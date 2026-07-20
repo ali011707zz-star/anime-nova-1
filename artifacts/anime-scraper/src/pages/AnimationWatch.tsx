@@ -190,15 +190,18 @@ const QUALITY_TIERS: QualityTier[] = ["1080p FHD", "720p HD", "360p SD"];
 
 /* ── ANIM_SOURCE_DEFS: نفس المصادر المفعَّلة في ANIM_SOURCE_ALLOWLIST بالخادم ── */
 const ANIM_SOURCE_DEFS = [
-  { site: "dulo_anim",       tag: "DU", name: "Dulo",     desc: "عربي مدبلج · HLS" },
-  { site: "starcima",        tag: "SC", name: "StarCima", desc: "عربي · HLS" },
-  { site: "vaplayer_anim",   tag: "VA", name: "VaPlayer", desc: "عربي · HLS" },
-  { site: "vidlink_encdec",  tag: "VL", name: "VidLink",  desc: "إنجليزي · MP4/DASH" },
-  { site: "vidfast",         tag: "VF", name: "VidFast",  desc: "إنجليزي · HLS" },
-  { site: "videasy3",        tag: "VE", name: "Videasy",  desc: "إنجليزي · HLS" },
-  { site: "fourkhdhub_anim", tag: "4K", name: "4KHDHub",  desc: "إنجليزي · 4K" },
-  { site: "nflixmovies_flux2", tag: "NF",  name: "NflixMovies", desc: "إنجليزي · HLS" },
-  { site: "vidbolt_flux3",     tag: "VB",  name: "VidBolt",     desc: "إنجليزي · HLS" },
+  { site: "dulo_anim",       tag: "DU", name: "Dulo",        desc: "عربي مدبلج · HLS" },
+  { site: "starcima",        tag: "SC", name: "StarCima",    desc: "عربي · HLS" },
+  { site: "vaplayer_anim",   tag: "VA", name: "VaPlayer",    desc: "عربي · HLS" },
+  { site: "vidlink_encdec",  tag: "VL", name: "VidLink",     desc: "إنجليزي · MP4/DASH" },
+  { site: "vidfast",         tag: "VF", name: "VidFast",     desc: "إنجليزي · HLS" },
+  { site: "vidfast_vc",      tag: "FC", name: "VidFast.vc",  desc: "إنجليزي · HLS" },
+  { site: "videasy3",        tag: "VE", name: "Videasy",     desc: "إنجليزي · HLS" },
+  { site: "nebula",          tag: "NB", name: "Nebula",      desc: "إنجليزي · HLS" },
+  { site: "fourkhdhub_anim", tag: "4K", name: "4KHDHub",     desc: "إنجليزي · 4K" },
+  { site: "nflixmovies_flux2", tag: "NF",  name: "NflixMovies",  desc: "إنجليزي · HLS" },
+  { site: "vidbolt_flux3",     tag: "VB",  name: "VidBolt",      desc: "إنجليزي · HLS" },
+  { site: "dahmermovies",      tag: "DH",  name: "DahmerMovies", desc: "إنجليزي · MP4" },
 ] as const;
 
 /* ── Source ── */
@@ -1714,6 +1717,8 @@ function getAnimTag(label: string): string {
   if (l.startsWith("multimovies"))    return "MM";
   if (l.startsWith("4k hdhub") || l.startsWith("4k hd")) return "4K";
   if (l.startsWith("vidfast"))        return "VF";
+  if (l.startsWith("nebula"))         return "NB";
+  if (l.startsWith("dahmermovies"))   return "DH";
   if (l.startsWith("vaplayer"))       return "VA";
   if (l.startsWith("akwam"))          return "AK";
   if (l.startsWith("mycima"))         return "MY";

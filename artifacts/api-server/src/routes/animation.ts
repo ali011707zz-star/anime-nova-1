@@ -2109,17 +2109,27 @@ async function scrapeVidFastVc(
 ): Promise<Array<{ url: string; label: string }>> {
   const ENCDEC   = "https://enc-dec.app/api";
   const VF_REF   = "https://vidfast.vc/";
+  // [2026-07-20] vidfast.vc migrated to Next.js RSC — old trailing-slash URLs 308-redirect.
+  // Page now embeds the player token directly in __next_f RSC push payload as:
+  //   "token":"<base64url_token>" (was: \"en\":\"<encrypted_text>\")
+  // Pass this token as the "text" to enc-dec.app/enc-vidfast (same as before).
   const pageUrl  = mtype === "movie"
-    ? `https://vidfast.vc/movie/${tmdbId}/`
-    : `https://vidfast.vc/tv/${tmdbId}/${season}/${episode}/`;
+    ? `https://vidfast.vc/movie/${tmdbId}`
+    : `https://vidfast.vc/tv/${tmdbId}/${season}/${episode}`;
 
   const html = await fetch(pageUrl, {
     headers: { "User-Agent": UA, "Referer": VF_REF },
     signal: AbortSignal.timeout(18_000),
+    redirect: "follow",
   }).then(r => { if (!r.ok) throw new Error(`page ${r.status}`); return r.text(); });
 
-  const m = html.match(/\\"en\\":\\"(.*?)\\"/);
-  if (!m) throw new Error("vidfast_vc: no encrypted text in page");
+  // New RSC format: "token":"<value>" inside __next_f.push payload
+  // Old format fallback: \"en\":\"<value>\"
+  const m = html.match(/"token":"([A-Za-z0-9_\-]{30,})"/)
+          || html.match(/\\"token\\":\\"([A-Za-z0-9_\-]{30,})\\"/)
+          || html.match(/\\"en\\":\\"([^"\\]{30,})\\"/)
+          || html.match(/"en":"([^"]{30,})"/);
+  if (!m) throw new Error("vidfast_vc: no token in page (RSC payload changed?)");
   const text = m[1];
 
   const encR = await fetch(`${ENCDEC}/enc-vidfast?text=${encodeURIComponent(text)}`, {
@@ -4725,23 +4735,20 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
         try {
           send("status", { msg: "DahmerMovies: جاري البحث…" });
 
-          // Get year — from query param or TMDB lookup
+          // Get year — from query param, or TMDB lookup (uses module-level TMDB_KEY with fallback)
           let year = String((req.query.year as string) || "");
-          if (!year && tmdbId) {
-            const tmdbKey = process.env.TMDB_API_KEY || "";
-            if (tmdbKey) {
-              try {
-                const tmdbType = type === "movie" ? "movie" : "tv";
-                const tr = await fetch(
-                  `https://api.themoviedb.org/3/${tmdbType}/${tmdbId}?api_key=${tmdbKey}`,
-                  { headers: { "User-Agent": UA }, signal: AbortSignal.timeout(8_000) },
-                );
-                if (tr.ok) {
-                  const td: any = await tr.json();
-                  year = ((td.release_date || td.first_air_date || "").split("-")[0]) || "";
-                }
-              } catch { /* skip */ }
-            }
+          if (!year && tmdbId && TMDB_KEY) {
+            try {
+              const tmdbType = type === "movie" ? "movie" : "tv";
+              const tr = await fetch(
+                `https://api.themoviedb.org/3/${tmdbType}/${tmdbId}?api_key=${TMDB_KEY}`,
+                { headers: { "User-Agent": UA }, signal: AbortSignal.timeout(8_000) },
+              );
+              if (tr.ok) {
+                const td: any = await tr.json();
+                year = ((td.release_date || td.first_air_date || "").split("-")[0]) || "";
+              }
+            } catch { /* skip */ }
           }
 
           if (!year) { console.log("[dahmermovies] no year — skipping"); return; }
