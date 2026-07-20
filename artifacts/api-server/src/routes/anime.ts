@@ -14696,12 +14696,27 @@ const _SEG_CF_KEY = process.env.CF_PROXY_KEY  || "";
 const _SEG_CF_URL = process.env.CF_WORKER_URL || "";
 
 /**
+ * Circuit-breaker لـ CF Worker — عند 401/403 (مفتاح خاطئ أو Worker معطّل)
+ * نُعطّله 30 دقيقة بدل إضاعة 5s على كل segment.
+ * يُعاد التجربة تلقائياً بعد انتهاء المدة.
+ */
+let _segCfAuthOk  = true;   // false = Worker يُرجع 401/403 (auth error)
+let _segCfRetryAt = 0;       // timestamp (ms) لإعادة التجربة
+
+function _isCfWorkerAvailable(): boolean {
+  if (!_SEG_CF_URL || !_SEG_CF_KEY) return false;
+  if (_segCfAuthOk) return true;
+  if (Date.now() >= _segCfRetryAt) { _segCfAuthOk = true; return true; } // retry window
+  return false;
+}
+
+/**
  * يجلب segment عبر CF Worker (nova-cdn-proxy) بنفس تشفير AES-256-GCM
  * المُطبَّق في wrapCfWorker (animation.ts). يُرجع null عند الفشل.
  * يُستخدم كـ fallback عندما يحجب CDN الـ VPS IP أو يُرجع HTML.
  */
 async function fetchSegViaCfWorker(url: string, ref: string, timeoutMs = 20000): Promise<Response | null> {
-  if (!_SEG_CF_URL || !_SEG_CF_KEY) return null;
+  if (!_isCfWorkerAvailable()) return null;
   try {
     const keyBuf  = Buffer.from(_SEG_CF_KEY.padEnd(32, "0").slice(0, 32));
     const iv      = randomBytes(12);
@@ -14712,6 +14727,13 @@ async function fetchSegViaCfWorker(url: string, ref: string, timeoutMs = 20000):
     const token   = iv.toString("hex") + Buffer.concat([enc, tag]).toString("hex");
     const cfUrl   = `${_SEG_CF_URL}?t=${token}`;
     const r = await fetch(cfUrl, { signal: AbortSignal.timeout(timeoutMs) });
+    if (r.status === 401 || r.status === 403) {
+      // مفتاح خاطئ أو Worker معطّل — عطّل 30 دقيقة
+      _segCfAuthOk  = false;
+      _segCfRetryAt = Date.now() + 30 * 60 * 1000;
+      console.warn(`[seg-proxy] CF Worker ${r.status} — disabled for 30min (key mismatch or Worker down)`);
+      return null;
+    }
     if (!r.ok) return null;
     return r; // serveSegResponse تتولى كشف text/html vs بيانات TS حقيقية
   } catch { return null; }
