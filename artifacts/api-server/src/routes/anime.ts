@@ -7549,12 +7549,19 @@ async function getAniPubSources(
     const m3u8: string = srcData?.sources?.file || "";
     if (!m3u8.includes(".m3u8")) return [];
 
-    // الترجمة العربية
+    // الترجمة — نُفضِّل العربي المباشر، وإلا نرجع الإنجليزي للمترجم تلقائياً عبر translate-vtt
     const tracks: Array<{ file: string; label: string }> = srcData?.tracks || [];
     const arTrack = tracks.find((t: any) =>
       (t.label || "").toLowerCase().includes("arabic") || (t.label || "").toLowerCase().includes("arab"),
     );
-    const subtitleUrl: string | undefined = arTrack?.file;
+    const enTrack = tracks.find((t: any) =>
+      (t.label || "").toLowerCase().includes("english") || (t.label || "").toLowerCase().includes("eng"),
+    );
+    // مدبلج: صوت عربي — لا حاجة لترجمة
+    // مترجم: عربي مباشر إن وُجد، وإلا إنجليزي يُترجَم تلقائياً عبر translate-vtt
+    const subtitleUrl: string | undefined =
+      arTrack?.file ??
+      (epType === "sub" && enTrack?.file ? enTrack.file : undefined);
 
     const referer = `${MEGAPLAY_BASE}/`;
     const proxied = `/api/anime/hls-proxy?url=${encodeURIComponent(m3u8)}&ref=${encodeURIComponent(referer)}`;
