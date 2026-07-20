@@ -7546,10 +7546,10 @@ async function getAniPubSources(
     const typeLabel = epType === "dub" ? "مدبلج" : "مترجم";
 
     return [{
-      name: `AniPub · MegaPlay · ${typeLabel}`,
+      name: `AniPub · MegaPlay · ${typeLabel} · 1080p`,
       url: m3u8,
       quality: "1080p",
-      qualityRank: 10,
+      qualityRank: 15,
       site: "anipub",
       directUrl: proxied,
       directType: "hls" as const,
