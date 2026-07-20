@@ -156,6 +156,8 @@ function getPlayUrl(s: Src): string {
  */
 function extractProxyHeaders(url: string): Record<string, string> | undefined {
   if (!url) return undefined;
+  /* روابط VPS proxy — ref الخاص بها hex مشفَّر وليس URL حقيقي؛ تخطَّها */
+  if (url.includes("/api/anime/") || url.includes("/api/animation/")) return undefined;
   try {
     const fullUrl = url.startsWith("/") ? `http://x.com${url}` : url;
     const u = new URL(fullUrl);
@@ -771,10 +773,14 @@ export default function WatchScreen() {
     /* مطابق لـ isArabic في web SCRAPER_DEFS — مصادر عربية لا تحتاج SmartSub */
     const ARABIC_SITES = new Set(["shahiid","animelek","animedar","okanime","arabseed","animephoenix","animeify","animeday","mycima","topcinemaa","anime4up2","animewitcher","ristoanime","faselhd_db","animetime","witanime","witanime_db","sanime"]);
     return srcs.map(s => {
-      const url = getPlayUrl(s);
+      const rawUrl = getPlayUrl(s);
       /* headers: استخدم الـ headers المُرسَلة من الخادم أولاً (Referer/Origin المباشرة)،
-         ثم احسبها من رابط الـ proxy كـ fallback للإصدارات القديمة من الكاش */
-      const headers = s.headers || extractProxyHeaders(url);
+         ثم احسبها من رابط الـ proxy كـ fallback للإصدارات القديمة من الكاش.
+         extractProxyHeaders تتجاهل روابط /api/ تلقائياً (ref مشفَّر وليس URL). */
+      const headers = s.headers || extractProxyHeaders(rawUrl);
+      /* شبكة أمان: أي رابط خام HLS وصل للعميل بدون مرور عبر VPS يُغلَّف هنا.
+         الروابط المُغلَّفة مسبقاً (/api/anime/) تُعاد كما هي. */
+      const url = ensureVpsProxy(rawUrl, headers, base);
       return {
         url,
         headers,
