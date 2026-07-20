@@ -21,7 +21,7 @@ type Screen     = "loading" | "picker" | "native" | "embed" | "resolving";
 
 /* ── مواقع محمية بـ Cloudflare/Turnstile يفشل الخادم (VPS) بجلب فيديوها المباشر —
    نحاول أولاً حلّها عبر WebView مخفي (IP سكني حقيقي للجهاز) قبل عرض بطاقة "يحتاج تطبيق أصلي" ── */
-const WEBVIEW_RESOLVE_SITES = new Set(["animelek", "animedar", "animephoenix", "anime3rb", "ristoanime", "faselhd_db", "witanime_db", "mycima"]);
+const WEBVIEW_RESOLVE_SITES = new Set(["animelek", "animedar", "animephoenix", "anime3rb", "ristoanime", "faselhd_db", "witanime", "witanime_db", "mycima"]);
 function needsHiddenResolve(s: Src): boolean {
   return !!s.isEmbed && !!s.site && WEBVIEW_RESOLVE_SITES.has(s.site);
 }
@@ -156,8 +156,6 @@ function getPlayUrl(s: Src): string {
  */
 function extractProxyHeaders(url: string): Record<string, string> | undefined {
   if (!url) return undefined;
-  /* روابط VPS proxy — ref الخاص بها hex مشفَّر وليس URL حقيقي؛ تخطَّها */
-  if (url.includes("/api/anime/") || url.includes("/api/animation/")) return undefined;
   try {
     const fullUrl = url.startsWith("/") ? `http://x.com${url}` : url;
     const u = new URL(fullUrl);
@@ -188,8 +186,6 @@ function ensureVpsProxy(url: string, headers: Record<string, string> | undefined
   // روابط embed (mega / vidmoly) — لا نلفّها
   if (url.includes("mega.nz") || url.includes("mega.co.nz")) return url;
   if (url.includes("mp4upload")) return url;
-  // LookMovie CDN — يعمل مباشرة من IP سكني مع Referer؛ يحجب VPS/datacenter
-  if (url.includes("lookmovie.")) return url;
   const ref = headers?.Referer || "";
   const isHls = /\.(m3u8)(\?|$)|\/hls\/|\/playlist\//i.test(url);
   if (isHls) {
@@ -209,7 +205,7 @@ function ensureVpsProxy(url: string, headers: Record<string, string> | undefined
 const SITE_PRIORITY: Record<string, number> = {
   kawaii: 100, hianime: 95, animewitcher: 90,
   dulo_anim: 70, vidlink_anim: 55,
-  anineko: 50, anikoto: 40, vidfast: 35,
+  anineko: 50, mitanime: 45, anikoto: 40, vidfast: 35,
   anikototv: 30, animekai: 25, animepahe: 20, anipm: 18,
   witanime: 12, anipub: 10,
 };
@@ -218,8 +214,7 @@ const SITE_PRIORITY: Record<string, number> = {
 /* مصادر موحَّدة مع الويب — نفس المصادر الـ 8 المفعَّلة في SCRAPER_DEFS */
 const ANIME_SITES = [
   "kawaii", "anikoto", "hianime", "animewitcher",
-  "anineko", "anslayer", "animeify", "anipub",
-  // "witanime": معطّل بطلب المستخدم
+  "anineko", "anslayer", "animeify", "witanime", "anipub",
   // "allmanga": معطّل 2026-07-17 — AA_CRYPTO_MISSING على AllAnime
 ] as const;
 
@@ -235,7 +230,7 @@ const SITE_TIMEOUT_MAP: Partial<Record<typeof ANIME_SITES[number], number>> = {
   mycima:       34_000,  // backend = 30s + 4s هامش
   anime4up2:    28_000,  // backend = 25s + 3s هامش
   anikototv:    28_000,  // backend = 25s + 3s هامش
-  hianime:      35_000,  // backend = 22s + 13s هامش (cold cache needs extra margin)
+  hianime:      26_000,  // backend = 22s + 4s هامش
   anipm:        24_000,  // backend = 20s + 4s هامش
   witanime:     20_000,  // backend يوناplay static HTML < 1s + chain search ~15s
 };
@@ -772,13 +767,10 @@ export default function WatchScreen() {
     /* مطابق لـ isArabic في web SCRAPER_DEFS — مصادر عربية لا تحتاج SmartSub */
     const ARABIC_SITES = new Set(["shahiid","animelek","animedar","okanime","arabseed","animephoenix","animeify","animeday","mycima","topcinemaa","anime4up2","animewitcher","ristoanime","faselhd_db","animetime","witanime","witanime_db","sanime"]);
     return srcs.map(s => {
-      const rawUrl = getPlayUrl(s);
+      const url = getPlayUrl(s);
       /* headers: استخدم الـ headers المُرسَلة من الخادم أولاً (Referer/Origin المباشرة)،
          ثم احسبها من رابط الـ proxy كـ fallback للإصدارات القديمة من الكاش */
-      const headers = s.headers || extractProxyHeaders(rawUrl);
-      /* نضمن أن كل الروابط تمرّ عبر VPS proxy — ExoPlayer/AVPlayer لا يُرسل Referer
-         بشكل موثوق لـ CDNs، وكثير من CDNs تحجب IPs مراكز البيانات بدون Referer صحيح */
-      const url = ensureVpsProxy(rawUrl, headers, base);
+      const headers = s.headers || extractProxyHeaders(url);
       return {
         url,
         headers,
@@ -801,24 +793,18 @@ export default function WatchScreen() {
   useEffect(() => { riftSourcesRef.current = riftSources; }, [riftSources]);
 
   /* تجميد قائمة المصادر لحظة دخول المشغّل، ومسحها عند الخروج (picker/embed/loading).
-     — عند دخول native: إذا كانت فارغة نملأها بـ riftSources الحالية (التجميد الأول).
-       إذا وصلت مصادر جديدة أثناء التشغيل نُضيفها للنهاية فقط (append) بدون تغيير
-       المصادر الموجودة حتى لا يُعيد RiftPlayer ترتيبها ويُعطّل التشغيل.
-     — هذا يحل مشكلة auto-play الذي كان يُجمِّد مصدراً واحداً فقط فيُفشل كل المصادر. */
+     بدون هذا، أي مصدر خلفي جديد يصل أثناء التشغيل (من موجة التحميل الكلي) يُعيد حساب
+     riftSources بمصفوفة جديدة (ترتيب مختلف) → RiftPlayer يستقبل sources prop جديد
+     أثناء التشغيل الفعلي مما يُسبِّب توقف/إعادة تعيين غير متوقعة والعودة لشاشة الـ picker. */
   useEffect(() => {
-    if (screen === "native") {
-      setFrozenSources(prev => {
-        if (prev.length === 0) return riftSources.length > 0 ? riftSources : prev;
-        // أضف المصادر الجديدة فقط (بدون إزاحة الحالية)
-        const existingUrls = new Set(prev.map(s => s.url));
-        const newOnes = riftSources.filter(s => s.url && !existingUrls.has(s.url));
-        return newOnes.length > 0 ? [...prev, ...newOnes] : prev;
-      });
-    } else {
+    if (screen === "native" && riftSources.length > 0) {
+      /* تجديد المصادر المجمَّدة عند تغيير المصدر المُشغَّل حتى تشمل المصادر الجديدة */
+      setFrozenSources(riftSources);
+    } else if (screen !== "native") {
       setFrozenSources([]);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [screen, riftSources]);
+  }, [screen, playingSrc?.directUrl ?? playingSrc?.url]);
 
   /* ── Grouped by quality for picker ── */
   const grouped = useMemo<Record<Quality, Src[]>>(() => ({
@@ -860,11 +846,7 @@ export default function WatchScreen() {
   /* ══════════════ RIFT PLAYER ══════════════ */
   const playerSources = frozenSources.length > 0 ? frozenSources : riftSources;
   if (screen === "native" && playerSources.length > 0) {
-    /* نحسب الرابط النهائي لـ playingSrc (بعد ensureVpsProxy) لمطابقة صحيحة مع playerSources */
-    const _playRaw = getPlayUrl(playingSrc!);
-    const _playHeaders = playingSrc?.headers || extractProxyHeaders(_playRaw);
-    const _playFinal = ensureVpsProxy(_playRaw, _playHeaders, getBaseUrl());
-    const startIdx = Math.max(0, playerSources.findIndex(s => playingSrc && s.url === _playFinal));
+    const startIdx = Math.max(0, playerSources.findIndex(s => playingSrc && s.url === getPlayUrl(playingSrc)));
     return (
       <RiftPlayer
         sources={playerSources}
