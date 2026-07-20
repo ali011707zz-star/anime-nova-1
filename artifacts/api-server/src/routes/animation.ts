@@ -951,23 +951,26 @@ function hasCJK(text: string): boolean {
 
 // ── تغليف روابط CDN المباشرة للموبايل عبر VPS proxy (animation) ──────────
 function wrapAnimForMobile(directUrl: string | undefined, proxyUrl: string | undefined, headers: Record<string,string> | undefined): { directUrl: string | undefined; proxyUrl: string | undefined } {
-  // إذا يوجد proxyUrl مسبق (مُمرَّر من الـ scraper)، استخدمه دون تغيير
+  // إذا يوجد proxyUrl مسبق (مُمرَّر من الـ scraper بـ /api/ prefix) → استخدمه دون تغيير
   if (proxyUrl && proxyUrl.startsWith("/api/")) return { directUrl, proxyUrl };
   const raw = directUrl || "";
   if (!raw) return { directUrl, proxyUrl };
   if (raw.startsWith("/api/")) return { directUrl, proxyUrl };
   if (raw.includes("mega.nz") || raw.includes("mega.co.nz")) return { directUrl, proxyUrl };
+
   const ref = headers?.Referer || "";
-  // Detect HLS by extension OR by common HLS path patterns (some CDNs omit .m3u8 extension)
+
+  // ── الإصلاح الجذري: لا نمرّ عبر VPS proxy عندما يتوفر Referer ──────────────
+  // react-native-video v6 (TheWidlarzGroup) يُرسل headers (Referer/Origin) مع
+  // كل طلب نيتيفاً — المانيفست + كل segment — عبر ExoPlayer/AVPlayer.
+  // الـ VPS proxy يُسبّب المشكلة لأن CDNs كثيرة تحجب IP الـ datacenter (VPS).
+  // الجهاز المحمول يستخدم IP سكني → CDN يقبله طالما Referer صحيح.
+  if (ref) return { directUrl: raw, proxyUrl: raw };
+
+  // بدون Referer: VPS يُضيفه من الخادم → لا بديل سوى hls-proxy للـ HLS
   const isHls = /\.m3u8/i.test(raw) || /\/hls\//i.test(raw) || /\/playlist\//i.test(raw) || /\/stream\//i.test(raw);
   if (isHls) {
-    const p = ref
-      ? `/api/anime/hls-proxy?url=${encodeURIComponent(raw)}&ref=${encodeURIComponent(ref)}`
-      : `/api/anime/hls-proxy?url=${encodeURIComponent(raw)}`;
-    return { directUrl: p, proxyUrl: p };
-  }
-  if (raw.includes(".mp4") && ref) {
-    const p = `/api/anime/video-proxy?url=${encodeURIComponent(raw)}&ref=${encodeURIComponent(ref)}`;
+    const p = `/api/anime/hls-proxy?url=${encodeURIComponent(raw)}`;
     return { directUrl: p, proxyUrl: p };
   }
   return { directUrl, proxyUrl };

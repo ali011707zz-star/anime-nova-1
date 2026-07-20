@@ -611,7 +611,7 @@ export function RiftPlayer({
 
   /* ─── Progress polling ─── */
   useEffect(() => {
-    const STALL_TIMEOUT_MS = 15000; // 15ث بدون تقدّم = stall
+    const STALL_TIMEOUT_MS = 8000; // 8ث بدون تقدّم = stall (مخفَّض لتسريع الانتقال للمصدر التالي)
     progressTimer.current = setInterval(() => {
       try {
         /* positionRef/durationRef يُحدَّثان عبر onProgress callback من react-native-video */
@@ -1450,9 +1450,9 @@ export function RiftPlayer({
             if (!loadTimeoutRef.current) {
               loadTimeoutRef.current = setTimeout(() => {
                 loadTimeoutRef.current = null;
-                console.warn(`[RiftPlayer] ⏱ buffer timeout 25s — switching source`);
+                console.warn(`[RiftPlayer] ⏱ buffer timeout 12s — switching source`);
                 setError(true); setBuffering(false);
-              }, 25000);
+              }, 12000);
             }
           } else {
             if (loadTimeoutRef.current) { clearTimeout(loadTimeoutRef.current); loadTimeoutRef.current = null; }

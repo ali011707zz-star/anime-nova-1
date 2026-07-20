@@ -70,26 +70,32 @@ function extractHeadersFromProxy(url: string): Record<string, string> | undefine
 }
 
 /**
- * يضمن أن رابط الفيديو يمرّ عبر VPS proxy لضمان التوافق مع ExoPlayer/AVPlayer.
- * CDN كثيرة تحجب طلبات الأجهزة المحمولة الـ datacenter بدون Referer صحيح.
+ * يضمن التوافق مع ExoPlayer/AVPlayer — لكن بدون VPS proxy عندما يتوفر Referer.
+ *
+ * الإصلاح الجذري (2026-07):
+ *   react-native-video v6 يُرسل headers (Referer/Origin) مع كل طلب نيتيفاً
+ *   (المانيفست + كل segment). IP الموبايل السكني مقبول من معظم CDNs خلافاً
+ *   لـ IP الـ VPS (datacenter) الذي يُحجب. → عندما يتوفر Referer نعيد الرابط
+ *   الخام مباشرةً بدون لفّه في hls-proxy.
  */
 function ensureVpsProxy(url: string, headers: Record<string, string> | undefined, base: string): string {
   if (!url) return url;
-  // بالفعل proxy عبر VPS
+  // بالفعل proxy عبر VPS — لا تغيير
   if (url.includes("/api/anime/") || url.includes("/api/animation/")) return url;
   // روابط embed (mega) — لا نلفّها
   if (url.includes("mega.nz") || url.includes("mega.co.nz")) return url;
-  // LookMovie CDN — يعمل مباشرة من IP سكني مع Referer؛ يحجب VPS/datacenter
+  // CDNs تعمل فقط من IP سكني — تمرير مباشر
   if (url.includes("lookmovie.")) return url;
+
   const ref = headers?.Referer || "";
+
+  // Referer متوفر → RNV يُرسله نيتيفاً مع كل segment → CDN يقبل → لا حاجة لـ proxy
+  if (ref) return url;
+
+  // بدون Referer: نلفّ HLS في hls-proxy حتى يُضيف الخادم الـ headers
   const isHls = /\.(m3u8)(\?|$)|\/hls\/|\/playlist\//i.test(url);
   if (isHls) {
-    return ref
-      ? `${base}/api/anime/hls-proxy?url=${encodeURIComponent(url)}&ref=${encodeURIComponent(ref)}`
-      : `${base}/api/anime/hls-proxy?url=${encodeURIComponent(url)}`;
-  }
-  if (ref) {
-    return `${base}/api/anime/video-proxy?url=${encodeURIComponent(url)}&ref=${encodeURIComponent(ref)}`;
+    return `${base}/api/anime/hls-proxy?url=${encodeURIComponent(url)}`;
   }
   return url;
 }
