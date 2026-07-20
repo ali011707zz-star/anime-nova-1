@@ -126,3 +126,4 @@
 - [CF Worker key resolution](cf-worker-key-resolution.md) — المفتاح الصحيح في ecosystem.config.cjs.bak؛ VPS .env كان خاطئاً؛ الحل: استعادة القيمة من الـ bak
 - [HLS VPS routing fix](hls-vps-routing-fix.md) — serveHlsVPS+segFallback كانا يُعطيان أولوية CF Worker على الموبايل؛ عُكس الترتيب: VPS مباشر → Hopx → CF Worker آخر ملجأ.
 - [HLS manifest absolute URLs fix](hls-manifest-absolute-urls.md) — serveHlsVPS: VPS+Hopx parallel → MediaFlow → CF Worker; segment URLs must be absolute (NOVA_PUBLIC_URL).
+- [DahmerMovies animation source](dahmermovies-animation-source.md) — a.111477.xyz direct MP4 rawUrl; residential-IP-only CDN; year param required.
