@@ -219,6 +219,22 @@
 
   body {
     @apply font-sans antialiased bg-background text-foreground;
+    scroll-behavior: smooth;
+  }
+
+  /* GPU acceleration for animated elements */
+  a, button, [role="button"],
+  [class*="transition-"], [class*="duration-"],
+  [class*="animate-"] {
+    will-change: auto;
+    transform: translateZ(0);
+  }
+
+  /* Snappier default interaction transitions */
+  a, button, [role="button"] {
+    transition-property: opacity, background-color, border-color, color, transform, box-shadow;
+    transition-timing-function: cubic-bezier(0.25, 0.1, 0.25, 1);
+    transition-duration: 120ms;
   }
 }
 
