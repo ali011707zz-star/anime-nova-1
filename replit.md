@@ -49,7 +49,7 @@ Custom email/password auth with verification codes, plus Google and GitHub OAuth
 
 السيرفر: `root@95.182.93.105` — مسار التطبيق: `/opt/anime-nova`
 
-المصادقة تعتمد على مفتاح SSH المثبَّت في `~/.ssh/deploy_key` (لا كلمة مرور).
+المصادقة تعتمد على مفتاح SSH في `~/.ssh/deploy_key` ✅ (أُنشئ وأُضيف لـ VPS authorized_keys — لا كلمة مرور مطلوبة).
 
 ```bash
 # نسخ ملف معدَّل للـ VPS وإعادة البناء والتشغيل (باكند)

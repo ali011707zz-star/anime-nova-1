@@ -15067,11 +15067,12 @@ router.get("/anime/seg-proxy", async (req, res) => {
     return true;
   }
 
-  /** fallback chain: Hopx (VPS curl_cffi) → CF Worker (آخر ملجأ) → 502
-   *  _hopxOk يُحدَّث كل 20s — إذا كان الـ sandbox ميتاً نتخطّاه فوراً بدل 20s timeout */
+  /** fallback chain: Hopx → MediaFlow (CF bridge) → CF Worker → 502
+   *  _hopxOk/_mfOk يُحدَّثان كل 20s — إذا كان الـ service ميتاً نتخطّاه فوراً */
   async function segFallback(): Promise<void> {
     if (res.headersSent) return;
-    // 1. Hopx — VPS مباشر بـ curl_cffi (يتجاوز حجب CDN لـ datacenter IPs)
+
+    // 1. Hopx — VPS curl_cffi (يتجاوز حجب CDN لـ datacenter IPs)
     if (_hopxOk) {
       try {
         const hopxR = await fetchViaHopx(url, ref, 18000);
@@ -15081,8 +15082,27 @@ router.get("/anime/seg-proxy", async (req, res) => {
         }
       } catch { /* Hopx فشل */ }
     }
-    // 2. CF Worker (fast-fail 5s) — آخر ملجأ إذا فشل Hopx
-    if (!res.headersSent) {
+
+    // 2. MediaFlow /proxy/forward (mitmproxy-cf-bridge — يتجاوز CF IP blocking)
+    if (!res.headersSent && _mfOk) {
+      try {
+        const mfParams = new URLSearchParams({ d: url, api_password: _MF_PASS });
+        if (ref) {
+          mfParams.set("h_referer", ref);
+          try { mfParams.set("h_origin", new URL(ref).origin); } catch {}
+        }
+        const mfR = await fetch(`${_MF_URL}/proxy/forward?${mfParams}`, {
+          signal: AbortSignal.timeout(15000),
+        });
+        if (mfR.ok) {
+          const ok = await serveSegResponse(mfR);
+          if (ok) return;
+        }
+      } catch { /* MediaFlow فشل */ }
+    }
+
+    // 3. CF Worker (fast-fail 5s) — آخر ملجأ
+    if (!res.headersSent && _SEG_CF_URL && _SEG_CF_KEY) {
       try {
         const cfR = await fetchSegViaCfWorker(url, ref, 5000);
         if (cfR) {
@@ -15091,6 +15111,7 @@ router.get("/anime/seg-proxy", async (req, res) => {
         }
       } catch { /* CF Worker فشل */ }
     }
+
     if (!res.headersSent) res.status(502).send("CDN blocked");
   }
 
