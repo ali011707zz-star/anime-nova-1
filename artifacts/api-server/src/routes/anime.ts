@@ -14729,13 +14729,18 @@ async function fetchViaHopx(url: string, ref: string, timeoutMs = 14000): Promis
   } catch { return null; }
 }
 
-// ── بناء رابط seg-proxy (VPS fallback) ───────────────────────────────────────
+// ── عنوان VPS الإنتاجي (للروابط المطلقة في M3U8) ────────────────────────────
+// ExoPlayer يحتاج روابط مطلقة حين تكون manifest URL معقدة (proxy URL مع query params)
+const NOVA_PUBLIC_URL = (process.env.NOVA_PUBLIC_URL || "https://animenovaa.duckdns.org").replace(/\/$/, "");
+
+// ── بناء رابط seg-proxy مطلق ─────────────────────────────────────────────────
 function toVpsSegProxy(absUrl: string, ref: string): string {
-  return `/api/anime/seg-proxy?url=${encryptParam(absUrl)}&ref=${encryptParam(ref || absUrl)}`;
+  return `${NOVA_PUBLIC_URL}/api/anime/seg-proxy?url=${encryptParam(absUrl)}&ref=${encryptParam(ref || absUrl)}`;
 }
 
-// ── إعادة كتابة M3U8 عبر VPS seg-proxy (بدون CF Worker) ─────────────────────
+// ── إعادة كتابة M3U8 بروابط مطلقة عبر VPS seg-proxy ─────────────────────────
 // يستخدم السياق (EXT-X-STREAM-INF) لتحديد هل السطر playlist أم segment
+// جميع الروابط مطلقة (https://...) لضمان صحة تفسير ExoPlayer
 function rewriteM3u8ForVPS(manifest: string, baseUrl: string, ref: string): string {
   const lines = manifest.split("\n");
   const out: string[] = [];
@@ -14756,7 +14761,7 @@ function rewriteM3u8ForVPS(manifest: string, baseUrl: string, ref: string): stri
         const abs = toAbsoluteUrl(uri, baseUrl);
         // EXT-X-MEDIA قد تشير لـ playlist (صوت/ترجمة بديلة)
         if (t.startsWith("#EXT-X-MEDIA") && /\.m3u8/i.test(uri)) {
-          return `URI="/api/anime/hls-proxy?url=${encryptParam(abs)}&ref=${encryptParam(ref || abs)}"`;
+          return `URI="${NOVA_PUBLIC_URL}/api/anime/hls-proxy?url=${encryptParam(abs)}&ref=${encryptParam(ref || abs)}"`;
         }
         return `URI="${toVpsSegProxy(abs, ref)}"`;
       });
@@ -14768,7 +14773,7 @@ function rewriteM3u8ForVPS(manifest: string, baseUrl: string, ref: string): stri
     // سطر URL: variant playlist أو segment
     const abs = toAbsoluteUrl(t, baseUrl);
     if (nextIsPlaylist || /\.m3u8(\?|#|$)/i.test(t)) {
-      out.push(`/api/anime/hls-proxy?url=${encryptParam(abs)}&ref=${encryptParam(ref || abs)}`);
+      out.push(`${NOVA_PUBLIC_URL}/api/anime/hls-proxy?url=${encryptParam(abs)}&ref=${encryptParam(ref || abs)}`);
     } else {
       out.push(toVpsSegProxy(abs, ref));
     }
@@ -14779,66 +14784,104 @@ function rewriteM3u8ForVPS(manifest: string, baseUrl: string, ref: string): stri
 }
 
 // ── VPS-side HLS manifest proxy ─────────────────────────────────────────────
-// طبقات الجلب (بالأولوية):
-//  1. Direct VPS fetch — مباشر من VPS بلا وسيط
-//  2. Hopx fallback (إذا كان صحياً) — curl_cffi يتجاوز حجب CDN لـ datacenter IPs
-//  (mediaflow-proxy/CF Worker bridge مُعطَّل — يسبب مشاكل على الموبايل)
+// طبقات الجلب (بالتوازي حيث أمكن):
+//  1. VPS direct + Hopx معاً بالتوازي — أيهما يرجع M3U8 أولاً يُستخدم
+//  2. CF Worker fallback — نفس آلية segments، يتجاوز حجب CDN لـ datacenter IPs
+// الروابط في الـ manifest مطلقة (https://...) — ExoPlayer لا يُخطئ تفسيرها
 async function serveHlsVPS(
   url: string, ref: string,
   res: import("express").Response,
 ): Promise<void> {
-  // ── 1. Direct VPS fetch ──────────────────────────────────────────────────────
   const hdrs: Record<string, string> = { ...BASE_HDRS, Accept: "*/*" };
   if (ref) { hdrs.Referer = ref; try { hdrs.Origin = new URL(ref).origin; } catch {} }
 
-  let lastStatus = 0;
-  let gotNetworkError = false;
+  // مساعد: إرسال manifest مُعاد كتابته للعميل
+  function sendManifest(body: string): void {
+    if (res.headersSent) return;
+    const rewritten = rewriteM3u8ForVPS(body, url, ref);
+    res.setHeader("Content-Type", "application/vnd.apple.mpegurl");
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Cache-Control", "no-cache");
+    res.send(rewritten);
+  }
 
-  for (let attempt = 0; attempt < 2; attempt++) {
-    try {
-      const r = await fetch(url, { headers: hdrs, signal: AbortSignal.timeout(10000) });
-      if (!r.ok) {
-        lastStatus = r.status;
-        if ((r.status === 403 || r.status === 429 || r.status === 503) && attempt < 1) {
-          await new Promise(res2 => setTimeout(res2, 400));
-          continue;
+  function isValidManifest(body: string): boolean {
+    return body.includes("#EXTM3U") || body.includes("#EXT-X-");
+  }
+
+  // ── 1. VPS direct ───────────────────────────────────────────────────────────
+  const fetchDirect = async (): Promise<string | null> => {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        const r = await fetch(url, { headers: hdrs, signal: AbortSignal.timeout(8000) });
+        if (r.ok) {
+          const body = await r.text();
+          if (isValidManifest(body)) return body;
         }
-        break;
+        if (r.status !== 403 && r.status !== 429 && r.status !== 503) break;
+        if (attempt < 1) await new Promise(r2 => setTimeout(r2, 300));
+      } catch {
+        if (attempt < 1) await new Promise(r2 => setTimeout(r2, 300));
+        else break;
       }
-      const body = await r.text();
-      const rewritten = rewriteM3u8ForVPS(body, url, ref);
-      res.setHeader("Content-Type", "application/vnd.apple.mpegurl");
-      res.setHeader("Access-Control-Allow-Origin", "*");
-      res.setHeader("Cache-Control", "no-cache");
-      res.send(rewritten);
-      return;
-    } catch {
-      if (attempt < 1) { await new Promise(res2 => setTimeout(res2, 400)); continue; }
-      gotNetworkError = true;
-      break;
     }
-  }
+    return null;
+  };
 
-  // ── 3. Hopx fallback (إذا كان صحياً) ────────────────────────────────────────
-  const shouldTryHopx = _hopxOk && (gotNetworkError || lastStatus === 403 || lastStatus === 429);
-  if (shouldTryHopx) {
+  // ── 2. Hopx parallel ───────────────────────────────────────────────────────
+  const fetchHopx = async (): Promise<string | null> => {
+    if (!_hopxOk) return null;
     try {
-      const hopxR = await fetchViaHopx(url, ref, 12000);
-      if (hopxR) {
-        const body = await hopxR.text();
-        if (body.includes("#EXTM3U")) {
-          const rewritten = rewriteM3u8ForVPS(body, url, ref);
-          res.setHeader("Content-Type", "application/vnd.apple.mpegurl");
-          res.setHeader("Access-Control-Allow-Origin", "*");
-          res.setHeader("Cache-Control", "no-cache");
-          res.send(rewritten);
-          return;
-        }
+      const r = await fetchViaHopx(url, ref, 12000);
+      if (!r) return null;
+      const body = await r.text();
+      return isValidManifest(body) ? body : null;
+    } catch { return null; }
+  };
+
+  // نُطلق VPS + Hopx معاً — أول نتيجة صالحة تُستخدم فوراً
+  const body1 = await new Promise<string | null>(resolve => {
+    let settled = 0;
+    const done = (v: string | null) => { if (v) resolve(v); else if (++settled === 2) resolve(null); };
+    fetchDirect().then(done).catch(() => done(null));
+    fetchHopx().then(done).catch(() => done(null));
+  });
+
+  if (body1) { sendManifest(body1); return; }
+
+  // ── 3. MediaFlow proxy (CF bridge → CDN) ─────────────────────────────────────
+  // يستخدم mitmproxy-cf-bridge على VPS — يمرّر طلبات CDN عبر Cloudflare
+  // أقوى من Hopx لأنه يتجاوز حجب IP ويُضيف CF cookies تلقائياً
+  if (_mfOk) {
+    try {
+      const mfParams = new URLSearchParams({ d: url, api_password: _MF_PASS });
+      if (ref) {
+        mfParams.set("h_referer", ref);
+        try { mfParams.set("h_origin", new URL(ref).origin); } catch {}
       }
-    } catch { /* Hopx فشل أيضاً */ }
+      const mfR = await fetch(`${_MF_URL}/proxy/forward?${mfParams}`, {
+        signal: AbortSignal.timeout(15000),
+      });
+      if (mfR.ok) {
+        const body = await mfR.text();
+        if (isValidManifest(body)) { sendManifest(body); return; }
+      }
+    } catch { /* MediaFlow فشل */ }
   }
 
-  if (!res.headersSent) res.status(lastStatus || 502).send("upstream error");
+  // ── 4. CF Worker fallback (آخر ملجأ للـ manifest) ─────────────────────────
+  // نفس الآلية المستخدمة بنجاح في seg-proxy — CF edge لا يُحجب من CDNs
+  if (_SEG_CF_URL && _SEG_CF_KEY) {
+    try {
+      const cfR = await fetchSegViaCfWorker(url, ref, 12000);
+      if (cfR) {
+        const body = await cfR.text();
+        if (isValidManifest(body)) { sendManifest(body); return; }
+      }
+    } catch { /* CF Worker فشل */ }
+  }
+
+  if (!res.headersSent) res.status(502).send("upstream error");
 }
 
 // ── VPS-side segment/video proxy (يُستخدم عند سقوط CF Worker) ─────────────────
