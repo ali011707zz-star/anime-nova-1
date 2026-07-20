@@ -40,6 +40,7 @@
 - [anime3rb Cookie Auto-Refresh](anime3rb-cookie-refresh-system.md) — nopecha-ext على OpenShift يحل Turnstile مرة/20h؛ scheduler 30min؛ Supabase site_cookies persistence؛ episodes table URL مباشر.
 - [AniPub/MegaPlay scraper](anipub-megaplay-scraper.md) — X-Requested-With:XMLHttpRequest لازم لـ getSourcesNew؛ M3U8 يحتاج Referer:megaplay.buzz؛ تجاوز CF عبر megaplay مباشرة.
 
+- [Mobile playback VPS-bypass fix](mobile-playback-vps-bypass-fix.md) — الإصلاح الجذري 2026-07: wrapAnimForMobile+ensureVpsProxy لا يُلفّان في hls-proxy عند وجود Referer؛ RNV v6 يُرسله نيتيفاً؛ dubbed rawUrl أولاً؛ timeouts 25s→12s / 15s→8s.
 - [seg-proxy text/html MPEG TS fix](seg-proxy-content-type-fix.md) — بعض CDNs تُرجع TS binary بـ text/html خاطئ → ExoPlayer يرفضه → شاشة سوداء؛ fix: كشف 0x47 sync byte وتصحيح Content-Type + CF Worker fallback.
 - [AnimeSlayer constants restored](anslayer-constants-restored.md) — ANSLAYER_BASE/CID/CSEC حُذفت من anime.ts وأُعيدت؛ لا تحذفها مجدداً.
 - [Slow sources fix plan](slow-sources-fix-plan.md) — خطط جذرية (بدون تطبيق) لـ HiAnime/AW/AN/AS/VL/VF/4K: slug-cache+Hopx+enc-dec-validation+vidfast.vc
