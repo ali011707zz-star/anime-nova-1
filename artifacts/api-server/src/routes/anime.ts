@@ -12681,13 +12681,14 @@ router.get("/anime/fetch-source", async (req, res) => {
   if (cached && !shouldRefreshCache(cached.expiresAt) && !skipCacheForShortTtl) {
     const enc = cached.sources.map((s: UnifiedSource) => {
       /* استخراج headers (Referer/Origin) من رابط الـ proxy قبل التشفير.
-         يحتاجها ExoPlayer/AVPlayer لإرسال Referer مع طلبات الـ segments مباشرةً للـ CDN. */
+         يحتاجها ExoPlayer/AVPlayer لإرسال Referer مع طلبات الـ segments مباشرةً للـ CDN.
+         إذا كان ref مشفَّراً (hex AES) فهو رابط proxy داخلي — لا نُرسله كـ Referer. */
       let derivedHeaders = s.headers;
       if (!derivedHeaders && s.directUrl) {
         try {
           const pu = new URL(s.directUrl.startsWith("/") ? `http://x.com${s.directUrl}` : s.directUrl);
           const ref = pu.searchParams.get("ref");
-          if (ref) {
+          if (ref && !isEncrypted(ref)) {
             let origin = "";
             try { origin = new URL(ref).origin; } catch {}
             derivedHeaders = origin ? { Referer: ref, Origin: origin } : { Referer: ref };
@@ -12869,13 +12870,14 @@ async function getVidboltAnimeSources(
     const isMobileClient = (req.headers["x-nova-client"] || "").toString().includes("mobile");
     const encSources = sources.map(s => {
       /* استخراج headers (Referer/Origin) قبل تشفير directUrl —
-         يحتاجها ExoPlayer/AVPlayer للـ CDN segments مباشرةً. */
+         يحتاجها ExoPlayer/AVPlayer للـ CDN segments مباشرةً.
+         إذا كان ref مشفَّراً (hex AES) فهو رابط proxy داخلي — لا نُرسله كـ Referer. */
       let derivedHeaders = s.headers;
       if (!derivedHeaders && s.directUrl) {
         try {
           const pu = new URL(s.directUrl.startsWith("/") ? `http://x.com${s.directUrl}` : s.directUrl);
           const ref = pu.searchParams.get("ref");
-          if (ref) {
+          if (ref && !isEncrypted(ref)) {
             let origin = "";
             try { origin = new URL(ref).origin; } catch {}
             derivedHeaders = origin ? { Referer: ref, Origin: origin } : { Referer: ref };
