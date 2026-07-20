@@ -1267,6 +1267,91 @@ async function getVideasyAnimationSources(
   return out;
 }
 
+// ── DahmerMovies (a.111477.xyz) ── direct MP4/MKV file server ──────────────────
+// Pipeline: title + year → /movies/Title (Year)/ directory listing → parse file hrefs
+//           → send as rawUrl (p.111477.xyz/bulk?u= via 307 — browser plays from residential IP)
+// TV: /tvs/Title/Season XX/ → filter S0XE0Y pattern
+// No auth, no CF, works from Replit IP for directory listing. CDN blocks datacenter.
+const DM_BASE  = "https://a.111477.xyz";
+const DM_PROXY = "https://p.111477.xyz/bulk?u=";
+const DM_HINDI = /\b(hindi|urdu|tamil|telugu|dubbed|hin\b|tam\b|tel\b|multi[._-]?audio|dual[._-]?audio)\b/i;
+
+function parseDahmerHrefs(html: string): Array<{ name: string; href: string }> {
+  const out: Array<{ name: string; href: string }> = [];
+  const re = /href="([^"]*\.(mp4|mkv))"/gi;
+  let m;
+  while ((m = re.exec(html)) !== null) {
+    const href = m[1];
+    if (href.startsWith("..")) continue;
+    const name = decodeURIComponent(href.split("/").pop() || href);
+    out.push({ name, href });
+  }
+  return out;
+}
+
+async function fetchDahmerMoviesFiles(
+  title: string,
+  year: string,
+  mediaType: "movie" | "tv",
+  season: number,
+  epNum: number,
+): Promise<Array<{ label: string; rawUrl: string }>> {
+  const cleanTitle = title.replace(/[:'"]/g, "").replace(/\s+/g, " ").trim();
+  const hdrs = { "User-Agent": UA, "Referer": `${DM_BASE}/` };
+
+  const buildDirUrl = (yr: string) =>
+    mediaType === "movie"
+      ? `${DM_BASE}/movies/${encodeURIComponent(`${cleanTitle} (${yr})`)}/`
+      : `${DM_BASE}/tvs/${encodeURIComponent(cleanTitle)}/Season%20${String(season).padStart(2, "0")}/`;
+
+  // Fetch the directory listing; try padded season then non-padded for TV
+  let html = "";
+  const tryUrls = year ? [buildDirUrl(year)] : [];
+  if (mediaType === "tv") tryUrls.push(
+    `${DM_BASE}/tvs/${encodeURIComponent(cleanTitle)}/Season%20${season}/`,
+  );
+  for (const u of tryUrls) {
+    try {
+      const r = await fetch(u, { headers: hdrs, signal: AbortSignal.timeout(10_000) });
+      if (r.ok) { html = await r.text(); break; }
+    } catch { /* try next */ }
+  }
+  if (!html) return [];
+
+  let files = parseDahmerHrefs(html);
+  if (!files.length) return [];
+
+  // TV: narrow to the specific episode
+  if (mediaType === "tv" && epNum) {
+    const ep2 = String(epNum).padStart(2, "0");
+    const se2 = String(season).padStart(2, "0");
+    const epFiles = files.filter(f => {
+      const nl = f.name.toLowerCase();
+      return nl.includes(`s${se2}e${ep2}`) || new RegExp(`[._-]e${ep2}[._-]`).test(nl);
+    });
+    if (epFiles.length) files = epFiles;
+  }
+
+  // Prefer mp4; remove Hindi/dual-audio
+  const mp4 = files.filter(f => f.name.toLowerCase().endsWith(".mp4"));
+  if (mp4.length) files = mp4;
+  files = files.filter(f => !DM_HINDI.test(f.name));
+  if (!files.length) return []; // all Hindi — skip
+
+  // Sort: 4K → 1080p → 720p → rest
+  const qScore = (n: string) =>
+    /2160p|4[Kk]/i.test(n) ? 4 : /1080p/i.test(n) ? 3 : /720p/i.test(n) ? 2 : 1;
+  files.sort((a, b) => qScore(b.name) - qScore(a.name));
+
+  return files.slice(0, 3).map(f => {
+    const absPath = f.href.startsWith("http") ? f.href
+      : `${DM_BASE}${f.href.startsWith("/") ? "" : "/"}${f.href}`;
+    const rawUrl  = DM_PROXY + encodeURIComponent(absPath);
+    const quality = f.name.match(/\b(2160p|4[Kk]|1080p|720p|480p)\b/i)?.[0] || "HD";
+    return { label: `DahmerMovies · ${quality}`, rawUrl };
+  });
+}
+
 // Hexa cooldown — enc-dec.app returns "Next retry: N minutes" on 500; don't hammer it
 let _hexaFailUntil = 0;
 
@@ -2233,6 +2318,7 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
   // videasy3  (VE)    ✅ api.speedracelight.com — STREAMCRYPTO HLS multi-quality
   // vidfast    (VF)   ✅ vidfast.pro TMDB-native AES-256-GCM HLS
   // fourkhdhub_anim (4K) ✅ 4khdhub.link → HubCloud MP4 — MKV مُفلتَر
+  // dahmermovies (DH) ✅ a.111477.xyz direct MP4 — rawUrl (browser plays from residential IP)
   //
   // محذوف:
   // multimovies_anim (MM): حُذف بطلب المستخدم 2026-07-16
@@ -2247,6 +2333,8 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
     // primesrc_anim + icefy: embeds كلها تحجب VPS IPs — معطّلة لحين إيجاد residential proxy
     "vidfast_vc", "nebula",
     "nflixmovies_flux2", "vidbolt_flux3",
+    // مضاف 2026-07-20: a.111477.xyz direct MP4/MKV rawUrl (browser follows 307→p.111477.xyz)
+    "dahmermovies",
   ]);
   /* كشط كسول: إذا أُرسل ?site= يُشغَّل ذلك المصدر فقط (lazy per-site fetch) */
   const siteParam = (req.query.site as string) || null;
@@ -4626,6 +4714,49 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
           sendSource(playlistUrl, "VixSrc · HLS", playlistUrl, proxied);
           console.log(`[vixsrc_anim] tmdb:${tmdbId} ${type} -> ok`);
         } catch (e: any) { console.warn("[vixsrc_anim]", e?.message); }
+      }),
+
+      // ── DahmerMovies (a.111477.xyz) — direct MP4 rawUrl ──────────────────────
+      // directory listing يعمل من VPS بدون CF. الملفات خلف p.111477.xyz (307 redirect)
+      // تُرسَل كـ rawUrl — المتصفح/ExoPlayer يشغّلها مباشرة من residential IP.
+      // يحتاج year: يُجلَب من req.query.year أو TMDB API.
+      scrapeAnimCached("dahmermovies", async () => {
+        if (!title) return;
+        try {
+          send("status", { msg: "DahmerMovies: جاري البحث…" });
+
+          // Get year — from query param or TMDB lookup
+          let year = String((req.query.year as string) || "");
+          if (!year && tmdbId) {
+            const tmdbKey = process.env.TMDB_API_KEY || "";
+            if (tmdbKey) {
+              try {
+                const tmdbType = type === "movie" ? "movie" : "tv";
+                const tr = await fetch(
+                  `https://api.themoviedb.org/3/${tmdbType}/${tmdbId}?api_key=${tmdbKey}`,
+                  { headers: { "User-Agent": UA }, signal: AbortSignal.timeout(8_000) },
+                );
+                if (tr.ok) {
+                  const td: any = await tr.json();
+                  year = ((td.release_date || td.first_air_date || "").split("-")[0]) || "";
+                }
+              } catch { /* skip */ }
+            }
+          }
+
+          if (!year) { console.log("[dahmermovies] no year — skipping"); return; }
+
+          const files = await fetchDahmerMoviesFiles(
+            title, year, type === "movie" ? "movie" : "tv", season, epNum,
+          );
+          for (const f of files) {
+            // rawUrl: browser follows 307 → p.111477.xyz/bulk (residential IP) ✅
+            sendSource(f.rawUrl, f.label, f.rawUrl, f.rawUrl, {
+              headers: { "Referer": `${DM_BASE}/`, "Origin": DM_BASE },
+            });
+          }
+          console.log(`[dahmermovies] tmdb:${tmdbId} year:${year} ${type} → ${files.length} files`);
+        } catch (e: any) { console.warn("[dahmermovies]", e?.message); }
       }),
 
       // ── MultiMovies (multimovies.homes) — pure HTTP chain (zangetsu-providers ref) ─
