@@ -305,6 +305,10 @@ export default function AnimationWatchScreen() {
   const seenKeys         = useRef(new Set<string>());
   const autoPlayFiredRef  = useRef(false);
   const autoPlayTimerRef  = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // batching: نجمع المصادر القادمة من SSE ونُحدّث الـ state دفعةً كل 300ms
+  // بدلاً من re-render لكل مصدر منفرد → سلاسة أفضل في الـ picker
+  const pendingBatch     = useRef<AnimSrc[]>([]);
+  const batchTimer       = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hasCachedRef      = useRef(false); // هل تم تحميل مصادر من الكاش المحلي؟
   /* تجميد مصادر المشغّل لحظة دخول التشغيل — يمنع مصادر SSE الجديدة التي تصل أثناء
      التشغيل الفعلي من إعادة كتابة مصفوفة sources الممرَّرة لـ RiftPlayer، وهو ما كان
@@ -434,6 +438,9 @@ export default function AnimationWatchScreen() {
     if (!hasCached) {
       setSources([]);
       seenKeys.current.clear();
+      // تنظيف الـ batch المعلَّق عند بدء fetch جديد
+      if (batchTimer.current) { clearTimeout(batchTimer.current); batchTimer.current = null; }
+      pendingBatch.current = [];
       setScreen("loading");
     }
 
@@ -493,9 +500,17 @@ export default function AnimationWatchScreen() {
               seenKeys.current.add(key);
               freshSrcs.push(src);
 
-              setSources(prev => [...prev, src]);
+              // أضف للـ batch بدلاً من setState فوري — يقلل re-renders من N لـ ~1 كل 300ms
+              pendingBatch.current.push(src);
+              if (!batchTimer.current) {
+                batchTimer.current = setTimeout(() => {
+                  batchTimer.current = null;
+                  const batch = pendingBatch.current.splice(0);
+                  if (batch.length > 0) setSources(prev => [...prev, ...batch]);
+                }, 300);
+              }
 
-              /* تشغيل تلقائي عند أول مصدر مباشر */
+              /* تشغيل تلقائي عند أول مصدر مباشر — يُفعَّل فوراً قبل الـ batch */
               if (!autoPlayFiredRef.current && isDirectPlayable(src)) {
                 autoPlayFiredRef.current = true;
                 setTimeout(() => playSrc(src), 0);
