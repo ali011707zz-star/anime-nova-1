@@ -2245,15 +2245,18 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
   // multimovies_anim (MM): حُذف بطلب المستخدم 2026-07-16
   // vidlink_encdec (VL): vidlink.pro API يحجب VPS (response فارغ) — معطَّل 2026-07-18
   const ANIM_SOURCE_ALLOWLIST: Set<string> | null = new Set([
-    "dulo_anim", "starcima", "vaplayer_anim",
+    // dulo_anim: CF يحجب dulo.tv من VPS + hopxProxyGet=null → 14s مهدورة → محذوف
+    "starcima", "vaplayer_anim",
     // videasy3 (VE): speedracelight API محجوب بـ CF من VPS + ironbubble HTTP 000 — معطّل
     // fourkhdhub_anim (4K): hubcloud يحجب VPS+Hopx — لا يمكن استخراج الرابط — معطّل
     // vidlink_encdec (VL): vidlink.pro يحجب VPS — response فارغ — معطّل 2026-07-18
     "vidfast",
-    // مضاف 2026-07: vidfast.vc يعمل (enc-dec.app) ✅; nebula محدودة لكن تعمل
+    // nebula: Cloudflare يحجب VPS IP على aether.cx — محذوف 2026-07-21
     // primesrc_anim + icefy: embeds كلها تحجب VPS IPs — معطّلة لحين إيجاد residential proxy
-    "vidfast_vc", "nebula",
+    "vidfast_vc",
     "nflixmovies_flux2", "vidbolt_flux3",
+    // vixsrc_anim: API مباشر بلا CF — tmdb-native ✅ أضيف 2026-07-21
+    "vixsrc_anim",
     // مضاف 2026-07-20: a.111477.xyz direct MP4/MKV rawUrl (browser follows 307→p.111477.xyz)
     "dahmermovies",
   ]);
@@ -2402,7 +2405,7 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
         streamDone = true;
         send("done", {}); clearInterval(keepAlive); res.end();
       }
-    }, 30_000);
+    }, 18_000);
 
     // ── Run all scrapers in parallel ──────────────────────────────────────────
     await Promise.allSettled([
@@ -2511,7 +2514,7 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
               try {
                 const r = await fetch(
                   `${SC_VIDZEE}?tmdbId=${tmdbId}&type=${type}&title=${encodeURIComponent(title)}${tvExtra}`,
-                  { headers: scHeaders, signal: AbortSignal.timeout(18_000) }
+                  { headers: scHeaders, signal: AbortSignal.timeout(8_000) }
                 );
                 if (!r.ok) {
                   console.error(`[StarCima/vidzee] HTTP ${r.status} for tmdbId=${tmdbId}`);
@@ -2559,7 +2562,7 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
                   prepared.map(async ({ proxied, rawUrl: pRaw, label }) => {
                     try {
                       const pr = await fetch(`http://localhost:${PROBE_PORT}${proxied}`, {
-                        signal: AbortSignal.timeout(6_000),
+                        signal: AbortSignal.timeout(1_500),
                       });
                       // 200/206 = CDN accessible from server → use hls-proxy
                       // 403/502/other = CDN blocks server IPs → send raw for browser
@@ -2589,15 +2592,11 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
                   return false;
                 };
 
-                for (const { proxied, rawUrl: sRaw, label, serverAccessible } of probed) {
-                  if (serverAccessible) {
-                    // CDN accessible from server → use hls-proxy (handles CORS + seg rewriting)
-                    sendSource(proxied, label, sRaw, proxied);
-                  } else if (!isTokenExpired(sRaw)) {
-                    // CDN blocks server IPs → still use hls-proxy (VPS, no bandwidth concern)
-                    sendSource(proxied, label, sRaw, proxied);
-                  }
-                  // else: expired token URL — skip entirely
+                for (const { proxied, rawUrl: sRaw, label } of probed) {
+                  if (isTokenExpired(sRaw)) continue; // رابط منتهي الصلاحية → تخطَّ
+                  // url=sRaw (raw CDN) → موبايل AnimHlsPlayer يجلب مباشرة بـ IP الجهاز
+                  // proxyUrl=proxied (hls-proxy) → ويب يستخدمه لـ CORS + segment rewriting
+                  sendSource(sRaw, label, sRaw, proxied);
                 }
               } catch (e) { console.error("[StarCima/vidzee] error:", e); }
             })(),
@@ -5171,7 +5170,7 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
           if (type !== "movie") { params.set("season", String(season)); params.set("episode", String(epNum)); }
           const r = await fetch(`https://stream.nflixmovies.app/api/v1/play?${params}`, {
             headers: { "Authorization": `Bearer ${NFLIX_TOKEN}`, "Origin": "https://nflixmovies.app" },
-            signal: AbortSignal.timeout(15_000),
+            signal: AbortSignal.timeout(8_000),
           });
           if (!r.ok) return;
           const data = await r.json() as { ok?: boolean; hlsUrl?: string; upstream?: string; label?: string; provider?: string };
@@ -5201,7 +5200,7 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
               const b64 = Buffer.from(path).toString("base64");
               const r = await fetch(`https://vidbolt.xyz/api/proxy-vidcdn?b64path=${b64}`, {
                 headers: { "Origin": "https://vidbolt.xyz", "Referer": "https://vidbolt.xyz/" },
-                signal: AbortSignal.timeout(15_000),
+                signal: AbortSignal.timeout(10_000),
               });
               if (!r.ok) continue;
               const data = await r.json() as { sources?: Array<{ url: string; name?: string }> };
@@ -5210,7 +5209,8 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
                 const rawUrl = s.url.startsWith("/proxy/") ? `https://wormhole.filmu.in${s.url}` : s.url;
                 const isHls = rawUrl.includes(".m3u8");
                 const proxied = isHls ? wrapHls(rawUrl, "https://vidbolt.xyz/") : rawUrl;
-                sendSource(proxied, `VidBolt · ${ext} · ${s.name || "HD"}`, rawUrl, proxied);
+                // url=rawUrl → موبايل AnimHlsPlayer يجلب مباشرة بـ IP الجهاز؛ proxyUrl=proxied → ويب
+                 sendSource(rawUrl, `VidBolt · ${ext} · ${s.name || "HD"}`, rawUrl, proxied);
                 sent++;
               }
             } catch { /* skip extractor */ }
