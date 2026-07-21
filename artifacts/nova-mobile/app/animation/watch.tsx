@@ -581,10 +581,13 @@ export default function AnimationWatchScreen() {
       const resolvedSubUrl = wantsNoSub ? undefined : (s.subtitleUrl
         ? resolveUrl(s.subtitleUrl, base)
         : activeSubUrl);
-      const rawUrl = getPlayUrl(s);
+      /* على الأجهزة: نفضّل directUrl (WebView يجلب بـ IP الجهاز → CDN لا يحجبه)
+         على الويب:  نفضّل proxyUrl (الـ API proxy يضيف CORS headers اللازمة للـ iframe) */
+      const rawUrl = Platform.OS === "web"
+        ? (s.proxyUrl || s.directUrl || s.url || "")
+        : (s.directUrl || s.url || s.proxyUrl || "");
       /* headers: من الخادم مباشرةً أو محسوبة من رابط الـ proxy */
       const headers = s.headers || extractHeadersFromProxy(rawUrl);
-      /* URL خام — لا ensureVpsProxy — WebView يجلب مباشرة بـ IP الجهاز */
       const url = rawUrl.startsWith("/") ? base + rawUrl : rawUrl;
       const q = getSrcQuality(s);
       return {
