@@ -14977,9 +14977,11 @@ router.get("/anime/seg-proxy", async (req, res) => {
     return true;
   }
 
-  // VPS مباشر فقط — لا fallback (Hopx/MediaFlow/CF Worker معطّلة)
+  // 307 Redirect → ExoPlayer/browser يجلب السيغمنت بـ IP الجهاز مباشرة (لا VPS IP)
+  // بدلاً من 502 عند حجب CDN للـ VPS، نُعيد توجيه الطلب للـ CDN مباشرة.
+  // ExoPlayer على Android والمتصفح يتبعان الـ redirect بـ IP الجهاز → CDN يسمح.
   async function segFallback(): Promise<void> {
-    if (!res.headersSent) res.status(502).send("CDN blocked");
+    if (!res.headersSent) res.redirect(307, url);
   }
 
   try {
