@@ -40,6 +40,7 @@
 - [anime3rb Cookie Auto-Refresh](anime3rb-cookie-refresh-system.md) — nopecha-ext على OpenShift يحل Turnstile مرة/20h؛ scheduler 30min؛ Supabase site_cookies persistence؛ episodes table URL مباشر.
 - [AniPub/MegaPlay scraper](anipub-megaplay-scraper.md) — X-Requested-With:XMLHttpRequest لازم لـ getSourcesNew؛ M3U8 يحتاج Referer:megaplay.buzz؛ تجاوز CF عبر megaplay مباشرة.
 
+- [Hopx+CF disabled 2026-07](hopx-cf-disabled-2026-07.md) — Hopx/CF Worker/MediaFlow كلها معطّلة؛ VPS-direct فقط؛ segFallback→502 فوري؛ CDN blocking هو السبب الحقيقي لفشل HLS.
 - [Mobile playback root cause 2026-07-20](mobile-playback-root-cause-2026-07-20.md) — ⚠️ SUPERSEDES mobile-playback-vps-bypass-fix: الإصلاح الأول كان خاطئاً؛ wrapAnimForMobile يجب أن يستخدم encryptParam+hls-proxy دائماً؛ CF Worker مكسور 401؛ خطة الإصلاح الصحيحة كاملة.
 - [seg-proxy text/html MPEG TS fix](seg-proxy-content-type-fix.md) — بعض CDNs تُرجع TS binary بـ text/html خاطئ → ExoPlayer يرفضه → شاشة سوداء؛ fix: كشف 0x47 sync byte وتصحيح Content-Type + CF Worker fallback.
 - [AnimeSlayer constants restored](anslayer-constants-restored.md) — ANSLAYER_BASE/CID/CSEC حُذفت من anime.ts وأُعيدت؛ لا تحذفها مجدداً.
