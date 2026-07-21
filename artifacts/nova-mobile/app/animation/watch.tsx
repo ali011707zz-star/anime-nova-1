@@ -70,32 +70,26 @@ function extractHeadersFromProxy(url: string): Record<string, string> | undefine
 }
 
 /**
- * يضمن التوافق مع ExoPlayer/AVPlayer — لكن بدون VPS proxy عندما يتوفر Referer.
- *
- * الإصلاح الجذري (2026-07):
- *   react-native-video v6 يُرسل headers (Referer/Origin) مع كل طلب نيتيفاً
- *   (المانيفست + كل segment). IP الموبايل السكني مقبول من معظم CDNs خلافاً
- *   لـ IP الـ VPS (datacenter) الذي يُحجب. → عندما يتوفر Referer نعيد الرابط
- *   الخام مباشرةً بدون لفّه في hls-proxy.
+ * يضمن أن رابط الفيديو يمرّ عبر VPS proxy لضمان التوافق مع ExoPlayer/AVPlayer.
+ * CDN كثيرة تحجب طلبات الأجهزة المحمولة الـ datacenter بدون Referer صحيح.
  */
 function ensureVpsProxy(url: string, headers: Record<string, string> | undefined, base: string): string {
   if (!url) return url;
-  // بالفعل proxy عبر VPS — لا تغيير
+  // بالفعل proxy عبر VPS
   if (url.includes("/api/anime/") || url.includes("/api/animation/")) return url;
   // روابط embed (mega) — لا نلفّها
   if (url.includes("mega.nz") || url.includes("mega.co.nz")) return url;
-  // CDNs تعمل فقط من IP سكني — تمرير مباشر
+  // LookMovie CDN — يعمل مباشرة من IP سكني مع Referer؛ يحجب VPS/datacenter
   if (url.includes("lookmovie.")) return url;
-
   const ref = headers?.Referer || "";
-
-  // Referer متوفر → RNV يُرسله نيتيفاً مع كل segment → CDN يقبل → لا حاجة لـ proxy
-  if (ref) return url;
-
-  // بدون Referer: نلفّ HLS في hls-proxy حتى يُضيف الخادم الـ headers
   const isHls = /\.(m3u8)(\?|$)|\/hls\/|\/playlist\//i.test(url);
   if (isHls) {
-    return `${base}/api/anime/hls-proxy?url=${encodeURIComponent(url)}`;
+    return ref
+      ? `${base}/api/anime/hls-proxy?url=${encodeURIComponent(url)}&ref=${encodeURIComponent(ref)}`
+      : `${base}/api/anime/hls-proxy?url=${encodeURIComponent(url)}`;
+  }
+  if (ref) {
+    return `${base}/api/anime/video-proxy?url=${encodeURIComponent(url)}&ref=${encodeURIComponent(ref)}`;
   }
   return url;
 }
@@ -220,7 +214,6 @@ function getAnimTag(label: string): string {
   // ─── مصادر إنجليزية / دولية ───
   if (l.startsWith("nflix"))          return "NF";
   if (l.startsWith("vidbolt"))        return "VB";
-  if (l.startsWith("dahmermovies"))   return "DH";
   if (l.startsWith("icefy"))          return "IF";
   if (l.startsWith("nebula"))         return "NB";
   if (l.startsWith("superembed"))     return "SE";
@@ -312,10 +305,6 @@ export default function AnimationWatchScreen() {
   const seenKeys         = useRef(new Set<string>());
   const autoPlayFiredRef  = useRef(false);
   const autoPlayTimerRef  = useRef<ReturnType<typeof setTimeout> | null>(null);
-  // batching: نجمع المصادر القادمة من SSE ونُحدّث الـ state دفعةً كل 300ms
-  // بدلاً من re-render لكل مصدر منفرد → سلاسة أفضل في الـ picker
-  const pendingBatch     = useRef<AnimSrc[]>([]);
-  const batchTimer       = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hasCachedRef      = useRef(false); // هل تم تحميل مصادر من الكاش المحلي؟
   /* تجميد مصادر المشغّل لحظة دخول التشغيل — يمنع مصادر SSE الجديدة التي تصل أثناء
      التشغيل الفعلي من إعادة كتابة مصفوفة sources الممرَّرة لـ RiftPlayer، وهو ما كان
@@ -445,9 +434,6 @@ export default function AnimationWatchScreen() {
     if (!hasCached) {
       setSources([]);
       seenKeys.current.clear();
-      // تنظيف الـ batch المعلَّق عند بدء fetch جديد
-      if (batchTimer.current) { clearTimeout(batchTimer.current); batchTimer.current = null; }
-      pendingBatch.current = [];
       setScreen("loading");
     }
 
@@ -507,17 +493,9 @@ export default function AnimationWatchScreen() {
               seenKeys.current.add(key);
               freshSrcs.push(src);
 
-              // أضف للـ batch بدلاً من setState فوري — يقلل re-renders من N لـ ~1 كل 300ms
-              pendingBatch.current.push(src);
-              if (!batchTimer.current) {
-                batchTimer.current = setTimeout(() => {
-                  batchTimer.current = null;
-                  const batch = pendingBatch.current.splice(0);
-                  if (batch.length > 0) setSources(prev => [...prev, ...batch]);
-                }, 300);
-              }
+              setSources(prev => [...prev, src]);
 
-              /* تشغيل تلقائي عند أول مصدر مباشر — يُفعَّل فوراً قبل الـ batch */
+              /* تشغيل تلقائي عند أول مصدر مباشر */
               if (!autoPlayFiredRef.current && isDirectPlayable(src)) {
                 autoPlayFiredRef.current = true;
                 setTimeout(() => playSrc(src), 0);
