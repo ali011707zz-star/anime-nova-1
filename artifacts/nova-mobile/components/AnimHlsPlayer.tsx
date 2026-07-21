@@ -8,8 +8,11 @@
  *  • WebView (pointerEvents="none") — يشغّل hls.js فقط، لا يستقبل لمسات
  *  • RN overlay — يتحكم بالإيماءات (سحب للبحث، نقر للتحكم، نقر مزدوج للتخطي)
  *  • Bridge: injectJavaScript (RN→WebView) + onMessage (WebView→RN)
+ *
+ * ملاحظة: hls.js مُضمَّن مباشرةً (لا CDN خارجي) — يعمل بدون اتصال بـ CDN.
  */
 import React, { useCallback, useEffect, useRef, useState } from "react";
+import { HLS_JS_INLINE } from "@/assets/hlsJsContent";
 import {
   Animated, Dimensions, Easing, I18nManager, PanResponder, Platform,
   Pressable, StyleSheet, Text, View, ActivityIndicator,
@@ -123,7 +126,6 @@ html,body{width:100%;height:100%;background:#000;overflow:hidden}
 </head>
 <body>
 <video id="v" playsinline autoplay webkit-playsinline x5-playsinline x5-video-player-type="h5"></video>
-<script src="https://cdn.jsdelivr.net/npm/hls.js@1.6.2/dist/hls.min.js"></script>
 <script>
 var v=document.getElementById('v');
 var hls=null;
@@ -806,6 +808,7 @@ export default function AnimHlsPlayer({
         bounces={false}
         cacheEnabled={false}
         incognito
+        injectedJavaScriptBeforeContentLoaded={HLS_JS_INLINE}
         onLoad={handleWebViewLoad}
         onMessage={handleMessage}
         onError={(e) => { console.error("[AnimHlsPlayer] WebView error:", e.nativeEvent); handleError(); }}
