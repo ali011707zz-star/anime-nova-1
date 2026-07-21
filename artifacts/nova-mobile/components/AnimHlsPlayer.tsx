@@ -118,7 +118,7 @@ html,body{width:100%;height:100%;background:#000;overflow:hidden}
 </style>
 </head>
 <body>
-<video id="v" playsinline autoplay webkit-playsinline></video>
+<video id="v" playsinline autoplay webkit-playsinline x5-playsinline x5-video-player-type="h5"></video>
 <script src="https://cdn.jsdelivr.net/npm/hls.js@1.6.2/dist/hls.min.js"></script>
 <script>
 var v=document.getElementById('v');
@@ -140,12 +140,11 @@ v.addEventListener('canplay',function(){post({k:'buf',v:false})});
 v.addEventListener('playing',function(){post({k:'buf',v:false});post({k:'play',v:true})});
 v.addEventListener('pause',function(){post({k:'play',v:false})});
 v.addEventListener('loadedmetadata',function(){post({k:'ready',d:isFinite(v.duration)?v.duration:0})});
-v.addEventListener('error',function(e){
-  post({k:'err',msg:'video_error:'+v.error?.code});
+v.addEventListener('error',function(){
+  post({k:'err',msg:'video_error:'+(v.error?v.error.code:'?')});
 });
 
 function loadSrc(url,ref){
-  if(url===currentUrl&&hls)return;
   currentUrl=url;
   if(hls){hls.destroy();hls=null;}
   post({k:'buf',v:true});
@@ -158,26 +157,17 @@ function loadSrc(url,ref){
     return;
   }
 
-  if(Hls&&Hls.isSupported()){
+  if(typeof Hls!=='undefined'&&Hls.isSupported()){
     var cfg={
       enableWorker:false,
       maxBufferLength:30,
       maxMaxBufferLength:60,
       startLevel:-1,
       abrEwmaDefaultEstimate:500000,
+      fragLoadingTimeOut:20000,
+      manifestLoadingTimeOut:15000,
+      levelLoadingTimeOut:15000,
     };
-    if(ref){
-      /* أحاول تعيين Referer — قد يُحجب في بعض إصدارات WebView لكن يستحق المحاولة */
-      cfg.xhrSetup=function(xhr,xurl){
-        try{xhr.setRequestHeader('X-Referer',ref);}catch(e){}
-      };
-      cfg.fetchSetup=function(ctx,initParams){
-        try{
-          initParams.headers=Object.assign({},initParams.headers||{});
-        }catch(e){}
-        return new Request(ctx.url,initParams);
-      };
-    }
     hls=new Hls(cfg);
     hls.loadSource(url);
     hls.attachMedia(v);
@@ -205,27 +195,15 @@ function loadSrc(url,ref){
   }
 }
 
-window.addEventListener('message',function(e){
-  try{
-    var cmd=JSON.parse(e.data);
-    if(cmd.type==='load')loadSrc(cmd.url,cmd.ref||'');
-    else if(cmd.type==='seek'){v.currentTime=cmd.t;post({k:'seeked',t:cmd.t});}
-    else if(cmd.type==='speed'){v.playbackRate=cmd.s;}
-    else if(cmd.type==='play'){v.play().catch(function(){});}
-    else if(cmd.type==='pause'){v.pause();}
-    else if(cmd.type==='ping'){post({k:'pong'});}
-  }catch(ex){}
-});
-document.addEventListener('message',function(e){
-  try{
-    var cmd=JSON.parse(e.data);
-    if(cmd.type==='load')loadSrc(cmd.url,cmd.ref||'');
-    else if(cmd.type==='seek'){v.currentTime=cmd.t;post({k:'seeked',t:cmd.t});}
-    else if(cmd.type==='speed'){v.playbackRate=cmd.s;}
-    else if(cmd.type==='play'){v.play().catch(function(){});}
-    else if(cmd.type==='pause'){v.pause();}
-  }catch(ex){}
-});
+/* ── دوال مكشوفة لـ injectJavaScript (أكثر موثوقية من MessageEvent) ── */
+window.NOVA_load  = function(url,ref){ loadSrc(url,ref||''); };
+window.NOVA_seek  = function(t){ v.currentTime=t; post({k:'seeked',t:t}); };
+window.NOVA_play  = function(){ v.play().catch(function(){}); };
+window.NOVA_pause = function(){ v.pause(); };
+window.NOVA_speed = function(s){ v.playbackRate=s; };
+
+/* إشعار React Native أن الـ WebView جاهز لاستقبال الأوامر */
+post({k:'webview_init'});
 </script>
 </body>
 </html>`;
@@ -308,12 +286,15 @@ export default function AnimHlsPlayer({
     };
   }, []);
 
-  /* ── Send load command to WebView ── */
+  /* ── Send load command to WebView (via direct NOVA_load call — more reliable than MessageEvent) ── */
   const sendLoad = useCallback((src: AnimHlsSource, seekTo?: number) => {
     if (!webRef.current) return;
+    const url = src.url;
     const ref = src.headers?.Referer || "";
-    const cmd = JSON.stringify({ type: "load", url: src.url, ref });
-    webRef.current.injectJavaScript(`(function(){window.dispatchEvent(new MessageEvent('message',{data:${JSON.stringify(cmd)}}));true;})();`);
+    /* Call exposed window function directly — avoids Android WebView MessageEvent quirks */
+    webRef.current.injectJavaScript(
+      `(function(){if(window.NOVA_load){window.NOVA_load(${JSON.stringify(url)},${JSON.stringify(ref)});}true;})();`
+    );
     setIsBuffering(true);
     setIsEnded(false);
     setIsPlaying(true);
@@ -329,21 +310,31 @@ export default function AnimHlsPlayer({
     /* Seek to saved position after load */
     if (seekTo && seekTo > 5) {
       setTimeout(() => {
-        webRef.current?.injectJavaScript(`(function(){var cmd=${JSON.stringify(JSON.stringify({type:'seek',t:seekTo}))};window.dispatchEvent(new MessageEvent('message',{data:cmd}));true;})();`);
+        webRef.current?.injectJavaScript(`(function(){if(window.NOVA_seek)window.NOVA_seek(${seekTo});true;})();`);
         positionLoadedRef.current = true;
       }, 2500);
     }
   }, []); // eslint-disable-line
 
-  /* ── WebView is ready (onLoad) ── */
+  /* ── WebView onLoad (fallback — in case webview_init message is missed) ── */
   const handleWebViewLoad = useCallback(() => {
-    if (currentSrc) sendLoad(currentSrc, initialPosition > 5 ? initialPosition : undefined);
+    /* نؤجل 800ms إضافية بعد onLoad للتأكد من تنفيذ scripts الخارجية */
+    setTimeout(() => {
+      if (!loadedRef.current && currentSrc) {
+        sendLoad(currentSrc, initialPosition > 5 ? initialPosition : undefined);
+      }
+    }, 800);
   }, [currentSrc, initialPosition, sendLoad]);
 
   /* ── Messages from WebView ── */
   const handleMessage = useCallback((event: any) => {
     try {
       const msg = JSON.parse(event.nativeEvent.data);
+      /* WebView أعلن جهوزيته — أرسل الـ load فوراً (هذا أكثر موثوقية من onLoad) */
+      if (msg.k === "webview_init") {
+        if (currentSrc) sendLoad(currentSrc, initialPosition > 5 ? initialPosition : undefined);
+        return;
+      }
       if (msg.k === "t") {
         const t = msg.t as number;
         const d = msg.d as number;
@@ -359,7 +350,7 @@ export default function AnimHlsPlayer({
         /* Resume to saved position (fallback if timeout-based seek failed) */
         if (!positionLoadedRef.current && initialPosition > 5 && t < 3) {
           positionLoadedRef.current = true;
-          webRef.current?.injectJavaScript(`(function(){var c=${JSON.stringify(JSON.stringify({type:'seek',t:initialPosition}))};window.dispatchEvent(new MessageEvent('message',{data:c}));true;})();`);
+          webRef.current?.injectJavaScript(`(function(){if(window.NOVA_seek)window.NOVA_seek(${initialPosition});true;})();`);
         }
       } else if (msg.k === "ready") {
         if (loadTimeoutRef.current) { clearTimeout(loadTimeoutRef.current); loadTimeoutRef.current = null; }
@@ -453,21 +444,21 @@ export default function AnimHlsPlayer({
     const clamped = Math.max(0, Math.min(durRef.current || 999999, t));
     setPosition(clamped);
     posRef.current = clamped;
-    webRef.current?.injectJavaScript(`(function(){var c=${JSON.stringify(JSON.stringify({type:'seek',t:clamped}))};window.dispatchEvent(new MessageEvent('message',{data:c}));true;})();`);
+    webRef.current?.injectJavaScript(`(function(){if(window.NOVA_seek)window.NOVA_seek(${clamped});true;})();`);
   }, []);
 
   const togglePlay = useCallback(() => {
     if (isEnded) {
       seek(0);
       setIsEnded(false);
-      webRef.current?.injectJavaScript(`(function(){var c=${JSON.stringify(JSON.stringify({type:'play'}))};window.dispatchEvent(new MessageEvent('message',{data:c}));true;})();`);
+      webRef.current?.injectJavaScript(`(function(){if(window.NOVA_play)window.NOVA_play();true;})();`);
       setIsPlaying(true);
       return;
     }
     if (isPlaying) {
-      webRef.current?.injectJavaScript(`(function(){var c=${JSON.stringify(JSON.stringify({type:'pause'}))};window.dispatchEvent(new MessageEvent('message',{data:c}));true;})();`);
+      webRef.current?.injectJavaScript(`(function(){if(window.NOVA_pause)window.NOVA_pause();true;})();`);
     } else {
-      webRef.current?.injectJavaScript(`(function(){var c=${JSON.stringify(JSON.stringify({type:'play'}))};window.dispatchEvent(new MessageEvent('message',{data:c}));true;})();`);
+      webRef.current?.injectJavaScript(`(function(){if(window.NOVA_play)window.NOVA_play();true;})();`);
     }
     setIsPlaying(p => !p);
   }, [isPlaying, isEnded, seek]);
@@ -548,16 +539,18 @@ export default function AnimHlsPlayer({
   const hasSub = cues.length > 0;
 
   return (
-    <View style={s.root}>
+    /* direction:'ltr' — يمنع RTL الخاص بالتطبيق العربي من عكس layout المشغّل */
+    <View style={[s.root, { direction: "ltr" }]}>
       <StatusBar hidden />
 
       {/* ── WebView — الفيديو الفعلي ── */}
       <WebView
         ref={webRef}
-        source={{ html: HLS_HTML }}
+        source={{ html: HLS_HTML, baseUrl: "https://nova-player.local/" }}
         style={StyleSheet.absoluteFill}
         mediaPlaybackRequiresUserAction={false}
         allowsInlineMediaPlayback
+        allowsFullscreenVideo
         javaScriptEnabled
         domStorageEnabled
         originWhitelist={["*"]}
@@ -565,6 +558,8 @@ export default function AnimHlsPlayer({
         pointerEvents="none"
         scrollEnabled={false}
         bounces={false}
+        cacheEnabled={false}
+        incognito
         onLoad={handleWebViewLoad}
         onMessage={handleMessage}
         onError={(e) => { console.error("[AnimHlsPlayer] WebView error:", e.nativeEvent); handleError(); }}
@@ -610,7 +605,7 @@ export default function AnimHlsPlayer({
             {/* ── Top bar ── */}
             <View style={[s.topBar, { paddingRight: insets.right + 12, paddingLeft: insets.left + 12 }]}>
               <Pressable onPress={onBack} style={s.backBtn} hitSlop={12}>
-                <Ionicons name="arrow-forward" size={20} color="#fff" />
+                <Ionicons name="arrow-back" size={20} color="#fff" />
               </Pressable>
               <View style={s.titleWrap}>
                 <Text style={s.titleText} numberOfLines={1}>{title}</Text>
@@ -688,7 +683,7 @@ export default function AnimHlsPlayer({
                 <Text style={[s.srcItemLabel, i === srcIdx && s.srcItemLabelActive]}>
                   {`سيرفر ${i + 1} — ${src.quality}`}
                 </Text>
-                <Text style={s.srcItemTag}>{src.label?.split(" ")[0] || "—"}</Text>
+                <Text style={s.srcItemTag} numberOfLines={1}>{src.label || "—"}</Text>
               </Pressable>
             ))}
           </View>
