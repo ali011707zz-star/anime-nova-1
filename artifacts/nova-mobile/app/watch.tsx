@@ -177,12 +177,13 @@ function resolveUrl(url: string | undefined, base: string): string {
 }
 
 /**
- * يضمن التوافق مع ExoPlayer/AVPlayer — بدون VPS proxy عندما يتوفر Referer.
+ * يضمن مرور كل روابط HLS عبر VPS proxy.
  *
- * الإصلاح الجذري (2026-07):
- *   react-native-video v6 يُرسل headers (Referer/Origin) مع كل طلب نيتيفاً.
- *   IP الموبايل السكني مقبول من CDNs بينما IP VPS محجوب → نتجنب proxy
- *   عندما يكون Referer متوفراً ونلعب الرابط الخام مباشرةً.
+ * الإصلاح 2026-07-21:
+ *   الكود القديم كان يُعيد raw CDN URL عند وجود Referer (if (ref) return url).
+ *   هذا يجعل ExoPlayer يتصل بـ CDN مباشرةً بدون مرور على nginx (لذا nginx يُسجّل صفر طلبات).
+ *   الحل: نلفّ HLS دائماً في hls-proxy ونمرر Referer كـ ref param.
+ *   VPS يُضيف Referer الصح للـ CDN ويتجاوز الحجب.
  */
 function ensureVpsProxy(url: string, headers: Record<string, string> | undefined, base: string): string {
   if (!url) return url;
@@ -193,16 +194,13 @@ function ensureVpsProxy(url: string, headers: Record<string, string> | undefined
   if (url.includes("mp4upload")) return url;
 
   const ref = headers?.Referer || "";
-
-  // Referer متوفر → RNV يُرسله مع كل طلب → CDN يقبل IP الموبايل → لا proxy
-  if (ref) return url;
-
-  // بدون Referer: hls-proxy يُضيف Referer من الخادم
   const isHls = /\.(m3u8)(\?|$)|\/hls\/|\/playlist\//i.test(url);
   if (isHls) {
-    return `${base}/api/anime/hls-proxy?url=${encodeURIComponent(url)}`;
+    // نلفّ دائماً في hls-proxy — VPS يُضيف Referer للـ CDN
+    const refParam = ref ? `&ref=${encodeURIComponent(ref)}` : "";
+    return `${base}/api/anime/hls-proxy?url=${encodeURIComponent(url)}${refParam}`;
   }
-  return url; // MP4 بدون Referer — تشغيل مباشر
+  return url; // MP4 مباشر
 }
 
 /* ── مصادر تُشغَّل native مباشرةً عبر RiftPlayer (seg-proxy يُعيد روابط مطلقة الآن) ── */
