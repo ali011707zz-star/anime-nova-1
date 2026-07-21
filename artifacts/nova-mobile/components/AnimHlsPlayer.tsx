@@ -150,6 +150,14 @@ function loadSrc(url,ref){
   if(hls){hls.destroy();hls=null;}
   post({k:'buf',v:true});
 
+  /* MP4 — تشغيل مباشر عبر عنصر video بدون hls.js */
+  if(/\.mp4(\?|$|#)/i.test(url)||(url.indexOf('.mp4')!==-1&&url.indexOf('.m3u8')===-1)){
+    v.src=url;
+    v.load();
+    v.play().catch(function(){});
+    return;
+  }
+
   if(Hls&&Hls.isSupported()){
     var cfg={
       enableWorker:false,
