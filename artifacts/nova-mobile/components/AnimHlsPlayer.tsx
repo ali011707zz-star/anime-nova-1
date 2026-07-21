@@ -327,6 +327,7 @@ export default function AnimHlsPlayer({
   const [isMuted, setIsMuted] = useState(false);
   const [speed, setSpeed] = useState(1);
   const [showSpeedMenu, setShowSpeedMenu] = useState(false);
+  const [isLandRight, setIsLandRight] = useState(true);
 
   /* ── Volume / Brightness ── */
   const [volume, setVolume] = useState(1);
@@ -535,10 +536,19 @@ export default function AnimHlsPlayer({
   /* ── Cleanup ── */
   useEffect(() => {
     return () => {
+      /* تدمير HLS وإيقاف الفيديو لتحرير ذاكرة WebView — يمنع hang عند التنقل المتكرر */
+      try {
+        webRef.current?.injectJavaScript(
+          `(function(){try{if(window.hls){window.hls.destroy();window.hls=null;}` +
+          `if(window.v){window.v.pause();window.v.src='';window.v.load();}}catch(e){}true;})();`
+        );
+      } catch {}
       if (loadTimeoutRef.current) clearTimeout(loadTimeoutRef.current);
       if (controlsTimerRef.current) clearTimeout(controlsTimerRef.current);
       if (feedbackTimer.current) clearTimeout(feedbackTimer.current);
       if (unlockTimer.current) clearTimeout(unlockTimer.current);
+      if (postSeekTimer.current) clearTimeout(postSeekTimer.current);
+      if (doubleTapTimerRef.current) clearTimeout(doubleTapTimerRef.current);
     };
   }, []);
 
@@ -593,6 +603,17 @@ export default function AnimHlsPlayer({
     ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP).catch(() => {});
     onBack();
   }, [onBack]);
+
+  const toggleRotation = useCallback(async () => {
+    const next = !isLandRight;
+    setIsLandRight(next);
+    await ScreenOrientation.lockAsync(
+      next
+        ? ScreenOrientation.OrientationLock.LANDSCAPE_RIGHT
+        : ScreenOrientation.OrientationLock.LANDSCAPE_LEFT
+    ).catch(() => {});
+    fadeIn();
+  }, [isLandRight, fadeIn]);
 
   /* ── Show feedback ── */
   const showFeedback = useCallback((fb: typeof feedback) => {
@@ -895,56 +916,62 @@ export default function AnimHlsPlayer({
             paddingLeft: insets.left + 14,
             paddingRight: insets.right + 14,
           }]}>
-            {/* ← رجوع أقصى اليسار */}
-            <Pressable onPress={handleBack} style={s.backBtn} hitSlop={12}>
-              <Ionicons name="arrow-back" size={20} color="#fff" />
-            </Pressable>
-
-            {/* العنوان في المنتصف */}
-            <View style={s.titleWrap}>
-              <Text style={s.titleText} numberOfLines={1}>{title}</Text>
-              {episode !== undefined && (
-                <Text style={s.epText}>الحلقة {episode}{episodeTitle ? ` — ${episodeTitle}` : ""}</Text>
-              )}
-            </View>
-
-            {/* أزرار اليمين: CC + speed */}
-            <View style={s.topRightRow}>
-              {/* زر الترجمة */}
+            {/* أقصى اليسار: CC + تدوير الشاشة */}
+            <View style={s.topLeftRow}>
               {hasSub && (
                 <Pressable onPress={() => setSubOn(v => !v)} style={[s.topIconBtn, subOn && s.topIconBtnActive]} hitSlop={10}>
                   <Ionicons name="logo-closed-captioning" size={15} color={subOn ? "#c4b5fd" : "rgba(255,255,255,0.75)"} />
                 </Pressable>
               )}
-              {/* زر السرعة */}
-              <View>
-                {showSpeedMenu && (
-                  <View style={s.speedDropdown}>
-                    {SPEEDS.map(sp => (
-                      <Pressable key={sp} onPress={() => changeSpeed(sp)} style={[s.dropItem, speed === sp && s.dropItemActive]}>
-                        <Text style={[s.dropSpeedNum, speed === sp && s.dropItemTextActive]}>{sp}x</Text>
-                        {speed === sp && <Ionicons name="checkmark" size={11} color="#c4b5fd" />}
-                      </Pressable>
-                    ))}
-                  </View>
+              <Pressable onPress={toggleRotation} style={s.topIconBtn} hitSlop={10}>
+                <Ionicons name="phone-landscape-outline" size={15} color="rgba(255,255,255,0.75)" />
+              </Pressable>
+            </View>
+
+            {/* فراغ مرن */}
+            <View style={{ flex: 1 }} />
+
+            {/* أقصى اليمين: عنوان + سهم رجوع */}
+            <View style={s.topRightRow}>
+              <View style={s.titleWrap}>
+                <Text style={s.titleText} numberOfLines={1}>{title}</Text>
+                {episode !== undefined && (
+                  <Text style={s.epText}>الحلقة {episode}{episodeTitle ? ` — ${episodeTitle}` : ""}</Text>
                 )}
-                <Pressable onPress={() => { setShowSpeedMenu(v => !v); fadeIn(); }} style={[s.topIconBtn, showSpeedMenu && s.topIconBtnActive]} hitSlop={10}>
-                  <Text style={[s.speedLabel, speed !== 1 && s.speedLabelActive]}>{speed}x</Text>
-                </Pressable>
               </View>
+              <Pressable onPress={handleBack} style={s.backBtn} hitSlop={12}>
+                <Ionicons name="arrow-forward" size={20} color="#fff" />
+              </Pressable>
             </View>
           </View>
 
-          {/* ── Center play/pause (landscape: show when paused/buffering) ── */}
+          {/* ── Center: تخطي ± 10 ثانية + تشغيل/إيقاف ── */}
           <View style={s.centerOverlay} pointerEvents="box-none">
             {!isPlaying && !isBuffering && <PulseRing />}
-            {(!isPlaying || isBuffering) && (
-              <Pressable onPress={togglePlay} style={s.centerPlayBtn} hitSlop={16}>
-                {isBuffering
-                  ? <ActivityIndicator size={32} color="#fff" />
-                  : <Ionicons name="play" size={36} color="#fff" style={{ transform: [{ translateX: 3 }] }} />}
+            <View style={s.centerRow}>
+              {/* تأخير 10 ثانية */}
+              <Pressable onPress={() => seek(posRef.current - 10)} style={s.centerSkipBtn} hitSlop={14}>
+                <Ionicons name="play-back" size={30} color="rgba(255,255,255,0.92)" />
+                <Text style={s.centerSkipLabel}>10</Text>
               </Pressable>
-            )}
+
+              {/* تشغيل / إيقاف (يظهر فقط عند الإيقاف أو التحميل) */}
+              {(!isPlaying || isBuffering) ? (
+                <Pressable onPress={togglePlay} style={s.centerPlayBtn} hitSlop={16}>
+                  {isBuffering
+                    ? <ActivityIndicator size={32} color="#fff" />
+                    : <Ionicons name="play" size={36} color="#fff" style={{ transform: [{ translateX: 3 }] }} />}
+                </Pressable>
+              ) : (
+                <View style={s.centerPlayPlaceholder} />
+              )}
+
+              {/* تقديم 10 ثانية */}
+              <Pressable onPress={() => seek(posRef.current + 10)} style={s.centerSkipBtn} hitSlop={14}>
+                <Ionicons name="play-forward" size={30} color="rgba(255,255,255,0.92)" />
+                <Text style={s.centerSkipLabel}>10</Text>
+              </Pressable>
+            </View>
           </View>
 
           {/* ── Bottom section ── */}
@@ -992,35 +1019,39 @@ export default function AnimHlsPlayer({
 
             {/* صف أزرار التحكم السفلي */}
             <View style={s.bottomCtrlRow}>
-              {/* يسار: قفل */}
+              {/* يسار: قفل + سرعة */}
               <View style={s.bottomSide}>
                 <Pressable onPress={() => { setIsLocked(true); fadeIn(); }} style={s.ctrlIconBtn} hitSlop={10}>
                   <Ionicons name="lock-closed-outline" size={16} color="rgba(255,255,255,0.80)" />
                 </Pressable>
+                {/* زر السرعة */}
+                <View>
+                  {showSpeedMenu && (
+                    <View style={s.speedDropdown}>
+                      {SPEEDS.map(sp => (
+                        <Pressable key={sp} onPress={() => changeSpeed(sp)} style={[s.dropItem, speed === sp && s.dropItemActive]}>
+                          <Text style={[s.dropSpeedNum, speed === sp && s.dropItemTextActive]}>{sp}x</Text>
+                          {speed === sp && <Ionicons name="checkmark" size={11} color="#c4b5fd" />}
+                        </Pressable>
+                      ))}
+                    </View>
+                  )}
+                  <Pressable onPress={() => { setShowSpeedMenu(v => !v); fadeIn(); }} style={[s.ctrlIconBtn, showSpeedMenu && s.topIconBtnActive]} hitSlop={10}>
+                    <Text style={[s.speedLabel, speed !== 1 && s.speedLabelActive]}>{speed}x</Text>
+                  </Pressable>
+                </View>
               </View>
 
-              {/* وسط: -10 + play + +10 */}
+              {/* وسط: حلقة سابقة + play + حلقة تالية */}
               <View style={s.bottomCenter}>
                 {onPrevEpisode && (
                   <Pressable onPress={onPrevEpisode} style={s.ctrlIconBtn} hitSlop={10}>
                     <Ionicons name="play-skip-back" size={18} color="rgba(255,255,255,0.80)" />
                   </Pressable>
                 )}
-                <View style={{ alignItems: "center", gap: 2 }}>
-                  <Pressable onPress={() => seek(posRef.current - 10)} style={s.seekCtrlBtn} hitSlop={10}>
-                    <Ionicons name="play-back" size={17} color="rgba(255,255,255,0.90)" />
-                  </Pressable>
-                  <Text style={s.seekCtrlLabel}>10</Text>
-                </View>
                 <Pressable onPress={togglePlay} style={s.bottomPlayBtn} hitSlop={10}>
                   <Ionicons name={isPlaying ? "pause" : "play"} size={23} color="#fff" style={isPlaying ? undefined : { transform: [{ translateX: 2 }] }} />
                 </Pressable>
-                <View style={{ alignItems: "center", gap: 2 }}>
-                  <Pressable onPress={() => seek(posRef.current + 10)} style={s.seekCtrlBtn} hitSlop={10}>
-                    <Ionicons name="play-forward" size={17} color="rgba(255,255,255,0.90)" />
-                  </Pressable>
-                  <Text style={s.seekCtrlLabel}>10</Text>
-                </View>
                 {onNextEpisode && (
                   <Pressable onPress={onNextEpisode} style={s.ctrlIconBtn} hitSlop={10}>
                     <Ionicons name="play-skip-forward" size={18} color="rgba(255,255,255,0.80)" />
@@ -1106,14 +1137,15 @@ const s = StyleSheet.create({
     position: "absolute", top: 0, left: 0, right: 0,
     flexDirection: "row", alignItems: "center", zIndex: 11, gap: 8,
   },
+  topLeftRow: { flexDirection: "row", alignItems: "center", gap: 6 },
+  topRightRow: { flexDirection: "row", alignItems: "center", gap: 8 },
   backBtn: {
     width: 36, height: 36, borderRadius: 18,
     backgroundColor: "rgba(0,0,0,0.4)", alignItems: "center", justifyContent: "center",
   },
-  titleWrap: { flex: 1, gap: 2 },
-  titleText: { fontSize: 13, fontFamily: "Cairo_700Bold", color: "#fff" },
-  epText: { fontSize: 10, color: "rgba(255,255,255,0.45)", fontFamily: "Cairo_400Regular" },
-  topRightRow: { flexDirection: "row", alignItems: "center", gap: 6 },
+  titleWrap: { alignItems: "flex-end", gap: 1 },
+  titleText: { fontSize: 13, fontFamily: "Cairo_700Bold", color: "#fff", textAlign: "right" },
+  epText: { fontSize: 10, color: "rgba(255,255,255,0.45)", fontFamily: "Cairo_400Regular", textAlign: "right" },
   topIconBtn: {
     width: 32, height: 32, borderRadius: 8,
     backgroundColor: "rgba(0,0,0,0.35)", alignItems: "center", justifyContent: "center",
@@ -1123,7 +1155,7 @@ const s = StyleSheet.create({
   speedLabel: { fontSize: 11, fontFamily: "Cairo_700Bold", color: "rgba(255,255,255,0.75)" },
   speedLabelActive: { color: "#c4b5fd" },
   speedDropdown: {
-    position: "absolute", bottom: 38, right: 0,
+    position: "absolute", bottom: 40, left: 0,
     backgroundColor: "rgba(10,8,25,0.95)", borderRadius: 12,
     paddingVertical: 4, minWidth: 72,
     borderWidth: 1, borderColor: "rgba(255,255,255,0.1)",
@@ -1138,6 +1170,17 @@ const s = StyleSheet.create({
   centerOverlay: {
     ...StyleSheet.absoluteFillObject, alignItems: "center", justifyContent: "center", zIndex: 10,
   } as any,
+  centerRow: {
+    flexDirection: "row", alignItems: "center", gap: 36,
+  },
+  centerSkipBtn: {
+    alignItems: "center", justifyContent: "center", gap: 4,
+    width: 56, height: 56,
+  },
+  centerSkipLabel: {
+    fontSize: 11, fontFamily: "Cairo_700Bold", color: "rgba(255,255,255,0.75)",
+  },
+  centerPlayPlaceholder: { width: 72, height: 72 },
   centerPlayBtn: {
     width: 72, height: 72, borderRadius: 36,
     backgroundColor: "rgba(0,0,0,0.55)", borderWidth: 1.5,

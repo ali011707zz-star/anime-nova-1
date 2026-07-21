@@ -89,7 +89,7 @@ export default function AnimationEpisodesScreen() {
     const t = encodeURIComponent(title);
     const poster = encodeURIComponent(detail?.poster_path ? `${IMG_W}${detail.poster_path}` : "");
     const et = epName ? `&etitle=${encodeURIComponent(epName)}` : "";
-    router.push(`/animation/watch?id=${id}&type=${type}&ep=${ep}&season=${selSeason}&title=${t}&poster=${poster}${et}`);
+    router.replace(`/animation/watch?id=${id}&type=${type}&ep=${ep}&season=${selSeason}&title=${t}&poster=${poster}${et}` as any);
   }, [id, type, selSeason, title, detail, router]);
 
   const renderEpisode = ({ item, index }: { item: Episode; index: number }) => {
