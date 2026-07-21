@@ -1,11 +1,11 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import {
   View, Text, Pressable, Image, ScrollView, StyleSheet,
-  Platform, Animated, Easing, ActivityIndicator, Linking,
+  Platform, Dimensions, Animated, Easing, ActivityIndicator, Linking,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
-import AnimHlsPlayer, { AnimHlsSource } from "@/components/AnimHlsPlayer";
+import { RiftPlayer, PlayerSource } from "@/components/RiftPlayer";
 import { HiddenResolverWebView, ResolvedStream } from "@/components/HiddenResolverWebView";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -14,6 +14,7 @@ import { getBaseUrl } from "@/utils/api";
 import { secureFetch, secureStreamFetch } from "@/utils/secureApi";
 import * as ScreenOrientation from "expo-screen-orientation";
 
+const { width: W, height: H } = Dimensions.get("window");
 
 /* ── Types ── */
 type Quality = "1080p FHD" | "720p HD" | "360p SD";
@@ -68,6 +69,30 @@ function extractHeadersFromProxy(url: string): Record<string, string> | undefine
   }
 }
 
+/**
+ * يضمن أن رابط الفيديو يمرّ عبر VPS proxy لضمان التوافق مع ExoPlayer/AVPlayer.
+ * CDN كثيرة تحجب طلبات الأجهزة المحمولة الـ datacenter بدون Referer صحيح.
+ */
+function ensureVpsProxy(url: string, headers: Record<string, string> | undefined, base: string): string {
+  if (!url) return url;
+  // بالفعل proxy عبر VPS
+  if (url.includes("/api/anime/") || url.includes("/api/animation/")) return url;
+  // روابط embed (mega) — لا نلفّها
+  if (url.includes("mega.nz") || url.includes("mega.co.nz")) return url;
+  // LookMovie CDN — يعمل مباشرة من IP سكني مع Referer؛ يحجب VPS/datacenter
+  if (url.includes("lookmovie.")) return url;
+  const ref = headers?.Referer || "";
+  const isHls = /\.(m3u8)(\?|$)|\/hls\/|\/playlist\//i.test(url);
+  if (isHls) {
+    return ref
+      ? `${base}/api/anime/hls-proxy?url=${encodeURIComponent(url)}&ref=${encodeURIComponent(ref)}`
+      : `${base}/api/anime/hls-proxy?url=${encodeURIComponent(url)}`;
+  }
+  if (ref) {
+    return `${base}/api/anime/video-proxy?url=${encodeURIComponent(url)}&ref=${encodeURIComponent(ref)}`;
+  }
+  return url;
+}
 
 function resolveUrl(url: string | undefined, base: string): string {
   if (!url) return "";
@@ -112,6 +137,9 @@ function getPlayUrl(src: AnimSrc): string {
   return src.proxyUrl || src.directUrl || src.url || "";
 }
 
+function getLabelShort(label: string): string {
+  return label?.split(" ")[0] || "مصدر";
+}
 
 /* ── Poster image with error fallback ── */
 function AnimPosterImg({ uri, type }: { uri: string; type: string }) {
@@ -268,14 +296,20 @@ export default function AnimationWatchScreen() {
   const [globalArSubUrl, setGlobalArSubUrl] = useState<string | undefined>();
   const [globalEnSubUrl, setGlobalEnSubUrl] = useState<string | undefined>();
   const [subLang, setSubLang] = useState<"ar" | "en" | "off">("ar");
+  /* تُقرأ من الإعدادات عند التهيئة */
+  const subPrefLoadedRef = useRef(false);
 
   const abortRef         = useRef<AbortController | null>(null);
   const lastSaveTs       = useRef(0);
   const lastTimeRef      = useRef(0);
   const seenKeys         = useRef(new Set<string>());
   const autoPlayFiredRef  = useRef(false);
+  const autoPlayTimerRef  = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hasCachedRef      = useRef(false); // هل تم تحميل مصادر من الكاش المحلي؟
-  /* لا حاجة لـ frozenSources — AnimHlsPlayer يدير قائمة المصادر داخلياً */
+  /* تجميد مصادر المشغّل لحظة دخول التشغيل — يمنع مصادر SSE الجديدة التي تصل أثناء
+     التشغيل الفعلي من إعادة كتابة مصفوفة sources الممرَّرة لـ RiftPlayer، وهو ما كان
+     يُسبِّب توقف التشغيل والعودة غير المتوقعة لشاشة الـ picker. */
+  const [frozenSources, setFrozenSources] = useState<PlayerSource[]>([]);
 
   const progressKey   = `anim-wp-${tmdbId}-${type}-${season}-${ep}`;
   /* كاش المصادر المحلي لفتح فوري في المرة الثانية */
@@ -523,8 +557,24 @@ export default function AnimationWatchScreen() {
     } else if (screen === "embed") {
       ScreenOrientation.unlockAsync().catch(() => {});
     }
-    // "native" orientation is handled by AnimHlsPlayer itself (locks to landscape)
+    // "native" orientation is handled by RiftPlayer itself
   }, [screen]);
+
+  /* ── تجميد المصادر لحظة دخول المشغّل، ومسحها عند الخروج (يحل مشكلة العودة للـ picker).
+     — append فقط أثناء التشغيل: لا نُزيح المصادر الحالية حتى لا يتأثر RiftPlayer. ── */
+  useEffect(() => {
+    if (screen === "native") {
+      setFrozenSources(prev => {
+        if (prev.length === 0) return riftSources.length > 0 ? riftSources : prev;
+        const existingUrls = new Set(prev.map(s => s.url));
+        const newOnes = riftSources.filter(s => s.url && !existingUrls.has(s.url));
+        return newOnes.length > 0 ? [...prev, ...newOnes] : prev;
+      });
+    } else {
+      setFrozenSources([]);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [screen, riftSources]);
 
   /* ── Play a source ── */
   const playSrc = useCallback((src: AnimSrc) => {
@@ -569,35 +619,36 @@ export default function AnimationWatchScreen() {
     "360p SD":   directSrcs.filter(s => getSrcQuality(s) === "360p SD"),
   }), [directSrcs]);
 
-  /* Build AnimHlsPlayer sources from directSrcs — روابط خام بلا VPS proxy
-     hls.js داخل WebView يجلب الـ segments بـ IP الجهاز مباشرةً → CDN لا يحجبه */
-  const animHlsSources = useMemo((): AnimHlsSource[] => {
+  /* Build RiftPlayer sources from directSrcs */
+  const riftSources = useMemo((): PlayerSource[] => {
     const base = getBaseUrl();
     const activeSubUrl = subLang === "ar" ? globalArSubUrl : subLang === "en" ? globalEnSubUrl : undefined;
-    const NO_SUB_PREFIXES = ["aflaam", "arabseed", "seepanel", "seepan"];
+    const NO_SUB_PREFIXES = ["aflaam", "ArabSeed", "arabseed", "SeePanal", "seepanel", "seepan"];
     return directSrcs.map(s => {
       const lbl = s.label || "";
       const wantsNoSub = NO_SUB_PREFIXES.some(p => lbl.toLowerCase().startsWith(p.toLowerCase()));
       const resolvedSubUrl = wantsNoSub ? undefined : (s.subtitleUrl
         ? resolveUrl(s.subtitleUrl, base)
         : activeSubUrl);
-      /* على الأجهزة: نستخدم raw CDN مباشرة (IP الجهاز لا يُحجب بـ CDN)
-         على الويب:  نمرّ عبر proxy (يضيف CORS headers اللازمة للـ iframe) */
+      const isArabic = subLang === "ar" && !!resolvedSubUrl;
+      /* على الأجهزة: raw CDN مباشرة (IP الجهاز لا يُحجب بـ CDN)
+         على الويب:  VPS proxy (يضيف CORS headers اللازمة) */
       const rawUrl = Platform.OS === "web"
         ? (s.proxyUrl || s.directUrl || s.url || "")
         : (s.url || s.directUrl || s.proxyUrl || "");
-      /* headers: من الخادم مباشرةً أو محسوبة من رابط الـ proxy */
       const headers = s.headers || extractHeadersFromProxy(rawUrl);
-      const url = rawUrl.startsWith("/") ? base + rawUrl : rawUrl;
-      const q = getSrcQuality(s);
+      const url = Platform.OS === "web"
+        ? ensureVpsProxy(rawUrl, headers, base)
+        : (rawUrl.startsWith("/") ? base + rawUrl : rawUrl);
       return {
         url,
         label: lbl || "مصدر",
-        quality: q,
+        quality: getSrcQuality(s),
         subtitleUrl: resolvedSubUrl,
+        isArabic,
         ...(headers ? { headers } : {}),
       };
-    }).filter(s => !!s.url);
+    }).filter(s => s.url);
   }, [directSrcs, globalArSubUrl, globalEnSubUrl, subLang]);
 
   /* ── Handle back ── */
@@ -669,16 +720,18 @@ export default function AnimationWatchScreen() {
     );
   }
 
-  /* ═══════════════════ ANIM HLS PLAYER ═══════════════════ */
-  if (screen === "native" && animHlsSources.length > 0) {
-    /* نجد فهرس المصدر المختار بمطابقة الـ URL الخام (بدون VPS proxy) */
+  /* ═══════════════════ RIFT PLAYER ═══════════════════ */
+  const playerSources = frozenSources.length > 0 ? frozenSources : riftSources;
+  if (screen === "native" && playerSources.length > 0) {
+    /* نحسب الرابط النهائي لـ playingSrc (بعد ensureVpsProxy) لمطابقة صحيحة مع playerSources */
     const _base = getBaseUrl();
     const _playRaw = getPlayUrl(playingSrc!);
-    const _playUrl = _playRaw.startsWith("/") ? _base + _playRaw : _playRaw;
-    const startIdx = Math.max(0, animHlsSources.findIndex(s => s.url === _playUrl));
+    const _playHeaders = playingSrc?.headers || extractHeadersFromProxy(_playRaw);
+    const _playFinal = ensureVpsProxy(_playRaw, _playHeaders, _base);
+    const startIdx = Math.max(0, playerSources.findIndex(s => s.url === _playFinal));
     return (
-      <AnimHlsPlayer
-        sources={animHlsSources}
+      <RiftPlayer
+        sources={playerSources}
         initialSourceIndex={startIdx}
         title={titleStr}
         episode={type !== "movie" ? ep : undefined}
@@ -687,6 +740,7 @@ export default function AnimationWatchScreen() {
         onBack={() => setScreen("picker")}
         onProgress={(pos, _dur) => handleTimeUpdate(pos)}
         onError={() => {
+          /* جميع المصادر فشلت → العودة للـ picker حتى يرى المستخدم ماذا حدث */
           console.warn("[Animation] جميع المصادر فشلت — العودة للـ picker");
           setScreen("picker");
         }}
