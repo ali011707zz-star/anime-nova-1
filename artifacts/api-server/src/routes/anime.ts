@@ -14667,91 +14667,15 @@ function toAbsoluteUrl(raw: string, base: string): string {
 }
 
 // ── Hopx proxy port (يحل CF Worker — كل الفيديو عبر VPS) ───────────────────────
-const _HOPX_PORT = process.env.CF_PROXY_PORT || "8001";
+// ── Hopx / MediaFlow / CF Worker — معطّلة جميعها، كل شيء عبر VPS مباشرة ─────────
+const _mfOk    = false; // معطّل
+const _hopxOk  = false; // معطّل
 
-// ── mediaflow-proxy (localhost:8888) + mitmproxy CF Worker bridge (localhost:8890) ─
-// يُغطّي M3U8 + segments عبر Cloudflare بدل VPS IP المحجوب من CDNs
-const _MF_URL  = "http://localhost:8888";
-const _MF_PASS = process.env.MF_PASSWORD || "nova_mf_2026";
-let   _mfOk    = false; // يُحدَّث كل 20s
-
-// ── Hopx health check — نتجنّب 20s timeout إذا الـ sandbox ميت ──────────────────
-let _hopxOk = false;
-
-async function _checkProxies() {
-  // mediaflow-proxy health
-  try {
-    const r = await fetch(`${_MF_URL}/health`, { signal: AbortSignal.timeout(3000) });
-    _mfOk = r.ok;
-  } catch { _mfOk = false; }
-  // Hopx health
-  try {
-    const r = await fetch(`http://localhost:${_HOPX_PORT}/health`, { signal: AbortSignal.timeout(3000) });
-    _hopxOk = r.ok;
-  } catch { _hopxOk = false; }
-}
-setInterval(_checkProxies, 20_000);
-_checkProxies(); // فحص فوري عند بدء التشغيل
-
-// ── CF Worker fallback للـ segments ─────────────────────────────────────────────
-const _SEG_CF_KEY = process.env.CF_PROXY_KEY  || "";
-const _SEG_CF_URL = process.env.CF_WORKER_URL || "";
-
-/**
- * Circuit-breaker لـ CF Worker — عند 401/403 (مفتاح خاطئ أو Worker معطّل)
- * نُعطّله 30 دقيقة بدل إضاعة 5s على كل segment.
- * يُعاد التجربة تلقائياً بعد انتهاء المدة.
- */
-let _segCfAuthOk  = true;   // false = Worker يُرجع 401/403 (auth error)
-let _segCfRetryAt = 0;       // timestamp (ms) لإعادة التجربة
-
-function _isCfWorkerAvailable(): boolean {
-  if (!_SEG_CF_URL || !_SEG_CF_KEY) return false;
-  if (_segCfAuthOk) return true;
-  if (Date.now() >= _segCfRetryAt) { _segCfAuthOk = true; return true; } // retry window
-  return false;
-}
-
-/**
- * يجلب segment عبر CF Worker (nova-cdn-proxy) بنفس تشفير AES-256-GCM
- * المُطبَّق في wrapCfWorker (animation.ts). يُرجع null عند الفشل.
- * يُستخدم كـ fallback عندما يحجب CDN الـ VPS IP أو يُرجع HTML.
- */
-async function fetchSegViaCfWorker(url: string, ref: string, timeoutMs = 20000): Promise<Response | null> {
-  if (!_isCfWorkerAvailable()) return null;
-  try {
-    const keyBuf  = Buffer.from(_SEG_CF_KEY.padEnd(32, "0").slice(0, 32));
-    const iv      = randomBytes(12);
-    const payload = JSON.stringify({ url, ref: ref || url, exp: Math.floor(Date.now() / 1000) + 3600 });
-    const cipher  = createCipheriv("aes-256-gcm", keyBuf, iv);
-    const enc     = Buffer.concat([cipher.update(payload, "utf8"), cipher.final()]);
-    const tag     = cipher.getAuthTag();
-    const token   = iv.toString("hex") + Buffer.concat([enc, tag]).toString("hex");
-    const cfUrl   = `${_SEG_CF_URL}?t=${token}`;
-    const r = await fetch(cfUrl, { signal: AbortSignal.timeout(timeoutMs) });
-    if (r.status === 401 || r.status === 403) {
-      // مفتاح خاطئ أو Worker معطّل — عطّل 30 دقيقة
-      _segCfAuthOk  = false;
-      _segCfRetryAt = Date.now() + 30 * 60 * 1000;
-      console.warn(`[seg-proxy] CF Worker ${r.status} — disabled for 30min (key mismatch or Worker down)`);
-      return null;
-    }
-    if (!r.ok) return null;
-    return r; // serveSegResponse تتولى كشف text/html vs بيانات TS حقيقية
-  } catch { return null; }
-}
-
-/**
- * يجلب URL عبر Hopx proxy (localhost:8001/stream) الذي يستخدم curl_cffi
- * لتجاوز حجب CDNs لـ datacenter IPs. يُرجع null عند الفشل.
- */
-async function fetchViaHopx(url: string, ref: string, timeoutMs = 14000): Promise<Response | null> {
-  try {
-    const hopxUrl = `http://localhost:${_HOPX_PORT}/stream?url=${encodeURIComponent(url)}&ref=${encodeURIComponent(ref || url)}`;
-    const r = await fetch(hopxUrl, { signal: AbortSignal.timeout(timeoutMs) });
-    return r.ok ? r : null;
-  } catch { return null; }
-}
+// ── CF Worker / Hopx — معطّلان، stub دائماً null ────────────────────────────────
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+async function fetchSegViaCfWorker(_url: string, _ref: string, _t?: number): Promise<Response | null> { return null; }
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+async function fetchViaHopx(_url: string, _ref: string, _t?: number): Promise<Response | null> { return null; }
 
 // ── عنوان VPS الإنتاجي (للروابط المطلقة في M3U8) ────────────────────────────
 // ExoPlayer يحتاج روابط مطلقة حين تكون manifest URL معقدة (proxy URL مع query params)
@@ -14863,47 +14787,9 @@ async function serveHlsVPS(
     } catch { return null; }
   };
 
-  // نُطلق VPS + Hopx معاً — أول نتيجة صالحة تُستخدم فوراً
-  const body1 = await new Promise<string | null>(resolve => {
-    let settled = 0;
-    const done = (v: string | null) => { if (v) resolve(v); else if (++settled === 2) resolve(null); };
-    fetchDirect().then(done).catch(() => done(null));
-    fetchHopx().then(done).catch(() => done(null));
-  });
-
+  // VPS مباشر فقط — Hopx / MediaFlow / CF Worker جميعها معطّلة
+  const body1 = await fetchDirect();
   if (body1) { sendManifest(body1); return; }
-
-  // ── 3. MediaFlow proxy (CF bridge → CDN) ─────────────────────────────────────
-  // يستخدم mitmproxy-cf-bridge على VPS — يمرّر طلبات CDN عبر Cloudflare
-  // أقوى من Hopx لأنه يتجاوز حجب IP ويُضيف CF cookies تلقائياً
-  if (_mfOk) {
-    try {
-      const mfParams = new URLSearchParams({ d: url, api_password: _MF_PASS });
-      if (ref) {
-        mfParams.set("h_referer", ref);
-        try { mfParams.set("h_origin", new URL(ref).origin); } catch {}
-      }
-      const mfR = await fetch(`${_MF_URL}/proxy/forward?${mfParams}`, {
-        signal: AbortSignal.timeout(15000),
-      });
-      if (mfR.ok) {
-        const body = await mfR.text();
-        if (isValidManifest(body)) { sendManifest(body); return; }
-      }
-    } catch { /* MediaFlow فشل */ }
-  }
-
-  // ── 4. CF Worker fallback (آخر ملجأ للـ manifest) ─────────────────────────
-  // نفس الآلية المستخدمة بنجاح في seg-proxy — CF edge لا يُحجب من CDNs
-  if (_SEG_CF_URL && _SEG_CF_KEY) {
-    try {
-      const cfR = await fetchSegViaCfWorker(url, ref, 12000);
-      if (cfR) {
-        const body = await cfR.text();
-        if (isValidManifest(body)) { sendManifest(body); return; }
-      }
-    } catch { /* CF Worker فشل */ }
-  }
 
   if (!res.headersSent) res.status(502).send("upstream error");
 }
@@ -15091,51 +14977,8 @@ router.get("/anime/seg-proxy", async (req, res) => {
     return true;
   }
 
-  /** fallback chain: Hopx → MediaFlow (CF bridge) → CF Worker → 502
-   *  _hopxOk/_mfOk يُحدَّثان كل 20s — إذا كان الـ service ميتاً نتخطّاه فوراً */
+  // VPS مباشر فقط — لا fallback (Hopx/MediaFlow/CF Worker معطّلة)
   async function segFallback(): Promise<void> {
-    if (res.headersSent) return;
-
-    // 1. Hopx — VPS curl_cffi (يتجاوز حجب CDN لـ datacenter IPs)
-    if (_hopxOk) {
-      try {
-        const hopxR = await fetchViaHopx(url, ref, 18000);
-        if (hopxR) {
-          const ok = await serveSegResponse(hopxR);
-          if (ok) return;
-        }
-      } catch { /* Hopx فشل */ }
-    }
-
-    // 2. MediaFlow /proxy/forward (mitmproxy-cf-bridge — يتجاوز CF IP blocking)
-    if (!res.headersSent && _mfOk) {
-      try {
-        const mfParams = new URLSearchParams({ d: url, api_password: _MF_PASS });
-        if (ref) {
-          mfParams.set("h_referer", ref);
-          try { mfParams.set("h_origin", new URL(ref).origin); } catch {}
-        }
-        const mfR = await fetch(`${_MF_URL}/proxy/forward?${mfParams}`, {
-          signal: AbortSignal.timeout(15000),
-        });
-        if (mfR.ok) {
-          const ok = await serveSegResponse(mfR);
-          if (ok) return;
-        }
-      } catch { /* MediaFlow فشل */ }
-    }
-
-    // 3. CF Worker (fast-fail 5s) — آخر ملجأ
-    if (!res.headersSent && _SEG_CF_URL && _SEG_CF_KEY) {
-      try {
-        const cfR = await fetchSegViaCfWorker(url, ref, 5000);
-        if (cfR) {
-          const ok = await serveSegResponse(cfR);
-          if (ok) return;
-        }
-      } catch { /* CF Worker فشل */ }
-    }
-
     if (!res.headersSent) res.status(502).send("CDN blocked");
   }
 

@@ -376,44 +376,10 @@ const CF_PROXY_BASE = _NOVA_PROXY_BASE
 
 
 // ════════════════════════════════════════════════════════════════════
-//  hopxProxyGet — جلب عبر Hopx sandbox (IP مختلف يتجاوز CF-block)
+//  hopxProxyGet — معطّل (Hopx offline للأبد)، دائماً يُعيد null
 // ════════════════════════════════════════════════════════════════════
-const HOPX_PROXY_BASE_ANIM = process.env.HOPX_PROXY_URL || "http://localhost:8001";
-let _hopxAliveAnim: boolean | null = null;
-let _hopxCheckedAtAnim = 0;
-
-async function hopxProxyGet(
-  url: string,
-  referer?: string,
-  timeoutMs = 25000,
-): Promise<string | null> {
-  const now = Date.now();
-  if (_hopxAliveAnim === null || now - _hopxCheckedAtAnim > 60_000) {
-    // retry مرتين: مرة عادية + مرة بعد 2s عند cold-start
-    for (let attempt = 0; attempt < 2; attempt++) {
-      try {
-        const h = await fetch(`${HOPX_PROXY_BASE_ANIM}/health`, { signal: AbortSignal.timeout(4000) });
-        const body = await h.json() as { ok?: boolean };
-        if (h.ok && body.ok === true) { _hopxAliveAnim = true; break; }
-      } catch { /* ignore */ }
-      if (attempt === 0) await new Promise(r => setTimeout(r, 2000)); // انتظر 2s ثم جرّب مرة أخرى
-      _hopxAliveAnim = false;
-    }
-    _hopxCheckedAtAnim = now;
-  }
-  if (!_hopxAliveAnim) return null;
-  try {
-    const params = new URLSearchParams({ url });
-    if (referer) params.set("ref", referer);
-    const r = await fetch(`${HOPX_PROXY_BASE_ANIM}/fetch?${params}`, {
-      signal: AbortSignal.timeout(timeoutMs + 5000),
-    });
-    if (!r.ok) return null;
-    const data = await r.json() as { status?: number; html?: string; error?: string };
-    if (data.error || !data.html || (data.status !== undefined && data.status >= 400)) return null;
-    return data.html;
-  } catch { return null; }
-}
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+async function hopxProxyGet(_url: string, _ref?: string, _t?: number): Promise<string | null> { return null; }
 
 // CF proxy helper — يمرر الطلب عبر curl_cffi
 async function cfProxyGet(url: string): Promise<string> {
@@ -483,85 +449,15 @@ async function orkestDirectGet(url: string, timeoutMs = 25_000): Promise<string>
   return html;
 }
 
-// ── hopxExtractCookies — تشغيل المتصفح مرة واحدة لاستخراج الكوكيز ─────────────
-// يُشغّل Playwright في Hopx sandbox → يحل CF → يُرجع الكوكيز + HTML المُعالج.
-// النتيجة مُخزَّنة في _browserCookieCache بـ TTL 6h → لا يحتاج browser في الطلبات التالية.
-async function hopxExtractCookies(
-  url: string,
-  referer = "",
-  waitMs = 6000,
-): Promise<{ ok: boolean; cookieStr: string; html: string }> {
-  // فحص الكاش
-  let domain = "";
-  try { domain = new URL(url).hostname; } catch {}
-  if (domain) {
-    const cached = _browserCookieCache.get(domain);
-    if (cached && Date.now() - cached.ts < BROWSER_COOKIE_TTL)
-      return { ok: true, cookieStr: cached.str, html: cached.html };
-  }
-  // فحص Hopx alive
-  const now = Date.now();
-  if (_hopxAliveAnim === null || now - _hopxCheckedAtAnim > 60_000) {
-    try {
-      const h = await fetch(`${HOPX_PROXY_BASE_ANIM}/health`, { signal: AbortSignal.timeout(3000) });
-      const body = await h.json() as { ok?: boolean };
-      _hopxAliveAnim = h.ok && body.ok === true;
-    } catch { _hopxAliveAnim = false; }
-    _hopxCheckedAtAnim = now;
-  }
-  if (!_hopxAliveAnim) return { ok: false, cookieStr: "", html: "" };
-  try {
-    const params = new URLSearchParams({ url, wait: String(waitMs) });
-    if (referer) params.set("ref", referer);
-    const r = await fetch(`${HOPX_PROXY_BASE_ANIM}/extract-cookies?${params}`, {
-      signal: AbortSignal.timeout(waitMs + 25_000),
-    });
-    if (!r.ok) return { ok: false, cookieStr: "", html: "" };
-    const data: any = await r.json();
-    if (data.ok && data.cookie_str) {
-      if (domain) _browserCookieCache.set(domain, { str: data.cookie_str, html: data.html || "", ts: Date.now() });
-      return { ok: true, cookieStr: data.cookie_str, html: data.html || "" };
-    }
-  } catch {}
+// ── hopxExtractCookies / hopxFetchCookied / hopxPostCookied — معطّلة (Hopx offline) ──
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+async function hopxExtractCookies(_url: string, _ref = "", _wait = 6000): Promise<{ ok: boolean; cookieStr: string; html: string }> {
   return { ok: false, cookieStr: "", html: "" };
 }
-
-// ── hopxFetchCookied — جلب URL عبر Hopx curl_cffi مع كوكيز مُحددة ────────────
-// يُرسل Cookie header مع الطلب → يتجاوز CF بدون تشغيل browser جديد.
-async function hopxFetchCookied(
-  url: string, referer: string, cookies: string, timeoutMs = 20_000
-): Promise<string | null> {
-  try {
-    const params = new URLSearchParams({ url, cookie: cookies });
-    if (referer) params.set("ref", referer);
-    const r = await fetch(`${HOPX_PROXY_BASE_ANIM}/fetch?${params}`, {
-      signal: AbortSignal.timeout(timeoutMs + 5_000),
-    });
-    if (!r.ok) return null;
-    const data: any = await r.json();
-    if (data.error || !data.html || (data.status !== undefined && data.status >= 400)) return null;
-    return data.html;
-  } catch { return null; }
-}
-
-// ── hopxPostCookied — POST عبر Hopx curl_cffi مع كوكيز مُحددة ───────────────
-async function hopxPostCookied(
-  url: string, formBody: string, cookies: string,
-): Promise<string | null> {
-  try {
-    const params = new URLSearchParams({ url });
-    if (cookies) params.set("cookie", cookies);
-    const r = await fetch(`${HOPX_PROXY_BASE_ANIM}/post?${params}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ data: formBody }),
-      signal: AbortSignal.timeout(20_000),
-    });
-    if (!r.ok) return null;
-    const data: any = await r.json();
-    return data.html ?? null;
-  } catch { return null; }
-}
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+async function hopxFetchCookied(_url: string, _ref: string, _cookies: string, _t = 20_000): Promise<string | null> { return null; }
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+async function hopxPostCookied(_url: string, _body: string, _cookies: string): Promise<string | null> { return null; }
 
 // cfProxyChainFetch — يجلب url1 ثم url2 بنفس الجلسة (cookies مشتركة)
 async function cfProxyChainFetch(url1: string, url2: string, ref1?: string, timeoutMs = 20_000): Promise<string> {
