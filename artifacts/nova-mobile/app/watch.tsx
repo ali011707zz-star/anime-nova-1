@@ -214,7 +214,7 @@ const SITE_PRIORITY: Record<string, number> = {
 /* مصادر موحَّدة مع الويب — نفس المصادر الـ 8 المفعَّلة في SCRAPER_DEFS */
 const ANIME_SITES = [
   "kawaii", "anikoto", "hianime", "animewitcher",
-  "anineko", "anslayer", "animeify",
+  "anineko", "anslayer", "animeify", "mitanime",
   // "witanime": معطّل بطلب المستخدم
   // "allmanga": معطّل 2026-07-17 — AA_CRYPTO_MISSING على AllAnime
 ] as const;
