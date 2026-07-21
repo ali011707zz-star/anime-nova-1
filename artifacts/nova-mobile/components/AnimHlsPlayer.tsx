@@ -171,6 +171,16 @@ function loadSrc(url,ref){
       fragLoadingTimeOut:20000,
       manifestLoadingTimeOut:15000,
       levelLoadingTimeOut:15000,
+      /* xhrSetup: تمرير Referer/Origin للـ CDNs التي تتطلبها (Android WebView يسمح بذلك) */
+      xhrSetup:function(xhr,u){
+        try{
+          if(ref){
+            xhr.setRequestHeader('Referer',ref);
+            var orig='';try{orig=new URL(ref).origin;}catch(e){}
+            if(orig)xhr.setRequestHeader('Origin',orig);
+          }
+        }catch(e){}
+      },
     };
     hls=new Hls(cfg);
     hls.loadSource(url);
