@@ -12522,8 +12522,7 @@ router.get("/anime/sources-stream", async (req, res) => {
       scrapeCached("animedar",     () => getAnimadarSources(title, english, ep, isMovie, matchCtx)),
       // okanime: معطّل بطلب المستخدم
       // scrapeCached("okanime",      () => getOkAnimeSources(title, english, ep, isMovie, matchCtx), true, 22_000),
-      // mitanime: معطّل بطلب المستخدم
-      // scrapeCached("mitanime",    () => getMitanimeSources(title, english, ep),            false, 60000),
+      scrapeCached("mitanime",    () => getMitanimeSources(title, english, ep),            false, 60000),
       scrapeCached("animeify",     () => getAnimeifySources(title, english, ep),  false, 18000),
       scrapeCached("animeday",     () => getAnimeDaySources(title, english, ep),    true, 18000),
       // scrapeCached("seepanel",  () => getSeepanelSources(title, english, ep, isMovie)), // DEAD: panel.seepanel.top/api returns 404 (2026-06)
@@ -12650,6 +12649,7 @@ router.get("/anime/fetch-source", async (req, res) => {
     "anipub",    // مُضاف 2026-07-19 — AniPub/MegaPlay مدبلج+ترجمة+عربي
     "anime3rb",  // مُضاف 2026-07-18 — Animatoo Supabase slug + Hopx browser-html
     "reanime",   // مُعاد تفعيله 2026-07-20 — reanime.to/api/flix + FlixCloud HLS ناعم
+    "mitanime",  // مُعاد تفعيله 2026-07-21 — RSC parse مباشر · videas/hgcloud/mp4upload
     // "allmanga": معطّل 2026-07-17 — AA_CRYPTO_MISSING
     // videasy_anim: نُقل بالكامل إلى قسم الأنيميشن بطلب المستخدم 2026-07-15
     // xpass_anim: محذوف — CDN (ps1/vip.1x2.space) يحجب VPS 2026-07-15
@@ -12749,7 +12749,7 @@ router.get("/anime/fetch-source", async (req, res) => {
       // case "animelek":     await runExtract(await race(getAnimelekSources(title, english, ep, isMovie),   SCRAPER_MS, [])); break;
       case "animedar":     await runExtract(await race(getAnimadarSources(title, english, ep, isMovie),   SCRAPER_MS, [])); break;
       // case "okanime": معطّل بطلب المستخدم
-      // case "mitanime": معطّل بطلب المستخدم
+      case "mitanime":    (await race(getMitanimeSources(title, english, ep),           60000, [])).forEach(collectSrc); break;
       case "animeify":    (await race(getAnimeifySources(title, english, ep),  18000, [])).forEach(collectSrc); break;
       case "animeday":     await runExtract(await race(getAnimeDaySources(title, english, ep),   SCRAPER_MS, [])); break;
       // case "seepanel": DEAD
