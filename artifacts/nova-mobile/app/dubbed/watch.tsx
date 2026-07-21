@@ -8,6 +8,7 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { RiftPlayer, PlayerSource } from "@/components/RiftPlayer";
 import { getBaseUrl } from "@/utils/api";
+import { secureFetch } from "@/utils/secureApi";
 
 export default function DubbedWatchScreen() {
   const insets = useSafeAreaInsets();
@@ -30,7 +31,7 @@ export default function DubbedWatchScreen() {
 
     const BASE = getBaseUrl();
     try {
-      const r = await fetch(`${BASE}/api/dubbed/watch-src?epUrl=${encodeURIComponent(epUrl)}`);
+      const r = await secureFetch(`${BASE}/api/dubbed/watch-src?epUrl=${encodeURIComponent(epUrl)}`);
       if (!mountedRef.current) return;
       if (!r.ok) {
         setError("تعذّر جلب مصدر الفيديو — حاول مرة أخرى");
