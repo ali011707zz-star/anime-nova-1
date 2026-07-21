@@ -530,14 +530,6 @@ export function RiftPlayer({
     uri: _initSrc?.url || "",
     headers: _initSrc?.headers,
   });
-  /* تشخيص: سجّل URI عند كل تغيير لـ playerSource — مهم لكشف URI="" أو localhost خاطئ */
-  useEffect(() => {
-    console.log(`[RiftPlayer] 🎬 playerSource.uri="${playerSource.uri?.slice(0, 140)}"`);
-    if (!playerSource.uri) {
-      console.warn(`[RiftPlayer] ⚠️ playerSource.uri فارغ! sources.length=${sources.length} initialSourceIndex=${initialSourceIndex}`);
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [playerSource.uri]);
 
   /* ─── Load SubSettings + subOffset + autoPlay pref from storage ─── */
   useEffect(() => {

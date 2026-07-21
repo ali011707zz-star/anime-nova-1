@@ -70,13 +70,13 @@ function extractHeadersFromProxy(url: string): Record<string, string> | undefine
 }
 
 /**
- * يضمن مرور كل روابط HLS عبر VPS proxy.
+ * يضمن التوافق مع ExoPlayer/AVPlayer — لكن بدون VPS proxy عندما يتوفر Referer.
  *
- * الإصلاح 2026-07-21:
- *   الكود القديم كان يُعيد raw CDN URL مباشرةً عندما يتوفر Referer (if (ref) return url).
- *   هذا يُسبب شاشة سوداء لأن ExoPlayer يتصل بـ CDN مباشرةً والـ CDN قد يحجبه.
- *   الحل: نلفّ HLS دائماً عبر hls-proxy ونمرر Referer كـ ref param حتى يُرسله VPS لـ CDN.
- *   سواء كان IP الموبايل سكنياً أم لا — VPS يتحكم في الـ headers ويُضيف Referer صح.
+ * الإصلاح الجذري (2026-07):
+ *   react-native-video v6 يُرسل headers (Referer/Origin) مع كل طلب نيتيفاً
+ *   (المانيفست + كل segment). IP الموبايل السكني مقبول من معظم CDNs خلافاً
+ *   لـ IP الـ VPS (datacenter) الذي يُحجب. → عندما يتوفر Referer نعيد الرابط
+ *   الخام مباشرةً بدون لفّه في hls-proxy.
  */
 function ensureVpsProxy(url: string, headers: Record<string, string> | undefined, base: string): string {
   if (!url) return url;
@@ -84,16 +84,20 @@ function ensureVpsProxy(url: string, headers: Record<string, string> | undefined
   if (url.includes("/api/anime/") || url.includes("/api/animation/")) return url;
   // روابط embed (mega) — لا نلفّها
   if (url.includes("mega.nz") || url.includes("mega.co.nz")) return url;
+  // CDNs تعمل فقط من IP سكني — تمرير مباشر
   if (url.includes("lookmovie.")) return url;
 
   const ref = headers?.Referer || "";
+
+  // Referer متوفر → RNV يُرسله نيتيفاً مع كل segment → CDN يقبل → لا حاجة لـ proxy
+  if (ref) return url;
+
+  // بدون Referer: نلفّ HLS في hls-proxy حتى يُضيف الخادم الـ headers
   const isHls = /\.(m3u8)(\?|$)|\/hls\/|\/playlist\//i.test(url);
   if (isHls) {
-    // نلفّ دائماً في hls-proxy — VPS يُضيف Referer للـ CDN من ref param
-    const refParam = ref ? `&ref=${encodeURIComponent(ref)}` : "";
-    return `${base}/api/anime/hls-proxy?url=${encodeURIComponent(url)}${refParam}`;
+    return `${base}/api/anime/hls-proxy?url=${encodeURIComponent(url)}`;
   }
-  return url; // MP4 مباشر
+  return url;
 }
 
 function resolveUrl(url: string | undefined, base: string): string {
@@ -312,10 +316,6 @@ export default function AnimationWatchScreen() {
   // بدلاً من re-render لكل مصدر منفرد → سلاسة أفضل في الـ picker
   const pendingBatch     = useRef<AnimSrc[]>([]);
   const batchTimer       = useRef<ReturnType<typeof setTimeout> | null>(null);
-  /* الإصلاح 2026-07-21: نحفظ المصدر الذي يجب تشغيله تلقائياً هنا بدلاً من
-     setTimeout فوري — ليُشغَّل داخل batch timer بعد تحديث sources state.
-     يحل race condition: playSrc كان يُستدعى قبل setSources فيُعطي riftSources=[] */
-  const pendingAutoPlayRef = useRef<AnimSrc | null>(null);
   const hasCachedRef      = useRef(false); // هل تم تحميل مصادر من الكاش المحلي؟
   /* تجميد مصادر المشغّل لحظة دخول التشغيل — يمنع مصادر SSE الجديدة التي تصل أثناء
      التشغيل الفعلي من إعادة كتابة مصفوفة sources الممرَّرة لـ RiftPlayer، وهو ما كان
@@ -514,21 +514,13 @@ export default function AnimationWatchScreen() {
                   batchTimer.current = null;
                   const batch = pendingBatch.current.splice(0);
                   if (batch.length > 0) setSources(prev => [...prev, ...batch]);
-                  /* الإصلاح 2026-07-21: نُشغّل auto-play داخل batch timer بعد setSources
-                     حتى يكون React 18 يُدمج الاثنين في render واحد.
-                     سابقاً: setTimeout(0) كان يُستدعى قبل batch(300ms) → sources=[] → playerSources=[] → RiftPlayer لا يُعرض */
-                  if (pendingAutoPlayRef.current) {
-                    const toPlay = pendingAutoPlayRef.current;
-                    pendingAutoPlayRef.current = null;
-                    playSrc(toPlay);
-                  }
                 }, 300);
               }
 
-              /* حفظ أول مصدر قابل للتشغيل — سيُشغَّل داخل batch timer (بعد setSources) */
+              /* تشغيل تلقائي عند أول مصدر مباشر — يُفعَّل فوراً قبل الـ batch */
               if (!autoPlayFiredRef.current && isDirectPlayable(src)) {
                 autoPlayFiredRef.current = true;
-                pendingAutoPlayRef.current = src;
+                setTimeout(() => playSrc(src), 0);
               }
 
             } else if (isDone) {
