@@ -5,7 +5,7 @@ import {
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
-import { RiftPlayer, PlayerSource } from "@/components/RiftPlayer";
+import AnimHlsPlayer, { AnimHlsSource } from "@/components/AnimHlsPlayer";
 import { HiddenResolverWebView, ResolvedStream } from "@/components/HiddenResolverWebView";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -309,7 +309,7 @@ export default function AnimationWatchScreen() {
   /* تجميد مصادر المشغّل لحظة دخول التشغيل — يمنع مصادر SSE الجديدة التي تصل أثناء
      التشغيل الفعلي من إعادة كتابة مصفوفة sources الممرَّرة لـ RiftPlayer، وهو ما كان
      يُسبِّب توقف التشغيل والعودة غير المتوقعة لشاشة الـ picker. */
-  const [frozenSources, setFrozenSources] = useState<PlayerSource[]>([]);
+  const [frozenSources, setFrozenSources] = useState<AnimHlsSource[]>([]);
 
   const progressKey   = `anim-wp-${tmdbId}-${type}-${season}-${ep}`;
   /* كاش المصادر المحلي لفتح فوري في المرة الثانية */
@@ -561,20 +561,20 @@ export default function AnimationWatchScreen() {
   }, [screen]);
 
   /* ── تجميد المصادر لحظة دخول المشغّل، ومسحها عند الخروج (يحل مشكلة العودة للـ picker).
-     — append فقط أثناء التشغيل: لا نُزيح المصادر الحالية حتى لا يتأثر RiftPlayer. ── */
+     — append فقط أثناء التشغيل: لا نُزيح المصادر الحالية حتى لا يتأثر AnimHlsPlayer. ── */
   useEffect(() => {
     if (screen === "native") {
       setFrozenSources(prev => {
-        if (prev.length === 0) return riftSources.length > 0 ? riftSources : prev;
+        if (prev.length === 0) return animHlsSources.length > 0 ? animHlsSources : prev;
         const existingUrls = new Set(prev.map(s => s.url));
-        const newOnes = riftSources.filter(s => s.url && !existingUrls.has(s.url));
+        const newOnes = animHlsSources.filter(s => s.url && !existingUrls.has(s.url));
         return newOnes.length > 0 ? [...prev, ...newOnes] : prev;
       });
     } else {
       setFrozenSources([]);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [screen, riftSources]);
+  }, [screen, animHlsSources]);
 
   /* ── Play a source ── */
   const playSrc = useCallback((src: AnimSrc) => {
@@ -619,8 +619,9 @@ export default function AnimationWatchScreen() {
     "360p SD":   directSrcs.filter(s => getSrcQuality(s) === "360p SD"),
   }), [directSrcs]);
 
-  /* Build RiftPlayer sources from directSrcs */
-  const riftSources = useMemo((): PlayerSource[] => {
+  /* Build AnimHlsPlayer sources from directSrcs
+     — نمرر rawUrl للـ WebView: المتصفح يجلب الـ HLS بـ IP الجهاز → يتجاوز حجب CDN للـ VPS */
+  const animHlsSources = useMemo((): AnimHlsSource[] => {
     const base = getBaseUrl();
     const activeSubUrl = subLang === "ar" ? globalArSubUrl : subLang === "en" ? globalEnSubUrl : undefined;
     const NO_SUB_PREFIXES = ["aflaam", "ArabSeed", "arabseed", "SeePanal", "seepanel", "seepan"];
@@ -630,25 +631,17 @@ export default function AnimationWatchScreen() {
       const resolvedSubUrl = wantsNoSub ? undefined : (s.subtitleUrl
         ? resolveUrl(s.subtitleUrl, base)
         : activeSubUrl);
-      const isArabic = subLang === "ar" && !!resolvedSubUrl;
-      /* على الأجهزة: raw CDN مباشرة (IP الجهاز لا يُحجب بـ CDN)
-         على الويب:  VPS proxy (يضيف CORS headers اللازمة) */
-      const rawUrl = Platform.OS === "web"
-        ? (s.proxyUrl || s.directUrl || s.url || "")
-        : (s.url || s.directUrl || s.proxyUrl || "");
-      const headers = s.headers || extractHeadersFromProxy(rawUrl);
-      const url = Platform.OS === "web"
-        ? ensureVpsProxy(rawUrl, headers, base)
-        : (rawUrl.startsWith("/") ? base + rawUrl : rawUrl);
+      // AnimHlsPlayer: raw CDN URL — WebView يجلبه بـ IP الجهاز (لا يُحجب بـ CDN)
+      const rawUrl = s.url || s.directUrl || s.proxyUrl || "";
+      const finalUrl = rawUrl.startsWith("/") ? base + rawUrl : rawUrl;
       return {
-        url,
+        url: finalUrl,
         label: lbl || "مصدر",
         quality: getSrcQuality(s),
         subtitleUrl: resolvedSubUrl,
-        isArabic,
-        ...(headers ? { headers } : {}),
+        ...(s.headers ? { headers: s.headers } : {}),
       };
-    }).filter(s => s.url);
+    }).filter(s => !!s.url);
   }, [directSrcs, globalArSubUrl, globalEnSubUrl, subLang]);
 
   /* ── Handle back ── */
@@ -720,17 +713,16 @@ export default function AnimationWatchScreen() {
     );
   }
 
-  /* ═══════════════════ RIFT PLAYER ═══════════════════ */
-  const playerSources = frozenSources.length > 0 ? frozenSources : riftSources;
+  /* ═══════════════════ ANIM HLS PLAYER (WebView + hls.js) ═══════════════════ */
+  const playerSources = frozenSources.length > 0 ? frozenSources : animHlsSources;
   if (screen === "native" && playerSources.length > 0) {
-    /* نحسب الرابط النهائي لـ playingSrc (بعد ensureVpsProxy) لمطابقة صحيحة مع playerSources */
-    const _base = getBaseUrl();
-    const _playRaw = getPlayUrl(playingSrc!);
-    const _playHeaders = playingSrc?.headers || extractHeadersFromProxy(_playRaw);
-    const _playFinal = ensureVpsProxy(_playRaw, _playHeaders, _base);
-    const startIdx = Math.max(0, playerSources.findIndex(s => s.url === _playFinal));
+    /* نجد الـ source المختار في قائمة AnimHlsSources بـ url المطابق */
+    const _playUrl = playingSrc?.url || "";
+    const startIdx = Math.max(0, playerSources.findIndex(
+      s => s.url === _playUrl || (_playUrl && s.url.split("?")[0] === _playUrl.split("?")[0])
+    ));
     return (
-      <RiftPlayer
+      <AnimHlsPlayer
         sources={playerSources}
         initialSourceIndex={startIdx}
         title={titleStr}
@@ -740,7 +732,7 @@ export default function AnimationWatchScreen() {
         onBack={() => setScreen("picker")}
         onProgress={(pos, _dur) => handleTimeUpdate(pos)}
         onError={() => {
-          /* جميع المصادر فشلت → العودة للـ picker حتى يرى المستخدم ماذا حدث */
+          /* جميع المصادر فشلت → العودة للـ picker */
           console.warn("[Animation] جميع المصادر فشلت — العودة للـ picker");
           setScreen("picker");
         }}
