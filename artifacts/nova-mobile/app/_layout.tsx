@@ -43,8 +43,7 @@ function RootLayoutNav() {
         headerShown: false,
         contentStyle: { backgroundColor: "#09090B" },
         animation: Platform.OS === "android" ? "fade_from_bottom" : "fade",
-        animationDuration: Platform.OS === "android" ? 85 : 140,
-        gestureEnabled: true,
+        animationDuration: Platform.OS === "android" ? 120 : 180,
       }}
     >
       <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
