@@ -243,16 +243,8 @@ export default function Home() {
     setMergedContinue(loadMergedContinue());
   }, []);
 
-  /* Load popular animation movies + TV from TMDB, and trending news from AniList */
-  useEffect(() => {
-    const key = "8265bd1679663a7ea12ac168da84d2e8";
-    // ملاحظة: بدون with_original_language=ja — هذا القسم لعرض أفلام الأنيميشن العالمية
-    // (ديزني/بيكسار/دريمووركس..) وليس أفلام الأنمي الياباني (لها قسم "أفلام أنمي" منفصل أعلاه).
-    fetch(`https://api.themoviedb.org/3/discover/movie?api_key=${key}&language=ar&with_genres=16&include_adult=false&sort_by=popularity.desc&page=1`)
-      .then(r => r.json())
-      .then(d => setAnimationMovies((d.results || []).filter((m: any) => m.original_language !== "ja").slice(0, 10)))
-      .catch(() => {});
-  }, []);
+  /* Animation movies fetch disabled — section hidden */
+  // useEffect(() => { ... }, []);
 
   /* Load Spring 2026 seasonal anime */
   useEffect(() => {
@@ -866,8 +858,8 @@ export default function Home() {
         </div>
       </div>
 
-      {/* ── قسم الأنيميشن ── */}
-      {!selectedGenre && (
+      {/* ── قسم الأنيميشن ── مخفي */}
+      {false && !selectedGenre && (
       <div className="mt-5 px-4">
           {/* Banner */}
           <Link href="/animations">

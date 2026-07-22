@@ -180,7 +180,6 @@ export function Sidebar({ open, onClose }: SidebarProps) {
                   <NavRow icon={Home}         label="الرئيسية"          href="/" />
                   <NavRow icon={Search}       label="البحث"              href="/search" />
                   <NavRow icon={Tv2}          label="الأنمي"             href="/browse" />
-                  <NavRow icon={Film}         label="الأنيميشن والأفلام" href="/animations" />
                   <NavRow icon={Tv}          label="كرتون مدبلج"       href="/dubbed" />
                   <NavRow icon={CalendarDays} label="الجدول الأسبوعي"   href="/schedule" />
                 </div>
