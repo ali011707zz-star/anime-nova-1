@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import {
   View, Text, Pressable, Image, ScrollView,
-  StyleSheet, Platform, Animated, Easing,
+  StyleSheet, Platform, Animated, Easing, Linking,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
@@ -199,6 +199,16 @@ function ensureVpsProxy(url: string, headers: Record<string, string> | undefined
     return `${base}/api/anime/video-proxy?url=${encodeURIComponent(url)}&ref=${encodeURIComponent(ref)}`;
   }
   return url; // لا Referer متاح — استخدم كما هو
+}
+
+/* ── فتح الفيديو مباشرةً في EZV Player (Android فقط) ── */
+function openInEzv(url: string) {
+  if (!url || Platform.OS !== "android") return;
+  /* intent:// يفتح EZV مباشرةً إن كان مثبَّتاً، وإلا يعود لـ URL المباشر */
+  const intentUrl = `intent:${url}#Intent;package=com.player.easy;type=video/mp4;end`;
+  Linking.openURL(intentUrl).catch(() => {
+    Linking.openURL(url).catch(() => {});
+  });
 }
 
 /* ── مصادر تُشغَّل native مباشرةً عبر RiftPlayer (seg-proxy يُعيد روابط مطلقة الآن) ── */
@@ -1068,6 +1078,18 @@ export default function WatchScreen() {
         )}
 
 
+        {/* ── EZV Player — فتح في المشغّل الخارجي (Android فقط) ── */}
+        {Platform.OS === "android" && directSrcs.length > 0 && (
+          <Pressable
+            style={d.ezvBtn}
+            onPress={() => openInEzv(getPlayUrl(directSrcs[0]))}
+          >
+            <Ionicons name="tv" size={16} color="#c4b5fd" />
+            <Text style={d.ezvBtnText}>فتح بـ EZV Player</Text>
+            <View style={d.ezvBadge}><Text style={d.ezvBadgeText}>خارجي</Text></View>
+          </Pressable>
+        )}
+
         {/* ── Loading indicator while more sources stream in ── */}
         {loading && allSrcs.length > 0 && (
           <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, paddingVertical: 12 }}>
@@ -1176,4 +1198,10 @@ const d = StyleSheet.create({
   webAppIcon:    { width: 40, height: 40, borderRadius: 12, backgroundColor: "rgba(139,92,246,0.16)", alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: "rgba(139,92,246,0.28)" },
   webAppTitle:   { fontSize: 13, fontFamily: "Cairo_700Bold", color: "rgba(196,181,253,0.95)", textAlign: "right" },
   webAppSub:     { fontSize: 10, fontFamily: "Cairo_400Regular", color: "rgba(255,255,255,0.30)", textAlign: "right" },
+
+  /* EZV Player */
+  ezvBtn:        { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, marginHorizontal: 16, marginTop: 4, marginBottom: 4, paddingVertical: 14, borderRadius: 14, backgroundColor: "rgba(124,58,237,0.15)", borderWidth: 1, borderColor: "rgba(139,92,246,0.32)" },
+  ezvBtnText:    { fontSize: 14, fontFamily: "Cairo_700Bold", color: "#c4b5fd" },
+  ezvBadge:      { paddingHorizontal: 7, paddingVertical: 2, borderRadius: 8, backgroundColor: "rgba(139,92,246,0.22)", borderWidth: 1, borderColor: "rgba(139,92,246,0.38)" },
+  ezvBadgeText:  { fontSize: 9, fontFamily: "Cairo_700Bold", color: "rgba(196,181,253,0.85)" },
 });
