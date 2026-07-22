@@ -49,6 +49,8 @@ export const SITE_TTL: Record<string, number> = {
   "2embed":       4 * 3_600_000,
   moviebox:       10 * 60_000,    // CDN URLs مُوقَّعة بـ &t= تنتهي بسرعة → 10 دقائق فقط
   moviebox_anim:  10 * 60_000,    // نفس السبب — Animation version
+  // ── روابط دائمة — MP4 مباشر بدون tokens ──────────────────────────
+  sanime:      30 * 24 * 3_600_000,  // server.sanime.net/Video/{id}/{ep}.mp4 — لا تنتهي
 };
 const DEFAULT_TTL = 4 * 3_600_000;
 
@@ -59,6 +61,7 @@ const PERMANENT_URL_PATTERNS = [
   /drive\.google\.com/i,
   /af[13]\.downet\.net/i,
   /video\.kawaii-anime\.com/i,
+  /server\.sanime\.net\/Video\//i,  // SA — ملفات MP4 دائمة بدون tokens
 ];
 
 function parseUrlExpiry(url: string): number | null {
