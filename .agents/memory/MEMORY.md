@@ -130,3 +130,4 @@
 - [HLS manifest absolute URLs fix](hls-manifest-absolute-urls.md) — serveHlsVPS: VPS+Hopx parallel → MediaFlow → CF Worker; segment URLs must be absolute (NOVA_PUBLIC_URL).
 - [DahmerMovies animation source](dahmermovies-animation-source.md) — a.111477.xyz direct MP4 rawUrl; residential-IP-only CDN; year param required.
 - [VidFast.vc RSC page format fix](vidfast-vc-rsc-fix.md) — __next_f RSC now has "token" not "en"; trailing slash 308-redirect fix; 4 sources confirmed.
+- [VPS mobile player sync](vps-mobile-player-sync.md) — VPS may retain an older WebVideoPlayer; back up and copy the player explicitly before Expo build, then verify bundle markers.
