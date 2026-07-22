@@ -2503,6 +2503,127 @@ async function getMitanimeSources(
 
 
 // ════════════════════════════════════════════════════════════════════
+//  SAnime scraper  (Arabic · MP4 مباشر من server.sanime.net)
+//  API: https://app.sanime.net/function/h10.php?page=
+//  UA gate: يجب إرسال User-Agent: IBRAHIMSEVEN لإظهار قائمة الحلقات
+// ════════════════════════════════════════════════════════════════════
+
+const SANIME_API  = "https://app.sanime.net/function/h10.php?page=";
+const SANIME_CDN  = "https://server.sanime.net/Video";
+const SANIME_UA   = "IBRAHIMSEVEN";
+const sanimeSrcCache = new Map<string, { sources: UnifiedSource[]; ts: number }>();
+
+async function getSAnimeSources(
+  title: string, english: string | null, ep: number,
+): Promise<UnifiedSource[]> {
+  const ck = `sanime:${(title + "|" + (english || "")).toLowerCase()}:${ep}`;
+  const hit = sanimeSrcCache.get(ck);
+  if (hit && Date.now() - hit.ts < SRC_TTL) return hit.sources;
+
+  try {
+    const query = english || title;
+    const searchR = await fetch(
+      `${SANIME_API}search&name=${encodeURIComponent(query)}`,
+      { headers: { "User-Agent": SANIME_UA }, signal: AbortSignal.timeout(10000) },
+    );
+    if (!searchR.ok) return [];
+    const searchData = await searchR.json() as any[];
+    if (!Array.isArray(searchData) || !searchData.length) return [];
+
+    // similarity match — أفضل نتيجة
+    let best: { score: number; item: any } = { score: 0, item: null };
+    for (const item of searchData) {
+      const n = String(item.name || "");
+      const s = Math.max(
+        english ? similarity(english, n) : 0,
+        similarity(title, n),
+      );
+      if (s > best.score) best = { score: s, item };
+    }
+    if (!best.item || best.score < 0.35) return [];
+
+    const animeId = String(best.item.id);
+
+    // جلب info + قائمة الحلقات
+    const infoR = await fetch(
+      `${SANIME_API}info&id=${animeId}`,
+      { headers: { "User-Agent": SANIME_UA }, signal: AbortSignal.timeout(10000) },
+    );
+    if (!infoR.ok) return [];
+    const info = await infoR.json() as any;
+
+    // ep هو 2D array — نُسطحه
+    const epPages: any[][] = Array.isArray(info?.ep) ? info.ep : [];
+    const allEps = epPages.flat();
+    const epObj = allEps.find((e: any) => Number(e?.epName) === ep || String(e?.epName) === String(ep));
+    if (!epObj) return [];
+
+    const sources: UnifiedSource[] = [];
+
+    // محاولة 1: URL مباشر (أسرع)
+    const directUrl = `${SANIME_CDN}/${animeId}/${ep}.mp4`;
+    try {
+      const head = await fetch(directUrl, {
+        method: "HEAD",
+        headers: { "User-Agent": SANIME_UA },
+        signal: AbortSignal.timeout(5000),
+      });
+      if (head.ok) {
+        sources.push({
+          name: "سـAnime · HD",
+          url: directUrl,
+          quality: "720p",
+          qualityRank: 11,
+          site: "sanime",
+          directUrl,
+          directType: "mp4",
+        });
+        sanimeSrcCache.set(ck, { sources, ts: Date.now() });
+        return sources;
+      }
+    } catch {}
+
+    // محاولة 2: openAnd fallback
+    try {
+      const epJson = JSON.stringify(epObj);
+      const epB64  = Buffer.from(encodeURIComponent(epJson)).toString("base64");
+      const openR  = await fetch(
+        `${SANIME_API}openAnd&id=${encodeURIComponent(epB64)}`,
+        { headers: { "User-Agent": SANIME_UA }, signal: AbortSignal.timeout(8000) },
+      );
+      if (openR.ok) {
+        const links = await openR.json() as any;
+        if (links?.hd && !links.hd.includes("sample-videos.com")) {
+          sources.push({
+            name: "سـAnime · HD",
+            url: links.hd,
+            quality: "720p",
+            qualityRank: 11,
+            site: "sanime",
+            directUrl: links.hd,
+            directType: "mp4",
+          });
+        }
+        if (links?.sd && !links.sd.includes("sample-videos.com")) {
+          sources.push({
+            name: "سـAnime · SD",
+            url: links.sd,
+            quality: "480p",
+            qualityRank: 8,
+            site: "sanime",
+            directUrl: links.sd,
+            directType: "mp4",
+          });
+        }
+      }
+    } catch {}
+
+    if (sources.length) sanimeSrcCache.set(ck, { sources, ts: Date.now() });
+    return sources;
+  } catch { return []; }
+}
+
+// ════════════════════════════════════════════════════════════════════
 //  TOONSTREAM.VIP scraper  (Japanese/multi-audio HLS)
 //  Episode slug: {anime-slug}-1x{ep}
 //  Player chain: episode page → outer server iframe → .Video iframe
@@ -8732,6 +8853,7 @@ router.get("/anime/fetch-source", async (req, res) => {
       case "animewitcher":(await race(getAnimeWitcherSources(title, english, ep, anilistId),SCRAPER_MS, [])).forEach(collectSrc); break;
       case "anineko":       (await race(getAninekoSources(title, english, ep),                SCRAPER_MS, [])).forEach(collectSrc); break;
       case "mitanime":      (await race(getMitanimeSources(title, english, ep),               SCRAPER_MS, [])).forEach(collectSrc); break;
+      case "sanime":        (await race(getSAnimeSources(title, english, ep),                 20_000,     [])).forEach(collectSrc); break;
       case "animephoenix":  await runExtract(await race(getAnimePhoenixSources(title, english, ep, isMovie), SCRAPER_MS, [])); break;
       // ── TMDB-native (StarCima محذوف من الأنمي — مصادر إنجليزية) ─────────────────────
       // case "starcima_anim": محذوف — يرسل صوتاً هندياً في قسم الأنمي
