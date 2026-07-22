@@ -1,13 +1,14 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import {
   View, Text, Pressable, Image, ScrollView,
-  StyleSheet, Platform, Animated, Easing, Linking,
+  StyleSheet, Platform, Animated, Easing,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { RiftPlayer, PlayerSource } from "@/components/RiftPlayer";
 import AnimHlsPlayer, { AnimHlsSource } from "@/components/AnimHlsPlayer";
+import WebVideoPlayer from "@/components/WebVideoPlayer";
 import { HiddenResolverWebView, ResolvedStream } from "@/components/HiddenResolverWebView";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -18,7 +19,7 @@ import * as ScreenOrientation from "expo-screen-orientation";
 
 /* ── Types ── */
 type Quality    = "1080p FHD" | "720p HD" | "360p SD";
-type Screen     = "loading" | "picker" | "native" | "embed" | "resolving";
+type Screen     = "loading" | "picker" | "native" | "embed" | "resolving" | "webplayer";
 
 /* ── مواقع محمية بـ Cloudflare/Turnstile يفشل الخادم (VPS) بجلب فيديوها المباشر —
    نحاول أولاً حلّها عبر WebView مخفي (IP سكني حقيقي للجهاز) قبل عرض بطاقة "يحتاج تطبيق أصلي" ── */
@@ -201,15 +202,7 @@ function ensureVpsProxy(url: string, headers: Record<string, string> | undefined
   return url; // لا Referer متاح — استخدم كما هو
 }
 
-/* ── فتح الفيديو مباشرةً في EZV Player (Android فقط) ── */
-function openInEzv(url: string) {
-  if (!url || Platform.OS !== "android") return;
-  /* intent:// يفتح EZV مباشرةً إن كان مثبَّتاً، وإلا يعود لـ URL المباشر */
-  const intentUrl = `intent:${url}#Intent;package=com.player.easy;type=video/mp4;end`;
-  Linking.openURL(intentUrl).catch(() => {
-    Linking.openURL(url).catch(() => {});
-  });
-}
+/* ── لا شيء هنا — EZV Player أصبح مشغّلاً داخلياً (WebVideoPlayer) ── */
 
 /* ── مصادر تُشغَّل native مباشرةً عبر RiftPlayer (seg-proxy يُعيد روابط مطلقة الآن) ── */
 
@@ -934,6 +927,35 @@ export default function WatchScreen() {
     );
   }
 
+  /* ══════════════ EZV — WebVideoPlayer (مشغّل داخلي كامل) ══════════════ */
+  if (screen === "webplayer" && playingSrc) {
+    const webUrl = getPlayUrl(playingSrc);
+    return (
+      <WebVideoPlayer
+        url={webUrl}
+        title={displayTitle}
+        episode={epNum}
+        totalEps={totalEpsCount}
+        subtitleUrl={playingSrc.subtitleUrl || globalSubUrl}
+        initialPosition={resumeTime}
+        qualityLabel={getSrcQuality(playingSrc)}
+        onBack={() => { saveProgress(); setScreen("picker"); }}
+        onProgress={(pos, dur) => {
+          lastTimeRef.current = pos;
+          if (pos > 10) AsyncStorage.setItem(progressKey, String(Math.floor(pos))).catch(() => {});
+          if (dur > 0 && anime) addToHistory({
+            animeId: parseInt(anime), ep: epNum,
+            title: titleStr, english: englishStr,
+            thumbnail: coverUrl || (anime ? `https://img.anili.st/media/${anime}` : ""),
+            position: pos, duration: dur, updatedAt: Date.now(),
+          });
+        }}
+        onNextEpisode={() => goEp(epNum + 1, true)}
+        onPrevEpisode={epNum > 1 ? () => goEp(epNum - 1) : undefined}
+      />
+    );
+  }
+
   /* ══════════════ PICKER ══════════════ */
   const allSrcs = [...directSrcs, ...embedSrcs];
 
@@ -1078,15 +1100,15 @@ export default function WatchScreen() {
         )}
 
 
-        {/* ── EZV Player — فتح في المشغّل الخارجي (Android فقط) ── */}
-        {Platform.OS === "android" && directSrcs.length > 0 && (
+        {/* ── EZV Player — مشغّل داخلي كامل WebView + HLS ── */}
+        {directSrcs.length > 0 && (
           <Pressable
             style={d.ezvBtn}
-            onPress={() => openInEzv(getPlayUrl(directSrcs[0]))}
+            onPress={() => { setPlayingSrc(directSrcs[0]); setScreen("webplayer"); }}
           >
             <Ionicons name="tv" size={16} color="#c4b5fd" />
-            <Text style={d.ezvBtnText}>فتح بـ EZV Player</Text>
-            <View style={d.ezvBadge}><Text style={d.ezvBadgeText}>خارجي</Text></View>
+            <Text style={d.ezvBtnText}>EZV Player</Text>
+            <View style={d.ezvBadge}><Text style={d.ezvBadgeText}>داخلي</Text></View>
           </Pressable>
         )}
 
