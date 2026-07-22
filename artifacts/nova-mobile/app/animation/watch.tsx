@@ -142,6 +142,15 @@ function getLabelShort(label: string): string {
   return label?.split(" ")[0] || "مصدر";
 }
 
+/* ── فتح الفيديو مباشرةً في EZV Player (Android فقط) ── */
+function openInEzv(url: string) {
+  if (!url || Platform.OS !== "android") return;
+  const intentUrl = `intent:${url}#Intent;package=com.player.easy;type=video/mp4;end`;
+  Linking.openURL(intentUrl).catch(() => {
+    Linking.openURL(url).catch(() => {});
+  });
+}
+
 /* ── Poster image with error fallback ── */
 function AnimPosterImg({ uri, type }: { uri: string; type: string }) {
   const [err, setErr] = useState(false);
@@ -957,6 +966,18 @@ export default function AnimationWatchScreen() {
           </View>
         )}
 
+        {/* ── EZV Player — فتح في المشغّل الخارجي (Android فقط) ── */}
+        {Platform.OS === "android" && directSrcs.length > 0 && (
+          <Pressable
+            style={w.ezvBtn}
+            onPress={() => openInEzv(getPlayUrl(directSrcs[0]))}
+          >
+            <Ionicons name="tv" size={16} color="#c4b5fd" />
+            <Text style={w.ezvBtnText}>فتح بـ EZV Player</Text>
+            <View style={w.ezvBadge}><Text style={w.ezvBadgeText}>خارجي</Text></View>
+          </Pressable>
+        )}
+
         {/* Empty state */}
         {!loading && totalDirect === 0 && totalEmbed === 0 && (
           <View style={w.empty}>
@@ -1082,4 +1103,10 @@ const w = StyleSheet.create({
   subLangBtnActive: { backgroundColor: "rgba(139,92,246,0.25)", borderColor: "rgba(139,92,246,0.60)" },
   subLangText: { color: "rgba(255,255,255,0.45)", fontFamily: "Cairo_700Bold", fontSize: 12 },
   subLangTextActive: { color: "#c4b5fd" },
+
+  /* EZV Player */
+  ezvBtn:       { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, marginHorizontal: 16, marginTop: 4, marginBottom: 4, paddingVertical: 14, borderRadius: 14, backgroundColor: "rgba(124,58,237,0.15)", borderWidth: 1, borderColor: "rgba(139,92,246,0.32)" },
+  ezvBtnText:   { fontSize: 14, fontFamily: "Cairo_700Bold", color: "#c4b5fd" },
+  ezvBadge:     { paddingHorizontal: 7, paddingVertical: 2, borderRadius: 8, backgroundColor: "rgba(139,92,246,0.22)", borderWidth: 1, borderColor: "rgba(139,92,246,0.38)" },
+  ezvBadgeText: { fontSize: 9, fontFamily: "Cairo_700Bold", color: "rgba(196,181,253,0.85)" },
 });
