@@ -11908,9 +11908,9 @@ async function getSAnimeSources(
       });
       if (headRes.ok) {
         out.push({
-          name:        "SAnime · HD",
+          name:        "SAnime · FHD",
           url:         directHD,
-          quality:     "HD",
+          quality:     "FHD",
           qualityRank: 14,
           site:        "sanime",
           directUrl:   proxiedHD,
@@ -11927,10 +11927,10 @@ async function getSAnimeSources(
           });
           if (sdHead.ok) {
             out.push({
-              name:        "SAnime · SD",
+              name:        "SAnime · HD",
               url:         directSD,
-              quality:     "SD",
-              qualityRank: 6,
+              quality:     "HD",
+              qualityRank: 9,
               site:        "sanime",
               directUrl:   proxiedSD,
               directType:  "mp4",
@@ -11958,9 +11958,9 @@ async function getSAnimeSources(
         const isBad = (u: string) => !u || u.includes("sample-videos.com");
         if (!isBad(hdUrl)) {
           out.push({
-            name:        "SAnime · HD",
+            name:        "SAnime · FHD",
             url:         hdUrl,
-            quality:     "HD",
+            quality:     "FHD",
             qualityRank: 14,
             site:        "sanime",
             directUrl:   `/api/anime/video-proxy?url=${encodeURIComponent(hdUrl)}&ref=${encodeURIComponent(SANIME_REF)}`,
@@ -11971,10 +11971,10 @@ async function getSAnimeSources(
         }
         if (!isBad(sdUrl)) {
           out.push({
-            name:        "SAnime · SD",
+            name:        "SAnime · HD",
             url:         sdUrl,
-            quality:     "SD",
-            qualityRank: 6,
+            quality:     "HD",
+            qualityRank: 9,
             site:        "sanime",
             directUrl:   `/api/anime/video-proxy?url=${encodeURIComponent(sdUrl)}&ref=${encodeURIComponent(SANIME_REF)}`,
             directType:  "mp4",
