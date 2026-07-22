@@ -1,12 +1,13 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import {
   View, Text, Pressable, Image, ScrollView, StyleSheet,
-  Platform, Dimensions, Animated, Easing, ActivityIndicator, Linking,
+  Platform, Dimensions, Animated, Easing, ActivityIndicator,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import AnimHlsPlayer, { AnimHlsSource } from "@/components/AnimHlsPlayer";
 import RiftPlayer, { PlayerSource } from "@/components/RiftPlayer";
+import WebVideoPlayer from "@/components/WebVideoPlayer";
 import { HiddenResolverWebView, ResolvedStream } from "@/components/HiddenResolverWebView";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -19,7 +20,7 @@ const { width: W, height: H } = Dimensions.get("window");
 
 /* ── Types ── */
 type Quality = "1080p FHD" | "720p HD" | "360p SD";
-type Screen = "loading" | "picker" | "native" | "embed" | "resolving";
+type Screen = "loading" | "picker" | "native" | "embed" | "resolving" | "webplayer";
 
 interface AnimSrc {
   url?: string;
@@ -142,14 +143,7 @@ function getLabelShort(label: string): string {
   return label?.split(" ")[0] || "مصدر";
 }
 
-/* ── فتح الفيديو مباشرةً في EZV Player (Android فقط) ── */
-function openInEzv(url: string) {
-  if (!url || Platform.OS !== "android") return;
-  const intentUrl = `intent:${url}#Intent;package=com.player.easy;type=video/mp4;end`;
-  Linking.openURL(intentUrl).catch(() => {
-    Linking.openURL(url).catch(() => {});
-  });
-}
+/* ── لا شيء هنا — EZV Player أصبح مشغّلاً داخلياً (WebVideoPlayer) ── */
 
 /* ── Poster image with error fallback ── */
 function AnimPosterImg({ uri, type }: { uri: string; type: string }) {
@@ -656,7 +650,7 @@ export default function AnimationWatchScreen() {
 
   /* ── Handle back ── */
   const handleBack = useCallback(() => {
-    if (screen === "native" || screen === "embed") {
+    if (screen === "native" || screen === "embed" || screen === "webplayer") {
       setScreen("picker");
       return;
     }
@@ -844,6 +838,34 @@ export default function AnimationWatchScreen() {
     );
   }
 
+  /* ═══════════════════ EZV — WebVideoPlayer (مشغّل داخلي كامل) ═══════════════════ */
+  if (screen === "webplayer" && playingSrc) {
+    const webUrl = getPlayUrl(playingSrc);
+    const activeSubUrl = subLang === "ar" ? globalArSubUrl : subLang === "en" ? globalEnSubUrl : undefined;
+    return (
+      <WebVideoPlayer
+        url={webUrl}
+        title={titleStr}
+        episode={type !== "movie" ? ep : undefined}
+        subtitleUrl={playingSrc.subtitleUrl || activeSubUrl}
+        initialPosition={resumeTime}
+        qualityLabel={getSrcQuality(playingSrc)}
+        onBack={() => { handleTimeUpdate(lastTimeRef.current); setScreen("picker"); }}
+        onProgress={(pos, _dur) => handleTimeUpdate(pos)}
+        onNextEpisode={type === "tv" ? () => {
+          const t = encodeURIComponent(titleStr);
+          const p = encodeURIComponent(posterUrl);
+          router.replace(`/animation/watch?id=${tmdbId}&type=${type}&ep=${ep + 1}&season=${season}&title=${t}&poster=${p}&autoplay=1`);
+        } : undefined}
+        onPrevEpisode={type === "tv" && ep > 1 ? () => {
+          const t = encodeURIComponent(titleStr);
+          const p = encodeURIComponent(posterUrl);
+          router.replace(`/animation/watch?id=${tmdbId}&type=${type}&ep=${ep - 1}&season=${season}&title=${t}&poster=${p}&autoplay=1`);
+        } : undefined}
+      />
+    );
+  }
+
   /* ═══════════════════ SOURCE PICKER ═══════════════════ */
   const totalDirect = directSrcs.length;
   const totalEmbed = embedSrcs.length;
@@ -966,15 +988,15 @@ export default function AnimationWatchScreen() {
           </View>
         )}
 
-        {/* ── EZV Player — فتح في المشغّل الخارجي (Android فقط) ── */}
-        {Platform.OS === "android" && directSrcs.length > 0 && (
+        {/* ── EZV Player — مشغّل داخلي كامل WebView + HLS ── */}
+        {directSrcs.length > 0 && (
           <Pressable
             style={w.ezvBtn}
-            onPress={() => openInEzv(getPlayUrl(directSrcs[0]))}
+            onPress={() => { setPlayingSrc(directSrcs[0]); setScreen("webplayer"); }}
           >
             <Ionicons name="tv" size={16} color="#c4b5fd" />
-            <Text style={w.ezvBtnText}>فتح بـ EZV Player</Text>
-            <View style={w.ezvBadge}><Text style={w.ezvBadgeText}>خارجي</Text></View>
+            <Text style={w.ezvBtnText}>EZV Player</Text>
+            <View style={w.ezvBadge}><Text style={w.ezvBadgeText}>داخلي</Text></View>
           </Pressable>
         )}
 
