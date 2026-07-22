@@ -274,7 +274,7 @@ function SrcRow({ src, idx, onPlay }: { src: AnimSrc; idx: number; onPlay: (s: A
 /* ══════════════════════════════════════════════════════════════ */
 export default function AnimationWatchScreen() {
   const params = useLocalSearchParams<{
-    id: string; type: string; ep: string; season: string; title: string; poster: string; etitle?: string; autoplay?: string; year?: string; year?: string;
+    id: string; type: string; ep: string; season: string; title: string; poster: string; etitle?: string; autoplay?: string;
   }>();
   const router = useRouter();
   const insets = useSafeAreaInsets();
@@ -288,7 +288,6 @@ export default function AnimationWatchScreen() {
   const posterUrl = params.poster ? decodeURIComponent(params.poster) : "";
   const epTitle   = params.etitle ? decodeURIComponent(params.etitle) : undefined;
   const autoplay  = params.autoplay === "1";
-  const yearStr   = params.year || "";
 
   const [screen, setScreen]       = useState<Screen>("picker");
   const [sources, setSources]     = useState<AnimSrc[]>([]);
@@ -447,7 +446,7 @@ export default function AnimationWatchScreen() {
     const clientTimeout = setTimeout(() => myAbort.abort(), 40_000);
 
     const base = getBaseUrl();
-    const url = `${base}/api/animation/sources-stream?title=${encodeURIComponent(titleStr)}&type=${type}&id=${tmdbId}&ep=${ep}&season=${season}${yearStr ? "&year="+encodeURIComponent(yearStr) : ""}`;
+    const url = `${base}/api/animation/sources-stream?title=${encodeURIComponent(titleStr)}&type=${type}&id=${tmdbId}&ep=${ep}&season=${season}`;
     const freshSrcs: AnimSrc[] = []; // تتبع المصادر الجديدة من SSE لحفظها
 
     try {
