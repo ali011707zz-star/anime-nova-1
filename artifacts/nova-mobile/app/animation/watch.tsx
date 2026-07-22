@@ -5,7 +5,7 @@ import {
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
-import AnimHlsPlayer, { AnimHlsSource } from "@/components/AnimHlsPlayer";
+// AnimHlsPlayer replaced by RiftPlayer (expo-video native ExoPlayer/AVPlayer)
 import RiftPlayer, { PlayerSource } from "@/components/RiftPlayer";
 // WebVideoPlayer removed — Rift Player is the only internal player
 import { HiddenResolverWebView, ResolvedStream } from "@/components/HiddenResolverWebView";
@@ -313,7 +313,7 @@ export default function AnimationWatchScreen() {
   /* تجميد مصادر المشغّل لحظة دخول التشغيل — يمنع مصادر SSE الجديدة التي تصل أثناء
      التشغيل الفعلي من إعادة كتابة مصفوفة sources الممرَّرة لـ RiftPlayer، وهو ما كان
      يُسبِّب توقف التشغيل والعودة غير المتوقعة لشاشة الـ picker. */
-  const [frozenSources, setFrozenSources] = useState<AnimHlsSource[]>([]);
+  const [frozenSources, setFrozenSources] = useState<PlayerSource[]>([]);
 
   const progressKey   = `anim-wp-${tmdbId}-${type}-${season}-${ep}`;
   /* كاش المصادر المحلي لفتح فوري في المرة الثانية */
@@ -565,7 +565,7 @@ export default function AnimationWatchScreen() {
   }, [screen]);
 
   /* ── تجميد المصادر لحظة دخول المشغّل، ومسحها عند الخروج (يحل مشكلة العودة للـ picker).
-     — append فقط أثناء التشغيل: لا نُزيح المصادر الحالية حتى لا يتأثر AnimHlsPlayer. ── */
+     — append فقط أثناء التشغيل: لا نُزيح المصادر الحالية حتى لا يتأثر RiftPlayer. ── */
   useEffect(() => {
     if (screen === "native") {
       setFrozenSources(prev => {
@@ -623,9 +623,10 @@ export default function AnimationWatchScreen() {
     "360p SD":   directSrcs.filter(s => getSrcQuality(s) === "360p SD"),
   }), [directSrcs]);
 
-  /* Build AnimHlsPlayer sources from directSrcs
-     — نمرر rawUrl للـ WebView: المتصفح يجلب الـ HLS بـ IP الجهاز → يتجاوز حجب CDN للـ VPS */
-  const animHlsSources = useMemo((): AnimHlsSource[] => {
+  /* Build RiftPlayer sources from directSrcs
+     — نمرر rawUrl مباشرةً مع headers: ExoPlayer/AVPlayer يجلب HLS بـ IP الجهاز (سكني)
+       مع إرسال Referer/Origin الصحيح مع كل segment → يتجاوز حجب CDN بالكامل */
+  const animHlsSources = useMemo((): PlayerSource[] => {
     const base = getBaseUrl();
     const activeSubUrl = subLang === "ar" ? globalArSubUrl : subLang === "en" ? globalEnSubUrl : undefined;
     const NO_SUB_PREFIXES = ["aflaam", "ArabSeed", "arabseed", "SeePanal", "seepanel", "seepan"];
@@ -635,15 +636,17 @@ export default function AnimationWatchScreen() {
       const resolvedSubUrl = wantsNoSub ? undefined : (s.subtitleUrl
         ? resolveUrl(s.subtitleUrl, base)
         : activeSubUrl);
-      // AnimHlsPlayer: raw CDN URL — WebView يجلبه بـ IP الجهاز (لا يُحجب بـ CDN)
+      // RiftPlayer (ExoPlayer/AVPlayer): raw CDN URL + headers — الجهاز يجلب بـ IP سكني
       const rawUrl = s.url || s.directUrl || s.proxyUrl || "";
       const finalUrl = rawUrl.startsWith("/") ? base + rawUrl : rawUrl;
+      // استخراج headers: أولوية للـ headers المُرسَلة من الخادم، ثم استخراج من proxy URL
+      const hdrs = s.headers || extractHeadersFromProxy(rawUrl);
       return {
         url: finalUrl,
         label: lbl || "مصدر",
-        quality: getSrcQuality(s),
+        quality: getSrcQuality(s) as PlayerSource["quality"],
         subtitleUrl: resolvedSubUrl,
-        ...(s.headers ? { headers: s.headers } : {}),
+        ...(hdrs && Object.keys(hdrs).length > 0 ? { headers: hdrs } : {}),
       };
     }).filter(s => !!s.url);
   }, [directSrcs, globalArSubUrl, globalEnSubUrl, subLang]);
@@ -717,7 +720,7 @@ export default function AnimationWatchScreen() {
     );
   }
 
-  /* ═══════════════════ ANIMHLS PLAYER (WebView + hls.js — المشغّل الداخلي الكامل) ═══════════════════ */
+  /* ═══════════════════ RIFT PLAYER (expo-video native — ExoPlayer/AVPlayer) ═══════════════════ */
   const playerSources = frozenSources.length > 0 ? frozenSources : animHlsSources;
   if (screen === "native" && playerSources.length > 0) {
     const _playUrl = playingSrc?.url || "";
@@ -725,14 +728,16 @@ export default function AnimationWatchScreen() {
       s => s.url === _playUrl || (_playUrl && s.url.split("?")[0] === _playUrl.split("?")[0])
     ));
     return (
-      <AnimHlsPlayer
+      <RiftPlayer
         sources={playerSources}
         initialSourceIndex={startIdx}
         title={titleStr}
         episode={type !== "movie" ? ep : undefined}
-        episodeTitle={epTitle}
         initialPosition={resumeTime}
-        onBack={() => setScreen("picker")}
+        onBack={() => {
+          handleTimeUpdate(lastTimeRef.current);
+          setScreen("picker");
+        }}
         onProgress={(pos, _dur) => handleTimeUpdate(pos)}
         onError={() => setScreen("picker")}
         onNextEpisode={type === "tv" ? () => {

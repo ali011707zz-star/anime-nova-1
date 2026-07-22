@@ -518,11 +518,13 @@ export function RiftPlayer({
   /* ─── expo-video player ─── */
   /* نستخدم ref ثابت للـ VideoSource الأولي حتى لا يُعيد useVideoPlayer
      تهيئة المشغّل عند تغيير srcIdx (التبديل يتم عبر player.replace فقط).
-     نمرّر URL string مباشرةً (بدون headers) — جميع المصادر تمرّ عبر VPS proxy
-     الذي يُضيف Referer/Origin داخلياً، لذا لا حاجة لإرسالها من ExoPlayer.
-     تمرير { uri, headers } يُسبِّب فشلاً صامتاً في بعض إصدارات expo-video native. */
+     expo-video v3 يدعم { uri, headers } بشكل كامل في ExoPlayer/AVPlayer —
+     نمرر headers (Referer/Origin) مع كل request بما فيها الـ HLS segments،
+     مما يتيح للجهاز (IP سكني) جلب المحتوى مباشرةً من CDN بدون VPS proxy. */
   const _initSrc = sources[initialSourceIndex ?? 0];
-  const _initVideoSrcRef = useRef<string>(_initSrc?.url || "");
+  const _initVideoSrcRef = useRef<{ uri: string; headers?: Record<string,string> } | null>(
+    _initSrc?.url ? { uri: _initSrc.url, ...((_initSrc.headers && Object.keys(_initSrc.headers).length > 0) ? { headers: _initSrc.headers } : {}) } : null
+  );
   const player = useVideoPlayer(_initVideoSrcRef.current || null, (p) => {
     p.loop = false;
     p.volume = 1;
@@ -1174,8 +1176,10 @@ export function RiftPlayer({
     setWhisperStatus("idle");
     setWhisperLang("");
     try {
-      /* نمرّر URL string فقط — VPS proxy يُضيف Referer/Origin داخلياً */
-      player.replace(newSrc.url as any);
+      /* نمرّر { uri, headers } — ExoPlayer/AVPlayer يُرسل الـ headers مع كل segment */
+      const src: any = { uri: newSrc.url };
+      if (newSrc.headers && Object.keys(newSrc.headers).length > 0) src.headers = newSrc.headers;
+      player.replace(src);
       /* play() is triggered in statusChange → readyToPlay once the stream is buffered */
     } catch {}
   }, [player, sources]);
