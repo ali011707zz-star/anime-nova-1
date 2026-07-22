@@ -8,7 +8,7 @@ import { LinearGradient } from "expo-linear-gradient";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { RiftPlayer, PlayerSource } from "@/components/RiftPlayer";
 import AnimHlsPlayer, { AnimHlsSource } from "@/components/AnimHlsPlayer";
-import WebVideoPlayer from "@/components/WebVideoPlayer";
+// WebVideoPlayer removed — Rift Player is the only internal player
 import { HiddenResolverWebView, ResolvedStream } from "@/components/HiddenResolverWebView";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -927,35 +927,7 @@ export default function WatchScreen() {
     );
   }
 
-  /* ══════════════ EZV — WebVideoPlayer (مشغّل داخلي كامل) ══════════════ */
-  if (screen === "webplayer" && playingSrc) {
-    const webUrl = getPlayUrl(playingSrc);
-    return (
-      <WebVideoPlayer
-        url={webUrl}
-        title={displayTitle}
-        episode={epNum}
-        totalEps={totalEpsCount}
-        subtitleUrl={playingSrc.subtitleUrl || globalSubUrl}
-        headers={playingSrc.headers}
-        initialPosition={resumeTime}
-        qualityLabel={getSrcQuality(playingSrc)}
-        onBack={() => { saveProgress(); setScreen("picker"); }}
-        onProgress={(pos, dur) => {
-          lastTimeRef.current = pos;
-          if (pos > 10) AsyncStorage.setItem(progressKey, String(Math.floor(pos))).catch(() => {});
-          if (dur > 0 && anime) addToHistory({
-            animeId: parseInt(anime), ep: epNum,
-            title: titleStr, english: englishStr,
-            thumbnail: coverUrl || (anime ? `https://img.anili.st/media/${anime}` : ""),
-            position: pos, duration: dur, updatedAt: Date.now(),
-          });
-        }}
-        onNextEpisode={() => goEp(epNum + 1, true)}
-        onPrevEpisode={epNum > 1 ? () => goEp(epNum - 1) : undefined}
-      />
-    );
-  }
+  /* EZV Player removed — Rift Player is the only internal player */
 
   /* ══════════════ PICKER ══════════════ */
   const allSrcs = [...directSrcs, ...embedSrcs];
@@ -1101,17 +1073,7 @@ export default function WatchScreen() {
         )}
 
 
-        {/* ── EZV Player — مشغّل داخلي كامل WebView + HLS ── */}
-        {directSrcs.length > 0 && (
-          <Pressable
-            style={d.ezvBtn}
-            onPress={() => { setPlayingSrc(directSrcs[0]); setScreen("webplayer"); }}
-          >
-            <Ionicons name="tv" size={16} color="#c4b5fd" />
-            <Text style={d.ezvBtnText}>EZV Player</Text>
-            <View style={d.ezvBadge}><Text style={d.ezvBadgeText}>داخلي</Text></View>
-          </Pressable>
-        )}
+        {/* EZV Player button removed */}
 
         {/* ── Loading indicator while more sources stream in ── */}
         {loading && allSrcs.length > 0 && (
