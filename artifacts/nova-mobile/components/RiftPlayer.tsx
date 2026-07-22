@@ -516,14 +516,18 @@ export function RiftPlayer({
   const loadTimeoutRef    = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   /* ─── expo-video player ─── */
-  /* نستخدم ref ثابت للـ VideoSource الأولي حتى لا يُعيد useVideoPlayer
-     تهيئة المشغّل عند تغيير srcIdx (التبديل يتم عبر player.replace فقط).
-     نمرّر URL string مباشرةً (بدون headers) — جميع المصادر تمرّ عبر VPS proxy
-     الذي يُضيف Referer/Origin داخلياً، لذا لا حاجة لإرسالها من ExoPlayer.
-     تمرير { uri, headers } يُسبِّب فشلاً صامتاً في بعض إصدارات expo-video native. */
+  /* طريقة EZV Player: نمرر { uri, headers } مباشرةً لـ ExoPlayer/AVPlayer —
+     ExoPlayer يُرسل Referer/Origin نيتياً بدون VPS proxy → CDN يسمح (IP الجهاز السكني).
+     نستخدم ref ثابت للـ VideoSource الأولي؛ التبديل يتم عبر player.replace فقط. */
   const _initSrc = sources[initialSourceIndex ?? 0];
-  const _initVideoSrcRef = useRef<string>(_initSrc?.url || "");
-  const player = useVideoPlayer(_initVideoSrcRef.current || null, (p) => {
+  /** بناء VideoSource بـ headers إن وُجدت — نفس طريقة EZV Player مع ExoPlayer */
+  function buildVideoSrc(src?: PlayerSource): string | { uri: string; headers: Record<string, string> } | null {
+    if (!src?.url) return null;
+    if (src.headers && Object.keys(src.headers).length > 0) return { uri: src.url, headers: src.headers };
+    return src.url;
+  }
+  const _initVideoSrcRef = useRef<ReturnType<typeof buildVideoSrc>>(buildVideoSrc(_initSrc));
+  const player = useVideoPlayer((_initVideoSrcRef.current as any) || null, (p) => {
     p.loop = false;
     p.volume = 1;
     p.play();
