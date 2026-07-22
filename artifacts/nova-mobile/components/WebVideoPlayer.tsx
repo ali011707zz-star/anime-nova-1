@@ -5,6 +5,7 @@
 import React, { useRef, useCallback } from "react";
 import { View, StyleSheet, StatusBar, Platform } from "react-native";
 import WebView, { WebViewMessageEvent } from "react-native-webview";
+import { HLS_JS_INLINE } from "@/assets/hlsJsContent";
 
 export interface WebPlayerProps {
   url: string;
@@ -36,13 +37,16 @@ function buildHtml(p: WebPlayerProps): string {
   const safeSubUrl = subtitleUrl.replace(/'/g, "\\'");
   const safeQuality = qualityLabel.replace(/'/g, "\\'");
 
+  /* hls.js مضمَّن inline مثل AnimHlsPlayer — لا CDN، لا شبكة خارجية */
+  const hlsScript = HLS_JS_INLINE;
+
   return `<!DOCTYPE html>
 <html lang="ar" dir="rtl">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
 <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;700;900&display=swap" rel="stylesheet">
-<script src="https://cdn.jsdelivr.net/npm/hls.js@1.6.2/dist/hls.min.js"></script>
+<script>${hlsScript}</script>
 <style>
 *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent;outline:none}
 html,body{width:100%;height:100%;overflow:hidden;background:#000;font-family:'Cairo',sans-serif;user-select:none}
@@ -764,33 +768,36 @@ function loadSrc() {
     } catch(e) {}
 
     const hls = new Hls({
-      enableWorker: true,
+      enableWorker: false,           // مطلوب داخل WebView — لا SharedArrayBuffer
       startLevel: -1,
       abrEwmaDefaultEstimate: bwEstimate,
-      abrEwmaFastLive: 3,
       abrBandWidthFactor: 0.90,
       abrBandWidthUpFactor: 0.80,
       capLevelToPlayerSize: true,
-      // ── Buffer: مُحسَّن للجوال مع VPS proxy ──
       maxBufferLength: 30,
-      maxMaxBufferLength: 120,
+      maxMaxBufferLength: 60,
       backBufferLength: 15,
-      maxBufferSize: 80 * 1024 * 1024, // 80MB
       maxBufferHole: 0.5,
-      // ── Prefetch: يبدأ تحميل السيقمنت القادم مبكراً ──
       startFragPrefetch: true,
-      progressive: true,
-      // ── Retry: يعيد المحاولة تلقائياً عند فشل الشبكة ──
-      fragLoadingMaxRetry: 5,
+      fragLoadingMaxRetry: 6,
       fragLoadingRetryDelay: 500,
-      fragLoadingMaxRetryTimeout: 12000,
+      fragLoadingTimeOut: 20000,
+      manifestLoadingTimeOut: 15000,
       manifestLoadingMaxRetry: 4,
-      manifestLoadingRetryDelay: 800,
-      maxStarvationDelay: 6,
-      maxLoadingDelay: 6,
+      levelLoadingTimeOut: 15000,
       nudgeMaxRetry: 20,
       enableCEA708Captions: false,
-      xhrSetup: function(xhr) { xhr.timeout = 20000; },
+      xhrSetup: function(xhr, u) {
+        xhr.timeout = 20000;
+        try {
+          // أضف Referer/Origin من domain المصدر لتجاوز قيود CDN
+          var origin = new URL(SRC).origin;
+          if (origin) {
+            xhr.setRequestHeader('Referer', origin + '/');
+            xhr.setRequestHeader('Origin', origin);
+          }
+        } catch(e) {}
+      },
     });
     hlsRef = hls;
     hls.loadSource(SRC);
