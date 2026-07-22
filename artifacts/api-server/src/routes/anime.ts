@@ -11685,12 +11685,32 @@ async function getAnimeSlayerSources(
       for (const q of queries) {
         const data = await anslayerGet("animes/get-published-animes", { list_type: "filter", anime_name: q, page: 1 });
         const list: any[] = data?.response?.data || [];
+        // AnimeSlayer يعرض أسماء عربية — similarity() بين لاتيني وعربي = 0 دائماً.
+        // الحل: نستخدم asciiSimilarity على الـ slug الضمني + نقبل أول نتيجة إذا كانت ≤3
+        // (API البحث هو المرشِّح الحقيقي، لذا نثق بنتائجه المحددة).
+        let firstCandidate: { score: number; id: number; name: string } | null = null;
         for (const item of list) {
-          const s = similarity(q, String(item.anime_name || ""));
-          if (s > 0.55 && (!best || s > best.score)) {
+          const nameStr = String(item.anime_name || "");
+          const nameEn  = String(item.anime_name_en || item.anime_name_english || "");
+          const s = Math.max(
+            similarity(q, nameStr),
+            nameEn ? similarity(q, nameEn) : 0,
+            asciiSimilarity(q, nameStr),
+            asciiSimilarity(q, nameEn),
+          );
+          if (s > 0.30 && (!best || s > best.score)) {
             best = { score: s, id: parseInt(item.anime_id, 10), name: item.anime_name };
           }
+          if (!firstCandidate) {
+            firstCandidate = { score: s, id: parseInt(item.anime_id, 10), name: item.anime_name };
+          }
         }
+        // إذا فشل شرط التشابه (أسماء عربية مقابل عنوان لاتيني) — نأخذ أول نتيجة
+        // بشرط أن البحث أعاد نتائج محددة (≤3) دلالةً على دقة البحث
+        if (!best && firstCandidate && list.length <= 3) {
+          best = firstCandidate;
+        }
+        if (best) break; // وجدنا نتيجة — لا داعي لمزيد من الاستعلامات
       }
     }
     if (!best) return out;
@@ -11721,7 +11741,7 @@ async function getAnimeSlayerSources(
           const direct = await extractMediafireDirect(link);
           if (direct) {
             out.push({
-              name: "AnimeSlayer · MediaFire", url: link, quality: "HD", qualityRank: 12,
+              name: "AnimeSlayer · MediaFire", url: link, quality: "FHD", qualityRank: 12,
               site: "anslayer",
               directUrl: `/api/anime/video-proxy?url=${encodeURIComponent(direct)}&ref=${encodeURIComponent("https://www.mediafire.com/")}`,
               directType: "mp4",
@@ -11743,14 +11763,22 @@ async function getAnimeSlayerSources(
 
             if (hlsMaster) {
               out.push({
-                name: "AnimeSlayer · OK.ru", url: link, quality: "HD", qualityRank: 11,
+                name: "AnimeSlayer · OK.ru", url: link, quality: "FHD", qualityRank: 11,
                 site: "anslayer",
                 directUrl: `/api/anime/hls-proxy?url=${encodeURIComponent(hlsMaster.url)}&ref=${encodeURIComponent("https://ok.ru/")}`,
                 directType: "hls",
               });
             } else if (bestMp4) {
+              // OK.ru name = height رقم ("1080","720","480","360") — نحوّله لتسمية واضحة
+              const okQuality = (() => {
+                const h = parseInt(bestMp4.name || "0", 10);
+                if (h >= 1080) return "FHD";
+                if (h >= 720)  return "HD";
+                if (h >= 480)  return "SD";
+                return bestMp4.name || "HD"; // الافتراضي HD لأن AS يستضيف 720p كحد أدنى
+              })();
               out.push({
-                name: "AnimeSlayer · OK.ru", url: link, quality: bestMp4.name || "SD", qualityRank: 10,
+                name: "AnimeSlayer · OK.ru", url: link, quality: okQuality, qualityRank: 10,
                 site: "anslayer",
                 directUrl: `/api/anime/video-proxy?url=${encodeURIComponent(bestMp4.url)}&ref=${encodeURIComponent("https://ok.ru/")}`,
                 directType: "mp4",
@@ -11768,7 +11796,7 @@ async function getAnimeSlayerSources(
             : link.includes("ok.ru") ? "OK.ru"
             : "External";
           out.push({
-            name: `AnimeSlayer · ${host}`, url: link, quality: "HD", qualityRank: 10,
+            name: `AnimeSlayer · ${host}`, url: link, quality: "FHD", qualityRank: 10,
             site: "anslayer",
             directUrl: extracted.type === "hls"
               ? `/api/anime/hls-proxy?url=${encodeURIComponent(extracted.url)}&ref=${encodeURIComponent(link)}`
@@ -11880,9 +11908,9 @@ async function getSAnimeSources(
       });
       if (headRes.ok) {
         out.push({
-          name:        "SAnime · HD",
+          name:        "SAnime · FHD",
           url:         directHD,
-          quality:     "HD",
+          quality:     "FHD",
           qualityRank: 14,
           site:        "sanime",
           directUrl:   proxiedHD,
@@ -11899,10 +11927,10 @@ async function getSAnimeSources(
           });
           if (sdHead.ok) {
             out.push({
-              name:        "SAnime · SD",
+              name:        "SAnime · HD",
               url:         directSD,
-              quality:     "SD",
-              qualityRank: 6,
+              quality:     "HD",
+              qualityRank: 9,
               site:        "sanime",
               directUrl:   proxiedSD,
               directType:  "mp4",
@@ -11930,9 +11958,9 @@ async function getSAnimeSources(
         const isBad = (u: string) => !u || u.includes("sample-videos.com");
         if (!isBad(hdUrl)) {
           out.push({
-            name:        "SAnime · HD",
+            name:        "SAnime · FHD",
             url:         hdUrl,
-            quality:     "HD",
+            quality:     "FHD",
             qualityRank: 14,
             site:        "sanime",
             directUrl:   `/api/anime/video-proxy?url=${encodeURIComponent(hdUrl)}&ref=${encodeURIComponent(SANIME_REF)}`,
@@ -11943,10 +11971,10 @@ async function getSAnimeSources(
         }
         if (!isBad(sdUrl)) {
           out.push({
-            name:        "SAnime · SD",
+            name:        "SAnime · HD",
             url:         sdUrl,
-            quality:     "SD",
-            qualityRank: 6,
+            quality:     "HD",
+            qualityRank: 9,
             site:        "sanime",
             directUrl:   `/api/anime/video-proxy?url=${encodeURIComponent(sdUrl)}&ref=${encodeURIComponent(SANIME_REF)}`,
             directType:  "mp4",

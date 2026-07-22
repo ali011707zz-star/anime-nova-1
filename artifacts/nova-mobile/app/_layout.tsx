@@ -49,8 +49,7 @@ function RootLayoutNav() {
       <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
       <Stack.Screen name="anime/[id]" options={{ headerShown: false, animation: "slide_from_bottom" }} />
       <Stack.Screen name="watch" options={{ headerShown: false, orientation: "all" }} />
-      <Stack.Screen name="animation/[type]/[id]" options={{ headerShown: false, animation: "slide_from_bottom" }} />
-      <Stack.Screen name="animation/watch" options={{ headerShown: false, orientation: "all" }} />
+      {/* animation screens disabled */}
       <Stack.Screen name="settings" options={{ headerShown: false }} />
       <Stack.Screen name="schedule" options={{ headerShown: false }} />
       <Stack.Screen name="profile" options={{ headerShown: false, animation: "slide_from_right" }} />
