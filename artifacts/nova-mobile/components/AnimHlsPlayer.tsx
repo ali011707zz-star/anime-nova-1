@@ -110,10 +110,11 @@ function bisectCue(cues: SubCue[], ct: number): SubCue | null {
 }
 
 /* ── hls.js HTML — يُشغَّل داخل WebView ──
-   ⚠️ الإصلاح الأساسي: post({k:'webview_init'}) يُرسَل داخل window.addEventListener('load', ...)
-      بعد اكتمال تحميل hls.js من CDN وليس قبله — هذا يمنع "hls_not_supported" الناتج
-      عن استدعاء NOVA_load قبل أن يُعرَّف كائن Hls. */
-const HLS_HTML = `<!DOCTYPE html>
+   hls.js مُضمَّن مباشرةً كـ <script> inline داخل HTML (لا CDN، لا injectedJavaScriptBeforeContentLoaded).
+   injectedJavaScriptBeforeContentLoaded مع 530KB يُسبِّب crash على Android بسبب OOM في WebView process.
+   الحل: source={{ html }} يحمّل hls.js كجزء من HTML → WebView يُعالجه كصفحة عادية بلا ضغط إضافي. */
+function buildHlsHtml(hlsJs: string): string {
+  return `<!DOCTYPE html>
 <html>
 <head>
 <meta charset="utf-8">
@@ -126,6 +127,9 @@ html,body{width:100%;height:100%;background:#000;overflow:hidden}
 </head>
 <body>
 <video id="v" playsinline autoplay webkit-playsinline x5-playsinline x5-video-player-type="h5"></video>
+<script>
+${hlsJs}
+</script>
 <script>
 var v=document.getElementById('v');
 var hls=null;
@@ -173,7 +177,6 @@ function loadSrc(url,ref){
       fragLoadingTimeOut:20000,
       manifestLoadingTimeOut:15000,
       levelLoadingTimeOut:15000,
-      /* xhrSetup: تمرير Referer/Origin للـ CDNs التي تتطلبها (Android WebView يسمح بذلك) */
       xhrSetup:function(xhr,u){
         try{
           if(ref){
@@ -202,7 +205,6 @@ function loadSrc(url,ref){
       v.play().catch(function(){});
     });
   } else if(v.canPlayType('application/vnd.apple.mpegurl')){
-    /* iOS native HLS */
     v.src=url;
     v.load();
     v.play().catch(function(){});
@@ -211,7 +213,6 @@ function loadSrc(url,ref){
   }
 }
 
-/* ── دوال مكشوفة لـ injectJavaScript (أكثر موثوقية من MessageEvent) ── */
 window.NOVA_load    = function(url,ref){ loadSrc(url,ref||''); };
 window.NOVA_seek    = function(t){ v.currentTime=t; post({k:'seeked',t:t}); };
 window.NOVA_play    = function(){ v.play().catch(function(){}); };
@@ -220,16 +221,14 @@ window.NOVA_speed   = function(s){ v.playbackRate=s; };
 window.NOVA_volume  = function(val){ v.volume=Math.max(0,Math.min(1,val)); };
 window.NOVA_mute    = function(m){ v.muted=!!m; };
 
-/* ── إشعار React Native بعد اكتمال تحميل hls.js (window.load) ──
-   ملاحظة: 'load' يُطلَق بعد تحميل جميع الـ resources الخارجية (بما فيها hls.js CDN)
-   على عكس DOMContentLoaded الذي يُطلَق قبل الـ scripts — هذا يضمن وجود Hls كائن عند
-   استدعاء NOVA_load لاحقاً. */
-window.addEventListener('load', function(){
-  post({k:'webview_init'});
-});
+/* hls.js مُحمَّل بشكل متزامن — Hls متاح الآن مباشرةً */
+post({k:'webview_init'});
 </script>
 </body>
 </html>`;
+}
+
+const HLS_HTML = buildHlsHtml(HLS_JS_INLINE);
 
 /* ── Spinning loader ── */
 function SpinRing({ size = 52 }: { size?: number }) {
@@ -808,7 +807,6 @@ export default function AnimHlsPlayer({
         bounces={false}
         cacheEnabled={false}
         incognito
-        injectedJavaScriptBeforeContentLoaded={HLS_JS_INLINE}
         onLoad={handleWebViewLoad}
         onMessage={handleMessage}
         onError={(e) => { console.error("[AnimHlsPlayer] WebView error:", e.nativeEvent); handleError(); }}
