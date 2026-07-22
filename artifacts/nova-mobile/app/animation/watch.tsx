@@ -848,6 +848,7 @@ export default function AnimationWatchScreen() {
         title={titleStr}
         episode={type !== "movie" ? ep : undefined}
         subtitleUrl={playingSrc.subtitleUrl || activeSubUrl}
+        headers={playingSrc.headers}
         initialPosition={resumeTime}
         qualityLabel={getSrcQuality(playingSrc)}
         onBack={() => { handleTimeUpdate(lastTimeRef.current); setScreen("picker"); }}

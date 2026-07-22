@@ -937,6 +937,7 @@ export default function WatchScreen() {
         episode={epNum}
         totalEps={totalEpsCount}
         subtitleUrl={playingSrc.subtitleUrl || globalSubUrl}
+        headers={playingSrc.headers}
         initialPosition={resumeTime}
         qualityLabel={getSrcQuality(playingSrc)}
         onBack={() => { saveProgress(); setScreen("picker"); }}

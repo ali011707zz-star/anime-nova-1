@@ -13,6 +13,8 @@ export interface WebPlayerProps {
   episode?: number;
   totalEps?: number;
   subtitleUrl?: string;
+  /** Headers required by the CDN (for example Referer/Origin). */
+  headers?: Record<string, string>;
   skipIntro?: { start: number; end: number };
   skipOutro?: { start: number; end: number };
   initialPosition?: number;
@@ -27,7 +29,7 @@ export interface WebPlayerProps {
 function buildHtml(p: WebPlayerProps): string {
   const {
     url = "", title = "", episode = 1, totalEps = 999,
-    subtitleUrl = "", qualityLabel = "",
+    subtitleUrl = "", qualityLabel = "", headers = {},
     skipIntro, skipOutro, initialPosition = 0,
   } = p;
 
@@ -36,6 +38,7 @@ function buildHtml(p: WebPlayerProps): string {
   const safeTitle  = title.replace(/'/g, "\\'");
   const safeSubUrl = subtitleUrl.replace(/'/g, "\\'");
   const safeQuality = qualityLabel.replace(/'/g, "\\'");
+  const safeHeaders = JSON.stringify(headers);
 
   /* hls.js مضمَّن inline مثل AnimHlsPlayer — لا CDN، لا شبكة خارجية */
   const hlsScript = HLS_JS_INLINE;
@@ -389,6 +392,7 @@ const SKIP_INTRO  = ${introJson};
 const SKIP_OUTRO  = ${outroJson};
 const RESUME_TIME = ${initialPosition};
 const SUB_URL     = ${JSON.stringify(subtitleUrl)};
+const REQUEST_HEADERS = ${safeHeaders};
 const EP_NUM      = ${episode};
 const TOTAL_EPS   = ${totalEps};
 
@@ -758,7 +762,17 @@ function cancelAutoPlay() {
 function loadSrc() {
   if (!SRC) return;
   loadingOvl.classList.remove('hidden');
-  if (Hls.isSupported()) {
+  // MP4 must go through the native video element. Passing it to hls.js
+  // makes some Android WebViews report a misleading manifest error.
+  const isMp4 = /\.mp4(?:[?#]|$)/i.test(SRC) ||
+    (SRC.indexOf('.mp4') !== -1 && !/\.m3u8(?:[?#]|$)/i.test(SRC));
+  if (isMp4) {
+    vid.src = SRC;
+    vid.load();
+    vid.play().catch(() => {});
+    return;
+  }
+  if (typeof Hls !== 'undefined' && Hls.isSupported()) {
     if (hlsRef) hlsRef.destroy();
     // ─── تقدير النطاق الترددي الأولي من Network Information API ───
     let bwEstimate = 3000000;
@@ -790,11 +804,21 @@ function loadSrc() {
       xhrSetup: function(xhr, u) {
         xhr.timeout = 20000;
         try {
-          // أضف Referer/Origin من domain المصدر لتجاوز قيود CDN
-          var origin = new URL(SRC).origin;
-          if (origin) {
-            xhr.setRequestHeader('Referer', origin + '/');
-            xhr.setRequestHeader('Origin', origin);
+          // Prefer headers supplied by the scraper; fall back to the source
+          // origin for older cached sources that have no header metadata.
+          var hasReferer = false;
+          Object.keys(REQUEST_HEADERS || {}).forEach(function(k) {
+            if (REQUEST_HEADERS[k]) {
+              xhr.setRequestHeader(k, REQUEST_HEADERS[k]);
+              if (k.toLowerCase() === 'referer') hasReferer = true;
+            }
+          });
+          if (!hasReferer) {
+            var origin = new URL(SRC).origin;
+            if (origin) {
+              xhr.setRequestHeader('Referer', origin + '/');
+              xhr.setRequestHeader('Origin', origin);
+            }
           }
         } catch(e) {}
       },
