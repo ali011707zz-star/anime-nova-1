@@ -7,7 +7,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import AnimHlsPlayer, { AnimHlsSource } from "@/components/AnimHlsPlayer";
 import RiftPlayer, { PlayerSource } from "@/components/RiftPlayer";
-import WebVideoPlayer from "@/components/WebVideoPlayer";
+// WebVideoPlayer removed — Rift Player is the only internal player
 import { HiddenResolverWebView, ResolvedStream } from "@/components/HiddenResolverWebView";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -792,21 +792,13 @@ export default function AnimationWatchScreen() {
               ? "بروتوكول HLS غير مدعوم في متصفح الويب — حمّل التطبيق للمشاهدة"
               : "مصدر الإطار لا يدعم تشغيل الويب مباشرةً"}
           </Text>
-          {playingSrc?.isEmbed && (
-            <Pressable
-              onPress={() => Linking.openURL(embedUrl)}
-              style={{ backgroundColor: "rgba(139,92,246,0.25)", borderRadius: 14, paddingHorizontal: 24, paddingVertical: 12, borderWidth: 1, borderColor: "rgba(139,92,246,0.4)", marginTop: 4 }}
-            >
-              <Text style={{ color: "#c4b5fd", fontFamily: "Cairo_700Bold", fontSize: 14 }}>فتح في المتصفح</Text>
-            </Pressable>
-          )}
           <Pressable onPress={() => setScreen("picker")} style={{ marginTop: 4 }}>
             <Text style={{ color: "rgba(255,255,255,0.35)", fontFamily: "Cairo_400Regular", fontSize: 13 }}>العودة للمصادر</Text>
           </Pressable>
         </View>
       );
     }
-    // Native: no WebView — show info card with option to open in browser
+    // Native: no WebView — show info card
     return (
       <View style={[w.container, { alignItems: "center", justifyContent: "center", gap: 16 }]}>
         <Pressable onPress={() => setScreen("picker")} style={[w.videoBackBtn, { position: "absolute", top: topPad + 4, right: 12 }]}>
@@ -816,21 +808,8 @@ export default function AnimationWatchScreen() {
           <Ionicons name="tv-outline" size={36} color="rgba(139,92,246,0.7)" />
         </View>
         <Text style={{ color: "#fff", fontFamily: "Cairo_700Bold", fontSize: 16, textAlign: "center" }}>
-          {playingSrc?.directType === "hls" ? "بث HLS — جاري التحميل" : "هذا المصدر يحتاج متصفحاً خارجياً"}
+          هذا المصدر يحتاج التطبيق الأصلي
         </Text>
-        <Text style={{ color: "rgba(255,255,255,0.45)", fontFamily: "Cairo_400Regular", fontSize: 13, textAlign: "center", paddingHorizontal: 32 }}>
-          {playingSrc?.isEmbed
-            ? "مصدر الإطار لا يدعم التشغيل المباشر — افتحه في المتصفح"
-            : "يتعذّر تشغيل هذا المصدر — اختر مصدراً آخر"}
-        </Text>
-        {playingSrc?.isEmbed && (
-          <Pressable
-            onPress={() => Linking.openURL(embedUrl)}
-            style={{ backgroundColor: "rgba(139,92,246,0.25)", borderRadius: 14, paddingHorizontal: 24, paddingVertical: 12, borderWidth: 1, borderColor: "rgba(139,92,246,0.4)", marginTop: 4 }}
-          >
-            <Text style={{ color: "#c4b5fd", fontFamily: "Cairo_700Bold", fontSize: 14 }}>فتح في المتصفح</Text>
-          </Pressable>
-        )}
         <Pressable onPress={() => setScreen("picker")} style={{ marginTop: 4 }}>
           <Text style={{ color: "rgba(255,255,255,0.35)", fontFamily: "Cairo_400Regular", fontSize: 13 }}>العودة للمصادر</Text>
         </Pressable>
@@ -838,34 +817,7 @@ export default function AnimationWatchScreen() {
     );
   }
 
-  /* ═══════════════════ EZV — WebVideoPlayer (مشغّل داخلي كامل) ═══════════════════ */
-  if (screen === "webplayer" && playingSrc) {
-    const webUrl = getPlayUrl(playingSrc);
-    const activeSubUrl = subLang === "ar" ? globalArSubUrl : subLang === "en" ? globalEnSubUrl : undefined;
-    return (
-      <WebVideoPlayer
-        url={webUrl}
-        title={titleStr}
-        episode={type !== "movie" ? ep : undefined}
-        subtitleUrl={playingSrc.subtitleUrl || activeSubUrl}
-        headers={playingSrc.headers}
-        initialPosition={resumeTime}
-        qualityLabel={getSrcQuality(playingSrc)}
-        onBack={() => { handleTimeUpdate(lastTimeRef.current); setScreen("picker"); }}
-        onProgress={(pos, _dur) => handleTimeUpdate(pos)}
-        onNextEpisode={type === "tv" ? () => {
-          const t = encodeURIComponent(titleStr);
-          const p = encodeURIComponent(posterUrl);
-          router.replace(`/animation/watch?id=${tmdbId}&type=${type}&ep=${ep + 1}&season=${season}&title=${t}&poster=${p}&autoplay=1`);
-        } : undefined}
-        onPrevEpisode={type === "tv" && ep > 1 ? () => {
-          const t = encodeURIComponent(titleStr);
-          const p = encodeURIComponent(posterUrl);
-          router.replace(`/animation/watch?id=${tmdbId}&type=${type}&ep=${ep - 1}&season=${season}&title=${t}&poster=${p}&autoplay=1`);
-        } : undefined}
-      />
-    );
-  }
+  /* EZV Player removed — Rift Player is the only internal player */
 
   /* ═══════════════════ SOURCE PICKER ═══════════════════ */
   const totalDirect = directSrcs.length;
@@ -989,17 +941,7 @@ export default function AnimationWatchScreen() {
           </View>
         )}
 
-        {/* ── EZV Player — مشغّل داخلي كامل WebView + HLS ── */}
-        {directSrcs.length > 0 && (
-          <Pressable
-            style={w.ezvBtn}
-            onPress={() => { setPlayingSrc(directSrcs[0]); setScreen("webplayer"); }}
-          >
-            <Ionicons name="tv" size={16} color="#c4b5fd" />
-            <Text style={w.ezvBtnText}>EZV Player</Text>
-            <View style={w.ezvBadge}><Text style={w.ezvBadgeText}>داخلي</Text></View>
-          </Pressable>
-        )}
+        {/* EZV Player button removed */}
 
         {/* Empty state */}
         {!loading && totalDirect === 0 && totalEmbed === 0 && (

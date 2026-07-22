@@ -84,9 +84,7 @@ export default function TabLayout() {
       <Tabs.Screen
         name="animations"
         options={{
-          tabBarIcon: ({ color, focused }) => (
-            <TabIcon name={focused ? "film" : "film-outline"} label="أنيميشن" color={color} focused={focused} />
-          ),
+          href: null,
         }}
       />
       <Tabs.Screen
