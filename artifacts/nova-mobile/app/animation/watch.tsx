@@ -714,11 +714,7 @@ export default function AnimationWatchScreen() {
     );
   }
 
-  /* ═══════════════════ NATIVE PLAYER (RiftPlayer — ExoPlayer/AVPlayer) ═══════════════════ */
-  /* نستخدم RiftPlayer (ExoPlayer) بدلاً من AnimHlsPlayer (WebView + hls.js):
-     - ExoPlayer يتعامل مع HLS أصلياً بدون مشاكل CORS
-     - IP الجهاز سكني → CDN لا تحجبه
-     - headers (Referer/Origin) تُرسَل مع كل طلب (manifest + segments) تلقائياً */
+  /* ═══════════════════ ANIMHLS PLAYER (WebView + hls.js — المشغّل الداخلي الكامل) ═══════════════════ */
   const playerSources = frozenSources.length > 0 ? frozenSources : animHlsSources;
   if (screen === "native" && playerSources.length > 0) {
     const _playUrl = playingSrc?.url || "";
@@ -726,8 +722,8 @@ export default function AnimationWatchScreen() {
       s => s.url === _playUrl || (_playUrl && s.url.split("?")[0] === _playUrl.split("?")[0])
     ));
     return (
-      <RiftPlayer
-        sources={playerSources as unknown as PlayerSource[]}
+      <AnimHlsPlayer
+        sources={playerSources}
         initialSourceIndex={startIdx}
         title={titleStr}
         episode={type !== "movie" ? ep : undefined}
@@ -735,10 +731,7 @@ export default function AnimationWatchScreen() {
         initialPosition={resumeTime}
         onBack={() => setScreen("picker")}
         onProgress={(pos, _dur) => handleTimeUpdate(pos)}
-        onError={() => {
-          console.warn("[Animation] RiftPlayer جميع المصادر فشلت — العودة للـ picker");
-          setScreen("picker");
-        }}
+        onError={() => setScreen("picker")}
         onNextEpisode={type === "tv" ? () => {
           const t = encodeURIComponent(titleStr);
           const p = encodeURIComponent(posterUrl);

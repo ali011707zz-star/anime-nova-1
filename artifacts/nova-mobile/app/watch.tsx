@@ -7,6 +7,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { RiftPlayer, PlayerSource } from "@/components/RiftPlayer";
+import AnimHlsPlayer, { AnimHlsSource } from "@/components/AnimHlsPlayer";
 import { HiddenResolverWebView, ResolvedStream } from "@/components/HiddenResolverWebView";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -761,60 +762,39 @@ export default function WatchScreen() {
     return { directSrcs: direct, embedSrcs: embeds };
   }, [sources]);
 
-  /* ── RiftPlayer sources (live, used for picker) ── */
-  const riftSources = useMemo((): PlayerSource[] => {
+  /* ── AnimHlsPlayer sources — WebView يجلب HLS مباشرةً بـ IP الجهاز (لا يُحجب بـ CDN) ── */
+  const animHlsSources = useMemo((): AnimHlsSource[] => {
     const base = getBaseUrl();
-    const srcs = directSrcs;
-    /* مطابق لـ isArabic في web SCRAPER_DEFS — مصادر عربية لا تحتاج SmartSub */
-    const ARABIC_SITES = new Set(["shahiid","animelek","animedar","okanime","arabseed","animephoenix","animeify","animeday","mycima","topcinemaa","anime4up2","animewitcher","ristoanime","faselhd_db","animetime","witanime","witanime_db","sanime"]);
-    return srcs.map(s => {
+    return directSrcs.map(s => {
       const rawUrl = getPlayUrl(s);
-      /* headers: استخدم الـ headers المُرسَلة من الخادم أولاً (Referer/Origin المباشرة)،
-         ثم احسبها من رابط الـ proxy كـ fallback للإصدارات القديمة من الكاش */
+      const url = rawUrl.startsWith("/") ? base + rawUrl : rawUrl;
       const headers = s.headers || extractProxyHeaders(rawUrl);
-      /* نضمن أن كل الروابط تمرّ عبر VPS proxy — ExoPlayer/AVPlayer لا يُرسل Referer
-         بشكل موثوق لـ CDNs، وكثير من CDNs تحجب IPs مراكز البيانات بدون Referer صحيح */
-      const url = ensureVpsProxy(rawUrl, headers, base);
       return {
         url,
-        headers,
         label: `سيرفر · ${getSiteTag(s.site || "")}`,
         quality: getSrcQuality(s),
         subtitleUrl: s.subtitleUrl ? resolveUrl(s.subtitleUrl, base) : globalSubUrl,
-        isArabic: ARABIC_SITES.has(s.site || ""),
-        wantsSmartSub: !ARABIC_SITES.has(s.site || ""),
-        skipIntro: s.skipIntro,
-        skipOutro: s.skipOutro,
+        ...(headers ? { headers } : {}),
       };
-    }).filter(s => s.url);
+    }).filter(s => !!s.url);
   }, [directSrcs, globalSubUrl]);
 
-  /* ── Frozen sources: تُجمَّد لحظة اختيار المستخدم للمصدر ولا تتغير أثناء التشغيل.
-     هذا يمنع تغيير مصفوفة sources في RiftPlayer بسبب وصول مصادر SSE جديدة.
-     الإصلاح: نحفظ riftSources في ref حتى نقرأه داخل playSrc بدون إضافته للـ deps ── */
-  const [frozenSources, setFrozenSources] = useState<PlayerSource[]>([]);
-  const riftSourcesRef = useRef<PlayerSource[]>([]);
-  useEffect(() => { riftSourcesRef.current = riftSources; }, [riftSources]);
+  /* ── Frozen sources: تُجمَّد لحظة دخول التشغيل — تمنع SSE الجديدة من إعادة ترتيب المصادر ── */
+  const [frozenSources, setFrozenSources] = useState<AnimHlsSource[]>([]);
 
-  /* تجميد قائمة المصادر لحظة دخول المشغّل، ومسحها عند الخروج (picker/embed/loading).
-     — عند دخول native: إذا كانت فارغة نملأها بـ riftSources الحالية (التجميد الأول).
-       إذا وصلت مصادر جديدة أثناء التشغيل نُضيفها للنهاية فقط (append) بدون تغيير
-       المصادر الموجودة حتى لا يُعيد RiftPlayer ترتيبها ويُعطّل التشغيل.
-     — هذا يحل مشكلة auto-play الذي كان يُجمِّد مصدراً واحداً فقط فيُفشل كل المصادر. */
   useEffect(() => {
     if (screen === "native") {
       setFrozenSources(prev => {
-        if (prev.length === 0) return riftSources.length > 0 ? riftSources : prev;
-        // أضف المصادر الجديدة فقط (بدون إزاحة الحالية)
+        if (prev.length === 0) return animHlsSources.length > 0 ? animHlsSources : prev;
         const existingUrls = new Set(prev.map(s => s.url));
-        const newOnes = riftSources.filter(s => s.url && !existingUrls.has(s.url));
+        const newOnes = animHlsSources.filter(s => s.url && !existingUrls.has(s.url));
         return newOnes.length > 0 ? [...prev, ...newOnes] : prev;
       });
     } else {
       setFrozenSources([]);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [screen, riftSources]);
+  }, [screen, animHlsSources]);
 
   /* ── Grouped by quality for picker ── */
   const grouped = useMemo<Record<Quality, Src[]>>(() => ({
@@ -853,28 +833,23 @@ export default function WatchScreen() {
     );
   }
 
-  /* ══════════════ RIFT PLAYER ══════════════ */
-  const playerSources = frozenSources.length > 0 ? frozenSources : riftSources;
+  /* ══════════════ ANIMHLS PLAYER (WebView + hls.js — المشغّل الداخلي الكامل) ══════════════ */
+  const playerSources = frozenSources.length > 0 ? frozenSources : animHlsSources;
   if (screen === "native" && playerSources.length > 0) {
-    /* نحسب الرابط النهائي لـ playingSrc (بعد ensureVpsProxy) لمطابقة صحيحة مع playerSources */
     const _playRaw = getPlayUrl(playingSrc!);
-    const _playHeaders = playingSrc?.headers || extractProxyHeaders(_playRaw);
-    const _playFinal = ensureVpsProxy(_playRaw, _playHeaders, getBaseUrl());
-    const startIdx = Math.max(0, playerSources.findIndex(s => playingSrc && s.url === _playFinal));
+    const startIdx = Math.max(0, playerSources.findIndex(s =>
+      s.url === _playRaw || (_playRaw && s.url.split("?")[0] === _playRaw.split("?")[0])
+    ));
     return (
-      <RiftPlayer
+      <AnimHlsPlayer
         sources={playerSources}
         initialSourceIndex={startIdx}
         title={displayTitle}
         episode={epNum}
-        anilistId={anime ? parseInt(anime) : undefined}
         episodeTitle={arEpTitle ?? (etitle ? decodeURIComponent(etitle) : undefined)}
         initialPosition={resumeTime}
-        totalEps={totalEpsCount}
         onBack={() => { saveProgress(); setScreen("picker"); }}
         onError={() => {
-          /* جميع مصادر المشغّل فشلت → العودة للـ picker حتى يرى المستخدم بقية المصادر */
-          console.warn("[Anime Watch] جميع المصادر فشلت — العودة للـ picker");
           saveProgress();
           setScreen("picker");
         }}
@@ -885,7 +860,6 @@ export default function WatchScreen() {
         }}
         onNextEpisode={() => goEp(epNum + 1, true)}
         onPrevEpisode={epNum > 1 ? () => goEp(epNum - 1) : undefined}
-        onEpisodeSelect={(n) => goEp(n)}
       />
     );
   }
