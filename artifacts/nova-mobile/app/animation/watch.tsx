@@ -6,6 +6,7 @@ import {
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import AnimHlsPlayer, { AnimHlsSource } from "@/components/AnimHlsPlayer";
+import RiftPlayer, { PlayerSource } from "@/components/RiftPlayer";
 import { HiddenResolverWebView, ResolvedStream } from "@/components/HiddenResolverWebView";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -713,17 +714,20 @@ export default function AnimationWatchScreen() {
     );
   }
 
-  /* ═══════════════════ ANIM HLS PLAYER (WebView + hls.js) ═══════════════════ */
+  /* ═══════════════════ NATIVE PLAYER (RiftPlayer — ExoPlayer/AVPlayer) ═══════════════════ */
+  /* نستخدم RiftPlayer (ExoPlayer) بدلاً من AnimHlsPlayer (WebView + hls.js):
+     - ExoPlayer يتعامل مع HLS أصلياً بدون مشاكل CORS
+     - IP الجهاز سكني → CDN لا تحجبه
+     - headers (Referer/Origin) تُرسَل مع كل طلب (manifest + segments) تلقائياً */
   const playerSources = frozenSources.length > 0 ? frozenSources : animHlsSources;
   if (screen === "native" && playerSources.length > 0) {
-    /* نجد الـ source المختار في قائمة AnimHlsSources بـ url المطابق */
     const _playUrl = playingSrc?.url || "";
     const startIdx = Math.max(0, playerSources.findIndex(
       s => s.url === _playUrl || (_playUrl && s.url.split("?")[0] === _playUrl.split("?")[0])
     ));
     return (
-      <AnimHlsPlayer
-        sources={playerSources}
+      <RiftPlayer
+        sources={playerSources as unknown as PlayerSource[]}
         initialSourceIndex={startIdx}
         title={titleStr}
         episode={type !== "movie" ? ep : undefined}
@@ -732,8 +736,7 @@ export default function AnimationWatchScreen() {
         onBack={() => setScreen("picker")}
         onProgress={(pos, _dur) => handleTimeUpdate(pos)}
         onError={() => {
-          /* جميع المصادر فشلت → العودة للـ picker */
-          console.warn("[Animation] جميع المصادر فشلت — العودة للـ picker");
+          console.warn("[Animation] RiftPlayer جميع المصادر فشلت — العودة للـ picker");
           setScreen("picker");
         }}
         onNextEpisode={type === "tv" ? () => {
