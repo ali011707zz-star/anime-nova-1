@@ -15,18 +15,18 @@ import { cacheSelect, cacheUpsert, cacheDelete, isCacheDbReady } from "./supabas
 // ── TTL بالميلي ثانية لكل موقع ──────────────────────────────────
 export const SITE_TTL: Record<string, number> = {
   animephoenix: 36 * 3_600_000,
-  animedar:     24 * 3_600_000,
+  animedar:     30 * 24 * 3_600_000, // Mega.nz + 4shared — روابط دائمة لا تنتهي
   kawaii:       24 * 3_600_000,
-  animeify:      45 * 60_000,    // MediaFire CDN URLs expire ~1h → 45min TTL
+  animeify:      45 * 60_000,    // مختلط: MediaFire دائم / FileMoon+SendVid مؤقتة → 45min
   mitanime:      8 * 3_600_000,
   seepanel:      8 * 3_600_000,
   okanime:       5 * 3_600_000,
   animetime:     5 * 3_600_000,
   ristoanime:    5 * 3_600_000,
-  anikoto:       90 * 60_000,   // vibeplayer.site tokens expire ~1-2h; reduced from 5h
-  anineko:       90 * 60_000,   // vibeplayer.site tokens expire ~1-2h; reduced from 5h
-  hianime:       90 * 60_000,   // vibeplayer.site tokens expire ~1-2h; reduced from 5h
-  animewitcher:  45 * 60_000,    // Streamtape/VTube URLs expire fast → 45min TTL
+  anikoto:       90 * 60_000,   // vibeplayer.site tokens expire ~1-2h
+  anineko:       90 * 60_000,   // vibeplayer.site tokens expire ~1-2h
+  hianime:       90 * 60_000,   // vibeplayer.site tokens expire ~1-2h
+  animewitcher:  45 * 60_000,    // مختلط: PD/MF دائم / Streamtape مؤقت → 45min
   animeday:      4 * 3_600_000,
   arabseed:      4 * 3_600_000,
   shahiid:       3 * 3_600_000,
@@ -36,7 +36,7 @@ export const SITE_TTL: Record<string, number> = {
   mycima:        4 * 3_600_000,
   mycima_anim:   4 * 3_600_000,
   aflaam:       24 * 3_600_000,
-  stardima:     12 * 3_600_000,
+  stardima:     30 * 24 * 3_600_000, // ap45.wiib.top — ملفات WordPress ثابتة لا تنتهي
   vyla:          4 * 3_600_000,
   videasy:        2 * 3_600_000,
   videasy3:       2 * 3_600_000,
@@ -49,24 +49,35 @@ export const SITE_TTL: Record<string, number> = {
   "2embed":       4 * 3_600_000,
   moviebox:       10 * 60_000,    // CDN URLs مُوقَّعة بـ &t= تنتهي بسرعة → 10 دقائق فقط
   moviebox_anim:  10 * 60_000,    // نفس السبب — Animation version
-  // ── روابط دائمة — MP4 مباشر بدون tokens ──────────────────────────
-  sanime:      30 * 24 * 3_600_000,  // server.sanime.net/Video/{id}/{ep}.mp4 — لا تنتهي
+  // ── روابط دائمة — MP4/HLS مباشر بدون tokens ─────────────────────
+  sanime:         30 * 24 * 3_600_000,  // server.sanime.net/Video/{id}/{ep}.mp4
+  dahmermovies:   30 * 24 * 3_600_000,  // a.111477.xyz → p.111477.xyz direct MP4/MKV
+  dahmermovies_anim: 30 * 24 * 3_600_000,
 };
 const DEFAULT_TTL = 4 * 3_600_000;
 
-const PERMANENT_URL_PATTERNS = [
-  /mega\.nz\/embed/i,
-  /vidmoly\.(to|biz)/i,
-  /\.workers\.dev\//i,
-  /drive\.google\.com/i,
-  /af[13]\.downet\.net/i,
-  /video\.kawaii-anime\.com/i,
-  /server\.sanime\.net\/Video\//i,  // SA — ملفات MP4 دائمة بدون tokens
+// URLs من هذه الأنماط تُعامَل كدائمة (TTL=30 يوم بدل حساب expiry من URL)
+const PERMANENT_URL_PATTERNS: Array<[RegExp, number]> = [
+  // ── مدة 30 يوم ─────────────────────────────────────────────────────
+  [/server\.sanime\.net\/Video\//i,     30 * 24 * 3_600_000], // SAnime MP4 مباشر
+  [/[ap]\.111477\.xyz\//i,              30 * 24 * 3_600_000], // DahmerMovies MP4
+  [/mega\.nz\/(embed|file)\//i,         30 * 24 * 3_600_000], // Mega — ملفات دائمة
+  [/drive\.google\.com\/file\//i,       30 * 24 * 3_600_000], // Google Drive
+  [/4shared\.com\/(video|audio)\//i,    30 * 24 * 3_600_000], // 4shared
+  [/ap45\.wiib\.top\//i,                30 * 24 * 3_600_000], // Stardima WP CDN
+  // ── مدة 7 أيام ─────────────────────────────────────────────────────
+  [/pixeldrain\.com\/api\/file\//i,      7 * 24 * 3_600_000], // PixelDrain — قد يُحذف
+  [/mediafire\.com\/file\//i,            7 * 24 * 3_600_000], // MediaFire — قد يُحذف
+  [/ok\.ru\/dk\b/i,                      7 * 24 * 3_600_000], // OK.ru stream — مستقر لأسابيع
+  [/vidmoly\.(to|biz)\//i,              7 * 24 * 3_600_000], // VidMoly
+  [/\.workers\.dev\//i,                  7 * 24 * 3_600_000], // CF Workers proxy
+  [/af[13]\.downet\.net\//i,             7 * 24 * 3_600_000], // Kawaii CDN
+  [/video\.kawaii-anime\.com\//i,        7 * 24 * 3_600_000], // Kawaii
 ];
 
 function parseUrlExpiry(url: string): number | null {
-  for (const pat of PERMANENT_URL_PATTERNS) {
-    if (pat.test(url)) return Date.now() + 7 * 24 * 3_600_000;
+  for (const [pat, ttl] of PERMANENT_URL_PATTERNS) {
+    if (pat.test(url)) return Date.now() + ttl;
   }
   const vt = url.match(/[?&]validto=(\d{10})\b/);
   if (vt) return parseInt(vt[1]) * 1000;
