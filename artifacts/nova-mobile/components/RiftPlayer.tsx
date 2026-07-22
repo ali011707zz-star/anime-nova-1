@@ -518,14 +518,12 @@ export function RiftPlayer({
   /* ─── expo-video player ─── */
   /* نستخدم ref ثابت للـ VideoSource الأولي حتى لا يُعيد useVideoPlayer
      تهيئة المشغّل عند تغيير srcIdx (التبديل يتم عبر player.replace فقط).
-     الحل: { uri, headers } مباشرة لـ ExoPlayer — IP الجهاز سكني → CDN لا يحجبه.
-     نفس مبدأ EZV Player: raw CDN URL + Referer/Origin بلا VPS proxy وسيط. */
+     نمرّر URL string مباشرةً (بدون headers) — جميع المصادر تمرّ عبر VPS proxy
+     الذي يُضيف Referer/Origin داخلياً، لذا لا حاجة لإرسالها من ExoPlayer.
+     تمرير { uri, headers } يُسبِّب فشلاً صامتاً في بعض إصدارات expo-video native. */
   const _initSrc = sources[initialSourceIndex ?? 0];
-  const _initVideoSource = _initSrc?.headers && Object.keys(_initSrc.headers).length > 0
-    ? { uri: _initSrc.url || "", headers: _initSrc.headers }
-    : (_initSrc?.url || "");
-  const _initVideoSrcRef = useRef<object | string>(_initVideoSource);
-  const player = useVideoPlayer(_initVideoSrcRef.current as any || null, (p) => {
+  const _initVideoSrcRef = useRef<string>(_initSrc?.url || "");
+  const player = useVideoPlayer(_initVideoSrcRef.current || null, (p) => {
     p.loop = false;
     p.volume = 1;
     p.play();
@@ -1176,11 +1174,8 @@ export function RiftPlayer({
     setWhisperStatus("idle");
     setWhisperLang("");
     try {
-      /* raw CDN URL + headers مباشرة لـ ExoPlayer (IP سكني → CDN لا يحجبه) */
-      const _videoSrc = newSrc.headers && Object.keys(newSrc.headers).length > 0
-        ? { uri: newSrc.url, headers: newSrc.headers }
-        : newSrc.url;
-      player.replace(_videoSrc as any);
+      /* نمرّر URL string فقط — VPS proxy يُضيف Referer/Origin داخلياً */
+      player.replace(newSrc.url as any);
       /* play() is triggered in statusChange → readyToPlay once the stream is buffered */
     } catch {}
   }, [player, sources]);
