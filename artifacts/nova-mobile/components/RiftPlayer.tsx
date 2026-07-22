@@ -516,18 +516,16 @@ export function RiftPlayer({
   const loadTimeoutRef    = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   /* ─── expo-video player ─── */
-  /* طريقة EZV Player: نمرر { uri, headers } مباشرةً لـ ExoPlayer/AVPlayer —
-     ExoPlayer يُرسل Referer/Origin نيتياً بدون VPS proxy → CDN يسمح (IP الجهاز السكني).
-     نستخدم ref ثابت للـ VideoSource الأولي؛ التبديل يتم عبر player.replace فقط. */
+  /* نستخدم ref ثابت للـ VideoSource الأولي حتى لا يُعيد useVideoPlayer
+     تهيئة المشغّل عند تغيير srcIdx (التبديل يتم عبر player.replace فقط).
+     الحل: { uri, headers } مباشرة لـ ExoPlayer — IP الجهاز سكني → CDN لا يحجبه.
+     نفس مبدأ EZV Player: raw CDN URL + Referer/Origin بلا VPS proxy وسيط. */
   const _initSrc = sources[initialSourceIndex ?? 0];
-  /** بناء VideoSource بـ headers إن وُجدت — نفس طريقة EZV Player مع ExoPlayer */
-  function buildVideoSrc(src?: PlayerSource): string | { uri: string; headers: Record<string, string> } | null {
-    if (!src?.url) return null;
-    if (src.headers && Object.keys(src.headers).length > 0) return { uri: src.url, headers: src.headers };
-    return src.url;
-  }
-  const _initVideoSrcRef = useRef<ReturnType<typeof buildVideoSrc>>(buildVideoSrc(_initSrc));
-  const player = useVideoPlayer((_initVideoSrcRef.current as any) || null, (p) => {
+  const _initVideoSource = _initSrc?.headers && Object.keys(_initSrc.headers).length > 0
+    ? { uri: _initSrc.url || "", headers: _initSrc.headers }
+    : (_initSrc?.url || "");
+  const _initVideoSrcRef = useRef<object | string>(_initVideoSource);
+  const player = useVideoPlayer(_initVideoSrcRef.current as any || null, (p) => {
     p.loop = false;
     p.volume = 1;
     p.play();
@@ -1178,8 +1176,11 @@ export function RiftPlayer({
     setWhisperStatus("idle");
     setWhisperLang("");
     try {
-      /* نمرّر URL string فقط — VPS proxy يُضيف Referer/Origin داخلياً */
-      player.replace(newSrc.url as any);
+      /* raw CDN URL + headers مباشرة لـ ExoPlayer (IP سكني → CDN لا يحجبه) */
+      const _videoSrc = newSrc.headers && Object.keys(newSrc.headers).length > 0
+        ? { uri: newSrc.url, headers: newSrc.headers }
+        : newSrc.url;
+      player.replace(_videoSrc as any);
       /* play() is triggered in statusChange → readyToPlay once the stream is buffered */
     } catch {}
   }, [player, sources]);
