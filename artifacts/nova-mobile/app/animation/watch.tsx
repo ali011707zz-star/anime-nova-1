@@ -636,9 +636,10 @@ export default function AnimationWatchScreen() {
       const resolvedSubUrl = wantsNoSub ? undefined : (s.subtitleUrl
         ? resolveUrl(s.subtitleUrl, base)
         : activeSubUrl);
-      // RiftPlayer (ExoPlayer/AVPlayer): أولوية لـ directUrl (CDN مباشر) لأن الجهاز
-      // يملك IP سكني لا يُحجب، بينما s.url/proxyUrl هي روابط VPS proxy التي تُحجب من CDN.
-      const rawUrl = s.directUrl || s.url || s.proxyUrl || "";
+      // RiftPlayer: أولوية لرابط VPS proxy. الروابط المباشرة لبعض الـ CDN
+      // تُحجب من VPS أو تفشل في segments، بينما hls-proxy يعيد كتابة كل
+      // segment ويرسل Referer الصحيح.
+      const rawUrl = s.proxyUrl || s.directUrl || s.url || "";
       const finalUrl = rawUrl.startsWith("/") ? base + rawUrl : rawUrl;
       // استخراج headers: أولوية للـ headers المُرسَلة من الخادم، ثم استخراج من proxy URL
       const hdrs = s.headers || extractHeadersFromProxy(rawUrl);
@@ -724,7 +725,11 @@ export default function AnimationWatchScreen() {
   /* ═══════════════════ RIFT PLAYER (react-native-video — ExoPlayer/AVPlayer) ═══════════════════ */
   const playerSources = frozenSources.length > 0 ? frozenSources : animHlsSources;
   if (screen === "native" && playerSources.length > 0) {
-    const _playUrl = playingSrc?.url || "";
+    const base = getBaseUrl();
+    const _playUrlRaw = playingSrc
+      ? (playingSrc.proxyUrl || playingSrc.directUrl || playingSrc.url || "")
+      : "";
+    const _playUrl = _playUrlRaw.startsWith("/") ? base + _playUrlRaw : _playUrlRaw;
     const startIdx = Math.max(0, playerSources.findIndex(
       s => s.url === _playUrl || (_playUrl && s.url.split("?")[0] === _playUrl.split("?")[0])
     ));
@@ -740,7 +745,7 @@ export default function AnimationWatchScreen() {
           setScreen("picker");
         }}
         onProgress={(pos, _dur) => handleTimeUpdate(pos)}
-        onError={() => setScreen("picker")}
+        onError={() => handleTimeUpdate(lastTimeRef.current)}
         onNextEpisode={type === "tv" ? () => {
           const t = encodeURIComponent(titleStr);
           const p = encodeURIComponent(posterUrl);

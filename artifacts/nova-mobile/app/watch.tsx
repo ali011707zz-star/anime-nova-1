@@ -858,7 +858,6 @@ export default function WatchScreen() {
         onBack={() => { saveProgress(); setScreen("picker"); }}
         onError={() => {
           saveProgress();
-          setScreen("picker");
         }}
         onProgress={(pos, dur) => {
           lastTimeRef.current = pos;
