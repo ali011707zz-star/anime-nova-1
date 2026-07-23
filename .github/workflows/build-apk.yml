@@ -68,30 +68,82 @@ jobs:
 
       - name: 🏗️ Expo Prebuild
         working-directory: artifacts/nova-mobile
-        run: npx expo prebuild --platform android --clean --no-install
+        # استخدام نسخة expo المثبّتة محلياً (لا npx الذي قد يحمّل نسخة أخرى)
+        run: ./node_modules/.bin/expo prebuild --platform android --clean --no-install
 
-      # ── إصلاح Gradle: تثبيت 8.13 + تعطيل الأخطاء الإهمالية ──────────────
+      # ── إصلاح Gradle: تثبيت 8.13 + إصلاح توافق react-native-video ──────────
       # RN 0.81.5 يستخدم deprecated Gradle APIs تُعتبر أخطاءً في 8.8+.
-      # 2026-07-10: AGP الحالي يتطلب Gradle 8.13 كحد أدنى (8.10.2 صار يفشل البناء بـ
-      # "Minimum supported Gradle version is 8.13. Current version is 8.10.2.")
-      # الحل: تثبيت 8.13 + org.gradle.warning.mode=none (لا يزال يمنع أخطاء deprecation)
+      # 2026-07-10: AGP الحالي يتطلب Gradle 8.13 كحد أدنى.
+      # 2026-07-23: react-native-video يقرأ rootProject.ext.kotlinVersion، لكن
+      #   RN 0.74+ يضعه في buildscript.ext (كائن منفصل) فيجد rnv أن rootProject.ext
+      #   فارغ ويستخدم نسخة "1.8.0" القديمة من project.properties مما يسبب تعارضاً.
+      #   الحل: إضافة ext.kotlinVersion في build.gradle على مستوى المشروع.
       - name: 🔧 Fix Gradle compatibility
         working-directory: artifacts/nova-mobile/android
         run: |
-          # تثبيت Gradle wrapper على 8.13 (متوافق مع Expo SDK 54 + AGP الحالي)
+          # ── 1. تثبيت Gradle wrapper على 8.13 ──
           sed -i \
             's|distributionUrl=.*|distributionUrl=https\\://services.gradle.org/distributions/gradle-8.13-all.zip|' \
             gradle/wrapper/gradle-wrapper.properties
 
-          # تعطيل أخطاء الإهمال وتسريع البناء
-          cat >> gradle.properties << 'EOF'
-          org.gradle.warning.mode=none
-          android.suppressUnsupportedCompileSdk=35
-          android.defaults.buildfeatures.buildconfig=true
-          EOF
+          # ── 2. تعطيل أخطاء الإهمال وإعدادات BuildConfig ──
+          cat >> gradle.properties << 'GRADLEEOF'
+org.gradle.warning.mode=none
+android.suppressUnsupportedCompileSdk=35
+android.defaults.buildfeatures.buildconfig=true
+GRADLEEOF
+
+          # ── 3. إضافة kotlinVersion لـ rootProject.ext لتوافق react-native-video ──
+          # RN 0.74+ يضع kotlinVersion في buildscript.ext فقط؛ rnv يتحقق من rootProject.ext
+          # فيجد null ويرجع لقيمة "1.8.0" الافتراضية مما يسبب تعارض classpath.
+          # نستخرج النسخة الفعلية من build.gradle ونضيفها للـ project-level ext.
+          KOTLIN_VER=$(grep -m1 'kotlinVersion\s*=' build.gradle | grep -oP '"[^"]+"' | tr -d '"' || echo "2.0.21")
+          echo "" >> build.gradle
+          echo "// react-native-video: kotlinVersion must be in project ext (not buildscript.ext)" >> build.gradle
+          echo "ext.kotlinVersion = \"${KOTLIN_VER}\"" >> build.gradle
+          echo "✅ Added ext.kotlinVersion = ${KOTLIN_VER} to build.gradle"
+
+          # ── 4. إضافة jvmTarget صريح لـ react-native-video مع AGP 8.x ──
+          # rnv build.gradle يتخطى compileOptions/kotlinOptions عند AGP >= 8
+          # مما يتسبب في عدم تطابق jvmTarget بين الـ modules.
+          RNV_BUILD=$(find ../node_modules/react-native-video/android -maxdepth 1 -name "build.gradle" 2>/dev/null | head -1)
+          if [ -n "$RNV_BUILD" ]; then
+            # أضف compileOptions + kotlinOptions للـ android{} block إذا AGP >= 8
+            python3 - "$RNV_BUILD" << 'PYEOF'
+import sys, re
+
+path = sys.argv[1]
+content = open(path).read()
+
+# Add jvmTarget and Java compatibility for AGP 8.x after the AGP < 8 conditional block
+patch = """
+    // AGP 8.x fix: add explicit Java/Kotlin compatibility
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+    kotlinOptions {
+        jvmTarget = JavaVersion.VERSION_17.majorVersion
+    }
+"""
+
+# Insert after the closing brace of the "if (agpVersion < 8)" block
+old = '    buildFeatures {\n        buildConfig true\n    }'
+new = f'{patch}\n    buildFeatures {{\n        buildConfig true\n    }}'
+
+if patch.strip() not in content:
+    content = content.replace(old, new, 1)
+    open(path, 'w').write(content)
+    print(f"✅ Patched {path} — added jvmTarget=17")
+else:
+    print(f"ℹ️  {path} already patched")
+PYEOF
+          fi
 
           echo "=== gradle-wrapper.properties ==="
           cat gradle/wrapper/gradle-wrapper.properties
+          echo "=== build.gradle (last 5 lines) ==="
+          tail -5 build.gradle
           echo "=== gradle.properties (last 10 lines) ==="
           tail -10 gradle.properties
 
@@ -117,8 +169,8 @@ jobs:
             --stacktrace \
             2>&1 | tee build.log || {
               echo ""
-              echo "══════ آخر 80 سطر من سجل البناء ══════"
-              tail -80 build.log
+              echo "══════ آخر 200 سطر من سجل البناء ══════"
+              tail -200 build.log
               exit 1
             }
 
