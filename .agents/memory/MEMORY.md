@@ -132,3 +132,4 @@
 - [VidFast.vc RSC page format fix](vidfast-vc-rsc-fix.md) — __next_f RSC now has "token" not "en"; trailing slash 308-redirect fix; 4 sources confirmed.
 - [VPS mobile player sync](vps-mobile-player-sync.md) — VPS may retain an older WebVideoPlayer; back up and copy the player explicitly before Expo build, then verify bundle markers.
 - [GitHub push auth](github-push-auth.md) — this workspace's GitHub remote currently rejects pushes because no valid GitHub credential is available; do not force-push or expose tokens.
+- [Mobile static serving](mobile-static-serving.md) — Expo bundle behind Nginx needs matching BASE_PATH, ^~ location, and a persistent PM2 service.

@@ -96,5 +96,14 @@ module.exports = {
         M3U8_CONTENT_ROUTING:               'direct',
       },
     },
+    {
+      name: 'nova-mobile-download',
+      script: '/opt/anime-nova/artifacts/nova-mobile/server/serve.js',
+      cwd: '/opt/anime-nova/artifacts/nova-mobile',
+      env: {
+        PORT: '5100',
+        BASE_PATH: '/nova-mobile',
+      },
+    },
   ],
 };

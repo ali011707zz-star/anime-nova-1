@@ -811,20 +811,20 @@ export default function WatchScreen() {
     return { directSrcs: direct, embedSrcs: embeds };
   }, [sources]);
 
-  /* ── RiftPlayer sources — ExoPlayer (AndroidX Media3) يجلب مباشرةً بـ IP الجهاز (سكني) ──
-     نفكّ proxy URLs هنا: بدل أن يذهب ExoPlayer للـ VPS ثم VPS للـ CDN (فيُحجب)،
-     يذهب ExoPlayer مباشرةً للـ CDN بـ IP الجهاز + Referer الصحيح. ── */
+  /* ── RiftPlayer sources ──
+     احتفظ برابط الـ VPS proxy المشفّر كما أعاده الخادم. فكّ الرابط إلى CDN
+     الخام هنا يجعل المشغّل يتجاوز hls-proxy، ويعيد مشاكل الحجب/إعادة كتابة
+     segments التي عالجها الخادم. ── */
   const animHlsSources = useMemo((): PlayerSource[] => {
     const base = getBaseUrl();
     return directSrcs.map(s => {
       const proxyUrl = getPlayUrl(s);
-      const { rawUrl, headers } = unwrapProxyUrl(proxyUrl, base, s.headers);
       return {
-        url: rawUrl,
+        url: resolveUrl(proxyUrl, base),
         label: `سيرفر · ${getSiteTag(s.site || "")}`,
         quality: getSrcQuality(s) as PlayerSource["quality"],
         subtitleUrl: s.subtitleUrl ? resolveUrl(s.subtitleUrl, base) : globalSubUrl,
-        ...(headers && Object.keys(headers).length > 0 ? { headers } : {}),
+        ...(s.headers && Object.keys(s.headers).length > 0 ? { headers: s.headers } : {}),
       };
     }).filter(s => !!s.url);
   }, [directSrcs, globalSubUrl]);
@@ -905,6 +905,7 @@ export default function WatchScreen() {
         onBack={() => { saveProgress(); setScreen("picker"); }}
         onError={() => {
           saveProgress();
+          setScreen("picker");
         }}
         onProgress={(pos, dur) => {
           lastTimeRef.current = pos;

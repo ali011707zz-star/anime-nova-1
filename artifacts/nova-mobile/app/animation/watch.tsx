@@ -657,11 +657,10 @@ export default function AnimationWatchScreen() {
     "360p SD":   directSrcs.filter(s => getSrcQuality(s) === "360p SD"),
   }), [directSrcs]);
 
-  /* Build RiftPlayer sources from directSrcs
-     — نمرر rawUrl مباشرةً مع headers: ExoPlayer/AVPlayer يجلب HLS بـ IP الجهاز (سكني)
-       مع إرسال Referer/Origin الصحيح مع كل segment → يتجاوز حجب CDN بالكامل */
-  /* ── RiftPlayer sources — ExoPlayer (AndroidX Media3) يجلب مباشرةً بـ IP الجهاز (سكني) ──
-     نفكّ proxy URLs: ExoPlayer → CDN مباشرة (IP سكني + Referer) بدل VPS → CDN (IP محجوب). ── */
+  /* ── RiftPlayer sources ──
+     احتفظ برابط الـ VPS proxy المشفّر كما أعاده الخادم. فكّ الرابط إلى CDN
+     الخام هنا يجعل المشغّل يتجاوز hls-proxy، ويعيد مشاكل الحجب/إعادة كتابة
+     segments التي عالجها الخادم. ── */
   const animHlsSources = useMemo((): PlayerSource[] => {
     const base = getBaseUrl();
     const activeSubUrl = subLang === "ar" ? globalArSubUrl : subLang === "en" ? globalEnSubUrl : undefined;
@@ -673,13 +672,12 @@ export default function AnimationWatchScreen() {
         ? resolveUrl(s.subtitleUrl, base)
         : activeSubUrl);
       const proxyUrl = s.proxyUrl || s.directUrl || s.url || "";
-      const { rawUrl, headers } = unwrapProxyUrl(proxyUrl, base, s.headers);
       return {
-        url: rawUrl,
+        url: resolveUrl(proxyUrl, base),
         label: lbl || "مصدر",
         quality: getSrcQuality(s) as PlayerSource["quality"],
         subtitleUrl: resolvedSubUrl,
-        ...(headers && Object.keys(headers).length > 0 ? { headers } : {}),
+        ...(s.headers && Object.keys(s.headers).length > 0 ? { headers: s.headers } : {}),
       };
     }).filter(s => !!s.url);
   }, [directSrcs, globalArSubUrl, globalEnSubUrl, subLang]);
@@ -776,7 +774,10 @@ export default function AnimationWatchScreen() {
           setScreen("picker");
         }}
         onProgress={(pos, _dur) => handleTimeUpdate(pos)}
-        onError={() => handleTimeUpdate(lastTimeRef.current)}
+        onError={() => {
+          handleTimeUpdate(lastTimeRef.current);
+          setScreen("picker");
+        }}
         onNextEpisode={type === "tv" ? () => {
           const t = encodeURIComponent(titleStr);
           const p = encodeURIComponent(posterUrl);
