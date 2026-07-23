@@ -54,20 +54,54 @@ const Q_SHORT: Record<Quality, string> = { "1080p FHD": "FHD", "720p HD": "HD", 
 const TIER_RANK: Record<Quality, number> = { "1080p FHD": 3, "720p HD": 2, "360p SD": 1 };
 
 /** استخراج Referer/Origin من رابط proxy (ref= param) — fallback إذا لم تُرسَل headers من الخادم */
-function extractHeadersFromProxy(url: string): Record<string, string> | undefined {
-  if (!url) return undefined;
-  /* روابط VPS proxy — ref الخاص بها hex مشفَّر وليس URL حقيقي؛ تخطَّها */
-  if (url.includes("/api/anime/") || url.includes("/api/animation/")) return undefined;
+/**
+ * يفكّ رابط VPS proxy ويعيد الرابط الخام + headers مباشرةً.
+ * ExoPlayer (AndroidX Media3) يجلب بـ IP الجهاز (سكني) → CDN يسمح بدل حجب datacenter VPS.
+ * الصيغة: /api/animation/hls-proxy?url=ENCODED_RAW&ref=ENCODED_REFERER
+ */
+function unwrapProxyUrl(
+  url: string,
+  base: string,
+  existingHeaders?: Record<string, string>,
+): { rawUrl: string; headers?: Record<string, string> } {
+  if (!url) return { rawUrl: url };
+  const full = url.startsWith("/") ? base + url : url;
+
+  const isProxy =
+    full.includes("/api/anime/hls-proxy") ||
+    full.includes("/api/anime/video-proxy") ||
+    full.includes("/api/animation/hls-proxy") ||
+    full.includes("/api/animation/video-proxy");
+
+  if (!isProxy) {
+    if (existingHeaders) return { rawUrl: full, headers: existingHeaders };
+    try {
+      const u = new URL(full);
+      const ref = u.searchParams.get("ref");
+      if (ref) {
+        let origin = "";
+        try { origin = new URL(ref).origin; } catch {}
+        return { rawUrl: full, headers: origin ? { Referer: ref, Origin: origin } : { Referer: ref } };
+      }
+    } catch {}
+    return { rawUrl: full };
+  }
+
   try {
-    const fullUrl = url.startsWith("/") ? `http://x.com${url}` : url;
-    const u = new URL(fullUrl);
-    const ref = u.searchParams.get("ref");
-    if (!ref) return undefined;
-    let origin = "";
-    try { origin = new URL(ref).origin; } catch {}
-    return origin ? { Referer: ref, Origin: origin } : { Referer: ref };
+    const u = new URL(full);
+    const rawEncoded = u.searchParams.get("url");
+    const refEncoded = u.searchParams.get("ref");
+    if (!rawEncoded) return { rawUrl: full };
+    const rawUrl = decodeURIComponent(rawEncoded);
+    const headers: Record<string, string> = { ...(existingHeaders || {}) };
+    if (refEncoded && !headers.Referer) {
+      const ref = decodeURIComponent(refEncoded);
+      headers.Referer = ref;
+      try { const o = new URL(ref).origin; if (o) headers.Origin = o; } catch {}
+    }
+    return { rawUrl, headers: Object.keys(headers).length > 0 ? headers : undefined };
   } catch {
-    return undefined;
+    return { rawUrl: full, headers: existingHeaders };
   }
 }
 
@@ -626,6 +660,8 @@ export default function AnimationWatchScreen() {
   /* Build RiftPlayer sources from directSrcs
      — نمرر rawUrl مباشرةً مع headers: ExoPlayer/AVPlayer يجلب HLS بـ IP الجهاز (سكني)
        مع إرسال Referer/Origin الصحيح مع كل segment → يتجاوز حجب CDN بالكامل */
+  /* ── RiftPlayer sources — ExoPlayer (AndroidX Media3) يجلب مباشرةً بـ IP الجهاز (سكني) ──
+     نفكّ proxy URLs: ExoPlayer → CDN مباشرة (IP سكني + Referer) بدل VPS → CDN (IP محجوب). ── */
   const animHlsSources = useMemo((): PlayerSource[] => {
     const base = getBaseUrl();
     const activeSubUrl = subLang === "ar" ? globalArSubUrl : subLang === "en" ? globalEnSubUrl : undefined;
@@ -636,19 +672,14 @@ export default function AnimationWatchScreen() {
       const resolvedSubUrl = wantsNoSub ? undefined : (s.subtitleUrl
         ? resolveUrl(s.subtitleUrl, base)
         : activeSubUrl);
-      // RiftPlayer: أولوية لرابط VPS proxy. الروابط المباشرة لبعض الـ CDN
-      // تُحجب من VPS أو تفشل في segments، بينما hls-proxy يعيد كتابة كل
-      // segment ويرسل Referer الصحيح.
-      const rawUrl = s.proxyUrl || s.directUrl || s.url || "";
-      const finalUrl = rawUrl.startsWith("/") ? base + rawUrl : rawUrl;
-      // استخراج headers: أولوية للـ headers المُرسَلة من الخادم، ثم استخراج من proxy URL
-      const hdrs = s.headers || extractHeadersFromProxy(rawUrl);
+      const proxyUrl = s.proxyUrl || s.directUrl || s.url || "";
+      const { rawUrl, headers } = unwrapProxyUrl(proxyUrl, base, s.headers);
       return {
-        url: finalUrl,
+        url: rawUrl,
         label: lbl || "مصدر",
         quality: getSrcQuality(s) as PlayerSource["quality"],
         subtitleUrl: resolvedSubUrl,
-        ...(hdrs && Object.keys(hdrs).length > 0 ? { headers: hdrs } : {}),
+        ...(headers && Object.keys(headers).length > 0 ? { headers } : {}),
       };
     }).filter(s => !!s.url);
   }, [directSrcs, globalArSubUrl, globalEnSubUrl, subLang]);

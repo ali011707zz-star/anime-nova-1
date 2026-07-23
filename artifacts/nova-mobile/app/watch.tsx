@@ -153,20 +153,66 @@ function getPlayUrl(s: Src): string {
  * يُمرَّران لـ ExoPlayer/AVPlayer كـ HTTP headers مع كل طلب.
  * بدون هذه الـ headers يعيد CDN 403 لأن الطلب يبدو من مصدر مجهول.
  */
-function extractProxyHeaders(url: string): Record<string, string> | undefined {
-  if (!url) return undefined;
-  /* روابط VPS proxy — ref الخاص بها hex مشفَّر وليس URL حقيقي؛ تخطَّها */
-  if (url.includes("/api/anime/") || url.includes("/api/animation/")) return undefined;
+/**
+ * يفكّ رابط VPS proxy ويعيد الرابط الخام + headers مباشرةً.
+ *
+ * المشكلة: hls-proxy/video-proxy يجلبان الـ segments بـ IP الداتاسنتر → CDN يُعيد 403.
+ * الحل: ExoPlayer (AndroidX Media3) يجلب مباشرةً بـ IP الجهاز (سكني) + Referer → CDN يسمح.
+ *
+ * الصيغة: /api/anime/hls-proxy?url=ENCODED_RAW_URL&ref=ENCODED_REFERER
+ * كلا البارامترات plain encodeURIComponent — يمكن فكّها client-side.
+ */
+function unwrapProxyUrl(
+  url: string,
+  base: string,
+  existingHeaders?: Record<string, string>,
+): { rawUrl: string; headers?: Record<string, string> } {
+  if (!url) return { rawUrl: url };
+
+  // افتح الرابط كاملاً إذا كان نسبياً
+  const full = url.startsWith("/") ? base + url : url;
+
+  const isProxy =
+    full.includes("/api/anime/hls-proxy") ||
+    full.includes("/api/anime/video-proxy") ||
+    full.includes("/api/animation/hls-proxy") ||
+    full.includes("/api/animation/video-proxy");
+
+  if (!isProxy) {
+    // رابط CDN مباشر — استخرج headers من البارامترات إن وُجدت
+    if (existingHeaders) return { rawUrl: full, headers: existingHeaders };
+    try {
+      const u = new URL(full);
+      const ref = u.searchParams.get("ref");
+      if (ref) {
+        let origin = "";
+        try { origin = new URL(ref).origin; } catch {}
+        return { rawUrl: full, headers: origin ? { Referer: ref, Origin: origin } : { Referer: ref } };
+      }
+    } catch {}
+    return { rawUrl: full };
+  }
+
+  // فكّ proxy URL
   try {
-    const fullUrl = url.startsWith("/") ? `http://x.com${url}` : url;
-    const u = new URL(fullUrl);
-    const ref = u.searchParams.get("ref");
-    if (!ref) return undefined;
-    let origin = "";
-    try { origin = new URL(ref).origin; } catch {}
-    return origin ? { Referer: ref, Origin: origin } : { Referer: ref };
+    const u = new URL(full);
+    const rawEncoded = u.searchParams.get("url");
+    const refEncoded = u.searchParams.get("ref");
+    if (!rawEncoded) return { rawUrl: full };
+
+    const rawUrl = decodeURIComponent(rawEncoded);
+    const headers: Record<string, string> = { ...(existingHeaders || {}) };
+    if (refEncoded && !headers.Referer) {
+      const ref = decodeURIComponent(refEncoded);
+      headers.Referer = ref;
+      try {
+        const origin = new URL(ref).origin;
+        if (origin) headers.Origin = origin;
+      } catch {}
+    }
+    return { rawUrl, headers: Object.keys(headers).length > 0 ? headers : undefined };
   } catch {
-    return undefined;
+    return { rawUrl: full, headers: existingHeaders };
   }
 }
 
@@ -765,19 +811,20 @@ export default function WatchScreen() {
     return { directSrcs: direct, embedSrcs: embeds };
   }, [sources]);
 
-  /* ── RiftPlayer sources — ExoPlayer/AVPlayer يجلب HLS بـ IP الجهاز (سكني لا يُحجب) ── */
+  /* ── RiftPlayer sources — ExoPlayer (AndroidX Media3) يجلب مباشرةً بـ IP الجهاز (سكني) ──
+     نفكّ proxy URLs هنا: بدل أن يذهب ExoPlayer للـ VPS ثم VPS للـ CDN (فيُحجب)،
+     يذهب ExoPlayer مباشرةً للـ CDN بـ IP الجهاز + Referer الصحيح. ── */
   const animHlsSources = useMemo((): PlayerSource[] => {
     const base = getBaseUrl();
     return directSrcs.map(s => {
-      const rawUrl = getPlayUrl(s);
-      const url = rawUrl.startsWith("/") ? base + rawUrl : rawUrl;
-      const headers = s.headers || extractProxyHeaders(rawUrl);
+      const proxyUrl = getPlayUrl(s);
+      const { rawUrl, headers } = unwrapProxyUrl(proxyUrl, base, s.headers);
       return {
-        url,
+        url: rawUrl,
         label: `سيرفر · ${getSiteTag(s.site || "")}`,
         quality: getSrcQuality(s) as PlayerSource["quality"],
         subtitleUrl: s.subtitleUrl ? resolveUrl(s.subtitleUrl, base) : globalSubUrl,
-        ...(headers ? { headers } : {}),
+        ...(headers && Object.keys(headers).length > 0 ? { headers } : {}),
       };
     }).filter(s => !!s.url);
   }, [directSrcs, globalSubUrl]);
