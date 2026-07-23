@@ -636,8 +636,9 @@ export default function AnimationWatchScreen() {
       const resolvedSubUrl = wantsNoSub ? undefined : (s.subtitleUrl
         ? resolveUrl(s.subtitleUrl, base)
         : activeSubUrl);
-      // RiftPlayer (ExoPlayer/AVPlayer): raw CDN URL + headers — الجهاز يجلب بـ IP سكني
-      const rawUrl = s.url || s.directUrl || s.proxyUrl || "";
+      // RiftPlayer (ExoPlayer/AVPlayer): أولوية لـ directUrl (CDN مباشر) لأن الجهاز
+      // يملك IP سكني لا يُحجب، بينما s.url/proxyUrl هي روابط VPS proxy التي تُحجب من CDN.
+      const rawUrl = s.directUrl || s.url || s.proxyUrl || "";
       const finalUrl = rawUrl.startsWith("/") ? base + rawUrl : rawUrl;
       // استخراج headers: أولوية للـ headers المُرسَلة من الخادم، ثم استخراج من proxy URL
       const hdrs = s.headers || extractHeadersFromProxy(rawUrl);
