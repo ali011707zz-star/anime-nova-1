@@ -836,7 +836,7 @@ export default function WatchScreen() {
     );
   }
 
-  /* ══════════════ RIFT PLAYER (expo-video native — ExoPlayer/AVPlayer) ══════════════ */
+  /* ══════════════ RIFT PLAYER (react-native-video — ExoPlayer/AVPlayer) ══════════════ */
   const playerSources = frozenSources.length > 0 ? frozenSources : animHlsSources;
   if (screen === "native" && playerSources.length > 0) {
     const _playRaw = getPlayUrl(playingSrc!);

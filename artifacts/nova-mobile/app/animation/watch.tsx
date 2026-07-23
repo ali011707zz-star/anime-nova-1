@@ -5,7 +5,7 @@ import {
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
-// AnimHlsPlayer replaced by RiftPlayer (expo-video native ExoPlayer/AVPlayer)
+// AnimHlsPlayer replaced by RiftPlayer (react-native-video native ExoPlayer/AVPlayer)
 import RiftPlayer, { PlayerSource } from "@/components/RiftPlayer";
 // WebVideoPlayer removed — Rift Player is the only internal player
 import { HiddenResolverWebView, ResolvedStream } from "@/components/HiddenResolverWebView";
@@ -721,7 +721,7 @@ export default function AnimationWatchScreen() {
     );
   }
 
-  /* ═══════════════════ RIFT PLAYER (expo-video native — ExoPlayer/AVPlayer) ═══════════════════ */
+  /* ═══════════════════ RIFT PLAYER (react-native-video — ExoPlayer/AVPlayer) ═══════════════════ */
   const playerSources = frozenSources.length > 0 ? frozenSources : animHlsSources;
   if (screen === "native" && playerSources.length > 0) {
     const _playUrl = playingSrc?.url || "";

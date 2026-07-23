@@ -50,7 +50,7 @@
       ],
       "expo-font",
       "expo-web-browser",
-      "expo-video",
+
       "expo-screen-orientation",
       [
         "expo-image-picker",
