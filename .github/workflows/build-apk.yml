@@ -94,9 +94,9 @@ jobs:
           # ── 3. إضافة kotlinVersion لـ rootProject.ext لتوافق react-native-video ──
           # RN 0.74+ يضع kotlinVersion في buildscript.ext فقط؛ rnv يتحقق من rootProject.ext
           # فيجد null ويرجع لقيمة "1.8.0" الافتراضية مما يسبب تعارض classpath.
-          # نستخرج النسخة الفعلية من build.gradle ونضيفها للـ project-level ext.
-          KOTLIN_VER=$(grep -m1 'kotlinVersion\s*=\s*"' build.gradle | grep -oP '"\K[^"]+' || true)
-          if [ -z "$KOTLIN_VER" ]; then KOTLIN_VER="2.0.21"; fi
+          # نثبّت 1.9.25 لأن react-native-video 6.9.0 لا يتوافق مع Kotlin 2.x
+          # (Kotlin 2.0 أشد صرامة في null-safety ويكسر CMCDProps.kt / Source.kt)
+          KOTLIN_VER="1.9.25"
           echo "ℹ️  kotlinVersion = ${KOTLIN_VER}"
           echo "" >> build.gradle
           echo "// react-native-video: kotlinVersion must be in project ext (not buildscript.ext)" >> build.gradle
