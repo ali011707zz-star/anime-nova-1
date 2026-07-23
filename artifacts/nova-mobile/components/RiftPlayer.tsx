@@ -703,7 +703,7 @@ export function RiftPlayer({
     };
     subRafRef.current = requestAnimationFrame(tick);
     return () => { if (subRafRef.current) { cancelAnimationFrame(subRafRef.current); subRafRef.current = null; } };
-  }, [effectiveCues, subOn, player]);
+  }, [effectiveCues, subOn]);
 
   /* ─── VTT loading when source changes ─── */
   /* Cache priority:
