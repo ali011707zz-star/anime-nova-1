@@ -55,30 +55,59 @@ jobs:
         run: pnpm install --no-frozen-lockfile
 
       - name: 🩹 Patch react-native-video Kotlin sources
-        working-directory: artifacts/nova-mobile
         run: |
-          RNV="node_modules/react-native-video/android/src/main/java/com/brentvatne"
+          # إيجاد المسار الفعلي لـ react-native-video في pnpm store
+          RNV=$(find . -path "*/react-native-video/android/src/main/java/com/brentvatne" -type d 2>/dev/null | head -1)
+          if [ -z "$RNV" ]; then
+            echo "❌ لم يتم العثور على react-native-video android sources"
+            find . -name "CMCDProps.kt" 2>/dev/null | head -3
+            exit 1
+          fi
+          echo "✅ RNV path: $RNV"
 
-          # 1. CMCDProps.kt: getMap(i) returns ReadableMap? → guard null
-          sed -i 's/val item = array\.getMap(i)/val item = array.getMap(i) ?: return@mapNotNull null/' \
-            "$RNV/common/api/CMCDProps.kt"
+          # جعل الملفات قابلة للكتابة (pnpm hard-links قد تكون read-only)
+          chmod -R u+w "$RNV/common/api" "$RNV/common/react" 2>/dev/null || true
 
-          # 2. SideLoadedTextTrackList.kt: ReadableMap = src.getMap(i) type mismatch
-          sed -i 's/val textTrack: ReadableMap = src\.getMap(i)/val textTrack: ReadableMap = src.getMap(i) ?: continue/' \
-            "$RNV/common/api/SideLoadedTextTrackList.kt"
+          # كتابة سكريبت Python مؤقت للتعديلات
+          PYSCRIPT=$(mktemp /tmp/patch_rnv_XXXXXX.py)
 
-          # 3. Source.kt: propSrcHeadersArray.getMap(i) returns nullable
-          sed -i 's/val current = propSrcHeadersArray\.getMap(i)/val current = propSrcHeadersArray.getMap(i) ?: continue/' \
-            "$RNV/common/api/Source.kt"
+          echo 'import sys, re, os' >> "$PYSCRIPT"
+          echo 'def patch(path, old, new, label):' >> "$PYSCRIPT"
+          echo '    if not os.path.exists(path): print(f"SKIP {label}: not found"); return' >> "$PYSCRIPT"
+          echo '    c = open(path).read()' >> "$PYSCRIPT"
+          echo '    if old not in c: print(f"SKIP {label}: pattern not found"); return' >> "$PYSCRIPT"
+          echo '    os.chmod(path, 0o644)' >> "$PYSCRIPT"
+          echo '    open(path, "w").write(c.replace(old, new, 1))' >> "$PYSCRIPT"
+          echo '    print(f"OK {label}")' >> "$PYSCRIPT"
 
-          # 4. VideoEventEmitter.kt: Event<Event<*>> type-bounds violation → suppress
-          sed -i 's/fun dispatch(event: EventTypes/@Suppress("UPPER_BOUND_VIOLATED")\n        fun dispatch(event: EventTypes/' \
-            "$RNV/common/react/VideoEventEmitter.kt"
+          RNV_PY=$(echo "$RNV" | sed "s|'|\\\'|g")
 
-          echo "=== CMCDProps.kt patch ===" && grep -n "getMap(i)" "$RNV/common/api/CMCDProps.kt"
-          echo "=== SideLoadedTextTrackList.kt patch ===" && grep -n "getMap(i)" "$RNV/common/api/SideLoadedTextTrackList.kt"
-          echo "=== Source.kt patch ===" && grep -n "getMap(i)" "$RNV/common/api/Source.kt"
-          echo "=== VideoEventEmitter.kt patch ===" && grep -n "UPPER_BOUND\|fun dispatch" "$RNV/common/react/VideoEventEmitter.kt"
+          # 1. CMCDProps.kt
+          echo "patch('$RNV_PY/common/api/CMCDProps.kt'," >> "$PYSCRIPT"
+          echo "  'val item = array.getMap(i)'," >> "$PYSCRIPT"
+          echo "  'val item = array.getMap(i) ?: return@mapNotNull null'," >> "$PYSCRIPT"
+          echo "  'CMCDProps nullable guard')" >> "$PYSCRIPT"
+
+          # 2. SideLoadedTextTrackList.kt
+          echo "patch('$RNV_PY/common/api/SideLoadedTextTrackList.kt'," >> "$PYSCRIPT"
+          echo "  'val textTrack: ReadableMap = src.getMap(i)'," >> "$PYSCRIPT"
+          echo "  'val textTrack: ReadableMap = src.getMap(i) ?: continue'," >> "$PYSCRIPT"
+          echo "  'SideLoadedTextTrackList nullable guard')" >> "$PYSCRIPT"
+
+          # 3. Source.kt
+          echo "patch('$RNV_PY/common/api/Source.kt'," >> "$PYSCRIPT"
+          echo "  'val current = propSrcHeadersArray.getMap(i)'," >> "$PYSCRIPT"
+          echo "  'val current = propSrcHeadersArray.getMap(i) ?: continue'," >> "$PYSCRIPT"
+          echo "  'Source nullable guard')" >> "$PYSCRIPT"
+
+          # 4. VideoEventEmitter.kt: استبدال Event<Event<*>> بـ concrete class لتجنب type-bounds error
+          echo "patch('$RNV_PY/common/react/VideoEventEmitter.kt'," >> "$PYSCRIPT"
+          echo "  '    private class EventBuilder(private val surfaceId: Int, private val viewId: Int, private val dispatcher: EventDispatcher) {\n        fun dispatch(event: EventTypes, paramsSetter: (WritableMap.() -> Unit)? = null) =\n            dispatcher.dispatchEvent(object : Event<Event<*>>(surfaceId, viewId) {\n                override fun getEventName() = \"top\${event.eventName.removePrefix(\"on\")}\"\n                override fun getEventData() = Arguments.createMap().apply(paramsSetter ?: {})\n            })\n    }'," >> "$PYSCRIPT"
+          echo "  '    private class RnvConcreteEvent(\n        surfaceId: Int, viewId: Int,\n        private val name: String,\n        private val data: WritableMap\n    ) : Event<RnvConcreteEvent>(surfaceId, viewId) {\n        override fun getEventName() = name\n        override fun getEventData() = data\n    }\n\n    private class EventBuilder(private val surfaceId: Int, private val viewId: Int, private val dispatcher: EventDispatcher) {\n        fun dispatch(event: EventTypes, paramsSetter: (WritableMap.() -> Unit)? = null) =\n            dispatcher.dispatchEvent(RnvConcreteEvent(\n                surfaceId, viewId,\n                \"top\${event.eventName.removePrefix(\"on\")}\",\n                Arguments.createMap().apply(paramsSetter ?: {})\n            ))\n    }'," >> "$PYSCRIPT"
+          echo "  'VideoEventEmitter EventBuilder fix')" >> "$PYSCRIPT"
+
+          python3 "$PYSCRIPT"
+          rm -f "$PYSCRIPT"
 
       - name: ✅ Verify native video player
         run: |
