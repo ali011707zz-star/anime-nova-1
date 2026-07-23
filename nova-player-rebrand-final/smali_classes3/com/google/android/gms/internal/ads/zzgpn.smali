@@ -1,0 +1,8 @@
+.class interface abstract Lcom/google/android/gms/internal/ads/zzgpn;
+.super Ljava/lang/Object;
+.source "com.google.android.gms:play-services-ads@@24.9.0"
+
+
+# virtual methods
+.method public abstract zza(Ljava/lang/String;)V
+.end method

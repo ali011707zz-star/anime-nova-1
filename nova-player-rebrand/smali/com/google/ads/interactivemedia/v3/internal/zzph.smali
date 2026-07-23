@@ -1,0 +1,77 @@
+.class public final Lcom/google/ads/interactivemedia/v3/internal/zzph;
+.super Ljava/lang/Object;
+.source "com.google.ads.interactivemedia.v3:interactivemedia@@3.38.0"
+
+
+# direct methods
+.method static final zza(Ljava/lang/Object;)Ljava/lang/CharSequence;
+    .locals 1
+
+    .line 1
+    invoke-static {p0}, Lj$/util/Objects;->requireNonNull(Ljava/lang/Object;)Ljava/lang/Object;
+
+    .line 2
+    instance-of v0, p0, Ljava/lang/CharSequence;
+
+    if-eqz v0, :cond_0
+
+    check-cast p0, Ljava/lang/CharSequence;
+
+    return-object p0
+
+    :cond_0
+    invoke-virtual {p0}, Ljava/lang/Object;->toString()Ljava/lang/String;
+
+    move-result-object p0
+
+    return-object p0
+.end method
+
+.method public static final zzb(Ljava/lang/Appendable;Ljava/util/Iterator;Ljava/lang/String;)Ljava/lang/Appendable;
+    .locals 1
+
+    .line 1
+    invoke-interface {p1}, Ljava/util/Iterator;->hasNext()Z
+
+    move-result v0
+
+    if-eqz v0, :cond_0
+
+    .line 2
+    invoke-interface {p1}, Ljava/util/Iterator;->next()Ljava/lang/Object;
+
+    move-result-object v0
+
+    invoke-static {v0}, Lcom/google/ads/interactivemedia/v3/internal/zzph;->zza(Ljava/lang/Object;)Ljava/lang/CharSequence;
+
+    move-result-object v0
+
+    invoke-interface {p0, v0}, Ljava/lang/Appendable;->append(Ljava/lang/CharSequence;)Ljava/lang/Appendable;
+
+    .line 3
+    :goto_0
+    invoke-interface {p1}, Ljava/util/Iterator;->hasNext()Z
+
+    move-result v0
+
+    if-eqz v0, :cond_0
+
+    .line 4
+    invoke-interface {p0, p2}, Ljava/lang/Appendable;->append(Ljava/lang/CharSequence;)Ljava/lang/Appendable;
+
+    .line 5
+    invoke-interface {p1}, Ljava/util/Iterator;->next()Ljava/lang/Object;
+
+    move-result-object v0
+
+    invoke-static {v0}, Lcom/google/ads/interactivemedia/v3/internal/zzph;->zza(Ljava/lang/Object;)Ljava/lang/CharSequence;
+
+    move-result-object v0
+
+    invoke-interface {p0, v0}, Ljava/lang/Appendable;->append(Ljava/lang/CharSequence;)Ljava/lang/Appendable;
+
+    goto :goto_0
+
+    :cond_0
+    return-object p0
+.end method

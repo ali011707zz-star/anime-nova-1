@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.coordinatorlayout.widget.CoordinatorLayout android:orientation="vertical" android:layout_width="fill_parent" android:layout_height="fill_parent"
+  xmlns:android="http://schemas.android.com/apk/res/android" xmlns:app="http://schemas.android.com/apk/res-auto">
+    <androidx.fragment.app.FragmentContainerView android:id="@id/fragment_container_view" android:layout_width="fill_parent" android:layout_height="fill_parent" app:layout_behavior="@string/appbar_scrolling_view_behavior" />
+    <com.google.android.material.appbar.AppBarLayout android:id="@id/appbar" android:fitsSystemWindows="true" android:layout_width="fill_parent" android:layout_height="wrap_content">
+        <com.google.android.material.appbar.MaterialToolbar android:theme="?actionBarTheme" android:id="@id/toolbar" android:layout_width="fill_parent" android:layout_height="?actionBarSize" />
+    </com.google.android.material.appbar.AppBarLayout>
+    <com.google.android.material.floatingactionbutton.FloatingActionButton android:id="@id/fab" android:contentDescription="@string/add_link" app:layout_anchor="@id/bottom_nav" app:srcCompat="@drawable/ic_baseline_add_24" style="@style/Theme.Widget.FAB" />
+    <com.google.android.material.bottomnavigation.BottomNavigationView android:layout_gravity="bottom" android:id="@id/bottom_nav" android:layout_width="fill_parent" android:layout_height="wrap_content" app:layout_insetEdge="bottom" app:menu="@menu/bottom_nav" />
+</androidx.coordinatorlayout.widget.CoordinatorLayout>

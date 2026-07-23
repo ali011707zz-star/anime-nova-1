@@ -133,3 +133,4 @@
 - [VPS mobile player sync](vps-mobile-player-sync.md) — VPS may retain an older WebVideoPlayer; back up and copy the player explicitly before Expo build, then verify bundle markers.
 - [GitHub push auth](github-push-auth.md) — this workspace's GitHub remote currently rejects pushes because no valid GitHub credential is available; do not force-push or expose tokens.
 - [Mobile static serving](mobile-static-serving.md) — Expo bundle behind Nginx needs matching BASE_PATH, ^~ location, and a persistent PM2 service.
+- [NOVA Player APK rebrand](nova-player-apk-rebrand.md) — resource-only rebranding preserves the original package contract, but rebuilt APKs require a new signature and replacement install.

@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout android:layout_width="fill_parent" android:layout_height="fill_parent"
+  xmlns:android="http://schemas.android.com/apk/res/android" xmlns:app="http://schemas.android.com/apk/res-auto">
+    <androidx.recyclerview.widget.RecyclerView android:id="@id/recycler" android:paddingBottom="140.0dip" android:clipToPadding="false" android:layout_width="fill_parent" android:layout_height="fill_parent" />
+    <LinearLayout android:gravity="center" android:orientation="vertical" android:id="@id/empty_text" android:padding="32.0dip" android:visibility="gone" android:layout_width="fill_parent" android:layout_height="fill_parent">
+        <ImageView android:layout_width="120.0dip" android:layout_height="120.0dip" android:src="@drawable/ic_baseline_file_download_done_24" android:alpha="0.6" app:tint="?colorOnSurfaceVariant" />
+        <TextView android:textAppearance="?textAppearanceTitleLarge" android:textColor="?colorOnSurface" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="24.0dip" android:text="@string/empty_finished_download" />
+        <TextView android:textAppearance="?textAppearanceBodyLarge" android:textColor="?colorOnSurfaceVariant" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="12.0dip" android:text="@string/empty_finished_description" android:textAlignment="center" />
+    </LinearLayout>
+</FrameLayout>

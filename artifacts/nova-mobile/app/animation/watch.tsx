@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import {
-  View, Text, Pressable, Image, ScrollView, StyleSheet,
+  Alert, View, Text, Pressable, Image, ScrollView, StyleSheet,
   Platform, Dimensions, Animated, Easing, ActivityIndicator,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
@@ -14,6 +14,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { getBaseUrl } from "@/utils/api";
 import { secureFetch, secureStreamFetch } from "@/utils/secureApi";
+import { openNovaPlayer } from "@/utils/externalPlayer";
 import * as ScreenOrientation from "expo-screen-orientation";
 
 const { width: W, height: H } = Dimensions.get("window");
@@ -293,6 +294,10 @@ function SrcRow({ src, idx, onPlay }: { src: AnimSrc; idx: number; onPlay: (s: A
           <Text style={w.srcNum}>سيرفر {idx + 1}</Text>
           <View style={w.srcTag}><Text style={w.srcTagText}>{tag}</Text></View>
           {hasSub && <View style={w.srcSubBadge}><Text style={w.srcSubText}>ترجمة</Text></View>}
+          <View style={w.srcPlayerBadge}>
+            <Ionicons name="open-outline" size={9} color="#c4b5fd" />
+            <Text style={w.srcPlayerText}>NOVA Player الخارجي</Text>
+          </View>
         </View>
       </View>
       <View style={w.srcRight}>
@@ -617,6 +622,14 @@ export default function AnimationWatchScreen() {
   /* ── Play a source ── */
   const playSrc = useCallback((src: AnimSrc) => {
     setPlayingSrc(src);
+    const url = getPlayUrl(src);
+    if (Platform.OS !== "web" && url && !src.isEmbed) {
+      const fullUrl = resolveUrl(url, getBaseUrl());
+      openNovaPlayer(fullUrl).then(ok => {
+        if (!ok) Alert.alert("NOVA Player", "تعذّر فتح المشغل الخارجي. تأكد من تثبيت NOVA Player.");
+      }).catch(() => Alert.alert("NOVA Player", "تعذّر فتح المشغل الخارجي."));
+      return;
+    }
     if (isDirectPlayable(src)) { setScreen("native"); return; }
     if (needsHiddenResolve(src)) { setScreen("resolving"); return; }
     setScreen("embed");
@@ -628,6 +641,18 @@ export default function AnimationWatchScreen() {
       if (!prev) return prev;
       return { ...prev, directUrl: stream.url, url: stream.url, isEmbed: false, headers: stream.headers || prev.headers, directType: stream.type };
     });
+    if (Platform.OS !== "web") {
+      openNovaPlayer(stream.url).then(ok => {
+        if (!ok) {
+          Alert.alert("NOVA Player", "تعذّر فتح المشغل الخارجي. تأكد من تثبيت NOVA Player.");
+          setScreen("picker");
+        }
+      }).catch(() => {
+        Alert.alert("NOVA Player", "تعذّر فتح المشغل الخارجي.");
+        setScreen("picker");
+      });
+      return;
+    }
     setScreen("native");
   }, []);
 
@@ -860,7 +885,7 @@ export default function AnimationWatchScreen() {
     );
   }
 
-  /* EZV Player removed — Rift Player is the only internal player */
+  /* كل مصادر الأنيميشن تُفتح في NOVA Player الخارجي على Android. */
 
   /* ═══════════════════ SOURCE PICKER ═══════════════════ */
   const totalDirect = directSrcs.length;
@@ -1088,6 +1113,8 @@ const w = StyleSheet.create({
   srcTagText: { fontSize: 10, fontFamily: "Cairo_800ExtraBold", color: "rgba(255,255,255,0.82)", fontVariant: ["tabular-nums"] },
   srcCdn: { fontSize: 10, fontFamily: "Cairo_400Regular", color: "rgba(255,255,255,0.32)", marginTop: 2 },
   srcSubBadge: { paddingHorizontal: 6, paddingVertical: 2, borderRadius: 5, backgroundColor: "rgba(34,197,94,0.12)", borderWidth: 1, borderColor: "rgba(34,197,94,0.28)" },
+  srcPlayerBadge: { flexDirection: "row", alignItems: "center", gap: 3, borderRadius: 5, paddingHorizontal: 5, paddingVertical: 2, backgroundColor: "rgba(167,139,250,0.10)", borderWidth: 1, borderColor: "rgba(167,139,250,0.26)" },
+  srcPlayerText: { fontSize: 8, fontFamily: "Cairo_700Bold", color: "#c4b5fd" },
   srcSubText: { fontSize: 9, fontFamily: "Cairo_700Bold", color: "rgba(134,239,172,0.9)" },
   srcRight: { flexDirection: "row", alignItems: "center", gap: 7 },
   srcQBadge: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 7, borderWidth: 1 },

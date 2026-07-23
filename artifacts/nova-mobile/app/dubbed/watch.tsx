@@ -6,8 +6,8 @@ import {
 import { Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { RiftPlayer, PlayerSource } from "@/components/RiftPlayer";
 import { getBaseUrl } from "@/utils/api";
+import { openNovaPlayer } from "@/utils/externalPlayer";
 
 export default function DubbedWatchScreen() {
   const insets = useSafeAreaInsets();
@@ -19,9 +19,9 @@ export default function DubbedWatchScreen() {
     poster: string; at: string;
   }>();
 
-  const [sources, setSources]  = useState<PlayerSource[]>([]);
   const [loading, setLoading]  = useState(true);
   const [error, setError]      = useState<string | null>(null);
+  const [externalOpened, setExternalOpened] = useState(false);
   const mountedRef = useRef(true);
 
   const loadSource = useCallback(async () => {
@@ -42,6 +42,7 @@ export default function DubbedWatchScreen() {
       const proxyUrl = typeof d.hlsUrl  === "string"
         ? (d.hlsUrl.startsWith("/") ? `${BASE}${d.hlsUrl}` : d.hlsUrl)
         : null;
+      const sourceType = typeof d.type === "string" ? d.type.toLowerCase() : "";
 
       if (!rawUrl && !proxyUrl) {
         setError("لم يُعثر على مصدر فيديو لهذه الحلقة");
@@ -51,19 +52,22 @@ export default function DubbedWatchScreen() {
 
       // foupix يحجب طلبات الـ VPS، بينما هاتف المستخدم يخرج من IP سكني مسموح.
       // لذلك جرّب الرابط الخام من الهاتف أولاً، ثم استخدم proxy الخادم كاحتياطي.
-      const srcs: PlayerSource[] = [];
-      if (rawUrl) {
-        // المصدر الرئيسي: الهاتف يتصل مباشرةً من IP سكني
-        srcs.push({ url: rawUrl, label: "مدبلج عربي (مباشر)", quality: "720p HD", headers: {
-          Referer: "https://www.arabic-toons.com/",
-          Origin: "https://www.arabic-toons.com",
-        }});
+      const playUrl = sourceType === "hls"
+        ? (proxyUrl || rawUrl)
+        : (rawUrl || proxyUrl);
+      if (!playUrl) throw new Error("missing playback URL");
+      if (Platform.OS === "web") {
+        setError("NOVA Player الخارجي متاح على Android فقط");
+        setLoading(false);
+        return;
       }
-      if (proxyUrl && proxyUrl !== rawUrl) {
-        // احتياطي: proxy الخادم (مفيد إذا تغيّر سلوك CDN)
-        srcs.push({ url: proxyUrl, label: "مدبلج عربي (احتياطي)", quality: "720p HD" });
+      const opened = await openNovaPlayer(playUrl);
+      if (!opened) {
+        setError("تعذّر فتح NOVA Player — تأكد من تثبيت التطبيق");
+        setLoading(false);
+        return;
       }
-      setSources(srcs);
+      setExternalOpened(true);
       setLoading(false);
     } catch {
       if (!mountedRef.current) return;
@@ -100,7 +104,7 @@ export default function DubbedWatchScreen() {
   }
 
   /* ── Error ── */
-  if (error || sources.length === 0) {
+  if (error) {
     return (
       <View style={[styles.container, { paddingTop: topPad }]}>
         <View style={styles.header}>
@@ -126,20 +130,38 @@ export default function DubbedWatchScreen() {
     );
   }
 
-  /* ── RiftPlayer (native) ── */
+  if (externalOpened) {
+    return (
+      <View style={[styles.container, { paddingTop: topPad }]}>
+        <View style={styles.header}>
+          <Pressable onPress={() => router.back()} style={styles.backBtn}>
+            <Ionicons name="chevron-forward" size={20} color="rgba(255,255,255,0.7)" />
+          </Pressable>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.headerTitle} numberOfLines={1}>{title}</Text>
+            <Text style={styles.headerSub}>{season} · الحلقة {ep} · NOVA Player الخارجي</Text>
+          </View>
+        </View>
+        <View style={styles.center}>
+          <View style={styles.externalIcon}>
+            <Ionicons name="open-outline" size={32} color="#c4b5fd" />
+          </View>
+          <Text style={styles.externalTitle}>تم فتح NOVA Player</Text>
+          <Text style={styles.errorText}>اضغط رجوع داخل NOVA Player للعودة إلى تطبيق NOVA.</Text>
+          <Pressable onPress={loadSource} style={styles.retryBtn}>
+            <Ionicons name="refresh" size={16} color="#A78BFA" />
+            <Text style={styles.retryText}>إعادة فتح المشغل</Text>
+          </Pressable>
+        </View>
+      </View>
+    );
+  }
+
+  /* كل مصادر الكرتون المدبلج تُفتح في NOVA Player الخارجي. */
   return (
-    <RiftPlayer
-      sources={sources}
-      title={`${title || ""} · ${season || ""}`}
-      episode={ep ? parseInt(ep, 10) : undefined}
-      onBack={() => router.back()}
-      /* يظل المشغل مفتوحاً بعد استنفاد المصادر كي تظهر أزرار إعادة المحاولة
-         والمصدر التالي داخل RiftPlayer بدلاً من العودة المفاجئة للشاشة السابقة. */
-      onError={() => {
-        setSources([]);
-        setError("تعذّر تشغيل مصدر المدبلج — حاول مرة أخرى");
-      }}
-    />
+    <View style={[styles.container, { paddingTop: topPad }]}>
+      <View style={styles.center}><ActivityIndicator color="#7C3AED" size="large" /></View>
+    </View>
   );
 }
 
@@ -174,4 +196,6 @@ const styles = StyleSheet.create({
     borderRadius: 12, borderWidth: 1, borderColor: "rgba(124,58,237,0.3)",
   },
   retryText: { color: "#A78BFA", fontFamily: "Cairo_700Bold" },
+  externalIcon: { width: 70, height: 70, borderRadius: 35, backgroundColor: "rgba(139,92,246,0.12)", borderWidth: 1, borderColor: "rgba(167,139,250,0.24)", alignItems: "center", justifyContent: "center" },
+  externalTitle: { color: "#c4b5fd", fontSize: 17, fontFamily: "Cairo_700Bold" },
 });

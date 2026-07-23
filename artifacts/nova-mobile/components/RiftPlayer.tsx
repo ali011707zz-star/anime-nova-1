@@ -1444,12 +1444,14 @@ export function RiftPlayer({
           }
         }}
         bufferConfig={{
-          minBufferMs: 1000,
-          maxBufferMs: 30000,
-          bufferForPlaybackMs: 150,
-          bufferForPlaybackAfterRebufferMs: 1200,
-          backBufferDurationMs: 30000,
-          cacheSizeMB: 50,
+          /* Larger progressive-video buffers prevent MP4 sources from
+             repeatedly starving when the CDN sends uneven chunks. */
+          minBufferMs: 3000,
+          maxBufferMs: 60000,
+          bufferForPlaybackMs: 1000,
+          bufferForPlaybackAfterRebufferMs: 3000,
+          backBufferDurationMs: 60000,
+          cacheSizeMB: 120,
         }}
         ignoreSilentSwitch="ignore"
         playInBackground={false}

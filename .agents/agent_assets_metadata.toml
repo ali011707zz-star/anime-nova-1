@@ -18,3 +18,9 @@ id = "MqPLzpHZcPtnxDqRhdo-F"
 uri = "file://attached_assets/output/AniTaku_patched.apk"
 type = "unspecified"
 title = "AniTaku (معدّل - يتجاوز فحص PCAPdroid)"
+
+[[outputs]]
+id = "wQlF71IryLSUSKnqTsTEb"
+uri = "file://nova-player-build/NOVA-Player.apk"
+type = "unspecified"
+title = "NOVA Player APK"
