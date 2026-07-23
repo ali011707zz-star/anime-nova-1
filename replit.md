@@ -78,7 +78,7 @@ ssh -i ~/.ssh/deploy_key root@95.182.93.105 \
 
 ## Nova Mobile (Expo APK) — Current Status
 
-**Project**: `artifacts/nova-mobile/` — Expo SDK 52 React Native app (Arabic anime streaming)
+**Project**: `artifacts/nova-mobile/` — Expo SDK 54 React Native app (Arabic anime streaming)
 
 **EAS Config**:
 - Project ID: `07296477-c5e8-4a47-a804-95f28b46ef7b`
@@ -97,6 +97,7 @@ ssh -i ~/.ssh/deploy_key root@95.182.93.105 \
 - expo-router, expo-screen-orientation, expo-video
 - react-native-gesture-handler, react-native-safe-area-context
 - react-native-screens, react-native-webview, expo-secure-store
+- **Active native player**: `react-native-video` (ExoPlayer on Android, AVPlayer on iOS)
 - **Removed**: expo-glass-effect, expo-location, react-native-reanimated, react-native-worklets, react-native-svg, expo-symbols
 
 **Key files**:
@@ -115,7 +116,7 @@ ssh -i ~/.ssh/deploy_key root@95.182.93.105 \
 - On failure → auto-fallback to next scraper in FALLBACK_ORDER
 - Results cached 5 min in AsyncStorage per (anime, ep, site)
 
-**Build command**: `cd artifacts/nova-mobile && eas build --platform android --profile preview`
+**Build command**: push to `main` or manually run `.github/workflows/build-apk.yml`; the workflow builds a native release APK with `react-native-video`.
 **Debug**: `adb logcat | grep -E "FATAL|crash|nova|expo"`
 
 ## Anime Rift APK Reverse-Engineering (owner's previous app)

@@ -27,7 +27,7 @@ VPS consumed ~14GB unexpectedly. Three endpoints were streaming video through th
 - `animation/watch.tsx`: added `extractHeadersFromProxy()` helper + uses `s.headers || extractHeadersFromProxy(url)`
 
 ## Why Headers Matter
-- Mobile (ExoPlayer/AVPlayer via expo-video): player receives `{ uri, headers }` → sends Referer/Origin on ALL requests including CDN segment fetches → CDN accepts
+- Mobile APK (ExoPlayer/AVPlayer via react-native-video): player receives `{ uri, headers }` → sends Referer/Origin on ALL requests including CDN segment fetches → CDN accepts
 - Web (hls.js): browser can't set custom Referer/Origin on cross-origin segment fetches → CDN without CORS will reject. This is unavoidable without proxying. User explicitly requested no proxying.
 
 ## Remaining pipe() in app.ts
