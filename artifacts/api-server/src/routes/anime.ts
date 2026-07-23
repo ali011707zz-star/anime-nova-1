@@ -4769,7 +4769,7 @@ async function getTopCimaaSources(
 // ════════════════════════════════════════════════════════════════════
 let _animeifyCreds: { base: string; token: string; ts: number } | null = null;
 let _animeifyFallbackCreds: { base: string; token: string } | null = null; // last known good
-const ANIMEIFY_CREDS_TTL = 60 * 60_000; // 1 hour
+const ANIMEIFY_CREDS_TTL = 12 * 60 * 60_000; // 12 hours — token نادراً ما يتغير، تجنّب طلب الخادم عند كل سحب
 
 function invalidateAnimeifyCreds() { _animeifyCreds = null; }
 
@@ -7938,35 +7938,74 @@ async function getAnimeWitcherSources(
   title: string, english: string | null, ep: number, _anilistId?: number,
 ): Promise<UnifiedSource[]> {
   try {
-    // 1. إيجاد docId بدون Algolia/Firestore (كلاهما محجوب من VPS 2026-07-17).
-    //    الـ HF Space يخزن الأنمي في Firestore بمفتاح = اسم الأنمي بالإنجليزي.
-    //    نجرب العنوان الإنجليزي أولاً ثم الرومانية — كل مرشح يُختبر بـ /api/episodes.
+    /* 1. البحث عبر /api/search?q= (الطريقة الصحيحة) بدلاً من تخمين docId مباشرةً.
+       نجرب الإنجليزي أولاً ثم الروماجي — نختار أفضل تطابق بـ similarity. */
     let docId: string | null = null;
     let episodes: Array<{ id: string; name: string; num: number }> = [];
 
-    const tryCandidate = async (candidate: string): Promise<boolean> => {
+    const queries = [...new Set([english, title].filter(Boolean) as string[])];
+    for (const q of queries) {
       try {
-        const r = await fetch(`${AW_HF_BASE}/api/episodes?id=${encodeURIComponent(candidate)}`, {
+        const sr = await fetch(`${AW_HF_BASE}/api/search?q=${encodeURIComponent(q)}`, {
           headers: BASE_HDRS,
-          signal: AbortSignal.timeout(12000),
+          signal: AbortSignal.timeout(10_000),
         });
-        if (!r.ok) return false;
-        const d = await r.json() as { episodes?: Array<{ id: string; name: string; num: number }> };
-        if (!d.episodes?.length) return false;
+        if (!sr.ok) continue;
+        const raw = await sr.json().catch(() => null);
+        const hits: any[] = raw?.hits ?? raw?.results ?? (Array.isArray(raw) ? raw : []);
+        if (!hits.length) continue;
+
+        // أفضل تطابق بـ similarity بدلاً من أخذ أول نتيجة عمياً
+        let bestHit: any = null;
+        let bestScore = 0;
+        for (const h of hits) {
+          const hName = String(h.name || h.title || h.anime_name || "");
+          const s = Math.max(
+            similarity(hName, title),
+            english ? similarity(hName, english) : 0,
+          );
+          if (s > bestScore) { bestScore = s; bestHit = h; }
+        }
+        if (!bestHit || bestScore < 0.45) continue;
+
+        const candidate = String(bestHit.id || bestHit.anime_id || "");
+        if (!candidate) continue;
+
+        // تحقق أن الـ id صحيح وجلب الحلقات في نفس الخطوة
+        const er = await fetch(`${AW_HF_BASE}/api/episodes?id=${encodeURIComponent(candidate)}`, {
+          headers: BASE_HDRS,
+          signal: AbortSignal.timeout(12_000),
+        });
+        if (!er.ok) continue;
+        const ed = await er.json() as { episodes?: Array<{ id: string; name: string; num: number }> };
+        if (!ed.episodes?.length) continue;
+
         docId = candidate;
-        episodes = d.episodes;
-        return true;
-      } catch { return false; }
-    };
-
-    // بناء قائمة المرشحين من العنوانين الإنجليزي والرومانية
-    const candidates: string[] = [];
-    if (english) candidates.push(english);
-    if (title && title !== english) candidates.push(title);
-
-    for (const c of candidates) {
-      if (await tryCandidate(c)) break;
+        episodes = ed.episodes;
+        console.log(`[AnimeWitcher] search hit: "${bestHit.name}" (score=${bestScore.toFixed(2)}) id=${docId}`);
+        break;
+      } catch {}
     }
+
+    // fallback: تجربة المطابقة المباشرة بالاسم إذا فشل البحث
+    if (!docId) {
+      const fallbackCandidates = [...new Set([english, title].filter(Boolean) as string[])];
+      for (const c of fallbackCandidates) {
+        try {
+          const r = await fetch(`${AW_HF_BASE}/api/episodes?id=${encodeURIComponent(c)}`, {
+            headers: BASE_HDRS,
+            signal: AbortSignal.timeout(10_000),
+          });
+          if (!r.ok) continue;
+          const d = await r.json() as { episodes?: Array<{ id: string; name: string; num: number }> };
+          if (!d.episodes?.length) continue;
+          docId = c;
+          episodes = d.episodes;
+          break;
+        } catch {}
+      }
+    }
+
     if (!docId) return [];
 
     // 2. ابحث عن الحلقة المطلوبة (episodes جُلبت في tryCandidate)
@@ -11844,32 +11883,47 @@ async function getSAnimeSources(
 
   const out: UnifiedSource[] = [];
   try {
-    // 1. بحث بالروماجي أولاً (SAnime يستخدم أسماء يابانية مرومجة) ثم الإنجليزي
-    const query = encodeURIComponent(title || english || "");
-    const searchRes = await fetch(`${SANIME_API}search&name=${query}`, {
-      headers: { "User-Agent": SANIME_UA, "Accept": "application/json" },
-      signal: AbortSignal.timeout(10_000),
-    });
-    if (!searchRes.ok) { console.warn(`[SAnime] search HTTP ${searchRes.status}`); return out; }
-    const results: any[] = await searchRes.json().catch(() => []);
-    if (!Array.isArray(results) || results.length === 0) return out;
+    /* 1. البحث — SAnime يخزّن أسماء عربية ومترجمة، نجرب الإنجليزي أولاً ثم الروماجي.
+       ندمج النتائج لتحسين فرص المطابقة (بعض العناوين موجودة بكلا الاسمين). */
+    const queries = [...new Set([english, title].filter(Boolean) as string[])];
+    const allResults: any[] = [];
+    const seenIds = new Set<string>();
+    for (const q of queries) {
+      try {
+        const searchRes = await fetch(`${SANIME_API}search&name=${encodeURIComponent(q)}`, {
+          headers: { "User-Agent": SANIME_UA, "Accept": "application/json" },
+          signal: AbortSignal.timeout(10_000),
+        });
+        if (!searchRes.ok) continue;
+        const batch: any[] = await searchRes.json().catch(() => []);
+        if (Array.isArray(batch)) {
+          for (const r of batch) {
+            const rid = String(r.id ?? "");
+            if (rid && !seenIds.has(rid)) { seenIds.add(rid); allResults.push(r); }
+          }
+        }
+      } catch {}
+      if (allResults.length > 0) break; // وجدنا نتائج بالاستعلام الأول — لا داعي للثاني
+    }
+    if (allResults.length === 0) return out;
 
     // 2. similarity match — مع ترجيح رقم الموسم (SAnime يفصل كل موسم كمُدخل مستقل)
     const targetSeason = sanimeSeasonNum(english) !== 1 ? sanimeSeasonNum(english) : sanimeSeasonNum(title);
     let bestId: string | null = null;
     let bestScore = 0;
-    for (const r of results) {
-      const label = r.name ?? "";
+    for (const r of allResults) {
+      const label = String(r.name ?? r.title ?? "");
       let score = Math.max(
         similarity(label, title),
         english ? similarity(label, english) : 0,
       );
-      // بدون هذا الترجيح، مطابقة "Re:Zero...4th Season" تُطابق خطأً الموسم الأول (تشابه نصي أعلى لكن موسم خاطئ)
+      // بدون هذا الترجيح، مطابقة "Re:Zero...4th Season" تُطابق خطأً الموسم الأول
       const labelSeason = sanimeSeasonNum(label);
       score += labelSeason === targetSeason ? 0.15 : -0.25;
       if (score > bestScore) { bestScore = score; bestId = String(r.id); }
     }
-    if (!bestId || bestScore < 0.42) {
+    // threshold مخفَّض من 0.42 → 0.30 لأن عناوين SAnime العربية لا تطابق تماماً الروماجي
+    if (!bestId || bestScore < 0.30) {
       console.log(`[SAnime] no match for "${english || title}" (best=${bestScore.toFixed(2)}, targetSeason=${targetSeason})`);
       return out;
     }
@@ -11893,7 +11947,7 @@ async function getSAnimeSources(
       return out;
     }
 
-    // 5. Direct CDN URL (HEAD check)
+    // 5. Direct CDN URL — HEAD checks بالتوازي لتوفير الوقت (5ث بدل 9ث)
     const directHD = `${SANIME_CDN}/${bestId}/${ep}.mp4`;
     const directSD = `${SANIME_CDN}/${bestId}/${ep}SD.mp4`;
     const SANIME_REF = "https://app.sanime.net/";
@@ -11901,47 +11955,21 @@ async function getSAnimeSources(
     const proxiedSD = `/api/anime/video-proxy?url=${encodeURIComponent(directSD)}&ref=${encodeURIComponent(SANIME_REF)}`;
     let usedDirect = false;
     try {
-      const headRes = await fetch(directHD, {
-        method: "HEAD",
-        headers: { "User-Agent": SANIME_UA },
-        signal: AbortSignal.timeout(5_000),
-      });
-      if (headRes.ok) {
-        out.push({
-          name:        "SAnime · FHD",
-          url:         directHD,
-          quality:     "FHD",
-          qualityRank: 14,
-          site:        "sanime",
-          directUrl:   proxiedHD,
-          directType:  "mp4",
-          headers:     { Referer: SANIME_REF },
-          corsOk:      false,
-        });
-        // تحقق من SD قبل الإضافة
-        try {
-          const sdHead = await fetch(directSD, {
-            method: "HEAD",
-            headers: { "User-Agent": SANIME_UA },
-            signal: AbortSignal.timeout(4_000),
-          });
-          if (sdHead.ok) {
-            out.push({
-              name:        "SAnime · HD",
-              url:         directSD,
-              quality:     "HD",
-              qualityRank: 9,
-              site:        "sanime",
-              directUrl:   proxiedSD,
-              directType:  "mp4",
-              headers:     { Referer: SANIME_REF },
-              corsOk:      false,
-            });
-          }
-        } catch { /* SD غير موجود — نتجاهله */ }
+      const [hdOk, sdOk] = await Promise.all([
+        fetch(directHD, { method: "HEAD", headers: { "User-Agent": SANIME_UA }, signal: AbortSignal.timeout(6_000) })
+          .then(r => r.ok).catch(() => false),
+        fetch(directSD, { method: "HEAD", headers: { "User-Agent": SANIME_UA }, signal: AbortSignal.timeout(6_000) })
+          .then(r => r.ok).catch(() => false),
+      ]);
+      if (hdOk) {
+        out.push({ name: "SAnime · FHD", url: directHD, quality: "FHD", qualityRank: 14, site: "sanime", directUrl: proxiedHD, directType: "mp4", headers: { Referer: SANIME_REF }, corsOk: false });
         usedDirect = true;
       }
-    } catch { /* timeout أو 404 — نجرب openAnd */ }
+      if (sdOk) {
+        out.push({ name: "SAnime · HD",  url: directSD, quality: "HD",  qualityRank: 9,  site: "sanime", directUrl: proxiedSD, directType: "mp4", headers: { Referer: SANIME_REF }, corsOk: false });
+        usedDirect = true;
+      }
+    } catch { /* timeout — نجرب openAnd */ }
 
     // 6. openAnd fallback
     if (!usedDirect) {

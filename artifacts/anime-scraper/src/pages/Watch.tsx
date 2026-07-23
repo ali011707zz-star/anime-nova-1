@@ -197,6 +197,7 @@ const ARABIC_SITES = new Set(SCRAPER_DEFS.filter(d => d.isArabic).map(d => d.sit
  */
 const PRIORITY_FETCH_SITES = new Set([
   "kawaii", "hianime", "animewitcher", "dulo_anim", "anineko", "anikoto",
+  "animeify", "sanime",  // animeify: token مُخزَّن (12h TTL) → استجابة سريعة ؛ sanime: MP4 مباشر بلا embed
   // shahiid/animelek: أُزيلت — معطّلة بطلب المستخدم 2026-07-14
 ]);
 
@@ -265,6 +266,8 @@ function isEmbedFallback(src: FetchedSrc): boolean {
   const url = (src.directUrl || src.url || "").toLowerCase();
   if (!src.isEmbed) return false;
   if (src.site === "witanime" || src.site === "mycima" || src.site === "moviz_time" || src.site === "faselhd_db" || src.site === "akoam") return true;
+  // animeify: FileMoon+SendVid تُعاد كـ isEmbed:true عند فشل extraction — اعرضها كـ fallback بدل إخفائها
+  if (src.site === "animeify") return true;
   return url.includes("mega.nz") || url.includes("mega.co.nz") || url.includes("vidmoly");
 }
 
