@@ -87,11 +87,9 @@ jobs:
             gradle/wrapper/gradle-wrapper.properties
 
           # ── 2. تعطيل أخطاء الإهمال وإعدادات BuildConfig ──
-          cat >> gradle.properties << 'GRADLEEOF'
-          org.gradle.warning.mode=none
-          android.suppressUnsupportedCompileSdk=35
-          android.defaults.buildfeatures.buildconfig=true
-          GRADLEEOF
+                    echo "org.gradle.warning.mode=none" >> gradle.properties
+          echo "android.suppressUnsupportedCompileSdk=35" >> gradle.properties
+          echo "android.defaults.buildfeatures.buildconfig=true" >> gradle.properties
 
           # ── 3. إضافة kotlinVersion لـ rootProject.ext لتوافق react-native-video ──
           # RN 0.74+ يضع kotlinVersion في buildscript.ext فقط؛ rnv يتحقق من rootProject.ext
