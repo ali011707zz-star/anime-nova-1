@@ -95,7 +95,9 @@ jobs:
           # RN 0.74+ يضع kotlinVersion في buildscript.ext فقط؛ rnv يتحقق من rootProject.ext
           # فيجد null ويرجع لقيمة "1.8.0" الافتراضية مما يسبب تعارض classpath.
           # نستخرج النسخة الفعلية من build.gradle ونضيفها للـ project-level ext.
-          KOTLIN_VER=$(grep -m1 'kotlinVersion\s*=' build.gradle | grep -oP '"[^"]+"' | tr -d '"' || echo "2.0.21")
+          KOTLIN_VER=$(grep -m1 'kotlinVersion\s*=\s*"' build.gradle | grep -oP '"\K[^"]+' || true)
+          if [ -z "$KOTLIN_VER" ]; then KOTLIN_VER="2.0.21"; fi
+          echo "ℹ️  kotlinVersion = ${KOTLIN_VER}"
           echo "" >> build.gradle
           echo "// react-native-video: kotlinVersion must be in project ext (not buildscript.ext)" >> build.gradle
           echo "ext.kotlinVersion = \"${KOTLIN_VER}\"" >> build.gradle
