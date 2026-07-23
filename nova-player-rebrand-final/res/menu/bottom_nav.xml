@@ -1,6 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<menu
-  xmlns:android="http://schemas.android.com/apk/res/android">
-    <item android:icon="@drawable/ic_nav_files" android:id="@id/nav_files" android:title="@string/label_files" />
-    <item android:icon="@drawable/ic_nav_downloads" android:id="@id/nav_downloads" android:title="@string/label_downloads" />
-</menu>

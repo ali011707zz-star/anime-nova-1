@@ -1,8 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<LinearLayout android:gravity="center_horizontal" android:orientation="vertical" android:id="@id/player_lock_button_outside" android:visibility="invisible" android:layout_width="wrap_content" android:layout_height="wrap_content"
-  xmlns:android="http://schemas.android.com/apk/res/android" xmlns:app="http://schemas.android.com/apk/res-auto">
-    <ImageButton android:gravity="center" android:id="@id/lock_button_outside" android:background="?selectableItemBackgroundBorderless" android:focusable="true" android:visibility="visible" android:layout_width="48.0dip" android:layout_height="48.0dip" android:contentDescription="@null" app:srcCompat="@drawable/circle_lock_icon" />
-    <Button android:id="@id/unlock_button" android:visibility="gone" android:layout_width="wrap_content" android:layout_height="48.0dip" android:text="@string/label_unlock_question" app:icon="@drawable/ic_icon_lock_open" app:iconTint="@color/md_black_1000" style="@style/NetflixButton" />
-    <TextView android:textSize="16.0sp" android:textStyle="bold" android:textColor="@color/md_white_1000" android:gravity="fill" android:visibility="gone" android:layout_width="wrap_content" android:layout_height="28.0dip" android:text="@string/label_locked" android:includeFontPadding="false" />
-    <TextView android:textSize="10.0sp" android:textColor="#ffb3b3b3" android:visibility="gone" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/label_tap_to_unlock" />
-</LinearLayout>

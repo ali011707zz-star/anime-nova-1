@@ -1,7 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<menu
-  xmlns:android="http://schemas.android.com/apk/res/android" xmlns:app="http://schemas.android.com/apk/res-auto">
-    <item android:id="@id/open_network_url" android:title="@string/open_with_internet" app:showAsAction="never" />
-    <item android:id="@id/sort_by" android:title="@string/sort_by" app:showAsAction="never" />
-    <item android:id="@id/action_settings" android:title="@string/action_settings" app:showAsAction="never" />
-</menu>

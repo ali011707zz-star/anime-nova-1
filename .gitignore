@@ -47,8 +47,6 @@ Thumbs.db
 # Replit
 .cache/
 .local/
-<<<<<<< HEAD
-=======
 .replit
 replit.nix
 
@@ -69,4 +67,14 @@ anime-nova-1/attached_assets/
 .env
 .env.local
 .env.production
->>>>>>> origin/main
+
+# Decompiled APK artifacts — contain embedded Firebase/Google API keys (NEVER commit)
+nova-player-rebrand/
+nova-player-rebrand-final/
+nova-player-build/
+nova-player-build-final/
+
+# APK binaries
+*.apk
+*.keystore
+*.jks

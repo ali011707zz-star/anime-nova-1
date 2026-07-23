@@ -1,6 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<resources>
-    <dimen name="brightness_bar_gesture_region_height">180.0dip</dimen>
-    <dimen name="brightness_bar_height">100.0dip</dimen>
-    <dimen name="brightness_gesture_region_width">75.0dip</dimen>
-</resources>
