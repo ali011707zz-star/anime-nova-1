@@ -860,7 +860,7 @@ function wrapAnimForMobile(
    * لا نُبقي directUrl الخام إذا كان هناك proxyUrl من الـ scraper.
    * ExoPlayer يختار directUrl في تطبيق الموبايل، وتركه خاماً يجعل الجهاز
    * يتجاوز hls-proxy ويصل إلى CDN المحجوب من VPS. نُرسل رابط الـ proxy
-   * في الحقلين حتى تكون الأولوية آمنة أيضاً مع الكاش والعملاء القدامى.
+   * في الحقلين حتى تكون الأولوية آمنة أيضاً مع العملاء أو الكاش القديم.
    */
   if (proxyUrl && proxyUrl.startsWith("/api/")) {
     return { directUrl: proxyUrl, proxyUrl };

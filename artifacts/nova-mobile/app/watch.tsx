@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import {
-  Alert, View, Text, Pressable, Image, ScrollView,
+  View, Text, Pressable, Image, ScrollView,
   StyleSheet, Platform, Animated, Easing,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
@@ -15,7 +15,6 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useApp } from "@/context/AppContext";
 import { getBaseUrl } from "@/utils/api";
 import { secureFetch, warmAuthToken } from "@/utils/secureApi";
-import { openNovaPlayer } from "@/utils/externalPlayer";
 import * as ScreenOrientation from "expo-screen-orientation";
 
 /* ── Types ── */
@@ -138,15 +137,6 @@ function isDirectPlayable(s: Src): boolean {
   // mp4upload: HEVC codec — يُشغَّل بدون صوت/صورة على أغلب الأجهزة
   if (url.includes("mp4upload")) return false;
   return true;
-}
-function isHlsSource(s: Src): boolean {
-  const url = (s.directUrl || s.url || "").toLowerCase();
-  return s.directType === "hls" || url.includes("hls-proxy") || /\.m3u8(?:[?#]|$)/i.test(url);
-}
-function isMp4Source(s: Src): boolean {
-  if (isHlsSource(s)) return false;
-  const url = (s.directUrl || s.url || "").toLowerCase();
-  return s.directType === "mp4" || /\.mp4(?:[?#]|$)/i.test(url) || url.includes("video-proxy");
 }
 function isEmbedSrc(s: Src): boolean {
   if (!s.isEmbed) return false;
@@ -321,7 +311,7 @@ function SrcRow({ src, idx, onPlay }: { src: Src; idx: number; onPlay: (s: Src) 
   const q = getSrcQuality(src);
   const qs = QUALITY_STYLE[q];
   const tag = getSiteTag(src.site || "");
-  const isExternal = !isMp4Source(src);
+  const isHls = (src.directUrl || src.url || "").includes("hls-proxy") || src.directType === "hls";
   const hasSub = !!src.subtitleUrl;
 
   return (
@@ -334,12 +324,6 @@ function SrcRow({ src, idx, onPlay }: { src: Src; idx: number; onPlay: (s: Src) 
           <Text style={d.srcNum}>سيرفر {idx + 1}</Text>
           <View style={d.srcTag}><Text style={d.srcTagText}>{tag}</Text></View>
           {hasSub && <View style={d.srcSubBadge}><Text style={d.srcSubText}>ترجمة</Text></View>}
-          <View style={[d.srcPlayerBadge, isExternal ? d.srcExternalBadge : d.srcInternalBadge]}>
-            <Ionicons name={isExternal ? "open-outline" : "phone-portrait-outline"} size={9} color={isExternal ? "#c4b5fd" : "#6ee7b7"} />
-            <Text style={[d.srcPlayerText, { color: isExternal ? "#c4b5fd" : "#6ee7b7" }]}>
-              {isExternal ? "NOVA Player الخارجي" : "المشغل المدمج"}
-            </Text>
-          </View>
         </View>
       </View>
       <View style={d.srcRight}>
@@ -393,7 +377,6 @@ export default function WatchScreen() {
   const [resolveFailed, setResolveFailed] = useState(false); // آخر محاولة WebView مخفي فشلت → نعرض بطاقة "يحتاج تطبيق أصلي"
   const [globalSubUrl, setGlobalSubUrl] = useState<string | undefined>();
   const [arEpTitle,   setArEpTitle]   = useState<string | undefined>();
-  const [externalError, setExternalError] = useState(false);
   /* slotStatus: حالة كل مصدر في المنتقي */
   const [slotStatus,  setSlotStatus]  = useState<Record<string, "idle" | "fetching" | "ready" | "failed">>({});
 
@@ -684,22 +667,7 @@ export default function WatchScreen() {
 
     setPlayingSrc(src);
     setResolveFailed(false);
-    setExternalError(false);
-    /* Every non-MP4 source belongs to the rebranded external NOVA Player. */
-    if (Platform.OS !== "web" && !isMp4Source(src) && !src.isEmbed) {
-      const url = resolveUrl(getPlayUrl(src), getBaseUrl());
-      openNovaPlayer(url).then(ok => {
-        if (!ok) {
-          setExternalError(true);
-          Alert.alert("NOVA Player", "تعذّر فتح المشغل الخارجي. تأكد من تثبيت NOVA Player.");
-        }
-      }).catch(() => {
-        setExternalError(true);
-        Alert.alert("NOVA Player", "تعذّر فتح المشغل الخارجي.");
-      });
-      return;
-    }
-    /* على web: التشغيل الداخلي هو البديل لأن APK خارجي غير متاح */
+    /* على web: HLS → embed WebView مع hls-proxy URL مباشرة */
     if (Platform.OS === "web") {
       setScreen(isEmbedSrc(src) ? "embed" : "native");
       return;
@@ -1049,7 +1017,7 @@ export default function WatchScreen() {
         </Pressable>
       </View>
 
-       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={d.scrollContent}>
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={d.scrollContent}>
 
         {/* ── Info card ── */}
         <View style={d.infoCard}>
@@ -1074,12 +1042,6 @@ export default function WatchScreen() {
             </View>
           </View>
         </View>
-        {externalError && (
-          <View style={d.externalNotice}>
-            <Ionicons name="information-circle-outline" size={15} color="#c4b5fd" />
-            <Text style={d.externalNoticeText}>مصادر HLS تُفتح في NOVA Player الخارجي</Text>
-          </View>
-        )}
 
         {/* ── Site selector: اختر مصدراً لبدء التشغيل ── */}
         {allSrcs.length === 0 && !loading && (
@@ -1236,12 +1198,6 @@ const d = StyleSheet.create({
   srcTag:        { backgroundColor: "rgba(139,92,246,0.18)", borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2, borderWidth: 1, borderColor: "rgba(139,92,246,0.30)" },
   srcTagText:    { fontSize: 9, fontFamily: "Cairo_800ExtraBold", color: "rgba(196,181,253,0.90)", fontVariant: ["tabular-nums"] },
   srcSubBadge:   { backgroundColor: "rgba(34,197,94,0.12)", borderRadius: 5, paddingHorizontal: 5, paddingVertical: 1, borderWidth: 1, borderColor: "rgba(34,197,94,0.25)" },
-  srcPlayerBadge: { flexDirection: "row", alignItems: "center", gap: 3, borderRadius: 5, paddingHorizontal: 5, paddingVertical: 1, borderWidth: 1 },
-  srcInternalBadge: { backgroundColor: "rgba(52,211,153,0.08)", borderColor: "rgba(52,211,153,0.22)" },
-  srcExternalBadge: { backgroundColor: "rgba(167,139,250,0.10)", borderColor: "rgba(167,139,250,0.26)" },
-  srcPlayerText: { fontSize: 8, fontFamily: "Cairo_700Bold" },
-  externalNotice: { flexDirection: "row", alignItems: "center", gap: 7, marginHorizontal: 14, marginBottom: 10, paddingHorizontal: 12, paddingVertical: 9, borderRadius: 10, backgroundColor: "rgba(139,92,246,0.09)", borderWidth: 1, borderColor: "rgba(139,92,246,0.20)" },
-  externalNoticeText: { flex: 1, color: "rgba(196,181,253,0.82)", fontSize: 11, fontFamily: "Cairo_400Regular", textAlign: "right" },
   srcSubText:    { fontSize: 8, fontFamily: "Cairo_700Bold", color: "rgba(134,239,172,0.85)" },
   srcHlsBadge:   { backgroundColor: "rgba(99,102,241,0.12)", borderRadius: 5, paddingHorizontal: 5, paddingVertical: 1, borderWidth: 1, borderColor: "rgba(99,102,241,0.25)" },
   srcHlsText:    { fontSize: 8, fontFamily: "Cairo_700Bold", color: "rgba(165,180,252,0.85)" },
