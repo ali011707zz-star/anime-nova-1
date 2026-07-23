@@ -836,7 +836,7 @@ export default function WatchScreen() {
     );
   }
 
-  /* ══════════════ ANIMHLS PLAYER (WebView + hls.js — المشغّل الداخلي الكامل) ══════════════ */
+  /* ══════════════ RIFT PLAYER (expo-video native — ExoPlayer/AVPlayer) ══════════════ */
   const playerSources = frozenSources.length > 0 ? frozenSources : animHlsSources;
   if (screen === "native" && playerSources.length > 0) {
     const _playRaw = getPlayUrl(playingSrc!);
@@ -844,13 +844,17 @@ export default function WatchScreen() {
       s.url === _playRaw || (_playRaw && s.url.split("?")[0] === _playRaw.split("?")[0])
     ));
     return (
-      <AnimHlsPlayer
+      <RiftPlayer
         sources={playerSources}
         initialSourceIndex={startIdx}
         title={displayTitle}
         episode={epNum}
         episodeTitle={arEpTitle ?? (etitle ? decodeURIComponent(etitle) : undefined)}
         initialPosition={resumeTime}
+        anilistId={anime ? parseInt(anime) : undefined}
+        skipIntro={playingSrc?.skipIntro}
+        skipOutro={playingSrc?.skipOutro}
+        totalEps={totalEpsCount}
         onBack={() => { saveProgress(); setScreen("picker"); }}
         onError={() => {
           saveProgress();
