@@ -133,10 +133,9 @@ export default function DubbedWatchScreen() {
       title={`${title || ""} · ${season || ""}`}
       episode={ep ? parseInt(ep, 10) : undefined}
       onBack={() => router.back()}
-      onError={() => {
-        setError("فشل تشغيل الفيديو — جرّب مصدراً آخر أو أعد المحاولة");
-        setSources([]);
-      }}
+      /* يظل المشغل مفتوحاً بعد استنفاد المصادر كي تظهر أزرار إعادة المحاولة
+         والمصدر التالي داخل RiftPlayer بدلاً من العودة المفاجئة للشاشة السابقة. */
+      onError={() => {}}
     />
   );
 }

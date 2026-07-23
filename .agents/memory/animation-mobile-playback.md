@@ -37,6 +37,7 @@ description: أسباب الشاشة السوداء في animation watch على 
 - عند إضافة source جديد لـ animation.ts: تأكد أن `sendSource` تُرسل `extra2.headers` الصحيح عند استخدام raw CDN URLs
 - الـ hls-proxy path (proxied URL) لا تحتاج headers في extra2 — CF Worker يتولى الـ Referer داخلياً
 - عند تعديل CF Worker: اختبر مع M3U8 مُعادة بـ Content-Type خاطئ (text/plain)
+- في عميل الموبايل، استخدم `proxyUrl` قبل `directUrl`؛ وعند إرسال مصدر موبايل من الخادم، اجعل رابط الـ proxy في الحقلين لتفادي تجاوز hls-proxy مع العملاء أو الكاش القديم.
 
 ## Why
 - الـ hls-proxy → CF Worker path آمنة لكلا web وmobile
