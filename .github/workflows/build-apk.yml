@@ -54,6 +54,18 @@ jobs:
       - name: 📥 Install dependencies
         run: pnpm install --no-frozen-lockfile
 
+      - name: ✅ Verify native video player
+        run: |
+          set -eu
+          if grep -q '"expo-video"' artifacts/nova-mobile/package.json; then
+            echo "❌ expo-video must not be used by the native APK player"
+            exit 1
+          fi
+          grep -q '"react-native-video"' artifacts/nova-mobile/package.json
+          test -e artifacts/nova-mobile/node_modules/react-native-video
+          grep -q 'from "react-native-video"' artifacts/nova-mobile/components/RiftPlayer.tsx
+          echo "✅ react-native-video is installed and RiftPlayer uses it"
+
       - name: 🏗️ Expo Prebuild
         working-directory: artifacts/nova-mobile
         run: npx expo prebuild --platform android --clean --no-install
