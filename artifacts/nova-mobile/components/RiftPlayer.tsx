@@ -1865,16 +1865,14 @@ export function RiftPlayer({
                   </Pressable>
                   <Text style={s.centerSeekLabel}>10</Text>
                 </View>
-                {/* زر المنتصف: يظهر فقط عند الإيقاف أو التحميل */}
+                {/* زر المنتصف: يظهر دائماً — تشغيل أو إيقاف */}
                 <View style={{ alignItems: "center", justifyContent: "center" }}>
                   {!isPlaying && !buffering && <PulseRing />}
-                  {(!isPlaying || buffering) && (
-                    <Pressable onPress={togglePlay} style={s.centerPlayBtn} hitSlop={16}>
-                      {buffering && !error
-                        ? <ActivityIndicator size={32} color="#fff" />
-                        : <Ionicons name="play" size={36} color="#fff" style={{ transform: [{ translateX: 3 }] }} />}
-                    </Pressable>
-                  )}
+                  <Pressable onPress={togglePlay} style={[s.centerPlayBtn, isPlaying && !buffering && s.centerPlayBtnPlaying]} hitSlop={16}>
+                    {buffering && !error
+                      ? <ActivityIndicator size={32} color="#fff" />
+                      : <Ionicons name={isPlaying ? "pause" : "play"} size={36} color="#fff" style={isPlaying ? undefined : { transform: [{ translateX: 3 }] }} />}
+                  </Pressable>
                 </View>
                 {/* زر التخطي للأمام */}
                 <View style={{ alignItems: "center", gap: 4 }}>
@@ -1887,16 +1885,14 @@ export function RiftPlayer({
             ) : (
               /* وضع أفقي: التشغيل فقط في المنتصف */
               <View style={s.centerLandscapeWrap}>
-                {/* زر المنتصف: يظهر فقط عند الإيقاف أو التحميل */}
+                {/* زر المنتصف: يظهر دائماً — تشغيل أو إيقاف */}
                 <View style={{ alignItems: "center", justifyContent: "center" }}>
                   {!isPlaying && !buffering && <PulseRing />}
-                  {(!isPlaying || buffering) && (
-                    <Pressable onPress={togglePlay} style={s.centerPlayBtn} hitSlop={16}>
-                      {buffering && !error
-                        ? <ActivityIndicator size={32} color="#fff" />
-                        : <Ionicons name="play" size={36} color="#fff" style={{ transform: [{ translateX: 3 }] }} />}
-                    </Pressable>
-                  )}
+                  <Pressable onPress={togglePlay} style={[s.centerPlayBtn, isPlaying && !buffering && s.centerPlayBtnPlaying]} hitSlop={16}>
+                    {buffering && !error
+                      ? <ActivityIndicator size={32} color="#fff" />
+                      : <Ionicons name={isPlaying ? "pause" : "play"} size={36} color="#fff" style={isPlaying ? undefined : { transform: [{ translateX: 3 }] }} />}
+                  </Pressable>
                 </View>
               </View>
             )}
@@ -2661,6 +2657,7 @@ const s = StyleSheet.create({
   seekStepBtn: { width: 58, height: 58, alignItems: "center", justifyContent: "center", borderRadius: 29, backgroundColor: "rgba(255,255,255,0.11)", borderWidth: 1, borderColor: "rgba(255,255,255,0.20)", gap: 2 },
   seekStepLabel: { color: "#fff", fontSize: 13, fontFamily: "Cairo_800ExtraBold", lineHeight: 15 },
   playBtn: { width: 90, height: 90, borderRadius: 45, backgroundColor: "rgba(139,92,246,0.22)", borderWidth: 2, borderColor: "rgba(167,139,250,0.70)", alignItems: "center", justifyContent: "center", shadowColor: "#8B5CF6", shadowOpacity: 0.65, shadowRadius: 20, elevation: 12 },
+  centerPlayBtnPlaying: { backgroundColor: "rgba(255,255,255,0.10)", borderColor: "rgba(255,255,255,0.25)", shadowOpacity: 0 },
 
   /* Bottom bar */
   bottomBar: { paddingHorizontal: 16, paddingTop: 28, gap: 8 },
