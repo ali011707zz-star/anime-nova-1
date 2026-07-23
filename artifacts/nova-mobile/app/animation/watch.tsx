@@ -6,7 +6,7 @@ import {
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 // AnimHlsPlayer replaced by RiftPlayer (react-native-video native ExoPlayer/AVPlayer)
-import RiftPlayer, { PlayerSource } from "@/components/RiftPlayer";
+import { RiftPlayer, PlayerSource } from "@/components/RiftPlayer";
 // WebVideoPlayer removed — Rift Player is the only internal player
 import { HiddenResolverWebView, ResolvedStream } from "@/components/HiddenResolverWebView";
 import { useLocalSearchParams, useRouter } from "expo-router";
