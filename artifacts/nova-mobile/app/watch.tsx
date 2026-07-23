@@ -7,7 +7,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { RiftPlayer, PlayerSource } from "@/components/RiftPlayer";
-import AnimHlsPlayer, { AnimHlsSource } from "@/components/AnimHlsPlayer";
+// AnimHlsPlayer removed — RiftPlayer is the only player
 // WebVideoPlayer removed — Rift Player is the only internal player
 import { HiddenResolverWebView, ResolvedStream } from "@/components/HiddenResolverWebView";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -765,8 +765,8 @@ export default function WatchScreen() {
     return { directSrcs: direct, embedSrcs: embeds };
   }, [sources]);
 
-  /* ── AnimHlsPlayer sources — WebView يجلب HLS مباشرةً بـ IP الجهاز (لا يُحجب بـ CDN) ── */
-  const animHlsSources = useMemo((): AnimHlsSource[] => {
+  /* ── RiftPlayer sources — ExoPlayer/AVPlayer يجلب HLS بـ IP الجهاز (سكني لا يُحجب) ── */
+  const animHlsSources = useMemo((): PlayerSource[] => {
     const base = getBaseUrl();
     return directSrcs.map(s => {
       const rawUrl = getPlayUrl(s);
@@ -775,7 +775,7 @@ export default function WatchScreen() {
       return {
         url,
         label: `سيرفر · ${getSiteTag(s.site || "")}`,
-        quality: getSrcQuality(s),
+        quality: getSrcQuality(s) as PlayerSource["quality"],
         subtitleUrl: s.subtitleUrl ? resolveUrl(s.subtitleUrl, base) : globalSubUrl,
         ...(headers ? { headers } : {}),
       };
@@ -783,7 +783,7 @@ export default function WatchScreen() {
   }, [directSrcs, globalSubUrl]);
 
   /* ── Frozen sources: تُجمَّد لحظة دخول التشغيل — تمنع SSE الجديدة من إعادة ترتيب المصادر ── */
-  const [frozenSources, setFrozenSources] = useState<AnimHlsSource[]>([]);
+  const [frozenSources, setFrozenSources] = useState<PlayerSource[]>([]);
 
   useEffect(() => {
     if (screen === "native") {
