@@ -109,35 +109,22 @@ jobs:
           RNV_BUILD=$(find ../node_modules/react-native-video/android -maxdepth 1 -name "build.gradle" 2>/dev/null | head -1)
           if [ -n "$RNV_BUILD" ]; then
             # أضف compileOptions + kotlinOptions للـ android{} block إذا AGP >= 8
-            python3 - "$RNV_BUILD" << 'PYEOF'
-import sys, re
-
-path = sys.argv[1]
-content = open(path).read()
-
-# Add jvmTarget and Java compatibility for AGP 8.x after the AGP < 8 conditional block
-patch = """
-    // AGP 8.x fix: add explicit Java/Kotlin compatibility
-    compileOptions {
-        sourceCompatibility JavaVersion.VERSION_17
-        targetCompatibility JavaVersion.VERSION_17
-    }
-    kotlinOptions {
-        jvmTarget = JavaVersion.VERSION_17.majorVersion
-    }
-"""
-
-# Insert after the closing brace of the "if (agpVersion < 8)" block
-old = '    buildFeatures {\n        buildConfig true\n    }'
-new = f'{patch}\n    buildFeatures {{\n        buildConfig true\n    }}'
-
-if patch.strip() not in content:
-    content = content.replace(old, new, 1)
-    open(path, 'w').write(content)
-    print(f"✅ Patched {path} — added jvmTarget=17")
-else:
-    print(f"ℹ️  {path} already patched")
-PYEOF
+            # كتابة سكريبت Python مؤقت لتجنب مشكلة YAML مع heredoc
+            PYSCRIPT=$(mktemp /tmp/patch_rnv_XXXXXX.py)
+            echo 'import sys' >> "$PYSCRIPT"
+            echo 'path = sys.argv[1]' >> "$PYSCRIPT"
+            echo 'content = open(path).read()' >> "$PYSCRIPT"
+            echo 'patch = "\n    // AGP 8.x fix: add explicit Java/Kotlin compatibility\n    compileOptions {\n        sourceCompatibility JavaVersion.VERSION_17\n        targetCompatibility JavaVersion.VERSION_17\n    }\n    kotlinOptions {\n        jvmTarget = JavaVersion.VERSION_17.majorVersion\n    }\n"' >> "$PYSCRIPT"
+            echo 'old = "    buildFeatures {\n        buildConfig true\n    }"' >> "$PYSCRIPT"
+            echo 'new = patch + "\n    buildFeatures {\n        buildConfig true\n    }"' >> "$PYSCRIPT"
+            echo 'if patch.strip() not in content:' >> "$PYSCRIPT"
+            echo '    content = content.replace(old, new, 1)' >> "$PYSCRIPT"
+            echo '    open(path, "w").write(content)' >> "$PYSCRIPT"
+            echo '    print("Patched " + path + " -- added jvmTarget=17")' >> "$PYSCRIPT"
+            echo 'else:' >> "$PYSCRIPT"
+            echo '    print(path + " already patched")' >> "$PYSCRIPT"
+            python3 "$PYSCRIPT" "$RNV_BUILD"
+            rm -f "$PYSCRIPT"
           fi
 
           echo "=== gradle-wrapper.properties ==="
