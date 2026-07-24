@@ -2882,6 +2882,7 @@ async function getMitanimeSources(
                        "fembed.com",   // TLS error / dead (2026-07-24)
                        "upvideo.to",   // TLS JA3 fingerprint block — no browser = no access
                        "ok.ru","odnoklassniki.ru",  // VPS IP blocked — embed returns "user not found" (2026-07-24)
+                       "videa.hu",                  // too slow via extractVideoDeep (15-22s); removed 2026-07-25
                        // HLS-only sources — skipped by user request 2026-07-24
                        // (cfProxy + hls-proxy chain is slow and unreliable on mobile)
                        "streamwish","hlswish","wishembed","embedwish","awish","swdyu",
