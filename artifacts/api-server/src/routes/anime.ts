@@ -2744,9 +2744,9 @@ const mitanimeSrcCache  = new Map<string, { sources: UnifiedSource[]; ts: number
 function parseMitanimeServers(
   rsc: string,
 ): Array<{ name: string; quality: string; url: string; isLocked: boolean }> {
-  // RSC embeds JSON with escaped quotes: \"servers\":[ — must search for this escaped form.
-  // (The raw fetch body contains literal backslash+quote sequences, not plain quotes.)
-  const MARKER = '\\"servers\\":[';
+  // RSC response embeds plain JSON (not escaped) — search for "servers":[
+  // Confirmed 2026-07-24: Node.js fetch returns "servers":[ (no backslash-escaping).
+  const MARKER = '"servers":[';
   const idx = rsc.indexOf(MARKER);
   if (idx === -1) return [];
   const start = idx + MARKER.length - 1; // point to opening '['
@@ -2757,8 +2757,7 @@ function parseMitanimeServers(
     else if (rsc[i] === "]") { depth--; if (depth === 0) { end = i + 1; break; } }
   }
   try {
-    // Unescape RSC-escaped backslash-quote sequences before JSON.parse
-    const raw = rsc.slice(start, end).replace(/\\"/g, '"');
+    const raw = rsc.slice(start, end);
     const arr = JSON.parse(raw);
     if (Array.isArray(arr)) return arr;
   } catch {}
@@ -2771,10 +2770,24 @@ async function resolveMitanimeSlug(title: string, english: string | null): Promi
   if (cached && Date.now() - cached.ts < SRC_TTL) return cached.slug;
 
   // Try slug candidates derived directly from titles
+  // MitAnime often uses Japanese romanization slug (e.g. "kimetsu-no-yaiba") even when
+  // the English title differs ("Demon Slayer: Kimetsu no Yaiba"). Generate many variants.
   const candidates: string[] = [];
   for (const t of [english, title].filter(Boolean) as string[]) {
-    const slug = toSlug(t);
-    if (slug) candidates.push(slug);
+    const full = toSlug(t);
+    if (full) candidates.push(full);
+    // Part before colon: "Demon Slayer: Kimetsu no Yaiba" → "demon-slayer"
+    const beforeColon = toSlug(t.split(/[：:]/)[0].trim());
+    if (beforeColon && beforeColon !== full) candidates.push(beforeColon);
+    // Part after colon: "Demon Slayer: Kimetsu no Yaiba" → "kimetsu-no-yaiba"
+    const colonParts = t.split(/[：:]/);
+    if (colonParts.length > 1) {
+      const afterColon = toSlug(colonParts.slice(1).join(" ").trim());
+      if (afterColon && afterColon !== full) candidates.push(afterColon);
+    }
+    // Season suffix removal: "Attack on Titan Season 3" → "attack-on-titan"
+    const noSeason = toSlug(t.replace(/\b(season|part|cour|s\d+)\s*\d*/gi, "").trim());
+    if (noSeason && noSeason !== full) candidates.push(noSeason);
   }
 
   for (const slug of [...new Set(candidates)]) {
@@ -2805,9 +2818,9 @@ async function resolveMitanimeSlug(title: string, english: string | null): Promi
       );
       if (!r.ok) continue;
       const text = await r.text();
-      // Extract slugs from RSC-escaped form \"slug\":\"...\" AND from href="/anime/{slug}" links
+      // Extract slugs from plain JSON "slug":"..." form (confirmed 2026-07-24: RSC uses plain quotes)
       const slugsFound: string[] = [];
-      for (const m of text.matchAll(/\\"slug\\":\\"([a-z0-9][a-z0-9-]*)\\"/g)) {
+      for (const m of text.matchAll(/"slug":"([a-z0-9][a-z0-9-]*)"/g)) {
         if (/^[a-z0-9-]+$/.test(m[1]) && m[1].length > 2) slugsFound.push(m[1]);
       }
       for (const m of text.matchAll(/href="\/anime\/([a-z0-9][a-z0-9-]*)"/g)) {
@@ -2855,7 +2868,7 @@ async function getMitanimeSources(
     });
     if (!r.ok) return [];
     const text = await r.text();
-    if (!text.includes('\\"servers\\":[')) return [];
+    if (!text.includes('"servers":[')) return [];
 
     const servers = parseMitanimeServers(text);
     const sources: UnifiedSource[] = [];
