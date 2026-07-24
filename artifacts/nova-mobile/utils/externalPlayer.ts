@@ -1,11 +1,12 @@
-import { Linking, Platform } from "react-native";
+import { Linking, Platform, Alert } from "react-native";
+
+const NOVA_PLAYER_PKG = "com.player.easy";
+const NOVA_PLAYER_URL = "https://animenovaa.duckdns.org/nova-player.apk";
 
 /**
- * Opens the video URL in NOVA Player (com.player.easy / EasyPlex) if installed.
- * Falls back to an implicit video/* intent so any installed player (VLC, MX Player…)
- * handles it instead of showing an error.
- *
- * Returns true if a player was opened, false only if no player is available at all.
+ * Opens the video URL in NOVA Player (com.player.easy).
+ * If not installed → shows an alert with a download link and returns false.
+ * Never falls back to another player.
  */
 export async function openNovaPlayer(url: string): Promise<boolean> {
   if (!url || Platform.OS !== "android") return false;
@@ -15,38 +16,33 @@ export async function openNovaPlayer(url: string): Promise<boolean> {
     const scheme = parsed.protocol.replace(":", "");
     const target = `${parsed.host}${parsed.pathname}${parsed.search}`;
 
-    // 1️⃣ Try NOVA Player / EasyPlex explicitly
-    const novaIntent =
+    const intentUrl =
       `intent://${target}` +
       `#Intent;scheme=${scheme};` +
       "action=android.intent.action.VIEW;" +
       "type=video/*;" +
-      "package=com.player.easy;end";
+      `package=${NOVA_PLAYER_PKG};end`;
 
-    const novaSupported = await Linking.canOpenURL(novaIntent);
-    if (novaSupported) {
-      await Linking.openURL(novaIntent);
+    const supported = await Linking.canOpenURL(intentUrl);
+    if (supported) {
+      await Linking.openURL(intentUrl);
       return true;
     }
   } catch {
-    /* NOVA Player not installed — fall through */
+    /* fall through to alert */
   }
 
-  // 2️⃣ Fallback: implicit intent → system picks any installed video player
-  try {
-    const parsed = new URL(url);
-    const scheme = parsed.protocol.replace(":", "");
-    const target = `${parsed.host}${parsed.pathname}${parsed.search}`;
-
-    const fallbackIntent =
-      `intent://${target}` +
-      `#Intent;scheme=${scheme};` +
-      "action=android.intent.action.VIEW;" +
-      "type=video/*;end";
-
-    await Linking.openURL(fallbackIntent);
-    return true;
-  } catch {
-    return false;
-  }
+  // NOVA Player not installed → alert only
+  Alert.alert(
+    "NOVA Player غير مثبَّت",
+    "هذا المصدر يتطلب مشغل NOVA Player.\nاضغط تنزيل لتثبيته ثم أعد المحاولة.",
+    [
+      {
+        text: "تنزيل",
+        onPress: () => Linking.openURL(NOVA_PLAYER_URL).catch(() => {}),
+      },
+      { text: "إلغاء", style: "cancel" },
+    ]
+  );
+  return false;
 }
