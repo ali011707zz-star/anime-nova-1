@@ -2881,6 +2881,7 @@ async function getMitanimeSources(
                        "dotplay.net",  // 404 on all tested links (dead embed — 2026-07-24)
                        "fembed.com",   // TLS error / dead (2026-07-24)
                        "upvideo.to",   // TLS JA3 fingerprint block — no browser = no access
+                       "ok.ru","odnoklassniki.ru",  // VPS IP blocked — embed returns "user not found" (2026-07-24)
                        // HLS-only sources — skipped by user request 2026-07-24
                        // (cfProxy + hls-proxy chain is slow and unreliable on mobile)
                        "streamwish","hlswish","wishembed","embedwish","awish","swdyu",
@@ -2907,30 +2908,7 @@ async function getMitanimeSources(
           return out;
         }
 
-        // ── ok.ru / odnoklassniki → dedicated HLS extractor ───────────────────
-        if (sUrl.includes("ok.ru/videoembed/") || sUrl.includes("odnoklassniki.ru/videoembed/")) {
-          try {
-            const okm = sUrl.match(/\/videoembed\/(\d+)/);
-            if (okm) {
-              // Race with 5s — ok.ru geo-blocked from VPS (12s default wastes time)
-              const vids = await Promise.race([
-                extractOkRuVideo(okm[1]),
-                new Promise<[]>(res => setTimeout(() => res([]), 5000)),
-              ]);
-              for (const v of vids.filter(x => x.url)) {
-                const isHls = v.type === "hls";
-                const vName = v.name === "auto" ? "HLS Auto" : v.name;
-                const directUrl = isHls
-                  ? `/api/anime/hls-proxy?url=${encodeURIComponent(v.url)}&ref=${encodeURIComponent(sUrl)}`
-                  : v.url;
-                out.push({ name: `ميتانيمي · OK.ru · ${vName} · ${qLabel}`,
-                  url: sUrl, quality: qLabel, qualityRank: qRank, site: "mitanime",
-                  directUrl, directType: isHls ? "hls" : "mp4" });
-              }
-            }
-          } catch {}
-          return out;
-        }
+        // ── ok.ru → in MITA_SKIP (VPS IP blocked, 2026-07-24) — handler removed ──
 
         // ── mp4upload → direct HTML parse (~800ms vs 15-30s yt-dlp) ───────────
         // Confirmed 2026-07-24: MP4 URL is in plain HTML inside player.src({src:"..."})
