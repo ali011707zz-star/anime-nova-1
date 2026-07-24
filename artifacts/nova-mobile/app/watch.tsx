@@ -212,12 +212,13 @@ const SITE_PRIORITY: Record<string, number> = {
   dulo_anim: 70, vidlink_anim: 55,
   vidfast: 35,
   anikototv: 30, animekai: 25, animepahe: 20, anipm: 18,
+  sanime: 15,
 };
 
 /* ── قائمة المصادر (KW أولاً — الأولوية القصوى للتشغيل الفوري) ── */
 /* مصادر موحَّدة مع الويب — نفس المصادر الـ 8 المفعَّلة في SCRAPER_DEFS */
 const ANIME_SITES = [
-  "kawaii", "animewitcher", "anslayer", "animeify",
+  "kawaii", "animewitcher", "anslayer", "animeify", "sanime",
   // "witanime": معطّل بطلب المستخدم
   // "allmanga": معطّل 2026-07-17 — AA_CRYPTO_MISSING على AllAnime
 ] as const;
