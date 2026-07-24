@@ -12,16 +12,6 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useColors } from "@/hooks/useColors";
 import { useApp } from "@/context/AppContext";
 
-interface AnimHistItem {
-  tmdbId: string | number;
-  type: "movie" | "tv";
-  ep?: number;
-  season?: number;
-  title: string;
-  poster?: string;
-  date: string;
-}
-
 interface FavChar {
   id: number;
   name: string;
@@ -46,25 +36,9 @@ export default function LibraryScreen() {
 
   const [activeTab, setActiveTab] = useState(0);
   const [search, setSearch] = useState("");
-  const [animHistory, setAnimHistory] = useState<AnimHistItem[]>([]);
   const [favChars, setFavChars] = useState<FavChar[]>([]);
 
   useEffect(() => {
-    AsyncStorage.getItem("anim-watch-history").then(raw => {
-      if (!raw) return;
-      try {
-        const parsed = JSON.parse(raw) as any[];
-        setAnimHistory(parsed.map(x => ({
-          tmdbId: x.tmdbId ?? x.id,
-          type: x.type || "movie",
-          ep: x.ep,
-          season: x.season,
-          title: x.title,
-          poster: x.poster ?? x.cover,
-          date: x.date || new Date().toISOString(),
-        })));
-      } catch {}
-    });
     AsyncStorage.getItem("fav-characters").then(raw => {
       if (!raw) return;
       try { setFavChars(JSON.parse(raw)); } catch {}
@@ -95,24 +69,9 @@ export default function LibraryScreen() {
         onPress: () => router.push(`/watch?anime=${h.animeId}&ep=${h.ep}&title=${encodeURIComponent(h.title)}&english=${encodeURIComponent(h.english)}`),
         onDelete: () => removeFromHistory(h.animeId),
       }));
-    const animItems = animHistory
-      .map(h => ({
-        key: `anim-${h.tmdbId}-${h.season || 0}-${h.ep || 0}`,
-        kind: "animation" as const,
-        title: h.title,
-        subtitle: h.type === "tv" ? `الموسم ${h.season || 1} · الحلقة ${h.ep || 1}` : "فيلم",
-        thumbnail: h.poster,
-        date: new Date(h.date).getTime(),
-        position: undefined as number | undefined,
-        duration: undefined as number | undefined,
-        onPress: () => h.type === "movie"
-          ? router.push(`/animation/watch?id=${h.tmdbId}&type=movie&title=${encodeURIComponent(h.title)}` as any)
-          : router.push(`/animation/watch?id=${h.tmdbId}&type=tv&season=${h.season || 1}&ep=${h.ep || 1}&title=${encodeURIComponent(h.title)}` as any),
-        onDelete: undefined as (() => void) | undefined,
-      }));
-    const all = [...animeItems, ...animItems].sort((a, b) => (b.date as number) - (a.date as number));
+    const all = animeItems.sort((a, b) => (b.date as number) - (a.date as number));
     return sq ? all.filter(i => i.title.toLowerCase().includes(sq)) : all;
-  }, [watchHistory, animHistory, search, router, removeFromHistory]);
+  }, [watchHistory, search, router, removeFromHistory]);
 
   /* ── All history (السجل) ── */
   const historyItems = useMemo(() => {
@@ -129,23 +88,9 @@ export default function LibraryScreen() {
       onPress: () => router.push(`/watch?anime=${h.animeId}&ep=${h.ep}&title=${encodeURIComponent(h.title)}&english=${encodeURIComponent(h.english)}`),
       onDelete: () => removeFromHistory(h.animeId),
     }));
-    const animItems = animHistory.map(h => ({
-      key: `anim-${h.tmdbId}-${h.season || 0}-${h.ep || 0}`,
-      kind: "animation" as const,
-      title: h.title,
-      subtitle: h.type === "tv" ? `الموسم ${h.season || 1} · الحلقة ${h.ep || 1}` : "فيلم",
-      thumbnail: h.poster,
-      date: new Date(h.date).getTime(),
-      position: undefined as number | undefined,
-      duration: undefined as number | undefined,
-      onPress: () => h.type === "movie"
-        ? router.push(`/animation/watch?id=${h.tmdbId}&type=movie&title=${encodeURIComponent(h.title)}` as any)
-        : router.push(`/animation/watch?id=${h.tmdbId}&type=tv&season=${h.season || 1}&ep=${h.ep || 1}&title=${encodeURIComponent(h.title)}` as any),
-      onDelete: undefined as (() => void) | undefined,
-    }));
-    const all = [...animeItems, ...animItems].sort((a, b) => (b.date as number) - (a.date as number));
+    const all = animeItems.sort((a, b) => (b.date as number) - (a.date as number));
     return sq ? all.filter(i => i.title.toLowerCase().includes(sq)) : all;
-  }, [watchHistory, animHistory, search, router, removeFromHistory]);
+  }, [watchHistory, search, router, removeFromHistory]);
 
   /* ── Filtered favorites (المحفوظة) ── */
   const filteredFavs = useMemo(() => {
@@ -166,7 +111,10 @@ export default function LibraryScreen() {
   /* ── Remove character ── */
   const removeChar = useCallback(async (id: number) => {
     const raw = await AsyncStorage.getItem("fav-characters");
-    const arr = raw ? (JSON.parse(raw) as FavChar[]) : [];
+    let arr: FavChar[] = [];
+    if (raw) {
+      try { arr = JSON.parse(raw) as FavChar[]; } catch { arr = []; }
+    }
     const updated = arr.filter(c => c.id !== id);
     await AsyncStorage.setItem("fav-characters", JSON.stringify(updated));
     setFavChars(updated);

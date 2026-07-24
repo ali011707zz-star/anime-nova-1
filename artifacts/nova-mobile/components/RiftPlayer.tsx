@@ -839,6 +839,13 @@ export function RiftPlayer({
             urlCueCacheRef.current.set(url, allCues);
             if (cacheKey && isTranslated) {
               AsyncStorage.setItem(cacheKey, JSON.stringify(allCues)).catch(() => {});
+              /* نظّف مفاتيح الترجمة القديمة (sub-ar-*) — ابقَ على آخر 10 فقط */
+              AsyncStorage.getAllKeys().then(keys => {
+                const subKeys = keys.filter(k => k.startsWith("sub-ar-") && k !== cacheKey);
+                if (subKeys.length > 10) {
+                  AsyncStorage.multiRemove(subKeys.slice(0, subKeys.length - 10)).catch(() => {});
+                }
+              }).catch(() => {});
             }
           }
         }).catch(() => {
@@ -1861,16 +1868,18 @@ export function RiftPlayer({
                   </Pressable>
                   <Text style={s.centerSeekLabel}>10</Text>
                 </View>
-                {/* زر المنتصف: يظهر فقط عند الإيقاف أو التحميل */}
+                {/* زر المنتصف: play/pause/spinner */}
                 <View style={{ alignItems: "center", justifyContent: "center" }}>
                   {!isPlaying && !buffering && <PulseRing />}
-                  {(!isPlaying || buffering) && (
-                    <Pressable onPress={togglePlay} style={s.centerPlayBtn} hitSlop={16}>
-                      {buffering && !error
-                        ? <ActivityIndicator size={32} color="#fff" />
-                        : <Ionicons name="play" size={36} color="#fff" style={{ transform: [{ translateX: 3 }] }} />}
-                    </Pressable>
-                  )}
+                  <Pressable onPress={togglePlay} style={s.centerPlayBtn} hitSlop={16}>
+                    {buffering && !error
+                      ? <ActivityIndicator size={32} color="#fff" />
+                      : <Ionicons
+                          name={isPlaying ? "pause" : "play"}
+                          size={36} color="#fff"
+                          style={isPlaying ? undefined : { transform: [{ translateX: 3 }] }}
+                        />}
+                  </Pressable>
                 </View>
                 {/* زر التخطي للأمام */}
                 <View style={{ alignItems: "center", gap: 4 }}>
@@ -1881,18 +1890,19 @@ export function RiftPlayer({
                 </View>
               </View>
             ) : (
-              /* وضع أفقي: التشغيل فقط في المنتصف */
+              /* وضع أفقي: play/pause في المنتصف دائماً */
               <View style={s.centerLandscapeWrap}>
-                {/* زر المنتصف: يظهر فقط عند الإيقاف أو التحميل */}
                 <View style={{ alignItems: "center", justifyContent: "center" }}>
                   {!isPlaying && !buffering && <PulseRing />}
-                  {(!isPlaying || buffering) && (
-                    <Pressable onPress={togglePlay} style={s.centerPlayBtn} hitSlop={16}>
-                      {buffering && !error
-                        ? <ActivityIndicator size={32} color="#fff" />
-                        : <Ionicons name="play" size={36} color="#fff" style={{ transform: [{ translateX: 3 }] }} />}
-                    </Pressable>
-                  )}
+                  <Pressable onPress={togglePlay} style={s.centerPlayBtn} hitSlop={16}>
+                    {buffering && !error
+                      ? <ActivityIndicator size={32} color="#fff" />
+                      : <Ionicons
+                          name={isPlaying ? "pause" : "play"}
+                          size={36} color="#fff"
+                          style={isPlaying ? undefined : { transform: [{ translateX: 3 }] }}
+                        />}
+                  </Pressable>
                 </View>
               </View>
             )}

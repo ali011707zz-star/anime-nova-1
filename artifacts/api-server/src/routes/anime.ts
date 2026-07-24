@@ -1455,22 +1455,17 @@ async function extractVideoDeep(
         }
         break; // don't follow iframes for ok.ru
       }
-      // ── mp4upload — yt-dlp (Rocket Loader hides the video URL) ────
+      // ── mp4upload — direct HTML parse (~800ms, confirmed 2026-07-24) ────
+      // URL is in plain HTML: player.src({ type:"video/mp4", src:"https://a4.mp4upload.com:183/..." })
+      // Rocket Loader obfuscates <script> types but leaves inline player.src() intact.
       if (url.includes("mp4upload.com/embed-")) {
-        try {
-          const ytUrl = await extractViaYtDlp(url, ref, 25000);
-          if (ytUrl) return { url: ytUrl, type: "mp4" };
-        } catch {}
+        const m = html.match(/player\.src\s*\(\s*\{[^}]*src\s*:\s*["'](https?:[^"']+\.mp4[^"']*)/s)
+               || html.match(/["']src["']\s*:\s*["'](https?:[^"']+\.mp4[^"']*)/);
+        if (m) return { url: m[1], type: "mp4" };
         break;
       }
-      // ── upvideo.to — yt-dlp ───────────────────────────────────────
-      if (url.includes("upvideo.to/e/")) {
-        try {
-          const ytUrl = await extractViaYtDlp(url, ref, 25000);
-          if (ytUrl) return { url: ytUrl, type: "mp4" };
-        } catch {}
-        break;
-      }
+      // ── upvideo.to — TLS fingerprint blocked from any non-browser client ────
+      if (url.includes("upvideo.to/e/")) break;
       const direct = parseVideoUrl(html);
       if (direct) return direct;
       const nextSrc = extractIframeSrc(html, url);
@@ -2744,9 +2739,12 @@ const mitanimeSrcCache  = new Map<string, { sources: UnifiedSource[]; ts: number
 function parseMitanimeServers(
   rsc: string,
 ): Array<{ name: string; quality: string; url: string; isLocked: boolean }> {
-  const idx = rsc.indexOf('"servers":[');
+  // RSC response embeds plain JSON (not escaped) — search for "servers":[
+  // Confirmed 2026-07-24: Node.js fetch returns "servers":[ (no backslash-escaping).
+  const MARKER = '"servers":[';
+  const idx = rsc.indexOf(MARKER);
   if (idx === -1) return [];
-  const start = idx + '"servers":'.length;
+  const start = idx + MARKER.length - 1; // point to opening '['
   let depth = 0;
   let end = start;
   for (let i = start; i < rsc.length; i++) {
@@ -2754,7 +2752,8 @@ function parseMitanimeServers(
     else if (rsc[i] === "]") { depth--; if (depth === 0) { end = i + 1; break; } }
   }
   try {
-    const arr = JSON.parse(rsc.slice(start, end));
+    const raw = rsc.slice(start, end);
+    const arr = JSON.parse(raw);
     if (Array.isArray(arr)) return arr;
   } catch {}
   return [];
@@ -2765,48 +2764,77 @@ async function resolveMitanimeSlug(title: string, english: string | null): Promi
   const cached = mitanimeSlugCache.get(ck);
   if (cached && Date.now() - cached.ts < SRC_TTL) return cached.slug;
 
-  // Try slug candidates derived directly from titles
+  // Build slug candidates from both title variants
+  // MitAnime often uses Japanese romanization slug (e.g. "kimetsu-no-yaiba") even when
+  // the English title differs ("Demon Slayer: Kimetsu no Yaiba"). Generate many variants.
   const candidates: string[] = [];
   for (const t of [english, title].filter(Boolean) as string[]) {
-    const slug = toSlug(t);
-    if (slug) candidates.push(slug);
+    const full = toSlug(t);
+    if (full) candidates.push(full);
+    const beforeColon = toSlug(t.split(/[：:]/)[0].trim());
+    if (beforeColon && beforeColon !== full) candidates.push(beforeColon);
+    const colonParts = t.split(/[：:]/);
+    if (colonParts.length > 1) {
+      const afterColon = toSlug(colonParts.slice(1).join(" ").trim());
+      if (afterColon && afterColon !== full) candidates.push(afterColon);
+    }
+    const noSeason = toSlug(t.replace(/\b(season|part|cour|s\d+)\s*\d*/gi, "").trim());
+    if (noSeason && noSeason !== full) candidates.push(noSeason);
   }
 
-  for (const slug of [...new Set(candidates)]) {
-    try {
-      const r = await fetch(`${MITANIME_BASE}/watch/${slug}/1`, {
-        headers: MITANIME_RSC_HDRS,
-        signal: AbortSignal.timeout(8000),
-        redirect: "follow",
+  // ── PARALLEL slug validation: run all candidates at once, first success wins ──
+  // Previously sequential (each 8s timeout) → up to 40s total. Now max ~5s.
+  const uniqueCandidates = [...new Set(candidates)];
+  const slugResult = await Promise.race([
+    (async (): Promise<string | null> => {
+      const checks = uniqueCandidates.map(async (slug): Promise<string | null> => {
+        try {
+          const r = await fetch(`${MITANIME_BASE}/anime/${slug}`, {
+            headers: MITANIME_RSC_HDRS,
+            signal: AbortSignal.timeout(5000),
+            redirect: "follow",
+          });
+          if (!r.ok) return null;
+          const text = await r.text();
+          if (!text.includes('"/_not-found"') && text.length > 20000) return slug;
+        } catch {}
+        return null;
       });
-      if (!r.ok) continue;
-      const text = await r.text();
-      if (text.includes('"servers":[') && !text.includes('"/_not-found"')) {
-        mitanimeSlugCache.set(ck, { slug, ts: Date.now() });
-        return slug;
+      // Return the first non-null result (preserving candidate priority order)
+      for (const p of checks) {
+        const result = await p;
+        if (result) return result;
       }
-    } catch {}
+      return null;
+    })(),
+    new Promise<null>(res => setTimeout(() => res(null), 8000)),
+  ]);
+
+  if (slugResult) {
+    mitanimeSlugCache.set(ck, { slug: slugResult, ts: Date.now() });
+    return slugResult;
   }
 
-  // Fallback: search RSC endpoint
-  for (const q of [english, title].filter(Boolean) as string[]) {
+  // Fallback: search RSC endpoint (parallel for both queries)
+  const searchQueries = [english, title].filter(Boolean) as string[];
+  const searchResults = await Promise.all(searchQueries.map(async (q): Promise<string | null> => {
     try {
       const r = await fetch(
-        `${MITANIME_BASE}/search?q=${encodeURIComponent(q as string)}`,
-        { headers: MITANIME_RSC_HDRS, signal: AbortSignal.timeout(8000), redirect: "follow" },
+        `${MITANIME_BASE}/search?q=${encodeURIComponent(q)}`,
+        { headers: MITANIME_RSC_HDRS, signal: AbortSignal.timeout(6000), redirect: "follow" },
       );
-      if (!r.ok) continue;
+      if (!r.ok) return null;
       const text = await r.text();
-      // Extract ASCII-only slugs (anime slugs, not Arabic genre slugs)
       const slugsFound: string[] = [];
       for (const m of text.matchAll(/"slug":"([a-z0-9][a-z0-9-]*)"/g)) {
         if (/^[a-z0-9-]+$/.test(m[1]) && m[1].length > 2) slugsFound.push(m[1]);
       }
-      const unique = [...new Set(slugsFound)];
-      // Score each slug by similarity to titles
+      for (const m of text.matchAll(/href="\/anime\/([a-z0-9][a-z0-9-]*)"/g)) {
+        if (/^[a-z0-9-]+$/.test(m[1]) && m[1].length > 2) slugsFound.push(m[1]);
+      }
       let best: string | null = null;
       let bestScore = 0;
-      for (const slug of unique) {
+      for (const slug of [...new Set(slugsFound)]) {
         const label = slug.replace(/-/g, " ");
         const score = Math.max(
           similarity(label, title),
@@ -2814,15 +2842,12 @@ async function resolveMitanimeSlug(title: string, english: string | null): Promi
         );
         if (score > bestScore && score > 0.40) { bestScore = score; best = slug; }
       }
-      if (best) {
-        mitanimeSlugCache.set(ck, { slug: best, ts: Date.now() });
-        return best;
-      }
-    } catch {}
-  }
-
-  mitanimeSlugCache.set(ck, { slug: null, ts: Date.now() });
-  return null;
+      return best;
+    } catch { return null; }
+  }));
+  const best = searchResults.find(Boolean) || null;
+  mitanimeSlugCache.set(ck, { slug: best, ts: Date.now() });
+  return best;
 }
 
 async function getMitanimeSources(
@@ -2852,7 +2877,18 @@ async function getMitanimeSources(
     // Sites confirmed dead/parked — skip immediately to save time
     const MITA_SKIP = ["mediafire.com","workupload","gofile.io","4shared.com",
                        "drive.google","soraplay","suzihazarpc.com","vivystream.com",
-                       "my.mail.ru","vk.com","wtsrv.xyz"];  // wtsrv.xyz=timer page (needs browser)
+                       "my.mail.ru","vk.com","wtsrv.xyz",
+                       "dotplay.net",  // 404 on all tested links (dead embed — 2026-07-24)
+                       "fembed.com",   // TLS error / dead (2026-07-24)
+                       "upvideo.to",   // TLS JA3 fingerprint block — no browser = no access
+                       "ok.ru","odnoklassniki.ru",  // VPS IP blocked — embed returns "user not found" (2026-07-24)
+                       "videa.hu",                  // too slow via extractVideoDeep (15-22s); removed 2026-07-25
+                       // HLS-only sources — skipped by user request 2026-07-24
+                       // (cfProxy + hls-proxy chain is slow and unreliable on mobile)
+                       "streamwish","hlswish","wishembed","embedwish","awish","swdyu",
+                       "luluvdo.com","darkibox.com","hydracker.com",
+                       "playerwish.com","bigwarp.io","voe.sx",
+                       ];
 
     // Process all servers in PARALLEL — yt-dlp/ok.ru each take ~5-25s so sequential
     // would exceed the 60s race timeout for episodes with many servers.
@@ -2873,61 +2909,42 @@ async function getMitanimeSources(
           return out;
         }
 
-        // ── ok.ru / odnoklassniki → dedicated HLS extractor ───────────────────
-        if (sUrl.includes("ok.ru/videoembed/") || sUrl.includes("odnoklassniki.ru/videoembed/")) {
+        // ── ok.ru → in MITA_SKIP (VPS IP blocked, 2026-07-24) — handler removed ──
+
+        // ── mp4upload → direct HTML parse (~800ms vs 15-30s yt-dlp) ───────────
+        // Confirmed 2026-07-24: MP4 URL is in plain HTML inside player.src({src:"..."})
+        // Cloudflare Rocket Loader obfuscates <script> types but leaves inline player init intact.
+        if (sUrl.includes("mp4upload.com/embed-")) {
           try {
-            const okm = sUrl.match(/\/videoembed\/(\d+)/);
-            if (okm) {
-              // Race with 5s — ok.ru geo-blocked from VPS (12s default wastes time)
-              const vids = await Promise.race([
-                extractOkRuVideo(okm[1]),
-                new Promise<[]>(res => setTimeout(() => res([]), 5000)),
-              ]);
-              for (const v of vids.filter(x => x.url)) {
-                const isHls = v.type === "hls";
-                const vName = v.name === "auto" ? "HLS Auto" : v.name;
-                const directUrl = isHls
-                  ? `/api/anime/hls-proxy?url=${encodeURIComponent(v.url)}&ref=${encodeURIComponent(sUrl)}`
-                  : v.url;
-                out.push({ name: `ميتانيمي · OK.ru · ${vName} · ${qLabel}`,
+            const r = await fetch(sUrl, {
+              headers: { "User-Agent": BROWSER_UA, Referer: `${MITANIME_BASE}/` },
+              signal: AbortSignal.timeout(10000),
+            });
+            if (r.ok) {
+              const html = await r.text();
+              // Pattern: player.src({ type: "video/mp4", src: "https://a4.mp4upload.com:183/d/.../video.mp4" })
+              const m = html.match(/player\.src\s*\(\s*\{[^}]*src\s*:\s*["'](https?:[^"']+\.mp4[^"']*)/s)
+                     || html.match(/["']src["']\s*:\s*["'](https?:[^"']+\.mp4[^"']*)/);
+              if (m) {
+                const rawUrl = m[1];
+                // mp4upload CDN uses non-standard port :183 — route through video-proxy
+                // Use URL.port (handles 2-5 digit ports correctly, unlike \d{4,5} regex)
+                let hasNonStdPort = false;
+                try { const p = new URL(rawUrl).port; hasNonStdPort = p !== "" && !["80","443","8080","8443"].includes(p); } catch {}
+                const directUrl = hasNonStdPort
+                  ? `/api/anime/video-proxy?url=${encodeURIComponent(rawUrl)}&ref=${encodeURIComponent(sUrl)}`
+                  : rawUrl;
+                out.push({ name: `ميتانيمي · MP4Upload · ${qLabel}`,
                   url: sUrl, quality: qLabel, qualityRank: qRank, site: "mitanime",
-                  directUrl, directType: isHls ? "hls" : "mp4" });
+                  directUrl, directType: "mp4" });
               }
             }
           } catch {}
           return out;
         }
 
-        // ── mp4upload → yt-dlp ─────────────────────────────────────────────────
-        if (sUrl.includes("mp4upload.com/embed-")) {
-          try {
-            const ytUrl = await extractViaYtDlp(sUrl, `${MITANIME_BASE}/`, 30000);
-            // yt-dlp returns the input URL if it can't extract (expired/geo-blocked file) — skip those
-            const isReal = ytUrl && !ytUrl.includes("mp4upload.com/embed-") && ytUrl.startsWith("http");
-            if (isReal) {
-              // mp4upload CDN often uses non-standard ports (e.g. :183) — route through video-proxy
-              const hasNonStdPort = /:\d{4,5}\//.test(ytUrl) && !/:(80|443|8080|8443)\//.test(ytUrl);
-              const directUrl = hasNonStdPort
-                ? `/api/anime/video-proxy?url=${encodeURIComponent(ytUrl)}&ref=${encodeURIComponent(sUrl)}`
-                : ytUrl;
-              out.push({ name: `ميتانيمي · MP4Upload · ${qLabel}`,
-                url: sUrl, quality: qLabel, qualityRank: qRank, site: "mitanime",
-                directUrl, directType: "mp4" });
-            }
-          } catch {}
-          return out;
-        }
-
-        // ── upvideo.to → yt-dlp ────────────────────────────────────────────────
-        if (sUrl.includes("upvideo.to/")) {
-          try {
-            const ytUrl = await extractViaYtDlp(sUrl, `${MITANIME_BASE}/`, 30000);
-            if (ytUrl) out.push({ name: `ميتانيمي · UpVideo · ${qLabel}`,
-              url: sUrl, quality: qLabel, qualityRank: qRank, site: "mitanime",
-              directUrl: ytUrl, directType: "mp4" });
-          } catch {}
-          return out;
-        }
+        // ── upvideo.to — TLS fingerprint blocked (JA3 check), skip ────────────
+        if (sUrl.includes("upvideo.to/")) return out;
 
         // ── share4max / playerwish / streamwish-family → extractVideoDeep ──────
         try {
@@ -4769,7 +4786,7 @@ async function getTopCimaaSources(
 // ════════════════════════════════════════════════════════════════════
 let _animeifyCreds: { base: string; token: string; ts: number } | null = null;
 let _animeifyFallbackCreds: { base: string; token: string } | null = null; // last known good
-const ANIMEIFY_CREDS_TTL = 60 * 60_000; // 1 hour
+const ANIMEIFY_CREDS_TTL = 12 * 60 * 60_000; // 12 hours — token نادراً ما يتغير، تجنّب طلب الخادم عند كل سحب
 
 function invalidateAnimeifyCreds() { _animeifyCreds = null; }
 
@@ -7938,35 +7955,75 @@ async function getAnimeWitcherSources(
   title: string, english: string | null, ep: number, _anilistId?: number,
 ): Promise<UnifiedSource[]> {
   try {
-    // 1. إيجاد docId بدون Algolia/Firestore (كلاهما محجوب من VPS 2026-07-17).
-    //    الـ HF Space يخزن الأنمي في Firestore بمفتاح = اسم الأنمي بالإنجليزي.
-    //    نجرب العنوان الإنجليزي أولاً ثم الرومانية — كل مرشح يُختبر بـ /api/episodes.
+    /* 1. البحث عبر /api/search?q= (الطريقة الصحيحة) بدلاً من تخمين docId مباشرةً.
+       نجرب الإنجليزي أولاً ثم الروماجي — نختار أفضل تطابق بـ similarity. */
     let docId: string | null = null;
     let episodes: Array<{ id: string; name: string; num: number }> = [];
 
-    const tryCandidate = async (candidate: string): Promise<boolean> => {
+    const queries = [...new Set([english, title].filter(Boolean) as string[])];
+    for (const q of queries) {
       try {
-        const r = await fetch(`${AW_HF_BASE}/api/episodes?id=${encodeURIComponent(candidate)}`, {
+        const sr = await fetch(`${AW_HF_BASE}/api/search?q=${encodeURIComponent(q)}`, {
           headers: BASE_HDRS,
-          signal: AbortSignal.timeout(12000),
+          signal: AbortSignal.timeout(10_000),
         });
-        if (!r.ok) return false;
-        const d = await r.json() as { episodes?: Array<{ id: string; name: string; num: number }> };
-        if (!d.episodes?.length) return false;
+        if (!sr.ok) continue;
+        const raw = await sr.json().catch(() => null);
+        const hits: any[] = raw?.hits ?? raw?.results ?? (Array.isArray(raw) ? raw : []);
+        if (!hits.length) continue;
+
+        // أفضل تطابق بـ similarity بدلاً من أخذ أول نتيجة عمياً
+        let bestHit: any = null;
+        let bestScore = 0;
+        for (const h of hits) {
+          const hName = String(h.name || h.title || h.anime_name || "");
+          const s = Math.max(
+            similarity(hName, title),
+            english ? similarity(hName, english) : 0,
+            asciiSimilarity(q, hName),
+          );
+          if (s > bestScore) { bestScore = s; bestHit = h; }
+        }
+        if (!bestHit || bestScore < 0.38) continue;
+
+        const candidate = String(bestHit.id || bestHit.anime_id || "");
+        if (!candidate) continue;
+
+        // تحقق أن الـ id صحيح وجلب الحلقات في نفس الخطوة
+        const er = await fetch(`${AW_HF_BASE}/api/episodes?id=${encodeURIComponent(candidate)}`, {
+          headers: BASE_HDRS,
+          signal: AbortSignal.timeout(12_000),
+        });
+        if (!er.ok) continue;
+        const ed = await er.json() as { episodes?: Array<{ id: string; name: string; num: number }> };
+        if (!ed.episodes?.length) continue;
+
         docId = candidate;
-        episodes = d.episodes;
-        return true;
-      } catch { return false; }
-    };
-
-    // بناء قائمة المرشحين من العنوانين الإنجليزي والرومانية
-    const candidates: string[] = [];
-    if (english) candidates.push(english);
-    if (title && title !== english) candidates.push(title);
-
-    for (const c of candidates) {
-      if (await tryCandidate(c)) break;
+        episodes = ed.episodes;
+        console.log(`[AnimeWitcher] search hit: "${bestHit.name}" (score=${bestScore.toFixed(2)}) id=${docId}`);
+        break;
+      } catch {}
     }
+
+    // fallback: تجربة المطابقة المباشرة بالاسم إذا فشل البحث
+    if (!docId) {
+      const fallbackCandidates = [...new Set([english, title].filter(Boolean) as string[])];
+      for (const c of fallbackCandidates) {
+        try {
+          const r = await fetch(`${AW_HF_BASE}/api/episodes?id=${encodeURIComponent(c)}`, {
+            headers: BASE_HDRS,
+            signal: AbortSignal.timeout(10_000),
+          });
+          if (!r.ok) continue;
+          const d = await r.json() as { episodes?: Array<{ id: string; name: string; num: number }> };
+          if (!d.episodes?.length) continue;
+          docId = c;
+          episodes = d.episodes;
+          break;
+        } catch {}
+      }
+    }
+
     if (!docId) return [];
 
     // 2. ابحث عن الحلقة المطلوبة (episodes جُلبت في tryCandidate)
@@ -11667,7 +11724,7 @@ async function anslayerGet(path: string, params: Record<string, any>): Promise<a
 }
 
 async function getAnimeSlayerSources(
-  title: string, english: string | null, ep: number, directAnimeId?: number,
+  title: string, english: string | null, ep: number, directAnimeId?: number, titleAr?: string | null,
 ): Promise<UnifiedSource[]> {
   const ck = directAnimeId ? `anslayer:id:${directAnimeId}:${ep}` : `anslayer:${english || title}:${ep}`;
   const hit = _anslayerCacheMap.get(ck);
@@ -11681,12 +11738,13 @@ async function getAnimeSlayerSources(
       ? { score: 1, id: directAnimeId, name: title || english || "" }
       : null;
     if (!best) {
-      const queries = [...new Set([english, title].filter(Boolean) as string[])];
+      // نُقدِّم الاسم العربي أولاً إن توفَّر — AS يخزِّن أسماء عربية فيطابق مباشرةً
+      const queries = [...new Set([titleAr, english, title].filter(Boolean) as string[])];
       for (const q of queries) {
         const data = await anslayerGet("animes/get-published-animes", { list_type: "filter", anime_name: q, page: 1 });
         const list: any[] = data?.response?.data || [];
         // AnimeSlayer يعرض أسماء عربية — similarity() بين لاتيني وعربي = 0 دائماً.
-        // الحل: نستخدم asciiSimilarity على الـ slug الضمني + نقبل أول نتيجة إذا كانت ≤3
+        // الحل: نستخدم asciiSimilarity على الـ slug الضمني + نقبل أول نتيجة إذا كانت ≤8
         // (API البحث هو المرشِّح الحقيقي، لذا نثق بنتائجه المحددة).
         let firstCandidate: { score: number; id: number; name: string } | null = null;
         for (const item of list) {
@@ -11706,8 +11764,8 @@ async function getAnimeSlayerSources(
           }
         }
         // إذا فشل شرط التشابه (أسماء عربية مقابل عنوان لاتيني) — نأخذ أول نتيجة
-        // بشرط أن البحث أعاد نتائج محددة (≤3) دلالةً على دقة البحث
-        if (!best && firstCandidate && list.length <= 3) {
+        // بشرط أن البحث أعاد نتائج محددة (≤8) دلالةً على دقة البحث
+        if (!best && firstCandidate && list.length <= 8) {
           best = firstCandidate;
         }
         if (best) break; // وجدنا نتيجة — لا داعي لمزيد من الاستعلامات
@@ -11844,32 +11902,52 @@ async function getSAnimeSources(
 
   const out: UnifiedSource[] = [];
   try {
-    // 1. بحث بالروماجي أولاً (SAnime يستخدم أسماء يابانية مرومجة) ثم الإنجليزي
-    const query = encodeURIComponent(title || english || "");
-    const searchRes = await fetch(`${SANIME_API}search&name=${query}`, {
-      headers: { "User-Agent": SANIME_UA, "Accept": "application/json" },
-      signal: AbortSignal.timeout(10_000),
-    });
-    if (!searchRes.ok) { console.warn(`[SAnime] search HTTP ${searchRes.status}`); return out; }
-    const results: any[] = await searchRes.json().catch(() => []);
-    if (!Array.isArray(results) || results.length === 0) return out;
+    /* 1. البحث — SAnime يخزّن أسماء عربية ومترجمة، نجرب الإنجليزي أولاً ثم الروماجي.
+       ندمج النتائج لتحسين فرص المطابقة (بعض العناوين موجودة بكلا الاسمين). */
+    const queries = [...new Set([english, title].filter(Boolean) as string[])];
+    const allResults: any[] = [];
+    const seenIds = new Set<string>();
+    for (const q of queries) {
+      try {
+        const searchRes = await fetch(`${SANIME_API}search&name=${encodeURIComponent(q)}`, {
+          headers: { "User-Agent": SANIME_UA, "Accept": "application/json" },
+          signal: AbortSignal.timeout(10_000),
+        });
+        if (!searchRes.ok) continue;
+        const batch: any[] = await searchRes.json().catch(() => []);
+        if (Array.isArray(batch)) {
+          for (const r of batch) {
+            const rid = String(r.id ?? "");
+            if (rid && !seenIds.has(rid)) { seenIds.add(rid); allResults.push(r); }
+          }
+        }
+      } catch {}
+      // لا نتوقف مبكراً — نجمع نتائج كل الاستعلامات لتحسين فرص المطابقة
+    }
+    if (allResults.length === 0) return out;
 
     // 2. similarity match — مع ترجيح رقم الموسم (SAnime يفصل كل موسم كمُدخل مستقل)
     const targetSeason = sanimeSeasonNum(english) !== 1 ? sanimeSeasonNum(english) : sanimeSeasonNum(title);
     let bestId: string | null = null;
     let bestScore = 0;
-    for (const r of results) {
-      const label = r.name ?? "";
+    for (const r of allResults) {
+      const label = String(r.name ?? r.title ?? "");
       let score = Math.max(
         similarity(label, title),
         english ? similarity(label, english) : 0,
       );
-      // بدون هذا الترجيح، مطابقة "Re:Zero...4th Season" تُطابق خطأً الموسم الأول (تشابه نصي أعلى لكن موسم خاطئ)
+      // ترجيح رقم الموسم — لكن نُطبِّق العقوبة فقط إذا كانت الدرجة الأساسية ضعيفة
+      // (إذا كان التطابق قوياً بالفعل لا نعاقبه بسبب خطأ في كشف الموسم)
       const labelSeason = sanimeSeasonNum(label);
-      score += labelSeason === targetSeason ? 0.15 : -0.25;
+      if (score > 0.50) {
+        score += labelSeason === targetSeason ? 0.10 : -0.05; // عقوبة خفيفة عند تطابق قوي
+      } else {
+        score += labelSeason === targetSeason ? 0.15 : -0.20; // عقوبة معتدلة عند تطابق ضعيف
+      }
       if (score > bestScore) { bestScore = score; bestId = String(r.id); }
     }
-    if (!bestId || bestScore < 0.42) {
+    // threshold مخفَّض من 0.42 → 0.30 لأن عناوين SAnime العربية لا تطابق تماماً الروماجي
+    if (!bestId || bestScore < 0.30) {
       console.log(`[SAnime] no match for "${english || title}" (best=${bestScore.toFixed(2)}, targetSeason=${targetSeason})`);
       return out;
     }
@@ -11893,7 +11971,7 @@ async function getSAnimeSources(
       return out;
     }
 
-    // 5. Direct CDN URL (HEAD check)
+    // 5. Direct CDN URL — HEAD checks بالتوازي لتوفير الوقت (5ث بدل 9ث)
     const directHD = `${SANIME_CDN}/${bestId}/${ep}.mp4`;
     const directSD = `${SANIME_CDN}/${bestId}/${ep}SD.mp4`;
     const SANIME_REF = "https://app.sanime.net/";
@@ -11901,47 +11979,21 @@ async function getSAnimeSources(
     const proxiedSD = `/api/anime/video-proxy?url=${encodeURIComponent(directSD)}&ref=${encodeURIComponent(SANIME_REF)}`;
     let usedDirect = false;
     try {
-      const headRes = await fetch(directHD, {
-        method: "HEAD",
-        headers: { "User-Agent": SANIME_UA },
-        signal: AbortSignal.timeout(5_000),
-      });
-      if (headRes.ok) {
-        out.push({
-          name:        "SAnime · FHD",
-          url:         directHD,
-          quality:     "FHD",
-          qualityRank: 14,
-          site:        "sanime",
-          directUrl:   proxiedHD,
-          directType:  "mp4",
-          headers:     { Referer: SANIME_REF },
-          corsOk:      false,
-        });
-        // تحقق من SD قبل الإضافة
-        try {
-          const sdHead = await fetch(directSD, {
-            method: "HEAD",
-            headers: { "User-Agent": SANIME_UA },
-            signal: AbortSignal.timeout(4_000),
-          });
-          if (sdHead.ok) {
-            out.push({
-              name:        "SAnime · HD",
-              url:         directSD,
-              quality:     "HD",
-              qualityRank: 9,
-              site:        "sanime",
-              directUrl:   proxiedSD,
-              directType:  "mp4",
-              headers:     { Referer: SANIME_REF },
-              corsOk:      false,
-            });
-          }
-        } catch { /* SD غير موجود — نتجاهله */ }
+      const [hdOk, sdOk] = await Promise.all([
+        fetch(directHD, { method: "HEAD", headers: { "User-Agent": SANIME_UA }, signal: AbortSignal.timeout(6_000) })
+          .then(r => r.ok).catch(() => false),
+        fetch(directSD, { method: "HEAD", headers: { "User-Agent": SANIME_UA }, signal: AbortSignal.timeout(6_000) })
+          .then(r => r.ok).catch(() => false),
+      ]);
+      if (hdOk) {
+        out.push({ name: "SAnime · FHD", url: directHD, quality: "FHD", qualityRank: 14, site: "sanime", directUrl: proxiedHD, directType: "mp4", headers: { Referer: SANIME_REF }, corsOk: false });
         usedDirect = true;
       }
-    } catch { /* timeout أو 404 — نجرب openAnd */ }
+      if (sdOk) {
+        out.push({ name: "SAnime · HD",  url: directSD, quality: "HD",  qualityRank: 9,  site: "sanime", directUrl: proxiedSD, directType: "mp4", headers: { Referer: SANIME_REF }, corsOk: false });
+        usedDirect = true;
+      }
+    } catch { /* timeout — نجرب openAnd */ }
 
     // 6. openAnd fallback
     if (!usedDirect) {
@@ -12550,8 +12602,7 @@ router.get("/anime/sources-stream", async (req, res) => {
       scrapeCached("animedar",     () => getAnimadarSources(title, english, ep, isMovie, matchCtx)),
       // okanime: معطّل بطلب المستخدم
       // scrapeCached("okanime",      () => getOkAnimeSources(title, english, ep, isMovie, matchCtx), true, 22_000),
-      // mitanime: مخفي مؤقتاً — slug discovery يفشل للأنمي ذات الـ romanji slugs (naruto-shippuuden/shingeki-no-kyojin)
-      // scrapeCached("mitanime",    () => getMitanimeSources(title, english, ep),            false, 60000),
+      scrapeCached("mitanime",    () => getMitanimeSources(title, english, ep),            false, 30000),
       scrapeCached("animeify",     () => getAnimeifySources(title, english, ep),  false, 18000),
       scrapeCached("animeday",     () => getAnimeDaySources(title, english, ep),    true, 18000),
       // scrapeCached("seepanel",  () => getSeepanelSources(title, english, ep, isMovie)), // DEAD: panel.seepanel.top/api returns 404 (2026-06)
@@ -12621,7 +12672,8 @@ router.get("/anime/sources-stream", async (req, res) => {
       // animegg:      معطّل بطلب المستخدم
       // allmanga: معطّل 2026-07-17 — AA_CRYPTO_MISSING على endpoint الحلقات (AllAnime أضافت anti-scraping)
       // scrapeCached("allmanga", () => getAllMangaSources(title, english, ep, anilistId), false, 18000),
-      scrapeCached("reanime",  () => getReanímeSources(title, english, ep, anilistId),   false, 25000),
+      // reanime: محذوف بطلب المستخدم 2026-07-24
+      // scrapeCached("reanime",  () => getReanímeSources(title, english, ep, anilistId),   false, 25000),
       // animepahe:    mirurotvapi + owocdn AES-128 HLS — 18ث timeout — ثقيل جداً في التشغيل
       // ── مصادر جديدة يوليو 2026 ────────────────────────────────────────────
       scrapeCached("nekowatch",  () => getNekowatchSources(title, english, ep, anilistId),  false, 18000),
@@ -12630,7 +12682,7 @@ router.get("/anime/sources-stream", async (req, res) => {
       // xyra_anim: معطّل مؤقتاً — api.xyra.stream يرجع 502 (Cloudflare) لكل الطلبات منذ 2026-07-09
       // scrapeCached("xyra_anim",  () => getXyraAnimeSources(title, english, ep, anilistId),  false, 18000),
       scrapeCached("sanime",     () => getSAnimeSources(title, english, ep),                 false, 20000),
-      scrapeCached("anslayer",   () => getAnimeSlayerSources(title, english, ep),             false, 20000),
+      scrapeCached("anslayer",   () => getAnimeSlayerSources(title, english, ep, undefined, titleAr), false, 20000),
       // animetime / notorrent: أُزيلت كلياً بطلب المستخدم (2026-07-09)
     ]);
 
@@ -12660,6 +12712,7 @@ router.get("/anime/fetch-source", async (req, res) => {
   const isMovieParam = (req.query.isMovie as string) === "true";
   const isMovie   = format === "MOVIE" || format === "MOVIE_SHORT" || isMovieParam;
   const anslayerId = parseInt((req.query.anslayerId as string) || "0") || undefined;
+  const titleAr    = ((req.query.titleAr as string) || "").trim() || null;
 
   if (!site || !title) {
     res.status(400).json({ error: "site and title required", sources: [] });
@@ -12677,8 +12730,9 @@ router.get("/anime/fetch-source", async (req, res) => {
     "witanime",  // مُعاد تفعيله 2026-07-17 — _zH/_zW + ok.ru/yonaplay/streamwish resolution
     "anipub",    // مُضاف 2026-07-19 — AniPub/MegaPlay مدبلج+ترجمة+عربي
     "anime3rb",  // مُضاف 2026-07-18 — Animatoo Supabase slug + Hopx browser-html
-    "reanime",   // مُعاد تفعيله 2026-07-20 — reanime.to/api/flix + FlixCloud HLS ناعم
-    // "mitanime",  // مخفي مؤقتاً 2026-07-21 — slug discovery يفشل للـ romanji slugs
+    // reanime: محذوف بطلب المستخدم 2026-07-24
+    "sanime",    // مُضاف 2026-07-24 — MP4 مباشر عربي مدبلج
+    "mitanime",  // مُعاد تفعيله 2026-07-24 — parseMitanimeServers مُصلَّح (RSC escaped quotes) + slug validation عبر /anime/{slug}
     // "allmanga": معطّل 2026-07-17 — AA_CRYPTO_MISSING
     // videasy_anim: نُقل بالكامل إلى قسم الأنيميشن بطلب المستخدم 2026-07-15
     // xpass_anim: محذوف — CDN (ps1/vip.1x2.space) يحجب VPS 2026-07-15
@@ -12778,8 +12832,7 @@ router.get("/anime/fetch-source", async (req, res) => {
       // case "animelek":     await runExtract(await race(getAnimelekSources(title, english, ep, isMovie),   SCRAPER_MS, [])); break;
       case "animedar":     await runExtract(await race(getAnimadarSources(title, english, ep, isMovie),   SCRAPER_MS, [])); break;
       // case "okanime": معطّل بطلب المستخدم
-      // case "mitanime": مخفي مؤقتاً
-      // case "mitanime":    (await race(getMitanimeSources(title, english, ep),           60000, [])).forEach(collectSrc); break;
+      case "mitanime":    (await race(getMitanimeSources(title, english, ep),           30000, [])).forEach(collectSrc); break;
       case "animeify":    (await race(getAnimeifySources(title, english, ep),  18000, [])).forEach(collectSrc); break;
       case "animeday":     await runExtract(await race(getAnimeDaySources(title, english, ep),   SCRAPER_MS, [])); break;
       // case "seepanel": DEAD
@@ -12816,7 +12869,8 @@ router.get("/anime/fetch-source", async (req, res) => {
       // faselhd_db: معطّلة بطلب المستخدم 2026-07-14 (قسم الأنمي فقط)
       // case "faselhd_db":   await runExtract(await race(getFaselhdDbSources(title, english, ep, isMovie), 28_000, [])); break;
       // case "witanime": معطّل بطلب المستخدم
-      case "reanime":    (await race(getReanímeSources(title, english, ep, anilistId),    25_000, [])).forEach(collectSrc); break;
+      // reanime: محذوف بطلب المستخدم 2026-07-24
+      // case "reanime":    (await race(getReanímeSources(title, english, ep, anilistId),    25_000, [])).forEach(collectSrc); break;
       case "akoam":        await runExtract(await race(getAkoamSources(title, english, ep), 22_000, [])); break;
       case "moviebox":     (await race(getMovieBoxAnimeSources(title, english, ep, isMovie), 18_000, [])).forEach(collectSrc); break;
       case "anime3rb":     (await race(getAnime3rbSources(title, english, ep), 38_000, [])).forEach(collectSrc); break;
@@ -12828,7 +12882,7 @@ router.get("/anime/fetch-source", async (req, res) => {
       // xyra_anim: معطّل مؤقتاً — api.xyra.stream يرجع 502 دائماً (عطل من طرفهم)
       // case "xyra_anim":    (await race(getXyraAnimeSources(title, english, ep, anilistId), 18_000, [])).forEach(collectSrc); break;
       case "sanime":       (await race(getSAnimeSources(title, english, ep),               20_000, [])).forEach(collectSrc); break;
-      case "anslayer":     (await race(getAnimeSlayerSources(title, english, ep, anslayerId), 20_000, [])).forEach(collectSrc); break;
+      case "anslayer":     (await race(getAnimeSlayerSources(title, english, ep, anslayerId, titleAr), 20_000, [])).forEach(collectSrc); break;
       case "ristoanime":   (await race(getRistoAnimeSources(title, english, ep),          22_000, [])).forEach(collectSrc); break;
       // case "allmanga": معطّل 2026-07-17
       case "nflixmovies_anim": (await race(getNflixMoviesAnimeSources(english, title, ep, isMovie, anilistId), 18_000, [])).forEach(collectSrc); break;
@@ -13017,6 +13071,27 @@ router.get("/anime/anslayer-latest", async (req, res) => {
       };
     }).filter((it: any) => it.animeId && it.episode);
 
+    // ── إرسال الحلقات الجديدة لتيليجرام (فقط عند التحديث الفعلي) ──────────
+    if (items.length > 0) {
+      const prevKeys = new Set(
+        (_anslayerLatestCache || []).map((it: any) => `${it.animeId}:${it.episode}`)
+      );
+      const newItems = items.filter(
+        (it: any) => !prevKeys.has(`${it.animeId}:${it.episode}`)
+      );
+      for (const it of newItems) {
+        try {
+          await notifyNewEpisode(
+            it.animeId,
+            it.name,
+            it.episode,
+            it.cover || undefined,
+          );
+        } catch (tgErr: any) {
+          console.warn(`[anslayer-latest] telegram notify failed: ${(tgErr as any)?.message}`);
+        }
+      }
+    }
     _anslayerLatestCache = items;
     _anslayerLatestTs = Date.now();
     res.json({ items });

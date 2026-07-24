@@ -54,7 +54,28 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     getAuthToken().catch(() => {});
   }, []);
 
+  /** حذف مفاتيح الكاش القديمة عند الإطلاق — يمنع امتلاء AsyncStorage (6MB Android limit) */
+  const cleanOldCacheKeys = async () => {
+    try {
+      const keys = await AsyncStorage.getAllKeys();
+      const toRemove: string[] = [];
+      // progress-* keys: keep only last 30 episodes
+      const progressKeys = keys.filter(k => k.startsWith("progress-"));
+      if (progressKeys.length > 30) toRemove.push(...progressKeys.slice(0, progressKeys.length - 30));
+      // anime-srcs-* keys: keep only last 20 episodes
+      const srcKeys = keys.filter(k => k.startsWith("anime-srcs-"));
+      if (srcKeys.length > 20) toRemove.push(...srcKeys.slice(0, srcKeys.length - 20));
+      // sub-ar-* keys: keep only last 10 episodes
+      const subKeys = keys.filter(k => k.startsWith("sub-ar-"));
+      if (subKeys.length > 10) toRemove.push(...subKeys.slice(0, subKeys.length - 10));
+      if (toRemove.length > 0) await AsyncStorage.multiRemove(toRemove).catch(() => {});
+    } catch {}
+  };
+
   const loadAll = async () => {
+    // نظّف الكاش القديم أولاً في الخلفية
+    cleanOldCacheKeys().catch(() => {});
+
     const [themeVal, historyVal, favVal] = await Promise.all([
       AsyncStorage.getItem("nova-theme").catch(() => null),
       AsyncStorage.getItem("nova-history").catch(() => null),
@@ -119,7 +140,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const toggleFavorite = async (anime: FavoriteAnime) => {
     setFavorites((prev) => {
       const exists = prev.find((f) => f.id === anime.id);
-      const updated = exists ? prev.filter((f) => f.id !== anime.id) : [anime, ...prev];
+      const updated = exists ? prev.filter((f) => f.id !== anime.id) : [anime, ...prev].slice(0, 500);
       AsyncStorage.setItem("nova-favorites", JSON.stringify(updated));
       return updated;
     });
