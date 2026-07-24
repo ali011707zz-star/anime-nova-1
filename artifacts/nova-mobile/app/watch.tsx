@@ -465,6 +465,8 @@ export default function WatchScreen() {
             url: resolveUrl(s.url, base),
           }))
           .filter(s => !isBlockedSource(s))
+          // فلتر mega.nz/embed — لا يعمل native في الموبايل (يحتاج تطبيق أصلي)
+          .filter(s => !(s.isEmbed && s.url && (s.url.includes("mega.nz") || s.url.includes("mega.co.nz"))))
           .filter(s => {
             const key = getPlayUrl(s);
             if (!key || seenKeys.current.has(key)) return false;
@@ -697,6 +699,7 @@ export default function WatchScreen() {
       const newSrcs = rawSrcs
         .map((s): Src => ({ ...s, site: s.site || site, directUrl: resolveUrl(s.directUrl, base), url: resolveUrl(s.url, base) }))
         .filter(s => !isBlockedSource(s))
+        .filter(s => !(s.isEmbed && s.url && (s.url.includes("mega.nz") || s.url.includes("mega.co.nz"))))
         .filter(s => { const k = getPlayUrl(s); if (!k || seenKeys.current.has(k)) return false; seenKeys.current.add(k); return true; });
 
       if (newSrcs.length) {
@@ -851,6 +854,9 @@ export default function WatchScreen() {
               </View>
             )}
           </View>
+          {displayTitle ? (
+            <Text style={{ fontSize: 16, fontFamily: "Cairo_700Bold", color: "#fff", textAlign: "center", paddingHorizontal: 12 }} numberOfLines={2}>{displayTitle}</Text>
+          ) : null}
           <View style={d.ldEpBadge}><Ionicons name="tv" size={10} color="#a78bfa" /><Text style={d.ldEpText}>الحلقة {epNum}</Text></View>
           <View style={{ alignItems: "center", gap: 10 }}>
             <SpinRing />

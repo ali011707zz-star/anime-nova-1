@@ -43,7 +43,8 @@ const SEASON_OPTIONS = [
 ];
 
 const CUR_YEAR = new Date().getFullYear();
-const YEARS = ["الكل", ...Array.from({ length: 10 }, (_, i) => String(CUR_YEAR - i))];
+const START_YEAR = 1990;
+const YEARS = ["الكل", ...Array.from({ length: CUR_YEAR - START_YEAR + 1 }, (_, i) => String(CUR_YEAR - i))];
 
 const GENRES_WITH_COVERS = [
   { genre: "Action",       ar: "أكشن",       color: "#EF4444" },
@@ -279,6 +280,7 @@ export default function BrowseScreen() {
               </View>
             </ScrollView>
 
+            {/* Seasons row */}
             <ScrollView horizontal showsHorizontalScrollIndicator={false} style={[g.chipRow, { marginTop: 4 }]}>
               <View style={{ flexDirection: "row", gap: 6 }}>
                 {SEASON_OPTIONS.map(opt => (
@@ -287,6 +289,11 @@ export default function BrowseScreen() {
                     <Text style={[g.chipText, season === opt.value && g.chipTextActive]}>{opt.label}</Text>
                   </Pressable>
                 ))}
+              </View>
+            </ScrollView>
+            {/* Years row — من 1990 حتى السنة الحالية */}
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={[g.chipRow, { marginTop: 4 }]}>
+              <View style={{ flexDirection: "row", gap: 6 }}>
                 {YEARS.map(y => {
                   const val = y === "الكل" ? "" : y;
                   return (
@@ -399,8 +406,8 @@ const g = StyleSheet.create({
   chipTextActive: { color: "#c4b5fd" },
   chipActive2: { backgroundColor: "#7C3AED", borderColor: "#8B5CF6" },
   chipText2Active: { color: "#fff" },
-  searchWrap: { flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: "#18181B", borderRadius: 12, paddingHorizontal: 12, paddingVertical: 8, marginTop: 6, borderWidth: 1, borderColor: "rgba(255,255,255,0.06)" },
-  searchInput: { flex: 1, color: "#fff", fontSize: 12, fontFamily: "Cairo_400Regular", textAlign: "right" },
+  searchWrap: { flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: "#18181B", borderRadius: 12, paddingHorizontal: 12, paddingVertical: 5, marginTop: 6, borderWidth: 1, borderColor: "rgba(255,255,255,0.06)" },
+  searchInput: { flex: 1, color: "#fff", fontSize: 11, fontFamily: "Cairo_400Regular", textAlign: "right" },
   genreCard: { flex: 1 },
   genreImgWrap: { height: 90, borderRadius: 16, overflow: "hidden", position: "relative", borderWidth: 1, borderColor: "rgba(255,255,255,0.07)", justifyContent: "flex-end" },
   genreImg: { ...StyleSheet.absoluteFillObject, width: "100%", height: "100%" },
