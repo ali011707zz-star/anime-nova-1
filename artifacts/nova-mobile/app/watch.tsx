@@ -7,7 +7,6 @@ import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { RiftPlayer, PlayerSource } from "@/components/RiftPlayer";
-import { openNovaPlayer } from "@/utils/externalPlayer";
 import { HiddenResolverWebView, ResolvedStream } from "@/components/HiddenResolverWebView";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -258,9 +257,6 @@ const SITE_PRIORITY: Record<string, number> = {
   anineko: 50, anikoto: 40, vidfast: 35,
   anikototv: 30, animekai: 25, animepahe: 20, anipm: 18,
 };
-
-/* ── مصادر HLS لا يستطيع RiftPlayer تشغيلها من VPS datacenter IP ── */
-const HLS_EXTERNAL_SITES = new Set(["animekai", "anineko", "hianime"]);
 
 /* ── قائمة المصادر (KW أولاً — الأولوية القصوى للتشغيل الفوري) ── */
 /* مصادر موحَّدة مع الويب — نفس المصادر الـ 8 المفعَّلة في SCRAPER_DEFS */

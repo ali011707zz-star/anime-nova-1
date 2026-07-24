@@ -579,7 +579,10 @@ export function RiftPlayer({
     setError(false);
     isErrorRef.current = false;
     setIsPlaying(true);
-    console.log(`[RiftPlayer] ✅ onLoad: ${sources[srcIdx]?.label || "?"} dur=${dur.toFixed(1)}s`);
+    const src = sources[srcIdx];
+    const urlSnippet = src?.url ? src.url.replace(/^https?:\/\//, "").slice(0, 80) : "?";
+    const hasHeaders = src?.headers && Object.keys(src.headers).length > 0;
+    console.log(`[RiftPlayer] ✅ onLoad [${srcIdx + 1}/${sources.length}]: ${src?.label || "?"} dur=${dur.toFixed(1)}s headers=${hasHeaders ? Object.keys(src!.headers!).join(",") : "none"} url=${urlSnippet}`);
     const swPos = switchPosRef.current;
     const initPos = initialPosition && initialPosition > 5 ? initialPosition : 0;
     const restorePos = swPos > 5 ? swPos : initPos;
@@ -592,11 +595,18 @@ export function RiftPlayer({
 
   const handleVideoError = useCallback((e: any) => {
     if (loadTimeoutRef.current) { clearTimeout(loadTimeoutRef.current); loadTimeoutRef.current = null; }
-    console.error(`[RiftPlayer] ❌ خطأ في التشغيل:`, JSON.stringify(e));
+    const src = sources[srcIdx];
+    const urlSnippet = src?.url ? src.url.replace(/^https?:\/\//, "").slice(0, 100) : "?";
+    const errCode = e?.error?.code ?? e?.errorCode ?? e?.code ?? "?";
+    const errDomain = e?.error?.domain ?? e?.error?.localizedDescription ?? "";
+    const errMsg = typeof e === "string" ? e : (e?.error?.localizedDescription ?? e?.error?.localizedFailureReason ?? JSON.stringify(e));
+    console.error(`[RiftPlayer] ❌ [${srcIdx + 1}/${sources.length}] label=${src?.label || "?"} code=${errCode} domain=${errDomain}`);
+    console.error(`[RiftPlayer] ❌ url=${urlSnippet}`);
+    console.error(`[RiftPlayer] ❌ error=`, errMsg.slice(0, 300));
     setError(true);
     setBuffering(false);
     isErrorRef.current = true;
-  }, []);
+  }, [sources, srcIdx]);
 
   const handleVideoBuffer = useCallback(({ isBuffering }: { isBuffering: boolean }) => {
     setBuffering(isBuffering);

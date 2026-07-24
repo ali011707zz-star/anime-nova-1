@@ -5,8 +5,8 @@ import {
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
-import { openNovaPlayer } from "@/utils/externalPlayer";
 import { HiddenResolverWebView, ResolvedStream } from "@/components/HiddenResolverWebView";
+import { RiftPlayer, PlayerSource } from "@/components/RiftPlayer";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -18,7 +18,7 @@ const { width: W, height: H } = Dimensions.get("window");
 
 /* ── Types ── */
 type Quality = "1080p FHD" | "720p HD" | "360p SD";
-type Screen = "loading" | "picker" | "external" | "embed" | "resolving" | "webplayer";
+type Screen = "loading" | "picker" | "native" | "external" | "embed" | "resolving" | "webplayer";
 
 interface AnimSrc {
   url?: string;
@@ -332,6 +332,8 @@ export default function AnimationWatchScreen() {
   const [globalArSubUrl, setGlobalArSubUrl] = useState<string | undefined>();
   const [globalEnSubUrl, setGlobalEnSubUrl] = useState<string | undefined>();
   const [subLang, setSubLang] = useState<"ar" | "en" | "off">("ar");
+  /* مصادر مجمَّدة: تُجمَّد لحظة دخول التشغيل — تمنع SSE الجديدة من تغيير ترتيب المصادر أثناء التشغيل */
+  const [frozenSources, setFrozenSources] = useState<PlayerSource[]>([]);
   /* تُقرأ من الإعدادات عند التهيئة */
   const subPrefLoadedRef = useRef(false);
 
@@ -593,20 +595,12 @@ export default function AnimationWatchScreen() {
   }, [screen]);
 
 
-  /* ── Play a source — كل المصادر المباشرة تُفتح في NOVA Player الخارجي ── */
+  /* ── Play a source — RiftPlayer الداخلي (react-native-video) ── */
   const playSrc = useCallback((src: AnimSrc) => {
     setPlayingSrc(src);
     if (isDirectPlayable(src)) {
-      const playUrl = src.proxyUrl || src.directUrl || src.url || "";
-      openNovaPlayer(playUrl).then(ok => {
-        if (ok) { setScreen("external"); }
-        else {
-          Alert.alert(
-            "NOVA Player",
-            "تعذّر فتح NOVA Player.\nتأكد من تثبيته أو حمّله من:\nhttps://animenovaa.duckdns.org/nova-player.apk"
-          );
-        }
-      });
+      /* تشغيل مباشر عبر RiftPlayer */
+      setScreen("native");
       return;
     }
     if (needsHiddenResolve(src)) { setScreen("resolving"); return; }
@@ -672,6 +666,21 @@ export default function AnimationWatchScreen() {
       };
     }).filter(s => !!s.url);
   }, [directSrcs, globalArSubUrl, globalEnSubUrl, subLang]);
+
+  /* ── Frozen sources: تُجمَّد لحظة دخول التشغيل — تمنع SSE الجديدة من تغيير ترتيب المصادر ── */
+  useEffect(() => {
+    if (screen === "native") {
+      setFrozenSources(prev => {
+        if (prev.length === 0) return animHlsSources.length > 0 ? animHlsSources : prev;
+        const existingUrls = new Set(prev.map(s => s.url));
+        const newOnes = animHlsSources.filter(s => s.url && !existingUrls.has(s.url));
+        return newOnes.length > 0 ? [...prev, ...newOnes] : prev;
+      });
+    } else {
+      setFrozenSources([]);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [screen, animHlsSources]);
 
   /* ── Handle back ── */
   const handleBack = useCallback(() => {
