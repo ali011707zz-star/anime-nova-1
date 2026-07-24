@@ -137,3 +137,4 @@
 - [GitHub APK build numbering](github-apk-run-number.md) — AnimeNova-vNNN is a GitHub Actions run number, not a Git tag or Expo version code.
 - [Hound source assessment](hound-anime-source-assessment.md) — master-fetch/Hound fetches pages, but is not an anime extractor; MITanime data needs Next.js parsing and WitAnime needs the real WP episode URL.
 - [Animation HLS deferred](animation-hls-currently-deferred.md) — user asked to leave animation HLS sources/player untouched because they are currently not working.
+- [MitAnime/Witanime HTTP test](mitanime-witanime-http-test-2026-07-24.md) — MitAnime watch HTML exposes provider links without a browser; witanime.you redirects to witanime.xyz, whose TLS closes from this environment.
