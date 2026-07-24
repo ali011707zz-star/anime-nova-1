@@ -171,7 +171,7 @@ const SCRAPER_DEFS: { site: string; name: string; desc: string; tag: string; aud
   { site: "hianime",      name: "HiAnime",       desc: "ياباني مترجم · HLS نظيف", tag: "HI" },
   { site: "animewitcher", name: "AnimeWitcher",   desc: "PD/ST · مباشر",           tag: "AW", isArabic: true },
   { site: "anineko",      name: "AniNeko",        desc: "ياباني مترجم · HLS",      tag: "AN" },
-  { site: "reanime",      name: "Reanime",        desc: "ياباني مترجم · FlixCloud",  tag: "RE" },
+  // reanime: محذوف بطلب المستخدم 2026-07-24
   { site: "anslayer",     name: "أنمي سلاير",    desc: "مشغلات خارجية · MixDrop/MediaFire", tag: "AS", isArabic: true },
   { site: "animeify",     name: "أنمي فاي",     desc: "عربي · ميغا",             tag: "AF", isArabic: true },
   { site: "anipub",       name: "AniPub",        desc: "مدبلج · ترجمة عربية",     tag: "AP", isArabic: true },
@@ -3299,7 +3299,8 @@ export default function WatchPage() {
       mycima:       34000,  // backend = 30s + هامش 4s
       witanime:     48000,  // backend = 45s + هامش 3s
       anikototv:    28000,  // backend = 25s + هامش 3s
-      reanime:      28000,  // backend = 25s + هامش 3s
+      mitanime:     33000,  // backend = 30s + هامش 3s (parallel slug resolution)
+      // reanime: محذوف 2026-07-24
       hianime:      26000,  // backend = 22s + هامش 4s
       anipm:        24000,  // backend = 20s + هامش 4s
     };

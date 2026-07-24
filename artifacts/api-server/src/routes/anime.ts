@@ -2764,56 +2764,67 @@ async function resolveMitanimeSlug(title: string, english: string | null): Promi
   const cached = mitanimeSlugCache.get(ck);
   if (cached && Date.now() - cached.ts < SRC_TTL) return cached.slug;
 
-  // Try slug candidates derived directly from titles
+  // Build slug candidates from both title variants
   // MitAnime often uses Japanese romanization slug (e.g. "kimetsu-no-yaiba") even when
   // the English title differs ("Demon Slayer: Kimetsu no Yaiba"). Generate many variants.
   const candidates: string[] = [];
   for (const t of [english, title].filter(Boolean) as string[]) {
     const full = toSlug(t);
     if (full) candidates.push(full);
-    // Part before colon: "Demon Slayer: Kimetsu no Yaiba" → "demon-slayer"
     const beforeColon = toSlug(t.split(/[：:]/)[0].trim());
     if (beforeColon && beforeColon !== full) candidates.push(beforeColon);
-    // Part after colon: "Demon Slayer: Kimetsu no Yaiba" → "kimetsu-no-yaiba"
     const colonParts = t.split(/[：:]/);
     if (colonParts.length > 1) {
       const afterColon = toSlug(colonParts.slice(1).join(" ").trim());
       if (afterColon && afterColon !== full) candidates.push(afterColon);
     }
-    // Season suffix removal: "Attack on Titan Season 3" → "attack-on-titan"
     const noSeason = toSlug(t.replace(/\b(season|part|cour|s\d+)\s*\d*/gi, "").trim());
     if (noSeason && noSeason !== full) candidates.push(noSeason);
   }
 
-  for (const slug of [...new Set(candidates)]) {
-    try {
-      // Validate via /anime/{slug} — works even when ep1 has no servers yet uploaded.
-      // Watch ep1 check was unreliable: many anime have no ep1 servers on MitAnime.
-      const r = await fetch(`${MITANIME_BASE}/anime/${slug}`, {
-        headers: MITANIME_RSC_HDRS,
-        signal: AbortSignal.timeout(8000),
-        redirect: "follow",
+  // ── PARALLEL slug validation: run all candidates at once, first success wins ──
+  // Previously sequential (each 8s timeout) → up to 40s total. Now max ~5s.
+  const uniqueCandidates = [...new Set(candidates)];
+  const slugResult = await Promise.race([
+    (async (): Promise<string | null> => {
+      const checks = uniqueCandidates.map(async (slug): Promise<string | null> => {
+        try {
+          const r = await fetch(`${MITANIME_BASE}/anime/${slug}`, {
+            headers: MITANIME_RSC_HDRS,
+            signal: AbortSignal.timeout(5000),
+            redirect: "follow",
+          });
+          if (!r.ok) return null;
+          const text = await r.text();
+          if (!text.includes('"/_not-found"') && text.length > 20000) return slug;
+        } catch {}
+        return null;
       });
-      if (!r.ok) continue;
-      const text = await r.text();
-      // Valid anime page: substantial content (not 404 shell) and no not-found RSC marker
-      if (!text.includes('"/_not-found"') && text.length > 20000) {
-        mitanimeSlugCache.set(ck, { slug, ts: Date.now() });
-        return slug;
+      // Return the first non-null result (preserving candidate priority order)
+      for (const p of checks) {
+        const result = await p;
+        if (result) return result;
       }
-    } catch {}
+      return null;
+    })(),
+    new Promise<null>(res => setTimeout(() => res(null), 8000)),
+  ]);
+
+  if (slugResult) {
+    mitanimeSlugCache.set(ck, { slug: slugResult, ts: Date.now() });
+    return slugResult;
   }
 
-  // Fallback: search RSC endpoint
-  for (const q of [english, title].filter(Boolean) as string[]) {
+  // Fallback: search RSC endpoint (parallel for both queries)
+  const searchQueries = [english, title].filter(Boolean) as string[];
+  const searchResults = await Promise.all(searchQueries.map(async (q): Promise<string | null> => {
     try {
       const r = await fetch(
-        `${MITANIME_BASE}/search?q=${encodeURIComponent(q as string)}`,
-        { headers: MITANIME_RSC_HDRS, signal: AbortSignal.timeout(8000), redirect: "follow" },
+        `${MITANIME_BASE}/search?q=${encodeURIComponent(q)}`,
+        { headers: MITANIME_RSC_HDRS, signal: AbortSignal.timeout(6000), redirect: "follow" },
       );
-      if (!r.ok) continue;
+      if (!r.ok) return null;
       const text = await r.text();
-      // Extract slugs from plain JSON "slug":"..." form (confirmed 2026-07-24: RSC uses plain quotes)
       const slugsFound: string[] = [];
       for (const m of text.matchAll(/"slug":"([a-z0-9][a-z0-9-]*)"/g)) {
         if (/^[a-z0-9-]+$/.test(m[1]) && m[1].length > 2) slugsFound.push(m[1]);
@@ -2821,11 +2832,9 @@ async function resolveMitanimeSlug(title: string, english: string | null): Promi
       for (const m of text.matchAll(/href="\/anime\/([a-z0-9][a-z0-9-]*)"/g)) {
         if (/^[a-z0-9-]+$/.test(m[1]) && m[1].length > 2) slugsFound.push(m[1]);
       }
-      const unique = [...new Set(slugsFound)];
-      // Score each slug by similarity to titles
       let best: string | null = null;
       let bestScore = 0;
-      for (const slug of unique) {
+      for (const slug of [...new Set(slugsFound)]) {
         const label = slug.replace(/-/g, " ");
         const score = Math.max(
           similarity(label, title),
@@ -2833,15 +2842,12 @@ async function resolveMitanimeSlug(title: string, english: string | null): Promi
         );
         if (score > bestScore && score > 0.40) { bestScore = score; best = slug; }
       }
-      if (best) {
-        mitanimeSlugCache.set(ck, { slug: best, ts: Date.now() });
-        return best;
-      }
-    } catch {}
-  }
-
-  mitanimeSlugCache.set(ck, { slug: null, ts: Date.now() });
-  return null;
+      return best;
+    } catch { return null; }
+  }));
+  const best = searchResults.find(Boolean) || null;
+  mitanimeSlugCache.set(ck, { slug: best, ts: Date.now() });
+  return best;
 }
 
 async function getMitanimeSources(
@@ -12617,7 +12623,7 @@ router.get("/anime/sources-stream", async (req, res) => {
       scrapeCached("animedar",     () => getAnimadarSources(title, english, ep, isMovie, matchCtx)),
       // okanime: معطّل بطلب المستخدم
       // scrapeCached("okanime",      () => getOkAnimeSources(title, english, ep, isMovie, matchCtx), true, 22_000),
-      scrapeCached("mitanime",    () => getMitanimeSources(title, english, ep),            false, 60000),
+      scrapeCached("mitanime",    () => getMitanimeSources(title, english, ep),            false, 30000),
       scrapeCached("animeify",     () => getAnimeifySources(title, english, ep),  false, 18000),
       scrapeCached("animeday",     () => getAnimeDaySources(title, english, ep),    true, 18000),
       // scrapeCached("seepanel",  () => getSeepanelSources(title, english, ep, isMovie)), // DEAD: panel.seepanel.top/api returns 404 (2026-06)
@@ -12687,7 +12693,8 @@ router.get("/anime/sources-stream", async (req, res) => {
       // animegg:      معطّل بطلب المستخدم
       // allmanga: معطّل 2026-07-17 — AA_CRYPTO_MISSING على endpoint الحلقات (AllAnime أضافت anti-scraping)
       // scrapeCached("allmanga", () => getAllMangaSources(title, english, ep, anilistId), false, 18000),
-      scrapeCached("reanime",  () => getReanímeSources(title, english, ep, anilistId),   false, 25000),
+      // reanime: محذوف بطلب المستخدم 2026-07-24
+      // scrapeCached("reanime",  () => getReanímeSources(title, english, ep, anilistId),   false, 25000),
       // animepahe:    mirurotvapi + owocdn AES-128 HLS — 18ث timeout — ثقيل جداً في التشغيل
       // ── مصادر جديدة يوليو 2026 ────────────────────────────────────────────
       scrapeCached("nekowatch",  () => getNekowatchSources(title, english, ep, anilistId),  false, 18000),
@@ -12744,7 +12751,7 @@ router.get("/anime/fetch-source", async (req, res) => {
     "witanime",  // مُعاد تفعيله 2026-07-17 — _zH/_zW + ok.ru/yonaplay/streamwish resolution
     "anipub",    // مُضاف 2026-07-19 — AniPub/MegaPlay مدبلج+ترجمة+عربي
     "anime3rb",  // مُضاف 2026-07-18 — Animatoo Supabase slug + Hopx browser-html
-    "reanime",   // مُعاد تفعيله 2026-07-20 — reanime.to/api/flix + FlixCloud HLS ناعم
+    // reanime: محذوف بطلب المستخدم 2026-07-24
     "sanime",    // مُضاف 2026-07-24 — MP4 مباشر عربي مدبلج
     "mitanime",  // مُعاد تفعيله 2026-07-24 — parseMitanimeServers مُصلَّح (RSC escaped quotes) + slug validation عبر /anime/{slug}
     // "allmanga": معطّل 2026-07-17 — AA_CRYPTO_MISSING
@@ -12846,7 +12853,7 @@ router.get("/anime/fetch-source", async (req, res) => {
       // case "animelek":     await runExtract(await race(getAnimelekSources(title, english, ep, isMovie),   SCRAPER_MS, [])); break;
       case "animedar":     await runExtract(await race(getAnimadarSources(title, english, ep, isMovie),   SCRAPER_MS, [])); break;
       // case "okanime": معطّل بطلب المستخدم
-      case "mitanime":    (await race(getMitanimeSources(title, english, ep),           60000, [])).forEach(collectSrc); break;
+      case "mitanime":    (await race(getMitanimeSources(title, english, ep),           30000, [])).forEach(collectSrc); break;
       case "animeify":    (await race(getAnimeifySources(title, english, ep),  18000, [])).forEach(collectSrc); break;
       case "animeday":     await runExtract(await race(getAnimeDaySources(title, english, ep),   SCRAPER_MS, [])); break;
       // case "seepanel": DEAD
@@ -12883,7 +12890,8 @@ router.get("/anime/fetch-source", async (req, res) => {
       // faselhd_db: معطّلة بطلب المستخدم 2026-07-14 (قسم الأنمي فقط)
       // case "faselhd_db":   await runExtract(await race(getFaselhdDbSources(title, english, ep, isMovie), 28_000, [])); break;
       // case "witanime": معطّل بطلب المستخدم
-      case "reanime":    (await race(getReanímeSources(title, english, ep, anilistId),    25_000, [])).forEach(collectSrc); break;
+      // reanime: محذوف بطلب المستخدم 2026-07-24
+      // case "reanime":    (await race(getReanímeSources(title, english, ep, anilistId),    25_000, [])).forEach(collectSrc); break;
       case "akoam":        await runExtract(await race(getAkoamSources(title, english, ep), 22_000, [])); break;
       case "moviebox":     (await race(getMovieBoxAnimeSources(title, english, ep, isMovie), 18_000, [])).forEach(collectSrc); break;
       case "anime3rb":     (await race(getAnime3rbSources(title, english, ep), 38_000, [])).forEach(collectSrc); break;
