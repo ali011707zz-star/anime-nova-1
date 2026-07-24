@@ -10,7 +10,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useColors } from "@/hooks/useColors";
 import { useApp } from "@/context/AppContext";
-import { getBaseUrl, setRuntimeApiUrl, CUSTOM_API_URL_KEY } from "@/utils/baseUrl";
+import { getBaseUrl } from "@/utils/baseUrl";
 
 const THEMES: { label: string; value: string; dot: string; desc: string }[] = [
   { label: "داكن",   value: "dark",   dot: "#3F3F46", desc: "رمادي داكن" },
@@ -223,132 +223,6 @@ function SectionHeader({ title, icon }: { title: string; icon: string }) {
     </View>
   );
 }
-
-/* ── API Server Section ── */
-function ApiServerSection() {
-  const [url, setUrl] = useState("");
-  const [saved, setSaved] = useState("");
-  const [editing, setEditing] = useState(false);
-  const [status, setStatus] = useState<"idle" | "testing" | "ok" | "fail">("idle");
-
-  useEffect(() => {
-    AsyncStorage.getItem(CUSTOM_API_URL_KEY).then(v => {
-      const val = v || "";
-      setSaved(val);
-      setUrl(val);
-    });
-  }, []);
-
-  async function testAndSave() {
-    const trimmed = url.trim().replace(/\/$/, "");
-    if (!trimmed) {
-      // إعادة الضبط للافتراضي
-      await AsyncStorage.removeItem(CUSTOM_API_URL_KEY);
-      setRuntimeApiUrl(null);
-      setSaved("");
-      setEditing(false);
-      setStatus("idle");
-      return;
-    }
-    if (!trimmed.startsWith("http")) {
-      Alert.alert("خطأ", "يجب أن يبدأ العنوان بـ https://");
-      return;
-    }
-    setStatus("testing");
-    try {
-      const r = await fetch(`${trimmed}/health`, { signal: AbortSignal.timeout(6000) });
-      if (r.ok) {
-        await AsyncStorage.setItem(CUSTOM_API_URL_KEY, trimmed);
-        setRuntimeApiUrl(trimmed);
-        setSaved(trimmed);
-        setUrl(trimmed);
-        setStatus("ok");
-        setEditing(false);
-        setTimeout(() => setStatus("idle"), 2000);
-      } else {
-        setStatus("fail");
-      }
-    } catch {
-      setStatus("fail");
-    }
-  }
-
-  const currentBase = getBaseUrl();
-
-  return (
-    <View style={{ paddingHorizontal: 16 }}>
-      <View style={ts.card}>
-        {/* Current URL display */}
-        <View style={ts.navRow}>
-          <View style={[ts.navIcon, { backgroundColor: "rgba(56,189,248,0.10)" }]}>
-            <Ionicons name="server" size={16} color="#38bdf8" />
-          </View>
-          <View style={[ts.navText, { alignItems: "flex-end" }]}>
-            <Text style={ts.navLabel}>حالة الاتصال</Text>
-            <Text style={[ts.navSub, { color: saved ? "#34d399" : "rgba(255,255,255,0.5)" }]} numberOfLines={1}>
-              {saved ? "✓ سيرفر مخصص" : "✓ متصل بالسيرفر الرسمي"}
-            </Text>
-          </View>
-          {saved ? (
-            <View style={{ paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8, backgroundColor: "rgba(52,211,153,0.12)", borderWidth: 1, borderColor: "rgba(52,211,153,0.3)" }}>
-              <Text style={{ fontSize: 9, color: "#34d399", fontFamily: "Cairo_700Bold" }}>مخصص</Text>
-            </View>
-          ) : null}
-        </View>
-
-        {/* Edit / input row */}
-        {editing ? (
-          <View style={{ paddingHorizontal: 12, paddingBottom: 12, gap: 8 }}>
-            <TextInput
-              value={url}
-              onChangeText={setUrl}
-              placeholder="https://your-api-server.replit.app"
-              placeholderTextColor="rgba(255,255,255,0.2)"
-              style={{ backgroundColor: "rgba(255,255,255,0.05)", borderWidth: 1.5, borderColor: "rgba(255,255,255,0.1)", borderRadius: 14, paddingHorizontal: 14, paddingVertical: 10, fontSize: 12, fontFamily: "Cairo_400Regular", color: "#fff", textAlign: "left", writingDirection: "ltr" }}
-              autoCapitalize="none"
-              autoCorrect={false}
-              keyboardType="url"
-            />
-            <View style={{ flexDirection: "row", gap: 8 }}>
-              <Pressable
-                onPress={testAndSave}
-                style={{ flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, paddingVertical: 10, borderRadius: 12, backgroundColor: status === "fail" ? "rgba(239,68,68,0.18)" : "rgba(139,92,246,0.20)", borderWidth: 1, borderColor: status === "fail" ? "rgba(239,68,68,0.4)" : "rgba(139,92,246,0.4)" }}
-              >
-                {status === "testing" ? (
-                  <ActivityIndicator size="small" color="#a78bfa" />
-                ) : (
-                  <Ionicons name={status === "ok" ? "checkmark-circle" : status === "fail" ? "close-circle" : "flash"} size={15} color={status === "fail" ? "#f87171" : "#a78bfa"} />
-                )}
-                <Text style={{ fontSize: 12, fontFamily: "Cairo_700Bold", color: status === "fail" ? "#f87171" : "#c4b5fd" }}>
-                  {status === "testing" ? "جاري الاختبار…" : status === "fail" ? "فشل الاتصال" : "اختبار وحفظ"}
-                </Text>
-              </Pressable>
-              <Pressable onPress={() => { setEditing(false); setUrl(saved); setStatus("idle"); }} style={{ paddingHorizontal: 14, paddingVertical: 10, borderRadius: 12, backgroundColor: "rgba(255,255,255,0.05)", borderWidth: 1, borderColor: "rgba(255,255,255,0.08)" }}>
-                <Text style={{ fontSize: 12, fontFamily: "Cairo_700Bold", color: "rgba(255,255,255,0.4)" }}>إلغاء</Text>
-              </Pressable>
-            </View>
-            {saved ? (
-              <Pressable onPress={() => { setUrl(""); }} style={{ alignItems: "center" }}>
-                <Text style={{ fontSize: 11, fontFamily: "Cairo_400Regular", color: "rgba(239,68,68,0.6)" }}>مسح المخصص والعودة للافتراضي</Text>
-              </Pressable>
-            ) : null}
-          </View>
-        ) : (
-          <Pressable onPress={() => setEditing(true)} style={ts.navRow}>
-            <View style={[ts.navIcon, { backgroundColor: "rgba(139,92,246,0.10)" }]}>
-              <Ionicons name="pencil" size={15} color="#a78bfa" />
-            </View>
-            <View style={[ts.navText, { alignItems: "flex-end" }]}>
-              <Text style={ts.navLabel}>تعيين سيرفر مخصص</Text>
-              <Text style={ts.navSub}>غيّر عنوان API دون إعادة بناء التطبيق</Text>
-            </View>
-          </Pressable>
-        )}
-      </View>
-    </View>
-  );
-}
-
 /* ── Card ── */
 function Card({ children }: { children: React.ReactNode }) {
   return (
