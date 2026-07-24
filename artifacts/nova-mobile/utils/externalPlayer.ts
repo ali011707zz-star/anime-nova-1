@@ -1,29 +1,52 @@
 import { Linking, Platform } from "react-native";
 
 /**
- * Opens the rebranded external player with an explicit Android package.
- * The explicit package keeps a missing-player installation from silently
- * sending the user to a browser page instead of back to NOVA.
+ * Opens the video URL in NOVA Player (com.player.easy / EasyPlex) if installed.
+ * Falls back to an implicit video/* intent so any installed player (VLC, MX Player…)
+ * handles it instead of showing an error.
+ *
+ * Returns true if a player was opened, false only if no player is available at all.
  */
 export async function openNovaPlayer(url: string): Promise<boolean> {
-  if (!url) return false;
+  if (!url || Platform.OS !== "android") return false;
 
-  if (Platform.OS === "android") {
-    try {
-      const parsed = new URL(url);
-      const target = `${parsed.host}${parsed.pathname}${parsed.search}`;
-      const intentUrl =
-        `intent://${target}` +
-        `#Intent;scheme=${parsed.protocol.replace(":", "")};` +
-        "action=android.intent.action.VIEW;" +
-        "type=video/*;" +
-        "package=com.player.easy;end";
-      await Linking.openURL(intentUrl);
+  try {
+    const parsed = new URL(url);
+    const scheme = parsed.protocol.replace(":", "");
+    const target = `${parsed.host}${parsed.pathname}${parsed.search}`;
+
+    // 1️⃣ Try NOVA Player / EasyPlex explicitly
+    const novaIntent =
+      `intent://${target}` +
+      `#Intent;scheme=${scheme};` +
+      "action=android.intent.action.VIEW;" +
+      "type=video/*;" +
+      "package=com.player.easy;end";
+
+    const novaSupported = await Linking.canOpenURL(novaIntent);
+    if (novaSupported) {
+      await Linking.openURL(novaIntent);
       return true;
-    } catch {
-      return false;
     }
+  } catch {
+    /* NOVA Player not installed — fall through */
   }
 
-  return false;
+  // 2️⃣ Fallback: implicit intent → system picks any installed video player
+  try {
+    const parsed = new URL(url);
+    const scheme = parsed.protocol.replace(":", "");
+    const target = `${parsed.host}${parsed.pathname}${parsed.search}`;
+
+    const fallbackIntent =
+      `intent://${target}` +
+      `#Intent;scheme=${scheme};` +
+      "action=android.intent.action.VIEW;" +
+      "type=video/*;end";
+
+    await Linking.openURL(fallbackIntent);
+    return true;
+  } catch {
+    return false;
+  }
 }

@@ -1,13 +1,11 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import {
   View, Text, Pressable, Image, ScrollView, StyleSheet,
-  Platform, Dimensions, Animated, Easing, ActivityIndicator,
+  Platform, Dimensions, Animated, Easing, ActivityIndicator, Alert,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
-// AnimHlsPlayer replaced by RiftPlayer (react-native-video native ExoPlayer/AVPlayer)
-import { RiftPlayer, PlayerSource } from "@/components/RiftPlayer";
-// WebVideoPlayer removed — Rift Player is the only internal player
+import { openNovaPlayer } from "@/utils/externalPlayer";
 import { HiddenResolverWebView, ResolvedStream } from "@/components/HiddenResolverWebView";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -20,7 +18,7 @@ const { width: W, height: H } = Dimensions.get("window");
 
 /* ── Types ── */
 type Quality = "1080p FHD" | "720p HD" | "360p SD";
-type Screen = "loading" | "picker" | "native" | "embed" | "resolving" | "webplayer";
+type Screen = "loading" | "picker" | "external" | "embed" | "resolving" | "webplayer";
 
 interface AnimSrc {
   url?: string;
@@ -344,10 +342,6 @@ export default function AnimationWatchScreen() {
   const autoPlayFiredRef  = useRef(false);
   const autoPlayTimerRef  = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hasCachedRef      = useRef(false); // هل تم تحميل مصادر من الكاش المحلي؟
-  /* تجميد مصادر المشغّل لحظة دخول التشغيل — يمنع مصادر SSE الجديدة التي تصل أثناء
-     التشغيل الفعلي من إعادة كتابة مصفوفة sources الممرَّرة لـ RiftPlayer، وهو ما كان
-     يُسبِّب توقف التشغيل والعودة غير المتوقعة لشاشة الـ picker. */
-  const [frozenSources, setFrozenSources] = useState<PlayerSource[]>([]);
 
   const progressKey   = `anim-wp-${tmdbId}-${type}-${season}-${ep}`;
   /* كاش المصادر المحلي لفتح فوري في المرة الثانية */
@@ -598,26 +592,23 @@ export default function AnimationWatchScreen() {
     // "native" orientation is handled by RiftPlayer itself
   }, [screen]);
 
-  /* ── تجميد المصادر لحظة دخول المشغّل، ومسحها عند الخروج (يحل مشكلة العودة للـ picker).
-     — append فقط أثناء التشغيل: لا نُزيح المصادر الحالية حتى لا يتأثر RiftPlayer. ── */
-  useEffect(() => {
-    if (screen === "native") {
-      setFrozenSources(prev => {
-        if (prev.length === 0) return animHlsSources.length > 0 ? animHlsSources : prev;
-        const existingUrls = new Set(prev.map(s => s.url));
-        const newOnes = animHlsSources.filter(s => s.url && !existingUrls.has(s.url));
-        return newOnes.length > 0 ? [...prev, ...newOnes] : prev;
-      });
-    } else {
-      setFrozenSources([]);
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [screen, animHlsSources]);
 
-  /* ── Play a source ── */
+  /* ── Play a source — كل المصادر المباشرة تُفتح في NOVA Player الخارجي ── */
   const playSrc = useCallback((src: AnimSrc) => {
     setPlayingSrc(src);
-    if (isDirectPlayable(src)) { setScreen("native"); return; }
+    if (isDirectPlayable(src)) {
+      const playUrl = src.proxyUrl || src.directUrl || src.url || "";
+      openNovaPlayer(playUrl).then(ok => {
+        if (ok) { setScreen("external"); }
+        else {
+          Alert.alert(
+            "NOVA Player",
+            "تعذّر فتح NOVA Player.\nتأكد من تثبيته أو حمّله من:\nhttps://animenovaa.duckdns.org/nova-player.apk"
+          );
+        }
+      });
+      return;
+    }
     if (needsHiddenResolve(src)) { setScreen("resolving"); return; }
     setScreen("embed");
   }, []);
@@ -789,6 +780,29 @@ export default function AnimationWatchScreen() {
           router.replace(`/animation/watch?id=${tmdbId}&type=${type}&ep=${ep - 1}&season=${season}&title=${t}&poster=${p}`);
         } : undefined}
       />
+    );
+  }
+
+  /* ══════════════ EXTERNAL PLAYER (NOVA Player) ══════════════ */
+  if (screen === "external") {
+    return (
+      <View style={[w.container, { alignItems: "center", justifyContent: "center", gap: 16 }]}>
+        <Pressable onPress={() => setScreen("picker")} style={[w.videoBackBtn, { position: "absolute", top: topPad + 4, right: 12 }]}>
+          <Ionicons name="arrow-forward" size={18} color="#fff" />
+        </Pressable>
+        <View style={{ width: 72, height: 72, borderRadius: 36, backgroundColor: "rgba(139,92,246,0.15)", alignItems: "center", justifyContent: "center" }}>
+          <Ionicons name="play-circle-outline" size={42} color="rgba(139,92,246,0.8)" />
+        </View>
+        <Text style={{ color: "#fff", fontFamily: "Cairo_700Bold", fontSize: 16, textAlign: "center" }}>
+          تم فتح NOVA Player
+        </Text>
+        <Text style={{ color: "rgba(255,255,255,0.45)", fontFamily: "Cairo_400Regular", fontSize: 13, textAlign: "center", paddingHorizontal: 32 }}>
+          يتم تشغيل الفيديو في NOVA Player خارجياً
+        </Text>
+        <Pressable onPress={() => setScreen("picker")} style={{ marginTop: 4 }}>
+          <Text style={{ color: "rgba(255,255,255,0.35)", fontFamily: "Cairo_400Regular", fontSize: 13 }}>العودة للمصادر</Text>
+        </Pressable>
+      </View>
     );
   }
 

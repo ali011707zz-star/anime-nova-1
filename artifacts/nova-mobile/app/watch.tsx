@@ -1,14 +1,13 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import {
   View, Text, Pressable, Image, ScrollView,
-  StyleSheet, Platform, Animated, Easing,
+  StyleSheet, Platform, Animated, Easing, Alert,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { RiftPlayer, PlayerSource } from "@/components/RiftPlayer";
-// AnimHlsPlayer removed — RiftPlayer is the only player
-// WebVideoPlayer removed — Rift Player is the only internal player
+import { openNovaPlayer } from "@/utils/externalPlayer";
 import { HiddenResolverWebView, ResolvedStream } from "@/components/HiddenResolverWebView";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -19,7 +18,7 @@ import * as ScreenOrientation from "expo-screen-orientation";
 
 /* ── Types ── */
 type Quality    = "1080p FHD" | "720p HD" | "360p SD";
-type Screen     = "loading" | "picker" | "native" | "embed" | "resolving" | "webplayer";
+type Screen     = "loading" | "picker" | "native" | "external" | "embed" | "resolving" | "webplayer";
 
 /* ── مواقع محمية بـ Cloudflare/Turnstile يفشل الخادم (VPS) بجلب فيديوها المباشر —
    نحاول أولاً حلّها عبر WebView مخفي (IP سكني حقيقي للجهاز) قبل عرض بطاقة "يحتاج تطبيق أصلي" ── */
@@ -259,6 +258,9 @@ const SITE_PRIORITY: Record<string, number> = {
   anineko: 50, anikoto: 40, vidfast: 35,
   anikototv: 30, animekai: 25, animepahe: 20, anipm: 18,
 };
+
+/* ── مصادر HLS لا يستطيع RiftPlayer تشغيلها من VPS datacenter IP ── */
+const HLS_EXTERNAL_SITES = new Set(["animekai", "anineko", "hianime"]);
 
 /* ── قائمة المصادر (KW أولاً — الأولوية القصوى للتشغيل الفوري) ── */
 /* مصادر موحَّدة مع الويب — نفس المصادر الـ 8 المفعَّلة في SCRAPER_DEFS */
@@ -879,6 +881,29 @@ export default function WatchScreen() {
             <Text style={{ fontSize: 13, fontFamily: "Cairo_400Regular", color: "rgba(255,255,255,0.45)", textAlign: "center" }}>⏳ جاري تجهيز الحلقة، قد يستغرق بضع ثوانٍ.</Text>
           </View>
         </View>
+      </View>
+    );
+  }
+
+  /* ══════════════ EXTERNAL PLAYER (NOVA Player) ══════════════ */
+  if (screen === "external") {
+    return (
+      <View style={{ flex: 1, backgroundColor: "#07070d", alignItems: "center", justifyContent: "center", gap: 16 }}>
+        <Pressable onPress={() => setScreen("picker")} style={[d.playerBackBtn, { position: "absolute", top: topPad + 4, right: 12 }]}>
+          <Ionicons name="arrow-forward" size={18} color="#fff" />
+        </Pressable>
+        <View style={{ width: 72, height: 72, borderRadius: 36, backgroundColor: "rgba(139,92,246,0.15)", alignItems: "center", justifyContent: "center" }}>
+          <Ionicons name="play-circle-outline" size={42} color="rgba(139,92,246,0.8)" />
+        </View>
+        <Text style={{ color: "#fff", fontFamily: "Cairo_700Bold", fontSize: 16, textAlign: "center" }}>
+          تم فتح NOVA Player
+        </Text>
+        <Text style={{ color: "rgba(255,255,255,0.45)", fontFamily: "Cairo_400Regular", fontSize: 13, textAlign: "center", paddingHorizontal: 32 }}>
+          يتم تشغيل الفيديو في NOVA Player خارجياً
+        </Text>
+        <Pressable onPress={() => setScreen("picker")} style={{ marginTop: 4 }}>
+          <Text style={{ color: "rgba(255,255,255,0.35)", fontFamily: "Cairo_400Regular", fontSize: 13 }}>العودة للمصادر</Text>
+        </Pressable>
       </View>
     );
   }
