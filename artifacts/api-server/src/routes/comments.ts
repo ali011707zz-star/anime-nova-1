@@ -1,5 +1,6 @@
 import { Router, type Request, type Response } from "express";
 import { sbSelect, sbInsert, sbDelete, sbPatch } from "../lib/supabaseClient.js";
+import { getMobileUserId } from "../lib/security.js";
 
 const router = Router();
 
@@ -7,7 +8,7 @@ async function getUserId(req: Request): Promise<string | null> {
   const sessionId = (req.session as any)?.userId || (req.session as any)?.emailUserId || null;
   if (sessionId) return sessionId;
 
-  const mobileUserId = req.headers["x-mobile-user-id"] as string | undefined;
+  const mobileUserId = getMobileUserId(req);
   if (mobileUserId) {
     try {
       const rows = await sbSelect("users", { id: `eq.${mobileUserId}` }, { limit: 1 });

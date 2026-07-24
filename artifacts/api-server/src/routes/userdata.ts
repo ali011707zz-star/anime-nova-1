@@ -1,5 +1,6 @@
 import { Router, type Request, type Response } from "express";
 import { sbSelect, sbInsert, sbUpsert, sbDelete } from "../lib/supabaseClient.js";
+import { getMobileUserId } from "../lib/security.js";
 
 const router = Router();
 
@@ -7,6 +8,7 @@ function getUserId(req: Request): string | null {
   return (
     (req.session as any)?.userId ||
     (req.session as any)?.emailUserId ||
+    getMobileUserId(req) ||
     null
   );
 }

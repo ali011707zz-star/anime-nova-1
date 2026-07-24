@@ -5,6 +5,7 @@ import { getBaseUrl } from "./baseUrl";
 
 const TOKEN_KEY = "nova_anon_token";
 const TOKEN_EXP_KEY = "nova_anon_token_exp";
+const USER_TOKEN_KEY = "nova_user_token";
 
 // معرّف ثابت للتطبيق (Client Identifier)
 const CLIENT_ID = "nova-anime-mobile-v1";
@@ -111,24 +112,20 @@ export async function invalidateToken(): Promise<void> {
   await secureDelete(TOKEN_EXP_KEY);
 }
 
-const MOBILE_USER_KEY = "nova-mobile-user";
+export async function setUserAuthToken(token: string | null): Promise<void> {
+  if (token) await secureSet(USER_TOKEN_KEY, token);
+  else await secureDelete(USER_TOKEN_KEY);
+}
 
-async function getMobileUserId(): Promise<string | null> {
-  try {
-    const raw = await AsyncStorage.getItem(MOBILE_USER_KEY);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw);
-    return parsed?.id || null;
-  } catch {
-    return null;
-  }
+export async function clearUserAuthToken(): Promise<void> {
+  await secureDelete(USER_TOKEN_KEY);
 }
 
 export async function secureFetch(
   url: string,
   options: RequestInit = {}
 ): Promise<Response> {
-  const [token, mobileUserId] = await Promise.all([getAuthToken(), getMobileUserId()]);
+  const [token, userToken] = await Promise.all([getAuthToken(), secureGet(USER_TOKEN_KEY)]);
   const buildHeaders = (tok: string | null): Record<string, string> => {
     const h: Record<string, string> = {
       ...(options.headers as Record<string, string> || {}),
@@ -136,7 +133,7 @@ export async function secureFetch(
       "User-Agent": APP_UA,
     };
     if (tok) h["X-App-Token"] = tok;
-    if (mobileUserId) h["X-Mobile-User-Id"] = mobileUserId;
+    if (userToken) h["X-User-Token"] = userToken;
     return h;
   };
 

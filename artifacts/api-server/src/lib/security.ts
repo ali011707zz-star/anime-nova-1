@@ -43,6 +43,7 @@ export function checkAppSecret(provided: string | undefined): boolean {
 // 1. توكن قصير العمر (5 دقائق) — مُوقَّع بـ HMAC-SHA256
 // ═══════════════════════════════════════════════════════════════════════════════
 const TOKEN_TTL = 300; // 5 دقائق
+const USER_TOKEN_TTL = 30 * 24 * 60 * 60; // 30 يوماً — جلسة الموبايل
 
 export function issueAnonToken(): { token: string; exp: number } {
   const now = Math.floor(Date.now() / 1000);
@@ -75,6 +76,41 @@ export function validateAnonToken(token: string): boolean {
   } catch {
     return false;
   }
+}
+
+/** توكن جلسة موقّع للموبايل — لا يعتمد على Cookie ولا يسمح بانتحال user id. */
+export function issueUserToken(userId: string): { token: string; exp: number } {
+  const now = Math.floor(Date.now() / 1000);
+  const exp = now + USER_TOKEN_TTL;
+  const payload = `user.${userId}.${now}.${exp}`;
+  const sig = createHmac("sha256", getSecret())
+    .update(payload)
+    .digest("base64url");
+  return { token: `${payload}.${sig}`, exp };
+}
+
+export function getUserIdFromToken(token: string | undefined): string | null {
+  if (!token) return null;
+  const parts = token.split(".");
+  if (parts.length !== 5 || parts[0] !== "user") return null;
+  const [, userId, iat, exp, sig] = parts;
+  if (!userId || userId.includes(".") || !/^\d+$/.test(iat) || !/^\d+$/.test(exp)) return null;
+  if (Date.now() / 1000 > Number(exp)) return null;
+  const payload = `user.${userId}.${iat}.${exp}`;
+  const expected = createHmac("sha256", getSecret()).update(payload).digest("base64url");
+  try {
+    const a = Buffer.from(sig);
+    const b = Buffer.from(expected);
+    return a.length === b.length && timingSafeEqual(a, b) ? userId : null;
+  } catch {
+    return null;
+  }
+}
+
+export function getMobileUserId(req: { headers: Record<string, string | string[] | undefined> }): string | null {
+  const raw = req.headers["x-user-token"];
+  const token = Array.isArray(raw) ? raw[0] : raw;
+  return getUserIdFromToken(token);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════

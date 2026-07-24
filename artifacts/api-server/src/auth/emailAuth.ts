@@ -3,6 +3,7 @@ import { scrypt, randomBytes, timingSafeEqual } from "node:crypto";
 import { promisify } from "node:util";
 import { sendVerifyEmail, sendPasswordResetEmail } from "./emailService.js";
 import { sbSelect, sbInsert, sbUpsert, sbDelete, sbPatch } from "../lib/supabaseClient.js";
+import { getMobileUserId, issueUserToken } from "../lib/security.js";
 
 const CODE_TTL_MS        = 10 * 60 * 1000;
 const MAX_ATTEMPTS       = 5;
@@ -105,6 +106,10 @@ function userPayload(u: any) {
   };
 }
 
+function authenticatedPayload(u: any) {
+  return { ...userPayload(u), authToken: issueUserToken(String(u.id)).token };
+}
+
 export function registerEmailAuthRoutes(app: Express): void {
 
   app.post("/api/auth/send-verify-code", async (req: Request, res: Response) => {
@@ -130,14 +135,15 @@ export function registerEmailAuthRoutes(app: Express): void {
         return res.status(404).json({ error: "لا يوجد حساب بهذا البريد الإلكتروني" });
 
       const code = generateCode();
-      await setPendingCode(emailKey, code, type as "signup" | "reset");
-
       const result = type === "reset"
         ? await sendPasswordResetEmail(emailKey, code)
         : await sendVerifyEmail(emailKey, code);
 
       if (!result.ok)
-        return res.status(500).json({ error: "فشل إرسال البريد، حاول مرة أخرى" });
+        return res.status(502).json({ error: result.error || "فشل إرسال البريد، تحقق من إعدادات البريد على الخادم" });
+
+      // لا نحجز البريد لمدة دقيقة إذا فشل SMTP؛ احفظ الكود فقط بعد نجاح الإرسال.
+      await setPendingCode(emailKey, code, type as "signup" | "reset");
 
       // نُرجع devCode فقط في بيئة التطوير (NODE_ENV !== "production")
       // في الـ production لا يُرسَل الكود في الاستجابة أبداً لأسباب أمنية
@@ -207,7 +213,7 @@ export function registerEmailAuthRoutes(app: Express): void {
       (req.session as any).userId = user.id;
       req.session.cookie.maxAge   = 30 * 24 * 60 * 60 * 1000;
 
-      return res.status(201).json(userPayload(user));
+      return res.status(201).json(authenticatedPayload(user));
     } catch (err: any) {
       console.error("[signup]", err);
       return res.status(500).json({ error: "حدث خطأ، حاول مرة أخرى" });
@@ -276,7 +282,7 @@ export function registerEmailAuthRoutes(app: Express): void {
       (req.session as any).userId = user.id;
       req.session.cookie.maxAge   = 30 * 24 * 60 * 60 * 1000;
 
-      return res.json(userPayload(user));
+      return res.json(authenticatedPayload(user));
     } catch (err) {
       console.error("[signin]", err);
       return res.status(500).json({ error: "حدث خطأ، حاول مرة أخرى" });
@@ -288,10 +294,7 @@ export function registerEmailAuthRoutes(app: Express): void {
   });
 
   app.get("/api/auth/me", async (req: Request, res: Response) => {
-    let userId = (req.session as any)?.userId;
-
-    /* ملاحظة: header X-Mobile-User-Id أُزيل — كان يسمح بانتحال هوية أي مستخدم.
-       التطبيق المحمول يجب أن يستخدم الجلسة (session cookie) بدلاً من ذلك. */
+    const userId = (req.session as any)?.userId || getMobileUserId(req);
 
     if (!userId) return res.status(401).json({ error: "غير مصرّح" });
     try {
@@ -312,7 +315,7 @@ export function registerEmailAuthRoutes(app: Express): void {
   });
 
   app.patch("/api/auth/profile", async (req: Request, res: Response) => {
-    const userId = (req.session as any)?.userId;
+    const userId = (req.session as any)?.userId || getMobileUserId(req);
     if (!userId) return res.status(401).json({ error: "غير مصرّح" });
     try {
       const { displayName, username, profileImageCustom, avatarColor } = req.body || {};
@@ -354,7 +357,7 @@ export function registerEmailAuthRoutes(app: Express): void {
   });
 
   app.post("/api/auth/change-password", async (req: Request, res: Response) => {
-    const userId = (req.session as any)?.userId;
+    const userId = (req.session as any)?.userId || getMobileUserId(req);
     if (!userId) return res.status(401).json({ error: "غير مصرّح" });
     try {
       const { currentPassword, newPassword } = req.body || {};
@@ -385,7 +388,7 @@ export function registerEmailAuthRoutes(app: Express): void {
   });
 
   app.delete("/api/auth/account", async (req: Request, res: Response) => {
-    const userId = (req.session as any)?.userId;
+    const userId = (req.session as any)?.userId || getMobileUserId(req);
     if (!userId) return res.status(401).json({ error: "غير مصرّح" });
     try {
       await sbDelete("users", { id: `eq.${userId}` });
@@ -413,7 +416,7 @@ export function registerEmailAuthRoutes(app: Express): void {
 }
 
 export async function getEmailUser(req: Request): Promise<any | null> {
-  const userId = (req.session as any)?.userId || (req.session as any)?.emailUserId;
+  const userId = (req.session as any)?.userId || (req.session as any)?.emailUserId || getMobileUserId(req);
   if (!userId) return null;
   try {
     const rows = await sbSelect("users", { id: `eq.${userId}` }, { limit: 1 });
