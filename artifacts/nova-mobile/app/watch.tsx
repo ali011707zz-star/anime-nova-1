@@ -50,8 +50,7 @@ const SITE_TAG: Record<string, string> = {
   ristoanime: "RS", animeify: "AF", animeday: "DY", arabseed: "AR",
   anime4up2: "4U", mycima: "MC", topcinemaa: "TC", animephoenix: "PH",
   animewitcher: "AW", kawaii: "KW",
-  anikoto: "AK", anikototv: "ATV", animekai: "KI", hianime: "HI",
-  anineko: "AN", mitanime: "MT",
+  anikototv: "ATV", animekai: "KI", mitanime: "MT",
   vidlink_anim: "VL", vidfast: "VF",
   animetime: "AT", animepahe: "AP", dulo_anim: "DL",
   faselhd_db: "FH", witanime: "WI", witanime_db: "WD",
@@ -61,8 +60,8 @@ const SITE_TAG: Record<string, string> = {
 
 /* ── اسم عرض لكل موقع في منتقي المصادر ── */
 const SITE_LABEL: Record<string, string> = {
-  kawaii: "Kawaii", hianime: "HiAnime", animewitcher: "AnimeWitcher",
-  dulo_anim: "Dulo", anineko: "Anineko", anikoto: "AniKoto",
+  kawaii: "Kawaii", animewitcher: "AnimeWitcher",
+  dulo_anim: "Dulo",
   anikototv: "AniKotoTV", mitanime: "MITanime", vidfast: "VidFast",
   vidlink_anim: "VidLink", animekai: "AnimeKai",
   animepahe: "AnimePahe", shahiid: "Shahiid", animelek: "Animelek",
@@ -81,9 +80,8 @@ function getSiteTag(site: string): string {
 /* ── وصف قصير لكل مصدر في شبكة الاختيار (يطابق نظام الويب) ── */
 const SITE_DESC: Record<string, string> = {
   kawaii: "1080p · مباشر", animewitcher: "PD/ST · مباشر",
-  hianime: "ياباني مترجم · HLS نظيف", dulo_anim: "ياباني/إنجليزي · HLS مباشر",
+  dulo_anim: "ياباني/إنجليزي · HLS مباشر",
   vidlink_anim: "ياباني مترجم · مباشر",
-  anineko: "ياباني مترجم · HLS", anikoto: "ياباني مترجم · 1080p",
   mitanime: "ياباني مترجم · مباشر", vidfast: "TMDB · HLS · متعدد الخوادم",
   anikototv: "ياباني مترجم · skip مدمج", animekai: "ياباني مترجم · DB مباشر",
   animepahe: "ياباني مترجم · HLS نظيف", anipm: "ياباني مترجم · 37 سيرفر/حلقة",
@@ -101,6 +99,12 @@ const SITE_DESC: Record<string, string> = {
 };
 function getSiteDesc(site: string): string {
   return SITE_DESC[site] || "";
+}
+
+/* مصادر محظورة في Nova Mobile — لا تُجلب ولا تُعرض حتى لو جاءت من كاش قديم. */
+const BLOCKED_SOURCE_SITES = new Set(["anikoto", "anineko", "hianime", "ak", "an", "hi"]);
+function isBlockedSource(src: Pick<Src, "site">): boolean {
+  return BLOCKED_SOURCE_SITES.has(String(src.site || "").trim().toLowerCase());
 }
 
 /* ── Quality helpers ── */
@@ -202,19 +206,20 @@ function ensureVpsProxy(url: string, headers: Record<string, string> | undefined
 
 /* ── مصادر تُشغَّل native مباشرةً عبر RiftPlayer (seg-proxy يُعيد روابط مطلقة الآن) ── */
 
-/* ── أولويات المصادر: KW → HI → AW → DU → rest ── */
+/* ── أولويات المصادر: KW → AW → DU → rest ── */
 const SITE_PRIORITY: Record<string, number> = {
-  kawaii: 100, hianime: 95, animewitcher: 90,
+  kawaii: 100, animewitcher: 90,
   dulo_anim: 70, vidlink_anim: 55,
-  anineko: 50, anikoto: 40, vidfast: 35,
+  vidfast: 35,
   anikototv: 30, animekai: 25, animepahe: 20, anipm: 18,
+  sanime: 15,
 };
 
 /* ── قائمة المصادر (KW أولاً — الأولوية القصوى للتشغيل الفوري) ── */
 /* مصادر موحَّدة مع الويب — نفس المصادر الـ 8 المفعَّلة في SCRAPER_DEFS */
 const ANIME_SITES = [
-  "kawaii", "anikoto", "hianime", "animewitcher",
-  "anineko", "anslayer", "animeify", "mitanime",
+  "kawaii", "animewitcher", "anslayer", "animeify", "sanime",
+  "mitanime",  // مُضاف 2026-07-24 — RSC HTTP مباشر بلا browser، 1-2s، 4-8 سيرفرات
   // "witanime": معطّل بطلب المستخدم
   // "allmanga": معطّل 2026-07-17 — AA_CRYPTO_MISSING على AllAnime
 ] as const;
@@ -231,9 +236,9 @@ const SITE_TIMEOUT_MAP: Partial<Record<typeof ANIME_SITES[number], number>> = {
   mycima:       34_000,  // backend = 30s + 4s هامش
   anime4up2:    28_000,  // backend = 25s + 3s هامش
   anikototv:    28_000,  // backend = 25s + 3s هامش
-  hianime:      35_000,  // backend = 22s + 13s هامش (cold cache needs extra margin)
   anipm:        24_000,  // backend = 20s + 4s هامش
   witanime:     20_000,  // backend يوناplay static HTML < 1s + chain search ~15s
+  mitanime:     65_000,  // backend = slug(8s) + fetch(10s) + parallel servers(22-30s) + 5s هامش
 };
 
 /* ── Spinning loader ── */
@@ -377,7 +382,7 @@ export default function WatchScreen() {
         const { sources: cached, ts }: { sources: Src[]; ts: number } = JSON.parse(raw);
         if (!cached?.length || Date.now() - ts > SRC_CACHE_TTL) return;
         const base = getBaseUrl();
-        const resolved = cached.map(s => ({
+        const resolved = cached.filter(s => !isBlockedSource(s)).map(s => ({
           ...s,
           directUrl: resolveUrl(s.directUrl, base),
           url: resolveUrl(s.url, base),
@@ -421,6 +426,8 @@ export default function WatchScreen() {
       episodes: episodes || "",
       native: native || "",
     });
+    // titleAr يُساعد مصادر كـ AnimeSlayer التي تخزّن أسماء عربية فقط
+    if (titleArStr) qs.set("titleAr", titleArStr);
 
     const allFresh: Src[] = [];
 
@@ -430,6 +437,7 @@ export default function WatchScreen() {
 
     /* جلب مصدر واحد — يُستدعى بالتوازي لكل site */
     const fetchOneSite = async (site: string) => {
+      if (BLOCKED_SOURCE_SITES.has(site.toLowerCase())) return;
       /* مهلة مستقلة لكل مصدر مع ربطها بـ abort الرئيسي */
       const siteCtrl = new AbortController();
       const effectiveTimeout = SITE_TIMEOUT_MAP[site as keyof typeof SITE_TIMEOUT_MAP] ?? SITE_TIMEOUT_MS;
@@ -458,6 +466,9 @@ export default function WatchScreen() {
             directUrl: resolveUrl(s.directUrl, base),
             url: resolveUrl(s.url, base),
           }))
+          .filter(s => !isBlockedSource(s))
+          // فلتر mega.nz/embed — لا يعمل native في الموبايل (يحتاج تطبيق أصلي)
+          .filter(s => !(s.isEmbed && s.url && (s.url.includes("mega.nz") || s.url.includes("mega.co.nz"))))
           .filter(s => {
             const key = getPlayUrl(s);
             if (!key || seenKeys.current.has(key)) return false;
@@ -474,19 +485,18 @@ export default function WatchScreen() {
         if (!autoPlayFiredRef.current) {
           const good = newSrcs.find(isDirectPlayable);
           if (good) {
-            /* الأولوية: KW → HI → AW → DU → أي مصدر مباشر */
+            /* الأولوية: KW → AW → DU → أي مصدر مباشر */
             const pickBest = (pool: Src[]): Src => {
               const direct = pool.filter(isDirectPlayable);
               return (
                 direct.find(s => s.site === "kawaii") ??
-                direct.find(s => s.site === "hianime") ??
                 direct.find(s => s.site === "animewitcher") ??
                 direct.find(s => s.site === "dulo_anim") ??
                 direct[0]
               ) || good;
             };
-            /* تأخير 400ms — يمنح KW/HI/AW فرصة الوصول قبل الاختيار */
-            const isHighPriority = ["kawaii", "hianime", "animewitcher"].includes(site);
+            /* تأخير 400ms — يمنح KW/AW فرصة الوصول قبل الاختيار */
+            const isHighPriority = ["kawaii", "animewitcher"].includes(site);
             autoPlayTimerRef.current = setTimeout(() => {
               autoPlayTimerRef.current = null;
               if (!isMountedRef.current || autoPlayFiredRef.current || fetchEpochRef.current !== myEpoch) return;
@@ -576,16 +586,21 @@ export default function WatchScreen() {
   /* ── Navigate episode ── */
   function goEp(n: number, auto = false) {
     saveProgress();
+    /* إلغاء كل الطلبات الجارية فوراً قبل الانتقال — يمنع stale fetches من إضافة مصادر الحلقة القديمة */
+    abortRef.current?.abort();
+    if (autoPlayTimerRef.current) { clearTimeout(autoPlayTimerRef.current); autoPlayTimerRef.current = null; }
     setSources([]);
     seenKeys.current.clear();
     autoPlayFiredRef.current = false;
+    autoFetchAllRef.current = false;   // ← إعادة تعيين حتى يجدوِل الموجة الخلفية للحلقة الجديدة
+    hasCachedRef.current = false;      // ← إعادة تعيين حتى تظهر شاشة التحميل للحلقة الجديدة
     inFlightSitesRef.current.clear();
     fetchedSitesRef.current.clear();
     /* إلغاء background timers من الحلقة السابقة — يمنع stale fetches */
     bgTimersRef.current.forEach(clearTimeout);
     bgTimersRef.current = [];
     setSlotStatus({});
-    setScreen("picker");
+    setScreen("loading");
     const coverParam = coverUrl ? `&cover=${encodeURIComponent(coverUrl)}` : "";
     const arParam    = titleArStr ? `&titleAr=${encodeURIComponent(titleArStr)}` : "";
     router.replace(`/watch?anime=${anime}&ep=${n}&title=${encodeURIComponent(titleStr)}&english=${encodeURIComponent(englishStr)}&format=${encodeURIComponent(format || "")}${coverParam}${arParam}${auto ? "&autoplay=1" : ""}`);
@@ -653,6 +668,7 @@ export default function WatchScreen() {
      autoPlayResult=true → يشغّل أول مصدر جاهز تلقائياً ثم يُحمّل الباقي خلفياً.
      autoPlayResult=false → تحميل خلفي فقط (يُضيف المصادر للـ picker). ── */
   const handlePickSite = useCallback(async (site: string, autoPlayResult = true) => {
+    if (BLOCKED_SOURCE_SITES.has(site.toLowerCase())) return;
     /* fetchedSitesRef يمنع re-fetch بعد إتمام الجلب (يحل stale-closure في setTimeout) */
     if (inFlightSitesRef.current.has(site) || fetchedSitesRef.current.has(site)) return;
 
@@ -689,6 +705,8 @@ export default function WatchScreen() {
 
       const newSrcs = rawSrcs
         .map((s): Src => ({ ...s, site: s.site || site, directUrl: resolveUrl(s.directUrl, base), url: resolveUrl(s.url, base) }))
+        .filter(s => !isBlockedSource(s))
+        .filter(s => !(s.isEmbed && s.url && (s.url.includes("mega.nz") || s.url.includes("mega.co.nz"))))
         .filter(s => { const k = getPlayUrl(s); if (!k || seenKeys.current.has(k)) return false; seenKeys.current.add(k); return true; });
 
       if (newSrcs.length) {
@@ -830,7 +848,7 @@ export default function WatchScreen() {
         {coverUrl ? <Image source={{ uri: coverUrl }} style={[StyleSheet.absoluteFill, { opacity: 0.13 }]} blurRadius={Platform.OS === "ios" ? 28 : 10} resizeMode="cover" /> : null}
         <LinearGradient colors={["rgba(7,7,13,0.90)", "rgba(12,8,24,0.60)", "rgba(7,7,13,0.95)"]} style={StyleSheet.absoluteFill} />
         <Pressable onPress={handleBack} style={[d.ldBackBtn, { top: topPad + 4 }]}>
-          <Ionicons name="chevron-forward" size={20} color="rgba(255,255,255,0.65)" />
+          <Ionicons name="arrow-back" size={20} color="rgba(255,255,255,0.65)" />
         </Pressable>
         <View style={d.ldContent}>
           <Text style={d.ldPrayer}>اللهم صلِّ وسلِّم على نبينا محمد ﷺ</Text>
@@ -843,6 +861,9 @@ export default function WatchScreen() {
               </View>
             )}
           </View>
+          {displayTitle ? (
+            <Text style={{ fontSize: 16, fontFamily: "Cairo_700Bold", color: "#fff", textAlign: "center", paddingHorizontal: 12 }} numberOfLines={2}>{displayTitle}</Text>
+          ) : null}
           <View style={d.ldEpBadge}><Ionicons name="tv" size={10} color="#a78bfa" /><Text style={d.ldEpText}>الحلقة {epNum}</Text></View>
           <View style={{ alignItems: "center", gap: 10 }}>
             <SpinRing />
@@ -896,7 +917,7 @@ export default function WatchScreen() {
     return (
       <View style={{ flex: 1, backgroundColor: "#07070d", alignItems: "center", justifyContent: "center", gap: 14 }}>
         <Pressable onPress={() => { setScreen("picker"); }} style={[d.playerBackBtn, { position: "absolute", top: topPad + 4, right: 12 }]}>
-          <Ionicons name="arrow-forward" size={18} color="#fff" />
+          <Ionicons name="arrow-back" size={18} color="#fff" />
         </Pressable>
         <SpinRing />
         <Text style={{ fontSize: 13, fontFamily: "Cairo_400Regular", color: "rgba(255,255,255,0.45)", textAlign: "center" }}>
@@ -921,7 +942,7 @@ export default function WatchScreen() {
       return (
         <View style={{ flex: 1, backgroundColor: "#07070d", alignItems: "center", justifyContent: "center", gap: 16 }}>
           <Pressable onPress={() => setScreen("picker")} style={[d.playerBackBtn, { position: "absolute", top: topPad + 4, right: 12 }]}>
-            <Ionicons name="arrow-forward" size={18} color="#fff" />
+            <Ionicons name="arrow-back" size={18} color="#fff" />
           </Pressable>
           <View style={{ width: 72, height: 72, borderRadius: 36, backgroundColor: "rgba(139,92,246,0.15)", alignItems: "center", justifyContent: "center" }}>
             <Ionicons name="tv-outline" size={36} color="rgba(139,92,246,0.7)" />
@@ -937,7 +958,7 @@ export default function WatchScreen() {
     return (
       <View style={{ flex: 1, backgroundColor: "#07070d", alignItems: "center", justifyContent: "center", gap: 16 }}>
         <Pressable onPress={() => { saveProgress(); setScreen("picker"); }} style={[d.playerBackBtn, { position: "absolute", top: topPad + 4, right: 12 }]}>
-          <Ionicons name="arrow-forward" size={18} color="#fff" />
+          <Ionicons name="arrow-back" size={18} color="#fff" />
         </Pressable>
         <View style={{ width: 72, height: 72, borderRadius: 36, backgroundColor: "rgba(139,92,246,0.15)", alignItems: "center", justifyContent: "center" }}>
           <Ionicons name="tv-outline" size={36} color="rgba(139,92,246,0.7)" />
@@ -967,10 +988,10 @@ export default function WatchScreen() {
             <Text style={d.epNavText}>السابقة</Text>
           </Pressable>
           <Pressable
-            disabled={totalEpsCount !== undefined && epNum >= totalEpsCount}
+            disabled={singleSite !== null || (totalEpsCount !== undefined && epNum >= totalEpsCount)}
             onPress={() => goEp(epNum + 1)}
             style={[d.epNavBtn, { borderColor: "rgba(139,92,246,0.35)", backgroundColor: "rgba(139,92,246,0.10)" },
-              (totalEpsCount !== undefined && epNum >= totalEpsCount) && { opacity: 0.22 }]}>
+              (singleSite !== null || (totalEpsCount !== undefined && epNum >= totalEpsCount)) && { opacity: 0.22 }]}>
             <Text style={[d.epNavText, { color: "#c4b5fd" }]}>التالية</Text>
             <Ionicons name="chevron-back" size={12} color="rgba(196,181,253,0.9)" />
           </Pressable>
@@ -983,7 +1004,7 @@ export default function WatchScreen() {
           <Text style={d.headerSub}>الحلقة {epNum}</Text>
         </View>
         <Pressable onPress={handleBack} style={d.headerBack}>
-          <Ionicons name="arrow-forward" size={17} color="rgba(255,255,255,0.75)" />
+          <Ionicons name="arrow-back" size={17} color="rgba(255,255,255,0.75)" />
         </Pressable>
       </View>
 
