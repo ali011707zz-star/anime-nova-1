@@ -50,8 +50,7 @@ const SITE_TAG: Record<string, string> = {
   ristoanime: "RS", animeify: "AF", animeday: "DY", arabseed: "AR",
   anime4up2: "4U", mycima: "MC", topcinemaa: "TC", animephoenix: "PH",
   animewitcher: "AW", kawaii: "KW",
-  anikoto: "AK", anikototv: "ATV", animekai: "KI", hianime: "HI",
-  anineko: "AN", mitanime: "MT",
+  anikototv: "ATV", animekai: "KI", mitanime: "MT",
   vidlink_anim: "VL", vidfast: "VF",
   animetime: "AT", animepahe: "AP", dulo_anim: "DL",
   faselhd_db: "FH", witanime: "WI", witanime_db: "WD",
@@ -61,8 +60,8 @@ const SITE_TAG: Record<string, string> = {
 
 /* ── اسم عرض لكل موقع في منتقي المصادر ── */
 const SITE_LABEL: Record<string, string> = {
-  kawaii: "Kawaii", hianime: "HiAnime", animewitcher: "AnimeWitcher",
-  dulo_anim: "Dulo", anineko: "Anineko", anikoto: "AniKoto",
+  kawaii: "Kawaii", animewitcher: "AnimeWitcher",
+  dulo_anim: "Dulo",
   anikototv: "AniKotoTV", mitanime: "MITanime", vidfast: "VidFast",
   vidlink_anim: "VidLink", animekai: "AnimeKai",
   animepahe: "AnimePahe", shahiid: "Shahiid", animelek: "Animelek",
@@ -81,9 +80,8 @@ function getSiteTag(site: string): string {
 /* ── وصف قصير لكل مصدر في شبكة الاختيار (يطابق نظام الويب) ── */
 const SITE_DESC: Record<string, string> = {
   kawaii: "1080p · مباشر", animewitcher: "PD/ST · مباشر",
-  hianime: "ياباني مترجم · HLS نظيف", dulo_anim: "ياباني/إنجليزي · HLS مباشر",
+  dulo_anim: "ياباني/إنجليزي · HLS مباشر",
   vidlink_anim: "ياباني مترجم · مباشر",
-  anineko: "ياباني مترجم · HLS", anikoto: "ياباني مترجم · 1080p",
   mitanime: "ياباني مترجم · مباشر", vidfast: "TMDB · HLS · متعدد الخوادم",
   anikototv: "ياباني مترجم · skip مدمج", animekai: "ياباني مترجم · DB مباشر",
   animepahe: "ياباني مترجم · HLS نظيف", anipm: "ياباني مترجم · 37 سيرفر/حلقة",
@@ -101,6 +99,12 @@ const SITE_DESC: Record<string, string> = {
 };
 function getSiteDesc(site: string): string {
   return SITE_DESC[site] || "";
+}
+
+/* مصادر محظورة في Nova Mobile — لا تُجلب ولا تُعرض حتى لو جاءت من كاش قديم. */
+const BLOCKED_SOURCE_SITES = new Set(["anikoto", "anineko", "hianime", "ak", "an", "hi"]);
+function isBlockedSource(src: Pick<Src, "site">): boolean {
+  return BLOCKED_SOURCE_SITES.has(String(src.site || "").trim().toLowerCase());
 }
 
 /* ── Quality helpers ── */
@@ -202,19 +206,18 @@ function ensureVpsProxy(url: string, headers: Record<string, string> | undefined
 
 /* ── مصادر تُشغَّل native مباشرةً عبر RiftPlayer (seg-proxy يُعيد روابط مطلقة الآن) ── */
 
-/* ── أولويات المصادر: KW → HI → AW → DU → rest ── */
+/* ── أولويات المصادر: KW → AW → DU → rest ── */
 const SITE_PRIORITY: Record<string, number> = {
-  kawaii: 100, hianime: 95, animewitcher: 90,
+  kawaii: 100, animewitcher: 90,
   dulo_anim: 70, vidlink_anim: 55,
-  anineko: 50, anikoto: 40, vidfast: 35,
+  vidfast: 35,
   anikototv: 30, animekai: 25, animepahe: 20, anipm: 18,
 };
 
 /* ── قائمة المصادر (KW أولاً — الأولوية القصوى للتشغيل الفوري) ── */
 /* مصادر موحَّدة مع الويب — نفس المصادر الـ 8 المفعَّلة في SCRAPER_DEFS */
 const ANIME_SITES = [
-  "kawaii", "anikoto", "hianime", "animewitcher",
-  "anineko", "anslayer", "animeify",
+  "kawaii", "animewitcher", "anslayer", "animeify",
   // "witanime": معطّل بطلب المستخدم
   // "allmanga": معطّل 2026-07-17 — AA_CRYPTO_MISSING على AllAnime
 ] as const;
@@ -231,7 +234,6 @@ const SITE_TIMEOUT_MAP: Partial<Record<typeof ANIME_SITES[number], number>> = {
   mycima:       34_000,  // backend = 30s + 4s هامش
   anime4up2:    28_000,  // backend = 25s + 3s هامش
   anikototv:    28_000,  // backend = 25s + 3s هامش
-  hianime:      35_000,  // backend = 22s + 13s هامش (cold cache needs extra margin)
   anipm:        24_000,  // backend = 20s + 4s هامش
   witanime:     20_000,  // backend يوناplay static HTML < 1s + chain search ~15s
 };
@@ -377,7 +379,7 @@ export default function WatchScreen() {
         const { sources: cached, ts }: { sources: Src[]; ts: number } = JSON.parse(raw);
         if (!cached?.length || Date.now() - ts > SRC_CACHE_TTL) return;
         const base = getBaseUrl();
-        const resolved = cached.map(s => ({
+        const resolved = cached.filter(s => !isBlockedSource(s)).map(s => ({
           ...s,
           directUrl: resolveUrl(s.directUrl, base),
           url: resolveUrl(s.url, base),
@@ -430,6 +432,7 @@ export default function WatchScreen() {
 
     /* جلب مصدر واحد — يُستدعى بالتوازي لكل site */
     const fetchOneSite = async (site: string) => {
+      if (BLOCKED_SOURCE_SITES.has(site.toLowerCase())) return;
       /* مهلة مستقلة لكل مصدر مع ربطها بـ abort الرئيسي */
       const siteCtrl = new AbortController();
       const effectiveTimeout = SITE_TIMEOUT_MAP[site as keyof typeof SITE_TIMEOUT_MAP] ?? SITE_TIMEOUT_MS;
@@ -458,6 +461,7 @@ export default function WatchScreen() {
             directUrl: resolveUrl(s.directUrl, base),
             url: resolveUrl(s.url, base),
           }))
+          .filter(s => !isBlockedSource(s))
           .filter(s => {
             const key = getPlayUrl(s);
             if (!key || seenKeys.current.has(key)) return false;
@@ -474,19 +478,18 @@ export default function WatchScreen() {
         if (!autoPlayFiredRef.current) {
           const good = newSrcs.find(isDirectPlayable);
           if (good) {
-            /* الأولوية: KW → HI → AW → DU → أي مصدر مباشر */
+            /* الأولوية: KW → AW → DU → أي مصدر مباشر */
             const pickBest = (pool: Src[]): Src => {
               const direct = pool.filter(isDirectPlayable);
               return (
                 direct.find(s => s.site === "kawaii") ??
-                direct.find(s => s.site === "hianime") ??
                 direct.find(s => s.site === "animewitcher") ??
                 direct.find(s => s.site === "dulo_anim") ??
                 direct[0]
               ) || good;
             };
-            /* تأخير 400ms — يمنح KW/HI/AW فرصة الوصول قبل الاختيار */
-            const isHighPriority = ["kawaii", "hianime", "animewitcher"].includes(site);
+            /* تأخير 400ms — يمنح KW/AW فرصة الوصول قبل الاختيار */
+            const isHighPriority = ["kawaii", "animewitcher"].includes(site);
             autoPlayTimerRef.current = setTimeout(() => {
               autoPlayTimerRef.current = null;
               if (!isMountedRef.current || autoPlayFiredRef.current || fetchEpochRef.current !== myEpoch) return;
@@ -653,6 +656,7 @@ export default function WatchScreen() {
      autoPlayResult=true → يشغّل أول مصدر جاهز تلقائياً ثم يُحمّل الباقي خلفياً.
      autoPlayResult=false → تحميل خلفي فقط (يُضيف المصادر للـ picker). ── */
   const handlePickSite = useCallback(async (site: string, autoPlayResult = true) => {
+    if (BLOCKED_SOURCE_SITES.has(site.toLowerCase())) return;
     /* fetchedSitesRef يمنع re-fetch بعد إتمام الجلب (يحل stale-closure في setTimeout) */
     if (inFlightSitesRef.current.has(site) || fetchedSitesRef.current.has(site)) return;
 
@@ -689,6 +693,7 @@ export default function WatchScreen() {
 
       const newSrcs = rawSrcs
         .map((s): Src => ({ ...s, site: s.site || site, directUrl: resolveUrl(s.directUrl, base), url: resolveUrl(s.url, base) }))
+        .filter(s => !isBlockedSource(s))
         .filter(s => { const k = getPlayUrl(s); if (!k || seenKeys.current.has(k)) return false; seenKeys.current.add(k); return true; });
 
       if (newSrcs.length) {
