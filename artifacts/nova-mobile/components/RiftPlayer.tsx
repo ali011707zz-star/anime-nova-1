@@ -34,6 +34,12 @@ export type PlayerSource = {
    * ضرورية لـ CDN تتحقق من Referer حين تذهب الـ segments مباشرةً (mobile=1).
    */
   headers?: Record<string, string>;
+  /**
+   * رابط بديل مباشر للـ CDN (بدون VPS proxy) يُجرَّب تلقائياً إذا فشل url الرئيسي.
+   * يُرسَل مع headers (Referer/Origin) مباشرةً لـ ExoPlayer من IP الجهاز (residential).
+   * يحل مشكلة: hls-proxy → seg-proxy → VPS datacenter IP → CDN يحجبه → شاشة سوداء.
+   */
+  directFallback?: { url: string; headers?: Record<string, string> };
 };
 
 export interface SubCue { start: number; end: number; text: string }
@@ -659,9 +665,38 @@ export function RiftPlayer({
 
   /* ─── Auto-advance on error ─── */
   const consecutiveErrorsRef = useRef(0);
+  /* true بعد محاولة directFallback للمصدر الحالي — يمنع حلقة لانهائية */
+  const triedDirectFallbackRef = useRef(false);
   useEffect(() => {
-    if (!error) { consecutiveErrorsRef.current = 0; setIsAutoCycling(false); return; }
-    if (sources.length <= 1) { setIsAutoCycling(false); onError?.(); return; }
+    if (!error) {
+      consecutiveErrorsRef.current = 0;
+      triedDirectFallbackRef.current = false;
+      setIsAutoCycling(false);
+      return;
+    }
+    if (sources.length <= 1 && !sources[srcIdx]?.directFallback) {
+      setIsAutoCycling(false); onError?.(); return;
+    }
+
+    const currentSrc = sources[srcIdx];
+
+    /* ── directFallback: جرّب CDN مباشرة من IP الجهاز قبل الانتقال للمصدر التالي ── */
+    if (currentSrc?.directFallback && !triedDirectFallbackRef.current) {
+      triedDirectFallbackRef.current = true;
+      setIsAutoCycling(true); // أخفِ رسالة الخطأ — أظهر loading بدلاً منها
+      const { url: fbUrl, headers: fbHdrs } = currentSrc.directFallback;
+      console.log(`[RiftPlayer] 🔄 directFallback [${srcIdx + 1}/${sources.length}]: ${(currentSrc.label || "?")} → ${fbUrl.slice(0, 80)}`);
+      const t = setTimeout(() => {
+        setVideoSource({ uri: fbUrl, ...(fbHdrs && Object.keys(fbHdrs).length > 0 ? { headers: fbHdrs } : {}) });
+        setError(false);
+        isErrorRef.current = false;
+        setBuffering(true);
+      }, 400);
+      return () => clearTimeout(t);
+    }
+
+    /* ── انتقل للمصدر التالي ── */
+    triedDirectFallbackRef.current = false;
     consecutiveErrorsRef.current += 1;
     /* لا تدور في حلقة — فقط جرّب المصادر التالية (بدون wrap-around) */
     const nextIdx = srcIdx + 1;

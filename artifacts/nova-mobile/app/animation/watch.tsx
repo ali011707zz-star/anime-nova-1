@@ -643,9 +643,10 @@ export default function AnimationWatchScreen() {
   }), [directSrcs]);
 
   /* ── RiftPlayer sources ──
-     احتفظ برابط الـ VPS proxy المشفّر كما أعاده الخادم. فكّ الرابط إلى CDN
-     الخام هنا يجعل المشغّل يتجاوز hls-proxy، ويعيد مشاكل الحجب/إعادة كتابة
-     segments التي عالجها الخادم. ── */
+     المصدر الرئيسي: proxyUrl (VPS hls-proxy + seg-proxy) — يُعيد كتابة segments للـ VPS.
+     directFallback:  directUrl (CDN مباشرة) + headers — يُجرَّب تلقائياً إذا فشل VPS proxy.
+       سبب الفصل: seg-proxy يستخدم VPS datacenter IP → بعض CDNs تحجبه.
+       الجهاز (residential IP) يستطيع الوصول مباشرةً مع Referer صحيح. ── */
   const animHlsSources = useMemo((): PlayerSource[] => {
     const base = getBaseUrl();
     const activeSubUrl = subLang === "ar" ? globalArSubUrl : subLang === "en" ? globalEnSubUrl : undefined;
@@ -657,12 +658,20 @@ export default function AnimationWatchScreen() {
         ? resolveUrl(s.subtitleUrl, base)
         : activeSubUrl);
       const proxyUrl = s.proxyUrl || s.directUrl || s.url || "";
+      /* directFallback: رابط CDN خام (بدون /api/) يُرسَل من IP الجهاز مع headers */
+      const rawDirect = s.directUrl && !s.directUrl.startsWith("/api/") ? s.directUrl : null;
+      const proxyResolved = resolveUrl(proxyUrl, base);
+      const directResolved = rawDirect ? resolveUrl(rawDirect, base) : null;
+      const hasFallback = directResolved && directResolved !== proxyResolved;
+      const cdnHeaders = s.headers && Object.keys(s.headers).length > 0 ? s.headers : undefined;
       return {
-        url: resolveUrl(proxyUrl, base),
+        url: proxyResolved,
         label: lbl || "مصدر",
         quality: getSrcQuality(s) as PlayerSource["quality"],
         subtitleUrl: resolvedSubUrl,
-        ...(s.headers && Object.keys(s.headers).length > 0 ? { headers: s.headers } : {}),
+        /* لا نمرّر headers للـ proxy — VPS يُضيفها server-side للـ CDN */
+        /* directFallback يحمل headers لأن ExoPlayer يُرسلها مع كل طلب segment */
+        ...(hasFallback ? { directFallback: { url: directResolved!, ...(cdnHeaders ? { headers: cdnHeaders } : {}) } } : {}),
       };
     }).filter(s => !!s.url);
   }, [directSrcs, globalArSubUrl, globalEnSubUrl, subLang]);
