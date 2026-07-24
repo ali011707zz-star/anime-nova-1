@@ -135,3 +135,4 @@
 - [Mobile static serving](mobile-static-serving.md) — Expo bundle behind Nginx needs matching BASE_PATH, ^~ location, and a persistent PM2 service.
 - [NOVA Player APK rebrand](nova-player-apk-rebrand.md) — resource-only rebranding preserves the original package contract, but rebuilt APKs require a new signature and replacement install.
 - [GitHub APK build numbering](github-apk-run-number.md) — AnimeNova-vNNN is a GitHub Actions run number, not a Git tag or Expo version code.
+- [Hound source assessment](hound-anime-source-assessment.md) — master-fetch/Hound fetches pages, but is not an anime extractor; MITanime data needs Next.js parsing and WitAnime needs the real WP episode URL.
