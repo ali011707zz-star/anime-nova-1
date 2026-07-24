@@ -2876,7 +2876,10 @@ async function getMitanimeSources(
     // Sites confirmed dead/parked — skip immediately to save time
     const MITA_SKIP = ["mediafire.com","workupload","gofile.io","4shared.com",
                        "drive.google","soraplay","suzihazarpc.com","vivystream.com",
-                       "my.mail.ru","vk.com","wtsrv.xyz"];  // wtsrv.xyz=timer page (needs browser)
+                       "my.mail.ru","vk.com","wtsrv.xyz",
+                       "dotplay.net",  // 404 on all tested links (dead embed — 2026-07-24)
+                       "fembed.com",   // TLS error / dead (2026-07-24)
+                       ];
 
     // Process all servers in PARALLEL — yt-dlp/ok.ru each take ~5-25s so sequential
     // would exceed the 60s race timeout for episodes with many servers.
