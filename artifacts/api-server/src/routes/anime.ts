@@ -7963,10 +7963,11 @@ async function getAnimeWitcherSources(
           const s = Math.max(
             similarity(hName, title),
             english ? similarity(hName, english) : 0,
+            asciiSimilarity(q, hName),
           );
           if (s > bestScore) { bestScore = s; bestHit = h; }
         }
-        if (!bestHit || bestScore < 0.45) continue;
+        if (!bestHit || bestScore < 0.38) continue;
 
         const candidate = String(bestHit.id || bestHit.anime_id || "");
         if (!candidate) continue;
@@ -11706,7 +11707,7 @@ async function anslayerGet(path: string, params: Record<string, any>): Promise<a
 }
 
 async function getAnimeSlayerSources(
-  title: string, english: string | null, ep: number, directAnimeId?: number,
+  title: string, english: string | null, ep: number, directAnimeId?: number, titleAr?: string | null,
 ): Promise<UnifiedSource[]> {
   const ck = directAnimeId ? `anslayer:id:${directAnimeId}:${ep}` : `anslayer:${english || title}:${ep}`;
   const hit = _anslayerCacheMap.get(ck);
@@ -11720,12 +11721,13 @@ async function getAnimeSlayerSources(
       ? { score: 1, id: directAnimeId, name: title || english || "" }
       : null;
     if (!best) {
-      const queries = [...new Set([english, title].filter(Boolean) as string[])];
+      // نُقدِّم الاسم العربي أولاً إن توفَّر — AS يخزِّن أسماء عربية فيطابق مباشرةً
+      const queries = [...new Set([titleAr, english, title].filter(Boolean) as string[])];
       for (const q of queries) {
         const data = await anslayerGet("animes/get-published-animes", { list_type: "filter", anime_name: q, page: 1 });
         const list: any[] = data?.response?.data || [];
         // AnimeSlayer يعرض أسماء عربية — similarity() بين لاتيني وعربي = 0 دائماً.
-        // الحل: نستخدم asciiSimilarity على الـ slug الضمني + نقبل أول نتيجة إذا كانت ≤3
+        // الحل: نستخدم asciiSimilarity على الـ slug الضمني + نقبل أول نتيجة إذا كانت ≤8
         // (API البحث هو المرشِّح الحقيقي، لذا نثق بنتائجه المحددة).
         let firstCandidate: { score: number; id: number; name: string } | null = null;
         for (const item of list) {
@@ -11745,8 +11747,8 @@ async function getAnimeSlayerSources(
           }
         }
         // إذا فشل شرط التشابه (أسماء عربية مقابل عنوان لاتيني) — نأخذ أول نتيجة
-        // بشرط أن البحث أعاد نتائج محددة (≤3) دلالةً على دقة البحث
-        if (!best && firstCandidate && list.length <= 3) {
+        // بشرط أن البحث أعاد نتائج محددة (≤8) دلالةً على دقة البحث
+        if (!best && firstCandidate && list.length <= 8) {
           best = firstCandidate;
         }
         if (best) break; // وجدنا نتيجة — لا داعي لمزيد من الاستعلامات
@@ -11903,7 +11905,7 @@ async function getSAnimeSources(
           }
         }
       } catch {}
-      if (allResults.length > 0) break; // وجدنا نتائج بالاستعلام الأول — لا داعي للثاني
+      // لا نتوقف مبكراً — نجمع نتائج كل الاستعلامات لتحسين فرص المطابقة
     }
     if (allResults.length === 0) return out;
 
@@ -11917,9 +11919,14 @@ async function getSAnimeSources(
         similarity(label, title),
         english ? similarity(label, english) : 0,
       );
-      // بدون هذا الترجيح، مطابقة "Re:Zero...4th Season" تُطابق خطأً الموسم الأول
+      // ترجيح رقم الموسم — لكن نُطبِّق العقوبة فقط إذا كانت الدرجة الأساسية ضعيفة
+      // (إذا كان التطابق قوياً بالفعل لا نعاقبه بسبب خطأ في كشف الموسم)
       const labelSeason = sanimeSeasonNum(label);
-      score += labelSeason === targetSeason ? 0.15 : -0.25;
+      if (score > 0.50) {
+        score += labelSeason === targetSeason ? 0.10 : -0.05; // عقوبة خفيفة عند تطابق قوي
+      } else {
+        score += labelSeason === targetSeason ? 0.15 : -0.20; // عقوبة معتدلة عند تطابق ضعيف
+      }
       if (score > bestScore) { bestScore = score; bestId = String(r.id); }
     }
     // threshold مخفَّض من 0.42 → 0.30 لأن عناوين SAnime العربية لا تطابق تماماً الروماجي
@@ -12658,7 +12665,7 @@ router.get("/anime/sources-stream", async (req, res) => {
       // xyra_anim: معطّل مؤقتاً — api.xyra.stream يرجع 502 (Cloudflare) لكل الطلبات منذ 2026-07-09
       // scrapeCached("xyra_anim",  () => getXyraAnimeSources(title, english, ep, anilistId),  false, 18000),
       scrapeCached("sanime",     () => getSAnimeSources(title, english, ep),                 false, 20000),
-      scrapeCached("anslayer",   () => getAnimeSlayerSources(title, english, ep),             false, 20000),
+      scrapeCached("anslayer",   () => getAnimeSlayerSources(title, english, ep, undefined, titleAr), false, 20000),
       // animetime / notorrent: أُزيلت كلياً بطلب المستخدم (2026-07-09)
     ]);
 
@@ -12688,6 +12695,7 @@ router.get("/anime/fetch-source", async (req, res) => {
   const isMovieParam = (req.query.isMovie as string) === "true";
   const isMovie   = format === "MOVIE" || format === "MOVIE_SHORT" || isMovieParam;
   const anslayerId = parseInt((req.query.anslayerId as string) || "0") || undefined;
+  const titleAr    = ((req.query.titleAr as string) || "").trim() || null;
 
   if (!site || !title) {
     res.status(400).json({ error: "site and title required", sources: [] });
@@ -12706,6 +12714,7 @@ router.get("/anime/fetch-source", async (req, res) => {
     "anipub",    // مُضاف 2026-07-19 — AniPub/MegaPlay مدبلج+ترجمة+عربي
     "anime3rb",  // مُضاف 2026-07-18 — Animatoo Supabase slug + Hopx browser-html
     "reanime",   // مُعاد تفعيله 2026-07-20 — reanime.to/api/flix + FlixCloud HLS ناعم
+    "sanime",    // مُضاف 2026-07-24 — MP4 مباشر عربي مدبلج
     // "mitanime",  // مخفي مؤقتاً 2026-07-21 — slug discovery يفشل للـ romanji slugs
     // "allmanga": معطّل 2026-07-17 — AA_CRYPTO_MISSING
     // videasy_anim: نُقل بالكامل إلى قسم الأنيميشن بطلب المستخدم 2026-07-15
@@ -12856,7 +12865,7 @@ router.get("/anime/fetch-source", async (req, res) => {
       // xyra_anim: معطّل مؤقتاً — api.xyra.stream يرجع 502 دائماً (عطل من طرفهم)
       // case "xyra_anim":    (await race(getXyraAnimeSources(title, english, ep, anilistId), 18_000, [])).forEach(collectSrc); break;
       case "sanime":       (await race(getSAnimeSources(title, english, ep),               20_000, [])).forEach(collectSrc); break;
-      case "anslayer":     (await race(getAnimeSlayerSources(title, english, ep, anslayerId), 20_000, [])).forEach(collectSrc); break;
+      case "anslayer":     (await race(getAnimeSlayerSources(title, english, ep, anslayerId, titleAr), 20_000, [])).forEach(collectSrc); break;
       case "ristoanime":   (await race(getRistoAnimeSources(title, english, ep),          22_000, [])).forEach(collectSrc); break;
       // case "allmanga": معطّل 2026-07-17
       case "nflixmovies_anim": (await race(getNflixMoviesAnimeSources(english, title, ep, isMovie, anilistId), 18_000, [])).forEach(collectSrc); break;

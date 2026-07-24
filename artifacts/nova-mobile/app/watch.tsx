@@ -424,6 +424,8 @@ export default function WatchScreen() {
       episodes: episodes || "",
       native: native || "",
     });
+    // titleAr يُساعد مصادر كـ AnimeSlayer التي تخزّن أسماء عربية فقط
+    if (titleArStr) qs.set("titleAr", titleArStr);
 
     const allFresh: Src[] = [];
 
