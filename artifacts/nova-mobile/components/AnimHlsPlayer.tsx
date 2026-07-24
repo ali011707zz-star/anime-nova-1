@@ -8,14 +8,11 @@
  *  • WebView (pointerEvents="none") — يشغّل hls.js فقط، لا يستقبل لمسات
  *  • RN overlay — يتحكم بالإيماءات (سحب للبحث، نقر للتحكم، نقر مزدوج للتخطي)
  *  • Bridge: injectJavaScript (RN→WebView) + onMessage (WebView→RN)
- *
- * ملاحظة: hls.js مُضمَّن مباشرةً (لا CDN خارجي) — يعمل بدون اتصال بـ CDN.
  */
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { HLS_JS_INLINE } from "@/assets/hlsJsContent";
 import {
-  Animated, Dimensions, Easing, I18nManager, PanResponder, Platform,
-  Pressable, StyleSheet, Text, View, ActivityIndicator,
+  Animated, Dimensions, Easing, PanResponder, Platform,
+  Pressable, StyleSheet, Text, View,
 } from "react-native";
 import { WebView } from "react-native-webview";
 import { Ionicons } from "@expo/vector-icons";
@@ -25,7 +22,6 @@ import * as ScreenOrientation from "expo-screen-orientation";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 const { width: W, height: H } = Dimensions.get("window");
-const SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 2];
 
 /* ── Types ── */
 export interface AnimHlsSource {
@@ -109,12 +105,8 @@ function bisectCue(cues: SubCue[], ct: number): SubCue | null {
   return null;
 }
 
-/* ── hls.js HTML — يُشغَّل داخل WebView ──
-   hls.js مُضمَّن مباشرةً كـ <script> inline داخل HTML (لا CDN، لا injectedJavaScriptBeforeContentLoaded).
-   injectedJavaScriptBeforeContentLoaded مع 530KB يُسبِّب crash على Android بسبب OOM في WebView process.
-   الحل: source={{ html }} يحمّل hls.js كجزء من HTML → WebView يُعالجه كصفحة عادية بلا ضغط إضافي. */
-function buildHlsHtml(hlsJs: string): string {
-  return `<!DOCTYPE html>
+/* ── hls.js HTML — يُشغَّل داخل WebView ── */
+const HLS_HTML = `<!DOCTYPE html>
 <html>
 <head>
 <meta charset="utf-8">
@@ -127,9 +119,7 @@ html,body{width:100%;height:100%;background:#000;overflow:hidden}
 </head>
 <body>
 <video id="v" playsinline autoplay webkit-playsinline x5-playsinline x5-video-player-type="h5"></video>
-<script>
-${hlsJs}
-</script>
+<script src="https://cdn.jsdelivr.net/npm/hls.js@1.6.2/dist/hls.min.js"></script>
 <script>
 var v=document.getElementById('v');
 var hls=null;
@@ -160,7 +150,7 @@ function loadSrc(url,ref){
   post({k:'buf',v:true});
 
   /* MP4 — تشغيل مباشر عبر عنصر video بدون hls.js */
-  if(/\\.mp4(\\?|$|#)/i.test(url)||(url.indexOf('.mp4')!==-1&&url.indexOf('.m3u8')===-1)){
+  if(/\.mp4(\?|$|#)/i.test(url)||(url.indexOf('.mp4')!==-1&&url.indexOf('.m3u8')===-1)){
     v.src=url;
     v.load();
     v.play().catch(function(){});
@@ -177,15 +167,6 @@ function loadSrc(url,ref){
       fragLoadingTimeOut:20000,
       manifestLoadingTimeOut:15000,
       levelLoadingTimeOut:15000,
-      xhrSetup:function(xhr,u){
-        try{
-          if(ref){
-            xhr.setRequestHeader('Referer',ref);
-            var orig='';try{orig=new URL(ref).origin;}catch(e){}
-            if(orig)xhr.setRequestHeader('Origin',orig);
-          }
-        }catch(e){}
-      },
     };
     hls=new Hls(cfg);
     hls.loadSource(url);
@@ -205,6 +186,7 @@ function loadSrc(url,ref){
       v.play().catch(function(){});
     });
   } else if(v.canPlayType('application/vnd.apple.mpegurl')){
+    /* iOS native HLS */
     v.src=url;
     v.load();
     v.play().catch(function(){});
@@ -213,84 +195,31 @@ function loadSrc(url,ref){
   }
 }
 
-window.NOVA_load    = function(url,ref){ loadSrc(url,ref||''); };
-window.NOVA_seek    = function(t){ v.currentTime=t; post({k:'seeked',t:t}); };
-window.NOVA_play    = function(){ v.play().catch(function(){}); };
-window.NOVA_pause   = function(){ v.pause(); };
-window.NOVA_speed   = function(s){ v.playbackRate=s; };
-window.NOVA_volume  = function(val){ v.volume=Math.max(0,Math.min(1,val)); };
-window.NOVA_mute    = function(m){ v.muted=!!m; };
+/* ── دوال مكشوفة لـ injectJavaScript (أكثر موثوقية من MessageEvent) ── */
+window.NOVA_load  = function(url,ref){ loadSrc(url,ref||''); };
+window.NOVA_seek  = function(t){ v.currentTime=t; post({k:'seeked',t:t}); };
+window.NOVA_play  = function(){ v.play().catch(function(){}); };
+window.NOVA_pause = function(){ v.pause(); };
+window.NOVA_speed = function(s){ v.playbackRate=s; };
 
-/* hls.js مُحمَّل بشكل متزامن — Hls متاح الآن مباشرةً */
+/* إشعار React Native أن الـ WebView جاهز لاستقبال الأوامر */
 post({k:'webview_init'});
 </script>
 </body>
 </html>`;
-}
-
-const HLS_HTML = buildHlsHtml(HLS_JS_INLINE);
 
 /* ── Spinning loader ── */
-function SpinRing({ size = 52 }: { size?: number }) {
+function SpinRing() {
   const rot = useRef(new Animated.Value(0)).current;
   useEffect(() => {
-    const anim = Animated.loop(
-      Animated.timing(rot, { toValue: 1, duration: 900, easing: Easing.linear, useNativeDriver: true })
-    );
-    anim.start();
-    return () => anim.stop();
+    Animated.loop(Animated.timing(rot, { toValue: 1, duration: 900, easing: Easing.linear, useNativeDriver: true })).start();
   }, []);
   const rotate = rot.interpolate({ inputRange: [0, 1], outputRange: ["0deg", "360deg"] });
-  const r = size / 2;
   return (
-    <View style={{ width: size, height: size }}>
-      <View style={[StyleSheet.absoluteFill, { borderRadius: r, borderWidth: 2.5, borderColor: "rgba(139,92,246,0.18)" }]} />
-      <Animated.View style={[StyleSheet.absoluteFill, {
-        borderRadius: r, borderWidth: 2.5, borderColor: "transparent",
-        borderTopColor: "#8B5CF6", borderRightColor: "rgba(139,92,246,0.45)",
-        transform: [{ rotate }],
-      }]} />
+    <View style={{ width: 48, height: 48 }}>
+      <View style={[StyleSheet.absoluteFill, { borderRadius: 24, borderWidth: 2.5, borderColor: "rgba(139,92,246,0.15)" }]} />
+      <Animated.View style={[StyleSheet.absoluteFill, { borderRadius: 24, borderWidth: 2.5, borderColor: "transparent", borderTopColor: "#8B5CF6", borderRightColor: "rgba(139,92,246,0.5)", transform: [{ rotate }] }]} />
     </View>
-  );
-}
-
-/* ── PulseRing (نبض أرجواني حول زر التشغيل عند الإيقاف المؤقت) ── */
-function PulseRing() {
-  const scale1 = useRef(new Animated.Value(1)).current;
-  const opacity1 = useRef(new Animated.Value(0.65)).current;
-  const scale2 = useRef(new Animated.Value(1)).current;
-  const opacity2 = useRef(new Animated.Value(0.35)).current;
-  useEffect(() => {
-    const pulse = (sc: Animated.Value, op: Animated.Value, delay: number) =>
-      Animated.loop(Animated.sequence([
-        Animated.delay(delay),
-        Animated.parallel([
-          Animated.timing(sc, { toValue: 1.85, duration: 1200, easing: Easing.out(Easing.quad), useNativeDriver: true }),
-          Animated.timing(op, { toValue: 0, duration: 1200, easing: Easing.out(Easing.quad), useNativeDriver: true }),
-        ]),
-        Animated.parallel([
-          Animated.timing(sc, { toValue: 1, duration: 0, useNativeDriver: true }),
-          Animated.timing(op, { toValue: delay === 0 ? 0.65 : 0.35, duration: 0, useNativeDriver: true }),
-        ]),
-      ]));
-    const a1 = pulse(scale1, opacity1, 0);
-    const a2 = pulse(scale2, opacity2, 550);
-    a1.start(); a2.start();
-    return () => { a1.stop(); a2.stop(); };
-  }, []);
-  return (
-    <>
-      <Animated.View pointerEvents="none" style={{
-        position: "absolute", width: 90, height: 90, borderRadius: 45,
-        borderWidth: 2, borderColor: "#8B5CF6",
-        transform: [{ scale: scale1 }], opacity: opacity1,
-      }} />
-      <Animated.View pointerEvents="none" style={{
-        position: "absolute", width: 90, height: 90, borderRadius: 45,
-        borderWidth: 1.5, borderColor: "#a78bfa",
-        transform: [{ scale: scale2 }], opacity: opacity2,
-      }} />
-    </>
   );
 }
 
@@ -322,25 +251,8 @@ export default function AnimHlsPlayer({
 
   /* ── UI state ── */
   const [showControls, setShowControls] = useState(true);
-  const [seekPreview, setSeekPreview] = useState<number | null>(null);
-  const [isLocked, setIsLocked] = useState(false);
-  const [showUnlock, setShowUnlock] = useState(false);
-  const [isMuted, setIsMuted] = useState(false);
-  const [speed, setSpeed] = useState(1);
-  const [showSpeedMenu, setShowSpeedMenu] = useState(false);
-  const [isLandRight, setIsLandRight] = useState(true);
-
-  /* ── Volume / Brightness ── */
-  const [volume, setVolume] = useState(1);
-  const [brightness, setBrightness] = useState(0); // 0 = full bright; 0.8 = very dim (overlay opacity)
-  const volumeRef = useRef(1);
-  const brightnessRef = useRef(0);
-  const brightnessStartRef = useRef(0);
-  const volumeStartRef = useRef(1);
-
-  /* ── Gesture feedback ── */
-  const [feedback, setFeedback] = useState<{ type: "volume" | "brightness" | "seek"; value: number; delta?: number } | null>(null);
-  const feedbackTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [showSrcPanel, setShowSrcPanel] = useState(false);
+  const [seekPreview, setSeekPreview] = useState<number | null>(null); // drag preview position
 
   /* ── Subtitle state ── */
   const [cues, setCues] = useState<SubCue[]>([]);
@@ -348,75 +260,38 @@ export default function AnimHlsPlayer({
   const [subOn, setSubOn] = useState(true);
   const subFetchedRef = useRef<string>("");
 
-  /* ── Controls animation ── */
-  const controlsOpacity = useRef(new Animated.Value(1)).current;
+  /* ── Orientation ── */
+  const [isLandscape, setIsLandscape] = useState(false);
 
   /* ── Refs ── */
   const posRef = useRef(0);
   const durRef = useRef(0);
   const seekingRef = useRef(false);
   const gestureStartXRef = useRef(0);
-  const gestureStartYRef = useRef(0);
   const gestureStartPosRef = useRef(0);
-  const gestureTypeRef = useRef<"seek" | "vol" | "bri" | null>(null);
-  const gestureSideRef = useRef<"L" | "R" | null>(null);
   const controlsTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const loadTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const consecutiveErrRef = useRef(0);
-  const loadedRef = useRef(false);
-  const positionLoadedRef = useRef(false);
-  const unlockTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  /* Seekbar refs */
-  const barRef = useRef<View>(null);
-  const barWidth = useRef(W);
-  const barPageX = useRef(0);
-  const lastMoveX = useRef(0);
-  const grantLocationXRef = useRef(0);
-  const [isDragging, setIsDragging] = useState(false);
-  const isDraggingRef = useRef(false);
-  const [dragPct, setDragPct] = useState(0);
-  const [postSeekPct, setPostSeekPct] = useState<number | null>(null);
-  const postSeekTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  /* Double tap */
-  const doubleTapTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const lastTapRef = useRef<{ time: number; side: "L" | "R" } | null>(null);
-
-  const _nRTL = Platform.OS !== "web" && I18nManager.isRTL;
+  const loadedRef = useRef(false); // هل تم الإرسال للـ WebView؟
+  const positionLoadedRef = useRef(false); // هل تم seek للـ initialPosition؟
 
   const currentSrc = sources[srcIdx];
 
-  /* ── Lock to LANDSCAPE_RIGHT on mount ── */
+  /* ── Lock to landscape on mount ── */
   useEffect(() => {
-    ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE_RIGHT).catch(() => {});
+    ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE_LEFT).catch(() => {});
+    setIsLandscape(true);
     return () => {
       ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP).catch(() => {});
     };
   }, []);
 
-  /* ── Controls show/hide ── */
-  const schedHide = useCallback(() => {
-    if (controlsTimerRef.current) clearTimeout(controlsTimerRef.current);
-    controlsTimerRef.current = setTimeout(() => {
-      Animated.timing(controlsOpacity, { toValue: 0, duration: 350, useNativeDriver: true }).start(() => setShowControls(false));
-    }, 5000);
-  }, []);
-
-  const fadeIn = useCallback(() => {
-    if (controlsTimerRef.current) clearTimeout(controlsTimerRef.current);
-    Animated.timing(controlsOpacity, { toValue: 1, duration: 200, useNativeDriver: true }).start();
-    setShowControls(true);
-    schedHide();
-  }, [schedHide]);
-
-  useEffect(() => { fadeIn(); }, []); // eslint-disable-line
-
-  /* ── Send load command to WebView ── */
+  /* ── Send load command to WebView (via direct NOVA_load call — more reliable than MessageEvent) ── */
   const sendLoad = useCallback((src: AnimHlsSource, seekTo?: number) => {
     if (!webRef.current) return;
     const url = src.url;
     const ref = src.headers?.Referer || "";
+    /* Call exposed window function directly — avoids Android WebView MessageEvent quirks */
     webRef.current.injectJavaScript(
       `(function(){if(window.NOVA_load){window.NOVA_load(${JSON.stringify(url)},${JSON.stringify(ref)});}true;})();`
     );
@@ -425,12 +300,14 @@ export default function AnimHlsPlayer({
     setIsPlaying(true);
     loadedRef.current = true;
     positionLoadedRef.current = false;
+    /* Start load timeout — if no readyToPlay in 25s, try next source */
     if (loadTimeoutRef.current) clearTimeout(loadTimeoutRef.current);
     loadTimeoutRef.current = setTimeout(() => {
       loadTimeoutRef.current = null;
       console.warn(`[AnimHlsPlayer] ⏱ timeout 25s — ${src.label}`);
       handleError();
     }, 25000);
+    /* Seek to saved position after load */
     if (seekTo && seekTo > 5) {
       setTimeout(() => {
         webRef.current?.injectJavaScript(`(function(){if(window.NOVA_seek)window.NOVA_seek(${seekTo});true;})();`);
@@ -439,21 +316,22 @@ export default function AnimHlsPlayer({
     }
   }, []); // eslint-disable-line
 
-  /* ── WebView onLoad (fallback — in case webview_init is missed) ── */
+  /* ── WebView onLoad (fallback — in case webview_init message is missed) ── */
   const handleWebViewLoad = useCallback(() => {
+    /* نؤجل 800ms إضافية بعد onLoad للتأكد من تنفيذ scripts الخارجية */
     setTimeout(() => {
       if (!loadedRef.current && currentSrc) {
         sendLoad(currentSrc, initialPosition > 5 ? initialPosition : undefined);
       }
-    }, 1200); // 1.2s fallback — after hls.js should be loaded
+    }, 800);
   }, [currentSrc, initialPosition, sendLoad]);
 
   /* ── Messages from WebView ── */
   const handleMessage = useCallback((event: any) => {
     try {
       const msg = JSON.parse(event.nativeEvent.data);
+      /* WebView أعلن جهوزيته — أرسل الـ load فوراً (هذا أكثر موثوقية من onLoad) */
       if (msg.k === "webview_init") {
-        /* ✅ hls.js is now loaded — safe to call NOVA_load */
         if (currentSrc) sendLoad(currentSrc, initialPosition > 5 ? initialPosition : undefined);
         return;
       }
@@ -462,12 +340,14 @@ export default function AnimHlsPlayer({
         const d = msg.d as number;
         posRef.current = t;
         durRef.current = d;
-        if (!seekingRef.current && !isDraggingRef.current) {
+        if (!seekingRef.current) {
           setPosition(t);
           setDuration(d > 0 ? d : durRef.current);
         }
         onProgress?.(t, d);
+        /* subtitle */
         if (cues.length > 0) setActiveCue(bisectCue(cues, t));
+        /* Resume to saved position (fallback if timeout-based seek failed) */
         if (!positionLoadedRef.current && initialPosition > 5 && t < 3) {
           positionLoadedRef.current = true;
           webRef.current?.injectJavaScript(`(function(){if(window.NOVA_seek)window.NOVA_seek(${initialPosition});true;})();`);
@@ -485,7 +365,7 @@ export default function AnimHlsPlayer({
       } else if (msg.k === "ended") {
         setIsEnded(true);
         setIsPlaying(false);
-        fadeIn();
+        autoShowControls();
         if (onNextEpisode) onNextEpisode();
       } else if (msg.k === "err") {
         console.warn(`[AnimHlsPlayer] ❌ err: ${msg.msg} (${currentSrc?.label})`);
@@ -517,9 +397,26 @@ export default function AnimHlsPlayer({
     const saved = posRef.current;
     consecutiveErrRef.current = 0;
     setSrcIdx(idx);
+    setShowSrcPanel(false);
     sendLoad(sources[idx], saved > 5 ? saved : undefined);
+    /* load subtitles for new source */
     subFetchedRef.current = "";
   }, [sources, sendLoad]);
+
+  /* ── Controls auto-hide ── */
+  const autoShowControls = useCallback(() => {
+    setShowControls(true);
+    if (controlsTimerRef.current) clearTimeout(controlsTimerRef.current);
+    controlsTimerRef.current = setTimeout(() => setShowControls(false), 4000);
+  }, []);
+
+  /* ── Auto-hide controls when playing ── */
+  useEffect(() => {
+    if (isPlaying && !showSrcPanel) {
+      controlsTimerRef.current = setTimeout(() => setShowControls(false), 3500);
+    }
+    return () => { if (controlsTimerRef.current) clearTimeout(controlsTimerRef.current); };
+  }, [isPlaying, showSrcPanel]);
 
   /* ── Subtitle loading ── */
   useEffect(() => {
@@ -537,19 +434,8 @@ export default function AnimHlsPlayer({
   /* ── Cleanup ── */
   useEffect(() => {
     return () => {
-      /* تدمير HLS وإيقاف الفيديو لتحرير ذاكرة WebView — يمنع hang عند التنقل المتكرر */
-      try {
-        webRef.current?.injectJavaScript(
-          `(function(){try{if(window.hls){window.hls.destroy();window.hls=null;}` +
-          `if(window.v){window.v.pause();window.v.src='';window.v.load();}}catch(e){}true;})();`
-        );
-      } catch {}
       if (loadTimeoutRef.current) clearTimeout(loadTimeoutRef.current);
       if (controlsTimerRef.current) clearTimeout(controlsTimerRef.current);
-      if (feedbackTimer.current) clearTimeout(feedbackTimer.current);
-      if (unlockTimer.current) clearTimeout(unlockTimer.current);
-      if (postSeekTimer.current) clearTimeout(postSeekTimer.current);
-      if (doubleTapTimerRef.current) clearTimeout(doubleTapTimerRef.current);
     };
   }, []);
 
@@ -559,13 +445,7 @@ export default function AnimHlsPlayer({
     setPosition(clamped);
     posRef.current = clamped;
     webRef.current?.injectJavaScript(`(function(){if(window.NOVA_seek)window.NOVA_seek(${clamped});true;})();`);
-    /* postSeek: يُبقي الـ thumb على الموضع الصحيح 800ms ريثما يُحدَّث الـ polling */
-    if (postSeekTimer.current) clearTimeout(postSeekTimer.current);
-    const pct = durRef.current > 0 ? clamped / durRef.current : 0;
-    setPostSeekPct(pct);
-    postSeekTimer.current = setTimeout(() => setPostSeekPct(null), 800);
-    fadeIn();
-  }, [fadeIn]);
+  }, []);
 
   const togglePlay = useCallback(() => {
     if (isEnded) {
@@ -581,212 +461,85 @@ export default function AnimHlsPlayer({
       webRef.current?.injectJavaScript(`(function(){if(window.NOVA_play)window.NOVA_play();true;})();`);
     }
     setIsPlaying(p => !p);
-    fadeIn();
-  }, [isPlaying, isEnded, seek, fadeIn]);
-
-  const toggleMute = useCallback(() => {
-    setIsMuted(m => {
-      const next = !m;
-      webRef.current?.injectJavaScript(`(function(){if(window.NOVA_mute)window.NOVA_mute(${next});true;})();`);
-      return next;
-    });
-    fadeIn();
-  }, [fadeIn]);
-
-  const changeSpeed = useCallback((s: number) => {
-    setSpeed(s);
-    setShowSpeedMenu(false);
-    webRef.current?.injectJavaScript(`(function(){if(window.NOVA_speed)window.NOVA_speed(${s});true;})();`);
-    fadeIn();
-  }, [fadeIn]);
-
-  const handleBack = useCallback(() => {
-    ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP).catch(() => {});
-    onBack();
-  }, [onBack]);
-
-  const toggleRotation = useCallback(async () => {
-    const next = !isLandRight;
-    setIsLandRight(next);
-    await ScreenOrientation.lockAsync(
-      next
-        ? ScreenOrientation.OrientationLock.LANDSCAPE_RIGHT
-        : ScreenOrientation.OrientationLock.LANDSCAPE_LEFT
-    ).catch(() => {});
-    fadeIn();
-  }, [isLandRight, fadeIn]);
-
-  /* ── Show feedback ── */
-  const showFeedback = useCallback((fb: typeof feedback) => {
-    setFeedback(fb);
-    if (feedbackTimer.current) clearTimeout(feedbackTimer.current);
-    feedbackTimer.current = setTimeout(() => setFeedback(null), 900);
-  }, []);
+  }, [isPlaying, isEnded, seek]);
 
   /* ── Seek bar progress (0–1) ── */
-  const rawFill = isDragging ? dragPct : postSeekPct !== null ? postSeekPct : duration > 0 ? position / duration : 0;
-  const progress = Math.min(Math.max(isFinite(rawFill) ? rawFill : 0, 0), 1);
+  const progress = duration > 0 ? (seekPreview !== null ? seekPreview : position) / duration : 0;
 
-  /* ── RTL calc ── */
-  const _calcPctFromAbsolute = (absoluteX: number): number => {
-    const localX = absoluteX - barPageX.current;
-    const raw = Math.min(1, Math.max(0, localX) / Math.max(1, barWidth.current));
-    return _nRTL ? 1 - raw : raw;
-  };
+  /* ── PanResponder for gestures ── */
+  const doubleTapTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastTapRef = useRef(0);
 
-  /* ── Seekbar PanResponder ── */
-  const seekBarPan = useRef(
-    PanResponder.create({
-      onStartShouldSetPanResponder: () => true,
-      onMoveShouldSetPanResponder: () => true,
-      onPanResponderGrant: (e) => {
-        const grantPageX = e.nativeEvent.pageX;
-        const grantLocX = e.nativeEvent.locationX;
-        lastMoveX.current = grantPageX;
-        grantLocationXRef.current = grantLocX;
-        if (postSeekTimer.current) { clearTimeout(postSeekTimer.current); postSeekTimer.current = null; }
-        setPostSeekPct(null);
-        isDraggingRef.current = true;
-        setIsDragging(true);
-        const bw = barWidth.current;
-        if (grantLocX >= 0 && grantLocX <= bw + 4) {
-          const raw = Math.min(1, Math.max(0, grantLocX / Math.max(1, bw)));
-          setDragPct(_nRTL ? 1 - raw : raw);
-        } else {
-          setDragPct(Math.max(0, Math.min(1, _calcPctFromAbsolute(grantPageX))));
-        }
-        barRef.current?.measureInWindow((px, _py, pw) => {
-          if (px >= 0) barPageX.current = px;
-          if (pw > 1) barWidth.current = pw;
-        });
-      },
-      onPanResponderMove: (_, gs) => {
-        const x = gs.moveX;
-        if (x > 0) lastMoveX.current = x;
-        setDragPct(Math.max(0, Math.min(1, _calcPctFromAbsolute(x > 0 ? x : lastMoveX.current))));
-      },
-      onPanResponderRelease: (_, gs) => {
-        isDraggingRef.current = false;
-        setIsDragging(false);
-        const isPureTap = Math.abs(gs.dx) < 8 && Math.abs(gs.dy) < 8;
-        let finalPct: number;
-        if (isPureTap) {
-          const loc = grantLocationXRef.current;
-          const bw = barWidth.current;
-          const isEdgeTap = lastMoveX.current <= barPageX.current + 4;
-          const locValid = loc > 0 || (loc === 0 && isEdgeTap);
-          finalPct = locValid
-            ? (_nRTL ? 1 - Math.min(1, Math.max(0, loc / Math.max(1, bw))) : Math.min(1, Math.max(0, loc / Math.max(1, bw))))
-            : _calcPctFromAbsolute(lastMoveX.current);
-        } else {
-          finalPct = _calcPctFromAbsolute(gs.moveX > 0 ? gs.moveX : lastMoveX.current);
-        }
-        finalPct = Math.max(0, Math.min(1, finalPct));
-        const dur = durRef.current;
-        if (dur > 0) seek(finalPct * dur);
-      },
-    })
-  ).current;
-
-  /* ── Main gesture PanResponder (volume / brightness / seek) ── */
   const panResponder = useRef(
     PanResponder.create({
-      onStartShouldSetPanResponder: () => !isLocked,
-      onMoveShouldSetPanResponder: (_, gs) => {
-        const adx = Math.abs(gs.dx), ady = Math.abs(gs.dy);
-        return (ady > 8 && ady > adx * 1.3) || (adx > 10 && adx > ady * 1.3);
-      },
-      onPanResponderGrant: (evt, gs) => {
-        const side: "L" | "R" = evt.nativeEvent.pageX < W / 2 ? "L" : "R";
-        gestureSideRef.current = side;
-        gestureTypeRef.current = null;
-        gestureStartYRef.current = gs.y0;
+      onStartShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: (_e, gs) => Math.abs(gs.dx) > 8,
+      onPanResponderGrant: (e, gs) => {
         gestureStartXRef.current = gs.x0;
         gestureStartPosRef.current = posRef.current;
-        volumeStartRef.current = volumeRef.current;
-        brightnessStartRef.current = brightnessRef.current;
         seekingRef.current = false;
       },
-      onPanResponderMove: (_, gs) => {
-        const side = gestureSideRef.current;
-        if (!side) return;
-        if (!gestureTypeRef.current) {
-          const adx = Math.abs(gs.dx), ady = Math.abs(gs.dy);
-          if (adx < 8 && ady < 8) return;
-          gestureTypeRef.current = adx > ady * 1.3 ? "seek"
-            : side === "R" ? "vol" : "bri";
-        }
-        if (gestureTypeRef.current === "seek") {
-          seekingRef.current = true;
-          const seekDelta = (gs.dx / W) * 120;
-          const newPos = Math.max(0, Math.min(durRef.current, gestureStartPosRef.current + seekDelta));
-          setFeedback({ type: "seek", value: newPos, delta: seekDelta });
-        } else if (gestureTypeRef.current === "vol") {
-          const delta = -(gs.moveY - gestureStartYRef.current) / (H * 0.65);
-          const newVol = Math.max(0, Math.min(1, volumeStartRef.current + delta));
-          volumeRef.current = newVol;
-          setVolume(newVol);
-          webRef.current?.injectJavaScript(`(function(){if(window.NOVA_volume)window.NOVA_volume(${newVol.toFixed(3)});true;})();`);
-          setFeedback({ type: "volume", value: newVol });
-        } else if (gestureTypeRef.current === "bri") {
-          const delta = -(gs.moveY - gestureStartYRef.current) / (H * 0.65);
-          const newBri = Math.max(0, Math.min(0.85, brightnessStartRef.current - delta));
-          brightnessRef.current = newBri;
-          setBrightness(newBri);
-          setFeedback({ type: "brightness", value: newBri });
-        }
+      onPanResponderMove: (_e, gs) => {
+        if (Math.abs(gs.dx) < 12) return;
+        seekingRef.current = true;
+        const d = durRef.current;
+        if (!d) return;
+        const delta = (gs.dx / W) * Math.min(d, 120); // 120s max per full swipe
+        const newPos = Math.max(0, Math.min(d, gestureStartPosRef.current + delta));
+        setSeekPreview(newPos);
       },
-      onPanResponderRelease: (_, gs) => {
-        if (gestureTypeRef.current === "seek" && seekingRef.current) {
-          const seekDelta = (gs.dx / W) * 120;
-          const newPos = Math.max(0, Math.min(durRef.current, gestureStartPosRef.current + seekDelta));
-          seek(newPos);
+      onPanResponderRelease: (_e, gs) => {
+        if (seekingRef.current) {
+          const d = durRef.current;
+          if (d) {
+            const delta = (gs.dx / W) * Math.min(d, 120);
+            seek(Math.max(0, Math.min(d, gestureStartPosRef.current + delta)));
+          }
+          seekingRef.current = false;
+          setSeekPreview(null);
+        } else {
+          /* Tap — show controls or double-tap seek */
+          const now = Date.now();
+          const side = gs.x0 < W / 2 ? "right" : "left"; // RTL: right side = forward in RN coord
+          if (now - lastTapRef.current < 300) {
+            /* Double tap */
+            if (doubleTapTimerRef.current) { clearTimeout(doubleTapTimerRef.current); doubleTapTimerRef.current = null; }
+            seek(posRef.current + (side === "left" ? -10 : 10));
+          } else {
+            lastTapRef.current = now;
+            doubleTapTimerRef.current = setTimeout(() => {
+              doubleTapTimerRef.current = null;
+              setShowControls(v => {
+                if (!v) {
+                  if (controlsTimerRef.current) clearTimeout(controlsTimerRef.current);
+                  controlsTimerRef.current = setTimeout(() => setShowControls(false), 4000);
+                }
+                return !v;
+              });
+            }, 300);
+          }
         }
-        seekingRef.current = false;
-        gestureTypeRef.current = null;
-        gestureSideRef.current = null;
-        if (feedbackTimer.current) clearTimeout(feedbackTimer.current);
-        feedbackTimer.current = setTimeout(() => setFeedback(null), 900);
       },
       onPanResponderTerminate: () => {
         seekingRef.current = false;
-        gestureTypeRef.current = null;
+        setSeekPreview(null);
       },
     })
   ).current;
 
-  /* ── Tap / double-tap ── */
-  const handleTap = useCallback((pageX: number) => {
-    if (isLocked) {
-      setShowUnlock(true);
-      if (unlockTimer.current) clearTimeout(unlockTimer.current);
-      unlockTimer.current = setTimeout(() => setShowUnlock(false), 2500);
-      return;
-    }
-    const side: "L" | "R" = pageX < W / 2 ? "L" : "R";
-    const now = Date.now();
-    const last = lastTapRef.current;
-    if (last && now - last.time < 300 && last.side === side) {
-      if (doubleTapTimerRef.current) { clearTimeout(doubleTapTimerRef.current); doubleTapTimerRef.current = null; }
-      lastTapRef.current = null;
-      seek(posRef.current + (side === "L" ? -10 : 10));
-    } else {
-      lastTapRef.current = { time: now, side };
-      doubleTapTimerRef.current = setTimeout(() => {
-        doubleTapTimerRef.current = null;
-        if (showControls) {
-          Animated.timing(controlsOpacity, { toValue: 0, duration: 200, useNativeDriver: true }).start(() => setShowControls(false));
-        } else {
-          fadeIn();
-        }
-      }, 300);
-    }
-  }, [isLocked, showControls, seek, fadeIn]);
+  /* ── Seek bar interaction ── */
+  const seekBarWidth = W - 100; // approximate
+  const handleSeekBarPress = useCallback((evt: any) => {
+    const x = evt.nativeEvent.locationX;
+    const ratio = Math.min(1, Math.max(0, x / seekBarWidth));
+    seek(ratio * (durRef.current || 0));
+    autoShowControls();
+  }, [seekBarWidth, seek, autoShowControls]);
 
   const hasSub = cues.length > 0;
-  const fillPct = Math.min(100, progress * 100);
 
   return (
+    /* direction:'ltr' — يمنع RTL الخاص بالتطبيق العربي من عكس layout المشغّل */
     <View style={[s.root, { direction: "ltr" }]}>
       <StatusBar hidden />
 
@@ -813,268 +566,138 @@ export default function AnimHlsPlayer({
         renderError={() => <View style={{ flex: 1, backgroundColor: "#000" }} />}
       />
 
-      {/* ── Brightness dimming overlay ── */}
-      {brightness > 0 && (
-        <View
-          pointerEvents="none"
-          style={[StyleSheet.absoluteFill, { backgroundColor: "#000", opacity: brightness, zIndex: 1 }]}
-        />
-      )}
-
-      {/* ── Buffering indicator ── */}
-      {isBuffering && (
-        <View style={s.bufferingWrap} pointerEvents="none">
-          <SpinRing size={52} />
-        </View>
-      )}
-
-      {/* ── Subtitle overlay ── */}
-      {subOn && activeCue && (
-        <View style={s.subWrap} pointerEvents="none">
-          {activeCue.text.split(/\r?\n/).map((line, i) => (
-            <Text key={i} style={s.subText}>{line || " "}</Text>
-          ))}
-        </View>
-      )}
-
-      {/* ── Gesture layer ── */}
+      {/* ── Gesture overlay ── */}
       <View
-        style={[StyleSheet.absoluteFill, { zIndex: isLocked ? 15 : 5 }]}
-        {...(!isLocked ? panResponder.panHandlers : {})}
+        style={StyleSheet.absoluteFill}
+        {...panResponder.panHandlers}
       >
-        <Pressable style={s.halfLeft} onPress={(e) => handleTap(e.nativeEvent.pageX)} />
-        <Pressable style={s.halfRight} onPress={(e) => handleTap(e.nativeEvent.pageX)} />
-      </View>
-
-      {/* ── Volume feedback ── */}
-      {feedback?.type === "volume" && (
-        <View style={s.feedbackRight} pointerEvents="none">
-          <View style={s.feedbackBarWrap}>
-            <View style={[s.feedbackBarFill, { height: `${Math.round(feedback.value * 100)}%` as any }]} />
+        {/* ── Buffering indicator ── */}
+        {isBuffering && (
+          <View style={s.bufferingWrap} pointerEvents="none">
+            <SpinRing />
           </View>
-          <View style={s.feedbackPill}>
-            <Ionicons name={feedback.value === 0 ? "volume-mute" : "volume-high"} size={12} color="rgba(255,255,255,0.75)" />
-            <Text style={s.feedbackPillText}>{Math.round(feedback.value * 100)}%</Text>
+        )}
+
+        {/* ── Seek preview badge ── */}
+        {seekPreview !== null && (
+          <View style={s.seekBadge} pointerEvents="none">
+            <Text style={s.seekBadgeTime}>{fmtTime(seekPreview)}</Text>
+            <Text style={s.seekBadgeDelta}>{seekPreview > gestureStartPosRef.current ? "+" : ""}{fmtTime(Math.abs(seekPreview - gestureStartPosRef.current))}</Text>
           </View>
-        </View>
-      )}
+        )}
 
-      {/* ── Brightness feedback ── */}
-      {feedback?.type === "brightness" && (
-        <View style={s.feedbackLeft} pointerEvents="none">
-          <View style={s.feedbackBarWrap}>
-            <View style={[s.feedbackBarFill, { height: `${Math.round((1 - feedback.value / 0.85) * 100)}%` as any }]} />
-          </View>
-          <View style={s.feedbackPill}>
-            <Ionicons name="sunny" size={12} color="rgba(253,224,71,0.85)" />
-            <Text style={s.feedbackPillText}>{Math.round((1 - feedback.value / 0.85) * 100)}%</Text>
-          </View>
-        </View>
-      )}
+        {/* ── Controls overlay — shown conditionally ── */}
+        {showControls && (
+          <View style={StyleSheet.absoluteFill} pointerEvents="box-none">
+            {/* Top gradient */}
+            <LinearGradient
+              colors={["rgba(0,0,0,0.75)", "transparent"]}
+              style={s.topGrad}
+              pointerEvents="none"
+            />
+            {/* Bottom gradient */}
+            <LinearGradient
+              colors={["transparent", "rgba(0,0,0,0.82)"]}
+              style={s.bottomGrad}
+              pointerEvents="none"
+            />
 
-      {/* ── Seek feedback ── */}
-      {feedback?.type === "seek" && (
-        <View style={s.feedbackCenter} pointerEvents="none">
-          <View style={s.seekFeedbackBox}>
-            <Ionicons name={(feedback.delta ?? 0) >= 0 ? "play-forward" : "play-back"} size={20} color="rgba(255,255,255,0.65)" />
-            <Text style={s.seekFeedbackTime}>{fmtTime(feedback.value)}</Text>
-            <Text style={s.seekFeedbackDelta}>
-              {(feedback.delta ?? 0) >= 0 ? "+" : ""}{Math.round(feedback.delta ?? 0)}ث
-            </Text>
-          </View>
-        </View>
-      )}
-
-      {/* ── Lock: mini dot ── */}
-      {isLocked && !showUnlock && (
-        <View style={s.lockDot} pointerEvents="none">
-          <Ionicons name="lock-closed" size={13} color="rgba(251,191,36,0.65)" />
-        </View>
-      )}
-
-      {/* ── Lock: unlock button ── */}
-      {isLocked && showUnlock && (
-        <Pressable style={s.swipeUnlockBar} onPress={() => { setIsLocked(false); setShowUnlock(false); }}>
-          <Ionicons name="lock-open-outline" size={20} color="#fbbf24" />
-          <Text style={s.swipeUnlockLabel}>اضغط لفتح القفل</Text>
-        </Pressable>
-      )}
-
-      {/* ════════════════════════════════════════
-          CONTROLS OVERLAY
-      ════════════════════════════════════════ */}
-      {showControls && !isLocked && (
-        <Animated.View
-          style={[StyleSheet.absoluteFill, { opacity: controlsOpacity, zIndex: 10 }]}
-          pointerEvents="box-none"
-        >
-          {/* ── Top gradient ── */}
-          <LinearGradient colors={["rgba(0,0,0,0.82)", "transparent"]} style={s.topGrad} pointerEvents="none" />
-
-          {/* ── Top bar ── */}
-          <View style={[s.topBar, {
-            paddingTop: Platform.OS === "web" ? 12 : insets.top + 6,
-            paddingLeft: insets.left + 14,
-            paddingRight: insets.right + 14,
-          }]}>
-            {/* أقصى اليسار: CC + تدوير الشاشة */}
-            <View style={s.topLeftRow}>
-              {hasSub && (
-                <Pressable onPress={() => setSubOn(v => !v)} style={[s.topIconBtn, subOn && s.topIconBtnActive]} hitSlop={10}>
-                  <Ionicons name="logo-closed-captioning" size={15} color={subOn ? "#c4b5fd" : "rgba(255,255,255,0.75)"} />
-                </Pressable>
-              )}
-              <Pressable onPress={toggleRotation} style={s.topIconBtn} hitSlop={10}>
-                <Ionicons name="phone-landscape-outline" size={15} color="rgba(255,255,255,0.75)" />
+            {/* ── Top bar ── */}
+            <View style={[s.topBar, { paddingRight: insets.right + 12, paddingLeft: insets.left + 12 }]}>
+              <Pressable onPress={onBack} style={s.backBtn} hitSlop={12}>
+                <Ionicons name="arrow-back" size={20} color="#fff" />
               </Pressable>
-            </View>
-
-            {/* فراغ مرن */}
-            <View style={{ flex: 1 }} />
-
-            {/* أقصى اليمين: عنوان + سهم رجوع */}
-            <View style={s.topRightRow}>
               <View style={s.titleWrap}>
                 <Text style={s.titleText} numberOfLines={1}>{title}</Text>
                 {episode !== undefined && (
-                  <Text style={s.epText}>الحلقة {episode}{episodeTitle ? ` — ${episodeTitle}` : ""}</Text>
+                  <Text style={s.epText}>الحلقة {episode}</Text>
                 )}
               </View>
-              <Pressable onPress={handleBack} style={s.backBtn} hitSlop={12}>
-                <Ionicons name="arrow-forward" size={20} color="#fff" />
+              {/* Source selector button */}
+              <Pressable onPress={() => { setShowSrcPanel(v => !v); autoShowControls(); }} style={s.srcBtn} hitSlop={8}>
+                <Ionicons name="layers" size={16} color="#fff" />
+                <Text style={s.srcBtnText}>{currentSrc?.quality?.split(" ")[0] || "HD"}</Text>
               </Pressable>
-            </View>
-          </View>
-
-          {/* ── Center: تخطي ± 10 ثانية + تشغيل/إيقاف ── */}
-          <View style={s.centerOverlay} pointerEvents="box-none">
-            {!isPlaying && !isBuffering && <PulseRing />}
-            <View style={s.centerRow}>
-              {/* تأخير 10 ثانية */}
-              <Pressable onPress={() => seek(posRef.current - 10)} style={s.centerSkipBtn} hitSlop={14}>
-                <Ionicons name="play-back" size={30} color="rgba(255,255,255,0.92)" />
-                <Text style={s.centerSkipLabel}>10</Text>
-              </Pressable>
-
-              {/* تشغيل / إيقاف (يظهر فقط عند الإيقاف أو التحميل) */}
-              {(!isPlaying || isBuffering) ? (
-                <Pressable onPress={togglePlay} style={s.centerPlayBtn} hitSlop={16}>
-                  {isBuffering
-                    ? <ActivityIndicator size={32} color="#fff" />
-                    : <Ionicons name="play" size={36} color="#fff" style={{ transform: [{ translateX: 3 }] }} />}
+              {/* Subtitle toggle */}
+              {hasSub && (
+                <Pressable onPress={() => setSubOn(v => !v)} style={[s.srcBtn, { marginLeft: 6 }]} hitSlop={8}>
+                  <Ionicons name="logo-closed-captioning" size={16} color={subOn ? "#a78bfa" : "rgba(255,255,255,0.4)"} />
                 </Pressable>
-              ) : (
-                <View style={s.centerPlayPlaceholder} />
-              )}
-
-              {/* تقديم 10 ثانية */}
-              <Pressable onPress={() => seek(posRef.current + 10)} style={s.centerSkipBtn} hitSlop={14}>
-                <Ionicons name="play-forward" size={30} color="rgba(255,255,255,0.92)" />
-                <Text style={s.centerSkipLabel}>10</Text>
-              </Pressable>
-            </View>
-          </View>
-
-          {/* ── Bottom section ── */}
-          <LinearGradient
-            colors={["transparent", "rgba(0,0,0,0.60)", "rgba(0,0,0,0.96)"]}
-            style={[s.bottomSection, {
-              paddingBottom: Platform.OS === "web" ? 16 : insets.bottom + 10,
-              paddingLeft: insets.left + 14,
-              paddingRight: insets.right + 14,
-            }]}
-          >
-            {/* وقت / شريط / وقت كلي */}
-            <View style={{ position: "relative", height: 18, marginBottom: 4 }}>
-              <Text style={[s.timeText, { position: "absolute", [_nRTL ? "right" : "left"]: 0 }]}>
-                {fmtTime(isDragging ? dragPct * (durRef.current || duration) : position)}
-              </Text>
-              <Text style={[s.timeText, { position: "absolute", [_nRTL ? "left" : "right"]: 0, opacity: 0.45 }]}>
-                {fmtTime(duration)}
-              </Text>
-            </View>
-
-            {/* شريط التقدم */}
-            <View
-              ref={barRef}
-              style={[s.progressWrap, isDragging && s.progressWrapDragging, _nRTL && { transform: [{ scaleX: -1 }] }]}
-              onLayout={(e) => {
-                barWidth.current = e.nativeEvent.layout.width || 1;
-                barRef.current?.measureInWindow((px) => { if (px >= 0) barPageX.current = px; });
-              }}
-              {...seekBarPan.panHandlers}
-            >
-              <View style={s.progressBg} />
-              <LinearGradient
-                colors={["#6D28D9", "#8B5CF6", "#a78bfa"]}
-                start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
-                style={[s.progressFill, { left: 0, width: `${fillPct}%` as any }]}
-              />
-              <View style={[s.thumb, { left: `${fillPct}%` as any }, isDragging && s.thumbDragging]} />
-              {isDragging && (
-                <View style={[s.dragTooltip, { left: `${Math.max(4, Math.min(88, fillPct - 6))}%` as any }]}>
-                  <Text style={s.dragTooltipText}>{fmtTime(dragPct * (durRef.current || duration))}</Text>
-                </View>
               )}
             </View>
 
-            {/* صف أزرار التحكم السفلي */}
-            <View style={s.bottomCtrlRow}>
-              {/* يسار: قفل + سرعة */}
-              <View style={s.bottomSide}>
-                <Pressable onPress={() => { setIsLocked(true); fadeIn(); }} style={s.ctrlIconBtn} hitSlop={10}>
-                  <Ionicons name="lock-closed-outline" size={16} color="rgba(255,255,255,0.80)" />
-                </Pressable>
-                {/* زر السرعة */}
-                <View>
-                  {showSpeedMenu && (
-                    <View style={s.speedDropdown}>
-                      {SPEEDS.map(sp => (
-                        <Pressable key={sp} onPress={() => changeSpeed(sp)} style={[s.dropItem, speed === sp && s.dropItemActive]}>
-                          <Text style={[s.dropSpeedNum, speed === sp && s.dropItemTextActive]}>{sp}x</Text>
-                          {speed === sp && <Ionicons name="checkmark" size={11} color="#c4b5fd" />}
-                        </Pressable>
-                      ))}
-                    </View>
-                  )}
-                  <Pressable onPress={() => { setShowSpeedMenu(v => !v); fadeIn(); }} style={[s.ctrlIconBtn, showSpeedMenu && s.topIconBtnActive]} hitSlop={10}>
-                    <Text style={[s.speedLabel, speed !== 1 && s.speedLabelActive]}>{speed}x</Text>
-                  </Pressable>
-                </View>
+            {/* ── Center play/pause ── */}
+            <View style={s.centerWrap} pointerEvents="none">
+              <View style={s.playBtn}>
+                <Ionicons name={isEnded ? "reload" : isPlaying ? "pause" : "play"} size={32} color="#fff" />
               </View>
+            </View>
+            {/* Invisible pressable on center for play/pause */}
+            <Pressable style={s.centerPressable} onPress={togglePlay} />
 
-              {/* وسط: حلقة سابقة + play + حلقة تالية */}
-              <View style={s.bottomCenter}>
+            {/* ── Episode nav ── */}
+            {(onPrevEpisode || onNextEpisode) && (
+              <View style={s.episodeNav}>
                 {onPrevEpisode && (
-                  <Pressable onPress={onPrevEpisode} style={s.ctrlIconBtn} hitSlop={10}>
-                    <Ionicons name="play-skip-back" size={18} color="rgba(255,255,255,0.80)" />
+                  <Pressable onPress={onPrevEpisode} style={s.epNavBtn}>
+                    <Ionicons name="play-skip-forward" size={18} color="rgba(255,255,255,0.8)" />
+                    <Text style={s.epNavText}>السابقة</Text>
                   </Pressable>
                 )}
-                <Pressable onPress={togglePlay} style={s.bottomPlayBtn} hitSlop={10}>
-                  <Ionicons name={isPlaying ? "pause" : "play"} size={23} color="#fff" style={isPlaying ? undefined : { transform: [{ translateX: 2 }] }} />
-                </Pressable>
                 {onNextEpisode && (
-                  <Pressable onPress={onNextEpisode} style={s.ctrlIconBtn} hitSlop={10}>
-                    <Ionicons name="play-skip-forward" size={18} color="rgba(255,255,255,0.80)" />
+                  <Pressable onPress={onNextEpisode} style={s.epNavBtn}>
+                    <Text style={s.epNavText}>التالية</Text>
+                    <Ionicons name="play-skip-back" size={18} color="rgba(255,255,255,0.8)" />
                   </Pressable>
                 )}
               </View>
+            )}
 
-              {/* يمين: كتم + جودة الحالي */}
-              <View style={[s.bottomSide, { justifyContent: "flex-end" }]}>
-                <Pressable onPress={toggleMute} style={[s.ctrlIconBtn, isMuted && s.ctrlIconBtnMuted]} hitSlop={10}>
-                  <Ionicons name={isMuted ? "volume-mute-outline" : "volume-high-outline"} size={16} color={isMuted ? "#fca5a5" : "rgba(255,255,255,0.80)"} />
-                </Pressable>
-                {currentSrc?.quality && (
-                  <View style={s.qualityBadge}>
-                    <Text style={s.qualityBadgeText}>{currentSrc.quality.split(" ")[0]}</Text>
-                  </View>
-                )}
-              </View>
+            {/* ── Bottom seek bar ── */}
+            <View style={[s.bottomBar, { paddingRight: insets.right + 12, paddingLeft: insets.left + 12 }]}>
+              <Text style={s.timeText}>{fmtTime(seekPreview ?? position)}</Text>
+              {/* Seek bar */}
+              <Pressable style={s.seekTrack} onPress={handleSeekBarPress}>
+                <View style={s.seekBg} />
+                <View style={[s.seekFill, { width: `${Math.min(100, progress * 100)}%` }]} />
+                <View style={[s.seekThumb, { left: `${Math.min(100, progress * 100)}%` }]} />
+              </Pressable>
+              <Text style={s.timeText}>{fmtTime(duration)}</Text>
             </View>
-          </LinearGradient>
-        </Animated.View>
-      )}
+          </View>
+        )}
+
+        {/* ── Source picker panel ── */}
+        {showSrcPanel && (
+          <View style={s.srcPanel}>
+            <LinearGradient colors={["rgba(7,5,20,0.97)", "rgba(7,5,20,0.93)"]} style={StyleSheet.absoluteFill} />
+            <View style={s.srcPanelHeader}>
+              <Text style={s.srcPanelTitle}>اختر المصدر</Text>
+              <Pressable onPress={() => setShowSrcPanel(false)} style={s.srcPanelClose}>
+                <Ionicons name="close" size={18} color="rgba(255,255,255,0.7)" />
+              </Pressable>
+            </View>
+            {sources.map((src, i) => (
+              <Pressable key={i} onPress={() => switchSource(i)} style={[s.srcItem, i === srcIdx && s.srcItemActive]}>
+                <View style={[s.srcItemDot, i === srcIdx && s.srcItemDotActive]} />
+                <Text style={[s.srcItemLabel, i === srcIdx && s.srcItemLabelActive]}>
+                  {`سيرفر ${i + 1} — ${src.quality}`}
+                </Text>
+                <Text style={s.srcItemTag} numberOfLines={1}>{src.label || "—"}</Text>
+              </Pressable>
+            ))}
+          </View>
+        )}
+
+        {/* ── Subtitle overlay ── */}
+        {subOn && activeCue && !showSrcPanel && (
+          <View style={s.subWrap} pointerEvents="none">
+            {activeCue.text.split(/\r?\n/).map((line, i) => (
+              <Text key={i} style={s.subText}>{line || " "}</Text>
+            ))}
+          </View>
+        )}
+      </View>
     </View>
   );
 }
@@ -1082,174 +705,50 @@ export default function AnimHlsPlayer({
 const s = StyleSheet.create({
   root: { flex: 1, backgroundColor: "#000" },
   bufferingWrap: { ...StyleSheet.absoluteFillObject, alignItems: "center", justifyContent: "center", zIndex: 5 } as any,
+  seekBadge: { position: "absolute", top: "40%", left: "50%", transform: [{ translateX: -56 }, { translateY: -32 }], backgroundColor: "rgba(0,0,0,0.72)", borderRadius: 16, paddingHorizontal: 18, paddingVertical: 10, alignItems: "center" },
+  seekBadgeTime: { fontSize: 22, fontFamily: "Cairo_700Bold", color: "#fff" },
+  seekBadgeDelta: { fontSize: 13, fontFamily: "Cairo_400Regular", color: "rgba(255,255,255,0.6)", marginTop: 2 },
 
-  halfLeft:  { position: "absolute", top: 0, left: 0, width: "50%", height: "100%" },
-  halfRight: { position: "absolute", top: 0, right: 0, width: "50%", height: "100%" },
+  topGrad: { position: "absolute", top: 0, left: 0, right: 0, height: 110 },
+  bottomGrad: { position: "absolute", bottom: 0, left: 0, right: 0, height: 130 },
 
-  /* ── Feedback overlays ── */
-  feedbackRight: {
-    position: "absolute", right: 24, top: "20%", alignItems: "center", gap: 8, zIndex: 20,
-  },
-  feedbackLeft: {
-    position: "absolute", left: 24, top: "20%", alignItems: "center", gap: 8, zIndex: 20,
-  },
-  feedbackCenter: {
-    ...StyleSheet.absoluteFillObject, alignItems: "center", justifyContent: "center", zIndex: 20,
-  },
-  feedbackBarWrap: {
-    width: 4, height: 80, backgroundColor: "rgba(255,255,255,0.15)", borderRadius: 2,
-    overflow: "hidden", justifyContent: "flex-end",
-  },
-  feedbackBarFill: { width: "100%", backgroundColor: "#8B5CF6", borderRadius: 2 },
-  feedbackPill: {
-    flexDirection: "row", alignItems: "center", gap: 4,
-    backgroundColor: "rgba(0,0,0,0.65)", borderRadius: 10,
-    paddingHorizontal: 8, paddingVertical: 4,
-    borderWidth: 1, borderColor: "rgba(255,255,255,0.12)",
-  },
-  feedbackPillText: { fontSize: 11, fontFamily: "Cairo_700Bold", color: "rgba(255,255,255,0.85)" },
-  seekFeedbackBox: {
-    backgroundColor: "rgba(0,0,0,0.72)", borderRadius: 16,
-    paddingHorizontal: 18, paddingVertical: 10, alignItems: "center", gap: 2,
-  },
-  seekFeedbackTime: { fontSize: 22, fontFamily: "Cairo_700Bold", color: "#fff" },
-  seekFeedbackDelta: { fontSize: 13, fontFamily: "Cairo_400Regular", color: "rgba(255,255,255,0.6)" },
+  topBar: { position: "absolute", top: 0, left: 0, right: 0, flexDirection: "row", alignItems: "center", paddingVertical: 14, gap: 10 },
+  backBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: "rgba(0,0,0,0.4)", alignItems: "center", justifyContent: "center" },
+  titleWrap: { flex: 1, gap: 2 },
+  titleText: { fontSize: 14, fontFamily: "Cairo_700Bold", color: "#fff" },
+  epText: { fontSize: 10, color: "rgba(255,255,255,0.45)", fontFamily: "Cairo_400Regular" },
+  srcBtn: { flexDirection: "row", alignItems: "center", gap: 5, backgroundColor: "rgba(139,92,246,0.25)", borderRadius: 10, paddingHorizontal: 10, paddingVertical: 6, borderWidth: 1, borderColor: "rgba(139,92,246,0.4)" },
+  srcBtnText: { fontSize: 11, fontFamily: "Cairo_700Bold", color: "#c4b5fd" },
 
-  /* ── Lock ── */
-  lockDot: {
-    position: "absolute", top: 18, left: "50%", marginLeft: -12,
-    width: 24, height: 24, borderRadius: 12,
-    backgroundColor: "rgba(0,0,0,0.55)", alignItems: "center", justifyContent: "center", zIndex: 20,
-  },
-  swipeUnlockBar: {
-    position: "absolute", top: "50%", left: "50%",
-    transform: [{ translateX: -80 }, { translateY: -22 }],
-    flexDirection: "row", alignItems: "center", gap: 8,
-    backgroundColor: "rgba(0,0,0,0.72)", borderRadius: 20,
-    paddingHorizontal: 18, paddingVertical: 10,
-    borderWidth: 1, borderColor: "rgba(251,191,36,0.4)",
-    zIndex: 20,
-  },
-  swipeUnlockLabel: { fontSize: 13, fontFamily: "Cairo_700Bold", color: "#fbbf24" },
+  centerWrap: { ...StyleSheet.absoluteFillObject, alignItems: "center", justifyContent: "center" } as any,
+  centerPressable: { position: "absolute", width: 90, height: 90, left: "50%", top: "50%", transform: [{ translateX: -45 }, { translateY: -45 }] },
+  playBtn: { width: 72, height: 72, borderRadius: 36, backgroundColor: "rgba(0,0,0,0.55)", borderWidth: 1.5, borderColor: "rgba(255,255,255,0.25)", alignItems: "center", justifyContent: "center" },
 
-  /* ── Top ── */
-  topGrad: { position: "absolute", top: 0, left: 0, right: 0, height: 120, zIndex: 10 },
-  topBar: {
-    position: "absolute", top: 0, left: 0, right: 0,
-    flexDirection: "row", alignItems: "center", zIndex: 11, gap: 8,
-  },
-  topLeftRow: { flexDirection: "row", alignItems: "center", gap: 6 },
-  topRightRow: { flexDirection: "row", alignItems: "center", gap: 8 },
-  backBtn: {
-    width: 36, height: 36, borderRadius: 18,
-    backgroundColor: "rgba(0,0,0,0.4)", alignItems: "center", justifyContent: "center",
-  },
-  titleWrap: { alignItems: "flex-end", gap: 1 },
-  titleText: { fontSize: 13, fontFamily: "Cairo_700Bold", color: "#fff", textAlign: "right" },
-  epText: { fontSize: 10, color: "rgba(255,255,255,0.45)", fontFamily: "Cairo_400Regular", textAlign: "right" },
-  topIconBtn: {
-    width: 32, height: 32, borderRadius: 8,
-    backgroundColor: "rgba(0,0,0,0.35)", alignItems: "center", justifyContent: "center",
-    borderWidth: 1, borderColor: "rgba(255,255,255,0.08)",
-  },
-  topIconBtnActive: { backgroundColor: "rgba(139,92,246,0.3)", borderColor: "rgba(139,92,246,0.5)" },
-  speedLabel: { fontSize: 11, fontFamily: "Cairo_700Bold", color: "rgba(255,255,255,0.75)" },
-  speedLabelActive: { color: "#c4b5fd" },
-  speedDropdown: {
-    position: "absolute", bottom: 40, left: 0,
-    backgroundColor: "rgba(10,8,25,0.95)", borderRadius: 12,
-    paddingVertical: 4, minWidth: 72,
-    borderWidth: 1, borderColor: "rgba(255,255,255,0.1)",
-    zIndex: 50,
-  },
-  dropItem: { flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 12, paddingVertical: 8 },
-  dropItemActive: { backgroundColor: "rgba(139,92,246,0.15)" },
-  dropSpeedNum: { fontSize: 12, fontFamily: "Cairo_700Bold", color: "rgba(255,255,255,0.70)", flex: 1 },
-  dropItemTextActive: { color: "#c4b5fd" },
+  episodeNav: { position: "absolute", right: 20, top: "50%", transform: [{ translateY: -30 }], gap: 10 },
+  epNavBtn: { flexDirection: "row", alignItems: "center", gap: 6, backgroundColor: "rgba(0,0,0,0.45)", borderRadius: 10, paddingHorizontal: 10, paddingVertical: 7, borderWidth: 1, borderColor: "rgba(255,255,255,0.15)" },
+  epNavText: { fontSize: 11, fontFamily: "Cairo_700Bold", color: "rgba(255,255,255,0.85)" },
 
-  /* ── Center ── */
-  centerOverlay: {
-    ...StyleSheet.absoluteFillObject, alignItems: "center", justifyContent: "center", zIndex: 10,
-  } as any,
-  centerRow: {
-    flexDirection: "row", alignItems: "center", gap: 36,
-  },
-  centerSkipBtn: {
-    alignItems: "center", justifyContent: "center", gap: 4,
-    width: 56, height: 56,
-  },
-  centerSkipLabel: {
-    fontSize: 11, fontFamily: "Cairo_700Bold", color: "rgba(255,255,255,0.75)",
-  },
-  centerPlayPlaceholder: { width: 72, height: 72 },
-  centerPlayBtn: {
-    width: 72, height: 72, borderRadius: 36,
-    backgroundColor: "rgba(0,0,0,0.55)", borderWidth: 1.5,
-    borderColor: "rgba(255,255,255,0.25)", alignItems: "center", justifyContent: "center",
-  },
+  bottomBar: { position: "absolute", bottom: 0, left: 0, right: 0, flexDirection: "row", alignItems: "center", paddingBottom: 18, paddingTop: 10, gap: 10 },
+  timeText: { fontSize: 11, fontFamily: "Cairo_700Bold", color: "rgba(255,255,255,0.8)", minWidth: 36, textAlign: "center" },
+  seekTrack: { flex: 1, height: 32, justifyContent: "center" },
+  seekBg: { position: "absolute", left: 0, right: 0, height: 3, borderRadius: 2, backgroundColor: "rgba(255,255,255,0.22)" },
+  seekFill: { position: "absolute", left: 0, height: 3, borderRadius: 2, backgroundColor: "#8B5CF6" },
+  seekThumb: { position: "absolute", width: 14, height: 14, borderRadius: 7, backgroundColor: "#fff", marginLeft: -7, top: 9, shadowColor: "#000", shadowOpacity: 0.5, shadowRadius: 4, elevation: 4 },
 
-  /* ── Bottom ── */
-  bottomSection: {
-    position: "absolute", bottom: 0, left: 0, right: 0,
-    paddingTop: 20, gap: 6,
-  },
-  timeText: { fontSize: 11, fontFamily: "Cairo_700Bold", color: "rgba(255,255,255,0.8)" },
-  progressWrap: {
-    height: 28, justifyContent: "center", position: "relative",
-    marginVertical: 2,
-  },
-  progressWrapDragging: { height: 36 },
-  progressBg: {
-    position: "absolute", left: 0, right: 0, height: 3, borderRadius: 2,
-    backgroundColor: "rgba(255,255,255,0.22)",
-  },
-  progressFill: { position: "absolute", height: 3, borderRadius: 2 },
-  thumb: {
-    position: "absolute", width: 13, height: 13, borderRadius: 6.5,
-    backgroundColor: "#fff", marginLeft: -6.5, top: 7.5,
-    shadowColor: "#000", shadowOpacity: 0.5, shadowRadius: 4, elevation: 4,
-  },
-  thumbDragging: { width: 17, height: 17, borderRadius: 8.5, marginLeft: -8.5, top: 5.5 },
-  dragTooltip: {
-    position: "absolute", bottom: 22,
-    backgroundColor: "rgba(0,0,0,0.80)", borderRadius: 6,
-    paddingHorizontal: 7, paddingVertical: 3,
-  },
-  dragTooltipText: { fontSize: 11, fontFamily: "Cairo_700Bold", color: "#fff" },
+  /* Source panel */
+  srcPanel: { position: "absolute", bottom: 0, left: 0, right: 0, borderTopLeftRadius: 20, borderTopRightRadius: 20, overflow: "hidden", paddingBottom: 24 },
+  srcPanelHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 20, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: "rgba(255,255,255,0.08)" },
+  srcPanelTitle: { fontSize: 14, fontFamily: "Cairo_700Bold", color: "#fff" },
+  srcPanelClose: { width: 30, height: 30, borderRadius: 15, backgroundColor: "rgba(255,255,255,0.08)", alignItems: "center", justifyContent: "center" },
+  srcItem: { flexDirection: "row", alignItems: "center", gap: 12, paddingHorizontal: 20, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: "rgba(255,255,255,0.05)" },
+  srcItemActive: { backgroundColor: "rgba(139,92,246,0.12)" },
+  srcItemDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: "rgba(255,255,255,0.2)" },
+  srcItemDotActive: { backgroundColor: "#8B5CF6" },
+  srcItemLabel: { flex: 1, fontSize: 13, fontFamily: "Cairo_700Bold", color: "rgba(255,255,255,0.7)" },
+  srcItemLabelActive: { color: "#fff" },
+  srcItemTag: { fontSize: 11, fontFamily: "Cairo_700Bold", color: "rgba(139,92,246,0.8)", backgroundColor: "rgba(139,92,246,0.15)", paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6 },
 
-  bottomCtrlRow: {
-    flexDirection: "row", alignItems: "center",
-    justifyContent: "space-between", marginTop: 2,
-  },
-  bottomSide: { flexDirection: "row", alignItems: "center", gap: 6, flex: 1 },
-  bottomCenter: { flexDirection: "row", alignItems: "center", gap: 10, justifyContent: "center" },
-  ctrlIconBtn: {
-    width: 34, height: 34, alignItems: "center", justifyContent: "center",
-    borderRadius: 8,
-  },
-  ctrlIconBtnMuted: { backgroundColor: "rgba(239,68,68,0.15)" },
-  seekCtrlBtn: { width: 32, height: 32, alignItems: "center", justifyContent: "center" },
-  seekCtrlLabel: { fontSize: 9, fontFamily: "Cairo_700Bold", color: "rgba(255,255,255,0.55)" },
-  bottomPlayBtn: {
-    width: 46, height: 46, borderRadius: 23,
-    backgroundColor: "rgba(139,92,246,0.25)", borderWidth: 1.5,
-    borderColor: "rgba(139,92,246,0.5)", alignItems: "center", justifyContent: "center",
-  },
-  qualityBadge: {
-    backgroundColor: "rgba(139,92,246,0.2)", borderRadius: 6,
-    paddingHorizontal: 7, paddingVertical: 3,
-    borderWidth: 1, borderColor: "rgba(139,92,246,0.35)",
-  },
-  qualityBadgeText: { fontSize: 10, fontFamily: "Cairo_700Bold", color: "#c4b5fd" },
-
-  /* ── Subtitles ── */
-  subWrap: {
-    position: "absolute", bottom: 90, left: 20, right: 20,
-    alignItems: "center", zIndex: 8,
-  },
-  subText: {
-    fontSize: 16, fontFamily: "Cairo_700Bold", color: "#fff", textAlign: "center",
-    textShadowColor: "rgba(0,0,0,0.95)", textShadowRadius: 8,
-    textShadowOffset: { width: 0, height: 1 }, lineHeight: 24,
-  },
+  /* Subtitles */
+  subWrap: { position: "absolute", bottom: 80, left: 20, right: 20, alignItems: "center" },
+  subText: { fontSize: 16, fontFamily: "Cairo_700Bold", color: "#fff", textAlign: "center", textShadowColor: "rgba(0,0,0,0.95)", textShadowRadius: 8, textShadowOffset: { width: 0, height: 1 }, lineHeight: 24 },
 });

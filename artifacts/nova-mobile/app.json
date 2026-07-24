@@ -50,23 +50,13 @@
       ],
       "expo-font",
       "expo-web-browser",
+      "expo-video",
       "expo-screen-orientation",
       [
         "expo-image-picker",
         {
           "photosPermission": "تسمح هذه الأذونات للتطبيق بالوصول إلى صورك.",
           "cameraPermission": "تسمح هذه الأذونات للتطبيق باستخدام الكاميرا."
-        }
-      ],
-      [
-        "react-native-video",
-        {
-          "androidExtensions": {
-            "useExoplayerHls": true,
-            "useExoplayerDash": true,
-            "useExoplayerSmoothStreaming": true,
-            "useExoplayerRtsp": false
-          }
         }
       ]
     ],

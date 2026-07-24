@@ -5,7 +5,6 @@
 import React, { useRef, useCallback } from "react";
 import { View, StyleSheet, StatusBar, Platform } from "react-native";
 import WebView, { WebViewMessageEvent } from "react-native-webview";
-import { HLS_JS_INLINE } from "@/assets/hlsJsContent";
 
 export interface WebPlayerProps {
   url: string;
@@ -13,8 +12,6 @@ export interface WebPlayerProps {
   episode?: number;
   totalEps?: number;
   subtitleUrl?: string;
-  /** Headers required by the CDN (for example Referer/Origin). */
-  headers?: Record<string, string>;
   skipIntro?: { start: number; end: number };
   skipOutro?: { start: number; end: number };
   initialPosition?: number;
@@ -29,7 +26,7 @@ export interface WebPlayerProps {
 function buildHtml(p: WebPlayerProps): string {
   const {
     url = "", title = "", episode = 1, totalEps = 999,
-    subtitleUrl = "", qualityLabel = "", headers = {},
+    subtitleUrl = "", qualityLabel = "",
     skipIntro, skipOutro, initialPosition = 0,
   } = p;
 
@@ -38,10 +35,6 @@ function buildHtml(p: WebPlayerProps): string {
   const safeTitle  = title.replace(/'/g, "\\'");
   const safeSubUrl = subtitleUrl.replace(/'/g, "\\'");
   const safeQuality = qualityLabel.replace(/'/g, "\\'");
-  const safeHeaders = JSON.stringify(headers);
-
-  /* hls.js مضمَّن inline مثل AnimHlsPlayer — لا CDN، لا شبكة خارجية */
-  const hlsScript = HLS_JS_INLINE;
 
   return `<!DOCTYPE html>
 <html lang="ar" dir="rtl">
@@ -49,7 +42,7 @@ function buildHtml(p: WebPlayerProps): string {
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
 <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;700;900&display=swap" rel="stylesheet">
-<script>${hlsScript}</script>
+<script src="https://cdn.jsdelivr.net/npm/hls.js@1.6.2/dist/hls.min.js"></script>
 <style>
 *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent;outline:none}
 html,body{width:100%;height:100%;overflow:hidden;background:#000;font-family:'Cairo',sans-serif;user-select:none}
@@ -392,7 +385,6 @@ const SKIP_INTRO  = ${introJson};
 const SKIP_OUTRO  = ${outroJson};
 const RESUME_TIME = ${initialPosition};
 const SUB_URL     = ${JSON.stringify(subtitleUrl)};
-const REQUEST_HEADERS = ${safeHeaders};
 const EP_NUM      = ${episode};
 const TOTAL_EPS   = ${totalEps};
 
@@ -762,17 +754,7 @@ function cancelAutoPlay() {
 function loadSrc() {
   if (!SRC) return;
   loadingOvl.classList.remove('hidden');
-  // MP4 must go through the native video element. Passing it to hls.js
-  // makes some Android WebViews report a misleading manifest error.
-  const isMp4 = /\.mp4(?:[?#]|$)/i.test(SRC) ||
-    (SRC.indexOf('.mp4') !== -1 && !/\.m3u8(?:[?#]|$)/i.test(SRC));
-  if (isMp4) {
-    vid.src = SRC;
-    vid.load();
-    vid.play().catch(() => {});
-    return;
-  }
-  if (typeof Hls !== 'undefined' && Hls.isSupported()) {
+  if (Hls.isSupported()) {
     if (hlsRef) hlsRef.destroy();
     // ─── تقدير النطاق الترددي الأولي من Network Information API ───
     let bwEstimate = 3000000;
@@ -782,46 +764,33 @@ function loadSrc() {
     } catch(e) {}
 
     const hls = new Hls({
-      enableWorker: false,           // مطلوب داخل WebView — لا SharedArrayBuffer
+      enableWorker: true,
       startLevel: -1,
       abrEwmaDefaultEstimate: bwEstimate,
+      abrEwmaFastLive: 3,
       abrBandWidthFactor: 0.90,
       abrBandWidthUpFactor: 0.80,
       capLevelToPlayerSize: true,
+      // ── Buffer: مُحسَّن للجوال مع VPS proxy ──
       maxBufferLength: 30,
-      maxMaxBufferLength: 60,
+      maxMaxBufferLength: 120,
       backBufferLength: 15,
+      maxBufferSize: 80 * 1024 * 1024, // 80MB
       maxBufferHole: 0.5,
+      // ── Prefetch: يبدأ تحميل السيقمنت القادم مبكراً ──
       startFragPrefetch: true,
-      fragLoadingMaxRetry: 6,
+      progressive: true,
+      // ── Retry: يعيد المحاولة تلقائياً عند فشل الشبكة ──
+      fragLoadingMaxRetry: 5,
       fragLoadingRetryDelay: 500,
-      fragLoadingTimeOut: 20000,
-      manifestLoadingTimeOut: 15000,
+      fragLoadingMaxRetryTimeout: 12000,
       manifestLoadingMaxRetry: 4,
-      levelLoadingTimeOut: 15000,
+      manifestLoadingRetryDelay: 800,
+      maxStarvationDelay: 6,
+      maxLoadingDelay: 6,
       nudgeMaxRetry: 20,
       enableCEA708Captions: false,
-      xhrSetup: function(xhr, u) {
-        xhr.timeout = 20000;
-        try {
-          // Prefer headers supplied by the scraper; fall back to the source
-          // origin for older cached sources that have no header metadata.
-          var hasReferer = false;
-          Object.keys(REQUEST_HEADERS || {}).forEach(function(k) {
-            if (REQUEST_HEADERS[k]) {
-              xhr.setRequestHeader(k, REQUEST_HEADERS[k]);
-              if (k.toLowerCase() === 'referer') hasReferer = true;
-            }
-          });
-          if (!hasReferer) {
-            var origin = new URL(SRC).origin;
-            if (origin) {
-              xhr.setRequestHeader('Referer', origin + '/');
-              xhr.setRequestHeader('Origin', origin);
-            }
-          }
-        } catch(e) {}
-      },
+      xhrSetup: function(xhr) { xhr.timeout = 20000; },
     });
     hlsRef = hls;
     hls.loadSource(SRC);

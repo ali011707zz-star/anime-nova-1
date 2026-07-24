@@ -85,7 +85,7 @@ export default function TabLayout() {
         name="animations"
         options={{
           tabBarIcon: ({ color, focused }) => (
-            <TabIcon name={focused ? "film" : "film-outline"} label="أنيميشن" color={color} focused={focused} />
+            <TabIcon name="film" label="أنيميشن" color={color} focused={focused} />
           ),
         }}
       />

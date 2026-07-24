@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import {
   View, Text, Pressable, Image, ScrollView,
-  StyleSheet, Platform, Animated, Easing, Alert,
+  StyleSheet, Platform, Animated, Easing,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
@@ -17,7 +17,7 @@ import * as ScreenOrientation from "expo-screen-orientation";
 
 /* ── Types ── */
 type Quality    = "1080p FHD" | "720p HD" | "360p SD";
-type Screen     = "loading" | "picker" | "native" | "external" | "embed" | "resolving" | "webplayer";
+type Screen     = "loading" | "picker" | "native" | "embed" | "resolving";
 
 /* ── مواقع محمية بـ Cloudflare/Turnstile يفشل الخادم (VPS) بجلب فيديوها المباشر —
    نحاول أولاً حلّها عبر WebView مخفي (IP سكني حقيقي للجهاز) قبل عرض بطاقة "يحتاج تطبيق أصلي" ── */
@@ -151,66 +151,20 @@ function getPlayUrl(s: Src): string {
  * يُمرَّران لـ ExoPlayer/AVPlayer كـ HTTP headers مع كل طلب.
  * بدون هذه الـ headers يعيد CDN 403 لأن الطلب يبدو من مصدر مجهول.
  */
-/**
- * يفكّ رابط VPS proxy ويعيد الرابط الخام + headers مباشرةً.
- *
- * المشكلة: hls-proxy/video-proxy يجلبان الـ segments بـ IP الداتاسنتر → CDN يُعيد 403.
- * الحل: ExoPlayer (AndroidX Media3) يجلب مباشرةً بـ IP الجهاز (سكني) + Referer → CDN يسمح.
- *
- * الصيغة: /api/anime/hls-proxy?url=ENCODED_RAW_URL&ref=ENCODED_REFERER
- * كلا البارامترات plain encodeURIComponent — يمكن فكّها client-side.
- */
-function unwrapProxyUrl(
-  url: string,
-  base: string,
-  existingHeaders?: Record<string, string>,
-): { rawUrl: string; headers?: Record<string, string> } {
-  if (!url) return { rawUrl: url };
-
-  // افتح الرابط كاملاً إذا كان نسبياً
-  const full = url.startsWith("/") ? base + url : url;
-
-  const isProxy =
-    full.includes("/api/anime/hls-proxy") ||
-    full.includes("/api/anime/video-proxy") ||
-    full.includes("/api/animation/hls-proxy") ||
-    full.includes("/api/animation/video-proxy");
-
-  if (!isProxy) {
-    // رابط CDN مباشر — استخرج headers من البارامترات إن وُجدت
-    if (existingHeaders) return { rawUrl: full, headers: existingHeaders };
-    try {
-      const u = new URL(full);
-      const ref = u.searchParams.get("ref");
-      if (ref) {
-        let origin = "";
-        try { origin = new URL(ref).origin; } catch {}
-        return { rawUrl: full, headers: origin ? { Referer: ref, Origin: origin } : { Referer: ref } };
-      }
-    } catch {}
-    return { rawUrl: full };
-  }
-
-  // فكّ proxy URL
+function extractProxyHeaders(url: string): Record<string, string> | undefined {
+  if (!url) return undefined;
+  /* روابط VPS proxy — ref الخاص بها hex مشفَّر وليس URL حقيقي؛ تخطَّها */
+  if (url.includes("/api/anime/") || url.includes("/api/animation/")) return undefined;
   try {
-    const u = new URL(full);
-    const rawEncoded = u.searchParams.get("url");
-    const refEncoded = u.searchParams.get("ref");
-    if (!rawEncoded) return { rawUrl: full };
-
-    const rawUrl = decodeURIComponent(rawEncoded);
-    const headers: Record<string, string> = { ...(existingHeaders || {}) };
-    if (refEncoded && !headers.Referer) {
-      const ref = decodeURIComponent(refEncoded);
-      headers.Referer = ref;
-      try {
-        const origin = new URL(ref).origin;
-        if (origin) headers.Origin = origin;
-      } catch {}
-    }
-    return { rawUrl, headers: Object.keys(headers).length > 0 ? headers : undefined };
+    const fullUrl = url.startsWith("/") ? `http://x.com${url}` : url;
+    const u = new URL(fullUrl);
+    const ref = u.searchParams.get("ref");
+    if (!ref) return undefined;
+    let origin = "";
+    try { origin = new URL(ref).origin; } catch {}
+    return origin ? { Referer: ref, Origin: origin } : { Referer: ref };
   } catch {
-    return { rawUrl: full, headers: existingHeaders };
+    return undefined;
   }
 }
 
@@ -246,8 +200,6 @@ function ensureVpsProxy(url: string, headers: Record<string, string> | undefined
   return url; // لا Referer متاح — استخدم كما هو
 }
 
-/* ── لا شيء هنا — EZV Player أصبح مشغّلاً داخلياً (WebVideoPlayer) ── */
-
 /* ── مصادر تُشغَّل native مباشرةً عبر RiftPlayer (seg-proxy يُعيد روابط مطلقة الآن) ── */
 
 /* ── أولويات المصادر: KW → HI → AW → DU → rest ── */
@@ -262,7 +214,7 @@ const SITE_PRIORITY: Record<string, number> = {
 /* مصادر موحَّدة مع الويب — نفس المصادر الـ 8 المفعَّلة في SCRAPER_DEFS */
 const ANIME_SITES = [
   "kawaii", "anikoto", "hianime", "animewitcher",
-  "anineko", "anslayer", "sanime", "animeify", "mitanime",
+  "anineko", "anslayer", "animeify",
   // "witanime": معطّل بطلب المستخدم
   // "allmanga": معطّل 2026-07-17 — AA_CRYPTO_MISSING على AllAnime
 ] as const;
@@ -809,40 +761,60 @@ export default function WatchScreen() {
     return { directSrcs: direct, embedSrcs: embeds };
   }, [sources]);
 
-  /* ── RiftPlayer sources ──
-     احتفظ برابط الـ VPS proxy المشفّر كما أعاده الخادم. فكّ الرابط إلى CDN
-     الخام هنا يجعل المشغّل يتجاوز hls-proxy، ويعيد مشاكل الحجب/إعادة كتابة
-     segments التي عالجها الخادم. ── */
-  const animHlsSources = useMemo((): PlayerSource[] => {
+  /* ── RiftPlayer sources (live, used for picker) ── */
+  const riftSources = useMemo((): PlayerSource[] => {
     const base = getBaseUrl();
-    return directSrcs.map(s => {
-      const proxyUrl = getPlayUrl(s);
+    const srcs = directSrcs;
+    /* مطابق لـ isArabic في web SCRAPER_DEFS — مصادر عربية لا تحتاج SmartSub */
+    const ARABIC_SITES = new Set(["shahiid","animelek","animedar","okanime","arabseed","animephoenix","animeify","animeday","mycima","topcinemaa","anime4up2","animewitcher","ristoanime","faselhd_db","animetime","witanime","witanime_db","sanime"]);
+    return srcs.map(s => {
+      const rawUrl = getPlayUrl(s);
+      /* headers: استخدم الـ headers المُرسَلة من الخادم أولاً (Referer/Origin المباشرة)،
+         ثم احسبها من رابط الـ proxy كـ fallback للإصدارات القديمة من الكاش */
+      const headers = s.headers || extractProxyHeaders(rawUrl);
+      /* نضمن أن كل الروابط تمرّ عبر VPS proxy — ExoPlayer/AVPlayer لا يُرسل Referer
+         بشكل موثوق لـ CDNs، وكثير من CDNs تحجب IPs مراكز البيانات بدون Referer صحيح */
+      const url = ensureVpsProxy(rawUrl, headers, base);
       return {
-        url: resolveUrl(proxyUrl, base),
+        url,
+        headers,
         label: `سيرفر · ${getSiteTag(s.site || "")}`,
-        quality: getSrcQuality(s) as PlayerSource["quality"],
+        quality: getSrcQuality(s),
         subtitleUrl: s.subtitleUrl ? resolveUrl(s.subtitleUrl, base) : globalSubUrl,
-        ...(s.headers && Object.keys(s.headers).length > 0 ? { headers: s.headers } : {}),
+        isArabic: ARABIC_SITES.has(s.site || ""),
+        wantsSmartSub: !ARABIC_SITES.has(s.site || ""),
+        skipIntro: s.skipIntro,
+        skipOutro: s.skipOutro,
       };
-    }).filter(s => !!s.url);
+    }).filter(s => s.url);
   }, [directSrcs, globalSubUrl]);
 
-  /* ── Frozen sources: تُجمَّد لحظة دخول التشغيل — تمنع SSE الجديدة من إعادة ترتيب المصادر ── */
+  /* ── Frozen sources: تُجمَّد لحظة اختيار المستخدم للمصدر ولا تتغير أثناء التشغيل.
+     هذا يمنع تغيير مصفوفة sources في RiftPlayer بسبب وصول مصادر SSE جديدة.
+     الإصلاح: نحفظ riftSources في ref حتى نقرأه داخل playSrc بدون إضافته للـ deps ── */
   const [frozenSources, setFrozenSources] = useState<PlayerSource[]>([]);
+  const riftSourcesRef = useRef<PlayerSource[]>([]);
+  useEffect(() => { riftSourcesRef.current = riftSources; }, [riftSources]);
 
+  /* تجميد قائمة المصادر لحظة دخول المشغّل، ومسحها عند الخروج (picker/embed/loading).
+     — عند دخول native: إذا كانت فارغة نملأها بـ riftSources الحالية (التجميد الأول).
+       إذا وصلت مصادر جديدة أثناء التشغيل نُضيفها للنهاية فقط (append) بدون تغيير
+       المصادر الموجودة حتى لا يُعيد RiftPlayer ترتيبها ويُعطّل التشغيل.
+     — هذا يحل مشكلة auto-play الذي كان يُجمِّد مصدراً واحداً فقط فيُفشل كل المصادر. */
   useEffect(() => {
     if (screen === "native") {
       setFrozenSources(prev => {
-        if (prev.length === 0) return animHlsSources.length > 0 ? animHlsSources : prev;
+        if (prev.length === 0) return riftSources.length > 0 ? riftSources : prev;
+        // أضف المصادر الجديدة فقط (بدون إزاحة الحالية)
         const existingUrls = new Set(prev.map(s => s.url));
-        const newOnes = animHlsSources.filter(s => s.url && !existingUrls.has(s.url));
+        const newOnes = riftSources.filter(s => s.url && !existingUrls.has(s.url));
         return newOnes.length > 0 ? [...prev, ...newOnes] : prev;
       });
     } else {
       setFrozenSources([]);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [screen, animHlsSources]);
+  }, [screen, riftSources]);
 
   /* ── Grouped by quality for picker ── */
   const grouped = useMemo<Record<Quality, Src[]>>(() => ({
@@ -881,50 +853,28 @@ export default function WatchScreen() {
     );
   }
 
-  /* ══════════════ EXTERNAL PLAYER (NOVA Player) ══════════════ */
-  if (screen === "external") {
-    return (
-      <View style={{ flex: 1, backgroundColor: "#07070d", alignItems: "center", justifyContent: "center", gap: 16 }}>
-        <Pressable onPress={() => setScreen("picker")} style={[d.playerBackBtn, { position: "absolute", top: topPad + 4, right: 12 }]}>
-          <Ionicons name="arrow-forward" size={18} color="#fff" />
-        </Pressable>
-        <View style={{ width: 72, height: 72, borderRadius: 36, backgroundColor: "rgba(139,92,246,0.15)", alignItems: "center", justifyContent: "center" }}>
-          <Ionicons name="play-circle-outline" size={42} color="rgba(139,92,246,0.8)" />
-        </View>
-        <Text style={{ color: "#fff", fontFamily: "Cairo_700Bold", fontSize: 16, textAlign: "center" }}>
-          تم فتح NOVA Player
-        </Text>
-        <Text style={{ color: "rgba(255,255,255,0.45)", fontFamily: "Cairo_400Regular", fontSize: 13, textAlign: "center", paddingHorizontal: 32 }}>
-          يتم تشغيل الفيديو في NOVA Player خارجياً
-        </Text>
-        <Pressable onPress={() => setScreen("picker")} style={{ marginTop: 4 }}>
-          <Text style={{ color: "rgba(255,255,255,0.35)", fontFamily: "Cairo_400Regular", fontSize: 13 }}>العودة للمصادر</Text>
-        </Pressable>
-      </View>
-    );
-  }
-
-  /* ══════════════ RIFT PLAYER (react-native-video — ExoPlayer/AVPlayer) ══════════════ */
-  const playerSources = frozenSources.length > 0 ? frozenSources : animHlsSources;
+  /* ══════════════ RIFT PLAYER ══════════════ */
+  const playerSources = frozenSources.length > 0 ? frozenSources : riftSources;
   if (screen === "native" && playerSources.length > 0) {
+    /* نحسب الرابط النهائي لـ playingSrc (بعد ensureVpsProxy) لمطابقة صحيحة مع playerSources */
     const _playRaw = getPlayUrl(playingSrc!);
-    const startIdx = Math.max(0, playerSources.findIndex(s =>
-      s.url === _playRaw || (_playRaw && s.url.split("?")[0] === _playRaw.split("?")[0])
-    ));
+    const _playHeaders = playingSrc?.headers || extractProxyHeaders(_playRaw);
+    const _playFinal = ensureVpsProxy(_playRaw, _playHeaders, getBaseUrl());
+    const startIdx = Math.max(0, playerSources.findIndex(s => playingSrc && s.url === _playFinal));
     return (
       <RiftPlayer
         sources={playerSources}
         initialSourceIndex={startIdx}
         title={displayTitle}
         episode={epNum}
+        anilistId={anime ? parseInt(anime) : undefined}
         episodeTitle={arEpTitle ?? (etitle ? decodeURIComponent(etitle) : undefined)}
         initialPosition={resumeTime}
-        anilistId={anime ? parseInt(anime) : undefined}
-        skipIntro={playingSrc?.skipIntro}
-        skipOutro={playingSrc?.skipOutro}
         totalEps={totalEpsCount}
         onBack={() => { saveProgress(); setScreen("picker"); }}
         onError={() => {
+          /* جميع مصادر المشغّل فشلت → العودة للـ picker حتى يرى المستخدم بقية المصادر */
+          console.warn("[Anime Watch] جميع المصادر فشلت — العودة للـ picker");
           saveProgress();
           setScreen("picker");
         }}
@@ -935,6 +885,7 @@ export default function WatchScreen() {
         }}
         onNextEpisode={() => goEp(epNum + 1, true)}
         onPrevEpisode={epNum > 1 ? () => goEp(epNum - 1) : undefined}
+        onEpisodeSelect={(n) => goEp(n)}
       />
     );
   }
@@ -998,8 +949,6 @@ export default function WatchScreen() {
       </View>
     );
   }
-
-  /* EZV Player removed — Rift Player is the only internal player */
 
   /* ══════════════ PICKER ══════════════ */
   const allSrcs = [...directSrcs, ...embedSrcs];
@@ -1145,8 +1094,6 @@ export default function WatchScreen() {
         )}
 
 
-        {/* EZV Player button removed */}
-
         {/* ── Loading indicator while more sources stream in ── */}
         {loading && allSrcs.length > 0 && (
           <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, paddingVertical: 12 }}>
@@ -1255,10 +1202,4 @@ const d = StyleSheet.create({
   webAppIcon:    { width: 40, height: 40, borderRadius: 12, backgroundColor: "rgba(139,92,246,0.16)", alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: "rgba(139,92,246,0.28)" },
   webAppTitle:   { fontSize: 13, fontFamily: "Cairo_700Bold", color: "rgba(196,181,253,0.95)", textAlign: "right" },
   webAppSub:     { fontSize: 10, fontFamily: "Cairo_400Regular", color: "rgba(255,255,255,0.30)", textAlign: "right" },
-
-  /* EZV Player */
-  ezvBtn:        { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, marginHorizontal: 16, marginTop: 4, marginBottom: 4, paddingVertical: 14, borderRadius: 14, backgroundColor: "rgba(124,58,237,0.15)", borderWidth: 1, borderColor: "rgba(139,92,246,0.32)" },
-  ezvBtnText:    { fontSize: 14, fontFamily: "Cairo_700Bold", color: "#c4b5fd" },
-  ezvBadge:      { paddingHorizontal: 7, paddingVertical: 2, borderRadius: 8, backgroundColor: "rgba(139,92,246,0.22)", borderWidth: 1, borderColor: "rgba(139,92,246,0.38)" },
-  ezvBadgeText:  { fontSize: 9, fontFamily: "Cairo_700Bold", color: "rgba(196,181,253,0.85)" },
 });

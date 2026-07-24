@@ -34,7 +34,6 @@ minimumReleaseAgeExclude:
   # this setting guards against does not apply to our own packages.
   - '@replit/*'
   - stripe-replit-sync
-  - tar
 
 packages:
   - artifacts/*

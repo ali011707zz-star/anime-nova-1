@@ -632,7 +632,7 @@ export default function AnimeDetailScreen() {
                 {related.map((e: any) => {
                   const n = e.node;
                   return (
-                    <Pressable key={n.id} onPress={() => router.replace(`/anime/${n.id}` as any)} style={d.relCard}>
+                    <Pressable key={n.id} onPress={() => router.push(`/anime/${n.id}`)} style={d.relCard}>
                       <View style={d.relImgWrap}>
                         {n.coverImage?.large ? (
                           <Image source={{ uri: n.coverImage.large }} style={d.relImg} />
@@ -667,7 +667,7 @@ export default function AnimeDetailScreen() {
                   const rec = n.mediaRecommendation;
                   if (!rec) return null;
                   return (
-                    <Pressable key={rec.id} onPress={() => router.replace(`/anime/${rec.id}` as any)} style={d.simCard}>
+                    <Pressable key={rec.id} onPress={() => router.push(`/anime/${rec.id}`)} style={d.simCard}>
                       <View style={d.simImgWrap}>
                         {rec.coverImage?.large ? (
                           <Image source={{ uri: rec.coverImage.large }} style={d.simImg} />

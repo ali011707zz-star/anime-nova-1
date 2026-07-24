@@ -54,138 +54,32 @@ jobs:
       - name: 📥 Install dependencies
         run: pnpm install --no-frozen-lockfile
 
-      - name: 🩹 Patch react-native-video Kotlin sources
-        run: |
-          # إيجاد المسار الفعلي لـ react-native-video في pnpm store
-          RNV=$(find . -path "*/react-native-video/android/src/main/java/com/brentvatne" -type d 2>/dev/null | head -1)
-          if [ -z "$RNV" ]; then
-            echo "❌ لم يتم العثور على react-native-video android sources"
-            find . -name "CMCDProps.kt" 2>/dev/null | head -3
-            exit 1
-          fi
-          echo "✅ RNV path: $RNV"
-
-          # جعل الملفات قابلة للكتابة (pnpm hard-links قد تكون read-only)
-          chmod -R u+w "$RNV/common/api" "$RNV/common/react" 2>/dev/null || true
-
-          # كتابة سكريبت Python مؤقت للتعديلات
-          PYSCRIPT=$(mktemp /tmp/patch_rnv_XXXXXX.py)
-
-          echo 'import sys, re, os' >> "$PYSCRIPT"
-          echo 'def patch(path, old, new, label):' >> "$PYSCRIPT"
-          echo '    if not os.path.exists(path): print(f"SKIP {label}: not found"); return' >> "$PYSCRIPT"
-          echo '    c = open(path).read()' >> "$PYSCRIPT"
-          echo '    if old not in c: print(f"SKIP {label}: pattern not found"); return' >> "$PYSCRIPT"
-          echo '    os.chmod(path, 0o644)' >> "$PYSCRIPT"
-          echo '    open(path, "w").write(c.replace(old, new, 1))' >> "$PYSCRIPT"
-          echo '    print(f"OK {label}")' >> "$PYSCRIPT"
-
-          RNV_PY=$(echo "$RNV" | sed "s|'|\\\'|g")
-
-          # 1. CMCDProps.kt
-          echo "patch('$RNV_PY/common/api/CMCDProps.kt'," >> "$PYSCRIPT"
-          echo "  'val item = array.getMap(i)'," >> "$PYSCRIPT"
-          echo "  'val item = array.getMap(i) ?: return@mapNotNull null'," >> "$PYSCRIPT"
-          echo "  'CMCDProps nullable guard')" >> "$PYSCRIPT"
-
-          # 2. SideLoadedTextTrackList.kt
-          echo "patch('$RNV_PY/common/api/SideLoadedTextTrackList.kt'," >> "$PYSCRIPT"
-          echo "  'val textTrack: ReadableMap = src.getMap(i)'," >> "$PYSCRIPT"
-          echo "  'val textTrack: ReadableMap = src.getMap(i) ?: continue'," >> "$PYSCRIPT"
-          echo "  'SideLoadedTextTrackList nullable guard')" >> "$PYSCRIPT"
-
-          # 3. Source.kt
-          echo "patch('$RNV_PY/common/api/Source.kt'," >> "$PYSCRIPT"
-          echo "  'val current = propSrcHeadersArray.getMap(i)'," >> "$PYSCRIPT"
-          echo "  'val current = propSrcHeadersArray.getMap(i) ?: continue'," >> "$PYSCRIPT"
-          echo "  'Source nullable guard')" >> "$PYSCRIPT"
-
-          # 4. VideoEventEmitter.kt: استبدال Event<Event<*>> بـ concrete class لتجنب type-bounds error
-          echo "patch('$RNV_PY/common/react/VideoEventEmitter.kt'," >> "$PYSCRIPT"
-          echo "  '    private class EventBuilder(private val surfaceId: Int, private val viewId: Int, private val dispatcher: EventDispatcher) {\n        fun dispatch(event: EventTypes, paramsSetter: (WritableMap.() -> Unit)? = null) =\n            dispatcher.dispatchEvent(object : Event<Event<*>>(surfaceId, viewId) {\n                override fun getEventName() = \"top\${event.eventName.removePrefix(\"on\")}\"\n                override fun getEventData() = Arguments.createMap().apply(paramsSetter ?: {})\n            })\n    }'," >> "$PYSCRIPT"
-          echo "  '    private class RnvConcreteEvent(\n        surfaceId: Int, viewId: Int,\n        private val name: String,\n        private val data: WritableMap\n    ) : Event<RnvConcreteEvent>(surfaceId, viewId) {\n        override fun getEventName() = name\n        override fun getEventData() = data\n    }\n\n    private class EventBuilder(private val surfaceId: Int, private val viewId: Int, private val dispatcher: EventDispatcher) {\n        fun dispatch(event: EventTypes, paramsSetter: (WritableMap.() -> Unit)? = null) =\n            dispatcher.dispatchEvent(RnvConcreteEvent(\n                surfaceId, viewId,\n                \"top\${event.eventName.removePrefix(\"on\")}\",\n                Arguments.createMap().apply(paramsSetter ?: {})\n            ))\n    }'," >> "$PYSCRIPT"
-          echo "  'VideoEventEmitter EventBuilder fix')" >> "$PYSCRIPT"
-
-          python3 "$PYSCRIPT"
-          rm -f "$PYSCRIPT"
-
-      - name: ✅ Verify native video player
-        run: |
-          set -eu
-          if grep -q '"expo-video"' artifacts/nova-mobile/package.json; then
-            echo "❌ expo-video must not be used by the native APK player"
-            exit 1
-          fi
-          grep -q '"react-native-video"' artifacts/nova-mobile/package.json
-          test -e artifacts/nova-mobile/node_modules/react-native-video
-          grep -q 'from "react-native-video"' artifacts/nova-mobile/components/RiftPlayer.tsx
-          echo "✅ react-native-video is installed and RiftPlayer uses it"
-
       - name: 🏗️ Expo Prebuild
         working-directory: artifacts/nova-mobile
-        # استخدام نسخة expo المثبّتة محلياً (لا npx الذي قد يحمّل نسخة أخرى)
-        run: ./node_modules/.bin/expo prebuild --platform android --clean --no-install
+        run: npx expo prebuild --platform android --clean --no-install
 
-      # ── إصلاح Gradle: تثبيت 8.13 + إصلاح توافق react-native-video ──────────
+      # ── إصلاح Gradle: تثبيت 8.13 + تعطيل الأخطاء الإهمالية ──────────────
       # RN 0.81.5 يستخدم deprecated Gradle APIs تُعتبر أخطاءً في 8.8+.
-      # 2026-07-10: AGP الحالي يتطلب Gradle 8.13 كحد أدنى.
-      # 2026-07-23: react-native-video يقرأ rootProject.ext.kotlinVersion، لكن
-      #   RN 0.74+ يضعه في buildscript.ext (كائن منفصل) فيجد rnv أن rootProject.ext
-      #   فارغ ويستخدم نسخة "1.8.0" القديمة من project.properties مما يسبب تعارضاً.
-      #   الحل: إضافة ext.kotlinVersion في build.gradle على مستوى المشروع.
+      # 2026-07-10: AGP الحالي يتطلب Gradle 8.13 كحد أدنى (8.10.2 صار يفشل البناء بـ
+      # "Minimum supported Gradle version is 8.13. Current version is 8.10.2.")
+      # الحل: تثبيت 8.13 + org.gradle.warning.mode=none (لا يزال يمنع أخطاء deprecation)
       - name: 🔧 Fix Gradle compatibility
         working-directory: artifacts/nova-mobile/android
         run: |
-          # ── 1. تثبيت Gradle wrapper على 8.13 ──
+          # تثبيت Gradle wrapper على 8.13 (متوافق مع Expo SDK 54 + AGP الحالي)
           sed -i \
             's|distributionUrl=.*|distributionUrl=https\\://services.gradle.org/distributions/gradle-8.13-all.zip|' \
             gradle/wrapper/gradle-wrapper.properties
 
-          # ── 2. تعطيل أخطاء الإهمال وإعدادات BuildConfig ──
-                    echo "org.gradle.warning.mode=none" >> gradle.properties
-          echo "android.suppressUnsupportedCompileSdk=35" >> gradle.properties
-          echo "android.defaults.buildfeatures.buildconfig=true" >> gradle.properties
-
-          # ── 3. إضافة kotlinVersion لـ rootProject.ext لتوافق react-native-video ──
-          # RN 0.74+ يضع kotlinVersion في buildscript.ext فقط؛ rnv يتحقق من rootProject.ext
-          # فيجد null ويرجع لقيمة "1.8.0" الافتراضية مما يسبب تعارض classpath.
-          # نثبّت 1.9.25 لأن react-native-video 6.9.0 لا يتوافق مع Kotlin 2.x
-          # (Kotlin 2.0 أشد صرامة في null-safety ويكسر CMCDProps.kt / Source.kt)
-          KOTLIN_VER="1.9.25"
-          echo "ℹ️  kotlinVersion = ${KOTLIN_VER}"
-          echo "" >> build.gradle
-          echo "// react-native-video: kotlinVersion must be in project ext (not buildscript.ext)" >> build.gradle
-          echo "ext.kotlinVersion = \"${KOTLIN_VER}\"" >> build.gradle
-          echo "✅ Added ext.kotlinVersion = ${KOTLIN_VER} to build.gradle"
-
-          # ── 4. إضافة jvmTarget صريح لـ react-native-video مع AGP 8.x ──
-          # rnv build.gradle يتخطى compileOptions/kotlinOptions عند AGP >= 8
-          # مما يتسبب في عدم تطابق jvmTarget بين الـ modules.
-          RNV_BUILD=$(find ../node_modules/react-native-video/android -maxdepth 1 -name "build.gradle" 2>/dev/null | head -1)
-          if [ -n "$RNV_BUILD" ]; then
-            # أضف compileOptions + kotlinOptions للـ android{} block إذا AGP >= 8
-            # كتابة سكريبت Python مؤقت لتجنب مشكلة YAML مع heredoc
-            PYSCRIPT=$(mktemp /tmp/patch_rnv_XXXXXX.py)
-            echo 'import sys' >> "$PYSCRIPT"
-            echo 'path = sys.argv[1]' >> "$PYSCRIPT"
-            echo 'content = open(path).read()' >> "$PYSCRIPT"
-            echo 'patch = "\n    // AGP 8.x fix: add explicit Java/Kotlin compatibility\n    compileOptions {\n        sourceCompatibility JavaVersion.VERSION_17\n        targetCompatibility JavaVersion.VERSION_17\n    }\n    kotlinOptions {\n        jvmTarget = JavaVersion.VERSION_17.majorVersion\n    }\n"' >> "$PYSCRIPT"
-            echo 'old = "    buildFeatures {\n        buildConfig true\n    }"' >> "$PYSCRIPT"
-            echo 'new = patch + "\n    buildFeatures {\n        buildConfig true\n    }"' >> "$PYSCRIPT"
-            echo 'if patch.strip() not in content:' >> "$PYSCRIPT"
-            echo '    content = content.replace(old, new, 1)' >> "$PYSCRIPT"
-            echo '    open(path, "w").write(content)' >> "$PYSCRIPT"
-            echo '    print("Patched " + path + " -- added jvmTarget=17")' >> "$PYSCRIPT"
-            echo 'else:' >> "$PYSCRIPT"
-            echo '    print(path + " already patched")' >> "$PYSCRIPT"
-            python3 "$PYSCRIPT" "$RNV_BUILD"
-            rm -f "$PYSCRIPT"
-          fi
+          # تعطيل أخطاء الإهمال وتسريع البناء
+          cat >> gradle.properties << 'EOF'
+          org.gradle.warning.mode=none
+          android.suppressUnsupportedCompileSdk=35
+          android.defaults.buildfeatures.buildconfig=true
+          EOF
 
           echo "=== gradle-wrapper.properties ==="
           cat gradle/wrapper/gradle-wrapper.properties
-          echo "=== build.gradle (last 5 lines) ==="
-          tail -5 build.gradle
           echo "=== gradle.properties (last 10 lines) ==="
           tail -10 gradle.properties
 
@@ -211,8 +105,8 @@ jobs:
             --stacktrace \
             2>&1 | tee build.log || {
               echo ""
-              echo "══════ آخر 200 سطر من سجل البناء ══════"
-              tail -200 build.log
+              echo "══════ آخر 80 سطر من سجل البناء ══════"
+              tail -80 build.log
               exit 1
             }
 

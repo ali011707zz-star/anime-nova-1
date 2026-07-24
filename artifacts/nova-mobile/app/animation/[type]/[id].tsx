@@ -357,7 +357,7 @@ export default function AnimationDetailScreen() {
               <Pressable
                 key={r.id}
                 style={s.recCard}
-                onPress={() => router.replace(`/animation/${type}/${r.id}` as any)}
+                onPress={() => router.push(`/animation/${type}/${r.id}`)}
               >
                 {r.poster_path ? (
                   <Image source={{ uri: `${IMG_W}${r.poster_path}` }} style={s.recImg} />
