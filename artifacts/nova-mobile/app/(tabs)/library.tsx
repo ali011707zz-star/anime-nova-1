@@ -111,7 +111,10 @@ export default function LibraryScreen() {
   /* ── Remove character ── */
   const removeChar = useCallback(async (id: number) => {
     const raw = await AsyncStorage.getItem("fav-characters");
-    const arr = raw ? (JSON.parse(raw) as FavChar[]) : [];
+    let arr: FavChar[] = [];
+    if (raw) {
+      try { arr = JSON.parse(raw) as FavChar[]; } catch { arr = []; }
+    }
     const updated = arr.filter(c => c.id !== id);
     await AsyncStorage.setItem("fav-characters", JSON.stringify(updated));
     setFavChars(updated);

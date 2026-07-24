@@ -839,6 +839,13 @@ export function RiftPlayer({
             urlCueCacheRef.current.set(url, allCues);
             if (cacheKey && isTranslated) {
               AsyncStorage.setItem(cacheKey, JSON.stringify(allCues)).catch(() => {});
+              /* نظّف مفاتيح الترجمة القديمة (sub-ar-*) — ابقَ على آخر 10 فقط */
+              AsyncStorage.getAllKeys().then(keys => {
+                const subKeys = keys.filter(k => k.startsWith("sub-ar-") && k !== cacheKey);
+                if (subKeys.length > 10) {
+                  AsyncStorage.multiRemove(subKeys.slice(0, subKeys.length - 10)).catch(() => {});
+                }
+              }).catch(() => {});
             }
           }
         }).catch(() => {

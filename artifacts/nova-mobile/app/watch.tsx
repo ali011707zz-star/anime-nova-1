@@ -338,6 +338,7 @@ export default function WatchScreen() {
   const abortRef          = useRef<AbortController | null>(null);
   const seenKeys          = useRef(new Set<string>());
   const lastTimeRef       = useRef(0);
+  const lastHistoryWriteRef = useRef(0); // throttle addToHistory writes — max once per 30s
   const autoPlayFiredRef  = useRef(false);
   const hasCachedRef      = useRef(false);
   const isMountedRef      = useRef(true);
@@ -532,12 +533,21 @@ export default function WatchScreen() {
     setLoading(false);
     setScreen(s => s === "loading" ? "picker" : s);
 
-    /* احفظ الكاش من مجموع المصادر الناجحة */
+    /* احفظ الكاش من مجموع المصادر الناجحة — max 8 to limit AsyncStorage size */
     if (srcCacheKey && allFresh.length) {
+      const toCache = allFresh.slice(0, 8);
       AsyncStorage.setItem(
         srcCacheKey,
-        JSON.stringify({ sources: allFresh, ts: Date.now() })
+        JSON.stringify({ sources: toCache, ts: Date.now() })
       ).catch(() => {});
+      /* نظّف مفاتيح الكاش القديمة (anime-srcs-*) — ابقَ على آخر 20 فقط */
+      AsyncStorage.getAllKeys().then(keys => {
+        const srcKeys = keys.filter(k => k.startsWith("anime-srcs-") && k !== srcCacheKey);
+        if (srcKeys.length > 20) {
+          const toDelete = srcKeys.slice(0, srcKeys.length - 20);
+          AsyncStorage.multiRemove(toDelete).catch(() => {});
+        }
+      }).catch(() => {});
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [anime, epNum, titleStr, englishStr, format, year, episodes, native, srcCacheKey]);
@@ -902,7 +912,12 @@ export default function WatchScreen() {
         onProgress={(pos, dur) => {
           lastTimeRef.current = pos;
           if (pos > 10) AsyncStorage.setItem(progressKey, String(Math.floor(pos))).catch(() => { });
-          if (dur > 0 && anime) addToHistory({ animeId: parseInt(anime), ep: epNum, title: titleStr, english: englishStr, thumbnail: coverUrl || (anime ? `https://img.anili.st/media/${anime}` : ""), position: pos, duration: dur, updatedAt: Date.now() });
+          // throttle: write watch-history at most once every 30s (not on every progress tick)
+          const now = Date.now();
+          if (dur > 0 && anime && now - lastHistoryWriteRef.current > 30_000) {
+            lastHistoryWriteRef.current = now;
+            addToHistory({ animeId: parseInt(anime), ep: epNum, title: titleStr, english: englishStr, thumbnail: coverUrl || (anime ? `https://img.anili.st/media/${anime}` : ""), position: pos, duration: dur, updatedAt: now });
+          }
         }}
         onNextEpisode={() => goEp(epNum + 1, true)}
         onPrevEpisode={epNum > 1 ? () => goEp(epNum - 1) : undefined}
