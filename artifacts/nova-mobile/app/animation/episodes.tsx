@@ -89,7 +89,7 @@ export default function AnimationEpisodesScreen() {
     const t = encodeURIComponent(title);
     const poster = encodeURIComponent(detail?.poster_path ? `${IMG_W}${detail.poster_path}` : "");
     const et = epName ? `&etitle=${encodeURIComponent(epName)}` : "";
-    router.push(`/animation/watch?id=${id}&type=${type}&ep=${ep}&season=${selSeason}&title=${t}&poster=${poster}${et}`);
+    router.replace(`/animation/watch?id=${id}&type=${type}&ep=${ep}&season=${selSeason}&title=${t}&poster=${poster}${et}` as any);
   }, [id, type, selSeason, title, detail, router]);
 
   const renderEpisode = ({ item, index }: { item: Episode; index: number }) => {
@@ -170,7 +170,7 @@ export default function AnimationEpisodesScreen() {
       <View style={s.header}>
         <View style={s.headerRow}>
           <Pressable onPress={() => router.canGoBack() ? router.back() : router.replace("/(tabs)/animations")} style={s.backBtn}>
-            <Ionicons name="chevron-forward" size={18} color="rgba(255,255,255,0.7)" />
+            <Ionicons name="chevron-back" size={18} color="rgba(255,255,255,0.7)" />
           </Pressable>
           <View style={s.headerInfo}>
             <Text style={s.headerLabel}>الحلقات</Text>

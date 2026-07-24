@@ -104,10 +104,9 @@ export default function DubbedDetailScreen() {
       {/* Header */}
       <View style={styles.header}>
         <Pressable onPress={() => router.back()} style={styles.backBtn}>
-          <Ionicons name="chevron-forward" size={20} color="rgba(255,255,255,0.7)" />
+          <Ionicons name="chevron-back" size={20} color="rgba(255,255,255,0.7)" />
         </Pressable>
-        <Text style={styles.headerTitle} numberOfLines={1}>{title}</Text>
-      </View>
+        </View>
 
       <FlatList
         data={episodes}

@@ -196,7 +196,7 @@ export default function CommentsPage() {
       {/* Header */}
       <View style={s.header}>
         <Pressable onPress={() => router.canGoBack() ? router.back() : router.replace("/(tabs)" as any)} style={s.backBtn}>
-          <Ionicons name="chevron-back" size={20} color="#fff" style={{ transform: [{ scaleX: -1 }] }} />
+          <Ionicons name="chevron-back" size={20} color="#fff" />
         </Pressable>
         <View style={{ flex: 1 }}>
           <View style={s.headerTitleRow}>

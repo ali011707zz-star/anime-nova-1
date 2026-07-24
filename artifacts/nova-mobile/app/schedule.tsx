@@ -60,7 +60,7 @@ export default function ScheduleScreen() {
       {/* Header */}
       <View style={[styles.header, { paddingTop: topPad + 16 }]}>
         <Pressable onPress={() => router.back()} style={styles.backBtn}>
-          <Ionicons name="arrow-forward" size={22} color={colors.text} />
+          <Ionicons name="arrow-back" size={22} color={colors.text} />
         </Pressable>
         <Text style={[styles.title, { color: colors.text }]}>جدول البث</Text>
         <View style={{ width: 30 }} />

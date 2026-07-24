@@ -194,7 +194,7 @@ export default function AnimationDetailScreen() {
         />
         <View style={[s.heroTopRow, { paddingTop: insets.top + 8 }]}>
           <Pressable onPress={() => router.canGoBack() ? router.back() : router.replace("/(tabs)" as any)} style={s.backCircle}>
-            <Ionicons name="chevron-forward" size={20} color="#fff" />
+            <Ionicons name="chevron-back" size={20} color="#fff" />
           </Pressable>
           {score > 0 && (
             <View style={s.scorePill}>

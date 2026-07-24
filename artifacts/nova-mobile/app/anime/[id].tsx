@@ -311,7 +311,7 @@ export default function AnimeDetailScreen() {
     <View style={[d.container, { paddingTop: topPad }]}>
       <Pressable onPress={() => router.canGoBack() ? router.back() : router.replace("/(tabs)")}
         style={{ position: "absolute", right: 14, top: 14, width: 36, height: 36, backgroundColor: "rgba(0,0,0,0.5)", borderRadius: 14, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: "rgba(255,255,255,0.1)", zIndex: 10 }}>
-        <Ionicons name="chevron-forward" size={20} color="#fff" />
+        <Ionicons name="chevron-back" size={20} color="#fff" />
       </Pressable>
       <View style={d.center}><ActivityIndicator color="#8B5CF6" size="large" /></View>
     </View>
@@ -320,7 +320,7 @@ export default function AnimeDetailScreen() {
     <View style={[d.container, { paddingTop: topPad }]}>
       <Pressable onPress={() => router.canGoBack() ? router.back() : router.replace("/(tabs)")}
         style={{ position: "absolute", right: 14, top: 14, width: 36, height: 36, backgroundColor: "rgba(0,0,0,0.5)", borderRadius: 14, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: "rgba(255,255,255,0.1)", zIndex: 10 }}>
-        <Ionicons name="chevron-forward" size={20} color="#fff" />
+        <Ionicons name="chevron-back" size={20} color="#fff" />
       </Pressable>
       <View style={[d.center, { paddingHorizontal: 32, gap: 14 }]}>
         <Ionicons name="cloud-offline-outline" size={44} color="rgba(255,255,255,0.3)" />
@@ -371,7 +371,7 @@ export default function AnimeDetailScreen() {
           />
           {/* Back */}
           <Pressable onPress={() => router.canGoBack() ? router.back() : router.replace("/(tabs)")} style={d.backBtn}>
-            <Ionicons name="chevron-forward" size={20} color="#fff" />
+            <Ionicons name="chevron-back" size={20} color="#fff" />
           </Pressable>
         </View>
 

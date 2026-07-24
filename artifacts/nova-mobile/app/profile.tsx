@@ -217,7 +217,7 @@ export default function ProfileScreen() {
       {/* Header */}
       <View style={[s.header, { paddingTop: topPad + 8 }]}>
         <Pressable onPress={() => router.back()} style={s.backBtn}>
-          <Ionicons name="arrow-forward" size={22} color={colors.text} />
+          <Ionicons name="arrow-back" size={22} color={colors.text} />
         </Pressable>
         <Text style={[s.headerTitle, { color: colors.text }]}>الملف الشخصي</Text>
         <View style={{ width: 38 }} />
