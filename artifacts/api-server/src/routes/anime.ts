@@ -13054,6 +13054,27 @@ router.get("/anime/anslayer-latest", async (req, res) => {
       };
     }).filter((it: any) => it.animeId && it.episode);
 
+    // ── إرسال الحلقات الجديدة لتيليجرام (فقط عند التحديث الفعلي) ──────────
+    if (items.length > 0) {
+      const prevKeys = new Set(
+        (_anslayerLatestCache || []).map((it: any) => `${it.animeId}:${it.episode}`)
+      );
+      const newItems = items.filter(
+        (it: any) => !prevKeys.has(`${it.animeId}:${it.episode}`)
+      );
+      for (const it of newItems) {
+        try {
+          await notifyNewEpisode(
+            it.animeId,
+            it.name,
+            it.episode,
+            it.cover || undefined,
+          );
+        } catch (tgErr: any) {
+          console.warn(`[anslayer-latest] telegram notify failed: ${(tgErr as any)?.message}`);
+        }
+      }
+    }
     _anslayerLatestCache = items;
     _anslayerLatestTs = Date.now();
     res.json({ items });

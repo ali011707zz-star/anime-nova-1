@@ -54,17 +54,10 @@ async function getTransporter(): Promise<Transporter> {
     isEthereal = false;
     console.log(`[email] ✅ SMTP جاهز → ${smtpHost}:${smtpPort} (${user})`);
   } else {
-    testAccount = await nodemailer.createTestAccount();
-    transporter = nodemailer.createTransport({
-      host: "smtp.ethereal.email",
-      port: 587,
-      auth: { user: testAccount.user, pass: testAccount.pass },
-    });
-    isEthereal = true;
-    console.error("[email] ❌ SMTP_PASS غير موجود في البيئة أو قاعدة البيانات");
-    console.warn(`[email] Ethereal fallback: ${testAccount.user}`);
+    // لا يوجد SMTP مضبوط — افشل بسرعة بدل الانتظار على Ethereal (يسبب timeout 120ث)
+    console.error("[email] SMTP_PASS not configured in env or DB — email disabled");
+    throw new Error("SMTP_NOT_CONFIGURED");
   }
-
   return transporter;
 }
 
@@ -107,8 +100,11 @@ export async function sendVerifyEmail(to: string, code: string): Promise<SendRes
     if (previewUrl) console.log("[email] Ethereal preview:", previewUrl);
     return { ok: true, messageId: info.messageId, previewUrl };
   } catch (err: any) {
-    console.error("[email] فشل إرسال كود التحقق:", err.message);
-    return { ok: false, error: err.message };
+    const msg = err.message === "SMTP_NOT_CONFIGURED"
+      ? "البريد الإلكتروني غير مفعّل — أضف SMTP_USER وSMTP_PASS في .env على السيرفر"
+      : err.message;
+    console.error("[email] فشل إرسال كود التحقق:", msg);
+    return { ok: false, error: msg };
   }
 }
 

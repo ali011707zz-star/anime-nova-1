@@ -454,7 +454,6 @@ export default function AnimeDetailScreen() {
         <View style={d.actionGrid}>
           {[
             { icon: "chatbubble",  label: "التعليقات", active: false,        activeColor: "#8B5CF6", onPress: () => router.push(`/comments?animeId=${anime?.id}&title=${encodeURIComponent(anime?.title?.romaji || "")}` as any) },
-            { icon: "add-circle",  label: "قائمتي",    active: saved,        activeColor: "#8B5CF6", onPress: toggleSave },
             { icon: "heart",       label: "المفضلة",   active: isFav,        activeColor: "#8B5CF6", onPress: handleFavorite },
             { icon: "star",        label: "تقييمي",    active: myRating > 0, activeColor: "#FBBF24", onPress: () => setShowRating(true) },
           ].map(({ icon, label, active, activeColor, onPress }) => (
@@ -464,9 +463,6 @@ export default function AnimeDetailScreen() {
               <Text style={[d.actionBtnLabel, active && { color: activeColor }]}>{label}</Text>
               {label === "تقييمي" && myRating > 0 ? (
                 <Text style={[d.actionBtnSub, { color: "#FBBF24" }]}>{myRating}/10</Text>
-              ) : null}
-              {label === "قائمتي" && saved ? (
-                <Text style={[d.actionBtnSub, { color: "#8B5CF6" }]}>مضاف</Text>
               ) : null}
               {label === "المفضلة" && isFav ? (
                 <Text style={[d.actionBtnSub, { color: "#8B5CF6" }]}>مضاف</Text>

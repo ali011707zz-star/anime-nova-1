@@ -286,14 +286,7 @@ export default function AnimationDetailScreen() {
 
       {/* ── Action row ── */}
       <View style={s.actionRow}>
-        <Pressable onPress={toggleSave} style={s.actionBtn}>
-          <Ionicons
-            name={saved ? "bookmark" : "bookmark"}
-            size={20}
-            color={saved ? "#8B5CF6" : "rgba(255,255,255,0.45)"}
-          />
-          <Text style={[s.actionLabel, saved && { color: "#8B5CF6" }]}>قائمتي</Text>
-        </Pressable>
+
         <Pressable
           onPress={() => router.push(`/comments?tmdbId=${id}&title=${encodeURIComponent(title)}` as any)}
           style={s.actionBtn}
@@ -357,7 +350,7 @@ export default function AnimationDetailScreen() {
               <Pressable
                 key={r.id}
                 style={s.recCard}
-                onPress={() => router.push(`/animation/${type}/${r.id}`)}
+                onPress={() => router.replace(`/animation/${type}/${r.id}` as any)}
               >
                 {r.poster_path ? (
                   <Image source={{ uri: `${IMG_W}${r.poster_path}` }} style={s.recImg} />
