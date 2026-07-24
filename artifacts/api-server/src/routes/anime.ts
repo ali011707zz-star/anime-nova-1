@@ -1455,22 +1455,17 @@ async function extractVideoDeep(
         }
         break; // don't follow iframes for ok.ru
       }
-      // ── mp4upload — yt-dlp (Rocket Loader hides the video URL) ────
+      // ── mp4upload — direct HTML parse (~800ms, confirmed 2026-07-24) ────
+      // URL is in plain HTML: player.src({ type:"video/mp4", src:"https://a4.mp4upload.com:183/..." })
+      // Rocket Loader obfuscates <script> types but leaves inline player.src() intact.
       if (url.includes("mp4upload.com/embed-")) {
-        try {
-          const ytUrl = await extractViaYtDlp(url, ref, 25000);
-          if (ytUrl) return { url: ytUrl, type: "mp4" };
-        } catch {}
+        const m = html.match(/player\.src\s*\(\s*\{[^}]*src\s*:\s*["'](https?:[^"']+\.mp4[^"']*)/s)
+               || html.match(/["']src["']\s*:\s*["'](https?:[^"']+\.mp4[^"']*)/);
+        if (m) return { url: m[1], type: "mp4" };
         break;
       }
-      // ── upvideo.to — yt-dlp ───────────────────────────────────────
-      if (url.includes("upvideo.to/e/")) {
-        try {
-          const ytUrl = await extractViaYtDlp(url, ref, 25000);
-          if (ytUrl) return { url: ytUrl, type: "mp4" };
-        } catch {}
-        break;
-      }
+      // ── upvideo.to — TLS fingerprint blocked from any non-browser client ────
+      if (url.includes("upvideo.to/e/")) break;
       const direct = parseVideoUrl(html);
       if (direct) return direct;
       const nextSrc = extractIframeSrc(html, url);
@@ -2879,6 +2874,12 @@ async function getMitanimeSources(
                        "my.mail.ru","vk.com","wtsrv.xyz",
                        "dotplay.net",  // 404 on all tested links (dead embed — 2026-07-24)
                        "fembed.com",   // TLS error / dead (2026-07-24)
+                       "upvideo.to",   // TLS JA3 fingerprint block — no browser = no access
+                       // HLS-only sources — skipped by user request 2026-07-24
+                       // (cfProxy + hls-proxy chain is slow and unreliable on mobile)
+                       "streamwish","hlswish","wishembed","embedwish","awish","swdyu",
+                       "luluvdo.com","darkibox.com","hydracker.com",
+                       "playerwish.com","bigwarp.io","voe.sx",
                        ];
 
     // Process all servers in PARALLEL — yt-dlp/ok.ru each take ~5-25s so sequential
@@ -2925,36 +2926,40 @@ async function getMitanimeSources(
           return out;
         }
 
-        // ── mp4upload → yt-dlp ─────────────────────────────────────────────────
+        // ── mp4upload → direct HTML parse (~800ms vs 15-30s yt-dlp) ───────────
+        // Confirmed 2026-07-24: MP4 URL is in plain HTML inside player.src({src:"..."})
+        // Cloudflare Rocket Loader obfuscates <script> types but leaves inline player init intact.
         if (sUrl.includes("mp4upload.com/embed-")) {
           try {
-            const ytUrl = await extractViaYtDlp(sUrl, `${MITANIME_BASE}/`, 30000);
-            // yt-dlp returns the input URL if it can't extract (expired/geo-blocked file) — skip those
-            const isReal = ytUrl && !ytUrl.includes("mp4upload.com/embed-") && ytUrl.startsWith("http");
-            if (isReal) {
-              // mp4upload CDN often uses non-standard ports (e.g. :183) — route through video-proxy
-              const hasNonStdPort = /:\d{4,5}\//.test(ytUrl) && !/:(80|443|8080|8443)\//.test(ytUrl);
-              const directUrl = hasNonStdPort
-                ? `/api/anime/video-proxy?url=${encodeURIComponent(ytUrl)}&ref=${encodeURIComponent(sUrl)}`
-                : ytUrl;
-              out.push({ name: `ميتانيمي · MP4Upload · ${qLabel}`,
-                url: sUrl, quality: qLabel, qualityRank: qRank, site: "mitanime",
-                directUrl, directType: "mp4" });
+            const r = await fetch(sUrl, {
+              headers: { "User-Agent": BROWSER_UA, Referer: `${MITANIME_BASE}/` },
+              signal: AbortSignal.timeout(10000),
+            });
+            if (r.ok) {
+              const html = await r.text();
+              // Pattern: player.src({ type: "video/mp4", src: "https://a4.mp4upload.com:183/d/.../video.mp4" })
+              const m = html.match(/player\.src\s*\(\s*\{[^}]*src\s*:\s*["'](https?:[^"']+\.mp4[^"']*)/s)
+                     || html.match(/["']src["']\s*:\s*["'](https?:[^"']+\.mp4[^"']*)/);
+              if (m) {
+                const rawUrl = m[1];
+                // mp4upload CDN uses non-standard port :183 — route through video-proxy
+                // Use URL.port (handles 2-5 digit ports correctly, unlike \d{4,5} regex)
+                let hasNonStdPort = false;
+                try { const p = new URL(rawUrl).port; hasNonStdPort = p !== "" && !["80","443","8080","8443"].includes(p); } catch {}
+                const directUrl = hasNonStdPort
+                  ? `/api/anime/video-proxy?url=${encodeURIComponent(rawUrl)}&ref=${encodeURIComponent(sUrl)}`
+                  : rawUrl;
+                out.push({ name: `ميتانيمي · MP4Upload · ${qLabel}`,
+                  url: sUrl, quality: qLabel, qualityRank: qRank, site: "mitanime",
+                  directUrl, directType: "mp4" });
+              }
             }
           } catch {}
           return out;
         }
 
-        // ── upvideo.to → yt-dlp ────────────────────────────────────────────────
-        if (sUrl.includes("upvideo.to/")) {
-          try {
-            const ytUrl = await extractViaYtDlp(sUrl, `${MITANIME_BASE}/`, 30000);
-            if (ytUrl) out.push({ name: `ميتانيمي · UpVideo · ${qLabel}`,
-              url: sUrl, quality: qLabel, qualityRank: qRank, site: "mitanime",
-              directUrl: ytUrl, directType: "mp4" });
-          } catch {}
-          return out;
-        }
+        // ── upvideo.to — TLS fingerprint blocked (JA3 check), skip ────────────
+        if (sUrl.includes("upvideo.to/")) return out;
 
         // ── share4max / playerwish / streamwish-family → extractVideoDeep ──────
         try {
