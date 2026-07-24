@@ -2744,9 +2744,12 @@ const mitanimeSrcCache  = new Map<string, { sources: UnifiedSource[]; ts: number
 function parseMitanimeServers(
   rsc: string,
 ): Array<{ name: string; quality: string; url: string; isLocked: boolean }> {
-  const idx = rsc.indexOf('"servers":[');
+  // RSC embeds JSON with escaped quotes: \"servers\":[ — must search for this escaped form.
+  // (The raw fetch body contains literal backslash+quote sequences, not plain quotes.)
+  const MARKER = '\\"servers\\":[';
+  const idx = rsc.indexOf(MARKER);
   if (idx === -1) return [];
-  const start = idx + '"servers":'.length;
+  const start = idx + MARKER.length - 1; // point to opening '['
   let depth = 0;
   let end = start;
   for (let i = start; i < rsc.length; i++) {
@@ -2754,7 +2757,9 @@ function parseMitanimeServers(
     else if (rsc[i] === "]") { depth--; if (depth === 0) { end = i + 1; break; } }
   }
   try {
-    const arr = JSON.parse(rsc.slice(start, end));
+    // Unescape RSC-escaped backslash-quote sequences before JSON.parse
+    const raw = rsc.slice(start, end).replace(/\\"/g, '"');
+    const arr = JSON.parse(raw);
     if (Array.isArray(arr)) return arr;
   } catch {}
   return [];
@@ -2774,14 +2779,17 @@ async function resolveMitanimeSlug(title: string, english: string | null): Promi
 
   for (const slug of [...new Set(candidates)]) {
     try {
-      const r = await fetch(`${MITANIME_BASE}/watch/${slug}/1`, {
+      // Validate via /anime/{slug} — works even when ep1 has no servers yet uploaded.
+      // Watch ep1 check was unreliable: many anime have no ep1 servers on MitAnime.
+      const r = await fetch(`${MITANIME_BASE}/anime/${slug}`, {
         headers: MITANIME_RSC_HDRS,
         signal: AbortSignal.timeout(8000),
         redirect: "follow",
       });
       if (!r.ok) continue;
       const text = await r.text();
-      if (text.includes('"servers":[') && !text.includes('"/_not-found"')) {
+      // Valid anime page: substantial content (not 404 shell) and no not-found RSC marker
+      if (!text.includes('"/_not-found"') && text.length > 20000) {
         mitanimeSlugCache.set(ck, { slug, ts: Date.now() });
         return slug;
       }
@@ -2797,9 +2805,12 @@ async function resolveMitanimeSlug(title: string, english: string | null): Promi
       );
       if (!r.ok) continue;
       const text = await r.text();
-      // Extract ASCII-only slugs (anime slugs, not Arabic genre slugs)
+      // Extract slugs from RSC-escaped form \"slug\":\"...\" AND from href="/anime/{slug}" links
       const slugsFound: string[] = [];
-      for (const m of text.matchAll(/"slug":"([a-z0-9][a-z0-9-]*)"/g)) {
+      for (const m of text.matchAll(/\\"slug\\":\\"([a-z0-9][a-z0-9-]*)\\"/g)) {
+        if (/^[a-z0-9-]+$/.test(m[1]) && m[1].length > 2) slugsFound.push(m[1]);
+      }
+      for (const m of text.matchAll(/href="\/anime\/([a-z0-9][a-z0-9-]*)"/g)) {
         if (/^[a-z0-9-]+$/.test(m[1]) && m[1].length > 2) slugsFound.push(m[1]);
       }
       const unique = [...new Set(slugsFound)];
@@ -2844,7 +2855,7 @@ async function getMitanimeSources(
     });
     if (!r.ok) return [];
     const text = await r.text();
-    if (!text.includes('"servers":[')) return [];
+    if (!text.includes('\\"servers\\":[')) return [];
 
     const servers = parseMitanimeServers(text);
     const sources: UnifiedSource[] = [];
@@ -12585,8 +12596,7 @@ router.get("/anime/sources-stream", async (req, res) => {
       scrapeCached("animedar",     () => getAnimadarSources(title, english, ep, isMovie, matchCtx)),
       // okanime: معطّل بطلب المستخدم
       // scrapeCached("okanime",      () => getOkAnimeSources(title, english, ep, isMovie, matchCtx), true, 22_000),
-      // mitanime: مخفي مؤقتاً — slug discovery يفشل للأنمي ذات الـ romanji slugs (naruto-shippuuden/shingeki-no-kyojin)
-      // scrapeCached("mitanime",    () => getMitanimeSources(title, english, ep),            false, 60000),
+      scrapeCached("mitanime",    () => getMitanimeSources(title, english, ep),            false, 60000),
       scrapeCached("animeify",     () => getAnimeifySources(title, english, ep),  false, 18000),
       scrapeCached("animeday",     () => getAnimeDaySources(title, english, ep),    true, 18000),
       // scrapeCached("seepanel",  () => getSeepanelSources(title, english, ep, isMovie)), // DEAD: panel.seepanel.top/api returns 404 (2026-06)
@@ -12715,7 +12725,7 @@ router.get("/anime/fetch-source", async (req, res) => {
     "anime3rb",  // مُضاف 2026-07-18 — Animatoo Supabase slug + Hopx browser-html
     "reanime",   // مُعاد تفعيله 2026-07-20 — reanime.to/api/flix + FlixCloud HLS ناعم
     "sanime",    // مُضاف 2026-07-24 — MP4 مباشر عربي مدبلج
-    // "mitanime",  // مخفي مؤقتاً 2026-07-21 — slug discovery يفشل للـ romanji slugs
+    "mitanime",  // مُعاد تفعيله 2026-07-24 — parseMitanimeServers مُصلَّح (RSC escaped quotes) + slug validation عبر /anime/{slug}
     // "allmanga": معطّل 2026-07-17 — AA_CRYPTO_MISSING
     // videasy_anim: نُقل بالكامل إلى قسم الأنيميشن بطلب المستخدم 2026-07-15
     // xpass_anim: محذوف — CDN (ps1/vip.1x2.space) يحجب VPS 2026-07-15
@@ -12815,8 +12825,7 @@ router.get("/anime/fetch-source", async (req, res) => {
       // case "animelek":     await runExtract(await race(getAnimelekSources(title, english, ep, isMovie),   SCRAPER_MS, [])); break;
       case "animedar":     await runExtract(await race(getAnimadarSources(title, english, ep, isMovie),   SCRAPER_MS, [])); break;
       // case "okanime": معطّل بطلب المستخدم
-      // case "mitanime": مخفي مؤقتاً
-      // case "mitanime":    (await race(getMitanimeSources(title, english, ep),           60000, [])).forEach(collectSrc); break;
+      case "mitanime":    (await race(getMitanimeSources(title, english, ep),           60000, [])).forEach(collectSrc); break;
       case "animeify":    (await race(getAnimeifySources(title, english, ep),  18000, [])).forEach(collectSrc); break;
       case "animeday":     await runExtract(await race(getAnimeDaySources(title, english, ep),   SCRAPER_MS, [])); break;
       // case "seepanel": DEAD

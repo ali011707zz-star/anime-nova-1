@@ -219,6 +219,7 @@ const SITE_PRIORITY: Record<string, number> = {
 /* مصادر موحَّدة مع الويب — نفس المصادر الـ 8 المفعَّلة في SCRAPER_DEFS */
 const ANIME_SITES = [
   "kawaii", "animewitcher", "anslayer", "animeify", "sanime",
+  "mitanime",  // مُضاف 2026-07-24 — RSC HTTP مباشر بلا browser، 1-2s، 4-8 سيرفرات
   // "witanime": معطّل بطلب المستخدم
   // "allmanga": معطّل 2026-07-17 — AA_CRYPTO_MISSING على AllAnime
 ] as const;
@@ -237,6 +238,7 @@ const SITE_TIMEOUT_MAP: Partial<Record<typeof ANIME_SITES[number], number>> = {
   anikototv:    28_000,  // backend = 25s + 3s هامش
   anipm:        24_000,  // backend = 20s + 4s هامش
   witanime:     20_000,  // backend يوناplay static HTML < 1s + chain search ~15s
+  mitanime:     65_000,  // backend = slug(8s) + fetch(10s) + parallel servers(22-30s) + 5s هامش
 };
 
 /* ── Spinning loader ── */
