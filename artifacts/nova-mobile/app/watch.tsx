@@ -584,16 +584,21 @@ export default function WatchScreen() {
   /* ── Navigate episode ── */
   function goEp(n: number, auto = false) {
     saveProgress();
+    /* إلغاء كل الطلبات الجارية فوراً قبل الانتقال — يمنع stale fetches من إضافة مصادر الحلقة القديمة */
+    abortRef.current?.abort();
+    if (autoPlayTimerRef.current) { clearTimeout(autoPlayTimerRef.current); autoPlayTimerRef.current = null; }
     setSources([]);
     seenKeys.current.clear();
     autoPlayFiredRef.current = false;
+    autoFetchAllRef.current = false;   // ← إعادة تعيين حتى يجدوِل الموجة الخلفية للحلقة الجديدة
+    hasCachedRef.current = false;      // ← إعادة تعيين حتى تظهر شاشة التحميل للحلقة الجديدة
     inFlightSitesRef.current.clear();
     fetchedSitesRef.current.clear();
     /* إلغاء background timers من الحلقة السابقة — يمنع stale fetches */
     bgTimersRef.current.forEach(clearTimeout);
     bgTimersRef.current = [];
     setSlotStatus({});
-    setScreen("picker");
+    setScreen("loading");
     const coverParam = coverUrl ? `&cover=${encodeURIComponent(coverUrl)}` : "";
     const arParam    = titleArStr ? `&titleAr=${encodeURIComponent(titleArStr)}` : "";
     router.replace(`/watch?anime=${anime}&ep=${n}&title=${encodeURIComponent(titleStr)}&english=${encodeURIComponent(englishStr)}&format=${encodeURIComponent(format || "")}${coverParam}${arParam}${auto ? "&autoplay=1" : ""}`);
@@ -841,7 +846,7 @@ export default function WatchScreen() {
         {coverUrl ? <Image source={{ uri: coverUrl }} style={[StyleSheet.absoluteFill, { opacity: 0.13 }]} blurRadius={Platform.OS === "ios" ? 28 : 10} resizeMode="cover" /> : null}
         <LinearGradient colors={["rgba(7,7,13,0.90)", "rgba(12,8,24,0.60)", "rgba(7,7,13,0.95)"]} style={StyleSheet.absoluteFill} />
         <Pressable onPress={handleBack} style={[d.ldBackBtn, { top: topPad + 4 }]}>
-          <Ionicons name="chevron-forward" size={20} color="rgba(255,255,255,0.65)" />
+          <Ionicons name="arrow-back" size={20} color="rgba(255,255,255,0.65)" />
         </Pressable>
         <View style={d.ldContent}>
           <Text style={d.ldPrayer}>اللهم صلِّ وسلِّم على نبينا محمد ﷺ</Text>
@@ -910,7 +915,7 @@ export default function WatchScreen() {
     return (
       <View style={{ flex: 1, backgroundColor: "#07070d", alignItems: "center", justifyContent: "center", gap: 14 }}>
         <Pressable onPress={() => { setScreen("picker"); }} style={[d.playerBackBtn, { position: "absolute", top: topPad + 4, right: 12 }]}>
-          <Ionicons name="arrow-forward" size={18} color="#fff" />
+          <Ionicons name="arrow-back" size={18} color="#fff" />
         </Pressable>
         <SpinRing />
         <Text style={{ fontSize: 13, fontFamily: "Cairo_400Regular", color: "rgba(255,255,255,0.45)", textAlign: "center" }}>
@@ -935,7 +940,7 @@ export default function WatchScreen() {
       return (
         <View style={{ flex: 1, backgroundColor: "#07070d", alignItems: "center", justifyContent: "center", gap: 16 }}>
           <Pressable onPress={() => setScreen("picker")} style={[d.playerBackBtn, { position: "absolute", top: topPad + 4, right: 12 }]}>
-            <Ionicons name="arrow-forward" size={18} color="#fff" />
+            <Ionicons name="arrow-back" size={18} color="#fff" />
           </Pressable>
           <View style={{ width: 72, height: 72, borderRadius: 36, backgroundColor: "rgba(139,92,246,0.15)", alignItems: "center", justifyContent: "center" }}>
             <Ionicons name="tv-outline" size={36} color="rgba(139,92,246,0.7)" />
@@ -951,7 +956,7 @@ export default function WatchScreen() {
     return (
       <View style={{ flex: 1, backgroundColor: "#07070d", alignItems: "center", justifyContent: "center", gap: 16 }}>
         <Pressable onPress={() => { saveProgress(); setScreen("picker"); }} style={[d.playerBackBtn, { position: "absolute", top: topPad + 4, right: 12 }]}>
-          <Ionicons name="arrow-forward" size={18} color="#fff" />
+          <Ionicons name="arrow-back" size={18} color="#fff" />
         </Pressable>
         <View style={{ width: 72, height: 72, borderRadius: 36, backgroundColor: "rgba(139,92,246,0.15)", alignItems: "center", justifyContent: "center" }}>
           <Ionicons name="tv-outline" size={36} color="rgba(139,92,246,0.7)" />
@@ -981,10 +986,10 @@ export default function WatchScreen() {
             <Text style={d.epNavText}>السابقة</Text>
           </Pressable>
           <Pressable
-            disabled={totalEpsCount !== undefined && epNum >= totalEpsCount}
+            disabled={singleSite !== null || (totalEpsCount !== undefined && epNum >= totalEpsCount)}
             onPress={() => goEp(epNum + 1)}
             style={[d.epNavBtn, { borderColor: "rgba(139,92,246,0.35)", backgroundColor: "rgba(139,92,246,0.10)" },
-              (totalEpsCount !== undefined && epNum >= totalEpsCount) && { opacity: 0.22 }]}>
+              (singleSite !== null || (totalEpsCount !== undefined && epNum >= totalEpsCount)) && { opacity: 0.22 }]}>
             <Text style={[d.epNavText, { color: "#c4b5fd" }]}>التالية</Text>
             <Ionicons name="chevron-back" size={12} color="rgba(196,181,253,0.9)" />
           </Pressable>
@@ -997,7 +1002,7 @@ export default function WatchScreen() {
           <Text style={d.headerSub}>الحلقة {epNum}</Text>
         </View>
         <Pressable onPress={handleBack} style={d.headerBack}>
-          <Ionicons name="arrow-forward" size={17} color="rgba(255,255,255,0.75)" />
+          <Ionicons name="arrow-back" size={17} color="rgba(255,255,255,0.75)" />
         </Pressable>
       </View>
 
