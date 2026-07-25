@@ -5978,7 +5978,43 @@ async function a3rbFetchPage(url: string, timeoutMs = 35000): Promise<string | n
     } catch { /* fall through to browser */ }
   }
 
-  // ── المسار البطيء 1: Hopx /extract-cookies (Playwright) ────────────
+  // ── المسار البطيء 1: Hound CF-Bypass Service (patchright محلي) ─────────
+  // أولوية عالية لأنه محلي على VPS — لا تأخير شبكة خارجي
+  // 150s ثابت لاستيعاب الطلبات المتزامنة (session_lock يُسلسلها)
+  if (HOUND_SERVICE_URL) {
+    try {
+      const hh = await fetch(`${HOUND_SERVICE_URL}/health`, { signal: AbortSignal.timeout(4000) });
+      if (hh.ok) {
+        console.log(`[anime3rb] Hound patchright bypass → ${url.slice(-50)}`);
+        const hr = await fetch(`${HOUND_SERVICE_URL}/fetch`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ url, wait: 9000, referer: REF, solve_cf: true }),
+          signal: AbortSignal.timeout(150_000),   // 150s ثابت — يكفي طلبين متزامنين
+        });
+        if (hr.ok) {
+          const data = await hr.json() as { ok?: boolean; html?: string; error?: string; method?: string; elapsed_ms?: number; cookie_str?: string };
+          if (data.ok && data.html && data.html.length > 500) {
+            console.log(`[anime3rb] ✅ Hound bypass (${data.method}) ${data.elapsed_ms}ms`);
+            // ── تخزين cf_clearance للمسار السريع (~1-2ث) لمدة 20 ساعة ──
+            if (data.cookie_str) {
+              setA3rbCfCookie(data.cookie_str);  // يُخزَّن في memory + Supabase
+              console.log(`[anime3rb] 🍪 cf_clearance cached via Hound ✅ — cycleTLS جاهز لـ ~20h`);
+            } else {
+              console.warn(`[anime3rb] Hound: no cookie_str — fast-path won't activate`);
+            }
+            return data.html;
+          } else if (data.error) {
+            console.warn("[anime3rb] Hound returned error:", data.error);
+          }
+        }
+      }
+    } catch (e) {
+      console.warn("[anime3rb] Hound CF-bypass error:", (e as any).message);
+    }
+  }
+
+  // ── المسار البطيء 2: Hopx /extract-cookies (Playwright خارجي) ──────────
   let hopxOk = false;
   try {
     const h = await fetch(`${HOPX_PROXY_BASE}/health`, { signal: AbortSignal.timeout(4000) });
@@ -5994,15 +6030,9 @@ async function a3rbFetchPage(url: string, timeoutMs = 35000): Promise<string | n
         signal: AbortSignal.timeout(timeoutMs + 10000),
       });
       if (r.ok) {
-        const data = await r.json() as {
-          ok?: boolean; html?: string; cookie_str?: string;
-          cookies?: Record<string, string>; error?: string;
-        };
+        const data = await r.json() as { ok?: boolean; html?: string; cookie_str?: string; cookies?: Record<string, string>; error?: string };
         if (data.ok) {
-          if (data.cookie_str) {
-            setA3rbCfCookie(data.cookie_str);   // يُخزَّن في Supabase تلقائياً
-            console.log(`[anime3rb] cf_clearance cached via Hopx ✅`);
-          }
+          if (data.cookie_str) { setA3rbCfCookie(data.cookie_str); console.log(`[anime3rb] cf_clearance cached via Hopx ✅`); }
           if (data.html) return data.html;
         } else {
           console.warn("[anime3rb] Hopx browser extract failed:", data.error);
@@ -6012,30 +6042,21 @@ async function a3rbFetchPage(url: string, timeoutMs = 35000): Promise<string | n
       console.warn("[anime3rb] Hopx browser fetch error:", (e as any).message);
     }
   } else {
-    console.warn("[anime3rb] Hopx unavailable — trying ScrapingAnt");
+    console.warn("[anime3rb] Hopx unavailable");
   }
 
-  // ── المسار البطيء 2: OpenShift CF Bypass (Playwright مُستضاف مجاناً) ──
-  // يعمل تماماً كـ Hopx — يُجدّد cf_clearance ويُخزّنها 20ساعة للـ cycleTLS
-  // النشر: bash cf-bypass-service/deploy-openshift.sh <TOKEN>
-  // الـ URL يُضبط عبر OPENSHIFT_CF_URL في .env / ecosystem.config.cjs
+  // ── المسار البطيء 3: OpenShift CF Bypass (Playwright مُستضاف مجاناً) ──
   if (OPENSHIFT_CF_URL) {
     try {
-      console.log(`[anime3rb] OpenShift CF bypass (Playwright) → ${url.slice(-50)}`);
+      console.log(`[anime3rb] OpenShift CF bypass → ${url.slice(-50)}`);
       const params = new URLSearchParams({ url, ref: REF, wait: "8000" });
       const r = await fetch(`${OPENSHIFT_CF_URL}/extract-cookies?${params}`, {
         signal: AbortSignal.timeout(timeoutMs + 10000),
       });
       if (r.ok) {
-        const data = await r.json() as {
-          ok?: boolean; html?: string; cookie_str?: string;
-          cookies?: Record<string, string>; error?: string;
-        };
+        const data = await r.json() as { ok?: boolean; html?: string; cookie_str?: string; cookies?: Record<string, string>; error?: string };
         if (data.ok) {
-          if (data.cookie_str) {
-            setA3rbCfCookie(data.cookie_str);   // يُخزَّن في Supabase تلقائياً
-            console.log(`[anime3rb] cf_clearance cached via OpenShift ✅ — cycleTLS جاهز للـ 20ساعة القادمة`);
-          }
+          if (data.cookie_str) { setA3rbCfCookie(data.cookie_str); console.log(`[anime3rb] cf_clearance cached via OpenShift ✅`); }
           if (data.html) return data.html;
         } else {
           console.warn("[anime3rb] OpenShift CF bypass failed:", data.error);
@@ -6043,41 +6064,6 @@ async function a3rbFetchPage(url: string, timeoutMs = 35000): Promise<string | n
       }
     } catch (e) {
       console.warn("[anime3rb] OpenShift CF bypass error:", (e as any).message);
-    }
-  } else {
-    console.warn("[anime3rb] OPENSHIFT_CF_URL غير مُضبوط — شغّل: bash cf-bypass-service/deploy-openshift.sh <TOKEN>");
-  }
-
-  // ── المسار البطيء 3: Hound CF-Bypass Service (patchright + Turnstile solver) ──
-  // يعمل محلياً على VPS — أفضل من Hopx لأنه يحل Turnstile Interactive
-  // التثبيت: cd /opt/anime-nova/hound-service && bash install.sh
-  //          pm2 start start.sh --name hound-service
-  if (HOUND_SERVICE_URL) {
-    try {
-      // فحص صحة الخدمة أولاً (timeout قصير)
-      const hh = await fetch(`${HOUND_SERVICE_URL}/health`, { signal: AbortSignal.timeout(4000) });
-      if (hh.ok) {
-        console.log(`[anime3rb] Hound patchright bypass → ${url.slice(-50)}`);
-        const hr = await fetch(`${HOUND_SERVICE_URL}/fetch`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ url, wait: 9000, referer: REF, solve_cf: true }),
-          signal: AbortSignal.timeout(timeoutMs + 15000),
-        });
-        if (hr.ok) {
-          const data = await hr.json() as { ok?: boolean; html?: string; error?: string; method?: string; elapsed_ms?: number };
-          if (data.ok && data.html && data.html.length > 500) {
-            console.log(`[anime3rb] ✅ Hound bypass (${data.method}) ${data.elapsed_ms}ms`);
-            // إذا نجح الـ patchright → نُحدِّث cf_clearance للمسار السريع لاحقاً
-            // (نستخرج cookie من الـ HTML إذا موجودة — للتوافق مع cycleTLS)
-            return data.html;
-          } else if (data.error) {
-            console.warn("[anime3rb] Hound returned error:", data.error);
-          }
-        }
-      }
-    } catch (e) {
-      console.warn("[anime3rb] Hound CF-bypass error:", (e as any).message);
     }
   }
 

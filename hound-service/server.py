@@ -35,6 +35,7 @@ PORT = int(os.getenv("HOUND_SERVICE_PORT", "8766"))
 _session = None
 _session_lock = asyncio.Lock()
 _session_idle_since: float = 0.0
+_active_requests: int = 0          # عدد الطلبات النشطة — watchdog لا يُغلق أثناءها
 SESSION_IDLE_TIMEOUT = int(os.getenv("HOUND_IDLE_TIMEOUT", "300"))  # 5 دقائق
 
 
@@ -61,15 +62,16 @@ async def get_session():
 
 
 async def idle_watchdog():
-    """يُغلق البراوزر بعد SESSION_IDLE_TIMEOUT ثانية بدون استخدام."""
+    """يُغلق البراوزر بعد SESSION_IDLE_TIMEOUT ثانية بدون استخدام — لا يُغلق أثناء request نشط."""
     global _session
     while True:
         await asyncio.sleep(60)
         if (
             SESSION_IDLE_TIMEOUT > 0
             and _session is not None
-            and _session._is_alive
+            and getattr(_session, "_is_alive", False)
             and _session_idle_since > 0
+            and _active_requests == 0                        # ← لا تُغلق أثناء request
             and (time.monotonic() - _session_idle_since) > SESSION_IDLE_TIMEOUT
         ):
             log.info("💤 browser idle — closing to free RAM")
@@ -112,6 +114,7 @@ class FetchResponse(BaseModel):
     method: str = ""
     error: Optional[str] = None
     elapsed_ms: int = 0
+    cookie_str: Optional[str] = None   # cf_clearance + __cf_bm بعد حل Turnstile
 
 
 # ── Endpoints ────────────────────────────────────────────────────────────────
@@ -170,9 +173,26 @@ async def fetch_url(req: FetchRequest):
             html = resp.content if hasattr(resp, "content") else (resp.html_content if hasattr(resp, "html_content") else "")
             status = resp.status if hasattr(resp, "status") else 200
 
+            # ── استخراج cf_clearance من browser context ──────────────────
+            cookie_str: str | None = None
+            try:
+                page = getattr(session, "_page", None) or getattr(session, "page", None)
+                if page is not None:
+                    all_cookies = await page.context.cookies()
+                    cf_parts = []
+                    for c in all_cookies:
+                        if c.get("name") in ("cf_clearance", "__cf_bm", "__cflb"):
+                            cf_parts.append(f"{c['name']}={c['value']}")
+                    if cf_parts:
+                        cookie_str = "; ".join(cf_parts)
+                        log.info(f"🍪 cf cookies extracted: {[c.split('=')[0] for c in cf_parts]}")
+            except Exception as ce:
+                log.warning(f"cookie extraction failed (non-critical): {ce}")
+
             elapsed = int((time.monotonic() - t0) * 1000)
             log.info(f"✅ patchright ({status}) {req.url[-60:]} [{elapsed}ms]")
-            return FetchResponse(ok=True, html=html, status=status, method="patchright", elapsed_ms=elapsed)
+            return FetchResponse(ok=True, html=html, status=status, method="patchright",
+                                 elapsed_ms=elapsed, cookie_str=cookie_str)
 
         except Exception as e:
             log.error(f"StealthyBrowser error: {e}")
