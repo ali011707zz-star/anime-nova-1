@@ -139,3 +139,4 @@
 - [Animation HLS deferred](animation-hls-currently-deferred.md) — user asked to leave animation HLS sources/player untouched because they are currently not working.
 - [MitAnime scraper fix 2026-07-24](mitanime-scraper-fix-2026-07-24.md) — RSC uses plain quotes not escaped; parseMitanimeServers MARKER was wrong → always returned []; fixed + slug candidates expanded (after-colon, no-season).
 - [CORS + scheduler startup fix 2026-07-25](cors-scheduler-startup-fix.md) — nova-player.local blocked OAuth WebViews; scheduler/email started before config-sync → race condition; .env cleared Jul 21, credentials in .bak.
+- [Anime Rift + AnimeWorld investigation 2026-07-25](anime-rift-animeworld-investigation-2026-07-25.md) — Firebase RC مكشوف (API key موثَّق)؛ RESTRICTED_COUNTRY = geo block لا auth؛ Hopx لم يُجرَّب بعد؛ AnimeWorld مرفوض (إيطالية مدمجة)؛ خطوات التالي: Hopx+v3 + blutter --dart-version + krakenfiles.
