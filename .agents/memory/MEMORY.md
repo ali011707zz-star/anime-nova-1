@@ -138,3 +138,4 @@
 - [Hound source assessment](hound-anime-source-assessment.md) — master-fetch/Hound fetches pages, but is not an anime extractor; MITanime data needs Next.js parsing and WitAnime needs the real WP episode URL.
 - [Animation HLS deferred](animation-hls-currently-deferred.md) — user asked to leave animation HLS sources/player untouched because they are currently not working.
 - [MitAnime scraper fix 2026-07-24](mitanime-scraper-fix-2026-07-24.md) — RSC uses plain quotes not escaped; parseMitanimeServers MARKER was wrong → always returned []; fixed + slug candidates expanded (after-colon, no-season).
+- [CORS + scheduler startup fix 2026-07-25](cors-scheduler-startup-fix.md) — nova-player.local blocked OAuth WebViews; scheduler/email started before config-sync → race condition; .env cleared Jul 21, credentials in .bak.
