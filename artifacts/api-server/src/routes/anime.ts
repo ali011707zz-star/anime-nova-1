@@ -8107,6 +8107,23 @@ async function getAnimeWitcherSources(
             sources.push({ name: `AnimeWitcher · ${qLabel} · VT`, url: srv.url, quality: q, qualityRank: qRank, site: "animewitcher", directUrl, directType: vtResult.type });
           }
         } catch {}
+
+      } else if (srvName === "KF") {
+        // KrakenFiles CDN (phs*.krakencloud.net) — يعمل من VPS مباشرة مع Referer صحيح
+        const kfUrl = srv.url;
+        if (kfUrl && kfUrl.includes("krakencloud.net")) {
+          const directUrl = `/api/anime/video-proxy?url=${encodeURIComponent(kfUrl)}&ref=${encodeURIComponent("https://krakenfiles.com/")}`;
+          sources.push({
+            name: `AnimeWitcher · ${qLabel} · KF`,
+            url: kfUrl,
+            quality: q,
+            qualityRank: qRank + 1,
+            site: "animewitcher",
+            directUrl,
+            directType: "mp4",
+            headers: { Referer: "https://krakenfiles.com/", Origin: "https://krakenfiles.com/" },
+          });
+        }
       }
     }
 

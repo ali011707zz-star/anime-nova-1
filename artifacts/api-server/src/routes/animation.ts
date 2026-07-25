@@ -2894,7 +2894,11 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
               } catch { /* skip */ }
 
             } else if (srvName === "KF") {
-              // KrakenFiles → Cloudflare 502 من Replit → يُتخطى
+              // KrakenFiles CDN (phs*.krakencloud.net) — يعمل من VPS مباشرة مع Referer
+              if (link && link.includes("krakencloud.net")) {
+                const proxied = wrapMp4(link, "https://krakenfiles.com/");
+                sendSource(proxied, label, proxied, proxied);
+              }
             }
           }));
 
