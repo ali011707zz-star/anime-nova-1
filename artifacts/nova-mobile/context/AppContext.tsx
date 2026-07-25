@@ -65,9 +65,18 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       // anime-srcs-* keys: keep only last 20 episodes
       const srcKeys = keys.filter(k => k.startsWith("anime-srcs-"));
       if (srcKeys.length > 20) toRemove.push(...srcKeys.slice(0, srcKeys.length - 20));
+      // anim-srcs-* keys (animation/movies): keep only last 20
+      const animSrcKeys = keys.filter(k => k.startsWith("anim-srcs-"));
+      if (animSrcKeys.length > 20) toRemove.push(...animSrcKeys.slice(0, animSrcKeys.length - 20));
       // sub-ar-* keys: keep only last 10 episodes
       const subKeys = keys.filter(k => k.startsWith("sub-ar-"));
       if (subKeys.length > 10) toRemove.push(...subKeys.slice(0, subKeys.length - 10));
+      // desc-ar-* keys (translated descriptions): keep only last 30
+      const descKeys = keys.filter(k => k.startsWith("desc-ar-"));
+      if (descKeys.length > 30) toRemove.push(...descKeys.slice(0, descKeys.length - 30));
+      // my-rating-* + saved-* + adult-warn-*: keep only last 50
+      const ratingKeys = keys.filter(k => k.startsWith("my-rating-") || k.startsWith("saved-") || k.startsWith("adult-warn-"));
+      if (ratingKeys.length > 50) toRemove.push(...ratingKeys.slice(0, ratingKeys.length - 50));
       if (toRemove.length > 0) await AsyncStorage.multiRemove(toRemove).catch(() => {});
     } catch {}
   };

@@ -506,6 +506,16 @@ export function RiftPlayer({
   const durationRef       = useRef(0);
   const positionRef       = useRef(0);
   const urlCueCacheRef    = useRef<Map<string, SubCue[]>>(new Map());
+  /** أضِف إدخالاً للـ subtitle cache مع حد أقصى 30 مدخل — منع تراكم الذاكرة */
+  const setCueCacheEntry  = useCallback((url: string, cues: SubCue[]) => {
+    const map = urlCueCacheRef.current;
+    if (!map.has(url) && map.size >= 30) {
+      /* أزِل أقدم مدخل (first-inserted key in insertion-order Map) */
+      const firstKey = map.keys().next().value;
+      if (firstKey !== undefined) map.delete(firstKey);
+    }
+    map.set(url, cues);
+  }, []);
   const seekRef           = useRef<(s: number) => void>(() => {});
   const gestureTypeRef    = useRef<"vol" | "bri" | "seek" | null>(null);
   const gestureStartPosRef= useRef(0);
@@ -544,6 +554,33 @@ export function RiftPlayer({
       };
     } catch {}
   });
+
+  /* ─── Master cleanup on unmount — تحرير جميع الموارد النشطة ─── */
+  useEffect(() => {
+    return () => {
+      /* 1. أوقف المشغّل وحرِّر موارده الأصلية (Native ExoPlayer / AVPlayer) */
+      try { player.pause(); } catch {}
+      try { (player as any).release(); } catch {}
+
+      /* 2. ألغِ timeout التحميل */
+      if (loadTimeoutRef.current) { clearTimeout(loadTimeoutRef.current); loadTimeoutRef.current = null; }
+
+      /* 3. ألغِ polling interval */
+      if (progressTimer.current) { clearInterval(progressTimer.current); progressTimer.current = null; }
+
+      /* 4. ألغِ subtitle rAF loop */
+      if (subRafRef.current) { cancelAnimationFrame(subRafRef.current); subRafRef.current = null; }
+
+      /* 5. ألغِ hide timer */
+      if (hideTimer.current) { clearTimeout(hideTimer.current); hideTimer.current = null; }
+
+      /* 6. فرِّغ subtitle cache لتحرير الذاكرة */
+      urlCueCacheRef.current.clear();
+
+      console.log("[RiftPlayer] 🧹 unmounted — all resources released");
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   /* ─── Load SubSettings + subOffset + autoPlay pref from storage ─── */
   useEffect(() => {
@@ -807,7 +844,7 @@ export function RiftPlayer({
           if (cached && !cancelled) {
             const cues: SubCue[] = JSON.parse(cached);
             if (cues.length > 0) {
-              urlCueCacheRef.current.set(url, cues); // populate URL cache
+              setCueCacheEntry(url, cues); // populate URL cache (size-limited)
               setLoadedCues(cues);
               setSubOn(true);
               return;
@@ -836,7 +873,7 @@ export function RiftPlayer({
           if (cancelled) return;
           setSubLoading(false);
           if (allCues.length > 0) {
-            urlCueCacheRef.current.set(url, allCues);
+            setCueCacheEntry(url, allCues);
             if (cacheKey && isTranslated) {
               AsyncStorage.setItem(cacheKey, JSON.stringify(allCues)).catch(() => {});
               /* نظّف مفاتيح الترجمة القديمة (sub-ar-*) — ابقَ على آخر 10 فقط */
@@ -864,7 +901,7 @@ export function RiftPlayer({
           const text = await r.text();
           if (cancelled) return;
           const cues = parseVTT(text);
-          if (cues.length > 0) urlCueCacheRef.current.set(url, cues);
+          if (cues.length > 0) setCueCacheEntry(url, cues);
           setLoadedCues(cues);
           if (cues.length > 0) setSubOn(true);
         }).catch(() => {

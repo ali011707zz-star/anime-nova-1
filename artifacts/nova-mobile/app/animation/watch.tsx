@@ -201,9 +201,12 @@ const w2 = StyleSheet.create({
 function SpinRing() {
   const rot = useRef(new Animated.Value(0)).current;
   useEffect(() => {
-    Animated.loop(
+    /* ⚠️ احفظ مرجع الـ loop لإيقافه عند unmount — منع memory leak */
+    const anim = Animated.loop(
       Animated.timing(rot, { toValue: 1, duration: 900, easing: Easing.linear, useNativeDriver: true })
-    ).start();
+    );
+    anim.start();
+    return () => anim.stop();
   }, []);
   const rotate = rot.interpolate({ inputRange: [0, 1], outputRange: ["0deg", "360deg"] });
   return (
