@@ -164,13 +164,80 @@ export default {
         headers: {
           "Access-Control-Allow-Origin": "*",
           "Access-Control-Allow-Headers": "Range, Content-Type",
-          "Access-Control-Allow-Methods": "GET, OPTIONS",
+          "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
           "Access-Control-Max-Age": "86400",
         },
       });
     }
 
     const reqUrl = new URL(request.url);
+
+    // ── Anime Rift API Proxy (geo-bypass via Cloudflare edge IPs) ──
+    // Route: /rift-proxy?path=/library/search?q=naruto&v=4
+    // Protected by CF_PROXY_KEY in X-Rift-Key header
+    if (reqUrl.pathname === "/rift-proxy") {
+      const riftKey = request.headers.get("x-rift-key") || reqUrl.searchParams.get("key") || "";
+      const expectedKey = env.CF_PROXY_KEY || "";
+      if (expectedKey && riftKey !== expectedKey) {
+        return new Response("Unauthorized", { status: 401 });
+      }
+      const apiVersion = reqUrl.searchParams.get("v") || "4";
+      const apiPath = reqUrl.searchParams.get("path") || "";
+      if (!apiPath) {
+        return new Response("path parameter required", { status: 400 });
+      }
+      const riftBase = `https://gateway.anime-rift.com/api/v${apiVersion}`;
+      const riftUrl = `${riftBase}${apiPath.startsWith("/") ? apiPath : "/" + apiPath}`;
+
+      // Forward all x- headers from request + add defaults
+      const riftHeaders = {
+        "User-Agent": "Dart/3.10 (dart:io)",
+        "x-platform": "mobile",
+        "x-os": "android",
+        "x-device-release-version": "3.13.13",
+        "x-device-language": "ar",
+        "x-device-timezone": "Africa/Cairo",
+        "x-installation-source": "IS_INSTALLED_FROM_PLAY_PACKAGE_INSTALLER",
+        "Accept": "application/json",
+        "Content-Type": "application/json",
+      };
+      // Forward custom headers from caller
+      for (const [k, v] of request.headers.entries()) {
+        if (k.startsWith("x-") && k !== "x-rift-key") riftHeaders[k] = v;
+        if (k === "authorization") riftHeaders[k] = v;
+        if (k === "integrity") riftHeaders[k] = v;
+      }
+
+      let body = undefined;
+      if (request.method === "POST") {
+        body = await request.text();
+      }
+
+      let riftRes;
+      try {
+        riftRes = await fetch(riftUrl, {
+          method: request.method,
+          headers: riftHeaders,
+          body: body || undefined,
+          redirect: "follow",
+        });
+      } catch (e) {
+        return new Response(JSON.stringify({ error: "upstream fetch failed", detail: e.message }), {
+          status: 502,
+          headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
+        });
+      }
+
+      const riftBody = await riftRes.text();
+      return new Response(riftBody, {
+        status: riftRes.status,
+        headers: {
+          "Content-Type": riftRes.headers.get("content-type") || "application/json",
+          "Access-Control-Allow-Origin": "*",
+          "X-Rift-Upstream-Status": String(riftRes.status),
+        },
+      });
+    }
     const workerOrigin = reqUrl.origin; // https://nova-cdn-proxy.ali011707zz.workers.dev
     let targetRaw, ref;
 
