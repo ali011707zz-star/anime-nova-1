@@ -278,7 +278,22 @@ let schedulerNextRun  = 0;
 let schedulerSentToday = 0;
 let schedulerTimer: ReturnType<typeof setTimeout> | null = null;
 
-const INTERVAL_MS = 30 * 60 * 1000; // كل 30 دقيقة
+const INTERVAL_MS = 10 * 60 * 1000; // كل 10 دقائق (كان 30)
+
+/* ── polling داخلي لـ AnimeSlayer (بدلاً من الانتظار حتى يفتح أحد التطبيق) ── */
+
+async function pollAnimeSlayerLatest(): Promise<void> {
+  const port = process.env.PORT || "8080";
+  try {
+    // نستدعي الـ endpoint داخلياً — يُطلق إشعارات تيليجرام تلقائياً إذا وُجدت حلقات جديدة
+    await fetch(`http://localhost:${port}/api/anime/anslayer-latest`, {
+      signal: AbortSignal.timeout(20_000),
+    });
+    console.log("[scheduler] 🔄 AnimeSlayer polling داخلي — تم");
+  } catch (e: any) {
+    console.warn("[scheduler] AnimeSlayer internal poll error:", e.message);
+  }
+}
 
 /* ── الدورة الواحدة ────────────────────────────────────────────────────── */
 
@@ -286,17 +301,21 @@ async function runSchedulerCycle(): Promise<void> {
   const tok = await getToken();
   if (!tok || !process.env.TELEGRAM_CHANNEL_ID) return;
 
+  // ── 1. فحص AnimeSlayer أولاً (الأسرع والأكثر تزامناً مع الحلقات الجديدة) ──
+  await pollAnimeSlayerLatest();
+
+  // ── 2. فحص AniList airing schedules (انتشار أوسع - لأنمي غير مُدرج في AnimeSlayer) ──
   const now  = Math.floor(Date.now() / 1000);
   const from = schedulerLastRun > 0
     ? schedulerLastRun
-    : now - (INTERVAL_MS / 1000) - 60; // أول مرة: نفس فترة الـ interval فقط (30 دقيقة)
+    : now - (INTERVAL_MS / 1000) - 60;
 
   schedulerLastRun = now;
   schedulerNextRun = now + INTERVAL_MS / 1000;
 
   console.log(`[scheduler] 🔍 فحص AiringSchedules من ${new Date(from * 1000).toISOString()} → الآن`);
 
-  const schedules = await fetchAiringSchedules(from - 60, now + 60); // ±60 ثانية هامش
+  const schedules = await fetchAiringSchedules(from - 60, now + 60);
 
   let sent = 0;
   for (const item of schedules) {
@@ -310,26 +329,35 @@ async function runSchedulerCycle(): Promise<void> {
 
     if (await wasNotified(anilistId, ep)) continue;
 
-    // فحص توفر الحلقة في AnimeWitcher — فقط أرسل عندما تكون متاحة فعلاً
     const titleToCheck = media.title?.romaji || media.title?.english || "";
     if (!titleToCheck) continue;
 
-    const awAvailable = await checkAnimeWitcherEp(titleToCheck, ep);
+    // ── فحص توفر الحلقة في AnimeWitcher مع timeout قصير (5 ثوانٍ فقط) ──
+    // إذا فشل الفحص أو انتهت المهلة → أرسل الإشعار مباشرة (لا تتأخر)
+    let awAvailable = false;
+    try {
+      const awPromise = checkAnimeWitcherEp(titleToCheck, ep);
+      awAvailable = await Promise.race([
+        awPromise,
+        new Promise<boolean>(resolve => setTimeout(() => resolve(true), 5_000)), // fallback: أرسل بعد 5s
+      ]);
+    } catch {
+      awAvailable = true; // خطأ → أرسل على أي حال
+    }
+
     if (!awAvailable) {
       console.log(`[scheduler] ⏳ AnimeWitcher لم يُضف بعد: ${titleToCheck} ح${ep} — تخطّي`);
-      // لا نُرسل إشعاراً مسبقاً، ننتظر التأكيد
-      notifiedEpisodes.delete(`tg_notify:${anilistId}:${ep}`); // أبقِه غير مُعلَّم حتى يتوفر
+      notifiedEpisodes.delete(`tg_notify:${anilistId}:${ep}`);
       continue;
     }
 
-    console.log(`[scheduler] ✨ AnimeWitcher أكّد توفر: ${titleToCheck} ح${ep} — إرسال الإشعار`);
+    console.log(`[scheduler] ✨ إرسال الإشعار: ${titleToCheck} ح${ep}`);
 
     const poster  = media.coverImage?.extraLarge || media.coverImage?.large || null;
     const caption = buildCaption(media, ep);
     const title   = media.title?.english || media.title?.romaji || "أنمي";
     const titleAr = media.title?.native || title;
 
-    // حفظ الإشعار داخل التطبيق
     await saveNotification({
       type: "anime_episode",
       title,
@@ -353,7 +381,6 @@ async function runSchedulerCycle(): Promise<void> {
 
     console.log(`[scheduler] ✅ أُرسل → ${title} ح${ep}`);
 
-    // تأخير بسيط بين الرسائل لتجنب flood limit
     if (sent < schedules.length) {
       await new Promise(r => setTimeout(r, 1_500));
     }
