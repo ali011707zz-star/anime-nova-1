@@ -394,7 +394,9 @@ export default function WatchScreen() {
         }));
         hasCachedRef.current = true;
         setSources(resolved);
-        seenKeys.current = new Set(resolved.map(s => getPlayUrl(s)).filter(Boolean));
+        /* ⚠️ لا نبذر seenKeys من الكاش — نتركها فارغة حتى تصل المصادر الطازجة وتحلّ محلّ القديمة.
+           إذا بذرنا seenKeys من URLs الكاش، الجلب الطازج (fetchOneSite) يُصفِّي المصادر الجديدة
+           لأن URL يطابق كاش قديم → يتم تشغيل رابط منتهٍ → كراش. */
         setLoading(false);
         setScreen("picker");
       } catch { }
@@ -484,7 +486,12 @@ export default function WatchScreen() {
         if (!newSrcs.length || !isMountedRef.current || fetchEpochRef.current !== myEpoch) return;
         allFresh.push(...newSrcs);
 
-        setSources(prev => [...prev, ...newSrcs]);
+        /* استبدل المصادر القديمة (من الكاش) لنفس الموقع بالجديدة الطازجة —
+           يمنع تشغيل روابط CDN منتهية الصلاحية من الكاش القديم. */
+        setSources(prev => {
+          const withoutOldSite = prev.filter(s => s.site !== site);
+          return [...withoutOldSite, ...newSrcs];
+        });
 
         /* تشغيل تلقائي مباشر — يتجاوز صفحة الـ picker تماماً */
         if (!autoPlayFiredRef.current) {
@@ -911,6 +918,14 @@ export default function WatchScreen() {
           /* جميع مصادر المشغّل فشلت → العودة للـ picker حتى يرى المستخدم بقية المصادر */
           console.warn("[Anime Watch] جميع المصادر فشلت — العودة للـ picker");
           saveProgress();
+          /* ⚠️ احذف كاش المصادر التالفة — يمنع تكرار الكراش عند فتح الحلقة مجدداً.
+             بدون هذا السطر: رابط CDN منتهٍ يبقى في AsyncStorage → يُشغَّل تلقائياً
+             في المرة القادمة → يُسقط التطبيق → لا يعمل إلا بعد مسح البيانات. */
+          if (srcCacheKey) AsyncStorage.removeItem(srcCacheKey).catch(() => {});
+          hasCachedRef.current = false;
+          setSources([]);
+          seenKeys.current.clear();
+          autoPlayFiredRef.current = false;
           setScreen("picker");
         }}
         onProgress={(pos, dur) => {

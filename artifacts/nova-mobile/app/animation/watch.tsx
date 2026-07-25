@@ -391,12 +391,14 @@ export default function AnimationWatchScreen() {
         /* أضف المصادر المحفوظة فوراً وانتقل للـ picker */
         hasCachedRef.current = true;
         setSources(resolved);
-        seenKeys.current = new Set(resolved.map(s => s.proxyUrl || s.directUrl || s.url || "").filter(Boolean));
+        /* ⚠️ لا نبذر seenKeys من الكاش — نتركها فارغة حتى تصل المصادر الطازجة
+           وتحلّ محلّ القديمة per-site. هذا يمنع تشغيل روابط CDN منتهية الصلاحية. */
         setLoading(false);
         setScreen("picker");
 
-        /* شغّل تلقائياً — أولوية: DU (Dulo) أولاً ثم أي مصدر مباشر */
-        if (autoplay) {
+        /* شغّل تلقائياً من الكاش فقط إذا كان الكاش حديثاً (< 2 دقيقة) —
+           الكاش الأقدم قد يحتوي روابط CDN منتهية الصلاحية تُسبّب الكراش */
+        if (autoplay && Date.now() - ts < 2 * 60 * 1000) {
           const isDU = (s: AnimSrc) => (s.label || "").toLowerCase().startsWith("dulo");
           const first =
             resolved.find(s => isDirectPlayable(s) && isDU(s)) ??
@@ -804,6 +806,11 @@ export default function AnimationWatchScreen() {
         onProgress={(pos, _dur) => handleTimeUpdate(pos)}
         onError={() => {
           handleTimeUpdate(lastTimeRef.current);
+          /* ⚠️ احذف كاش المصادر التالفة — يمنع تكرار الكراش عند فتح نفس المحتوى مجدداً */
+          if (animSrcCacheKey) AsyncStorage.removeItem(animSrcCacheKey).catch(() => {});
+          hasCachedRef.current = false;
+          setSources([]);
+          seenKeys.current.clear();
           setScreen("picker");
         }}
         onNextEpisode={type === "tv" ? () => {

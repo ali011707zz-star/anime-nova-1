@@ -1205,9 +1205,7 @@ export function RiftPlayer({
     const newSrc = sources[idx];
     console.log(`[Nova Mobile] تبديل المصدر → ${newSrc?.label || "مجهول"} (${idx + 1}/${sources.length}): ${newSrc?.url?.slice(0, 120)}`);
     setSrcIdx(idx);
-    setError(false);
     setIsAutoCycling(false);
-    setBuffering(true);
     setIsEnded(false);
     resumedRef.current = false;
     /* إعادة ضبط كاشف الـ stall عند كل تبديل مصدر */
@@ -1217,11 +1215,28 @@ export function RiftPlayer({
     /* Reset whisper status when source changes */
     setWhisperStatus("idle");
     setWhisperLang("");
+
+    /* ⚠️ التحقق من صلاحية الـ URL قبل تمريره لـ ExoPlayer/AVPlayer —
+       URL فارغ أو بدون بروتوكول يُسبِّب native crash بدل statusChange→error */
+    const srcUrl = newSrc?.url;
+    if (!srcUrl || typeof srcUrl !== "string" || (!srcUrl.startsWith("http://") && !srcUrl.startsWith("https://"))) {
+      console.warn(`[RiftPlayer] ⛔ URL غير صالح للمصدر ${idx + 1}: "${srcUrl?.slice(0, 60) ?? "فارغ"}"`);
+      setError(true);
+      setBuffering(false);
+      return;
+    }
+
+    setError(false);
+    setBuffering(true);
     try {
       /* نمرّر URL string فقط — VPS proxy يُضيف Referer/Origin داخلياً */
-      player.replace(newSrc.url as any);
+      player.replace(srcUrl as any);
       /* play() is triggered in statusChange → readyToPlay once the stream is buffered */
-    } catch {}
+    } catch (e) {
+      console.warn("[RiftPlayer] player.replace() رمى استثناء:", e);
+      setError(true);
+      setBuffering(false);
+    }
   }, [player, sources]);
 
   /* ─── Whisper audio transcription ─── */
