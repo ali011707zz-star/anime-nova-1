@@ -3,6 +3,11 @@
  * يتصل مباشرة بـ Supabase عبر متغيرات البيئة (SUPABASE_URL + SUPABASE_SERVICE_KEY)
  */
 
+// ── إجبار IPv4 لجميع DNS resolutions — VPS لا يدعم IPv6 للخدمات الخارجية ──
+// يجب أن يكون قبل أي import يستخدم الشبكة
+import { setDefaultResultOrder } from "dns";
+setDefaultResultOrder("ipv4first");
+
 // ── حماية العملية من الانهيار بسبب أخطاء غير معالجة (TimeoutError على Readable streams إلخ) ──
 process.on("uncaughtException", (err: any) => {
   // نتجاهل TimeoutError المعتادة من AbortSignal.timeout() على Streams

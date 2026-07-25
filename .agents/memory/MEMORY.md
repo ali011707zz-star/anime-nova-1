@@ -139,6 +139,7 @@
 - [Animation HLS deferred](animation-hls-currently-deferred.md) — user asked to leave animation HLS sources/player untouched because they are currently not working.
 - [MitAnime scraper fix 2026-07-24](mitanime-scraper-fix-2026-07-24.md) — RSC uses plain quotes not escaped; parseMitanimeServers MARKER was wrong → always returned []; fixed + slug candidates expanded (after-colon, no-season).
 - [CORS + scheduler startup fix 2026-07-25](cors-scheduler-startup-fix.md) — nova-player.local blocked OAuth WebViews; scheduler/email started before config-sync → race condition; .env cleared Jul 21, credentials in .bak.
+- [VPS SMTP IPv6 + Port Block](vps-smtp-ipv6-blocked.md) — منافذ 587/465 محجوبة من الاستضافة + IPv6 unreachable; dns.setDefaultResultOrder('ipv4first') في index.ts; يحتاج Resend API أو فتح المنفذ.
 - [Anime Rift + AnimeWorld investigation 2026-07-25](anime-rift-animeworld-investigation-2026-07-25.md) — CF Worker IPs تتجاوز RESTRICTED_COUNTRY (HTML 404 لا JSON block)؛ /rift-proxy route جاهز في worker.js ينتظر CLOUDFLARE_API_TOKEN للنشر؛ Firebase RC API key صحيح؛ blutter Dart 3.10.4 جاهز للتشغيل.
 - [Anime Rift live source verification](anime-rift-live-source-test-2026-07-25.md) — direct_link حقيقي من Rift شُغّل على VPS بـ veldox MP4 وffprobe؛ Worker يتجاوز geo فقط، والاستخراج الجديد يحتاج integrity من جهاز حقيقي.
 - [Mobile crash fix — stale cache + URL validation](mobile-crash-fix-2026-07-25.md) — 4 أخطاء مُصلَّحة: seenKeys من كاش+upsert-by-site+onError يحذف كاش+RiftPlayer يتحقق من URL قبل player.replace.

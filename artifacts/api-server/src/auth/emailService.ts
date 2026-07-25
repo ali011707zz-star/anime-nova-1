@@ -3,7 +3,18 @@
  * يقرأ SMTP من متغيرات البيئة أو Supabase app_config
  */
 import nodemailer, { type Transporter } from "nodemailer";
+import { promises as dnsPromises } from "dns";
 import { sbSelect, sbUpsert } from "../lib/supabaseClient.js";
+
+/** يحوّل اسم المضيف إلى IPv4 صريح لتجنب ENETUNREACH على IPv6 */
+async function resolveIPv4(hostname: string): Promise<string> {
+  try {
+    const addrs = await dnsPromises.resolve4(hostname);
+    return addrs[0] ?? hostname;
+  } catch {
+    return hostname;
+  }
+}
 
 let transporter: Transporter | null = null;
 let testAccount: { user: string; pass: string } | null = null;
@@ -42,17 +53,19 @@ async function getTransporter(): Promise<Transporter> {
   let port = dbPort ? Number(dbPort) : (process.env.SMTP_PORT ? Number(process.env.SMTP_PORT) : undefined);
 
   if (user && pass) {
-    const smtpHost = host || "smtp.gmail.com";
-    const smtpPort = port || 587;
+    const smtpHostname = host || "smtp.gmail.com";
+    const smtpPort     = port || 587;
+    // حل الـ hostname إلى IPv4 صريح لتجنب ENETUNREACH (VPS لا يدعم IPv6 لـ Gmail)
+    const smtpHost = await resolveIPv4(smtpHostname);
     transporter = nodemailer.createTransport({
       host: smtpHost,
       port: smtpPort,
       secure: smtpPort === 465,
       auth: { user, pass },
-      tls: { rejectUnauthorized: false },
+      tls: { rejectUnauthorized: false, servername: smtpHostname },
     });
     isEthereal = false;
-    console.log(`[email] ✅ SMTP جاهز → ${smtpHost}:${smtpPort} (${user})`);
+    console.log(`[email] ✅ SMTP جاهز → ${smtpHostname}(${smtpHost}):${smtpPort} (${user})`);
   } else {
     // لا يوجد SMTP مضبوط — افشل بسرعة بدل الانتظار على Ethereal (يسبب timeout 120ث)
     console.error("[email] SMTP_PASS not configured in env or DB — email disabled");
@@ -69,7 +82,8 @@ export async function initEmailService(): Promise<void> {
       console.log("[email] ✅ اتصال SMTP تم التحقق منه بنجاح");
     }
   } catch (err: any) {
-    transporter = null;
+    // لا نُصفّر الـ transporter هنا — يحتفظ بـ IPv4 المُحلَّل
+    // حتى لو فشل verify() (قد تكون مشكلة مؤقتة) الإرسال الفعلي قد يعمل
     console.error("[email] ❌ فشل التحقق من SMTP:", err.message);
   }
 }

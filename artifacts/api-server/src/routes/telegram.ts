@@ -272,6 +272,7 @@ function buildCaption(media: any, ep: number): string {
 
 /* ── حالة الـ scheduler ──────────────────────────────────────────────── */
 
+let schedulerFirstRun = true;  // أول دورة: بذر الكاش بدون إرسال لتفادي إغراق Telegram
 let schedulerRunning  = false;
 let schedulerLastRun  = 0;
 let schedulerNextRun  = 0;
@@ -280,18 +281,91 @@ let schedulerTimer: ReturnType<typeof setTimeout> | null = null;
 
 const INTERVAL_MS = 10 * 60 * 1000; // كل 10 دقائق (كان 30)
 
-/* ── polling داخلي لـ AnimeSlayer (بدلاً من الانتظار حتى يفتح أحد التطبيق) ── */
+/* ── polling مباشر لـ AnimeSlayer API (بدون المرور على الـ cached endpoint) ── */
+// السبب: الـ endpoint /api/anime/anslayer-latest لديه TTL كاش 15 دقيقة يرجع
+// مبكراً بدون فحص الحلقات الجديدة، بينما الـ scheduler يعمل كل 10 دقائق.
+// الحل: استدعاء AnimeSlayer API مباشرة + تتبع الإشعارات المرسلة عبر DB.
 
-async function pollAnimeSlayerLatest(): Promise<void> {
-  const port = process.env.PORT || "8080";
+const ANSLAYER_SCHED_BASE  = "https://anslayer.com/anime/public";
+const ANSLAYER_SCHED_CID   = "android-app2";
+const ANSLAYER_SCHED_CSEC  = "7befba6263cc14c90d2f1d6da2c5cf9b251bfbbd";
+
+async function pollAnimeSlayerDirect(): Promise<void> {
   try {
-    // نستدعي الـ endpoint داخلياً — يُطلق إشعارات تيليجرام تلقائياً إذا وُجدت حلقات جديدة
-    await fetch(`http://localhost:${port}/api/anime/anslayer-latest`, {
-      signal: AbortSignal.timeout(20_000),
+    const json = JSON.stringify({ list_type: "latest_updated_episode_new", page: 1 });
+    const url  = `${ANSLAYER_SCHED_BASE}/animes/get-published-animes?json=${encodeURIComponent(json)}`;
+    const resp = await fetch(url, {
+      headers: {
+        "Client-Id":     ANSLAYER_SCHED_CID,
+        "Client-Secret": ANSLAYER_SCHED_CSEC,
+        "User-Agent":    "okhttp/4.12.0",
+      },
+      signal: AbortSignal.timeout(25_000),
     });
-    console.log("[scheduler] 🔄 AnimeSlayer polling داخلي — تم");
+    if (!resp.ok) {
+      console.warn(`[scheduler] AnimeSlayer API HTTP ${resp.status}`);
+      return;
+    }
+    const data = await resp.json() as any;
+    const list: any[] = data?.response?.data || [];
+
+    if (!list.length) {
+      console.log("[scheduler] 🔄 AnimeSlayer: لا بيانات في الرد");
+      return;
+    }
+
+    // ── أول تشغيل بعد restart: نبذر الكاش فقط بدون إرسال ──────────────────
+    // لتفادي إغراق Telegram بكل الحلقات الحالية دفعة واحدة
+    if (schedulerFirstRun) {
+      schedulerFirstRun = false;
+      let seeded = 0;
+      for (const item of list) {
+        const animeId = parseInt(item.anime_id, 10);
+        const epMatch = String(item.latest_episode_name || "").match(/(\d+)/);
+        const ep      = epMatch ? parseInt(epMatch[1], 10) : null;
+        if (!animeId || !ep) continue;
+        if (!(await wasNotified(animeId, ep))) {
+          await markNotified(animeId, ep);
+          seeded++;
+        }
+      }
+      console.log(`[scheduler] 🌱 AnimeSlayer seed: ${seeded} حلقة موجودة مُسجَّلة (لن تُرسل) — الدورات القادمة ستُرسل الجديد فقط`);
+      return;
+    }
+
+    let sent = 0;
+    for (const item of list) {
+      const animeId = parseInt(item.anime_id, 10);
+      const epMatch = String(item.latest_episode_name || "").match(/(\d+)/);
+      const ep      = epMatch ? parseInt(epMatch[1], 10) : null;
+      if (!animeId || !ep) continue;
+
+      // تحقق من DB + ذاكرة العملية — لا ترسل مرتين
+      if (await wasNotified(animeId, ep)) continue;
+
+      const name  = item.anime_name  || "أنمي";
+      const cover = item.anime_cover_image_url || "";
+
+      console.log(`[scheduler] 🎯 AnimeSlayer جديد: ${name} ح${ep}`);
+
+      try {
+        await notifyNewEpisode(animeId, name, ep, cover || undefined);
+        sent++;
+      } catch (e: any) {
+        console.warn(`[scheduler] notify error (${name}): ${e.message}`);
+      }
+
+      // فاصل بين الرسائل لتجنب Telegram rate-limit (max ~1 msg/sec)
+      await new Promise(r => setTimeout(r, 1_500));
+    }
+
+    if (sent > 0) {
+      console.log(`[scheduler] 📨 AnimeSlayer: أُرسل ${sent} إشعار`);
+    } else {
+      console.log("[scheduler] 📭 AnimeSlayer: لا حلقات جديدة");
+    }
   } catch (e: any) {
-    console.warn("[scheduler] AnimeSlayer internal poll error:", e.message);
+    console.warn("[scheduler] AnimeSlayer direct poll error:", e.message);
   }
 }
 
@@ -301,8 +375,8 @@ async function runSchedulerCycle(): Promise<void> {
   const tok = await getToken();
   if (!tok || !process.env.TELEGRAM_CHANNEL_ID) return;
 
-  // ── 1. فحص AnimeSlayer أولاً (الأسرع والأكثر تزامناً مع الحلقات الجديدة) ──
-  await pollAnimeSlayerLatest();
+  // ── 1. فحص AnimeSlayer مباشرة (بدون الـ cached endpoint) ──
+  await pollAnimeSlayerDirect();
 
   // ── 2. فحص AniList airing schedules (انتشار أوسع - لأنمي غير مُدرج في AnimeSlayer) ──
   const now  = Math.floor(Date.now() / 1000);
