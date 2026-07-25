@@ -140,3 +140,4 @@
 - [MitAnime scraper fix 2026-07-24](mitanime-scraper-fix-2026-07-24.md) — RSC uses plain quotes not escaped; parseMitanimeServers MARKER was wrong → always returned []; fixed + slug candidates expanded (after-colon, no-season).
 - [CORS + scheduler startup fix 2026-07-25](cors-scheduler-startup-fix.md) — nova-player.local blocked OAuth WebViews; scheduler/email started before config-sync → race condition; .env cleared Jul 21, credentials in .bak.
 - [Anime Rift + AnimeWorld investigation 2026-07-25](anime-rift-animeworld-investigation-2026-07-25.md) — CF Worker IPs تتجاوز RESTRICTED_COUNTRY (HTML 404 لا JSON block)؛ /rift-proxy route جاهز في worker.js ينتظر CLOUDFLARE_API_TOKEN للنشر؛ Firebase RC API key صحيح؛ blutter Dart 3.10.4 جاهز للتشغيل.
+- [Anime Rift live source verification](anime-rift-live-source-test-2026-07-25.md) — direct_link حقيقي من Rift شُغّل على VPS بـ veldox MP4 وffprobe؛ Worker يتجاوز geo فقط، والاستخراج الجديد يحتاج integrity من جهاز حقيقي.
