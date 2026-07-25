@@ -351,6 +351,12 @@ export default function WatchScreen() {
      جدولة موجة ثانية مكرّرة عند نجاح أول مصدر (نفس منطق autoFetchAllRef في نظام الويب) */
   const autoFetchAllRef   = useRef(false);
 
+  /* ── تعقّب الـ mount ── */
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => { isMountedRef.current = false; };
+  }, []);
+
   /* ── ترجمة عنوان الحلقة من الإنجليزية للعربية ── */
   useEffect(() => {
     if (!etitle) return;
@@ -359,14 +365,9 @@ export default function WatchScreen() {
     const base = getBaseUrl();
     secureFetch(`${base}/api/anime/translate?text=${encodeURIComponent(raw)}&from=en&to=ar`)
       .then(r => r.ok ? r.json() : null)
-      .then((d: any) => { if (d?.translated) setArEpTitle(d.translated); })
+      .then((d: any) => { if (!isMountedRef.current) return; if (d?.translated) setArEpTitle(d.translated); })
       .catch(() => {});
   }, [etitle]); // eslint-disable-line
-
-  useEffect(() => {
-    isMountedRef.current = true;
-    return () => { isMountedRef.current = false; };
-  }, []);
 
   const progressKey    = `progress-${anime}-${epNum}`;
   const srcCacheKey    = anime ? `anime-srcs-${anime}-e${epNum}` : null;
@@ -374,7 +375,10 @@ export default function WatchScreen() {
 
   /* ── Load resume time + cached sources ── */
   useEffect(() => {
-    AsyncStorage.getItem(progressKey).then(v => { if (v) setResumeTime(parseFloat(v) || 0); });
+    AsyncStorage.getItem(progressKey).then(v => {
+      if (!isMountedRef.current) return;
+      if (v) setResumeTime(parseFloat(v) || 0);
+    }).catch(() => {});
 
     if (!srcCacheKey) return;
     AsyncStorage.getItem(srcCacheKey).then(raw => {

@@ -121,10 +121,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   };
 
   const addToHistory = async (item: WatchProgress) => {
+    /* ⚠️ AsyncStorage.setItem داخل setState محظور في React concurrent mode —
+       نحسب القيمة أولاً ثم نكتب AsyncStorage في microtask منفصل */
     setWatchHistory((prev) => {
       const filtered = prev.filter((h) => !(h.animeId === item.animeId && h.ep === item.ep));
       const updated = [item, ...filtered].slice(0, 50);
-      AsyncStorage.setItem("nova-history", JSON.stringify(updated));
+      Promise.resolve().then(() => AsyncStorage.setItem("nova-history", JSON.stringify(updated)).catch(() => {}));
       return updated;
     });
   };
@@ -132,7 +134,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const removeFromHistory = async (animeId: number) => {
     setWatchHistory((prev) => {
       const updated = prev.filter((h) => h.animeId !== animeId);
-      AsyncStorage.setItem("nova-history", JSON.stringify(updated));
+      Promise.resolve().then(() => AsyncStorage.setItem("nova-history", JSON.stringify(updated)).catch(() => {}));
       return updated;
     });
   };
@@ -141,7 +143,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setFavorites((prev) => {
       const exists = prev.find((f) => f.id === anime.id);
       const updated = exists ? prev.filter((f) => f.id !== anime.id) : [anime, ...prev].slice(0, 500);
-      AsyncStorage.setItem("nova-favorites", JSON.stringify(updated));
+      Promise.resolve().then(() => AsyncStorage.setItem("nova-favorites", JSON.stringify(updated)).catch(() => {}));
       return updated;
     });
   };

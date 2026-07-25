@@ -344,17 +344,25 @@ export default function AnimationWatchScreen() {
   const autoPlayFiredRef  = useRef(false);
   const autoPlayTimerRef  = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hasCachedRef      = useRef(false); // هل تم تحميل مصادر من الكاش المحلي؟
+  const isMountedRef      = useRef(true);  // يمنع setState بعد unmount → يحمي من crash
 
   const progressKey   = `anim-wp-${tmdbId}-${type}-${season}-${ep}`;
   /* كاش المصادر المحلي لفتح فوري في المرة الثانية */
   const animSrcCacheKey = tmdbId ? `anim-srcs-${tmdbId}-${type}-s${season}-e${ep}` : null;
   const ANIM_SRC_CACHE_TTL = 60 * 60 * 1000; // ساعة واحدة
 
+  /* ── تنظيف: منع setState بعد unmount ── */
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => { isMountedRef.current = false; };
+  }, []);
+
   /* ── تحميل المصادر المحفوظة + وقت الاستئناف ── */
   useEffect(() => {
     AsyncStorage.getItem(progressKey).then(v => {
+      if (!isMountedRef.current) return;
       if (v) setResumeTime(parseFloat(v) || 0);
-    });
+    }).catch(() => {});
     /* احترام إعداد الترجمة من الإعدادات */
     AsyncStorage.getItem("pref-anim-sub").then(v => {
       if (v === "false") setSubLang("off");
@@ -363,10 +371,11 @@ export default function AnimationWatchScreen() {
     /* فحص الكاش المحلي للمصادر — يتيح الفتح الفوري */
     if (!animSrcCacheKey) return;
     AsyncStorage.getItem(animSrcCacheKey).then(raw => {
-      if (!raw) return;
+      if (!raw || !isMountedRef.current) return;
       try {
         const { sources: cached, ts }: { sources: AnimSrc[]; ts: number } = JSON.parse(raw);
         if (!cached?.length || Date.now() - ts > ANIM_SRC_CACHE_TTL) return;
+        if (!isMountedRef.current) return;
 
         const base = getBaseUrl();
         const resolved = cached.map(s => ({
@@ -391,10 +400,13 @@ export default function AnimationWatchScreen() {
             resolved.find(s => isDirectPlayable(s));
           if (first) {
             autoPlayFiredRef.current = true;
-            setTimeout(() => { setPlayingSrc(first); setScreen("native"); }, 0);
+            setTimeout(() => {
+              if (!isMountedRef.current) return;
+              setPlayingSrc(first); setScreen("native");
+            }, 0);
           }
         }
-      } catch { /* تجاهل كاش تالف */ }
+      } catch { /* تجاهل كاش تالف — يحدث عند الإغلاق القسري للتطبيق */ }
     }).catch(() => {});
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [progressKey, animSrcCacheKey]);
@@ -410,6 +422,7 @@ export default function AnimationWatchScreen() {
     )
       .then(r => r.json())
       .then((data: any) => {
+        if (!isMountedRef.current) return;
         const tracks: any[] = data?.tracks || [];
         const arTrack = tracks.find((t: any) => t.lang === "ar" || t.lang === "ar-auto");
         const enTrack = tracks.find((t: any) => t.lang === "en" || t.label?.toLowerCase().includes("english"));
@@ -451,7 +464,10 @@ export default function AnimationWatchScreen() {
     /* Save to anim-watch-history */
     if (t > 30) {
       AsyncStorage.getItem("anim-watch-history").then(raw => {
-        const hist = JSON.parse(raw || "[]");
+        if (!isMountedRef.current) return;
+        /* ⚠️ CRITICAL: try-catch مطلوب — raw قد يكون بيانات تالفة إذا أُغلق التطبيق قسراً أثناء الكتابة */
+        let hist: any[] = [];
+        try { hist = JSON.parse(raw || "[]"); if (!Array.isArray(hist)) hist = []; } catch { hist = []; }
         const item = { id: tmdbId, type, ep, season, title: titleStr, poster: posterUrl, date: new Date().toISOString() };
         const filtered = hist.filter((h: any) => !(h.id === tmdbId && h.type === type));
         AsyncStorage.setItem("anim-watch-history", JSON.stringify([item, ...filtered].slice(0, 50))).catch(() => {});

@@ -88,10 +88,12 @@ export default function HomeScreen() {
   const BASE_URL = getBaseUrl();
   const [dubbedSeries, setDubbedSeries] = useState<any[]>([]);
   useEffect(() => {
+    let cancelled = false;
     fetch(`${BASE_URL}/api/dubbed/catalog?page=1`)
       .then(r => r.json())
-      .then(d => setDubbedSeries((d.results || d.items || d.series || []).slice(0, 14)))
+      .then(d => { if (!cancelled) setDubbedSeries((d.results || d.items || d.series || []).slice(0, 14)); })
       .catch(() => {});
+    return () => { cancelled = true; };
   }, []);
 
 
