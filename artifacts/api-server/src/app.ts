@@ -80,6 +80,8 @@ export async function createApp(): Promise<Express> {
       if (/^https?:\/\/[a-zA-Z0-9-]+\.duckdns\.org$/.test(origin)) return cb(null, true);
       // في التطوير: اسمح بأي localhost
       if (origin.includes("localhost") || origin.includes("127.0.0.1")) return cb(null, true);
+      // السماح لـ nova-player.local (Expo mobile OAuth WebViews)
+      if (origin.includes("nova-player.local") || origin.endsWith(".local")) return cb(null, true);
       cb(new Error(`CORS: ${origin} غير مسموح`));
     },
     credentials: true,

@@ -66,9 +66,8 @@ app.listen(port, host, (err) => {
     }
   })();
 
-  initEmailService().catch(() => {});
-
-  // ── مزامنة ENV ↔ DB عند كل startup ──────────────────────────────────────
+  // ── مزامنة ENV ↔ DB ثم تشغيل الـ schedulers بعد اكتمال التحميل ──────────
+  // ملاحظة: الـ schedulers تبدأ داخل هذا الـ block لتضمن توفر التوكن من DB
   (async () => {
     try {
       const { setDbConfig, getDbConfig } = await import("./lib/dbConfig.js");
@@ -104,52 +103,60 @@ app.listen(port, host, (err) => {
         const v = await getDbConfig("telegram_channel_id");
         if (v) { process.env.TELEGRAM_CHANNEL_ID = v; restored.push("TELEGRAM_CHANNEL_ID"); }
       }
+      if (!process.env.SMTP_PASS) {
+        const v = await getDbConfig("smtp_pass");
+        if (v) { process.env.SMTP_PASS = v; restored.push("SMTP_PASS"); }
+      }
       if (restored.length > 0)
         console.log("[config-sync] ✅ DB → ENV (restored):", restored.join(", "));
     } catch (e: any) {
       console.warn("[config-sync] ⚠️ فشل مزامنة ENV ↔ DB:", e.message);
     }
-  })();
 
-  // ── تصحيح SMTP على Orkestr تلقائياً عند الـ startup ──
-  const orkestrUrl = process.env.ORKESTR_RELAY_URL;
-  const appSecret  = process.env.APP_SECRET || "anime-nova-default-change-me-aabbccdd";
-  const smtpUser   = process.env.SMTP_USER;
-  const smtpPass   = process.env.SMTP_PASS;
-  if (orkestrUrl && smtpUser && smtpPass) {
-    fetch(`${orkestrUrl}/api/admin/smtp-env-patch`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "x-relay-secret": appSecret },
-      body: JSON.stringify({ smtp_user: smtpUser, smtp_pass: smtpPass, smtp_host: process.env.SMTP_HOST || "smtp.gmail.com", smtp_port: process.env.SMTP_PORT || "587" }),
-    }).then(r => r.ok ? r.json() : Promise.reject(r.status)).then((d: any) => {
-      if (d.ok) console.log("[smtp-sync] ✅ Orkestr smtp-env-patch →", d.smtp_user);
-    }).catch(() => {
-      fetch(`${orkestrUrl}/api/admin/smtp-config`, {
+    // ── إعداد email بعد اكتمال config-sync (يضمن توفر SMTP_PASS) ──
+    initEmailService().catch(() => {});
+
+    // ── تصحيح SMTP على Orkestr تلقائياً عند الـ startup ──
+    const orkestrUrl = process.env.ORKESTR_RELAY_URL;
+    const appSecret  = process.env.APP_SECRET || "anime-nova-default-change-me-aabbccdd";
+    const smtpUser   = process.env.SMTP_USER;
+    const smtpPass   = process.env.SMTP_PASS;
+    if (orkestrUrl && smtpUser && smtpPass) {
+      fetch(`${orkestrUrl}/api/admin/smtp-env-patch`, {
         method: "POST",
         headers: { "Content-Type": "application/json", "x-relay-secret": appSecret },
         body: JSON.stringify({ smtp_user: smtpUser, smtp_pass: smtpPass, smtp_host: process.env.SMTP_HOST || "smtp.gmail.com", smtp_port: process.env.SMTP_PORT || "587" }),
-      }).catch(() => {});
-    });
-  }
-
-  const schedulerEnabled = process.env.TELEGRAM_SCHEDULER_ENABLED !== "false";
-  if (schedulerEnabled) {
-    const domain =
-      process.env.APP_DOMAIN ||
-      process.env.REPLIT_DEV_DOMAIN ||
-      process.env.REPLIT_DOMAINS?.split(",")[0] ||
-      null;
-    if (domain) {
-      registerTelegramWebhook(domain).catch(() => {});
-    } else {
-      console.warn("[telegram] ⚠️ لم يُعثر على domain — webhook لن يُسجَّل تلقائياً");
+      }).then(r => r.ok ? r.json() : Promise.reject(r.status)).then((d: any) => {
+        if (d.ok) console.log("[smtp-sync] ✅ Orkestr smtp-env-patch →", d.smtp_user);
+      }).catch(() => {
+        fetch(`${orkestrUrl}/api/admin/smtp-config`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "x-relay-secret": appSecret },
+          body: JSON.stringify({ smtp_user: smtpUser, smtp_pass: smtpPass, smtp_host: process.env.SMTP_HOST || "smtp.gmail.com", smtp_port: process.env.SMTP_PORT || "587" }),
+        }).catch(() => {});
+      });
     }
-    startEpisodeScheduler();
-  } else {
-    console.log("[telegram] ℹ️ TELEGRAM_SCHEDULER_ENABLED=false — الـ scheduler معطَّل");
-  }
 
-  // تشغيل scheduler الأنيميشن دائماً (لا يحتاج Telegram token)
-  startAnimationNotificationScheduler();
+    // ── تشغيل الـ schedulers بعد اكتمال تحميل التوكن من DB ──────────────────
+    const schedulerEnabled = process.env.TELEGRAM_SCHEDULER_ENABLED !== "false";
+    if (schedulerEnabled) {
+      const domain =
+        process.env.APP_DOMAIN ||
+        process.env.REPLIT_DEV_DOMAIN ||
+        process.env.REPLIT_DOMAINS?.split(",")[0] ||
+        null;
+      if (domain) {
+        registerTelegramWebhook(domain).catch(() => {});
+      } else {
+        console.warn("[telegram] ⚠️ لم يُعثر على domain — webhook لن يُسجَّل تلقائياً");
+      }
+      startEpisodeScheduler();
+    } else {
+      console.log("[telegram] ℹ️ TELEGRAM_SCHEDULER_ENABLED=false — الـ scheduler معطَّل");
+    }
+
+    // تشغيل scheduler الأنيميشن دائماً (لا يحتاج Telegram token)
+    startAnimationNotificationScheduler();
+  })();
 
 });
