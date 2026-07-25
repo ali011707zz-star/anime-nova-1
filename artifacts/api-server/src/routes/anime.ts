@@ -487,6 +487,9 @@ const HOPX_PROXY_BASE      = process.env.HOPX_PROXY_URL    || "http://localhost:
 // النشر: bash cf-bypass-service/deploy-openshift.sh <TOKEN>
 const OPENSHIFT_CF_URL     = process.env.OPENSHIFT_CF_URL   || "";
 const NOPECHA_KEY          = process.env.NOPECHA_KEY         || "";
+// Hound CF-Bypass Service — patchright stealth browser يحل Turnstile محلياً على VPS
+// تشغيل: cd /opt/anime-nova/hound-service && bash install.sh && pm2 start start.sh --name hound-service
+const HOUND_SERVICE_URL    = process.env.HOUND_SERVICE_URL   || "http://localhost:8766";
 let _hopxAlive: boolean | null = null;
 let _hopxCheckedAt = 0;
 
@@ -6043,6 +6046,39 @@ async function a3rbFetchPage(url: string, timeoutMs = 35000): Promise<string | n
     }
   } else {
     console.warn("[anime3rb] OPENSHIFT_CF_URL غير مُضبوط — شغّل: bash cf-bypass-service/deploy-openshift.sh <TOKEN>");
+  }
+
+  // ── المسار البطيء 3: Hound CF-Bypass Service (patchright + Turnstile solver) ──
+  // يعمل محلياً على VPS — أفضل من Hopx لأنه يحل Turnstile Interactive
+  // التثبيت: cd /opt/anime-nova/hound-service && bash install.sh
+  //          pm2 start start.sh --name hound-service
+  if (HOUND_SERVICE_URL) {
+    try {
+      // فحص صحة الخدمة أولاً (timeout قصير)
+      const hh = await fetch(`${HOUND_SERVICE_URL}/health`, { signal: AbortSignal.timeout(4000) });
+      if (hh.ok) {
+        console.log(`[anime3rb] Hound patchright bypass → ${url.slice(-50)}`);
+        const hr = await fetch(`${HOUND_SERVICE_URL}/fetch`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ url, wait: 9000, referer: REF, solve_cf: true }),
+          signal: AbortSignal.timeout(timeoutMs + 15000),
+        });
+        if (hr.ok) {
+          const data = await hr.json() as { ok?: boolean; html?: string; error?: string; method?: string; elapsed_ms?: number };
+          if (data.ok && data.html && data.html.length > 500) {
+            console.log(`[anime3rb] ✅ Hound bypass (${data.method}) ${data.elapsed_ms}ms`);
+            // إذا نجح الـ patchright → نُحدِّث cf_clearance للمسار السريع لاحقاً
+            // (نستخرج cookie من الـ HTML إذا موجودة — للتوافق مع cycleTLS)
+            return data.html;
+          } else if (data.error) {
+            console.warn("[anime3rb] Hound returned error:", data.error);
+          }
+        }
+      }
+    } catch (e) {
+      console.warn("[anime3rb] Hound CF-bypass error:", (e as any).message);
+    }
   }
 
   return null;

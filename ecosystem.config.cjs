@@ -42,6 +42,7 @@ module.exports = {
         SCRAPINGANT_KEY: _e("SCRAPINGANT_KEY"),
         NOPECHA_KEY: _e("NOPECHA_KEY"),
         OPENSHIFT_CF_URL: "https://nova-cf-bypass-lly581758-dev.apps.rm1.0a51.p1.openshiftapps.com",
+        HOUND_SERVICE_URL: "http://localhost:8766",
         MXP_SERVICE_PORT: "8002",
         CF_PROXY_PORT: "8001",   // ← السكرابر الآن عبر Hopx (35Mbps, 2vCPU) بدل cf-proxy
         HOPX_PROXY_URL: "http://localhost:8001",
