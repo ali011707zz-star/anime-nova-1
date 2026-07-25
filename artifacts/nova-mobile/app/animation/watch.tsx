@@ -548,7 +548,8 @@ export default function AnimationWatchScreen() {
               seenKeys.current.add(key);
               freshSrcs.push(src);
 
-              setSources(prev => [...prev, src]);
+              /* حد أقصى 20 مصدر — يمنع تراكم مئات المصادر من SSE stream */
+              setSources(prev => prev.length >= 20 ? prev : [...prev, src]);
 
               /* تشغيل تلقائي عند أول مصدر مباشر */
               if (!autoPlayFiredRef.current && isDirectPlayable(src)) {

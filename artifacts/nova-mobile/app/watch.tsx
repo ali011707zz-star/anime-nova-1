@@ -847,7 +847,10 @@ export default function WatchScreen() {
         // أضف المصادر الجديدة فقط (بدون إزاحة الحالية)
         const existingUrls = new Set(prev.map(s => s.url));
         const newOnes = riftSources.filter(s => s.url && !existingUrls.has(s.url));
-        return newOnes.length > 0 ? [...prev, ...newOnes] : prev;
+        if (!newOnes.length) return prev;
+        /* حد أقصى 10 مصادر في frozenSources — بدون هذا الحد يواصل RiftPlayer
+           الدوران عبر كل المصادر الجديدة (كل منها 12s timeout) → OOM → كراش */
+        return [...prev, ...newOnes].slice(0, 10);
       });
     } else {
       setFrozenSources([]);

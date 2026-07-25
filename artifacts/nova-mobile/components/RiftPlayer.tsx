@@ -574,7 +574,8 @@ export function RiftPlayer({
       /* 5. ألغِ hide timer */
       if (hideTimer.current) { clearTimeout(hideTimer.current); hideTimer.current = null; }
 
-      /* 6. فرِّغ subtitle cache لتحرير الذاكرة */
+      /* 6. فرِّغ subtitle cache + cues لتحرير الذاكرة
+         loadedCues قد تكون مئات/آلاف من الـ cues المترجمة — تحريرها فوراً يُقلل ضغط GC */
       urlCueCacheRef.current.clear();
 
       console.log("[RiftPlayer] 🧹 unmounted — all resources released");
@@ -631,14 +632,16 @@ export function RiftPlayer({
     const sub2 = player.addListener("statusChange", (e: any) => {
       if (e.status === "loading") {
         setBuffering(true);
-        /* إذا بقي التحميل أكثر من 25ث (شاشة سوداء) نعامله كخطأ ونتجاوز للمصدر التالي */
+        /* إذا بقي التحميل أكثر من 12ث (شاشة سوداء) نعامله كخطأ ونتجاوز للمصدر التالي.
+           25ث كان طويلاً جداً: 10 مصادر × 25ث = 250ث انتظار + OOM من الـ buffers المتراكمة.
+           12ث كافٍ لأغلب HLS streams مع هامش للشبكات البطيئة. */
         if (loadTimeoutRef.current) clearTimeout(loadTimeoutRef.current);
         loadTimeoutRef.current = setTimeout(() => {
           loadTimeoutRef.current = null;
-          console.warn(`[RiftPlayer] ⏱ timeout (25s) — ${sources[srcIdx]?.label || "?"}: ${sources[srcIdx]?.url?.slice(0, 80)}`);
+          console.warn(`[RiftPlayer] ⏱ timeout (12s) — ${sources[srcIdx]?.label || "?"}: ${sources[srcIdx]?.url?.slice(0, 80)}`);
           setError(true);
           setBuffering(false);
-        }, 25000);
+        }, 12000);
       } else {
         /* أي حالة غير loading → ألغِ الـ timeout */
         if (loadTimeoutRef.current) { clearTimeout(loadTimeoutRef.current); loadTimeoutRef.current = null; }
@@ -676,14 +679,19 @@ export function RiftPlayer({
 
   /* ─── Auto-advance on error ─── */
   const consecutiveErrorsRef = useRef(0);
+  /* MAX_SOURCE_CYCLES: حد أقصى لعدد المصادر المُجرَّبة تلقائياً قبل الاستسلام.
+     بدون هذا الحد، إذا أضافت الـ background fetches مصادر جديدة لـ frozenSources
+     أثناء الدوران، يستمر RiftPlayer في المحاولة للأبد → كل مصدر يفتح buffer جديد
+     → OOM بعد عدة حلقات → كراش التطبيق. */
+  const MAX_SOURCE_CYCLES = 8;
   useEffect(() => {
     if (!error) { consecutiveErrorsRef.current = 0; setIsAutoCycling(false); return; }
     if (sources.length <= 1) { setIsAutoCycling(false); onError?.(); return; }
     consecutiveErrorsRef.current += 1;
-    /* لا تدور في حلقة — فقط جرّب المصادر التالية (بدون wrap-around) */
+    /* لا تدور في حلقة — جرّب المصادر التالية بحد أقصى MAX_SOURCE_CYCLES */
     const nextIdx = srcIdx + 1;
-    if (nextIdx >= sources.length || consecutiveErrorsRef.current > sources.length) {
-      setIsAutoCycling(false); // كل المصادر جُرِّبت، أوقف الدوران
+    if (nextIdx >= sources.length || consecutiveErrorsRef.current >= MAX_SOURCE_CYCLES) {
+      setIsAutoCycling(false); // كل المصادر جُرِّبت أو وصلنا للحد الأقصى
       onError?.();
       return;
     }
@@ -998,7 +1006,7 @@ export function RiftPlayer({
   /* ─── AniSkip: جلب أوقات المقدمة/النهاية إذا لم تُوفَّر بالمصدر ─── */
   useEffect(() => {
     if (skipIntroProp || skipOutroProp || !anilistId || !episode) return;
-    let cancelled = false;
+    const ctrl = new AbortController();
     (async () => {
       try {
         // 1. Get MAL ID from AniList
@@ -1006,14 +1014,18 @@ export function RiftPlayer({
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ query: "query($id:Int){Media(id:$id){idMal}}", variables: { id: anilistId } }),
+          signal: ctrl.signal,
         });
         const alData = await alRes.json();
         const malId: number | null = alData?.data?.Media?.idMal;
-        if (!malId || cancelled) return;
+        if (!malId || ctrl.signal.aborted) return;
         // 2. Fetch skip times from AniSkip
-        const skipRes = await fetch(`https://api.aniskip.com/v1/skip-times/${malId}/${episode}?types[]=op&types[]=ed`);
+        const skipRes = await fetch(
+          `https://api.aniskip.com/v1/skip-times/${malId}/${episode}?types[]=op&types[]=ed`,
+          { signal: ctrl.signal },
+        );
         const skipData = await skipRes.json();
-        if (cancelled || !skipData?.found) return;
+        if (ctrl.signal.aborted || !skipData?.found) return;
         for (const r of (skipData.results ?? [])) {
           const s = { start: r.interval.start_time, end: r.interval.end_time };
           if (r.skip_type === "op")  setFetchedSkipIntro(s);
@@ -1021,14 +1033,14 @@ export function RiftPlayer({
         }
       } catch {}
     })();
-    return () => { cancelled = true; };
+    return () => ctrl.abort();
   }, [anilistId, episode]);
 
   /* ─── Auto-fetch subtitles via subtitle-tracks API (wyzie.ru + SubDL + HiAnime) ─── */
   useEffect(() => {
     if (!anilistId || !episode) return;
     if (subCues?.length) return; // already provided as prop
-    let cancelled = false;
+    const ctrl = new AbortController(); // يُلغى عند unmount أو تغيير الحلقة
     setAutoSubSource(null);
     (async () => {
       try {
@@ -1040,12 +1052,12 @@ export function RiftPlayer({
         });
         const res = await fetch(
           `${base}/api/anime/subtitle-tracks?${params}`,
-          { signal: AbortSignal.timeout(20_000) }
+          { signal: ctrl.signal },
         );
-        if (!res.ok || cancelled) return;
+        if (!res.ok || ctrl.signal.aborted) return;
         const data = await res.json();
         const tracks: any[] = data.tracks || [];
-        if (cancelled || tracks.length === 0) return;
+        if (ctrl.signal.aborted || tracks.length === 0) return;
 
         /* Store raw English URL for language switching */
         const enTrack = tracks.find((t: any) => t.lang === "en");
@@ -1073,9 +1085,9 @@ export function RiftPlayer({
         /* ── fetch + parse: translate-vtt → JSON, others → VTT text ── */
         const vttRes = await fetch(trackUrl, {
           headers: { Accept: "application/json,text/vtt,text/plain,*/*" },
-          signal: AbortSignal.timeout(30_000),
+          signal: ctrl.signal,
         });
-        if (!vttRes.ok || cancelled) return;
+        if (!vttRes.ok || ctrl.signal.aborted) return;
 
         let cues: SubCue[] = [];
         if (trackUrl.includes("translate-vtt")) {
@@ -1088,19 +1100,19 @@ export function RiftPlayer({
             .filter((c: SubCue) => c.start < c.end && c.text.length > 0);
         } else {
           const text = await vttRes.text();
-          if (cancelled) return;
+          if (ctrl.signal.aborted) return;
           cues = parseVTT(text);
         }
 
-        if (cues.length > 0 && !cancelled) {
+        if (cues.length > 0 && !ctrl.signal.aborted) {
           setLoadedCues(cues);
           setSubOn(true);
           setAutoSubSource(track.lang === "ar" ? "wyzie-ar" : "wyzie-en-translated");
         }
       } catch {}
-      finally { if (!cancelled) setSubLoading(false); }
+      finally { if (!ctrl.signal.aborted) setSubLoading(false); }
     })();
-    return () => { cancelled = true; setSubLoading(false); };
+    return () => { ctrl.abort(); setSubLoading(false); };
   }, [anilistId, episode, subLang]); // eslint-disable-line
 
   /* ─── Subtitle panel slide animation ─── */
