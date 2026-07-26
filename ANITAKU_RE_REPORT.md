@@ -195,38 +195,82 @@ Authorization: Bearer {jwt_token}
 
 ## 9. الحلول الذكية لاستخراج `{code}` (بدون GitHub)
 
-### الحل 1 — Smali Injection (الأذكى) ⭐⭐⭐
+### الحل 1 — Smali Injection ⭐⭐⭐ ← **الأفضل عملياً**
 ```bash
-# على VPS:
-apktool d AniTaku_0.1.apk -o anitaku_smali
-# تعديل ob/b.smali: إضافة Log.d("CODE", result) بعد SC.a()
-apktool b anitaku_smali -o AniTaku_logged.apk
+# على VPS — APK مفكوك بالفعل في /tmp/anitaku_smali/
+# تعديل ob/b.smali: إضافة Log.d("CODE", result) بعد SC.a() في السطر 95
+apktool b /tmp/anitaku_smali -o AniTaku_logged.apk
 zipalign -v 4 AniTaku_logged.apk AniTaku_aligned.apk
 apksigner sign --ks debug.keystore AniTaku_aligned.apk
-# تشغيل على emulator + logcat | grep CODE
+# تشغيل على هاتف حقيقي + logcat | grep CODE
+# أو: adb shell run-as com.anitaku cat /data/data/com.anitaku/shared_prefs/Preferences.xml
 ```
+> ✅ apktool مثبت على VPS، الـ smali مفكوك في `/tmp/anitaku_smali`
 
-### الحل 2 — Native Lib Analysis ⭐⭐
+### الحل 2 — Native Lib Analysis ⭐⭐ ← **جُرِّب — نتائج جزئية**
 ```bash
-unzip AniTaku_0.1.apk lib/x86_64/libsc-native-lib.so
-strings libsc-native-lib.so | grep -E "key|aes|decrypt"
-# أو: objdump -d libsc-native-lib.so | grep -A20 "Java_com_stringcare"
+# الـ .so مستخرج في /tmp/anitaku_re/lib/x86_64/libsc-native-lib.so
+# دوال مكتشفة:
+#   Java_com_stringcare_library_SC_jniRevealV3  ← دالة فك التشفير الرئيسية
+#   _Z16valueDeobfuscate(int, string, string)   ← دالة C++ مباشرة بلا JNI
+#   _Z4sign(string)                             ← تحسب الـ cert fingerprint
+#   string_to_hex, hex_to_string               ← أدوات تحويل
+# المشكلة: liblog.so + libm.so الأندرويدية تمنع التشغيل على Linux
 ```
 
 ### الحل 3 — Android Emulator على VPS ⭐⭐⭐
 ```bash
-# تثبيت Android emulator خفيف (rancher/android-emulator-docker)
-# تشغيل AniTaku-nodetect.apk
+# الحاجة: KVM أو Docker — غير متاحَين على VPS الحالي (95.182.93.105)
+# kernel 6.8.0-35-generic، /dev/binder غير موجود
+# البديل: خادم بـ KVM أو استخدام Redroid (يحتاج Docker)
 # ADB: adb shell run-as com.anitaku cat /data/data/com.anitaku/shared_prefs/Preferences.xml
-# → يظهر cuepoint مباشرة
 ```
 
-### الحل 4 — Bypass StringCare بالـ cert ⭐⭐
+### الحل 4 — Bypass StringCare بالـ cert ⭐⭐ ← **جُرِّب — محجوب**
 ```python
-# استخراج native lib وتشغيلها مباشرة بـ ctypes:
-import ctypes
-lib = ctypes.CDLL('./libsc-native-lib.so')
-# استدعاء Java_com_stringcare_library_SC_jniRevealV3 مباشرة
+# الخوارزمية موثقة كاملاً:
+# AES key = SHA1(cert_sha1_hex_with_colons.encode("utf-8"))[:16]
+# ciphertext = "97d27022-37e7-4ac3-81f4-133301523fe9".encode("utf-8")  # 36 bytes
+# AES-128-ECB decrypt
+# المشكلة: كل APKs على VPS معادة التوقيع بـ debug cert — الشهادة الأصلية (CN=Zak Alter) غير متوفرة
+```
+
+---
+
+## 9.5 نتائج التحقيق التفصيلي (2026-07-26)
+
+### الـ Smali المفككة — ما اكتُشف في ob/b.smali
+| المتغير | القيمة المشفرة | نوع التشفير | النتيجة |
+|---------|---------------|-------------|---------|
+| ob.b.a | `97d27022-37e7-4ac3-81f4-133301523fe9` | V3 (AES+cert) | {code} — يحتاج cert أصلي |
+| ob.b.b | `455448095512-rcsrmjjm54rpj0vtnrqorsm0oul23qos.apps.googleusercontent.com` | V0 (plain) | Google Client ID |
+| ob.b.c | `UECatLeZvbJKKgjRMwTP...` | V2 (non-base64) | License Key |
+| ob.b.d | `Z3JlZW5mdWJ1a2l0YXRzdW1ha2lzYWl0YW1heWVsbG93Z2Vub3NvcG10aGlyZHNlYW9zb24=` | V1 (base64) | **= "greenfubukitatsumakisaitamayellowgenosopmthirdseaoson"** |
+| ob.b.e | API base URL encoded | plain | cuepointUrl default |
+
+### آلية قراءة {code} في u8/r.smali
+```java
+// الكود الفعلي المكتشف:
+SharedPreferences prefs = context.getSharedPreferences(...);
+String code = prefs.getString("cuepoint", SC.b(ob.b.a));
+// إذا لم يُحدد الـ admin قيمة في SharedPrefs → يُستخدم SC.b(ob.b.a) كقيمة افتراضية
+```
+
+### خوارزمية StringCare V3 (مؤكدة من ng/b.smali)
+```java
+// ng/b.b(Context) → String certFingerprint:
+X509Certificate cert = CertificateFactory.getInstance("X509")
+    .generateCertificate(new ByteArrayInputStream(pm.getPackageInfo(pkg, 0x40).signatures[0].toByteArray()));
+byte[] sha1 = MessageDigest.getInstance("SHA-1").digest(cert.getEncoded());
+String fingerprint = sha1Bytes.joinToString(":") { byte -> String.format("%02X", byte & 0xFF) }
+// → "2E:3D:DF:B5:28:3C:95:55:72:6C:63:03:FC:23:56:45:32:F2:11:02"
+
+// ng/b.a(String fingerprint) → SecretKeySpec:
+byte[] key = Arrays.copyOf(SHA1(fingerprint.getBytes("UTF-8")), 16);
+return new SecretKeySpec(key, "AES");
+
+// Java_com_stringcare_library_SC_jniRevealV3(Context, certFingerprint, inputBytes):
+//   AES-128-ECB decrypt of inputBytes using key derived above
 ```
 
 ---
@@ -234,24 +278,43 @@ lib = ctypes.CDLL('./libsc-native-lib.so')
 ## 10. ملخص للتكامل في NOVA
 
 **ما يعمل الآن:**
-- ✅ API Base URL محدد: `https://anitakuapp.hasalaty.com/public/api/`
-- ✅ JWT Token (register مفتوح للجميع)
-- ✅ `search/imdbid-{imdb}` لا يحتاج {code}
+- ✅ API Base URL: `https://anitakuapp.hasalaty.com/public/api/`
+- ✅ JWT Token (register مفتوح للجميع، صلاحية سنة)
+- ✅ `search/imdbid-{imdb}` لا يحتاج {code} ← **يمكن استخدامه فوراً**
 - ✅ 70+ endpoint مرسومة كاملاً
 - ✅ مسار البث: `stream/show/{id}/{code}`
+- ✅ Google Client ID: `455448095512-rcsrmjjm54rpj0vtnrqorsm0oul23qos.apps.googleusercontent.com`
 
 **المتبقي:**
-- ❌ قيمة `{code}` — تحتاج أحد الحلول الأربعة أعلاه
+- ❌ قيمة `{code}` — تحتاج **هاتف Android حقيقي** أو **خادم بـ KVM**
+
+**الخطوة الأسرع للحصول على {code}:**
+```bash
+# على هاتف Android مع USB debugging:
+adb install /tmp/nodetect/AniTaku-nodetect.apk
+adb shell run-as com.anitaku cat \
+  /data/data/com.anitaku/shared_prefs/Preferences.xml 2>/dev/null | grep cuepoint
+# أو بعد تشغيل التطبيق:
+adb logcat | grep -E "CODE|cuepoint"
+```
 
 **بمجرد الحصول على {code}:**
 ```javascript
 // في anime.ts أو animation.ts:
 const BASE = "https://anitakuapp.hasalaty.com/public/api";
 const CODE = "<the_extracted_code>";
-const JWT = "eyJ0eXAi..."; // من /api/register
+const JWT = await fetch(`${BASE}/register`, {
+  method: "POST",
+  body: new FormData(/* name, email, password */)
+}).then(r => r.json()).then(d => d.access_token);
 
-// مثال جلب مصادر أنيمي:
+// جلب مصادر أنيمي:
 const res = await fetch(`${BASE}/animes/show/${tmdb_id}/${CODE}`, {
+  headers: { Authorization: `Bearer ${JWT}` }
+});
+
+// جلب بيانات بحث (يعمل بدون code):
+const search = await fetch(`${BASE}/search/imdbid-${imdb_id}`, {
   headers: { Authorization: `Bearer ${JWT}` }
 });
 ```
