@@ -32,6 +32,7 @@
 - [Animation mobile playback](animation-mobile-playback.md) — شاشة سوداء صامتة: garbage Referer في sendSource + Dulo raw fallback بلا Referer + no onError handler + CF Worker لا يكتشف M3U8 بـ #EXTM3U content sniff.
 - [Orkestr removal](orkestr-removal.md) — Orkestr أُزيل كلياً من animation.ts+anime.ts; كل calls صارت cfProxy (localhost:8000); CINESRC_BASE=http://localhost:13004 أُضيف لـ ecosystem.
 - [AniTaku APK Analysis](anitaku-apk-analysis.md) — EasyPlex base; static token found (GxoNdPhOrskWYZfSw2d9hgeXToSlUBal); DB empty; client_secret not in APK; routes mapped.
+- [AniTaku V3 current status](anitaku-v3-current-status.md) — VPS-only test: API alive; original cert fingerprint supplied; native StringCare V3 cuepoint still unresolved.
 - [serveHlsVPS CF Worker fallback](servehlsvps-cf-worker-fallback.md) — hls-proxy now retries via CF Worker on 403/429; fixes animation black-screen when CDN blocks VPS IP on variant playlists.
 - [kartoney Arabic dubbed catalog](kartoney-arabic-dubbed.md) — kartoney.com: 106 مسلسل مدبلج عربي; MP4 مباشر من servallvid; no CF; slug→TMDB مطابقة; لم يُطبَّق بعد.
 - [witanime.life RE](witanime-life-re.md) — _zH/_zW base64→JSON decode; ok.ru FHD /dk?videoPlayerMetadata ✅ HLS; WP REST API يعمل للبحث+الحلقات; hgcloud/yonaplay يحتاج browser.
