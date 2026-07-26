@@ -144,3 +144,4 @@
 - [Anime Rift live source verification](anime-rift-live-source-test-2026-07-25.md) — direct_link حقيقي من Rift شُغّل على VPS بـ veldox MP4 وffprobe؛ Worker يتجاوز geo فقط، والاستخراج الجديد يحتاج integrity من جهاز حقيقي.
 - [Mobile crash fix — stale cache + URL validation](mobile-crash-fix-2026-07-25.md) — 4 أخطاء مُصلَّحة: seenKeys من كاش+upsert-by-site+onError يحذف كاش+RiftPlayer يتحقق من URL قبل player.replace.
 - [Hound CF-Bypass Service](hound-service-cf-bypass.md) — patchright Chrome يتجاوز Turnstile على anime3rb؛ port 8766؛ cold=59s warm=21s؛ vid3rb URLs مكتشفة؛ patchright install chrome (ليس chromium).
+- [WitAnime KF scan + browser cleanup](witanime-kf-scan-result.md) — KF=0 في 300 أنمي؛ 20+ streamwish hosts مضافة؛ browser أُزيل من per-request؛ anime3rb cooldown 6h؛ AnimeWitcher fast-fail.

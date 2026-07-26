@@ -5552,29 +5552,25 @@ async function resolveWitaServerUrl(
   }
 
   // ── hgcloud / streamwish-family ───────────────────────────────────────────
-  // Hopx browser-extract يعمل لـ hgcloud.to (~7s) — نجرّبه أولاً
-  // ثم cf-proxy + parseStreamwish كـ fallback
+  // cf-proxy (Chrome impersonation) خفيف — بدون browser في كل طلب
+  // الـ hosts المؤكدة streamwish-family من scan witanime.life (2026-07):
   if (
-    host.includes("hgcloud.to") || host.includes("streamwish") ||
-    host.includes("embedwish") || host.includes("wishembed") ||
-    host.includes("stmruby.com") || host.includes("swdyu.com")
+    host.includes("hgcloud.to") || host.includes("hglink.to") ||
+    host.includes("gradehgplus.com") ||
+    host.includes("streamwish") || host.includes("embedwish") ||
+    host.includes("wishembed") || host.includes("hlswish.com") ||
+    host.includes("jodwish.com") || host.includes("cdnwish.com") ||
+    host.includes("ghbrisk.com") ||
+    host.includes("stmruby.com") || host.includes("swdyu.com") ||
+    host.includes("luluvdo.com") || host.includes("lulustream.com") ||
+    host.includes("playerwish.com") || host.includes("darkibox.com") ||
+    host.includes("vivystream.com") || host.includes("iplayerhls.com") ||
+    host.includes("sbfast.com") || host.includes("sblanh.com") ||
+    host.includes("sbspeed.com") || host.includes("lvturbo.com") ||
+    host.includes("cybervynx.com") || host.includes("soraplay.xyz") ||
+    host.includes("suzihazarpc.com")
   ) {
-    // 1) Hopx browser extract — يعمل لـ hgcloud حتى من VPS
-    if (host.includes("hgcloud.to")) {
-      const hopx = await hopxBrowserExtract(embedUrl, "https://witanime.life/", 18000);
-      if (hopx) {
-        console.log(`[WitAnime/hgcloud] hopx got ${hopx.type} URL`);
-        return [{
-          name: serverName || "StreamHG",
-          url: hopx.url,
-          directUrl: hopx.type === "hls"
-            ? `/api/anime/hls-proxy?url=${encodeURIComponent(hopx.url)}&ref=${encodeURIComponent("https://witanime.life/")}`
-            : `/api/anime/video-proxy?url=${encodeURIComponent(hopx.url)}&ref=${encodeURIComponent("https://witanime.life/")}`,
-          quality: "HD", qualityRank: 9, site: "witanime",
-        }];
-      }
-    }
-    // 2) cf-proxy fetch + parseStreamwish
+    // cf-proxy fetch + parseStreamwish — خفيف بدون browser
     try {
       const p = new URLSearchParams({ url: embedUrl, ref: "https://witanime.life/", timeout: "18" });
       const rr = await fetch(`http://localhost:8000/fetch?${p}`, { signal: AbortSignal.timeout(20000) });
@@ -5582,9 +5578,10 @@ async function resolveWitaServerUrl(
         const html = await rr.text();
         const v = parseStreamwish(html);
         if (v) {
-          console.log(`[WitAnime/streamwish] cf-proxy HTML got ${v.type} URL`);
+          const label = host.includes("hgcloud") || host.includes("hglink") || host.includes("gradehg") ? "StreamHG" : "StreamWish";
+          console.log(`[WitAnime/streamwish:${host}] cf-proxy got ${v.type} URL`);
           return [{
-            name: serverName || "StreamHG",
+            name: serverName || label,
             url: v.url,
             directUrl: v.type === "hls"
               ? `/api/anime/hls-proxy?url=${encodeURIComponent(v.url)}&ref=${encodeURIComponent("https://witanime.life/")}`
@@ -5593,8 +5590,7 @@ async function resolveWitaServerUrl(
           }];
         }
       }
-    } catch (e: any) { console.warn("[WitAnime/streamwish]", e?.message); }
-    // فشل الاستخراج — لا نُرجع isEmbed
+    } catch (e: any) { console.warn(`[WitAnime/streamwish:${host}]`, e?.message); }
     return [];
   }
 
@@ -5664,6 +5660,33 @@ async function resolveWitaServerUrl(
       }
     } catch (e: any) { console.warn("[WitAnime/mp4upload]", e?.message); }
     return [];
+  }
+
+  // ── KrakenFiles CDN (krakencloud.net) — MP4 مباشر بـ Referer صحيح ──────────
+  // WitAnime أحياناً يُعيد رابط krakencloud.net مباشرة كـ server URL
+  if (host.includes("krakencloud.net")) {
+    const directUrl = `/api/anime/video-proxy?url=${encodeURIComponent(embedUrl)}&ref=${encodeURIComponent("https://krakenfiles.com/")}`;
+    console.log(`[WitAnime/KF] got krakencloud URL`);
+    return [{
+      name: serverName || "KrakenFiles",
+      url: embedUrl,
+      directUrl,
+      quality: "HD", qualityRank: 10, site: "witanime",
+      headers: { Referer: "https://krakenfiles.com/", Origin: "https://krakenfiles.com/" },
+      directType: "mp4",
+    }];
+  }
+
+  // ── dailymotion — embed مباشر (لا يحتاج browser extraction من VPS) ──────────
+  if (host.includes("dailymotion.com")) {
+    // نُرجع isEmbed ليشغله المتصفح مباشرة
+    return [{
+      name: serverName || "Dailymotion",
+      url: embedUrl,
+      directUrl: embedUrl,
+      quality: "HD", qualityRank: 7, site: "witanime",
+      isEmbed: true,
+    }];
   }
 
   // ── عام — تجاهل (لا نُرجع isEmbed لأي host مجهول) ──────────────────────────
@@ -5875,24 +5898,31 @@ async function a3rbSaveCookieToSupabase(cookie: string, updatedAt: number): Prom
 // ══════════════════════════════════════════════════════════════════════
 //  Auto-refresh scheduler — يجدد الكوكيز تلقائياً قبل انتهائه بـ 4 ساعات
 // ══════════════════════════════════════════════════════════════════════
-const A3RB_REFRESH_BEFORE = 4 * 3_600_000;   // جدّد عند بقاء < 4 ساعات
-const A3RB_CHECK_INTERVAL = 30 * 60_000;     // فحص كل 30 دقيقة
-let _a3rbRefreshing = false;
+const A3RB_REFRESH_BEFORE  = 4 * 3_600_000;   // جدّد عند بقاء < 4 ساعات
+const A3RB_CHECK_INTERVAL  = 30 * 60_000;     // فحص كل 30 دقيقة
+const A3RB_RETRY_COOLDOWN  = 6 * 3_600_000;   // انتظر 6 ساعات بعد الفشل قبل إعادة المحاولة
+let _a3rbRefreshing        = false;
+let _a3rbLastRefreshAttempt = 0;              // منع hammering عند فشل متكرر
 
-// يجدّد cf_clearance عبر المسار الموجود أصلاً (Hopx → OpenShift → ملف)
-// يستدعي a3rbFetchPage مباشرة — إذا نجحت تُخزَّن الكوكيز تلقائياً عبر setA3rbCfCookie
+// يجدّد cf_clearance عبر browser — مرة واحدة فعلياً كل 6h كحد أدنى
 async function a3rbTriggerCookieRefresh(): Promise<void> {
   if (_a3rbRefreshing) return;
+  // cooldown: لا تُعيد المحاولة قبل مرور 6 ساعات من آخر محاولة (ناجحة أو فاشلة)
+  const timeSinceLast = Date.now() - _a3rbLastRefreshAttempt;
+  if (_a3rbLastRefreshAttempt > 0 && timeSinceLast < A3RB_RETRY_COOLDOWN) {
+    const waitH = Math.round((A3RB_RETRY_COOLDOWN - timeSinceLast) / 3_600_000 * 10) / 10;
+    console.log(`[anime3rb] cookie refresh في cooldown — انتظر ${waitH}h`);
+    return;
+  }
   _a3rbRefreshing = true;
+  _a3rbLastRefreshAttempt = Date.now();
   try {
-    console.log("[anime3rb] 🔄 تجديد cf_clearance عبر Hopx browser...");
-    // نستدعي الصفحة الرئيسية — إذا نجح Hopx يُخزَّن الكوكيز في memory + Supabase
-    const html = await a3rbFetchPage("https://anime3rb.com", 60_000);
+    console.log("[anime3rb] 🔄 تجديد cf_clearance عبر browser (scheduler)...");
+    const html = await a3rbFetchPageViaBrowser("https://anime3rb.com", 90_000);
     if (html && !isCloudflareBlock(html)) {
-      // a3rbFetchPage تستدعي setA3rbCfCookie داخلياً عند نجاح Hopx/OpenShift
-      console.log("[anime3rb] ✅ cf_clearance جُدِّد عبر Hopx بنجاح");
+      console.log("[anime3rb] ✅ cf_clearance جُدِّد بنجاح");
     } else {
-      console.warn("[anime3rb] تجديد الكوكيز: الصفحة محجوبة أو فارغة — سيُعاد المحاولة لاحقاً");
+      console.warn("[anime3rb] تجديد الكوكيز: محجوب أو فارغ — سيُعاد بعد 6h");
     }
   } catch (e: any) {
     console.warn("[anime3rb] cookie refresh error:", e.message);
@@ -5941,12 +5971,12 @@ export function getA3rbCfCookieStatus(): {
 }
 
 /**
- * يجلب صفحة anime3rb بطريقتين:
- *  المسار السريع: cycleTLS + cf_clearance cookie المخزّنة (~1-2ث)
- *  المسار البطيء: Hopx /extract-cookies (browser Playwright يحل CF)
- *                 → يُخزّن cookie للاستخدام اللاحق (~15-20ث مرة واحدة كل 20ساعة)
+ * يجلب صفحة anime3rb:
+ *  المسار السريع  : cycleTLS + cf_clearance cookie المخزّنة (~1-2ث)
+ *  المسار البطيء  : browser فقط من الـ scheduler الدوري (ليس من هنا)
+ *                   → إذا انتهت الكوكيز نُرجع null وتُستخدم embed-fallback
  */
-async function a3rbFetchPage(url: string, timeoutMs = 35000): Promise<string | null> {
+async function a3rbFetchPage(url: string, _timeoutMs = 35000): Promise<string | null> {
   const REF = A3RB_BASE + "/";
 
   // ── المسار السريع: cycleTLS + cookie مخزّنة ──────────────────────────
@@ -5971,16 +6001,27 @@ async function a3rbFetchPage(url: string, timeoutMs = 35000): Promise<string | n
           console.log(`[anime3rb] fast-path (cycleTLS+cookie) ✅ ${url.slice(-40)}`);
           return text;
         }
-        // cookie منتهية أو باتت غير صالحة — نجدد
-        console.warn(`[anime3rb] fast-path cookie expired/invalid → refreshing via browser`);
+        // cookie باتت غير صالحة — أعلم الـ scheduler بالتجديد ولا تستخدم browser هنا
+        console.warn(`[anime3rb] fast-path: cookie invalid — queuing background refresh`);
         _a3rbCfCookie = "";
+        a3rbTriggerCookieRefresh().catch(() => {});
       }
-    } catch { /* fall through to browser */ }
+    } catch { /* fall through */ }
   }
 
-  // ── المسار البطيء 1: Hound CF-Bypass Service (patchright محلي) ─────────
-  // أولوية عالية لأنه محلي على VPS — لا تأخير شبكة خارجي
-  // 150s ثابت لاستيعاب الطلبات المتزامنة (session_lock يُسلسلها)
+  // لا cookie صالحة → أعلم الـ scheduler ونُرجع null (embed-fallback يتولى الأمر)
+  // البراوزر يُشغَّل فقط من الـ scheduler كل 30 دقيقة، ليس من كل طلب
+  if (!_a3rbCfCookie) {
+    a3rbTriggerCookieRefresh().catch(() => {});
+  }
+  return null;
+}
+
+/** جلب صفحة anime3rb عبر browser حقيقي — يُستدعى فقط من الـ scheduler */
+async function a3rbFetchPageViaBrowser(url: string, timeoutMs = 60000): Promise<string | null> {
+  const REF = A3RB_BASE + "/";
+
+  // Hound CF-Bypass Service (patchright محلي — VPS)
   if (HOUND_SERVICE_URL) {
     try {
       const hh = await fetch(`${HOUND_SERVICE_URL}/health`, { signal: AbortSignal.timeout(4000) });
@@ -5990,18 +6031,17 @@ async function a3rbFetchPage(url: string, timeoutMs = 35000): Promise<string | n
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ url, wait: 9000, referer: REF, solve_cf: true }),
-          signal: AbortSignal.timeout(150_000),   // 150s ثابت — يكفي طلبين متزامنين
+          signal: AbortSignal.timeout(timeoutMs),
         });
         if (hr.ok) {
           const data = await hr.json() as { ok?: boolean; html?: string; error?: string; method?: string; elapsed_ms?: number; cookie_str?: string };
           if (data.ok && data.html && data.html.length > 500) {
             console.log(`[anime3rb] ✅ Hound bypass (${data.method}) ${data.elapsed_ms}ms`);
-            // ── تخزين cf_clearance للمسار السريع (~1-2ث) لمدة 20 ساعة ──
             if (data.cookie_str) {
-              setA3rbCfCookie(data.cookie_str);  // يُخزَّن في memory + Supabase
+              setA3rbCfCookie(data.cookie_str);
               console.log(`[anime3rb] 🍪 cf_clearance cached via Hound ✅ — cycleTLS جاهز لـ ~20h`);
             } else {
-              console.warn(`[anime3rb] Hound: no cookie_str — fast-path won't activate`);
+              console.warn(`[anime3rb] Hound: no cookie_str returned`);
             }
             return data.html;
           } else if (data.error) {
@@ -6014,57 +6054,40 @@ async function a3rbFetchPage(url: string, timeoutMs = 35000): Promise<string | n
     }
   }
 
-  // ── المسار البطيء 2: Hopx /extract-cookies (Playwright خارجي) ──────────
-  let hopxOk = false;
+  // Hopx /extract-cookies (Playwright خارجي)
   try {
     const h = await fetch(`${HOPX_PROXY_BASE}/health`, { signal: AbortSignal.timeout(4000) });
     const hj = await h.json() as { ok?: boolean; playwright?: boolean };
-    hopxOk = !!(h.ok && hj.ok && hj.playwright);
-  } catch { /* hopx unavailable */ }
-
-  if (hopxOk) {
-    try {
-      console.log(`[anime3rb] slow-path (Hopx browser) → solving CF for ${url.slice(-50)}`);
+    if (h.ok && hj.ok && hj.playwright) {
       const params = new URLSearchParams({ url, ref: REF, wait: "8000" });
       const r = await fetch(`${HOPX_PROXY_BASE}/extract-cookies?${params}`, {
-        signal: AbortSignal.timeout(timeoutMs + 10000),
+        signal: AbortSignal.timeout(timeoutMs),
       });
       if (r.ok) {
-        const data = await r.json() as { ok?: boolean; html?: string; cookie_str?: string; cookies?: Record<string, string>; error?: string };
+        const data = await r.json() as { ok?: boolean; html?: string; cookie_str?: string; error?: string };
         if (data.ok) {
           if (data.cookie_str) { setA3rbCfCookie(data.cookie_str); console.log(`[anime3rb] cf_clearance cached via Hopx ✅`); }
           if (data.html) return data.html;
-        } else {
-          console.warn("[anime3rb] Hopx browser extract failed:", data.error);
         }
       }
-    } catch (e) {
-      console.warn("[anime3rb] Hopx browser fetch error:", (e as any).message);
     }
-  } else {
-    console.warn("[anime3rb] Hopx unavailable");
-  }
+  } catch { /* hopx unavailable */ }
 
-  // ── المسار البطيء 3: OpenShift CF Bypass (Playwright مُستضاف مجاناً) ──
+  // OpenShift CF Bypass
   if (OPENSHIFT_CF_URL) {
     try {
-      console.log(`[anime3rb] OpenShift CF bypass → ${url.slice(-50)}`);
       const params = new URLSearchParams({ url, ref: REF, wait: "8000" });
       const r = await fetch(`${OPENSHIFT_CF_URL}/extract-cookies?${params}`, {
-        signal: AbortSignal.timeout(timeoutMs + 10000),
+        signal: AbortSignal.timeout(timeoutMs),
       });
       if (r.ok) {
-        const data = await r.json() as { ok?: boolean; html?: string; cookie_str?: string; cookies?: Record<string, string>; error?: string };
+        const data = await r.json() as { ok?: boolean; html?: string; cookie_str?: string; error?: string };
         if (data.ok) {
           if (data.cookie_str) { setA3rbCfCookie(data.cookie_str); console.log(`[anime3rb] cf_clearance cached via OpenShift ✅`); }
           if (data.html) return data.html;
-        } else {
-          console.warn("[anime3rb] OpenShift CF bypass failed:", data.error);
         }
       }
-    } catch (e) {
-      console.warn("[anime3rb] OpenShift CF bypass error:", (e as any).message);
-    }
+    } catch { /* openshift unavailable */ }
   }
 
   return null;
@@ -6208,6 +6231,8 @@ function extractA3rbVideoUrls(html: string): string[] {
 
   // vid3rb.com — CDN الخاص بـ anime3rb (mp4 مباشر أو HLS)
   for (const m of html.matchAll(/(https?:\/\/[^\s"'<>\\]+vid3rb[^\s"'<>\\]*(?:\.mp4|\.m3u8|\/video\/)[^\s"'<>\\]*)/gi)) add(m[1]);
+  // krakencloud.net (KrakenFiles CDN) — MP4 مباشر بـ Referer krakenfiles.com
+  for (const m of html.matchAll(/(https?:\/\/[^\s"'<>\\]+krakencloud\.net[^\s"'<>\\]*)/gi)) add(m[1]);
   // HLS مباشر
   for (const m of html.matchAll(/(https?:\/\/[^\s"'<>\\]+\.m3u8[^\s"'<>\\]*)/gi)) add(m[1]);
   // MP4 مباشر
@@ -6292,7 +6317,23 @@ async function getAnime3rbSources(
     // 5. تصنيف المصادر المباشرة + إضافة embed كخيار إضافي
     const sources: UnifiedSource[] = videoUrls.map((url, i) => {
       const isHls  = url.includes(".m3u8");
-      const isDirect = url.includes("vid3rb") || isHls || url.includes(".mp4");
+      const isKF   = url.includes("krakencloud.net");
+      const isDirect = url.includes("vid3rb") || isHls || url.includes(".mp4") || isKF;
+      if (isKF) {
+        // KrakenFiles CDN يحتاج Referer محدد
+        const proxied = `/api/anime/video-proxy?url=${encodeURIComponent(url)}&ref=${encodeURIComponent("https://krakenfiles.com/")}`;
+        return {
+          name: `أنمي 3رب · KF · سيرفر ${i + 1}`,
+          url,
+          directUrl: proxied,
+          quality: "HD",
+          qualityRank: 10,
+          site: "anime3rb",
+          audioLang: "ar",
+          directType: "mp4",
+          headers: { Referer: "https://krakenfiles.com/", Origin: "https://krakenfiles.com/" },
+        } as UnifiedSource;
+      }
       return {
         name: `أنمي 3رب · سيرفر ${i + 1}`,
         url,
@@ -7973,12 +8014,21 @@ async function getAnimeKaiSources(
 const AW_HF_BASE   = "https://1we323-witcher.hf.space";
 const AW_FS_BASE   = "https://firestore.googleapis.com/v1/projects/animewitcher-1c66d/databases/(default)/documents";
 
+// fast-fail: إذا رجع Algolia 403 مرة نوقف المحاولات لمدة ساعة
+let _awAlgoliaBlocked = false;
+let _awAlgoliaBlockedAt = 0;
+const AW_ALGOLIA_BLOCK_TTL = 60 * 60_000; // ساعة
+
 async function getAnimeWitcherSources(
   title: string, english: string | null, ep: number, _anilistId?: number,
 ): Promise<UnifiedSource[]> {
+  // fast-fail إذا Algolia محجوب
+  if (_awAlgoliaBlocked && Date.now() - _awAlgoliaBlockedAt < AW_ALGOLIA_BLOCK_TTL) {
+    console.log("[AnimeWitcher] Algolia محجوب — skip (fast-fail)");
+    return [];
+  }
   try {
-    /* 1. البحث عبر /api/search?q= (الطريقة الصحيحة) بدلاً من تخمين docId مباشرةً.
-       نجرب الإنجليزي أولاً ثم الروماجي — نختار أفضل تطابق بـ similarity. */
+    /* 1. البحث عبر /api/search?q= بدلاً من تخمين docId مباشرةً */
     let docId: string | null = null;
     let episodes: Array<{ id: string; name: string; num: number }> = [];
 
@@ -7989,7 +8039,15 @@ async function getAnimeWitcherSources(
           headers: BASE_HDRS,
           signal: AbortSignal.timeout(10_000),
         });
-        if (!sr.ok) continue;
+        if (!sr.ok) {
+          if (sr.status === 403) {
+            _awAlgoliaBlocked = true;
+            _awAlgoliaBlockedAt = Date.now();
+            console.warn("[AnimeWitcher] Algolia 403 — fast-fail لمدة ساعة");
+            return [];
+          }
+          continue;
+        }
         const raw = await sr.json().catch(() => null);
         const hits: any[] = raw?.hits ?? raw?.results ?? (Array.isArray(raw) ? raw : []);
         if (!hits.length) continue;
