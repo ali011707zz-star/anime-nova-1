@@ -3324,10 +3324,11 @@ export default function WatchPage() {
         setSlotStatus(prev => ({ ...prev, [site]: "ready" }));
         if (animeId) saveAnimeSrcs(animeId, ep, site, srcs);
 
-        /* تشغيل تلقائي: المصدر الأول يُشغَّل فوراً عند أول نجاح (مرة واحدة فقط) */
+        /* تشغيل تلقائي: أفضل جودة متاحة يُشغَّل فوراً عند أول نجاح (مرة واحدة فقط) */
         if (!bgLoad && !autoPlayedRef.current) {
           autoPlayedRef.current = true;
-          handlePlaySrc(srcs[0]);
+          const sortedSrcs = [...srcs].sort((a, b) => (b.qualityRank ?? 0) - (a.qualityRank ?? 0));
+          handlePlaySrc(sortedSrcs[0]);
         }
 
         /* تحميل خلفي: بعد تشغيل أي مصدر، اكشط بقية المصادر الخاملة تلقائياً

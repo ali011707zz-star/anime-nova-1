@@ -8218,10 +8218,47 @@ async function getAnimeKaiSources(
 const AW_HF_BASE   = "https://1we323-witcher.hf.space";
 const AW_FS_BASE   = "https://firestore.googleapis.com/v1/projects/animewitcher-1c66d/databases/(default)/documents";
 
-// fast-fail: إذا رجع Algolia 403 نوقف المحاولات 10 دقائق فقط (الحجب متقطع وليس دائم)
+// Algolia مباشر عبر CF Worker (يتجاوز حجب IP للـ datacenter)
+// App ID: RV1NI0FQC6  |  Search-only API Key: 9cefebad731e1547e2f2384094a17869
+const AW_ALGOLIA_APP   = "RV1NI0FQC6";
+const AW_ALGOLIA_KEY   = "9cefebad731e1547e2f2384094a17869";
+const AW_ALGOLIA_INDEX = "all_anime";
+const AW_ALGOLIA_URL   = `https://${AW_ALGOLIA_APP.toLowerCase()}-dsn.algolia.net/1/indexes/${AW_ALGOLIA_INDEX}/query`;
+
+// fast-fail: إذا رجع HF Space 403 نوقف المحاولات 10 دقائق
 let _awAlgoliaBlocked = false;
 let _awAlgoliaBlockedAt = 0;
-const AW_ALGOLIA_BLOCK_TTL = 10 * 60_000; // 10 دقائق (كان ساعة — الحجب متقطع)
+const AW_ALGOLIA_BLOCK_TTL = 10 * 60_000;
+
+/** بحث Algolia مباشر — يعمل من VPS بشكل مستقل عن HF Space */
+async function awAlgoliaSearch(query: string): Promise<any[]> {
+  try {
+    const res = await fetch(AW_ALGOLIA_URL, {
+      method: "POST",
+      headers: {
+        "X-Algolia-Application-Id": AW_ALGOLIA_APP,
+        "X-Algolia-API-Key":        AW_ALGOLIA_KEY,
+        "Content-Type":             "application/json",
+      },
+      body: JSON.stringify({ query, hitsPerPage: 5, attributesToRetrieve: ["id","name","poster","type","anime_id"] }),
+      signal: AbortSignal.timeout(8_000),
+    });
+    if (!res.ok) {
+      if (res.status === 403) {
+        _awAlgoliaBlocked = true;
+        _awAlgoliaBlockedAt = Date.now();
+        console.warn("[AnimeWitcher] Algolia direct 403 — fast-fail");
+      }
+      return [];
+    }
+    const data = await res.json() as any;
+    _awAlgoliaBlocked    = false; // نجح → ألغِ الـ fast-fail
+    _awAlgoliaBlockedAt  = 0;
+    return data?.hits ?? [];
+  } catch {
+    return [];
+  }
+}
 
 async function getAnimeWitcherSources(
   title: string, english: string | null, ep: number, _anilistId?: number,
@@ -8232,28 +8269,33 @@ async function getAnimeWitcherSources(
     return [];
   }
   try {
-    /* 1. البحث عبر /api/search?q= بدلاً من تخمين docId مباشرةً */
+    /* 1. البحث عبر Algolia مباشرة (أسرع وأكثر موثوقية من HF Space) */
     let docId: string | null = null;
     let episodes: Array<{ id: string; name: string; num: number }> = [];
 
     const queries = [...new Set([english, title].filter(Boolean) as string[])];
     for (const q of queries) {
       try {
-        const sr = await fetch(`${AW_HF_BASE}/api/search?q=${encodeURIComponent(q)}`, {
-          headers: BASE_HDRS,
-          signal: AbortSignal.timeout(10_000),
-        });
-        if (!sr.ok) {
-          if (sr.status === 403) {
-            _awAlgoliaBlocked = true;
-            _awAlgoliaBlockedAt = Date.now();
-            console.warn("[AnimeWitcher] Algolia 403 — fast-fail لمدة ساعة");
+        // جرّب Algolia مباشر أولاً
+        let hits = await awAlgoliaSearch(q);
+
+        // fallback: HF Space /api/search إذا فشل Algolia
+        if (!hits.length && !_awAlgoliaBlocked) {
+          const sr = await fetch(`${AW_HF_BASE}/api/search?q=${encodeURIComponent(q)}`, {
+            headers: BASE_HDRS,
+            signal: AbortSignal.timeout(10_000),
+          });
+          if (sr.ok) {
+            const raw = await sr.json().catch(() => null);
+            hits = raw?.hits ?? raw?.results ?? (Array.isArray(raw) ? raw : []);
+          } else if (sr.status === 403) {
+            _awAlgoliaBlocked    = true;
+            _awAlgoliaBlockedAt  = Date.now();
+            console.warn("[AnimeWitcher] HF Space 403 — fast-fail");
             return [];
           }
-          continue;
         }
-        const raw = await sr.json().catch(() => null);
-        const hits: any[] = raw?.hits ?? raw?.results ?? (Array.isArray(raw) ? raw : []);
+
         if (!hits.length) continue;
 
         // أفضل تطابق بـ similarity بدلاً من أخذ أول نتيجة عمياً

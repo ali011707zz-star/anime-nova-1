@@ -1,6 +1,15 @@
 /**
- * emailService.ts — إرسال بريد إلكتروني عبر nodemailer
- * يقرأ SMTP من متغيرات البيئة أو Supabase app_config
+ * emailService.ts — إرسال بريد إلكتروني
+ *
+ * ترتيب الأولوية:
+ *   1. Resend API (HTTPS/443) — لا يتأثر بحجب منافذ SMTP
+ *   2. SMTP (nodemailer) — كـ fallback مع timeout قصير (15ث)
+ *
+ * متغيرات البيئة:
+ *   RESEND_API_KEY   — مفتاح Resend API (احصل عليه من resend.com مجاناً)
+ *   RESEND_FROM      — عنوان الإرسال المُحقَّق في Resend (مثال: no-reply@yourdomain.com)
+ *                      إذا لم يُضبَط يستخدم onboarding@resend.dev (يعمل مع حسابات Resend المجانية)
+ *   SMTP_USER / SMTP_PASS / SMTP_HOST / SMTP_PORT — بيانات SMTP كـ fallback
  */
 import nodemailer, { type Transporter } from "nodemailer";
 import { promises as dnsPromises } from "dns";
@@ -17,7 +26,6 @@ async function resolveIPv4(hostname: string): Promise<string> {
 }
 
 let transporter: Transporter | null = null;
-let testAccount: { user: string; pass: string } | null = null;
 let isEthereal = false;
 
 async function getConfig(key: string): Promise<string | null> {
@@ -35,10 +43,43 @@ export function resetTransporter() {
   transporter = null;
 }
 
+// ── Resend API (primary — uses HTTPS/443, not blocked by ISP) ──────────────
+
+async function getResendKey(): Promise<string | null> {
+  // ENV أولاً، ثم DB
+  return process.env.RESEND_API_KEY || await getConfig("resend_api_key") || null;
+}
+
+async function sendViaResend(to: string, subject: string, html: string, text: string): Promise<void> {
+  const apiKey = await getResendKey();
+  if (!apiKey) throw new Error("RESEND_NOT_CONFIGURED");
+
+  const fromEnv = process.env.RESEND_FROM || await getConfig("resend_from");
+  const from    = fromEnv || "Anime NOVA <onboarding@resend.dev>";
+
+  const res = await fetch("https://api.resend.com/emails", {
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${apiKey}`,
+      "Content-Type":  "application/json",
+    },
+    body: JSON.stringify({ from, to, subject, html, text }),
+    signal: AbortSignal.timeout(15000),
+  });
+
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    throw new Error(`Resend HTTP ${res.status}: ${body.slice(0, 200)}`);
+  }
+  console.log(`[email] ✅ Resend → ${to}`);
+}
+
+// ── SMTP fallback (nodemailer) ─────────────────────────────────────────────
+
 async function getTransporter(): Promise<Transporter> {
   if (transporter) return transporter;
 
-  // اقرأ DB دائماً — إذا وُجد smtp_pass في DB فهو يأخذ الأولوية (يسمح بتحديث SMTP بدون إعادة نشر)
+  // اقرأ DB دائماً — إذا وُجد smtp_pass في DB فهو يأخذ الأولوية
   const [dbUser, dbPass, dbHost, dbPort] = await Promise.all([
     getConfig("smtp_user"),
     getConfig("smtp_pass"),
@@ -46,28 +87,29 @@ async function getTransporter(): Promise<Transporter> {
     getConfig("smtp_port"),
   ]);
 
-  // DB له الأولوية، ENV كـ fallback
-  let user = dbUser || process.env.SMTP_USER || process.env.EMAIL_USER;
-  let pass = dbPass || process.env.SMTP_PASS;
-  let host = dbHost || process.env.SMTP_HOST;
-  let port = dbPort ? Number(dbPort) : (process.env.SMTP_PORT ? Number(process.env.SMTP_PORT) : undefined);
+  const user = dbUser || process.env.SMTP_USER || process.env.EMAIL_USER;
+  const pass = dbPass || process.env.SMTP_PASS;
+  const host = dbHost || process.env.SMTP_HOST;
+  const port = dbPort ? Number(dbPort) : (process.env.SMTP_PORT ? Number(process.env.SMTP_PORT) : undefined);
 
   if (user && pass) {
     const smtpHostname = host || "smtp.gmail.com";
     const smtpPort     = port || 587;
-    // حل الـ hostname إلى IPv4 صريح لتجنب ENETUNREACH (VPS لا يدعم IPv6 لـ Gmail)
-    const smtpHost = await resolveIPv4(smtpHostname);
+    const smtpHost     = await resolveIPv4(smtpHostname);
     transporter = nodemailer.createTransport({
-      host: smtpHost,
-      port: smtpPort,
-      secure: smtpPort === 465,
-      auth: { user, pass },
-      tls: { rejectUnauthorized: false, servername: smtpHostname },
+      host:              smtpHost,
+      port:              smtpPort,
+      secure:            smtpPort === 465,
+      auth:              { user, pass },
+      tls:               { rejectUnauthorized: false, servername: smtpHostname },
+      // ⬇ timeout قصير — لا نُعيق الـ request دقيقتين إذا كان المنفذ محجوباً
+      connectionTimeout: 12000,
+      greetingTimeout:   12000,
+      socketTimeout:     20000,
     });
     isEthereal = false;
     console.log(`[email] ✅ SMTP جاهز → ${smtpHostname}(${smtpHost}):${smtpPort} (${user})`);
   } else {
-    // لا يوجد SMTP مضبوط — افشل بسرعة بدل الانتظار على Ethereal (يسبب timeout 120ث)
     console.error("[email] SMTP_PASS not configured in env or DB — email disabled");
     throw new Error("SMTP_NOT_CONFIGURED");
   }
@@ -75,6 +117,12 @@ async function getTransporter(): Promise<Transporter> {
 }
 
 export async function initEmailService(): Promise<void> {
+  const resendKey = await getResendKey();
+  if (resendKey) {
+    console.log("[email] ✅ Resend API مُفعَّل — سيُستخدم HTTPS لإرسال البريد");
+    return;
+  }
+  // لا يوجد Resend — جرّب SMTP
   try {
     const t = await getTransporter();
     if (!isEthereal) {
@@ -82,9 +130,8 @@ export async function initEmailService(): Promise<void> {
       console.log("[email] ✅ اتصال SMTP تم التحقق منه بنجاح");
     }
   } catch (err: any) {
-    // لا نُصفّر الـ transporter هنا — يحتفظ بـ IPv4 المُحلَّل
-    // حتى لو فشل verify() (قد تكون مشكلة مؤقتة) الإرسال الفعلي قد يعمل
     console.error("[email] ❌ فشل التحقق من SMTP:", err.message);
+    console.warn("[email] ⚠️  أضف RESEND_API_KEY إلى .env لإرسال موثوق (resend.com مجاني)");
   }
 }
 
@@ -95,54 +142,62 @@ export interface SendResult {
   error?: string;
 }
 
-export async function sendVerifyEmail(to: string, code: string): Promise<SendResult> {
+/** إرسال عبر Resend أو SMTP مع fallback */
+async function sendEmail(
+  to: string,
+  subject: string,
+  html: string,
+  text: string,
+): Promise<SendResult> {
+  // 1. Resend API (HTTPS — لا يُحجب)
+  const resendKey = await getResendKey();
+  if (resendKey) {
+    try {
+      await sendViaResend(to, subject, html, text);
+      return { ok: true };
+    } catch (err: any) {
+      console.error("[email] Resend فشل:", err.message);
+      // لا نجرب SMTP إذا فشل Resend — الأرجح أن المشكلة في المفتاح/الإعداد
+      return { ok: false, error: `Resend: ${err.message}` };
+    }
+  }
+
+  // 2. SMTP fallback
   try {
     const t = await getTransporter();
-    const from = process.env.SMTP_FROM
+    const smtpUser  = process.env.SMTP_USER || await getConfig("smtp_user") || "";
+    const fromAddr  = process.env.SMTP_FROM
       ? `"Anime NOVA" <${process.env.SMTP_FROM}>`
-      : isEthereal
-      ? `"Anime NOVA" <${testAccount?.user}>`
-      : `"Anime NOVA" <${process.env.SMTP_USER || await getConfig("smtp_user")}>`;
+      : `"Anime NOVA" <${smtpUser}>`;
 
-    const info = await t.sendMail({
-      from, to,
-      subject: `كود التحقق: ${code} — Anime NOVA`,
-      html: verifyHtml(code),
-      text: `كود تفعيل حسابك في Anime NOVA هو: ${code}\nصالح لمدة 10 دقائق فقط.`,
-    });
-    const previewUrl = isEthereal ? nodemailer.getTestMessageUrl(info) || undefined : undefined;
-    if (previewUrl) console.log("[email] Ethereal preview:", previewUrl);
-    return { ok: true, messageId: info.messageId, previewUrl };
+    const info = await t.sendMail({ from: fromAddr, to, subject, html, text });
+    console.log(`[email] ✅ SMTP → ${to}`);
+    return { ok: true, messageId: info.messageId };
   } catch (err: any) {
     const msg = err.message === "SMTP_NOT_CONFIGURED"
-      ? "البريد الإلكتروني غير مفعّل — أضف SMTP_USER وSMTP_PASS في .env على السيرفر"
+      ? "البريد الإلكتروني غير مفعّل — أضف RESEND_API_KEY إلى .env (resend.com)"
       : err.message;
-    console.error("[email] فشل إرسال كود التحقق:", msg);
+    console.error("[email] SMTP فشل:", msg);
     return { ok: false, error: msg };
   }
 }
 
-export async function sendPasswordResetEmail(to: string, code: string): Promise<SendResult> {
-  try {
-    const t = await getTransporter();
-    const from = process.env.SMTP_FROM
-      ? `"Anime NOVA" <${process.env.SMTP_FROM}>`
-      : isEthereal
-      ? `"Anime NOVA" <${testAccount?.user}>`
-      : `"Anime NOVA" <${process.env.SMTP_USER || await getConfig("smtp_user")}>`;
+export async function sendVerifyEmail(to: string, code: string): Promise<SendResult> {
+  return sendEmail(
+    to,
+    `كود التحقق: ${code} — Anime NOVA`,
+    verifyHtml(code),
+    `كود تفعيل حسابك في Anime NOVA هو: ${code}\nصالح لمدة 10 دقائق فقط.`,
+  );
+}
 
-    const info = await t.sendMail({
-      from, to,
-      subject: `إعادة تعيين كلمة المرور: ${code} — Anime NOVA`,
-      html: resetHtml(code),
-      text: `كود إعادة تعيين كلمة مرورك في Anime NOVA هو: ${code}\nصالح لمدة 10 دقائق فقط.`,
-    });
-    const previewUrl = isEthereal ? nodemailer.getTestMessageUrl(info) || undefined : undefined;
-    return { ok: true, messageId: info.messageId, previewUrl };
-  } catch (err: any) {
-    console.error("[email] فشل إرسال كود إعادة التعيين:", err.message);
-    return { ok: false, error: err.message };
-  }
+export async function sendPasswordResetEmail(to: string, code: string): Promise<SendResult> {
+  return sendEmail(
+    to,
+    `إعادة تعيين كلمة المرور: ${code} — Anime NOVA`,
+    resetHtml(code),
+    `كود إعادة تعيين كلمة مرورك في Anime NOVA هو: ${code}\nصالح لمدة 10 دقائق فقط.`,
+  );
 }
 
 function verifyHtml(code: string): string {
