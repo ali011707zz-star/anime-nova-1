@@ -270,7 +270,8 @@ function parseVTT(text: string): SubCue[] {
       .map(l => l.replace(/<[^>]*>/g, "")
         .replace(/&amp;/g, "&").replace(/&lt;/g, "<")
         .replace(/&gt;/g, ">").replace(/&nbsp;/g, " ").trim())
-      .filter(Boolean);
+      .filter(Boolean)
+      .filter(l => !/^kaa\.m\s*$/i.test(l)); // حذف علامة ترجمة kaa.m من مصدر Kawaii
     if (textLines.length > 0) cues.push({ start, end, text: textLines.join("\n") });
   }
   return cues;
@@ -466,6 +467,8 @@ export function RiftPlayer({
 
   /* ─── Skip notification ─── */
   const skipNotifFired                = useRef(false);
+  const [skipIntroDismissed, setSkipIntroDismissed] = useState(false);
+  const [skipOutroDismissed, setSkipOutroDismissed] = useState(false);
 
   /* ─── Anime Rift features ─── */
   const [seekDuration, setSeekDuration] = useState(10);
@@ -1505,18 +1508,26 @@ export function RiftPlayer({
   ).current;
 
   /* ─── Skip intro/outro logic ─── */
-  const SKIP_LEAD = 8;
-  const inIntroRange = !!skipIntro && position >= Math.max(0, skipIntro.start - SKIP_LEAD) && position < skipIntro.end;
-  const inOutroRange = !!skipOutro && position >= Math.max(0, skipOutro.start - SKIP_LEAD) && position <= skipOutro.end;
+  /* يظهر الزر دائماً طالما الحلقة لم تتجاوز المقدمة، ويختفي فقط عند ضغط المستخدم عليه */
+  const inIntroRange = !!skipIntro && !skipIntroDismissed && position < skipIntro.end;
+  const inOutroRange = !!skipOutro && !skipOutroDismissed && position < skipOutro.end;
+
+  /* إعادة تعيين الإخفاء عند تغيير المصدر — كل حلقة/مصدر جديد يُعيد الزر للظهور */
+  useEffect(() => {
+    setSkipIntroDismissed(false);
+    setSkipOutroDismissed(false);
+  }, [srcIdx]);
 
   const doSkipIntro = useCallback(() => {
     if (skipIntro) seek(skipIntro.end);
+    setSkipIntroDismissed(true); // يختفي بعد ضغط المستخدم
     fadeIn();
   }, [skipIntro, seek, fadeIn]);
 
   const doSkipOutro = useCallback(() => {
     if (onNextEpisode) { onNextEpisode(); return; }
     if (skipOutro) seek(skipOutro.end);
+    setSkipOutroDismissed(true);
     fadeIn();
   }, [skipOutro, onNextEpisode, seek, fadeIn]);
 
@@ -1984,10 +1995,10 @@ export function RiftPlayer({
             {isPortrait ? (
               /* وضع عمودي: أزرار التخطي + التشغيل */
               <View style={s.centerPortraitRow}>
-                {/* زر التخطي للخلف — "10" تحت الدائرة لمحاذاة دقيقة مع زر التشغيل */}
+                {/* زر التخطي للأمام — الأول في JSX → يظهر على اليمين في RTL */}
                 <View style={{ alignItems: "center", gap: 4 }}>
-                  <Pressable onPress={() => seek(positionRef.current - 10)} style={s.centerSeekBtn} hitSlop={14}>
-                    <Ionicons name="play-back" size={24} color="#fff" />
+                  <Pressable onPress={() => seek(positionRef.current + 10)} style={s.centerSeekBtn} hitSlop={14}>
+                    <Ionicons name="play-forward" size={24} color="#fff" />
                   </Pressable>
                   <Text style={s.centerSeekLabel}>10</Text>
                 </View>
@@ -2004,10 +2015,10 @@ export function RiftPlayer({
                         />}
                   </Pressable>
                 </View>
-                {/* زر التخطي للأمام */}
+                {/* زر الرجوع — الأخير في JSX → يظهر على اليسار في RTL */}
                 <View style={{ alignItems: "center", gap: 4 }}>
-                  <Pressable onPress={() => seek(positionRef.current + 10)} style={s.centerSeekBtn} hitSlop={14}>
-                    <Ionicons name="play-forward" size={24} color="#fff" />
+                  <Pressable onPress={() => seek(positionRef.current - 10)} style={s.centerSeekBtn} hitSlop={14}>
+                    <Ionicons name="play-back" size={24} color="#fff" />
                   </Pressable>
                   <Text style={s.centerSeekLabel}>10</Text>
                 </View>
@@ -2078,6 +2089,9 @@ export function RiftPlayer({
                   ]}
                   onLayout={(e) => {
                     barWidth.current = e.nativeEvent.layout.width || 1;
+                    // مسح أي seek مؤقت عند تغيير الاتجاه (portrait↔landscape) لتجنب الإحداثيات القديمة
+                    setPostSeekPct(null);
+                    setIsDragging(false);
                     barRef.current?.measureInWindow((px) => { if (px >= 0) barPageX.current = px; });
                   }}
                   {...seekBarPan.panHandlers}
@@ -2158,8 +2172,8 @@ export function RiftPlayer({
               <View style={s.bottomCenter}>
                 {!isPortrait && (
                   <View style={{ alignItems: "center", gap: 2 }}>
-                    <Pressable onPress={() => seek(positionRef.current - 10)} style={s.seekCtrlBtn} hitSlop={10}>
-                      <Ionicons name="play-back" size={17} color="rgba(255,255,255,0.90)" />
+                    <Pressable onPress={() => seek(positionRef.current + 10)} style={s.seekCtrlBtn} hitSlop={10}>
+                      <Ionicons name="play-forward" size={17} color="rgba(255,255,255,0.90)" />
                     </Pressable>
                     <Text style={s.seekCtrlLabel}>10</Text>
                   </View>
@@ -2169,8 +2183,8 @@ export function RiftPlayer({
                 </Pressable>
                 {!isPortrait && (
                   <View style={{ alignItems: "center", gap: 2 }}>
-                    <Pressable onPress={() => seek(positionRef.current + 10)} style={s.seekCtrlBtn} hitSlop={10}>
-                      <Ionicons name="play-forward" size={17} color="rgba(255,255,255,0.90)" />
+                    <Pressable onPress={() => seek(positionRef.current - 10)} style={s.seekCtrlBtn} hitSlop={10}>
+                      <Ionicons name="play-back" size={17} color="rgba(255,255,255,0.90)" />
                     </Pressable>
                     <Text style={s.seekCtrlLabel}>10</Text>
                   </View>

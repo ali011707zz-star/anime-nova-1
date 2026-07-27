@@ -1087,44 +1087,19 @@ export default function WatchScreen() {
           </View>
         </View>
 
-        {/* ── Site selector: اختر مصدراً لبدء التشغيل ── */}
+        {/* ── لا توجد مصادر: رسالة صريحة + زر تحديث ── */}
         {allSrcs.length === 0 && !loading && (
-          <View style={d.siteSelectorCard}>
-            <View style={d.siteSelectorHeader}>
-              <Ionicons name="play-circle" size={16} color="#a78bfa" />
-              <Text style={d.siteSelectorTitle}>اختر مصدراً للتشغيل</Text>
-            </View>
-            <View style={d.siteGrid}>
-              {(ANIME_SITES as readonly string[]).map(site => {
-                const st = slotStatus[site] || "idle";
-                const isFetching = st === "fetching";
-                const isFailed = st === "failed";
-                return (
-                  <Pressable
-                    key={site}
-                    style={[d.siteCard, isFailed && d.siteCardFailed]}
-                    onPress={() => handlePickSite(site, true)}
-                    disabled={isFetching}
-                  >
-                    <View style={d.siteCardTopRow}>
-                      <View style={d.siteTagBadge}>
-                        <Text style={d.siteTagText}>{getSiteTag(site)}</Text>
-                      </View>
-                      <Text style={d.siteCardName} numberOfLines={1}>{SITE_LABEL[site] || site}</Text>
-                      {isFetching && <SpinRing size={14} />}
-                      {st === "ready" && <Ionicons name="checkmark-circle" size={14} color="#34d399" />}
-                      {isFailed && <Text style={d.siteCardFailedText}>فشل</Text>}
-                    </View>
-                    {!!getSiteDesc(site) && (
-                      <Text style={d.siteCardDesc} numberOfLines={1}>{getSiteDesc(site)}</Text>
-                    )}
-                  </Pressable>
-                );
-              })}
-            </View>
+          <View style={[d.siteSelectorCard, { alignItems: "center", paddingVertical: 32 }]}>
+            <Ionicons name="film-outline" size={44} color="rgba(139,92,246,0.28)" style={{ marginBottom: 14 }} />
+            <Text style={{ color: "rgba(255,255,255,0.88)", fontFamily: "Cairo_700Bold", fontSize: 16, textAlign: "center", marginBottom: 6 }}>
+              لا يوجد مصدر لهذه الحلقة
+            </Text>
+            <Text style={{ color: "rgba(255,255,255,0.38)", fontFamily: "Cairo_400Regular", fontSize: 13, textAlign: "center", marginBottom: 22, lineHeight: 20 }}>
+              تعذّر العثور على مصدر متاح{"\n"}جرّب التحديث أو عد لاحقاً
+            </Text>
             <Pressable style={d.loadAllBtn} onPress={refreshAllSources}>
-              <Ionicons name="flash" size={13} color="#c4b5fd" />
-              <Text style={d.loadAllText}>تحميل كل المصادر</Text>
+              <Ionicons name="refresh" size={13} color="#c4b5fd" />
+              <Text style={d.loadAllText}>تحديث المصادر</Text>
             </Pressable>
           </View>
         )}
