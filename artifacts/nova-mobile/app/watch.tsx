@@ -206,9 +206,9 @@ function ensureVpsProxy(url: string, headers: Record<string, string> | undefined
 
 /* ── مصادر تُشغَّل native مباشرةً عبر RiftPlayer (seg-proxy يُعيد روابط مطلقة الآن) ── */
 
-/* ── أولويات المصادر: KW → AF → SA → rest ── */
+/* ── أولويات المصادر: KW → AW → AF → SA → rest ── */
 const SITE_PRIORITY: Record<string, number> = {
-  kawaii: 100,
+  kawaii: 100, animewitcher: 90,
   animeify: 85, sanime: 80,
   dulo_anim: 70, vidlink_anim: 55,
   vidfast: 35,
@@ -219,10 +219,9 @@ const SITE_PRIORITY: Record<string, number> = {
 /* ── قائمة المصادر (KW أولاً — الأولوية القصوى للتشغيل الفوري) ── */
 /* مصادر موحَّدة مع الويب — نفس المصادر الـ 8 المفعَّلة في SCRAPER_DEFS */
 const ANIME_SITES = [
-  "kawaii", "anslayer", "animeify", "sanime",
+  "kawaii", "animewitcher", "anslayer", "animeify", "sanime",
   "anifox",    // مُضاف 2026-07-27 — Archive.org/MediaFire/MP4Upload/Uqload، tag=FX
   // "mitanime":  محذوف بطلب المستخدم 2026-07-27
-  // "animewitcher": Algolia يحجب VPS + HuggingFace space نهائياً (403 دائم) — أُزيل 2026-07-27
   // "witanime": معطّل بطلب المستخدم
   // "allmanga": معطّل 2026-07-17 — AA_CRYPTO_MISSING على AllAnime
 ] as const;
@@ -233,12 +232,9 @@ const SITE_TIMEOUT_MS = 28_000;
 /* timeout مُخصَّص لكل موقع — يجب أن يكون >= timeout الباكند + هامش
    وإلا يُقتل الطلب قبل أن يرد الباكند (سبب اختفاء المصادر في cache البارد) */
 const SITE_TIMEOUT_MAP: Partial<Record<typeof ANIME_SITES[number], number>> = {
-  anifox:       82_000,  // backend race = 75s (catalog pagination 0→4000) + 7s هامش — CRITICAL
-  kawaii:       15_000,  // backend = 1s API + 2s extraction + هامش — كان SCRAPER_MS=7s
-  // مصادر محذوفة من ANIME_SITES لكن تُترك للتوثيق:
-  // animekai:  46_000  // backend = 40s + 6s
-  // animewitcher: 32_000  // DEAD — Algolia 403 دائم
-  // mitanime:  65_000  // disabled by user
+  anifox:       35_000,  // backend race = 30s (catalog من cache + season/ep fetch) + 5s هامش
+  kawaii:       15_000,  // backend = 1s API + 2s extraction + هامش
+  animewitcher: 38_000,  // backend race = 38s (servers_resolved ~30s) + هامش
 };
 
 /* ── Spinning loader ── */
@@ -508,7 +504,7 @@ export default function WatchScreen() {
               return direct[0] || good;
             };
             /* تأخير 400ms — يمنح KW/AW فرصة الوصول قبل الاختيار */
-            const isHighPriority = ["kawaii"].includes(site);
+            const isHighPriority = ["kawaii", "animewitcher"].includes(site);
             autoPlayTimerRef.current = setTimeout(() => {
               autoPlayTimerRef.current = null;
               if (!isMountedRef.current || autoPlayFiredRef.current || fetchEpochRef.current !== myEpoch) return;

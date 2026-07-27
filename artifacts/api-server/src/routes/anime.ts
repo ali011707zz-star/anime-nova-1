@@ -1265,8 +1265,29 @@ async function getAnifoxSources(
     const rawSources = Array.isArray(sourceJson?.data) ? sourceJson.data : [];
     const fallbackSources = Array.isArray(episode.sources) ? episode.sources : [];
     const allSources = rawSources.length ? rawSources : fallbackSources;
+    // ── فلتر المصادر الموثوقة فقط — نتجاهل الـ embeds وصفحات الهبوط غير المدعومة ──
+    // مصادر مدعومة: archive.org · mediafire · mp4upload · uqload · direct CDN (.mp4/.mkv/.webm)
+    const ANIFOX_TRUSTED = (url: string) => {
+      const l = url.toLowerCase();
+      return (
+        /archive\.org\/download\//i.test(l) ||        // Archive.org — MP4 مباشر موثوق
+        /\.(?:mp4|mkv|webm)(?:[?#]|$)/i.test(l) ||  // أي CDN مباشر (server.sanime.net وغيره)
+        l.includes("mediafire.com") ||                // MediaFire — تحتاج page fetch → direct link
+        l.includes("mp4upload.com") ||                // MP4Upload — HTML parse → CDN link
+        l.includes("uqload.is") || l.includes("uqload.co") || l.includes("uqload.com") // Uqload
+      );
+    };
     const jobs = allSources
-      .filter((s: any) => s?.source && !/yandex\.(com|ru)|yadi\.sk/i.test(String(s.source)))
+      .filter((s: any) => {
+        if (!s?.source) return false;
+        const url = String(s.source);
+        if (/yandex\.(com|ru)|yadi\.sk/i.test(url)) return false;
+        if (!ANIFOX_TRUSTED(url)) {
+          console.log(`[ANIFOX] skip unsupported host: ${url.slice(0, 60)}`);
+          return false;
+        }
+        return true;
+      })
       .map(async (s: any) => {
         const pageUrl = String(s.source);
         const quality = String(s.source_quality || "HD");
@@ -1274,7 +1295,7 @@ async function getAnifoxSources(
         let result: UnifiedSource | null = null;
         if (/archive\.org\/download\/.*\.(?:mp4|mkv|webm)/i.test(pageUrl) || /\.(?:mp4|mkv|webm)(?:[?#]|$)/i.test(pageUrl)) {
           const isArchive = pageUrl.includes("archive.org");
-          const referer = isArchive ? "https://archive.org/" : "https://max-panel.monster/";
+          const referer = isArchive ? "https://archive.org/" : pageUrl.split("/").slice(0, 3).join("/") + "/";
           result = {
             name: `ANIFOX · ${name} · ${quality}`,
             url: pageUrl,
@@ -8197,10 +8218,10 @@ async function getAnimeKaiSources(
 const AW_HF_BASE   = "https://1we323-witcher.hf.space";
 const AW_FS_BASE   = "https://firestore.googleapis.com/v1/projects/animewitcher-1c66d/databases/(default)/documents";
 
-// fast-fail: إذا رجع Algolia 403 مرة نوقف المحاولات لمدة ساعة
+// fast-fail: إذا رجع Algolia 403 نوقف المحاولات 10 دقائق فقط (الحجب متقطع وليس دائم)
 let _awAlgoliaBlocked = false;
 let _awAlgoliaBlockedAt = 0;
-const AW_ALGOLIA_BLOCK_TTL = 60 * 60_000; // ساعة
+const AW_ALGOLIA_BLOCK_TTL = 10 * 60_000; // 10 دقائق (كان ساعة — الحجب متقطع)
 
 async function getAnimeWitcherSources(
   title: string, english: string | null, ep: number, _anilistId?: number,
@@ -13163,7 +13184,7 @@ router.get("/anime/fetch-source", async (req, res) => {
       // xyra_anim: معطّل مؤقتاً — api.xyra.stream يرجع 502 دائماً (عطل من طرفهم)
       // case "xyra_anim":    (await race(getXyraAnimeSources(title, english, ep, anilistId), 18_000, [])).forEach(collectSrc); break;
       case "sanime":       (await race(getSAnimeSources(title, english, ep),               20_000, [])).forEach(collectSrc); break;
-      case "anifox":       (await race(getAnifoxSources(title, english, ep),               75_000, [])).forEach(collectSrc); break;
+      case "anifox":       (await race(getAnifoxSources(title, english, ep),               30_000, [])).forEach(collectSrc); break;
       case "anslayer":     (await race(getAnimeSlayerSources(title, english, ep, anslayerId, titleAr), 20_000, [])).forEach(collectSrc); break;
       case "ristoanime":   (await race(getRistoAnimeSources(title, english, ep),          22_000, [])).forEach(collectSrc); break;
       // case "allmanga": معطّل 2026-07-17
