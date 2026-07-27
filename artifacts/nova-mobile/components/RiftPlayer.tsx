@@ -1521,7 +1521,8 @@ export function RiftPlayer({
   /* ─── Skip intro/outro logic ─── */
   /* يظهر الزر دائماً طالما الحلقة لم تتجاوز المقدمة، ويختفي فقط عند ضغط المستخدم عليه */
   const inIntroRange = !!skipIntro && !skipIntroDismissed && position < skipIntro.end;
-  const inOutroRange = !!skipOutro && !skipOutroDismissed && position < skipOutro.end;
+  // النهاية لا تظهر أثناء المقدمة — زر واحد في كل مرة
+  const inOutroRange = !!skipOutro && !skipOutroDismissed && !inIntroRange && position < skipOutro.end;
 
   /* إعادة تعيين الإخفاء عند تغيير المصدر — كل حلقة/مصدر جديد يُعيد الزر للظهور */
   useEffect(() => {
@@ -1536,11 +1537,11 @@ export function RiftPlayer({
   }, [skipIntro, seek, fadeIn]);
 
   const doSkipOutro = useCallback(() => {
-    if (onNextEpisode) { onNextEpisode(); return; }
+    // تخطي النهاية = القفز لنهاية نطاق الـ outro فقط (لا الانتقال للحلقة التالية)
     if (skipOutro) seek(skipOutro.end);
     setSkipOutroDismissed(true);
     fadeIn();
-  }, [skipOutro, onNextEpisode, seek, fadeIn]);
+  }, [skipOutro, seek, fadeIn]);
 
   /* ─── Tap handler with double-tap detection ─── */
   const handleTap = useCallback((pageX: number) => {
