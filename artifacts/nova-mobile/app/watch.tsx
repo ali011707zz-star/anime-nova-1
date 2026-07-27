@@ -220,6 +220,7 @@ const SITE_PRIORITY: Record<string, number> = {
 const ANIME_SITES = [
   "kawaii", "animewitcher", "anslayer", "animeify", "sanime",
   "mitanime",  // مُضاف 2026-07-24 — RSC HTTP مباشر بلا browser، 1-2s، 4-8 سيرفرات
+  "anifox",    // مُضاف 2026-07-27 — Archive.org/MediaFire/MP4Upload/Uqload، tag=FX
   // "witanime": معطّل بطلب المستخدم
   // "allmanga": معطّل 2026-07-17 — AA_CRYPTO_MISSING على AllAnime
 ] as const;
