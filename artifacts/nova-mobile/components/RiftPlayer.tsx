@@ -447,9 +447,12 @@ export function RiftPlayer({
   const prevSpeedRef                  = useRef(1);
 
   /* ─── Volume / Brightness ─── */
-  const [volume, setVolume]           = useState(2);   // يبدأ بـ 200%
+  /* expo-video يطابق مستوى الصوت الحقيقي في النظام ضمن 0..1.
+     لا نعرض 200% وهمية ثم نعيدها إلى 100% عند التحميل؛ يبدأ المشغل
+     بأقصى مستوى حقيقي، وتبقى الزيادة الإضافية من أزرار الهاتف نفسها. */
+  const [volume, setVolume]           = useState(1);
   const [brightness, setBrightness]   = useState(0);
-  const volumeRef                     = useRef(2);
+  const volumeRef                     = useRef(1);
   const brightnessRef                 = useRef(0);
 
   /* ─── Gesture feedback ─── */
@@ -1017,7 +1020,14 @@ export function RiftPlayer({
     if (Platform.OS === "web") return; // web browsers block video frame capture
     try {
       const VS = await import("react-native-view-shot" as any);
-      const uri: string = await VS.captureRef(rootViewRef, { format: "jpg", quality: 0.9 });
+      /* VideoView قد يُرسم كسطح native لا يستطيع captureRef قراءته على بعض
+         إصدارات Android؛ نجرّب لقطة المشغل أولاً ثم لقطة الشاشة كاحتياطي. */
+      let uri: string;
+      try {
+        uri = await VS.captureRef(rootViewRef, { format: "jpg", quality: 0.95, result: "tmpfile" });
+      } catch {
+        uri = await VS.captureScreen({ format: "jpg", quality: 0.95, result: "tmpfile" });
+      }
       const ML = await import("expo-media-library" as any);
       const perm = await ML.requestPermissionsAsync({ writeOnly: true });
       if (perm.status === "granted") await ML.saveToLibraryAsync(uri);
@@ -1046,12 +1056,12 @@ export function RiftPlayer({
     return () => sub.remove();
   }, []);
 
-  /* ─── Mute sync + initial 200% volume ─── */
+  /* ─── Mute sync + initial maximum real volume ─── */
   useEffect(() => {
     try {
       if (isMuted) { prevVolRef.current = volumeRef.current; player.volume = 0; }
       else {
-        /* حجم الجهاز دائماً 1 (أقصى حد للهاردوير) — الـ 200% هي مؤشر UI فقط */
+        /* expo-video يقبل 1 كأقصى مستوى حقيقي للصوت */
         player.volume = 1;
       }
     } catch {}
@@ -1395,13 +1405,14 @@ export function RiftPlayer({
           setFeedback({ type: "seek", value: newPos, delta: seekDelta });
         } else if (gestureTypeRef.current === "vol") {
           const delta = -(gs.moveY - gestureStartY.current) / (H * 0.55);
-          const newVol = Math.max(0, Math.min(2, gestureStartVal.current + delta)); // 200% max
+          const newVol = Math.max(0, Math.min(1, gestureStartVal.current + delta));
           volumeRef.current = newVol;
           setVolume(newVol);
           setFeedback({ type: "volume", value: newVol });
         } else {
           const delta = -(gs.moveY - gestureStartY.current) / (H * 0.55);
-          const newBri = Math.max(0, Math.min(0.75, gestureStartVal.current - delta));
+          /* السحب للأعلى يرفع السطوع، والأسفل يعيده للصفر */
+          const newBri = Math.max(0, Math.min(0.75, gestureStartVal.current + delta));
           brightnessRef.current = newBri;
           setBrightness(newBri);
           setFeedback({ type: "brightness", value: newBri });
@@ -1581,10 +1592,10 @@ export function RiftPlayer({
     ? Math.min(Math.max(position / duration, 0), 1)
     : 0;
 
-  /* ─── Volume sync to player (clamp 0-1 for hardware, allow 0-2 for UI boost) ─── */
+  /* ─── Volume sync to player ─── */
   useEffect(() => {
     volumeRef.current = volume;
-    try { player.volume = Math.min(1, volume); } catch {}
+    try { player.volume = volume; } catch {}
   }, [volume, player]);
 
   const markerPctIntro = duration > 0 && skipIntro && position < skipIntro.end
@@ -1615,11 +1626,11 @@ export function RiftPlayer({
         contentFit={contentFit}
       />
 
-      {/* ── Brightness overlay ── */}
+      {/* ── Brightness overlay: white veil gives a real visible lift ── */}
       {brightness > 0 && (
         <View
           pointerEvents="none"
-          style={[StyleSheet.absoluteFill, { backgroundColor: "#000", opacity: brightness, zIndex: 2 }]}
+          style={[StyleSheet.absoluteFill, { backgroundColor: "#fff", opacity: brightness * 0.35, zIndex: 2 }]}
         />
       )}
 
@@ -1728,7 +1739,7 @@ export function RiftPlayer({
         </Animated.View>
       )}
 
-      {/* ── Volume feedback (يدعم 0-200% Volume Boost مثل مشغل الويب) ── */}
+      {/* ── Volume feedback ── */}
       {feedback?.type === "volume" && (
         <View style={s.feedbackRight} pointerEvents="none">
           <View style={[s.feedbackBarWrap, feedback.value > 1 && { borderColor: "rgba(139,92,246,0.35)", borderWidth: 1 }]}>
@@ -1745,7 +1756,7 @@ export function RiftPlayer({
               color={feedback.value > 1 ? "#c4b5fd" : "rgba(255,255,255,0.75)"}
             />
             <Text style={[s.feedbackPillText, feedback.value > 1 && { color: "#c4b5fd" }]}>
-              {Math.round(feedback.value * 100)}%{feedback.value > 1 ? " 🔊" : ""}
+              {Math.round(feedback.value * 100)}%
             </Text>
           </View>
         </View>
@@ -1759,7 +1770,7 @@ export function RiftPlayer({
           </View>
           <View style={s.feedbackPill}>
             <Ionicons name="sunny" size={12} color="rgba(253,224,71,0.85)" />
-            <Text style={s.feedbackPillText}>{Math.round((1 - feedback.value / 0.75) * 100)}%</Text>
+            <Text style={s.feedbackPillText}>{Math.round(100 + (feedback.value / 0.75) * 75)}%</Text>
           </View>
         </View>
       )}

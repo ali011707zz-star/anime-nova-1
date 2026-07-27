@@ -134,6 +134,7 @@
 - [DahmerMovies animation source](dahmermovies-animation-source.md) — a.111477.xyz direct MP4 rawUrl; residential-IP-only CDN; year param required.
 - [VidFast.vc RSC page format fix](vidfast-vc-rsc-fix.md) — __next_f RSC now has "token" not "en"; trailing slash 308-redirect fix; 4 sources confirmed.
 - [VPS mobile player sync](vps-mobile-player-sync.md) — VPS may retain an older WebVideoPlayer; back up and copy the player explicitly before Expo build, then verify bundle markers.
+- [Nova Mobile GitHub builds](nova-mobile-github-builds.md) — user builds APKs through GitHub; sync source to VPS if needed, but never build or install Nova Mobile in Replit.
 - [GitHub push auth](github-push-auth.md) — this workspace's GitHub remote currently rejects pushes because no valid GitHub credential is available; do not force-push or expose tokens.
 - [Mobile static serving](mobile-static-serving.md) — Expo bundle behind Nginx needs matching BASE_PATH, ^~ location, and a persistent PM2 service.
 - [NOVA Player APK rebrand](nova-player-apk-rebrand.md) — resource-only rebranding preserves the original package contract, but rebuilt APKs require a new signature and replacement install.
