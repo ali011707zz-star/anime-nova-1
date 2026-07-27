@@ -65,9 +65,18 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       // anime-srcs-* keys: keep only last 20 episodes
       const srcKeys = keys.filter(k => k.startsWith("anime-srcs-"));
       if (srcKeys.length > 20) toRemove.push(...srcKeys.slice(0, srcKeys.length - 20));
+      // anim-srcs-* keys (animation/movies): keep only last 20
+      const animSrcKeys = keys.filter(k => k.startsWith("anim-srcs-"));
+      if (animSrcKeys.length > 20) toRemove.push(...animSrcKeys.slice(0, animSrcKeys.length - 20));
       // sub-ar-* keys: keep only last 10 episodes
       const subKeys = keys.filter(k => k.startsWith("sub-ar-"));
       if (subKeys.length > 10) toRemove.push(...subKeys.slice(0, subKeys.length - 10));
+      // desc-ar-* keys (translated descriptions): keep only last 30
+      const descKeys = keys.filter(k => k.startsWith("desc-ar-"));
+      if (descKeys.length > 30) toRemove.push(...descKeys.slice(0, descKeys.length - 30));
+      // my-rating-* + saved-* + adult-warn-*: keep only last 50
+      const ratingKeys = keys.filter(k => k.startsWith("my-rating-") || k.startsWith("saved-") || k.startsWith("adult-warn-"));
+      if (ratingKeys.length > 50) toRemove.push(...ratingKeys.slice(0, ratingKeys.length - 50));
       if (toRemove.length > 0) await AsyncStorage.multiRemove(toRemove).catch(() => {});
     } catch {}
   };
@@ -121,10 +130,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   };
 
   const addToHistory = async (item: WatchProgress) => {
+    /* ⚠️ AsyncStorage.setItem داخل setState محظور في React concurrent mode —
+       نحسب القيمة أولاً ثم نكتب AsyncStorage في microtask منفصل */
     setWatchHistory((prev) => {
       const filtered = prev.filter((h) => !(h.animeId === item.animeId && h.ep === item.ep));
       const updated = [item, ...filtered].slice(0, 50);
-      AsyncStorage.setItem("nova-history", JSON.stringify(updated));
+      Promise.resolve().then(() => AsyncStorage.setItem("nova-history", JSON.stringify(updated)).catch(() => {}));
       return updated;
     });
   };
@@ -132,7 +143,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const removeFromHistory = async (animeId: number) => {
     setWatchHistory((prev) => {
       const updated = prev.filter((h) => h.animeId !== animeId);
-      AsyncStorage.setItem("nova-history", JSON.stringify(updated));
+      Promise.resolve().then(() => AsyncStorage.setItem("nova-history", JSON.stringify(updated)).catch(() => {}));
       return updated;
     });
   };
@@ -141,7 +152,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setFavorites((prev) => {
       const exists = prev.find((f) => f.id === anime.id);
       const updated = exists ? prev.filter((f) => f.id !== anime.id) : [anime, ...prev].slice(0, 500);
-      AsyncStorage.setItem("nova-favorites", JSON.stringify(updated));
+      Promise.resolve().then(() => AsyncStorage.setItem("nova-favorites", JSON.stringify(updated)).catch(() => {}));
       return updated;
     });
   };

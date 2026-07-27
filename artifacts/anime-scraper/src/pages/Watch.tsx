@@ -171,19 +171,20 @@ const SCRAPER_DEFS: { site: string; name: string; desc: string; tag: string; aud
   { site: "hianime",      name: "HiAnime",       desc: "ياباني مترجم · HLS نظيف", tag: "HI" },
   { site: "animewitcher", name: "AnimeWitcher",   desc: "PD/ST · مباشر",           tag: "AW", isArabic: true },
   { site: "anineko",      name: "AniNeko",        desc: "ياباني مترجم · HLS",      tag: "AN" },
-  { site: "reanime",      name: "Reanime",        desc: "ياباني مترجم · FlixCloud",  tag: "RE" },
+  // reanime: محذوف بطلب المستخدم 2026-07-24
   { site: "anslayer",     name: "أنمي سلاير",    desc: "مشغلات خارجية · MixDrop/MediaFire", tag: "AS", isArabic: true },
   { site: "animeify",     name: "أنمي فاي",     desc: "عربي · ميغا",             tag: "AF", isArabic: true },
-  { site: "anipub",       name: "AniPub",        desc: "مدبلج · ترجمة عربية",     tag: "AP", isArabic: true },
+  // anipub: معطّل بطلب المستخدم 2026-07-27
   // allmanga: معطّل 2026-07-17 — AllAnime أضافت AA_CRYPTO_MISSING على endpoint الحلقات (anti-scraping)
   // xpass_anim: محذوف — CDN يحجب VPS/CF IPs، المقاطع تفشل للمستخدم 2026-07-15
   // vaplayer_anim: محذوف من الأنمي — مصدره إنجليزي فقط، أُبقي في الأنيميشن 2026-07-15
   // faselhd_db (FH) / moviz_time (MT): معطّلة بطلب المستخدم 2026-07-14
-  { site: "mitanime",     name: "MitAnime",       desc: "ياباني مترجم · videas / hgcloud · MP4", tag: "MT" },
+  // mitanime: محذوف بطلب المستخدم 2026-07-27
   { site: "witanime",     name: "ويت أنمي",      desc: "عربي · ok.ru / yonaplay",    tag: "WI", isArabic: true },
   { site: "nflixmovies_anim", name: "NflixMovies", desc: "إنجليزي · HLS", tag: "NX" },
   { site: "vidbolt_anim",     name: "VidBolt",      desc: "إنجليزي · HLS", tag: "VB" },
   { site: "sanime",           name: "سـAnime",       desc: "عربي · MP4 مباشر",        tag: "SA", isArabic: true },
+  { site: "anifox",           name: "ANIFOX",        desc: "Archive · MediaFire · MP4Upload · Uqload", tag: "FX", isArabic: true },
 ];
 
 /** مجموعة المصادر العربية — لا تعرض زر الترجمة الخارجية لها */
@@ -197,6 +198,7 @@ const ARABIC_SITES = new Set(SCRAPER_DEFS.filter(d => d.isArabic).map(d => d.sit
  */
 const PRIORITY_FETCH_SITES = new Set([
   "kawaii", "hianime", "animewitcher", "dulo_anim", "anineko", "anikoto",
+  "animeify", "sanime", "anifox",  // ANIFOX: Archive/MediaFire/MP4Upload/Uqload
   // shahiid/animelek: أُزيلت — معطّلة بطلب المستخدم 2026-07-14
 ]);
 
@@ -265,6 +267,8 @@ function isEmbedFallback(src: FetchedSrc): boolean {
   const url = (src.directUrl || src.url || "").toLowerCase();
   if (!src.isEmbed) return false;
   if (src.site === "witanime" || src.site === "mycima" || src.site === "moviz_time" || src.site === "faselhd_db" || src.site === "akoam") return true;
+  // animeify: FileMoon+SendVid تُعاد كـ isEmbed:true عند فشل extraction — اعرضها كـ fallback بدل إخفائها
+  if (src.site === "animeify") return true;
   return url.includes("mega.nz") || url.includes("mega.co.nz") || url.includes("vidmoly");
 }
 
@@ -3296,7 +3300,8 @@ export default function WatchPage() {
       mycima:       34000,  // backend = 30s + هامش 4s
       witanime:     48000,  // backend = 45s + هامش 3s
       anikototv:    28000,  // backend = 25s + هامش 3s
-      reanime:      28000,  // backend = 25s + هامش 3s
+      // mitanime: محذوف 2026-07-27
+      // reanime: محذوف 2026-07-24
       hianime:      26000,  // backend = 22s + هامش 4s
       anipm:        24000,  // backend = 20s + هامش 4s
     };
@@ -3319,10 +3324,11 @@ export default function WatchPage() {
         setSlotStatus(prev => ({ ...prev, [site]: "ready" }));
         if (animeId) saveAnimeSrcs(animeId, ep, site, srcs);
 
-        /* تشغيل تلقائي: المصدر الأول يُشغَّل فوراً عند أول نجاح (مرة واحدة فقط) */
+        /* تشغيل تلقائي: أفضل جودة متاحة يُشغَّل فوراً عند أول نجاح (مرة واحدة فقط) */
         if (!bgLoad && !autoPlayedRef.current) {
           autoPlayedRef.current = true;
-          handlePlaySrc(srcs[0]);
+          const sortedSrcs = [...srcs].sort((a, b) => (b.qualityRank ?? 0) - (a.qualityRank ?? 0));
+          handlePlaySrc(sortedSrcs[0]);
         }
 
         /* تحميل خلفي: بعد تشغيل أي مصدر، اكشط بقية المصادر الخاملة تلقائياً
@@ -3379,30 +3385,24 @@ export default function WatchPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  /* ── تشغيل تلقائي: كشط متوازٍ لجميع المصادر فور فتح الصفحة ──
-     أول مصدر يصل ويُشغَّل تلقائياً (bgLoad=false → autoPlayedRef يمنع تكرار التشغيل).
-     إذا كان quick-resume قد فعّل التشغيل مسبقاً (autoPlayedRef=true) تعمل كـ bgLoad=true
-     فقط لتجميع المصادر في قائمة السيرفرات — دون إعادة الضبط أو تشغيل مصدر جديد.
-     cleanup: إلغاء المهل المجدولة عند تغيير الحلقة أو unmount. ── */
+  /* ── Lazy picker (مثل الموبايل): لا كشط تلقائي عند فتح الحلقة ──
+     المستخدم يرى شبكة المصادر فوراً (SCRAPER_DEFS static) ويضغط ما يريد.
+     بعد أول نجاح → بقية المصادر تُكشَّف في الخلفية (منطق bgLoad في handleFetchSite).
+     quick-resume لا يزال يعمل: يشغّل آخر مصدر محفوظ إذا كان هناك تقدُّم > 30s. ── */
   useEffect(() => {
     if (!animeId && !titleParam) return;
-    // إذا كان quick-resume قد شغّل مصدراً بالفعل → لا نُعيد ضبط autoPlayedRef
-    // (إعادة الضبط تُعيد التشغيل التلقائي فوق مصدر الاستئناف الجاري)
-    const resumeAlreadyPlaying = autoPlayedRef.current;
-    if (!resumeAlreadyPlaying) {
-      autoPlayedRef.current   = false;
-    }
-    autoFetchAllRef.current  = false;
-    inFlightRef.current      = new Set();
-    SCRAPER_DEFS.forEach((d, i) => {
-      const tid = window.setTimeout(
-        // bgLoad=true عند الاستئناف: يُجمّع المصادر خلفياً دون تشغيل تلقائي
-        () => handleFetchSite(d.site, resumeAlreadyPlaying ? true : false),
-        i * 70,
-      );
-      pendingTimeoutsRef.current.push(tid);
-    });
+    if (!autoPlayedRef.current) autoPlayedRef.current = false;
+    autoFetchAllRef.current = false;
+    inFlightRef.current     = new Set();
+
+    /* ── إصلاح: إذا لم يُفعَّل quick-resume خلال 350ms → أظهر الـ picker فوراً.
+       بدون هذا الـ fallback تبقى شاشة التحميل عالقة للأبد عند أول فتح للحلقة. ── */
+    const pickerFallbackTimer = window.setTimeout(() => {
+      if (!autoPlayedRef.current) setShowPicker(true);
+    }, 350);
+
     return () => {
+      window.clearTimeout(pickerFallbackTimer);
       pendingTimeoutsRef.current.forEach(id => window.clearTimeout(id));
       pendingTimeoutsRef.current = [];
     };

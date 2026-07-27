@@ -258,7 +258,7 @@ export default function EpisodeListScreen() {
         {/* Back */}
         <Pressable onPress={() => router.canGoBack() ? router.back() : router.replace("/(tabs)")}
           style={[ep_s.backBtn, { top: 12 }]}>
-          <Ionicons name="chevron-forward" size={18} color="#fff" />
+          <Ionicons name="chevron-back" size={18} color="#fff" />
         </Pressable>
 
         {/* Cover + info */}

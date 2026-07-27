@@ -49,19 +49,19 @@ export default function DubbedWatchScreen() {
         return;
       }
 
-      // foupix CDN يتحقق من UA-hash في الـ token ضد الـ User-Agent الذي أنتجه (سيرفر UA).
-      // الموبايل يستخدم UA مختلف → يجب استخدام proxy السيرفر (/api/dubbed/stream) الذي يبثّ بنفس UA.
+      // foupix يحجب طلبات الـ VPS، بينما هاتف المستخدم يخرج من IP سكني مسموح.
+      // لذلك جرّب الرابط الخام من الهاتف أولاً، ثم استخدم proxy الخادم كاحتياطي.
       const srcs: PlayerSource[] = [];
-      if (proxyUrl) {
-        // المصدر الرئيسي: server-side proxy يتجاوز UA-hash مشكلة foupix
-        srcs.push({ url: proxyUrl, label: "مدبلج عربي", quality: "720p HD" });
-      }
-      if (rawUrl && rawUrl !== proxyUrl) {
-        // احتياطي: rawUrl مباشر (قد يفشل بسبب UA مختلف)
+      if (rawUrl) {
+        // المصدر الرئيسي: الهاتف يتصل مباشرةً من IP سكني
         srcs.push({ url: rawUrl, label: "مدبلج عربي (مباشر)", quality: "720p HD", headers: {
           Referer: "https://www.arabic-toons.com/",
           Origin: "https://www.arabic-toons.com",
         }});
+      }
+      if (proxyUrl && proxyUrl !== rawUrl) {
+        // احتياطي: proxy الخادم (مفيد إذا تغيّر سلوك CDN)
+        srcs.push({ url: proxyUrl, label: "مدبلج عربي (احتياطي)", quality: "720p HD" });
       }
       setSources(srcs);
       setLoading(false);
@@ -84,7 +84,7 @@ export default function DubbedWatchScreen() {
       <View style={[styles.container, { paddingTop: topPad }]}>
         <View style={styles.header}>
           <Pressable onPress={() => router.back()} style={styles.backBtn}>
-            <Ionicons name="chevron-forward" size={20} color="rgba(255,255,255,0.7)" />
+            <Ionicons name="chevron-back" size={20} color="rgba(255,255,255,0.7)" />
           </Pressable>
           <View style={{ flex: 1 }}>
             <Text style={styles.headerTitle} numberOfLines={1}>{title}</Text>
@@ -105,7 +105,7 @@ export default function DubbedWatchScreen() {
       <View style={[styles.container, { paddingTop: topPad }]}>
         <View style={styles.header}>
           <Pressable onPress={() => router.back()} style={styles.backBtn}>
-            <Ionicons name="chevron-forward" size={20} color="rgba(255,255,255,0.7)" />
+            <Ionicons name="chevron-back" size={20} color="rgba(255,255,255,0.7)" />
           </Pressable>
           <View style={{ flex: 1 }}>
             <Text style={styles.headerTitle} numberOfLines={1}>{title}</Text>
@@ -133,9 +133,11 @@ export default function DubbedWatchScreen() {
       title={`${title || ""} · ${season || ""}`}
       episode={ep ? parseInt(ep, 10) : undefined}
       onBack={() => router.back()}
+      /* يظل المشغل مفتوحاً بعد استنفاد المصادر كي تظهر أزرار إعادة المحاولة
+         والمصدر التالي داخل RiftPlayer بدلاً من العودة المفاجئة للشاشة السابقة. */
       onError={() => {
-        setError("فشل تشغيل الفيديو — جرّب مصدراً آخر أو أعد المحاولة");
         setSources([]);
+        setError("تعذّر تشغيل مصدر المدبلج — حاول مرة أخرى");
       }}
     />
   );

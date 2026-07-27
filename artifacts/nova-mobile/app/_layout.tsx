@@ -16,9 +16,13 @@ import { SafeAreaProvider } from "react-native-safe-area-context";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { AppProvider } from "@/context/AppContext";
 import { loadRuntimeApiUrl } from "@/utils/baseUrl";
+import { installGlobalCrashHandlers } from "@/utils/crashLogger";
 
 // تحميل عنوان API المخصص من AsyncStorage قبل أي طلب شبكي
 loadRuntimeApiUrl().catch(() => {});
+
+// تثبيت معالجات الأعطال العالمية — فوراً عند بدء التشغيل
+installGlobalCrashHandlers();
 
 SplashScreen.preventAutoHideAsync().catch(() => {});
 
@@ -49,7 +53,8 @@ function RootLayoutNav() {
       <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
       <Stack.Screen name="anime/[id]" options={{ headerShown: false, animation: "slide_from_bottom" }} />
       <Stack.Screen name="watch" options={{ headerShown: false, orientation: "all" }} />
-      {/* animation screens disabled */}
+      <Stack.Screen name="animation/[type]/[id]" options={{ headerShown: false, animation: "slide_from_bottom" }} />
+      <Stack.Screen name="animation/watch" options={{ headerShown: false, orientation: "all" }} />
       <Stack.Screen name="settings" options={{ headerShown: false }} />
       <Stack.Screen name="schedule" options={{ headerShown: false }} />
       <Stack.Screen name="profile" options={{ headerShown: false, animation: "slide_from_right" }} />

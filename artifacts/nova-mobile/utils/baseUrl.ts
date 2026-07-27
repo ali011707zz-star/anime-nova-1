@@ -23,11 +23,36 @@ export function setRuntimeApiUrl(url: string | null) {
   _runtimeUrl = url && url.startsWith("http") ? url.replace(/\/$/, "") : null;
 }
 
-/** استدعِها مرة واحدة في _layout.tsx لتحميل الـ URL المحفوظ */
+/** استدعِها مرة واحدة في _layout.tsx لتحميل الـ URL المحفوظ.
+ *  تتحقق من صحة URL المحفوظ قبل استخدامه — إذا لم يرد خلال 4 ثوانٍ أو أرجع خطأ
+ *  يُحذف تلقائياً ويعود للسيرفر الرسمي، مما يمنع تعليق التطبيق بعد إدخال URL خاطئ.
+ */
 export async function loadRuntimeApiUrl(): Promise<void> {
   try {
     const saved = await AsyncStorage.getItem(CUSTOM_API_URL_KEY);
-    if (saved) setRuntimeApiUrl(saved);
+    if (!saved) return; // لا يوجد URL مخصص — استخدم الافتراضي مباشرةً
+
+    // ── تحقق سريع من صحة URL المحفوظ ──────────────────────────────────────
+    try {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 4_000); // 4 ثوانٍ بحد أقصى
+      const r = await fetch(`${saved.replace(/\/\/$/, "")}/health`, {
+        signal: ctrl.signal,
+      });
+      clearTimeout(timer);
+      if (r.ok) {
+        // URL صالح → استخدمه
+        setRuntimeApiUrl(saved);
+      } else {
+        // يستجيب لكن بخطأ → احذفه وارجع للافتراضي
+        await AsyncStorage.removeItem(CUSTOM_API_URL_KEY);
+        console.warn("[baseUrl] Saved custom URL returned error, reverted to default");
+      }
+    } catch {
+      // لا يمكن الاتصال به (timeout / network error) → احذفه فوراً
+      await AsyncStorage.removeItem(CUSTOM_API_URL_KEY);
+      console.warn("[baseUrl] Saved custom URL unreachable, reverted to default");
+    }
   } catch {}
 }
 

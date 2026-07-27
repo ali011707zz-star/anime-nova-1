@@ -170,7 +170,7 @@ export default function AnimationEpisodesScreen() {
       <View style={s.header}>
         <View style={s.headerRow}>
           <Pressable onPress={() => router.canGoBack() ? router.back() : router.replace("/(tabs)/animations")} style={s.backBtn}>
-            <Ionicons name="chevron-forward" size={18} color="rgba(255,255,255,0.7)" />
+            <Ionicons name="chevron-back" size={18} color="rgba(255,255,255,0.7)" />
           </Pressable>
           <View style={s.headerInfo}>
             <Text style={s.headerLabel}>الحلقات</Text>

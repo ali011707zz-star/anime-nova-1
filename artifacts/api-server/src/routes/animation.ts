@@ -856,8 +856,15 @@ function wrapAnimForMobile(
   proxyUrl: string | undefined,
   headers: Record<string, string> | undefined
 ): { directUrl: string | undefined; proxyUrl: string | undefined } {
-  // إذا يوجد proxyUrl مسبق (مُمرَّر من الـ scraper بـ /api/ prefix) → استخدمه دون تغيير
-  if (proxyUrl && proxyUrl.startsWith("/api/")) return { directUrl, proxyUrl };
+  /*
+   * لا نُبقي directUrl الخام إذا كان هناك proxyUrl من الـ scraper.
+   * ExoPlayer يختار directUrl في تطبيق الموبايل، وتركه خاماً يجعل الجهاز
+   * يتجاوز hls-proxy ويصل إلى CDN المحجوب من VPS. نُرسل رابط الـ proxy
+   * في الحقلين حتى تكون الأولوية آمنة أيضاً مع العملاء أو الكاش القديم.
+   */
+  if (proxyUrl && proxyUrl.startsWith("/api/")) {
+    return { directUrl: proxyUrl, proxyUrl };
+  }
   const raw = directUrl || "";
   if (!raw) return { directUrl, proxyUrl };
   if (raw.startsWith("/api/")) return { directUrl, proxyUrl };
@@ -2887,7 +2894,11 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
               } catch { /* skip */ }
 
             } else if (srvName === "KF") {
-              // KrakenFiles → Cloudflare 502 من Replit → يُتخطى
+              // KrakenFiles CDN (phs*.krakencloud.net) — يعمل من VPS مباشرة مع Referer
+              if (link && link.includes("krakencloud.net")) {
+                const proxied = wrapMp4(link, "https://krakenfiles.com/");
+                sendSource(proxied, label, proxied, proxied);
+              }
             }
           }));
 

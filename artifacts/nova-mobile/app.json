@@ -52,6 +52,15 @@
       "expo-web-browser",
       "expo-video",
       "expo-screen-orientation",
+      "expo-brightness",
+      "react-native-volume-manager",
+      [
+        "expo-media-library",
+        {
+          "photosPermission": "يسمح هذا الإذن بحفظ لقطات المشاهدة في معرض الصور.",
+          "savePhotosPermission": "يسمح هذا الإذن بحفظ لقطات المشاهدة في معرض الصور."
+        }
+      ],
       [
         "expo-image-picker",
         {

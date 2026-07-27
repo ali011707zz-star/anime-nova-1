@@ -43,7 +43,8 @@ const SEASON_OPTIONS = [
 ];
 
 const CUR_YEAR = new Date().getFullYear();
-const YEARS = ["الكل", ...Array.from({ length: 10 }, (_, i) => String(CUR_YEAR - i))];
+const START_YEAR = 1990;
+const YEARS = ["الكل", ...Array.from({ length: CUR_YEAR - START_YEAR + 1 }, (_, i) => String(CUR_YEAR - i))];
 
 const GENRES_WITH_COVERS = [
   { genre: "Action",       ar: "أكشن",       color: "#EF4444" },
@@ -279,6 +280,7 @@ export default function BrowseScreen() {
               </View>
             </ScrollView>
 
+            {/* Seasons row */}
             <ScrollView horizontal showsHorizontalScrollIndicator={false} style={[g.chipRow, { marginTop: 4 }]}>
               <View style={{ flexDirection: "row", gap: 6 }}>
                 {SEASON_OPTIONS.map(opt => (
@@ -287,6 +289,11 @@ export default function BrowseScreen() {
                     <Text style={[g.chipText, season === opt.value && g.chipTextActive]}>{opt.label}</Text>
                   </Pressable>
                 ))}
+              </View>
+            </ScrollView>
+            {/* Years row — من 1990 حتى السنة الحالية */}
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={[g.chipRow, { marginTop: 4 }]}>
+              <View style={{ flexDirection: "row", gap: 6 }}>
                 {YEARS.map(y => {
                   const val = y === "الكل" ? "" : y;
                   return (
@@ -383,24 +390,24 @@ export default function BrowseScreen() {
 
 const g = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#09090B" },
-  header: { backgroundColor: "#09090B", borderBottomWidth: 1, borderBottomColor: "rgba(255,255,255,0.06)", paddingHorizontal: 14, paddingTop: 12, paddingBottom: 8 },
-  headerRow: { flexDirection: "row", alignItems: "center", marginBottom: 10 },
-  headerTitle: { fontSize: 22, fontFamily: "Cairo_800ExtraBold", color: "#fff" },
-  headerSub: { fontSize: 10, color: "rgba(255,255,255,0.3)", fontFamily: "Cairo_400Regular" },
-  clearBtn: { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 12, backgroundColor: "rgba(239,68,68,0.1)", borderWidth: 1, borderColor: "rgba(239,68,68,0.2)" },
-  clearBtnText: { fontSize: 10, fontFamily: "Cairo_700Bold", color: "rgba(252,165,165,0.8)" },
-  genreToggleBtn: { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 12, backgroundColor: "rgba(255,255,255,0.05)", borderWidth: 1, borderColor: "rgba(255,255,255,0.1)" },
+  header: { backgroundColor: "#09090B", borderBottomWidth: 1, borderBottomColor: "rgba(255,255,255,0.06)", paddingHorizontal: 12, paddingTop: 8, paddingBottom: 5 },
+  headerRow: { flexDirection: "row", alignItems: "center", marginBottom: 6 },
+  headerTitle: { fontSize: 17, fontFamily: "Cairo_800ExtraBold", color: "#fff" },
+  headerSub: { fontSize: 9, color: "rgba(255,255,255,0.3)", fontFamily: "Cairo_400Regular" },
+  clearBtn: { flexDirection: "row", alignItems: "center", gap: 3, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 10, backgroundColor: "rgba(239,68,68,0.1)", borderWidth: 1, borderColor: "rgba(239,68,68,0.2)" },
+  clearBtnText: { fontSize: 9, fontFamily: "Cairo_700Bold", color: "rgba(252,165,165,0.8)" },
+  genreToggleBtn: { flexDirection: "row", alignItems: "center", gap: 3, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 10, backgroundColor: "rgba(255,255,255,0.05)", borderWidth: 1, borderColor: "rgba(255,255,255,0.1)" },
   genreToggleBtnActive: { backgroundColor: "rgba(139,92,246,0.15)", borderColor: "rgba(139,92,246,0.35)" },
-  genreToggleText: { fontSize: 10, fontFamily: "Cairo_700Bold", color: "rgba(255,255,255,0.4)" },
-  chipRow: { marginBottom: 4 },
-  chip: { paddingHorizontal: 12, paddingVertical: 7, borderRadius: 12, backgroundColor: "#18181B", borderWidth: 1, borderColor: "rgba(255,255,255,0.06)" },
+  genreToggleText: { fontSize: 9, fontFamily: "Cairo_700Bold", color: "rgba(255,255,255,0.4)" },
+  chipRow: { marginBottom: 2 },
+  chip: { paddingHorizontal: 9, paddingVertical: 4, borderRadius: 10, backgroundColor: "#18181B", borderWidth: 1, borderColor: "rgba(255,255,255,0.06)" },
   chipActive: { backgroundColor: "rgba(139,92,246,0.2)", borderColor: "rgba(139,92,246,0.4)" },
-  chipText: { fontSize: 11, fontFamily: "Cairo_700Bold", color: "rgba(255,255,255,0.45)" },
+  chipText: { fontSize: 10, fontFamily: "Cairo_700Bold", color: "rgba(255,255,255,0.45)" },
   chipTextActive: { color: "#c4b5fd" },
   chipActive2: { backgroundColor: "#7C3AED", borderColor: "#8B5CF6" },
   chipText2Active: { color: "#fff" },
-  searchWrap: { flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: "#18181B", borderRadius: 12, paddingHorizontal: 12, paddingVertical: 8, marginTop: 6, borderWidth: 1, borderColor: "rgba(255,255,255,0.06)" },
-  searchInput: { flex: 1, color: "#fff", fontSize: 12, fontFamily: "Cairo_400Regular", textAlign: "right" },
+  searchWrap: { flexDirection: "row", alignItems: "center", gap: 6, backgroundColor: "#18181B", borderRadius: 10, paddingHorizontal: 10, paddingVertical: 4, marginTop: 4, borderWidth: 1, borderColor: "rgba(255,255,255,0.06)" },
+  searchInput: { flex: 1, color: "#fff", fontSize: 10, fontFamily: "Cairo_400Regular", textAlign: "right" },
   genreCard: { flex: 1 },
   genreImgWrap: { height: 90, borderRadius: 16, overflow: "hidden", position: "relative", borderWidth: 1, borderColor: "rgba(255,255,255,0.07)", justifyContent: "flex-end" },
   genreImg: { ...StyleSheet.absoluteFillObject, width: "100%", height: "100%" },
