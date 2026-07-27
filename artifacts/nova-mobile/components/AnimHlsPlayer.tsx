@@ -1,38 +1,26 @@
 /**
- * AnimHlsPlayer — مشغّل HLS مخصص للأنيميشن عبر WebView + hls.js
- *
- * المشكلة: ExoPlayer يُرسِل الـ segments عبر VPS proxy → CDN يحجب IP الـ VPS.
- * الحل: WebView (Chromium on Android) يجلب الـ segments مباشرةً بـ IP الجهاز → CDN يسمح.
+ * AnimHlsPlayer — مشغّل HLS للأنيميشن مبني على تصميم AniPlay
+ * https://github.com/SahilKumar337/AniPlay
  *
  * البنية:
- *  • WebView (pointerEvents="none") — يشغّل hls.js فقط، لا يستقبل لمسات
- *  • RN overlay — يتحكم بالإيماءات (سحب للبحث، نقر للتحكم، نقر مزدوج للتخطي)
- *  • Bridge: injectJavaScript (RN→WebView) + onMessage (WebView→RN)
+ *  • WebView كاملة الشاشة — تشغيل الفيديو + UI كامل (بـ AniPlayer CSS/JS)
+ *  • bridge: injectJavaScript (RN→WebView) + onMessage (WebView→RN)
+ *  • RN wrapper يُدير: landscape lock + StatusBar فقط
  */
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import {
-  Animated, Dimensions, Easing, PanResponder, Platform,
-  Pressable, StyleSheet, Text, View,
-} from "react-native";
+import { StyleSheet, View } from "react-native";
 import { WebView } from "react-native-webview";
-import { Ionicons } from "@expo/vector-icons";
-import { LinearGradient } from "expo-linear-gradient";
 import { StatusBar } from "expo-status-bar";
 import * as ScreenOrientation from "expo-screen-orientation";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
-
-const { width: W, height: H } = Dimensions.get("window");
 
 /* ── Types ── */
 export interface AnimHlsSource {
-  url: string;           // raw M3U8 URL — هاتف يجلب مباشرة
+  url: string;
   label: string;
   quality: "1080p FHD" | "720p HD" | "360p SD";
   headers?: Record<string, string>;
   subtitleUrl?: string;
 }
-
-interface SubCue { start: number; end: number; text: string }
 
 interface Props {
   sources: AnimHlsSource[];
@@ -48,218 +36,910 @@ interface Props {
   onPrevEpisode?: () => void;
 }
 
-/* ── Utilities ── */
-function fmtTime(s: number): string {
-  if (!isFinite(s) || s < 0) return "0:00";
-  const h = Math.floor(s / 3600);
-  const m = Math.floor((s % 3600) / 60);
-  const sec = Math.floor(s % 60);
-  if (h > 0) return `${h}:${String(m).padStart(2, "0")}:${String(sec).padStart(2, "0")}`;
-  return `${m}:${String(sec).padStart(2, "0")}`;
-}
+/* ═══════════════════════════════════════════════════════════
+   HTML — AniPlay player (vanilla JS + hls.js)
+   تصميم AniPlay مع ألوان Nova البنفسجية
+   ═══════════════════════════════════════════════════════════ */
+const buildHtml = (
+  sources: AnimHlsSource[],
+  title: string,
+  episode: number | undefined,
+  initialPosition: number,
+) => {
+  const srcJson = JSON.stringify(
+    sources.map((s) => ({
+      url: s.url,
+      label: s.label,
+      quality: s.quality,
+      referer: s.headers?.Referer || s.headers?.referer || "",
+      subtitleUrl: s.subtitleUrl || "",
+    })),
+  );
+  const titleJson = JSON.stringify(title || "");
+  const epJson = JSON.stringify(episode ?? null);
+  const initPos = initialPosition > 5 ? initialPosition : 0;
 
-function parseVTTTime(s: string): number {
-  const parts = s.replace(",", ".").split(":");
-  let sec = 0;
-  for (const p of parts) sec = sec * 60 + parseFloat(p);
-  return isNaN(sec) ? 0 : sec;
-}
-
-function parseVTT(text: string): SubCue[] {
-  const cues: SubCue[] = [];
-  let tsOffset = 0;
-  const tsMapM = text.match(/X-TIMESTAMP-MAP=MPEGTS:(\d+),LOCAL:([\d:.]+)/i);
-  if (tsMapM) {
-    const mpegts = parseInt(tsMapM[1], 10) / 90000;
-    const local = parseVTTTime(tsMapM[2].trim());
-    tsOffset = Math.max(0, mpegts - local);
-  }
-  const blocks = text.split(/\n\n+/);
-  for (const block of blocks) {
-    const lines = block.trim().split("\n");
-    let ti = 0;
-    if (ti < lines.length && !lines[ti].includes("-->")) ti++;
-    if (ti >= lines.length) continue;
-    const m = lines[ti].match(/(\d[\d:.]*)\s*-->\s*(\d[\d:.]*)/);
-    if (!m) continue;
-    const start = Math.max(0, parseVTTTime(m[1]) - tsOffset);
-    const end = Math.max(0, parseVTTTime(m[2]) - tsOffset);
-    const textLines = lines.slice(ti + 1)
-      .map(l => l.replace(/<[^>]*>/g, "")
-        .replace(/&amp;/g, "&").replace(/&lt;/g, "<")
-        .replace(/&gt;/g, ">").replace(/&nbsp;/g, " ").trim())
-      .filter(Boolean);
-    if (textLines.length > 0) cues.push({ start, end, text: textLines.join("\n") });
-  }
-  return cues;
-}
-
-function bisectCue(cues: SubCue[], ct: number): SubCue | null {
-  let lo = 0, hi = cues.length - 1;
-  while (lo <= hi) {
-    const mid = (lo + hi) >>> 1;
-    if (cues[mid].start <= ct) lo = mid + 1;
-    else hi = mid - 1;
-  }
-  if (hi >= 0 && cues[hi].end >= ct) return cues[hi];
-  return null;
-}
-
-/* ── hls.js HTML — يُشغَّل داخل WebView ── */
-const HLS_HTML = `<!DOCTYPE html>
-<html>
+  return `<!DOCTYPE html>
+<html lang="ar" dir="ltr">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
 <style>
-*{margin:0;padding:0;box-sizing:border-box}
-html,body{width:100%;height:100%;background:#000;overflow:hidden}
-#v{width:100%;height:100%;object-fit:contain;display:block}
+:root{--accent:#8B5CF6;--accent-glow:rgba(139,92,246,0.35);}
+*{margin:0;padding:0;box-sizing:border-box;}
+html,body{width:100%;height:100%;background:#000;overflow:hidden;}
+
+/* ── Wrapper ── */
+.anip{position:relative;width:100%;height:100%;background:#000;overflow:hidden;user-select:none;-webkit-user-select:none;touch-action:none;-webkit-tap-highlight-color:transparent;font-family:system-ui,-apple-system,sans-serif;}
+
+/* ── Video ── */
+.anip__video{width:100%;height:100%;display:block;object-fit:contain;background:#000;-webkit-appearance:none;appearance:none;touch-action:none;}
+.anip__video::-webkit-media-controls,.anip__video::-webkit-media-controls-panel,.anip__video::-webkit-media-controls-play-button,.anip__video::-webkit-media-controls-overlay-play-button,.anip__video::-webkit-media-controls-start-playback-button{display:none!important;-webkit-appearance:none!important;}
+
+/* ── Loading bg ── */
+.anip__loading-bg{position:absolute;inset:0;background:#000;z-index:9;pointer-events:auto;touch-action:none;}
+
+/* ── Spinner ── */
+.anip__spinner{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none;z-index:10;}
+.anip__spinner-ring{width:48px;height:48px;border-radius:50%;border:3px solid rgba(139,92,246,0.18);border-top-color:var(--accent);animation:anip-spin 0.9s linear infinite;}
+@keyframes anip-spin{to{transform:rotate(360deg)}}
+
+/* ── Error ── */
+.anip__error{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;z-index:15;background:rgba(0,0,0,0.85);padding:24px;text-align:center;}
+.anip__error-icon{font-size:40px;}
+.anip__error-msg{color:#fff;font-size:14px;font-weight:600;line-height:1.5;}
+.anip__error-btn{background:var(--accent);color:#fff;border:none;border-radius:10px;padding:10px 28px;font-size:14px;font-weight:700;cursor:pointer;}
+.anip__error-btn:active{opacity:0.8;}
+
+/* ── Overlay ── */
+.anip__overlay{position:absolute;inset:0;z-index:20;display:flex;flex-direction:column;pointer-events:none;transition:opacity 0.25s ease;}
+.anip__overlay--hidden{opacity:0;}
+.anip__overlay>*{pointer-events:auto;}
+
+/* Gradients */
+.anip__grad-top{position:absolute;top:0;left:0;right:0;height:120px;background:linear-gradient(to bottom,rgba(0,0,0,0.78),transparent);pointer-events:none;}
+.anip__grad-bot{position:absolute;bottom:0;left:0;right:0;height:140px;background:linear-gradient(to top,rgba(0,0,0,0.82),transparent);pointer-events:none;}
+
+/* ── Top bar ── */
+.anip__top-bar{position:absolute;top:0;left:0;right:0;display:flex;align-items:center;gap:10px;padding:16px 16px 0;z-index:21;}
+.anip__back-btn{width:36px;height:36px;border-radius:18px;background:rgba(0,0,0,0.45);border:1px solid rgba(255,255,255,0.18);display:flex;align-items:center;justify-content:center;cursor:pointer;color:#fff;font-size:18px;flex-shrink:0;}
+.anip__back-btn:active{opacity:0.7;}
+.anip__title-wrap{flex:1;min-width:0;}
+.anip__title{display:block;font-size:14px;font-weight:700;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.anip__ep-label{display:block;font-size:10px;color:rgba(255,255,255,0.45);margin-top:1px;}
+.anip__top-right{display:flex;align-items:center;gap:6px;}
+
+/* ── Pill buttons ── */
+.anip__pill{display:flex;align-items:center;gap:5px;background:rgba(139,92,246,0.2);border:1px solid rgba(139,92,246,0.38);border-radius:10px;padding:5px 10px;cursor:pointer;color:#c4b5fd;font-size:11px;font-weight:700;flex-shrink:0;white-space:nowrap;}
+.anip__pill:active{opacity:0.75;}
+.anip__pill--active{background:rgba(139,92,246,0.38);border-color:var(--accent);}
+.anip__pill-sub{background:rgba(0,0,0,0.35);border-color:rgba(255,255,255,0.2);color:rgba(255,255,255,0.75);}
+.anip__pill-sub.anip__pill--active{background:rgba(139,92,246,0.25);border-color:var(--accent);color:#c4b5fd;}
+
+/* ── Center play ── */
+.anip__center-wrap{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none;z-index:21;}
+.anip__play-btn{width:72px;height:72px;border-radius:36px;background:rgba(0,0,0,0.55);border:1.5px solid rgba(255,255,255,0.28);display:flex;align-items:center;justify-content:center;cursor:pointer;pointer-events:auto;}
+.anip__play-btn:active{background:rgba(139,92,246,0.4);}
+.anip__play-icon{color:#fff;font-size:28px;line-height:1;margin-left:3px;}
+.anip__play-icon--pause{margin-left:0;}
+.anip__play-icon--replay{margin-left:0;}
+
+/* ── Episode nav ── */
+.anip__ep-nav{position:absolute;right:18px;top:50%;transform:translateY(-50%);display:flex;flex-direction:column;gap:8px;z-index:21;}
+.anip__ep-btn{display:flex;align-items:center;gap:6px;background:rgba(0,0,0,0.5);border:1px solid rgba(255,255,255,0.18);border-radius:10px;padding:8px 11px;cursor:pointer;color:rgba(255,255,255,0.88);font-size:11px;font-weight:700;}
+.anip__ep-btn:active{opacity:0.7;}
+
+/* ── Bottom bar ── */
+.anip__bottom-bar{position:absolute;bottom:0;left:0;right:0;padding:0 16px 18px;z-index:21;}
+
+/* ── Seek ── */
+.anip__seek-row{display:flex;align-items:center;gap:10px;margin-bottom:10px;}
+.anip__time{font-size:11px;font-weight:700;color:rgba(255,255,255,0.82);white-space:nowrap;min-width:36px;}
+.anip__seek-wrap{flex:1;padding:8px 0;cursor:pointer;position:relative;}
+.anip__seek-track{height:3px;border-radius:99px;background:rgba(255,255,255,0.22);position:relative;transition:height 0.15s ease;}
+.anip__seek-buf{position:absolute;left:0;top:0;bottom:0;background:rgba(255,255,255,0.3);border-radius:99px;}
+.anip__seek-played{position:absolute;left:0;top:0;bottom:0;background:var(--accent);border-radius:99px;}
+.anip__seek-knob{position:absolute;right:-7px;top:50%;transform:translateY(-50%) scale(1);width:13px;height:13px;border-radius:50%;background:#fff;border:2px solid var(--accent);box-shadow:0 0 6px var(--accent-glow);}
+
+/* ── Controls row ── */
+.anip__ctrl-row{display:flex;align-items:center;justify-content:space-between;}
+.anip__cluster{display:flex;align-items:center;gap:6px;}
+.anip__btn{background:none;border:none;color:#fff;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:6px;border-radius:8px;}
+.anip__btn:active{background:rgba(255,255,255,0.1);}
+.anip__skip-btn{font-size:11px;font-weight:700;color:rgba(255,255,255,0.82);}
+
+/* ── Menus ── */
+.anip__menu-wrap{position:absolute;z-index:30;}
+.anip__menu{background:rgba(15,10,30,0.95);border:1px solid rgba(139,92,246,0.25);border-radius:12px;min-width:120px;overflow:hidden;backdrop-filter:blur(12px);}
+.anip__menu-item{padding:10px 16px;font-size:13px;font-weight:600;color:rgba(255,255,255,0.8);cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:8px;}
+.anip__menu-item:hover{background:rgba(139,92,246,0.15);}
+.anip__menu-item.active{color:var(--accent);}
+.anip__menu-item.active::after{content:"✓";font-size:11px;}
+
+/* ── Source panel (bottom sheet) ── */
+.anip__src-panel{position:absolute;bottom:0;left:0;right:0;z-index:35;background:rgba(8,6,22,0.97);border-top:1px solid rgba(139,92,246,0.22);border-radius:20px 20px 0 0;padding-bottom:20px;}
+.anip__src-header{display:flex;align-items:center;justify-content:space-between;padding:14px 20px;border-bottom:1px solid rgba(255,255,255,0.07);}
+.anip__src-title{font-size:14px;font-weight:700;color:#fff;}
+.anip__src-close{background:rgba(255,255,255,0.08);border:none;color:rgba(255,255,255,0.7);width:28px;height:28px;border-radius:14px;font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:center;}
+.anip__src-item{display:flex;align-items:center;gap:12px;padding:12px 20px;border-bottom:1px solid rgba(255,255,255,0.05);cursor:pointer;}
+.anip__src-item.active{background:rgba(139,92,246,0.1);}
+.anip__src-dot{width:8px;height:8px;border-radius:50%;background:rgba(255,255,255,0.2);flex-shrink:0;}
+.anip__src-item.active .anip__src-dot{background:var(--accent);}
+.anip__src-info{flex:1;min-width:0;}
+.anip__src-label{font-size:13px;font-weight:700;color:rgba(255,255,255,0.7);}
+.anip__src-item.active .anip__src-label{color:#fff;}
+.anip__src-tag{font-size:11px;font-weight:700;color:rgba(139,92,246,0.85);background:rgba(139,92,246,0.15);padding:2px 8px;border-radius:6px;white-space:nowrap;}
+
+/* ── Skip ripple ── */
+.anip-ripple{position:absolute;top:0;bottom:0;width:35%;display:flex;align-items:center;justify-content:center;pointer-events:none;z-index:22;}
+.anip-ripple--left{left:0;}
+.anip-ripple--right{right:0;}
+.anip-ripple__inner{display:flex;flex-direction:column;align-items:center;gap:6px;color:#fff;font-size:11px;font-weight:700;}
+.anip-ripple__ring{position:absolute;inset:0;border-radius:999px;border:2px solid rgba(255,255,255,0.25);animation:ripple-out 0.7s ease-out forwards;}
+.anip-ripple__ring--2{animation-delay:0.15s;}
+@keyframes ripple-out{from{opacity:0.8;transform:scale(0.7)}to{opacity:0;transform:scale(1.1)}}
+
+/* ── Subtitle ── */
+.anip__sub-overlay{position:absolute;bottom:14%;left:5%;right:5%;text-align:center;z-index:23;pointer-events:none;}
+.anip__sub-overlay.anip__sub-overlay--up{bottom:22%;}
+.anip__sub-text{background:rgba(0,0,0,0.38);color:#fff;font-size:17px;font-weight:600;padding:4px 12px;border-radius:5px;text-shadow:0 1px 4px rgba(0,0,0,0.95);white-space:pre-wrap;display:inline-block;line-height:1.45;letter-spacing:0.1px;}
+
+/* ── Swipe indicator ── */
+.anip__swipe{position:absolute;top:50%;transform:translateY(-50%);display:flex;flex-direction:column;align-items:center;gap:8px;background:rgba(0,0,0,0.55);border-radius:12px;padding:12px 10px;z-index:24;pointer-events:none;opacity:0;transition:opacity 0.2s;}
+.anip__swipe--on{opacity:1;}
+.anip__swipe--brightness{left:18px;}
+.anip__swipe--volume{right:18px;}
+.anip__swipe-icon{font-size:18px;}
+.anip__swipe-track{width:6px;height:80px;background:rgba(255,255,255,0.2);border-radius:3px;position:relative;overflow:hidden;}
+.anip__swipe-fill{position:absolute;bottom:0;left:0;right:0;background:var(--accent);border-radius:3px;}
+.anip__swipe-pct{font-size:11px;font-weight:700;color:#fff;}
+
+/* ── Toast ── */
+.anip__toast{position:absolute;top:12%;left:50%;transform:translateX(-50%);background:rgba(0,0,0,0.75);color:#fff;padding:7px 18px;border-radius:20px;font-size:12px;font-weight:600;white-space:nowrap;pointer-events:none;backdrop-filter:blur(8px);border:1px solid rgba(255,255,255,0.12);z-index:30;animation:anip-fade-in 0.2s ease;}
+@keyframes anip-fade-in{from{opacity:0;transform:translateX(-50%) translateY(-6px)}to{opacity:1;transform:translateX(-50%) translateY(0)}}
 </style>
 </head>
 <body>
-<video id="v" playsinline autoplay webkit-playsinline x5-playsinline x5-video-player-type="h5"></video>
+<div class="anip" id="player">
+  <!-- Video element -->
+  <video class="anip__video" id="v" playsinline webkit-playsinline x5-playsinline autoplay></video>
+
+  <!-- Loading bg (hidden once video starts) -->
+  <div class="anip__loading-bg" id="loadBg"></div>
+
+  <!-- Buffering spinner -->
+  <div class="anip__spinner" id="spinner" style="display:none">
+    <div class="anip__spinner-ring"></div>
+  </div>
+
+  <!-- Error overlay -->
+  <div class="anip__error" id="errOverlay" style="display:none">
+    <div class="anip__error-icon">⚠️</div>
+    <div class="anip__error-msg" id="errMsg">تعذّر تشغيل المصدر</div>
+    <button class="anip__error-btn" onclick="retryNext()">المصدر التالي</button>
+    <button class="anip__error-btn" style="background:rgba(255,255,255,0.12);margin-top:4px" onclick="post({k:'back'})">العودة</button>
+  </div>
+
+  <!-- Controls overlay -->
+  <div class="anip__overlay" id="overlay">
+    <div class="anip__grad-top"></div>
+    <div class="anip__grad-bot"></div>
+
+    <!-- Top bar -->
+    <div class="anip__top-bar">
+      <div class="anip__back-btn" onclick="post({k:'back'})">&#8592;</div>
+      <div class="anip__title-wrap">
+        <span class="anip__title" id="titleEl"></span>
+        <span class="anip__ep-label" id="epEl"></span>
+      </div>
+      <div class="anip__top-right">
+        <!-- Subtitle toggle -->
+        <div class="anip__pill anip__pill-sub" id="subBtn" onclick="toggleSub()" style="display:none">CC</div>
+        <!-- Quality / Source picker -->
+        <div class="anip__pill" id="qualPill" onclick="toggleSrcPanel()">
+          <span id="qualLabel">HD</span>
+          <span>&#9776;</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Center play/pause button -->
+    <div class="anip__center-wrap" id="centerWrap">
+      <div class="anip__play-btn" id="playBtn" onclick="togglePlay()">
+        <span class="anip__play-icon" id="playIcon">&#9654;</span>
+      </div>
+    </div>
+
+    <!-- Episode navigation -->
+    <div class="anip__ep-nav" id="epNav" style="display:none">
+      <div class="anip__ep-btn" id="prevEpBtn" onclick="post({k:'prev_ep'})" style="display:none">
+        <span>&#9654;</span><span>السابقة</span>
+      </div>
+      <div class="anip__ep-btn" id="nextEpBtn" onclick="post({k:'next_ep'})" style="display:none">
+        <span>التالية</span><span>&#9654;</span>
+      </div>
+    </div>
+
+    <!-- Bottom bar -->
+    <div class="anip__bottom-bar">
+      <!-- Seek row -->
+      <div class="anip__seek-row">
+        <span class="anip__time" id="curTimeEl">0:00</span>
+        <div class="anip__seek-wrap" id="seekWrap">
+          <div class="anip__seek-track" id="seekTrack">
+            <div class="anip__seek-buf" id="seekBuf" style="width:0%"></div>
+            <div class="anip__seek-played" id="seekPlayed" style="width:0%"></div>
+            <div class="anip__seek-knob" id="seekKnob" style="left:0%"></div>
+          </div>
+        </div>
+        <span class="anip__time" id="durEl">0:00</span>
+      </div>
+      <!-- Controls row -->
+      <div class="anip__ctrl-row">
+        <div class="anip__cluster">
+          <button class="anip__btn anip__skip-btn" onclick="skip(-10)">&#8635; 10</button>
+          <button class="anip__btn anip__skip-btn" onclick="skip(10)">10 &#8634;</button>
+        </div>
+        <div class="anip__cluster">
+          <button class="anip__btn" onclick="toggleSpeed()" style="font-size:11px;font-weight:700;color:rgba(255,255,255,0.75);" id="speedBtn">1x</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Source picker panel -->
+  <div class="anip__src-panel" id="srcPanel" style="display:none">
+    <div class="anip__src-header">
+      <span class="anip__src-title">اختر المصدر</span>
+      <button class="anip__src-close" onclick="closeSrcPanel()">&#10005;</button>
+    </div>
+    <div id="srcList"></div>
+  </div>
+
+  <!-- Skip ripples -->
+  <div class="anip-ripple anip-ripple--left" id="rippleL" style="display:none">
+    <div class="anip-ripple__ring"></div>
+    <div class="anip-ripple__ring anip-ripple__ring--2"></div>
+    <div class="anip-ripple__inner">&#8635; <span>10s</span></div>
+  </div>
+  <div class="anip-ripple anip-ripple--right" id="rippleR" style="display:none">
+    <div class="anip-ripple__ring"></div>
+    <div class="anip-ripple__ring anip-ripple__ring--2"></div>
+    <div class="anip-ripple__inner">&#8634; <span>10s</span></div>
+  </div>
+
+  <!-- Swipe indicators -->
+  <div class="anip__swipe anip__swipe--brightness" id="swipeBri">
+    <span class="anip__swipe-icon">&#9728;</span>
+    <div class="anip__swipe-track"><div class="anip__swipe-fill" id="briFill" style="height:100%"></div></div>
+    <span class="anip__swipe-pct" id="briPct">100%</span>
+  </div>
+  <div class="anip__swipe anip__swipe--volume" id="swipeVol">
+    <span class="anip__swipe-icon">&#128266;</span>
+    <div class="anip__swipe-track"><div class="anip__swipe-fill" id="volFill" style="height:100%"></div></div>
+    <span class="anip__swipe-pct" id="volPct">100%</span>
+  </div>
+
+  <!-- Subtitle overlay -->
+  <div class="anip__sub-overlay" id="subOverlay" style="display:none">
+    <span class="anip__sub-text" id="subText"></span>
+  </div>
+</div>
+
 <script src="https://cdn.jsdelivr.net/npm/hls.js@1.6.2/dist/hls.min.js"></script>
 <script>
-var v=document.getElementById('v');
-var hls=null;
-var currentUrl='';
-var currentRef='';
-var retryCount=0;
+/* ════════════════════════════════════════════════════════
+   AniPlay-style vanilla JS player — Nova Anime Mobile
+   ════════════════════════════════════════════════════════ */
 
-function post(o){
-  try{
-    if(window.ReactNativeWebView)window.ReactNativeWebView.postMessage(JSON.stringify(o));
-  }catch(e){}
+/* ── Constants ── */
+var SOURCES      = ${srcJson};
+var TITLE        = ${titleJson};
+var EPISODE      = ${epJson};
+var INIT_POS     = ${initPos};
+var HAS_PREV_EP  = false;
+var HAS_NEXT_EP  = false;
+var SPEEDS       = [0.5, 0.75, 1, 1.25, 1.5, 2];
+
+/* ── State ── */
+var srcIdx       = 0;
+var hls          = null;
+var dur          = 0;
+var ctrlVisible  = true;
+var hideTimer    = null;
+var subOn        = true;
+var cues         = [];
+var activeCue    = null;
+var speedIdx     = 2; // index into SPEEDS → default 1x
+var bright       = 1;
+var volume       = 1;
+var seekDrag     = false;
+var seekDragPct  = 0;
+var lastTap      = 0;
+var tapTimer     = null;
+var retryCount   = 0;
+var loadTimeout  = null;
+var initPosDone  = false;
+var hasStarted   = false;
+var gesture      = null;
+var swipeTimeout = null;
+
+/* ── Elements ── */
+var v            = document.getElementById('v');
+var spinner      = document.getElementById('spinner');
+var loadBg       = document.getElementById('loadBg');
+var overlay      = document.getElementById('overlay');
+var errOverlay   = document.getElementById('errOverlay');
+var errMsg       = document.getElementById('errMsg');
+var titleEl      = document.getElementById('titleEl');
+var epEl         = document.getElementById('epEl');
+var qualLabel    = document.getElementById('qualLabel');
+var qualPill     = document.getElementById('qualPill');
+var subBtn       = document.getElementById('subBtn');
+var centerWrap   = document.getElementById('centerWrap');
+var playBtn      = document.getElementById('playBtn');
+var playIcon     = document.getElementById('playIcon');
+var epNav        = document.getElementById('epNav');
+var prevEpBtn    = document.getElementById('prevEpBtn');
+var nextEpBtn    = document.getElementById('nextEpBtn');
+var curTimeEl    = document.getElementById('curTimeEl');
+var durEl        = document.getElementById('durEl');
+var seekWrap     = document.getElementById('seekWrap');
+var seekBuf      = document.getElementById('seekBuf');
+var seekPlayed   = document.getElementById('seekPlayed');
+var seekKnob     = document.getElementById('seekKnob');
+var srcPanel     = document.getElementById('srcPanel');
+var srcList      = document.getElementById('srcList');
+var rippleL      = document.getElementById('rippleL');
+var rippleR      = document.getElementById('rippleR');
+var swipeBri     = document.getElementById('swipeBri');
+var swipeVol     = document.getElementById('swipeVol');
+var briFill      = document.getElementById('briFill');
+var volFill      = document.getElementById('volFill');
+var briPct       = document.getElementById('briPct');
+var volPct       = document.getElementById('volPct');
+var subOverlay   = document.getElementById('subOverlay');
+var subText      = document.getElementById('subText');
+var speedBtn     = document.getElementById('speedBtn');
+
+/* ── RN bridge ── */
+function post(o) {
+  try {
+    if (window.ReactNativeWebView) window.ReactNativeWebView.postMessage(JSON.stringify(o));
+  } catch(e) {}
 }
 
-v.addEventListener('timeupdate',function(){
-  post({k:'t',t:v.currentTime,d:isFinite(v.duration)?v.duration:0});
-});
-v.addEventListener('ended',function(){post({k:'ended'})});
-v.addEventListener('waiting',function(){post({k:'buf',v:true})});
-v.addEventListener('canplay',function(){post({k:'buf',v:false})});
-v.addEventListener('playing',function(){post({k:'buf',v:false});post({k:'play',v:true})});
-v.addEventListener('pause',function(){post({k:'play',v:false})});
-v.addEventListener('loadedmetadata',function(){post({k:'ready',d:isFinite(v.duration)?v.duration:0})});
-v.addEventListener('error',function(){
-  post({k:'err',msg:'video_error:'+(v.error?v.error.code:'?')});
-});
+/* ── Format time ── */
+function fmt(s) {
+  if (!isFinite(s) || s < 0) return '0:00';
+  var h = Math.floor(s / 3600);
+  var m = Math.floor((s % 3600) / 60);
+  var sec = Math.floor(s % 60);
+  if (h > 0) return h + ':' + pad(m) + ':' + pad(sec);
+  return m + ':' + pad(sec);
+}
+function pad(n) { return n < 10 ? '0' + n : '' + n; }
+function clamp(v, lo, hi) { return Math.min(Math.max(v, lo), hi); }
 
-/* خدمة fetch مخصصة تُرسل Referer مع كل طلب HLS (manifest + segments) */
-function makeFetchLoader(ref){
-  function FetchLoader(config){this.stats={trequest:0,tfirst:0,tload:0,loaded:0};}
-  FetchLoader.prototype.load=function(context,config,callbacks){
-    var self=this;
-    var hdrs={'Accept':'*/*'};
-    if(ref){hdrs['Referer']=ref;try{hdrs['Origin']=new URL(ref).origin;}catch(e){}}
-    self.stats.trequest=performance.now();
-    self._ctl=new AbortController();
-    fetch(context.url,{headers:hdrs,signal:self._ctl.signal,credentials:'omit'})
-      .then(function(r){
-        if(!r.ok)throw new Error('HTTP '+r.status);
-        self.stats.tfirst=performance.now();
-        return context.responseType==='arraybuffer'?r.arrayBuffer():r.text();
+/* ── Init title ── */
+titleEl.textContent = TITLE || '';
+if (EPISODE !== null) epEl.textContent = 'الحلقة ' + EPISODE;
+
+/* ── Build source list ── */
+function buildSrcList() {
+  srcList.innerHTML = '';
+  SOURCES.forEach(function(src, i) {
+    var item = document.createElement('div');
+    item.className = 'anip__src-item' + (i === srcIdx ? ' active' : '');
+    item.innerHTML =
+      '<div class="anip__src-dot"></div>' +
+      '<div class="anip__src-info">' +
+        '<div class="anip__src-label">سيرفر ' + (i + 1) + '</div>' +
+      '</div>' +
+      '<div class="anip__src-tag">' + (src.quality || src.label || 'HD') + '</div>';
+    item.onclick = function() { switchSrc(i); };
+    srcList.appendChild(item);
+  });
+  // Update quality pill
+  var cur = SOURCES[srcIdx];
+  qualLabel.textContent = cur ? (cur.quality || cur.label || 'HD').split(' ')[0] : 'HD';
+}
+
+/* ── HLS loader with Referer ── */
+function makeRefLoader(ref) {
+  function L(cfg) { this.stats = {trequest:0,tfirst:0,tload:0,loaded:0}; }
+  L.prototype.load = function(ctx, cfg, cb) {
+    var self = this;
+    var hdrs = { 'Accept': '*/*' };
+    if (ref) {
+      hdrs['Referer'] = ref;
+      try { hdrs['Origin'] = new URL(ref).origin; } catch(e) {}
+    }
+    self.stats.trequest = performance.now();
+    self._ctl = new AbortController();
+    fetch(ctx.url, { headers: hdrs, signal: self._ctl.signal, credentials: 'omit' })
+      .then(function(r) {
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        self.stats.tfirst = performance.now();
+        return ctx.responseType === 'arraybuffer' ? r.arrayBuffer() : r.text();
       })
-      .then(function(data){
-        self.stats.tload=performance.now();
-        self.stats.loaded=data.byteLength||data.length||0;
-        callbacks.onSuccess({data:data,url:context.url,code:200},self.stats,context,null);
+      .then(function(data) {
+        self.stats.tload = performance.now();
+        self.stats.loaded = data.byteLength || data.length || 0;
+        cb.onSuccess({ data: data, url: ctx.url, code: 200 }, self.stats, ctx, null);
       })
-      .catch(function(err){
-        if(err.name==='AbortError')return;
-        callbacks.onError({code:0,text:err.message},context,null,self.stats);
+      .catch(function(err) {
+        if (err.name === 'AbortError') return;
+        cb.onError({ code: 0, text: err.message }, ctx, null, self.stats);
       });
   };
-  FetchLoader.prototype.abort=function(){try{this._ctl&&this._ctl.abort();}catch(e){}};
-  FetchLoader.prototype.destroy=function(){this.abort();};
-  return FetchLoader;
+  L.prototype.abort   = function() { try { this._ctl && this._ctl.abort(); } catch(e) {} };
+  L.prototype.destroy = function() { this.abort(); };
+  return L;
 }
 
-function loadSrc(url,ref){
-  currentUrl=url;
-  currentRef=ref||'';
-  retryCount=0;
-  if(hls){hls.destroy();hls=null;}
-  post({k:'buf',v:true});
+/* ── Load source ── */
+function loadSrc(idx, seekTo) {
+  srcIdx = idx;
+  retryCount = 0;
+  initPosDone = false;
+  hasStarted = false;
+  showSpinner(true);
+  hideErr();
+  buildSrcList();
 
-  /* MP4 — تشغيل مباشر */
-  if(/\.mp4(\?|$|#)/i.test(url)||(url.indexOf('.mp4')!==-1&&url.indexOf('.m3u8')===-1)){
-    v.src=url;
-    v.load();
-    v.play().catch(function(){});
+  var src = SOURCES[idx];
+  if (!src) { showErr('لا توجد مصادر متاحة'); return; }
+
+  var url = src.url;
+  var ref = src.referer || '';
+
+  if (hls) { hls.destroy(); hls = null; }
+
+  // Start load timeout
+  clearTimeout(loadTimeout);
+  loadTimeout = setTimeout(function() {
+    loadTimeout = null;
+    handleErr('timeout loading source');
+  }, 25000);
+
+  function doLoad() {
+    if (/\\.mp4(\\?|$|#)/i.test(url) || (url.indexOf('.mp4') !== -1 && url.indexOf('.m3u8') === -1)) {
+      // MP4
+      v.src = url;
+      v.load();
+      v.play().catch(function() {});
+    } else if (typeof Hls !== 'undefined' && Hls.isSupported()) {
+      var cfg = {
+        enableWorker: false,
+        maxBufferLength: 30,
+        maxMaxBufferLength: 60,
+        startLevel: -1,
+        fragLoadingTimeOut: 20000,
+        manifestLoadingTimeOut: 15000,
+        levelLoadingTimeOut: 15000,
+        loader: ref ? makeRefLoader(ref) : undefined,
+      };
+      hls = new Hls(cfg);
+      hls.loadSource(url);
+      hls.attachMedia(v);
+      hls.on(Hls.Events.MANIFEST_PARSED, function() {
+        v.play().catch(function() {});
+      });
+      hls.on(Hls.Events.ERROR, function(ev, data) {
+        if (data.fatal) {
+          if (data.type === Hls.ErrorTypes.NETWORK_ERROR && retryCount < 2) {
+            retryCount++;
+            setTimeout(function() { try { hls.startLoad(); } catch(e) {} }, 1000);
+          } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR && retryCount < 2) {
+            retryCount++;
+            setTimeout(function() { try { hls.recoverMediaError(); } catch(e) {} }, 500);
+          } else {
+            handleErr(data.type + ':' + data.details);
+          }
+        }
+      });
+    } else if (v.canPlayType('application/vnd.apple.mpegurl')) {
+      v.src = url;
+      v.load();
+      v.play().catch(function() {});
+    } else {
+      handleErr('hls_not_supported');
+    }
+  }
+
+  if (seekTo && seekTo > 5) {
+    doLoad();
+    setTimeout(function() {
+      if (!initPosDone) { initPosDone = true; v.currentTime = seekTo; }
+    }, 3000);
+  } else {
+    doLoad();
+  }
+
+  // Load subtitles
+  loadSubtitles(src.subtitleUrl);
+}
+
+/* ── Error handling ── */
+function handleErr(msg) {
+  clearTimeout(loadTimeout);
+  post({ k: 'err', msg: msg });
+  // Try next source automatically
+  var next = srcIdx + 1;
+  if (next < SOURCES.length) {
+    console.warn('[Nova] trying next source:', next);
+    loadSrc(next);
+  } else {
+    showErr('فشلت جميع المصادر');
+  }
+}
+
+function retryNext() {
+  var next = srcIdx + 1;
+  if (next < SOURCES.length) { loadSrc(next); }
+  else { post({ k: 'err', msg: 'all_sources_failed' }); }
+}
+
+function showErr(msg) {
+  showSpinner(false);
+  errMsg.textContent = msg || 'خطأ في التشغيل';
+  errOverlay.style.display = 'flex';
+}
+function hideErr() { errOverlay.style.display = 'none'; }
+
+function switchSrc(idx) {
+  closeSrcPanel();
+  var savedPos = v.currentTime;
+  loadSrc(idx, savedPos > 5 ? savedPos : 0);
+}
+
+/* ── Video events ── */
+v.addEventListener('loadedmetadata', function() {
+  dur = v.duration;
+  durEl.textContent = fmt(dur);
+  if (!initPosDone && INIT_POS > 5) { initPosDone = true; v.currentTime = INIT_POS; }
+  clearTimeout(loadTimeout);
+  showSpinner(false);
+  if (loadBg) { loadBg.style.display = 'none'; loadBg = null; }
+  post({ k: 'ready', d: dur });
+});
+
+v.addEventListener('timeupdate', function() {
+  if (seekDrag) return;
+  var ct = v.currentTime;
+  curTimeEl.textContent = fmt(ct);
+  if (dur > 0) {
+    var pct = ct / dur;
+    seekPlayed.style.width = (pct * 100) + '%';
+    seekKnob.style.left = (pct * 100) + '%';
+    if (v.buffered.length) {
+      seekBuf.style.width = (v.buffered.end(v.buffered.length - 1) / dur * 100) + '%';
+    }
+  }
+  updateSubtitle(ct);
+  if (!initPosDone && INIT_POS > 5 && ct < 3) {
+    initPosDone = true; v.currentTime = INIT_POS;
+  }
+  post({ k: 't', t: ct, d: dur });
+});
+
+v.addEventListener('waiting', function() { showSpinner(true); post({ k: 'buf', v: true }); });
+v.addEventListener('canplay', function() { showSpinner(false); post({ k: 'buf', v: false }); });
+v.addEventListener('playing', function() {
+  showSpinner(false);
+  hasStarted = true;
+  setPlayIcon(true);
+  post({ k: 'buf', v: false });
+  post({ k: 'play', v: true });
+});
+v.addEventListener('pause', function() { setPlayIcon(false); post({ k: 'play', v: false }); });
+v.addEventListener('ended', function() {
+  setPlayIcon(false);
+  post({ k: 'ended' });
+  showCtrl(true);
+});
+v.addEventListener('error', function() {
+  handleErr('video_error:' + (v.error ? v.error.code : '?'));
+});
+
+function setPlayIcon(playing) {
+  if (playing) {
+    playIcon.innerHTML = '&#9646;&#9646;';
+    playIcon.className = 'anip__play-icon anip__play-icon--pause';
+  } else {
+    playIcon.innerHTML = '&#9654;';
+    playIcon.className = 'anip__play-icon';
+    playIcon.style.marginLeft = '3px';
+  }
+}
+
+/* ── Play/pause ── */
+function togglePlay() {
+  if (v.paused) { v.play().catch(function(){}); }
+  else { v.pause(); }
+  showCtrl(true);
+}
+
+/* ── Spinner ── */
+function showSpinner(on) {
+  spinner.style.display = on ? 'flex' : 'none';
+}
+
+/* ── Controls visibility ── */
+function showCtrl(temporary) {
+  overlay.classList.remove('anip__overlay--hidden');
+  ctrlVisible = true;
+  subOverlay.classList.add('anip__sub-overlay--up');
+  clearTimeout(hideTimer);
+  if (temporary && !v.paused) {
+    hideTimer = setTimeout(function() { hideCtrl(); }, 3500);
+  }
+}
+function hideCtrl() {
+  overlay.classList.add('anip__overlay--hidden');
+  ctrlVisible = false;
+  subOverlay.classList.remove('anip__sub-overlay--up');
+}
+
+/* ── Skip ── */
+function skip(s) {
+  v.currentTime = clamp(v.currentTime + s, 0, dur || 999999);
+  var el = s < 0 ? rippleL : rippleR;
+  el.style.display = 'flex';
+  setTimeout(function() { el.style.display = 'none'; }, 750);
+  showCtrl(true);
+}
+
+/* ── Speed ── */
+function toggleSpeed() {
+  speedIdx = (speedIdx + 1) % SPEEDS.length;
+  var s = SPEEDS[speedIdx];
+  v.playbackRate = s;
+  speedBtn.textContent = s + 'x';
+  showCtrl(true);
+}
+
+/* ── Source panel ── */
+function toggleSrcPanel() {
+  if (srcPanel.style.display === 'none') {
+    buildSrcList();
+    srcPanel.style.display = 'block';
+    clearTimeout(hideTimer);
+  } else {
+    closeSrcPanel();
+  }
+}
+function closeSrcPanel() { srcPanel.style.display = 'none'; }
+
+/* ── Subtitle handling ── */
+var subUrl = '';
+function loadSubtitles(url) {
+  cues = []; activeCue = null; updateSubDisplay();
+  if (!url) { subBtn.style.display = 'none'; return; }
+  subUrl = url;
+  fetch(url).then(function(r) { return r.text(); }).then(function(text) {
+    var parsed = parseVTT(text);
+    cues = parsed;
+    if (parsed.length) { subBtn.style.display = 'flex'; }
+  }).catch(function() {});
+}
+
+function parseVTT(text) {
+  var result = [];
+  var blocks = text.split(/\\n\\n+/);
+  for (var i = 0; i < blocks.length; i++) {
+    var lines = blocks[i].trim().split('\\n');
+    var tsIdx = -1;
+    for (var j = 0; j < lines.length; j++) {
+      if (lines[j].indexOf('-->') !== -1) { tsIdx = j; break; }
+    }
+    if (tsIdx === -1) continue;
+    var parts = lines[tsIdx].split('-->');
+    if (parts.length < 2) continue;
+    var t = parts[1].trim().split(/\\s+/)[0];
+    result.push({
+      start: parseTime(parts[0]),
+      end: parseTime(t),
+      text: lines.slice(tsIdx + 1).join('\\n').replace(/<[^>]*>/g, '').trim()
+    });
+  }
+  return result;
+}
+
+function parseTime(s) {
+  var p = s.trim().replace(',', '.').split(':');
+  var sec = 0;
+  for (var i = 0; i < p.length; i++) sec = sec * 60 + parseFloat(p[i]);
+  return isNaN(sec) ? 0 : sec;
+}
+
+function updateSubtitle(ct) {
+  if (!subOn || !cues.length) { updateSubDisplay(); return; }
+  var found = null;
+  for (var i = 0; i < cues.length; i++) {
+    if (cues[i].start <= ct && cues[i].end >= ct) { found = cues[i]; break; }
+  }
+  if (found !== activeCue) {
+    activeCue = found;
+    updateSubDisplay();
+  }
+}
+
+function updateSubDisplay() {
+  if (subOn && activeCue) {
+    subText.textContent = activeCue.text;
+    subOverlay.style.display = 'block';
+  } else {
+    subOverlay.style.display = 'none';
+  }
+}
+
+function toggleSub() {
+  subOn = !subOn;
+  if (subOn) subBtn.classList.add('anip__pill--active');
+  else subBtn.classList.remove('anip__pill--active');
+  updateSubDisplay();
+}
+
+/* ── Seek bar ── */
+function seekFromX(clientX) {
+  var r = seekWrap.getBoundingClientRect();
+  var pct = clamp((clientX - r.left) / r.width, 0, 1);
+  v.currentTime = pct * (dur || 0);
+}
+
+seekWrap.addEventListener('touchstart', function(e) {
+  seekDrag = true;
+  e.stopPropagation();
+  seekFromX(e.touches[0].clientX);
+  showCtrl(false);
+}, { passive: true });
+
+seekWrap.addEventListener('touchmove', function(e) {
+  if (!seekDrag) return;
+  e.stopPropagation();
+  var r = seekWrap.getBoundingClientRect();
+  var pct = clamp((e.touches[0].clientX - r.left) / r.width, 0, 1);
+  seekDragPct = pct;
+  seekPlayed.style.width = (pct * 100) + '%';
+  seekKnob.style.left = (pct * 100) + '%';
+  curTimeEl.textContent = fmt(pct * (dur || 0));
+}, { passive: true });
+
+seekWrap.addEventListener('touchend', function(e) {
+  if (!seekDrag) return;
+  seekDrag = false;
+  e.stopPropagation();
+  seekFromX(e.changedTouches[0].clientX);
+  showCtrl(true);
+}, { passive: true });
+
+/* ── Gestures (tap / double-tap / swipe) ── */
+var player = document.getElementById('player');
+
+function isCtrlTarget(el) {
+  if (!el) return false;
+  return el.closest('.anip__play-btn') || el.closest('.anip__top-bar') ||
+    el.closest('.anip__bottom-bar') || el.closest('.anip__ep-nav') ||
+    el.closest('.anip__seek-wrap') || el.closest('.anip__src-panel') ||
+    el.closest('button') || el.tagName === 'BUTTON';
+}
+
+player.addEventListener('touchstart', function(e) {
+  if (isCtrlTarget(e.target)) return;
+  var t = e.touches[0];
+  gesture = {
+    startX: t.clientX, startY: t.clientY,
+    isLeft: t.clientX / window.innerWidth < 0.5,
+    startVol: volume, startBri: bright,
+    moved: false, startTime: Date.now()
+  };
+}, { passive: true });
+
+player.addEventListener('touchmove', function(e) {
+  if (!gesture || isCtrlTarget(e.target)) return;
+  var t = e.touches[0];
+  var dx = Math.abs(t.clientX - gesture.startX);
+  var dy = Math.abs(t.clientY - gesture.startY);
+  if (!gesture.moved) {
+    if (dx > 12 || dy > 12) {
+      if (dx > dy) { gesture = null; return; } // horizontal = skip (handled by double-tap)
+      gesture.moved = true;
+    } else return;
+  }
+  // Vertical swipe: volume or brightness
+  var delta = (gesture.startY - t.clientY) / 180;
+  if (gesture.isLeft) {
+    bright = clamp(gesture.startBri + delta, 0.15, 2);
+    v.style.filter = 'brightness(' + bright + ')';
+    briFill.style.height = (clamp(bright / 2, 0, 1) * 100) + '%';
+    briPct.textContent = Math.round(clamp(bright / 2, 0, 1) * 100) + '%';
+    showSwipe(swipeBri);
+  } else {
+    volume = clamp(gesture.startVol + delta, 0, 1);
+    v.volume = volume;
+    volFill.style.height = (volume * 100) + '%';
+    volPct.textContent = Math.round(volume * 100) + '%';
+    showSwipe(swipeVol);
+  }
+}, { passive: true });
+
+player.addEventListener('touchend', function(e) {
+  if (!gesture || isCtrlTarget(e.target)) return;
+  var g = gesture;
+  gesture = null;
+  if (g.moved) {
+    hideSwipe(swipeBri); hideSwipe(swipeVol);
     return;
   }
-
-  if(typeof Hls!=='undefined'&&Hls.isSupported()){
-    var cfg={
-      enableWorker:false,
-      maxBufferLength:30,
-      maxMaxBufferLength:60,
-      startLevel:-1,
-      abrEwmaDefaultEstimate:500000,
-      fragLoadingTimeOut:20000,
-      manifestLoadingTimeOut:15000,
-      levelLoadingTimeOut:15000,
-      /* استخدم FetchLoader إذا كان هناك Referer — يُرسل الـ header مع كل طلب segment */
-      loader: currentRef ? makeFetchLoader(currentRef) : undefined,
-    };
-    hls=new Hls(cfg);
-    hls.loadSource(url);
-    hls.attachMedia(v);
-    hls.on(Hls.Events.ERROR,function(ev,data){
-      if(data.fatal){
-        post({k:'err',msg:data.type+':'+data.details});
-        if(data.type===Hls.ErrorTypes.NETWORK_ERROR&&retryCount<2){
-          retryCount++;
-          setTimeout(function(){try{hls.startLoad();}catch(e){}},1000);
-        } else if(data.type===Hls.ErrorTypes.MEDIA_ERROR&&retryCount<2){
-          retryCount++;
-          setTimeout(function(){try{hls.recoverMediaError();}catch(e){}},500);
-        }
-      }
-    });
-    hls.on(Hls.Events.MANIFEST_PARSED,function(ev,data){
-      post({k:'levels',n:data.levels.length});
-      v.play().catch(function(){});
-    });
-  } else if(v.canPlayType('application/vnd.apple.mpegurl')){
-    /* iOS native HLS */
-    v.src=url;
-    v.load();
-    v.play().catch(function(){});
+  // Tap logic
+  var t = e.changedTouches[0];
+  var now = Date.now();
+  var xPct = t.clientX / window.innerWidth;
+  if (now - lastTap < 280) {
+    clearTimeout(tapTimer);
+    lastTap = 0;
+    // Double tap — skip
+    if (xPct < 0.35) skip(-10);
+    else if (xPct > 0.65) skip(10);
+    else togglePlay();
   } else {
-    post({k:'err',msg:'hls_not_supported'});
+    lastTap = now;
+    tapTimer = setTimeout(function() {
+      lastTap = 0;
+      // Single tap — toggle controls
+      if (!ctrlVisible) showCtrl(true);
+      else if (!v.paused) hideCtrl();
+    }, 280);
   }
+}, { passive: true });
+
+function showSwipe(el) {
+  el.classList.add('anip__swipe--on');
+  clearTimeout(swipeTimeout);
+  swipeTimeout = setTimeout(function() {
+    el.classList.remove('anip__swipe--on');
+  }, 1200);
+}
+function hideSwipe(el) { el.classList.remove('anip__swipe--on'); }
+
+/* ── Episode nav setup (called from RN) ── */
+window.NOVA_setEpNav = function(hasPrev, hasNext) {
+  HAS_PREV_EP = hasPrev;
+  HAS_NEXT_EP = hasNext;
+  var any = hasPrev || hasNext;
+  epNav.style.display = any ? 'flex' : 'none';
+  prevEpBtn.style.display = hasPrev ? 'flex' : 'none';
+  nextEpBtn.style.display = hasNext ? 'flex' : 'none';
+};
+
+/* ── Exposed functions for RN bridge ── */
+window.NOVA_load  = function(url, ref, seekTo) {
+  // Load a specific URL directly (used when RN wants to override a source URL)
+  SOURCES[srcIdx].url = url;
+  if (ref) SOURCES[srcIdx].referer = ref;
+  loadSrc(srcIdx, seekTo || 0);
+};
+window.NOVA_seek  = function(t) { v.currentTime = t; };
+window.NOVA_play  = function() { v.play().catch(function(){}); };
+window.NOVA_pause = function() { v.pause(); };
+
+/* ── Start ── */
+if (SOURCES.length > 0) {
+  loadSrc(0, INIT_POS);
+} else {
+  showErr('لا توجد مصادر');
 }
 
-/* ── دوال مكشوفة لـ injectJavaScript ── */
-window.NOVA_load  = function(url,ref){ loadSrc(url,ref||''); };
-window.NOVA_seek  = function(t){ v.currentTime=t; post({k:'seeked',t:t}); };
-window.NOVA_play  = function(){ v.play().catch(function(){}); };
-window.NOVA_pause = function(){ v.pause(); };
-window.NOVA_speed = function(s){ v.playbackRate=s; };
+// Show controls initially, then auto-hide
+showCtrl(true);
 
-/* إشعار React Native أن الـ WebView جاهز لاستقبال الأوامر */
-post({k:'webview_init'});
+post({ k: 'webview_init' });
 </script>
 </body>
 </html>`;
-
-/* ── Spinning loader ── */
-function SpinRing() {
-  const rot = useRef(new Animated.Value(0)).current;
-  useEffect(() => {
-    Animated.loop(Animated.timing(rot, { toValue: 1, duration: 900, easing: Easing.linear, useNativeDriver: true })).start();
-  }, []);
-  const rotate = rot.interpolate({ inputRange: [0, 1], outputRange: ["0deg", "360deg"] });
-  return (
-    <View style={{ width: 48, height: 48 }}>
-      <View style={[StyleSheet.absoluteFill, { borderRadius: 24, borderWidth: 2.5, borderColor: "rgba(139,92,246,0.15)" }]} />
-      <Animated.View style={[StyleSheet.absoluteFill, { borderRadius: 24, borderWidth: 2.5, borderColor: "transparent", borderTopColor: "#8B5CF6", borderRightColor: "rgba(139,92,246,0.5)", transform: [{ rotate }] }]} />
-    </View>
-  );
-}
+};
 
 /* ══════════════ المكوّن الرئيسي ══════════════ */
 export default function AnimHlsPlayer({
@@ -275,316 +955,76 @@ export default function AnimHlsPlayer({
   onNextEpisode,
   onPrevEpisode,
 }: Props) {
-  const insets = useSafeAreaInsets();
   const webRef = useRef<WebView>(null);
-
-  /* ── Player state ── */
-  const [srcIdx, setSrcIdx] = useState(initialSourceIndex);
-  const [position, setPosition] = useState(0);
-  const [duration, setDuration] = useState(0);
-  const [isPlaying, setIsPlaying] = useState(true);
-  const [isBuffering, setIsBuffering] = useState(true);
-  const [isEnded, setIsEnded] = useState(false);
-  const [errorCount, setErrorCount] = useState(0);
-
-  /* ── UI state ── */
-  const [showControls, setShowControls] = useState(true);
-  const [showSrcPanel, setShowSrcPanel] = useState(false);
-  const [seekPreview, setSeekPreview] = useState<number | null>(null); // drag preview position
-
-  /* ── Subtitle state ── */
-  const [cues, setCues] = useState<SubCue[]>([]);
-  const [activeCue, setActiveCue] = useState<SubCue | null>(null);
-  const [subOn, setSubOn] = useState(true);
-  const subFetchedRef = useRef<string>("");
-
-  /* ── Orientation ── */
-  const [isLandscape, setIsLandscape] = useState(false);
-
-  /* ── Refs ── */
-  const posRef = useRef(0);
-  const durRef = useRef(0);
-  const seekingRef = useRef(false);
-  const gestureStartXRef = useRef(0);
-  const gestureStartPosRef = useRef(0);
-  const controlsTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const loadTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const consecutiveErrRef = useRef(0);
-  const loadedRef = useRef(false); // هل تم الإرسال للـ WebView؟
-  const positionLoadedRef = useRef(false); // هل تم seek للـ initialPosition؟
-
-  const currentSrc = sources[srcIdx];
+  const loadedRef = useRef(false);
 
   /* ── Lock to landscape on mount ── */
   useEffect(() => {
     ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE_LEFT).catch(() => {});
-    setIsLandscape(true);
     return () => {
       ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP).catch(() => {});
     };
   }, []);
 
-  /* ── Send load command to WebView (via direct NOVA_load call — more reliable than MessageEvent) ── */
-  const sendLoad = useCallback((src: AnimHlsSource, seekTo?: number) => {
-    if (!webRef.current) return;
-    const url = src.url;
-    const ref = src.headers?.Referer || "";
-    /* Call exposed window function directly — avoids Android WebView MessageEvent quirks */
-    webRef.current.injectJavaScript(
-      `(function(){if(window.NOVA_load){window.NOVA_load(${JSON.stringify(url)},${JSON.stringify(ref)});}true;})();`
+  /* ── Set episode nav after WebView ready ── */
+  const setEpNav = useCallback(() => {
+    const hasPrev = !!onPrevEpisode;
+    const hasNext = !!onNextEpisode;
+    webRef.current?.injectJavaScript(
+      `(function(){if(window.NOVA_setEpNav)window.NOVA_setEpNav(${hasPrev},${hasNext});true;})();`
     );
-    setIsBuffering(true);
-    setIsEnded(false);
-    setIsPlaying(true);
-    loadedRef.current = true;
-    positionLoadedRef.current = false;
-    /* Start load timeout — if no readyToPlay in 25s, try next source */
-    if (loadTimeoutRef.current) clearTimeout(loadTimeoutRef.current);
-    loadTimeoutRef.current = setTimeout(() => {
-      loadTimeoutRef.current = null;
-      console.warn(`[AnimHlsPlayer] ⏱ timeout 25s — ${src.label}`);
-      handleError();
-    }, 25000);
-    /* Seek to saved position after load */
-    if (seekTo && seekTo > 5) {
-      setTimeout(() => {
-        webRef.current?.injectJavaScript(`(function(){if(window.NOVA_seek)window.NOVA_seek(${seekTo});true;})();`);
-        positionLoadedRef.current = true;
-      }, 2500);
-    }
-  }, []); // eslint-disable-line
-
-  /* ── WebView onLoad (fallback — in case webview_init message is missed) ── */
-  const handleWebViewLoad = useCallback(() => {
-    /* نؤجل 800ms إضافية بعد onLoad للتأكد من تنفيذ scripts الخارجية */
-    setTimeout(() => {
-      if (!loadedRef.current && currentSrc) {
-        sendLoad(currentSrc, initialPosition > 5 ? initialPosition : undefined);
-      }
-    }, 800);
-  }, [currentSrc, initialPosition, sendLoad]);
+  }, [onPrevEpisode, onNextEpisode]);
 
   /* ── Messages from WebView ── */
-  const handleMessage = useCallback((event: any) => {
-    try {
-      const msg = JSON.parse(event.nativeEvent.data);
-      /* WebView أعلن جهوزيته — أرسل الـ load فوراً (هذا أكثر موثوقية من onLoad) */
-      if (msg.k === "webview_init") {
-        if (currentSrc) sendLoad(currentSrc, initialPosition > 5 ? initialPosition : undefined);
-        return;
+  const handleMessage = useCallback(
+    (event: any) => {
+      try {
+        const msg = JSON.parse(event.nativeEvent.data);
+        if (msg.k === "webview_init") {
+          loadedRef.current = true;
+          setEpNav();
+        } else if (msg.k === "back") {
+          onBack();
+        } else if (msg.k === "prev_ep") {
+          onPrevEpisode?.();
+        } else if (msg.k === "next_ep") {
+          onNextEpisode?.();
+        } else if (msg.k === "t") {
+          onProgress?.(msg.t, msg.d);
+        } else if (msg.k === "err") {
+          console.warn("[AnimHlsPlayer] err:", msg.msg);
+        } else if (msg.k === "ended") {
+          onNextEpisode?.();
+        }
+      } catch {}
+    },
+    [onBack, onProgress, onError, onNextEpisode, onPrevEpisode, setEpNav],
+  );
+
+  /* ── Fallback: if webview_init missed ── */
+  const handleWebViewLoad = useCallback(() => {
+    setTimeout(() => {
+      if (!loadedRef.current) {
+        loadedRef.current = true;
+        setEpNav();
       }
-      if (msg.k === "t") {
-        const t = msg.t as number;
-        const d = msg.d as number;
-        posRef.current = t;
-        durRef.current = d;
-        if (!seekingRef.current) {
-          setPosition(t);
-          setDuration(d > 0 ? d : durRef.current);
-        }
-        onProgress?.(t, d);
-        /* subtitle */
-        if (cues.length > 0) setActiveCue(bisectCue(cues, t));
-        /* Resume to saved position (fallback if timeout-based seek failed) */
-        if (!positionLoadedRef.current && initialPosition > 5 && t < 3) {
-          positionLoadedRef.current = true;
-          webRef.current?.injectJavaScript(`(function(){if(window.NOVA_seek)window.NOVA_seek(${initialPosition});true;})();`);
-        }
-      } else if (msg.k === "ready") {
-        if (loadTimeoutRef.current) { clearTimeout(loadTimeoutRef.current); loadTimeoutRef.current = null; }
-        consecutiveErrRef.current = 0;
-        setIsBuffering(false);
-        if (msg.d > 0) setDuration(msg.d);
-        console.log(`[AnimHlsPlayer] ✅ ready: ${currentSrc?.label} → ${currentSrc?.url?.slice(0, 80)}`);
-      } else if (msg.k === "buf") {
-        setIsBuffering(!!msg.v);
-      } else if (msg.k === "play") {
-        setIsPlaying(!!msg.v);
-      } else if (msg.k === "ended") {
-        setIsEnded(true);
-        setIsPlaying(false);
-        autoShowControls();
-        if (onNextEpisode) onNextEpisode();
-      } else if (msg.k === "err") {
-        console.warn(`[AnimHlsPlayer] ❌ err: ${msg.msg} (${currentSrc?.label})`);
-        handleError();
-      } else if (msg.k === "levels") {
-        console.log(`[AnimHlsPlayer] HLS levels: ${msg.n}`);
-      }
-    } catch {}
-  }, [cues, currentSrc, initialPosition, onProgress, onNextEpisode]); // eslint-disable-line
+    }, 1200);
+  }, [setEpNav]);
 
-  /* ── Error handling: try next source ── */
-  const handleError = useCallback(() => {
-    if (loadTimeoutRef.current) { clearTimeout(loadTimeoutRef.current); loadTimeoutRef.current = null; }
-    setIsBuffering(false);
-    consecutiveErrRef.current += 1;
-    const nextIdx = srcIdx + 1;
-    if (nextIdx >= sources.length || consecutiveErrRef.current > sources.length) {
-      setErrorCount(e => e + 1);
-      onError?.();
-      return;
-    }
-    console.log(`[AnimHlsPlayer] trying next: ${sources[nextIdx]?.label}`);
-    setSrcIdx(nextIdx);
-    sendLoad(sources[nextIdx]);
-  }, [srcIdx, sources, sendLoad, onError]);
-
-  /* ── Change source manually ── */
-  const switchSource = useCallback((idx: number) => {
-    const saved = posRef.current;
-    consecutiveErrRef.current = 0;
-    setSrcIdx(idx);
-    setShowSrcPanel(false);
-    sendLoad(sources[idx], saved > 5 ? saved : undefined);
-    /* load subtitles for new source */
-    subFetchedRef.current = "";
-  }, [sources, sendLoad]);
-
-  /* ── Controls auto-hide ── */
-  const autoShowControls = useCallback(() => {
-    setShowControls(true);
-    if (controlsTimerRef.current) clearTimeout(controlsTimerRef.current);
-    controlsTimerRef.current = setTimeout(() => setShowControls(false), 4000);
-  }, []);
-
-  /* ── Auto-hide controls when playing ── */
-  useEffect(() => {
-    if (isPlaying && !showSrcPanel) {
-      controlsTimerRef.current = setTimeout(() => setShowControls(false), 3500);
-    }
-    return () => { if (controlsTimerRef.current) clearTimeout(controlsTimerRef.current); };
-  }, [isPlaying, showSrcPanel]);
-
-  /* ── Subtitle loading ── */
-  useEffect(() => {
-    const subUrl = currentSrc?.subtitleUrl;
-    if (!subUrl || subUrl === subFetchedRef.current) return;
-    subFetchedRef.current = subUrl;
-    setCues([]);
-    setActiveCue(null);
-    fetch(subUrl).then(r => r.text()).then(text => {
-      const parsed = parseVTT(text);
-      if (parsed.length > 0) setCues(parsed);
-    }).catch(() => {});
-  }, [currentSrc?.subtitleUrl]);
-
-  /* ── Cleanup ── */
-  useEffect(() => {
-    return () => {
-      if (loadTimeoutRef.current) clearTimeout(loadTimeoutRef.current);
-      if (controlsTimerRef.current) clearTimeout(controlsTimerRef.current);
-    };
-  }, []);
-
-  /* ── Seek helper ── */
-  const seek = useCallback((t: number) => {
-    const clamped = Math.max(0, Math.min(durRef.current || 999999, t));
-    setPosition(clamped);
-    posRef.current = clamped;
-    webRef.current?.injectJavaScript(`(function(){if(window.NOVA_seek)window.NOVA_seek(${clamped});true;})();`);
-  }, []);
-
-  const togglePlay = useCallback(() => {
-    if (isEnded) {
-      seek(0);
-      setIsEnded(false);
-      webRef.current?.injectJavaScript(`(function(){if(window.NOVA_play)window.NOVA_play();true;})();`);
-      setIsPlaying(true);
-      return;
-    }
-    if (isPlaying) {
-      webRef.current?.injectJavaScript(`(function(){if(window.NOVA_pause)window.NOVA_pause();true;})();`);
-    } else {
-      webRef.current?.injectJavaScript(`(function(){if(window.NOVA_play)window.NOVA_play();true;})();`);
-    }
-    setIsPlaying(p => !p);
-  }, [isPlaying, isEnded, seek]);
-
-  /* ── Seek bar progress (0–1) ── */
-  const progress = duration > 0 ? (seekPreview !== null ? seekPreview : position) / duration : 0;
-
-  /* ── PanResponder for gestures ── */
-  const doubleTapTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const lastTapRef = useRef(0);
-
-  const panResponder = useRef(
-    PanResponder.create({
-      onStartShouldSetPanResponder: () => true,
-      onMoveShouldSetPanResponder: (_e, gs) => Math.abs(gs.dx) > 8,
-      onPanResponderGrant: (e, gs) => {
-        gestureStartXRef.current = gs.x0;
-        gestureStartPosRef.current = posRef.current;
-        seekingRef.current = false;
-      },
-      onPanResponderMove: (_e, gs) => {
-        if (Math.abs(gs.dx) < 12) return;
-        seekingRef.current = true;
-        const d = durRef.current;
-        if (!d) return;
-        const delta = (gs.dx / W) * Math.min(d, 120); // 120s max per full swipe
-        const newPos = Math.max(0, Math.min(d, gestureStartPosRef.current + delta));
-        setSeekPreview(newPos);
-      },
-      onPanResponderRelease: (_e, gs) => {
-        if (seekingRef.current) {
-          const d = durRef.current;
-          if (d) {
-            const delta = (gs.dx / W) * Math.min(d, 120);
-            seek(Math.max(0, Math.min(d, gestureStartPosRef.current + delta)));
-          }
-          seekingRef.current = false;
-          setSeekPreview(null);
-        } else {
-          /* Tap — show controls or double-tap seek */
-          const now = Date.now();
-          const side = gs.x0 < W / 2 ? "right" : "left"; // RTL: right side = forward in RN coord
-          if (now - lastTapRef.current < 300) {
-            /* Double tap */
-            if (doubleTapTimerRef.current) { clearTimeout(doubleTapTimerRef.current); doubleTapTimerRef.current = null; }
-            seek(posRef.current + (side === "left" ? -10 : 10));
-          } else {
-            lastTapRef.current = now;
-            doubleTapTimerRef.current = setTimeout(() => {
-              doubleTapTimerRef.current = null;
-              setShowControls(v => {
-                if (!v) {
-                  if (controlsTimerRef.current) clearTimeout(controlsTimerRef.current);
-                  controlsTimerRef.current = setTimeout(() => setShowControls(false), 4000);
-                }
-                return !v;
-              });
-            }, 300);
-          }
-        }
-      },
-      onPanResponderTerminate: () => {
-        seekingRef.current = false;
-        setSeekPreview(null);
-      },
-    })
-  ).current;
-
-  /* ── Seek bar interaction ── */
-  const seekBarWidth = W - 100; // approximate
-  const handleSeekBarPress = useCallback((evt: any) => {
-    const x = evt.nativeEvent.locationX;
-    const ratio = Math.min(1, Math.max(0, x / seekBarWidth));
-    seek(ratio * (durRef.current || 0));
-    autoShowControls();
-  }, [seekBarWidth, seek, autoShowControls]);
-
-  const hasSub = cues.length > 0;
+  /* ── Build HTML once ── */
+  const html = buildHtml(
+    sources,
+    `${title}${episode !== undefined ? ` - الحلقة ${episode}` : ""}`,
+    episode,
+    initialPosition,
+  );
 
   return (
-    /* direction:'ltr' — يمنع RTL الخاص بالتطبيق العربي من عكس layout المشغّل */
-    <View style={[s.root, { direction: "ltr" }]}>
+    <View style={styles.root}>
       <StatusBar hidden />
-
-      {/* ── WebView — الفيديو الفعلي ── */}
       <WebView
         ref={webRef}
-        source={{ html: HLS_HTML, baseUrl: "https://nova-player.local/" }}
+        source={{ html, baseUrl: "https://nova-player.local/" }}
         style={StyleSheet.absoluteFill}
         mediaPlaybackRequiresUserAction={false}
         allowsInlineMediaPlayback
@@ -593,200 +1033,22 @@ export default function AnimHlsPlayer({
         domStorageEnabled
         originWhitelist={["*"]}
         mixedContentMode="always"
-        pointerEvents="none"
         scrollEnabled={false}
         bounces={false}
         cacheEnabled={false}
         incognito
         onLoad={handleWebViewLoad}
         onMessage={handleMessage}
-        onError={(e) => { console.error("[AnimHlsPlayer] WebView error:", e.nativeEvent); handleError(); }}
+        onError={(e) => {
+          console.error("[AnimHlsPlayer] WebView error:", e.nativeEvent);
+          onError?.();
+        }}
         renderError={() => <View style={{ flex: 1, backgroundColor: "#000" }} />}
       />
-
-      {/* ── Gesture overlay ── */}
-      <View
-        style={StyleSheet.absoluteFill}
-        {...panResponder.panHandlers}
-      >
-        {/* ── Buffering indicator ── */}
-        {isBuffering && (
-          <View style={s.bufferingWrap} pointerEvents="none">
-            <SpinRing />
-          </View>
-        )}
-
-        {/* ── Seek preview badge ── */}
-        {seekPreview !== null && (
-          <View style={s.seekBadge} pointerEvents="none">
-            <Text style={s.seekBadgeTime}>{fmtTime(seekPreview)}</Text>
-            <Text style={s.seekBadgeDelta}>{seekPreview > gestureStartPosRef.current ? "+" : ""}{fmtTime(Math.abs(seekPreview - gestureStartPosRef.current))}</Text>
-          </View>
-        )}
-
-        {/* ── Controls overlay — shown conditionally ── */}
-        {showControls && (
-          <View style={StyleSheet.absoluteFill} pointerEvents="box-none">
-            {/* Top gradient */}
-            <LinearGradient
-              colors={["rgba(0,0,0,0.75)", "transparent"]}
-              style={s.topGrad}
-              pointerEvents="none"
-            />
-            {/* Bottom gradient */}
-            <LinearGradient
-              colors={["transparent", "rgba(0,0,0,0.82)"]}
-              style={s.bottomGrad}
-              pointerEvents="none"
-            />
-
-            {/* ── Top bar ── */}
-            <View style={[s.topBar, { paddingRight: insets.right + 12, paddingLeft: insets.left + 12 }]}>
-              <Pressable onPress={onBack} style={s.backBtn} hitSlop={12}>
-                <Ionicons name="arrow-back" size={20} color="#fff" />
-              </Pressable>
-              <View style={s.titleWrap}>
-                <Text style={s.titleText} numberOfLines={1}>{title}</Text>
-                {episode !== undefined && (
-                  <Text style={s.epText}>الحلقة {episode}</Text>
-                )}
-              </View>
-              {/* Source selector button */}
-              <Pressable onPress={() => { setShowSrcPanel(v => !v); autoShowControls(); }} style={s.srcBtn} hitSlop={8}>
-                <Ionicons name="layers" size={16} color="#fff" />
-                <Text style={s.srcBtnText}>{currentSrc?.quality?.split(" ")[0] || "HD"}</Text>
-              </Pressable>
-              {/* Subtitle toggle */}
-              {hasSub && (
-                <Pressable onPress={() => setSubOn(v => !v)} style={[s.srcBtn, { marginLeft: 6 }]} hitSlop={8}>
-                  <Ionicons name="logo-closed-captioning" size={16} color={subOn ? "#a78bfa" : "rgba(255,255,255,0.4)"} />
-                </Pressable>
-              )}
-            </View>
-
-            {/* ── Center play/pause ── */}
-            <View style={s.centerWrap} pointerEvents="none">
-              <View style={s.playBtn}>
-                <Ionicons name={isEnded ? "reload" : isPlaying ? "pause" : "play"} size={32} color="#fff" />
-              </View>
-            </View>
-            {/* Invisible pressable on center for play/pause */}
-            <Pressable style={s.centerPressable} onPress={togglePlay} />
-
-            {/* ── Episode nav ── */}
-            {(onPrevEpisode || onNextEpisode) && (
-              <View style={s.episodeNav}>
-                {onPrevEpisode && (
-                  <Pressable onPress={onPrevEpisode} style={s.epNavBtn}>
-                    <Ionicons name="play-skip-forward" size={18} color="rgba(255,255,255,0.8)" />
-                    <Text style={s.epNavText}>السابقة</Text>
-                  </Pressable>
-                )}
-                {onNextEpisode && (
-                  <Pressable onPress={onNextEpisode} style={s.epNavBtn}>
-                    <Text style={s.epNavText}>التالية</Text>
-                    <Ionicons name="play-skip-back" size={18} color="rgba(255,255,255,0.8)" />
-                  </Pressable>
-                )}
-              </View>
-            )}
-
-            {/* ── Bottom seek bar ── */}
-            <View style={[s.bottomBar, { paddingRight: insets.right + 12, paddingLeft: insets.left + 12 }]}>
-              <Text style={s.timeText}>{fmtTime(seekPreview ?? position)}</Text>
-              {/* Seek bar */}
-              <Pressable style={s.seekTrack} onPress={handleSeekBarPress}>
-                <View style={s.seekBg} />
-                <View style={[s.seekFill, { width: `${Math.min(100, progress * 100)}%` }]} />
-                <View style={[s.seekThumb, { left: `${Math.min(100, progress * 100)}%` }]} />
-              </Pressable>
-              <Text style={s.timeText}>{fmtTime(duration)}</Text>
-            </View>
-          </View>
-        )}
-
-        {/* ── Source picker panel ── */}
-        {showSrcPanel && (
-          <View style={s.srcPanel}>
-            <LinearGradient colors={["rgba(7,5,20,0.97)", "rgba(7,5,20,0.93)"]} style={StyleSheet.absoluteFill} />
-            <View style={s.srcPanelHeader}>
-              <Text style={s.srcPanelTitle}>اختر المصدر</Text>
-              <Pressable onPress={() => setShowSrcPanel(false)} style={s.srcPanelClose}>
-                <Ionicons name="close" size={18} color="rgba(255,255,255,0.7)" />
-              </Pressable>
-            </View>
-            {sources.map((src, i) => (
-              <Pressable key={i} onPress={() => switchSource(i)} style={[s.srcItem, i === srcIdx && s.srcItemActive]}>
-                <View style={[s.srcItemDot, i === srcIdx && s.srcItemDotActive]} />
-                <Text style={[s.srcItemLabel, i === srcIdx && s.srcItemLabelActive]}>
-                  {`سيرفر ${i + 1} — ${src.quality}`}
-                </Text>
-                <Text style={s.srcItemTag} numberOfLines={1}>{src.label || "—"}</Text>
-              </Pressable>
-            ))}
-          </View>
-        )}
-
-        {/* ── Subtitle overlay ── */}
-        {subOn && activeCue && !showSrcPanel && (
-          <View style={s.subWrap} pointerEvents="none">
-            {activeCue.text.split(/\r?\n/).map((line, i) => (
-              <Text key={i} style={s.subText}>{line || " "}</Text>
-            ))}
-          </View>
-        )}
-      </View>
     </View>
   );
 }
 
-const s = StyleSheet.create({
+const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: "#000" },
-  bufferingWrap: { ...StyleSheet.absoluteFillObject, alignItems: "center", justifyContent: "center", zIndex: 5 } as any,
-  seekBadge: { position: "absolute", top: "40%", left: "50%", transform: [{ translateX: -56 }, { translateY: -32 }], backgroundColor: "rgba(0,0,0,0.72)", borderRadius: 16, paddingHorizontal: 18, paddingVertical: 10, alignItems: "center" },
-  seekBadgeTime: { fontSize: 22, fontFamily: "Cairo_700Bold", color: "#fff" },
-  seekBadgeDelta: { fontSize: 13, fontFamily: "Cairo_400Regular", color: "rgba(255,255,255,0.6)", marginTop: 2 },
-
-  topGrad: { position: "absolute", top: 0, left: 0, right: 0, height: 110 },
-  bottomGrad: { position: "absolute", bottom: 0, left: 0, right: 0, height: 130 },
-
-  topBar: { position: "absolute", top: 0, left: 0, right: 0, flexDirection: "row", alignItems: "center", paddingVertical: 14, gap: 10 },
-  backBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: "rgba(0,0,0,0.4)", alignItems: "center", justifyContent: "center" },
-  titleWrap: { flex: 1, gap: 2 },
-  titleText: { fontSize: 14, fontFamily: "Cairo_700Bold", color: "#fff" },
-  epText: { fontSize: 10, color: "rgba(255,255,255,0.45)", fontFamily: "Cairo_400Regular" },
-  srcBtn: { flexDirection: "row", alignItems: "center", gap: 5, backgroundColor: "rgba(139,92,246,0.25)", borderRadius: 10, paddingHorizontal: 10, paddingVertical: 6, borderWidth: 1, borderColor: "rgba(139,92,246,0.4)" },
-  srcBtnText: { fontSize: 11, fontFamily: "Cairo_700Bold", color: "#c4b5fd" },
-
-  centerWrap: { ...StyleSheet.absoluteFillObject, alignItems: "center", justifyContent: "center" } as any,
-  centerPressable: { position: "absolute", width: 90, height: 90, left: "50%", top: "50%", transform: [{ translateX: -45 }, { translateY: -45 }] },
-  playBtn: { width: 72, height: 72, borderRadius: 36, backgroundColor: "rgba(0,0,0,0.55)", borderWidth: 1.5, borderColor: "rgba(255,255,255,0.25)", alignItems: "center", justifyContent: "center" },
-
-  episodeNav: { position: "absolute", right: 20, top: "50%", transform: [{ translateY: -30 }], gap: 10 },
-  epNavBtn: { flexDirection: "row", alignItems: "center", gap: 6, backgroundColor: "rgba(0,0,0,0.45)", borderRadius: 10, paddingHorizontal: 10, paddingVertical: 7, borderWidth: 1, borderColor: "rgba(255,255,255,0.15)" },
-  epNavText: { fontSize: 11, fontFamily: "Cairo_700Bold", color: "rgba(255,255,255,0.85)" },
-
-  bottomBar: { position: "absolute", bottom: 0, left: 0, right: 0, flexDirection: "row", alignItems: "center", paddingBottom: 18, paddingTop: 10, gap: 10 },
-  timeText: { fontSize: 11, fontFamily: "Cairo_700Bold", color: "rgba(255,255,255,0.8)", minWidth: 36, textAlign: "center" },
-  seekTrack: { flex: 1, height: 32, justifyContent: "center" },
-  seekBg: { position: "absolute", left: 0, right: 0, height: 3, borderRadius: 2, backgroundColor: "rgba(255,255,255,0.22)" },
-  seekFill: { position: "absolute", left: 0, height: 3, borderRadius: 2, backgroundColor: "#8B5CF6" },
-  seekThumb: { position: "absolute", width: 14, height: 14, borderRadius: 7, backgroundColor: "#fff", marginLeft: -7, top: 9, shadowColor: "#000", shadowOpacity: 0.5, shadowRadius: 4, elevation: 4 },
-
-  /* Source panel */
-  srcPanel: { position: "absolute", bottom: 0, left: 0, right: 0, borderTopLeftRadius: 20, borderTopRightRadius: 20, overflow: "hidden", paddingBottom: 24 },
-  srcPanelHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 20, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: "rgba(255,255,255,0.08)" },
-  srcPanelTitle: { fontSize: 14, fontFamily: "Cairo_700Bold", color: "#fff" },
-  srcPanelClose: { width: 30, height: 30, borderRadius: 15, backgroundColor: "rgba(255,255,255,0.08)", alignItems: "center", justifyContent: "center" },
-  srcItem: { flexDirection: "row", alignItems: "center", gap: 12, paddingHorizontal: 20, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: "rgba(255,255,255,0.05)" },
-  srcItemActive: { backgroundColor: "rgba(139,92,246,0.12)" },
-  srcItemDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: "rgba(255,255,255,0.2)" },
-  srcItemDotActive: { backgroundColor: "#8B5CF6" },
-  srcItemLabel: { flex: 1, fontSize: 13, fontFamily: "Cairo_700Bold", color: "rgba(255,255,255,0.7)" },
-  srcItemLabelActive: { color: "#fff" },
-  srcItemTag: { fontSize: 11, fontFamily: "Cairo_700Bold", color: "rgba(139,92,246,0.8)", backgroundColor: "rgba(139,92,246,0.15)", paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6 },
-
-  /* Subtitles */
-  subWrap: { position: "absolute", bottom: 80, left: 20, right: 20, alignItems: "center" },
-  subText: { fontSize: 16, fontFamily: "Cairo_700Bold", color: "#fff", textAlign: "center", textShadowColor: "rgba(0,0,0,0.95)", textShadowRadius: 8, textShadowOffset: { width: 0, height: 1 }, lineHeight: 24 },
 });
