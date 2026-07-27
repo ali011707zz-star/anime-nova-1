@@ -7,6 +7,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import { HiddenResolverWebView, ResolvedStream } from "@/components/HiddenResolverWebView";
 import { RiftPlayer, PlayerSource } from "@/components/RiftPlayer";
+import AnimHlsPlayer, { AnimHlsSource } from "@/components/AnimHlsPlayer";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -407,7 +408,7 @@ export default function AnimationWatchScreen() {
             autoPlayFiredRef.current = true;
             setTimeout(() => {
               if (!isMountedRef.current) return;
-              setPlayingSrc(first); setScreen("native");
+              setPlayingSrc(first); setScreen("webplayer");
             }, 0);
           }
         }
@@ -617,12 +618,12 @@ export default function AnimationWatchScreen() {
   }, [screen]);
 
 
-  /* ── Play a source — RiftPlayer الداخلي (react-native-video) ── */
+  /* ── Play a source — AnimHlsPlayer (WebView+hls.js) أولاً، RiftPlayer كـ fallback ── */
   const playSrc = useCallback((src: AnimSrc) => {
     setPlayingSrc(src);
     if (isDirectPlayable(src)) {
-      /* تشغيل مباشر عبر RiftPlayer */
-      setScreen("native");
+      /* WebView+hls.js: الجهاز يجلب segments مباشرةً بـ IP سكني → لا حجب CDN */
+      setScreen("webplayer");
       return;
     }
     if (needsHiddenResolve(src)) { setScreen("resolving"); return; }
@@ -664,11 +665,31 @@ export default function AnimationWatchScreen() {
     "360p SD":   directSrcs.filter(s => getSrcQuality(s) === "360p SD"),
   }), [directSrcs]);
 
-  /* ── RiftPlayer sources ──
-     المصدر الرئيسي: proxyUrl (VPS hls-proxy + seg-proxy) — يُعيد كتابة segments للـ VPS.
-     directFallback:  directUrl (CDN مباشرة) + headers — يُجرَّب تلقائياً إذا فشل VPS proxy.
-       سبب الفصل: seg-proxy يستخدم VPS datacenter IP → بعض CDNs تحجبه.
-       الجهاز (residential IP) يستطيع الوصول مباشرةً مع Referer صحيح. ── */
+  /* ── AnimHlsPlayer sources (WebView+hls.js) ──
+     الجهاز يجلب الـ segments مباشرةً بـ IP سكني → CDN يسمح بدل حجب VPS datacenter.
+     نُفضّل directUrl (CDN خام) على proxyUrl (VPS) — unwrapProxyUrl يستخرج الرابط الخام. ── */
+  const animHlsSourcesForWebPlayer = useMemo((): AnimHlsSource[] => {
+    const base = getBaseUrl();
+    const activeSubUrl = subLang === "ar" ? globalArSubUrl : subLang === "en" ? globalEnSubUrl : undefined;
+    return directSrcs.map(s => {
+      /* نفضّل directUrl (CDN خام) — proxyUrl مشفَّر ولا يمكن فك تشفيره على الموبايل.
+         إذا لم يوجد directUrl نستخدم url الذي قد يكون proxyUrl — سيفشل من VPS IP
+         لكن قد ينجح من IP الجهاز (residential). */
+      const rawUrl = resolveUrl(s.directUrl || s.url || "", base);
+      const resolvedSubUrl = s.subtitleUrl ? resolveUrl(s.subtitleUrl, base) : activeSubUrl;
+      return {
+        url: rawUrl,
+        label: s.label || "مصدر",
+        quality: getSrcQuality(s),
+        /* headers (Referer/Origin) — AnimHlsPlayer يُضيفها لكل طلب HLS عبر makeFetchLoader */
+        headers: s.headers && Object.keys(s.headers).length > 0 ? s.headers : undefined,
+        subtitleUrl: resolvedSubUrl,
+      } as AnimHlsSource;
+    }).filter(s => !!s.url);
+  }, [directSrcs, globalArSubUrl, globalEnSubUrl, subLang]);
+
+  /* ── RiftPlayer sources (ExoPlayer — fallback) ──
+     نُبقيه كـ fallback للـ MP4 المباشر وأي حالة لا تعمل فيها WebView. ── */
   const animHlsSources = useMemo((): PlayerSource[] => {
     const base = getBaseUrl();
     const activeSubUrl = subLang === "ar" ? globalArSubUrl : subLang === "en" ? globalEnSubUrl : undefined;
@@ -782,7 +803,67 @@ export default function AnimationWatchScreen() {
     );
   }
 
-  /* ═══════════════════ RIFT PLAYER (react-native-video — ExoPlayer/AVPlayer) ═══════════════════ */
+  /* ═══════════════════ ANIM HLS PLAYER — WebView+hls.js (المشغّل الرئيسي) ═══════════════════
+     الجهاز يجلب الـ segments مباشرةً بـ IP سكني → CDN يسمح (لا حجب datacenter VPS).
+     إذا كانت المصادر فارغة → ننتقل لـ RiftPlayer كـ fallback. ══════════════════════════ */
+  if (screen === "webplayer") {
+    /* حسب directUrl الخام (بلا /api/) — أو الـ proxyUrl إذا لم يوجد directUrl */
+    const webSrcs = animHlsSourcesForWebPlayer;
+    if (webSrcs.length === 0) {
+      /* لا مصادر بعد — ارجع للـ picker */
+      setTimeout(() => setScreen("picker"), 0);
+      return null;
+    }
+    const base = getBaseUrl();
+    const _playRaw = playingSrc ? (playingSrc.directUrl || playingSrc.url || "") : "";
+    const _playUrl = _playRaw.startsWith("/") ? base + _playRaw : _playRaw;
+    /* ابحث عن المصدر المختار بين webSrcs */
+    let startIdx = 0;
+    if (_playUrl) {
+      const exact = webSrcs.findIndex(s => s.url === _playUrl);
+      if (exact >= 0) startIdx = exact;
+      else {
+        const partial = webSrcs.findIndex(s => _playUrl && s.url.split("?")[0] === _playUrl.split("?")[0]);
+        if (partial >= 0) startIdx = partial;
+      }
+    }
+    return (
+      <AnimHlsPlayer
+        sources={webSrcs}
+        initialSourceIndex={Math.max(0, startIdx)}
+        title={titleStr}
+        episode={type !== "movie" ? ep : undefined}
+        episodeTitle={epTitle}
+        initialPosition={resumeTime}
+        onBack={() => {
+          handleTimeUpdate(lastTimeRef.current);
+          setScreen("picker");
+        }}
+        onProgress={handleTimeUpdate}
+        onError={() => {
+          handleTimeUpdate(lastTimeRef.current);
+          if (animSrcCacheKey) AsyncStorage.removeItem(animSrcCacheKey).catch(() => {});
+          hasCachedRef.current = false;
+          setSources([]);
+          seenKeys.current.clear();
+          setScreen("picker");
+        }}
+        onNextEpisode={type === "tv" ? () => {
+          const t = encodeURIComponent(titleStr);
+          const p = encodeURIComponent(posterUrl);
+          router.replace(`/animation/watch?id=${tmdbId}&type=${type}&ep=${ep + 1}&season=${season}&title=${t}&poster=${p}&autoplay=1` as any);
+        } : undefined}
+        onPrevEpisode={type === "tv" && ep > 1 ? () => {
+          const t = encodeURIComponent(titleStr);
+          const p = encodeURIComponent(posterUrl);
+          router.replace(`/animation/watch?id=${tmdbId}&type=${type}&ep=${ep - 1}&season=${season}&title=${t}&poster=${p}` as any);
+        } : undefined}
+      />
+    );
+  }
+
+  /* ═══════════════════ RIFT PLAYER (react-native-video — ExoPlayer/AVPlayer — fallback) ════════════
+     يُستخدم كـ fallback إذا فشل AnimHlsPlayer أو للمصادر التي لا تعمل عبر WebView. ══════════ */
   const playerSources = frozenSources.length > 0 ? frozenSources : animHlsSources;
   if (screen === "native" && playerSources.length > 0) {
     const base = getBaseUrl();

@@ -124,6 +124,8 @@ html,body{width:100%;height:100%;background:#000;overflow:hidden}
 var v=document.getElementById('v');
 var hls=null;
 var currentUrl='';
+var currentRef='';
+var retryCount=0;
 
 function post(o){
   try{
@@ -144,12 +146,44 @@ v.addEventListener('error',function(){
   post({k:'err',msg:'video_error:'+(v.error?v.error.code:'?')});
 });
 
+/* خدمة fetch مخصصة تُرسل Referer مع كل طلب HLS (manifest + segments) */
+function makeFetchLoader(ref){
+  function FetchLoader(config){this.stats={trequest:0,tfirst:0,tload:0,loaded:0};}
+  FetchLoader.prototype.load=function(context,config,callbacks){
+    var self=this;
+    var hdrs={'Accept':'*/*'};
+    if(ref){hdrs['Referer']=ref;try{hdrs['Origin']=new URL(ref).origin;}catch(e){}}
+    self.stats.trequest=performance.now();
+    self._ctl=new AbortController();
+    fetch(context.url,{headers:hdrs,signal:self._ctl.signal,credentials:'omit'})
+      .then(function(r){
+        if(!r.ok)throw new Error('HTTP '+r.status);
+        self.stats.tfirst=performance.now();
+        return context.responseType==='arraybuffer'?r.arrayBuffer():r.text();
+      })
+      .then(function(data){
+        self.stats.tload=performance.now();
+        self.stats.loaded=data.byteLength||data.length||0;
+        callbacks.onSuccess({data:data,url:context.url,code:200},self.stats,context,null);
+      })
+      .catch(function(err){
+        if(err.name==='AbortError')return;
+        callbacks.onError({code:0,text:err.message},context,null,self.stats);
+      });
+  };
+  FetchLoader.prototype.abort=function(){try{this._ctl&&this._ctl.abort();}catch(e){}};
+  FetchLoader.prototype.destroy=function(){this.abort();};
+  return FetchLoader;
+}
+
 function loadSrc(url,ref){
   currentUrl=url;
+  currentRef=ref||'';
+  retryCount=0;
   if(hls){hls.destroy();hls=null;}
   post({k:'buf',v:true});
 
-  /* MP4 — تشغيل مباشر عبر عنصر video بدون hls.js */
+  /* MP4 — تشغيل مباشر */
   if(/\.mp4(\?|$|#)/i.test(url)||(url.indexOf('.mp4')!==-1&&url.indexOf('.m3u8')===-1)){
     v.src=url;
     v.load();
@@ -167,6 +201,8 @@ function loadSrc(url,ref){
       fragLoadingTimeOut:20000,
       manifestLoadingTimeOut:15000,
       levelLoadingTimeOut:15000,
+      /* استخدم FetchLoader إذا كان هناك Referer — يُرسل الـ header مع كل طلب segment */
+      loader: currentRef ? makeFetchLoader(currentRef) : undefined,
     };
     hls=new Hls(cfg);
     hls.loadSource(url);
@@ -174,10 +210,12 @@ function loadSrc(url,ref){
     hls.on(Hls.Events.ERROR,function(ev,data){
       if(data.fatal){
         post({k:'err',msg:data.type+':'+data.details});
-        if(data.type===Hls.ErrorTypes.NETWORK_ERROR){
-          try{hls.startLoad();}catch(e){}
-        } else if(data.type===Hls.ErrorTypes.MEDIA_ERROR){
-          try{hls.recoverMediaError();}catch(e){}
+        if(data.type===Hls.ErrorTypes.NETWORK_ERROR&&retryCount<2){
+          retryCount++;
+          setTimeout(function(){try{hls.startLoad();}catch(e){}},1000);
+        } else if(data.type===Hls.ErrorTypes.MEDIA_ERROR&&retryCount<2){
+          retryCount++;
+          setTimeout(function(){try{hls.recoverMediaError();}catch(e){}},500);
         }
       }
     });
@@ -195,7 +233,7 @@ function loadSrc(url,ref){
   }
 }
 
-/* ── دوال مكشوفة لـ injectJavaScript (أكثر موثوقية من MessageEvent) ── */
+/* ── دوال مكشوفة لـ injectJavaScript ── */
 window.NOVA_load  = function(url,ref){ loadSrc(url,ref||''); };
 window.NOVA_seek  = function(t){ v.currentTime=t; post({k:'seeked',t:t}); };
 window.NOVA_play  = function(){ v.play().catch(function(){}); };
