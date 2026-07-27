@@ -12865,7 +12865,7 @@ router.get("/anime/sources-stream", async (req, res) => {
       scrapeCached("animedar",     () => getAnimadarSources(title, english, ep, isMovie, matchCtx)),
       // okanime: معطّل بطلب المستخدم
       // scrapeCached("okanime",      () => getOkAnimeSources(title, english, ep, isMovie, matchCtx), true, 22_000),
-      scrapeCached("mitanime",    () => getMitanimeSources(title, english, ep),            false, 30000),
+      // mitanime: محذوف بطلب المستخدم 2026-07-27
       scrapeCached("animeify",     () => getAnimeifySources(title, english, ep),  false, 18000),
       scrapeCached("animeday",     () => getAnimeDaySources(title, english, ep),    true, 18000),
       // scrapeCached("seepanel",  () => getSeepanelSources(title, english, ep, isMovie)), // DEAD: panel.seepanel.top/api returns 404 (2026-06)
@@ -12995,7 +12995,7 @@ router.get("/anime/fetch-source", async (req, res) => {
     "anime3rb",  // مُضاف 2026-07-18 — Animatoo Supabase slug + Hopx browser-html
     // reanime: محذوف بطلب المستخدم 2026-07-24
     "sanime",    // مُضاف 2026-07-24 — MP4 مباشر عربي مدبلج
-    "mitanime",  // مُعاد تفعيله 2026-07-24 — parseMitanimeServers مُصلَّح (RSC escaped quotes) + slug validation عبر /anime/{slug}
+    // mitanime: محذوف بطلب المستخدم 2026-07-27
     "anifox",    // ANIFOX 2.4.2 — Archive/MediaFire/MP4Upload/Uqload; Yandex filtered
     // "allmanga": معطّل 2026-07-17 — AA_CRYPTO_MISSING
     // videasy_anim: نُقل بالكامل إلى قسم الأنيميشن بطلب المستخدم 2026-07-15
@@ -13096,7 +13096,7 @@ router.get("/anime/fetch-source", async (req, res) => {
       // case "animelek":     await runExtract(await race(getAnimelekSources(title, english, ep, isMovie),   SCRAPER_MS, [])); break;
       case "animedar":     await runExtract(await race(getAnimadarSources(title, english, ep, isMovie),   SCRAPER_MS, [])); break;
       // case "okanime": معطّل بطلب المستخدم
-      case "mitanime":    (await race(getMitanimeSources(title, english, ep),           30000, [])).forEach(collectSrc); break;
+      // case "mitanime": محذوف بطلب المستخدم 2026-07-27
       case "animeify":    (await race(getAnimeifySources(title, english, ep),  18000, [])).forEach(collectSrc); break;
       case "animeday":     await runExtract(await race(getAnimeDaySources(title, english, ep),   SCRAPER_MS, [])); break;
       // case "seepanel": DEAD

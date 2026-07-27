@@ -50,7 +50,7 @@ const SITE_TAG: Record<string, string> = {
   ristoanime: "RS", animeify: "AF", animeday: "DY", arabseed: "AR",
   anime4up2: "4U", mycima: "MC", topcinemaa: "TC", animephoenix: "PH",
   animewitcher: "AW", kawaii: "KW",
-  anikototv: "ATV", animekai: "KI", mitanime: "MT",
+  anikototv: "ATV", animekai: "KI",
   vidlink_anim: "VL", vidfast: "VF",
   animetime: "AT", animepahe: "AP", dulo_anim: "DL",
   faselhd_db: "FH", witanime: "WI", witanime_db: "WD",
@@ -62,7 +62,7 @@ const SITE_TAG: Record<string, string> = {
 const SITE_LABEL: Record<string, string> = {
   kawaii: "Kawaii", animewitcher: "AnimeWitcher",
   dulo_anim: "Dulo",
-  anikototv: "AniKotoTV", mitanime: "MITanime", vidfast: "VidFast",
+  anikototv: "AniKotoTV", vidfast: "VidFast",
   vidlink_anim: "VidLink", animekai: "AnimeKai",
   animepahe: "AnimePahe", shahiid: "Shahiid", animelek: "Animelek",
   animedar: "Animedar", okanime: "OkAnime", ristoanime: "RistoAnime",
@@ -82,7 +82,7 @@ const SITE_DESC: Record<string, string> = {
   kawaii: "1080p · مباشر", animewitcher: "PD/ST · مباشر",
   dulo_anim: "ياباني/إنجليزي · HLS مباشر",
   vidlink_anim: "ياباني مترجم · مباشر",
-  mitanime: "ياباني مترجم · مباشر", vidfast: "TMDB · HLS · متعدد الخوادم",
+  vidfast: "TMDB · HLS · متعدد الخوادم",
   anikototv: "ياباني مترجم · skip مدمج", animekai: "ياباني مترجم · DB مباشر",
   animepahe: "ياباني مترجم · HLS نظيف", anipm: "ياباني مترجم · 37 سيرفر/حلقة",
   shahiid: "عربي مدبلج / مترجم", animelek: "عربي مدبلج / مترجم",
@@ -219,7 +219,7 @@ const SITE_PRIORITY: Record<string, number> = {
 /* مصادر موحَّدة مع الويب — نفس المصادر الـ 8 المفعَّلة في SCRAPER_DEFS */
 const ANIME_SITES = [
   "kawaii", "animewitcher", "anslayer", "animeify", "sanime", "anifox",
-  "mitanime",  // مُضاف 2026-07-24 — RSC HTTP مباشر بلا browser، 1-2s، 4-8 سيرفرات
+  // mitanime: محذوف بطلب المستخدم 2026-07-27
   // "witanime": معطّل بطلب المستخدم
   // "allmanga": معطّل 2026-07-17 — AA_CRYPTO_MISSING على AllAnime
 ] as const;
@@ -238,7 +238,7 @@ const SITE_TIMEOUT_MAP: Partial<Record<typeof ANIME_SITES[number], number>> = {
   anikototv:    28_000,  // backend = 25s + 3s هامش
   anipm:        24_000,  // backend = 20s + 4s هامش
   witanime:     20_000,  // backend يوناplay static HTML < 1s + chain search ~15s
-  mitanime:     65_000,  // backend = slug(8s) + fetch(10s) + parallel servers(22-30s) + 5s هامش
+  // mitanime: محذوف 2026-07-27
 };
 
 /* ── Spinning loader ── */

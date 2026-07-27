@@ -179,7 +179,7 @@ const SCRAPER_DEFS: { site: string; name: string; desc: string; tag: string; aud
   // xpass_anim: محذوف — CDN يحجب VPS/CF IPs، المقاطع تفشل للمستخدم 2026-07-15
   // vaplayer_anim: محذوف من الأنمي — مصدره إنجليزي فقط، أُبقي في الأنيميشن 2026-07-15
   // faselhd_db (FH) / moviz_time (MT): معطّلة بطلب المستخدم 2026-07-14
-  { site: "mitanime",     name: "MitAnime",       desc: "ياباني مترجم · videas / hgcloud · MP4", tag: "MT" },
+  // mitanime: محذوف بطلب المستخدم 2026-07-27
   { site: "witanime",     name: "ويت أنمي",      desc: "عربي · ok.ru / yonaplay",    tag: "WI", isArabic: true },
   { site: "nflixmovies_anim", name: "NflixMovies", desc: "إنجليزي · HLS", tag: "NX" },
   { site: "vidbolt_anim",     name: "VidBolt",      desc: "إنجليزي · HLS", tag: "VB" },
@@ -3300,7 +3300,7 @@ export default function WatchPage() {
       mycima:       34000,  // backend = 30s + هامش 4s
       witanime:     48000,  // backend = 45s + هامش 3s
       anikototv:    28000,  // backend = 25s + هامش 3s
-      mitanime:     33000,  // backend = 30s + هامش 3s (parallel slug resolution)
+      // mitanime: محذوف 2026-07-27
       // reanime: محذوف 2026-07-24
       hianime:      26000,  // backend = 22s + هامش 4s
       anipm:        24000,  // backend = 20s + هامش 4s
