@@ -1,13 +1,13 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import {
   View, Text, Pressable, Image, ScrollView, StyleSheet,
-  Platform, Dimensions, Animated, Easing, ActivityIndicator, Linking,
+  Platform, Dimensions, Animated, Easing, ActivityIndicator, Alert,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
-import AnimHlsPlayer, { AnimHlsSource } from "@/components/AnimHlsPlayer";
-import RiftPlayer, { PlayerSource } from "@/components/RiftPlayer";
 import { HiddenResolverWebView, ResolvedStream } from "@/components/HiddenResolverWebView";
+import { RiftPlayer, PlayerSource } from "@/components/RiftPlayer";
+import AnimHlsPlayer, { AnimHlsSource } from "@/components/AnimHlsPlayer";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -19,7 +19,7 @@ const { width: W, height: H } = Dimensions.get("window");
 
 /* ── Types ── */
 type Quality = "1080p FHD" | "720p HD" | "360p SD";
-type Screen = "loading" | "picker" | "native" | "embed" | "resolving";
+type Screen = "loading" | "picker" | "native" | "external" | "embed" | "resolving" | "webplayer";
 
 interface AnimSrc {
   url?: string;
@@ -53,20 +53,54 @@ const Q_SHORT: Record<Quality, string> = { "1080p FHD": "FHD", "720p HD": "HD", 
 const TIER_RANK: Record<Quality, number> = { "1080p FHD": 3, "720p HD": 2, "360p SD": 1 };
 
 /** استخراج Referer/Origin من رابط proxy (ref= param) — fallback إذا لم تُرسَل headers من الخادم */
-function extractHeadersFromProxy(url: string): Record<string, string> | undefined {
-  if (!url) return undefined;
-  /* روابط VPS proxy — ref الخاص بها hex مشفَّر وليس URL حقيقي؛ تخطَّها */
-  if (url.includes("/api/anime/") || url.includes("/api/animation/")) return undefined;
+/**
+ * يفكّ رابط VPS proxy ويعيد الرابط الخام + headers مباشرةً.
+ * ExoPlayer (AndroidX Media3) يجلب بـ IP الجهاز (سكني) → CDN يسمح بدل حجب datacenter VPS.
+ * الصيغة: /api/animation/hls-proxy?url=ENCODED_RAW&ref=ENCODED_REFERER
+ */
+function unwrapProxyUrl(
+  url: string,
+  base: string,
+  existingHeaders?: Record<string, string>,
+): { rawUrl: string; headers?: Record<string, string> } {
+  if (!url) return { rawUrl: url };
+  const full = url.startsWith("/") ? base + url : url;
+
+  const isProxy =
+    full.includes("/api/anime/hls-proxy") ||
+    full.includes("/api/anime/video-proxy") ||
+    full.includes("/api/animation/hls-proxy") ||
+    full.includes("/api/animation/video-proxy");
+
+  if (!isProxy) {
+    if (existingHeaders) return { rawUrl: full, headers: existingHeaders };
+    try {
+      const u = new URL(full);
+      const ref = u.searchParams.get("ref");
+      if (ref) {
+        let origin = "";
+        try { origin = new URL(ref).origin; } catch {}
+        return { rawUrl: full, headers: origin ? { Referer: ref, Origin: origin } : { Referer: ref } };
+      }
+    } catch {}
+    return { rawUrl: full };
+  }
+
   try {
-    const fullUrl = url.startsWith("/") ? `http://x.com${url}` : url;
-    const u = new URL(fullUrl);
-    const ref = u.searchParams.get("ref");
-    if (!ref) return undefined;
-    let origin = "";
-    try { origin = new URL(ref).origin; } catch {}
-    return origin ? { Referer: ref, Origin: origin } : { Referer: ref };
+    const u = new URL(full);
+    const rawEncoded = u.searchParams.get("url");
+    const refEncoded = u.searchParams.get("ref");
+    if (!rawEncoded) return { rawUrl: full };
+    const rawUrl = decodeURIComponent(rawEncoded);
+    const headers: Record<string, string> = { ...(existingHeaders || {}) };
+    if (refEncoded && !headers.Referer) {
+      const ref = decodeURIComponent(refEncoded);
+      headers.Referer = ref;
+      try { const o = new URL(ref).origin; if (o) headers.Origin = o; } catch {}
+    }
+    return { rawUrl, headers: Object.keys(headers).length > 0 ? headers : undefined };
   } catch {
-    return undefined;
+    return { rawUrl: full, headers: existingHeaders };
   }
 }
 
@@ -142,6 +176,8 @@ function getLabelShort(label: string): string {
   return label?.split(" ")[0] || "مصدر";
 }
 
+/* ── لا شيء هنا — EZV Player أصبح مشغّلاً داخلياً (WebVideoPlayer) ── */
+
 /* ── Poster image with error fallback ── */
 function AnimPosterImg({ uri, type }: { uri: string; type: string }) {
   const [err, setErr] = useState(false);
@@ -166,9 +202,12 @@ const w2 = StyleSheet.create({
 function SpinRing() {
   const rot = useRef(new Animated.Value(0)).current;
   useEffect(() => {
-    Animated.loop(
+    /* ⚠️ احفظ مرجع الـ loop لإيقافه عند unmount — منع memory leak */
+    const anim = Animated.loop(
       Animated.timing(rot, { toValue: 1, duration: 900, easing: Easing.linear, useNativeDriver: true })
-    ).start();
+    );
+    anim.start();
+    return () => anim.stop();
   }, []);
   const rotate = rot.interpolate({ inputRange: [0, 1], outputRange: ["0deg", "360deg"] });
   return (
@@ -297,6 +336,8 @@ export default function AnimationWatchScreen() {
   const [globalArSubUrl, setGlobalArSubUrl] = useState<string | undefined>();
   const [globalEnSubUrl, setGlobalEnSubUrl] = useState<string | undefined>();
   const [subLang, setSubLang] = useState<"ar" | "en" | "off">("ar");
+  /* مصادر مجمَّدة: تُجمَّد لحظة دخول التشغيل — تمنع SSE الجديدة من تغيير ترتيب المصادر أثناء التشغيل */
+  const [frozenSources, setFrozenSources] = useState<PlayerSource[]>([]);
   /* تُقرأ من الإعدادات عند التهيئة */
   const subPrefLoadedRef = useRef(false);
 
@@ -307,21 +348,25 @@ export default function AnimationWatchScreen() {
   const autoPlayFiredRef  = useRef(false);
   const autoPlayTimerRef  = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hasCachedRef      = useRef(false); // هل تم تحميل مصادر من الكاش المحلي؟
-  /* تجميد مصادر المشغّل لحظة دخول التشغيل — يمنع مصادر SSE الجديدة التي تصل أثناء
-     التشغيل الفعلي من إعادة كتابة مصفوفة sources الممرَّرة لـ RiftPlayer، وهو ما كان
-     يُسبِّب توقف التشغيل والعودة غير المتوقعة لشاشة الـ picker. */
-  const [frozenSources, setFrozenSources] = useState<AnimHlsSource[]>([]);
+  const isMountedRef      = useRef(true);  // يمنع setState بعد unmount → يحمي من crash
 
   const progressKey   = `anim-wp-${tmdbId}-${type}-${season}-${ep}`;
   /* كاش المصادر المحلي لفتح فوري في المرة الثانية */
   const animSrcCacheKey = tmdbId ? `anim-srcs-${tmdbId}-${type}-s${season}-e${ep}` : null;
   const ANIM_SRC_CACHE_TTL = 60 * 60 * 1000; // ساعة واحدة
 
+  /* ── تنظيف: منع setState بعد unmount ── */
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => { isMountedRef.current = false; };
+  }, []);
+
   /* ── تحميل المصادر المحفوظة + وقت الاستئناف ── */
   useEffect(() => {
     AsyncStorage.getItem(progressKey).then(v => {
+      if (!isMountedRef.current) return;
       if (v) setResumeTime(parseFloat(v) || 0);
-    });
+    }).catch(() => {});
     /* احترام إعداد الترجمة من الإعدادات */
     AsyncStorage.getItem("pref-anim-sub").then(v => {
       if (v === "false") setSubLang("off");
@@ -330,10 +375,11 @@ export default function AnimationWatchScreen() {
     /* فحص الكاش المحلي للمصادر — يتيح الفتح الفوري */
     if (!animSrcCacheKey) return;
     AsyncStorage.getItem(animSrcCacheKey).then(raw => {
-      if (!raw) return;
+      if (!raw || !isMountedRef.current) return;
       try {
         const { sources: cached, ts }: { sources: AnimSrc[]; ts: number } = JSON.parse(raw);
         if (!cached?.length || Date.now() - ts > ANIM_SRC_CACHE_TTL) return;
+        if (!isMountedRef.current) return;
 
         const base = getBaseUrl();
         const resolved = cached.map(s => ({
@@ -346,22 +392,27 @@ export default function AnimationWatchScreen() {
         /* أضف المصادر المحفوظة فوراً وانتقل للـ picker */
         hasCachedRef.current = true;
         setSources(resolved);
-        seenKeys.current = new Set(resolved.map(s => s.proxyUrl || s.directUrl || s.url || "").filter(Boolean));
+        /* ⚠️ لا نبذر seenKeys من الكاش — نتركها فارغة حتى تصل المصادر الطازجة
+           وتحلّ محلّ القديمة per-site. هذا يمنع تشغيل روابط CDN منتهية الصلاحية. */
         setLoading(false);
         setScreen("picker");
 
-        /* شغّل تلقائياً — أولوية: DU (Dulo) أولاً ثم أي مصدر مباشر */
-        if (autoplay) {
+        /* شغّل تلقائياً من الكاش فقط إذا كان الكاش حديثاً (< 2 دقيقة) —
+           الكاش الأقدم قد يحتوي روابط CDN منتهية الصلاحية تُسبّب الكراش */
+        if (autoplay && Date.now() - ts < 2 * 60 * 1000) {
           const isDU = (s: AnimSrc) => (s.label || "").toLowerCase().startsWith("dulo");
           const first =
             resolved.find(s => isDirectPlayable(s) && isDU(s)) ??
             resolved.find(s => isDirectPlayable(s));
           if (first) {
             autoPlayFiredRef.current = true;
-            setTimeout(() => { setPlayingSrc(first); setScreen("native"); }, 0);
+            setTimeout(() => {
+              if (!isMountedRef.current) return;
+              setPlayingSrc(first); setScreen("webplayer");
+            }, 0);
           }
         }
-      } catch { /* تجاهل كاش تالف */ }
+      } catch { /* تجاهل كاش تالف — يحدث عند الإغلاق القسري للتطبيق */ }
     }).catch(() => {});
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [progressKey, animSrcCacheKey]);
@@ -377,6 +428,7 @@ export default function AnimationWatchScreen() {
     )
       .then(r => r.json())
       .then((data: any) => {
+        if (!isMountedRef.current) return;
         const tracks: any[] = data?.tracks || [];
         const arTrack = tracks.find((t: any) => t.lang === "ar" || t.lang === "ar-auto");
         const enTrack = tracks.find((t: any) => t.lang === "en" || t.label?.toLowerCase().includes("english"));
@@ -418,7 +470,10 @@ export default function AnimationWatchScreen() {
     /* Save to anim-watch-history */
     if (t > 30) {
       AsyncStorage.getItem("anim-watch-history").then(raw => {
-        const hist = JSON.parse(raw || "[]");
+        if (!isMountedRef.current) return;
+        /* ⚠️ CRITICAL: try-catch مطلوب — raw قد يكون بيانات تالفة إذا أُغلق التطبيق قسراً أثناء الكتابة */
+        let hist: any[] = [];
+        try { hist = JSON.parse(raw || "[]"); if (!Array.isArray(hist)) hist = []; } catch { hist = []; }
         const item = { id: tmdbId, type, ep, season, title: titleStr, poster: posterUrl, date: new Date().toISOString() };
         const filtered = hist.filter((h: any) => !(h.id === tmdbId && h.type === type));
         AsyncStorage.setItem("anim-watch-history", JSON.stringify([item, ...filtered].slice(0, 50))).catch(() => {});
@@ -494,7 +549,8 @@ export default function AnimationWatchScreen() {
               seenKeys.current.add(key);
               freshSrcs.push(src);
 
-              setSources(prev => [...prev, src]);
+              /* حد أقصى 20 مصدر — يمنع تراكم مئات المصادر من SSE stream */
+              setSources(prev => prev.length >= 20 ? prev : [...prev, src]);
 
               /* تشغيل تلقائي عند أول مصدر مباشر */
               if (!autoPlayFiredRef.current && isDirectPlayable(src)) {
@@ -561,26 +617,15 @@ export default function AnimationWatchScreen() {
     // "native" orientation is handled by RiftPlayer itself
   }, [screen]);
 
-  /* ── تجميد المصادر لحظة دخول المشغّل، ومسحها عند الخروج (يحل مشكلة العودة للـ picker).
-     — append فقط أثناء التشغيل: لا نُزيح المصادر الحالية حتى لا يتأثر AnimHlsPlayer. ── */
-  useEffect(() => {
-    if (screen === "native") {
-      setFrozenSources(prev => {
-        if (prev.length === 0) return animHlsSources.length > 0 ? animHlsSources : prev;
-        const existingUrls = new Set(prev.map(s => s.url));
-        const newOnes = animHlsSources.filter(s => s.url && !existingUrls.has(s.url));
-        return newOnes.length > 0 ? [...prev, ...newOnes] : prev;
-      });
-    } else {
-      setFrozenSources([]);
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [screen, animHlsSources]);
 
-  /* ── Play a source ── */
+  /* ── Play a source — AnimHlsPlayer (WebView+hls.js) أولاً، RiftPlayer كـ fallback ── */
   const playSrc = useCallback((src: AnimSrc) => {
     setPlayingSrc(src);
-    if (isDirectPlayable(src)) { setScreen("native"); return; }
+    if (isDirectPlayable(src)) {
+      /* WebView+hls.js: الجهاز يجلب segments مباشرةً بـ IP سكني → لا حجب CDN */
+      setScreen("webplayer");
+      return;
+    }
     if (needsHiddenResolve(src)) { setScreen("resolving"); return; }
     setScreen("embed");
   }, []);
@@ -620,9 +665,32 @@ export default function AnimationWatchScreen() {
     "360p SD":   directSrcs.filter(s => getSrcQuality(s) === "360p SD"),
   }), [directSrcs]);
 
-  /* Build AnimHlsPlayer sources from directSrcs
-     — نمرر rawUrl للـ WebView: المتصفح يجلب الـ HLS بـ IP الجهاز → يتجاوز حجب CDN للـ VPS */
-  const animHlsSources = useMemo((): AnimHlsSource[] => {
+  /* ── AnimHlsPlayer sources (WebView+hls.js) ──
+     الجهاز يجلب الـ segments مباشرةً بـ IP سكني → CDN يسمح بدل حجب VPS datacenter.
+     نُفضّل directUrl (CDN خام) على proxyUrl (VPS) — unwrapProxyUrl يستخرج الرابط الخام. ── */
+  const animHlsSourcesForWebPlayer = useMemo((): AnimHlsSource[] => {
+    const base = getBaseUrl();
+    const activeSubUrl = subLang === "ar" ? globalArSubUrl : subLang === "en" ? globalEnSubUrl : undefined;
+    return directSrcs.map(s => {
+      /* نفضّل directUrl (CDN خام) — proxyUrl مشفَّر ولا يمكن فك تشفيره على الموبايل.
+         إذا لم يوجد directUrl نستخدم url الذي قد يكون proxyUrl — سيفشل من VPS IP
+         لكن قد ينجح من IP الجهاز (residential). */
+      const rawUrl = resolveUrl(s.directUrl || s.url || "", base);
+      const resolvedSubUrl = s.subtitleUrl ? resolveUrl(s.subtitleUrl, base) : activeSubUrl;
+      return {
+        url: rawUrl,
+        label: s.label || "مصدر",
+        quality: getSrcQuality(s),
+        /* headers (Referer/Origin) — AnimHlsPlayer يُضيفها لكل طلب HLS عبر makeFetchLoader */
+        headers: s.headers && Object.keys(s.headers).length > 0 ? s.headers : undefined,
+        subtitleUrl: resolvedSubUrl,
+      } as AnimHlsSource;
+    }).filter(s => !!s.url);
+  }, [directSrcs, globalArSubUrl, globalEnSubUrl, subLang]);
+
+  /* ── RiftPlayer sources (ExoPlayer — fallback) ──
+     نُبقيه كـ fallback للـ MP4 المباشر وأي حالة لا تعمل فيها WebView. ── */
+  const animHlsSources = useMemo((): PlayerSource[] => {
     const base = getBaseUrl();
     const activeSubUrl = subLang === "ar" ? globalArSubUrl : subLang === "en" ? globalEnSubUrl : undefined;
     const NO_SUB_PREFIXES = ["aflaam", "ArabSeed", "arabseed", "SeePanal", "seepanel", "seepan"];
@@ -632,22 +700,43 @@ export default function AnimationWatchScreen() {
       const resolvedSubUrl = wantsNoSub ? undefined : (s.subtitleUrl
         ? resolveUrl(s.subtitleUrl, base)
         : activeSubUrl);
-      // AnimHlsPlayer: raw CDN URL — WebView يجلبه بـ IP الجهاز (لا يُحجب بـ CDN)
-      const rawUrl = s.url || s.directUrl || s.proxyUrl || "";
-      const finalUrl = rawUrl.startsWith("/") ? base + rawUrl : rawUrl;
+      const proxyUrl = s.proxyUrl || s.directUrl || s.url || "";
+      /* directFallback: رابط CDN خام (بدون /api/) يُرسَل من IP الجهاز مع headers */
+      const rawDirect = s.directUrl && !s.directUrl.startsWith("/api/") ? s.directUrl : null;
+      const proxyResolved = resolveUrl(proxyUrl, base);
+      const directResolved = rawDirect ? resolveUrl(rawDirect, base) : null;
+      const hasFallback = directResolved && directResolved !== proxyResolved;
+      const cdnHeaders = s.headers && Object.keys(s.headers).length > 0 ? s.headers : undefined;
       return {
-        url: finalUrl,
+        url: proxyResolved,
         label: lbl || "مصدر",
-        quality: getSrcQuality(s),
+        quality: getSrcQuality(s) as PlayerSource["quality"],
         subtitleUrl: resolvedSubUrl,
-        ...(s.headers ? { headers: s.headers } : {}),
+        /* لا نمرّر headers للـ proxy — VPS يُضيفها server-side للـ CDN */
+        /* directFallback يحمل headers لأن ExoPlayer يُرسلها مع كل طلب segment */
+        ...(hasFallback ? { directFallback: { url: directResolved!, ...(cdnHeaders ? { headers: cdnHeaders } : {}) } } : {}),
       };
     }).filter(s => !!s.url);
   }, [directSrcs, globalArSubUrl, globalEnSubUrl, subLang]);
 
+  /* ── Frozen sources: تُجمَّد لحظة دخول التشغيل — تمنع SSE الجديدة من تغيير ترتيب المصادر ── */
+  useEffect(() => {
+    if (screen === "native") {
+      setFrozenSources(prev => {
+        if (prev.length === 0) return animHlsSources.length > 0 ? animHlsSources : prev;
+        const existingUrls = new Set(prev.map(s => s.url));
+        const newOnes = animHlsSources.filter(s => s.url && !existingUrls.has(s.url));
+        return newOnes.length > 0 ? [...prev, ...newOnes] : prev;
+      });
+    } else {
+      setFrozenSources([]);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [screen, animHlsSources]);
+
   /* ── Handle back ── */
   const handleBack = useCallback(() => {
-    if (screen === "native" || screen === "embed") {
+    if (screen === "native" || screen === "embed" || screen === "webplayer") {
       setScreen("picker");
       return;
     }
@@ -678,7 +767,7 @@ export default function AnimationWatchScreen() {
 
         {/* Back button */}
         <Pressable onPress={handleBack} style={[w.loadBackBtn, { top: topPad + 4 }]}>
-          <Ionicons name="chevron-forward" size={20} color="rgba(255,255,255,0.65)" />
+          <Ionicons name="chevron-back" size={20} color="rgba(255,255,255,0.65)" />
         </Pressable>
 
         {/* Center content */}
@@ -714,29 +803,96 @@ export default function AnimationWatchScreen() {
     );
   }
 
-  /* ═══════════════════ NATIVE PLAYER (RiftPlayer — ExoPlayer/AVPlayer) ═══════════════════ */
-  /* نستخدم RiftPlayer (ExoPlayer) بدلاً من AnimHlsPlayer (WebView + hls.js):
-     - ExoPlayer يتعامل مع HLS أصلياً بدون مشاكل CORS
-     - IP الجهاز سكني → CDN لا تحجبه
-     - headers (Referer/Origin) تُرسَل مع كل طلب (manifest + segments) تلقائياً */
+  /* ═══════════════════ ANIM HLS PLAYER — WebView+hls.js (المشغّل الرئيسي) ═══════════════════
+     الجهاز يجلب الـ segments مباشرةً بـ IP سكني → CDN يسمح (لا حجب datacenter VPS).
+     إذا كانت المصادر فارغة → ننتقل لـ RiftPlayer كـ fallback. ══════════════════════════ */
+  if (screen === "webplayer") {
+    /* حسب directUrl الخام (بلا /api/) — أو الـ proxyUrl إذا لم يوجد directUrl */
+    const webSrcs = animHlsSourcesForWebPlayer;
+    if (webSrcs.length === 0) {
+      /* لا مصادر بعد — ارجع للـ picker */
+      setTimeout(() => setScreen("picker"), 0);
+      return null;
+    }
+    const base = getBaseUrl();
+    const _playRaw = playingSrc ? (playingSrc.directUrl || playingSrc.url || "") : "";
+    const _playUrl = _playRaw.startsWith("/") ? base + _playRaw : _playRaw;
+    /* ابحث عن المصدر المختار بين webSrcs */
+    let startIdx = 0;
+    if (_playUrl) {
+      const exact = webSrcs.findIndex(s => s.url === _playUrl);
+      if (exact >= 0) startIdx = exact;
+      else {
+        const partial = webSrcs.findIndex(s => _playUrl && s.url.split("?")[0] === _playUrl.split("?")[0]);
+        if (partial >= 0) startIdx = partial;
+      }
+    }
+    return (
+      <AnimHlsPlayer
+        sources={webSrcs}
+        initialSourceIndex={Math.max(0, startIdx)}
+        title={titleStr}
+        episode={type !== "movie" ? ep : undefined}
+        episodeTitle={epTitle}
+        initialPosition={resumeTime}
+        onBack={() => {
+          handleTimeUpdate(lastTimeRef.current);
+          setScreen("picker");
+        }}
+        onProgress={handleTimeUpdate}
+        onError={() => {
+          handleTimeUpdate(lastTimeRef.current);
+          if (animSrcCacheKey) AsyncStorage.removeItem(animSrcCacheKey).catch(() => {});
+          hasCachedRef.current = false;
+          setSources([]);
+          seenKeys.current.clear();
+          setScreen("picker");
+        }}
+        onNextEpisode={type === "tv" ? () => {
+          const t = encodeURIComponent(titleStr);
+          const p = encodeURIComponent(posterUrl);
+          router.replace(`/animation/watch?id=${tmdbId}&type=${type}&ep=${ep + 1}&season=${season}&title=${t}&poster=${p}&autoplay=1` as any);
+        } : undefined}
+        onPrevEpisode={type === "tv" && ep > 1 ? () => {
+          const t = encodeURIComponent(titleStr);
+          const p = encodeURIComponent(posterUrl);
+          router.replace(`/animation/watch?id=${tmdbId}&type=${type}&ep=${ep - 1}&season=${season}&title=${t}&poster=${p}` as any);
+        } : undefined}
+      />
+    );
+  }
+
+  /* ═══════════════════ RIFT PLAYER (react-native-video — ExoPlayer/AVPlayer — fallback) ════════════
+     يُستخدم كـ fallback إذا فشل AnimHlsPlayer أو للمصادر التي لا تعمل عبر WebView. ══════════ */
   const playerSources = frozenSources.length > 0 ? frozenSources : animHlsSources;
   if (screen === "native" && playerSources.length > 0) {
-    const _playUrl = playingSrc?.url || "";
+    const base = getBaseUrl();
+    const _playUrlRaw = playingSrc
+      ? (playingSrc.proxyUrl || playingSrc.directUrl || playingSrc.url || "")
+      : "";
+    const _playUrl = _playUrlRaw.startsWith("/") ? base + _playUrlRaw : _playUrlRaw;
     const startIdx = Math.max(0, playerSources.findIndex(
       s => s.url === _playUrl || (_playUrl && s.url.split("?")[0] === _playUrl.split("?")[0])
     ));
     return (
       <RiftPlayer
-        sources={playerSources as unknown as PlayerSource[]}
+        sources={playerSources}
         initialSourceIndex={startIdx}
         title={titleStr}
         episode={type !== "movie" ? ep : undefined}
-        episodeTitle={epTitle}
         initialPosition={resumeTime}
-        onBack={() => setScreen("picker")}
+        onBack={() => {
+          handleTimeUpdate(lastTimeRef.current);
+          setScreen("picker");
+        }}
         onProgress={(pos, _dur) => handleTimeUpdate(pos)}
         onError={() => {
-          console.warn("[Animation] RiftPlayer جميع المصادر فشلت — العودة للـ picker");
+          handleTimeUpdate(lastTimeRef.current);
+          /* ⚠️ احذف كاش المصادر التالفة — يمنع تكرار الكراش عند فتح نفس المحتوى مجدداً */
+          if (animSrcCacheKey) AsyncStorage.removeItem(animSrcCacheKey).catch(() => {});
+          hasCachedRef.current = false;
+          setSources([]);
+          seenKeys.current.clear();
           setScreen("picker");
         }}
         onNextEpisode={type === "tv" ? () => {
@@ -753,13 +909,36 @@ export default function AnimationWatchScreen() {
     );
   }
 
+  /* ══════════════ EXTERNAL PLAYER (NOVA Player) ══════════════ */
+  if (screen === "external") {
+    return (
+      <View style={[w.container, { alignItems: "center", justifyContent: "center", gap: 16 }]}>
+        <Pressable onPress={() => setScreen("picker")} style={[w.videoBackBtn, { position: "absolute", top: topPad + 4, right: 12 }]}>
+          <Ionicons name="arrow-back" size={18} color="#fff" />
+        </Pressable>
+        <View style={{ width: 72, height: 72, borderRadius: 36, backgroundColor: "rgba(139,92,246,0.15)", alignItems: "center", justifyContent: "center" }}>
+          <Ionicons name="play-circle-outline" size={42} color="rgba(139,92,246,0.8)" />
+        </View>
+        <Text style={{ color: "#fff", fontFamily: "Cairo_700Bold", fontSize: 16, textAlign: "center" }}>
+          تم فتح NOVA Player
+        </Text>
+        <Text style={{ color: "rgba(255,255,255,0.45)", fontFamily: "Cairo_400Regular", fontSize: 13, textAlign: "center", paddingHorizontal: 32 }}>
+          يتم تشغيل الفيديو في NOVA Player خارجياً
+        </Text>
+        <Pressable onPress={() => setScreen("picker")} style={{ marginTop: 4 }}>
+          <Text style={{ color: "rgba(255,255,255,0.35)", fontFamily: "Cairo_400Regular", fontSize: 13 }}>العودة للمصادر</Text>
+        </Pressable>
+      </View>
+    );
+  }
+
   /* ══════════════ RESOLVING (WebView مخفي — لا يُعرض للمستخدم) ══════════════ */
   if (screen === "resolving" && playingSrc) {
     const resolveUrl2 = getPlayUrl(playingSrc);
     return (
       <View style={{ flex: 1, backgroundColor: "#07070d", alignItems: "center", justifyContent: "center", gap: 14 }}>
         <Pressable onPress={() => setScreen("picker")} style={[w.videoBackBtn, { position: "absolute", top: topPad + 4, right: 12 }]}>
-          <Ionicons name="arrow-forward" size={18} color="#fff" />
+          <Ionicons name="arrow-back" size={18} color="#fff" />
         </Pressable>
         <SpinRing />
         <Text style={{ fontSize: 13, fontFamily: "Cairo_400Regular", color: "rgba(255,255,255,0.45)", textAlign: "center" }}>
@@ -783,7 +962,7 @@ export default function AnimationWatchScreen() {
       return (
         <View style={[w.container, { alignItems: "center", justifyContent: "center", gap: 16 }]}>
           <Pressable onPress={() => setScreen("picker")} style={[w.videoBackBtn, { position: "absolute", top: topPad + 4, right: 12 }]}>
-            <Ionicons name="arrow-forward" size={18} color="#fff" />
+            <Ionicons name="arrow-back" size={18} color="#fff" />
           </Pressable>
           <View style={{ width: 72, height: 72, borderRadius: 36, backgroundColor: "rgba(139,92,246,0.15)", alignItems: "center", justifyContent: "center" }}>
             <Ionicons name="tv-outline" size={36} color="rgba(139,92,246,0.7)" />
@@ -796,51 +975,32 @@ export default function AnimationWatchScreen() {
               ? "بروتوكول HLS غير مدعوم في متصفح الويب — حمّل التطبيق للمشاهدة"
               : "مصدر الإطار لا يدعم تشغيل الويب مباشرةً"}
           </Text>
-          {playingSrc?.isEmbed && (
-            <Pressable
-              onPress={() => Linking.openURL(embedUrl)}
-              style={{ backgroundColor: "rgba(139,92,246,0.25)", borderRadius: 14, paddingHorizontal: 24, paddingVertical: 12, borderWidth: 1, borderColor: "rgba(139,92,246,0.4)", marginTop: 4 }}
-            >
-              <Text style={{ color: "#c4b5fd", fontFamily: "Cairo_700Bold", fontSize: 14 }}>فتح في المتصفح</Text>
-            </Pressable>
-          )}
           <Pressable onPress={() => setScreen("picker")} style={{ marginTop: 4 }}>
             <Text style={{ color: "rgba(255,255,255,0.35)", fontFamily: "Cairo_400Regular", fontSize: 13 }}>العودة للمصادر</Text>
           </Pressable>
         </View>
       );
     }
-    // Native: no WebView — show info card with option to open in browser
+    // Native: no WebView — show info card
     return (
       <View style={[w.container, { alignItems: "center", justifyContent: "center", gap: 16 }]}>
         <Pressable onPress={() => setScreen("picker")} style={[w.videoBackBtn, { position: "absolute", top: topPad + 4, right: 12 }]}>
-          <Ionicons name="arrow-forward" size={18} color="#fff" />
+          <Ionicons name="arrow-back" size={18} color="#fff" />
         </Pressable>
         <View style={{ width: 72, height: 72, borderRadius: 36, backgroundColor: "rgba(139,92,246,0.15)", alignItems: "center", justifyContent: "center" }}>
           <Ionicons name="tv-outline" size={36} color="rgba(139,92,246,0.7)" />
         </View>
         <Text style={{ color: "#fff", fontFamily: "Cairo_700Bold", fontSize: 16, textAlign: "center" }}>
-          {playingSrc?.directType === "hls" ? "بث HLS — جاري التحميل" : "هذا المصدر يحتاج متصفحاً خارجياً"}
+          هذا المصدر يحتاج التطبيق الأصلي
         </Text>
-        <Text style={{ color: "rgba(255,255,255,0.45)", fontFamily: "Cairo_400Regular", fontSize: 13, textAlign: "center", paddingHorizontal: 32 }}>
-          {playingSrc?.isEmbed
-            ? "مصدر الإطار لا يدعم التشغيل المباشر — افتحه في المتصفح"
-            : "يتعذّر تشغيل هذا المصدر — اختر مصدراً آخر"}
-        </Text>
-        {playingSrc?.isEmbed && (
-          <Pressable
-            onPress={() => Linking.openURL(embedUrl)}
-            style={{ backgroundColor: "rgba(139,92,246,0.25)", borderRadius: 14, paddingHorizontal: 24, paddingVertical: 12, borderWidth: 1, borderColor: "rgba(139,92,246,0.4)", marginTop: 4 }}
-          >
-            <Text style={{ color: "#c4b5fd", fontFamily: "Cairo_700Bold", fontSize: 14 }}>فتح في المتصفح</Text>
-          </Pressable>
-        )}
         <Pressable onPress={() => setScreen("picker")} style={{ marginTop: 4 }}>
           <Text style={{ color: "rgba(255,255,255,0.35)", fontFamily: "Cairo_400Regular", fontSize: 13 }}>العودة للمصادر</Text>
         </Pressable>
       </View>
     );
   }
+
+  /* EZV Player removed — Rift Player is the only internal player */
 
   /* ═══════════════════ SOURCE PICKER ═══════════════════ */
   const totalDirect = directSrcs.length;
@@ -875,7 +1035,7 @@ export default function AnimationWatchScreen() {
         </View>
         {/* Right: back button (always same position) */}
         <Pressable onPress={handleBack} style={w.headerBack}>
-          <Ionicons name="arrow-forward" size={17} color="rgba(255,255,255,0.75)" />
+          <Ionicons name="arrow-back" size={17} color="rgba(255,255,255,0.75)" />
         </Pressable>
       </View>
 
@@ -963,6 +1123,8 @@ export default function AnimationWatchScreen() {
             </View>
           </View>
         )}
+
+        {/* EZV Player button removed */}
 
         {/* Empty state */}
         {!loading && totalDirect === 0 && totalEmbed === 0 && (
@@ -1089,4 +1251,10 @@ const w = StyleSheet.create({
   subLangBtnActive: { backgroundColor: "rgba(139,92,246,0.25)", borderColor: "rgba(139,92,246,0.60)" },
   subLangText: { color: "rgba(255,255,255,0.45)", fontFamily: "Cairo_700Bold", fontSize: 12 },
   subLangTextActive: { color: "#c4b5fd" },
+
+  /* EZV Player */
+  ezvBtn:       { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, marginHorizontal: 16, marginTop: 4, marginBottom: 4, paddingVertical: 14, borderRadius: 14, backgroundColor: "rgba(124,58,237,0.15)", borderWidth: 1, borderColor: "rgba(139,92,246,0.32)" },
+  ezvBtnText:   { fontSize: 14, fontFamily: "Cairo_700Bold", color: "#c4b5fd" },
+  ezvBadge:     { paddingHorizontal: 7, paddingVertical: 2, borderRadius: 8, backgroundColor: "rgba(139,92,246,0.22)", borderWidth: 1, borderColor: "rgba(139,92,246,0.38)" },
+  ezvBadgeText: { fontSize: 9, fontFamily: "Cairo_700Bold", color: "rgba(196,181,253,0.85)" },
 });
