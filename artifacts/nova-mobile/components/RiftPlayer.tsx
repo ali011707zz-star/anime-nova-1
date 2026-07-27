@@ -10,7 +10,7 @@ import * as ScreenOrientation from "expo-screen-orientation";
 import { StatusBar } from "expo-status-bar";
 import { useVideoPlayer, VideoView } from "expo-video";
 import * as Brightness from "expo-brightness";
-import { VolumeManager } from "react-native-volume-manager";
+import { VolumeManager } from "../lib/volume-manager";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator, Animated, Dimensions, Easing, I18nManager, Platform,

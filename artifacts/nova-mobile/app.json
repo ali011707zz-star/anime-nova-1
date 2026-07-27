@@ -53,7 +53,6 @@
       "expo-video",
       "expo-screen-orientation",
       "expo-brightness",
-      "react-native-volume-manager",
       [
         "expo-media-library",
         {
