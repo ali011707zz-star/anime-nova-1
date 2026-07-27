@@ -1071,7 +1071,8 @@ export default function RiftPlayer({
   const effectiveSkipIntro = skipIntro;
   const effectiveSkipOutro = skipOutro;
   const inIntroRange  = !!effectiveSkipIntro && currentTime >= Math.max(0, effectiveSkipIntro.start - SKIP_LEAD) && currentTime < effectiveSkipIntro.end;
-  const inOutroRange  = !!effectiveSkipOutro && currentTime >= Math.max(0, effectiveSkipOutro.start - SKIP_LEAD) && currentTime <= effectiveSkipOutro.end;
+  // النهاية لا تظهر إلا بعد انتهاء نطاق المقدمة — زر واحد في كل مرة
+  const inOutroRange  = !!effectiveSkipOutro && !inIntroRange && currentTime >= Math.max(0, effectiveSkipOutro.start - SKIP_LEAD) && currentTime <= effectiveSkipOutro.end;
   /* NOTE: duration > 0 intentionally removed — button must show as soon as skip data arrives */
   const hasSkipData   = !!(effectiveSkipIntro || effectiveSkipOutro);
   const activeSkipLabel = inIntroRange ? "تخطي المقدمة" : inOutroRange ? "تخطي النهاية" : null;
@@ -1085,7 +1086,7 @@ export default function RiftPlayer({
     showControls();
   };
   const doSkipOutro = () => {
-    if (onNextEp) { onNextEp(); return; }
+    // تخطي النهاية = القفز لنهاية نطاق الـ outro فقط (لا الانتقال للحلقة التالية)
     const v = videoRef.current;
     if (v && effectiveSkipOutro) {
       v.currentTime = effectiveSkipOutro.end;

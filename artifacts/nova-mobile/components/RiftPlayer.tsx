@@ -9,7 +9,9 @@ import { LinearGradient } from "expo-linear-gradient";
 import * as ScreenOrientation from "expo-screen-orientation";
 import { StatusBar } from "expo-status-bar";
 import { useVideoPlayer, VideoView } from "expo-video";
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import * as Brightness from "expo-brightness";
+import { VolumeManager } from "react-native-volume-manager";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator, Animated, Dimensions, Easing, I18nManager, Platform,
   PanResponder, Pressable, ScrollView, StyleSheet, Text, View,
@@ -35,6 +37,20 @@ export type PlayerSource = {
    */
   headers?: Record<string, string>;
 };
+
+/** Never pass malformed URLs into the native player.
+ *  Some Media3/AVPlayer versions crash before emitting statusChange(error)
+ *  when the source is empty, relative, or otherwise not an HTTP URL.
+ */
+export function isValidPlayerSourceUrl(value: unknown): value is string {
+  if (typeof value !== "string" || !value.trim()) return false;
+  try {
+    const parsed = new URL(value.trim());
+    return (parsed.protocol === "http:" || parsed.protocol === "https:") && !!parsed.hostname;
+  } catch {
+    return false;
+  }
+}
 
 export interface SubCue { start: number; end: number; text: string }
 
@@ -256,7 +272,8 @@ function parseVTT(text: string): SubCue[] {
       .map(l => l.replace(/<[^>]*>/g, "")
         .replace(/&amp;/g, "&").replace(/&lt;/g, "<")
         .replace(/&gt;/g, ">").replace(/&nbsp;/g, " ").trim())
-      .filter(Boolean);
+      .filter(Boolean)
+      .filter(l => !/^kaa\.m\s*$/i.test(l)); // حذف علامة ترجمة kaa.m من مصدر Kawaii
     if (textLines.length > 0) cues.push({ start, end, text: textLines.join("\n") });
   }
   return cues;
@@ -369,8 +386,23 @@ export function RiftPlayer({
   const insets = useSafeAreaInsets();
 
   /* ─── Source ─── */
-  const [srcIdx, setSrcIdx]           = useState(initialSourceIndex);
-  const currentSrc                    = sources[srcIdx];
+  const playableSources = useMemo(() => {
+    const seen = new Set<string>();
+    return sources.filter(source => {
+      const url = source?.url?.trim();
+      if (!isValidPlayerSourceUrl(url) || seen.has(url)) return false;
+      seen.add(url);
+      return true;
+    });
+  }, [sources]);
+  const safeInitialIndex = Math.min(
+    Math.max(initialSourceIndex, 0),
+    Math.max(playableSources.length - 1, 0),
+  );
+  const [srcIdx, setSrcIdx]         = useState(safeInitialIndex);
+  const currentSrc                  = playableSources[srcIdx];
+  const aliveRef                    = useRef(true);
+  const terminalErrorRef            = useRef(false);
 
   /* ─── Playback state ─── */
   const [position, setPosition]       = useState(0);
@@ -417,10 +449,14 @@ export function RiftPlayer({
   const prevSpeedRef                  = useRef(1);
 
   /* ─── Volume / Brightness ─── */
-  const [volume, setVolume]           = useState(2);   // يبدأ بـ 200%
-  const [brightness, setBrightness]   = useState(0);
-  const volumeRef                     = useRef(2);
-  const brightnessRef                 = useRef(0);
+  /* الصوت والسطوع يعكسان القيم الحقيقية للنظام:
+     - expo-brightness: يقرأ/يضبط سطوع الشاشة الحقيقي (Activity-level)
+     - react-native-volume-manager: يقرأ/يضبط صوت الوسائط في النظام
+       ويُبرز HUD أزرار الصوت الفيزيائية عند التغيير */
+  const [volume, setVolume]           = useState(1);
+  const [brightness, setBrightness]   = useState(0.5);
+  const volumeRef                     = useRef(1);
+  const brightnessRef                 = useRef(0.5);
 
   /* ─── Gesture feedback ─── */
   const [feedback, setFeedback]       = useState<{ type: "volume" | "brightness" | "seek"; value: number; delta?: number } | null>(null);
@@ -437,6 +473,8 @@ export function RiftPlayer({
 
   /* ─── Skip notification ─── */
   const skipNotifFired                = useRef(false);
+  const [skipIntroDismissed, setSkipIntroDismissed] = useState(false);
+  const [skipOutroDismissed, setSkipOutroDismissed] = useState(false);
 
   /* ─── Anime Rift features ─── */
   const [seekDuration, setSeekDuration] = useState(10);
@@ -506,6 +544,16 @@ export function RiftPlayer({
   const durationRef       = useRef(0);
   const positionRef       = useRef(0);
   const urlCueCacheRef    = useRef<Map<string, SubCue[]>>(new Map());
+  /** أضِف إدخالاً للـ subtitle cache مع حد أقصى 30 مدخل — منع تراكم الذاكرة */
+  const setCueCacheEntry  = useCallback((url: string, cues: SubCue[]) => {
+    const map = urlCueCacheRef.current;
+    if (!map.has(url) && map.size >= 30) {
+      /* أزِل أقدم مدخل (first-inserted key in insertion-order Map) */
+      const firstKey = map.keys().next().value;
+      if (firstKey !== undefined) map.delete(firstKey);
+    }
+    map.set(url, cues);
+  }, []);
   const seekRef           = useRef<(s: number) => void>(() => {});
   const gestureTypeRef    = useRef<"vol" | "bri" | "seek" | null>(null);
   const gestureStartPosRef= useRef(0);
@@ -515,18 +563,67 @@ export function RiftPlayer({
      نعامله كخطأ ونتجاوز للمصدر التالي تلقائياً */
   const loadTimeoutRef    = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  useEffect(() => {
+    aliveRef.current = true;
+    return () => { aliveRef.current = false; };
+  }, []);
+
+  /* ─── تهيئة السطوع والصوت من قيم النظام الحقيقية عند فتح المشغّل ─── */
+  const originalBrightnessRef = useRef<number | null>(null);
+  useEffect(() => {
+    /* اقرأ سطوع الشاشة الحقيقي ثم اضبطه كنقطة بداية */
+    Brightness.getBrightnessAsync()
+      .then(b => {
+        if (!aliveRef.current) return;
+        const clamped = Math.max(0.05, Math.min(1, b));
+        originalBrightnessRef.current = clamped; // احفظ لاستعادته عند الإغلاق
+        setBrightness(clamped);
+        brightnessRef.current = clamped;
+      })
+      .catch(() => {});
+
+    /* اقرأ مستوى الصوت الحالي للوسائط من النظام */
+    VolumeManager.getVolume("music")
+      .then((res: any) => {
+        if (!aliveRef.current) return;
+        const v = typeof res === "number" ? res : (res?.volume ?? 1);
+        setVolume(v);
+        volumeRef.current = v;
+        try { player.volume = 1; } catch {} // player يعمل دائماً بـ 100% من صوت النظام
+      })
+      .catch(() => {});
+
+    /* استمع لأزرار الصوت الفيزيائية — يُحدّث الـ UI عند الضغط */
+    const volSub = VolumeManager.addVolumeListener((result: any) => {
+      if (!aliveRef.current) return;
+      const v = typeof result === "number" ? result : (result?.volume ?? result?.value ?? 1);
+      setVolume(v);
+      volumeRef.current = v;
+      setFeedback({ type: "volume", value: v });
+      if (feedbackTimer.current) clearTimeout(feedbackTimer.current);
+      feedbackTimer.current = setTimeout(() => setFeedback(null), 900);
+    });
+
+    return () => {
+      try { volSub?.remove?.(); } catch {}
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   /* ─── expo-video player ─── */
   /* نستخدم ref ثابت للـ VideoSource الأولي حتى لا يُعيد useVideoPlayer
      تهيئة المشغّل عند تغيير srcIdx (التبديل يتم عبر player.replace فقط).
      نمرّر URL string مباشرةً (بدون headers) — جميع المصادر تمرّ عبر VPS proxy
      الذي يُضيف Referer/Origin داخلياً، لذا لا حاجة لإرسالها من ExoPlayer.
      تمرير { uri, headers } يُسبِّب فشلاً صامتاً في بعض إصدارات expo-video native. */
-  const _initSrc = sources[initialSourceIndex ?? 0];
+  const _initSrc = playableSources[safeInitialIndex];
   const _initVideoSrcRef = useRef<string>(_initSrc?.url || "");
   const player = useVideoPlayer(_initVideoSrcRef.current || null, (p) => {
     p.loop = false;
     p.volume = 1;
-    p.play();
+    /* ⚠️ لا نستدعي p.play() هنا مباشرةً — بعض إصدارات ExoPlayer/AVPlayer تُطلق
+       native crash عند استدعاء play() قبل أن يكون المصدر جاهزاً للتشغيل.
+       التشغيل الآن يتم فقط عبر حدث statusChange → readyToPlay أدناه. */
     if (initialPosition && initialPosition > 5) {
       try { p.currentTime = initialPosition; } catch {}
     }
@@ -544,6 +641,41 @@ export function RiftPlayer({
       };
     } catch {}
   });
+
+  /* ─── Master cleanup on unmount — تحرير جميع الموارد النشطة ─── */
+  useEffect(() => {
+    return () => {
+      /* 1. أوقف المشغّل وحرِّر موارده الأصلية (Native ExoPlayer / AVPlayer) */
+      try { player.pause(); } catch {}
+      /* useVideoPlayer owns the native player's lifecycle and releases it
+         automatically. Calling release() here as well can double-release the
+         native object during a fast route transition and crash the app. */
+
+      /* 2. ألغِ timeout التحميل */
+      if (loadTimeoutRef.current) { clearTimeout(loadTimeoutRef.current); loadTimeoutRef.current = null; }
+
+      /* 3. ألغِ polling interval */
+      if (progressTimer.current) { clearInterval(progressTimer.current); progressTimer.current = null; }
+
+      /* 4. ألغِ subtitle rAF loop */
+      if (subRafRef.current) { cancelAnimationFrame(subRafRef.current); subRafRef.current = null; }
+
+      /* 5. ألغِ hide timer */
+      if (hideTimer.current) { clearTimeout(hideTimer.current); hideTimer.current = null; }
+
+      /* 6. فرِّغ subtitle cache + cues لتحرير الذاكرة
+         loadedCues قد تكون مئات/آلاف من الـ cues المترجمة — تحريرها فوراً يُقلل ضغط GC */
+      urlCueCacheRef.current.clear();
+
+      /* 7. استعِد السطوع الأصلي للشاشة عند مغادرة المشغّل */
+      if (originalBrightnessRef.current !== null) {
+        Brightness.setBrightnessAsync(originalBrightnessRef.current).catch(() => {});
+      }
+
+      console.log("[RiftPlayer] 🧹 unmounted — all resources released");
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   /* ─── Load SubSettings + subOffset + autoPlay pref from storage ─── */
   useEffect(() => {
@@ -588,27 +720,33 @@ export function RiftPlayer({
   /* ─── Player events ─── */
   useEffect(() => {
     const sub1 = player.addListener("playingChange", (e: any) => {
+      if (!aliveRef.current) return;
       setIsPlaying(e.isPlaying ?? false);
       setBuffering(false);
     });
     const sub2 = player.addListener("statusChange", (e: any) => {
+      if (!aliveRef.current) return;
       if (e.status === "loading") {
         setBuffering(true);
-        /* إذا بقي التحميل أكثر من 25ث (شاشة سوداء) نعامله كخطأ ونتجاوز للمصدر التالي */
+        /* إذا بقي التحميل أكثر من 12ث (شاشة سوداء) نعامله كخطأ ونتجاوز للمصدر التالي.
+           25ث كان طويلاً جداً: 10 مصادر × 25ث = 250ث انتظار + OOM من الـ buffers المتراكمة.
+           12ث كافٍ لأغلب HLS streams مع هامش للشبكات البطيئة. */
         if (loadTimeoutRef.current) clearTimeout(loadTimeoutRef.current);
         loadTimeoutRef.current = setTimeout(() => {
           loadTimeoutRef.current = null;
-          console.warn(`[RiftPlayer] ⏱ timeout (25s) — ${sources[srcIdx]?.label || "?"}: ${sources[srcIdx]?.url?.slice(0, 80)}`);
+          if (!aliveRef.current) return;
+          console.warn(`[RiftPlayer] ⏱ timeout (12s) — ${playableSources[srcIdx]?.label || "?"}: ${playableSources[srcIdx]?.url?.slice(0, 80)}`);
           setError(true);
           setBuffering(false);
-        }, 25000);
+        }, 12000);
       } else {
         /* أي حالة غير loading → ألغِ الـ timeout */
         if (loadTimeoutRef.current) { clearTimeout(loadTimeoutRef.current); loadTimeoutRef.current = null; }
         if (e.status === "readyToPlay") {
           setBuffering(false);
           setError(false);
-          console.log(`[RiftPlayer] ✅ readyToPlay: ${sources[srcIdx]?.label || "?"} → ${sources[srcIdx]?.url?.slice(0, 100)}`);
+          terminalErrorRef.current = false;
+          console.log(`[RiftPlayer] ✅ readyToPlay: ${playableSources[srcIdx]?.label || "?"} → ${playableSources[srcIdx]?.url?.slice(0, 100)}`);
           /* ── Restore position on readyToPlay (server-switch or initial resume) ──
              Doing this here (not in the polling timer) ensures we only seek AFTER
              the new stream is actually buffered, preventing conflicts with loading. */
@@ -635,25 +773,41 @@ export function RiftPlayer({
       sub2.remove();
       if (loadTimeoutRef.current) { clearTimeout(loadTimeoutRef.current); loadTimeoutRef.current = null; }
     };
-  }, [player, initialPosition]); // eslint-disable-line
+  }, [player, initialPosition, playableSources, srcIdx]); // eslint-disable-line
 
   /* ─── Auto-advance on error ─── */
   const consecutiveErrorsRef = useRef(0);
+  /* MAX_SOURCE_CYCLES: حد أقصى لعدد المصادر المُجرَّبة تلقائياً قبل الاستسلام.
+     بدون هذا الحد، إذا أضافت الـ background fetches مصادر جديدة لـ frozenSources
+     أثناء الدوران، يستمر RiftPlayer في المحاولة للأبد → كل مصدر يفتح buffer جديد
+     → OOM بعد عدة حلقات → كراش التطبيق. */
+  const MAX_SOURCE_CYCLES = 8;
   useEffect(() => {
     if (!error) { consecutiveErrorsRef.current = 0; setIsAutoCycling(false); return; }
-    if (sources.length <= 1) { setIsAutoCycling(false); onError?.(); return; }
+    if (!aliveRef.current) return;
+    if (playableSources.length <= 1) {
+      setIsAutoCycling(false);
+      if (!terminalErrorRef.current) {
+        terminalErrorRef.current = true;
+        onError?.();
+      }
+      return;
+    }
     consecutiveErrorsRef.current += 1;
-    /* لا تدور في حلقة — فقط جرّب المصادر التالية (بدون wrap-around) */
+    /* لا تدور في حلقة — جرّب المصادر التالية بحد أقصى MAX_SOURCE_CYCLES */
     const nextIdx = srcIdx + 1;
-    if (nextIdx >= sources.length || consecutiveErrorsRef.current > sources.length) {
-      setIsAutoCycling(false); // كل المصادر جُرِّبت، أوقف الدوران
-      onError?.();
+    if (nextIdx >= playableSources.length || consecutiveErrorsRef.current >= MAX_SOURCE_CYCLES) {
+      setIsAutoCycling(false); // كل المصادر جُرِّبت أو وصلنا للحد الأقصى
+      if (!terminalErrorRef.current) {
+        terminalErrorRef.current = true;
+        onError?.();
+      }
       return;
     }
     setIsAutoCycling(true); // suppress full error UI — show silent loading instead
     const t = setTimeout(() => switchSource(nextIdx), 600);
     return () => clearTimeout(t);
-  }, [error, srcIdx, sources.length, onError]); // eslint-disable-line
+  }, [error, srcIdx, playableSources.length, onError]); // eslint-disable-line
 
   /* ─── تبديل المصدر عندما يُغيِّر الـ parent قيمة initialSourceIndex (المستخدم اختار مصدراً مختلفاً) ─── */
   const prevInitSourceIdxRef = useRef(initialSourceIndex ?? 0);
@@ -807,7 +961,7 @@ export function RiftPlayer({
           if (cached && !cancelled) {
             const cues: SubCue[] = JSON.parse(cached);
             if (cues.length > 0) {
-              urlCueCacheRef.current.set(url, cues); // populate URL cache
+              setCueCacheEntry(url, cues); // populate URL cache (size-limited)
               setLoadedCues(cues);
               setSubOn(true);
               return;
@@ -836,7 +990,7 @@ export function RiftPlayer({
           if (cancelled) return;
           setSubLoading(false);
           if (allCues.length > 0) {
-            urlCueCacheRef.current.set(url, allCues);
+            setCueCacheEntry(url, allCues);
             if (cacheKey && isTranslated) {
               AsyncStorage.setItem(cacheKey, JSON.stringify(allCues)).catch(() => {});
               /* نظّف مفاتيح الترجمة القديمة (sub-ar-*) — ابقَ على آخر 10 فقط */
@@ -864,7 +1018,7 @@ export function RiftPlayer({
           const text = await r.text();
           if (cancelled) return;
           const cues = parseVTT(text);
-          if (cues.length > 0) urlCueCacheRef.current.set(url, cues);
+          if (cues.length > 0) setCueCacheEntry(url, cues);
           setLoadedCues(cues);
           if (cues.length > 0) setSubOn(true);
         }).catch(() => {
@@ -918,7 +1072,14 @@ export function RiftPlayer({
     if (Platform.OS === "web") return; // web browsers block video frame capture
     try {
       const VS = await import("react-native-view-shot" as any);
-      const uri: string = await VS.captureRef(rootViewRef, { format: "jpg", quality: 0.9 });
+      /* VideoView قد يُرسم كسطح native لا يستطيع captureRef قراءته على بعض
+         إصدارات Android؛ نجرّب لقطة المشغل أولاً ثم لقطة الشاشة كاحتياطي. */
+      let uri: string;
+      try {
+        uri = await VS.captureRef(rootViewRef, { format: "jpg", quality: 0.95, result: "tmpfile" });
+      } catch {
+        uri = await VS.captureScreen({ format: "jpg", quality: 0.95, result: "tmpfile" });
+      }
       const ML = await import("expo-media-library" as any);
       const perm = await ML.requestPermissionsAsync({ writeOnly: true });
       if (perm.status === "granted") await ML.saveToLibraryAsync(uri);
@@ -947,12 +1108,12 @@ export function RiftPlayer({
     return () => sub.remove();
   }, []);
 
-  /* ─── Mute sync + initial 200% volume ─── */
+  /* ─── Mute sync + initial maximum real volume ─── */
   useEffect(() => {
     try {
       if (isMuted) { prevVolRef.current = volumeRef.current; player.volume = 0; }
       else {
-        /* حجم الجهاز دائماً 1 (أقصى حد للهاردوير) — الـ 200% هي مؤشر UI فقط */
+        /* expo-video يقبل 1 كأقصى مستوى حقيقي للصوت */
         player.volume = 1;
       }
     } catch {}
@@ -961,7 +1122,7 @@ export function RiftPlayer({
   /* ─── AniSkip: جلب أوقات المقدمة/النهاية إذا لم تُوفَّر بالمصدر ─── */
   useEffect(() => {
     if (skipIntroProp || skipOutroProp || !anilistId || !episode) return;
-    let cancelled = false;
+    const ctrl = new AbortController();
     (async () => {
       try {
         // 1. Get MAL ID from AniList
@@ -969,14 +1130,18 @@ export function RiftPlayer({
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ query: "query($id:Int){Media(id:$id){idMal}}", variables: { id: anilistId } }),
+          signal: ctrl.signal,
         });
         const alData = await alRes.json();
         const malId: number | null = alData?.data?.Media?.idMal;
-        if (!malId || cancelled) return;
+        if (!malId || ctrl.signal.aborted) return;
         // 2. Fetch skip times from AniSkip
-        const skipRes = await fetch(`https://api.aniskip.com/v1/skip-times/${malId}/${episode}?types[]=op&types[]=ed`);
+        const skipRes = await fetch(
+          `https://api.aniskip.com/v1/skip-times/${malId}/${episode}?types[]=op&types[]=ed`,
+          { signal: ctrl.signal },
+        );
         const skipData = await skipRes.json();
-        if (cancelled || !skipData?.found) return;
+        if (ctrl.signal.aborted || !skipData?.found) return;
         for (const r of (skipData.results ?? [])) {
           const s = { start: r.interval.start_time, end: r.interval.end_time };
           if (r.skip_type === "op")  setFetchedSkipIntro(s);
@@ -984,14 +1149,14 @@ export function RiftPlayer({
         }
       } catch {}
     })();
-    return () => { cancelled = true; };
+    return () => ctrl.abort();
   }, [anilistId, episode]);
 
   /* ─── Auto-fetch subtitles via subtitle-tracks API (wyzie.ru + SubDL + HiAnime) ─── */
   useEffect(() => {
     if (!anilistId || !episode) return;
     if (subCues?.length) return; // already provided as prop
-    let cancelled = false;
+    const ctrl = new AbortController(); // يُلغى عند unmount أو تغيير الحلقة
     setAutoSubSource(null);
     (async () => {
       try {
@@ -1003,12 +1168,12 @@ export function RiftPlayer({
         });
         const res = await fetch(
           `${base}/api/anime/subtitle-tracks?${params}`,
-          { signal: AbortSignal.timeout(20_000) }
+          { signal: ctrl.signal },
         );
-        if (!res.ok || cancelled) return;
+        if (!res.ok || ctrl.signal.aborted) return;
         const data = await res.json();
         const tracks: any[] = data.tracks || [];
-        if (cancelled || tracks.length === 0) return;
+        if (ctrl.signal.aborted || tracks.length === 0) return;
 
         /* Store raw English URL for language switching */
         const enTrack = tracks.find((t: any) => t.lang === "en");
@@ -1036,9 +1201,9 @@ export function RiftPlayer({
         /* ── fetch + parse: translate-vtt → JSON, others → VTT text ── */
         const vttRes = await fetch(trackUrl, {
           headers: { Accept: "application/json,text/vtt,text/plain,*/*" },
-          signal: AbortSignal.timeout(30_000),
+          signal: ctrl.signal,
         });
-        if (!vttRes.ok || cancelled) return;
+        if (!vttRes.ok || ctrl.signal.aborted) return;
 
         let cues: SubCue[] = [];
         if (trackUrl.includes("translate-vtt")) {
@@ -1051,19 +1216,19 @@ export function RiftPlayer({
             .filter((c: SubCue) => c.start < c.end && c.text.length > 0);
         } else {
           const text = await vttRes.text();
-          if (cancelled) return;
+          if (ctrl.signal.aborted) return;
           cues = parseVTT(text);
         }
 
-        if (cues.length > 0 && !cancelled) {
+        if (cues.length > 0 && !ctrl.signal.aborted) {
           setLoadedCues(cues);
           setSubOn(true);
           setAutoSubSource(track.lang === "ar" ? "wyzie-ar" : "wyzie-en-translated");
         }
       } catch {}
-      finally { if (!cancelled) setSubLoading(false); }
+      finally { if (!ctrl.signal.aborted) setSubLoading(false); }
     })();
-    return () => { cancelled = true; setSubLoading(false); };
+    return () => { ctrl.abort(); setSubLoading(false); };
   }, [anilistId, episode, subLang]); // eslint-disable-line
 
   /* ─── Subtitle panel slide animation ─── */
@@ -1160,17 +1325,23 @@ export function RiftPlayer({
   }, [player, fadeIn]);
 
   const switchSource = useCallback((idx: number) => {
+    if (!aliveRef.current) return;
+    const safeIdx = Math.min(Math.max(idx, 0), Math.max(playableSources.length - 1, 0));
+    const newSrc = playableSources[safeIdx];
+    if (!newSrc) {
+      setError(true);
+      setBuffering(false);
+      return;
+    }
     /* ألغِ timeout التحميل القديم عند التبديل */
     if (loadTimeoutRef.current) { clearTimeout(loadTimeoutRef.current); loadTimeoutRef.current = null; }
     /* ── Save current position before replacing source ── */
     const savedPos = player.currentTime || 0;
     if (savedPos > 5) switchPosRef.current = savedPos;
-    const newSrc = sources[idx];
-    console.log(`[Nova Mobile] تبديل المصدر → ${newSrc?.label || "مجهول"} (${idx + 1}/${sources.length}): ${newSrc?.url?.slice(0, 120)}`);
-    setSrcIdx(idx);
-    setError(false);
+    console.log(`[Nova Mobile] تبديل المصدر → ${newSrc.label || "مجهول"} (${safeIdx + 1}/${playableSources.length}): ${newSrc.url?.slice(0, 120)}`);
+    setSrcIdx(safeIdx);
+    terminalErrorRef.current = false;
     setIsAutoCycling(false);
-    setBuffering(true);
     setIsEnded(false);
     resumedRef.current = false;
     /* إعادة ضبط كاشف الـ stall عند كل تبديل مصدر */
@@ -1180,12 +1351,29 @@ export function RiftPlayer({
     /* Reset whisper status when source changes */
     setWhisperStatus("idle");
     setWhisperLang("");
+
+    /* ⚠️ التحقق من صلاحية الـ URL قبل تمريره لـ ExoPlayer/AVPlayer —
+       URL فارغ أو بدون بروتوكول يُسبِّب native crash بدل statusChange→error */
+    const srcUrl = newSrc?.url;
+    if (!isValidPlayerSourceUrl(srcUrl)) {
+      console.warn(`[RiftPlayer] ⛔ URL غير صالح للمصدر ${safeIdx + 1}: "${srcUrl?.slice(0, 60) ?? "فارغ"}"`);
+      setError(true);
+      setBuffering(false);
+      return;
+    }
+
+    setError(false);
+    setBuffering(true);
     try {
       /* نمرّر URL string فقط — VPS proxy يُضيف Referer/Origin داخلياً */
-      player.replace(newSrc.url as any);
+      player.replace(srcUrl as any);
       /* play() is triggered in statusChange → readyToPlay once the stream is buffered */
-    } catch {}
-  }, [player, sources]);
+    } catch (e) {
+      console.warn("[RiftPlayer] player.replace() رمى استثناء:", e);
+      setError(true);
+      setBuffering(false);
+    }
+  }, [player, playableSources]);
 
   /* ─── Whisper audio transcription ─── */
   const triggerWhisper = useCallback(async () => {
@@ -1269,16 +1457,21 @@ export function RiftPlayer({
           setFeedback({ type: "seek", value: newPos, delta: seekDelta });
         } else if (gestureTypeRef.current === "vol") {
           const delta = -(gs.moveY - gestureStartY.current) / (H * 0.55);
-          const newVol = Math.max(0, Math.min(2, gestureStartVal.current + delta)); // 200% max
+          const newVol = Math.max(0, Math.min(1, gestureStartVal.current + delta));
           volumeRef.current = newVol;
           setVolume(newVol);
           setFeedback({ type: "volume", value: newVol });
+          /* ضبط صوت الوسائط الحقيقي في النظام (يُظهر HUD أزرار الصوت) */
+          VolumeManager.setVolume(newVol, { showUI: true }).catch(() => {});
         } else {
           const delta = -(gs.moveY - gestureStartY.current) / (H * 0.55);
-          const newBri = Math.max(0, Math.min(0.75, gestureStartVal.current - delta));
+          /* السحب للأعلى يرفع السطوع الحقيقي للشاشة (0.05..1) */
+          const newBri = Math.max(0.05, Math.min(1, gestureStartVal.current + delta));
           brightnessRef.current = newBri;
           setBrightness(newBri);
           setFeedback({ type: "brightness", value: newBri });
+          /* ضبط سطوع الشاشة الحقيقي عبر expo-brightness */
+          Brightness.setBrightnessAsync(newBri).catch(() => {});
         }
       },
       onPanResponderRelease: (_, gs) => {
@@ -1382,20 +1575,29 @@ export function RiftPlayer({
   ).current;
 
   /* ─── Skip intro/outro logic ─── */
-  const SKIP_LEAD = 8;
-  const inIntroRange = !!skipIntro && position >= Math.max(0, skipIntro.start - SKIP_LEAD) && position < skipIntro.end;
-  const inOutroRange = !!skipOutro && position >= Math.max(0, skipOutro.start - SKIP_LEAD) && position <= skipOutro.end;
+  /* يظهر الزر دائماً طالما الحلقة لم تتجاوز المقدمة، ويختفي فقط عند ضغط المستخدم عليه */
+  const inIntroRange = !!skipIntro && !skipIntroDismissed && position < skipIntro.end;
+  // النهاية لا تظهر أثناء المقدمة — زر واحد في كل مرة
+  const inOutroRange = !!skipOutro && !skipOutroDismissed && !inIntroRange && position < skipOutro.end;
+
+  /* إعادة تعيين الإخفاء عند تغيير المصدر — كل حلقة/مصدر جديد يُعيد الزر للظهور */
+  useEffect(() => {
+    setSkipIntroDismissed(false);
+    setSkipOutroDismissed(false);
+  }, [srcIdx]);
 
   const doSkipIntro = useCallback(() => {
     if (skipIntro) seek(skipIntro.end);
+    setSkipIntroDismissed(true); // يختفي بعد ضغط المستخدم
     fadeIn();
   }, [skipIntro, seek, fadeIn]);
 
   const doSkipOutro = useCallback(() => {
-    if (onNextEpisode) { onNextEpisode(); return; }
+    // تخطي النهاية = القفز لنهاية نطاق الـ outro فقط (لا الانتقال للحلقة التالية)
     if (skipOutro) seek(skipOutro.end);
+    setSkipOutroDismissed(true);
     fadeIn();
-  }, [skipOutro, onNextEpisode, seek, fadeIn]);
+  }, [skipOutro, seek, fadeIn]);
 
   /* ─── Tap handler with double-tap detection ─── */
   const handleTap = useCallback((pageX: number) => {
@@ -1447,10 +1649,12 @@ export function RiftPlayer({
     ? Math.min(Math.max(position / duration, 0), 1)
     : 0;
 
-  /* ─── Volume sync to player (clamp 0-1 for hardware, allow 0-2 for UI boost) ─── */
+  /* ─── Volume sync: player يعمل دائماً بـ 100% — النظام يتحكم بالصوت الفعلي ─── */
   useEffect(() => {
     volumeRef.current = volume;
-    try { player.volume = Math.min(1, volume); } catch {}
+    /* player.volume=1 دائماً: VolumeManager.setVolume يضبط صوت الوسائط في النظام
+       فلا نحتاج ضرب المشغّل بعامل إضافي */
+    try { player.volume = 1; } catch {}
   }, [volume, player]);
 
   const markerPctIntro = duration > 0 && skipIntro && position < skipIntro.end
@@ -1481,13 +1685,7 @@ export function RiftPlayer({
         contentFit={contentFit}
       />
 
-      {/* ── Brightness overlay ── */}
-      {brightness > 0 && (
-        <View
-          pointerEvents="none"
-          style={[StyleSheet.absoluteFill, { backgroundColor: "#000", opacity: brightness, zIndex: 2 }]}
-        />
-      )}
+      {/* ── Brightness: يُضبط عبر expo-brightness (سطوع الشاشة الحقيقي) — لا حاجة لـ overlay ── */}
 
       {/* ── Screenshot flash ── */}
       <ScreenshotFlash visible={screenshotFlash} />
@@ -1594,38 +1792,37 @@ export function RiftPlayer({
         </Animated.View>
       )}
 
-      {/* ── Volume feedback (يدعم 0-200% Volume Boost مثل مشغل الويب) ── */}
+      {/* ── Volume feedback ── */}
       {feedback?.type === "volume" && (
         <View style={s.feedbackRight} pointerEvents="none">
-          <View style={[s.feedbackBarWrap, feedback.value > 1 && { borderColor: "rgba(139,92,246,0.35)", borderWidth: 1 }]}>
+          <View style={s.feedbackBarWrap}>
             <View style={[
               s.feedbackBarFill,
-              { height: `${Math.min(Math.round(feedback.value * 50), 100)}%` as any },
-              feedback.value > 1 && { backgroundColor: "rgba(167,139,250,0.90)" },
+              { height: `${Math.min(Math.round(feedback.value * 100), 100)}%` as any },
             ]} />
           </View>
-          <View style={[s.feedbackPill, feedback.value > 1 && { borderColor: "rgba(139,92,246,0.50)", backgroundColor: "rgba(15,10,30,0.85)" }]}>
+          <View style={s.feedbackPill}>
             <Ionicons
-              name={feedback.value === 0 ? "volume-mute" : feedback.value > 1 ? "volume-high" : "volume-medium"}
+              name={feedback.value === 0 ? "volume-mute" : feedback.value >= 0.6 ? "volume-high" : "volume-medium"}
               size={12}
-              color={feedback.value > 1 ? "#c4b5fd" : "rgba(255,255,255,0.75)"}
+              color="rgba(255,255,255,0.75)"
             />
-            <Text style={[s.feedbackPillText, feedback.value > 1 && { color: "#c4b5fd" }]}>
-              {Math.round(feedback.value * 100)}%{feedback.value > 1 ? " 🔊" : ""}
+            <Text style={s.feedbackPillText}>
+              {Math.round(feedback.value * 100)}%
             </Text>
           </View>
         </View>
       )}
 
-      {/* ── Brightness feedback ── */}
+      {/* ── Brightness feedback — النسبة تعكس سطوع الشاشة الحقيقي 0..100% ── */}
       {feedback?.type === "brightness" && (
         <View style={s.feedbackLeft} pointerEvents="none">
           <View style={s.feedbackBarWrap}>
-            <View style={[s.feedbackBarFillY, { height: `${Math.round((1 - feedback.value / 0.75) * 100)}%` as any }]} />
+            <View style={[s.feedbackBarFillY, { height: `${Math.round((1 - feedback.value) * 100)}%` as any }]} />
           </View>
           <View style={s.feedbackPill}>
             <Ionicons name="sunny" size={12} color="rgba(253,224,71,0.85)" />
-            <Text style={s.feedbackPillText}>{Math.round((1 - feedback.value / 0.75) * 100)}%</Text>
+            <Text style={s.feedbackPillText}>{Math.round(feedback.value * 100)}%</Text>
           </View>
         </View>
       )}
@@ -1861,10 +2058,10 @@ export function RiftPlayer({
             {isPortrait ? (
               /* وضع عمودي: أزرار التخطي + التشغيل */
               <View style={s.centerPortraitRow}>
-                {/* زر التخطي للخلف — "10" تحت الدائرة لمحاذاة دقيقة مع زر التشغيل */}
+                {/* زر التخطي للأمام — الأول في JSX → يظهر على اليمين في RTL */}
                 <View style={{ alignItems: "center", gap: 4 }}>
-                  <Pressable onPress={() => seek(positionRef.current - 10)} style={s.centerSeekBtn} hitSlop={14}>
-                    <Ionicons name="play-back" size={24} color="#fff" />
+                  <Pressable onPress={() => seek(positionRef.current + 10)} style={s.centerSeekBtn} hitSlop={14}>
+                    <Ionicons name="play-forward" size={24} color="#fff" />
                   </Pressable>
                   <Text style={s.centerSeekLabel}>10</Text>
                 </View>
@@ -1881,10 +2078,10 @@ export function RiftPlayer({
                         />}
                   </Pressable>
                 </View>
-                {/* زر التخطي للأمام */}
+                {/* زر الرجوع — الأخير في JSX → يظهر على اليسار في RTL */}
                 <View style={{ alignItems: "center", gap: 4 }}>
-                  <Pressable onPress={() => seek(positionRef.current + 10)} style={s.centerSeekBtn} hitSlop={14}>
-                    <Ionicons name="play-forward" size={24} color="#fff" />
+                  <Pressable onPress={() => seek(positionRef.current - 10)} style={s.centerSeekBtn} hitSlop={14}>
+                    <Ionicons name="play-back" size={24} color="#fff" />
                   </Pressable>
                   <Text style={s.centerSeekLabel}>10</Text>
                 </View>
@@ -1955,6 +2152,9 @@ export function RiftPlayer({
                   ]}
                   onLayout={(e) => {
                     barWidth.current = e.nativeEvent.layout.width || 1;
+                    // مسح أي seek مؤقت عند تغيير الاتجاه (portrait↔landscape) لتجنب الإحداثيات القديمة
+                    setPostSeekPct(null);
+                    setIsDragging(false);
                     barRef.current?.measureInWindow((px) => { if (px >= 0) barPageX.current = px; });
                   }}
                   {...seekBarPan.panHandlers}
@@ -2035,8 +2235,8 @@ export function RiftPlayer({
               <View style={s.bottomCenter}>
                 {!isPortrait && (
                   <View style={{ alignItems: "center", gap: 2 }}>
-                    <Pressable onPress={() => seek(positionRef.current - 10)} style={s.seekCtrlBtn} hitSlop={10}>
-                      <Ionicons name="play-back" size={17} color="rgba(255,255,255,0.90)" />
+                    <Pressable onPress={() => seek(positionRef.current + 10)} style={s.seekCtrlBtn} hitSlop={10}>
+                      <Ionicons name="play-forward" size={17} color="rgba(255,255,255,0.90)" />
                     </Pressable>
                     <Text style={s.seekCtrlLabel}>10</Text>
                   </View>
@@ -2046,8 +2246,8 @@ export function RiftPlayer({
                 </Pressable>
                 {!isPortrait && (
                   <View style={{ alignItems: "center", gap: 2 }}>
-                    <Pressable onPress={() => seek(positionRef.current + 10)} style={s.seekCtrlBtn} hitSlop={10}>
-                      <Ionicons name="play-forward" size={17} color="rgba(255,255,255,0.90)" />
+                    <Pressable onPress={() => seek(positionRef.current - 10)} style={s.seekCtrlBtn} hitSlop={10}>
+                      <Ionicons name="play-back" size={17} color="rgba(255,255,255,0.90)" />
                     </Pressable>
                     <Text style={s.seekCtrlLabel}>10</Text>
                   </View>

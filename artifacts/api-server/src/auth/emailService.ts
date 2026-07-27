@@ -1,13 +1,34 @@
 /**
- * emailService.ts — إرسال بريد إلكتروني عبر nodemailer
- * يقرأ SMTP من متغيرات البيئة أو Supabase app_config
+ * emailService.ts — إرسال بريد إلكتروني
+ *
+ * ترتيب الأولوية:
+ *   1. Gmail REST API (HTTPS/443) — لا يتأثر بحجب منافذ SMTP — Google فقط
+ *   2. SMTP (nodemailer + Gmail) — fallback إذا انفتحت المنافذ مستقبلاً
+ *
+ * متغيرات البيئة للـ Gmail REST API:
+ *   GMAIL_CLIENT_ID      — OAuth2 Client ID من Google Cloud Console
+ *   GMAIL_CLIENT_SECRET  — OAuth2 Client Secret
+ *   GMAIL_REFRESH_TOKEN  — Refresh Token (نُولَّد مرة واحدة عبر OAuth consent)
+ *   GMAIL_USER           — عنوان Gmail للإرسال منه (مثال: lya482569@gmail.com)
+ *
+ * متغيرات SMTP (fallback):
+ *   SMTP_USER / SMTP_PASS / SMTP_HOST / SMTP_PORT
  */
 import nodemailer, { type Transporter } from "nodemailer";
+import { promises as dnsPromises } from "dns";
 import { sbSelect, sbUpsert } from "../lib/supabaseClient.js";
 
+/** يحوّل اسم المضيف إلى IPv4 صريح لتجنب ENETUNREACH على IPv6 */
+async function resolveIPv4(hostname: string): Promise<string> {
+  try {
+    const addrs = await dnsPromises.resolve4(hostname);
+    return addrs[0] ?? hostname;
+  } catch {
+    return hostname;
+  }
+}
+
 let transporter: Transporter | null = null;
-let testAccount: { user: string; pass: string } | null = null;
-let isEthereal = false;
 
 async function getConfig(key: string): Promise<string | null> {
   try {
@@ -24,10 +45,130 @@ export function resetTransporter() {
   transporter = null;
 }
 
+// ─── Gmail REST API (primary) ──────────────────────────────────────────────
+// يستخدم HTTPS/443 — لا يتأثر بحجب منافذ SMTP من الاستضافة
+// يحتاج: GMAIL_CLIENT_ID + GMAIL_CLIENT_SECRET + GMAIL_REFRESH_TOKEN + GMAIL_USER
+// للحصول على الـ credentials: https://console.cloud.google.com/ → Create OAuth2 client → get refresh token
+
+let _gmailAccessToken: string | null = null;
+let _gmailTokenExpiry = 0;
+
+async function getGmailCreds(): Promise<{
+  clientId: string; clientSecret: string; refreshToken: string; gmailUser: string;
+} | null> {
+  const clientId     = process.env.GMAIL_CLIENT_ID     || await getConfig("gmail_client_id");
+  const clientSecret = process.env.GMAIL_CLIENT_SECRET || await getConfig("gmail_client_secret");
+  const refreshToken = process.env.GMAIL_REFRESH_TOKEN || await getConfig("gmail_refresh_token");
+  const gmailUser    = process.env.GMAIL_USER           || await getConfig("gmail_user")
+                       || process.env.SMTP_USER          || null;
+  if (!clientId || !clientSecret || !refreshToken || !gmailUser) return null;
+  return { clientId, clientSecret, refreshToken, gmailUser };
+}
+
+/** جلب/تجديد access_token من Gmail OAuth2 */
+async function getGmailAccessToken(creds: {
+  clientId: string; clientSecret: string; refreshToken: string;
+}): Promise<string> {
+  // إذا الـ token لا يزال صالحاً (مع هامش 60ث)
+  if (_gmailAccessToken && Date.now() < _gmailTokenExpiry - 60_000) {
+    return _gmailAccessToken;
+  }
+
+  const res = await fetch("https://oauth2.googleapis.com/token", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      client_id:     creds.clientId,
+      client_secret: creds.clientSecret,
+      refresh_token: creds.refreshToken,
+      grant_type:    "refresh_token",
+    }),
+    signal: AbortSignal.timeout(10_000),
+  });
+
+  if (!res.ok) {
+    const err = await res.text().catch(() => "");
+    throw new Error(`Gmail OAuth2 token refresh فشل: ${res.status} — ${err.slice(0, 200)}`);
+  }
+
+  const json = await res.json() as any;
+  _gmailAccessToken = json.access_token as string;
+  // expires_in عادةً 3600 ثانية
+  _gmailTokenExpiry = Date.now() + ((json.expires_in ?? 3600) * 1000);
+  return _gmailAccessToken!;
+}
+
+/** بناء رسالة RFC 2822 وترميزها base64url */
+function buildRfc2822(from: string, to: string, subject: string, html: string, text: string): string {
+  const boundary = `=_nova_${Math.random().toString(36).slice(2)}_${Date.now()}`;
+  const subjectEncoded = `=?UTF-8?B?${Buffer.from(subject).toString("base64")}?=`;
+
+  const raw = [
+    `From: "Anime NOVA" <${from}>`,
+    `To: ${to}`,
+    `Subject: ${subjectEncoded}`,
+    `MIME-Version: 1.0`,
+    `Content-Type: multipart/alternative; boundary="${boundary}"`,
+    ``,
+    `--${boundary}`,
+    `Content-Type: text/plain; charset=UTF-8`,
+    `Content-Transfer-Encoding: base64`,
+    ``,
+    Buffer.from(text, "utf-8").toString("base64"),
+    ``,
+    `--${boundary}`,
+    `Content-Type: text/html; charset=UTF-8`,
+    `Content-Transfer-Encoding: base64`,
+    ``,
+    Buffer.from(html, "utf-8").toString("base64"),
+    ``,
+    `--${boundary}--`,
+  ].join("\r\n");
+
+  return Buffer.from(raw, "utf-8").toString("base64url");
+}
+
+/** إرسال بريد عبر Gmail REST API (HTTPS/443) */
+async function sendViaGmailApi(
+  to: string, subject: string, html: string, text: string,
+): Promise<void> {
+  const creds = await getGmailCreds();
+  if (!creds) throw new Error("GMAIL_API_NOT_CONFIGURED");
+
+  const accessToken = await getGmailAccessToken(creds);
+  const rawEncoded  = buildRfc2822(creds.gmailUser, to, subject, html, text);
+
+  const res = await fetch(
+    "https://gmail.googleapis.com/gmail/v1/users/me/messages/send",
+    {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${accessToken}`,
+        "Content-Type":  "application/json",
+      },
+      body: JSON.stringify({ raw: rawEncoded }),
+      signal: AbortSignal.timeout(20_000),
+    },
+  );
+
+  if (!res.ok) {
+    const err = await res.text().catch(() => "");
+    // إذا انتهت صلاحية الـ token أعد المحاولة مرة واحدة
+    if (res.status === 401) {
+      _gmailAccessToken = null;
+      _gmailTokenExpiry = 0;
+    }
+    throw new Error(`Gmail API HTTP ${res.status}: ${err.slice(0, 200)}`);
+  }
+
+  console.log(`[email] ✅ Gmail API → ${to}`);
+}
+
+// ── SMTP fallback (nodemailer) ─────────────────────────────────────────────
+
 async function getTransporter(): Promise<Transporter> {
   if (transporter) return transporter;
 
-  // اقرأ DB دائماً — إذا وُجد smtp_pass في DB فهو يأخذ الأولوية (يسمح بتحديث SMTP بدون إعادة نشر)
   const [dbUser, dbPass, dbHost, dbPort] = await Promise.all([
     getConfig("smtp_user"),
     getConfig("smtp_pass"),
@@ -35,49 +176,51 @@ async function getTransporter(): Promise<Transporter> {
     getConfig("smtp_port"),
   ]);
 
-  // DB له الأولوية، ENV كـ fallback
-  let user = dbUser || process.env.SMTP_USER || process.env.EMAIL_USER;
-  let pass = dbPass || process.env.SMTP_PASS;
-  let host = dbHost || process.env.SMTP_HOST;
-  let port = dbPort ? Number(dbPort) : (process.env.SMTP_PORT ? Number(process.env.SMTP_PORT) : undefined);
+  const user = dbUser || process.env.SMTP_USER || process.env.EMAIL_USER;
+  const pass = dbPass || process.env.SMTP_PASS;
+  const host = dbHost || process.env.SMTP_HOST;
+  const port = dbPort ? Number(dbPort) : (process.env.SMTP_PORT ? Number(process.env.SMTP_PORT) : undefined);
 
   if (user && pass) {
-    const smtpHost = host || "smtp.gmail.com";
-    const smtpPort = port || 587;
+    const smtpHostname = host || "smtp.gmail.com";
+    const smtpPort     = port || 587;
+    const smtpHost     = await resolveIPv4(smtpHostname);
     transporter = nodemailer.createTransport({
-      host: smtpHost,
-      port: smtpPort,
-      secure: smtpPort === 465,
-      auth: { user, pass },
-      tls: { rejectUnauthorized: false },
+      host:              smtpHost,
+      port:              smtpPort,
+      secure:            smtpPort === 465,
+      auth:              { user, pass },
+      tls:               { rejectUnauthorized: false, servername: smtpHostname },
+      connectionTimeout: 12000,
+      greetingTimeout:   12000,
+      socketTimeout:     20000,
     });
-    isEthereal = false;
-    console.log(`[email] ✅ SMTP جاهز → ${smtpHost}:${smtpPort} (${user})`);
-  } else {
-    testAccount = await nodemailer.createTestAccount();
-    transporter = nodemailer.createTransport({
-      host: "smtp.ethereal.email",
-      port: 587,
-      auth: { user: testAccount.user, pass: testAccount.pass },
-    });
-    isEthereal = true;
-    console.error("[email] ❌ SMTP_PASS غير موجود في البيئة أو قاعدة البيانات");
-    console.warn(`[email] Ethereal fallback: ${testAccount.user}`);
+    console.log(`[email] SMTP جاهز → ${smtpHostname}(${smtpHost}):${smtpPort} (${user})`);
+    return transporter;
   }
 
-  return transporter;
+  throw new Error("SMTP_NOT_CONFIGURED");
 }
 
 export async function initEmailService(): Promise<void> {
+  const creds = await getGmailCreds();
+  if (creds) {
+    console.log(`[email] ✅ Gmail REST API مُفعَّل → ${creds.gmailUser} (HTTPS/443)`);
+    return;
+  }
+  // لا يوجد Gmail API — جرّب SMTP
   try {
     const t = await getTransporter();
-    if (!isEthereal) {
-      await t.verify();
-      console.log("[email] ✅ اتصال SMTP تم التحقق منه بنجاح");
-    }
+    await t.verify();
+    console.log("[email] ✅ SMTP متصل");
   } catch (err: any) {
-    transporter = null;
-    console.error("[email] ❌ فشل التحقق من SMTP:", err.message);
+    if (err.message === "SMTP_NOT_CONFIGURED") {
+      console.error("[email] ❌ لا يوجد Gmail API ولا SMTP — البريد معطّل");
+      console.warn("[email] ⚠️  لتفعيل Gmail REST API أضف: GMAIL_CLIENT_ID + GMAIL_CLIENT_SECRET + GMAIL_REFRESH_TOKEN + GMAIL_USER");
+    } else {
+      console.error("[email] ❌ SMTP verify فشل:", err.message);
+      console.warn("[email] ⚠️  المنافذ 587/465 محجوبة — أضف Gmail API credentials لإصلاح دائم");
+    }
   }
 }
 
@@ -88,51 +231,58 @@ export interface SendResult {
   error?: string;
 }
 
-export async function sendVerifyEmail(to: string, code: string): Promise<SendResult> {
+/** إرسال بريد: Gmail REST API أولاً، ثم SMTP كـ fallback */
+async function sendEmail(
+  to: string,
+  subject: string,
+  html: string,
+  text: string,
+): Promise<SendResult> {
+  // 1. Gmail REST API (HTTPS/443 — لا يُحجب)
+  try {
+    await sendViaGmailApi(to, subject, html, text);
+    return { ok: true };
+  } catch (err: any) {
+    if (err.message !== "GMAIL_API_NOT_CONFIGURED") {
+      console.error("[email] Gmail API فشل:", err.message);
+      return { ok: false, error: `Gmail API: ${err.message}` };
+    }
+    // لا يوجد Gmail API credentials → جرّب SMTP
+  }
+
+  // 2. SMTP fallback (Gmail App Password — يعمل إذا لم تكن المنافذ محجوبة)
   try {
     const t = await getTransporter();
-    const from = process.env.SMTP_FROM
-      ? `"Anime NOVA" <${process.env.SMTP_FROM}>`
-      : isEthereal
-      ? `"Anime NOVA" <${testAccount?.user}>`
-      : `"Anime NOVA" <${process.env.SMTP_USER || await getConfig("smtp_user")}>`;
-
-    const info = await t.sendMail({
-      from, to,
-      subject: `كود التحقق: ${code} — Anime NOVA`,
-      html: verifyHtml(code),
-      text: `كود تفعيل حسابك في Anime NOVA هو: ${code}\nصالح لمدة 10 دقائق فقط.`,
-    });
-    const previewUrl = isEthereal ? nodemailer.getTestMessageUrl(info) || undefined : undefined;
-    if (previewUrl) console.log("[email] Ethereal preview:", previewUrl);
-    return { ok: true, messageId: info.messageId, previewUrl };
+    const smtpUser = process.env.SMTP_USER || await getConfig("smtp_user") || "";
+    const fromAddr = `"Anime NOVA" <${smtpUser}>`;
+    const info     = await t.sendMail({ from: fromAddr, to, subject, html, text });
+    console.log(`[email] ✅ SMTP → ${to}`);
+    return { ok: true, messageId: info.messageId };
   } catch (err: any) {
-    console.error("[email] فشل إرسال كود التحقق:", err.message);
-    return { ok: false, error: err.message };
+    const msg = err.message === "SMTP_NOT_CONFIGURED"
+      ? "البريد غير مفعّل — أضف Gmail API credentials (GMAIL_CLIENT_ID + GMAIL_CLIENT_SECRET + GMAIL_REFRESH_TOKEN + GMAIL_USER)"
+      : err.message;
+    console.error("[email] SMTP فشل:", msg);
+    return { ok: false, error: msg };
   }
 }
 
-export async function sendPasswordResetEmail(to: string, code: string): Promise<SendResult> {
-  try {
-    const t = await getTransporter();
-    const from = process.env.SMTP_FROM
-      ? `"Anime NOVA" <${process.env.SMTP_FROM}>`
-      : isEthereal
-      ? `"Anime NOVA" <${testAccount?.user}>`
-      : `"Anime NOVA" <${process.env.SMTP_USER || await getConfig("smtp_user")}>`;
+export async function sendVerifyEmail(to: string, code: string): Promise<SendResult> {
+  return sendEmail(
+    to,
+    `كود التحقق: ${code} — Anime NOVA`,
+    verifyHtml(code),
+    `كود تفعيل حسابك في Anime NOVA هو: ${code}\nصالح لمدة 10 دقائق فقط.`,
+  );
+}
 
-    const info = await t.sendMail({
-      from, to,
-      subject: `إعادة تعيين كلمة المرور: ${code} — Anime NOVA`,
-      html: resetHtml(code),
-      text: `كود إعادة تعيين كلمة مرورك في Anime NOVA هو: ${code}\nصالح لمدة 10 دقائق فقط.`,
-    });
-    const previewUrl = isEthereal ? nodemailer.getTestMessageUrl(info) || undefined : undefined;
-    return { ok: true, messageId: info.messageId, previewUrl };
-  } catch (err: any) {
-    console.error("[email] فشل إرسال كود إعادة التعيين:", err.message);
-    return { ok: false, error: err.message };
-  }
+export async function sendPasswordResetEmail(to: string, code: string): Promise<SendResult> {
+  return sendEmail(
+    to,
+    `إعادة تعيين كلمة المرور: ${code} — Anime NOVA`,
+    resetHtml(code),
+    `كود إعادة تعيين كلمة مرورك في Anime NOVA هو: ${code}\nصالح لمدة 10 دقائق فقط.`,
+  );
 }
 
 function verifyHtml(code: string): string {
@@ -146,7 +296,6 @@ function verifyHtml(code: string): string {
 <table width="100%" cellpadding="0" cellspacing="0" style="background:#07070f;padding:32px 0;">
   <tr><td align="center">
     <table width="480" cellpadding="0" cellspacing="0" style="max-width:480px;width:100%;background:#0d0d1f;border-radius:20px;overflow:hidden;border:1px solid rgba(124,58,237,0.25);">
-      <!-- Header -->
       <tr>
         <td style="background:linear-gradient(135deg,#6d28d9 0%,#4f46e5 100%);padding:28px 32px;text-align:center;">
           <p style="margin:0 0 4px;font-size:11px;font-weight:700;color:rgba(255,255,255,0.55);letter-spacing:3px;font-family:Arial,sans-serif;">ANIME</p>
@@ -154,21 +303,18 @@ function verifyHtml(code: string): string {
           <p style="margin:10px 0 0;color:rgba(196,181,253,0.80);font-size:13px;font-family:Arial,sans-serif;">تحقق من بريدك الإلكتروني</p>
         </td>
       </tr>
-      <!-- Body -->
       <tr>
         <td style="padding:36px 32px;text-align:center;">
           <p style="color:#94a3b8;margin:0 0 28px;font-size:15px;line-height:1.7;font-family:Arial,sans-serif;">
             مرحباً! استخدم الكود أدناه لتفعيل حسابك.<br>
             الكود صالح لمدة <strong style="color:#a78bfa;">10 دقائق</strong> فقط.
           </p>
-          <!-- Digit boxes -->
           <table cellpadding="0" cellspacing="0" style="margin:0 auto 28px;">
             <tr>${digits}</tr>
           </table>
           <p style="color:#64748b;font-size:12px;margin:0;font-family:Arial,sans-serif;">إذا لم تطلب هذا الكود، تجاهل هذا البريد.</p>
         </td>
       </tr>
-      <!-- Footer -->
       <tr>
         <td style="padding:18px 32px;text-align:center;border-top:1px solid rgba(124,58,237,0.15);">
           <p style="color:#334155;font-size:11px;margin:0;font-family:Arial,sans-serif;">Anime NOVA · جميع الحقوق محفوظة 2026</p>
@@ -192,7 +338,6 @@ function resetHtml(code: string): string {
 <table width="100%" cellpadding="0" cellspacing="0" style="background:#07070f;padding:32px 0;">
   <tr><td align="center">
     <table width="480" cellpadding="0" cellspacing="0" style="max-width:480px;width:100%;background:#0d0d1f;border-radius:20px;overflow:hidden;border:1px solid rgba(124,58,237,0.25);">
-      <!-- Header -->
       <tr>
         <td style="background:linear-gradient(135deg,#6d28d9 0%,#4f46e5 100%);padding:28px 32px;text-align:center;">
           <p style="margin:0 0 4px;font-size:11px;font-weight:700;color:rgba(255,255,255,0.55);letter-spacing:3px;font-family:Arial,sans-serif;">ANIME</p>
@@ -200,21 +345,18 @@ function resetHtml(code: string): string {
           <p style="margin:10px 0 0;color:rgba(196,181,253,0.80);font-size:13px;font-family:Arial,sans-serif;">إعادة تعيين كلمة المرور</p>
         </td>
       </tr>
-      <!-- Body -->
       <tr>
         <td style="padding:36px 32px;text-align:center;">
           <p style="color:#94a3b8;margin:0 0 28px;font-size:15px;line-height:1.7;font-family:Arial,sans-serif;">
             استخدم الكود أدناه لإعادة تعيين كلمة مرورك.<br>
             الكود صالح لمدة <strong style="color:#a78bfa;">10 دقائق</strong> فقط.
           </p>
-          <!-- Digit boxes -->
           <table cellpadding="0" cellspacing="0" style="margin:0 auto 28px;">
             <tr>${digits}</tr>
           </table>
           <p style="color:#64748b;font-size:12px;margin:0;font-family:Arial,sans-serif;">إذا لم تطلب إعادة التعيين، تجاهل هذا البريد.</p>
         </td>
       </tr>
-      <!-- Footer -->
       <tr>
         <td style="padding:18px 32px;text-align:center;border-top:1px solid rgba(124,58,237,0.15);">
           <p style="color:#334155;font-size:11px;margin:0;font-family:Arial,sans-serif;">Anime NOVA · جميع الحقوق محفوظة 2026</p>

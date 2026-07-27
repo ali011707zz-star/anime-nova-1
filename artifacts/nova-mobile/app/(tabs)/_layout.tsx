@@ -84,7 +84,7 @@ export default function TabLayout() {
       <Tabs.Screen
         name="animations"
         options={{
-          href: null,
+          href: null, // مخفي بطلب المستخدم — لا يظهر في شريط التنقل ولا يُحمَّل في الخلفية
         }}
       />
       <Tabs.Screen

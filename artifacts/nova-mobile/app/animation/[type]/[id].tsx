@@ -194,7 +194,7 @@ export default function AnimationDetailScreen() {
         />
         <View style={[s.heroTopRow, { paddingTop: insets.top + 8 }]}>
           <Pressable onPress={() => router.canGoBack() ? router.back() : router.replace("/(tabs)" as any)} style={s.backCircle}>
-            <Ionicons name="chevron-forward" size={20} color="#fff" />
+            <Ionicons name="chevron-back" size={20} color="#fff" />
           </Pressable>
           {score > 0 && (
             <View style={s.scorePill}>
@@ -286,14 +286,7 @@ export default function AnimationDetailScreen() {
 
       {/* ── Action row ── */}
       <View style={s.actionRow}>
-        <Pressable onPress={toggleSave} style={s.actionBtn}>
-          <Ionicons
-            name={saved ? "bookmark" : "bookmark"}
-            size={20}
-            color={saved ? "#8B5CF6" : "rgba(255,255,255,0.45)"}
-          />
-          <Text style={[s.actionLabel, saved && { color: "#8B5CF6" }]}>قائمتي</Text>
-        </Pressable>
+
         <Pressable
           onPress={() => router.push(`/comments?tmdbId=${id}&title=${encodeURIComponent(title)}` as any)}
           style={s.actionBtn}

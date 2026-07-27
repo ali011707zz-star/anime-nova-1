@@ -617,8 +617,8 @@ const sm = StyleSheet.create({
 const s = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#0A0A0F" },
   header: { backgroundColor: "#0A0A0F", borderBottomWidth: 1, borderBottomColor: "rgba(255,255,255,0.05)", paddingHorizontal: 14, paddingTop: 10, paddingBottom: 6 },
-  searchBar: { flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: "#18181B", borderRadius: 14, paddingHorizontal: 12, paddingVertical: 9, borderWidth: 1, borderColor: "rgba(255,255,255,0.07)", marginBottom: 6 },
-  searchInput: { flex: 1, color: "#fff", fontSize: 13, fontFamily: "Cairo_700Bold", textAlign: "right" },
+  searchBar: { flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: "#18181B", borderRadius: 12, paddingHorizontal: 12, paddingVertical: 6, borderWidth: 1, borderColor: "rgba(255,255,255,0.07)", marginBottom: 6 },
+  searchInput: { flex: 1, color: "#fff", fontSize: 12, fontFamily: "Cairo_700Bold", textAlign: "right" },
   filterRow: { flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 6 },
   filterToggle: { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 8, paddingVertical: 5, borderRadius: 10, backgroundColor: "#18181B", borderWidth: 1, borderColor: "rgba(255,255,255,0.05)" },
   filterToggleActive: { backgroundColor: "rgba(139,92,246,0.15)", borderColor: "rgba(139,92,246,0.3)" },
