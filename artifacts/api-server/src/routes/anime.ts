@@ -1119,6 +1119,170 @@ function parseMp4Upload(html: string): string | null {
   return null;
 }
 
+function parseUqloadDownload(html: string, pageUrl: string): string | null {
+  const m = html.match(/href=["'](\/d\/[A-Za-z0-9_-]+)["']/i);
+  if (!m) return null;
+  try { return new URL(m[1], pageUrl).toString(); } catch { return null; }
+}
+
+function anifoxQualityRank(quality: string): number {
+  const q = quality.toLowerCase();
+  return q.includes("1080") || q.includes("fhd") ? 14
+    : q.includes("720") || q.includes("hd") ? 10
+    : q.includes("480") || q.includes("sd") ? 7
+    : 6;
+}
+
+async function extractAnifoxExternal(
+  pageUrl: string,
+  quality: string,
+  sourceName: string,
+): Promise<UnifiedSource | null> {
+  const lower = pageUrl.toLowerCase();
+  if (lower.includes("yandex.com") || lower.includes("yadi.sk")) return null;
+  try {
+    const r = await fetch(pageUrl, {
+      headers: { ...BASE_HDRS, Referer: "https://max-panel.monster/" },
+      signal: AbortSignal.timeout(10_000),
+      redirect: "follow",
+    });
+    if (!r.ok) return null;
+    const html = await r.text();
+    let directUrl: string | null = null;
+    let directType: "mp4" = "mp4";
+    let referer = pageUrl;
+
+    if (lower.includes("mp4upload.com")) {
+      directUrl = parseMp4Upload(html);
+    } else if (lower.includes("mediafire.com")) {
+      directUrl = await extractMediafireDirect(pageUrl);
+    } else if (lower.includes("uqload.is") || lower.includes("uqload.co") || lower.includes("uqload.com")) {
+      directUrl = parseUqloadDownload(html, pageUrl);
+      referer = "https://uqload.is/";
+    } else if (/\.(mp4|mkv|webm)(?:[?#]|$)/i.test(pageUrl) || lower.includes("archive.org/download/")) {
+      directUrl = pageUrl;
+      referer = "https://archive.org/";
+    }
+    if (!directUrl) return null;
+    const proxied = `/api/anime/video-proxy?url=${encodeURIComponent(directUrl)}&ref=${encodeURIComponent(referer)}`;
+    return {
+      name: `ANIFOX · ${sourceName} · ${quality || "HD"}`,
+      url: pageUrl,
+      quality: quality || "HD",
+      qualityRank: anifoxQualityRank(quality),
+      site: "anifox",
+      directUrl: proxied,
+      directType,
+      headers: { Referer: referer },
+    };
+  } catch { return null; }
+}
+
+async function getAnifoxSources(
+  title: string,
+  english: string | null,
+  ep: number,
+): Promise<UnifiedSource[]> {
+  const out: UnifiedSource[] = [];
+  const seen = new Set<string>();
+  const queries = [...new Set([english, title].filter(Boolean) as string[])];
+  try {
+    const candidates: Array<{ content_id: string; content_title: string; score: number }> = [];
+    for (const start of [0, 500, 1000, 1500, 2000]) {
+      const body = new URLSearchParams({
+        start: String(start),
+        limit: "500",
+        genre_id: "0",
+        order_by: "content_title",
+        order_direction: "ASC",
+      });
+      const r = await fetch("https://max-panel.monster/api/Content/searchContent", {
+        method: "POST",
+        headers: { "Unique-Key": "flix!123", Accept: "application/json", "Content-Type": "application/x-www-form-urlencoded" },
+        body,
+        signal: AbortSignal.timeout(12_000),
+      });
+      if (!r.ok) continue;
+      const data = await r.json().catch(() => null) as any;
+      const items = Array.isArray(data?.data) ? data.data : [];
+      if (!items.length) break;
+      for (const item of items) {
+        const itemTitle = String(item.content_title || "");
+        const score = Math.max(...queries.map(q => similarity(q, itemTitle)));
+        if (score > 0.35) {
+          candidates.push({ content_id: String(item.content_id || ""), content_title: itemTitle, score });
+        }
+      }
+      if (items.length < 500) break;
+    }
+    candidates.sort((a, b) => b.score - a.score);
+    const best = candidates[0];
+    if (!best?.content_id) return [];
+
+    const seasonBody = new URLSearchParams({
+      user_id: "",
+      content_id: best.content_id,
+      lazy: "0",
+    });
+    const seasonRes = await fetch("https://max-panel.monster/api/Content/getSeasonByContentID", {
+      method: "POST",
+      headers: { "Unique-Key": "flix!123", Accept: "application/json", "Content-Type": "application/x-www-form-urlencoded" },
+      body: seasonBody,
+      signal: AbortSignal.timeout(15_000),
+    });
+    if (!seasonRes.ok) return [];
+    const seasonJson = await seasonRes.json().catch(() => null) as any;
+    const episodes = (Array.isArray(seasonJson?.data) ? seasonJson.data : [])
+      .flatMap((s: any) => Array.isArray(s?.episodes) ? s.episodes : []);
+    const episode = episodes.find((e: any) => Number(e?.episode_id) && Number(e?.episode_title?.match(/\d+/)?.[0]) === ep)
+      || episodes.find((e: any) => Number(e?.episode_id) && String(e?.episode_title || "").includes(`الحلقة ${ep}`));
+    if (!episode?.episode_id) return [];
+
+    const sourceRes = await fetch("https://max-panel.monster/api/Content/getSourceByEpisodeID", {
+      method: "POST",
+      headers: { "Unique-Key": "flix!123", Accept: "application/json", "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({ episode_id: String(episode.episode_id) }),
+      signal: AbortSignal.timeout(12_000),
+    });
+    const sourceJson = await sourceRes.json().catch(() => null) as any;
+    const rawSources = Array.isArray(sourceJson?.data) ? sourceJson.data : [];
+    const fallbackSources = Array.isArray(episode.sources) ? episode.sources : [];
+    const allSources = rawSources.length ? rawSources : fallbackSources;
+    const jobs = allSources
+      .filter((s: any) => s?.source && !/yandex\.(com|ru)|yadi\.sk/i.test(String(s.source)))
+      .map(async (s: any) => {
+        const pageUrl = String(s.source);
+        const quality = String(s.source_quality || "HD");
+        const name = String(s.source_title || "Server");
+        let result: UnifiedSource | null = null;
+        if (/archive\.org\/download\/.*\.(?:mp4|mkv|webm)/i.test(pageUrl) || /\.(?:mp4|mkv|webm)(?:[?#]|$)/i.test(pageUrl)) {
+          result = {
+            name: `ANIFOX · ${name} · ${quality}`,
+            url: pageUrl,
+            quality,
+            qualityRank: anifoxQualityRank(quality) + 2,
+            site: "anifox",
+            directUrl: `/api/anime/video-proxy?url=${encodeURIComponent(pageUrl)}&ref=${encodeURIComponent("https://archive.org/")}`,
+            directType: "mp4",
+            headers: { Referer: "https://archive.org/" },
+          };
+        } else {
+          result = await extractAnifoxExternal(pageUrl, quality, name);
+        }
+        if (result && !seen.has(result.directUrl || result.url)) {
+          seen.add(result.directUrl || result.url);
+          out.push(result);
+        }
+      });
+    await Promise.allSettled(jobs);
+    out.sort((a, b) => b.qualityRank - a.qualityRank);
+    console.log(`[ANIFOX] "${best.content_title}" ep${ep} → ${out.length} direct sources`);
+  } catch (e: any) {
+    console.warn("[ANIFOX]", e?.message || e);
+  }
+  return out;
+}
+
 function parseMegamax(html: string): { url: string; type: "hls" | "mp4" } | null {
   const pats = [
     /["']sources["']\s*:\s*\[.*?["']file["']\s*:\s*["'](https?:\/\/[^"']+)["']/is,
@@ -12620,7 +12784,7 @@ router.get("/anime/sources-stream", async (req, res) => {
       "moviebox", "moviebox_anim",      // &t= signed URLs ~10min
       "vidlink_encdec", "vidlink_anim", // stormvv URLs ~45min
       "xpass_anim",                     // XPass token ~8min
-      "hianime", "anineko", "anikoto",  // vibeplayer.site tokens expire in ~1-2h
+  "hianime", "anineko", "anikoto",  // vibeplayer.site tokens expire in ~1-2h
     ]);
 
     // ── مساعد: كاشط بـ cache + extractAndCollect ──
@@ -12830,6 +12994,7 @@ router.get("/anime/fetch-source", async (req, res) => {
     // reanime: محذوف بطلب المستخدم 2026-07-24
     "sanime",    // مُضاف 2026-07-24 — MP4 مباشر عربي مدبلج
     "mitanime",  // مُعاد تفعيله 2026-07-24 — parseMitanimeServers مُصلَّح (RSC escaped quotes) + slug validation عبر /anime/{slug}
+    "anifox",    // ANIFOX 2.4.2 — Archive/MediaFire/MP4Upload/Uqload; Yandex filtered
     // "allmanga": معطّل 2026-07-17 — AA_CRYPTO_MISSING
     // videasy_anim: نُقل بالكامل إلى قسم الأنيميشن بطلب المستخدم 2026-07-15
     // xpass_anim: محذوف — CDN (ps1/vip.1x2.space) يحجب VPS 2026-07-15
@@ -12979,6 +13144,7 @@ router.get("/anime/fetch-source", async (req, res) => {
       // xyra_anim: معطّل مؤقتاً — api.xyra.stream يرجع 502 دائماً (عطل من طرفهم)
       // case "xyra_anim":    (await race(getXyraAnimeSources(title, english, ep, anilistId), 18_000, [])).forEach(collectSrc); break;
       case "sanime":       (await race(getSAnimeSources(title, english, ep),               20_000, [])).forEach(collectSrc); break;
+      case "anifox":       (await race(getAnifoxSources(title, english, ep),               75_000, [])).forEach(collectSrc); break;
       case "anslayer":     (await race(getAnimeSlayerSources(title, english, ep, anslayerId, titleAr), 20_000, [])).forEach(collectSrc); break;
       case "ristoanime":   (await race(getRistoAnimeSources(title, english, ep),          22_000, [])).forEach(collectSrc); break;
       // case "allmanga": معطّل 2026-07-17

@@ -54,7 +54,7 @@ const SITE_TAG: Record<string, string> = {
   vidlink_anim: "VL", vidfast: "VF",
   animetime: "AT", animepahe: "AP", dulo_anim: "DL",
   faselhd_db: "FH", witanime: "WI", witanime_db: "WD",
-  notorrent: "NO", sanime: "SA", anipm: "PM", anslayer: "AS",
+  notorrent: "NO", sanime: "SA", anipm: "PM", anslayer: "AS", anifox: "FX",
   anime3rb: "A3", akwam: "AQ",
 };
 
@@ -70,7 +70,7 @@ const SITE_LABEL: Record<string, string> = {
   anime4up2: "Anime4Up", mycima: "MyCima", topcinemaa: "TopCinema",
   animephoenix: "AnimePhoenix", faselhd_db: "FaselHD", animetime: "AnimeTime",
   witanime: "WITanime", witanime_db: "WIT مدبلج",
-  notorrent: "Notorrent", sanime: "SAnime", anipm: "AniPm", anslayer: "AnimeSlayer",
+  notorrent: "Notorrent", sanime: "SAnime", anipm: "AniPm", anslayer: "AnimeSlayer", anifox: "ANIFOX",
   anime3rb: "Anime3rb", akwam: "Akwam",
 };
 function getSiteTag(site: string): string {
@@ -218,7 +218,7 @@ const SITE_PRIORITY: Record<string, number> = {
 /* ── قائمة المصادر (KW أولاً — الأولوية القصوى للتشغيل الفوري) ── */
 /* مصادر موحَّدة مع الويب — نفس المصادر الـ 8 المفعَّلة في SCRAPER_DEFS */
 const ANIME_SITES = [
-  "kawaii", "animewitcher", "anslayer", "animeify", "sanime",
+  "kawaii", "animewitcher", "anslayer", "animeify", "sanime", "anifox",
   "mitanime",  // مُضاف 2026-07-24 — RSC HTTP مباشر بلا browser، 1-2s، 4-8 سيرفرات
   // "witanime": معطّل بطلب المستخدم
   // "allmanga": معطّل 2026-07-17 — AA_CRYPTO_MISSING على AllAnime

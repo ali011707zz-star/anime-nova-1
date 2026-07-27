@@ -52,6 +52,7 @@ export const SITE_TTL: Record<string, number> = {
   // ── مصادر أنمي ──────────────────────────────────────────────────
   witanime:       3 * 3_600_000,   // ok.ru + hgcloud عادةً مستقرة لساعات
   anslayer:       6 * 3_600_000,   // روابط Mediafire/OK.ru دائمة نسبياً
+  anifox:         6 * 3_600_000,   // روابط Archive/MediaFire/MP4Upload/Uqload
   animewitcher:   45 * 60_000,     // Streamtape/VTube تنتهي سريعاً
   animeify:       45 * 60_000,     // Mediafire CDN ~1h
   nekowatch:      4 * 3_600_000,   // HLS مباشر نسبياً مستقر

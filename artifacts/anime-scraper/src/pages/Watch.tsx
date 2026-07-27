@@ -184,6 +184,7 @@ const SCRAPER_DEFS: { site: string; name: string; desc: string; tag: string; aud
   { site: "nflixmovies_anim", name: "NflixMovies", desc: "إنجليزي · HLS", tag: "NX" },
   { site: "vidbolt_anim",     name: "VidBolt",      desc: "إنجليزي · HLS", tag: "VB" },
   { site: "sanime",           name: "سـAnime",       desc: "عربي · MP4 مباشر",        tag: "SA", isArabic: true },
+  { site: "anifox",           name: "ANIFOX",        desc: "Archive · MediaFire · MP4Upload · Uqload", tag: "FX", isArabic: true },
 ];
 
 /** مجموعة المصادر العربية — لا تعرض زر الترجمة الخارجية لها */
@@ -197,7 +198,7 @@ const ARABIC_SITES = new Set(SCRAPER_DEFS.filter(d => d.isArabic).map(d => d.sit
  */
 const PRIORITY_FETCH_SITES = new Set([
   "kawaii", "hianime", "animewitcher", "dulo_anim", "anineko", "anikoto",
-  "animeify", "sanime",  // animeify: token مُخزَّن (12h TTL) → استجابة سريعة ؛ sanime: MP4 مباشر بلا embed
+  "animeify", "sanime", "anifox",  // ANIFOX: Archive/MediaFire/MP4Upload/Uqload
   // shahiid/animelek: أُزيلت — معطّلة بطلب المستخدم 2026-07-14
 ]);
 
