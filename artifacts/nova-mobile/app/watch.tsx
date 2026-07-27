@@ -206,9 +206,10 @@ function ensureVpsProxy(url: string, headers: Record<string, string> | undefined
 
 /* ── مصادر تُشغَّل native مباشرةً عبر RiftPlayer (seg-proxy يُعيد روابط مطلقة الآن) ── */
 
-/* ── أولويات المصادر: KW → AW → DU → rest ── */
+/* ── أولويات المصادر: KW → AF → SA → rest ── */
 const SITE_PRIORITY: Record<string, number> = {
-  kawaii: 100, animewitcher: 90,
+  kawaii: 100,
+  animeify: 85, sanime: 80,
   dulo_anim: 70, vidlink_anim: 55,
   vidfast: 35,
   anikototv: 30, animekai: 25, animepahe: 20, anipm: 18,
@@ -218,9 +219,10 @@ const SITE_PRIORITY: Record<string, number> = {
 /* ── قائمة المصادر (KW أولاً — الأولوية القصوى للتشغيل الفوري) ── */
 /* مصادر موحَّدة مع الويب — نفس المصادر الـ 8 المفعَّلة في SCRAPER_DEFS */
 const ANIME_SITES = [
-  "kawaii", "animewitcher", "anslayer", "animeify", "sanime",
-  "mitanime",  // مُضاف 2026-07-24 — RSC HTTP مباشر بلا browser، 1-2s، 4-8 سيرفرات
+  "kawaii", "anslayer", "animeify", "sanime",
   "anifox",    // مُضاف 2026-07-27 — Archive.org/MediaFire/MP4Upload/Uqload، tag=FX
+  // "mitanime":  محذوف بطلب المستخدم 2026-07-27
+  // "animewitcher": Algolia يحجب VPS + HuggingFace space نهائياً (403 دائم) — أُزيل 2026-07-27
   // "witanime": معطّل بطلب المستخدم
   // "allmanga": معطّل 2026-07-17 — AA_CRYPTO_MISSING على AllAnime
 ] as const;
@@ -231,15 +233,12 @@ const SITE_TIMEOUT_MS = 28_000;
 /* timeout مُخصَّص لكل موقع — يجب أن يكون >= timeout الباكند + هامش
    وإلا يُقتل الطلب قبل أن يرد الباكند (سبب اختفاء المصادر في cache البارد) */
 const SITE_TIMEOUT_MAP: Partial<Record<typeof ANIME_SITES[number], number>> = {
-  animekai:     46_000,  // backend = 40s + 6s هامش
-  animewitcher: 32_000,  // backend = 28s + 4s هامش
-  cinesrc_anim: 38_000,  // backend = 35s + 3s هامش
-  mycima:       34_000,  // backend = 30s + 4s هامش
-  anime4up2:    28_000,  // backend = 25s + 3s هامش
-  anikototv:    28_000,  // backend = 25s + 3s هامش
-  anipm:        24_000,  // backend = 20s + 4s هامش
-  witanime:     20_000,  // backend يوناplay static HTML < 1s + chain search ~15s
-  mitanime:     65_000,  // backend = slug(8s) + fetch(10s) + parallel servers(22-30s) + 5s هامش
+  anifox:       82_000,  // backend race = 75s (catalog pagination 0→4000) + 7s هامش — CRITICAL
+  kawaii:       15_000,  // backend = 1s API + 2s extraction + هامش — كان SCRAPER_MS=7s
+  // مصادر محذوفة من ANIME_SITES لكن تُترك للتوثيق:
+  // animekai:  46_000  // backend = 40s + 6s
+  // animewitcher: 32_000  // DEAD — Algolia 403 دائم
+  // mitanime:  65_000  // disabled by user
 };
 
 /* ── Spinning loader ── */
@@ -509,7 +508,7 @@ export default function WatchScreen() {
               return direct[0] || good;
             };
             /* تأخير 400ms — يمنح KW/AW فرصة الوصول قبل الاختيار */
-            const isHighPriority = ["kawaii", "animewitcher"].includes(site);
+            const isHighPriority = ["kawaii"].includes(site);
             autoPlayTimerRef.current = setTimeout(() => {
               autoPlayTimerRef.current = null;
               if (!isMountedRef.current || autoPlayFiredRef.current || fetchEpochRef.current !== myEpoch) return;

@@ -1178,6 +1178,44 @@ async function extractAnifoxExternal(
   } catch { return null; }
 }
 
+// ── ANIFOX catalog cache — يمنع جلب 9 صفحات عند كل طلب (كان يسبب timeout 75s) ──
+const _anifoxCatalog: { items: Array<{ content_id: string; content_title: string }>; ts: number } = {
+  items: [], ts: 0,
+};
+const ANIFOX_CATALOG_TTL = 24 * 3_600_000; // 24h — الكاتلوج لا يتغير كثيراً
+
+async function _getAnifoxCatalog(): Promise<Array<{ content_id: string; content_title: string }>> {
+  if (_anifoxCatalog.items.length && Date.now() - _anifoxCatalog.ts < ANIFOX_CATALOG_TTL) {
+    return _anifoxCatalog.items;
+  }
+  const all: Array<{ content_id: string; content_title: string }> = [];
+  // جلب صفحات بالتوازي 5 صفحات × 500 = 2500 أول مرة، ثم 5 أخرى إن وُجدت
+  for (let batch = 0; batch <= 4000; batch += 2500) {
+    const starts = [0, 500, 1000, 1500, 2000].map(s => s + batch);
+    const pages = await Promise.allSettled(starts.map(start => {
+      const body = new URLSearchParams({ start: String(start), limit: "500", genre_id: "0", order_by: "content_title", order_direction: "ASC" });
+      return fetch("https://max-panel.monster/api/Content/searchContent", {
+        method: "POST",
+        headers: { "Unique-Key": "flix!123", Accept: "application/json", "Content-Type": "application/x-www-form-urlencoded" },
+        body, signal: AbortSignal.timeout(12_000),
+      }).then(r => r.ok ? r.json() : null).catch(() => null);
+    }));
+    let lastPageFull = false;
+    for (const p of pages) {
+      if (p.status !== "fulfilled" || !p.value) continue;
+      const items: any[] = Array.isArray(p.value?.data) ? p.value.data : [];
+      if (items.length) {
+        items.forEach(item => all.push({ content_id: String(item.content_id || ""), content_title: String(item.content_title || "") }));
+        if (items.length >= 500) lastPageFull = true;
+      }
+    }
+    if (!lastPageFull) break; // الكاتلوج انتهى قبل 4000
+  }
+  if (all.length) { _anifoxCatalog.items = all; _anifoxCatalog.ts = Date.now(); }
+  console.log(`[ANIFOX] catalog cached: ${all.length} titles`);
+  return all;
+}
+
 async function getAnifoxSources(
   title: string,
   english: string | null,
@@ -1187,33 +1225,12 @@ async function getAnifoxSources(
   const seen = new Set<string>();
   const queries = [...new Set([english, title].filter(Boolean) as string[])];
   try {
+    // ── البحث من الكاش (< 1ms بعد أول جلب) بدل 9 HTTP requests متسلسلة ──
+    const catalog = await _getAnifoxCatalog();
     const candidates: Array<{ content_id: string; content_title: string; score: number }> = [];
-    for (let start = 0; start <= 4000; start += 500) {
-      const body = new URLSearchParams({
-        start: String(start),
-        limit: "500",
-        genre_id: "0",
-        order_by: "content_title",
-        order_direction: "ASC",
-      });
-      const r = await fetch("https://max-panel.monster/api/Content/searchContent", {
-        method: "POST",
-        headers: { "Unique-Key": "flix!123", Accept: "application/json", "Content-Type": "application/x-www-form-urlencoded" },
-        body,
-        signal: AbortSignal.timeout(12_000),
-      });
-      if (!r.ok) continue;
-      const data = await r.json().catch(() => null) as any;
-      const items = Array.isArray(data?.data) ? data.data : [];
-      if (!items.length) break;
-      for (const item of items) {
-        const itemTitle = String(item.content_title || "");
-        const score = Math.max(...queries.map(q => similarity(q, itemTitle)));
-        if (score > 0.35) {
-          candidates.push({ content_id: String(item.content_id || ""), content_title: itemTitle, score });
-        }
-      }
-      if (items.length < 500) break;
+    for (const item of catalog) {
+      const score = Math.max(...queries.map(q => similarity(q, item.content_title)));
+      if (score > 0.35) candidates.push({ ...item, score });
     }
     candidates.sort((a, b) => b.score - a.score);
     const best = candidates[0];
@@ -13107,7 +13124,7 @@ router.get("/anime/fetch-source", async (req, res) => {
       // moviz_time: معطّل بطلب المستخدم 2026-07-14 (قسم الأنمي فقط)
       // case "moviz_time":  (await race(getMovizTimeSources(title, english, ep, isMovie), 20000, [])).forEach(collectSrc); break;
       case "topcinemaa":   await runExtract(await race(getTopCimaaSources(title, english, ep, isMovie), SCRAPER_MS, [])); break;
-      case "kawaii":      (await race(getKawaiiAnimeSources(title, english, ep, anilistId), SCRAPER_MS, [])).forEach(collectSrc); break;
+      case "kawaii":      (await race(getKawaiiAnimeSources(title, english, ep, anilistId), 15_000, [])).forEach(collectSrc); break;
       case "anikoto":     (await race(getAniKotoSources(title, english, ep, anilistId),     20_000, [])).forEach(collectSrc); break;
       case "anikototv":   (await race(getAnikototvSources(title, english, ep),              25000, [])).forEach(collectSrc); break;
       case "animekai":    (await race(getAnimeKaiSources(title, english, ep, anilistId),    40_000, [])).forEach(collectSrc); break;
