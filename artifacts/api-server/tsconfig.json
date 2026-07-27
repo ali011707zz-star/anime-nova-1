@@ -1,8 +1,11 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
+<<<<<<< HEAD
     "incremental": true,
     "tsBuildInfoFile": ".tsbuildinfo",
+=======
+>>>>>>> 22277ebee9275f51cb7b54c9b3300c5144e2c175
     "outDir": "dist",
     "rootDir": "src",
     "types": ["node"]

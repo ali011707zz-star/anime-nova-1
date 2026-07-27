@@ -10,5 +10,12 @@
   "devDependencies": {
     "@types/node": "catalog:",
     "tsx": "catalog:"
+<<<<<<< HEAD
+=======
+  },
+  "dependencies": {
+    "axios": "^1.17.0",
+    "cheerio": "^1.2.0"
+>>>>>>> 22277ebee9275f51cb7b54c9b3300c5144e2c175
   }
 }

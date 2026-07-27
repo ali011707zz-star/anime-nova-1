@@ -47,3 +47,37 @@ Thumbs.db
 # Replit
 .cache/
 .local/
+<<<<<<< HEAD
+=======
+.replit
+replit.nix
+
+# Large binary files - do not commit
+artifacts/api-server/bin/
+anime-nova-1/artifacts/api-server/bin/
+**/bin/yt-dlp
+**/bin/yt-dlp_*
+
+# Attached assets (screenshots/videos from chat - not needed in repo)
+attached_assets/
+anime-nova-1/attached_assets/
+
+# Agent memory files — may contain API keys/tokens from research (never commit)
+.agents/
+
+# Environment files with real secrets (use .env.example instead)
+.env
+.env.local
+.env.production
+
+# Decompiled APK artifacts — contain embedded Firebase/Google API keys (NEVER commit)
+nova-player-rebrand/
+nova-player-rebrand-final/
+nova-player-build/
+nova-player-build-final/
+
+# APK binaries
+*.apk
+*.keystore
+*.jks
+>>>>>>> 22277ebee9275f51cb7b54c9b3300c5144e2c175

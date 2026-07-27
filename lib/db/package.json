@@ -14,7 +14,11 @@
   "dependencies": {
     "drizzle-orm": "catalog:",
     "drizzle-zod": "^0.8.3",
+<<<<<<< HEAD
     "pg": "^8.22.0",
+=======
+    "pg": "^8.20.0",
+>>>>>>> 22277ebee9275f51cb7b54c9b3300c5144e2c175
     "zod": "catalog:"
   },
   "devDependencies": {

@@ -1,0 +1,37 @@
+module.exports = {
+  apps: [
+    {
+      name: "anime-nova-api",
+      script: "/usr/bin/node",
+      args: "--enable-source-maps artifacts/api-server/dist/index.mjs",
+      cwd: "/opt/anime-nova",
+      env: {
+        NODE_ENV: "production",
+        PORT: "5000",
+        DATABASE_URL: "postgresql://anime_nova:anime_nova_pass_2024@localhost:5432/anime_nova",
+        CF_WORKER_URL: "https://nova-cdn-proxy.ali011707zz.workers.dev",
+        CF_PROXY_KEY: "v2vofszzFo4s40ibQA1ywFbMHK---fx55GX9MMKbe84",
+        TELEGRAM_BOT_TOKEN: "8203586223:AAG8qEYt04dPApCbjriGpQAYZUcMQA6s3qs",
+        TELEGRAM_CHANNEL_ID: "-1003917929487",
+        TELEGRAM_CHAT_ID: "5477879129",
+        SMTP_HOST: "smtp.gmail.com",
+        SMTP_PORT: "587",
+        SMTP_USER: "lya482569@gmail.com",
+        SMTP_PASS: "baqvqrjchqfbtnal",
+        APP_DOMAIN: "animenovaa.duckdns.org",
+        SESSION_SECRET: "7e086706e69291b989ae20d2f0fae40b9c14946369f62638ddee9e651fd4e254",
+        APP_SECRET: "648be696460094744b3c856fb58c0cce201815becab1da3ef40de076971f79ef",
+        CINESRC_BASE: "http://localhost:13004",
+        MXP_SERVICE_PORT: "8002",
+        CF_PROXY_PORT: "8000",
+      },
+    },
+    {
+      name: "cf-proxy",
+      script: "/opt/anime-nova/scripts/cf_proxy.py",
+      interpreter: "/opt/cf-proxy-venv/bin/python",
+      cwd: "/root",
+      env: { CF_PROXY_PORT: "8000", CF_PROXY_KEY: "v2vofszzFo4s40ibQA1ywFbMHK---fx55GX9MMKbe84" },
+    },
+  ],
+};

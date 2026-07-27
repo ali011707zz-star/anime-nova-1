@@ -1,0 +1,8 @@
+name = "nova-cdn-proxy"
+main = "worker.js"
+compatibility_date = "2024-01-01"
+
+# بعد النشر شغّل:
+#   wrangler secret put CF_PROXY_KEY
+# ثم انسخ الـ URL واحفظه في VPS:
+#   CF_WORKER_URL=https://nova-anime-proxy.<your-subdomain>.workers.dev

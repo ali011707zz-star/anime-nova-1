@@ -40,6 +40,10 @@
   --color-sidebar-accent-foreground: hsl(var(--sidebar-accent-foreground));
   --color-sidebar-border: hsl(var(--sidebar-border));
   --color-sidebar-ring: hsl(var(--sidebar-ring));
+<<<<<<< HEAD
+=======
+<<<<<<< HEAD
+>>>>>>> 22277ebee9275f51cb7b54c9b3300c5144e2c175
 
   --text-xs: 0.75rem;
   --text-xs--line-height: calc(1 / 0.75);
@@ -67,6 +71,11 @@
   --text-8xl--line-height: 1;
   --text-9xl: 8rem;
   --text-9xl--line-height: 1;
+<<<<<<< HEAD
+=======
+=======
+>>>>>>> origin/main
+>>>>>>> 22277ebee9275f51cb7b54c9b3300c5144e2c175
 }
 
 /* LIGHT MODE - Default theme with placeholder values */
@@ -182,4 +191,12 @@
     color: hsl(var(--muted-foreground));
     pointer-events: none;
   }
+<<<<<<< HEAD
 }
+=======
+<<<<<<< HEAD
+}
+=======
+}
+>>>>>>> origin/main
+>>>>>>> 22277ebee9275f51cb7b54c9b3300c5144e2c175

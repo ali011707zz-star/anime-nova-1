@@ -1,0 +1,2 @@
+tmp_out/anime-rift-patched.apk filter=lfs diff=lfs merge=lfs -text
+tmp_out/download/anime-rift-patched.apk filter=lfs diff=lfs merge=lfs -text

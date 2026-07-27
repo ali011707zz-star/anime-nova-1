@@ -3394,6 +3394,7 @@ export default function WatchPage() {
     if (!autoPlayedRef.current) autoPlayedRef.current = false;
     autoFetchAllRef.current = false;
     inFlightRef.current     = new Set();
+<<<<<<< HEAD
 
     /* ── إصلاح: إذا لم يُفعَّل quick-resume خلال 350ms → أظهر الـ picker فوراً.
        بدون هذا الـ fallback تبقى شاشة التحميل عالقة للأبد عند أول فتح للحلقة. ── */
@@ -3403,6 +3404,9 @@ export default function WatchPage() {
 
     return () => {
       window.clearTimeout(pickerFallbackTimer);
+=======
+    return () => {
+>>>>>>> 22277ebee9275f51cb7b54c9b3300c5144e2c175
       pendingTimeoutsRef.current.forEach(id => window.clearTimeout(id));
       pendingTimeoutsRef.current = [];
     };
