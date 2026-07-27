@@ -8230,8 +8230,12 @@ let _awAlgoliaBlocked = false;
 let _awAlgoliaBlockedAt = 0;
 const AW_ALGOLIA_BLOCK_TTL = 10 * 60_000;
 
-/** بحث Algolia مباشر — يعمل من VPS بشكل مستقل عن HF Space */
+/** بحث Algolia — يحاول مباشرة أولاً، ثم CF Worker إذا حُجب IP الـ datacenter */
 async function awAlgoliaSearch(query: string): Promise<any[]> {
+  const body = JSON.stringify({ query, hitsPerPage: 5, attributesToRetrieve: ["id","name","poster","type","anime_id"] });
+
+  // 1. محاولة مباشرة
+  let directBlocked = false;
   try {
     const res = await fetch(AW_ALGOLIA_URL, {
       method: "POST",
@@ -8240,22 +8244,62 @@ async function awAlgoliaSearch(query: string): Promise<any[]> {
         "X-Algolia-API-Key":        AW_ALGOLIA_KEY,
         "Content-Type":             "application/json",
       },
-      body: JSON.stringify({ query, hitsPerPage: 5, attributesToRetrieve: ["id","name","poster","type","anime_id"] }),
+      body,
       signal: AbortSignal.timeout(8_000),
+    });
+    if (res.ok) {
+      const data = await res.json() as any;
+      _awAlgoliaBlocked   = false;
+      _awAlgoliaBlockedAt = 0;
+      return data?.hits ?? [];
+    }
+    if (res.status === 403) {
+      directBlocked = true;
+      console.warn("[AnimeWitcher] Algolia direct 403 — trying CF Worker fallback");
+    } else {
+      return [];
+    }
+  } catch {
+    directBlocked = true; // network error → try CF Worker
+  }
+
+  if (!directBlocked) return [];
+
+  // 2. CF Worker fallback — IPs غير datacenter تتجاوز حجب Algolia
+  const cfWorkerUrl = process.env.CF_WORKER_URL?.replace(/\/$/, "");
+  const cfProxyKey  = process.env.CF_PROXY_KEY;
+  if (!cfWorkerUrl) {
+    _awAlgoliaBlocked   = true;
+    _awAlgoliaBlockedAt = Date.now();
+    console.warn("[AnimeWitcher] Algolia محجوب + CF_WORKER_URL غير مضبوط");
+    return [];
+  }
+  try {
+    const res = await fetch(`${cfWorkerUrl}/aw-search`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(cfProxyKey ? { "x-aw-key": cfProxyKey } : {}),
+      },
+      body,
+      signal: AbortSignal.timeout(10_000),
     });
     if (!res.ok) {
       if (res.status === 403) {
-        _awAlgoliaBlocked = true;
+        _awAlgoliaBlocked   = true;
         _awAlgoliaBlockedAt = Date.now();
-        console.warn("[AnimeWitcher] Algolia direct 403 — fast-fail");
       }
+      console.warn("[AnimeWitcher] CF Worker Algolia:", res.status);
       return [];
     }
     const data = await res.json() as any;
-    _awAlgoliaBlocked    = false; // نجح → ألغِ الـ fast-fail
-    _awAlgoliaBlockedAt  = 0;
+    _awAlgoliaBlocked   = false;
+    _awAlgoliaBlockedAt = 0;
+    console.log("[AnimeWitcher] ✅ Algolia via CF Worker");
     return data?.hits ?? [];
   } catch {
+    _awAlgoliaBlocked   = true;
+    _awAlgoliaBlockedAt = Date.now();
     return [];
   }
 }

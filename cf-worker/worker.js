@@ -172,6 +172,52 @@ export default {
 
     const reqUrl = new URL(request.url);
 
+    // ── AnimeWitcher Algolia proxy (bypass datacenter IP block) ──
+    // Route: POST /aw-search  body: {query, hitsPerPage, attributesToRetrieve}
+    // Protected by x-aw-key header (same CF_PROXY_KEY)
+    if (reqUrl.pathname === "/aw-search") {
+      const awKey = request.headers.get("x-aw-key") || "";
+      const expectedKey = env.CF_PROXY_KEY || "";
+      if (expectedKey && awKey !== expectedKey) {
+        return new Response("Unauthorized", { status: 401 });
+      }
+      const ALGOLIA_APP   = "RV1NI0FQC6";
+      const ALGOLIA_KEY   = "9cefebad731e1547e2f2384094a17869";
+      const ALGOLIA_INDEX = "all_anime";
+      const algoliaUrl    = `https://${ALGOLIA_APP.toLowerCase()}-dsn.algolia.net/1/indexes/${ALGOLIA_INDEX}/query`;
+
+      let body = "";
+      try { body = await request.text(); } catch {}
+
+      let algoliaRes;
+      try {
+        algoliaRes = await fetch(algoliaUrl, {
+          method: "POST",
+          headers: {
+            "X-Algolia-Application-Id": ALGOLIA_APP,
+            "X-Algolia-API-Key":        ALGOLIA_KEY,
+            "Content-Type":             "application/json",
+          },
+          body: body || JSON.stringify({ query: "", hitsPerPage: 0 }),
+        });
+      } catch (e) {
+        return new Response(JSON.stringify({ error: "upstream failed", detail: e.message }), {
+          status: 502,
+          headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
+        });
+      }
+
+      const algoliaBody = await algoliaRes.text();
+      return new Response(algoliaBody, {
+        status: algoliaRes.status,
+        headers: {
+          "Content-Type":                "application/json",
+          "Access-Control-Allow-Origin": "*",
+          "X-Algolia-Upstream-Status":   String(algoliaRes.status),
+        },
+      });
+    }
+
     // ── Anime Rift API Proxy (geo-bypass via Cloudflare edge IPs) ──
     // Route: /rift-proxy?path=/library/search?q=naruto&v=4
     // Protected by CF_PROXY_KEY in X-Rift-Key header
