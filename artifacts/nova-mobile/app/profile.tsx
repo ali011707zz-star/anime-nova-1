@@ -11,7 +11,6 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColors } from "@/hooks/useColors";
 import { getBaseUrl } from "@/utils/api";
-import { clearUserAuthToken, secureFetch } from "@/utils/secureApi";
 
 const AUTH_KEY = "nova-mobile-user";
 
@@ -66,7 +65,7 @@ export default function ProfileScreen() {
       }
     });
     /* Also reload from server to get latest profileImageUrl */
-    secureFetch(`${base}/api/auth/me`)
+    fetch(`${base}/api/auth/me`, { credentials: "include" })
       .then(r => r.ok ? r.json() : null)
       .then((d: any) => {
         if (!d) return;
@@ -98,7 +97,7 @@ export default function ProfileScreen() {
     if (!displayName.trim()) { showMsg("الاسم الظاهر مطلوب", false); return; }
     setLoading(true); setError(""); setSuccess("");
     try {
-      const r = await secureFetch(`${base}/api/auth/profile`, {
+      const r = await fetch(`${base}/api/auth/profile`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
@@ -122,7 +121,7 @@ export default function ProfileScreen() {
     if (newPass !== confirmPass) { showMsg("كلمتا المرور غير متطابقتين", false); return; }
     setLoading(true); setError(""); setSuccess("");
     try {
-      const r = await secureFetch(`${base}/api/auth/change-password`, {
+      const r = await fetch(`${base}/api/auth/change-password`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
@@ -160,7 +159,7 @@ export default function ProfileScreen() {
 
       const dataUrl = `data:image/jpeg;base64,${asset.base64}`;
       setUploadingImg(true);
-      const r = await secureFetch(`${base}/api/auth/profile`, {
+      const r = await fetch(`${base}/api/auth/profile`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
@@ -183,7 +182,7 @@ export default function ProfileScreen() {
   const handleRemoveImage = async () => {
     setUploadingImg(true);
     try {
-      const r = await secureFetch(`${base}/api/auth/profile`, {
+      const r = await fetch(`${base}/api/auth/profile`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
@@ -201,7 +200,6 @@ export default function ProfileScreen() {
 
   const handleLogout = async () => {
     await AsyncStorage.removeItem(AUTH_KEY);
-    await clearUserAuthToken();
     try { await fetch(`${base}/api/auth/signout`, { method: "POST", credentials: "include" }); } catch {}
     router.replace("/settings" as any);
   };

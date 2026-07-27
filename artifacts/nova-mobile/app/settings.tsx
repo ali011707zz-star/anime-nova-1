@@ -11,7 +11,6 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useColors } from "@/hooks/useColors";
 import { useApp } from "@/context/AppContext";
 import { getBaseUrl } from "@/utils/baseUrl";
-import { clearUserAuthToken, secureFetch, setUserAuthToken } from "@/utils/secureApi";
 
 const THEMES: { label: string; value: string; dot: string; desc: string }[] = [
   { label: "داكن",   value: "dark",   dot: "#3F3F46", desc: "رمادي داكن" },
@@ -318,7 +317,6 @@ function AuthSheet({ open, onClose, onLogin }: {
       else {
         const u: MobileUser = { email: d.email || email, displayName: d.displayName || d.username || email.split("@")[0], id: d.id || "" };
         await AsyncStorage.setItem(AUTH_KEY, JSON.stringify(u));
-        if (d.authToken) await setUserAuthToken(d.authToken);
         onLogin(u); onClose();
       }
     } catch { setError("تعذّر الوصول للخادم"); }
@@ -373,7 +371,6 @@ function AuthSheet({ open, onClose, onLogin }: {
       else {
         const u: MobileUser = { email: d.email || email, displayName: d.displayName || d.username || name || email.split("@")[0], id: d.id || "" };
         await AsyncStorage.setItem(AUTH_KEY, JSON.stringify(u));
-        if (d.authToken) await setUserAuthToken(d.authToken);
         onLogin(u); onClose();
       }
     } catch { setError("تعذّر الوصول للخادم"); }
@@ -721,7 +718,7 @@ function ProfileSheet({ open, onClose, user, onUpdate, onLogout }: {
     if (!displayName.trim()) { setError("الاسم الظاهر مطلوب"); return; }
     setLoading(true); setError(""); setSuccess("");
     try {
-      const r = await secureFetch(`${base}/api/auth/profile`, {
+      const r = await fetch(`${base}/api/auth/profile`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
@@ -750,7 +747,7 @@ function ProfileSheet({ open, onClose, user, onUpdate, onLogout }: {
     if (newPass !== confirmPass) { setError("كلمتا المرور غير متطابقتين"); return; }
     setLoading(true); setError(""); setSuccess("");
     try {
-      const r = await secureFetch(`${base}/api/auth/change-password`, {
+      const r = await fetch(`${base}/api/auth/change-password`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
@@ -966,6 +963,7 @@ export default function SettingsScreen() {
 
   const { toast, show: showToast } = useToast();
   const [notifs, setNotifs] = useState(true);
+  const [animSubOn, setAnimSubOn] = useState(true);
   const [showReport, setShowReport] = useState(false);
   const [showAuth, setShowAuth] = useState(false);
   const [showPremium, setShowPremium] = useState(false);
@@ -973,11 +971,11 @@ export default function SettingsScreen() {
 
   useEffect(() => {
     AsyncStorage.getItem(AUTH_KEY).then(v => { if (v) { try { setCurrentUser(JSON.parse(v)); } catch {} } });
+    AsyncStorage.getItem("pref-anim-sub").then(v => { if (v !== null) setAnimSubOn(v !== "false"); });
   }, []);
 
   const handleLogout = () => {
     AsyncStorage.removeItem(AUTH_KEY);
-    clearUserAuthToken().catch(() => {});
     setCurrentUser(null);
     showToast("تم تسجيل الخروج");
   };
@@ -1253,6 +1251,40 @@ export default function SettingsScreen() {
 
         {/* ══════ إعدادات التشغيل ══════ */}
         <SectionHeader title="إعدادات التشغيل" icon="▶️" />
+        <View style={{ paddingHorizontal: 16 }}>
+          <Card>
+            <Pressable
+              onPress={async () => {
+                const next = !animSubOn;
+                setAnimSubOn(next);
+                await AsyncStorage.setItem("pref-anim-sub", String(next));
+                showToast(next ? "الترجمة العربية مفعّلة" : "الترجمة موقفة");
+              }}
+              style={ts.navRow}
+            >
+              <View style={[ts.navIcon, { backgroundColor: animSubOn ? "rgba(139,92,246,0.10)" : "rgba(255,255,255,0.05)" }]}>
+                <Ionicons name="text" size={16} color={animSubOn ? "#a78bfa" : "rgba(255,255,255,0.3)"} />
+              </View>
+              <View style={[ts.navText, { alignItems: "flex-end" }]}>
+                <Text style={ts.navLabel}>الترجمة العربية (أنيميشن)</Text>
+                <Text style={ts.navSub}>
+                  {animSubOn ? "مفعّلة · تظهر الترجمة العربية تلقائياً" : "موقفة · لا تظهر أي ترجمة"}
+                </Text>
+              </View>
+              <Switch
+                value={animSubOn}
+                onValueChange={async (v) => {
+                  setAnimSubOn(v);
+                  await AsyncStorage.setItem("pref-anim-sub", String(v));
+                  showToast(v ? "الترجمة العربية مفعّلة" : "الترجمة موقفة");
+                }}
+                trackColor={{ false: "rgba(255,255,255,0.1)", true: "rgba(139,92,246,0.7)" }}
+                thumbColor="#fff"
+                ios_backgroundColor="rgba(255,255,255,0.1)"
+              />
+            </Pressable>
+          </Card>
+        </View>
 
         {/* ══════ عن التطبيق ══════ */}
         <SectionHeader title="عن التطبيق" icon="ℹ️" />
