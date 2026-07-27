@@ -3384,29 +3384,15 @@ export default function WatchPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  /* ── تشغيل تلقائي: كشط متوازٍ لجميع المصادر فور فتح الصفحة ──
-     أول مصدر يصل ويُشغَّل تلقائياً (bgLoad=false → autoPlayedRef يمنع تكرار التشغيل).
-     إذا كان quick-resume قد فعّل التشغيل مسبقاً (autoPlayedRef=true) تعمل كـ bgLoad=true
-     فقط لتجميع المصادر في قائمة السيرفرات — دون إعادة الضبط أو تشغيل مصدر جديد.
-     cleanup: إلغاء المهل المجدولة عند تغيير الحلقة أو unmount. ── */
+  /* ── Lazy picker (مثل الموبايل): لا كشط تلقائي عند فتح الحلقة ──
+     المستخدم يرى شبكة المصادر فوراً (SCRAPER_DEFS static) ويضغط ما يريد.
+     بعد أول نجاح → بقية المصادر تُكشَّف في الخلفية (منطق bgLoad في handleFetchSite).
+     quick-resume لا يزال يعمل: يشغّل آخر مصدر محفوظ إذا كان هناك تقدُّم > 30s. ── */
   useEffect(() => {
     if (!animeId && !titleParam) return;
-    // إذا كان quick-resume قد شغّل مصدراً بالفعل → لا نُعيد ضبط autoPlayedRef
-    // (إعادة الضبط تُعيد التشغيل التلقائي فوق مصدر الاستئناف الجاري)
-    const resumeAlreadyPlaying = autoPlayedRef.current;
-    if (!resumeAlreadyPlaying) {
-      autoPlayedRef.current   = false;
-    }
-    autoFetchAllRef.current  = false;
-    inFlightRef.current      = new Set();
-    SCRAPER_DEFS.forEach((d, i) => {
-      const tid = window.setTimeout(
-        // bgLoad=true عند الاستئناف: يُجمّع المصادر خلفياً دون تشغيل تلقائي
-        () => handleFetchSite(d.site, resumeAlreadyPlaying ? true : false),
-        i * 70,
-      );
-      pendingTimeoutsRef.current.push(tid);
-    });
+    if (!autoPlayedRef.current) autoPlayedRef.current = false;
+    autoFetchAllRef.current = false;
+    inFlightRef.current     = new Set();
     return () => {
       pendingTimeoutsRef.current.forEach(id => window.clearTimeout(id));
       pendingTimeoutsRef.current = [];
