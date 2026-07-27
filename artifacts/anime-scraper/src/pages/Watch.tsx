@@ -174,7 +174,7 @@ const SCRAPER_DEFS: { site: string; name: string; desc: string; tag: string; aud
   // reanime: محذوف بطلب المستخدم 2026-07-24
   { site: "anslayer",     name: "أنمي سلاير",    desc: "مشغلات خارجية · MixDrop/MediaFire", tag: "AS", isArabic: true },
   { site: "animeify",     name: "أنمي فاي",     desc: "عربي · ميغا",             tag: "AF", isArabic: true },
-  { site: "anipub",       name: "AniPub",        desc: "مدبلج · ترجمة عربية",     tag: "AP", isArabic: true },
+  // anipub: معطّل بطلب المستخدم 2026-07-27
   // allmanga: معطّل 2026-07-17 — AllAnime أضافت AA_CRYPTO_MISSING على endpoint الحلقات (anti-scraping)
   // xpass_anim: محذوف — CDN يحجب VPS/CF IPs، المقاطع تفشل للمستخدم 2026-07-15
   // vaplayer_anim: محذوف من الأنمي — مصدره إنجليزي فقط، أُبقي في الأنيميشن 2026-07-15
