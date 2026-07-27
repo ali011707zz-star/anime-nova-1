@@ -81,3 +81,8 @@ nova-player-build-final/
 *.keystore
 *.jks
 >>>>>>> 22277ebee9275f51cb7b54c9b3300c5144e2c175
+
+# ── أسرار — لا تُرفع أبداً ──
+.env.prev
+artifacts/anime-scraper/.env.production
+artifacts/nova-mobile/.env.production
