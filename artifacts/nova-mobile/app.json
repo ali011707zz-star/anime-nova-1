@@ -1,0 +1,82 @@
+{
+  "expo": {
+    "name": "ANIME NOVA",
+    "slug": "anime-nova-",
+    "owner": "ali011707s-team",
+    "version": "1.0.0",
+    "orientation": "default",
+    "icon": "./assets/images/icon.png",
+    "scheme": "nova-mobile",
+    "userInterfaceStyle": "dark",
+    "backgroundColor": "#09090B",
+    "newArchEnabled": false,
+    "splash": {
+      "image": "./assets/images/icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#09090B"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.nova.anime",
+      "backgroundColor": "#09090B",
+      "infoPlist": {
+        "UISupportedInterfaceOrientations": [
+          "UIInterfaceOrientationPortrait",
+          "UIInterfaceOrientationLandscapeLeft",
+          "UIInterfaceOrientationLandscapeRight"
+        ]
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/images/icon.png",
+        "backgroundColor": "#09090B"
+      },
+      "package": "com.nova.anime",
+      "backgroundColor": "#09090B",
+      "usesCleartextTraffic": true
+    },
+    "web": {
+      "bundler": "metro",
+      "output": "single",
+      "favicon": "./assets/images/icon.png"
+    },
+    "plugins": [
+      [
+        "expo-router",
+        {
+          "origin": "https://animenovaa.duckdns.org"
+        }
+      ],
+      "expo-font",
+      "expo-web-browser",
+      "expo-video",
+      "expo-screen-orientation",
+      "expo-brightness",
+      "react-native-volume-manager",
+      [
+        "expo-media-library",
+        {
+          "photosPermission": "يسمح هذا الإذن بحفظ لقطات المشاهدة في معرض الصور.",
+          "savePhotosPermission": "يسمح هذا الإذن بحفظ لقطات المشاهدة في معرض الصور."
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "تسمح هذه الأذونات للتطبيق بالوصول إلى صورك.",
+          "cameraPermission": "تسمح هذه الأذونات للتطبيق باستخدام الكاميرا."
+        }
+      ]
+    ],
+    "experiments": {
+      "typedRoutes": true,
+      "baseUrl": "/nova-mobile"
+    },
+    "extra": {
+      "eas": {
+        "projectId": "07296477-c5e8-4a47-a804-95f28b46ef7b"
+      }
+    }
+  }
+}
