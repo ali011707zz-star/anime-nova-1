@@ -638,7 +638,11 @@ export default function WatchScreen() {
     inFlightSitesRef.current.clear();
     fetchedSitesRef.current.clear();
     hasCachedRef.current = false;
-    setSlotStatus({});
+    /* pre-populate slotStatus بـ "fetching" حتى لا تظهر رسالة "لا يوجد مصدر"
+       قبل اكتمال جميع المصادر — تتحول لـ ready/failed عند انتهاء كل مصدر */
+    const initialFetching: Record<string, "idle" | "fetching" | "ready" | "failed"> = {};
+    ANIME_SITES.forEach(s => { initialFetching[s] = "fetching"; });
+    setSlotStatus(initialFetching);
     setScreen("picker");
     /* تحميل كل المصادر بالتوازي (staggered) */
     ANIME_SITES.forEach((site, i) => {
@@ -1084,6 +1088,10 @@ export default function WatchScreen() {
 
         {/* ── لا توجد مصادر: رسالة صريحة + زر تحديث ── */}
         {allSrcs.length === 0 && !loading && (
+          /* يظهر فقط عندما تنتهي كل المصادر (fetchSources: loading=false بعد allSettled،
+             refreshAllSources: كل slotStatus وصل لحالة نهائية) */
+          Object.keys(slotStatus).length === 0 || Object.values(slotStatus).every(s => s === "ready" || s === "failed")
+        ) && (
           <View style={[d.siteSelectorCard, { alignItems: "center", paddingVertical: 32 }]}>
             <Ionicons name="film-outline" size={44} color="rgba(139,92,246,0.28)" style={{ marginBottom: 14 }} />
             <Text style={{ color: "rgba(255,255,255,0.88)", fontFamily: "Cairo_700Bold", fontSize: 16, textAlign: "center", marginBottom: 6 }}>

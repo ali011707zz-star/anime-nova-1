@@ -9,6 +9,8 @@ import { LinearGradient } from "expo-linear-gradient";
 import * as ScreenOrientation from "expo-screen-orientation";
 import { StatusBar } from "expo-status-bar";
 import { useVideoPlayer, VideoView } from "expo-video";
+import * as Brightness from "expo-brightness";
+import { VolumeManager } from "react-native-volume-manager";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator, Animated, Dimensions, Easing, I18nManager, Platform,
@@ -447,13 +449,14 @@ export function RiftPlayer({
   const prevSpeedRef                  = useRef(1);
 
   /* ─── Volume / Brightness ─── */
-  /* expo-video يطابق مستوى الصوت الحقيقي في النظام ضمن 0..1.
-     لا نعرض 200% وهمية ثم نعيدها إلى 100% عند التحميل؛ يبدأ المشغل
-     بأقصى مستوى حقيقي، وتبقى الزيادة الإضافية من أزرار الهاتف نفسها. */
+  /* الصوت والسطوع يعكسان القيم الحقيقية للنظام:
+     - expo-brightness: يقرأ/يضبط سطوع الشاشة الحقيقي (Activity-level)
+     - react-native-volume-manager: يقرأ/يضبط صوت الوسائط في النظام
+       ويُبرز HUD أزرار الصوت الفيزيائية عند التغيير */
   const [volume, setVolume]           = useState(1);
-  const [brightness, setBrightness]   = useState(0);
+  const [brightness, setBrightness]   = useState(0.5);
   const volumeRef                     = useRef(1);
-  const brightnessRef                 = useRef(0);
+  const brightnessRef                 = useRef(0.5);
 
   /* ─── Gesture feedback ─── */
   const [feedback, setFeedback]       = useState<{ type: "volume" | "brightness" | "seek"; value: number; delta?: number } | null>(null);
@@ -565,6 +568,48 @@ export function RiftPlayer({
     return () => { aliveRef.current = false; };
   }, []);
 
+  /* ─── تهيئة السطوع والصوت من قيم النظام الحقيقية عند فتح المشغّل ─── */
+  const originalBrightnessRef = useRef<number | null>(null);
+  useEffect(() => {
+    /* اقرأ سطوع الشاشة الحقيقي ثم اضبطه كنقطة بداية */
+    Brightness.getBrightnessAsync()
+      .then(b => {
+        if (!aliveRef.current) return;
+        const clamped = Math.max(0.05, Math.min(1, b));
+        originalBrightnessRef.current = clamped; // احفظ لاستعادته عند الإغلاق
+        setBrightness(clamped);
+        brightnessRef.current = clamped;
+      })
+      .catch(() => {});
+
+    /* اقرأ مستوى الصوت الحالي للوسائط من النظام */
+    VolumeManager.getVolume("music")
+      .then((res: any) => {
+        if (!aliveRef.current) return;
+        const v = typeof res === "number" ? res : (res?.volume ?? 1);
+        setVolume(v);
+        volumeRef.current = v;
+        try { player.volume = 1; } catch {} // player يعمل دائماً بـ 100% من صوت النظام
+      })
+      .catch(() => {});
+
+    /* استمع لأزرار الصوت الفيزيائية — يُحدّث الـ UI عند الضغط */
+    const volSub = VolumeManager.addVolumeListener((result: any) => {
+      if (!aliveRef.current) return;
+      const v = typeof result === "number" ? result : (result?.volume ?? result?.value ?? 1);
+      setVolume(v);
+      volumeRef.current = v;
+      setFeedback({ type: "volume", value: v });
+      if (feedbackTimer.current) clearTimeout(feedbackTimer.current);
+      feedbackTimer.current = setTimeout(() => setFeedback(null), 900);
+    });
+
+    return () => {
+      try { volSub?.remove?.(); } catch {}
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   /* ─── expo-video player ─── */
   /* نستخدم ref ثابت للـ VideoSource الأولي حتى لا يُعيد useVideoPlayer
      تهيئة المشغّل عند تغيير srcIdx (التبديل يتم عبر player.replace فقط).
@@ -619,6 +664,11 @@ export function RiftPlayer({
       /* 6. فرِّغ subtitle cache + cues لتحرير الذاكرة
          loadedCues قد تكون مئات/آلاف من الـ cues المترجمة — تحريرها فوراً يُقلل ضغط GC */
       urlCueCacheRef.current.clear();
+
+      /* 7. استعِد السطوع الأصلي للشاشة عند مغادرة المشغّل */
+      if (originalBrightnessRef.current !== null) {
+        Brightness.setBrightnessAsync(originalBrightnessRef.current).catch(() => {});
+      }
 
       console.log("[RiftPlayer] 🧹 unmounted — all resources released");
     };
@@ -1409,13 +1459,17 @@ export function RiftPlayer({
           volumeRef.current = newVol;
           setVolume(newVol);
           setFeedback({ type: "volume", value: newVol });
+          /* ضبط صوت الوسائط الحقيقي في النظام (يُظهر HUD أزرار الصوت) */
+          VolumeManager.setVolume(newVol, { showUI: true }).catch(() => {});
         } else {
           const delta = -(gs.moveY - gestureStartY.current) / (H * 0.55);
-          /* السحب للأعلى يرفع السطوع، والأسفل يعيده للصفر */
-          const newBri = Math.max(0, Math.min(0.75, gestureStartVal.current + delta));
+          /* السحب للأعلى يرفع السطوع الحقيقي للشاشة (0.05..1) */
+          const newBri = Math.max(0.05, Math.min(1, gestureStartVal.current + delta));
           brightnessRef.current = newBri;
           setBrightness(newBri);
           setFeedback({ type: "brightness", value: newBri });
+          /* ضبط سطوع الشاشة الحقيقي عبر expo-brightness */
+          Brightness.setBrightnessAsync(newBri).catch(() => {});
         }
       },
       onPanResponderRelease: (_, gs) => {
@@ -1593,10 +1647,12 @@ export function RiftPlayer({
     ? Math.min(Math.max(position / duration, 0), 1)
     : 0;
 
-  /* ─── Volume sync to player ─── */
+  /* ─── Volume sync: player يعمل دائماً بـ 100% — النظام يتحكم بالصوت الفعلي ─── */
   useEffect(() => {
     volumeRef.current = volume;
-    try { player.volume = volume; } catch {}
+    /* player.volume=1 دائماً: VolumeManager.setVolume يضبط صوت الوسائط في النظام
+       فلا نحتاج ضرب المشغّل بعامل إضافي */
+    try { player.volume = 1; } catch {}
   }, [volume, player]);
 
   const markerPctIntro = duration > 0 && skipIntro && position < skipIntro.end
@@ -1627,13 +1683,7 @@ export function RiftPlayer({
         contentFit={contentFit}
       />
 
-      {/* ── Brightness overlay: white veil gives a real visible lift ── */}
-      {brightness > 0 && (
-        <View
-          pointerEvents="none"
-          style={[StyleSheet.absoluteFill, { backgroundColor: "#fff", opacity: brightness * 0.35, zIndex: 2 }]}
-        />
-      )}
+      {/* ── Brightness: يُضبط عبر expo-brightness (سطوع الشاشة الحقيقي) — لا حاجة لـ overlay ── */}
 
       {/* ── Screenshot flash ── */}
       <ScreenshotFlash visible={screenshotFlash} />
@@ -1743,35 +1793,34 @@ export function RiftPlayer({
       {/* ── Volume feedback ── */}
       {feedback?.type === "volume" && (
         <View style={s.feedbackRight} pointerEvents="none">
-          <View style={[s.feedbackBarWrap, feedback.value > 1 && { borderColor: "rgba(139,92,246,0.35)", borderWidth: 1 }]}>
+          <View style={s.feedbackBarWrap}>
             <View style={[
               s.feedbackBarFill,
-              { height: `${Math.min(Math.round(feedback.value * 50), 100)}%` as any },
-              feedback.value > 1 && { backgroundColor: "rgba(167,139,250,0.90)" },
+              { height: `${Math.min(Math.round(feedback.value * 100), 100)}%` as any },
             ]} />
           </View>
-          <View style={[s.feedbackPill, feedback.value > 1 && { borderColor: "rgba(139,92,246,0.50)", backgroundColor: "rgba(15,10,30,0.85)" }]}>
+          <View style={s.feedbackPill}>
             <Ionicons
-              name={feedback.value === 0 ? "volume-mute" : feedback.value > 1 ? "volume-high" : "volume-medium"}
+              name={feedback.value === 0 ? "volume-mute" : feedback.value >= 0.6 ? "volume-high" : "volume-medium"}
               size={12}
-              color={feedback.value > 1 ? "#c4b5fd" : "rgba(255,255,255,0.75)"}
+              color="rgba(255,255,255,0.75)"
             />
-            <Text style={[s.feedbackPillText, feedback.value > 1 && { color: "#c4b5fd" }]}>
+            <Text style={s.feedbackPillText}>
               {Math.round(feedback.value * 100)}%
             </Text>
           </View>
         </View>
       )}
 
-      {/* ── Brightness feedback ── */}
+      {/* ── Brightness feedback — النسبة تعكس سطوع الشاشة الحقيقي 0..100% ── */}
       {feedback?.type === "brightness" && (
         <View style={s.feedbackLeft} pointerEvents="none">
           <View style={s.feedbackBarWrap}>
-            <View style={[s.feedbackBarFillY, { height: `${Math.round((1 - feedback.value / 0.75) * 100)}%` as any }]} />
+            <View style={[s.feedbackBarFillY, { height: `${Math.round((1 - feedback.value) * 100)}%` as any }]} />
           </View>
           <View style={s.feedbackPill}>
             <Ionicons name="sunny" size={12} color="rgba(253,224,71,0.85)" />
-            <Text style={s.feedbackPillText}>{Math.round(100 + (feedback.value / 0.75) * 75)}%</Text>
+            <Text style={s.feedbackPillText}>{Math.round(feedback.value * 100)}%</Text>
           </View>
         </View>
       )}
