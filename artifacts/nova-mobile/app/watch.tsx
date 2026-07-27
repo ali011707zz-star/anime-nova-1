@@ -630,17 +630,22 @@ export default function WatchScreen() {
 
   /* ── إعادة تحميل كل المصادر (زر تحديث) ── */
   function refreshAllSources() {
+    /* 1. أوقف fetchSources الجاري — يمنع وصول مصادر قديمة بعد المسح */
+    abortRef.current?.abort();
+    ++fetchEpochRef.current; // ← يجعل أي fetchOneSite معلّق يرى epoch خاطئ ويتوقف
+    if (autoPlayTimerRef.current) { clearTimeout(autoPlayTimerRef.current); autoPlayTimerRef.current = null; }
     bgTimersRef.current.forEach(clearTimeout);
     bgTimersRef.current = [];
     setSources([]);
     seenKeys.current.clear();
     autoPlayFiredRef.current = false;
+    autoFetchAllRef.current = false;
     inFlightSitesRef.current.clear();
     fetchedSitesRef.current.clear();
     hasCachedRef.current = false;
     setSlotStatus({});
     setScreen("picker");
-    /* تحميل كل المصادر الآن بالتوازي */
+    /* تحميل كل المصادر بالتوازي (staggered) */
     ANIME_SITES.forEach((site, i) => {
       const tid = setTimeout(() => { handlePickSite(site, i === 0); }, i * 80);
       bgTimersRef.current.push(tid);
@@ -734,7 +739,9 @@ export default function WatchScreen() {
       if (newSrcs.length) {
         fetchedSitesRef.current.add(site); // ✓ نجح — امنع الإعادة
         setSlotStatus(prev => ({ ...prev, [site]: "ready" }));
-        setSources(prev => [...prev, ...newSrcs]);
+        /* استبدل مصادر الموقع القديمة بالجديدة (بدل الإضافة) —
+           يمنع تراكم روابط CDN منتهية الصلاحية من fetchSources السابق أو الكاش */
+        setSources(prev => [...prev.filter(s => s.site !== site), ...newSrcs]);
 
         /* تشغيل تلقائي عند أول نجاح */
         if (autoPlayResult && !autoPlayFiredRef.current) {
@@ -901,9 +908,9 @@ export default function WatchScreen() {
 
   /* ══════════════ RIFT PLAYER ══════════════ */
   const playerSources = frozenSources.length > 0 ? frozenSources : riftSources;
-  if (screen === "native" && playerSources.length > 0) {
+  if (screen === "native" && playerSources.length > 0 && playingSrc) {
     /* نحسب الرابط النهائي لـ playingSrc (بعد ensureVpsProxy) لمطابقة صحيحة مع playerSources */
-    const _playRaw = getPlayUrl(playingSrc!);
+    const _playRaw = getPlayUrl(playingSrc);
     const _playHeaders = playingSrc?.headers || extractProxyHeaders(_playRaw);
     const _playFinal = ensureVpsProxy(_playRaw, _playHeaders, getBaseUrl());
     const startIdx = Math.max(0, playerSources.findIndex(s => playingSrc && s.url === _playFinal));
@@ -922,14 +929,22 @@ export default function WatchScreen() {
           /* جميع مصادر المشغّل فشلت → العودة للـ picker حتى يرى المستخدم بقية المصادر */
           console.warn("[Anime Watch] جميع المصادر فشلت — العودة للـ picker");
           saveProgress();
-          /* ⚠️ احذف كاش المصادر التالفة — يمنع تكرار الكراش عند فتح الحلقة مجدداً.
-             بدون هذا السطر: رابط CDN منتهٍ يبقى في AsyncStorage → يُشغَّل تلقائياً
-             في المرة القادمة → يُسقط التطبيق → لا يعمل إلا بعد مسح البيانات. */
+          /* ⚠️ احذف كاش المصادر التالفة — يمنع تكرار الكراش عند فتح الحلقة مجدداً */
           if (srcCacheKey) AsyncStorage.removeItem(srcCacheKey).catch(() => {});
+          /* أوقف أي طلبات جارية — يمنع وصول مصادر تالفة إضافية */
+          abortRef.current?.abort();
+          if (autoPlayTimerRef.current) { clearTimeout(autoPlayTimerRef.current); autoPlayTimerRef.current = null; }
+          bgTimersRef.current.forEach(clearTimeout);
+          bgTimersRef.current = [];
+          /* أعد ضبط كل refs — يضمن عمل زر تحديث بشكل صحيح بعد الخطأ */
           hasCachedRef.current = false;
+          autoPlayFiredRef.current = false;
+          autoFetchAllRef.current = false;
+          inFlightSitesRef.current.clear();
+          fetchedSitesRef.current.clear();
           setSources([]);
           seenKeys.current.clear();
-          autoPlayFiredRef.current = false;
+          setSlotStatus({});
           setScreen("picker");
         }}
         onProgress={(pos, dur) => {
