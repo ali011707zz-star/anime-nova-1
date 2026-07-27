@@ -9,7 +9,7 @@ import { LinearGradient } from "expo-linear-gradient";
 import * as ScreenOrientation from "expo-screen-orientation";
 import { StatusBar } from "expo-status-bar";
 import { useVideoPlayer, VideoView } from "expo-video";
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator, Animated, Dimensions, Easing, I18nManager, Platform,
   PanResponder, Pressable, ScrollView, StyleSheet, Text, View,
@@ -35,6 +35,20 @@ export type PlayerSource = {
    */
   headers?: Record<string, string>;
 };
+
+/** Never pass malformed URLs into the native player.
+ *  Some Media3/AVPlayer versions crash before emitting statusChange(error)
+ *  when the source is empty, relative, or otherwise not an HTTP URL.
+ */
+export function isValidPlayerSourceUrl(value: unknown): value is string {
+  if (typeof value !== "string" || !value.trim()) return false;
+  try {
+    const parsed = new URL(value.trim());
+    return (parsed.protocol === "http:" || parsed.protocol === "https:") && !!parsed.hostname;
+  } catch {
+    return false;
+  }
+}
 
 export interface SubCue { start: number; end: number; text: string }
 
@@ -369,8 +383,23 @@ export function RiftPlayer({
   const insets = useSafeAreaInsets();
 
   /* ─── Source ─── */
-  const [srcIdx, setSrcIdx]           = useState(initialSourceIndex);
-  const currentSrc                    = sources[srcIdx];
+  const playableSources = useMemo(() => {
+    const seen = new Set<string>();
+    return sources.filter(source => {
+      const url = source?.url?.trim();
+      if (!isValidPlayerSourceUrl(url) || seen.has(url)) return false;
+      seen.add(url);
+      return true;
+    });
+  }, [sources]);
+  const safeInitialIndex = Math.min(
+    Math.max(initialSourceIndex, 0),
+    Math.max(playableSources.length - 1, 0),
+  );
+  const [srcIdx, setSrcIdx]         = useState(safeInitialIndex);
+  const currentSrc                  = playableSources[srcIdx];
+  const aliveRef                    = useRef(true);
+  const terminalErrorRef            = useRef(false);
 
   /* ─── Playback state ─── */
   const [position, setPosition]       = useState(0);
@@ -525,13 +554,18 @@ export function RiftPlayer({
      نعامله كخطأ ونتجاوز للمصدر التالي تلقائياً */
   const loadTimeoutRef    = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  useEffect(() => {
+    aliveRef.current = true;
+    return () => { aliveRef.current = false; };
+  }, []);
+
   /* ─── expo-video player ─── */
   /* نستخدم ref ثابت للـ VideoSource الأولي حتى لا يُعيد useVideoPlayer
      تهيئة المشغّل عند تغيير srcIdx (التبديل يتم عبر player.replace فقط).
      نمرّر URL string مباشرةً (بدون headers) — جميع المصادر تمرّ عبر VPS proxy
      الذي يُضيف Referer/Origin داخلياً، لذا لا حاجة لإرسالها من ExoPlayer.
      تمرير { uri, headers } يُسبِّب فشلاً صامتاً في بعض إصدارات expo-video native. */
-  const _initSrc = sources[initialSourceIndex ?? 0];
+  const _initSrc = playableSources[safeInitialIndex];
   const _initVideoSrcRef = useRef<string>(_initSrc?.url || "");
   const player = useVideoPlayer(_initVideoSrcRef.current || null, (p) => {
     p.loop = false;
@@ -560,7 +594,9 @@ export function RiftPlayer({
     return () => {
       /* 1. أوقف المشغّل وحرِّر موارده الأصلية (Native ExoPlayer / AVPlayer) */
       try { player.pause(); } catch {}
-      try { (player as any).release(); } catch {}
+      /* useVideoPlayer owns the native player's lifecycle and releases it
+         automatically. Calling release() here as well can double-release the
+         native object during a fast route transition and crash the app. */
 
       /* 2. ألغِ timeout التحميل */
       if (loadTimeoutRef.current) { clearTimeout(loadTimeoutRef.current); loadTimeoutRef.current = null; }
@@ -626,10 +662,12 @@ export function RiftPlayer({
   /* ─── Player events ─── */
   useEffect(() => {
     const sub1 = player.addListener("playingChange", (e: any) => {
+      if (!aliveRef.current) return;
       setIsPlaying(e.isPlaying ?? false);
       setBuffering(false);
     });
     const sub2 = player.addListener("statusChange", (e: any) => {
+      if (!aliveRef.current) return;
       if (e.status === "loading") {
         setBuffering(true);
         /* إذا بقي التحميل أكثر من 12ث (شاشة سوداء) نعامله كخطأ ونتجاوز للمصدر التالي.
@@ -638,7 +676,8 @@ export function RiftPlayer({
         if (loadTimeoutRef.current) clearTimeout(loadTimeoutRef.current);
         loadTimeoutRef.current = setTimeout(() => {
           loadTimeoutRef.current = null;
-          console.warn(`[RiftPlayer] ⏱ timeout (12s) — ${sources[srcIdx]?.label || "?"}: ${sources[srcIdx]?.url?.slice(0, 80)}`);
+          if (!aliveRef.current) return;
+          console.warn(`[RiftPlayer] ⏱ timeout (12s) — ${playableSources[srcIdx]?.label || "?"}: ${playableSources[srcIdx]?.url?.slice(0, 80)}`);
           setError(true);
           setBuffering(false);
         }, 12000);
@@ -648,7 +687,8 @@ export function RiftPlayer({
         if (e.status === "readyToPlay") {
           setBuffering(false);
           setError(false);
-          console.log(`[RiftPlayer] ✅ readyToPlay: ${sources[srcIdx]?.label || "?"} → ${sources[srcIdx]?.url?.slice(0, 100)}`);
+          terminalErrorRef.current = false;
+          console.log(`[RiftPlayer] ✅ readyToPlay: ${playableSources[srcIdx]?.label || "?"} → ${playableSources[srcIdx]?.url?.slice(0, 100)}`);
           /* ── Restore position on readyToPlay (server-switch or initial resume) ──
              Doing this here (not in the polling timer) ensures we only seek AFTER
              the new stream is actually buffered, preventing conflicts with loading. */
@@ -675,7 +715,7 @@ export function RiftPlayer({
       sub2.remove();
       if (loadTimeoutRef.current) { clearTimeout(loadTimeoutRef.current); loadTimeoutRef.current = null; }
     };
-  }, [player, initialPosition]); // eslint-disable-line
+  }, [player, initialPosition, playableSources, srcIdx]); // eslint-disable-line
 
   /* ─── Auto-advance on error ─── */
   const consecutiveErrorsRef = useRef(0);
@@ -686,19 +726,30 @@ export function RiftPlayer({
   const MAX_SOURCE_CYCLES = 8;
   useEffect(() => {
     if (!error) { consecutiveErrorsRef.current = 0; setIsAutoCycling(false); return; }
-    if (sources.length <= 1) { setIsAutoCycling(false); onError?.(); return; }
+    if (!aliveRef.current) return;
+    if (playableSources.length <= 1) {
+      setIsAutoCycling(false);
+      if (!terminalErrorRef.current) {
+        terminalErrorRef.current = true;
+        onError?.();
+      }
+      return;
+    }
     consecutiveErrorsRef.current += 1;
     /* لا تدور في حلقة — جرّب المصادر التالية بحد أقصى MAX_SOURCE_CYCLES */
     const nextIdx = srcIdx + 1;
-    if (nextIdx >= sources.length || consecutiveErrorsRef.current >= MAX_SOURCE_CYCLES) {
+    if (nextIdx >= playableSources.length || consecutiveErrorsRef.current >= MAX_SOURCE_CYCLES) {
       setIsAutoCycling(false); // كل المصادر جُرِّبت أو وصلنا للحد الأقصى
-      onError?.();
+      if (!terminalErrorRef.current) {
+        terminalErrorRef.current = true;
+        onError?.();
+      }
       return;
     }
     setIsAutoCycling(true); // suppress full error UI — show silent loading instead
     const t = setTimeout(() => switchSource(nextIdx), 600);
     return () => clearTimeout(t);
-  }, [error, srcIdx, sources.length, onError]); // eslint-disable-line
+  }, [error, srcIdx, playableSources.length, onError]); // eslint-disable-line
 
   /* ─── تبديل المصدر عندما يُغيِّر الـ parent قيمة initialSourceIndex (المستخدم اختار مصدراً مختلفاً) ─── */
   const prevInitSourceIdxRef = useRef(initialSourceIndex ?? 0);
@@ -1209,14 +1260,22 @@ export function RiftPlayer({
   }, [player, fadeIn]);
 
   const switchSource = useCallback((idx: number) => {
+    if (!aliveRef.current) return;
+    const safeIdx = Math.min(Math.max(idx, 0), Math.max(playableSources.length - 1, 0));
+    const newSrc = playableSources[safeIdx];
+    if (!newSrc) {
+      setError(true);
+      setBuffering(false);
+      return;
+    }
     /* ألغِ timeout التحميل القديم عند التبديل */
     if (loadTimeoutRef.current) { clearTimeout(loadTimeoutRef.current); loadTimeoutRef.current = null; }
     /* ── Save current position before replacing source ── */
     const savedPos = player.currentTime || 0;
     if (savedPos > 5) switchPosRef.current = savedPos;
-    const newSrc = sources[idx];
-    console.log(`[Nova Mobile] تبديل المصدر → ${newSrc?.label || "مجهول"} (${idx + 1}/${sources.length}): ${newSrc?.url?.slice(0, 120)}`);
-    setSrcIdx(idx);
+    console.log(`[Nova Mobile] تبديل المصدر → ${newSrc.label || "مجهول"} (${safeIdx + 1}/${playableSources.length}): ${newSrc.url?.slice(0, 120)}`);
+    setSrcIdx(safeIdx);
+    terminalErrorRef.current = false;
     setIsAutoCycling(false);
     setIsEnded(false);
     resumedRef.current = false;
@@ -1231,8 +1290,8 @@ export function RiftPlayer({
     /* ⚠️ التحقق من صلاحية الـ URL قبل تمريره لـ ExoPlayer/AVPlayer —
        URL فارغ أو بدون بروتوكول يُسبِّب native crash بدل statusChange→error */
     const srcUrl = newSrc?.url;
-    if (!srcUrl || typeof srcUrl !== "string" || (!srcUrl.startsWith("http://") && !srcUrl.startsWith("https://"))) {
-      console.warn(`[RiftPlayer] ⛔ URL غير صالح للمصدر ${idx + 1}: "${srcUrl?.slice(0, 60) ?? "فارغ"}"`);
+    if (!isValidPlayerSourceUrl(srcUrl)) {
+      console.warn(`[RiftPlayer] ⛔ URL غير صالح للمصدر ${safeIdx + 1}: "${srcUrl?.slice(0, 60) ?? "فارغ"}"`);
       setError(true);
       setBuffering(false);
       return;
@@ -1249,7 +1308,7 @@ export function RiftPlayer({
       setError(true);
       setBuffering(false);
     }
-  }, [player, sources]);
+  }, [player, playableSources]);
 
   /* ─── Whisper audio transcription ─── */
   const triggerWhisper = useCallback(async () => {

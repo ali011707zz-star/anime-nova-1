@@ -497,15 +497,15 @@ export default function WatchScreen() {
         if (!autoPlayFiredRef.current) {
           const good = newSrcs.find(isDirectPlayable);
           if (good) {
-            /* الأولوية: KW → AW → DU → أي مصدر مباشر */
+            /* الجودة أولاً، ثم أولوية المصدر. لا نبدأ AS بجودة أقل
+               لمجرد أنه وصل قبل AW أو مصدر آخر أعلى جودة. */
             const pickBest = (pool: Src[]): Src => {
-              const direct = pool.filter(isDirectPlayable);
-              return (
-                direct.find(s => s.site === "kawaii") ??
-                direct.find(s => s.site === "animewitcher") ??
-                direct.find(s => s.site === "dulo_anim") ??
-                direct[0]
-              ) || good;
+              const direct = pool.filter(isDirectPlayable).sort((a, b) => {
+                const qualityDiff = TIER_RANK[getSrcQuality(b)] - TIER_RANK[getSrcQuality(a)];
+                if (qualityDiff !== 0) return qualityDiff;
+                return (SITE_PRIORITY[b.site || ""] ?? 0) - (SITE_PRIORITY[a.site || ""] ?? 0);
+              });
+              return direct[0] || good;
             };
             /* تأخير 400ms — يمنح KW/AW فرصة الوصول قبل الاختيار */
             const isHighPriority = ["kawaii", "animewitcher"].includes(site);
