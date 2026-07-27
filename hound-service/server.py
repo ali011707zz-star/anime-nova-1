@@ -35,7 +35,6 @@ PORT = int(os.getenv("HOUND_SERVICE_PORT", "8766"))
 _session = None
 _session_lock = asyncio.Lock()
 _session_idle_since: float = 0.0
-_active_requests: int = 0          # عدد الطلبات النشطة — watchdog لا يُغلق أثناءها
 SESSION_IDLE_TIMEOUT = int(os.getenv("HOUND_IDLE_TIMEOUT", "300"))  # 5 دقائق
 
 
@@ -62,16 +61,15 @@ async def get_session():
 
 
 async def idle_watchdog():
-    """يُغلق البراوزر بعد SESSION_IDLE_TIMEOUT ثانية بدون استخدام — لا يُغلق أثناء request نشط."""
+    """يُغلق البراوزر بعد SESSION_IDLE_TIMEOUT ثانية بدون استخدام."""
     global _session
     while True:
         await asyncio.sleep(60)
         if (
             SESSION_IDLE_TIMEOUT > 0
             and _session is not None
-            and getattr(_session, "_is_alive", False)
+            and _session._is_alive
             and _session_idle_since > 0
-            and _active_requests == 0                        # ← لا تُغلق أثناء request
             and (time.monotonic() - _session_idle_since) > SESSION_IDLE_TIMEOUT
         ):
             log.info("💤 browser idle — closing to free RAM")

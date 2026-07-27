@@ -38,6 +38,9 @@ export default function HomeScreen() {
   const topPad = Platform.OS === "web" ? 0 : insets.top;
   const { season, year } = getCurrentSeason();
 
+  /* TMDB animation movies — disabled (section hidden) */
+  const [animMovies] = useState<TmdbMovie[]>([]);
+
   const { data: trending, isLoading: loadingT, refetch: refetchT } = useQuery({
     queryKey: ["trending"],
     queryFn: () => anilistQuery<{ Page: { media: AnilistMedia[] } }>(TRENDING_QUERY, { page: 1 }),
@@ -265,6 +268,9 @@ export default function HomeScreen() {
                 size="md"
                 onSeeAll={() => router.push("/browse")}
               />
+
+              {/* TMDB Animation Movies — disabled */}
+
 
               {/* ── Dubbed Cartoons Section ── */}
               {dubbedSeries.length > 0 && (

@@ -406,8 +406,25 @@ async function runSchedulerCycle(): Promise<void> {
     const titleToCheck = media.title?.romaji || media.title?.english || "";
     if (!titleToCheck) continue;
 
-    // ── إرسال مباشر بناءً على جدول AniList — بدون فحص AnimeWitcher ──
-    // (AnimeWitcher Algolia محجوب حالياً؛ الـ gate كان يسبب إرسال مكرر أو صمت كامل)
+    // ── فحص توفر الحلقة في AnimeWitcher مع timeout قصير (5 ثوانٍ فقط) ──
+    // إذا فشل الفحص أو انتهت المهلة → أرسل الإشعار مباشرة (لا تتأخر)
+    let awAvailable = false;
+    try {
+      const awPromise = checkAnimeWitcherEp(titleToCheck, ep);
+      awAvailable = await Promise.race([
+        awPromise,
+        new Promise<boolean>(resolve => setTimeout(() => resolve(true), 5_000)), // fallback: أرسل بعد 5s
+      ]);
+    } catch {
+      awAvailable = true; // خطأ → أرسل على أي حال
+    }
+
+    if (!awAvailable) {
+      console.log(`[scheduler] ⏳ AnimeWitcher لم يُضف بعد: ${titleToCheck} ح${ep} — تخطّي`);
+      notifiedEpisodes.delete(`tg_notify:${anilistId}:${ep}`);
+      continue;
+    }
+
     console.log(`[scheduler] ✨ إرسال الإشعار: ${titleToCheck} ح${ep}`);
 
     const poster  = media.coverImage?.extraLarge || media.coverImage?.large || null;
