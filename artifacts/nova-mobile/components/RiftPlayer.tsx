@@ -621,13 +621,7 @@ export function RiftPlayer({
   const player = useVideoPlayer(_initVideoSrcRef.current || null, (p) => {
     p.loop = false;
     p.volume = 1;
-<<<<<<< HEAD
-    /* ⚠️ لا نستدعي p.play() هنا مباشرةً — بعض إصدارات ExoPlayer/AVPlayer تُطلق
-       native crash عند استدعاء play() قبل أن يكون المصدر جاهزاً للتشغيل.
-       التشغيل الآن يتم فقط عبر حدث statusChange → readyToPlay أدناه. */
-=======
     p.play();
->>>>>>> 22277ebee9275f51cb7b54c9b3300c5144e2c175
     if (initialPosition && initialPosition > 5) {
       try { p.currentTime = initialPosition; } catch {}
     }

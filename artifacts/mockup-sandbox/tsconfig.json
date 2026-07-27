@@ -3,11 +3,8 @@
   "include": ["src/**/*", "mockupPreviewPlugin.ts", "vite.config.ts"],
   "exclude": ["node_modules", "build", "dist", "**/*.test.ts"],
   "compilerOptions": {
-<<<<<<< HEAD
     "incremental": true,
     "tsBuildInfoFile": ".tsbuildinfo",
-=======
->>>>>>> 22277ebee9275f51cb7b54c9b3300c5144e2c175
     "noEmit": true,
     "lib": ["es2022", "dom", "dom.iterable"],
     "jsx": "preserve",

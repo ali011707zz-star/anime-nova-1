@@ -4,25 +4,17 @@
   "license": "MIT",
   "scripts": {
     "preinstall": "sh -c 'rm -f package-lock.json yarn.lock; case \"$npm_config_user_agent\" in pnpm/*) ;; *) echo \"Use pnpm instead\" >&2; exit 1 ;; esac'",
-<<<<<<< HEAD
-=======
     "dev": "pnpm --filter @workspace/anime-scraper run dev",
->>>>>>> 22277ebee9275f51cb7b54c9b3300c5144e2c175
     "build": "pnpm run typecheck && pnpm -r --if-present run build",
     "typecheck:libs": "tsc --build",
     "typecheck": "pnpm run typecheck:libs && pnpm -r --filter \"./artifacts/**\" --filter \"./scripts\" --if-present run typecheck"
   },
   "private": true,
-<<<<<<< HEAD
   "dependencies": {
     "@replit/connectors-sdk": "^0.4.1"
   },
   "devDependencies": {
     "prettier": "^3.9.5",
-=======
-  "devDependencies": {
-    "prettier": "^3.8.3",
->>>>>>> 22277ebee9275f51cb7b54c9b3300c5144e2c175
     "typescript": "~5.9.3"
   }
 }

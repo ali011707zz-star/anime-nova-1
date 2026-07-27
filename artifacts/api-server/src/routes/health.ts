@@ -1,13 +1,10 @@
 import { Router, type IRouter } from "express";
 import { HealthCheckResponse } from "@workspace/api-zod";
-<<<<<<< HEAD
-=======
 import { readFileSync } from "fs";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 
 const __dir = dirname(fileURLToPath(import.meta.url));
->>>>>>> 22277ebee9275f51cb7b54c9b3300c5144e2c175
 
 const router: IRouter = Router();
 
@@ -16,8 +13,6 @@ router.get("/healthz", (_req, res) => {
   res.json(data);
 });
 
-<<<<<<< HEAD
-=======
 router.get("/updates", (_req, res) => {
   try {
     const filePath = join(__dir, "../data/updates.json");
@@ -30,5 +25,4 @@ router.get("/updates", (_req, res) => {
   }
 });
 
->>>>>>> 22277ebee9275f51cb7b54c9b3300c5144e2c175
 export default router;
