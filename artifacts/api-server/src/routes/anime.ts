@@ -1188,7 +1188,7 @@ async function getAnifoxSources(
   const queries = [...new Set([english, title].filter(Boolean) as string[])];
   try {
     const candidates: Array<{ content_id: string; content_title: string; score: number }> = [];
-    for (const start of [0, 500, 1000, 1500, 2000]) {
+    for (let start = 0; start <= 4000; start += 500) {
       const body = new URLSearchParams({
         start: String(start),
         limit: "500",
@@ -1256,15 +1256,17 @@ async function getAnifoxSources(
         const name = String(s.source_title || "Server");
         let result: UnifiedSource | null = null;
         if (/archive\.org\/download\/.*\.(?:mp4|mkv|webm)/i.test(pageUrl) || /\.(?:mp4|mkv|webm)(?:[?#]|$)/i.test(pageUrl)) {
+          const isArchive = pageUrl.includes("archive.org");
+          const referer = isArchive ? "https://archive.org/" : "https://max-panel.monster/";
           result = {
             name: `ANIFOX · ${name} · ${quality}`,
             url: pageUrl,
             quality,
             qualityRank: anifoxQualityRank(quality) + 2,
             site: "anifox",
-            directUrl: `/api/anime/video-proxy?url=${encodeURIComponent(pageUrl)}&ref=${encodeURIComponent("https://archive.org/")}`,
+            directUrl: `/api/anime/video-proxy?url=${encodeURIComponent(pageUrl)}&ref=${encodeURIComponent(referer)}`,
             directType: "mp4",
-            headers: { Referer: "https://archive.org/" },
+            headers: { Referer: referer },
           };
         } else {
           result = await extractAnifoxExternal(pageUrl, quality, name);
