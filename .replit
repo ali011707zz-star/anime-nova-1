@@ -34,6 +34,8 @@ CF_PROXY_PORT = "8000"
 SMTP_HOST = "smtp.gmail.com"
 SMTP_PORT = "587"
 NOVA_PROXY_BASE = "https://animenovaa.duckdns.org"
+VPS_HOST = "95.182.93.105"
+VPS_USER = "root"
 
 [userenv.development]
 CF_WORKER_URL = "http://localhost:8000/stream"
