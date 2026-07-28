@@ -8524,37 +8524,49 @@ async function getAnimeKaiSources(
 
 
 // ════════════════════════════════════════════════════════════════════
-//  ANIMEWITCHER — API جديد على Hugging Face Space (يوليو 2025)
-//  Base: https://1we323-witcher.hf.space
-//  Flow:
-//    1. GET /api/search?q={title}  → [{id, name, poster, type}]
-//    2. GET /api/episodes?id={id}  → [{id, name, num}]
-//    3. GET /api/servers_resolved?anime={id}&ep={epId}
-//         → [{name, url, proxy_url, quality, lang, playable}]
-//  المزايا: روابط مباشرة جاهزة، حقل playable يُصفّي الميتة،
-//           بحث بالاسم (لا حاجة لـ AniList ID)، 1000+ أنمي
+//  ANIMEWITCHER — RE 2026-07-28: Firestore-direct + fresh Algolia
+//  اكتشافات RE:
+//    • Algolia credentials جديدة من Firestore /Settings/search_service
+//      App: D8LH9I7ZL7 | Key: b56c01ef52540ef334bcdbaa00ded9e4
+//    • Firestore anime_list مفتوح بدون auth (PERMISSION_DENIED سابقاً للمسار الخاطئ)
+//    • objectID في Algolia = document ID في Firestore anime_list
+//    • بنية episodes: anime_list/{id}/episodes/{pad3(num)} مثلاً "001"
+//    • servers collection: /episodes/{epId}/servers أو /servers2/all_servers
+//    • PD (Pixeldrain): pixeldrain.com/api/file/{id} مباشر 200 OK ✅
+//    • KF (KrakenFiles): API token → direct CDN URL ✅
+//    • لا حاجة لـ HF Space إطلاقاً — كل شيء عبر Firestore مباشرة
 // ════════════════════════════════════════════════════════════════════
-const AW_HF_BASE   = "https://1we323-witcher.hf.space";
 const AW_FS_BASE   = "https://firestore.googleapis.com/v1/projects/animewitcher-1c66d/databases/(default)/documents";
 
-// Algolia مباشر عبر CF Worker (يتجاوز حجب IP للـ datacenter)
-// App ID: RV1NI0FQC6  |  Search-only API Key: 9cefebad731e1547e2f2384094a17869
-const AW_ALGOLIA_APP   = "RV1NI0FQC6";
-const AW_ALGOLIA_KEY   = "9cefebad731e1547e2f2384094a17869";
+// Algolia — credentials حديثة من Firestore /Settings/search_service (آخر تحديث 2026-07-16)
+const AW_ALGOLIA_APP   = "D8LH9I7ZL7";
+const AW_ALGOLIA_KEY   = "b56c01ef52540ef334bcdbaa00ded9e4";
 const AW_ALGOLIA_INDEX = "all_anime";
 const AW_ALGOLIA_URL   = `https://${AW_ALGOLIA_APP.toLowerCase()}-dsn.algolia.net/1/indexes/${AW_ALGOLIA_INDEX}/query`;
 
-// fast-fail: إذا رجع HF Space 403 نوقف المحاولات 10 دقائق
-let _awAlgoliaBlocked = false;
-let _awAlgoliaBlockedAt = 0;
-const AW_ALGOLIA_BLOCK_TTL = 10 * 60_000;
+/** helper: استخراج قيمة Firestore field */
+function _awFv(v: any): any {
+  if (!v) return "";
+  if ("stringValue"  in v) return v.stringValue;
+  if ("integerValue" in v) return parseInt(v.integerValue, 10);
+  if ("booleanValue" in v) return v.booleanValue;
+  if ("doubleValue"  in v) return parseFloat(v.doubleValue);
+  if ("arrayValue"   in v) return (v.arrayValue.values || []).map(_awFv);
+  if ("mapValue"     in v) {
+    const out: Record<string, any> = {};
+    for (const [k, vv] of Object.entries(v.mapValue.fields || {})) out[k] = _awFv(vv);
+    return out;
+  }
+  return "";
+}
+function _awDoc(doc: any): Record<string, any> {
+  const out: Record<string, any> = {};
+  for (const [k, v] of Object.entries(doc.fields || {})) out[k] = _awFv(v as any);
+  return out;
+}
 
-/** بحث Algolia — يحاول مباشرة أولاً، ثم CF Worker إذا حُجب IP الـ datacenter */
+/** بحث Algolia — credentials D8LH9I7ZL7 تعمل مباشرة من VPS */
 async function awAlgoliaSearch(query: string): Promise<any[]> {
-  const body = JSON.stringify({ query, hitsPerPage: 5, attributesToRetrieve: ["id","name","poster","type","anime_id"] });
-
-  // 1. محاولة مباشرة
-  let directBlocked = false;
   try {
     const res = await fetch(AW_ALGOLIA_URL, {
       method: "POST",
@@ -8563,239 +8575,254 @@ async function awAlgoliaSearch(query: string): Promise<any[]> {
         "X-Algolia-API-Key":        AW_ALGOLIA_KEY,
         "Content-Type":             "application/json",
       },
-      body,
-      signal: AbortSignal.timeout(8_000),
-    });
-    if (res.ok) {
-      const data = await res.json() as any;
-      _awAlgoliaBlocked   = false;
-      _awAlgoliaBlockedAt = 0;
-      return data?.hits ?? [];
-    }
-    if (res.status === 403) {
-      directBlocked = true;
-      console.warn("[AnimeWitcher] Algolia direct 403 — trying CF Worker fallback");
-    } else {
-      return [];
-    }
-  } catch {
-    directBlocked = true; // network error → try CF Worker
-  }
-
-  if (!directBlocked) return [];
-
-  // 2. CF Worker fallback — IPs غير datacenter تتجاوز حجب Algolia
-  const cfWorkerUrl = process.env.CF_WORKER_URL?.replace(/\/$/, "");
-  const cfProxyKey  = process.env.CF_PROXY_KEY;
-  if (!cfWorkerUrl) {
-    _awAlgoliaBlocked   = true;
-    _awAlgoliaBlockedAt = Date.now();
-    console.warn("[AnimeWitcher] Algolia محجوب + CF_WORKER_URL غير مضبوط");
-    return [];
-  }
-  try {
-    const res = await fetch(`${cfWorkerUrl}/aw-search`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        ...(cfProxyKey ? { "x-aw-key": cfProxyKey } : {}),
-      },
-      body,
+      body: JSON.stringify({ query, hitsPerPage: 6, attributesToRetrieve: ["objectID","name","type","details"] }),
       signal: AbortSignal.timeout(10_000),
     });
-    if (!res.ok) {
-      if (res.status === 403) {
-        _awAlgoliaBlocked   = true;
-        _awAlgoliaBlockedAt = Date.now();
-      }
-      console.warn("[AnimeWitcher] CF Worker Algolia:", res.status);
-      return [];
-    }
+    if (!res.ok) { console.warn("[AW] Algolia", res.status); return []; }
     const data = await res.json() as any;
-    _awAlgoliaBlocked   = false;
-    _awAlgoliaBlockedAt = 0;
-    console.log("[AnimeWitcher] ✅ Algolia via CF Worker");
     return data?.hits ?? [];
-  } catch {
-    _awAlgoliaBlocked   = true;
-    _awAlgoliaBlockedAt = Date.now();
+  } catch (e) {
+    console.warn("[AW] Algolia err:", e);
     return [];
   }
+}
+
+/** جلب الحلقات مباشرة من Firestore (تجاوز HF Space كلياً) */
+async function awFetchEpisodes(animeId: string): Promise<Array<{ id: string; num: number }>> {
+  const eps: Array<{ id: string; num: number }> = [];
+  let token: string | null = null;
+  do {
+    const url = `${AW_FS_BASE}/anime_list/${encodeURIComponent(animeId)}/episodes?pageSize=300`
+      + (token ? `&pageToken=${token}` : "");
+    try {
+      const r = await fetch(url, { headers: BASE_HDRS, signal: AbortSignal.timeout(12_000) });
+      if (!r.ok) break;
+      const data = await r.json() as any;
+      for (const doc of (data.documents || [])) {
+        const epId = doc.name.split("/").pop()!;
+        const f    = _awDoc(doc);
+        const name = String(f.name || f.nameFull || epId);
+        const m    = name.match(/(\d+(?:\.\d+)?)/);
+        eps.push({ id: epId, num: m ? parseFloat(m[1]) : 0 });
+      }
+      token = data.nextPageToken || null;
+    } catch { break; }
+  } while (token);
+  eps.sort((a, b) => a.num - b.num);
+  return eps;
+}
+
+/** جلب servers من Firestore — يجرب collection ثم document-fallback */
+async function awFetchServers(animeId: string, epId: string): Promise<Array<{name:string;url:string;quality:string;visible:boolean}>> {
+  const base = `${AW_FS_BASE}/anime_list/${encodeURIComponent(animeId)}/episodes/${encodeURIComponent(epId)}`;
+
+  // 1. collection /servers
+  try {
+    const r = await fetch(`${base}/servers?pageSize=30`, { headers: BASE_HDRS, signal: AbortSignal.timeout(12_000) });
+    if (r.ok) {
+      const data = await r.json() as any;
+      const docs = (data.documents || []) as any[];
+      if (docs.length) {
+        return docs.map(doc => {
+          const f = _awDoc(doc);
+          const url = String(f.link || f.url || f.imageUrl || f.server || "");
+          return { name: String(f.serverName || f.name || ""), url, quality: String(f.quality || "720p"), visible: f.visible !== false };
+        }).filter(s => s.url && s.visible);
+      }
+    }
+  } catch {}
+
+  // 2. document /servers2/all_servers
+  try {
+    const r = await fetch(`${base}/servers2/all_servers`, { headers: BASE_HDRS, signal: AbortSignal.timeout(12_000) });
+    if (r.ok) {
+      const data = await r.json() as any;
+      const f = _awDoc(data);
+      const servers = Array.isArray(f.servers) ? f.servers : [];
+      return servers.map((s: any) => ({
+        name: String(s.serverName || s.name || ""),
+        url: String(s.link || s.url || s.imageUrl || ""),
+        quality: String(s.quality || "720p"),
+        visible: true,
+      })).filter((s: any) => s.url);
+    }
+  } catch {}
+
+  return [];
+}
+
+/** Resolve Pixeldrain ID مباشرة — بدون proxy (200 OK مؤكد من VPS) */
+function awResolvePd(pageUrl: string): string | null {
+  const m = pageUrl.match(/pixeldrain\.com\/(?:u|l)\/([A-Za-z0-9_-]+)/);
+  if (!m) return null;
+  return `https://pixeldrain.com/api/file/${m[1]}`;
+}
+
+/** Resolve KrakenFiles via token API */
+async function awResolveKf(pageUrl: string): Promise<string | null> {
+  const m = pageUrl.match(/krakenfiles\.com\/view\/([A-Za-z0-9_-]+)/);
+  if (!m) return null;
+  const fileId = m[1];
+  try {
+    const r = await fetch(
+      `https://krakenfiles.com/api/master/file/${fileId}/download/token?website=1`,
+      { method: "POST", headers: { ...BASE_HDRS, "Content-Type": "application/json" }, signal: AbortSignal.timeout(10_000) },
+    );
+    if (!r.ok) return null;
+    const data = await r.json() as any;
+    const token = data?.data?.token || data?.token;
+    if (!token) return null;
+    return `https://krakenfiles.com/api/master/file/${fileId}/download?token=${token}`;
+  } catch { return null; }
 }
 
 async function getAnimeWitcherSources(
   title: string, english: string | null, ep: number, _anilistId?: number,
 ): Promise<UnifiedSource[]> {
-  // fast-fail إذا Algolia محجوب
-  if (_awAlgoliaBlocked && Date.now() - _awAlgoliaBlockedAt < AW_ALGOLIA_BLOCK_TTL) {
-    console.log("[AnimeWitcher] Algolia محجوب — skip (fast-fail)");
-    return [];
-  }
   try {
-    /* 1. البحث عبر Algolia مباشرة (أسرع وأكثر موثوقية من HF Space) */
-    let docId: string | null = null;
-    let episodes: Array<{ id: string; name: string; num: number }> = [];
+    // 1. بحث Algolia بـ credentials جديدة (D8LH9I7ZL7) — تعمل مباشرة من VPS
+    let animeId: string | null = null;
 
     const queries = [...new Set([english, title].filter(Boolean) as string[])];
     for (const q of queries) {
-      try {
-        // جرّب Algolia مباشر أولاً
-        let hits = await awAlgoliaSearch(q);
+      const hits = await awAlgoliaSearch(q);
+      if (!hits.length) continue;
 
-        // fallback: HF Space /api/search إذا فشل Algolia
-        if (!hits.length && !_awAlgoliaBlocked) {
-          const sr = await fetch(`${AW_HF_BASE}/api/search?q=${encodeURIComponent(q)}`, {
-            headers: BASE_HDRS,
-            signal: AbortSignal.timeout(10_000),
-          });
-          if (sr.ok) {
-            const raw = await sr.json().catch(() => null);
-            hits = raw?.hits ?? raw?.results ?? (Array.isArray(raw) ? raw : []);
-          } else if (sr.status === 403) {
-            _awAlgoliaBlocked    = true;
-            _awAlgoliaBlockedAt  = Date.now();
-            console.warn("[AnimeWitcher] HF Space 403 — fast-fail");
-            return [];
-          }
-        }
-
-        if (!hits.length) continue;
-
-        // أفضل تطابق بـ similarity بدلاً من أخذ أول نتيجة عمياً
-        let bestHit: any = null;
-        let bestScore = 0;
-        for (const h of hits) {
-          const hName = String(h.name || h.title || h.anime_name || "");
-          const s = Math.max(
-            similarity(hName, title),
-            english ? similarity(hName, english) : 0,
-            asciiSimilarity(q, hName),
-          );
-          if (s > bestScore) { bestScore = s; bestHit = h; }
-        }
-        if (!bestHit || bestScore < 0.38) continue;
-
-        const candidate = String(bestHit.id || bestHit.anime_id || "");
-        if (!candidate) continue;
-
-        // تحقق أن الـ id صحيح وجلب الحلقات في نفس الخطوة
-        const er = await fetch(`${AW_HF_BASE}/api/episodes?id=${encodeURIComponent(candidate)}`, {
-          headers: BASE_HDRS,
-          signal: AbortSignal.timeout(12_000),
-        });
-        if (!er.ok) continue;
-        const ed = await er.json() as { episodes?: Array<{ id: string; name: string; num: number }> };
-        if (!ed.episodes?.length) continue;
-
-        docId = candidate;
-        episodes = ed.episodes;
-        console.log(`[AnimeWitcher] search hit: "${bestHit.name}" (score=${bestScore.toFixed(2)}) id=${docId}`);
-        break;
-      } catch {}
-    }
-
-    // fallback: تجربة المطابقة المباشرة بالاسم إذا فشل البحث
-    if (!docId) {
-      const fallbackCandidates = [...new Set([english, title].filter(Boolean) as string[])];
-      for (const c of fallbackCandidates) {
-        try {
-          const r = await fetch(`${AW_HF_BASE}/api/episodes?id=${encodeURIComponent(c)}`, {
-            headers: BASE_HDRS,
-            signal: AbortSignal.timeout(10_000),
-          });
-          if (!r.ok) continue;
-          const d = await r.json() as { episodes?: Array<{ id: string; name: string; num: number }> };
-          if (!d.episodes?.length) continue;
-          docId = c;
-          episodes = d.episodes;
-          break;
-        } catch {}
+      let bestHit: any = null, bestScore = 0;
+      for (const h of hits) {
+        const hName = String(h.name || "");
+        const engTitle = h.details?.english_title || "";
+        const s = Math.max(
+          similarity(hName, title),
+          english ? similarity(hName, english) : 0,
+          asciiSimilarity(q, hName),
+          engTitle ? similarity(engTitle, title) : 0,
+          english && engTitle ? similarity(engTitle, english) : 0,
+        );
+        if (s > bestScore) { bestScore = s; bestHit = h; }
       }
+      if (!bestHit || bestScore < 0.35) continue;
+
+      // objectID من Algolia = document ID في Firestore anime_list
+      animeId = String(bestHit.objectID || "");
+      console.log(`[AW] match: "${bestHit.name}" score=${bestScore.toFixed(2)} → id="${animeId}"`);
+      break;
     }
+    if (!animeId) return [];
 
-    if (!docId) return [];
+    // 2. جلب الحلقات مباشرة من Firestore
+    const eps = await awFetchEpisodes(animeId);
+    if (!eps.length) { console.warn(`[AW] no episodes for "${animeId}"`); return []; }
 
-    // 2. ابحث عن الحلقة المطلوبة (episodes جُلبت في tryCandidate)
-    const epObj = episodes.find(e => Math.round(e.num) === ep)
-      || episodes.find(e => Math.abs(e.num - ep) < 0.6);
+    const epObj = eps.find(e => Math.round(e.num) === ep)
+      || eps.find(e => Math.abs(e.num - ep) < 0.6);
     if (!epObj) return [];
 
-    // 3. احصل على الـ servers المحلولة (يحتاج ~30ث — رُفع الـ timeout بناءً على قياسات VPS)
-    const srvR = await fetch(
-      `${AW_HF_BASE}/api/servers_resolved?anime=${encodeURIComponent(docId)}&ep=${encodeURIComponent(epObj.id)}`,
-      { headers: BASE_HDRS, signal: AbortSignal.timeout(33000) },
-    );
-    if (!srvR.ok) return [];
-    const srvData = await srvR.json() as {
-      servers?: Array<{ name: string; url: string; proxy_url: string; quality: string; lang: string; playable: boolean; browser: boolean }>;
-    };
-    const servers = (srvData.servers || []).filter(s => s.playable && s.url);
-    if (!servers.length) return [];
+    console.log(`[AW] ep${ep} → Firestore id="${epObj.id}"`);
+
+    // 3. جلب servers من Firestore مباشرة
+    const rawServers = await awFetchServers(animeId, epObj.id);
+    if (!rawServers.length) return [];
 
     const sources: UnifiedSource[] = [];
+    const seenUrls = new Set<string>();
 
-    for (const srv of servers) {
-      const q = srv.quality || "720p";
-      const qRank = q === "1080p" ? 22 : q === "720p" ? 21 : q === "480p" ? 10 : 5;
-      const qLabel = q === "1080p" ? "FHD 1080p" : q === "720p" ? "HD 720p" : q;
+    for (const srv of rawServers) {
       const srvName = srv.name.toUpperCase();
+      const q       = String(srv.quality || "720p").replace(/p$/i, "p");
+      const qRank   = q === "1080p" ? 22 : q === "720p" ? 21 : q === "480p" ? 10 : 5;
+      const qLabel  = q === "1080p" ? "FHD 1080p" : q === "720p" ? "HD 720p" : q;
 
       if (srvName === "PD") {
-        const pdProxied = `/api/anime/video-proxy?url=${encodeURIComponent(srv.url)}&ref=${encodeURIComponent("https://pixeldrain.com/")}`;
-        sources.push({ name: `AnimeWitcher · ${qLabel} · PD`, url: srv.url, quality: q, qualityRank: qRank, site: "animewitcher", directUrl: pdProxied, directType: "mp4" });
+        // Pixeldrain — مباشر من VPS (لا يحجب datacenter IPs) ✅
+        const direct = awResolvePd(srv.url);
+        if (!direct || seenUrls.has(direct)) continue;
+        seenUrls.add(direct);
+        sources.push({
+          name: `AnimeWitcher · ${qLabel} · PD`,
+          url: srv.url, quality: q, qualityRank: qRank + 2,
+          site: "animewitcher",
+          directUrl: `/api/anime/video-proxy?url=${encodeURIComponent(direct)}&ref=${encodeURIComponent("https://pixeldrain.com/")}`,
+          directType: "mp4",
+        });
+
+      } else if (srvName === "KF") {
+        // KrakenFiles — resolve عبر token API
+        try {
+          const kfDirect = await awResolveKf(srv.url);
+          if (kfDirect && !seenUrls.has(kfDirect)) {
+            seenUrls.add(kfDirect);
+            sources.push({
+              name: `AnimeWitcher · ${qLabel} · KF`,
+              url: srv.url, quality: q, qualityRank: qRank + 1,
+              site: "animewitcher",
+              directUrl: `/api/anime/video-proxy?url=${encodeURIComponent(kfDirect)}&ref=${encodeURIComponent("https://krakenfiles.com/")}`,
+              directType: "mp4",
+              headers: { Referer: "https://krakenfiles.com/", Origin: "https://krakenfiles.com/" },
+            });
+          }
+        } catch {}
 
       } else if (srvName === "MF") {
-        const mfProxied = srv.proxy_url
-          ? `${AW_HF_BASE}${srv.proxy_url.startsWith("/") ? srv.proxy_url : "/" + srv.proxy_url}`
-          : srv.url;
-        const directUrl = `/api/anime/video-proxy?url=${encodeURIComponent(mfProxied)}&ref=${encodeURIComponent("https://www.mediafire.com/")}`;
-        sources.push({ name: `AnimeWitcher · ${qLabel} · MF`, url: mfProxied, quality: q, qualityRank: qRank, site: "animewitcher", directUrl, directType: "mp4" });
+        // MediaFire — HTML scraping
+        try {
+          const mfDirect = await extractMediafireDirect(srv.url);
+          if (mfDirect && !seenUrls.has(mfDirect)) {
+            seenUrls.add(mfDirect);
+            sources.push({
+              name: `AnimeWitcher · ${qLabel} · MF`,
+              url: srv.url, quality: q, qualityRank: qRank,
+              site: "animewitcher",
+              directUrl: `/api/anime/video-proxy?url=${encodeURIComponent(mfDirect)}&ref=${encodeURIComponent("https://www.mediafire.com/")}`,
+              directType: "mp4",
+            });
+          }
+        } catch {}
 
       } else if (srvName === "ST") {
+        // Streamtape
         try {
           const stHtml = await fetch(srv.url, {
             headers: { ...BASE_HDRS, Referer: "https://streamtape.com/" },
-            signal: AbortSignal.timeout(8000),
+            signal: AbortSignal.timeout(8_000),
           }).then(r => r.ok ? r.text() : "").catch(() => "");
           const stResult = parseStreamtape(stHtml);
-          if (stResult) {
-            const directUrl = `/api/anime/video-proxy?url=${encodeURIComponent(stResult.url)}&ref=${encodeURIComponent("https://streamtape.com/")}`;
-            sources.push({ name: `AnimeWitcher · ${qLabel} · ST`, url: srv.url, quality: q, qualityRank: qRank, site: "animewitcher", directUrl, directType: "mp4" });
+          if (stResult && !seenUrls.has(stResult.url)) {
+            seenUrls.add(stResult.url);
+            sources.push({
+              name: `AnimeWitcher · ${qLabel} · ST`,
+              url: srv.url, quality: q, qualityRank: qRank,
+              site: "animewitcher",
+              directUrl: `/api/anime/video-proxy?url=${encodeURIComponent(stResult.url)}&ref=${encodeURIComponent("https://streamtape.com/")}`,
+              directType: "mp4",
+            });
           }
         } catch {}
 
       } else if (srvName === "VT") {
         try {
           const vtResult = await extractVideoDeep(srv.url, srv.url);
-          if (vtResult) {
+          if (vtResult && !seenUrls.has(vtResult.url)) {
+            seenUrls.add(vtResult.url);
             const directUrl = vtResult.type === "hls"
               ? `/api/anime/hls-proxy?url=${encodeURIComponent(vtResult.url)}&ref=${encodeURIComponent(srv.url)}`
               : `/api/anime/video-proxy?url=${encodeURIComponent(vtResult.url)}&ref=${encodeURIComponent(srv.url)}`;
-            sources.push({ name: `AnimeWitcher · ${qLabel} · VT`, url: srv.url, quality: q, qualityRank: qRank, site: "animewitcher", directUrl, directType: vtResult.type });
+            sources.push({
+              name: `AnimeWitcher · ${qLabel} · VT`,
+              url: srv.url, quality: q, qualityRank: qRank,
+              site: "animewitcher", directUrl, directType: vtResult.type,
+            });
           }
         } catch {}
-
-      } else if (srvName === "KF") {
-        // KrakenFiles CDN (phs*.krakencloud.net) — يعمل من VPS مباشرة مع Referer صحيح
-        const kfUrl = srv.url;
-        if (kfUrl && kfUrl.includes("krakencloud.net")) {
-          const directUrl = `/api/anime/video-proxy?url=${encodeURIComponent(kfUrl)}&ref=${encodeURIComponent("https://krakenfiles.com/")}`;
-          sources.push({
-            name: `AnimeWitcher · ${qLabel} · KF`,
-            url: kfUrl,
-            quality: q,
-            qualityRank: qRank + 1,
-            site: "animewitcher",
-            directUrl,
-            directType: "mp4",
-            headers: { Referer: "https://krakenfiles.com/", Origin: "https://krakenfiles.com/" },
-          });
-        }
       }
     }
 
+    console.log(`[AW] ✅ ${sources.length} sources for "${animeId}" ep${ep}`);
     return sources;
-  } catch { return []; }
+  } catch (e) {
+    console.warn("[AW] getAnimeWitcherSources err:", e);
+    return [];
+  }
 }
 
 
