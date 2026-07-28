@@ -7930,14 +7930,16 @@ async function getAninekoSources(
       let referer = ANINEKO_BASE + "/";
       let multiQualities: Array<{ quality: string; rank: number; url: string }> = [];
 
-      // vibeplayer.site: اشتقاق مباشر للـ HLS من الـ token بدون HTTP request إضافي
-      const vibeToken = embedUrl.match(/vibeplayer\.site\/([a-zA-Z0-9]{10,})/i)?.[1];
-      if (vibeToken) {
-        m3u8Url = `https://vibeplayer.site/public/stream/${vibeToken}/master.m3u8`;
-        referer = `https://vibeplayer.site/${vibeToken}`;
+      // vibeplayer.site / vivibebe.site: نفس البنية — /public/stream/{token}/master.m3u8
+      const vibeMatch = embedUrl.match(/^https?:\/\/((?:vibeplayer|vivibebe)\.site)\/([a-zA-Z0-9]{8,})/i);
+      if (vibeMatch) {
+        const vibeDomain = vibeMatch[1];  // vibeplayer.site أو vivibebe.site
+        const vibeToken  = vibeMatch[2];
+        m3u8Url = `https://${vibeDomain}/public/stream/${vibeToken}/master.m3u8`;
+        referer  = `https://${vibeDomain}/${vibeToken}`;
         multiQualities = await parseM3u8Qualities(m3u8Url, referer);
       } else {
-        // خوادم أخرى (OtakuHG / OtakuVid): استخراج كل الجودات hls1-hls4
+        // خوادم أخرى (OtakuHG / OtakuVid / playmogo): packed JS → hls1-hls4
         try { referer = new URL(embedUrl).origin + "/"; } catch {}
         multiQualities = await extractAninekoAllHls(embedUrl, slug);
         m3u8Url = multiQualities[0]?.url ?? null;
@@ -7952,9 +7954,11 @@ async function getAninekoSources(
         subtitleUrl = `/api/anime/translate-vtt?url=${encodeURIComponent(proxySubUrl)}&from=en&to=ar`;
       }
 
-      const hostLabel = embedUrl.includes("bibi")     ? "BibiEmb"
+      const hostLabel = embedUrl.includes("bibi")      ? "BibiEmb"
+                      : embedUrl.includes("vivibebe") ? "ViviBebe"
                       : embedUrl.includes("otakuhg")  ? "OtakuHG"
                       : embedUrl.includes("otakuvid") ? "OtakuVid"
+                      : embedUrl.includes("playmogo") ? "PlayMogo"
                       : "VibePlayer";
 
       if (multiQualities.length > 0) {
