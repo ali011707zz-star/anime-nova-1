@@ -5045,8 +5045,42 @@ async function animeifyPost(base: string, token: string, path: string, body: URL
   return r.ok ? r : null;
 }
 
-/** Extract a direct MediaFire download link from a serverId or full URL */
+/** استخراج quick_key من رابط MediaFire */
+function extractMediafireKey(urlOrKey: string): string | null {
+  if (!urlOrKey.includes("/")) return urlOrKey.trim() || null; // already a key
+  // https://www.mediafire.com/file/{quick_key}/filename.mp4[/file]
+  const m = urlOrKey.match(/mediafire\.com\/file\/([^/?#]+)/i);
+  return m?.[1] || null;
+}
+
+/**
+ * Extract a direct MediaFire download link.
+ * Strategy: API (quick_key) → HTML scrape fallback.
+ * API URL doesn't need Referer → works on mobile without proxy.
+ */
 async function extractMediafireDirect(serverId: string): Promise<string | null> {
+  // ── 1) Official API (fast, no HTML parsing) ──
+  try {
+    const key = extractMediafireKey(serverId);
+    if (key) {
+      const apiUrl = `https://www.mediafire.com/api/1.5/file/get_links.php?quick_key=${key}&response_format=json`;
+      const apiR = await fetch(apiUrl, {
+        headers: { "User-Agent": "Mozilla/5.0" },
+        signal: AbortSignal.timeout(8000),
+      });
+      if (apiR.ok) {
+        const data = await apiR.json().catch(() => null);
+        const download: string | undefined =
+          data?.response?.links?.[0]?.normal_download ||
+          data?.response?.links?.[0]?.download;
+        if (download && download.startsWith("http") && !download.includes("mediafire.com/file")) {
+          return download;
+        }
+      }
+    }
+  } catch { /* fall through to HTML scrape */ }
+
+  // ── 2) HTML scrape fallback ──
   try {
     const url = serverId.startsWith("http") ? serverId : `https://www.mediafire.com/file/${serverId}`;
     const r = await fetch(url, {
@@ -5056,7 +5090,6 @@ async function extractMediafireDirect(serverId: string): Promise<string | null> 
     });
     if (!r.ok) return null;
     const html = await r.text();
-    // Try multiple patterns — MediaFire changes their HTML periodically
     const raw =
       (/(https:\/\/download\d*\.mediafire\.com\/[^"' \n<>]+)/.exec(html))?.[1] ||
       (/(https:\/\/download[^"' \n<>]*mediafire[^"' \n<>]+\.(?:mp4|mkv|avi|mov|webm)[^"' \n<>]*)/.exec(html))?.[1] ||
@@ -12471,11 +12504,13 @@ async function getAnimeSlayerSources(
         if (link.includes("mediafire.com")) {
           const direct = await extractMediafireDirect(link);
           if (direct) {
+            // MediaFire CDN URL (من API) لا يحتاج Referer → مباشر على الموبايل بدون proxy
             out.push({
               name: "AnimeSlayer · MediaFire", url: link, quality: "FHD", qualityRank: 12,
               site: "anslayer",
-              directUrl: `/api/anime/video-proxy?url=${encodeURIComponent(direct)}&ref=${encodeURIComponent("https://www.mediafire.com/")}`,
+              directUrl: direct,
               directType: "mp4",
+              corsOk: true,
             });
           }
           continue;
