@@ -8924,30 +8924,51 @@ async function getAnimeWitcherSources(
       }
     }
 
-    // ── BUNNY: السيرفر الاحتياطي من episode doc (bunny_video_id + bunny_library_id) ──
-    // bunny_video_id و bunny_library_id موجودان مباشرة في document الحلقة
-    const bunnyVideoId   = String(epDoc.bunny_video_id   || "").trim();
-    const bunnyLibraryId = String(epDoc.bunny_library_id  || epDoc.library_id || "").trim();
+    // ── BUNNY: BunnyCDN — يحاول حقل bunny_video_id أولاً، ثم يستخرج من thumb_uri ──
+    let bunnyVideoId   = String(epDoc.bunny_video_id   || "").trim();
+    let bunnyLibraryId = String(epDoc.bunny_library_id || epDoc.library_id || "").trim();
+
+    // fallback: استخرج lib/vid من thumb_uri إذا كانت BunnyCDN URL
+    // نمط: https://vz-{library_id}.b-cdn.net/{video_id}/thumbnail.jpg
+    if (!bunnyVideoId || !bunnyLibraryId) {
+      const thumbUri = String(epDoc.thumb_uri || "").trim();
+      const bm = thumbUri.match(/vz-([a-f0-9-]+)\.b-cdn\.net\/([a-f0-9-]+)\//);
+      if (bm) {
+        bunnyLibraryId = bunnyLibraryId || bm[1];
+        bunnyVideoId   = bunnyVideoId   || bm[2];
+        console.log(`[AW/BUNNY] extracted from thumb_uri: lib=${bunnyLibraryId} vid=${bunnyVideoId}`);
+      }
+    }
+
     if (bunnyVideoId && bunnyLibraryId && !seenUrls.has(bunnyVideoId)) {
       seenUrls.add(bunnyVideoId);
-      // BunnyCDN iframe embed URL — يشغّل الفيديو مباشرة في المتصفح
-      const embedUrl = `https://iframe.mediadelivery.net/embed/${bunnyLibraryId}/${bunnyVideoId}`;
-      // نحاول أيضاً استخراج رابط MP4 مباشر عبر BunnyCDN pull zone
-      const directMp4 = `https://vz-${bunnyLibraryId}.b-cdn.net/${bunnyVideoId}/play_720p.mp4`;
-      sources.push({
-        name:        `AnimeWitcher · HD 720p · BUNNY`,
-        url:         embedUrl,
-        quality:     "720p",
-        qualityRank: 20,
-        site:        "animewitcher",
-        directUrl:   `/api/anime/video-proxy?url=${encodeURIComponent(directMp4)}&ref=${encodeURIComponent(embedUrl)}`,
-        directType:  "mp4",
-        rawUrl:      directMp4,
-      });
-      console.log(`[AW/BUNNY] ✅ bunny_video_id=${bunnyVideoId} library=${bunnyLibraryId}`);
-    } else if (bunnyVideoId) {
-      // library_id غير موجودة في doc الحلقة — سجّل للتحقيق
-      console.warn(`[AW/BUNNY] bunny_video_id=${bunnyVideoId} found but no library_id in ep doc`);
+      const embedUrl  = `https://iframe.mediadelivery.net/embed/${bunnyLibraryId}/${bunnyVideoId}`;
+      // BunnyCDN blocks datacenter IPs (403 from VPS) → rawUrl يُشغَّل مباشرة في المتصفح بـ IP المستخدم
+      const rawMp4_720  = `https://vz-${bunnyLibraryId}.b-cdn.net/${bunnyVideoId}/play_720p.mp4`;
+      const rawMp4_1080 = `https://vz-${bunnyLibraryId}.b-cdn.net/${bunnyVideoId}/play_1080p.mp4`;
+      const rawMp4_480  = `https://vz-${bunnyLibraryId}.b-cdn.net/${bunnyVideoId}/play_480p.mp4`;
+
+      for (const [q, raw, qRank] of [
+        ["FHD 1080p", rawMp4_1080, 22] as const,
+        ["HD 720p",   rawMp4_720,  21] as const,
+        ["480p",      rawMp4_480,  10] as const,
+      ]) {
+        sources.push({
+          name:        `AnimeWitcher · ${q} · BUNNY`,
+          url:         embedUrl,
+          quality:     q.replace("FHD ","").replace("HD ",""),
+          qualityRank: qRank,
+          site:        "animewitcher",
+          // لا نستخدم video-proxy (VPS يُحجب بـ 403) — rawUrl مباشر للمتصفح
+          directUrl:   raw,
+          directType:  "mp4",
+          rawUrl:      raw,
+          extra:       { headers: { Referer: embedUrl, Origin: "https://iframe.mediadelivery.net" } },
+        });
+      }
+      console.log(`[AW/BUNNY] ✅ 3 sources — lib=${bunnyLibraryId} vid=${bunnyVideoId}`);
+    } else if (bunnyVideoId && !bunnyLibraryId) {
+      console.warn(`[AW/BUNNY] bunny_video_id=${bunnyVideoId} found but no library_id in ep doc or thumb_uri`);
     }
 
     console.log(`[AW] ✅ ${sources.length} sources for "${animeId}" ep${ep}`);
