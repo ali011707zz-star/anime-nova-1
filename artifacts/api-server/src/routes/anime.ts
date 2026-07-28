@@ -5049,7 +5049,8 @@ async function animeifyPost(base: string, token: string, path: string, body: URL
 function extractMediafireKey(urlOrKey: string): string | null {
   if (!urlOrKey.includes("/")) return urlOrKey.trim() || null; // already a key
   // https://www.mediafire.com/file/{quick_key}/filename.mp4[/file]
-  const m = urlOrKey.match(/mediafire\.com\/file\/([^/?#]+)/i);
+  // https://www.mediafire.com/file_premium/{quick_key}/filename.mp4[/file]
+  const m = urlOrKey.match(/mediafire\.com\/file(?:_premium)?\/([^/?#]+)/i);
   return m?.[1] || null;
 }
 
@@ -8763,15 +8764,15 @@ async function getAnimeWitcherSources(
           }
         } catch {}
 
-      } else if (srvName === "MF") {
-        // MediaFire — HTML scraping
+      } else if (srvName === "MF" || srvName === "MF2") {
+        // MediaFire — HTML scraping (MF = /file/, MF2 = /file_premium/)
         try {
           const mfDirect = await extractMediafireDirect(srv.url);
           if (mfDirect && !seenUrls.has(mfDirect)) {
             seenUrls.add(mfDirect);
             sources.push({
-              name: `AnimeWitcher · ${qLabel} · MF`,
-              url: srv.url, quality: q, qualityRank: qRank,
+              name: `AnimeWitcher · ${qLabel} · ${srvName}`,
+              url: srv.url, quality: q, qualityRank: qRank + (srvName === "MF2" ? 1 : 0),
               site: "animewitcher",
               directUrl: `/api/anime/video-proxy?url=${encodeURIComponent(mfDirect)}&ref=${encodeURIComponent("https://www.mediafire.com/")}`,
               directType: "mp4",
