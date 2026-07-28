@@ -1,3 +1,4 @@
+- [Hosting Extractor Strategy](hosting-extractor-strategy.md) — browser مرة واحدة لجمع file_ids → API مباشر للـ MP4؛ MediaFire+Archive أولوية؛ OK.ru/Mega يُتجاهلان.
 - [OkAnime RE 2026-07](okanime-re-2026-07.md) — /api/search?q= فقط؛ مصادر الحلقة Alpine HTML فقط؛ direct fetch يعمل بلا CF؛ scraper محسَّن (API-first + labels).
 - [FaselHD scdns.io RE](faselhd-scdns-reverse-engineering.md) — CDN=scdns.io; master.m3u8 أي IP بلا headers; quality URLs=نفس IP؛ TTL=~5-6h؛ browser مرة واحدة/محتوى (Hopx playwright)؛ cache بـ expiry_ts من URL.
 - [DramaWorld APK Analysis](dramaworld-apk-analysis.md) — API=app.arabypros.com/api; KEY=4F5A9C3D.../d506abfd; filtres محجوبة من servers; apk-mitm تعمل على VPS لتجاوز SSL pinning.
