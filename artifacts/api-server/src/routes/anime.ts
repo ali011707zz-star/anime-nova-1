@@ -1076,16 +1076,50 @@ function parseVideoUrl(html: string): { url: string; type: "hls" | "mp4" } | nul
 
 function parseStreamtape(html: string): { url: string; type: "mp4" } | null {
   try {
-    const tokenRe = /getElementById\(['"]\S+['"]\)\.innerHTML\s*=\s*["']([^"']+)["']\s*\+\s*["']([^"']+)["']/;
-    const m = html.match(tokenRe);
-    if (m) {
-      const combined = (m[1] + m[2]).replace(/\s/g, "");
-      if (combined.includes("streamtape")) return { url: "https:" + combined, type: "mp4" };
-      return { url: "https://streamtape.com" + combined, type: "mp4" };
+    // --- Pattern A: الصيغة الجديدة (2025+) ---
+    // innerHTML = '//str' + '' + ('xcdeamtape.com/get_video?...&token=T').substring(1).substring(2)
+    // أو: innerHTML = '//str' + ('defgeamtape.com/get_video?...').substring(4)
+    // الحل: استخرج الـ prefix + الـ garbled string + عمليات substring ثم طبّقها
+    const substRe = /["'`]([^"'`]{1,10})["'`]\s*(?:\+\s*["'`][^"'`]{0,20}["'`]\s*)*\+\s*\(\s*["'`]([A-Za-z0-9+/=]{0,20}[A-Za-z]*(?:tape|stre)[^"'`]*)["'`]\s*\)((?:\.substring\(\d+\))*)/gm;
+    for (const m of html.matchAll(substRe)) {
+      const prefix = m[1];
+      let garbled  = m[2];
+      const ops    = m[3] || "";
+      for (const s of ops.matchAll(/\.substring\((\d+)\)/g)) {
+        garbled = garbled.substring(parseInt(s[1]));
+      }
+      const combined = (prefix + garbled).replace(/\s/g, "");
+      const url = combined.startsWith("//") ? "https:" + combined
+                : combined.startsWith("/")  ? "https://streamtape.com" + combined
+                : combined;
+      if ((url.includes("streamtape.com") || url.includes("streamtape.to")) && url.includes("get_video")) {
+        return { url, type: "mp4" };
+      }
     }
-    const altRe = /get_video\?id=[^&"'<\s]+&expires=\d+&ip=[^&"'<\s]+&token=[^&"'<>\s;]+/;
-    const alt = html.match(altRe);
-    if (alt) return { url: "https://streamtape.com/" + alt[0], type: "mp4" };
+
+    // --- Pattern B: الصيغة الكلاسيكية --- innerHTML = "part1" + "part2"
+    const m1 = html.match(/getElementById\(['"]\S+['"]\)\.innerHTML\s*=\s*["']([^"']+)["']\s*\+\s*["']([^"']+)["']/);
+    if (m1) {
+      const combined = (m1[1] + m1[2]).replace(/\s/g, "");
+      const url = combined.startsWith("//") ? "https:" + combined
+                : combined.startsWith("/")  ? "https://streamtape.com" + combined
+                : combined;
+      if (url.includes("streamtape") || url.includes("get_video")) return { url, type: "mp4" };
+    }
+
+    // --- Pattern C: var A="//streamtape.../get_video" ; innerHTML = A + "token=..."
+    const m2 = html.match(/var\s+\w+\s*=\s*["'](\/\/[^"']+get_video[^"']*)["'][^;]*;\s*[^;]*innerHTML\s*=\s*\w+\s*\+\s*["']([^"']*)["']/);
+    if (m2) {
+      const combined = (m2[1] + m2[2]).replace(/\s/g, "");
+      return { url: "https:" + combined, type: "mp4" };
+    }
+
+    // --- Pattern D: get_video?id=...&token=... مباشراً (لا يُعيد الـ token المزيّف داخل <div>) ---
+    // نبحث فقط في سياق JS (بعد نهاية أقرب وسم HTML)
+    const jsSection = html.replace(/<div[^>]*>.*?<\/div>/gis, "");
+    const m3 = jsSection.match(/get_video\?id=[^&"'<\s]+&expires=\d+(?:&ip=[^&"'<\s]+)?&token=[^&"'<>\s;)]+/);
+    if (m3) return { url: "https://streamtape.com/" + m3[0], type: "mp4" };
+
   } catch {}
   return null;
 }
@@ -8659,22 +8693,91 @@ function awResolvePd(pageUrl: string): string | null {
   return `https://pixeldrain.com/api/file/${m[1]}`;
 }
 
-/** Resolve KrakenFiles via token API */
+/** Resolve KrakenFiles — HTML scraping (API blocked by CF from datacenter IPs) */
 async function awResolveKf(pageUrl: string): Promise<string | null> {
   const m = pageUrl.match(/krakenfiles\.com\/view\/([A-Za-z0-9_-]+)/);
   if (!m) return null;
   const fileId = m[1];
+  const KF_HDRS = {
+    ...BASE_HDRS,
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Referer": "https://krakenfiles.com/",
+    "Origin": "https://krakenfiles.com",
+  };
+
+  // 1. جلب صفحة الملف
+  let html = "";
+  try {
+    const r = await fetch(`https://krakenfiles.com/view/${fileId}/file.html`, {
+      headers: KF_HDRS, signal: AbortSignal.timeout(12_000),
+    });
+    if (r.ok) html = await r.text();
+  } catch {}
+
+  if (html && !html.includes("File not found")) {
+    // 1a. CDN URL مباشر في الـ JS
+    const cdnRe = /(https?:\/\/[^\s"'`<>\\]*krakencloud\.net\/[^\s"'`<>\\]+\.(?:mp4|mkv|webm|avi)[^\s"'`<>\\]*)/i;
+    const cdnM  = html.match(cdnRe);
+    if (cdnM?.[1]) return cdnM[1];
+
+    // 1b. استخراج _token + hash من الـ form ثم POST
+    const tokenVal = html.match(/name=["']_token["'][^>]*value=["']([^"']+)["']/i)?.[1]
+                  || html.match(/name=["']token["'][^>]*value=["']([^"']+)["']/i)?.[1];
+    const hashVal  = html.match(/name=["']hash["'][^>]*value=["']([^"']+)["']/i)?.[1];
+    if (tokenVal) {
+      try {
+        const body = `_token=${encodeURIComponent(tokenVal)}`
+                   + (hashVal ? `&hash=${encodeURIComponent(hashVal)}` : "");
+        const fr = await fetch(`https://krakenfiles.com/download/${fileId}`, {
+          method: "POST",
+          headers: { ...KF_HDRS, "Content-Type": "application/x-www-form-urlencoded" },
+          body,
+          redirect: "manual",
+          signal: AbortSignal.timeout(12_000),
+        });
+        const loc = fr.headers.get("location") || fr.headers.get("Location") || "";
+        if (loc && (loc.includes("krakencloud") || loc.includes(".mp4"))) return loc;
+        if (fr.ok) {
+          const txt  = await fr.text();
+          const jCDN = txt.match(/"url"\s*:\s*["']([^"']+krakencloud[^"']+)["']/i)?.[1];
+          if (jCDN) return jCDN;
+        }
+      } catch {}
+    }
+  }
+
+  // 2. fallback — token API (يعمل أحياناً بدون CF block)
   try {
     const r = await fetch(
       `https://krakenfiles.com/api/master/file/${fileId}/download/token?website=1`,
-      { method: "POST", headers: { ...BASE_HDRS, "Content-Type": "application/json" }, signal: AbortSignal.timeout(10_000) },
+      {
+        method: "POST",
+        headers: { ...BASE_HDRS, "Content-Type": "application/json", "Referer": `https://krakenfiles.com/view/${fileId}/file.html`, "Origin": "https://krakenfiles.com" },
+        signal: AbortSignal.timeout(8_000),
+      },
     );
-    if (!r.ok) return null;
-    const data = await r.json() as any;
-    const token = data?.data?.token || data?.token;
-    if (!token) return null;
-    return `https://krakenfiles.com/api/master/file/${fileId}/download?token=${token}`;
-  } catch { return null; }
+    if (r.ok) {
+      const data = await r.json() as any;
+      const token = data?.data?.token || data?.token;
+      if (token) return `https://krakenfiles.com/api/master/file/${fileId}/download?token=${token}`;
+    }
+  } catch {}
+
+  return null;
+}
+
+/** جلب episode doc كاملاً للحصول على bunny_video_id + bunny_library_id */
+async function awFetchEpDoc(animeId: string, epId: string): Promise<Record<string, any>> {
+  try {
+    const r = await fetch(
+      `${AW_FS_BASE}/anime_list/${encodeURIComponent(animeId)}/episodes/${encodeURIComponent(epId)}`,
+      { headers: BASE_HDRS, signal: AbortSignal.timeout(8_000) },
+    );
+    if (!r.ok) return {};
+    const doc = await r.json() as any;
+    return _awDoc(doc);
+  } catch { return {}; }
 }
 
 async function getAnimeWitcherSources(
@@ -8721,9 +8824,12 @@ async function getAnimeWitcherSources(
 
     console.log(`[AW] ep${ep} → Firestore id="${epObj.id}"`);
 
-    // 3. جلب servers من Firestore مباشرة
-    const rawServers = await awFetchServers(animeId, epObj.id);
-    if (!rawServers.length) return [];
+    // 3. جلب servers + episode doc بالتوازي
+    const [rawServers, epDoc] = await Promise.all([
+      awFetchServers(animeId, epObj.id),
+      awFetchEpDoc(animeId, epObj.id),
+    ]);
+    if (!rawServers.length && !epDoc.bunny_video_id) return [];
 
     const sources: UnifiedSource[] = [];
     const seenUrls = new Set<string>();
@@ -8816,6 +8922,32 @@ async function getAnimeWitcherSources(
           }
         } catch {}
       }
+    }
+
+    // ── BUNNY: السيرفر الاحتياطي من episode doc (bunny_video_id + bunny_library_id) ──
+    // bunny_video_id و bunny_library_id موجودان مباشرة في document الحلقة
+    const bunnyVideoId   = String(epDoc.bunny_video_id   || "").trim();
+    const bunnyLibraryId = String(epDoc.bunny_library_id  || epDoc.library_id || "").trim();
+    if (bunnyVideoId && bunnyLibraryId && !seenUrls.has(bunnyVideoId)) {
+      seenUrls.add(bunnyVideoId);
+      // BunnyCDN iframe embed URL — يشغّل الفيديو مباشرة في المتصفح
+      const embedUrl = `https://iframe.mediadelivery.net/embed/${bunnyLibraryId}/${bunnyVideoId}`;
+      // نحاول أيضاً استخراج رابط MP4 مباشر عبر BunnyCDN pull zone
+      const directMp4 = `https://vz-${bunnyLibraryId}.b-cdn.net/${bunnyVideoId}/play_720p.mp4`;
+      sources.push({
+        name:        `AnimeWitcher · HD 720p · BUNNY`,
+        url:         embedUrl,
+        quality:     "720p",
+        qualityRank: 20,
+        site:        "animewitcher",
+        directUrl:   `/api/anime/video-proxy?url=${encodeURIComponent(directMp4)}&ref=${encodeURIComponent(embedUrl)}`,
+        directType:  "mp4",
+        rawUrl:      directMp4,
+      });
+      console.log(`[AW/BUNNY] ✅ bunny_video_id=${bunnyVideoId} library=${bunnyLibraryId}`);
+    } else if (bunnyVideoId) {
+      // library_id غير موجودة في doc الحلقة — سجّل للتحقيق
+      console.warn(`[AW/BUNNY] bunny_video_id=${bunnyVideoId} found but no library_id in ep doc`);
     }
 
     console.log(`[AW] ✅ ${sources.length} sources for "${animeId}" ep${ep}`);
