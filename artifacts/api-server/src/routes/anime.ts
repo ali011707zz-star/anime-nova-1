@@ -6714,6 +6714,288 @@ async function getAkoamSources(
 
 
 // ════════════════════════════════════════════════════════════════════
+//  BLKOM.COM scraper
+//  Pipeline:
+//    1. Hound → blkom.com/search?query={title}  → slug (/anime/{slug})
+//    2. Hound → blkom.com/watch/{slug}/{ep}      → bkvideo embed URL
+//    3. Direct fetch bkvideo.online/embedvideo/{hash}?s={token} → CDN <source> tags
+//  CF: blkom.com محمي بـ CF Managed Challenge (Hound ضروري)
+//       bkvideo.online بلا CF (direct fetch ~0.4s)
+//  Token TTL: ~2h → نكشط مجدداً عند انتهائه
+// ════════════════════════════════════════════════════════════════════
+const BLKOM_BASE   = "https://blkom.com";
+const BKVIDEO_BASE = "https://bkvideo.online";
+
+const blkomSlugCache = new Map<string, { slug: string; ts: number }>();
+const BLKOM_SLUG_TTL = 6 * 60 * 60_000; // 6 ساعات
+
+/** جلب صفحة blkom عبر Hound (CF managed challenge)
+ *  timeout قصير (25s) للـ fail-fast إذا كان Hound مشغولاً بـ anime3rb
+ */
+async function blkomHoundFetch(url: string, waitMs = 5000): Promise<string | null> {
+  try {
+    const hh = await fetch(`${HOUND_SERVICE_URL}/health`, { signal: AbortSignal.timeout(3000) });
+    if (!hh.ok) { console.log("[blkom] Hound not available"); return null; }
+    const hj = await hh.json() as { ok?: boolean; browser_alive?: boolean };
+    if (!hj.ok) { console.log("[blkom] Hound not ok"); return null; }
+    // fail-fast: 25s — إذا Hound مشغول بـ anime3rb سنُخطئ بسرعة لا نعلّق 70s
+    const hr = await fetch(`${HOUND_SERVICE_URL}/fetch`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url, wait: waitMs, referer: BLKOM_BASE + "/", solve_cf: true }),
+      signal: AbortSignal.timeout(25000),
+    });
+    if (!hr.ok) return null;
+    const data = await hr.json() as { ok?: boolean; html?: string; error?: string; elapsed_ms?: number };
+    if (data.ok && data.html && data.html.length > 500) {
+      console.log(`[blkom] Hound ✅ ${data.elapsed_ms}ms html=${data.html.length}`);
+      return data.html;
+    }
+    if (data.error) console.log(`[blkom] Hound busy/error: ${data.error}`);
+  } catch (e: any) {
+    console.log(`[blkom] Hound timeout/busy: ${(e as any)?.message?.slice(0, 60)}`);
+  }
+  return null;
+}
+
+/** بناء slug candidates من العنوان (بدون Hound search — يوفّر call) */
+function blkomBuildSlugCandidates(title: string, english: string | null): string[] {
+  const toSlug = (s: string) =>
+    s.toLowerCase()
+      .replace(/[:\u060C,!?'"""'']/g, "")   // أحرف خاصة
+      .replace(/\s+/g, "-")
+      .replace(/-+/g, "-")
+      .replace(/^-|-$/g, "");
+
+  const candidates = new Set<string>();
+  for (const t of [english, title].filter(Boolean) as string[]) {
+    candidates.add(toSlug(t));
+    // بدون "season X" / "الجزء X" في النهاية
+    candidates.add(toSlug(t.replace(/\s+(season|part|الجزء|الموسم)\s*\d+$/i, "")));
+    // مع تطبيع Shippuden/Shippuuden
+    candidates.add(toSlug(t).replace("shippuden", "shippuuden"));
+    candidates.add(toSlug(t).replace("shippuuden", "shippuden"));
+  }
+  return [...candidates].filter(s => s.length > 2);
+}
+
+async function getBlkomSources(
+  title: string, english: string | null, ep: number,
+): Promise<UnifiedSource[]> {
+  try {
+    // 1. ── Slug lookup (cache أولاً، ثم بناء مباشر بدون Hound search) ──
+    const sCk = "blkom:" + (english ?? title).toLowerCase();
+    const cached = blkomSlugCache.get(sCk);
+    let slug: string | null = (cached && Date.now() - cached.ts < BLKOM_SLUG_TTL) ? cached.slug : null;
+
+    const slugCandidates = slug ? [slug] : blkomBuildSlugCandidates(title, english);
+    console.log(`[blkom] slug candidates: ${slugCandidates.join(", ")}`);
+
+    // 2. ── Watch page via Hound → bkvideo embed URL ──────────────────
+    // نجرّب slug candidate واحد فقط (أقل تزاحم مع anime3rb على Hound)
+    // إذا فشل، نجرّب البحث once كـ fallback — لكن ليس cascade كامل
+    let watchHtml: string | null = null;
+    let usedSlug: string | null = null;
+
+    for (const candidate of slugCandidates.slice(0, 2)) {
+      const watchUrl = `${BLKOM_BASE}/watch/${candidate}/${ep}`;
+      console.log(`[blkom] → ${watchUrl}`);
+      const html = await blkomHoundFetch(watchUrl, 5000);
+      if (html && /bkvideo\.online/.test(html)) {
+        watchHtml = html; usedSlug = candidate; break;
+      }
+      // إذا Hound مشغول (html=null) → لا جدوى من المزيد من المحاولات الآن
+      if (!html) { console.log("[blkom] Hound busy, aborting"); break; }
+    }
+
+    if (!watchHtml) { console.log("[blkom] no valid watch page found"); return []; }
+    if (usedSlug && !slug) {
+      blkomSlugCache.set(sCk, { slug: usedSlug, ts: Date.now() });
+      console.log(`[blkom] slug="${usedSlug}" cached`);
+    }
+
+    // استخرج bkvideo embed URLs
+    const embedMatches = [...watchHtml.matchAll(/(?:bkvideo\.online\/embedvideo\/)([a-f0-9]+)\?s=([A-Za-z0-9+/=_-]+)/g)];
+    // استخرج bkvideo download URLs (redirect مباشر للـ CDN)
+    const dlMatches    = [...watchHtml.matchAll(/(?:bkvideo\.online\/video\/)([a-f0-9]+)\/download\?s=([A-Za-z0-9+/=_-]+)/g)];
+
+    console.log(`[blkom] slug="${usedSlug}" embeds=${embedMatches.length} downloads=${dlMatches.length}`);
+    if (!embedMatches.length && !dlMatches.length) return [];
+
+    const results: UnifiedSource[] = [];
+
+    // 3a. ── Embed page → parse <source> tags (direct fetch, no CF) ──
+    const seenHashes = new Set<string>();
+    for (const m of embedMatches) {
+      const [, hash, sParam] = m;
+      if (seenHashes.has(hash)) continue;
+      seenHashes.add(hash);
+
+      const embedUrl = `${BKVIDEO_BASE}/embedvideo/${hash}?s=${sParam}`;
+      try {
+        const er = await fetch(embedUrl, {
+          headers: {
+            "Referer": BLKOM_BASE + "/",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+          },
+          signal: AbortSignal.timeout(8000),
+        });
+        if (!er.ok) { console.warn(`[blkom] embed fetch ${er.status}`); continue; }
+        const eHtml = await er.text();
+        // <source src="https://cdn.bkvideo.online/videos/..." label="1080p" type="video/mp4">
+        for (const sm of eHtml.matchAll(/<source[^>]+src=["']([^"']+cdn\.bkvideo\.online[^"']+\.mp4[^"']*)["'][^>]*label=["']([^"']+)["']/gi)) {
+          const [, cdnUrl, label] = sm;
+          const h = parseInt(label) || 0;
+          const { quality, qualityRank } = h >= 1080 ? { quality: "FHD", qualityRank: 10 }
+            : h >= 720 ? { quality: "HD", qualityRank: 9 }
+            : h >= 480 ? { quality: "SD", qualityRank: 7 }
+            : { quality: "LD", qualityRank: 5 };
+          results.push({
+            name: `بالكوم · ${label}`,
+            url: cdnUrl, quality, qualityRank,
+            site: "blkom",
+            directUrl: cdnUrl,
+            directType: "mp4",
+            headers: { Referer: BLKOM_BASE + "/" },
+          });
+          console.log(`[blkom] ✅ ${label} → ${cdnUrl.slice(0, 70)}`);
+        }
+        // fallback: بحث عن أي mp4 URL في الـ HTML
+        if (!results.length) {
+          for (const mm of eHtml.matchAll(/["'](https:\/\/cdn\.bkvideo\.online\/videos\/[^"'?]+\.mp4[^"']*)/g)) {
+            results.push({
+              name: "بالكوم", url: mm[1], quality: "HD", qualityRank: 9,
+              site: "blkom", directUrl: mm[1], directType: "mp4",
+              headers: { Referer: BLKOM_BASE + "/" },
+            });
+          }
+        }
+      } catch (e: any) {
+        console.warn("[blkom] embed parse error:", e?.message);
+      }
+      if (results.length) break; // أول embed ناجح يكفي
+    }
+
+    // 3b. ── Download redirect → إذا لم تُسفر embed عن نتائج ────────
+    if (!results.length) {
+      for (const m of dlMatches.slice(0, 4)) {
+        const [, vid, sParam] = m;
+        const dlUrl = `${BKVIDEO_BASE}/video/${vid}/download?s=${sParam}`;
+        try {
+          const dr = await fetch(dlUrl, {
+            headers: { "Referer": BLKOM_BASE + "/", "User-Agent": "Mozilla/5.0" },
+            signal: AbortSignal.timeout(6000),
+            redirect: "manual",
+          });
+          const loc = dr.headers.get("location");
+          if (loc?.startsWith("http")) {
+            const labelM = loc.match(/\/(\d{3,4})p\./);
+            const h = labelM ? parseInt(labelM[1]) : 0;
+            const { quality, qualityRank } = h >= 1080 ? { quality: "FHD", qualityRank: 10 }
+              : h >= 720 ? { quality: "HD", qualityRank: 9 }
+              : { quality: "HD", qualityRank: 8 };
+            results.push({
+              name: "بالكوم", url: loc, quality, qualityRank,
+              site: "blkom", directUrl: loc, directType: "mp4",
+              headers: { Referer: BLKOM_BASE + "/" },
+            });
+            console.log(`[blkom] download redirect ✅ ${quality} → ${loc.slice(0, 70)}`);
+          }
+        } catch { /* ignore */ }
+      }
+    }
+
+    return results;
+  } catch (e: any) {
+    console.warn("[blkom]", e?.message ?? e);
+    return [];
+  }
+}
+
+// ════════════════════════════════════════════════════════════════════
+//  ANIME-PHOENIX.COM scraper
+//  Pipeline (NO browser — direct HTTP):
+//    1. Build slug from English title (kebab-case)
+//    2. GET /episodes/{slug}-episode-{N}
+//    3. Extract <source src="..."> from <template id="player-html-template">
+//    4. Return direct MP4/MKV source via phoenixpr.workers.dev CDN
+//
+//  No CF protection on individual pages. No auth needed.
+//  CDN: new.phoenixpr.workers.dev (Cloudflare Worker serving direct files)
+// ════════════════════════════════════════════════════════════════════
+const ANIMEPHOENIX_BASE = "https://anime-phoenix.com";
+
+function animephoenixBuildSlugCandidates(title: string, english: string | null): string[] {
+  const toSlug = (s: string) =>
+    s.toLowerCase()
+      .replace(/[:\u060C,!?'""\u201C\u201D\u2018\u2019]/g, "")
+      .replace(/\s+/g, "-")
+      .replace(/-+/g, "-")
+      .replace(/^-|-$/g, "");
+  const candidates = new Set<string>();
+  for (const t of [english, title].filter(Boolean) as string[]) {
+    candidates.add(toSlug(t));
+    candidates.add(toSlug(t.replace(/\s+(season|part|الجزء|الموسم)\s*\d+$/i, "")));
+    candidates.add(toSlug(t).replace("shippuden", "shippuuden"));
+    candidates.add(toSlug(t).replace("shippuuden", "shippuden"));
+  }
+  return [...candidates].filter(s => s.length > 2);
+}
+
+async function getAnimephoenixSources(
+  title: string, english: string | null, ep: number,
+): Promise<UnifiedSource[]> {
+  const slugCandidates = animephoenixBuildSlugCandidates(title, english);
+  console.log(`[animephoenix] trying ep=${ep} slugs: ${slugCandidates.join(", ")}`);
+
+  for (const slug of slugCandidates.slice(0, 4)) {
+    const epUrl = `${ANIMEPHOENIX_BASE}/episodes/${slug}-episode-${ep}`;
+    try {
+      const r = await fetch(epUrl, {
+        headers: {
+          ...BASE_HDRS,
+          Referer: `${ANIMEPHOENIX_BASE}/animes/${slug}`,
+        },
+        signal: AbortSignal.timeout(12000),
+      });
+      if (!r.ok) continue;
+      const html = await r.text();
+      if (html.length < 5000) continue;  // 404 page is ~21KB but might be short on errors
+
+      // Extract <source src="..."> from <template id="player-html-template">
+      const tmplM = html.match(/<template[^>]+id=["']player-html-template["'][^>]*>([\s\S]*?)<\/template>/i);
+      if (!tmplM) { console.log(`[animephoenix] no template in ${slug}`); continue; }
+
+      const tmplHtml = tmplM[1];
+      const sources: UnifiedSource[] = [];
+      for (const m of tmplHtml.matchAll(/<source[^>]+src=["']([^"']+)["'][^>]*/gi)) {
+        const srcUrl = m[1];
+        if (!srcUrl.startsWith("http")) continue;
+        const qualM = srcUrl.match(/[-_\s\[\(](\d{3,4})[pP]/);
+        const h = qualM ? parseInt(qualM[1]) : 0;
+        const { quality, qualityRank } = h >= 1080 ? { quality: "FHD", qualityRank: 10 }
+          : h >= 720 ? { quality: "HD",  qualityRank: 9 }
+          : h >= 480 ? { quality: "SD",  qualityRank: 7 }
+          : { quality: "HD", qualityRank: 8 };
+        sources.push({
+          name: `فينيكس${h ? " · " + h + "p" : ""}`,
+          url: srcUrl, quality, qualityRank,
+          site: "animephoenix",
+          directUrl: srcUrl,
+          directType: "mp4",
+        });
+        console.log(`[animephoenix] ✅ ${quality} ${slug} ep${ep} → ${srcUrl.slice(0, 80)}`);
+      }
+      if (sources.length) return sources;
+    } catch (e: any) {
+      if (e?.name !== "TimeoutError") console.warn(`[animephoenix] ${slug}: ${e?.message}`);
+    }
+  }
+  console.log("[animephoenix] no sources found");
+  return [];
+}
+
+// ════════════════════════════════════════════════════════════════════
 //  KAWAII-ANIME.COM scraper  (Next.js Arabic anime — no CF)
 //  API: GET /api/watch?anilistId={id}&ep={ep}
 //  Returns sources from video.kawaii-anime.com CDN (CORS *, Range: bytes)
@@ -13044,8 +13326,9 @@ router.get("/anime/sources-stream", async (req, res) => {
       // scrapeCached("faselhd_db", () => getFaselhdDbSources(title, english, ep, isMovie), false, 28000),
       // witanime: معطّل بطلب المستخدم
       // scrapeCached("witanime",  () => getWitanimeSources(title, english, ep),   false, 50000),
-      scrapeCached("anime3rb",  () => getAnime3rbSources(title, english, ep),   false, 38000),
-      scrapeCached("akoam",     () => getAkoamSources(title, english, ep),       false, 22000),
+      scrapeCached("anime3rb",     () => getAnime3rbSources(title, english, ep),       false, 38000),
+      // akoam: حُذف 2026-07-28 — كان يستخدم hopxBrowserExtract (browser) على كل طلب
+      scrapeCached("animephoenix", () => getAnimephoenixSources(title, english, ep),   false, 15000),
       // ── MovieBox — MP4 مباشر، صوت خام، بدون ترجمة مدمجة ─────────────────────
       scrapeCached("moviebox",  () => getMovieBoxAnimeSources(title, english, ep, isMovie), false, 18000),
       // ── أبس أنمي — معطّل مؤقتاً (OK.ru يحجب datacenter IPs) ────────────────────
@@ -13121,6 +13404,9 @@ router.get("/anime/fetch-source", async (req, res) => {
     "sanime",    // مُضاف 2026-07-24 — MP4 مباشر عربي مدبلج
     // mitanime: محذوف بطلب المستخدم 2026-07-27
     "anifox",    // ANIFOX 2.4.2 — Archive/MediaFire/MP4Upload/Uqload; Yandex filtered
+    "blkom",         // بالكوم — Hound CF bypass + bkvideo CDN direct fetch; مُضاف 2026-07-28
+    "animephoenix",  // أنمي فينيكس — /episodes/{slug}-episode-{N} direct HTTP; مُضاف 2026-07-28
+    // "akoam": حُذف 2026-07-28 — كان يستخدم hopxBrowserExtract (browser) على كل طلب
     // "allmanga": معطّل 2026-07-17 — AA_CRYPTO_MISSING
     // videasy_anim: نُقل بالكامل إلى قسم الأنيميشن بطلب المستخدم 2026-07-15
     // xpass_anim: محذوف — CDN (ps1/vip.1x2.space) يحجب VPS 2026-07-15
@@ -13247,9 +13533,10 @@ router.get("/anime/fetch-source", async (req, res) => {
       // ── TMDB-native (StarCima محذوف من الأنمي — مصادر إنجليزية) ─────────────────────
       // case "starcima_anim": محذوف — يرسل صوتاً هندياً في قسم الأنمي
       // videasy_anim: نُقل بالكامل إلى قسم الأنيميشن بطلب المستخدم 2026-07-15
-      // vidlink_anim / mxplayer / animephoenix / ristoanime: معطّلة — أُزيلت من دورة السكرابر (لا تعمل)
+      // vidlink_anim / mxplayer / ristoanime: معطّلة — أُزيلت من دورة السكرابر (لا تعمل)
       // lordflix_anim: محذوف
       // case "vyla_anim": DEAD
+      case "animephoenix":  (await race(getAnimephoenixSources(title, english, ep), 15_000, [])).forEach(collectSrc); break;
       case "vidfast":       (await race(getVidFastAnimeSources(title, english, ep, anilistId), 20_000, [])).forEach(collectSrc); break;
       case "dulo_anim":    (await race(getDuloAnimeSources(title, english, ep, anilistId),     18_000, [])).forEach(collectSrc); break;
       case "cinesrc_anim": (await race(getCineSrcAnimeSources(title, english, ep, anilistId), 35_000, [])).forEach(collectSrc); break;
@@ -13259,7 +13546,7 @@ router.get("/anime/fetch-source", async (req, res) => {
       // case "witanime": معطّل بطلب المستخدم
       // reanime: محذوف بطلب المستخدم 2026-07-24
       // case "reanime":    (await race(getReanímeSources(title, english, ep, anilistId),    25_000, [])).forEach(collectSrc); break;
-      case "akoam":        await runExtract(await race(getAkoamSources(title, english, ep), 22_000, [])); break;
+      // case "akoam": حُذف 2026-07-28 — browser (hopxBrowserExtract) على كل طلب
       case "moviebox":     (await race(getMovieBoxAnimeSources(title, english, ep, isMovie), 18_000, [])).forEach(collectSrc); break;
       case "anime3rb":     (await race(getAnime3rbSources(title, english, ep), 38_000, [])).forEach(collectSrc); break;
       case "anipub":     (await race(getAniPubSources(title, english, ep),  20_000, [])).forEach(collectSrc); break;
@@ -13271,6 +13558,7 @@ router.get("/anime/fetch-source", async (req, res) => {
       // case "xyra_anim":    (await race(getXyraAnimeSources(title, english, ep, anilistId), 18_000, [])).forEach(collectSrc); break;
       case "sanime":       (await race(getSAnimeSources(title, english, ep),               20_000, [])).forEach(collectSrc); break;
       case "anifox":       (await race(getAnifoxSources(title, english, ep),               30_000, [])).forEach(collectSrc); break;
+      case "blkom":        (await race(getBlkomSources(title, english, ep),                70_000, [])).forEach(collectSrc); break;
       case "anslayer":     (await race(getAnimeSlayerSources(title, english, ep, anslayerId, titleAr), 20_000, [])).forEach(collectSrc); break;
       case "ristoanime":   (await race(getRistoAnimeSources(title, english, ep),          22_000, [])).forEach(collectSrc); break;
       // case "allmanga": معطّل 2026-07-17

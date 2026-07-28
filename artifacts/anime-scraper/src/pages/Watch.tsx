@@ -185,6 +185,9 @@ const SCRAPER_DEFS: { site: string; name: string; desc: string; tag: string; aud
   { site: "vidbolt_anim",     name: "VidBolt",      desc: "إنجليزي · HLS", tag: "VB" },
   { site: "sanime",           name: "سـAnime",       desc: "عربي · MP4 مباشر",        tag: "SA", isArabic: true },
   { site: "anifox",           name: "ANIFOX",        desc: "Archive · MediaFire · MP4Upload · Uqload", tag: "FX", isArabic: true },
+  { site: "blkom",            name: "بالكوم",         desc: "عربي · MP4 مباشر · CDN",        tag: "BK", isArabic: true },
+  { site: "animephoenix",    name: "أنمي فينيكس",   desc: "عربي · مباشر · phoenixpr CDN",  tag: "PH", isArabic: true },
+  // akoam: حُذف 2026-07-28 — كان يستخدم hopxBrowserExtract (browser) على كل طلب
 ];
 
 /** مجموعة المصادر العربية — لا تعرض زر الترجمة الخارجية لها */
