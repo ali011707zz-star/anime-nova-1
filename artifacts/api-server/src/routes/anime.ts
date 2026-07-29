@@ -1088,8 +1088,19 @@ function parseStreamtape(html: string): { url: string; type: "mp4" } | null {
       return { url: "https:" + combined, type: "mp4" };
     }
 
-    // --- Pattern D: get_video?id=...&token=... مباشراً (لا يُعيد الـ token المزيّف داخل <div>) ---
-    // نبحث فقط في سياق JS (بعد نهاية أقرب وسم HTML)
+    // --- Pattern E: محتوى مباشر في div#robotlink (2025+) ---
+    // <div id="robotlink" style="display:none;">/streamtape.to/get_video?id=...&token=...</div>
+    const mRobot = html.match(/id=["']robotlink["'][^>]*>([^<]+)/);
+    if (mRobot) {
+      let raw = mRobot[1].trim();
+      // /streamtape.to/get_video?... → https://streamtape.to/get_video?...
+      if (raw.startsWith("/") && !raw.startsWith("//")) raw = "https:/" + raw;
+      else if (raw.startsWith("//")) raw = "https:" + raw;
+      if (raw.includes("get_video")) return { url: raw, type: "mp4" };
+    }
+
+    // --- Pattern D: get_video?id=...&token=... مباشراً في سياق JS ---
+    // نبحث فقط في سياق JS (بعد إزالة محتوى divs لتجنب الـ token المزيّف)
     const jsSection = html.replace(/<div[^>]*>.*?<\/div>/gis, "");
     const m3 = jsSection.match(/get_video\?id=[^&"'<\s]+&expires=\d+(?:&ip=[^&"'<\s]+)?&token=[^&"'<>\s;)]+/);
     if (m3) return { url: "https://streamtape.com/" + m3[0], type: "mp4" };
