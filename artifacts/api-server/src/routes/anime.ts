@@ -1274,16 +1274,8 @@ async function getAnifoxSources(
       || episodes.find((e: any) => Number(e?.episode_id) && String(e?.episode_title || "").includes(`الحلقة ${ep}`));
     if (!episode?.episode_id) return [];
 
-    const sourceRes = await fetch("https://max-panel.monster/api/Content/getSourceByEpisodeID", {
-      method: "POST",
-      headers: { "Unique-Key": "flix!123", Accept: "application/json", "Content-Type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({ episode_id: String(episode.episode_id) }),
-      signal: AbortSignal.timeout(12_000),
-    });
-    const sourceJson = await sourceRes.json().catch(() => null) as any;
-    const rawSources = Array.isArray(sourceJson?.data) ? sourceJson.data : [];
-    const fallbackSources = Array.isArray(episode.sources) ? episode.sources : [];
-    const allSources = rawSources.length ? rawSources : fallbackSources;
+    // المصادر مضمّنة في getSeasonByContentID مباشرةً — لا حاجة لـ getSourceByEpisodeID
+    const allSources = Array.isArray(episode.sources) ? episode.sources : [];
     // ── فلتر المصادر الموثوقة فقط — نتجاهل الـ embeds وصفحات الهبوط غير المدعومة ──
     // مصادر مدعومة: archive.org · mediafire · mp4upload · uqload · direct CDN (.mp4/.mkv/.webm)
     const ANIFOX_TRUSTED = (url: string) => {
