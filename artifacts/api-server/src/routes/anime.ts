@@ -13168,6 +13168,7 @@ router.get("/anime/sources-stream", async (req, res) => {
   const reqYear     = parseInt((req.query.year     as string) || "0") || null;
   const reqNative   = ((req.query.native   as string) || "").trim() || null;
   const reqTotalEps = parseInt((req.query.episodes as string) || "0") || null;
+  const titleAr     = ((req.query.titleAr  as string) || "").trim() || null;
   const seasonNum   = extractSeasonNum(title) ?? extractSeasonNum(english || "") ?? null;
   const matchCtx: MatchCtx = {
     romaji: title, english, native: reqNative,
