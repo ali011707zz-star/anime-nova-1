@@ -173,25 +173,25 @@ def create_sandbox():
         except Exception: pass
         raise RuntimeError('curl_cffi failed to install/import')
 
-    # Install playwright (for browser-extract endpoint)
-    log.info('Installing playwright in sandbox...')
+    # Install patchright (stealth Chromium — يحل CF Turnstile بدون كشف)
+    log.info('Installing patchright in sandbox...')
     r_pw = sb.commands.run(
-        'pip install playwright -q --break-system-packages 2>&1 | tail -3',
+        'pip install patchright -q --break-system-packages 2>&1 | tail -3',
         timeout=120,
     )
-    log.info(f'playwright pip: {r_pw.stdout.strip()[-200:]}')
-    # Install Chromium + system dependencies (libnspr4 etc.)
+    log.info(f'patchright pip: {r_pw.stdout.strip()[-200:]}')
+    # Install Chromium عبر patchright (يثبت نسخة مُعدَّلة stealth)
     r_cr = sb.commands.run(
-        'playwright install --with-deps chromium 2>&1 | tail -8',
+        'patchright install --with-deps chromium 2>&1 | tail -8',
         timeout=300,
     )
-    log.info(f'chromium install: {r_cr.stdout.strip()[-400:]}')
-    # Quick playwright smoke test
+    log.info(f'patchright chromium install: {r_cr.stdout.strip()[-400:]}')
+    # Quick patchright smoke test
     r_pw_check = sb.commands.run(
-        'python3 -c "from playwright.sync_api import sync_playwright; print(\'playwright OK\')"',
+        'python3 -c "from patchright.sync_api import sync_playwright; print(\'patchright OK\')"',
         timeout=15,
     )
-    log.info(f'playwright check: {r_pw_check.stdout.strip()}')
+    log.info(f'patchright check: {r_pw_check.stdout.strip()}')
 
     # Start the server in background
     sb.commands.run(

@@ -28,9 +28,17 @@ session = cf.Session()
 _PLAYWRIGHT_OK: bool | None = None
 
 def _check_playwright() -> bool:
+    """يتحقق من توفر patchright أو playwright."""
     global _PLAYWRIGHT_OK
     if _PLAYWRIGHT_OK is not None:
         return _PLAYWRIGHT_OK
+    # patchright أولاً (stealth) ثم playwright عادي
+    try:
+        from patchright.sync_api import sync_playwright  # noqa
+        _PLAYWRIGHT_OK = True
+        return _PLAYWRIGHT_OK
+    except Exception:
+        pass
     try:
         from playwright.sync_api import sync_playwright  # noqa
         _PLAYWRIGHT_OK = True
@@ -484,18 +492,24 @@ def get_html_sync(url: str, referer: str, wait_ms: int) -> dict:
         return {"ok": False, "html": "", "error": str(e)}
 
 
-# ── Cookie extractor (Playwright) ─────────────────────────────────────────────
+# ── Cookie extractor (patchright — stealth Chromium يحل CF Turnstile) ────────
 # يُشغّل المتصفح مرة واحدة → يحل CF challenge → يُرجع كل الكوكيز + HTML المُعالج.
 # الـ caller يخزّنها ويعيد استخدامها بدون متصفح في الطلبات التالية.
 
 async def _async_extract_cookies(url: str, referer: str, wait_ms: int) -> dict:
-    from playwright.async_api import async_playwright
+    # نحاول patchright أولاً (stealth) — إذا فشل نرجع لـ playwright عادي
+    try:
+        from patchright.async_api import async_playwright as _apw
+        _use_patch = True
+    except ImportError:
+        from playwright.async_api import async_playwright as _apw  # type: ignore
+        _use_patch = False
+
     cookies_list: list = []
-    async with async_playwright() as pw:
+    async with _apw() as pw:
         browser = await pw.chromium.launch(
             headless=True,
-            args=["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu",
-                  "--disable-blink-features=AutomationControlled"],
+            args=["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu"],
         )
         ctx = await browser.new_context(
             user_agent=(
@@ -506,14 +520,10 @@ async def _async_extract_cookies(url: str, referer: str, wait_ms: int) -> dict:
             extra_http_headers={"Referer": referer} if referer else {},
             ignore_https_errors=True,
         )
-        # إخفاء بصمة webdriver
-        await ctx.add_init_script(
-            "Object.defineProperty(navigator,'webdriver',{get:()=>undefined})"
-        )
         page = await ctx.new_page()
         try:
-            await page.goto(url, timeout=30000, wait_until="domcontentloaded")
-            # انتظر حل CF challenge + تحميل JS
+            await page.goto(url, timeout=35000, wait_until="domcontentloaded")
+            # انتظر حل CF Turnstile — patchright يحلها تلقائياً
             await asyncio.sleep(wait_ms / 1000)
             cookies_list = await ctx.cookies()
             html  = await page.content()
@@ -529,6 +539,7 @@ async def _async_extract_cookies(url: str, referer: str, wait_ms: int) -> dict:
         "cookies":    {c["name"]: c["value"] for c in cookies_list},
         "html":       html[:80000],
         "title":      title,
+        "engine":     "patchright" if _use_patch else "playwright",
     }
 
 
