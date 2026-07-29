@@ -3303,6 +3303,7 @@ export default function WatchPage() {
       mycima:       34000,  // backend = 30s + هامش 4s
       witanime:     48000,  // backend = 45s + هامش 3s
       anikototv:    28000,  // backend = 25s + هامش 3s
+      anslayer:     50000,  // backend = 45s + هامش 5s (parallel embed extraction)
       // mitanime: محذوف 2026-07-27
       // reanime: محذوف 2026-07-24
       hianime:      26000,  // backend = 22s + هامش 4s
