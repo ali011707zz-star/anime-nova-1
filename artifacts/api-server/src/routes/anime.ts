@@ -7052,9 +7052,8 @@ async function getKawaiiAnimeSources(
 
     return data.sources.map((src) => {
       const isHls = src.isM3U8 === true || src.type === "hls";
-      // video.kawaii-anime.com CDN يتحقق من Referer + md5 token —
-      // يجب تمرير الطلب عبر proxy حتى يُرسَل الـ Referer الصحيح.
       const refEnc = encodeURIComponent(KAWAII_BASE + "/");
+      // directUrl: عبر proxy للـ VPS (يُرسَل Referer تلقائياً)
       const directUrl = isHls
         ? `/api/anime/hls-proxy?url=${encodeURIComponent(src.url)}&ref=${refEnc}`
         : `/api/anime/video-proxy?url=${encodeURIComponent(src.url)}&ref=${refEnc}`;
@@ -7066,10 +7065,13 @@ async function getKawaiiAnimeSources(
         site: "kawaii",
         directUrl,
         directType: isHls ? "hls" : "mp4",
+        // rawUrl: المتصفح يشغّل مباشرة مع Referer header — لا يمر بـ VPS
+        rawUrl: src.url,
         corsOk: false,
         subtitleUrl,
         skipIntro,
         skipOutro,
+        extra: { headers: { Referer: KAWAII_BASE + "/" } },
       } as UnifiedSource;
     });
   } catch { return []; }
@@ -12561,85 +12563,80 @@ async function getAnimeSlayerSources(
     // ── 3) روابط المشغلات الخارجية ──
     const r = await fetch(muiltUrl, {
       headers: { "User-Agent": "okhttp/4.9.3" },
-      signal: AbortSignal.timeout(12_000),
+      signal: AbortSignal.timeout(8_000),
     });
     if (!r.ok) return out;
     const embedLinks: string[] = await r.json().catch(() => []);
     if (!Array.isArray(embedLinks)) return out;
 
-    for (const link of embedLinks.slice(0, 6)) {
-      if (typeof link !== "string" || !link.startsWith("http")) continue;
-      try {
-        if (link.includes("mediafire.com")) {
-          const direct = await extractMediafireDirect(link);
-          if (direct) {
-            // MediaFire CDN URL (من API) لا يحتاج Referer → مباشر على الموبايل بدون proxy
-            out.push({
+    // معالجة الروابط بالتوازي بدلاً من التسلسل — كل رابط له 10s budget
+    const linkResults = await Promise.allSettled(
+      embedLinks.slice(0, 6).map(async (link): Promise<UnifiedSource | null> => {
+        if (typeof link !== "string" || !link.startsWith("http")) return null;
+        if (link.includes("drive.google.com")) return null;
+        try {
+          if (link.includes("mediafire.com")) {
+            const direct = await Promise.race([
+              extractMediafireDirect(link),
+              new Promise<null>(r => setTimeout(() => r(null), 9_000)),
+            ]);
+            if (!direct) return null;
+            return {
               name: "AnimeSlayer · MediaFire", url: link, quality: "FHD", qualityRank: 12,
-              site: "anslayer",
-              directUrl: direct,
-              directType: "mp4",
-              corsOk: true,
-            });
+              site: "anslayer", directUrl: direct, directType: "mp4", corsOk: true,
+            };
           }
-          continue;
-        }
-        if (link.includes("drive.google.com")) continue; // Google Drive غير مدعوم كمصدر مباشر
-        if (link.includes("ok.ru")) {
-          const oid = link.match(/ok\.ru\/video\/(\d+)/)?.[1] || link.match(/ok\.ru\/videoembed\/(\d+)/)?.[1];
-          if (oid) {
-            const vids = await extractOkRuVideo(oid);
-            // Prefer the adaptive HLS master (mirror-raced — more resilient to
-            // a blocked primary CDN host) over a single fixed-quality MP4.
+          if (link.includes("ok.ru")) {
+            const oid = link.match(/ok\.ru\/video\/(\d+)/)?.[1] || link.match(/ok\.ru\/videoembed\/(\d+)/)?.[1];
+            if (!oid) return null;
+            const vids = await Promise.race([
+              extractOkRuVideo(oid),
+              new Promise<[]>(r => setTimeout(() => r([]), 9_000)),
+            ]);
             const hlsMaster = vids.find(v => v.type === "hls" && v.name === "auto");
-            const bestMp4 = vids
-              .filter(v => v.type !== "hls")
+            const bestMp4   = vids.filter(v => v.type !== "hls")
               .sort((a, b) => (parseInt(b.name) || 0) - (parseInt(a.name) || 0))[0];
-
-            if (hlsMaster) {
-              out.push({
-                name: "AnimeSlayer · OK.ru", url: link, quality: "FHD", qualityRank: 11,
-                site: "anslayer",
-                directUrl: `/api/anime/hls-proxy?url=${encodeURIComponent(hlsMaster.url)}&ref=${encodeURIComponent("https://ok.ru/")}`,
-                directType: "hls",
-              });
-            } else if (bestMp4) {
-              // OK.ru name = height رقم ("1080","720","480","360") — نحوّله لتسمية واضحة
-              const okQuality = (() => {
-                const h = parseInt(bestMp4.name || "0", 10);
-                if (h >= 1080) return "FHD";
-                if (h >= 720)  return "HD";
-                if (h >= 480)  return "SD";
-                return bestMp4.name || "HD"; // الافتراضي HD لأن AS يستضيف 720p كحد أدنى
-              })();
-              out.push({
-                name: "AnimeSlayer · OK.ru", url: link, quality: okQuality, qualityRank: 10,
+            if (hlsMaster) return {
+              name: "AnimeSlayer · OK.ru", url: link, quality: "FHD", qualityRank: 11,
+              site: "anslayer",
+              directUrl: `/api/anime/hls-proxy?url=${encodeURIComponent(hlsMaster.url)}&ref=${encodeURIComponent("https://ok.ru/")}`,
+              directType: "hls",
+            };
+            if (bestMp4) {
+              const h = parseInt(bestMp4.name || "0", 10);
+              const okQ = h >= 1080 ? "FHD" : h >= 720 ? "HD" : h >= 480 ? "SD" : bestMp4.name || "HD";
+              return {
+                name: "AnimeSlayer · OK.ru", url: link, quality: okQ, qualityRank: 10,
                 site: "anslayer",
                 directUrl: `/api/anime/video-proxy?url=${encodeURIComponent(bestMp4.url)}&ref=${encodeURIComponent("https://ok.ru/")}`,
                 directType: "mp4",
-              });
+              };
             }
+            return null;
           }
-          continue;
-        }
-        // mixdrop / streamtape / filemoon / streamwish-family → extractVideoDeep
-        const extracted = await extractVideoDeep(link, link);
-        if (extracted?.url) {
+          // mixdrop / streamtape / filemoon / streamwish-family → extractVideoDeep
+          const extracted = await Promise.race([
+            extractVideoDeep(link, link),
+            new Promise<null>(r => setTimeout(() => r(null), 9_000)),
+          ]);
+          if (!extracted?.url) return null;
           const host = link.includes("mixdrop") ? "MixDrop"
             : link.includes("streamtape") ? "Streamtape"
-            : link.includes("filemoon") ? "FileMoon"
-            : link.includes("ok.ru") ? "OK.ru"
+            : link.includes("filemoon")    ? "FileMoon"
             : "External";
-          out.push({
+          return {
             name: `AnimeSlayer · ${host}`, url: link, quality: "FHD", qualityRank: 10,
             site: "anslayer",
             directUrl: extracted.type === "hls"
               ? `/api/anime/hls-proxy?url=${encodeURIComponent(extracted.url)}&ref=${encodeURIComponent(link)}`
               : `/api/anime/video-proxy?url=${encodeURIComponent(extracted.url)}&ref=${encodeURIComponent(link)}`,
             directType: extracted.type,
-          });
-        }
-      } catch { /* skip this link */ }
+          };
+        } catch { return null; }
+      })
+    );
+    for (const r of linkResults) {
+      if (r.status === "fulfilled" && r.value) out.push(r.value);
     }
 
     console.log(`[AnimeSlayer] "${best.name}" ep${ep} → ${out.length} sources`);
@@ -13461,7 +13458,7 @@ router.get("/anime/sources-stream", async (req, res) => {
       // xyra_anim: معطّل مؤقتاً — api.xyra.stream يرجع 502 (Cloudflare) لكل الطلبات منذ 2026-07-09
       // scrapeCached("xyra_anim",  () => getXyraAnimeSources(title, english, ep, anilistId),  false, 18000),
       scrapeCached("sanime",     () => getSAnimeSources(title, english, ep),                 false, 20000),
-      scrapeCached("anslayer",   () => getAnimeSlayerSources(title, english, ep, undefined, titleAr), false, 20000),
+      scrapeCached("anslayer",   () => getAnimeSlayerSources(title, english, ep, undefined, titleAr), false, 45000),
       // animetime / notorrent: أُزيلت كلياً بطلب المستخدم (2026-07-09)
     ]);
 
@@ -13668,7 +13665,7 @@ router.get("/anime/fetch-source", async (req, res) => {
       case "sanime":       (await race(getSAnimeSources(title, english, ep),               20_000, [])).forEach(collectSrc); break;
       case "anifox":       (await race(getAnifoxSources(title, english, ep),               30_000, [])).forEach(collectSrc); break;
       // case "blkom": حُذف 2026-07-28 — Hound browser dependency
-      case "anslayer":     (await race(getAnimeSlayerSources(title, english, ep, anslayerId, titleAr), 20_000, [])).forEach(collectSrc); break;
+      case "anslayer":     (await race(getAnimeSlayerSources(title, english, ep, anslayerId, titleAr), 45_000, [])).forEach(collectSrc); break;
       case "ristoanime":   (await race(getRistoAnimeSources(title, english, ep),          22_000, [])).forEach(collectSrc); break;
       // case "allmanga": معطّل 2026-07-17
       case "nflixmovies_anim": (await race(getNflixMoviesAnimeSources(english, title, ep, isMovie, anilistId), 18_000, [])).forEach(collectSrc); break;

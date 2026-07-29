@@ -54,7 +54,7 @@ export const SITE_TTL: Record<string, number> = {
   dahmermovies:   30 * 24 * 3_600_000,  // a.111477.xyz → p.111477.xyz direct MP4/MKV
   dahmermovies_anim: 30 * 24 * 3_600_000,
 };
-const DEFAULT_TTL = 4 * 3_600_000;
+const DEFAULT_TTL = 2 * 3_600_000;
 
 // URLs من هذه الأنماط تُعامَل كدائمة (TTL=30 يوم بدل حساب expiry من URL)
 const PERMANENT_URL_PATTERNS: Array<[RegExp, number]> = [
@@ -238,7 +238,8 @@ export async function setSourceCache(
 }
 
 export function shouldRefreshCache(expiresAt: number): boolean {
-  return expiresAt - Date.now() < 45 * 60_000;
+  // تجديد خلفي عندما يبقى أقل من 90 دقيقة على الانتهاء (كان 45 دقيقة)
+  return expiresAt - Date.now() < 90 * 60_000;
 }
 
 export function getCacheStats(): { l1Size: number; supabaseEnabled: boolean } {
