@@ -1138,10 +1138,22 @@ function parseMp4Upload(html: string): string | null {
   return null;
 }
 
-function parseUqloadDownload(html: string, pageUrl: string): string | null {
-  const m = html.match(/href=["'](\/d\/[A-Za-z0-9_-]+)["']/i);
+function parseUqloadHls(html: string): string | null {
+  // Uqload يشفّر الـ player setup بـ Dean Edwards packer
+  const re = /eval\(function\(p,a,c,k,e,d?\)\{[\s\S]+?\}\('([\s\S]+?)',(\d+),(\d+),'([\s\S]+?)'\.split/;
+  const m = html.match(re);
   if (!m) return null;
-  try { return new URL(m[1], pageUrl).toString(); } catch { return null; }
+  let [, p, a, c, k] = m as [string, string, string, string, string];
+  const base = parseInt(a), count = parseInt(c);
+  const keys = k.split("|");
+  let decoded = p;
+  let i = count;
+  while (i--) if (keys[i]) decoded = decoded.replace(new RegExp("\\b" + i.toString(base) + "\\b", "g"), keys[i]);
+  // استخرج file URL من jwplayer sources
+  const fm = decoded.match(/['"]file['"]\s*:\s*['"]( https?:\/\/[^'"]+)['"]/);
+  if (fm) return fm[1].trim();
+  const fm2 = decoded.match(/file["']?\s*:\s*["'](https?:\/\/[^"']+)["']/);
+  return fm2 ? fm2[1].trim() : null;
 }
 
 function anifoxQualityRank(quality: string): number {
@@ -1168,7 +1180,7 @@ async function extractAnifoxExternal(
     if (!r.ok) return null;
     const html = await r.text();
     let directUrl: string | null = null;
-    let directType: "mp4" = "mp4";
+    let directType: "mp4" | "hls" = "mp4";
     let referer = pageUrl;
 
     if (lower.includes("mp4upload.com")) {
@@ -1176,14 +1188,20 @@ async function extractAnifoxExternal(
     } else if (lower.includes("mediafire.com")) {
       directUrl = await extractMediafireDirect(pageUrl);
     } else if (lower.includes("uqload.is") || lower.includes("uqload.co") || lower.includes("uqload.com")) {
-      directUrl = parseUqloadDownload(html, pageUrl);
+      directUrl = parseUqloadHls(html);
       referer = "https://uqload.is/";
+      if (directUrl) directType = "hls";
     } else if (/\.(mp4|mkv|webm)(?:[?#]|$)/i.test(pageUrl) || lower.includes("archive.org/download/")) {
       directUrl = pageUrl;
       referer = "https://archive.org/";
     }
     if (!directUrl) return null;
-    const proxied = `/api/anime/video-proxy?url=${encodeURIComponent(directUrl)}&ref=${encodeURIComponent(referer)}`;
+
+    // HLS → hls-proxy ، MP4 → video-proxy
+    const proxied = directType === "hls"
+      ? `/api/anime/hls-proxy?url=${encodeURIComponent(directUrl)}&ref=${encodeURIComponent(referer)}`
+      : `/api/anime/video-proxy?url=${encodeURIComponent(directUrl)}&ref=${encodeURIComponent(referer)}`;
+
     return {
       name: `ANIFOX · ${sourceName} · ${quality || "HD"}`,
       url: pageUrl,
