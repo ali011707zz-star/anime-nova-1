@@ -521,37 +521,11 @@ async function hopxProxyGet(
   } catch { return null; }
 }
 
-// ════════════════════════════════════════════════════════════════════
-//  hopxBrowserExtract — استخراج رابط فيديو مباشر عبر متصفح Playwright
-//  في Hopx sandbox (headless Chromium يُنفّذ JS ويعترض طلبات الشبكة)
-// ════════════════════════════════════════════════════════════════════
+// hopxBrowserExtract — معطَّل 2026-07-28 (حُذف المتصفح من VPS لتوفير الذاكرة)
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 async function hopxBrowserExtract(
-  url: string,
-  referer?: string,
-  timeoutMs = 25000,
-): Promise<{ url: string; type: "hls" | "mp4" } | null> {
-  // نتحقق أولاً أن الـ sandbox حي وأن playwright متاح
-  try {
-    const h = await fetch(`${HOPX_PROXY_BASE}/health`, { signal: AbortSignal.timeout(4000) });
-    if (!h.ok) return null;
-    const hj = await h.json() as { ok?: boolean; playwright?: boolean };
-    if (!hj.ok || !hj.playwright) return null;
-  } catch { return null; }
-
-  try {
-    const params = new URLSearchParams({ url, timeout: String(timeoutMs) });
-    if (referer) params.set("ref", referer);
-    const r = await fetch(`${HOPX_PROXY_BASE}/browser-extract?${params}`, {
-      signal: AbortSignal.timeout(timeoutMs + 12000),
-    });
-    if (!r.ok) return null;
-    const data = await r.json() as { ok?: boolean; urls?: Array<{ url: string; type: string }>; error?: string };
-    if (data.error) { console.warn("[hopxBrowser]", data.error); return null; }
-    if (!data.ok || !data.urls?.length) return null;
-    const first = data.urls[0];
-    return { url: first.url, type: first.type === "hls" ? "hls" : "mp4" };
-  } catch { return null; }
-}
+  _url: string, _referer?: string, _timeoutMs = 25000,
+): Promise<{ url: string; type: "hls" | "mp4" } | null> { return null; }
 
 
 // ════════════════════════════════════════════════════════════════════
@@ -6203,28 +6177,7 @@ async function a3rbTriggerCookieRefresh(): Promise<void> {
   }
 }
 
-// تشغيل عند بدء السيرفر: تحميل الكوكيز من Supabase + بدء الـ scheduler
-(async function initA3rbCookieSystem() {
-  // 1. حمّل الكوكيز من Supabase
-  await a3rbLoadCookieFromSupabase();
-
-  // 2. إن لم يكن هناك كوكيز صالحة → جدّد فوراً
-  const age = _a3rbCfCookieAt ? Date.now() - _a3rbCfCookieAt : A3RB_COOKIE_TTL + 1;
-  if (age >= A3RB_COOKIE_TTL - A3RB_REFRESH_BEFORE) {
-    console.log("[anime3rb] cookie near/past expiry on startup → triggering refresh");
-    a3rbTriggerCookieRefresh().catch(() => {});
-  }
-
-  // 3. فحص دوري كل 30 دقيقة
-  setInterval(() => {
-    const remaining = A3RB_COOKIE_TTL - (Date.now() - (_a3rbCfCookieAt || 0));
-    if (remaining < A3RB_REFRESH_BEFORE) {
-      const remH = Math.round(remaining / 3_600_000 * 10) / 10;
-      console.log(`[anime3rb] 🔄 cookie expires in ${remH}h → auto-refresh`);
-      a3rbTriggerCookieRefresh().catch(() => {});
-    }
-  }, A3RB_CHECK_INTERVAL);
-})().catch(e => console.error("[anime3rb] initCookieSystem error:", e.message));
+// initA3rbCookieSystem: معطَّل 2026-07-28 — anime3rb حُذف (browser dependency)
 
 /** يُرجع حالة الكوكيز الحالية لنظام التجديد الخارجي (nopecha-refresh) */
 export function getA3rbCfCookieStatus(): {
@@ -6366,31 +6319,11 @@ async function a3rbFetchPageViaBrowser(url: string, timeoutMs = 60000): Promise<
 }
 
 /** جلب صفحة HTML عبر Hopx browser-html (Playwright headless) — للاستخدامات العامة */
+// hopxBrowserHtml — معطَّل 2026-07-28 (حُذف المتصفح من VPS)
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 async function hopxBrowserHtml(
-  url: string,
-  referer?: string,
-  waitMs = 5000,
-  timeoutMs = 35000,
-): Promise<string | null> {
-  try {
-    const h = await fetch(`${HOPX_PROXY_BASE}/health`, { signal: AbortSignal.timeout(4000) });
-    if (!h.ok) return null;
-    const hj = await h.json() as { ok?: boolean; playwright?: boolean };
-    if (!hj.ok || !hj.playwright) return null;
-  } catch { return null; }
-
-  try {
-    const params = new URLSearchParams({ url, wait: String(waitMs) });
-    if (referer) params.set("ref", referer);
-    const r = await fetch(`${HOPX_PROXY_BASE}/browser-html?${params}`, {
-      signal: AbortSignal.timeout(timeoutMs + 8000),
-    });
-    if (!r.ok) return null;
-    const data = await r.json() as { ok?: boolean; html?: string; error?: string };
-    if (!data.ok || !data.html) return null;
-    return data.html;
-  } catch { return null; }
-}
+  _url: string, _referer?: string, _waitMs = 5000, _timeoutMs = 35000,
+): Promise<string | null> { return null; }
 
 /**
  * البحث عن anime3rb slug عبر Animatoo Supabase DB
@@ -8924,52 +8857,7 @@ async function getAnimeWitcherSources(
       }
     }
 
-    // ── BUNNY: BunnyCDN — يحاول حقل bunny_video_id أولاً، ثم يستخرج من thumb_uri ──
-    let bunnyVideoId   = String(epDoc.bunny_video_id   || "").trim();
-    let bunnyLibraryId = String(epDoc.bunny_library_id || epDoc.library_id || "").trim();
-
-    // fallback: استخرج lib/vid من thumb_uri إذا كانت BunnyCDN URL
-    // نمط: https://vz-{library_id}.b-cdn.net/{video_id}/thumbnail.jpg
-    if (!bunnyVideoId || !bunnyLibraryId) {
-      const thumbUri = String(epDoc.thumb_uri || "").trim();
-      const bm = thumbUri.match(/vz-([a-f0-9-]+)\.b-cdn\.net\/([a-f0-9-]+)\//);
-      if (bm) {
-        bunnyLibraryId = bunnyLibraryId || bm[1];
-        bunnyVideoId   = bunnyVideoId   || bm[2];
-        console.log(`[AW/BUNNY] extracted from thumb_uri: lib=${bunnyLibraryId} vid=${bunnyVideoId}`);
-      }
-    }
-
-    if (bunnyVideoId && bunnyLibraryId && !seenUrls.has(bunnyVideoId)) {
-      seenUrls.add(bunnyVideoId);
-      const embedUrl  = `https://iframe.mediadelivery.net/embed/${bunnyLibraryId}/${bunnyVideoId}`;
-      // BunnyCDN blocks datacenter IPs (403 from VPS) → rawUrl يُشغَّل مباشرة في المتصفح بـ IP المستخدم
-      const rawMp4_720  = `https://vz-${bunnyLibraryId}.b-cdn.net/${bunnyVideoId}/play_720p.mp4`;
-      const rawMp4_1080 = `https://vz-${bunnyLibraryId}.b-cdn.net/${bunnyVideoId}/play_1080p.mp4`;
-      const rawMp4_480  = `https://vz-${bunnyLibraryId}.b-cdn.net/${bunnyVideoId}/play_480p.mp4`;
-
-      for (const [q, raw, qRank] of [
-        ["FHD 1080p", rawMp4_1080, 22] as const,
-        ["HD 720p",   rawMp4_720,  21] as const,
-        ["480p",      rawMp4_480,  10] as const,
-      ]) {
-        sources.push({
-          name:        `AnimeWitcher · ${q} · BUNNY`,
-          url:         embedUrl,
-          quality:     q.replace("FHD ","").replace("HD ",""),
-          qualityRank: qRank,
-          site:        "animewitcher",
-          // لا نستخدم video-proxy (VPS يُحجب بـ 403) — rawUrl مباشر للمتصفح
-          directUrl:   raw,
-          directType:  "mp4",
-          rawUrl:      raw,
-          extra:       { headers: { Referer: embedUrl, Origin: "https://iframe.mediadelivery.net" } },
-        });
-      }
-      console.log(`[AW/BUNNY] ✅ 3 sources — lib=${bunnyLibraryId} vid=${bunnyVideoId}`);
-    } else if (bunnyVideoId && !bunnyLibraryId) {
-      console.warn(`[AW/BUNNY] bunny_video_id=${bunnyVideoId} found but no library_id in ep doc or thumb_uri`);
-    }
+    // BUNNY: محذوف 2026-07-28 — vz-*.b-cdn.net "Domain suspended or not configured"
 
     console.log(`[AW] ✅ ${sources.length} sources for "${animeId}" ep${ep}`);
     return sources;
@@ -13546,7 +13434,8 @@ router.get("/anime/sources-stream", async (req, res) => {
       // scrapeCached("faselhd_db", () => getFaselhdDbSources(title, english, ep, isMovie), false, 28000),
       // witanime: معطّل بطلب المستخدم
       // scrapeCached("witanime",  () => getWitanimeSources(title, english, ep),   false, 50000),
-      scrapeCached("anime3rb",     () => getAnime3rbSources(title, english, ep),       false, 38000),
+      // anime3rb: حُذف 2026-07-28 — hound browser dependency
+      // scrapeCached("anime3rb", () => getAnime3rbSources(title, english, ep), false, 38000),
       // akoam: حُذف 2026-07-28 — كان يستخدم hopxBrowserExtract (browser) على كل طلب
       scrapeCached("animephoenix", () => getAnimephoenixSources(title, english, ep),   false, 15000),
       // ── MovieBox — MP4 مباشر، صوت خام، بدون ترجمة مدمجة ─────────────────────
@@ -13619,12 +13508,12 @@ router.get("/anime/fetch-source", async (req, res) => {
     "animekai",  // مُضاف بطلب المستخدم 2026-07-16
     "witanime",  // مُعاد تفعيله 2026-07-17 — _zH/_zW + ok.ru/yonaplay/streamwish resolution
     "anipub",    // مُضاف 2026-07-19 — AniPub/MegaPlay مدبلج+ترجمة+عربي
-    "anime3rb",  // مُضاف 2026-07-18 — Animatoo Supabase slug + Hopx browser-html
+    // "anime3rb": حُذف 2026-07-28 — cookie refresh يعتمد على hound browser
     // reanime: محذوف بطلب المستخدم 2026-07-24
     "sanime",    // مُضاف 2026-07-24 — MP4 مباشر عربي مدبلج
     // mitanime: محذوف بطلب المستخدم 2026-07-27
     "anifox",    // ANIFOX 2.4.2 — Archive/MediaFire/MP4Upload/Uqload; Yandex filtered
-    "blkom",         // بالكوم — Hound CF bypass + bkvideo CDN direct fetch; مُضاف 2026-07-28
+    // "blkom": حُذف 2026-07-28 — يعتمد على Hound browser في كل طلب
     "animephoenix",  // أنمي فينيكس — /episodes/{slug}-episode-{N} direct HTTP; مُضاف 2026-07-28
     // "akoam": حُذف 2026-07-28 — كان يستخدم hopxBrowserExtract (browser) على كل طلب
     // "allmanga": معطّل 2026-07-17 — AA_CRYPTO_MISSING
@@ -13768,7 +13657,7 @@ router.get("/anime/fetch-source", async (req, res) => {
       // case "reanime":    (await race(getReanímeSources(title, english, ep, anilistId),    25_000, [])).forEach(collectSrc); break;
       // case "akoam": حُذف 2026-07-28 — browser (hopxBrowserExtract) على كل طلب
       case "moviebox":     (await race(getMovieBoxAnimeSources(title, english, ep, isMovie), 18_000, [])).forEach(collectSrc); break;
-      case "anime3rb":     (await race(getAnime3rbSources(title, english, ep), 38_000, [])).forEach(collectSrc); break;
+      // case "anime3rb": حُذف 2026-07-28 — hound browser dependency
       case "anipub":     (await race(getAniPubSources(title, english, ep),  20_000, [])).forEach(collectSrc); break;
       // case "appsanime": disabled — OK.ru blocks datacenter IPs server-side
       case "nekowatch":    (await race(getNekowatchSources(title, english, ep, anilistId), 18_000, [])).forEach(collectSrc); break;
@@ -13778,7 +13667,7 @@ router.get("/anime/fetch-source", async (req, res) => {
       // case "xyra_anim":    (await race(getXyraAnimeSources(title, english, ep, anilistId), 18_000, [])).forEach(collectSrc); break;
       case "sanime":       (await race(getSAnimeSources(title, english, ep),               20_000, [])).forEach(collectSrc); break;
       case "anifox":       (await race(getAnifoxSources(title, english, ep),               30_000, [])).forEach(collectSrc); break;
-      case "blkom":        (await race(getBlkomSources(title, english, ep),                70_000, [])).forEach(collectSrc); break;
+      // case "blkom": حُذف 2026-07-28 — Hound browser dependency
       case "anslayer":     (await race(getAnimeSlayerSources(title, english, ep, anslayerId, titleAr), 20_000, [])).forEach(collectSrc); break;
       case "ristoanime":   (await race(getRistoAnimeSources(title, english, ep),          22_000, [])).forEach(collectSrc); break;
       // case "allmanga": معطّل 2026-07-17

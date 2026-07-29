@@ -42,6 +42,7 @@
 - [anime3rb Cookie Auto-Refresh](anime3rb-cookie-refresh-system.md) — nopecha-ext على OpenShift يحل Turnstile مرة/20h؛ scheduler 30min؛ Supabase site_cookies persistence؛ episodes table URL مباشر.
 - [AniPub/MegaPlay scraper](anipub-megaplay-scraper.md) — X-Requested-With:XMLHttpRequest لازم لـ getSourcesNew؛ M3U8 يحتاج Referer:megaplay.buzz؛ تجاوز CF عبر megaplay مباشرة.
 - [AniTaku StringCare V3 Decrypt](anitaku-stringcare-v3-decrypt.md) — ✅ محلول: key=package_name bytes؛ L=len(pkg)=11؛ plain[i]=(cipher[i]-(k*(i+L)//(i+1)))&0xFF؛ code=56389881-14c2-4bbe-b51e-347e3d98f34c؛ DB فارغة.
+- [Browser sources removed 2026-07-28](browser-sources-removed-2026-07-28.md) — blkom/anime3rb/BUNNY حُذفت؛ hopxBrowserExtract/Html=null stub؛ hound-service pm2-deleted؛ RAM نزل 42%→26.9%.
 
 - [AniTaku 0.1 RE findings](anitaku-v0.1-re-findings.md) — API=hasalaty.com/public/api/; yobdev DNS مات؛ register→JWT يعمل؛ {code}=StringCare V3 في SharedPrefs "cuepoint"؛ خريطة 70+ endpoint كاملة.
 - [Hopx+CF disabled 2026-07](hopx-cf-disabled-2026-07.md) — Hopx/CF Worker/MediaFlow كلها معطّلة؛ VPS-direct فقط؛ segFallback→502 فوري؛ CDN blocking هو السبب الحقيقي لفشل HLS.
