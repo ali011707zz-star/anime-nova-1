@@ -45,6 +45,7 @@
 - [Browser sources removed 2026-07-28](browser-sources-removed-2026-07-28.md) — blkom/anime3rb/BUNNY حُذفت؛ hopxBrowserExtract/Html=null stub؛ hound-service pm2-deleted؛ RAM نزل 42%→26.9%.
 - [KW/AnimeSlayer/Cache fixes 2026-07-29](kawaii-anslayer-cache-fixes-2026-07-29.md) — KW: rawUrl مباشر بـ Referer؛ AnimeSlayer: parallel embeds+45s timeout (timeout 20s كان السبب)؛ cache DEFAULT_TTL 4h→2h + shouldRefresh 45→90min.
 - [anime3rb CF total block 2026-07-29](anime3rb-cf-total-block-2026-07-29.md) — CF تحجب كل cloud IPs (VPS+Hopx+GH Actions) بـ 403؛ لا cf_clearance ممكن حالياً؛ site_cookies table مفقود؛ يحتاج residential proxy أو captcha solver.
+- [Anime Lore RE findings](anime-lore-re-findings.md) — Firebase Remote Config مفتوح؛ AniList مصدرهم الأساسي؛ base URL ديناميكي (يحتاج MITM)؛ source flags: holakos/tersana/sdr.
 
 - [AniTaku 0.1 RE findings](anitaku-v0.1-re-findings.md) — API=hasalaty.com/public/api/; yobdev DNS مات؛ register→JWT يعمل؛ {code}=StringCare V3 في SharedPrefs "cuepoint"؛ خريطة 70+ endpoint كاملة.
 - [Hopx+CF disabled 2026-07](hopx-cf-disabled-2026-07.md) — Hopx/CF Worker/MediaFlow كلها معطّلة؛ VPS-direct فقط؛ segFallback→502 فوري؛ CDN blocking هو السبب الحقيقي لفشل HLS.
