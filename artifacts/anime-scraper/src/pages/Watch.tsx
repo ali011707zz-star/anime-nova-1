@@ -1405,54 +1405,8 @@ function ScraperPicker({
               </div>
             )}
           </>
-        ) : hasIdleScrapers ? (
-          /* Lazy mode: untried scrapers remain — show scraper selection grid */
-          <div className="px-4 mt-2 pb-4">
-            <p className="text-white/40 text-[11px] font-['Cairo'] text-center mb-4">
-              اختر مصدراً لبدء التشغيل
-            </p>
-            <div className="grid grid-cols-2 gap-2.5">
-              {VISIBLE_DEFS.map(d => {
-                const st = slotStatus[d.site];
-                const isFetching = st === "fetching";
-                const isFailed   = st === "failed";
-                return (
-                  <button
-                    key={d.site}
-                    onClick={() => onFetchSite(d.site)}
-                    disabled={isFetching}
-                    className="relative flex flex-col items-start gap-1 px-3 py-3 rounded-2xl active:scale-95 transition-transform disabled:opacity-50"
-                    style={{
-                      background: isFailed ? "rgba(239,68,68,0.07)" : "rgba(255,255,255,0.04)",
-                      border: isFailed ? "1px solid rgba(239,68,68,0.22)" : "1px solid rgba(255,255,255,0.09)",
-                    }}
-                    dir="rtl"
-                  >
-                    <div className="flex items-center gap-1.5 w-full">
-                      <span className="text-[10px] font-black font-mono px-1.5 py-0.5 rounded"
-                        style={{ background: "rgba(139,92,246,0.20)", color: "rgba(196,181,253,0.90)" }}>
-                        {d.tag}
-                      </span>
-                      <span className="text-[11.5px] font-black font-['Cairo'] text-white/80 truncate flex-1">
-                        {d.name}
-                      </span>
-                      {isFetching && (
-                        <motion.div
-                          className="w-3.5 h-3.5 rounded-full border border-transparent border-t-violet-400 border-r-violet-400/40 shrink-0"
-                          animate={{ rotate: 360 }}
-                          transition={{ duration: 0.8, repeat: Infinity, ease: "linear" }}
-                        />
-                      )}
-                      {isFailed && <span className="text-[9px] text-red-400/70 font-['Cairo'] shrink-0">فشل</span>}
-                    </div>
-                    <span className="text-[9px] text-white/25 font-['Cairo'] leading-tight">{d.desc}</span>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-        ) : anyFetching ? (
-          /* All remaining scrapers are fetching but no playable results yet */
+        ) : (hasIdleScrapers || anyFetching) ? (
+          /* جاري البحث التلقائي — لا تُظهر قائمة المصادر أبداً */
           <motion.div
             initial={{ opacity: 0 }} animate={{ opacity: 1 }}
             className="flex flex-col items-center gap-3 py-10 px-8">
@@ -3397,19 +3351,20 @@ export default function WatchPage() {
     autoFetchAllRef.current = false;
     inFlightRef.current     = new Set();
 
-    // ابدأ كشط مصادر الأولوية فوراً — الأول يُرجع نتيجة يُشغَّل تلقائياً
+    // ابدأ مصادر الأولوية فوراً (stagger 80ms) — الأول يُشغَّل تلقائياً
     Array.from(PRIORITY_FETCH_SITES).forEach((site, i) => {
       const tid = window.setTimeout(() => handleFetchSite(site, false), 80 * i);
       pendingTimeoutsRef.current.push(tid);
     });
-
-    // Fallback: إذا فشلت كل مصادر الأولوية خلال 8s → أظهر الـ picker
-    const pickerFallbackTimer = window.setTimeout(() => {
-      if (!autoPlayedRef.current) setShowPicker(true);
-    }, 8000);
+    // ابدأ بقية المصادر خلفياً بعد تأخير قصير (لا تعطي الأولوية لكنها تعمل تلقائياً)
+    const priDelay = PRIORITY_FETCH_SITES.size * 80 + 300;
+    SCRAPER_DEFS.filter(d => !PRIORITY_FETCH_SITES.has(d.site)).forEach((d, i) => {
+      const tid = window.setTimeout(() => handleFetchSite(d.site, true), priDelay + 180 * i);
+      pendingTimeoutsRef.current.push(tid);
+    });
+    // لا يوجد fallback timer للـ picker — حالة الخطأ تظهر تلقائياً عند انتهاء كل المصادر
 
     return () => {
-      window.clearTimeout(pickerFallbackTimer);
       pendingTimeoutsRef.current.forEach(id => window.clearTimeout(id));
       pendingTimeoutsRef.current = [];
     };

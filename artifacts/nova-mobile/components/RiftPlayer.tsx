@@ -782,6 +782,11 @@ export function RiftPlayer({
      أثناء الدوران، يستمر RiftPlayer في المحاولة للأبد → كل مصدر يفتح buffer جديد
      → OOM بعد عدة حلقات → كراش التطبيق. */
   const MAX_SOURCE_CYCLES = 8;
+  /* نحفظ onError في ref حتى لا يُعيد useEffect التنفيذ عند كل re-render للـ parent
+     (الدالة الـ inline في watch.tsx تتغير مرجعاً عند كل render وهذا يلغي timeout التبديل) */
+  const onErrorRef = useRef(onError);
+  useEffect(() => { onErrorRef.current = onError; }, [onError]);
+
   useEffect(() => {
     if (!error) { consecutiveErrorsRef.current = 0; setIsAutoCycling(false); return; }
     if (!aliveRef.current) return;
@@ -789,7 +794,7 @@ export function RiftPlayer({
       setIsAutoCycling(false);
       if (!terminalErrorRef.current) {
         terminalErrorRef.current = true;
-        onError?.();
+        onErrorRef.current?.();
       }
       return;
     }
@@ -800,14 +805,14 @@ export function RiftPlayer({
       setIsAutoCycling(false); // كل المصادر جُرِّبت أو وصلنا للحد الأقصى
       if (!terminalErrorRef.current) {
         terminalErrorRef.current = true;
-        onError?.();
+        onErrorRef.current?.();
       }
       return;
     }
     setIsAutoCycling(true); // suppress full error UI — show silent loading instead
     const t = setTimeout(() => switchSource(nextIdx), 600);
     return () => clearTimeout(t);
-  }, [error, srcIdx, playableSources.length, onError]); // eslint-disable-line
+  }, [error, srcIdx, playableSources.length]); // eslint-disable-line
 
   /* ─── تبديل المصدر عندما يُغيِّر الـ parent قيمة initialSourceIndex (المستخدم اختار مصدراً مختلفاً) ─── */
   const prevInitSourceIdxRef = useRef(initialSourceIndex ?? 0);
@@ -1456,16 +1461,19 @@ export function RiftPlayer({
           const newPos = Math.max(0, Math.min(durationRef.current, gestureStartPosRef.current + seekDelta));
           setFeedback({ type: "seek", value: newPos, delta: seekDelta });
         } else if (gestureTypeRef.current === "vol") {
-          const delta = -(gs.moveY - gestureStartY.current) / (H * 0.55);
+          /* السحب للأعلى يرفع الصوت — dy سالب عند الرفع → delta موجب */
+          const delta = -gs.dy / (H * 0.40);
           const newVol = Math.max(0, Math.min(1, gestureStartVal.current + delta));
           volumeRef.current = newVol;
           setVolume(newVol);
           setFeedback({ type: "volume", value: newVol });
           /* ضبط صوت الوسائط الحقيقي في النظام (يُظهر HUD أزرار الصوت) */
           VolumeManager.setVolume(newVol, { showUI: true }).catch(() => {});
+          /* fallback: ضبط مستوى صوت المشغّل مباشرةً إن لم يعمل system volume */
+          try { player.volume = newVol; } catch {}
         } else {
-          const delta = -(gs.moveY - gestureStartY.current) / (H * 0.55);
-          /* السحب للأعلى يرفع السطوع الحقيقي للشاشة (0.05..1) */
+          /* السحب للأعلى يرفع السطوع — dy سالب عند الرفع → delta موجب */
+          const delta = -gs.dy / (H * 0.40);
           const newBri = Math.max(0.05, Math.min(1, gestureStartVal.current + delta));
           brightnessRef.current = newBri;
           setBrightness(newBri);
@@ -1575,10 +1583,13 @@ export function RiftPlayer({
   ).current;
 
   /* ─── Skip intro/outro logic ─── */
+  const SKIP_BTN_LEAD = 3; // ثوانٍ قبل بداية النطاق لإظهار الزر
   /* يظهر الزر دائماً طالما الحلقة لم تتجاوز المقدمة، ويختفي فقط عند ضغط المستخدم عليه */
   const inIntroRange = !!skipIntro && !skipIntroDismissed && position < skipIntro.end;
-  // النهاية لا تظهر أثناء المقدمة — زر واحد في كل مرة
-  const inOutroRange = !!skipOutro && !skipOutroDismissed && !inIntroRange && position < skipOutro.end;
+  // النهاية لا تظهر أثناء المقدمة، ولا تظهر قبل بدء نطاق النهاية — زر واحد في كل مرة
+  const inOutroRange = !!skipOutro && !skipOutroDismissed && !inIntroRange
+    && position >= Math.max(0, skipOutro.start - SKIP_BTN_LEAD)
+    && position < skipOutro.end;
 
   /* إعادة تعيين الإخفاء عند تغيير المصدر — كل حلقة/مصدر جديد يُعيد الزر للظهور */
   useEffect(() => {

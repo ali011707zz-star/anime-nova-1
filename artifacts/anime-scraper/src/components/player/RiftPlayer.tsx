@@ -1551,21 +1551,6 @@ export default function RiftPlayer({
 
                   {/* RIGHT: action buttons */}
                   <div className="flex items-center gap-2 shrink-0">
-                    {/* Auto-play next episode toggle */}
-                    {onNextEp && (
-                      <button
-                        onClick={e => { e.stopPropagation(); toggleAutoPlay(); }}
-                        className="w-9 h-9 rounded-full flex items-center justify-center active:scale-90 transition-all duration-150"
-                        title={autoPlayOn ? "إيقاف التشغيل التلقائي" : "تشغيل تلقائي للحلقة التالية"}
-                        style={autoPlayOn
-                          ? { background: "rgba(139,92,246,0.30)", border: "1px solid rgba(139,92,246,0.50)" }
-                          : { background: "rgba(255,255,255,0.10)", border: "1px solid rgba(255,255,255,0.15)" }
-                        }
-                      >
-                        <SkipForward className="w-[15px] h-[15px]"
-                          style={{ color: autoPlayOn ? "#c4b5fd" : "rgba(255,255,255,0.65)" }} />
-                      </button>
-                    )}
                     {/* Subtitle / CC button — opens side subtitle panel */}
                     {onSubtitleClick && (
                       <button
