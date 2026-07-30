@@ -3,6 +3,7 @@ import {
   View, Text, Pressable, TextInput, FlatList, Image,
   ActivityIndicator, StyleSheet, Platform, ScrollView,
 } from "react-native";
+import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
@@ -46,7 +47,12 @@ function SeriesCard({ s, onPress }: { s: Series; onPress: () => void }) {
             <Text style={{ fontSize: 24 }}>📺</Text>
           </View>
         )}
-        <View style={styles.cardGrad} />
+        {/* LinearGradient بدل background: CSS — يعمل على React Native */}
+        <LinearGradient
+          colors={["transparent", "rgba(0,0,0,0.85)"]}
+          style={StyleSheet.absoluteFill}
+          pointerEvents="none"
+        />
         <View style={styles.cardLabel}>
           <Text style={styles.cardTitle} numberOfLines={2}>{s.title}</Text>
           {s.seasons.length > 1 && (
