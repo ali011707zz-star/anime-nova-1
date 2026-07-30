@@ -226,7 +226,8 @@ const _MBX_SUGGEST_ANIM  = `${_MBX_API_ANIM}/wefeed-h5api-bff/subject/search-sug
 const _MBX_SEARCH_ANIM   = `${_MBX_API_ANIM}/wefeed-h5api-bff/subject/search`;
 const _MBX_DOWNLOAD_ANIM = `${_MBX_API_ANIM}/wefeed-h5api-bff/subject/download`;
 const _MBX_TOKEN_TTL_ANIM = 7 * 24 * 3_600_000;
-const _MBX_DUBBED_RE_ANIM = /(?:\[\s*|\b)(?:hindi|arabic|tamil|telugu|spanish|french|portuguese|korean|turkish|urdu|norwegian|italian|german|dual[\s-]?audio|dubbed|dub)(?:\s*\]|\b)/i;
+// يشمل الآن: russian, english, chinese (نسخ مدبلجة أو غير أصلية)
+const _MBX_DUBBED_RE_ANIM = /(?:\[\s*|\b)(?:hindi|arabic|tamil|telugu|spanish|french|portuguese|korean|turkish|urdu|norwegian|italian|german|russian|english|chinese|dual[\s-]?audio|dubbed|dub)(?:\s*\]|\b)/i;
 interface MbxAuthAnim { token: string; cookies: string; fetchedAt: number; }
 let _mbxAuthAnim: MbxAuthAnim | null = null;
 let _mbxAuthAnimPending: Promise<{ token: string; cookies: string } | null> | null = null;
@@ -2263,6 +2264,8 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
     "nflixmovies_flux2", "vidbolt_flux3",
     // مضاف 2026-07-20: a.111477.xyz direct MP4/MKV rawUrl (browser follows 307→p.111477.xyz)
     "dahmermovies",
+    // مضاف 2026-07-30: MovieBox H5-API — MP4 مباشر بدون دبلجة (بعد فلترة Russian/English)
+    "moviebox_anim",
   ]);
   /* كشط كسول: إذا أُرسل ?site= يُشغَّل ذلك المصدر فقط (lazy per-site fetch) */
   const siteParam = (req.query.site as string) || null;
