@@ -1258,12 +1258,15 @@ async function getAnifoxSources(
     const catalog = await _getAnifoxCatalog();
     const candidates: Array<{ content_id: string; content_title: string; score: number }> = [];
     for (const item of catalog) {
-      const score = Math.max(...queries.map(q => similarity(q, item.content_title)));
-      if (score > 0.35) candidates.push({ ...item, score });
+      const score = Math.max(...queries.map(q =>
+        Math.max(similarity(q, item.content_title), asciiSimilarity(item.content_title, q)),
+      ));
+      if (score > 0.50) candidates.push({ ...item, score });
     }
     candidates.sort((a, b) => b.score - a.score);
     const best = candidates[0];
-    if (!best?.content_id) return [];
+    if (!best?.content_id) { console.log(`[ANIFOX] no match ≥0.50 for "${queries.join(" / ")}"`); return []; }
+    console.log(`[ANIFOX] match: "${best.content_title}" score=${best.score.toFixed(2)}`);
 
     const seasonBody = new URLSearchParams({
       user_id: "",
