@@ -12,7 +12,7 @@ import {
   Maximize2, Minimize2, AlertTriangle, RefreshCw,
   RotateCcw, RotateCw, Sun, Lock, Unlock,
   Scan, ScanLine, Camera, X, Zap,
-  ChevronDown,
+  ChevronDown, SkipForward,
 } from "lucide-react";
 
 /* ─────────────────────────────────────── helpers ─── */
@@ -281,6 +281,18 @@ export default function RiftPlayer({
   const [screenshotFlash, setScreenshotFlash] = useState(false);
   const [isEnded,         setIsEnded]         = useState(false);
   const [autoPlayCountdown, setAutoPlayCountdown] = useState(0);
+  // autoPlayOn: حالة تشغيل تلقائي للحلقة التالية — يُحفظ في localStorage
+  const [autoPlayOn, setAutoPlayOn] = useState(() =>
+    localStorage.getItem("pref-autoplay") === "true"
+  );
+  function toggleAutoPlay() {
+    setAutoPlayOn(prev => {
+      const next = !prev;
+      localStorage.setItem("pref-autoplay", String(next));
+      if (!next) setAutoPlayCountdown(0); // أوقف العدّ إذا أُطفئ
+      return next;
+    });
+  }
   const [showUnlockBtn,   setShowUnlockBtn]   = useState(false);
   const [showShortcuts,   setShowShortcuts]   = useState(false);
 
@@ -740,7 +752,7 @@ export default function RiftPlayer({
 
   /* ── autoPlay countdown when episode ends ── */
   useEffect(() => {
-    if (!isEnded || !autoPlay || !onNextEp || ep >= totalEps) { setAutoPlayCountdown(0); return; }
+    if (!isEnded || !autoPlayOn || !onNextEp || ep >= totalEps) { setAutoPlayCountdown(0); return; }
     setAutoPlayCountdown(5);
     const tick = setInterval(() => {
       setAutoPlayCountdown(c => {
@@ -749,7 +761,7 @@ export default function RiftPlayer({
       });
     }, 1000);
     return () => clearInterval(tick);
-  }, [isEnded, autoPlay]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [isEnded, autoPlayOn]); // eslint-disable-line react-hooks/exhaustive-deps
 
   /* ── mark skip data loaded (no notification) ── */
   useEffect(() => {
@@ -1493,6 +1505,21 @@ export default function RiftPlayer({
 
                   {/* RIGHT: action buttons */}
                   <div className="flex items-center gap-2 shrink-0">
+                    {/* Auto-play next episode toggle */}
+                    {onNextEp && (
+                      <button
+                        onClick={e => { e.stopPropagation(); toggleAutoPlay(); }}
+                        className="w-9 h-9 rounded-full flex items-center justify-center active:scale-90 transition-all duration-150"
+                        title={autoPlayOn ? "إيقاف التشغيل التلقائي" : "تشغيل تلقائي للحلقة التالية"}
+                        style={autoPlayOn
+                          ? { background: "rgba(139,92,246,0.30)", border: "1px solid rgba(139,92,246,0.50)" }
+                          : { background: "rgba(255,255,255,0.10)", border: "1px solid rgba(255,255,255,0.15)" }
+                        }
+                      >
+                        <SkipForward className="w-[15px] h-[15px]"
+                          style={{ color: autoPlayOn ? "#c4b5fd" : "rgba(255,255,255,0.65)" }} />
+                      </button>
+                    )}
                     {/* Subtitle / CC button — opens side subtitle panel */}
                     {onSubtitleClick && (
                       <button

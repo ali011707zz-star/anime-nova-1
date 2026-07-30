@@ -11539,7 +11539,8 @@ router.get("/anime/sources-stream", async (req, res) => {
       "moviebox", "moviebox_anim",      // &t= signed URLs ~10min
       "vidlink_encdec", "vidlink_anim", // stormvv URLs ~45min
       "xpass_anim",                     // XPass token ~8min
-  "anineko", "anikoto",  // vibeplayer.site tokens expire in ~1-2h
+      "anineko", "anikoto",             // vibeplayer.site tokens expire in ~1-2h
+      "kawaii",                         // video.kawaii-anime.com signed URLs (md5+expires ~17h) — نتجنب الـ cache القديم الذي يحتوي proxy URLs لا تعمل
     ]);
 
     // ── مساعد: كاشط بـ cache + extractAndCollect ──
