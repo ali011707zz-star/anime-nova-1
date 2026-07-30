@@ -403,6 +403,14 @@ export function RiftPlayer({
   const currentSrc                  = playableSources[srcIdx];
   const aliveRef                    = useRef(true);
   const terminalErrorRef            = useRef(false);
+  /* refs تُبقي statusChange listener على اطلاع بآخر قيم بدون إعادة اشتراك
+     (إعادة الاشتراك تمسح loadTimeout أثناء التحميل → stream يتجمّد للأبد) */
+  const playableSourcesRef          = useRef(playableSources);
+  const srcIdxRef                   = useRef(0);
+  /* guard: يمنع استدعاء player.replace() المتعدد المتزامن → ExoPlayer crash */
+  const isReplacingRef              = useRef(false);
+  /* throttle: آخر وقت استُدعي فيه VolumeManager.setVolume → يمنع flood النظام */
+  const lastVolNativeRef            = useRef(0);
 
   /* ─── Playback state ─── */
   const [position, setPosition]       = useState(0);
@@ -624,23 +632,30 @@ export function RiftPlayer({
     /* ⚠️ لا نستدعي p.play() هنا مباشرةً — بعض إصدارات ExoPlayer/AVPlayer تُطلق
        native crash عند استدعاء play() قبل أن يكون المصدر جاهزاً للتشغيل.
        التشغيل الآن يتم فقط عبر حدث statusChange → readyToPlay أدناه. */
-    if (initialPosition && initialPosition > 5) {
-      try { p.currentTime = initialPosition; } catch {}
-    }
-    /* Buffer tuning — reduces initial delay + stutter
-       iOS: start immediately without waiting for large buffer
-       Android ExoPlayer: 3s min buffer before playback starts */
+    /* ⚠️ لا نضبط currentTime هنا — المصدر لم يُحمَّل بعد ومحاولة الـ seek قبل
+       STATE_READY تُطلق IllegalStateException في ExoPlayer وتُسقط التطبيق.
+       الاستئناف يتم داخل statusChange → readyToPlay بعد اكتمال التحميل. */
+    /* ⚠️ bufferOptions أُزيلت من هنا — ضبطها داخل setup callback synchronously
+       يُسبِّب native crash في بعض إصدارات expo-video لأن native player لم يكتمل
+       تهيئته بعد. تُضبط عبر useEffect بعد mount بأمان. */
+  });
+
+  /* ─── bufferOptions — تُضبط عبر useEffect (لا في setup callback) ──────────────
+     ضبطها داخل setup callback synchronously يُسبب native crash على Android لأن
+     ExoPlayer لم يكتمل تهيئته بعد. هنا نضبطها بعد mount في آمان. ─── */
+  useEffect(() => {
     try {
-      (p as any).bufferOptions = {
-        preferredForwardBufferDuration: 12, // iOS: مسبق 12ث لتجنب الانقطاع
-        waitsToMinimizeStalling: false,     // iOS: ابدأ فوراً بدون انتظار
-        minBufferMs: 1000,                  // Android: ابدأ بعد 1ث فقط (أسرع)
-        maxBufferMs: 30000,                 // Android: احتفظ بـ30ث في الذاكرة
-        bufferForPlaybackMs: 150,           // Android: ابدأ بعد 0.15ث (أسرع بدء)
-        bufferForPlaybackAfterRebufferMs: 1200, // Android: استأنف بعد 1.2ث
+      (player as any).bufferOptions = {
+        preferredForwardBufferDuration: 12, // iOS: مسبق 12ث
+        waitsToMinimizeStalling: false,     // iOS: ابدأ فوراً
+        minBufferMs: 2000,                  // Android: ابدأ بعد 2ث (150ms كان crash)
+        maxBufferMs: 30000,                 // Android: احتفظ بـ30ث
+        bufferForPlaybackMs: 2000,          // Android: ابدأ بعد 2ث
+        bufferForPlaybackAfterRebufferMs: 3000, // Android: استأنف بعد 3ث
       };
     } catch {}
-  });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [player]);
 
   /* ─── Master cleanup on unmount — تحرير جميع الموارد النشطة ─── */
   useEffect(() => {
@@ -729,24 +744,30 @@ export function RiftPlayer({
       if (e.status === "loading") {
         setBuffering(true);
         /* إذا بقي التحميل أكثر من 12ث (شاشة سوداء) نعامله كخطأ ونتجاوز للمصدر التالي.
-           25ث كان طويلاً جداً: 10 مصادر × 25ث = 250ث انتظار + OOM من الـ buffers المتراكمة.
-           12ث كافٍ لأغلب HLS streams مع هامش للشبكات البطيئة. */
+           ⚠️ نقرأ playableSourcesRef/srcIdxRef (لا playableSources/srcIdx مباشرةً) لأن
+           إضافتهما للـ deps تُعيد تسجيل الـ listener عند وصول مصادر جديدة وتمسح
+           الـ loadTimeout أثناء التحميل → stream يتجمّد للأبد. */
         if (loadTimeoutRef.current) clearTimeout(loadTimeoutRef.current);
         loadTimeoutRef.current = setTimeout(() => {
           loadTimeoutRef.current = null;
           if (!aliveRef.current) return;
-          console.warn(`[RiftPlayer] ⏱ timeout (12s) — ${playableSources[srcIdx]?.label || "?"}: ${playableSources[srcIdx]?.url?.slice(0, 80)}`);
+          const srcs = playableSourcesRef.current;
+          const idx  = srcIdxRef.current;
+          console.warn(`[RiftPlayer] ⏱ timeout (12s) — ${srcs[idx]?.label || "?"}: ${srcs[idx]?.url?.slice(0, 80)}`);
           setError(true);
           setBuffering(false);
         }, 12000);
       } else {
-        /* أي حالة غير loading → ألغِ الـ timeout */
+        /* أي حالة غير loading → ألغِ الـ timeout وأطلق guard التبديل */
         if (loadTimeoutRef.current) { clearTimeout(loadTimeoutRef.current); loadTimeoutRef.current = null; }
+        isReplacingRef.current = false; // حرِّر الـ guard — player.replace() المقبل مسموح
         if (e.status === "readyToPlay") {
           setBuffering(false);
           setError(false);
           terminalErrorRef.current = false;
-          console.log(`[RiftPlayer] ✅ readyToPlay: ${playableSources[srcIdx]?.label || "?"} → ${playableSources[srcIdx]?.url?.slice(0, 100)}`);
+          const srcs = playableSourcesRef.current;
+          const idx  = srcIdxRef.current;
+          console.log(`[RiftPlayer] ✅ readyToPlay: ${srcs[idx]?.label || "?"} → ${srcs[idx]?.url?.slice(0, 100)}`);
           /* ── Restore position on readyToPlay (server-switch or initial resume) ──
              Doing this here (not in the polling timer) ensures we only seek AFTER
              the new stream is actually buffered, preventing conflicts with loading. */
@@ -773,7 +794,8 @@ export function RiftPlayer({
       sub2.remove();
       if (loadTimeoutRef.current) { clearTimeout(loadTimeoutRef.current); loadTimeoutRef.current = null; }
     };
-  }, [player, initialPosition, playableSources, srcIdx]); // eslint-disable-line
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [player, initialPosition]); // ⚠️ لا تُضف playableSources/srcIdx — راجع تعليق playableSourcesRef أعلاه
 
   /* ─── Auto-advance on error ─── */
   const consecutiveErrorsRef = useRef(0);
@@ -829,6 +851,9 @@ export function RiftPlayer({
   useEffect(() => { isPlayingRef.current = isPlaying; }, [isPlaying]);
   useEffect(() => { isErrorRef.current = error; }, [error]);
   useEffect(() => { isEndedRef.current = isEnded; }, [isEnded]);
+  /* مزامنة refs — تُبقي الـ listeners على اطلاع دون إعادة اشتراك */
+  useEffect(() => { playableSourcesRef.current = playableSources; }, [playableSources]);
+  useEffect(() => { srcIdxRef.current = srcIdx; }, [srcIdx]);
 
   /* ─── Progress polling ─── */
   useEffect(() => {
@@ -1331,6 +1356,14 @@ export function RiftPlayer({
 
   const switchSource = useCallback((idx: number) => {
     if (!aliveRef.current) return;
+    /* ⚠️ Guard: منع استدعاء player.replace() المتعدد المتزامن.
+       التبديل السريع المتتالي (error → auto-switch → error → ...) يُطلق
+       استدعاءات player.replace() متراكبة → ExoPlayer يُطلق IllegalStateException.
+       isReplacingRef يُحرَّر في statusChange عندما يخرج المشغّل من حالة loading. */
+    if (isReplacingRef.current) {
+      console.warn(`[RiftPlayer] ⏳ تجاهل تبديل المصدر — player.replace() جارٍ بالفعل`);
+      return;
+    }
     const safeIdx = Math.min(Math.max(idx, 0), Math.max(playableSources.length - 1, 0));
     const newSrc = playableSources[safeIdx];
     if (!newSrc) {
@@ -1361,7 +1394,7 @@ export function RiftPlayer({
        URL فارغ أو بدون بروتوكول يُسبِّب native crash بدل statusChange→error */
     const srcUrl = newSrc?.url;
     if (!isValidPlayerSourceUrl(srcUrl)) {
-      console.warn(`[RiftPlayer] ⛔ URL غير صالح للمصدر ${safeIdx + 1}: "${srcUrl?.slice(0, 60) ?? "فارغ"}"`);
+      console.warn(`[RiftPlayer] ⛔ URL غير صالح للمصدر ${safeIdx + 1}: "${(srcUrl as string | undefined)?.slice(0, 60) ?? "فارغ"}"`);
       setError(true);
       setBuffering(false);
       return;
@@ -1369,11 +1402,13 @@ export function RiftPlayer({
 
     setError(false);
     setBuffering(true);
+    isReplacingRef.current = true; // أقفل الـ guard — يُحرَّر في statusChange
     try {
       /* نمرّر URL string فقط — VPS proxy يُضيف Referer/Origin داخلياً */
       player.replace(srcUrl as any);
       /* play() is triggered in statusChange → readyToPlay once the stream is buffered */
     } catch (e) {
+      isReplacingRef.current = false; // حرِّر الـ guard عند الاستثناء
       console.warn("[RiftPlayer] player.replace() رمى استثناء:", e);
       setError(true);
       setBuffering(false);
@@ -1467,8 +1502,14 @@ export function RiftPlayer({
           volumeRef.current = newVol;
           setVolume(newVol);
           setFeedback({ type: "volume", value: newVol });
-          /* ضبط صوت الوسائط الحقيقي في النظام (يُظهر HUD أزرار الصوت) */
-          VolumeManager.setVolume(newVol, { showUI: true }).catch(() => {});
+          /* ⚠️ Throttle: VolumeManager.setVolume عبر Native Bridge — استدعاؤه على كل
+             حدث gesture (60fps) يُغرق الـ bridge ويُسبِّب كراش أو تأخيراً في تسجيل الحركة.
+             80ms فاصل كافٍ لاستجابة سريعة دون تدمير الـ bridge. */
+          const now = Date.now();
+          if (now - lastVolNativeRef.current > 80) {
+            lastVolNativeRef.current = now;
+            VolumeManager.setVolume(newVol, { showUI: true }).catch(() => {});
+          }
           /* fallback: ضبط مستوى صوت المشغّل مباشرةً إن لم يعمل system volume */
           try { player.volume = newVol; } catch {}
         } else {
@@ -1925,7 +1966,7 @@ export function RiftPlayer({
               <Text style={s.endBtnLabel}>إعادة</Text>
             </Pressable>
             {onNextEpisode && ((episode ?? 0) < totalEps) && (
-              <Pressable onPress={() => { setAutoCountdown(0); aliveRef.current = false; onNextEpisode!(); }} style={s.endNextBtn}>
+              <Pressable onPress={() => { setAutoCountdown(0); onNextEpisode!(); }} style={s.endNextBtn}>
                 <Ionicons name="play-skip-forward" size={16} color="#fff" />
                 <Text style={s.endBtnLabel}>
                   الحلقة التالية{autoCountdown > 0 ? ` (${autoCountdown})` : " ⏭"}
