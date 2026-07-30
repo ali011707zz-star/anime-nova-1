@@ -23,8 +23,8 @@ export const SITE_TTL: Record<string, number> = {
   okanime:       5 * 3_600_000,
   animetime:     5 * 3_600_000,
   ristoanime:    5 * 3_600_000,
-  anikoto:       5 * 3_600_000,
-  anineko:       5 * 3_600_000,
+  anikoto:       90 * 60_000,    // vibeplayer.site tokens تنتهي خلال ~1-2h → 90min TTL
+  anineko:       90 * 60_000,    // vibeplayer.site tokens تنتهي خلال ~1-2h → 90min TTL
   hianime:       5 * 3_600_000,
   animewitcher:  45 * 60_000,    // Streamtape/VTube URLs expire fast → 45min TTL
   animeday:      4 * 3_600_000,
@@ -90,6 +90,45 @@ function parseUrlExpiry(url: string): number | null {
   const starExp = url.match(/[?&]exp=(\d{10})\b/);
   if (starExp) return parseInt(starExp[1]) * 1000;
   return null;
+}
+
+// ── فحص انتهاء صلاحية رابط واحد ──
+function isUrlExpired(rawUrl: string): boolean {
+  let url = rawUrl;
+  // إذا كان proxy داخلي → استخرج الرابط الحقيقي من param ?url=
+  if (url.startsWith("/api/")) {
+    try {
+      const inner = new URLSearchParams(url.split("?")[1] ?? "").get("url");
+      if (!inner) return false;
+      url = inner;
+    } catch { return false; }
+  }
+  // روابط دائمة (mega/vidmoly/workers.dev/drive) → لا تنتهي
+  for (const pat of PERMANENT_URL_PATTERNS) {
+    if (pat.test(url)) return false;
+  }
+  const now = Date.now();
+  const vt = url.match(/[?&]validto=(\d{10})\b/);
+  if (vt && parseInt(vt[1]) * 1000 < now) return true;
+  const ex = url.match(/[?&]expires=(\d{10})\b/);
+  if (ex && parseInt(ex[1]) * 1000 < now) return true;
+  const exMs = url.match(/[?&]expires=(\d{13})\b/);
+  if (exMs && parseInt(exMs[1]) < now) return true;
+  const starExp = url.match(/[?&]exp=(\d{10})\b/);
+  if (starExp && parseInt(starExp[1]) * 1000 < now) return true;
+  return false;
+}
+
+// ── تصفية المصادر ذات الروابط المنتهية الصلاحية ──
+export function filterExpiredSources(sources: any[]): any[] {
+  if (!sources.length) return sources;
+  return sources.filter(s => {
+    for (const field of [s.directUrl, s.url, s.proxyUrl] as (string | undefined)[]) {
+      if (!field) continue;
+      if (isUrlExpired(field)) return false;
+    }
+    return true;
+  });
 }
 
 export function computeExpiry(site: string, sources: any[]): number {
@@ -239,52 +278,70 @@ export function makeAnimCacheKey(site: string, tmdbId: string, type: string, sea
     : `${site}:anim-tv:${tmdbId}:s${season}e${ep}`;
 }
 
-// ── قراءة من Cache (L1 → L2) ──
+// ── قراءة من Cache (L1 → L2 → L3) ──
 export async function getFromSourceCache(
   key: string
 ): Promise<{ sources: any[]; expiresAt: number; stale?: boolean } | null> {
   // L1 أولاً (أسرع)
   const m = l1.get(key);
-  if (m && Date.now() < m.expiresAt) return m;
-  l1.delete(key);
+  if (m && Date.now() < m.expiresAt) {
+    const alive = filterExpiredSources(m.sources);
+    if (alive.length < m.sources.length) {
+      // بعض/كل الروابط انتهت → نظّف L1
+      if (!alive.length) { l1.delete(key); /* سقوط لـ L2 */ }
+      else { l1.set(key, { sources: alive, expiresAt: m.expiresAt }); return { sources: alive, expiresAt: m.expiresAt }; }
+    } else if (alive.length) {
+      return m;
+    }
+  } else {
+    l1.delete(key);
+  }
 
   // L2: Supabase
   const row = await sbGet(key);
   if (row) {
-    if (Date.now() > row.expiresAt) {
-      return { sources: row.sources, expiresAt: row.expiresAt, stale: true };
+    const alive = filterExpiredSources(row.sources);
+    // كل الروابط منتهية → تجاهل الكاش (cache miss — يُعيد الكشط)
+    if (!alive.length && row.sources.length > 0) return null;
+    if (alive.length) {
+      const stale = Date.now() > row.expiresAt;
+      l1.set(key, { sources: alive, expiresAt: row.expiresAt });
+      return { sources: alive, expiresAt: row.expiresAt, ...(stale ? { stale: true } : {}) };
     }
-    l1.set(key, { sources: row.sources, expiresAt: row.expiresAt });
-    return { sources: row.sources, expiresAt: row.expiresAt };
   }
 
   // L3: ملف JSON محلي (fallback عند انقطاع Supabase أو بعد restart)
   const l3row = l3Get(key);
   if (l3row) {
-    if (Date.now() > l3row.expiresAt) {
-      return { sources: l3row.sources, expiresAt: l3row.expiresAt, stale: true };
+    const alive = filterExpiredSources(l3row.sources);
+    if (!alive.length && l3row.sources.length > 0) return null;
+    if (alive.length) {
+      const stale = Date.now() > l3row.expiresAt;
+      l1.set(key, { sources: alive, expiresAt: l3row.expiresAt });
+      return { sources: alive, expiresAt: l3row.expiresAt, ...(stale ? { stale: true } : {}) };
     }
-    l1.set(key, { sources: l3row.sources, expiresAt: l3row.expiresAt });
-    return { sources: l3row.sources, expiresAt: l3row.expiresAt };
   }
 
   return null;
 }
 
-// ── كتابة في Cache (L1 + L2) ──
+// ── كتابة في Cache (L1 + L2 + L3) ──
 export async function setSourceCache(
   key: string,
   site: string,
   sources: any[]
 ): Promise<void> {
   if (!sources.length) return;
-  const expiresAt = computeExpiry(site, sources);
+  // تصفية أي روابط منتهية الصلاحية قبل الحفظ
+  const alive = filterExpiredSources(sources);
+  if (!alive.length) return; // لا تحفظ نتيجة فارغة أو منتهية بالكامل
+  const expiresAt = computeExpiry(site, alive);
   // L1 فوري
-  l1.set(key, { sources, expiresAt });
+  l1.set(key, { sources: alive, expiresAt });
   // L2 Supabase: fire-and-forget (لا يؤخر الاستجابة)
-  sbUpsertCache(key, site, sources, expiresAt);
+  sbUpsertCache(key, site, alive, expiresAt);
   // L3 ملف محلي: يُكتب دائماً بغض النظر عن Supabase
-  l3Set(key, sources, expiresAt);
+  l3Set(key, alive, expiresAt);
 }
 
 export function shouldRefreshCache(expiresAt: number): boolean {

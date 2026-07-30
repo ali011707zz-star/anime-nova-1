@@ -762,7 +762,7 @@ export default function Home() {
               const accentBg    = "rgba(239,68,68,0.88)";
               /* site=anslayer + anslayerId + single=1 → صفحة المشاهدة تجلب من anslayer
                  فقط (بمعرّفه المباشر من كتالوجه)، بدون تشغيل أي مصدر آخر. */
-              const href = `/watch?anime=0&ep=${it.episode}&title=${encodeURIComponent(it.name || "")}&english=${encodeURIComponent(it.name || "")}&cover=${encodeURIComponent(it.cover || "")}&site=anslayer&anslayerId=${it.animeId}`;
+              const href = `/watch?anime=0&ep=${it.episode}&title=${encodeURIComponent(it.name || "")}&english=${encodeURIComponent(it.name || "")}&cover=${encodeURIComponent(it.cover || "")}&titleAr=${encodeURIComponent(it.name || "")}&site=anslayer&anslayerId=${it.animeId}`;
               return (
                 <Link href={href} key={`${it.animeId}-${it.episode}-${i}`}>
                   <motion.div whileTap={{ scale: 0.91 }} className="shrink-0 cursor-pointer" style={{ width: 110 }}>

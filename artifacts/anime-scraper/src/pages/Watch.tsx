@@ -2872,6 +2872,7 @@ export default function WatchPage() {
   const titleParam   = sp.get("title") || "";
   const englishParam = sp.get("english") || "";
   const coverParam   = sp.get("cover") || "";
+  const titleArParam = sp.get("titleAr") || "";
   const totalEpsParam = parseInt(sp.get("totalEps") || "0");
 
   const [anime,        setAnime]        = useState<any>(null);
@@ -3192,6 +3193,7 @@ export default function WatchPage() {
     const goParams: Record<string, string> = { anime: String(animeId), ep: String(n), title: titleParam, english: englishParam, cover };
     if (totalEps > 0 && totalEps < 990) goParams.totalEps = String(totalEps);
     if (anime?.format) goParams.format = anime.format;
+    if (titleArParam) goParams.titleAr = titleArParam;
     navigate(`/watch?${new URLSearchParams(goParams)}`);
   }
 
@@ -3267,8 +3269,10 @@ export default function WatchPage() {
     try {
       const params = new URLSearchParams({ site, title: resolvedTitle, english: resolvedEnglish, ep: String(ep), anime: String(animeId || 0), format: anime?.format || sp.get("format") || "" });
       /* anslayerId: يمرَّر من قسم "أحدث الحلقات" (معرّف anslayer المباشر من كتالوجه —
-         يتجاوز البحث بالاسم ويحدّد الأنمي الصحيح 100%). */
+         يتجاوز البحث بالاسم ويحدّد الأنمي الصحيح 100%).
+         titleAr: العنوان العربي يُحسَّن البحث على AnimeSlayer (يبحث بالعربي أولاً). */
       if (site === "anslayer" && sp.get("anslayerId")) params.set("anslayerId", sp.get("anslayerId")!);
+      if (site === "anslayer" && titleArParam) params.set("titleAr", titleArParam);
       const r    = await fetch(`${API_BASE}/api/anime/fetch-source?${params}`, { signal: ctrl.signal, headers: { "X-App-Token": await getAppToken() } });
       const data = await r.json() as { sources?: FetchedSrc[] };
       const srcs: FetchedSrc[] = data.sources || [];
