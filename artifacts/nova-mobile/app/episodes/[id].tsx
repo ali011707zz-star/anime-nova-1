@@ -122,36 +122,52 @@ export default function EpisodeListScreen() {
   const [page, setPage] = useState(1);
   const [watched, setWatched] = useState<Set<number>>(new Set());
   const [commentCounts, setCommentCounts] = useState<Record<number, number>>({});
+  /* isMountedRef: يمنع تحديث state بعد unmount — يتسبّب بـ "Can't perform state update on unmounted component" warning وتسرّب ذاكرة */
+  const isMountedRef = useRef(true);
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => { isMountedRef.current = false; };
+  }, []);
 
   useEffect(() => {
     if (!id) return;
     setLoading(true);
     setEpData([]); setPage(1); setSearch("");
-    getWatched(id).then(setWatched);
-    getCommentCounts(id).then(setCommentCounts);
+    getWatched(id).then(s => { if (isMountedRef.current) setWatched(s); });
+    getCommentCounts(id).then(c => { if (isMountedRef.current) setCommentCounts(c); });
+
+    const ctrl = new AbortController();
+    const tid = setTimeout(() => ctrl.abort(), 15000);
 
     fetch(`${getBaseUrl()}/api/anilist`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ query: ANIME_QUERY, variables: { id: parseInt(id) } }),
+      signal: ctrl.signal,
     }).then(r => r.json()).then(d => {
+      if (!isMountedRef.current) return;
       const a = d.data?.Media;
       setAnime(a);
       if (a?.idMal) {
-        fetch(`https://api.jikan.moe/v4/anime/${a.idMal}/episodes?page=1`)
+        fetch(`https://api.jikan.moe/v4/anime/${a.idMal}/episodes?page=1`, { signal: ctrl.signal })
           .then(r => r.json())
-          .then(d => { if (d.data) setEpData(d.data); })
+          .then(d => { if (isMountedRef.current && d.data) setEpData(d.data); })
           .catch(() => {});
       }
-    }).finally(() => setLoading(false));
+    }).catch(() => {})
+      .finally(() => { clearTimeout(tid); if (isMountedRef.current) setLoading(false); });
+
+    return () => { clearTimeout(tid); ctrl.abort(); };
   }, [id]);
 
   /* Load comment counts from server (background, non-blocking) */
   useEffect(() => {
     if (!id) return;
-    fetch(`${getBaseUrl()}/api/comments/count?animeId=${id}`)
+    const ctrl = new AbortController();
+    fetch(`${getBaseUrl()}/api/comments/count?animeId=${id}`, { signal: ctrl.signal })
       .then(r => r.json())
       .then(d => {
+        if (!isMountedRef.current) return;
         if (d.counts && typeof d.counts === "object") {
           const numericCounts: Record<number, number> = {};
           for (const [k, v] of Object.entries(d.counts)) {
@@ -163,6 +179,7 @@ export default function EpisodeListScreen() {
         }
       })
       .catch(() => {});
+    return () => ctrl.abort();
   }, [id]);
 
   const toggleWatched = useCallback((n: number) => {
