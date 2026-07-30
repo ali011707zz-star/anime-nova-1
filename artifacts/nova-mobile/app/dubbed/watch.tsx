@@ -49,19 +49,20 @@ export default function DubbedWatchScreen() {
         return;
       }
 
-      // foupix يحجب طلبات الـ VPS، بينما هاتف المستخدم يخرج من IP سكني مسموح.
-      // لذلك جرّب الرابط الخام من الهاتف أولاً، ثم استخدم proxy الخادم كاحتياطي.
+      // foupix يتحقق من IP+UA عبر حقلي ips+ua في الـ token — التوكن يُنشأ من الـ VPS
+      // لذا proxy الخادم يعمل دائماً (نفس IP+UA)، بينما الرابط الخام يفشل من الهاتف.
+      // الأولوية: proxy الخادم أولاً (فوري)، ثم الرابط الخام كاحتياطي.
       const srcs: PlayerSource[] = [];
-      if (rawUrl) {
-        // المصدر الرئيسي: الهاتف يتصل مباشرةً من IP سكني
+      if (proxyUrl) {
+        // المصدر الرئيسي: proxy الخادم — يطابق IP+UA اللذين أنشآ التوكن → يعمل فوراً
+        srcs.push({ url: proxyUrl, label: "مدبلج عربي", quality: "720p HD" });
+      }
+      if (rawUrl && rawUrl !== proxyUrl) {
+        // احتياطي: رابط foupix المباشر (قد يعمل من شبكات سكنية بعض الأحيان)
         srcs.push({ url: rawUrl, label: "مدبلج عربي (مباشر)", quality: "720p HD", headers: {
           Referer: "https://www.arabic-toons.com/",
           Origin: "https://www.arabic-toons.com",
         }});
-      }
-      if (proxyUrl && proxyUrl !== rawUrl) {
-        // احتياطي: proxy الخادم (مفيد إذا تغيّر سلوك CDN)
-        srcs.push({ url: proxyUrl, label: "مدبلج عربي (احتياطي)", quality: "720p HD" });
       }
       setSources(srcs);
       setLoading(false);
