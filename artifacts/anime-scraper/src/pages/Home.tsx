@@ -725,8 +725,8 @@ export default function Home() {
         </div>
       )}
 
-      {/* ── حلقات اليوم — مخفي: روابط AnimeSlayer لا تعمل بشكل موثوق ── */}
-      {false && todayEps.length > 0 && (
+      {/* ── حلقات اليوم ── */}
+      {todayEps.length > 0 && (
         <div className="mt-5">
           <div className="flex items-center justify-between px-4 mb-3">
             <div className="flex items-center gap-2">
