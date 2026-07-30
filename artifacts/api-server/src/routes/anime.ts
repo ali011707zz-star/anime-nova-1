@@ -5472,10 +5472,13 @@ async function getKawaiiAnimeSources(
     return data.sources.map((src) => {
       const isHls = src.isM3U8 === true || src.type === "hls";
       const refEnc = encodeURIComponent(KAWAII_BASE + "/");
-      // directUrl: عبر proxy للـ VPS (يُرسَل Referer تلقائياً)
+      // video.kawaii-anime.com CDN يدعم CORS * ويستخدم روابط موقَّعة (md5+expires)
+      // CDN يحجب datacenter IPs (VPS/CF) → لا نمرر عبر video-proxy
+      // الحل: directUrl = CDN مباشرة — المتصفح/الموبايل يتصل من IP سكني فيعمل
+      // HLS يمر عبر hls-proxy فقط لأن المتصفح يحتاج Referer لكل segment
       const directUrl = isHls
         ? `/api/anime/hls-proxy?url=${encodeURIComponent(src.url)}&ref=${refEnc}`
-        : `/api/anime/video-proxy?url=${encodeURIComponent(src.url)}&ref=${refEnc}`;
+        : src.url; // MP4 مباشر — CORS * مدعوم
       return {
         name: `كواي أنمي · ${src.quality || "1080p"}${subLangLabel ? ` · ${subLangLabel}` : ""}`,
         url: src.url,
@@ -5484,9 +5487,8 @@ async function getKawaiiAnimeSources(
         site: "kawaii",
         directUrl,
         directType: isHls ? "hls" : "mp4",
-        // rawUrl: المتصفح يشغّل مباشرة مع Referer header — لا يمر بـ VPS
         rawUrl: src.url,
-        corsOk: false,
+        corsOk: true,   // CORS * — المتصفح يشغّل مباشرة بدون VPS proxy
         subtitleUrl,
         skipIntro,
         skipOutro,
