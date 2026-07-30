@@ -5472,39 +5472,37 @@ async function getKawaiiAnimeSources(
     const skipOutro = data.outro?.start !== undefined && data.outro?.end !== undefined
       ? { start: data.outro.start, end: data.outro.end } : undefined;
 
-    // ── kawaii CDN: no-Referer→200, wrong-Referer→403 ──
-    // hls.js XHR لا يستطيع إخفاء Referer (forbidden header) → 403 صامت للـ HLS.
-    // الإصلاح الجذري: نفضّل MP4 على HLS — <video referrerPolicy="no-referrer"> يعمل بشكل مثالي.
-    // إذا لم يوجد MP4 نستخدم الـ HLS ويعالجه Custom Fetch Loader في الـ frontend.
-    // فلترة: نقبل فقط روابط video.kawaii-anime.com المضمونة (CORS * + لا حجب).
-    // CDNs الخارجية (مثل megap.kotocdn.site) محمية بـ Cloudflare وتُرجع 403 من المتصفح → skip صامت.
+    // ── kawaii CDN: تشترط Referer: kawaii-anime.com وتقطع الاتصال كلياً بدونه (HTTP 000) ──
+    // المتصفح لا يستطيع تعيين Referer كـ forbidden header → التشغيل المباشر دائماً يفشل.
+    // الـ VPS يصل بشكل مثالي مع Referer صحيح (200 + 223MB مؤكَّد بالاختبار).
+    // الحل الوحيد الموثوق: توجيه كل المصادر عبر VPS proxy مع الـ Referer الصحيح.
+    // فلترة: نقبل فقط روابط video.kawaii-anime.com المضمونة.
     const trustedSources = data.sources.filter(s =>
       s.url && (s.url.includes("video.kawaii-anime.com") || s.url.startsWith("/"))
     );
     if (!trustedSources.length) return [];
 
-    const mp4Sources = trustedSources.filter(s => !s.isM3U8 && s.type !== "hls");
-    const sourcesToUse = mp4Sources.length > 0 ? mp4Sources : trustedSources;
+    const kawaiiRef = encodeURIComponent(KAWAII_BASE + "/");
 
-    return sourcesToUse.map((src) => {
+    return trustedSources.map((src) => {
       const isHls = src.isM3U8 === true || src.type === "hls";
-      // video.kawaii-anime.com CDN: CORS * + روابط موقَّعة (md5+expires)
-      // لا proxy — المتصفح يشغّل مباشرةً مع referrerPolicy="no-referrer"
-      const directUrl = src.url;
+      // كل المصادر عبر VPS proxy مع Referer: www.kawaii-anime.com — المسار الوحيد الذي يعمل
+      const directUrl = isHls
+        ? `/api/anime/hls-proxy?url=${encodeURIComponent(src.url)}&ref=${kawaiiRef}`
+        : `/api/anime/video-proxy?url=${encodeURIComponent(src.url)}&ref=${kawaiiRef}`;
       return {
         name: `كواي أنمي · ${src.quality || "1080p"}${subLangLabel ? ` · ${subLangLabel}` : ""}`,
-        url: src.url,
+        url: directUrl,
         quality: src.quality || "1080p",
         qualityRank: 20,
         site: "kawaii",
         directUrl,
         directType: isHls ? "hls" : "mp4",
         rawUrl: src.url,
-        corsOk: true,   // CORS * — referrerPolicy="no-referrer" على <video>
+        corsOk: false,
         subtitleUrl,
         skipIntro,
         skipOutro,
-        // لا Referer في extra — نريد no-referrer كاملاً لتجاوز CDN block
       } as UnifiedSource;
     });
   } catch { return []; }
