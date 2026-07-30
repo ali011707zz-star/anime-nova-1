@@ -4427,37 +4427,53 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
           const items: any[] = sData?.data?.items || [];
           if (!items.length) return;
 
-          // فلتر: استبعد المدبلج أولاً، ثم فلتر حسب نوع المحتوى (1=movie, 2=series)
-          const nonDubbed = items.filter((it: any) => !_MBX_DUBBED_RE_ANIM.test(it.title || ""));
-          const pool = nonDubbed.length ? nonDubbed : items;
-          const expectedType = type === "movie" ? 1 : 2;
-          const typeMatched = pool.filter((it: any) => it.subjectType === expectedType);
-          const candidates = typeMatched.length ? typeMatched : pool;
+          // بناء قائمة مرشحين مرتّبة: الأصلي (non-dubbed + نوع صحيح) أولاً، ثم fallback
           const qLow = title.toLowerCase();
-          candidates.sort((a: any, b: any) => {
-            const aHit = (a.title || "").toLowerCase().includes(qLow) ? 1 : 0;
-            const bHit = (b.title || "").toLowerCase().includes(qLow) ? 1 : 0;
-            return bHit - aHit;
-          });
-          const item = candidates[0];
-          if (!item?.subjectId || !item?.detailPath) return;
+          const expectedType = type === "movie" ? 1 : 2;
+
+          function rankItems(list: any[]): any[] {
+            return [...list].sort((a: any, b: any) => {
+              const aHit = (a.title || "").toLowerCase().includes(qLow) ? 1 : 0;
+              const bHit = (b.title || "").toLowerCase().includes(qLow) ? 1 : 0;
+              return bHit - aHit;
+            });
+          }
+
+          const isDubbed = (it: any) => _MBX_DUBBED_RE_ANIM.test(it.title || "");
+          const isRightType = (it: any) => it.subjectType === expectedType;
+
+          // أولوية 1: أصلي + نوع صحيح
+          const p1 = rankItems(items.filter((it: any) => !isDubbed(it) && isRightType(it)));
+          // أولوية 2: أصلي بأي نوع
+          const p2 = rankItems(items.filter((it: any) => !isDubbed(it) && !p1.includes(it)));
+          // أولوية 3: مدبلج (fallback — فقط إذا لم تجد streams في الأعلى)
+          const p3 = rankItems(items.filter((it: any) => isDubbed(it)));
+          const orderedCandidates = [...p1, ...p2, ...p3];
 
           // الموسم والحلقة: فيلم → se=0&ep=0، مسلسل → se=season&ep=epNum
           const se = type === "movie" ? 0 : season;
           const epP = type === "movie" ? 0 : epNum;
-          const dr = await fetch(
-            `${_MBX_DOWNLOAD_ANIM}?subjectId=${encodeURIComponent(item.subjectId)}&se=${se}&ep=${epP}&detailPath=${encodeURIComponent(item.detailPath)}`,
-            { headers: hdrs, signal: AbortSignal.timeout(10_000) },
-          );
-          if (!dr.ok) return;
-          const dData: any = await dr.json();
-          const downloads: any[] = dData?.data?.downloads || [];
-          if (!downloads.length) return;
 
-          downloads.sort((a: any, b: any) => (b.resolution || 0) - (a.resolution || 0));
-          for (const dl of downloads.slice(0, 3)) {
+          // جرّب كل candidate بالترتيب حتى نجد streams فعلية (URLs غير فارغة)
+          let foundDownloads: any[] = [];
+          for (const candidate of orderedCandidates.slice(0, 4)) {
+            if (!candidate?.subjectId || !candidate?.detailPath) continue;
+            try {
+              const dr = await fetch(
+                `${_MBX_DOWNLOAD_ANIM}?subjectId=${encodeURIComponent(candidate.subjectId)}&se=${se}&ep=${epP}&detailPath=${encodeURIComponent(candidate.detailPath)}`,
+                { headers: hdrs, signal: AbortSignal.timeout(10_000) },
+              );
+              if (!dr.ok) continue;
+              const dData: any = await dr.json();
+              const dls: any[] = (dData?.data?.downloads || []).filter((d: any) => d.url && Number(d.resolution) > 0);
+              if (dls.length) { foundDownloads = dls; break; }
+            } catch { continue; }
+          }
+          if (!foundDownloads.length) return;
+
+          foundDownloads.sort((a: any, b: any) => (b.resolution || 0) - (a.resolution || 0));
+          for (const dl of foundDownloads.slice(0, 3)) {
             const res = Number(dl.resolution) || 0;
-            if (!dl.url || res <= 0) continue;
             const label = `MovieBox · ${res}p`;
             sendSource(String(dl.url), label, String(dl.url), undefined, { headers: { Referer: _MBX_REF_ANIM } });
           }

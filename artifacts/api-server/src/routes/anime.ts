@@ -9725,33 +9725,43 @@ async function getMovieBoxAnimeSources(
     const items: any[] = sData?.data?.items || [];
     if (!items.length) return [];
 
-    // فلتر: استبعد النسخ المدبلجة أولاً، ثم فلتر حسب نوع المحتوى (1=movie, 2=series)
-    const nonDubbed = items.filter((it: any) => !MBX_DUBBED_RE.test(it.title || ""));
-    const pool = nonDubbed.length ? nonDubbed : items;
-    const expectedType = isMovie ? 1 : 2;
-    const typeMatched = pool.filter((it: any) => it.subjectType === expectedType);
-    const candidates = typeMatched.length ? typeMatched : pool;
-
-    // رتّب: الأقرب للعنوان أولاً
+    // بناء قائمة مرشحين مرتّبة: الأصلي (non-dubbed + نوع صحيح) أولاً، ثم fallback
     const qLow = query.toLowerCase();
-    candidates.sort((a: any, b: any) => {
-      const aHit = (a.title || "").toLowerCase().includes(qLow) ? 1 : 0;
-      const bHit = (b.title || "").toLowerCase().includes(qLow) ? 1 : 0;
-      return bHit - aHit;
-    });
-    const item = candidates[0];
-    if (!item?.subjectId || !item?.detailPath) return [];
+    const expectedType = isMovie ? 1 : 2;
 
-    // ── 2. روابط التحميل ──
+    function rankMbx(list: any[]): any[] {
+      return [...list].sort((a: any, b: any) => {
+        const aHit = (a.title || "").toLowerCase().includes(qLow) ? 1 : 0;
+        const bHit = (b.title || "").toLowerCase().includes(qLow) ? 1 : 0;
+        return bHit - aHit;
+      });
+    }
+    const isDub = (it: any) => MBX_DUBBED_RE.test(it.title || "");
+    const isTyped = (it: any) => it.subjectType === expectedType;
+
+    const mp1 = rankMbx(items.filter((it: any) => !isDub(it) && isTyped(it)));
+    const mp2 = rankMbx(items.filter((it: any) => !isDub(it) && !mp1.includes(it)));
+    const mp3 = rankMbx(items.filter((it: any) => isDub(it)));
+    const orderedCandidates = [...mp1, ...mp2, ...mp3];
+
+    // ── 2. روابط التحميل — جرّب كل candidate حتى تجد streams فعلية ──
     const se = isMovie ? 0 : seasonNum;
     const epParam = isMovie ? 0 : ep;
-    const dr = await fetch(
-      `${MBX_DOWNLOAD}?subjectId=${encodeURIComponent(item.subjectId)}&se=${se}&ep=${epParam}&detailPath=${encodeURIComponent(item.detailPath)}`,
-      { headers: hdrs, signal: AbortSignal.timeout(10_000) },
-    );
-    if (!dr.ok) return [];
-    const dData: any = await dr.json();
-    const downloads: any[] = dData?.data?.downloads || [];
+
+    let downloads: any[] = [];
+    for (const candidate of orderedCandidates.slice(0, 4)) {
+      if (!candidate?.subjectId || !candidate?.detailPath) continue;
+      try {
+        const dr = await fetch(
+          `${MBX_DOWNLOAD}?subjectId=${encodeURIComponent(candidate.subjectId)}&se=${se}&ep=${epParam}&detailPath=${encodeURIComponent(candidate.detailPath)}`,
+          { headers: hdrs, signal: AbortSignal.timeout(10_000) },
+        );
+        if (!dr.ok) continue;
+        const dData: any = await dr.json();
+        const dls: any[] = (dData?.data?.downloads || []).filter((d: any) => d.url && Number(d.resolution) > 0);
+        if (dls.length) { downloads = dls; break; }
+      } catch { continue; }
+    }
     if (!downloads.length) return [];
 
     // رتّب تنازلياً حسب الدقة
