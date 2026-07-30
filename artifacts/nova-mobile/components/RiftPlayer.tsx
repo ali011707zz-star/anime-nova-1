@@ -1584,8 +1584,10 @@ export function RiftPlayer({
 
   /* ─── Skip intro/outro logic ─── */
   const SKIP_BTN_LEAD = 3; // ثوانٍ قبل بداية النطاق لإظهار الزر
-  /* يظهر الزر دائماً طالما الحلقة لم تتجاوز المقدمة، ويختفي فقط عند ضغط المستخدم عليه */
-  const inIntroRange = !!skipIntro && !skipIntroDismissed && position < skipIntro.end;
+  /* يظهر الزر عند اقتراب المشغّل من بداية المقدمة (LEAD ثوانٍ قبلها) وحتى نهايتها */
+  const inIntroRange = !!skipIntro && !skipIntroDismissed
+    && position >= Math.max(0, (skipIntro.start ?? 0) - SKIP_BTN_LEAD)
+    && position < skipIntro.end;
   // النهاية لا تظهر أثناء المقدمة، ولا تظهر قبل بدء نطاق النهاية — زر واحد في كل مرة
   const inOutroRange = !!skipOutro && !skipOutroDismissed && !inIntroRange
     && position >= Math.max(0, skipOutro.start - SKIP_BTN_LEAD)
@@ -1829,7 +1831,7 @@ export function RiftPlayer({
       {feedback?.type === "brightness" && (
         <View style={s.feedbackLeft} pointerEvents="none">
           <View style={s.feedbackBarWrap}>
-            <View style={[s.feedbackBarFillY, { height: `${Math.round((1 - feedback.value) * 100)}%` as any }]} />
+            <View style={[s.feedbackBarFillY, { height: `${Math.round(feedback.value * 100)}%` as any }]} />
           </View>
           <View style={s.feedbackPill}>
             <Ionicons name="sunny" size={12} color="rgba(253,224,71,0.85)" />
@@ -1912,14 +1914,18 @@ export function RiftPlayer({
               <Text style={[s.endBtnLabel, { color: "rgba(255,255,255,0.65)" }]}>رجوع</Text>
             </Pressable>
             <Pressable
-              onPress={() => { seek(0); setIsEnded(false); try { player.play(); } catch {} }}
+              onPress={() => {
+                setIsEnded(false);
+                try { player.currentTime = 0; } catch {}
+                setTimeout(() => { try { player.play(); } catch {} }, 120);
+              }}
               style={s.endReplayBtn}
             >
               <Ionicons name="refresh" size={16} color="#fff" />
               <Text style={s.endBtnLabel}>إعادة</Text>
             </Pressable>
             {onNextEpisode && ((episode ?? 0) < totalEps) && (
-              <Pressable onPress={() => { setAutoCountdown(0); onNextEpisode!(); }} style={s.endNextBtn}>
+              <Pressable onPress={() => { setAutoCountdown(0); aliveRef.current = false; onNextEpisode!(); }} style={s.endNextBtn}>
                 <Ionicons name="play-skip-forward" size={16} color="#fff" />
                 <Text style={s.endBtnLabel}>
                   الحلقة التالية{autoCountdown > 0 ? ` (${autoCountdown})` : " ⏭"}
@@ -2013,7 +2019,7 @@ export function RiftPlayer({
               >
                 <Ionicons
                   name="logo-closed-captioning"
-                  size={15}
+                  size={18}
                   color={subOn ? "#c4b5fd" : "rgba(255,255,255,0.75)"}
                 />
               </Pressable>
@@ -2021,35 +2027,35 @@ export function RiftPlayer({
             const btnsBlock = nativeRTL ? (
               <View style={s.topRightRow}>
                 <Pressable onPress={handleBack} style={s.topCloseBtn} hitSlop={10}>
-                  <Ionicons name="close" size={17} color="rgba(239,68,68,0.90)" />
+                  <Ionicons name="close" size={21} color="rgba(239,68,68,0.90)" />
                 </Pressable>
                 <Pressable onPress={togglePortrait} style={[s.topRotateBtn, isPortrait && s.topRotateBtnActive]} hitSlop={10}>
                   <Ionicons
                     name={isPortrait ? "phone-landscape-outline" : "phone-portrait-outline"}
-                    size={15}
+                    size={17}
                     color={isPortrait ? "#c4b5fd" : "rgba(255,255,255,0.85)"}
                   />
                 </Pressable>
                 {ccBtn}
                 <Pressable onPress={takeScreenshot} style={s.topIconBtn} hitSlop={10}>
-                  <Ionicons name="camera-outline" size={15} color="rgba(255,255,255,0.85)" />
+                  <Ionicons name="camera-outline" size={18} color="rgba(255,255,255,0.85)" />
                 </Pressable>
               </View>
             ) : (
               <View style={s.topRightRow}>
                 <Pressable onPress={takeScreenshot} style={s.topIconBtn} hitSlop={10}>
-                  <Ionicons name="camera-outline" size={15} color="rgba(255,255,255,0.85)" />
+                  <Ionicons name="camera-outline" size={18} color="rgba(255,255,255,0.85)" />
                 </Pressable>
                 {ccBtn}
                 <Pressable onPress={togglePortrait} style={[s.topRotateBtn, isPortrait && s.topRotateBtnActive]} hitSlop={10}>
                   <Ionicons
                     name={isPortrait ? "phone-landscape-outline" : "phone-portrait-outline"}
-                    size={15}
+                    size={17}
                     color={isPortrait ? "#c4b5fd" : "rgba(255,255,255,0.85)"}
                   />
                 </Pressable>
                 <Pressable onPress={handleBack} style={s.topCloseBtn} hitSlop={10}>
-                  <Ionicons name="close" size={17} color="rgba(239,68,68,0.90)" />
+                  <Ionicons name="close" size={21} color="rgba(239,68,68,0.90)" />
                 </Pressable>
               </View>
             );
@@ -2121,24 +2127,7 @@ export function RiftPlayer({
             colors={["transparent", "rgba(0,0,0,0.60)", "rgba(0,0,0,0.96)"]}
             style={[s.bottomSection, { paddingBottom: Platform.OS === "web" ? 16 : insets.bottom + 12 }]}
           >
-            {/* ── أزرار تخطي المقدمة / النهاية ── */}
-            {/* direction:'ltr' يضمن أن الأيقونة دائماً قبل النص بصرياً بغض النظر عن RTL */}
-            {(inIntroRange || inOutroRange) && (
-              <View style={s.skipBtnRow}>
-                {inIntroRange && (
-                  <Pressable onPress={doSkipIntro} style={s.skipPillIntro} hitSlop={8}>
-                    <Ionicons name="play-forward" size={13} color="#92400e" />
-                    <Text style={s.skipPillIntroText}>تخطي المقدمة</Text>
-                  </Pressable>
-                )}
-                {inOutroRange && (
-                  <Pressable onPress={doSkipOutro} style={s.skipPillOutro} hitSlop={8}>
-                    <Ionicons name="play-forward" size={13} color="#4c1d95" />
-                    <Text style={s.skipPillOutroText}>تخطي النهاية</Text>
-                  </Pressable>
-                )}
-              </View>
-            )}
+            {/* أزرار التخطي انتقلت إلى overlay مستقل خارج showControls */}
 
             {/* الوقت — الوقت الحالي أقصى اليسار الفيزيائي، المدة الكلية أقصى اليمين الفيزيائي */}
             <View style={{ position: "relative", height: 18, marginBottom: 2 }}>
@@ -2446,6 +2435,24 @@ export function RiftPlayer({
         </Pressable>
       )}
 
+      {/* ── أزرار تخطي المقدمة/النهاية — مستقلة تماماً عن رؤية الـ controls ── */}
+      {!error && !isEnded && !isLocked && (inIntroRange || inOutroRange) && (
+        <View style={s.skipBtnRowFloat} pointerEvents="box-none">
+          {inIntroRange && (
+            <Pressable onPress={doSkipIntro} style={s.skipPillIntro} hitSlop={8} pointerEvents="auto">
+              <Ionicons name="play-forward" size={13} color="#92400e" />
+              <Text style={s.skipPillIntroText}>تخطي المقدمة</Text>
+            </Pressable>
+          )}
+          {inOutroRange && (
+            <Pressable onPress={doSkipOutro} style={s.skipPillOutro} hitSlop={8} pointerEvents="auto">
+              <Ionicons name="play-forward" size={13} color="#4c1d95" />
+              <Text style={s.skipPillOutroText}>تخطي النهاية</Text>
+            </Pressable>
+          )}
+        </View>
+      )}
+
     </View>
   );
 }
@@ -2590,7 +2597,12 @@ const s = StyleSheet.create({
   halfRight: { position: "absolute", right: 0, top: 0, width: "50%", height: "100%" },
 
   /* ── Skip intro/outro pill buttons ── */
-  /* في RTL: flex-start = الجانب الأيمن بصرياً — هذا هو الموضع الصحيح لأزرار التخطي */
+  /* skipBtnRowFloat: overlay مستقل يظهر دائماً بغض النظر عن رؤية الـ controls */
+  skipBtnRowFloat: {
+    position: "absolute", bottom: 90, left: 12, right: 12,
+    flexDirection: "row", justifyContent: "flex-start", gap: 8,
+    zIndex: 20,
+  },
   skipBtnRow: { flexDirection: "row", justifyContent: "flex-start", gap: 8, marginBottom: 4, paddingStart: 2 },
   skipPillIntro: {
     flexDirection: "row", alignItems: "center", gap: 5,
@@ -2755,7 +2767,7 @@ const s = StyleSheet.create({
   },
   topRightRow: { flexDirection: "row", alignItems: "center", gap: 5 },
   topIconBtn: {
-    width: 30, height: 30, borderRadius: 15,
+    width: 38, height: 38, borderRadius: 19,
     backgroundColor: "rgba(255,255,255,0.10)", borderWidth: 1, borderColor: "rgba(255,255,255,0.16)",
     alignItems: "center", justifyContent: "center",
   },
@@ -2774,7 +2786,7 @@ const s = StyleSheet.create({
   },
   topRotateLabelActive: { color: "#c4b5fd" },
   topCloseBtn: {
-    width: 32, height: 32, borderRadius: 16,
+    width: 40, height: 40, borderRadius: 20,
     backgroundColor: "rgba(239,68,68,0.14)", borderWidth: 1.5, borderColor: "rgba(239,68,68,0.40)",
     alignItems: "center", justifyContent: "center",
   },
