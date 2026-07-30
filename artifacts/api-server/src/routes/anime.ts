@@ -7012,6 +7012,37 @@ async function awFetchEpisodes(animeId: string): Promise<Array<{ id: string; num
   return eps;
 }
 
+/**
+ * Fast path: يبني episode ID مباشرة بدون جلب قائمة الحلقات كلها.
+ * نمط AnimeWitcher: pad3 أو pad4 أو رقم عادي (مثلاً ep1→"001", ep10→"010", ep100→"100")
+ * يجرب المرشحين بالتوازي — أول رد ناجح يُرجعه.
+ */
+async function awDirectEpId(animeId: string, ep: number): Promise<string | null> {
+  const n = Math.round(ep);
+  const candidates = [
+    String(n).padStart(3, "0"),   // "001", "010", "100", "1000"
+    String(n).padStart(4, "0"),   // "0001" (بعض الأنمي يستخدم 4 أرقام)
+    String(n),                    // "1" بدون padding
+  ];
+  // احذف المكرر (مثلاً ep=100 → "100" يظهر مرتين)
+  const unique = [...new Set(candidates)];
+  const base = `${AW_FS_BASE}/anime_list/${encodeURIComponent(animeId)}/episodes`;
+
+  const results = await Promise.allSettled(
+    unique.map(id =>
+      fetch(`${base}/${encodeURIComponent(id)}`, {
+        headers: BASE_HDRS,
+        signal: AbortSignal.timeout(6_000),
+      }).then(r => r.ok ? id : null).catch(() => null)
+    )
+  );
+
+  for (const r of results) {
+    if (r.status === "fulfilled" && r.value) return r.value;
+  }
+  return null;
+}
+
 /** جلب servers من Firestore — يجرب collection ثم document-fallback */
 async function awFetchServers(animeId: string, epId: string): Promise<Array<{name:string;url:string;quality:string;visible:boolean}>> {
   const base = `${AW_FS_BASE}/anime_list/${encodeURIComponent(animeId)}/episodes/${encodeURIComponent(epId)}`;
@@ -7157,9 +7188,10 @@ async function getAnimeWitcherSources(
       const hits = await awAlgoliaSearch(q);
       if (!hits.length) continue;
 
-      let bestHit: any = null, bestScore = 0;
+      let bestHit: any = null, bestScore = 0, bestIdScore = 0;
       for (const h of hits) {
-        const hName = String(h.name || "");
+        const hName    = String(h.name || "");
+        const hObjId   = String(h.objectID || "");
         const engTitle = h.details?.english_title || "";
         const s = Math.max(
           similarity(hName, title),
@@ -7168,7 +7200,15 @@ async function getAnimeWitcherSources(
           engTitle ? similarity(engTitle, title) : 0,
           english && engTitle ? similarity(engTitle, english) : 0,
         );
-        if (s > bestScore) { bestScore = s; bestHit = h; }
+        // objectID tiebreaker: يُفضَّل الـ ID الأقرب للعنوان (يمنع "One Piece Live Action" من سرقة "One Piece")
+        const idScore = Math.max(
+          similarity(hObjId, title),
+          english ? similarity(hObjId, english) : 0,
+        );
+        // نختار إذا كانت النتيجة أعلى، أو مساوية لكن idScore أفضل
+        if (s > bestScore || (s === bestScore && idScore > bestIdScore)) {
+          bestScore = s; bestIdScore = idScore; bestHit = h;
+        }
       }
       if (!bestHit || bestScore < 0.35) continue;
 
@@ -7179,20 +7219,27 @@ async function getAnimeWitcherSources(
     }
     if (!animeId) return [];
 
-    // 2. جلب الحلقات مباشرة من Firestore
-    const eps = await awFetchEpisodes(animeId);
-    if (!eps.length) { console.warn(`[AW] no episodes for "${animeId}"`); return []; }
+    // 2. جلب episode ID — fast path أولاً (بناء مباشر)، ثم full scan fallback
+    let epId: string | null = await awDirectEpId(animeId, ep);
 
-    const epObj = eps.find(e => Math.round(e.num) === ep)
-      || eps.find(e => Math.abs(e.num - ep) < 0.6);
-    if (!epObj) return [];
-
-    console.log(`[AW] ep${ep} → Firestore id="${epObj.id}"`);
+    if (epId) {
+      console.log(`[AW] ep${ep} → direct id="${epId}"`);
+    } else {
+      // fallback: جلب قائمة كاملة (بطيء لأنمي طويل مثل One Piece)
+      console.log(`[AW] direct miss for ep${ep} — falling back to full scan`);
+      const eps = await awFetchEpisodes(animeId);
+      if (!eps.length) { console.warn(`[AW] no episodes for "${animeId}"`); return []; }
+      const epObj = eps.find(e => Math.round(e.num) === ep)
+        || eps.find(e => Math.abs(e.num - ep) < 0.6);
+      if (!epObj) return [];
+      epId = epObj.id;
+      console.log(`[AW] ep${ep} → fallback scan id="${epId}"`);
+    }
 
     // 3. جلب servers + episode doc بالتوازي
     const [rawServers, epDoc] = await Promise.all([
-      awFetchServers(animeId, epObj.id),
-      awFetchEpDoc(animeId, epObj.id),
+      awFetchServers(animeId, epId),
+      awFetchEpDoc(animeId, epId),
     ]);
     if (!rawServers.length && !epDoc.bunny_video_id) return [];
 
