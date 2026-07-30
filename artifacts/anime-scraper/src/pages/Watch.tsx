@@ -166,8 +166,7 @@ interface FetchedSrc {
 //    من الباك-إند أيضاً (ANIME_SOURCE_ALLOWLIST في anime.ts). القائمة الأصلية
 //    الكاملة محفوظة أعلاه في تاريخ Git — لإعادة أي مصدر أضِفه هنا وفي الباك-إند معاً.
 const SCRAPER_DEFS: { site: string; name: string; desc: string; tag: string; audioLang?: "en"; isArabic?: true }[] = [
-  // kawaii: مخفي مؤقتاً على الويب 2026-07-30 — يموت بصمت (referrer block + HLS.js XHR)
-  // { site: "kawaii",       name: "كواي أنمي",    desc: "1080p · مباشر",            tag: "KW" },
+  { site: "kawaii",       name: "كواي أنمي",    desc: "1080p · مباشر",            tag: "KW" },
   { site: "anikoto",      name: "AniKoto",       desc: "ياباني مترجم · 1080p",    tag: "AK" },
   // hianime: معطّل بطلب المستخدم 2026-07-30 — تفوّت حلقات
   { site: "animewitcher", name: "AnimeWitcher",   desc: "PD/ST · مباشر",           tag: "AW", isArabic: true },
@@ -198,7 +197,7 @@ const ARABIC_SITES = new Set(SCRAPER_DEFS.filter(d => d.isArabic).map(d => d.sit
  * دون التأثير على سرعة تجربة المستخدم (auto-play يبقى فورياً).
  */
 const PRIORITY_FETCH_SITES = new Set([
-  /* kawaii مخفي على الويب */ "animewitcher", "dulo_anim", "anineko", "anikoto",
+  "kawaii", "animewitcher", "dulo_anim", "anineko", "anikoto",
   "animeify", "sanime", "anifox",  // ANIFOX: Archive/MediaFire/MP4Upload/Uqload
   // shahiid/animelek: أُزيلت — معطّلة بطلب المستخدم 2026-07-14
 ]);

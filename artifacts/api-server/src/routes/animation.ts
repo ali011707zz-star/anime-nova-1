@@ -2264,8 +2264,8 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
     "nflixmovies_flux2", "vidbolt_flux3",
     // مضاف 2026-07-20: a.111477.xyz direct MP4/MKV rawUrl (browser follows 307→p.111477.xyz)
     "dahmermovies",
-    // مضاف 2026-07-30: MovieBox H5-API — MP4 مباشر بدون دبلجة (بعد فلترة Russian/English)
-    "moviebox_anim",
+    // moviebox_anim: disabled 2026-07-30
+    // "moviebox_anim",
   ]);
   /* كشط كسول: إذا أُرسل ?site= يُشغَّل ذلك المصدر فقط (lazy per-site fetch) */
   const siteParam = (req.query.site as string) || null;
@@ -4402,83 +4402,7 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
         } catch { /* silent */ }
       }),
 
-      // ── MovieBox — مُعاد تفعيله (Streamrip API) ──────────────────────────────
-      scrapeAnimCached("moviebox_anim", async () => {
-        if (!title) return;
-        const auth = await getMbxAuthAnim();
-        if (!auth) return;
-        const { token, cookies } = auth;
-        const hdrs: Record<string, string> = {
-          "Accept": "application/json",
-          "User-Agent": _MBX_UA_ANIM,
-          "Referer": _MBX_REF_ANIM,
-          "Authorization": `Bearer ${token}`,
-          "Cookie": cookies,
-        };
-        try {
-          const sr = await fetch(_MBX_SEARCH_ANIM, {
-            method: "POST",
-            headers: { ...hdrs, "Content-Type": "application/json" },
-            body: JSON.stringify({ keyword: title, page: 1, perPage: 12, subjectType: 0 }),
-            signal: AbortSignal.timeout(10_000),
-          });
-          if (!sr.ok) return;
-          const sData: any = await sr.json();
-          const items: any[] = sData?.data?.items || [];
-          if (!items.length) return;
-
-          // بناء قائمة مرشحين مرتّبة: الأصلي (non-dubbed + نوع صحيح) أولاً، ثم fallback
-          const qLow = title.toLowerCase();
-          const expectedType = type === "movie" ? 1 : 2;
-
-          function rankItems(list: any[]): any[] {
-            return [...list].sort((a: any, b: any) => {
-              const aHit = (a.title || "").toLowerCase().includes(qLow) ? 1 : 0;
-              const bHit = (b.title || "").toLowerCase().includes(qLow) ? 1 : 0;
-              return bHit - aHit;
-            });
-          }
-
-          const isDubbed = (it: any) => _MBX_DUBBED_RE_ANIM.test(it.title || "");
-          const isRightType = (it: any) => it.subjectType === expectedType;
-
-          // أولوية 1: أصلي + نوع صحيح
-          const p1 = rankItems(items.filter((it: any) => !isDubbed(it) && isRightType(it)));
-          // أولوية 2: أصلي بأي نوع
-          const p2 = rankItems(items.filter((it: any) => !isDubbed(it) && !p1.includes(it)));
-          // أولوية 3: مدبلج (fallback — فقط إذا لم تجد streams في الأعلى)
-          const p3 = rankItems(items.filter((it: any) => isDubbed(it)));
-          const orderedCandidates = [...p1, ...p2, ...p3];
-
-          // الموسم والحلقة: فيلم → se=0&ep=0، مسلسل → se=season&ep=epNum
-          const se = type === "movie" ? 0 : season;
-          const epP = type === "movie" ? 0 : epNum;
-
-          // جرّب كل candidate بالترتيب حتى نجد streams فعلية (URLs غير فارغة)
-          let foundDownloads: any[] = [];
-          for (const candidate of orderedCandidates.slice(0, 4)) {
-            if (!candidate?.subjectId || !candidate?.detailPath) continue;
-            try {
-              const dr = await fetch(
-                `${_MBX_DOWNLOAD_ANIM}?subjectId=${encodeURIComponent(candidate.subjectId)}&se=${se}&ep=${epP}&detailPath=${encodeURIComponent(candidate.detailPath)}`,
-                { headers: hdrs, signal: AbortSignal.timeout(10_000) },
-              );
-              if (!dr.ok) continue;
-              const dData: any = await dr.json();
-              const dls: any[] = (dData?.data?.downloads || []).filter((d: any) => d.url && Number(d.resolution) > 0);
-              if (dls.length) { foundDownloads = dls; break; }
-            } catch { continue; }
-          }
-          if (!foundDownloads.length) return;
-
-          foundDownloads.sort((a: any, b: any) => (b.resolution || 0) - (a.resolution || 0));
-          for (const dl of foundDownloads.slice(0, 3)) {
-            const res = Number(dl.resolution) || 0;
-            const label = `MovieBox · ${res}p`;
-            sendSource(String(dl.url), label, String(dl.url), undefined, { headers: { Referer: _MBX_REF_ANIM } });
-          }
-        } catch { /* silent */ }
-      }),
+      // ── MovieBox — معطّل 2026-07-30 ──────────────────────────────────────────
 
       // ── Xyra (api.xyra.stream) — معطّل مؤقتاً: خادمهم يرجع 502 (Cloudflare) دائماً منذ 2026-07-09 ──
       // scrapeAnimCached("xyra", async () => {

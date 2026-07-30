@@ -11528,9 +11528,13 @@ router.get("/anime/sources-stream", async (req, res) => {
       } catch { /* ignore */ }
     }
 
+    // corsOk=true (e.g. kawaii CDN): نُرسل directUrl خاماً بدون تشفير حتى يتعرّف عليه RiftPlayer
+    // ويُطبّق referrerPolicy="no-referrer" الصحيح — التشفير يُعيق الكشف ويُفشل التشغيل صامتاً
     const toSend: UnifiedSource = {
       ...s,
-      directUrl: s.directUrl ? encryptProxyUrl(s.directUrl) : s.directUrl,
+      directUrl: s.directUrl
+        ? (s.corsOk ? s.directUrl : encryptProxyUrl(s.directUrl))
+        : s.directUrl,
       ...(derivedHeaders ? { headers: derivedHeaders } : {}),
     };
     res.write(`data: ${JSON.stringify(toSend)}\n\n`);
@@ -11866,10 +11870,14 @@ router.get("/anime/fetch-source", async (req, res) => {
       }
       const mobileClient = (req.headers["x-nova-client"] || "").toString().includes("mobile");
       const finalS = mobileClient ? wrapForMobile(s) : s;
+      // corsOk=true: لا تشفير على directUrl — RiftPlayer يحتاج URL الخام لكشف CDN وإخفاء الـ Referer
+      const encDirectUrl = finalS.directUrl
+        ? (finalS.corsOk ? finalS.directUrl : encryptProxyUrl(finalS.directUrl))
+        : finalS.directUrl;
       return {
         ...finalS,
         ...(derivedHeaders ? { headers: derivedHeaders } : {}),
-        directUrl: finalS.directUrl ? encryptProxyUrl(finalS.directUrl) : finalS.directUrl,
+        directUrl: encDirectUrl,
       };
     });
     res.json({ sources: enc, fromCache: true });
@@ -12029,10 +12037,14 @@ async function getVidboltAnimeSources(
       }
       /* تغليف روابط CDN المباشرة للموبايل — يضمن المرور عبر VPS */
       const wrapped = isMobileClient ? wrapForMobile({ ...s, headers: derivedHeaders || s.headers }) : s;
+      // corsOk=true: لا تشفير على directUrl — RiftPlayer يحتاج URL الخام لكشف kawaii CDN
+      const encDirectUrl = wrapped.directUrl
+        ? (wrapped.corsOk ? wrapped.directUrl : encryptProxyUrl(wrapped.directUrl))
+        : wrapped.directUrl;
       return {
         ...wrapped,
         ...(derivedHeaders ? { headers: derivedHeaders } : {}),
-        directUrl: wrapped.directUrl ? encryptProxyUrl(wrapped.directUrl) : wrapped.directUrl,
+        directUrl: encDirectUrl,
       };
     });
     res.json({ sources: encSources });

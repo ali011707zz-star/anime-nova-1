@@ -46,10 +46,11 @@ function WatchWrapper() {
   const search = useSearch();
   return <Watch key={search} />;
 }
-function AnimationWatchWrapper() {
-  const search = useSearch();
-  return <AnimationWatch key={search} />;
-}
+// AnimationWatchWrapper disabled — animation section hidden 2026-07-30
+// function AnimationWatchWrapper() {
+//   const search = useSearch();
+//   return <AnimationWatch key={search} />;
+// }
 const Home               = lazy(() => import("@/pages/Home"));
 const AnimeDetail        = lazy(() => import("@/pages/AnimeDetail"));
 const Watch              = lazy(() => import("@/pages/Watch"));
@@ -62,10 +63,11 @@ const Browse             = lazy(() => import("@/pages/Browse"));
 const Settings           = lazy(() => import("@/pages/Settings"));
 const Profile            = lazy(() => import("@/pages/Profile"));
 const NotFound           = lazy(() => import("@/pages/not-found"));
-const AnimationLibrary   = lazy(() => import("@/pages/AnimationLibrary"));
-const AnimationDetail    = lazy(() => import("@/pages/AnimationDetail"));
-const AnimationEpisodes  = lazy(() => import("@/pages/AnimationEpisodes"));
-const AnimationWatch     = lazy(() => import("@/pages/AnimationWatch"));
+// Animation section hidden — disabled 2026-07-30
+// const AnimationLibrary   = lazy(() => import("@/pages/AnimationLibrary"));
+// const AnimationDetail    = lazy(() => import("@/pages/AnimationDetail"));
+// const AnimationEpisodes  = lazy(() => import("@/pages/AnimationEpisodes"));
+// const AnimationWatch     = lazy(() => import("@/pages/AnimationWatch"));
 const DubbedLibrary      = lazy(() => import("@/pages/DubbedLibrary"));
 const DubbedDetail       = lazy(() => import("@/pages/DubbedDetail"));
 const DubbedWatch        = lazy(() => import("@/pages/DubbedWatch"));
@@ -169,10 +171,7 @@ function Router({ onMenuClick }: { onMenuClick: () => void }) {
                 <Route path="/profile"                component={Profile} />
                 <Route path="/auth/callback"           component={AuthCallback} />
                 <Route path="/auth"                    component={AuthPage} />
-                <Route path="/animation"                       component={AnimationLibrary} />
-                <Route path="/animation/watch"                 component={AnimationWatchWrapper} />
-                <Route path="/animation/:type/:id/episodes"    component={AnimationEpisodes} />
-                <Route path="/animation/:type/:id"             component={AnimationDetail} />
+                {/* Animation section hidden — disabled 2026-07-30 */}
                 <Route path="/dubbed"                          component={DubbedLibrary} />
                 <Route path="/dubbed/watch"                    component={DubbedWatch} />
                 <Route path="/dubbed/:key"                     component={DubbedDetail} />
