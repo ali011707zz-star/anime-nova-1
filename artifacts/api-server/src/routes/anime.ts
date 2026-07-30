@@ -5473,8 +5473,15 @@ async function getKawaiiAnimeSources(
     // hls.js XHR لا يستطيع إخفاء Referer (forbidden header) → 403 صامت للـ HLS.
     // الإصلاح الجذري: نفضّل MP4 على HLS — <video referrerPolicy="no-referrer"> يعمل بشكل مثالي.
     // إذا لم يوجد MP4 نستخدم الـ HLS ويعالجه Custom Fetch Loader في الـ frontend.
-    const mp4Sources = data.sources.filter(s => !s.isM3U8 && s.type !== "hls");
-    const sourcesToUse = mp4Sources.length > 0 ? mp4Sources : data.sources;
+    // فلترة: نقبل فقط روابط video.kawaii-anime.com المضمونة (CORS * + لا حجب).
+    // CDNs الخارجية (مثل megap.kotocdn.site) محمية بـ Cloudflare وتُرجع 403 من المتصفح → skip صامت.
+    const trustedSources = data.sources.filter(s =>
+      s.url && (s.url.includes("video.kawaii-anime.com") || s.url.startsWith("/"))
+    );
+    if (!trustedSources.length) return [];
+
+    const mp4Sources = trustedSources.filter(s => !s.isM3U8 && s.type !== "hls");
+    const sourcesToUse = mp4Sources.length > 0 ? mp4Sources : trustedSources;
 
     return sourcesToUse.map((src) => {
       const isHls = src.isM3U8 === true || src.type === "hls";
