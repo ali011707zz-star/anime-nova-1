@@ -168,7 +168,7 @@ interface FetchedSrc {
 const SCRAPER_DEFS: { site: string; name: string; desc: string; tag: string; audioLang?: "en"; isArabic?: true }[] = [
   { site: "kawaii",       name: "كواي أنمي",    desc: "1080p · مباشر",            tag: "KW" },
   { site: "anikoto",      name: "AniKoto",       desc: "ياباني مترجم · 1080p",    tag: "AK" },
-  { site: "hianime",      name: "HiAnime",       desc: "ياباني مترجم · HLS نظيف", tag: "HI" },
+  // hianime: معطّل بطلب المستخدم 2026-07-30 — تفوّت حلقات
   { site: "animewitcher", name: "AnimeWitcher",   desc: "PD/ST · مباشر",           tag: "AW", isArabic: true },
   { site: "anineko",      name: "AniNeko",        desc: "ياباني مترجم · HLS",      tag: "AN" },
   // reanime: محذوف بطلب المستخدم 2026-07-24
@@ -180,13 +180,10 @@ const SCRAPER_DEFS: { site: string; name: string; desc: string; tag: string; aud
   // vaplayer_anim: محذوف من الأنمي — مصدره إنجليزي فقط، أُبقي في الأنيميشن 2026-07-15
   // faselhd_db (FH) / moviz_time (MT): معطّلة بطلب المستخدم 2026-07-14
   // mitanime: محذوف بطلب المستخدم 2026-07-27
-  { site: "witanime",     name: "ويت أنمي",      desc: "عربي · ok.ru / yonaplay",    tag: "WI", isArabic: true },
-  { site: "nflixmovies_anim", name: "NflixMovies", desc: "إنجليزي · HLS", tag: "NX" },
-  { site: "vidbolt_anim",     name: "VidBolt",      desc: "إنجليزي · HLS", tag: "VB" },
+  // nflixmovies_anim: حُذف 2026-07-30 — 0 مصادر (ميت)
+  // vidbolt_anim: معطّل 2026-07-30 — كود محفوظ (10 مصادر HLS)، يُفعَّل لاحقاً
   { site: "sanime",           name: "سـAnime",       desc: "عربي · MP4 مباشر",        tag: "SA", isArabic: true },
   { site: "anifox",           name: "ANIFOX",        desc: "Archive · MediaFire · MP4Upload · Uqload", tag: "FX", isArabic: true },
-  { site: "blkom",            name: "بالكوم",         desc: "عربي · MP4 مباشر · CDN",        tag: "BK", isArabic: true },
-  { site: "animephoenix",    name: "أنمي فينيكس",   desc: "عربي · مباشر · phoenixpr CDN",  tag: "PH", isArabic: true },
   // akoam: حُذف 2026-07-28 — كان يستخدم hopxBrowserExtract (browser) على كل طلب
 ];
 
@@ -200,7 +197,7 @@ const ARABIC_SITES = new Set(SCRAPER_DEFS.filter(d => d.isArabic).map(d => d.sit
  * دون التأثير على سرعة تجربة المستخدم (auto-play يبقى فورياً).
  */
 const PRIORITY_FETCH_SITES = new Set([
-  "kawaii", "hianime", "animewitcher", "dulo_anim", "anineko", "anikoto",
+  "kawaii", "animewitcher", "dulo_anim", "anineko", "anikoto",
   "animeify", "sanime", "anifox",  // ANIFOX: Archive/MediaFire/MP4Upload/Uqload
   // shahiid/animelek: أُزيلت — معطّلة بطلب المستخدم 2026-07-14
 ]);
@@ -212,7 +209,7 @@ const PRIORITY_FETCH_SITES = new Set([
  * بواسطة تأثير subtitleUrl الحالي — لا تحتاج لإدراجها هنا.
  */
 const PROVIDER_WANTS_SMART_SUB = new Set([
-  "hianime", "animepahe", "anineko",
+  "animepahe", "anineko",
   "anikototv", "animekai", "dulo_anim",
 ]);
 
@@ -269,7 +266,7 @@ function shouldShowSrc(src: FetchedSrc): boolean {
 function isEmbedFallback(src: FetchedSrc): boolean {
   const url = (src.directUrl || src.url || "").toLowerCase();
   if (!src.isEmbed) return false;
-  if (src.site === "witanime" || src.site === "mycima" || src.site === "moviz_time" || src.site === "faselhd_db" || src.site === "akoam") return true;
+  if (src.site === "mycima" || src.site === "moviz_time" || src.site === "faselhd_db" || src.site === "akoam") return true;
   // animeify: FileMoon+SendVid تُعاد كـ isEmbed:true عند فشل extraction — اعرضها كـ fallback بدل إخفائها
   if (src.site === "animeify") return true;
   return url.includes("mega.nz") || url.includes("mega.co.nz") || url.includes("vidmoly");
@@ -3301,12 +3298,11 @@ export default function WatchPage() {
       cinesrc_anim: 38000,  // backend = 35s + هامش 3s
       anime4up2:    28000,  // backend = 25s + هامش 3s
       mycima:       34000,  // backend = 30s + هامش 4s
-      witanime:     48000,  // backend = 45s + هامش 3s
       anikototv:    28000,  // backend = 25s + هامش 3s
       anslayer:     50000,  // backend = 45s + هامش 5s (parallel embed extraction)
       // mitanime: محذوف 2026-07-27
       // reanime: محذوف 2026-07-24
-      hianime:      26000,  // backend = 22s + هامش 4s
+      // hianime: معطّل 2026-07-30
       anipm:        24000,  // backend = 20s + هامش 4s
     };
     const siteTimeout = SITE_REQUEST_TIMEOUTS[site] ?? 24000;

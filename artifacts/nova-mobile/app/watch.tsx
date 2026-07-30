@@ -22,7 +22,7 @@ type Screen     = "loading" | "picker" | "native" | "embed" | "resolving";
 /* ── مواقع محمية بـ Cloudflare/Turnstile يفشل الخادم (VPS) بجلب فيديوها المباشر —
    نحاول أولاً حلّها عبر WebView مخفي (IP سكني حقيقي للجهاز) قبل عرض بطاقة "يحتاج تطبيق أصلي" ── */
 // animephoenix أُزيل من WEBVIEW_RESOLVE_SITES — الآن يُرجع روابط مباشرة (phoenixpr CDN) لا iframes
-const WEBVIEW_RESOLVE_SITES = new Set(["animelek", "animedar", "anime3rb", "ristoanime", "faselhd_db", "witanime_db", "mycima"]);
+const WEBVIEW_RESOLVE_SITES = new Set(["animelek", "animedar", "ristoanime", "faselhd_db", "mycima"]);
 function needsHiddenResolve(s: Src): boolean {
   return !!s.isEmbed && !!s.site && WEBVIEW_RESOLVE_SITES.has(s.site);
 }
@@ -49,14 +49,14 @@ interface Src {
 const SITE_TAG: Record<string, string> = {
   shahiid: "SH", animelek: "EK", animedar: "AD", okanime: "OK",
   ristoanime: "RS", animeify: "AF", animeday: "DY", arabseed: "AR",
-  anime4up2: "4U", mycima: "MC", topcinemaa: "TC", animephoenix: "PH",
-  animewitcher: "AW", kawaii: "KW", blkom: "BK",
+  anime4up2: "4U", mycima: "MC", topcinemaa: "TC",
+  animewitcher: "AW", kawaii: "KW",
   anikototv: "ATV", animekai: "KI", mitanime: "MT",
   vidlink_anim: "VL", vidfast: "VF",
   animetime: "AT", animepahe: "AP", dulo_anim: "DL",
-  faselhd_db: "FH", witanime: "WI", witanime_db: "WD",
+  faselhd_db: "FH",
   notorrent: "NO", sanime: "SA", anipm: "PM", anslayer: "AS",
-  anime3rb: "A3", akwam: "AQ",
+  akwam: "AQ",
 };
 
 /* ── اسم عرض لكل موقع في منتقي المصادر ── */
@@ -69,10 +69,9 @@ const SITE_LABEL: Record<string, string> = {
   animedar: "Animedar", okanime: "OkAnime", ristoanime: "RistoAnime",
   animeify: "AnimeIfy", animeday: "AnimeDay", arabseed: "ArabSeed",
   anime4up2: "Anime4Up", mycima: "MyCima", topcinemaa: "TopCinema",
-  animephoenix: "AnimePhoenix", faselhd_db: "FaselHD", animetime: "AnimeTime",
-  witanime: "WITanime", witanime_db: "WIT مدبلج",
+  faselhd_db: "FaselHD", animetime: "AnimeTime",
   notorrent: "Notorrent", sanime: "SAnime", anipm: "AniPm", anslayer: "AnimeSlayer",
-  anime3rb: "Anime3rb", akwam: "Akwam", blkom: "بالكوم",
+  akwam: "Akwam",
 };
 function getSiteTag(site: string): string {
   return SITE_TAG[site] || site.slice(0, 2).toUpperCase();
@@ -91,13 +90,11 @@ const SITE_DESC: Record<string, string> = {
   ristoanime: "عربي مترجم · MP4 مباشر", animeify: "عربي · ميغا",
   animeday: "عربي مدبلج · HLS مباشر", arabseed: "عربي مدبلج/مترجم · MP4",
   anime4up2: "عربي مترجم · HLS/ميغا", mycima: "عربي مترجم · HLS/فيديو",
-  topcinemaa: "عربي مترجم · HLS/فيديو", animephoenix: "عربي مترجم · مباشر",
+  topcinemaa: "عربي مترجم · HLS/فيديو",
   faselhd_db: "عربي مترجم · GitHub DB", animetime: "عربي مترجم · مباشر",
-  witanime: "عربي مترجم · CycleTLS", witanime_db: "عربي مدبلج · WP",
   notorrent: "IMDB · مصادر متعددة", sanime: "عربي مدبلج/مترجم · MP4",
   anslayer: "مشغلات خارجية · MixDrop/MediaFire",
-  anime3rb: "عربي مترجم · embed مباشر", akwam: "عربي مترجم · MP4 مباشر",
-  blkom: "عربي · MP4 مباشر · CDN",
+  akwam: "عربي مترجم · MP4 مباشر",
 };
 function getSiteDesc(site: string): string {
   return SITE_DESC[site] || "";
@@ -223,10 +220,7 @@ const SITE_PRIORITY: Record<string, number> = {
 const ANIME_SITES = [
   "kawaii", "animewitcher", "anslayer", "animeify", "sanime",
   "anifox",        // مُضاف 2026-07-27 — Archive.org/MediaFire/MP4Upload/Uqload، tag=FX
-  "blkom",         // مُضاف 2026-07-28 — بالكوم · MP4 مباشر · CDN
-  "animephoenix",  // مُضاف 2026-07-28 — phoenixpr CDN direct HTTP · لا browser
   // "mitanime":  محذوف بطلب المستخدم 2026-07-27
-  // "witanime": معطّل بطلب المستخدم
   // "allmanga": معطّل 2026-07-17 — AA_CRYPTO_MISSING على AllAnime
 ] as const;
 
@@ -239,7 +233,6 @@ const SITE_TIMEOUT_MAP: Partial<Record<typeof ANIME_SITES[number], number>> = {
   anifox:       35_000,  // backend race = 30s (catalog من cache + season/ep fetch) + 5s هامش
   kawaii:       15_000,  // backend = 1s API + 2s extraction + هامش
   animewitcher: 38_000,  // backend race = 38s (servers_resolved ~30s) + هامش
-  blkom:        75_000,  // Hound cold=59s / warm=21s per call; search+watch = max 75s
 };
 
 /* ── Spinning loader ── */
@@ -817,7 +810,7 @@ export default function WatchScreen() {
     const base = getBaseUrl();
     const srcs = directSrcs;
     /* مطابق لـ isArabic في web SCRAPER_DEFS — مصادر عربية لا تحتاج SmartSub */
-    const ARABIC_SITES = new Set(["shahiid","animelek","animedar","okanime","arabseed","animephoenix","animeify","animeday","mycima","topcinemaa","anime4up2","animewitcher","ristoanime","faselhd_db","animetime","witanime","witanime_db","sanime"]);
+    const ARABIC_SITES = new Set(["shahiid","animelek","animedar","okanime","arabseed","animeify","animeday","mycima","topcinemaa","anime4up2","animewitcher","ristoanime","faselhd_db","animetime","sanime"]);
     return srcs.map(s => {
       const rawUrl = getPlayUrl(s);
       /* headers: استخدم الـ headers المُرسَلة من الخادم أولاً (Referer/Origin المباشرة)،

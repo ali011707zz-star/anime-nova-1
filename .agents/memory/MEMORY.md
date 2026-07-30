@@ -42,7 +42,7 @@
 - [anime3rb Cookie Auto-Refresh](anime3rb-cookie-refresh-system.md) — nopecha-ext على OpenShift يحل Turnstile مرة/20h؛ scheduler 30min؛ Supabase site_cookies persistence؛ episodes table URL مباشر.
 - [AniPub/MegaPlay scraper](anipub-megaplay-scraper.md) — X-Requested-With:XMLHttpRequest لازم لـ getSourcesNew؛ M3U8 يحتاج Referer:megaplay.buzz؛ تجاوز CF عبر megaplay مباشرة.
 - [AniTaku StringCare V3 Decrypt](anitaku-stringcare-v3-decrypt.md) — ✅ محلول: key=package_name bytes؛ L=len(pkg)=11؛ plain[i]=(cipher[i]-(k*(i+L)//(i+1)))&0xFF؛ code=56389881-14c2-4bbe-b51e-347e3d98f34c؛ DB فارغة.
-- [Browser sources removed 2026-07-28](browser-sources-removed-2026-07-28.md) — blkom/anime3rb/BUNNY حُذفت؛ hopxBrowserExtract/Html=null stub؛ hound-service pm2-deleted؛ RAM نزل 42%→26.9%.
+- [Source cleanup 2026-07-30](source-cleanup-2026-07-30.md) — animephoenix/witanime/blkom/anime3rb/nflixmovies حُذفت؛ hianime معطّل؛ vidbolt_anim كود محفوظ؛ admin.ts anime3rb routes أُزيلت.
 - [KW/AnimeSlayer/Cache fixes 2026-07-29](kawaii-anslayer-cache-fixes-2026-07-29.md) — KW: rawUrl مباشر بـ Referer؛ AnimeSlayer: parallel embeds+45s timeout (timeout 20s كان السبب)؛ cache DEFAULT_TTL 4h→2h + shouldRefresh 45→90min.
 - [anime3rb CF total block 2026-07-29](anime3rb-cf-total-block-2026-07-29.md) — CF تحجب كل cloud IPs (VPS+Hopx+GH Actions) بـ 403؛ لا cf_clearance ممكن حالياً؛ site_cookies table مفقود؛ يحتاج residential proxy أو captcha solver.
 - [Anime Lore RE findings](anime-lore-re-findings.md) — Firebase Remote Config مفتوح؛ AniList مصدرهم الأساسي؛ base URL ديناميكي (يحتاج MITM)؛ source flags: holakos/tersana/sdr.
