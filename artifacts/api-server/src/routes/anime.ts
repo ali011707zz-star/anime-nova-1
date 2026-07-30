@@ -1042,25 +1042,31 @@ function parseVideoUrl(html: string): { url: string; type: "hls" | "mp4" } | nul
 
 function parseStreamtape(html: string): { url: string; type: "mp4" } | null {
   try {
-    // --- Pattern A: الصيغة الجديدة (2025+) ---
-    // innerHTML = '//str' + '' + ('xcdeamtape.com/get_video?...&token=T').substring(1).substring(2)
-    // أو: innerHTML = '//str' + ('defgeamtape.com/get_video?...').substring(4)
-    // الحل: استخرج الـ prefix + الـ garbled string + عمليات substring ثم طبّقها
-    const substRe = /["'`]([^"'`]{1,10})["'`]\s*(?:\+\s*["'`][^"'`]{0,20}["'`]\s*)*\+\s*\(\s*["'`]([A-Za-z0-9+/=]{0,20}[A-Za-z]*(?:tape|stre)[^"'`]*)["'`]\s*\)((?:\.substring\(\d+\))*)/gm;
+    // --- Pattern A: الصيغة المبهمة (2025+) ---
+    // الفكرة: نبحث عن prefix + garbled string + سلسلة .substring() ثم نُطبّق العمليات
+    // ونتحقق أن الناتج يحتوي على get_video + token + streamtape
+    // أمثلة حقيقية:
+    //   '//stream'+ ('defgtape.to/get_video?...&token=T').substring(4)
+    //   "/streamt" + ''+ ('xcddape.to/get_video?...&token=T').substring(1).substring(2)
+    //   '//str' + ('xcdeamtape.com/get_video?...&token=T').substring(2).substring(1)
+    const substRe = /["'`]([^"'`]{1,50})["'`]\s*(?:\+\s*["'`][^"'`]{0,30}["'`]\s*)*\+\s*\(\s*["'`]([^"'`]{5,300})["'`]\s*\)((?:\.substring\(\d+\))+)/gm;
     for (const m of html.matchAll(substRe)) {
-      const prefix = m[1];
-      let garbled  = m[2];
-      const ops    = m[3] || "";
-      for (const s of ops.matchAll(/\.substring\((\d+)\)/g)) {
+      let garbled = m[2];
+      for (const s of m[3].matchAll(/\.substring\((\d+)\)/g)) {
         garbled = garbled.substring(parseInt(s[1]));
       }
-      const combined = (prefix + garbled).replace(/\s/g, "");
+      const combined = (m[1] + garbled).replace(/\s/g, "");
+      if (!combined.includes("get_video") || !combined.includes("token=")) continue;
       const url = combined.startsWith("//") ? "https:" + combined
-                : combined.startsWith("/")  ? "https://streamtape.com" + combined
+                : combined.startsWith("/") && !combined.startsWith("//") ? "https://streamtape.to" + combined
                 : combined;
-      if ((url.includes("streamtape.com") || url.includes("streamtape.to")) && url.includes("get_video")) {
-        return { url, type: "mp4" };
-      }
+      // تحقق صارم: الـ hostname يجب أن يكون streamtape.{com|to|net} والمسار /get_video
+      try {
+        const u = new URL(url);
+        const validHost = u.hostname === "streamtape.com" || u.hostname === "streamtape.to" || u.hostname === "streamtape.net";
+        const validPath = u.pathname === "/get_video" || u.pathname.startsWith("/get_video");
+        if (validHost && validPath) return { url, type: "mp4" };
+      } catch {}
     }
 
     // --- Pattern B: الصيغة الكلاسيكية --- innerHTML = "part1" + "part2"
@@ -1068,7 +1074,7 @@ function parseStreamtape(html: string): { url: string; type: "mp4" } | null {
     if (m1) {
       const combined = (m1[1] + m1[2]).replace(/\s/g, "");
       const url = combined.startsWith("//") ? "https:" + combined
-                : combined.startsWith("/")  ? "https://streamtape.com" + combined
+                : combined.startsWith("/")  ? "https://streamtape.to" + combined
                 : combined;
       if (url.includes("streamtape") || url.includes("get_video")) return { url, type: "mp4" };
     }
@@ -1080,22 +1086,16 @@ function parseStreamtape(html: string): { url: string; type: "mp4" } | null {
       return { url: "https:" + combined, type: "mp4" };
     }
 
-    // --- Pattern E: محتوى مباشر في div#robotlink (2025+) ---
-    // <div id="robotlink" style="display:none;">/streamtape.to/get_video?id=...&token=...</div>
-    const mRobot = html.match(/id=["']robotlink["'][^>]*>([^<]+)/);
-    if (mRobot) {
-      let raw = mRobot[1].trim();
-      // /streamtape.to/get_video?... → https://streamtape.to/get_video?...
-      if (raw.startsWith("/") && !raw.startsWith("//")) raw = "https:/" + raw;
-      else if (raw.startsWith("//")) raw = "https:" + raw;
-      if (raw.includes("get_video")) return { url: raw, type: "mp4" };
-    }
-
-    // --- Pattern D: get_video?id=...&token=... مباشراً في سياق JS ---
-    // نبحث فقط في سياق JS (بعد إزالة محتوى divs لتجنب الـ token المزيّف)
-    const jsSection = html.replace(/<div[^>]*>.*?<\/div>/gis, "");
-    const m3 = jsSection.match(/get_video\?id=[^&"'<\s]+&expires=\d+(?:&ip=[^&"'<\s]+)?&token=[^&"'<>\s;)]+/);
-    if (m3) return { url: "https://streamtape.com/" + m3[0], type: "mp4" };
+    // --- Pattern D: get_video?...&token=... داخل سلاسل JS (بعد إزالة divs/spans الثابتة) ---
+    // الـ divs الثابتة تحتوي tokens مزيّفة (garbled) — لا نستخدمها
+    // لكن الـ token داخل سلاسل JS هو الصحيح دائماً
+    const jsSection = html.replace(/<(?:div|span)[^>]*>.*?<\/(?:div|span)>/gis, "");
+    // ابحث أولاً عن get_video مع domain واضح في نفس السياق
+    const m3 = jsSection.match(/(streamtape\.(?:com|to|net))[^"'`]*?(get_video\?id=[^&"'`<\s]+&expires=\d+(?:&ip=[^&"'`<\s]+)?&token=[^"'`<>\s;)]+)/);
+    if (m3) return { url: `https://${m3[1]}/${m3[2]}`, type: "mp4" };
+    // fallback: أيّ get_video URL في JS — نفترض streamtape.to (الدومين الشائع في AnimeSlayer)
+    const m3b = jsSection.match(/get_video\?id=[^&"'`<\s]+&expires=\d+(?:&ip=[^&"'`<\s]+)?&token=[^"'`<>\s;)]+/);
+    if (m3b) return { url: "https://streamtape.to/" + m3b[0], type: "mp4" };
 
   } catch {}
   return null;
@@ -1617,7 +1617,7 @@ async function extractVideoDeep(
         html = await r.text();
       }
       if (isCloudflareBlock(html)) break;
-      if (url.includes("streamtape.com") || url.includes("streamtape.net")) {
+      if (url.includes("streamtape.com") || url.includes("streamtape.net") || url.includes("streamtape.to")) {
         const v = parseStreamtape(html); if (v) return v;
       }
       if (url.includes("streamwish") || url.includes("wishembed") || url.includes("embedwish") ||

@@ -20,6 +20,7 @@
 - [Hidden-resolve embed sites](hidden-resolve-embed-sites.md) — 3 independent gates (isEmbed flag, backend SSE allowlist, mobile WEBVIEW_RESOLVE_SITES Set) must all list a site or its hidden-WebView extraction silently breaks.
 - [AnimeSlayer constants restored](anslayer-constants-restored.md) — ANSLAYER_BASE/CID/CSEC حُذفت من anime.ts وأُعيدت؛ لا تحذفها مجدداً.
 - [KW/AnimeSlayer/Cache fixes 2026-07-29](kawaii-anslayer-cache-fixes-2026-07-29.md) — KW: rawUrl مباشر بـ Referer؛ AnimeSlayer: parallel embeds+45s timeout (timeout 20s كان السبب)؛ cache DEFAULT_TTL 4h→2h + shouldRefresh 45→90min.
+- [Streamtape .to domain fix](streamtape-to-domain-fix.md) — extractVideoDeep كان يتجاهل .to؛ Pattern A أُعيد تصميمه مع URL validation صارم؛ static div tokens دائماً garbled.
 - [kawaii CDN Referer block](kawaii-cdn-referer-fix.md) — no-Referer=200, wrong-Referer=403; fix: v.referrerPolicy="no-referrer" in RiftPlayer; format=MP4 (not HLS); mobile works via explicit Referer.
 - [Source cleanup 2026-07-30](source-cleanup-2026-07-30.md) — animephoenix/witanime/blkom/anime3rb/nflixmovies حُذفت؛ hianime معطّل؛ vidbolt_anim كود محفوظ؛ admin.ts anime3rb routes أُزيلت.
 - [MovieBox H5-API verified](moviebox-h5api-verified.md) — h5-api.aoneroom.com يعمل من VPS؛ mobile API geo-blocked؛ subjectType 1=movie/2=series؛ movies se=0,ep=0؛ filter أُضيف لـ anime.ts+animation.ts.
