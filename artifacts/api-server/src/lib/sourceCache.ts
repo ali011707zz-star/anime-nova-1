@@ -16,7 +16,7 @@ import { cacheSelect, cacheUpsert, cacheDelete, isCacheDbReady } from "./supabas
 export const SITE_TTL: Record<string, number> = {
   animephoenix: 36 * 3_600_000,
   animedar:     30 * 24 * 3_600_000, // Mega.nz + 4shared — روابط دائمة لا تنتهي
-  kawaii:       24 * 3_600_000,
+  kawaii:       15 * 3_600_000,  // روابط موقَّعة تنتهي ~17h → 15h TTL احتياطي
   animeify:      45 * 60_000,    // مختلط: MediaFire دائم / FileMoon+SendVid مؤقتة → 45min
   mitanime:      8 * 3_600_000,
   seepanel:      8 * 3_600_000,
@@ -71,8 +71,8 @@ const PERMANENT_URL_PATTERNS: Array<[RegExp, number]> = [
   [/ok\.ru\/dk\b/i,                      7 * 24 * 3_600_000], // OK.ru stream — مستقر لأسابيع
   [/vidmoly\.(to|biz)\//i,              7 * 24 * 3_600_000], // VidMoly
   [/\.workers\.dev\//i,                  7 * 24 * 3_600_000], // CF Workers proxy
-  [/af[13]\.downet\.net\//i,             7 * 24 * 3_600_000], // Kawaii CDN
-  [/video\.kawaii-anime\.com\//i,        7 * 24 * 3_600_000], // Kawaii
+  // ملاحظة: video.kawaii-anime.com و af[13].downet.net أُزيلا من PERMANENT_URL_PATTERNS
+  // لأن روابطهما موقَّعة (md5+expires ~17h) → يجب أن تسقط لـ parseUrlExpiry لقراءة ?expires= الفعلي
 ];
 
 function parseUrlExpiry(url: string): number | null {
@@ -200,21 +200,40 @@ export function makeAnimCacheKey(site: string, tmdbId: string, type: string, sea
     : `${site}:anim-tv:${tmdbId}:s${season}e${ep}`;
 }
 
+// ── تحقق من انتهاء URL الفعلي (signed URLs كـ kawaii md5+expires) ──
+// يكشف الإدخالات القديمة التي كانت مخزَّنة بـ TTL خاطئ (7 أيام بدل ~17h)
+function isSourcesUrlExpired(sources: any[]): boolean {
+  const now = Date.now();
+  for (const src of sources) {
+    for (const field of [src.directUrl, src.url, src.rawUrl] as (string | undefined)[]) {
+      if (!field || field.startsWith("/api/")) continue;
+      const ex10 = field.match(/[?&]expires=(\d{10})\b/);
+      if (ex10 && parseInt(ex10[1]) * 1000 < now) return true;
+      const ex13 = field.match(/[?&]expires=(\d{13})\b/);
+      if (ex13 && parseInt(ex13[1]) < now) return true;
+    }
+  }
+  return false;
+}
+
 // ── قراءة من Cache (L1 → L2) ──
 export async function getFromSourceCache(
   key: string
 ): Promise<{ sources: any[]; expiresAt: number; stale?: boolean } | null> {
   // L1 أولاً (أسرع)
   const m = l1.get(key);
-  if (m && Date.now() < m.expiresAt) return m;
-  l1.delete(key);
+  if (m && Date.now() < m.expiresAt) {
+    // تحقق من انتهاء الـ URL الفعلي (signed URLs)
+    if (isSourcesUrlExpired(m.sources)) { l1.delete(key); }
+    else return m;
+  } else { l1.delete(key); }
 
   // L2: Supabase
   const row = await sbGet(key);
   if (!row) return null;
 
-  if (Date.now() > row.expiresAt) {
-    // بيانات منتهية الصلاحية — أعدها مع علامة stale لإعادة الجلب
+  if (Date.now() > row.expiresAt || isSourcesUrlExpired(row.sources)) {
+    // بيانات منتهية الصلاحية (TTL أو URL) — أعدها مع علامة stale لإعادة الجلب
     return { sources: row.sources, expiresAt: row.expiresAt, stale: true };
   }
 
