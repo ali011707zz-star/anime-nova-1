@@ -3385,21 +3385,27 @@ export default function WatchPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  /* ── Lazy picker (مثل الموبايل): لا كشط تلقائي عند فتح الحلقة ──
-     المستخدم يرى شبكة المصادر فوراً (SCRAPER_DEFS static) ويضغط ما يريد.
-     بعد أول نجاح → بقية المصادر تُكشَّف في الخلفية (منطق bgLoad في handleFetchSite).
-     quick-resume لا يزال يعمل: يشغّل آخر مصدر محفوظ إذا كان هناك تقدُّم > 30s. ── */
+  /* ── Auto-fetch on mount: يُشغَّل PRIORITY_FETCH_SITES فوراً عند فتح الحلقة ──
+     أول مصدر يصل → يُشغَّل تلقائياً (auto-play logic في handleFetchSite، bgLoad=false).
+     بعد أول نجاح → بقية المصادر تُكشَّف خلفياً تلقائياً.
+     quick-resume لا يزال يعمل: يُفعَّل أولاً من useEffect منفصل أعلاه.
+     Fallback: إذا فشلت كل مصادر الأولوية → picker بعد 8s للاختيار اليدوي. ── */
   useEffect(() => {
     if (!animeId && !titleParam) return;
-    if (!autoPlayedRef.current) autoPlayedRef.current = false;
+    autoPlayedRef.current   = false;
     autoFetchAllRef.current = false;
     inFlightRef.current     = new Set();
 
-    /* ── إصلاح: إذا لم يُفعَّل quick-resume خلال 350ms → أظهر الـ picker فوراً.
-       بدون هذا الـ fallback تبقى شاشة التحميل عالقة للأبد عند أول فتح للحلقة. ── */
+    // ابدأ كشط مصادر الأولوية فوراً — الأول يُرجع نتيجة يُشغَّل تلقائياً
+    Array.from(PRIORITY_FETCH_SITES).forEach((site, i) => {
+      const tid = window.setTimeout(() => handleFetchSite(site, false), 80 * i);
+      pendingTimeoutsRef.current.push(tid);
+    });
+
+    // Fallback: إذا فشلت كل مصادر الأولوية خلال 8s → أظهر الـ picker
     const pickerFallbackTimer = window.setTimeout(() => {
       if (!autoPlayedRef.current) setShowPicker(true);
-    }, 350);
+    }, 8000);
 
     return () => {
       window.clearTimeout(pickerFallbackTimer);

@@ -525,7 +525,46 @@ export default function RiftPlayer({
     if (Hls.isSupported()) {
       /* ── Network-adaptive buffer config — computed fresh on every source load ── */
       const bufCfg = getHlsBufferConfig();
+
+      // ── kawaii CDN: XHR لا يستطيع إخفاء Referer (forbidden header) → CDN يُرجع 403.
+      // الحل: custom Fetch loader بـ referrerPolicy:"no-referrer" لجميع طلبات kawaii HLS.
+      const isKawaiiHls = m3u8.includes("video.kawaii-anime.com");
+      class KawaiiNoRefLoader {
+        private ctrl: AbortController | null = null;
+        destroy() { this.ctrl?.abort(); }
+        abort()   { this.ctrl?.abort(); }
+        load(ctx: any, _cfg: any, cb: any) {
+          const t0 = performance.now();
+          this.ctrl = new AbortController();
+          const hdrs: Record<string, string> = {};
+          if (ctx.rangeStart != null && ctx.rangeEnd != null)
+            hdrs["Range"] = `bytes=${ctx.rangeStart}-${ctx.rangeEnd}`;
+          fetch(ctx.url, { signal: this.ctrl.signal, referrerPolicy: "no-referrer", headers: hdrs })
+            .then(async r => {
+              if (!r.ok) { cb.onError({ code: r.status, text: r.statusText }, ctx, null, {}); return; }
+              // manifest → text; segments (.ts) → arraybuffer
+              const isText = ctx.url.includes(".m3u8") || ctx.responseType !== "arraybuffer";
+              const data: string | ArrayBuffer = isText ? await r.text() : await r.arrayBuffer();
+              const len = typeof data === "string" ? data.length : (data as ArrayBuffer).byteLength;
+              const t1 = performance.now();
+              cb.onSuccess(
+                { data, url: r.url || ctx.url },
+                { aborted: false, loaded: len, total: len, retry: 0, chunkCount: 0,
+                  bwEstimate: len / Math.max(0.001, (t1 - t0) / 1000),
+                  loading: { start: t0, first: t0, end: t1 },
+                  parsing: { start: t1, end: t1 },
+                  buffering: { start: t1, first: t1, end: t1 } },
+                ctx, null);
+            })
+            .catch(e => {
+              if (e?.name !== "AbortError")
+                cb.onError({ code: 0, text: e?.message || "fetch error" }, ctx, null, {});
+            });
+        }
+      }
+
       const hls = new Hls({
+        ...(isKawaiiHls ? { loader: KawaiiNoRefLoader as any } : {}),
         enableWorker: true,
         lowLatencyMode: false,
         /* ── Vidstack: defer segment loading until we know the resume position ──
@@ -567,15 +606,18 @@ export default function RiftPlayer({
         nudgeOffset: 0.5,
         enableCEA708Captions: false,
         renderTextTracksNatively: false,
-        xhrSetup: (xhr: XMLHttpRequest) => {
-          xhr.timeout = 25000;
-          // CDN auth headers (Referer/Origin) — needed for Dulo raw URLs blocked from datacenter IP
-          if (hlsHeaders) {
-            for (const [k, v] of Object.entries(hlsHeaders)) {
-              try { xhr.setRequestHeader(k, v); } catch { /* ignore read-only headers */ }
+        // xhrSetup: only for non-kawaii HLS (kawaii uses KawaiiNoRefLoader above)
+        ...(!isKawaiiHls ? {
+          xhrSetup: (xhr: XMLHttpRequest) => {
+            xhr.timeout = 25000;
+            // CDN auth headers (Referer/Origin) — needed for Dulo raw URLs blocked from datacenter IP
+            if (hlsHeaders) {
+              for (const [k, v] of Object.entries(hlsHeaders)) {
+                try { xhr.setRequestHeader(k, v); } catch { /* ignore read-only headers */ }
+              }
             }
-          }
-        },
+          },
+        } : {}),
       });
       hlsRef.current = hls;
       hls.loadSource(m3u8); hls.attachMedia(v);
