@@ -476,6 +476,8 @@ export default function RiftPlayer({
     const isCorsDirectCdn = CORS_DIRECT_CDN.some(h => src.includes(h));
     if (isCorsDirectCdn && !src.match(/\.m3u8([?#]|$)/i)) {
       // MP4/non-HLS: native <video> element works fine (CORS *)
+      // kawaii CDN: no-Referer=200, wrong-Referer=403 — browser sends page URL as Referer by default
+      if (src.includes("video.kawaii-anime.com")) v.referrerPolicy = "no-referrer";
       v.src = src; v.load();
       let done = false;
       const cleanup = () => { done = true; clearTimeout(t); v.removeEventListener("loadedmetadata", onMd); v.removeEventListener("error", onEd); };
