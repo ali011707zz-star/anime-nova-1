@@ -3462,6 +3462,19 @@ export default function WatchPage() {
     /* Put clicked URL first in its tier, others after */
     const servers: Record<Quality, string[]> = { "1080p FHD": [], "720p HD": [], "360p SD": [] };
     servers[clickedTier].push(clickedUrl);
+
+    /* ── kawaii CDN fallback: إذا فشل التشغيل المباشر، نجرّب عبر VPS proxy بـ Referer الصحيح ──
+       video.kawaii-anime.com تحجب المتصفح أحياناً (Referer خاطئ أو URL منتهي) → نضع URL
+       الـ proxy مباشرةً بعد الـ URL المباشر كـ سيرفر 2 بدلاً من القفز لمصدر آخر كلياً. */
+    if (src.site === "kawaii" && clickedUrl.includes("video.kawaii-anime.com")) {
+      const kawaiiRef = "https://www.kawaii-anime.com/";
+      const isHlsKw  = /\.m3u8([?#]|$)/i.test(clickedUrl);
+      const kwProxy  = isHlsKw
+        ? `/api/anime/hls-proxy?url=${encodeURIComponent(clickedUrl)}&ref=${encodeURIComponent(kawaiiRef)}`
+        : `/api/anime/video-proxy?url=${encodeURIComponent(clickedUrl)}&ref=${encodeURIComponent(kawaiiRef)}`;
+      servers[clickedTier].splice(1, 0, kwProxy);
+    }
+
     for (const s of allFlat) {
       const u = s.directUrl || s.url;
       if (!u || u === clickedUrl) continue;

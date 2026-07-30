@@ -16,7 +16,7 @@ import { cacheSelect, cacheUpsert, cacheDelete, isCacheDbReady } from "./supabas
 export const SITE_TTL: Record<string, number> = {
   animephoenix: 36 * 3_600_000,
   animedar:     24 * 3_600_000,
-  kawaii:       24 * 3_600_000,
+  kawaii:       14 * 3_600_000,  // signed URLs تنتهي ~17h → نخفّض التخزين لـ 14h مع 3h هامش أمان
   animeify:      45 * 60_000,    // MediaFire CDN URLs expire ~1h → 45min TTL
   mitanime:      8 * 3_600_000,
   seepanel:      8 * 3_600_000,
@@ -73,7 +73,8 @@ const PERMANENT_URL_PATTERNS = [
   /\.workers\.dev\//i,
   /drive\.google\.com/i,
   /af[13]\.downet\.net/i,
-  /video\.kawaii-anime\.com/i,
+  // video.kawaii-anime.com أُزيلت من هنا: روابطها موقَّعة بـ md5+expires (~17h)
+  // parseUrlExpiry يجب أن يكتشف ?expires= الحقيقي بدلاً من افتراض 7 أيام
 ];
 
 function parseUrlExpiry(url: string): number | null {
