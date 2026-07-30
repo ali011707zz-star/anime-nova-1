@@ -470,11 +470,12 @@ export default function RiftPlayer({
     }
 
     // CDNs with CORS * + Accept-Ranges → play DIRECTLY in browser (no proxy round-trip)
-    // video.kawaii-anime.com: confirmed CORS * + Range support
-    // pixeldrain.com/api/file/: confirmed CORS * + Accept-Ranges
+    // video.kawaii-anime.com: confirmed CORS * + Range support (MP4 native, m3u8 via hls.js below)
+    // pixeldrain.com/api/file/: confirmed CORS * + Accept-Ranges (MP4 only)
     const CORS_DIRECT_CDN = ["video.kawaii-anime.com", "pixeldrain.com/api/file/"];
     const isCorsDirectCdn = CORS_DIRECT_CDN.some(h => src.includes(h));
-    if (isCorsDirectCdn) {
+    if (isCorsDirectCdn && !src.match(/\.m3u8([?#]|$)/i)) {
+      // MP4/non-HLS: native <video> element works fine (CORS *)
       v.src = src; v.load();
       let done = false;
       const cleanup = () => { done = true; clearTimeout(t); v.removeEventListener("loadedmetadata", onMd); v.removeEventListener("error", onEd); };
@@ -485,6 +486,7 @@ export default function RiftPlayer({
       v.addEventListener("error", onEd, { once: true });
       return;
     }
+    // kawaii m3u8: CORS * allows direct hls.js load — falls through to Hls.isSupported() block below
 
     const isDirect = src.includes("streamtape.com") || src.includes("sendvid.com")
       || src.includes("videos2.sendvid.com") || src.includes("video-proxy?")
