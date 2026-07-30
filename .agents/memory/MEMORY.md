@@ -22,6 +22,7 @@
 - [KW/AnimeSlayer/Cache fixes 2026-07-29](kawaii-anslayer-cache-fixes-2026-07-29.md) — KW: rawUrl مباشر بـ Referer؛ AnimeSlayer: parallel embeds+45s timeout (timeout 20s كان السبب)؛ cache DEFAULT_TTL 4h→2h + shouldRefresh 45→90min.
 - [kawaii CDN Referer block](kawaii-cdn-referer-fix.md) — no-Referer=200, wrong-Referer=403; fix: v.referrerPolicy="no-referrer" in RiftPlayer; format=MP4 (not HLS); mobile works via explicit Referer.
 - [Source cleanup 2026-07-30](source-cleanup-2026-07-30.md) — animephoenix/witanime/blkom/anime3rb/nflixmovies حُذفت؛ hianime معطّل؛ vidbolt_anim كود محفوظ؛ admin.ts anime3rb routes أُزيلت.
+- [MovieBox H5-API verified](moviebox-h5api-verified.md) — h5-api.aoneroom.com يعمل من VPS؛ mobile API geo-blocked؛ subjectType 1=movie/2=series؛ movies se=0,ep=0؛ filter أُضيف لـ anime.ts+animation.ts.
 - [FaselHD scdns.io RE](faselhd-scdns-reverse-engineering.md) — CDN=scdns.io; master.m3u8 أي IP بلا headers; quality URLs=نفس IP؛ TTL=~5-6h؛ browser مرة واحدة/محتوى (Hopx playwright)؛ cache بـ expiry_ts من URL.
 - [anime3rb CF total block 2026-07-29](anime3rb-cf-total-block-2026-07-29.md) — CF تحجب كل cloud IPs (VPS+Hopx+GH Actions) بـ 403؛ لا cf_clearance ممكن حالياً؛ site_cookies table مفقود؛ يحتاج residential proxy أو captcha solver.
 - [WeCima domain 2026-07](wecima-domain-2026-07.md) — mycima.gripe→wecima.gold; data-watch+mycimafsd unchanged; fastvip.space/cdn-centaurus.com.

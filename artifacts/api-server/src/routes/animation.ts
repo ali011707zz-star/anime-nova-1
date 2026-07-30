@@ -4424,9 +4424,12 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
           const items: any[] = sData?.data?.items || [];
           if (!items.length) return;
 
-          // فلتر: استبعد المدبلج أولاً
+          // فلتر: استبعد المدبلج أولاً، ثم فلتر حسب نوع المحتوى (1=movie, 2=series)
           const nonDubbed = items.filter((it: any) => !_MBX_DUBBED_RE_ANIM.test(it.title || ""));
-          const candidates = nonDubbed.length ? nonDubbed : items;
+          const pool = nonDubbed.length ? nonDubbed : items;
+          const expectedType = type === "movie" ? 1 : 2;
+          const typeMatched = pool.filter((it: any) => it.subjectType === expectedType);
+          const candidates = typeMatched.length ? typeMatched : pool;
           const qLow = title.toLowerCase();
           candidates.sort((a: any, b: any) => {
             const aHit = (a.title || "").toLowerCase().includes(qLow) ? 1 : 0;

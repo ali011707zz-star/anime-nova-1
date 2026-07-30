@@ -9725,9 +9725,12 @@ async function getMovieBoxAnimeSources(
     const items: any[] = sData?.data?.items || [];
     if (!items.length) return [];
 
-    // فلتر: استبعد النسخ المدبلجة أولاً
+    // فلتر: استبعد النسخ المدبلجة أولاً، ثم فلتر حسب نوع المحتوى (1=movie, 2=series)
     const nonDubbed = items.filter((it: any) => !MBX_DUBBED_RE.test(it.title || ""));
-    const candidates = nonDubbed.length ? nonDubbed : items;
+    const pool = nonDubbed.length ? nonDubbed : items;
+    const expectedType = isMovie ? 1 : 2;
+    const typeMatched = pool.filter((it: any) => it.subjectType === expectedType);
+    const candidates = typeMatched.length ? typeMatched : pool;
 
     // رتّب: الأقرب للعنوان أولاً
     const qLow = query.toLowerCase();
