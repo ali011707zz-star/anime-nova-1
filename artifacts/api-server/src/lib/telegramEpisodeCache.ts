@@ -157,7 +157,14 @@ async function dbUpsert(row: Partial<TgCacheRow> & { id: string }): Promise<void
 // ── Telegram helpers ─────────────────────────────────────────────────────
 
 async function getTgToken(): Promise<string> {
-  return (await getEnvOrDb("TELEGRAM_BOT_TOKEN", "telegram_bot_token")) || "";
+  // TELEGRAM_CACHE_BOT_TOKEN: بوت مخصص للرفع (يختلف عن بوت الإشعارات)
+  // يرجع إلى TELEGRAM_BOT_TOKEN إن لم يكن CACHE_BOT_TOKEN موجوداً
+  return (
+    process.env.TELEGRAM_CACHE_BOT_TOKEN ||
+    (await getEnvOrDb("TELEGRAM_CACHE_BOT_TOKEN", "telegram_cache_bot_token")) ||
+    (await getEnvOrDb("TELEGRAM_BOT_TOKEN", "telegram_bot_token")) ||
+    ""
+  );
 }
 
 async function getTgChannelId(): Promise<string> {
