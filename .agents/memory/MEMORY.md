@@ -1,4 +1,5 @@
 - [Shirayuki & Open-Anime-API](shirayuki-open-anime-api.md) — تحليل المستودعَين + خطة حل HLS موبايل (hls-to-fmp4 vs AnimHlsPlayer fallback) — مؤجّل.
+- [Telegram Cache Plan](telegram-cache-plan.md) — تخزين حلقات MP4 بكل الجودات في تيليغرام (قناة خاصة + بوت موجود)؛ أول مشاهدة عبر scraper + background upload؛ ترجمة منفصلة عن الفيديو.
 - [VPS Deployment](vps-deployment.md) — خادم 95.182.93.105 Ubuntu 24.04; Telegram webhook uses self-signed cert uploaded to Telegram API; CHANNEL_ID in .env + DB; token DB-only via config-sync.
 - [VPS-only deployment policy](vps-only-deployment-policy.md) — user explicitly forbids running/installing the app in Replit workspace; it runs only on the VPS via pm2. Replit is code-editing only; verify via SSH+pm2 logs, not local workflows.
 - [VPS manual deploy](vps-manual-deploy-2026-07.md) — app runs only on VPS via pm2, never on Replit; diff files vs VPS working copy before overwriting (VPS had unique unpushed commits); rebuild both frontend+backend after sync.
