@@ -221,6 +221,29 @@ CREATE TABLE IF NOT EXISTS telegram_episode_cache (
   updated_at   TIMESTAMPTZ DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS idx_tg_ep_cache_lookup ON telegram_episode_cache (anime_id, ep, status);
+
+-- ════════════════════════════════════════════════════════════════════════
+--  Row-Level Security — تفعيل على جميع الجداول
+--  الخادم يستخدم service_role key دائماً → يتجاوز RLS تلقائياً
+--  RLS مُفعَّل لمنع الوصول العام عبر anon key
+-- ════════════════════════════════════════════════════════════════════════
+ALTER TABLE users                  ENABLE ROW LEVEL SECURITY;
+ALTER TABLE pending_verifications   ENABLE ROW LEVEL SECURITY;
+ALTER TABLE sessions               ENABLE ROW LEVEL SECURITY;
+ALTER TABLE watch_history          ENABLE ROW LEVEL SECURITY;
+ALTER TABLE favorites              ENABLE ROW LEVEL SECURITY;
+ALTER TABLE watch_progress         ENABLE ROW LEVEL SECURITY;
+ALTER TABLE comments               ENABLE ROW LEVEL SECURITY;
+ALTER TABLE comment_likes          ENABLE ROW LEVEL SECURITY;
+ALTER TABLE source_cache           ENABLE ROW LEVEL SECURITY;
+ALTER TABLE subtitle_cache         ENABLE ROW LEVEL SECURITY;
+ALTER TABLE cdn_cache              ENABLE ROW LEVEL SECURITY;
+ALTER TABLE reports                ENABLE ROW LEVEL SECURITY;
+ALTER TABLE app_config             ENABLE ROW LEVEL SECURITY;
+ALTER TABLE translations_cache     ENABLE ROW LEVEL SECURITY;
+ALTER TABLE anime_meta_ar          ENABLE ROW LEVEL SECURITY;
+ALTER TABLE anime_meta_cache       ENABLE ROW LEVEL SECURITY;
+ALTER TABLE telegram_episode_cache ENABLE ROW LEVEL SECURITY;
 `;
 
 const REQUIRED_TABLES = ["users", "pending_verifications", "watch_history", "favorites", "translations_cache", "anime_meta_ar", "anime_meta_cache", "telegram_episode_cache"];
