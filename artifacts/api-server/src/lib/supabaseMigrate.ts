@@ -202,9 +202,28 @@ CREATE TABLE IF NOT EXISTS anime_meta_cache (
   ttl_seconds INTEGER DEFAULT 21600,
   created_at  TIMESTAMPTZ DEFAULT NOW()
 );
+
+-- جدول تخزين الحلقات في تيليغرام
+CREATE TABLE IF NOT EXISTS telegram_episode_cache (
+  id           TEXT PRIMARY KEY,
+  anime_id     INTEGER NOT NULL,
+  ep           INTEGER NOT NULL,
+  title        TEXT,
+  quality      TEXT NOT NULL DEFAULT 'HD',
+  site         TEXT NOT NULL,
+  file_id      TEXT NOT NULL DEFAULT '',
+  file_size    BIGINT,
+  duration_sec INTEGER,
+  status       TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','downloading','ready','failed')),
+  source_url   TEXT,
+  caption      TEXT,
+  created_at   TIMESTAMPTZ DEFAULT NOW(),
+  updated_at   TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_tg_ep_cache_lookup ON telegram_episode_cache (anime_id, ep, status);
 `;
 
-const REQUIRED_TABLES = ["users", "pending_verifications", "watch_history", "favorites", "translations_cache", "anime_meta_ar", "anime_meta_cache"];
+const REQUIRED_TABLES = ["users", "pending_verifications", "watch_history", "favorites", "translations_cache", "anime_meta_ar", "anime_meta_cache", "telegram_episode_cache"];
 
 // ── PostgreSQL direct migration (للـ Replit PostgreSQL) ──────────────────────
 const PG_MIGRATION_SQL = `

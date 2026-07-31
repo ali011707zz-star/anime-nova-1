@@ -14,6 +14,12 @@ import {
   setSubtitleCache,
 } from "../lib/sourceCache.js";
 import { notifyNewEpisode } from "./telegram.js";
+import {
+  getTgCachedSources,
+  isTgCacheable,
+  enqueueTgDownload,
+  cleanupStaleTgJobs,
+} from "../lib/telegramEpisodeCache.js";
 import { encryptProxyUrl, encryptParam, decryptParam, isEncrypted } from "../lib/security.js";
 import { sbSelect, sbUpsert } from "../lib/supabaseClient.js";
 import pg from "pg";
@@ -11469,6 +11475,7 @@ router.get("/anime/sources-stream", async (req, res) => {
   const reqNative   = ((req.query.native   as string) || "").trim() || null;
   const reqTotalEps = parseInt((req.query.episodes as string) || "0") || null;
   const titleAr     = ((req.query.titleAr  as string) || "").trim() || null;
+  const tgTmdbId    = ((req.query.tmdbId   as string) || "").trim() || null;
   const seasonNum   = extractSeasonNum(title) ?? extractSeasonNum(english || "") ?? null;
   const matchCtx: MatchCtx = {
     romaji: title, english, native: reqNative,
@@ -11509,6 +11516,20 @@ router.get("/anime/sources-stream", async (req, res) => {
     if (globalSeen.has(key)) return;
     globalSeen.add(key);
 
+    // ── TG Cache: أضف المصدر لقائمة التخزين إن كان مؤهَّلاً ──────────────
+    if (anilistId && s.site && isTgCacheable(s.site, s.directType, s.directUrl)) {
+      enqueueTgDownload({
+        animeId:       anilistId,
+        ep,
+        title,
+        quality:       s.quality || "HD",
+        site:          s.site,
+        sourceUrl:     s.directUrl!,
+        injectSubtitle: s.site === "kawaii",
+        tmdbId:        tgTmdbId || undefined,
+      });
+    }
+
     /* استخراج Referer/Origin من رابط الـ proxy (ref= param) وتضمينهم في الاستجابة.
        هذا يتيح للعميل (ExoPlayer/AVPlayer) إرسال الـ headers الصحيحة مباشرةً للـ CDN
        حتى لو لم يكن هناك proxy يمر عبر الخادم. */
@@ -11544,6 +11565,13 @@ router.get("/anime/sources-stream", async (req, res) => {
   }, 28_000);
 
   try {
+    // ── TG Cache: بث المصادر المخزَّنة في تيليغرام فوراً ─────────────────
+    if (anilistId) {
+      getTgCachedSources(anilistId, ep).then(cached => {
+        for (const src of cached) sendSrc(src as UnifiedSource);
+      }).catch(() => {});
+    }
+
     const SCRAPER_MS = 7000;   // كان 12000 — تقليل وقت انتظار كل مصدر
     const EXTRACT_MS = 7000;   // كان 15000 — تقليل وقت الاستخراج العميق
     const race = <T>(p: Promise<T>, ms: number, fallback: T) =>

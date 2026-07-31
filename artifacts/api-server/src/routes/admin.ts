@@ -459,4 +459,41 @@ router.get("/admin/setup/status", async (req: Request, res: Response) => {
 
 // ── anime3rb CF cookie routes removed 2026-07-30 (anime3rb deleted) ──
 
+/* GET /api/admin/tg-cache-status — حالة نظام تخزين الحلقات في تيليغرام */
+router.get("/admin/tg-cache-status", async (req: Request, res: Response) => {
+  if (!(await hasRelayAccess(req)))
+    return res.status(401).json({ error: "unauthorized" });
+
+  try {
+    const { getTgCacheStatus } = await import("../lib/telegramEpisodeCache.js");
+    return res.json({ ok: true, ...getTgCacheStatus() });
+  } catch (e: any) {
+    return res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+/* POST /api/admin/tg-cache-credentials — تعيين TELEGRAM_BOT_TOKEN + TELEGRAM_CACHE_CHANNEL_ID */
+router.post("/admin/tg-cache-credentials", async (req: Request, res: Response) => {
+  if (!(await hasRelayAccess(req)))
+    return res.status(401).json({ error: "unauthorized" });
+
+  const { setDbConfig } = await import("../lib/dbConfig.js");
+  const { bot_token, channel_id } = req.body || {};
+
+  if (bot_token) {
+    process.env.TELEGRAM_BOT_TOKEN = String(bot_token);
+    await setDbConfig("telegram_bot_token", String(bot_token));
+  }
+  if (channel_id) {
+    process.env.TELEGRAM_CACHE_CHANNEL_ID = String(channel_id);
+    await setDbConfig("telegram_cache_channel_id", String(channel_id));
+  }
+
+  return res.json({
+    ok: true,
+    hasToken:   !!process.env.TELEGRAM_BOT_TOKEN,
+    channelId:  process.env.TELEGRAM_CACHE_CHANNEL_ID || "(من DB)",
+  });
+});
+
 export default router;
