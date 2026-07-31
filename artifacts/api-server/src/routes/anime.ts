@@ -19,6 +19,7 @@ import {
   isTgCacheable,
   enqueueTgDownload,
   cleanupStaleTgJobs,
+  normalizeTgQuality,
 } from "../lib/telegramEpisodeCache.js";
 import { encryptProxyUrl, encryptParam, decryptParam, isEncrypted } from "../lib/security.js";
 import { sbSelect, sbUpsert } from "../lib/supabaseClient.js";
@@ -11517,16 +11518,17 @@ router.get("/anime/sources-stream", async (req, res) => {
     globalSeen.add(key);
 
     // ── TG Cache: أضف المصدر لقائمة التخزين إن كان مؤهَّلاً ──────────────
-    if (anilistId && s.site && isTgCacheable(s.site, s.directType, s.directUrl)) {
+    // فقط 3 جودات مسموحة: 1080p / 720p / 360p
+    if (anilistId && s.site && isTgCacheable(s.site, s.directType, s.directUrl, s.quality)) {
       enqueueTgDownload({
-        animeId:       anilistId,
+        animeId:        anilistId,
         ep,
         title,
-        quality:       s.quality || "HD",
-        site:          s.site,
-        sourceUrl:     s.directUrl!,
+        quality:        normalizeTgQuality(s.quality || "") || s.quality || "HD",
+        site:           s.site,
+        sourceUrl:      s.directUrl!,
         injectSubtitle: s.site === "kawaii",
-        tmdbId:        tgTmdbId || undefined,
+        tmdbId:         tgTmdbId || undefined,
       });
     }
 

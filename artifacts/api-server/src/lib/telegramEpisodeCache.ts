@@ -36,6 +36,26 @@ export const TG_ALLOWED_SITES = new Set<string>([...TG_PRIORITY_SITES, TG_FALLBA
 // ── أنواع قابلة للتخزين (MP4 مباشر فقط — HLS يُضاف لاحقاً) ────────────
 const CACHEABLE_TYPES = new Set<string>(["mp4"]);
 
+// ── الجودات المسموح بتخزينها: 3 سيرفرات فقط لكل حلقة ───────────────────
+// أي جودة أخرى (480p، 240p، HD غير محدد…) تُرفض تلقائياً
+const TG_QUALITY_MAP: Record<string, string> = {
+  "1080": "1080p", "1080p": "1080p", "fhd": "1080p",
+  "720":  "720p",  "720p":  "720p",
+  "360":  "360p",  "360p":  "360p",
+};
+
+/**
+ * يُعيد الجودة المُعيَّرة (1080p / 720p / 360p) أو null إن لم تكن مقبولة.
+ * مثال: "1080 HD" → "1080p" | "480p" → null | "HD" → null
+ */
+export function normalizeTgQuality(quality: string): string | null {
+  const q = (quality || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+  if (q.includes("1080")) return "1080p";
+  if (q.includes("720"))  return "720p";
+  if (q.includes("360"))  return "360p";
+  return TG_QUALITY_MAP[q] ?? null;
+}
+
 // ── Types ────────────────────────────────────────────────────────────────
 
 export interface TgCacheJob {
@@ -79,13 +99,14 @@ const _urlCache = new Map<string, { url: string; expiresAt: number }>();
 /** مفتاح DB منظَّم: tg:{animeId}:ep{ep:03d}:{quality}:{site} */
 export function makeTgId(animeId: number, ep: number, quality: string, site: string): string {
   const epStr = String(ep).padStart(3, "0");
-  const q     = (quality || "hd").replace(/[^a-z0-9]/gi, "").toLowerCase() || "hd";
+  const q     = (normalizeTgQuality(quality) || quality || "hd").replace(/[^a-z0-9]/gi, "").toLowerCase() || "hd";
   return `tg:${animeId}:ep${epStr}:${q}:${site}`;
 }
 
 /** مفتاح الـ pending set: {animeId}:{ep}:{quality} — يمنع تخزين نفس الجودة مرتين */
 function makePendingKey(animeId: number, ep: number, quality: string): string {
-  return `${animeId}:${ep}:${(quality || "hd").toLowerCase()}`;
+  const q = normalizeTgQuality(quality) || quality || "hd";
+  return `${animeId}:${ep}:${q.toLowerCase()}`;
 }
 
 /** Caption يُرسل مع الفيديو على تيليغرام */
@@ -484,11 +505,12 @@ async function runWorker(): Promise<void> {
  * Fallback:  kawaii (مع حقن ترجمة)
  * شرط:       directType === "mp4" + رابط خارجي
  */
-export function isTgCacheable(site: string, directType?: string, directUrl?: string): boolean {
-  if (!TG_ALLOWED_SITES.has(site))   return false;
-  if (directType !== "mp4")           return false;
-  if (!directUrl)                     return false;
-  if (directUrl.startsWith("/api/"))  return false; // proxy داخلي — لا يُخزَّن
+export function isTgCacheable(site: string, directType?: string, directUrl?: string, quality?: string): boolean {
+  if (!TG_ALLOWED_SITES.has(site))            return false;
+  if (directType !== "mp4")                    return false;
+  if (!directUrl)                              return false;
+  if (directUrl.startsWith("/api/"))           return false; // proxy داخلي — لا يُخزَّن
+  if (!normalizeTgQuality(quality || ""))      return false; // فقط 1080p / 720p / 360p
   return true;
 }
 
