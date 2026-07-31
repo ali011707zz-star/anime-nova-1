@@ -561,8 +561,16 @@ export default function WatchScreen() {
   useEffect(() => {
     fetchSources();
     return () => {
+      /* إلغاء جميع الطلبات الجارية عند تغيير الحلقة أو إلغاء تحميل الشاشة */
       abortRef.current?.abort();
-      if (autoPlayTimerRef.current) clearTimeout(autoPlayTimerRef.current);
+      if (autoPlayTimerRef.current) { clearTimeout(autoPlayTimerRef.current); autoPlayTimerRef.current = null; }
+      /* تحرير الـ sets من الذاكرة فوراً — تجنّب تراكم URLs من حلقات سابقة */
+      seenKeys.current.clear();
+      inFlightSitesRef.current.clear();
+      fetchedSitesRef.current.clear();
+      /* إلغاء جميع background timers المعلّقة */
+      bgTimersRef.current.forEach(clearTimeout);
+      bgTimersRef.current = [];
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [anime, epNum]);

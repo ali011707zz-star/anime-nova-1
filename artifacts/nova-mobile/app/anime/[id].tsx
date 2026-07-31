@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import {
   View, Text, Pressable, Image, ScrollView,
   ActivityIndicator, StyleSheet, Platform, Modal,
@@ -166,6 +166,14 @@ export default function AnimeDetailScreen() {
   const topPad = Platform.OS === "web" ? 0 : insets.top;
   const { isFavorite, toggleFavorite } = useApp();
 
+  /* يمنع setState بعد unmount — الصفحة تُستبدَل عبر router.replace فتظل كائناتها في الذاكرة
+     لفترة قصيرة وأي fetch معلّق يُكمِل ويُطلق تحديثات حالة على مكوّن منفصل */
+  const isMountedRef = useRef(true);
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => { isMountedRef.current = false; };
+  }, []);
+
   const [anime, setAnime] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [showFull, setShowFull] = useState(false);
@@ -226,6 +234,7 @@ export default function AnimeDetailScreen() {
       body: JSON.stringify({ query: DETAIL_QUERY, variables: { id: parseInt(id) } }),
       signal: controller.signal,
     }).then(r => r.json()).then(data => {
+      if (!isMountedRef.current) return;
       const a = data.data?.Media;
       if (!a) { setLoadError(true); return; }
       setAnime(a);
@@ -251,8 +260,8 @@ export default function AnimeDetailScreen() {
             }).catch(() => { if (!controller.signal.aborted) setDescAr(stripped); });
         });
       }
-    }).catch((e: any) => { if (e?.name !== "AbortError") setLoadError(true); })
-      .finally(() => { clearTimeout(timeoutId); setLoading(false); });
+    }).catch((e: any) => { if (e?.name !== "AbortError" && isMountedRef.current) setLoadError(true); })
+      .finally(() => { clearTimeout(timeoutId); if (isMountedRef.current) setLoading(false); });
 
     AsyncStorage.getItem(`my-rating-${id}`).then(v => { if (v) setMyRating(parseInt(v)); });
     AsyncStorage.getItem(`saved-${id}`).then(v => { if (v === "1") setSaved(true); });
