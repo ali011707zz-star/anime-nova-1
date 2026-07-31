@@ -139,3 +139,24 @@ CREATE TABLE IF NOT EXISTS site_cookies (
   expires_at  TIMESTAMPTZ NOT NULL
 );
 ALTER TABLE site_cookies DISABLE ROW LEVEL SECURITY;
+
+-- ── aw_links — روابط AnimeWitcher الدائمة (MF, PD, VT, KF) من Firestore ──
+-- يُستخدم كـ fast-path بدل Algolia search + Firestore scraping عند كل طلب
+CREATE TABLE IF NOT EXISTS aw_links (
+  id          BIGSERIAL   PRIMARY KEY,
+  anime_id    TEXT        NOT NULL,       -- Firestore doc ID (e.g. "009-1")
+  anime_name  TEXT        NOT NULL DEFAULT '',
+  anilist_id  INT,                        -- AniList ID (من Firestore، nullable)
+  ep_number   INT         NOT NULL,       -- رقم الحلقة (1, 2, 3...)
+  ep_id       TEXT        NOT NULL,       -- Firestore episode doc ID (e.g. "001")
+  server      TEXT        NOT NULL,       -- MF | PD | VT | KF  (ST مستبعد)
+  quality     TEXT        NOT NULL DEFAULT '720p',
+  link        TEXT        NOT NULL,       -- رابط الصفحة الدائم
+  imported_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  verified_at TIMESTAMPTZ,               -- آخر تحقق ناجح (nullable)
+  UNIQUE (anime_id, ep_id, server)
+);
+CREATE INDEX IF NOT EXISTS idx_aw_links_anilist  ON aw_links(anilist_id) WHERE anilist_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_aw_links_anime_ep ON aw_links(anime_id, ep_number);
+CREATE INDEX IF NOT EXISTS idx_aw_links_server   ON aw_links(server);
+ALTER TABLE aw_links DISABLE ROW LEVEL SECURITY;
