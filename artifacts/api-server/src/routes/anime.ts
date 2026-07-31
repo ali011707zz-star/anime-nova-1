@@ -11519,14 +11519,31 @@ router.get("/anime/sources-stream", async (req, res) => {
 
     // ── TG Cache: أضف المصدر لقائمة التخزين إن كان مؤهَّلاً ──────────────
     // فقط 3 جودات مسموحة: 1080p / 720p / 360p
-    if (anilistId && s.site && isTgCacheable(s.site, s.directType, s.directUrl, s.quality)) {
+    // إذا كان directUrl هو proxy داخلي (/api/...) نستخرج الرابط الأصلي من ?url= param
+    // أو نستخدم s.url (الرابط الخارجي الخام)
+    let tgRawUrl: string | undefined;
+    if (s.directUrl && !s.directUrl.startsWith("/api/")) {
+      tgRawUrl = s.directUrl;
+    } else if (s.directUrl?.startsWith("/api/")) {
+      try {
+        const pu = new URL(s.directUrl, "http://x.com");
+        const decoded = decodeURIComponent(pu.searchParams.get("url") || "");
+        if (decoded.startsWith("http")) tgRawUrl = decoded;
+      } catch {}
+    }
+    // fallback: s.url إذا كان رابطاً خارجياً مباشراً
+    if (!tgRawUrl && s.url && s.url.startsWith("http") && !s.isEmbed) {
+      tgRawUrl = s.url;
+    }
+
+    if (anilistId && s.site && tgRawUrl && isTgCacheable(s.site, s.directType, tgRawUrl, s.quality)) {
       enqueueTgDownload({
         animeId:        anilistId,
         ep,
         title,
         quality:        normalizeTgQuality(s.quality || "") || s.quality || "HD",
         site:           s.site,
-        sourceUrl:      s.directUrl!,
+        sourceUrl:      tgRawUrl,
         injectSubtitle: s.site === "kawaii",
         tmdbId:         tgTmdbId || undefined,
       });

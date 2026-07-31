@@ -94,6 +94,10 @@ let   _workerRunning = false;
 // كاش Telegram file URLs (30 دقيقة) — getFile تستغرق 200-500ms
 const _urlCache = new Map<string, { url: string; expiresAt: number }>();
 
+// عداد الحلقات المرفوعة منذ بدء التشغيل
+let _totalUploaded = 0;
+let _totalFailed   = 0;
+
 // ── مساعدات التسمية ──────────────────────────────────────────────────────
 
 /** مفتاح DB منظَّم: tg:{animeId}:ep{ep:03d}:{quality}:{site} */
@@ -152,6 +156,30 @@ async function dbUpsert(row: Partial<TgCacheRow> & { id: string }): Promise<void
   } catch (e: any) {
     console.warn("[tgCache] DB upsert error:", e.message);
   }
+}
+
+// ── إشعارات الأدمن ─────────────────────────────────────────────────────
+
+/**
+ * يرسل رسالة نصية للأدمن عبر TELEGRAM_CHAT_ID
+ * لا ينتظر — لا يؤثر على pipeline الرفع
+ */
+function sendAdminNotif(text: string): void {
+  const token  = process.env.TELEGRAM_BOT_TOKEN || process.env.TELEGRAM_CACHE_BOT_TOKEN;
+  const chatId = process.env.TELEGRAM_CHAT_ID;
+  if (!token || !chatId) return;
+
+  fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      chat_id:    chatId,
+      text,
+      parse_mode: "HTML",
+      disable_web_page_preview: true,
+    }),
+    signal: AbortSignal.timeout(10_000),
+  }).catch(() => {}); // تجاهل أخطاء الإشعار — لا تؤثر على العملية
 }
 
 // ── Telegram helpers ─────────────────────────────────────────────────────
@@ -393,8 +421,17 @@ async function processJob(job: TgCacheJob): Promise<void> {
   const epStr   = String(ep).padStart(3, "0");
   const qLabel  = quality || "HD";
   const caption = makeCaption(title, ep, qLabel, site);
+  const queueRemaining = _jobQueue.length; // عدد المتبقّي بعد هذه الوظيفة
 
   console.log(`[tgCache] 🎬 معالجة: ${title} ح${ep} | ${qLabel} | ${site}${job.injectSubtitle ? " + ترجمة" : ""}`);
+
+  // ── إشعار: بدء المعالجة ────────────────────────────────────────────
+  sendAdminNotif(
+    `🎬 <b>بدأ تحميل حلقة</b>\n` +
+    `📺 ${title || "أنمي"} | ح${epStr} | ${qLabel}\n` +
+    `🌐 المصدر: ${site}\n` +
+    `📋 المتبقّي في القائمة: ${queueRemaining} حلقة`,
+  );
 
   // تسجيل "قيد التحميل" في DB
   await dbUpsert({ id, anime_id: animeId, ep, title: title || null, quality: qLabel, site, source_url: sourceUrl, caption, status: "downloading", file_id: "" });
@@ -410,8 +447,17 @@ async function processJob(job: TgCacheJob): Promise<void> {
     if (!probe.ok) {
       console.warn("[tgCache] ❌ الرابط لا يحتوي فيديو صالح — تخطّي");
       await dbUpsert({ id, anime_id: animeId, ep, quality: qLabel, site, status: "failed", file_id: "" });
+      _totalFailed++;
+      sendAdminNotif(
+        `❌ <b>فشل التحقق من الرابط</b>\n` +
+        `📺 ${title || "أنمي"} | ح${epStr} | ${qLabel} | ${site}\n` +
+        `⚠️ الرابط لا يحتوي فيديو صالح\n` +
+        `📊 إجمالي اليوم: ✅ ${_totalUploaded} مرفوعة | ❌ ${_totalFailed} فشلت`,
+      );
       return;
     }
+    const durationMin = Math.floor(probe.duration / 60);
+    const durationSec = probe.duration % 60;
     console.log(`[tgCache] ✅ الرابط يعمل | ${probe.duration}s | ${probe.width}x${probe.height}`);
 
     // ── الخطوة 2: التحميل (مع حقن ترجمة لـ KW أو بدونها) ─────────────
@@ -424,6 +470,7 @@ async function processJob(job: TgCacheJob): Promise<void> {
       const vttText = await fetchArabicVtt(job.tmdbId, ep);
       if (vttText) {
         console.log(`[tgCache] ✅ ترجمة عربية موجودة (${vttText.length} bytes) — burn-in مع ffmpeg`);
+        sendAdminNotif(`🔤 ترجمة عربية موجودة — جارٍ الدمج مع الفيديو…\n📺 ${title} ح${epStr}`);
         downloaded = await downloadVideoWithSub(sourceUrl, vttText, tmpFile);
       } else {
         console.warn("[tgCache] ⚠️ لا توجد ترجمة عربية في vdrk.site — تحميل بدون ترجمة");
@@ -437,10 +484,18 @@ async function processJob(job: TgCacheJob): Promise<void> {
     if (!downloaded) {
       console.warn("[tgCache] ❌ فشل تحميل الفيديو");
       await dbUpsert({ id, anime_id: animeId, ep, quality: qLabel, site, status: "failed", file_id: "" });
+      _totalFailed++;
+      sendAdminNotif(
+        `❌ <b>فشل تحميل الفيديو</b>\n` +
+        `📺 ${title || "أنمي"} | ح${epStr} | ${qLabel} | ${site}\n` +
+        `⏱ المدة: ${durationMin}:${String(durationSec).padStart(2,"0")}\n` +
+        `📊 إجمالي اليوم: ✅ ${_totalUploaded} مرفوعة | ❌ ${_totalFailed} فشلت`,
+      );
       return;
     }
     const fileSize = statSync(tmpFile).size;
-    console.log(`[tgCache] ✅ تم التحميل | ${(fileSize / 1024 / 1024).toFixed(1)} MB`);
+    const fileMB   = (fileSize / 1024 / 1024).toFixed(1);
+    console.log(`[tgCache] ✅ تم التحميل | ${fileMB} MB`);
 
     // ── الخطوة 3: الرفع إلى تيليغرام ─────────────────────────────────
     const tok = await getTgToken();
@@ -448,14 +503,30 @@ async function processJob(job: TgCacheJob): Promise<void> {
     if (!tok || !cid) {
       console.warn("[tgCache] ❌ TELEGRAM_BOT_TOKEN أو TELEGRAM_CACHE_CHANNEL_ID غير موجود");
       await dbUpsert({ id, anime_id: animeId, ep, quality: qLabel, site, status: "failed", file_id: "" });
+      _totalFailed++;
+      sendAdminNotif(`❌ توكن البوت أو ID القناة غير موجود — تحقق من الإعدادات`);
       return;
     }
+
+    // ── إشعار: بدء الرفع ──────────────────────────────────────────────
+    sendAdminNotif(
+      `⬆️ <b>جارٍ الرفع إلى تيليغرام</b>\n` +
+      `📺 ${title || "أنمي"} | ح${epStr} | ${qLabel}\n` +
+      `📦 الحجم: ${fileMB} MB | ⏱ ${durationMin}:${String(durationSec).padStart(2,"0")} دقيقة\n` +
+      `🌐 المصدر: ${site}`,
+    );
 
     console.log(`[tgCache] ⬆️ رفع إلى تيليغرام: ${caption}`);
     const fileId = await uploadVideo(tmpFile, cid, caption, tok);
     if (!fileId) {
       console.warn("[tgCache] ❌ فشل الرفع إلى تيليغرام");
       await dbUpsert({ id, anime_id: animeId, ep, quality: qLabel, site, status: "failed", file_id: "" });
+      _totalFailed++;
+      sendAdminNotif(
+        `❌ <b>فشل الرفع إلى تيليغرام</b>\n` +
+        `📺 ${title || "أنمي"} | ح${epStr} | ${qLabel} | ${site}\n` +
+        `📊 إجمالي اليوم: ✅ ${_totalUploaded} مرفوعة | ❌ ${_totalFailed} فشلت`,
+      );
       return;
     }
 
@@ -473,7 +544,18 @@ async function processJob(job: TgCacheJob): Promise<void> {
       status:       "ready",
     });
 
+    _totalUploaded++;
     console.log(`[tgCache] 🎉 تم الحفظ: ${title} ح${ep} | ${qLabel} | file_id=${fileId.slice(0, 20)}…`);
+
+    // ── إشعار: اكتمال الرفع ────────────────────────────────────────────
+    sendAdminNotif(
+      `✅ <b>اكتمل الرفع بنجاح!</b>\n` +
+      `📺 ${title || "أنمي"} | ح${epStr} | ${qLabel} | ${site}\n` +
+      `📦 ${fileMB} MB | ⏱ ${durationMin}:${String(durationSec).padStart(2,"0")}\n` +
+      `🆔 file_id: <code>${fileId.slice(0, 30)}…</code>\n` +
+      `📋 المتبقّي في القائمة: ${_jobQueue.length} حلقة\n` +
+      `📊 إجمالي اليوم: ✅ ${_totalUploaded} مرفوعة | ❌ ${_totalFailed} فشلت`,
+    );
 
   } finally {
     // تنظيف الملف المؤقت دائماً
@@ -594,6 +676,8 @@ export function getTgCacheStatus() {
     pendingKeys:    [..._pendingKeys],
     workerRunning:  _workerRunning,
     urlCacheSize:   _urlCache.size,
+    totalUploaded:  _totalUploaded,
+    totalFailed:    _totalFailed,
   };
 }
 
