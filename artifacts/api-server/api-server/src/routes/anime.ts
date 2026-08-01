@@ -13,6 +13,13 @@ import {
   setSubtitleCache,
 } from "../lib/sourceCache.js";
 import { notifyNewEpisode } from "./telegram.js";
+import {
+  isTgCacheable,
+  enqueueTgDownload,
+  getTgCachedSources,
+  getTgCacheStatus,
+  cleanupStaleTgJobs,
+} from "../lib/telegramEpisodeCache.js";
 import { encryptProxyUrl, encryptParam, decryptParam, isEncrypted } from "../lib/security.js";
 import { sbSelect, sbUpsert } from "../lib/supabaseClient.js";
 import pg from "pg";
@@ -8567,6 +8574,23 @@ router.get("/anime/sources-stream", async (req, res) => {
       : checkUrl;
     if (globalSeen.has(key)) return;
     globalSeen.add(key);
+
+    // ── Telegram cache: طابور الحفظ الخلفي ─────────────────────────────
+    // Priority: animewitcher → animefay → anifox → sanime
+    // Fallback: kawaii مع حقن ترجمة عربية
+    if (anilistId && s.directUrl && isTgCacheable(s.site, s.directType, s.directUrl)) {
+      enqueueTgDownload({
+        animeId:        anilistId,
+        ep,
+        title:          title || english || "أنمي",
+        quality:        s.quality || "HD",
+        site:           s.site,
+        sourceUrl:      s.directUrl,                   // raw URL قبل التشفير
+        injectSubtitle: s.site === "kawaii",           // حقن ترجمة لـ KW فقط
+        // tmdbId يُحقن لاحقاً من lookup إن احتيج
+      });
+    }
+
     const toSend: UnifiedSource = {
       ...s,
       directUrl: s.directUrl ? encryptProxyUrl(s.directUrl) : s.directUrl,

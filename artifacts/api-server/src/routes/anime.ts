@@ -7184,10 +7184,116 @@ async function awFetchEpDoc(animeId: string, epId: string): Promise<Record<strin
   } catch { return {}; }
 }
 
+// ── aw_links fast-path: يقرأ الروابط الدائمة من DB بدل Algolia+Firestore ──
+async function getAwLinksFromDB(
+  anilistId: number, ep: number,
+): Promise<UnifiedSource[]> {
+  try {
+    const rows = await sbSelect<{
+      server: string; link: string; quality: string; anime_id: string;
+    }>(
+      "aw_links",
+      { anilist_id: `eq.${anilistId}`, ep_number: `eq.${ep}` },
+      { columns: "server,link,quality,anime_id" },
+    );
+    if (!rows.length) return [];
+
+    const sources: UnifiedSource[] = [];
+    const seenUrls = new Set<string>();
+
+    for (const row of rows) {
+      const { server, link, quality } = row;
+      const q      = String(quality || "720p").replace(/p$/i, "p");
+      const qRank  = q === "1080p" ? 22 : q === "720p" ? 21 : q === "480p" ? 10 : 5;
+      const qLabel = q === "1080p" ? "FHD 1080p" : q === "720p" ? "HD 720p" : q;
+
+      if (server === "PD") {
+        const direct = awResolvePd(link);
+        if (!direct || seenUrls.has(direct)) continue;
+        seenUrls.add(direct);
+        sources.push({
+          name: `AnimeWitcher · ${qLabel} · PD`,
+          url: link, quality: q, qualityRank: qRank + 2,
+          site: "animewitcher",
+          directUrl: `/api/anime/video-proxy?url=${encodeURIComponent(direct)}&ref=${encodeURIComponent("https://pixeldrain.com/")}`,
+          directType: "mp4",
+        });
+
+      } else if (server === "MF" || server === "MF2") {
+        try {
+          const mfDirect = await extractMediafireDirect(link);
+          if (mfDirect && !seenUrls.has(mfDirect)) {
+            seenUrls.add(mfDirect);
+            sources.push({
+              name: `AnimeWitcher · ${qLabel} · ${server}`,
+              url: link, quality: q, qualityRank: qRank + 1,
+              site: "animewitcher",
+              directUrl: `/api/anime/video-proxy?url=${encodeURIComponent(mfDirect)}&ref=${encodeURIComponent("https://www.mediafire.com/")}`,
+              directType: "mp4",
+            });
+          }
+        } catch {}
+
+      } else if (server === "KF") {
+        try {
+          const kfDirect = await awResolveKf(link);
+          if (kfDirect && !seenUrls.has(kfDirect)) {
+            seenUrls.add(kfDirect);
+            sources.push({
+              name: `AnimeWitcher · ${qLabel} · KF`,
+              url: link, quality: q, qualityRank: qRank,
+              site: "animewitcher",
+              directUrl: `/api/anime/video-proxy?url=${encodeURIComponent(kfDirect)}&ref=${encodeURIComponent("https://krakenfiles.com/")}`,
+              directType: "mp4",
+              headers: { Referer: "https://krakenfiles.com/", Origin: "https://krakenfiles.com/" },
+            });
+          }
+        } catch {}
+
+      } else if (server === "VT") {
+        try {
+          const vtResult = await extractVideoDeep(link, link);
+          if (vtResult && !seenUrls.has(vtResult.url)) {
+            seenUrls.add(vtResult.url);
+            const directUrl = vtResult.type === "hls"
+              ? `/api/anime/hls-proxy?url=${encodeURIComponent(vtResult.url)}&ref=${encodeURIComponent(link)}`
+              : `/api/anime/video-proxy?url=${encodeURIComponent(vtResult.url)}&ref=${encodeURIComponent(link)}`;
+            sources.push({
+              name: `AnimeWitcher · ${qLabel} · VT`,
+              url: link, quality: q, qualityRank: qRank,
+              site: "animewitcher", directUrl, directType: vtResult.type,
+            });
+          }
+        } catch {}
+      }
+    }
+
+    if (sources.length) {
+      // تحديث verified_at في الخلفية
+      sbUpsert("aw_links",
+        rows.map(r => ({ ...r, anilist_id: anilistId, ep_number: ep, verified_at: new Date().toISOString() })),
+        ["anime_id", "ep_id", "server"],
+      ).catch(() => {});
+      console.log(`[AW-DB] ✅ ${sources.length} sources from DB for anilist=${anilistId} ep${ep}`);
+    }
+    return sources;
+  } catch (e: any) {
+    console.warn(`[AW-DB] DB lookup failed: ${e?.message}`);
+    return [];
+  }
+}
+
 async function getAnimeWitcherSources(
   title: string, english: string | null, ep: number, _anilistId?: number,
 ): Promise<UnifiedSource[]> {
   try {
+    // 0. Fast-path: ابحث في aw_links DB أولاً (بدل Algolia+Firestore)
+    if (_anilistId) {
+      const dbSources = await getAwLinksFromDB(_anilistId, ep);
+      if (dbSources.length) return dbSources;
+      console.log(`[AW-DB] miss for anilist=${_anilistId} ep${ep} — falling back to Algolia`);
+    }
+
     // 1. بحث Algolia بـ credentials جديدة (D8LH9I7ZL7) — تعمل مباشرة من VPS
     let animeId: string | null = null;
 
