@@ -208,7 +208,7 @@ export default function EpisodeListScreen() {
     const coverParam = anime?.coverImage?.large ? `&cover=${encodeURIComponent(anime.coverImage.extraLarge || anime.coverImage.large)}` : "";
     const arTitle = extractArabicTitle(anime?.synonyms);
     const arParam = arTitle ? `&titleAr=${encodeURIComponent(arTitle)}` : "";
-    router.replace(`/watch?anime=${id}&ep=${n}${t ? `&title=${t}` : ""}${eng ? `&english=${eng}` : ""}${fmt ? `&format=${fmt}` : ""}${et}${totalParam}${coverParam}${arParam}`);
+    router.push(`/watch?anime=${id}&ep=${n}${t ? `&title=${t}` : ""}${eng ? `&english=${eng}` : ""}${fmt ? `&format=${fmt}` : ""}${et}${totalParam}${coverParam}${arParam}`);
   }
 
   function openComments(n: number) {

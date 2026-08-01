@@ -642,16 +642,18 @@ export function RiftPlayer({
 
   /* ─── bufferOptions — تُضبط عبر useEffect (لا في setup callback) ──────────────
      ضبطها داخل setup callback synchronously يُسبب native crash على Android لأن
-     ExoPlayer لم يكتمل تهيئته بعد. هنا نضبطها بعد mount في آمان. ─── */
+     ExoPlayer لم يكتمل تهيئته بعد. هنا نضبطها بعد mount في آمان.
+     القيم المُختارة تُقلل التقطيع على الاتصالات المتوسطة: تُبفَّر كمية أكبر مسبقاً
+     وتُعطي وقتاً أطول للاستعادة بعد stall مقارنةً بالإعدادات الافتراضية. ─── */
   useEffect(() => {
     try {
       (player as any).bufferOptions = {
-        preferredForwardBufferDuration: 12, // iOS: مسبق 12ث
-        waitsToMinimizeStalling: false,     // iOS: ابدأ فوراً
-        minBufferMs: 2000,                  // Android: ابدأ بعد 2ث (150ms كان crash)
-        maxBufferMs: 30000,                 // Android: احتفظ بـ30ث
-        bufferForPlaybackMs: 2000,          // Android: ابدأ بعد 2ث
-        bufferForPlaybackAfterRebufferMs: 3000, // Android: استأنف بعد 3ث
+        preferredForwardBufferDuration: 20, // iOS: مسبق 20ث (↑ من 12ث) — يُقلل stall
+        waitsToMinimizeStalling: false,     // iOS: ابدأ فوراً بلا انتظار
+        minBufferMs: 3000,                  // Android: ابدأ بعد 3ث (↑ من 2ث)
+        maxBufferMs: 50000,                 // Android: احتفظ بـ50ث (↑ من 30ث) — مخزن أكبر
+        bufferForPlaybackMs: 2500,          // Android: ابدأ التشغيل بعد 2.5ث
+        bufferForPlaybackAfterRebufferMs: 6000, // Android: استأنف بعد 6ث (↑ من 3ث) — تجنّب stall فوري
       };
     } catch {}
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -686,6 +688,14 @@ export function RiftPlayer({
       if (originalBrightnessRef.current !== null) {
         Brightness.setBrightnessAsync(originalBrightnessRef.current).catch(() => {});
       }
+
+      /* 8. ألغِ timers الإيماءات والتغذية الراجعة — تظل نشطة بعد unmount وتُسبب
+         setState على مكوّن منفصل → تحذيرات React + ضغط GC غير ضروري */
+      if (feedbackTimer.current) { clearTimeout(feedbackTimer.current); feedbackTimer.current = null; }
+      if (tapTimer.current) { clearTimeout(tapTimer.current); tapTimer.current = null; }
+      if (longPressTimer.current) { clearTimeout(longPressTimer.current); longPressTimer.current = null; }
+      if (unlockTimer.current) { clearTimeout(unlockTimer.current); unlockTimer.current = null; }
+      if (postSeekTimer.current) { clearTimeout(postSeekTimer.current); postSeekTimer.current = null; }
 
       console.log("[RiftPlayer] 🧹 unmounted — all resources released");
     };
@@ -743,7 +753,9 @@ export function RiftPlayer({
       if (!aliveRef.current) return;
       if (e.status === "loading") {
         setBuffering(true);
-        /* إذا بقي التحميل أكثر من 12ث (شاشة سوداء) نعامله كخطأ ونتجاوز للمصدر التالي.
+        /* إذا بقي التحميل أكثر من 20ث (شاشة سوداء) نعامله كخطأ ونتجاوز للمصدر التالي.
+           رُفع من 12ث → 20ث: المصادر HLS على اتصالات بطيئة تحتاج وقتاً أطول لبدء البث
+           خاصةً بعد عملية seek حيث يُعيد ExoPlayer/AVPlayer تحميل الـ segment الجديد.
            ⚠️ نقرأ playableSourcesRef/srcIdxRef (لا playableSources/srcIdx مباشرةً) لأن
            إضافتهما للـ deps تُعيد تسجيل الـ listener عند وصول مصادر جديدة وتمسح
            الـ loadTimeout أثناء التحميل → stream يتجمّد للأبد. */
@@ -1343,7 +1355,13 @@ export function RiftPlayer({
   const seek = useCallback((secs: number) => {
     fadeIn();
     const target = Math.max(0, Math.min(secs, durationRef.current || duration));
-    try { player.currentTime = target; setPosition(target); } catch {}
+    try {
+      player.currentTime = target;
+      setPosition(target);
+      /* إعادة ضبط كاشف الـ stall عند كل seek يدوي — بدون هذا يرى المؤقت أن الـ position
+         لم يتقدم منذ آخر قراءة (الـ seek غيّر الموضع فجأة) ويُطلق false auto-advance */
+      stallRef.current = { lastPos: target, lastAt: Date.now() };
+    } catch {}
   }, [player, duration, fadeIn]);
   seekRef.current = seek;
 
@@ -1403,7 +1421,15 @@ export function RiftPlayer({
     setError(false);
     setBuffering(true);
     isReplacingRef.current = true; // أقفل الـ guard — يُحرَّر في statusChange
+
+    /* إلغاء أي postSeek مرئي من مصدر قديم — لا معنى له بعد تبديل المصدر */
+    if (postSeekTimer.current) { clearTimeout(postSeekTimer.current); postSeekTimer.current = null; }
+    setPostSeekPct(null);
+
     try {
+      /* إيقاف مؤقت قبل replace — يُعطي ExoPlayer/AVPlayer وقتاً لتحرير buffer المصدر الحالي
+         قبل تحميل الجديد؛ يُقلل احتمالية IllegalStateException والـ OOM أثناء التبديل */
+      try { player.pause(); } catch {}
       /* نمرّر URL string فقط — VPS proxy يُضيف Referer/Origin داخلياً */
       player.replace(srcUrl as any);
       /* play() is triggered in statusChange → readyToPlay once the stream is buffered */
@@ -1610,15 +1636,16 @@ export function RiftPlayer({
           safePct = Math.max(0, Math.min(1, _calcPctFromAbsolute(x)));
         }
         seekRef.current(safePct * durationRef.current);
-        // نُبقي على الموضع المطلوب مرئياً 800ms ريثما يتحدث الـ polling (كل 500ms)
-        // هذا يمنع "الخط الوهمي" الذي يملأ ثم يرجع عند الإفلات
+        /* نُبقي على الموضع المطلوب مرئياً 1500ms ريثما يُعيد المشغّل التحميل عند الموضع الجديد.
+           رُفع من 800ms → 1500ms: على الاتصالات البطيئة يأخذ ExoPlayer/AVPlayer وقتاً أطول
+           لبدء البث من الـ segment الجديد؛ 800ms كانت قصيرة وتُسبب ارتداداً مرئياً للـ thumb */
         setPostSeekPct(safePct);
         setIsDragging(false);
         if (postSeekTimer.current) clearTimeout(postSeekTimer.current);
         postSeekTimer.current = setTimeout(() => {
           setPostSeekPct(null);
           postSeekTimer.current = null;
-        }, 800);
+        }, 1500);
       },
     })
   ).current;

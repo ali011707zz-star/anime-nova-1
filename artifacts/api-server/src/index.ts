@@ -69,6 +69,13 @@ app.listen(port, host, (err) => {
     } catch (e: any) {
       console.warn("[bootstrap] ⚠️ فشل migration:", e.message);
     }
+    // تنظيف الوظائف المعلّقة في telegram_episode_cache بعد migration
+    try {
+      const { cleanupStaleTgJobs } = await import("./lib/telegramEpisodeCache.js");
+      await cleanupStaleTgJobs();
+    } catch (e: any) {
+      console.warn("[bootstrap] ⚠️ فشل cleanup tg jobs:", e.message);
+    }
   })();
 
   // ── مزامنة ENV ↔ DB ثم تشغيل الـ schedulers بعد اكتمال التحميل ──────────
@@ -79,13 +86,15 @@ app.listen(port, host, (err) => {
 
       // ENV → DB (push env vars إلى DB إن وُجدت)
       const envMap: Record<string, string> = {
-        smtp_user:           process.env.SMTP_USER           || "",
-        smtp_pass:           process.env.SMTP_PASS           || "",
-        smtp_host:           process.env.SMTP_HOST           || "",
-        smtp_port:           process.env.SMTP_PORT           || "",
-        telegram_bot_token:  process.env.TELEGRAM_BOT_TOKEN  || "",
-        telegram_channel_id: process.env.TELEGRAM_CHANNEL_ID || "",
-        telegram_chat_id:    process.env.TELEGRAM_CHAT_ID    || "",
+        smtp_user:                   process.env.SMTP_USER                   || "",
+        smtp_pass:                   process.env.SMTP_PASS                   || "",
+        smtp_host:                   process.env.SMTP_HOST                   || "",
+        smtp_port:                   process.env.SMTP_PORT                   || "",
+        telegram_bot_token:          process.env.TELEGRAM_BOT_TOKEN          || "",
+        telegram_channel_id:         process.env.TELEGRAM_CHANNEL_ID         || "",
+        telegram_chat_id:            process.env.TELEGRAM_CHAT_ID            || "",
+        telegram_cache_channel_id:   process.env.TELEGRAM_CACHE_CHANNEL_ID   || "",
+        telegram_cache_bot_token:    process.env.TELEGRAM_CACHE_BOT_TOKEN    || "",
       };
       const synced: string[] = [];
       for (const [key, val] of Object.entries(envMap)) {
@@ -111,6 +120,14 @@ app.listen(port, host, (err) => {
       if (!process.env.SMTP_PASS) {
         const v = await getDbConfig("smtp_pass");
         if (v) { process.env.SMTP_PASS = v; restored.push("SMTP_PASS"); }
+      }
+      if (!process.env.TELEGRAM_CACHE_CHANNEL_ID) {
+        const v = await getDbConfig("telegram_cache_channel_id");
+        if (v) { process.env.TELEGRAM_CACHE_CHANNEL_ID = v; restored.push("TELEGRAM_CACHE_CHANNEL_ID"); }
+      }
+      if (!process.env.TELEGRAM_CACHE_BOT_TOKEN) {
+        const v = await getDbConfig("telegram_cache_bot_token");
+        if (v) { process.env.TELEGRAM_CACHE_BOT_TOKEN = v; restored.push("TELEGRAM_CACHE_BOT_TOKEN"); }
       }
       if (restored.length > 0)
         console.log("[config-sync] ✅ DB → ENV (restored):", restored.join(", "));

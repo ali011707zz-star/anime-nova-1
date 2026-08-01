@@ -202,9 +202,51 @@ CREATE TABLE IF NOT EXISTS anime_meta_cache (
   ttl_seconds INTEGER DEFAULT 21600,
   created_at  TIMESTAMPTZ DEFAULT NOW()
 );
+
+-- جدول تخزين الحلقات في تيليغرام
+CREATE TABLE IF NOT EXISTS telegram_episode_cache (
+  id           TEXT PRIMARY KEY,
+  anime_id     INTEGER NOT NULL,
+  ep           INTEGER NOT NULL,
+  title        TEXT,
+  quality      TEXT NOT NULL DEFAULT 'HD',
+  site         TEXT NOT NULL,
+  file_id      TEXT NOT NULL DEFAULT '',
+  file_size    BIGINT,
+  duration_sec INTEGER,
+  status       TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','downloading','ready','failed')),
+  source_url   TEXT,
+  caption      TEXT,
+  created_at   TIMESTAMPTZ DEFAULT NOW(),
+  updated_at   TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_tg_ep_cache_lookup ON telegram_episode_cache (anime_id, ep, status);
+
+-- ════════════════════════════════════════════════════════════════════════
+--  Row-Level Security — تفعيل على جميع الجداول
+--  الخادم يستخدم service_role key دائماً → يتجاوز RLS تلقائياً
+--  RLS مُفعَّل لمنع الوصول العام عبر anon key
+-- ════════════════════════════════════════════════════════════════════════
+ALTER TABLE users                  ENABLE ROW LEVEL SECURITY;
+ALTER TABLE pending_verifications   ENABLE ROW LEVEL SECURITY;
+ALTER TABLE sessions               ENABLE ROW LEVEL SECURITY;
+ALTER TABLE watch_history          ENABLE ROW LEVEL SECURITY;
+ALTER TABLE favorites              ENABLE ROW LEVEL SECURITY;
+ALTER TABLE watch_progress         ENABLE ROW LEVEL SECURITY;
+ALTER TABLE comments               ENABLE ROW LEVEL SECURITY;
+ALTER TABLE comment_likes          ENABLE ROW LEVEL SECURITY;
+ALTER TABLE source_cache           ENABLE ROW LEVEL SECURITY;
+ALTER TABLE subtitle_cache         ENABLE ROW LEVEL SECURITY;
+ALTER TABLE cdn_cache              ENABLE ROW LEVEL SECURITY;
+ALTER TABLE reports                ENABLE ROW LEVEL SECURITY;
+ALTER TABLE app_config             ENABLE ROW LEVEL SECURITY;
+ALTER TABLE translations_cache     ENABLE ROW LEVEL SECURITY;
+ALTER TABLE anime_meta_ar          ENABLE ROW LEVEL SECURITY;
+ALTER TABLE anime_meta_cache       ENABLE ROW LEVEL SECURITY;
+ALTER TABLE telegram_episode_cache ENABLE ROW LEVEL SECURITY;
 `;
 
-const REQUIRED_TABLES = ["users", "pending_verifications", "watch_history", "favorites", "translations_cache", "anime_meta_ar", "anime_meta_cache"];
+const REQUIRED_TABLES = ["users", "pending_verifications", "watch_history", "favorites", "translations_cache", "anime_meta_ar", "anime_meta_cache", "telegram_episode_cache"];
 
 // ── PostgreSQL direct migration (للـ Replit PostgreSQL) ──────────────────────
 const PG_MIGRATION_SQL = `
@@ -384,6 +426,23 @@ CREATE TABLE IF NOT EXISTS notifications (
 );
 CREATE INDEX IF NOT EXISTS idx_notifications_created ON notifications(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_notifications_unread  ON notifications(is_read) WHERE is_read = FALSE;
+CREATE TABLE IF NOT EXISTS telegram_episode_cache (
+  id           TEXT PRIMARY KEY,
+  anime_id     INTEGER NOT NULL,
+  ep           INTEGER NOT NULL,
+  title        TEXT,
+  quality      TEXT NOT NULL DEFAULT 'HD',
+  site         TEXT NOT NULL,
+  file_id      TEXT NOT NULL DEFAULT '',
+  file_size    BIGINT,
+  duration_sec INTEGER,
+  status       TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','downloading','ready','failed')),
+  source_url   TEXT,
+  caption      TEXT,
+  created_at   TIMESTAMPTZ DEFAULT NOW(),
+  updated_at   TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_tg_ep_cache_lookup ON telegram_episode_cache (anime_id, ep, status);
 `;
 
 /** يُنشئ الجداول مباشرةً في Replit PostgreSQL عند الـ startup */

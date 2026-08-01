@@ -361,6 +361,10 @@ export default function BrowseScreen() {
               showsVerticalScrollIndicator={false}
               onEndReached={() => { if (hasMore && !loading) loadItems(page + 1, false); }}
               onEndReachedThreshold={0.4}
+              removeClippedSubviews={true}
+              maxToRenderPerBatch={9}
+              windowSize={5}
+              initialNumToRender={9}
               ListEmptyComponent={
                 !loading ? (
                   <View style={g.center}>

@@ -267,7 +267,7 @@ export default function AnimationDetailScreen() {
       <View style={s.watchBtnWrap}>
         <Pressable
           style={s.watchBtn}
-          onPress={() => (isTV ? router.push(getEpisodesUrl() as any) : router.replace(getWatchUrl() as any))}
+          onPress={() => router.push((isTV ? getEpisodesUrl() : getWatchUrl()) as any)}
         >
           <LinearGradient
             colors={["#8B5CF6", "#6D28D9", "#5B21B6"]}
