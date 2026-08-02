@@ -15195,6 +15195,223 @@ router.get("/anime/new-episodes", async (req, res) => {
 });
 
 // ════════════════════════════════════════════════════════════════════
+//  AW Dubbed Section — كتالوج + حلقات + مصادر من aw_links (dubbed=true)
+//  يرتبط تلقائياً بـ aw_links: أي تحديث للاستيراد يظهر فوراً
+// ════════════════════════════════════════════════════════════════════
+
+let _awDubCatalogCache: { data: AwDubSeries[]; ts: number } | null = null;
+const AW_DUB_CATALOG_TTL = 6 * 60 * 60_000; // 6 ساعات
+
+interface AwDubSeries {
+  key: string; title: string; titleAr: string; poster: string;
+  story: string; year: string; rating: number;
+  seasons: Array<{ label: string; animeId: string }>;
+}
+
+function _awDubBaseTitle(name: string): string {
+  return name
+    .replace(/\s*Season\s*\d+\s*/gi, " ")
+    .replace(/\s+Dubbed?\s*/gi, " ")
+    .replace(/\s+\d+\s*$/, " ")
+    .replace(/\s+/g, " ").trim();
+}
+
+function _awDubSeasonLabel(name: string): string {
+  const m = name.match(/Season\s*(\d+)/i) ?? name.match(/(\d+)\s*(?:Dub(?:bed)?)?\s*$/i);
+  return m ? `الموسم ${m[1]}` : "الموسم 1";
+}
+
+async function _fetchAwDubCatalog(): Promise<AwDubSeries[]> {
+  if (_awDubCatalogCache && Date.now() - _awDubCatalogCache.ts < AW_DUB_CATALOG_TTL)
+    return _awDubCatalogCache.data;
+
+  const res = await fetch(`${AW_FS_BASE}:runQuery`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      structuredQuery: {
+        from: [{ collectionId: "anime_list" }],
+        where: { fieldFilter: { field: { fieldPath: "dubbed" }, op: "EQUAL", value: { booleanValue: true } } },
+        limit: 300,
+      }
+    }),
+    signal: AbortSignal.timeout(15_000),
+  });
+  if (!res.ok) throw new Error(`aw-dubbed catalog: ${res.status}`);
+  const data = await res.json() as any[];
+
+  const groups = new Map<string, AwDubSeries>();
+  for (const d of data) {
+    if (!d?.document?.name) continue;
+    const f    = d.document.fields || {};
+    const animeId  = d.document.name.split("/").pop() || "";
+    const poster   = f.poster_uri?.stringValue ?? f.poster?.mapValue?.fields?.large?.stringValue ?? "";
+    const titleAr  = f.other_names?.arrayValue?.values?.[0]?.stringValue ?? "";
+    const story    = f.story?.stringValue ?? "";
+    const year     = f.details?.mapValue?.fields?.year?.stringValue ?? "";
+    const rating   = f.rating?.mapValue?.fields?.rate?.doubleValue ?? 0;
+    const base     = _awDubBaseTitle(animeId);
+    const label    = _awDubSeasonLabel(animeId);
+
+    if (!groups.has(base))
+      groups.set(base, { key: base, title: base, titleAr, poster, story, year, rating, seasons: [] });
+
+    const g = groups.get(base)!;
+    g.seasons.push({ label, animeId });
+    if (poster && !g.poster) g.poster = poster;
+    if (rating > g.rating)   { g.rating = rating; if (year) g.year = year; }
+  }
+
+  for (const g of groups.values())
+    g.seasons.sort((a, b) =>
+      (parseInt(a.label.replace(/\D+/g, "")) || 0) - (parseInt(b.label.replace(/\D+/g, "")) || 0)
+    );
+
+  const result = [...groups.values()].sort((a, b) =>
+    b.rating - a.rating || a.title.localeCompare(b.title)
+  );
+  _awDubCatalogCache = { data: result, ts: Date.now() };
+  return result;
+}
+
+// ─── resolve sources لحلقة معينة من aw_links (by anime_id) ───────────────
+async function getAwDubSources(animeId: string, ep: number): Promise<UnifiedSource[]> {
+  const rows = await sbSelect<{ server: string; link: string; quality: string }>(
+    "aw_links",
+    { anime_id: `eq.${animeId}`, ep_number: `eq.${ep}` },
+    { columns: "server,link,quality" },
+  );
+  if (!rows.length) return [];
+
+  const sources: UnifiedSource[]  = [];
+  const seenUrls = new Set<string>();
+
+  await Promise.allSettled(rows.map(async ({ server, link, quality }) => {
+    const q       = String(quality || "720p").replace(/p$/i, "p");
+    const qRank   = q === "1080p" ? 22 : q === "720p" ? 21 : q === "480p" ? 10 : 5;
+    const qLabel  = q === "1080p" ? "FHD 1080p" : q === "720p" ? "HD 720p" : q;
+
+    if (server === "PD") {
+      const direct = awResolvePd(link);
+      if (!direct || seenUrls.has(direct)) return;
+      seenUrls.add(direct);
+      sources.push({
+        name: `AW·Dubbed · ${qLabel} · PD`, url: link, quality: q, qualityRank: qRank + 2,
+        site: "animewitcher",
+        directUrl: `/api/anime/video-proxy?url=${encodeURIComponent(direct)}&ref=${encodeURIComponent("https://pixeldrain.com/")}`,
+        directType: "mp4",
+      });
+
+    } else if (server === "MF" || server === "MF2") {
+      try {
+        const mfDirect = await extractMediafireDirect(link);
+        if (!mfDirect || seenUrls.has(mfDirect)) return;
+        seenUrls.add(mfDirect);
+        sources.push({
+          name: `AW·Dubbed · ${qLabel} · MF`, url: link, quality: q, qualityRank: qRank + 1,
+          site: "animewitcher",
+          directUrl: `/api/anime/video-proxy?url=${encodeURIComponent(mfDirect)}&ref=${encodeURIComponent("https://www.mediafire.com/")}`,
+          directType: "mp4",
+        });
+      } catch { /* skip */ }
+
+    } else if (server === "KF") {
+      try {
+        const kfDirect = await awResolveKf(link);
+        if (!kfDirect || seenUrls.has(kfDirect)) return;
+        seenUrls.add(kfDirect);
+        sources.push({
+          name: `AW·Dubbed · ${qLabel} · KF`, url: link, quality: q, qualityRank: qRank,
+          site: "animewitcher",
+          directUrl: `/api/anime/video-proxy?url=${encodeURIComponent(kfDirect)}&ref=${encodeURIComponent("https://krakenfiles.com/")}`,
+          directType: "mp4",
+          headers: { Referer: "https://krakenfiles.com/", Origin: "https://krakenfiles.com/" },
+        });
+      } catch { /* skip */ }
+
+    } else if (server === "VT") {
+      try {
+        const vtResult = await extractVideoDeep(link, link);
+        if (!vtResult || seenUrls.has(vtResult.url)) return;
+        seenUrls.add(vtResult.url);
+        const directUrl = vtResult.type === "hls"
+          ? `/api/anime/hls-proxy?url=${encodeURIComponent(vtResult.url)}&ref=${encodeURIComponent(link)}`
+          : `/api/anime/video-proxy?url=${encodeURIComponent(vtResult.url)}&ref=${encodeURIComponent(link)}`;
+        sources.push({
+          name: `AW·Dubbed · ${qLabel} · VT`, url: link, quality: q, qualityRank: qRank,
+          site: "animewitcher", directUrl, directType: vtResult.type,
+        });
+      } catch { /* skip */ }
+    }
+  }));
+
+  return sources.sort((a, b) => (b.qualityRank ?? 0) - (a.qualityRank ?? 0));
+}
+
+// ─── GET /api/aw-dubbed/catalog?page=N&q=search ──────────────────────────────
+router.get("/aw-dubbed/catalog", async (req: Request, res: Response) => {
+  try {
+    const q        = String(req.query.q   || "").trim().toLowerCase();
+    const page     = Math.max(1, parseInt(String(req.query.page || "1")) || 1);
+    const PAGE_SIZE = 36;
+    const all      = await _fetchAwDubCatalog();
+    const filtered = q
+      ? all.filter(s => s.title.toLowerCase().includes(q) || (s.titleAr || "").toLowerCase().includes(q))
+      : all;
+    const results  = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+    res.setHeader("Cache-Control", "public, max-age=300");
+    res.json({ results, total: filtered.length, totalPages: Math.ceil(filtered.length / PAGE_SIZE), page });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ─── GET /api/aw-dubbed/episodes?series=<animeId> ────────────────────────────
+router.get("/aw-dubbed/episodes", async (req: Request, res: Response) => {
+  const series = String(req.query.series || "").trim();
+  if (!series) { res.status(400).json({ error: "series required" }); return; }
+  try {
+    const rows = await sbSelect<{ ep_number: number }>(
+      "aw_links", { anime_id: `eq.${series}` }, { columns: "ep_number" },
+    );
+    const nums = [...new Set(rows.map((r: any) => Number(r.ep_number)))].sort((a, b) => a - b);
+    res.setHeader("Cache-Control", "public, max-age=300");
+    res.json({ episodes: nums.map(n => ({ number: n })) });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ─── GET /api/aw-dubbed/watch-src?series=<animeId>&ep=N ──────────────────────
+router.get("/aw-dubbed/watch-src", async (req: Request, res: Response) => {
+  const series = String(req.query.series || "").trim();
+  const ep     = parseInt(String(req.query.ep || "1")) || 1;
+  if (!series) { res.status(400).json({ error: "series required" }); return; }
+  try {
+    const sources = await getAwDubSources(series, ep);
+    if (!sources.length) { res.status(404).json({ error: "no sources" }); return; }
+
+    // أفضل مصدر لكل جودة للـ picker
+    const allSources = sources.map(s => ({
+      quality: s.quality, name: s.name,
+      rawUrl: s.directType !== "hls" ? s.directUrl : null,
+      hlsUrl: s.directType === "hls" ? s.directUrl : null,
+    }));
+
+    const best = sources[0];
+    const isHls = best.directType === "hls";
+    res.json({
+      rawUrl:     isHls ? null : best.directUrl,
+      hlsUrl:     isHls ? best.directUrl : null,
+      quality:    best.quality || "720p",
+      allSources,
+    });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ════════════════════════════════════════════════════════════════════
 //  /api/cfproxy/:endpoint — يعيد توجيه الطلبات لـ cf_proxy.py المحلي
 //  يُستخدم من Replit عبر NOVA_PROXY_BASE=https://animenovaa.duckdns.org
 //  مثال: GET /api/cfproxy/fetch?url=https://...

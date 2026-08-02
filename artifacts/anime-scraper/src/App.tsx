@@ -71,6 +71,9 @@ const NotFound           = lazy(() => import("@/pages/not-found"));
 const DubbedLibrary      = lazy(() => import("@/pages/DubbedLibrary"));
 const DubbedDetail       = lazy(() => import("@/pages/DubbedDetail"));
 const DubbedWatch        = lazy(() => import("@/pages/DubbedWatch"));
+const AwDubbedLibrary    = lazy(() => import("@/pages/AwDubbedLibrary"));
+const AwDubbedDetail     = lazy(() => import("@/pages/AwDubbedDetail"));
+const AwDubbedWatch      = lazy(() => import("@/pages/AwDubbedWatch"));
 const Updates            = lazy(() => import("@/pages/Updates"));
 const AuthPage           = lazy(() => import("@/pages/Auth"));
 const AuthCallback       = lazy(() => import("@/pages/AuthCallback"));
@@ -89,7 +92,7 @@ function PageLoader() {
   );
 }
 
-const NO_GLOBAL_HEADER = ["/watch", "/episodes/", "/anime/", "/settings", "/profile", "/browse", "/animation/", "/auth", "/subscription", "/dubbed/watch"];
+const NO_GLOBAL_HEADER = ["/watch", "/episodes/", "/anime/", "/settings", "/profile", "/browse", "/animation/", "/auth", "/subscription", "/dubbed/watch", "/aw-dubbed/watch"];
 
 function applyTheme(t: string) {
   const root = document.documentElement;
@@ -175,6 +178,9 @@ function Router({ onMenuClick }: { onMenuClick: () => void }) {
                 <Route path="/dubbed"                          component={DubbedLibrary} />
                 <Route path="/dubbed/watch"                    component={DubbedWatch} />
                 <Route path="/dubbed/:key"                     component={DubbedDetail} />
+                <Route path="/aw-dubbed"                       component={AwDubbedLibrary} />
+                <Route path="/aw-dubbed/watch"                 component={AwDubbedWatch} />
+                <Route path="/aw-dubbed/:key"                  component={AwDubbedDetail} />
                 <Route path="/comments"                component={CommentsPage} />
                 <Route path="/subscription"            component={Subscription} />
                 <Route path="/episodes/:id"            component={EpisodeList} />
