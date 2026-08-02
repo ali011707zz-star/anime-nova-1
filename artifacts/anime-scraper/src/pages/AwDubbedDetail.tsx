@@ -119,13 +119,18 @@ export default function AwDubbedDetail() {
                     boxShadow: isAct ? "0 0 22px rgba(16,185,129,0.22), 0 4px 16px rgba(0,0,0,0.45)" : "0 2px 8px rgba(0,0,0,0.30)",
                     transform: isAct ? "scale(1.04)" : "scale(1)",
                   }}>
+                  {/* بوستر المسلسل كخلفية للموسم */}
+                  {poster && (
+                    <img src={poster} alt="" className="absolute inset-0 w-full h-full object-cover"
+                      style={{ opacity: isAct ? 0.55 : 0.35 }} />
+                  )}
                   <div className="absolute inset-0"
                     style={{ background: isAct
-                      ? "linear-gradient(145deg, rgba(4,120,87,0.60), rgba(16,185,129,0.30))"
-                      : "linear-gradient(145deg, rgba(20,30,20,0.80), rgba(10,15,10,0.90))" }} />
+                      ? "linear-gradient(145deg, rgba(4,120,87,0.45), rgba(16,185,129,0.20))"
+                      : "linear-gradient(145deg, rgba(0,0,0,0.50), rgba(0,0,0,0.30))" }} />
                   <div className="absolute inset-0"
-                    style={{ background: "linear-gradient(to top, rgba(0,0,0,0.88) 0%, rgba(0,0,0,0.30) 55%, rgba(0,0,0,0.10) 100%)" }} />
-                  {isAct && <div className="absolute inset-0" style={{ background: "rgba(16,185,129,0.12)" }} />}
+                    style={{ background: "linear-gradient(to top, rgba(0,0,0,0.85) 0%, rgba(0,0,0,0.20) 55%, rgba(0,0,0,0.05) 100%)" }} />
+                  {isAct && <div className="absolute inset-0" style={{ background: "rgba(16,185,129,0.10)" }} />}
                   <div className="absolute bottom-0 left-0 right-0 px-1.5 pb-1.5 text-center">
                     <p className="text-[8px] font-black font-['Cairo'] leading-tight"
                       style={{ color: isAct ? "#6ee7b7" : "rgba(255,255,255,0.70)" }}>{s.label}</p>
@@ -191,11 +196,14 @@ export default function AwDubbedDetail() {
                 className={`flex items-center gap-3 p-3 rounded-2xl border cursor-pointer active:bg-white/8 transition-colors ${
                   watched ? "bg-white/3 border-white/4 opacity-55" : "bg-[#111116] border-white/6"
                 }`}>
-                {/* Thumbnail placeholder */}
+                {/* Thumbnail — بوستر المسلسل كـ fallback */}
                 <div className="w-[88px] h-[52px] rounded-xl overflow-hidden bg-white/6 flex-shrink-0 relative"
                   style={{ background: "linear-gradient(135deg, rgba(4,120,87,0.20), rgba(16,185,129,0.10))" }}>
-                  <div className="w-full h-full flex items-center justify-center">
-                    <Play className="w-4 h-4 text-emerald-400/40" />
+                  {poster && (
+                    <img src={poster} alt="" className="absolute inset-0 w-full h-full object-cover opacity-50" />
+                  )}
+                  <div className="absolute inset-0 flex items-center justify-center">
+                    <Play className="w-4 h-4 text-emerald-400/70" />
                   </div>
                   {/* Progress bar */}
                   {pct > 0 && !watched && (

@@ -29,6 +29,28 @@ function _dcSet(key: string, data: any): void {
 
 const SC_BASE = "https://starcima.com";
 const AT_BASE = "https://www.arabic-toons.com";
+const TMDB_KEY_DUB = "8265bd1679663a7ea12ac168da84d2e8";
+
+/* ── TMDB poster lookup (24h cache) ── */
+const _tmdbPosterCache = new Map<string, { poster: string; ts: number }>();
+async function _fetchTmdbPosterDub(title: string): Promise<string> {
+  const cacheKey = title.toLowerCase().trim();
+  const hit = _tmdbPosterCache.get(cacheKey);
+  if (hit && Date.now() - hit.ts < 24 * 60 * 60_000) return hit.poster;
+  try {
+    const q = title.replace(/\s*(Dub(?:bed)?|\d+)\s*/gi, " ").replace(/\s+/g, " ").trim();
+    const r = await fetch(
+      `https://api.themoviedb.org/3/search/multi?api_key=${TMDB_KEY_DUB}&query=${encodeURIComponent(q)}&language=ar`,
+      { signal: AbortSignal.timeout(5000) }
+    );
+    if (!r.ok) return "";
+    const d = await r.json();
+    const path = d.results?.[0]?.poster_path;
+    const poster = path ? `https://image.tmdb.org/t/p/w342${path}` : "";
+    _tmdbPosterCache.set(cacheKey, { poster, ts: Date.now() });
+    return poster;
+  } catch { return ""; }
+}
 const CF_PROXY_BASE = "http://localhost:8000";
 const BROWSER_UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
@@ -147,6 +169,17 @@ router.get("/dubbed/catalog", async (req, res) => {
   const page = parseInt(req.query.page as string || "1", 10) || 1;
   const data = await fetchStarCimaDubbed(`/api/dubbed/catalog?page=${page}`);
   if (!data) { res.status(502).json({ error: "upstream failed" }); return; }
+
+  // ── TMDB poster fallback: أصناف بدون poster أو image → ابحث في TMDB ──
+  const results: any[] = Array.isArray(data) ? data : (data.results || []);
+  const missing = results.filter((s: any) => !s.poster && !s.image);
+  if (missing.length > 0) {
+    await Promise.allSettled(missing.map(async (s: any) => {
+      const p = await _fetchTmdbPosterDub(s.title || s.name || "");
+      if (p) { s.poster = p; s.image = p; }
+    }));
+  }
+
   res.setHeader("Cache-Control", "public, max-age=1800");
   res.json(data);
 });
