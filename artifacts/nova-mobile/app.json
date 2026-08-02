@@ -34,7 +34,8 @@
       },
       "package": "com.nova.anime",
       "backgroundColor": "#09090B",
-      "usesCleartextTraffic": true
+      "usesCleartextTraffic": true,
+      "versionCode": 362
     },
     "web": {
       "bundler": "metro",

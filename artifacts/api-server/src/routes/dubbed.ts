@@ -170,11 +170,16 @@ router.get("/dubbed/catalog", async (req, res) => {
   const data = await fetchStarCimaDubbed(`/api/dubbed/catalog?page=${page}`);
   if (!data) { res.status(502).json({ error: "upstream failed" }); return; }
 
-  // ── TMDB poster fallback: أصناف بدون poster أو image → ابحث في TMDB ──
+  // ── TMDB poster fallback (جذري):
+  //    كل صنف لا يملك URL كامل (http) → استبدله ببوستر TMDB مباشرة
+  //    هذا يلغي الاعتماد على proxy StarCima للصور.
   const results: any[] = Array.isArray(data) ? data : (data.results || []);
-  const missing = results.filter((s: any) => !s.poster && !s.image);
-  if (missing.length > 0) {
-    await Promise.allSettled(missing.map(async (s: any) => {
+  const needTmdb = results.filter((s: any) => {
+    const p = s.poster || s.image;
+    return !p || !String(p).startsWith("http");
+  });
+  if (needTmdb.length > 0) {
+    await Promise.allSettled(needTmdb.map(async (s: any) => {
       const p = await _fetchTmdbPosterDub(s.title || s.name || "");
       if (p) { s.poster = p; s.image = p; }
     }));
