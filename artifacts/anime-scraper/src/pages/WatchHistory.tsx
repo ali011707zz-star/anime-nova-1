@@ -229,7 +229,11 @@ export default function WatchHistory() {
                       {/* Cover */}
                       <Link href={`/anime/${item.id}`} className="shrink-0">
                         <div className="relative w-14 h-[78px] rounded-xl overflow-hidden bg-white/5">
-                          {item.cover && <img src={item.cover} alt="" className="w-full h-full object-cover" loading="lazy" />}
+                          {item.cover && <img src={item.cover} alt="" className="w-full h-full object-cover" loading="lazy"
+                            onError={(e) => {
+                              const img = e.currentTarget; img.onerror = null;
+                              fetch(`${API_BASE}/api/anime/poster/${item.id}`).then(r => r.json()).then(d => { if (d.coverUrl) img.src = d.coverUrl; }).catch(() => {});
+                            }} />}
                           {progress > 0 && (
                             <div className="absolute bottom-0 left-0 right-0 h-1 bg-white/15">
                               <div className="h-full bg-primary" style={{ width: `${Math.min(99, Math.round((progress / 1440) * 100))}%` }} />
@@ -310,7 +314,11 @@ export default function WatchHistory() {
                     {/* Cover */}
                     <Link href={detailUrl} className="shrink-0">
                       <div className="relative w-14 h-[78px] rounded-xl overflow-hidden bg-white/5">
-                        {item.cover && <img src={item.cover} alt="" className="w-full h-full object-cover" loading="lazy" />}
+                        {item.cover && <img src={item.cover} alt="" className="w-full h-full object-cover" loading="lazy"
+                          onError={(e) => {
+                            const img = e.currentTarget; img.onerror = null;
+                            fetch(`${API_BASE}/api/anime/poster/${item.id}`).then(r => r.json()).then(d => { if (d.coverUrl) img.src = d.coverUrl; }).catch(() => {});
+                          }} />}
                         {progress > 0 && (
                           <div className="absolute bottom-0 left-0 right-0 h-1 bg-white/15">
                             <div className="h-full bg-cyan-400" style={{ width: `${Math.min(99, Math.round((progress / 7200) * 100))}%` }} />

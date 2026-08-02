@@ -348,7 +348,11 @@ export default function Library() {
                           {/* Cover */}
                           <div className="relative shrink-0">
                             {cover
-                              ? <img src={isAnim && cover ? `https://image.tmdb.org/t/p/w200${cover}` : cover} alt="" className="w-12 h-[64px] rounded-xl object-cover border border-white/10" />
+                              ? <img src={isAnim && cover ? `https://image.tmdb.org/t/p/w200${cover}` : cover} alt="" className="w-12 h-[64px] rounded-xl object-cover border border-white/10"
+                                  onError={!isAnim && item.id ? (e) => {
+                                    const img = e.currentTarget; img.onerror = null;
+                                    fetch(`${API_BASE}/api/anime/poster/${item.id}`).then(r => r.json()).then(d => { if (d.coverUrl) img.src = d.coverUrl; }).catch(() => {});
+                                  } : undefined} />
                               : <div className="w-12 h-[64px] rounded-xl bg-white/5 flex items-center justify-center border border-white/10">
                                   {isAnim ? <Clapperboard className="w-6 h-6 text-white/20" /> : <PlayCircle className="w-6 h-6 text-white/20" />}
                                 </div>
@@ -470,7 +474,11 @@ export default function Library() {
                               {/* Cover */}
                               <div className="relative shrink-0">
                                 {coverSrc
-                                  ? <img src={coverSrc} alt="" className="w-11 h-[58px] rounded-xl object-cover border border-white/10" />
+                                  ? <img src={coverSrc} alt="" className="w-11 h-[58px] rounded-xl object-cover border border-white/10"
+                                      onError={!isAnim && item.id ? (e) => {
+                                        const img = e.currentTarget; img.onerror = null;
+                                        fetch(`${API_BASE}/api/anime/poster/${item.id}`).then(r => r.json()).then(d => { if (d.coverUrl) img.src = d.coverUrl; }).catch(() => {});
+                                      } : undefined} />
                                   : <div className="w-11 h-[58px] rounded-xl bg-white/5 flex items-center justify-center border border-white/10">
                                       {isAnim ? <Clapperboard className="w-5 h-5 text-white/20" /> : <PlayCircle className="w-5 h-5 text-white/20" />}
                                     </div>

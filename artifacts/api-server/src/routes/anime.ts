@@ -14702,6 +14702,47 @@ async function metaCacheSet(key: string, data: any, ttl: number, source: string)
   } catch {}
 }
 
+// ── Poster Cache — كاش البوستر والقصة بـ anilist_id مباشرة ───────────────────
+
+/** يجلب بوستر + قصة من كاش anime_poster_cache */
+async function posterCacheGet(anilistId: number): Promise<{ coverUrl: string | null; synopsis: string | null } | null> {
+  try {
+    const rows = await sbSelect<{ cover_url: string; synopsis: string }>(
+      "anime_poster_cache",
+      { anilist_id: `eq.${anilistId}` },
+      { limit: 1, select: "cover_url,synopsis" }
+    );
+    if (!rows.length) return null;
+    return { coverUrl: rows[0].cover_url || null, synopsis: rows[0].synopsis || null };
+  } catch { return null; }
+}
+
+/** يحفظ/يحدّث بوستر + قصة في anime_poster_cache */
+async function posterCacheSet(anilistId: number, coverUrl: string | null, synopsis: string | null): Promise<void> {
+  if (!anilistId) return;
+  try {
+    await sbUpsert(
+      "anime_poster_cache",
+      { anilist_id: anilistId, cover_url: coverUrl || null, synopsis: synopsis || null, updated_at: new Date().toISOString() },
+      "anilist_id"
+    );
+  } catch {}
+}
+
+/** يستخرج بيانات البوستر من رد AniList GraphQL ويخزّنها */
+function extractAndCachePoster(anilistResponse: any): void {
+  try {
+    const media = anilistResponse?.data?.Media;
+    if (!media?.id) return;
+    const coverUrl =
+      media.coverImage?.extraLarge ||
+      media.coverImage?.large ||
+      (media.id ? `https://img.anili.st/media/${media.id}` : null);
+    const synopsis = media.description || null;
+    posterCacheSet(media.id, coverUrl, synopsis).catch(() => {});
+  } catch {}
+}
+
 /**
  * فلتر الأنمي الصيني (Donghua) — العناوين اليابانية الحقيقية دائماً تحتوي
  * على حروف hiragana أو katakana. إذا كان العنوان الياباني موجوداً لكن
@@ -15092,6 +15133,8 @@ async function anilistFetchAndCache(body: any, cacheKey: string, ttl: number): P
     _anilistDown = false;
     _anilistDownSince = 0;
     metaCacheSet(cacheKey, data, ttl, "anilist").catch(() => {});
+    // خزّن البوستر+القصة في poster cache إذا كانت استجابة Media فردية
+    if (data?.data?.Media) extractAndCachePoster(data);
     return data;
   } catch { return null; }
 }
@@ -15161,6 +15204,49 @@ router.post("/anilist", async (req, res) => {
 
   // 5️⃣ كل المصادر فشلت — هيكل فارغ بدل خطأ
   return res.json({ data: { Page: { media: [], pageInfo: { hasNextPage: false, total: 0 } }, Media: null } });
+});
+
+// ── Poster endpoint — جلب بوستر+قصة بـ AniList ID ─────────────────────────
+router.get("/anime/poster/:id", async (req, res) => {
+  const anilistId = parseInt(req.params.id, 10);
+  if (!anilistId || isNaN(anilistId)) return res.status(400).json({ error: "id غير صالح" });
+
+  // 1️⃣ من الكاش أولاً
+  const cached = await posterCacheGet(anilistId);
+  if (cached?.coverUrl) {
+    res.setHeader("Cache-Control", "public, max-age=3600");
+    return res.json({ coverUrl: cached.coverUrl, synopsis: cached.synopsis, source: "cache" });
+  }
+
+  // 2️⃣ جلب من AniList وتخزين
+  try {
+    const body = {
+      query: `query($id:Int){Media(id:$id,type:ANIME){id coverImage{extraLarge large}description(asHtml:false)}}`,
+      variables: { id: anilistId },
+    };
+    const r = await fetch("https://graphql.anilist.co", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Accept": "application/json" },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(8000),
+    });
+    if (r.ok) {
+      const data = await r.json() as any;
+      const media = data?.data?.Media;
+      if (media) {
+        const coverUrl = media.coverImage?.extraLarge || media.coverImage?.large || `https://img.anili.st/media/${anilistId}`;
+        const synopsis = media.description || null;
+        posterCacheSet(anilistId, coverUrl, synopsis).catch(() => {});
+        res.setHeader("Cache-Control", "public, max-age=3600");
+        return res.json({ coverUrl, synopsis, source: "anilist" });
+      }
+    }
+  } catch {}
+
+  // 3️⃣ fallback — img.anili.st مباشرة
+  const fallbackUrl = `https://img.anili.st/media/${anilistId}`;
+  res.setHeader("Cache-Control", "public, max-age=300");
+  return res.json({ coverUrl: fallbackUrl, synopsis: null, source: "fallback" });
 });
 
 // ── بناء كتالوج AnimeWitcher في الخلفية عند إقلاع السيرفر ──

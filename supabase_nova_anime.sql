@@ -130,6 +130,16 @@ ALTER TABLE source_cache           DISABLE ROW LEVEL SECURITY;
 ALTER TABLE subtitle_cache         DISABLE ROW LEVEL SECURITY;
 ALTER TABLE pending_verifications  DISABLE ROW LEVEL SECURITY;
 
+-- ── anime_poster_cache — كاش البوستر والقصة بـ anilist_id ──────────
+-- يُخزَّن تلقائياً عند جلب بيانات من AniList؛ يُستخدم fallback عندما يتوقف img.anili.st
+CREATE TABLE IF NOT EXISTS anime_poster_cache (
+  anilist_id  INTEGER     PRIMARY KEY,
+  cover_url   TEXT,
+  synopsis    TEXT,
+  updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+ALTER TABLE anime_poster_cache DISABLE ROW LEVEL SECURITY;
+
 -- ── site_cookies — تخزين كوكيز CF دائم (يصمد بعد restart) ───────────
 -- يُستخدم لـ anime3rb cf_clearance: يُجدَّد مرة/20ساعة عبر nopecha
 CREATE TABLE IF NOT EXISTS site_cookies (

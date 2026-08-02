@@ -202,9 +202,17 @@ CREATE TABLE IF NOT EXISTS anime_meta_cache (
   ttl_seconds INTEGER DEFAULT 21600,
   created_at  TIMESTAMPTZ DEFAULT NOW()
 );
+
+-- جدول كاش البوستر والقصة (بحث بـ anilist_id مباشرة)
+CREATE TABLE IF NOT EXISTS anime_poster_cache (
+  anilist_id  INTEGER PRIMARY KEY,
+  cover_url   TEXT,
+  synopsis    TEXT,
+  updated_at  TIMESTAMPTZ DEFAULT NOW()
+);
 `;
 
-const REQUIRED_TABLES = ["users", "pending_verifications", "watch_history", "favorites", "translations_cache", "anime_meta_ar", "anime_meta_cache"];
+const REQUIRED_TABLES = ["users", "pending_verifications", "watch_history", "favorites", "translations_cache", "anime_meta_ar", "anime_meta_cache", "anime_poster_cache"];
 
 // ── PostgreSQL direct migration (للـ Replit PostgreSQL) ──────────────────────
 const PG_MIGRATION_SQL = `
@@ -367,6 +375,12 @@ CREATE TABLE IF NOT EXISTS anime_meta_cache (
   source      TEXT DEFAULT 'anilist',
   ttl_seconds INTEGER DEFAULT 21600,
   created_at  TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE TABLE IF NOT EXISTS anime_poster_cache (
+  anilist_id  INTEGER PRIMARY KEY,
+  cover_url   TEXT,
+  synopsis    TEXT,
+  updated_at  TIMESTAMPTZ DEFAULT NOW()
 );
 CREATE TABLE IF NOT EXISTS notifications (
   id          SERIAL PRIMARY KEY,
