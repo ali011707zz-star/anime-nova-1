@@ -19,7 +19,8 @@ export default function AwDubbedDetail() {
   const titleAr  = params.get("titleAr") || "";
   const rawImg   = params.get("img")     || "";
   const rawSeasons: Season[] = (() => {
-    try { return JSON.parse(decodeURIComponent(params.get("seasons") || "[]")); } catch { return []; }
+    // params.get() decodes URL encoding automatically — no second decodeURIComponent needed
+    try { return JSON.parse(params.get("seasons") || "[]"); } catch { return []; }
   })();
 
   const [selSeason,  setSelSeason]  = useState(0);

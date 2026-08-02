@@ -15217,8 +15217,13 @@ function _awDubBaseTitle(name: string): string {
 }
 
 function _awDubSeasonLabel(name: string): string {
-  const m = name.match(/Season\s*(\d+)/i) ?? name.match(/(\d+)\s*(?:Dub(?:bed)?)?\s*$/i);
-  return m ? `الموسم ${m[1]}` : "الموسم 1";
+  // أولاً: "Season N" صريح
+  const m1 = name.match(/Season\s*(\d+)/i);
+  if (m1) return `الموسم ${m1[1]}`;
+  // ثانياً: رقم 1-2 خانة فقط في نهاية الاسم (نتجنّب 4 خانات مثل سنة 2011)
+  const m2 = name.match(/\b([1-9]\d?)\s*(?:Dub(?:bed)?)?\s*$/i);
+  if (m2) return `الموسم ${m2[1]}`;
+  return "الموسم 1";
 }
 
 async function _fetchAwDubCatalog(): Promise<AwDubSeries[]> {
@@ -15232,7 +15237,7 @@ async function _fetchAwDubCatalog(): Promise<AwDubSeries[]> {
       structuredQuery: {
         from: [{ collectionId: "anime_list" }],
         where: { fieldFilter: { field: { fieldPath: "dubbed" }, op: "EQUAL", value: { booleanValue: true } } },
-        limit: 300,
+        limit: 600,
       }
     }),
     signal: AbortSignal.timeout(15_000),
@@ -15271,22 +15276,62 @@ async function _fetchAwDubCatalog(): Promise<AwDubSeries[]> {
       (parseInt(a.label.replace(/\D+/g, "")) || 0) - (parseInt(b.label.replace(/\D+/g, "")) || 0)
     );
 
-  // ─── TMDB fallback: أصناف بدون بوستر → ابحث في TMDB ──────────────────
+  // ─── استعادة البوسترات المحفوظة مسبقاً من Supabase ─────────────────────
+  await Promise.allSettled(
+    [...groups.values()].filter(g => !g.poster).map(async g => {
+      try {
+        const cached = await metaCacheGet(`aw_poster:${g.key}`);
+        if (cached?.data?.poster) g.poster = cached.data.poster;
+      } catch {}
+    })
+  );
+
+  // ─── TMDB + AniList fallback: أصناف لا تزال بدون بوستر ──────────────────
   const missingPosters = [...groups.values()].filter(g => !g.poster);
   if (missingPosters.length > 0) {
     await Promise.allSettled(
       missingPosters.map(async g => {
+        const q = g.title.replace(/\s*Dub(?:bed)?\s*/gi, "").trim();
+        let found: string | null = null;
+
+        // ① TMDB
         try {
-          const q = g.title.replace(/\s*Dub(?:bed)?\s*/gi, "").trim();
           const r = await fetch(
             `https://api.themoviedb.org/3/search/multi?api_key=${TMDB_KEY_ANIME}&query=${encodeURIComponent(q)}&language=ar`,
             { signal: AbortSignal.timeout(5000) }
           );
-          if (!r.ok) return;
-          const d = await r.json();
-          const path = d.results?.[0]?.poster_path;
-          if (path) g.poster = `https://image.tmdb.org/t/p/w342${path}`;
-        } catch { /* تجاهل — لا يؤثر على باقي الكتالوج */ }
+          if (r.ok) {
+            const d = await r.json();
+            const path = d.results?.[0]?.poster_path;
+            if (path) found = `https://image.tmdb.org/t/p/w342${path}`;
+          }
+        } catch {}
+
+        // ② AniList (GraphQL — مجاني بدون مفتاح)
+        if (!found) {
+          try {
+            const gql = await fetch("https://graphql.anilist.co", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                query: `query($s:String){Media(search:$s,type:ANIME){coverImage{large}}}`,
+                variables: { s: q },
+              }),
+              signal: AbortSignal.timeout(5000),
+            });
+            if (gql.ok) {
+              const gd = await gql.json();
+              const img = gd?.data?.Media?.coverImage?.large;
+              if (img) found = img;
+            }
+          } catch {}
+        }
+
+        if (found) {
+          g.poster = found;
+          // احفظ في Supabase لتجنّب البحث عند كل تحميل
+          metaCacheSet(`aw_poster:${g.key}`, { poster: found }, 30 * 24 * 3600, "aw-poster-search").catch(() => {});
+        }
       })
     );
   }

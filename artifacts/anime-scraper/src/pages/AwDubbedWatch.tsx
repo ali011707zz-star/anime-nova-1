@@ -62,12 +62,10 @@ export default function AwDubbedWatch() {
           const srcs: SourceItem[] = c.allSources || [];
           if (srcs.length) {
             setAllSources(srcs);
-            if (srcs.length === 1) {
-              setPlayUrl(srcs[0].rawUrl || srcs[0].hlsUrl);
-              setPhase("player");
-            } else {
-              setPhase("picker");
-            }
+            // دائماً شغّل أفضل جودة مباشرةً
+            setSelIdx(0);
+            setPlayUrl(srcs[0].rawUrl || srcs[0].hlsUrl);
+            setPhase("player");
             return;
           }
         }
@@ -93,13 +91,10 @@ export default function AwDubbedWatch() {
       }
       try { sessionStorage.setItem(cacheKey, JSON.stringify({ allSources: srcs, ts: Date.now() })); } catch {}
       setAllSources(srcs);
-      if (srcs.length === 1) {
-        setPlayUrl(srcs[0].rawUrl || srcs[0].hlsUrl);
-        setPhase("player");
-      } else {
-        setSelIdx(0);
-        setPhase("picker");
-      }
+      // دائماً شغّل أفضل جودة (index 0) مباشرةً — المستخدم يستطيع التبديل من داخل المشغّل
+      setSelIdx(0);
+      setPlayUrl(srcs[0].rawUrl || srcs[0].hlsUrl);
+      setPhase("player");
     } catch {
       if (!mountedRef.current) return;
       setError("خطأ في الاتصال بالخادم");
