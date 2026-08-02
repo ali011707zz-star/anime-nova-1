@@ -15245,7 +15245,11 @@ async function _fetchAwDubCatalog(): Promise<AwDubSeries[]> {
     if (!d?.document?.name) continue;
     const f    = d.document.fields || {};
     const animeId  = d.document.name.split("/").pop() || "";
-    const poster   = f.poster_uri?.stringValue ?? f.poster?.mapValue?.fields?.large?.stringValue ?? "";
+    const poster   = f.poster_uri?.stringValue
+                  ?? f.cover_uri?.stringValue
+                  ?? f.poster?.mapValue?.fields?.large?.stringValue
+                  ?? f.cover?.mapValue?.fields?.large?.stringValue
+                  ?? "";
     const titleAr  = f.other_names?.arrayValue?.values?.[0]?.stringValue ?? "";
     const story    = f.story?.stringValue ?? "";
     const year     = f.details?.mapValue?.fields?.year?.stringValue ?? "";

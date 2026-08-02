@@ -94,7 +94,7 @@ export default function AwDubbedDetail() {
             <ChevronRight className="w-4 h-4 text-white/70" />
           </button>
           <div className="flex-1 min-w-0">
-            <p className="text-[10px] text-white/30 font-['Cairo']">كرتون مدبلج · AW</p>
+            <p className="text-[10px] text-white/30 font-['Cairo']">أنيميشن مدبلج</p>
             <h1 className="text-[14px] font-black text-white font-['Cairo'] truncate leading-tight">{displayTitle}</h1>
           </div>
           {episodes.length > 0 && (
@@ -156,10 +156,6 @@ export default function AwDubbedDetail() {
                 <span className="px-2 py-0.5 rounded-lg text-[10px] font-black font-['Cairo']"
                   style={{ background: "rgba(16,185,129,0.20)", border: "1px solid rgba(16,185,129,0.30)", color: "#6ee7b7" }}>
                   مدبلج عربي
-                </span>
-                <span className="px-2 py-0.5 rounded-lg text-[10px] font-black font-['Cairo']"
-                  style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.10)", color: "rgba(255,255,255,0.50)" }}>
-                  AW
                 </span>
               </div>
             </div>

@@ -181,7 +181,7 @@ export function Sidebar({ open, onClose }: SidebarProps) {
                   <NavRow icon={Search}       label="البحث"              href="/search" />
                   <NavRow icon={Tv2}          label="الأنمي"             href="/browse" />
                   <NavRow icon={Tv}          label="كرتون مدبلج"       href="/dubbed" />
-                  <NavRow icon={Tv}          label="كرتون AW"           href="/aw-dubbed" sub="AnimeWitcher · مدبلج عربي" />
+                  <NavRow icon={Tv}          label="أنيميشن مدبلج"       href="/aw-dubbed" />
                   <NavRow icon={CalendarDays} label="الجدول الأسبوعي"   href="/schedule" />
                 </div>
               </div>

@@ -33,11 +33,6 @@ function SeriesCard({ s, onClick }: { s: Series; onClick: () => void }) {
             <span className="text-white/55 text-[10px] font-['Cairo']">{s.seasons.length} مواسم</span>
           )}
         </div>
-        {/* AW badge */}
-        <div className="absolute top-1.5 left-1.5">
-          <span className="text-[8px] font-black px-1.5 py-0.5 rounded-md"
-            style={{ background: "rgba(16,185,129,0.20)", border: "1px solid rgba(16,185,129,0.35)", color: "#6ee7b7" }}>AW</span>
-        </div>
       </div>
     </motion.div>
   );
@@ -120,14 +115,8 @@ export default function AwDubbedLibrary() {
             <ChevronDown className="w-4 h-4 text-white/70 rotate-90" />
           </button>
           <div className="flex-1">
-            <div className="flex items-center gap-2">
-              <h1 className="text-lg font-black font-['Cairo'] text-white">كرتون مدبلج</h1>
-              <span className="text-[9px] font-black px-1.5 py-0.5 rounded-md"
-                style={{ background: "rgba(16,185,129,0.15)", border: "1px solid rgba(16,185,129,0.30)", color: "#6ee7b7" }}>
-                AnimeWitcher
-              </span>
-            </div>
-            <p className="text-xs text-white/40 font-['Cairo']">كرتون وأنيميشن مدبلج عربي</p>
+            <h1 className="text-lg font-black font-['Cairo'] text-white">أنيميشن مدبلج</h1>
+            <p className="text-xs text-white/40 font-['Cairo']">كرتون وأنيميشن مدبلج بالعربية</p>
           </div>
           <button
             onClick={() => { setSearchOpen(o => !o); if (!searchOpen) setTimeout(() => document.getElementById("aw-dubbed-search")?.focus(), 50); }}
@@ -141,7 +130,7 @@ export default function AwDubbedLibrary() {
             <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} exit={{ height: 0, opacity: 0 }}
               className="overflow-hidden px-4 pb-3">
               <input id="aw-dubbed-search" value={searchQ} onChange={e => setSearchQ(e.target.value)}
-                placeholder="ابحث في الكرتون المدبلج..."
+                placeholder="ابحث في الأنيميشن المدبلج..."
                 className="w-full bg-white/5 border border-white/10 rounded-xl py-2.5 px-4 text-sm text-white placeholder:text-white/30 font-['Cairo'] focus:outline-none focus:border-emerald-500/40" />
             </motion.div>
           )}
@@ -176,7 +165,7 @@ export default function AwDubbedLibrary() {
               <div ref={loaderRef} className="flex items-center justify-center py-8">
                 {loadingMore && <Loader2 className="w-6 h-6 animate-spin text-emerald-500" />}
                 {!loadingMore && page >= totalPages && series.length > 0 && (
-                  <p className="text-xs text-white/30 font-['Cairo']">تم تحميل جميع المسلسلات ({series.length})</p>
+                  <p className="text-xs text-white/30 font-['Cairo']">تم تحميل جميع المسلسلات</p>
                 )}
               </div>
             )}
