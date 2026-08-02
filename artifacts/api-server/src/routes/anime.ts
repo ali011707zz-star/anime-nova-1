@@ -14175,6 +14175,10 @@ router.get("/anime/hls-proxy", async (req, res) => {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Headers", "Range");
 
+  // mobile=1 → redirect مباشر للـ M3U8 الأصلي
+  // ExoPlayer يجلب الـ manifest من CDN بـ IP الجهاز + Referer من PlayerSource.headers
+  if (req.query.mobile === "1") { res.redirect(307, url); return; }
+
   await serveHlsVPS(url, ref, res);
 });
 
@@ -14191,6 +14195,11 @@ router.get("/anime/video-proxy", async (req, res) => {
 
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Headers", "Range");
+
+  // mobile=1 → redirect مباشر للـ CDN بدل بث عبر VPS
+  // ExoPlayer يجلب الفيديو من CDN بـ IP الجهاز + Referer من PlayerSource.headers
+  // هذا يحلّ: timeout VPS، بطء البث، حجب CDN لـ IPs مراكز البيانات
+  if (req.query.mobile === "1") { res.redirect(307, url); return; }
 
   await serveMediaVPS(url, ref, req, res);
 });

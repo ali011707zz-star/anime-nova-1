@@ -182,9 +182,14 @@ function resolveUrl(url: string | undefined, base: string): string {
  * إذا كان الرابط بالفعل عبر /api/ → يتركه كما هو.
  * إذا كان رابطاً مباشراً للـ CDN → يلفّه في hls-proxy أو video-proxy.
  */
-/** يضيف mobile=1 لـ video-proxy URLs حتى يرد VPS بـ 307 redirect بدل streaming كامل */
+/** يضيف mobile=1 لـ video-proxy و hls-proxy URLs حتى يرد VPS بـ 307 redirect بدل streaming كامل */
 function addMobileFlag(url: string): string {
-  if (!url.includes("/api/anime/video-proxy") && !url.includes("/api/animation/video-proxy")) return url;
+  const isProxy =
+    url.includes("/api/anime/video-proxy") ||
+    url.includes("/api/animation/video-proxy") ||
+    url.includes("/api/anime/hls-proxy") ||
+    url.includes("/api/animation/hls-proxy");
+  if (!isProxy) return url;
   if (url.includes("mobile=1")) return url;
   return url + "&mobile=1";
 }
