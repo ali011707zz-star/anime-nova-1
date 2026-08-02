@@ -56,7 +56,7 @@ const SITE_TAG: Record<string, string> = {
   animetime: "AT", animepahe: "AP", dulo_anim: "DL",
   faselhd_db: "FH",
   notorrent: "NO", sanime: "SA", anipm: "PM", anslayer: "AS",
-  akwam: "AQ",
+  akwam: "AQ", anifox: "FX",
 };
 
 /* ── اسم عرض لكل موقع في منتقي المصادر ── */
@@ -71,7 +71,7 @@ const SITE_LABEL: Record<string, string> = {
   anime4up2: "Anime4Up", mycima: "MyCima", topcinemaa: "TopCinema",
   faselhd_db: "FaselHD", animetime: "AnimeTime",
   notorrent: "Notorrent", sanime: "SAnime", anipm: "AniPm", anslayer: "AnimeSlayer",
-  akwam: "Akwam",
+  akwam: "Akwam", anifox: "AniFox",
 };
 function getSiteTag(site: string): string {
   return SITE_TAG[site] || site.slice(0, 2).toUpperCase();
@@ -95,6 +95,7 @@ const SITE_DESC: Record<string, string> = {
   notorrent: "IMDB · مصادر متعددة", sanime: "عربي مدبلج/مترجم · MP4",
   anslayer: "مشغلات خارجية · MixDrop/MediaFire",
   akwam: "عربي مترجم · MP4 مباشر",
+  anifox: "أرشيف · MP4/MediaFire متعدد",
 };
 function getSiteDesc(site: string): string {
   return SITE_DESC[site] || "";
@@ -210,9 +211,8 @@ const SITE_PRIORITY: Record<string, number> = {
   kawaii: 100, animewitcher: 90,
   animeify: 85, sanime: 80,
   dulo_anim: 70, vidlink_anim: 55,
-  vidfast: 35,
+  anifox: 40, vidfast: 35,
   anikototv: 30, animekai: 25, animepahe: 20, anipm: 18,
-  sanime: 15,
 };
 
 /* ── قائمة المصادر (KW أولاً — الأولوية القصوى للتشغيل الفوري) ── */
