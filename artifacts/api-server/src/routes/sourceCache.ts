@@ -170,6 +170,7 @@ setInterval(sbDeleteExpired, 3_600_000);
 // ── L3: فايل JSON محلي على القرص (fallback عند انقطاع Supabase) ──────────────
 // يحفظ في /opt/nova-cache/ ويبقى بعد restart الـ pm2 (إلا عند reboot الـ VPS)
 import { existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync, statSync } from "node:fs";
+import { writeFile as writeFileAsync } from "node:fs/promises";
 import { join } from "node:path";
 
 const L3_DIR = "/opt/nova-cache";
