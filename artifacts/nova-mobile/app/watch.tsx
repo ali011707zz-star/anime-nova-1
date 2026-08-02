@@ -182,10 +182,17 @@ function resolveUrl(url: string | undefined, base: string): string {
  * إذا كان الرابط بالفعل عبر /api/ → يتركه كما هو.
  * إذا كان رابطاً مباشراً للـ CDN → يلفّه في hls-proxy أو video-proxy.
  */
+/** يضيف mobile=1 لـ video-proxy URLs حتى يرد VPS بـ 307 redirect بدل streaming كامل */
+function addMobileFlag(url: string): string {
+  if (!url.includes("/api/anime/video-proxy") && !url.includes("/api/animation/video-proxy")) return url;
+  if (url.includes("mobile=1")) return url;
+  return url + "&mobile=1";
+}
+
 function ensureVpsProxy(url: string, headers: Record<string, string> | undefined, base: string): string {
   if (!url) return url;
-  // بالفعل proxy عبر VPS
-  if (url.includes("/api/anime/") || url.includes("/api/animation/")) return url;
+  // بالفعل proxy عبر VPS — أضف mobile=1 لـ video-proxy فقط (ليس hls-proxy)
+  if (url.includes("/api/anime/") || url.includes("/api/animation/")) return addMobileFlag(url);
   // روابط embed (mega / vidmoly) — لا نلفّها
   if (url.includes("mega.nz") || url.includes("mega.co.nz")) return url;
   if (url.includes("mp4upload")) return url;
@@ -199,7 +206,8 @@ function ensureVpsProxy(url: string, headers: Record<string, string> | undefined
       : `${base}/api/anime/hls-proxy?url=${encodeURIComponent(url)}`;
   }
   if (ref) {
-    return `${base}/api/anime/video-proxy?url=${encodeURIComponent(url)}&ref=${encodeURIComponent(ref)}`;
+    // mobile=1 → VPS يرسل 307 redirect بدل streaming عبر الخادم (يوفّر bandwidth ويحلّ timeout)
+    return `${base}/api/anime/video-proxy?url=${encodeURIComponent(url)}&ref=${encodeURIComponent(ref)}&mobile=1`;
   }
   return url; // لا Referer متاح — استخدم كما هو
 }
