@@ -2597,9 +2597,10 @@ const s = StyleSheet.create({
   halfRight: { position: "absolute", right: 0, top: 0, width: "50%", height: "100%" },
 
   /* ── Skip intro/outro pill buttons ── */
-  /* skipBtnRowFloat: overlay مستقل يظهر دائماً بغض النظر عن رؤية الـ controls */
+  /* skipBtnRowFloat: overlay مستقل يظهر دائماً بغض النظر عن رؤية الـ controls
+     bottom: 135 — يضمن ظهور الزر فوق قسم التحكم السفلي (~130px) بأمان */
   skipBtnRowFloat: {
-    position: "absolute", bottom: 90, left: 12, right: 12,
+    position: "absolute", bottom: 135, left: 12, right: 12,
     flexDirection: "row", justifyContent: "flex-start", gap: 8,
     zIndex: 20,
   },
