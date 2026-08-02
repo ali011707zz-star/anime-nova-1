@@ -14,13 +14,6 @@ import {
   setSubtitleCache,
 } from "../lib/sourceCache.js";
 import { notifyNewEpisode } from "./telegram.js";
-import {
-  getTgCachedSources,
-  isTgCacheable,
-  enqueueTgDownload,
-  cleanupStaleTgJobs,
-  normalizeTgQuality,
-} from "../lib/telegramEpisodeCache.js";
 import { encryptProxyUrl, encryptParam, decryptParam, isEncrypted } from "../lib/security.js";
 import { sbSelect, sbUpsert } from "../lib/supabaseClient.js";
 import pg from "pg";
@@ -1049,31 +1042,25 @@ function parseVideoUrl(html: string): { url: string; type: "hls" | "mp4" } | nul
 
 function parseStreamtape(html: string): { url: string; type: "mp4" } | null {
   try {
-    // --- Pattern A: الصيغة المبهمة (2025+) ---
-    // الفكرة: نبحث عن prefix + garbled string + سلسلة .substring() ثم نُطبّق العمليات
-    // ونتحقق أن الناتج يحتوي على get_video + token + streamtape
-    // أمثلة حقيقية:
-    //   '//stream'+ ('defgtape.to/get_video?...&token=T').substring(4)
-    //   "/streamt" + ''+ ('xcddape.to/get_video?...&token=T').substring(1).substring(2)
-    //   '//str' + ('xcdeamtape.com/get_video?...&token=T').substring(2).substring(1)
-    const substRe = /["'`]([^"'`]{1,50})["'`]\s*(?:\+\s*["'`][^"'`]{0,30}["'`]\s*)*\+\s*\(\s*["'`]([^"'`]{5,300})["'`]\s*\)((?:\.substring\(\d+\))+)/gm;
+    // --- Pattern A: الصيغة الجديدة (2025+) ---
+    // innerHTML = '//str' + '' + ('xcdeamtape.com/get_video?...&token=T').substring(1).substring(2)
+    // أو: innerHTML = '//str' + ('defgeamtape.com/get_video?...').substring(4)
+    // الحل: استخرج الـ prefix + الـ garbled string + عمليات substring ثم طبّقها
+    const substRe = /["'`]([^"'`]{1,10})["'`]\s*(?:\+\s*["'`][^"'`]{0,20}["'`]\s*)*\+\s*\(\s*["'`]([A-Za-z0-9+/=]{0,20}[A-Za-z]*(?:tape|stre)[^"'`]*)["'`]\s*\)((?:\.substring\(\d+\))*)/gm;
     for (const m of html.matchAll(substRe)) {
-      let garbled = m[2];
-      for (const s of m[3].matchAll(/\.substring\((\d+)\)/g)) {
+      const prefix = m[1];
+      let garbled  = m[2];
+      const ops    = m[3] || "";
+      for (const s of ops.matchAll(/\.substring\((\d+)\)/g)) {
         garbled = garbled.substring(parseInt(s[1]));
       }
-      const combined = (m[1] + garbled).replace(/\s/g, "");
-      if (!combined.includes("get_video") || !combined.includes("token=")) continue;
+      const combined = (prefix + garbled).replace(/\s/g, "");
       const url = combined.startsWith("//") ? "https:" + combined
-                : combined.startsWith("/") && !combined.startsWith("//") ? "https://streamtape.to" + combined
+                : combined.startsWith("/")  ? "https://streamtape.com" + combined
                 : combined;
-      // تحقق صارم: الـ hostname يجب أن يكون streamtape.{com|to|net} والمسار /get_video
-      try {
-        const u = new URL(url);
-        const validHost = u.hostname === "streamtape.com" || u.hostname === "streamtape.to" || u.hostname === "streamtape.net";
-        const validPath = u.pathname === "/get_video" || u.pathname.startsWith("/get_video");
-        if (validHost && validPath) return { url, type: "mp4" };
-      } catch {}
+      if ((url.includes("streamtape.com") || url.includes("streamtape.to")) && url.includes("get_video")) {
+        return { url, type: "mp4" };
+      }
     }
 
     // --- Pattern B: الصيغة الكلاسيكية --- innerHTML = "part1" + "part2"
@@ -1081,7 +1068,7 @@ function parseStreamtape(html: string): { url: string; type: "mp4" } | null {
     if (m1) {
       const combined = (m1[1] + m1[2]).replace(/\s/g, "");
       const url = combined.startsWith("//") ? "https:" + combined
-                : combined.startsWith("/")  ? "https://streamtape.to" + combined
+                : combined.startsWith("/")  ? "https://streamtape.com" + combined
                 : combined;
       if (url.includes("streamtape") || url.includes("get_video")) return { url, type: "mp4" };
     }
@@ -1093,16 +1080,22 @@ function parseStreamtape(html: string): { url: string; type: "mp4" } | null {
       return { url: "https:" + combined, type: "mp4" };
     }
 
-    // --- Pattern D: get_video?...&token=... داخل سلاسل JS (بعد إزالة divs/spans الثابتة) ---
-    // الـ divs الثابتة تحتوي tokens مزيّفة (garbled) — لا نستخدمها
-    // لكن الـ token داخل سلاسل JS هو الصحيح دائماً
-    const jsSection = html.replace(/<(?:div|span)[^>]*>.*?<\/(?:div|span)>/gis, "");
-    // ابحث أولاً عن get_video مع domain واضح في نفس السياق
-    const m3 = jsSection.match(/(streamtape\.(?:com|to|net))[^"'`]*?(get_video\?id=[^&"'`<\s]+&expires=\d+(?:&ip=[^&"'`<\s]+)?&token=[^"'`<>\s;)]+)/);
-    if (m3) return { url: `https://${m3[1]}/${m3[2]}`, type: "mp4" };
-    // fallback: أيّ get_video URL في JS — نفترض streamtape.to (الدومين الشائع في AnimeSlayer)
-    const m3b = jsSection.match(/get_video\?id=[^&"'`<\s]+&expires=\d+(?:&ip=[^&"'`<\s]+)?&token=[^"'`<>\s;)]+/);
-    if (m3b) return { url: "https://streamtape.to/" + m3b[0], type: "mp4" };
+    // --- Pattern E: محتوى مباشر في div#robotlink (2025+) ---
+    // <div id="robotlink" style="display:none;">/streamtape.to/get_video?id=...&token=...</div>
+    const mRobot = html.match(/id=["']robotlink["'][^>]*>([^<]+)/);
+    if (mRobot) {
+      let raw = mRobot[1].trim();
+      // /streamtape.to/get_video?... → https://streamtape.to/get_video?...
+      if (raw.startsWith("/") && !raw.startsWith("//")) raw = "https:/" + raw;
+      else if (raw.startsWith("//")) raw = "https:" + raw;
+      if (raw.includes("get_video")) return { url: raw, type: "mp4" };
+    }
+
+    // --- Pattern D: get_video?id=...&token=... مباشراً في سياق JS ---
+    // نبحث فقط في سياق JS (بعد إزالة محتوى divs لتجنب الـ token المزيّف)
+    const jsSection = html.replace(/<div[^>]*>.*?<\/div>/gis, "");
+    const m3 = jsSection.match(/get_video\?id=[^&"'<\s]+&expires=\d+(?:&ip=[^&"'<\s]+)?&token=[^&"'<>\s;)]+/);
+    if (m3) return { url: "https://streamtape.com/" + m3[0], type: "mp4" };
 
   } catch {}
   return null;
@@ -1624,7 +1617,7 @@ async function extractVideoDeep(
         html = await r.text();
       }
       if (isCloudflareBlock(html)) break;
-      if (url.includes("streamtape.com") || url.includes("streamtape.net") || url.includes("streamtape.to")) {
+      if (url.includes("streamtape.com") || url.includes("streamtape.net")) {
         const v = parseStreamtape(html); if (v) return v;
       }
       if (url.includes("streamwish") || url.includes("wishembed") || url.includes("embedwish") ||
@@ -7184,116 +7177,10 @@ async function awFetchEpDoc(animeId: string, epId: string): Promise<Record<strin
   } catch { return {}; }
 }
 
-// ── aw_links fast-path: يقرأ الروابط الدائمة من DB بدل Algolia+Firestore ──
-async function getAwLinksFromDB(
-  anilistId: number, ep: number,
-): Promise<UnifiedSource[]> {
-  try {
-    const rows = await sbSelect<{
-      server: string; link: string; quality: string; anime_id: string;
-    }>(
-      "aw_links",
-      { anilist_id: `eq.${anilistId}`, ep_number: `eq.${ep}` },
-      { columns: "server,link,quality,anime_id" },
-    );
-    if (!rows.length) return [];
-
-    const sources: UnifiedSource[] = [];
-    const seenUrls = new Set<string>();
-
-    for (const row of rows) {
-      const { server, link, quality } = row;
-      const q      = String(quality || "720p").replace(/p$/i, "p");
-      const qRank  = q === "1080p" ? 22 : q === "720p" ? 21 : q === "480p" ? 10 : 5;
-      const qLabel = q === "1080p" ? "FHD 1080p" : q === "720p" ? "HD 720p" : q;
-
-      if (server === "PD") {
-        const direct = awResolvePd(link);
-        if (!direct || seenUrls.has(direct)) continue;
-        seenUrls.add(direct);
-        sources.push({
-          name: `AnimeWitcher · ${qLabel} · PD`,
-          url: link, quality: q, qualityRank: qRank + 2,
-          site: "animewitcher",
-          directUrl: `/api/anime/video-proxy?url=${encodeURIComponent(direct)}&ref=${encodeURIComponent("https://pixeldrain.com/")}`,
-          directType: "mp4",
-        });
-
-      } else if (server === "MF" || server === "MF2") {
-        try {
-          const mfDirect = await extractMediafireDirect(link);
-          if (mfDirect && !seenUrls.has(mfDirect)) {
-            seenUrls.add(mfDirect);
-            sources.push({
-              name: `AnimeWitcher · ${qLabel} · ${server}`,
-              url: link, quality: q, qualityRank: qRank + 1,
-              site: "animewitcher",
-              directUrl: `/api/anime/video-proxy?url=${encodeURIComponent(mfDirect)}&ref=${encodeURIComponent("https://www.mediafire.com/")}`,
-              directType: "mp4",
-            });
-          }
-        } catch {}
-
-      } else if (server === "KF") {
-        try {
-          const kfDirect = await awResolveKf(link);
-          if (kfDirect && !seenUrls.has(kfDirect)) {
-            seenUrls.add(kfDirect);
-            sources.push({
-              name: `AnimeWitcher · ${qLabel} · KF`,
-              url: link, quality: q, qualityRank: qRank,
-              site: "animewitcher",
-              directUrl: `/api/anime/video-proxy?url=${encodeURIComponent(kfDirect)}&ref=${encodeURIComponent("https://krakenfiles.com/")}`,
-              directType: "mp4",
-              headers: { Referer: "https://krakenfiles.com/", Origin: "https://krakenfiles.com/" },
-            });
-          }
-        } catch {}
-
-      } else if (server === "VT") {
-        try {
-          const vtResult = await extractVideoDeep(link, link);
-          if (vtResult && !seenUrls.has(vtResult.url)) {
-            seenUrls.add(vtResult.url);
-            const directUrl = vtResult.type === "hls"
-              ? `/api/anime/hls-proxy?url=${encodeURIComponent(vtResult.url)}&ref=${encodeURIComponent(link)}`
-              : `/api/anime/video-proxy?url=${encodeURIComponent(vtResult.url)}&ref=${encodeURIComponent(link)}`;
-            sources.push({
-              name: `AnimeWitcher · ${qLabel} · VT`,
-              url: link, quality: q, qualityRank: qRank,
-              site: "animewitcher", directUrl, directType: vtResult.type,
-            });
-          }
-        } catch {}
-      }
-    }
-
-    if (sources.length) {
-      // تحديث verified_at في الخلفية
-      sbUpsert("aw_links",
-        rows.map(r => ({ ...r, anilist_id: anilistId, ep_number: ep, verified_at: new Date().toISOString() })),
-        ["anime_id", "ep_id", "server"],
-      ).catch(() => {});
-      console.log(`[AW-DB] ✅ ${sources.length} sources from DB for anilist=${anilistId} ep${ep}`);
-    }
-    return sources;
-  } catch (e: any) {
-    console.warn(`[AW-DB] DB lookup failed: ${e?.message}`);
-    return [];
-  }
-}
-
 async function getAnimeWitcherSources(
   title: string, english: string | null, ep: number, _anilistId?: number,
 ): Promise<UnifiedSource[]> {
   try {
-    // 0. Fast-path: ابحث في aw_links DB أولاً (بدل Algolia+Firestore)
-    if (_anilistId) {
-      const dbSources = await getAwLinksFromDB(_anilistId, ep);
-      if (dbSources.length) return dbSources;
-      console.log(`[AW-DB] miss for anilist=${_anilistId} ep${ep} — falling back to Algolia`);
-    }
-
     // 1. بحث Algolia بـ credentials جديدة (D8LH9I7ZL7) — تعمل مباشرة من VPS
     let animeId: string | null = null;
 
@@ -11582,7 +11469,6 @@ router.get("/anime/sources-stream", async (req, res) => {
   const reqNative   = ((req.query.native   as string) || "").trim() || null;
   const reqTotalEps = parseInt((req.query.episodes as string) || "0") || null;
   const titleAr     = ((req.query.titleAr  as string) || "").trim() || null;
-  const tgTmdbId    = ((req.query.tmdbId   as string) || "").trim() || null;
   const seasonNum   = extractSeasonNum(title) ?? extractSeasonNum(english || "") ?? null;
   const matchCtx: MatchCtx = {
     romaji: title, english, native: reqNative,
@@ -11623,38 +11509,6 @@ router.get("/anime/sources-stream", async (req, res) => {
     if (globalSeen.has(key)) return;
     globalSeen.add(key);
 
-    // ── TG Cache: أضف المصدر لقائمة التخزين إن كان مؤهَّلاً ──────────────
-    // فقط 3 جودات مسموحة: 1080p / 720p / 360p
-    // إذا كان directUrl هو proxy داخلي (/api/...) نستخرج الرابط الأصلي من ?url= param
-    // أو نستخدم s.url (الرابط الخارجي الخام)
-    let tgRawUrl: string | undefined;
-    if (s.directUrl && !s.directUrl.startsWith("/api/")) {
-      tgRawUrl = s.directUrl;
-    } else if (s.directUrl?.startsWith("/api/")) {
-      try {
-        const pu = new URL(s.directUrl, "http://x.com");
-        const decoded = decodeURIComponent(pu.searchParams.get("url") || "");
-        if (decoded.startsWith("http")) tgRawUrl = decoded;
-      } catch {}
-    }
-    // fallback: s.url إذا كان رابطاً خارجياً مباشراً
-    if (!tgRawUrl && s.url && s.url.startsWith("http") && !s.isEmbed) {
-      tgRawUrl = s.url;
-    }
-
-    if (anilistId && s.site && tgRawUrl && isTgCacheable(s.site, s.directType, tgRawUrl, s.quality)) {
-      enqueueTgDownload({
-        animeId:        anilistId,
-        ep,
-        title,
-        quality:        normalizeTgQuality(s.quality || "") || s.quality || "HD",
-        site:           s.site,
-        sourceUrl:      tgRawUrl,
-        injectSubtitle: s.site === "kawaii",
-        tmdbId:         tgTmdbId || undefined,
-      });
-    }
-
     /* استخراج Referer/Origin من رابط الـ proxy (ref= param) وتضمينهم في الاستجابة.
        هذا يتيح للعميل (ExoPlayer/AVPlayer) إرسال الـ headers الصحيحة مباشرةً للـ CDN
        حتى لو لم يكن هناك proxy يمر عبر الخادم. */
@@ -11690,13 +11544,6 @@ router.get("/anime/sources-stream", async (req, res) => {
   }, 28_000);
 
   try {
-    // ── TG Cache: بث المصادر المخزَّنة في تيليغرام فوراً ─────────────────
-    if (anilistId) {
-      getTgCachedSources(anilistId, ep).then(cached => {
-        for (const src of cached) sendSrc(src as UnifiedSource);
-      }).catch(() => {});
-    }
-
     const SCRAPER_MS = 7000;   // كان 12000 — تقليل وقت انتظار كل مصدر
     const EXTRACT_MS = 7000;   // كان 15000 — تقليل وقت الاستخراج العميق
     const race = <T>(p: Promise<T>, ms: number, fallback: T) =>
@@ -12293,10 +12140,27 @@ router.get("/anime/anslayer-latest", async (req, res) => {
       };
     }).filter((it: any) => it.animeId && it.episode);
 
-    // ── ملاحظة: الإشعارات تُرسَل حصراً عبر الـ scheduler في telegram.ts ──────
-    // (pollAnimeSlayerDirect يستخدم DB لتتبّع ما أُرسل ويتجنّب إغراق Telegram)
-    // لا تُضف notifyNewEpisode هنا — هذا الـ endpoint يُستدعى من العميل كل دقيقة
-    // وعند كل restart تكون _anslayerLatestCache فارغة فتبدو كل الحلقات "جديدة"
+    // ── إرسال الحلقات الجديدة لتيليجرام (فقط عند التحديث الفعلي) ──────────
+    if (items.length > 0) {
+      const prevKeys = new Set(
+        (_anslayerLatestCache || []).map((it: any) => `${it.animeId}:${it.episode}`)
+      );
+      const newItems = items.filter(
+        (it: any) => !prevKeys.has(`${it.animeId}:${it.episode}`)
+      );
+      for (const it of newItems) {
+        try {
+          await notifyNewEpisode(
+            it.animeId,
+            it.name,
+            it.episode,
+            it.cover || undefined,
+          );
+        } catch (tgErr: any) {
+          console.warn(`[anslayer-latest] telegram notify failed: ${(tgErr as any)?.message}`);
+        }
+      }
+    }
     _anslayerLatestCache = items;
     _anslayerLatestTs = Date.now();
     res.json({ items });
@@ -14175,10 +14039,6 @@ router.get("/anime/hls-proxy", async (req, res) => {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Headers", "Range");
 
-  // mobile=1 → redirect مباشر للـ M3U8 الأصلي
-  // ExoPlayer يجلب الـ manifest من CDN بـ IP الجهاز + Referer من PlayerSource.headers
-  if (req.query.mobile === "1") { res.redirect(307, url); return; }
-
   await serveHlsVPS(url, ref, res);
 });
 
@@ -14195,11 +14055,6 @@ router.get("/anime/video-proxy", async (req, res) => {
 
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Headers", "Range");
-
-  // mobile=1 → redirect مباشر للـ CDN بدل بث عبر VPS
-  // ExoPlayer يجلب الفيديو من CDN بـ IP الجهاز + Referer من PlayerSource.headers
-  // هذا يحلّ: timeout VPS، بطء البث، حجب CDN لـ IPs مراكز البيانات
-  if (req.query.mobile === "1") { res.redirect(307, url); return; }
 
   await serveMediaVPS(url, ref, req, res);
 });
@@ -15200,292 +15055,6 @@ router.get("/anime/new-episodes", async (req, res) => {
     console.warn("[new-episodes] error:", e.message);
     res.setHeader("Cache-Control", "public, max-age=60");
     res.json(_awNewEpsCache.items);
-  }
-});
-
-// ════════════════════════════════════════════════════════════════════
-//  AW Dubbed Section — كتالوج + حلقات + مصادر من aw_links (dubbed=true)
-//  يرتبط تلقائياً بـ aw_links: أي تحديث للاستيراد يظهر فوراً
-// ════════════════════════════════════════════════════════════════════
-
-let _awDubCatalogCache: { data: AwDubSeries[]; ts: number } | null = null;
-const AW_DUB_CATALOG_TTL = 6 * 60 * 60_000; // 6 ساعات
-
-interface AwDubSeries {
-  key: string; title: string; titleAr: string; poster: string;
-  story: string; year: string; rating: number;
-  seasons: Array<{ label: string; animeId: string }>;
-}
-
-function _awDubBaseTitle(name: string): string {
-  return name
-    .replace(/\s*Season\s*\d+\s*/gi, " ")
-    .replace(/\s+Dubbed?\s*/gi, " ")
-    .replace(/\s+\d+\s*$/, " ")
-    .replace(/\s+/g, " ").trim();
-}
-
-function _awDubSeasonLabel(name: string): string {
-  // أولاً: "Season N" صريح
-  const m1 = name.match(/Season\s*(\d+)/i);
-  if (m1) return `الموسم ${m1[1]}`;
-  // ثانياً: رقم 1-2 خانة فقط في نهاية الاسم (نتجنّب 4 خانات مثل سنة 2011)
-  const m2 = name.match(/\b([1-9]\d?)\s*(?:Dub(?:bed)?)?\s*$/i);
-  if (m2) return `الموسم ${m2[1]}`;
-  return "الموسم 1";
-}
-
-async function _fetchAwDubCatalog(): Promise<AwDubSeries[]> {
-  if (_awDubCatalogCache && Date.now() - _awDubCatalogCache.ts < AW_DUB_CATALOG_TTL)
-    return _awDubCatalogCache.data;
-
-  const res = await fetch(`${AW_FS_BASE}:runQuery`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      structuredQuery: {
-        from: [{ collectionId: "anime_list" }],
-        where: { fieldFilter: { field: { fieldPath: "dubbed" }, op: "EQUAL", value: { booleanValue: true } } },
-        limit: 600,
-      }
-    }),
-    signal: AbortSignal.timeout(15_000),
-  });
-  if (!res.ok) throw new Error(`aw-dubbed catalog: ${res.status}`);
-  const data = await res.json() as any[];
-
-  const groups = new Map<string, AwDubSeries>();
-  for (const d of data) {
-    if (!d?.document?.name) continue;
-    const f    = d.document.fields || {};
-    const animeId  = d.document.name.split("/").pop() || "";
-    const poster   = f.poster_uri?.stringValue
-                  ?? f.cover_uri?.stringValue
-                  ?? f.poster?.mapValue?.fields?.large?.stringValue
-                  ?? f.cover?.mapValue?.fields?.large?.stringValue
-                  ?? "";
-    const titleAr  = f.other_names?.arrayValue?.values?.[0]?.stringValue ?? "";
-    const story    = f.story?.stringValue ?? "";
-    const year     = f.details?.mapValue?.fields?.year?.stringValue ?? "";
-    const rating   = f.rating?.mapValue?.fields?.rate?.doubleValue ?? 0;
-    const base     = _awDubBaseTitle(animeId);
-    const label    = _awDubSeasonLabel(animeId);
-
-    if (!groups.has(base))
-      groups.set(base, { key: base, title: base, titleAr, poster, story, year, rating, seasons: [] });
-
-    const g = groups.get(base)!;
-    g.seasons.push({ label, animeId });
-    if (poster && !g.poster) g.poster = poster;
-    if (rating > g.rating)   { g.rating = rating; if (year) g.year = year; }
-  }
-
-  for (const g of groups.values())
-    g.seasons.sort((a, b) =>
-      (parseInt(a.label.replace(/\D+/g, "")) || 0) - (parseInt(b.label.replace(/\D+/g, "")) || 0)
-    );
-
-  // ─── استعادة البوسترات المحفوظة مسبقاً من Supabase ─────────────────────
-  await Promise.allSettled(
-    [...groups.values()].filter(g => !g.poster).map(async g => {
-      try {
-        const cached = await metaCacheGet(`aw_poster:${g.key}`);
-        if (cached?.data?.poster) g.poster = cached.data.poster;
-      } catch {}
-    })
-  );
-
-  // ─── TMDB + AniList fallback: أصناف لا تزال بدون بوستر ──────────────────
-  const missingPosters = [...groups.values()].filter(g => !g.poster);
-  if (missingPosters.length > 0) {
-    await Promise.allSettled(
-      missingPosters.map(async g => {
-        const q = g.title.replace(/\s*Dub(?:bed)?\s*/gi, "").trim();
-        let found: string | null = null;
-
-        // ① TMDB
-        try {
-          const r = await fetch(
-            `https://api.themoviedb.org/3/search/multi?api_key=${TMDB_KEY_ANIME}&query=${encodeURIComponent(q)}&language=ar`,
-            { signal: AbortSignal.timeout(5000) }
-          );
-          if (r.ok) {
-            const d = await r.json();
-            const path = d.results?.[0]?.poster_path;
-            if (path) found = `https://image.tmdb.org/t/p/w342${path}`;
-          }
-        } catch {}
-
-        // ② AniList (GraphQL — مجاني بدون مفتاح)
-        if (!found) {
-          try {
-            const gql = await fetch("https://graphql.anilist.co", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                query: `query($s:String){Media(search:$s,type:ANIME){coverImage{large}}}`,
-                variables: { s: q },
-              }),
-              signal: AbortSignal.timeout(5000),
-            });
-            if (gql.ok) {
-              const gd = await gql.json();
-              const img = gd?.data?.Media?.coverImage?.large;
-              if (img) found = img;
-            }
-          } catch {}
-        }
-
-        if (found) {
-          g.poster = found;
-          // احفظ في Supabase لتجنّب البحث عند كل تحميل
-          metaCacheSet(`aw_poster:${g.key}`, { poster: found }, 30 * 24 * 3600, "aw-poster-search").catch(() => {});
-        }
-      })
-    );
-  }
-
-  const result = [...groups.values()].sort((a, b) =>
-    b.rating - a.rating || a.title.localeCompare(b.title)
-  );
-  _awDubCatalogCache = { data: result, ts: Date.now() };
-  return result;
-}
-
-// ─── resolve sources لحلقة معينة من aw_links (by anime_id) ───────────────
-async function getAwDubSources(animeId: string, ep: number): Promise<UnifiedSource[]> {
-  const rows = await sbSelect<{ server: string; link: string; quality: string }>(
-    "aw_links",
-    { anime_id: `eq.${animeId}`, ep_number: `eq.${ep}` },
-    { columns: "server,link,quality" },
-  );
-  if (!rows.length) return [];
-
-  const sources: UnifiedSource[]  = [];
-  const seenUrls = new Set<string>();
-
-  await Promise.allSettled(rows.map(async ({ server, link, quality }) => {
-    const q       = String(quality || "720p").replace(/p$/i, "p");
-    const qRank   = q === "1080p" ? 22 : q === "720p" ? 21 : q === "480p" ? 10 : 5;
-    const qLabel  = q === "1080p" ? "FHD 1080p" : q === "720p" ? "HD 720p" : q;
-
-    if (server === "PD") {
-      const direct = awResolvePd(link);
-      if (!direct || seenUrls.has(direct)) return;
-      seenUrls.add(direct);
-      sources.push({
-        name: `AW·Dubbed · ${qLabel} · PD`, url: link, quality: q, qualityRank: qRank + 2,
-        site: "animewitcher",
-        directUrl: `/api/anime/video-proxy?url=${encodeURIComponent(direct)}&ref=${encodeURIComponent("https://pixeldrain.com/")}`,
-        directType: "mp4",
-      });
-
-    } else if (server === "MF" || server === "MF2") {
-      try {
-        const mfDirect = await extractMediafireDirect(link);
-        if (!mfDirect || seenUrls.has(mfDirect)) return;
-        seenUrls.add(mfDirect);
-        sources.push({
-          name: `AW·Dubbed · ${qLabel} · MF`, url: link, quality: q, qualityRank: qRank + 1,
-          site: "animewitcher",
-          directUrl: `/api/anime/video-proxy?url=${encodeURIComponent(mfDirect)}&ref=${encodeURIComponent("https://www.mediafire.com/")}`,
-          directType: "mp4",
-        });
-      } catch { /* skip */ }
-
-    } else if (server === "KF") {
-      try {
-        const kfDirect = await awResolveKf(link);
-        if (!kfDirect || seenUrls.has(kfDirect)) return;
-        seenUrls.add(kfDirect);
-        sources.push({
-          name: `AW·Dubbed · ${qLabel} · KF`, url: link, quality: q, qualityRank: qRank,
-          site: "animewitcher",
-          directUrl: `/api/anime/video-proxy?url=${encodeURIComponent(kfDirect)}&ref=${encodeURIComponent("https://krakenfiles.com/")}`,
-          directType: "mp4",
-          headers: { Referer: "https://krakenfiles.com/", Origin: "https://krakenfiles.com/" },
-        });
-      } catch { /* skip */ }
-
-    } else if (server === "VT") {
-      try {
-        const vtResult = await extractVideoDeep(link, link);
-        if (!vtResult || seenUrls.has(vtResult.url)) return;
-        seenUrls.add(vtResult.url);
-        const directUrl = vtResult.type === "hls"
-          ? `/api/anime/hls-proxy?url=${encodeURIComponent(vtResult.url)}&ref=${encodeURIComponent(link)}`
-          : `/api/anime/video-proxy?url=${encodeURIComponent(vtResult.url)}&ref=${encodeURIComponent(link)}`;
-        sources.push({
-          name: `AW·Dubbed · ${qLabel} · VT`, url: link, quality: q, qualityRank: qRank,
-          site: "animewitcher", directUrl, directType: vtResult.type,
-        });
-      } catch { /* skip */ }
-    }
-  }));
-
-  return sources.sort((a, b) => (b.qualityRank ?? 0) - (a.qualityRank ?? 0));
-}
-
-// ─── GET /api/aw-dubbed/catalog?page=N&q=search ──────────────────────────────
-router.get("/aw-dubbed/catalog", async (req: Request, res: Response) => {
-  try {
-    const q        = String(req.query.q   || "").trim().toLowerCase();
-    const page     = Math.max(1, parseInt(String(req.query.page || "1")) || 1);
-    const PAGE_SIZE = 36;
-    const all      = await _fetchAwDubCatalog();
-    const filtered = q
-      ? all.filter(s => s.title.toLowerCase().includes(q) || (s.titleAr || "").toLowerCase().includes(q))
-      : all;
-    const results  = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
-    res.setHeader("Cache-Control", "public, max-age=300");
-    res.json({ results, total: filtered.length, totalPages: Math.ceil(filtered.length / PAGE_SIZE), page });
-  } catch (e: any) {
-    res.status(500).json({ error: e.message });
-  }
-});
-
-// ─── GET /api/aw-dubbed/episodes?series=<animeId> ────────────────────────────
-router.get("/aw-dubbed/episodes", async (req: Request, res: Response) => {
-  const series = String(req.query.series || "").trim();
-  if (!series) { res.status(400).json({ error: "series required" }); return; }
-  try {
-    const rows = await sbSelect<{ ep_number: number }>(
-      "aw_links", { anime_id: `eq.${series}` }, { columns: "ep_number" },
-    );
-    const nums = [...new Set(rows.map((r: any) => Number(r.ep_number)))].sort((a, b) => a - b);
-    res.setHeader("Cache-Control", "public, max-age=300");
-    res.json({ episodes: nums.map(n => ({ number: n })) });
-  } catch (e: any) {
-    res.status(500).json({ error: e.message });
-  }
-});
-
-// ─── GET /api/aw-dubbed/watch-src?series=<animeId>&ep=N ──────────────────────
-router.get("/aw-dubbed/watch-src", async (req: Request, res: Response) => {
-  const series = String(req.query.series || "").trim();
-  const ep     = parseInt(String(req.query.ep || "1")) || 1;
-  if (!series) { res.status(400).json({ error: "series required" }); return; }
-  try {
-    const sources = await getAwDubSources(series, ep);
-    if (!sources.length) { res.status(404).json({ error: "no sources" }); return; }
-
-    // أفضل مصدر لكل جودة للـ picker
-    const allSources = sources.map(s => ({
-      quality: s.quality, name: s.name,
-      rawUrl: s.directType !== "hls" ? s.directUrl : null,
-      hlsUrl: s.directType === "hls" ? s.directUrl : null,
-    }));
-
-    const best = sources[0];
-    const isHls = best.directType === "hls";
-    res.json({
-      rawUrl:     isHls ? null : best.directUrl,
-      hlsUrl:     isHls ? best.directUrl : null,
-      quality:    best.quality || "720p",
-      allSources,
-    });
-  } catch (e: any) {
-    res.status(500).json({ error: e.message });
   }
 });
 

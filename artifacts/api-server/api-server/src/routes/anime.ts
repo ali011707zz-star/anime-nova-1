@@ -13,13 +13,6 @@ import {
   setSubtitleCache,
 } from "../lib/sourceCache.js";
 import { notifyNewEpisode } from "./telegram.js";
-import {
-  isTgCacheable,
-  enqueueTgDownload,
-  getTgCachedSources,
-  getTgCacheStatus,
-  cleanupStaleTgJobs,
-} from "../lib/telegramEpisodeCache.js";
 import { encryptProxyUrl, encryptParam, decryptParam, isEncrypted } from "../lib/security.js";
 import { sbSelect, sbUpsert } from "../lib/supabaseClient.js";
 import pg from "pg";
@@ -4296,15 +4289,7 @@ async function animeifyPost(base: string, token: string, path: string, body: URL
 }
 
 /** Extract a direct MediaFire download link from a serverId or full URL */
-// ── كاش CDN روابط MediaFire المستخرجة (تتغير كل بضع ساعات) ──
-const _mfDirectCache = new Map<string, { url: string; ts: number }>();
-const MF_DIRECT_TTL = 2 * 60 * 60_000; // ساعتان
-
 async function extractMediafireDirect(serverId: string): Promise<string | null> {
-  // تحقق من الكاش أولاً
-  const hit = _mfDirectCache.get(serverId);
-  if (hit && Date.now() - hit.ts < MF_DIRECT_TTL) return hit.url;
-
   try {
     const url = serverId.startsWith("http") ? serverId : `https://www.mediafire.com/file/${serverId}`;
     const r = await fetch(url, {
@@ -4323,9 +4308,7 @@ async function extractMediafireDirect(serverId: string): Promise<string | null> 
       (/class="[^"]*download[^"]*"[^>]*href="(https:\/\/[^"]+)"/.exec(html))?.[1] ||
       (/(https:\/\/download\d*[^"' \n<>]+)/.exec(html))?.[1] ||
       null;
-    const result = raw?.replace(/&amp;/g, "&") || null;
-    if (result) _mfDirectCache.set(serverId, { url: result, ts: Date.now() });
-    return result;
+    return raw?.replace(/&amp;/g, "&") || null;
   } catch { return null; }
 }
 
@@ -5952,76 +5935,10 @@ async function getAnimeKaiSources(
 // ════════════════════════════════════════════════════════════════════
 const AW_HF_BASE = "https://1we323-witcher.hf.space";
 
-async function buildAwSourcesFromDb(
-  rows: Array<{ server: string; quality: string; link: string }>,
-): Promise<UnifiedSource[]> {
-  const sources: UnifiedSource[] = [];
-
-  await Promise.all(rows.map(async ({ server, quality, link }) => {
-    const srvName = server.toUpperCase();
-    const q = quality || "720p";
-    const qRank = q === "1080p" ? 22 : q === "720p" ? 21 : q === "480p" ? 10 : 5;
-    const qLabel = q === "1080p" ? "FHD 1080p" : q === "720p" ? "HD 720p" : q;
-
-    if (srvName === "PD") {
-      const directUrl = `/api/anime/video-proxy?url=${encodeURIComponent(link)}&ref=${encodeURIComponent("https://pixeldrain.com/")}`;
-      sources.push({ name: `AnimeWitcher · ${qLabel} · PD`, url: link, quality: q, qualityRank: qRank, site: "animewitcher", directUrl, directType: "mp4" });
-
-    } else if (srvName === "MF") {
-      const directMp4 = await extractMediafireDirect(link);
-      if (directMp4) {
-        const directUrl = `/api/anime/video-proxy?url=${encodeURIComponent(directMp4)}&ref=https://www.mediafire.com/`;
-        sources.push({ name: `AnimeWitcher · ${qLabel} · MF`, url: link, quality: q, qualityRank: qRank, site: "animewitcher", directUrl, directType: "mp4" });
-      }
-
-    } else if (srvName === "ST") {
-      try {
-        const stHtml = await fetch(link, {
-          headers: { ...BASE_HDRS, Referer: "https://streamtape.com/" },
-          signal: AbortSignal.timeout(8000),
-        }).then(r => r.ok ? r.text() : "").catch(() => "");
-        const stResult = parseStreamtape(stHtml);
-        if (stResult) {
-          const directUrl = `/api/anime/video-proxy?url=${encodeURIComponent(stResult.url)}&ref=${encodeURIComponent("https://streamtape.com/")}`;
-          sources.push({ name: `AnimeWitcher · ${qLabel} · ST`, url: link, quality: q, qualityRank: qRank, site: "animewitcher", directUrl, directType: "mp4" });
-        }
-      } catch {}
-
-    } else if (srvName === "VT") {
-      try {
-        const vtResult = await extractVideoDeep(link, link);
-        if (vtResult) {
-          const directUrl = vtResult.type === "hls"
-            ? `/api/anime/hls-proxy?url=${encodeURIComponent(vtResult.url)}&ref=${encodeURIComponent(link)}`
-            : `/api/anime/video-proxy?url=${encodeURIComponent(vtResult.url)}&ref=${encodeURIComponent(link)}`;
-          sources.push({ name: `AnimeWitcher · ${qLabel} · VT`, url: link, quality: q, qualityRank: qRank, site: "animewitcher", directUrl, directType: vtResult.type });
-        }
-      } catch {}
-
-    }
-    // KF (KrakenFiles): غير قابل للتشغيل مباشرة في المتصفح — نتجاهله
-  }));
-
-  return sources;
-}
-
 async function getAnimeWitcherSources(
   title: string, english: string | null, ep: number, _anilistId?: number,
 ): Promise<UnifiedSource[]> {
   try {
-    // 0. DB lookup أولاً — تجنّب 3 API calls لـ HF Space إذا عندنا الروابط محلياً
-    if (_anilistId) {
-      const dbRows = await sbSelect<{ server: string; quality: string; link: string }>(
-        "aw_links",
-        { anilist_id: _anilistId, ep_number: ep },
-        { select: "server,quality,link", limit: 20 },
-      );
-      if (dbRows.length) {
-        const dbSources = await buildAwSourcesFromDb(dbRows);
-        if (dbSources.length) return dbSources;
-      }
-    }
-
     // 1. بحث بالعنوان — نحاول romaji أولاً ثم english
     const queries = [title, english].filter(Boolean) as string[];
     let animeId: string | null = null;
@@ -8650,23 +8567,6 @@ router.get("/anime/sources-stream", async (req, res) => {
       : checkUrl;
     if (globalSeen.has(key)) return;
     globalSeen.add(key);
-
-    // ── Telegram cache: طابور الحفظ الخلفي ─────────────────────────────
-    // Priority: animewitcher → animefay → anifox → sanime
-    // Fallback: kawaii مع حقن ترجمة عربية
-    if (anilistId && s.directUrl && isTgCacheable(s.site, s.directType, s.directUrl)) {
-      enqueueTgDownload({
-        animeId:        anilistId,
-        ep,
-        title:          title || english || "أنمي",
-        quality:        s.quality || "HD",
-        site:           s.site,
-        sourceUrl:      s.directUrl,                   // raw URL قبل التشفير
-        injectSubtitle: s.site === "kawaii",           // حقن ترجمة لـ KW فقط
-        // tmdbId يُحقن لاحقاً من lookup إن احتيج
-      });
-    }
-
     const toSend: UnifiedSource = {
       ...s,
       directUrl: s.directUrl ? encryptProxyUrl(s.directUrl) : s.directUrl,

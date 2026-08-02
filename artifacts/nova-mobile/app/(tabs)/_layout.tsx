@@ -84,23 +84,13 @@ export default function TabLayout() {
       <Tabs.Screen
         name="animations"
         options={{
-          href: null, // معطَّل كلياً بطلب المستخدم — لا يظهر ولا يُحمَّل
-        }}
-      />
-      <Tabs.Screen
-        name="aw-dubbed"
-        options={{
-          tabBarIcon: ({ color, focused }) => (
-            <TabIcon name={focused ? "film" : "film-outline"} label="أنيميشن" color={color} focused={focused} />
-          ),
+          href: null, // مخفي بطلب المستخدم — لا يظهر في شريط التنقل ولا يُحمَّل في الخلفية
         }}
       />
       <Tabs.Screen
         name="dubbed"
         options={{
-          tabBarIcon: ({ color, focused }) => (
-            <TabIcon name={focused ? "tv" : "tv-outline"} label="كرتون" color={color} focused={focused} />
-          ),
+          href: null,
         }}
       />
       <Tabs.Screen

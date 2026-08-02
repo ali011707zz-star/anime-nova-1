@@ -71,8 +71,7 @@ export default function DubbedDetailScreen() {
   };
 
   const renderEp = ({ item: ep }: { item: Episode }) => {
-    /* استخدم thumbnail الحلقة إن وُجد، وإلا استخدم بوستر المسلسل كـ fallback */
-    const thumb = thumbSrc(ep.thumbnail) || posterSrc;
+    const thumb = thumbSrc(ep.thumbnail);
     return (
       <Pressable
         onPress={() => openWatch(ep)}

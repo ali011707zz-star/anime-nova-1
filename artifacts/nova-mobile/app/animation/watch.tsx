@@ -108,17 +108,10 @@ function unwrapProxyUrl(
  * يضمن أن رابط الفيديو يمرّ عبر VPS proxy لضمان التوافق مع ExoPlayer/AVPlayer.
  * CDN كثيرة تحجب طلبات الأجهزة المحمولة الـ datacenter بدون Referer صحيح.
  */
-/** يضيف mobile=1 لـ video-proxy URLs حتى يرد VPS بـ 307 redirect بدل streaming كامل */
-function addMobileFlag(url: string): string {
-  if (!url.includes("/api/anime/video-proxy") && !url.includes("/api/animation/video-proxy")) return url;
-  if (url.includes("mobile=1")) return url;
-  return url + "&mobile=1";
-}
-
 function ensureVpsProxy(url: string, headers: Record<string, string> | undefined, base: string): string {
   if (!url) return url;
-  // بالفعل proxy عبر VPS — أضف mobile=1 لـ video-proxy فقط (ليس hls-proxy)
-  if (url.includes("/api/anime/") || url.includes("/api/animation/")) return addMobileFlag(url);
+  // بالفعل proxy عبر VPS
+  if (url.includes("/api/anime/") || url.includes("/api/animation/")) return url;
   // روابط embed (mega) — لا نلفّها
   if (url.includes("mega.nz") || url.includes("mega.co.nz")) return url;
   // LookMovie CDN — يعمل مباشرة من IP سكني مع Referer؛ يحجب VPS/datacenter
@@ -131,8 +124,7 @@ function ensureVpsProxy(url: string, headers: Record<string, string> | undefined
       : `${base}/api/anime/hls-proxy?url=${encodeURIComponent(url)}`;
   }
   if (ref) {
-    // mobile=1 → VPS يرسل 307 redirect بدل streaming عبر الخادم
-    return `${base}/api/anime/video-proxy?url=${encodeURIComponent(url)}&ref=${encodeURIComponent(ref)}&mobile=1`;
+    return `${base}/api/anime/video-proxy?url=${encodeURIComponent(url)}&ref=${encodeURIComponent(ref)}`;
   }
   return url;
 }

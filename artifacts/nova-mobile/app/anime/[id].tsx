@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import {
   View, Text, Pressable, Image, ScrollView,
   ActivityIndicator, StyleSheet, Platform, Modal,
@@ -166,14 +166,6 @@ export default function AnimeDetailScreen() {
   const topPad = Platform.OS === "web" ? 0 : insets.top;
   const { isFavorite, toggleFavorite } = useApp();
 
-  /* يمنع setState بعد unmount — الصفحة تُستبدَل عبر router.replace فتظل كائناتها في الذاكرة
-     لفترة قصيرة وأي fetch معلّق يُكمِل ويُطلق تحديثات حالة على مكوّن منفصل */
-  const isMountedRef = useRef(true);
-  useEffect(() => {
-    isMountedRef.current = true;
-    return () => { isMountedRef.current = false; };
-  }, []);
-
   const [anime, setAnime] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [showFull, setShowFull] = useState(false);
@@ -234,7 +226,6 @@ export default function AnimeDetailScreen() {
       body: JSON.stringify({ query: DETAIL_QUERY, variables: { id: parseInt(id) } }),
       signal: controller.signal,
     }).then(r => r.json()).then(data => {
-      if (!isMountedRef.current) return;
       const a = data.data?.Media;
       if (!a) { setLoadError(true); return; }
       setAnime(a);
@@ -244,12 +235,10 @@ export default function AnimeDetailScreen() {
       if (a?.description) {
         const cacheKey = `desc-ar-${id}`;
         AsyncStorage.getItem(cacheKey).then(cached => {
-          if (controller.signal.aborted) return;
           if (cached) { setDescAr(cached); return; }
           const stripped = stripHtml(a.description).substring(0, 500);
-          fetch(`${getBaseUrl()}/api/anime/translate?text=${encodeURIComponent(stripped)}`, { signal: controller.signal })
+          fetch(`${getBaseUrl()}/api/anime/translate?text=${encodeURIComponent(stripped)}`)
             .then(r2 => r2.json()).then(d2 => {
-              if (controller.signal.aborted) return;
               const t = d2.translated;
               if (t && t !== stripped && t.length > 10) {
                 setDescAr(t);
@@ -257,11 +246,11 @@ export default function AnimeDetailScreen() {
               } else {
                 setDescAr(stripped);
               }
-            }).catch(() => { if (!controller.signal.aborted) setDescAr(stripped); });
+            }).catch(() => { setDescAr(stripped); });
         });
       }
-    }).catch((e: any) => { if (e?.name !== "AbortError" && isMountedRef.current) setLoadError(true); })
-      .finally(() => { clearTimeout(timeoutId); if (isMountedRef.current) setLoading(false); });
+    }).catch(() => { setLoadError(true); })
+      .finally(() => { clearTimeout(timeoutId); setLoading(false); });
 
     AsyncStorage.getItem(`my-rating-${id}`).then(v => { if (v) setMyRating(parseInt(v)); });
     AsyncStorage.getItem(`saved-${id}`).then(v => { if (v === "1") setSaved(true); });
@@ -639,7 +628,7 @@ export default function AnimeDetailScreen() {
                 {related.map((e: any) => {
                   const n = e.node;
                   return (
-                    <Pressable key={n.id} onPress={() => router.replace(`/anime/${n.id}` as any)} style={d.relCard}>
+                    <Pressable key={n.id} onPress={() => router.push(`/anime/${n.id}`)} style={d.relCard}>
                       <View style={d.relImgWrap}>
                         {n.coverImage?.large ? (
                           <Image source={{ uri: n.coverImage.large }} style={d.relImg} />
@@ -674,7 +663,7 @@ export default function AnimeDetailScreen() {
                   const rec = n.mediaRecommendation;
                   if (!rec) return null;
                   return (
-                    <Pressable key={rec.id} onPress={() => router.replace(`/anime/${rec.id}` as any)} style={d.simCard}>
+                    <Pressable key={rec.id} onPress={() => router.push(`/anime/${rec.id}`)} style={d.simCard}>
                       <View style={d.simImgWrap}>
                         {rec.coverImage?.large ? (
                           <Image source={{ uri: rec.coverImage.large }} style={d.simImg} />

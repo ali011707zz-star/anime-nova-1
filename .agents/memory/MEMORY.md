@@ -1,5 +1,3 @@
-- [Shirayuki & Open-Anime-API](shirayuki-open-anime-api.md) — تحليل المستودعَين + خطة حل HLS موبايل (hls-to-fmp4 vs AnimHlsPlayer fallback) — مؤجّل.
-- [Telegram Cache Plan](telegram-cache-plan.md) — تخزين حلقات MP4 بكل الجودات في تيليغرام (قناة خاصة + بوت موجود)؛ أول مشاهدة عبر scraper + background upload؛ ترجمة منفصلة عن الفيديو.
 - [VPS Deployment](vps-deployment.md) — خادم 95.182.93.105 Ubuntu 24.04; Telegram webhook uses self-signed cert uploaded to Telegram API; CHANNEL_ID in .env + DB; token DB-only via config-sync.
 - [VPS-only deployment policy](vps-only-deployment-policy.md) — user explicitly forbids running/installing the app in Replit workspace; it runs only on the VPS via pm2. Replit is code-editing only; verify via SSH+pm2 logs, not local workflows.
 - [VPS manual deploy](vps-manual-deploy-2026-07.md) — app runs only on VPS via pm2, never on Replit; diff files vs VPS working copy before overwriting (VPS had unique unpushed commits); rebuild both frontend+backend after sync.
@@ -22,7 +20,6 @@
 - [Hidden-resolve embed sites](hidden-resolve-embed-sites.md) — 3 independent gates (isEmbed flag, backend SSE allowlist, mobile WEBVIEW_RESOLVE_SITES Set) must all list a site or its hidden-WebView extraction silently breaks.
 - [AnimeSlayer constants restored](anslayer-constants-restored.md) — ANSLAYER_BASE/CID/CSEC حُذفت من anime.ts وأُعيدت؛ لا تحذفها مجدداً.
 - [KW/AnimeSlayer/Cache fixes 2026-07-29](kawaii-anslayer-cache-fixes-2026-07-29.md) — KW: rawUrl مباشر بـ Referer؛ AnimeSlayer: parallel embeds+45s timeout (timeout 20s كان السبب)؛ cache DEFAULT_TTL 4h→2h + shouldRefresh 45→90min.
-- [Streamtape .to domain fix](streamtape-to-domain-fix.md) — extractVideoDeep كان يتجاهل .to؛ Pattern A أُعيد تصميمه مع URL validation صارم؛ static div tokens دائماً garbled.
 - [kawaii CDN Referer block](kawaii-cdn-referer-fix.md) — no-Referer=200, wrong-Referer=403; fix: v.referrerPolicy="no-referrer" in RiftPlayer; format=MP4 (not HLS); mobile works via explicit Referer.
 - [Source cleanup 2026-07-30](source-cleanup-2026-07-30.md) — animephoenix/witanime/blkom/anime3rb/nflixmovies حُذفت؛ hianime معطّل؛ vidbolt_anim كود محفوظ؛ admin.ts anime3rb routes أُزيلت.
 - [MovieBox H5-API verified](moviebox-h5api-verified.md) — h5-api.aoneroom.com يعمل من VPS؛ mobile API geo-blocked؛ subjectType 1=movie/2=series؛ movies se=0,ep=0؛ filter أُضيف لـ anime.ts+animation.ts.

@@ -56,7 +56,7 @@ const SITE_TAG: Record<string, string> = {
   animetime: "AT", animepahe: "AP", dulo_anim: "DL",
   faselhd_db: "FH",
   notorrent: "NO", sanime: "SA", anipm: "PM", anslayer: "AS",
-  akwam: "AQ", anifox: "FX",
+  akwam: "AQ",
 };
 
 /* ── اسم عرض لكل موقع في منتقي المصادر ── */
@@ -71,7 +71,7 @@ const SITE_LABEL: Record<string, string> = {
   anime4up2: "Anime4Up", mycima: "MyCima", topcinemaa: "TopCinema",
   faselhd_db: "FaselHD", animetime: "AnimeTime",
   notorrent: "Notorrent", sanime: "SAnime", anipm: "AniPm", anslayer: "AnimeSlayer",
-  akwam: "Akwam", anifox: "AniFox",
+  akwam: "Akwam",
 };
 function getSiteTag(site: string): string {
   return SITE_TAG[site] || site.slice(0, 2).toUpperCase();
@@ -95,7 +95,6 @@ const SITE_DESC: Record<string, string> = {
   notorrent: "IMDB · مصادر متعددة", sanime: "عربي مدبلج/مترجم · MP4",
   anslayer: "مشغلات خارجية · MixDrop/MediaFire",
   akwam: "عربي مترجم · MP4 مباشر",
-  anifox: "أرشيف · MP4/MediaFire متعدد",
 };
 function getSiteDesc(site: string): string {
   return SITE_DESC[site] || "";
@@ -182,22 +181,10 @@ function resolveUrl(url: string | undefined, base: string): string {
  * إذا كان الرابط بالفعل عبر /api/ → يتركه كما هو.
  * إذا كان رابطاً مباشراً للـ CDN → يلفّه في hls-proxy أو video-proxy.
  */
-/** يضيف mobile=1 لـ video-proxy و hls-proxy URLs حتى يرد VPS بـ 307 redirect بدل streaming كامل */
-function addMobileFlag(url: string): string {
-  const isProxy =
-    url.includes("/api/anime/video-proxy") ||
-    url.includes("/api/animation/video-proxy") ||
-    url.includes("/api/anime/hls-proxy") ||
-    url.includes("/api/animation/hls-proxy");
-  if (!isProxy) return url;
-  if (url.includes("mobile=1")) return url;
-  return url + "&mobile=1";
-}
-
 function ensureVpsProxy(url: string, headers: Record<string, string> | undefined, base: string): string {
   if (!url) return url;
-  // بالفعل proxy عبر VPS — أضف mobile=1 لـ video-proxy فقط (ليس hls-proxy)
-  if (url.includes("/api/anime/") || url.includes("/api/animation/")) return addMobileFlag(url);
+  // بالفعل proxy عبر VPS
+  if (url.includes("/api/anime/") || url.includes("/api/animation/")) return url;
   // روابط embed (mega / vidmoly) — لا نلفّها
   if (url.includes("mega.nz") || url.includes("mega.co.nz")) return url;
   if (url.includes("mp4upload")) return url;
@@ -211,8 +198,7 @@ function ensureVpsProxy(url: string, headers: Record<string, string> | undefined
       : `${base}/api/anime/hls-proxy?url=${encodeURIComponent(url)}`;
   }
   if (ref) {
-    // mobile=1 → VPS يرسل 307 redirect بدل streaming عبر الخادم (يوفّر bandwidth ويحلّ timeout)
-    return `${base}/api/anime/video-proxy?url=${encodeURIComponent(url)}&ref=${encodeURIComponent(ref)}&mobile=1`;
+    return `${base}/api/anime/video-proxy?url=${encodeURIComponent(url)}&ref=${encodeURIComponent(ref)}`;
   }
   return url; // لا Referer متاح — استخدم كما هو
 }
@@ -224,8 +210,9 @@ const SITE_PRIORITY: Record<string, number> = {
   kawaii: 100, animewitcher: 90,
   animeify: 85, sanime: 80,
   dulo_anim: 70, vidlink_anim: 55,
-  anifox: 40, vidfast: 35,
+  vidfast: 35,
   anikototv: 30, animekai: 25, animepahe: 20, anipm: 18,
+  sanime: 15,
 };
 
 /* ── قائمة المصادر (KW أولاً — الأولوية القصوى للتشغيل الفوري) ── */
@@ -574,16 +561,8 @@ export default function WatchScreen() {
   useEffect(() => {
     fetchSources();
     return () => {
-      /* إلغاء جميع الطلبات الجارية عند تغيير الحلقة أو إلغاء تحميل الشاشة */
       abortRef.current?.abort();
-      if (autoPlayTimerRef.current) { clearTimeout(autoPlayTimerRef.current); autoPlayTimerRef.current = null; }
-      /* تحرير الـ sets من الذاكرة فوراً — تجنّب تراكم URLs من حلقات سابقة */
-      seenKeys.current.clear();
-      inFlightSitesRef.current.clear();
-      fetchedSitesRef.current.clear();
-      /* إلغاء جميع background timers المعلّقة */
-      bgTimersRef.current.forEach(clearTimeout);
-      bgTimersRef.current = [];
+      if (autoPlayTimerRef.current) clearTimeout(autoPlayTimerRef.current);
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [anime, epNum]);
