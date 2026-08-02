@@ -7177,10 +7177,190 @@ async function awFetchEpDoc(animeId: string, epId: string): Promise<Record<strin
   } catch { return {}; }
 }
 
+// ════════════════════════════════════════════════════════════════════
+//  AnimeWitcher DB helpers — aw_links table (142k pre-loaded links)
+// ════════════════════════════════════════════════════════════════════
+
+interface AwLinkRow {
+  id?: number;
+  anime_id: string;
+  anime_name: string;
+  anilist_id: number | null;
+  ep_number: number;
+  ep_id: string;
+  server: string;
+  quality: string;
+  link: string;
+  imported_at: string;
+  verified_at?: string | null;
+}
+
+/** DB-first lookup: يبحث في aw_links بـ anilistId + ep_number — أسرع بـ ~10x من Algolia */
+async function awDbLookup(anilistId: number, ep: number): Promise<AwLinkRow[]> {
+  try {
+    return await sbSelect<AwLinkRow>("aw_links", {
+      "anilist_id": `eq.${anilistId}`,
+      "ep_number":  `eq.${ep}`,
+    }, { limit: 20 });
+  } catch { return []; }
+}
+
+/** DB lookup بالعنوان (fallback إذا لم يكن anilistId متاحاً) */
+async function awDbLookupByTitle(animeName: string, ep: number): Promise<AwLinkRow[]> {
+  try {
+    return await sbSelect<AwLinkRow>("aw_links", {
+      "anime_id":  `ilike.${animeName}`,
+      "ep_number": `eq.${ep}`,
+    }, { limit: 20 });
+  } catch { return []; }
+}
+
+/** حفظ روابط جديدة في aw_links (تحديث DB تلقائي بعد كل Algolia-hit) */
+async function awDbSaveLinks(
+  animeId: string,
+  animeName: string,
+  anilistId: number | undefined,
+  ep: number,
+  epId: string,
+  servers: Array<{ name: string; url: string; quality: string }>,
+): Promise<void> {
+  try {
+    for (const srv of servers) {
+      if (!srv.url) continue;
+      const srvName = srv.name.toUpperCase();
+      if (!["PD","KF","MF","MF2","ST","VT"].includes(srvName)) continue;
+      await sbUpsert("aw_links", {
+        anime_id:    animeId,
+        anime_name:  animeName,
+        anilist_id:  anilistId ?? null,
+        ep_number:   ep,
+        ep_id:       epId,
+        server:      srvName,
+        quality:     srv.quality || "720p",
+        link:        srv.url,
+        imported_at: new Date().toISOString(),
+      }, "anime_id,ep_number,server");
+    }
+  } catch (e: any) {
+    console.warn("[AW-DB] save error:", e?.message);
+  }
+}
+
+/** بناء UnifiedSources من صفوف aw_links (بدون Algolia/Firestore) */
+async function awBuildSourcesFromDb(rows: AwLinkRow[]): Promise<UnifiedSource[]> {
+  const sources: UnifiedSource[] = [];
+  const seenUrls = new Set<string>();
+
+  for (const row of rows) {
+    const srvName = row.server.toUpperCase();
+    const q      = String(row.quality || "720p");
+    const qRank  = q === "1080p" ? 22 : q === "720p" ? 21 : q === "480p" ? 10 : 5;
+    const qLabel = q === "1080p" ? "FHD 1080p" : q === "720p" ? "HD 720p" : q;
+
+    if (srvName === "PD") {
+      const direct = awResolvePd(row.link);
+      if (!direct || seenUrls.has(direct)) continue;
+      seenUrls.add(direct);
+      sources.push({
+        name: `AnimeWitcher · ${qLabel} · PD`,
+        url: row.link, quality: q, qualityRank: qRank + 2,
+        site: "animewitcher",
+        directUrl: `/api/anime/video-proxy?url=${encodeURIComponent(direct)}&ref=${encodeURIComponent("https://pixeldrain.com/")}`,
+        directType: "mp4",
+      });
+    } else if (srvName === "KF") {
+      try {
+        const kfDirect = await awResolveKf(row.link);
+        if (kfDirect && !seenUrls.has(kfDirect)) {
+          seenUrls.add(kfDirect);
+          sources.push({
+            name: `AnimeWitcher · ${qLabel} · KF`,
+            url: row.link, quality: q, qualityRank: qRank + 1,
+            site: "animewitcher",
+            directUrl: `/api/anime/video-proxy?url=${encodeURIComponent(kfDirect)}&ref=${encodeURIComponent("https://krakenfiles.com/")}`,
+            directType: "mp4",
+            headers: { Referer: "https://krakenfiles.com/", Origin: "https://krakenfiles.com/" },
+          });
+        }
+      } catch {}
+    } else if (srvName === "MF" || srvName === "MF2") {
+      try {
+        const mfDirect = await extractMediafireDirect(row.link);
+        if (mfDirect && !seenUrls.has(mfDirect)) {
+          seenUrls.add(mfDirect);
+          sources.push({
+            name: `AnimeWitcher · ${qLabel} · ${srvName}`,
+            url: row.link, quality: q, qualityRank: qRank + (srvName === "MF2" ? 1 : 0),
+            site: "animewitcher",
+            directUrl: `/api/anime/video-proxy?url=${encodeURIComponent(mfDirect)}&ref=${encodeURIComponent("https://www.mediafire.com/")}`,
+            directType: "mp4",
+          });
+        }
+      } catch {}
+    } else if (srvName === "ST") {
+      try {
+        const stHtml = await fetch(row.link, {
+          headers: { ...BASE_HDRS, Referer: "https://streamtape.com/" },
+          signal: AbortSignal.timeout(8_000),
+        }).then(r => r.ok ? r.text() : "").catch(() => "");
+        const stResult = parseStreamtape(stHtml);
+        if (stResult && !seenUrls.has(stResult.url)) {
+          seenUrls.add(stResult.url);
+          sources.push({
+            name: `AnimeWitcher · ${qLabel} · ST`,
+            url: row.link, quality: q, qualityRank: qRank,
+            site: "animewitcher",
+            directUrl: `/api/anime/video-proxy?url=${encodeURIComponent(stResult.url)}&ref=${encodeURIComponent("https://streamtape.com/")}`,
+            directType: "mp4",
+          });
+        }
+      } catch {}
+    } else if (srvName === "VT") {
+      try {
+        const vtResult = await extractVideoDeep(row.link, row.link);
+        if (vtResult && !seenUrls.has(vtResult.url)) {
+          seenUrls.add(vtResult.url);
+          const directUrl = vtResult.type === "hls"
+            ? `/api/anime/hls-proxy?url=${encodeURIComponent(vtResult.url)}&ref=${encodeURIComponent(row.link)}`
+            : `/api/anime/video-proxy?url=${encodeURIComponent(vtResult.url)}&ref=${encodeURIComponent(row.link)}`;
+          sources.push({
+            name: `AnimeWitcher · ${qLabel} · VT`,
+            url: row.link, quality: q, qualityRank: qRank,
+            site: "animewitcher", directUrl, directType: vtResult.type,
+          });
+        }
+      } catch {}
+    }
+  }
+  return sources;
+}
+
 async function getAnimeWitcherSources(
   title: string, english: string | null, ep: number, _anilistId?: number,
 ): Promise<UnifiedSource[]> {
   try {
+    // ── DB-first path: aw_links (142k pre-loaded) — أسرع بـ ~10x من Algolia ─
+    if (_anilistId) {
+      const dbRows = await awDbLookup(_anilistId, ep);
+      if (dbRows.length) {
+        console.log(`[AW] DB-hit: ${dbRows.length} rows for anilistId=${_anilistId} ep${ep}`);
+        const dbSources = await awBuildSourcesFromDb(dbRows);
+        if (dbSources.length) {
+          console.log(`[AW] ✅ DB-path: ${dbSources.length} sources`);
+          return dbSources;
+        }
+      }
+    }
+    // title fallback (بدون anilistId)
+    if (!_anilistId) {
+      const titleRows = await awDbLookupByTitle(title, ep);
+      if (titleRows.length) {
+        const titleSources = await awBuildSourcesFromDb(titleRows);
+        if (titleSources.length) return titleSources;
+      }
+    }
+
+    // ── Algolia → Firestore fallback (DB miss) ──────────────────────────────
     // 1. بحث Algolia بـ credentials جديدة (D8LH9I7ZL7) — تعمل مباشرة من VPS
     let animeId: string | null = null;
 
@@ -7340,6 +7520,13 @@ async function getAnimeWitcherSources(
     // BUNNY: محذوف 2026-07-28 — vz-*.b-cdn.net "Domain suspended or not configured"
 
     console.log(`[AW] ✅ ${sources.length} sources for "${animeId}" ep${ep}`);
+
+    // ── حفظ نتائج Algolia في DB تلقائياً (يُغني عن Algolia في المرة القادمة) ──
+    if (sources.length && rawServers.length) {
+      const animeName = animeId; // animeId = string title in AW
+      awDbSaveLinks(animeId, animeName, _anilistId, ep, epId!, rawServers).catch(() => {});
+    }
+
     return sources;
   } catch (e) {
     console.warn("[AW] getAnimeWitcherSources err:", e);
@@ -11815,17 +12002,20 @@ router.get("/anime/fetch-source", async (req, res) => {
   //    السكرابر لا يمر بأي موقع آخر إطلاقاً، نفس نظام قسم الأنيميشن (ANIM_SOURCE_ALLOWLIST).
   //    لإعادة التفعيل: احذف/عدّل ANIME_SOURCE_ALLOWLIST بالأسفل. ─────────────────
   const ANIME_SOURCE_ALLOWLIST: Set<string> | null = new Set([
-    "kawaii", "anslayer", "anineko", "anikoto", "animewitcher", "animeify",
-    "animekai",  // مُضاف بطلب المستخدم 2026-07-16
-    "anipub",    // مُضاف 2026-07-19 — AniPub/MegaPlay مدبلج+ترجمة+عربي
-    "sanime",    // مُضاف 2026-07-24 — MP4 مباشر عربي مدبلج
-    "anifox",    // ANIFOX 2.4.2 — Archive/MediaFire/MP4Upload/Uqload; Yandex filtered
-    // "akoam": حُذف 2026-07-28 — كان يستخدم hopxBrowserExtract (browser) على كل طلب
+    "kawaii",        // ⚡ الأسرع — DB-cached (50ms) ✅
+    "animewitcher",  // 🗄️ DB-first aw_links (142k) → Algolia fallback ✅
+    "anifox",        // 📦 12 مصدر — Archive/MediaFire/MP4Upload/Uqload ✅
+    "sanime",        // 🎌 MP4 مباشر عربي مدبلج ✅
+    // ── معطّلة 2026-08-02 بطلب المستخدم (تحسين التزامن) ──────────────────────
+    // "anslayer":   0 نتائج لكثير من الأنمي + بطيء (2s+)
+    // "anineko":    متوسط (3s) — معطّل
+    // "anikoto":    معطّل
+    // "animeify":   الأبطأ (5s) — معطّل
+    // "animekai":   معطّل
+    // "anipub":     معطّل
+    // ── مُعطَّلة سابقاً ─────────────────────────────────────────────────────
+    // "akoam": حُذف 2026-07-28 — كان يستخدم hopxBrowserExtract على كل طلب
     // "allmanga": معطّل 2026-07-17 — AA_CRYPTO_MISSING
-    // videasy_anim: نُقل بالكامل إلى قسم الأنيميشن بطلب المستخدم 2026-07-15
-    // xpass_anim: محذوف — CDN (ps1/vip.1x2.space) يحجب VPS 2026-07-15
-    // vaplayer_anim: محذوف من الأنمي — يُبقى فقط في الأنيميشن 2026-07-15
-    // faselhd_db/moviz_time: أُزيلت من القائمة — معطّلة بطلب المستخدم 2026-07-14
   ]);
   // الطلبات الداخلية (x-internal:1) تتجاوز القائمة لتسمح لـ animation.ts باستدعاء moviz_time وغيره
   const isInternalCall = req.headers["x-internal"] === "1";
@@ -12166,6 +12356,49 @@ router.get("/anime/anslayer-latest", async (req, res) => {
     res.json({ items });
   } catch (e: any) {
     res.json({ items: _anslayerLatestCache || [], error: e?.message });
+  }
+});
+
+// ════════════════════════════════════════════════════════════════════
+//  AW Latest  GET /api/anime/aw-latest
+//  أحدث الحلقات من aw_links (قاعدة AnimeWitcher) — 30 أنمي مرتبة بآخر import
+// ════════════════════════════════════════════════════════════════════
+let _awLatestCache: any[] | null = null;
+let _awLatestTs = 0;
+const AW_LATEST_TTL = 5 * 60_000; // 5 دقائق
+
+router.get("/anime/aw-latest", async (req, res) => {
+  try {
+    if (_awLatestCache && Date.now() - _awLatestTs < AW_LATEST_TTL) {
+      res.json({ items: _awLatestCache });
+      return;
+    }
+    // أحدث 500 صف مرتبة بـ imported_at DESC
+    const rows = await sbSelect<AwLinkRow>("aw_links", {
+      "order": "imported_at.desc",
+    }, { limit: 500, select: "anime_id,anime_name,anilist_id,ep_number,imported_at" });
+
+    // تجميع: أحدث حلقة لكل أنمي
+    const seen = new Map<string, AwLinkRow>();
+    for (const row of rows) {
+      if (!seen.has(row.anime_id)) seen.set(row.anime_id, row);
+    }
+    const items = Array.from(seen.values())
+      .sort((a, b) => new Date(b.imported_at).getTime() - new Date(a.imported_at).getTime())
+      .slice(0, 30)
+      .map(r => ({
+        animeId: r.anilist_id,
+        name:    r.anime_name || r.anime_id,
+        episode: r.ep_number,
+        cover:   r.anilist_id ? `https://img.anili.st/media/${r.anilist_id}` : "",
+        source:  "animewitcher",
+      }));
+
+    _awLatestCache = items;
+    _awLatestTs    = Date.now();
+    res.json({ items });
+  } catch (e: any) {
+    res.json({ items: _awLatestCache || [], error: e?.message });
   }
 });
 
@@ -15077,5 +15310,86 @@ router.get("/cfproxy/:endpoint", async (req: Request, res: Response) => {
     res.status(502).json({ error: `cfproxy: ${e.message}` });
   }
 });
+
+// ════════════════════════════════════════════════════════════════════
+//  AW Auto-Sync Scheduler — يحدّث aw_links بالحلقات الجديدة كل ساعتين
+//  يفحص 30 أنمي الأكثر نشاطاً (آخر imported_at) ويضيف حلقات جديدة
+// ════════════════════════════════════════════════════════════════════
+
+/** يزامن أنمي واحد: يجلب حلقاته من Firestore ويحفظ الجديدة في DB */
+async function awSyncAnime(
+  animeId: string, animeName: string, anilistId: number | null,
+): Promise<number> {
+  try {
+    // آخر ep_number في DB لهذا الأنمي
+    const existing = await sbSelect<{ ep_number: number }>("aw_links", {
+      "anime_id": `eq.${animeId}`,
+      "order":    "ep_number.desc",
+    }, { limit: 1, select: "ep_number" });
+    const lastInDb = existing[0]?.ep_number ?? 0;
+
+    // جلب قائمة الحلقات من Firestore
+    const episodes = await awFetchEpisodes(animeId);
+    const newEps   = episodes.filter(e => Math.round(e.num) > lastInDb);
+    if (!newEps.length) return 0;
+
+    let added = 0;
+    for (const ep of newEps) {
+      const epNum    = Math.round(ep.num);
+      const servers  = await awFetchServers(animeId, ep.id);
+      if (!servers.length) continue;
+      await awDbSaveLinks(animeId, animeName, anilistId ?? undefined, epNum, ep.id, servers);
+      added++;
+      await new Promise(r => setTimeout(r, 300)); // rate limit خفيف
+    }
+    return added;
+  } catch (e: any) {
+    console.warn(`[AW-SYNC] ${animeId}:`, e?.message);
+    return 0;
+  }
+}
+
+let _awSyncRunning = false;
+
+async function awAutoSync(): Promise<void> {
+  if (_awSyncRunning) return;
+  _awSyncRunning = true;
+  const start = Date.now();
+  try {
+    console.log("[AW-SYNC] بدء التزامن التلقائي...");
+
+    // الأنمي الأكثر نشاطاً (آخر 200 صف من aw_links → أحدث 30 أنمي فريد)
+    const recent = await sbSelect<{ anime_id: string; anime_name: string; anilist_id: number | null }>(
+      "aw_links",
+      { "order": "imported_at.desc" },
+      { limit: 200, select: "anime_id,anime_name,anilist_id" },
+    );
+    const seen   = new Set<string>();
+    const toSync: typeof recent = [];
+    for (const r of recent) {
+      if (!seen.has(r.anime_id)) { seen.add(r.anime_id); toSync.push(r); }
+      if (toSync.length >= 30) break;
+    }
+
+    let totalAdded = 0;
+    for (const item of toSync) {
+      const added = await awSyncAnime(item.anime_id, item.anime_name, item.anilist_id);
+      if (added > 0) {
+        console.log(`[AW-SYNC] ${item.anime_name}: +${added} حلقة جديدة`);
+        totalAdded += added;
+      }
+      await new Promise(r => setTimeout(r, 500));
+    }
+    console.log(`[AW-SYNC] انتهى في ${((Date.now()-start)/1000).toFixed(1)}s — +${totalAdded} حلقة إجمالاً`);
+  } catch (e: any) {
+    console.warn("[AW-SYNC] خطأ:", e?.message);
+  } finally {
+    _awSyncRunning = false;
+  }
+}
+
+// بدء التزامن بعد 3 دقائق من تشغيل السيرفر، ثم كل ساعتين
+setTimeout(() => awAutoSync().catch(() => {}), 3 * 60_000);
+setInterval(() => awAutoSync().catch(() => {}), 2 * 60 * 60_000);
 
 export default router;
