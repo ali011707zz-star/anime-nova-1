@@ -88,10 +88,18 @@ export default function TabLayout() {
         }}
       />
       <Tabs.Screen
+        name="aw-dubbed"
+        options={{
+          tabBarIcon: ({ color, focused }) => (
+            <TabIcon name={focused ? "film" : "film-outline"} label="أنيميشن" color={color} focused={focused} />
+          ),
+        }}
+      />
+      <Tabs.Screen
         name="dubbed"
         options={{
           tabBarIcon: ({ color, focused }) => (
-            <TabIcon name={focused ? "tv" : "tv-outline"} label="مدبلج" color={color} focused={focused} />
+            <TabIcon name={focused ? "tv" : "tv-outline"} label="كرتون" color={color} focused={focused} />
           ),
         }}
       />
