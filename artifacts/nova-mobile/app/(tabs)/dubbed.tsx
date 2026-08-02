@@ -3,6 +3,7 @@ import {
   View, Text, Pressable, TextInput, FlatList, Image,
   ActivityIndicator, StyleSheet, Platform, ScrollView,
 } from "react-native";
+import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
@@ -46,7 +47,11 @@ function SeriesCard({ s, onPress }: { s: Series; onPress: () => void }) {
             <Text style={{ fontSize: 24 }}>📺</Text>
           </View>
         )}
-        <View style={styles.cardGrad} />
+        <LinearGradient
+          colors={["transparent", "rgba(0,0,0,0.85)"]}
+          style={StyleSheet.absoluteFill}
+          pointerEvents="none"
+        />
         <View style={styles.cardLabel}>
           <Text style={styles.cardTitle} numberOfLines={2}>{s.title}</Text>
           {s.seasons.length > 1 && (
@@ -227,10 +232,6 @@ const styles = StyleSheet.create({
   card: { borderRadius: 12, overflow: "hidden" },
   cardPoster: { aspectRatio: 2 / 3, backgroundColor: "rgba(255,255,255,0.05)", borderRadius: 12, overflow: "hidden" },
   cardPlaceholder: { flex: 1, alignItems: "center", justifyContent: "center" },
-  cardGrad: {
-    ...StyleSheet.absoluteFillObject,
-    background: "linear-gradient(to top, rgba(0,0,0,0.85), transparent)",
-  },
   cardLabel: { position: "absolute", bottom: 0, left: 0, right: 0, padding: 6 },
   cardTitle: {
     color: "#fff", fontSize: 10, fontWeight: "700",

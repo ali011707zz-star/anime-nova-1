@@ -407,4 +407,191 @@ router.get("/dubbed/img", async (req, res) => {
   }
 });
 
+// ════════════════════════════════════════════════════════════════════════════
+// aw-dubbed routes — أنيميشن مدبلج (aw_links table in Supabase)
+// ════════════════════════════════════════════════════════════════════════════
+
+interface AwCatalogItem {
+  key: string;
+  title: string;
+  titleAr: string | null;
+  poster: string | null;
+  seasons: { label: string; animeId: string }[];
+}
+
+let _awCatalog: AwCatalogItem[] | null = null;
+let _awCatalogTs = 0;
+const AW_TTL = 2 * 60 * 60_000; // 2 ساعات
+let _awLoadPromise: Promise<AwCatalogItem[]> | null = null;
+
+function awPoster(anilistId: number | null | undefined): string | null {
+  if (!anilistId) return null;
+  return `https://img.anili.st/media/${anilistId}`;
+}
+
+async function buildAwCatalog(): Promise<AwCatalogItem[]> {
+  const SB_URL = (process.env.SUPABASE_URL || "").replace(/\/$/, "");
+  const SB_KEY = process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || "";
+  if (!SB_URL || !SB_KEY) return [];
+
+  const seen = new Map<string, { anime_name: string; anilist_id: number | null }>();
+  let offset = 0;
+  const batchSize = 1000;
+
+  while (true) {
+    try {
+      const url = `${SB_URL}/rest/v1/aw_links?select=anime_id,anime_name,anilist_id&order=anime_id.asc&limit=${batchSize}&offset=${offset}`;
+      const r = await fetch(url, {
+        headers: { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}` },
+        signal: AbortSignal.timeout(15000),
+      });
+      if (!r.ok) break;
+      const rows: { anime_id: string; anime_name: string; anilist_id: number | null }[] = await r.json();
+      if (!Array.isArray(rows) || !rows.length) break;
+
+      for (const row of rows) {
+        if (row.anime_id && !seen.has(row.anime_id)) {
+          seen.set(row.anime_id, { anime_name: row.anime_name || row.anime_id, anilist_id: row.anilist_id ?? null });
+        }
+      }
+
+      if (rows.length < batchSize) break;
+      offset += batchSize;
+    } catch { break; }
+  }
+
+  const items: AwCatalogItem[] = [];
+  for (const [anime_id, { anime_name, anilist_id }] of seen) {
+    items.push({
+      key: anime_id,
+      title: anime_name || anime_id,
+      titleAr: null,
+      poster: awPoster(anilist_id),
+      seasons: [{ label: "الحلقات", animeId: anime_id }],
+    });
+  }
+  items.sort((a, b) => a.title.localeCompare(b.title, "en-US"));
+  logger.info({ count: items.length }, "[aw-dubbed] catalog built");
+  return items;
+}
+
+async function getAwCatalog(): Promise<AwCatalogItem[]> {
+  if (_awCatalog && Date.now() - _awCatalogTs < AW_TTL) return _awCatalog;
+  if (_awLoadPromise) return _awLoadPromise;
+  _awLoadPromise = buildAwCatalog().then(c => {
+    _awCatalog = c;
+    _awCatalogTs = Date.now();
+    _awLoadPromise = null;
+    return c;
+  }).catch(() => { _awLoadPromise = null; return _awCatalog || []; });
+  return _awLoadPromise;
+}
+
+// دفء الكاش عند بدء السيرفر
+setTimeout(() => { getAwCatalog().catch(() => {}); }, 6000);
+
+const AW_PAGE_SIZE = 36;
+
+// ── GET /api/aw-dubbed/catalog?page=N&q=search ──
+router.get("/aw-dubbed/catalog", async (req, res) => {
+  const page = Math.max(1, parseInt(req.query.page as string || "1", 10) || 1);
+  const q = (req.query.q as string || "").trim().toLowerCase();
+  try {
+    let catalog = await getAwCatalog();
+    if (q.length >= 2) {
+      catalog = catalog.filter(s =>
+        s.title.toLowerCase().includes(q) ||
+        (s.titleAr && s.titleAr.toLowerCase().includes(q))
+      );
+    }
+    const totalPages = Math.max(1, Math.ceil(catalog.length / AW_PAGE_SIZE));
+    const results = catalog.slice((page - 1) * AW_PAGE_SIZE, page * AW_PAGE_SIZE);
+    res.setHeader("Cache-Control", "public, max-age=300");
+    res.json({ results, page, totalPages, total: catalog.length });
+  } catch {
+    res.status(502).json({ error: "failed to load catalog" });
+  }
+});
+
+// ── GET /api/aw-dubbed/episodes?series=anime_id ──
+router.get("/aw-dubbed/episodes", async (req, res) => {
+  const series = (req.query.series as string || "").trim();
+  if (!series) { res.json({ episodes: [] }); return; }
+
+  const SB_URL = (process.env.SUPABASE_URL || "").replace(/\/$/, "");
+  const SB_KEY = process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || "";
+  if (!SB_URL || !SB_KEY) { res.json({ episodes: [] }); return; }
+
+  try {
+    const url = `${SB_URL}/rest/v1/aw_links?select=ep_number&anime_id=eq.${encodeURIComponent(series)}&order=ep_number.asc&limit=2000`;
+    const r = await fetch(url, {
+      headers: { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}` },
+      signal: AbortSignal.timeout(10000),
+    });
+    if (!r.ok) { res.json({ episodes: [] }); return; }
+    const rows: { ep_number: number }[] = await r.json();
+    const seen = new Set<number>();
+    const episodes: { number: number }[] = [];
+    for (const row of rows) {
+      if (typeof row.ep_number === "number" && !seen.has(row.ep_number)) {
+        seen.add(row.ep_number);
+        episodes.push({ number: row.ep_number });
+      }
+    }
+    res.setHeader("Cache-Control", "public, max-age=1800");
+    res.json({ episodes });
+  } catch { res.json({ episodes: [] }); }
+});
+
+// ── GET /api/aw-dubbed/watch-src?series=anime_id&ep=N ──
+router.get("/aw-dubbed/watch-src", async (req, res) => {
+  const series = (req.query.series as string || "").trim();
+  const ep     = Math.max(1, parseInt(req.query.ep as string || "1", 10) || 1);
+  if (!series) { res.status(400).json({ error: "missing series" }); return; }
+
+  const SB_URL = (process.env.SUPABASE_URL || "").replace(/\/$/, "");
+  const SB_KEY = process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || "";
+  if (!SB_URL || !SB_KEY) { res.status(502).json({ error: "not configured" }); return; }
+
+  try {
+    const url = `${SB_URL}/rest/v1/aw_links?select=server,quality,link&anime_id=eq.${encodeURIComponent(series)}&ep_number=eq.${ep}&order=quality.desc&limit=30`;
+    const r = await fetch(url, {
+      headers: { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}` },
+      signal: AbortSignal.timeout(10000),
+    });
+    if (!r.ok) { res.status(502).json({ error: "db query failed" }); return; }
+    const rows: { server: string; quality: string; link: string }[] = await r.json();
+    if (!rows.length) { res.status(404).json({ error: "no sources found" }); return; }
+
+    function serverLabel(srv: string): string {
+      if (srv === "PD") return "Pixeldrain";
+      if (srv === "MF") return "Mediafire";
+      if (srv === "KF") return "KrakenFiles";
+      if (srv === "VT") return "Vidtape";
+      return srv;
+    }
+
+    function toPlayUrl(link: string, srv: string): string {
+      // Pixeldrain: /u/{id} → /api/file/{id} (direct stream)
+      if (srv === "PD" || link.includes("pixeldrain.com/u/")) {
+        const id = link.split("/u/").pop()?.split("?")[0];
+        if (id) return `https://pixeldrain.com/api/file/${id}`;
+      }
+      return link;
+    }
+
+    const allSources = rows.map(row => ({
+      quality: row.quality || "720p",
+      name:    `AW·Dubbed · ${serverLabel(row.server)}`,
+      rawUrl:  toPlayUrl(row.link, row.server),
+      hlsUrl:  null,
+    }));
+
+    res.setHeader("Cache-Control", "public, max-age=300");
+    res.json({ allSources, rawUrl: allSources[0]?.rawUrl ?? null, hlsUrl: null });
+  } catch (e: any) {
+    res.status(502).json({ error: String(e?.message || e) });
+  }
+});
+
 export default router;
