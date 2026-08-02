@@ -440,7 +440,7 @@ async function buildAwCatalog(): Promise<AwCatalogItem[]> {
 
   while (true) {
     try {
-      const url = `${SB_URL}/rest/v1/aw_links?select=anime_id,anime_name,anilist_id&order=anime_id.asc&limit=${batchSize}&offset=${offset}`;
+      const url = `${SB_URL}/rest/v1/aw_links?select=anime_id,anime_name,anilist_id&content_type=eq.dubbed&order=anime_id.asc&limit=${batchSize}&offset=${offset}`;
       const r = await fetch(url, {
         headers: { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}` },
         signal: AbortSignal.timeout(15000),
