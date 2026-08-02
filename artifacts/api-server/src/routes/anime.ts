@@ -15271,6 +15271,26 @@ async function _fetchAwDubCatalog(): Promise<AwDubSeries[]> {
       (parseInt(a.label.replace(/\D+/g, "")) || 0) - (parseInt(b.label.replace(/\D+/g, "")) || 0)
     );
 
+  // ─── TMDB fallback: أصناف بدون بوستر → ابحث في TMDB ──────────────────
+  const missingPosters = [...groups.values()].filter(g => !g.poster);
+  if (missingPosters.length > 0) {
+    await Promise.allSettled(
+      missingPosters.map(async g => {
+        try {
+          const q = g.title.replace(/\s*Dub(?:bed)?\s*/gi, "").trim();
+          const r = await fetch(
+            `https://api.themoviedb.org/3/search/multi?api_key=${TMDB_KEY_ANIME}&query=${encodeURIComponent(q)}&language=ar`,
+            { signal: AbortSignal.timeout(5000) }
+          );
+          if (!r.ok) return;
+          const d = await r.json();
+          const path = d.results?.[0]?.poster_path;
+          if (path) g.poster = `https://image.tmdb.org/t/p/w342${path}`;
+        } catch { /* تجاهل — لا يؤثر على باقي الكتالوج */ }
+      })
+    );
+  }
+
   const result = [...groups.values()].sort((a, b) =>
     b.rating - a.rating || a.title.localeCompare(b.title)
   );
