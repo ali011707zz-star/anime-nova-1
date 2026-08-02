@@ -282,53 +282,7 @@ export default function HomeScreen() {
 
               {/* TMDB Animation Movies — disabled */}
 
-
-              {/* ── Dubbed Cartoons Section ── */}
-              {dubbedSeries.length > 0 && (
-                <View style={{ marginBottom: 24 }}>
-                  <View style={styles.sectionHeader}>
-                    <View style={styles.sectionLeft}>
-                      <View style={[styles.sectionDot, { backgroundColor: "#f59e0b" }]} />
-                      <Text style={[styles.sectionTitle, { color: colors.text }]}>🎬 كرتون مدبلج عربي</Text>
-                    </View>
-                    <Pressable style={styles.seeAllBtn} onPress={() => router.push("/dubbed" as any)}>
-                      <Text style={[styles.seeAllText, { color: colors.primary }]}>عرض الكل</Text>
-                      <Ionicons name="chevron-back" size={13} color={colors.primary} />
-                    </Pressable>
-                  </View>
-                  <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 16, gap: 10 }}>
-                    {dubbedSeries.map((item: any, idx: number) => {
-                      const rawImg = item.image || item.poster || "";
-                      const imgUri = rawImg
-                        ? rawImg.startsWith("http") ? rawImg : `${BASE_URL}${rawImg}`
-                        : null;
-                      return (
-                        <Pressable
-                          key={item.key || item.id || idx}
-                          onPress={() => {
-                            const seasons = JSON.stringify(item.seasons || [{ label: "الحلقات", arabicToonsId: item.arabicToonsId }]);
-                            router.push({ pathname: "/dubbed/[id]" as any, params: { id: item.key || item.id || item.title, title: item.title, seasons, img: rawImg } });
-                          }}
-                          style={[todayStyles.card, { backgroundColor: colors.card, borderColor: colors.border }]}
-                        >
-                          {imgUri ? (
-                            <Image source={{ uri: imgUri }} style={todayStyles.img} resizeMode="cover" />
-                          ) : (
-                            <View style={[todayStyles.img, { backgroundColor: colors.card, alignItems: "center", justifyContent: "center" }]}>
-                              <Ionicons name="tv" size={28} color="rgba(255,255,255,0.2)" />
-                            </View>
-                          )}
-                          <LinearGradient colors={["transparent", "rgba(0,0,0,0.92)"]} style={todayStyles.grad}>
-                            <Text style={todayStyles.title} numberOfLines={2}>{item.title}</Text>
-                          </LinearGradient>
-                        </Pressable>
-                      );
-                    })}
-                  </ScrollView>
-                </View>
-              )}
-
-              {/* ── أنيميشن مدبلج (aw-dubbed) Section ── */}
+              {/* ── أنيميشن مدبلج (aw-dubbed) Section — فوق كرتون مدبلج ── */}
               {awDubbedSeries.length > 0 && (
                 <View style={{ marginBottom: 24 }}>
                   <View style={styles.sectionHeader}>
@@ -371,6 +325,51 @@ export default function HomeScreen() {
                           )}
                           <LinearGradient colors={["transparent", "rgba(0,0,0,0.92)"]} style={todayStyles.grad}>
                             <Text style={todayStyles.title} numberOfLines={2}>{item.titleAr || item.title}</Text>
+                          </LinearGradient>
+                        </Pressable>
+                      );
+                    })}
+                  </ScrollView>
+                </View>
+              )}
+
+              {/* ── Dubbed Cartoons Section ── */}
+              {dubbedSeries.length > 0 && (
+                <View style={{ marginBottom: 24 }}>
+                  <View style={styles.sectionHeader}>
+                    <View style={styles.sectionLeft}>
+                      <View style={[styles.sectionDot, { backgroundColor: "#f59e0b" }]} />
+                      <Text style={[styles.sectionTitle, { color: colors.text }]}>🎬 كرتون مدبلج عربي</Text>
+                    </View>
+                    <Pressable style={styles.seeAllBtn} onPress={() => router.push("/dubbed" as any)}>
+                      <Text style={[styles.seeAllText, { color: colors.primary }]}>عرض الكل</Text>
+                      <Ionicons name="chevron-back" size={13} color={colors.primary} />
+                    </Pressable>
+                  </View>
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 16, gap: 10 }}>
+                    {dubbedSeries.map((item: any, idx: number) => {
+                      const rawImg = item.image || item.poster || "";
+                      const imgUri = rawImg
+                        ? rawImg.startsWith("http") ? rawImg : `${BASE_URL}${rawImg}`
+                        : null;
+                      return (
+                        <Pressable
+                          key={item.key || item.id || idx}
+                          onPress={() => {
+                            const seasons = JSON.stringify(item.seasons || [{ label: "الحلقات", arabicToonsId: item.arabicToonsId }]);
+                            router.push({ pathname: "/dubbed/[id]" as any, params: { id: item.key || item.id || item.title, title: item.title, seasons, img: rawImg } });
+                          }}
+                          style={[todayStyles.card, { backgroundColor: colors.card, borderColor: colors.border }]}
+                        >
+                          {imgUri ? (
+                            <Image source={{ uri: imgUri }} style={todayStyles.img} resizeMode="cover" />
+                          ) : (
+                            <View style={[todayStyles.img, { backgroundColor: colors.card, alignItems: "center", justifyContent: "center" }]}>
+                              <Ionicons name="tv" size={28} color="rgba(255,255,255,0.2)" />
+                            </View>
+                          )}
+                          <LinearGradient colors={["transparent", "rgba(0,0,0,0.92)"]} style={todayStyles.grad}>
+                            <Text style={todayStyles.title} numberOfLines={2}>{item.title}</Text>
                           </LinearGradient>
                         </Pressable>
                       );
