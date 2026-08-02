@@ -99,6 +99,17 @@ export default function HomeScreen() {
     return () => { cancelled = true; };
   }, []);
 
+  /* ── أنيميشن مدبلج (aw-dubbed) catalog ── */
+  const [awDubbedSeries, setAwDubbedSeries] = useState<any[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`${BASE_URL}/api/aw-dubbed/catalog?page=1`)
+      .then(r => r.json())
+      .then(d => { if (!cancelled) setAwDubbedSeries((d.results || []).slice(0, 10)); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
+
 
   const trendingList = trending?.Page?.media || [];
   const popularList = popular?.Page?.media || [];

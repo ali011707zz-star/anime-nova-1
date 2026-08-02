@@ -168,6 +168,8 @@ interface Props {
   onFail?: () => void;
   topSlot?: React.ReactNode;
   bottomSlot?: React.ReactNode;
+  /** إخفاء زري قلب الشاشة والسكرين شوت (مفيد لمحتوى المدبلج) */
+  hideExtraButtons?: boolean;
 }
 
 type GT = "none" | "seek" | "volume" | "brightness";
@@ -211,6 +213,7 @@ export default function RiftPlayer({
   onSubtitleClick, onSubSettingsChange, onSubtitleOff,
   skipIntro, skipOutro, animeId, autoPlay, hlsHeaders,
   onBack, onPrevEp, onNextEp, onEpisodeSelect, onRealQuality, onTimeUpdate, onDuration, onFail,
+  hideExtraButtons = false,
 }: Props) {
 
   const videoRef     = useRef<HTMLVideoElement>(null);
@@ -1569,7 +1572,8 @@ export default function RiftPlayer({
                         )}
                       </button>
                     )}
-                    {/* Flip screen */}
+                    {/* Flip screen — مخفي في وضع hideExtraButtons */}
+                    {!hideExtraButtons && (
                     <button onClick={toggleRotation}
                       className="w-9 h-9 rounded-full flex items-center justify-center active:scale-90 transition-all duration-150"
                       style={isPortrait
@@ -1578,12 +1582,15 @@ export default function RiftPlayer({
                       <FlipScreenIcon className="w-[16px] h-[16px]"
                         style={{ color: isPortrait ? "#c4b5fd" : "rgba(255,255,255,0.65)" }} />
                     </button>
-                    {/* Screenshot */}
+                    )}
+                    {/* Screenshot — مخفي في وضع hideExtraButtons */}
+                    {!hideExtraButtons && (
                     <button onClick={takeScreenshot}
                       className="w-9 h-9 rounded-full flex items-center justify-center active:scale-90 transition-all duration-150"
                       style={{ background: "rgba(255,255,255,0.10)", border: "1px solid rgba(255,255,255,0.15)" }}>
                       <Camera className="w-[15px] h-[15px] text-white/65" />
                     </button>
+                    )}
                     {/* Close */}
                     <button onClick={onBack}
                       className="w-9 h-9 rounded-full flex items-center justify-center active:scale-90 transition-all duration-150"

@@ -235,6 +235,7 @@ export default function Home() {
   const [animationMovies, setAnimationMovies] = useState<any[]>([]);
   const [spring2026, setSpring2026] = useState<any[]>([]);
   const [dubbedCards, setDubbedCards] = useState<any[]>([]);
+  const [awCards,     setAwCards]     = useState<any[]>([]);
   const [todayEps, setTodayEps] = useState<any[]>(_cachedTodayEps || []);
   const [todayChecking, setTodayChecking] = useState(false);
 
@@ -262,6 +263,14 @@ export default function Home() {
     fetch(API_BASE + "/api/dubbed/catalog?page=1")
       .then(r => r.json())
       .then(d => setDubbedCards((d.results || d.items || []).slice(0, 8)))
+      .catch(() => {});
+  }, []);
+
+  /* Load أنيميشن مدبلج (aw-dubbed) cards for Home section */
+  useEffect(() => {
+    fetch(API_BASE + "/api/aw-dubbed/catalog?page=1")
+      .then(r => r.json())
+      .then(d => setAwCards((d.results || []).slice(0, 8)))
       .catch(() => {});
   }, []);
 
@@ -894,6 +903,53 @@ export default function Home() {
           )}
 
         </div>
+      )}
+
+      {/* ── قسم أنيميشن مدبلج (aw-dubbed) ── */}
+      {!selectedGenre && (
+      <div className="mt-5">
+        <div className="flex items-center justify-between px-4 mb-2.5">
+          <div className="flex items-center gap-2">
+            <div className="w-7 h-7 rounded-xl flex items-center justify-center shrink-0" style={{ background: "linear-gradient(135deg,#10b981,#06b6d4)" }}>
+              <Film className="w-3.5 h-3.5 text-white" />
+            </div>
+            <div>
+              <h2 className="text-[13px] font-black font-['Cairo'] text-white leading-none">أنيميشن مدبلج 🎬</h2>
+              <p className="text-[9px] text-white/25 font-['Cairo'] mt-0.5">أنيميشن مدبلج بالعربية</p>
+            </div>
+          </div>
+          <Link href="/aw-dubbed">
+            <button className="text-[10px] text-cyan-400/80 font-black font-['Cairo'] flex items-center gap-0.5 bg-cyan-500/8 px-2.5 py-1 rounded-xl border border-cyan-500/15">
+              عرض الكل <ChevronLeft className="w-3 h-3" />
+            </button>
+          </Link>
+        </div>
+        <div className="flex gap-3 overflow-x-auto pb-1 px-4" style={{ scrollbarWidth: "none" }}>
+          {awCards.length > 0 ? awCards.map((c: any, i: number) => {
+            const imgSrc = c.poster || null;
+            const toDetail = `/aw-dubbed/${encodeURIComponent(c.key)}?title=${encodeURIComponent(c.title)}&seasons=${encodeURIComponent(JSON.stringify(c.seasons || []))}&img=${encodeURIComponent(c.poster || "")}`;
+            return (
+              <Link key={i} href={toDetail}>
+                <motion.div whileTap={{ scale: 0.92 }} className="shrink-0 w-[110px] cursor-pointer">
+                  <div className="relative w-[110px] h-[158px] rounded-2xl overflow-hidden bg-[#18181B] border border-white/[0.08] shadow-lg shadow-black/50">
+                    {imgSrc
+                      ? <img src={imgSrc} alt={c.title} className="w-full h-full object-cover" loading="lazy"
+                          onError={e => { (e.target as HTMLImageElement).style.display = "none"; }} />
+                      : <div className="w-full h-full bg-cyan-900/20 flex items-center justify-center"><Film className="w-8 h-8 text-cyan-600/30" /></div>
+                    }
+                    <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/15 to-transparent" />
+                    <div className="absolute bottom-0 left-0 right-0 px-2 pb-2">
+                      <p className="text-[9px] text-white/90 font-bold line-clamp-2 leading-tight">{c.titleAr || c.title}</p>
+                    </div>
+                  </div>
+                </motion.div>
+              </Link>
+            );
+          }) : Array.from({ length: 5 }).map((_, i) => (
+            <div key={i} className="shrink-0 w-[110px] h-[158px] rounded-2xl bg-white/4 border border-white/6 animate-pulse" />
+          ))}
+        </div>
+      </div>
       )}
 
       {/* ── قسم الكرتون المدبلج ── */}

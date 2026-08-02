@@ -310,6 +310,7 @@ export default function AwDubbedWatch() {
         serverCount={allSources.length}
         serverIndex={selIdx}
         poster={posterUrl || undefined}
+        hideExtraButtons={true}
         onTimeUpdate={handleTimeUpdate}
         onBack={() => {
           // العودة للـ picker إذا يوجد أكثر من مصدر
