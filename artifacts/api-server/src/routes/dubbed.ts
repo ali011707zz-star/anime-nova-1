@@ -28,6 +28,26 @@ function _dcSet(key: string, data: any): void {
 }
 
 const SC_BASE = "https://starcima.com";
+
+// ── Mediafire CDN resolver (module-level with TTL cache) ──────────────────────
+const _mfCdnCache = new Map<string, { url: string; exp: number }>();
+
+async function resolveMfUrl(link: string): Promise<string | null> {
+  const cached = _mfCdnCache.get(link);
+  if (cached && cached.exp > Date.now()) return cached.url;
+  try {
+    const r = await fetch(link, {
+      headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" },
+      signal: AbortSignal.timeout(8000),
+    });
+    if (!r.ok) return null;
+    const html = await r.text();
+    const m = html.match(/href="(https:\/\/download\d*\.mediafire\.com\/[^"]+)"/);
+    const cdnUrl = m?.[1] ?? html.match(/id="downloadButton"[^>]+href="([^"]+)"/)?.[1] ?? null;
+    if (cdnUrl) _mfCdnCache.set(link, { url: cdnUrl, exp: Date.now() + 3 * 60_000 }); // 3min
+    return cdnUrl;
+  } catch { return null; }
+}
 const AT_BASE = "https://www.arabic-toons.com";
 const CF_PROXY_BASE = "http://localhost:8000";
 const BROWSER_UA =
@@ -630,25 +650,6 @@ router.get("/aw-dubbed/watch-src", async (req, res) => {
       return srv;
     }
 
-    /** استخراج رابط التنزيل المباشر من صفحة Mediafire */
-    async function resolveMfUrl(link: string): Promise<string | null> {
-      try {
-        const r = await fetch(link, {
-          headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" },
-          signal: AbortSignal.timeout(8000),
-        });
-        if (!r.ok) return null;
-        const html = await r.text();
-        // رابط التنزيل المباشر في زر "Download File"
-        const m = html.match(/href="(https:\/\/download\d*\.mediafire\.com\/[^"]+)"/);
-        if (m) return m[1];
-        // نمط بديل
-        const m2 = html.match(/id="downloadButton"[^>]+href="([^"]+)"/);
-        if (m2) return m2[1];
-        return null;
-      } catch { return null; }
-    }
-
     /** لفّ رابط مباشر عبر video-proxy حتى يلتقطه RiftPlayer isDirect branch */
     function wrapProxy(directUrl: string): string {
       return `/api/anime/video-proxy?url=${encodeURIComponent(directUrl)}&ref=${encodeURIComponent("https://animenovaa.duckdns.org")}`;
@@ -658,16 +659,16 @@ router.get("/aw-dubbed/watch-src", async (req, res) => {
     async function toPlayUrl(link: string, srv: string): Promise<string | null> {
       // KrakenFiles — كل الروابط 404 (محذوفة) → تخطي
       if (srv === "KF") return null;
-      // Pixeldrain: /u/{id} → /api/file/{id} عبر video-proxy
+      // Pixeldrain: رابط مباشر — RiftPlayer يتعامل معه عبر CORS_DIRECT_CDN (لا حاجة لـ proxy)
       if (srv === "PD" || link.includes("pixeldrain.com/u/")) {
         const id = link.split("/u/").pop()?.split("?")[0];
-        if (id) return wrapProxy(`https://pixeldrain.com/api/file/${id}`);
+        if (id) return `https://pixeldrain.com/api/file/${id}`;
       }
-      // Mediafire: استخراج رابط CDN المباشر ثم تمريره عبر video-proxy
+      // Mediafire: لا نحلّ رابط CDN الآن (ينتهي صلاحيته) — نُمرّر صفحة MF عبر mf-stream
+      // الـ endpoint يحلّ الرابط وقت التشغيل الفعلي مع TTL cache
       if (srv === "MF" || srv === "MF2" || link.includes("mediafire.com")) {
-        const cdnUrl = await resolveMfUrl(link);
-        if (!cdnUrl) return null;
-        return wrapProxy(cdnUrl);
+        if (!link.includes("mediafire.com")) return null;
+        return `/api/aw-dubbed/mf-stream?link=${encodeURIComponent(link)}`;
       }
       return wrapProxy(link);
     }
@@ -696,6 +697,45 @@ router.get("/aw-dubbed/watch-src", async (req, res) => {
     res.json({ allSources, rawUrl: allSources[0]?.rawUrl ?? null, hlsUrl: null });
   } catch (e: any) {
     res.status(502).json({ error: String(e?.message || e) });
+  }
+});
+
+// ── mf-stream: يحلّ رابط Mediafire CDN وقت التشغيل ويبثّ الفيديو ────────────
+// لا نحلّ رابط CDN عند scrape (ينتهي صلاحيته) — نؤجّل الحلّ لطلب التشغيل الفعلي
+router.get("/aw-dubbed/mf-stream", async (req, res) => {
+  const link = (req.query.link as string || "").trim();
+  if (!link || !link.includes("mediafire.com")) {
+    res.status(400).json({ error: "invalid mediafire link" }); return;
+  }
+
+  const cdnUrl = await resolveMfUrl(link);
+  if (!cdnUrl) { res.status(502).json({ error: "تعذّر استخراج رابط Mediafire" }); return; }
+
+  const hdrs: Record<string, string> = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+    "Accept": "video/mp4,video/*,*/*;q=0.8",
+  };
+  const range = req.headers.range;
+  if (range) hdrs["Range"] = range;
+
+  try {
+    const r = await fetch(cdnUrl, { headers: hdrs, signal: AbortSignal.timeout(30000) });
+
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Access-Control-Allow-Headers", "Range");
+    res.setHeader("Content-Type", r.headers.get("content-type") || "video/mp4");
+    const cl = r.headers.get("content-length"); if (cl) res.setHeader("Content-Length", cl);
+    const cr = r.headers.get("content-range");  if (cr) res.setHeader("Content-Range", cr);
+    const ar = r.headers.get("accept-ranges");  if (ar) res.setHeader("Accept-Ranges", ar);
+    res.status(r.status);
+
+    if (!r.body) { res.end(); return; }
+    const { Readable } = await import("node:stream");
+    const nodeStream = Readable.fromWeb(r.body as any);
+    nodeStream.pipe(res);
+    req.on("close", () => nodeStream.destroy());
+  } catch (e: any) {
+    if (!res.headersSent) res.status(502).json({ error: String(e?.message) });
   }
 });
 

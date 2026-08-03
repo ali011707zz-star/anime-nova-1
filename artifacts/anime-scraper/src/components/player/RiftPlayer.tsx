@@ -495,10 +495,13 @@ export default function RiftPlayer({
 
     const isDirect = src.includes("streamtape.com") || src.includes("sendvid.com")
       || src.includes("videos2.sendvid.com") || src.includes("video-proxy?")
+      || src.includes("/aw-dubbed/mf-stream?")
       || src.includes("workers.dev")
       || /\.(mp4|mkv|webm)([?#]|$)/i.test(src);
     if (isDirect) {
-      const px = src.includes("video-proxy?") ? src
+      // روابط proxy الجاهزة تُستخدم مباشرةً بدون إعادة تغليف
+      const isPreProxied = src.includes("video-proxy?") || src.includes("/aw-dubbed/mf-stream?");
+      const px = isPreProxied ? src
         : `/api/anime/video-proxy?url=${encodeURIComponent(src)}&ref=${encodeURIComponent(src)}`;
       v.src = px; v.load();
       let done = false;
