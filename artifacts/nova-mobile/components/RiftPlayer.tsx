@@ -627,17 +627,21 @@ export function RiftPlayer({
     if (initialPosition && initialPosition > 5) {
       try { p.currentTime = initialPosition; } catch {}
     }
-    /* Buffer tuning — reduces initial delay + stutter
-       iOS: start immediately without waiting for large buffer
-       Android ExoPlayer: 3s min buffer before playback starts */
+    /* Buffer tuning — يوازن بين سرعة البدء وتجنب native crash من OOM
+       ⚠️ bufferForPlaybackMs=150 كان يُسبّب crash فوري في ExoPlayer على بعض
+          الأجهزة لأنه يحاول decode الفيديو قبل أن يجمع Media3 بيانات كافية.
+       ⚠️ maxBufferMs=30000 كان يُسبّب OOM على الأجهزة منخفضة الذاكرة.
+       ⚠️ backBufferDurationMs غير محدّد → يبقي ExoPlayer 30ث من المحتوى
+          المُشغَّل في الذاكرة → يُضاعف استهلاك الذاكرة. */
     try {
       (p as any).bufferOptions = {
-        preferredForwardBufferDuration: 12, // iOS: مسبق 12ث لتجنب الانقطاع
+        preferredForwardBufferDuration: 10, // iOS: مسبق 10ث (كافٍ وآمن)
         waitsToMinimizeStalling: false,     // iOS: ابدأ فوراً بدون انتظار
-        minBufferMs: 1000,                  // Android: ابدأ بعد 1ث فقط (أسرع)
-        maxBufferMs: 30000,                 // Android: احتفظ بـ30ث في الذاكرة
-        bufferForPlaybackMs: 150,           // Android: ابدأ بعد 0.15ث (أسرع بدء)
-        bufferForPlaybackAfterRebufferMs: 1200, // Android: استأنف بعد 1.2ث
+        minBufferMs: 2000,                  // Android: ابدأ بعد 2ث (آمن للـ codec)
+        maxBufferMs: 15000,                 // Android: 15ث كافٍ ← يقلل OOM
+        bufferForPlaybackMs: 1500,          // Android: ابدأ بعد 1.5ث ← يمنع crash
+        bufferForPlaybackAfterRebufferMs: 2000, // Android: استأنف بعد 2ث
+        backBufferDurationMs: 5000,         // Android: احتفظ بـ5ث فقط خلف ← يقلل OOM
       };
     } catch {}
   });
@@ -771,9 +775,14 @@ export function RiftPlayer({
     return () => {
       sub1.remove();
       sub2.remove();
-      if (loadTimeoutRef.current) { clearTimeout(loadTimeoutRef.current); loadTimeoutRef.current = null; }
+      /* ⚠️ لا نُلغي loadTimeoutRef هنا — هذا الـ effect يُعاد تشغيله عند تغيير
+         playableSources (وصول مصادر جديدة من الخلفية). إلغاء الـ timeout هنا
+         كان يُزيل الحماية من الـ black-screen بينما المشغّل لا يزال في loading.
+         الـ timeout يُلغى فقط في: Master cleanup (unmount) أو statusChange نفسه. */
     };
-  }, [player, initialPosition, playableSources, srcIdx]); // eslint-disable-line
+  }, [player, initialPosition, srcIdx]); // eslint-disable-line
+  /* ✅ أُزيل playableSources من deps — كان يُعيد تسجيل الـ listeners عند كل وصول
+     مصدر جديد مما يُلغي loadTimeoutRef الجاري ويُعطّل حماية الـ black-screen. */
 
   /* ─── Auto-advance on error ─── */
   const consecutiveErrorsRef = useRef(0);
@@ -786,11 +795,16 @@ export function RiftPlayer({
      (الدالة الـ inline في watch.tsx تتغير مرجعاً عند كل render وهذا يلغي timeout التبديل) */
   const onErrorRef = useRef(onError);
   useEffect(() => { onErrorRef.current = onError; }, [onError]);
+  /* ref دائم لـ playableSources.length — يتحدث دائماً بدون إعادة تشغيل أي effect */
+  const playableCountRef = useRef(playableSources.length);
+  useEffect(() => { playableCountRef.current = playableSources.length; }, [playableSources.length]);
 
   useEffect(() => {
     if (!error) { consecutiveErrorsRef.current = 0; setIsAutoCycling(false); return; }
     if (!aliveRef.current) return;
-    if (playableSources.length <= 1) {
+    /* نقرأ الطول من ref — يعكس القيمة الأحدث دون إعادة تشغيل هذا الـ effect */
+    const curLen = playableCountRef.current;
+    if (curLen <= 1) {
       setIsAutoCycling(false);
       if (!terminalErrorRef.current) {
         terminalErrorRef.current = true;
@@ -801,7 +815,7 @@ export function RiftPlayer({
     consecutiveErrorsRef.current += 1;
     /* لا تدور في حلقة — جرّب المصادر التالية بحد أقصى MAX_SOURCE_CYCLES */
     const nextIdx = srcIdx + 1;
-    if (nextIdx >= playableSources.length || consecutiveErrorsRef.current >= MAX_SOURCE_CYCLES) {
+    if (nextIdx >= curLen || consecutiveErrorsRef.current >= MAX_SOURCE_CYCLES) {
       setIsAutoCycling(false); // كل المصادر جُرِّبت أو وصلنا للحد الأقصى
       if (!terminalErrorRef.current) {
         terminalErrorRef.current = true;
@@ -812,7 +826,10 @@ export function RiftPlayer({
     setIsAutoCycling(true); // suppress full error UI — show silent loading instead
     const t = setTimeout(() => switchSource(nextIdx), 600);
     return () => clearTimeout(t);
-  }, [error, srcIdx, playableSources.length]); // eslint-disable-line
+  }, [error, srcIdx]); // eslint-disable-line
+  /* ✅ أُزيل playableSources.length من deps — كان يُعيد تشغيل هذا الـ effect عند كل
+     وصول مصدر جديد من الخلفية بينما error=true، مما يرفع consecutiveErrorsRef
+     بسرعة لـ MAX_SOURCE_CYCLES ويستدعي onError() قبل محاولة أي مصدر. */
 
   /* ─── تبديل المصدر عندما يُغيِّر الـ parent قيمة initialSourceIndex (المستخدم اختار مصدراً مختلفاً) ─── */
   const prevInitSourceIdxRef = useRef(initialSourceIndex ?? 0);
