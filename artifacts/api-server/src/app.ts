@@ -178,8 +178,16 @@ export async function createApp(): Promise<Express> {
 
   // Serve built frontend in production
   const frontendDist = path.resolve(__dirname, "../../anime-scraper/dist/public");
-  app.use(express.static(frontendDist));
+  // Hashed assets (JS/CSS with content hash) → cache 1 year, immutable
+  app.use("/assets", express.static(path.join(frontendDist, "assets"), {
+    maxAge: "1y",
+    immutable: true,
+    etag: false,
+  }));
+  // index.html + other root files → no cache (always fresh)
+  app.use(express.static(frontendDist, { maxAge: 0, etag: true }));
   app.get("/{*path}", (_req, res) => {
+    res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
     res.sendFile(path.join(frontendDist, "index.html"));
   });
 
