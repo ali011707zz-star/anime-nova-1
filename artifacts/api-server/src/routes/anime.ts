@@ -414,28 +414,15 @@ async function denoProxyGet(
 }
 
 // ════════════════════════════════════════════════════════════════════
-//  orkestGet — يستخدم CF_PROXY_BASE (محلي أو VPS حسب NOVA_PROXY_BASE)
+//  orkestGet — يستخدم CF_PROXY_BASE (curl_cffi + primp محلي)
 // ════════════════════════════════════════════════════════════════════
 async function orkestGet(
   url: string,
   referer?: string,
   timeoutMs = 25000,
 ): Promise<string | null> {
-  // cf-proxy (port 8000) أُوقف نهائياً (استُبدل بـ Hopx لتوفير الموارد) —
-  // orkestGet كان لا يزال يستهدف CF_PROXY_BASE الميت فيفشل فوراً بصمت
-  // (تأثر anineko/RISTO/A4UP2/anikototv). الآن يمر عبر hopxProxyGet مباشرة.
-  const viaHopx = await hopxProxyGet(url, referer, timeoutMs);
-  if (viaHopx) return viaHopx;
-  try {
-    const r = await fetch(
-      `${CF_PROXY_BASE}/fetch?url=${encodeURIComponent(url)}`,
-      { signal: AbortSignal.timeout(timeoutMs) },
-    );
-    if (!r.ok) return null;
-    const text = await r.text();
-    if (text.length < 50 || text.includes("Just a moment") || text.includes("cf-browser-verification")) return null;
-    return text;
-  } catch { return null; }
+  // cfProxy (curl_cffi + primp) — hopx حُذف نهائياً
+  return await cfProxyGet(url, referer, timeoutMs).catch(() => null);
 }
 
 // ════════════════════════════════════════════════════════════════════
@@ -474,46 +461,14 @@ async function scrapingAntGet(
 
 // ════════════════════════════════════════════════════════════════════
 
-// ════════════════════════════════════════════════════════════════════
-//  hopxProxyGet — جلب عبر Hopx sandbox (IP مختلف يتجاوز CF-block)
-//  يُستخدم كـ fallback للمواقع المحجوبة من VPS IP مباشرة
-// ════════════════════════════════════════════════════════════════════
-const HOPX_PROXY_BASE      = process.env.HOPX_PROXY_URL    || "http://localhost:8001";
 // Hound CF-Bypass Service — patchright stealth browser يحل Turnstile محلياً على VPS
-// تشغيل: cd /opt/anime-nova/hound-service && bash install.sh && pm2 start start.sh --name hound-service
 const HOUND_SERVICE_URL    = process.env.HOUND_SERVICE_URL   || "http://localhost:8766";
-let _hopxAlive: boolean | null = null;
-let _hopxCheckedAt = 0;
 
-async function hopxProxyGet(
-  url: string,
-  referer?: string,
-  timeoutMs = 25000,
-): Promise<string | null> {
-  const now = Date.now();
-  if (_hopxAlive === null || now - _hopxCheckedAt > 60_000) {
-    try {
-      const h = await fetch(`${HOPX_PROXY_BASE}/health`, { signal: AbortSignal.timeout(3000) });
-      const body = await h.json() as { ok?: boolean };
-      _hopxAlive = h.ok && body.ok === true;
-    } catch { _hopxAlive = false; }
-    _hopxCheckedAt = now;
-  }
-  if (!_hopxAlive) return null;
-  try {
-    const params = new URLSearchParams({ url });
-    if (referer) params.set("ref", referer);
-    const r = await fetch(`${HOPX_PROXY_BASE}/fetch?${params}`, {
-      signal: AbortSignal.timeout(timeoutMs + 5000),
-    });
-    if (!r.ok) return null;
-    const data = await r.json() as { status?: number; html?: string; error?: string };
-    if (data.error || !data.html || (data.status !== undefined && data.status >= 400)) return null;
-    return data.html;
-  } catch { return null; }
-}
+// hopxProxyGet — معطَّل نهائياً (hopx-manager حُذف 2026-08-03)
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+async function hopxProxyGet(_url: string, _ref?: string, _t?: number): Promise<string | null> { return null; }
 
-// hopxBrowserExtract — معطَّل 2026-07-28 (حُذف المتصفح من VPS لتوفير الذاكرة)
+// hopxBrowserExtract — معطَّل (hopx-manager حُذف)
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 async function hopxBrowserExtract(
   _url: string, _referer?: string, _timeoutMs = 25000,
@@ -567,8 +522,8 @@ function videaQualityFromUrl(url: string): { quality: string; qualityRank: numbe
 
 //  smartFetch — جلب ذكي يجرب كل الوسائل بالترتيب (تلقائياً)
 //  1. cfProxy (curl_cffi + primp محلي)
-//  2. hopxProxy (Hopx sandbox IP مختلف)
-//  3. ScrapingAnt (Chrome headless — آخر خيار لتوفير الكريدت)
+//  2. ScrapingAnt (Chrome headless — آخر خيار لتوفير الكريدت)
+//  ملاحظة: hopx حُذف نهائياً 2026-08-03
 // ════════════════════════════════════════════════════════════════════
 async function smartFetch(
   url: string,
@@ -580,11 +535,7 @@ async function smartFetch(
   const fromProxy = await cfProxyGet(url, referer, timeoutMs).catch(() => null);
   if (fromProxy && !isCloudflareBlock(fromProxy)) return fromProxy;
 
-  // 2) hopxProxy — IP مختلف يتجاوز CF-block بدون استهلاك كريدت
-  const fromHopx = await hopxProxyGet(url, referer, timeoutMs).catch(() => null);
-  if (fromHopx && !isCloudflareBlock(fromHopx)) return fromHopx;
-
-  // 3) ScrapingAnt — الأقوى لكن يستهلك كريدت أكثر
+  // 2) ScrapingAnt — الأقوى لكن يستهلك كريدت أكثر
   if (SCRAPINGANT_KEY) {
     const fromAnt = await scrapingAntGet(url, { browser: forceAnt, timeoutMs: timeoutMs + 15000 });
     if (fromAnt) return fromAnt;

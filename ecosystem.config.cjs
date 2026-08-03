@@ -44,8 +44,7 @@ module.exports = {
         OPENSHIFT_CF_URL: "https://nova-cf-bypass-lly581758-dev.apps.rm1.0a51.p1.openshiftapps.com",
         HOUND_SERVICE_URL: "http://localhost:8766",
         MXP_SERVICE_PORT: "8002",
-        CF_PROXY_PORT: "8001",   // ← السكرابر الآن عبر Hopx (35Mbps, 2vCPU) بدل cf-proxy
-        HOPX_PROXY_URL: "http://localhost:8001",
+        CF_PROXY_PORT: "8000",   // cf-proxy (curl_cffi + primp) — hopx حُذف 2026-08-03
       },
     },
     {
@@ -56,17 +55,6 @@ module.exports = {
       env: {
         CF_PROXY_PORT: "8000",
         CF_PROXY_KEY: _e("CF_PROXY_KEY"),
-      },
-    },
-    {
-      name: "hopx-manager",
-      script: "/opt/anime-nova/scripts/hopx_manager.py",
-      interpreter: "/usr/bin/python3",
-      cwd: "/opt/anime-nova/scripts",
-      restart_delay: 10000,
-      env: {
-        HOPX_API_KEY: _e("HOPX_API_KEY"),
-        HOPX_LOCAL_PORT: "8001",
       },
     },
     {
