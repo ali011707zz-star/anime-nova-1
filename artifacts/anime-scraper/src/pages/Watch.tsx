@@ -3324,29 +3324,16 @@ export default function WatchPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  /* ── Auto-fetch-all: جلب جميع المصادر تلقائياً عند فتح الصفحة ──
-     مصادر أولوية (أسرع — auto-play أول نتيجة): 0ms, 80ms, 160ms
-     مصادر خلفية (أبطأ — تتراكم في الـ picker): 300ms, 480ms, 660ms, 840ms, 1020ms ── */
+  /* ── Static picker: المستخدم يختار المصدر يدوياً — لا جلب تلقائي عند الفتح ──
+     المصادر تُجلب فقط عند الضغط على بطاقة المصدر (onFetchSite → handleFetchSite).
+     quick-resume لا يزال يعمل عبر useEffect المنفصل أعلاه. ── */
   useEffect(() => {
     if (!animeId && !titleParam) return;
     autoPlayedRef.current   = false;
-    autoFetchAllRef.current = true;
+    autoFetchAllRef.current = false;
     inFlightRef.current     = new Set();
-
-    const PRIORITY_SITES   = ["kawaii", "anikoto", "anineko"];
-    const BACKGROUND_SITES = SCRAPER_DEFS.map(d => d.site).filter(s => !PRIORITY_SITES.includes(s));
-
-    const ids: number[] = [];
-    PRIORITY_SITES.forEach((site, i) => {
-      ids.push(window.setTimeout(() => handleFetchSite(site, false), i * 80));
-    });
-    BACKGROUND_SITES.forEach((site, i) => {
-      ids.push(window.setTimeout(() => handleFetchSite(site, true), 300 + i * 180));
-    });
-    pendingTimeoutsRef.current = ids;
-
     return () => {
-      ids.forEach(id => window.clearTimeout(id));
+      pendingTimeoutsRef.current.forEach(id => window.clearTimeout(id));
       pendingTimeoutsRef.current = [];
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
