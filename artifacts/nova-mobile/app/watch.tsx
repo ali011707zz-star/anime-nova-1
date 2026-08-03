@@ -216,23 +216,49 @@ const SITE_PRIORITY: Record<string, number> = {
 };
 
 /* ── قائمة المصادر (KW أولاً — الأولوية القصوى للتشغيل الفوري) ── */
-/* مصادر موحَّدة مع الويب — نفس المصادر الـ 8 المفعَّلة في SCRAPER_DEFS */
-const ANIME_SITES = [
-  "kawaii", "animewitcher", "anslayer", "animeify", "sanime",
-  "anifox",        // مُضاف 2026-07-27 — Archive.org/MediaFire/MP4Upload/Uqload، tag=FX
-  // "mitanime":  محذوف بطلب المستخدم 2026-07-27
-  // "allmanga": معطّل 2026-07-17 — AA_CRYPTO_MISSING على AllAnime
-] as const;
+/* ── Picker ثابت: جودة → مصادر (تظهر فوراً دون أي جلب مسبق) ── */
+type QualityKey = "1080p" | "720p" | "480p";
 
-/* timeout موحّد افتراضي — يُستبدل بـ SITE_TIMEOUT_MAP للمواقع التي تحتاج وقتاً أطول */
+const STATIC_PICKER: Record<QualityKey, { site: string; tag: string; name: string }[]> = {
+  "1080p": [
+    { site: "animewitcher", tag: "AW", name: "AnimeWitcher" },
+    { site: "sanime",       tag: "SA", name: "SAnime"       },
+    { site: "animeify",     tag: "AF", name: "أنمي فاي"     },
+    // kawaii: صيانة مؤقتة — يُضاف لاحقاً
+  ],
+  "720p": [
+    { site: "animewitcher", tag: "AW", name: "AnimeWitcher" },
+    { site: "sanime",       tag: "SA", name: "SAnime"       },
+    { site: "animeify",     tag: "AF", name: "أنمي فاي"     },
+    { site: "anifox",       tag: "FX", name: "ANIFOX"       },
+  ],
+  "480p": [
+    { site: "animewitcher", tag: "AW", name: "AnimeWitcher" },
+    { site: "animeify",     tag: "AF", name: "أنمي فاي"     },
+    { site: "anifox",       tag: "FX", name: "ANIFOX"       },
+  ],
+};
+
+const Q_KEYS: QualityKey[] = ["1080p", "720p", "480p"];
+const Q_KEY_LABEL: Record<QualityKey, string> = {
+  "1080p": "1080p",
+  "720p":  "720p",
+  "480p":  "480p",
+};
+const Q_KEY_SUB: Record<QualityKey, string> = {
+  "1080p": "دقة كاملة",
+  "720p":  "دقة عالية",
+  "480p":  "دقة متوسطة",
+};
+
+/* timeout موحّد افتراضي */
 const SITE_TIMEOUT_MS = 28_000;
-
-/* timeout مُخصَّص لكل موقع — يجب أن يكون >= timeout الباكند + هامش
-   وإلا يُقتل الطلب قبل أن يرد الباكند (سبب اختفاء المصادر في cache البارد) */
-const SITE_TIMEOUT_MAP: Partial<Record<typeof ANIME_SITES[number], number>> = {
-  anifox:       35_000,  // backend race = 30s (catalog من cache + season/ep fetch) + 5s هامش
-  kawaii:       15_000,  // backend = 1s API + 2s extraction + هامش
-  animewitcher: 38_000,  // backend race = 38s (servers_resolved ~30s) + هامش
+const SITE_TIMEOUT_MAP: Record<string, number> = {
+  anifox:       35_000,
+  animewitcher: 38_000,
+  animeify:     22_000,
+  sanime:       18_000,
+  kawaii:       15_000,
 };
 
 /* ── Spinning loader ── */
@@ -318,32 +344,26 @@ export default function WatchScreen() {
   const displayTitle = titleArStr || englishStr || titleStr;
 
   /* ── State ── */
-  const [screen,      setScreen]      = useState<Screen>("loading"); // يبدأ بـ loading — التشغيل التلقائي يبدأ فوراً
+  const [screen,      setScreen]      = useState<Screen>("picker"); // يبدأ مباشرةً بالـ picker — بدون تشغيل تلقائي
   const [sources,     setSources]     = useState<Src[]>([]);
-  const [loading,     setLoading]     = useState(false);
   const [playingSrc,  setPlayingSrc]  = useState<Src | null>(null);
   const [resumeTime,  setResumeTime]  = useState(0);
-  const [resolveFailed, setResolveFailed] = useState(false); // آخر محاولة WebView مخفي فشلت → نعرض بطاقة "يحتاج تطبيق أصلي"
+  const [resolveFailed, setResolveFailed] = useState(false);
   const [globalSubUrl, setGlobalSubUrl] = useState<string | undefined>();
   const [arEpTitle,   setArEpTitle]   = useState<string | undefined>();
-  /* slotStatus: حالة كل مصدر في المنتقي */
+  /* slotStatus: حالة كل مصدر في المنتقي (idle → fetching → ready/failed) */
   const [slotStatus,  setSlotStatus]  = useState<Record<string, "idle" | "fetching" | "ready" | "failed">>({});
+  /* الجودة المختارة في الـ picker */
+  const [selQuality,  setSelQuality]  = useState<QualityKey>("1080p");
 
   const abortRef          = useRef<AbortController | null>(null);
   const seenKeys          = useRef(new Set<string>());
   const lastTimeRef       = useRef(0);
-  const lastHistoryWriteRef = useRef(0); // throttle addToHistory writes — max once per 30s
-  const autoPlayFiredRef  = useRef(false);
-  const hasCachedRef      = useRef(false);
+  const lastHistoryWriteRef = useRef(0);
   const isMountedRef      = useRef(true);
   const fetchEpochRef     = useRef(0);
-  const autoPlayTimerRef  = useRef<ReturnType<typeof setTimeout> | null>(null);
   const inFlightSitesRef  = useRef<Set<string>>(new Set());
-  const fetchedSitesRef   = useRef<Set<string>>(new Set()); // يمنع إعادة جلب نفس المصدر مرتين (فقط الناجحة)
-  const bgTimersRef       = useRef<ReturnType<typeof setTimeout>[]>([]); // background-load timers للإلغاء عند تغيير الحلقة
-  /* true بعد جدولة موجة "تحميل كل المصادر" عند فتح الشاشة — يمنع handlePickSite من
-     جدولة موجة ثانية مكرّرة عند نجاح أول مصدر (نفس منطق autoFetchAllRef في نظام الويب) */
-  const autoFetchAllRef   = useRef(false);
+  const fetchedSitesRef   = useRef<Set<string>>(new Set());
 
   /* ── تعقّب الـ mount ── */
   useEffect(() => {
@@ -367,224 +387,25 @@ export default function WatchScreen() {
   const srcCacheKey    = anime ? `anime-srcs-${anime}-e${epNum}` : null;
   const SRC_CACHE_TTL  = 5 * 60 * 1000; // 5 minutes
 
-  /* ── Load resume time + cached sources ── */
+  /* ── Load resume time فقط ── */
   useEffect(() => {
     AsyncStorage.getItem(progressKey).then(v => {
       if (!isMountedRef.current) return;
       if (v) setResumeTime(parseFloat(v) || 0);
     }).catch(() => {});
-
-    if (!srcCacheKey) return;
-    AsyncStorage.getItem(srcCacheKey).then(raw => {
-      if (!raw) return;
-      try {
-        const { sources: cached, ts }: { sources: Src[]; ts: number } = JSON.parse(raw);
-        if (!cached?.length || Date.now() - ts > SRC_CACHE_TTL) return;
-        const base = getBaseUrl();
-        const resolved = cached.filter(s => !isBlockedSource(s)).map(s => ({
-          ...s,
-          directUrl: resolveUrl(s.directUrl, base),
-          url: resolveUrl(s.url, base),
-        }));
-        hasCachedRef.current = true;
-        setSources(resolved);
-        /* ⚠️ لا نبذر seenKeys من الكاش — نتركها فارغة حتى تصل المصادر الطازجة وتحلّ محلّ القديمة.
-           إذا بذرنا seenKeys من URLs الكاش، الجلب الطازج (fetchOneSite) يُصفِّي المصادر الجديدة
-           لأن URL يطابق كاش قديم → يتم تشغيل رابط منتهٍ → كراش. */
-        setLoading(false);
-        setScreen("picker");
-      } catch { }
-    }).catch(() => { });
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [progressKey, srcCacheKey]);
+  }, [progressKey]);
 
   /* ── Parallel per-source HTTP fetch (يحل محل SSE تماماً) ── */
-  const fetchSources = useCallback(async () => {
-    if (!anime) return;
-    const myEpoch = ++fetchEpochRef.current;
-    if (autoPlayTimerRef.current) { clearTimeout(autoPlayTimerRef.current); autoPlayTimerRef.current = null; }
-    autoPlayFiredRef.current = false;
-    setLoading(true);
-    const hasCached = hasCachedRef.current;
-    if (!hasCached) {
-      setSources([]);
-      seenKeys.current.clear();
-      setScreen("loading");
-    }
-
-    abortRef.current?.abort();
-    abortRef.current = new AbortController();
-    const mainSignal = abortRef.current.signal;
-
-    const base = getBaseUrl();
-    const qs = new URLSearchParams({
-      anime: anime || "0",
-      ep: String(epNum),
-      title: titleStr,
-      english: englishStr,
-      format: format || "",
-      year: year || "",
-      episodes: episodes || "",
-      native: native || "",
-    });
-    // titleAr يُساعد مصادر كـ AnimeSlayer التي تخزّن أسماء عربية فقط
-    if (titleArStr) qs.set("titleAr", titleArStr);
-
-    const allFresh: Src[] = [];
-
-    /* pre-warm التوكن مرة واحدة قبل الطلبات المتوازية —
-       يمنع 20+ طلب token متوازٍ عند فتح الشاشة (السبب الجذري لـ 403 الجماعي) */
-    await warmAuthToken();
-
-    /* جلب مصدر واحد — يُستدعى بالتوازي لكل site */
-    const fetchOneSite = async (site: string) => {
-      if (BLOCKED_SOURCE_SITES.has(site.toLowerCase())) return;
-      /* مهلة مستقلة لكل مصدر مع ربطها بـ abort الرئيسي */
-      const siteCtrl = new AbortController();
-      const effectiveTimeout = SITE_TIMEOUT_MAP[site as keyof typeof SITE_TIMEOUT_MAP] ?? SITE_TIMEOUT_MS;
-      const tid = setTimeout(() => siteCtrl.abort(), effectiveTimeout);
-      const onMainAbort = () => siteCtrl.abort();
-      mainSignal.addEventListener("abort", onMainAbort, { once: true });
-
-      try {
-        const res = await secureFetch(
-          `${base}/api/anime/fetch-source?site=${site}&${qs}`,
-          { signal: siteCtrl.signal }
-        );
-        clearTimeout(tid);
-        mainSignal.removeEventListener("abort", onMainAbort);
-
-        if (!res.ok || !isMountedRef.current || fetchEpochRef.current !== myEpoch) return;
-        const data = await res.json();
-        const rawSrcs: Src[] = data.sources || [];
-        if (!rawSrcs.length) return;
-
-        /* فلتر التكرار وإصلاح URLs النسبية */
-        const newSrcs = rawSrcs
-          .map((s): Src => ({
-            ...s,
-            site: s.site || site,
-            directUrl: resolveUrl(s.directUrl, base),
-            url: resolveUrl(s.url, base),
-          }))
-          .filter(s => !isBlockedSource(s))
-          // فلتر mega.nz/embed — لا يعمل native في الموبايل (يحتاج تطبيق أصلي)
-          .filter(s => !(s.isEmbed && s.url && (s.url.includes("mega.nz") || s.url.includes("mega.co.nz"))))
-          .filter(s => {
-            const key = getPlayUrl(s);
-            if (!key || seenKeys.current.has(key)) return false;
-            seenKeys.current.add(key);
-            return true;
-          });
-
-        if (!newSrcs.length || !isMountedRef.current || fetchEpochRef.current !== myEpoch) return;
-        allFresh.push(...newSrcs);
-
-        /* استبدل المصادر القديمة (من الكاش) لنفس الموقع بالجديدة الطازجة —
-           يمنع تشغيل روابط CDN منتهية الصلاحية من الكاش القديم. */
-        setSources(prev => {
-          const withoutOldSite = prev.filter(s => s.site !== site);
-          return [...withoutOldSite, ...newSrcs];
-        });
-
-        /* تشغيل تلقائي مباشر — يتجاوز صفحة الـ picker تماماً */
-        if (!autoPlayFiredRef.current) {
-          const good = newSrcs.find(isDirectPlayable);
-          if (good) {
-            /* الجودة أولاً، ثم أولوية المصدر. لا نبدأ AS بجودة أقل
-               لمجرد أنه وصل قبل AW أو مصدر آخر أعلى جودة. */
-            const pickBest = (pool: Src[]): Src => {
-              const direct = pool.filter(isDirectPlayable).sort((a, b) => {
-                const qualityDiff = TIER_RANK[getSrcQuality(b)] - TIER_RANK[getSrcQuality(a)];
-                if (qualityDiff !== 0) return qualityDiff;
-                return (SITE_PRIORITY[b.site || ""] ?? 0) - (SITE_PRIORITY[a.site || ""] ?? 0);
-              });
-              return direct[0] || good;
-            };
-            /* تأخير 400ms — يمنح KW/AW فرصة الوصول قبل الاختيار */
-            const isHighPriority = ["kawaii", "animewitcher"].includes(site);
-            autoPlayTimerRef.current = setTimeout(() => {
-              autoPlayTimerRef.current = null;
-              if (!isMountedRef.current || autoPlayFiredRef.current || fetchEpochRef.current !== myEpoch) return;
-              /* أعد جمع كل المصادر المتاحة حتى الآن */
-              setSources(latest => {
-                const best = pickBest(latest);
-                if (isDirectPlayable(best)) {
-                  autoPlayFiredRef.current = true;
-                  setPlayingSrc(best);
-                  setScreen("native");
-                } else {
-                  setScreen(s => s === "loading" ? "picker" : s);
-                }
-                return latest;
-              });
-            }, isHighPriority ? 0 : 400);
-          } else {
-            /* embed فقط — أظهر الـ picker */
-            setScreen(s => s === "loading" ? "picker" : s);
-          }
-        }
-      } catch (e: any) {
-        clearTimeout(tid);
-        mainSignal.removeEventListener("abort", onMainAbort);
-        /* تجاهل AbortError — مصادر أخرى لا تزال تعمل */
-      }
-    };
-
-    /* شغّل جميع المصادر بالتوازي الكامل */
-    await Promise.allSettled(ANIME_SITES.map(site => fetchOneSite(site)));
-
-    if (!isMountedRef.current) return;
-    setLoading(false);
-    setScreen(s => s === "loading" ? "picker" : s);
-
-    /* احفظ الكاش من مجموع المصادر الناجحة — max 8 to limit AsyncStorage size */
-    if (srcCacheKey && allFresh.length) {
-      const toCache = allFresh.slice(0, 8);
-      AsyncStorage.setItem(
-        srcCacheKey,
-        JSON.stringify({ sources: toCache, ts: Date.now() })
-      ).catch(() => {});
-      /* نظّف مفاتيح الكاش القديمة (anime-srcs-*) — ابقَ على آخر 20 فقط */
-      AsyncStorage.getAllKeys().then(keys => {
-        const srcKeys = keys.filter(k => k.startsWith("anime-srcs-") && k !== srcCacheKey);
-        if (srcKeys.length > 20) {
-          const toDelete = srcKeys.slice(0, srcKeys.length - 20);
-          AsyncStorage.multiRemove(toDelete).catch(() => {});
-        }
-      }).catch(() => {});
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [anime, epNum, titleStr, englishStr, format, year, episodes, native, srcCacheKey]);
-
-  /* ── تشغيل تلقائي: كشط جميع المصادر فور فتح الشاشة ── */
+  /* ── Cleanup طلبات الجلب عند تغيير الحلقة أو إلغاء mount ── */
   useEffect(() => {
-    fetchSources();
-    return () => {
-      abortRef.current?.abort();
-      if (autoPlayTimerRef.current) clearTimeout(autoPlayTimerRef.current);
-    };
+    return () => { abortRef.current?.abort(); };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [anime, epNum]);
 
-  /* ── Cleanup bgTimers on unmount/episode-change ── */
-  useEffect(() => {
-    return () => {
-      bgTimersRef.current.forEach(clearTimeout);
-      bgTimersRef.current = [];
-    };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [anime, ep]);
-
-  /* ── 30-second hard timeout (only for "loading" screen — not used in lazy mode) ── */
-  useEffect(() => {
-    const t = setTimeout(() => { setScreen(s => s === "loading" ? "picker" : s); setLoading(false); }, 30000);
-    return () => clearTimeout(t);
-  }, [anime, ep]);
-
   /* ── Orientation lock ── */
   useEffect(() => {
-    if (screen === "loading" || screen === "picker") {
+    if (screen === "picker") {
       ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP).catch(() => { });
     } else if (screen === "embed") {
       /* LANDSCAPE_RIGHT لمطابقة اتجاه RiftPlayer — كلاهما يقفل نفس الاتجاه */
@@ -599,54 +420,29 @@ export default function WatchScreen() {
   }, [progressKey]);
 
   /* ── Navigate episode ── */
-  function goEp(n: number, auto = false) {
+  function goEp(n: number, _auto = false) {
     saveProgress();
-    /* إلغاء كل الطلبات الجارية فوراً قبل الانتقال — يمنع stale fetches من إضافة مصادر الحلقة القديمة */
     abortRef.current?.abort();
-    if (autoPlayTimerRef.current) { clearTimeout(autoPlayTimerRef.current); autoPlayTimerRef.current = null; }
     setSources([]);
     seenKeys.current.clear();
-    autoPlayFiredRef.current = false;
-    autoFetchAllRef.current = false;   // ← إعادة تعيين حتى يجدوِل الموجة الخلفية للحلقة الجديدة
-    hasCachedRef.current = false;      // ← إعادة تعيين حتى تظهر شاشة التحميل للحلقة الجديدة
     inFlightSitesRef.current.clear();
     fetchedSitesRef.current.clear();
-    /* إلغاء background timers من الحلقة السابقة — يمنع stale fetches */
-    bgTimersRef.current.forEach(clearTimeout);
-    bgTimersRef.current = [];
     setSlotStatus({});
-    setScreen("loading");
+    setScreen("picker");
     const coverParam = coverUrl ? `&cover=${encodeURIComponent(coverUrl)}` : "";
     const arParam    = titleArStr ? `&titleAr=${encodeURIComponent(titleArStr)}` : "";
-    router.replace(`/watch?anime=${anime}&ep=${n}&title=${encodeURIComponent(titleStr)}&english=${encodeURIComponent(englishStr)}&format=${encodeURIComponent(format || "")}${coverParam}${arParam}${auto ? "&autoplay=1" : ""}`);
+    router.replace(`/watch?anime=${anime}&ep=${n}&title=${encodeURIComponent(titleStr)}&english=${encodeURIComponent(englishStr)}&format=${encodeURIComponent(format || "")}${coverParam}${arParam}`);
   }
 
-  /* ── إعادة تحميل كل المصادر (زر تحديث) ── */
+  /* ── إعادة تعيين حالة المصادر (زر تحديث) — مسح الأخطاء للسماح بالمحاولة مجدداً ── */
   function refreshAllSources() {
-    /* 1. أوقف fetchSources الجاري — يمنع وصول مصادر قديمة بعد المسح */
     abortRef.current?.abort();
-    ++fetchEpochRef.current; // ← يجعل أي fetchOneSite معلّق يرى epoch خاطئ ويتوقف
-    if (autoPlayTimerRef.current) { clearTimeout(autoPlayTimerRef.current); autoPlayTimerRef.current = null; }
-    bgTimersRef.current.forEach(clearTimeout);
-    bgTimersRef.current = [];
+    ++fetchEpochRef.current;
     setSources([]);
     seenKeys.current.clear();
-    autoPlayFiredRef.current = false;
-    autoFetchAllRef.current = false;
     inFlightSitesRef.current.clear();
     fetchedSitesRef.current.clear();
-    hasCachedRef.current = false;
-    /* pre-populate slotStatus بـ "fetching" حتى لا تظهر رسالة "لا يوجد مصدر"
-       قبل اكتمال جميع المصادر — تتحول لـ ready/failed عند انتهاء كل مصدر */
-    const initialFetching: Record<string, "idle" | "fetching" | "ready" | "failed"> = {};
-    ANIME_SITES.forEach(s => { initialFetching[s] = "fetching"; });
-    setSlotStatus(initialFetching);
-    setScreen("picker");
-    /* تحميل كل المصادر بالتوازي (staggered) */
-    ANIME_SITES.forEach((site, i) => {
-      const tid = setTimeout(() => { handlePickSite(site, i === 0); }, i * 80);
-      bgTimersRef.current.push(tid);
-    });
+    setSlotStatus({});
   }
 
   /* ── Play a source ── */
@@ -688,16 +484,19 @@ export default function WatchScreen() {
     setScreen("embed");
   }, []);
 
-  /* ── جلب مصدر واحد عند اختيار المستخدم ──
-     autoPlayResult=true → يشغّل أول مصدر جاهز تلقائياً ثم يُحمّل الباقي خلفياً.
-     autoPlayResult=false → تحميل خلفي فقط (يُضيف المصادر للـ picker). ── */
-  const handlePickSite = useCallback(async (site: string, autoPlayResult = true) => {
+  /* ── جلب مصدر واحد عند ضغط المستخدم على زر المصدر ── */
+  const handlePickSite = useCallback(async (site: string) => {
     if (BLOCKED_SOURCE_SITES.has(site.toLowerCase())) return;
-    /* fetchedSitesRef يمنع re-fetch بعد إتمام الجلب (يحل stale-closure في setTimeout) */
-    if (inFlightSitesRef.current.has(site) || fetchedSitesRef.current.has(site)) return;
+    /* منع الضغط المزدوج أثناء الجلب — يسمح بإعادة المحاولة بعد الفشل */
+    if (inFlightSitesRef.current.has(site)) return;
+    /* إذا نجح سابقاً → شغّل أفضل مصدر متاح منه مباشرة */
+    if (fetchedSitesRef.current.has(site)) {
+      const cached = sources.filter(s => s.site === site);
+      const best = cached.find(isDirectPlayable) ?? cached[0];
+      if (best) { playSrc(best); return; }
+    }
 
     inFlightSitesRef.current.add(site);
-    /* لا نضيف لـ fetchedSitesRef هنا — فقط نضيفه عند النجاح لنسمح بإعادة المحاولة عند الفشل */
     setSlotStatus(prev => ({ ...prev, [site]: "fetching" }));
 
     const base = getBaseUrl();
@@ -706,15 +505,14 @@ export default function WatchScreen() {
       english: englishStr, format: format || "",
       year: year || "", episodes: episodes || "", native: native || "",
     });
-    /* anslayerId: يمرَّر من قسم "أحدث الحلقات" — معرّف anslayer المباشر من كتالوجه
-       يتجاوز البحث بالاسم ويحدّد الأنمي الصحيح 100% (يطابق نظام الويب). */
+    if (titleArStr) qs.set("titleAr", titleArStr);
     if (site === "anslayer" && anslayerId) qs.set("anslayerId", anslayerId);
 
     try {
       await warmAuthToken();
       const siteCtrl = new AbortController();
-      const lazyTimeout = SITE_TIMEOUT_MAP[site as keyof typeof SITE_TIMEOUT_MAP] ?? SITE_TIMEOUT_MS;
-      const tid = setTimeout(() => siteCtrl.abort(), lazyTimeout);
+      const timeout = SITE_TIMEOUT_MAP[site] ?? SITE_TIMEOUT_MS;
+      const tid = setTimeout(() => siteCtrl.abort(), timeout);
       const res = await secureFetch(`${base}/api/anime/fetch-source?site=${site}&${qs}`, { signal: siteCtrl.signal });
       clearTimeout(tid);
 
@@ -722,10 +520,7 @@ export default function WatchScreen() {
       const data = await res.json();
       const rawSrcs: Src[] = data.sources || [];
 
-      if (!rawSrcs.length) {
-        setSlotStatus(prev => ({ ...prev, [site]: "failed" }));
-        return;
-      }
+      if (!rawSrcs.length) { setSlotStatus(prev => ({ ...prev, [site]: "failed" })); return; }
 
       const newSrcs = rawSrcs
         .map((s): Src => ({ ...s, site: s.site || site, directUrl: resolveUrl(s.directUrl, base), url: resolveUrl(s.url, base) }))
@@ -733,44 +528,24 @@ export default function WatchScreen() {
         .filter(s => !(s.isEmbed && s.url && (s.url.includes("mega.nz") || s.url.includes("mega.co.nz"))))
         .filter(s => { const k = getPlayUrl(s); if (!k || seenKeys.current.has(k)) return false; seenKeys.current.add(k); return true; });
 
-      if (newSrcs.length) {
-        fetchedSitesRef.current.add(site); // ✓ نجح — امنع الإعادة
-        setSlotStatus(prev => ({ ...prev, [site]: "ready" }));
-        /* استبدل مصادر الموقع القديمة بالجديدة (بدل الإضافة) —
-           يمنع تراكم روابط CDN منتهية الصلاحية من fetchSources السابق أو الكاش */
-        setSources(prev => [...prev.filter(s => s.site !== site), ...newSrcs]);
+      if (!newSrcs.length) { setSlotStatus(prev => ({ ...prev, [site]: "failed" })); return; }
 
-        /* تشغيل تلقائي عند أول نجاح */
-        if (autoPlayResult && !autoPlayFiredRef.current) {
-          const best = newSrcs.find(isDirectPlayable) ?? newSrcs[0];
-          if (isDirectPlayable(best)) {
-            autoPlayFiredRef.current = true;
-            playSrc(best);
-          }
-        }
+      fetchedSitesRef.current.add(site);
+      setSlotStatus(prev => ({ ...prev, [site]: "ready" }));
+      setSources(prev => [...prev.filter(s => s.site !== site), ...newSrcs]);
 
-        /* كشط خلفي: بعد أول نجاح جدوِل بقية المصادر الخاملة */
-        if (autoPlayResult && !autoFetchAllRef.current) {
-          autoFetchAllRef.current = true;
-          let bgIdx = 0;
-          ANIME_SITES.forEach(s => {
-            if (s === site) return;
-            const t = setTimeout(() => handlePickSite(s, false), 70 * (++bgIdx));
-            bgTimersRef.current.push(t);
-          });
-        }
-      } else {
-        setSlotStatus(prev => ({ ...prev, [site]: "failed" }));
-        // لا نضيف لـ fetchedSitesRef — يسمح بإعادة المحاولة يدوياً
-      }
+      /* شغّل فوراً عند النجاح */
+      const best = newSrcs.find(isDirectPlayable) ?? newSrcs[0];
+      if (best) playSrc(best);
+
     } catch {
       if (isMountedRef.current) setSlotStatus(prev => ({ ...prev, [site]: "failed" }));
-      // لا نضيف لـ fetchedSitesRef عند الخطأ — يسمح بإعادة المحاولة
+      fetchedSitesRef.current.delete(site); // يسمح بإعادة المحاولة
     } finally {
       inFlightSitesRef.current.delete(site);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [anime, epNum, titleStr, englishStr, format, year, episodes, native, playSrc, anslayerId]);
+  }, [anime, epNum, titleStr, englishStr, titleArStr, format, year, episodes, native, playSrc, anslayerId, sources]);
 
   /* ── Handle back ── */
   const handleBack = useCallback(() => {
