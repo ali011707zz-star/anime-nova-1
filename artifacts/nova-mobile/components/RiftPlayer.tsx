@@ -411,6 +411,7 @@ export function RiftPlayer({
   const [isPlaying, setIsPlaying]     = useState(true);
   const [error, setError]             = useState(false);
   const [isAutoCycling, setIsAutoCycling] = useState(false);
+  const [isWaitingForSources, setIsWaitingForSources] = useState(false);
   const [isEnded, setIsEnded]         = useState(false);
 
   /* ─── UI state ─── */
@@ -562,10 +563,15 @@ export function RiftPlayer({
   /* timeout لاكتشاف الشاشة السوداء: إذا بقي المشغّل في "loading" أكثر من 25ث
      نعامله كخطأ ونتجاوز للمصدر التالي تلقائياً */
   const loadTimeoutRef    = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /* timer الانتظار لوصول مصادر إضافية عندما يفشل المصدر الوحيد */
+  const waitForSrcTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     aliveRef.current = true;
-    return () => { aliveRef.current = false; };
+    return () => {
+      aliveRef.current = false;
+      if (waitForSrcTimerRef.current) { clearTimeout(waitForSrcTimerRef.current); waitForSrcTimerRef.current = null; }
+    };
   }, []);
 
   /* ─── تهيئة السطوع والصوت من قيم النظام الحقيقية عند فتح المشغّل ─── */
@@ -800,16 +806,39 @@ export function RiftPlayer({
   useEffect(() => { playableCountRef.current = playableSources.length; }, [playableSources.length]);
 
   useEffect(() => {
-    if (!error) { consecutiveErrorsRef.current = 0; setIsAutoCycling(false); return; }
+    if (!error) {
+      consecutiveErrorsRef.current = 0;
+      setIsAutoCycling(false);
+      setIsWaitingForSources(false);
+      if (waitForSrcTimerRef.current) { clearTimeout(waitForSrcTimerRef.current); waitForSrcTimerRef.current = null; }
+      return;
+    }
     if (!aliveRef.current) return;
     /* نقرأ الطول من ref — يعكس القيمة الأحدث دون إعادة تشغيل هذا الـ effect */
     const curLen = playableCountRef.current;
     if (curLen <= 1) {
-      setIsAutoCycling(false);
-      if (!terminalErrorRef.current) {
-        terminalErrorRef.current = true;
-        onErrorRef.current?.();
-      }
+      /* ── انتظر حتى 8 ثوانٍ لوصول مصادر من الخلفية قبل الاستسلام ──
+         هذا يمنع الخروج الفوري عندما يفشل المصدر الأول بينما المصادر الأخرى
+         لا تزال تُحمَّل (kawaii يُشغَّل تلقائياً وقد يفشل في ثانية واحدة،
+         بينما anifox/sanime/anslayer قد تصل خلال 5-15 ثانية) */
+      setIsAutoCycling(true);
+      setIsWaitingForSources(true);
+      if (waitForSrcTimerRef.current) clearTimeout(waitForSrcTimerRef.current);
+      waitForSrcTimerRef.current = setTimeout(() => {
+        waitForSrcTimerRef.current = null;
+        if (!aliveRef.current) return;
+        setIsWaitingForSources(false);
+        setIsAutoCycling(false);
+        /* تحقق مجدداً — قد وصلت مصادر خلال فترة الانتظار */
+        if (playableCountRef.current > 1) {
+          /* وصلت مصادر جديدة → سيُعالجها الـ effect الآخر (playableSources.length) */
+          return;
+        }
+        if (!terminalErrorRef.current) {
+          terminalErrorRef.current = true;
+          onErrorRef.current?.();
+        }
+      }, 8_000);
       return;
     }
     consecutiveErrorsRef.current += 1;
@@ -827,6 +856,20 @@ export function RiftPlayer({
     const t = setTimeout(() => switchSource(nextIdx), 600);
     return () => clearTimeout(t);
   }, [error, srcIdx]); // eslint-disable-line
+
+  /* ── عندما تصل مصادر جديدة أثناء انتظار البديل → جرّب الأول الجديد فوراً ── */
+  useEffect(() => {
+    if (!isWaitingForSources) return;
+    if (playableSources.length <= 1) return;
+    /* وصل مصدر إضافي → الغِ timer الانتظار وانتقل إليه */
+    if (waitForSrcTimerRef.current) { clearTimeout(waitForSrcTimerRef.current); waitForSrcTimerRef.current = null; }
+    setIsWaitingForSources(false);
+    setIsAutoCycling(false);
+    consecutiveErrorsRef.current = 0;
+    terminalErrorRef.current = false;
+    /* تبديل للمصدر التالي (index 1) */
+    switchSource(1);
+  }, [playableSources.length, isWaitingForSources]); // eslint-disable-line
   /* ✅ أُزيل playableSources.length من deps — كان يُعيد تشغيل هذا الـ effect عند كل
      وصول مصدر جديد من الخلفية بينما error=true، مما يرفع consecutiveErrorsRef
      بسرعة لـ MAX_SOURCE_CYCLES ويستدعي onError() قبل محاولة أي مصدر. */
@@ -1763,7 +1806,10 @@ export function RiftPlayer({
         <View style={s.errorWrap} pointerEvents="none">
           <SpinRing size={44} />
           <Text style={[s.errorTitle, { color: "rgba(167,139,250,0.9)", marginTop: 12 }]}>
-            جاري تجربة مصدر آخر… ({consecutiveErrorsRef.current}/{sources.length})
+            {isWaitingForSources
+              ? "جاري البحث عن مصادر بديلة…"
+              : `جاري تجربة مصدر آخر… (${consecutiveErrorsRef.current}/${sources.length})`
+            }
           </Text>
         </View>
       )}

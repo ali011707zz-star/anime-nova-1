@@ -60,3 +60,4 @@
 - [Hound CF-Bypass Service](hound-service-cf-bypass.md) — patchright Chrome يتجاوز Turnstile على anime3rb؛ port 8766؛ cold=59s warm=21s؛ vid3rb URLs مكتشفة؛ patchright install chrome (ليس chromium).
 - [ANIFOX source live test](anifox-source-live-test-2026-07-27.md) — API mirrors حيّة ومتطابقة؛ Home→content→season→episode→sources يعمل؛ Archive.org direct MP4 مؤكد، والبقية embeds/landing pages.
 - [Mobile sources root cause 2026-07-27](mobile-sources-root-cause-2026-07-27.md) — AW ميت (Algolia 403)؛ ANIFOX timeout mismatch حُلّ بـ catalog cache + 82s؛ KW timeout رُفع لـ 15s.
+- [Anime watch onError crash fix](anime-watch-onError-fix.md) — player exits in 1s: curLen≤1 → onError immediately + abortRef kills background fetches → empty picker. Fix: RiftPlayer waits 8s for more sources; onError keeps fetches alive + autoPlayFiredRef=true.

@@ -923,22 +923,23 @@ export default function WatchScreen() {
         totalEps={totalEpsCount}
         onBack={() => { saveProgress(); setScreen("picker"); }}
         onError={() => {
-          /* جميع مصادر المشغّل فشلت → العودة للـ picker حتى يرى المستخدم بقية المصادر */
+          /* جميع مصادر المشغّل فشلت → العودة للـ picker */
           console.warn("[Anime Watch] جميع المصادر فشلت — العودة للـ picker");
           saveProgress();
           /* ⚠️ احذف كاش المصادر التالفة — يمنع تكرار الكراش عند فتح الحلقة مجدداً */
           if (srcCacheKey) AsyncStorage.removeItem(srcCacheKey).catch(() => {});
-          /* أوقف أي طلبات جارية — يمنع وصول مصادر تالفة إضافية */
-          abortRef.current?.abort();
           if (autoPlayTimerRef.current) { clearTimeout(autoPlayTimerRef.current); autoPlayTimerRef.current = null; }
           bgTimersRef.current.forEach(clearTimeout);
           bgTimersRef.current = [];
-          /* أعد ضبط كل refs — يضمن عمل زر تحديث بشكل صحيح بعد الخطأ */
           hasCachedRef.current = false;
-          autoPlayFiredRef.current = false;
+          /* ⚠️ true وليس false — يمنع إعادة التشغيل التلقائي حين تصل مصادر جديدة من الخلفية.
+             false كان يُسبِّب حلقة: onError → picker → مصدر جديد يصل → auto-play → فشل → onError */
+          autoPlayFiredRef.current = true;
           autoFetchAllRef.current = false;
           inFlightSitesRef.current.clear();
           fetchedSitesRef.current.clear();
+          /* ⚠️ لا نستدعي abortRef.current?.abort() — الطلبات الجارية لمواقع أخرى
+             تستمر وتُضيف مصادر للـ picker حتى يجد المستخدم بديلاً يعمل */
           setSources([]);
           seenKeys.current.clear();
           setSlotStatus({});
