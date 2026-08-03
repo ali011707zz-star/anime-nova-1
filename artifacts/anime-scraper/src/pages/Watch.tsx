@@ -190,21 +190,25 @@ const SCRAPER_DEFS: { site: string; name: string; desc: string; tag: string; aud
 /** مجموعة المصادر العربية — لا تعرض زر الترجمة الخارجية لها */
 const ARABIC_SITES = new Set(SCRAPER_DEFS.filter(d => d.isArabic).map(d => d.site));
 
-/* ── Static picker للويب: جودة → مصادر — نفس مصادر الموبايل بنفس الترتيب ── */
+/* ── Static picker للويب: جودات مكدّسة + صفوف مصادر (تصميم Aniyomi) ── */
 type WebQualityKey = "1080p" | "720p" | "480p";
 const STATIC_PICKER_WEB: Record<WebQualityKey, { site: string; tag: string }[]> = {
   "1080p": [
+    { site: "kawaii",       tag: "KW" },
     { site: "animewitcher", tag: "AW" },
     { site: "sanime",       tag: "SA" },
     { site: "animeify",     tag: "AF" },
+    { site: "anifox",       tag: "FX" },
   ],
   "720p": [
+    { site: "kawaii",       tag: "KW" },
     { site: "animewitcher", tag: "AW" },
     { site: "sanime",       tag: "SA" },
     { site: "animeify",     tag: "AF" },
     { site: "anifox",       tag: "FX" },
   ],
   "480p": [
+    { site: "kawaii",       tag: "KW" },
     { site: "animewitcher", tag: "AW" },
     { site: "animeify",     tag: "AF" },
     { site: "sanime",       tag: "SA" },
@@ -212,7 +216,6 @@ const STATIC_PICKER_WEB: Record<WebQualityKey, { site: string; tag: string }[]> 
   ],
 };
 const WEB_Q_KEYS: WebQualityKey[] = ["1080p", "720p", "480p"];
-const WEB_Q_SUB: Record<WebQualityKey, string> = { "1080p": "دقة كاملة", "720p": "دقة عالية", "480p": "دقة متوسطة" };
 
 /**
  * الموجة الأولى من المصادر التي تُجرَّب فوراً عند فتح الحلقة — أسرع/أوثق المصادر تاريخياً.
@@ -1344,64 +1347,53 @@ function ScraperPicker({
       <div className="flex-1 overflow-y-auto" style={{ scrollbarWidth: "none" }}>
         {HeroSection}
 
-        {/* ── Static picker: تبويبات الجودة + grid بطاقتان/صف (تصميم الموبايل) ── */}
+        {/* ── Static picker: جودات مكدّسة + صفوف (تصميم Aniyomi) ── */}
         <div className="px-4 mt-4 mb-3">
-          {/* Quality tabs */}
-          <div className="flex gap-2 mb-4">
-            {WEB_Q_KEYS.map(qk => (
-              <button key={qk} onClick={() => setWebQual(qk)}
-                className="flex-1 rounded-2xl font-['Cairo'] transition-all active:scale-95"
-                style={webQual === qk
-                  ? { background: "rgba(109,40,217,0.35)", border: "1px solid rgba(139,92,246,0.55)", color: "rgba(196,181,253,1)", padding: "9px 0 5px" }
-                  : { background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", color: "rgba(255,255,255,0.35)", padding: "9px 0 5px" }
-                }>
-                <p className="text-[12px] font-black leading-tight">{qk}</p>
-                <p className="text-[9px] font-normal mt-0.5 opacity-60">{WEB_Q_SUB[qk]}</p>
-              </button>
-            ))}
-          </div>
-
-          {/* Site grid — 2 per row, same as mobile */}
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-            {(STATIC_PICKER_WEB[webQual] || []).map(slot => {
-              const def     = SCRAPER_DEFS.find(d => d.site === slot.site);
-              const status  = slotStatus[slot.site] || "idle";
-              const srcs    = (slotSources[slot.site] || []).filter(shouldShowSrc);
-              const bestSrc = srcs.length
-                ? [...srcs].sort((a, b) => (b.qualityRank ?? 0) - (a.qualityRank ?? 0))[0]
-                : null;
-              const isFetching = status === "fetching";
-              const isReady    = status === "ready";
-              const isFailed   = status === "failed";
-              return (
-                <button key={slot.site}
-                  onClick={() => { if (isReady && bestSrc) onPlaySrc(bestSrc); else if (!isFetching) onFetchSite(slot.site); }}
-                  style={{
-                    background: isReady ? "rgba(34,197,94,0.07)" : isFailed ? "rgba(239,68,68,0.06)" : isFetching ? "rgba(139,92,246,0.08)" : "rgba(255,255,255,0.03)",
-                    border: `1px solid ${isReady ? "rgba(34,197,94,0.22)" : isFailed ? "rgba(239,68,68,0.20)" : isFetching ? "rgba(139,92,246,0.28)" : "rgba(255,255,255,0.08)"}`,
-                    borderRadius: 16, padding: "12px", textAlign: "right", cursor: isFetching ? "default" : "pointer",
-                  }}>
-                  {/* Top row: badge + status dot */}
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-                    {/* Tag badge / spinner */}
-                    <div style={{ width: 34, height: 34, borderRadius: 10, background: "rgba(124,58,237,0.18)", border: "1px solid rgba(139,92,246,0.28)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+          {WEB_Q_KEYS.map(qk => (
+            <div key={qk} style={{ marginBottom: 18 }}>
+              {/* Quality header divider */}
+              <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
+                <div style={{ flex: 1, height: 1, background: "rgba(255,255,255,0.07)" }} />
+                <span style={{ fontSize: 11, fontWeight: 900, letterSpacing: "0.10em", color: "rgba(255,255,255,0.38)", fontFamily: "monospace" }}>{qk.toUpperCase()}</span>
+                <div style={{ flex: 1, height: 1, background: "rgba(255,255,255,0.07)" }} />
+              </div>
+              {/* Source rows */}
+              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                {(STATIC_PICKER_WEB[qk] || []).map(slot => {
+                  const status  = slotStatus[slot.site] || "idle";
+                  const srcs    = (slotSources[slot.site] || []).filter(shouldShowSrc);
+                  const bestSrc = srcs.length
+                    ? [...srcs].sort((a, b) => (b.qualityRank ?? 0) - (a.qualityRank ?? 0))[0]
+                    : null;
+                  const isFetching = status === "fetching";
+                  const isReady    = status === "ready";
+                  const isFailed   = status === "failed";
+                  return (
+                    <button key={`${qk}-${slot.site}`}
+                      onClick={() => { if (isReady && bestSrc) onPlaySrc(bestSrc); else if (!isFetching) onFetchSite(slot.site); }}
+                      style={{
+                        display: "flex", alignItems: "center", gap: 10, width: "100%",
+                        padding: "11px 14px", borderRadius: 14,
+                        background: isReady ? "rgba(34,197,94,0.06)" : isFailed ? "rgba(239,68,68,0.05)" : isFetching ? "rgba(139,92,246,0.06)" : "rgba(255,255,255,0.03)",
+                        border: `1px solid ${isReady ? "rgba(34,197,94,0.20)" : isFailed ? "rgba(239,68,68,0.18)" : isFetching ? "rgba(139,92,246,0.22)" : "rgba(255,255,255,0.07)"}`,
+                        cursor: isFetching ? "default" : "pointer", textAlign: "right",
+                      }}>
+                      {/* Status dot / spinner */}
                       {isFetching
-                        ? <motion.div style={{ width: 14, height: 14, borderRadius: "50%", border: "2px solid transparent", borderTopColor: "#8B5CF6", borderRightColor: "rgba(139,92,246,0.35)" }}
+                        ? <motion.div style={{ width: 10, height: 10, borderRadius: "50%", border: "2px solid transparent", borderTopColor: "#8B5CF6", borderRightColor: "rgba(139,92,246,0.30)", flexShrink: 0 }}
                             animate={{ rotate: 360 }} transition={{ duration: 0.9, repeat: Infinity, ease: "linear" }} />
-                        : <span style={{ fontSize: 10, fontWeight: 900, fontFamily: "monospace", color: "rgba(196,181,253,0.92)" }}>{slot.tag}</span>
+                        : <div style={{ width: 10, height: 10, borderRadius: "50%", background: isReady ? "#22c55e" : isFailed ? "#ef4444" : "rgba(255,255,255,0.18)", flexShrink: 0 }} />
                       }
-                    </div>
-                    {/* Status dot */}
-                    <div style={{ width: 8, height: 8, borderRadius: "50%", background: isReady ? "#22c55e" : isFailed ? "#ef4444" : "rgba(255,255,255,0.16)" }} />
-                  </div>
-                  {/* Tag label */}
-                  <p style={{ margin: 0, fontSize: 13, fontWeight: 800, fontFamily: "Cairo", color: "rgba(255,255,255,0.88)", lineHeight: 1.2 }}>{slot.tag}</p>
-                  {/* Short desc */}
-                  {def && <p style={{ margin: "3px 0 0", fontSize: 9, fontFamily: "Cairo", color: "rgba(255,255,255,0.28)", lineHeight: 1.3 }}>{def.desc}</p>}
-                </button>
-              );
-            })}
-          </div>
+                      {/* Tag name */}
+                      <span style={{ flex: 1, fontSize: 13, fontWeight: 900, fontFamily: "monospace", color: "rgba(255,255,255,0.88)", direction: "ltr", textAlign: "left" }}>{slot.tag}</span>
+                      {/* Play icon */}
+                      <Play className="w-4 h-4 shrink-0" style={{ color: isReady ? "rgba(167,139,250,0.90)" : "rgba(255,255,255,0.18)" }} />
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
         </div>
 
         {/* Episode comments */}
