@@ -230,11 +230,13 @@ const STATIC_PICKER: Record<QualityKey, { site: string; tag: string; name: strin
     { site: "animewitcher", tag: "AW", name: "AnimeWitcher" },
     { site: "sanime",       tag: "SA", name: "SAnime"       },
     { site: "animeify",     tag: "AF", name: "أنمي فاي"     },
+    { site: "anifox",       tag: "FX", name: "ANIFOX"       },
   ],
   "480p": [
     { site: "animewitcher", tag: "AW", name: "AnimeWitcher" },
     { site: "animeify",     tag: "AF", name: "أنمي فاي"     },
     { site: "sanime",       tag: "SA", name: "SAnime"       },
+    { site: "anifox",       tag: "FX", name: "ANIFOX"       },
   ],
 };
 

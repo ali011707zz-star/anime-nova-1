@@ -12006,11 +12006,11 @@ router.get("/anime/fetch-source", async (req, res) => {
     "animewitcher",  // 🗄️ DB-first aw_links (142k) → Algolia fallback ✅
     "anifox",        // 📦 12 مصدر — Archive/MediaFire/MP4Upload/Uqload ✅
     "sanime",        // 🎌 MP4 مباشر عربي مدبلج ✅
+    "animeify",      // 🎬 أنمي فاي — MEGA/Streamtape/MediaFire ✅ (مُعاد تفعيله)
     // ── معطّلة 2026-08-02 بطلب المستخدم (تحسين التزامن) ──────────────────────
     // "anslayer":   0 نتائج لكثير من الأنمي + بطيء (2s+)
     // "anineko":    متوسط (3s) — معطّل
     // "anikoto":    معطّل
-    // "animeify":   الأبطأ (5s) — معطّل
     // "animekai":   معطّل
     // "anipub":     معطّل
     // ── مُعطَّلة سابقاً ─────────────────────────────────────────────────────

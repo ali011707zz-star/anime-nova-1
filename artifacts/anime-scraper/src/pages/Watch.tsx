@@ -190,6 +190,30 @@ const SCRAPER_DEFS: { site: string; name: string; desc: string; tag: string; aud
 /** مجموعة المصادر العربية — لا تعرض زر الترجمة الخارجية لها */
 const ARABIC_SITES = new Set(SCRAPER_DEFS.filter(d => d.isArabic).map(d => d.site));
 
+/* ── Static picker للويب: جودة → مصادر (تظهر فوراً دون جلب مسبق) ── */
+type WebQualityKey = "1080p" | "720p" | "480p";
+const STATIC_PICKER_WEB: Record<WebQualityKey, { site: string; tag: string; name: string }[]> = {
+  "1080p": [
+    { site: "kawaii",       tag: "KW", name: "كواي أنمي"    },
+    { site: "anikoto",      tag: "AK", name: "AniKoto"      },
+    { site: "anineko",      tag: "AN", name: "AniNeko"      },
+    { site: "animewitcher", tag: "AW", name: "AnimeWitcher" },
+  ],
+  "720p": [
+    { site: "animewitcher", tag: "AW", name: "AnimeWitcher" },
+    { site: "sanime",       tag: "SA", name: "سـAnime"       },
+    { site: "animeify",     tag: "AF", name: "أنمي فاي"      },
+    { site: "anifox",       tag: "FX", name: "ANIFOX"        },
+  ],
+  "480p": [
+    { site: "sanime",       tag: "SA", name: "سـAnime"       },
+    { site: "animeify",     tag: "AF", name: "أنمي فاي"      },
+    { site: "anifox",       tag: "FX", name: "ANIFOX"        },
+    { site: "anslayer",     tag: "AS", name: "أنمي سلاير"    },
+  ],
+};
+const WEB_Q_KEYS: WebQualityKey[] = ["1080p", "720p", "480p"];
+
 /**
  * الموجة الأولى من المصادر التي تُجرَّب فوراً عند فتح الحلقة — أسرع/أوثق المصادر تاريخياً.
  * بقية المصادر (~20 موقع) تُجرَّب فقط لو ما لقينا مصدر شغّال خلال 1.8 ثانية،
@@ -1051,6 +1075,7 @@ function ScraperPicker({
   singleSite?: string | null;
 }) {
   const VISIBLE_DEFS = singleSite ? SCRAPER_DEFS.filter(d => d.site === singleSite) : SCRAPER_DEFS;
+  const [webQual, setWebQual] = useState<WebQualityKey>("1080p");
   /* anyFetching: true while at least one scraper is actively running
      hasIdleScrapers: true whenever any scraper is still untried (idle)
      allScrapersComplete: all scrapers done — none fetching, none idle
@@ -1319,129 +1344,95 @@ function ScraperPicker({
       <div className="flex-1 overflow-y-auto" style={{ scrollbarWidth: "none" }}>
         {HeroSection}
 
-        {/* ── Watch / Sources section header ── */}
-        <div className="px-4 mt-6 mb-1">
-          <div className="flex items-center justify-between mb-2">
-            <div className="flex items-center gap-2">
-              <div className="w-1 h-4 bg-primary rounded-full" />
-              <h2 className="text-[13px] font-black font-['Cairo']">مصادر المشاهدة</h2>
-            </div>
-            {(hasSources || hasBackupSources) && (
-              <span className="px-2.5 py-1 rounded-xl text-[10px] font-black font-['Cairo']"
-                style={{ background: "rgba(52,211,153,0.12)", border: "1px solid rgba(52,211,153,0.26)", color: "rgba(110,231,183,0.82)" }}>
-                {displaySources.length + embedFallbacks.length} مصدر
-              </span>
-            )}
+        {/* ── Static picker: تبويبات الجودة → بطاقات المصادر ── */}
+        <div className="px-4 mt-5 mb-3">
+          <div className="flex items-center gap-2 mb-3">
+            <div className="w-1 h-4 bg-primary rounded-full" />
+            <h2 className="text-[13px] font-black font-['Cairo']">اختر المصدر</h2>
           </div>
-          {(hasSources || hasBackupSources) && (
-            <div className="px-3 py-2.5 rounded-xl flex items-center gap-2.5 mb-3"
-              style={{ background: "rgba(251,191,36,0.07)", border: "1px solid rgba(251,191,36,0.15)" }}>
-              <span className="text-sm shrink-0">⚠️</span>
-              <p className="text-[10px] text-amber-200/55 font-['Cairo'] leading-snug">
-                <span className="text-amber-300/75 font-black">السيرفر لا يعمل؟</span> جرّب سيرفراً آخر.
-              </p>
-            </div>
-          )}
-        </div>
 
-        {(hasSources || hasBackupSources) ? (
-          <>
-            {/* ── Main sources: Arabic / Japanese ── */}
-            {(["1080p FHD", "720p HD", "360p SD"] as Quality[]).map(q => {
-              const srcs = grouped[q];
-              if (!srcs.length) return null;
-              const qs = QUALITY_STYLE[q];
-              let rowIdx = 0;
-              for (const prevQ of ["1080p FHD", "720p HD", "360p SD"] as Quality[]) {
-                if (prevQ === q) break;
-                rowIdx += grouped[prevQ].length;
-              }
+          {/* Quality tabs */}
+          <div className="flex gap-2 mb-4">
+            {WEB_Q_KEYS.map(qk => (
+              <button key={qk} onClick={() => setWebQual(qk)}
+                className="flex-1 py-2.5 rounded-2xl text-[12px] font-black font-['Cairo'] transition-all active:scale-95"
+                style={webQual === qk
+                  ? { background: "rgba(124,58,237,0.55)", border: "1px solid rgba(139,92,246,0.60)", color: "rgba(196,181,253,1)" }
+                  : { background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", color: "rgba(255,255,255,0.40)" }
+                }>
+                {qk}
+              </button>
+            ))}
+          </div>
+
+          {/* Site cards */}
+          <div className="flex flex-col gap-2">
+            {(STATIC_PICKER_WEB[webQual] || []).map(slot => {
+              const status  = slotStatus[slot.site] || "idle";
+              const srcs    = (slotSources[slot.site] || []).filter(shouldShowSrc);
+              const bestSrc = srcs.length
+                ? [...srcs].sort((a, b) => (b.qualityRank ?? 0) - (a.qualityRank ?? 0))[0]
+                : null;
               return (
-                <div key={q}>
-                  <div className="flex items-center gap-2 px-4 pt-3 pb-2">
-                    <div className="w-1.5 h-1.5 rounded-full shrink-0"
-                      style={{ background: qs.dot, boxShadow: `0 0 6px ${qs.dot}88` }} />
-                    <span className="text-[10px] font-bold font-['Cairo'] tracking-wider" style={{ color: qs.text }}>
-                      {Q_LABEL[q]}
-                    </span>
-                    <span className="mr-auto font-mono text-[9px] font-bold px-1.5 py-0.5 rounded"
-                      style={{ background: qs.badge, border: `1px solid ${qs.border}`, color: qs.text }}>
-                      {srcs.length}
-                    </span>
+                <div key={slot.site}
+                  className="flex items-center gap-3 px-3.5 py-3 rounded-2xl"
+                  style={{
+                    background: status === "failed" ? "rgba(239,68,68,0.06)" : "rgba(255,255,255,0.03)",
+                    border: `1px solid ${status === "failed" ? "rgba(239,68,68,0.20)" : status === "ready" ? "rgba(52,211,153,0.22)" : "rgba(255,255,255,0.08)"}`,
+                  }}>
+                  {/* Tag badge */}
+                  <div className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0 font-mono text-[11px] font-black"
+                    style={{ background: "rgba(124,58,237,0.18)", border: "1px solid rgba(139,92,246,0.28)", color: "rgba(196,181,253,0.90)" }}>
+                    {slot.tag}
                   </div>
-                  {srcs.map((src, i) => (
-                    <SourceRow key={`${src.site}-${rowIdx + i}`} src={src} idx={rowIdx + i} onPlaySrc={onPlaySrc} />
-                  ))}
+                  {/* Name + status */}
+                  <div className="flex-1 min-w-0">
+                    <p className="text-white/85 text-[13px] font-black font-['Cairo'] leading-tight">{slot.name}</p>
+                    {status === "ready" && srcs.length > 0 && (
+                      <p className="text-emerald-400/70 text-[10px] font-['Cairo'] mt-0.5">{srcs.length} سيرفر جاهز ✓</p>
+                    )}
+                    {status === "fetching" && (
+                      <p className="text-violet-400/60 text-[10px] font-['Cairo'] mt-0.5">جاري الجلب...</p>
+                    )}
+                    {status === "failed" && (
+                      <p className="text-red-400/60 text-[10px] font-['Cairo'] mt-0.5">لم يُعثر على مصدر</p>
+                    )}
+                  </div>
+                  {/* Action button */}
+                  {status === "idle" && (
+                    <button onClick={() => onFetchSite(slot.site)}
+                      className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-[12px] font-black font-['Cairo'] active:scale-95 transition-transform shrink-0"
+                      style={{ background: "rgba(124,58,237,0.28)", border: "1px solid rgba(139,92,246,0.38)", color: "rgba(196,181,253,0.92)" }}>
+                      جلب
+                    </button>
+                  )}
+                  {status === "fetching" && (
+                    <div className="w-8 h-8 flex items-center justify-center shrink-0">
+                      <motion.div
+                        className="w-5 h-5 rounded-full border-2 border-transparent border-t-violet-500 border-r-violet-500/40"
+                        animate={{ rotate: 360 }} transition={{ duration: 0.9, repeat: Infinity, ease: "linear" }}
+                      />
+                    </div>
+                  )}
+                  {status === "ready" && bestSrc && (
+                    <button onClick={() => onPlaySrc(bestSrc)}
+                      className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-[12px] font-black font-['Cairo'] active:scale-95 transition-transform shrink-0"
+                      style={{ background: "linear-gradient(135deg,rgba(124,58,237,0.90),rgba(91,33,182,0.96))", border: "1px solid rgba(167,139,250,0.25)", color: "white" }}>
+                      <Play className="w-3 h-3 fill-white" />تشغيل
+                    </button>
+                  )}
+                  {status === "failed" && (
+                    <button onClick={() => onFetchSite(slot.site)}
+                      className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-[12px] font-black font-['Cairo'] active:scale-95 transition-transform shrink-0"
+                      style={{ background: "rgba(239,68,68,0.10)", border: "1px solid rgba(239,68,68,0.22)", color: "rgba(252,165,165,0.80)" }}>
+                      إعادة
+                    </button>
+                  )}
                 </div>
               );
             })}
-
-
-            {/* ── Backup / embed sources section (mega / vidmoly) ── */}
-            {hasBackupSources && (
-              <div className="mt-5 px-4">
-                <div className="flex items-center gap-2 mb-2">
-                  <div className="w-1 h-4 rounded-full" style={{ background: "rgba(99,102,241,0.85)" }} />
-                  <h2 className="text-[13px] font-black font-['Cairo']">سيرفرات احتياطية</h2>
-                  <span className="mr-auto font-mono text-[9px] font-bold px-1.5 py-0.5 rounded"
-                    style={{ background: "rgba(99,102,241,0.12)", border: "1px solid rgba(99,102,241,0.28)", color: "rgba(165,180,252,0.80)" }}>
-                    {embedFallbacks.length}
-                  </span>
-                </div>
-                <div className="px-3 py-2 rounded-xl flex items-center gap-2 mb-2"
-                  style={{ background: "rgba(99,102,241,0.07)", border: "1px solid rgba(99,102,241,0.18)" }}>
-                  <span className="text-sm shrink-0">ℹ️</span>
-                  <p className="text-[10px] font-['Cairo'] leading-snug" style={{ color: "rgba(165,180,252,0.60)" }}>
-                    تُشغَّل داخل مشغّل مدمج — جرّبها إن لم تعمل المصادر المباشرة
-                  </p>
-                </div>
-                <div className="rounded-2xl overflow-hidden"
-                  style={{ border: "1px solid rgba(99,102,241,0.15)", background: "rgba(99,102,241,0.04)" }}>
-                  {embedFallbacks.map((src, i) => (
-                    <SourceRow key={`embed-backup-${i}`} src={src} idx={i} onPlaySrc={onPlaySrc} />
-                  ))}
-                </div>
-              </div>
-            )}
-          </>
-        ) : (hasIdleScrapers || anyFetching) ? (
-          /* جاري البحث التلقائي — لا تُظهر قائمة المصادر أبداً */
-          <motion.div
-            initial={{ opacity: 0 }} animate={{ opacity: 1 }}
-            className="flex flex-col items-center gap-3 py-10 px-8">
-            <div className="relative w-8 h-8">
-              <div className="absolute inset-0 rounded-full border-2 border-violet-500/15" />
-              <motion.div
-                className="absolute inset-0 rounded-full border-2 border-transparent border-t-violet-500 border-r-violet-500/40"
-                animate={{ rotate: 360 }}
-                transition={{ duration: 0.9, repeat: Infinity, ease: "linear" }}
-              />
-            </div>
-            <p className="text-white/55 text-[12px] font-['Cairo'] text-center">جاري البحث عن مصادر...</p>
-          </motion.div>
-        ) : (
-          <motion.div
-            initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}
-            className="flex flex-col items-center justify-center py-10 gap-5 px-8">
-            <div className="w-16 h-16 rounded-3xl flex items-center justify-center"
-              style={{ background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.18)" }}>
-              <AlertTriangle className="w-7 h-7 text-red-400/60" />
-            </div>
-            <div className="text-center flex flex-col gap-2">
-              <p className="text-white/70 text-[16px] font-black font-['Cairo']">الحلقة {ep} غير متوفرة بعد</p>
-              <p className="text-white/28 text-[12px] font-['Cairo'] leading-relaxed">
-                المصادر العربية تتأخر عادةً ٢–٣ حلقات عن البث الأصلي.
-              </p>
-            </div>
-            {ep > 1 && (
-              <button onClick={onPrevEp}
-                className="flex items-center gap-2 px-5 py-2.5 rounded-2xl text-[13px] font-black font-['Cairo'] active:scale-95 transition-transform"
-                style={{ background: "rgba(124,58,237,0.18)", border: "1px solid rgba(124,58,237,0.30)", color: "rgba(196,181,253,0.90)" }}>
-                <ChevronRight className="w-4 h-4" />جرّب الحلقة {ep - 1}
-              </button>
-            )}
-          </motion.div>
-        )}
+          </div>
+        </div>
 
         {/* Episode comments */}
         <EpComments commKey={`nova-ep-comments-${animeId}-${ep}`} />
@@ -2891,7 +2882,7 @@ export default function WatchPage() {
      فلن تظهر شاشة السيرفرات مطلقاً؛ إن لم يُعثر على أي مصدر بهذه السرعة تظهر الشاشة
      لتسمح للمستخدم باختيار مصدر يدوياً. هذا يمنع "الفلاش" السابق (ظهور الشاشة لثوانٍ
      ثم اختفاؤها فجأة عند نجاح أول مصدر). */
-  const [showPicker,   setShowPicker]   = useState(false);
+  const [showPicker,   setShowPicker]   = useState(true);
   // failedSrcToast: shown briefly when all servers in a tier fail → lets user know why they're back at picker
   const [failedSrcToast, setFailedSrcToast] = useState(false);
   // keep phaseRef in sync so async fetch handlers can guard against updating picker state while player is active
@@ -3202,7 +3193,8 @@ export default function WatchPage() {
       try { v.pause(); v.src = ""; } catch {}
     });
     if (phase === "player") {
-      /* From player → go back to source picker (show full picker so user can choose) */
+      /* From player → go back to source picker */
+      autoPlayedRef.current = false;   // السماح بـ auto-play عند اختيار مصدر جديد
       setShowPicker(true);
       setPhase("picker");
     } else {
@@ -3289,20 +3281,7 @@ export default function WatchPage() {
           handlePlaySrc(sortedSrcs[0]);
         }
 
-        /* تحميل خلفي: بعد تشغيل أي مصدر، اكشط بقية المصادر الخاملة تلقائياً
-           بتأخير 70ms بين كل طلب لتوزيع الحمل على السيرفر */
-        if (!bgLoad && !autoFetchAllRef.current) {
-          autoFetchAllRef.current = true;
-          const otherSites = SCRAPER_DEFS.filter(
-            d => d.site !== site && slotStatusRef.current[d.site] === "idle"
-          );
-          otherSites.forEach((d, i) => {
-            const tid = window.setTimeout(() => {
-              handleFetchSite(d.site, true);
-            }, 70 * (i + 1));
-            pendingTimeoutsRef.current.push(tid);
-          });
-        }
+        /* لا جلب خلفي — المستخدم يختار المصادر يدوياً عبر static picker */
       } else {
         setSlotStatus(prev => ({ ...prev, [site]: "failed" }));
       }
@@ -3343,30 +3322,14 @@ export default function WatchPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  /* ── Auto-fetch on mount: يُشغَّل PRIORITY_FETCH_SITES فوراً عند فتح الحلقة ──
-     أول مصدر يصل → يُشغَّل تلقائياً (auto-play logic في handleFetchSite، bgLoad=false).
-     بعد أول نجاح → بقية المصادر تُكشَّف خلفياً تلقائياً.
-     quick-resume لا يزال يعمل: يُفعَّل أولاً من useEffect منفصل أعلاه.
-     Fallback: إذا فشلت كل مصادر الأولوية → picker بعد 8s للاختيار اليدوي. ── */
+  /* ── Static picker: المستخدم يختار المصدر يدوياً — لا جلب تلقائي عند الفتح ──
+     المصادر تُجلب فقط عند الضغط على بطاقة المصدر (onFetchSite → handleFetchSite).
+     quick-resume لا يزال يعمل عبر useEffect المنفصل أعلاه. ── */
   useEffect(() => {
     if (!animeId && !titleParam) return;
     autoPlayedRef.current   = false;
     autoFetchAllRef.current = false;
     inFlightRef.current     = new Set();
-
-    // ابدأ مصادر الأولوية فوراً (stagger 80ms) — الأول يُشغَّل تلقائياً
-    Array.from(PRIORITY_FETCH_SITES).forEach((site, i) => {
-      const tid = window.setTimeout(() => handleFetchSite(site, false), 80 * i);
-      pendingTimeoutsRef.current.push(tid);
-    });
-    // ابدأ بقية المصادر خلفياً بعد تأخير قصير (لا تعطي الأولوية لكنها تعمل تلقائياً)
-    const priDelay = PRIORITY_FETCH_SITES.size * 80 + 300;
-    SCRAPER_DEFS.filter(d => !PRIORITY_FETCH_SITES.has(d.site)).forEach((d, i) => {
-      const tid = window.setTimeout(() => handleFetchSite(d.site, true), priDelay + 180 * i);
-      pendingTimeoutsRef.current.push(tid);
-    });
-    // لا يوجد fallback timer للـ picker — حالة الخطأ تظهر تلقائياً عند انتهاء كل المصادر
-
     return () => {
       pendingTimeoutsRef.current.forEach(id => window.clearTimeout(id));
       pendingTimeoutsRef.current = [];
