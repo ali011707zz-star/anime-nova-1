@@ -210,7 +210,6 @@ const STATIC_PICKER_WEB: Record<WebQualityKey, { site: string; tag: string }[]> 
   "480p": [
     { site: "animewitcher", tag: "AW" },
     { site: "animeify",     tag: "AF" },
-    { site: "sanime",       tag: "SA" },
     { site: "anifox",       tag: "FX" },
   ],
 };
@@ -1386,13 +1385,13 @@ function ScraperPicker({
                   const defInfo    = SCRAPER_DEFS.find(d => d.site === slot.site);
                   return (
                     <button key={`${qk}-${slot.site}`}
-                      onClick={() => { if (isReady && bestSrc) onPlaySrc(bestSrc); else if (!isFetching && !isFailed) onFetchSite(slot.site); }}
+                      onClick={() => { if (isReady && bestSrc) onPlaySrc(bestSrc); else if (!isFetching) onFetchSite(slot.site); }}
                       style={{
                         display: "flex", alignItems: "center", gap: 11, width: "100%",
                         padding: "12px 14px", borderRadius: 16,
                         background: isReady ? "rgba(34,197,94,0.07)" : isFailed ? "rgba(239,68,68,0.04)" : isFetching ? "rgba(139,92,246,0.08)" : "rgba(255,255,255,0.03)",
                         border: `1px solid ${isReady ? "rgba(34,197,94,0.22)" : isFailed ? "rgba(239,68,68,0.14)" : isFetching ? "rgba(139,92,246,0.24)" : "rgba(255,255,255,0.07)"}`,
-                        cursor: (isFetching || isFailed) ? "default" : "pointer", textAlign: "right",
+                        cursor: isFetching ? "default" : "pointer", textAlign: "right",
                         transition: "background 0.2s, border-color 0.2s",
                       }}>
                       {/* Status dot / spinner */}
@@ -3229,12 +3228,18 @@ export default function WatchPage() {
      bgLoad=true  → background loading after player started (no auto-play, no re-trigger)
      bgLoad=false → user tapped this scraper → auto-play first result + background-load rest */
   async function handleFetchSite(site: string, bgLoad = false) {
-    /* Guard: skip if already fetching/ready/failed — reads slotStatusRef (not the closed-over
+    /* Guard: skip if already fetching/ready — reads slotStatusRef (not the closed-over
        slotStatus state) so delayed/scheduled calls never re-fetch a site that already
-       resolved between the time they were scheduled and the time they fire. */
+       resolved between the time they were scheduled and the time they fire.
+       "failed" مسموح — يُعيد المحاولة عند النقر بدل إجبار المستخدم على تحديث الصفحة. */
     if (inFlightRef.current.has(site)) return;
     const knownStatus = slotStatusRef.current[site];
-    if (knownStatus === "fetching" || knownStatus === "ready" || knownStatus === "failed") return;
+    if (knownStatus === "fetching" || knownStatus === "ready") return;
+    if (knownStatus === "failed") {
+      // أعِد ضبط الحالة قبل المحاولة الجديدة
+      slotStatusRef.current = { ...slotStatusRef.current, [site]: "idle" };
+      setSlotStatus(prev => ({ ...prev, [site]: "idle" }));
+    }
 
     inFlightRef.current.add(site);
     setSlotStatus(prev => ({ ...prev, [site]: "fetching" }));
