@@ -68,55 +68,66 @@ export default function AnimationDetailScreen() {
     setLoading(true);
     setDescAr(null);
 
-    AsyncStorage.getItem(saveKey).then(v => setSaved(v === "1"));
+    let cancelled = false;
+    const ctrl = new AbortController();
+
+    AsyncStorage.getItem(saveKey).then(v => { if (!cancelled) setSaved(v === "1"); });
 
     const base = getBaseUrl();
     const detailCacheKey = `anim-detail-${type}-${id}`;
     const DETAIL_TTL = 2 * 60 * 60 * 1000; // ساعتان
 
     const processDetail = async (d: any) => {
+      if (cancelled) return;
       setDetail(d);
       setLoading(false);
       const overview = d.overview || "";
       if (!overview) return;
       const descCacheKey = `anim-desc-ar-${type}-${id}`;
       const cachedDesc = await AsyncStorage.getItem(descCacheKey);
+      if (cancelled) return;
       if (cachedDesc) { setDescAr(cachedDesc); return; }
       try {
-        const r2 = await fetch(`${base}/api/anime/translate?text=${encodeURIComponent(overview.slice(0, 480))}`);
+        const r2 = await fetch(
+          `${base}/api/anime/translate?text=${encodeURIComponent(overview.slice(0, 480))}`,
+          { signal: ctrl.signal },
+        );
         const d2 = await r2.json();
+        if (cancelled) return;
         if (d2.translated && d2.translated !== overview && d2.translated.length > 10) {
           setDescAr(d2.translated);
           AsyncStorage.setItem(descCacheKey, d2.translated).catch(() => {});
         } else {
           setDescAr(overview);
         }
-      } catch { setDescAr(overview); }
+      } catch (e: any) { if (!cancelled && e?.name !== "AbortError") setDescAr(overview); }
     };
 
     (async () => {
       /* 1. فحص الكاش المحلي أولاً → فتح فوري */
       try {
         const raw = await AsyncStorage.getItem(detailCacheKey);
-        if (raw) {
+        if (raw && !cancelled) {
           const { data, ts } = JSON.parse(raw);
           if (Date.now() - ts < DETAIL_TTL && data?.id) {
             await processDetail(data);
-            /* ما زال يُحدَّث في الخلفية */
           }
         }
       } catch { /* كاش تالف، تجاهل */ }
 
       /* 2. جلب من API (دائماً لضمان البيانات محدّثة) */
+      if (cancelled) return;
       try {
-        const r = await fetch(`${base}/api/animation/detail?type=${type}&id=${id}`);
+        const r = await fetch(`${base}/api/animation/detail?type=${type}&id=${id}`, { signal: ctrl.signal });
         const d = await r.json();
-        if (d?.id) {
+        if (d?.id && !cancelled) {
           await processDetail(d);
           AsyncStorage.setItem(detailCacheKey, JSON.stringify({ data: d, ts: Date.now() })).catch(() => {});
         }
-      } catch { setLoading(false); }
+      } catch (e: any) { if (!cancelled && e?.name !== "AbortError") setLoading(false); }
     })();
+
+    return () => { cancelled = true; ctrl.abort(); };
   }, [type, id]); // eslint-disable-line
 
   const toggleSave = useCallback(async () => {

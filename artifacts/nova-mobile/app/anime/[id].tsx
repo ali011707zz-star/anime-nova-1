@@ -235,10 +235,12 @@ export default function AnimeDetailScreen() {
       if (a?.description) {
         const cacheKey = `desc-ar-${id}`;
         AsyncStorage.getItem(cacheKey).then(cached => {
+          if (controller.signal.aborted) return;
           if (cached) { setDescAr(cached); return; }
           const stripped = stripHtml(a.description).substring(0, 500);
-          fetch(`${getBaseUrl()}/api/anime/translate?text=${encodeURIComponent(stripped)}`)
+          fetch(`${getBaseUrl()}/api/anime/translate?text=${encodeURIComponent(stripped)}`, { signal: controller.signal })
             .then(r2 => r2.json()).then(d2 => {
+              if (controller.signal.aborted) return;
               const t = d2.translated;
               if (t && t !== stripped && t.length > 10) {
                 setDescAr(t);
@@ -246,7 +248,7 @@ export default function AnimeDetailScreen() {
               } else {
                 setDescAr(stripped);
               }
-            }).catch(() => { setDescAr(stripped); });
+            }).catch((e) => { if (e?.name !== "AbortError" && !controller.signal.aborted) setDescAr(stripped); });
         });
       }
     }).catch(() => { setLoadError(true); })

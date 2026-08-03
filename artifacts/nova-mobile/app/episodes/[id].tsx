@@ -125,33 +125,40 @@ export default function EpisodeListScreen() {
 
   useEffect(() => {
     if (!id) return;
+    const ctrl = new AbortController();
     setLoading(true);
     setEpData([]); setPage(1); setSearch("");
-    getWatched(id).then(setWatched);
-    getCommentCounts(id).then(setCommentCounts);
+    getWatched(id).then(v => { if (!ctrl.signal.aborted) setWatched(v); });
+    getCommentCounts(id).then(v => { if (!ctrl.signal.aborted) setCommentCounts(v); });
 
     fetch(`${getBaseUrl()}/api/anilist`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ query: ANIME_QUERY, variables: { id: parseInt(id) } }),
+      signal: ctrl.signal,
     }).then(r => r.json()).then(d => {
+      if (ctrl.signal.aborted) return;
       const a = d.data?.Media;
       setAnime(a);
       if (a?.idMal) {
-        fetch(`https://api.jikan.moe/v4/anime/${a.idMal}/episodes?page=1`)
+        fetch(`https://api.jikan.moe/v4/anime/${a.idMal}/episodes?page=1`, { signal: ctrl.signal })
           .then(r => r.json())
-          .then(d => { if (d.data) setEpData(d.data); })
-          .catch(() => {});
+          .then(d => { if (!ctrl.signal.aborted && d.data) setEpData(d.data); })
+          .catch((e) => { if (e?.name !== "AbortError") console.warn("[Episodes] jikan fetch error"); });
       }
-    }).finally(() => setLoading(false));
+    }).catch((e) => { if (e?.name !== "AbortError") console.warn("[Episodes] anilist fetch error"); })
+      .finally(() => { if (!ctrl.signal.aborted) setLoading(false); });
+    return () => ctrl.abort();
   }, [id]);
 
   /* Load comment counts from server (background, non-blocking) */
   useEffect(() => {
     if (!id) return;
-    fetch(`${getBaseUrl()}/api/comments/count?animeId=${id}`)
+    const ctrl = new AbortController();
+    fetch(`${getBaseUrl()}/api/comments/count?animeId=${id}`, { signal: ctrl.signal })
       .then(r => r.json())
       .then(d => {
+        if (ctrl.signal.aborted) return;
         if (d.counts && typeof d.counts === "object") {
           const numericCounts: Record<number, number> = {};
           for (const [k, v] of Object.entries(d.counts)) {
@@ -162,7 +169,8 @@ export default function EpisodeListScreen() {
           saveCommentCounts(id, numericCounts);
         }
       })
-      .catch(() => {});
+      .catch((e) => { if (e?.name !== "AbortError") console.warn("[Episodes] comment count error"); });
+    return () => ctrl.abort();
   }, [id]);
 
   const toggleWatched = useCallback((n: number) => {

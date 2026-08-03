@@ -194,7 +194,12 @@ export default function SearchScreen() {
       .then(v => { if (v) setHistory(JSON.parse(v)); });
   }, []);
 
-  const doSearch = useCallback(async (q: string, so: string, fo: string, st: string, ge: string, se: string) => {
+  const searchAbortRef = useRef<AbortController | null>(null);
+
+  const doSearch = useCallback(async (
+    q: string, so: string, fo: string, st: string, ge: string, se: string,
+    signal: AbortSignal
+  ) => {
     setLoading(true);
     try {
       let body: object;
@@ -213,22 +218,32 @@ export default function SearchScreen() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
+        signal,
       });
+      if (signal.aborted) return;
       const json = await res.json();
-      setResults(filterSafe(json.data?.Page?.media || []));
+      if (!signal.aborted) setResults(filterSafe(json.data?.Page?.media || []));
+    } catch (e: any) {
+      if (e?.name === "AbortError") return;
     } finally {
-      setLoading(false);
+      if (!signal.aborted) setLoading(false);
     }
   }, []);
 
   useEffect(() => {
     if (timer.current) clearTimeout(timer.current);
+    searchAbortRef.current?.abort();
     const hasFilters = format || status || genre || season;
     if (!query.trim() && !hasFilters) { setResults([]); setLoading(false); return; }
+    const ctrl = new AbortController();
+    searchAbortRef.current = ctrl;
     timer.current = setTimeout(() => {
-      doSearch(query, sort, format, status, genre, season);
+      doSearch(query, sort, format, status, genre, season, ctrl.signal);
     }, query.trim() ? 400 : 100);
-    return () => { if (timer.current) clearTimeout(timer.current); };
+    return () => {
+      if (timer.current) clearTimeout(timer.current);
+      ctrl.abort();
+    };
   }, [query, sort, format, status, genre, season]);
 
   function clearFilters() { setFormat(""); setStatus(""); setGenre(""); setSeason(""); }

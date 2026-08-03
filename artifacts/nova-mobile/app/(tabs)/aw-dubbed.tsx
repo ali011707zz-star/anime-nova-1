@@ -67,17 +67,27 @@ export default function AwDubbedTabScreen() {
   const [searchOpen,  setSearchOpen]  = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  const loadAbortRef = useRef<AbortController | null>(null);
+
   const loadPage = useCallback(async (p: number, reset = false) => {
+    if (reset) {
+      loadAbortRef.current?.abort();
+      loadAbortRef.current = new AbortController();
+    }
+    const ctrl = reset ? loadAbortRef.current! : new AbortController();
     reset ? setLoading(true) : setLoadingMore(true);
     try {
-      const r = await fetch(`${BASE}/api/aw-dubbed/catalog?page=${p}`);
+      const r = await fetch(`${BASE}/api/aw-dubbed/catalog?page=${p}`, { signal: ctrl.signal });
       const d = await r.json();
+      if (ctrl.signal.aborted) return;
       const results: AwSeries[] = d.results || [];
       setTotalPages(d.totalPages || 1);
       setSeries(prev => reset ? results : [...prev, ...results]);
       setPage(p);
-    } catch {}
-    setLoading(false); setLoadingMore(false);
+    } catch (e: any) {
+      if (e?.name === "AbortError") return;
+    }
+    if (!ctrl.signal.aborted) { setLoading(false); setLoadingMore(false); }
   }, []);
 
   useEffect(() => { loadPage(1, true); }, [loadPage]);

@@ -39,10 +39,12 @@ export default function LibraryScreen() {
   const [favChars, setFavChars] = useState<FavChar[]>([]);
 
   useEffect(() => {
+    let cancelled = false;
     AsyncStorage.getItem("fav-characters").then(raw => {
-      if (!raw) return;
+      if (cancelled || !raw) return;
       try { setFavChars(JSON.parse(raw)); } catch {}
     });
+    return () => { cancelled = true; };
   }, []);
 
   const refreshChars = useCallback(() => {

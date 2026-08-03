@@ -48,36 +48,44 @@ export default function AnimationEpisodesScreen() {
 
   useEffect(() => {
     if (!id || !type) return;
-    fetch(`${base}/api/animation/detail?type=${type}&id=${id}`)
+    const ctrl = new AbortController();
+    fetch(`${base}/api/animation/detail?type=${type}&id=${id}`, { signal: ctrl.signal })
       .then(r => r.json())
-      .then(d => setDetail(d))
-      .catch(() => {});
+      .then(d => { if (!ctrl.signal.aborted) setDetail(d); })
+      .catch((e) => { if (e?.name !== "AbortError") console.warn("[Episodes] detail fetch error", e?.message); });
+    return () => ctrl.abort();
   }, [type, id]);
 
   useEffect(() => {
     if (!id) return;
+    const ctrl = new AbortController();
     setEpLoading(true);
-    fetch(`${base}/api/animation/season?id=${id}&season=${selSeason}`)
+    fetch(`${base}/api/animation/season?id=${id}&season=${selSeason}`, { signal: ctrl.signal })
       .then(r => r.json())
       .then(d => {
+        if (ctrl.signal.aborted) return;
         setEpisodes(d.episodes || []);
         setEpLoading(false);
       })
-      .catch(() => setEpLoading(false));
+      .catch((e) => { if (e?.name !== "AbortError") setEpLoading(false); });
+    return () => ctrl.abort();
   }, [id, selSeason]);
 
   useEffect(() => {
     if (!episodes.length) return;
+    let cancelled = false;
     const loadProgress = async () => {
       const prog: Record<number, number> = {};
       for (const ep of episodes) {
+        if (cancelled) return;
         const key = `anim-wp-${id}-tv-${selSeason}-${ep.episode_number}`;
         const t = parseFloat((await AsyncStorage.getItem(key)) || "0");
         if (t > 0) prog[ep.episode_number] = t;
       }
-      setEpProgress(prog);
+      if (!cancelled) setEpProgress(prog);
     };
-    loadProgress();
+    loadProgress().catch(() => {});
+    return () => { cancelled = true; };
   }, [episodes, id, selSeason]);
 
   const seasons: Season[] = (detail?.seasons || []).filter((s: Season) => s.season_number > 0);

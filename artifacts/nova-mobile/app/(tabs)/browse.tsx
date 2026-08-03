@@ -157,21 +157,30 @@ export default function BrowseScreen() {
 
   /* load genre cover images */
   useEffect(() => {
+    const ctrl = new AbortController();
     const covers: Record<string,number> = {};
     Promise.all(GENRES_WITH_COVERS.map(async item => {
       try {
         const r = await fetch(`${getBaseUrl()}/api/anilist`, {
           method: "POST", headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ query: GENRE_COVER_QUERY(item.genre) }),
+          signal: ctrl.signal,
         });
         const d = await r.json();
         const id = d.data?.Page?.media?.[0]?.id;
         if (id) covers[item.genre] = id;
-      } catch {}
-    })).then(() => setGenreCovers({ ...covers }));
+      } catch (e: any) { if (e?.name === "AbortError") return; }
+    })).then(() => { if (!ctrl.signal.aborted) setGenreCovers({ ...covers }); });
+    return () => ctrl.abort();
   }, []);
 
+  const abortRef = useRef<AbortController | null>(null);
+
   const loadItems = useCallback(async (p: number, reset: boolean) => {
+    // إلغاء أي طلب سابق قبل إطلاق الجديد
+    abortRef.current?.abort();
+    const ctrl = new AbortController();
+    abortRef.current = ctrl;
     setLoading(true);
     const gen = ++genRef.current;
     try {
@@ -181,9 +190,10 @@ export default function BrowseScreen() {
           query: BROWSE_QUERY(sort, format, season, year, activeGenre),
           variables: { page: p },
         }),
+        signal: ctrl.signal,
       });
       const d = await r.json();
-      if (genRef.current !== gen) return;
+      if (genRef.current !== gen || ctrl.signal.aborted) return;
       const results: AnimeResult[] = (d.data?.Page?.media || [])
         .filter((a: AnimeResult) => !(a.genres || []).some(gx => BLOCKED.has(gx)));
       if (reset) setItems(results);
@@ -193,8 +203,10 @@ export default function BrowseScreen() {
       });
       setPage(p);
       setHasMore(results.length === 30);
+    } catch (e: any) {
+      if (e?.name === "AbortError") return;
     } finally {
-      if (genRef.current === gen) setLoading(false);
+      if (genRef.current === gen && !ctrl.signal.aborted) setLoading(false);
     }
   }, [sort, format, season, year, activeGenre]);
 

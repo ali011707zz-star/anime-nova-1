@@ -47,12 +47,14 @@ export default function DubbedDetailScreen() {
 
   useEffect(() => {
     if (!curSeason) return;
+    const ctrl = new AbortController();
     setEpLoading(true);
     setEpisodes([]);
-    fetch(`${BASE}/api/dubbed/episodes?series=${encodeURIComponent(curSeason.arabicToonsId)}`)
+    fetch(`${BASE}/api/dubbed/episodes?series=${encodeURIComponent(curSeason.arabicToonsId)}`, { signal: ctrl.signal })
       .then(r => r.json())
-      .then(d => { setEpisodes(d.episodes || []); setEpLoading(false); })
-      .catch(() => setEpLoading(false));
+      .then(d => { if (!ctrl.signal.aborted) { setEpisodes(d.episodes || []); setEpLoading(false); } })
+      .catch((e) => { if (e?.name !== "AbortError") setEpLoading(false); });
+    return () => ctrl.abort();
   }, [curSeason?.arabicToonsId]);
 
   const openWatch = (ep: Episode) => {

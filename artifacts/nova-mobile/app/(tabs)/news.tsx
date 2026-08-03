@@ -78,17 +78,19 @@ function timeAgo(ts: number | string): string {
   return `منذ ${Math.floor(days / 7)} أسبوع`;
 }
 
-async function gqlFetch(query: string): Promise<any> {
+async function gqlFetch(query: string, signal?: AbortSignal): Promise<any> {
   try {
     const r = await fetch(`${getBaseUrl()}/api/anilist`, {
       method: "POST",
       headers: { "Content-Type": "application/json", Accept: "application/json" },
       body: JSON.stringify({ query }),
+      signal,
     });
     if (!r.ok) return null;
     const json = await r.json();
     return json?.data?.Page ?? null;
-  } catch {
+  } catch (e: any) {
+    if (e?.name === "AbortError") throw e; // re-throw so Promise.all catches it
     return null;
   }
 }
@@ -135,6 +137,9 @@ export default function NewsScreen() {
   /* comment counts cache: newsId → count */
   const [commentCounts, setCommentCounts] = useState<Record<string, number>>({});
 
+  const aniAbortRef = useRef<AbortController | null>(null);
+  const newsAbortRef = useRef<AbortController | null>(null);
+
   /* ── load AniList data only when switching to those tabs ── */
   useEffect(() => {
     if (tab === "latestnews") return;
@@ -143,13 +148,17 @@ export default function NewsScreen() {
   }, [tab]);
 
   function loadAniList() {
+    aniAbortRef.current?.abort();
+    const ctrl = new AbortController();
+    aniAbortRef.current = ctrl;
     setAniLoading(true);
     setAniError(false);
     Promise.all([
-      gqlFetch(RECENTLY_AIRED_Q),
-      gqlFetch(UPCOMING_Q),
-      gqlFetch(TRENDING_Q),
+      gqlFetch(RECENTLY_AIRED_Q, ctrl.signal),
+      gqlFetch(UPCOMING_Q, ctrl.signal),
+      gqlFetch(TRENDING_Q, ctrl.signal),
     ]).then(([a, u, t]) => {
+      if (ctrl.signal.aborted) return;
       if (!a && !u && !t) { setAniError(true); return; }
       const schedules = ((a?.airingSchedules) || []).filter((s: any) => s?.media);
       const seen = new Set<number>();
@@ -161,13 +170,14 @@ export default function NewsScreen() {
       setUpcoming(u?.media || []);
       setTrending(t?.media || []);
       setAniLoaded(true);
-    }).catch(() => setAniError(true))
-      .finally(() => setAniLoading(false));
+    }).catch((e) => { if (e?.name !== "AbortError" && !ctrl.signal.aborted) setAniError(true); })
+      .finally(() => { if (!ctrl.signal.aborted) setAniLoading(false); });
   }
 
   /* ── load news on mount ── */
   useEffect(() => {
     loadNews(1);
+    return () => { newsAbortRef.current?.abort(); aniAbortRef.current?.abort(); };
   }, []);
 
   async function loadNews(page: number) {

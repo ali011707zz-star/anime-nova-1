@@ -921,7 +921,7 @@ export function RiftPlayer({
   /* ─── AniSkip: جلب أوقات المقدمة/النهاية إذا لم تُوفَّر بالمصدر ─── */
   useEffect(() => {
     if (skipIntroProp || skipOutroProp || !anilistId || !episode) return;
-    let cancelled = false;
+    const ctrl = new AbortController();
     (async () => {
       try {
         // 1. Get MAL ID from AniList
@@ -929,22 +929,26 @@ export function RiftPlayer({
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ query: "query($id:Int){Media(id:$id){idMal}}", variables: { id: anilistId } }),
+          signal: ctrl.signal,
         });
         const alData = await alRes.json();
         const malId: number | null = alData?.data?.Media?.idMal;
-        if (!malId || cancelled) return;
+        if (!malId) return;
         // 2. Fetch skip times from AniSkip
-        const skipRes = await fetch(`https://api.aniskip.com/v1/skip-times/${malId}/${episode}?types[]=op&types[]=ed`);
+        const skipRes = await fetch(
+          `https://api.aniskip.com/v1/skip-times/${malId}/${episode}?types[]=op&types[]=ed`,
+          { signal: ctrl.signal },
+        );
         const skipData = await skipRes.json();
-        if (cancelled || !skipData?.found) return;
+        if (!skipData?.found) return;
         for (const r of (skipData.results ?? [])) {
           const s = { start: r.interval.start_time, end: r.interval.end_time };
           if (r.skip_type === "op")  setFetchedSkipIntro(s);
           if (r.skip_type === "ed")  setFetchedSkipOutro(s);
         }
-      } catch {}
+      } catch (e: any) { if (e?.name !== "AbortError") console.warn("[RiftPlayer] AniSkip fetch error", e?.message); }
     })();
-    return () => { cancelled = true; };
+    return () => { ctrl.abort(); };
   }, [anilistId, episode]);
 
   /* ─── Auto-fetch subtitles via subtitle-tracks API (wyzie.ru + SubDL + HiAnime) ─── */
@@ -1092,6 +1096,25 @@ export function RiftPlayer({
     fadeIn();
     return () => { if (hideTimer.current) clearTimeout(hideTimer.current); };
   }, []);
+
+  /* ─── MASTER UNMOUNT CLEANUP — يُنظّف جميع الـ timers والموارد عند الخروج ─── */
+  useEffect(() => {
+    return () => {
+      // إيقاف الفيديو وتحرير المورد
+      try { videoRef.current?.seek(0); } catch {}
+      // إلغاء جميع الـ timers المعلّقة
+      if (hideTimer.current)       { clearTimeout(hideTimer.current);       hideTimer.current = null; }
+      if (feedbackTimer.current)   { clearTimeout(feedbackTimer.current);   feedbackTimer.current = null; }
+      if (tapTimer.current)        { clearTimeout(tapTimer.current);        tapTimer.current = null; }
+      if (longPressTimer.current)  { clearTimeout(longPressTimer.current);  longPressTimer.current = null; }
+      if (unlockTimer.current)     { clearTimeout(unlockTimer.current);     unlockTimer.current = null; }
+      if (postSeekTimer.current)   { clearTimeout(postSeekTimer.current);   postSeekTimer.current = null; }
+      if (loadTimeoutRef.current)  { clearTimeout(loadTimeoutRef.current);  loadTimeoutRef.current = null; }
+      // إلغاء rAF للترجمة
+      if (subRafRef.current) { cancelAnimationFrame(subRafRef.current); subRafRef.current = null; }
+      console.log("[RiftPlayer] 🧹 unmount cleanup done");
+    };
+  }, []); // eslint-disable-line
 
   /* ─── Back: lock to portrait then go back ─── */
   const handleBack = useCallback(() => {
@@ -1455,11 +1478,11 @@ export function RiftPlayer({
         }}
         bufferConfig={{
           minBufferMs: 1000,
-          maxBufferMs: 30000,
+          maxBufferMs: 15000,
           bufferForPlaybackMs: 150,
           bufferForPlaybackAfterRebufferMs: 1200,
-          backBufferDurationMs: 30000,
-          cacheSizeMB: 50,
+          backBufferDurationMs: 5000,
+          cacheSizeMB: 20,
         }}
         ignoreSilentSwitch="ignore"
         playInBackground={false}

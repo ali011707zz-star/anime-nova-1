@@ -135,21 +135,35 @@ export default function AnimationsScreen() {
     load(type, genre, sort, year, 1, gen);
   }, [type, genre, sort, year]);
 
+  const searchAbortRef = useRef<AbortController | null>(null);
   useEffect(() => {
     if (!searchQ.trim()) { setSearchResults([]); return; }
     if (searchTimer.current) clearTimeout(searchTimer.current);
+    searchAbortRef.current?.abort();
+    const ctrl = new AbortController();
+    searchAbortRef.current = ctrl;
     searchTimer.current = setTimeout(async () => {
       try {
         const base = getBaseUrl();
-        const r = await fetch(`${base}/api/animation/search?q=${encodeURIComponent(searchQ)}&type=${type}`);
+        const r = await fetch(
+          `${base}/api/animation/search?q=${encodeURIComponent(searchQ)}&type=${type}`,
+          { signal: ctrl.signal },
+        );
+        if (ctrl.signal.aborted) return;
         const d = await r.json();
-        const filtered = (d.results || []).filter((item: TmdbItem) => {
-          const orig = item.title || ""; const name = item.name || "";
-          return !hasCjk(orig) || !hasCjk(name);
-        });
-        setSearchResults(filtered.slice(0, 10));
-      } catch { setSearchResults([]); }
+        if (!ctrl.signal.aborted) {
+          const filtered = (d.results || []).filter((item: TmdbItem) => {
+            const orig = item.title || ""; const name = item.name || "";
+            return !hasCjk(orig) || !hasCjk(name);
+          });
+          setSearchResults(filtered.slice(0, 10));
+        }
+      } catch (e: any) { if (e?.name !== "AbortError") setSearchResults([]); }
     }, 350);
+    return () => {
+      if (searchTimer.current) clearTimeout(searchTimer.current);
+      ctrl.abort();
+    };
   }, [searchQ, type]);
 
   const handleTypeChange = (t: MediaType) => {

@@ -76,13 +76,12 @@ export default function HomeScreen() {
   type TodayEp = { animeId: number; name: string; episode: number; cover: string; year?: string };
   const [todayEps, setTodayEps] = useState<TodayEp[]>([]);
   useEffect(() => {
-    let cancelled = false;
-    fetch(`${getBaseUrl()}/api/anime/anslayer-latest`)
+    const ctrl = new AbortController();
+    fetch(`${getBaseUrl()}/api/anime/anslayer-latest`, { signal: ctrl.signal })
       .then(r => r.json())
-      .then((d: { items?: TodayEp[] }) => {
-        if (!cancelled) setTodayEps(d.items || []);
-      }).catch(() => {});
-    return () => { cancelled = true; };
+      .then((d: { items?: TodayEp[] }) => { if (!ctrl.signal.aborted) setTodayEps(d.items || []); })
+      .catch((e) => { if (e?.name !== "AbortError") console.warn("[Home] anslayer-latest fetch error"); });
+    return () => ctrl.abort();
   }, []);
 
   const isLoading = loadingT || loadingP || loadingA;
@@ -91,23 +90,23 @@ export default function HomeScreen() {
   const BASE_URL = getBaseUrl();
   const [dubbedSeries, setDubbedSeries] = useState<any[]>([]);
   useEffect(() => {
-    let cancelled = false;
-    fetch(`${BASE_URL}/api/dubbed/catalog?page=1`)
+    const ctrl = new AbortController();
+    fetch(`${BASE_URL}/api/dubbed/catalog?page=1`, { signal: ctrl.signal })
       .then(r => r.json())
-      .then(d => { if (!cancelled) setDubbedSeries((d.results || d.items || d.series || []).slice(0, 14)); })
-      .catch(() => {});
-    return () => { cancelled = true; };
+      .then(d => { if (!ctrl.signal.aborted) setDubbedSeries((d.results || d.items || d.series || []).slice(0, 14)); })
+      .catch((e) => { if (e?.name !== "AbortError") console.warn("[Home] dubbed/catalog fetch error"); });
+    return () => ctrl.abort();
   }, []);
 
   /* ── أنيميشن مدبلج (aw-dubbed) catalog ── */
   const [awDubbedSeries, setAwDubbedSeries] = useState<any[]>([]);
   useEffect(() => {
-    let cancelled = false;
-    fetch(`${BASE_URL}/api/aw-dubbed/catalog?page=1`)
+    const ctrl = new AbortController();
+    fetch(`${BASE_URL}/api/aw-dubbed/catalog?page=1`, { signal: ctrl.signal })
       .then(r => r.json())
-      .then(d => { if (!cancelled) setAwDubbedSeries((d.results || []).slice(0, 10)); })
-      .catch(() => {});
-    return () => { cancelled = true; };
+      .then(d => { if (!ctrl.signal.aborted) setAwDubbedSeries((d.results || []).slice(0, 10)); })
+      .catch((e) => { if (e?.name !== "AbortError") console.warn("[Home] aw-dubbed/catalog fetch error"); });
+    return () => ctrl.abort();
   }, []);
 
 
