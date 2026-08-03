@@ -623,28 +623,67 @@ router.get("/aw-dubbed/watch-src", async (req, res) => {
     if (!rows.length) { res.status(404).json({ error: "no sources found" }); return; }
 
     function serverLabel(srv: string): string {
-      if (srv === "PD") return "Pixeldrain";
-      if (srv === "MF") return "Mediafire";
-      if (srv === "KF") return "KrakenFiles";
-      if (srv === "VT") return "Vidtape";
+      if (srv === "PD")  return "Pixeldrain";
+      if (srv === "MF")  return "Mediafire";
+      if (srv === "MF2") return "Mediafire";
+      if (srv === "VT")  return "Vidtape";
       return srv;
     }
 
-    function toPlayUrl(link: string, srv: string): string {
-      // Pixeldrain: /u/{id} → /api/file/{id} (direct stream)
+    /** استخراج رابط التنزيل المباشر من صفحة Mediafire */
+    async function resolveMfUrl(link: string): Promise<string | null> {
+      try {
+        const r = await fetch(link, {
+          headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" },
+          signal: AbortSignal.timeout(8000),
+        });
+        if (!r.ok) return null;
+        const html = await r.text();
+        // رابط التنزيل المباشر في زر "Download File"
+        const m = html.match(/href="(https:\/\/download\d*\.mediafire\.com\/[^"]+)"/);
+        if (m) return m[1];
+        // نمط بديل
+        const m2 = html.match(/id="downloadButton"[^>]+href="([^"]+)"/);
+        if (m2) return m2[1];
+        return null;
+      } catch { return null; }
+    }
+
+    /** تحويل رابط أي خادم إلى رابط تشغيل مباشر; null = تخطي */
+    async function toPlayUrl(link: string, srv: string): Promise<string | null> {
+      // KrakenFiles — كل الروابط 404 (محذوفة) → تخطي
+      if (srv === "KF") return null;
+      // Pixeldrain: /u/{id} → /api/file/{id}?download (direct stream)
       if (srv === "PD" || link.includes("pixeldrain.com/u/")) {
         const id = link.split("/u/").pop()?.split("?")[0];
         if (id) return `https://pixeldrain.com/api/file/${id}`;
       }
+      // Mediafire: استخراج رابط التنزيل المباشر من الصفحة
+      if (srv === "MF" || srv === "MF2" || link.includes("mediafire.com")) {
+        return await resolveMfUrl(link);
+      }
       return link;
     }
 
-    const allSources = rows.map(row => ({
-      quality: row.quality || "720p",
-      name:    `AW·Dubbed · ${serverLabel(row.server)}`,
-      rawUrl:  toPlayUrl(row.link, row.server),
-      hlsUrl:  null,
-    }));
+    // استخراج الروابط بشكل متوازٍ
+    const resolved = await Promise.all(
+      rows.map(async row => {
+        const rawUrl = await toPlayUrl(row.link, row.server);
+        if (!rawUrl) return null;
+        return {
+          quality: row.quality || "720p",
+          name:    serverLabel(row.server),
+          rawUrl,
+          hlsUrl: null,
+        };
+      })
+    );
+    const allSources = resolved.filter(Boolean) as { quality: string; name: string; rawUrl: string; hlsUrl: null }[];
+
+    if (!allSources.length) {
+      res.status(404).json({ error: "لا توجد مصادر متاحة لهذه الحلقة حالياً" });
+      return;
+    }
 
     res.setHeader("Cache-Control", "public, max-age=300");
     res.json({ allSources, rawUrl: allSources[0]?.rawUrl ?? null, hlsUrl: null });
