@@ -1,19 +1,53 @@
 /**
  * aw-dubbed/watch.tsx — مشغّل أنيميشن مدبلج
+ * يجلب المصادر من /api/aw-dubbed/watch-src ثم يُحوّلها
+ * إلى PlayerSource المتوافق مع RiftPlayer (url مطلق + label + quality).
  */
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { getBaseUrl } from "@/utils/api";
-import { RiftPlayer } from "@/components/RiftPlayer";
+import { RiftPlayer, type PlayerSource, isValidPlayerSourceUrl } from "@/components/RiftPlayer";
 
-const BASE = getBaseUrl();
+const BASE = getBaseUrl(); // e.g. "https://animenovaa.duckdns.org"
 
-interface PlayerSource {
+/** الشكل الخام الذي يُرجعه الـ API */
+interface ApiSource {
   quality: string;
   name:    string;
   rawUrl:  string | null;
   hlsUrl:  string | null;
+}
+
+/** تحويل جودة النصية إلى الشكل المتوقع من RiftPlayer */
+function toRiftQuality(q: string): "1080p FHD" | "720p HD" | "360p SD" {
+  if (q.includes("1080")) return "1080p FHD";
+  if (q.includes("720"))  return "720p HD";
+  return "360p SD";
+}
+
+/** تحويل أي رابط (نسبي أو مطلق) إلى رابط HTTP مطلق */
+function toAbsoluteUrl(url: string | null | undefined): string | null {
+  if (!url) return null;
+  const u = url.trim();
+  if (u.startsWith("http://") || u.startsWith("https://")) return u;
+  if (u.startsWith("/")) return `${BASE}${u}`;
+  return null;
+}
+
+/** تحويل ApiSource[] إلى PlayerSource[] صالحة لـ RiftPlayer */
+function toRiftSources(apiSrcs: ApiSource[]): PlayerSource[] {
+  const out: PlayerSource[] = [];
+  for (const s of apiSrcs) {
+    const absUrl = toAbsoluteUrl(s.rawUrl) ?? toAbsoluteUrl(s.hlsUrl);
+    if (!absUrl || !isValidPlayerSourceUrl(absUrl)) continue;
+    out.push({
+      url:     absUrl,
+      label:   s.name || "مصدر",
+      quality: toRiftQuality(s.quality || "720p"),
+    });
+  }
+  return out;
 }
 
 export default function AwDubbedWatchScreen() {
@@ -51,11 +85,10 @@ export default function AwDubbedWatchScreen() {
       );
       const d = await r.json();
       if (!r.ok) throw new Error(d.error || "فشل تحميل المصادر");
-      const srcs: PlayerSource[] = (d.allSources || []).filter(
-        (s: PlayerSource) => s.rawUrl || s.hlsUrl,
-      );
-      if (!srcs.length) throw new Error("لا توجد مصادر متاحة");
-      setSources(srcs);
+
+      const riftSrcs = toRiftSources(d.allSources || []);
+      if (!riftSrcs.length) throw new Error("لا توجد مصادر متاحة لهذه الحلقة");
+      setSources(riftSrcs);
     } catch (e: any) {
       if (e?.name !== "AbortError") setError(e?.message || "خطأ في التحميل");
     } finally {
@@ -91,8 +124,7 @@ export default function AwDubbedWatchScreen() {
     <RiftPlayer
       sources={sources}
       title={displayTitle}
-      subtitle={`${season} • الحلقة ${ep}`}
-      poster={poster}
+      episodeTitle={`${season} • الحلقة ${ep}`}
       onBack={() => router.back()}
     />
   );

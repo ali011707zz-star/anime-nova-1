@@ -2,17 +2,14 @@
  * emailService.ts — إرسال بريد إلكتروني
  *
  * ترتيب الأولوية:
- *   1. Gmail REST API (HTTPS/443) — لا يتأثر بحجب منافذ SMTP — Google فقط
- *   2. SMTP (nodemailer + Gmail) — fallback إذا انفتحت المنافذ مستقبلاً
- *
- * متغيرات البيئة للـ Gmail REST API:
- *   GMAIL_CLIENT_ID      — OAuth2 Client ID من Google Cloud Console
- *   GMAIL_CLIENT_SECRET  — OAuth2 Client Secret
- *   GMAIL_REFRESH_TOKEN  — Refresh Token (نُولَّد مرة واحدة عبر OAuth consent)
- *   GMAIL_USER           — عنوان Gmail للإرسال منه (مثال: lya482569@gmail.com)
- *
- * متغيرات SMTP (fallback):
- *   SMTP_USER / SMTP_PASS / SMTP_HOST / SMTP_PORT
+ *   1. Resend API (HTTPS/443) — مجاني 3000 بريد/شهر، بدون بطاقة، بدون منافذ SMTP
+ *      RESEND_API_KEY — مفتاح من resend.com (مجاني)
+ *      RESEND_FROM    — عنوان الإرسال مثل "Anime NOVA <no-reply@yourdomain.com>"
+ *                       أو اتركه فارغاً لاستخدام onboarding@resend.dev
+ *   2. Gmail REST API (HTTPS/443) — لا يتأثر بحجب منافذ SMTP — Google فقط
+ *      GMAIL_CLIENT_ID + GMAIL_CLIENT_SECRET + GMAIL_REFRESH_TOKEN + GMAIL_USER
+ *   3. SMTP (nodemailer + Gmail) — fallback إذا انفتحت المنافذ مستقبلاً
+ *      SMTP_USER / SMTP_PASS / SMTP_HOST / SMTP_PORT
  */
 import nodemailer, { type Transporter } from "nodemailer";
 import { promises as dnsPromises } from "dns";
@@ -203,24 +200,26 @@ async function getTransporter(): Promise<Transporter> {
 }
 
 export async function initEmailService(): Promise<void> {
+  // 1. Resend
+  const resendKey = process.env.RESEND_API_KEY || await getConfig("resend_api_key").catch(() => null);
+  if (resendKey) {
+    console.log("[email] ✅ Resend API مُفعَّل (HTTPS/443 — مجاني)");
+    return;
+  }
+  // 2. Gmail REST API
   const creds = await getGmailCreds();
   if (creds) {
     console.log(`[email] ✅ Gmail REST API مُفعَّل → ${creds.gmailUser} (HTTPS/443)`);
     return;
   }
-  // لا يوجد Gmail API — جرّب SMTP
+  // 3. SMTP
   try {
     const t = await getTransporter();
     await t.verify();
     console.log("[email] ✅ SMTP متصل");
   } catch (err: any) {
-    if (err.message === "SMTP_NOT_CONFIGURED") {
-      console.error("[email] ❌ لا يوجد Gmail API ولا SMTP — البريد معطّل");
-      console.warn("[email] ⚠️  لتفعيل Gmail REST API أضف: GMAIL_CLIENT_ID + GMAIL_CLIENT_SECRET + GMAIL_REFRESH_TOKEN + GMAIL_USER");
-    } else {
-      console.error("[email] ❌ SMTP verify فشل:", err.message);
-      console.warn("[email] ⚠️  المنافذ 587/465 محجوبة — أضف Gmail API credentials لإصلاح دائم");
-    }
+    console.error("[email] ❌ البريد معطّل — أضف RESEND_API_KEY (مجاني من resend.com)");
+    console.warn("[email] ⚠️  سجّل على resend.com → API Keys → أنشئ مفتاحاً → أضفه للـ .env");
   }
 }
 
@@ -231,14 +230,51 @@ export interface SendResult {
   error?: string;
 }
 
-/** إرسال بريد: Gmail REST API أولاً، ثم SMTP كـ fallback */
+// ── Resend API (أسرع وأبسط — مجاني 3000 بريد/شهر بدون بطاقة) ──────────────
+async function sendViaResend(
+  to: string, subject: string, html: string, text: string,
+): Promise<void> {
+  const apiKey  = process.env.RESEND_API_KEY || await getConfig("resend_api_key");
+  if (!apiKey) throw new Error("RESEND_NOT_CONFIGURED");
+
+  const fromAddr = process.env.RESEND_FROM
+    || await getConfig("resend_from")
+    || "Anime NOVA <onboarding@resend.dev>";
+
+  const res = await fetch("https://api.resend.com/emails", {
+    method:  "POST",
+    headers: { "Authorization": `Bearer ${apiKey}`, "Content-Type": "application/json" },
+    body:    JSON.stringify({ from: fromAddr, to, subject, html, text }),
+    signal:  AbortSignal.timeout(15_000),
+  });
+
+  if (!res.ok) {
+    const err = await res.text().catch(() => "");
+    throw new Error(`Resend HTTP ${res.status}: ${err.slice(0, 200)}`);
+  }
+  console.log(`[email] ✅ Resend → ${to}`);
+}
+
+/** إرسال بريد: Resend أولاً ← Gmail REST API ← SMTP */
 async function sendEmail(
   to: string,
   subject: string,
   html: string,
   text: string,
 ): Promise<SendResult> {
-  // 1. Gmail REST API (HTTPS/443 — لا يُحجب)
+  // 1. Resend (HTTPS/443 — مجاني بدون بطاقة — الأسهل إعداداً)
+  try {
+    await sendViaResend(to, subject, html, text);
+    return { ok: true };
+  } catch (err: any) {
+    if (err.message !== "RESEND_NOT_CONFIGURED") {
+      console.error("[email] Resend فشل:", err.message);
+      return { ok: false, error: `Resend: ${err.message}` };
+    }
+    // لا يوجد RESEND_API_KEY → جرّب Gmail API
+  }
+
+  // 2. Gmail REST API (HTTPS/443 — لا يُحجب)
   try {
     await sendViaGmailApi(to, subject, html, text);
     return { ok: true };
@@ -250,7 +286,7 @@ async function sendEmail(
     // لا يوجد Gmail API credentials → جرّب SMTP
   }
 
-  // 2. SMTP fallback (Gmail App Password — يعمل إذا لم تكن المنافذ محجوبة)
+  // 3. SMTP fallback (يعمل إذا لم تكن المنافذ محجوبة)
   try {
     const t = await getTransporter();
     const smtpUser = process.env.SMTP_USER || await getConfig("smtp_user") || "";
@@ -260,7 +296,7 @@ async function sendEmail(
     return { ok: true, messageId: info.messageId };
   } catch (err: any) {
     const msg = err.message === "SMTP_NOT_CONFIGURED"
-      ? "البريد غير مفعّل — أضف Gmail API credentials (GMAIL_CLIENT_ID + GMAIL_CLIENT_SECRET + GMAIL_REFRESH_TOKEN + GMAIL_USER)"
+      ? "البريد معطّل — أضف RESEND_API_KEY (مجاني من resend.com) أو Gmail API credentials"
       : err.message;
     console.error("[email] SMTP فشل:", msg);
     return { ok: false, error: msg };
