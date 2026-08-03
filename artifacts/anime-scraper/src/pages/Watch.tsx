@@ -950,12 +950,7 @@ const SourceRow = memo(function SourceRow({ src, idx, onPlaySrc }: { src: Fetche
         </div>
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-1.5 flex-wrap mb-0.5">
-            <p className="text-white/90 text-[12px] font-black font-['Cairo'] leading-tight">سيرفر {idx + 1}</p>
-            <span className="text-[11px] font-black px-2 py-0.5 rounded-md tracking-wide"
-              dir="ltr"
-              style={{ color: "rgba(255,255,255,0.80)", background: "rgba(255,255,255,0.10)", border: "1px solid rgba(255,255,255,0.18)", fontFamily: "monospace" }}>
-              {tag}
-            </span>
+            <p className="text-white/90 text-[12px] font-black font-['Cairo'] leading-tight" dir="rtl">السيرفر <span className="font-mono" dir="ltr">{tag}</span></p>
             {isEngAudio && (
               <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-md font-['Cairo'] shrink-0"
                 style={{ background: "rgba(59,130,246,0.14)", border: "1px solid rgba(59,130,246,0.30)", color: "rgba(147,197,253,0.90)" }}>
@@ -986,7 +981,7 @@ const SourceRow = memo(function SourceRow({ src, idx, onPlaySrc }: { src: Fetche
             </a>
           )}
           <div className="flex items-center gap-0.5 px-2.5 py-1.5 rounded-xl active:scale-95 transition-transform"
-            style={{ background: "linear-gradient(135deg, rgba(124,58,237,0.90), rgba(91,33,182,0.96))", border: "1px solid rgba(167,139,250,0.25)", boxShadow: "0 2px 10px rgba(109,40,217,0.25)" }}>
+            style={{ background: "linear-gradient(135deg, rgba(16,185,129,0.92), rgba(5,150,105,0.97))", border: "1px solid rgba(52,211,153,0.35)", boxShadow: "0 2px 10px rgba(16,185,129,0.30)" }}>
             <Play className="w-2.5 h-2.5 text-white fill-white" />
             <span className="text-white text-[10.5px] font-black font-['Cairo']">تشغيل</span>
           </div>
@@ -1030,12 +1025,7 @@ const SourceGroupRow = memo(function SourceGroupRow({
         </div>
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-1.5 flex-wrap mb-0.5">
-            <p className="text-white/90 text-[12px] font-black font-['Cairo'] leading-tight">{def.name}</p>
-            <span className="text-[10px] font-black px-1.5 py-0.5 rounded font-mono"
-              dir="ltr"
-              style={{ color: "rgba(196,181,253,0.90)", background: "rgba(139,92,246,0.18)", border: "1px solid rgba(139,92,246,0.30)" }}>
-              {def.tag}
-            </span>
+            <p className="text-white/90 text-[12px] font-black font-['Cairo'] leading-tight" dir="rtl">السيرفر <span className="font-mono" dir="ltr">{def.tag}</span></p>
             {def.audioLang === "en" && (
               <span className="text-[9px] font-bold px-1.5 py-0.5 rounded font-['Cairo'] shrink-0"
                 style={{ background: "rgba(59,130,246,0.12)", border: "1px solid rgba(59,130,246,0.28)", color: "rgba(147,197,253,0.85)" }}>
@@ -1056,7 +1046,7 @@ const SourceGroupRow = memo(function SourceGroupRow({
             {Q_LABEL[q]}
           </span>
           <div className="flex items-center gap-0.5 px-2.5 py-1.5 rounded-xl"
-            style={{ background: "linear-gradient(135deg,rgba(124,58,237,0.90),rgba(91,33,182,0.96))", border: "1px solid rgba(167,139,250,0.25)", boxShadow: "0 2px 10px rgba(109,40,217,0.25)" }}>
+            style={{ background: "linear-gradient(135deg,rgba(16,185,129,0.92),rgba(5,150,105,0.97))", border: "1px solid rgba(52,211,153,0.35)", boxShadow: "0 2px 10px rgba(16,185,129,0.30)" }}>
             <Play className="w-2.5 h-2.5 text-white fill-white" />
             <span className="text-white text-[10.5px] font-black font-['Cairo']">تشغيل</span>
           </div>
@@ -1414,29 +1404,30 @@ function ScraperPicker({
                             boxShadow: isReady ? "0 0 6px rgba(34,197,94,0.55)" : "none",
                           }} />
                       }
-                      {/* Tag badge */}
-                      <span style={{
-                        fontSize: 12, fontWeight: 900, fontFamily: "monospace", letterSpacing: "0.04em",
-                        padding: "2px 7px", borderRadius: 6,
-                        color: isReady ? "rgba(167,139,250,0.95)" : "rgba(255,255,255,0.55)",
-                        background: isReady ? "rgba(139,92,246,0.18)" : "rgba(255,255,255,0.05)",
-                        border: `1px solid ${isReady ? "rgba(139,92,246,0.32)" : "rgba(255,255,255,0.09)"}`,
-                        direction: "ltr", flexShrink: 0,
-                      }}>{slot.tag}</span>
-                      {/* Source name */}
-                      <span style={{ flex: 1, fontSize: 12.5, fontWeight: 700, fontFamily: "'Cairo', sans-serif",
-                        color: isReady ? "rgba(255,255,255,0.85)" : isFailed ? "rgba(255,255,255,0.28)" : "rgba(255,255,255,0.55)",
+                      {/* Source name: "السيرفر KW" */}
+                      <span style={{ flex: 1, fontSize: 13, fontWeight: 800, fontFamily: "'Cairo', sans-serif",
+                        color: isReady ? "rgba(255,255,255,0.90)" : isFailed ? "rgba(255,255,255,0.28)" : "rgba(255,255,255,0.65)",
                         textAlign: "right", direction: "rtl", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-                      }}>{defInfo?.name || slot.tag}</span>
-                      {/* Play icon */}
+                      }}>
+                        السيرفر{" "}
+                        <span style={{ fontFamily: "monospace", direction: "ltr", display: "inline-block" }}>{slot.tag}</span>
+                      </span>
+                      {/* Action button */}
                       {isReady
-                        ? <div style={{ display: "flex", alignItems: "center", gap: 4, padding: "4px 10px", borderRadius: 10,
-                            background: "linear-gradient(135deg,rgba(124,58,237,0.85),rgba(91,33,182,0.95))",
-                            border: "1px solid rgba(167,139,250,0.28)", flexShrink: 0 }}>
+                        ? <div style={{ display: "flex", alignItems: "center", gap: 4, padding: "5px 12px", borderRadius: 10,
+                            background: "linear-gradient(135deg,rgba(16,185,129,0.92),rgba(5,150,105,0.97))",
+                            border: "1px solid rgba(52,211,153,0.35)", flexShrink: 0, boxShadow: "0 2px 8px rgba(16,185,129,0.28)" }}>
                             <Play className="w-3 h-3 text-white fill-white" />
                             <span style={{ fontSize: 11, fontWeight: 900, color: "white", fontFamily: "'Cairo', sans-serif" }}>تشغيل</span>
                           </div>
-                        : <Play className="w-4 h-4 shrink-0" style={{ color: "rgba(255,255,255,0.15)" }} />
+                        : isFetching
+                        ? <div style={{ flexShrink: 0, width: 8, height: 8, borderRadius: "50%", border: "2px solid transparent",
+                            borderTopColor: "#8B5CF6", borderRightColor: "rgba(139,92,246,0.30)" }} />
+                        : <div style={{ display: "flex", alignItems: "center", gap: 4, padding: "5px 12px", borderRadius: 10,
+                            background: "rgba(139,92,246,0.15)", border: "1px solid rgba(139,92,246,0.30)", flexShrink: 0,
+                            cursor: "pointer" }}>
+                            <span style={{ fontSize: 11, fontWeight: 900, color: "rgba(196,181,253,0.90)", fontFamily: "'Cairo', sans-serif" }}>اختيار</span>
+                          </div>
                       }
                     </button>
                   );

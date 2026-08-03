@@ -137,12 +137,14 @@ const CATALOG_TTL = 4 * 60 * 60_000; // 4 ساعات — أطول من قبل (�
 async function fetchStarCimaDubbed(path: string): Promise<any> {
   const hit = _catalogCache.get(path);
   if (hit && Date.now() - hit.ts < CATALOG_TTL) return hit.data;
+
+  // جرّب الـ disk cache أولاً (يبقى بعد restart)
+  const diskHit = _dcGet(path);
+  if (diskHit) {
+    _catalogCache.set(path, { data: diskHit, ts: Date.now() - CATALOG_TTL + 10 * 60_000 }); // يُجدَّد خلال 10 دقائق
+  }
+
   try {
-    // قبل الجلب من الشبكة، جرّب الـ disk cache (يبقى بعد restart)
-    const diskHit = _dcGet(path);
-    if (diskHit) {
-      _catalogCache.set(path, { data: diskHit, ts: Date.now() - CATALOG_TTL + 10 * 60_000 }); // يُجدَّد خلال 10 دقائق
-    }
     const r = await fetch(`${SC_BASE}${path}`, {
       headers: {
         "User-Agent": BROWSER_UA,
@@ -151,13 +153,19 @@ async function fetchStarCimaDubbed(path: string): Promise<any> {
       },
       signal: AbortSignal.timeout(12000),
     });
-    if (!r.ok) return null;
+    if (!r.ok) {
+      // إذا فشل الشبكة، ارجع للـ disk cache إن وُجد
+      if (diskHit) return diskHit;
+      return null;
+    }
     const data = await r.json();
     _catalogCache.set(path, { data, ts: Date.now() });
     _dcSet(path, data); // حفظ على القرص للـ restart القادم
     return data;
   } catch (e) {
     logger.warn({ err: e }, "dubbed: fetchStarCimaDubbed error");
+    // عند فشل الشبكة (CF block / timeout)، ارجع للـ disk cache إن وُجد
+    if (diskHit) return diskHit;
     return null;
   }
 }

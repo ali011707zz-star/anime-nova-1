@@ -219,24 +219,25 @@ const SITE_PRIORITY: Record<string, number> = {
 /* ── Picker ثابت: جودة → مصادر (تظهر فوراً دون أي جلب مسبق) ── */
 type QualityKey = "1080p" | "720p" | "480p";
 
-const STATIC_PICKER: Record<QualityKey, { site: string; tag: string; name: string }[]> = {
+const STATIC_PICKER: Record<QualityKey, { site: string; name: string }[]> = {
   "1080p": [
-    { site: "animewitcher", tag: "AW", name: "AnimeWitcher" },
-    { site: "sanime",       tag: "SA", name: "SAnime"       },
-    { site: "animeify",     tag: "AF", name: "أنمي فاي"     },
-    // kawaii: صيانة مؤقتة — يُضاف لاحقاً
+    { site: "kawaii",       name: "كواي أنمي"    },
+    { site: "animewitcher", name: "AnimeWitcher" },
+    { site: "sanime",       name: "سـAnime"       },
+    { site: "animeify",     name: "أنمي فاي"     },
+    { site: "anifox",       name: "ANIFOX"       },
   ],
   "720p": [
-    { site: "animewitcher", tag: "AW", name: "AnimeWitcher" },
-    { site: "sanime",       tag: "SA", name: "SAnime"       },
-    { site: "animeify",     tag: "AF", name: "أنمي فاي"     },
-    { site: "anifox",       tag: "FX", name: "ANIFOX"       },
+    { site: "animewitcher", name: "AnimeWitcher" },
+    { site: "sanime",       name: "سـAnime"       },
+    { site: "animeify",     name: "أنمي فاي"     },
+    { site: "anifox",       name: "ANIFOX"       },
   ],
   "480p": [
-    { site: "animewitcher", tag: "AW", name: "AnimeWitcher" },
-    { site: "animeify",     tag: "AF", name: "أنمي فاي"     },
-    { site: "sanime",       tag: "SA", name: "SAnime"       },
-    { site: "anifox",       tag: "FX", name: "ANIFOX"       },
+    { site: "animewitcher", name: "AnimeWitcher" },
+    { site: "animeify",     name: "أنمي فاي"     },
+    { site: "sanime",       name: "سـAnime"       },
+    { site: "anifox",       name: "ANIFOX"       },
   ],
 };
 
@@ -282,12 +283,11 @@ function SpinRing({ size = 36 }: { size?: number }) {
   );
 }
 
-/* ── Source row: "Server N · KW" ── */
+/* ── Source row: "السيرفر KW" ── */
 function SrcRow({ src, idx, onPlay }: { src: Src; idx: number; onPlay: (s: Src) => void }) {
   const q = getSrcQuality(src);
   const qs = QUALITY_STYLE[q];
   const tag = getSiteTag(src.site || "");
-  const isHls = (src.directUrl || src.url || "").includes("hls-proxy") || src.directType === "hls";
   const hasSub = !!src.subtitleUrl;
 
   return (
@@ -296,11 +296,12 @@ function SrcRow({ src, idx, onPlay }: { src: Src; idx: number; onPlay: (s: Src) 
         <Ionicons name="play-circle" size={11} color={qs.text} />
       </View>
       <View style={{ flex: 1, minWidth: 0 }}>
-        <View style={{ flexDirection: "row", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-          <Text style={d.srcNum}>سيرفر {idx + 1}</Text>
-          <View style={d.srcTag}><Text style={d.srcTagText}>{tag}</Text></View>
-          {hasSub && <View style={d.srcSubBadge}><Text style={d.srcSubText}>ترجمة</Text></View>}
-        </View>
+        <Text style={d.srcNum}>
+          السيرفر <Text style={d.srcTagInline}>{tag}</Text>
+        </Text>
+        {hasSub && (
+          <View style={d.srcSubBadge}><Text style={d.srcSubText}>ترجمة</Text></View>
+        )}
       </View>
       <View style={d.srcRight}>
         <View style={[d.srcQBadge, { backgroundColor: qs.badge, borderColor: qs.border }]}>
@@ -884,40 +885,53 @@ export default function WatchScreen() {
             <Ionicons name="server-outline" size={12} color="#a78bfa" />
             <Text style={d.siteSelectorTitle}>اختر مصدراً — يبدأ التشغيل فوراً</Text>
           </View>
-          <View style={d.siteGrid}>
-            {(STATIC_PICKER[selQuality] || []).map(slot => {
+          <View style={d.siteList}>
+            {(STATIC_PICKER[selQuality] || []).map((slot, idx) => {
               const status = slotStatus[slot.site] || "idle";
               const isFetching = status === "fetching";
               const isFailed   = status === "failed";
               const isReady    = status === "ready";
               return (
                 <Pressable key={slot.site} onPress={() => handlePickSite(slot.site)}
-                  style={[d.siteCard,
-                    isFailed && d.siteCardFailed,
-                    isReady  && { backgroundColor: "rgba(34,197,94,0.07)", borderColor: "rgba(34,197,94,0.22)" },
-                    isFetching && { backgroundColor: "rgba(139,92,246,0.10)", borderColor: "rgba(139,92,246,0.30)" },
+                  style={({ pressed }) => [
+                    d.siteRow,
+                    idx < (STATIC_PICKER[selQuality] || []).length - 1 && d.siteRowBorder,
+                    isFailed   && { backgroundColor: "rgba(239,68,68,0.04)" },
+                    isReady    && { backgroundColor: "rgba(34,197,94,0.05)" },
+                    isFetching && { backgroundColor: "rgba(139,92,246,0.06)" },
+                    pressed    && { opacity: 0.75 },
                   ]}>
-                  <View style={d.siteCardTopRow}>
+                  {/* Status indicator */}
+                  <View style={d.siteRowDot}>
                     {isFetching ? (
-                      <SpinRing size={16} />
-                    ) : isReady ? (
-                      <Ionicons name="checkmark-circle" size={14} color="rgba(134,239,172,0.85)" />
-                    ) : isFailed ? (
-                      <Ionicons name="close-circle" size={14} color="rgba(248,113,113,0.70)" />
+                      <SpinRing size={14} />
                     ) : (
-                      <Ionicons name="play-circle-outline" size={14} color="rgba(196,181,253,0.45)" />
+                      <View style={[d.siteRowDotInner, {
+                        backgroundColor: isReady ? "#22c55e" : isFailed ? "rgba(239,68,68,0.50)" : "rgba(255,255,255,0.18)",
+                        boxShadow: isReady ? "0 0 6px rgba(34,197,94,0.55)" : undefined,
+                      } as any]} />
                     )}
-                    <View style={d.siteTagBadge}>
-                      <Text style={d.siteTagText}>{slot.tag}</Text>
-                    </View>
-                    <Text style={d.siteCardName} numberOfLines={1}>{slot.name}</Text>
                   </View>
-                  <Text style={d.siteCardDesc} numberOfLines={1}>
-                    {isFetching ? "جاري الجلب…"
-                      : isFailed  ? "تعذّر الاتصال — اضغط للمحاولة"
-                      : isReady   ? "جاهز — اضغط للتشغيل"
-                      : getSiteDesc(slot.site)}
+                  {/* Name: "السيرفر KW" */}
+                  <Text style={[d.siteRowName,
+                    isReady  && { color: "rgba(255,255,255,0.90)" },
+                    isFailed && { color: "rgba(255,255,255,0.25)" },
+                  ]} numberOfLines={1}>
+                    السيرفر <Text style={d.siteRowTag}>{slot.name.length <= 4 ? slot.name : slot.name}</Text>
                   </Text>
+                  {/* Action button */}
+                  {isReady ? (
+                    <View style={d.siteRowPlayBtn}>
+                      <Ionicons name="play" size={9} color="#fff" />
+                      <Text style={d.siteRowPlayText}>تشغيل</Text>
+                    </View>
+                  ) : isFetching ? null : (
+                    <View style={[d.siteRowSelectBtn, isFailed && d.siteRowRetryBtn]}>
+                      <Text style={[d.siteRowSelectText, isFailed && { color: "rgba(248,113,113,0.80)" }]}>
+                        {isFailed ? "إعادة" : "اختيار"}
+                      </Text>
+                    </View>
+                  )}
                 </Pressable>
               );
             })}
@@ -1002,9 +1016,8 @@ const d = StyleSheet.create({
   /* Source row: "Server N · KW" */
   srcRow:        { flexDirection: "row", alignItems: "center", paddingHorizontal: 14, paddingVertical: 8, gap: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: "rgba(255,255,255,0.05)" },
   srcIcon:       { width: 28, height: 28, borderRadius: 8, alignItems: "center", justifyContent: "center", borderWidth: 1 },
-  srcNum:        { fontSize: 13, fontFamily: "Cairo_800ExtraBold", color: "rgba(255,255,255,0.92)" },
-  srcTag:        { backgroundColor: "rgba(139,92,246,0.18)", borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2, borderWidth: 1, borderColor: "rgba(139,92,246,0.30)" },
-  srcTagText:    { fontSize: 9, fontFamily: "Cairo_800ExtraBold", color: "rgba(196,181,253,0.90)", fontVariant: ["tabular-nums"] },
+  srcNum:        { fontSize: 13, fontFamily: "Cairo_800ExtraBold", color: "rgba(255,255,255,0.92)", textAlign: "right", direction: "rtl" } as any,
+  srcTagInline:  { fontFamily: "Cairo_800ExtraBold", letterSpacing: 0.5 },
   srcSubBadge:   { backgroundColor: "rgba(34,197,94,0.12)", borderRadius: 5, paddingHorizontal: 5, paddingVertical: 1, borderWidth: 1, borderColor: "rgba(34,197,94,0.25)" },
   srcSubText:    { fontSize: 8, fontFamily: "Cairo_700Bold", color: "rgba(134,239,172,0.85)" },
   srcHlsBadge:   { backgroundColor: "rgba(99,102,241,0.12)", borderRadius: 5, paddingHorizontal: 5, paddingVertical: 1, borderWidth: 1, borderColor: "rgba(99,102,241,0.25)" },
@@ -1012,24 +1025,28 @@ const d = StyleSheet.create({
   srcRight:      { flexDirection: "row", alignItems: "center", gap: 6, flexShrink: 0 },
   srcQBadge:     { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 7, borderWidth: 1 },
   srcQText:      { fontSize: 8, fontFamily: "Cairo_800ExtraBold" },
-  srcPlayBtn:    { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 10, paddingVertical: 7, borderRadius: 10, backgroundColor: "rgba(109,40,217,0.88)", borderWidth: 1, borderColor: "rgba(167,139,250,0.28)" },
+  srcPlayBtn:    { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 10, paddingVertical: 7, borderRadius: 10, backgroundColor: "rgba(16,185,129,0.88)", borderWidth: 1, borderColor: "rgba(52,211,153,0.35)" },
   srcPlayText:   { fontSize: 10, fontFamily: "Cairo_800ExtraBold", color: "#fff" },
 
   /* Site selector */
-  siteSelectorCard: { backgroundColor: "rgba(14,12,24,0.92)", borderRadius: 18, borderWidth: 1, borderColor: "rgba(139,92,246,0.18)", overflow: "hidden" },
+  siteSelectorCard:   { backgroundColor: "rgba(14,12,24,0.92)", borderRadius: 18, borderWidth: 1, borderColor: "rgba(139,92,246,0.18)", overflow: "hidden" },
   siteSelectorHeader: { flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 14, paddingVertical: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: "rgba(255,255,255,0.07)" },
-  siteSelectorTitle: { fontSize: 12, fontFamily: "Cairo_700Bold", color: "#a78bfa" },
-  siteGrid:      { flexDirection: "row", flexWrap: "wrap", gap: 10, padding: 12 },
-  siteCard:      { width: "47%", flexDirection: "column", alignItems: "flex-start", gap: 4, paddingHorizontal: 12, paddingVertical: 11, borderRadius: 16, backgroundColor: "rgba(255,255,255,0.04)", borderWidth: 1, borderColor: "rgba(255,255,255,0.09)" },
-  siteCardFailed:{ backgroundColor: "rgba(239,68,68,0.07)", borderColor: "rgba(239,68,68,0.22)" },
-  siteCardTopRow:{ flexDirection: "row-reverse", alignItems: "center", gap: 6, width: "100%" },
-  siteTagBadge:  { paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6, backgroundColor: "rgba(139,92,246,0.20)" },
-  siteTagText:   { fontSize: 9, fontFamily: "Cairo_800ExtraBold", color: "rgba(196,181,253,0.9)" },
-  siteCardName:  { flex: 1, fontSize: 11.5, fontFamily: "Cairo_800ExtraBold", color: "rgba(255,255,255,0.8)", textAlign: "right" },
-  siteCardFailedText: { fontSize: 9, fontFamily: "Cairo_700Bold", color: "rgba(248,113,113,0.7)" },
-  siteCardDesc:  { fontSize: 9, fontFamily: "Cairo_400Regular", color: "rgba(255,255,255,0.25)", textAlign: "right", width: "100%" },
-  loadAllBtn:    { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, paddingVertical: 12, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: "rgba(255,255,255,0.07)" },
-  loadAllText:   { fontSize: 11, fontFamily: "Cairo_700Bold", color: "#c4b5fd" },
+  siteSelectorTitle:  { fontSize: 12, fontFamily: "Cairo_700Bold", color: "#a78bfa" },
+  /* قائمة عمودية بدل شبكة */
+  siteList:           { flexDirection: "column" },
+  siteRow:            { flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 14, paddingVertical: 13 },
+  siteRowBorder:      { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: "rgba(255,255,255,0.06)" },
+  siteRowDot:         { width: 18, alignItems: "center", justifyContent: "center", flexShrink: 0 },
+  siteRowDotInner:    { width: 9, height: 9, borderRadius: 5 },
+  siteRowName:        { flex: 1, fontSize: 13, fontFamily: "Cairo_800ExtraBold", color: "rgba(255,255,255,0.55)", textAlign: "right", direction: "rtl" } as any,
+  siteRowTag:         { fontFamily: "Cairo_800ExtraBold", letterSpacing: 0.5 },
+  siteRowPlayBtn:     { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 11, paddingVertical: 6, borderRadius: 10, backgroundColor: "rgba(16,185,129,0.88)", borderWidth: 1, borderColor: "rgba(52,211,153,0.35)", flexShrink: 0 },
+  siteRowPlayText:    { fontSize: 11, fontFamily: "Cairo_800ExtraBold", color: "#fff" },
+  siteRowSelectBtn:   { paddingHorizontal: 11, paddingVertical: 6, borderRadius: 10, backgroundColor: "rgba(139,92,246,0.15)", borderWidth: 1, borderColor: "rgba(139,92,246,0.30)", flexShrink: 0 },
+  siteRowRetryBtn:    { backgroundColor: "rgba(239,68,68,0.10)", borderColor: "rgba(239,68,68,0.28)" },
+  siteRowSelectText:  { fontSize: 11, fontFamily: "Cairo_800ExtraBold", color: "rgba(196,181,253,0.90)" },
+  loadAllBtn:         { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, paddingVertical: 12, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: "rgba(255,255,255,0.07)" },
+  loadAllText:        { fontSize: 11, fontFamily: "Cairo_700Bold", color: "#c4b5fd" },
 
   /* Empty state */
   empty:         { alignItems: "center", justifyContent: "center", gap: 14, paddingVertical: 50 },
