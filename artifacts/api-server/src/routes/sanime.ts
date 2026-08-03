@@ -149,41 +149,8 @@ router.get("/sanime/src", async (req, res) => {
     const hdUrl = `${SA_CDN}/${id}/${epNum}.mp4`;
     const sdUrl = `${SA_CDN}/${id}/${epNum}SD.mp4`;
 
-    // Quick HEAD check — if VPS can reach it, great
-    let hdOk = false;
-    try {
-      const h = await fetch(hdUrl, {
-        method: "HEAD",
-        headers: { "User-Agent": SA_UA },
-        signal: AbortSignal.timeout(5_000),
-      });
-      hdOk = h.ok;
-    } catch {}
-
-    if (hdOk) {
-      return void res.json({ hdUrl, sdUrl, permanent: true });
-    }
-
-    // Fallback: openAnd API (more reliable for older eps)
-    try {
-      const epId  = `${id}EP-${epNum}`;
-      const epObj = { id: epId, name: `الحلقة ${epNum}`, epName: epNum, date: "" };
-      const b64   = Buffer.from(
-        unescape(encodeURIComponent(JSON.stringify(epObj)))
-      ).toString("base64");
-      const oR = await fetch(`${SA_API}openAnd&id=${encodeURIComponent(b64)}`, {
-        headers: { "User-Agent": SA_UA },
-        signal: AbortSignal.timeout(8_000),
-      });
-      if (oR.ok) {
-        const links = await oR.json() as { hd?: string; sd?: string };
-        if (links.hd && !links.hd.includes("sample-videos.com")) {
-          return void res.json({ hdUrl: links.hd, sdUrl: links.sd || sdUrl, permanent: true });
-        }
-      }
-    } catch {}
-
-    // Return direct URLs anyway — browser may reach them fine
+    // Return direct URLs immediately — SA CDN URLs are permanent & predictable.
+    // Skip slow HEAD/openAnd checks that added 5–13s latency; the player handles failures.
     res.json({ hdUrl, sdUrl, permanent: true });
   } catch (e) {
     logger.error({ err: e }, "sanime /src error");
