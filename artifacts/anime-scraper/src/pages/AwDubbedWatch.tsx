@@ -53,16 +53,21 @@ export default function AwDubbedWatch() {
     if (!series) { setError("بيانات الحلقة مفقودة"); setPhase("error"); return; }
     setPhase("loading"); setError(null);
 
-    const cacheKey = `aw-dubbed-src-${series}-${ep}`;
+    // v3: يُبطل كاش KF الميت تلقائياً
+    const CACHE_VER = "v3";
+    const cacheKey = `aw-dubbed-src-${CACHE_VER}-${series}-${ep}`;
     try {
       const cached = sessionStorage.getItem(cacheKey);
       if (cached) {
         const c = JSON.parse(cached);
         if (Date.now() - c.ts < 5 * 60_000) {
-          const srcs: SourceItem[] = c.allSources || [];
+          const srcs: SourceItem[] = (c.allSources || []).filter(
+            (s: SourceItem) =>
+              (s.rawUrl || s.hlsUrl) &&
+              !String(s.rawUrl || "").includes("krakenfiles.com")
+          );
           if (srcs.length) {
             setAllSources(srcs);
-            // دائماً شغّل أفضل جودة مباشرةً
             setSelIdx(0);
             setPlayUrl(srcs[0].rawUrl || srcs[0].hlsUrl);
             setPhase("player");

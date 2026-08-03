@@ -685,7 +685,7 @@ router.get("/aw-dubbed/watch-src", async (req, res) => {
       return;
     }
 
-    res.setHeader("Cache-Control", "public, max-age=300");
+    res.setHeader("Cache-Control", "no-cache");
     res.json({ allSources, rawUrl: allSources[0]?.rawUrl ?? null, hlsUrl: null });
   } catch (e: any) {
     res.status(502).json({ error: String(e?.message || e) });
