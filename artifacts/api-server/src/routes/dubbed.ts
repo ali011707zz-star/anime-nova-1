@@ -429,6 +429,51 @@ function awPoster(anilistId: number | null | undefined): string | null {
   return `https://img.anili.st/media/${anilistId}`;
 }
 
+// ── TMDB poster cache (عمر الكاش = 24 ساعة مع السيرفر) ──
+const _tmdbPosterCache = new Map<string, string | null>();
+const TMDB_KEY = "8265bd1679663a7ea12ac168da84d2e8";
+const TMDB_IMG = "https://image.tmdb.org/t/p/w300";
+
+/** استخرج العنوان الأساسي: احذف "Season N" و "Dub" و "Dub Season N" */
+function awBaseTitle(title: string): string {
+  return title
+    .replace(/\s+Season\s+\d+(\s+Dub)?$/i, "")
+    .replace(/\s+Dub$/i, "")
+    .trim();
+}
+
+/** ابحث عن بوستر في TMDB بالعنوان */
+async function tmdbPosterByTitle(title: string): Promise<string | null> {
+  const base = awBaseTitle(title);
+  if (_tmdbPosterCache.has(base)) return _tmdbPosterCache.get(base) ?? null;
+  try {
+    const url = `https://api.themoviedb.org/3/search/multi?api_key=${TMDB_KEY}&query=${encodeURIComponent(base)}&language=en-US&page=1`;
+    const r = await fetch(url, { signal: AbortSignal.timeout(6000) });
+    if (!r.ok) { _tmdbPosterCache.set(base, null); return null; }
+    const data = await r.json();
+    const hit = (data.results as any[] || []).find((h: any) =>
+      h.poster_path && (h.media_type === "tv" || h.media_type === "movie")
+    );
+    const poster = hit ? `${TMDB_IMG}${hit.poster_path}` : null;
+    _tmdbPosterCache.set(base, poster);
+    return poster;
+  } catch { _tmdbPosterCache.set(base, null); return null; }
+}
+
+/** جلب بوسترات TMDB لقائمة من العناوين (تشغيل متوازٍ بحد أقصى 8) */
+async function fetchTmdbPosters(titles: string[]): Promise<Map<string, string | null>> {
+  const unique = [...new Set(titles.map(awBaseTitle))];
+  const results = new Map<string, string | null>();
+  // معالجة دُفعات بمعدل 8 طلبات متوازية
+  for (let i = 0; i < unique.length; i += 8) {
+    const batch = unique.slice(i, i + 8);
+    const posters = await Promise.all(batch.map(t => tmdbPosterByTitle(t)));
+    batch.forEach((t, idx) => results.set(t, posters[idx]));
+    if (i + 8 < unique.length) await new Promise(r => setTimeout(r, 250)); // تأخير بسيط
+  }
+  return results;
+}
+
 async function buildAwCatalog(): Promise<AwCatalogItem[]> {
   const SB_URL = (process.env.SUPABASE_URL || "").replace(/\/$/, "");
   const SB_KEY = process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || "";
@@ -460,17 +505,31 @@ async function buildAwCatalog(): Promise<AwCatalogItem[]> {
     } catch { break; }
   }
 
+  // بناء العناصر الأولية
   const items: AwCatalogItem[] = [];
   for (const [anime_id, { anime_name, anilist_id }] of seen) {
     items.push({
       key: anime_id,
       title: anime_name || anime_id,
       titleAr: null,
-      poster: awPoster(anilist_id),
+      poster: awPoster(anilist_id), // null إذا لم يكن هناك anilist_id
       seasons: [{ label: "الحلقات", animeId: anime_id }],
     });
   }
   items.sort((a, b) => a.title.localeCompare(b.title, "en-US"));
+
+  // جلب بوسترات TMDB للعناصر التي ليس لها بوستر من AniList
+  const needPosters = items.filter(it => !it.poster).map(it => it.title);
+  if (needPosters.length > 0) {
+    logger.info({ count: needPosters.length }, "[aw-dubbed] جلب بوسترات TMDB...");
+    const posterMap = await fetchTmdbPosters(needPosters);
+    for (const item of items) {
+      if (!item.poster) {
+        item.poster = posterMap.get(awBaseTitle(item.title)) ?? null;
+      }
+    }
+  }
+
   logger.info({ count: items.length }, "[aw-dubbed] catalog built");
   return items;
 }
