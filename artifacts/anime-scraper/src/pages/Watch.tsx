@@ -190,29 +190,29 @@ const SCRAPER_DEFS: { site: string; name: string; desc: string; tag: string; aud
 /** مجموعة المصادر العربية — لا تعرض زر الترجمة الخارجية لها */
 const ARABIC_SITES = new Set(SCRAPER_DEFS.filter(d => d.isArabic).map(d => d.site));
 
-/* ── Static picker للويب: جودة → مصادر (تظهر فوراً دون جلب مسبق) ── */
+/* ── Static picker للويب: جودة → مصادر — نفس مصادر الموبايل بنفس الترتيب ── */
 type WebQualityKey = "1080p" | "720p" | "480p";
-const STATIC_PICKER_WEB: Record<WebQualityKey, { site: string; tag: string; name: string }[]> = {
+const STATIC_PICKER_WEB: Record<WebQualityKey, { site: string; tag: string }[]> = {
   "1080p": [
-    { site: "kawaii",       tag: "KW", name: "كواي أنمي"    },
-    { site: "anikoto",      tag: "AK", name: "AniKoto"      },
-    { site: "anineko",      tag: "AN", name: "AniNeko"      },
-    { site: "animewitcher", tag: "AW", name: "AnimeWitcher" },
+    { site: "animewitcher", tag: "AW" },
+    { site: "sanime",       tag: "SA" },
+    { site: "animeify",     tag: "AF" },
   ],
   "720p": [
-    { site: "animewitcher", tag: "AW", name: "AnimeWitcher" },
-    { site: "sanime",       tag: "SA", name: "سـAnime"       },
-    { site: "animeify",     tag: "AF", name: "أنمي فاي"      },
-    { site: "anifox",       tag: "FX", name: "ANIFOX"        },
+    { site: "animewitcher", tag: "AW" },
+    { site: "sanime",       tag: "SA" },
+    { site: "animeify",     tag: "AF" },
+    { site: "anifox",       tag: "FX" },
   ],
   "480p": [
-    { site: "sanime",       tag: "SA", name: "سـAnime"       },
-    { site: "animeify",     tag: "AF", name: "أنمي فاي"      },
-    { site: "anifox",       tag: "FX", name: "ANIFOX"        },
-    { site: "anslayer",     tag: "AS", name: "أنمي سلاير"    },
+    { site: "animewitcher", tag: "AW" },
+    { site: "animeify",     tag: "AF" },
+    { site: "sanime",       tag: "SA" },
+    { site: "anifox",       tag: "FX" },
   ],
 };
 const WEB_Q_KEYS: WebQualityKey[] = ["1080p", "720p", "480p"];
+const WEB_Q_SUB: Record<WebQualityKey, string> = { "1080p": "دقة كاملة", "720p": "دقة عالية", "480p": "دقة متوسطة" };
 
 /**
  * الموجة الأولى من المصادر التي تُجرَّب فوراً عند فتح الحلقة — أسرع/أوثق المصادر تاريخياً.
@@ -1344,91 +1344,61 @@ function ScraperPicker({
       <div className="flex-1 overflow-y-auto" style={{ scrollbarWidth: "none" }}>
         {HeroSection}
 
-        {/* ── Static picker: تبويبات الجودة → بطاقات المصادر ── */}
-        <div className="px-4 mt-5 mb-3">
-          <div className="flex items-center gap-2 mb-3">
-            <div className="w-1 h-4 bg-primary rounded-full" />
-            <h2 className="text-[13px] font-black font-['Cairo']">اختر المصدر</h2>
-          </div>
-
+        {/* ── Static picker: تبويبات الجودة + grid بطاقتان/صف (تصميم الموبايل) ── */}
+        <div className="px-4 mt-4 mb-3">
           {/* Quality tabs */}
           <div className="flex gap-2 mb-4">
             {WEB_Q_KEYS.map(qk => (
               <button key={qk} onClick={() => setWebQual(qk)}
-                className="flex-1 py-2.5 rounded-2xl text-[12px] font-black font-['Cairo'] transition-all active:scale-95"
+                className="flex-1 rounded-2xl font-['Cairo'] transition-all active:scale-95"
                 style={webQual === qk
-                  ? { background: "rgba(124,58,237,0.55)", border: "1px solid rgba(139,92,246,0.60)", color: "rgba(196,181,253,1)" }
-                  : { background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", color: "rgba(255,255,255,0.40)" }
+                  ? { background: "rgba(109,40,217,0.35)", border: "1px solid rgba(139,92,246,0.55)", color: "rgba(196,181,253,1)", padding: "9px 0 5px" }
+                  : { background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", color: "rgba(255,255,255,0.35)", padding: "9px 0 5px" }
                 }>
-                {qk}
+                <p className="text-[12px] font-black leading-tight">{qk}</p>
+                <p className="text-[9px] font-normal mt-0.5 opacity-60">{WEB_Q_SUB[qk]}</p>
               </button>
             ))}
           </div>
 
-          {/* Site cards */}
-          <div className="flex flex-col gap-2">
+          {/* Site grid — 2 per row, same as mobile */}
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
             {(STATIC_PICKER_WEB[webQual] || []).map(slot => {
+              const def     = SCRAPER_DEFS.find(d => d.site === slot.site);
               const status  = slotStatus[slot.site] || "idle";
               const srcs    = (slotSources[slot.site] || []).filter(shouldShowSrc);
               const bestSrc = srcs.length
                 ? [...srcs].sort((a, b) => (b.qualityRank ?? 0) - (a.qualityRank ?? 0))[0]
                 : null;
+              const isFetching = status === "fetching";
+              const isReady    = status === "ready";
+              const isFailed   = status === "failed";
               return (
-                <div key={slot.site}
-                  className="flex items-center gap-3 px-3.5 py-3 rounded-2xl"
+                <button key={slot.site}
+                  onClick={() => { if (isReady && bestSrc) onPlaySrc(bestSrc); else if (!isFetching) onFetchSite(slot.site); }}
                   style={{
-                    background: status === "failed" ? "rgba(239,68,68,0.06)" : "rgba(255,255,255,0.03)",
-                    border: `1px solid ${status === "failed" ? "rgba(239,68,68,0.20)" : status === "ready" ? "rgba(52,211,153,0.22)" : "rgba(255,255,255,0.08)"}`,
+                    background: isReady ? "rgba(34,197,94,0.07)" : isFailed ? "rgba(239,68,68,0.06)" : isFetching ? "rgba(139,92,246,0.08)" : "rgba(255,255,255,0.03)",
+                    border: `1px solid ${isReady ? "rgba(34,197,94,0.22)" : isFailed ? "rgba(239,68,68,0.20)" : isFetching ? "rgba(139,92,246,0.28)" : "rgba(255,255,255,0.08)"}`,
+                    borderRadius: 16, padding: "12px", textAlign: "right", cursor: isFetching ? "default" : "pointer",
                   }}>
-                  {/* Tag badge */}
-                  <div className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0 font-mono text-[11px] font-black"
-                    style={{ background: "rgba(124,58,237,0.18)", border: "1px solid rgba(139,92,246,0.28)", color: "rgba(196,181,253,0.90)" }}>
-                    {slot.tag}
-                  </div>
-                  {/* Name + status */}
-                  <div className="flex-1 min-w-0">
-                    <p className="text-white/85 text-[13px] font-black font-['Cairo'] leading-tight">{slot.name}</p>
-                    {status === "ready" && srcs.length > 0 && (
-                      <p className="text-emerald-400/70 text-[10px] font-['Cairo'] mt-0.5">{srcs.length} سيرفر جاهز ✓</p>
-                    )}
-                    {status === "fetching" && (
-                      <p className="text-violet-400/60 text-[10px] font-['Cairo'] mt-0.5">جاري الجلب...</p>
-                    )}
-                    {status === "failed" && (
-                      <p className="text-red-400/60 text-[10px] font-['Cairo'] mt-0.5">لم يُعثر على مصدر</p>
-                    )}
-                  </div>
-                  {/* Action button */}
-                  {status === "idle" && (
-                    <button onClick={() => onFetchSite(slot.site)}
-                      className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-[12px] font-black font-['Cairo'] active:scale-95 transition-transform shrink-0"
-                      style={{ background: "rgba(124,58,237,0.28)", border: "1px solid rgba(139,92,246,0.38)", color: "rgba(196,181,253,0.92)" }}>
-                      جلب
-                    </button>
-                  )}
-                  {status === "fetching" && (
-                    <div className="w-8 h-8 flex items-center justify-center shrink-0">
-                      <motion.div
-                        className="w-5 h-5 rounded-full border-2 border-transparent border-t-violet-500 border-r-violet-500/40"
-                        animate={{ rotate: 360 }} transition={{ duration: 0.9, repeat: Infinity, ease: "linear" }}
-                      />
+                  {/* Top row: badge + status dot */}
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                    {/* Tag badge / spinner */}
+                    <div style={{ width: 34, height: 34, borderRadius: 10, background: "rgba(124,58,237,0.18)", border: "1px solid rgba(139,92,246,0.28)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                      {isFetching
+                        ? <motion.div style={{ width: 14, height: 14, borderRadius: "50%", border: "2px solid transparent", borderTopColor: "#8B5CF6", borderRightColor: "rgba(139,92,246,0.35)" }}
+                            animate={{ rotate: 360 }} transition={{ duration: 0.9, repeat: Infinity, ease: "linear" }} />
+                        : <span style={{ fontSize: 10, fontWeight: 900, fontFamily: "monospace", color: "rgba(196,181,253,0.92)" }}>{slot.tag}</span>
+                      }
                     </div>
-                  )}
-                  {status === "ready" && bestSrc && (
-                    <button onClick={() => onPlaySrc(bestSrc)}
-                      className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-[12px] font-black font-['Cairo'] active:scale-95 transition-transform shrink-0"
-                      style={{ background: "linear-gradient(135deg,rgba(124,58,237,0.90),rgba(91,33,182,0.96))", border: "1px solid rgba(167,139,250,0.25)", color: "white" }}>
-                      <Play className="w-3 h-3 fill-white" />تشغيل
-                    </button>
-                  )}
-                  {status === "failed" && (
-                    <button onClick={() => onFetchSite(slot.site)}
-                      className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-[12px] font-black font-['Cairo'] active:scale-95 transition-transform shrink-0"
-                      style={{ background: "rgba(239,68,68,0.10)", border: "1px solid rgba(239,68,68,0.22)", color: "rgba(252,165,165,0.80)" }}>
-                      إعادة
-                    </button>
-                  )}
-                </div>
+                    {/* Status dot */}
+                    <div style={{ width: 8, height: 8, borderRadius: "50%", background: isReady ? "#22c55e" : isFailed ? "#ef4444" : "rgba(255,255,255,0.16)" }} />
+                  </div>
+                  {/* Tag label */}
+                  <p style={{ margin: 0, fontSize: 13, fontWeight: 800, fontFamily: "Cairo", color: "rgba(255,255,255,0.88)", lineHeight: 1.2 }}>{slot.tag}</p>
+                  {/* Short desc */}
+                  {def && <p style={{ margin: "3px 0 0", fontSize: 9, fontFamily: "Cairo", color: "rgba(255,255,255,0.28)", lineHeight: 1.3 }}>{def.desc}</p>}
+                </button>
               );
             })}
           </div>
@@ -3274,7 +3244,12 @@ export default function WatchPage() {
         setSlotStatus(prev => ({ ...prev, [site]: "ready" }));
         if (animeId) saveAnimeSrcs(animeId, ep, site, srcs);
 
-        /* static picker — المستخدم يضغط "تشغيل" يدوياً بعد ظهور الزر */
+        /* ضغط المستخدم على البطاقة → شغّل أفضل مصدر فوراً (مرة واحدة فقط) */
+        if (!bgLoad && !autoPlayedRef.current) {
+          autoPlayedRef.current = true;
+          const sorted = [...srcs].sort((a, b) => (b.qualityRank ?? 0) - (a.qualityRank ?? 0));
+          handlePlaySrc(sorted[0]);
+        }
       } else {
         setSlotStatus(prev => ({ ...prev, [site]: "failed" }));
       }
