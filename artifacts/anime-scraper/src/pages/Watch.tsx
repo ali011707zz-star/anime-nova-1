@@ -3274,14 +3274,7 @@ export default function WatchPage() {
         setSlotStatus(prev => ({ ...prev, [site]: "ready" }));
         if (animeId) saveAnimeSrcs(animeId, ep, site, srcs);
 
-        /* تشغيل تلقائي: أفضل جودة متاحة يُشغَّل فوراً عند أول نجاح (مرة واحدة فقط) */
-        if (!bgLoad && !autoPlayedRef.current) {
-          autoPlayedRef.current = true;
-          const sortedSrcs = [...srcs].sort((a, b) => (b.qualityRank ?? 0) - (a.qualityRank ?? 0));
-          handlePlaySrc(sortedSrcs[0]);
-        }
-
-        /* لا جلب خلفي — المستخدم يختار المصادر يدوياً عبر static picker */
+        /* static picker — المستخدم يضغط "تشغيل" يدوياً بعد ظهور الزر */
       } else {
         setSlotStatus(prev => ({ ...prev, [site]: "failed" }));
       }
