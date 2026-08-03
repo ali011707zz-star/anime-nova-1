@@ -473,14 +473,14 @@ export default function RiftPlayer({
     }
 
     // CDNs with CORS * + Accept-Ranges → play DIRECTLY in browser (no proxy round-trip)
-    // video.kawaii-anime.com: confirmed CORS * + Range support (MP4 native, m3u8 via hls.js below)
+    // cdn.momentoai.dev (kawaii جديد): CORS * + Range support (MP4 native)
     // pixeldrain.com/api/file/: confirmed CORS * + Accept-Ranges (MP4 only)
-    const CORS_DIRECT_CDN = ["video.kawaii-anime.com", "pixeldrain.com/api/file/"];
+    const CORS_DIRECT_CDN = ["cdn.momentoai.dev", "video.kawaii-anime.com", "pixeldrain.com/api/file/"];
     const isCorsDirectCdn = CORS_DIRECT_CDN.some(h => src.includes(h));
     if (isCorsDirectCdn && !src.match(/\.m3u8([?#]|$)/i)) {
       // MP4/non-HLS: native <video> element works fine (CORS *)
       // kawaii CDN: no-Referer=200, wrong-Referer=403 — browser sends page URL as Referer by default
-      if (src.includes("video.kawaii-anime.com")) v.referrerPolicy = "no-referrer";
+      if (src.includes("cdn.momentoai.dev") || src.includes("video.kawaii-anime.com")) v.referrerPolicy = "no-referrer";
       v.src = src; v.load();
       let done = false;
       const cleanup = () => { done = true; clearTimeout(t); v.removeEventListener("loadedmetadata", onMd); v.removeEventListener("error", onEd); };
@@ -534,7 +534,7 @@ export default function RiftPlayer({
 
       // ── kawaii CDN: XHR لا يستطيع إخفاء Referer (forbidden header) → CDN يُرجع 403.
       // الحل: custom Fetch loader بـ referrerPolicy:"no-referrer" لجميع طلبات kawaii HLS.
-      const isKawaiiHls = m3u8.includes("video.kawaii-anime.com");
+      const isKawaiiHls = m3u8.includes("cdn.momentoai.dev") || m3u8.includes("video.kawaii-anime.com");
       class KawaiiNoRefLoader {
         private ctrl: AbortController | null = null;
         destroy() { this.ctrl?.abort(); }

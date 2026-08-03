@@ -332,7 +332,8 @@ function isIframeUrl(url: string): boolean {
   if (url.includes("workers.dev")) return false;        // Anime-Phoenix CDN (direct video)
   if (url.includes("streamtape.com")) return false;     // direct MP4
   if (url.includes("sendvid.com")) return false;        // direct MP4
-  if (url.includes("video.kawaii-anime.com")) return false; // kawaii CDN (CORS * — direct HLS)
+  if (url.includes("cdn.momentoai.dev")) return false;      // kawaii CDN جديد (cdn.momentoai.dev)
+  if (url.includes("video.kawaii-anime.com")) return false; // kawaii CDN قديم (legacy)
   if (url.includes("missourimonster-vyla.hf.space")) return false; // Vyla proxy (direct HLS)
   if (url.match(/\.(m3u8|mp4|mkv|webm|ts)([?#]|$)/i)) return false; // video file
   return url.startsWith("https://");                    // external embed page
@@ -390,7 +391,7 @@ function getServerInfo(url: string, idx: number): ServerInfo {
     return { label: "MP4Upload", sublabel: "مباشر", isHls: true, isDirect: true };
   }
   // CORS * CDNs — تشغيل مباشر في المتصفح بدون proxy
-  if (url.includes("video.kawaii-anime.com")) {
+  if (url.includes("cdn.momentoai.dev") || url.includes("video.kawaii-anime.com")) {
     return { label: "كواي CDN", sublabel: "مباشر · 1080p", isHls: false, isDirect: true };
   }
   if (url.includes("pixeldrain.com/api/file/")) {
@@ -3441,10 +3442,12 @@ export default function WatchPage() {
     servers[clickedTier].push(clickedUrl);
 
     /* ── kawaii CDN fallback: إذا فشل التشغيل المباشر، نجرّب عبر VPS proxy بـ Referer الصحيح ──
-       video.kawaii-anime.com تحجب المتصفح أحياناً (Referer خاطئ أو URL منتهي) → نضع URL
-       الـ proxy مباشرةً بعد الـ URL المباشر كـ سيرفر 2 بدلاً من القفز لمصدر آخر كلياً. */
-    if (src.site === "kawaii" && clickedUrl.includes("video.kawaii-anime.com")) {
-      const kawaiiRef = "https://www.kawaii-anime.com/";
+       cdn.momentoai.dev يشترط Referer: kawaiianime.cc — المتصفح لا يستطيع تعيينه → proxy fallback */
+    const isKawaiiCdn = src.site === "kawaii" && (
+      clickedUrl.includes("cdn.momentoai.dev") || clickedUrl.includes("video.kawaii-anime.com")
+    );
+    if (isKawaiiCdn) {
+      const kawaiiRef = "https://kawaiianime.cc/";
       const isHlsKw  = /\.m3u8([?#]|$)/i.test(clickedUrl);
       const kwProxy  = isHlsKw
         ? `/api/anime/hls-proxy?url=${encodeURIComponent(clickedUrl)}&ref=${encodeURIComponent(kawaiiRef)}`

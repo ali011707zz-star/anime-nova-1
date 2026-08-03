@@ -5421,10 +5421,11 @@ async function getAkoamSources(
 
 
 //  API: GET /api/watch?anilistId={id}&ep={ep}
-//  Returns sources from video.kawaii-anime.com CDN (CORS *, Range: bytes)
+//  Returns sources from cdn.momentoai.dev CDN via kawaiianime.cc API
 //  AniList ID used directly — no slug lookup needed
 // ════════════════════════════════════════════════════════════════════
-const KAWAII_BASE = "https://www.kawaii-anime.com";
+// الدومين الجديد (kawaii-anime.com → kawaiianime.cc، CDN: cdn.momentoai.dev)
+const KAWAII_BASE = "https://kawaiianime.cc";
 
 async function getKawaiiAnimeSources(
   _title: string, _english: string | null, ep: number, anilistId?: number,
@@ -5472,13 +5473,16 @@ async function getKawaiiAnimeSources(
     const skipOutro = data.outro?.start !== undefined && data.outro?.end !== undefined
       ? { start: data.outro.start, end: data.outro.end } : undefined;
 
-    // ── kawaii CDN: تشترط Referer: kawaii-anime.com وتقطع الاتصال كلياً بدونه (HTTP 000) ──
-    // المتصفح لا يستطيع تعيين Referer كـ forbidden header → التشغيل المباشر دائماً يفشل.
-    // الـ VPS يصل بشكل مثالي مع Referer صحيح (200 + 223MB مؤكَّد بالاختبار).
-    // الحل الوحيد الموثوق: توجيه كل المصادر عبر VPS proxy مع الـ Referer الصحيح.
-    // فلترة: نقبل فقط روابط video.kawaii-anime.com المضمونة.
+    // ── kawaii CDN: cdn.momentoai.dev يشترط Referer: kawaiianime.cc ──
+    // المتصفح لا يستطيع تعيين Referer كـ forbidden header → التشغيل المباشر يفشل.
+    // الحل: توجيه كل المصادر عبر VPS proxy مع الـ Referer الصحيح.
+    // فلترة: نقبل روابط cdn.momentoai.dev + video.kawaii-anime.com (legacy) + مسارات نسبية.
     const trustedSources = data.sources.filter(s =>
-      s.url && (s.url.includes("video.kawaii-anime.com") || s.url.startsWith("/"))
+      s.url && (
+        s.url.includes("cdn.momentoai.dev") ||
+        s.url.includes("video.kawaii-anime.com") ||
+        s.url.startsWith("/")
+      )
     );
     if (!trustedSources.length) return [];
 
@@ -11801,7 +11805,7 @@ router.get("/anime/sources-stream", async (req, res) => {
       "vidlink_encdec", "vidlink_anim", // stormvv URLs ~45min
       "xpass_anim",                     // XPass token ~8min
       "anineko", "anikoto",             // vibeplayer.site tokens expire in ~1-2h
-      "kawaii",                         // video.kawaii-anime.com signed URLs (md5+expires ~17h) — نتجنب الـ cache القديم الذي يحتوي proxy URLs لا تعمل
+      "kawaii",                         // cdn.momentoai.dev signed URLs (md5+expires) — نتجنب الـ cache القديم الذي يحتوي proxy URLs لا تعمل
     ]);
 
     // ── مساعد: كاشط بـ cache + extractAndCollect ──
