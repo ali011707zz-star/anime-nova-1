@@ -649,20 +649,27 @@ router.get("/aw-dubbed/watch-src", async (req, res) => {
       } catch { return null; }
     }
 
-    /** تحويل رابط أي خادم إلى رابط تشغيل مباشر; null = تخطي */
+    /** لفّ رابط مباشر عبر video-proxy حتى يلتقطه RiftPlayer isDirect branch */
+    function wrapProxy(directUrl: string): string {
+      return `/api/anime/video-proxy?url=${encodeURIComponent(directUrl)}&ref=${encodeURIComponent("https://animenovaa.duckdns.org")}`;
+    }
+
+    /** تحويل رابط أي خادم إلى رابط تشغيل؛ null = تخطي */
     async function toPlayUrl(link: string, srv: string): Promise<string | null> {
       // KrakenFiles — كل الروابط 404 (محذوفة) → تخطي
       if (srv === "KF") return null;
-      // Pixeldrain: /u/{id} → /api/file/{id}?download (direct stream)
+      // Pixeldrain: /u/{id} → /api/file/{id} عبر video-proxy
       if (srv === "PD" || link.includes("pixeldrain.com/u/")) {
         const id = link.split("/u/").pop()?.split("?")[0];
-        if (id) return `https://pixeldrain.com/api/file/${id}`;
+        if (id) return wrapProxy(`https://pixeldrain.com/api/file/${id}`);
       }
-      // Mediafire: استخراج رابط التنزيل المباشر من الصفحة
+      // Mediafire: استخراج رابط CDN المباشر ثم تمريره عبر video-proxy
       if (srv === "MF" || srv === "MF2" || link.includes("mediafire.com")) {
-        return await resolveMfUrl(link);
+        const cdnUrl = await resolveMfUrl(link);
+        if (!cdnUrl) return null;
+        return wrapProxy(cdnUrl);
       }
-      return link;
+      return wrapProxy(link);
     }
 
     // استخراج الروابط بشكل متوازٍ
