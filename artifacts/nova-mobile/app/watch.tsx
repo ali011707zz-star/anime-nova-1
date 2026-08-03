@@ -230,12 +230,11 @@ const STATIC_PICKER: Record<QualityKey, { site: string; tag: string; name: strin
     { site: "animewitcher", tag: "AW", name: "AnimeWitcher" },
     { site: "sanime",       tag: "SA", name: "SAnime"       },
     { site: "animeify",     tag: "AF", name: "أنمي فاي"     },
-    { site: "anifox",       tag: "FX", name: "ANIFOX"       },
   ],
   "480p": [
     { site: "animewitcher", tag: "AW", name: "AnimeWitcher" },
     { site: "animeify",     tag: "AF", name: "أنمي فاي"     },
-    { site: "anifox",       tag: "FX", name: "ANIFOX"       },
+    { site: "sanime",       tag: "SA", name: "SAnime"       },
   ],
 };
 
@@ -645,6 +644,9 @@ export default function WatchScreen() {
     "360p SD":   directSrcs.filter(s => getSrcQuality(s) === "360p SD"),
   }), [directSrcs]);
 
+  /* ── loading: صحيح عندما يكون أي موقع قيد الجلب ── */
+  const loading = Object.values(slotStatus).some(s => s === "fetching");
+
   /* ══════════════ LOADING SCREEN ══════════════ */
   if (screen === "loading") {
     return (
@@ -703,14 +705,6 @@ export default function WatchScreen() {
           saveProgress();
           /* ⚠️ احذف كاش المصادر التالفة — يمنع تكرار الكراش عند فتح الحلقة مجدداً */
           if (srcCacheKey) AsyncStorage.removeItem(srcCacheKey).catch(() => {});
-          if (autoPlayTimerRef.current) { clearTimeout(autoPlayTimerRef.current); autoPlayTimerRef.current = null; }
-          bgTimersRef.current.forEach(clearTimeout);
-          bgTimersRef.current = [];
-          hasCachedRef.current = false;
-          /* ⚠️ true وليس false — يمنع إعادة التشغيل التلقائي حين تصل مصادر جديدة من الخلفية.
-             false كان يُسبِّب حلقة: onError → picker → مصدر جديد يصل → auto-play → فشل → onError */
-          autoPlayFiredRef.current = true;
-          autoFetchAllRef.current = false;
           inFlightSitesRef.current.clear();
           fetchedSitesRef.current.clear();
           /* ⚠️ لا نستدعي abortRef.current?.abort() — الطلبات الجارية لمواقع أخرى
@@ -798,7 +792,6 @@ export default function WatchScreen() {
   }
 
   /* ══════════════ PICKER ══════════════ */
-  const allSrcs = [...directSrcs, ...embedSrcs];
 
   return (
     <View style={{ flex: 1, backgroundColor: "#07070d" }}>
@@ -853,78 +846,97 @@ export default function WatchScreen() {
               </View>
               {loading && (
                 <View style={[d.infoEpBadge, { backgroundColor: "rgba(139,92,246,0.08)", borderColor: "rgba(139,92,246,0.18)" }]}>
-                  <Text style={[d.infoEpText, { color: "rgba(196,181,253,0.7)" }]}>جاري البحث عن مصادر...</Text>
+                  <SpinRing size={12} />
+                  <Text style={[d.infoEpText, { color: "rgba(196,181,253,0.7)" }]}>جاري الجلب…</Text>
                 </View>
               )}
             </View>
           </View>
         </View>
 
-        {/* ── لا توجد مصادر: رسالة صريحة + زر تحديث ── */}
-        {allSrcs.length === 0 && !loading && (
-          /* يظهر فقط عندما تنتهي كل المصادر (fetchSources: loading=false بعد allSettled،
-             refreshAllSources: كل slotStatus وصل لحالة نهائية) */
-          Object.keys(slotStatus).length === 0 || Object.values(slotStatus).every(s => s === "ready" || s === "failed")
-        ) && (
-          <View style={[d.siteSelectorCard, { alignItems: "center", paddingVertical: 32 }]}>
-            <Ionicons name="film-outline" size={44} color="rgba(139,92,246,0.28)" style={{ marginBottom: 14 }} />
-            <Text style={{ color: "rgba(255,255,255,0.88)", fontFamily: "Cairo_700Bold", fontSize: 16, textAlign: "center", marginBottom: 6 }}>
-              لا يوجد مصدر لهذه الحلقة
-            </Text>
-            <Text style={{ color: "rgba(255,255,255,0.38)", fontFamily: "Cairo_400Regular", fontSize: 13, textAlign: "center", marginBottom: 22, lineHeight: 20 }}>
-              تعذّر العثور على مصدر متاح{"\n"}جرّب التحديث أو عد لاحقاً
-            </Text>
-            <Pressable style={d.loadAllBtn} onPress={refreshAllSources}>
-              <Ionicons name="refresh" size={13} color="#c4b5fd" />
-              <Text style={d.loadAllText}>تحديث المصادر</Text>
-            </Pressable>
+        {/* ── تبويبات الجودة ── */}
+        <View style={{ flexDirection: "row", gap: 8 }}>
+          {Q_KEYS.map(qk => {
+            const isActive = selQuality === qk;
+            return (
+              <Pressable key={qk} onPress={() => setSelQuality(qk)}
+                style={{ flex: 1, alignItems: "center", paddingVertical: 10, borderRadius: 14, borderWidth: 1,
+                  backgroundColor: isActive ? "rgba(109,40,217,0.25)" : "rgba(255,255,255,0.04)",
+                  borderColor: isActive ? "rgba(139,92,246,0.55)" : "rgba(255,255,255,0.09)" }}>
+                <Text style={{ fontSize: 13, fontFamily: "Cairo_800ExtraBold",
+                  color: isActive ? "#c4b5fd" : "rgba(255,255,255,0.50)" }}>
+                  {Q_KEY_LABEL[qk]}
+                </Text>
+                <Text style={{ fontSize: 9, fontFamily: "Cairo_400Regular", marginTop: 2,
+                  color: isActive ? "rgba(196,181,253,0.50)" : "rgba(255,255,255,0.22)" }}>
+                  {Q_KEY_SUB[qk]}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
+
+        {/* ── بطاقات المصادر للجودة المختارة ── */}
+        <View style={d.siteSelectorCard}>
+          <View style={d.siteSelectorHeader}>
+            <Ionicons name="server-outline" size={12} color="#a78bfa" />
+            <Text style={d.siteSelectorTitle}>اختر مصدراً — يبدأ التشغيل فوراً</Text>
           </View>
-        )}
+          <View style={d.siteGrid}>
+            {(STATIC_PICKER[selQuality] || []).map(slot => {
+              const status = slotStatus[slot.site] || "idle";
+              const isFetching = status === "fetching";
+              const isFailed   = status === "failed";
+              const isReady    = status === "ready";
+              return (
+                <Pressable key={slot.site} onPress={() => handlePickSite(slot.site)}
+                  style={[d.siteCard,
+                    isFailed && d.siteCardFailed,
+                    isReady  && { backgroundColor: "rgba(34,197,94,0.07)", borderColor: "rgba(34,197,94,0.22)" },
+                    isFetching && { backgroundColor: "rgba(139,92,246,0.10)", borderColor: "rgba(139,92,246,0.30)" },
+                  ]}>
+                  <View style={d.siteCardTopRow}>
+                    {isFetching ? (
+                      <SpinRing size={16} />
+                    ) : isReady ? (
+                      <Ionicons name="checkmark-circle" size={14} color="rgba(134,239,172,0.85)" />
+                    ) : isFailed ? (
+                      <Ionicons name="close-circle" size={14} color="rgba(248,113,113,0.70)" />
+                    ) : (
+                      <Ionicons name="play-circle-outline" size={14} color="rgba(196,181,253,0.45)" />
+                    )}
+                    <View style={d.siteTagBadge}>
+                      <Text style={d.siteTagText}>{slot.tag}</Text>
+                    </View>
+                    <Text style={d.siteCardName} numberOfLines={1}>{slot.name}</Text>
+                  </View>
+                  <Text style={d.siteCardDesc} numberOfLines={1}>
+                    {isFetching ? "جاري الجلب…"
+                      : isFailed  ? "تعذّر الاتصال — اضغط للمحاولة"
+                      : isReady   ? "جاهز — اضغط للتشغيل"
+                      : getSiteDesc(slot.site)}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+        </View>
 
-        {/* ── Quality tiers ── */}
-        {(["1080p FHD", "720p HD", "360p SD"] as Quality[]).map(q => {
-          const srcs = grouped[q];
-          if (!srcs.length) return null;
-          const qs = QUALITY_STYLE[q];
-          return (
-            <View key={q} style={d.tierSection}>
-              <View style={d.tierHeader}>
-                <View style={[d.tierDot, { backgroundColor: qs.dot }]} />
-                <Text style={[d.tierTitle, { color: qs.text }]}>{Q_LABEL[q]}</Text>
-                <View style={[d.tierCount, { backgroundColor: qs.badge, borderColor: qs.border }]}>
-                  <Text style={[d.tierCountText, { color: qs.text }]}>{srcs.length}</Text>
-                </View>
-              </View>
-              <View style={d.srcSection}>
-                {srcs.map((src, i) => (
-                  <SrcRow key={i} src={src} idx={allSrcs.indexOf(src)} onPlay={playSrc} />
-                ))}
-              </View>
-            </View>
-          );
-        })}
-
-        {/* ── Embeds ── */}
-        {embedSrcs.length > 0 && (
+        {/* ── مصادر جاهزة (بعد الجلب) — يظهر زر تشغيل مباشر لكل مصدر ── */}
+        {directSrcs.length > 0 && (
           <View style={d.tierSection}>
             <View style={d.tierHeader}>
-              <View style={[d.tierDot, { backgroundColor: "#64748b" }]} />
-              <Text style={[d.tierTitle, { color: "rgba(148,163,184,0.7)" }]}>سيرفرات احتياطية (مدمج)</Text>
+              <View style={[d.tierDot, { backgroundColor: "#34d399" }]} />
+              <Text style={[d.tierTitle, { color: "rgba(134,239,172,0.80)" }]}>مصادر جاهزة للتشغيل</Text>
+              <View style={[d.tierCount, { backgroundColor: "rgba(52,211,153,0.09)", borderColor: "rgba(52,211,153,0.24)" }]}>
+                <Text style={[d.tierCountText, { color: "rgba(110,231,183,0.92)" }]}>{directSrcs.length}</Text>
+              </View>
             </View>
             <View style={d.srcSection}>
-              {embedSrcs.map((src, i) => (
-                <SrcRow key={`emb-${i}`} src={src} idx={directSrcs.length + i} onPlay={playSrc} />
+              {directSrcs.map((src, i) => (
+                <SrcRow key={i} src={src} idx={i} onPlay={playSrc} />
               ))}
             </View>
-          </View>
-        )}
-
-
-        {/* ── Loading indicator while more sources stream in ── */}
-        {loading && allSrcs.length > 0 && (
-          <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, paddingVertical: 12 }}>
-            <SpinRing size={20} />
-            <Text style={{ fontSize: 11, fontFamily: "Cairo_400Regular", color: "rgba(139,92,246,0.7)" }}>جاري البحث عن مصادر إضافية...</Text>
           </View>
         )}
 
