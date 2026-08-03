@@ -29,9 +29,10 @@ export default function DubbedWatchScreen() {
     setLoading(true); setError(null);
 
     const BASE = getBaseUrl();
+    const ctrl = new AbortController();
     try {
-      const r = await fetch(`${BASE}/api/dubbed/watch-src?epUrl=${encodeURIComponent(epUrl)}`);
-      if (!mountedRef.current) return;
+      const r = await fetch(`${BASE}/api/dubbed/watch-src?epUrl=${encodeURIComponent(epUrl)}`, { signal: ctrl.signal });
+      if (ctrl.signal.aborted) return;
       if (!r.ok) {
         setError("تعذّر جلب مصدر الفيديو — حاول مرة أخرى");
         setLoading(false);

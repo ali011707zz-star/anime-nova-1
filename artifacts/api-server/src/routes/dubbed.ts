@@ -207,7 +207,28 @@ router.get("/dubbed/episodes", async (req, res) => {
     });
     if (!r.ok) { res.json({ episodes: [] }); return; }
     const data = await r.json();
-    const episodes = Array.isArray(data) ? data : (data.episodes || []);
+    const rawEps = Array.isArray(data) ? data : (data.episodes || []);
+
+    // ── تطبيع روابط الحلقات: بعض استجابات starcima تُعيد روابط نسبية أو من نطاقها
+    // الـ watch-src يقبل فقط arabic-toons.com — نُطبّع هنا تفادياً لـ 400
+    const AT_BASE_NORM = "https://www.arabic-toons.com";
+    const SC_HOST = new URL(SC_BASE).hostname; // "starcima.com"
+    const episodes = rawEps.map((ep: any) => {
+      if (!ep || typeof ep.url !== "string") return ep;
+      let url = ep.url.trim();
+      // رابط نسبي → مطلق على arabic-toons (النمط الأصلي)
+      if (url.startsWith("/")) url = `${AT_BASE_NORM}${url}`;
+      // رابط starcima.com → حوّله إلى arabic-toons.com (نفس المسار)
+      try {
+        const u = new URL(url);
+        if (u.hostname === SC_HOST || u.hostname === `www.${SC_HOST}`) {
+          u.hostname = "www.arabic-toons.com";
+          url = u.toString();
+        }
+      } catch { /* url غير قابل للتحليل — ابقه كما هو */ }
+      return { ...ep, url };
+    });
+
     _catalogCache.set(cacheKey, { data: episodes, ts: Date.now() });
     res.setHeader("Cache-Control", "public, max-age=1800");
     res.json({ episodes });
@@ -220,6 +241,8 @@ router.get("/dubbed/episodes", async (req, res) => {
 const ALLOWED_DUBBED_HOSTNAMES = new Set([
   "www.arabic-toons.com",
   "arabic-toons.com",
+  "starcima.com",
+  "www.starcima.com",
 ]);
 
 router.get("/dubbed/watch-src", async (req, res) => {
