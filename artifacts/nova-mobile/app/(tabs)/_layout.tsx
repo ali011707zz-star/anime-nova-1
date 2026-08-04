@@ -103,9 +103,13 @@ export default function TabLayout() {
       />
       <Tabs.Screen
         name="news"
+        options={{ href: null }}
+      />
+      <Tabs.Screen
+        name="downloads"
         options={{
           tabBarIcon: ({ color, focused }) => (
-            <TabIcon name={focused ? "newspaper" : "newspaper-outline"} label="أخبار" color={color} focused={focused} />
+            <TabIcon name={focused ? "download" : "download-outline"} label="تنزيلاتي" color={color} focused={focused} />
           ),
         }}
       />

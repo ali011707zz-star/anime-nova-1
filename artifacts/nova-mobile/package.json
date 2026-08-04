@@ -52,6 +52,7 @@
   },
   "dependencies": {
     "@expo-google-fonts/cairo": "^0.4.2",
+    "expo-file-system": "~18.0.7",
     "expo-brightness": "~13.0.1",
     "expo-media-library": "~17.0.6",
     "expo-secure-store": "~15.0.8",

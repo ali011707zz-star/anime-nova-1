@@ -12,7 +12,8 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useApp } from "@/context/AppContext";
 import { getBaseUrl } from "@/utils/api";
-import { secureFetch, warmAuthToken } from "@/utils/secureApi";
+import { secureFetch, warmAuthToken, getAuthToken } from "@/utils/secureApi";
+import { startDownload } from "@/utils/downloadManager";
 import * as ScreenOrientation from "expo-screen-orientation";
 
 /* ── Types ── */
@@ -354,8 +355,9 @@ export default function WatchScreen() {
   const [arEpTitle,   setArEpTitle]   = useState<string | undefined>();
   /* slotStatus: حالة كل مصدر في المنتقي (idle → fetching → ready/failed) */
   const [slotStatus,  setSlotStatus]  = useState<Record<string, "idle" | "fetching" | "ready" | "failed">>({});
-  /* الجودة المختارة في الـ picker */
-  const [selQuality,  setSelQuality]  = useState<QualityKey>("1080p");
+  /* حالات التنزيل لكل موقع */
+  const [downloadStates,   setDownloadStates]   = useState<Record<string, "idle" | "downloading" | "done" | "error">>({});
+  const [downloadProgress, setDownloadProgress] = useState<Record<string, number>>({});
 
   const abortRef          = useRef<AbortController | null>(null);
   /* siteCtrls: نتتبع AbortController لكل موقع جارٍ جلبه — لضمان إلغاء كل الطلبات عند الخروج */
@@ -566,6 +568,46 @@ export default function WatchScreen() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [anime, epNum, titleStr, englishStr, titleArStr, format, year, episodes, native, playSrc, anslayerId, sources]);
 
+  /* ── تنزيل حلقة من موقع معين ── */
+  const handleDownloadSite = useCallback(async (site: string) => {
+    if ((downloadStates[site] === "downloading") || (downloadStates[site] === "done")) return;
+    const siteSrcs = sources.filter(s => s.site === site);
+    const best = siteSrcs.find(isDirectPlayable) ?? siteSrcs[0];
+    if (!best || !isDirectPlayable(best)) return;
+    const rawUrl  = getPlayUrl(best);
+    const headers = best.headers || extractProxyHeaders(rawUrl);
+    const base    = getBaseUrl();
+    const proxyUrl = ensureVpsProxy(rawUrl, headers, base);
+    setDownloadStates(prev => ({ ...prev, [site]: "downloading" }));
+    setDownloadProgress(prev => ({ ...prev, [site]: 0 }));
+    try {
+      const token = await getAuthToken();
+      await startDownload(
+        {
+          animeId:  parseInt(anime || "0"),
+          ep:       epNum,
+          title:    displayTitle,
+          cover:    coverUrl,
+          site,
+          quality:  getSrcQuality(best),
+          url:      proxyUrl,
+          authToken: token,
+        },
+        (p) => {
+          if (isMountedRef.current) {
+            setDownloadProgress(prev => ({ ...prev, [site]: p.progress }));
+          }
+        }
+      );
+      if (isMountedRef.current) setDownloadStates(prev => ({ ...prev, [site]: "done" }));
+    } catch (e: any) {
+      if (e?.name !== "AbortError" && isMountedRef.current) {
+        setDownloadStates(prev => ({ ...prev, [site]: "error" }));
+      }
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [downloadStates, sources, anime, epNum, displayTitle, coverUrl]);
+
   /* ── Handle back ── */
   const handleBack = useCallback(() => {
     if (screen === "native" || screen === "embed") {
@@ -596,7 +638,7 @@ export default function WatchScreen() {
       if (qDiff !== 0) return qDiff;
       return (SITE_PRIORITY[b.site || ""] ?? 0) - (SITE_PRIORITY[a.site || ""] ?? 0);
     });
-    return { directSrcs: direct, embedSrcs: embeds };
+    return { directSrcs: direct, embedSrcs: embeds }; // embedSrcs reserved for future WebView fallback
   }, [sources]);
 
   /* ── RiftPlayer sources (live, used for picker) ── */
@@ -657,15 +699,9 @@ export default function WatchScreen() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [screen, riftSources]);
 
-  /* ── Grouped by quality for picker ── */
-  const grouped = useMemo<Record<Quality, Src[]>>(() => ({
-    "1080p FHD": directSrcs.filter(s => getSrcQuality(s) === "1080p FHD"),
-    "720p HD":   directSrcs.filter(s => getSrcQuality(s) === "720p HD"),
-    "360p SD":   directSrcs.filter(s => getSrcQuality(s) === "360p SD"),
-  }), [directSrcs]);
 
-  /* ── loading: صحيح عندما يكون أي موقع قيد الجلب ── */
-  const loading = Object.values(slotStatus).some(s => s === "fetching");
+  /* ── loading: صحيح عندما يكون أي موقع قيد الجلب (مرجع للمستقبل) ── */
+  const _loading = Object.values(slotStatus).some(s => s === "fetching"); void _loading;
 
   /* ══════════════ LOADING SCREEN ══════════════ */
   if (screen === "loading") {
@@ -864,114 +900,113 @@ export default function WatchScreen() {
                 <Ionicons name="play-circle" size={10} color="#a78bfa" />
                 <Text style={d.infoEpText}>الحلقة {epNum}</Text>
               </View>
-              {loading && (
-                <View style={[d.infoEpBadge, { backgroundColor: "rgba(139,92,246,0.08)", borderColor: "rgba(139,92,246,0.18)" }]}>
-                  <SpinRing size={12} />
-                  <Text style={[d.infoEpText, { color: "rgba(196,181,253,0.7)" }]}>جاري الجلب…</Text>
-                </View>
-              )}
             </View>
           </View>
         </View>
 
-        {/* ── تبويبات الجودة ── */}
-        <View style={{ flexDirection: "row", gap: 8 }}>
-          {Q_KEYS.map(qk => {
-            const isActive = selQuality === qk;
-            return (
-              <Pressable key={qk} onPress={() => setSelQuality(qk)}
-                style={{ flex: 1, alignItems: "center", paddingVertical: 10, borderRadius: 14, borderWidth: 1,
-                  backgroundColor: isActive ? "rgba(109,40,217,0.25)" : "rgba(255,255,255,0.04)",
-                  borderColor: isActive ? "rgba(139,92,246,0.55)" : "rgba(255,255,255,0.09)" }}>
-                <Text style={{ fontSize: 13, fontFamily: "Cairo_800ExtraBold",
-                  color: isActive ? "#c4b5fd" : "rgba(255,255,255,0.50)" }}>
-                  {Q_KEY_LABEL[qk]}
+        {/* ── مجموعات الجودة — نمط الويب ── */}
+        {(["1080p", "720p", "480p"] as QualityKey[]).map(qk => {
+          const slots = STATIC_PICKER[qk] || [];
+          const dotColor = qk === "1080p" ? "#fbbf24" : qk === "720p" ? "#34d399" : "#94a3b8";
+          return (
+            <View key={qk} style={{ gap: 6 }}>
+              {/* رأس الجودة */}
+              <View style={d.qPill}>
+                <Text style={[d.qPillText, { color: dotColor }]}>
+                  {qk.replace("p", "P")}
                 </Text>
-                <Text style={{ fontSize: 9, fontFamily: "Cairo_400Regular", marginTop: 2,
-                  color: isActive ? "rgba(196,181,253,0.50)" : "rgba(255,255,255,0.22)" }}>
-                  {Q_KEY_SUB[qk]}
-                </Text>
-              </Pressable>
-            );
-          })}
-        </View>
+                <View style={[d.qPillDot, { backgroundColor: dotColor }]} />
+              </View>
 
-        {/* ── بطاقات المصادر للجودة المختارة ── */}
-        <View style={d.siteSelectorCard}>
-          <View style={d.siteSelectorHeader}>
-            <Ionicons name="server-outline" size={12} color="#a78bfa" />
-            <Text style={d.siteSelectorTitle}>اختر مصدراً — يبدأ التشغيل فوراً</Text>
-          </View>
-          <View style={d.siteList}>
-            {(STATIC_PICKER[selQuality] || []).map((slot, idx) => {
-              const status = slotStatus[slot.site] || "idle";
-              const isFetching = status === "fetching";
-              const isFailed   = status === "failed";
-              const isReady    = status === "ready";
-              return (
-                <Pressable key={slot.site} onPress={() => handlePickSite(slot.site)}
-                  style={({ pressed }) => [
-                    d.siteRow,
-                    idx < (STATIC_PICKER[selQuality] || []).length - 1 && d.siteRowBorder,
-                    isFailed   && { backgroundColor: "rgba(239,68,68,0.04)" },
-                    isReady    && { backgroundColor: "rgba(34,197,94,0.05)" },
-                    isFetching && { backgroundColor: "rgba(139,92,246,0.06)" },
-                    pressed    && { opacity: 0.75 },
-                  ]}>
-                  {/* Status indicator */}
-                  <View style={d.siteRowDot}>
-                    {isFetching ? (
-                      <SpinRing size={14} />
-                    ) : (
-                      <View style={[d.siteRowDotInner, {
-                        backgroundColor: isReady ? "#22c55e" : isFailed ? "rgba(239,68,68,0.50)" : "rgba(255,255,255,0.18)",
-                        boxShadow: isReady ? "0 0 6px rgba(34,197,94,0.55)" : undefined,
-                      } as any]} />
-                    )}
-                  </View>
-                  {/* Name: "السيرفر KW" */}
-                  <Text style={[d.siteRowName,
-                    isReady  && { color: "rgba(255,255,255,0.90)" },
-                    isFailed && { color: "rgba(255,255,255,0.25)" },
-                  ]} numberOfLines={1}>
-                    السيرفر <Text style={d.siteRowTag}>{slot.tag}</Text>
-                  </Text>
-                  {/* Action button */}
-                  {isReady ? (
-                    <View style={d.siteRowPlayBtn}>
-                      <Ionicons name="play" size={9} color="#fff" />
-                      <Text style={d.siteRowPlayText}>تشغيل</Text>
-                    </View>
-                  ) : isFetching ? null : (
-                    <View style={[d.siteRowSelectBtn, isFailed && d.siteRowRetryBtn]}>
-                      <Text style={[d.siteRowSelectText, isFailed && { color: "rgba(248,113,113,0.80)" }]}>
-                        {isFailed ? "إعادة" : "اختيار"}
+              {/* قائمة السيرفرات */}
+              <View style={d.srcSection}>
+                {slots.map((slot, idx) => {
+                  const status   = slotStatus[slot.site] || "idle";
+                  const isFetching = status === "fetching";
+                  const isFailed   = status === "failed";
+                  const isReady    = status === "ready";
+                  const dlState    = downloadStates[slot.site] || "idle";
+                  const dlPct      = Math.round((downloadProgress[slot.site] || 0) * 100);
+                  return (
+                    <Pressable
+                      key={slot.site}
+                      onPress={() => handlePickSite(slot.site)}
+                      style={({ pressed }) => [
+                        d.webRow,
+                        idx < slots.length - 1 && d.webRowBorder,
+                        isReady  && { backgroundColor: "rgba(34,197,94,0.035)" },
+                        isFailed && { opacity: 0.40 },
+                        pressed  && { opacity: 0.72 },
+                      ]}
+                    >
+                      {/* Left: play icon / spinner */}
+                      <View style={d.webRowPlayIcon}>
+                        {isFetching ? (
+                          <SpinRing size={16} />
+                        ) : (
+                          <Ionicons
+                            name={isReady ? "play-circle" : "play-circle-outline"}
+                            size={19}
+                            color={
+                              isReady  ? "#34d399" :
+                              isFailed ? "rgba(239,68,68,0.40)" :
+                              "rgba(255,255,255,0.22)"
+                            }
+                          />
+                        )}
+                      </View>
+
+                      {/* Center: name + tag */}
+                      <Text
+                        style={[
+                          d.webRowName,
+                          isReady  && { color: "rgba(255,255,255,0.90)" },
+                          isFailed && { color: "rgba(255,255,255,0.22)" },
+                        ]}
+                        numberOfLines={1}
+                      >
+                        {slot.name}{"  "}
+                        <Text style={d.webRowTag}>{slot.tag}</Text>
                       </Text>
-                    </View>
-                  )}
-                </Pressable>
-              );
-            })}
-          </View>
-        </View>
 
-        {/* ── مصادر جاهزة (بعد الجلب) — يظهر زر تشغيل مباشر لكل مصدر ── */}
-        {directSrcs.length > 0 && (
-          <View style={d.tierSection}>
-            <View style={d.tierHeader}>
-              <View style={[d.tierDot, { backgroundColor: "#34d399" }]} />
-              <Text style={[d.tierTitle, { color: "rgba(134,239,172,0.80)" }]}>مصادر جاهزة للتشغيل</Text>
-              <View style={[d.tierCount, { backgroundColor: "rgba(52,211,153,0.09)", borderColor: "rgba(52,211,153,0.24)" }]}>
-                <Text style={[d.tierCountText, { color: "rgba(110,231,183,0.92)" }]}>{directSrcs.length}</Text>
+                      {/* Right: download + status dot */}
+                      <View style={d.webRowRight}>
+                        {isReady && dlState === "idle" && (
+                          <Pressable
+                            onPress={() => handleDownloadSite(slot.site)}
+                            hitSlop={10}
+                            style={d.dlIconBtn}
+                          >
+                            <Ionicons name="download-outline" size={15} color="rgba(139,92,246,0.80)" />
+                          </Pressable>
+                        )}
+                        {isReady && dlState === "downloading" && (
+                          <View style={d.dlPctBadge}>
+                            <Text style={d.dlPctText}>{dlPct}%</Text>
+                          </View>
+                        )}
+                        {isReady && dlState === "done" && (
+                          <Ionicons name="checkmark-circle" size={16} color="#8B5CF6" />
+                        )}
+                        {isReady && dlState === "error" && (
+                          <Ionicons name="close-circle" size={16} color="rgba(239,68,68,0.70)" />
+                        )}
+                        {!isFetching && (
+                          <View style={[d.webRowDot, {
+                            backgroundColor:
+                              isReady  ? "#34d399" :
+                              isFailed ? "rgba(239,68,68,0.50)" :
+                              "rgba(255,255,255,0.18)",
+                          }]} />
+                        )}
+                      </View>
+                    </Pressable>
+                  );
+                })}
               </View>
             </View>
-            <View style={d.srcSection}>
-              {directSrcs.map((src, i) => (
-                <SrcRow key={i} src={src} idx={i} onPlay={playSrc} />
-              ))}
-            </View>
-          </View>
-        )}
+          );
+        })}
 
       </ScrollView>
     </View>
@@ -1076,4 +1111,23 @@ const d = StyleSheet.create({
   webAppIcon:    { width: 40, height: 40, borderRadius: 12, backgroundColor: "rgba(139,92,246,0.16)", alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: "rgba(139,92,246,0.28)" },
   webAppTitle:   { fontSize: 13, fontFamily: "Cairo_700Bold", color: "rgba(196,181,253,0.95)", textAlign: "right" },
   webAppSub:     { fontSize: 10, fontFamily: "Cairo_400Regular", color: "rgba(255,255,255,0.30)", textAlign: "right" },
+
+  /* ── Web-style quality pill header ── */
+  qPill:         { flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 4 },
+  qPillText:     { fontSize: 12, fontFamily: "Cairo_800ExtraBold", letterSpacing: 0.5 },
+  qPillDot:      { width: 6, height: 6, borderRadius: 3 },
+
+  /* ── Web-style server row ── */
+  webRow:         { flexDirection: "row", alignItems: "center", paddingHorizontal: 14, paddingVertical: 14, gap: 10 },
+  webRowBorder:   { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: "rgba(255,255,255,0.06)" },
+  webRowPlayIcon: { width: 22, alignItems: "center", justifyContent: "center", flexShrink: 0 },
+  webRowName:     { flex: 1, fontSize: 13, fontFamily: "Cairo_800ExtraBold", color: "rgba(255,255,255,0.48)", textAlign: "right" } as any,
+  webRowTag:      { fontFamily: "Cairo_800ExtraBold", letterSpacing: 0.4, fontSize: 11 },
+  webRowRight:    { flexDirection: "row", alignItems: "center", gap: 7, flexShrink: 0 },
+  webRowDot:      { width: 8, height: 8, borderRadius: 4 },
+
+  /* ── Download button ── */
+  dlIconBtn:     { width: 28, height: 28, borderRadius: 9, backgroundColor: "rgba(139,92,246,0.12)", borderWidth: 1, borderColor: "rgba(139,92,246,0.22)", alignItems: "center", justifyContent: "center" },
+  dlPctBadge:    { paddingHorizontal: 7, paddingVertical: 2, borderRadius: 7, backgroundColor: "rgba(139,92,246,0.15)", borderWidth: 1, borderColor: "rgba(139,92,246,0.28)" },
+  dlPctText:     { fontSize: 9, fontFamily: "Cairo_800ExtraBold", color: "#c4b5fd" },
 });

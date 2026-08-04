@@ -39,7 +39,7 @@ const NAV_MAIN: NavItem[] = [
   { icon: "search",          label: "البحث",                 route: "/(tabs)/search",      color: "#6366f1" },
   { icon: "grid",            label: "تصفح الأنمي",           route: "/(tabs)/browse",      color: "#3b82f6" },
   { icon: "tv",              label: "كرتون مدبلج",           route: "/dubbed",             color: "#10b981" },
-  { icon: "newspaper",       label: "أخبار الأنمي",          route: "/(tabs)/news",        color: "#f59e0b" },
+  { icon: "download",        label: "تنزيلاتي",              route: "/(tabs)/downloads",   color: "#8B5CF6" },
   { icon: "calendar",        label: "جدول البث الأسبوعي",    route: "/schedule",           color: "#10b981" },
 ];
 
