@@ -23,6 +23,7 @@ interface ApiSource {
 function toRiftQuality(q: string): "1080p FHD" | "720p HD" | "360p SD" {
   if (q.includes("1080")) return "1080p FHD";
   if (q.includes("720"))  return "720p HD";
+  if (q.includes("480"))  return "720p HD";  // 480p → نعرضها كـ HD (أقرب تصنيف)
   return "360p SD";
 }
 

@@ -725,24 +725,34 @@ router.get("/aw-dubbed/watch-src", async (req, res) => {
 
   try {
     // جلب من الجدولين بالتوازي — dubbed_anim_links أولاً ثم aw_links
+    // ملاحظة: order=quality.desc يفرز نصياً (720p > 480p > 1080p) — نفرز بعدها رقمياً في الكود
     const [dalRows, awRows] = await Promise.all([
-      fetch(`${SB_URL}/rest/v1/dubbed_anim_links?select=server,quality,link&series_id=eq.${encodeURIComponent(series)}&ep_number=eq.${ep}&order=quality.desc&limit=30`, {
+      fetch(`${SB_URL}/rest/v1/dubbed_anim_links?select=server,quality,link&series_id=eq.${encodeURIComponent(series)}&ep_number=eq.${ep}&limit=30`, {
         headers: { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}` },
         signal: AbortSignal.timeout(10000),
       }).then(r => r.ok ? r.json() as Promise<{ server: string; quality: string; link: string }[]> : [] as { server: string; quality: string; link: string }[]).catch(() => [] as { server: string; quality: string; link: string }[]),
-      fetch(`${SB_URL}/rest/v1/aw_links?select=server,quality,link&anime_id=eq.${encodeURIComponent(series)}&ep_number=eq.${ep}&content_type=eq.dubbed&order=quality.desc&limit=30`, {
+      fetch(`${SB_URL}/rest/v1/aw_links?select=server,quality,link&anime_id=eq.${encodeURIComponent(series)}&ep_number=eq.${ep}&content_type=eq.dubbed&limit=30`, {
         headers: { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}` },
         signal: AbortSignal.timeout(10000),
       }).then(r => r.ok ? r.json() as Promise<{ server: string; quality: string; link: string }[]> : [] as { server: string; quality: string; link: string }[]).catch(() => [] as { server: string; quality: string; link: string }[]),
     ]);
 
-    // دمج: dubbed_anim_links أولاً (أحدث وأكثر اكتمالاً)، ثم aw_links للتكملة
+    // وزن الجودة الرقمي للفرز الصحيح
+    function qualityWeight(q: string): number {
+      const n = parseInt(q.replace(/\D/g, "") || "0", 10);
+      return n; // 1080 > 720 > 480 > 360
+    }
+
+    // دمج: dubbed_anim_links أولاً، ثم aw_links — مع تخطي KF (روابطه محذوفة)
     const seenSrv = new Set<string>();
     const rows: { server: string; quality: string; link: string }[] = [];
     for (const r of [...(Array.isArray(dalRows) ? dalRows : []), ...(Array.isArray(awRows) ? awRows : [])]) {
+      if (r.server === "KF") continue; // KrakenFiles: كل روابطه 404 — تخطي مباشر
       const k = `${r.server}|${r.link}`;
       if (!seenSrv.has(k)) { seenSrv.add(k); rows.push(r); }
     }
+    // فرز: 1080p أولاً ثم 720p ثم 480p
+    rows.sort((a, b) => qualityWeight(b.quality) - qualityWeight(a.quality));
     if (!rows.length) { res.status(404).json({ error: "no sources found" }); return; }
 
     function serverLabel(srv: string): string {
