@@ -13,7 +13,12 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useApp } from "@/context/AppContext";
 import { getBaseUrl } from "@/utils/api";
 import { secureFetch, warmAuthToken, getAuthToken } from "@/utils/secureApi";
-import { startDownload } from "@/utils/downloadManager";
+import {
+  startGlobalDownload,
+  subscribeActiveDownloads,
+  getActiveDownloadsSnapshot,
+  cancelActiveDownload,
+} from "@/utils/downloadManager";
 import * as ScreenOrientation from "expo-screen-orientation";
 
 /* ── Types ── */
@@ -568,45 +573,77 @@ export default function WatchScreen() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [anime, epNum, titleStr, englishStr, titleArStr, format, year, episodes, native, playSrc, anslayerId, sources]);
 
-  /* ── تنزيل حلقة من موقع معين ── */
+  /* ── مزامنة حالة التنزيل من Global Singleton ── */
+  useEffect(() => {
+    const animeIdNum = parseInt(anime || "0");
+    const sync = () => {
+      const snapshot = getActiveDownloadsSnapshot();
+      /* خريطة: site → ActiveDownload للحلقة الحالية فقط */
+      const activeForEp = new Map(
+        snapshot
+          .filter(d => d.animeId === animeIdNum && d.ep === epNum)
+          .map(d => [d.site, d])
+      );
+      setDownloadStates(prev => {
+        const next = { ...prev };
+        /* downloading → done: إذا اختفى من الـ snapshot (اكتمل بنجاح) */
+        for (const k of Object.keys(next)) {
+          if (next[k] === "downloading" && !activeForEp.has(k)) {
+            next[k] = "done";
+          }
+        }
+        /* حدِّث من الـ snapshot الحالي */
+        for (const [site, d] of activeForEp) {
+          next[site] = d.status === "error" ? "error" : "downloading";
+        }
+        return next;
+      });
+      setDownloadProgress(prev => {
+        const next = { ...prev };
+        for (const [site, d] of activeForEp) {
+          next[site] = d.progress;
+        }
+        return next;
+      });
+    };
+    sync(); // قراءة فورية عند mount
+    return subscribeActiveDownloads(sync);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [anime, epNum]);
+
+  /* ── تنزيل حلقة من موقع معين (Global — يستمر عند التنقل) ── */
   const handleDownloadSite = useCallback(async (site: string) => {
-    if ((downloadStates[site] === "downloading") || (downloadStates[site] === "done")) return;
+    const dlState = downloadStates[site] || "idle";
+    if (dlState === "downloading" || dlState === "done") return;
+
     const siteSrcs = sources.filter(s => s.site === site);
     const best = siteSrcs.find(isDirectPlayable) ?? siteSrcs[0];
     if (!best || !isDirectPlayable(best)) return;
-    const rawUrl  = getPlayUrl(best);
-    const headers = best.headers || extractProxyHeaders(rawUrl);
-    const base    = getBaseUrl();
+
+    const rawUrl   = getPlayUrl(best);
+    const headers  = best.headers || extractProxyHeaders(rawUrl);
+    const base     = getBaseUrl();
     const proxyUrl = ensureVpsProxy(rawUrl, headers, base);
-    setDownloadStates(prev => ({ ...prev, [site]: "downloading" }));
-    setDownloadProgress(prev => ({ ...prev, [site]: 0 }));
-    try {
-      const token = await getAuthToken();
-      await startDownload(
-        {
-          animeId:  parseInt(anime || "0"),
-          ep:       epNum,
-          title:    displayTitle,
-          cover:    coverUrl,
-          site,
-          quality:  getSrcQuality(best),
-          url:      proxyUrl,
-          authToken: token,
-        },
-        (p) => {
-          if (isMountedRef.current) {
-            setDownloadProgress(prev => ({ ...prev, [site]: p.progress }));
-          }
-        }
-      );
-      if (isMountedRef.current) setDownloadStates(prev => ({ ...prev, [site]: "done" }));
-    } catch (e: any) {
-      if (e?.name !== "AbortError" && isMountedRef.current) {
-        setDownloadStates(prev => ({ ...prev, [site]: "error" }));
-      }
-    }
+
+    /* ترجمة: استخدم subtitleUrl المصدر أولاً ثم الترجمة العالمية */
+    const subRaw     = best.subtitleUrl || globalSubUrl;
+    const subtitleUrl = subRaw ? resolveUrl(subRaw, base) : undefined;
+
+    const token = await getAuthToken();
+    /* Fire-and-forget — يعمل في الخلفية بمستقل عن lifecycle هذه الشاشة */
+    void startGlobalDownload({
+      animeId:  parseInt(anime || "0"),
+      ep:       epNum,
+      title:    displayTitle,
+      cover:    coverUrl,
+      site,
+      quality:  getSrcQuality(best),
+      url:      proxyUrl,
+      authToken: token,
+      subtitleUrl,
+    });
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [downloadStates, sources, anime, epNum, displayTitle, coverUrl]);
+  }, [downloadStates, sources, anime, epNum, displayTitle, coverUrl, globalSubUrl]);
 
   /* ── Handle back ── */
   const handleBack = useCallback(() => {
@@ -971,24 +1008,25 @@ export default function WatchScreen() {
 
                       {/* Right: download + status dot */}
                       <View style={d.webRowRight}>
-                        {isReady && dlState === "idle" && (
+                        {/* زر التنزيل — ظاهر دائماً، يُفعَّل فقط عند ready */}
+                        {dlState === "idle" && (
                           <Pressable
-                            onPress={() => handleDownloadSite(slot.site)}
+                            onPress={() => { if (isReady) handleDownloadSite(slot.site); }}
                             hitSlop={10}
-                            style={d.dlIconBtn}
+                            style={[d.dlIconBtn, !isReady && { opacity: 0.22 }]}
                           >
                             <Ionicons name="download-outline" size={15} color="rgba(139,92,246,0.80)" />
                           </Pressable>
                         )}
-                        {isReady && dlState === "downloading" && (
+                        {dlState === "downloading" && (
                           <View style={d.dlPctBadge}>
                             <Text style={d.dlPctText}>{dlPct}%</Text>
                           </View>
                         )}
-                        {isReady && dlState === "done" && (
+                        {dlState === "done" && (
                           <Ionicons name="checkmark-circle" size={16} color="#8B5CF6" />
                         )}
-                        {isReady && dlState === "error" && (
+                        {dlState === "error" && (
                           <Ionicons name="close-circle" size={16} color="rgba(239,68,68,0.70)" />
                         )}
                         {!isFetching && (
