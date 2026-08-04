@@ -742,9 +742,48 @@ export default function WatchScreen() {
       return;
     }
     saveProgress();
+    /* إلغاء جميع طلبات المواقع الجارية عند الخروج الكامل من الشاشة */
+    siteCtrls.current.forEach(c => c.abort());
+    siteCtrls.current.clear();
     if (router.canGoBack()) router.back();
     else router.replace(`/episodes/${anime}` as any);
   }, [screen, anime, router, saveProgress]);
+
+  /* ── Memoized RiftPlayer callbacks — يمنع إعادة render المشغّل عند كل تغيير في الـ parent ── */
+  const onRiftBack = useCallback(() => {
+    saveProgress();
+    setScreen("picker");
+  }, [saveProgress]);
+
+  const onRiftError = useCallback(() => {
+    console.warn("[Anime Watch] جميع المصادر فشلت — العودة للـ picker");
+    saveProgress();
+    if (srcCacheKey) AsyncStorage.removeItem(srcCacheKey).catch(() => {});
+    inFlightSitesRef.current.clear();
+    fetchedSitesRef.current.clear();
+    setSources([]);
+    seenKeys.current.clear();
+    setSlotStatus({});
+    setScreen("picker");
+  }, [saveProgress, srcCacheKey]);
+
+  const onRiftProgress = useCallback((pos: number, dur: number) => {
+    lastTimeRef.current = pos;
+    if (pos > 10) AsyncStorage.setItem(progressKey, String(Math.floor(pos))).catch(() => {});
+    const now = Date.now();
+    if (dur > 0 && anime && now - lastHistoryWriteRef.current > 30_000) {
+      lastHistoryWriteRef.current = now;
+      addToHistory({
+        animeId: parseInt(anime), ep: epNum, title: titleStr, english: englishStr,
+        thumbnail: coverUrl || (anime ? `https://img.anili.st/media/${anime}` : ""),
+        position: pos, duration: dur, updatedAt: now,
+      });
+    }
+  }, [progressKey, anime, epNum, titleStr, englishStr, coverUrl, addToHistory]);
+
+  const onRiftNextEpisode = useCallback(() => goEp(epNum + 1, true), [goEp, epNum]);
+  const onRiftPrevEpisode = useCallback(() => goEp(epNum - 1), [goEp, epNum]);
+  const onRiftEpisodeSelect = useCallback((n: number) => goEp(n), [goEp]);
 
   /* ── Group sources ── */
   const { directSrcs, embedSrcs } = useMemo(() => {
@@ -880,35 +919,12 @@ export default function WatchScreen() {
         episodeTitle={arEpTitle ?? (etitle ? decodeURIComponent(etitle) : undefined)}
         initialPosition={resumeTime}
         totalEps={totalEpsCount}
-        onBack={() => { saveProgress(); setScreen("picker"); }}
-        onError={() => {
-          /* جميع مصادر المشغّل فشلت → العودة للـ picker */
-          console.warn("[Anime Watch] جميع المصادر فشلت — العودة للـ picker");
-          saveProgress();
-          /* ⚠️ احذف كاش المصادر التالفة — يمنع تكرار الكراش عند فتح الحلقة مجدداً */
-          if (srcCacheKey) AsyncStorage.removeItem(srcCacheKey).catch(() => {});
-          inFlightSitesRef.current.clear();
-          fetchedSitesRef.current.clear();
-          /* ⚠️ لا نستدعي abortRef.current?.abort() — الطلبات الجارية لمواقع أخرى
-             تستمر وتُضيف مصادر للـ picker حتى يجد المستخدم بديلاً يعمل */
-          setSources([]);
-          seenKeys.current.clear();
-          setSlotStatus({});
-          setScreen("picker");
-        }}
-        onProgress={(pos, dur) => {
-          lastTimeRef.current = pos;
-          if (pos > 10) AsyncStorage.setItem(progressKey, String(Math.floor(pos))).catch(() => { });
-          // throttle: write watch-history at most once every 30s (not on every progress tick)
-          const now = Date.now();
-          if (dur > 0 && anime && now - lastHistoryWriteRef.current > 30_000) {
-            lastHistoryWriteRef.current = now;
-            addToHistory({ animeId: parseInt(anime), ep: epNum, title: titleStr, english: englishStr, thumbnail: coverUrl || (anime ? `https://img.anili.st/media/${anime}` : ""), position: pos, duration: dur, updatedAt: now });
-          }
-        }}
-        onNextEpisode={() => goEp(epNum + 1, true)}
-        onPrevEpisode={epNum > 1 ? () => goEp(epNum - 1) : undefined}
-        onEpisodeSelect={(n) => goEp(n)}
+        onBack={onRiftBack}
+        onError={onRiftError}
+        onProgress={onRiftProgress}
+        onNextEpisode={onRiftNextEpisode}
+        onPrevEpisode={epNum > 1 ? onRiftPrevEpisode : undefined}
+        onEpisodeSelect={onRiftEpisodeSelect}
       />
     );
   }
