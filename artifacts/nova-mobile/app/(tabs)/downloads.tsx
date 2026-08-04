@@ -312,6 +312,18 @@ export default function DownloadsScreen() {
   const isEmpty      = !hasActive && !hasCompleted;
 
   return (
+    <>
+    {/* ── تشغيل محلي — Modal كاملة الشاشة حتى لا يظهر شريط التنقل السفلي ── */}
+    <Modal
+      visible={playingItem !== null}
+      animationType="slide"
+      presentationStyle="fullScreen"
+      onRequestClose={handleClosePlayer}
+      statusBarTranslucent
+    >
+      {playingItem && <LocalPlayer item={playingItem} onClose={handleClosePlayer} />}
+    </Modal>
+
     <View style={[s.screen, { paddingTop: topPad }]}>
       {/* Header */}
       <View style={s.header}>
@@ -388,6 +400,7 @@ export default function DownloadsScreen() {
         </View>
       )}
     </View>
+    </>
   );
 }
 

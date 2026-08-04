@@ -260,7 +260,7 @@ export async function startGlobalDownload(params: {
         FileSystem.deleteAsync(localPath, { idempotent: true }).catch(() => {});
         entry.status = "error";
         _notify();
-        setTimeout(() => { _active.delete(id); _notify(); }, 3000);
+        /* لا تُحذف بطاقة الخطأ تلقائياً — المستخدم يضغط × ليُغلقها */
       }
     }, STALL_MS);
   }
