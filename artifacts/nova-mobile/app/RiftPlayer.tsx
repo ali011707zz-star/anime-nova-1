@@ -328,6 +328,21 @@ function SpinRing({ size = 52 }: { size?: number }) {
   );
 }
 
+/* ─── تقسيم سطر الترجمة الطويل إلى سطرين عند منتصف أقرب مسافة ─── */
+function wrapSubLine(text: string, maxLen = 30): string[] {
+  if (!text || text.length <= maxLen) return [text];
+  const mid = Math.floor(text.length / 2);
+  let best = -1, bestDist = Infinity;
+  for (let i = 0; i < text.length; i++) {
+    if (text[i] === " ") {
+      const dist = Math.abs(i - mid);
+      if (dist < bestDist) { bestDist = dist; best = i; }
+    }
+  }
+  if (best === -1) return [text];
+  return [text.slice(0, best).trim(), text.slice(best + 1).trim()].filter(Boolean);
+}
+
 /* ─── Screenshot flash overlay ─── */
 function ScreenshotFlash({ visible }: { visible: boolean }) {
   const opacity = useRef(new Animated.Value(0)).current;
@@ -852,10 +867,10 @@ export function RiftPlayer({
     return () => { cancelled = true; streamAbort.abort(); setSubLoading(false); };
   }, [currentSrc?.subtitleUrl, srcIdx, anilistId, episode, subLang]); // eslint-disable-line
 
-  /* ─── Auto-enable subtitles when source provides a subtitle URL ─── */
-  useEffect(() => {
-    if (currentSrc?.subtitleUrl) setSubOn(true);
-  }, [currentSrc?.subtitleUrl]);
+  /* ─── Auto-enable subtitles: معطَّل — المستخدم يُفعّل الترجمة يدوياً ─── */
+  // useEffect(() => {
+  //   if (currentSrc?.subtitleUrl) setSubOn(true);
+  // }, [currentSrc?.subtitleUrl]);
 
   /* ─── Screen brightness — حصري للمشغل فقط ─── */
   const origBrightnessRef = useRef<number>(0.5);
@@ -1041,7 +1056,8 @@ export function RiftPlayer({
         if (cues.length > 0 && !cancelled) {
           /* نحفظ في autoSubCues (لا loadedCues) حتى لا تُمسح عند تبديل المصدر */
           setAutoSubCues(cues);
-          setSubOn(true);
+          /* التفعيل التلقائي معطَّل — المستخدم يُفعّل الترجمة يدوياً */
+          // setSubOn(true);
           setAutoSubSource(track.lang === "ar" ? "wyzie-ar" : "wyzie-en-translated");
         }
       } catch {}
@@ -1538,9 +1554,11 @@ export function RiftPlayer({
           style={[s.subtitleWrap, subPositionStyle()]}
           pointerEvents="none"
         >
-          {/* Vidstack technique: split multi-line VTT cues → each line as separate Text */}
-          {activeCue.text.split(/\r?\n/).map((line, i) => (
-            <Text key={i} style={[
+          {/* split multi-line VTT cues → wrapSubLine تقسّم السطور الطويلة إلى سطرين */}
+          {activeCue.text.split(/\r?\n/).flatMap((rawLine, ri) =>
+            wrapSubLine(rawLine).map((line, wi) => ({ line, key: `${ri}-${wi}` }))
+          ).map(({ line, key }, i) => (
+            <Text key={key} style={[
               s.subtitleText,
               i > 0 && { marginTop: 2 },
               {

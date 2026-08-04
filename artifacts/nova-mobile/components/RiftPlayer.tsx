@@ -1140,10 +1140,10 @@ export function RiftPlayer({
     return () => { cancelled = true; streamAbort.abort(); setSubLoading(false); };
   }, [currentSrc?.subtitleUrl, srcIdx, anilistId, episode, subLang]); // eslint-disable-line
 
-  /* ─── Auto-enable subtitles when source provides a subtitle URL ─── */
-  useEffect(() => {
-    if (currentSrc?.subtitleUrl) setSubOn(true);
-  }, [currentSrc?.subtitleUrl]);
+  /* ─── Auto-enable subtitles: معطَّل — المستخدم يُفعّل الترجمة يدوياً ─── */
+  // useEffect(() => {
+  //   if (currentSrc?.subtitleUrl) setSubOn(true);
+  // }, [currentSrc?.subtitleUrl]);
 
   /* ─── Screen orientation lock to landscape ─── */
   useEffect(() => {
@@ -1343,9 +1343,8 @@ export function RiftPlayer({
 
         if (cues.length > 0 && !ctrl.signal.aborted) {
           setLoadedCues(cues);
-          /* لا تُفعَّل الترجمة الخارجية تلقائياً لمصادر تحتوي ترجمة مدمجة (isArabic)
-             مثل KW/AW/AF/SA/FX — المستخدم يُفعّلها يدوياً إن أراد */
-          if (!isArabicRef.current) setSubOn(true);
+          /* التفعيل التلقائي معطَّل — المستخدم يُفعّل الترجمة يدوياً */
+          // if (!isArabicRef.current) setSubOn(true);
           setAutoSubSource(track.lang === "ar" ? "wyzie-ar" : "wyzie-en-translated");
         }
       } catch {}
@@ -1848,9 +1847,11 @@ export function RiftPlayer({
           style={[s.subtitleWrap, subPositionStyle()]}
           pointerEvents="none"
         >
-          {/* Vidstack technique: split multi-line VTT cues → each line as separate Text */}
-          {activeCue.text.split(/\r?\n/).map((line, i) => (
-            <Text key={i} style={[
+          {/* split multi-line VTT cues → wrapSubLine تقسّم السطور الطويلة إلى سطرين */}
+          {activeCue.text.split(/\r?\n/).flatMap((rawLine, ri) =>
+            wrapSubLine(rawLine).map((line, wi) => ({ line, key: `${ri}-${wi}` }))
+          ).map(({ line, key }, i) => (
+            <Text key={key} style={[
               s.subtitleText,
               i > 0 && { marginTop: 2 },
               {
