@@ -367,6 +367,8 @@ export default function WatchScreen() {
   const seenKeys          = useRef(new Set<string>());
   const lastTimeRef       = useRef(0);
   const lastHistoryWriteRef = useRef(0);
+  /* آخر كتابة فعلية لـ progressKey — نحدّها بمرة واحدة كل 10ث بدل كل 500ms */
+  const lastProgressSaveRef = useRef(0);
   const isMountedRef      = useRef(true);
   const fetchEpochRef     = useRef(0);
   const inFlightSitesRef  = useRef<Set<string>>(new Set());
@@ -432,7 +434,7 @@ export default function WatchScreen() {
   }, [progressKey]);
 
   /* ── Navigate episode ── */
-  function goEp(n: number, _auto = false) {
+  const goEp = useCallback((n: number, _auto = false) => {
     saveProgress();
     abortRef.current?.abort();
     /* إلغاء جميع طلبات المواقع الجارية قبل الانتقال للحلقة التالية */
@@ -447,7 +449,8 @@ export default function WatchScreen() {
     const coverParam = coverUrl ? `&cover=${encodeURIComponent(coverUrl)}` : "";
     const arParam    = titleArStr ? `&titleAr=${encodeURIComponent(titleArStr)}` : "";
     router.replace(`/watch?anime=${anime}&ep=${n}&title=${encodeURIComponent(titleStr)}&english=${encodeURIComponent(englishStr)}&format=${encodeURIComponent(format || "")}${coverParam}${arParam}`);
-  }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [saveProgress, coverUrl, titleArStr, router, anime, titleStr, englishStr, format]);
 
   /* ── إعادة تعيين حالة المصادر (زر تحديث) — مسح الأخطاء للسماح بالمحاولة مجدداً ── */
   function refreshAllSources() {
@@ -538,6 +541,8 @@ export default function WatchScreen() {
 
       if (!res.ok || !isMountedRef.current) throw new Error("fetch failed");
       const data = await res.json();
+      /* تحقق مجدداً بعد await — الـ component قد يكون unmounted أثناء parse الـ JSON */
+      if (!isMountedRef.current) return;
       const rawSrcs: Src[] = data.sources || [];
 
       if (!rawSrcs.length) { setSlotStatus(prev => ({ ...prev, [site]: "failed" })); return; }
