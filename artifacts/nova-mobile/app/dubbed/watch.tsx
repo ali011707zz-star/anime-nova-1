@@ -26,15 +26,70 @@ export default function DubbedWatchScreen() {
   /* تخزين AbortController في ref حتى يمكن إلغاؤه عند unmount أو retry */
   const ctrlRef = useRef<AbortController | null>(null);
 
+  /** استخراج رابط الفيديو من HTML صفحة arabic-toons.com — نفس patterns الباكند */
+  function extractVideoFromHtml(html: string, base: string): string | null {
+    // Pattern 1: videoSrc = "https://stream.foupix.com:8443/...mp4?tkn=..."
+    const m1 = html.match(/(?:const\s+)?videoSrc\s*=\s*["']([^"']+(?:\.mp4|\.m3u8)[^"']*)["']/);
+    if (m1) return m1[1].split('"')[0].split("'")[0];
+    // Pattern 2: file: "https://....mp4"
+    const m2 = html.match(/['"](https?:\/\/[^"']+\.mp4[^"']*)['"]/);
+    if (m2) return m2[1];
+    // Pattern 3: src="...m3u8"
+    const m3 = html.match(/src=["']([^"']+\.m3u8[^"']*)["']/);
+    if (m3) return m3[1].startsWith("/") ? `${base}${m3[1]}` : m3[1];
+    return null;
+  }
+
   const loadSource = useCallback(async () => {
     if (!epUrl) { setError("رابط الحلقة مفقود"); setLoading(false); return; }
-    /* إلغاء أي طلب سابق قبل البدء بجديد */
     ctrlRef.current?.abort();
     const ctrl = new AbortController();
     ctrlRef.current = ctrl;
     setLoading(true); setError(null);
 
     const BASE = getBaseUrl();
+
+    // ── الطريقة الأولى: الموبايل يجلب صفحة arabic-toons.com مباشرة (IP سكني لا يُحجب) ──
+    // هذا يتجاوز مشكلة حجب VPS بواسطة arabic-toons.com
+    try {
+      const pageR = await fetch(epUrl, {
+        signal: ctrl.signal,
+        headers: {
+          "User-Agent": "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.6367.82 Mobile Safari/537.36",
+          Referer: "https://www.arabic-toons.com/",
+          Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+          "Accept-Language": "ar,en-US;q=0.9,en;q=0.8",
+        },
+      });
+      if (ctrl.signal.aborted) return;
+      if (pageR.ok) {
+        const html = await pageR.text();
+        if (ctrl.signal.aborted) return;
+        const videoUrl = extractVideoFromHtml(html, "https://www.arabic-toons.com");
+        if (videoUrl) {
+          const srcs: PlayerSource[] = [{
+            url: videoUrl,
+            label: "مدبلج عربي (مباشر)",
+            quality: "720p HD",
+            headers: {
+              Referer: "https://www.arabic-toons.com/",
+              Origin: "https://www.arabic-toons.com",
+            },
+          }];
+          // أضف proxy السيرفر كاحتياطي
+          const proxyUrl = `${BASE}/api/dubbed/stream?url=${encodeURIComponent(videoUrl)}`;
+          srcs.push({ url: proxyUrl, label: "مدبلج عربي (احتياطي)", quality: "720p HD" });
+          setSources(srcs);
+          setLoading(false);
+          return;
+        }
+      }
+    } catch (e: any) {
+      if (e?.name === "AbortError" || !mountedRef.current) return;
+      // جلب الصفحة مباشرة فشل — نجرب السيرفر
+    }
+
+    // ── الطريقة الثانية (احتياطي): السيرفر يجلب الصفحة عبر الـ proxy ──
     try {
       const r = await fetch(`${BASE}/api/dubbed/watch-src?epUrl=${encodeURIComponent(epUrl)}`, { signal: ctrl.signal });
       if (ctrl.signal.aborted) return;
@@ -55,18 +110,14 @@ export default function DubbedWatchScreen() {
         return;
       }
 
-      // foupix يحجب طلبات الـ VPS، بينما هاتف المستخدم يخرج من IP سكني مسموح.
-      // لذلك جرّب الرابط الخام من الهاتف أولاً، ثم استخدم proxy الخادم كاحتياطي.
       const srcs: PlayerSource[] = [];
       if (rawUrl) {
-        // المصدر الرئيسي: الهاتف يتصل مباشرةً من IP سكني
         srcs.push({ url: rawUrl, label: "مدبلج عربي (مباشر)", quality: "720p HD", headers: {
           Referer: "https://www.arabic-toons.com/",
           Origin: "https://www.arabic-toons.com",
         }});
       }
       if (proxyUrl && proxyUrl !== rawUrl) {
-        // احتياطي: proxy الخادم (مفيد إذا تغيّر سلوك CDN)
         srcs.push({ url: proxyUrl, label: "مدبلج عربي (احتياطي)", quality: "720p HD" });
       }
       setSources(srcs);

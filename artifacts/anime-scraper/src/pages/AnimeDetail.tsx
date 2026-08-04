@@ -1076,6 +1076,7 @@ function CharCard({ e, main, isFav, onToggleFav }: { e: any; main?: boolean; isF
         <button
           type="button"
           onClick={ev => { ev.stopPropagation(); ev.preventDefault(); onToggleFav?.(); }}
+          onPointerDown={ev => ev.stopPropagation()}
           className="absolute top-1 right-1 w-7 h-7 rounded-full flex items-center justify-center transition-all active:scale-90"
           style={{ background: isFav ? "rgba(236,72,153,0.85)" : "rgba(0,0,0,0.65)", backdropFilter: "blur(4px)", zIndex: 20, position: "absolute", border: isFav ? "1.5px solid rgba(236,72,153,0.9)" : "1.5px solid rgba(255,255,255,0.35)", touchAction: "manipulation" }}>
           <Heart className={`w-3.5 h-3.5 ${isFav ? "fill-white text-white" : "text-white"}`} />

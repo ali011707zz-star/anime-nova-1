@@ -3218,6 +3218,13 @@ export default function WatchPage() {
        (المشكلة: quick-resume يضبطه true → رابط CDN منتهي الصلاحية → فشل → العودة للـ picker
        لكن autoPlayedRef=true يمنع أي تشغيل تلقائي آخر → المستخدم عالق يدوياً) */
     autoPlayedRef.current = false;
+    /* ── إعادة ضبط المصادر "ready" لتجنب إعادة تشغيل روابط CDN منتهية الصلاحية ──
+       المشكلة: عند فشل المشغل (رابط منتهي الصلاحية)، تبقى slotSources بروابطها القديمة
+       المحذوفة. النقرة التالية على أي مصدر "ready" تُعيد تشغيل نفس الرابط المنتهي → فشل
+       سلسلة. الحل: إعادة ضبط كل المصادر المُجلَبة لإجبار إعادة الجلب من الباكند. */
+    setSlotStatus(EMPTY_SLOTS);
+    setSlotSources({});
+    slotStatusRef.current = { ...EMPTY_SLOTS };
     setTimeout(() => setFailedSrcToast(false), 3500);
   }
 
