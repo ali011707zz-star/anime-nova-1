@@ -6,8 +6,9 @@
 import * as FileSystem from "expo-file-system";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
-const DOWNLOADS_KEY = "nova-downloads-v2";
-const DOWNLOADS_DIR = (FileSystem.documentDirectory ?? "") + "nova-downloads/";
+const DOWNLOADS_KEY        = "nova-downloads-v2";
+const ACTIVE_PENDING_KEY   = "nova-downloads-active-v1"; // تنزيلات جارية مُحفوظة عبر إغلاق التطبيق
+const DOWNLOADS_DIR        = (FileSystem.documentDirectory ?? "") + "nova-downloads/";
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -130,8 +131,52 @@ const _active = new Map<string, ActiveDownload>();
 type Listener = () => void;
 const _listeners = new Set<Listener>();
 
+/** الحقول القابلة للحفظ (بدون cancelFn التي لا تُسلسَل) */
+type PersistedActive = Omit<ActiveDownload, "cancelFn">;
+
+function _persistActive(): void {
+  try {
+    const data: PersistedActive[] = Array.from(_active.values()).map(
+      ({ cancelFn: _cf, ...rest }) => rest,
+    );
+    AsyncStorage.setItem(ACTIVE_PENDING_KEY, JSON.stringify(data)).catch(() => {});
+  } catch {}
+}
+
 function _notify() {
   _listeners.forEach(fn => { try { fn(); } catch {} });
+  _persistActive();
+}
+
+/**
+ * عند بدء التطبيق — يُحمَّل أي تنزيل كان جارياً قبل الإغلاق ويُعرض
+ * بحالة "error" (لأن الـ resumable state ضاع). يُتيح للمستخدم رؤيتها
+ * وإعادة التنزيل بدلاً من أن تختفي كلياً.
+ */
+export async function restoreInterruptedDownloads(): Promise<void> {
+  try {
+    const raw = await AsyncStorage.getItem(ACTIVE_PENDING_KEY);
+    if (!raw) return;
+    const data: PersistedActive[] = JSON.parse(raw);
+    if (!Array.isArray(data) || data.length === 0) return;
+    for (const item of data) {
+      if (!item.id || _active.has(item.id)) continue;
+      // تحقق: إذا اكتمل التنزيل بالفعل (في DOWNLOADS_KEY) فلا تُعد تحميله
+      const done = await AsyncStorage.getItem(DOWNLOADS_KEY).then(r => {
+        try { return (JSON.parse(r || "[]") as { id: string }[]).some(d => d.id === item.id); }
+        catch { return false; }
+      }).catch(() => false);
+      if (done) continue;
+      _active.set(item.id, {
+        ...item,
+        status: "error",
+        cancelFn: () => { _active.delete(item.id); _notify(); },
+      });
+    }
+    // امسح الـ pending بعد الاستعادة
+    await AsyncStorage.removeItem(ACTIVE_PENDING_KEY).catch(() => {});
+    _notify();
+  } catch {}
 }
 
 /** اشترك في تحديثات التنزيلات الجارية — يُعيد دالة إلغاء الاشتراك */
@@ -198,6 +243,28 @@ export async function startGlobalDownload(params: {
   };
   if (params.authToken) reqHeaders["X-App-Token"] = params.authToken;
 
+  /* كاشف التعليق: إذا لم تتغير bytesWritten لـ 90 ثانية → خطأ */
+  let lastProgressBytes = -1;
+  let lastProgressTime  = Date.now();
+  const STALL_MS = 90_000;
+  let stallTimer: ReturnType<typeof setTimeout> | null = null;
+
+  function resetStallTimer() {
+    if (stallTimer) clearTimeout(stallTimer);
+    stallTimer = setTimeout(() => {
+      if (aborted) return;
+      const entry = _active.get(id);
+      if (entry && entry.status === "downloading") {
+        aborted = true;
+        resumable.cancelAsync().catch(() => {});
+        FileSystem.deleteAsync(localPath, { idempotent: true }).catch(() => {});
+        entry.status = "error";
+        _notify();
+        setTimeout(() => { _active.delete(id); _notify(); }, 3000);
+      }
+    }, STALL_MS);
+  }
+
   const resumable = FileSystem.createDownloadResumable(
     params.url,
     localPath,
@@ -215,11 +282,18 @@ export async function startGlobalDownload(params: {
         entry.totalBytes = totalBytesExpectedToWrite;
         _notify();
       }
+      // إعادة ضبط كاشف التعليق إذا تقدّم التنزيل
+      if (totalBytesWritten !== lastProgressBytes) {
+        lastProgressBytes = totalBytesWritten;
+        lastProgressTime  = Date.now();
+        resetStallTimer();
+      }
     }
   );
 
   const cancelFn = () => {
     aborted = true;
+    if (stallTimer) clearTimeout(stallTimer);
     resumable.cancelAsync().catch(() => {});
     FileSystem.deleteAsync(localPath, { idempotent: true }).catch(() => {});
   };
@@ -239,6 +313,7 @@ export async function startGlobalDownload(params: {
     cancelFn,
   });
   _notify();
+  resetStallTimer(); // ابدأ كاشف التعليق فوراً
 
   // تشغيل بشكل غير متزامن — لا يوقف التنقل بين الشاشات
   (async () => {
@@ -283,12 +358,14 @@ export async function startGlobalDownload(params: {
         downloadedAt: Date.now(),
       };
 
+      if (stallTimer) clearTimeout(stallTimer);
       const existing = await getDownloads();
       await saveDownloads([...existing.filter(i => i.id !== id), item]);
 
       _active.delete(id);
       _notify();
     } catch (e: any) {
+      if (stallTimer) clearTimeout(stallTimer);
       if (aborted) {
         _active.delete(id);
         _notify();

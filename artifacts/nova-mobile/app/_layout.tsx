@@ -24,6 +24,9 @@ loadRuntimeApiUrl().catch(() => {});
 // تثبيت معالجات الأعطال العالمية — فوراً عند بدء التشغيل
 installGlobalCrashHandlers();
 
+// استعادة التنزيلات التي انقطعت بسبب إغلاق التطبيق — تُعرض بحالة خطأ للمستخدم
+import("@/utils/downloadManager").then(m => m.restoreInterruptedDownloads()).catch(() => {});
+
 SplashScreen.preventAutoHideAsync().catch(() => {});
 
 // RTL: نُفعّل مرة واحدة فقط عند أول تشغيل

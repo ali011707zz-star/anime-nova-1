@@ -247,6 +247,19 @@ const STATIC_PICKER: Record<QualityKey, { site: string; name: string; tag: strin
 };
 
 const Q_KEYS: QualityKey[] = ["1080p", "720p", "480p"];
+
+/* أوّل جودة يظهر فيها كل موقع — يُستخدم لعرض زر التنزيل مرّة واحدة فقط.
+   بدون هذا يُضاف اسم الموقع لـ dlFetchingSites فيظهر SpinRing
+   لكل صفوف نفس الموقع في الجودات الثلاث (1080p/720p/480p). */
+const SITE_FIRST_QUALITY: Map<string, QualityKey> = (() => {
+  const m = new Map<string, QualityKey>();
+  for (const qk of (["1080p", "720p", "480p"] as QualityKey[])) {
+    for (const slot of (STATIC_PICKER[qk] || [])) {
+      if (!m.has(slot.site)) m.set(slot.site, qk);
+    }
+  }
+  return m;
+})();
 const Q_KEY_LABEL: Record<QualityKey, string> = {
   "1080p": "1080p",
   "720p":  "720p",
@@ -1115,8 +1128,9 @@ export default function WatchScreen() {
 
                       {/* Right: download + status dot */}
                       <View style={d.webRowRight}>
-                        {/* زر التنزيل — يعمل دائماً (يجلب المصدر تلقائياً إذا لزم) */}
-                        {dlState === "idle" && (
+                        {/* زر التنزيل — يظهر مرّة واحدة فقط (أعلى جودة للموقع)
+                            وإلا تظهر SpinRing لكل صفوف الموقع عند ضغط التنزيل */}
+                        {dlState === "idle" && SITE_FIRST_QUALITY.get(slot.site) === qk && (
                           <Pressable
                             onPress={() => handleFetchAndDownload(slot.site)}
                             hitSlop={10}
