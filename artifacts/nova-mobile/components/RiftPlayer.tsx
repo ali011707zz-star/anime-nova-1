@@ -565,6 +565,9 @@ export function RiftPlayer({
   const loadTimeoutRef    = useRef<ReturnType<typeof setTimeout> | null>(null);
   /* timer الانتظار لوصول مصادر إضافية عندما يفشل المصدر الوحيد */
   const waitForSrcTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /* timers صغيرة غير مُتتبَّعة سابقاً — يجب مسحها في master cleanup لمنع كراش الـ native player */
+  const replayTimeoutRef         = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const screenshotFlashTimerRef  = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     aliveRef.current = true;
@@ -673,6 +676,18 @@ export function RiftPlayer({
       /* 5. ألغِ hide timer */
       if (hideTimer.current) { clearTimeout(hideTimer.current); hideTimer.current = null; }
 
+      /* 5b. ألغِ كل الـ timers الصغيرة التي لم تكن في cleanup — مسببات الكراش الرئيسية:
+             replayTimeout: يستدعي player.play() بعد 120ms من unmount → native crash
+             screenshotFlashTimer: يستدعي setState بعد unmount
+             feedbackTimer/tapTimer/longPressTimer/unlockTimer/postSeekTimer: setState بعد unmount */
+      if (replayTimeoutRef.current) { clearTimeout(replayTimeoutRef.current); replayTimeoutRef.current = null; }
+      if (screenshotFlashTimerRef.current) { clearTimeout(screenshotFlashTimerRef.current); screenshotFlashTimerRef.current = null; }
+      if (feedbackTimer.current) { clearTimeout(feedbackTimer.current); feedbackTimer.current = null; }
+      if (tapTimer.current) { clearTimeout(tapTimer.current); tapTimer.current = null; }
+      if (longPressTimer.current) { clearTimeout(longPressTimer.current); longPressTimer.current = null; }
+      if (unlockTimer.current) { clearTimeout(unlockTimer.current); unlockTimer.current = null; }
+      if (postSeekTimer.current) { clearTimeout(postSeekTimer.current); postSeekTimer.current = null; }
+
       /* 6. فرِّغ subtitle cache + cues لتحرير الذاكرة
          loadedCues قد تكون مئات/آلاف من الـ cues المترجمة — تحريرها فوراً يُقلل ضغط GC */
       urlCueCacheRef.current.clear();
@@ -690,9 +705,11 @@ export function RiftPlayer({
   /* ─── Load SubSettings + subOffset + autoPlay pref from storage ─── */
   useEffect(() => {
     AsyncStorage.getItem("sub-settings-v1").then(raw => {
+      if (!aliveRef.current) return; // لا setState بعد unmount
       if (raw) { try { setSubSettings(JSON.parse(raw)); } catch {} }
     }).catch(() => {});
     AsyncStorage.getItem("pref-autoplay").then(v => {
+      if (!aliveRef.current) return;
       if (v === "false") setAutoPlayEnabled(false);
     }).catch(() => {});
     /* sub-offset intentionally NOT restored from storage — resets to 0 on each session
@@ -1132,7 +1149,8 @@ export function RiftPlayer({
   const rootViewRef = useRef<View>(null);
   const takeScreenshot = useCallback(async () => {
     setScreenshotFlash(true);
-    setTimeout(() => setScreenshotFlash(false), 600);
+    if (screenshotFlashTimerRef.current) clearTimeout(screenshotFlashTimerRef.current);
+    screenshotFlashTimerRef.current = setTimeout(() => { screenshotFlashTimerRef.current = null; setScreenshotFlash(false); }, 600);
     
     if (Platform.OS === "web") return; // web browsers block video frame capture
     try {
@@ -1309,6 +1327,7 @@ export function RiftPlayer({
   /* ─── Load seek duration preference (Anime Rift: manageTheInternalPlayerSeekDuration) ─── */
   useEffect(() => {
     AsyncStorage.getItem("nova-seek-duration").then(v => {
+      if (!aliveRef.current) return;
       if (v) { const n = Number(v); setSeekDuration(n); seekDurationRef.current = n; }
     });
   }, []);
@@ -1985,7 +2004,12 @@ export function RiftPlayer({
               onPress={() => {
                 setIsEnded(false);
                 try { player.currentTime = 0; } catch {}
-                setTimeout(() => { try { player.play(); } catch {} }, 120);
+                if (replayTimeoutRef.current) clearTimeout(replayTimeoutRef.current);
+                replayTimeoutRef.current = setTimeout(() => {
+                  replayTimeoutRef.current = null;
+                  if (!aliveRef.current) return; // لا تلمس native player بعد unmount
+                  try { player.play(); } catch {}
+                }, 120);
               }}
               style={s.endReplayBtn}
             >
