@@ -5,6 +5,7 @@
  * سحب شريط + إيماءات + تخطي + سرعة + وضع عرض
  */
 import { Ionicons } from "@expo/vector-icons";
+import * as Brightness from "expo-brightness";
 import { LinearGradient } from "expo-linear-gradient";
 import * as ScreenOrientation from "expo-screen-orientation";
 import { StatusBar } from "expo-status-bar";
@@ -395,6 +396,8 @@ export function RiftPlayer({
   /* ─── Subtitle state ─── */
   const [subOn, setSubOn]               = useState(subEnabled);
   const [loadedCues, setLoadedCues]     = useState<SubCue[]>([]);
+  /* autoSubCues: ترجمة مجلوبة تلقائياً (wyzie/SubDL) — مستقلة عن subtitleUrl المصدر */
+  const [autoSubCues, setAutoSubCues]   = useState<SubCue[]>([]);
   const [subLoading, setSubLoading]     = useState(false);
   const [autoSubSource, setAutoSubSource] = useState<string | null>(null);
   const [subSettings, setSubSettings]   = useState<SubSettings>(DEFAULT_SUB_SETTINGS);
@@ -507,6 +510,7 @@ export function RiftPlayer({
   const positionRef       = useRef(0);
   const urlCueCacheRef    = useRef<Map<string, SubCue[]>>(new Map());
   const seekRef           = useRef<(s: number) => void>(() => {});
+  const seekSilentRef     = useRef<(s: number) => void>(() => {});
   const gestureTypeRef    = useRef<"vol" | "bri" | "seek" | null>(null);
   const gestureStartPosRef= useRef(0);
   const gestureStartXRef  = useRef(0);
@@ -695,7 +699,8 @@ export function RiftPlayer({
 
   /* ─── Subtitle cue lookup via rAF ─── */
   /* Vidstack technique: pre-sort once → binary search O(log n) at 60fps */
-  const effectiveCues = (subCues?.length ? subCues : loadedCues);
+  /* subtitleUrl cues أولاً، ثم auto-fetch cues كـ fallback لكل المصادر */
+  const effectiveCues = (subCues?.length ? subCues : (loadedCues.length ? loadedCues : autoSubCues));
   useEffect(() => {
     if (subRafRef.current) { cancelAnimationFrame(subRafRef.current); subRafRef.current = null; }
     if (!effectiveCues.length || !subOn) { setActiveCue(null); return; }
@@ -724,10 +729,10 @@ export function RiftPlayer({
   useEffect(() => {
     const rawUrl = currentSrc?.subtitleUrl;
     if (!rawUrl) {
+      /* امسح فقط الـ cues المحملة من subtitleUrl —
+         لا تمسح autoSubCues حتى تستمر الترجمة التلقائية في العمل لجميع المصادر */
       setLoadedCues([]);
-      /* إيقاف الترجمة تلقائياً عند التبديل لمصدر بلا subtitle —
-         يمنع ظهور نص فارغ أو ترجمة قديمة من المصدر السابق */
-      setSubOn(false);
+      /* لا تُوقف الترجمة — إذا كانت هناك autoSubCues ستستمر عبر effectiveCues */
       return;
     }
 
@@ -852,6 +857,19 @@ export function RiftPlayer({
     if (currentSrc?.subtitleUrl) setSubOn(true);
   }, [currentSrc?.subtitleUrl]);
 
+  /* ─── Screen brightness — حصري للمشغل فقط ─── */
+  const origBrightnessRef = useRef<number>(0.5);
+  useEffect(() => {
+    /* احفظ سطوع الشاشة الأصلي عند دخول المشغّل */
+    Brightness.getBrightnessAsync()
+      .then(b => { origBrightnessRef.current = b; })
+      .catch(() => {});
+    return () => {
+      /* استعد السطوع الأصلي عند الخروج من المشغّل */
+      Brightness.setBrightnessAsync(origBrightnessRef.current).catch(() => {});
+    };
+  }, []);
+
   /* ─── Screen orientation lock to landscape ─── */
   useEffect(() => {
     ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE_RIGHT)
@@ -957,6 +975,7 @@ export function RiftPlayer({
     if (subCues?.length) return; // already provided as prop
     let cancelled = false;
     setAutoSubSource(null);
+    setAutoSubCues([]);
     (async () => {
       try {
         const base = getBaseUrl();
@@ -1020,7 +1039,8 @@ export function RiftPlayer({
         }
 
         if (cues.length > 0 && !cancelled) {
-          setLoadedCues(cues);
+          /* نحفظ في autoSubCues (لا loadedCues) حتى لا تُمسح عند تبديل المصدر */
+          setAutoSubCues(cues);
           setSubOn(true);
           setAutoSubSource(track.lang === "ar" ? "wyzie-ar" : "wyzie-en-translated");
         }
@@ -1135,6 +1155,14 @@ export function RiftPlayer({
   }, [duration, fadeIn]);
   seekRef.current = seek;
 
+  /* seekSilent: نفس seek لكن بدون إظهار الـ controls —
+     يُستخدم للضغط المزدوج + تخطي المقدمة/النهاية + الإيماءات */
+  const seekSilent = useCallback((secs: number) => {
+    const target = Math.max(0, Math.min(secs, durationRef.current || duration));
+    try { videoRef.current?.seek(target); setPosition(target); positionRef.current = target; } catch {}
+  }, [duration]);
+  seekSilentRef.current = seekSilent;
+
   const changeSpeed = useCallback((s: number) => {
     setSpeed(s);
     setRate(s);
@@ -1209,9 +1237,9 @@ export function RiftPlayer({
     setDblTap({ side, id: Date.now() });
     anim.setValue(0);
     Animated.timing(anim, { toValue: 1, duration: 600, useNativeDriver: true }).start(() => setDblTap(null));
-    
-    seek(side === "R" ? positionRef.current + seekDurationRef.current : positionRef.current - seekDurationRef.current);
-  }, [seek, dblTapLeft, dblTapRight]);
+    /* seekSilent: لا نُظهر الـ controls عند الضغط المزدوج */
+    seekSilent(side === "R" ? positionRef.current + seekDurationRef.current : positionRef.current - seekDurationRef.current);
+  }, [seekSilent, dblTapLeft, dblTapRight]);
 
   /* ─── Show feedback overlay ─── */
   const showFeedback = useCallback((fb: typeof feedback) => {
@@ -1234,6 +1262,7 @@ export function RiftPlayer({
         gestureTypeRef.current = null;
         gestureStartY.current = gs.y0;
         gestureStartXRef.current = gs.x0;
+        /* للسطوع: ابدأ من القيمة الحقيقية للجهاز لا من الـ overlay state */
         gestureStartVal.current = side === "R" ? volumeRef.current : brightnessRef.current;
         gestureStartPosRef.current = positionRef.current;
       },
@@ -1257,10 +1286,12 @@ export function RiftPlayer({
           setVolume(newVol);
           setFeedback({ type: "volume", value: newVol });
         } else {
-          const delta = -(gs.moveY - gestureStartY.current) / (H * 0.55);
-          const newBri = Math.max(0, Math.min(0.75, gestureStartVal.current - delta));
+          /* السطوع: سحب للأعلى يرفع — نستخدم expo-brightness لسطوع الشاشة الحقيقي */
+          const delta = (gs.moveY - gestureStartY.current) / (H * 0.7);
+          const newBri = Math.max(0.05, Math.min(1, gestureStartVal.current - delta));
           brightnessRef.current = newBri;
           setBrightness(newBri);
+          Brightness.setBrightnessAsync(newBri).catch(() => {});
           setFeedback({ type: "brightness", value: newBri });
         }
       },
@@ -1268,7 +1299,8 @@ export function RiftPlayer({
         if (gestureTypeRef.current === "seek") {
           const seekDelta = (gs.dx / W) * 120;
           const newPos = Math.max(0, Math.min(durationRef.current, gestureStartPosRef.current + seekDelta));
-          seekRef.current(newPos);
+          /* seekSilent: الإيماءات لا تُظهر الـ controls */
+          seekSilentRef.current(newPos);
         }
         gestureTypeRef.current = null;
         gestureSide.current = null;
@@ -1370,15 +1402,15 @@ export function RiftPlayer({
   const inOutroRange = !!skipOutro && position >= Math.max(0, skipOutro.start - SKIP_LEAD) && position <= skipOutro.end;
 
   const doSkipIntro = useCallback(() => {
-    if (skipIntro) seek(skipIntro.end);
-    fadeIn();
-  }, [skipIntro, seek, fadeIn]);
+    /* seekSilent: لا نُظهر الـ controls عند تخطي المقدمة */
+    if (skipIntro) seekSilent(skipIntro.end);
+  }, [skipIntro, seekSilent]);
 
   const doSkipOutro = useCallback(() => {
     if (onNextEpisode) { onNextEpisode(); return; }
-    if (skipOutro) seek(skipOutro.end);
-    fadeIn();
-  }, [skipOutro, onNextEpisode, seek, fadeIn]);
+    /* seekSilent: لا نُظهر الـ controls عند تخطي النهاية */
+    if (skipOutro) seekSilent(skipOutro.end);
+  }, [skipOutro, onNextEpisode, seekSilent]);
 
   /* ─── Tap handler with double-tap detection ─── */
   const handleTap = useCallback((pageX: number) => {
@@ -1415,8 +1447,8 @@ export function RiftPlayer({
     prevSpeedRef.current = speed;
     setLongPressSpeed(true);
     setRate(2);
-    fadeIn();
-  }, [speed, fadeIn]);
+    /* لا fadeIn — الضغط الطويل لا يُظهر الـ controls */
+  }, [speed]);
 
   const handleLongPressRelease = useCallback(() => {
     if (!longPressSpeed) return;
@@ -1458,7 +1490,7 @@ export function RiftPlayer({
         source={videoSource ?? undefined}
         style={s.video}
         paused={paused}
-        volume={isMuted ? 0 : Math.min(1, volume)}
+        volume={isMuted ? 0 : 1}
         rate={rate}
         repeat={false}
         resizeMode={contentFit === "cover" ? "cover" : contentFit === "fill" ? "stretch" : "contain"}
@@ -2091,14 +2123,16 @@ export function RiftPlayer({
           SUBTITLE SETTINGS PANEL (slides from right)
       ════════════════════════════════════════ */}
       {showSubPanel && (
-        <Pressable
-          style={[StyleSheet.absoluteFill, s.subPanelBackdrop, { zIndex: 60 }]}
-          onPress={() => setShowSubPanel(false)}
-        >
+        /* backdrop + panel كأخوين داخل View — يمنع الـ backdrop من اعتراض scroll الـ panel */
+        <View style={[StyleSheet.absoluteFill, { zIndex: 60 }]} pointerEvents="box-none">
+          {/* Backdrop — إغلاق عند الضغط خارج الـ panel */}
+          <Pressable
+            style={[StyleSheet.absoluteFill, s.subPanelBackdrop]}
+            onPress={() => setShowSubPanel(false)}
+          />
           <Animated.View
             style={[s.subPanel, isPortrait ? s.subPanelPortrait : s.subPanelLandscape, { transform: [{ translateX: subPanelX }] }]}
           >
-            <Pressable onPress={() => {}} style={{ flex: 1 }}>
               {/* Header */}
               <View style={s.subPanelHeader}>
                 <Text style={s.subPanelTitle}>إعدادات الترجمة</Text>
@@ -2231,9 +2265,8 @@ export function RiftPlayer({
                 </View>
 
               </ScrollView>
-            </Pressable>
           </Animated.View>
-        </Pressable>
+        </View>
       )}
 
     </View>

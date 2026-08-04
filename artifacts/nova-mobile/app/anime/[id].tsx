@@ -75,10 +75,22 @@ const REL_TYPE: Record<string,string> = {
 
 function stripHtml(html?: string | null) {
   if (!html) return "";
-  return html.replace(/<[^>]+>/g, "").replace(/&[a-z]+;/gi, c => ({
-    "&amp;":"&","&lt;":"<","&gt;":">","&quot;":'"',"&apos;":"'","&#39;":"'",
-    "&nbsp;":" "
-  }[c] || c)).trim();
+  return html
+    // <br> → سطر جديد
+    .replace(/<br\s*\/?>/gi, "\n")
+    // <p> و </p> → سطر جديد
+    .replace(/<\/p>/gi, "\n")
+    .replace(/<p[^>]*>/gi, "")
+    // إزالة بقية الوسوم
+    .replace(/<[^>]+>/g, "")
+    // فك ترميز HTML entities
+    .replace(/&[a-z]+;/gi, c => ({
+      "&amp;":"&","&lt;":"<","&gt;":">","&quot;":'"',"&apos;":"'","&#39;":"'",
+      "&nbsp;":" ","&mdash;":"—","&ndash;":"–","&hellip;":"…",
+    }[c] || c))
+    // تنظيف أكثر من سطرين فارغين متتاليين
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
 }
 
 function fmtDate(d?: { year?: number; month?: number; day?: number } | null) {
