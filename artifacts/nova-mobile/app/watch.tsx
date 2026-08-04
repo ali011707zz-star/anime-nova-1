@@ -827,7 +827,8 @@ export default function WatchScreen() {
     const base = getBaseUrl();
     const srcs = directSrcs;
     /* مطابق لـ isArabic في web SCRAPER_DEFS — مصادر عربية لا تحتاج SmartSub */
-    const ARABIC_SITES = new Set(["shahiid","animelek","animedar","okanime","arabseed","animeify","animeday","mycima","topcinemaa","anime4up2","animewitcher","ristoanime","faselhd_db","animetime","sanime"]);
+    /* kawaii + anifox: تحتوي على ترجمة عربية مدمجة في الستريم — لا تحتاج SmartSub خارجي */
+  const ARABIC_SITES = new Set(["shahiid","animelek","animedar","okanime","arabseed","animeify","animeday","mycima","topcinemaa","anime4up2","animewitcher","ristoanime","faselhd_db","animetime","sanime","kawaii","anifox"]);
     return srcs.map(s => {
       const rawUrl = getPlayUrl(s);
       /* headers: استخدم الـ headers المُرسَلة من الخادم أولاً (Referer/Origin المباشرة)،
@@ -840,7 +841,14 @@ export default function WatchScreen() {
         url,
         headers,
         label: `سيرفر · ${getSiteTag(s.site || "")}`,
-        quality: getSrcQuality(s),
+        /* جودة المصدر: نستخدم التحليل أولاً، ثم tier الموقع كـ fallback
+           (بعض المصادر لا تُرسل qualityRank/label صريح فتُصنَّف خطأً كـ SD) */
+        quality: (() => {
+          const detected = getSrcQuality(s);
+          if (detected !== "360p SD") return detected;
+          const siteQk = SITE_FIRST_QUALITY.get(s.site || "");
+          return siteQk === "1080p" ? "1080p FHD" : siteQk === "720p" ? "720p HD" : "360p SD";
+        })(),
         subtitleUrl: undefined, // مخفية في نوفا موبايل
         isArabic: ARABIC_SITES.has(s.site || ""),
         wantsSmartSub: !ARABIC_SITES.has(s.site || ""),
@@ -1097,8 +1105,8 @@ export default function WatchScreen() {
                         pressed  && { opacity: 0.72 },
                       ]}
                     >
-                      {/* Left in code = Right visually (RTL): زر اختيار/تشغيل */}
-                      <View style={d.webRowPlayIcon}>
+                      {/* Left in code = Right visually (RTL): اختيار/تشغيل + التنزيل بجانبه */}
+                      <View style={[d.webRowPlayIcon, { flexDirection: "row", alignItems: "center", gap: 6 }]}>
                         {isFetching ? (
                           <SpinRing size={16} />
                         ) : isReady ? (
@@ -1111,25 +1119,8 @@ export default function WatchScreen() {
                             <Text style={d.pickBtnText}>اختيار</Text>
                           </View>
                         )}
-                      </View>
 
-                      {/* Center: السيرفر XX */}
-                      <Text
-                        style={[
-                          d.webRowTag,
-                          { flex: 1, textAlign: "right" },
-                          isReady  && { color: "rgba(255,255,255,0.90)" },
-                          isFailed && { color: "rgba(255,255,255,0.35)" },
-                        ]}
-                        numberOfLines={1}
-                      >
-                        السيرفر {slot.tag}
-                      </Text>
-
-                      {/* Right: download + status dot */}
-                      <View style={d.webRowRight}>
-                        {/* زر التنزيل — يظهر مرّة واحدة فقط (أعلى جودة للموقع)
-                            وإلا تظهر SpinRing لكل صفوف الموقع عند ضغط التنزيل */}
+                        {/* زر التنزيل بجانب اختيار مباشرةً */}
                         {dlState === "idle" && SITE_FIRST_QUALITY.get(slot.site) === qk && (
                           <Pressable
                             onPress={() => handleFetchAndDownload(slot.site)}
@@ -1154,6 +1145,23 @@ export default function WatchScreen() {
                         {dlState === "error" && (
                           <Ionicons name="close-circle" size={16} color="rgba(239,68,68,0.70)" />
                         )}
+                      </View>
+
+                      {/* Center: السيرفر XX */}
+                      <Text
+                        style={[
+                          d.webRowTag,
+                          { flex: 1, textAlign: "right" },
+                          isReady  && { color: "rgba(255,255,255,0.90)" },
+                          isFailed && { color: "rgba(255,255,255,0.35)" },
+                        ]}
+                        numberOfLines={1}
+                      >
+                        السيرفر {slot.tag}
+                      </Text>
+
+                      {/* Right: نقطة الحالة فقط */}
+                      <View style={d.webRowRight}>
                         {!isFetching && (
                           <View style={[d.webRowDot, {
                             backgroundColor:

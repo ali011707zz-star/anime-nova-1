@@ -347,11 +347,28 @@ function SpinRing({ size = 52 }: { size?: number }) {
   );
 }
 
+/* ─── وظيفة تقسيم سطر الترجمة الطويل إلى سطرين قصيرين ─── */
+function wrapSubLine(text: string, maxLen = 30): string[] {
+  if (!text || text.length <= maxLen) return [text];
+  const mid = Math.floor(text.length / 2);
+  let best = -1, bestDist = Infinity;
+  for (let i = 0; i < text.length; i++) {
+    if (text[i] === " ") {
+      const dist = Math.abs(i - mid);
+      if (dist < bestDist) { bestDist = dist; best = i; }
+    }
+  }
+  if (best === -1) return [text];
+  return [text.slice(0, best).trim(), text.slice(best + 1).trim()].filter(Boolean);
+}
+
 /* ─── Screenshot flash overlay ─── */
 function ScreenshotFlash({ visible }: { visible: boolean }) {
   const opacity = useRef(new Animated.Value(0)).current;
   useEffect(() => {
     if (visible) {
+      /* إيقاف أي animation سابقة قبل البدء من جديد */
+      opacity.stopAnimation();
       opacity.setValue(0.7);
       Animated.timing(opacity, { toValue: 0, duration: 500, useNativeDriver: true }).start();
     }
@@ -559,6 +576,9 @@ export function RiftPlayer({
     map.set(url, cues);
   }, []);
   const seekRef           = useRef<(s: number) => void>(() => {});
+  /** ref للـ isArabic flag — يُستخدَم داخل async effects بدون closure stale */
+  const isArabicRef       = useRef<boolean>(currentSrc?.isArabic ?? false);
+  useEffect(() => { isArabicRef.current = currentSrc?.isArabic ?? false; }, [currentSrc?.isArabic]);
   const gestureTypeRef    = useRef<"vol" | "bri" | "seek" | null>(null);
   const gestureStartPosRef= useRef(0);
   const gestureStartXRef  = useRef(0);
@@ -1157,21 +1177,33 @@ export function RiftPlayer({
     setScreenshotFlash(true);
     if (screenshotFlashTimerRef.current) clearTimeout(screenshotFlashTimerRef.current);
     screenshotFlashTimerRef.current = setTimeout(() => { screenshotFlashTimerRef.current = null; setScreenshotFlash(false); }, 600);
-    
-    if (Platform.OS === "web") return; // web browsers block video frame capture
+
+    if (Platform.OS === "web") return;
     try {
-      const VS = await import("react-native-view-shot" as any);
-      /* VideoView قد يُرسم كسطح native لا يستطيع captureRef قراءته على بعض
-         إصدارات Android؛ نجرّب لقطة المشغل أولاً ثم لقطة الشاشة كاحتياطي. */
-      let uri: string;
-      try {
-        uri = await VS.captureRef(rootViewRef, { format: "jpg", quality: 0.95, result: "tmpfile" });
-      } catch {
-        uri = await VS.captureScreen({ format: "jpg", quality: 0.95, result: "tmpfile" });
+      /* نستخدم require() بدل import() الديناميكي — Metro يحزمه بشكل أموثق */
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      const VS = require("react-native-view-shot");
+      const captureRef    = VS.captureRef    as (ref: any, opts: any) => Promise<string>;
+      const captureScreen = VS.captureScreen as (opts: any) => Promise<string>;
+
+      /* VideoView يُرسم على سطح native (SurfaceView/TextureView) — captureRef قد
+         يُعطي صورة سوداء على بعض أجهزة Android؛ captureScreen يحل ذلك. */
+      let uri: string | null = null;
+      try { uri = await captureRef(rootViewRef, { format: "jpg", quality: 0.92, result: "tmpfile" }); } catch {}
+      if (!uri) {
+        try { uri = await captureScreen({ format: "jpg", quality: 0.92, result: "tmpfile" }); } catch {}
       }
-      const ML = await import("expo-media-library" as any);
+      if (!uri) return;
+
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      const ML = require("expo-media-library");
       const perm = await ML.requestPermissionsAsync({ writeOnly: true });
-      if (perm.status === "granted") await ML.saveToLibraryAsync(uri);
+      if (perm.status !== "granted") {
+        /* طلب إذن أولي — المرة القادمة ستُحفظ مباشرة */
+        await ML.requestPermissionsAsync();
+        return;
+      }
+      await ML.saveToLibraryAsync(uri);
     } catch {}
   }, []);
 
@@ -1311,7 +1343,9 @@ export function RiftPlayer({
 
         if (cues.length > 0 && !ctrl.signal.aborted) {
           setLoadedCues(cues);
-          setSubOn(true);
+          /* لا تُفعَّل الترجمة الخارجية تلقائياً لمصادر تحتوي ترجمة مدمجة (isArabic)
+             مثل KW/AW/AF/SA/FX — المستخدم يُفعّلها يدوياً إن أراد */
+          if (!isArabicRef.current) setSubOn(true);
           setAutoSubSource(track.lang === "ar" ? "wyzie-ar" : "wyzie-en-translated");
         }
       } catch {}
@@ -1566,10 +1600,10 @@ export function RiftPlayer({
           volumeRef.current = newVol;
           setVolume(newVol);
           setFeedback({ type: "volume", value: newVol });
-          /* ضبط صوت الوسائط الحقيقي في النظام (يُظهر HUD أزرار الصوت) */
-          VolumeManager.setVolume(newVol, { showUI: true }).catch(() => {});
-          /* player يعمل دائماً بـ 100% — النظام هو من يتحكم بالصوت الفعلي */
-          try { player.volume = 1; } catch {}
+          /* ضبط صوت المشغّل مباشرةً (يعمل دائماً بدون native module) */
+          try { player.volume = newVol; } catch {}
+          /* محاولة ضبط صوت النظام أيضاً عبر VolumeManager (يعمل إذا توفّر native module) */
+          VolumeManager.setVolume(newVol, { showUI: false }).catch(() => {});
         } else {
           /* السحب للأعلى يرفع السطوع — dy سالب عند الرفع → delta موجب */
           const delta = -gs.dy / (H * 0.40);
