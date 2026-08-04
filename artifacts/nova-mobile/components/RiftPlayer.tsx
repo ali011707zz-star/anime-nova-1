@@ -1433,6 +1433,12 @@ export function RiftPlayer({
     }
     /* ألغِ timeout التحميل القديم عند التبديل */
     if (loadTimeoutRef.current) { clearTimeout(loadTimeoutRef.current); loadTimeoutRef.current = null; }
+    /* ألغِ waitForSrcTimer — يجب ألا يستدعي onError() بعد تبديل يدوي أو تلقائي جديد */
+    if (waitForSrcTimerRef.current) { clearTimeout(waitForSrcTimerRef.current); waitForSrcTimerRef.current = null; }
+    /* صفّر consecutiveErrorsRef مباشرةً هنا (بدون الاعتماد على async state update)
+       حتى لا يُحسب الخطأ القادم ضمن دورة الأخطاء السابقة */
+    consecutiveErrorsRef.current = 0;
+    setIsWaitingForSources(false);
     /* ── Save current position before replacing source ── */
     const savedPos = player.currentTime || 0;
     if (savedPos > 5) switchPosRef.current = savedPos;
@@ -1775,7 +1781,16 @@ export function RiftPlayer({
     return { bottom: showControls ? 100 : 24, top: undefined };
   }
 
-  if (!currentSrc) return null;
+  /* لا نرجع null عند غياب currentSrc — يظهر شاشة رمادية بيضاء.
+     نعرض loading spinner بدلاً حتى تصل المصادر من الخلفية. */
+  if (!currentSrc) return (
+    <View style={{ flex: 1, backgroundColor: "#000", alignItems: "center", justifyContent: "center" }}>
+      <ActivityIndicator size="large" color="rgba(167,139,250,0.9)" />
+      <Text style={{ color: "rgba(255,255,255,0.45)", marginTop: 12, fontSize: 13, fontFamily: "System" }}>
+        جاري تحميل المشغّل…
+      </Text>
+    </View>
+  );
 
   return (
     <View ref={rootViewRef} style={[s.root, isFlipped && { transform: [{ rotate: "180deg" }] }]}>
