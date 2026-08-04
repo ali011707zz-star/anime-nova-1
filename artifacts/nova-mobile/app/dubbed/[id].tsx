@@ -112,7 +112,7 @@ export default function DubbedDetailScreen() {
 
       <FlatList
         data={episodes}
-        keyExtractor={ep => ep.epId}
+        keyExtractor={ep => ep.epId || String(ep.number)}
         renderItem={renderEp}
         ListHeaderComponent={() => (
           <View>

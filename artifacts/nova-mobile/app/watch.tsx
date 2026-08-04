@@ -679,6 +679,8 @@ export default function WatchScreen() {
     try {
       await warmAuthToken();
       const siteCtrl = new AbortController();
+      /* تسجيل الـ controller — يُلغى عند navigation/refresh/goEp تماماً كـ handlePickSite */
+      siteCtrls.current.set(site, siteCtrl);
       const timeout = SITE_TIMEOUT_MAP[site] ?? SITE_TIMEOUT_MS;
       tid = setTimeout(() => siteCtrl.abort(), timeout);
       const res = await secureFetch(`${base}/api/anime/fetch-source?site=${site}&${qs}`, { signal: siteCtrl.signal });
@@ -728,6 +730,7 @@ export default function WatchScreen() {
         setDownloadStates(prev => ({ ...prev, [site]: "error" }));
     } finally {
       if (tid !== null) clearTimeout(tid);
+      siteCtrls.current.delete(site); // تنظيف الـ controller بعد انتهاء الطلب
       if (isMountedRef.current)
         setDlFetchingSites(prev => { const s = new Set(prev); s.delete(site); return s; });
     }
