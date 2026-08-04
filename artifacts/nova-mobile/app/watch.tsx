@@ -145,6 +145,15 @@ function isDirectPlayable(s: Src): boolean {
   if (url.includes("mp4upload")) return false;
   return true;
 }
+/** هل الرابط HLS manifest؟ — لا يمكن تنزيله كملف واحد قابل للتشغيل offline */
+function isHlsUrl(url: string): boolean {
+  return /\.(m3u8)(\?|$)|\/hls\/|\/playlist\//i.test(url);
+}
+/** مثل isDirectPlayable لكن يستثني HLS — للتنزيل فقط */
+function isDownloadableSource(s: Src): boolean {
+  if (!isDirectPlayable(s)) return false;
+  return !isHlsUrl(getPlayUrl(s));
+}
 function isEmbedSrc(s: Src): boolean {
   if (!s.isEmbed) return false;
   const url = (s.directUrl || s.url || "").toLowerCase();
@@ -632,8 +641,8 @@ export default function WatchScreen() {
     if (dlState === "downloading" || dlState === "done") return;
 
     const siteSrcs = sources.filter(s => s.site === site);
-    const best = siteSrcs.find(isDirectPlayable) ?? siteSrcs[0];
-    if (!best || !isDirectPlayable(best)) return;
+    const best = siteSrcs.find(isDownloadableSource) ?? null;
+    if (!best) return; // لا يوجد مصدر قابل للتنزيل (HLS أو embed فقط)
 
     const rawUrl   = getPlayUrl(best);
     const headers  = best.headers || extractProxyHeaders(rawUrl);

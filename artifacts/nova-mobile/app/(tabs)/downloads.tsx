@@ -1,7 +1,7 @@
 import React, { useState, useCallback, useEffect, useRef } from "react";
 import {
   View, Text, StyleSheet, Pressable, FlatList,
-  Image, Alert, Platform, Animated, Easing,
+  Image, Alert, Platform, Animated, Easing, Modal,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
@@ -179,7 +179,7 @@ function LocalPlayer({ item, onClose }: { item: DownloadItem; onClose: () => voi
     url: toFileUri(item.localPath),
     label: `${item.quality} · ${item.site}`,
     quality: (item.quality as any) || "720p HD",
-    subtitleUrl: item.subtitleLocalPath,
+    subtitleUrl: item.subtitleLocalPath ? toFileUri(item.subtitleLocalPath) : undefined,
   };
   return (
     <RiftPlayer
@@ -189,6 +189,7 @@ function LocalPlayer({ item, onClose }: { item: DownloadItem; onClose: () => voi
       episode={item.ep}
       onBack={onClose}
       onError={onClose}
+      offline
     />
   );
 }
@@ -303,15 +304,8 @@ export default function DownloadsScreen() {
     cancelActiveDownload(id);
   }, []);
 
-  /* تشغيل محلي */
-  if (playingItem) {
-    return (
-      <LocalPlayer
-        item={playingItem}
-        onClose={() => setPlayingItem(null)}
-      />
-    );
-  }
+  /* تشغيل محلي — Modal كاملة الشاشة حتى لا يظهر شريط التنقل السفلي */
+  const handleClosePlayer = useCallback(() => setPlayingItem(null), []);
 
   const hasActive    = activeDownloads.length > 0;
   const hasCompleted = downloads.length > 0;

@@ -86,6 +86,8 @@ type Props = {
   episodeTitle?: string;
   /** يُستدعى عند فشل جميع المصادر المتاحة */
   onError?: () => void;
+  /** وضع التشغيل بدون إنترنت (ملف محلي) — يُلغي الانتظار 8s لمصادر بديلة */
+  offline?: boolean;
 };
 
 /* ─── Constants ─── */
@@ -402,6 +404,7 @@ export function RiftPlayer({
   totalEps = 999,
   episodeTitle,
   onError,
+  offline = false,
 }: Props) {
   const insets = useSafeAreaInsets();
 
@@ -860,6 +863,17 @@ export function RiftPlayer({
     /* نقرأ الطول من ref — يعكس القيمة الأحدث دون إعادة تشغيل هذا الـ effect */
     const curLen = playableCountRef.current;
     if (curLen <= 1) {
+      /* ── وضع offline (ملف محلي) أو مصدر واحد بلا خلفية: أظهر الخطأ فوراً ──
+         في وضع offline لا يوجد مصادر بديلة تأتي من الخلفية، الانتظار 8s عديم الفائدة */
+      if (offline || (currentSrc?.url ?? "").startsWith("file://")) {
+        setIsAutoCycling(false);
+        setIsWaitingForSources(false);
+        if (!terminalErrorRef.current) {
+          terminalErrorRef.current = true;
+          onErrorRef.current?.();
+        }
+        return;
+      }
       /* ── انتظر حتى 8 ثوانٍ لوصول مصادر من الخلفية قبل الاستسلام ──
          هذا يمنع الخروج الفوري عندما يفشل المصدر الأول بينما المصادر الأخرى
          لا تزال تُحمَّل (kawaii يُشغَّل تلقائياً وقد يفشل في ثانية واحدة،

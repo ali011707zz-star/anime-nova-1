@@ -374,13 +374,9 @@ export async function startGlobalDownload(params: {
       const entry = _active.get(id);
       if (entry) {
         entry.status = "error";
+        /* لا تُزيل تلقائياً — المستخدم يضغط × ليُغلق بطاقة الخطأ */
         _notify();
       }
-      // إزالة بعد 3 ثوانٍ للسماح لـ UI بإظهار رسالة الخطأ
-      setTimeout(() => {
-        _active.delete(id);
-        _notify();
-      }, 3000);
     }
   })();
 }
