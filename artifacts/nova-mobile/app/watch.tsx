@@ -219,25 +219,24 @@ const SITE_PRIORITY: Record<string, number> = {
 /* ── Picker ثابت: جودة → مصادر (تظهر فوراً دون أي جلب مسبق) ── */
 type QualityKey = "1080p" | "720p" | "480p";
 
-const STATIC_PICKER: Record<QualityKey, { site: string; name: string }[]> = {
+const STATIC_PICKER: Record<QualityKey, { site: string; name: string; tag: string }[]> = {
   "1080p": [
-    { site: "kawaii",       name: "كواي أنمي"    },
-    { site: "animewitcher", name: "AnimeWitcher" },
-    { site: "sanime",       name: "سـAnime"       },
-    { site: "animeify",     name: "أنمي فاي"     },
-    { site: "anifox",       name: "ANIFOX"       },
+    { site: "kawaii",       name: "كواي أنمي",   tag: "KW" },
+    { site: "animewitcher", name: "AnimeWitcher", tag: "AW" },
+    { site: "sanime",       name: "سـAnime",      tag: "SA" },
+    { site: "animeify",     name: "أنمي فاي",    tag: "AF" },
+    { site: "anifox",       name: "ANIFOX",      tag: "FX" },
   ],
   "720p": [
-    { site: "animewitcher", name: "AnimeWitcher" },
-    { site: "sanime",       name: "سـAnime"       },
-    { site: "animeify",     name: "أنمي فاي"     },
-    { site: "anifox",       name: "ANIFOX"       },
+    { site: "animewitcher", name: "AnimeWitcher", tag: "AW" },
+    { site: "sanime",       name: "سـAnime",      tag: "SA" },
+    { site: "animeify",     name: "أنمي فاي",    tag: "AF" },
+    { site: "anifox",       name: "ANIFOX",      tag: "FX" },
   ],
   "480p": [
-    { site: "animewitcher", name: "AnimeWitcher" },
-    { site: "animeify",     name: "أنمي فاي"     },
-    { site: "sanime",       name: "سـAnime"       },
-    { site: "anifox",       name: "ANIFOX"       },
+    { site: "animewitcher", name: "AnimeWitcher", tag: "AW" },
+    { site: "animeify",     name: "أنمي فاي",    tag: "AF" },
+    { site: "anifox",       name: "ANIFOX",      tag: "FX" },
   ],
 };
 
@@ -359,6 +358,8 @@ export default function WatchScreen() {
   const [selQuality,  setSelQuality]  = useState<QualityKey>("1080p");
 
   const abortRef          = useRef<AbortController | null>(null);
+  /* siteCtrls: نتتبع AbortController لكل موقع جارٍ جلبه — لضمان إلغاء كل الطلبات عند الخروج */
+  const siteCtrls         = useRef<Map<string, AbortController>>(new Map());
   const seenKeys          = useRef(new Set<string>());
   const lastTimeRef       = useRef(0);
   const lastHistoryWriteRef = useRef(0);
@@ -399,9 +400,14 @@ export default function WatchScreen() {
   }, [progressKey]);
 
   /* ── Parallel per-source HTTP fetch (يحل محل SSE تماماً) ── */
-  /* ── Cleanup طلبات الجلب عند تغيير الحلقة أو إلغاء mount ── */
+  /* ── Cleanup: إلغاء كل طلبات الجلب الجارية عند تغيير الحلقة أو إلغاء mount ── */
   useEffect(() => {
-    return () => { abortRef.current?.abort(); };
+    return () => {
+      abortRef.current?.abort();
+      /* إلغاء جميع controllers للمواقع الجارية — يمنع تسرب الذاكرة عند التنقل السريع */
+      siteCtrls.current.forEach(c => c.abort());
+      siteCtrls.current.clear();
+    };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [anime, epNum]);
 
@@ -425,6 +431,9 @@ export default function WatchScreen() {
   function goEp(n: number, _auto = false) {
     saveProgress();
     abortRef.current?.abort();
+    /* إلغاء جميع طلبات المواقع الجارية قبل الانتقال للحلقة التالية */
+    siteCtrls.current.forEach(c => c.abort());
+    siteCtrls.current.clear();
     setSources([]);
     seenKeys.current.clear();
     inFlightSitesRef.current.clear();
@@ -513,6 +522,8 @@ export default function WatchScreen() {
     try {
       await warmAuthToken();
       const siteCtrl = new AbortController();
+      /* تسجيل الـ controller لضمان إلغائه عند الخروج من الشاشة */
+      siteCtrls.current.set(site, siteCtrl);
       const timeout = SITE_TIMEOUT_MAP[site] ?? SITE_TIMEOUT_MS;
       const tid = setTimeout(() => siteCtrl.abort(), timeout);
       const res = await secureFetch(`${base}/api/anime/fetch-source?site=${site}&${qs}`, { signal: siteCtrl.signal });
@@ -545,6 +556,7 @@ export default function WatchScreen() {
       fetchedSitesRef.current.delete(site); // يسمح بإعادة المحاولة
     } finally {
       inFlightSitesRef.current.delete(site);
+      siteCtrls.current.delete(site); // تنظيف الـ controller بعد انتهاء الطلب
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [anime, epNum, titleStr, englishStr, titleArStr, format, year, episodes, native, playSrc, anslayerId, sources]);
@@ -917,7 +929,7 @@ export default function WatchScreen() {
                     isReady  && { color: "rgba(255,255,255,0.90)" },
                     isFailed && { color: "rgba(255,255,255,0.25)" },
                   ]} numberOfLines={1}>
-                    السيرفر <Text style={d.siteRowTag}>{slot.name.length <= 4 ? slot.name : slot.name}</Text>
+                    السيرفر <Text style={d.siteRowTag}>{slot.tag}</Text>
                   </Text>
                   {/* Action button */}
                   {isReady ? (
