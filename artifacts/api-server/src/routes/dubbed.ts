@@ -525,44 +525,92 @@ async function fetchTmdbPosters(titles: string[]): Promise<Map<string, string | 
   return results;
 }
 
+/** جلب كل السلاسل من جدول dubbed_anim_links (الجديد) */
+async function fetchDalCatalog(
+  sbUrl: string, sbKey: string
+): Promise<Map<string, { series_name: string; series_name_ar: string | null }>> {
+  const result = new Map<string, { series_name: string; series_name_ar: string | null }>();
+  let offset = 0;
+  const batch = 1000;
+  while (true) {
+    try {
+      const url = `${sbUrl}/rest/v1/dubbed_anim_links?select=series_id,series_name,series_name_ar&order=series_id.asc&limit=${batch}&offset=${offset}`;
+      const r = await fetch(url, {
+        headers: { apikey: sbKey, Authorization: `Bearer ${sbKey}` },
+        signal: AbortSignal.timeout(15000),
+      });
+      if (!r.ok) break;
+      const rows: { series_id: string; series_name: string; series_name_ar: string | null }[] = await r.json();
+      if (!Array.isArray(rows) || !rows.length) break;
+      for (const row of rows) {
+        if (row.series_id && !result.has(row.series_id)) {
+          result.set(row.series_id, { series_name: row.series_name || row.series_id, series_name_ar: row.series_name_ar || null });
+        }
+      }
+      if (rows.length < batch) break;
+      offset += batch;
+    } catch { break; }
+  }
+  return result;
+}
+
 async function buildAwCatalog(): Promise<AwCatalogItem[]> {
   const SB_URL = (process.env.SUPABASE_URL || "").replace(/\/$/, "");
   const SB_KEY = process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || "";
   if (!SB_URL || !SB_KEY) return [];
 
-  const seen = new Map<string, { anime_name: string; anilist_id: number | null }>();
+  const seen = new Map<string, { anime_name: string; anilist_id: number | null; titleAr: string | null }>();
   let offset = 0;
   const batchSize = 1000;
 
-  while (true) {
-    try {
-      const url = `${SB_URL}/rest/v1/aw_links?select=anime_id,anime_name,anilist_id&content_type=eq.dubbed&order=anime_id.asc&limit=${batchSize}&offset=${offset}`;
-      const r = await fetch(url, {
-        headers: { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}` },
-        signal: AbortSignal.timeout(15000),
-      });
-      if (!r.ok) break;
-      const rows: { anime_id: string; anime_name: string; anilist_id: number | null }[] = await r.json();
-      if (!Array.isArray(rows) || !rows.length) break;
-
-      for (const row of rows) {
-        if (row.anime_id && !seen.has(row.anime_id)) {
-          seen.set(row.anime_id, { anime_name: row.anime_name || row.anime_id, anilist_id: row.anilist_id ?? null });
-        }
+  // ── جلب aw_links + dubbed_anim_links بالتوازي ──
+  const [, dalMap] = await Promise.all([
+    // aw_links: يملأ seen مباشرةً
+    (async () => {
+      while (true) {
+        try {
+          const url = `${SB_URL}/rest/v1/aw_links?select=anime_id,anime_name,anilist_id&content_type=eq.dubbed&order=anime_id.asc&limit=${batchSize}&offset=${offset}`;
+          const r = await fetch(url, {
+            headers: { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}` },
+            signal: AbortSignal.timeout(15000),
+          });
+          if (!r.ok) break;
+          const rows: { anime_id: string; anime_name: string; anilist_id: number | null }[] = await r.json();
+          if (!Array.isArray(rows) || !rows.length) break;
+          for (const row of rows) {
+            if (row.anime_id && !seen.has(row.anime_id)) {
+              seen.set(row.anime_id, { anime_name: row.anime_name || row.anime_id, anilist_id: row.anilist_id ?? null, titleAr: null });
+            }
+          }
+          if (rows.length < batchSize) break;
+          offset += batchSize;
+        } catch { break; }
       }
+    })(),
+    // dubbed_anim_links: يُعاد كـ Map
+    fetchDalCatalog(SB_URL, SB_KEY),
+  ]);
 
-      if (rows.length < batchSize) break;
-      offset += batchSize;
-    } catch { break; }
+  // دمج: أضف سلاسل dubbed_anim_links غير الموجودة في aw_links
+  for (const [sid, info] of dalMap) {
+    if (!seen.has(sid)) {
+      seen.set(sid, { anime_name: info.series_name, anilist_id: null, titleAr: info.series_name_ar });
+    } else {
+      // أضف العنوان العربي لمن وُجد في aw_links دون عنوان عربي
+      const existing = seen.get(sid)!;
+      if (!existing.titleAr && info.series_name_ar) {
+        existing.titleAr = info.series_name_ar;
+      }
+    }
   }
 
   // بناء العناصر الأولية
   const items: AwCatalogItem[] = [];
-  for (const [anime_id, { anime_name, anilist_id }] of seen) {
+  for (const [anime_id, { anime_name, anilist_id, titleAr }] of seen) {
     items.push({
       key: anime_id,
       title: anime_name || anime_id,
-      titleAr: null,
+      titleAr: titleAr ?? null,
       poster: awPoster(anilist_id), // null إذا لم يكن هناك anilist_id
       seasons: [{ label: "الحلقات", animeId: anime_id }],
     });
@@ -633,21 +681,33 @@ router.get("/aw-dubbed/episodes", async (req, res) => {
   if (!SB_URL || !SB_KEY) { res.json({ episodes: [] }); return; }
 
   try {
-    const url = `${SB_URL}/rest/v1/aw_links?select=ep_number&anime_id=eq.${encodeURIComponent(series)}&order=ep_number.asc&limit=2000`;
-    const r = await fetch(url, {
-      headers: { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}` },
-      signal: AbortSignal.timeout(10000),
-    });
-    if (!r.ok) { res.json({ episodes: [] }); return; }
-    const rows: { ep_number: number }[] = await r.json();
+    // جلب من الجدولين بالتوازي — dubbed_anim_links أولاً (أحدث) ثم aw_links كـ fallback
+    const [dalR, awR] = await Promise.all([
+      fetch(`${SB_URL}/rest/v1/dubbed_anim_links?select=ep_number&series_id=eq.${encodeURIComponent(series)}&order=ep_number.asc&limit=2000`, {
+        headers: { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}` },
+        signal: AbortSignal.timeout(10000),
+      }).then(r => r.ok ? r.json() as Promise<{ ep_number: number }[]> : [] as { ep_number: number }[]).catch(() => [] as { ep_number: number }[]),
+      fetch(`${SB_URL}/rest/v1/aw_links?select=ep_number&anime_id=eq.${encodeURIComponent(series)}&content_type=eq.dubbed&order=ep_number.asc&limit=2000`, {
+        headers: { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}` },
+        signal: AbortSignal.timeout(10000),
+      }).then(r => r.ok ? r.json() as Promise<{ ep_number: number }[]> : [] as { ep_number: number }[]).catch(() => [] as { ep_number: number }[]),
+    ]);
+
+    // دمج: dubbed_anim_links أولاً، ثم aw_links للتكملة
+    const rawRows: { ep_number: number }[] = [
+      ...(Array.isArray(dalR) ? dalR : []),
+      ...(Array.isArray(awR)  ? awR  : []),
+    ];
+
     const seen = new Set<number>();
     const episodes: { number: number }[] = [];
-    for (const row of rows) {
+    for (const row of rawRows) {
       if (typeof row.ep_number === "number" && !seen.has(row.ep_number)) {
         seen.add(row.ep_number);
         episodes.push({ number: row.ep_number });
       }
     }
+    episodes.sort((a, b) => a.number - b.number);
     res.setHeader("Cache-Control", "public, max-age=1800");
     res.json({ episodes });
   } catch { res.json({ episodes: [] }); }
@@ -664,13 +724,25 @@ router.get("/aw-dubbed/watch-src", async (req, res) => {
   if (!SB_URL || !SB_KEY) { res.status(502).json({ error: "not configured" }); return; }
 
   try {
-    const url = `${SB_URL}/rest/v1/aw_links?select=server,quality,link&anime_id=eq.${encodeURIComponent(series)}&ep_number=eq.${ep}&order=quality.desc&limit=30`;
-    const r = await fetch(url, {
-      headers: { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}` },
-      signal: AbortSignal.timeout(10000),
-    });
-    if (!r.ok) { res.status(502).json({ error: "db query failed" }); return; }
-    const rows: { server: string; quality: string; link: string }[] = await r.json();
+    // جلب من الجدولين بالتوازي — dubbed_anim_links أولاً ثم aw_links
+    const [dalRows, awRows] = await Promise.all([
+      fetch(`${SB_URL}/rest/v1/dubbed_anim_links?select=server,quality,link&series_id=eq.${encodeURIComponent(series)}&ep_number=eq.${ep}&order=quality.desc&limit=30`, {
+        headers: { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}` },
+        signal: AbortSignal.timeout(10000),
+      }).then(r => r.ok ? r.json() as Promise<{ server: string; quality: string; link: string }[]> : [] as { server: string; quality: string; link: string }[]).catch(() => [] as { server: string; quality: string; link: string }[]),
+      fetch(`${SB_URL}/rest/v1/aw_links?select=server,quality,link&anime_id=eq.${encodeURIComponent(series)}&ep_number=eq.${ep}&content_type=eq.dubbed&order=quality.desc&limit=30`, {
+        headers: { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}` },
+        signal: AbortSignal.timeout(10000),
+      }).then(r => r.ok ? r.json() as Promise<{ server: string; quality: string; link: string }[]> : [] as { server: string; quality: string; link: string }[]).catch(() => [] as { server: string; quality: string; link: string }[]),
+    ]);
+
+    // دمج: dubbed_anim_links أولاً (أحدث وأكثر اكتمالاً)، ثم aw_links للتكملة
+    const seenSrv = new Set<string>();
+    const rows: { server: string; quality: string; link: string }[] = [];
+    for (const r of [...(Array.isArray(dalRows) ? dalRows : []), ...(Array.isArray(awRows) ? awRows : [])]) {
+      const k = `${r.server}|${r.link}`;
+      if (!seenSrv.has(k)) { seenSrv.add(k); rows.push(r); }
+    }
     if (!rows.length) { res.status(404).json({ error: "no sources found" }); return; }
 
     function serverLabel(srv: string): string {

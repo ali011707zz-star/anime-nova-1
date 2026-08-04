@@ -61,3 +61,4 @@
 - [ANIFOX source live test](anifox-source-live-test-2026-07-27.md) — API mirrors حيّة ومتطابقة؛ Home→content→season→episode→sources يعمل؛ Archive.org direct MP4 مؤكد، والبقية embeds/landing pages.
 - [Mobile sources root cause 2026-07-27](mobile-sources-root-cause-2026-07-27.md) — AW ميت (Algolia 403)؛ ANIFOX timeout mismatch حُلّ بـ catalog cache + 82s؛ KW timeout رُفع لـ 15s.
 - [Anime watch onError crash fix](anime-watch-onError-fix.md) — player exits in 1s: curLen≤1 → onError immediately + abortRef kills background fetches → empty picker. Fix: RiftPlayer waits 8s for more sources; onError keeps fetches alive + autoPlayFiredRef=true.
+- [Mobile crash root causes](mobile-crash-root-causes.md) — 3 AbortController/timer leaks caused app exit after episodes: dubbed/watch ctrlRef, refreshAllSources missing siteCtrls abort, handlePickSite tid not in finally.
