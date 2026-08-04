@@ -358,6 +358,8 @@ export default function WatchScreen() {
   /* حالات التنزيل لكل موقع */
   const [downloadStates,   setDownloadStates]   = useState<Record<string, "idle" | "downloading" | "done" | "error">>({});
   const [downloadProgress, setDownloadProgress] = useState<Record<string, number>>({});
+  /* مواقع يجري جلبها خصيصاً للتنزيل (بدون فتح المشغّل) */
+  const [dlFetchingSites,  setDlFetchingSites]  = useState<Set<string>>(new Set());
 
   const abortRef          = useRef<AbortController | null>(null);
   /* siteCtrls: نتتبع AbortController لكل موقع جارٍ جلبه — لضمان إلغاء كل الطلبات عند الخروج */
@@ -639,6 +641,93 @@ export default function WatchScreen() {
     });
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [downloadStates, sources, anime, epNum, displayTitle, coverUrl, globalSubUrl]);
+
+  /**
+   * handleFetchAndDownload — يُنزَّل مباشرةً بدون الحاجة لفتح المشغّل أولاً.
+   * - إذا كان المصدر مجلوباً مسبقاً → يُنزَّل من الكاش مباشرةً.
+   * - إذا لم يُجلب بعد → يجلبه أولاً ثم يبدأ التنزيل.
+   */
+  const handleFetchAndDownload = useCallback(async (site: string) => {
+    const dlState = downloadStates[site] || "idle";
+    if (dlState === "downloading" || dlState === "done") return;
+    if (dlFetchingSites.has(site)) return; // جلب جارٍ بالفعل
+
+    // إذا كان المصدر مجلوباً → نزّل مباشرةً من sources الحالية
+    if (fetchedSitesRef.current.has(site)) {
+      await handleDownloadSite(site);
+      return;
+    }
+
+    // جلب المصدر ثم التنزيل
+    setDlFetchingSites(prev => { const s = new Set(prev); s.add(site); return s; });
+
+    const base = getBaseUrl();
+    const qs = new URLSearchParams({
+      anime: anime || "0", ep: String(epNum), title: titleStr,
+      english: englishStr, format: format || "",
+      year: year || "", episodes: episodes || "", native: native || "",
+    });
+    if (titleArStr) qs.set("titleAr", titleArStr);
+    if (site === "anslayer" && anslayerId) qs.set("anslayerId", anslayerId);
+
+    let tid: ReturnType<typeof setTimeout> | null = null;
+    try {
+      await warmAuthToken();
+      const siteCtrl = new AbortController();
+      const timeout = SITE_TIMEOUT_MAP[site] ?? SITE_TIMEOUT_MS;
+      tid = setTimeout(() => siteCtrl.abort(), timeout);
+      const res = await secureFetch(`${base}/api/anime/fetch-source?site=${site}&${qs}`, { signal: siteCtrl.signal });
+
+      if (!res.ok || !isMountedRef.current) throw new Error("fetch failed");
+      const data = await res.json();
+      const rawSrcs: Src[] = data.sources || [];
+      if (!rawSrcs.length) throw new Error("no sources");
+
+      const newSrcs = rawSrcs
+        .map((s): Src => ({ ...s, site: s.site || site, directUrl: resolveUrl(s.directUrl, base), url: resolveUrl(s.url, base) }))
+        .filter(s => !isBlockedSource(s))
+        .filter(s => !(s.isEmbed && s.url && (s.url.includes("mega.nz") || s.url.includes("mega.co.nz"))))
+        .filter(s => { const k = getPlayUrl(s); if (!k || seenKeys.current.has(k)) return false; seenKeys.current.add(k); return true; });
+
+      if (!newSrcs.length) throw new Error("no direct sources");
+
+      fetchedSitesRef.current.add(site);
+      setSlotStatus(prev => ({ ...prev, [site]: "ready" }));
+      setSources(prev => [...prev.filter(s => s.site !== site), ...newSrcs]);
+
+      // ابحث عن أفضل مصدر قابل للتشغيل المباشر
+      const best = newSrcs.find(isDirectPlayable) ?? newSrcs[0];
+      if (!best || !isDirectPlayable(best)) throw new Error("no playable source");
+
+      const rawUrl    = getPlayUrl(best);
+      const hdrs      = best.headers || extractProxyHeaders(rawUrl);
+      const proxyUrl  = ensureVpsProxy(rawUrl, hdrs, base);
+      const subRaw    = best.subtitleUrl || globalSubUrl;
+      const subtitleUrl = subRaw ? resolveUrl(subRaw, base) : undefined;
+      const token     = await getAuthToken();
+
+      void startGlobalDownload({
+        animeId:    parseInt(anime || "0"),
+        ep:         epNum,
+        title:      displayTitle,
+        cover:      coverUrl,
+        site,
+        quality:    getSrcQuality(best),
+        url:        proxyUrl,
+        authToken:  token,
+        subtitleUrl,
+      });
+
+    } catch {
+      if (isMountedRef.current)
+        setDownloadStates(prev => ({ ...prev, [site]: "error" }));
+    } finally {
+      if (tid !== null) clearTimeout(tid);
+      if (isMountedRef.current)
+        setDlFetchingSites(prev => { const s = new Set(prev); s.delete(site); return s; });
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [downloadStates, dlFetchingSites, anime, epNum, titleStr, englishStr, titleArStr, format, year, episodes, native, anslayerId, displayTitle, coverUrl, globalSubUrl, handleDownloadSite]);
 
   /* ── Handle back ── */
   const handleBack = useCallback(() => {
@@ -1003,14 +1092,18 @@ export default function WatchScreen() {
 
                       {/* Right: download + status dot */}
                       <View style={d.webRowRight}>
-                        {/* زر التنزيل — ظاهر دائماً، يُفعَّل فقط عند ready */}
+                        {/* زر التنزيل — يعمل دائماً (يجلب المصدر تلقائياً إذا لزم) */}
                         {dlState === "idle" && (
                           <Pressable
-                            onPress={() => { if (isReady) handleDownloadSite(slot.site); }}
+                            onPress={() => handleFetchAndDownload(slot.site)}
                             hitSlop={10}
-                            style={[d.dlIconBtn, !isReady && { opacity: 0.22 }]}
+                            style={d.dlIconBtn}
                           >
-                            <Ionicons name="download-outline" size={15} color="rgba(139,92,246,0.80)" />
+                            {dlFetchingSites.has(slot.site) ? (
+                              <SpinRing size={14} />
+                            ) : (
+                              <Ionicons name="download-outline" size={15} color="rgba(139,92,246,0.80)" />
+                            )}
                           </Pressable>
                         )}
                         {dlState === "downloading" && (
