@@ -165,11 +165,20 @@ function DownloadCard({
 
 // ── Local Player Overlay ──────────────────────────────────────────────────
 
+/** يضمن أن المسار المحلي يبدأ بـ file:// كما يتوقع expo-video/isValidPlayerSourceUrl.
+ *  بعض إصدارات expo-file-system القديمة تُرجع مساراً مطلقاً بدون بروتوكول. */
+function toFileUri(path: string): string {
+  if (!path) return path;
+  if (path.startsWith("file://")) return path;
+  if (path.startsWith("/")) return `file://${path}`;
+  return path;
+}
+
 function LocalPlayer({ item, onClose }: { item: DownloadItem; onClose: () => void }) {
   const src: PlayerSource = {
-    url: item.localPath,
+    url: toFileUri(item.localPath),
     label: `${item.quality} · ${item.site}`,
-    quality: item.quality as any,
+    quality: (item.quality as any) || "720p HD",
     subtitleUrl: item.subtitleLocalPath,
   };
   return (

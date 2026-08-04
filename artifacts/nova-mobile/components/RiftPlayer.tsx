@@ -690,6 +690,9 @@ export function RiftPlayer({
       if (longPressTimer.current) { clearTimeout(longPressTimer.current); longPressTimer.current = null; }
       if (unlockTimer.current) { clearTimeout(unlockTimer.current); unlockTimer.current = null; }
       if (postSeekTimer.current) { clearTimeout(postSeekTimer.current); postSeekTimer.current = null; }
+      /* waitForSrcTimerRef: يُلغى عند unmount لمنع onError من الاستدعاء بعد تفكيك المشغّل
+         كان يُسبّب setState بعد unmount → crash عند التبديل السريع بين المصادر */
+      if (waitForSrcTimerRef.current) { clearTimeout(waitForSrcTimerRef.current); waitForSrcTimerRef.current = null; }
 
       /* 6. فرِّغ subtitle cache + cues لتحرير الذاكرة
          loadedCues قد تكون مئات/آلاف من الـ cues المترجمة — تحريرها فوراً يُقلل ضغط GC */
