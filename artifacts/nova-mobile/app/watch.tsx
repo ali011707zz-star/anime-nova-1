@@ -293,8 +293,6 @@ function SrcRow({ src, idx, onPlay }: { src: Src; idx: number; onPlay: (s: Src) 
   const q = getSrcQuality(src);
   const qs = QUALITY_STYLE[q];
   const tag = getSiteTag(src.site || "");
-  const hasSub = !!src.subtitleUrl;
-
   return (
     <Pressable onPress={() => onPlay(src)} style={d.srcRow}>
       <View style={[d.srcIcon, { backgroundColor: qs.badge, borderColor: qs.border }]}>
@@ -304,9 +302,6 @@ function SrcRow({ src, idx, onPlay }: { src: Src; idx: number; onPlay: (s: Src) 
         <Text style={d.srcNum}>
           السيرفر <Text style={d.srcTagInline}>{tag}</Text>
         </Text>
-        {hasSub && (
-          <View style={d.srcSubBadge}><Text style={d.srcSubText}>ترجمة</Text></View>
-        )}
       </View>
       <View style={d.srcRight}>
         <View style={[d.srcQBadge, { backgroundColor: qs.badge, borderColor: qs.border }]}>
@@ -697,7 +692,7 @@ export default function WatchScreen() {
         headers,
         label: `سيرفر · ${getSiteTag(s.site || "")}`,
         quality: getSrcQuality(s),
-        subtitleUrl: s.subtitleUrl ? resolveUrl(s.subtitleUrl, base) : globalSubUrl,
+        subtitleUrl: undefined, // مخفية في نوفا موبايل
         isArabic: ARABIC_SITES.has(s.site || ""),
         wantsSmartSub: !ARABIC_SITES.has(s.site || ""),
         skipIntro: s.skipIntro,
@@ -993,17 +988,17 @@ export default function WatchScreen() {
                         )}
                       </View>
 
-                      {/* Center: name + tag */}
+                      {/* Center: tag only */}
                       <Text
                         style={[
-                          d.webRowName,
+                          d.webRowTag,
+                          { flex: 1, textAlign: "right" },
                           isReady  && { color: "rgba(255,255,255,0.90)" },
                           isFailed && { color: "rgba(255,255,255,0.22)" },
                         ]}
                         numberOfLines={1}
                       >
-                        {slot.name}{"  "}
-                        <Text style={d.webRowTag}>{slot.tag}</Text>
+                        {slot.tag}
                       </Text>
 
                       {/* Right: download + status dot */}

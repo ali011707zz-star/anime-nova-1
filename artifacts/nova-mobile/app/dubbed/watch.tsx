@@ -11,23 +11,22 @@ import { getBaseUrl } from "@/utils/api";
 
 export default function DubbedWatchScreen() {
   const insets = useSafeAreaInsets();
-  const router = useRouter();
-  const topPad = Platform.OS === "web" ? 0 : insets.top;
+  const router  = useRouter();
+  const topPad  = Platform.OS === "web" ? 0 : insets.top;
 
-  const { epUrl, title, ep, season, poster, at } = useLocalSearchParams<{
+  const { epUrl, title, ep, season } = useLocalSearchParams<{
     epUrl: string; title: string; ep: string; season: string;
     poster: string; at: string;
   }>();
 
-  const [sources, setSources]  = useState<PlayerSource[]>([]);
-  const [loading, setLoading]  = useState(true);
-  const [error, setError]      = useState<string | null>(null);
+  const [sources, setSources] = useState<PlayerSource[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error,   setError]   = useState<string | null>(null);
   const mountedRef = useRef(true);
-  /* تخزين AbortController في ref حتى يمكن إلغاؤه عند unmount أو retry */
-  const ctrlRef = useRef<AbortController | null>(null);
+  const ctrlRef    = useRef<AbortController | null>(null);
 
-  /** استخراج رابط الفيديو من HTML صفحة arabic-toons.com — نفس patterns الباكند */
-  function extractVideoFromHtml(html: string, base: string): string | null {
+  /** استخراج رابط الفيديو من HTML — نفس patterns الباكند */
+  function extractVideoFromHtml(html: string): string | null {
     // Pattern 1: videoSrc = "https://stream.foupix.com:8443/...mp4?tkn=..."
     const m1 = html.match(/(?:const\s+)?videoSrc\s*=\s*["']([^"']+(?:\.mp4|\.m3u8)[^"']*)["']/);
     if (m1) return m1[1].split('"')[0].split("'")[0];
@@ -36,7 +35,7 @@ export default function DubbedWatchScreen() {
     if (m2) return m2[1];
     // Pattern 3: src="...m3u8"
     const m3 = html.match(/src=["']([^"']+\.m3u8[^"']*)["']/);
-    if (m3) return m3[1].startsWith("/") ? `${base}${m3[1]}` : m3[1];
+    if (m3) return m3[1];
     return null;
   }
 
@@ -49,8 +48,47 @@ export default function DubbedWatchScreen() {
 
     const BASE = getBaseUrl();
 
-    // ── الطريقة الأولى: الموبايل يجلب صفحة arabic-toons.com مباشرة (IP سكني لا يُحجب) ──
-    // هذا يتجاوز مشكلة حجب VPS بواسطة arabic-toons.com
+    // ── الطريقة الأولى: VPS API (يجلب الصفحة ويعيد rawUrl + proxyUrl) ──
+    // الـ VPS يستطيع جلب arabic-toons.com بـ UA موبايل؛ الموبايل يشغّل rawUrl مباشرة
+    try {
+      const r = await fetch(
+        `${BASE}/api/dubbed/watch-src?epUrl=${encodeURIComponent(epUrl)}`,
+        { signal: ctrl.signal },
+      );
+      if (ctrl.signal.aborted || !mountedRef.current) return;
+      if (r.ok) {
+        const d = await r.json();
+        if (ctrl.signal.aborted) return;
+
+        const rawUrl   = typeof d.rawUrl  === "string" && d.rawUrl   ? d.rawUrl  : null;
+        const proxyUrl = typeof d.hlsUrl  === "string" && d.hlsUrl   ? (d.hlsUrl.startsWith("/") ? `${BASE}${d.hlsUrl}` : d.hlsUrl) : null;
+
+        if (rawUrl || proxyUrl) {
+          const srcs: PlayerSource[] = [];
+          // المصدر المباشر أولاً (foupix CDN — يعمل من IP سكني مباشرة)
+          if (rawUrl) srcs.push({
+            url: rawUrl,
+            label: "مدبلج عربي",
+            quality: "720p HD",
+            headers: {
+              Referer: "https://www.arabic-toons.com/",
+              Origin:  "https://www.arabic-toons.com",
+            },
+          });
+          // الـ proxy احتياطي (VPS يُمرّر الطلب)
+          if (proxyUrl && proxyUrl !== rawUrl) srcs.push({
+            url: proxyUrl, label: "مدبلج عربي (احتياطي)", quality: "720p HD",
+          });
+          if (mountedRef.current) { setSources(srcs); setLoading(false); }
+          return;
+        }
+      }
+    } catch (e: any) {
+      if (e?.name === "AbortError" || !mountedRef.current) return;
+      // VPS API فشل — نجرب الجلب المباشر من الموبايل
+    }
+
+    // ── الطريقة الثانية: الموبايل يجلب الصفحة مباشرة (IP سكني) ──
     try {
       const pageR = await fetch(epUrl, {
         signal: ctrl.signal,
@@ -61,74 +99,29 @@ export default function DubbedWatchScreen() {
           "Accept-Language": "ar,en-US;q=0.9,en;q=0.8",
         },
       });
-      if (ctrl.signal.aborted) return;
+      if (ctrl.signal.aborted || !mountedRef.current) return;
       if (pageR.ok) {
         const html = await pageR.text();
         if (ctrl.signal.aborted) return;
-        const videoUrl = extractVideoFromHtml(html, "https://www.arabic-toons.com");
+        const videoUrl = extractVideoFromHtml(html);
         if (videoUrl) {
-          const srcs: PlayerSource[] = [{
-            url: videoUrl,
-            label: "مدبلج عربي (مباشر)",
-            quality: "720p HD",
-            headers: {
-              Referer: "https://www.arabic-toons.com/",
-              Origin: "https://www.arabic-toons.com",
-            },
-          }];
-          // أضف proxy السيرفر كاحتياطي
           const proxyUrl = `${BASE}/api/dubbed/stream?url=${encodeURIComponent(videoUrl)}`;
-          srcs.push({ url: proxyUrl, label: "مدبلج عربي (احتياطي)", quality: "720p HD" });
-          setSources(srcs);
-          setLoading(false);
+          const srcs: PlayerSource[] = [
+            { url: videoUrl, label: "مدبلج عربي", quality: "720p HD", headers: { Referer: "https://www.arabic-toons.com/", Origin: "https://www.arabic-toons.com" } },
+            { url: proxyUrl, label: "مدبلج عربي (احتياطي)", quality: "720p HD" },
+          ];
+          if (mountedRef.current) { setSources(srcs); setLoading(false); }
           return;
         }
       }
     } catch (e: any) {
       if (e?.name === "AbortError" || !mountedRef.current) return;
-      // جلب الصفحة مباشرة فشل — نجرب السيرفر
     }
 
-    // ── الطريقة الثانية (احتياطي): السيرفر يجلب الصفحة عبر الـ proxy ──
-    try {
-      const r = await fetch(`${BASE}/api/dubbed/watch-src?epUrl=${encodeURIComponent(epUrl)}`, { signal: ctrl.signal });
-      if (ctrl.signal.aborted) return;
-      if (!r.ok) {
-        setError("تعذّر جلب مصدر الفيديو — حاول مرة أخرى");
-        setLoading(false);
-        return;
-      }
-      const d = await r.json();
-      const rawUrl   = typeof d.rawUrl  === "string" ? d.rawUrl  : null;
-      const proxyUrl = typeof d.hlsUrl  === "string"
-        ? (d.hlsUrl.startsWith("/") ? `${BASE}${d.hlsUrl}` : d.hlsUrl)
-        : null;
-
-      if (!rawUrl && !proxyUrl) {
-        setError("لم يُعثر على مصدر فيديو لهذه الحلقة");
-        setLoading(false);
-        return;
-      }
-
-      const srcs: PlayerSource[] = [];
-      if (rawUrl) {
-        srcs.push({ url: rawUrl, label: "مدبلج عربي (مباشر)", quality: "720p HD", headers: {
-          Referer: "https://www.arabic-toons.com/",
-          Origin: "https://www.arabic-toons.com",
-        }});
-      }
-      if (proxyUrl && proxyUrl !== rawUrl) {
-        srcs.push({ url: proxyUrl, label: "مدبلج عربي (احتياطي)", quality: "720p HD" });
-      }
-      setSources(srcs);
-      setLoading(false);
-    } catch {
-      if (!mountedRef.current) return;
-      setError("خطأ في الاتصال — تحقق من الشبكة وأعد المحاولة");
+    if (mountedRef.current) {
+      setError("تعذّر جلب مصدر الفيديو — تحقق من الاتصال وأعد المحاولة");
       setLoading(false);
     }
-  // title مُزال من deps — تغييره لا يستوجب إعادة الجلب
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [epUrl]);
 
   useEffect(() => {
@@ -136,7 +129,6 @@ export default function DubbedWatchScreen() {
     loadSource();
     return () => {
       mountedRef.current = false;
-      /* إلغاء الطلب المعلق عند مغادرة الشاشة — يمنع تسرب الذاكرة */
       ctrlRef.current?.abort();
     };
   }, [loadSource]);
@@ -189,15 +181,13 @@ export default function DubbedWatchScreen() {
     );
   }
 
-  /* ── RiftPlayer (native) ── */
+  /* ── RiftPlayer ── */
   return (
     <RiftPlayer
       sources={sources}
       title={`${title || ""} · ${season || ""}`}
       episode={ep ? parseInt(ep, 10) : undefined}
       onBack={() => router.back()}
-      /* يظل المشغل مفتوحاً بعد استنفاد المصادر كي تظهر أزرار إعادة المحاولة
-         والمصدر التالي داخل RiftPlayer بدلاً من العودة المفاجئة للشاشة السابقة. */
       onError={() => {
         setSources([]);
         setError("تعذّر تشغيل مصدر المدبلج — حاول مرة أخرى");
@@ -207,7 +197,7 @@ export default function DubbedWatchScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#000" },
+  container:   { flex: 1, backgroundColor: "#000" },
   header: {
     flexDirection: "row", alignItems: "center", gap: 12,
     paddingHorizontal: 16, paddingTop: 12, paddingBottom: 12,
@@ -219,9 +209,9 @@ const styles = StyleSheet.create({
     borderWidth: 1, borderColor: "rgba(255,255,255,0.10)",
     alignItems: "center", justifyContent: "center",
   },
-  headerTitle: { color: "#fff", fontSize: 13, fontWeight: "700", fontFamily: "Cairo_700Bold", textAlign: "right", writingDirection: "rtl" },
-  headerSub: { color: "rgba(255,255,255,0.4)", fontSize: 11, fontFamily: "Cairo_400Regular", textAlign: "right" },
-  center: { flex: 1, alignItems: "center", justifyContent: "center", gap: 14, padding: 24 },
+  headerTitle: { color: "#fff", fontSize: 13, fontFamily: "Cairo_700Bold", textAlign: "right" },
+  headerSub:   { color: "rgba(255,255,255,0.4)", fontSize: 11, fontFamily: "Cairo_400Regular", textAlign: "right" },
+  center:      { flex: 1, alignItems: "center", justifyContent: "center", gap: 14, padding: 24 },
   loadingText: { color: "rgba(255,255,255,0.5)", fontFamily: "Cairo_400Regular" },
   errorIcon: {
     width: 64, height: 64, borderRadius: 32,
@@ -229,7 +219,7 @@ const styles = StyleSheet.create({
     borderWidth: 1, borderColor: "rgba(239,68,68,0.2)",
     alignItems: "center", justifyContent: "center",
   },
-  errorText: { color: "rgba(255,255,255,0.6)", fontFamily: "Cairo_400Regular", textAlign: "center" },
+  errorText:  { color: "rgba(255,255,255,0.6)", fontFamily: "Cairo_400Regular", textAlign: "center" },
   retryBtn: {
     flexDirection: "row", alignItems: "center", gap: 8,
     paddingHorizontal: 20, paddingVertical: 10,

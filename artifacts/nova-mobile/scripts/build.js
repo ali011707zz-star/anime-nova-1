@@ -240,6 +240,7 @@ async function downloadBundle(platform, timestamp) {
   url.searchParams.set("minify", "true");
 
   const output = path.join(
+    projectRoot,
     "static-build",
     timestamp,
     "_expo",
