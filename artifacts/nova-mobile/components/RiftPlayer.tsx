@@ -1382,6 +1382,14 @@ export function RiftPlayer({
   }, [player, duration, fadeIn]);
   seekRef.current = seek;
 
+  /* seekSilent: نفس seek لكن بدون إظهار controls (للـ double-tap والـ gestures) */
+  const seekSilentRef = useRef<(s: number) => void>(() => {});
+  const seekSilent = useCallback((secs: number) => {
+    const target = Math.max(0, Math.min(secs, durationRef.current || duration));
+    try { player.currentTime = target; setPosition(target); } catch {}
+  }, [player, duration]);
+  seekSilentRef.current = seekSilent;
+
   const changeSpeed = useCallback((s: number) => {
     setSpeed(s);
     try { player.playbackRate = s; } catch {}
@@ -1479,9 +1487,9 @@ export function RiftPlayer({
     setDblTap({ side, id: Date.now() });
     anim.setValue(0);
     Animated.timing(anim, { toValue: 1, duration: 600, useNativeDriver: true }).start(() => setDblTap(null));
-    
-    seek(side === "R" ? positionRef.current + seekDurationRef.current : positionRef.current - seekDurationRef.current);
-  }, [seek, dblTapLeft, dblTapRight]);
+    /* seekSilent: لا نُظهر controls عند الـ double-tap */
+    seekSilent(side === "R" ? positionRef.current + seekDurationRef.current : positionRef.current - seekDurationRef.current);
+  }, [seekSilent, dblTapLeft, dblTapRight]);
 
   /* ─── Show feedback overlay ─── */
   const showFeedback = useCallback((fb: typeof feedback) => {
@@ -1529,8 +1537,8 @@ export function RiftPlayer({
           setFeedback({ type: "volume", value: newVol });
           /* ضبط صوت الوسائط الحقيقي في النظام (يُظهر HUD أزرار الصوت) */
           VolumeManager.setVolume(newVol, { showUI: true }).catch(() => {});
-          /* fallback: ضبط مستوى صوت المشغّل مباشرةً إن لم يعمل system volume */
-          try { player.volume = newVol; } catch {}
+          /* player يعمل دائماً بـ 100% — النظام هو من يتحكم بالصوت الفعلي */
+          try { player.volume = 1; } catch {}
         } else {
           /* السحب للأعلى يرفع السطوع — dy سالب عند الرفع → delta موجب */
           const delta = -gs.dy / (H * 0.40);
@@ -1546,7 +1554,8 @@ export function RiftPlayer({
         if (gestureTypeRef.current === "seek") {
           const seekDelta = (gs.dx / W) * 120;
           const newPos = Math.max(0, Math.min(durationRef.current, gestureStartPosRef.current + seekDelta));
-          seekRef.current(newPos);
+          /* seekSilent: لا نُظهر controls عند إنهاء سحب الـ seek */
+          seekSilentRef.current(newPos);
         }
         gestureTypeRef.current = null;
         gestureSide.current = null;
@@ -1660,17 +1669,15 @@ export function RiftPlayer({
   }, [srcIdx]);
 
   const doSkipIntro = useCallback(() => {
-    if (skipIntro) seek(skipIntro.end);
+    if (skipIntro) seekSilent(skipIntro.end);
     setSkipIntroDismissed(true); // يختفي بعد ضغط المستخدم
-    fadeIn();
-  }, [skipIntro, seek, fadeIn]);
+  }, [skipIntro, seekSilent]);
 
   const doSkipOutro = useCallback(() => {
     // تخطي النهاية = القفز لنهاية نطاق الـ outro فقط (لا الانتقال للحلقة التالية)
-    if (skipOutro) seek(skipOutro.end);
+    if (skipOutro) seekSilent(skipOutro.end);
     setSkipOutroDismissed(true);
-    fadeIn();
-  }, [skipOutro, seek, fadeIn]);
+  }, [skipOutro, seekSilent]);
 
   /* ─── Tap handler with double-tap detection ─── */
   const handleTap = useCallback((pageX: number) => {
@@ -1707,9 +1714,7 @@ export function RiftPlayer({
     prevSpeedRef.current = speed;
     setLongPressSpeed(true);
     try { player.playbackRate = 2; } catch {}
-    
-    fadeIn();
-  }, [speed, player, fadeIn]);
+  }, [speed, player]);
 
   const handleLongPressRelease = useCallback(() => {
     if (!longPressSpeed) return;
