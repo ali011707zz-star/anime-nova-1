@@ -1060,34 +1060,33 @@ export default function WatchScreen() {
                         pressed  && { opacity: 0.72 },
                       ]}
                     >
-                      {/* Left: play icon / spinner */}
+                      {/* Left in code = Right visually (RTL): زر اختيار/تشغيل */}
                       <View style={d.webRowPlayIcon}>
                         {isFetching ? (
                           <SpinRing size={16} />
+                        ) : isReady ? (
+                          <View style={d.playBtnGreen}>
+                            <Ionicons name="play" size={10} color="#fff" />
+                            <Text style={d.playBtnGreenText}>تشغيل</Text>
+                          </View>
                         ) : (
-                          <Ionicons
-                            name={isReady ? "play-circle" : "play-circle-outline"}
-                            size={19}
-                            color={
-                              isReady  ? "#34d399" :
-                              isFailed ? "rgba(239,68,68,0.40)" :
-                              "rgba(255,255,255,0.22)"
-                            }
-                          />
+                          <View style={[d.pickBtn, isFailed && { opacity: 0.4 }]}>
+                            <Text style={d.pickBtnText}>اختيار</Text>
+                          </View>
                         )}
                       </View>
 
-                      {/* Center: tag only */}
+                      {/* Center: السيرفر XX */}
                       <Text
                         style={[
                           d.webRowTag,
                           { flex: 1, textAlign: "right" },
                           isReady  && { color: "rgba(255,255,255,0.90)" },
-                          isFailed && { color: "rgba(255,255,255,0.22)" },
+                          isFailed && { color: "rgba(255,255,255,0.35)" },
                         ]}
                         numberOfLines={1}
                       >
-                        {slot.tag}
+                        السيرفر {slot.tag}
                       </Text>
 
                       {/* Right: download + status dot */}
@@ -1246,11 +1245,17 @@ const d = StyleSheet.create({
   /* ── Web-style server row ── */
   webRow:         { flexDirection: "row", alignItems: "center", paddingHorizontal: 14, paddingVertical: 14, gap: 10 },
   webRowBorder:   { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: "rgba(255,255,255,0.06)" },
-  webRowPlayIcon: { width: 22, alignItems: "center", justifyContent: "center", flexShrink: 0 },
+  webRowPlayIcon: { alignItems: "center", justifyContent: "center", flexShrink: 0 },
   webRowName:     { flex: 1, fontSize: 13, fontFamily: "Cairo_800ExtraBold", color: "rgba(255,255,255,0.48)", textAlign: "right" } as any,
-  webRowTag:      { fontFamily: "Cairo_800ExtraBold", letterSpacing: 0.4, fontSize: 11 },
+  webRowTag:      { fontFamily: "Cairo_800ExtraBold", letterSpacing: 0.4, fontSize: 11, color: "rgba(255,255,255,0.60)" },
   webRowRight:    { flexDirection: "row", alignItems: "center", gap: 7, flexShrink: 0 },
   webRowDot:      { width: 8, height: 8, borderRadius: 4 },
+
+  /* ── أزرار الاختيار/التشغيل ── */
+  pickBtn:        { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 10, backgroundColor: "rgba(124,58,237,0.18)", borderWidth: 1, borderColor: "rgba(139,92,246,0.35)" },
+  pickBtnText:    { fontSize: 12, fontFamily: "Cairo_700Bold", color: "#c4b5fd" },
+  playBtnGreen:   { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 11, paddingVertical: 6, borderRadius: 10, backgroundColor: "rgba(16,185,129,0.88)", borderWidth: 1, borderColor: "rgba(52,211,153,0.35)" },
+  playBtnGreenText: { fontSize: 12, fontFamily: "Cairo_800ExtraBold", color: "#fff" },
 
   /* ── Download button ── */
   dlIconBtn:     { width: 28, height: 28, borderRadius: 9, backgroundColor: "rgba(139,92,246,0.12)", borderWidth: 1, borderColor: "rgba(139,92,246,0.22)", alignItems: "center", justifyContent: "center" },

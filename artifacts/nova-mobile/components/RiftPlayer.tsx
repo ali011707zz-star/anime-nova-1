@@ -41,11 +41,14 @@ export type PlayerSource = {
 /** Never pass malformed URLs into the native player.
  *  Some Media3/AVPlayer versions crash before emitting statusChange(error)
  *  when the source is empty, relative, or otherwise not an HTTP URL.
+ *  ملاحظة: file:// مسموح — يُستخدم لتشغيل الحلقات المحمَّلة محلياً.
  */
 export function isValidPlayerSourceUrl(value: unknown): value is string {
   if (typeof value !== "string" || !value.trim()) return false;
   try {
     const parsed = new URL(value.trim());
+    // Local file — valid on mobile (pathname كافٍ، hostname فارغ)
+    if (parsed.protocol === "file:") return !!parsed.pathname;
     return (parsed.protocol === "http:" || parsed.protocol === "https:") && !!parsed.hostname;
   } catch {
     return false;
