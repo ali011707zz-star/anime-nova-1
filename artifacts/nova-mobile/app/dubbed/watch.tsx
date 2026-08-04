@@ -23,13 +23,18 @@ export default function DubbedWatchScreen() {
   const [loading, setLoading]  = useState(true);
   const [error, setError]      = useState<string | null>(null);
   const mountedRef = useRef(true);
+  /* تخزين AbortController في ref حتى يمكن إلغاؤه عند unmount أو retry */
+  const ctrlRef = useRef<AbortController | null>(null);
 
   const loadSource = useCallback(async () => {
     if (!epUrl) { setError("رابط الحلقة مفقود"); setLoading(false); return; }
+    /* إلغاء أي طلب سابق قبل البدء بجديد */
+    ctrlRef.current?.abort();
+    const ctrl = new AbortController();
+    ctrlRef.current = ctrl;
     setLoading(true); setError(null);
 
     const BASE = getBaseUrl();
-    const ctrl = new AbortController();
     try {
       const r = await fetch(`${BASE}/api/dubbed/watch-src?epUrl=${encodeURIComponent(epUrl)}`, { signal: ctrl.signal });
       if (ctrl.signal.aborted) return;
@@ -71,12 +76,18 @@ export default function DubbedWatchScreen() {
       setError("خطأ في الاتصال — تحقق من الشبكة وأعد المحاولة");
       setLoading(false);
     }
-  }, [epUrl, title]);
+  // title مُزال من deps — تغييره لا يستوجب إعادة الجلب
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [epUrl]);
 
   useEffect(() => {
     mountedRef.current = true;
     loadSource();
-    return () => { mountedRef.current = false; };
+    return () => {
+      mountedRef.current = false;
+      /* إلغاء الطلب المعلق عند مغادرة الشاشة — يمنع تسرب الذاكرة */
+      ctrlRef.current?.abort();
+    };
   }, [loadSource]);
 
   /* ── Loading ── */

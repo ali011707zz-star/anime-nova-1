@@ -2,7 +2,7 @@
  * WebVideoPlayer — نفس مشغل الويب بالضبط داخل WebView
  * ينقل كود RiftPlayer الويب كاملاً إلى التطبيق
  */
-import React, { useRef, useCallback } from "react";
+import React, { useRef, useCallback, useEffect } from "react";
 import { View, StyleSheet, StatusBar, Platform } from "react-native";
 import WebView, { WebViewMessageEvent } from "react-native-webview";
 import { HLS_JS_INLINE } from "@/assets/hlsJsContent";
@@ -1096,6 +1096,19 @@ schedHide();
 /* ─── React Native component ─── */
 export default function WebVideoPlayer(props: WebPlayerProps) {
   const webRef = useRef<WebView>(null);
+
+  /* ── تنظيف عند unmount: إيقاف الفيديو وإلغاء الطلبات المعلقة داخل WebView ──
+     بدون هذا يظل الـ WebView يبث الفيديو في الخلفية ويستهلك الذاكرة/الشبكة */
+  useEffect(() => {
+    return () => {
+      try {
+        webRef.current?.injectJavaScript?.(
+          `try{var v=document.querySelector('video');if(v){v.pause();v.src='';v.load();}}catch(e){}true;`
+        );
+        webRef.current?.stopLoading?.();
+      } catch {}
+    };
+  }, []);
 
   const onMessage = useCallback((e: WebViewMessageEvent) => {
     try {

@@ -448,6 +448,9 @@ export default function WatchScreen() {
   /* ── إعادة تعيين حالة المصادر (زر تحديث) — مسح الأخطاء للسماح بالمحاولة مجدداً ── */
   function refreshAllSources() {
     abortRef.current?.abort();
+    /* إلغاء كل طلبات المواقع الجارية — كانت تتراكم بدون إلغاء عند الضغط على تحديث */
+    siteCtrls.current.forEach(c => c.abort());
+    siteCtrls.current.clear();
     ++fetchEpochRef.current;
     setSources([]);
     seenKeys.current.clear();
@@ -519,15 +522,15 @@ export default function WatchScreen() {
     if (titleArStr) qs.set("titleAr", titleArStr);
     if (site === "anslayer" && anslayerId) qs.set("anslayerId", anslayerId);
 
+    let tid: ReturnType<typeof setTimeout> | null = null;
     try {
       await warmAuthToken();
       const siteCtrl = new AbortController();
       /* تسجيل الـ controller لضمان إلغائه عند الخروج من الشاشة */
       siteCtrls.current.set(site, siteCtrl);
       const timeout = SITE_TIMEOUT_MAP[site] ?? SITE_TIMEOUT_MS;
-      const tid = setTimeout(() => siteCtrl.abort(), timeout);
+      tid = setTimeout(() => siteCtrl.abort(), timeout);
       const res = await secureFetch(`${base}/api/anime/fetch-source?site=${site}&${qs}`, { signal: siteCtrl.signal });
-      clearTimeout(tid);
 
       if (!res.ok || !isMountedRef.current) throw new Error("fetch failed");
       const data = await res.json();
@@ -555,6 +558,8 @@ export default function WatchScreen() {
       if (isMountedRef.current) setSlotStatus(prev => ({ ...prev, [site]: "failed" }));
       fetchedSitesRef.current.delete(site); // يسمح بإعادة المحاولة
     } finally {
+      /* نضمن مسح الـ timeout دائماً — حتى عند abort أو خطأ */
+      if (tid !== null) clearTimeout(tid);
       inFlightSitesRef.current.delete(site);
       siteCtrls.current.delete(site); // تنظيف الـ controller بعد انتهاء الطلب
     }
