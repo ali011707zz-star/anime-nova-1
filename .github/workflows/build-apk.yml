@@ -12,6 +12,7 @@ on:
 
 env:
   EXPO_PUBLIC_DOMAIN: ${{ github.event.inputs.backend_domain || 'https://animenovaa.duckdns.org' }}
+  NODE_ENV: production
 
 jobs:
   build:
