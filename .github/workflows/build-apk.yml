@@ -102,25 +102,60 @@ jobs:
           # store entries and reports them "resolved" without re-extracting,
           # so it can repeat forever with zero progress. --force makes pnpm
           # re-extract/re-link every package instead of trusting the cache.
+          # Symlink-repair helper: pnpm sometimes fully extracts a package
+          # into its content-addressable store (node_modules/.pnpm/<pkg>@...)
+          # but never creates the top-level symlink in the consuming
+          # workspace's node_modules. This is deterministic (not a race) —
+          # confirmed 2026-08-05: 3 identical `pnpm install --force` runs
+          # reproduced the exact same missing list every time, while the
+          # store itself already had complete, valid package contents.
+          # Repair it directly instead of hoping a reinstall fixes it.
+          repair_missing_links() {
+            node -e '
+              const fs = require("fs");
+              const path = require("path");
+              const appJsonPath = "artifacts/nova-mobile/app.json";
+              const { expo } = JSON.parse(fs.readFileSync(appJsonPath, "utf8"));
+              const plugins = (expo.plugins || [])
+                .map((p) => (Array.isArray(p) ? p[0] : p))
+                .filter((p) => typeof p === "string" && !p.startsWith("."));
+              const nmDir = "artifacts/nova-mobile/node_modules";
+              const storeDir = "node_modules/.pnpm";
+              for (const pkg of plugins) {
+                const linkPath = path.join(nmDir, pkg);
+                if (fs.existsSync(path.join(linkPath, "package.json"))) continue;
+                const prefix = pkg + "@";
+                const candidates = fs.readdirSync(storeDir).filter((d) => d.startsWith(prefix));
+                if (candidates.length === 0) {
+                  console.log(`no store entry found for ${pkg}`);
+                  continue;
+                }
+                const target = path.resolve(storeDir, candidates[0], "node_modules", pkg);
+                if (!fs.existsSync(path.join(target, "package.json"))) {
+                  console.log(`store entry for ${pkg} is itself incomplete: ${target}`);
+                  continue;
+                }
+                fs.rmSync(linkPath, { recursive: true, force: true });
+                fs.mkdirSync(path.dirname(linkPath), { recursive: true });
+                fs.symlinkSync(target, linkPath, "dir");
+                console.log(`relinked ${pkg} -> ${target}`);
+              }
+            '
+          }
+
           attempt=1
           while ! check_install; do
             if [ "$attempt" -ge 3 ]; then
-              echo "❌ dependencies still incomplete after $attempt install attempts — diagnostics:"
-              echo "--- ls node_modules/expo-router ---"
-              ls -la artifacts/nova-mobile/node_modules/expo-router 2>&1 || true
-              echo "--- readlink ---"
-              readlink -f artifacts/nova-mobile/node_modules/expo-router 2>&1 || true
-              echo "--- find in pnpm store ---"
-              find node_modules/.pnpm -maxdepth 1 -iname 'expo-router@*' 2>&1 || true
-              echo "--- contents of that store dir (if any) ---"
-              STOREDIR=$(find node_modules/.pnpm -maxdepth 1 -iname 'expo-router@*' | head -1)
-              if [ -n "$STOREDIR" ]; then
-                find "$STOREDIR" -maxdepth 3 2>&1 || true
-              fi
+              echo "❌ dependencies still incomplete after $attempt install/repair attempts"
               exit 1
             fi
-            echo "⚠️ install incomplete — forcing full re-link (pnpm store extraction race), attempt $((attempt + 1))"
-            pnpm install --no-frozen-lockfile --force
+            if [ "$attempt" -eq 1 ]; then
+              echo "⚠️ install incomplete — retrying pnpm install, attempt $((attempt + 1))"
+              pnpm install --no-frozen-lockfile
+            else
+              echo "⚠️ install still incomplete after plain retry — repairing symlinks directly from the pnpm store, attempt $((attempt + 1))"
+              repair_missing_links
+            fi
             attempt=$((attempt + 1))
           done
           echo "✅ install verified (expo bin + all config-plugin packages present)"
