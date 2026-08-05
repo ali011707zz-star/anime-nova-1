@@ -105,7 +105,18 @@ jobs:
           attempt=1
           while ! check_install; do
             if [ "$attempt" -ge 3 ]; then
-              echo "❌ dependencies still incomplete after $attempt install attempts"
+              echo "❌ dependencies still incomplete after $attempt install attempts — diagnostics:"
+              echo "--- ls node_modules/expo-router ---"
+              ls -la artifacts/nova-mobile/node_modules/expo-router 2>&1 || true
+              echo "--- readlink ---"
+              readlink -f artifacts/nova-mobile/node_modules/expo-router 2>&1 || true
+              echo "--- find in pnpm store ---"
+              find node_modules/.pnpm -maxdepth 1 -iname 'expo-router@*' 2>&1 || true
+              echo "--- contents of that store dir (if any) ---"
+              STOREDIR=$(find node_modules/.pnpm -maxdepth 1 -iname 'expo-router@*' | head -1)
+              if [ -n "$STOREDIR" ]; then
+                find "$STOREDIR" -maxdepth 3 2>&1 || true
+              fi
               exit 1
             fi
             echo "⚠️ install incomplete — forcing full re-link (pnpm store extraction race), attempt $((attempt + 1))"
