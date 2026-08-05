@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Platform, View } from "react-native";
 import { requireNativeViewManager } from "expo-modules-core";
 
@@ -19,6 +19,7 @@ type NativePlaybackEvent = {
 export type NovaMedia3ViewProps = {
   sourceUrl?: string;
   sourceHeaders?: string;
+  initialPosition?: number;
   command?: string;
   onPlaybackState?: (event: NativePlaybackEvent) => void;
   onProgress?: (event: NativePlaybackEvent) => void;
@@ -59,6 +60,18 @@ export function useNovaMedia3Player(
   const listenersRef = useRef(
     new Map<NovaMedia3Event, Set<(event: any) => void>>(),
   );
+
+  // The first source can arrive asynchronously from the scraper/SSE stream.
+  // Keep the native view in sync when that happens without recreating the
+  // player object used by RiftPlayer's callbacks.
+  useEffect(() => {
+    setSourceUrl(initialUrl);
+    setSourceHeaders(JSON.stringify(initialHeaders ?? {}));
+    if (initialPosition > 5) {
+      initialPositionRef.current = initialPosition;
+      currentTimeRef.current = initialPosition;
+    }
+  }, [initialUrl, initialHeaders, initialPosition]);
 
   const emit = useCallback((event: NovaMedia3Event, payload: any) => {
     listenersRef.current.get(event)?.forEach((listener) => listener(payload));
@@ -158,6 +171,7 @@ export function useNovaMedia3Player(
     () => ({
       sourceUrl,
       sourceHeaders,
+      initialPosition: initialPositionRef.current,
       command,
       onPlaybackState,
       onProgress,

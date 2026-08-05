@@ -227,6 +227,17 @@ export function RiftPlayer({
     setSubtitles(subCues);
   }, [sourceIndex, subCues]);
 
+  useEffect(() => {
+    if (!playableSources.length) return;
+    const nextIndex = Math.min(sourceIndex, playableSources.length - 1);
+    if (nextIndex !== sourceIndex) setSourceIndex(nextIndex);
+    if (failed) {
+      setFailed(false);
+      setEnded(false);
+      setBuffering(true);
+    }
+  }, [failed, playableSources.length, sourceIndex]);
+
   const changeSource = useCallback(
     (index: number) => {
       const next = playableSources[index];
