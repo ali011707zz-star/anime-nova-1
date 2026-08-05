@@ -98,14 +98,18 @@ jobs:
 
           pnpm install --no-frozen-lockfile
 
+          # A plain retry re-trusts the same (possibly corrupted/incomplete)
+          # store entries and reports them "resolved" without re-extracting,
+          # so it can repeat forever with zero progress. --force makes pnpm
+          # re-extract/re-link every package instead of trusting the cache.
           attempt=1
           while ! check_install; do
             if [ "$attempt" -ge 3 ]; then
               echo "❌ dependencies still incomplete after $attempt install attempts"
               exit 1
             fi
-            echo "⚠️ install incomplete — repairing (pnpm store extraction race), attempt $((attempt + 1))"
-            pnpm install --no-frozen-lockfile
+            echo "⚠️ install incomplete — forcing full re-link (pnpm store extraction race), attempt $((attempt + 1))"
+            pnpm install --no-frozen-lockfile --force
             attempt=$((attempt + 1))
           done
           echo "✅ install verified (expo bin + all config-plugin packages present)"
