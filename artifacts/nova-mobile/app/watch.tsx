@@ -5,7 +5,7 @@ import {
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
-import { useLocalSearchParams, useRouter } from "expo-router";
+import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { RiftPlayer, PlayerSource } from "@/components/RiftPlayer";
 import { HiddenResolverWebView, ResolvedStream } from "@/components/HiddenResolverWebView";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -392,6 +392,31 @@ export default function WatchScreen() {
     isMountedRef.current = true;
     return () => { isMountedRef.current = false; };
   }, []);
+
+  /* ── إيقاف كامل عند مغادرة صفحة المشاهدة ──
+     Expo Router قد يُبقي صفحات الـ Stack السابقة mounted عند فتح حلقة/صفحة
+     جديدة. إذا بقي RiftPlayer القديم حياً فسيستمر ExoPlayer والطلبات والمؤقتات
+     بالعمل بجانب المشغل الجديد، وهذا قد ينتهي بكراش native/OOM. */
+  useFocusEffect(useCallback(() => {
+    isMountedRef.current = true;
+
+    return () => {
+      isMountedRef.current = false;
+      abortRef.current?.abort();
+      abortRef.current = null;
+      siteCtrls.current.forEach(ctrl => ctrl.abort());
+      siteCtrls.current.clear();
+      fetchEpochRef.current += 1;
+      inFlightSitesRef.current.clear();
+      fetchedSitesRef.current.clear();
+      setScreen("picker");
+      setPlayingSrc(null);
+      setSources([]);
+      setFrozenSources([]);
+      setSlotStatus({});
+      seenKeys.current.clear();
+    };
+  }, []));
 
   /* ── ترجمة عنوان الحلقة من الإنجليزية للعربية ── */
   useEffect(() => {

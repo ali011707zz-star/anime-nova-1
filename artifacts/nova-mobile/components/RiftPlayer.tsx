@@ -19,6 +19,11 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { getBaseUrl } from "@/utils/api";
+import {
+  clearPlayerSession,
+  logPlayerError,
+  markPlayerSession,
+} from "@/utils/crashLogger";
 
 const { width: W, height: H } = Dimensions.get("window");
 
@@ -580,6 +585,25 @@ export function RiftPlayer({
     };
   }, []);
 
+  /* ─── Native-crash breadcrumb ───
+     ErrorBoundary/JS global handlers cannot observe an ExoPlayer crash.
+     Keep the current player context until a normal unmount; the next launch
+     turns a leftover marker into a server-side fatal report. */
+  useEffect(() => {
+    markPlayerSession({
+      title,
+      episode,
+      source: currentSrc?.label,
+      url: currentSrc?.url,
+    }).catch(() => {});
+  }, [title, episode, currentSrc?.label, currentSrc?.url]);
+
+  useEffect(() => {
+    return () => {
+      clearPlayerSession().catch(() => {});
+    };
+  }, []);
+
   /* ─── تهيئة السطوع والصوت من قيم النظام الحقيقية عند فتح المشغّل ─── */
   const originalBrightnessRef = useRef<number | null>(null);
   useEffect(() => {
@@ -769,6 +793,11 @@ export function RiftPlayer({
           loadTimeoutRef.current = null;
           if (!aliveRef.current) return;
           console.warn(`[RiftPlayer] ⏱ timeout (12s) — ${playableSources[srcIdx]?.label || "?"}: ${playableSources[srcIdx]?.url?.slice(0, 80)}`);
+            logPlayerError({
+              message: "Player load timeout after 12 seconds",
+              site: playableSources[srcIdx]?.label,
+              url: playableSources[srcIdx]?.url,
+            });
           setError(true);
           setBuffering(false);
         }, 12000);
@@ -798,6 +827,12 @@ export function RiftPlayer({
           setBuffering(false);
           /* تفاصيل الخطأ — ضرورية لتشخيص مشاكل ExoPlayer/AVPlayer مع المصادر */
           console.error(`[RiftPlayer] ❌ خطأ في التشغيل:`, JSON.stringify(e));
+          const nativeError = e?.error;
+          logPlayerError({
+            message: nativeError?.message ?? e?.message ?? (typeof nativeError === "string" ? nativeError : "Native player error"),
+            site: playableSources[srcIdx]?.label,
+            url: playableSources[srcIdx]?.url,
+          });
         }
       }
     });
@@ -946,6 +981,11 @@ export function RiftPlayer({
             stallRef.current = { lastPos: pos, lastAt: Date.now() };
           } else if (stallRef.current.lastAt > 0 && Date.now() - stallRef.current.lastAt > STALL_TIMEOUT_MS) {
             console.warn(`[RiftPlayer] 🔴 stall detected (${STALL_TIMEOUT_MS / 1000}s no progress) — switching source`);
+            logPlayerError({
+              message: `Player stalled for ${STALL_TIMEOUT_MS / 1000} seconds`,
+              site: currentSrc?.label,
+              url: currentSrc?.url,
+            });
             stallRef.current = { lastPos: -1, lastAt: 0 };
             setError(true);
             setBuffering(false);
@@ -1461,6 +1501,11 @@ export function RiftPlayer({
     const srcUrl = newSrc?.url;
     if (!isValidPlayerSourceUrl(srcUrl)) {
       console.warn(`[RiftPlayer] ⛔ URL غير صالح للمصدر ${safeIdx + 1}: "${srcUrl?.slice(0, 60) ?? "فارغ"}"`);
+      logPlayerError({
+        message: "Invalid player source URL",
+        site: newSrc.label,
+        url: srcUrl,
+      });
       setError(true);
       setBuffering(false);
       return;
@@ -1474,6 +1519,11 @@ export function RiftPlayer({
       /* play() is triggered in statusChange → readyToPlay once the stream is buffered */
     } catch (e) {
       console.warn("[RiftPlayer] player.replace() رمى استثناء:", e);
+      logPlayerError({
+        message: `player.replace failed: ${e instanceof Error ? e.message : String(e)}`,
+        site: newSrc.label,
+        url: srcUrl,
+      });
       setError(true);
       setBuffering(false);
     }
