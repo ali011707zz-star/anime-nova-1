@@ -57,21 +57,58 @@ jobs:
           restore-keys: pnpm-v2-${{ runner.os }}-
 
       - name: 📥 Install dependencies
+        working-directory: artifacts/nova-mobile
         run: |
-          pnpm install --no-frozen-lockfile
+          cd ../..
+
           # pnpm's content-addressable store extraction occasionally races
           # on a cold, many-workspace-package install and leaves some bin
-          # symlinks missing (ENOENT) even though the package was "added"
-          # (seen with tsx/jiti/prettier/expo). A second pass repairs any
-          # missing links without re-downloading anything already extracted.
-          if [ ! -e artifacts/nova-mobile/node_modules/.bin/expo ]; then
-            echo "⚠️ expo bin missing after install — repairing (pnpm store extraction race)"
+          # symlinks or package folders missing (ENOENT) even though the
+          # package was reported as "added" (seen with tsx/jiti/prettier/expo,
+          # and 2026-08-05 with expo-web-browser — which broke `expo prebuild`
+          # with "Failed to resolve plugin for module expo-web-browser" even
+          # though the bin check below passed). Verify every Expo config
+          # plugin package (not just the expo bin) actually landed in
+          # node_modules, and retry the install (without re-downloading
+          # anything already extracted) until they all do.
+          check_install() {
+            if [ ! -e artifacts/nova-mobile/node_modules/.bin/expo ]; then
+              echo "missing: node_modules/.bin/expo"
+              return 1
+            fi
+            missing=$(node -e '
+              const fs = require("fs");
+              const path = require("path");
+              const appJsonPath = "artifacts/nova-mobile/app.json";
+              const { expo } = JSON.parse(fs.readFileSync(appJsonPath, "utf8"));
+              const plugins = (expo.plugins || [])
+                .map((p) => (Array.isArray(p) ? p[0] : p))
+                .filter((p) => typeof p === "string" && !p.startsWith("."));
+              const missing = plugins.filter(
+                (p) => !fs.existsSync(path.join("artifacts/nova-mobile/node_modules", p, "package.json"))
+              );
+              console.log(missing.join(" "));
+            ')
+            if [ -n "$missing" ]; then
+              echo "missing plugin package(s): $missing"
+              return 1
+            fi
+            return 0
+          }
+
+          pnpm install --no-frozen-lockfile
+
+          attempt=1
+          while ! check_install; do
+            if [ "$attempt" -ge 3 ]; then
+              echo "❌ dependencies still incomplete after $attempt install attempts"
+              exit 1
+            fi
+            echo "⚠️ install incomplete — repairing (pnpm store extraction race), attempt $((attempt + 1))"
             pnpm install --no-frozen-lockfile
-          fi
-          if [ ! -e artifacts/nova-mobile/node_modules/.bin/expo ]; then
-            echo "❌ expo bin still missing after repair attempt"
-            exit 1
-          fi
+            attempt=$((attempt + 1))
+          done
+          echo "✅ install verified (expo bin + all config-plugin packages present)"
 
       - name: 🩹 Fix react-native-video Android compatibility
         working-directory: artifacts/nova-mobile
