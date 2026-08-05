@@ -145,15 +145,6 @@ function isDirectPlayable(s: Src): boolean {
   if (url.includes("mp4upload")) return false;
   return true;
 }
-/** هل الرابط HLS manifest؟ — لا يمكن تنزيله كملف واحد قابل للتشغيل offline */
-function isHlsUrl(url: string): boolean {
-  return /\.(m3u8)(\?|$)|\/hls\/|\/playlist\//i.test(url);
-}
-/** مثل isDirectPlayable لكن يستثني HLS — للتنزيل فقط */
-function isDownloadableSource(s: Src): boolean {
-  if (!isDirectPlayable(s)) return false;
-  return !isHlsUrl(getPlayUrl(s));
-}
 function isEmbedSrc(s: Src): boolean {
   if (!s.isEmbed) return false;
   const url = (s.directUrl || s.url || "").toLowerCase();
@@ -457,7 +448,6 @@ export default function WatchScreen() {
 
   /* ── Navigate episode ── */
   const goEp = useCallback((n: number, _auto = false) => {
-    if (!isMountedRef.current) return;
     saveProgress();
     abortRef.current?.abort();
     /* إلغاء جميع طلبات المواقع الجارية قبل الانتقال للحلقة التالية */
@@ -510,7 +500,7 @@ export default function WatchScreen() {
 
   /* ── نتيجة استخراج WebView المخفي ── */
   const handleHiddenResolved = useCallback((stream: ResolvedStream) => {
-    if (!isMountedRef.current || !playingSrc) return;
+    if (!playingSrc) return;
     const resolved: Src = {
       ...playingSrc,
       directUrl: stream.url,
@@ -524,7 +514,6 @@ export default function WatchScreen() {
   }, [playingSrc]);
 
   const handleHiddenFailed = useCallback(() => {
-    if (!isMountedRef.current) return;
     setResolveFailed(true);
     setScreen("embed");
   }, []);
@@ -643,8 +632,8 @@ export default function WatchScreen() {
     if (dlState === "downloading" || dlState === "done") return;
 
     const siteSrcs = sources.filter(s => s.site === site);
-    const best = siteSrcs.find(isDownloadableSource) ?? null;
-    if (!best) return; // لا يوجد مصدر قابل للتنزيل (HLS أو embed فقط)
+    const best = siteSrcs.find(isDirectPlayable) ?? siteSrcs[0];
+    if (!best || !isDirectPlayable(best)) return;
 
     const rawUrl   = getPlayUrl(best);
     const headers  = best.headers || extractProxyHeaders(rawUrl);
@@ -783,7 +772,6 @@ export default function WatchScreen() {
   }, [saveProgress]);
 
   const onRiftError = useCallback(() => {
-    if (!isMountedRef.current) return;
     console.warn("[Anime Watch] جميع المصادر فشلت — العودة للـ picker");
     saveProgress();
     if (srcCacheKey) AsyncStorage.removeItem(srcCacheKey).catch(() => {});
@@ -797,12 +785,8 @@ export default function WatchScreen() {
 
   const onRiftProgress = useCallback((pos: number, dur: number) => {
     lastTimeRef.current = pos;
+    if (pos > 10) AsyncStorage.setItem(progressKey, String(Math.floor(pos))).catch(() => {});
     const now = Date.now();
-    /* كتابة AsyncStorage كل 10ث فقط — تقليل I/O الناتج عن polling 500ms */
-    if (pos > 10 && now - lastProgressSaveRef.current > 10_000) {
-      lastProgressSaveRef.current = now;
-      AsyncStorage.setItem(progressKey, String(Math.floor(pos))).catch(() => {});
-    }
     if (dur > 0 && anime && now - lastHistoryWriteRef.current > 30_000) {
       lastHistoryWriteRef.current = now;
       addToHistory({
@@ -843,8 +827,7 @@ export default function WatchScreen() {
     const base = getBaseUrl();
     const srcs = directSrcs;
     /* مطابق لـ isArabic في web SCRAPER_DEFS — مصادر عربية لا تحتاج SmartSub */
-    /* kawaii + anifox: تحتوي على ترجمة عربية مدمجة في الستريم — لا تحتاج SmartSub خارجي */
-  const ARABIC_SITES = new Set(["shahiid","animelek","animedar","okanime","arabseed","animeify","animeday","mycima","topcinemaa","anime4up2","animewitcher","ristoanime","faselhd_db","animetime","sanime","kawaii","anifox"]);
+    const ARABIC_SITES = new Set(["shahiid","animelek","animedar","okanime","arabseed","animeify","animeday","mycima","topcinemaa","anime4up2","animewitcher","ristoanime","faselhd_db","animetime","sanime"]);
     return srcs.map(s => {
       const rawUrl = getPlayUrl(s);
       /* headers: استخدم الـ headers المُرسَلة من الخادم أولاً (Referer/Origin المباشرة)،
@@ -857,14 +840,7 @@ export default function WatchScreen() {
         url,
         headers,
         label: `سيرفر · ${getSiteTag(s.site || "")}`,
-        /* جودة المصدر: نستخدم التحليل أولاً، ثم tier الموقع كـ fallback
-           (بعض المصادر لا تُرسل qualityRank/label صريح فتُصنَّف خطأً كـ SD) */
-        quality: (() => {
-          const detected = getSrcQuality(s);
-          if (detected !== "360p SD") return detected;
-          const siteQk = SITE_FIRST_QUALITY.get(s.site || "");
-          return siteQk === "1080p" ? "1080p FHD" : siteQk === "720p" ? "720p HD" : "360p SD";
-        })(),
+        quality: getSrcQuality(s),
         subtitleUrl: undefined, // مخفية في نوفا موبايل
         isArabic: ARABIC_SITES.has(s.site || ""),
         wantsSmartSub: !ARABIC_SITES.has(s.site || ""),
@@ -1121,8 +1097,8 @@ export default function WatchScreen() {
                         pressed  && { opacity: 0.72 },
                       ]}
                     >
-                      {/* Left in code = Right visually (RTL): اختيار/تشغيل + التنزيل بجانبه */}
-                      <View style={[d.webRowPlayIcon, { flexDirection: "row", alignItems: "center", gap: 6 }]}>
+                      {/* Left in code = Right visually (RTL): زر اختيار/تشغيل */}
+                      <View style={d.webRowPlayIcon}>
                         {isFetching ? (
                           <SpinRing size={16} />
                         ) : isReady ? (
@@ -1135,8 +1111,25 @@ export default function WatchScreen() {
                             <Text style={d.pickBtnText}>اختيار</Text>
                           </View>
                         )}
+                      </View>
 
-                        {/* زر التنزيل بجانب اختيار مباشرةً */}
+                      {/* Center: السيرفر XX */}
+                      <Text
+                        style={[
+                          d.webRowTag,
+                          { flex: 1, textAlign: "right" },
+                          isReady  && { color: "rgba(255,255,255,0.90)" },
+                          isFailed && { color: "rgba(255,255,255,0.35)" },
+                        ]}
+                        numberOfLines={1}
+                      >
+                        السيرفر {slot.tag}
+                      </Text>
+
+                      {/* Right: download + status dot */}
+                      <View style={d.webRowRight}>
+                        {/* زر التنزيل — يظهر مرّة واحدة فقط (أعلى جودة للموقع)
+                            وإلا تظهر SpinRing لكل صفوف الموقع عند ضغط التنزيل */}
                         {dlState === "idle" && SITE_FIRST_QUALITY.get(slot.site) === qk && (
                           <Pressable
                             onPress={() => handleFetchAndDownload(slot.site)}
@@ -1161,23 +1154,6 @@ export default function WatchScreen() {
                         {dlState === "error" && (
                           <Ionicons name="close-circle" size={16} color="rgba(239,68,68,0.70)" />
                         )}
-                      </View>
-
-                      {/* Center: السيرفر XX */}
-                      <Text
-                        style={[
-                          d.webRowTag,
-                          { flex: 1, textAlign: "right" },
-                          isReady  && { color: "rgba(255,255,255,0.90)" },
-                          isFailed && { color: "rgba(255,255,255,0.35)" },
-                        ]}
-                        numberOfLines={1}
-                      >
-                        السيرفر {slot.tag}
-                      </Text>
-
-                      {/* Right: نقطة الحالة فقط */}
-                      <View style={d.webRowRight}>
                         {!isFetching && (
                           <View style={[d.webRowDot, {
                             backgroundColor:
