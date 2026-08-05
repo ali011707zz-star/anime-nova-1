@@ -44,13 +44,8 @@ export default defineConfig(async ({ mode }) => {
         output: {
           manualChunks(id) {
             if (id.includes("node_modules")) {
-              if (id.includes("react-dom") || id.includes("react/"))   return "vendor-react";
-              if (id.includes("framer-motion"))                         return "vendor-motion";
-              if (id.includes("hls.js") || id.includes("@types/hls"))  return "vendor-hls";
-              if (id.includes("lucide-react"))                          return "vendor-icons";
-              if (id.includes("@radix-ui"))                             return "vendor-radix";
-              if (id.includes("wouter") || id.includes("@tanstack"))    return "vendor-router";
-              return "vendor-misc";
+              if (id.includes("hls.js") || id.includes("@types/hls")) return "vendor-hls";
+              return "vendor";
             }
           },
         },
