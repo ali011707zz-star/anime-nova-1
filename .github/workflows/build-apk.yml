@@ -54,32 +54,127 @@ jobs:
       - name: 📥 Install dependencies
         run: pnpm install --no-frozen-lockfile
 
+      - name: 🩹 Fix react-native-video Android compatibility
+        working-directory: artifacts/nova-mobile
+        run: |
+          set -eu
+
+          # react-native-video is still part of the Android dependency graph
+          # even though the app's primary native player is NovaMedia3. Its
+          # Gradle/Kotlin sources need these small compatibility fixes with
+          # RN 0.81 + AGP 8.
+          RNV="node_modules/react-native-video"
+          RNV_SRC="$RNV/android/src/main/java/com/brentvatne"
+          if [ ! -d "$RNV_SRC" ]; then
+            echo "❌ react-native-video Android sources were not found: $RNV_SRC"
+            find node_modules -path "*/react-native-video/android/src/main/java/com/brentvatne" -type d -print
+            exit 1
+          fi
+
+          chmod -R u+w "$RNV/android" 2>/dev/null || true
+
+          # Kotlin's newer React Native types make getMap(i) nullable.
+          # Apply the guard only when the older expression is present so this
+          # remains safe if a future react-native-video release already fixes it.
+          python3 - "$RNV_SRC" <<'PY'
+          import pathlib
+          import sys
+
+          root = pathlib.Path(sys.argv[1])
+          replacements = {
+              "common/api/CMCDProps.kt": (
+                  "val item = array.getMap(i)",
+                  "val item = array.getMap(i) ?: return@mapNotNull null",
+              ),
+              "common/api/SideLoadedTextTrackList.kt": (
+                  "val textTrack: ReadableMap = src.getMap(i)",
+                  "val textTrack: ReadableMap? = src.getMap(i)",
+              ),
+              "common/api/Source.kt": (
+                  "val current = propSrcHeadersArray.getMap(i)",
+                  "val current = propSrcHeadersArray.getMap(i) ?: continue",
+              ),
+          }
+
+          for relative, (old, new) in replacements.items():
+              path = root / relative
+              if not path.exists():
+                  print(f"SKIP {relative}: file not found")
+                  continue
+              content = path.read_text()
+              if old in content:
+                  path.write_text(content.replace(old, new, 1))
+                  print(f"OK {relative}")
+              else:
+                  print(f"SKIP {relative}: already compatible")
+          PY
+
       - name: 🏗️ Expo Prebuild
         working-directory: artifacts/nova-mobile
-        run: npx expo prebuild --platform android --clean --no-install
+        # Never let npx download a different Expo CLI during the build.
+        run: ./node_modules/.bin/expo prebuild --platform android --clean --no-install
 
-      # ── إصلاح Gradle: تثبيت 8.13 + تعطيل الأخطاء الإهمالية ──────────────
+      # ── إصلاح Gradle/Kotlin: تثبيت 8.13 + توافق react-native-video ────────
       # RN 0.81.5 يستخدم deprecated Gradle APIs تُعتبر أخطاءً في 8.8+.
       # 2026-07-10: AGP الحالي يتطلب Gradle 8.13 كحد أدنى (8.10.2 صار يفشل البناء بـ
       # "Minimum supported Gradle version is 8.13. Current version is 8.10.2.")
-      # الحل: تثبيت 8.13 + org.gradle.warning.mode=none (لا يزال يمنع أخطاء deprecation)
+      # react-native-video يقرأ rootProject.ext.kotlinVersion ويحتاج أيضاً
+      # target JVM صريحاً مع AGP 8.
       - name: 🔧 Fix Gradle compatibility
         working-directory: artifacts/nova-mobile/android
         run: |
-          # تثبيت Gradle wrapper على 8.13 (متوافق مع Expo SDK 54 + AGP الحالي)
           sed -i \
             's|distributionUrl=.*|distributionUrl=https\\://services.gradle.org/distributions/gradle-8.13-all.zip|' \
             gradle/wrapper/gradle-wrapper.properties
 
-          # تعطيل أخطاء الإهمال وتسريع البناء
-          cat >> gradle.properties << 'EOF'
-          org.gradle.warning.mode=none
-          android.suppressUnsupportedCompileSdk=35
-          android.defaults.buildfeatures.buildconfig=true
-          EOF
+          grep -q '^ext.kotlinVersion' build.gradle || {
+            printf '\n// react-native-video compatibility with RN 0.81 / AGP 8\next.kotlinVersion = "1.9.25"\n' >> build.gradle
+          }
+
+          RNV_BUILD="../node_modules/react-native-video/android/build.gradle"
+          if [ ! -f "$RNV_BUILD" ]; then
+            echo "❌ react-native-video build.gradle was not found: $RNV_BUILD"
+            exit 1
+          fi
+
+          python3 - "$RNV_BUILD" <<'PY'
+          import pathlib
+          import sys
+
+          path = pathlib.Path(sys.argv[1])
+          content = path.read_text()
+          marker = "// NOVA AGP 8 JVM compatibility"
+          if marker not in content:
+              needle = "android {\n"
+              patch = """android {
+              // NOVA AGP 8 JVM compatibility
+              compileOptions {
+                  sourceCompatibility JavaVersion.VERSION_17
+                  targetCompatibility JavaVersion.VERSION_17
+              }
+              kotlinOptions {
+                  jvmTarget = JavaVersion.VERSION_17.majorVersion
+              }
+          """
+              if needle not in content:
+                  raise SystemExit(f"Could not find android block in {path}")
+              path.write_text(content.replace(needle, patch, 1))
+              print(f"OK patched {path}")
+          else:
+              print(f"SKIP {path}: already patched")
+          PY
+
+          printf '%s\n' \
+            'org.gradle.warning.mode=none' \
+            'android.suppressUnsupportedCompileSdk=35' \
+            'android.defaults.buildfeatures.buildconfig=true' >> gradle.properties
 
           echo "=== gradle-wrapper.properties ==="
           cat gradle/wrapper/gradle-wrapper.properties
+          echo "=== root build.gradle (last 5 lines) ==="
+          tail -5 build.gradle
+          echo "=== react-native-video build.gradle (first 35 lines) ==="
+          sed -n '1,35p' "$RNV_BUILD"
           echo "=== gradle.properties (last 10 lines) ==="
           tail -10 gradle.properties
 
@@ -105,8 +200,10 @@ jobs:
             --stacktrace \
             2>&1 | tee build.log || {
               echo ""
-              echo "══════ آخر 80 سطر من سجل البناء ══════"
-              tail -80 build.log
+              echo "══════ Gradle failure summary ══════"
+              grep -nE -C 4 'What went wrong|Execution failed|Could not|error:|e: |FAILED|Caused by:' build.log | tail -240 || true
+              echo "══════ آخر 200 سطر من سجل البناء ══════"
+              tail -200 build.log
               exit 1
             }
 
