@@ -647,15 +647,17 @@ export default function AnimeDetail() {
       {descText && (
         <div className="mt-5 px-4">
           <SectionHeader title="القصة" />
-          <div className="bg-[#111116] border border-white/6 rounded-2xl p-4">
-            <p className={`text-[#B4B4B8] leading-loose text-[13px] font-['Cairo'] ${!showFull ? "line-clamp-4" : ""}`}>
+          <div className="rounded-2xl p-4" style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.07)" }}>
+            <p dir="auto"
+              className={`text-[13.5px] font-['Cairo'] ${!showFull ? "line-clamp-4" : ""}`}
+              style={{ color: "#C4C4CC", lineHeight: "1.95", letterSpacing: "0.01em" }}>
               {descText}
             </p>
             {descText.length > 200 && (
               <button onClick={() => setShowFull(p => !p)}
-                className="mt-3 flex items-center gap-1 text-primary text-xs font-black font-['Cairo']">
-                {showFull ? "عرض أقل" : "عرض المزيد"}
-                <ChevronDown className={`w-3.5 h-3.5 transition-transform ${showFull ? "rotate-180" : ""}`} />
+                className="mt-3 flex items-center gap-1.5 text-xs font-black font-['Cairo']"
+                style={{ color: "#a78bfa" }}>
+                {showFull ? "عرض أقل ↑" : "عرض المزيد ↓"}
               </button>
             )}
           </div>
@@ -1047,16 +1049,21 @@ function SectionHeader({ title }: { title: string }) {
 
 function MetaRow({ label, value, badge, english }: { label: string; value: string; badge?: boolean; english?: boolean }) {
   return (
-    <div className="flex items-center justify-between px-4 py-3 gap-4">
+    <div className="flex items-center justify-between px-4 py-3 gap-3 min-w-0">
       <span className="text-[11px] text-white/35 font-['Cairo'] shrink-0">{label}</span>
       {badge ? (
-        <span className="text-[11px] font-black font-['Cairo'] px-3 py-1 rounded-xl"
+        <span className="text-[11px] font-black font-['Cairo'] px-3 py-1 rounded-xl shrink-0"
           style={{ background: "rgba(139,92,246,0.15)", border: "1px solid rgba(139,92,246,0.3)", color: "#c4b5fd" }}>
           {value}
         </span>
+      ) : english ? (
+        /* العنوان الإنجليزي — LTR داخل حاوية RTL */
+        <span className="text-[11px] font-bold text-white/70 text-left min-w-0 truncate flex-1 tracking-wide"
+          dir="ltr" style={{ fontFamily: "system-ui, sans-serif" }}>
+          {value}
+        </span>
       ) : (
-        <span className={`text-[11px] font-black font-['Cairo'] text-right ${english ? "" : "text-white/80"}`}
-          dir={english ? "ltr" : "rtl"}>
+        <span className="text-[11px] font-black font-['Cairo'] text-right text-white/80 min-w-0 flex-1">
           {value}
         </span>
       )}

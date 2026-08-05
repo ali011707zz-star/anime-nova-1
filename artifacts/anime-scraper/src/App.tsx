@@ -69,6 +69,7 @@ const NotFound           = lazy(() => import("@/pages/not-found"));
 // const AnimationEpisodes  = lazy(() => import("@/pages/AnimationEpisodes"));
 // const AnimationWatch     = lazy(() => import("@/pages/AnimationWatch"));
 const DubbedLibrary      = lazy(() => import("@/pages/DubbedLibrary"));
+const DubbedCombinedLibrary = lazy(() => import("@/pages/DubbedCombinedLibrary"));
 const DubbedDetail       = lazy(() => import("@/pages/DubbedDetail"));
 const DubbedWatch        = lazy(() => import("@/pages/DubbedWatch"));
 const AwDubbedLibrary    = lazy(() => import("@/pages/AwDubbedLibrary"));
@@ -175,10 +176,10 @@ function Router({ onMenuClick }: { onMenuClick: () => void }) {
                 <Route path="/auth/callback"           component={AuthCallback} />
                 <Route path="/auth"                    component={AuthPage} />
                 {/* Animation section hidden — disabled 2026-07-30 */}
-                <Route path="/dubbed"                          component={DubbedLibrary} />
+                <Route path="/dubbed"                          component={DubbedCombinedLibrary} />
                 <Route path="/dubbed/watch"                    component={DubbedWatch} />
                 <Route path="/dubbed/:key"                     component={DubbedDetail} />
-                <Route path="/aw-dubbed"                       component={AwDubbedLibrary} />
+                <Route path="/aw-dubbed"                       component={DubbedCombinedLibrary} />
                 <Route path="/aw-dubbed/watch"                 component={AwDubbedWatch} />
                 <Route path="/aw-dubbed/:key"                  component={AwDubbedDetail} />
                 <Route path="/comments"                component={CommentsPage} />

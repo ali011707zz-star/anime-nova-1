@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import {
   View, Text, Pressable, Image, ScrollView,
   ActivityIndicator, StyleSheet, Platform, Modal,
@@ -194,6 +194,13 @@ export default function AnimeDetailScreen() {
   const [loadError, setLoadError] = useState(false);
   const [retryTick, setRetryTick] = useState(0);
 
+  /* ── تتبع الـ mount لمنع setState بعد unmount ── */
+  const isMountedRef = useRef(true);
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => { isMountedRef.current = false; };
+  }, []);
+
   const isFav = anime ? isFavorite(anime.id) : false;
 
   useEffect(() => {
@@ -263,12 +270,12 @@ export default function AnimeDetailScreen() {
             }).catch((e) => { if (e?.name !== "AbortError" && !controller.signal.aborted) setDescAr(stripped); });
         });
       }
-    }).catch(() => { setLoadError(true); })
-      .finally(() => { clearTimeout(timeoutId); setLoading(false); });
+    }).catch(() => { if (isMountedRef.current) setLoadError(true); })
+      .finally(() => { clearTimeout(timeoutId); if (isMountedRef.current) setLoading(false); });
 
-    AsyncStorage.getItem(`my-rating-${id}`).then(v => { if (v) setMyRating(parseInt(v)); });
-    AsyncStorage.getItem(`saved-${id}`).then(v => { if (v === "1") setSaved(true); });
-    AsyncStorage.getItem(`adult-warn-${id}`).then(v => { if (v === "1") setWarnDismissed(true); });
+    AsyncStorage.getItem(`my-rating-${id}`).then(v => { if (isMountedRef.current && v) setMyRating(parseInt(v)); });
+    AsyncStorage.getItem(`saved-${id}`).then(v => { if (isMountedRef.current && v === "1") setSaved(true); });
+    AsyncStorage.getItem(`adult-warn-${id}`).then(v => { if (isMountedRef.current && v === "1") setWarnDismissed(true); });
 
     return () => { clearTimeout(timeoutId); controller.abort(); };
   }, [id, retryTick]);

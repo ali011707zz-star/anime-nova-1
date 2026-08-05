@@ -95,28 +95,28 @@ export function DrawerMenu({ visible, onClose }: Props) {
       Animated.parallel([
         Animated.timing(slideX, {
           toValue: 0,
-          duration: 300,
+          duration: 180,
           easing: Easing.bezier(0.22, 1, 0.36, 1),
           useNativeDriver: true,
         }),
-        Animated.timing(opacity, { toValue: 1, duration: 200, useNativeDriver: true }),
+        Animated.timing(opacity, { toValue: 1, duration: 140, useNativeDriver: true }),
       ]).start();
     } else {
       Animated.parallel([
         Animated.timing(slideX, {
           toValue: DRAWER_W,
-          duration: 240,
+          duration: 150,
           easing: Easing.bezier(0.4, 0, 1, 1),
           useNativeDriver: true,
         }),
-        Animated.timing(opacity, { toValue: 0, duration: 200, useNativeDriver: true }),
+        Animated.timing(opacity, { toValue: 0, duration: 130, useNativeDriver: true }),
       ]).start();
     }
   }, [visible]);
 
   function nav(route: string) {
     onClose();
-    setTimeout(() => router.push(route as any), 220);
+    setTimeout(() => router.push(route as any), 150);
   }
 
   if (!visible) return null;

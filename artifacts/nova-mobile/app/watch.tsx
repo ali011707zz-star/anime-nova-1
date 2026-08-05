@@ -457,6 +457,7 @@ export default function WatchScreen() {
 
   /* ── Navigate episode ── */
   const goEp = useCallback((n: number, _auto = false) => {
+    if (!isMountedRef.current) return;
     saveProgress();
     abortRef.current?.abort();
     /* إلغاء جميع طلبات المواقع الجارية قبل الانتقال للحلقة التالية */
@@ -509,7 +510,7 @@ export default function WatchScreen() {
 
   /* ── نتيجة استخراج WebView المخفي ── */
   const handleHiddenResolved = useCallback((stream: ResolvedStream) => {
-    if (!playingSrc) return;
+    if (!isMountedRef.current || !playingSrc) return;
     const resolved: Src = {
       ...playingSrc,
       directUrl: stream.url,
@@ -523,6 +524,7 @@ export default function WatchScreen() {
   }, [playingSrc]);
 
   const handleHiddenFailed = useCallback(() => {
+    if (!isMountedRef.current) return;
     setResolveFailed(true);
     setScreen("embed");
   }, []);
@@ -781,6 +783,7 @@ export default function WatchScreen() {
   }, [saveProgress]);
 
   const onRiftError = useCallback(() => {
+    if (!isMountedRef.current) return;
     console.warn("[Anime Watch] جميع المصادر فشلت — العودة للـ picker");
     saveProgress();
     if (srcCacheKey) AsyncStorage.removeItem(srcCacheKey).catch(() => {});
@@ -794,8 +797,12 @@ export default function WatchScreen() {
 
   const onRiftProgress = useCallback((pos: number, dur: number) => {
     lastTimeRef.current = pos;
-    if (pos > 10) AsyncStorage.setItem(progressKey, String(Math.floor(pos))).catch(() => {});
     const now = Date.now();
+    /* كتابة AsyncStorage كل 10ث فقط — تقليل I/O الناتج عن polling 500ms */
+    if (pos > 10 && now - lastProgressSaveRef.current > 10_000) {
+      lastProgressSaveRef.current = now;
+      AsyncStorage.setItem(progressKey, String(Math.floor(pos))).catch(() => {});
+    }
     if (dur > 0 && anime && now - lastHistoryWriteRef.current > 30_000) {
       lastHistoryWriteRef.current = now;
       addToHistory({

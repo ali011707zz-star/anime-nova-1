@@ -534,7 +534,7 @@ async function fetchDalCatalog(
   const batch = 1000;
   while (true) {
     try {
-      const url = `${sbUrl}/rest/v1/dubbed_anim_links?select=series_id,series_name,series_name_ar&order=series_id.asc&limit=${batch}&offset=${offset}`;
+      const url = `${sbUrl}/rest/v1/dubbed_anim_links?select=series_id,series_name,series_name_ar&ep_number=not.is.null&order=series_id.asc&limit=${batch}&offset=${offset}`;
       const r = await fetch(url, {
         headers: { apikey: sbKey, Authorization: `Bearer ${sbKey}` },
         signal: AbortSignal.timeout(15000),
