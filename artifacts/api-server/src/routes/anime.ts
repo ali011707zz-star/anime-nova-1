@@ -14180,8 +14180,16 @@ async function serveMediaVPS(
   if (ref) { hdrs.Referer = ref; try { hdrs.Origin = new URL(ref).origin; } catch {} }
   const range = req.headers.range;
   if (range) hdrs.Range = range;
+  const upstreamAbort = new AbortController();
+  /* The timeout is only for establishing the upstream response. Applying
+     AbortSignal.timeout() directly to fetch also aborts a healthy MP4 body
+     after 20s, which looks like a playback freeze until the next seek. */
+  const connectTimeout = setTimeout(() => upstreamAbort.abort(), 20000);
+  const abortUpstream = () => upstreamAbort.abort();
+  res.once("close", abortUpstream);
   try {
-    const r = await fetch(url, { headers: hdrs, signal: AbortSignal.timeout(20000) });
+    const r = await fetch(url, { headers: hdrs, signal: upstreamAbort.signal });
+    clearTimeout(connectTimeout);
     res.setHeader("Access-Control-Allow-Origin", "*");
     res.setHeader("Access-Control-Expose-Headers", "Content-Length,Content-Range,Content-Type");
     let ct = r.headers.get("content-type") || "video/MP2T";
@@ -14192,6 +14200,8 @@ async function serveMediaVPS(
       ct = "video/mp4";
     }
     res.setHeader("Content-Type", ct);
+    const acceptRanges = r.headers.get("accept-ranges");
+    if (acceptRanges) res.setHeader("Accept-Ranges", acceptRanges);
     const cl = r.headers.get("content-length");
     if (cl) res.setHeader("Content-Length", cl);
     if (r.status === 206) {
@@ -14210,6 +14220,9 @@ async function serveMediaVPS(
     }
   } catch {
     if (!res.headersSent) res.status(502).send("media fetch failed");
+  } finally {
+    clearTimeout(connectTimeout);
+    res.removeListener("close", abortUpstream);
   }
 }
 
@@ -14334,8 +14347,25 @@ router.get("/anime/seg-proxy", async (req, res) => {
       return false;
     }
 
-    // Content-Type طبيعي — بثّ مباشرة
-    await serveMediaVPS(url, ref, req, res);
+    // Content-Type طبيعي — بثّ نفس response الذي جُلب للتو.
+    // إعادة استدعاء serveMediaVPS هنا كانت تجلب كل segment مرتين، ما يسبب
+    // تأخيراً/توقفاً متقطعاً عندما يقترب المشغل من نهاية الـ buffer.
+    res.setHeader("Content-Type", r.headers.get("content-type") || "video/MP2T");
+    const cl = r.headers.get("content-length");
+    if (cl) res.setHeader("Content-Length", cl);
+    if (r.status === 206) {
+      const cr = r.headers.get("content-range");
+      if (cr) res.setHeader("Content-Range", cr);
+      res.status(206);
+    } else {
+      res.status(200);
+    }
+    if (r.body) {
+      const { Readable } = await import("stream");
+      (Readable.fromWeb as Function)(r.body).pipe(res);
+    } else {
+      res.end();
+    }
     return true;
   }
 

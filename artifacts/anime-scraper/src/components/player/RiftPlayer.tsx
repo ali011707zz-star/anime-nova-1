@@ -235,6 +235,11 @@ export default function RiftPlayer({
      HLS.js يتولى التعافي الداخلي من الأخطاء غير الحرجة. */
   const hasPlayedSuccessRef = useRef(false);
   const successTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /* HLS can enter a silent buffer hole where the browser only resumes after
+     a manual seek. Keep recovery local to the current source first. */
+  const stallRecoveryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastStallRecoveryRef = useRef(0);
+  const nativeRecoveryInFlightRef = useRef(false);
   const gestRef      = useRef<GS>({ active: "none", startX: 0, startY: 0, lastY: 0, lastX: 0, startValue: 0 });
   const volumeRef     = useRef(1);
   const brightnessRef = useRef(0.85);
@@ -447,6 +452,69 @@ export default function RiftPlayer({
     failTimer.current = setTimeout(() => onFailRef.current?.(), 800);
   }, []);
 
+  const recoverFromStall = useCallback(() => {
+    const v = videoRef.current;
+    if (!v || v.paused || v.ended) return;
+
+    const now = Date.now();
+    if (now - lastStallRecoveryRef.current < 2500) return;
+    lastStallRecoveryRef.current = now;
+
+    const position = v.currentTime;
+    const hls = hlsRef.current;
+    if (hls) {
+      try {
+        /* Re-arm fragment loading at the current position. This is the same
+           operation a manual seek implicitly triggers, without skipping content. */
+        hls.startLoad(Math.max(0, position - 0.25));
+      } catch {}
+      try {
+        /* A tiny nudge lets hls.js/browser leave a one-fragment buffer hole.
+           Never jump the user forward by a visible amount. */
+        const max = Number.isFinite(v.duration) && v.duration > 0 ? v.duration - 0.05 : position + 0.05;
+        if (!v.seeking && max > position) v.currentTime = Math.min(position + 0.05, max);
+      } catch {}
+      v.play().catch(() => {});
+      return;
+    }
+
+    /* Native MP4 recovery: reload the same URL at the current timestamp.
+       This forces a fresh Range request, which is what manual seeking was
+       doing, but without skipping the user's position by ten seconds. */
+    if (nativeRecoveryInFlightRef.current) return;
+    const source = v.currentSrc || v.src;
+    if (!source) return;
+    nativeRecoveryInFlightRef.current = true;
+    const resumeAt = position;
+    let finished = false;
+    const finish = () => {
+      if (finished) return;
+      finished = true;
+      v.removeEventListener("loadedmetadata", restore);
+      v.removeEventListener("canplay", finish);
+      nativeRecoveryInFlightRef.current = false;
+      try {
+        if (Number.isFinite(resumeAt) && resumeAt > 0) v.currentTime = resumeAt;
+        v.play().catch(() => {});
+      } catch {}
+    };
+    const restore = () => {
+      try {
+        if (Number.isFinite(resumeAt) && resumeAt > 0) v.currentTime = resumeAt;
+      } catch {}
+    };
+    v.addEventListener("loadedmetadata", restore, { once: true });
+    v.addEventListener("canplay", finish, { once: true });
+    try {
+      v.pause();
+      v.src = source;
+      v.load();
+    } catch {
+      finish();
+    }
+    setTimeout(finish, 8000);
+  }, []);
+
   /* ── load source ── */
   const loadSource = useCallback(async () => {
     const v = videoRef.current; if (!v) return;
@@ -647,8 +715,9 @@ export default function RiftPlayer({
       hls.on(Hls.Events.ERROR, (_, d) => {
         if (hlsRef.current !== hls) return;
         if (!d.fatal) {
-          // Non-fatal errors: let HLS.js handle via internal nudge mechanism
-          // Do NOT manually seek on BUFFER_STALLED — it conflicts with nudge
+           // BUFFER_STALLED_ERROR can leave the media element waiting forever
+           // on a CDN gap. Recover locally; do not switch source yet.
+           if (String(d.details || "").includes("BUFFER_STALLED")) recoverFromStall();
           return;
         }
         if (d.type === Hls.ErrorTypes.MEDIA_ERROR) {
@@ -673,7 +742,7 @@ export default function RiftPlayer({
     } else {
       setError("المتصفح لا يدعم HLS"); setLoading(false);
     }
-  }, [src, onRealQuality, fireOnFail, showControls]);
+  }, [src, onRealQuality, fireOnFail, recoverFromStall, showControls]);
 
   useEffect(() => {
     loadSource();
@@ -686,6 +755,7 @@ export default function RiftPlayer({
       if (feedbackHideRef.current) clearTimeout(feedbackHideRef.current);
       if (failTimer.current) clearTimeout(failTimer.current);
       if (successTimerRef.current) clearTimeout(successTimerRef.current);
+      if (stallRecoveryTimerRef.current) clearTimeout(stallRecoveryTimerRef.current);
     };
   }, [loadSource]);
 
@@ -744,7 +814,16 @@ export default function RiftPlayer({
     const onDur   = () => { setDuration(v.duration); if (v.duration > 0) onDuration?.(v.duration); };
     const onWait  = () => {
       const v2 = videoRef.current;
-      if (v2 && v2.currentTime > 1) setBuffering(true);
+      if (v2 && v2.currentTime > 1) {
+        setBuffering(true);
+        if (stallRecoveryTimerRef.current) clearTimeout(stallRecoveryTimerRef.current);
+        /* Give the active fragment request a moment to finish, then apply
+           the same small recovery used by the watchdog. */
+        stallRecoveryTimerRef.current = setTimeout(() => {
+          stallRecoveryTimerRef.current = null;
+          recoverFromStall();
+        }, 1200);
+      }
       else setLoading(true);
     };
     const onPlay2 = () => { setLoading(false); setBuffering(false); };
@@ -759,7 +838,7 @@ export default function RiftPlayer({
       v.removeEventListener("waiting", onWait); v.removeEventListener("playing", onPlay2);
       v.removeEventListener("ended", onEnded);
     };
-  }, [onTimeUpdate]);
+  }, [onTimeUpdate, recoverFromStall]);
 
   /* ── Black-screen detector: audio works but no picture → try next server ── */
   useEffect(() => {
@@ -776,20 +855,25 @@ export default function RiftPlayer({
     return () => clearTimeout(t);
   }, [playing]);
 
-  /* ── Stall watchdog: if video is playing but currentTime doesn't advance for 15s → force-switch ──
-     يعالج حالة التوقف الصامت (CDN يُرجع بيانات فارغة أو stream ينقطع بدون إشعار HLS.js) */
+  /* ── Stall watchdog ───────────────────────────────────────────────────────
+     Recover the current HLS source first. Only switch after several recovery
+     attempts, so a temporary CDN gap does not throw away a healthy stream. */
   useEffect(() => {
     if (!playing) return;
     let lastTime = -1;
     let stalledFor = 0;
-    const CHECK_INTERVAL = 3000; // فحص كل 3 ثوانٍ
-    const STALL_THRESHOLD = 8;    // حد التوقف = 8 ثوانٍ
+    const CHECK_INTERVAL = 2000;
+    const RECOVER_AFTER = 4;
+    const FAIL_AFTER = 18;
     const t = setInterval(() => {
       const v = videoRef.current;
-      if (!v || v.paused || v.ended || v.readyState < 3) { stalledFor = 0; return; }
+      if (!v || v.paused || v.ended) { stalledFor = 0; return; }
       if (v.currentTime === lastTime) {
         stalledFor += CHECK_INTERVAL / 1000;
-        if (stalledFor >= STALL_THRESHOLD) {
+        if (stalledFor >= RECOVER_AFTER && stalledFor < FAIL_AFTER) {
+          console.warn(`[Nova Player] stall watchdog: recovering at ${v.currentTime}s (${stalledFor}s)`);
+          recoverFromStall();
+        } else if (stalledFor >= FAIL_AFTER) {
           console.warn(`[Nova Player] stall watchdog: currentTime stuck at ${v.currentTime}s for ${stalledFor}s → force-switch`);
           clearInterval(t);
           fireOnFail(true);
@@ -800,7 +884,7 @@ export default function RiftPlayer({
       }
     }, CHECK_INTERVAL);
     return () => clearInterval(t);
-  }, [playing, fireOnFail]);
+  }, [playing, fireOnFail, recoverFromStall]);
 
   /* ── autoPlay countdown when episode ends ── */
   useEffect(() => {
