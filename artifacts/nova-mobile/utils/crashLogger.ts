@@ -1,37 +1,60 @@
 /**
- * crashLogger.ts — نظام تسجيل الأعطال والأخطاء غير المعالجة
+ * crashLogger.ts — نظام تسجيل الأعطال (Server-First مثل Firebase Crashlytics)
  *
- * يحفظ سجل مضغوط من آخر 100 خطأ في AsyncStorage بمفتاح "nova-crash-log"
- * (يُمكن قراءته من صفحة الإعدادات أو عبر ADB logcat في وقت لاحق)
+ * يحفظ الأخطاء محلياً في AsyncStorage ويرفعها للسيرفر فور حدوثها.
+ * الهدف: رؤية الأعطال في الوقت الفعلي دون الحاجة لـ ADB أو الوصول للجهاز.
  */
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { getBaseUrl } from "@/utils/api";
+import { Platform } from "react-native";
 
 const STORAGE_KEY = "nova-crash-log";
 const MAX_ENTRIES = 100;
 
 export interface CrashEntry {
-  ts: number;          // UNIX timestamp
-  type: "js" | "promise" | "render";
+  ts: number;
+  type: "js" | "promise" | "render" | "player" | "network";
   message: string;
   stack?: string;
+  context?: string;   // معلومات إضافية: اسم الشاشة / المصدر / URL
+  isFatal?: boolean;
 }
 
-/** أضف إدخال خطأ جديد — لا يُعيق أي شيء (صامت تماماً إن فشل) */
+/* ─── حفظ محلي ─── */
 export async function logCrash(entry: Omit<CrashEntry, "ts">): Promise<void> {
+  const full: CrashEntry = { ...entry, ts: Date.now() };
   try {
     const raw = await AsyncStorage.getItem(STORAGE_KEY);
     const existing: CrashEntry[] = raw ? JSON.parse(raw) : [];
-    const updated = [
-      { ...entry, ts: Date.now() },
-      ...existing,
-    ].slice(0, MAX_ENTRIES);
+    const updated = [full, ...existing].slice(0, MAX_ENTRIES);
     await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
+  } catch {}
+
+  // رفع للسيرفر في الخلفية (لا نُعيق التطبيق)
+  uploadCrash(full).catch(() => {});
+}
+
+/* ─── رفع للسيرفر ─── */
+async function uploadCrash(entry: CrashEntry): Promise<void> {
+  try {
+    const base = getBaseUrl();
+    await fetch(`${base}/api/crash-report`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        ...entry,
+        platform: Platform.OS,
+        version: Platform.Version,
+      }),
+      // timeout قصير حتى لا يُعيق التطبيق
+      signal: AbortSignal.timeout?.(5000),
+    });
   } catch {
-    // تجاهل أي خطأ في التسجيل نفسه
+    // صامت — الحفظ المحلي كافٍ كبديل
   }
 }
 
-/** اقرأ كل الإدخالات المحفوظة */
+/* ─── قراءة السجل المحلي ─── */
 export async function getCrashLog(): Promise<CrashEntry[]> {
   try {
     const raw = await AsyncStorage.getItem(STORAGE_KEY);
@@ -41,55 +64,61 @@ export async function getCrashLog(): Promise<CrashEntry[]> {
   }
 }
 
-/** امسح سجل الأعطال */
+/* ─── مسح السجل ─── */
 export async function clearCrashLog(): Promise<void> {
   try {
     await AsyncStorage.removeItem(STORAGE_KEY);
   } catch {}
 }
 
-/** تثبيت المعالج العالمي — اُستدعِه مرة واحدة فقط عند إطلاق التطبيق */
+/* ─── تثبيت المعالجات العالمية — يُستدعى مرة واحدة في _layout.tsx ─── */
 export function installGlobalCrashHandlers(): void {
+  // ── JS exceptions ──
   try {
-    // ─── JS exceptions (sync + uncaught async thrown from RN bridge) ───
     const ErrorUtils = (global as any).ErrorUtils;
     if (ErrorUtils?.setGlobalHandler) {
       const prev = ErrorUtils.getGlobalHandler?.();
       ErrorUtils.setGlobalHandler((error: Error, isFatal?: boolean) => {
         logCrash({
           type: "js",
+          isFatal: !!isFatal,
           message: `[${isFatal ? "FATAL" : "NON-FATAL"}] ${error?.message ?? String(error)}`,
-          stack: error?.stack?.slice(0, 800),
+          stack: error?.stack?.slice(0, 1000),
         }).catch(() => {});
-        // أحلِ الخطأ للمعالج السابق (RN default = red screen في dev / crash في prod)
         if (prev) prev(error, isFatal);
       });
     }
   } catch {}
 
+  // ── Unhandled Promise rejections ──
   try {
-    // ─── Unhandled Promise rejections ───
-    const tracking = (global as any).HermesInternal?.hasPromise?.() ?? false;
-    if (tracking) {
-      // Hermes يدعم trackAsyncErrors مما يُبلَّغ عنه بـ unhandledRejection على الـ event loop
-    }
-    // نُسجّل عبر patching global.Promise مباشرةً:
-    // (الطريقة الأكثر توافقاً عبر React Native + Hermes + JSC)
-    const OriginalPromise = global.Promise as any;
-    if (OriginalPromise && !OriginalPromise.__novaCrashPatched) {
-      OriginalPromise.__novaCrashPatched = true;
-      // نستخدم الـ addEventListener المتاح في Hermes/Node-like envs إن وُجد
-      const win = global as any;
-      if (typeof win.addEventListener === "function") {
-        win.addEventListener("unhandledrejection", (event: any) => {
-          const reason = event?.reason;
-          logCrash({
-            type: "promise",
-            message: reason?.message ?? String(reason),
-            stack: reason?.stack?.slice(0, 600),
-          }).catch(() => {});
-        });
-      }
+    const win = global as any;
+    if (typeof win.addEventListener === "function") {
+      win.addEventListener("unhandledrejection", (event: any) => {
+        const reason = event?.reason;
+        // تجاهل AbortError — هذه طبيعية عند إلغاء الطلبات
+        if (reason?.name === "AbortError" || reason?.message?.includes("aborted")) return;
+        logCrash({
+          type: "promise",
+          message: reason?.message ?? String(reason),
+          stack: reason?.stack?.slice(0, 600),
+        }).catch(() => {});
+      });
     }
   } catch {}
+}
+
+/* ─── تسجيل أخطاء المشغّل (يُستدعى من RiftPlayer) ─── */
+export function logPlayerError(opts: {
+  message: string;
+  url?: string;
+  site?: string;
+  isFatal?: boolean;
+}): void {
+  logCrash({
+    type: "player",
+    message: opts.message,
+    context: [opts.site, opts.url?.slice(0, 120)].filter(Boolean).join(" | "),
+    isFatal: opts.isFatal,
+  }).catch(() => {});
 }

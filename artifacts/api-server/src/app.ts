@@ -17,6 +17,7 @@ import notificationsRouter from "./routes/notifications.js";
 import { logger } from "./lib/logger";
 import { setupSession, registerEmailAuthRoutes, registerGoogleAuthRoutes, registerGithubAuthRoutes } from "./auth/index.js";
 import sitemapRouter from "./routes/sitemap.js";
+import crashReportRouter from "./routes/crashReport.js";
 import { validateAnonToken, checkRateLimit } from "./lib/security.js";
 
 // ── المسارات التي تتطلب توكن صالح ──
@@ -157,6 +158,7 @@ export async function createApp(): Promise<Express> {
   app.use("/api", dbRelayRouter);
   app.use(reportRouter);
   app.use(telegramRouter);
+  app.use("/api/crash-report", crashReportRouter);
 
   // ── Proxy /nova-mobile/* → port 3000 (Nova Mobile static server) ──
   app.use("/nova-mobile", (req, res) => {

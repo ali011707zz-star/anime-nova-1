@@ -11,6 +11,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useColors } from "@/hooks/useColors";
 import { useApp } from "@/context/AppContext";
 import { getBaseUrl } from "@/utils/baseUrl";
+import { getCrashLog, clearCrashLog, type CrashEntry } from "@/utils/crashLogger";
 
 const THEMES: { label: string; value: string; dot: string; desc: string }[] = [
   { label: "داكن",   value: "dark",   dot: "#3F3F46", desc: "رمادي داكن" },
@@ -968,6 +969,8 @@ export default function SettingsScreen() {
   const [showAuth, setShowAuth] = useState(false);
   const [showPremium, setShowPremium] = useState(false);
   const [currentUser, setCurrentUser] = useState<MobileUser | null>(null);
+  const [showCrashLog, setShowCrashLog] = useState(false);
+  const [crashEntries, setCrashEntries] = useState<CrashEntry[]>([]);
 
   useEffect(() => {
     AsyncStorage.getItem(AUTH_KEY).then(v => { if (v) { try { setCurrentUser(JSON.parse(v)); } catch {} } });
@@ -1356,6 +1359,35 @@ export default function SettingsScreen() {
           </Card>
         </View>
 
+        {/* ══════ سجل الأعطال (للمطور) ══════ */}
+        <SectionHeader title="سجل الأعطال" icon="🛠️" />
+        <View style={{ paddingHorizontal: 16 }}>
+          <Card>
+            <NavRow
+              icon="bug" iconColor="#f87171" iconBg="rgba(239,68,68,0.10)"
+              label="عرض سجل الأخطاء"
+              sub="يُرفع تلقائياً للسيرفر · للتشخيص فقط"
+              onPress={async () => {
+                const logs = await getCrashLog();
+                setCrashEntries(logs);
+                setShowCrashLog(true);
+              }}
+            />
+            <DangerRow
+              label="مسح سجل الأعطال"
+              sub="يمسح الأخطاء المحفوظة محلياً"
+              onPress={() => openConfirm({
+                open: true,
+                title: "مسح سجل الأعطال؟",
+                desc: "سيتم حذف كل الأخطاء المحفوظة.",
+                confirmLabel: "امسح",
+                danger: true,
+                onConfirm: async () => { await clearCrashLog(); setCrashEntries([]); showToast("تم مسح السجل"); },
+              })}
+            />
+          </Card>
+        </View>
+
         {/* ── Disclaimer ── */}
         <View style={ts.disclaimer}>
           <View style={{ flexDirection: "row", alignItems: "flex-start", gap: 10, marginBottom: 10 }}>
@@ -1394,6 +1426,58 @@ export default function SettingsScreen() {
 
       {/* Report Sheet */}
       <ReportSheet open={showReport} onClose={() => setShowReport(false)} />
+
+      {/* Crash Log Modal */}
+      {showCrashLog && (
+        <Modal transparent animationType="slide" onRequestClose={() => setShowCrashLog(false)}>
+          <Pressable style={ts.overlay} onPress={() => setShowCrashLog(false)} />
+          <View style={[ts.bottomSheet, { maxHeight: "88%" }]}>
+            <View style={[ts.sheetAccentBar, { backgroundColor: "#ef4444" }]} />
+            <View style={ts.sheetHandle} />
+            <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 20, paddingBottom: 12 }}>
+              <Pressable onPress={() => setShowCrashLog(false)} style={ts.reportCloseBtn}>
+                <Ionicons name="close" size={16} color="rgba(255,255,255,0.5)" />
+              </Pressable>
+              <Text style={{ fontSize: 15, fontFamily: "Cairo_800ExtraBold", color: "#fff" }}>
+                🛠️ سجل الأعطال ({crashEntries.length})
+              </Text>
+              <View style={{ width: 36 }} />
+            </View>
+            <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 16, gap: 10 }}>
+              {crashEntries.length === 0 ? (
+                <View style={{ alignItems: "center", paddingVertical: 40, gap: 12 }}>
+                  <Ionicons name="checkmark-circle" size={40} color="#34d399" />
+                  <Text style={{ fontSize: 14, fontFamily: "Cairo_700Bold", color: "rgba(255,255,255,0.5)" }}>لا توجد أعطال مسجّلة 🎉</Text>
+                </View>
+              ) : crashEntries.map((e, i) => (
+                <View key={i} style={{ borderRadius: 14, padding: 12, backgroundColor: e.isFatal ? "rgba(239,68,68,0.10)" : "rgba(255,255,255,0.04)", borderWidth: 1, borderColor: e.isFatal ? "rgba(239,68,68,0.25)" : "rgba(255,255,255,0.07)", gap: 4 }}>
+                  <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
+                    <Text style={{ fontSize: 9, fontFamily: "Cairo_700Bold", color: e.isFatal ? "#f87171" : "#fbbf24" }}>
+                      {e.isFatal ? "🔴 FATAL" : "🟡"} [{e.type?.toUpperCase()}] [{e.platform ?? "?"}]
+                    </Text>
+                    <Text style={{ fontSize: 9, fontFamily: "Cairo_400Regular", color: "rgba(255,255,255,0.25)" }}>
+                      {e.ts ? new Date(e.ts).toLocaleTimeString("ar-SA") : ""}
+                    </Text>
+                  </View>
+                  <Text style={{ fontSize: 11, fontFamily: "Cairo_400Regular", color: "rgba(255,255,255,0.75)", lineHeight: 18 }} selectable>
+                    {e.message?.slice(0, 200)}
+                  </Text>
+                  {e.context ? (
+                    <Text style={{ fontSize: 9, fontFamily: "Cairo_400Regular", color: "rgba(255,255,255,0.30)" }} selectable>
+                      {e.context}
+                    </Text>
+                  ) : null}
+                  {e.stack ? (
+                    <Text style={{ fontSize: 8, fontFamily: "Cairo_400Regular", color: "rgba(255,255,255,0.20)", marginTop: 4 }} selectable numberOfLines={3}>
+                      {e.stack}
+                    </Text>
+                  ) : null}
+                </View>
+              ))}
+            </ScrollView>
+          </View>
+        </Modal>
+      )}
 
       {/* Auth Sheet */}
       <AuthSheet
