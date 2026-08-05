@@ -12,6 +12,11 @@ expo-env.d.ts
 # Native
 ios/
 android/
+# The Expo local module contains source-controlled Android code. Keep the
+# generated app/android project ignored, but include this module's native
+# implementation so prebuild can autolink it in CI.
+!modules/nova-media3/android/
+!modules/nova-media3/android/**
 *.orig.*
 *.jks
 *.p8
