@@ -49,8 +49,12 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ${{ steps.pnpm-cache.outputs.STORE_PATH }}
-          key: pnpm-${{ runner.os }}-${{ hashFiles('**/pnpm-lock.yaml') }}
-          restore-keys: pnpm-${{ runner.os }}-
+          # v2: bumped to invalidate a corrupted pnpm store cache that was
+          # silently dropping extracted package files ("Failed to create bin"
+          # for tsx/jiti/prettier/etc.), which broke workspace bin symlinks
+          # like artifacts/nova-mobile/node_modules/.bin/expo.
+          key: pnpm-v2-${{ runner.os }}-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: pnpm-v2-${{ runner.os }}-
 
       - name: 📥 Install dependencies
         run: pnpm install --no-frozen-lockfile
