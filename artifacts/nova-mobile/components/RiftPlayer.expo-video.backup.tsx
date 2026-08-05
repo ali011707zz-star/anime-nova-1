@@ -11,7 +11,6 @@ import { StatusBar } from "expo-status-bar";
 import { useVideoPlayer, VideoView } from "expo-video";
 import * as Brightness from "expo-brightness";
 import { VolumeManager } from "../lib/volume-manager";
-import { RiftPlayer as NativeMedia3RiftPlayer } from "./RiftPlayerNative";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator, Animated, Dimensions, Easing, I18nManager, Platform,
@@ -371,7 +370,7 @@ function ScreenshotFlash({ visible }: { visible: boolean }) {
 }
 
 /* ─── Main Component ─── */
-function ExpoVideoRiftPlayer({
+export function RiftPlayer({
   sources,
   initialSourceIndex = 0,
   title,
@@ -2619,17 +2618,6 @@ function ExpoVideoRiftPlayer({
 
     </View>
   );
-}
-
-/**
- * Android uses the in-app Media3 implementation. The Expo Video player above
- * intentionally remains intact as the iOS/web fallback and rollback copy.
- */
-export function RiftPlayer(props: Props) {
-  if (Platform.OS === "android") {
-    return <NativeMedia3RiftPlayer {...props} />;
-  }
-  return <ExpoVideoRiftPlayer {...props} />;
 }
 
 /* ─── Accordion Section Component ─── */

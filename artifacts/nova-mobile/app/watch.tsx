@@ -866,7 +866,9 @@ export default function WatchScreen() {
         headers,
         label: `سيرفر · ${getSiteTag(s.site || "")}`,
         quality: getSrcQuality(s),
-        subtitleUrl: undefined, // مخفية في نوفا موبايل
+        subtitleUrl: s.subtitleUrl
+          ? resolveUrl(s.subtitleUrl, base)
+          : (globalSubUrl ? resolveUrl(globalSubUrl, base) : undefined),
         isArabic: ARABIC_SITES.has(s.site || ""),
         wantsSmartSub: !ARABIC_SITES.has(s.site || ""),
         skipIntro: s.skipIntro,

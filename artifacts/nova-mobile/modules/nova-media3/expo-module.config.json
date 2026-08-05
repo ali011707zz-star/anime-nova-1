@@ -1,0 +1,6 @@
+{
+  "platforms": ["android"],
+  "android": {
+    "modules": ["expo.modules.novamedia3.NovaMedia3Module"]
+  }
+}

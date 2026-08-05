@@ -56,6 +56,7 @@
       "expo-font",
       "expo-web-browser",
       "expo-video",
+      "./plugins/withPipAndroid",
       "expo-screen-orientation",
       "expo-brightness",
       [
