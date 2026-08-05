@@ -6,6 +6,7 @@
  */
 import { Router } from "express";
 import { logger } from "../lib/logger.js";
+import { sendAdminAlert } from "./telegram.js";
 
 const router = Router();
 
@@ -18,6 +19,8 @@ interface CrashEntry {
   isFatal?: boolean;
   platform?: string;
   version?: string | number;
+  appVersion?: string;
+  deviceModel?: string;
 }
 
 // حد أقصى 500 خطأ في الذاكرة
@@ -38,6 +41,19 @@ router.post("/", (req, res) => {
     logger.warn(
       `[crash-report] ${prefix} [${entry.platform ?? "?"}] [${entry.type}] ${entry.message?.slice(0, 200)}`
     );
+
+    // تنبيه Telegram فوري عند الأعطال القاتلة
+    if (entry.isFatal) {
+      const device = [entry.deviceModel, entry.platform, entry.version].filter(Boolean).join(" · ");
+      const appVer = entry.appVersion ? ` v${entry.appVersion}` : "";
+      sendAdminAlert(
+        `🔴 *Nova Mobile FATAL CRASH*${appVer}\n` +
+        `📱 ${device || "unknown device"}\n` +
+        `📌 \`[${entry.type}]\` ${entry.message?.slice(0, 300)}\n` +
+        (entry.context ? `🔗 ${entry.context?.slice(0, 120)}\n` : "") +
+        (entry.stack ? `\`\`\`\n${entry.stack?.slice(0, 400)}\n\`\`\`` : "")
+      ).catch(() => {});
+    }
 
     res.json({ ok: true });
   } catch {

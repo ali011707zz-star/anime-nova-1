@@ -1456,7 +1456,7 @@ export default function SettingsScreen() {
                       {e.isFatal ? "🔴 FATAL" : "🟡"} [{e.type?.toUpperCase()}] [{e.platform ?? "?"}]
                     </Text>
                     <Text style={{ fontSize: 9, fontFamily: "Cairo_400Regular", color: "rgba(255,255,255,0.25)" }}>
-                      {e.ts ? new Date(e.ts).toLocaleTimeString("ar-SA") : ""}
+                      {e.ts ? new Date(e.ts).toLocaleString("ar-SA") : ""}
                     </Text>
                   </View>
                   <Text style={{ fontSize: 11, fontFamily: "Cairo_400Regular", color: "rgba(255,255,255,0.75)", lineHeight: 18 }} selectable>

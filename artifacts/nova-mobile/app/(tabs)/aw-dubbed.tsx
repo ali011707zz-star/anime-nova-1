@@ -109,15 +109,18 @@ function AnimationList({ searchQ }: { searchQ: string }) {
     if (q.length < 2) { setSearchRes([]); return; }
     setSearchLoad(true);
     if (timer.current) clearTimeout(timer.current);
+    const ctrl = new AbortController();
     timer.current = setTimeout(async () => {
       try {
-        const r = await fetch(`${BASE}/api/aw-dubbed/catalog?q=${encodeURIComponent(q)}&page=1`);
+        const r = await fetch(`${BASE}/api/aw-dubbed/catalog?q=${encodeURIComponent(q)}&page=1`, { signal: ctrl.signal });
         const d = await r.json();
         setSearchRes(d.results || []);
-      } catch { setSearchRes([]); }
-      setSearchLoad(false);
+      } catch (e: any) {
+        if (e?.name !== "AbortError") setSearchRes([]);
+      }
+      if (!ctrl.signal.aborted) setSearchLoad(false);
     }, 400);
-    return () => { if (timer.current) clearTimeout(timer.current); };
+    return () => { if (timer.current) clearTimeout(timer.current); ctrl.abort(); };
   }, [searchQ, BASE]);
 
   const openDetail = (s: AwSeries) => {

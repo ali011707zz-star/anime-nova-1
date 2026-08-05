@@ -63,3 +63,4 @@
 - [Anime watch onError crash fix](anime-watch-onError-fix.md) — player exits in 1s: curLen≤1 → onError immediately + abortRef kills background fetches → empty picker. Fix: RiftPlayer waits 8s for more sources; onError keeps fetches alive + autoPlayFiredRef=true.
 - [Mobile crash root causes](mobile-crash-root-causes.md) — 3 AbortController/timer leaks caused app exit after episodes: dubbed/watch ctrlRef, refreshAllSources missing siteCtrls abort, handlePickSite tid not in finally.
 - [Vite manualChunks TDZ](vite-manualchunks-tdz.md) — ملف جديد يغير module graph → شاشة سوداء؛ الحل: vendor chunk واحد فقط + vendor-hls منفصل.
+- [Crash-report VPS deploy](crash-report-vps-deploy.md) — route missing from VPS build; deployed + Telegram isFatal alert + device info in crashLogger.

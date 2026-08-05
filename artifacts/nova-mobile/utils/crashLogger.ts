@@ -7,6 +7,7 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { getBaseUrl } from "@/utils/api";
 import { Platform } from "react-native";
+import Constants from "expo-constants";
 
 const STORAGE_KEY = "nova-crash-log";
 const MAX_ENTRIES = 100;
@@ -18,6 +19,8 @@ export interface CrashEntry {
   stack?: string;
   context?: string;   // معلومات إضافية: اسم الشاشة / المصدر / URL
   isFatal?: boolean;
+  appVersion?: string;
+  deviceModel?: string;
 }
 
 /* ─── حفظ محلي ─── */
@@ -34,10 +37,27 @@ export async function logCrash(entry: Omit<CrashEntry, "ts">): Promise<void> {
   uploadCrash(full).catch(() => {});
 }
 
+/* ─── معلومات الجهاز (تُقرأ مرة واحدة فقط) ─── */
+let _deviceInfo: { appVersion: string; deviceModel: string } | null = null;
+function getDeviceInfo() {
+  if (!_deviceInfo) {
+    const nativeVer = Constants.expoConfig?.version ?? Constants.manifest?.version ?? "unknown";
+    // Platform.constants يحتوي على معلومات الجهاز في RN
+    const pc = (Platform.constants as any);
+    const model = pc?.Model ?? pc?.systemName ?? Platform.OS;
+    _deviceInfo = {
+      appVersion: String(nativeVer),
+      deviceModel: String(model),
+    };
+  }
+  return _deviceInfo;
+}
+
 /* ─── رفع للسيرفر ─── */
 async function uploadCrash(entry: CrashEntry): Promise<void> {
   try {
     const base = getBaseUrl();
+    const { appVersion, deviceModel } = getDeviceInfo();
     await fetch(`${base}/api/crash-report`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -45,6 +65,8 @@ async function uploadCrash(entry: CrashEntry): Promise<void> {
         ...entry,
         platform: Platform.OS,
         version: Platform.Version,
+        appVersion,
+        deviceModel,
       }),
       // timeout قصير حتى لا يُعيق التطبيق
       signal: AbortSignal.timeout?.(5000),
