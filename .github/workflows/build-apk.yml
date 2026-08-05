@@ -57,7 +57,21 @@ jobs:
           restore-keys: pnpm-v2-${{ runner.os }}-
 
       - name: 📥 Install dependencies
-        run: pnpm install --no-frozen-lockfile
+        run: |
+          pnpm install --no-frozen-lockfile
+          # pnpm's content-addressable store extraction occasionally races
+          # on a cold, many-workspace-package install and leaves some bin
+          # symlinks missing (ENOENT) even though the package was "added"
+          # (seen with tsx/jiti/prettier/expo). A second pass repairs any
+          # missing links without re-downloading anything already extracted.
+          if [ ! -e artifacts/nova-mobile/node_modules/.bin/expo ]; then
+            echo "⚠️ expo bin missing after install — repairing (pnpm store extraction race)"
+            pnpm install --no-frozen-lockfile
+          fi
+          if [ ! -e artifacts/nova-mobile/node_modules/.bin/expo ]; then
+            echo "❌ expo bin still missing after repair attempt"
+            exit 1
+          fi
 
       - name: 🩹 Fix react-native-video Android compatibility
         working-directory: artifacts/nova-mobile
