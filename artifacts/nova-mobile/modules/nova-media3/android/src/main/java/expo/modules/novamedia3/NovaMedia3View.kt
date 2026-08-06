@@ -15,6 +15,7 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.okhttp.OkHttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
+import okhttp3.OkHttpClient
 import androidx.media3.exoplayer.hls.HlsMediaSource
 import androidx.media3.exoplayer.source.MediaSource
 import androidx.media3.exoplayer.source.ProgressiveMediaSource
@@ -30,6 +31,13 @@ class NovaMedia3View(
   context: Context,
   appContext: AppContext
 ) : ExpoView(context, appContext) {
+  companion object {
+    // Shared across instances: media3-datasource-okhttp 1.5.1 dropped the
+    // no-arg OkHttpDataSource.Factory() constructor in favor of an explicit
+    // Call.Factory, so a single OkHttpClient is reused for all playback.
+    private val sharedOkHttpClient = OkHttpClient()
+  }
+
   private val mainHandler = Handler(Looper.getMainLooper())
   private val playerView = PlayerView(context)
   private var exoPlayer: ExoPlayer? = null
@@ -190,7 +198,7 @@ class NovaMedia3View(
       // Invalid optional headers must not prevent a valid URL from playing.
     }
 
-    val httpFactory = OkHttpDataSource.Factory()
+    val httpFactory = OkHttpDataSource.Factory(sharedOkHttpClient)
       .setUserAgent("NOVA/1.0")
       .setDefaultRequestProperties(requestProperties)
     val dataSourceFactory = DefaultDataSource.Factory(context, httpFactory)
