@@ -65,3 +65,4 @@
 - [Vite manualChunks TDZ](vite-manualchunks-tdz.md) — ملف جديد يغير module graph → شاشة سوداء؛ الحل: vendor chunk واحد فقط + vendor-hls منفصل.
 - [Crash-report VPS deploy](crash-report-vps-deploy.md) — route missing from VPS build; deployed + Telegram isFatal alert + device info in crashLogger.
 - [APK build workflow compatibility](apk-build-workflow-compatibility.md) — CI NODE_ENV=production skips devDependencies (Expo config plugins); media3-datasource-okhttp 1.5.1 dropped OkHttpDataSource.Factory() no-arg ctor.
+- [RiftPlayer switchSource native crash race](riftplayer-switch-source-race.md) — stale native statusChange events after player.replace() raced a 2nd replace → instant force-close; fixed with generation guard + pause-before-replace.

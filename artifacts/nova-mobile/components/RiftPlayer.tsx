@@ -406,6 +406,14 @@ export function RiftPlayer({
   const currentSrc                  = playableSources[srcIdx];
   const aliveRef                    = useRef(true);
   const terminalErrorRef            = useRef(false);
+  /* switchGenerationRef: يُزاد عند كل استدعاء switchSource. أحداث player.replace()
+     (statusChange/playingChange) من مصدر سابق قد تصل بعد أن بدأنا التبديل للمصدر
+     التالي (native ExoPlayer غير متزامن) — بدون هذا الحارس، حدث "error" متأخر من
+     المصدر القديم يُشغِّل setError(true) فوق مصدر جديد قيد التحضير فعلاً، فتتسابق
+     دورتان من player.replace() على نفس native player → هذا هو سبب الكراش الفوري
+     (أقل من ثانية) الذي ظهر بعد إضافة "انتظار 8 ثوانٍ قبل الاستسلام". كل useEffect
+     يستمع لأحداث المشغّل يلتقط جيله عند التسجيل ويتجاهل أي حدث وصل بعد تغيّره. */
+  const switchGenerationRef         = useRef(0);
 
   /* ─── Playback state ─── */
   const [position, setPosition]       = useState(0);
@@ -750,15 +758,23 @@ export function RiftPlayer({
     });
   }, []);
 
-  /* ─── Player events ─── */
+  /* ─── Player events ───
+     myGen: يُلتقط جيل التبديل الحالي لحظة تسجيل هذا الـ effect (بعد أي switchSource
+     سابق زاد switchGenerationRef). أي حدث يصل من native player بعد أن بدأ تبديل
+     جديد (switchSource زاد الجيل) لكن قبل أن يُعاد تسجيل هذا الـ listener (فجوة
+     async بين setSrcIdx وإعادة تشغيل الـ effect) يُتجاهل بدل أن يُشغِّل setError()
+     فوق مصدر جديد قيد التحضير — هذا كان يُسبِّب تسابق replace() مزدوج وكراش native
+     فوري (أقل من ثانية). ── */
   useEffect(() => {
+    const myGen = switchGenerationRef.current;
+    const isStale = () => switchGenerationRef.current !== myGen;
     const sub1 = player.addListener("playingChange", (e: any) => {
-      if (!aliveRef.current) return;
+      if (!aliveRef.current || isStale()) return;
       setIsPlaying(e.isPlaying ?? false);
       setBuffering(false);
     });
     const sub2 = player.addListener("statusChange", (e: any) => {
-      if (!aliveRef.current) return;
+      if (!aliveRef.current || isStale()) return;
       if (e.status === "loading") {
         setBuffering(true);
         /* إذا بقي التحميل أكثر من 12ث (شاشة سوداء) نعامله كخطأ ونتجاوز للمصدر التالي.
@@ -767,7 +783,7 @@ export function RiftPlayer({
         if (loadTimeoutRef.current) clearTimeout(loadTimeoutRef.current);
         loadTimeoutRef.current = setTimeout(() => {
           loadTimeoutRef.current = null;
-          if (!aliveRef.current) return;
+          if (!aliveRef.current || isStale()) return;
           console.warn(`[RiftPlayer] ⏱ timeout (12s) — ${playableSources[srcIdx]?.label || "?"}: ${playableSources[srcIdx]?.url?.slice(0, 80)}`);
           setError(true);
           setBuffering(false);
@@ -1424,6 +1440,11 @@ export function RiftPlayer({
 
   const switchSource = useCallback((idx: number) => {
     if (!aliveRef.current) return;
+    /* زِد جيل التبديل فوراً — يُبطل أي حدث statusChange/playingChange متأخر من
+       المصدر القديم (سباق native async) قبل أن يصل ويُشغِّل setError() فوق مصدر
+       جديد قيد التحضير. هذا يمنع تسابق player.replace() المزدوج الذي كان يُسبِّب
+       كراش native فوري (أقل من ثانية). */
+    switchGenerationRef.current += 1;
     const safeIdx = Math.min(Math.max(idx, 0), Math.max(playableSources.length - 1, 0));
     const newSrc = playableSources[safeIdx];
     if (!newSrc) {
@@ -1469,6 +1490,10 @@ export function RiftPlayer({
     setError(false);
     setBuffering(true);
     try {
+      /* أوقِف المشغّل قبل الاستبدال — يمنع ExoPlayer/AVPlayer من معالجة prepare()
+         لمصدر جديد بينما هو لا يزال في حالة "يشغّل" للمصدر القديم، وهو أحد
+         أسباب التسابق native الذي يُسبِّب الكراش الفوري. */
+      player.pause();
       /* نمرّر URL string فقط — VPS proxy يُضيف Referer/Origin داخلياً */
       player.replace(srcUrl as any);
       /* play() is triggered in statusChange → readyToPlay once the stream is buffered */
