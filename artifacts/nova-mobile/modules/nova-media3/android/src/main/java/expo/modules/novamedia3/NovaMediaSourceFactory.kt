@@ -22,6 +22,9 @@ object NovaMediaSourceFactory {
       .build()
   }
 
+  /** Plain data source factory (no custom headers) — used for subtitle tracks, which don't need Referer/Origin. */
+  fun dataSourceFactory(): OkHttpDataSource.Factory = OkHttpDataSource.Factory(okHttpClient)
+
   fun buildMediaSource(context: Context, url: String, headersJson: String): MediaSource {
     val headers = parseHeaders(headersJson)
 

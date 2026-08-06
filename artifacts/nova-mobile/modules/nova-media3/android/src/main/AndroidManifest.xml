@@ -4,13 +4,21 @@
     android:required="false" />
   <application>
     <!--
-      IsolatedPlayerActivity/IsolatedPlayerModule are documented in
-      artifacts/nova-mobile/docs/NOVA_PLAYER_FULL_ISOLATION_PLAN.md as
-      "implemented" but the Kotlin sources were never actually committed to
-      the repo (confirmed via git history — they never existed). Referencing
-      them here broke the Android build (manifest/ExpoModulesPackageList
-      pointed at classes that don't exist). Removed until the isolated-player
-      feature is actually implemented; see the proposed follow-up task.
+      android:process=":player" is the actual isolation line: this Activity
+      runs in a separate Android process from the main app. If ExoPlayer/
+      media3 crashes natively anywhere inside it, only the `:player` process
+      dies — the caller (main app process) is unaffected. See
+      IsolatedPlayerActivity.kt and
+      artifacts/nova-mobile/docs/NOVA_PLAYER_FULL_ISOLATION_PLAN.md.
     -->
+    <activity
+      android:name=".IsolatedPlayerActivity"
+      android:process=":player"
+      android:exported="false"
+      android:theme="@android:style/Theme.Black.NoTitleBar.Fullscreen"
+      android:configChanges="orientation|screenSize|keyboardHidden|screenLayout|smallestScreenSize|uiMode"
+      android:screenOrientation="sensorLandscape"
+      android:hardwareAccelerated="true"
+      android:launchMode="singleTask" />
   </application>
 </manifest>
