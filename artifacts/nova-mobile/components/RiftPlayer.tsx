@@ -414,6 +414,15 @@ export function RiftPlayer({
      (أقل من ثانية) الذي ظهر بعد إضافة "انتظار 8 ثوانٍ قبل الاستسلام". كل useEffect
      يستمع لأحداث المشغّل يلتقط جيله عند التسجيل ويتجاهل أي حدث وصل بعد تغيّره. */
   const switchGenerationRef         = useRef(0);
+  /* replaceInFlightRef/pendingSwitchIdxRef: يمنعان استدعاء player.replace() مرتين
+     متتاليتين قبل أن ينتهي native ExoPlayer من معالجة الاستبدال الأول. switchSource
+     كانت تُنفَّذ فوراً حتى لو كانت هناك عملية replace() سابقة لا تزال قيد التحضير —
+     استدعاءان متزامنان لـ pause()/replace() على نفس native player هما سبب رئيسي
+     لتسابق native وكراش فوري. الآن: إذا كانت هناك عملية جارية، نُخزِّن آخر idx مطلوب
+     فقط وننفّذه بمجرد أن تُبلِّغ statusChange (أو timeout احتياطي) بانتهاء الحالية. */
+  const replaceInFlightRef          = useRef(false);
+  const pendingSwitchIdxRef         = useRef<number | null>(null);
+  const replaceSafetyTimerRef       = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   /* ─── Playback state ─── */
   const [position, setPosition]       = useState(0);
@@ -701,6 +710,7 @@ export function RiftPlayer({
       /* waitForSrcTimerRef: يُلغى عند unmount لمنع onError من الاستدعاء بعد تفكيك المشغّل
          كان يُسبّب setState بعد unmount → crash عند التبديل السريع بين المصادر */
       if (waitForSrcTimerRef.current) { clearTimeout(waitForSrcTimerRef.current); waitForSrcTimerRef.current = null; }
+      if (replaceSafetyTimerRef.current) { clearTimeout(replaceSafetyTimerRef.current); replaceSafetyTimerRef.current = null; }
 
       /* 6. فرِّغ subtitle cache + cues لتحرير الذاكرة
          loadedCues قد تكون مئات/آلاف من الـ cues المترجمة — تحريرها فوراً يُقلل ضغط GC */
@@ -791,6 +801,17 @@ export function RiftPlayer({
       } else {
         /* أي حالة غير loading → ألغِ الـ timeout */
         if (loadTimeoutRef.current) { clearTimeout(loadTimeoutRef.current); loadTimeoutRef.current = null; }
+        /* انتهت عملية replace() الجارية (نجاحاً أو فشلاً) — حرِّر القفل ونفِّذ أي
+           تبديل مصدر تراكم أثناء الانتظار (انظر replaceInFlightRef أعلاه). */
+        if (e.status === "readyToPlay" || e.status === "error") {
+          if (replaceSafetyTimerRef.current) { clearTimeout(replaceSafetyTimerRef.current); replaceSafetyTimerRef.current = null; }
+          replaceInFlightRef.current = false;
+          const pending = pendingSwitchIdxRef.current;
+          pendingSwitchIdxRef.current = null;
+          if (pending !== null && !isStale() && aliveRef.current) {
+            switchSourceRef.current?.(pending);
+          }
+        }
         if (e.status === "readyToPlay") {
           setBuffering(false);
           setError(false);
@@ -1369,7 +1390,7 @@ export function RiftPlayer({
       setSleepRemaining(r => {
         if (r <= 1) {
           clearInterval(tick);
-          try { player.pause(); } catch {}
+          if (aliveRef.current) { try { player.pause(); } catch {} }
           setSleepTimer(0);
           return 0;
         }
@@ -1440,6 +1461,13 @@ export function RiftPlayer({
 
   const switchSource = useCallback((idx: number) => {
     if (!aliveRef.current) return;
+    /* إذا كانت هناك عملية replace() جارية فعلياً في native player، لا نستدعي
+       pause()/replace() فوق بعضهما — فقط نُخزِّن آخر idx مطلوب وننفّذه لاحقاً
+       (انظر تعريف replaceInFlightRef أعلاه لسبب هذا الحارس). */
+    if (replaceInFlightRef.current) {
+      pendingSwitchIdxRef.current = idx;
+      return;
+    }
     /* زِد جيل التبديل فوراً — يُبطل أي حدث statusChange/playingChange متأخر من
        المصدر القديم (سباق native async) قبل أن يصل ويُشغِّل setError() فوق مصدر
        جديد قيد التحضير. هذا يمنع تسابق player.replace() المزدوج الذي كان يُسبِّب
@@ -1489,6 +1517,19 @@ export function RiftPlayer({
 
     setError(false);
     setBuffering(true);
+    /* علِّم أن عملية replace() أصبحت جارية — أي استدعاء switchSource آخر يصل الآن
+       سيُخزَّن في pendingSwitchIdxRef بدل أن يُنفَّذ فوراً فوق هذه العملية. */
+    replaceInFlightRef.current = true;
+    if (replaceSafetyTimerRef.current) clearTimeout(replaceSafetyTimerRef.current);
+    /* شبكة أمان: إذا لم يصل أي statusChange خلال 10ث (حالة نادرة/غير متوقعة من
+       native) نُحرِّر القفل يدوياً حتى لا يتجمَّد التبديل للأبد. */
+    replaceSafetyTimerRef.current = setTimeout(() => {
+      replaceSafetyTimerRef.current = null;
+      replaceInFlightRef.current = false;
+      const pending = pendingSwitchIdxRef.current;
+      pendingSwitchIdxRef.current = null;
+      if (pending !== null && aliveRef.current) switchSourceRef.current?.(pending);
+    }, 10_000);
     try {
       /* أوقِف المشغّل قبل الاستبدال — يمنع ExoPlayer/AVPlayer من معالجة prepare()
          لمصدر جديد بينما هو لا يزال في حالة "يشغّل" للمصدر القديم، وهو أحد
@@ -1496,13 +1537,21 @@ export function RiftPlayer({
       player.pause();
       /* نمرّر URL string فقط — VPS proxy يُضيف Referer/Origin داخلياً */
       player.replace(srcUrl as any);
-      /* play() is triggered in statusChange → readyToPlay once the stream is buffered */
+      /* play() is triggered in statusChange → readyToPlay once the stream is buffered,
+         حيث يُحرَّر replaceInFlightRef أيضاً. */
     } catch (e) {
       console.warn("[RiftPlayer] player.replace() رمى استثناء:", e);
       setError(true);
       setBuffering(false);
+      if (replaceSafetyTimerRef.current) { clearTimeout(replaceSafetyTimerRef.current); replaceSafetyTimerRef.current = null; }
+      replaceInFlightRef.current = false;
+      const pending = pendingSwitchIdxRef.current;
+      pendingSwitchIdxRef.current = null;
+      if (pending !== null && aliveRef.current) switchSourceRef.current?.(pending);
     }
   }, [player, playableSources]);
+  const switchSourceRef = useRef(switchSource);
+  useEffect(() => { switchSourceRef.current = switchSource; }, [switchSource]);
 
   /* ─── Whisper audio transcription ─── */
   const triggerWhisper = useCallback(async () => {
@@ -2049,11 +2098,14 @@ export function RiftPlayer({
             <Pressable
               onPress={() => {
                 setIsEnded(false);
+                const genAtPress = switchGenerationRef.current;
                 try { player.currentTime = 0; } catch {}
                 if (replayTimeoutRef.current) clearTimeout(replayTimeoutRef.current);
                 replayTimeoutRef.current = setTimeout(() => {
                   replayTimeoutRef.current = null;
-                  if (!aliveRef.current) return; // لا تلمس native player بعد unmount
+                  /* لا تلمس native player بعد unmount أو بعد أن بدأ تبديل مصدر آخر
+                     خلال هذه الـ 120ms (كان يُشغِّل مصدراً مختلفاً/مُستبدَلاً بالخطأ) */
+                  if (!aliveRef.current || switchGenerationRef.current !== genAtPress) return;
                   try { player.play(); } catch {}
                 }, 120);
               }}
