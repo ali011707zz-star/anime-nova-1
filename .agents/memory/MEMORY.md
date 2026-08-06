@@ -66,3 +66,4 @@
 - [Crash-report VPS deploy](crash-report-vps-deploy.md) — route missing from VPS build; deployed + Telegram isFatal alert + device info in crashLogger.
 - [APK build workflow compatibility](apk-build-workflow-compatibility.md) — CI NODE_ENV=production skips devDependencies (Expo config plugins); media3-datasource-okhttp 1.5.1 dropped OkHttpDataSource.Factory() no-arg ctor.
 - [RiftPlayer switchSource native crash race](riftplayer-switch-source-race.md) — stale native statusChange events after player.replace() raced a 2nd replace → instant force-close; fixed with generation guard + pause-before-replace.
+- [Mobile native-crash blind spot fixed with Sentry](mobile-native-crash-blind-spot-sentry.md) — zero crash reports ≠ no crash; custom logger was JS-only and missed native crashes; Sentry added, DSN via EXPO_PUBLIC_SENTRY_DSN (not secret); tar@7.5.7 CVE firewall block fixed via pnpm override.

@@ -13,10 +13,26 @@ import React, { useEffect, useState } from "react";
 import { I18nManager, Platform } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider } from "react-native-safe-area-context";
+import * as Sentry from "@sentry/react-native";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { AppProvider } from "@/context/AppContext";
 import { loadRuntimeApiUrl } from "@/utils/baseUrl";
 import { installGlobalCrashHandlers } from "@/utils/crashLogger";
+
+/* Sentry: يلتقط أعطال JS *و* الأعطال الأصلية (native) — مثل كراش مشغّل الفيديو
+   الذي كان يُغلق التطبيق فوراً دون أن يترك أي أثر في نظام تسجيل الأعطال القديم
+   (كان يمسك JS فقط). يجب استدعاء init() قبل أي كود آخر قدر الإمكان. */
+const SENTRY_DSN = process.env.EXPO_PUBLIC_SENTRY_DSN;
+if (SENTRY_DSN) {
+  Sentry.init({
+    dsn: SENTRY_DSN,
+    enableNative: true,
+    enableNativeCrashHandling: true,
+    attachStacktrace: true,
+    tracesSampleRate: 0.1,
+    debug: false,
+  });
+}
 
 // تحميل عنوان API المخصص من AsyncStorage قبل أي طلب شبكي
 loadRuntimeApiUrl().catch(() => {});
@@ -68,7 +84,7 @@ function RootLayoutNav() {
   );
 }
 
-export default function RootLayout() {
+function RootLayout() {
   const [fontsLoaded, fontError] = useFonts({
     Cairo_400Regular,
     Cairo_600SemiBold,
@@ -109,3 +125,7 @@ export default function RootLayout() {
     </SafeAreaProvider>
   );
 }
+
+/* Sentry.wrap: يضيف مراقبة تلقائية للتنقّل بين الشاشات وأداء الإقلاع،
+   ولا يعمل شيء إضافياً إذا لم يُستدعَ Sentry.init() أعلاه (بلا DSN). */
+export default Sentry.wrap(RootLayout);

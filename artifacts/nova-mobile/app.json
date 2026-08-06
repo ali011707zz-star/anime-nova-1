@@ -71,6 +71,13 @@
           "photosPermission": "تسمح هذه الأذونات للتطبيق بالوصول إلى صورك.",
           "cameraPermission": "تسمح هذه الأذونات للتطبيق باستخدام الكاميرا."
         }
+      ],
+      [
+        "@sentry/react-native/expo",
+        {
+          "organization": "anime-nova",
+          "project": "react-native"
+        }
       ]
     ],
     "experiments": {

@@ -28,6 +28,7 @@ A full-stack anime streaming platform with web and mobile clients.
 - **Mobile**: Expo React Native
 - **CDN**: Cloudflare Worker (`nova-cdn-proxy`)
 - **Package manager**: pnpm (monorepo)
+- **Crash reporting**: Sentry (`@sentry/react-native`) in `nova-mobile`, added 2026-08-06 to catch *native* crashes (e.g. video player force-closes) that the older JS-only `crashLogger.ts` could never see. DSN is passed as `EXPO_PUBLIC_SENTRY_DSN` (build-apk.yml + eas.json) — Sentry DSNs are safe to embed client-side, not a real secret.
 
 ## User preferences
 

@@ -16,5 +16,10 @@
   "devDependencies": {
     "prettier": "^3.9.5",
     "typescript": "~5.9.3"
+  },
+  "pnpm": {
+    "overrides": {
+      "tar": "^7.5.22"
+    }
   }
 }

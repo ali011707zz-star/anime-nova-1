@@ -8,6 +8,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { getBaseUrl } from "@/utils/api";
 import { Platform } from "react-native";
 import Constants from "expo-constants";
+import * as Sentry from "@sentry/react-native";
 
 const STORAGE_KEY = "nova-crash-log";
 const MAX_ENTRIES = 100;
@@ -107,6 +108,7 @@ export function installGlobalCrashHandlers(): void {
           message: `[${isFatal ? "FATAL" : "NON-FATAL"}] ${error?.message ?? String(error)}`,
           stack: error?.stack?.slice(0, 1000),
         }).catch(() => {});
+        try { Sentry.captureException(error); } catch {}
         if (prev) prev(error, isFatal);
       });
     }
@@ -143,4 +145,15 @@ export function logPlayerError(opts: {
     context: [opts.site, opts.url?.slice(0, 120)].filter(Boolean).join(" | "),
     isFatal: opts.isFatal,
   }).catch(() => {});
+  /* Breadcrumb: لو حصل كراش أصلي (native) بعد ثوانٍ من هذا الخطأ، سيظهر هذا
+     السطر في تقرير Sentry كآخر حدث قبل الكراش — مهم لأن الكراش نفسه لا يترك
+     أثراً JS يمكن التقاطه مباشرة. */
+  try {
+    Sentry.addBreadcrumb({
+      category: "player",
+      message: opts.message,
+      data: { url: opts.url?.slice(0, 200), site: opts.site },
+      level: opts.isFatal ? "error" : "warning",
+    });
+  } catch {}
 }
