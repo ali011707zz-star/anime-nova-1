@@ -1,6 +1,9 @@
 {
   "platforms": ["android"],
   "android": {
-    "modules": ["expo.modules.novamedia3.NovaMedia3Module"]
+    "modules": [
+      "expo.modules.novamedia3.NovaMedia3Module",
+      "expo.modules.novamedia3.IsolatedPlayerModule"
+    ]
   }
 }

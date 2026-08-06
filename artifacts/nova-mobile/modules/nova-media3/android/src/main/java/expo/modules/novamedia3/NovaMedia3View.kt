@@ -8,36 +8,21 @@ import android.os.Looper
 import android.util.Rational
 import android.view.ViewGroup
 import androidx.media3.common.C
-import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
-import androidx.media3.datasource.DefaultDataSource
-import androidx.media3.datasource.okhttp.OkHttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
-import okhttp3.OkHttpClient
-import androidx.media3.exoplayer.hls.HlsMediaSource
-import androidx.media3.exoplayer.source.MediaSource
-import androidx.media3.exoplayer.source.ProgressiveMediaSource
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
 import expo.modules.kotlin.AppContext
 import expo.modules.kotlin.viewevent.EventDispatcher
 import expo.modules.kotlin.views.ExpoView
-import org.json.JSONObject
 
 @UnstableApi
 class NovaMedia3View(
   context: Context,
   appContext: AppContext
 ) : ExpoView(context, appContext) {
-  companion object {
-    // Shared across instances: media3-datasource-okhttp 1.5.1 dropped the
-    // no-arg OkHttpDataSource.Factory() constructor in favor of an explicit
-    // Call.Factory, so a single OkHttpClient is reused for all playback.
-    private val sharedOkHttpClient = OkHttpClient()
-  }
-
   private val mainHandler = Handler(Looper.getMainLooper())
   private val playerView = PlayerView(context)
   private var exoPlayer: ExoPlayer? = null
@@ -180,36 +165,10 @@ class NovaMedia3View(
     })
 
     try {
-      player.setMediaSource(buildMediaSource(url))
+      player.setMediaSource(NovaMediaSourceFactory.buildMediaSource(context, url, headersJson))
       player.prepare()
     } catch (error: Throwable) {
       emitError(error)
-    }
-  }
-
-  private fun buildMediaSource(url: String): MediaSource {
-    val requestProperties = mutableMapOf<String, String>()
-    try {
-      val json = JSONObject(headersJson)
-      json.keys().forEach { key ->
-        json.optString(key).takeIf { it.isNotBlank() }?.let { requestProperties[key] = it }
-      }
-    } catch (_: Throwable) {
-      // Invalid optional headers must not prevent a valid URL from playing.
-    }
-
-    val httpFactory = OkHttpDataSource.Factory(sharedOkHttpClient)
-      .setUserAgent("NOVA/1.0")
-      .setDefaultRequestProperties(requestProperties)
-    val dataSourceFactory = DefaultDataSource.Factory(context, httpFactory)
-    val item = MediaItem.fromUri(url)
-    // Proxied manifests often hide the real extension in an encoded `url=`
-    // query parameter, so checking only the outer pathname would select the
-    // progressive extractor and fail before the first frame.
-    return if (url.contains("m3u8", ignoreCase = true)) {
-      HlsMediaSource.Factory(dataSourceFactory).createMediaSource(item)
-    } else {
-      ProgressiveMediaSource.Factory(dataSourceFactory).createMediaSource(item)
     }
   }
 

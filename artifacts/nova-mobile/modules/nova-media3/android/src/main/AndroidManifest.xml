@@ -2,4 +2,21 @@
   <uses-feature
     android:name="android.software.picture_in_picture"
     android:required="false" />
+  <application>
+    <!--
+      android:process=":player" is the actual isolation mechanism: this
+      Activity runs in its own Android process, so a native crash inside it
+      (ExoPlayer/codec/memory) can only kill this process, never the main app
+      process. See IsolatedPlayerActivity.kt and
+      artifacts/nova-mobile/docs/NOVA_PLAYER_FULL_ISOLATION_PLAN.md.
+    -->
+    <activity
+      android:name="expo.modules.novamedia3.IsolatedPlayerActivity"
+      android:process=":player"
+      android:exported="false"
+      android:launchMode="singleTask"
+      android:screenOrientation="sensorLandscape"
+      android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboardHidden|uiMode"
+      android:theme="@android:style/Theme.Black.NoTitleBar.Fullscreen" />
+  </application>
 </manifest>

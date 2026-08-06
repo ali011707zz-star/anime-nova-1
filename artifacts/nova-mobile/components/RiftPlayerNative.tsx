@@ -4,6 +4,7 @@ import { StatusBar } from "expo-status-bar";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  Alert,
   Dimensions,
   PanResponder,
   Platform,
@@ -13,6 +14,7 @@ import {
   View,
 } from "react-native";
 import { useNovaMedia3Player, NovaMedia3View } from "../lib/nova-media3";
+import { openIsolatedPlayer } from "../lib/isolatedPlayer";
 import type { PlayerSource, SubCue } from "./RiftPlayer";
 
 type Props = {
@@ -297,6 +299,59 @@ export function RiftPlayer({
     };
   }, [player]);
 
+  const [isolatedTestBusy, setIsolatedTestBusy] = useState(false);
+
+  // First testable slice of the process-isolated player (see
+  // artifacts/nova-mobile/docs/NOVA_PLAYER_FULL_ISOLATION_PLAN.md). Wired
+  // here as an explicit opt-in button rather than replacing RiftPlayer
+  // outright, per the plan's staged rollout: prove stability on real
+  // devices via a GitHub Actions APK build before making it the default.
+  const testIsolatedPlayer = useCallback(async () => {
+    if (Platform.OS !== "android" || !source?.url || isolatedTestBusy) return;
+    setIsolatedTestBusy(true);
+    player.pause();
+    setIsPlaying(false);
+    try {
+      const result = await openIsolatedPlayer({
+        sourceUrl: source.url,
+        sourceHeaders: source.headers,
+        subtitleUrl: source.subtitleUrl,
+        title,
+        episodeLabel: episode != null ? `الحلقة ${episode}` : episodeTitle,
+        initialPositionSeconds: position,
+        introStartSeconds: skipIntro?.start,
+        introEndSeconds: skipIntro?.end,
+        outroStartSeconds: skipOutro?.start,
+        outroEndSeconds: skipOutro?.end,
+      });
+      if (result.positionSeconds > 0) {
+        player.currentTime = result.positionSeconds;
+        setPosition(result.positionSeconds);
+        onProgress?.(result.positionSeconds, result.durationSeconds || duration);
+      }
+      if (result.ended) setEnded(true);
+    } catch (error) {
+      Alert.alert(
+        "تعذّر فتح المشغّل المعزول",
+        error instanceof Error ? error.message : "خطأ غير معروف",
+      );
+    } finally {
+      setIsolatedTestBusy(false);
+    }
+  }, [
+    duration,
+    episode,
+    episodeTitle,
+    isolatedTestBusy,
+    onProgress,
+    player,
+    position,
+    skipIntro,
+    skipOutro,
+    source,
+    title,
+  ]);
+
   if (!source || failed) {
     return (
       <View style={styles.center}>
@@ -357,6 +412,20 @@ export function RiftPlayer({
             <Pressable onPress={() => player.enterPictureInPicture()} hitSlop={10} style={styles.iconButton}>
               <Ionicons name="scan-outline" size={19} color="#fff" />
             </Pressable>
+            {Platform.OS === "android" && (
+              <Pressable
+                onPress={testIsolatedPlayer}
+                disabled={isolatedTestBusy}
+                hitSlop={10}
+                style={styles.iconButton}
+              >
+                {isolatedTestBusy ? (
+                  <ActivityIndicator size="small" color="#c4b5fd" />
+                ) : (
+                  <Ionicons name="flask-outline" size={19} color="#fff" />
+                )}
+              </Pressable>
+            )}
           </View>
           <View style={styles.bottomArea}>
             <View style={styles.seekRow}>
