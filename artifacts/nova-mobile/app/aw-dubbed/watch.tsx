@@ -6,7 +6,7 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
+import { useLocalSearchParams, useRouter } from "expo-router";
 import { getBaseUrl } from "@/utils/api";
 import { RiftPlayer, type PlayerSource, isValidPlayerSourceUrl } from "@/components/RiftPlayer";
 
@@ -112,18 +112,6 @@ export default function AwDubbedWatchScreen() {
       abortRef.current?.abort();
     };
   }, [loadSources]);
-
-  /* ── إلغاء الطلب الجاري عند مغادرة الشاشة (blur) — نفس إصلاح dubbed/watch.tsx ── */
-  useFocusEffect(
-    useCallback(() => {
-      mountedRef.current = true;
-      return () => {
-        mountedRef.current = false;
-        abortRef.current?.abort();
-        abortRef.current = null;
-      };
-    }, []),
-  );
 
   const displayTitle = titleAr || title;
 

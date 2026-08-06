@@ -137,9 +137,6 @@ export function RiftPlayer({
   const lastProgress = useRef(0);
   const restoredInitialPosition = useRef(false);
   const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  // refs لتجنب stale-closure في PanResponder (يُنشأ مرة واحدة فقط)
-  const durationForPan = useRef(0);
-  const seekForPan = useRef<(next: number) => void>(() => {});
 
   const activeCue = useMemo(
     () => subtitles.find((cue) => position >= cue.start && position <= cue.end),
@@ -230,17 +227,6 @@ export function RiftPlayer({
     setSubtitles(subCues);
   }, [sourceIndex, subCues]);
 
-  useEffect(() => {
-    if (!playableSources.length) return;
-    const nextIndex = Math.min(sourceIndex, playableSources.length - 1);
-    if (nextIndex !== sourceIndex) setSourceIndex(nextIndex);
-    if (failed) {
-      setFailed(false);
-      setEnded(false);
-      setBuffering(true);
-    }
-  }, [failed, playableSources.length, sourceIndex]);
-
   const changeSource = useCallback(
     (index: number) => {
       const next = playableSources[index];
@@ -267,18 +253,13 @@ export function RiftPlayer({
     [duration, onProgress, player, scheduleHide],
   );
 
-  // حافظ على أحدث قيمة دائماً داخل الـ ref
-  durationForPan.current = duration;
-  seekForPan.current = seek;
-
   const seekPan = useRef(
     PanResponder.create({
       onStartShouldSetPanResponder: () => true,
       onMoveShouldSetPanResponder: () => true,
       onPanResponderRelease: (event) => {
         const percentage = Math.max(0, Math.min(1, event.nativeEvent.locationX / SCREEN_WIDTH));
-        // استخدام ref بدلاً من القيمة المُلتقطة عند الإنشاء (stale closure)
-        seekForPan.current(percentage * durationForPan.current);
+        seek(percentage * duration);
       },
     }),
   ).current;

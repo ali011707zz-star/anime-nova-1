@@ -4,7 +4,7 @@ import {
   StyleSheet, Platform,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
+import { useLocalSearchParams, useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { RiftPlayer, PlayerSource } from "@/components/RiftPlayer";
 import { getBaseUrl } from "@/utils/api";
@@ -135,21 +135,6 @@ export default function DubbedWatchScreen() {
       ctrlRef.current?.abort();
     };
   }, [loadSource]);
-
-  /* ── إلغاء الطلب الجاري عند مغادرة الشاشة (blur) —
-     Expo Router قد يُبقي هذه الشاشة mounted في الـ stack عند التنقل
-     لصفحة/حلقة جديدة؛ بدون هذا يستمر fetch/setState في الخلفية ويتراكم
-     عبر عدة تصفحات حتى يُسبب كراش أو خروجاً تلقائياً. */
-  useFocusEffect(
-    useCallback(() => {
-      mountedRef.current = true;
-      return () => {
-        mountedRef.current = false;
-        ctrlRef.current?.abort();
-        ctrlRef.current = null;
-      };
-    }, []),
-  );
 
   /* ── Loading ── */
   if (loading) {
