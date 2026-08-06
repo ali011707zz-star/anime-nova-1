@@ -64,4 +64,4 @@
 - [Mobile crash root causes](mobile-crash-root-causes.md) — 3 AbortController/timer leaks caused app exit after episodes: dubbed/watch ctrlRef, refreshAllSources missing siteCtrls abort, handlePickSite tid not in finally.
 - [Vite manualChunks TDZ](vite-manualchunks-tdz.md) — ملف جديد يغير module graph → شاشة سوداء؛ الحل: vendor chunk واحد فقط + vendor-hls منفصل.
 - [Crash-report VPS deploy](crash-report-vps-deploy.md) — route missing from VPS build; deployed + Telegram isFatal alert + device info in crashLogger.
-- [APK build workflow compatibility](apk-build-workflow-compatibility.md) — GitHub APK CI needs local Expo CLI plus react-native-video Kotlin/AGP compatibility patches before Gradle.
+- [APK build workflow compatibility](apk-build-workflow-compatibility.md) — CI NODE_ENV=production skips devDependencies (Expo config plugins); media3-datasource-okhttp 1.5.1 dropped OkHttpDataSource.Factory() no-arg ctor.
