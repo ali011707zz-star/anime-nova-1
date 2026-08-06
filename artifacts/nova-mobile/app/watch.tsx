@@ -927,6 +927,14 @@ export default function WatchScreen() {
     const startIdx = Math.max(0, playerSources.findIndex(s => playingSrc && s.url === _playFinal));
     return (
       <RiftPlayer
+        /* ⚠️ key فريد لكل حلقة — يجبر React على تفكيك المشغّل بالكامل (unmount حقيقي)
+           بدل إعادة استخدام نفس native player عبر player.replace() فقط. بدون هذا الـ key
+           فإن router.replace لنفس المسار (/watch) بمعاملات مختلفة لا يُعيد mount الشاشة،
+           فتتراكم موارد ExoPlayer/AVPlayer الأصلية (buffers/codecs) عبر الحلقات المتتالية
+           حتى يحدث OOM أصلي (native) يُغلق التطبيق بصمت دون أي سجل خطأ JS.
+           هذا الـ key يحل المشكلة جذرياً: كل حلقة = مشغّل native جديد تماماً + Master
+           cleanup الحالي يعمل فعلياً بين كل حلقة وأخرى. */
+        key={`${anime}-${epNum}`}
         sources={playerSources}
         initialSourceIndex={startIdx}
         title={displayTitle}

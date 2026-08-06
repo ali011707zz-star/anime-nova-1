@@ -876,6 +876,10 @@ export default function AnimationWatchScreen() {
     ));
     return (
       <RiftPlayer
+        /* key فريد لكل حلقة/فيلم — يمنع تراكم موارد native player عبر الحلقات (نفس
+           إصلاح app/watch.tsx: router.replace لنفس /animation/watch لا يُعيد mount
+           الشاشة بدون هذا الـ key). */
+        key={`${tmdbId}-${type}-${season}-${ep}`}
         sources={playerSources}
         initialSourceIndex={startIdx}
         title={titleStr}

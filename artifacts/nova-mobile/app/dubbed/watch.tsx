@@ -187,6 +187,9 @@ export default function DubbedWatchScreen() {
   /* ── RiftPlayer ── */
   return (
     <RiftPlayer
+      /* key فريد لكل حلقة — يمنع تراكم موارد native player عبر الحلقات (نفس إصلاح
+         app/watch.tsx: بدونه router.replace لنفس /dubbed/watch لا يُعيد mount الشاشة). */
+      key={epUrl || `${title}-${season}-${ep}`}
       sources={sources}
       title={`${title || ""} · ${season || ""}`}
       episode={ep ? parseInt(ep, 10) : undefined}

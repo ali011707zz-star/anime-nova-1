@@ -146,6 +146,9 @@ export default function AwDubbedWatchScreen() {
 
   return (
     <RiftPlayer
+      /* key فريد لكل حلقة — يمنع تراكم موارد native player عبر الحلقات (نفس إصلاح
+         app/watch.tsx). */
+      key={`${series}-${season}-${ep}`}
       sources={sources}
       title={displayTitle}
       episodeTitle={`${season} • الحلقة ${ep}`}
