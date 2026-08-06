@@ -88,8 +88,16 @@ jobs:
             const plugins = (expo.plugins || [])
               .map((p) => (Array.isArray(p) ? p[0] : p))
               .filter((p) => typeof p === "string" && !p.startsWith("."));
+            // Resolve a plugin specifier to its actual npm package dir, since
+            // some plugins are subpath exports of a package (e.g.
+            // "@sentry/react-native/expo" -> package "@sentry/react-native",
+            // subpath "expo"), not a package of that exact name.
+            const packageNameOf = (p) => {
+              const parts = p.split("/");
+              return p.startsWith("@") ? parts.slice(0, 2).join("/") : parts[0];
+            };
             const missing = plugins.filter(
-              (p) => !fs.existsSync(path.join("artifacts/nova-mobile/node_modules", p, "package.json"))
+              (p) => !fs.existsSync(path.join("artifacts/nova-mobile/node_modules", packageNameOf(p), "package.json"))
             );
             console.log(missing.join(" "));
           ')
