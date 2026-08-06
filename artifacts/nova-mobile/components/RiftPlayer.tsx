@@ -544,6 +544,11 @@ export function RiftPlayer({
   const progressTimer     = useRef<ReturnType<typeof setInterval> | null>(null);
   /** كاشف الـ stall: موضع آخر حركة + وقتها (لكشف "يشتغل بدون تقدّم") */
   const stallRef          = useRef<{ lastPos: number; lastAt: number }>({ lastPos: -1, lastAt: 0 });
+  /* stallNudgeTriedRef: قبل الاستسلام والانتقال لمصدر آخر، نجرّب "نقرة" صغيرة
+     (seek +0.4ث ثم play()) — هذا بالضبط ما يفعله المستخدم يدوياً بالتقديم/الإرجاع
+     ويُصلح كثيراً من حالات "شغّال لكن بدون تقدّم" الناتجة عن اختناق مؤقت في
+     الـ HLS proxy، بدون الحاجة لإزعاجه بشاشة "البحث عن مصادر بديلة". */
+  const stallNudgeTriedRef = useRef(false);
   /** refs للحالات التي يحتاجها الـ polling interval بدون stale closure */
   const isPlayingRef      = useRef(false);
   const isErrorRef        = useRef(false);
@@ -979,13 +984,28 @@ export function RiftPlayer({
            نتجاهل حالة الإيقاف المؤقت أو نهاية الحلقة أو حالة الخطأ الموجودة. */
         if (isPlayingRef.current && !isErrorRef.current && !isEndedRef.current && dur > 0) {
           if (pos > stallRef.current.lastPos + 0.1) {
-            // تقدّم طبيعي — أعد ضبط العداد
+            // تقدّم طبيعي — أعد ضبط العداد وألغِ محاولة الـ nudge السابقة
             stallRef.current = { lastPos: pos, lastAt: Date.now() };
+            stallNudgeTriedRef.current = false;
           } else if (stallRef.current.lastAt > 0 && Date.now() - stallRef.current.lastAt > STALL_TIMEOUT_MS) {
-            console.warn(`[RiftPlayer] 🔴 stall detected (${STALL_TIMEOUT_MS / 1000}s no progress) — switching source`);
-            stallRef.current = { lastPos: -1, lastAt: 0 };
-            setError(true);
-            setBuffering(false);
+            if (!stallNudgeTriedRef.current) {
+              /* محاولة إنعاش أولى بدون إزعاج المستخدم: نفس ما يفعله يدوياً بالتقديم
+                 قليلاً — كثيراً ما يكفي لتحرير اختناق مؤقت في HLS proxy. */
+              console.warn("[RiftPlayer] 🟡 stall detected — trying silent nudge before giving up");
+              stallNudgeTriedRef.current = true;
+              stallRef.current = { lastPos: pos, lastAt: Date.now() }; // مهلة جديدة أقصر للمحاولة التالية
+              try {
+                const nudgeTarget = pos + 0.4;
+                player.currentTime = nudgeTarget;
+                player.play();
+              } catch {}
+            } else {
+              console.warn(`[RiftPlayer] 🔴 stall persists after nudge — switching source`);
+              stallRef.current = { lastPos: -1, lastAt: 0 };
+              stallNudgeTriedRef.current = false;
+              setError(true);
+              setBuffering(false);
+            }
           }
         } else {
           // ليس في حالة تشغيل نشط — أعد ضبط العداد لتجنّب false positive
@@ -1441,6 +1461,11 @@ export function RiftPlayer({
     fadeIn();
     const target = Math.max(0, Math.min(secs, durationRef.current || duration));
     try { player.currentTime = target; setPosition(target); } catch {}
+    /* أعِد ضبط كاشف الـ stall — بدون هذا، القفز للخلف يجعل pos أصغر من
+       lastPos المُخزَّن فيبقى عدّاد "بدون تقدّم" السابق للتنقّل يعمل، فيُطلق
+       "stall" زائف بعد ثوانٍ قليلة من القفز رغم أن التشغيل طبيعي تماماً —
+       هذا هو سبب التجمّد الظاهري بعد التقديم/الإرجاع الذي أبلغ عنه المستخدم. */
+    stallRef.current = { lastPos: target, lastAt: Date.now() };
   }, [player, duration, fadeIn]);
   seekRef.current = seek;
 
@@ -1449,6 +1474,7 @@ export function RiftPlayer({
   const seekSilent = useCallback((secs: number) => {
     const target = Math.max(0, Math.min(secs, durationRef.current || duration));
     try { player.currentTime = target; setPosition(target); } catch {}
+    stallRef.current = { lastPos: target, lastAt: Date.now() };
   }, [player, duration]);
   seekSilentRef.current = seekSilent;
 
@@ -1499,6 +1525,7 @@ export function RiftPlayer({
     resumedRef.current = false;
     /* إعادة ضبط كاشف الـ stall عند كل تبديل مصدر */
     stallRef.current = { lastPos: -1, lastAt: 0 };
+    stallNudgeTriedRef.current = false;
     /* مسح الترجمات القديمة فوراً حتى لا تظهر مع المصدر الجديد */
     setLoadedCues([]);
     /* Reset whisper status when source changes */
