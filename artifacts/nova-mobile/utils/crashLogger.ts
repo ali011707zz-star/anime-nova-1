@@ -10,7 +10,6 @@ import { Platform } from "react-native";
 import Constants from "expo-constants";
 
 const STORAGE_KEY = "nova-crash-log";
-const PLAYER_SESSION_KEY = "nova-player-session";
 const MAX_ENTRIES = 100;
 
 export interface CrashEntry {
@@ -22,14 +21,6 @@ export interface CrashEntry {
   isFatal?: boolean;
   appVersion?: string;
   deviceModel?: string;
-}
-
-interface PlayerSessionMarker {
-  startedAt: number;
-  title?: string;
-  episode?: number;
-  source?: string;
-  url?: string;
 }
 
 /* ─── حفظ محلي ─── */
@@ -102,59 +93,8 @@ export async function clearCrashLog(): Promise<void> {
   } catch {}
 }
 
-/**
- * Native video crashes do not pass through ErrorUtils or ErrorBoundary.
- * Keep a short-lived marker while RiftPlayer is mounted so the next app
- * launch can report an unexpected exit with the last known player context.
- */
-export async function markPlayerSession(marker: Omit<PlayerSessionMarker, "startedAt">): Promise<void> {
-  try {
-    await AsyncStorage.setItem(
-      PLAYER_SESSION_KEY,
-      JSON.stringify({ ...marker, startedAt: Date.now() } satisfies PlayerSessionMarker),
-    );
-  } catch {}
-}
-
-export async function clearPlayerSession(): Promise<void> {
-  try {
-    await AsyncStorage.removeItem(PLAYER_SESSION_KEY);
-  } catch {}
-}
-
-async function reportUnexpectedPlayerExit(): Promise<void> {
-  try {
-    const raw = await AsyncStorage.getItem(PLAYER_SESSION_KEY);
-    if (!raw) return;
-
-    // Remove first so a failed upload cannot report the same old session on
-    // every launch. The crash remains in the local log if the network is down.
-    await AsyncStorage.removeItem(PLAYER_SESSION_KEY);
-    const marker = JSON.parse(raw) as PlayerSessionMarker;
-    const age = Date.now() - Number(marker.startedAt);
-    // Ignore corrupt or very old markers left by an interrupted install.
-    if (!Number.isFinite(age) || age < 0 || age > 7 * 24 * 60 * 60 * 1000) return;
-
-    await logCrash({
-      type: "player",
-      isFatal: true,
-      message: "Previous app session ended unexpectedly while the player was open",
-      context: [
-        marker.title,
-        marker.episode != null ? `episode ${marker.episode}` : undefined,
-        marker.source,
-        marker.url?.slice(0, 120),
-      ].filter(Boolean).join(" | "),
-    });
-  } catch {}
-}
-
 /* ─── تثبيت المعالجات العالمية — يُستدعى مرة واحدة في _layout.tsx ─── */
 export function installGlobalCrashHandlers(): void {
-  // Must run before the rest of the app mounts. This is the only reliable
-  // JavaScript-side signal available after a native ExoPlayer crash.
-  reportUnexpectedPlayerExit().catch(() => {});
-
   // ── JS exceptions ──
   try {
     const ErrorUtils = (global as any).ErrorUtils;

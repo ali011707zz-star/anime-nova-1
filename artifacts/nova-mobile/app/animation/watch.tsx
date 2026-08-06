@@ -8,7 +8,7 @@ import { LinearGradient } from "expo-linear-gradient";
 import { HiddenResolverWebView, ResolvedStream } from "@/components/HiddenResolverWebView";
 import { RiftPlayer, PlayerSource } from "@/components/RiftPlayer";
 import AnimHlsPlayer, { AnimHlsSource } from "@/components/AnimHlsPlayer";
-import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
+import { useLocalSearchParams, useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { getBaseUrl } from "@/utils/api";
@@ -361,29 +361,6 @@ export default function AnimationWatchScreen() {
     return () => { isMountedRef.current = false; };
   }, []);
 
-  /* ── إيقاف كامل عند مغادرة صفحة المشاهدة ──
-     صفحات Expo Router السابقة قد تبقى mounted في الـ Stack. يجب ألا يظل
-     AnimHlsPlayer/RiftPlayer أو SSE الخاص بالحلقة القديمة يعمل مع الجديدة. */
-  useFocusEffect(useCallback(() => {
-    isMountedRef.current = true;
-
-    return () => {
-      isMountedRef.current = false;
-      abortRef.current?.abort();
-      abortRef.current = null;
-      if (autoPlayTimerRef.current) {
-        clearTimeout(autoPlayTimerRef.current);
-        autoPlayTimerRef.current = null;
-      }
-      setScreen("picker");
-      setPlayingSrc(null);
-      setFrozenSources([]);
-      setSources([]);
-      seenKeys.current.clear();
-      hasCachedRef.current = false;
-    };
-  }, []));
-
   /* ── تحميل المصادر المحفوظة + وقت الاستئناف ── */
   useEffect(() => {
     AsyncStorage.getItem(progressKey).then(v => {
@@ -429,8 +406,7 @@ export default function AnimationWatchScreen() {
             resolved.find(s => isDirectPlayable(s));
           if (first) {
             autoPlayFiredRef.current = true;
-            autoPlayTimerRef.current = setTimeout(() => {
-              autoPlayTimerRef.current = null;
+            setTimeout(() => {
               if (!isMountedRef.current) return;
               setPlayingSrc(first); setScreen("webplayer");
             }, 0);
@@ -579,12 +555,7 @@ export default function AnimationWatchScreen() {
               /* تشغيل تلقائي عند أول مصدر مباشر */
               if (!autoPlayFiredRef.current && isDirectPlayable(src)) {
                 autoPlayFiredRef.current = true;
-                if (autoPlayTimerRef.current) clearTimeout(autoPlayTimerRef.current);
-                autoPlayTimerRef.current = setTimeout(() => {
-                  autoPlayTimerRef.current = null;
-                  if (!isMountedRef.current) return;
-                  playSrc(src);
-                }, 0);
+                setTimeout(() => playSrc(src), 0);
               }
 
             } else if (isDone) {

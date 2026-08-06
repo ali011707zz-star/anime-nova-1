@@ -11,7 +11,6 @@ import { StatusBar } from "expo-status-bar";
 import { useVideoPlayer, VideoView } from "expo-video";
 import * as Brightness from "expo-brightness";
 import { VolumeManager } from "../lib/volume-manager";
-import { RiftPlayer as NativeMedia3RiftPlayer } from "./RiftPlayerNative";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator, Animated, Dimensions, Easing, I18nManager, Platform,
@@ -20,11 +19,6 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { getBaseUrl } from "@/utils/api";
-import {
-  clearPlayerSession,
-  logPlayerError,
-  markPlayerSession,
-} from "@/utils/crashLogger";
 
 const { width: W, height: H } = Dimensions.get("window");
 
@@ -371,7 +365,7 @@ function ScreenshotFlash({ visible }: { visible: boolean }) {
 }
 
 /* ─── Main Component ─── */
-function ExpoVideoRiftPlayer({
+export function RiftPlayer({
   sources,
   initialSourceIndex = 0,
   title,
@@ -586,25 +580,6 @@ function ExpoVideoRiftPlayer({
     };
   }, []);
 
-  /* ─── Native-crash breadcrumb ───
-     ErrorBoundary/JS global handlers cannot observe an ExoPlayer crash.
-     Keep the current player context until a normal unmount; the next launch
-     turns a leftover marker into a server-side fatal report. */
-  useEffect(() => {
-    markPlayerSession({
-      title,
-      episode,
-      source: currentSrc?.label,
-      url: currentSrc?.url,
-    }).catch(() => {});
-  }, [title, episode, currentSrc?.label, currentSrc?.url]);
-
-  useEffect(() => {
-    return () => {
-      clearPlayerSession().catch(() => {});
-    };
-  }, []);
-
   /* ─── تهيئة السطوع والصوت من قيم النظام الحقيقية عند فتح المشغّل ─── */
   const originalBrightnessRef = useRef<number | null>(null);
   useEffect(() => {
@@ -794,11 +769,6 @@ function ExpoVideoRiftPlayer({
           loadTimeoutRef.current = null;
           if (!aliveRef.current) return;
           console.warn(`[RiftPlayer] ⏱ timeout (12s) — ${playableSources[srcIdx]?.label || "?"}: ${playableSources[srcIdx]?.url?.slice(0, 80)}`);
-            logPlayerError({
-              message: "Player load timeout after 12 seconds",
-              site: playableSources[srcIdx]?.label,
-              url: playableSources[srcIdx]?.url,
-            });
           setError(true);
           setBuffering(false);
         }, 12000);
@@ -828,12 +798,6 @@ function ExpoVideoRiftPlayer({
           setBuffering(false);
           /* تفاصيل الخطأ — ضرورية لتشخيص مشاكل ExoPlayer/AVPlayer مع المصادر */
           console.error(`[RiftPlayer] ❌ خطأ في التشغيل:`, JSON.stringify(e));
-          const nativeError = e?.error;
-          logPlayerError({
-            message: nativeError?.message ?? e?.message ?? (typeof nativeError === "string" ? nativeError : "Native player error"),
-            site: playableSources[srcIdx]?.label,
-            url: playableSources[srcIdx]?.url,
-          });
         }
       }
     });
@@ -982,11 +946,6 @@ function ExpoVideoRiftPlayer({
             stallRef.current = { lastPos: pos, lastAt: Date.now() };
           } else if (stallRef.current.lastAt > 0 && Date.now() - stallRef.current.lastAt > STALL_TIMEOUT_MS) {
             console.warn(`[RiftPlayer] 🔴 stall detected (${STALL_TIMEOUT_MS / 1000}s no progress) — switching source`);
-            logPlayerError({
-              message: `Player stalled for ${STALL_TIMEOUT_MS / 1000} seconds`,
-              site: currentSrc?.label,
-              url: currentSrc?.url,
-            });
             stallRef.current = { lastPos: -1, lastAt: 0 };
             setError(true);
             setBuffering(false);
@@ -1502,11 +1461,6 @@ function ExpoVideoRiftPlayer({
     const srcUrl = newSrc?.url;
     if (!isValidPlayerSourceUrl(srcUrl)) {
       console.warn(`[RiftPlayer] ⛔ URL غير صالح للمصدر ${safeIdx + 1}: "${srcUrl?.slice(0, 60) ?? "فارغ"}"`);
-      logPlayerError({
-        message: "Invalid player source URL",
-        site: newSrc.label,
-        url: srcUrl,
-      });
       setError(true);
       setBuffering(false);
       return;
@@ -1520,11 +1474,6 @@ function ExpoVideoRiftPlayer({
       /* play() is triggered in statusChange → readyToPlay once the stream is buffered */
     } catch (e) {
       console.warn("[RiftPlayer] player.replace() رمى استثناء:", e);
-      logPlayerError({
-        message: `player.replace failed: ${e instanceof Error ? e.message : String(e)}`,
-        site: newSrc.label,
-        url: srcUrl,
-      });
       setError(true);
       setBuffering(false);
     }
@@ -2619,17 +2568,6 @@ function ExpoVideoRiftPlayer({
 
     </View>
   );
-}
-
-/**
- * Android uses the in-app Media3 implementation. The Expo Video player above
- * intentionally remains intact as the iOS/web fallback and rollback copy.
- */
-export function RiftPlayer(props: Props) {
-  if (Platform.OS === "android") {
-    return <NativeMedia3RiftPlayer {...props} />;
-  }
-  return <ExpoVideoRiftPlayer {...props} />;
 }
 
 /* ─── Accordion Section Component ─── */
