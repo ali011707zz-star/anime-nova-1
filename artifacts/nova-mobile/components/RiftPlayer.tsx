@@ -593,12 +593,28 @@ export function RiftPlayer({
   /* timers صغيرة غير مُتتبَّعة سابقاً — يجب مسحها في master cleanup لمنع كراش الـ native player */
   const replayTimeoutRef         = useRef<ReturnType<typeof setTimeout> | null>(null);
   const screenshotFlashTimerRef  = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /* طلبات الشبكة المرتبطة بالمصدر الحالي — تُلغى قبل تبديل الحلقة أو إغلاقها. */
+  const subtitleAbortRef         = useRef<AbortController | null>(null);
+  const whisperAbortRef          = useRef<AbortController | null>(null);
+  const subtitleTimeoutRef       = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const playerSubscriptionsRef  = useRef<Array<{ remove: () => void }>>([]);
+  /* يؤجل replace إلى effect بعد إعادة تسجيل listeners الخاصة بالمصدر الجديد. */
+  const nativeSrcIdxRef          = useRef(safeInitialIndex);
+  const replaceCallTimerRef      = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     aliveRef.current = true;
     return () => {
       aliveRef.current = false;
+      switchGenerationRef.current += 1;
+      replaceInFlightRef.current = false;
+      pendingSwitchIdxRef.current = null;
       if (waitForSrcTimerRef.current) { clearTimeout(waitForSrcTimerRef.current); waitForSrcTimerRef.current = null; }
+      if (replaceCallTimerRef.current) { clearTimeout(replaceCallTimerRef.current); replaceCallTimerRef.current = null; }
+      subtitleAbortRef.current?.abort();
+      subtitleAbortRef.current = null;
+      whisperAbortRef.current?.abort();
+      whisperAbortRef.current = null;
     };
   }, []);
 
@@ -683,6 +699,13 @@ export function RiftPlayer({
   /* ─── Master cleanup on unmount — تحرير جميع الموارد النشطة ─── */
   useEffect(() => {
     return () => {
+      /* أزل listeners قبل إيقاف المشغل حتى لا تصل callbacks native أثناء
+         تفكيك VideoView في route transition. */
+      for (const subscription of playerSubscriptionsRef.current) {
+        try { subscription.remove(); } catch {}
+      }
+      playerSubscriptionsRef.current = [];
+
       /* 1. أوقف المشغّل وحرِّر موارده الأصلية (Native ExoPlayer / AVPlayer) */
       try { player.pause(); } catch {}
       /* useVideoPlayer owns the native player's lifecycle and releases it
@@ -716,6 +739,12 @@ export function RiftPlayer({
          كان يُسبّب setState بعد unmount → crash عند التبديل السريع بين المصادر */
       if (waitForSrcTimerRef.current) { clearTimeout(waitForSrcTimerRef.current); waitForSrcTimerRef.current = null; }
       if (replaceSafetyTimerRef.current) { clearTimeout(replaceSafetyTimerRef.current); replaceSafetyTimerRef.current = null; }
+      if (replaceCallTimerRef.current) { clearTimeout(replaceCallTimerRef.current); replaceCallTimerRef.current = null; }
+      if (subtitleTimeoutRef.current) { clearTimeout(subtitleTimeoutRef.current); subtitleTimeoutRef.current = null; }
+      subtitleAbortRef.current?.abort();
+      subtitleAbortRef.current = null;
+      whisperAbortRef.current?.abort();
+      whisperAbortRef.current = null;
 
       /* 6. فرِّغ subtitle cache + cues لتحرير الذاكرة
          loadedCues قد تكون مئات/آلاف من الـ cues المترجمة — تحريرها فوراً يُقلل ضغط GC */
@@ -843,9 +872,13 @@ export function RiftPlayer({
         }
       }
     });
+    playerSubscriptionsRef.current = [sub1, sub2];
     return () => {
-      sub1.remove();
-      sub2.remove();
+      try { sub1.remove(); } catch {}
+      try { sub2.remove(); } catch {}
+      playerSubscriptionsRef.current = playerSubscriptionsRef.current.filter(
+        subscription => subscription !== sub1 && subscription !== sub2,
+      );
       /* ⚠️ لا نُلغي loadTimeoutRef هنا — هذا الـ effect يُعاد تشغيله عند تغيير
          playableSources (وصول مصادر جديدة من الخلفية). إلغاء الـ timeout هنا
          كان يُزيل الحماية من الـ black-screen بينما المشغّل لا يزال في loading.
@@ -1093,6 +1126,12 @@ export function RiftPlayer({
     subOffsetRef.current = 0;
     let cancelled = false;
     const streamAbort = new AbortController(); // هوست هنا حتى نتمكن من إلغائه في cleanup
+    subtitleAbortRef.current?.abort();
+    subtitleAbortRef.current = streamAbort;
+    if (subtitleTimeoutRef.current) {
+      clearTimeout(subtitleTimeoutRef.current);
+      subtitleTimeoutRef.current = null;
+    }
 
     /* مفتاح الكاش خاص بكل لغة لتجنب إرجاع cues الإنجليزية حين يطلب المستخدم العربية */
     const cacheKey = (anilistId && episode && subLang === "ar") ? `sub-ar-${anilistId}-${episode}` : null;
@@ -1123,6 +1162,11 @@ export function RiftPlayer({
         // 🌊 متدفق: ترجمة عربية chunk by chunk عبر SSE
         setSubLoading(true);
         setLoadedCues([]);
+        const streamTimeout = setTimeout(() => {
+          subtitleTimeoutRef.current = null;
+          streamAbort.abort();
+        }, 90_000);
+        subtitleTimeoutRef.current = streamTimeout;
 
         let allCues: SubCue[] = [];
         _fetchStreamedSubtitles(url, (incoming) => {
@@ -1132,6 +1176,10 @@ export function RiftPlayer({
           setSubOn(true);
           if (allCues.length > 0) setSubLoading(false);
         }, streamAbort.signal).then(() => {
+          if (subtitleTimeoutRef.current === streamTimeout) {
+            clearTimeout(streamTimeout);
+            subtitleTimeoutRef.current = null;
+          }
           if (cancelled) return;
           setSubLoading(false);
           if (allCues.length > 0) {
@@ -1148,15 +1196,24 @@ export function RiftPlayer({
             }
           }
         }).catch(() => {
+          if (subtitleTimeoutRef.current === streamTimeout) {
+            clearTimeout(streamTimeout);
+            subtitleTimeoutRef.current = null;
+          }
           if (!cancelled) setSubLoading(false);
         });
       } else {
         // VTT/SRT نص مباشر
         setSubLoading(true);
         setLoadedCues([]);
+        const directTimeout = setTimeout(() => {
+          subtitleTimeoutRef.current = null;
+          streamAbort.abort();
+        }, 30_000);
+        subtitleTimeoutRef.current = directTimeout;
         fetch(url, {
           headers: { "Accept": "text/vtt,text/plain,*/*" },
-          signal: AbortSignal.timeout(30_000),
+          signal: streamAbort.signal,
         }).then(async r => {
           if (!r.ok) throw new Error(`HTTP ${r.status}`);
           if (cancelled) return;
@@ -1169,12 +1226,25 @@ export function RiftPlayer({
         }).catch(() => {
           if (!cancelled) setLoadedCues([]);
         }).finally(() => {
+          if (subtitleTimeoutRef.current === directTimeout) {
+            clearTimeout(directTimeout);
+            subtitleTimeoutRef.current = null;
+          }
           if (!cancelled) setSubLoading(false);
         });
       }
     })();
 
-    return () => { cancelled = true; streamAbort.abort(); setSubLoading(false); };
+    return () => {
+      cancelled = true;
+      streamAbort.abort();
+      if (subtitleAbortRef.current === streamAbort) subtitleAbortRef.current = null;
+      if (subtitleTimeoutRef.current) {
+        clearTimeout(subtitleTimeoutRef.current);
+        subtitleTimeoutRef.current = null;
+      }
+      if (aliveRef.current) setSubLoading(false);
+    };
   }, [currentSrc?.subtitleUrl, srcIdx, anilistId, episode, subLang]); // eslint-disable-line
 
   /* ─── Auto-enable subtitles when source provides a subtitle URL ─── */
@@ -1528,6 +1598,14 @@ export function RiftPlayer({
     stallNudgeTriedRef.current = false;
     /* مسح الترجمات القديمة فوراً حتى لا تظهر مع المصدر الجديد */
     setLoadedCues([]);
+    subtitleAbortRef.current?.abort();
+    subtitleAbortRef.current = null;
+    if (subtitleTimeoutRef.current) {
+      clearTimeout(subtitleTimeoutRef.current);
+      subtitleTimeoutRef.current = null;
+    }
+    whisperAbortRef.current?.abort();
+    whisperAbortRef.current = null;
     /* Reset whisper status when source changes */
     setWhisperStatus("idle");
     setWhisperLang("");
@@ -1544,41 +1622,62 @@ export function RiftPlayer({
 
     setError(false);
     setBuffering(true);
-    /* علِّم أن عملية replace() أصبحت جارية — أي استدعاء switchSource آخر يصل الآن
-       سيُخزَّن في pendingSwitchIdxRef بدل أن يُنفَّذ فوراً فوق هذه العملية. */
-    replaceInFlightRef.current = true;
-    if (replaceSafetyTimerRef.current) clearTimeout(replaceSafetyTimerRef.current);
-    /* شبكة أمان: إذا لم يصل أي statusChange خلال 10ث (حالة نادرة/غير متوقعة من
-       native) نُحرِّر القفل يدوياً حتى لا يتجمَّد التبديل للأبد. */
-    replaceSafetyTimerRef.current = setTimeout(() => {
-      replaceSafetyTimerRef.current = null;
-      replaceInFlightRef.current = false;
-      const pending = pendingSwitchIdxRef.current;
-      pendingSwitchIdxRef.current = null;
-      if (pending !== null && aliveRef.current) switchSourceRef.current?.(pending);
-    }, 10_000);
-    try {
-      /* أوقِف المشغّل قبل الاستبدال — يمنع ExoPlayer/AVPlayer من معالجة prepare()
-         لمصدر جديد بينما هو لا يزال في حالة "يشغّل" للمصدر القديم، وهو أحد
-         أسباب التسابق native الذي يُسبِّب الكراش الفوري. */
-      player.pause();
-      /* نمرّر URL string فقط — VPS proxy يُضيف Referer/Origin داخلياً */
-      player.replace(srcUrl as any);
-      /* play() is triggered in statusChange → readyToPlay once the stream is buffered,
-         حيث يُحرَّر replaceInFlightRef أيضاً. */
-    } catch (e) {
-      console.warn("[RiftPlayer] player.replace() رمى استثناء:", e);
-      setError(true);
-      setBuffering(false);
-      if (replaceSafetyTimerRef.current) { clearTimeout(replaceSafetyTimerRef.current); replaceSafetyTimerRef.current = null; }
-      replaceInFlightRef.current = false;
-      const pending = pendingSwitchIdxRef.current;
-      pendingSwitchIdxRef.current = null;
-      if (pending !== null && aliveRef.current) switchSourceRef.current?.(pending);
-    }
+    /* لا نستدعي pause()/replace() هنا. استدعاؤهما داخل نفس دورة الحالة التي
+       غيّرت srcIdx كان يسمح لحدث native قديم بالتداخل مع المصدر الجديد.
+       effect مستقل ينفّذ replace بعد إعادة تسجيل listeners الجديدة. */
   }, [player, playableSources]);
   const switchSourceRef = useRef(switchSource);
   useEffect(() => { switchSourceRef.current = switchSource; }, [switchSource]);
+
+  /* ─── Serialized native source replacement ───
+     يُنفّذ بعد effect الـlisteners أعلاه، وبعملية replace واحدة فقط. */
+  useEffect(() => {
+    if (nativeSrcIdxRef.current === srcIdx) return;
+    nativeSrcIdxRef.current = srcIdx;
+    const nextSrc = playableSources[srcIdx];
+    if (!nextSrc || !isValidPlayerSourceUrl(nextSrc.url)) return;
+
+    if (replaceCallTimerRef.current) clearTimeout(replaceCallTimerRef.current);
+    replaceCallTimerRef.current = setTimeout(() => {
+      replaceCallTimerRef.current = null;
+      if (!aliveRef.current) return;
+
+      replaceInFlightRef.current = true;
+      if (replaceSafetyTimerRef.current) clearTimeout(replaceSafetyTimerRef.current);
+      replaceSafetyTimerRef.current = setTimeout(() => {
+        replaceSafetyTimerRef.current = null;
+        replaceInFlightRef.current = false;
+        const pending = pendingSwitchIdxRef.current;
+        pendingSwitchIdxRef.current = null;
+        if (pending !== null && aliveRef.current) switchSourceRef.current?.(pending);
+      }, 10_000);
+
+      try {
+        /* replace() يدير إيقاف الـpipeline السابق داخلياً؛ لا نضيف pause()
+           قبله لأن استدعاءين native متتاليين كانا سبباً لسباق الكراش. */
+        player.replace(nextSrc.url as any);
+      } catch (e) {
+        console.warn("[RiftPlayer] player.replace() رمى استثناء:", e);
+        setError(true);
+        setBuffering(false);
+        if (replaceSafetyTimerRef.current) {
+          clearTimeout(replaceSafetyTimerRef.current);
+          replaceSafetyTimerRef.current = null;
+        }
+        replaceInFlightRef.current = false;
+        const pending = pendingSwitchIdxRef.current;
+        pendingSwitchIdxRef.current = null;
+        if (pending !== null && aliveRef.current) switchSourceRef.current?.(pending);
+      }
+    }, 0);
+
+    return () => {
+      if (replaceCallTimerRef.current) {
+        clearTimeout(replaceCallTimerRef.current);
+        replaceCallTimerRef.current = null;
+      }
+    };
+  }, [player, playableSources, srcIdx]);
 
   /* ─── Whisper audio transcription ─── */
   const triggerWhisper = useCallback(async () => {
@@ -1587,12 +1686,16 @@ export function RiftPlayer({
     if (!url) return;
     setWhisperStatus("loading");
     setWhisperLang("");
+    whisperAbortRef.current?.abort();
+    const ctrl = new AbortController();
+    whisperAbortRef.current = ctrl;
     const base = getBaseUrl();
     try {
       const r = await fetch(`${base}/api/anime/whisper-transcribe`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ url, duration: 120 }),
+        signal: ctrl.signal,
       });
       if (!r.ok) throw new Error(`${r.status}`);
       const d = await r.json() as {
@@ -1600,6 +1703,7 @@ export function RiftPlayer({
         cues?: Array<{ start: number; end: number; text: string }>;
       };
       if (!d.cues?.length) throw new Error("no cues");
+      if (!aliveRef.current || ctrl.signal.aborted || currentSrc?.url !== url) return;
       setLoadedCues(d.cues as SubCue[]);
       setSubOn(true);
       setWhisperStatus("ready");
@@ -1609,7 +1713,9 @@ export function RiftPlayer({
         AsyncStorage.setItem(`sub-ar-${anilistId}-${episode}`, JSON.stringify(d.cues)).catch(() => {});
       }
     } catch {
-      setWhisperStatus("error");
+      if (aliveRef.current && !ctrl.signal.aborted) setWhisperStatus("error");
+    } finally {
+      if (whisperAbortRef.current === ctrl) whisperAbortRef.current = null;
     }
   }, [whisperStatus, currentSrc?.url, anilistId, episode]);
 
