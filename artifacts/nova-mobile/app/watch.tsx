@@ -20,7 +20,6 @@ import {
   cancelActiveDownload,
 } from "@/utils/downloadManager";
 import * as ScreenOrientation from "expo-screen-orientation";
-import { Alert } from "react-native";
 import { openIsolatedPlayer } from "@/lib/isolatedPlayer";
 
 /* ── Types ── */
