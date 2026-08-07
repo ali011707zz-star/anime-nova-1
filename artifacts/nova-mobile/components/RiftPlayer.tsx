@@ -991,7 +991,7 @@ export function RiftPlayer({
   /* ─── Progress polling ─── */
   useEffect(() => {
     const STALL_TIMEOUT_MS = 15000; // 15ث بدون تقدّم = stall
-    progressTimer.current = setInterval(() => {
+    const id = setInterval(() => {
       try {
         const rawPos = player.currentTime;
         const rawDur = player.duration;
@@ -1046,7 +1046,11 @@ export function RiftPlayer({
         }
       } catch {}
     }, 500);
-    return () => { if (progressTimer.current) clearInterval(progressTimer.current); };
+    progressTimer.current = id;
+    return () => {
+      clearInterval(id);
+      if (progressTimer.current === id) progressTimer.current = null;
+    };
   }, [player, onProgress]); // eslint-disable-line
 
   /* ─── Subtitle cue lookup via rAF ─── */

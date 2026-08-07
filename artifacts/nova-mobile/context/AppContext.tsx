@@ -46,6 +46,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [remoteConfig, setRemoteConfig] = useState<RemoteConfig>(DEFAULT_CONFIG);
   const [watchHistory, setWatchHistory] = useState<WatchProgress[]>([]);
   const [favorites, setFavorites] = useState<FavoriteAnime[]>([]);
+  const [historyHydrated, setHistoryHydrated] = useState(false);
+  const [favoritesHydrated, setFavoritesHydrated] = useState(false);
 
   useEffect(() => {
     loadAll();
@@ -117,6 +119,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         await AsyncStorage.removeItem("nova-favorites").catch(() => {});
       }
     }
+    setHistoryHydrated(true);
+    setFavoritesHydrated(true);
   };
 
   const refreshConfig = useCallback(async () => {
@@ -129,31 +133,44 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     await AsyncStorage.setItem("nova-theme", t);
   };
 
-  const addToHistory = async (item: WatchProgress) => {
-    /* ⚠️ AsyncStorage.setItem داخل setState محظور في React concurrent mode —
-       نحسب القيمة أولاً ثم نكتب AsyncStorage في microtask منفصل */
+  /*
+   * Keep the state updater pure. React may invoke functional updaters more than
+   * once in concurrent mode, so AsyncStorage must never be written from inside
+   * this callback.
+   */
+  const addToHistory = useCallback(async (item: WatchProgress) => {
     setWatchHistory((prev) => {
-      const filtered = prev.filter((h) => !(h.animeId === item.animeId && h.ep === item.ep));
-      const updated = [item, ...filtered].slice(0, 50);
-      Promise.resolve().then(() => AsyncStorage.setItem("nova-history", JSON.stringify(updated)).catch(() => {}));
-      return updated;
+      const exists = prev.find(
+        (historyItem) =>
+          historyItem.animeId === item.animeId && historyItem.ep === item.ep,
+      );
+      if (exists) return prev;
+      return [...prev.slice(-99), item];
     });
-  };
+  }, []);
+
+  /*
+   * Persist after React commits the new state. This keeps storage I/O out of
+   * the state updater and prevents render/update loops in React 19.
+   */
+  useEffect(() => {
+    if (!historyHydrated) return;
+    AsyncStorage.setItem("nova-history", JSON.stringify(watchHistory)).catch(() => {});
+  }, [historyHydrated, watchHistory]);
+
+  useEffect(() => {
+    if (!favoritesHydrated) return;
+    AsyncStorage.setItem("nova-favorites", JSON.stringify(favorites)).catch(() => {});
+  }, [favorites, favoritesHydrated]);
 
   const removeFromHistory = async (animeId: number) => {
-    setWatchHistory((prev) => {
-      const updated = prev.filter((h) => h.animeId !== animeId);
-      Promise.resolve().then(() => AsyncStorage.setItem("nova-history", JSON.stringify(updated)).catch(() => {}));
-      return updated;
-    });
+    setWatchHistory((prev) => prev.filter((h) => h.animeId !== animeId));
   };
 
   const toggleFavorite = async (anime: FavoriteAnime) => {
     setFavorites((prev) => {
       const exists = prev.find((f) => f.id === anime.id);
-      const updated = exists ? prev.filter((f) => f.id !== anime.id) : [anime, ...prev].slice(0, 500);
-      Promise.resolve().then(() => AsyncStorage.setItem("nova-favorites", JSON.stringify(updated)).catch(() => {}));
-      return updated;
+      return exists ? prev.filter((f) => f.id !== anime.id) : [anime, ...prev].slice(0, 500);
     });
   };
 
