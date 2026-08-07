@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import {
   View, Text, Pressable, Image, ScrollView,
-  StyleSheet, Platform, Animated, Easing,
+  StyleSheet, Platform, Animated, Easing, Alert,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
@@ -20,6 +20,8 @@ import {
   cancelActiveDownload,
 } from "@/utils/downloadManager";
 import * as ScreenOrientation from "expo-screen-orientation";
+import { Alert } from "react-native";
+import { openIsolatedPlayer } from "@/lib/isolatedPlayer";
 
 /* ── Types ── */
 type Quality    = "1080p FHD" | "720p HD" | "360p SD";
