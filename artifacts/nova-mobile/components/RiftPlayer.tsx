@@ -2403,14 +2403,14 @@ export function RiftPlayer({
               /* وضع عمودي: أزرار التخطي + التشغيل */
               <View style={s.centerPortraitRow}>
                 {/* زر التخطي للأمام — الأول في JSX → يظهر على اليمين في RTL */}
-                <View style={{ alignItems: "center", gap: 4 }}>
+                <View style={s.controlButtonSlot}>
                   <Pressable onPress={() => seek(positionRef.current + 10)} style={s.centerSeekBtn} hitSlop={14}>
                     <Ionicons name="play-forward" size={24} color="#fff" />
                   </Pressable>
-                  <Text style={s.centerSeekLabel}>10</Text>
+                  <Text style={s.controlButtonLabel}>10</Text>
                 </View>
                 {/* زر المنتصف: play/pause/spinner */}
-                <View style={{ alignItems: "center", justifyContent: "center" }}>
+                <View style={s.controlButtonSlot}>
                   {!isPlaying && !buffering && <PulseRing />}
                   <Pressable onPress={togglePlay} style={s.centerPlayBtn} hitSlop={16}>
                     {buffering && !error
@@ -2423,17 +2423,17 @@ export function RiftPlayer({
                   </Pressable>
                 </View>
                 {/* زر الرجوع — الأخير في JSX → يظهر على اليسار في RTL */}
-                <View style={{ alignItems: "center", gap: 4 }}>
+                <View style={s.controlButtonSlot}>
                   <Pressable onPress={() => seek(positionRef.current - 10)} style={s.centerSeekBtn} hitSlop={14}>
                     <Ionicons name="play-back" size={24} color="#fff" />
                   </Pressable>
-                  <Text style={s.centerSeekLabel}>10</Text>
+                  <Text style={s.controlButtonLabel}>10</Text>
                 </View>
               </View>
             ) : (
               /* وضع أفقي: play/pause في المنتصف دائماً */
               <View style={s.centerLandscapeWrap}>
-                <View style={{ alignItems: "center", justifyContent: "center" }}>
+                <View style={s.controlButtonSlot}>
                   {!isPlaying && !buffering && <PulseRing />}
                   <Pressable onPress={togglePlay} style={s.centerPlayBtn} hitSlop={16}>
                     {buffering && !error
@@ -2529,10 +2529,12 @@ export function RiftPlayer({
 
               {/* يسار: قفل + ملء شاشة */}
               <View style={s.bottomSide}>
-                <Pressable onPress={() => setIsLocked(true)} style={s.ctrlIconBtn} hitSlop={10}>
-                  <Ionicons name="lock-closed-outline" size={16} color="rgba(255,255,255,0.80)" />
-                </Pressable>
-                <View>
+                <View style={s.controlButtonSlot}>
+                  <Pressable onPress={() => setIsLocked(true)} style={s.ctrlIconBtn} hitSlop={10}>
+                    <Ionicons name="lock-closed-outline" size={16} color="rgba(255,255,255,0.80)" />
+                  </Pressable>
+                </View>
+                <View style={s.controlButtonSlot}>
                   {showFitMenu && (
                     <View style={s.fitDropdown}>
                       {([
@@ -2561,32 +2563,36 @@ export function RiftPlayer({
               {/* وسط: تخطي + تشغيل (وضع أفقي فقط) — "10" خارج الدائرة للمحاذاة الصحيحة */}
               <View style={s.bottomCenter}>
                 {!isPortrait && (
-                  <View style={{ alignItems: "center", gap: 2 }}>
+                  <View style={s.controlButtonSlot}>
                     <Pressable onPress={() => seek(positionRef.current + 10)} style={s.seekCtrlBtn} hitSlop={10}>
                       <Ionicons name="play-forward" size={17} color="rgba(255,255,255,0.90)" />
                     </Pressable>
-                    <Text style={s.seekCtrlLabel}>10</Text>
+                    <Text style={s.controlButtonLabel}>10</Text>
                   </View>
                 )}
-                <Pressable onPress={togglePlay} style={s.bottomPlayBtn} hitSlop={10}>
-                  <Ionicons name={isPlaying ? "pause" : "play"} size={23} color="#fff" style={isPlaying ? undefined : { transform: [{ translateX: 2 }] }} />
-                </Pressable>
+                <View style={s.controlButtonSlot}>
+                  <Pressable onPress={togglePlay} style={s.bottomPlayBtn} hitSlop={10}>
+                    <Ionicons name={isPlaying ? "pause" : "play"} size={23} color="#fff" style={isPlaying ? undefined : { transform: [{ translateX: 2 }] }} />
+                  </Pressable>
+                </View>
                 {!isPortrait && (
-                  <View style={{ alignItems: "center", gap: 2 }}>
+                  <View style={s.controlButtonSlot}>
                     <Pressable onPress={() => seek(positionRef.current - 10)} style={s.seekCtrlBtn} hitSlop={10}>
                       <Ionicons name="play-back" size={17} color="rgba(255,255,255,0.90)" />
                     </Pressable>
-                    <Text style={s.seekCtrlLabel}>10</Text>
+                    <Text style={s.controlButtonLabel}>10</Text>
                   </View>
                 )}
               </View>
 
               {/* يمين: كتم + تشغيل تلقائي + سرعة */}
               <View style={[s.bottomSide, { justifyContent: "flex-end" }]}>
-                <Pressable onPress={() => { setIsMuted(v => !v); fadeIn(); }} style={[s.ctrlIconBtn, isMuted && s.ctrlIconBtnMuted]} hitSlop={10}>
-                  <Ionicons name={isMuted ? "volume-mute-outline" : "volume-high-outline"} size={16} color={isMuted ? "#fca5a5" : "rgba(255,255,255,0.80)"} />
-                </Pressable>
-                <View>
+                <View style={s.controlButtonSlot}>
+                  <Pressable onPress={() => { setIsMuted(v => !v); fadeIn(); }} style={[s.ctrlIconBtn, isMuted && s.ctrlIconBtnMuted]} hitSlop={10}>
+                    <Ionicons name={isMuted ? "volume-mute-outline" : "volume-high-outline"} size={16} color={isMuted ? "#fca5a5" : "rgba(255,255,255,0.80)"} />
+                  </Pressable>
+                </View>
+                <View style={s.controlButtonSlot}>
                   {showSpeedMenu && (
                     <View style={s.speedDropdown}>
                       {SPEEDS.map(sp => (
@@ -3123,6 +3129,8 @@ const s = StyleSheet.create({
   centerOverlay: { flex: 1, alignItems: "center", justifyContent: "center", paddingTop: 60 },
   centerLandscapeWrap: { alignItems: "center" },
   centerPortraitRow: { flexDirection: "row", alignItems: "center", gap: 28 },
+  controlButtonSlot: { height: 72, justifyContent: "center", alignItems: "center" },
+  controlButtonLabel: { position: "absolute", bottom: -2, color: "rgba(255,255,255,0.80)", fontSize: 11, fontFamily: "Cairo_700Bold", lineHeight: 13 },
   centerSeekBtn: {
     width: 58, height: 58, borderRadius: 29,
     backgroundColor: "rgba(0,0,0,0.38)", borderWidth: 1, borderColor: "rgba(255,255,255,0.20)",
