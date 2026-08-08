@@ -233,6 +233,7 @@ export default function Browse() {
           }),
           signal: ctrl.signal,
         });
+        if (!r.ok) throw new Error(`search ${r.status}`);
         const json = await r.json();
         if (!ctrl.signal.aborted && requestId === searchRequestRef.current) {
           setSearchResults(json.data?.Page?.media || []);

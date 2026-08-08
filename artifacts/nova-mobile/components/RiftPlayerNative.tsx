@@ -437,17 +437,23 @@ export function RiftPlayer({
               <Text style={styles.time}>{formatTime(duration)}</Text>
             </View>
             <View style={styles.controlsRow}>
-              <Pressable onPress={() => seek(position - 10)} style={styles.control}>
-                <Ionicons name="play-back" size={20} color="#fff" />
-                <Text style={styles.controlText}>10</Text>
-              </Pressable>
-              <Pressable onPress={togglePlayback} style={styles.playButton}>
-                <Ionicons name={isPlaying ? "pause" : "play"} size={24} color="#09090b" />
-              </Pressable>
-              <Pressable onPress={() => seek(position + 10)} style={styles.control}>
-                <Ionicons name="play-forward" size={20} color="#fff" />
-                <Text style={styles.controlText}>10</Text>
-              </Pressable>
+              <View style={styles.controlSide}>
+                <Pressable onPress={() => seek(position - 10)} style={styles.control}>
+                  <Ionicons name="play-back" size={20} color="#fff" />
+                  <Text style={styles.controlText}>10</Text>
+                </Pressable>
+              </View>
+              <View style={styles.controlCenter}>
+                <Pressable onPress={togglePlayback} style={styles.playButton}>
+                  <Ionicons name={isPlaying ? "pause" : "play"} size={24} color="#09090b" />
+                </Pressable>
+              </View>
+              <View style={styles.controlSide}>
+                <Pressable onPress={() => seek(position + 10)} style={styles.control}>
+                  <Ionicons name="play-forward" size={20} color="#fff" />
+                  <Text style={styles.controlText}>10</Text>
+                </Pressable>
+              </View>
               {skipIntro && position >= skipIntro.start && position < skipIntro.end && (
                 <Pressable onPress={() => seek(skipIntro.end)} style={styles.skip}>
                   <Text style={styles.skipText}>تخطي المقدمة</Text>
@@ -529,7 +535,9 @@ const styles = StyleSheet.create({
   seekTrack: { flex: 1, height: 22, justifyContent: "center" },
   seekFill: { height: 4, borderRadius: 2, backgroundColor: "#a78bfa" },
   seekThumb: { position: "absolute", width: 12, height: 12, borderRadius: 6, backgroundColor: "#fff", marginLeft: -6 },
-  controlsRow: { flexDirection: "row", alignItems: "center", gap: 9, marginTop: 4 },
+  controlsRow: { flexDirection: "row", alignItems: "center", marginTop: 4 },
+  controlSide: { flex: 1, alignItems: "center" },
+  controlCenter: { width: 66, alignItems: "center" },
   control: { flexDirection: "row", alignItems: "center", padding: 7 },
   controlText: { color: "#fff", fontSize: 10, marginLeft: -5 },
   playButton: { width: 48, height: 48, borderRadius: 24, backgroundColor: "#c4b5fd", alignItems: "center", justifyContent: "center" },

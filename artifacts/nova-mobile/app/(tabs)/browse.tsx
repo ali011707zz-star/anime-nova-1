@@ -141,6 +141,36 @@ query ($search: String!) {
   }
 }`;
 
+const ARABIC_SEARCH_ALIASES: Record<string, string> = {
+  "ناروتو": "Naruto",
+  "هانتر": "Hunter x Hunter",
+  "هنتر": "Hunter x Hunter",
+  "ون بيس": "One Piece",
+  "وان بيس": "One Piece",
+  "دراغون بول": "Dragon Ball",
+  "دراجون بول": "Dragon Ball",
+  "ديمون سلاير": "Demon Slayer",
+  "قاتل الشياطين": "Demon Slayer",
+  "هجوم العمالقة": "Shingeki no Kyojin",
+  "بوكو نو هيرو": "Boku no Hero Academia",
+  "أكاديمية بطلي": "Boku no Hero Academia",
+  "بليتش": "Bleach",
+  "جوجوتسو كايسن": "Jujutsu Kaisen",
+  "جوجوتسو": "Jujutsu Kaisen",
+  "سولو ليفلينج": "Solo Leveling",
+  "بلاك كلوفر": "Black Clover",
+};
+
+function translateSearchQuery(value: string): string {
+  const query = value.trim();
+  if (!query) return "";
+  if (ARABIC_SEARCH_ALIASES[query]) return ARABIC_SEARCH_ALIASES[query];
+  for (const [arabic, english] of Object.entries(ARABIC_SEARCH_ALIASES)) {
+    if (query.includes(arabic)) return query.replace(arabic, english);
+  }
+  return query;
+}
+
 export default function BrowseScreen() {
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
@@ -170,6 +200,7 @@ export default function BrowseScreen() {
   const genRef = useRef(0);
   const searchAbortRef = useRef<AbortController | null>(null);
   const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const searchRequestRef = useRef(0);
 
   /* load genre cover images */
   useEffect(() => {
@@ -242,27 +273,30 @@ export default function BrowseScreen() {
     }
     const ctrl = new AbortController();
     searchAbortRef.current = ctrl;
+    const requestId = ++searchRequestRef.current;
     searchTimerRef.current = setTimeout(async () => {
       setSearchLoading(true);
       try {
+        const translated = translateSearchQuery(search);
         const r = await fetch(`${getBaseUrl()}/api/anilist`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             query: SEARCH_QUERY(sort, format, season, year, activeGenre),
-            variables: { search: search.trim() },
+            variables: { search: translated },
           }),
           signal: ctrl.signal,
         });
+        if (!r.ok) throw new Error(`search ${r.status}`);
         const d = await r.json();
-        if (!ctrl.signal.aborted) {
+        if (!ctrl.signal.aborted && requestId === searchRequestRef.current) {
           setSearchItems((d.data?.Page?.media || [])
             .filter((a: AnimeResult) => !(a.genres || []).some(gx => BLOCKED.has(gx))));
         }
       } catch (e: any) {
-        if (e?.name !== "AbortError" && !ctrl.signal.aborted) setSearchItems([]);
+        if (e?.name !== "AbortError" && !ctrl.signal.aborted && requestId === searchRequestRef.current) setSearchItems([]);
       } finally {
-        if (!ctrl.signal.aborted) setSearchLoading(false);
+        if (!ctrl.signal.aborted && requestId === searchRequestRef.current) setSearchLoading(false);
       }
     }, 400);
     return () => {

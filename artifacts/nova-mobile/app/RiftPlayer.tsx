@@ -2655,14 +2655,12 @@ const s = StyleSheet.create({
   bottomSide: { flex: 1, flexDirection: "row", alignItems: "center", gap: 8 },
   bottomSidePortrait: { gap: 4 },
   bottomCenter: {
-    position: "absolute", top: "50%" as any, left: "50%" as any,
-    marginLeft: -91,
+    position: "absolute", top: "50%" as any, left: 0, right: 0,
     transform: [{ translateY: -29 }],
     flexDirection: "row", alignItems: "center", justifyContent: "center",
     gap: 16, zIndex: 2,
   },
   bottomCenterPortrait: {
-    marginLeft: -66,
     transform: [{ translateY: -24 }],
     gap: 8,
   },

@@ -1877,7 +1877,7 @@ export default function RiftPlayer({
 
                 {/* ── Controls row ── */}
                 <div
-                  className="flex items-center px-3 pt-2"
+                  className="relative flex items-center px-3 pt-2"
                   style={{
                     /* portrait-rotated: physical bottom → player's left → no safe area needed there;
                        physical top (notch) → player's left edge in landscape, handled by paddingLeft.
@@ -1941,7 +1941,8 @@ export default function RiftPlayer({
                   </div>
 
                   {/* Center: +10ث · play/pause · -10ث  (RTL: تقدم على اليسار، رجوع على اليمين) */}
-                  <div className="flex items-center gap-2">
+                  <div className="absolute inset-x-0 top-2 flex items-center justify-center gap-2 pointer-events-none">
+                    <div className="flex items-center gap-2 pointer-events-auto">
                     <button
                       onPointerDown={e => { e.stopPropagation(); skip(10); showControls(); }}
                       className="flex flex-col items-center justify-center gap-[3px] rounded-2xl active:scale-90 transition-all"
@@ -1966,6 +1967,7 @@ export default function RiftPlayer({
                       <RotateCcw className="w-[18px] h-[18px] text-white/80" strokeWidth={1.8} />
                       <span className="font-mono font-black leading-none text-white/60" style={{ fontSize: 9 }}>-10ث</span>
                     </button>
+                    </div>
                   </div>
 
                   {/* Right: view-mode · lock */}
