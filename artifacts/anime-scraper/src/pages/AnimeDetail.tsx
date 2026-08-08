@@ -867,7 +867,7 @@ export default function AnimeDetail() {
             </div>
             {/* YouTube iframe fills full screen */}
             <iframe
-              src={`https://www.youtube-nocookie.com/embed/${trailerYT}?autoplay=1&rel=0&fs=1&playsinline=1&origin=${encodeURIComponent(window.location.origin)}`}
+              src={`https://www.youtube-nocookie.com/embed/${trailerYT}?autoplay=1&rel=0&modestbranding=1&fs=1&playsinline=1&origin=${encodeURIComponent(window.location.origin)}`}
               className="w-full flex-1"
               allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
               allowFullScreen

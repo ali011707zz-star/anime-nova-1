@@ -526,10 +526,11 @@ export default function AnimationDetail() {
               <div className="w-9" />
             </div>
             <iframe
-              src={`https://www.youtube.com/embed/${trailerYT}?autoplay=1&rel=0&fs=1&playsinline=0`}
+              src={`https://www.youtube-nocookie.com/embed/${trailerYT}?autoplay=1&rel=0&modestbranding=1&fs=1&playsinline=1`}
               className="w-full flex-1"
-              allow="autoplay; fullscreen; picture-in-picture"
+              allow="autoplay; fullscreen; encrypted-media; picture-in-picture"
               allowFullScreen
+              referrerPolicy="strict-origin-when-cross-origin"
               style={{ border: "none" }}
             />
           </motion.div>

@@ -10,6 +10,7 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { getBaseUrl } from "@/utils/api";
+import { getYoutubeEmbedUrl, getYoutubeReferer } from "@/utils/youtube";
 
 const { width: W } = Dimensions.get("window");
 const IMG_W = "https://image.tmdb.org/t/p/w500";
@@ -429,7 +430,9 @@ export default function AnimationDetailScreen() {
         {trailerKey ? (
           <WebView
             source={{
-              html: `<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width,initial-scale=1.0"><style>*{margin:0;padding:0;background:#000;}html,body{width:100%;height:100%;overflow:hidden;display:flex;align-items:center;justify-content:center;}iframe{position:absolute;top:0;left:0;width:100%;height:100%;border:0;}</style></head><body><iframe src="https://www.youtube-nocookie.com/embed/${trailerKey}?autoplay=1&playsinline=1&rel=0&modestbranding=1&fs=1" allow="autoplay;fullscreen;picture-in-picture" allowfullscreen></iframe></body></html>`,
+              html: `<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width,initial-scale=1.0"><meta name="referrer" content="strict-origin-when-cross-origin"><style>*{margin:0;padding:0;background:#000;}html,body{width:100%;height:100%;overflow:hidden;display:flex;align-items:center;justify-content:center;}iframe{position:absolute;top:0;left:0;width:100%;height:100%;border:0;}</style></head><body><iframe src="${getYoutubeEmbedUrl(trailerKey)}" allow="autoplay;fullscreen;encrypted-media;picture-in-picture" allowfullscreen></iframe></body></html>`,
+              baseUrl: getYoutubeReferer(),
+              headers: { Referer: getYoutubeReferer() },
             }}
             style={{ flex: 1 }}
             allowsFullscreenVideo

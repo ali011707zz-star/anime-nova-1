@@ -69,3 +69,4 @@
 - [Mobile native-crash blind spot fixed with Sentry](mobile-native-crash-blind-spot-sentry.md) — zero crash reports ≠ no crash; custom logger was JS-only and missed native crashes; Sentry added, DSN via EXPO_PUBLIC_SENTRY_DSN (not secret); tar@7.5.7 CVE firewall block fixed via pnpm override.
 - [build-apk.yml plugin verification subpath bug](build-apk-plugin-verification-subpath-bug.md) — CI's Expo-plugin-exists check broke on subpath specifiers like "@sentry/react-native/expo"; must resolve to the real npm package dir, not treat the whole string as a package name.
 - [GitHub Actions "not acquired by hosted runner"](github-actions-runner-not-acquired.md) — this error means a GitHub-side outage, not a repo/workflow bug; check githubstatus.com before touching CI config.
+- [YouTube embed referrer](youtube-embed-referrer.md) — trailer embeds need youtube-nocookie, strict cross-origin referrer, and an explicit mobile WebView Referer.

@@ -14,6 +14,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useApp } from "@/context/AppContext";
 import { getBaseUrl } from "@/utils/api";
 import { secureFetch } from "@/utils/secureApi";
+import { getYoutubeEmbedUrl, getYoutubeReferer } from "@/utils/youtube";
 
 const { width: W } = Dimensions.get("window");
 
@@ -729,7 +730,8 @@ export default function AnimeDetailScreen() {
               مع URI مباشر يرى يوتيوب الطلب كأنه من youtube-nocookie.com نفسه. */}
           <WebView
             source={{
-              uri: `https://www.youtube-nocookie.com/embed/${trailerYT}?autoplay=1&playsinline=1&rel=0&modestbranding=1&fs=1`,
+              uri: getYoutubeEmbedUrl(trailerYT),
+              headers: { Referer: getYoutubeReferer() },
             }}
             style={{ flex: 1 }}
             allowsFullscreenVideo
@@ -739,6 +741,7 @@ export default function AnimeDetailScreen() {
             domStorageEnabled
             originWhitelist={["*"]}
             mixedContentMode="always"
+            thirdPartyCookiesEnabled
             userAgent="Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"
             onShouldStartLoadWithRequest={(req) => {
               const url = req.url;
