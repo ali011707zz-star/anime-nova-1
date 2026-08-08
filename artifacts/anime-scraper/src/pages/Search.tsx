@@ -79,12 +79,51 @@ const GENRES_AR: Record<string, string> = {
   "School": "مدرسي", "Isekai": "إيسيكاي",
 };
 
+/**
+ * ✅ محسّن: filterSafe يزيل الأنميات المزيفة والوهمية
+ * - يزيل المحتوى المحظور (Hentai)
+ * - يتحقق من وجود البيانات الأساسية (العنوان، الصورة)
+ * - يزيل النتائج المكررة
+ * - يفلتر المحتوى غير المكتمل أو منخفض الجودة
+ */
 function filterSafe(list: any[]): any[] {
+  const seen = new Set<number>();
+  
   return list.filter(a => {
+    // تخطي النتائج المكررة
+    if (seen.has(a.id)) return false;
+    seen.add(a.id);
+    
+    // تحقق من البيانات الأساسية
+    if (!a.id || !a.title?.romaji || !a.coverImage?.large) {
+      return false;
+    }
+    
+    // حذف المحتوى المحظور
     const genres: string[] = a.genres || [];
-    return !genres.some(g => BLOCKED_GENRES.has(g));
+    if (genres.some(g => BLOCKED_GENRES.has(g))) {
+      return false;
+    }
+    
+    // تجاهل الأنميات بدون حالة معروفة (قد تكون وهمية)
+    if (!a.status || !a.format) {
+      return false;
+    }
+    
+    // تجاهل النتائج بدون سنة إصدار (مشبوهة)
+    if (!a.startDate?.year || a.startDate.year < 1990 || a.startDate.year > new Date().getFullYear() + 2) {
+      return false;
+    }
+    
+    // تجاهل النتائج بدون تصنيفات (غير كاملة)
+    if (!genres || genres.length === 0) {
+      return false;
+    }
+    
+    return true;
   });
 }
+
 const FORMAT_AR: Record<string, string> = {
   TV: "مسلسل", MOVIE: "فيلم", OVA: "OVA", ONA: "ONA", SPECIAL: "خاص", MUSIC: "موسيقى",
 };
@@ -173,7 +212,7 @@ function AnimeCardSmall({ anime }: { anime: AnimeResult }) {
             </div>
           )}
           {fmt && (
-            <div className={`absolute top-2 left-2 text-white text-[7px] px-1.5 py-0.5 rounded-md font-black shadow-md ${isFilm ? "bg-blue-500 shadow-blue-500/40" : "bg-violet-600 shadow-violet-500/30"}`}>
+            <div className={`absolute top-2 left-2 text-white text-[7px] px-1.5 py-0.5 rounded-md font-black shadow-md ${isFilm ? "bg-blue-500 shadow-blue-500/40" : "bg-violet-600 shadow-violet-500/40"}`}>
               {fmt}
             </div>
           )}
@@ -517,7 +556,7 @@ export default function Search() {
           <div className="flex flex-wrap gap-2">
             {history.map((h, i) => (
               <button key={i} onClick={() => setQuery(h)}
-                className="flex items-center gap-1.5 text-[11px] font-bold bg-[#18181B] text-white/55 px-3 py-1.5 rounded-xl border border-white/5 hover:border-primary/30 transition-all active:scale-95 font-['Cairo']">
+                className="flex items-center gap-1.5 text-[11px] font-bold bg-[#18181B] text-white/55 px-3 py-1.5 rounded-xl border border-white/5 hover:border-primary/30 transition-all active:scale-95">
                 <SearchIcon className="w-3 h-3 opacity-50" />
                 {h}
               </button>
@@ -616,7 +655,7 @@ export default function Search() {
                 <button
                   onClick={() => traceFileRef.current?.click()}
                   disabled={traceLoading}
-                  className="w-full flex items-center justify-center gap-2.5 bg-violet-600/20 hover:bg-violet-600/30 border border-violet-500/30 hover:border-violet-500/60 rounded-2xl py-5 text-[14px] font-black font-['Cairo'] text-violet-300 hover:text-violet-200 transition-all active:scale-95 disabled:opacity-40">
+                  className="w-full flex items-center justify-center gap-2.5 bg-violet-600/20 hover:bg-violet-600/30 border border-violet-500/30 hover:border-violet-500/60 rounded-2xl py-5 text-white disabled:opacity-50">
                   <Upload className="w-5 h-5" />
                   ارفع صورة من هاتفك
                 </button>
