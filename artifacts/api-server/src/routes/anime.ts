@@ -14744,6 +14744,7 @@ function isLikelyJapaneseAnime(a: any): boolean {
 
 /** تحويل بيانات Jikan إلى تنسيق AniList */
 function jikanToAniList(a: any): any {
+  const year = a.year || a.aired?.from?.slice?.(0, 4) || null;
   return {
     id: a.mal_id,
     idMal: a.mal_id,
@@ -14757,6 +14758,7 @@ function jikanToAniList(a: any): any {
     bannerImage: null,
     description: a.synopsis || null,
     episodes: a.episodes || null,
+    startDate: { year: year ? Number(year) : null },
     status: a.airing ? "RELEASING" : a.status === "Finished Airing" ? "FINISHED" : "NOT_YET_RELEASED",
     averageScore: a.score ? Math.round(a.score * 10) : null,
     popularity: a.popularity || null,
@@ -14970,6 +14972,7 @@ function kitsuToAniList(a: any): any {
   const attr = a.attributes ?? {};
   const poster = attr.posterImage?.large || attr.posterImage?.medium || null;
   const banner = attr.coverImage?.large || attr.coverImage?.original || null;
+  const year = attr.startDate ? Number(String(attr.startDate).slice(0, 4)) : null;
   const status = attr.status === "current" ? "RELEASING"
     : attr.status === "finished" ? "FINISHED"
     : attr.status === "upcoming" ? "NOT_YET_RELEASED" : "RELEASING";
@@ -14989,6 +14992,7 @@ function kitsuToAniList(a: any): any {
     bannerImage: banner,
     description: attr.description || null,
     episodes: attr.episodeCount || null,
+    startDate: { year: Number.isFinite(year) ? year : null },
     status,
     averageScore: attr.averageRating ? Math.round(parseFloat(attr.averageRating)) : null,
     popularity: attr.userCount || null,

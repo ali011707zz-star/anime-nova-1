@@ -84,7 +84,7 @@ const GENRES_AR: Record<string, string> = {
  * - يزيل المحتوى المحظور (Hentai)
  * - يتحقق من وجود البيانات الأساسية (العنوان، الصورة)
  * - يزيل النتائج المكررة
- * - يفلتر المحتوى غير المكتمل أو منخفض الجودة
+ * - لا يرفض النتائج الاحتياطية التي ينقصها حقل اختياري مثل السنة أو التصنيفات
  */
 function filterSafe(list: any[]): any[] {
   const seen = new Set<number>();
@@ -102,21 +102,6 @@ function filterSafe(list: any[]): any[] {
     // حذف المحتوى المحظور
     const genres: string[] = a.genres || [];
     if (genres.some(g => BLOCKED_GENRES.has(g))) {
-      return false;
-    }
-    
-    // تجاهل الأنميات بدون حالة معروفة (قد تكون وهمية)
-    if (!a.status || !a.format) {
-      return false;
-    }
-    
-    // تجاهل النتائج بدون سنة إصدار (مشبوهة)
-    if (!a.startDate?.year || a.startDate.year < 1990 || a.startDate.year > new Date().getFullYear() + 2) {
-      return false;
-    }
-    
-    // تجاهل النتائج بدون تصنيفات (غير كاملة)
-    if (!genres || genres.length === 0) {
       return false;
     }
     
