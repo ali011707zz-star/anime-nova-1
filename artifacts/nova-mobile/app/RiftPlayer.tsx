@@ -2049,11 +2049,11 @@ export function RiftPlayer({
             })()}
 
             {/* ── صف أزرار التحكم السفلي ── */}
-            <View style={s.bottomCtrlRow}>
+            <View style={[s.bottomCtrlRow, isPortrait && s.bottomCtrlRowPortrait]}>
 
               {/* يسار: قفل + ملء شاشة */}
-              <View style={s.bottomSide}>
-                <Pressable onPress={() => setIsLocked(true)} style={s.ctrlIconBtn} hitSlop={10}>
+              <View style={[s.bottomSide, isPortrait && s.bottomSidePortrait]}>
+                <Pressable onPress={() => setIsLocked(true)} style={[s.ctrlIconBtn, isPortrait && s.ctrlIconBtnPortrait]} hitSlop={10}>
                   <Ionicons name="lock-closed-outline" size={16} color="rgba(255,255,255,0.80)" />
                 </Pressable>
                 <View>
@@ -2076,38 +2076,42 @@ export function RiftPlayer({
                       ))}
                     </View>
                   )}
-                  <Pressable onPress={() => { setShowFitMenu(v => !v); setShowSpeedMenu(false); fadeIn(); }} style={[s.ctrlIconBtn, showFitMenu && s.ctrlIconBtnActive]} hitSlop={10}>
+                  <Pressable onPress={() => { setShowFitMenu(v => !v); setShowSpeedMenu(false); fadeIn(); }} style={[s.ctrlIconBtn, isPortrait && s.ctrlIconBtnPortrait, showFitMenu && s.ctrlIconBtnActive]} hitSlop={10}>
                     <Ionicons name="scan-outline" size={16} color={showFitMenu ? "#c4b5fd" : "rgba(255,255,255,0.80)"} />
                   </Pressable>
                 </View>
               </View>
 
-              {/* وسط: تخطي + تشغيل (وضع أفقي فقط) — "10" خارج الدائرة للمحاذاة الصحيحة */}
-              <View style={s.bottomCenter}>
-                {!isPortrait && (
-                  <View style={{ alignItems: "center", gap: 2 }}>
-                    <Pressable onPress={() => seek(positionRef.current - 10)} style={s.seekCtrlBtn} hitSlop={10}>
-                      <Ionicons name="play-back" size={17} color="rgba(255,255,255,0.90)" />
-                    </Pressable>
-                    <Text style={s.seekCtrlLabel}>10</Text>
-                  </View>
-                )}
-                <Pressable onPress={togglePlay} style={s.bottomPlayBtn} hitSlop={10}>
+              {/* وسط: تخطي + تشغيل — مثبت في مركز الشريط في الوضعين العمودي والأفقي */}
+              <View style={[s.bottomCenter, isPortrait && s.bottomCenterPortrait]}>
+                <View style={[s.seekCtrlGroup, isPortrait && s.seekCtrlGroupPortrait]}>
+                  <Pressable
+                    onPress={() => seek(positionRef.current - 10)}
+                    style={[s.seekCtrlBtn, isPortrait && s.seekCtrlBtnPortrait]}
+                    hitSlop={10}
+                  >
+                    <Ionicons name="play-back" size={17} color="rgba(255,255,255,0.90)" />
+                  </Pressable>
+                  <Text style={s.seekCtrlLabel}>10</Text>
+                </View>
+                <Pressable onPress={togglePlay} style={[s.bottomPlayBtn, isPortrait && s.bottomPlayBtnPortrait]} hitSlop={10}>
                   <Ionicons name={isPlaying ? "pause" : "play"} size={23} color="#fff" style={isPlaying ? undefined : { transform: [{ translateX: 2 }] }} />
                 </Pressable>
-                {!isPortrait && (
-                  <View style={{ alignItems: "center", gap: 2 }}>
-                    <Pressable onPress={() => seek(positionRef.current + 10)} style={s.seekCtrlBtn} hitSlop={10}>
-                      <Ionicons name="play-forward" size={17} color="rgba(255,255,255,0.90)" />
-                    </Pressable>
-                    <Text style={s.seekCtrlLabel}>10</Text>
-                  </View>
-                )}
+                <View style={[s.seekCtrlGroup, isPortrait && s.seekCtrlGroupPortrait]}>
+                  <Pressable
+                    onPress={() => seek(positionRef.current + 10)}
+                    style={[s.seekCtrlBtn, isPortrait && s.seekCtrlBtnPortrait]}
+                    hitSlop={10}
+                  >
+                    <Ionicons name="play-forward" size={17} color="rgba(255,255,255,0.90)" />
+                  </Pressable>
+                  <Text style={s.seekCtrlLabel}>10</Text>
+                </View>
               </View>
 
               {/* يمين: كتم + تشغيل تلقائي + سرعة */}
-              <View style={[s.bottomSide, { justifyContent: "flex-end" }]}>
-                <Pressable onPress={() => { setIsMuted(v => !v); fadeIn(); }} style={[s.ctrlIconBtn, isMuted && s.ctrlIconBtnMuted]} hitSlop={10}>
+              <View style={[s.bottomSide, isPortrait && s.bottomSidePortrait, { justifyContent: "flex-end" }]}>
+                <Pressable onPress={() => { setIsMuted(v => !v); fadeIn(); }} style={[s.ctrlIconBtn, isPortrait && s.ctrlIconBtnPortrait, isMuted && s.ctrlIconBtnMuted]} hitSlop={10}>
                   <Ionicons name={isMuted ? "volume-mute-outline" : "volume-high-outline"} size={16} color={isMuted ? "#fca5a5" : "rgba(255,255,255,0.80)"} />
                 </Pressable>
                 <View>
@@ -2125,7 +2129,7 @@ export function RiftPlayer({
                       ))}
                     </View>
                   )}
-                  <Pressable onPress={() => { setShowSpeedMenu(v => !v); setShowFitMenu(false); fadeIn(); }} style={[s.ctrlIconBtn, s.ctrlSpeedBtn, showSpeedMenu && s.ctrlIconBtnActive]} hitSlop={10}>
+                  <Pressable onPress={() => { setShowSpeedMenu(v => !v); setShowFitMenu(false); fadeIn(); }} style={[s.ctrlIconBtn, s.ctrlSpeedBtn, isPortrait && s.ctrlIconBtnPortrait, isPortrait && s.ctrlSpeedBtnPortrait, showSpeedMenu && s.ctrlIconBtnActive]} hitSlop={10}>
                     <Text style={[s.speedLabel, speed !== 1 && s.speedLabelActive]}>{speed}x</Text>
                   </Pressable>
                 </View>
@@ -2644,27 +2648,45 @@ const s = StyleSheet.create({
   /* ── Bottom controls row ── */
   bottomCtrlRow: {
     flexDirection: "row", alignItems: "center", justifyContent: "space-between",
+    position: "relative", minHeight: 58,
     marginTop: 4, marginBottom: 2,
   },
+  bottomCtrlRowPortrait: { minHeight: 64 },
   bottomSide: { flex: 1, flexDirection: "row", alignItems: "center", gap: 8 },
-  bottomCenter: { flexDirection: "row", alignItems: "center", gap: 14 },
+  bottomSidePortrait: { gap: 4 },
+  bottomCenter: {
+    position: "absolute", top: "50%" as any, left: "50%" as any,
+    marginLeft: -91,
+    transform: [{ translateY: -29 }],
+    flexDirection: "row", alignItems: "center", justifyContent: "center",
+    gap: 16, zIndex: 2,
+  },
+  bottomCenterPortrait: {
+    marginLeft: -66,
+    transform: [{ translateY: -24 }],
+    gap: 8,
+  },
 
   /* ── Seek buttons (in bottom row, landscape) ── */
   seekCtrlBtn: {
     width: 46, height: 46, borderRadius: 23,
     backgroundColor: "rgba(255,255,255,0.09)", borderWidth: 1, borderColor: "rgba(255,255,255,0.18)",
-    alignItems: "center", justifyContent: "center", gap: 2,
+    alignItems: "center", justifyContent: "center", gap: 2, flexShrink: 0,
   },
+  seekCtrlGroup: { alignItems: "center", justifyContent: "center", gap: 2, flexShrink: 0 },
+  seekCtrlGroupPortrait: { gap: 1 },
   seekCtrlLabel: { color: "rgba(255,255,255,0.70)", fontSize: 9, fontFamily: "Cairo_700Bold", lineHeight: 11 },
+  seekCtrlBtnPortrait: { width: 34, height: 34, borderRadius: 17 },
 
   /* ── Bottom play button ── */
   bottomPlayBtn: {
     width: 58, height: 58, borderRadius: 29,
     backgroundColor: "rgba(139,92,246,0.88)",
     borderWidth: 2, borderColor: "rgba(196,181,253,0.75)",
-    alignItems: "center", justifyContent: "center",
+    alignItems: "center", justifyContent: "center", flexShrink: 0,
     shadowColor: "#8B5CF6", shadowOpacity: 0.65, shadowRadius: 18, elevation: 12,
   },
+  bottomPlayBtnPortrait: { width: 48, height: 48, borderRadius: 24 },
 
   /* ── Icon control buttons ── */
   ctrlIconBtn: {
@@ -2672,9 +2694,11 @@ const s = StyleSheet.create({
     backgroundColor: "rgba(255,255,255,0.09)", borderWidth: 1, borderColor: "rgba(255,255,255,0.15)",
     alignItems: "center", justifyContent: "center",
   },
+  ctrlIconBtnPortrait: { width: 30, height: 30, borderRadius: 15 },
   ctrlIconBtnActive: { backgroundColor: "rgba(139,92,246,0.28)", borderColor: "rgba(167,139,250,0.50)" },
   ctrlIconBtnMuted:  { backgroundColor: "rgba(239,68,68,0.14)", borderColor: "rgba(239,68,68,0.30)" },
   ctrlSpeedBtn: { paddingHorizontal: 4, minWidth: 42 },
+  ctrlSpeedBtnPortrait: { paddingHorizontal: 2, minWidth: 36 },
   speedLabel: { color: "rgba(255,255,255,0.75)", fontSize: 12, fontFamily: "Cairo_700Bold" },
   speedLabelActive: { color: "#c4b5fd" },
 
