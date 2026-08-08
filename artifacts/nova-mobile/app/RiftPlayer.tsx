@@ -2627,7 +2627,14 @@ const s = StyleSheet.create({
   /* ── Center overlay ── */
   centerOverlay: { flex: 1, alignItems: "center", justifyContent: "center", paddingTop: 60 },
   centerLandscapeWrap: { alignItems: "center" },
-  centerPortraitRow: { flexDirection: "row", alignItems: "center", gap: 28 },
+  /* صف الوسط بعرض ثابت وتقسيم متناظر — يمنع تحرك زر التشغيل بسبب اختلاف
+     عرض الأزرار الجانبية أو اتجاه RTL. */
+  centerPortraitRow: {
+    width: 280,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
   centerSeekBtn: {
     width: 58, height: 58, borderRadius: 29,
     backgroundColor: "rgba(0,0,0,0.38)", borderWidth: 1, borderColor: "rgba(255,255,255,0.20)",
@@ -2657,12 +2664,13 @@ const s = StyleSheet.create({
   bottomCenter: {
     position: "absolute", top: "50%" as any, left: 0, right: 0,
     transform: [{ translateY: -29 }],
-    flexDirection: "row", alignItems: "center", justifyContent: "center",
-    gap: 16, zIndex: 2,
+    width: 190, alignSelf: "center",
+    flexDirection: "row", alignItems: "center", justifyContent: "space-between",
+    zIndex: 2,
   },
   bottomCenterPortrait: {
+    width: 132,
     transform: [{ translateY: -24 }],
-    gap: 8,
   },
 
   /* ── Seek buttons (in bottom row, landscape) ── */
