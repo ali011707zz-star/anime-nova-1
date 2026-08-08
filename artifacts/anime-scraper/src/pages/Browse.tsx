@@ -31,6 +31,48 @@ function coverUrl(id: number) {
   return `https://img.anili.st/media/${id}`;
 }
 
+/* Common Arabic titles that AniList does not consistently match directly. */
+const ARABIC_SEARCH_ALIASES: Record<string, string> = {
+  "ناروتو": "Naruto",
+  "هانتر": "Hunter x Hunter",
+  "هنتر": "Hunter x Hunter",
+  "ون بيس": "One Piece",
+  "وان بيس": "One Piece",
+  "دراغون بول": "Dragon Ball",
+  "دراجون بول": "Dragon Ball",
+  "ديمون سلاير": "Demon Slayer",
+  "قاتل الشياطين": "Demon Slayer",
+  "هجوم العمالقة": "Shingeki no Kyojin",
+  "بوكو نو هيرو": "Boku no Hero Academia",
+  "أكاديمية بطلي": "Boku no Hero Academia",
+  "بليتش": "Bleach",
+  "فيري تيل": "Fairy Tail",
+  "توكيو غول": "Tokyo Ghoul",
+  "ريزيرو": "Re:Zero",
+  "سوورد آرت أونلاين": "Sword Art Online",
+  "سورد آرت أونلاين": "Sword Art Online",
+  "فول ميتال": "Fullmetal Alchemist",
+  "جوجوتسو كايسن": "Jujutsu Kaisen",
+  "جوجوتسو": "Jujutsu Kaisen",
+  "سولو ليفلينج": "Solo Leveling",
+  "بلاك كلوفر": "Black Clover",
+};
+
+function translateSearchQuery(value: string): string {
+  const query = value.trim();
+  if (!query) return "";
+  if (ARABIC_SEARCH_ALIASES[query]) return ARABIC_SEARCH_ALIASES[query];
+
+  for (const [arabic, english] of Object.entries(ARABIC_SEARCH_ALIASES)) {
+    if (query.includes(arabic)) return query.replace(arabic, english);
+  }
+  return query;
+}
+
+function displayTitle(anime: any): string {
+  return anime.title?.english || anime.title?.romaji || anime.title?.native || "أنمي";
+}
+
 const FORMAT_TABS = [
   { id: "",      ar: "الكل" },
   { id: "TV",    ar: "مسلسلات" },
@@ -71,12 +113,18 @@ function buildQuery(genre: string, format: string, year: number | "", page: numb
 }
 
 function AnimeCard({ anime }: { anime: any }) {
+  const primaryTitle = displayTitle(anime);
+  const secondaryTitle =
+    anime.title?.english && anime.title.romaji !== anime.title.english
+      ? anime.title.romaji
+      : "";
+
   return (
     <Link href={animeHref(anime)}>
       <motion.div whileTap={{ scale: 0.93 }} className="cursor-pointer group">
         <div className="relative aspect-[2/3] rounded-2xl overflow-hidden bg-[#18181B] border border-white/[0.07]">
           <img
-            src={anime.coverImage?.large} alt={anime.title?.romaji}
+            src={anime.coverImage?.large} alt={primaryTitle}
             className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
             loading="lazy"
           />
@@ -96,7 +144,10 @@ function AnimeCard({ anime }: { anime: any }) {
             <div className="absolute bottom-1.5 right-1.5 bg-emerald-500/80 text-white text-[7px] px-1.5 py-0.5 rounded-md font-black">يُبث</div>
           )}
         </div>
-        <p className="mt-1.5 text-[10px] text-white/70 truncate font-bold group-hover:text-primary transition-colors">{anime.title?.romaji}</p>
+        <p className="mt-1.5 text-[10px] text-white/80 truncate font-bold group-hover:text-primary transition-colors">{primaryTitle}</p>
+        {secondaryTitle && (
+          <p className="text-[9px] text-white/35 truncate font-['Cairo']">{secondaryTitle}</p>
+        )}
       </motion.div>
     </Link>
   );
@@ -149,11 +200,20 @@ export default function Browse() {
     if (searchTimer.current) clearTimeout(searchTimer.current);
     searchTimer.current = setTimeout(async () => {
       setSearchLoading(true);
-      const q = `query { Page(perPage: 24) { media(type: ANIME, search: "${searchQ.replace(/"/g, "")}", sort: POPULARITY_DESC) { id title { romaji } coverImage { large } averageScore format status } } }`;
-      const data = await fetch$(q);
-      setSearchResults(data?.media || []);
-      setSearchLoading(false);
+      try {
+        const translated = translateSearchQuery(searchQ);
+        const q = `query { Page(perPage: 24) { media(type: ANIME, search: ${JSON.stringify(translated)}, sort: [SEARCH_MATCH, POPULARITY_DESC], isAdult: false, genre_not_in: ["Hentai", "Ecchi"]) { id title { romaji english native } coverImage { large } averageScore format status } } }`;
+        const data = await fetch$(q);
+        setSearchResults(data?.media || []);
+      } catch {
+        setSearchResults([]);
+      } finally {
+        setSearchLoading(false);
+      }
     }, 450);
+    return () => {
+      if (searchTimer.current) clearTimeout(searchTimer.current);
+    };
   }, [searchQ]);
 
   const loadMore = () => {

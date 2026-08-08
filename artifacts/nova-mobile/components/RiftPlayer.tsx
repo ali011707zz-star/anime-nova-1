@@ -3158,7 +3158,7 @@ const s = StyleSheet.create({
 
   /* ── Bottom play button ── */
   bottomPlayBtn: {
-    width: 58, height: 58, borderRadius: 29,
+    width: 46, height: 46, borderRadius: 23,
     backgroundColor: "rgba(139,92,246,0.88)",
     borderWidth: 2, borderColor: "rgba(196,181,253,0.75)",
     alignItems: "center", justifyContent: "center",
