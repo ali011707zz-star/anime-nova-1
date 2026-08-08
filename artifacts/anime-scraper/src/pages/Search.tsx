@@ -250,10 +250,16 @@ export default function Search() {
   const traceFileRef = useRef<HTMLInputElement>(null);
 
   const inputRef = useRef<HTMLInputElement>(null);
+  const searchAbortRef = useRef<AbortController | null>(null);
+  const searchRequestRef = useRef(0);
 
   const activeFilterCount = [format, status, genre, season].filter(Boolean).length;
 
   useEffect(() => {
+    if (searchAbortRef.current) searchAbortRef.current.abort();
+    const controller = new AbortController();
+    searchAbortRef.current = controller;
+    const requestId = ++searchRequestRef.current;
     const timer = setTimeout(async () => {
       setLoading(true);
       try {
@@ -267,18 +273,26 @@ export default function Search() {
         } else {
           q = { query: buildBrowseQuery(sort, format, status, genre, season), variables: { page: 1, perPage: 30 } };
         }
-        const res  = await fetch('/api/anilist', {
+        const res  = await fetch(API_BASE + '/api/anilist', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(q),
+          signal: controller.signal,
         });
         const json = await res.json();
-        setResults(filterSafe(json.data?.Page?.media || []));
+        if (!controller.signal.aborted && requestId === searchRequestRef.current) {
+          setResults(filterSafe(json.data?.Page?.media || []));
+        }
+      } catch (e: any) {
+        if (e?.name !== "AbortError" && requestId === searchRequestRef.current) setResults([]);
       } finally {
-        setLoading(false);
+        if (!controller.signal.aborted && requestId === searchRequestRef.current) setLoading(false);
       }
     }, query.trim() ? 400 : 100);
-    return () => clearTimeout(timer);
+    return () => {
+      clearTimeout(timer);
+      controller.abort();
+    };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [query, sort, format, status, genre, season]);
 

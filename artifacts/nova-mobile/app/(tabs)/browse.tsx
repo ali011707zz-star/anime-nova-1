@@ -132,6 +132,15 @@ query ($page: Int) {
   }
 }`;
 
+const SEARCH_QUERY = (sort: string, format: string, season: string, year: string, genre: string) => `
+query ($search: String!) {
+  Page(page: 1, perPage: 30) {
+    media(search: $search, type: ANIME, isAdult: false, genre_not_in:["Hentai","Ecchi"], sort:[SEARCH_MATCH,${sort || "POPULARITY_DESC"}]${format ? `,format:${format}` : ""}${season ? `,season:${season}` : ""}${year ? `,seasonYear:${year}` : ""}${genre ? `,genre:"${genre}"` : ""}) {
+      id title { romaji english } coverImage { large } averageScore episodes format status startDate { year } genres
+    }
+  }
+}`;
+
 export default function BrowseScreen() {
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
@@ -155,8 +164,12 @@ export default function BrowseScreen() {
   const [hasMore, setHasMore] = useState(true);
 
   const [genreCovers, setGenreCovers] = useState<Record<string, number>>({});
+  const [searchItems, setSearchItems] = useState<AnimeResult[]>([]);
+  const [searchLoading, setSearchLoading] = useState(false);
 
   const genRef = useRef(0);
+  const searchAbortRef = useRef<AbortController | null>(null);
+  const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   /* load genre cover images */
   useEffect(() => {
@@ -219,6 +232,45 @@ export default function BrowseScreen() {
     loadItems(1, true);
   }, [view, sort, format, season, year, activeGenre]);
 
+  useEffect(() => {
+    searchAbortRef.current?.abort();
+    if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
+    if (!search.trim()) {
+      setSearchItems([]);
+      setSearchLoading(false);
+      return;
+    }
+    const ctrl = new AbortController();
+    searchAbortRef.current = ctrl;
+    searchTimerRef.current = setTimeout(async () => {
+      setSearchLoading(true);
+      try {
+        const r = await fetch(`${getBaseUrl()}/api/anilist`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            query: SEARCH_QUERY(sort, format, season, year, activeGenre),
+            variables: { search: search.trim() },
+          }),
+          signal: ctrl.signal,
+        });
+        const d = await r.json();
+        if (!ctrl.signal.aborted) {
+          setSearchItems((d.data?.Page?.media || [])
+            .filter((a: AnimeResult) => !(a.genres || []).some(gx => BLOCKED.has(gx))));
+        }
+      } catch (e: any) {
+        if (e?.name !== "AbortError" && !ctrl.signal.aborted) setSearchItems([]);
+      } finally {
+        if (!ctrl.signal.aborted) setSearchLoading(false);
+      }
+    }, 400);
+    return () => {
+      if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
+      ctrl.abort();
+    };
+  }, [search, sort, format, season, year, activeGenre]);
+
   function openGenre(genre: string, ar: string) {
     setActiveGenre(genre); setActiveGenreAr(ar);
     setView("list"); setPage(1); setItems([]);
@@ -228,10 +280,8 @@ export default function BrowseScreen() {
     setFormat(""); setSort("POPULARITY_DESC"); setSeason(""); setYear("");
   }
 
-  const filteredItems = search.trim()
-    ? items.filter(a =>
-        (a.title.romaji + " " + (a.title.english || "")).toLowerCase().includes(search.toLowerCase()))
-    : items;
+  const filteredItems = search.trim() ? searchItems : items;
+  const listLoading = search.trim() ? searchLoading : loading;
 
   const hasFilters = format || sort !== "POPULARITY_DESC" || season || year;
   const browseTitle = activeGenreAr
@@ -364,7 +414,7 @@ export default function BrowseScreen() {
       {/* ── Anime list ── */}
       {view === "list" && (
         <>
-          {loading && items.length === 0 ? (
+          {listLoading && filteredItems.length === 0 ? (
             <View style={g.center}>
               <ActivityIndicator color="#8B5CF6" size="large" />
             </View>
@@ -377,17 +427,17 @@ export default function BrowseScreen() {
               contentContainerStyle={{ paddingHorizontal: 12, paddingTop: 12, paddingBottom: 100 }}
               columnWrapperStyle={{ gap: 10, marginBottom: 10 }}
               showsVerticalScrollIndicator={false}
-              onEndReached={() => { if (hasMore && !loading) loadItems(page + 1, false); }}
+               onEndReached={() => { if (!search.trim() && hasMore && !loading) loadItems(page + 1, false); }}
               onEndReachedThreshold={0.4}
               ListEmptyComponent={
-                !loading ? (
+                 !listLoading ? (
                   <View style={g.center}>
                     <Ionicons name="film" size={48} color="rgba(255,255,255,0.15)" />
                     <Text style={g.emptyText}>لا توجد أنميات بهذه الفلاتر</Text>
                   </View>
                 ) : null
               }
-              ListFooterComponent={loading && items.length > 0 ? (
+               ListFooterComponent={listLoading && filteredItems.length > 0 ? (
                 <View style={{ padding: 20, alignItems: "center" }}>
                   <ActivityIndicator color="#8B5CF6" />
                 </View>

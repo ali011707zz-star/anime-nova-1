@@ -112,6 +112,22 @@ function buildQuery(genre: string, format: string, year: number | "", page: numb
 }`;
 }
 
+function buildSearchQuery(search: string, genre: string, format: string, year: number | "", season = "") {
+  const gf = genre ? `, genre: "${genre}"` : "";
+  const ff = format ? `, format: ${format}` : "";
+  const effectiveYear = year || (season ? CUR_YEAR : "");
+  const yf = effectiveYear ? `, seasonYear: ${effectiveYear}` : "";
+  const sf = (season && format !== "MOVIE") ? `, season: ${season}` : "";
+  const countryFilter = format === "MOVIE" ? "" : `, countryOfOrigin: "JP"`;
+  return `query ($search: String!) {
+  Page(page: 1, perPage: 30) {
+    media(type: ANIME, search: $search, sort: [SEARCH_MATCH, POPULARITY_DESC]${countryFilter}, isAdult: false, genre_not_in: ["Ecchi", "Hentai"]${gf}${ff}${yf}${sf}) {
+      id title { romaji english native } coverImage { large } averageScore episodes format status genres
+    }
+  }
+}`;
+}
+
 function AnimeCard({ anime }: { anime: any }) {
   const primaryTitle = displayTitle(anime);
   const secondaryTitle =
@@ -169,6 +185,8 @@ export default function Browse() {
   const [searchResults, setSearchResults] = useState<any[]>([]);
   const [searchLoading, setSearchLoading] = useState(false);
   const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const searchAbortRef = useRef<AbortController | null>(null);
+  const searchRequestRef = useRef(0);
   const loaderRef   = useRef<HTMLDivElement | null>(null);
 
   const fetch$ = async (query: string) => {
@@ -196,25 +214,40 @@ export default function Browse() {
   }, [selectedGenre, selectedFormat, selectedYear, selectedSeason]);
 
   useEffect(() => {
-    if (!searchQ.trim()) { setSearchResults([]); return; }
+    searchAbortRef.current?.abort();
     if (searchTimer.current) clearTimeout(searchTimer.current);
+    if (!searchQ.trim()) { setSearchResults([]); return; }
+    const ctrl = new AbortController();
+    searchAbortRef.current = ctrl;
+    const requestId = ++searchRequestRef.current;
     searchTimer.current = setTimeout(async () => {
       setSearchLoading(true);
       try {
         const translated = translateSearchQuery(searchQ);
-        const q = `query { Page(perPage: 24) { media(type: ANIME, search: ${JSON.stringify(translated)}, sort: [SEARCH_MATCH, POPULARITY_DESC], isAdult: false, genre_not_in: ["Hentai", "Ecchi"]) { id title { romaji english native } coverImage { large } averageScore format status } } }`;
-        const data = await fetch$(q);
-        setSearchResults(data?.media || []);
-      } catch {
-        setSearchResults([]);
+        const r = await fetch(API_BASE + "/api/anilist", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            query: buildSearchQuery(translated, selectedGenre, selectedFormat, selectedYear, selectedSeason),
+            variables: { search: translated },
+          }),
+          signal: ctrl.signal,
+        });
+        const json = await r.json();
+        if (!ctrl.signal.aborted && requestId === searchRequestRef.current) {
+          setSearchResults(json.data?.Page?.media || []);
+        }
+      } catch (e: any) {
+        if (e?.name !== "AbortError" && requestId === searchRequestRef.current) setSearchResults([]);
       } finally {
-        setSearchLoading(false);
+        if (!ctrl.signal.aborted && requestId === searchRequestRef.current) setSearchLoading(false);
       }
     }, 450);
     return () => {
       if (searchTimer.current) clearTimeout(searchTimer.current);
+      ctrl.abort();
     };
-  }, [searchQ]);
+  }, [searchQ, selectedGenre, selectedFormat, selectedYear, selectedSeason]);
 
   const loadMore = () => {
     const next = page + 1;
