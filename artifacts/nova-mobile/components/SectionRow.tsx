@@ -1,5 +1,5 @@
 import React from "react";
-import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { FlatList, Platform, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useColors } from "@/hooks/useColors";
 import { AnilistMedia } from "@/utils/anilist";
 import { AnimeCard } from "./AnimeCard";
@@ -12,7 +12,7 @@ type Props = {
   size?: "sm" | "md" | "lg";
 };
 
-export function SectionRow({ title, items, onSeeAll, size = "md" }: Props) {
+export const SectionRow = React.memo(function SectionRow({ title, items, onSeeAll, size = "md" }: Props) {
   const colors = useColors();
 
   if (!items.length) return null;
@@ -28,18 +28,24 @@ export function SectionRow({ title, items, onSeeAll, size = "md" }: Props) {
           </Pressable>
         )}
       </View>
-      <ScrollView
+      <FlatList
+        data={items}
         horizontal
+        keyExtractor={(item) => String(item.id)}
+        renderItem={({ item }) => <AnimeCard anime={item} size={size} />}
         showsHorizontalScrollIndicator={false}
         contentContainerStyle={styles.scroll}
-      >
-        {items.map((anime) => (
-          <AnimeCard key={anime.id} anime={anime} size={size} />
-        ))}
-      </ScrollView>
+        // These rails are rendered inside the home ScrollView. FlatList keeps
+        // off-screen posters out of the native view tree, which matters on
+        // tablets where several rails are visible in one session.
+        initialNumToRender={5}
+        maxToRenderPerBatch={5}
+        windowSize={3}
+        removeClippedSubviews={Platform.OS !== "web"}
+      />
     </View>
   );
-}
+});
 
 export function SkeletonRow() {
   const colors = useColors();

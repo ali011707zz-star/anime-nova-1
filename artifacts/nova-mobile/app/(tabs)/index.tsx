@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useRouter } from "expo-router";
 import { LinearGradient } from "expo-linear-gradient";
-import { Image } from "react-native";
+import { FlatList, Image } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import React, { useState, useEffect } from "react";
 import {
@@ -170,10 +170,14 @@ export default function HomeScreen() {
                 <Ionicons name="chevron-back" size={13} color={colors.primary} />
               </Pressable>
             </View>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 16, gap: 10 }}>
-              {recentHistory.map((h) => (
+            <FlatList
+              data={recentHistory}
+              horizontal
+              keyExtractor={(h) => `${h.animeId}-${h.ep}`}
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={{ paddingHorizontal: 16, gap: 10 }}
+              renderItem={({ item: h }) => (
                 <Pressable
-                  key={`${h.animeId}-${h.ep}`}
                   onPress={() => router.push(`/watch?anime=${h.animeId}&ep=${h.ep}&title=${encodeURIComponent(h.title)}&english=${encodeURIComponent(h.english)}${h.thumbnail ? `&cover=${encodeURIComponent(h.thumbnail)}` : ""}`)}
                   style={[styles.historyCard, { backgroundColor: colors.card, borderColor: colors.border }]}
                 >
@@ -191,8 +195,12 @@ export default function HomeScreen() {
                     <Ionicons name="play-circle" size={28} color="rgba(255,255,255,0.85)" />
                   </View>
                 </Pressable>
-              ))}
-            </ScrollView>
+              )}
+              initialNumToRender={5}
+              maxToRenderPerBatch={5}
+              windowSize={3}
+              removeClippedSubviews={Platform.OS !== "web"}
+            />
           </View>
         )}
 
@@ -209,10 +217,14 @@ export default function HomeScreen() {
                 <Ionicons name="chevron-back" size={13} color={colors.primary} />
               </Pressable>
             </View>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 16, gap: 10 }}>
-              {todayEps.map((ep, i) => (
+            <FlatList
+              data={todayEps}
+              horizontal
+              keyExtractor={(ep) => `${ep.animeId}-${ep.episode}`}
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={{ paddingHorizontal: 16, gap: 10 }}
+              renderItem={({ item: ep }) => (
                 <Pressable
-                  key={`${ep.animeId}-${ep.episode}-${i}`}
                   onPress={() => router.push(`/watch?anime=0&ep=${ep.episode}&title=${encodeURIComponent(ep.name || "")}&english=${encodeURIComponent(ep.name || "")}&cover=${encodeURIComponent(ep.cover || "")}&site=anslayer&anslayerId=${ep.animeId}&single=1` as any)}
                   style={[todayEpStyles.card, { backgroundColor: colors.card, borderColor: colors.border }]}
                 >
@@ -228,8 +240,12 @@ export default function HomeScreen() {
                     <Text style={todayEpStyles.title} numberOfLines={2}>{ep.name}</Text>
                   </LinearGradient>
                 </Pressable>
-              ))}
-            </ScrollView>
+              )}
+              initialNumToRender={5}
+              maxToRenderPerBatch={5}
+              windowSize={3}
+              removeClippedSubviews={Platform.OS !== "web"}
+            />
           </View>
         )}
 
@@ -294,12 +310,16 @@ export default function HomeScreen() {
                       <Ionicons name="chevron-back" size={13} color={colors.primary} />
                     </Pressable>
                   </View>
-                  <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 16, gap: 10 }}>
-                    {awDubbedSeries.map((item: any, idx: number) => {
+                  <FlatList
+                    data={awDubbedSeries}
+                    horizontal
+                    keyExtractor={(item: any, idx) => String(item.key || idx)}
+                    showsHorizontalScrollIndicator={false}
+                    contentContainerStyle={{ paddingHorizontal: 16, gap: 10 }}
+                    renderItem={({ item }: { item: any }) => {
                       const imgUri = item.poster || null;
                       return (
                         <Pressable
-                          key={item.key || idx}
                           onPress={() => {
                             const seasons = JSON.stringify(item.seasons || [{ label: "الحلقات", animeId: item.key }]);
                             router.push({
@@ -327,8 +347,12 @@ export default function HomeScreen() {
                           </LinearGradient>
                         </Pressable>
                       );
-                    })}
-                  </ScrollView>
+                    }}
+                    initialNumToRender={5}
+                    maxToRenderPerBatch={5}
+                    windowSize={3}
+                    removeClippedSubviews={Platform.OS !== "web"}
+                  />
                 </View>
               )}
 
@@ -345,15 +369,19 @@ export default function HomeScreen() {
                       <Ionicons name="chevron-back" size={13} color={colors.primary} />
                     </Pressable>
                   </View>
-                  <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 16, gap: 10 }}>
-                    {dubbedSeries.map((item: any, idx: number) => {
+                  <FlatList
+                    data={dubbedSeries}
+                    horizontal
+                    keyExtractor={(item: any, idx) => String(item.key || item.id || idx)}
+                    showsHorizontalScrollIndicator={false}
+                    contentContainerStyle={{ paddingHorizontal: 16, gap: 10 }}
+                    renderItem={({ item }: { item: any }) => {
                       const rawImg = item.image || item.poster || "";
                       const imgUri = rawImg
                         ? rawImg.startsWith("http") ? rawImg : `${BASE_URL}${rawImg}`
                         : null;
                       return (
                         <Pressable
-                          key={item.key || item.id || idx}
                           onPress={() => {
                             const seasons = JSON.stringify(item.seasons || [{ label: "الحلقات", arabicToonsId: item.arabicToonsId }]);
                             router.push({ pathname: "/dubbed/[id]" as any, params: { id: item.key || item.id || item.title, title: item.title, seasons, img: rawImg } });
@@ -372,8 +400,12 @@ export default function HomeScreen() {
                           </LinearGradient>
                         </Pressable>
                       );
-                    })}
-                  </ScrollView>
+                    }}
+                    initialNumToRender={5}
+                    maxToRenderPerBatch={5}
+                    windowSize={3}
+                    removeClippedSubviews={Platform.OS !== "web"}
+                  />
                 </View>
               )}
 

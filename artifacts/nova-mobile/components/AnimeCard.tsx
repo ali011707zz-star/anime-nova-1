@@ -1,13 +1,10 @@
 import { AnilistMedia } from "@/utils/anilist";
 import { Ionicons } from "@expo/vector-icons";
-import { Image } from "react-native";
+import { Image, useWindowDimensions } from "react-native";
 import { useRouter } from "expo-router";
 import React from "react";
-import { Dimensions, Platform, Pressable, StyleSheet, Text, View } from "react-native";
+import { Pressable, StyleSheet, Text, View } from "react-native";
 import { useColors } from "@/hooks/useColors";
-
-const { width: SCREEN_WIDTH } = Dimensions.get("window");
-const CARD_WIDTH = (SCREEN_WIDTH - 48) / 3;
 
 type Props = {
   anime: AnilistMedia;
@@ -16,10 +13,14 @@ type Props = {
   showProgress?: boolean;
 };
 
-export function AnimeCard({ anime, size = "sm", progress, showProgress }: Props) {
+export const AnimeCard = React.memo(function AnimeCard({ anime, size = "sm", progress, showProgress }: Props) {
   const router = useRouter();
   const colors = useColors();
-  const cardW = size === "lg" ? 160 : size === "md" ? 130 : CARD_WIDTH;
+  const { width: windowWidth } = useWindowDimensions();
+  // Recalculate on rotation/window resize and keep poster widths bounded so
+  // tablets do not decode a handful of unnecessarily huge images.
+  const smallCardWidth = Math.max(96, Math.min(130, (windowWidth - 48) / 3));
+  const cardW = size === "lg" ? 160 : size === "md" ? 130 : smallCardWidth;
   const cardH = cardW * 1.4;
 
   const title = anime.title.english || anime.title.romaji;
@@ -31,7 +32,7 @@ export function AnimeCard({ anime, size = "sm", progress, showProgress }: Props)
     >
       <View style={[styles.imageContainer, { width: cardW, height: cardH, borderRadius: colors.radius - 4 }]}>
         <Image
-          source={{ uri: anime.coverImage.extraLarge || anime.coverImage.large }}
+          source={{ uri: anime.coverImage.large || anime.coverImage.extraLarge }}
           style={[styles.image, { borderRadius: colors.radius - 4 }]}
           resizeMode="cover"
           transition={300}
@@ -63,7 +64,7 @@ export function AnimeCard({ anime, size = "sm", progress, showProgress }: Props)
       )}
     </Pressable>
   );
-}
+});
 
 const styles = StyleSheet.create({
   card: { flexDirection: "column", gap: 6 },

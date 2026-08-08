@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from "react";
 import {
   View, Text, Pressable, TextInput, FlatList, Image,
   ScrollView, ActivityIndicator, StyleSheet, Platform,
-  KeyboardAvoidingView, Modal, Alert,
+  KeyboardAvoidingView, Modal, Alert, useWindowDimensions,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -130,11 +130,11 @@ function filterSafe(list: AnimeResult[]): AnimeResult[] {
 }
 
 /* ── Anime Card ── */
-function AnimeCard({ anime, onPress }: { anime: AnimeResult; onPress: () => void }) {
+function AnimeCard({ anime, onPress, columns }: { anime: AnimeResult; onPress: () => void; columns: number }) {
   const fmt = anime.format ? FORMAT_AR[anime.format] || anime.format : null;
   const isFilm = anime.format === "MOVIE";
   return (
-    <Pressable onPress={onPress} style={s.card}>
+    <Pressable onPress={onPress} style={[s.card, { flex: 1 / columns }]}>
       <View style={s.cardImgWrap}>
         {anime.coverImage?.large ? (
           <Image source={{ uri: anime.coverImage.large }} style={s.cardImg} />
@@ -162,8 +162,10 @@ function AnimeCard({ anime, onPress }: { anime: AnimeResult; onPress: () => void
 
 export default function SearchScreen() {
   const insets = useSafeAreaInsets();
+  const { width } = useWindowDimensions();
   const router = useRouter();
   const topPad = Platform.OS === "web" ? 0 : insets.top;
+  const gridColumns = width >= 1000 ? 6 : width >= 700 ? 5 : 3;
 
   const [query, setQuery]         = useState("");
   const [results, setResults]     = useState<AnimeResult[]>([]);
@@ -472,8 +474,9 @@ export default function SearchScreen() {
         {!loading && results.length > 0 && (
           <FlatList
             data={results}
+            key={`search-grid-${gridColumns}`}
             keyExtractor={item => item.id.toString()}
-            numColumns={3}
+            numColumns={gridColumns}
             columnWrapperStyle={{ gap: 10, marginBottom: 10 }}
             contentContainerStyle={{ paddingHorizontal: 14, paddingTop: 12, paddingBottom: 100 }}
             showsVerticalScrollIndicator={false}
@@ -488,6 +491,7 @@ export default function SearchScreen() {
             renderItem={({ item }) => (
               <AnimeCard
                 anime={item}
+                columns={gridColumns}
                 onPress={() => router.push(`/anime/${item.id}?title=${encodeURIComponent(item.title?.romaji || "")}&english=${encodeURIComponent(item.title?.english || "")}`)}
               />
             )}
@@ -666,7 +670,7 @@ const s = StyleSheet.create({
   activeSeasonLabel: { fontSize: 10, color: "rgba(255,255,255,0.25)", fontFamily: "Cairo_400Regular" },
   activeSeasonValue: { fontSize: 11, fontFamily: "Cairo_700Bold", color: "#8B5CF6" },
   loadingWrap: { flex: 1, alignItems: "center", justifyContent: "center" },
-  card: { flex: 1 / 3 },
+  card: { flex: 1 },
   cardImgWrap: { borderRadius: 14, overflow: "hidden", aspectRatio: 2 / 3, backgroundColor: "#18181B", borderWidth: 1, borderColor: "rgba(255,255,255,0.07)", position: "relative" },
   cardImg: { width: "100%", height: "100%" },
   noImg: { backgroundColor: "rgba(139,92,246,0.1)", alignItems: "center", justifyContent: "center" },

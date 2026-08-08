@@ -5,7 +5,7 @@ import { useRouter } from "expo-router";
 import React, { useState, useEffect, useCallback, useMemo } from "react";
 import {
   FlatList, Platform, Pressable, ScrollView,
-  StyleSheet, Text, View, TextInput,
+  StyleSheet, Text, View, TextInput, useWindowDimensions,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -30,7 +30,9 @@ const TABS = [
 export default function LibraryScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
+  const { width } = useWindowDimensions();
   const topPad = Platform.OS === "web" ? 0 : Math.max(insets.top, 0);
+  const gridColumns = width >= 1000 ? 6 : width >= 700 ? 5 : 4;
   const router = useRouter();
   const { watchHistory, favorites, removeFromHistory, toggleFavorite } = useApp();
 
@@ -291,7 +293,8 @@ export default function LibraryScreen() {
           <FlatList
             data={filteredFavs}
             keyExtractor={f => f.id.toString()}
-            numColumns={4}
+            key={`favorites-grid-${gridColumns}`}
+            numColumns={gridColumns}
             columnWrapperStyle={{ gap: 8 }}
             contentContainerStyle={[s.favGrid, { paddingBottom: insets.bottom + 100 }]}
             showsVerticalScrollIndicator={false}
@@ -338,7 +341,8 @@ export default function LibraryScreen() {
           <FlatList
             data={filteredChars}
             keyExtractor={c => c.id.toString()}
-            numColumns={4}
+            key={`characters-grid-${gridColumns}`}
+            numColumns={gridColumns}
             columnWrapperStyle={{ gap: 10 }}
             contentContainerStyle={[s.charGrid, { paddingBottom: insets.bottom + 100 }]}
             showsVerticalScrollIndicator={false}

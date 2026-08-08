@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import {
   View, Text, Pressable, TextInput, FlatList, Image,
-  ScrollView, ActivityIndicator, StyleSheet, Platform,
+  ScrollView, ActivityIndicator, StyleSheet, Platform, useWindowDimensions,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -71,9 +71,9 @@ const BLOCKED = new Set(["Hentai"]);
 function coverUrl(id: number) { return `https://img.anili.st/media/${id}`; }
 
 /* ── Genre cover card ── */
-function GenreCard({ item, animeId, onPress }: { item: typeof GENRES_WITH_COVERS[0]; animeId?: number; onPress: () => void }) {
+function GenreCard({ item, animeId, onPress, columns }: { item: typeof GENRES_WITH_COVERS[0]; animeId?: number; onPress: () => void; columns: number }) {
   return (
-    <Pressable onPress={onPress} style={g.genreCard}>
+    <Pressable onPress={onPress} style={[g.genreCard, { flex: 1 / columns }]}>
       <View style={[g.genreImgWrap, { backgroundColor: item.color + "22" }]}>
         {animeId ? (
           <Image source={{ uri: coverUrl(animeId) }} style={g.genreImg} />
@@ -87,11 +87,11 @@ function GenreCard({ item, animeId, onPress }: { item: typeof GENRES_WITH_COVERS
 }
 
 /* ── Anime card ── */
-function AnimeCard({ anime, onPress }: { anime: AnimeResult; onPress: () => void }) {
+function AnimeCard({ anime, onPress, columns }: { anime: AnimeResult; onPress: () => void; columns: number }) {
   const fmt = anime.format ? FORMAT_AR[anime.format] : null;
   const isFilm = anime.format === "MOVIE";
   return (
-    <Pressable onPress={onPress} style={g.card}>
+    <Pressable onPress={onPress} style={[g.card, { flex: 1 / columns }]}>
       <View style={g.cardWrap}>
         {anime.coverImage?.large ? (
           <Image source={{ uri: anime.coverImage.large }} style={g.cardImg} />
@@ -134,8 +134,11 @@ query ($page: Int) {
 
 export default function BrowseScreen() {
   const insets = useSafeAreaInsets();
+  const { width } = useWindowDimensions();
   const router = useRouter();
   const topPad = Platform.OS === "web" ? 0 : insets.top;
+  const gridColumns = width >= 1000 ? 6 : width >= 700 ? 5 : 3;
+  const genreColumns = width >= 700 ? 3 : 2;
 
   const [view, setView] = useState<"genres" | "list">("list");
   const [activeGenre, setActiveGenre] = useState("");
@@ -341,8 +344,9 @@ export default function BrowseScreen() {
       {view === "genres" && (
         <FlatList
           data={GENRES_WITH_COVERS}
+          key={`genres-${genreColumns}`}
           keyExtractor={item => item.genre}
-          numColumns={2}
+          numColumns={genreColumns}
           contentContainerStyle={{ paddingHorizontal: 12, paddingTop: 12, paddingBottom: 100 }}
           columnWrapperStyle={{ gap: 10, marginBottom: 10 }}
           showsVerticalScrollIndicator={false}
@@ -350,6 +354,7 @@ export default function BrowseScreen() {
             <GenreCard
               item={item}
               animeId={genreCovers[item.genre]}
+              columns={genreColumns}
               onPress={() => openGenre(item.genre, item.ar)}
             />
           )}
@@ -366,8 +371,9 @@ export default function BrowseScreen() {
           ) : (
             <FlatList
               data={filteredItems}
+              key={`anime-grid-${gridColumns}`}
               keyExtractor={(item, i) => `${item.id}-${i}`}
-              numColumns={3}
+              numColumns={gridColumns}
               contentContainerStyle={{ paddingHorizontal: 12, paddingTop: 12, paddingBottom: 100 }}
               columnWrapperStyle={{ gap: 10, marginBottom: 10 }}
               showsVerticalScrollIndicator={false}
@@ -389,6 +395,7 @@ export default function BrowseScreen() {
               renderItem={({ item }) => (
                 <AnimeCard
                   anime={item}
+                  columns={gridColumns}
                   onPress={() => router.push(`/anime/${item.id}?title=${encodeURIComponent(item.title.romaji)}&english=${encodeURIComponent(item.title.english || "")}`)}
                 />
               )}
@@ -425,7 +432,7 @@ const g = StyleSheet.create({
   genreImg: { ...StyleSheet.absoluteFillObject, width: "100%", height: "100%" },
   genreColorBar: { position: "absolute", bottom: 0, left: 0, right: 0, height: 3 },
   genreLabel: { fontSize: 14, fontFamily: "Cairo_800ExtraBold", color: "#fff", padding: 10, textShadowColor: "rgba(0,0,0,0.8)", textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 4 },
-  card: { flex: 1 / 3 },
+  card: { flex: 1 },
   cardWrap: { borderRadius: 14, overflow: "hidden", aspectRatio: 2 / 3, backgroundColor: "#18181B", borderWidth: 1, borderColor: "rgba(255,255,255,0.07)", position: "relative" },
   cardImg: { width: "100%", height: "100%" },
   cardNoImg: { backgroundColor: "rgba(139,92,246,0.1)", alignItems: "center", justifyContent: "center" },

@@ -8,6 +8,7 @@ import React, { useState, useEffect, useCallback, useRef } from "react";
 import {
   View, Text, Pressable, TextInput, FlatList, Image,
   ActivityIndicator, StyleSheet, Platform, Animated, Easing,
+  useWindowDimensions,
 } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
@@ -32,6 +33,9 @@ interface DubbedSeries  {
 }
 
 type TabKey = "animation" | "cartoon";
+function gridColumnsForWidth(width: number) {
+  return width >= 1000 ? 6 : width >= 700 ? 5 : 3;
+}
 
 // ─────────────────────────────────────────────────────────
 // Shared card helpers
@@ -72,6 +76,8 @@ function PosterCard({ uri, title, seasons, tint, onPress }: {
 // ─────────────────────────────────────────────────────────
 
 function AnimationList({ searchQ }: { searchQ: string }) {
+  const { width } = useWindowDimensions();
+  const columns = gridColumnsForWidth(width);
   const router = useRouter();
   const BASE = getBaseUrl();
   const [series,      setSeries]      = useState<AwSeries[]>([]);
@@ -147,12 +153,13 @@ function AnimationList({ searchQ }: { searchQ: string }) {
   return (
     <FlatList
       data={displayList}
+      key={`aw-animation-grid-${columns}`}
       keyExtractor={item => item.key}
-      numColumns={3}
+      numColumns={columns}
       contentContainerStyle={shared.grid}
       columnWrapperStyle={{ gap: 10 }}
       renderItem={({ item }) => (
-        <View style={{ flex: 1 / 3 }}>
+        <View style={{ flex: 1 / columns }}>
           <PosterCard
             uri={item.poster || null}
             title={item.titleAr || item.title}
@@ -194,6 +201,8 @@ function dubbedImgUri(s: DubbedSeries, base: string): string | null {
 }
 
 function CartoonList({ searchQ }: { searchQ: string }) {
+  const { width } = useWindowDimensions();
+  const columns = gridColumnsForWidth(width);
   const router = useRouter();
   const BASE = getBaseUrl();
   const [series,      setSeries]      = useState<DubbedSeries[]>([]);
@@ -259,12 +268,13 @@ function CartoonList({ searchQ }: { searchQ: string }) {
   return (
     <FlatList
       data={displayList}
+      key={`aw-cartoon-grid-${columns}`}
       keyExtractor={item => item.key || item.title}
-      numColumns={3}
+      numColumns={columns}
       contentContainerStyle={shared.grid}
       columnWrapperStyle={{ gap: 10 }}
       renderItem={({ item }) => (
-        <View style={{ flex: 1 / 3 }}>
+        <View style={{ flex: 1 / columns }}>
           <PosterCard
             uri={dubbedImgUri(item, BASE)}
             title={item.title}

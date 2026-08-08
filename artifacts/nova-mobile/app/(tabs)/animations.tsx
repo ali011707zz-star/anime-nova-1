@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from "react";
 import {
   View, Text, Pressable, TextInput, FlatList, Image,
   ScrollView, ActivityIndicator, StyleSheet, Platform,
-  Animated,
+  Animated, useWindowDimensions,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 
@@ -69,8 +69,10 @@ function hasCjk(s: string) {
 
 export default function AnimationsScreen() {
   const insets = useSafeAreaInsets();
+  const { width } = useWindowDimensions();
   const router = useRouter();
   const topPad = Platform.OS === "web" ? 0 : insets.top;
+  const gridColumns = width >= 1000 ? 6 : width >= 700 ? 5 : 3;
 
   const [type, setType] = useState<MediaType>("movie");
   const [genre, setGenre] = useState<number>(0);
@@ -174,9 +176,9 @@ export default function AnimationsScreen() {
 
   const activeFilterCount = (genre !== 0 ? 1 : 0) + (sort !== "popularity.desc" ? 1 : 0) + (year ? 1 : 0);
 
-  const renderItem = ({ item, index }: { item: TmdbItem; index: number }) => (
+  const renderItem = ({ item }: { item: TmdbItem }) => (
     <Pressable
-      style={[s.card, { marginRight: index % 3 !== 2 ? 10 : 0 }]}
+      style={[s.card, { flex: 1 / gridColumns }]}
       onPress={() => router.push(`/animation/${type}/${item.id}`)}
     >
       <View style={s.cardImgWrap}>
@@ -384,9 +386,11 @@ export default function AnimationsScreen() {
       ) : (
         <FlatList
           data={items}
+          key={`animation-grid-${gridColumns}`}
           keyExtractor={(item, i) => `${item.id}-${i}`}
-          numColumns={3}
+          numColumns={gridColumns}
           contentContainerStyle={s.grid}
+          columnWrapperStyle={s.gridRow}
           showsVerticalScrollIndicator={false}
           renderItem={renderItem}
           onEndReached={() => {
@@ -442,7 +446,8 @@ const s = StyleSheet.create({
   noticeTitle: { fontSize: 12, fontFamily: "Cairo_700Bold", color: "rgba(251,191,36,0.9)", marginBottom: 3 },
   noticeSub: { fontSize: 11, color: "rgba(251,191,36,0.5)", fontFamily: "Cairo_400Regular", lineHeight: 17 },
   grid: { paddingHorizontal: 12, paddingTop: 12, paddingBottom: 100 },
-  card: { flex: 1 / 3, marginBottom: 14 },
+  gridRow: { gap: 10 },
+  card: { flex: 1, marginBottom: 14 },
   cardImgWrap: { borderRadius: 14, overflow: "hidden", aspectRatio: 2 / 3, backgroundColor: "rgba(255,255,255,0.05)" },
   cardImg: { width: "100%", height: "100%" },
   noImg: { alignItems: "center", justifyContent: "center", backgroundColor: "rgba(139,92,246,0.08)" },

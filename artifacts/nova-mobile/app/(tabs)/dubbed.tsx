@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from "react";
 import {
   View, Text, Pressable, TextInput, FlatList, Image,
   ActivityIndicator, StyleSheet, Platform, ScrollView,
+  useWindowDimensions,
 } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
@@ -65,8 +66,10 @@ function SeriesCard({ s, onPress }: { s: Series; onPress: () => void }) {
 
 export default function DubbedScreen() {
   const insets = useSafeAreaInsets();
+  const { width } = useWindowDimensions();
   const router = useRouter();
   const topPad = Platform.OS === "web" ? 0 : insets.top;
+  const numColumns = width >= 1000 ? 6 : width >= 700 ? 5 : 3;
 
   const [series, setSeries] = useState<Series[]>([]);
   const [page, setPage] = useState(1);
@@ -126,8 +129,6 @@ export default function DubbedScreen() {
 
   const displayList = searchQ.trim().length >= 2 ? searchResults : series;
 
-  const numColumns = 3;
-
   return (
     <View style={[styles.container, { paddingTop: topPad }]}>
       {/* Header */}
@@ -171,6 +172,7 @@ export default function DubbedScreen() {
       ) : (
         <FlatList
           data={displayList}
+          key={`dubbed-grid-${numColumns}`}
           keyExtractor={item => item.key || item.title}
           numColumns={numColumns}
           contentContainerStyle={styles.grid}
@@ -228,7 +230,7 @@ const styles = StyleSheet.create({
     flex: 1, color: "#fff", fontSize: 14,
     fontFamily: "Cairo_400Regular", textAlign: "right", paddingRight: 8,
   },
-  grid: { padding: 12, paddingBottom: 100, gap: 10 },
+  grid: { padding: 12, paddingBottom: 100 },
   card: { borderRadius: 12, overflow: "hidden" },
   cardPoster: { aspectRatio: 2 / 3, backgroundColor: "rgba(255,255,255,0.05)", borderRadius: 12, overflow: "hidden" },
   cardPlaceholder: { flex: 1, alignItems: "center", justifyContent: "center" },
