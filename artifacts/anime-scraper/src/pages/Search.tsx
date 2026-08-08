@@ -269,6 +269,7 @@ export default function Search() {
   const [query,       setQuery]      = useState('');
   const [results,     setResults]    = useState<AnimeResult[]>([]);
   const [loading,     setLoading]    = useState(false);
+  const [searchError, setSearchError] = useState("");
   const [sort,        setSort]       = useState('POPULARITY_DESC');
   const [format,      setFormat]     = useState('');
   const [status,      setStatus]     = useState('');
@@ -301,6 +302,7 @@ export default function Search() {
     const requestId = ++searchRequestRef.current;
     const timer = setTimeout(async () => {
       setLoading(true);
+      setSearchError("");
       try {
         let q: object;
         if (query.trim()) {
@@ -318,12 +320,21 @@ export default function Search() {
           body: JSON.stringify(q),
           signal: controller.signal,
         });
-        const json = await res.json();
+        const json = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          throw new Error(json?.error || `Search failed (${res.status})`);
+        }
+        if (Array.isArray(json?.errors) && json.errors.length > 0) {
+          throw new Error(json.errors[0]?.message || "Search failed");
+        }
         if (!controller.signal.aborted && requestId === searchRequestRef.current) {
           setResults(filterSafe(json.data?.Page?.media || []));
         }
       } catch (e: any) {
-        if (e?.name !== "AbortError" && requestId === searchRequestRef.current) setResults([]);
+        if (e?.name !== "AbortError" && requestId === searchRequestRef.current) {
+          setResults([]);
+          setSearchError("تعذّر تنفيذ البحث الآن. حاول مرة أخرى.");
+        }
       } finally {
         if (!controller.signal.aborted && requestId === searchRequestRef.current) setLoading(false);
       }
@@ -604,7 +615,16 @@ export default function Search() {
       )}
 
       {/* ── Empty state ── */}
-      {!loading && results.length === 0 && (query || format || status || genre || season) && (
+      {!loading && searchError && (
+        <div className="text-center py-20 px-6">
+          <div className="w-16 h-16 rounded-3xl bg-red-500/10 border border-red-400/15 flex items-center justify-center mx-auto mb-4">
+            <SearchIcon className="w-7 h-7 text-red-300/50" />
+          </div>
+          <p className="font-bold text-sm font-['Cairo'] text-red-200/70">{searchError}</p>
+        </div>
+      )}
+
+      {!loading && !searchError && results.length === 0 && (query || format || status || genre || season) && (
         <div className="text-center py-20 px-6">
           <div className="w-16 h-16 rounded-3xl bg-white/4 border border-white/8 flex items-center justify-center mx-auto mb-4">
             <SearchIcon className="w-7 h-7 text-white/15" />
