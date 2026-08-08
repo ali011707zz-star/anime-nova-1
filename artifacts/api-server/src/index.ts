@@ -12,8 +12,13 @@ setDefaultResultOrder("ipv4first");
 process.on("uncaughtException", (err: any) => {
   // نتجاهل TimeoutError المعتادة من AbortSignal.timeout() على Streams
   const name = err?.name || err?.constructor?.name || "";
-  if (name === "TimeoutError" || name === "AbortError" || err?.code === "ABORT_ERR") {
-    console.warn("[uncaughtException] تجاهل TimeoutError/AbortError على stream:", err?.message);
+  const message = String(err?.message || "");
+  const transientStreamError =
+    message === "terminated" ||
+    err?.code === "UND_ERR_SOCKET" ||
+    err?.cause?.code === "UND_ERR_SOCKET";
+  if (name === "TimeoutError" || name === "AbortError" || err?.code === "ABORT_ERR" || transientStreamError) {
+    console.warn("[uncaughtException] تجاهل انقطاع/إلغاء عابر في stream:", message);
     return;
   }
   console.error("[uncaughtException] خطأ غير متوقع:", err);
@@ -21,8 +26,13 @@ process.on("uncaughtException", (err: any) => {
 
 process.on("unhandledRejection", (reason: any) => {
   const name = reason?.name || reason?.constructor?.name || "";
-  if (name === "TimeoutError" || name === "AbortError" || reason?.code === "ABORT_ERR") {
-    console.warn("[unhandledRejection] تجاهل TimeoutError/AbortError:", reason?.message);
+  const message = String(reason?.message || reason || "");
+  const transientStreamError =
+    message === "terminated" ||
+    reason?.code === "UND_ERR_SOCKET" ||
+    reason?.cause?.code === "UND_ERR_SOCKET";
+  if (name === "TimeoutError" || name === "AbortError" || reason?.code === "ABORT_ERR" || transientStreamError) {
+    console.warn("[unhandledRejection] تجاهل انقطاع/إلغاء عابر في stream:", message);
     return;
   }
   console.error("[unhandledRejection] وعد مرفوض:", reason);
