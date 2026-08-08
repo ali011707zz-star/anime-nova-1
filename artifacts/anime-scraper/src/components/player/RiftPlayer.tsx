@@ -792,6 +792,11 @@ export default function RiftPlayer({
 
   useEffect(() => {
     const v = videoRef.current; if (!v) return;
+    // Keep inline playback and conservative metadata preloading explicit for
+    // Android/iOS WebViews as well as regular mobile browsers.
+    v.setAttribute("playsinline", "");
+    v.setAttribute("webkit-playsinline", "");
+    v.preload = "metadata";
     const onPlay  = () => {
       setPlaying(true);
       if (!autoFsTriggered.current && !document.fullscreenElement) {
@@ -812,30 +817,42 @@ export default function RiftPlayer({
       onTimeUpdate?.(v.currentTime);
     };
     const onDur   = () => { setDuration(v.duration); if (v.duration > 0) onDuration?.(v.duration); };
-    const onWait  = () => {
+    const onBuffering = () => {
       const v2 = videoRef.current;
       if (v2 && v2.currentTime > 1) {
         setBuffering(true);
         if (stallRecoveryTimerRef.current) clearTimeout(stallRecoveryTimerRef.current);
-        /* Give the active fragment request a moment to finish, then apply
-           the same small recovery used by the watchdog. */
+        /* Keep the spinner visible while the browser waits, then give the
+           active MP4 Range request/HLS fragment 3.5s to recover naturally. */
         stallRecoveryTimerRef.current = setTimeout(() => {
           stallRecoveryTimerRef.current = null;
           recoverFromStall();
-        }, 1200);
+        }, 3500);
       }
       else setLoading(true);
     };
-    const onPlay2 = () => { setLoading(false); setBuffering(false); };
+    const onPlay2 = () => {
+      if (stallRecoveryTimerRef.current) {
+        clearTimeout(stallRecoveryTimerRef.current);
+        stallRecoveryTimerRef.current = null;
+      }
+      setLoading(false); setBuffering(false);
+    };
     const onEnded = () => { setIsEnded(true); setPlaying(false); setShowCtrl(true); };
     v.addEventListener("play", onPlay); v.addEventListener("pause", onPause);
     v.addEventListener("timeupdate", onTime); v.addEventListener("durationchange", onDur);
-    v.addEventListener("waiting", onWait); v.addEventListener("playing", onPlay2);
+    v.addEventListener("waiting", onBuffering); v.addEventListener("stalled", onBuffering);
+    v.addEventListener("playing", onPlay2);
     v.addEventListener("ended", onEnded);
     return () => {
+      if (stallRecoveryTimerRef.current) {
+        clearTimeout(stallRecoveryTimerRef.current);
+        stallRecoveryTimerRef.current = null;
+      }
       v.removeEventListener("play", onPlay); v.removeEventListener("pause", onPause);
       v.removeEventListener("timeupdate", onTime); v.removeEventListener("durationchange", onDur);
-      v.removeEventListener("waiting", onWait); v.removeEventListener("playing", onPlay2);
+      v.removeEventListener("waiting", onBuffering); v.removeEventListener("stalled", onBuffering);
+      v.removeEventListener("playing", onPlay2);
       v.removeEventListener("ended", onEnded);
     };
   }, [onTimeUpdate, recoverFromStall]);

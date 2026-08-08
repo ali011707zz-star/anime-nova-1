@@ -141,6 +141,47 @@ function HistoryTracker() {
   return null;
 }
 
+function resetScrollPositions() {
+  const reset = (element: HTMLElement | Document) => {
+    try {
+      if ("scrollTo" in element && typeof element.scrollTo === "function") {
+        element.scrollTo({ top: 0, left: 0, behavior: "auto" });
+      } else if ("scrollTop" in element) {
+        element.scrollTop = 0;
+        if ("scrollLeft" in element) element.scrollLeft = 0;
+      }
+    } catch {
+      if ("scrollTop" in element) element.scrollTop = 0;
+    }
+  };
+
+  reset(window);
+  reset(document.documentElement);
+  reset(document.body);
+
+  const mainContainers = document.querySelectorAll<HTMLElement>(
+    "#app, #root, main, [data-scroll-container], .main-app-scroll",
+  );
+  mainContainers.forEach(reset);
+
+  document.querySelectorAll<HTMLElement>("*").forEach((element) => {
+    const style = window.getComputedStyle(element);
+    if (/(auto|scroll)/i.test(style.overflowY)) reset(element);
+  });
+}
+
+function ScrollToTop() {
+  const [location] = useLocation();
+
+  useEffect(() => {
+    resetScrollPositions();
+    const frame = requestAnimationFrame(resetScrollPositions);
+    return () => cancelAnimationFrame(frame);
+  }, [location]);
+
+  return null;
+}
+
 function Router({ onMenuClick }: { onMenuClick: () => void }) {
   const [location] = useLocation();
   const hideHeader = NO_GLOBAL_HEADER.some(r => location.startsWith(r));
@@ -149,6 +190,7 @@ function Router({ onMenuClick }: { onMenuClick: () => void }) {
     <>
       <StartPageRedirect />
       <HistoryTracker />
+      <ScrollToTop />
       {!hideHeader && <Header onMenuClick={onMenuClick} />}
       <ErrorBoundary resetKey={location}>
         <Suspense fallback={<PageLoader />}>
