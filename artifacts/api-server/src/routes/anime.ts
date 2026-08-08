@@ -55,6 +55,36 @@ const BASE_HDRS: Record<string, string> = {
   Connection: "keep-alive",
 };
 
+/**
+ * Upstream source sites occasionally reset connections or return transient
+ * 5xx/429 responses. Retry those requests locally so a brief upstream issue
+ * does not become an empty shared-cache result.
+ */
+async function fetchSourceWithRetry(
+  input: string | URL,
+  init: RequestInit = {},
+  timeoutMs = 10_000,
+  attempts = 2,
+): Promise<Response | null> {
+  for (let attempt = 0; attempt < Math.max(1, attempts); attempt++) {
+    try {
+      const response = await fetch(input, {
+        ...init,
+        signal: AbortSignal.timeout(timeoutMs),
+      });
+      if (response.ok || (response.status < 500 && response.status !== 429)) {
+        return response;
+      }
+    } catch {
+      // Retry below; upstream failures are expected to be transient sometimes.
+    }
+    if (attempt + 1 < attempts) {
+      await new Promise(resolve => setTimeout(resolve, 250 * (attempt + 1)));
+    }
+  }
+  return null;
+}
+
 // ── In-memory caches ──
 const searchCache    = new Map<string, { result: any; ts: number }>();
 const translateCache = new Map<string, string>();
@@ -1115,12 +1145,11 @@ async function extractAnifoxExternal(
   const lower = pageUrl.toLowerCase();
   if (lower.includes("yandex.com") || lower.includes("yadi.sk")) return null;
   try {
-    const r = await fetch(pageUrl, {
+    const r = await fetchSourceWithRetry(pageUrl, {
       headers: { ...BASE_HDRS, Referer: "https://max-panel.monster/" },
-      signal: AbortSignal.timeout(10_000),
       redirect: "follow",
-    });
-    if (!r.ok) return null;
+    }, 12_000);
+    if (!r) return null;
     const html = await r.text();
     let directUrl: string | null = null;
     let directType: "mp4" | "hls" = "mp4";
@@ -1174,11 +1203,11 @@ async function _getAnifoxCatalog(): Promise<Array<{ content_id: string; content_
     const starts = [0, 500, 1000, 1500, 2000].map(s => s + batch);
     const pages = await Promise.allSettled(starts.map(start => {
       const body = new URLSearchParams({ start: String(start), limit: "500", genre_id: "0", order_by: "content_title", order_direction: "ASC" });
-      return fetch("https://max-panel.monster/api/Content/searchContent", {
+      return fetchSourceWithRetry("https://max-panel.monster/api/Content/searchContent", {
         method: "POST",
         headers: { "Unique-Key": "flix!123", Accept: "application/json", "Content-Type": "application/x-www-form-urlencoded" },
-        body, signal: AbortSignal.timeout(12_000),
-      }).then(r => r.ok ? r.json() : null).catch(() => null);
+        body,
+      }, 14_000).then(r => r ? r.json() : null).catch(() => null);
     }));
     let lastPageFull = false;
     for (const p of pages) {
@@ -1191,9 +1220,18 @@ async function _getAnifoxCatalog(): Promise<Array<{ content_id: string; content_
     }
     if (!lastPageFull) break; // الكاتلوج انتهى قبل 4000
   }
-  if (all.length) { _anifoxCatalog.items = all; _anifoxCatalog.ts = Date.now(); }
-  console.log(`[ANIFOX] catalog cached: ${all.length} titles`);
-  return all;
+  // Do not replace a complete catalog with a partial result after a transient
+  // batch failure; partial catalogs cause false "no match" responses.
+  const deduped = [...new Map(
+    all.filter(item => item.content_id && item.content_title)
+      .map(item => [item.content_id, item]),
+  ).values()];
+  if (deduped.length >= 100 || !_anifoxCatalog.items.length) {
+    _anifoxCatalog.items = deduped;
+    _anifoxCatalog.ts = Date.now();
+  }
+  console.log(`[ANIFOX] catalog cached: ${_anifoxCatalog.items.length} titles`);
+  return _anifoxCatalog.items;
 }
 
 async function getAnifoxSources(
@@ -1224,13 +1262,12 @@ async function getAnifoxSources(
       content_id: best.content_id,
       lazy: "0",
     });
-    const seasonRes = await fetch("https://max-panel.monster/api/Content/getSeasonByContentID", {
+    const seasonRes = await fetchSourceWithRetry("https://max-panel.monster/api/Content/getSeasonByContentID", {
       method: "POST",
       headers: { "Unique-Key": "flix!123", Accept: "application/json", "Content-Type": "application/x-www-form-urlencoded" },
       body: seasonBody,
-      signal: AbortSignal.timeout(15_000),
-    });
-    if (!seasonRes.ok) return [];
+    }, 16_000);
+    if (!seasonRes) return [];
     const seasonJson = await seasonRes.json().catch(() => null) as any;
     const episodes = (Array.isArray(seasonJson?.data) ? seasonJson.data : [])
       .flatMap((s: any) => Array.isArray(s?.episodes) ? s.episodes : []);
@@ -4923,8 +4960,11 @@ async function getAnimeifySources(title: string, english: string | null, ep: num
         const tags     = String(item.Tags      || "");
         const s = Math.max(
           enTitle   ? similarity(q, enTitle)   : 0,
+          enTitle   ? asciiSimilarity(q, enTitle) : 0,
           enTitle   ? similarity(title, enTitle)   : 0,
+          enTitle   ? asciiSimilarity(title, enTitle) : 0,
           english && enTitle ? similarity(english, enTitle) : 0,
+          english && enTitle ? asciiSimilarity(english, enTitle) : 0,
           arTitle   ? similarity(q, arTitle)   : 0,
           synonyms  ? similarity(q, synonyms)  : 0,
           tags      ? similarity(q, tags)      : 0,
@@ -5384,15 +5424,14 @@ async function getKawaiiAnimeSources(
   if (!anilistId) return [];
   try {
     const apiUrl = `${KAWAII_BASE}/api/watch?anilistId=${anilistId}&ep=${ep}`;
-    const r = await fetch(apiUrl, {
+    const r = await fetchSourceWithRetry(apiUrl, {
       headers: {
         ...BASE_HDRS,
         Accept: "application/json",
         Referer: KAWAII_BASE + "/",
       },
-      signal: AbortSignal.timeout(10000),
-    });
-    if (!r.ok) return [];
+    }, 12_000);
+    if (!r) return [];
     const data = await r.json() as {
       sources?: Array<{ url: string; quality?: string; isM3U8?: boolean; type?: string }>;
       subtitles?: Array<{ url: string; lang?: string; label?: string }>;
@@ -5428,13 +5467,20 @@ async function getKawaiiAnimeSources(
     // المتصفح لا يستطيع تعيين Referer كـ forbidden header → التشغيل المباشر يفشل.
     // الحل: توجيه كل المصادر عبر VPS proxy مع الـ Referer الصحيح.
     // فلترة: نقبل روابط cdn.momentoai.dev + video.kawaii-anime.com (legacy) + مسارات نسبية.
-    const trustedSources = data.sources.filter(s =>
-      s.url && (
-        s.url.includes("cdn.momentoai.dev") ||
-        s.url.includes("video.kawaii-anime.com") ||
-        s.url.startsWith("/")
-      )
-    );
+    const trustedSources = data.sources
+      .map(s => {
+        if (!s?.url) return null;
+        try {
+          const url = new URL(s.url, KAWAII_BASE).toString();
+          return { ...s, url };
+        } catch { return null; }
+      })
+      .filter((s): s is NonNullable<typeof s> =>
+        !!s && (
+          s.url.includes("cdn.momentoai.dev") ||
+          s.url.includes("video.kawaii-anime.com")
+        )
+      );
     if (!trustedSources.length) return [];
 
     const kawaiiRef = encodeURIComponent(KAWAII_BASE + "/");
@@ -11180,11 +11226,10 @@ async function getSAnimeSources(
     }
 
     // 3. info + episodes
-    const infoRes = await fetch(`${SANIME_API}info&id=${bestId}`, {
+    const infoRes = await fetchSourceWithRetry(`${SANIME_API}info&id=${bestId}`, {
       headers: { "User-Agent": SANIME_UA, "Accept": "application/json" },
-      signal: AbortSignal.timeout(10_000),
-    });
-    if (!infoRes.ok) { console.warn(`[SAnime] info HTTP ${infoRes.status}`); return out; }
+    }, 12_000);
+    if (!infoRes) { console.warn("[SAnime] info request failed"); return out; }
     const info: any = await infoRes.json().catch(() => null);
     if (!info?.ep) return out;
 
@@ -11205,12 +11250,24 @@ async function getSAnimeSources(
     const proxiedHD = `/api/anime/video-proxy?url=${encodeURIComponent(directHD)}&ref=${encodeURIComponent(SANIME_REF)}`;
     const proxiedSD = `/api/anime/video-proxy?url=${encodeURIComponent(directSD)}&ref=${encodeURIComponent(SANIME_REF)}`;
     let usedDirect = false;
+    const probe = async (url: string): Promise<boolean> => {
+      try {
+        const head = await fetchSourceWithRetry(url, {
+          method: "HEAD",
+          headers: { "User-Agent": SANIME_UA },
+        }, 5_000);
+        if (head?.ok) return true;
+        // SAnime's CDN intermittently rejects HEAD while serving normal GETs.
+        const range = await fetchSourceWithRetry(url, {
+          headers: { "User-Agent": SANIME_UA, Range: "bytes=0-0" },
+        }, 6_000);
+        return !!range && [200, 206, 416].includes(range.status);
+      } catch { return false; }
+    };
     try {
       const [hdOk, sdOk] = await Promise.all([
-        fetch(directHD, { method: "HEAD", headers: { "User-Agent": SANIME_UA }, signal: AbortSignal.timeout(6_000) })
-          .then(r => r.ok).catch(() => false),
-        fetch(directSD, { method: "HEAD", headers: { "User-Agent": SANIME_UA }, signal: AbortSignal.timeout(6_000) })
-          .then(r => r.ok).catch(() => false),
+        probe(directHD),
+        probe(directSD),
       ]);
       if (hdOk) {
         out.push({ name: "SAnime · FHD", url: directHD, quality: "FHD", qualityRank: 14, site: "sanime", directUrl: proxiedHD, directType: "mp4", headers: { Referer: SANIME_REF }, corsOk: false });
@@ -11850,7 +11907,7 @@ router.get("/anime/sources-stream", async (req, res) => {
       // scrapeCached("moviz_time",   () => getMovizTimeSources(title, english, ep, isMovie), false, 20000),
       scrapeCached("topcinemaa",   () => getTopCimaaSources(title, english, ep, isMovie)),
       // ── ياباني مترجم (AniList ID) ─────────────────────────────────
-      scrapeCached("kawaii",       () => getKawaiiAnimeSources(title, english, ep, anilistId), false),
+      scrapeCached("kawaii",       () => getKawaiiAnimeSources(title, english, ep, anilistId), false, 14000),
       scrapeCached("anikoto",      () => getAniKotoSources(title, english, ep, anilistId),      false),
       scrapeCached("anikototv",    () => getAnikototvSources(title, english, ep),               false, 22000),
       // anikuro: محذوف
@@ -11984,6 +12041,7 @@ router.get("/anime/fetch-source", async (req, res) => {
   const SHORT_TTL_FETCH_SITES = new Set([
     "anineko", "anikoto", "anikototv", // vibeplayer.site tokens ~1-2h
     "animewitcher", "animeify",                    // Streamtape/MediaFire ~45min
+    "kawaii", "anifox",                             // signed CDN/download URLs
     "moviebox", "moviebox_anim",                   // &t= signed URLs ~10min
     "vidlink_encdec", "vidlink_anim",              // stormvv URLs ~45min
     "xpass_anim",                                  // XPass token ~8min
@@ -12080,7 +12138,7 @@ router.get("/anime/fetch-source", async (req, res) => {
       // moviz_time: معطّل بطلب المستخدم 2026-07-14 (قسم الأنمي فقط)
       // case "moviz_time":  (await race(getMovizTimeSources(title, english, ep, isMovie), 20000, [])).forEach(collectSrc); break;
       case "topcinemaa":   await runExtract(await race(getTopCimaaSources(title, english, ep, isMovie), SCRAPER_MS, [])); break;
-      case "kawaii":      (await race(getKawaiiAnimeSources(title, english, ep, anilistId), 15_000, [])).forEach(collectSrc); break;
+      case "kawaii":      (await race(getKawaiiAnimeSources(title, english, ep, anilistId), 14_000, [])).forEach(collectSrc); break;
       case "anikoto":     (await race(getAniKotoSources(title, english, ep, anilistId),     20_000, [])).forEach(collectSrc); break;
       case "anikototv":   (await race(getAnikototvSources(title, english, ep),              25000, [])).forEach(collectSrc); break;
       case "animekai":    (await race(getAnimeKaiSources(title, english, ep, anilistId),    40_000, [])).forEach(collectSrc); break;

@@ -18,6 +18,7 @@ export const SITE_TTL: Record<string, number> = {
   animedar:     30 * 24 * 3_600_000, // Mega.nz + 4shared — روابط دائمة لا تنتهي
   kawaii:       15 * 3_600_000,  // روابط موقَّعة تنتهي ~17h → 15h TTL احتياطي
   animeify:      45 * 60_000,    // مختلط: MediaFire دائم / FileMoon+SendVid مؤقتة → 45min
+  anifox:        3 * 3_600_000,  // Archive/MediaFire/Uqload — قد تُوقَّع بعض الروابط
   mitanime:      8 * 3_600_000,
   seepanel:      8 * 3_600_000,
   okanime:       5 * 3_600_000,
