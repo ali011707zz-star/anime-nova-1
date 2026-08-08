@@ -37,6 +37,12 @@ jobs:
           distribution: temurin
           java-version: '17'
 
+      - name: 🤖 Android SDK + NDK 27
+        uses: android-actions/setup-android@v3
+        with:
+          packages: 'ndk;27.0.12077973'
+          accept-android-sdk-licenses: true
+
       - name: 🔧 Node.js 20
         uses: actions/setup-node@v4
         with:
