@@ -620,6 +620,17 @@ function asciiSimilarity(a: string, b: string): number {
   const toAscii = (s: string) => s.replace(/[^\x00-\x7F]/g, " ").replace(/-/g, " ");
   return similarity(toAscii(a), b);
 }
+
+/** All AniList title forms accepted by source catalogues. */
+function titleQueries(
+  title: string,
+  english: string | null,
+  variants: string[] = [],
+): string[] {
+  return [...new Set([title, english, ...variants]
+    .filter((value): value is string => typeof value === "string" && value.trim().length > 0)
+    .map(value => value.trim()))];
+}
 /**
  * Stricter similarity for movie/OVA matching:
  * Combines normal similarity with a character-length ratio penalty.
@@ -1238,10 +1249,11 @@ async function getAnifoxSources(
   title: string,
   english: string | null,
   ep: number,
+  variants: string[] = [],
 ): Promise<UnifiedSource[]> {
   const out: UnifiedSource[] = [];
   const seen = new Set<string>();
-  const queries = [...new Set([english, title].filter(Boolean) as string[])];
+  const queries = titleQueries(title, english, variants);
   try {
     // ── البحث من الكاش (< 1ms بعد أول جلب) بدل 9 HTTP requests متسلسلة ──
     const catalog = await _getAnifoxCatalog();
@@ -4921,14 +4933,14 @@ async function extractMediafireDirect(serverId: string): Promise<string | null> 
   } catch { return null; }
 }
 
-async function getAnimeifySources(title: string, english: string | null, ep: number): Promise<UnifiedSource[]> {
+async function getAnimeifySources(title: string, english: string | null, ep: number, variants: string[] = []): Promise<UnifiedSource[]> {
   try {
     const creds = await getAnimeifyCreds();
     if (!creds) return [];
     let { base, token } = creds;
 
     // Search with both titles; pick best match across SERIES + MOVIE — بالتوازي لسرعة أكبر
-    const queries = [...new Set([english, title].filter(Boolean) as string[])];
+    const queries = titleQueries(title, english, variants);
     let best: { score: number; item: any } = { score: 0, item: null };
 
     const searchCombinations = queries.flatMap(q =>
@@ -7337,7 +7349,7 @@ async function awBuildSourcesFromDb(rows: AwLinkRow[]): Promise<UnifiedSource[]>
 }
 
 async function getAnimeWitcherSources(
-  title: string, english: string | null, ep: number, _anilistId?: number,
+  title: string, english: string | null, ep: number, _anilistId?: number, variants: string[] = [],
 ): Promise<UnifiedSource[]> {
   try {
     // ── DB-first path: aw_links (142k pre-loaded) — أسرع بـ ~10x من Algolia ─
@@ -7365,7 +7377,7 @@ async function getAnimeWitcherSources(
     // 1. بحث Algolia بـ credentials جديدة (D8LH9I7ZL7) — تعمل مباشرة من VPS
     let animeId: string | null = null;
 
-    const queries = [...new Set([english, title].filter(Boolean) as string[])];
+    const queries = titleQueries(title, english, variants);
     for (const q of queries) {
       const hits = await awAlgoliaSearch(q);
       if (!hits.length) continue;
@@ -11167,7 +11179,7 @@ function sanimeSeasonNum(s: string | null | undefined): number {
 }
 
 async function getSAnimeSources(
-  title: string, english: string | null, ep: number,
+  title: string, english: string | null, ep: number, variants: string[] = [],
 ): Promise<UnifiedSource[]> {
   const ck = `sanime:${english || title}:${ep}`;
   const hit = _sanimeCacheMap.get(ck);
@@ -11177,7 +11189,7 @@ async function getSAnimeSources(
   try {
     /* 1. البحث — SAnime يخزّن أسماء عربية ومترجمة، نجرب الإنجليزي أولاً ثم الروماجي.
        ندمج النتائج لتحسين فرص المطابقة (بعض العناوين موجودة بكلا الاسمين). */
-    const queries = [...new Set([english, title].filter(Boolean) as string[])];
+    const queries = titleQueries(title, english, variants);
     const allResults: any[] = [];
     const seenIds = new Set<string>();
     for (const q of queries) {
@@ -11668,6 +11680,16 @@ router.get("/anime/sources-stream", async (req, res) => {
   const reqNative   = ((req.query.native   as string) || "").trim() || null;
   const reqTotalEps = parseInt((req.query.episodes as string) || "0") || null;
   const titleAr     = ((req.query.titleAr  as string) || "").trim() || null;
+  let titleVariants: string[] = [];
+  try {
+    const rawTitles = req.query.titles as string;
+    const parsed = rawTitles ? JSON.parse(rawTitles) : [];
+    if (Array.isArray(parsed)) {
+      titleVariants = parsed.filter((value): value is string =>
+        typeof value === "string" && value.trim().length > 0
+      ).map(value => value.trim()).slice(0, 20);
+    }
+  } catch { /* malformed optional title list — keep the primary fields */ }
   const seasonNum   = extractSeasonNum(title) ?? extractSeasonNum(english || "") ?? null;
   const matchCtx: MatchCtx = {
     romaji: title, english, native: reqNative,
@@ -11893,7 +11915,7 @@ router.get("/anime/sources-stream", async (req, res) => {
       // okanime: معطّل بطلب المستخدم
       // scrapeCached("okanime",      () => getOkAnimeSources(title, english, ep, isMovie, matchCtx), true, 22_000),
       // mitanime: محذوف بطلب المستخدم 2026-07-27
-      scrapeCached("animeify",     () => getAnimeifySources(title, english, ep),  false, 18000),
+      scrapeCached("animeify",     () => getAnimeifySources(title, english, ep, titleVariants),  false, 18000),
       scrapeCached("animeday",     () => getAnimeDaySources(title, english, ep),    true, 18000),
       // scrapeCached("seepanel",  () => getSeepanelSources(title, english, ep, isMovie)), // DEAD: panel.seepanel.top/api returns 404 (2026-06)
       scrapeCached("arabseed",     () => getArabSeedSources(title, english, ep, isMovie)),
@@ -11920,7 +11942,7 @@ router.get("/anime/sources-stream", async (req, res) => {
       scrapeCached("anipm",        () => getAniPmSources(title, english, ep, anilistId),        false, 20000),
       scrapeCached("anizone",      () => getAniZoneSources(title, english, ep),                 false, 18000),
       scrapeCached("2dhive",       () => get2DhiveSources(title, english, ep),                  true,  20000),
-      scrapeCached("animewitcher", () => getAnimeWitcherSources(title, english, ep, anilistId), false, 38000),
+      scrapeCached("animewitcher", () => getAnimeWitcherSources(title, english, ep, anilistId, titleVariants), false, 38000),
       // ── مدبلج عربي/كرتون (WordPress REST) ───────────────────────────
       scrapeCached("stardima",     () => getStardimaSources(title, english, ep, isMovie),      false, 20000),
       // ── ياباني مترجم (بدون ID) ────────────────────────────────────
@@ -11970,7 +11992,7 @@ router.get("/anime/sources-stream", async (req, res) => {
       // vaplayer_anim: محذوف من الأنمي — يُبقى فقط في الأنيميشن (2026-07-15)
       // xyra_anim: معطّل مؤقتاً — api.xyra.stream يرجع 502 (Cloudflare) لكل الطلبات منذ 2026-07-09
       // scrapeCached("xyra_anim",  () => getXyraAnimeSources(title, english, ep, anilistId),  false, 18000),
-      scrapeCached("sanime",     () => getSAnimeSources(title, english, ep),                 false, 20000),
+      scrapeCached("sanime",     () => getSAnimeSources(title, english, ep, titleVariants), false, 20000),
       scrapeCached("anslayer",   () => getAnimeSlayerSources(title, english, ep, undefined, titleAr), false, 45000),
       // animetime / notorrent: أُزيلت كلياً بطلب المستخدم (2026-07-09)
     ]);
@@ -12002,6 +12024,16 @@ router.get("/anime/fetch-source", async (req, res) => {
   const isMovie   = format === "MOVIE" || format === "MOVIE_SHORT" || isMovieParam;
   const anslayerId = parseInt((req.query.anslayerId as string) || "0") || undefined;
   const titleAr    = ((req.query.titleAr as string) || "").trim() || null;
+  let titleVariants: string[] = [];
+  try {
+    const rawTitles = req.query.titles as string;
+    const parsed = rawTitles ? JSON.parse(rawTitles) : [];
+    if (Array.isArray(parsed)) {
+      titleVariants = parsed.filter((value): value is string =>
+        typeof value === "string" && value.trim().length > 0
+      ).map(value => value.trim()).slice(0, 20);
+    }
+  } catch { /* malformed optional title list — keep the primary fields */ }
 
   if (!site || !title) {
     res.status(400).json({ error: "site and title required", sources: [] });
@@ -12128,7 +12160,7 @@ router.get("/anime/fetch-source", async (req, res) => {
       case "animedar":     await runExtract(await race(getAnimadarSources(title, english, ep, isMovie),   SCRAPER_MS, [])); break;
       // case "okanime": معطّل بطلب المستخدم
       // case "mitanime": محذوف بطلب المستخدم 2026-07-27
-      case "animeify":    (await race(getAnimeifySources(title, english, ep),  18000, [])).forEach(collectSrc); break;
+      case "animeify":    (await race(getAnimeifySources(title, english, ep, titleVariants),  18000, [])).forEach(collectSrc); break;
       case "animeday":     await runExtract(await race(getAnimeDaySources(title, english, ep),   SCRAPER_MS, [])); break;
       // case "seepanel": DEAD
       case "arabseed":     await runExtract(await race(getArabSeedSources(title, english, ep),   SCRAPER_MS, [])); break;
@@ -12145,7 +12177,7 @@ router.get("/anime/fetch-source", async (req, res) => {
       // anikuro: محذوف
       // anivault: محذوف
       // case "hianime": معطّل بطلب المستخدم 2026-07-30
-      case "animewitcher":(await race(getAnimeWitcherSources(title, english, ep, anilistId),38000, [])).forEach(collectSrc); break;
+      case "animewitcher":(await race(getAnimeWitcherSources(title, english, ep, anilistId, titleVariants),38000, [])).forEach(collectSrc); break;
       case "stardima":    (await race(getStardimaSources(title, english, ep, isMovie),       20000, [])).forEach(collectSrc); break;
       case "anineko":       (await race(getAninekoSources(title, english, ep),                20_000, [])).forEach(collectSrc); break;
       case "anipm":         (await race(getAniPmSources(title, english, ep, anilistId),       20_000,     [])).forEach(collectSrc); break;
@@ -12174,8 +12206,8 @@ router.get("/anime/fetch-source", async (req, res) => {
       // case "vaplayer_anim": محذوف من الأنمي 2026-07-15
       // xyra_anim: معطّل مؤقتاً — api.xyra.stream يرجع 502 دائماً (عطل من طرفهم)
       // case "xyra_anim":    (await race(getXyraAnimeSources(title, english, ep, anilistId), 18_000, [])).forEach(collectSrc); break;
-      case "sanime":       (await race(getSAnimeSources(title, english, ep),               20_000, [])).forEach(collectSrc); break;
-      case "anifox":       (await race(getAnifoxSources(title, english, ep),               30_000, [])).forEach(collectSrc); break;
+      case "sanime":       (await race(getSAnimeSources(title, english, ep, titleVariants),               20_000, [])).forEach(collectSrc); break;
+      case "anifox":       (await race(getAnifoxSources(title, english, ep, titleVariants),               30_000, [])).forEach(collectSrc); break;
       case "anslayer":     (await race(getAnimeSlayerSources(title, english, ep, anslayerId, titleAr), 45_000, [])).forEach(collectSrc); break;
       case "ristoanime":   (await race(getRistoAnimeSources(title, english, ep),          22_000, [])).forEach(collectSrc); break;
       // case "allmanga": معطّل 2026-07-17

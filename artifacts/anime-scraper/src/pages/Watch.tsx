@@ -18,7 +18,7 @@ import { AnimeMascot } from "@/components/AnimeMascot";
 /* ══════════════════════════════════ ANILIST ══════════════════ */
 const ANILIST_Q = `query ($id: Int) {
   Media(id: $id, type: ANIME) {
-    id idMal title { romaji english native }
+    id idMal title { romaji english native userPreferred } synonyms
     episodes coverImage { large extraLarge }
     nextAiringEpisode { episode }
     bannerImage genres averageScore popularity
@@ -3253,6 +3253,18 @@ export default function WatchPage() {
 
     const resolvedTitle   = anime?.title?.romaji   || titleParam;
     const resolvedEnglish = anime?.title?.english  || englishParam || "";
+    const titleVariants = [
+      anime?.title?.romaji,
+      anime?.title?.english,
+      anime?.title?.native,
+      anime?.title?.userPreferred,
+      ...(Array.isArray(anime?.synonyms) ? anime.synonyms : []),
+      titleParam,
+      englishParam,
+      titleArParam,
+    ].filter((value): value is string => typeof value === "string" && value.trim().length > 0)
+      .map(value => value.trim())
+      .filter((value, index, values) => values.indexOf(value) === index);
 
     /* timeout مُصمَّم لكل موقع — يجب أن يكون >= timeout الباكند لنفس الموقع
        حتى لا يُقتل الطلب قبل أن يرد الباكند (مشكلة جذرية لفقدان المصادر في cache البارد) */
@@ -3276,6 +3288,7 @@ export default function WatchPage() {
 
     try {
       const params = new URLSearchParams({ site, title: resolvedTitle, english: resolvedEnglish, ep: String(ep), anime: String(animeId || 0), format: anime?.format || sp.get("format") || "" });
+      params.set("titles", JSON.stringify(titleVariants));
       /* anslayerId: يمرَّر من قسم "أحدث الحلقات" (معرّف anslayer المباشر من كتالوجه —
          يتجاوز البحث بالاسم ويحدّد الأنمي الصحيح 100%).
          titleAr: العنوان العربي يُحسَّن البحث على AnimeSlayer (يبحث بالعربي أولاً). */
