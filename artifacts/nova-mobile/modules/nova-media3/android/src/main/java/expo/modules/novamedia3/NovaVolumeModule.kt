@@ -18,6 +18,14 @@ import expo.modules.kotlin.modules.ModuleDefinition
 class NovaVolumeModule : Module() {
   private var volumeReceiver: BroadcastReceiver? = null
 
+  // AudioManager exposes these as hidden/system API constants on newer SDKs,
+  // so referencing them directly breaks Kotlin compilation. The broadcast
+  // action and extra names are stable Android platform contract strings.
+  private companion object {
+    const val VOLUME_CHANGED_ACTION = "android.media.VOLUME_CHANGED_ACTION"
+    const val EXTRA_VOLUME_STREAM_TYPE = "android.media.EXTRA_VOLUME_STREAM_TYPE"
+  }
+
   private fun audioManager(): AudioManager? =
     appContext.reactContext?.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
 
@@ -37,10 +45,10 @@ class NovaVolumeModule : Module() {
 
     OnCreate {
       appContext.reactContext?.let { context ->
-        val filter = IntentFilter(AudioManager.VOLUME_CHANGED_ACTION)
+        val filter = IntentFilter(VOLUME_CHANGED_ACTION)
         val receiver = object : BroadcastReceiver() {
           override fun onReceive(context: Context?, intent: Intent?) {
-            if (intent?.getIntExtra(AudioManager.EXTRA_VOLUME_STREAM_TYPE, -1) ==
+            if (intent?.getIntExtra(EXTRA_VOLUME_STREAM_TYPE, -1) ==
               AudioManager.STREAM_MUSIC
             ) {
               emitCurrentVolume()
