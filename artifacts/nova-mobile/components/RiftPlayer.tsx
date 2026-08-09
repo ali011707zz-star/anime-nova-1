@@ -360,23 +360,6 @@ function SpinRing({ size = 52 }: { size?: number }) {
   );
 }
 
-/* ─── Screenshot flash overlay ─── */
-function ScreenshotFlash({ visible }: { visible: boolean }) {
-  const opacity = useRef(new Animated.Value(0)).current;
-  useEffect(() => {
-    if (visible) {
-      opacity.setValue(0.7);
-      Animated.timing(opacity, { toValue: 0, duration: 500, useNativeDriver: true }).start();
-    }
-  }, [visible]);
-  return (
-    <Animated.View
-      pointerEvents="none"
-      style={[StyleSheet.absoluteFill, { backgroundColor: "#fff", opacity, zIndex: 99 }]}
-    />
-  );
-}
-
 /* ─── Main Component ─── */
 export function RiftPlayer({
   sources,
@@ -456,7 +439,6 @@ export function RiftPlayer({
   const [isLocked, setIsLocked]         = useState(false);
   const [showUnlock, setShowUnlock]     = useState(false);
   const [contentFit, setContentFit]     = useState<"contain" | "cover" | "fill">("contain");
-  const [screenshotFlash, setScreenshotFlash] = useState(false);
   const [isFlipped, setIsFlipped]       = useState(false);
 
   /* ─── Subtitle state ─── */
@@ -604,9 +586,8 @@ export function RiftPlayer({
   const loadTimeoutRef    = useRef<ReturnType<typeof setTimeout> | null>(null);
   /* timer الانتظار لوصول مصادر إضافية عندما يفشل المصدر الوحيد */
   const waitForSrcTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  /* timers صغيرة غير مُتتبَّعة سابقاً — يجب مسحها في master cleanup لمنع كراش الـ native player */
+      /* timers صغيرة غير مُتتبَّعة سابقاً — يجب مسحها في master cleanup لمنع كراش الـ native player */
   const replayTimeoutRef         = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const screenshotFlashTimerRef  = useRef<ReturnType<typeof setTimeout> | null>(null);
   /* طلبات الشبكة المرتبطة بالمصدر الحالي — تُلغى قبل تبديل الحلقة أو إغلاقها. */
   const subtitleAbortRef         = useRef<AbortController | null>(null);
   const whisperAbortRef          = useRef<AbortController | null>(null);
@@ -740,10 +721,8 @@ export function RiftPlayer({
 
       /* 5b. ألغِ كل الـ timers الصغيرة التي لم تكن في cleanup — مسببات الكراش الرئيسية:
              replayTimeout: يستدعي player.play() بعد 120ms من unmount → native crash
-             screenshotFlashTimer: يستدعي setState بعد unmount
              feedbackTimer/tapTimer/longPressTimer/unlockTimer/postSeekTimer: setState بعد unmount */
       if (replayTimeoutRef.current) { clearTimeout(replayTimeoutRef.current); replayTimeoutRef.current = null; }
-      if (screenshotFlashTimerRef.current) { clearTimeout(screenshotFlashTimerRef.current); screenshotFlashTimerRef.current = null; }
       if (feedbackTimer.current) { clearTimeout(feedbackTimer.current); feedbackTimer.current = null; }
       if (tapTimer.current) { clearTimeout(tapTimer.current); tapTimer.current = null; }
       if (longPressTimer.current) { clearTimeout(longPressTimer.current); longPressTimer.current = null; }
@@ -1352,13 +1331,6 @@ export function RiftPlayer({
         return;
       }
       await ML.saveToLibraryAsync(uri);
-      setScreenshotFlash(true);
-      if (screenshotFlashTimerRef.current) clearTimeout(screenshotFlashTimerRef.current);
-      screenshotFlashTimerRef.current = setTimeout(() => {
-        screenshotFlashTimerRef.current = null;
-        if (aliveRef.current) setScreenshotFlash(false);
-      }, 600);
-      Alert.alert("تم الحفظ", "حُفظت لقطة الشاشة في معرض الصور.");
     } catch (error) {
       console.warn("[RiftPlayer] screenshot failed", error);
       Alert.alert("تعذّر حفظ اللقطة", "حاول مرة أخرى بعد منح إذن الصور.");
@@ -1842,8 +1814,8 @@ export function RiftPlayer({
           volumeRef.current = newVol;
           setVolume(newVol);
           setFeedback({ type: "volume", value: newVol });
-          /* ضبط صوت الوسائط الحقيقي في النظام (يُظهر HUD أزرار الصوت) */
-          VolumeManager.setVolume(newVol, { showUI: true }).catch(() => {});
+          /* ضبط صوت الوسائط الحقيقي بدون طلب إظهار لوحة صوت النظام */
+          VolumeManager.setVolume(newVol, { showUI: false }).catch(() => {});
           /* player يعمل دائماً بـ 100% — النظام هو من يتحكم بالصوت الفعلي */
           try { player.volume = 1; } catch {}
         } else {
@@ -2080,9 +2052,6 @@ export function RiftPlayer({
       />
 
       {/* ── Brightness: يُضبط عبر expo-brightness (سطوع الشاشة الحقيقي) — لا حاجة لـ overlay ── */}
-
-      {/* ── Screenshot flash ── */}
-      <ScreenshotFlash visible={screenshotFlash} />
 
       {/* ── Subtitle overlay ── */}
       {subOn && activeCue && (
