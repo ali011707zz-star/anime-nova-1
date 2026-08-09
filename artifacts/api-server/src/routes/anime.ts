@@ -826,6 +826,10 @@ function buildAnimeSlugs(titles: string[]): string[] {
 function slugSimilarity(a: string, b: string): number {
   const left = new Set(buildAnimeSlugs([a]));
   const right = new Set(buildAnimeSlugs([b]));
+  return slugSimilarityFromSets(left, right);
+}
+
+function slugSimilarityFromSets(left: Set<string>, right: Set<string>): number {
   for (const item of left) if (right.has(item)) return 1;
   const leftAscii = [...left].filter(s => /^[a-z0-9-]+$/i.test(s));
   const rightAscii = [...right].filter(s => /^[a-z0-9-]+$/i.test(s));
@@ -1393,12 +1397,16 @@ async function filterAnifoxCachedSources(sources: UnifiedSource[]): Promise<Unif
 const _anifoxCatalog: { items: Array<{ content_id: string; content_title: string }>; ts: number } = {
   items: [], ts: 0,
 };
+let _anifoxCatalogInFlight: Promise<Array<{ content_id: string; content_title: string }>> | null = null;
 const ANIFOX_CATALOG_TTL = 24 * 3_600_000; // 24h — الكاتلوج لا يتغير كثيراً
 
 async function _getAnifoxCatalog(): Promise<Array<{ content_id: string; content_title: string }>> {
   if (_anifoxCatalog.items.length && Date.now() - _anifoxCatalog.ts < ANIFOX_CATALOG_TTL) {
     return _anifoxCatalog.items;
   }
+  if (_anifoxCatalogInFlight) return _anifoxCatalogInFlight;
+
+  _anifoxCatalogInFlight = (async () => {
   const all: Array<{ content_id: string; content_title: string }> = [];
   // جلب صفحات بالتوازي 5 صفحات × 500 = 2500 أول مرة، ثم 5 أخرى إن وُجدت
   for (let batch = 0; batch <= 4000; batch += 2500) {
@@ -1434,6 +1442,13 @@ async function _getAnifoxCatalog(): Promise<Array<{ content_id: string; content_
   }
   console.log(`[ANIFOX] catalog cached: ${_anifoxCatalog.items.length} titles`);
   return _anifoxCatalog.items;
+  })();
+
+  try {
+    return await _anifoxCatalogInFlight;
+  } finally {
+    _anifoxCatalogInFlight = null;
+  }
 }
 
 async function getAnifoxSources(
@@ -1448,17 +1463,27 @@ async function getAnifoxSources(
   const queries = titleQueries(title, english, variants);
   try {
     // ── البحث من الكاش (< 1ms بعد أول جلب) بدل 9 HTTP requests متسلسلة ──
-    const catalog = await _getAnifoxCatalog();
-    const animeRecord = await ensureAnimeSlugRecord(anilistId, [title, english || "", ...variants]);
+    const [catalog, animeRecord] = await Promise.all([
+      _getAnifoxCatalog(),
+      ensureAnimeSlugRecord(anilistId, [title, english || "", ...variants]),
+    ]);
     const storedSlugs = animeRecord?.slugs ?? [];
     const candidates: Array<{ content_id: string; content_title: string; score: number }> = [];
+    const querySlugSets = queries.map(query => new Set(buildAnimeSlugs([query])));
+    const storedSlugSet = new Set(storedSlugs);
+    const catalogSlugSets = new Map<string, Set<string>>();
     for (const item of catalog) {
       const titleScore = Math.max(...queries.map(q =>
         Math.max(similarity(q, item.content_title), asciiSimilarity(item.content_title, q)),
       ));
+      let itemSlugSet = catalogSlugSets.get(item.content_id);
+      if (!itemSlugSet) {
+        itemSlugSet = new Set(buildAnimeSlugs([item.content_title]));
+        catalogSlugSets.set(item.content_id, itemSlugSet);
+      }
       const slugScore = storedSlugs.length
-        ? Math.max(...storedSlugs.map(slug => slugSimilarity(slug, item.content_title)))
-        : 0;
+        ? slugSimilarityFromSets(storedSlugSet, itemSlugSet)
+        : Math.max(...querySlugSets.map(querySet => slugSimilarityFromSets(querySet, itemSlugSet)));
       const score = Math.max(titleScore, slugScore);
       if (score > 0.50) candidates.push({ ...item, score });
     }
@@ -10836,7 +10861,7 @@ async function getAniPmSources(
       },
       signal: AbortSignal.timeout(14_000),
     });
-    if (!r.ok) return out;
+    if (!r || !r.ok) return out;
     const raw = await r.json();
     if (!raw || typeof raw !== "object") return out;
 
@@ -11193,6 +11218,7 @@ const ANSLAYER_BASE   = "https://anslayer.com/anime/public";
 const ANSLAYER_CID    = "android-app2";
 const ANSLAYER_CSEC   = "7befba6263cc14c90d2f1d6da2c5cf9b251bfbbd";
 const _anslayerCacheMap = new Map<string, { sources: UnifiedSource[]; ts: number }>();
+const _anslayerInFlight = new Map<string, Promise<UnifiedSource[]>>();
 const ANSLAYER_TTL    = 4 * 3_600_000;
 
 async function anslayerGet(path: string, params: Record<string, any>): Promise<any | null> {
@@ -11206,17 +11232,19 @@ async function anslayerGet(path: string, params: Record<string, any>): Promise<a
         "User-Agent":    "okhttp/4.9.3",
         "Accept":        "application/json",
       },
-      signal: AbortSignal.timeout(12_000),
+      signal: AbortSignal.timeout(7_000),
     });
     if (!r.ok) return null;
     return await r.json();
   } catch { return null; }
 }
 
-async function getAnimeSlayerSources(
+async function getAnimeSlayerSourcesUncached(
   title: string, english: string | null, ep: number, directAnimeId?: number, titleAr?: string | null,
 ): Promise<UnifiedSource[]> {
-  const ck = directAnimeId ? `anslayer:id:${directAnimeId}:${ep}` : `anslayer:${english || title}:${ep}`;
+  const ck = directAnimeId
+    ? `anslayer:id:${directAnimeId}:${ep}`
+    : `anslayer:${normalize(english || title).replace(/\s+/g, "-")}:${ep}`;
   const hit = _anslayerCacheMap.get(ck);
   if (hit && Date.now() - hit.ts < ANSLAYER_TTL) return hit.sources;
 
@@ -11230,8 +11258,14 @@ async function getAnimeSlayerSources(
     if (!best) {
       // نُقدِّم الاسم العربي أولاً إن توفَّر — AS يخزِّن أسماء عربية فيطابق مباشرةً
       const queries = [...new Set([titleAr, english, title].filter(Boolean) as string[])];
-      for (const q of queries) {
-        const data = await anslayerGet("animes/get-published-animes", { list_type: "filter", anime_name: q, page: 1 });
+      const searchResults = await Promise.allSettled(
+        queries.slice(0, 6).map(q =>
+          anslayerGet("animes/get-published-animes", { list_type: "filter", anime_name: q, page: 1 }),
+        ),
+      );
+      for (let queryIndex = 0; queryIndex < searchResults.length; queryIndex++) {
+        const result = searchResults[queryIndex];
+        const data = result.status === "fulfilled" ? result.value : null;
         const list: any[] = data?.response?.data || [];
         // AnimeSlayer يعرض أسماء عربية — similarity() بين لاتيني وعربي = 0 دائماً.
         // الحل: نستخدم asciiSimilarity على الـ slug الضمني + نقبل أول نتيجة إذا كانت ≤8
@@ -11258,7 +11292,6 @@ async function getAnimeSlayerSources(
         if (!best && firstCandidate && list.length <= 8) {
           best = firstCandidate;
         }
-        if (best) break; // وجدنا نتيجة — لا داعي لمزيد من الاستعلامات
       }
     }
     if (!best) return out;
@@ -11274,11 +11307,10 @@ async function getAnimeSlayerSources(
     if (!muiltUrl) return out;
 
     // ── 3) روابط المشغلات الخارجية ──
-    const r = await fetch(muiltUrl, {
+    const r = await fetchSourceWithRetry(muiltUrl, {
       headers: { "User-Agent": "okhttp/4.9.3" },
-      signal: AbortSignal.timeout(8_000),
-    });
-    if (!r.ok) return out;
+    }, 7_000, 2);
+    if (!r || !r.ok) return out;
     const embedLinks: string[] = await r.json().catch(() => []);
     if (!Array.isArray(embedLinks)) return out;
 
@@ -11360,6 +11392,28 @@ async function getAnimeSlayerSources(
   return out;
 }
 
+/**
+ * Deduplicate concurrent SA requests. The source picker can ask for the same
+ * episode from the stream endpoint and the on-demand endpoint at nearly the
+ * same time; only one upstream search/extraction should run.
+ */
+async function getAnimeSlayerSources(
+  title: string, english: string | null, ep: number, directAnimeId?: number, titleAr?: string | null,
+): Promise<UnifiedSource[]> {
+  const key = directAnimeId
+    ? `anslayer:id:${directAnimeId}:${ep}`
+    : `anslayer:${normalize(english || title).replace(/\s+/g, "-")}:${ep}`;
+  const active = _anslayerInFlight.get(key);
+  if (active) return active;
+  const promise = getAnimeSlayerSourcesUncached(title, english, ep, directAnimeId, titleAr);
+  _anslayerInFlight.set(key, promise);
+  try {
+    return await promise;
+  } finally {
+    if (_anslayerInFlight.get(key) === promise) _anslayerInFlight.delete(key);
+  }
+}
+
 // notorrent (NO / addon-osvh.onrender.com): أُزيل كلياً بطلب المستخدم 2026-07-09
 
 const SANIME_API  = "https://app.sanime.net/function/h10.php?page=";
@@ -11383,7 +11437,7 @@ function sanimeSeasonNum(s: string | null | undefined): number {
 async function getSAnimeSources(
   title: string, english: string | null, ep: number, variants: string[] = [],
 ): Promise<UnifiedSource[]> {
-  const ck = `sanime:${english || title}:${ep}`;
+  const ck = `sanime:${normalize(english || title).replace(/\s+/g, "-")}:${ep}`;
   const hit = _sanimeCacheMap.get(ck);
   if (hit && Date.now() - hit.ts < SANIME_TTL) return hit.sources;
 
@@ -11394,22 +11448,21 @@ async function getSAnimeSources(
     const queries = titleQueries(title, english, variants);
     const allResults: any[] = [];
     const seenIds = new Set<string>();
-    for (const q of queries) {
-      try {
-        const searchRes = await fetch(`${SANIME_API}search&name=${encodeURIComponent(q)}`, {
+    const searchResults = await Promise.allSettled(
+      queries.slice(0, 6).map(q =>
+        fetchSourceWithRetry(`${SANIME_API}search&name=${encodeURIComponent(q)}`, {
           headers: { "User-Agent": SANIME_UA, "Accept": "application/json" },
-          signal: AbortSignal.timeout(10_000),
-        });
-        if (!searchRes.ok) continue;
-        const batch: any[] = await searchRes.json().catch(() => []);
-        if (Array.isArray(batch)) {
-          for (const r of batch) {
-            const rid = String(r.id ?? "");
-            if (rid && !seenIds.has(rid)) { seenIds.add(rid); allResults.push(r); }
-          }
-        }
-      } catch {}
-      // لا نتوقف مبكراً — نجمع نتائج كل الاستعلامات لتحسين فرص المطابقة
+        }, 6_000, 1),
+      ),
+    );
+    for (const result of searchResults) {
+      if (result.status !== "fulfilled" || !result.value) continue;
+      const batch: any[] = await result.value.json().catch(() => []);
+      if (!Array.isArray(batch)) continue;
+      for (const r of batch) {
+        const rid = String(r.id ?? "");
+        if (rid && !seenIds.has(rid)) { seenIds.add(rid); allResults.push(r); }
+      }
     }
     if (allResults.length === 0) return out;
 
@@ -11422,6 +11475,9 @@ async function getSAnimeSources(
       let score = Math.max(
         similarity(label, title),
         english ? similarity(label, english) : 0,
+        slugSimilarity(label, title),
+        english ? slugSimilarity(label, english) : 0,
+        ...variants.map(variant => slugSimilarity(label, variant)),
       );
       // ترجيح رقم الموسم — لكن نُطبِّق العقوبة فقط إذا كانت الدرجة الأساسية ضعيفة
       // (إذا كان التطابق قوياً بالفعل لا نعاقبه بسبب خطأ في كشف الموسم)
@@ -11466,16 +11522,14 @@ async function getSAnimeSources(
     let usedDirect = false;
     const probe = async (url: string): Promise<boolean> => {
       try {
-        const head = await fetchSourceWithRetry(url, {
-          method: "HEAD",
-          headers: { "User-Agent": SANIME_UA },
-        }, 5_000);
-        if (head?.ok) return true;
+        // One ranged GET is faster and more reliable than HEAD + fallback:
         // SAnime's CDN intermittently rejects HEAD while serving normal GETs.
         const range = await fetchSourceWithRetry(url, {
           headers: { "User-Agent": SANIME_UA, Range: "bytes=0-0" },
-        }, 6_000);
-        return !!range && [200, 206, 416].includes(range.status);
+        }, 4_500, 1);
+        const ok = !!range && [200, 206, 416].includes(range.status);
+        await range?.body?.cancel().catch(() => {});
+        return ok;
       } catch { return false; }
     };
     try {
@@ -12252,9 +12306,9 @@ router.get("/anime/fetch-source", async (req, res) => {
     "animewitcher",  // 🗄️ DB-first aw_links (142k) → Algolia fallback ✅
     "anifox",        // 📦 12 مصدر — Archive/MediaFire/MP4Upload/Uqload ✅
     "sanime",        // 🎌 MP4 مباشر عربي مدبلج ✅
+    "anslayer",      // ⚡ بحث متوازٍ + dedupe للطلبات + cache
     "animeify",      // 🎬 أنمي فاي — MEGA/Streamtape/MediaFire ✅ (مُعاد تفعيله)
     // ── معطّلة 2026-08-02 بطلب المستخدم (تحسين التزامن) ──────────────────────
-    // "anslayer":   0 نتائج لكثير من الأنمي + بطيء (2s+)
     // "anineko":    متوسط (3s) — معطّل
     // "anikoto":    معطّل
     // "animekai":   معطّل
@@ -14539,7 +14593,8 @@ router.get("/anime/hls-proxy", async (req, res) => {
   if (!url.startsWith("http")) { res.status(400).send("invalid url"); return; }
 
   res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Access-Control-Allow-Headers", "Range");
+  res.setHeader("Access-Control-Allow-Headers", "Range, Content-Type");
+  res.setHeader("Access-Control-Expose-Headers", "Accept-Ranges, Content-Length, Content-Range, Content-Type");
 
   await serveHlsVPS(url, ref, res);
 });
@@ -14556,7 +14611,8 @@ router.get("/anime/video-proxy", async (req, res) => {
   if (!url.startsWith("http")) { res.status(400).send("invalid url"); return; }
 
   res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Access-Control-Allow-Headers", "Range");
+  res.setHeader("Access-Control-Allow-Headers", "Range, Content-Type");
+  res.setHeader("Access-Control-Expose-Headers", "Accept-Ranges, Content-Length, Content-Range, Content-Type");
 
   await serveMediaVPS(url, ref, req, res);
 });
@@ -14598,10 +14654,13 @@ router.get("/anime/seg-proxy", async (req, res) => {
   if (ref && isEncrypted(ref)) ref = decryptParam(ref);
 
   res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Access-Control-Allow-Headers", "Range");
+  res.setHeader("Access-Control-Allow-Headers", "Range, Content-Type");
+  res.setHeader("Access-Control-Expose-Headers", "Accept-Ranges, Content-Length, Content-Range, Content-Type");
 
   const hdrs: Record<string, string> = { ...BASE_HDRS, Accept: "*/*" };
   if (ref) { hdrs.Referer = ref; try { hdrs.Origin = new URL(ref).origin; } catch {} }
+  if (req.headers.range) hdrs.Range = req.headers.range;
+  if (req.headers["if-range"]) hdrs["If-Range"] = String(req.headers["if-range"]);
 
   /** مساعد داخلي: يخدم segment من response جاهز (مع دعم PNG wrapper + تصحيح Content-Type) */
   async function serveSegResponse(r: Response): Promise<boolean> {
@@ -14617,11 +14676,15 @@ router.get("/anime/seg-proxy", async (req, res) => {
       if (stripped) {
         res.setHeader("Content-Type", "video/MP2T");
         res.setHeader("Content-Length", String(stripped.length));
+        res.setHeader("Accept-Ranges", "bytes");
+        res.setHeader("Cache-Control", "public, max-age=60");
         res.status(200).end(stripped);
         return true;
       }
       const cl = r.headers.get("content-length");
       if (cl) res.setHeader("Content-Length", cl);
+      res.setHeader("Accept-Ranges", r.headers.get("accept-ranges") || "bytes");
+      res.setHeader("Cache-Control", "public, max-age=60");
       const correctedCt = (ct === "application/octet-stream" || ct === "binary/octet-stream") && /\.mp4(\?|$)/i.test(url)
         ? "video/mp4"
         : ct;
@@ -14641,6 +14704,8 @@ router.get("/anime/seg-proxy", async (req, res) => {
         // بيانات TS حقيقية بـ Content-Type خاطئ → صحّح وأرسل
         res.setHeader("Content-Type", "video/MP2T");
         res.setHeader("Content-Length", String(buf.length));
+        res.setHeader("Accept-Ranges", "bytes");
+        res.setHeader("Cache-Control", "public, max-age=60");
         res.status(200).end(buf);
         return true;
       }
@@ -14654,6 +14719,8 @@ router.get("/anime/seg-proxy", async (req, res) => {
     res.setHeader("Content-Type", r.headers.get("content-type") || "video/MP2T");
     const cl = r.headers.get("content-length");
     if (cl) res.setHeader("Content-Length", cl);
+    res.setHeader("Accept-Ranges", r.headers.get("accept-ranges") || "bytes");
+    res.setHeader("Cache-Control", "public, max-age=60");
     if (r.status === 206) {
       const cr = r.headers.get("content-range");
       if (cr) res.setHeader("Content-Range", cr);
@@ -14674,11 +14741,22 @@ router.get("/anime/seg-proxy", async (req, res) => {
   // بدلاً من 502 عند حجب CDN للـ VPS، نُعيد توجيه الطلب للـ CDN مباشرة.
   // ExoPlayer على Android والمتصفح يتبعان الـ redirect بـ IP الجهاز → CDN يسمح.
   async function segFallback(): Promise<void> {
-    if (!res.headersSent) res.redirect(307, url);
+    if (res.headersSent) return;
+    // Keep Range/Referer semantics on fallback instead of redirecting a
+    // byte-range request into a different request shape.
+    res.setHeader("Cache-Control", "no-store");
+    res.redirect(307, url);
   }
 
+  const upstreamAbort = new AbortController();
+  const connectTimeout = setTimeout(() => upstreamAbort.abort(), 12_000);
+  const abortUpstream = () => upstreamAbort.abort();
+  res.once("close", abortUpstream);
   try {
-    const r = await fetch(url, { headers: hdrs, signal: AbortSignal.timeout(20000) });
+    // This timeout only covers connection/headers. Do not abort the body
+    // after 20s: signed CDNs can deliver a healthy segment slowly.
+    const r = await fetch(url, { headers: hdrs, signal: upstreamAbort.signal });
+    clearTimeout(connectTimeout);
 
     if (!r.ok) {
       // 403/429/5xx → fallback chain (CDN blocks VPS or upstream error)
@@ -14693,6 +14771,9 @@ router.get("/anime/seg-proxy", async (req, res) => {
   } catch {
     // network error / timeout → try fallback chain instead of immediate 502
     await segFallback();
+  } finally {
+    clearTimeout(connectTimeout);
+    res.removeListener("close", abortUpstream);
   }
 });
 
