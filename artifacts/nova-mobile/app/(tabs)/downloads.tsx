@@ -64,12 +64,12 @@ function ActiveDownloadCard({
         >
           <Ionicons
             name={isPaused ? "play" : "pause"}
-            size={13}
+            size={18}
             color={isPaused ? "#c4b5fd" : "rgba(255,255,255,0.65)"}
           />
         </Pressable>
         <Pressable onPress={onCancel} hitSlop={8} style={[s.activeAction, s.activeCancel]}>
-          <Ionicons name="close" size={14} color="rgba(255,255,255,0.45)" />
+          <Ionicons name="close" size={18} color="rgba(255,255,255,0.55)" />
         </Pressable>
       </View>
 
@@ -143,7 +143,7 @@ function DownloadCard({
           style={StyleSheet.absoluteFill}
         />
         <View style={s.playOverlay}>
-          <Ionicons name="play-circle" size={28} color="rgba(255,255,255,0.85)" />
+          <Ionicons name="play-circle" size={36} color="rgba(255,255,255,0.9)" />
         </View>
       </View>
 
@@ -500,15 +500,15 @@ const s = StyleSheet.create({
   activeCard: {
     flexDirection: "row", alignItems: "flex-start", gap: 10,
     backgroundColor: "rgba(15,12,28,0.95)", borderRadius: 16,
-    borderWidth: 1, borderColor: "rgba(139,92,246,0.20)", padding: 14,
+    borderWidth: 1, borderColor: "rgba(139,92,246,0.20)", padding: 16,
   },
   activeCardError: { borderColor: "rgba(239,68,68,0.25)" },
   activeCancel: {
     backgroundColor: "rgba(255,255,255,0.06)",
   },
-  activeActions: { flexDirection: "row", alignItems: "center", gap: 6, flexShrink: 0, marginTop: 1 },
+  activeActions: { flexDirection: "row", alignItems: "center", gap: 8, flexShrink: 0, marginTop: 1 },
   activeAction: {
-    width: 28, height: 28, borderRadius: 9,
+    width: 40, height: 40, borderRadius: 12,
     backgroundColor: "rgba(139,92,246,0.13)", borderWidth: 1,
     borderColor: "rgba(139,92,246,0.24)", alignItems: "center", justifyContent: "center",
   },
@@ -567,7 +567,7 @@ const s = StyleSheet.create({
   cardDate: { fontSize: 10, fontFamily: "Cairo_400Regular", color: "rgba(255,255,255,0.25)", marginTop: 2 },
 
   deleteBtn: {
-    width: 34, height: 34, borderRadius: 10,
+    width: 40, height: 40, borderRadius: 12,
     backgroundColor: "rgba(239,68,68,0.07)", borderWidth: 1,
     borderColor: "rgba(239,68,68,0.15)", alignItems: "center", justifyContent: "center",
     flexShrink: 0,

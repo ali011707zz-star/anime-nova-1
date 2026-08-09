@@ -856,7 +856,9 @@ export default function WatchScreen() {
         label: `سيرفر · ${getSiteTag(s.site || "")}`,
         quality: getSrcQuality(s),
         site: s.site,
-        subtitleUrl: undefined, // مخفية في نوفا موبايل
+        /* Keep the source subtitle URL so KW's translated VTT is available
+           both during streaming and after it is saved with a download. */
+        subtitleUrl: s.subtitleUrl ? resolveUrl(s.subtitleUrl, base) : undefined,
         isArabic: ARABIC_SITES.has(s.site || ""),
         wantsSmartSub: !ARABIC_SITES.has(s.site || ""),
         skipIntro: s.skipIntro,
@@ -1322,7 +1324,7 @@ const d = StyleSheet.create({
   playBtnGreenText: { fontSize: 12, fontFamily: "Cairo_800ExtraBold", color: "#fff" },
 
   /* ── Download button ── */
-  dlIconBtn:     { width: 28, height: 28, borderRadius: 9, backgroundColor: "rgba(139,92,246,0.12)", borderWidth: 1, borderColor: "rgba(139,92,246,0.22)", alignItems: "center", justifyContent: "center" },
-  dlPctBadge:    { paddingHorizontal: 7, paddingVertical: 2, borderRadius: 7, backgroundColor: "rgba(139,92,246,0.15)", borderWidth: 1, borderColor: "rgba(139,92,246,0.28)" },
-  dlPctText:     { fontSize: 9, fontFamily: "Cairo_800ExtraBold", color: "#c4b5fd" },
+  dlIconBtn:     { width: 40, height: 40, borderRadius: 12, backgroundColor: "rgba(139,92,246,0.14)", borderWidth: 1, borderColor: "rgba(139,92,246,0.28)", alignItems: "center", justifyContent: "center" },
+  dlPctBadge:    { minWidth: 40, height: 40, paddingHorizontal: 8, borderRadius: 12, backgroundColor: "rgba(139,92,246,0.15)", borderWidth: 1, borderColor: "rgba(139,92,246,0.28)", alignItems: "center", justifyContent: "center" },
+  dlPctText:     { fontSize: 11, fontFamily: "Cairo_800ExtraBold", color: "#c4b5fd" },
 });

@@ -83,7 +83,6 @@ type RuntimeDownload = ActiveDownload & {
   resumable?: FileSystem.DownloadResumable;
   resumeState?: ResumeState;
   notificationAt: number;
-  notificationShown: boolean;
   notificationPromise?: Promise<void>;
 };
 
@@ -220,10 +219,10 @@ async function configureNotifications(): Promise<boolean> {
     notificationsReady = (async () => {
       try {
         Notifications.setNotificationHandler({
-          handleNotification: async () => ({
+          handleNotification: async (notification) => ({
             /* Keep download updates in the notification shade instead of
                repeatedly flashing transient banners while progress changes. */
-            shouldShowBanner: false,
+            shouldShowBanner: Boolean(notification.request.content.data?.completed),
             shouldShowList: true,
             shouldPlaySound: false,
             shouldSetBadge: false,
@@ -237,7 +236,7 @@ async function configureNotifications(): Promise<boolean> {
         if (Platform.OS === "android") {
           await Notifications.setNotificationChannelAsync(NOTIFICATION_CHANNEL, {
             name: "تنزيلات Nova",
-            importance: Notifications.AndroidImportance.DEFAULT,
+            importance: Notifications.AndroidImportance.HIGH,
             sound: null,
             vibrationPattern: [0, 0],
             enableVibrate: false,
@@ -262,36 +261,46 @@ async function dismissDownloadNotification(id: string): Promise<void> {
 
 function updateDownloadNotification(entry: RuntimeDownload, force = false): void {
   if (Platform.OS === "web") return;
-  /* A notification is deliberately created once per task. Dismissing and
-     recreating it for every progress callback makes Android show a flickering
-     banner and can make the download look as if it stopped. */
-  if (entry.notificationShown) return;
   const now = Date.now();
-  if (!force && now - entry.notificationAt < 2000) return;
+  /* Re-schedule the same identifier so Android updates one persistent row
+     instead of adding a new notification for every progress callback. */
+  if (!force && now - entry.notificationAt < 800) return;
   entry.notificationAt = now;
   if (entry.notificationPromise) return;
 
   entry.notificationPromise = (async () => {
     if (!(await configureNotifications())) return;
     const identifier = `nova-download-${entry.id}`;
+    const percentage = Math.round(Math.max(0, Math.min(1, entry.progress)) * 100);
+    const byteText = entry.bytesWritten > 0 && entry.totalBytes > 0
+      ? `${formatFileSize(entry.bytesWritten)} من ${formatFileSize(entry.totalBytes)}`
+      : "";
     try {
+      await dismissDownloadNotification(entry.id);
       await Notifications.scheduleNotificationAsync({
         identifier,
-        content: {
+        content: ({
           title: `تنزيل الحلقة ${entry.ep}`,
-          body: `${entry.title} · يعمل في الخلفية`,
+          body: `${entry.title} · ${percentage}%${byteText ? ` · ${byteText}` : ""}`,
           sticky: true,
           autoDismiss: false,
           sound: false,
           color: "#8B5CF6",
+          progress: {
+            max: 100,
+            current: percentage,
+            indeterminate: entry.totalBytes <= 0,
+          },
           data: { downloadId: entry.id },
-        },
+        } as any),
         trigger: null,
       });
-        entry.notificationShown = true;
     } catch {}
   })().finally(() => {
     entry.notificationPromise = undefined;
+    if (entry.status === "downloading" && Date.now() - entry.notificationAt >= 800) {
+      updateDownloadNotification(entry);
+    }
   });
 }
 
@@ -299,17 +308,20 @@ function completeNotification(entry: RuntimeDownload, error = false): void {
   if (Platform.OS === "web") return;
   void (async () => {
     await dismissDownloadNotification(entry.id);
-    if (error && await configureNotifications()) {
+    if (await configureNotifications()) {
       try {
         await Notifications.scheduleNotificationAsync({
           identifier: `nova-download-${entry.id}`,
           content: {
             title: "Nova Anime",
-            body: `فشل تنزيل ${entry.title} — الحلقة ${entry.ep}`,
-            sticky: true,
-            autoDismiss: false,
-            sound: false,
-            color: "#EF4444",
+            body: error
+              ? `فشل تنزيل ${entry.title} — الحلقة ${entry.ep}`
+              : `اكتمل تنزيل ${entry.title} — الحلقة ${entry.ep}`,
+            sticky: false,
+            autoDismiss: true,
+            sound: !error,
+            color: error ? "#EF4444" : "#34D399",
+            data: { downloadId: entry.id, completed: !error },
           },
           trigger: null,
         });
@@ -399,8 +411,37 @@ async function saveCompleted(entry: RuntimeDownload): Promise<void> {
   if (entry.params.subtitleUrl) {
     const subtitlePath = `${entry.localPath.slice(0, -4)}.vtt`;
     try {
-      const subtitle = await FileSystem.downloadAsync(entry.params.subtitleUrl, subtitlePath);
-      if (subtitle.status >= 200 && subtitle.status < 300) subtitleLocalPath = subtitlePath;
+      /* KW's Arabic track is generated by the API at download time. The
+         translate-vtt endpoint returns JSON cues, so convert that response
+         into a real VTT file before handing it to the local player. */
+      const response = await fetch(entry.params.subtitleUrl, {
+        headers: requestHeaders(entry.params),
+      });
+      if (!response.ok) throw new Error(`subtitle ${response.status}`);
+      const body = await response.text();
+      let vtt = body;
+      try {
+        const payload = JSON.parse(body) as {
+          cues?: Array<{ timing?: string; text?: string }>;
+        };
+        if (Array.isArray(payload.cues)) {
+          vtt = [
+            "WEBVTT",
+            "",
+            ...payload.cues.flatMap((cue, index) => [
+              String(index + 1),
+              cue.timing || "00:00:00.000 --> 00:00:01.000",
+              cue.text || "",
+              "",
+            ]),
+          ].join("\n");
+        }
+      } catch {
+        /* A direct VTT response is already in the required format. */
+      }
+      if (!vtt.includes("-->")) throw new Error("empty subtitle");
+      await FileSystem.writeAsStringAsync(subtitlePath, vtt);
+      subtitleLocalPath = subtitlePath;
     } catch {}
   }
 
@@ -480,7 +521,7 @@ async function runDownload(entry: RuntimeDownload): Promise<void> {
       }
       await saveCompleted(entry);
       active.delete(entry.id);
-      await dismissDownloadNotification(entry.id);
+      completeNotification(entry);
       notifyListeners();
       return;
     } catch (error) {
@@ -542,7 +583,6 @@ function enqueueDownload(
     localPath: localPath ?? localPathFor(params),
     resumeState,
     notificationAt: 0,
-    notificationShown: false,
     cancelFn: () => {
       entry.resumable?.cancelAsync().catch(() => {});
       FileSystem.deleteAsync(entry.localPath, { idempotent: true }).catch(() => {});
@@ -630,6 +670,9 @@ export async function restoreInterruptedDownloads(): Promise<void> {
 /* Keep the service warm at module load. This does not attach any screen. */
 if (Platform.OS !== "web") {
   AppState.addEventListener("change", (state) => {
+    /* Save the latest offset before backgrounding. The native background
+       session continues independently of the watch screen. */
+    persistActive();
     if (state === "active") {
       for (const entry of active.values()) updateDownloadNotification(entry, true);
     }

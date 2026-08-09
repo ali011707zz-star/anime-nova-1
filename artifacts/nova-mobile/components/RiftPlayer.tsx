@@ -1306,16 +1306,18 @@ export function RiftPlayer({
       Alert.alert("لقطة الشاشة", "هذه الميزة متاحة على الهاتف فقط.");
       return;
     }
+    const wasShowingControls = showControls;
     try {
       const VS = await import("react-native-view-shot" as any);
-      /* VideoView قد يُرسم كسطح native لا يستطيع captureRef قراءته على بعض
-         إصدارات Android؛ نجرّب لقطة المشغل أولاً ثم لقطة الشاشة كاحتياطي. */
-      let uri: string;
-      try {
-        uri = await VS.captureRef(rootViewRef, { format: "jpg", quality: 0.95, result: "tmpfile" });
-      } catch {
-        uri = await VS.captureScreen({ format: "jpg", quality: 0.95, result: "tmpfile" });
+      /* Hide the player chrome before capturing the root so the saved image
+         contains the video frame and subtitles, not the control buttons. */
+      if (wasShowingControls) {
+        setShowControls(false);
+        if (hideTimer.current) clearTimeout(hideTimer.current);
+        await new Promise((resolve) => setTimeout(resolve, 100));
       }
+      let uri: string;
+      uri = await VS.captureRef(rootViewRef, { format: "jpg", quality: 0.95, result: "tmpfile" });
       const ML = await import("expo-media-library" as any);
       const perm = await ML.requestPermissionsAsync(true);
       if (perm.status !== "granted") {
@@ -1345,8 +1347,13 @@ export function RiftPlayer({
     } catch (error) {
       console.warn("[RiftPlayer] screenshot failed", error);
       Alert.alert("تعذّر حفظ اللقطة", "حاول مرة أخرى بعد منح إذن الصور.");
+    } finally {
+      if (wasShowingControls && aliveRef.current) {
+        setShowControls(true);
+        fadeIn();
+      }
     }
-  }, []);
+  }, [fadeIn, showControls]);
 
   /* ─── Orientation change listener ─── */
   useEffect(() => {
