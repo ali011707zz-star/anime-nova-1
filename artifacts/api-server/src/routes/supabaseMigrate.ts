@@ -203,6 +203,15 @@ CREATE TABLE IF NOT EXISTS anime_meta_cache (
   created_at  TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- كتالوج عناوين الأنمي وslugs متعددة اللغات لتحسين مطابقة المصادر
+CREATE TABLE IF NOT EXISTS anime (
+  anilist_id  INTEGER PRIMARY KEY,
+  titles      JSONB NOT NULL DEFAULT '[]'::jsonb,
+  slugs       JSONB NOT NULL DEFAULT '[]'::jsonb,
+  updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_anime_slugs ON anime USING GIN (slugs);
+
 -- كوكيز CF المشتركة — تُجدَّد مرة/20ساعة عبر Playwright وتُخزَّن هنا
 CREATE TABLE IF NOT EXISTS site_cookies (
   site        TEXT        PRIMARY KEY,
@@ -212,7 +221,7 @@ CREATE TABLE IF NOT EXISTS site_cookies (
 );
 `;
 
-const REQUIRED_TABLES = ["users", "pending_verifications", "watch_history", "favorites", "translations_cache", "anime_meta_ar", "anime_meta_cache", "site_cookies"];
+const REQUIRED_TABLES = ["users", "pending_verifications", "watch_history", "favorites", "translations_cache", "anime_meta_ar", "anime_meta_cache", "anime", "site_cookies"];
 
 // ── PostgreSQL direct migration (للـ Replit PostgreSQL) ──────────────────────
 const PG_MIGRATION_SQL = `
@@ -376,6 +385,13 @@ CREATE TABLE IF NOT EXISTS anime_meta_cache (
   ttl_seconds INTEGER DEFAULT 21600,
   created_at  TIMESTAMPTZ DEFAULT NOW()
 );
+CREATE TABLE IF NOT EXISTS anime (
+  anilist_id  INTEGER PRIMARY KEY,
+  titles      JSONB NOT NULL DEFAULT '[]'::jsonb,
+  slugs       JSONB NOT NULL DEFAULT '[]'::jsonb,
+  updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_anime_slugs ON anime USING GIN (slugs);
 CREATE TABLE IF NOT EXISTS notifications (
   id          SERIAL PRIMARY KEY,
   type        TEXT NOT NULL DEFAULT 'episode_new',

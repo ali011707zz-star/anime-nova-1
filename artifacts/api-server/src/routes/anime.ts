@@ -766,6 +766,142 @@ function toSlug(s: string): string {
     .replace(/[^\w\s-]/g, " ").trim()
     .replace(/\s+/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "");
 }
+
+/**
+ * Build stable, language-aware search slugs without adding a runtime
+ * dependency.  ASCII slugs are useful to Arabic/Latin catalogues, while the
+ * Unicode slug keeps Japanese, Korean, Chinese, and other native titles
+ * searchable instead of silently dropping their characters.
+ */
+const ARABIC_TRANSLITERATION: Record<string, string> = {
+  ا: "a", أ: "a", إ: "i", آ: "a", ء: "a", ؤ: "w", ئ: "y",
+  ب: "b", ت: "t", ث: "th", ج: "j", ح: "h", خ: "kh", د: "d",
+  ذ: "dh", ر: "r", ز: "z", س: "s", ش: "sh", ص: "s", ض: "d",
+  ط: "t", ظ: "z", ع: "a", غ: "gh", ف: "f", ق: "q", ك: "k",
+  ل: "l", م: "m", ن: "n", ه: "h", و: "w", ي: "y", ى: "a",
+  ة: "a", لا: "la",
+};
+
+function transliterateTitle(value: string): string {
+  let out = value.normalize("NFKD").replace(/\p{M}/gu, "");
+  for (const [from, to] of Object.entries(ARABIC_TRANSLITERATION)) {
+    out = out.split(from).join(to);
+  }
+  return out
+    .replace(/[^\p{ASCII}\p{L}\p{N}]+/gu, " ")
+    .normalize("NFKD")
+    .replace(/[^\x00-\x7F]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function unicodeSlug(value: string): string {
+  return value
+    .normalize("NFKC")
+    .toLocaleLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "");
+}
+
+function buildAnimeSlugs(titles: string[]): string[] {
+  const slugs = new Set<string>();
+  for (const raw of titles) {
+    const title = String(raw || "").trim();
+    if (!title) continue;
+    const nativeSlug = unicodeSlug(title);
+    if (nativeSlug) slugs.add(nativeSlug);
+    const latin = transliterateTitle(title);
+    const latinSlug = toSlug(latin);
+    if (latinSlug) slugs.add(latinSlug);
+    const compact = latinSlug.replace(/-/g, "");
+    if (compact.length >= 3) slugs.add(compact);
+    // Keep a compact native form too; this helps catalogues that omit spaces.
+    const compactNative = nativeSlug.replace(/-/g, "");
+    if (compactNative.length >= 3) slugs.add(compactNative);
+  }
+  return [...slugs].slice(0, 80);
+}
+
+function slugSimilarity(a: string, b: string): number {
+  const left = new Set(buildAnimeSlugs([a]));
+  const right = new Set(buildAnimeSlugs([b]));
+  for (const item of left) if (right.has(item)) return 1;
+  const leftAscii = [...left].filter(s => /^[a-z0-9-]+$/i.test(s));
+  const rightAscii = [...right].filter(s => /^[a-z0-9-]+$/i.test(s));
+  let best = 0;
+  for (const l of leftAscii) {
+    for (const r of rightAscii) best = Math.max(best, similarity(l.replace(/-/g, " "), r.replace(/-/g, " ")));
+  }
+  return best;
+}
+
+type AnimeSlugRecord = { slugs: string[]; titles: string[] };
+const animeSlugCache = new Map<number, { record: AnimeSlugRecord; ts: number }>();
+const ANIME_SLUG_CACHE_TTL = 24 * 3_600_000;
+
+async function getAnimeSlugRecord(anilistId: number): Promise<AnimeSlugRecord | null> {
+  if (!anilistId) return null;
+  const cached = animeSlugCache.get(anilistId);
+  if (cached && Date.now() - cached.ts < ANIME_SLUG_CACHE_TTL) return cached.record;
+  try {
+    const rows = await sbSelect<{ slugs?: unknown; titles?: unknown }>(
+      "anime",
+      { anilist_id: `eq.${anilistId}` },
+      { limit: 1, select: "slugs,titles" },
+    );
+    const row = rows[0];
+    if (!row) return null;
+    const record = {
+      slugs: Array.isArray(row.slugs) ? row.slugs.filter((v): v is string => typeof v === "string") : [],
+      titles: Array.isArray(row.titles) ? row.titles.filter((v): v is string => typeof v === "string") : [],
+    };
+    animeSlugCache.set(anilistId, { record, ts: Date.now() });
+    return record;
+  } catch { return null; }
+}
+
+async function saveAnimeSlugRecord(anilistId: number, titles: string[]): Promise<AnimeSlugRecord | null> {
+  if (!anilistId) return null;
+  const cleanTitles = [...new Set(titles.map(t => String(t || "").trim()).filter(Boolean))].slice(0, 30);
+  const record: AnimeSlugRecord = { titles: cleanTitles, slugs: buildAnimeSlugs(cleanTitles) };
+  if (!record.slugs.length) return null;
+  animeSlugCache.set(anilistId, { record, ts: Date.now() });
+  sbUpsert(
+    "anime",
+    { anilist_id: anilistId, titles: record.titles, slugs: record.slugs, updated_at: new Date().toISOString() },
+    "anilist_id",
+  ).catch(() => {});
+  return record;
+}
+
+async function ensureAnimeSlugRecord(
+  anilistId: number | undefined,
+  titles: string[],
+): Promise<AnimeSlugRecord | null> {
+  if (!anilistId) return null;
+  const existing = await getAnimeSlugRecord(anilistId);
+  if (existing?.slugs.length) return existing;
+  return saveAnimeSlugRecord(anilistId, titles);
+}
+
+function cacheAnimeSlugsFromAniListResponse(response: any): void {
+  const mediaItems: any[] = [];
+  if (response?.data?.Media) mediaItems.push(response.data.Media);
+  if (Array.isArray(response?.data?.Page?.media)) mediaItems.push(...response.data.Page.media);
+  for (const media of mediaItems) {
+    const anilistId = Number(media?.id);
+    if (!Number.isInteger(anilistId) || anilistId <= 0) continue;
+    const titles = [
+      media?.title?.romaji,
+      media?.title?.english,
+      media?.title?.native,
+      ...(Array.isArray(media?.synonyms) ? media.synonyms : []),
+    ].filter((value): value is string => typeof value === "string" && value.trim().length > 0);
+    if (titles.length) saveAnimeSlugRecord(anilistId, titles).catch(() => {});
+  }
+}
+
 function qualityRank(quality: string): number {
   const q = quality.toUpperCase();
   if (q.includes("FHD") || q.includes("1080") || q.includes("FULLHD")) return 3;
@@ -1179,6 +1315,10 @@ async function extractAnifoxExternal(
       referer = "https://archive.org/";
     }
     if (!directUrl) return null;
+    if (!(await probeAnifoxDirectUrl(directUrl, referer))) {
+      console.log(`[ANIFOX] dead direct URL skipped: ${directUrl.slice(0, 100)}`);
+      return null;
+    }
 
     // HLS → hls-proxy ، MP4 → video-proxy
     const proxied = directType === "hls"
@@ -1196,6 +1336,57 @@ async function extractAnifoxExternal(
       headers: { Referer: referer },
     };
   } catch { return null; }
+}
+
+/**
+ * ANIFOX may keep a catalog row alive after the underlying file disappears.
+ * Probe the extracted file itself and reject HTML error pages, 404/410, and
+ * upstream 5xx responses before returning it or writing it to source_cache.
+ */
+async function probeAnifoxDirectUrl(url: string, referer?: string): Promise<boolean> {
+  try {
+    const r = await fetch(url, {
+      headers: {
+        ...BASE_HDRS,
+        ...(referer ? { Referer: referer } : {}),
+        Range: "bytes=0-2048",
+      },
+      signal: AbortSignal.timeout(7000),
+      redirect: "follow",
+    });
+    if (r.status === 404 || r.status === 410 || r.status >= 500) return false;
+    const contentType = (r.headers.get("content-type") || "").toLowerCase();
+    if (contentType.includes("text/html") || contentType.includes("application/json")) return false;
+    if (!r.ok && r.status !== 206) return false;
+    if (r.body) await r.body.cancel().catch(() => {});
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function unwrapSourceProxyUrl(value: string): string | null {
+  if (!value.startsWith("/api/")) return value.startsWith("http") ? value : null;
+  try {
+    const query = value.split("?")[1] || "";
+    const inner = new URLSearchParams(query).get("url");
+    return inner && /^https?:\/\//i.test(inner) ? inner : null;
+  } catch {
+    return null;
+  }
+}
+
+async function filterAnifoxCachedSources(sources: UnifiedSource[]): Promise<UnifiedSource[]> {
+  const checked = await Promise.allSettled(sources.map(async source => {
+    const raw = source.directUrl ? unwrapSourceProxyUrl(source.directUrl) : null;
+    if (!raw) return null;
+    const referer = source.headers?.Referer;
+    return await probeAnifoxDirectUrl(raw, referer) ? source : null;
+  }));
+  return checked
+    .filter((item): item is PromiseFulfilledResult<UnifiedSource | null> => item.status === "fulfilled")
+    .map(item => item.value)
+    .filter((source): source is UnifiedSource => source !== null);
 }
 
 // ── ANIFOX catalog cache — يمنع جلب 9 صفحات عند كل طلب (كان يسبب timeout 75s) ──
@@ -1250,6 +1441,7 @@ async function getAnifoxSources(
   english: string | null,
   ep: number,
   variants: string[] = [],
+  anilistId?: number,
 ): Promise<UnifiedSource[]> {
   const out: UnifiedSource[] = [];
   const seen = new Set<string>();
@@ -1257,11 +1449,17 @@ async function getAnifoxSources(
   try {
     // ── البحث من الكاش (< 1ms بعد أول جلب) بدل 9 HTTP requests متسلسلة ──
     const catalog = await _getAnifoxCatalog();
+    const animeRecord = await ensureAnimeSlugRecord(anilistId, [title, english || "", ...variants]);
+    const storedSlugs = animeRecord?.slugs ?? [];
     const candidates: Array<{ content_id: string; content_title: string; score: number }> = [];
     for (const item of catalog) {
-      const score = Math.max(...queries.map(q =>
+      const titleScore = Math.max(...queries.map(q =>
         Math.max(similarity(q, item.content_title), asciiSimilarity(item.content_title, q)),
       ));
+      const slugScore = storedSlugs.length
+        ? Math.max(...storedSlugs.map(slug => slugSimilarity(slug, item.content_title)))
+        : 0;
+      const score = Math.max(titleScore, slugScore);
       if (score > 0.50) candidates.push({ ...item, score });
     }
     candidates.sort((a, b) => b.score - a.score);
@@ -1320,6 +1518,10 @@ async function getAnifoxSources(
         if (/archive\.org\/download\/.*\.(?:mp4|mkv|webm)/i.test(pageUrl) || /\.(?:mp4|mkv|webm)(?:[?#]|$)/i.test(pageUrl)) {
           const isArchive = pageUrl.includes("archive.org");
           const referer = isArchive ? "https://archive.org/" : pageUrl.split("/").slice(0, 3).join("/") + "/";
+          if (!(await probeAnifoxDirectUrl(pageUrl, referer))) {
+            console.log(`[ANIFOX] dead direct source skipped: ${pageUrl.slice(0, 100)}`);
+            return;
+          }
           result = {
             name: `ANIFOX · ${name} · ${quality}`,
             url: pageUrl,
@@ -12080,7 +12282,16 @@ router.get("/anime/fetch-source", async (req, res) => {
   ]);
   const SHORT_TTL_MAX_AGE_MS = 90 * 60_000; // 90 دقيقة — قبل انتهاء tokens
   const cKey = makeSourceCacheKey(site, title, ep);
-  const cached = await getFromSourceCache(cKey);
+  let cached = await getFromSourceCache(cKey);
+  if (cached && site === "anifox") {
+    const liveSources = await filterAnifoxCachedSources(cached.sources);
+    if (!liveSources.length) {
+      cached = null;
+    } else if (liveSources.length !== cached.sources.length) {
+      cached = { ...cached, sources: liveSources };
+      setSourceCache(cKey, site, liveSources).catch(() => {});
+    }
+  }
   // للمواقع قصيرة الـ TTL: إذا بقي للكاش أقل من 90 دقيقة أو انتهى → اكشط مباشرةً
   const skipCacheForShortTtl = cached !== null && SHORT_TTL_FETCH_SITES.has(site) &&
     (cached.stale === true || (cached.expiresAt - Date.now()) < SHORT_TTL_MAX_AGE_MS);
@@ -12207,7 +12418,7 @@ router.get("/anime/fetch-source", async (req, res) => {
       // xyra_anim: معطّل مؤقتاً — api.xyra.stream يرجع 502 دائماً (عطل من طرفهم)
       // case "xyra_anim":    (await race(getXyraAnimeSources(title, english, ep, anilistId), 18_000, [])).forEach(collectSrc); break;
       case "sanime":       (await race(getSAnimeSources(title, english, ep, titleVariants),               20_000, [])).forEach(collectSrc); break;
-      case "anifox":       (await race(getAnifoxSources(title, english, ep, titleVariants),               30_000, [])).forEach(collectSrc); break;
+      case "anifox":       (await race(getAnifoxSources(title, english, ep, titleVariants, anilistId),    30_000, [])).forEach(collectSrc); break;
       case "anslayer":     (await race(getAnimeSlayerSources(title, english, ep, anslayerId, titleAr), 45_000, [])).forEach(collectSrc); break;
       case "ristoanime":   (await race(getRistoAnimeSources(title, english, ep),          22_000, [])).forEach(collectSrc); break;
       // case "allmanga": معطّل 2026-07-17
@@ -15212,6 +15423,7 @@ async function anilistFetchAndCache(body: any, cacheKey: string, ttl: number): P
     _anilistDown = false;
     _anilistDownSince = 0;
     metaCacheSet(cacheKey, data, ttl, "anilist").catch(() => {});
+    cacheAnimeSlugsFromAniListResponse(data);
     // خزّن البوستر+القصة في poster cache إذا كانت استجابة Media فردية
     if (data?.data?.Media) extractAndCachePoster(data);
     return data;

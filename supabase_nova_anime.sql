@@ -140,6 +140,16 @@ CREATE TABLE IF NOT EXISTS anime_poster_cache (
 );
 ALTER TABLE anime_poster_cache DISABLE ROW LEVEL SECURITY;
 
+-- ── anime — عناوين وslugs متعددة اللغات لتحسين مطابقة السكرابر ─────────
+CREATE TABLE IF NOT EXISTS anime (
+  anilist_id  INTEGER PRIMARY KEY,
+  titles      JSONB NOT NULL DEFAULT '[]'::jsonb,
+  slugs       JSONB NOT NULL DEFAULT '[]'::jsonb,
+  updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_anime_slugs ON anime USING GIN (slugs);
+ALTER TABLE anime DISABLE ROW LEVEL SECURITY;
+
 -- ── site_cookies — تخزين كوكيز CF دائم (يصمد بعد restart) ───────────
 -- يُستخدم لـ anime3rb cf_clearance: يُجدَّد مرة/20ساعة عبر nopecha
 CREATE TABLE IF NOT EXISTS site_cookies (
