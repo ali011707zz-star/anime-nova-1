@@ -3276,6 +3276,9 @@ export default function WatchPage() {
       mycima:       34000,  // backend = 30s + هامش 4s
       anikototv:    28000,  // backend = 25s + هامش 3s
       anslayer:     50000,  // backend = 45s + هامش 5s (parallel embed extraction)
+      animeify:     28000,  // backend = 18s + هامش للاستخراج/الشبكة
+      sanime:       28000,  // backend = 20s + هامش للبحث وinfo
+      anifox:       38000,  // backend = 30s + هامش لتحميل الكتالوج أول مرة
       // mitanime: محذوف 2026-07-27
       // reanime: محذوف 2026-07-24
       // hianime: معطّل 2026-07-30
@@ -3294,7 +3297,20 @@ export default function WatchPage() {
          titleAr: العنوان العربي يُحسَّن البحث على AnimeSlayer (يبحث بالعربي أولاً). */
       if (site === "anslayer" && sp.get("anslayerId")) params.set("anslayerId", sp.get("anslayerId")!);
       if (site === "anslayer" && titleArParam) params.set("titleAr", titleArParam);
-      const r    = await fetch(`${API_BASE}/api/anime/fetch-source?${params}`, { signal: ctrl.signal, headers: { "X-App-Token": await getAppToken() } });
+      let token = await getAppToken();
+      let r = await fetch(`${API_BASE}/api/anime/fetch-source?${params}`, {
+        signal: ctrl.signal,
+        headers: token ? { "X-App-Token": token } : {},
+      });
+      // A token can expire between the cache check and the request. Refresh once
+      // instead of marking a healthy source as failed after a transient 403.
+      if (r.status === 403 && !ctrl.signal.aborted) {
+        token = await getAppToken(true);
+        r = await fetch(`${API_BASE}/api/anime/fetch-source?${params}`, {
+          signal: ctrl.signal,
+          headers: token ? { "X-App-Token": token } : {},
+        });
+      }
       const data = await r.json() as { sources?: FetchedSrc[] };
       const srcs: FetchedSrc[] = data.sources || [];
 

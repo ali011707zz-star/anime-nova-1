@@ -28,10 +28,10 @@ async function fetchToken(): Promise<string> {
  * أعد التوكن الحالي (أو اجلب واحداً جديداً إذا انتهى أو قارب على الانتهاء).
  * آمن للاستخدام المتزامن — يدمج الطلبات الجارية.
  */
-export async function getAppToken(): Promise<string> {
+export async function getAppToken(forceRefresh = false): Promise<string> {
   const now = Math.floor(Date.now() / 1000);
   // إذا كان التوكن صالحاً لأكثر من 60 ثانية → أعده فوراً
-  if (_cache && _cache.exp - now > 60) return _cache.token;
+  if (!forceRefresh && _cache && _cache.exp - now > 60) return _cache.token;
 
   // دمج الطلبات المتزامنة
   if (_inflight) return _inflight;

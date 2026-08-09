@@ -11492,6 +11492,8 @@ async function getSAnimeSourcesUncached(
         english ? similarity(label, english) : 0,
         slugSimilarity(label, title),
         english ? slugSimilarity(label, english) : 0,
+        ...variants.map(variant => similarity(label, variant)),
+        ...variants.map(variant => asciiSimilarity(label, variant)),
         ...variants.map(variant => slugSimilarity(label, variant)),
       );
       // ترجيح رقم الموسم — لكن نُطبِّق العقوبة فقط إذا كانت الدرجة الأساسية ضعيفة
@@ -12361,8 +12363,8 @@ router.get("/anime/fetch-source", async (req, res) => {
     return;
   }
 
-  const SCRAPER_MS = 7000;   // موحّد مع مسار التدفق المتوازي — كان 20000
-  const EXTRACT_MS = 7000;   // موحّد مع مسار التدفق المتوازي — كان 15000
+  const SCRAPER_MS = 12000;  // لا تقطع المصادر العربية البطيئة أثناء البحث
+  const EXTRACT_MS = 9000;   // هامش كافٍ لاستخراج روابط AF/المصادر المماثلة
   const race = <T>(p: Promise<T>, ms: number, fallback: T) =>
     Promise.race([p, new Promise<T>(r => setTimeout(() => r(fallback), ms))]);
 

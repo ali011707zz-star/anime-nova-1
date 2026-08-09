@@ -71,3 +71,4 @@
 - [GitHub Actions "not acquired by hosted runner"](github-actions-runner-not-acquired.md) — this error means a GitHub-side outage, not a repo/workflow bug; check githubstatus.com before touching CI config.
 - [YouTube embed referrer](youtube-embed-referrer.md) — trailer embeds need youtube-nocookie, strict cross-origin referrer, and an explicit mobile WebView Referer.
 - [Streaming buffer policy](stream-buffer-policy.md) — slow signed CDN segments need aligned Media3/HLS buffers and longer proxy read windows; validate on real clients.
+- [Source request budget](source-request-budget.md) — frontend per-source timeouts must exceed backend scraper races; refresh the anon token once after a transient 403.
