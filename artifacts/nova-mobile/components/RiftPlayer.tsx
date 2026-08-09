@@ -2060,6 +2060,10 @@ export function RiftPlayer({
         style={s.video}
         nativeControls={false}
         contentFit={contentFit}
+        /* Android SurfaceView is not included by react-native-view-shot and
+           produced a black saved image. TextureView is capturable while
+           retaining the same native decoder/player. */
+        surfaceType={Platform.OS === "android" ? "textureView" : undefined}
       />
 
       {/* ── Brightness: يُضبط عبر expo-brightness (سطوع الشاشة الحقيقي) — لا حاجة لـ overlay ── */}

@@ -1120,8 +1120,8 @@ export default function WatchScreen() {
                         pressed  && { opacity: 0.72 },
                       ]}
                     >
-                      {/* Left in code = Right visually (RTL): زر اختيار/تشغيل */}
-                      <View style={d.webRowPlayIcon}>
+                      {/* Keep download immediately beside the server action. */}
+                      <View style={d.webRowActions}>
                         {isFetching ? (
                           <SpinRing size={16} />
                         ) : isReady ? (
@@ -1134,30 +1134,15 @@ export default function WatchScreen() {
                             <Text style={d.pickBtnText}>اختيار</Text>
                           </View>
                         )}
-                      </View>
-
-                      {/* Center: السيرفر XX */}
-                      <Text
-                        style={[
-                          d.webRowTag,
-                          { flex: 1, textAlign: "right" },
-                          isReady  && { color: "rgba(255,255,255,0.90)" },
-                          isFailed && { color: "rgba(255,255,255,0.35)" },
-                        ]}
-                        numberOfLines={1}
-                      >
-                        السيرفر {slot.tag}
-                      </Text>
-
-                      {/* Right: download + status dot */}
-                      <View style={d.webRowRight}>
-                        {/* زر التنزيل — يظهر مرّة واحدة فقط (أعلى جودة للموقع)
-                            وإلا تظهر SpinRing لكل صفوف الموقع عند ضغط التنزيل */}
                         {dlState === "idle" && SITE_FIRST_QUALITY.get(slot.site) === qk && (
                           <Pressable
-                            onPress={() => handleFetchAndDownload(slot.site)}
-                            hitSlop={10}
+                            onPress={(event) => {
+                              event.stopPropagation();
+                              void handleFetchAndDownload(slot.site);
+                            }}
+                            hitSlop={8}
                             style={d.dlIconBtn}
+                            accessibilityLabel="تنزيل الحلقة"
                           >
                             {dlFetchingSites.has(slot.site) ? (
                               <SpinRing size={14} />
@@ -1177,6 +1162,23 @@ export default function WatchScreen() {
                         {dlState === "error" && (
                           <Ionicons name="close-circle" size={16} color="rgba(239,68,68,0.70)" />
                         )}
+                      </View>
+
+                      {/* Center: السيرفر XX */}
+                      <Text
+                        style={[
+                          d.webRowTag,
+                          { flex: 1, textAlign: "right" },
+                          isReady  && { color: "rgba(255,255,255,0.90)" },
+                          isFailed && { color: "rgba(255,255,255,0.35)" },
+                        ]}
+                        numberOfLines={1}
+                      >
+                        السيرفر {slot.tag}
+                      </Text>
+
+                      {/* Status only; the download action sits beside اختيار. */}
+                      <View style={d.webRowRight}>
                         {!isFetching && (
                           <View style={[d.webRowDot, {
                             backgroundColor:
@@ -1307,6 +1309,7 @@ const d = StyleSheet.create({
   webRow:         { flexDirection: "row", alignItems: "center", paddingHorizontal: 14, paddingVertical: 14, gap: 10 },
   webRowBorder:   { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: "rgba(255,255,255,0.06)" },
   webRowPlayIcon: { alignItems: "center", justifyContent: "center", flexShrink: 0 },
+  webRowActions: { flexDirection: "row", alignItems: "center", gap: 6, flexShrink: 0 },
   webRowName:     { flex: 1, fontSize: 13, fontFamily: "Cairo_800ExtraBold", color: "rgba(255,255,255,0.48)", textAlign: "right" } as any,
   webRowTag:      { fontFamily: "Cairo_800ExtraBold", letterSpacing: 0.4, fontSize: 11, color: "rgba(255,255,255,0.60)" },
   webRowRight:    { flexDirection: "row", alignItems: "center", gap: 7, flexShrink: 0 },

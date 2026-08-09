@@ -11,6 +11,7 @@ import {
   getDownloads, deleteDownload, clearAllDownloads,
   formatFileSize, DownloadItem, ActiveDownload,
   subscribeActiveDownloads, getActiveDownloadsSnapshot, cancelActiveDownload,
+  pauseActiveDownload, resumeActiveDownload,
 } from "@/utils/downloadManager";
 import { RiftPlayer, PlayerSource } from "@/components/RiftPlayer";
 import * as FileSystem from "expo-file-system";
@@ -39,19 +40,38 @@ function SpinIcon({ size = 16 }: { size?: number }) {
 function ActiveDownloadCard({
   item,
   onCancel,
+  onPause,
+  onResume,
 }: {
   item: ActiveDownload;
   onCancel: () => void;
+  onPause: () => void;
+  onResume: () => void;
 }) {
   const pct = Math.round(item.progress * 100);
+  const isPaused = item.status === "paused";
   const isError = item.status === "error";
 
   return (
     <View style={[s.activeCard, isError && s.activeCardError]}>
-      {/* Cancel / error icon */}
-      <Pressable onPress={onCancel} hitSlop={10} style={s.activeCancel}>
-        <Ionicons name="close" size={14} color="rgba(255,255,255,0.45)" />
-      </Pressable>
+      {/* Pause/resume + cancel controls. Pausing keeps the partial file. */}
+      <View style={s.activeActions}>
+        <Pressable
+          onPress={isPaused ? onResume : onPause}
+          hitSlop={8}
+          style={[s.activeAction, isPaused && s.activeActionResume]}
+          accessibilityLabel={isPaused ? "استئناف التنزيل" : "إيقاف التنزيل مؤقتاً"}
+        >
+          <Ionicons
+            name={isPaused ? "play" : "pause"}
+            size={13}
+            color={isPaused ? "#c4b5fd" : "rgba(255,255,255,0.65)"}
+          />
+        </Pressable>
+        <Pressable onPress={onCancel} hitSlop={8} style={[s.activeAction, s.activeCancel]}>
+          <Ionicons name="close" size={14} color="rgba(255,255,255,0.45)" />
+        </Pressable>
+      </View>
 
       {/* Info + progress */}
       <View style={{ flex: 1, gap: 6 }}>
@@ -63,7 +83,7 @@ function ActiveDownloadCard({
           {/* Percentage badge */}
           <View style={[s.activePctBadge, isError && s.activePctBadgeError]}>
             <Text style={[s.activePctText, isError && { color: "rgba(239,68,68,0.85)" }]}>
-              {isError ? "خطأ" : `${pct}%`}
+           {isError ? "خطأ" : isPaused ? "متوقف" : `${pct}%`}
             </Text>
           </View>
         </View>
@@ -78,7 +98,11 @@ function ActiveDownloadCard({
         </View>
 
         <Text style={[s.activeStatus, isError && { color: "rgba(239,68,68,0.65)" }]}>
-          {isError ? "فشل التنزيل — اضغط × للإغلاق" : "جاري التحميل..."}
+          {isError
+            ? "فشل التنزيل — اضغط × للإغلاق"
+            : isPaused
+              ? "متوقف مؤقتاً — اضغط ▶ للاستئناف"
+              : "يعمل في الخلفية..."}
         </Text>
       </View>
     </View>
@@ -304,6 +328,14 @@ export default function DownloadsScreen() {
     cancelActiveDownload(id);
   }, []);
 
+  const handlePauseActive = useCallback((id: string) => {
+    void pauseActiveDownload(id);
+  }, []);
+
+  const handleResumeActive = useCallback((id: string) => {
+    resumeActiveDownload(id);
+  }, []);
+
   const handlePlay = useCallback(async (item: DownloadItem) => {
     try {
       const info = await FileSystem.getInfoAsync(item.localPath, { size: true });
@@ -378,6 +410,8 @@ export default function DownloadsScreen() {
                     key={item.id}
                     item={item}
                     onCancel={() => handleCancelActive(item.id)}
+                    onPause={() => handlePauseActive(item.id)}
+                    onResume={() => handleResumeActive(item.id)}
                   />
                 ))}
               </View>
@@ -470,11 +504,15 @@ const s = StyleSheet.create({
   },
   activeCardError: { borderColor: "rgba(239,68,68,0.25)" },
   activeCancel: {
-    width: 26, height: 26, borderRadius: 9,
-    backgroundColor: "rgba(255,255,255,0.06)", borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.10)", alignItems: "center", justifyContent: "center",
-    flexShrink: 0, marginTop: 1,
+    backgroundColor: "rgba(255,255,255,0.06)",
   },
+  activeActions: { flexDirection: "row", alignItems: "center", gap: 6, flexShrink: 0, marginTop: 1 },
+  activeAction: {
+    width: 28, height: 28, borderRadius: 9,
+    backgroundColor: "rgba(139,92,246,0.13)", borderWidth: 1,
+    borderColor: "rgba(139,92,246,0.24)", alignItems: "center", justifyContent: "center",
+  },
+  activeActionResume: { backgroundColor: "rgba(52,211,153,0.12)", borderColor: "rgba(52,211,153,0.25)" },
   activeTitle: { fontSize: 13, fontFamily: "Cairo_800ExtraBold", color: "#fff", textAlign: "right", lineHeight: 19 },
   activeEp:    { fontSize: 11, fontFamily: "Cairo_700Bold", color: "rgba(196,181,253,0.70)", textAlign: "right" },
 

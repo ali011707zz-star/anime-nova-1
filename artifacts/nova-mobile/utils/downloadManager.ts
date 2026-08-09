@@ -42,7 +42,7 @@ export interface ActiveDownload {
   bytesWritten: number;
   totalBytes: number;
   retryCount: number;
-  status: "downloading" | "error";
+  status: "downloading" | "paused" | "error";
   cancelFn: () => void;
 }
 
@@ -83,6 +83,7 @@ type RuntimeDownload = ActiveDownload & {
   resumable?: FileSystem.DownloadResumable;
   resumeState?: ResumeState;
   notificationAt: number;
+  notificationShown: boolean;
   notificationPromise?: Promise<void>;
 };
 
@@ -220,7 +221,9 @@ async function configureNotifications(): Promise<boolean> {
       try {
         Notifications.setNotificationHandler({
           handleNotification: async () => ({
-            shouldShowBanner: true,
+            /* Keep download updates in the notification shade instead of
+               repeatedly flashing transient banners while progress changes. */
+            shouldShowBanner: false,
             shouldShowList: true,
             shouldPlaySound: false,
             shouldSetBadge: false,
@@ -234,7 +237,7 @@ async function configureNotifications(): Promise<boolean> {
         if (Platform.OS === "android") {
           await Notifications.setNotificationChannelAsync(NOTIFICATION_CHANNEL, {
             name: "تنزيلات Nova",
-            importance: Notifications.AndroidImportance.LOW,
+            importance: Notifications.AndroidImportance.DEFAULT,
             sound: null,
             vibrationPattern: [0, 0],
             enableVibrate: false,
@@ -252,28 +255,31 @@ async function configureNotifications(): Promise<boolean> {
 
 async function dismissDownloadNotification(id: string): Promise<void> {
   if (!(await configureNotifications())) return;
-  try { await Notifications.dismissNotificationAsync(id); } catch {}
-  try { await Notifications.cancelScheduledNotificationAsync(id); } catch {}
+  const identifier = `nova-download-${id}`;
+  try { await Notifications.dismissNotificationAsync(identifier); } catch {}
+  try { await Notifications.cancelScheduledNotificationAsync(identifier); } catch {}
 }
 
 function updateDownloadNotification(entry: RuntimeDownload, force = false): void {
   if (Platform.OS === "web") return;
+  /* A notification is deliberately created once per task. Dismissing and
+     recreating it for every progress callback makes Android show a flickering
+     banner and can make the download look as if it stopped. */
+  if (entry.notificationShown) return;
   const now = Date.now();
   if (!force && now - entry.notificationAt < 2000) return;
   entry.notificationAt = now;
   if (entry.notificationPromise) return;
 
-  const percent = Math.round(entry.progress * 100);
   entry.notificationPromise = (async () => {
     if (!(await configureNotifications())) return;
     const identifier = `nova-download-${entry.id}`;
-    try { await Notifications.dismissNotificationAsync(identifier); } catch {}
     try {
       await Notifications.scheduleNotificationAsync({
         identifier,
         content: {
-          title: `جاري تنزيل الحلقة ${entry.ep}`,
-          body: `${entry.title} (${percent}%)`,
+          title: `تنزيل الحلقة ${entry.ep}`,
+          body: `${entry.title} · يعمل في الخلفية`,
           sticky: true,
           autoDismiss: false,
           sound: false,
@@ -282,6 +288,7 @@ function updateDownloadNotification(entry: RuntimeDownload, force = false): void
         },
         trigger: null,
       });
+        entry.notificationShown = true;
     } catch {}
   })().finally(() => {
     entry.notificationPromise = undefined;
@@ -337,6 +344,36 @@ export function cancelActiveDownload(id: string): void {
   active.delete(id);
   void dismissDownloadNotification(id);
   notifyListeners();
+}
+
+/** Pause without deleting the partial file. The resumable task and its byte
+ * offset remain in memory and are persisted for the next app launch. */
+export async function pauseActiveDownload(id: string): Promise<void> {
+  const entry = active.get(id);
+  if (!entry || entry.status !== "downloading") return;
+
+  entry.status = "paused";
+  notifyListeners();
+  try {
+    if (entry.resumable) {
+      entry.resumeState = await entry.resumable.pauseAsync();
+    }
+    notifyListeners();
+  } catch {
+    if (active.has(id)) {
+      entry.status = "downloading";
+      notifyListeners();
+    }
+  }
+}
+
+/** Resume a paused task from its saved native offset. */
+export function resumeActiveDownload(id: string): void {
+  const entry = active.get(id);
+  if (!entry || entry.status !== "paused") return;
+  entry.status = "downloading";
+  notifyListeners();
+  void runDownload(entry);
 }
 
 function wait(ms: number): Promise<void> {
@@ -448,6 +485,9 @@ async function runDownload(entry: RuntimeDownload): Promise<void> {
       return;
     } catch (error) {
       if (!active.has(entry.id)) return;
+      /* A user pause also interrupts downloadAsync on some Android versions.
+         Do not treat that intentional interruption as a failed retry. */
+      if (entry.status === "paused") return;
       /* Keep the resumable state and partial file. A subsequent attempt starts
          from the saved native resume state instead of deleting the download. */
       try {
@@ -476,7 +516,12 @@ async function runDownload(entry: RuntimeDownload): Promise<void> {
   }
 }
 
-function enqueueDownload(params: StartDownloadParams, resumeState?: ResumeState, localPath?: string): void {
+function enqueueDownload(
+  params: StartDownloadParams,
+  resumeState?: ResumeState,
+  localPath?: string,
+  autoStart = true,
+): void {
   const id = makeDownloadId(params.animeId, params.ep);
   cancelActiveDownload(id);
 
@@ -492,11 +537,12 @@ function enqueueDownload(params: StartDownloadParams, resumeState?: ResumeState,
     bytesWritten: 0,
     totalBytes: 0,
     retryCount: 0,
-    status: "downloading",
+    status: autoStart ? "downloading" : "paused",
     params,
     localPath: localPath ?? localPathFor(params),
     resumeState,
     notificationAt: 0,
+    notificationShown: false,
     cancelFn: () => {
       entry.resumable?.cancelAsync().catch(() => {});
       FileSystem.deleteAsync(entry.localPath, { idempotent: true }).catch(() => {});
@@ -505,6 +551,7 @@ function enqueueDownload(params: StartDownloadParams, resumeState?: ResumeState,
   };
   active.set(id, entry);
   notifyListeners();
+  if (!autoStart) return;
   void ensureDirectoryFor(entry.localPath)
     .then(() => configureNotifications())
     .then(() => runDownload(entry))
@@ -575,7 +622,7 @@ export async function restoreInterruptedDownloads(): Promise<void> {
             },
             resumeData: String(record.bytesWritten),
           }
-        : undefined), record.localPath);
+         : undefined), record.localPath, record.status !== "paused");
     }
   } catch {}
 }
