@@ -79,6 +79,13 @@ function RootLayoutNav() {
       <Stack.Screen name="profile" options={{ headerShown: false, animation: "slide_from_right" }} />
       <Stack.Screen name="aw-dubbed/[key]" options={{ headerShown: false, animation: "slide_from_bottom" }} />
       <Stack.Screen name="aw-dubbed/watch"  options={{ headerShown: false, orientation: "all" }} />
+      {/* The cartoon tab intentionally opens the legacy Arabic-Toons
+          screens, not the anime-dubbed Supabase screens. Register them in
+          the root stack so native builds resolve the detail and watch routes
+          reliably. */}
+      <Stack.Screen name="dubbed" options={{ headerShown: false }} />
+      <Stack.Screen name="dubbed/[id]" options={{ headerShown: false, animation: "slide_from_bottom" }} />
+      <Stack.Screen name="dubbed/watch" options={{ headerShown: false, orientation: "all" }} />
       <Stack.Screen name="+not-found" />
     </Stack>
   );

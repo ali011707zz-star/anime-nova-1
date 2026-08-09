@@ -210,19 +210,25 @@ function CartoonList({ searchQ }: { searchQ: string }) {
   const [totalPages,  setTotalPages]  = useState(1);
   const [loading,     setLoading]     = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
+  const [loadError,   setLoadError]   = useState(false);
   const [searchRes,   setSearchRes]   = useState<DubbedSeries[]>([]);
   const [searchLoad,  setSearchLoad]  = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const loadPage = useCallback(async (p: number, reset = false) => {
     if (reset) setLoading(true); else setLoadingMore(true);
+    if (reset) setLoadError(false);
     try {
       const r = await fetch(`${BASE}/api/dubbed/catalog?page=${p}`);
+      if (!r.ok) throw new Error(`catalog ${r.status}`);
       const d = await r.json();
+      if (!Array.isArray(d.results)) throw new Error("invalid catalog response");
       setSeries(prev => reset ? (d.results || []) : [...prev, ...(d.results || [])]);
       setTotalPages(d.totalPages || 1);
       setPage(p);
-    } catch {}
+    } catch {
+      if (reset) setLoadError(true);
+    }
     setLoading(false);
     setLoadingMore(false);
   }, [BASE]);
@@ -262,6 +268,17 @@ function CartoonList({ searchQ }: { searchQ: string }) {
   if (loading) return (
     <View style={shared.center}>
       <ActivityIndicator color="#7C3AED" size="large" />
+    </View>
+  );
+
+  if (loadError && series.length === 0) return (
+    <View style={shared.center}>
+      <Ionicons name="cloud-offline-outline" size={42} color="rgba(167,139,250,0.55)" />
+      <Text style={shared.emptyText}>تعذّر تحميل الكرتون المدبلج</Text>
+      <Pressable onPress={() => loadPage(1, true)} style={shared.retryBtn}>
+        <Ionicons name="refresh" size={15} color="#A78BFA" />
+        <Text style={shared.retryText}>إعادة المحاولة</Text>
+      </Pressable>
     </View>
   );
 
@@ -450,6 +467,8 @@ const shared = StyleSheet.create({
   grid:       { padding: 12, paddingBottom: 110, gap: 10 },
   center:     { flex: 1, alignItems: "center", justifyContent: "center", paddingVertical: 60 },
   emptyText:  { color: "rgba(255,255,255,0.3)", fontFamily: "Cairo_400Regular" },
+  retryBtn:   { flexDirection: "row", alignItems: "center", gap: 7, marginTop: 10, paddingHorizontal: 16, paddingVertical: 9, borderRadius: 12, backgroundColor: "rgba(124,58,237,0.15)", borderWidth: 1, borderColor: "rgba(124,58,237,0.3)" },
+  retryText:  { color: "#A78BFA", fontFamily: "Cairo_700Bold", fontSize: 12 },
 });
 
 const card = StyleSheet.create({

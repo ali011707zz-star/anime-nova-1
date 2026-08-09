@@ -220,9 +220,10 @@ async function configureNotifications(): Promise<boolean> {
       try {
         Notifications.setNotificationHandler({
           handleNotification: async (notification) => ({
-            /* Keep download updates in the notification shade instead of
-               repeatedly flashing transient banners while progress changes. */
-            shouldShowBanner: Boolean(notification.request.content.data?.completed),
+            /* Download progress is an ongoing notification. Showing the
+               banner here also makes the first notification visible
+               immediately; the same notification id is updated below. */
+            shouldShowBanner: true,
             shouldShowList: true,
             shouldPlaySound: false,
             shouldSetBadge: false,
@@ -276,7 +277,6 @@ function updateDownloadNotification(entry: RuntimeDownload, force = false): void
       ? `${formatFileSize(entry.bytesWritten)} من ${formatFileSize(entry.totalBytes)}`
       : "";
     try {
-      await dismissDownloadNotification(entry.id);
       await Notifications.scheduleNotificationAsync({
         identifier,
         content: ({
@@ -317,8 +317,10 @@ function completeNotification(entry: RuntimeDownload, error = false): void {
             body: error
               ? `فشل تنزيل ${entry.title} — الحلقة ${entry.ep}`
               : `اكتمل تنزيل ${entry.title} — الحلقة ${entry.ep}`,
-            sticky: false,
-            autoDismiss: true,
+            /* Leave the result in the notification shade. It should not
+               disappear before the user has a chance to read it. */
+            sticky: true,
+            autoDismiss: false,
             sound: !error,
             color: error ? "#EF4444" : "#34D399",
             data: { downloadId: entry.id, completed: !error },
