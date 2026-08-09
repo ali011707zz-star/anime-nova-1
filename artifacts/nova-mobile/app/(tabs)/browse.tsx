@@ -215,6 +215,7 @@ export default function BrowseScreen() {
   const [searchItems, setSearchItems] = useState<AnimeResult[]>([]);
   const [searchLoading, setSearchLoading] = useState(false);
 
+  const listRef = useRef<FlatList<AnimeResult>>(null);
   const genRef = useRef(0);
   const searchAbortRef = useRef<AbortController | null>(null);
   const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -291,6 +292,9 @@ export default function BrowseScreen() {
 
   useEffect(() => {
     if (view !== "list") return;
+    // Each filter produces a new result set. Never leave the user at the
+    // old list offset, where the beginning of the new results is skipped.
+    listRef.current?.scrollToOffset({ offset: 0, animated: false });
     setPage(1); setHasMore(true);
     loadItems(1, true);
   }, [view, sort, format, season, year, activeGenre, status]);
@@ -487,6 +491,7 @@ export default function BrowseScreen() {
             </View>
           ) : (
             <FlatList
+              ref={listRef}
               data={filteredItems}
               key={`anime-grid-${gridColumns}`}
               keyExtractor={(item, i) => `${item.id}-${i}`}
