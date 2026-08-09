@@ -1,19 +1,23 @@
 /**
- * Nova Download Manager — Global Singleton
- * يدير تنزيل حلقات الأنمي بشكل مستقل عن lifecycle أي شاشة.
- * التنزيل يستمر عند التنقل بين الشاشات.
+ * Nova Download Service
+ *
+ * The download task deliberately lives outside React screens.  DownloadResumable
+ * uses the background file-system session, while the small persisted record lets
+ * the service rebuild the task after the app is opened again.
  */
+import { AppState, Platform } from "react-native";
 import * as FileSystem from "expo-file-system";
+import * as Notifications from "expo-notifications";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
-const DOWNLOADS_KEY        = "nova-downloads-v2";
-const ACTIVE_PENDING_KEY   = "nova-downloads-active-v1"; // تنزيلات جارية مُحفوظة عبر إغلاق التطبيق
-const DOWNLOADS_DIR        = (FileSystem.documentDirectory ?? "") + "nova-downloads/";
-
-// ── Types ──────────────────────────────────────────────────────────────────
+const DOWNLOADS_KEY = "nova-downloads-v3";
+const ACTIVE_PENDING_KEY = "nova-downloads-active-v2";
+const DOWNLOADS_ROOT = `${FileSystem.documentDirectory ?? ""}downloads/`;
+const MAX_RETRIES = 3;
+const NOTIFICATION_CHANNEL = "nova-downloads";
 
 export interface DownloadItem {
-  id: string;                   // "{animeId}_ep{ep}"
+  id: string;
   animeId: number;
   ep: number;
   title: string;
@@ -21,8 +25,8 @@ export interface DownloadItem {
   site: string;
   quality: string;
   localPath: string;
-  subtitleLocalPath?: string;   // ترجمة محفوظة محلياً (KW وغيرها)
-  fileSize: number;             // bytes
+  subtitleLocalPath?: string;
+  fileSize: number;
   downloadedAt: number;
 }
 
@@ -34,14 +38,58 @@ export interface ActiveDownload {
   cover: string;
   site: string;
   quality: string;
-  progress: number;     // 0-1
+  progress: number;
   bytesWritten: number;
   totalBytes: number;
+  retryCount: number;
   status: "downloading" | "error";
   cancelFn: () => void;
 }
 
-// ── Helpers ────────────────────────────────────────────────────────────────
+export interface StartDownloadParams {
+  animeId: number;
+  ep: number;
+  title: string;
+  cover: string;
+  site: string;
+  quality: string;
+  url: string;
+  authToken?: string | null;
+  subtitleUrl?: string;
+}
+
+type DownloadOptions = {
+  headers?: Record<string, string>;
+  sessionType?: FileSystem.FileSystemSessionType;
+};
+
+type ResumeState = {
+  url: string;
+  fileUri: string;
+  options: DownloadOptions;
+  resumeData?: string;
+};
+
+type PersistedActive = Omit<ActiveDownload, "cancelFn"> & {
+  url: string;
+  localPath: string;
+  subtitleUrl?: string;
+  resumeState?: ResumeState;
+};
+
+type RuntimeDownload = ActiveDownload & {
+  params: StartDownloadParams;
+  localPath: string;
+  resumable?: FileSystem.DownloadResumable;
+  resumeState?: ResumeState;
+  notificationAt: number;
+  notificationPromise?: Promise<void>;
+};
+
+const active = new Map<string, RuntimeDownload>();
+const listeners = new Set<() => void>();
+let notificationsReady: Promise<boolean> | null = null;
+let persistQueue = Promise.resolve();
 
 export function makeDownloadId(animeId: number, ep: number): string {
   return `${animeId}_ep${ep}`;
@@ -54,24 +102,39 @@ export function formatFileSize(bytes: number): string {
   return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} جيجابايت`;
 }
 
-// ── Directory ──────────────────────────────────────────────────────────────
-
-export async function ensureDownloadsDir(): Promise<void> {
-  try {
-    const info = await FileSystem.getInfoAsync(DOWNLOADS_DIR);
-    if (!info.exists) {
-      await FileSystem.makeDirectoryAsync(DOWNLOADS_DIR, { intermediates: true });
-    }
-  } catch {}
+function safePathSegment(value: string): string {
+  const cleaned = (value || "anime")
+    .normalize("NFKC")
+    .replace(/[^\u0600-\u06FF\u0621-\u064Aa-zA-Z0-9 _-]/g, "")
+    .trim()
+    .replace(/\s+/g, "-")
+    .replace(/-+/g, "-");
+  return cleaned.slice(0, 80) || "anime";
 }
 
-// ── Storage helpers ────────────────────────────────────────────────────────
+function localPathFor(params: StartDownloadParams): string {
+  return `${DOWNLOADS_ROOT}${safePathSegment(params.title)}/${params.ep}.mp4`;
+}
+
+async function ensureDirectoryFor(fileUri: string): Promise<void> {
+  const slash = fileUri.lastIndexOf("/");
+  const directory = slash > 0 ? fileUri.slice(0, slash + 1) : DOWNLOADS_ROOT;
+  const info = await FileSystem.getInfoAsync(directory);
+  if (!info.exists) {
+    await FileSystem.makeDirectoryAsync(directory, { intermediates: true });
+  }
+}
+
+export async function ensureDownloadsDir(): Promise<void> {
+  await ensureDirectoryFor(`${DOWNLOADS_ROOT}placeholder`);
+}
 
 export async function getDownloads(): Promise<DownloadItem[]> {
   try {
     const raw = await AsyncStorage.getItem(DOWNLOADS_KEY);
     if (!raw) return [];
-    return JSON.parse(raw) as DownloadItem[];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed as DownloadItem[] : [];
   } catch {
     return [];
   }
@@ -81,224 +144,343 @@ async function saveDownloads(items: DownloadItem[]): Promise<void> {
   await AsyncStorage.setItem(DOWNLOADS_KEY, JSON.stringify(items));
 }
 
-// ── Public API ─────────────────────────────────────────────────────────────
-
-/** هل الحلقة محمّلة؟ يتحقق من وجود الملف فعلياً. */
+/** Only a non-empty file is considered playable. */
 export async function isDownloaded(animeId: number, ep: number): Promise<DownloadItem | null> {
+  const items = await getDownloads();
+  const item = items.find((entry) => entry.id === makeDownloadId(animeId, ep));
+  if (!item) return null;
+
   try {
-    const items = await getDownloads();
-    const item = items.find(i => i.id === makeDownloadId(animeId, ep));
-    if (!item) return null;
-    const info = await FileSystem.getInfoAsync(item.localPath);
-    if (!info.exists) {
-      await saveDownloads(items.filter(i => i.id !== item.id));
-      return null;
-    }
-    return item;
+    const info = await FileSystem.getInfoAsync(item.localPath, { size: true });
+    if (info.exists && ((info as { size?: number }).size ?? 0) > 0) return item;
   } catch {
-    return null;
+    // Treat an unreadable file exactly like a missing file.
   }
+
+  await saveDownloads(items.filter((entry) => entry.id !== item.id));
+  return null;
 }
 
-/** حذف تنزيل (الملف + الترجمة + السجل) */
 export async function deleteDownload(item: DownloadItem): Promise<void> {
   try { await FileSystem.deleteAsync(item.localPath, { idempotent: true }); } catch {}
   if (item.subtitleLocalPath) {
     try { await FileSystem.deleteAsync(item.subtitleLocalPath, { idempotent: true }); } catch {}
   }
   const items = await getDownloads();
-  await saveDownloads(items.filter(i => i.id !== item.id));
+  await saveDownloads(items.filter((entry) => entry.id !== item.id));
 }
 
-/** حذف كل التنزيلات */
 export async function clearAllDownloads(): Promise<void> {
   const items = await getDownloads();
-  await Promise.allSettled(
-    items.flatMap(item => [
-      FileSystem.deleteAsync(item.localPath, { idempotent: true }),
-      item.subtitleLocalPath
-        ? FileSystem.deleteAsync(item.subtitleLocalPath, { idempotent: true })
-        : Promise.resolve(),
-    ])
-  );
+  await Promise.allSettled(items.flatMap((item) => [
+    FileSystem.deleteAsync(item.localPath, { idempotent: true }),
+    item.subtitleLocalPath
+      ? FileSystem.deleteAsync(item.subtitleLocalPath, { idempotent: true })
+      : Promise.resolve(),
+  ]));
   await AsyncStorage.removeItem(DOWNLOADS_KEY);
 }
 
-// ── Global Active Downloads Singleton ─────────────────────────────────────
-// يعيش طوال جلسة التطبيق — مستقل عن lifecycle أي component أو شاشة.
-
-const _active = new Map<string, ActiveDownload>();
-type Listener = () => void;
-const _listeners = new Set<Listener>();
-
-/** الحقول القابلة للحفظ (بدون cancelFn التي لا تُسلسَل) */
-type PersistedActive = Omit<ActiveDownload, "cancelFn">;
-
-function _persistActive(): void {
-  try {
-    const data: PersistedActive[] = Array.from(_active.values()).map(
-      ({ cancelFn: _cf, ...rest }) => rest,
-    );
-    AsyncStorage.setItem(ACTIVE_PENDING_KEY, JSON.stringify(data)).catch(() => {});
-  } catch {}
+function persistActive(): void {
+  const records: PersistedActive[] = Array.from(active.values()).map((entry) => ({
+    id: entry.id,
+    animeId: entry.animeId,
+    ep: entry.ep,
+    title: entry.title,
+    cover: entry.cover,
+    site: entry.site,
+    quality: entry.quality,
+    progress: entry.progress,
+    bytesWritten: entry.bytesWritten,
+    totalBytes: entry.totalBytes,
+    retryCount: entry.retryCount,
+    status: entry.status,
+    url: entry.params.url,
+    localPath: entry.localPath,
+    subtitleUrl: entry.params.subtitleUrl,
+    resumeState: entry.resumeState,
+  }));
+  persistQueue = persistQueue
+    .catch(() => {})
+    .then(() => AsyncStorage.setItem(ACTIVE_PENDING_KEY, JSON.stringify(records)))
+    .catch(() => {});
 }
 
-function _notify() {
-  _listeners.forEach(fn => { try { fn(); } catch {} });
-  _persistActive();
-}
-
-/**
- * عند بدء التطبيق — يُحمَّل أي تنزيل كان جارياً قبل الإغلاق ويُعرض
- * بحالة "error" (لأن الـ resumable state ضاع). يُتيح للمستخدم رؤيتها
- * وإعادة التنزيل بدلاً من أن تختفي كلياً.
- */
-export async function restoreInterruptedDownloads(): Promise<void> {
-  try {
-    const raw = await AsyncStorage.getItem(ACTIVE_PENDING_KEY);
-    if (!raw) return;
-    const data: PersistedActive[] = JSON.parse(raw);
-    if (!Array.isArray(data) || data.length === 0) return;
-    for (const item of data) {
-      if (!item.id || _active.has(item.id)) continue;
-      // تحقق: إذا اكتمل التنزيل بالفعل (في DOWNLOADS_KEY) فلا تُعد تحميله
-      const done = await AsyncStorage.getItem(DOWNLOADS_KEY).then(r => {
-        try { return (JSON.parse(r || "[]") as { id: string }[]).some(d => d.id === item.id); }
-        catch { return false; }
-      }).catch(() => false);
-      if (done) continue;
-      _active.set(item.id, {
-        ...item,
-        status: "error",
-        cancelFn: () => { _active.delete(item.id); _notify(); },
-      });
-    }
-    // امسح الـ pending بعد الاستعادة
-    await AsyncStorage.removeItem(ACTIVE_PENDING_KEY).catch(() => {});
-    _notify();
-  } catch {}
-}
-
-/** اشترك في تحديثات التنزيلات الجارية — يُعيد دالة إلغاء الاشتراك */
-export function subscribeActiveDownloads(fn: Listener): () => void {
-  _listeners.add(fn);
-  return () => _listeners.delete(fn);
-}
-
-/** قراءة لحظية للتنزيلات الجارية */
-export function getActiveDownloadsSnapshot(): ActiveDownload[] {
-  return Array.from(_active.values());
-}
-
-/** هل هذه الحلقة تُحمَّل الآن؟ */
-export function getActiveDownload(animeId: number, ep: number): ActiveDownload | null {
-  return _active.get(makeDownloadId(animeId, ep)) ?? null;
-}
-
-/** هل هذا الموقع يُحمَّل الآن لهذه الحلقة؟ */
-export function getActiveSiteDownload(animeId: number, ep: number, site: string): ActiveDownload | null {
-  const d = _active.get(makeDownloadId(animeId, ep));
-  return (d && d.site === site) ? d : null;
-}
-
-/** إلغاء تنزيل جارٍ بالمعرّف */
-export function cancelActiveDownload(id: string): void {
-  const d = _active.get(id);
-  if (d) {
-    d.cancelFn();
-    _active.delete(id);
-    _notify();
+function notifyListeners(): void {
+  for (const listener of listeners) {
+    try { listener(); } catch {}
   }
+  persistActive();
 }
 
-/**
- * بدء تنزيل في الخلفية — يستمر عند التنقل بين الشاشات.
- * تنزيل واحد فقط لكل حلقة في وقت واحد (الجديد يلغي القديم).
- * يُنزِّل الترجمة تلقائياً بعد الفيديو إذا توفّر subtitleUrl.
- */
-export async function startGlobalDownload(params: {
-  animeId: number;
-  ep: number;
-  title: string;
-  cover: string;
-  site: string;
-  quality: string;
-  url: string;
-  authToken?: string | null;
-  subtitleUrl?: string;
-}): Promise<void> {
-  await ensureDownloadsDir();
+async function configureNotifications(): Promise<boolean> {
+  if (Platform.OS === "web") return false;
+  if (!notificationsReady) {
+    notificationsReady = (async () => {
+      try {
+        Notifications.setNotificationHandler({
+          handleNotification: async () => ({
+            shouldShowBanner: true,
+            shouldShowList: true,
+            shouldPlaySound: false,
+            shouldSetBadge: false,
+          }),
+        });
+        const current = await Notifications.getPermissionsAsync();
+        const permission = current.granted
+          ? current
+          : await Notifications.requestPermissionsAsync();
+        if (!permission.granted) return false;
+        if (Platform.OS === "android") {
+          await Notifications.setNotificationChannelAsync(NOTIFICATION_CHANNEL, {
+            name: "تنزيلات Nova",
+            importance: Notifications.AndroidImportance.LOW,
+            sound: null,
+            vibrationPattern: [0, 0],
+            enableVibrate: false,
+            showBadge: false,
+          });
+        }
+        return true;
+      } catch {
+        return false;
+      }
+    })();
+  }
+  return notificationsReady;
+}
 
-  const id = makeDownloadId(params.animeId, params.ep);
-  const localPath = DOWNLOADS_DIR + id + ".mp4";
+async function dismissDownloadNotification(id: string): Promise<void> {
+  if (!(await configureNotifications())) return;
+  try { await Notifications.dismissNotificationAsync(id); } catch {}
+  try { await Notifications.cancelScheduledNotificationAsync(id); } catch {}
+}
 
-  // ألغِ أي تنزيل سابق لنفس الحلقة
-  cancelActiveDownload(id);
-  try { await FileSystem.deleteAsync(localPath, { idempotent: true }); } catch {}
+function updateDownloadNotification(entry: RuntimeDownload, force = false): void {
+  if (Platform.OS === "web") return;
+  const now = Date.now();
+  if (!force && now - entry.notificationAt < 2000) return;
+  entry.notificationAt = now;
+  if (entry.notificationPromise) return;
 
-  let aborted = false;
-  const reqHeaders: Record<string, string> = {
+  const percent = Math.round(entry.progress * 100);
+  entry.notificationPromise = (async () => {
+    if (!(await configureNotifications())) return;
+    const identifier = `nova-download-${entry.id}`;
+    try { await Notifications.dismissNotificationAsync(identifier); } catch {}
+    try {
+      await Notifications.scheduleNotificationAsync({
+        identifier,
+        content: {
+          title: `جاري تنزيل الحلقة ${entry.ep}`,
+          body: `${entry.title} (${percent}%)`,
+          sticky: true,
+          autoDismiss: false,
+          sound: false,
+          color: "#8B5CF6",
+          data: { downloadId: entry.id },
+        },
+        trigger: null,
+      });
+    } catch {}
+  })().finally(() => {
+    entry.notificationPromise = undefined;
+  });
+}
+
+function completeNotification(entry: RuntimeDownload, error = false): void {
+  if (Platform.OS === "web") return;
+  void (async () => {
+    await dismissDownloadNotification(entry.id);
+    if (error && await configureNotifications()) {
+      try {
+        await Notifications.scheduleNotificationAsync({
+          identifier: `nova-download-${entry.id}`,
+          content: {
+            title: "Nova Anime",
+            body: `فشل تنزيل ${entry.title} — الحلقة ${entry.ep}`,
+            sticky: true,
+            autoDismiss: false,
+            sound: false,
+            color: "#EF4444",
+          },
+          trigger: null,
+        });
+      } catch {}
+    }
+  })();
+}
+
+export function subscribeActiveDownloads(listener: () => void): () => void {
+  listeners.add(listener);
+  return () => listeners.delete(listener);
+}
+
+export function getActiveDownloadsSnapshot(): ActiveDownload[] {
+  return Array.from(active.values()).map(({ params: _params, resumable: _resumable, resumeState: _resumeState, notificationAt: _notificationAt, notificationPromise: _notificationPromise, localPath: _localPath, ...item }) => item);
+}
+
+export function getActiveDownload(animeId: number, ep: number): ActiveDownload | null {
+  return getActiveDownloadsSnapshot().find((entry) => entry.id === makeDownloadId(animeId, ep)) ?? null;
+}
+
+export function getActiveSiteDownload(animeId: number, ep: number, site: string): ActiveDownload | null {
+  return getActiveDownloadsSnapshot().find(
+    (entry) => entry.animeId === animeId && entry.ep === ep && entry.site === site,
+  ) ?? null;
+}
+
+export function cancelActiveDownload(id: string): void {
+  const entry = active.get(id);
+  if (!entry) return;
+  entry.cancelFn();
+  active.delete(id);
+  void dismissDownloadNotification(id);
+  notifyListeners();
+}
+
+function wait(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function requestHeaders(params: StartDownloadParams): Record<string, string> {
+  const headers: Record<string, string> = {
     "X-Nova-Client": "nova-anime-mobile-v1",
     "User-Agent": "NovaAnime/1.0 (Expo; Mobile)",
   };
-  if (params.authToken) reqHeaders["X-App-Token"] = params.authToken;
+  if (params.authToken) headers["X-App-Token"] = params.authToken;
+  return headers;
+}
 
-  /* كاشف التعليق: إذا لم تتغير bytesWritten لـ 90 ثانية → خطأ */
-  let lastProgressBytes = -1;
-  let lastProgressTime  = Date.now();
-  const STALL_MS = 90_000;
-  let stallTimer: ReturnType<typeof setTimeout> | null = null;
+async function saveCompleted(entry: RuntimeDownload): Promise<void> {
+  let fileSize = 0;
+  const info = await FileSystem.getInfoAsync(entry.localPath, { size: true });
+  if (info.exists) fileSize = (info as { size?: number }).size ?? 0;
+  if (fileSize <= 0) throw new Error("ملف التنزيل فارغ");
 
-  function resetStallTimer() {
-    if (stallTimer) clearTimeout(stallTimer);
-    stallTimer = setTimeout(() => {
-      if (aborted) return;
-      const entry = _active.get(id);
-      if (entry && entry.status === "downloading") {
-        aborted = true;
-        resumable.cancelAsync().catch(() => {});
-        FileSystem.deleteAsync(localPath, { idempotent: true }).catch(() => {});
-        entry.status = "error";
-        _notify();
-        /* لا تُحذف بطاقة الخطأ تلقائياً — المستخدم يضغط × ليُغلقها */
-      }
-    }, STALL_MS);
+  let subtitleLocalPath: string | undefined;
+  if (entry.params.subtitleUrl) {
+    const subtitlePath = `${entry.localPath.slice(0, -4)}.vtt`;
+    try {
+      const subtitle = await FileSystem.downloadAsync(entry.params.subtitleUrl, subtitlePath);
+      if (subtitle.status >= 200 && subtitle.status < 300) subtitleLocalPath = subtitlePath;
+    } catch {}
   }
 
-  const resumable = FileSystem.createDownloadResumable(
-    params.url,
-    localPath,
-    { headers: reqHeaders },
-    (progress) => {
-      if (aborted) return;
-      const { totalBytesWritten, totalBytesExpectedToWrite } = progress;
-      const pct = totalBytesExpectedToWrite > 0
-        ? Math.min(totalBytesWritten / totalBytesExpectedToWrite, 1)
-        : 0;
-      const entry = _active.get(id);
-      if (entry) {
-        entry.progress = pct;
-        entry.bytesWritten = totalBytesWritten;
-        entry.totalBytes = totalBytesExpectedToWrite;
-        _notify();
-      }
-      // إعادة ضبط كاشف التعليق إذا تقدّم التنزيل
-      if (totalBytesWritten !== lastProgressBytes) {
-        lastProgressBytes = totalBytesWritten;
-        lastProgressTime  = Date.now();
-        resetStallTimer();
-      }
-    }
-  );
-
-  const cancelFn = () => {
-    aborted = true;
-    if (stallTimer) clearTimeout(stallTimer);
-    resumable.cancelAsync().catch(() => {});
-    FileSystem.deleteAsync(localPath, { idempotent: true }).catch(() => {});
+  const item: DownloadItem = {
+    id: entry.id,
+    animeId: entry.animeId,
+    ep: entry.ep,
+    title: entry.title,
+    cover: entry.cover,
+    site: entry.site,
+    quality: entry.quality,
+    localPath: entry.localPath,
+    subtitleLocalPath,
+    fileSize,
+    downloadedAt: Date.now(),
   };
+  const existing = await getDownloads();
+  await saveDownloads([...existing.filter((old) => old.id !== entry.id), item]);
+}
 
-  _active.set(id, {
+function makeResumable(
+  entry: RuntimeDownload,
+  resumeState?: ResumeState,
+): FileSystem.DownloadResumable {
+  const state = resumeState;
+  return FileSystem.createDownloadResumable(
+    state?.url ?? entry.params.url,
+    state?.fileUri ?? entry.localPath,
+    state?.options ?? {
+      headers: requestHeaders(entry.params),
+      sessionType: FileSystem.FileSystemSessionType.BACKGROUND,
+    },
+    (progress) => {
+      entry.bytesWritten = Math.max(0, progress.totalBytesWritten);
+      entry.totalBytes = progress.totalBytesExpectedToWrite;
+      entry.progress = progress.totalBytesExpectedToWrite > 0
+        ? Math.min(progress.totalBytesWritten / progress.totalBytesExpectedToWrite, 1)
+        : 0;
+      /* Android's resumable API represents resumeData as the byte offset.
+         Persist it on every callback so a process restart can append to the
+         partial file even when the native task could not produce pause data. */
+      if (Platform.OS === "android") {
+        entry.resumeState = {
+          url: entry.params.url,
+          fileUri: entry.localPath,
+          options: {
+            headers: requestHeaders(entry.params),
+            sessionType: FileSystem.FileSystemSessionType.BACKGROUND,
+          },
+          resumeData: String(entry.bytesWritten),
+        };
+      }
+      notifyListeners();
+      updateDownloadNotification(entry);
+    },
+    state?.resumeData,
+  );
+}
+
+async function runDownload(entry: RuntimeDownload): Promise<void> {
+  let resumeState = entry.resumeState;
+
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt += 1) {
+    if (!active.has(entry.id)) return;
+    entry.status = "downloading";
+    entry.retryCount = attempt;
+    entry.resumable = makeResumable(entry, resumeState);
+    entry.resumeState = entry.resumable.savable();
+    notifyListeners();
+    updateDownloadNotification(entry, true);
+
+    try {
+      const result = await entry.resumable.downloadAsync();
+      if (!active.has(entry.id)) return;
+      if (!result || result.status < 200 || result.status >= 300) {
+        throw new Error(`HTTP ${result?.status ?? "?"}`);
+      }
+      await saveCompleted(entry);
+      active.delete(entry.id);
+      await dismissDownloadNotification(entry.id);
+      notifyListeners();
+      return;
+    } catch (error) {
+      if (!active.has(entry.id)) return;
+      /* Keep the resumable state and partial file. A subsequent attempt starts
+         from the saved native resume state instead of deleting the download. */
+      try {
+        const paused = await entry.resumable.pauseAsync();
+        resumeState = paused;
+        entry.resumeState = paused;
+      } catch {
+        /* On Android the progress callback already contains the byte offset.
+           Do not replace that durable offset with the initial savable state
+           when the native task has already failed and cannot be paused again. */
+        resumeState = entry.resumeState ?? entry.resumable.savable();
+        entry.resumeState = resumeState;
+      }
+      if (attempt >= MAX_RETRIES) {
+        entry.status = "error";
+        notifyListeners();
+        completeNotification(entry, true);
+        return;
+      }
+      entry.retryCount = attempt + 1;
+      notifyListeners();
+      updateDownloadNotification(entry, true);
+      await wait(1000 * (attempt + 1));
+      void error;
+    }
+  }
+}
+
+function enqueueDownload(params: StartDownloadParams, resumeState?: ResumeState, localPath?: string): void {
+  const id = makeDownloadId(params.animeId, params.ep);
+  cancelActiveDownload(id);
+
+  const entry: RuntimeDownload = {
     id,
     animeId: params.animeId,
     ep: params.ep,
@@ -309,74 +491,100 @@ export async function startGlobalDownload(params: {
     progress: 0,
     bytesWritten: 0,
     totalBytes: 0,
+    retryCount: 0,
     status: "downloading",
-    cancelFn,
-  });
-  _notify();
-  resetStallTimer(); // ابدأ كاشف التعليق فوراً
+    params,
+    localPath: localPath ?? localPathFor(params),
+    resumeState,
+    notificationAt: 0,
+    cancelFn: () => {
+      entry.resumable?.cancelAsync().catch(() => {});
+      FileSystem.deleteAsync(entry.localPath, { idempotent: true }).catch(() => {});
+      FileSystem.deleteAsync(`${entry.localPath.slice(0, -4)}.vtt`, { idempotent: true }).catch(() => {});
+    },
+  };
+  active.set(id, entry);
+  notifyListeners();
+  void ensureDirectoryFor(entry.localPath)
+    .then(() => configureNotifications())
+    .then(() => runDownload(entry))
+    .catch(() => {
+      if (!active.has(id)) return;
+      entry.status = "error";
+      notifyListeners();
+      completeNotification(entry, true);
+    });
+}
 
-  // تشغيل بشكل غير متزامن — لا يوقف التنقل بين الشاشات
-  (async () => {
-    try {
-      const result = await resumable.downloadAsync();
-      if (aborted) return;
+/**
+ * Starts a download without tying it to a component lifecycle.
+ * The task uses expo-file-system's background session and is retried up to 3
+ * times while retaining the partial file and AsyncStorage resume state.
+ */
+export async function startGlobalDownload(params: StartDownloadParams): Promise<void> {
+  await ensureDownloadsDir();
+  const existing = await getDownloads();
+  const existingItem = existing.find((entry) => entry.id === makeDownloadId(params.animeId, params.ep));
+  if (existingItem) {
+    await deleteDownload(existingItem);
+  }
+  enqueueDownload(params);
+}
 
-      if (!result || result.status < 200 || result.status >= 300) {
-        throw new Error(`فشل التنزيل (${result?.status ?? "?"})`);
-      }
+/**
+ * Rebuilds resumable tasks saved before an app restart. Completed files are
+ * left alone; incomplete files are automatically retried when the app opens.
+ */
+export async function restoreInterruptedDownloads(): Promise<void> {
+  try {
+    const raw = await AsyncStorage.getItem(ACTIVE_PENDING_KEY);
+    if (!raw) return;
+    const records = JSON.parse(raw) as PersistedActive[];
+    await AsyncStorage.removeItem(ACTIVE_PENDING_KEY);
+    if (!Array.isArray(records)) return;
 
-      // تنزيل الترجمة إذا توفّرت (KW وغيرها)
-      let subtitleLocalPath: string | undefined;
-      if (params.subtitleUrl) {
-        const subPath = DOWNLOADS_DIR + id + ".vtt";
-        try {
-          const subRes = await FileSystem.downloadAsync(params.subtitleUrl, subPath, {});
-          if (subRes.status >= 200 && subRes.status < 300) {
-            subtitleLocalPath = subPath;
+    const completed = await getDownloads();
+    for (const record of records) {
+      if (!record?.id || completed.some((item) => item.id === record.id)) continue;
+      if (!record.url || !record.localPath) continue;
+      enqueueDownload({
+        animeId: record.animeId,
+        ep: record.ep,
+        title: record.title,
+        cover: record.cover,
+        site: record.site,
+        quality: record.quality,
+        url: record.url,
+        subtitleUrl: record.subtitleUrl,
+      }, record.resumeState ?? (Platform.OS === "android" && record.bytesWritten > 0
+        ? {
+            url: record.url,
+            fileUri: record.localPath,
+            options: {
+              headers: requestHeaders({
+                animeId: record.animeId,
+                ep: record.ep,
+                title: record.title,
+                cover: record.cover,
+                site: record.site,
+                quality: record.quality,
+                url: record.url,
+                subtitleUrl: record.subtitleUrl,
+              }),
+              sessionType: FileSystem.FileSystemSessionType.BACKGROUND,
+            },
+            resumeData: String(record.bytesWritten),
           }
-        } catch {}
-      }
-
-      // قياس حجم الملف
-      let fileSize = 0;
-      try {
-        const fi = await FileSystem.getInfoAsync(localPath, { size: true });
-        if (fi.exists) fileSize = (fi as any).size ?? 0;
-      } catch {}
-
-      const item: DownloadItem = {
-        id,
-        animeId: params.animeId,
-        ep: params.ep,
-        title: params.title,
-        cover: params.cover,
-        site: params.site,
-        quality: params.quality,
-        localPath,
-        subtitleLocalPath,
-        fileSize,
-        downloadedAt: Date.now(),
-      };
-
-      if (stallTimer) clearTimeout(stallTimer);
-      const existing = await getDownloads();
-      await saveDownloads([...existing.filter(i => i.id !== id), item]);
-
-      _active.delete(id);
-      _notify();
-    } catch (e: any) {
-      if (stallTimer) clearTimeout(stallTimer);
-      if (aborted) {
-        _active.delete(id);
-        _notify();
-        return;
-      }
-      const entry = _active.get(id);
-      if (entry) {
-        entry.status = "error";
-        /* لا تُزيل تلقائياً — المستخدم يضغط × ليُغلق بطاقة الخطأ */
-        _notify();
-      }
+        : undefined), record.localPath);
     }
-  })();
+  } catch {}
+}
+
+/* Keep the service warm at module load. This does not attach any screen. */
+if (Platform.OS !== "web") {
+  AppState.addEventListener("change", (state) => {
+    if (state === "active") {
+      for (const entry of active.values()) updateDownloadNotification(entry, true);
+    }
+  });
 }

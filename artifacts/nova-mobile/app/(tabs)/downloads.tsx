@@ -13,6 +13,7 @@ import {
   subscribeActiveDownloads, getActiveDownloadsSnapshot, cancelActiveDownload,
 } from "@/utils/downloadManager";
 import { RiftPlayer, PlayerSource } from "@/components/RiftPlayer";
+import * as FileSystem from "expo-file-system";
 
 // ── Spinner ───────────────────────────────────────────────────────────────
 
@@ -189,7 +190,6 @@ function LocalPlayer({ item, onClose }: { item: DownloadItem; onClose: () => voi
       episode={item.ep}
       onBack={onClose}
       onError={onClose}
-      offline
     />
   );
 }
@@ -304,6 +304,25 @@ export default function DownloadsScreen() {
     cancelActiveDownload(id);
   }, []);
 
+  const handlePlay = useCallback(async (item: DownloadItem) => {
+    try {
+      const info = await FileSystem.getInfoAsync(item.localPath, { size: true });
+      const size = (info as { size?: number }).size ?? 0;
+      if (!info.exists || size <= 0) {
+        Alert.alert(
+          "التنزيل غير مكتمل",
+          "لم يكتمل حفظ الحلقة على الجهاز، لذلك لن يتم فتح شاشة بيضاء.",
+        );
+        await deleteDownload(item);
+        await loadDownloads();
+        return;
+      }
+      setPlayingItem({ ...item, localPath: info.uri || item.localPath });
+    } catch {
+      Alert.alert("التنزيل غير مكتمل", "تعذر قراءة ملف الحلقة المحفوظ.");
+    }
+  }, [loadDownloads]);
+
   /* تشغيل محلي — Modal كاملة الشاشة حتى لا يظهر شريط التنقل السفلي */
   const handleClosePlayer = useCallback(() => setPlayingItem(null), []);
 
@@ -372,7 +391,7 @@ export default function DownloadsScreen() {
                   <DownloadCard
                     key={item.id}
                     item={item}
-                    onPlay={setPlayingItem}
+                    onPlay={handlePlay}
                     onDelete={handleDelete}
                   />
                 ))}
