@@ -2452,13 +2452,8 @@ interface UnifiedSource {
 const SHIRAYUKI_API_BASE = process.env.SHIRAYUKI_API_URL || "http://127.0.0.1:3100";
 
 const SHIRAYUKI_PROVIDER_SITE: Record<string, string> = {
-  animepahe: "shirayuki_animepahe",
   anikoto: "shirayuki_anikoto",
-  reanime: "shirayuki_reanime",
-  animedao: "shirayuki_animedao",
-  allanime: "shirayuki_allanime",
   animix: "shirayuki_animix",
-  senshi: "shirayuki_senshi",
 };
 
 async function getShirayukiSources(
@@ -12379,13 +12374,8 @@ router.get("/anime/fetch-source", async (req, res) => {
     "sanime",        // 🎌 MP4 مباشر عربي مدبلج ✅
     "anslayer",      // ⚡ بحث متوازٍ + dedupe للطلبات + cache
     "animeify",      // 🎬 أنمي فاي — MEGA/Streamtape/MediaFire ✅ (مُعاد تفعيله)
-    "shirayuki_animepahe", // 🌸 Shirayuki · Pahe
     "shirayuki_anikoto",   // 🌸 Shirayuki · Anikoto
-    "shirayuki_reanime",   // 🌸 Shirayuki · ReAnime
-    "shirayuki_animedao",  // 🌸 Shirayuki · AnimeDao
-    "shirayuki_allanime",  // 🌸 Shirayuki · AllAni
     "shirayuki_animix",    // 🌸 Shirayuki · AnimiX
-    "shirayuki_senshi",    // 🌸 Shirayuki · Senshi
     // ── معطّلة 2026-08-02 بطلب المستخدم (تحسين التزامن) ──────────────────────
     // "anineko":    متوسط (3s) — معطّل
     // "anikoto":    معطّل
@@ -12552,20 +12542,10 @@ router.get("/anime/fetch-source", async (req, res) => {
       case "sanime":       (await race(getSAnimeSources(title, english, ep, titleVariants),               20_000, [])).forEach(collectSrc); break;
       case "anifox":       (await race(getAnifoxSources(title, english, ep, titleVariants, anilistId),    30_000, [])).forEach(collectSrc); break;
       case "anslayer":     (await race(getAnimeSlayerSources(title, english, ep, anslayerId, titleAr), 45_000, [])).forEach(collectSrc); break;
-      case "shirayuki_animepahe":
-        (await race(getShirayukiSources(anilistId, ep, "animepahe"), 24_000, [])).forEach(collectSrc); break;
       case "shirayuki_anikoto":
         (await race(getShirayukiSources(anilistId, ep, "anikoto"), 24_000, [])).forEach(collectSrc); break;
-      case "shirayuki_reanime":
-        (await race(getShirayukiSources(anilistId, ep, "reanime"), 24_000, [])).forEach(collectSrc); break;
-      case "shirayuki_animedao":
-        (await race(getShirayukiSources(anilistId, ep, "animedao"), 24_000, [])).forEach(collectSrc); break;
-      case "shirayuki_allanime":
-        (await race(getShirayukiSources(anilistId, ep, "allanime"), 24_000, [])).forEach(collectSrc); break;
       case "shirayuki_animix":
         (await race(getShirayukiSources(anilistId, ep, "animix"), 24_000, [])).forEach(collectSrc); break;
-      case "shirayuki_senshi":
-        (await race(getShirayukiSources(anilistId, ep, "senshi"), 24_000, [])).forEach(collectSrc); break;
       case "ristoanime":   (await race(getRistoAnimeSources(title, english, ep),          22_000, [])).forEach(collectSrc); break;
       // case "allmanga": معطّل 2026-07-17
       // case "nflixmovies_anim": حُذف 2026-07-30 — 0 مصادر (ميت)
