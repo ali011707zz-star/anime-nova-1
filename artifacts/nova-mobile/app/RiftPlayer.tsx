@@ -1498,7 +1498,11 @@ export function RiftPlayer({
   if (!currentSrc) return null;
 
   return (
-    <View ref={rootViewRef} style={[s.root, isFlipped && { transform: [{ rotate: "180deg" }] }]}>
+    <View
+      ref={rootViewRef}
+      collapsable={false}
+      style={[s.root, isFlipped && { transform: [{ rotate: "180deg" }] }]}
+    >
       <StatusBar hidden />
       {/* ── Video ── */}
       <Video
@@ -1509,6 +1513,8 @@ export function RiftPlayer({
         volume={isMuted ? 0 : 1}
         rate={rate}
         repeat={false}
+        useTextureView={true}
+        secureView={false}
         resizeMode={contentFit === "cover" ? "cover" : contentFit === "fill" ? "stretch" : "contain"}
         controls={false}
         progressUpdateInterval={500}
