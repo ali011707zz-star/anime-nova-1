@@ -12,6 +12,20 @@ expo-env.d.ts
 # Native
 ios/
 android/
+# Keep the source of the local Expo module tracked. The broad rules above
+# intentionally ignore generated native projects, not hand-written module code.
+!modules/
+!modules/nova-media3/
+!modules/nova-media3/android/
+!modules/nova-media3/android/src/
+!modules/nova-media3/android/src/main/
+!modules/nova-media3/android/src/main/java/
+!modules/nova-media3/android/src/main/java/expo/
+!modules/nova-media3/android/src/main/java/expo/modules/
+!modules/nova-media3/android/src/main/java/expo/modules/novamedia3/
+!modules/nova-media3/android/src/main/java/expo/modules/novamedia3/NovaVolumeModule.kt
+!modules/nova-media3/ios/
+!modules/nova-media3/ios/NovaVolumeModule.swift
 *.orig.*
 *.jks
 *.p8

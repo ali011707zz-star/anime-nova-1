@@ -13,7 +13,7 @@ import * as Brightness from "expo-brightness";
 import { VolumeManager } from "../lib/volume-manager";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  ActivityIndicator, Animated, Dimensions, Easing, I18nManager, Platform,
+  ActivityIndicator, Alert, Animated, Dimensions, Easing, I18nManager, Linking, Platform,
   PanResponder, Pressable, ScrollView, StyleSheet, Text, View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -1320,11 +1320,10 @@ export function RiftPlayer({
   /* ─── Screenshot ─── */
   const rootViewRef = useRef<View>(null);
   const takeScreenshot = useCallback(async () => {
-    setScreenshotFlash(true);
-    if (screenshotFlashTimerRef.current) clearTimeout(screenshotFlashTimerRef.current);
-    screenshotFlashTimerRef.current = setTimeout(() => { screenshotFlashTimerRef.current = null; setScreenshotFlash(false); }, 600);
-    
-    if (Platform.OS === "web") return; // web browsers block video frame capture
+    if (Platform.OS === "web") {
+      Alert.alert("لقطة الشاشة", "هذه الميزة متاحة على الهاتف فقط.");
+      return;
+    }
     try {
       const VS = await import("react-native-view-shot" as any);
       /* VideoView قد يُرسم كسطح native لا يستطيع captureRef قراءته على بعض
@@ -1336,9 +1335,34 @@ export function RiftPlayer({
         uri = await VS.captureScreen({ format: "jpg", quality: 0.95, result: "tmpfile" });
       }
       const ML = await import("expo-media-library" as any);
-      const perm = await ML.requestPermissionsAsync({ writeOnly: true });
-      if (perm.status === "granted") await ML.saveToLibraryAsync(uri);
-    } catch {}
+      const perm = await ML.requestPermissionsAsync(true);
+      if (perm.status !== "granted") {
+        if (perm.canAskAgain === false) {
+          Alert.alert(
+            "الإذن مطلوب",
+            "اسمح للتطبيق بالوصول إلى الصور من إعدادات الهاتف لحفظ لقطة الشاشة.",
+            [
+              { text: "إلغاء", style: "cancel" },
+              { text: "فتح الإعدادات", onPress: () => Linking.openSettings().catch(() => {}) },
+            ],
+          );
+        } else {
+          Alert.alert("لم تُحفظ اللقطة", "يلزم السماح بحفظ الصور أولاً.");
+        }
+        return;
+      }
+      await ML.saveToLibraryAsync(uri);
+      setScreenshotFlash(true);
+      if (screenshotFlashTimerRef.current) clearTimeout(screenshotFlashTimerRef.current);
+      screenshotFlashTimerRef.current = setTimeout(() => {
+        screenshotFlashTimerRef.current = null;
+        if (aliveRef.current) setScreenshotFlash(false);
+      }, 600);
+      Alert.alert("تم الحفظ", "حُفظت لقطة الشاشة في معرض الصور.");
+    } catch (error) {
+      console.warn("[RiftPlayer] screenshot failed", error);
+      Alert.alert("تعذّر حفظ اللقطة", "حاول مرة أخرى بعد منح إذن الصور.");
+    }
   }, []);
 
   /* ─── Orientation change listener ─── */
