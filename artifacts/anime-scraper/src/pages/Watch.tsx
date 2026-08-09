@@ -184,7 +184,13 @@ const SCRAPER_DEFS: { site: string; name: string; desc: string; tag: string; aud
   // vidbolt_anim: معطّل 2026-07-30 — كود محفوظ (10 مصادر HLS)، يُفعَّل لاحقاً
   { site: "sanime",           name: "سـAnime",       desc: "عربي · MP4 مباشر",        tag: "SA", isArabic: true },
   { site: "anifox",           name: "ANIFOX",        desc: "Archive · MediaFire · MP4Upload · Uqload", tag: "FX", isArabic: true },
-  { site: "shirayuki",        name: "Shirayuki",     desc: "AniKuro · HLS مباشر", tag: "SY" },
+  { site: "shirayuki_animepahe", name: "Shirayuki · Pahe",     desc: "AniKuro · Pahe",     tag: "SY-AP" },
+  { site: "shirayuki_anikoto",   name: "Shirayuki · Anikoto",  desc: "AniKuro · Anikoto",  tag: "SY-AK" },
+  { site: "shirayuki_reanime",   name: "Shirayuki · ReAnime",  desc: "AniKuro · ReAnime",  tag: "SY-RA" },
+  { site: "shirayuki_animedao",  name: "Shirayuki · AnimeDao", desc: "AniKuro · AnimeDao", tag: "SY-AD" },
+  { site: "shirayuki_allanime",  name: "Shirayuki · AllAni",   desc: "AniKuro · AllAni",   tag: "SY-AA" },
+  { site: "shirayuki_animix",    name: "Shirayuki · AnimiX",   desc: "AniKuro · AnimiX",   tag: "SY-AX" },
+  { site: "shirayuki_senshi",   name: "Shirayuki · Senshi",   desc: "AniKuro · Senshi",   tag: "SY-SE" },
   // akoam: حُذف 2026-07-28 — كان يستخدم hopxBrowserExtract (browser) على كل طلب
 ];
 
@@ -201,20 +207,38 @@ const STATIC_PICKER_WEB: Record<WebQualityKey, { site: string; tag: string }[]> 
     { site: "sanime",       tag: "SA" },
     { site: "animeify",     tag: "AF" },
     { site: "anifox",       tag: "FX" },
-    { site: "shirayuki",    tag: "SY" },
+    { site: "shirayuki_animepahe", tag: "SY-AP" },
+    { site: "shirayuki_anikoto",   tag: "SY-AK" },
+    { site: "shirayuki_reanime",   tag: "SY-RA" },
+    { site: "shirayuki_animedao",  tag: "SY-AD" },
+    { site: "shirayuki_allanime",  tag: "SY-AA" },
+    { site: "shirayuki_animix",    tag: "SY-AX" },
+    { site: "shirayuki_senshi",   tag: "SY-SE" },
   ],
   "720p": [
     { site: "animewitcher", tag: "AW" },
     { site: "sanime",       tag: "SA" },
     { site: "animeify",     tag: "AF" },
     { site: "anifox",       tag: "FX" },
-    { site: "shirayuki",    tag: "SY" },
+    { site: "shirayuki_animepahe", tag: "SY-AP" },
+    { site: "shirayuki_anikoto",   tag: "SY-AK" },
+    { site: "shirayuki_reanime",   tag: "SY-RA" },
+    { site: "shirayuki_animedao",  tag: "SY-AD" },
+    { site: "shirayuki_allanime",  tag: "SY-AA" },
+    { site: "shirayuki_animix",    tag: "SY-AX" },
+    { site: "shirayuki_senshi",   tag: "SY-SE" },
   ],
   "480p": [
     { site: "animewitcher", tag: "AW" },
     { site: "animeify",     tag: "AF" },
     { site: "anifox",       tag: "FX" },
-    { site: "shirayuki",    tag: "SY" },
+    { site: "shirayuki_animepahe", tag: "SY-AP" },
+    { site: "shirayuki_anikoto",   tag: "SY-AK" },
+    { site: "shirayuki_reanime",   tag: "SY-RA" },
+    { site: "shirayuki_animedao",  tag: "SY-AD" },
+    { site: "shirayuki_allanime",  tag: "SY-AA" },
+    { site: "shirayuki_animix",    tag: "SY-AX" },
+    { site: "shirayuki_senshi",   tag: "SY-SE" },
   ],
 };
 const WEB_Q_KEYS: WebQualityKey[] = ["1080p", "720p", "480p"];
@@ -234,7 +258,8 @@ const PICKER_QMAP: Record<WebQualityKey, Quality> = {
 const PRIORITY_FETCH_SITES = new Set([
   "kawaii", "animewitcher", "dulo_anim", "anineko", "anikoto",
   "animeify", "sanime", "anifox",  // ANIFOX: Archive/MediaFire/MP4Upload/Uqload
-  "shirayuki",
+  "shirayuki_animepahe", "shirayuki_anikoto", "shirayuki_reanime",
+  "shirayuki_animedao", "shirayuki_allanime", "shirayuki_animix", "shirayuki_senshi",
   // shahiid/animelek: أُزيلت — معطّلة بطلب المستخدم 2026-07-14
 ]);
 
@@ -3284,7 +3309,9 @@ export default function WatchPage() {
       animeify:     28000,  // backend = 18s + هامش للاستخراج/الشبكة
       sanime:       28000,  // backend = 20s + هامش للبحث وinfo
       anifox:       38000,  // backend = 30s + هامش لتحميل الكتالوج أول مرة
-      shirayuki:    26000,  // Shirayuki servers + source extraction
+      shirayuki_animepahe: 26000, shirayuki_anikoto: 26000,
+      shirayuki_reanime: 26000, shirayuki_animedao: 26000,
+      shirayuki_allanime: 26000, shirayuki_animix: 26000, shirayuki_senshi: 26000,
       // mitanime: محذوف 2026-07-27
       // reanime: محذوف 2026-07-24
       // hianime: معطّل 2026-07-30

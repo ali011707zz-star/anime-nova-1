@@ -2451,9 +2451,20 @@ interface UnifiedSource {
 // our own HLS proxy URL.
 const SHIRAYUKI_API_BASE = process.env.SHIRAYUKI_API_URL || "http://127.0.0.1:3100";
 
+const SHIRAYUKI_PROVIDER_SITE: Record<string, string> = {
+  animepahe: "shirayuki_animepahe",
+  anikoto: "shirayuki_anikoto",
+  reanime: "shirayuki_reanime",
+  animedao: "shirayuki_animedao",
+  allanime: "shirayuki_allanime",
+  animix: "shirayuki_animix",
+  senshi: "shirayuki_senshi",
+};
+
 async function getShirayukiSources(
   anilistId: number | undefined,
   ep: number,
+  onlyProvider?: string,
 ): Promise<UnifiedSource[]> {
   if (!anilistId) return [];
 
@@ -2474,7 +2485,8 @@ async function getShirayukiSources(
     };
     const providers = (serversPayload.data?.servers?.sub || []).filter(
       (provider): provider is { name?: string; nameId?: string; provider?: string } =>
-        Boolean(provider.provider || provider.nameId),
+        Boolean(provider.provider || provider.nameId) &&
+        (!onlyProvider || (provider.provider || provider.nameId) === onlyProvider),
     );
     if (!providers.length) return [];
 
@@ -2506,7 +2518,9 @@ async function getShirayukiSources(
           url: directUrl,
           quality,
           qualityRank: rank,
-          site: "shirayuki",
+          // Keep each AniKuro provider as its own Nova source. The picker uses
+          // this value for independent status, caching, and playback buttons.
+          site: SHIRAYUKI_PROVIDER_SITE[server] || `shirayuki_${server}`,
           directUrl,
           directType: "hls" as const,
           ...(subtitleUrl ? { subtitleUrl } : {}),
@@ -12365,7 +12379,13 @@ router.get("/anime/fetch-source", async (req, res) => {
     "sanime",        // 🎌 MP4 مباشر عربي مدبلج ✅
     "anslayer",      // ⚡ بحث متوازٍ + dedupe للطلبات + cache
     "animeify",      // 🎬 أنمي فاي — MEGA/Streamtape/MediaFire ✅ (مُعاد تفعيله)
-    "shirayuki",     // 🌸 Shirayuki/AniKuro المحلي على VPS
+    "shirayuki_animepahe", // 🌸 Shirayuki · Pahe
+    "shirayuki_anikoto",   // 🌸 Shirayuki · Anikoto
+    "shirayuki_reanime",   // 🌸 Shirayuki · ReAnime
+    "shirayuki_animedao",  // 🌸 Shirayuki · AnimeDao
+    "shirayuki_allanime",  // 🌸 Shirayuki · AllAni
+    "shirayuki_animix",    // 🌸 Shirayuki · AnimiX
+    "shirayuki_senshi",    // 🌸 Shirayuki · Senshi
     // ── معطّلة 2026-08-02 بطلب المستخدم (تحسين التزامن) ──────────────────────
     // "anineko":    متوسط (3s) — معطّل
     // "anikoto":    معطّل
@@ -12532,7 +12552,20 @@ router.get("/anime/fetch-source", async (req, res) => {
       case "sanime":       (await race(getSAnimeSources(title, english, ep, titleVariants),               20_000, [])).forEach(collectSrc); break;
       case "anifox":       (await race(getAnifoxSources(title, english, ep, titleVariants, anilistId),    30_000, [])).forEach(collectSrc); break;
       case "anslayer":     (await race(getAnimeSlayerSources(title, english, ep, anslayerId, titleAr), 45_000, [])).forEach(collectSrc); break;
-      case "shirayuki":    (await race(getShirayukiSources(anilistId, ep), 24_000, [])).forEach(collectSrc); break;
+      case "shirayuki_animepahe":
+        (await race(getShirayukiSources(anilistId, ep, "animepahe"), 24_000, [])).forEach(collectSrc); break;
+      case "shirayuki_anikoto":
+        (await race(getShirayukiSources(anilistId, ep, "anikoto"), 24_000, [])).forEach(collectSrc); break;
+      case "shirayuki_reanime":
+        (await race(getShirayukiSources(anilistId, ep, "reanime"), 24_000, [])).forEach(collectSrc); break;
+      case "shirayuki_animedao":
+        (await race(getShirayukiSources(anilistId, ep, "animedao"), 24_000, [])).forEach(collectSrc); break;
+      case "shirayuki_allanime":
+        (await race(getShirayukiSources(anilistId, ep, "allanime"), 24_000, [])).forEach(collectSrc); break;
+      case "shirayuki_animix":
+        (await race(getShirayukiSources(anilistId, ep, "animix"), 24_000, [])).forEach(collectSrc); break;
+      case "shirayuki_senshi":
+        (await race(getShirayukiSources(anilistId, ep, "senshi"), 24_000, [])).forEach(collectSrc); break;
       case "ristoanime":   (await race(getRistoAnimeSources(title, english, ep),          22_000, [])).forEach(collectSrc); break;
       // case "allmanga": معطّل 2026-07-17
       // case "nflixmovies_anim": حُذف 2026-07-30 — 0 مصادر (ميت)
