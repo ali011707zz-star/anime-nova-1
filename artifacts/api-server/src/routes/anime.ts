@@ -2445,6 +2445,82 @@ interface UnifiedSource {
   headers?: Record<string, string>;
 }
 
+// ── Shirayuki / AniKuro bridge ─────────────────────────────────────────────
+// Shirayuki runs as a separate local service on the VPS (pm2: shirayuki-api).
+// Keep its network address server-side; the browser/mobile clients only receive
+// our own HLS proxy URL.
+const SHIRAYUKI_API_BASE = process.env.SHIRAYUKI_API_URL || "http://127.0.0.1:3100";
+
+async function getShirayukiSources(
+  anilistId: number | undefined,
+  ep: number,
+): Promise<UnifiedSource[]> {
+  if (!anilistId) return [];
+
+  try {
+    const ref = `${anilistId}:${ep}`;
+    const serversResponse = await fetch(
+      `${SHIRAYUKI_API_BASE}/api/v2/anikuro/episode/servers?animeEpisodeId=${encodeURIComponent(ref)}`,
+      { signal: AbortSignal.timeout(8_000) },
+    );
+    if (!serversResponse.ok) return [];
+    const serversPayload = await serversResponse.json() as {
+      data?: {
+        servers?: {
+          sub?: Array<{ name?: string; nameId?: string; provider?: string }>;
+          dub?: Array<{ name?: string; nameId?: string; provider?: string }>;
+        };
+      };
+    };
+    const providers = (serversPayload.data?.servers?.sub || []).filter(
+      (provider): provider is { name?: string; nameId?: string; provider?: string } =>
+        Boolean(provider.provider || provider.nameId),
+    );
+    if (!providers.length) return [];
+
+    const results = await Promise.allSettled(providers.map(async (provider) => {
+      const server = provider.nameId || provider.provider || "";
+      const sourceResponse = await fetch(
+        `${SHIRAYUKI_API_BASE}/api/v2/anikuro/episode/sources?animeEpisodeId=${encodeURIComponent(ref)}&server=${encodeURIComponent(server)}&category=sub`,
+        { signal: AbortSignal.timeout(18_000) },
+      );
+      if (!sourceResponse.ok) return [];
+      const payload = await sourceResponse.json() as {
+        data?: {
+          sources?: Array<{
+            m3u8?: string; type?: string; quality?: string; referer?: string;
+          }>;
+          tracks?: Array<{ file?: string; label?: string }>;
+        };
+      };
+      const tracks = payload.data?.tracks || [];
+      return (payload.data?.sources || []).flatMap((source) => {
+        if (!source.m3u8) return [];
+        const referer = source.referer || "https://anikuro.ru/";
+        const directUrl = `/api/anime/hls-proxy?url=${encodeURIComponent(source.m3u8)}&ref=${encodeURIComponent(referer)}`;
+        const quality = source.quality || "HD";
+        const rank = qualityRank(quality) || 9;
+        const subtitleUrl = tracks.find(track => track.file)?.file;
+        return [{
+          name: `Shirayuki · ${provider.name || server}`,
+          url: directUrl,
+          quality,
+          qualityRank: rank,
+          site: "shirayuki",
+          directUrl,
+          directType: "hls" as const,
+          ...(subtitleUrl ? { subtitleUrl } : {}),
+          headers: { Referer: referer },
+        } satisfies UnifiedSource];
+      });
+    }));
+
+    return results.flatMap(result => result.status === "fulfilled" ? result.value : []);
+  } catch {
+    return [];
+  }
+}
+
 const SKIP_EXTRACT_HOSTS = [
   "drive.google","mega.nz","mediafire.com",
   "ok.ru","odnoklassniki.ru","youtube.com","youtu.be",
@@ -12289,6 +12365,7 @@ router.get("/anime/fetch-source", async (req, res) => {
     "sanime",        // 🎌 MP4 مباشر عربي مدبلج ✅
     "anslayer",      // ⚡ بحث متوازٍ + dedupe للطلبات + cache
     "animeify",      // 🎬 أنمي فاي — MEGA/Streamtape/MediaFire ✅ (مُعاد تفعيله)
+    "shirayuki",     // 🌸 Shirayuki/AniKuro المحلي على VPS
     // ── معطّلة 2026-08-02 بطلب المستخدم (تحسين التزامن) ──────────────────────
     // "anineko":    متوسط (3s) — معطّل
     // "anikoto":    معطّل
@@ -12455,6 +12532,7 @@ router.get("/anime/fetch-source", async (req, res) => {
       case "sanime":       (await race(getSAnimeSources(title, english, ep, titleVariants),               20_000, [])).forEach(collectSrc); break;
       case "anifox":       (await race(getAnifoxSources(title, english, ep, titleVariants, anilistId),    30_000, [])).forEach(collectSrc); break;
       case "anslayer":     (await race(getAnimeSlayerSources(title, english, ep, anslayerId, titleAr), 45_000, [])).forEach(collectSrc); break;
+      case "shirayuki":    (await race(getShirayukiSources(anilistId, ep), 24_000, [])).forEach(collectSrc); break;
       case "ristoanime":   (await race(getRistoAnimeSources(title, english, ep),          22_000, [])).forEach(collectSrc); break;
       // case "allmanga": معطّل 2026-07-17
       // case "nflixmovies_anim": حُذف 2026-07-30 — 0 مصادر (ميت)

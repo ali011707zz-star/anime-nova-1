@@ -74,12 +74,14 @@ const SITE_TAG: Record<string, string> = {
   animetime: "AT", animepahe: "AP", dulo_anim: "DL",
   faselhd_db: "FH",
   notorrent: "NO", sanime: "SA", anipm: "PM", anslayer: "AS",
+  shirayuki: "SY",
   akwam: "AQ",
 };
 
 /* ── اسم عرض لكل موقع في منتقي المصادر ── */
 const SITE_LABEL: Record<string, string> = {
   kawaii: "Kawaii", animewitcher: "AnimeWitcher",
+  shirayuki: "Shirayuki",
   dulo_anim: "Dulo",
   anikototv: "AniKotoTV", mitanime: "MITanime", vidfast: "VidFast",
   vidlink_anim: "VidLink", animekai: "AnimeKai",
@@ -112,6 +114,7 @@ const SITE_DESC: Record<string, string> = {
   faselhd_db: "عربي مترجم · GitHub DB", animetime: "عربي مترجم · مباشر",
   notorrent: "IMDB · مصادر متعددة", sanime: "عربي مدبلج/مترجم · MP4",
   anslayer: "مشغلات خارجية · MixDrop/MediaFire",
+  shirayuki: "AniKuro · HLS مباشر",
   akwam: "عربي مترجم · MP4 مباشر",
 };
 function getSiteDesc(site: string): string {
@@ -244,17 +247,20 @@ const STATIC_PICKER: Record<QualityKey, { site: string; name: string; tag: strin
     { site: "sanime",       name: "سـAnime",      tag: "SA" },
     { site: "animeify",     name: "أنمي فاي",    tag: "AF" },
     { site: "anifox",       name: "ANIFOX",      tag: "FX" },
+    { site: "shirayuki",    name: "Shirayuki",   tag: "SY" },
   ],
   "720p": [
     { site: "animewitcher", name: "AnimeWitcher", tag: "AW" },
     { site: "sanime",       name: "سـAnime",      tag: "SA" },
     { site: "animeify",     name: "أنمي فاي",    tag: "AF" },
     { site: "anifox",       name: "ANIFOX",      tag: "FX" },
+    { site: "shirayuki",    name: "Shirayuki",   tag: "SY" },
   ],
   "480p": [
     { site: "animewitcher", name: "AnimeWitcher", tag: "AW" },
     { site: "animeify",     name: "أنمي فاي",    tag: "AF" },
     { site: "anifox",       name: "ANIFOX",      tag: "FX" },
+    { site: "shirayuki",    name: "Shirayuki",   tag: "SY" },
   ],
 };
 
@@ -287,6 +293,7 @@ const Q_KEY_SUB: Record<QualityKey, string> = {
 const SITE_TIMEOUT_MS = 28_000;
 const SITE_TIMEOUT_MAP: Record<string, number> = {
   anifox:       35_000,
+  shirayuki:    26_000,
   animewitcher: 38_000,
   animeify:     22_000,
   sanime:       18_000,

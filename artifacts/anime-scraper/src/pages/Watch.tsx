@@ -184,6 +184,7 @@ const SCRAPER_DEFS: { site: string; name: string; desc: string; tag: string; aud
   // vidbolt_anim: معطّل 2026-07-30 — كود محفوظ (10 مصادر HLS)، يُفعَّل لاحقاً
   { site: "sanime",           name: "سـAnime",       desc: "عربي · MP4 مباشر",        tag: "SA", isArabic: true },
   { site: "anifox",           name: "ANIFOX",        desc: "Archive · MediaFire · MP4Upload · Uqload", tag: "FX", isArabic: true },
+  { site: "shirayuki",        name: "Shirayuki",     desc: "AniKuro · HLS مباشر", tag: "SY" },
   // akoam: حُذف 2026-07-28 — كان يستخدم hopxBrowserExtract (browser) على كل طلب
 ];
 
@@ -200,17 +201,20 @@ const STATIC_PICKER_WEB: Record<WebQualityKey, { site: string; tag: string }[]> 
     { site: "sanime",       tag: "SA" },
     { site: "animeify",     tag: "AF" },
     { site: "anifox",       tag: "FX" },
+    { site: "shirayuki",    tag: "SY" },
   ],
   "720p": [
     { site: "animewitcher", tag: "AW" },
     { site: "sanime",       tag: "SA" },
     { site: "animeify",     tag: "AF" },
     { site: "anifox",       tag: "FX" },
+    { site: "shirayuki",    tag: "SY" },
   ],
   "480p": [
     { site: "animewitcher", tag: "AW" },
     { site: "animeify",     tag: "AF" },
     { site: "anifox",       tag: "FX" },
+    { site: "shirayuki",    tag: "SY" },
   ],
 };
 const WEB_Q_KEYS: WebQualityKey[] = ["1080p", "720p", "480p"];
@@ -230,6 +234,7 @@ const PICKER_QMAP: Record<WebQualityKey, Quality> = {
 const PRIORITY_FETCH_SITES = new Set([
   "kawaii", "animewitcher", "dulo_anim", "anineko", "anikoto",
   "animeify", "sanime", "anifox",  // ANIFOX: Archive/MediaFire/MP4Upload/Uqload
+  "shirayuki",
   // shahiid/animelek: أُزيلت — معطّلة بطلب المستخدم 2026-07-14
 ]);
 
@@ -3279,6 +3284,7 @@ export default function WatchPage() {
       animeify:     28000,  // backend = 18s + هامش للاستخراج/الشبكة
       sanime:       28000,  // backend = 20s + هامش للبحث وinfo
       anifox:       38000,  // backend = 30s + هامش لتحميل الكتالوج أول مرة
+      shirayuki:    26000,  // Shirayuki servers + source extraction
       // mitanime: محذوف 2026-07-27
       // reanime: محذوف 2026-07-24
       // hianime: معطّل 2026-07-30
