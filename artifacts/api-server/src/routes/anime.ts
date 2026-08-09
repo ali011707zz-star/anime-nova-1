@@ -5050,6 +5050,7 @@ async function getTopCimaaSources(
 // ════════════════════════════════════════════════════════════════════
 let _animeifyCreds: { base: string; token: string; ts: number } | null = null;
 let _animeifyFallbackCreds: { base: string; token: string } | null = null; // last known good
+const _animeifyInFlight = new Map<string, Promise<UnifiedSource[]>>();
 const ANIMEIFY_CREDS_TTL = 12 * 60 * 60_000; // 12 hours — token نادراً ما يتغير، تجنّب طلب الخادم عند كل سحب
 
 function invalidateAnimeifyCreds() { _animeifyCreds = null; }
@@ -5160,7 +5161,7 @@ async function extractMediafireDirect(serverId: string): Promise<string | null> 
   } catch { return null; }
 }
 
-async function getAnimeifySources(title: string, english: string | null, ep: number, variants: string[] = []): Promise<UnifiedSource[]> {
+async function getAnimeifySourcesUncached(title: string, english: string | null, ep: number, variants: string[] = []): Promise<UnifiedSource[]> {
   try {
     const creds = await getAnimeifyCreds();
     if (!creds) return [];
@@ -5170,7 +5171,9 @@ async function getAnimeifySources(title: string, english: string | null, ep: num
     const queries = titleQueries(title, english, variants);
     let best: { score: number; item: any } = { score: 0, item: null };
 
-    const searchCombinations = queries.flatMap(q =>
+    // Four title variants are enough for the API's fuzzy search. More variants
+    // multiplied the same four upstream requests and made AF slower under load.
+    const searchCombinations = queries.slice(0, 4).flatMap(q =>
       (["SERIES", "MOVIE"] as const).flatMap(type =>
         (["English", "Arabic"] as const).map(lang => ({ q, type, lang }))
       )
@@ -5241,37 +5244,29 @@ async function getAnimeifySources(title: string, english: string | null, ep: num
     const sources: UnifiedSource[] = [];
 
     // ── FileMoon (FDLink) → HLS مباشر → مشغّل داخلي بدون إعلانات ──
+    // Start this extraction while MediaFire links are being resolved below.
+    // FileMoon is the slowest AF branch on a cold cache.
     const fdLink = String(epData.FDLink || "").trim();
-    if (fdLink) {
-      const filemoonUrl = `https://filemoon.sx/e/${fdLink}`;
-      try {
-        const extracted = await extractVideoDeep(filemoonUrl, filemoonUrl);
-        if (extracted?.url) {
-          const proxyUrl = `/api/anime/hls-proxy?url=${encodeURIComponent(extracted.url)}&ref=${encodeURIComponent(filemoonUrl)}`;
-          sources.push({
-            name: "فايل مون · 1080p",
-            url: filemoonUrl,
-            quality: "FHD",
-            qualityRank: 30,
-            site: "animeify",
-            directUrl: proxyUrl,
-            directType: "hls",
-          });
-        } else {
-          // AF fallback: FileMoon extraction failed → isEmbed:true حتى يُعرض في الفرونتند كـ embed
-          // (directType:"embed" بدون isEmbed:true يُرسَل للمشغّل المباشر فيفشل لأنه صفحة HTML)
-          sources.push({
-            name: "فايل مون · embed",
-            url: filemoonUrl,
-            quality: "HD",
-            qualityRank: 8,
-            site: "animeify",
-            directUrl: filemoonUrl,
-            isEmbed: true,
-          });
-        }
-      } catch {}
-    }
+    const filemoonTask = fdLink
+      ? (async (): Promise<UnifiedSource | null> => {
+          const filemoonUrl = `https://filemoon.sx/e/${fdLink}`;
+          try {
+            const extracted = await extractVideoDeep(filemoonUrl, filemoonUrl);
+            if (extracted?.url) {
+              const proxyUrl = `/api/anime/hls-proxy?url=${encodeURIComponent(extracted.url)}&ref=${encodeURIComponent(filemoonUrl)}`;
+              return {
+                name: "فايل مون · 1080p", url: filemoonUrl, quality: "FHD",
+                qualityRank: 30, site: "animeify", directUrl: proxyUrl, directType: "hls",
+              };
+            }
+            // AF fallback: FileMoon extraction failed → iframe only.
+            return {
+              name: "فايل مون · embed", url: filemoonUrl, quality: "HD",
+              qualityRank: 8, site: "animeify", directUrl: filemoonUrl, isEmbed: true,
+            };
+          } catch { return null; }
+        })()
+      : Promise.resolve(null);
 
     // ── MediaFire MP4 (FRFhdQ=1080p, FRLink=720p, FRLowQ=480p) → مشغّل داخلي مباشر ──
     const mfSlots = [
@@ -5296,6 +5291,9 @@ async function getAnimeifySources(title: string, english: string | null, ep: num
         directType: "mp4",
       });
     }));
+
+    const filemoonSource = await filemoonTask;
+    if (filemoonSource) sources.push(filemoonSource);
 
     // ── SendVid (SVLink) → embed iframe ──────────────────────────────────────
     // ⚠️ sendvid.com يُصدر MP4 موقَّعاً بـ IP+TTL-4h، لكن SRC_TTL=6h
@@ -5499,6 +5497,22 @@ async function getAnimeifySources(title: string, english: string | null, ep: num
 
     return sources;
   } catch { return []; }
+}
+
+/** Share one AF lookup between the stream picker and background downloads. */
+async function getAnimeifySources(
+  title: string, english: string | null, ep: number, variants: string[] = [],
+): Promise<UnifiedSource[]> {
+  const key = `animeify:${normalize(english || title).replace(/\s+/g, "-")}:${ep}`;
+  const active = _animeifyInFlight.get(key);
+  if (active) return active;
+  const promise = getAnimeifySourcesUncached(title, english, ep, variants);
+  _animeifyInFlight.set(key, promise);
+  try {
+    return await promise;
+  } finally {
+    if (_animeifyInFlight.get(key) === promise) _animeifyInFlight.delete(key);
+  }
 }
 
 
@@ -11420,6 +11434,7 @@ const SANIME_API  = "https://app.sanime.net/function/h10.php?page=";
 const SANIME_CDN  = "https://server.sanime.net/Video";
 const SANIME_UA   = "IBRAHIMSEVEN";
 const _sanimeCacheMap = new Map<string, { sources: UnifiedSource[]; ts: number }>();
+const _sanimeInFlight = new Map<string, Promise<UnifiedSource[]>>();
 const SANIME_TTL  = 4 * 3_600_000;
 
 // يستخرج رقم الموسم من العنوان (Season 4 / 4th Season / S4) — الافتراضي 1
@@ -11434,7 +11449,7 @@ function sanimeSeasonNum(s: string | null | undefined): number {
   return 1;
 }
 
-async function getSAnimeSources(
+async function getSAnimeSourcesUncached(
   title: string, english: string | null, ep: number, variants: string[] = [],
 ): Promise<UnifiedSource[]> {
   const ck = `sanime:${normalize(english || title).replace(/\s+/g, "-")}:${ep}`;
@@ -11513,81 +11528,29 @@ async function getSAnimeSources(
       return out;
     }
 
-    // 5. Direct CDN URL — HEAD checks بالتوازي لتوفير الوقت (5ث بدل 9ث)
+    // 5. Direct CDN URLs.
+    //
+    // The info endpoint already confirmed that this episode exists. Waiting for
+    // two ranged CDN probes here used to add up to 4.5s before the source could
+    // reach the picker, and HEAD/Range is intermittently filtered by SAnime's
+    // CDN even when normal playback works. Return both quality candidates
+    // immediately; the VPS video proxy still preserves Range and the player can
+    // fall back to SD if the old HD file is unavailable.
     const directHD = `${SANIME_CDN}/${bestId}/${ep}.mp4`;
     const directSD = `${SANIME_CDN}/${bestId}/${ep}SD.mp4`;
     const SANIME_REF = "https://app.sanime.net/";
     const proxiedHD = `/api/anime/video-proxy?url=${encodeURIComponent(directHD)}&ref=${encodeURIComponent(SANIME_REF)}`;
     const proxiedSD = `/api/anime/video-proxy?url=${encodeURIComponent(directSD)}&ref=${encodeURIComponent(SANIME_REF)}`;
-    let usedDirect = false;
-    const probe = async (url: string): Promise<boolean> => {
-      try {
-        // One ranged GET is faster and more reliable than HEAD + fallback:
-        // SAnime's CDN intermittently rejects HEAD while serving normal GETs.
-        const range = await fetchSourceWithRetry(url, {
-          headers: { "User-Agent": SANIME_UA, Range: "bytes=0-0" },
-        }, 4_500, 1);
-        const ok = !!range && [200, 206, 416].includes(range.status);
-        await range?.body?.cancel().catch(() => {});
-        return ok;
-      } catch { return false; }
-    };
-    try {
-      const [hdOk, sdOk] = await Promise.all([
-        probe(directHD),
-        probe(directSD),
-      ]);
-      if (hdOk) {
-        out.push({ name: "SAnime · FHD", url: directHD, quality: "FHD", qualityRank: 14, site: "sanime", directUrl: proxiedHD, directType: "mp4", headers: { Referer: SANIME_REF }, corsOk: false });
-        usedDirect = true;
-      }
-      if (sdOk) {
-        out.push({ name: "SAnime · HD",  url: directSD, quality: "HD",  qualityRank: 9,  site: "sanime", directUrl: proxiedSD, directType: "mp4", headers: { Referer: SANIME_REF }, corsOk: false });
-        usedDirect = true;
-      }
-    } catch { /* timeout — نجرب openAnd */ }
-
-    // 6. openAnd fallback
-    if (!usedDirect) {
-      // بتقنية browser: btoa(unescape(encodeURIComponent(JSON))) = Buffer utf8→base64
-      const epB64 = Buffer.from(JSON.stringify(epObj), "utf8").toString("base64");
-      const openRes = await fetch(`${SANIME_API}openAnd&id=${encodeURIComponent(epB64)}`, {
-        headers: { "User-Agent": SANIME_UA, "Accept": "application/json" },
-        signal: AbortSignal.timeout(8_000),
-      });
-      if (openRes.ok) {
-        const links: any = await openRes.json().catch(() => null);
-        const hdUrl = links?.hd;
-        const sdUrl = links?.sd;
-        const isBad = (u: string) => !u || u.includes("sample-videos.com");
-        if (!isBad(hdUrl)) {
-          out.push({
-            name:        "SAnime · FHD",
-            url:         hdUrl,
-            quality:     "FHD",
-            qualityRank: 14,
-            site:        "sanime",
-            directUrl:   `/api/anime/video-proxy?url=${encodeURIComponent(hdUrl)}&ref=${encodeURIComponent(SANIME_REF)}`,
-            directType:  "mp4",
-            headers:     { Referer: SANIME_REF },
-            corsOk:      false,
-          });
-        }
-        if (!isBad(sdUrl)) {
-          out.push({
-            name:        "SAnime · HD",
-            url:         sdUrl,
-            quality:     "HD",
-            qualityRank: 9,
-            site:        "sanime",
-            directUrl:   `/api/anime/video-proxy?url=${encodeURIComponent(sdUrl)}&ref=${encodeURIComponent(SANIME_REF)}`,
-            directType:  "mp4",
-            headers:     { Referer: SANIME_REF },
-            corsOk:      false,
-          });
-        }
-      }
-    }
+    out.push({
+      name: "SAnime · FHD", url: directHD, quality: "FHD", qualityRank: 14,
+      site: "sanime", directUrl: proxiedHD, directType: "mp4",
+      headers: { Referer: SANIME_REF }, corsOk: false,
+    });
+    out.push({
+      name: "SAnime · HD", url: directSD, quality: "HD", qualityRank: 9,
+      site: "sanime", directUrl: proxiedSD, directType: "mp4",
+      headers: { Referer: SANIME_REF }, corsOk: false,
+    });
 
     console.log(`[SAnime] id=${bestId} ep${ep} → ${out.length} sources (match=${bestScore.toFixed(2)})`);
     if (out.length) _sanimeCacheMap.set(ck, { sources: out, ts: Date.now() });
@@ -11595,6 +11558,22 @@ async function getSAnimeSources(
     console.warn("[SAnime]", e?.message);
   }
   return out;
+}
+
+/** Share one upstream SA lookup between stream, picker and download requests. */
+async function getSAnimeSources(
+  title: string, english: string | null, ep: number, variants: string[] = [],
+): Promise<UnifiedSource[]> {
+  const key = `sanime:${normalize(english || title).replace(/\s+/g, "-")}:${ep}`;
+  const active = _sanimeInFlight.get(key);
+  if (active) return active;
+  const promise = getSAnimeSourcesUncached(title, english, ep, variants);
+  _sanimeInFlight.set(key, promise);
+  try {
+    return await promise;
+  } finally {
+    if (_sanimeInFlight.get(key) === promise) _sanimeInFlight.delete(key);
+  }
 }
 
 // ════════════════════════════════════════════════════════════════════
@@ -14517,7 +14496,13 @@ async function serveMediaVPS(
   req: import("express").Request,
   res: import("express").Response,
 ): Promise<void> {
-  const hdrs: Record<string, string> = { ...BASE_HDRS, Accept: "*/*" };
+  // Keep media responses byte-for-byte and let the client control buffering.
+  // Compression adds latency and can interfere with Range-based resume.
+  const hdrs: Record<string, string> = {
+    ...BASE_HDRS,
+    Accept: "*/*",
+    "Accept-Encoding": "identity",
+  };
   // بعض CDNs مثل stormvv.vodvidl.site تُضمِّن headers مطلوبة في ?headers={...}
   // نستخرجها ونُضيفها للطلب، ونحذفها من URL الفعلي قبل الإرسال
   try {
@@ -14535,6 +14520,9 @@ async function serveMediaVPS(
   if (ref) { hdrs.Referer = ref; try { hdrs.Origin = new URL(ref).origin; } catch {} }
   const range = req.headers.range;
   if (range) hdrs.Range = range;
+  if (req.headers["if-range"]) hdrs["If-Range"] = String(req.headers["if-range"]);
+  if (req.headers["if-none-match"]) hdrs["If-None-Match"] = String(req.headers["if-none-match"]);
+  if (req.headers["if-modified-since"]) hdrs["If-Modified-Since"] = String(req.headers["if-modified-since"]);
   const upstreamAbort = new AbortController();
   /* The timeout is only for establishing the upstream response. Applying
      AbortSignal.timeout() directly to fetch also aborts a healthy MP4 body
