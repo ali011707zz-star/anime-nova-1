@@ -677,7 +677,7 @@ export function RiftPlayer({
     if (initialPosition && initialPosition > 5) {
       try { p.currentTime = initialPosition; } catch {}
     }
-    /* Buffer tuning — يوازن بين سرعة البدء وتجنب native crash من OOM
+    /* Buffer tuning — هامش أمامي أكبر لتقليل التقطيع، مع تجنّب buffer ضخم
        ⚠️ bufferForPlaybackMs=150 كان يُسبّب crash فوري في ExoPlayer على بعض
           الأجهزة لأنه يحاول decode الفيديو قبل أن يجمع Media3 بيانات كافية.
        ⚠️ maxBufferMs=30000 كان يُسبّب OOM على الأجهزة منخفضة الذاكرة.
@@ -685,13 +685,13 @@ export function RiftPlayer({
           المُشغَّل في الذاكرة → يُضاعف استهلاك الذاكرة. */
     try {
       (p as any).bufferOptions = {
-        preferredForwardBufferDuration: 10, // iOS: مسبق 10ث (كافٍ وآمن)
-        waitsToMinimizeStalling: false,     // iOS: ابدأ فوراً بدون انتظار
-        minBufferMs: 2000,                  // Android: ابدأ بعد 2ث (آمن للـ codec)
-        maxBufferMs: 15000,                 // Android: 15ث كافٍ ← يقلل OOM
-        bufferForPlaybackMs: 1500,          // Android: ابدأ بعد 1.5ث ← يمنع crash
-        bufferForPlaybackAfterRebufferMs: 2000, // Android: استأنف بعد 2ث
-        backBufferDurationMs: 5000,         // Android: احتفظ بـ5ث فقط خلف ← يقلل OOM
+        preferredForwardBufferDuration: 20, // iOS: مسبق 20ث لتقليل التقطيع
+        waitsToMinimizeStalling: true,      // iOS: لا تبدأ قبل buffer آمن
+        minBufferMs: 3000,                  // Android: الحد الأدنى قبل التشغيل
+        maxBufferMs: 20000,                 // Android: هامش 20ث بدون OOM مبالغ
+        bufferForPlaybackMs: 2000,          // Android: بداية آمنة للـ codec
+        bufferForPlaybackAfterRebufferMs: 4500, // Android: استئناف بعد 4.5ث
+        backBufferDurationMs: 3000,         // Android: ذاكرة خلفية صغيرة
       };
     } catch {}
   });
