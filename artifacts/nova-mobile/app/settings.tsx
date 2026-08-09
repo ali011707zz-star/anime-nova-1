@@ -964,7 +964,6 @@ export default function SettingsScreen() {
 
   const { toast, show: showToast } = useToast();
   const [notifs, setNotifs] = useState(true);
-  const [animSubOn, setAnimSubOn] = useState(true);
   const [showReport, setShowReport] = useState(false);
   const [showAuth, setShowAuth] = useState(false);
   const [showPremium, setShowPremium] = useState(false);
@@ -974,7 +973,6 @@ export default function SettingsScreen() {
 
   useEffect(() => {
     AsyncStorage.getItem(AUTH_KEY).then(v => { if (v) { try { setCurrentUser(JSON.parse(v)); } catch {} } });
-    AsyncStorage.getItem("pref-anim-sub").then(v => { if (v !== null) setAnimSubOn(v !== "false"); });
   }, []);
 
   const handleLogout = () => {
@@ -1244,43 +1242,6 @@ export default function SettingsScreen() {
               <Switch
                 value={notifs}
                 onValueChange={setNotifs}
-                trackColor={{ false: "rgba(255,255,255,0.1)", true: "rgba(139,92,246,0.7)" }}
-                thumbColor="#fff"
-                ios_backgroundColor="rgba(255,255,255,0.1)"
-              />
-            </Pressable>
-          </Card>
-        </View>
-
-        {/* ══════ إعدادات التشغيل ══════ */}
-        <SectionHeader title="إعدادات التشغيل" icon="▶️" />
-        <View style={{ paddingHorizontal: 16 }}>
-          <Card>
-            <Pressable
-              onPress={async () => {
-                const next = !animSubOn;
-                setAnimSubOn(next);
-                await AsyncStorage.setItem("pref-anim-sub", String(next));
-                showToast(next ? "الترجمة العربية مفعّلة" : "الترجمة موقفة");
-              }}
-              style={ts.navRow}
-            >
-              <View style={[ts.navIcon, { backgroundColor: animSubOn ? "rgba(139,92,246,0.10)" : "rgba(255,255,255,0.05)" }]}>
-                <Ionicons name="text" size={16} color={animSubOn ? "#a78bfa" : "rgba(255,255,255,0.3)"} />
-              </View>
-              <View style={[ts.navText, { alignItems: "flex-end" }]}>
-                <Text style={ts.navLabel}>الترجمة العربية (أنيميشن)</Text>
-                <Text style={ts.navSub}>
-                  {animSubOn ? "مفعّلة · تظهر الترجمة العربية تلقائياً" : "موقفة · لا تظهر أي ترجمة"}
-                </Text>
-              </View>
-              <Switch
-                value={animSubOn}
-                onValueChange={async (v) => {
-                  setAnimSubOn(v);
-                  await AsyncStorage.setItem("pref-anim-sub", String(v));
-                  showToast(v ? "الترجمة العربية مفعّلة" : "الترجمة موقفة");
-                }}
                 trackColor={{ false: "rgba(255,255,255,0.1)", true: "rgba(139,92,246,0.7)" }}
                 thumbColor="#fff"
                 ios_backgroundColor="rgba(255,255,255,0.1)"
