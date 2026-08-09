@@ -52,6 +52,17 @@ interface Src {
   headers?: Record<string, string>;
 }
 
+const SUBTITLE_DISABLED_SITES = new Set([
+  "animeify", "af",
+  "animewitcher", "aw",
+  "sanime", "sa",
+  "anifox", "fx",
+]);
+
+function subtitlesDisabledForSite(site?: string): boolean {
+  return SUBTITLE_DISABLED_SITES.has(String(site || "").trim().toLowerCase());
+}
+
 /* ── Site → 2-letter tag (mirrors web SCRAPER_DEFS tags exactly) ── */
 const SITE_TAG: Record<string, string> = {
   shahiid: "SH", animelek: "EK", animedar: "AD", okanime: "OK",
@@ -642,7 +653,9 @@ export default function WatchScreen() {
     const proxyUrl = ensureVpsProxy(rawUrl, headers, base);
 
     /* ترجمة: استخدم subtitleUrl المصدر أولاً ثم الترجمة العالمية */
-    const subRaw     = best.subtitleUrl || globalSubUrl;
+    const subRaw     = subtitlesDisabledForSite(site)
+      ? undefined
+      : (best.subtitleUrl || globalSubUrl);
     const subtitleUrl = subRaw ? resolveUrl(subRaw, base) : undefined;
 
     const token = await getAuthToken();
@@ -842,6 +855,7 @@ export default function WatchScreen() {
         headers,
         label: `سيرفر · ${getSiteTag(s.site || "")}`,
         quality: getSrcQuality(s),
+        site: s.site,
         subtitleUrl: undefined, // مخفية في نوفا موبايل
         isArabic: ARABIC_SITES.has(s.site || ""),
         wantsSmartSub: !ARABIC_SITES.has(s.site || ""),

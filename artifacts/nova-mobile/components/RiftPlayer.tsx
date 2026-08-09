@@ -27,6 +27,7 @@ export type PlayerSource = {
   url: string;
   label: string;
   quality: "1080p FHD" | "720p HD" | "360p SD";
+  site?: string;
   subtitleUrl?: string;
   isArabic?: boolean;
   /** المزوّد يحتاج ترجمة ذكية تلقائية (مصدر ياباني بدون ترجمة عربية مدمجة) */
@@ -87,6 +88,18 @@ type Props = {
   /** يُستدعى عند فشل جميع المصادر المتاحة */
   onError?: () => void;
 };
+
+/* هذه المصادر لا يجب أن تظهر معها ترجمة تلقائية أو ترجمة محفوظة من مصدر آخر. */
+const SUBTITLE_DISABLED_SITES = new Set([
+  "animeify", "af",
+  "animewitcher", "aw",
+  "sanime", "sa",
+  "anifox", "fx",
+]);
+
+function subtitlesDisabledForSite(site?: string): boolean {
+  return SUBTITLE_DISABLED_SITES.has(String(site || "").trim().toLowerCase());
+}
 
 /* ─── Constants ─── */
 const SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 2];
@@ -404,6 +417,7 @@ export function RiftPlayer({
   );
   const [srcIdx, setSrcIdx]         = useState(safeInitialIndex);
   const currentSrc                  = playableSources[srcIdx];
+  const subtitlesDisabled = subtitlesDisabledForSite(currentSrc?.site);
   const aliveRef                    = useRef(true);
   const terminalErrorRef            = useRef(false);
   /* switchGenerationRef: يُزاد عند كل استدعاء switchSource. أحداث player.replace()
@@ -1055,7 +1069,9 @@ export function RiftPlayer({
 
   /* ─── Subtitle cue lookup via rAF ─── */
   /* Vidstack technique: pre-sort once → binary search O(log n) at 60fps */
-  const effectiveCues = (subCues?.length ? subCues : loadedCues);
+  const effectiveCues = subtitlesDisabled
+    ? []
+    : (subCues?.length ? subCues : loadedCues);
   useEffect(() => {
     if (subRafRef.current) { cancelAnimationFrame(subRafRef.current); subRafRef.current = null; }
     if (!effectiveCues.length || !subOn) { setActiveCue(null); return; }
@@ -1073,7 +1089,7 @@ export function RiftPlayer({
     };
     subRafRef.current = requestAnimationFrame(tick);
     return () => { if (subRafRef.current) { cancelAnimationFrame(subRafRef.current); subRafRef.current = null; } };
-  }, [effectiveCues, subOn, player]);
+  }, [effectiveCues, subOn, player, subtitlesDisabled]);
 
   /* ─── VTT loading when source changes ─── */
   /* Cache priority:
@@ -1082,6 +1098,19 @@ export function RiftPlayer({
      2. Network fetch
   */
   useEffect(() => {
+    if (subtitlesDisabled) {
+      setLoadedCues([]);
+      setSubOn(false);
+      setAutoSubSource(null);
+      subtitleAbortRef.current?.abort();
+      subtitleAbortRef.current = null;
+      if (subtitleTimeoutRef.current) {
+        clearTimeout(subtitleTimeoutRef.current);
+        subtitleTimeoutRef.current = null;
+      }
+      return;
+    }
+
     const rawUrl = currentSrc?.subtitleUrl;
     if (!rawUrl) {
       setLoadedCues([]);
@@ -1249,12 +1278,18 @@ export function RiftPlayer({
       }
       if (aliveRef.current) setSubLoading(false);
     };
-  }, [currentSrc?.subtitleUrl, srcIdx, anilistId, episode, subLang]); // eslint-disable-line
+  }, [currentSrc?.subtitleUrl, currentSrc?.site, srcIdx, anilistId, episode, subLang, subtitlesDisabled]); // eslint-disable-line
 
   /* ─── Auto-enable subtitles when source provides a subtitle URL ─── */
   useEffect(() => {
-    if (currentSrc?.subtitleUrl) setSubOn(true);
-  }, [currentSrc?.subtitleUrl]);
+    if (subtitlesDisabled) {
+      setSubOn(false);
+      setLoadedCues([]);
+      setAutoSubSource(null);
+    } else if (currentSrc?.subtitleUrl) {
+      setSubOn(true);
+    }
+  }, [currentSrc?.subtitleUrl, subtitlesDisabled]);
 
   /* ─── Screen orientation lock to landscape ─── */
   useEffect(() => {
@@ -1374,6 +1409,12 @@ export function RiftPlayer({
 
   /* ─── Auto-fetch subtitles via subtitle-tracks API (wyzie.ru + SubDL + HiAnime) ─── */
   useEffect(() => {
+    if (subtitlesDisabled) {
+      setLoadedCues([]);
+      setAutoSubSource(null);
+      setSubOn(false);
+      return;
+    }
     if (!anilistId || !episode) return;
     if (subCues?.length) return; // already provided as prop
     const ctrl = new AbortController(); // يُلغى عند unmount أو تغيير الحلقة
@@ -1449,7 +1490,7 @@ export function RiftPlayer({
       finally { if (!ctrl.signal.aborted) setSubLoading(false); }
     })();
     return () => { ctrl.abort(); setSubLoading(false); };
-  }, [anilistId, episode, subLang]); // eslint-disable-line
+  }, [anilistId, episode, subLang, srcIdx, subtitlesDisabled]); // eslint-disable-line
 
   /* ─── Subtitle panel slide animation ─── */
   useEffect(() => {
@@ -2338,7 +2379,7 @@ export function RiftPlayer({
             );
             // في RTL: زر الإغلاق أول (يظهر أقصى اليمين) ← الصحيح للعربية
             // في LTR: زر الإغلاق آخر (يظهر أقصى اليمين) ← الصحيح للـ web
-            const ccBtn = (
+            const ccBtn = subtitlesDisabled ? null : (
               <Pressable
                 onPress={() => setShowSubPanel(true)}
                 style={[s.topIconBtn, s.topCCBtn, subOn && s.topCCBtnActive]}
@@ -2622,7 +2663,7 @@ export function RiftPlayer({
       {/* ════════════════════════════════════════
           SUBTITLE SETTINGS PANEL (slides from right)
       ════════════════════════════════════════ */}
-      {showSubPanel && (
+      {showSubPanel && !subtitlesDisabled && (
         <Pressable
           style={[StyleSheet.absoluteFill, s.subPanelBackdrop, { zIndex: 60 }]}
           onPress={() => setShowSubPanel(false)}
