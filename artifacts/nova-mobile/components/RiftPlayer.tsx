@@ -439,6 +439,7 @@ export function RiftPlayer({
   const [isLocked, setIsLocked]         = useState(false);
   const [showUnlock, setShowUnlock]     = useState(false);
   const [contentFit, setContentFit]     = useState<"contain" | "cover" | "fill">("contain");
+  const [screenshotSaved, setScreenshotSaved] = useState(false);
   const [isFlipped, setIsFlipped]       = useState(false);
 
   /* ─── Subtitle state ─── */
@@ -588,6 +589,7 @@ export function RiftPlayer({
   const waitForSrcTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
       /* timers صغيرة غير مُتتبَّعة سابقاً — يجب مسحها في master cleanup لمنع كراش الـ native player */
   const replayTimeoutRef         = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const screenshotSavedTimerRef  = useRef<ReturnType<typeof setTimeout> | null>(null);
   /* طلبات الشبكة المرتبطة بالمصدر الحالي — تُلغى قبل تبديل الحلقة أو إغلاقها. */
   const subtitleAbortRef         = useRef<AbortController | null>(null);
   const whisperAbortRef          = useRef<AbortController | null>(null);
@@ -723,6 +725,7 @@ export function RiftPlayer({
              replayTimeout: يستدعي player.play() بعد 120ms من unmount → native crash
              feedbackTimer/tapTimer/longPressTimer/unlockTimer/postSeekTimer: setState بعد unmount */
       if (replayTimeoutRef.current) { clearTimeout(replayTimeoutRef.current); replayTimeoutRef.current = null; }
+      if (screenshotSavedTimerRef.current) { clearTimeout(screenshotSavedTimerRef.current); screenshotSavedTimerRef.current = null; }
       if (feedbackTimer.current) { clearTimeout(feedbackTimer.current); feedbackTimer.current = null; }
       if (tapTimer.current) { clearTimeout(tapTimer.current); tapTimer.current = null; }
       if (longPressTimer.current) { clearTimeout(longPressTimer.current); longPressTimer.current = null; }
@@ -1331,6 +1334,14 @@ export function RiftPlayer({
         return;
       }
       await ML.saveToLibraryAsync(uri);
+      if (screenshotSavedTimerRef.current) clearTimeout(screenshotSavedTimerRef.current);
+      if (aliveRef.current) {
+        setScreenshotSaved(true);
+        screenshotSavedTimerRef.current = setTimeout(() => {
+          screenshotSavedTimerRef.current = null;
+          if (aliveRef.current) setScreenshotSaved(false);
+        }, 1400);
+      }
     } catch (error) {
       console.warn("[RiftPlayer] screenshot failed", error);
       Alert.alert("تعذّر حفظ اللقطة", "حاول مرة أخرى بعد منح إذن الصور.");
@@ -2052,6 +2063,13 @@ export function RiftPlayer({
       />
 
       {/* ── Brightness: يُضبط عبر expo-brightness (سطوع الشاشة الحقيقي) — لا حاجة لـ overlay ── */}
+
+      {screenshotSaved && (
+        <View style={s.screenshotSavedBadge} pointerEvents="none">
+          <Ionicons name="checkmark-circle" size={19} color="#86efac" />
+          <Text style={s.screenshotSavedText}>تم الحفظ</Text>
+        </View>
+      )}
 
       {/* ── Subtitle overlay ── */}
       {subOn && activeCue && (
@@ -2881,6 +2899,29 @@ function AccordionSection({
 const s = StyleSheet.create({
   root:  { flex: 1, backgroundColor: "#000", position: "relative" },
   video: { width: "100%", height: "100%" },
+  screenshotSavedBadge: {
+    position: "absolute",
+    top: 24,
+    left: "50%",
+    transform: [{ translateX: -58 }],
+    minWidth: 116,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 7,
+    paddingHorizontal: 13,
+    paddingVertical: 8,
+    borderRadius: 20,
+    backgroundColor: "rgba(16, 40, 28, 0.94)",
+    borderWidth: 1,
+    borderColor: "rgba(134, 239, 172, 0.55)",
+    zIndex: 60,
+  },
+  screenshotSavedText: {
+    color: "#bbf7d0",
+    fontSize: 13,
+    fontFamily: "Cairo_700Bold",
+  },
 
   /* Spinner — top area of screen */
   errorWrap:   { ...StyleSheet.absoluteFillObject, alignItems: "center", justifyContent: "center", gap: 14, zIndex: 20, backgroundColor: "rgba(0,0,0,0.92)" },
