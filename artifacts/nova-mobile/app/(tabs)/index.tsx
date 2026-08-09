@@ -262,37 +262,37 @@ export default function HomeScreen() {
                 title="🔥 رائج الآن"
                 items={trendingList}
                 size="md"
-                onSeeAll={() => router.push("/browse")}
+                onSeeAll={() => router.push({ pathname: "/browse", params: { sort: "TRENDING_DESC" } } as any)}
               />
               <SectionRow
                 title={`🌸 أنمي ${SEASON_AR[season] ?? "الموسم"} ${year}`}
                 items={seasonalList}
                 size="md"
-                onSeeAll={() => router.push("/browse")}
+                onSeeAll={() => router.push({ pathname: "/browse", params: { sort: "POPULARITY_DESC", season, year: String(year) } } as any)}
               />
               <SectionRow
                 title="📡 يُعرض حالياً"
                 items={airingList}
                 size="md"
-                onSeeAll={() => router.push("/browse")}
+                onSeeAll={() => router.push({ pathname: "/browse", params: { status: "RELEASING", sort: "POPULARITY_DESC" } } as any)}
               />
               <SectionRow
                 title="🏆 الأعلى تقييماً على الإطلاق"
                 items={topRatedList}
                 size="md"
-                onSeeAll={() => router.push("/browse")}
+                onSeeAll={() => router.push({ pathname: "/browse", params: { sort: "SCORE_DESC" } } as any)}
               />
               <SectionRow
                 title="⭐ الأكثر شعبية"
                 items={popularList}
                 size="md"
-                onSeeAll={() => router.push("/browse")}
+                onSeeAll={() => router.push({ pathname: "/browse", params: { sort: "POPULARITY_DESC" } } as any)}
               />
               <SectionRow
                 title="🎬 أفلام الأنمي"
                 items={moviesList}
                 size="md"
-                onSeeAll={() => router.push("/browse")}
+                onSeeAll={() => router.push({ pathname: "/browse", params: { format: "MOVIE", sort: "POPULARITY_DESC" } } as any)}
               />
 
               {/* TMDB Animation Movies — disabled */}

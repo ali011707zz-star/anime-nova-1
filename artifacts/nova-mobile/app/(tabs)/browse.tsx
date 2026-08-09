@@ -5,7 +5,7 @@ import {
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { useRouter } from "expo-router";
+import { useLocalSearchParams, useRouter } from "expo-router";
 import { getBaseUrl } from "@/utils/api";
 
 /* ── Data ── */
@@ -123,19 +123,19 @@ query { Page(page:1,perPage:1) {
   media(type:ANIME,genre:"${genre}",sort:[POPULARITY_DESC]){id}
 }}`;
 
-const BROWSE_QUERY = (sort: string, format: string, season: string, year: string, genre: string) => `
+const BROWSE_QUERY = (sort: string, format: string, season: string, year: string, genre: string, status: string) => `
 query ($page: Int) {
   Page(page: $page, perPage: 30) {
-    media(type:ANIME, countryOfOrigin:"JP", isAdult:false, genre_not_in:["Hentai"], sort:[${sort || "POPULARITY_DESC"}]${format ? `, format:${format}` : ""}${season ? `, season:${season}` : ""}${year ? `, seasonYear:${year}` : ""}${genre ? `, genre:"${genre}"` : ""}) {
+    media(type:ANIME, countryOfOrigin:"JP", isAdult:false, genre_not_in:["Hentai"], sort:[${sort || "POPULARITY_DESC"}]${format ? `, format:${format}` : ""}${season ? `, season:${season}` : ""}${year ? `, seasonYear:${year}` : ""}${genre ? `, genre:"${genre}"` : ""}${status ? `, status:${status}` : ""}) {
       id title { romaji english } coverImage { large } averageScore episodes format status startDate { year } genres
     }
   }
 }`;
 
-const SEARCH_QUERY = (sort: string, format: string, season: string, year: string, genre: string) => `
+const SEARCH_QUERY = (sort: string, format: string, season: string, year: string, genre: string, status: string) => `
 query ($search: String!) {
   Page(page: 1, perPage: 30) {
-    media(search: $search, type: ANIME, isAdult: false, genre_not_in:["Hentai","Ecchi"], sort:[SEARCH_MATCH,${sort || "POPULARITY_DESC"}]${format ? `,format:${format}` : ""}${season ? `,season:${season}` : ""}${year ? `,seasonYear:${year}` : ""}${genre ? `,genre:"${genre}"` : ""}) {
+    media(search: $search, type: ANIME, isAdult: false, genre_not_in:["Hentai","Ecchi"], sort:[SEARCH_MATCH,${sort || "POPULARITY_DESC"}]${format ? `,format:${format}` : ""}${season ? `,season:${season}` : ""}${year ? `,seasonYear:${year}` : ""}${genre ? `,genre:"${genre}"` : ""}${status ? `,status:${status}` : ""}) {
       id title { romaji english } coverImage { large } averageScore episodes format status startDate { year } genres
     }
   }
@@ -174,18 +174,36 @@ function translateSearchQuery(value: string): string {
 export default function BrowseScreen() {
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
+  const routeParams = useLocalSearchParams<{
+    genre?: string;
+    genreAr?: string;
+    format?: string;
+    sort?: string;
+    season?: string;
+    year?: string;
+    status?: string;
+  }>();
   const router = useRouter();
   const topPad = Platform.OS === "web" ? 0 : insets.top;
   const gridColumns = width >= 1000 ? 6 : width >= 700 ? 5 : 3;
   const genreColumns = width >= 700 ? 3 : 2;
 
+  const routeValue = (value: string | string[] | undefined) =>
+    Array.isArray(value) ? value[0] || "" : value || "";
+  const routeSort = routeValue(routeParams.sort);
+  const routeFormat = routeValue(routeParams.format);
+  const routeSeason = routeValue(routeParams.season);
+  const routeYear = routeValue(routeParams.year);
+  const routeStatus = routeValue(routeParams.status);
+
   const [view, setView] = useState<"genres" | "list">("list");
-  const [activeGenre, setActiveGenre] = useState("");
-  const [activeGenreAr, setActiveGenreAr] = useState("");
-  const [format, setFormat] = useState("");
-  const [sort, setSort] = useState("POPULARITY_DESC");
-  const [season, setSeason] = useState("");
-  const [year, setYear] = useState("");
+  const [activeGenre, setActiveGenre] = useState(routeValue(routeParams.genre));
+  const [activeGenreAr, setActiveGenreAr] = useState(routeValue(routeParams.genreAr));
+  const [format, setFormat] = useState(FORMAT_OPTIONS.some(opt => opt.value === routeFormat) ? routeFormat : "");
+  const [sort, setSort] = useState(SORT_OPTIONS.some(opt => opt.value === routeSort) ? routeSort : "POPULARITY_DESC");
+  const [season, setSeason] = useState(SEASON_OPTIONS.some(opt => opt.value === routeSeason) ? routeSeason : "");
+  const [year, setYear] = useState(/^\d{4}$/.test(routeYear) ? routeYear : "");
+  const [status, setStatus] = useState(routeStatus === "RELEASING" ? routeStatus : "");
   const [search, setSearch] = useState("");
 
   const [items, setItems] = useState<AnimeResult[]>([]);
@@ -201,6 +219,20 @@ export default function BrowseScreen() {
   const searchAbortRef = useRef<AbortController | null>(null);
   const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const searchRequestRef = useRef(0);
+
+  /* Home sections open this tab with a filter in the route. Keep the
+     filter state synced when the tab is already mounted and receives
+     another "See all" navigation event. */
+  useEffect(() => {
+    setActiveGenre(routeValue(routeParams.genre));
+    setActiveGenreAr(routeValue(routeParams.genreAr));
+    setFormat(FORMAT_OPTIONS.some(opt => opt.value === routeFormat) ? routeFormat : "");
+    setSort(SORT_OPTIONS.some(opt => opt.value === routeSort) ? routeSort : "POPULARITY_DESC");
+    setSeason(SEASON_OPTIONS.some(opt => opt.value === routeSeason) ? routeSeason : "");
+    setYear(/^\d{4}$/.test(routeYear) ? routeYear : "");
+    setStatus(routeStatus === "RELEASING" ? routeStatus : "");
+    setView("list");
+  }, [routeParams.genre, routeParams.genreAr, routeParams.format, routeParams.sort, routeParams.season, routeParams.year, routeParams.status]);
 
   /* load genre cover images */
   useEffect(() => {
@@ -234,7 +266,7 @@ export default function BrowseScreen() {
       const r = await fetch(`${getBaseUrl()}/api/anilist`, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          query: BROWSE_QUERY(sort, format, season, year, activeGenre),
+            query: BROWSE_QUERY(sort, format, season, year, activeGenre, status),
           variables: { page: p },
         }),
         signal: ctrl.signal,
@@ -255,13 +287,13 @@ export default function BrowseScreen() {
     } finally {
       if (genRef.current === gen && !ctrl.signal.aborted) setLoading(false);
     }
-  }, [sort, format, season, year, activeGenre]);
+  }, [sort, format, season, year, activeGenre, status]);
 
   useEffect(() => {
     if (view !== "list") return;
     setPage(1); setHasMore(true);
     loadItems(1, true);
-  }, [view, sort, format, season, year, activeGenre]);
+  }, [view, sort, format, season, year, activeGenre, status]);
 
   useEffect(() => {
     searchAbortRef.current?.abort();
@@ -282,7 +314,7 @@ export default function BrowseScreen() {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            query: SEARCH_QUERY(sort, format, season, year, activeGenre),
+            query: SEARCH_QUERY(sort, format, season, year, activeGenre, status),
             variables: { search: translated },
           }),
           signal: ctrl.signal,
@@ -303,7 +335,7 @@ export default function BrowseScreen() {
       if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
       ctrl.abort();
     };
-  }, [search, sort, format, season, year, activeGenre]);
+  }, [search, sort, format, season, year, activeGenre, status]);
 
   function openGenre(genre: string, ar: string) {
     setActiveGenre(genre); setActiveGenreAr(ar);
@@ -311,15 +343,16 @@ export default function BrowseScreen() {
   }
   function clearAll() {
     setView("list"); setActiveGenre(""); setActiveGenreAr("");
-    setFormat(""); setSort("POPULARITY_DESC"); setSeason(""); setYear("");
+    setFormat(""); setSort("POPULARITY_DESC"); setSeason(""); setYear(""); setStatus("");
   }
 
   const filteredItems = search.trim() ? searchItems : items;
   const listLoading = search.trim() ? searchLoading : loading;
 
-  const hasFilters = format || sort !== "POPULARITY_DESC" || season || year;
+  const hasFilters = format || sort !== "POPULARITY_DESC" || season || year || status;
   const browseTitle = activeGenreAr
     ? `${activeGenreAr}`
+    : status === "RELEASING" ? "يُعرض حالياً"
     : format ? FORMAT_AR[format] || format
     : season ? SEASON_OPTIONS.find(s => s.value === season)?.label.replace(/.*? /, "") || "تصفح"
     : "تصفح";
