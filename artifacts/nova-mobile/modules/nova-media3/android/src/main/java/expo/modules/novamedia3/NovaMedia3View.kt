@@ -11,6 +11,7 @@ import androidx.media3.common.C
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
@@ -135,7 +136,24 @@ class NovaMedia3View(
     }
 
     releasePlayer()
-    val player = ExoPlayer.Builder(context).build()
+    /*
+     * The default Media3 load control is tuned for short, reliable streams.
+     * Our sources can take several seconds to deliver a segment, especially
+     * when the CDN is reached through a redirect/proxy. Keep a real safety
+     * buffer instead of starting playback again after roughly one segment.
+     */
+    val loadControl = DefaultLoadControl.Builder()
+      .setBufferDurationsMs(
+        15_000, // minBufferMs
+        60_000, // maxBufferMs
+        2_500,  // bufferForPlaybackMs
+        5_000,  // bufferForPlaybackAfterRebufferMs
+      )
+      .setBackBuffer(15_000, false)
+      .build()
+    val player = ExoPlayer.Builder(context)
+      .setLoadControl(loadControl)
+      .build()
     exoPlayer = player
     playerView.player = player
     player.addListener(object : Player.Listener {

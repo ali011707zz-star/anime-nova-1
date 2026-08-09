@@ -17,6 +17,7 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.MediaSource
 import androidx.media3.exoplayer.source.MergingMediaSource
@@ -150,7 +151,18 @@ class IsolatedPlayerActivity : Activity() {
 
     setContentView(root)
 
-    val player = ExoPlayer.Builder(this).build()
+    val loadControl = DefaultLoadControl.Builder()
+      .setBufferDurationsMs(
+        15_000, // minBufferMs
+        60_000, // maxBufferMs
+        2_500,  // bufferForPlaybackMs
+        5_000,  // bufferForPlaybackAfterRebufferMs
+      )
+      .setBackBuffer(15_000, false)
+      .build()
+    val player = ExoPlayer.Builder(this)
+      .setLoadControl(loadControl)
+      .build()
     exoPlayer = player
     view.player = player
 

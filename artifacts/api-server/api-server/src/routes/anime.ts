@@ -10634,7 +10634,7 @@ router.get("/anime/video-proxy", async (req, res) => {
     const upstreamHeaders: Record<string, string> = { ...HLS_PROXY_HDRS(ref || url, origin) };
     if (req.headers.range) upstreamHeaders["Range"] = req.headers.range as string;
 
-    const r = await fetch(url, { headers: upstreamHeaders, signal: AbortSignal.timeout(20000), redirect: "follow" });
+    const r = await fetch(url, { headers: upstreamHeaders, signal: AbortSignal.timeout(35000), redirect: "follow" });
     if (!r.ok && r.status !== 206) { res.status(r.status).send(`upstream ${r.status}`); return; }
 
     res.status(r.status);
@@ -10675,7 +10675,7 @@ router.get("/anime/seg-proxy", async (req, res) => {
     const upstreamHeaders: Record<string, string> = { ...HLS_PROXY_HDRS(ref || url, origin) };
     if (req.headers.range) upstreamHeaders["Range"] = req.headers.range as string;
 
-    const r = await fetch(url, { headers: upstreamHeaders, signal: AbortSignal.timeout(15000), redirect: "follow" });
+    const r = await fetch(url, { headers: upstreamHeaders, signal: AbortSignal.timeout(35000), redirect: "follow" });
     if (!r.ok && r.status !== 206) { res.status(r.status).send(`upstream ${r.status}`); return; }
 
     res.status(r.status);

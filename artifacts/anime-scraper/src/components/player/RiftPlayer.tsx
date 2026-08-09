@@ -73,25 +73,26 @@ function getHlsBufferConfig() {
     const slow   = dl < 1   || eff === "2g"  || eff === "slow-2g";
     const medium = !slow && (dl < 3.5 || eff === "3g");
     return {
-      maxBufferLength:       slow ? 8   : medium ? 15  : 20,
-      maxMaxBufferLength:    slow ? 40  : medium ? 80  : 150,
-      backBufferLength:      isMobile ? (slow ? 5  : 10)  : 30,
+      /* Keep enough future media to cover a slow 10–26s segment response. */
+      maxBufferLength:       slow ? 15  : medium ? 25  : 35,
+      maxMaxBufferLength:    slow ? 60  : medium ? 120 : 240,
+      backBufferLength:      isMobile ? (slow ? 10 : 15) : 45,
       maxBufferSize:         (isMobile ? 60 : 160) * 1024 * 1024,
-      maxStarvationDelay:    slow ? 15  : 8,
-      maxLoadingDelay:       slow ? 15  : 8,
-      fragLoadingMaxRetry:   slow ? 6   : 4,
-      fragLoadingRetryDelay: slow ? 1500 : 800,
-      nudgeMaxRetry:         slow ? 30  : 20,
+      maxStarvationDelay:    slow ? 20  : 12,
+      maxLoadingDelay:       slow ? 20  : 12,
+      fragLoadingMaxRetry:   slow ? 8   : 5,
+      fragLoadingRetryDelay: slow ? 2000 : 1000,
+      nudgeMaxRetry:         slow ? 30  : 24,
     };
   } catch {
     return {
-      maxBufferLength: isMobile ? 25 : 60,
-      maxMaxBufferLength: isMobile ? 120 : 300,
-      backBufferLength: isMobile ? 15 : 60,
+      maxBufferLength: isMobile ? 25 : 45,
+      maxMaxBufferLength: isMobile ? 120 : 240,
+      backBufferLength: isMobile ? 15 : 45,
       maxBufferSize: (isMobile ? 60 : 160) * 1024 * 1024,
-      maxStarvationDelay: 8, maxLoadingDelay: 8,
-      fragLoadingMaxRetry: 4, fragLoadingRetryDelay: 800,
-      nudgeMaxRetry: 20,
+      maxStarvationDelay: 12, maxLoadingDelay: 12,
+      fragLoadingMaxRetry: 5, fragLoadingRetryDelay: 1000,
+      nudgeMaxRetry: 24,
     };
   }
 }
@@ -683,7 +684,7 @@ export default function RiftPlayer({
         // xhrSetup: only for non-kawaii HLS (kawaii uses KawaiiNoRefLoader above)
         ...(!isKawaiiHls ? {
           xhrSetup: (xhr: XMLHttpRequest) => {
-            xhr.timeout = 25000;
+            xhr.timeout = 35000;
             // CDN auth headers (Referer/Origin) — needed for Dulo raw URLs blocked from datacenter IP
             if (hlsHeaders) {
               for (const [k, v] of Object.entries(hlsHeaders)) {

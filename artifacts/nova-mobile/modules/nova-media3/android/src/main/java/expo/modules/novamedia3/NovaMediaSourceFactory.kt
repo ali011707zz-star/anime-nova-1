@@ -17,7 +17,9 @@ object NovaMediaSourceFactory {
   private val okHttpClient: OkHttpClient by lazy {
     OkHttpClient.Builder()
       .connectTimeout(15, TimeUnit.SECONDS)
-      .readTimeout(30, TimeUnit.SECONDS)
+      // A slow signed CDN response must not be treated as a dead source
+      // while ExoPlayer is building its safety buffer.
+      .readTimeout(45, TimeUnit.SECONDS)
       .followRedirects(true)
       .build()
   }
