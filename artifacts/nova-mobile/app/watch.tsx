@@ -69,7 +69,6 @@ const SITE_TAG: Record<string, string> = {
   ristoanime: "RS", animeify: "AF", animeday: "DY", arabseed: "AR",
   anime4up2: "4U", mycima: "MC", topcinemaa: "TC",
   animewitcher: "AW", kawaii: "KW", anineko: "AN",
-  anikototv: "ATV", mitanime: "MT",
   vidlink_anim: "VL", vidfast: "VF",
   animetime: "AT", animepahe: "AP", dulo_anim: "DL",
   faselhd_db: "FH",
@@ -82,7 +81,6 @@ const SITE_LABEL: Record<string, string> = {
   kawaii: "Kawaii", animewitcher: "AnimeWitcher", anineko: "AniNeko",
   dulo_anim: "Dulo",
   anikototv: "AniKotoTV", mitanime: "MITanime", vidfast: "VidFast",
-  vidlink_anim: "VidLink",
   animepahe: "AnimePahe", shahiid: "Shahiid", animelek: "Animelek",
   animedar: "Animedar", okanime: "OkAnime", ristoanime: "RistoAnime",
   animeify: "AnimeIfy", animeday: "AnimeDay", arabseed: "ArabSeed",
@@ -102,7 +100,6 @@ const SITE_DESC: Record<string, string> = {
   dulo_anim: "ياباني/إنجليزي · HLS مباشر",
   vidlink_anim: "ياباني مترجم · مباشر",
   mitanime: "ياباني مترجم · مباشر", vidfast: "TMDB · HLS · متعدد الخوادم",
-  anikototv: "ياباني مترجم · skip مدمج",
   animepahe: "ياباني مترجم · HLS نظيف", anipm: "ياباني مترجم · 37 سيرفر/حلقة",
   shahiid: "عربي مدبلج / مترجم", animelek: "عربي مدبلج / مترجم",
   animedar: "عربي مترجم", okanime: "عربي مترجم",
@@ -234,7 +231,6 @@ const SITE_PRIORITY: Record<string, number> = {
   animeify: 85, sanime: 80,
   dulo_anim: 70, vidlink_anim: 55,
   vidfast: 35,
-  anikototv: 30, animepahe: 20, anipm: 18,
   sanime: 15,
 };
 

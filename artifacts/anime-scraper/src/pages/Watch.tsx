@@ -199,17 +199,20 @@ const STATIC_PICKER_WEB: Record<WebQualityKey, { site: string; tag: string }[]> 
     { site: "sanime",       tag: "SA" },
     { site: "animeify",     tag: "AF" },
     { site: "anifox",       tag: "FX" },
+    { site: "anineko",      tag: "AN" },
   ],
   "720p": [
     { site: "animewitcher", tag: "AW" },
     { site: "sanime",       tag: "SA" },
     { site: "animeify",     tag: "AF" },
     { site: "anifox",       tag: "FX" },
+    { site: "anineko",      tag: "AN" },
   ],
   "480p": [
     { site: "animewitcher", tag: "AW" },
     { site: "animeify",     tag: "AF" },
     { site: "anifox",       tag: "FX" },
+    { site: "anineko",      tag: "AN" },
   ],
 };
 const WEB_Q_KEYS: WebQualityKey[] = ["1080p", "720p", "480p"];
@@ -228,7 +231,7 @@ const PICKER_QMAP: Record<WebQualityKey, Quality> = {
  */
 const PRIORITY_FETCH_SITES = new Set([
   "kawaii", "animewitcher", "dulo_anim", "anineko",
-  "animeify", "sanime", "anifox",  // ANIFOX: Archive/MediaFire/MP4Upload/Uqload
+  "animeify", "sanime", "anifox",  // Japanese providers
   // shahiid/animelek: أُزيلت — معطّلة بطلب المستخدم 2026-07-14
 ]);
 
@@ -240,7 +243,7 @@ const PRIORITY_FETCH_SITES = new Set([
  */
 const PROVIDER_WANTS_SMART_SUB = new Set([
   "animepahe", "anineko",
-  "anikototv", "dulo_anim",
+  "anikototv", "animekai", "dulo_anim",
 ]);
 
 type SlotStatus = "idle" | "fetching" | "ready" | "failed";
@@ -3277,6 +3280,7 @@ export default function WatchPage() {
       animeify:     28000,  // backend = 18s + هامش للاستخراج/الشبكة
       sanime:       28000,  // backend = 20s + هامش للبحث وinfo
       anifox:       38000,  // backend = 30s + هامش لتحميل الكتالوج أول مرة
+      anikoto:        26000,  anineko: 26000,
       // mitanime: محذوف 2026-07-27
       // reanime: محذوف 2026-07-24
       // hianime: معطّل 2026-07-30

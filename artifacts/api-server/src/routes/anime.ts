@@ -12421,21 +12421,20 @@ router.get("/anime/fetch-source", async (req, res) => {
   const ANIME_SOURCE_ALLOWLIST: Set<string> | null = new Set([
     "kawaii",        // ⚡ الأسرع — DB-cached (50ms) ✅
     "animewitcher",  // 🗄️ DB-first aw_links (142k) → Algolia fallback ✅
-    "anineko",       // 🐱 AniNeko — HLS مترجم، حتى 4 خوادم للحلقة
     "anifox",        // 📦 12 مصدر — Archive/MediaFire/MP4Upload/Uqload ✅
     "sanime",        // 🎌 MP4 مباشر عربي مدبلج ✅
     "anslayer",      // ⚡ بحث متوازٍ + dedupe للطلبات + cache
     "animeify",      // 🎬 أنمي فاي — MEGA/Streamtape/MediaFire ✅ (مُعاد تفعيله)
-    // AK / AX / KI: متوقفة بطلب المستخدم — لا تُضاف إلى القائمة
+    "anineko",        // 🐱 AniNeko — HLS مترجم
     // "anipub":     معطّل
     // ── مُعطَّلة سابقاً ─────────────────────────────────────────────────────
     // "akoam": حُذف 2026-07-28 — كان يستخدم hopxBrowserExtract على كل طلب
     // "allmanga": معطّل 2026-07-17 — AA_CRYPTO_MISSING
   ]);
+  // الطلبات الداخلية (x-internal:1) تتجاوز القائمة لتسمح لـ animation.ts باستدعاء moviz_time وغيره
   const DISABLED_ANIME_SOURCES = new Set([
     "anikoto", "animekai", "shirayuki_anikoto", "shirayuki_animix",
   ]);
-  // الطلبات الداخلية (x-internal:1) تتجاوز القائمة لتسمح لـ animation.ts باستدعاء moviz_time وغيره
   const isInternalCall = req.headers["x-internal"] === "1";
   if (DISABLED_ANIME_SOURCES.has(site)) {
     res.json({ sources: [] });
