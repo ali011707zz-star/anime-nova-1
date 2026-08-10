@@ -222,6 +222,20 @@ function ensureVpsProxy(url: string, headers: Record<string, string> | undefined
   return url; // لا Referer متاح — استخدم كما هو
 }
 
+function buildEmbeddedDownloadUrl(
+  site: string,
+  mediaUrl: string,
+  subtitleUrl: string | undefined,
+  base: string,
+): string {
+  const query = new URLSearchParams({
+    site,
+    url: mediaUrl,
+  });
+  if (subtitleUrl) query.set("subtitleUrl", subtitleUrl);
+  return `${base}/api/anime/download-mp4?${query.toString()}`;
+}
+
 /* ── مصادر تُشغَّل native مباشرةً عبر RiftPlayer (seg-proxy يُعيد روابط مطلقة الآن) ── */
 
 /* ── أولويات المصادر: KW → AW → AF → SA → rest ── */
@@ -743,6 +757,9 @@ export default function WatchScreen() {
       const subRaw    = best.subtitleUrl || globalSubUrl;
       const subtitleUrl = subRaw ? resolveUrl(subRaw, base) : undefined;
       const token     = await getAuthToken();
+      const downloadUrl = (site === "anineko" || site === "kawaii")
+        ? buildEmbeddedDownloadUrl(site, proxyUrl, subtitleUrl, base)
+        : proxyUrl;
 
       void startGlobalDownload({
         animeId:    parseInt(anime || "0"),
@@ -751,7 +768,7 @@ export default function WatchScreen() {
         cover:      coverUrl,
         site,
         quality:    getSrcQuality(best),
-        url:        proxyUrl,
+        url:        downloadUrl,
         authToken:  token,
         subtitleUrl,
       });

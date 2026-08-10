@@ -1,7 +1,7 @@
-import { Router } from "express";
+import { Router, type Request } from "express";
 import { createHash, createDecipheriv, createCipheriv, randomBytes } from "crypto";
-import { execSync, execFile } from "child_process";
-import { existsSync, writeFileSync, readFileSync, readdirSync, mkdirSync } from "fs";
+import { execSync, execFile, spawn } from "child_process";
+import { createReadStream, existsSync, writeFileSync, readFileSync, readdirSync, mkdirSync, rmSync, statSync } from "fs";
 import { join as pathJoin } from "path";
 import {
   makeSourceCacheKey,
@@ -14746,6 +14746,148 @@ router.get("/anime/video-proxy", async (req, res) => {
   res.setHeader("Access-Control-Expose-Headers", "Accept-Ranges, Content-Length, Content-Range, Content-Type");
 
   await serveMediaVPS(url, ref, req, res);
+});
+
+// ── download-mp4: تحويل HLS إلى MP4 مع حرق الترجمة للموبايل ────────────────
+// هذا المسار مخصص للمصادر التي تحتاج ملفاً حقيقياً قابلاً للتشغيل دون اتصال.
+// لا يقبل روابط CDN عشوائية: المصدر يجب أن يكون أحد مسارات الـ proxy الداخلية.
+function localApiUrl(raw: string, allowedPaths: string[], req: Request): string | null {
+  if (!raw) return null;
+  try {
+    const parsed = new URL(raw, `http://${req.headers.host || "localhost"}`);
+    if (!allowedPaths.some(path => parsed.pathname === path)) return null;
+    const appDomain = process.env.APP_DOMAIN || "";
+    const publicHost = (() => {
+      try { return new URL(NOVA_PUBLIC_URL).hostname; } catch { return ""; }
+    })();
+    const requestHost = (req.hostname || "").split(":")[0];
+    const allowedHosts = new Set(["localhost", "127.0.0.1", "::1", appDomain, publicHost, requestHost].filter(Boolean));
+    if (!allowedHosts.has(parsed.hostname)) return null;
+    const port = process.env.PORT || "5000";
+    return `http://127.0.0.1:${port}${parsed.pathname}${parsed.search}`;
+  } catch {
+    return null;
+  }
+}
+
+function cuesToVtt(body: string): string {
+  try {
+    const payload = JSON.parse(body) as { cues?: Array<{ timing?: string; text?: string }> };
+    if (Array.isArray(payload.cues)) {
+      return [
+        "WEBVTT",
+        "",
+        ...payload.cues.flatMap((cue, index) => [
+          String(index + 1),
+          cue.timing || "00:00:00.000 --> 00:00:01.000",
+          cue.text || "",
+          "",
+        ]),
+      ].join("\n");
+    }
+  } catch {
+    // Direct VTT/SRT responses are handled unchanged below.
+  }
+  return body;
+}
+
+router.get("/anime/download-mp4", async (req, res) => {
+  const site = String(req.query.site || "").trim().toLowerCase();
+  if (site !== "anineko" && site !== "kawaii") {
+    res.status(400).send("download conversion is only available for AN and KW");
+    return;
+  }
+
+  const sourceUrl = localApiUrl(
+    String(req.query.url || ""),
+    ["/api/anime/hls-proxy", "/api/anime/video-proxy"],
+    req,
+  );
+  if (!sourceUrl) {
+    res.status(400).send("invalid proxied media url");
+    return;
+  }
+
+  const subtitleRaw = String(req.query.subtitleUrl || "");
+  const subtitleUrl = subtitleRaw
+    ? localApiUrl(subtitleRaw, ["/api/anime/translate-vtt", "/api/anime/proxy-text"], req)
+    : null;
+  if (subtitleRaw && !subtitleUrl) {
+    res.status(400).send("invalid proxied subtitle url");
+    return;
+  }
+
+  const tempRoot = `/tmp/nova-download-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const outputPath = `${tempRoot}/episode.mp4`;
+  const subtitlePath = `${tempRoot}/episode.vtt`;
+  mkdirSync(tempRoot, { recursive: true, mode: 0o700 });
+
+  const cleanup = () => {
+    try { rmSync(tempRoot, { recursive: true, force: true }); } catch {}
+  };
+  res.on("close", cleanup);
+
+  try {
+    if (subtitleUrl) {
+      const subtitleResponse = await fetch(subtitleUrl, {
+        headers: { Accept: "application/json,text/vtt,text/plain,*/*" },
+        signal: AbortSignal.timeout(30_000),
+      });
+      if (!subtitleResponse.ok) throw new Error(`subtitle ${subtitleResponse.status}`);
+      const vtt = cuesToVtt(await subtitleResponse.text());
+      if (!vtt.includes("-->")) throw new Error("subtitle has no cues");
+      writeFileSync(subtitlePath, vtt, { mode: 0o600 });
+    }
+
+    const args = [
+      "-hide_banner", "-loglevel", "error", "-y",
+      "-i", sourceUrl,
+      "-map", "0:v:0",
+      "-map", "0:a:0?",
+    ];
+    if (subtitleUrl) {
+      args.push(
+        "-vf",
+        `subtitles=${subtitlePath}:force_style='FontName=DejaVu Sans,FontSize=20,Alignment=2,Outline=1,Shadow=1'`,
+      );
+    }
+    args.push(
+      "-c:v", "libx264",
+      "-preset", "veryfast",
+      "-crf", "23",
+      "-pix_fmt", "yuv420p",
+      "-c:a", "aac",
+      "-b:a", "128k",
+      "-movflags", "+faststart",
+      outputPath,
+    );
+
+    await new Promise<void>((resolve, reject) => {
+      const child = spawn("/usr/bin/ffmpeg", args, { stdio: ["ignore", "ignore", "pipe"] });
+      let stderr = "";
+      child.stderr.on("data", (chunk: Buffer) => {
+        stderr = (stderr + chunk.toString()).slice(-4000);
+      });
+      child.once("error", reject);
+      child.once("close", code => {
+        if (code === 0) resolve();
+        else reject(new Error(`ffmpeg exited ${code}: ${stderr}`));
+      });
+      req.once("close", () => {
+        if (!res.headersSent) child.kill("SIGTERM");
+      });
+    });
+
+    const size = statSync(outputPath).size;
+    if (size <= 0) throw new Error("empty converted video");
+    res.status(200);
+    res.setHeader("Content-Type", "video/mp4");
+    res.setHeader("Content-Length", String(size));
+    res.setHeader("Content-Disposition", `attachment; filename="nova-episode.mp4"`);
+    createReadStream(outputPath).pipe(res);
+  } catch (error: any) {
+    if (!res.headersSent) res.status(502).send(`video conversion failed: ${error?.message || "unknown error"}`);
+  }
 });
 
 // ── seg-proxy: VPS يجلب الـ segment مع Referer الصحيح ───────────────────────
