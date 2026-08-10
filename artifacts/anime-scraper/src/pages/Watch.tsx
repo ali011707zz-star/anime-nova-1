@@ -184,8 +184,8 @@ const SCRAPER_DEFS: { site: string; name: string; desc: string; tag: string; aud
   // vidbolt_anim: معطّل 2026-07-30 — كود محفوظ (10 مصادر HLS)، يُفعَّل لاحقاً
   { site: "sanime",           name: "سـAnime",       desc: "عربي · MP4 مباشر",        tag: "SA", isArabic: true },
   { site: "anifox",           name: "ANIFOX",        desc: "Archive · MediaFire · MP4Upload · Uqload", tag: "FX", isArabic: true },
-  { site: "shirayuki_anikoto",   name: "Shirayuki · Anikoto",  desc: "AniKuro · Anikoto",  tag: "SY-AK" },
-  { site: "shirayuki_animix",    name: "Shirayuki · AnimiX",   desc: "AniKuro · AnimiX",   tag: "SY-AX" },
+  { site: "shirayuki_anikoto",   name: "AK",  desc: "Shirayuki · Anikoto",  tag: "AK" },
+  { site: "shirayuki_animix",    name: "AX",  desc: "Shirayuki · AnimiX",   tag: "AX" },
   // akoam: حُذف 2026-07-28 — كان يستخدم hopxBrowserExtract (browser) على كل طلب
 ];
 
@@ -202,23 +202,23 @@ const STATIC_PICKER_WEB: Record<WebQualityKey, { site: string; tag: string }[]> 
     { site: "sanime",       tag: "SA" },
     { site: "animeify",     tag: "AF" },
     { site: "anifox",       tag: "FX" },
-    { site: "shirayuki_anikoto",   tag: "SY-AK" },
-    { site: "shirayuki_animix",    tag: "SY-AX" },
+    { site: "shirayuki_anikoto",   tag: "AK" },
+    { site: "shirayuki_animix",    tag: "AX" },
   ],
   "720p": [
     { site: "animewitcher", tag: "AW" },
     { site: "sanime",       tag: "SA" },
     { site: "animeify",     tag: "AF" },
     { site: "anifox",       tag: "FX" },
-    { site: "shirayuki_anikoto",   tag: "SY-AK" },
-    { site: "shirayuki_animix",    tag: "SY-AX" },
+    { site: "shirayuki_anikoto",   tag: "AK" },
+    { site: "shirayuki_animix",    tag: "AX" },
   ],
   "480p": [
     { site: "animewitcher", tag: "AW" },
     { site: "animeify",     tag: "AF" },
     { site: "anifox",       tag: "FX" },
-    { site: "shirayuki_anikoto",   tag: "SY-AK" },
-    { site: "shirayuki_animix",    tag: "SY-AX" },
+    { site: "shirayuki_anikoto",   tag: "AK" },
+    { site: "shirayuki_animix",    tag: "AX" },
   ],
 };
 const WEB_Q_KEYS: WebQualityKey[] = ["1080p", "720p", "480p"];

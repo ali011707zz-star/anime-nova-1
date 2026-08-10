@@ -74,14 +74,14 @@ const SITE_TAG: Record<string, string> = {
   animetime: "AT", animepahe: "AP", dulo_anim: "DL",
   faselhd_db: "FH",
   notorrent: "NO", sanime: "SA", anipm: "PM", anslayer: "AS",
-  shirayuki_anikoto: "SY-AK", shirayuki_animix: "SY-AX",
+  shirayuki_anikoto: "AK", shirayuki_animix: "AX",
   akwam: "AQ",
 };
 
 /* ── اسم عرض لكل موقع في منتقي المصادر ── */
 const SITE_LABEL: Record<string, string> = {
   kawaii: "Kawaii", animewitcher: "AnimeWitcher",
-  shirayuki_anikoto: "Shirayuki · Anikoto", shirayuki_animix: "Shirayuki · AnimiX",
+  shirayuki_anikoto: "AK", shirayuki_animix: "AX",
   dulo_anim: "Dulo",
   anikototv: "AniKotoTV", mitanime: "MITanime", vidfast: "VidFast",
   vidlink_anim: "VidLink", animekai: "AnimeKai",
@@ -114,7 +114,7 @@ const SITE_DESC: Record<string, string> = {
   faselhd_db: "عربي مترجم · GitHub DB", animetime: "عربي مترجم · مباشر",
   notorrent: "IMDB · مصادر متعددة", sanime: "عربي مدبلج/مترجم · MP4",
   anslayer: "مشغلات خارجية · MixDrop/MediaFire",
-  shirayuki_anikoto: "AniKuro · Anikoto", shirayuki_animix: "AniKuro · AnimiX",
+  shirayuki_anikoto: "Shirayuki · Anikoto", shirayuki_animix: "Shirayuki · AnimiX",
   akwam: "عربي مترجم · MP4 مباشر",
 };
 function getSiteDesc(site: string): string {
@@ -206,6 +206,9 @@ function ensureVpsProxy(url: string, headers: Record<string, string> | undefined
   if (!url) return url;
   // بالفعل proxy عبر VPS
   if (url.includes("/api/anime/") || url.includes("/api/animation/")) return url;
+  // Shirayuki already rewrites child playlists and segments. Do not wrap
+  // its proxy URL in Nova's HLS proxy a second time.
+  if (url.includes("proxy.anikuro.ru/")) return url;
   // روابط embed (mega / vidmoly) — لا نلفّها
   if (url.includes("mega.nz") || url.includes("mega.co.nz")) return url;
   if (url.includes("mp4upload")) return url;
@@ -247,23 +250,23 @@ const STATIC_PICKER: Record<QualityKey, { site: string; name: string; tag: strin
     { site: "sanime",       name: "سـAnime",      tag: "SA" },
     { site: "animeify",     name: "أنمي فاي",    tag: "AF" },
     { site: "anifox",       name: "ANIFOX",      tag: "FX" },
-    { site: "shirayuki_anikoto",   name: "Shirayuki · Anikoto",  tag: "SY-AK" },
-    { site: "shirayuki_animix",    name: "Shirayuki · AnimiX",   tag: "SY-AX" },
+    { site: "shirayuki_anikoto",   name: "AK",  tag: "AK" },
+    { site: "shirayuki_animix",    name: "AX",  tag: "AX" },
   ],
   "720p": [
     { site: "animewitcher", name: "AnimeWitcher", tag: "AW" },
     { site: "sanime",       name: "سـAnime",      tag: "SA" },
     { site: "animeify",     name: "أنمي فاي",    tag: "AF" },
     { site: "anifox",       name: "ANIFOX",      tag: "FX" },
-    { site: "shirayuki_anikoto",   name: "Shirayuki · Anikoto",  tag: "SY-AK" },
-    { site: "shirayuki_animix",    name: "Shirayuki · AnimiX",   tag: "SY-AX" },
+    { site: "shirayuki_anikoto",   name: "AK",  tag: "AK" },
+    { site: "shirayuki_animix",    name: "AX",  tag: "AX" },
   ],
   "480p": [
     { site: "animewitcher", name: "AnimeWitcher", tag: "AW" },
     { site: "animeify",     name: "أنمي فاي",    tag: "AF" },
     { site: "anifox",       name: "ANIFOX",      tag: "FX" },
-    { site: "shirayuki_anikoto",   name: "Shirayuki · Anikoto",  tag: "SY-AK" },
-    { site: "shirayuki_animix",    name: "Shirayuki · AnimiX",   tag: "SY-AX" },
+    { site: "shirayuki_anikoto",   name: "AK",  tag: "AK" },
+    { site: "shirayuki_animix",    name: "AX",  tag: "AX" },
   ],
 };
 

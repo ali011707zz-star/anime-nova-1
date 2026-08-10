@@ -2492,36 +2492,86 @@ async function getShirayukiSources(
         { signal: AbortSignal.timeout(18_000) },
       );
       if (!sourceResponse.ok) return [];
+      type ShirayukiSourceRow = {
+        m3u8?: string; type?: string; quality?: string; referer?: string;
+      };
       const payload = await sourceResponse.json() as {
         data?: {
-          sources?: Array<{
-            m3u8?: string; type?: string; quality?: string; referer?: string;
-          }>;
+          sources?: ShirayukiSourceRow[];
+          variants?: Array<{ quality?: string; sources?: ShirayukiSourceRow[] }>;
           tracks?: Array<{ file?: string; label?: string }>;
         };
       };
       const tracks = payload.data?.tracks || [];
-      return (payload.data?.sources || []).flatMap((source) => {
-        if (!source.m3u8) return [];
+      // Recent Shirayuki responses group sources under quality variants while
+      // older responses expose a flat sources array. Accept both response
+      // shapes and let the HLS manifest provide the actual quality when it is
+      // available.
+      const sourceRows = [
+        ...(payload.data?.sources || []),
+        ...(payload.data?.variants || []).flatMap(variant =>
+          (variant.sources || []).map(source => ({
+            ...source,
+            quality: source.quality || variant.quality,
+          })),
+        ),
+      ];
+      const expanded: UnifiedSource[] = [];
+
+      for (const source of sourceRows) {
+        if (!source.m3u8) continue;
         const referer = source.referer || "https://anikuro.ru/";
-        const directUrl = `/api/anime/hls-proxy?url=${encodeURIComponent(source.m3u8)}&ref=${encodeURIComponent(referer)}`;
-        const quality = source.quality || "HD";
-        const rank = qualityRank(quality) || 9;
         const subtitleUrl = tracks.find(track => track.file)?.file;
-        return [{
-          name: `Shirayuki · ${provider.name || server}`,
-          url: directUrl,
-          quality,
-          qualityRank: rank,
-          // Keep each AniKuro provider as its own Nova source. The picker uses
-          // this value for independent status, caching, and playback buttons.
-          site: SHIRAYUKI_PROVIDER_SITE[server] || `shirayuki_${server}`,
-          directUrl,
-          directType: "hls" as const,
-          ...(subtitleUrl ? { subtitleUrl } : {}),
-          headers: { Referer: referer },
-        } satisfies UnifiedSource];
-      });
+        const isShirayukiProxy = source.m3u8.includes("proxy.anikuro.ru/");
+
+        // Discard stale CDN rows instead of presenting a dead source. This
+        // is especially important for AX, whose CDN hostname can rotate while
+        // the Shirayuki API still has an old cached row.
+        const manifestProbe = await fetch(source.m3u8, {
+          headers: { ...BASE_HDRS, Accept: "*/*", Referer: referer },
+          signal: AbortSignal.timeout(8_000),
+        }).catch(() => null);
+        if (!manifestProbe?.ok) continue;
+        const manifestText = await manifestProbe.text().catch(() => "");
+        if (!manifestText.includes("#EXTM3U")) continue;
+
+        const parsedQualities = await parseM3u8Qualities(source.m3u8, referer);
+        const qualities = parsedQualities.length
+          ? parsedQualities.map(item => ({
+              url: item.url,
+              quality: item.quality,
+              rank: item.rank >= 11 ? 14 : item.rank >= 10 ? 13 : 11,
+            }))
+          : [{
+              url: source.m3u8,
+              quality: source.quality || "HD",
+              rank: qualityRank(source.quality || "") || 9,
+            }];
+
+        for (const variant of qualities) {
+          // Shirayuki's proxy already rewrites child playlists and segments.
+          // Wrapping it again through Nova creates a proxy-to-proxy request.
+          const directUrl = isShirayukiProxy
+            ? variant.url
+            : `/api/anime/hls-proxy?url=${encodeURIComponent(variant.url)}&ref=${encodeURIComponent(referer)}`;
+          expanded.push({
+            name: `${server === "anikoto" ? "AK" : "AX"} · ${variant.quality}`,
+            url: variant.url,
+            quality: variant.quality,
+            qualityRank: variant.rank,
+            // Keep each AniKuro provider as its own Nova source. The picker
+            // uses this value for independent status and caching.
+            site: SHIRAYUKI_PROVIDER_SITE[server] || `shirayuki_${server}`,
+            directUrl,
+            directType: "hls" as const,
+            corsOk: isShirayukiProxy,
+            ...(subtitleUrl ? { subtitleUrl } : {}),
+            headers: { Referer: referer },
+          });
+        }
+      }
+
+      return expanded;
     }));
 
     return results.flatMap(result => result.status === "fulfilled" ? result.value : []);
@@ -5979,6 +6029,9 @@ function wrapForMobile(s: { directUrl?: string; url?: string; directType?: strin
   if (!rawUrl) return s;
   // بالفعل proxy عبر VPS
   if (rawUrl.startsWith("/api/")) return s;
+  // Shirayuki already rewrites child playlists and segments. Wrapping its
+  // URL through Nova again creates a proxy-to-proxy request.
+  if (rawUrl.includes("proxy.anikuro.ru/")) return { ...s, corsOk: true };
   // روابط embed/mega
   if (rawUrl.includes("mega.nz") || rawUrl.includes("mega.co.nz")) return s;
   const ref = s.headers?.Referer || "";
@@ -12403,6 +12456,8 @@ router.get("/anime/fetch-source", async (req, res) => {
     "xpass_anim",                                  // XPass token ~8min
   ]);
   const SHORT_TTL_MAX_AGE_MS = 90 * 60_000; // 90 دقيقة — قبل انتهاء tokens
+  // Shirayuki returns short-lived CDN URLs; never serve its cached rows.
+  const FORCE_LIVE_FETCH_SITES = new Set(["shirayuki_anikoto", "shirayuki_animix"]);
   const cKey = makeSourceCacheKey(site, title, ep);
   let cached = await getFromSourceCache(cKey);
   if (cached && site === "anifox") {
@@ -12417,7 +12472,8 @@ router.get("/anime/fetch-source", async (req, res) => {
   // للمواقع قصيرة الـ TTL: إذا بقي للكاش أقل من 90 دقيقة أو انتهى → اكشط مباشرةً
   const skipCacheForShortTtl = cached !== null && SHORT_TTL_FETCH_SITES.has(site) &&
     (cached.stale === true || (cached.expiresAt - Date.now()) < SHORT_TTL_MAX_AGE_MS);
-  if (cached && !shouldRefreshCache(cached.expiresAt) && !skipCacheForShortTtl) {
+  if (cached && !FORCE_LIVE_FETCH_SITES.has(site) &&
+      !shouldRefreshCache(cached.expiresAt) && !skipCacheForShortTtl) {
     const enc = cached.sources.map((s: UnifiedSource) => {
       /* استخراج headers (Referer/Origin) من رابط الـ proxy قبل التشفير.
          يحتاجها ExoPlayer/AVPlayer لإرسال Referer مع طلبات الـ segments مباشرةً للـ CDN.
