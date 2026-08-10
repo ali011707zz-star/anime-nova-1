@@ -14913,7 +14913,11 @@ router.get("/anime/download-mp4", async (req, res) => {
     if (subtitleUrl) {
       args.push(
         "-vf",
-        `subtitles=${subtitlePath}:force_style='FontName=DejaVu Sans,FontSize=20,Alignment=2,Outline=1,Shadow=1'`,
+        /* Escape the temporary path for ffmpeg's subtitles filter. This is
+           important on the VPS where the temp directory can contain special
+           characters after a process restart. The Arabic VTT is rendered
+           into the MP4; no sidecar subtitle is needed for KW downloads. */
+        `subtitles=${subtitlePath.replace(/([\\':])/g, "\\$1")}:force_style='FontName=DejaVu Sans,FontSize=20,Alignment=2,Outline=1,Shadow=1'`,
       );
     }
     args.push(

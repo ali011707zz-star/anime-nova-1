@@ -115,7 +115,8 @@ function getSiteDesc(site: string): string {
   return SITE_DESC[site] || "";
 }
 
-/* مصادر محظورة في Nova Mobile — لا تُجلب ولا تُعرض حتى لو جاءت من كاش قديم. */
+/* AN/AniNeko is web-only for now. Keep the backend source enabled for the
+   web client, but never show, fetch, or download it in Nova Mobile. */
 const BLOCKED_SOURCE_SITES = new Set(["hianime", "ak", "an", "anineko", "hi"]);
 function isBlockedSource(src: Pick<Src, "site">): boolean {
   return BLOCKED_SOURCE_SITES.has(String(src.site || "").trim().toLowerCase());
@@ -255,18 +256,18 @@ const STATIC_PICKER: Record<QualityKey, { site: string; name: string; tag: strin
     { site: "animewitcher", name: "AnimeWitcher", tag: "AW" },
     { site: "sanime",       name: "سـAnime",      tag: "SA" },
     { site: "animeify",     name: "أنمي فاي",    tag: "AF" },
-    { site: "anifox",       name: "ANIFOX",      tag: "FX" },
+    { site: "anifox",        name: "ANIFOX",      tag: "FX" },
   ],
   "720p": [
     { site: "animewitcher", name: "AnimeWitcher", tag: "AW" },
     { site: "sanime",       name: "سـAnime",      tag: "SA" },
     { site: "animeify",     name: "أنمي فاي",    tag: "AF" },
-    { site: "anifox",       name: "ANIFOX",      tag: "FX" },
+    { site: "anifox",        name: "ANIFOX",      tag: "FX" },
   ],
   "480p": [
     { site: "animewitcher", name: "AnimeWitcher", tag: "AW" },
     { site: "animeify",     name: "أنمي فاي",    tag: "AF" },
-    { site: "anifox",       name: "ANIFOX",      tag: "FX" },
+    { site: "anifox",        name: "ANIFOX",      tag: "FX" },
   ],
 };
 
