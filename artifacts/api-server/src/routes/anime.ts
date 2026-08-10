@@ -6035,7 +6035,11 @@ function wrapForMobile(s: { directUrl?: string; url?: string; directType?: strin
   // روابط embed/mega
   if (rawUrl.includes("mega.nz") || rawUrl.includes("mega.co.nz")) return s;
   const ref = s.headers?.Referer || "";
-  const isHls = /\.m3u8|hls-proxy/i.test(rawUrl) || s.directType === "hls";
+  // لا نعتمد على امتداد الرابط فقط: AniNeko أحياناً يعيد token/playlist
+  // بلا امتداد .m3u8، بينما directType هو المعلومة الموثوقة التي أعادها
+  // الـ scraper. بدون ذلك يصل الرابط الخام إلى ExoPlayer فيحاول قراءته
+  // كـ Progressive MP4 ثم يفشل بصمت على Android.
+  const isHls = s.directType === "hls" || /\.m3u8|hls-proxy/i.test(rawUrl);
   const isMp4 = rawUrl.includes(".mp4") || s.directType === "mp4";
   let proxied = rawUrl;
   if (isHls) {
@@ -6047,7 +6051,7 @@ function wrapForMobile(s: { directUrl?: string; url?: string; directType?: strin
   } else {
     return s; // MP4 بدون Referer — اتركه للموبايل يتعامل معه مباشرة
   }
-  return { ...s, directUrl: proxied, url: proxied };
+  return { ...s, directUrl: proxied, url: proxied, directType: isHls ? "hls" : s.directType };
 }
 
 
@@ -14568,6 +14572,37 @@ function rewriteM3u8ForVPS(manifest: string, baseUrl: string, ref: string): stri
   }
 
   return out.join("\n");
+}
+
+/** ردود الـCDN الخاطئة لا يجب أن تصل إلى ExoPlayer كأنها media.
+ * بعض مزوّدي AN يعيدون HTML/JSON مع status=200 أو يضعون fMP4 داخل
+ * Content-Type عام. نقرأ segment الصغير مرة واحدة ونصنّفه من magic bytes. */
+function mediaMagic(raw: Buffer): "ts" | "mp4" | "unknown" {
+  if (raw.length >= 1 && raw[0] === 0x47) {
+    // MPEG-TS packets are 188 bytes apart. A single sync byte is enough
+    // for short segments; the second check avoids classifying HTML by chance.
+    if (raw.length < 188 || raw[188] === 0x47) return "ts";
+  }
+  const scanLimit = Math.min(raw.length - 4, 4096);
+  for (let i = 0; i <= scanLimit; i++) {
+    if (raw.subarray(i, i + 4).toString("ascii") === "ftyp") return "mp4";
+  }
+  return "unknown";
+}
+
+function isHtmlOrJsonBody(raw: Buffer): boolean {
+  const prefix = raw.subarray(0, 512).toString("utf8").replace(/^\uFEFF/, "").trimStart().toLowerCase();
+  return prefix.startsWith("<!doctype") || prefix.startsWith("<html") ||
+    prefix.startsWith("<head") || prefix.startsWith("{") || prefix.startsWith("[");
+}
+
+function isValidMp4File(filePath: string): boolean {
+  try {
+    const head = readFileSync(filePath).subarray(0, 4096);
+    return mediaMagic(head) === "mp4";
+  } catch {
+    return false;
+  }
 }
 
 // ── VPS-side HLS manifest proxy ─────────────────────────────────────────────
