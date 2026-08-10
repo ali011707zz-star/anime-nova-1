@@ -232,7 +232,16 @@ function buildEmbeddedDownloadUrl(
     site,
     url: mediaUrl,
   });
-  if (subtitleUrl) query.set("subtitleUrl", subtitleUrl);
+  if (subtitleUrl) {
+    // download-mp4 intentionally accepts only internal proxy URLs. Kawaii
+    // returns an external VTT URL, so proxy it before handing it to ffmpeg.
+    const isInternalSubtitle = subtitleUrl.includes("/api/anime/proxy-text")
+      || subtitleUrl.includes("/api/anime/translate-vtt");
+    const downloadSubtitle = site === "kawaii" && !isInternalSubtitle
+      ? `${base}/api/anime/proxy-text?url=${encodeURIComponent(subtitleUrl)}&ref=${encodeURIComponent("https://kawaiianime.cc/")}`
+      : subtitleUrl;
+    query.set("subtitleUrl", downloadSubtitle);
+  }
   return `${base}/api/anime/download-mp4?${query.toString()}`;
 }
 
