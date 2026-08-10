@@ -68,23 +68,21 @@ const SITE_TAG: Record<string, string> = {
   shahiid: "SH", animelek: "EK", animedar: "AD", okanime: "OK",
   ristoanime: "RS", animeify: "AF", animeday: "DY", arabseed: "AR",
   anime4up2: "4U", mycima: "MC", topcinemaa: "TC",
-  animewitcher: "AW", kawaii: "KW",
-  anikototv: "ATV", animekai: "KI", mitanime: "MT",
+  animewitcher: "AW", kawaii: "KW", anineko: "AN",
+  anikototv: "ATV", mitanime: "MT",
   vidlink_anim: "VL", vidfast: "VF",
   animetime: "AT", animepahe: "AP", dulo_anim: "DL",
   faselhd_db: "FH",
   notorrent: "NO", sanime: "SA", anipm: "PM", anslayer: "AS",
-  shirayuki_anikoto: "AK", shirayuki_animix: "AX",
   akwam: "AQ",
 };
 
 /* ── اسم عرض لكل موقع في منتقي المصادر ── */
 const SITE_LABEL: Record<string, string> = {
-  kawaii: "Kawaii", animewitcher: "AnimeWitcher",
-  shirayuki_anikoto: "AK", shirayuki_animix: "AX",
+  kawaii: "Kawaii", animewitcher: "AnimeWitcher", anineko: "AniNeko",
   dulo_anim: "Dulo",
   anikototv: "AniKotoTV", mitanime: "MITanime", vidfast: "VidFast",
-  vidlink_anim: "VidLink", animekai: "AnimeKai",
+  vidlink_anim: "VidLink",
   animepahe: "AnimePahe", shahiid: "Shahiid", animelek: "Animelek",
   animedar: "Animedar", okanime: "OkAnime", ristoanime: "RistoAnime",
   animeify: "AnimeIfy", animeday: "AnimeDay", arabseed: "ArabSeed",
@@ -100,10 +98,11 @@ function getSiteTag(site: string): string {
 /* ── وصف قصير لكل مصدر في شبكة الاختيار (يطابق نظام الويب) ── */
 const SITE_DESC: Record<string, string> = {
   kawaii: "1080p · مباشر", animewitcher: "PD/ST · مباشر",
+  anineko: "ياباني مترجم · HLS · حتى 4 خوادم",
   dulo_anim: "ياباني/إنجليزي · HLS مباشر",
   vidlink_anim: "ياباني مترجم · مباشر",
   mitanime: "ياباني مترجم · مباشر", vidfast: "TMDB · HLS · متعدد الخوادم",
-  anikototv: "ياباني مترجم · skip مدمج", animekai: "ياباني مترجم · DB مباشر",
+  anikototv: "ياباني مترجم · skip مدمج",
   animepahe: "ياباني مترجم · HLS نظيف", anipm: "ياباني مترجم · 37 سيرفر/حلقة",
   shahiid: "عربي مدبلج / مترجم", animelek: "عربي مدبلج / مترجم",
   animedar: "عربي مترجم", okanime: "عربي مترجم",
@@ -114,7 +113,6 @@ const SITE_DESC: Record<string, string> = {
   faselhd_db: "عربي مترجم · GitHub DB", animetime: "عربي مترجم · مباشر",
   notorrent: "IMDB · مصادر متعددة", sanime: "عربي مدبلج/مترجم · MP4",
   anslayer: "مشغلات خارجية · MixDrop/MediaFire",
-  shirayuki_anikoto: "Shirayuki · Anikoto", shirayuki_animix: "Shirayuki · AnimiX",
   akwam: "عربي مترجم · MP4 مباشر",
 };
 function getSiteDesc(site: string): string {
@@ -122,7 +120,7 @@ function getSiteDesc(site: string): string {
 }
 
 /* مصادر محظورة في Nova Mobile — لا تُجلب ولا تُعرض حتى لو جاءت من كاش قديم. */
-const BLOCKED_SOURCE_SITES = new Set(["anikoto", "anineko", "hianime", "ak", "an", "hi"]);
+const BLOCKED_SOURCE_SITES = new Set(["hianime", "ak", "an", "hi"]);
 function isBlockedSource(src: Pick<Src, "site">): boolean {
   return BLOCKED_SOURCE_SITES.has(String(src.site || "").trim().toLowerCase());
 }
@@ -232,10 +230,11 @@ function ensureVpsProxy(url: string, headers: Record<string, string> | undefined
 /* ── أولويات المصادر: KW → AW → AF → SA → rest ── */
 const SITE_PRIORITY: Record<string, number> = {
   kawaii: 100, animewitcher: 90,
+  anineko: 72,
   animeify: 85, sanime: 80,
   dulo_anim: 70, vidlink_anim: 55,
   vidfast: 35,
-  anikototv: 30, animekai: 25, animepahe: 20, anipm: 18,
+  anikototv: 30, animepahe: 20, anipm: 18,
   sanime: 15,
 };
 
@@ -250,23 +249,20 @@ const STATIC_PICKER: Record<QualityKey, { site: string; name: string; tag: strin
     { site: "sanime",       name: "سـAnime",      tag: "SA" },
     { site: "animeify",     name: "أنمي فاي",    tag: "AF" },
     { site: "anifox",       name: "ANIFOX",      tag: "FX" },
-    { site: "shirayuki_anikoto",   name: "AK",  tag: "AK" },
-    { site: "shirayuki_animix",    name: "AX",  tag: "AX" },
+    { site: "anineko",      name: "AniNeko",      tag: "AN" },
   ],
   "720p": [
     { site: "animewitcher", name: "AnimeWitcher", tag: "AW" },
     { site: "sanime",       name: "سـAnime",      tag: "SA" },
     { site: "animeify",     name: "أنمي فاي",    tag: "AF" },
     { site: "anifox",       name: "ANIFOX",      tag: "FX" },
-    { site: "shirayuki_anikoto",   name: "AK",  tag: "AK" },
-    { site: "shirayuki_animix",    name: "AX",  tag: "AX" },
+    { site: "anineko",      name: "AniNeko",      tag: "AN" },
   ],
   "480p": [
     { site: "animewitcher", name: "AnimeWitcher", tag: "AW" },
     { site: "animeify",     name: "أنمي فاي",    tag: "AF" },
     { site: "anifox",       name: "ANIFOX",      tag: "FX" },
-    { site: "shirayuki_anikoto",   name: "AK",  tag: "AK" },
-    { site: "shirayuki_animix",    name: "AX",  tag: "AX" },
+    { site: "anineko",      name: "AniNeko",      tag: "AN" },
   ],
 };
 
@@ -299,7 +295,6 @@ const Q_KEY_SUB: Record<QualityKey, string> = {
 const SITE_TIMEOUT_MS = 28_000;
 const SITE_TIMEOUT_MAP: Record<string, number> = {
   anifox:       35_000,
-  shirayuki_anikoto: 26_000, shirayuki_animix: 26_000,
   animewitcher: 38_000,
   animeify:     22_000,
   sanime:       18_000,

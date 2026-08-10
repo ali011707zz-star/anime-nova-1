@@ -12305,11 +12305,9 @@ router.get("/anime/sources-stream", async (req, res) => {
       scrapeCached("topcinemaa",   () => getTopCimaaSources(title, english, ep, isMovie)),
       // ── ياباني مترجم (AniList ID) ─────────────────────────────────
       scrapeCached("kawaii",       () => getKawaiiAnimeSources(title, english, ep, anilistId), false, 14000),
-      scrapeCached("anikoto",      () => getAniKotoSources(title, english, ep, anilistId),      false),
       scrapeCached("anikototv",    () => getAnikototvSources(title, english, ep),               false, 22000),
       // anikuro: محذوف
       // anivault: محذوف — ترجمة إنجليزية مدمجة في الـ stream
-      scrapeCached("animekai",      () => getAnimeKaiSources(title, english, ep, anilistId),     false, 45000),
       // hianime: معطّل بطلب المستخدم 2026-07-30 — تفوّت حلقات
       // animex: محذوف
       // animepahe: mirurotvapi + owocdn AES-128 HLS — 18ث timeout — ثقيل
@@ -12423,23 +12421,26 @@ router.get("/anime/fetch-source", async (req, res) => {
   const ANIME_SOURCE_ALLOWLIST: Set<string> | null = new Set([
     "kawaii",        // ⚡ الأسرع — DB-cached (50ms) ✅
     "animewitcher",  // 🗄️ DB-first aw_links (142k) → Algolia fallback ✅
+    "anineko",       // 🐱 AniNeko — HLS مترجم، حتى 4 خوادم للحلقة
     "anifox",        // 📦 12 مصدر — Archive/MediaFire/MP4Upload/Uqload ✅
     "sanime",        // 🎌 MP4 مباشر عربي مدبلج ✅
     "anslayer",      // ⚡ بحث متوازٍ + dedupe للطلبات + cache
     "animeify",      // 🎬 أنمي فاي — MEGA/Streamtape/MediaFire ✅ (مُعاد تفعيله)
-    "shirayuki_anikoto",   // 🌸 Shirayuki · Anikoto
-    "shirayuki_animix",    // 🌸 Shirayuki · AnimiX
-    // ── معطّلة 2026-08-02 بطلب المستخدم (تحسين التزامن) ──────────────────────
-    // "anineko":    متوسط (3s) — معطّل
-    // "anikoto":    معطّل
-    // "animekai":   معطّل
+    // AK / AX / KI: متوقفة بطلب المستخدم — لا تُضاف إلى القائمة
     // "anipub":     معطّل
     // ── مُعطَّلة سابقاً ─────────────────────────────────────────────────────
     // "akoam": حُذف 2026-07-28 — كان يستخدم hopxBrowserExtract على كل طلب
     // "allmanga": معطّل 2026-07-17 — AA_CRYPTO_MISSING
   ]);
+  const DISABLED_ANIME_SOURCES = new Set([
+    "anikoto", "animekai", "shirayuki_anikoto", "shirayuki_animix",
+  ]);
   // الطلبات الداخلية (x-internal:1) تتجاوز القائمة لتسمح لـ animation.ts باستدعاء moviz_time وغيره
   const isInternalCall = req.headers["x-internal"] === "1";
+  if (DISABLED_ANIME_SOURCES.has(site)) {
+    res.json({ sources: [] });
+    return;
+  }
   if (ANIME_SOURCE_ALLOWLIST && !ANIME_SOURCE_ALLOWLIST.has(site) && !isInternalCall) {
     res.json({ sources: [] });
     return;
@@ -12560,9 +12561,7 @@ router.get("/anime/fetch-source", async (req, res) => {
       // case "moviz_time":  (await race(getMovizTimeSources(title, english, ep, isMovie), 20000, [])).forEach(collectSrc); break;
       case "topcinemaa":   await runExtract(await race(getTopCimaaSources(title, english, ep, isMovie), SCRAPER_MS, [])); break;
       case "kawaii":      (await race(getKawaiiAnimeSources(title, english, ep, anilistId), 14_000, [])).forEach(collectSrc); break;
-      case "anikoto":     (await race(getAniKotoSources(title, english, ep, anilistId),     20_000, [])).forEach(collectSrc); break;
       case "anikototv":   (await race(getAnikototvSources(title, english, ep),              25000, [])).forEach(collectSrc); break;
-      case "animekai":    (await race(getAnimeKaiSources(title, english, ep, anilistId),    40_000, [])).forEach(collectSrc); break;
       // anikuro: محذوف
       // anivault: محذوف
       // case "hianime": معطّل بطلب المستخدم 2026-07-30
@@ -12598,10 +12597,6 @@ router.get("/anime/fetch-source", async (req, res) => {
       case "sanime":       (await race(getSAnimeSources(title, english, ep, titleVariants),               20_000, [])).forEach(collectSrc); break;
       case "anifox":       (await race(getAnifoxSources(title, english, ep, titleVariants, anilistId),    30_000, [])).forEach(collectSrc); break;
       case "anslayer":     (await race(getAnimeSlayerSources(title, english, ep, anslayerId, titleAr), 45_000, [])).forEach(collectSrc); break;
-      case "shirayuki_anikoto":
-        (await race(getShirayukiSources(anilistId, ep, "anikoto"), 24_000, [])).forEach(collectSrc); break;
-      case "shirayuki_animix":
-        (await race(getShirayukiSources(anilistId, ep, "animix"), 24_000, [])).forEach(collectSrc); break;
       case "ristoanime":   (await race(getRistoAnimeSources(title, english, ep),          22_000, [])).forEach(collectSrc); break;
       // case "allmanga": معطّل 2026-07-17
       // case "nflixmovies_anim": حُذف 2026-07-30 — 0 مصادر (ميت)

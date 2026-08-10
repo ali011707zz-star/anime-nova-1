@@ -167,7 +167,6 @@ interface FetchedSrc {
 //    الكاملة محفوظة أعلاه في تاريخ Git — لإعادة أي مصدر أضِفه هنا وفي الباك-إند معاً.
 const SCRAPER_DEFS: { site: string; name: string; desc: string; tag: string; audioLang?: "en"; isArabic?: true }[] = [
   { site: "kawaii",       name: "كواي أنمي",    desc: "1080p · مباشر",            tag: "KW" },
-  { site: "anikoto",      name: "AniKoto",       desc: "ياباني مترجم · 1080p",    tag: "AK" },
   // hianime: معطّل بطلب المستخدم 2026-07-30 — تفوّت حلقات
   { site: "animewitcher", name: "AnimeWitcher",   desc: "PD/ST · مباشر",           tag: "AW", isArabic: true },
   { site: "anineko",      name: "AniNeko",        desc: "ياباني مترجم · HLS",      tag: "AN" },
@@ -184,8 +183,6 @@ const SCRAPER_DEFS: { site: string; name: string; desc: string; tag: string; aud
   // vidbolt_anim: معطّل 2026-07-30 — كود محفوظ (10 مصادر HLS)، يُفعَّل لاحقاً
   { site: "sanime",           name: "سـAnime",       desc: "عربي · MP4 مباشر",        tag: "SA", isArabic: true },
   { site: "anifox",           name: "ANIFOX",        desc: "Archive · MediaFire · MP4Upload · Uqload", tag: "FX", isArabic: true },
-  { site: "shirayuki_anikoto",   name: "AK",  desc: "Shirayuki · Anikoto",  tag: "AK" },
-  { site: "shirayuki_animix",    name: "AX",  desc: "Shirayuki · AnimiX",   tag: "AX" },
   // akoam: حُذف 2026-07-28 — كان يستخدم hopxBrowserExtract (browser) على كل طلب
 ];
 
@@ -202,23 +199,17 @@ const STATIC_PICKER_WEB: Record<WebQualityKey, { site: string; tag: string }[]> 
     { site: "sanime",       tag: "SA" },
     { site: "animeify",     tag: "AF" },
     { site: "anifox",       tag: "FX" },
-    { site: "shirayuki_anikoto",   tag: "AK" },
-    { site: "shirayuki_animix",    tag: "AX" },
   ],
   "720p": [
     { site: "animewitcher", tag: "AW" },
     { site: "sanime",       tag: "SA" },
     { site: "animeify",     tag: "AF" },
     { site: "anifox",       tag: "FX" },
-    { site: "shirayuki_anikoto",   tag: "AK" },
-    { site: "shirayuki_animix",    tag: "AX" },
   ],
   "480p": [
     { site: "animewitcher", tag: "AW" },
     { site: "animeify",     tag: "AF" },
     { site: "anifox",       tag: "FX" },
-    { site: "shirayuki_anikoto",   tag: "AK" },
-    { site: "shirayuki_animix",    tag: "AX" },
   ],
 };
 const WEB_Q_KEYS: WebQualityKey[] = ["1080p", "720p", "480p"];
@@ -236,9 +227,8 @@ const PICKER_QMAP: Record<WebQualityKey, Quality> = {
  * دون التأثير على سرعة تجربة المستخدم (auto-play يبقى فورياً).
  */
 const PRIORITY_FETCH_SITES = new Set([
-  "kawaii", "animewitcher", "dulo_anim", "anineko", "anikoto",
+  "kawaii", "animewitcher", "dulo_anim", "anineko",
   "animeify", "sanime", "anifox",  // ANIFOX: Archive/MediaFire/MP4Upload/Uqload
-  "shirayuki_anikoto", "shirayuki_animix",
   // shahiid/animelek: أُزيلت — معطّلة بطلب المستخدم 2026-07-14
 ]);
 
@@ -250,7 +240,7 @@ const PRIORITY_FETCH_SITES = new Set([
  */
 const PROVIDER_WANTS_SMART_SUB = new Set([
   "animepahe", "anineko",
-  "anikototv", "animekai", "dulo_anim",
+  "anikototv", "dulo_anim",
 ]);
 
 type SlotStatus = "idle" | "fetching" | "ready" | "failed";
@@ -3278,7 +3268,6 @@ export default function WatchPage() {
     /* timeout مُصمَّم لكل موقع — يجب أن يكون >= timeout الباكند لنفس الموقع
        حتى لا يُقتل الطلب قبل أن يرد الباكند (مشكلة جذرية لفقدان المصادر في cache البارد) */
     const SITE_REQUEST_TIMEOUTS: Record<string, number> = {
-      animekai:     46000,  // backend = 40s + هامش 6s
       animewitcher: 32000,  // backend = 28s + هامش 4s
       cinesrc_anim: 38000,  // backend = 35s + هامش 3s
       anime4up2:    28000,  // backend = 25s + هامش 3s
@@ -3288,7 +3277,6 @@ export default function WatchPage() {
       animeify:     28000,  // backend = 18s + هامش للاستخراج/الشبكة
       sanime:       28000,  // backend = 20s + هامش للبحث وinfo
       anifox:       38000,  // backend = 30s + هامش لتحميل الكتالوج أول مرة
-      shirayuki_anikoto: 26000, shirayuki_animix: 26000,
       // mitanime: محذوف 2026-07-27
       // reanime: محذوف 2026-07-24
       // hianime: معطّل 2026-07-30
