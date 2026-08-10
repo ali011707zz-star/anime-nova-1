@@ -18,6 +18,7 @@ import { logger } from "./lib/logger";
 import { setupSession, registerEmailAuthRoutes, registerGoogleAuthRoutes, registerGithubAuthRoutes } from "./auth/index.js";
 import sitemapRouter from "./routes/sitemap.js";
 import crashReportRouter from "./routes/crashReport.js";
+import hlsProxyRouter from "./routes/hlsProxy.js";
 import { validateAnonToken, checkRateLimit } from "./lib/security.js";
 
 // ── المسارات التي تتطلب توكن صالح ──
@@ -160,6 +161,9 @@ export async function createApp(): Promise<Express> {
   app.use(reportRouter);
   app.use(telegramRouter);
   app.use("/api/crash-report", crashReportRouter);
+  // Manifest-only proxy used by the mobile AniNeko player. Segment URLs are
+  // rewritten to absolute upstream URLs and are fetched directly by ExoPlayer.
+  app.use(hlsProxyRouter);
 
   // ── Proxy /nova-mobile/* → port 3000 (Nova Mobile static server) ──
   app.use("/nova-mobile", (req, res) => {

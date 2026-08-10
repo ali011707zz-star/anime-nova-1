@@ -6023,18 +6023,35 @@ function buildStardimaSources(post: any): UnifiedSource[] {
 // ── تغليف روابط CDN المباشرة للموبايل عبر VPS proxy ──────────────────────
 // CDN كثيرة تحجب IPs الموبايل بدون Referer صحيح من الخادم.
 // تُستدعى فقط إذا كان الطلب من تطبيق الموبايل (X-Nova-Client header).
-function wrapForMobile(s: { directUrl?: string; url?: string; directType?: string; isEmbed?: boolean; headers?: Record<string,string> }) {
+function wrapForMobile(s: { site?: string; directUrl?: string; url?: string; directType?: string; isEmbed?: boolean; headers?: Record<string,string> }) {
   if (s.isEmbed) return s;
-  const rawUrl = s.directUrl || s.url || "";
+  // AniNeko's native Android player needs a simple manifest-only proxy.
+  // Prefer the original m3u8 in `url`; `directUrl` may be the legacy
+  // encrypted /api/anime/hls-proxy URL from an older cache entry.
+  const rawUrl = s.site === "anineko"
+    ? (s.url || s.directUrl || "")
+    : (s.directUrl || s.url || "");
   if (!rawUrl) return s;
+  const ref = s.headers?.Referer || "";
+  const isHls = s.directType === "hls" || /\.m3u8|hls-proxy/i.test(rawUrl);
+
+  if (s.site === "anineko" && isHls && !rawUrl.startsWith("/proxy/hls")) {
+    const params = new URLSearchParams({
+      url: rawUrl,
+      referer: ref,
+      ua: BROWSER_UA,
+    });
+    const proxied = `/proxy/hls?${params.toString()}`;
+    return { ...s, directUrl: proxied, url: proxied, directType: "hls" };
+  }
+
   // بالفعل proxy عبر VPS
-  if (rawUrl.startsWith("/api/")) return s;
+  if (rawUrl.startsWith("/api/") || rawUrl.startsWith("/proxy/hls")) return s;
   // Shirayuki already rewrites child playlists and segments. Wrapping its
   // URL through Nova again creates a proxy-to-proxy request.
   if (rawUrl.includes("proxy.anikuro.ru/")) return { ...s, corsOk: true };
   // روابط embed/mega
   if (rawUrl.includes("mega.nz") || rawUrl.includes("mega.co.nz")) return s;
-  const ref = s.headers?.Referer || "";
   // لا نعتمد على امتداد الرابط فقط: AniNeko أحياناً يعيد token/playlist
   // بلا امتداد .m3u8، بينما directType هو المعلومة الموثوقة التي أعادها
   // الـ scraper. بدون ذلك يصل الرابط الخام إلى ExoPlayer فيحاول قراءته

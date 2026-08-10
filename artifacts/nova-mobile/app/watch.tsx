@@ -200,7 +200,7 @@ function resolveUrl(url: string | undefined, base: string): string {
 function ensureVpsProxy(url: string, headers: Record<string, string> | undefined, base: string): string {
   if (!url) return url;
   // بالفعل proxy عبر VPS
-  if (url.includes("/api/anime/") || url.includes("/api/animation/")) return url;
+  if (url.includes("/api/anime/") || url.includes("/api/animation/") || url.includes("/proxy/hls")) return url;
   // Shirayuki already rewrites child playlists and segments. Do not wrap
   // its proxy URL in Nova's HLS proxy a second time.
   if (url.includes("proxy.anikuro.ru/")) return url;
