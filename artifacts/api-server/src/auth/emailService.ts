@@ -255,23 +255,29 @@ async function sendViaResend(
   console.log(`[email] ✅ Resend → ${to}`);
 }
 
-/** إرسال بريد: Resend أولاً ← Gmail REST API ← SMTP */
+/** إرسال بريد: Resend أولاً ← Gmail REST API ← SMTP.
+ * إذا رفض Resend الإرسال (مثلاً لأن النطاق غير موثّق في وضع الاختبار)
+ * نتابع إلى مزوّد آخر بدلاً من إيقاف الطلب فوراً.
+ */
 async function sendEmail(
   to: string,
   subject: string,
   html: string,
   text: string,
 ): Promise<SendResult> {
+  const providerErrors: string[] = [];
+
   // 1. Resend (HTTPS/443 — مجاني بدون بطاقة — الأسهل إعداداً)
   try {
     await sendViaResend(to, subject, html, text);
     return { ok: true };
   } catch (err: any) {
-    if (err.message !== "RESEND_NOT_CONFIGURED") {
-      console.error("[email] Resend فشل:", err.message);
-      return { ok: false, error: `Resend: ${err.message}` };
+    if (err.message === "RESEND_NOT_CONFIGURED") {
+      console.warn("[email] Resend غير مُهيّأ — الانتقال إلى Gmail API/SMTP");
+    } else {
+      providerErrors.push(`Resend: ${err.message}`);
+      console.error("[email] Resend فشل — تجربة البديل:", err.message);
     }
-    // لا يوجد RESEND_API_KEY → جرّب Gmail API
   }
 
   // 2. Gmail REST API (HTTPS/443 — لا يُحجب)
@@ -279,11 +285,12 @@ async function sendEmail(
     await sendViaGmailApi(to, subject, html, text);
     return { ok: true };
   } catch (err: any) {
-    if (err.message !== "GMAIL_API_NOT_CONFIGURED") {
-      console.error("[email] Gmail API فشل:", err.message);
-      return { ok: false, error: `Gmail API: ${err.message}` };
+    if (err.message === "GMAIL_API_NOT_CONFIGURED") {
+      console.warn("[email] Gmail API غير مُهيّأ — الانتقال إلى SMTP");
+    } else {
+      providerErrors.push(`Gmail API: ${err.message}`);
+      console.error("[email] Gmail API فشل — تجربة SMTP:", err.message);
     }
-    // لا يوجد Gmail API credentials → جرّب SMTP
   }
 
   // 3. SMTP fallback (يعمل إذا لم تكن المنافذ محجوبة)
@@ -296,10 +303,15 @@ async function sendEmail(
     return { ok: true, messageId: info.messageId };
   } catch (err: any) {
     const msg = err.message === "SMTP_NOT_CONFIGURED"
-      ? "البريد معطّل — أضف RESEND_API_KEY (مجاني من resend.com) أو Gmail API credentials"
+      ? "SMTP_NOT_CONFIGURED"
       : err.message;
+    providerErrors.push(`SMTP: ${msg}`);
     console.error("[email] SMTP فشل:", msg);
-    return { ok: false, error: msg };
+    return {
+      ok: false,
+      // التفاصيل تبقى في سجل الخادم ولا تُعرض للمستخدم النهائي.
+      error: providerErrors.join(" | ") || "EMAIL_DELIVERY_FAILED",
+    };
   }
 }
 

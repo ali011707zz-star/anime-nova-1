@@ -139,8 +139,12 @@ export function registerEmailAuthRoutes(app: Express): void {
         ? await sendPasswordResetEmail(emailKey, code)
         : await sendVerifyEmail(emailKey, code);
 
-      if (!result.ok)
-        return res.status(502).json({ error: result.error || "فشل إرسال البريد، تحقق من إعدادات البريد على الخادم" });
+      if (!result.ok) {
+        console.error("[send-verify-code] email delivery failed:", result.error || "EMAIL_DELIVERY_FAILED");
+        return res.status(502).json({
+          error: "تعذر إرسال رسالة التحقق حالياً. حاول مرة أخرى لاحقاً.",
+        });
+      }
 
       // لا نحجز البريد لمدة دقيقة إذا فشل SMTP؛ احفظ الكود فقط بعد نجاح الإرسال.
       await setPendingCode(emailKey, code, type as "signup" | "reset");
