@@ -5854,7 +5854,13 @@ async function getKawaiiAnimeSources(
     // ── kawaii CDN: cdn.momentoai.dev يشترط Referer: kawaiianime.cc ──
     // المتصفح لا يستطيع تعيين Referer كـ forbidden header → التشغيل المباشر يفشل.
     // الحل: توجيه كل المصادر عبر VPS proxy مع الـ Referer الصحيح.
-    // فلترة: نقبل روابط cdn.momentoai.dev + video.kawaii-anime.com (legacy) + مسارات نسبية.
+    // فلترة: كواي بدّل CDN إلى cdn.mewstream.buzz مؤخراً. يجب قبول النطاقات
+    // المعروفة فقط؛ إسقاط هذا النطاق يجعل الحلقة تظهر بلا مصدر ويفشل التنزيل.
+    const KAWAII_CDN_HOSTS = new Set([
+      "cdn.momentoai.dev",
+      "video.kawaii-anime.com",
+      "cdn.mewstream.buzz",
+    ]);
     const trustedSources = data.sources
       .map(s => {
         if (!s?.url) return null;
@@ -5863,12 +5869,11 @@ async function getKawaiiAnimeSources(
           return { ...s, url };
         } catch { return null; }
       })
-      .filter((s): s is NonNullable<typeof s> =>
-        !!s && (
-          s.url.includes("cdn.momentoai.dev") ||
-          s.url.includes("video.kawaii-anime.com")
-        )
-      );
+      .filter((s): s is NonNullable<typeof s> => {
+        if (!s) return false;
+        try { return KAWAII_CDN_HOSTS.has(new URL(s.url).hostname.toLowerCase()); }
+        catch { return false; }
+      });
     if (!trustedSources.length) return [];
 
     const kawaiiRef = encodeURIComponent(KAWAII_BASE + "/");
@@ -12343,7 +12348,6 @@ router.get("/anime/sources-stream", async (req, res) => {
       // hianime: معطّل بطلب المستخدم 2026-07-30 — تفوّت حلقات
       // animex: محذوف
       // animepahe: mirurotvapi + owocdn AES-128 HLS — 18ث timeout — ثقيل
-      scrapeCached("anineko",      () => getAninekoSources(title, english, ep),                 false),
       scrapeCached("anipm",        () => getAniPmSources(title, english, ep, anilistId),        false, 20000),
       scrapeCached("anizone",      () => getAniZoneSources(title, english, ep),                 false, 18000),
       scrapeCached("2dhive",       () => get2DhiveSources(title, english, ep),                  true,  20000),
@@ -12446,7 +12450,7 @@ router.get("/anime/fetch-source", async (req, res) => {
   }
 
   // ── تقييد مؤقت (بطلب المستخدم 2026-07-13): تعطيل كل مصادر قسم الأنمي ما عدا
-  //    كواي(kawaii) / أنمي سلاير(anslayer) / أنيمينيكو(anineko) / AniKoto(anikoto) /
+  //    كواي(kawaii) / أنمي سلاير(anslayer) / AniKoto(anikoto) /
   //    HiAnime(hianime) / AnimeWitcher(animewitcher) / أنمي فاي(animeify) —
   //    السكرابر لا يمر بأي موقع آخر إطلاقاً، نفس نظام قسم الأنيميشن (ANIM_SOURCE_ALLOWLIST).
   //    لإعادة التفعيل: احذف/عدّل ANIME_SOURCE_ALLOWLIST بالأسفل. ─────────────────
@@ -12457,7 +12461,6 @@ router.get("/anime/fetch-source", async (req, res) => {
     "sanime",        // 🎌 MP4 مباشر عربي مدبلج ✅
     "anslayer",      // ⚡ بحث متوازٍ + dedupe للطلبات + cache
     "animeify",      // 🎬 أنمي فاي — MEGA/Streamtape/MediaFire ✅ (مُعاد تفعيله)
-    "anineko",        // 🐱 AniNeko — HLS مترجم
     // "anipub":     معطّل
     // ── مُعطَّلة سابقاً ─────────────────────────────────────────────────────
     // "akoam": حُذف 2026-07-28 — كان يستخدم hopxBrowserExtract على كل طلب
@@ -12480,7 +12483,7 @@ router.get("/anime/fetch-source", async (req, res) => {
   // ── فحص الكاش أولاً ─────────────────────────────────────────────
   // مواقع ذات tokens/URLs قصيرة الأجل — لا نقدّم بياناتها إذا كانت قديمة
   const SHORT_TTL_FETCH_SITES = new Set([
-    "anineko", "anikoto", "anikototv", // vibeplayer.site tokens ~1-2h
+    "anikoto", "anikototv", // vibeplayer.site tokens ~1-2h
     "animewitcher", "animeify",                    // Streamtape/MediaFire ~45min
     "kawaii", "anifox",                             // signed CDN/download URLs
     "moviebox", "moviebox_anim",                   // &t= signed URLs ~10min
@@ -12571,7 +12574,7 @@ router.get("/anime/fetch-source", async (req, res) => {
   }
 
   // scrapers that use probe-only (no deep extraction)
-  const probeOnly = new Set(["animeify","kawaii","anikoto","anikototv","animewitcher","anineko","anizone","stardima"]);
+  const probeOnly = new Set(["animeify","kawaii","anikoto","anikototv","animewitcher","anizone","stardima"]);
 
   try {
     switch (site) {
@@ -12598,7 +12601,6 @@ router.get("/anime/fetch-source", async (req, res) => {
       // case "hianime": معطّل بطلب المستخدم 2026-07-30
       case "animewitcher":(await race(getAnimeWitcherSources(title, english, ep, anilistId, titleVariants),38000, [])).forEach(collectSrc); break;
       case "stardima":    (await race(getStardimaSources(title, english, ep, isMovie),       20000, [])).forEach(collectSrc); break;
-      case "anineko":       (await race(getAninekoSources(title, english, ep),                20_000, [])).forEach(collectSrc); break;
       case "anipm":         (await race(getAniPmSources(title, english, ep, anilistId),       20_000,     [])).forEach(collectSrc); break;
       case "anizone":       (await race(getAniZoneSources(title, english, ep),               18_000,     [])).forEach(collectSrc); break;
       case "2dhive":        await runExtract(await race(get2DhiveSources(title, english, ep), 20_000, [])); break;
@@ -14856,8 +14858,8 @@ function cuesToVtt(body: string): string {
 
 router.get("/anime/download-mp4", async (req, res) => {
   const site = String(req.query.site || "").trim().toLowerCase();
-  if (site !== "anineko" && site !== "kawaii") {
-    res.status(400).send("download conversion is only available for AN and KW");
+  if (site !== "kawaii") {
+    res.status(400).send("download conversion is only available for KW");
     return;
   }
 

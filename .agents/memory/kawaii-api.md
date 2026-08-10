@@ -41,4 +41,11 @@ description: How to scrape kawaii-anime.com — uses AniList IDs natively, has A
 - SSE endpoint needs `req.query.anime` extracted as anilistId
 - `lang` vs `label` field inconsistency possible → check both
 
+## CDN rotation
+The API may return HLS URLs on `cdn.mewstream.buzz` (for example, One Piece episode 1173), in addition to the older `cdn.momentoai.dev` and `video.kawaii-anime.com` hosts. The scraper must allowlist the hostname and send the URL through the VPS HLS proxy with the Kawaii referer.
+
+**Why:** Kawaii's API can rotate its media CDN without changing the API contract; filtering only the old hosts makes an otherwise valid episode disappear and also breaks conversion downloads.
+
+**How to apply:** When Kawaii returns a new CDN, verify the hostname is trusted before adding it to the server-side Kawaii host allowlist. Keep the proxy path and referer handling unchanged.
+
 **Why:** kawaii's API returns both Arabic and English subtitles for new anime. Old code only looked for English and missed Arabic entirely.

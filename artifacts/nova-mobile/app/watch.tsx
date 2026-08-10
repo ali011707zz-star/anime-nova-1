@@ -68,7 +68,7 @@ const SITE_TAG: Record<string, string> = {
   shahiid: "SH", animelek: "EK", animedar: "AD", okanime: "OK",
   ristoanime: "RS", animeify: "AF", animeday: "DY", arabseed: "AR",
   anime4up2: "4U", mycima: "MC", topcinemaa: "TC",
-  animewitcher: "AW", kawaii: "KW", anineko: "AN",
+  animewitcher: "AW", kawaii: "KW",
   vidlink_anim: "VL", vidfast: "VF",
   animetime: "AT", animepahe: "AP", dulo_anim: "DL",
   faselhd_db: "FH",
@@ -78,7 +78,7 @@ const SITE_TAG: Record<string, string> = {
 
 /* ── اسم عرض لكل موقع في منتقي المصادر ── */
 const SITE_LABEL: Record<string, string> = {
-  kawaii: "Kawaii", animewitcher: "AnimeWitcher", anineko: "AniNeko",
+  kawaii: "Kawaii", animewitcher: "AnimeWitcher",
   dulo_anim: "Dulo",
   anikototv: "AniKotoTV", mitanime: "MITanime", vidfast: "VidFast",
   animepahe: "AnimePahe", shahiid: "Shahiid", animelek: "Animelek",
@@ -96,7 +96,6 @@ function getSiteTag(site: string): string {
 /* ── وصف قصير لكل مصدر في شبكة الاختيار (يطابق نظام الويب) ── */
 const SITE_DESC: Record<string, string> = {
   kawaii: "1080p · مباشر", animewitcher: "PD/ST · مباشر",
-  anineko: "ياباني مترجم · HLS · حتى 4 خوادم",
   dulo_anim: "ياباني/إنجليزي · HLS مباشر",
   vidlink_anim: "ياباني مترجم · مباشر",
   mitanime: "ياباني مترجم · مباشر", vidfast: "TMDB · HLS · متعدد الخوادم",
@@ -117,7 +116,7 @@ function getSiteDesc(site: string): string {
 }
 
 /* مصادر محظورة في Nova Mobile — لا تُجلب ولا تُعرض حتى لو جاءت من كاش قديم. */
-const BLOCKED_SOURCE_SITES = new Set(["hianime", "ak", "an", "hi"]);
+const BLOCKED_SOURCE_SITES = new Set(["hianime", "ak", "an", "anineko", "hi"]);
 function isBlockedSource(src: Pick<Src, "site">): boolean {
   return BLOCKED_SOURCE_SITES.has(String(src.site || "").trim().toLowerCase());
 }
@@ -241,7 +240,6 @@ function buildEmbeddedDownloadUrl(
 /* ── أولويات المصادر: KW → AW → AF → SA → rest ── */
 const SITE_PRIORITY: Record<string, number> = {
   kawaii: 100, animewitcher: 90,
-  anineko: 72,
   animeify: 85, sanime: 80,
   dulo_anim: 70, vidlink_anim: 55,
   vidfast: 35,
@@ -258,20 +256,17 @@ const STATIC_PICKER: Record<QualityKey, { site: string; name: string; tag: strin
     { site: "sanime",       name: "سـAnime",      tag: "SA" },
     { site: "animeify",     name: "أنمي فاي",    tag: "AF" },
     { site: "anifox",       name: "ANIFOX",      tag: "FX" },
-    { site: "anineko",      name: "AniNeko",      tag: "AN" },
   ],
   "720p": [
     { site: "animewitcher", name: "AnimeWitcher", tag: "AW" },
     { site: "sanime",       name: "سـAnime",      tag: "SA" },
     { site: "animeify",     name: "أنمي فاي",    tag: "AF" },
     { site: "anifox",       name: "ANIFOX",      tag: "FX" },
-    { site: "anineko",      name: "AniNeko",      tag: "AN" },
   ],
   "480p": [
     { site: "animewitcher", name: "AnimeWitcher", tag: "AW" },
     { site: "animeify",     name: "أنمي فاي",    tag: "AF" },
     { site: "anifox",       name: "ANIFOX",      tag: "FX" },
-    { site: "anineko",      name: "AniNeko",      tag: "AN" },
   ],
 };
 
@@ -677,7 +672,7 @@ export default function WatchScreen() {
 
     const token = await getAuthToken();
     /* Fire-and-forget — يعمل في الخلفية بمستقل عن lifecycle هذه الشاشة */
-    const downloadUrl = (site === "anineko" || site === "kawaii")
+    const downloadUrl = site === "kawaii"
       ? buildEmbeddedDownloadUrl(site, proxyUrl, subtitleUrl, base)
       : proxyUrl;
     void startGlobalDownload({
@@ -759,7 +754,7 @@ export default function WatchScreen() {
       const subRaw    = best.subtitleUrl || globalSubUrl;
       const subtitleUrl = subRaw ? resolveUrl(subRaw, base) : undefined;
       const token     = await getAuthToken();
-      const downloadUrl = (site === "anineko" || site === "kawaii")
+      const downloadUrl = site === "kawaii"
         ? buildEmbeddedDownloadUrl(site, proxyUrl, subtitleUrl, base)
         : proxyUrl;
 
