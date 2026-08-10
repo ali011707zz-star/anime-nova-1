@@ -96,7 +96,7 @@ export function computeExpiry(site: string, sources: any[]): number {
   let minExpiry = siteDefault;
 
   for (const src of sources) {
-    for (const rawField of [src.directUrl, src.url, src.proxyUrl] as (string | undefined)[]) {
+    for (const rawField of [src.directUrl, src.url, src.proxyUrl, src.rawUrl] as (string | undefined)[]) {
       if (!rawField) continue;
       let url = rawField;
       if (url.startsWith("/api/")) {

@@ -5805,6 +5805,41 @@ async function getAkoamSources(
 // ════════════════════════════════════════════════════════════════════
 // الدومين الجديد (kawaii-anime.com → kawaiianime.cc، CDN: cdn.momentoai.dev)
 const KAWAII_BASE = "https://kawaiianime.cc";
+const KAWAII_CDN_HOSTS = new Set([
+  "cdn.momentoai.dev",
+  "video.kawaii-anime.com",
+  "cdn.mewstream.buzz",
+]);
+
+/**
+ * Kawaii rotates the hostname used for signed media URLs. Keep the explicit
+ * hosts for compatibility, but also accept a rotated Kawaii subdomain or a
+ * CDN-shaped hostname carrying Kawaii's md5+expiry signature. The URL still
+ * has to be HTTPS and must come from the trusted Kawaii API response.
+ */
+function isTrustedKawaiiCdnUrl(rawUrl: string): boolean {
+  try {
+    const parsed = new URL(rawUrl, KAWAII_BASE);
+    if (parsed.protocol !== "https:" || parsed.username || parsed.password || parsed.port) return false;
+    const host = parsed.hostname.toLowerCase();
+    if (
+      KAWAII_CDN_HOSTS.has(host) ||
+      host.endsWith(".kawaii-anime.com") ||
+      host.endsWith(".momentoai.dev") ||
+      host.endsWith(".mewstream.buzz")
+    ) return true;
+
+    const signed = parsed.searchParams.has("md5") && (
+      parsed.searchParams.has("expires") ||
+      parsed.searchParams.has("expire") ||
+      parsed.searchParams.has("exp") ||
+      parsed.searchParams.has("validto")
+    );
+    return signed && /^(cdn|video)([.-][a-z0-9-]+)*\./i.test(host);
+  } catch {
+    return false;
+  }
+}
 
 async function getKawaiiAnimeSources(
   _title: string, _english: string | null, ep: number, anilistId?: number,
@@ -5854,13 +5889,6 @@ async function getKawaiiAnimeSources(
     // ── kawaii CDN: cdn.momentoai.dev يشترط Referer: kawaiianime.cc ──
     // المتصفح لا يستطيع تعيين Referer كـ forbidden header → التشغيل المباشر يفشل.
     // الحل: توجيه كل المصادر عبر VPS proxy مع الـ Referer الصحيح.
-    // فلترة: كواي بدّل CDN إلى cdn.mewstream.buzz مؤخراً. يجب قبول النطاقات
-    // المعروفة فقط؛ إسقاط هذا النطاق يجعل الحلقة تظهر بلا مصدر ويفشل التنزيل.
-    const KAWAII_CDN_HOSTS = new Set([
-      "cdn.momentoai.dev",
-      "video.kawaii-anime.com",
-      "cdn.mewstream.buzz",
-    ]);
     const trustedSources = data.sources
       .map(s => {
         if (!s?.url) return null;
@@ -5871,8 +5899,7 @@ async function getKawaiiAnimeSources(
       })
       .filter((s): s is NonNullable<typeof s> => {
         if (!s) return false;
-        try { return KAWAII_CDN_HOSTS.has(new URL(s.url).hostname.toLowerCase()); }
-        catch { return false; }
+         return isTrustedKawaiiCdnUrl(s.url);
       });
     if (!trustedSources.length) return [];
 
@@ -12492,7 +12519,13 @@ router.get("/anime/fetch-source", async (req, res) => {
   ]);
   const SHORT_TTL_MAX_AGE_MS = 90 * 60_000; // 90 دقيقة — قبل انتهاء tokens
   // Shirayuki returns short-lived CDN URLs; never serve its cached rows.
-  const FORCE_LIVE_FETCH_SITES = new Set(["shirayuki_anikoto", "shirayuki_animix"]);
+  const FORCE_LIVE_FETCH_SITES = new Set([
+    "shirayuki_anikoto",
+    "shirayuki_animix",
+    // Kawaii links are episode-specific signed URLs and the catalog changes
+    // while an episode is still being added. Always ask Kawaii for a fresh URL.
+    "kawaii",
+  ]);
   const cKey = makeSourceCacheKey(site, title, ep);
   let cached = await getFromSourceCache(cKey);
   if (cached && site === "anifox") {
@@ -14835,6 +14868,46 @@ function localApiUrl(raw: string, allowedPaths: string[], req: Request): string 
   }
 }
 
+function trustedKawaiiMediaUrl(raw: string): string | null {
+  if (!raw) return null;
+  try {
+    const parsed = new URL(raw);
+    return isTrustedKawaiiCdnUrl(parsed.toString()) ? parsed.toString() : null;
+  } catch {
+    return null;
+  }
+}
+
+function proxyTargetFromLocalUrl(sourceUrl: string): { url: string; ref: string; isHls: boolean } | null {
+  try {
+    const parsed = new URL(sourceUrl);
+    const rawTarget = parsed.searchParams.get("url") || "";
+    const rawRef = parsed.searchParams.get("ref") || "";
+    const url = isEncrypted(rawTarget) ? decryptParam(rawTarget) : rawTarget;
+    const ref = isEncrypted(rawRef) ? decryptParam(rawRef) : rawRef;
+    if (!isTrustedKawaiiMediaUrl(url)) return null;
+    return {
+      url,
+      ref,
+      isHls: parsed.pathname === "/api/anime/hls-proxy",
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function streamKawaiiMp4(
+  sourceUrl: string,
+  req: Request,
+  res: Response,
+): Promise<boolean> {
+  const target = proxyTargetFromLocalUrl(sourceUrl);
+  if (!target || target.isHls) return false;
+  res.setHeader("Content-Disposition", `attachment; filename="nova-episode.mp4"`);
+  await serveMediaVPS(target.url, target.ref, req, res);
+  return res.headersSent;
+}
+
 function cuesToVtt(body: string): string {
   try {
     const payload = JSON.parse(body) as { cues?: Array<{ timing?: string; text?: string }> };
@@ -14863,12 +14936,16 @@ router.get("/anime/download-mp4", async (req, res) => {
     return;
   }
 
+  const requestedUrl = String(req.query.url || "");
   const sourceUrl = localApiUrl(
-    String(req.query.url || ""),
+    requestedUrl,
     ["/api/anime/hls-proxy", "/api/anime/video-proxy"],
     req,
   );
-  if (!sourceUrl) {
+  const rawKawaiiUrl = site === "kawaii" && !sourceUrl
+    ? trustedKawaiiMediaUrl(requestedUrl)
+    : null;
+  if (!sourceUrl && !rawKawaiiUrl) {
     res.status(400).send("invalid proxied media url");
     return;
   }
@@ -14893,6 +14970,23 @@ router.get("/anime/download-mp4", async (req, res) => {
   res.on("close", cleanup);
 
   try {
+    // MP4 Kawaii URLs are already signed media files. Stream them through the
+    // same VPS proxy used by the player instead of invoking ffmpeg. This is
+    // critical for DownloadResumable: a retry Range request must not trigger a
+    // second full conversion before the first byte is sent.
+    if (site === "kawaii" && !subtitleUrl) {
+      if (rawKawaiiUrl) {
+        res.setHeader("Content-Disposition", `attachment; filename="nova-episode.mp4"`);
+        await serveMediaVPS(rawKawaiiUrl, KAWAII_BASE + "/", req, res);
+        return;
+      }
+      if (sourceUrl && await streamKawaiiMp4(sourceUrl, req, res)) return;
+    }
+
+    if (!sourceUrl) {
+      res.status(400).send("invalid media url");
+      return;
+    }
     if (subtitleUrl) {
       const subtitleResponse = await fetch(subtitleUrl, {
         headers: { Accept: "application/json,text/vtt,text/plain,*/*" },

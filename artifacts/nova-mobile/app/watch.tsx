@@ -233,16 +233,26 @@ function buildEmbeddedDownloadUrl(
     url: mediaUrl,
   });
   if (subtitleUrl) {
-    // download-mp4 intentionally accepts only internal proxy URLs. Kawaii
-    // returns an external VTT URL, so proxy it before handing it to ffmpeg.
+    // Kawaii MP4 downloads are streamed directly so DownloadResumable can use
+    // Range/resume. The subtitle is saved as a local VTT sidecar after the
+    // video completes; only legacy/non-Kawaii conversions pass it to ffmpeg.
     const isInternalSubtitle = subtitleUrl.includes("/api/anime/proxy-text")
       || subtitleUrl.includes("/api/anime/translate-vtt");
     const downloadSubtitle = site === "kawaii" && !isInternalSubtitle
       ? `${base}/api/anime/proxy-text?url=${encodeURIComponent(subtitleUrl)}&ref=${encodeURIComponent("https://kawaiianime.cc/")}`
       : subtitleUrl;
-    query.set("subtitleUrl", downloadSubtitle);
+    if (site !== "kawaii") query.set("subtitleUrl", downloadSubtitle);
   }
   return `${base}/api/anime/download-mp4?${query.toString()}`;
+}
+
+function normalizeKawaiiSubtitleUrl(url: string | undefined, base: string): string | undefined {
+  if (!url) return undefined;
+  const resolved = resolveUrl(url, base);
+  if (resolved.includes("/api/anime/translate-vtt") || resolved.includes("/api/anime/proxy-text")) {
+    return resolved;
+  }
+  return `${base}/api/anime/proxy-text?url=${encodeURIComponent(resolved)}&ref=${encodeURIComponent("https://kawaiianime.cc/")}`;
 }
 
 /* ── مصادر تُشغَّل native مباشرةً عبر RiftPlayer (seg-proxy يُعيد روابط مطلقة الآن) ── */
@@ -678,7 +688,9 @@ export default function WatchScreen() {
     const subRaw     = subtitlesDisabledForSite(site)
       ? undefined
       : (best.subtitleUrl || globalSubUrl);
-    const subtitleUrl = subRaw ? resolveUrl(subRaw, base) : undefined;
+     const subtitleUrl = site === "kawaii"
+       ? normalizeKawaiiSubtitleUrl(subRaw, base)
+       : (subRaw ? resolveUrl(subRaw, base) : undefined);
 
     const token = await getAuthToken();
     /* Fire-and-forget — يعمل في الخلفية بمستقل عن lifecycle هذه الشاشة */
@@ -762,7 +774,9 @@ export default function WatchScreen() {
       const hdrs      = best.headers || extractProxyHeaders(rawUrl);
       const proxyUrl  = ensureVpsProxy(rawUrl, hdrs, base);
       const subRaw    = best.subtitleUrl || globalSubUrl;
-      const subtitleUrl = subRaw ? resolveUrl(subRaw, base) : undefined;
+       const subtitleUrl = site === "kawaii"
+         ? normalizeKawaiiSubtitleUrl(subRaw, base)
+         : (subRaw ? resolveUrl(subRaw, base) : undefined);
       const token     = await getAuthToken();
       const downloadUrl = site === "kawaii"
         ? buildEmbeddedDownloadUrl(site, proxyUrl, subtitleUrl, base)
