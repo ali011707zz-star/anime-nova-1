@@ -33,6 +33,8 @@ module.exports = {
         SMTP_PORT: "587",
         SMTP_USER: _e("SMTP_USER"),
         SMTP_PASS: _e("SMTP_PASS"),
+        RESEND_API_KEY: _e("RESEND_API_KEY"),
+        RESEND_FROM: _e("RESEND_FROM") || "Anime NOVA <onboarding@resend.dev>",
         APP_DOMAIN: _e("APP_DOMAIN") || "animenovaa.duckdns.org",
         SESSION_SECRET: _e("SESSION_SECRET"),
         APP_SECRET: _e("APP_SECRET"),
