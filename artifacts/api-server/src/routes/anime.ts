@@ -6790,6 +6790,13 @@ async function getAninekoSources(
                       : embedUrl.includes("otakuvid") ? "OtakuVid"
                       : embedUrl.includes("playmogo") ? "PlayMogo"
                       : "VibePlayer";
+      const sourceHeaders = (() => {
+        try {
+          return { Referer: referer, Origin: new URL(referer).origin };
+        } catch {
+          return { Referer: referer };
+        }
+      })();
 
       if (multiQualities.length > 0) {
         for (const q of multiQualities) {
@@ -6803,6 +6810,9 @@ async function getAninekoSources(
             directUrl: proxied,
             directType: "hls",
             subtitleUrl,
+            // Keep the source identity available to Android if seg-proxy has
+            // to redirect a blocked CDN request back to the device.
+            headers: sourceHeaders,
           });
         }
       } else if (m3u8Url) {
@@ -6816,6 +6826,7 @@ async function getAninekoSources(
           directUrl: proxied,
           directType: "hls",
           subtitleUrl,
+          headers: sourceHeaders,
         });
       }
 
@@ -15026,9 +15037,18 @@ router.get("/anime/seg-proxy", async (req, res) => {
       if (cl) res.setHeader("Content-Length", cl);
       res.setHeader("Accept-Ranges", r.headers.get("accept-ranges") || "bytes");
       res.setHeader("Cache-Control", "public, max-age=60");
-      const correctedCt = (ct === "application/octet-stream" || ct === "binary/octet-stream") && /\.mp4(\?|$)/i.test(url)
-        ? "video/mp4"
-        : ct;
+      // AniNeko's newer CDNs sometimes return a real MPEG-TS/fMP4 segment
+      // with a generic image/octet-stream content type. ExoPlayer trusts this
+      // header and then rejects the otherwise valid segment. Classify the
+      // bytes before passing the response through.
+      const magic = mediaMagic(Buffer.from(raw));
+      const correctedCt = magic === "ts"
+        ? "video/MP2T"
+        : magic === "mp4"
+          ? "video/mp4"
+          : (ct === "application/octet-stream" || ct === "binary/octet-stream") && /\.mp4(\?|$)/i.test(url)
+            ? "video/mp4"
+            : ct;
       res.setHeader("Content-Type", correctedCt);
       res.status(200).end(Buffer.from(raw));
       return true;
@@ -15041,7 +15061,7 @@ router.get("/anime/seg-proxy", async (req, res) => {
       const raw = await r.arrayBuffer();
       const buf  = Buffer.from(raw);
       // MPEG TS sync byte = 0x47, packet size = 188 bytes
-      if (buf.length > 1000 && buf[0] === 0x47) {
+      if (buf.length > 1000 && mediaMagic(buf) === "ts") {
         // بيانات TS حقيقية بـ Content-Type خاطئ → صحّح وأرسل
         res.setHeader("Content-Type", "video/MP2T");
         res.setHeader("Content-Length", String(buf.length));
