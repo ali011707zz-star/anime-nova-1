@@ -9,6 +9,7 @@ import { AppState, Platform } from "react-native";
 import * as FileSystem from "expo-file-system";
 import * as Notifications from "expo-notifications";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { getAuthToken } from "./secureApi";
 
 const DOWNLOADS_KEY = "nova-downloads-v3";
 const ACTIVE_PENDING_KEY = "nova-downloads-active-v2";
@@ -90,6 +91,10 @@ const active = new Map<string, RuntimeDownload>();
 const listeners = new Set<() => void>();
 let notificationsReady: Promise<boolean> | null = null;
 let persistQueue = Promise.resolve();
+
+function isPaused(entry: RuntimeDownload): boolean {
+  return entry.status === "paused";
+}
 
 export function makeDownloadId(animeId: number, ep: number): string {
   return `${animeId}_ep${ep}`;
@@ -472,13 +477,18 @@ function makeResumable(
   resumeState?: ResumeState,
 ): FileSystem.DownloadResumable {
   const state = resumeState;
+  const options: DownloadOptions = {
+    ...(state?.options ?? {
+      sessionType: FileSystem.FileSystemSessionType.BACKGROUND,
+    }),
+    /* A saved download may outlive the anon token that created it. Keep the
+       native session settings, but always use the current request headers. */
+    headers: requestHeaders(entry.params),
+  };
   return FileSystem.createDownloadResumable(
     state?.url ?? entry.params.url,
     state?.fileUri ?? entry.localPath,
-    state?.options ?? {
-      headers: requestHeaders(entry.params),
-      sessionType: FileSystem.FileSystemSessionType.BACKGROUND,
-    },
+    options,
     (progress) => {
       entry.bytesWritten = Math.max(0, progress.totalBytesWritten);
       entry.totalBytes = progress.totalBytesExpectedToWrite;
@@ -533,7 +543,7 @@ async function runDownload(entry: RuntimeDownload): Promise<void> {
       if (!active.has(entry.id)) return;
       /* A user pause also interrupts downloadAsync on some Android versions.
          Do not treat that intentional interruption as a failed retry. */
-      if (entry.status === "paused") return;
+      if (isPaused(entry)) return;
       /* Keep the resumable state and partial file. A subsequent attempt starts
          from the saved native resume state instead of deleting the download. */
       try {
@@ -636,10 +646,14 @@ export async function restoreInterruptedDownloads(): Promise<void> {
     if (!Array.isArray(records)) return;
 
     const completed = await getDownloads();
+    /* download-mp4 is protected by the same anon-token middleware as source
+       fetching. Refresh once before rebuilding tasks so an app restart does
+       not turn a resumable download into a permanent 403. */
+    const restoredToken = await getAuthToken();
     for (const record of records) {
       if (!record?.id || completed.some((item) => item.id === record.id)) continue;
       if (!record.url || !record.localPath) continue;
-      enqueueDownload({
+      const params: StartDownloadParams = {
         animeId: record.animeId,
         ep: record.ep,
         title: record.title,
@@ -647,22 +661,26 @@ export async function restoreInterruptedDownloads(): Promise<void> {
         site: record.site,
         quality: record.quality,
         url: record.url,
+        authToken: restoredToken,
         subtitleUrl: record.subtitleUrl,
-      }, record.resumeState ?? (Platform.OS === "android" && record.bytesWritten > 0
+      };
+      const savedResumeState = record.resumeState
+        ? {
+            ...record.resumeState,
+            options: {
+              ...record.resumeState.options,
+              headers: requestHeaders(params),
+            },
+          }
+        : undefined;
+      enqueueDownload({
+        ...params,
+      }, savedResumeState ?? (Platform.OS === "android" && record.bytesWritten > 0
         ? {
             url: record.url,
             fileUri: record.localPath,
             options: {
-              headers: requestHeaders({
-                animeId: record.animeId,
-                ep: record.ep,
-                title: record.title,
-                cover: record.cover,
-                site: record.site,
-                quality: record.quality,
-                url: record.url,
-                subtitleUrl: record.subtitleUrl,
-              }),
+              headers: requestHeaders(params),
               sessionType: FileSystem.FileSystemSessionType.BACKGROUND,
             },
             resumeData: String(record.bytesWritten),

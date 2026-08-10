@@ -14880,11 +14880,44 @@ router.get("/anime/download-mp4", async (req, res) => {
 
     const size = statSync(outputPath).size;
     if (size <= 0) throw new Error("empty converted video");
-    res.status(200);
+    /* DownloadResumable sends a byte Range when it retries an interrupted
+       transfer. The conversion is repeated server-side, then only the
+       requested slice is returned so the native downloader can append it
+       safely instead of starting with a second full MP4. */
+    const range = String(req.headers.range || "").trim();
+    let streamStart = 0;
+    let streamEnd = size - 1;
+    let statusCode = 200;
+    if (range) {
+      const match = /^bytes=(\d*)-(\d*)$/i.exec(range);
+      if (!match || (!match[1] && !match[2])) {
+        res.status(416).setHeader("Content-Range", `bytes */${size}`).end();
+        return;
+      }
+      if (match[1]) {
+        streamStart = Number(match[1]);
+        streamEnd = match[2] ? Math.min(Number(match[2]), size - 1) : size - 1;
+      } else {
+        const suffixLength = Number(match[2]);
+        streamStart = Math.max(0, size - suffixLength);
+        streamEnd = size - 1;
+      }
+      if (!Number.isSafeInteger(streamStart) || !Number.isSafeInteger(streamEnd)
+          || streamStart < 0 || streamStart >= size || streamStart > streamEnd) {
+        res.status(416).setHeader("Content-Range", `bytes */${size}`).end();
+        return;
+      }
+      statusCode = 206;
+    }
+    res.status(statusCode);
     res.setHeader("Content-Type", "video/mp4");
-    res.setHeader("Content-Length", String(size));
+    res.setHeader("Accept-Ranges", "bytes");
+    res.setHeader("Content-Length", String(streamEnd - streamStart + 1));
+    if (statusCode === 206) {
+      res.setHeader("Content-Range", `bytes ${streamStart}-${streamEnd}/${size}`);
+    }
     res.setHeader("Content-Disposition", `attachment; filename="nova-episode.mp4"`);
-    createReadStream(outputPath).pipe(res);
+    createReadStream(outputPath, { start: streamStart, end: streamEnd }).pipe(res);
   } catch (error: any) {
     if (!res.headersSent) res.status(502).send(`video conversion failed: ${error?.message || "unknown error"}`);
   }

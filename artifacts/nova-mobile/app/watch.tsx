@@ -245,7 +245,6 @@ const SITE_PRIORITY: Record<string, number> = {
   animeify: 85, sanime: 80,
   dulo_anim: 70, vidlink_anim: 55,
   vidfast: 35,
-  sanime: 15,
 };
 
 /* ── قائمة المصادر (KW أولاً — الأولوية القصوى للتشغيل الفوري) ── */
@@ -678,6 +677,9 @@ export default function WatchScreen() {
 
     const token = await getAuthToken();
     /* Fire-and-forget — يعمل في الخلفية بمستقل عن lifecycle هذه الشاشة */
+    const downloadUrl = (site === "anineko" || site === "kawaii")
+      ? buildEmbeddedDownloadUrl(site, proxyUrl, subtitleUrl, base)
+      : proxyUrl;
     void startGlobalDownload({
       animeId:  parseInt(anime || "0"),
       ep:       epNum,
@@ -685,7 +687,7 @@ export default function WatchScreen() {
       cover:    coverUrl,
       site,
       quality:  getSrcQuality(best),
-      url:      proxyUrl,
+      url:      downloadUrl,
       authToken: token,
       subtitleUrl,
     });
