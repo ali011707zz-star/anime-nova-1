@@ -5938,7 +5938,12 @@ async function getKawaiiAnimeSources(
         directType: isHls ? "hls" : "mp4",
         rawUrl: src.url,
         corsOk: false,
-        headers: { Referer: kawaiiRefValue },
+         headers: {
+           Referer: kawaiiRefValue,
+           Origin: (() => {
+             try { return new URL(kawaiiRefValue).origin; } catch { return kawaiiRefValue.replace(/\/$/, ""); }
+           })(),
+         },
         subtitleUrl,
         skipIntro,
         skipOutro,
@@ -6075,25 +6080,17 @@ function buildStardimaSources(post: any): UnifiedSource[] {
 // تُستدعى فقط إذا كان الطلب من تطبيق الموبايل (X-Nova-Client header).
 function wrapForMobile(s: { site?: string; directUrl?: string; url?: string; directType?: string; isEmbed?: boolean; headers?: Record<string,string> }) {
   if (s.isEmbed) return s;
-  // AniNeko's native Android player needs a simple manifest-only proxy.
-  // Prefer the original m3u8 in `url`; `directUrl` may be the legacy
-  // encrypted /api/anime/hls-proxy URL from an older cache entry.
+  // AniNeko and Kawaii both need the full VPS HLS proxy. A manifest-only
+  // proxy leaves child playlists/segments on the device, where the required
+  // Referer/Origin is lost and playback fails after the first request.
+  // Prefer the original media URL in `url`; `directUrl` may be a legacy
+  // encrypted proxy URL from an older cache entry.
   const rawUrl = s.site === "anineko"
     ? (s.url || s.directUrl || "")
     : (s.directUrl || s.url || "");
   if (!rawUrl) return s;
   const ref = s.headers?.Referer || "";
   const isHls = s.directType === "hls" || /\.m3u8|hls-proxy/i.test(rawUrl);
-
-  if (s.site === "anineko" && isHls && !rawUrl.startsWith("/proxy/hls")) {
-    const params = new URLSearchParams({
-      url: rawUrl,
-      referer: ref,
-      ua: BROWSER_UA,
-    });
-    const proxied = `/proxy/hls?${params.toString()}`;
-    return { ...s, directUrl: proxied, url: proxied, directType: "hls" };
-  }
 
   // بالفعل proxy عبر VPS
   if (rawUrl.startsWith("/api/") || rawUrl.startsWith("/proxy/hls")) return s;
@@ -12501,6 +12498,7 @@ router.get("/anime/fetch-source", async (req, res) => {
   //    لإعادة التفعيل: احذف/عدّل ANIME_SOURCE_ALLOWLIST بالأسفل. ─────────────────
   const ANIME_SOURCE_ALLOWLIST: Set<string> | null = new Set([
     "kawaii",        // ⚡ الأسرع — DB-cached (50ms) ✅
+    "anineko",       // 🎌 HLS متعدد الجودات — full VPS manifest + segment proxy
     "animewitcher",  // 🗄️ DB-first aw_links (142k) → Algolia fallback ✅
     "anifox",        // 📦 12 مصدر — Archive/MediaFire/MP4Upload/Uqload ✅
     "sanime",        // 🎌 MP4 مباشر عربي مدبلج ✅
@@ -12667,7 +12665,8 @@ router.get("/anime/fetch-source", async (req, res) => {
       // moviz_time: معطّل بطلب المستخدم 2026-07-14 (قسم الأنمي فقط)
       // case "moviz_time":  (await race(getMovizTimeSources(title, english, ep, isMovie), 20000, [])).forEach(collectSrc); break;
       case "topcinemaa":   await runExtract(await race(getTopCimaaSources(title, english, ep, isMovie), SCRAPER_MS, [])); break;
-      case "kawaii":      (await race(getKawaiiAnimeSources(title, english, ep, anilistId), 14_000, [])).forEach(collectSrc); break;
+      case "kawaii":      (await race(getKawaiiAnimeSources(title, english, ep, anilistId), 24_000, [])).forEach(collectSrc); break;
+      case "anineko":     (await race(getAninekoSources(title, english, ep),              40_000, [])).forEach(collectSrc); break;
       case "anikototv":   (await race(getAnikototvSources(title, english, ep),              25000, [])).forEach(collectSrc); break;
       // anikuro: محذوف
       // anivault: محذوف

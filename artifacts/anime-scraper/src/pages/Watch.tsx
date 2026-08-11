@@ -161,8 +161,8 @@ interface FetchedSrc {
   skipOutro?: { start: number; end: number };
 }
 
-/* AN/AniNeko is disabled for this app. Keep stale cache rows hidden too. */
-const BLOCKED_SOURCE_SITES = new Set(["anineko", "an"]);
+/* Only sources explicitly disabled by product policy remain hidden. */
+const BLOCKED_SOURCE_SITES = new Set(["hianime", "hi", "ak"]);
 
 /* ── All known scrapers — shown immediately in picker ── */
 // ── تقييد مؤقت (بطلب المستخدم 2026-07-13): إبقاء 7 مصادر فقط — الباقي مُعطَّل
@@ -170,6 +170,7 @@ const BLOCKED_SOURCE_SITES = new Set(["anineko", "an"]);
 //    الكاملة محفوظة أعلاه في تاريخ Git — لإعادة أي مصدر أضِفه هنا وفي الباك-إند معاً.
 const SCRAPER_DEFS: { site: string; name: string; desc: string; tag: string; audioLang?: "en"; isArabic?: true }[] = [
   { site: "kawaii",       name: "كواي أنمي",    desc: "1080p · مباشر",            tag: "KW" },
+  { site: "anineko",      name: "AniNeko",       desc: "HLS · متعدد الجودات",       tag: "AN" },
   // hianime: معطّل بطلب المستخدم 2026-07-30 — تفوّت حلقات
   { site: "animewitcher", name: "AnimeWitcher",   desc: "PD/ST · مباشر",           tag: "AW", isArabic: true },
   // reanime: محذوف بطلب المستخدم 2026-07-24
@@ -197,18 +198,21 @@ type WebQualityKey = "1080p" | "720p" | "480p";
 const STATIC_PICKER_WEB: Record<WebQualityKey, { site: string; tag: string }[]> = {
   "1080p": [
     { site: "kawaii",       tag: "KW" },
+    { site: "anineko",      tag: "AN" },
     { site: "animewitcher", tag: "AW" },
     { site: "sanime",       tag: "SA" },
     { site: "animeify",     tag: "AF" },
     { site: "anifox",       tag: "FX" },
   ],
   "720p": [
+    { site: "anineko",      tag: "AN" },
     { site: "animewitcher", tag: "AW" },
     { site: "sanime",       tag: "SA" },
     { site: "animeify",     tag: "AF" },
     { site: "anifox",       tag: "FX" },
   ],
   "480p": [
+    { site: "anineko",      tag: "AN" },
     { site: "animewitcher", tag: "AW" },
     { site: "animeify",     tag: "AF" },
     { site: "anifox",       tag: "FX" },
@@ -3275,6 +3279,7 @@ export default function WatchPage() {
       anime4up2:    28000,  // backend = 25s + هامش 3s
       mycima:       34000,  // backend = 30s + هامش 4s
       anikototv:    28000,  // backend = 25s + هامش 3s
+      anineko:      45000,  // search + episode page + embed/master extraction
       anslayer:     50000,  // backend = 45s + هامش 5s (parallel embed extraction)
       animeify:     28000,  // backend = 18s + هامش للاستخراج/الشبكة
       sanime:       28000,  // backend = 20s + هامش للبحث وinfo

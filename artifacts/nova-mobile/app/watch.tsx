@@ -68,7 +68,7 @@ const SITE_TAG: Record<string, string> = {
   shahiid: "SH", animelek: "EK", animedar: "AD", okanime: "OK",
   ristoanime: "RS", animeify: "AF", animeday: "DY", arabseed: "AR",
   anime4up2: "4U", mycima: "MC", topcinemaa: "TC",
-  animewitcher: "AW", kawaii: "KW",
+  animewitcher: "AW", kawaii: "KW", anineko: "AN",
   vidlink_anim: "VL", vidfast: "VF",
   animetime: "AT", animepahe: "AP", dulo_anim: "DL",
   faselhd_db: "FH",
@@ -79,6 +79,7 @@ const SITE_TAG: Record<string, string> = {
 /* ── اسم عرض لكل موقع في منتقي المصادر ── */
 const SITE_LABEL: Record<string, string> = {
   kawaii: "Kawaii", animewitcher: "AnimeWitcher",
+  anineko: "AniNeko",
   dulo_anim: "Dulo",
   anikototv: "AniKotoTV", mitanime: "MITanime", vidfast: "VidFast",
   animepahe: "AnimePahe", shahiid: "Shahiid", animelek: "Animelek",
@@ -95,7 +96,7 @@ function getSiteTag(site: string): string {
 
 /* ── وصف قصير لكل مصدر في شبكة الاختيار (يطابق نظام الويب) ── */
 const SITE_DESC: Record<string, string> = {
-  kawaii: "1080p · مباشر", animewitcher: "PD/ST · مباشر",
+  kawaii: "1080p · مباشر", anineko: "HLS · متعدد الجودات", animewitcher: "PD/ST · مباشر",
   dulo_anim: "ياباني/إنجليزي · HLS مباشر",
   vidlink_anim: "ياباني مترجم · مباشر",
   mitanime: "ياباني مترجم · مباشر", vidfast: "TMDB · HLS · متعدد الخوادم",
@@ -115,9 +116,9 @@ function getSiteDesc(site: string): string {
   return SITE_DESC[site] || "";
 }
 
-/* AN/AniNeko is web-only for now. Keep the backend source enabled for the
-   web client, but never show, fetch, or download it in Nova Mobile. */
-const BLOCKED_SOURCE_SITES = new Set(["hianime", "ak", "an", "anineko", "hi"]);
+/* Sources disabled by product policy. AniNeko is supported through the
+   full VPS HLS proxy, so it must remain available on mobile. */
+const BLOCKED_SOURCE_SITES = new Set(["hianime", "hi", "ak"]);
 function isBlockedSource(src: Pick<Src, "site">): boolean {
   return BLOCKED_SOURCE_SITES.has(String(src.site || "").trim().toLowerCase());
 }
@@ -272,18 +273,21 @@ type QualityKey = "1080p" | "720p" | "480p";
 const STATIC_PICKER: Record<QualityKey, { site: string; name: string; tag: string }[]> = {
   "1080p": [
     { site: "kawaii",       name: "كواي أنمي",   tag: "KW" },
+    { site: "anineko",      name: "AniNeko",      tag: "AN" },
     { site: "animewitcher", name: "AnimeWitcher", tag: "AW" },
     { site: "sanime",       name: "سـAnime",      tag: "SA" },
     { site: "animeify",     name: "أنمي فاي",    tag: "AF" },
     { site: "anifox",        name: "ANIFOX",      tag: "FX" },
   ],
   "720p": [
+    { site: "anineko",      name: "AniNeko",      tag: "AN" },
     { site: "animewitcher", name: "AnimeWitcher", tag: "AW" },
     { site: "sanime",       name: "سـAnime",      tag: "SA" },
     { site: "animeify",     name: "أنمي فاي",    tag: "AF" },
     { site: "anifox",        name: "ANIFOX",      tag: "FX" },
   ],
   "480p": [
+    { site: "anineko",      name: "AniNeko",      tag: "AN" },
     { site: "animewitcher", name: "AnimeWitcher", tag: "AW" },
     { site: "animeify",     name: "أنمي فاي",    tag: "AF" },
     { site: "anifox",        name: "ANIFOX",      tag: "FX" },
@@ -323,6 +327,7 @@ const SITE_TIMEOUT_MAP: Record<string, number> = {
   animeify:     22_000,
   sanime:       18_000,
   kawaii:       15_000,
+  anineko:      45_000,
 };
 
 /* ── Spinning loader ── */
