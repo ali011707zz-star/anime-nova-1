@@ -37,6 +37,8 @@ function needsHiddenResolve(s: Src): boolean {
 interface Src {
   url?: string;
   directUrl?: string;
+  /** The signed provider URL, kept separately from the mobile playback proxy. */
+  rawUrl?: string;
   qualityRank?: number;
   label?: string;
   quality?: string;
@@ -163,6 +165,11 @@ function isEmbedSrc(s: Src): boolean {
   return url.includes("mega.nz") || url.includes("mega.co.nz") || url.includes("vidmoly");
 }
 function getPlayUrl(s: Src): string {
+  /* Mobile responses may contain an encrypted directUrl plus an unencrypted
+     /api/... URL in `url`. Prefer the readable proxy URL or the player receives
+     the ciphertext and silently fails. */
+  if (s.url?.startsWith("/api/")) return s.url;
+  if (s.directUrl?.startsWith("/api/")) return s.directUrl;
   return s.directUrl || s.url || "";
 }
 
@@ -700,7 +707,7 @@ export default function WatchScreen() {
     const token = await getAuthToken();
     /* Fire-and-forget — يعمل في الخلفية بمستقل عن lifecycle هذه الشاشة */
     const downloadUrl = site === "kawaii"
-      ? buildEmbeddedDownloadUrl(site, proxyUrl, subtitleUrl, base)
+      ? buildEmbeddedDownloadUrl(site, best.rawUrl || proxyUrl, subtitleUrl, base)
       : proxyUrl;
     void startGlobalDownload({
       animeId:  parseInt(anime || "0"),
@@ -783,8 +790,8 @@ export default function WatchScreen() {
          ? normalizeKawaiiSubtitleUrl(subRaw, base)
          : (subRaw ? resolveUrl(subRaw, base) : undefined);
       const token     = await getAuthToken();
-      const downloadUrl = site === "kawaii"
-        ? buildEmbeddedDownloadUrl(site, proxyUrl, subtitleUrl, base)
+       const downloadUrl = site === "kawaii"
+         ? buildEmbeddedDownloadUrl(site, best.rawUrl || proxyUrl, subtitleUrl, base)
         : proxyUrl;
 
       void startGlobalDownload({

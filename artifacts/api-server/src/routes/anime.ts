@@ -14884,9 +14884,10 @@ router.get("/anime/video-proxy", async (req, res) => {
   await serveMediaVPS(url, ref, req, res);
 });
 
-// ── download-mp4: تحويل HLS إلى MP4 مع حرق الترجمة للموبايل ────────────────
+// ── download-mp4: تحويل HLS إلى MP4 للتنزيل دون اتصال ───────────────────────
 // هذا المسار مخصص للمصادر التي تحتاج ملفاً حقيقياً قابلاً للتشغيل دون اتصال.
-// لا يقبل روابط CDN عشوائية: المصدر يجب أن يكون أحد مسارات الـ proxy الداخلية.
+// الترجمة لا تُحرق داخل الفيديو: تطبيق الموبايل ينزل VTT كملف جانبي محلي
+// ويشغله مع الفيديو دون إنترنت.
 function localApiUrl(raw: string, allowedPaths: string[], req: Request): string | null {
   if (!raw) return null;
   try {
@@ -14913,6 +14914,21 @@ function trustedKawaiiMediaUrl(raw: string): string | null {
     return isTrustedKawaiiCdnUrl(parsed.toString()) ? parsed.toString() : null;
   } catch {
     return null;
+  }
+}
+
+function kawaiiMediaIsHls(url: string): boolean {
+  return /\.m3u8(?:[?#]|$)/i.test(url) || /\/(?:hls|playlist)(?:\/|$)/i.test(url);
+}
+
+function kawaiiReferrer(url: string): string {
+  try {
+    const host = new URL(url).hostname.toLowerCase();
+    return host.endsWith(".mewstream.buzz")
+      ? "https://megaplay.buzz/"
+      : KAWAII_BASE + "/";
+  } catch {
+    return KAWAII_BASE + "/";
   }
 }
 
@@ -14975,7 +14991,7 @@ router.get("/anime/download-mp4", async (req, res) => {
   }
 
   const requestedUrl = String(req.query.url || "");
-  const sourceUrl = localApiUrl(
+  let sourceUrl = localApiUrl(
     requestedUrl,
     ["/api/anime/hls-proxy", "/api/anime/video-proxy"],
     req,
@@ -14988,18 +15004,21 @@ router.get("/anime/download-mp4", async (req, res) => {
     return;
   }
 
-  const subtitleRaw = String(req.query.subtitleUrl || "");
-  const subtitleUrl = subtitleRaw
-    ? localApiUrl(subtitleRaw, ["/api/anime/translate-vtt", "/api/anime/proxy-text"], req)
-    : null;
-  if (subtitleRaw && !subtitleUrl) {
-    res.status(400).send("invalid proxied subtitle url");
-    return;
+  /* A raw signed KW URL is valid input for this endpoint. HLS must go through
+     the local proxy so ffmpeg receives the provider Referer on the manifest
+     and every segment; MP4 can be streamed directly when no sidecar is being
+     requested. */
+  if (!sourceUrl && rawKawaiiUrl) {
+    const ref = kawaiiReferrer(rawKawaiiUrl);
+    const path = kawaiiMediaIsHls(rawKawaiiUrl)
+      ? "/api/anime/hls-proxy"
+      : "/api/anime/video-proxy";
+    const port = process.env.PORT || "5000";
+    sourceUrl = `http://127.0.0.1:${port}${path}?url=${encodeURIComponent(rawKawaiiUrl)}&ref=${encodeURIComponent(ref)}`;
   }
 
   const tempRoot = `/tmp/nova-download-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   const outputPath = `${tempRoot}/episode.mp4`;
-  const subtitlePath = `${tempRoot}/episode.vtt`;
   mkdirSync(tempRoot, { recursive: true, mode: 0o700 });
 
   const cleanup = () => {
@@ -15012,28 +15031,20 @@ router.get("/anime/download-mp4", async (req, res) => {
     // same VPS proxy used by the player instead of invoking ffmpeg. This is
     // critical for DownloadResumable: a retry Range request must not trigger a
     // second full conversion before the first byte is sent.
-    if (site === "kawaii" && !subtitleUrl) {
-      if (rawKawaiiUrl) {
+    if (site === "kawaii" && rawKawaiiUrl && !kawaiiMediaIsHls(rawKawaiiUrl)
+        && !String(req.query.subtitleUrl || "")) {
         res.setHeader("Content-Disposition", `attachment; filename="nova-episode.mp4"`);
         await serveMediaVPS(rawKawaiiUrl, KAWAII_BASE + "/", req, res);
         return;
-      }
-      if (sourceUrl && await streamKawaiiMp4(sourceUrl, req, res)) return;
+    }
+    if (site === "kawaii" && sourceUrl && !kawaiiMediaIsHls(sourceUrl)
+        && !String(req.query.subtitleUrl || "")) {
+      if (await streamKawaiiMp4(sourceUrl, req, res)) return;
     }
 
     if (!sourceUrl) {
       res.status(400).send("invalid media url");
       return;
-    }
-    if (subtitleUrl) {
-      const subtitleResponse = await fetch(subtitleUrl, {
-        headers: { Accept: "application/json,text/vtt,text/plain,*/*" },
-        signal: AbortSignal.timeout(30_000),
-      });
-      if (!subtitleResponse.ok) throw new Error(`subtitle ${subtitleResponse.status}`);
-      const vtt = cuesToVtt(await subtitleResponse.text());
-      if (!vtt.includes("-->")) throw new Error("subtitle has no cues");
-      writeFileSync(subtitlePath, vtt, { mode: 0o600 });
     }
 
     const args = [
@@ -15042,16 +15053,6 @@ router.get("/anime/download-mp4", async (req, res) => {
       "-map", "0:v:0",
       "-map", "0:a:0?",
     ];
-    if (subtitleUrl) {
-      args.push(
-        "-vf",
-        /* Escape the temporary path for ffmpeg's subtitles filter. This is
-           important on the VPS where the temp directory can contain special
-           characters after a process restart. The Arabic VTT is rendered
-           into the MP4; no sidecar subtitle is needed for KW downloads. */
-        `subtitles=${subtitlePath.replace(/([\\':])/g, "\\$1")}:force_style='FontName=DejaVu Sans,FontSize=20,Alignment=2,Outline=1,Shadow=1'`,
-      );
-    }
     args.push(
       "-c:v", "libx264",
       "-preset", "veryfast",
