@@ -333,7 +333,9 @@ const SITE_TIMEOUT_MAP: Record<string, number> = {
   animewitcher: 38_000,
   animeify:     22_000,
   sanime:       18_000,
-  kawaii:       15_000,
+  // Backend fetch-source allows Kawaii up to 24s. Keep the client alive
+  // longer than that race so a slow signed-URL response is not aborted first.
+  kawaii:       30_000,
   anineko:      45_000,
 };
 

@@ -5912,7 +5912,17 @@ async function getKawaiiAnimeSources(
     const apiReferer = data.headers?.Referer || data.headers?.referer;
 
     return trustedSources.map((src) => {
-      const isHls = src.isM3U8 === true || src.type === "hls";
+      // Kawaii has returned the HLS flag as a boolean, a string ("hls"/"m3u8"),
+      // and occasionally omitted it while keeping the playlist-shaped URL.
+      // If this is misclassified as MP4, mobile playback and the download
+      // conversion path both use the wrong proxy.
+      const sourceType = String(src.type || "").toLowerCase();
+      const isHls =
+        src.isM3U8 === true ||
+        sourceType === "hls" ||
+        sourceType === "m3u8" ||
+        /\.m3u8(?:[?#]|$)/i.test(src.url) ||
+        /\/(?:hls|playlist)(?:\/|$)/i.test(src.url);
       let sourceHost = "";
       try { sourceHost = new URL(src.url).hostname.toLowerCase(); } catch {}
       // The Kawaii API has briefly returned a stale top-level headers object
@@ -15034,7 +15044,9 @@ router.get("/anime/download-mp4", async (req, res) => {
     if (site === "kawaii" && rawKawaiiUrl && !kawaiiMediaIsHls(rawKawaiiUrl)
         && !String(req.query.subtitleUrl || "")) {
         res.setHeader("Content-Disposition", `attachment; filename="nova-episode.mp4"`);
-        await serveMediaVPS(rawKawaiiUrl, KAWAII_BASE + "/", req, res);
+        // Mewstream rejects the Kawaii page Referer and only accepts
+        // Megaplay. Keep this identical to the playback proxy's routing.
+        await serveMediaVPS(rawKawaiiUrl, kawaiiReferrer(rawKawaiiUrl), req, res);
         return;
     }
     if (site === "kawaii" && sourceUrl && !kawaiiMediaIsHls(sourceUrl)
