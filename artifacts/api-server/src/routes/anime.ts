@@ -12561,13 +12561,35 @@ router.get("/anime/fetch-source", async (req, res) => {
   if (cached && !FORCE_LIVE_FETCH_SITES.has(site) &&
       !shouldRefreshCache(cached.expiresAt) && !skipCacheForShortTtl) {
     const enc = cached.sources.map((s: UnifiedSource) => {
+      // Cached Kawaii URLs can outlive a provider rotation. When the cached
+      // raw URL points to Mewstream, rebuild the proxy URL and force the
+      // provider's required Megaplay Referer instead of reusing a stale
+      // Kawaii-page Referer from the old cache entry.
+      const cacheSource = (() => {
+        if (site !== "kawaii") return s;
+        const raw = String((s as UnifiedSource & { rawUrl?: string }).rawUrl || "");
+        let host = "";
+        try { host = new URL(raw).hostname.toLowerCase(); } catch {}
+        if (!host.endsWith("mewstream.buzz")) return s;
+        const ref = "https://megaplay.buzz/";
+        const isHls = s.directType === "hls" || /\.m3u8/i.test(raw) || String(s.directUrl || "").includes("/hls-proxy");
+        const proxyPath = isHls
+          ? `/api/anime/hls-proxy?url=${encodeURIComponent(raw)}&ref=${encodeURIComponent(ref)}`
+          : `/api/anime/video-proxy?url=${encodeURIComponent(raw)}&ref=${encodeURIComponent(ref)}`;
+        return {
+          ...s,
+          url: proxyPath,
+          directUrl: proxyPath,
+          headers: { ...(s.headers || {}), Referer: ref, Origin: "https://megaplay.buzz" },
+        };
+      })();
       /* استخراج headers (Referer/Origin) من رابط الـ proxy قبل التشفير.
          يحتاجها ExoPlayer/AVPlayer لإرسال Referer مع طلبات الـ segments مباشرةً للـ CDN.
          إذا كان ref مشفَّراً (hex AES) فهو رابط proxy داخلي — لا نُرسله كـ Referer. */
-      let derivedHeaders = s.headers;
-      if (!derivedHeaders && s.directUrl) {
+      let derivedHeaders = cacheSource.headers;
+      if (!derivedHeaders && cacheSource.directUrl) {
         try {
-          const pu = new URL(s.directUrl.startsWith("/") ? `http://x.com${s.directUrl}` : s.directUrl);
+          const pu = new URL(cacheSource.directUrl.startsWith("/") ? `http://x.com${cacheSource.directUrl}` : cacheSource.directUrl);
           const ref = pu.searchParams.get("ref");
           if (ref && !isEncrypted(ref)) {
             let origin = "";
@@ -12577,7 +12599,7 @@ router.get("/anime/fetch-source", async (req, res) => {
         } catch { /* ignore */ }
       }
       const mobileClient = (req.headers["x-nova-client"] || "").toString().includes("mobile");
-      const finalS = mobileClient ? wrapForMobile(s) : s;
+      const finalS = mobileClient ? wrapForMobile(cacheSource) : cacheSource;
       // corsOk=true: لا تشفير على directUrl — RiftPlayer يحتاج URL الخام لكشف CDN وإخفاء الـ Referer
       const encDirectUrl = finalS.directUrl
         ? (finalS.corsOk ? finalS.directUrl : encryptProxyUrl(finalS.directUrl))
