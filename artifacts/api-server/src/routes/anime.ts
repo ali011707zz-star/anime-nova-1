@@ -5858,6 +5858,7 @@ async function getKawaiiAnimeSources(
     const data = await r.json() as {
       sources?: Array<{ url: string; quality?: string; isM3U8?: boolean; type?: string }>;
       subtitles?: Array<{ url: string; lang?: string; label?: string }>;
+      headers?: Record<string, string>;
       intro?: { start: number; end: number };
       outro?: { start: number; end: number };
     };
@@ -5903,11 +5904,27 @@ async function getKawaiiAnimeSources(
       });
     if (!trustedSources.length) return [];
 
-    const kawaiiRef = encodeURIComponent(KAWAII_BASE + "/");
+    // Kawaii can route newer episodes through another provider. For example,
+    // Grand Blue S3 ep6 currently returns megaplay/mewstream and rejects the
+    // Kawaii page as Referer (403); the API tells us the provider's Referer.
+    // Keep the old Kawaii page as a fallback for legacy video.kawaii-anime.com
+    // URLs where the API does not include headers.
+    const apiReferer = data.headers?.Referer || data.headers?.referer;
 
     return trustedSources.map((src) => {
       const isHls = src.isM3U8 === true || src.type === "hls";
-      // كل المصادر عبر VPS proxy مع Referer: www.kawaii-anime.com — المسار الوحيد الذي يعمل
+      let sourceHost = "";
+      try { sourceHost = new URL(src.url).hostname.toLowerCase(); } catch {}
+      // The Kawaii API has briefly returned a stale top-level headers object
+      // while rotating a source to Mewstream. The CDN host is authoritative:
+      // Mewstream accepts Megaplay's Referer, not kawaiianime.cc.
+      const kawaiiRefValue =
+        sourceHost === "cdn.mewstream.buzz" || sourceHost.endsWith(".mewstream.buzz")
+          ? "https://megaplay.buzz/"
+          : apiReferer?.trim() || KAWAII_BASE + "/";
+      const kawaiiRef = encodeURIComponent(kawaiiRefValue);
+      // Every Kawaii source goes through the VPS proxy so the provider-specific
+      // Referer reaches both the manifest and its rewritten segments.
       const directUrl = isHls
         ? `/api/anime/hls-proxy?url=${encodeURIComponent(src.url)}&ref=${kawaiiRef}`
         : `/api/anime/video-proxy?url=${encodeURIComponent(src.url)}&ref=${kawaiiRef}`;
@@ -5921,6 +5938,7 @@ async function getKawaiiAnimeSources(
         directType: isHls ? "hls" : "mp4",
         rawUrl: src.url,
         corsOk: false,
+        headers: { Referer: kawaiiRefValue },
         subtitleUrl,
         skipIntro,
         skipOutro,
