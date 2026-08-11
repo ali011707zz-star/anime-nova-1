@@ -17,6 +17,7 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import * as FileSystem from "expo-file-system";
 import { getBaseUrl } from "@/utils/api";
 
 const { width: W, height: H } = Dimensions.get("window");
@@ -753,6 +754,7 @@ export function RiftPlayer({
 
     /* ── حساب الـ URL الإنجليزي الخام (قبل أي ترجمة) ── */
     const base = getBaseUrl();
+    const isLocalSubtitle = /^(?:file|content):\/\//i.test(rawUrl);
     const alreadyTranslated = rawUrl.includes("translate-vtt") || rawUrl.includes("proxy-text");
 
     // استخراج الـ URL الداخلي إذا كان translate-vtt
@@ -768,7 +770,12 @@ export function RiftPlayer({
 
     /* ── اختيار الـ URL بناءً على اللغة المختارة ── */
     let url: string;
-    if (subLang === "en") {
+    if (isLocalSubtitle) {
+      /* Downloaded subtitles are already translated before they are stored.
+         Never send a local VTT back through translate-vtt: that would require
+         the network and made offline downloads appear to have no subtitles. */
+      url = innerUrl;
+    } else if (subLang === "en") {
       url = innerUrl; // إنجليزي خام مباشر
     } else if (currentSrc?.isArabic || alreadyTranslated) {
       url = rawUrl; // عربي مباشر أو translate-vtt جاهز
@@ -793,7 +800,7 @@ export function RiftPlayer({
 
     /* مفتاح الكاش خاص بكل لغة لتجنب إرجاع cues الإنجليزية حين يطلب المستخدم العربية */
     const cacheKey = (anilistId && episode && subLang === "ar") ? `sub-ar-${anilistId}-${episode}` : null;
-    const isTranslated = url.includes("translate-vtt") || url.includes("proxy-text");
+    const isTranslated = isLocalSubtitle || url.includes("translate-vtt") || url.includes("proxy-text");
 
     (async () => {
       /* ── 1. Check AsyncStorage cache first (translated subs only) ── */
@@ -844,13 +851,16 @@ export function RiftPlayer({
         // VTT/SRT نص مباشر
         setSubLoading(true);
         setLoadedCues([]);
-        fetch(url, {
-          headers: { "Accept": "text/vtt,text/plain,*/*" },
-          signal: AbortSignal.timeout(30_000),
-        }).then(async r => {
-          if (!r.ok) throw new Error(`HTTP ${r.status}`);
-          if (cancelled) return;
-          const text = await r.text();
+        const textPromise = isLocalSubtitle
+          ? FileSystem.readAsStringAsync(url)
+          : fetch(url, {
+              headers: { "Accept": "text/vtt,text/plain,*/*" },
+              signal: AbortSignal.timeout(30_000),
+            }).then(async r => {
+              if (!r.ok) throw new Error(`HTTP ${r.status}`);
+              return r.text();
+            });
+        textPromise.then(text => {
           if (cancelled) return;
           const cues = parseVTT(text);
           if (cues.length > 0) urlCueCacheRef.current.set(url, cues);

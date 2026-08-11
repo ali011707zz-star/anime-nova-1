@@ -5904,6 +5904,20 @@ async function getKawaiiAnimeSources(
       });
     if (!trustedSources.length) return [];
 
+    /* Prefer the original MP4 when Kawaii returns both MP4 and HLS variants.
+       Android can otherwise enter the source-fallback loop on an HLS row even
+       though the same episode has a directly playable file. HLS remains in
+       the list as a fallback when no MP4 is available. */
+    const isKawaiiHls = (src: { url: string; isM3U8?: boolean; type?: string }) => {
+      const type = String(src.type || "").toLowerCase();
+      return src.isM3U8 === true
+        || type === "hls"
+        || type === "m3u8"
+        || /\.m3u8(?:[?#]|$)/i.test(src.url)
+        || /\/(?:hls|playlist)(?:\/|$)/i.test(src.url);
+    };
+    trustedSources.sort((a, b) => Number(isKawaiiHls(a)) - Number(isKawaiiHls(b)));
+
     // Kawaii can route newer episodes through another provider. For example,
     // Grand Blue S3 ep6 currently returns megaplay/mewstream and rejects the
     // Kawaii page as Referer (403); the API tells us the provider's Referer.

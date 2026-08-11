@@ -240,16 +240,12 @@ function buildEmbeddedDownloadUrl(
     site,
     url: mediaUrl,
   });
-  if (subtitleUrl) {
-    // Kawaii MP4 downloads are streamed directly so DownloadResumable can use
-    // Range/resume. The subtitle is saved as a local VTT sidecar after the
-    // video completes; only legacy/non-Kawaii conversions pass it to ffmpeg.
-    const isInternalSubtitle = subtitleUrl.includes("/api/anime/proxy-text")
-      || subtitleUrl.includes("/api/anime/translate-vtt");
-    const downloadSubtitle = site === "kawaii" && !isInternalSubtitle
-      ? `${base}/api/anime/proxy-text?url=${encodeURIComponent(subtitleUrl)}&ref=${encodeURIComponent("https://kawaiianime.cc/")}`
-      : subtitleUrl;
-    if (site !== "kawaii") query.set("subtitleUrl", downloadSubtitle);
+  if (subtitleUrl && site !== "kawaii") {
+    /* KW must stay byte-for-byte separate from subtitles. Its subtitle is
+       fetched by downloadManager after the video and saved as a local VTT
+       sidecar; sending subtitleUrl here would opt the server into the old
+       conversion path. */
+    query.set("subtitleUrl", subtitleUrl);
   }
   return `${base}/api/anime/download-mp4?${query.toString()}`;
 }
