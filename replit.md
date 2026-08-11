@@ -33,4 +33,5 @@ A full-stack anime streaming platform with web and mobile clients.
 ## User preferences
 
 - Do not run or install the app in Replit — VPS only.
+- Do not create, configure, or start Replit workflows for this project; local workflow failures are expected because Replit is code-editing only.
 - Do not restructure or migrate the existing stack.

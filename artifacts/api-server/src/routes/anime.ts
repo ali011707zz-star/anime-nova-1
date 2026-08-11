@@ -6090,7 +6090,6 @@ function wrapForMobile(s: { site?: string; directUrl?: string; url?: string; dir
     : (s.directUrl || s.url || "");
   if (!rawUrl) return s;
   const ref = s.headers?.Referer || "";
-  const isHls = s.directType === "hls" || /\.m3u8|hls-proxy/i.test(rawUrl);
 
   // بالفعل proxy عبر VPS
   if (rawUrl.startsWith("/api/") || rawUrl.startsWith("/proxy/hls")) return s;
