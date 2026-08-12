@@ -60,7 +60,7 @@ const SUBTITLE_DISABLED_SITES = new Set([
   "sanime", "sa",
   "anifox", "fx",
   "consumet_gogo", "consumet_world", "consumet_reanime",
-  "consumet_miruro", "consumet_saturn", "consumet_sama",
+  "consumet_miruro", "consumet_saturn", "consumet_anikoto",
 ]);
 
 function subtitlesDisabledForSite(site?: string): boolean {
@@ -82,7 +82,7 @@ const SITE_TAG: Record<string, string> = {
   anivexa_animegg: "GG", anivexa_anidbapp: "DB", anivexa_2dhive: "2D",
   anivexa_senshi: "SE", anivexa_kaa: "KA",
   consumet_gogo: "CG", consumet_world: "CW", consumet_reanime: "CR",
-  consumet_miruro: "CM", consumet_saturn: "CS", consumet_sama: "CA",
+  consumet_miruro: "CM", consumet_saturn: "CS", consumet_anikoto: "CK",
 };
 
 /* ── اسم عرض لكل موقع في منتقي المصادر ── */
@@ -105,7 +105,7 @@ const SITE_LABEL: Record<string, string> = {
   anivexa_kaa: "Kickassanime",
   consumet_gogo: "Consumet · GogoAnime", consumet_world: "Consumet · AnimeWorld",
   consumet_reanime: "Consumet · ReAnime", consumet_miruro: "Consumet · Miruro",
-  consumet_saturn: "Consumet · AnimeSaturn", consumet_sama: "Consumet · AnimeSama",
+  consumet_saturn: "Consumet · AnimeSaturn", consumet_anikoto: "Consumet · AniKoto",
 };
 function getSiteTag(site: string): string {
   return SITE_TAG[site] || site.slice(0, 2).toUpperCase();
@@ -135,7 +135,7 @@ const SITE_DESC: Record<string, string> = {
   anivexa_kaa: "HLS · صوت خام",
   consumet_gogo: "HLS/MP4 · صوت خام", consumet_world: "HLS/MP4 · صوت خام",
   consumet_reanime: "HLS/MP4 · صوت خام", consumet_miruro: "HLS/MP4 · صوت خام",
-  consumet_saturn: "HLS/MP4 · صوت خام", consumet_sama: "HLS/MP4 · صوت خام",
+  consumet_saturn: "HLS/MP4 · صوت خام", consumet_anikoto: "HLS/MP4 · صوت خام",
 };
 function getSiteDesc(site: string): string {
   return SITE_DESC[site] || "";
@@ -292,7 +292,7 @@ const SITE_PRIORITY: Record<string, number> = {
   anivexa_animegg: 85, anivexa_anidbapp: 84, anivexa_2dhive: 83,
   anivexa_senshi: 81, anivexa_kaa: 80,
   consumet_gogo: 78, consumet_world: 77, consumet_reanime: 76,
-  consumet_miruro: 75, consumet_saturn: 74, consumet_sama: 73,
+  consumet_miruro: 75, consumet_saturn: 74, consumet_anikoto: 73,
   dulo_anim: 70, vidlink_anim: 55,
   vidfast: 35,
 };
@@ -322,7 +322,7 @@ const STATIC_PICKER: Record<QualityKey, { site: string; name: string; tag: strin
     { site: "consumet_reanime", name: "Consumet · ReAnime", tag: "CR" },
     { site: "consumet_miruro", name: "Consumet · Miruro", tag: "CM" },
     { site: "consumet_saturn", name: "Consumet · AnimeSaturn", tag: "CS" },
-    { site: "consumet_sama", name: "Consumet · AnimeSama", tag: "CA" },
+    { site: "consumet_anikoto", name: "Consumet · AniKoto", tag: "CK" },
   ],
   "720p": [
     { site: "anineko",      name: "AniNeko",      tag: "AN" },
@@ -343,7 +343,7 @@ const STATIC_PICKER: Record<QualityKey, { site: string; name: string; tag: strin
     { site: "consumet_reanime", name: "Consumet · ReAnime", tag: "CR" },
     { site: "consumet_miruro", name: "Consumet · Miruro", tag: "CM" },
     { site: "consumet_saturn", name: "Consumet · AnimeSaturn", tag: "CS" },
-    { site: "consumet_sama", name: "Consumet · AnimeSama", tag: "CA" },
+    { site: "consumet_anikoto", name: "Consumet · AniKoto", tag: "CK" },
   ],
   "480p": [
     { site: "anineko",      name: "AniNeko",      tag: "AN" },
@@ -362,7 +362,7 @@ const STATIC_PICKER: Record<QualityKey, { site: string; name: string; tag: strin
     { site: "consumet_reanime", name: "Consumet · ReAnime", tag: "CR" },
     { site: "consumet_miruro", name: "Consumet · Miruro", tag: "CM" },
     { site: "consumet_saturn", name: "Consumet · AnimeSaturn", tag: "CS" },
-    { site: "consumet_sama", name: "Consumet · AnimeSama", tag: "CA" },
+    { site: "consumet_anikoto", name: "Consumet · AniKoto", tag: "CK" },
   ],
 };
 
@@ -409,7 +409,7 @@ const SITE_TIMEOUT_MAP: Record<string, number> = {
   anivexa_senshi: 32_000, anivexa_kaa: 32_000,
   consumet_gogo: 32_000, consumet_world: 32_000,
   consumet_reanime: 32_000, consumet_miruro: 32_000,
-  consumet_saturn: 32_000, consumet_sama: 32_000,
+  consumet_saturn: 32_000, consumet_anikoto: 32_000,
 };
 
 /* ── Spinning loader ── */

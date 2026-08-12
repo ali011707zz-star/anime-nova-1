@@ -11,7 +11,7 @@ export const CONSUMET_SOURCES = [
   { site: "consumet_reanime", provider: "reanime", label: "ReAnime" },
   { site: "consumet_miruro", provider: "miruro", label: "Miruro" },
   { site: "consumet_saturn", provider: "animesaturn", label: "AnimeSaturn" },
-  { site: "consumet_sama", provider: "animesama", label: "AnimeSama" },
+  { site: "consumet_anikoto", provider: "anikoto", label: "AniKoto" },
 ] as const;
 
 type ConsumetSite = (typeof CONSUMET_SOURCES)[number]["site"];

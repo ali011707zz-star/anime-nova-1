@@ -191,7 +191,7 @@ const SCRAPER_DEFS: { site: string; name: string; desc: string; tag: string; aud
   { site: "consumet_reanime", name: "Consumet · ReAnime",    desc: "HLS/MP4 · صوت خام", tag: "CR" },
   { site: "consumet_miruro",  name: "Consumet · Miruro",     desc: "HLS/MP4 · صوت خام", tag: "CM" },
   { site: "consumet_saturn",  name: "Consumet · AnimeSaturn", desc: "HLS/MP4 · صوت خام", tag: "CS" },
-  { site: "consumet_sama",    name: "Consumet · AnimeSama",   desc: "HLS/MP4 · صوت خام", tag: "CA" },
+  { site: "consumet_anikoto", name: "Consumet · AniKoto",     desc: "HLS/MP4 · صوت خام", tag: "CK" },
   // akoam: حُذف 2026-07-28 — كان يستخدم hopxBrowserExtract (browser) على كل طلب
 ];
 
@@ -215,7 +215,7 @@ const STATIC_PICKER_WEB: Record<WebQualityKey, { site: string; tag: string }[]> 
     { site: "consumet_reanime", tag: "CR" },
     { site: "consumet_miruro", tag: "CM" },
     { site: "consumet_saturn", tag: "CS" },
-    { site: "consumet_sama", tag: "CA" },
+    { site: "consumet_anikoto", tag: "CK" },
   ],
   "720p": [
     { site: "anineko",      tag: "AN" },
@@ -229,7 +229,7 @@ const STATIC_PICKER_WEB: Record<WebQualityKey, { site: string; tag: string }[]> 
     { site: "consumet_reanime", tag: "CR" },
     { site: "consumet_miruro", tag: "CM" },
     { site: "consumet_saturn", tag: "CS" },
-    { site: "consumet_sama", tag: "CA" },
+    { site: "consumet_anikoto", tag: "CK" },
   ],
   "480p": [
     { site: "anineko",      tag: "AN" },
@@ -241,7 +241,7 @@ const STATIC_PICKER_WEB: Record<WebQualityKey, { site: string; tag: string }[]> 
     { site: "consumet_reanime", tag: "CR" },
     { site: "consumet_miruro", tag: "CM" },
     { site: "consumet_saturn", tag: "CS" },
-    { site: "consumet_sama", tag: "CA" },
+    { site: "consumet_anikoto", tag: "CK" },
   ],
 };
 const WEB_Q_KEYS: WebQualityKey[] = ["1080p", "720p", "480p"];
@@ -279,7 +279,7 @@ const PROVIDER_WANTS_SMART_SUB = new Set([
    subtitles to them, even when a global subtitle cache exists. */
 const RAW_AUDIO_ONLY_SITES = new Set([
   "consumet_gogo", "consumet_world", "consumet_reanime",
-  "consumet_miruro", "consumet_saturn", "consumet_sama",
+  "consumet_miruro", "consumet_saturn", "consumet_anikoto",
 ]);
 
 type SlotStatus = "idle" | "fetching" | "ready" | "failed";
@@ -3331,7 +3331,7 @@ export default function WatchPage() {
       consumet_reanime: 32000,
       consumet_miruro:  32000,
       consumet_saturn:  32000,
-      consumet_sama:    32000,
+      consumet_anikoto: 32000,
     };
     const siteTimeout = SITE_REQUEST_TIMEOUTS[site] ?? 24000;
     const ctrl = new AbortController();
