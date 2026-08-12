@@ -29,8 +29,12 @@ type AnivexaStream = {
   server?: string;
   quality?: string;
   referer?: string;
-  // Optional external subtitle tracks are intentionally not copied to Nova.
-  // Their presence does not mean the audio/video has burned-in subtitles.
+  headers?: Record<string, string>;
+  subtitle?: unknown;
+  subtitles?: unknown;
+  tracks?: unknown;
+  hardsub?: unknown;
+  burnedSub?: unknown;
 };
 
 type NovaSource = {
@@ -78,8 +82,20 @@ function resolveUpstreamUrl(baseUrl: string, value: string): string {
 function streamKind(stream: AnivexaStream, url: string): "hls" | "mp4" | null {
   const type = String(stream.type || "").toLowerCase();
   const lowerUrl = url.toLowerCase();
-  if (type.includes("embed") || type.includes("iframe")) return null;
-  if (type.includes("hls") || lowerUrl.includes(".m3u8") || lowerUrl.includes("/stream/")) {
+  if (
+    type.includes("embed") ||
+    type.includes("iframe") ||
+    type.includes("hardsub") ||
+    type.includes("burned")
+  ) return null;
+  if (
+    type.includes("hls") ||
+    lowerUrl.includes(".m3u8") ||
+    lowerUrl.includes("/stream/") ||
+    lowerUrl.includes("m3u8-proxy") ||
+    lowerUrl.includes("hls-proxy") ||
+    lowerUrl.includes("/manifest/")
+  ) {
     return "hls";
   }
   if (type.includes("mp4") || type.includes("direct") || /\.(mp4|webm)(?:[?#]|$)/i.test(lowerUrl)) {
@@ -130,13 +146,21 @@ export async function getAnivexaSources(
         ? resolveUpstreamUrl(baseUrl, stream.url.trim())
         : "";
       if (!rawUrl || seen.has(rawUrl)) continue;
+      // External subtitle tracks do not mean the video has burned-in subtitles.
+      // Nova intentionally ignores provider tracks and overlays Kawaii Arabic
+      // subtitles separately. Reject only explicit hard-sub flags.
+      if (stream.hardsub || stream.burnedSub) continue;
       const kind = streamKind(stream, rawUrl);
       if (!kind) continue;
       seen.add(rawUrl);
 
       const referer = typeof stream.referer === "string" && stream.referer
         ? stream.referer
-        : `${baseUrl}/`;
+        : typeof stream.headers?.Referer === "string" && stream.headers.Referer
+          ? stream.headers.Referer
+          : typeof stream.headers?.referer === "string" && stream.headers.referer
+            ? stream.headers.referer
+            : `${baseUrl}/`;
       const quality = qualityInfo(stream);
       const server = stream.server ? ` · ${stream.server}` : "";
       const directUrl = novaProxyUrl(kind, rawUrl, referer);

@@ -509,6 +509,41 @@ export default function WatchScreen() {
       .catch(() => {});
   }, [etitle]); // eslint-disable-line
 
+  /* ── Kawaii Arabic subtitle for every raw-audio source ──
+     Anivexa streams are deliberately returned without provider subtitles so
+     that the user gets one consistent Arabic track across all raw sources.
+     Kawaii may return Arabic directly or English only; translate the latter
+     through Nova after proxying the signed subtitle file server-side. */
+  useEffect(() => {
+    if (!anime) {
+      setGlobalSubUrl(undefined);
+      return;
+    }
+    setGlobalSubUrl(undefined);
+    const ctrl = new AbortController();
+    const base = getBaseUrl();
+    secureFetch(`${base}/api/anime/kawaii-meta?anilistId=${encodeURIComponent(anime)}&ep=${epNum}`, {
+      signal: ctrl.signal,
+      headers: { Accept: "application/json" },
+    })
+      .then(r => r.ok ? r.json() : null)
+      .then((data: any) => {
+        if (ctrl.signal.aborted || !data) return;
+        const rawArabic = typeof data.arabicSubUrl === "string" ? data.arabicSubUrl : "";
+        const rawEnglish = typeof data.englishSubUrl === "string" ? data.englishSubUrl : "";
+        const raw = rawArabic || rawEnglish;
+        if (!raw) return;
+        const proxied = normalizeKawaiiSubtitleUrl(raw, base);
+        if (!proxied) return;
+        const subtitleUrl = rawArabic
+          ? proxied
+          : `${base}/api/anime/translate-vtt?url=${encodeURIComponent(proxied)}&from=en&to=ar`;
+        setGlobalSubUrl(subtitleUrl);
+      })
+      .catch(() => {});
+    return () => ctrl.abort();
+  }, [anime, epNum]);
+
   const progressKey    = `progress-${anime}-${epNum}`;
   const srcCacheKey    = anime ? `anime-srcs-${anime}-e${epNum}` : null;
   const SRC_CACHE_TTL  = 5 * 60 * 1000; // 5 minutes
@@ -588,7 +623,10 @@ export default function WatchScreen() {
     const thumb = coverUrl || (anime ? `https://img.anili.st/media/${anime}` : "");
     if (anime) addToHistory({ animeId: parseInt(anime), ep: epNum, title: titleStr, english: englishStr, thumbnail: thumb, updatedAt: Date.now() });
 
-    setPlayingSrc(src);
+    const subtitleUrl = subtitlesDisabledForSite(src.site)
+      ? undefined
+      : (src.subtitleUrl || globalSubUrl);
+    setPlayingSrc({ ...src, subtitleUrl });
     setResolveFailed(false);
     /* على web: HLS → embed WebView مع hls-proxy URL مباشرة */
     if (Platform.OS === "web") {
@@ -600,7 +638,7 @@ export default function WatchScreen() {
        عبر WebView مخفي (IP الجهاز السكني) قبل عرض بطاقة "يحتاج تطبيق أصلي" */
     if (needsHiddenResolve(src)) { setScreen("resolving"); return; }
     setScreen("embed");
-  }, [anime, epNum, titleStr, englishStr, coverUrl]); // eslint-disable-line
+  }, [anime, epNum, titleStr, englishStr, coverUrl, globalSubUrl]); // eslint-disable-line
 
   /* ── نتيجة استخراج WebView المخفي ── */
   const handleHiddenResolved = useCallback((stream: ResolvedStream) => {
@@ -958,7 +996,9 @@ export default function WatchScreen() {
         site: s.site,
         /* Keep the source subtitle URL so KW's translated VTT is available
            both during streaming and after it is saved with a download. */
-        subtitleUrl: s.subtitleUrl ? resolveUrl(s.subtitleUrl, base) : undefined,
+        subtitleUrl: subtitlesDisabledForSite(s.site)
+          ? undefined
+          : (s.subtitleUrl ? resolveUrl(s.subtitleUrl, base) : globalSubUrl),
         isArabic: ARABIC_SITES.has(s.site || ""),
         wantsSmartSub: !ARABIC_SITES.has(s.site || ""),
         skipIntro: s.skipIntro,
