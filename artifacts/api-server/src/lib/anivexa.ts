@@ -70,7 +70,7 @@ function qualityInfo(stream: AnivexaStream): { label: string; rank: number } {
   if (raw.includes("720") || raw.includes("hd")) return { label: "720p HD", rank: 13 };
   if (raw.includes("480")) return { label: "480p", rank: 8 };
   if (raw.includes("360") || raw.includes("sd")) return { label: "360p SD", rank: 5 };
-  return { label: stream.quality || "Auto", rank: 0 };
+  return { label: "Auto", rank: 0 };
 }
 
 function resolveUpstreamUrl(baseUrl: string, value: string): string {

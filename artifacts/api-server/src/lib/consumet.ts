@@ -131,7 +131,7 @@ async function resolveGogoPlayer(
     if (!dataId) return null;
 
     const sourceResponse = await fetch(
-      `https://megaplay.buzz/stream/getSourcesNew?id=${dataId}&id=${dataId}`,
+      `https://megaplay.buzz/stream/getSourcesNew?id=${dataId}&category=sub`,
       {
         headers: {
           Accept: "application/json",
@@ -190,7 +190,11 @@ function qualityInfo(video: ConsumetVideo): { label: string; rank: number } {
   if (raw.includes("720") || raw.includes("hd")) return { label: "720p HD", rank: 13 };
   if (raw.includes("480")) return { label: "480p", rank: 8 };
   if (raw.includes("360") || raw.includes("sd")) return { label: "360p SD", rank: 5 };
-  return { label: String(video.quality || "Auto"), rank: 0 };
+  const label = String(video.quality || "").trim();
+  return {
+    label: /^(?:auto|default|original|unknown)?$/i.test(label) ? "Auto" : label,
+    rank: 0,
+  };
 }
 
 function playableType(video: ConsumetVideo, url: string): "hls" | "mp4" | null {
@@ -296,22 +300,23 @@ function resultTitle(item: any): string {
 
 function watchVideos(payload: ConsumetWatchPayload | null): ConsumetVideo[] {
   if (!payload) return [];
-  const buckets = [
-    { videos: payload.sources, headers: payload.headers },
-    { videos: payload.sub?.sources, headers: payload.sub?.headers },
-    { videos: payload.data?.sources, headers: payload.data?.headers },
-  ];
-  const result: ConsumetVideo[] = [];
-  for (const bucket of buckets) {
-    for (const video of bucket.videos || []) {
-      if (!video || typeof video !== "object") continue;
-      result.push({
-        ...video,
-        headers: video.headers || bucket.headers,
-      });
-    }
-  }
-  return result;
+  // `sub` is provider metadata/subtitle payload, not a second video bucket.
+  // Merging it with the primary array leaks hard-subbed/dubbed variants into
+  // the source picker. Only accept the provider's primary video array. Some
+  // deployments wrap that same array in `data`, so use it only as a shape
+  // fallback, never in addition to `sources`.
+  const videos = Array.isArray(payload.sources)
+    ? payload.sources
+    : Array.isArray(payload.data?.sources)
+      ? payload.data.sources
+      : [];
+  const headers = payload.headers || payload.data?.headers;
+  return videos
+    .filter(video => video && typeof video === "object")
+    .map(video => ({
+      ...video,
+      headers: video.headers || headers,
+    }));
 }
 
 /**
@@ -368,6 +373,7 @@ async function getAnivexaFallbackSources(
         !type.includes("direct")
       )
     ) continue;
+    if (isNonOriginalVideo(stream as Record<string, unknown>, rawUrl)) continue;
     const kind: "hls" | "mp4" =
       type.includes("hls") || lower.includes(".m3u8") || lower.includes("/stream/")
         ? "hls"
@@ -380,7 +386,7 @@ async function getAnivexaFallbackSources(
       ? { label: "1080p FHD", rank: 18 }
       : qualityRaw.includes("720") || qualityRaw.includes("hd")
         ? { label: "720p HD", rank: 13 }
-        : { label: "HD", rank: 10 };
+        : { label: "Auto", rank: 0 };
     const proxied = proxyUrl(kind, rawUrl, referer);
     seen.add(rawUrl);
     result.push({
@@ -427,13 +433,16 @@ async function findEpisode(
       }
     }
   }
-  const best = results
+  const bestScore = results
     .filter(item => !isDubbedSearchVariant(
       `${resultTitle(item)} ${String(item?.id || "")} ${String(item?.url || "")}`,
     ))
     .map(item => ({ item, score: titleScore(resultTitle(item), queries) }))
-    .sort((a, b) => b.score - a.score)[0]?.item;
-  if (!best) return null;
+    .sort((a, b) => b.score - a.score)[0];
+  // Partial matches are dangerous here: "One Piece Movie 15" scores as a
+  // match for "One Piece" and returns a valid-looking but wrong episode.
+  if (!bestScore || bestScore.score < 0.95) return null;
+  const best = bestScore.item;
 
   const id = String(best.id || best.url || "");
   if (!id) return null;
@@ -444,8 +453,16 @@ async function findEpisode(
   const match = episodes.find(item => {
     const number = Number(item.number ?? item.episodeNumber);
     return Number.isFinite(number) && number === ep;
-  }) || episodes[ep - 1];
-  return match?.id == null ? null : String(match.id);
+  });
+  const hasEpisodeNumbers = episodes.some(item =>
+    Number.isFinite(Number(item.number ?? item.episodeNumber)),
+  );
+  const positionalMatch = !hasEpisodeNumbers ? episodes[ep - 1] : undefined;
+  const selected = match || positionalMatch;
+  if (selected?.id == null) return null;
+  const selectedText = `${String(selected.id)} ${String(selected.title || selected.name || "")}`;
+  if (isDubbedSearchVariant(selectedText)) return null;
+  return String(selected.id);
 }
 
 export async function getConsumetSources(
@@ -469,9 +486,11 @@ export async function getConsumetSources(
   try {
     const episodeId = await findEpisode(baseUrl, providerInfo.provider, title, english, ep, variants);
     if (!episodeId) return await getAnivexaFallbackSources(site, anilistId, ep);
-    const payload = await getJson<ConsumetWatchPayload>(
-      `${baseUrl}/anime/${providerInfo.provider}/watch/${encodePath(episodeId)}`,
-    );
+    const watchPath = `${baseUrl}/anime/${providerInfo.provider}/watch/${encodePath(episodeId)}`;
+    const watchUrl = providerInfo.provider === "gogoanime"
+      ? `${watchPath}?category=sub`
+      : watchPath;
+    const payload = await getJson<ConsumetWatchPayload>(watchUrl);
     const videos = watchVideos(payload);
     const payloadReferer =
       payload?.headers?.Referer ||
