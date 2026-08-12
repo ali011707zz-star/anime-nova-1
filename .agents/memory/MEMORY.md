@@ -75,3 +75,4 @@
 - [Source request budget](source-request-budget.md) — frontend per-source timeouts must exceed backend scraper races; refresh the anon token once after a transient 403.
 - [Shirayuki/AniKuro bridge](shirayuki-anikuro-bridge.md) — VPS-local Shirayuki runs on 127.0.0.1:3100; main API must proxy its AniList-based HLS sources server-side.
 - [AnimeSlayer MediaFire direct links](anslayer-mediafire-proxy.md) — extracted MediaFire CDN files are playable; proxy them with MediaFire Referer instead of applying the generic page-host block.
+- [Anikoto API site behavior](anikotoapi-site-behavior.md) — catalog API returns MegaPlay embeds, not m3u8; HTTP 200 can contain an internal 410 deleted-file page.
