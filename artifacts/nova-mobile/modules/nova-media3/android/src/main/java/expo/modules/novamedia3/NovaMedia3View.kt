@@ -33,6 +33,15 @@ class NovaMedia3View(
   private var lastCommandSequence = 0L
   private var attached = false
   private var shouldAutoPlay = true
+  /*
+   * Expo can deliver sourceUrl and sourceHeaders as two prop updates during
+   * one React render. Rebuilding ExoPlayer synchronously in both setters
+   * creates a short-lived player with stale headers and can race a second
+   * release/prepare on Android. Coalesce the pair into one main-thread turn.
+   */
+  private val prepareRunnable = Runnable {
+    if (attached) prepareCurrentSource()
+  }
 
   private val onPlaybackState by EventDispatcher()
   private val onProgress by EventDispatcher()
@@ -64,14 +73,14 @@ class NovaMedia3View(
     val next = value?.trim().takeUnless { it.isNullOrEmpty() }
     if (next == currentUrl) return
     currentUrl = next
-    if (attached) prepareCurrentSource()
+    schedulePrepare()
   }
 
   fun setSourceHeaders(value: String?) {
     val next = value?.takeUnless { it.isBlank() } ?: "{}"
     if (next == headersJson) return
     headersJson = next
-    if (attached && currentUrl != null) prepareCurrentSource()
+    schedulePrepare()
   }
 
   fun setInitialPosition(value: Double) {
@@ -116,16 +125,23 @@ class NovaMedia3View(
   override fun onAttachedToWindow() {
     super.onAttachedToWindow()
     attached = true
-    prepareCurrentSource()
+    schedulePrepare()
     mainHandler.removeCallbacks(progressRunnable)
     mainHandler.post(progressRunnable)
   }
 
   override fun onDetachedFromWindow() {
     attached = false
+    mainHandler.removeCallbacks(prepareRunnable)
     mainHandler.removeCallbacks(progressRunnable)
     releasePlayer()
     super.onDetachedFromWindow()
+  }
+
+  private fun schedulePrepare() {
+    if (!attached) return
+    mainHandler.removeCallbacks(prepareRunnable)
+    mainHandler.post(prepareRunnable)
   }
 
   private fun prepareCurrentSource() {

@@ -39,6 +39,32 @@ export type PlayerSource = {
   headers?: Record<string, string>;
 };
 
+type NovaVideoSource = string | {
+  uri: string;
+  /**
+   * expo-video otherwise infers a proxy URL as progressive media because the
+   * encrypted query no longer exposes the upstream `.m3u8` suffix.
+   */
+  contentType?: "hls";
+};
+
+function isHlsSourceUrl(url: string): boolean {
+  const lower = url.toLowerCase();
+  return (
+    /\.m3u8(?:[?#]|$)/i.test(lower) ||
+    lower.includes("/api/anime/hls-proxy") ||
+    lower.includes("/proxy/hls") ||
+    /\/(?:hls|playlist)(?:\/|[?#]|$)/i.test(lower)
+  );
+}
+
+function toExpoVideoSource(source: PlayerSource | undefined): NovaVideoSource | null {
+  if (!source?.url) return null;
+  return isHlsSourceUrl(source.url)
+    ? { uri: source.url, contentType: "hls" }
+    : source.url;
+}
+
 /** Never pass malformed URLs into the native player.
  *  Some Media3/AVPlayer versions crash before emitting statusChange(error)
  *  when the source is empty, relative, or otherwise not an HTTP URL.
@@ -660,11 +686,11 @@ export function RiftPlayer({
   /* ─── expo-video player ─── */
   /* نستخدم ref ثابت للـ VideoSource الأولي حتى لا يُعيد useVideoPlayer
      تهيئة المشغّل عند تغيير srcIdx (التبديل يتم عبر player.replace فقط).
-     نمرّر URL string مباشرةً (بدون headers) — جميع المصادر تمرّ عبر VPS proxy
-     الذي يُضيف Referer/Origin داخلياً، لذا لا حاجة لإرسالها من ExoPlayer.
-     تمرير { uri, headers } يُسبِّب فشلاً صامتاً في بعض إصدارات expo-video native. */
+     روابط HLS تمرّر contentType صراحةً — خصوصاً رابط hls-proxy المشفّر الذي
+     لا يحتوي امتداد .m3u8 ظاهراً. جميع هذه المصادر تمرّ عبر VPS proxy الذي
+     يُضيف Referer/Origin داخلياً، لذا لا نمرّر headers الخام إلى expo-video. */
   const _initSrc = playableSources[safeInitialIndex];
-  const _initVideoSrcRef = useRef<string>(_initSrc?.url || "");
+  const _initVideoSrcRef = useRef<NovaVideoSource | null>(toExpoVideoSource(_initSrc));
   const player = useVideoPlayer(_initVideoSrcRef.current || null, (p) => {
     p.loop = false;
     p.volume = 1;
@@ -1714,7 +1740,7 @@ export function RiftPlayer({
       try {
         /* replace() يدير إيقاف الـpipeline السابق داخلياً؛ لا نضيف pause()
            قبله لأن استدعاءين native متتاليين كانا سبباً لسباق الكراش. */
-        player.replace(nextSrc.url as any);
+        player.replace(toExpoVideoSource(nextSrc) as any);
       } catch (e) {
         console.warn("[RiftPlayer] player.replace() رمى استثناء:", e);
         setError(true);

@@ -6107,16 +6107,31 @@ function wrapForMobile(s: { site?: string; directUrl?: string; url?: string; dir
   // AniNeko and Kawaii both need the full VPS HLS proxy. A manifest-only
   // proxy leaves child playlists/segments on the device, where the required
   // Referer/Origin is lost and playback fails after the first request.
-  // Prefer the original media URL in `url`; `directUrl` may be a legacy
-  // encrypted proxy URL from an older cache entry.
-  const rawUrl = s.site === "anineko"
+  //
+  // The mobile contract is deliberately stronger than the web contract:
+  // both `url` and `directUrl` must point at the same protected media URL.
+  // Older cache rows can contain a raw URL in one field and an encrypted
+  // proxy URL in the other, so prefer the readable field when the selected
+  // value is already encrypted.
+  const preferredUrl = s.site === "anineko"
     ? (s.url || s.directUrl || "")
     : (s.directUrl || s.url || "");
+  const rawUrl = isEncrypted(preferredUrl) && s.url && !isEncrypted(s.url)
+    ? s.url
+    : preferredUrl;
   if (!rawUrl) return s;
   const ref = s.headers?.Referer || "";
 
-  // بالفعل proxy عبر VPS
-  if (rawUrl.startsWith("/api/") || rawUrl.startsWith("/proxy/hls")) return s;
+  // Already proxied through Nova: normalize both fields and encrypt any
+  // legacy plaintext query parameters before handing the URL to the app.
+  // This also makes cached sources follow the exact same contract as fresh
+  // scraper results.
+  if (rawUrl.startsWith("/api/anime/") || rawUrl.startsWith("/proxy/hls")) {
+    const protectedUrl = rawUrl.startsWith("/api/anime/")
+      ? encryptProxyUrl(rawUrl)
+      : rawUrl;
+    return { ...s, directUrl: protectedUrl, url: protectedUrl, corsOk: false };
+  }
   // Shirayuki already rewrites child playlists and segments. Wrapping its
   // URL through Nova again creates a proxy-to-proxy request.
   if (rawUrl.includes("proxy.anikuro.ru/")) return { ...s, corsOk: true };
@@ -6126,15 +6141,17 @@ function wrapForMobile(s: { site?: string; directUrl?: string; url?: string; dir
   // بلا امتداد .m3u8، بينما directType هو المعلومة الموثوقة التي أعادها
   // الـ scraper. بدون ذلك يصل الرابط الخام إلى ExoPlayer فيحاول قراءته
   // كـ Progressive MP4 ثم يفشل بصمت على Android.
-  const isHls = s.directType === "hls" || /\.m3u8|hls-proxy/i.test(rawUrl);
+  const isHls =
+    String(s.directType || "").toLowerCase() === "hls" ||
+    /\.m3u8|hls-proxy|\/(?:hls|playlist)(?:\/|$)/i.test(rawUrl);
   const isMp4 = rawUrl.includes(".mp4") || s.directType === "mp4";
   let proxied = rawUrl;
   if (isHls) {
     proxied = ref
-      ? `/api/anime/hls-proxy?url=${encodeURIComponent(rawUrl)}&ref=${encodeURIComponent(ref)}`
-      : `/api/anime/hls-proxy?url=${encodeURIComponent(rawUrl)}`;
+      ? `/api/anime/hls-proxy?url=${encryptParam(rawUrl)}&ref=${encryptParam(ref)}`
+      : `/api/anime/hls-proxy?url=${encryptParam(rawUrl)}`;
   } else if (isMp4 && ref) {
-    proxied = `/api/anime/video-proxy?url=${encodeURIComponent(rawUrl)}&ref=${encodeURIComponent(ref)}`;
+    proxied = `/api/anime/video-proxy?url=${encryptParam(rawUrl)}&ref=${encryptParam(ref)}`;
   } else {
     return s; // MP4 بدون Referer — اتركه للموبايل يتعامل معه مباشرة
   }
