@@ -85,6 +85,61 @@ async function getJson<T>(url: string): Promise<T | null> {
   }
 }
 
+async function resolveGogoPlayer(
+  playerUrl: string,
+): Promise<{ url: string; referer: string } | null> {
+  try {
+    const playerResponse = await fetch(playerUrl, {
+      headers: {
+        Accept: "text/html,*/*",
+        Referer: "https://gogoanime.me.uk/",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124 Safari/537.36",
+      },
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    });
+    if (!playerResponse.ok) return null;
+    const playerHtml = await playerResponse.text();
+    const iframeMatch = playerHtml.match(/<iframe[^>]+src=["']([^"']+)["']/i);
+    const iframeUrl = iframeMatch?.[1]?.replace(/&amp;/g, "&") || "";
+    if (!/^https?:\/\/megaplay\.buzz\//i.test(iframeUrl)) return null;
+
+    const megaResponse = await fetch(iframeUrl, {
+      headers: {
+        Accept: "text/html,*/*",
+        Referer: "https://gogoanime.me.uk/",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124 Safari/537.36",
+      },
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    });
+    if (!megaResponse.ok) return null;
+    const megaHtml = await megaResponse.text();
+    const dataId = megaHtml.match(/data-id=["'](\d+)["']/i)?.[1];
+    if (!dataId) return null;
+
+    const sourceResponse = await fetch(
+      `https://megaplay.buzz/stream/getSourcesNew?id=${dataId}&id=${dataId}`,
+      {
+        headers: {
+          Accept: "application/json",
+          Referer: iframeUrl,
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124 Safari/537.36",
+          "X-Requested-With": "XMLHttpRequest",
+        },
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      },
+    );
+    if (!sourceResponse.ok) return null;
+    const sourcePayload = await sourceResponse.json() as { sources?: { file?: unknown } };
+    const mediaUrl = typeof sourcePayload.sources?.file === "string"
+      ? sourcePayload.sources.file.trim()
+      : "";
+    if (!/^https?:\/\/.+\.m3u8(?:[?#]|$)/i.test(mediaUrl)) return null;
+    return { url: mediaUrl, referer: "https://megaplay.buzz/" };
+  } catch {
+    return null;
+  }
+}
+
 function normalizeTitle(value: string): string {
   return value
     .toLowerCase()
@@ -237,13 +292,20 @@ export async function getConsumetSources(
     const sources: NovaSource[] = [];
 
     for (const video of videos) {
-      const rawUrl = typeof video?.url === "string" ? video.url.trim() : "";
-      if (!/^https?:\/\//i.test(rawUrl) || seen.has(rawUrl)) continue;
+      const originalUrl = typeof video?.url === "string" ? video.url.trim() : "";
+      if (!/^https?:\/\//i.test(originalUrl)) continue;
+      const gogoResolved = providerInfo.provider === "gogoanime" &&
+        /gogoanime\.me\.uk\/newplayer\.php/i.test(originalUrl)
+        ? await resolveGogoPlayer(originalUrl)
+        : null;
+      const rawUrl = gogoResolved?.url || originalUrl;
+      if (seen.has(rawUrl)) continue;
       const kind = playableType(video, rawUrl);
       if (!kind) continue;
       seen.add(rawUrl);
       const quality = qualityInfo(video);
-      const referer = video.headers?.Referer || video.headers?.referer || payloadReferer;
+      const referer = gogoResolved?.referer ||
+        video.headers?.Referer || video.headers?.referer || payloadReferer;
       const proxied = proxyUrl(kind, rawUrl, referer);
       sources.push({
         name: `${providerInfo.label} · ${quality.label} · صوت خام`,
