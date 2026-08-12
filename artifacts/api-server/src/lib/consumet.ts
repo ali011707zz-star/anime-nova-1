@@ -30,6 +30,13 @@ type ConsumetVideo = {
   language?: unknown;
 };
 
+type ConsumetWatchPayload = {
+  sources?: ConsumetVideo[];
+  headers?: Record<string, string>;
+  sub?: { sources?: ConsumetVideo[]; headers?: Record<string, string> };
+  data?: { sources?: ConsumetVideo[]; headers?: Record<string, string> };
+};
+
 type ConsumetEpisode = {
   id?: unknown;
   number?: unknown;
@@ -217,6 +224,111 @@ function resultTitle(item: any): string {
   return String(item?.name || item?.titleText || "");
 }
 
+function watchVideos(payload: ConsumetWatchPayload | null): ConsumetVideo[] {
+  if (!payload) return [];
+  const buckets = [
+    { videos: payload.sources, headers: payload.headers },
+    { videos: payload.sub?.sources, headers: payload.sub?.headers },
+    { videos: payload.data?.sources, headers: payload.data?.headers },
+  ];
+  const result: ConsumetVideo[] = [];
+  for (const bucket of buckets) {
+    for (const video of bucket.videos || []) {
+      if (!video || typeof video !== "object") continue;
+      result.push({
+        ...video,
+        headers: video.headers || bucket.headers,
+      });
+    }
+  }
+  return result;
+}
+
+/**
+ * Some providers in the self-hosted Consumet build are currently only
+ * returning a provider error from the VPS (Miruro) or an embed-only response
+ * (ReAnime). AniVexa already exposes verified direct streams for these same
+ * AniList ids, so use it as a provider-local fallback rather than returning
+ * an apparently healthy but empty source card.
+ */
+const ANIVEXA_FALLBACKS: Record<string, { provider: string; label: string }> = {
+  consumet_reanime: { provider: "reanime", label: "ReAnime" },
+  consumet_miruro: { provider: "animegg", label: "Miruro" },
+  consumet_anikoto: { provider: "anikoto", label: "AniKoto" },
+};
+
+async function getAnivexaFallbackSources(
+  site: string,
+  anilistId: number | undefined,
+  ep: number,
+): Promise<NovaSource[]> {
+  const fallback = ANIVEXA_FALLBACKS[site];
+  const baseUrl = (process.env.ANIVEXA_API_URL || "").trim().replace(/\/+$/, "");
+  if (!fallback || !baseUrl || !anilistId) return [];
+
+  const payload = await getJson<{
+    streams?: Array<{
+      url?: unknown;
+      type?: unknown;
+      server?: unknown;
+      quality?: unknown;
+      referer?: unknown;
+      headers?: Record<string, string>;
+    }>;
+  }>(`${baseUrl}/watch/${fallback.provider}/${anilistId}/sub/${fallback.provider}-${ep}`);
+  const streams = Array.isArray(payload?.streams) ? payload.streams : [];
+  const result: NovaSource[] = [];
+  const seen = new Set<string>();
+
+  for (const stream of streams) {
+    const rawUrl = typeof stream.url === "string" ? stream.url.trim() : "";
+    if (!/^https?:\/\//i.test(rawUrl) || seen.has(rawUrl)) continue;
+    const type = String(stream.type || "").toLowerCase();
+    const lower = rawUrl.toLowerCase();
+    if (
+      type.includes("embed") ||
+      type.includes("iframe") ||
+      type.includes("hardsub") ||
+      type.includes("burned") ||
+      (
+        !/\.m3u8(?:[?#]|$)/i.test(lower) &&
+        !/\.(?:mp4|webm)(?:[?#]|$)/i.test(lower) &&
+        !type.includes("hls") &&
+        !type.includes("mp4") &&
+        !type.includes("direct")
+      )
+    ) continue;
+    const kind: "hls" | "mp4" =
+      type.includes("hls") || lower.includes(".m3u8") || lower.includes("/stream/")
+        ? "hls"
+        : "mp4";
+    const referer = typeof stream.referer === "string" && stream.referer
+      ? stream.referer
+      : stream.headers?.Referer || stream.headers?.referer || `${baseUrl}/`;
+    const qualityRaw = `${stream.quality || ""} ${stream.server || ""}`.toLowerCase();
+    const quality = qualityRaw.includes("1080") || qualityRaw.includes("fhd")
+      ? { label: "1080p FHD", rank: 18 }
+      : qualityRaw.includes("720") || qualityRaw.includes("hd")
+        ? { label: "720p HD", rank: 13 }
+        : { label: "HD", rank: 10 };
+    const proxied = proxyUrl(kind, rawUrl, referer);
+    seen.add(rawUrl);
+    result.push({
+      name: `${fallback.label} · ${quality.label} · صوت خام`,
+      url: proxied,
+      quality: quality.label,
+      qualityRank: quality.rank,
+      site,
+      directUrl: proxied,
+      directType: kind,
+      isEmbed: false,
+      hasBuiltinSub: false,
+      headers: { Referer: referer },
+    });
+  }
+  return result;
+}
+
 async function findEpisode(
   baseUrl: string,
   provider: string,
@@ -269,6 +381,7 @@ export async function getConsumetSources(
   english: string | null,
   ep: number,
   variants: string[] = [],
+  anilistId?: number,
 ): Promise<NovaSource[]> {
   const providerInfo = providerForSite(site);
   const baseUrl = consumetBaseUrl();
@@ -282,12 +395,17 @@ export async function getConsumetSources(
 
   try {
     const episodeId = await findEpisode(baseUrl, providerInfo.provider, title, english, ep, variants);
-    if (!episodeId) return [];
-    const payload = await getJson<{ sources?: ConsumetVideo[]; headers?: Record<string, string> }>(
+    if (!episodeId) return await getAnivexaFallbackSources(site, anilistId, ep);
+    const payload = await getJson<ConsumetWatchPayload>(
       `${baseUrl}/anime/${providerInfo.provider}/watch/${encodePath(episodeId)}`,
     );
-    const videos = Array.isArray(payload?.sources) ? payload.sources : [];
-    const payloadReferer = payload?.headers?.Referer || payload?.headers?.referer || `${baseUrl}/`;
+    const videos = watchVideos(payload);
+    const payloadReferer =
+      payload?.headers?.Referer ||
+      payload?.headers?.referer ||
+      payload?.sub?.headers?.Referer ||
+      payload?.sub?.headers?.referer ||
+      `${baseUrl}/`;
     const seen = new Set<string>();
     const sources: NovaSource[] = [];
 
@@ -320,10 +438,11 @@ export async function getConsumetSources(
         headers: referer ? { Referer: referer } : undefined,
       });
     }
-    return sources;
+    if (sources.length) return sources;
+    return await getAnivexaFallbackSources(site, anilistId, ep);
   } catch (error: any) {
     console.warn(`[Consumet] ${providerInfo.provider} ep${ep} failed:`, error?.message || error);
-    return [];
+    return await getAnivexaFallbackSources(site, anilistId, ep);
   }
 }
 

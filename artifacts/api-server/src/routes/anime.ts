@@ -12596,7 +12596,7 @@ router.get("/anime/fetch-source", async (req, res) => {
     return;
   }
   if (isConsumetSite(site)) {
-    const sources = await getConsumetSources(site, title, english, ep, titleVariants);
+    const sources = await getConsumetSources(site, title, english, ep, titleVariants, anilistId);
     const isMobileClient = (req.headers["x-nova-client"] || "").toString().includes("mobile");
     const encSources = sources.map(source => {
       const wrapped = isMobileClient ? wrapForMobile(source) : source;
