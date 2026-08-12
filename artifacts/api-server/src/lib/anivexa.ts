@@ -29,9 +29,8 @@ type AnivexaStream = {
   server?: string;
   quality?: string;
   referer?: string;
-  subtitle?: unknown;
-  subtitles?: unknown;
-  tracks?: unknown;
+  // Optional external subtitle tracks are intentionally not copied to Nova.
+  // Their presence does not mean the audio/video has burned-in subtitles.
 };
 
 type NovaSource = {
@@ -131,10 +130,6 @@ export async function getAnivexaSources(
         ? resolveUpstreamUrl(baseUrl, stream.url.trim())
         : "";
       if (!rawUrl || seen.has(rawUrl)) continue;
-      // Never expose a source that the upstream provider identifies as carrying
-      // subtitle tracks. Nova's player can add optional subtitles separately.
-      if (stream.subtitle || stream.subtitles || stream.tracks) continue;
-
       const kind = streamKind(stream, rawUrl);
       if (!kind) continue;
       seen.add(rawUrl);
