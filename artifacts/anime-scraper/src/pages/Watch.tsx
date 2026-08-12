@@ -332,6 +332,9 @@ function shouldShowSrc(src: FetchedSrc): boolean {
   const url = (src.directUrl || src.url || "").toLowerCase();
   // Remove mp4upload entirely (HEVC codec — audio plays but video fails on Linux Chrome)
   if (url.includes("mp4upload")) return false;
+  // Never show a known dubbed or burned-in foreign-subtitle file, even if an
+  // upstream provider bypassed the backend metadata filter.
+  if (/(?:dub(?:bed)?|hardsub|hardcoded|burned|sub[_-]?ita|subita|sub[_-]?eng|subeng)/i.test(`${url} ${src.name || ""}`)) return false;
   // Hide embed sources (iframes) — will be shown as fallback when no direct sources
   if (src.isEmbed) return false;
   return true;

@@ -1,4 +1,6 @@
 import { encryptParam } from "./security.js";
+import { isNonOriginalVideo } from "./source-policy.js";
+import { probeHlsQuality } from "./consumet.js";
 
 /**
  * Anivexa is intentionally kept as a separate VPS service. This adapter only
@@ -30,6 +32,11 @@ type AnivexaStream = {
   tracks?: unknown;
   hardsub?: unknown;
   burnedSub?: unknown;
+  isDub?: unknown;
+  audio?: unknown;
+  language?: unknown;
+  name?: unknown;
+  label?: unknown;
 };
 
 type NovaSource = {
@@ -63,7 +70,7 @@ function qualityInfo(stream: AnivexaStream): { label: string; rank: number } {
   if (raw.includes("720") || raw.includes("hd")) return { label: "720p HD", rank: 13 };
   if (raw.includes("480")) return { label: "480p", rank: 8 };
   if (raw.includes("360") || raw.includes("sd")) return { label: "360p SD", rank: 5 };
-  return { label: stream.quality || "HD", rank: 10 };
+  return { label: stream.quality || "Auto", rank: 0 };
 }
 
 function resolveUpstreamUrl(baseUrl: string, value: string): string {
@@ -144,7 +151,7 @@ export async function getAnivexaSources(
       // External subtitle tracks do not mean the video has burned-in subtitles.
       // Nova intentionally ignores provider tracks and overlays Kawaii Arabic
       // subtitles separately. Reject only explicit hard-sub flags.
-      if (stream.hardsub || stream.burnedSub) continue;
+      if (isNonOriginalVideo(stream as Record<string, unknown>, rawUrl)) continue;
       const kind = streamKind(stream, rawUrl);
       if (!kind) continue;
       seen.add(rawUrl);
@@ -156,7 +163,11 @@ export async function getAnivexaSources(
           : typeof stream.headers?.referer === "string" && stream.headers.referer
             ? stream.headers.referer
             : `${baseUrl}/`;
-      const quality = qualityInfo(stream);
+       let quality = qualityInfo(stream);
+       if (kind === "hls" && quality.rank < 18) {
+         const manifestQuality = await probeHlsQuality(rawUrl, referer);
+         if (manifestQuality.rank > quality.rank) quality = manifestQuality;
+       }
       const server = stream.server ? ` · ${stream.server}` : "";
       const directUrl = novaProxyUrl(kind, rawUrl, referer);
 

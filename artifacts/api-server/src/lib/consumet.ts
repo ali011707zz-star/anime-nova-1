@@ -1,4 +1,5 @@
 import { encryptParam } from "./security.js";
+import { isDubbedSearchVariant, isNonOriginalVideo } from "./source-policy.js";
 
 /**
  * Consumet is self-hosted on the VPS. Nova consumes only the provider's
@@ -28,6 +29,12 @@ type ConsumetVideo = {
   hardSub?: unknown;
   dub?: unknown;
   language?: unknown;
+  isDub?: unknown;
+  audio?: unknown;
+  burnedSub?: unknown;
+  subtitles?: unknown;
+  tracks?: unknown;
+  name?: unknown;
 };
 
 type ConsumetWatchPayload = {
@@ -183,21 +190,84 @@ function qualityInfo(video: ConsumetVideo): { label: string; rank: number } {
   if (raw.includes("720") || raw.includes("hd")) return { label: "720p HD", rank: 13 };
   if (raw.includes("480")) return { label: "480p", rank: 8 };
   if (raw.includes("360") || raw.includes("sd")) return { label: "360p SD", rank: 5 };
-  return { label: String(video.quality || "HD"), rank: 10 };
+  return { label: String(video.quality || "Auto"), rank: 0 };
 }
 
 function playableType(video: ConsumetVideo, url: string): "hls" | "mp4" | null {
   const lower = url.toLowerCase();
   const type = String(video.type || "").toLowerCase();
-  const language = String(video.language || "").toLowerCase();
 
   // Do not expose subtitle files, dub variants, DASH manifests, or embed pages.
-  if (video.isDASH || video.hardsub || video.hardSub || video.dub) return null;
-  if (language.includes("dub") || type.includes("dub") || type.includes("embed") || type.includes("iframe")) return null;
+  if (
+    video.isDASH ||
+    isNonOriginalVideo(video as Record<string, unknown>, url) ||
+    type.includes("embed") ||
+    type.includes("iframe")
+  ) return null;
   if (/\.(?:vtt|srt|ass|ssa)(?:[?#]|$)/i.test(lower) || lower.includes("/subtitle")) return null;
   if (Boolean(video.isM3U8) || /\.m3u8(?:[?#]|$)/i.test(lower)) return "hls";
   if (type.includes("mp4") || type.includes("video") || /\.(?:mp4|webm)(?:[?#]|$)/i.test(lower)) return "mp4";
   return null;
+}
+
+function qualityFromHeight(height: number): { label: string; rank: number } {
+  if (height >= 2160) return { label: "4K", rank: 24 };
+  if (height >= 1440) return { label: "1440p", rank: 21 };
+  if (height >= 1080) return { label: "1080p FHD", rank: 18 };
+  if (height >= 720) return { label: "720p HD", rank: 13 };
+  if (height >= 480) return { label: "480p", rank: 8 };
+  if (height > 0) return { label: "360p SD", rank: 5 };
+  return { label: "Auto", rank: 0 };
+}
+
+const hlsQualityCache = new Map<string, { quality: { label: string; rank: number }; expiresAt: number }>();
+
+/**
+ * Providers often label a master playlist as `auto` or `HD-1`. Read the
+ * advertised variant resolutions so the picker never calls a 720p stream
+ * 1080p, and can expose a real 1080p master when one exists.
+ */
+export async function probeHlsQuality(
+  url: string,
+  referer: string,
+): Promise<{ label: string; rank: number }> {
+  const cached = hlsQualityCache.get(url);
+  if (cached && cached.expiresAt > Date.now()) return cached.quality;
+  try {
+    const response = await fetch(url, {
+      headers: {
+        Accept: "application/vnd.apple.mpegurl,application/x-mpegURL,*/*",
+        Referer: referer,
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124 Safari/537.36",
+      },
+      signal: AbortSignal.timeout(2_500),
+    });
+    if (!response.ok) return { label: "Auto", rank: 0 };
+    const manifest = await response.text();
+    let maxHeight = 0;
+    for (const match of manifest.matchAll(/#EXT-X-STREAM-INF:([^\r\n]*)/gi)) {
+      const attributes = match[1] || "";
+      const resolution = attributes.match(/(?:^|,)RESOLUTION=\d+x(\d+)/i);
+      const namedQuality = attributes.match(/(?:^|,)(?:NAME|VIDEO)=["']?([^,"']+)/i)?.[1] || "";
+      const height = resolution
+        ? Number(resolution[1])
+        : /2160|4k/i.test(namedQuality)
+          ? 2160
+          : /1440/i.test(namedQuality)
+            ? 1440
+            : /1080|fhd/i.test(namedQuality)
+              ? 1080
+              : /720|hd/i.test(namedQuality)
+                ? 720
+                : 0;
+      if (Number.isFinite(height)) maxHeight = Math.max(maxHeight, height);
+    }
+    const quality = qualityFromHeight(maxHeight);
+    hlsQualityCache.set(url, { quality, expiresAt: Date.now() + 5 * 60_000 });
+    return quality;
+  } catch {
+    return { label: "Auto", rank: 0 };
+  }
 }
 
 function proxyUrl(kind: "hls" | "mp4", rawUrl: string, referer: string): string {
@@ -358,6 +428,9 @@ async function findEpisode(
     }
   }
   const best = results
+    .filter(item => !isDubbedSearchVariant(
+      `${resultTitle(item)} ${String(item?.id || "")} ${String(item?.url || "")}`,
+    ))
     .map(item => ({ item, score: titleScore(resultTitle(item), queries) }))
     .sort((a, b) => b.score - a.score)[0]?.item;
   if (!best) return null;
@@ -421,9 +494,13 @@ export async function getConsumetSources(
       const kind = playableType(video, rawUrl);
       if (!kind) continue;
       seen.add(rawUrl);
-      const quality = qualityInfo(video);
+       let quality = qualityInfo(video);
       const referer = gogoResolved?.referer ||
         video.headers?.Referer || video.headers?.referer || payloadReferer;
+       if (kind === "hls" && quality.rank < 18) {
+         const manifestQuality = await probeHlsQuality(rawUrl, referer);
+         if (manifestQuality.rank > quality.rank) quality = manifestQuality;
+       }
       const proxied = proxyUrl(kind, rawUrl, referer);
       sources.push({
         name: `${providerInfo.label} · ${quality.label} · صوت خام`,
