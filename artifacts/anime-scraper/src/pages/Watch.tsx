@@ -186,15 +186,8 @@ const SCRAPER_DEFS: { site: string; name: string; desc: string; tag: string; aud
   // vidbolt_anim: معطّل 2026-07-30 — كود محفوظ (10 مصادر HLS)، يُفعَّل لاحقاً
   { site: "sanime",           name: "سـAnime",       desc: "عربي · MP4 مباشر",        tag: "SA", isArabic: true },
   { site: "anifox",           name: "ANIFOX",        desc: "Archive · MediaFire · MP4Upload · Uqload", tag: "FX", isArabic: true },
-  { site: "anivexa_mkissa",   name: "MKissa",        desc: "HLS · صوت خام",              tag: "MK" },
-  { site: "anivexa_reanime",  name: "Reanime",       desc: "HLS · صوت خام",              tag: "RA" },
   { site: "anivexa_anikoto",  name: "AniKoto",       desc: "HLS · صوت خام",              tag: "AK" },
-  { site: "anivexa_animegg",  name: "AnimeGG",       desc: "HLS · صوت خام",              tag: "GG" },
-  { site: "anivexa_anidbapp", name: "AniDB App",     desc: "HLS · صوت خام",              tag: "DB" },
-  { site: "anivexa_2dhive",   name: "2dhive",        desc: "HLS · صوت خام",              tag: "2D" },
   { site: "anivexa_anibd",    name: "AniBD",         desc: "HLS · صوت خام",              tag: "BD" },
-  { site: "anivexa_senshi",   name: "Senshi",        desc: "HLS · صوت خام",              tag: "SE" },
-  { site: "anivexa_kaa",      name: "Kickassanime",  desc: "HLS · صوت خام",              tag: "KA" },
   // akoam: حُذف 2026-07-28 — كان يستخدم hopxBrowserExtract (browser) على كل طلب
 ];
 
@@ -213,15 +206,8 @@ const STATIC_PICKER_WEB: Record<WebQualityKey, { site: string; tag: string }[]> 
     { site: "sanime",       tag: "SA" },
     { site: "animeify",     tag: "AF" },
     { site: "anifox",       tag: "FX" },
-    { site: "anivexa_mkissa", tag: "MK" },
-    { site: "anivexa_reanime", tag: "RA" },
     { site: "anivexa_anikoto", tag: "AK" },
-    { site: "anivexa_animegg", tag: "GG" },
-    { site: "anivexa_anidbapp", tag: "DB" },
-    { site: "anivexa_2dhive", tag: "2D" },
     { site: "anivexa_anibd", tag: "BD" },
-    { site: "anivexa_senshi", tag: "SE" },
-    { site: "anivexa_kaa", tag: "KA" },
   ],
   "720p": [
     { site: "anineko",      tag: "AN" },
@@ -230,30 +216,16 @@ const STATIC_PICKER_WEB: Record<WebQualityKey, { site: string; tag: string }[]> 
     { site: "sanime",       tag: "SA" },
     { site: "animeify",     tag: "AF" },
     { site: "anifox",       tag: "FX" },
-    { site: "anivexa_mkissa", tag: "MK" },
-    { site: "anivexa_reanime", tag: "RA" },
     { site: "anivexa_anikoto", tag: "AK" },
-    { site: "anivexa_animegg", tag: "GG" },
-    { site: "anivexa_anidbapp", tag: "DB" },
-    { site: "anivexa_2dhive", tag: "2D" },
     { site: "anivexa_anibd", tag: "BD" },
-    { site: "anivexa_senshi", tag: "SE" },
-    { site: "anivexa_kaa", tag: "KA" },
   ],
   "480p": [
     { site: "anineko",      tag: "AN" },
     { site: "animewitcher", tag: "AW" },
     { site: "animeify",     tag: "AF" },
     { site: "anifox",       tag: "FX" },
-    { site: "anivexa_mkissa", tag: "MK" },
-    { site: "anivexa_reanime", tag: "RA" },
     { site: "anivexa_anikoto", tag: "AK" },
-    { site: "anivexa_animegg", tag: "GG" },
-    { site: "anivexa_anidbapp", tag: "DB" },
-    { site: "anivexa_2dhive", tag: "2D" },
     { site: "anivexa_anibd", tag: "BD" },
-    { site: "anivexa_senshi", tag: "SE" },
-    { site: "anivexa_kaa", tag: "KA" },
   ],
 };
 const WEB_Q_KEYS: WebQualityKey[] = ["1080p", "720p", "480p"];
@@ -3327,15 +3299,8 @@ export default function WatchPage() {
       // reanime: محذوف 2026-07-24
       // hianime: معطّل 2026-07-30
       anipm:        24000,  // backend = 20s + هامش 4s
-      anivexa_mkissa:  32000,
-      anivexa_reanime: 32000,
       anivexa_anikoto: 32000,
-      anivexa_animegg: 32000,
-      anivexa_anidbapp: 32000,
-      anivexa_2dhive:  32000,
       anivexa_anibd:   32000,
-      anivexa_senshi:  32000,
-      anivexa_kaa:     32000,
     };
     const siteTimeout = SITE_REQUEST_TIMEOUTS[site] ?? 24000;
     const ctrl = new AbortController();

@@ -4,21 +4,14 @@ import { encryptParam } from "./security.js";
  * Anivexa is intentionally kept as a separate VPS service. This adapter only
  * translates its direct stream response into Nova's existing source contract.
  *
- * Deliberately excluded:
- * - anineko: already exists as a first-party Nova source
- * - animenosub, anizone, animedunya: the upstream project marks these
- *   providers as subtitle-only
+ * Only providers that have been verified end-to-end on the production VPS
+ * remain here. The adapter deliberately requests the `sub` route (original
+ * audio) and ignores provider subtitle tracks so Nova can overlay Kawaii's
+ * Arabic subtitle independently.
  */
 export const ANIVEXA_SOURCES = [
-  { site: "anivexa_mkissa", provider: "mkissa", label: "MKissa" },
-  { site: "anivexa_reanime", provider: "reanime", label: "Reanime" },
   { site: "anivexa_anikoto", provider: "anikoto", label: "AniKoto" },
-  { site: "anivexa_animegg", provider: "animegg", label: "AnimeGG" },
-  { site: "anivexa_anidbapp", provider: "anidbapp", label: "AniDB App" },
-  { site: "anivexa_2dhive", provider: "2dhive", label: "2dhive" },
   { site: "anivexa_anibd", provider: "anibd", label: "AniBD" },
-  { site: "anivexa_senshi", provider: "senshi", label: "Senshi" },
-  { site: "anivexa_kaa", provider: "kaa", label: "Kickassanime" },
 ] as const;
 
 type AnivexaSourceSite = (typeof ANIVEXA_SOURCES)[number]["site"];
