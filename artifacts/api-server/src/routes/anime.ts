@@ -11581,9 +11581,26 @@ async function getAnimeSlayerSourcesUncached(
               new Promise<null>(r => setTimeout(() => r(null), 9_000)),
             ]);
             if (!direct) return null;
+            // MediaFire is blocked by the global dead-host filter because its
+            // page URLs are not playable.  This is different for AnimeSlayer:
+            // extractMediafireDirect() returns the actual CDN file URL.  Keep
+            // the page blocked globally, but expose the extracted file through
+            // our proxy so web and mobile both retain the required Referer.
+            const mediaRef = "https://www.mediafire.com/";
+            const lowerDirect = direct.toLowerCase();
+            const quality = /(?:2160|1440|1080)(?:p)?(?:[._-]|$)/i.test(lowerDirect) || /(?:uhd|fhd)(?:[._-]|$)/i.test(lowerDirect)
+              ? "FHD"
+              : /(?:720|hd)(?:p)?(?:[._-]|$)/i.test(lowerDirect)
+                ? "HD"
+                : /(?:480|sd)(?:p)?(?:[._-]|$)/i.test(lowerDirect)
+                  ? "SD"
+                  : "HD";
+            const qualityRank = quality === "FHD" ? 12 : quality === "HD" ? 10 : 7;
+            const proxied = `/api/anime/video-proxy?url=${encodeURIComponent(direct)}&ref=${encodeURIComponent(mediaRef)}`;
             return {
-              name: "AnimeSlayer · MediaFire", url: link, quality: "FHD", qualityRank: 12,
-              site: "anslayer", directUrl: direct, directType: "mp4", corsOk: true,
+              name: `AnimeSlayer · MediaFire · ${quality}`, url: link, quality, qualityRank,
+              site: "anslayer", directUrl: proxied, directType: "mp4",
+              headers: { Referer: mediaRef, Origin: "https://www.mediafire.com" },
             };
           }
           if (link.includes("ok.ru")) {
