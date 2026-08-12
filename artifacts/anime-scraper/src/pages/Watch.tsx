@@ -200,6 +200,7 @@ const STATIC_PICKER_WEB: Record<WebQualityKey, { site: string; tag: string }[]> 
     { site: "kawaii",       tag: "KW" },
     { site: "anineko",      tag: "AN" },
     { site: "animewitcher", tag: "AW" },
+    { site: "anslayer",     tag: "AS" },
     { site: "sanime",       tag: "SA" },
     { site: "animeify",     tag: "AF" },
     { site: "anifox",       tag: "FX" },
@@ -207,6 +208,7 @@ const STATIC_PICKER_WEB: Record<WebQualityKey, { site: string; tag: string }[]> 
   "720p": [
     { site: "anineko",      tag: "AN" },
     { site: "animewitcher", tag: "AW" },
+    { site: "anslayer",     tag: "AS" },
     { site: "sanime",       tag: "SA" },
     { site: "animeify",     tag: "AF" },
     { site: "anifox",       tag: "FX" },
