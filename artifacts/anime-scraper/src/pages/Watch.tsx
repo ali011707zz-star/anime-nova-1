@@ -186,6 +186,8 @@ const SCRAPER_DEFS: { site: string; name: string; desc: string; tag: string; aud
   // vidbolt_anim: معطّل 2026-07-30 — كود محفوظ (10 مصادر HLS)، يُفعَّل لاحقاً
   { site: "sanime",           name: "سـAnime",       desc: "عربي · MP4 مباشر",        tag: "SA", isArabic: true },
   { site: "anifox",           name: "ANIFOX",        desc: "Archive · MediaFire · MP4Upload · Uqload", tag: "FX", isArabic: true },
+  { site: "animekai",         name: "AnimeKai",      desc: "HLS · ياباني + ترجمة",                    tag: "AK" },
+  { site: "anivexa_anibd",    name: "AniBD",         desc: "HLS · صوت خام",                           tag: "BD" },
   { site: "consumet_gogo",    name: "GogoAnime",    desc: "HLS/MP4 · صوت خام", tag: "GOGO" },
   { site: "consumet_world",   name: "AnimeWorld",   desc: "HLS/MP4 · صوت خام", tag: "WORLD" },
   { site: "consumet_reanime", name: "ReAnime",      desc: "HLS/MP4 · صوت خام", tag: "RE" },
@@ -210,6 +212,8 @@ const STATIC_PICKER_WEB: Record<WebQualityKey, { site: string; tag: string }[]> 
     { site: "sanime",       tag: "SA" },
     { site: "animeify",     tag: "AF" },
     { site: "anifox",       tag: "FX" },
+    { site: "animekai",     tag: "AK" },
+    { site: "anivexa_anibd", tag: "BD" },
     { site: "consumet_gogo", tag: "GOGO" },
     { site: "consumet_world", tag: "WORLD" },
     { site: "consumet_reanime", tag: "RE" },
@@ -224,6 +228,8 @@ const STATIC_PICKER_WEB: Record<WebQualityKey, { site: string; tag: string }[]> 
     { site: "sanime",       tag: "SA" },
     { site: "animeify",     tag: "AF" },
     { site: "anifox",       tag: "FX" },
+    { site: "animekai",     tag: "AK" },
+    { site: "anivexa_anibd", tag: "BD" },
     { site: "consumet_gogo", tag: "GOGO" },
     { site: "consumet_world", tag: "WORLD" },
     { site: "consumet_reanime", tag: "RE" },
@@ -236,6 +242,8 @@ const STATIC_PICKER_WEB: Record<WebQualityKey, { site: string; tag: string }[]> 
     { site: "animewitcher", tag: "AW" },
     { site: "animeify",     tag: "AF" },
     { site: "anifox",       tag: "FX" },
+    { site: "animekai",     tag: "AK" },
+    { site: "anivexa_anibd", tag: "BD" },
     { site: "consumet_gogo", tag: "GOGO" },
     { site: "consumet_world", tag: "WORLD" },
     { site: "consumet_reanime", tag: "RE" },
@@ -280,6 +288,7 @@ const PROVIDER_WANTS_SMART_SUB = new Set([
 const RAW_AUDIO_ONLY_SITES = new Set([
   "consumet_gogo", "consumet_world", "consumet_reanime",
   "consumet_miruro", "consumet_saturn", "consumet_anikoto",
+  "anivexa_anibd",
 ]);
 
 type SlotStatus = "idle" | "fetching" | "ready" | "failed";

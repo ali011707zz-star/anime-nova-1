@@ -12566,6 +12566,7 @@ router.get("/anime/fetch-source", async (req, res) => {
     "sanime",        // 🎌 MP4 مباشر عربي مدبلج ✅
     "anslayer",      // ⚡ بحث متوازٍ + dedupe للطلبات + cache
     "animeify",      // 🎬 أنمي فاي — MEGA/Streamtape/MediaFire ✅ (مُعاد تفعيله)
+    "animekai",      // 🎌 AnimeKai direct scraper — HLS/MP4
     ...ANIVEXA_SOURCES.map(source => source.site),
     ...CONSUMET_SOURCES.map(source => source.site),
     // "anipub":     معطّل
@@ -12575,8 +12576,8 @@ router.get("/anime/fetch-source", async (req, res) => {
   ]);
   // الطلبات الداخلية (x-internal:1) تتجاوز القائمة لتسمح لـ animation.ts باستدعاء moviz_time وغيره
   const DISABLED_ANIME_SOURCES = new Set([
-    "anikoto", "animekai", "shirayuki_anikoto", "shirayuki_animix",
-    "anivexa_anikoto", "anivexa_anibd",
+    "anikoto", "shirayuki_anikoto", "shirayuki_animix",
+    "anivexa_anikoto",
   ]);
   const isInternalCall = req.headers["x-internal"] === "1";
   if (isAnivexaSite(site)) {
@@ -12622,6 +12623,7 @@ router.get("/anime/fetch-source", async (req, res) => {
   // مواقع ذات tokens/URLs قصيرة الأجل — لا نقدّم بياناتها إذا كانت قديمة
   const SHORT_TTL_FETCH_SITES = new Set([
     "anikoto", "anikototv", // vibeplayer.site tokens ~1-2h
+    "animekai",             // embed/CDN links are signed and short-lived
     "animewitcher", "animeify",                    // Streamtape/MediaFire ~45min
     "kawaii", "anifox",                             // signed CDN/download URLs
     "moviebox", "moviebox_anim",                   // &t= signed URLs ~10min
@@ -12763,6 +12765,7 @@ router.get("/anime/fetch-source", async (req, res) => {
       case "kawaii":      (await race(getKawaiiAnimeSources(title, english, ep, anilistId), 24_000, [])).forEach(collectSrc); break;
       case "anineko":     (await race(getAninekoSources(title, english, ep),              40_000, [])).forEach(collectSrc); break;
       case "anikototv":   (await race(getAnikototvSources(title, english, ep),              25000, [])).forEach(collectSrc); break;
+      case "animekai":    (await race(getAnimeKaiSources(title, english, ep, anilistId),  30000, [])).forEach(collectSrc); break;
       // anikuro: محذوف
       // anivault: محذوف
       // case "hianime": معطّل بطلب المستخدم 2026-07-30

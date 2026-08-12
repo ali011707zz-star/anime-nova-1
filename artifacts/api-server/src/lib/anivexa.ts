@@ -9,10 +9,12 @@ import { encryptParam } from "./security.js";
  * audio) and ignores provider subtitle tracks so Nova can overlay Kawaii's
  * Arabic subtitle independently.
  */
-// AK and BD were removed from the product after repeated failures in the
-// source picker. Keep this adapter empty so old cache rows cannot re-enable
-// either source.
-export const ANIVEXA_SOURCES = [] as const;
+// Only providers verified end-to-end on the production VPS are exposed here.
+// AniBD returns a live HLS stream for the `sub` route; provider tracks are
+// intentionally ignored so Nova can apply its own subtitle policy.
+export const ANIVEXA_SOURCES = [
+  { site: "anivexa_anibd", provider: "anibd", label: "AniBD" },
+] as const;
 
 type AnivexaSourceSite = (typeof ANIVEXA_SOURCES)[number]["site"];
 

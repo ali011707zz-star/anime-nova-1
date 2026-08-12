@@ -40,6 +40,7 @@ module.exports = {
         APP_SECRET: _e("APP_SECRET"),
         CINESRC_BASE: _e("CINESRC_BASE") || "http://localhost:13004",
         CONSUMET_API_URL: _e("CONSUMET_API_URL") || "http://127.0.0.1:3000",
+        ANIVEXA_API_URL: _e("ANIVEXA_API_URL") || "http://127.0.0.1:8787",
         SUPABASE_URL: _e("SUPABASE_URL"),
         SUPABASE_SERVICE_KEY: _e("SUPABASE_SERVICE_KEY"),
         SCRAPINGANT_KEY: _e("SCRAPINGANT_KEY"),

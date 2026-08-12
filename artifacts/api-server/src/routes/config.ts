@@ -17,6 +17,7 @@ const DEFAULT_CONFIG = {
     anikoto:      true,
     animepahe:    true,
     animewitcher: true,
+    animekai:      true,
     seepanel:     true,
     arabseed:     true,
     animephoenix: true,
@@ -33,6 +34,7 @@ const DEFAULT_CONFIG = {
     consumet_miruro: true,
     consumet_saturn: true,
     consumet_anikoto: true,
+    anivexa_anibd: true,
   },
   announcements: [] as {
     id: string;
