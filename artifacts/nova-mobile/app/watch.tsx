@@ -76,6 +76,9 @@ const SITE_TAG: Record<string, string> = {
   faselhd_db: "FH",
   notorrent: "NO", sanime: "SA", anipm: "PM", anslayer: "AS",
   akwam: "AQ",
+  anivexa_mkissa: "MK", anivexa_reanime: "RA", anivexa_anikoto: "AK",
+  anivexa_animegg: "GG", anivexa_anidbapp: "DB", anivexa_2dhive: "2D",
+  anivexa_anibd: "BD", anivexa_senshi: "SE", anivexa_kaa: "KA",
 };
 
 /* ── اسم عرض لكل موقع في منتقي المصادر ── */
@@ -91,6 +94,11 @@ const SITE_LABEL: Record<string, string> = {
   faselhd_db: "FaselHD", animetime: "AnimeTime",
   notorrent: "Notorrent", sanime: "SAnime", anipm: "AniPm", anslayer: "AnimeSlayer",
   akwam: "Akwam",
+  anivexa_mkissa: "MKissa", anivexa_reanime: "Reanime",
+  anivexa_anikoto: "AniKoto", anivexa_animegg: "AnimeGG",
+  anivexa_anidbapp: "AniDB App", anivexa_2dhive: "2dhive",
+  anivexa_anibd: "AniBD", anivexa_senshi: "Senshi",
+  anivexa_kaa: "Kickassanime",
 };
 function getSiteTag(site: string): string {
   return SITE_TAG[site] || site.slice(0, 2).toUpperCase();
@@ -113,6 +121,11 @@ const SITE_DESC: Record<string, string> = {
   notorrent: "IMDB · مصادر متعددة", sanime: "عربي مدبلج/مترجم · MP4",
   anslayer: "مشغلات خارجية · MixDrop/MediaFire",
   akwam: "عربي مترجم · MP4 مباشر",
+  anivexa_mkissa: "HLS · صوت خام", anivexa_reanime: "HLS · صوت خام",
+  anivexa_anikoto: "HLS · صوت خام", anivexa_animegg: "HLS · صوت خام",
+  anivexa_anidbapp: "HLS · صوت خام", anivexa_2dhive: "HLS · صوت خام",
+  anivexa_anibd: "HLS · صوت خام", anivexa_senshi: "HLS · صوت خام",
+  anivexa_kaa: "HLS · صوت خام",
 };
 function getSiteDesc(site: string): string {
   return SITE_DESC[site] || "";
@@ -265,6 +278,9 @@ function normalizeKawaiiSubtitleUrl(url: string | undefined, base: string): stri
 const SITE_PRIORITY: Record<string, number> = {
   kawaii: 100, animewitcher: 90,
   animeify: 85, sanime: 80,
+  anivexa_mkissa: 88, anivexa_reanime: 87, anivexa_anikoto: 86,
+  anivexa_animegg: 85, anivexa_anidbapp: 84, anivexa_2dhive: 83,
+  anivexa_anibd: 82, anivexa_senshi: 81, anivexa_kaa: 80,
   dulo_anim: 70, vidlink_anim: 55,
   vidfast: 35,
 };
@@ -282,6 +298,15 @@ const STATIC_PICKER: Record<QualityKey, { site: string; name: string; tag: strin
     { site: "sanime",       name: "سـAnime",      tag: "SA" },
     { site: "animeify",     name: "أنمي فاي",    tag: "AF" },
     { site: "anifox",        name: "ANIFOX",      tag: "FX" },
+    { site: "anivexa_mkissa", name: "MKissa", tag: "MK" },
+    { site: "anivexa_reanime", name: "Reanime", tag: "RA" },
+    { site: "anivexa_anikoto", name: "AniKoto", tag: "AK" },
+    { site: "anivexa_animegg", name: "AnimeGG", tag: "GG" },
+    { site: "anivexa_anidbapp", name: "AniDB App", tag: "DB" },
+    { site: "anivexa_2dhive", name: "2dhive", tag: "2D" },
+    { site: "anivexa_anibd", name: "AniBD", tag: "BD" },
+    { site: "anivexa_senshi", name: "Senshi", tag: "SE" },
+    { site: "anivexa_kaa", name: "Kickassanime", tag: "KA" },
   ],
   "720p": [
     { site: "anineko",      name: "AniNeko",      tag: "AN" },
@@ -290,12 +315,30 @@ const STATIC_PICKER: Record<QualityKey, { site: string; name: string; tag: strin
     { site: "sanime",       name: "سـAnime",      tag: "SA" },
     { site: "animeify",     name: "أنمي فاي",    tag: "AF" },
     { site: "anifox",        name: "ANIFOX",      tag: "FX" },
+    { site: "anivexa_mkissa", name: "MKissa", tag: "MK" },
+    { site: "anivexa_reanime", name: "Reanime", tag: "RA" },
+    { site: "anivexa_anikoto", name: "AniKoto", tag: "AK" },
+    { site: "anivexa_animegg", name: "AnimeGG", tag: "GG" },
+    { site: "anivexa_anidbapp", name: "AniDB App", tag: "DB" },
+    { site: "anivexa_2dhive", name: "2dhive", tag: "2D" },
+    { site: "anivexa_anibd", name: "AniBD", tag: "BD" },
+    { site: "anivexa_senshi", name: "Senshi", tag: "SE" },
+    { site: "anivexa_kaa", name: "Kickassanime", tag: "KA" },
   ],
   "480p": [
     { site: "anineko",      name: "AniNeko",      tag: "AN" },
     { site: "animewitcher", name: "AnimeWitcher", tag: "AW" },
     { site: "animeify",     name: "أنمي فاي",    tag: "AF" },
     { site: "anifox",        name: "ANIFOX",      tag: "FX" },
+    { site: "anivexa_mkissa", name: "MKissa", tag: "MK" },
+    { site: "anivexa_reanime", name: "Reanime", tag: "RA" },
+    { site: "anivexa_anikoto", name: "AniKoto", tag: "AK" },
+    { site: "anivexa_animegg", name: "AnimeGG", tag: "GG" },
+    { site: "anivexa_anidbapp", name: "AniDB App", tag: "DB" },
+    { site: "anivexa_2dhive", name: "2dhive", tag: "2D" },
+    { site: "anivexa_anibd", name: "AniBD", tag: "BD" },
+    { site: "anivexa_senshi", name: "Senshi", tag: "SE" },
+    { site: "anivexa_kaa", name: "Kickassanime", tag: "KA" },
   ],
 };
 
@@ -336,6 +379,10 @@ const SITE_TIMEOUT_MAP: Record<string, number> = {
   // longer than that race so a slow signed-URL response is not aborted first.
   kawaii:       30_000,
   anineko:      45_000,
+  anivexa_mkissa:  32_000, anivexa_reanime: 32_000,
+  anivexa_anikoto: 32_000, anivexa_animegg: 32_000,
+  anivexa_anidbapp: 32_000, anivexa_2dhive: 32_000,
+  anivexa_anibd: 32_000, anivexa_senshi: 32_000, anivexa_kaa: 32_000,
 };
 
 /* ── Spinning loader ── */

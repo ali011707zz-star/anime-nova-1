@@ -33,5 +33,9 @@ A full-stack anime streaming platform with web and mobile clients.
 ## User preferences
 
 - Do not run or install the app in Replit — VPS only.
+- Anivexa integration: run the imported Anivexa-API service separately on the VPS
+  (default `127.0.0.1:8787`) and set `ANIVEXA_API_URL` in `/opt/anime-nova/.env`.
+  Nova consumes only direct HLS/MP4 streams from the approved Anivexa providers;
+  AniNeko is not duplicated and subtitle-only providers are filtered out.
 - Do not create, configure, or start Replit workflows for this project; local workflow failures are expected because Replit is code-editing only.
 - Do not restructure or migrate the existing stack.
