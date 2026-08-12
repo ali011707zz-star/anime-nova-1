@@ -326,9 +326,10 @@ const Q_KEY_SUB: Record<QualityKey, string> = {
 const SITE_TIMEOUT_MS = 28_000;
 const SITE_TIMEOUT_MAP: Record<string, number> = {
   anifox:       35_000,
-  animewitcher: 38_000,
-  animeify:     22_000,
-  sanime:       18_000,
+  animewitcher: 45_000,
+  anslayer:     50_000,
+  animeify:     30_000,
+  sanime:       28_000,
   // Backend fetch-source allows Kawaii up to 24s. Keep the client alive
   // longer than that race so a slow signed-URL response is not aborted first.
   kawaii:       30_000,
@@ -617,7 +618,6 @@ export default function WatchScreen() {
       const newSrcs = rawSrcs
         .map((s): Src => ({ ...s, site: s.site || site, directUrl: resolveUrl(s.directUrl, base), url: resolveUrl(s.url, base) }))
         .filter(s => !isBlockedSource(s))
-        .filter(s => !(s.isEmbed && s.url && (s.url.includes("mega.nz") || s.url.includes("mega.co.nz"))))
         .filter(s => { const k = getPlayUrl(s); if (!k || seenKeys.current.has(k)) return false; seenKeys.current.add(k); return true; });
 
       if (!newSrcs.length) { setSlotStatus(prev => ({ ...prev, [site]: "failed" })); return; }
@@ -767,7 +767,6 @@ export default function WatchScreen() {
       const newSrcs = rawSrcs
         .map((s): Src => ({ ...s, site: s.site || site, directUrl: resolveUrl(s.directUrl, base), url: resolveUrl(s.url, base) }))
         .filter(s => !isBlockedSource(s))
-        .filter(s => !(s.isEmbed && s.url && (s.url.includes("mega.nz") || s.url.includes("mega.co.nz"))))
         .filter(s => { const k = getPlayUrl(s); if (!k || seenKeys.current.has(k)) return false; seenKeys.current.add(k); return true; });
 
       if (!newSrcs.length) throw new Error("no direct sources");

@@ -3274,7 +3274,7 @@ export default function WatchPage() {
     /* timeout مُصمَّم لكل موقع — يجب أن يكون >= timeout الباكند لنفس الموقع
        حتى لا يُقتل الطلب قبل أن يرد الباكند (مشكلة جذرية لفقدان المصادر في cache البارد) */
     const SITE_REQUEST_TIMEOUTS: Record<string, number> = {
-      animewitcher: 32000,  // backend = 28s + هامش 4s
+      animewitcher: 42000,  // backend = 38s + هامش 4s
       cinesrc_anim: 38000,  // backend = 35s + هامش 3s
       anime4up2:    28000,  // backend = 25s + هامش 3s
       mycima:       34000,  // backend = 30s + هامش 4s

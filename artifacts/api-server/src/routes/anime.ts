@@ -11518,6 +11518,7 @@ async function getAnimeSlayerSourcesUncached(
         ),
       );
       for (let queryIndex = 0; queryIndex < searchResults.length; queryIndex++) {
+        const q = queries[queryIndex];
         const result = searchResults[queryIndex];
         const data = result.status === "fulfilled" ? result.value : null;
         const list: any[] = data?.response?.data || [];
@@ -11671,7 +11672,9 @@ async function getAnimeSlayerSources(
 // notorrent (NO / addon-osvh.onrender.com): أُزيل كلياً بطلب المستخدم 2026-07-09
 
 const SANIME_API  = "https://app.sanime.net/function/h10.php?page=";
-const SANIME_CDN  = "https://server.sanime.net/Video";
+// The live SAnime CDN uses Video2. The legacy /Video path returns 404 even
+// though the info endpoint confirms that the episode exists.
+const SANIME_CDN  = "https://server.sanime.net/Video2";
 const SANIME_UA   = "IBRAHIMSEVEN";
 const _sanimeCacheMap = new Map<string, { sources: UnifiedSource[]; ts: number }>();
 const _sanimeInFlight = new Map<string, Promise<UnifiedSource[]>>();
