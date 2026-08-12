@@ -39,6 +39,7 @@ module.exports = {
         SESSION_SECRET: _e("SESSION_SECRET"),
         APP_SECRET: _e("APP_SECRET"),
         CINESRC_BASE: _e("CINESRC_BASE") || "http://localhost:13004",
+        CONSUMET_API_URL: _e("CONSUMET_API_URL") || "http://127.0.0.1:3000",
         SUPABASE_URL: _e("SUPABASE_URL"),
         SUPABASE_SERVICE_KEY: _e("SUPABASE_SERVICE_KEY"),
         SCRAPINGANT_KEY: _e("SCRAPINGANT_KEY"),
@@ -48,6 +49,18 @@ module.exports = {
         MXP_SERVICE_PORT: "8002",
         CF_PROXY_PORT: "8000",   // cf-proxy (curl_cffi + primp) — hopx حُذف 2026-08-03
       },
+    },
+    {
+      name: "consumet-api",
+      script: "/usr/bin/npm",
+      args: "run start",
+      cwd: "/opt/consumet-api",
+      env: {
+        NODE_ENV: "PROD",
+        PORT: "3000",
+      },
+      restart_delay: 5000,
+      max_memory_restart: "512M",
     },
     {
       name: "cf-proxy",

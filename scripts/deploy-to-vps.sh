@@ -126,6 +126,24 @@ else
   log "ملف .env موجود ✓"
 fi
 
+# خدمة Consumet مستقلة — لا تُضمّن داخل Nova حتى يمكن تحديثها أو إيقافها
+# دون التأثير على API الرئيسي.
+CONSUMET_DIR="/opt/consumet-api"
+CONSUMET_REPO="https://github.com/solo12345689/api.consumet.org.git"
+if ! grep -q '^CONSUMET_API_URL=' "$ENV_FILE"; then
+  echo "CONSUMET_API_URL=http://127.0.0.1:3000" >> "$ENV_FILE"
+fi
+if [ -d "$CONSUMET_DIR/.git" ]; then
+  log "تحديث Consumet..."
+  git -C "$CONSUMET_DIR" pull --ff-only origin main 2>/dev/null || warn "تعذر تحديث Consumet — سيُستخدم الإصدار الموجود"
+else
+  log "تحميل Consumet..."
+  git clone "$CONSUMET_REPO" "$CONSUMET_DIR"
+fi
+log "تثبيت تبعيات Consumet..."
+cd "$CONSUMET_DIR"
+npm install --no-audit --no-fund
+
 # ── 8. تثبيت التبعيات والبناء ────────────────────────────────────────────
 cd "$APP_DIR"
 log "تثبيت التبعيات (pnpm install)..."
@@ -141,20 +159,34 @@ VITE_API_URL= NODE_ENV=production pnpm --filter @workspace/anime-scraper run bui
 log "إعداد PM2..."
 cat > "$APP_DIR/ecosystem.config.cjs" << ECOSEOF
 module.exports = {
-  apps: [{
-    name: "anime-nova-api",
-    script: "node",
-    args: "--enable-source-maps artifacts/api-server/dist/index.mjs",
-    cwd: "$APP_DIR",
-    env_file: "$APP_DIR/.env",
-    instances: 1,
-    autorestart: true,
-    watch: false,
-    max_memory_restart: "512M",
-    error_file: "/var/log/anime-nova/error.log",
-    out_file: "/var/log/anime-nova/out.log",
-    log_date_format: "YYYY-MM-DD HH:mm:ss"
-  }]
+  apps: [
+    {
+      name: "anime-nova-api",
+      script: "node",
+      args: "--enable-source-maps artifacts/api-server/dist/index.mjs",
+      cwd: "$APP_DIR",
+      env_file: "$APP_DIR/.env",
+      instances: 1,
+      autorestart: true,
+      watch: false,
+      max_memory_restart: "512M",
+      error_file: "/var/log/anime-nova/error.log",
+      out_file: "/var/log/anime-nova/out.log",
+      log_date_format: "YYYY-MM-DD HH:mm:ss"
+    },
+    {
+      name: "consumet-api",
+      script: "/usr/bin/npm",
+      args: "run start",
+      cwd: "$CONSUMET_DIR",
+      env: { NODE_ENV: "PROD", PORT: "3000" },
+      autorestart: true,
+      watch: false,
+      max_memory_restart: "512M",
+      error_file: "/var/log/anime-nova/consumet-error.log",
+      out_file: "/var/log/anime-nova/consumet-out.log"
+    }
+  ]
 };
 ECOSEOF
 
@@ -162,6 +194,7 @@ mkdir -p /var/log/anime-nova
 
 # إيقاف أي نسخة قديمة
 pm2 delete anime-nova-api 2>/dev/null || true
+pm2 delete consumet-api 2>/dev/null || true
 
 # تشغيل الخادم
 pm2 start "$APP_DIR/ecosystem.config.cjs"

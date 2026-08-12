@@ -16,6 +16,7 @@ import {
 import { notifyNewEpisode } from "./telegram.js";
 import { encryptProxyUrl, encryptParam, decryptParam, isEncrypted } from "../lib/security.js";
 import { ANIVEXA_SOURCES, getAnivexaSources, isAnivexaSite } from "../lib/anivexa.js";
+import { CONSUMET_SOURCES, getConsumetSources, isConsumetSite } from "../lib/consumet.js";
 import { sbSelect, sbUpsert } from "../lib/supabaseClient.js";
 import pg from "pg";
 // Pool مباشر لـ translations_cache + anime_meta_ar (بدون Supabase REST)
@@ -12566,6 +12567,7 @@ router.get("/anime/fetch-source", async (req, res) => {
     "anslayer",      // ⚡ بحث متوازٍ + dedupe للطلبات + cache
     "animeify",      // 🎬 أنمي فاي — MEGA/Streamtape/MediaFire ✅ (مُعاد تفعيله)
     ...ANIVEXA_SOURCES.map(source => source.site),
+    ...CONSUMET_SOURCES.map(source => source.site),
     // "anipub":     معطّل
     // ── مُعطَّلة سابقاً ─────────────────────────────────────────────────────
     // "akoam": حُذف 2026-07-28 — كان يستخدم hopxBrowserExtract على كل طلب
@@ -12574,10 +12576,26 @@ router.get("/anime/fetch-source", async (req, res) => {
   // الطلبات الداخلية (x-internal:1) تتجاوز القائمة لتسمح لـ animation.ts باستدعاء moviz_time وغيره
   const DISABLED_ANIME_SOURCES = new Set([
     "anikoto", "animekai", "shirayuki_anikoto", "shirayuki_animix",
+    "anivexa_anikoto", "anivexa_anibd",
   ]);
   const isInternalCall = req.headers["x-internal"] === "1";
   if (isAnivexaSite(site)) {
     const sources = await getAnivexaSources(site, anilistId, ep);
+    const isMobileClient = (req.headers["x-nova-client"] || "").toString().includes("mobile");
+    const encSources = sources.map(source => {
+      const wrapped = isMobileClient ? wrapForMobile(source) : source;
+      return {
+        ...wrapped,
+        directUrl: wrapped.directUrl
+          ? (wrapped.corsOk ? wrapped.directUrl : encryptProxyUrl(wrapped.directUrl))
+          : wrapped.directUrl,
+      };
+    });
+    res.json({ sources: encSources });
+    return;
+  }
+  if (isConsumetSite(site)) {
+    const sources = await getConsumetSources(site, title, english, ep, titleVariants);
     const isMobileClient = (req.headers["x-nova-client"] || "").toString().includes("mobile");
     const encSources = sources.map(source => {
       const wrapped = isMobileClient ? wrapForMobile(source) : source;

@@ -186,8 +186,12 @@ const SCRAPER_DEFS: { site: string; name: string; desc: string; tag: string; aud
   // vidbolt_anim: معطّل 2026-07-30 — كود محفوظ (10 مصادر HLS)، يُفعَّل لاحقاً
   { site: "sanime",           name: "سـAnime",       desc: "عربي · MP4 مباشر",        tag: "SA", isArabic: true },
   { site: "anifox",           name: "ANIFOX",        desc: "Archive · MediaFire · MP4Upload · Uqload", tag: "FX", isArabic: true },
-  { site: "anivexa_anikoto",  name: "AniKoto",       desc: "HLS · صوت خام",              tag: "AK" },
-  { site: "anivexa_anibd",    name: "AniBD",         desc: "HLS · صوت خام",              tag: "BD" },
+  { site: "consumet_gogo",    name: "Consumet · GogoAnime",   desc: "HLS/MP4 · صوت خام", tag: "CG" },
+  { site: "consumet_world",   name: "Consumet · AnimeWorld",  desc: "HLS/MP4 · صوت خام", tag: "CW" },
+  { site: "consumet_reanime", name: "Consumet · ReAnime",    desc: "HLS/MP4 · صوت خام", tag: "CR" },
+  { site: "consumet_miruro",  name: "Consumet · Miruro",     desc: "HLS/MP4 · صوت خام", tag: "CM" },
+  { site: "consumet_saturn",  name: "Consumet · AnimeSaturn", desc: "HLS/MP4 · صوت خام", tag: "CS" },
+  { site: "consumet_sama",    name: "Consumet · AnimeSama",   desc: "HLS/MP4 · صوت خام", tag: "CA" },
   // akoam: حُذف 2026-07-28 — كان يستخدم hopxBrowserExtract (browser) على كل طلب
 ];
 
@@ -206,8 +210,12 @@ const STATIC_PICKER_WEB: Record<WebQualityKey, { site: string; tag: string }[]> 
     { site: "sanime",       tag: "SA" },
     { site: "animeify",     tag: "AF" },
     { site: "anifox",       tag: "FX" },
-    { site: "anivexa_anikoto", tag: "AK" },
-    { site: "anivexa_anibd", tag: "BD" },
+    { site: "consumet_gogo", tag: "CG" },
+    { site: "consumet_world", tag: "CW" },
+    { site: "consumet_reanime", tag: "CR" },
+    { site: "consumet_miruro", tag: "CM" },
+    { site: "consumet_saturn", tag: "CS" },
+    { site: "consumet_sama", tag: "CA" },
   ],
   "720p": [
     { site: "anineko",      tag: "AN" },
@@ -216,16 +224,24 @@ const STATIC_PICKER_WEB: Record<WebQualityKey, { site: string; tag: string }[]> 
     { site: "sanime",       tag: "SA" },
     { site: "animeify",     tag: "AF" },
     { site: "anifox",       tag: "FX" },
-    { site: "anivexa_anikoto", tag: "AK" },
-    { site: "anivexa_anibd", tag: "BD" },
+    { site: "consumet_gogo", tag: "CG" },
+    { site: "consumet_world", tag: "CW" },
+    { site: "consumet_reanime", tag: "CR" },
+    { site: "consumet_miruro", tag: "CM" },
+    { site: "consumet_saturn", tag: "CS" },
+    { site: "consumet_sama", tag: "CA" },
   ],
   "480p": [
     { site: "anineko",      tag: "AN" },
     { site: "animewitcher", tag: "AW" },
     { site: "animeify",     tag: "AF" },
     { site: "anifox",       tag: "FX" },
-    { site: "anivexa_anikoto", tag: "AK" },
-    { site: "anivexa_anibd", tag: "BD" },
+    { site: "consumet_gogo", tag: "CG" },
+    { site: "consumet_world", tag: "CW" },
+    { site: "consumet_reanime", tag: "CR" },
+    { site: "consumet_miruro", tag: "CM" },
+    { site: "consumet_saturn", tag: "CS" },
+    { site: "consumet_sama", tag: "CA" },
   ],
 };
 const WEB_Q_KEYS: WebQualityKey[] = ["1080p", "720p", "480p"];
@@ -257,6 +273,13 @@ const PRIORITY_FETCH_SITES = new Set([
 const PROVIDER_WANTS_SMART_SUB = new Set([
   "animepahe",
   "anikototv", "animekai", "dulo_anim",
+]);
+
+/* Consumet entries are raw-audio only; never attach episode-level or smart
+   subtitles to them, even when a global subtitle cache exists. */
+const RAW_AUDIO_ONLY_SITES = new Set([
+  "consumet_gogo", "consumet_world", "consumet_reanime",
+  "consumet_miruro", "consumet_saturn", "consumet_sama",
 ]);
 
 type SlotStatus = "idle" | "fetching" | "ready" | "failed";
@@ -3032,7 +3055,11 @@ export default function WatchPage() {
               : undefined);
         /* إصلاح race condition: إذا كان المصدر الحالي عربياً → لا نضع kawaiiSubUrl
            (تجنّب تداخل الترجمة الخارجية مع الترجمة المضمّنة في الفيديو) */
-        if (subUrl && !ARABIC_SITES.has(playerSrcSiteRef.current)) setKawaiiSubUrl(subUrl);
+        if (
+          subUrl &&
+          !ARABIC_SITES.has(playerSrcSiteRef.current) &&
+          !RAW_AUDIO_ONLY_SITES.has(playerSrcSiteRef.current)
+        ) setKawaiiSubUrl(subUrl);
         // Skip times: only fill gaps not already covered by aniskip/baha
         if (data.intro || data.outro) {
           setSkipTimes(prev => {
@@ -3299,8 +3326,12 @@ export default function WatchPage() {
       // reanime: محذوف 2026-07-24
       // hianime: معطّل 2026-07-30
       anipm:        24000,  // backend = 20s + هامش 4s
-      anivexa_anikoto: 32000,
-      anivexa_anibd:   32000,
+      consumet_gogo:    32000,
+      consumet_world:   32000,
+      consumet_reanime: 32000,
+      consumet_miruro:  32000,
+      consumet_saturn:  32000,
+      consumet_sama:    32000,
     };
     const siteTimeout = SITE_REQUEST_TIMEOUTS[site] ?? 24000;
     const ctrl = new AbortController();
@@ -3516,7 +3547,8 @@ export default function WatchPage() {
     /* Store download URL + subtitle URL for player */
     setPlayerDlUrl(getDownloadUrl(src) || undefined);
     // مصادر عربية: ترجمة مدمجة/غير مطلوبة — لا تُشغّل ترجمة خارجية (نعتمد على إعدادات المزود)
-    const skipExternalSub = ARABIC_SITES.has(src.site || "");
+    const skipExternalSub =
+      ARABIC_SITES.has(src.site || "") || RAW_AUDIO_ONLY_SITES.has(src.site || "");
     // مصادر عربية لكنها تُرسل subtitleUrl خاصة بها (مثل AniPub sub) — نمررها حتى تعمل الترجمة الناعمة
     setPlayerSubUrl(skipExternalSub && !src.subtitleUrl ? undefined : (src.subtitleUrl || undefined));
     // مصادر عربية: امسح kawaiiSubUrl أيضاً لمنع تداخل الترجمة
@@ -3693,7 +3725,7 @@ export default function WatchPage() {
         cover={cover} ep={ep} totalEps={totalEps}
         isMovie={anime?.format === "MOVIE" || anime?.format === "MOVIE_SHORT"}
         downloadUrl={playerDlUrl}
-        subtitleUrl={playerSubUrl || kawaiiSubUrl}
+        subtitleUrl={playerSubUrl || (RAW_AUDIO_ONLY_SITES.has(playerSrcSite) ? undefined : kawaiiSubUrl)}
         subtitleSite={playerSrcSite}
         hideSubtitle={ARABIC_SITES.has(playerSrcSite) && !(playerSubUrl || kawaiiSubUrl)}
         skipTimes={skipTimes}
