@@ -8,19 +8,14 @@ import { lookupAniListTitle } from "./anilist-title.js";
  * Anivexa is intentionally kept as a separate VPS service. This adapter only
  * translates its direct stream response into Nova's existing source contract.
  *
- * The adapter deliberately requests the `sub` route (original audio), filters
- * Reanime's three known soft-sub servers, and ignores provider subtitle tracks
- * so Nova can overlay Kawaii's Arabic subtitle independently.
+ * The adapter deliberately requests the `sub` route (original audio), folds
+ * every Reanime soft-sub server into one RE source, and ignores provider
+ * subtitle tracks so Nova can overlay Kawaii's Arabic subtitle independently.
  */
 export const ANIVEXA_SOURCES = [
-  // Aggregate source used by the clients. The provider adapter resolves all
-  // original Reanime soft-sub servers and the picker groups their variants
-  // into one RE row per quality.
+  // One public source only. The adapter resolves every Reanime soft-sub
+  // server and expands the returned HLS master into one row per quality.
   { site: "anivexa_re", provider: "reanime", tag: "RE", label: "RE", server: "", aliases: [], aggregate: true },
-  // RE is the original provider name. The current Anivexa API calls these
-  // two servers HD-1/HD-2, while older responses used the Solaris names.
-  { site: "anivexa_solaris_1", provider: "reanime", tag: "RE", label: "Solaris-1", server: "Solaris-1", aliases: ["HD-1"], aggregate: false },
-  { site: "anivexa_solaris_2", provider: "reanime", tag: "RE", label: "Solaris-2", server: "Solaris-2", aliases: ["HD-2"], aggregate: false },
 ] as const;
 
 type AnivexaSourceSite = (typeof ANIVEXA_SOURCES)[number]["site"];
@@ -92,13 +87,6 @@ function qualityInfo(stream: AnivexaStream): { label: string; rank: number } {
   if (raw.includes("720") || raw.includes("hd")) return { label: "720p HD", rank: 13 };
   if (raw.includes("480")) return { label: "480p", rank: 8 };
   if (raw.includes("360") || raw.includes("sd")) return { label: "360p SD", rank: 5 };
-  // Reanime's current API names its original servers HD-1/HD-2. Older
-  // Anivexa responses renamed those same servers Solaris-1/Solaris-2.
-  // Treating them as Auto makes the frontend put a working HLS source in
-  // the 360p bucket when the manifest probe is temporarily unavailable.
-  if (/\bhd[-_ ]?[12]\b|\bsolaris[-_ ]?[12]\b/i.test(raw)) {
-    return { label: "720p HD", rank: 13 };
-  }
   return { label: "Auto", rank: 0 };
 }
 
