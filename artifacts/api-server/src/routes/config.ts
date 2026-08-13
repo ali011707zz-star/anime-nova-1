@@ -30,7 +30,6 @@ const DEFAULT_CONFIG = {
     stardima:     true,
     consumet_gogo: true,
     consumet_world: true,
-    consumet_reanime: true,
     consumet_miruro: true,
     consumet_saturn: true,
     consumet_anikoto: true,

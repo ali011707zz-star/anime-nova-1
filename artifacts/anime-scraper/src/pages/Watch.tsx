@@ -190,7 +190,6 @@ const SCRAPER_DEFS: { site: string; name: string; desc: string; tag: string; aud
   { site: "anivexa_anibd",    name: "AniBD",         desc: "HLS · صوت خام",                           tag: "BD" },
   { site: "consumet_gogo",    name: "GogoAnime",    desc: "HLS/MP4 · صوت خام", tag: "GO" },
   { site: "consumet_world",   name: "AnimeWorld",   desc: "HLS/MP4 · صوت خام", tag: "WO" },
-  { site: "consumet_reanime", name: "ReAnime",      desc: "HLS/MP4 · صوت خام", tag: "RE" },
   { site: "consumet_miruro",  name: "Miruro",       desc: "HLS/MP4 · صوت خام", tag: "MI" },
   { site: "consumet_saturn",  name: "AnimeSaturn",  desc: "HLS/MP4 · صوت خام", tag: "ST" },
   { site: "consumet_anikoto", name: "AniKoto",      desc: "HLS/MP4 · صوت خام", tag: "KO" },
@@ -216,7 +215,6 @@ const STATIC_PICKER_WEB: Record<WebQualityKey, { site: string; tag: string }[]> 
     { site: "anivexa_anibd", tag: "BD" },
     { site: "consumet_gogo", tag: "GO" },
     { site: "consumet_world", tag: "WO" },
-    { site: "consumet_reanime", tag: "RE" },
     { site: "consumet_miruro", tag: "MI" },
     { site: "consumet_saturn", tag: "ST" },
     { site: "consumet_anikoto", tag: "KO" },
@@ -232,7 +230,6 @@ const STATIC_PICKER_WEB: Record<WebQualityKey, { site: string; tag: string }[]> 
     { site: "anivexa_anibd", tag: "BD" },
     { site: "consumet_gogo", tag: "GO" },
     { site: "consumet_world", tag: "WO" },
-    { site: "consumet_reanime", tag: "RE" },
     { site: "consumet_miruro", tag: "MI" },
     { site: "consumet_saturn", tag: "ST" },
     { site: "consumet_anikoto", tag: "KO" },
@@ -246,7 +243,6 @@ const STATIC_PICKER_WEB: Record<WebQualityKey, { site: string; tag: string }[]> 
     { site: "anivexa_anibd", tag: "BD" },
     { site: "consumet_gogo", tag: "GO" },
     { site: "consumet_world", tag: "WO" },
-    { site: "consumet_reanime", tag: "RE" },
     { site: "consumet_miruro", tag: "MI" },
     { site: "consumet_saturn", tag: "ST" },
     { site: "consumet_anikoto", tag: "KO" },
@@ -281,14 +277,14 @@ const PRIORITY_FETCH_SITES = new Set([
 const PROVIDER_WANTS_SMART_SUB = new Set([
   "animepahe",
   "anikototv", "animekai", "dulo_anim",
+  "consumet_gogo", "anivexa_anibd", "consumet_anikoto",
 ]);
 
-/* Consumet entries are raw-audio only; never attach episode-level or smart
-   subtitles to them, even when a global subtitle cache exists. */
+/* These providers are intentionally left without the generic episode subtitle
+   fallback. GO/DB/KO are Japanese raw-audio streams, so they are opted into
+   the smart Arabic subtitle path above instead. */
 const RAW_AUDIO_ONLY_SITES = new Set([
-  "consumet_gogo", "consumet_world", "consumet_reanime",
-  "consumet_miruro", "consumet_saturn", "consumet_anikoto",
-  "anivexa_anibd",
+  "consumet_world", "consumet_miruro", "consumet_saturn",
 ]);
 
 type SlotStatus = "idle" | "fetching" | "ready" | "failed";
@@ -3340,7 +3336,6 @@ export default function WatchPage() {
       anipm:        24000,  // backend = 20s + هامش 4s
       consumet_gogo:    32000,
       consumet_world:   32000,
-      consumet_reanime: 32000,
       consumet_miruro:  32000,
       consumet_saturn:  32000,
       consumet_anikoto: 32000,

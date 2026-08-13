@@ -16,7 +16,7 @@ import {
 import { notifyNewEpisode } from "./telegram.js";
 import { encryptProxyUrl, encryptParam, decryptParam, isEncrypted } from "../lib/security.js";
 import { ANIVEXA_SOURCES, getAnivexaSources, isAnivexaSite } from "../lib/anivexa.js";
-import { CONSUMET_SOURCES, getConsumetSources, isConsumetSite } from "../lib/consumet.js";
+import { CONSUMET_SOURCES, getConsumetSources, isConsumetSite, probeHlsQuality } from "../lib/consumet.js";
 import { sbSelect, sbUpsert } from "../lib/supabaseClient.js";
 import pg from "pg";
 // Pool مباشر لـ translations_cache + anime_meta_ar (بدون Supabase REST)
@@ -6240,22 +6240,30 @@ async function getAniKotoSources(
     const origin = new URL(actualEmbedUrl).origin;
     // جلب مصادر الفيديو — مع fallback عبر cfProxy
     let data: any = null;
-    const sourcesUrl = `${origin}/stream/getSources?id=${fileId}`;
+    // MegaPlay's current documented endpoint is getSourcesNew. Keep the
+    // legacy endpoint as a compatibility fallback because some older embed
+    // pages still only expose the old response path.
+    const sourceEndpoints = [
+      `${origin}/stream/getSourcesNew?id=${encodeURIComponent(fileId)}&category=sub`,
+      `${origin}/stream/getSources?id=${encodeURIComponent(fileId)}`,
+    ];
     const sourcesHdrs = {
       ...BASE_HDRS,
       Referer: `${origin}/`,
       "X-Requested-With": "XMLHttpRequest",
       Accept: "application/json, */*",
     };
-    data = await fetch(sourcesUrl, {
-      headers: sourcesHdrs,
-      signal: AbortSignal.timeout(8000),
-    }).then(r => r.ok ? r.json() : null).catch(() => null);
-    if (!data?.sources?.file) {
+    for (const sourcesUrl of sourceEndpoints) {
+      data = await fetch(sourcesUrl, {
+        headers: sourcesHdrs,
+        signal: AbortSignal.timeout(8000),
+      }).then(r => r.ok ? r.json() : null).catch(() => null);
+      if (data?.sources?.file) break;
       const txt = await cfProxyGet(sourcesUrl, `${origin}/`, 10000);
       if (txt) {
         try { data = JSON.parse(txt); } catch {}
       }
+      if (data?.sources?.file) break;
     }
     const typedData = data as {
       sources?: { file?: string };
@@ -7423,9 +7431,14 @@ async function getAnimeKaiSources(
           : `/api/anime/video-proxy?url=${encodeURIComponent(m3u8)}&ref=${encodeURIComponent(KAI_BASE + "/")}`;
         // sub/softsub = صوت ياباني + ترجمة ناعمة (خارجية) — النوع المطلوب
         const langLabel = srv.lang === "dub" ? "مدبلج" : "ياباني · ترجمة ناعمة";
+        const manifestQuality = isHls
+          ? await probeHlsQuality(m3u8, `${KAI_BASE}/`)
+          : { label: "Auto", rank: 0 };
+        const quality = manifestQuality.rank > 0 ? manifestQuality.label : "Auto";
+        const qualityRank = manifestQuality.rank > 0 ? manifestQuality.rank : 0;
         sources.push({
-          name: `AnimeKai · ${langLabel} · ${srv.name}`,
-          url: m3u8, quality: "auto", qualityRank: 15,
+          name: `AnimeKai · ${langLabel} · ${srv.name} · ${quality}`,
+          url: m3u8, quality, qualityRank,
           site: "animekai", directUrl: proxyUrl,
           directType: isHls ? "hls" : "mp4",
         });
@@ -12786,8 +12799,6 @@ router.get("/anime/fetch-source", async (req, res) => {
       // faselhd_db: معطّلة بطلب المستخدم 2026-07-14 (قسم الأنمي فقط)
       // case "faselhd_db":   await runExtract(await race(getFaselhdDbSources(title, english, ep, isMovie), 28_000, [])); break;
       // case "witanime": معطّل بطلب المستخدم
-      // reanime: محذوف بطلب المستخدم 2026-07-24
-      // case "reanime":    (await race(getReanímeSources(title, english, ep, anilistId),    25_000, [])).forEach(collectSrc); break;
       // case "akoam": حُذف 2026-07-28 — browser (hopxBrowserExtract) على كل طلب
       case "moviebox":     (await race(getMovieBoxAnimeSources(title, english, ep, isMovie), 18_000, [])).forEach(collectSrc); break;
       case "anipub":     (await race(getAniPubSources(title, english, ep),  20_000, [])).forEach(collectSrc); break;

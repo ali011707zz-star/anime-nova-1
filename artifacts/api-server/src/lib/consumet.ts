@@ -9,7 +9,6 @@ import { isDubbedSearchVariant, isNonOriginalVideo } from "./source-policy.js";
 export const CONSUMET_SOURCES = [
   { site: "consumet_gogo", provider: "gogoanime", label: "GogoAnime" },
   { site: "consumet_world", provider: "animeworld", label: "AnimeWorld" },
-  { site: "consumet_reanime", provider: "reanime", label: "ReAnime" },
   { site: "consumet_miruro", provider: "miruro", label: "Miruro" },
   { site: "consumet_saturn", provider: "animesaturn", label: "AnimeSaturn" },
   { site: "consumet_anikoto", provider: "anikoto", label: "AniKoto" },
@@ -321,13 +320,12 @@ function watchVideos(payload: ConsumetWatchPayload | null): ConsumetVideo[] {
 
 /**
  * Some providers in the self-hosted Consumet build are currently only
- * returning a provider error from the VPS (Miruro) or an embed-only response
- * (ReAnime). AniVexa already exposes verified direct streams for these same
+ * returning a provider error from the VPS (Miruro) or an embed-only response.
+ * AniVexa already exposes verified direct streams for these same
  * AniList ids, so use it as a provider-local fallback rather than returning
  * an apparently healthy but empty source card.
  */
 const ANIVEXA_FALLBACKS: Record<string, { provider: string; label: string }> = {
-  consumet_reanime: { provider: "reanime", label: "ReAnime" },
   consumet_miruro: { provider: "animegg", label: "Miruro" },
   consumet_anikoto: { provider: "anikoto", label: "AniKoto" },
 };
