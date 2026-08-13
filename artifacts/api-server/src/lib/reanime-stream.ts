@@ -8,6 +8,7 @@ const FLIX_BASE = "https://flixcloud.cc";
 type ReanimeEmbedData = {
   url: string;
   subtitles?: unknown;
+  manifestKey: string;
 };
 
 function base64Bytes(value: string): Uint8Array {
@@ -289,20 +290,41 @@ function parseWasmDecrypt(wasmBytes: Uint8Array) {
   };
 }
 
-function runWasmDecrypt(
+async function runWasmDecrypt(
   wasmBytes: Uint8Array,
   fragment: Uint8Array,
   keyFragment: Uint8Array,
   tokenBytes: Uint8Array,
   seedInt: number,
-): Uint8Array {
-  const { step, transform } = parseWasmDecrypt(wasmBytes);
-  const output = new Uint8Array(fragment.length);
-  for (let i = 0; i < fragment.length; i++) {
-    const mixed = (fragment[i] ^ keyFragment[i] ^ tokenBytes[i]) & 255;
-    output[i] = (transform(mixed) ^ (i * step) + seedInt) & 255;
-  }
-  return output;
+): Promise<{ decryptedKey: Uint8Array; manifestKey: Uint8Array }> {
+  // Reanime's player keeps the second WASM output as `window.__pk`. The
+  // custom FlixCloud HLS loader XOR-decodes every encrypted manifest with
+  // those 32 bytes before parsing it.
+  const instantiated = await WebAssembly.instantiate(wasmBytes, {});
+  const instance = "instance" in instantiated ? instantiated.instance : instantiated;
+  const exports = instance.exports as WebAssembly.Exports & {
+    memory: WebAssembly.Memory;
+    _s: (seed: number) => void;
+    _r: (fragment: number, keyFragment: number, token: number, output: number, length: number) => void;
+    _c: () => number;
+  };
+  const length = fragment.length;
+  const fragmentPtr = 1000;
+  const keyFragmentPtr = fragmentPtr + length;
+  const tokenPtr = keyFragmentPtr + length;
+  const outputPtr = tokenPtr + length;
+  const requiredBytes = outputPtr + length;
+  while (exports.memory.buffer.byteLength < requiredBytes) exports.memory.grow(1);
+  const memory = new Uint8Array(exports.memory.buffer);
+  memory.set(fragment, fragmentPtr);
+  memory.set(keyFragment, keyFragmentPtr);
+  memory.set(tokenBytes, tokenPtr);
+  exports._s(seedInt);
+  exports._r(fragmentPtr, keyFragmentPtr, tokenPtr, outputPtr, length);
+  const decryptedKey = memory.slice(outputPtr, outputPtr + length);
+  const manifestKeyPtr = exports._c();
+  const manifestKey = memory.slice(manifestKeyPtr, manifestKeyPtr + 32);
+  return { decryptedKey, manifestKey };
 }
 
 export async function decryptReanimeEmbed(
@@ -341,7 +363,7 @@ export async function decryptReanimeEmbed(
     throw new Error("Reanime embed token payload is incomplete");
   }
 
-  const decryptedKey = runWasmDecrypt(
+  const { decryptedKey, manifestKey } = await runWasmDecrypt(
     wasmBytes,
     base64Bytes(keyFragment),
     base64Bytes(keyFragment2),
@@ -363,5 +385,9 @@ export async function decryptReanimeEmbed(
   );
   const url = dec.decode(plain).trim().replace(/\0+$/, "");
   if (!url.startsWith("http")) throw new Error("Reanime returned an invalid stream URL");
-  return { url, subtitles: data.subtitles };
+  return {
+    url,
+    subtitles: data.subtitles,
+    manifestKey: Buffer.from(manifestKey).toString("base64"),
+  };
 }

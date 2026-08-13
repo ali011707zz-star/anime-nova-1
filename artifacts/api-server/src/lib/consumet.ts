@@ -1,6 +1,7 @@
 import { encryptParam } from "./security.js";
 import { isDubbedSearchVariant, isNonOriginalVideo } from "./source-policy.js";
 import { lookupAniListTitle } from "./anilist-title.js";
+import { Buffer } from "node:buffer";
 
 /**
  * Consumet is self-hosted on the VPS. Nova consumes only the provider's
@@ -12,6 +13,25 @@ type ConsumetProvider = {
   provider: string;
   label: string;
 };
+
+/**
+ * FlixCloud's custom HLS loader XOR-decodes its base64 playlist response
+ * with a per-embed 32-byte key before parsing #EXTM3U.
+ */
+export function decodeEncryptedHlsPlaylist(body: string, manifestKey?: string): string {
+  if (!manifestKey || /^\s*#EXTM3U(?:\s|$)/m.test(body)) return body;
+  try {
+    const key = Buffer.from(manifestKey, "base64");
+    const encoded = Buffer.from(body.trim(), "base64");
+    if (!key.length || !encoded.length) return body;
+    const decoded = Buffer.allocUnsafe(encoded.length);
+    for (let i = 0; i < encoded.length; i++) decoded[i] = encoded[i] ^ key[i % key.length];
+    const text = decoded.toString("utf8");
+    return text.startsWith("#EXTM3U") ? text : body;
+  } catch {
+    return body;
+  }
+}
 
 // No Consumet provider is currently approved for production. Keep the
 // adapter typed so stale clients can still be rejected cleanly by the route.
@@ -131,11 +151,16 @@ async function resolveGogoPlayer(
     });
     if (!megaResponse.ok) return null;
     const megaHtml = await megaResponse.text();
-    const dataId = megaHtml.match(/data-id=["'](\d+)["']/i)?.[1];
-    if (!dataId) return null;
+    // MegaPlay exposes an internal data-id and the real episode id. The
+    // source API expects data-realid; keep data-id only for older pages.
+    const realId = megaHtml.match(/data-realid=["']([^"']+)["']/i)?.[1]
+      || megaHtml.match(/data-real-id=["']([^"']+)["']/i)?.[1]
+      || megaHtml.match(/data-id=["'](\d+)["']/i)?.[1];
+    if (!realId) return null;
+    const megaOrigin = new URL(iframeUrl).origin;
 
     const sourceResponse = await fetch(
-      `https://megaplay.buzz/stream/getSourcesNew?id=${dataId}&category=sub`,
+      `${megaOrigin}/stream/getSourcesNew?id=${encodeURIComponent(realId)}&category=sub`,
       {
         headers: {
           Accept: "application/json",
@@ -271,7 +296,7 @@ function hlsVariantQuality(attributes: string): { label: string; rank: number } 
  * needed by AnimeKai because one master URL otherwise gets classified as the
  * fallback 360p row even when it contains 1080p/720p/480p variants.
  */
-export async function probeHlsVariants(url: string, referer: string): Promise<HlsVariant[]> {
+export async function probeHlsVariants(url: string, referer: string, manifestKey?: string): Promise<HlsVariant[]> {
   const cached = hlsVariantsCache.get(url);
   if (cached && cached.expiresAt > Date.now()) return cached.variants;
   try {
@@ -286,7 +311,7 @@ export async function probeHlsVariants(url: string, referer: string): Promise<Hl
        signal: AbortSignal.timeout(12_000),
     });
     if (!response.ok) return [];
-    const manifest = await response.text();
+    const manifest = decodeEncryptedHlsPlaylist(await response.text(), manifestKey);
     const valid = /^\s*#EXTM3U(?:\s|$)/m.test(manifest);
     const expiresAt = Date.now() + 5 * 60_000;
     hlsManifestCache.set(url, { valid, expiresAt });
@@ -322,7 +347,7 @@ export async function probeHlsVariants(url: string, referer: string): Promise<Hl
  * still advertising an m3u8 content type. Those URLs must not become green
  * source cards or reach hls-proxy.
  */
-export async function probeHlsManifest(url: string, referer: string): Promise<boolean> {
+export async function probeHlsManifest(url: string, referer: string, manifestKey?: string): Promise<boolean> {
   const cached = hlsManifestCache.get(url);
   if (cached && cached.expiresAt > Date.now()) return cached.valid;
   try {
@@ -338,7 +363,7 @@ export async function probeHlsManifest(url: string, referer: string): Promise<bo
       hlsManifestCache.set(url, { valid: false, expiresAt: Date.now() + 60_000 });
       return false;
     }
-    const body = await response.text();
+    const body = decodeEncryptedHlsPlaylist(await response.text(), manifestKey);
     const valid = /^\s*#EXTM3U(?:\s|$)/m.test(body);
     hlsManifestCache.set(url, { valid, expiresAt: Date.now() + 5 * 60_000 });
     return valid;
@@ -356,6 +381,7 @@ export async function probeHlsManifest(url: string, referer: string): Promise<bo
 export async function probeHlsQuality(
   url: string,
   referer: string,
+  manifestKey?: string,
 ): Promise<{ label: string; rank: number }> {
   const cached = hlsQualityCache.get(url);
   if (cached && cached.expiresAt > Date.now()) return cached.quality;
@@ -369,7 +395,7 @@ export async function probeHlsQuality(
       signal: AbortSignal.timeout(5_000),
     });
     if (!response.ok) return { label: "Auto", rank: 0 };
-    const manifest = await response.text();
+    const manifest = decodeEncryptedHlsPlaylist(await response.text(), manifestKey);
     let maxHeight = 0;
     for (const match of manifest.matchAll(/#EXT-X-STREAM-INF:([^\r\n]*)/gi)) {
       const attributes = match[1] || "";
