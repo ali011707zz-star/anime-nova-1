@@ -5805,8 +5805,15 @@ async function getAkoamSources(
 //  Returns sources from cdn.momentoai.dev CDN via kawaiianime.cc API
 //  AniList ID used directly — no slug lookup needed
 // ════════════════════════════════════════════════════════════════════
-// الدومين الجديد (kawaii-anime.com → kawaiianime.cc، CDN: cdn.momentoai.dev)
+// الدومين الجديد (kawaii-anime.com → kawaiianime.cc، CDN: cdn.momentoai.dev).
+// KW أبقى نفس API على أكثر من نطاق أثناء تدوير الدومين؛ نحتفظ بها كـ
+// fallback حتى لا تفشل كل الحلقات إذا تعطل alias واحد أو أعاد 5xx.
 const KAWAII_BASE = "https://kawaiianime.cc";
+const KAWAII_API_BASES = [
+  KAWAII_BASE,
+  "https://www.kawaii-anime.com",
+  "https://kawaii-anime.com",
+] as const;
 const KAWAII_CDN_HOSTS = new Set([
   "cdn.momentoai.dev",
   "video.kawaii-anime.com",
@@ -5848,23 +5855,35 @@ async function getKawaiiAnimeSources(
 ): Promise<UnifiedSource[]> {
   if (!anilistId) return [];
   try {
-    const apiUrl = `${KAWAII_BASE}/api/watch?anilistId=${anilistId}&ep=${ep}`;
-    const r = await fetchSourceWithRetry(apiUrl, {
-      headers: {
-        ...BASE_HDRS,
-        Accept: "application/json",
-        Referer: KAWAII_BASE + "/",
-      },
-    }, 12_000);
-    if (!r) return [];
-    const data = await r.json() as {
+    type KawaiiApiData = {
       sources?: Array<{ url: string; quality?: string; isM3U8?: boolean; type?: string }>;
       subtitles?: Array<{ url: string; lang?: string; label?: string }>;
       headers?: Record<string, string>;
       intro?: { start: number; end: number };
       outro?: { start: number; end: number };
     };
-    if (!data.sources?.length) return [];
+    let data: KawaiiApiData | null = null;
+    let apiBase = KAWAII_BASE;
+
+    // Try every live API alias before validating the returned CDN host.
+    for (const base of KAWAII_API_BASES) {
+      const apiUrl = `${base}/api/watch?anilistId=${anilistId}&ep=${ep}`;
+      const r = await fetchSourceWithRetry(apiUrl, {
+        headers: {
+          ...BASE_HDRS,
+          Accept: "application/json",
+          Referer: base + "/",
+        },
+      }, 12_000);
+      if (!r) continue;
+      const candidate = await r.json().catch(() => null) as KawaiiApiData | null;
+      if (candidate?.sources?.some(source => typeof source?.url === "string" && source.url.length > 0)) {
+        data = candidate;
+        apiBase = base;
+        break;
+      }
+    }
+    if (!data?.sources?.length) return [];
 
     // kawaii يوفر فقط ترجمة إنجليزية — نمررها عبر translate-vtt للحصول على عربي
     const findSub = (tag: string) => data.subtitles?.find(s =>
@@ -5896,7 +5915,7 @@ async function getKawaiiAnimeSources(
       .map(s => {
         if (!s?.url) return null;
         try {
-          const url = new URL(s.url, KAWAII_BASE).toString();
+           const url = new URL(s.url, apiBase).toString();
           return { ...s, url };
         } catch { return null; }
       })
@@ -5947,7 +5966,7 @@ async function getKawaiiAnimeSources(
       const kawaiiRefValue =
         sourceHost === "cdn.mewstream.buzz" || sourceHost.endsWith(".mewstream.buzz")
           ? "https://megaplay.buzz/"
-          : apiReferer?.trim() || KAWAII_BASE + "/";
+           : apiReferer?.trim() || apiBase + "/";
       const kawaiiRef = encodeURIComponent(kawaiiRefValue);
       // Every Kawaii source goes through the VPS proxy so the provider-specific
       // Referer reaches both the manifest and its rewritten segments.
