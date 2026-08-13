@@ -76,7 +76,7 @@ const SITE_TAG: Record<string, string> = {
   faselhd_db: "FH",
   notorrent: "NO", sanime: "SA", anipm: "PM", anslayer: "AS",
   akwam: "AQ",
-  animekai: "AK", consumet_gogo: "GO",
+  animekai: "AK",
   anivexa_re: "RE",
 };
 
@@ -93,7 +93,7 @@ const SITE_LABEL: Record<string, string> = {
   faselhd_db: "FaselHD", animetime: "AnimeTime",
   notorrent: "Notorrent", sanime: "SAnime", anipm: "AniPm", anslayer: "AnimeSlayer",
   akwam: "Akwam",
-  animekai: "AnimeKai", consumet_gogo: "GogoAnime",
+  animekai: "AnimeKai",
   anivexa_re: "RE",
 };
 function getSiteTag(site: string): string {
@@ -118,7 +118,6 @@ const SITE_DESC: Record<string, string> = {
   anslayer: "مشغلات خارجية · MixDrop/MediaFire",
   akwam: "عربي مترجم · MP4 مباشر",
   animekai: "HLS · ياباني + ترجمة",
-  consumet_gogo: "HLS · صوت خام · كل الجودات",
   anivexa_re: "Soft Sub · HLS مباشر · متعدد الجودات",
 };
 function getSiteDesc(site: string): string {
@@ -283,7 +282,6 @@ const SITE_PRIORITY: Record<string, number> = {
   kawaii: 100, animewitcher: 90,
   animeify: 85, sanime: 80,
   animekai: 79,
-  consumet_gogo: 78,
   anivexa_re: 77,
   dulo_anim: 70, vidlink_anim: 55,
   vidfast: 35,
@@ -303,7 +301,6 @@ const STATIC_PICKER: Record<QualityKey, { site: string; name: string; tag: strin
     { site: "animeify",     name: "أنمي فاي",    tag: "AF" },
     { site: "anifox",        name: "ANIFOX",      tag: "FX" },
     { site: "animekai", name: "AnimeKai", tag: "AK" },
-    { site: "consumet_gogo", name: "GogoAnime", tag: "GO" },
     { site: "anivexa_re", name: "RE", tag: "RE" },
   ],
   "720p": [
@@ -314,7 +311,6 @@ const STATIC_PICKER: Record<QualityKey, { site: string; name: string; tag: strin
     { site: "animeify",     name: "أنمي فاي",    tag: "AF" },
     { site: "anifox",        name: "ANIFOX",      tag: "FX" },
     { site: "animekai", name: "AnimeKai", tag: "AK" },
-    { site: "consumet_gogo", name: "GogoAnime", tag: "GO" },
     { site: "anivexa_re", name: "RE", tag: "RE" },
   ],
   "480p": [
@@ -323,7 +319,6 @@ const STATIC_PICKER: Record<QualityKey, { site: string; name: string; tag: strin
     { site: "animeify",     name: "أنمي فاي",    tag: "AF" },
     { site: "anifox",        name: "ANIFOX",      tag: "FX" },
     { site: "animekai", name: "AnimeKai", tag: "AK" },
-    { site: "consumet_gogo", name: "GogoAnime", tag: "GO" },
     { site: "anivexa_re", name: "RE", tag: "RE" },
   ],
 };
@@ -366,7 +361,6 @@ const SITE_TIMEOUT_MAP: Record<string, number> = {
   kawaii:       30_000,
   anineko:      45_000,
   animekai: 35_000,
-  consumet_gogo: 35_000,
   anivexa_re: 90_000,
 };
 

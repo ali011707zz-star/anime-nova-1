@@ -196,7 +196,6 @@ const SCRAPER_DEFS: { site: string; name: string; desc: string; tag: string; ser
   { site: "sanime",           name: "سـAnime",       desc: "عربي · MP4 مباشر",        tag: "SA", isArabic: true },
   { site: "anifox",           name: "ANIFOX",        desc: "Archive · MediaFire · MP4Upload · Uqload", tag: "FX", isArabic: true },
   { site: "animekai",         name: "AnimeKai",      desc: "HLS · ياباني + ترجمة",                    tag: "AK" },
-  { site: "consumet_gogo",    name: "GogoAnime",     desc: "HLS · صوت خام · كل الجودات",              tag: "GO" },
   { site: "anivexa_re",        name: "RE",            desc: "Soft Sub · HLS مباشر · متعدد الجودات", tag: "RE" },
   // akoam: حُذف 2026-07-28 — كان يستخدم hopxBrowserExtract (browser) على كل طلب
 ];
@@ -217,7 +216,6 @@ const STATIC_PICKER_WEB: Record<WebQualityKey, { site: string; tag: string; serv
     { site: "animeify",     tag: "AF" },
     { site: "anifox",       tag: "FX" },
     { site: "animekai",     tag: "AK" },
-    { site: "consumet_gogo", tag: "GO" },
     { site: "anivexa_re",        tag: "RE" },
   ],
   "720p": [
@@ -228,7 +226,6 @@ const STATIC_PICKER_WEB: Record<WebQualityKey, { site: string; tag: string; serv
     { site: "animeify",     tag: "AF" },
     { site: "anifox",       tag: "FX" },
     { site: "animekai",     tag: "AK" },
-    { site: "consumet_gogo", tag: "GO" },
     { site: "anivexa_re",        tag: "RE" },
   ],
   "480p": [
@@ -237,7 +234,6 @@ const STATIC_PICKER_WEB: Record<WebQualityKey, { site: string; tag: string; serv
     { site: "animeify",     tag: "AF" },
     { site: "anifox",       tag: "FX" },
     { site: "animekai",     tag: "AK" },
-    { site: "consumet_gogo", tag: "GO" },
     { site: "anivexa_re",        tag: "RE" },
   ],
 };
@@ -269,13 +265,13 @@ const PRIORITY_FETCH_SITES = new Set([
  */
 const PROVIDER_WANTS_SMART_SUB = new Set([
   "animepahe",
-  "anikototv", "animekai", "consumet_gogo", "dulo_anim",
+  "anikototv", "animekai", "dulo_anim",
   "anivexa_re",
 ]);
 
 /* These providers are intentionally left without the generic episode subtitle
-   fallback. GO/DB/KO are Japanese raw-audio streams, so they are opted into
-   the smart Arabic subtitle path above instead. */
+   fallback. DB/KO are Japanese raw-audio streams, so they are opted into the
+   smart Arabic subtitle path above instead. */
 const RAW_AUDIO_ONLY_SITES = new Set<string>();
 
 type SlotStatus = "idle" | "fetching" | "ready" | "failed";
@@ -3314,7 +3310,6 @@ export default function WatchPage() {
     const SITE_REQUEST_TIMEOUTS: Record<string, number> = {
       animewitcher: 42000,  // backend = 38s + هامش 4s
       animekai:     36000,  // backend = 30s + هامش 6s
-      consumet_gogo: 36000,
       cinesrc_anim: 38000,  // backend = 35s + هامش 3s
       anime4up2:    28000,  // backend = 25s + هامش 3s
       mycima:       34000,  // backend = 30s + هامش 4s

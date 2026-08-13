@@ -43,6 +43,8 @@ type AnivexaServer = {
   name?: string;
   type?: string;
   embed?: string;
+  dataLink?: string;
+  link?: string;
 };
 
 type AnivexaPayload = {
@@ -52,6 +54,17 @@ type AnivexaPayload = {
   headers?: Record<string, string>;
   streams?: AnivexaStream[];
   allServers?: AnivexaServer[];
+  servers?: AnivexaServer[];
+  data?: {
+    stream_url?: string;
+    server?: string;
+    referer?: string;
+    headers?: Record<string, string>;
+    streams?: AnivexaStream[];
+    sources?: AnivexaStream[];
+    allServers?: AnivexaServer[];
+    servers?: AnivexaServer[];
+  } | AnivexaStream[] | AnivexaStream;
 };
 
 type NovaSource = {
@@ -176,7 +189,9 @@ async function makeResolvedSources(
     }
   }
 
-  let quality = qualityInfo({ server: provider.server });
+  // A few RE manifests are media playlists whose URL itself carries the
+  // encoded quality, so keep that hint before falling back to "Auto".
+  let quality = qualityInfo({ server: `${provider.server} ${resolved.url}` });
   if (resolved.kind === "hls") {
     const manifestQuality = await probeHlsQuality(resolved.url, resolved.referer);
     if (manifestQuality.rank > quality.rank) quality = manifestQuality;
@@ -200,8 +215,9 @@ async function fetchReanimeServer(
   baseUrl: string,
   server: AnivexaServer,
 ): Promise<{ url: string; kind: "hls" | "mp4"; referer: string } | null> {
-  const embed = typeof server.embed === "string"
-    ? resolveUpstreamUrl(baseUrl, server.embed.trim())
+  const rawEmbed = server.embed || server.dataLink || server.link;
+  const embed = typeof rawEmbed === "string"
+    ? resolveUpstreamUrl(baseUrl, rawEmbed.trim())
     : "";
   if (!embed) return null;
 
@@ -249,19 +265,56 @@ export async function getAnivexaSources(
   const resolvedAnilistId = anilistId || titleMatch?.id;
   if (!resolvedAnilistId) return [];
 
-  const endpoint = `${baseUrl}/watch/${provider.provider}/${resolvedAnilistId}/sub/${provider.provider}-${ep}`;
   try {
-    const response = await fetch(endpoint, {
-      headers: { Accept: "application/json", "User-Agent": "Nova-Anivexa-Adapter/1.0" },
-      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-    });
-    if (!response.ok) return [];
+    // Keep the canonical episode id first, but accept the short form used by
+    // older Anivexa deployments. This avoids a false red source when only one
+    // of the two compatible route shapes is enabled on the VPS service.
+    const endpointBase = `${baseUrl}/watch/${provider.provider}/${resolvedAnilistId}/sub`;
+    const endpoints = [
+      `${endpointBase}/${provider.provider}-${ep}`,
+      `${endpointBase}/${ep}`,
+    ];
+    let payload: AnivexaPayload | null = null;
+    for (const endpoint of endpoints) {
+      const response = await fetch(endpoint, {
+        headers: { Accept: "application/json", "User-Agent": "Nova-Anivexa-Adapter/1.0" },
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      });
+      if (!response.ok) continue;
+      const candidate = await response.json() as AnivexaPayload;
+      if (candidate && typeof candidate === "object") {
+        payload = candidate;
+        break;
+      }
+    }
+    if (!payload) return [];
 
-    const payload = await response.json() as AnivexaPayload;
+    const nested: any = Array.isArray(payload.data) ? null : (payload.data || null);
+    const payloadStreamUrl = payload.stream_url || nested?.stream_url;
+    const payloadServer = payload.server || nested?.server || provider.server;
+    const payloadReferer = payload.referer || nested?.referer;
+    const payloadHeaders = payload.headers || nested?.headers;
+    const streams = [
+      ...(Array.isArray(payload.streams) ? payload.streams : []),
+      ...(Array.isArray((payload as any).sources) ? (payload as any).sources : []),
+      ...(Array.isArray(nested?.streams) ? nested.streams : []),
+      ...(Array.isArray(nested?.sources) ? nested.sources : []),
+      ...(Array.isArray(payload.data) ? payload.data : []),
+      ...(payload.data && !Array.isArray(payload.data) && !Array.isArray(nested?.streams) &&
+        !Array.isArray(nested?.sources) && typeof payload.data === "object"
+        ? [payload.data as AnivexaStream]
+        : []),
+    ];
+
     const serverNames = [provider.server, ...provider.aliases]
       .filter(Boolean)
       .map(normalizeServerName);
-    const allServers = Array.isArray(payload.allServers) ? payload.allServers : [];
+    const allServers = [
+      ...(Array.isArray(payload.allServers) ? payload.allServers : []),
+      ...(Array.isArray(payload.servers) ? payload.servers : []),
+      ...(Array.isArray(nested?.allServers) ? nested.allServers : []),
+      ...(Array.isArray(nested?.servers) ? nested.servers : []),
+    ];
     const matchingServers = allServers.filter(server => {
       const name = normalizeServerName(server.name);
       const isSoftSub = !/hard.?sub|hardsub|dub/i.test(`${server.name || ""} ${server.type || ""}`);
@@ -285,22 +338,32 @@ export async function getAnivexaSources(
       }
     };
 
-    if (typeof payload.stream_url === "string" && payload.stream_url.trim()) {
+    if (typeof payloadStreamUrl === "string" && payloadStreamUrl.trim()) {
       addDirectCandidate(
-        { url: payload.stream_url, type: "hls", server: payload.server || provider.server },
-        payload.stream_url,
-        payload.server || provider.server,
+        {
+          url: payloadStreamUrl,
+          type: "hls",
+          server: payloadServer,
+          referer: payloadReferer,
+          headers: payloadHeaders,
+        },
+        payloadStreamUrl,
+        payloadServer,
       );
     }
 
-    const directFallback = (Array.isArray(payload.streams) ? payload.streams : [])
+    const directFallback = streams
       .filter(stream =>
-        typeof stream.url === "string" &&
+        typeof (stream.url || (stream as any).file || (stream as any).m3u8) === "string" &&
         (!stream.server || provider.aggregate || serverNames.includes(normalizeServerName(stream.server))) &&
-        !isNonOriginalVideo(stream as Record<string, unknown>, stream.url),
+        !isNonOriginalVideo(
+          stream as Record<string, unknown>,
+          String(stream.url || (stream as any).file || (stream as any).m3u8),
+        ),
       );
     for (const stream of directFallback) {
-      if (stream.url) addDirectCandidate(stream, stream.url, stream.server || provider.server);
+      const rawUrl = stream.url || (stream as any).file || (stream as any).m3u8;
+      if (typeof rawUrl === "string") addDirectCandidate(stream, rawUrl, stream.server || provider.server);
     }
 
     const resolvedEmbeds = await Promise.allSettled(

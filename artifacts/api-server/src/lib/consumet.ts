@@ -7,9 +7,15 @@ import { lookupAniListTitle } from "./anilist-title.js";
  * direct media URLs; subtitle tracks and embed pages are intentionally not
  * forwarded to either client.
  */
-export const CONSUMET_SOURCES = [
-  { site: "consumet_gogo", provider: "gogoanime", label: "GogoAnime" },
-] as const;
+type ConsumetProvider = {
+  site: string;
+  provider: string;
+  label: string;
+};
+
+// No Consumet provider is currently approved for production. Keep the
+// adapter typed so stale clients can still be rejected cleanly by the route.
+export const CONSUMET_SOURCES: readonly ConsumetProvider[] = [];
 
 type ConsumetSite = (typeof CONSUMET_SOURCES)[number]["site"];
 
@@ -234,6 +240,16 @@ function hlsVariantQuality(attributes: string): { label: string; rank: number } 
   if (/720|hd/i.test(namedQuality)) return qualityFromHeight(720);
   if (/480/i.test(namedQuality)) return qualityFromHeight(480);
   if (/360|sd/i.test(namedQuality)) return qualityFromHeight(360);
+  // Some RE/FlixCloud masters omit RESOLUTION and only advertise bitrate.
+  // Treat the bandwidth as a quality hint instead of collapsing every variant
+  // into the generic Auto/360 bucket.
+  const bandwidth = Number(attributes.match(/(?:^|,)AVERAGE-BANDWIDTH=(\d+)/i)?.[1]
+    || attributes.match(/(?:^|,)BANDWIDTH=(\d+)/i)?.[1]
+    || 0);
+  if (bandwidth >= 2_000_000) return qualityFromHeight(1080);
+  if (bandwidth >= 1_000_000) return qualityFromHeight(720);
+  if (bandwidth >= 500_000) return qualityFromHeight(480);
+  if (bandwidth > 0) return qualityFromHeight(360);
   return { label: "Auto", rank: 0 };
 }
 
@@ -254,7 +270,7 @@ export async function probeHlsVariants(url: string, referer: string): Promise<Hl
       },
       // Reanime/Anivexa signed manifests can take a few seconds on the VPS.
       // A short probe timeout made a healthy master fall back to Auto/360.
-      signal: AbortSignal.timeout(7_000),
+       signal: AbortSignal.timeout(12_000),
     });
     if (!response.ok) return [];
     const lines = (await response.text()).split(/\r?\n/);
@@ -377,8 +393,7 @@ function watchVideos(payload: ConsumetWatchPayload | null): ConsumetVideo[] {
  * AniList ids, so use it as a provider-local fallback rather than returning
  * an apparently healthy but empty source card.
  */
-const ANIVEXA_FALLBACKS: Record<string, { provider: string; label: string }> = {
-};
+const ANIVEXA_FALLBACKS: Record<string, { provider: string; label: string }> = {};
 
 async function getAnivexaFallbackSources(
   site: string,

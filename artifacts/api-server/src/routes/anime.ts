@@ -12644,7 +12644,6 @@ router.get("/anime/fetch-source", async (req, res) => {
     "animeify",      // 🎬 أنمي فاي — MEGA/Streamtape/MediaFire ✅ (مُعاد تفعيله)
     "animekai",      // 🎌 AnimeKai direct scraper — HLS/MP4
     ...ANIVEXA_SOURCES.map(source => source.site),
-    ...CONSUMET_SOURCES.map(source => source.site),
     // "anipub":     معطّل
     // ── مُعطَّلة سابقاً ─────────────────────────────────────────────────────
     // "akoam": حُذف 2026-07-28 — كان يستخدم hopxBrowserExtract على كل طلب

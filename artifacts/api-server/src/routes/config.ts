@@ -28,7 +28,6 @@ const DEFAULT_CONFIG = {
     vyla:         true,
     aflaam:       true,
     stardima:     true,
-    consumet_gogo: true,
     consumet_anikoto: true,
   },
   announcements: [] as {
