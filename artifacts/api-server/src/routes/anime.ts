@@ -14793,6 +14793,10 @@ function toAbsoluteUrl(raw: string, base: string): string {
   return raw.startsWith("/") ? (new URL(base).origin + raw) : dir + raw;
 }
 
+function safeHost(raw: string): string {
+  try { return new URL(raw).hostname; } catch { return "invalid"; }
+}
+
 // ── Hopx proxy port (يحل CF Worker — كل الفيديو عبر VPS) ───────────────────────
 // ── Hopx / MediaFlow / CF Worker — معطّلة جميعها، كل شيء عبر VPS مباشرة ─────────
 const _mfOk    = false; // معطّل
@@ -14923,10 +14927,15 @@ async function serveHlsVPS(
         if (r.ok) {
           const body = await r.text();
           if (isValidManifest(body)) return body;
+          console.warn(`[hls-proxy] invalid manifest host=${safeHost(url)} status=${r.status} bytes=${body.length}`);
+        } else {
+          console.warn(`[hls-proxy] upstream rejected host=${safeHost(url)} status=${r.status} attempt=${attempt + 1}`);
         }
         if (r.status !== 403 && r.status !== 429 && r.status !== 503) break;
         if (attempt < 1) await new Promise(r2 => setTimeout(r2, 300));
-      } catch {
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        console.warn(`[hls-proxy] upstream fetch failed host=${safeHost(url)} attempt=${attempt + 1}: ${message}`);
         if (attempt < 1) await new Promise(r2 => setTimeout(r2, 300));
         else break;
       }

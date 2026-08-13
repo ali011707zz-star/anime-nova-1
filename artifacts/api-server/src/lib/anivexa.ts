@@ -74,6 +74,7 @@ type NovaSource = {
 
 const REQUEST_TIMEOUT_MS = 26_000;
 const REANIME_REFERER = "https://reanime.to/";
+const REANIME_STREAM_REFERER = "https://flixcloud.cc/";
 let warnedMissingUrl = false;
 
 function anivexaBaseUrl(): string {
@@ -111,6 +112,25 @@ function resolveUpstreamUrl(baseUrl: string, value: string): string {
 
 function normalizeServerName(value: unknown): string {
   return String(value || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+function streamReferer(
+  rawUrl: string,
+  explicitReferer?: unknown,
+  headers?: Record<string, string>,
+): string {
+  const explicit = typeof explicitReferer === "string" ? explicitReferer.trim() : "";
+  if (explicit) return explicit;
+  const headerReferer = headers?.Referer || headers?.referer || "";
+  if (headerReferer.trim()) return headerReferer.trim();
+  try {
+    if (new URL(rawUrl).hostname.toLowerCase().endsWith("flixcloud.cc")) {
+      return REANIME_STREAM_REFERER;
+    }
+  } catch {
+    // Keep the provider page referer for malformed or relative upstream URLs.
+  }
+  return REANIME_REFERER;
 }
 
 function streamKind(stream: AnivexaStream, url: string): "hls" | "mp4" | null {
@@ -210,7 +230,7 @@ async function fetchReanimeServer(
   const decrypted = await decryptReanimeEmbed(await response.text());
   const lower = decrypted.url.toLowerCase();
   const kind = /\.(mp4|webm)(?:[?#]|$)/i.test(lower) ? "mp4" : "hls";
-  return { url: decrypted.url, kind, referer: REANIME_REFERER };
+  return { url: decrypted.url, kind, referer: streamReferer(decrypted.url) };
 }
 
 /**
@@ -271,11 +291,7 @@ export async function getAnivexaSources(
       if (!rawUrl || isNonOriginalVideo(stream as Record<string, unknown>, rawUrl)) return;
       const kind = streamKind(stream, rawUrl);
       if (!kind) return;
-      const referer =
-        (typeof stream.referer === "string" && stream.referer.trim()) ||
-        stream.headers?.Referer ||
-        stream.headers?.referer ||
-        (fallbackServer ? REANIME_REFERER : REANIME_REFERER);
+      const referer = streamReferer(rawUrl, stream.referer, stream.headers);
       if (!candidates.some(candidate => candidate.url === rawUrl)) {
         candidates.push({ url: rawUrl, kind, referer });
       }
