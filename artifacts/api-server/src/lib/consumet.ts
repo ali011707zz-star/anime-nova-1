@@ -8,7 +8,6 @@ import { isDubbedSearchVariant, isNonOriginalVideo } from "./source-policy.js";
  */
 export const CONSUMET_SOURCES = [
   { site: "consumet_gogo", provider: "gogoanime", label: "GogoAnime" },
-  { site: "consumet_anikoto", provider: "anikoto", label: "AniKoto" },
 ] as const;
 
 type ConsumetSite = (typeof CONSUMET_SOURCES)[number]["site"];
@@ -376,7 +375,6 @@ function watchVideos(payload: ConsumetWatchPayload | null): ConsumetVideo[] {
  * an apparently healthy but empty source card.
  */
 const ANIVEXA_FALLBACKS: Record<string, { provider: string; label: string }> = {
-  consumet_anikoto: { provider: "anikoto", label: "AniKoto" },
 };
 
 async function getAnivexaFallbackSources(
@@ -566,28 +564,48 @@ export async function getConsumetSources(
       const kind = playableType(video, rawUrl);
       if (!kind) continue;
       seen.add(rawUrl);
-       let quality = qualityInfo(video);
       const referer = gogoResolved?.referer ||
         video.headers?.Referer || video.headers?.referer || payloadReferer;
-       if (kind === "hls") {
-         const manifestQuality = await probeHlsQuality(rawUrl, referer);
-         // The manifest is authoritative: never advertise 1080p for a
-         // stream whose highest real variant is only 720p.
-         if (manifestQuality.rank > 0) quality = manifestQuality;
-       }
-      const proxied = proxyUrl(kind, rawUrl, referer);
-      sources.push({
-        name: `${providerInfo.label} · ${quality.label} · صوت خام`,
-        url: proxied,
-        quality: quality.label,
-        qualityRank: quality.rank,
-        site: providerInfo.site,
-        directUrl: proxied,
-        directType: kind,
-        isEmbed: false,
-        hasBuiltinSub: false,
-        headers: referer ? { Referer: referer } : undefined,
-      });
+        if (kind === "hls" && providerInfo.provider === "gogoanime") {
+          const variants = await probeHlsVariants(rawUrl, referer);
+          const playableVariants = variants.length
+            ? variants
+            : [{
+                url: rawUrl,
+                ...(await probeHlsQuality(rawUrl, referer)),
+              }];
+          for (const variant of playableVariants) {
+            const proxiedVariant = proxyUrl("hls", variant.url, referer);
+            sources.push({
+              name: `${providerInfo.label} · ${variant.label} · صوت خام`,
+              url: proxiedVariant,
+              quality: variant.label,
+              qualityRank: variant.rank,
+              site: providerInfo.site,
+              directUrl: proxiedVariant,
+              directType: "hls",
+              isEmbed: false,
+              hasBuiltinSub: false,
+              headers: referer ? { Referer: referer } : undefined,
+            });
+          }
+          continue;
+        }
+
+        const quality = qualityInfo(video);
+        const proxied = proxyUrl(kind, rawUrl, referer);
+        sources.push({
+          name: `${providerInfo.label} · ${quality.label} · صوت خام`,
+          url: proxied,
+          quality: quality.label,
+          qualityRank: quality.rank,
+          site: providerInfo.site,
+          directUrl: proxied,
+          directType: kind,
+          isEmbed: false,
+          hasBuiltinSub: false,
+          headers: referer ? { Referer: referer } : undefined,
+        });
     }
     if (sources.length) return sources;
     return await getAnivexaFallbackSources(site, anilistId, ep);

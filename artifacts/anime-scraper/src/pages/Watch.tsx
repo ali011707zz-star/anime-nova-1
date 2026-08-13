@@ -196,6 +196,7 @@ const SCRAPER_DEFS: { site: string; name: string; desc: string; tag: string; ser
   { site: "sanime",           name: "سـAnime",       desc: "عربي · MP4 مباشر",        tag: "SA", isArabic: true },
   { site: "anifox",           name: "ANIFOX",        desc: "Archive · MediaFire · MP4Upload · Uqload", tag: "FX", isArabic: true },
   { site: "animekai",         name: "AnimeKai",      desc: "HLS · ياباني + ترجمة",                    tag: "AK" },
+  { site: "consumet_gogo",    name: "GogoAnime",     desc: "HLS · صوت خام · كل الجودات",              tag: "GO" },
   { site: "anivexa_solaris_1", name: "Solaris-1",    serverLabel: "Solaris-1", desc: "RE · Soft Sub · HLS مباشر", tag: "RE" },
   { site: "anivexa_solaris_2", name: "Solaris-2",    serverLabel: "Solaris-2", desc: "RE · Soft Sub · HLS مباشر", tag: "RE" },
   { site: "anivexa_frost",     name: "Frost",        serverLabel: "Frost",     desc: "RE · Soft Sub · HLS مباشر", tag: "RE" },
@@ -218,6 +219,7 @@ const STATIC_PICKER_WEB: Record<WebQualityKey, { site: string; tag: string; serv
     { site: "animeify",     tag: "AF" },
     { site: "anifox",       tag: "FX" },
     { site: "animekai",     tag: "AK" },
+    { site: "consumet_gogo", tag: "GO" },
     { site: "anivexa_solaris_1", tag: "RE", serverLabel: "Solaris-1" },
     { site: "anivexa_solaris_2", tag: "RE", serverLabel: "Solaris-2" },
     { site: "anivexa_frost",     tag: "RE", serverLabel: "Frost" },
@@ -230,6 +232,7 @@ const STATIC_PICKER_WEB: Record<WebQualityKey, { site: string; tag: string; serv
     { site: "animeify",     tag: "AF" },
     { site: "anifox",       tag: "FX" },
     { site: "animekai",     tag: "AK" },
+    { site: "consumet_gogo", tag: "GO" },
     { site: "anivexa_solaris_1", tag: "RE", serverLabel: "Solaris-1" },
     { site: "anivexa_solaris_2", tag: "RE", serverLabel: "Solaris-2" },
     { site: "anivexa_frost",     tag: "RE", serverLabel: "Frost" },
@@ -240,6 +243,7 @@ const STATIC_PICKER_WEB: Record<WebQualityKey, { site: string; tag: string; serv
     { site: "animeify",     tag: "AF" },
     { site: "anifox",       tag: "FX" },
     { site: "animekai",     tag: "AK" },
+    { site: "consumet_gogo", tag: "GO" },
     { site: "anivexa_solaris_1", tag: "RE", serverLabel: "Solaris-1" },
     { site: "anivexa_solaris_2", tag: "RE", serverLabel: "Solaris-2" },
     { site: "anivexa_frost",     tag: "RE", serverLabel: "Frost" },
@@ -273,7 +277,7 @@ const PRIORITY_FETCH_SITES = new Set([
  */
 const PROVIDER_WANTS_SMART_SUB = new Set([
   "animepahe",
-  "anikototv", "animekai", "dulo_anim",
+  "anikototv", "animekai", "consumet_gogo", "dulo_anim",
   "anivexa_solaris_1", "anivexa_solaris_2", "anivexa_frost",
 ]);
 
@@ -3317,6 +3321,8 @@ export default function WatchPage() {
        حتى لا يُقتل الطلب قبل أن يرد الباكند (مشكلة جذرية لفقدان المصادر في cache البارد) */
     const SITE_REQUEST_TIMEOUTS: Record<string, number> = {
       animewitcher: 42000,  // backend = 38s + هامش 4s
+      animekai:     36000,  // backend = 30s + هامش 6s
+      consumet_gogo: 36000,
       cinesrc_anim: 38000,  // backend = 35s + هامش 3s
       anime4up2:    28000,  // backend = 25s + هامش 3s
       mycima:       34000,  // backend = 30s + هامش 4s

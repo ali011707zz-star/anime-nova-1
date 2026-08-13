@@ -1,6 +1,6 @@
 import { encryptParam } from "./security.js";
 import { isNonOriginalVideo } from "./source-policy.js";
-import { probeHlsQuality } from "./consumet.js";
+import { probeHlsQuality, probeHlsVariants } from "./consumet.js";
 import { decryptReanimeEmbed } from "./reanime-stream.js";
 
 /**
@@ -12,9 +12,11 @@ import { decryptReanimeEmbed } from "./reanime-stream.js";
  * so Nova can overlay Kawaii's Arabic subtitle independently.
  */
 export const ANIVEXA_SOURCES = [
-  { site: "anivexa_solaris_1", provider: "reanime", tag: "RE", label: "Solaris-1", server: "Solaris-1" },
-  { site: "anivexa_solaris_2", provider: "reanime", tag: "RE", label: "Solaris-2", server: "Solaris-2" },
-  { site: "anivexa_frost", provider: "reanime", tag: "RE", label: "Frost", server: "Frost" },
+  // RE is the original provider name. The current Anivexa API calls these
+  // two servers HD-1/HD-2, while older responses used the Solaris names.
+  { site: "anivexa_solaris_1", provider: "reanime", tag: "RE", label: "Solaris-1", server: "Solaris-1", aliases: ["HD-1"] },
+  { site: "anivexa_solaris_2", provider: "reanime", tag: "RE", label: "Solaris-2", server: "Solaris-2", aliases: ["HD-2"] },
+  { site: "anivexa_frost", provider: "reanime", tag: "RE", label: "Frost", server: "Frost", aliases: [] },
 ] as const;
 
 type AnivexaSourceSite = (typeof ANIVEXA_SOURCES)[number]["site"];
@@ -126,6 +128,51 @@ function novaProxyUrl(kind: "hls" | "mp4", rawUrl: string, referer: string): str
   return `/api/anime/${route}?url=${encodeURIComponent(encryptParam(rawUrl))}&ref=${encodeURIComponent(encryptParam(referer))}`;
 }
 
+async function makeResolvedSources(
+  provider: (typeof ANIVEXA_SOURCES)[number],
+  resolved: { url: string; kind: "hls" | "mp4"; referer: string },
+): Promise<NovaSource[]> {
+  if (resolved.kind === "hls") {
+    const variants = await probeHlsVariants(resolved.url, resolved.referer);
+    if (variants.length) {
+      return variants.map(variant => {
+        const directUrl = novaProxyUrl("hls", variant.url, resolved.referer);
+        return {
+          name: `${provider.tag} · ${provider.label} · ${variant.label}`,
+          url: directUrl,
+          quality: variant.label,
+          qualityRank: variant.rank,
+          site: provider.site,
+          directUrl,
+          directType: "hls",
+          isEmbed: false,
+          hasBuiltinSub: false,
+          headers: { Referer: resolved.referer },
+        };
+      });
+    }
+  }
+
+  let quality = qualityInfo({ server: provider.server });
+  if (resolved.kind === "hls") {
+    const manifestQuality = await probeHlsQuality(resolved.url, resolved.referer);
+    if (manifestQuality.rank > quality.rank) quality = manifestQuality;
+  }
+  const directUrl = novaProxyUrl(resolved.kind, resolved.url, resolved.referer);
+  return [{
+    name: `${provider.tag} · ${provider.label} · ${quality.label}`,
+    url: directUrl,
+    quality: quality.label,
+    qualityRank: quality.rank,
+    site: provider.site,
+    directUrl,
+    directType: resolved.kind,
+    isEmbed: false,
+    hasBuiltinSub: false,
+    headers: { Referer: resolved.referer },
+  }];
+}
+
 async function fetchReanimeServer(
   baseUrl: string,
   server: AnivexaServer,
@@ -179,10 +226,10 @@ export async function getAnivexaSources(
     if (!response.ok) return [];
 
     const payload = await response.json() as AnivexaPayload;
-    const serverName = normalizeServerName(provider.server);
+    const serverNames = [provider.server, ...provider.aliases].map(normalizeServerName);
     const allServers = Array.isArray(payload.allServers) ? payload.allServers : [];
     const matchingServer = allServers.find(server =>
-      normalizeServerName(server.name) === serverName
+      serverNames.includes(normalizeServerName(server.name))
       && !/hard.?sub|hardsub|dub/i.test(`${server.name || ""} ${server.type || ""}`),
     );
 
@@ -194,24 +241,7 @@ export async function getAnivexaSources(
       const resolved = await fetchReanimeServer(baseUrl, matchingServer);
       if (!resolved) return [];
 
-      let quality = qualityInfo({ server: matchingServer.name });
-      if (resolved.kind === "hls") {
-        const manifestQuality = await probeHlsQuality(resolved.url, resolved.referer);
-        if (manifestQuality.rank > quality.rank) quality = manifestQuality;
-      }
-      const directUrl = novaProxyUrl(resolved.kind, resolved.url, resolved.referer);
-      return [{
-        name: `${provider.tag} · ${provider.label} · ${quality.label}`,
-        url: directUrl,
-        quality: quality.label,
-        qualityRank: quality.rank,
-        site: provider.site,
-        directUrl,
-        directType: resolved.kind,
-        isEmbed: false,
-        hasBuiltinSub: false,
-        headers: { Referer: resolved.referer },
-      }];
+      return await makeResolvedSources(provider, resolved);
     }
 
     // Keep a safe fallback for older Anivexa deployments that do not expose
@@ -219,7 +249,7 @@ export async function getAnivexaSources(
     // to the requested server; unnamed streams are never mislabeled.
     const directFallback = (Array.isArray(payload.streams) ? payload.streams : [])
       .find(stream =>
-        normalizeServerName(stream.server) === serverName
+        serverNames.includes(normalizeServerName(stream.server))
         && typeof stream.url === "string"
         && !isNonOriginalVideo(stream as Record<string, unknown>, stream.url),
       );
@@ -230,20 +260,7 @@ export async function getAnivexaSources(
     const referer = typeof directFallback.referer === "string" && directFallback.referer
       ? directFallback.referer
       : REANIME_REFERER;
-    const quality = qualityInfo(directFallback);
-    const directUrl = novaProxyUrl(kind, rawUrl, referer);
-    return [{
-      name: `${provider.tag} · ${provider.label} · ${quality.label}`,
-      url: directUrl,
-      quality: quality.label,
-      qualityRank: quality.rank,
-      site: provider.site,
-      directUrl,
-      directType: kind,
-      isEmbed: false,
-      hasBuiltinSub: false,
-      headers: { Referer: referer },
-    }];
+    return await makeResolvedSources(provider, { url: rawUrl, kind, referer });
   } catch (error: any) {
     console.warn(`[Anivexa] ${provider.provider} ep${ep} failed:`, error?.message || error);
     return [];

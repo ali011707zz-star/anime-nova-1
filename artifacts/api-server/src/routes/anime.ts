@@ -7433,6 +7433,7 @@ async function getAnimeKaiSources(
     pool.sort((a, b) => kaiHostRank(b.videoUrl) - kaiHostRank(a.videoUrl));
 
     const sources: UnifiedSource[] = [];
+    const seenHlsQualities = new Set<string>();
     for (const srv of pool.slice(0, 8)) {
       try {
         let m3u8: string | null = null;
@@ -7460,6 +7461,11 @@ async function getAnimeKaiSources(
           ? variants
           : [{ url: m3u8, label: manifestQuality.rank > 0 ? manifestQuality.label : "Auto", rank: manifestQuality.rank }];
         for (const variant of playableVariants) {
+          // Prefer the first working/highest-ranked server for each real HLS
+          // quality. This keeps the picker stable while still exposing every
+          // quality declared by the master playlist.
+          if (isHls && seenHlsQualities.has(variant.label)) continue;
+          if (isHls) seenHlsQualities.add(variant.label);
           const variantProxyUrl = isHls
             ? `/api/anime/hls-proxy?url=${encodeURIComponent(variant.url)}&ref=${encodeURIComponent(KAI_BASE + "/")}`
             : proxyUrl;
@@ -7470,7 +7476,6 @@ async function getAnimeKaiSources(
             directType: isHls ? "hls" : "mp4",
           });
         }
-        if (sources.length >= 8) break;
       } catch { continue; }
     }
     return sources;
@@ -7800,6 +7805,16 @@ async function awDbSaveLinks(
   }
 }
 
+async function awResolveHlsVariants(
+  mediaUrl: string,
+  referer: string,
+): Promise<Array<{ url: string; label: string; rank: number }>> {
+  const variants = await probeHlsVariants(mediaUrl, referer);
+  if (variants.length) return variants;
+  const quality = await probeHlsQuality(mediaUrl, referer);
+  return [{ url: mediaUrl, label: quality.rank > 0 ? quality.label : "Auto", rank: quality.rank }];
+}
+
 /** بناء UnifiedSources من صفوف aw_links (بدون Algolia/Firestore) */
 async function awBuildSourcesFromDb(rows: AwLinkRow[]): Promise<UnifiedSource[]> {
   const sources: UnifiedSource[] = [];
@@ -7874,14 +7889,24 @@ async function awBuildSourcesFromDb(rows: AwLinkRow[]): Promise<UnifiedSource[]>
         const vtResult = await extractVideoDeep(row.link, row.link);
         if (vtResult && !seenUrls.has(vtResult.url)) {
           seenUrls.add(vtResult.url);
-          const directUrl = vtResult.type === "hls"
-            ? `/api/anime/hls-proxy?url=${encodeURIComponent(vtResult.url)}&ref=${encodeURIComponent(row.link)}`
-            : `/api/anime/video-proxy?url=${encodeURIComponent(vtResult.url)}&ref=${encodeURIComponent(row.link)}`;
-          sources.push({
-            name: `AnimeWitcher · ${qLabel} · VT`,
-            url: row.link, quality: q, qualityRank: qRank,
-            site: "animewitcher", directUrl, directType: vtResult.type,
-          });
+          if (vtResult.type === "hls") {
+            const hlsVariants = await awResolveHlsVariants(vtResult.url, row.link);
+            for (const variant of hlsVariants) {
+              const directUrl = `/api/anime/hls-proxy?url=${encodeURIComponent(variant.url)}&ref=${encodeURIComponent(row.link)}`;
+              sources.push({
+                name: `AnimeWitcher · ${variant.label} · VT`,
+                url: row.link, quality: variant.label, qualityRank: variant.rank,
+                site: "animewitcher", directUrl, directType: "hls",
+              });
+            }
+          } else {
+            const directUrl = `/api/anime/video-proxy?url=${encodeURIComponent(vtResult.url)}&ref=${encodeURIComponent(row.link)}`;
+            sources.push({
+              name: `AnimeWitcher · ${qLabel} · VT`,
+              url: row.link, quality: q, qualityRank: qRank,
+              site: "animewitcher", directUrl, directType: "mp4",
+            });
+          }
         }
       } catch {}
     }
@@ -8058,14 +8083,24 @@ async function getAnimeWitcherSources(
           const vtResult = await extractVideoDeep(srv.url, srv.url);
           if (vtResult && !seenUrls.has(vtResult.url)) {
             seenUrls.add(vtResult.url);
-            const directUrl = vtResult.type === "hls"
-              ? `/api/anime/hls-proxy?url=${encodeURIComponent(vtResult.url)}&ref=${encodeURIComponent(srv.url)}`
-              : `/api/anime/video-proxy?url=${encodeURIComponent(vtResult.url)}&ref=${encodeURIComponent(srv.url)}`;
-            sources.push({
-              name: `AnimeWitcher · ${qLabel} · VT`,
-              url: srv.url, quality: q, qualityRank: qRank,
-              site: "animewitcher", directUrl, directType: vtResult.type,
-            });
+            if (vtResult.type === "hls") {
+              const hlsVariants = await awResolveHlsVariants(vtResult.url, srv.url);
+              for (const variant of hlsVariants) {
+                const directUrl = `/api/anime/hls-proxy?url=${encodeURIComponent(variant.url)}&ref=${encodeURIComponent(srv.url)}`;
+                sources.push({
+                  name: `AnimeWitcher · ${variant.label} · VT`,
+                  url: srv.url, quality: variant.label, qualityRank: variant.rank,
+                  site: "animewitcher", directUrl, directType: "hls",
+                });
+              }
+            } else {
+              const directUrl = `/api/anime/video-proxy?url=${encodeURIComponent(vtResult.url)}&ref=${encodeURIComponent(srv.url)}`;
+              sources.push({
+                name: `AnimeWitcher · ${qLabel} · VT`,
+                url: srv.url, quality: q, qualityRank: qRank,
+                site: "animewitcher", directUrl, directType: "mp4",
+              });
+            }
           }
         } catch {}
       }

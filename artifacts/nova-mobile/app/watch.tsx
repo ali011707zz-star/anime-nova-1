@@ -76,7 +76,7 @@ const SITE_TAG: Record<string, string> = {
   faselhd_db: "FH",
   notorrent: "NO", sanime: "SA", anipm: "PM", anslayer: "AS",
   akwam: "AQ",
-  animekai: "AK",
+  animekai: "AK", consumet_gogo: "GO",
   anivexa_solaris_1: "RE", anivexa_solaris_2: "RE", anivexa_frost: "RE",
 };
 
@@ -93,7 +93,7 @@ const SITE_LABEL: Record<string, string> = {
   faselhd_db: "FaselHD", animetime: "AnimeTime",
   notorrent: "Notorrent", sanime: "SAnime", anipm: "AniPm", anslayer: "AnimeSlayer",
   akwam: "Akwam",
-  animekai: "AnimeKai",
+  animekai: "AnimeKai", consumet_gogo: "GogoAnime",
   anivexa_solaris_1: "Solaris-1", anivexa_solaris_2: "Solaris-2", anivexa_frost: "Frost",
 };
 function getSiteTag(site: string): string {
@@ -118,6 +118,7 @@ const SITE_DESC: Record<string, string> = {
   anslayer: "مشغلات خارجية · MixDrop/MediaFire",
   akwam: "عربي مترجم · MP4 مباشر",
   animekai: "HLS · ياباني + ترجمة",
+  consumet_gogo: "HLS · صوت خام · كل الجودات",
   anivexa_solaris_1: "Soft Sub · HLS مباشر",
   anivexa_solaris_2: "Soft Sub · HLS مباشر",
   anivexa_frost: "Soft Sub · HLS مباشر",
@@ -132,7 +133,7 @@ const BLOCKED_SOURCE_SITES = new Set([
   "hianime", "hi",
   "anivexa_anidbapp",
   "consumet_world", "consumet_reanime", "consumet_miruro", "consumet_saturn",
-  "consumet_gogo", "consumet_anikoto",
+  "consumet_anikoto",
   "reanime",
   "mkissa", "mk", "ra", "animegg", "gg", "anibd", "db",
   "2dhive", "2d", "senshi", "se", "kickassanime", "ka",
@@ -284,6 +285,7 @@ const SITE_PRIORITY: Record<string, number> = {
   kawaii: 100, animewitcher: 90,
   animeify: 85, sanime: 80,
   animekai: 79,
+  consumet_gogo: 78,
   anivexa_solaris_1: 77, anivexa_solaris_2: 76, anivexa_frost: 75,
   dulo_anim: 70, vidlink_anim: 55,
   vidfast: 35,
@@ -303,6 +305,7 @@ const STATIC_PICKER: Record<QualityKey, { site: string; name: string; tag: strin
     { site: "animeify",     name: "أنمي فاي",    tag: "AF" },
     { site: "anifox",        name: "ANIFOX",      tag: "FX" },
     { site: "animekai", name: "AnimeKai", tag: "AK" },
+    { site: "consumet_gogo", name: "GogoAnime", tag: "GO" },
     { site: "anivexa_solaris_1", name: "Solaris-1", tag: "RE" },
     { site: "anivexa_solaris_2", name: "Solaris-2", tag: "RE" },
     { site: "anivexa_frost", name: "Frost", tag: "RE" },
@@ -315,6 +318,7 @@ const STATIC_PICKER: Record<QualityKey, { site: string; name: string; tag: strin
     { site: "animeify",     name: "أنمي فاي",    tag: "AF" },
     { site: "anifox",        name: "ANIFOX",      tag: "FX" },
     { site: "animekai", name: "AnimeKai", tag: "AK" },
+    { site: "consumet_gogo", name: "GogoAnime", tag: "GO" },
     { site: "anivexa_solaris_1", name: "Solaris-1", tag: "RE" },
     { site: "anivexa_solaris_2", name: "Solaris-2", tag: "RE" },
     { site: "anivexa_frost", name: "Frost", tag: "RE" },
@@ -325,6 +329,7 @@ const STATIC_PICKER: Record<QualityKey, { site: string; name: string; tag: strin
     { site: "animeify",     name: "أنمي فاي",    tag: "AF" },
     { site: "anifox",        name: "ANIFOX",      tag: "FX" },
     { site: "animekai", name: "AnimeKai", tag: "AK" },
+    { site: "consumet_gogo", name: "GogoAnime", tag: "GO" },
     { site: "anivexa_solaris_1", name: "Solaris-1", tag: "RE" },
     { site: "anivexa_solaris_2", name: "Solaris-2", tag: "RE" },
     { site: "anivexa_frost", name: "Frost", tag: "RE" },
@@ -369,6 +374,7 @@ const SITE_TIMEOUT_MAP: Record<string, number> = {
   kawaii:       30_000,
   anineko:      45_000,
   animekai: 35_000,
+  consumet_gogo: 35_000,
   anivexa_solaris_1: 90_000, anivexa_solaris_2: 90_000, anivexa_frost: 90_000,
 };
 
