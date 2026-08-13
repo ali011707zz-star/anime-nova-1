@@ -2,6 +2,7 @@ import { encryptParam } from "./security.js";
 import { isNonOriginalVideo } from "./source-policy.js";
 import { probeHlsQuality, probeHlsVariants } from "./consumet.js";
 import { decryptReanimeEmbed } from "./reanime-stream.js";
+import { lookupAniListTitle } from "./anilist-title.js";
 
 /**
  * Anivexa is intentionally kept as a separate VPS service. This adapter only
@@ -16,7 +17,6 @@ export const ANIVEXA_SOURCES = [
   // two servers HD-1/HD-2, while older responses used the Solaris names.
   { site: "anivexa_solaris_1", provider: "reanime", tag: "RE", label: "Solaris-1", server: "Solaris-1", aliases: ["HD-1"] },
   { site: "anivexa_solaris_2", provider: "reanime", tag: "RE", label: "Solaris-2", server: "Solaris-2", aliases: ["HD-2"] },
-  { site: "anivexa_frost", provider: "reanime", tag: "RE", label: "Frost", server: "Frost", aliases: [] },
 ] as const;
 
 type AnivexaSourceSite = (typeof ANIVEXA_SOURCES)[number]["site"];
@@ -206,10 +206,13 @@ export async function getAnivexaSources(
   site: string,
   anilistId: number | undefined,
   ep: number,
+  title = "",
+  english: string | null = null,
+  titleVariants: string[] = [],
 ): Promise<NovaSource[]> {
   const provider = providerForSite(site);
   const baseUrl = anivexaBaseUrl();
-  if (!provider || !baseUrl || !anilistId || !Number.isFinite(ep) || ep < 1) {
+  if (!provider || !baseUrl || !Number.isFinite(ep) || ep < 1) {
     if (provider && !baseUrl && !warnedMissingUrl) {
       warnedMissingUrl = true;
       console.warn("[Anivexa] ANIVEXA_API_URL is not configured; Anivexa sources are disabled");
@@ -217,7 +220,13 @@ export async function getAnivexaSources(
     return [];
   }
 
-    const endpoint = `${baseUrl}/watch/${provider.provider}/${anilistId}/sub/${provider.provider}-${ep}`;
+  const titleMatch = anilistId
+    ? null
+    : await lookupAniListTitle([title, english || "", ...titleVariants]);
+  const resolvedAnilistId = anilistId || titleMatch?.id;
+  if (!resolvedAnilistId) return [];
+
+  const endpoint = `${baseUrl}/watch/${provider.provider}/${resolvedAnilistId}/sub/${provider.provider}-${ep}`;
   try {
     const response = await fetch(endpoint, {
       headers: { Accept: "application/json", "User-Agent": "Nova-Anivexa-Adapter/1.0" },

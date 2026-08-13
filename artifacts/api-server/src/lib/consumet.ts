@@ -1,5 +1,6 @@
 import { encryptParam } from "./security.js";
 import { isDubbedSearchVariant, isNonOriginalVideo } from "./source-policy.js";
+import { lookupAniListTitle } from "./anilist-title.js";
 
 /**
  * Consumet is self-hosted on the VPS. Nova consumes only the provider's
@@ -535,8 +536,16 @@ export async function getConsumetSources(
   }
 
   try {
-    const episodeId = await findEpisode(baseUrl, providerInfo.provider, title, english, ep, variants);
-    if (!episodeId) return await getAnivexaFallbackSources(site, anilistId, ep);
+    let searchVariants = variants;
+    const titleMatch = await lookupAniListTitle([title, english || "", ...variants], anilistId);
+    if (titleMatch?.titles.length) {
+      searchVariants = [...new Set([...variants, ...titleMatch.titles])].slice(0, 20);
+    }
+    const episodeId = await findEpisode(baseUrl, providerInfo.provider, title, english, ep, searchVariants);
+    if (!episodeId) {
+      console.warn(`[Consumet] ${providerInfo.provider} no episode match for "${title}" ep${ep}`);
+      return await getAnivexaFallbackSources(site, anilistId, ep);
+    }
     const watchPath = `${baseUrl}/anime/${providerInfo.provider}/watch/${encodePath(episodeId)}`;
     const watchUrl = providerInfo.provider === "gogoanime"
       ? `${watchPath}?category=sub`
@@ -551,6 +560,9 @@ export async function getConsumetSources(
       `${baseUrl}/`;
     const seen = new Set<string>();
     const sources: NovaSource[] = [];
+    if (!videos.length) {
+      console.warn(`[Consumet] ${providerInfo.provider} returned no videos for ${episodeId}`);
+    }
 
     for (const video of videos) {
       const originalUrl = typeof video?.url === "string" ? video.url.trim() : "";
@@ -608,6 +620,7 @@ export async function getConsumetSources(
         });
     }
     if (sources.length) return sources;
+    console.warn(`[Consumet] ${providerInfo.provider} returned no playable sources for ${episodeId} (${videos.length} videos)`);
     return await getAnivexaFallbackSources(site, anilistId, ep);
   } catch (error: any) {
     console.warn(`[Consumet] ${providerInfo.provider} ep${ep} failed:`, error?.message || error);
