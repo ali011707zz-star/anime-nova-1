@@ -221,6 +221,65 @@ function qualityFromHeight(height: number): { label: string; rank: number } {
 }
 
 const hlsQualityCache = new Map<string, { quality: { label: string; rank: number }; expiresAt: number }>();
+export type HlsVariant = { url: string; label: string; rank: number };
+const hlsVariantsCache = new Map<string, { variants: HlsVariant[]; expiresAt: number }>();
+
+function hlsVariantQuality(attributes: string): { label: string; rank: number } {
+  const resolution = attributes.match(/(?:^|,)RESOLUTION=\d+x(\d+)/i);
+  if (resolution) return qualityFromHeight(Number(resolution[1]));
+  const namedQuality = attributes.match(/(?:^|,)(?:NAME|VIDEO)=["']?([^,"']+)/i)?.[1] || "";
+  if (/2160|4k/i.test(namedQuality)) return qualityFromHeight(2160);
+  if (/1440/i.test(namedQuality)) return qualityFromHeight(1440);
+  if (/1080|fhd/i.test(namedQuality)) return qualityFromHeight(1080);
+  if (/720|hd/i.test(namedQuality)) return qualityFromHeight(720);
+  if (/480/i.test(namedQuality)) return qualityFromHeight(480);
+  if (/360|sd/i.test(namedQuality)) return qualityFromHeight(360);
+  return { label: "Auto", rank: 0 };
+}
+
+/**
+ * Return the real variant playlists advertised by an HLS master. This is
+ * needed by AnimeKai because one master URL otherwise gets classified as the
+ * fallback 360p row even when it contains 1080p/720p/480p variants.
+ */
+export async function probeHlsVariants(url: string, referer: string): Promise<HlsVariant[]> {
+  const cached = hlsVariantsCache.get(url);
+  if (cached && cached.expiresAt > Date.now()) return cached.variants;
+  try {
+    const response = await fetch(url, {
+      headers: {
+        Accept: "application/vnd.apple.mpegurl,application/x-mpegURL,*/*",
+        Referer: referer,
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124 Safari/537.36",
+      },
+      signal: AbortSignal.timeout(2_500),
+    });
+    if (!response.ok) return [];
+    const lines = (await response.text()).split(/\r?\n/);
+    const variants: HlsVariant[] = [];
+    const seenRanks = new Set<number>();
+    for (let index = 0; index < lines.length; index++) {
+      const line = lines[index]?.trim() || "";
+      if (!line.toUpperCase().startsWith("#EXT-X-STREAM-INF:")) continue;
+      const quality = hlsVariantQuality(line.slice(line.indexOf(":") + 1));
+      if (quality.rank <= 0 || seenRanks.has(quality.rank)) continue;
+      const variantPath = lines.slice(index + 1).find(candidate => {
+        const value = candidate.trim();
+        return Boolean(value) && !value.startsWith("#");
+      })?.trim();
+      if (!variantPath) continue;
+      let variantUrl = "";
+      try { variantUrl = new URL(variantPath, url).toString(); } catch { continue; }
+      variants.push({ url: variantUrl, label: quality.label, rank: quality.rank });
+      seenRanks.add(quality.rank);
+    }
+    variants.sort((a, b) => b.rank - a.rank);
+    hlsVariantsCache.set(url, { variants, expiresAt: Date.now() + 5 * 60_000 });
+    return variants;
+  } catch {
+    return [];
+  }
+}
 
 /**
  * Providers often label a master playlist as `auto` or `HD-1`. Read the
@@ -247,19 +306,13 @@ export async function probeHlsQuality(
     let maxHeight = 0;
     for (const match of manifest.matchAll(/#EXT-X-STREAM-INF:([^\r\n]*)/gi)) {
       const attributes = match[1] || "";
-      const resolution = attributes.match(/(?:^|,)RESOLUTION=\d+x(\d+)/i);
-      const namedQuality = attributes.match(/(?:^|,)(?:NAME|VIDEO)=["']?([^,"']+)/i)?.[1] || "";
-      const height = resolution
-        ? Number(resolution[1])
-        : /2160|4k/i.test(namedQuality)
-          ? 2160
-          : /1440/i.test(namedQuality)
-            ? 1440
-            : /1080|fhd/i.test(namedQuality)
-              ? 1080
-              : /720|hd/i.test(namedQuality)
-                ? 720
-                : 0;
+      const quality = hlsVariantQuality(attributes);
+      const height = quality.rank >= 24 ? 2160
+        : quality.rank >= 21 ? 1440
+          : quality.rank >= 18 ? 1080
+            : quality.rank >= 13 ? 720
+              : quality.rank >= 8 ? 480
+                : quality.rank > 0 ? 360 : 0;
       if (Number.isFinite(height)) maxHeight = Math.max(maxHeight, height);
     }
     const quality = qualityFromHeight(maxHeight);

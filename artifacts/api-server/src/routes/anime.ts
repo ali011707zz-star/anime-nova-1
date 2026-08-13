@@ -16,7 +16,7 @@ import {
 import { notifyNewEpisode } from "./telegram.js";
 import { encryptProxyUrl, encryptParam, decryptParam, isEncrypted } from "../lib/security.js";
 import { ANIVEXA_SOURCES, getAnivexaSources, isAnivexaSite } from "../lib/anivexa.js";
-import { CONSUMET_SOURCES, getConsumetSources, isConsumetSite, probeHlsQuality } from "../lib/consumet.js";
+import { CONSUMET_SOURCES, getConsumetSources, isConsumetSite, probeHlsQuality, probeHlsVariants } from "../lib/consumet.js";
 import { sbSelect, sbUpsert } from "../lib/supabaseClient.js";
 import pg from "pg";
 // Pool مباشر لـ translations_cache + anime_meta_ar (بدون Supabase REST)
@@ -7450,18 +7450,27 @@ async function getAnimeKaiSources(
           : `/api/anime/video-proxy?url=${encodeURIComponent(m3u8)}&ref=${encodeURIComponent(KAI_BASE + "/")}`;
         // sub/softsub = صوت ياباني + ترجمة ناعمة (خارجية) — النوع المطلوب
         const langLabel = srv.lang === "dub" ? "مدبلج" : "ياباني · ترجمة ناعمة";
-        const manifestQuality = isHls
+        const variants = isHls
+          ? await probeHlsVariants(m3u8, `${KAI_BASE}/`)
+          : [];
+        const manifestQuality = isHls && !variants.length
           ? await probeHlsQuality(m3u8, `${KAI_BASE}/`)
           : { label: "Auto", rank: 0 };
-        const quality = manifestQuality.rank > 0 ? manifestQuality.label : "Auto";
-        const qualityRank = manifestQuality.rank > 0 ? manifestQuality.rank : 0;
-        sources.push({
-          name: `AnimeKai · ${langLabel} · ${srv.name} · ${quality}`,
-          url: m3u8, quality, qualityRank,
-          site: "animekai", directUrl: proxyUrl,
-          directType: isHls ? "hls" : "mp4",
-        });
-        if (sources.length >= 4) break;
+        const playableVariants = variants.length
+          ? variants
+          : [{ url: m3u8, label: manifestQuality.rank > 0 ? manifestQuality.label : "Auto", rank: manifestQuality.rank }];
+        for (const variant of playableVariants) {
+          const variantProxyUrl = isHls
+            ? `/api/anime/hls-proxy?url=${encodeURIComponent(variant.url)}&ref=${encodeURIComponent(KAI_BASE + "/")}`
+            : proxyUrl;
+          sources.push({
+            name: `AnimeKai · ${langLabel} · ${srv.name} · ${variant.label}`,
+            url: variant.url, quality: variant.label, qualityRank: variant.rank,
+            site: "animekai", directUrl: variantProxyUrl,
+            directType: isHls ? "hls" : "mp4",
+          });
+        }
+        if (sources.length >= 8) break;
       } catch { continue; }
     }
     return sources;
@@ -12611,7 +12620,7 @@ router.get("/anime/fetch-source", async (req, res) => {
     "anikoto", "shirayuki_anikoto", "shirayuki_animix",
     "anivexa_anikoto", "anivexa_anidbapp",
     "consumet_world", "consumet_miruro", "consumet_saturn",
-    "consumet_reanime", "reanime",
+    "consumet_reanime", "consumet_gogo", "consumet_anikoto", "reanime",
     // Retired provider ids and legacy short tags. Keep these blocked so stale
     // clients/cache rows cannot resurrect the failed servers.
     "mkissa", "mk", "reanime", "ra", "animegg", "gg", "anibd", "db",

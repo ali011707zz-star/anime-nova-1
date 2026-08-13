@@ -59,7 +59,6 @@ const SUBTITLE_DISABLED_SITES = new Set([
   "animewitcher", "aw",
   "sanime", "sa",
   "anifox", "fx",
-  "consumet_gogo", "consumet_anikoto",
 ]);
 
 function subtitlesDisabledForSite(site?: string): boolean {
@@ -79,7 +78,6 @@ const SITE_TAG: Record<string, string> = {
   akwam: "AQ",
   animekai: "AK",
   anivexa_solaris_1: "RE", anivexa_solaris_2: "RE", anivexa_frost: "RE",
-  consumet_gogo: "GO", consumet_anikoto: "KO",
 };
 
 /* ── اسم عرض لكل موقع في منتقي المصادر ── */
@@ -97,7 +95,6 @@ const SITE_LABEL: Record<string, string> = {
   akwam: "Akwam",
   animekai: "AnimeKai",
   anivexa_solaris_1: "Solaris-1", anivexa_solaris_2: "Solaris-2", anivexa_frost: "Frost",
-  consumet_gogo: "Consumet · GogoAnime", consumet_anikoto: "Consumet · AniKoto",
 };
 function getSiteTag(site: string): string {
   return SITE_TAG[site] || site.slice(0, 2).toUpperCase();
@@ -124,7 +121,6 @@ const SITE_DESC: Record<string, string> = {
   anivexa_solaris_1: "Soft Sub · HLS مباشر",
   anivexa_solaris_2: "Soft Sub · HLS مباشر",
   anivexa_frost: "Soft Sub · HLS مباشر",
-  consumet_gogo: "HLS/MP4 · صوت خام", consumet_anikoto: "HLS/MP4 · صوت خام",
 };
 function getSiteDesc(site: string): string {
   return SITE_DESC[site] || "";
@@ -136,6 +132,7 @@ const BLOCKED_SOURCE_SITES = new Set([
   "hianime", "hi",
   "anivexa_anidbapp",
   "consumet_world", "consumet_reanime", "consumet_miruro", "consumet_saturn",
+  "consumet_gogo", "consumet_anikoto",
   "reanime",
   "mkissa", "mk", "ra", "animegg", "gg", "anibd", "db",
   "2dhive", "2d", "senshi", "se", "kickassanime", "ka",
@@ -288,7 +285,6 @@ const SITE_PRIORITY: Record<string, number> = {
   animeify: 85, sanime: 80,
   animekai: 79,
   anivexa_solaris_1: 77, anivexa_solaris_2: 76, anivexa_frost: 75,
-  consumet_gogo: 78, consumet_anikoto: 73,
   dulo_anim: 70, vidlink_anim: 55,
   vidfast: 35,
 };
@@ -310,8 +306,6 @@ const STATIC_PICKER: Record<QualityKey, { site: string; name: string; tag: strin
     { site: "anivexa_solaris_1", name: "Solaris-1", tag: "RE" },
     { site: "anivexa_solaris_2", name: "Solaris-2", tag: "RE" },
     { site: "anivexa_frost", name: "Frost", tag: "RE" },
-    { site: "consumet_gogo", name: "Consumet · GogoAnime", tag: "GO" },
-    { site: "consumet_anikoto", name: "Consumet · AniKoto", tag: "KO" },
   ],
   "720p": [
     { site: "anineko",      name: "AniNeko",      tag: "AN" },
@@ -324,8 +318,6 @@ const STATIC_PICKER: Record<QualityKey, { site: string; name: string; tag: strin
     { site: "anivexa_solaris_1", name: "Solaris-1", tag: "RE" },
     { site: "anivexa_solaris_2", name: "Solaris-2", tag: "RE" },
     { site: "anivexa_frost", name: "Frost", tag: "RE" },
-    { site: "consumet_gogo", name: "Consumet · GogoAnime", tag: "GO" },
-    { site: "consumet_anikoto", name: "Consumet · AniKoto", tag: "KO" },
   ],
   "480p": [
     { site: "anineko",      name: "AniNeko",      tag: "AN" },
@@ -336,8 +328,6 @@ const STATIC_PICKER: Record<QualityKey, { site: string; name: string; tag: strin
     { site: "anivexa_solaris_1", name: "Solaris-1", tag: "RE" },
     { site: "anivexa_solaris_2", name: "Solaris-2", tag: "RE" },
     { site: "anivexa_frost", name: "Frost", tag: "RE" },
-    { site: "consumet_gogo", name: "Consumet · GogoAnime", tag: "GO" },
-    { site: "consumet_anikoto", name: "Consumet · AniKoto", tag: "KO" },
   ],
 };
 
@@ -380,7 +370,6 @@ const SITE_TIMEOUT_MAP: Record<string, number> = {
   anineko:      45_000,
   animekai: 35_000,
   anivexa_solaris_1: 90_000, anivexa_solaris_2: 90_000, anivexa_frost: 90_000,
-  consumet_gogo: 32_000, consumet_anikoto: 32_000,
 };
 
 /* ── Spinning loader ── */

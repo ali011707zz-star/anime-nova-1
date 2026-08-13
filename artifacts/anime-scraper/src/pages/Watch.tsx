@@ -166,7 +166,7 @@ const BLOCKED_SOURCE_SITES = new Set([
   "hianime", "hi",
   // Removed provider ids: hide stale cached responses and old clients too.
   "anivexa_anidbapp", "consumet_world", "consumet_miruro",
-  "consumet_saturn", "consumet_reanime", "reanime",
+  "consumet_saturn", "consumet_reanime", "consumet_gogo", "consumet_anikoto", "reanime",
   "mkissa", "mk", "ra", "animegg", "gg", "anibd", "db",
   "2dhive", "2d", "senshi", "se", "kickassanime", "ka",
   "anivexa_mkissa", "anivexa_animegg", "anivexa_anibd",
@@ -199,8 +199,6 @@ const SCRAPER_DEFS: { site: string; name: string; desc: string; tag: string; ser
   { site: "anivexa_solaris_1", name: "Solaris-1",    serverLabel: "Solaris-1", desc: "RE · Soft Sub · HLS مباشر", tag: "RE" },
   { site: "anivexa_solaris_2", name: "Solaris-2",    serverLabel: "Solaris-2", desc: "RE · Soft Sub · HLS مباشر", tag: "RE" },
   { site: "anivexa_frost",     name: "Frost",        serverLabel: "Frost",     desc: "RE · Soft Sub · HLS مباشر", tag: "RE" },
-  { site: "consumet_gogo",    name: "GogoAnime",    desc: "HLS/MP4 · صوت خام", tag: "GO" },
-  { site: "consumet_anikoto", name: "AniKoto",      desc: "HLS/MP4 · صوت خام", tag: "KO" },
   // akoam: حُذف 2026-07-28 — كان يستخدم hopxBrowserExtract (browser) على كل طلب
 ];
 
@@ -223,8 +221,6 @@ const STATIC_PICKER_WEB: Record<WebQualityKey, { site: string; tag: string; serv
     { site: "anivexa_solaris_1", tag: "RE", serverLabel: "Solaris-1" },
     { site: "anivexa_solaris_2", tag: "RE", serverLabel: "Solaris-2" },
     { site: "anivexa_frost",     tag: "RE", serverLabel: "Frost" },
-    { site: "consumet_gogo", tag: "GO" },
-    { site: "consumet_anikoto", tag: "KO" },
   ],
   "720p": [
     { site: "anineko",      tag: "AN" },
@@ -237,8 +233,6 @@ const STATIC_PICKER_WEB: Record<WebQualityKey, { site: string; tag: string; serv
     { site: "anivexa_solaris_1", tag: "RE", serverLabel: "Solaris-1" },
     { site: "anivexa_solaris_2", tag: "RE", serverLabel: "Solaris-2" },
     { site: "anivexa_frost",     tag: "RE", serverLabel: "Frost" },
-    { site: "consumet_gogo", tag: "GO" },
-    { site: "consumet_anikoto", tag: "KO" },
   ],
   "480p": [
     { site: "anineko",      tag: "AN" },
@@ -249,8 +243,6 @@ const STATIC_PICKER_WEB: Record<WebQualityKey, { site: string; tag: string; serv
     { site: "anivexa_solaris_1", tag: "RE", serverLabel: "Solaris-1" },
     { site: "anivexa_solaris_2", tag: "RE", serverLabel: "Solaris-2" },
     { site: "anivexa_frost",     tag: "RE", serverLabel: "Frost" },
-    { site: "consumet_gogo", tag: "GO" },
-    { site: "consumet_anikoto", tag: "KO" },
   ],
 };
 const WEB_Q_KEYS: WebQualityKey[] = ["1080p", "720p", "480p"];
@@ -282,17 +274,13 @@ const PRIORITY_FETCH_SITES = new Set([
 const PROVIDER_WANTS_SMART_SUB = new Set([
   "animepahe",
   "anikototv", "animekai", "dulo_anim",
-  "consumet_gogo",
   "anivexa_solaris_1", "anivexa_solaris_2", "anivexa_frost",
-  "consumet_anikoto",
 ]);
 
 /* These providers are intentionally left without the generic episode subtitle
    fallback. GO/DB/KO are Japanese raw-audio streams, so they are opted into
    the smart Arabic subtitle path above instead. */
-const RAW_AUDIO_ONLY_SITES = new Set([
-  "consumet_gogo", "consumet_anikoto",
-]);
+const RAW_AUDIO_ONLY_SITES = new Set<string>();
 
 type SlotStatus = "idle" | "fetching" | "ready" | "failed";
 
@@ -3343,8 +3331,6 @@ export default function WatchPage() {
       // reanime: محذوف 2026-07-24
       // hianime: معطّل 2026-07-30
       anipm:        24000,  // backend = 20s + هامش 4s
-      consumet_gogo:    32000,
-      consumet_anikoto: 32000,
     };
     const siteTimeout = SITE_REQUEST_TIMEOUTS[site] ?? 24000;
     const ctrl = new AbortController();
