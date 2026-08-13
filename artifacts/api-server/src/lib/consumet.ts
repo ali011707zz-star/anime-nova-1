@@ -241,6 +241,7 @@ function qualityFromHeight(height: number): { label: string; rank: number } {
 const hlsQualityCache = new Map<string, { quality: { label: string; rank: number }; expiresAt: number }>();
 export type HlsVariant = { url: string; label: string; rank: number };
 const hlsVariantsCache = new Map<string, { variants: HlsVariant[]; expiresAt: number }>();
+const hlsManifestCache = new Map<string, { valid: boolean; expiresAt: number }>();
 
 function hlsVariantQuality(attributes: string): { label: string; rank: number } {
   const resolution = attributes.match(/(?:^|,)RESOLUTION=\d+x(\d+)/i);
@@ -285,7 +286,11 @@ export async function probeHlsVariants(url: string, referer: string): Promise<Hl
        signal: AbortSignal.timeout(12_000),
     });
     if (!response.ok) return [];
-    const lines = (await response.text()).split(/\r?\n/);
+    const manifest = await response.text();
+    const valid = /^\s*#EXTM3U(?:\s|$)/m.test(manifest);
+    const expiresAt = Date.now() + 5 * 60_000;
+    hlsManifestCache.set(url, { valid, expiresAt });
+    const lines = manifest.split(/\r?\n/);
     const variants: HlsVariant[] = [];
     const seenRanks = new Set<number>();
     for (let index = 0; index < lines.length; index++) {
@@ -304,10 +309,42 @@ export async function probeHlsVariants(url: string, referer: string): Promise<Hl
       seenRanks.add(quality.rank);
     }
     variants.sort((a, b) => b.rank - a.rank);
-    hlsVariantsCache.set(url, { variants, expiresAt: Date.now() + 5 * 60_000 });
+    hlsVariantsCache.set(url, { variants, expiresAt });
     return variants;
   } catch {
     return [];
+  }
+}
+
+/**
+ * Verify that an upstream URL actually returned an HLS playlist. A number of
+ * providers answer 200 with an encrypted blob or an HTML error page while
+ * still advertising an m3u8 content type. Those URLs must not become green
+ * source cards or reach hls-proxy.
+ */
+export async function probeHlsManifest(url: string, referer: string): Promise<boolean> {
+  const cached = hlsManifestCache.get(url);
+  if (cached && cached.expiresAt > Date.now()) return cached.valid;
+  try {
+    const response = await fetch(url, {
+      headers: {
+        Accept: "application/vnd.apple.mpegurl,application/x-mpegURL,*/*",
+        Referer: referer,
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124 Safari/537.36",
+      },
+      signal: AbortSignal.timeout(12_000),
+    });
+    if (!response.ok) {
+      hlsManifestCache.set(url, { valid: false, expiresAt: Date.now() + 60_000 });
+      return false;
+    }
+    const body = await response.text();
+    const valid = /^\s*#EXTM3U(?:\s|$)/m.test(body);
+    hlsManifestCache.set(url, { valid, expiresAt: Date.now() + 5 * 60_000 });
+    return valid;
+  } catch {
+    hlsManifestCache.set(url, { valid: false, expiresAt: Date.now() + 60_000 });
+    return false;
   }
 }
 

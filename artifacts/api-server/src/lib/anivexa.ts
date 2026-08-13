@@ -1,6 +1,6 @@
 import { encryptParam } from "./security.js";
 import { isNonOriginalVideo } from "./source-policy.js";
-import { probeHlsQuality, probeHlsVariants } from "./consumet.js";
+import { probeHlsManifest, probeHlsQuality, probeHlsVariants } from "./consumet.js";
 import { decryptReanimeEmbed } from "./reanime-stream.js";
 import { lookupAniListTitle } from "./anilist-title.js";
 
@@ -174,6 +174,10 @@ async function makeResolvedSources(
   },
 ): Promise<NovaSource[]> {
   if (resolved.kind === "hls") {
+    // FlixCloud currently returns HTTP 200 with an encrypted body for some
+    // RE streams. Content-Type/.m3u8 alone is not proof of a playable HLS
+    // playlist, so reject it before the source card is exposed.
+    if (!await probeHlsManifest(resolved.url, resolved.referer)) return [];
     const variants = await probeHlsVariants(resolved.url, resolved.referer);
     if (variants.length) {
       return variants.map(variant => {
