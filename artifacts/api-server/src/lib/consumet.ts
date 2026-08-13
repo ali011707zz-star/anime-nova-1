@@ -376,11 +376,17 @@ async function getAnivexaFallbackSources(
       ? stream.referer
       : stream.headers?.Referer || stream.headers?.referer || `${baseUrl}/`;
     const qualityRaw = `${stream.quality || ""} ${stream.server || ""}`.toLowerCase();
-    const quality = qualityRaw.includes("1080") || qualityRaw.includes("fhd")
+    let quality = qualityRaw.includes("1080") || qualityRaw.includes("fhd")
       ? { label: "1080p FHD", rank: 18 }
       : qualityRaw.includes("720") || qualityRaw.includes("hd")
         ? { label: "720p HD", rank: 13 }
         : { label: "Auto", rank: 0 };
+    // Provider metadata often says 720p for a master playlist. Inspect the
+    // actual HLS variants before exposing the quality in the picker.
+    if (kind === "hls") {
+      const manifestQuality = await probeHlsQuality(rawUrl, referer);
+      if (manifestQuality.rank > 0) quality = manifestQuality;
+    }
     const proxied = proxyUrl(kind, rawUrl, referer);
     seen.add(rawUrl);
     result.push({

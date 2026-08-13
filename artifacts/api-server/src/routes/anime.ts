@@ -12590,11 +12590,17 @@ router.get("/anime/fetch-source", async (req, res) => {
   // الطلبات الداخلية (x-internal:1) تتجاوز القائمة لتسمح لـ animation.ts باستدعاء moviz_time وغيره
   const DISABLED_ANIME_SOURCES = new Set([
     "anikoto", "shirayuki_anikoto", "shirayuki_animix",
-    "anivexa_anikoto",
-    "anivexa_anibd", "consumet_world", "consumet_miruro",
-    "consumet_saturn", "consumet_reanime", "reanime",
+    "anivexa_anikoto", "anivexa_anidbapp",
+    "consumet_world", "consumet_miruro", "consumet_saturn",
+    "consumet_reanime", "reanime",
   ]);
   const isInternalCall = req.headers["x-internal"] === "1";
+  // Reject retired provider ids before any provider adapter or cache lookup.
+  // This keeps old clients and stale cache rows from reintroducing them.
+  if (DISABLED_ANIME_SOURCES.has(site)) {
+    res.json({ sources: [] });
+    return;
+  }
   if (isAnivexaSite(site)) {
     const sources = await getAnivexaSources(site, anilistId, ep);
     const isMobileClient = (req.headers["x-nova-client"] || "").toString().includes("mobile");
@@ -12623,10 +12629,6 @@ router.get("/anime/fetch-source", async (req, res) => {
       };
     });
     res.json({ sources: encSources });
-    return;
-  }
-  if (DISABLED_ANIME_SOURCES.has(site)) {
-    res.json({ sources: [] });
     return;
   }
   if (ANIME_SOURCE_ALLOWLIST && !ANIME_SOURCE_ALLOWLIST.has(site) && !isInternalCall) {

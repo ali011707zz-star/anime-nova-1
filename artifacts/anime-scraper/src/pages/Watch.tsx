@@ -165,7 +165,7 @@ interface FetchedSrc {
 const BLOCKED_SOURCE_SITES = new Set([
   "hianime", "hi",
   // Removed provider ids: hide stale cached responses and old clients too.
-  "anivexa_anibd", "consumet_world", "consumet_miruro",
+  "anivexa_anidbapp", "consumet_world", "consumet_miruro",
   "consumet_saturn", "consumet_reanime", "reanime",
 ]);
 
@@ -273,7 +273,7 @@ const PROVIDER_WANTS_SMART_SUB = new Set([
    fallback. GO/DB/KO are Japanese raw-audio streams, so they are opted into
    the smart Arabic subtitle path above instead. */
 const RAW_AUDIO_ONLY_SITES = new Set([
-  "consumet_world", "consumet_miruro", "consumet_saturn",
+  "consumet_gogo", "consumet_anikoto",
 ]);
 
 type SlotStatus = "idle" | "fetching" | "ready" | "failed";
@@ -3324,9 +3324,6 @@ export default function WatchPage() {
       // hianime: معطّل 2026-07-30
       anipm:        24000,  // backend = 20s + هامش 4s
       consumet_gogo:    32000,
-      consumet_world:   32000,
-      consumet_miruro:  32000,
-      consumet_saturn:  32000,
       consumet_anikoto: 32000,
     };
     const siteTimeout = SITE_REQUEST_TIMEOUTS[site] ?? 24000;

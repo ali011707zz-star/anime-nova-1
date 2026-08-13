@@ -29,11 +29,7 @@ const DEFAULT_CONFIG = {
     aflaam:       true,
     stardima:     true,
     consumet_gogo: true,
-    consumet_world: true,
-    consumet_miruro: true,
-    consumet_saturn: true,
     consumet_anikoto: true,
-    anivexa_anibd: true,
   },
   announcements: [] as {
     id: string;

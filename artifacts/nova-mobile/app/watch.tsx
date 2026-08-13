@@ -59,9 +59,7 @@ const SUBTITLE_DISABLED_SITES = new Set([
   "animewitcher", "aw",
   "sanime", "sa",
   "anifox", "fx",
-  "consumet_gogo", "consumet_world", "consumet_reanime",
-  "consumet_miruro", "consumet_saturn", "consumet_anikoto",
-  "anivexa_anibd",
+  "consumet_gogo", "consumet_anikoto",
 ]);
 
 function subtitlesDisabledForSite(site?: string): boolean {
@@ -80,11 +78,10 @@ const SITE_TAG: Record<string, string> = {
   notorrent: "NO", sanime: "SA", anipm: "PM", anslayer: "AS",
   akwam: "AQ",
   anivexa_mkissa: "MK", anivexa_reanime: "RA",
-  anivexa_animegg: "GG", anivexa_anidbapp: "DB", anivexa_2dhive: "2D",
+  anivexa_animegg: "GG", anivexa_2dhive: "2D",
   anivexa_senshi: "SE", anivexa_kaa: "KA",
   animekai: "AK", anivexa_anibd: "BD",
-  consumet_gogo: "GO", consumet_world: "WO", consumet_reanime: "RE",
-  consumet_miruro: "MI", consumet_saturn: "ST", consumet_anikoto: "KO",
+  consumet_gogo: "GO", consumet_anikoto: "KO",
 };
 
 /* ── اسم عرض لكل موقع في منتقي المصادر ── */
@@ -102,13 +99,11 @@ const SITE_LABEL: Record<string, string> = {
   akwam: "Akwam",
   anivexa_mkissa: "MKissa", anivexa_reanime: "Reanime",
   anivexa_animegg: "AnimeGG",
-  anivexa_anidbapp: "AniDB App", anivexa_2dhive: "2dhive",
+  anivexa_2dhive: "2dhive",
   anivexa_senshi: "Senshi",
   anivexa_kaa: "Kickassanime",
   animekai: "AnimeKai", anivexa_anibd: "AniBD",
-  consumet_gogo: "Consumet · GogoAnime", consumet_world: "Consumet · AnimeWorld",
-  consumet_reanime: "Consumet · ReAnime", consumet_miruro: "Consumet · Miruro",
-  consumet_saturn: "Consumet · AnimeSaturn", consumet_anikoto: "Consumet · AniKoto",
+  consumet_gogo: "Consumet · GogoAnime", consumet_anikoto: "Consumet · AniKoto",
 };
 function getSiteTag(site: string): string {
   return SITE_TAG[site] || site.slice(0, 2).toUpperCase();
@@ -133,13 +128,11 @@ const SITE_DESC: Record<string, string> = {
   akwam: "عربي مترجم · MP4 مباشر",
   anivexa_mkissa: "HLS · صوت خام", anivexa_reanime: "HLS · صوت خام",
   anivexa_animegg: "HLS · صوت خام",
-  anivexa_anidbapp: "HLS · صوت خام", anivexa_2dhive: "HLS · صوت خام",
+  anivexa_2dhive: "HLS · صوت خام",
   anivexa_senshi: "HLS · صوت خام",
   anivexa_kaa: "HLS · صوت خام",
   animekai: "HLS · ياباني + ترجمة", anivexa_anibd: "HLS · صوت خام",
-  consumet_gogo: "HLS/MP4 · صوت خام", consumet_world: "HLS/MP4 · صوت خام",
-  consumet_reanime: "HLS/MP4 · صوت خام", consumet_miruro: "HLS/MP4 · صوت خام",
-  consumet_saturn: "HLS/MP4 · صوت خام", consumet_anikoto: "HLS/MP4 · صوت خام",
+  consumet_gogo: "HLS/MP4 · صوت خام", consumet_anikoto: "HLS/MP4 · صوت خام",
 };
 function getSiteDesc(site: string): string {
   return SITE_DESC[site] || "";
@@ -147,7 +140,12 @@ function getSiteDesc(site: string): string {
 
 /* Sources disabled by product policy. AniNeko is supported through the
    full VPS HLS proxy, so it must remain available on mobile. */
-const BLOCKED_SOURCE_SITES = new Set(["hianime", "hi", "ak"]);
+const BLOCKED_SOURCE_SITES = new Set([
+  "hianime", "hi",
+  "anivexa_anidbapp",
+  "consumet_world", "consumet_reanime", "consumet_miruro", "consumet_saturn",
+  "reanime",
+]);
 function isBlockedSource(src: Pick<Src, "site">): boolean {
   return BLOCKED_SOURCE_SITES.has(String(src.site || "").trim().toLowerCase());
 }
@@ -293,11 +291,10 @@ const SITE_PRIORITY: Record<string, number> = {
   kawaii: 100, animewitcher: 90,
   animeify: 85, sanime: 80,
   anivexa_mkissa: 88, anivexa_reanime: 87,
-  anivexa_animegg: 85, anivexa_anidbapp: 84, anivexa_2dhive: 83,
+  anivexa_animegg: 85, anivexa_2dhive: 83,
   anivexa_senshi: 81, anivexa_kaa: 80,
   animekai: 79, anivexa_anibd: 78,
-  consumet_gogo: 78, consumet_world: 77, consumet_reanime: 76,
-  consumet_miruro: 75, consumet_saturn: 74, consumet_anikoto: 73,
+  consumet_gogo: 78, consumet_anikoto: 73,
   dulo_anim: 70, vidlink_anim: 55,
   vidfast: 35,
 };
@@ -318,17 +315,12 @@ const STATIC_PICKER: Record<QualityKey, { site: string; name: string; tag: strin
     { site: "anivexa_mkissa", name: "MKissa", tag: "MK" },
     { site: "anivexa_reanime", name: "Reanime", tag: "RA" },
     { site: "anivexa_animegg", name: "AnimeGG", tag: "GG" },
-    { site: "anivexa_anidbapp", name: "AniDB App", tag: "DB" },
     { site: "anivexa_2dhive", name: "2dhive", tag: "2D" },
     { site: "anivexa_senshi", name: "Senshi", tag: "SE" },
     { site: "anivexa_kaa", name: "Kickassanime", tag: "KA" },
     { site: "animekai", name: "AnimeKai", tag: "AK" },
     { site: "anivexa_anibd", name: "AniBD", tag: "BD" },
     { site: "consumet_gogo", name: "Consumet · GogoAnime", tag: "GO" },
-    { site: "consumet_world", name: "Consumet · AnimeWorld", tag: "WO" },
-    { site: "consumet_reanime", name: "Consumet · ReAnime", tag: "RE" },
-    { site: "consumet_miruro", name: "Consumet · Miruro", tag: "MI" },
-    { site: "consumet_saturn", name: "Consumet · AnimeSaturn", tag: "ST" },
     { site: "consumet_anikoto", name: "Consumet · AniKoto", tag: "KO" },
   ],
   "720p": [
@@ -341,17 +333,12 @@ const STATIC_PICKER: Record<QualityKey, { site: string; name: string; tag: strin
     { site: "anivexa_mkissa", name: "MKissa", tag: "MK" },
     { site: "anivexa_reanime", name: "Reanime", tag: "RA" },
     { site: "anivexa_animegg", name: "AnimeGG", tag: "GG" },
-    { site: "anivexa_anidbapp", name: "AniDB App", tag: "DB" },
     { site: "anivexa_2dhive", name: "2dhive", tag: "2D" },
     { site: "anivexa_senshi", name: "Senshi", tag: "SE" },
     { site: "anivexa_kaa", name: "Kickassanime", tag: "KA" },
     { site: "animekai", name: "AnimeKai", tag: "AK" },
     { site: "anivexa_anibd", name: "AniBD", tag: "BD" },
     { site: "consumet_gogo", name: "Consumet · GogoAnime", tag: "GO" },
-    { site: "consumet_world", name: "Consumet · AnimeWorld", tag: "WO" },
-    { site: "consumet_reanime", name: "Consumet · ReAnime", tag: "RE" },
-    { site: "consumet_miruro", name: "Consumet · Miruro", tag: "MI" },
-    { site: "consumet_saturn", name: "Consumet · AnimeSaturn", tag: "ST" },
     { site: "consumet_anikoto", name: "Consumet · AniKoto", tag: "KO" },
   ],
   "480p": [
@@ -362,17 +349,12 @@ const STATIC_PICKER: Record<QualityKey, { site: string; name: string; tag: strin
     { site: "anivexa_mkissa", name: "MKissa", tag: "MK" },
     { site: "anivexa_reanime", name: "Reanime", tag: "RA" },
     { site: "anivexa_animegg", name: "AnimeGG", tag: "GG" },
-    { site: "anivexa_anidbapp", name: "AniDB App", tag: "DB" },
     { site: "anivexa_2dhive", name: "2dhive", tag: "2D" },
     { site: "anivexa_senshi", name: "Senshi", tag: "SE" },
     { site: "anivexa_kaa", name: "Kickassanime", tag: "KA" },
     { site: "animekai", name: "AnimeKai", tag: "AK" },
     { site: "anivexa_anibd", name: "AniBD", tag: "BD" },
     { site: "consumet_gogo", name: "Consumet · GogoAnime", tag: "GO" },
-    { site: "consumet_world", name: "Consumet · AnimeWorld", tag: "WO" },
-    { site: "consumet_reanime", name: "Consumet · ReAnime", tag: "RE" },
-    { site: "consumet_miruro", name: "Consumet · Miruro", tag: "MI" },
-    { site: "consumet_saturn", name: "Consumet · AnimeSaturn", tag: "ST" },
     { site: "consumet_anikoto", name: "Consumet · AniKoto", tag: "KO" },
   ],
 };
@@ -416,12 +398,10 @@ const SITE_TIMEOUT_MAP: Record<string, number> = {
   anineko:      45_000,
   anivexa_mkissa:  32_000, anivexa_reanime: 32_000,
   anivexa_animegg: 32_000,
-  anivexa_anidbapp: 32_000, anivexa_2dhive: 32_000,
+  anivexa_2dhive: 32_000,
   anivexa_senshi: 32_000, anivexa_kaa: 32_000,
   animekai: 35_000, anivexa_anibd: 32_000,
-  consumet_gogo: 32_000, consumet_world: 32_000,
-  consumet_reanime: 32_000, consumet_miruro: 32_000,
-  consumet_saturn: 32_000, consumet_anikoto: 32_000,
+  consumet_gogo: 32_000, consumet_anikoto: 32_000,
 };
 
 /* ── Spinning loader ── */
