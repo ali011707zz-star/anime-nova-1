@@ -159,9 +159,19 @@ function streamKind(stream: AnivexaStream, url: string): "hls" | "mp4" | null {
   return null;
 }
 
-function novaProxyUrl(kind: "hls" | "mp4", rawUrl: string, referer: string): string {
+function novaProxyUrl(
+  kind: "hls" | "mp4",
+  rawUrl: string,
+  referer: string,
+  manifestKey = "",
+): string {
   const route = kind === "hls" ? "hls-proxy" : "video-proxy";
-  return `/api/anime/${route}?url=${encodeURIComponent(encryptParam(rawUrl))}&ref=${encodeURIComponent(encryptParam(referer))}`;
+  const params = new URLSearchParams({
+    url: encryptParam(rawUrl),
+    ref: encryptParam(referer),
+  });
+  if (kind === "hls" && manifestKey) params.set("mk", encryptParam(manifestKey));
+  return `/api/anime/${route}?${params.toString()}`;
 }
 
 async function makeResolvedSources(
@@ -171,17 +181,23 @@ async function makeResolvedSources(
     kind: "hls" | "mp4";
     referer: string;
     qualityHint?: { label: string; rank: number };
+    manifestKey?: string;
   },
 ): Promise<NovaSource[]> {
   if (resolved.kind === "hls") {
     // FlixCloud currently returns HTTP 200 with an encrypted body for some
     // RE streams. Content-Type/.m3u8 alone is not proof of a playable HLS
     // playlist, so reject it before the source card is exposed.
-    if (!await probeHlsManifest(resolved.url, resolved.referer)) return [];
-    const variants = await probeHlsVariants(resolved.url, resolved.referer);
+    if (!await probeHlsManifest(resolved.url, resolved.referer, resolved.manifestKey)) return [];
+    const variants = await probeHlsVariants(resolved.url, resolved.referer, resolved.manifestKey);
     if (variants.length) {
       return variants.map(variant => {
-        const directUrl = novaProxyUrl("hls", variant.url, resolved.referer);
+        const directUrl = novaProxyUrl(
+          "hls",
+          variant.url,
+          resolved.referer,
+          resolved.manifestKey,
+        );
         return {
           name: `${provider.tag} · ${provider.label} · ${variant.label}`,
           url: directUrl,
@@ -202,10 +218,19 @@ async function makeResolvedSources(
   // encoded quality, so keep that hint before falling back to "Auto".
   let quality = resolved.qualityHint || qualityInfo({ server: `${provider.server} ${resolved.url}` });
   if (resolved.kind === "hls") {
-    const manifestQuality = await probeHlsQuality(resolved.url, resolved.referer);
+    const manifestQuality = await probeHlsQuality(
+      resolved.url,
+      resolved.referer,
+      resolved.manifestKey,
+    );
     if (manifestQuality.rank > quality.rank) quality = manifestQuality;
   }
-  const directUrl = novaProxyUrl(resolved.kind, resolved.url, resolved.referer);
+  const directUrl = novaProxyUrl(
+    resolved.kind,
+    resolved.url,
+    resolved.referer,
+    resolved.manifestKey,
+  );
   return [{
     name: `${provider.tag} · ${provider.label} · ${quality.label}`,
     url: directUrl,
@@ -228,6 +253,7 @@ async function fetchReanimeServer(
   kind: "hls" | "mp4";
   referer: string;
   qualityHint: { label: string; rank: number };
+  manifestKey?: string;
 } | null> {
   const rawEmbed = server.embed || server.dataLink || server.link;
   const embed = typeof rawEmbed === "string"
@@ -253,6 +279,7 @@ async function fetchReanimeServer(
     kind,
     referer: streamReferer(decrypted.url),
     qualityHint: qualityInfo({ server: server.name || server.type || "" }),
+    manifestKey: decrypted.manifestKey,
   };
 }
 
@@ -350,6 +377,7 @@ export async function getAnivexaSources(
       kind: "hls" | "mp4";
       referer: string;
       qualityHint?: { label: string; rank: number };
+      manifestKey?: string;
     }> = [];
     const addDirectCandidate = (stream: AnivexaStream, rawValue: string, fallbackServer = "") => {
       const rawUrl = resolveUpstreamUrl(baseUrl, rawValue.trim());
@@ -399,9 +427,16 @@ export async function getAnivexaSources(
       matchingServers.slice(0, 6).map(server => fetchReanimeServer(baseUrl, server)),
     );
     for (const result of resolvedEmbeds) {
-      if (result.status === "fulfilled" && result.value &&
-          !candidates.some(candidate => candidate.url === result.value!.url)) {
-        candidates.push(result.value);
+      if (result.status === "fulfilled" && result.value) {
+        const existingIndex = candidates.findIndex(candidate => candidate.url === result.value!.url);
+        if (existingIndex < 0) {
+          candidates.push(result.value);
+        } else if (!candidates[existingIndex].manifestKey && result.value.manifestKey) {
+          // The Anivexa response also exposes stream_url, but it omits the
+          // per-embed manifest key. Prefer the embed-derived candidate when
+          // both point at the same HLS URL.
+          candidates[existingIndex] = result.value;
+        }
       }
     }
 

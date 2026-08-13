@@ -16,7 +16,14 @@ import {
 import { notifyNewEpisode } from "./telegram.js";
 import { encryptProxyUrl, encryptParam, decryptParam, isEncrypted } from "../lib/security.js";
 import { ANIVEXA_SOURCES, getAnivexaSources, isAnivexaSite } from "../lib/anivexa.js";
-import { CONSUMET_SOURCES, getConsumetSources, isConsumetSite, probeHlsQuality, probeHlsVariants } from "../lib/consumet.js";
+import {
+  CONSUMET_SOURCES,
+  decodeEncryptedHlsPlaylist,
+  getConsumetSources,
+  isConsumetSite,
+  probeHlsQuality,
+  probeHlsVariants,
+} from "../lib/consumet.js";
 import { sbSelect, sbUpsert } from "../lib/supabaseClient.js";
 import pg from "pg";
 // Pool مباشر لـ translations_cache + anime_meta_ar (بدون Supabase REST)
@@ -12428,6 +12435,7 @@ router.get("/anime/sources-stream", async (req, res) => {
       "xpass_anim",                     // XPass token ~8min
       "anineko", "anikoto",             // vibeplayer.site tokens expire in ~1-2h
       "kawaii",                         // cdn.momentoai.dev signed URLs (md5+expires) — نتجنب الـ cache القديم الذي يحتوي proxy URLs لا تعمل
+      "anivexa_re",                     // RE/FlixCloud manifest URLs rotate and old rows may lack the manifest key
     ]);
 
     // ── مساعد: كاشط بـ cache + extractAndCollect ──
@@ -12711,6 +12719,7 @@ router.get("/anime/fetch-source", async (req, res) => {
     "animekai",             // embed/CDN links are signed and short-lived
     "animewitcher", "animeify",                    // Streamtape/MediaFire ~45min
     "kawaii", "anifox",                             // signed CDN/download URLs
+      "anivexa_re",                                  // RE/FlixCloud signed manifests
     "moviebox", "moviebox_anim",                   // &t= signed URLs ~10min
     "vidlink_encdec", "vidlink_anim",              // stormvv URLs ~45min
     "xpass_anim",                                  // XPass token ~8min
@@ -12720,6 +12729,7 @@ router.get("/anime/fetch-source", async (req, res) => {
   const FORCE_LIVE_FETCH_SITES = new Set([
     "shirayuki_anikoto",
     "shirayuki_animix",
+    "anivexa_re",
     // Kawaii links are episode-specific signed URLs and the catalog changes
     // while an episode is still being added. Always ask Kawaii for a fresh URL.
     "kawaii",
@@ -14816,10 +14826,24 @@ function toVpsSegProxy(absUrl: string, ref: string): string {
   return `${NOVA_PUBLIC_URL}/api/anime/seg-proxy?url=${encryptParam(absUrl)}&ref=${encryptParam(ref || absUrl)}`;
 }
 
+function toVpsHlsProxy(absUrl: string, ref: string, manifestKey = ""): string {
+  const params = new URLSearchParams({
+    url: encryptParam(absUrl),
+    ref: encryptParam(ref || absUrl),
+  });
+  if (manifestKey) params.set("mk", encryptParam(manifestKey));
+  return `${NOVA_PUBLIC_URL}/api/anime/hls-proxy?${params.toString()}`;
+}
+
 // ── إعادة كتابة M3U8 بروابط مطلقة عبر VPS seg-proxy ─────────────────────────
 // يستخدم السياق (EXT-X-STREAM-INF) لتحديد هل السطر playlist أم segment
 // جميع الروابط مطلقة (https://...) لضمان صحة تفسير ExoPlayer
-function rewriteM3u8ForVPS(manifest: string, baseUrl: string, ref: string): string {
+function rewriteM3u8ForVPS(
+  manifest: string,
+  baseUrl: string,
+  ref: string,
+  manifestKey = "",
+): string {
   const lines = manifest.split("\n");
   const out: string[] = [];
   let nextIsPlaylist = false;
@@ -14839,7 +14863,7 @@ function rewriteM3u8ForVPS(manifest: string, baseUrl: string, ref: string): stri
         const abs = toAbsoluteUrl(uri, baseUrl);
         // EXT-X-MEDIA قد تشير لـ playlist (صوت/ترجمة بديلة)
         if (t.startsWith("#EXT-X-MEDIA") && /\.m3u8/i.test(uri)) {
-          return `URI="${NOVA_PUBLIC_URL}/api/anime/hls-proxy?url=${encryptParam(abs)}&ref=${encryptParam(ref || abs)}"`;
+          return `URI="${toVpsHlsProxy(abs, ref, manifestKey)}"`;
         }
         return `URI="${toVpsSegProxy(abs, ref)}"`;
       });
@@ -14851,7 +14875,7 @@ function rewriteM3u8ForVPS(manifest: string, baseUrl: string, ref: string): stri
     // سطر URL: variant playlist أو segment
     const abs = toAbsoluteUrl(t, baseUrl);
     if (nextIsPlaylist || /\.m3u8(\?|#|$)/i.test(t)) {
-      out.push(`${NOVA_PUBLIC_URL}/api/anime/hls-proxy?url=${encryptParam(abs)}&ref=${encryptParam(ref || abs)}`);
+      out.push(toVpsHlsProxy(abs, ref, manifestKey));
     } else {
       out.push(toVpsSegProxy(abs, ref));
     }
@@ -14899,6 +14923,7 @@ function isValidMp4File(filePath: string): boolean {
 // الروابط في الـ manifest مطلقة (https://...) — ExoPlayer لا يُخطئ تفسيرها
 async function serveHlsVPS(
   url: string, ref: string,
+  manifestKey: string,
   res: import("express").Response,
 ): Promise<void> {
   const hdrs: Record<string, string> = { ...BASE_HDRS, Accept: "*/*" };
@@ -14907,7 +14932,7 @@ async function serveHlsVPS(
   // مساعد: إرسال manifest مُعاد كتابته للعميل
   function sendManifest(body: string): void {
     if (res.headersSent) return;
-    const rewritten = rewriteM3u8ForVPS(body, url, ref);
+    const rewritten = rewriteM3u8ForVPS(body, url, ref, manifestKey);
     res.setHeader("Content-Type", "application/vnd.apple.mpegurl");
     res.setHeader("Access-Control-Allow-Origin", "*");
     res.setHeader("Cache-Control", "no-cache");
@@ -14924,7 +14949,7 @@ async function serveHlsVPS(
       try {
         const r = await fetch(url, { headers: hdrs, signal: AbortSignal.timeout(8000) });
         if (r.ok) {
-          const body = await r.text();
+          const body = decodeEncryptedHlsPlaylist(await r.text(), manifestKey);
           if (isValidManifest(body)) return body;
           console.warn(`[hls-proxy] invalid manifest host=${safeHost(url)} status=${r.status} bytes=${body.length}`);
         } else {
@@ -14948,7 +14973,7 @@ async function serveHlsVPS(
     try {
       const r = await fetchViaHopx(url, ref, 12000);
       if (!r) return null;
-      const body = await r.text();
+      const body = decodeEncryptedHlsPlaylist(await r.text(), manifestKey);
       return isValidManifest(body) ? body : null;
     } catch { return null; }
   };
@@ -15043,18 +15068,20 @@ async function serveMediaVPS(
 router.get("/anime/hls-proxy", async (req, res) => {
   const rawUrl = (req.query.url as string || "").trim();
   let ref      = (req.query.ref as string || "").trim();
+  let manifestKey = (req.query.mk as string || "").trim();
   if (!rawUrl) { res.status(400).send("url required"); return; }
   let url: string;
   try { url = decodeURIComponent(rawUrl); } catch { url = rawUrl; }
   if (isEncrypted(url)) url = decryptParam(url);
   if (ref && isEncrypted(ref)) ref = decryptParam(ref);
+  if (manifestKey && isEncrypted(manifestKey)) manifestKey = decryptParam(manifestKey);
   if (!url.startsWith("http")) { res.status(400).send("invalid url"); return; }
 
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Headers", "Range, Content-Type");
   res.setHeader("Access-Control-Expose-Headers", "Accept-Ranges, Content-Length, Content-Range, Content-Type");
 
-  await serveHlsVPS(url, ref, res);
+  await serveHlsVPS(url, ref, manifestKey, res);
 });
 
 // ── video-proxy: VPS يبث الفيديو مع Referer الصحيح ─────────────────────────

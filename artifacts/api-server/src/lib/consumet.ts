@@ -297,7 +297,8 @@ function hlsVariantQuality(attributes: string): { label: string; rank: number } 
  * fallback 360p row even when it contains 1080p/720p/480p variants.
  */
 export async function probeHlsVariants(url: string, referer: string, manifestKey?: string): Promise<HlsVariant[]> {
-  const cached = hlsVariantsCache.get(url);
+  const cacheId = `${url}\n${manifestKey || ""}`;
+  const cached = hlsVariantsCache.get(cacheId);
   if (cached && cached.expiresAt > Date.now()) return cached.variants;
   try {
     const response = await fetch(url, {
@@ -314,7 +315,7 @@ export async function probeHlsVariants(url: string, referer: string, manifestKey
     const manifest = decodeEncryptedHlsPlaylist(await response.text(), manifestKey);
     const valid = /^\s*#EXTM3U(?:\s|$)/m.test(manifest);
     const expiresAt = Date.now() + 5 * 60_000;
-    hlsManifestCache.set(url, { valid, expiresAt });
+    hlsManifestCache.set(cacheId, { valid, expiresAt });
     const lines = manifest.split(/\r?\n/);
     const variants: HlsVariant[] = [];
     const seenRanks = new Set<number>();
@@ -334,7 +335,7 @@ export async function probeHlsVariants(url: string, referer: string, manifestKey
       seenRanks.add(quality.rank);
     }
     variants.sort((a, b) => b.rank - a.rank);
-    hlsVariantsCache.set(url, { variants, expiresAt });
+    hlsVariantsCache.set(cacheId, { variants, expiresAt });
     return variants;
   } catch {
     return [];
@@ -348,7 +349,8 @@ export async function probeHlsVariants(url: string, referer: string, manifestKey
  * source cards or reach hls-proxy.
  */
 export async function probeHlsManifest(url: string, referer: string, manifestKey?: string): Promise<boolean> {
-  const cached = hlsManifestCache.get(url);
+  const cacheId = `${url}\n${manifestKey || ""}`;
+  const cached = hlsManifestCache.get(cacheId);
   if (cached && cached.expiresAt > Date.now()) return cached.valid;
   try {
     const response = await fetch(url, {
@@ -360,15 +362,15 @@ export async function probeHlsManifest(url: string, referer: string, manifestKey
       signal: AbortSignal.timeout(12_000),
     });
     if (!response.ok) {
-      hlsManifestCache.set(url, { valid: false, expiresAt: Date.now() + 60_000 });
+      hlsManifestCache.set(cacheId, { valid: false, expiresAt: Date.now() + 60_000 });
       return false;
     }
     const body = decodeEncryptedHlsPlaylist(await response.text(), manifestKey);
     const valid = /^\s*#EXTM3U(?:\s|$)/m.test(body);
-    hlsManifestCache.set(url, { valid, expiresAt: Date.now() + 5 * 60_000 });
+    hlsManifestCache.set(cacheId, { valid, expiresAt: Date.now() + 5 * 60_000 });
     return valid;
   } catch {
-    hlsManifestCache.set(url, { valid: false, expiresAt: Date.now() + 60_000 });
+    hlsManifestCache.set(cacheId, { valid: false, expiresAt: Date.now() + 60_000 });
     return false;
   }
 }
@@ -383,7 +385,8 @@ export async function probeHlsQuality(
   referer: string,
   manifestKey?: string,
 ): Promise<{ label: string; rank: number }> {
-  const cached = hlsQualityCache.get(url);
+  const cacheId = `${url}\n${manifestKey || ""}`;
+  const cached = hlsQualityCache.get(cacheId);
   if (cached && cached.expiresAt > Date.now()) return cached.quality;
   try {
     const response = await fetch(url, {
@@ -409,7 +412,7 @@ export async function probeHlsQuality(
       if (Number.isFinite(height)) maxHeight = Math.max(maxHeight, height);
     }
     const quality = qualityFromHeight(maxHeight);
-    hlsQualityCache.set(url, { quality, expiresAt: Date.now() + 5 * 60_000 });
+    hlsQualityCache.set(cacheId, { quality, expiresAt: Date.now() + 5 * 60_000 });
     return quality;
   } catch {
     return { label: "Auto", rank: 0 };
