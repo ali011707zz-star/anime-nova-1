@@ -166,7 +166,12 @@ function novaProxyUrl(kind: "hls" | "mp4", rawUrl: string, referer: string): str
 
 async function makeResolvedSources(
   provider: (typeof ANIVEXA_SOURCES)[number],
-  resolved: { url: string; kind: "hls" | "mp4"; referer: string },
+  resolved: {
+    url: string;
+    kind: "hls" | "mp4";
+    referer: string;
+    qualityHint?: { label: string; rank: number };
+  },
 ): Promise<NovaSource[]> {
   if (resolved.kind === "hls") {
     const variants = await probeHlsVariants(resolved.url, resolved.referer);
@@ -191,7 +196,7 @@ async function makeResolvedSources(
 
   // A few RE manifests are media playlists whose URL itself carries the
   // encoded quality, so keep that hint before falling back to "Auto".
-  let quality = qualityInfo({ server: `${provider.server} ${resolved.url}` });
+  let quality = resolved.qualityHint || qualityInfo({ server: `${provider.server} ${resolved.url}` });
   if (resolved.kind === "hls") {
     const manifestQuality = await probeHlsQuality(resolved.url, resolved.referer);
     if (manifestQuality.rank > quality.rank) quality = manifestQuality;
@@ -214,7 +219,12 @@ async function makeResolvedSources(
 async function fetchReanimeServer(
   baseUrl: string,
   server: AnivexaServer,
-): Promise<{ url: string; kind: "hls" | "mp4"; referer: string } | null> {
+): Promise<{
+  url: string;
+  kind: "hls" | "mp4";
+  referer: string;
+  qualityHint: { label: string; rank: number };
+} | null> {
   const rawEmbed = server.embed || server.dataLink || server.link;
   const embed = typeof rawEmbed === "string"
     ? resolveUpstreamUrl(baseUrl, rawEmbed.trim())
@@ -234,7 +244,12 @@ async function fetchReanimeServer(
   const decrypted = await decryptReanimeEmbed(await response.text());
   const lower = decrypted.url.toLowerCase();
   const kind = /\.(mp4|webm)(?:[?#]|$)/i.test(lower) ? "mp4" : "hls";
-  return { url: decrypted.url, kind, referer: streamReferer(decrypted.url) };
+  return {
+    url: decrypted.url,
+    kind,
+    referer: streamReferer(decrypted.url),
+    qualityHint: qualityInfo({ server: server.name || server.type || "" }),
+  };
 }
 
 /**
@@ -326,15 +341,25 @@ export async function getAnivexaSources(
     // a fallback. The old adapter ignored stream_url and only tried one
     // encrypted embed, which made RE appear red even when the API had a
     // playable stream and also discarded the second server.
-    const candidates: Array<{ url: string; kind: "hls" | "mp4"; referer: string }> = [];
+    const candidates: Array<{
+      url: string;
+      kind: "hls" | "mp4";
+      referer: string;
+      qualityHint?: { label: string; rank: number };
+    }> = [];
     const addDirectCandidate = (stream: AnivexaStream, rawValue: string, fallbackServer = "") => {
       const rawUrl = resolveUpstreamUrl(baseUrl, rawValue.trim());
       if (!rawUrl || isNonOriginalVideo(stream as Record<string, unknown>, rawUrl)) return;
       const kind = streamKind(stream, rawUrl);
       if (!kind) return;
+      const streamType = String(stream.type || "").toLowerCase();
+      // Anivexa exposes a local redirect helper alongside the real FlixCloud
+      // URL. It is not a media playlist and must never be sent to hls-proxy.
+      if (streamType.includes("redirect") && rawUrl.includes("/stream/")) return;
       const referer = streamReferer(rawUrl, stream.referer, stream.headers);
+      const qualityHint = qualityInfo({ quality: stream.quality, server: stream.server || fallbackServer });
       if (!candidates.some(candidate => candidate.url === rawUrl)) {
-        candidates.push({ url: rawUrl, kind, referer });
+        candidates.push({ url: rawUrl, kind, referer, qualityHint });
       }
     };
 

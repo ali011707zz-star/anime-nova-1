@@ -166,7 +166,7 @@ const BLOCKED_SOURCE_SITES = new Set([
   "hianime", "hi",
   // Removed provider ids: hide stale cached responses and old clients too.
   "anivexa_anidbapp", "consumet_world", "consumet_miruro",
-  "consumet_saturn", "consumet_reanime", "consumet_gogo", "consumet_anikoto", "reanime",
+  "consumet_saturn", "consumet_reanime", "consumet_anikoto", "reanime",
   "mkissa", "mk", "ra", "animegg", "gg", "anibd", "db",
   "2dhive", "2d", "senshi", "se", "kickassanime", "ka",
   "anivexa_mkissa", "anivexa_animegg", "anivexa_anibd",
@@ -196,6 +196,7 @@ const SCRAPER_DEFS: { site: string; name: string; desc: string; tag: string; ser
   { site: "sanime",           name: "سـAnime",       desc: "عربي · MP4 مباشر",        tag: "SA", isArabic: true },
   { site: "anifox",           name: "ANIFOX",        desc: "Archive · MediaFire · MP4Upload · Uqload", tag: "FX", isArabic: true },
   { site: "animekai",         name: "AnimeKai",      desc: "HLS · ياباني + ترجمة",                    tag: "AK" },
+  { site: "consumet_gogo",   name: "GogoAnime",     desc: "HLS · صوت خام · كل الجودات",              tag: "GO" },
   { site: "anivexa_re",        name: "RE",            desc: "Soft Sub · HLS مباشر · متعدد الجودات", tag: "RE" },
   // akoam: حُذف 2026-07-28 — كان يستخدم hopxBrowserExtract (browser) على كل طلب
 ];
@@ -216,6 +217,7 @@ const STATIC_PICKER_WEB: Record<WebQualityKey, { site: string; tag: string; serv
     { site: "animeify",     tag: "AF" },
     { site: "anifox",       tag: "FX" },
     { site: "animekai",     tag: "AK" },
+    { site: "consumet_gogo",    tag: "GO" },
     { site: "anivexa_re",        tag: "RE" },
   ],
   "720p": [
@@ -226,6 +228,7 @@ const STATIC_PICKER_WEB: Record<WebQualityKey, { site: string; tag: string; serv
     { site: "animeify",     tag: "AF" },
     { site: "anifox",       tag: "FX" },
     { site: "animekai",     tag: "AK" },
+    { site: "consumet_gogo",    tag: "GO" },
     { site: "anivexa_re",        tag: "RE" },
   ],
   "480p": [
@@ -234,6 +237,7 @@ const STATIC_PICKER_WEB: Record<WebQualityKey, { site: string; tag: string; serv
     { site: "animeify",     tag: "AF" },
     { site: "anifox",       tag: "FX" },
     { site: "animekai",     tag: "AK" },
+    { site: "consumet_gogo",    tag: "GO" },
     { site: "anivexa_re",        tag: "RE" },
   ],
 };
@@ -3325,6 +3329,7 @@ export default function WatchPage() {
       // hianime: معطّل 2026-07-30
       anipm:        24000,  // backend = 20s + هامش 4s
       anivexa_re:   50000,  // backend = 26s + manifest/embed fallback probes
+      consumet_gogo: 50000, // search + episode info + Megaplay HLS extraction
     };
     const siteTimeout = SITE_REQUEST_TIMEOUTS[site] ?? 24000;
     const ctrl = new AbortController();

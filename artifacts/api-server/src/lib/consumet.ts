@@ -15,7 +15,9 @@ type ConsumetProvider = {
 
 // No Consumet provider is currently approved for production. Keep the
 // adapter typed so stale clients can still be rejected cleanly by the route.
-export const CONSUMET_SOURCES: readonly ConsumetProvider[] = [];
+export const CONSUMET_SOURCES: readonly ConsumetProvider[] = [
+  { site: "consumet_gogo", provider: "gogoanime", label: "GogoAnime" },
+];
 
 type ConsumetSite = (typeof CONSUMET_SOURCES)[number]["site"];
 
@@ -145,10 +147,20 @@ async function resolveGogoPlayer(
       },
     );
     if (!sourceResponse.ok) return null;
-    const sourcePayload = await sourceResponse.json() as { sources?: { file?: unknown } };
-    const mediaUrl = typeof sourcePayload.sources?.file === "string"
-      ? sourcePayload.sources.file.trim()
-      : "";
+    const sourcePayload = await sourceResponse.json() as {
+      file?: unknown;
+      url?: unknown;
+      sources?: { file?: unknown; url?: unknown } | Array<{ file?: unknown; url?: unknown }>;
+    };
+    const sourceEntries = Array.isArray(sourcePayload.sources)
+      ? sourcePayload.sources
+      : sourcePayload.sources ? [sourcePayload.sources] : [];
+    const mediaValue = sourceEntries.find(entry =>
+      typeof entry.file === "string" || typeof entry.url === "string"
+    );
+    const mediaUrl = String(
+      mediaValue?.file ?? mediaValue?.url ?? sourcePayload.file ?? sourcePayload.url ?? "",
+    ).trim();
     if (!/^https?:\/\/.+\.m3u8(?:[?#]|$)/i.test(mediaUrl)) return null;
     return { url: mediaUrl, referer: "https://megaplay.buzz/" };
   } catch {

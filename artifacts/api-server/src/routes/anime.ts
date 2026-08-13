@@ -12654,7 +12654,7 @@ router.get("/anime/fetch-source", async (req, res) => {
     "anikoto", "shirayuki_anikoto", "shirayuki_animix",
     "anivexa_anikoto", "anivexa_anidbapp",
     "consumet_world", "consumet_miruro", "consumet_saturn",
-    "consumet_reanime", "consumet_gogo", "consumet_anikoto", "reanime",
+    "consumet_reanime", "consumet_anikoto", "reanime",
     // Retired provider ids and legacy short tags. Keep these blocked so stale
     // clients/cache rows cannot resurrect the failed servers.
     "mkissa", "mk", "reanime", "ra", "animegg", "gg", "anibd", "db",
