@@ -197,9 +197,7 @@ const SCRAPER_DEFS: { site: string; name: string; desc: string; tag: string; ser
   { site: "anifox",           name: "ANIFOX",        desc: "Archive · MediaFire · MP4Upload · Uqload", tag: "FX", isArabic: true },
   { site: "animekai",         name: "AnimeKai",      desc: "HLS · ياباني + ترجمة",                    tag: "AK" },
   { site: "consumet_gogo",    name: "GogoAnime",     desc: "HLS · صوت خام · كل الجودات",              tag: "GO" },
-  { site: "anivexa_solaris_1", name: "Solaris-1",    serverLabel: "Solaris-1", desc: "RE · Soft Sub · HLS مباشر", tag: "RE" },
-  { site: "anivexa_solaris_2", name: "Solaris-2",    serverLabel: "Solaris-2", desc: "RE · Soft Sub · HLS مباشر", tag: "RE" },
-  { site: "anivexa_frost",     name: "Frost",        serverLabel: "Frost",     desc: "RE · Soft Sub · HLS مباشر", tag: "RE" },
+  { site: "anivexa_re",        name: "RE",            desc: "Soft Sub · HLS مباشر · متعدد الجودات", tag: "RE" },
   // akoam: حُذف 2026-07-28 — كان يستخدم hopxBrowserExtract (browser) على كل طلب
 ];
 
@@ -220,9 +218,7 @@ const STATIC_PICKER_WEB: Record<WebQualityKey, { site: string; tag: string; serv
     { site: "anifox",       tag: "FX" },
     { site: "animekai",     tag: "AK" },
     { site: "consumet_gogo", tag: "GO" },
-    { site: "anivexa_solaris_1", tag: "RE", serverLabel: "Solaris-1" },
-    { site: "anivexa_solaris_2", tag: "RE", serverLabel: "Solaris-2" },
-    { site: "anivexa_frost",     tag: "RE", serverLabel: "Frost" },
+    { site: "anivexa_re",        tag: "RE" },
   ],
   "720p": [
     { site: "anineko",      tag: "AN" },
@@ -233,9 +229,7 @@ const STATIC_PICKER_WEB: Record<WebQualityKey, { site: string; tag: string; serv
     { site: "anifox",       tag: "FX" },
     { site: "animekai",     tag: "AK" },
     { site: "consumet_gogo", tag: "GO" },
-    { site: "anivexa_solaris_1", tag: "RE", serverLabel: "Solaris-1" },
-    { site: "anivexa_solaris_2", tag: "RE", serverLabel: "Solaris-2" },
-    { site: "anivexa_frost",     tag: "RE", serverLabel: "Frost" },
+    { site: "anivexa_re",        tag: "RE" },
   ],
   "480p": [
     { site: "anineko",      tag: "AN" },
@@ -244,9 +238,7 @@ const STATIC_PICKER_WEB: Record<WebQualityKey, { site: string; tag: string; serv
     { site: "anifox",       tag: "FX" },
     { site: "animekai",     tag: "AK" },
     { site: "consumet_gogo", tag: "GO" },
-    { site: "anivexa_solaris_1", tag: "RE", serverLabel: "Solaris-1" },
-    { site: "anivexa_solaris_2", tag: "RE", serverLabel: "Solaris-2" },
-    { site: "anivexa_frost",     tag: "RE", serverLabel: "Frost" },
+    { site: "anivexa_re",        tag: "RE" },
   ],
 };
 const WEB_Q_KEYS: WebQualityKey[] = ["1080p", "720p", "480p"];
@@ -278,7 +270,7 @@ const PRIORITY_FETCH_SITES = new Set([
 const PROVIDER_WANTS_SMART_SUB = new Set([
   "animepahe",
   "anikototv", "animekai", "consumet_gogo", "dulo_anim",
-  "anivexa_solaris_1", "anivexa_solaris_2", "anivexa_frost",
+  "anivexa_re",
 ]);
 
 /* These providers are intentionally left without the generic episode subtitle
@@ -3337,6 +3329,7 @@ export default function WatchPage() {
       // reanime: محذوف 2026-07-24
       // hianime: معطّل 2026-07-30
       anipm:        24000,  // backend = 20s + هامش 4s
+      anivexa_re:   50000,  // backend = 26s + manifest/embed fallback probes
     };
     const siteTimeout = SITE_REQUEST_TIMEOUTS[site] ?? 24000;
     const ctrl = new AbortController();

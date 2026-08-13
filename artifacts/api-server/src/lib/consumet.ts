@@ -252,7 +252,9 @@ export async function probeHlsVariants(url: string, referer: string): Promise<Hl
         Referer: referer,
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124 Safari/537.36",
       },
-      signal: AbortSignal.timeout(2_500),
+      // Reanime/Anivexa signed manifests can take a few seconds on the VPS.
+      // A short probe timeout made a healthy master fall back to Auto/360.
+      signal: AbortSignal.timeout(7_000),
     });
     if (!response.ok) return [];
     const lines = (await response.text()).split(/\r?\n/);
@@ -299,7 +301,7 @@ export async function probeHlsQuality(
         Referer: referer,
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124 Safari/537.36",
       },
-      signal: AbortSignal.timeout(2_500),
+      signal: AbortSignal.timeout(5_000),
     });
     if (!response.ok) return { label: "Auto", rank: 0 };
     const manifest = await response.text();

@@ -13,10 +13,14 @@ import { lookupAniListTitle } from "./anilist-title.js";
  * so Nova can overlay Kawaii's Arabic subtitle independently.
  */
 export const ANIVEXA_SOURCES = [
+  // Aggregate source used by the clients. The provider adapter resolves all
+  // original Reanime soft-sub servers and the picker groups their variants
+  // into one RE row per quality.
+  { site: "anivexa_re", provider: "reanime", tag: "RE", label: "RE", server: "", aliases: [], aggregate: true },
   // RE is the original provider name. The current Anivexa API calls these
   // two servers HD-1/HD-2, while older responses used the Solaris names.
-  { site: "anivexa_solaris_1", provider: "reanime", tag: "RE", label: "Solaris-1", server: "Solaris-1", aliases: ["HD-1"] },
-  { site: "anivexa_solaris_2", provider: "reanime", tag: "RE", label: "Solaris-2", server: "Solaris-2", aliases: ["HD-2"] },
+  { site: "anivexa_solaris_1", provider: "reanime", tag: "RE", label: "Solaris-1", server: "Solaris-1", aliases: ["HD-1"], aggregate: false },
+  { site: "anivexa_solaris_2", provider: "reanime", tag: "RE", label: "Solaris-2", server: "Solaris-2", aliases: ["HD-2"], aggregate: false },
 ] as const;
 
 type AnivexaSourceSite = (typeof ANIVEXA_SOURCES)[number]["site"];
@@ -47,6 +51,10 @@ type AnivexaServer = {
 };
 
 type AnivexaPayload = {
+  stream_url?: string;
+  server?: string;
+  referer?: string;
+  headers?: Record<string, string>;
   streams?: AnivexaStream[];
   allServers?: AnivexaServer[];
 };
@@ -83,6 +91,13 @@ function qualityInfo(stream: AnivexaStream): { label: string; rank: number } {
   if (raw.includes("720") || raw.includes("hd")) return { label: "720p HD", rank: 13 };
   if (raw.includes("480")) return { label: "480p", rank: 8 };
   if (raw.includes("360") || raw.includes("sd")) return { label: "360p SD", rank: 5 };
+  // Reanime's current API names its original servers HD-1/HD-2. Older
+  // Anivexa responses renamed those same servers Solaris-1/Solaris-2.
+  // Treating them as Auto makes the frontend put a working HLS source in
+  // the 360p bucket when the manifest probe is temporarily unavailable.
+  if (/\bhd[-_ ]?[12]\b|\bsolaris[-_ ]?[12]\b/i.test(raw)) {
+    return { label: "720p HD", rank: 13 };
+  }
   return { label: "Auto", rank: 0 };
 }
 
@@ -235,41 +250,76 @@ export async function getAnivexaSources(
     if (!response.ok) return [];
 
     const payload = await response.json() as AnivexaPayload;
-    const serverNames = [provider.server, ...provider.aliases].map(normalizeServerName);
+    const serverNames = [provider.server, ...provider.aliases]
+      .filter(Boolean)
+      .map(normalizeServerName);
     const allServers = Array.isArray(payload.allServers) ? payload.allServers : [];
-    const matchingServer = allServers.find(server =>
-      serverNames.includes(normalizeServerName(server.name))
-      && !/hard.?sub|hardsub|dub/i.test(`${server.name || ""} ${server.type || ""}`),
-    );
+    const matchingServers = allServers.filter(server => {
+      const name = normalizeServerName(server.name);
+      const isSoftSub = !/hard.?sub|hardsub|dub/i.test(`${server.name || ""} ${server.type || ""}`);
+      return isSoftSub && (provider.aggregate || serverNames.includes(name));
+    });
 
-    // Anivexa's Reanime endpoint returns one already-decrypted stream plus
-    // the remaining server embeds. Resolve the requested Soft Sub embed here
-    // so Nova receives a native HLS/MP4 source, not an iframe that the player
-    // cannot use reliably on mobile.
-    if (matchingServer) {
-      const resolved = await fetchReanimeServer(baseUrl, matchingServer);
-      if (!resolved) return [];
+    // The current Anivexa contract exposes the already-decrypted primary
+    // stream as `stream_url`. Prefer it, then resolve every soft-sub embed as
+    // a fallback. The old adapter ignored stream_url and only tried one
+    // encrypted embed, which made RE appear red even when the API had a
+    // playable stream and also discarded the second server.
+    const candidates: Array<{ url: string; kind: "hls" | "mp4"; referer: string }> = [];
+    const addDirectCandidate = (stream: AnivexaStream, rawValue: string, fallbackServer = "") => {
+      const rawUrl = resolveUpstreamUrl(baseUrl, rawValue.trim());
+      if (!rawUrl || isNonOriginalVideo(stream as Record<string, unknown>, rawUrl)) return;
+      const kind = streamKind(stream, rawUrl);
+      if (!kind) return;
+      const referer =
+        (typeof stream.referer === "string" && stream.referer.trim()) ||
+        stream.headers?.Referer ||
+        stream.headers?.referer ||
+        (fallbackServer ? REANIME_REFERER : REANIME_REFERER);
+      if (!candidates.some(candidate => candidate.url === rawUrl)) {
+        candidates.push({ url: rawUrl, kind, referer });
+      }
+    };
 
-      return await makeResolvedSources(provider, resolved);
+    if (typeof payload.stream_url === "string" && payload.stream_url.trim()) {
+      addDirectCandidate(
+        { url: payload.stream_url, type: "hls", server: payload.server || provider.server },
+        payload.stream_url,
+        payload.server || provider.server,
+      );
     }
 
-    // Keep a safe fallback for older Anivexa deployments that do not expose
-    // allServers yet. It only accepts an explicitly direct stream belonging
-    // to the requested server; unnamed streams are never mislabeled.
     const directFallback = (Array.isArray(payload.streams) ? payload.streams : [])
-      .find(stream =>
-        serverNames.includes(normalizeServerName(stream.server))
-        && typeof stream.url === "string"
-        && !isNonOriginalVideo(stream as Record<string, unknown>, stream.url),
+      .filter(stream =>
+        typeof stream.url === "string" &&
+        (!stream.server || provider.aggregate || serverNames.includes(normalizeServerName(stream.server))) &&
+        !isNonOriginalVideo(stream as Record<string, unknown>, stream.url),
       );
-    if (!directFallback?.url) return [];
-    const rawUrl = resolveUpstreamUrl(baseUrl, directFallback.url.trim());
-    const kind = streamKind(directFallback, rawUrl);
-    if (!rawUrl || !kind) return [];
-    const referer = typeof directFallback.referer === "string" && directFallback.referer
-      ? directFallback.referer
-      : REANIME_REFERER;
-    return await makeResolvedSources(provider, { url: rawUrl, kind, referer });
+    for (const stream of directFallback) {
+      if (stream.url) addDirectCandidate(stream, stream.url, stream.server || provider.server);
+    }
+
+    const resolvedEmbeds = await Promise.allSettled(
+      matchingServers.slice(0, 6).map(server => fetchReanimeServer(baseUrl, server)),
+    );
+    for (const result of resolvedEmbeds) {
+      if (result.status === "fulfilled" && result.value &&
+          !candidates.some(candidate => candidate.url === result.value!.url)) {
+        candidates.push(result.value);
+      }
+    }
+
+    if (!candidates.length) return [];
+    const sources: NovaSource[] = [];
+    for (const candidate of candidates) {
+      const resolved = await makeResolvedSources(provider, candidate);
+      for (const source of resolved) {
+        if (!sources.some(existing => existing.directUrl === source.directUrl)) {
+          sources.push(source);
+        }
+      }
+    }
+    return sources;
   } catch (error: any) {
     console.warn(`[Anivexa] ${provider.provider} ep${ep} failed:`, error?.message || error);
     return [];
