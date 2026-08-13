@@ -192,6 +192,9 @@ const SCRAPER_DEFS: { site: string; name: string; desc: string; tag: string; aud
   { site: "sanime",           name: "سـAnime",       desc: "عربي · MP4 مباشر",        tag: "SA", isArabic: true },
   { site: "anifox",           name: "ANIFOX",        desc: "Archive · MediaFire · MP4Upload · Uqload", tag: "FX", isArabic: true },
   { site: "animekai",         name: "AnimeKai",      desc: "HLS · ياباني + ترجمة",                    tag: "AK" },
+  { site: "anivexa_solaris_1", name: "Solaris-1",    desc: "Soft Sub · HLS مباشر",                    tag: "S1" },
+  { site: "anivexa_solaris_2", name: "Solaris-2",    desc: "Soft Sub · HLS مباشر",                    tag: "S2" },
+  { site: "anivexa_frost",     name: "Frost",        desc: "Soft Sub · HLS مباشر",                    tag: "FR" },
   { site: "consumet_gogo",    name: "GogoAnime",    desc: "HLS/MP4 · صوت خام", tag: "GO" },
   { site: "consumet_anikoto", name: "AniKoto",      desc: "HLS/MP4 · صوت خام", tag: "KO" },
   // akoam: حُذف 2026-07-28 — كان يستخدم hopxBrowserExtract (browser) على كل طلب
@@ -213,6 +216,9 @@ const STATIC_PICKER_WEB: Record<WebQualityKey, { site: string; tag: string }[]> 
     { site: "animeify",     tag: "AF" },
     { site: "anifox",       tag: "FX" },
     { site: "animekai",     tag: "AK" },
+    { site: "anivexa_solaris_1", tag: "S1" },
+    { site: "anivexa_solaris_2", tag: "S2" },
+    { site: "anivexa_frost",     tag: "FR" },
     { site: "consumet_gogo", tag: "GO" },
     { site: "consumet_anikoto", tag: "KO" },
   ],
@@ -224,6 +230,9 @@ const STATIC_PICKER_WEB: Record<WebQualityKey, { site: string; tag: string }[]> 
     { site: "animeify",     tag: "AF" },
     { site: "anifox",       tag: "FX" },
     { site: "animekai",     tag: "AK" },
+    { site: "anivexa_solaris_1", tag: "S1" },
+    { site: "anivexa_solaris_2", tag: "S2" },
+    { site: "anivexa_frost",     tag: "FR" },
     { site: "consumet_gogo", tag: "GO" },
     { site: "consumet_anikoto", tag: "KO" },
   ],
@@ -233,6 +242,9 @@ const STATIC_PICKER_WEB: Record<WebQualityKey, { site: string; tag: string }[]> 
     { site: "animeify",     tag: "AF" },
     { site: "anifox",       tag: "FX" },
     { site: "animekai",     tag: "AK" },
+    { site: "anivexa_solaris_1", tag: "S1" },
+    { site: "anivexa_solaris_2", tag: "S2" },
+    { site: "anivexa_frost",     tag: "FR" },
     { site: "consumet_gogo", tag: "GO" },
     { site: "consumet_anikoto", tag: "KO" },
   ],
@@ -266,7 +278,9 @@ const PRIORITY_FETCH_SITES = new Set([
 const PROVIDER_WANTS_SMART_SUB = new Set([
   "animepahe",
   "anikototv", "animekai", "dulo_anim",
-  "consumet_gogo", "anivexa_anibd", "consumet_anikoto",
+  "consumet_gogo",
+  "anivexa_solaris_1", "anivexa_solaris_2", "anivexa_frost",
+  "consumet_anikoto",
 ]);
 
 /* These providers are intentionally left without the generic episode subtitle
