@@ -167,18 +167,22 @@ const BLOCKED_SOURCE_SITES = new Set([
   // Removed provider ids: hide stale cached responses and old clients too.
   "anivexa_anidbapp", "consumet_world", "consumet_miruro",
   "consumet_saturn", "consumet_reanime", "reanime",
+  "mkissa", "mk", "ra", "animegg", "gg", "anibd", "db",
+  "2dhive", "2d", "senshi", "se", "kickassanime", "ka",
+  "anivexa_mkissa", "anivexa_animegg", "anivexa_anibd",
+  "anivexa_2dhive", "anivexa_senshi", "anivexa_kickassanime",
 ]);
 
 /* ── All known scrapers — shown immediately in picker ── */
-// ── تقييد مؤقت (بطلب المستخدم 2026-07-13): إبقاء 7 مصادر فقط — الباقي مُعطَّل
+// ── قائمة المصادر المعتمدة فقط — المصادر الفاشلة لا تُعاد إلى المنتقي
 //    من الباك-إند أيضاً (ANIME_SOURCE_ALLOWLIST في anime.ts). القائمة الأصلية
 //    الكاملة محفوظة أعلاه في تاريخ Git — لإعادة أي مصدر أضِفه هنا وفي الباك-إند معاً.
-const SCRAPER_DEFS: { site: string; name: string; desc: string; tag: string; audioLang?: "en"; isArabic?: true }[] = [
+const SCRAPER_DEFS: { site: string; name: string; desc: string; tag: string; serverLabel?: string; audioLang?: "en"; isArabic?: true }[] = [
   { site: "kawaii",       name: "كواي أنمي",    desc: "1080p · مباشر",            tag: "KW" },
   { site: "anineko",      name: "AniNeko",       desc: "HLS · متعدد الجودات",       tag: "AN" },
   // hianime: معطّل بطلب المستخدم 2026-07-30 — تفوّت حلقات
   { site: "animewitcher", name: "AnimeWitcher",   desc: "PD/ST · مباشر",           tag: "AW", isArabic: true },
-  // reanime: محذوف بطلب المستخدم 2026-07-24
+  // direct Reanime was retired; RE below is the approved Anivexa/Reanime adapter
   { site: "anslayer",     name: "أنمي سلاير",    desc: "مشغلات خارجية · MixDrop/MediaFire", tag: "AS", isArabic: true },
   { site: "animeify",     name: "أنمي فاي",     desc: "عربي · ميغا",             tag: "AF", isArabic: true },
   // anipub: معطّل بطلب المستخدم 2026-07-27
@@ -192,9 +196,9 @@ const SCRAPER_DEFS: { site: string; name: string; desc: string; tag: string; aud
   { site: "sanime",           name: "سـAnime",       desc: "عربي · MP4 مباشر",        tag: "SA", isArabic: true },
   { site: "anifox",           name: "ANIFOX",        desc: "Archive · MediaFire · MP4Upload · Uqload", tag: "FX", isArabic: true },
   { site: "animekai",         name: "AnimeKai",      desc: "HLS · ياباني + ترجمة",                    tag: "AK" },
-  { site: "anivexa_solaris_1", name: "Solaris-1",    desc: "Soft Sub · HLS مباشر",                    tag: "S1" },
-  { site: "anivexa_solaris_2", name: "Solaris-2",    desc: "Soft Sub · HLS مباشر",                    tag: "S2" },
-  { site: "anivexa_frost",     name: "Frost",        desc: "Soft Sub · HLS مباشر",                    tag: "FR" },
+  { site: "anivexa_solaris_1", name: "Solaris-1",    serverLabel: "Solaris-1", desc: "RE · Soft Sub · HLS مباشر", tag: "RE" },
+  { site: "anivexa_solaris_2", name: "Solaris-2",    serverLabel: "Solaris-2", desc: "RE · Soft Sub · HLS مباشر", tag: "RE" },
+  { site: "anivexa_frost",     name: "Frost",        serverLabel: "Frost",     desc: "RE · Soft Sub · HLS مباشر", tag: "RE" },
   { site: "consumet_gogo",    name: "GogoAnime",    desc: "HLS/MP4 · صوت خام", tag: "GO" },
   { site: "consumet_anikoto", name: "AniKoto",      desc: "HLS/MP4 · صوت خام", tag: "KO" },
   // akoam: حُذف 2026-07-28 — كان يستخدم hopxBrowserExtract (browser) على كل طلب
@@ -206,7 +210,7 @@ const ARABIC_SITES = new Set(SCRAPER_DEFS.filter(d => d.isArabic).map(d => d.sit
 /* ── Static picker للويب: جودات مكدّسة + صفوف مصادر (تصميم Aniyomi) ── */
 type WebQualityKey = "1080p" | "720p" | "480p";
 /* KW (kawaii) يوفر 1080p فقط — لا يُعرض في 720p/480p لتجنب الإيهام بأنه متاح بجودات أخرى */
-const STATIC_PICKER_WEB: Record<WebQualityKey, { site: string; tag: string }[]> = {
+const STATIC_PICKER_WEB: Record<WebQualityKey, { site: string; tag: string; serverLabel?: string }[]> = {
   "1080p": [
     { site: "kawaii",       tag: "KW" },
     { site: "anineko",      tag: "AN" },
@@ -216,9 +220,9 @@ const STATIC_PICKER_WEB: Record<WebQualityKey, { site: string; tag: string }[]> 
     { site: "animeify",     tag: "AF" },
     { site: "anifox",       tag: "FX" },
     { site: "animekai",     tag: "AK" },
-    { site: "anivexa_solaris_1", tag: "S1" },
-    { site: "anivexa_solaris_2", tag: "S2" },
-    { site: "anivexa_frost",     tag: "FR" },
+    { site: "anivexa_solaris_1", tag: "RE", serverLabel: "Solaris-1" },
+    { site: "anivexa_solaris_2", tag: "RE", serverLabel: "Solaris-2" },
+    { site: "anivexa_frost",     tag: "RE", serverLabel: "Frost" },
     { site: "consumet_gogo", tag: "GO" },
     { site: "consumet_anikoto", tag: "KO" },
   ],
@@ -230,9 +234,9 @@ const STATIC_PICKER_WEB: Record<WebQualityKey, { site: string; tag: string }[]> 
     { site: "animeify",     tag: "AF" },
     { site: "anifox",       tag: "FX" },
     { site: "animekai",     tag: "AK" },
-    { site: "anivexa_solaris_1", tag: "S1" },
-    { site: "anivexa_solaris_2", tag: "S2" },
-    { site: "anivexa_frost",     tag: "FR" },
+    { site: "anivexa_solaris_1", tag: "RE", serverLabel: "Solaris-1" },
+    { site: "anivexa_solaris_2", tag: "RE", serverLabel: "Solaris-2" },
+    { site: "anivexa_frost",     tag: "RE", serverLabel: "Frost" },
     { site: "consumet_gogo", tag: "GO" },
     { site: "consumet_anikoto", tag: "KO" },
   ],
@@ -242,9 +246,9 @@ const STATIC_PICKER_WEB: Record<WebQualityKey, { site: string; tag: string }[]> 
     { site: "animeify",     tag: "AF" },
     { site: "anifox",       tag: "FX" },
     { site: "animekai",     tag: "AK" },
-    { site: "anivexa_solaris_1", tag: "S1" },
-    { site: "anivexa_solaris_2", tag: "S2" },
-    { site: "anivexa_frost",     tag: "FR" },
+    { site: "anivexa_solaris_1", tag: "RE", serverLabel: "Solaris-1" },
+    { site: "anivexa_solaris_2", tag: "RE", serverLabel: "Solaris-2" },
+    { site: "anivexa_frost",     tag: "RE", serverLabel: "Frost" },
     { site: "consumet_gogo", tag: "GO" },
     { site: "consumet_anikoto", tag: "KO" },
   ],
@@ -1458,7 +1462,9 @@ function ScraperPicker({
                         textAlign: "right", direction: "rtl", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
                       }}>
                         السيرفر{" "}
-                        <span style={{ fontFamily: "monospace", direction: "ltr", display: "inline-block" }}>{slot.tag}</span>
+                         <span style={{ fontFamily: "monospace", direction: "ltr", display: "inline-block" }}>
+                           {slot.tag}{slot.serverLabel ? ` · ${slot.serverLabel}` : ""}
+                         </span>
                       </span>
                       {/* Action button */}
                       {isReady

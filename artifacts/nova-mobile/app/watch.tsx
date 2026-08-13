@@ -78,7 +78,7 @@ const SITE_TAG: Record<string, string> = {
   notorrent: "NO", sanime: "SA", anipm: "PM", anslayer: "AS",
   akwam: "AQ",
   animekai: "AK",
-  anivexa_solaris_1: "S1", anivexa_solaris_2: "S2", anivexa_frost: "FR",
+  anivexa_solaris_1: "RE", anivexa_solaris_2: "RE", anivexa_frost: "RE",
   consumet_gogo: "GO", consumet_anikoto: "KO",
 };
 
@@ -137,6 +137,10 @@ const BLOCKED_SOURCE_SITES = new Set([
   "anivexa_anidbapp",
   "consumet_world", "consumet_reanime", "consumet_miruro", "consumet_saturn",
   "reanime",
+  "mkissa", "mk", "ra", "animegg", "gg", "anibd", "db",
+  "2dhive", "2d", "senshi", "se", "kickassanime", "ka",
+  "anivexa_mkissa", "anivexa_animegg", "anivexa_anibd",
+  "anivexa_2dhive", "anivexa_senshi", "anivexa_kickassanime",
 ]);
 function isBlockedSource(src: Pick<Src, "site">): boolean {
   return BLOCKED_SOURCE_SITES.has(String(src.site || "").trim().toLowerCase());
@@ -303,9 +307,9 @@ const STATIC_PICKER: Record<QualityKey, { site: string; name: string; tag: strin
     { site: "animeify",     name: "أنمي فاي",    tag: "AF" },
     { site: "anifox",        name: "ANIFOX",      tag: "FX" },
     { site: "animekai", name: "AnimeKai", tag: "AK" },
-    { site: "anivexa_solaris_1", name: "Solaris-1", tag: "S1" },
-    { site: "anivexa_solaris_2", name: "Solaris-2", tag: "S2" },
-    { site: "anivexa_frost", name: "Frost", tag: "FR" },
+    { site: "anivexa_solaris_1", name: "Solaris-1", tag: "RE" },
+    { site: "anivexa_solaris_2", name: "Solaris-2", tag: "RE" },
+    { site: "anivexa_frost", name: "Frost", tag: "RE" },
     { site: "consumet_gogo", name: "Consumet · GogoAnime", tag: "GO" },
     { site: "consumet_anikoto", name: "Consumet · AniKoto", tag: "KO" },
   ],
@@ -317,9 +321,9 @@ const STATIC_PICKER: Record<QualityKey, { site: string; name: string; tag: strin
     { site: "animeify",     name: "أنمي فاي",    tag: "AF" },
     { site: "anifox",        name: "ANIFOX",      tag: "FX" },
     { site: "animekai", name: "AnimeKai", tag: "AK" },
-    { site: "anivexa_solaris_1", name: "Solaris-1", tag: "S1" },
-    { site: "anivexa_solaris_2", name: "Solaris-2", tag: "S2" },
-    { site: "anivexa_frost", name: "Frost", tag: "FR" },
+    { site: "anivexa_solaris_1", name: "Solaris-1", tag: "RE" },
+    { site: "anivexa_solaris_2", name: "Solaris-2", tag: "RE" },
+    { site: "anivexa_frost", name: "Frost", tag: "RE" },
     { site: "consumet_gogo", name: "Consumet · GogoAnime", tag: "GO" },
     { site: "consumet_anikoto", name: "Consumet · AniKoto", tag: "KO" },
   ],
@@ -329,9 +333,9 @@ const STATIC_PICKER: Record<QualityKey, { site: string; name: string; tag: strin
     { site: "animeify",     name: "أنمي فاي",    tag: "AF" },
     { site: "anifox",        name: "ANIFOX",      tag: "FX" },
     { site: "animekai", name: "AnimeKai", tag: "AK" },
-    { site: "anivexa_solaris_1", name: "Solaris-1", tag: "S1" },
-    { site: "anivexa_solaris_2", name: "Solaris-2", tag: "S2" },
-    { site: "anivexa_frost", name: "Frost", tag: "FR" },
+    { site: "anivexa_solaris_1", name: "Solaris-1", tag: "RE" },
+    { site: "anivexa_solaris_2", name: "Solaris-2", tag: "RE" },
+    { site: "anivexa_frost", name: "Frost", tag: "RE" },
     { site: "consumet_gogo", name: "Consumet · GogoAnime", tag: "GO" },
     { site: "consumet_anikoto", name: "Consumet · AniKoto", tag: "KO" },
   ],
@@ -1310,7 +1314,7 @@ export default function WatchScreen() {
                         ]}
                         numberOfLines={1}
                       >
-                        السيرفر {slot.tag}
+                         السيرفر {slot.tag}{slot.site.startsWith("anivexa_") ? ` · ${slot.name}` : ""}
                       </Text>
 
                       {/* Status only; the download action sits beside اختيار. */}

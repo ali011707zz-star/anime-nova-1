@@ -12,9 +12,9 @@ import { decryptReanimeEmbed } from "./reanime-stream.js";
  * so Nova can overlay Kawaii's Arabic subtitle independently.
  */
 export const ANIVEXA_SOURCES = [
-  { site: "anivexa_solaris_1", provider: "reanime", label: "Solaris-1", server: "Solaris-1" },
-  { site: "anivexa_solaris_2", provider: "reanime", label: "Solaris-2", server: "Solaris-2" },
-  { site: "anivexa_frost", provider: "reanime", label: "Frost", server: "Frost" },
+  { site: "anivexa_solaris_1", provider: "reanime", tag: "RE", label: "Solaris-1", server: "Solaris-1" },
+  { site: "anivexa_solaris_2", provider: "reanime", tag: "RE", label: "Solaris-2", server: "Solaris-2" },
+  { site: "anivexa_frost", provider: "reanime", tag: "RE", label: "Frost", server: "Frost" },
 ] as const;
 
 type AnivexaSourceSite = (typeof ANIVEXA_SOURCES)[number]["site"];
@@ -201,7 +201,7 @@ export async function getAnivexaSources(
       }
       const directUrl = novaProxyUrl(resolved.kind, resolved.url, resolved.referer);
       return [{
-        name: `${provider.label} · ${quality.label}`,
+        name: `${provider.tag} · ${provider.label} · ${quality.label}`,
         url: directUrl,
         quality: quality.label,
         qualityRank: quality.rank,
@@ -233,7 +233,7 @@ export async function getAnivexaSources(
     const quality = qualityInfo(directFallback);
     const directUrl = novaProxyUrl(kind, rawUrl, referer);
     return [{
-      name: `${provider.label} · ${quality.label}`,
+      name: `${provider.tag} · ${provider.label} · ${quality.label}`,
       url: directUrl,
       quality: quality.label,
       qualityRank: quality.rank,

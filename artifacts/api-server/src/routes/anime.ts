@@ -12486,7 +12486,7 @@ router.get("/anime/sources-stream", async (req, res) => {
       // animepahe: mirurotvapi + owocdn AES-128 HLS — 18ث timeout — ثقيل
       scrapeCached("anipm",        () => getAniPmSources(title, english, ep, anilistId),        false, 20000),
       scrapeCached("anizone",      () => getAniZoneSources(title, english, ep),                 false, 18000),
-      scrapeCached("2dhive",       () => get2DhiveSources(title, english, ep),                  true,  20000),
+      // 2dhive (2D): removed with the failed provider set shown in the client.
       scrapeCached("animewitcher", () => getAnimeWitcherSources(title, english, ep, anilistId, titleVariants), false, 38000),
       // ── مدبلج عربي/كرتون (WordPress REST) ───────────────────────────
       scrapeCached("stardima",     () => getStardimaSources(title, english, ep, isMovie),      false, 20000),
@@ -12612,6 +12612,12 @@ router.get("/anime/fetch-source", async (req, res) => {
     "anivexa_anikoto", "anivexa_anidbapp",
     "consumet_world", "consumet_miruro", "consumet_saturn",
     "consumet_reanime", "reanime",
+    // Retired provider ids and legacy short tags. Keep these blocked so stale
+    // clients/cache rows cannot resurrect the failed servers.
+    "mkissa", "mk", "reanime", "ra", "animegg", "gg", "anibd", "db",
+    "2dhive", "2d", "senshi", "se", "kickassanime", "ka",
+    "anivexa_mkissa", "anivexa_animegg", "anivexa_anibd",
+    "anivexa_2dhive", "anivexa_senshi", "anivexa_kickassanime",
   ]);
   const isInternalCall = req.headers["x-internal"] === "1";
   // Reject retired provider ids before any provider adapter or cache lookup.
