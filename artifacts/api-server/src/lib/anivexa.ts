@@ -15,7 +15,6 @@ import { probeHlsQuality } from "./consumet.js";
 // AniBD returns a live HLS stream for the `sub` route; provider tracks are
 // intentionally ignored so Nova can apply its own subtitle policy.
 export const ANIVEXA_SOURCES = [
-  { site: "anivexa_anibd", provider: "anibd", label: "AniBD" },
 ] as const;
 
 type AnivexaSourceSite = (typeof ANIVEXA_SOURCES)[number]["site"];

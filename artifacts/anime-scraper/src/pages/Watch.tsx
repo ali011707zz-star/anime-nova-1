@@ -162,7 +162,12 @@ interface FetchedSrc {
 }
 
 /* Only sources explicitly disabled by product policy remain hidden. */
-const BLOCKED_SOURCE_SITES = new Set(["hianime", "hi", "ak"]);
+const BLOCKED_SOURCE_SITES = new Set([
+  "hianime", "hi",
+  // Removed provider ids: hide stale cached responses and old clients too.
+  "anivexa_anibd", "consumet_world", "consumet_miruro",
+  "consumet_saturn", "consumet_reanime", "reanime",
+]);
 
 /* ── All known scrapers — shown immediately in picker ── */
 // ── تقييد مؤقت (بطلب المستخدم 2026-07-13): إبقاء 7 مصادر فقط — الباقي مُعطَّل
@@ -187,11 +192,7 @@ const SCRAPER_DEFS: { site: string; name: string; desc: string; tag: string; aud
   { site: "sanime",           name: "سـAnime",       desc: "عربي · MP4 مباشر",        tag: "SA", isArabic: true },
   { site: "anifox",           name: "ANIFOX",        desc: "Archive · MediaFire · MP4Upload · Uqload", tag: "FX", isArabic: true },
   { site: "animekai",         name: "AnimeKai",      desc: "HLS · ياباني + ترجمة",                    tag: "AK" },
-  { site: "anivexa_anibd",    name: "AniBD",         desc: "HLS · صوت خام",                           tag: "BD" },
   { site: "consumet_gogo",    name: "GogoAnime",    desc: "HLS/MP4 · صوت خام", tag: "GO" },
-  { site: "consumet_world",   name: "AnimeWorld",   desc: "HLS/MP4 · صوت خام", tag: "WO" },
-  { site: "consumet_miruro",  name: "Miruro",       desc: "HLS/MP4 · صوت خام", tag: "MI" },
-  { site: "consumet_saturn",  name: "AnimeSaturn",  desc: "HLS/MP4 · صوت خام", tag: "ST" },
   { site: "consumet_anikoto", name: "AniKoto",      desc: "HLS/MP4 · صوت خام", tag: "KO" },
   // akoam: حُذف 2026-07-28 — كان يستخدم hopxBrowserExtract (browser) على كل طلب
 ];
@@ -212,11 +213,7 @@ const STATIC_PICKER_WEB: Record<WebQualityKey, { site: string; tag: string }[]> 
     { site: "animeify",     tag: "AF" },
     { site: "anifox",       tag: "FX" },
     { site: "animekai",     tag: "AK" },
-    { site: "anivexa_anibd", tag: "BD" },
     { site: "consumet_gogo", tag: "GO" },
-    { site: "consumet_world", tag: "WO" },
-    { site: "consumet_miruro", tag: "MI" },
-    { site: "consumet_saturn", tag: "ST" },
     { site: "consumet_anikoto", tag: "KO" },
   ],
   "720p": [
@@ -227,11 +224,7 @@ const STATIC_PICKER_WEB: Record<WebQualityKey, { site: string; tag: string }[]> 
     { site: "animeify",     tag: "AF" },
     { site: "anifox",       tag: "FX" },
     { site: "animekai",     tag: "AK" },
-    { site: "anivexa_anibd", tag: "BD" },
     { site: "consumet_gogo", tag: "GO" },
-    { site: "consumet_world", tag: "WO" },
-    { site: "consumet_miruro", tag: "MI" },
-    { site: "consumet_saturn", tag: "ST" },
     { site: "consumet_anikoto", tag: "KO" },
   ],
   "480p": [
@@ -240,11 +233,7 @@ const STATIC_PICKER_WEB: Record<WebQualityKey, { site: string; tag: string }[]> 
     { site: "animeify",     tag: "AF" },
     { site: "anifox",       tag: "FX" },
     { site: "animekai",     tag: "AK" },
-    { site: "anivexa_anibd", tag: "BD" },
     { site: "consumet_gogo", tag: "GO" },
-    { site: "consumet_world", tag: "WO" },
-    { site: "consumet_miruro", tag: "MI" },
-    { site: "consumet_saturn", tag: "ST" },
     { site: "consumet_anikoto", tag: "KO" },
   ],
 };

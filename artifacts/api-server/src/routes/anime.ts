@@ -12591,6 +12591,8 @@ router.get("/anime/fetch-source", async (req, res) => {
   const DISABLED_ANIME_SOURCES = new Set([
     "anikoto", "shirayuki_anikoto", "shirayuki_animix",
     "anivexa_anikoto",
+    "anivexa_anibd", "consumet_world", "consumet_miruro",
+    "consumet_saturn", "consumet_reanime", "reanime",
   ]);
   const isInternalCall = req.headers["x-internal"] === "1";
   if (isAnivexaSite(site)) {

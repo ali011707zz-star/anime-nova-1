@@ -8,9 +8,6 @@ import { isDubbedSearchVariant, isNonOriginalVideo } from "./source-policy.js";
  */
 export const CONSUMET_SOURCES = [
   { site: "consumet_gogo", provider: "gogoanime", label: "GogoAnime" },
-  { site: "consumet_world", provider: "animeworld", label: "AnimeWorld" },
-  { site: "consumet_miruro", provider: "miruro", label: "Miruro" },
-  { site: "consumet_saturn", provider: "animesaturn", label: "AnimeSaturn" },
   { site: "consumet_anikoto", provider: "anikoto", label: "AniKoto" },
 ] as const;
 
@@ -326,7 +323,6 @@ function watchVideos(payload: ConsumetWatchPayload | null): ConsumetVideo[] {
  * an apparently healthy but empty source card.
  */
 const ANIVEXA_FALLBACKS: Record<string, { provider: string; label: string }> = {
-  consumet_miruro: { provider: "animegg", label: "Miruro" },
   consumet_anikoto: { provider: "anikoto", label: "AniKoto" },
 };
 
@@ -514,9 +510,11 @@ export async function getConsumetSources(
        let quality = qualityInfo(video);
       const referer = gogoResolved?.referer ||
         video.headers?.Referer || video.headers?.referer || payloadReferer;
-       if (kind === "hls" && quality.rank < 18) {
+       if (kind === "hls") {
          const manifestQuality = await probeHlsQuality(rawUrl, referer);
-         if (manifestQuality.rank > quality.rank) quality = manifestQuality;
+         // The manifest is authoritative: never advertise 1080p for a
+         // stream whose highest real variant is only 720p.
+         if (manifestQuality.rank > 0) quality = manifestQuality;
        }
       const proxied = proxyUrl(kind, rawUrl, referer);
       sources.push({
