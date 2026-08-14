@@ -76,3 +76,4 @@
 - [Shirayuki/AniKuro bridge](shirayuki-anikuro-bridge.md) — VPS-local Shirayuki runs on 127.0.0.1:3100; main API must proxy its AniList-based HLS sources server-side.
 - [AnimeSlayer provider behavior](anslayer-provider-behavior.md) — catalog is live, but current OK.ru embed pages no longer expose the legacy metadata shape; MediaFire links may expire.
 - [Anikoto API site behavior](anikotoapi-site-behavior.md) — catalog API returns MegaPlay embeds, not m3u8; HTTP 200 can contain an internal 410 deleted-file page.
+- [Reanime encrypted manifests](reanime-encrypted-manifests.md) — FlixCloud stream_url returns an encrypted 200; only the embed-derived manifest key makes the HLS proxy playable.

@@ -164,6 +164,19 @@ function streamKind(stream: AnivexaStream, url: string): "hls" | "mp4" | null {
   return null;
 }
 
+function isEncryptedReanimeManifest(url: string, kind: "hls" | "mp4"): boolean {
+  if (kind !== "hls") return false;
+  try {
+    const parsed = new URL(url);
+    // Reanime/FlixCloud deliberately returns a base64/XOR payload from the
+    // signed master URL. It becomes playable only after the embed page gives
+    // us the per-embed manifest key.
+    return parsed.hostname.toLowerCase().endsWith("flixcloud.cc");
+  } catch {
+    return false;
+  }
+}
+
 function novaProxyUrl(
   kind: "hls" | "mp4",
   rawUrl: string,
@@ -190,10 +203,10 @@ async function makeResolvedSources(
   },
 ): Promise<NovaSource[]> {
   if (resolved.kind === "hls") {
-    // FlixCloud currently returns HTTP 200 with an encrypted body for some
-    // RE streams. Content-Type/.m3u8 alone is not proof of a playable HLS
-    // playlist, so reject it before the source card is exposed.
-    if (!await probeHlsManifest(resolved.url, resolved.referer, resolved.manifestKey)) return [];
+    // Probe the master once and use the parsed variants immediately. The old
+    // flow fetched the same signed manifest twice for every RE server
+    // (validity probe, then variant probe), which made a healthy source look
+    // slow and often exceeded the mobile source budget.
     const variants = await probeHlsVariants(resolved.url, resolved.referer, resolved.manifestKey);
     if (variants.length) {
       return variants.map(variant => {
@@ -217,6 +230,11 @@ async function makeResolvedSources(
         };
       });
     }
+
+    // A media playlist has no #EXT-X-STREAM-INF rows, so it needs one
+    // explicit validity check after the variant probe. This also rejects an
+    // encrypted/HTML 200 response when no manifest key was available.
+    if (!await probeHlsManifest(resolved.url, resolved.referer, resolved.manifestKey)) return [];
   }
 
   // A few RE manifests are media playlists whose URL itself carries the
@@ -405,6 +423,7 @@ export async function getAnivexaSources(
       // Anivexa exposes a local redirect helper alongside the real FlixCloud
       // URL. It is not a media playlist and must never be sent to hls-proxy.
       if (streamType.includes("redirect") && rawUrl.includes("/stream/")) return;
+      if (isEncryptedReanimeManifest(rawUrl, kind)) return;
       const referer = streamReferer(rawUrl, stream.referer, stream.headers);
       const qualityHint = qualityInfo({ quality: stream.quality, server: stream.server || fallbackServer });
       if (!candidates.some(candidate => candidate.url === rawUrl)) {
@@ -454,34 +473,36 @@ export async function getAnivexaSources(
           .filter(([embed]) => Boolean(embed)),
       ).values(),
     );
-    const resolvedEmbeds = await Promise.allSettled(
-      uniqueMatchingServers.slice(0, 4).map(server => fetchReanimeServer(baseUrl, server)),
+    // A playable RE source needs the key from its embed page. Resolve the
+    // unique soft-sub servers concurrently and return as soon as one produces
+    // a valid HLS playlist. The direct stream_url is intentionally not used
+    // for FlixCloud because Anivexa does not return its manifest key.
+    const embedCandidates = uniqueMatchingServers.slice(0, 4);
+    const directResults = await Promise.allSettled(
+      candidates.map(candidate => makeResolvedSources(provider, candidate)),
     );
-    for (const result of resolvedEmbeds) {
-      if (result.status === "fulfilled" && result.value) {
-        const existingIndex = candidates.findIndex(candidate => candidate.url === result.value!.url);
-        if (existingIndex < 0) {
-          candidates.push(result.value);
-        } else if (!candidates[existingIndex].manifestKey && result.value.manifestKey) {
-          // The Anivexa response also exposes stream_url, but it omits the
-          // per-embed manifest key. Prefer the embed-derived candidate when
-          // both point at the same HLS URL.
-          candidates[existingIndex] = result.value;
+    const firstEmbedSources = embedCandidates.length
+      ? await Promise.any(
+        embedCandidates.map(async server => {
+          const resolved = await fetchReanimeServer(baseUrl, server);
+          if (!resolved) throw new Error("Reanime embed did not resolve");
+          const sources = await makeResolvedSources(provider, resolved);
+          if (!sources.length) throw new Error("Reanime manifest was not playable");
+          return sources;
+        }),
+      ).catch(() => null)
+      : null;
+    const sources: NovaSource[] = [];
+    for (const result of directResults) {
+      if (result.status !== "fulfilled") continue;
+      for (const source of result.value) {
+        if (!sources.some(existing => existing.directUrl === source.directUrl)) {
+          sources.push(source);
         }
       }
     }
-
-    if (!candidates.length) return [];
-    // Manifest validation performs network probes. Resolve all candidates
-    // concurrently so one slow/expired FlixCloud server cannot make the
-    // frontend hit its source timeout while another server is already ready.
-    const resolvedCandidates = await Promise.allSettled(
-      candidates.map(candidate => makeResolvedSources(provider, candidate)),
-    );
-    const sources: NovaSource[] = [];
-    for (const result of resolvedCandidates) {
-      if (result.status !== "fulfilled") continue;
-      for (const source of result.value) {
+    if (firstEmbedSources) {
+      for (const source of firstEmbedSources) {
         if (!sources.some(existing => existing.directUrl === source.directUrl)) {
           sources.push(source);
         }
