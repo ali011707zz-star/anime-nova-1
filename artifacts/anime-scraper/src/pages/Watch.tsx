@@ -89,16 +89,38 @@ function loadSubSettings(): SubSettings {
 }
 
 /* ── Last-source helpers: cache the URL that actually played so resume is instant ── */
-function saveLastSrc(animeId: number, ep: number, url: string, qualityRank: number) {
-  try { localStorage.setItem(`last-src-${animeId}-${ep}`, JSON.stringify({ url, qualityRank, ts: Date.now() })); } catch {}
-}
-function loadLastSrc(animeId: number, ep: number): { url: string; qualityRank: number } | null {
+function saveLastSrc(animeId: number, ep: number, url: string, qualityRank: number, site?: string) {
   try {
-    const raw = localStorage.getItem(`last-src-${animeId}-${ep}`);
+    localStorage.setItem(
+      `last-src-${animeId}-${ep}`,
+      JSON.stringify({ url, qualityRank, site: site || "", ts: Date.now() }),
+    );
+  } catch {}
+}
+function loadLastSrc(animeId: number, ep: number): { url: string; qualityRank: number; site?: string } | null {
+  try {
+    const key = `last-src-${animeId}-${ep}`;
+    const raw = localStorage.getItem(key);
     if (!raw) return null;
     const d = JSON.parse(raw);
     // Expire after 6 hours — sources (especially HLS) expire on CDN
-    if (!d?.url || Date.now() - (d.ts || 0) > 6 * 60 * 60_000) return null;
+    if (!d?.url || Date.now() - (d.ts || 0) > 6 * 60 * 60_000) {
+      localStorage.removeItem(key);
+      return null;
+    }
+    /* Reanime's FlixCloud manifests are encrypted and require the per-embed
+       manifest key in the proxy URL. Older quick-resume entries predate that
+       key and otherwise look healthy until hls-proxy returns the encrypted
+       200-byte body, leaving the player on a permanent black loading screen.
+       A site-less legacy hls-proxy entry is also discarded because it cannot
+       be distinguished from that old Reanime format. */
+    const isHlsProxy = /\/hls-proxy(?:\?|&)/i.test(String(d.url));
+    const hasManifestKey = /[?&]mk=/i.test(String(d.url));
+    if ((d.site === "anivexa_re" && isHlsProxy && !hasManifestKey) ||
+        (!d.site && isHlsProxy && !hasManifestKey)) {
+      localStorage.removeItem(key);
+      return null;
+    }
     return d;
   } catch { return null; }
 }
@@ -3561,7 +3583,9 @@ export default function WatchPage() {
     setPlayKey(k => k + 1);
 
     /* Save for quick-resume next time (skip embed URLs — they cause iframe flicker) */
-    if (animeId && src.site !== "_resume" && !isIframeUrl(clickedUrl)) saveLastSrc(animeId, ep, clickedUrl, src.qualityRank ?? 0);
+    if (animeId && src.site !== "_resume" && !isIframeUrl(clickedUrl)) {
+      saveLastSrc(animeId, ep, clickedUrl, src.qualityRank ?? 0, src.site);
+    }
 
     setPhase("player");
   }
