@@ -42,6 +42,11 @@ type AnivexaStream = {
 type AnivexaServer = {
   name?: string;
   type?: string;
+  dataType?: string;
+  data_type?: string;
+  softsub?: boolean;
+  hardsub?: boolean;
+  isDub?: boolean;
   embed?: string;
   dataLink?: string;
   link?: string;
@@ -283,6 +288,18 @@ async function fetchReanimeServer(
   };
 }
 
+function isDubOrHardSubServer(server: AnivexaServer): boolean {
+  const metadata = [
+    server.name,
+    server.type,
+    server.dataType,
+    server.data_type,
+    server.isDub === true ? "dub" : "",
+    server.hardsub === true ? "hardsub" : "",
+  ].filter(Boolean).join(" ");
+  return /(?:^|[\s_-])dub(?:bed)?(?:$|[\s_-])|hard.?sub|hardsub|burned/i.test(metadata);
+}
+
 /**
  * Fetch one provider lazily. The frontend already fans out one request per
  * source card, so this avoids making a slow provider block all other sources.
@@ -363,7 +380,7 @@ export async function getAnivexaSources(
     ];
     const matchingServers = allServers.filter(server => {
       const name = normalizeServerName(server.name);
-      const isSoftSub = !/hard.?sub|hardsub|dub/i.test(`${server.name || ""} ${server.type || ""}`);
+      const isSoftSub = !isDubOrHardSubServer(server);
       return isSoftSub && (provider.aggregate || serverNames.includes(name));
     });
 
@@ -423,8 +440,22 @@ export async function getAnivexaSources(
       if (typeof rawUrl === "string") addDirectCandidate(stream, rawUrl, stream.server || provider.server);
     }
 
+    // Reanime returns one row per audio mode, and the same dataLink can appear
+    // more than once (for example HD-1/sub and HD-1/dub).  De-duplicate the
+    // embed URLs before decrypting so a dubbed row cannot delay the original
+    // stream or consume another token request.
+    const uniqueMatchingServers = Array.from(
+      new Map(
+        matchingServers
+          .map(server => {
+            const rawEmbed = server.embed || server.dataLink || server.link;
+            return [typeof rawEmbed === "string" ? resolveUpstreamUrl(baseUrl, rawEmbed.trim()) : "", server] as const;
+          })
+          .filter(([embed]) => Boolean(embed)),
+      ).values(),
+    );
     const resolvedEmbeds = await Promise.allSettled(
-      matchingServers.slice(0, 6).map(server => fetchReanimeServer(baseUrl, server)),
+      uniqueMatchingServers.slice(0, 4).map(server => fetchReanimeServer(baseUrl, server)),
     );
     for (const result of resolvedEmbeds) {
       if (result.status === "fulfilled" && result.value) {
@@ -441,10 +472,16 @@ export async function getAnivexaSources(
     }
 
     if (!candidates.length) return [];
+    // Manifest validation performs network probes. Resolve all candidates
+    // concurrently so one slow/expired FlixCloud server cannot make the
+    // frontend hit its source timeout while another server is already ready.
+    const resolvedCandidates = await Promise.allSettled(
+      candidates.map(candidate => makeResolvedSources(provider, candidate)),
+    );
     const sources: NovaSource[] = [];
-    for (const candidate of candidates) {
-      const resolved = await makeResolvedSources(provider, candidate);
-      for (const source of resolved) {
+    for (const result of resolvedCandidates) {
+      if (result.status !== "fulfilled") continue;
+      for (const source of result.value) {
         if (!sources.some(existing => existing.directUrl === source.directUrl)) {
           sources.push(source);
         }

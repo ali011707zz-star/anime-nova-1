@@ -3328,7 +3328,7 @@ export default function WatchPage() {
       // reanime: محذوف 2026-07-24
       // hianime: معطّل 2026-07-30
       anipm:        24000,  // backend = 20s + هامش 4s
-      anivexa_re:   50000,  // backend = 26s + manifest/embed fallback probes
+      anivexa_re:   90000,  // endpoint + embed decryption + encrypted HLS probes
       consumet_gogo: 50000, // search + episode info + Megaplay HLS extraction
     };
     const siteTimeout = SITE_REQUEST_TIMEOUTS[site] ?? 24000;
