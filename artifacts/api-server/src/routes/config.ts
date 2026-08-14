@@ -18,6 +18,7 @@ const DEFAULT_CONFIG = {
     animepahe:    true,
     animewitcher: true,
     animekai:      true,
+    anivexa_re:    true,
     seepanel:     true,
     arabseed:     true,
     animephoenix: true,

@@ -12611,7 +12611,12 @@ router.get("/anime/sources-stream", async (req, res) => {
 //  video URL fetched only when user taps a specific source row.
 // ════════════════════════════════════════════════════════════════════
 router.get("/anime/fetch-source", async (req, res) => {
-  const site      = ((req.query.site    as string) || "").trim().toLowerCase();
+  const requestedSite = ((req.query.site as string) || "").trim().toLowerCase();
+  // Keep old mobile builds working while routing every Reanime request
+  // through the Anivexa adapter, which preserves the per-embed manifest key.
+  const site = requestedSite === "reanime" || requestedSite === "consumet_reanime"
+    ? "anivexa_re"
+    : requestedSite;
   const title     = ((req.query.title   as string) || "").trim();
   const english   = ((req.query.english as string) || "").trim() || null;
   const ep        = parseInt((req.query.ep    as string) || "1");
