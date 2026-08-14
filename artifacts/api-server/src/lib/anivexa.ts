@@ -90,6 +90,64 @@ const REANIME_REFERER = "https://reanime.to/";
 const REANIME_STREAM_REFERER = "https://flixcloud.cc/";
 let warnedMissingUrl = false;
 
+function reanimeCfProxyBase(): string {
+  const remoteBase = (process.env.NOVA_PROXY_BASE || "").trim().replace(/\/+$/, "");
+  return remoteBase
+    ? `${remoteBase}/api/cfproxy`
+    : `http://localhost:${process.env.CF_PROXY_PORT || "8000"}`;
+}
+
+function looksLikeCloudflareChallenge(body: string): boolean {
+  const lower = body.slice(0, 16_000).toLowerCase();
+  return lower.includes("just a moment") ||
+    lower.includes("cf-chl-") ||
+    lower.includes("challenge-platform") ||
+    lower.includes("turnstile");
+}
+
+/**
+ * Reanime's embed and token endpoints can return a successful HTTP response
+ * containing a Cloudflare challenge instead of the real payload. Use the VPS
+ * curl_cffi proxy as a fallback, matching the legacy Reanime adapter, while
+ * keeping a direct request as the fast path.
+ */
+async function fetchReanimeResponse(
+  input: RequestInfo | URL,
+  init: RequestInit = {},
+): Promise<Response> {
+  const target = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+  let direct: Response | null = null;
+
+  try {
+    direct = await fetch(input, init);
+    if (direct.ok) {
+      const body = await direct.clone().text();
+      if (!looksLikeCloudflareChallenge(body)) return direct;
+    }
+  } catch {
+    // Fall through to the VPS proxy.
+  }
+
+  try {
+    const proxyUrl = new URL(`${reanimeCfProxyBase()}/fetch`);
+    proxyUrl.searchParams.set("url", target);
+    const headers = new Headers(init.headers);
+    const referer = headers.get("Referer") || headers.get("referer");
+    if (referer) proxyUrl.searchParams.set("ref", referer);
+    proxyUrl.searchParams.set("timeout", String(Math.floor(REQUEST_TIMEOUT_MS / 1000)));
+
+    const proxied = await fetch(proxyUrl, {
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS + 2_000),
+    });
+    if (proxied.ok) return proxied;
+  } catch {
+    // Preserve the original response below when it was at least available.
+  }
+
+  if (direct) return direct;
+  throw new Error("Reanime upstream request failed");
+}
+
 function anivexaBaseUrl(): string {
   return (process.env.ANIVEXA_API_URL || "").trim().replace(/\/+$/, "");
 }
@@ -284,7 +342,7 @@ async function fetchReanimeServer(
     : "";
   if (!embed) return null;
 
-  const response = await fetch(embed, {
+  const response = await fetchReanimeResponse(embed, {
     headers: {
       Accept: "text/html,*/*",
       "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124 Safari/537.36",
@@ -294,7 +352,7 @@ async function fetchReanimeServer(
   });
   if (!response.ok) throw new Error(`Reanime ${server.name || "server"} embed returned ${response.status}`);
 
-  const decrypted = await decryptReanimeEmbed(await response.text());
+  const decrypted = await decryptReanimeEmbed(await response.text(), fetchReanimeResponse);
   const lower = decrypted.url.toLowerCase();
   const kind = /\.(mp4|webm)(?:[?#]|$)/i.test(lower) ? "mp4" : "hls";
   return {
