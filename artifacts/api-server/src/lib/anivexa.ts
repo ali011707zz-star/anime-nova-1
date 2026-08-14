@@ -358,7 +358,11 @@ async function fetchReanimeServer(
   return {
     url: decrypted.url,
     kind,
-    referer: streamReferer(decrypted.url),
+    // FlixCloud's CDN validates the page that issued the signed manifest,
+    // not just the provider origin. The old Reanime adapter forwarded the
+    // complete embed URL; keeping only https://flixcloud.cc/ makes the source
+    // appear healthy but causes the manifest/segments to be rejected.
+    referer: embed,
     qualityHint: qualityInfo({ server: server.name || server.type || "" }),
     manifestKey: decrypted.manifestKey,
   };
