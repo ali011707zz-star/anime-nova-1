@@ -8285,6 +8285,7 @@ async function awBuildSourcesFromDb(rows: AwLinkRow[]): Promise<UnifiedSource[]>
 
 async function getAnimeWitcherSources(
   title: string, english: string | null, ep: number, _anilistId?: number, variants: string[] = [],
+  availabilityOnly = false,
 ): Promise<UnifiedSource[]> {
   try {
     // ── DB-first path: aw_links (142k pre-loaded) — أسرع بـ ~10x من Algolia ─
@@ -8292,6 +8293,27 @@ async function getAnimeWitcherSources(
       const dbRows = await awDbLookup(_anilistId, ep);
       if (dbRows.length) {
         console.log(`[AW] DB-hit: ${dbRows.length} rows for anilistId=${_anilistId} ep${ep}`);
+        if (availabilityOnly) {
+          const seenQuality = new Set<string>();
+          return dbRows
+            .filter(row => {
+              const quality = String(row.quality || "720p");
+              if (seenQuality.has(quality)) return false;
+              seenQuality.add(quality);
+              return true;
+            })
+            .map(row => {
+              const quality = String(row.quality || "720p");
+              return {
+                name: `AnimeWitcher · ${quality} · الحلقة موجودة`,
+                url: "",
+                quality,
+                qualityRank: quality === "1080p" ? 22 : quality === "720p" ? 21 : quality === "480p" ? 10 : 5,
+                site: "animewitcher",
+                verified: true,
+              } as UnifiedSource;
+            });
+        }
         const dbSources = await awBuildSourcesFromDb(dbRows);
         if (dbSources.length) {
           console.log(`[AW] ✅ DB-path: ${dbSources.length} sources`);
@@ -8363,6 +8385,19 @@ async function getAnimeWitcherSources(
       if (!epObj) return [];
       epId = epObj.id;
       console.log(`[AW] ep${ep} → fallback scan id="${epId}"`);
+    }
+
+    // Availability mode only needs confirmation that the episode exists.
+    // Do not resolve file hosts, manifests, or video URLs during the picker scan.
+    if (availabilityOnly) {
+      return [{
+        name: "AnimeWitcher · 720p · الحلقة موجودة",
+        url: "",
+        quality: "720p",
+        qualityRank: 21,
+        site: "animewitcher",
+        verified: true,
+      }];
     }
 
     // 3. جلب servers + episode doc بالتوازي
@@ -13209,7 +13244,7 @@ router.get("/anime/sources-stream", async (req, res) => {
             } as UnifiedSource);
           }
         })(),
-        () => scrapeCached("animewitcher",  () => getAnimeWitcherSources(title, english, ep, anilistId, titleVariants), false, 3200),
+        () => scrapeCached("animewitcher",  () => getAnimeWitcherSources(title, english, ep, anilistId, titleVariants, true), false, 11000),
         () => scrapeCached("anslayer",      () => getAnimeSlayerSources(title, english, ep, anslayerId, titleAr), false, 3200),
         () => scrapeCached("animeify",      () => getAnimeifySources(title, english, ep, titleVariants, true), false, 4000),
         () => scrapeCached("sanime",        () => getSAnimeSources(title, english, ep, titleVariants, true), false, 4000),
@@ -13800,8 +13835,9 @@ router.get("/anime/check-arabic", async (req, res) => {
 // ════════════════════════════════════════════════════════════════════
 //  AnimeSlayer latest episodes  GET /api/anime/anslayer-latest
 //  يُستخدم في قسم "أحدث الحلقات" على الواجهة الرئيسية — كتالوج anslayer
-//  الخاص به مباشرةً (anime_id + latest_episode_name + cover) بلا أي
-//  اعتماد على AniList أو مصادر أخرى، لأن التشغيل مقيّد بمصدر anslayer فقط.
+//  الخاص به مباشرةً (anime_id + latest_episode_name + cover). نُرجع
+//  معرّف AnimeSlayer وAniList منفصلين: الرابط العام وباقي المصادر يحتاجان
+//  AniList، بينما مصدر AS نفسه يحتاج معرّف AnimeSlayer.
 // ════════════════════════════════════════════════════════════════════
 let _anslayerLatestCache: any[] | null = null;
 let _anslayerLatestTs = 0;
@@ -13815,30 +13851,36 @@ router.get("/anime/anslayer-latest", async (req, res) => {
     }
     const data = await anslayerGet("animes/get-published-animes", { list_type: "latest_updated_episode_new", page: 1 });
     const list: any[] = data?.response?.data || [];
-    const items = list.map((item: any) => {
+    const rawItems = list.map((item: any) => {
       const epMatch = String(item.latest_episode_name || "").match(/(\d+)/);
       return {
-        animeId: parseInt(item.anime_id, 10),
         anslayerId: parseInt(item.anime_id, 10),
         name: item.anime_name || "",
         episode: epMatch ? parseInt(epMatch[1], 10) : null,
         cover: item.anime_cover_image_url || "",
         year: item.anime_release_year || "",
       };
-    }).filter((it: any) => it.animeId && it.episode);
+    }).filter((it: any) => it.anslayerId && it.episode);
+
+    // Resolve in parallel so the latest list can use the same AniList-based
+    // detail, subtitle, and Japanese-source paths as the normal catalog.
+    const items = (await Promise.all(rawItems.map(async (item: any) => ({
+      ...item,
+      animeId: await resolveAniListIdForSource(item.name, null, [], null),
+    })))).filter((it: any) => it.animeId && it.episode);
 
     // ── إرسال الحلقات الجديدة لتيليجرام (فقط عند التحديث الفعلي) ──────────
     if (items.length > 0) {
       const prevKeys = new Set(
-        (_anslayerLatestCache || []).map((it: any) => `${it.animeId}:${it.episode}`)
+        (_anslayerLatestCache || []).map((it: any) => `${it.anslayerId || it.animeId}:${it.episode}`)
       );
       const newItems = items.filter(
-        (it: any) => !prevKeys.has(`${it.animeId}:${it.episode}`)
+        (it: any) => !prevKeys.has(`${it.anslayerId || it.animeId}:${it.episode}`)
       );
       for (const it of newItems) {
         try {
           await notifyNewEpisode(
-            it.animeId,
+            it.anslayerId,
             it.name,
             it.episode,
             it.cover || undefined,
