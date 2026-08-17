@@ -91,21 +91,55 @@ const BLOCKED_GENRES = new Set<string>(["Hentai", "Ecchi"]);
 
 /* ── Arabic transliteration ── */
 const AR_TO_EN: Record<string,string> = {
-  "ناروتو":"Naruto","هانتر":"Hunter x Hunter","ون بيس":"One Piece",
-  "دراغون بول":"Dragon Ball","ديمون سلاير":"Demon Slayer",
-  "هجوم العمالقة":"Shingeki no Kyojin","بوكو نو هيرو":"Boku no Hero Academia",
-  "بليتش":"Bleach","هانتر إكس هانتر":"Hunter x Hunter","فيري تيل":"Fairy Tail","توكيو غول":"Tokyo Ghoul",
-  "ريزيرو":"Re:Zero","سوورد ارت":"Sword Art Online","فولميتال":"Fullmetal Alchemist",
+  "ناروتو":"Naruto","هانتر":"Hunter x Hunter","هنتر":"Hunter x Hunter",
+  "ون بيس":"One Piece","ون بيسي":"One Piece",
+  "دراغون بول":"Dragon Ball","دراجون بول":"Dragon Ball",
+  "ديمون سلاير":"Demon Slayer","كيميتسو":"Kimetsu",
+  "هجوم العمالقة":"Shingeki no Kyojin","بوكو نو هيرو":"Boku no Hero",
+  "بلاتش":"Bleach","بليتش":"Bleach","هانتر إكس هانتر":"Hunter x Hunter",
+  "فيري تيل":"Fairy Tail","الكيميائي":"Fullmetal Alchemist",
+  "سوورد ارت":"Sword Art Online","توكيو غول":"Tokyo Ghoul",
+  "ريزيرو":"Re:Zero","تيتان":"Titan","ابطال":"Hero Academia",
 };
-function translateQuery(q: string): string {
-  const t = q.trim();
-  if (AR_TO_EN[t]) return AR_TO_EN[t];
-  if (/[\u0600-\u06FF]/.test(t)) {
-    for (const [ar, en] of Object.entries(AR_TO_EN)) {
-      if (t.includes(ar)) return t.replace(ar, en);
+function normalizeArabicSearch(value: string): string {
+  return value.normalize("NFKC")
+    .replace(/[ًٌٍَُِّْـ]/g, "")
+    .replace(/[أإآ]/g, "ا")
+    .replace(/ة/g, "ه")
+    .replace(/يٰ/g, "ي")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+async function translateQuery(q: string): Promise<string> {
+  const trimmed = q.trim();
+  if (!/[\u0600-\u06FF]/.test(trimmed)) return trimmed;
+
+  const normalized = normalizeArabicSearch(trimmed);
+  const exact = Object.entries(AR_TO_EN)
+    .find(([ar]) => normalizeArabicSearch(ar) === normalized);
+  if (exact) return exact[1];
+
+  const phrase = Object.entries(AR_TO_EN)
+    .filter(([ar]) => normalized.includes(normalizeArabicSearch(ar)))
+    .sort((a, b) => b[0].length - a[0].length)[0];
+  if (phrase) return trimmed.replace(phrase[0], phrase[1]);
+
+  try {
+    const response = await fetch(
+      `${SEARCH_API_BASE}/api/anime/translate?text=${encodeURIComponent(trimmed)}&from=ar&to=en&kind=search`,
+    );
+    if (response.ok) {
+      const data = await response.json();
+      const translated = String(data?.translated || "").trim();
+      if (translated && translated !== trimmed && !/[\u0600-\u06FF]/.test(translated)) {
+        return translated;
+      }
     }
+  } catch {
+    // AniList still receives the original Arabic query as the final fallback.
   }
-  return t;
+  return trimmed;
 }
 
 function buildSearchQuery(sort: string, format: string, status: string, genre: string, season: string) {
@@ -210,7 +244,7 @@ export default function SearchScreen() {
     try {
       let body: object;
       if (q.trim()) {
-        const term = translateQuery(q);
+        const term = await translateQuery(q);
         body = { query: buildSearchQuery(so, fo, st, ge, se), variables: { search: term, page: 1, perPage: 30 } };
         setHistory(prev => {
           const updated = [q, ...prev.filter(h => h !== q)].slice(0, 8);

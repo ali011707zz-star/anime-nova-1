@@ -47,7 +47,8 @@ export const POPULAR_QUERY = `
 query PopularAnime($page: Int) {
   Page(page: $page, perPage: 20) {
     media(sort: POPULARITY_DESC, type: ANIME, countryOfOrigin: "JP", isAdult: false, genre_not_in: ["Hentai"]) {
-      id title { romaji english } coverImage { large extraLarge } averageScore episodes status format
+      id title { romaji english } coverImage { large extraLarge } bannerImage
+      averageScore episodes status format genres
     }
   }
 }`;

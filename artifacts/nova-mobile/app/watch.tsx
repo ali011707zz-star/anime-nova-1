@@ -70,7 +70,8 @@ const SITE_TAG: Record<string, string> = {
   shahiid: "SH", animelek: "EK", animedar: "AD", okanime: "OK",
   ristoanime: "RS", animeify: "AF", animeday: "DY", arabseed: "AR",
   anime4up2: "4U", mycima: "MC", topcinemaa: "TC",
-  animewitcher: "AW", kawaii: "KW", anineko: "AN",
+  animewitcher: "AW", kawaii: "KW", megaplay: "MP", anineko: "AN",
+  animekai: "AK", consumet_gogo: "GO",
   vidlink_anim: "VL", vidfast: "VF",
   animetime: "AT", animepahe: "AP", dulo_anim: "DL",
   faselhd_db: "FH",
@@ -82,7 +83,8 @@ const SITE_TAG: Record<string, string> = {
 
 /* ── اسم عرض لكل موقع في منتقي المصادر ── */
 const SITE_LABEL: Record<string, string> = {
-  kawaii: "Kawaii", animewitcher: "AnimeWitcher",
+  kawaii: "Kawaii", megaplay: "MegaPlay", animekai: "AnimeKai",
+  consumet_gogo: "GogoAnime", animewitcher: "AnimeWitcher",
   anineko: "AniNeko",
   dulo_anim: "Dulo",
   anikototv: "AniKotoTV", mitanime: "MITanime", vidfast: "VidFast",
@@ -104,7 +106,9 @@ function getSiteTag(site: string): string {
 
 /* ── وصف قصير لكل مصدر في شبكة الاختيار (يطابق نظام الويب) ── */
 const SITE_DESC: Record<string, string> = {
-  kawaii: "1080p · مباشر", anineko: "HLS · متعدد الجودات", animewitcher: "PD/ST · مباشر",
+  kawaii: "1080p · مباشر", megaplay: "HLS · صوت خام · ترجمة Kawaii",
+  anineko: "HLS · متعدد الجودات", animekai: "HLS · ياباني + ترجمة",
+  consumet_gogo: "HLS · صوت خام · كل الجودات", animewitcher: "PD/ST · مباشر",
   dulo_anim: "ياباني/إنجليزي · HLS مباشر",
   vidlink_anim: "ياباني مترجم · مباشر",
   mitanime: "ياباني مترجم · مباشر", vidfast: "TMDB · HLS · متعدد الخوادم",
@@ -131,7 +135,7 @@ function getSiteDesc(site: string): string {
 
 /* Sources disabled by product policy. AniNeko is supported through the
    full VPS HLS proxy, so it must remain available on mobile. */
-const BLOCKED_SOURCE_SITES = new Set(["hianime", "hi", "ak"]);
+const BLOCKED_SOURCE_SITES = new Set(["hianime", "hi"]);
 function isBlockedSource(src: Pick<Src, "site">): boolean {
   return BLOCKED_SOURCE_SITES.has(String(src.site || "").trim().toLowerCase());
 }
@@ -254,33 +258,47 @@ function buildEmbeddedDownloadUrl(
     url: mediaUrl,
   });
   if (subtitleUrl) {
-    // Kawaii MP4 downloads are streamed directly so DownloadResumable can use
-    // Range/resume. The subtitle is saved as a local VTT sidecar after the
-    // video completes; only legacy/non-Kawaii conversions pass it to ffmpeg.
+    // The subtitle is always saved as a local VTT sidecar after the video
+    // completes. The API receives it too so non-KW HLS downloads use the
+    // same authenticated conversion contract.
     const isInternalSubtitle = subtitleUrl.includes("/api/anime/proxy-text")
       || subtitleUrl.includes("/api/anime/translate-vtt");
     const downloadSubtitle = site === "kawaii" && !isInternalSubtitle
       ? `${base}/api/anime/proxy-text?url=${encodeURIComponent(subtitleUrl)}&ref=${encodeURIComponent("https://kawaiianime.cc/")}`
       : subtitleUrl;
-    if (site !== "kawaii") query.set("subtitleUrl", downloadSubtitle);
+    query.set("subtitleUrl", downloadSubtitle);
   }
   return `${base}/api/anime/download-mp4?${query.toString()}`;
 }
 
-function normalizeKawaiiSubtitleUrl(url: string | undefined, base: string): string | undefined {
+/* Web's canonical Arabic subtitle policy: KW supplies the track for the
+   Japanese raw-audio providers AN/AK/MP as well as for KW itself. */
+const KAWAII_SUBTITLE_SITES = new Set(["kawaii", "anineko", "animekai", "megaplay"]);
+const DOWNLOAD_SUBTITLE_SITES = KAWAII_SUBTITLE_SITES;
+
+function normalizeProviderSubtitleUrl(
+  site: string,
+  url: string | undefined,
+  base: string,
+): string | undefined {
   if (!url) return undefined;
   const resolved = resolveUrl(url, base);
+  if (!KAWAII_SUBTITLE_SITES.has(site)) return resolved;
   if (resolved.includes("/api/anime/translate-vtt") || resolved.includes("/api/anime/proxy-text")) {
     return resolved;
   }
   return `${base}/api/anime/proxy-text?url=${encodeURIComponent(resolved)}&ref=${encodeURIComponent("https://kawaiianime.cc/")}`;
 }
 
+function normalizeKawaiiSubtitleUrl(url: string | undefined, base: string): string | undefined {
+  return normalizeProviderSubtitleUrl("kawaii", url, base);
+}
+
 /* ── مصادر تُشغَّل native مباشرةً عبر RiftPlayer (seg-proxy يُعيد روابط مطلقة الآن) ── */
 
-/* ── أولويات المصادر: KW → AW → AF → SA → rest ── */
+/* ── أولويات المصادر: KW → MP → AN → AK → AW → rest ── */
 const SITE_PRIORITY: Record<string, number> = {
-  kawaii: 100, animewitcher: 90,
+  kawaii: 100, megaplay: 98, anineko: 96, animekai: 94, animewitcher: 90,
   anivexa_mkissa: 88, anivexa_re: 87, anivexa_anikoto: 86,
   anivexa_animegg: 85, anivexa_anidbapp: 84, anivexa_2dhive: 83,
   anivexa_anibd: 82, anivexa_senshi: 81, anivexa_kaa: 80,
@@ -296,53 +314,35 @@ type QualityKey = "1080p" | "720p" | "360p";
 const STATIC_PICKER: Record<QualityKey, { site: string; name: string; tag: string }[]> = {
   "1080p": [
     { site: "kawaii",       name: "كواي أنمي",   tag: "KW" },
+    { site: "megaplay",     name: "MegaPlay",    tag: "MP" },
     { site: "anineko",      name: "AniNeko",      tag: "AN" },
     { site: "animewitcher", name: "AnimeWitcher", tag: "AW" },
     { site: "anslayer",     name: "AnimeSlayer",  tag: "AS" },
     { site: "sanime",       name: "سـAnime",      tag: "SA" },
     { site: "animeify",     name: "أنمي فاي",    tag: "AF" },
     { site: "anifox",        name: "ANIFOX",      tag: "FX" },
-    { site: "anivexa_mkissa", name: "MKissa", tag: "MK" },
-    { site: "anivexa_re", name: "Reanime", tag: "RE" },
-    { site: "anivexa_anikoto", name: "AniKoto", tag: "AK" },
-    { site: "anivexa_animegg", name: "AnimeGG", tag: "GG" },
-    { site: "anivexa_anidbapp", name: "AniDB App", tag: "DB" },
-    { site: "anivexa_2dhive", name: "2dhive", tag: "2D" },
-    { site: "anivexa_anibd", name: "AniBD", tag: "BD" },
-    { site: "anivexa_senshi", name: "Senshi", tag: "SE" },
-    { site: "anivexa_kaa", name: "Kickassanime", tag: "KA" },
+    { site: "animekai",      name: "AnimeKai",   tag: "AK" },
+    { site: "consumet_gogo", name: "GogoAnime",  tag: "GO" },
   ],
   "720p": [
+    { site: "megaplay",     name: "MegaPlay",    tag: "MP" },
     { site: "anineko",      name: "AniNeko",      tag: "AN" },
     { site: "animewitcher", name: "AnimeWitcher", tag: "AW" },
     { site: "anslayer",     name: "AnimeSlayer",  tag: "AS" },
     { site: "sanime",       name: "سـAnime",      tag: "SA" },
     { site: "animeify",     name: "أنمي فاي",    tag: "AF" },
     { site: "anifox",        name: "ANIFOX",      tag: "FX" },
-    { site: "anivexa_mkissa", name: "MKissa", tag: "MK" },
-    { site: "anivexa_re", name: "Reanime", tag: "RE" },
-    { site: "anivexa_anikoto", name: "AniKoto", tag: "AK" },
-    { site: "anivexa_animegg", name: "AnimeGG", tag: "GG" },
-    { site: "anivexa_anidbapp", name: "AniDB App", tag: "DB" },
-    { site: "anivexa_2dhive", name: "2dhive", tag: "2D" },
-    { site: "anivexa_anibd", name: "AniBD", tag: "BD" },
-    { site: "anivexa_senshi", name: "Senshi", tag: "SE" },
-    { site: "anivexa_kaa", name: "Kickassanime", tag: "KA" },
+    { site: "animekai",      name: "AnimeKai",   tag: "AK" },
+    { site: "consumet_gogo", name: "GogoAnime",  tag: "GO" },
   ],
   "360p": [
+    { site: "megaplay",     name: "MegaPlay",    tag: "MP" },
     { site: "anineko",      name: "AniNeko",      tag: "AN" },
     { site: "animewitcher", name: "AnimeWitcher", tag: "AW" },
     { site: "animeify",     name: "أنمي فاي",    tag: "AF" },
     { site: "anifox",        name: "ANIFOX",      tag: "FX" },
-    { site: "anivexa_mkissa", name: "MKissa", tag: "MK" },
-    { site: "anivexa_re", name: "Reanime", tag: "RE" },
-    { site: "anivexa_anikoto", name: "AniKoto", tag: "AK" },
-    { site: "anivexa_animegg", name: "AnimeGG", tag: "GG" },
-    { site: "anivexa_anidbapp", name: "AniDB App", tag: "DB" },
-    { site: "anivexa_2dhive", name: "2dhive", tag: "2D" },
-    { site: "anivexa_anibd", name: "AniBD", tag: "BD" },
-    { site: "anivexa_senshi", name: "Senshi", tag: "SE" },
-    { site: "anivexa_kaa", name: "Kickassanime", tag: "KA" },
+    { site: "animekai",      name: "AnimeKai",   tag: "AK" },
+    { site: "consumet_gogo", name: "GogoAnime",  tag: "GO" },
   ],
 };
 
@@ -816,8 +816,12 @@ export default function WatchScreen() {
 
     const token = await getAuthToken();
     /* Fire-and-forget — يعمل في الخلفية بمستقل عن lifecycle هذه الشاشة */
-    const downloadUrl = site === "kawaii"
-      ? buildEmbeddedDownloadUrl(site, best.rawUrl || proxyUrl, subtitleUrl, base)
+    if (DOWNLOAD_SUBTITLE_SITES.has(site) && !subtitleUrl) {
+      Alert.alert("الترجمة غير جاهزة", "تعذر تجهيز الترجمة العربية لهذه الحلقة. أعد المحاولة بعد لحظات.");
+      return;
+    }
+    const downloadUrl = DOWNLOAD_SUBTITLE_SITES.has(site)
+      ? buildEmbeddedDownloadUrl(site, site === "kawaii" ? (best.rawUrl || proxyUrl) : proxyUrl, subtitleUrl, base)
       : proxyUrl;
     void startGlobalDownload({
       animeId:  parseInt(anime || "0"),
@@ -900,9 +904,12 @@ export default function WatchScreen() {
          ? normalizeKawaiiSubtitleUrl(subRaw, base)
          : (subRaw ? resolveUrl(subRaw, base) : undefined);
       const token     = await getAuthToken();
-       const downloadUrl = site === "kawaii"
-         ? buildEmbeddedDownloadUrl(site, best.rawUrl || proxyUrl, subtitleUrl, base)
-        : proxyUrl;
+       if (DOWNLOAD_SUBTITLE_SITES.has(site) && !subtitleUrl) {
+         throw new Error("Arabic subtitle is not ready");
+       }
+       const downloadUrl = DOWNLOAD_SUBTITLE_SITES.has(site)
+         ? buildEmbeddedDownloadUrl(site, site === "kawaii" ? (best.rawUrl || proxyUrl) : proxyUrl, subtitleUrl, base)
+         : proxyUrl;
 
       void startGlobalDownload({
         animeId:    parseInt(anime || "0"),

@@ -15621,8 +15621,9 @@ function cuesToVtt(body: string): string {
 
 router.get("/anime/download-mp4", async (req, res) => {
   const site = String(req.query.site || "").trim().toLowerCase();
-  if (site !== "kawaii") {
-    res.status(400).send("download conversion is only available for KW");
+  const DOWNLOADABLE_SITES = new Set(["kawaii", "anineko", "animekai", "megaplay"]);
+  if (!DOWNLOADABLE_SITES.has(site)) {
+    res.status(400).send("download conversion is only available for KW/AN/AK/MP");
     return;
   }
 
