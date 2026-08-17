@@ -12,7 +12,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useApp } from "@/context/AppContext";
 import { getBaseUrl } from "@/utils/api";
-import { secureFetch, warmAuthToken, getAuthToken } from "@/utils/secureApi";
+import { secureFetch, secureStreamFetch, warmAuthToken, getAuthToken } from "@/utils/secureApi";
 import {
   startGlobalDownload,
   subscribeActiveDownloads,
@@ -25,6 +25,7 @@ import { openIsolatedPlayer } from "@/lib/isolatedPlayer";
 /* ── Types ── */
 type Quality    = "1080p FHD" | "720p HD" | "360p SD";
 type Screen     = "loading" | "picker" | "native" | "embed" | "resolving";
+type AvailabilityQuality = "1080p" | "720p" | "360p";
 
 /* ── مواقع محمية بـ Cloudflare/Turnstile يفشل الخادم (VPS) بجلب فيديوها المباشر —
    نحاول أولاً حلّها عبر WebView مخفي (IP سكني حقيقي للجهاز) قبل عرض بطاقة "يحتاج تطبيق أصلي" ── */
@@ -169,7 +170,7 @@ function getSrcQuality(s: Src): Quality {
 function isDirectPlayable(s: Src): boolean {
   if (s.isEmbed) return false;
   const url = (s.directUrl || s.url || "").toLowerCase();
-  if (!url) return false;
+  if (!isValidSourceUrl(s.directUrl || s.url)) return false;
   if (url.includes("mega.nz") || url.includes("mega.co.nz")) return false;
   // mp4upload: HEVC codec — يُشغَّل بدون صوت/صورة على أغلب الأجهزة
   if (url.includes("mp4upload")) return false;
@@ -188,6 +189,16 @@ function getPlayUrl(s: Src): string {
   if (s.url?.startsWith("/api/")) return s.url;
   if (s.directUrl?.startsWith("/api/")) return s.directUrl;
   return s.directUrl || s.url || "";
+}
+
+function isValidSourceUrl(url: string | undefined): boolean {
+  if (!url) return false;
+  try {
+    const parsed = new URL(url.startsWith("/") ? `https://nova.local${url}` : url);
+    return parsed.protocol === "http:" || parsed.protocol === "https:";
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -307,8 +318,7 @@ const SITE_PRIORITY: Record<string, number> = {
   vidfast: 35,
 };
 
-/* ── قائمة المصادر (KW أولاً — الأولوية القصوى للتشغيل الفوري) ── */
-/* ── Picker ثابت: جودة → مصادر (تظهر فوراً دون أي جلب مسبق) ── */
+/* ── قائمة المصادر المعتمدة — الصفوف لا تظهر إلا بعد نتيجة mode=check ── */
 type QualityKey = "1080p" | "720p" | "360p";
 
 const STATIC_PICKER: Record<QualityKey, { site: string; name: string; tag: string }[]> = {
@@ -491,8 +501,14 @@ export default function WatchScreen() {
   const [downloadProgress, setDownloadProgress] = useState<Record<string, number>>({});
   /* مواقع يجري جلبها خصيصاً للتنزيل (بدون فتح المشغّل) */
   const [dlFetchingSites,  setDlFetchingSites]  = useState<Set<string>>(new Set());
+  /* نتائج الاستعلام المسبق: لا نعرض أي صف ثابت قبل أن يؤكده الخادم */
+  const [availableSlots, setAvailableSlots] = useState<Record<string, Partial<Record<QualityKey, { serverCount: number }>>>>({});
+  const [availabilityDone, setAvailabilityDone] = useState(false);
+  const [availabilityError, setAvailabilityError] = useState(false);
+  const [availabilityAttempt, setAvailabilityAttempt] = useState(0);
 
   const abortRef          = useRef<AbortController | null>(null);
+  const availabilityAbortRef = useRef<AbortController | null>(null);
   /* siteCtrls: نتتبع AbortController لكل موقع جارٍ جلبه — لضمان إلغاء كل الطلبات عند الخروج */
   const siteCtrls         = useRef<Map<string, AbortController>>(new Map());
   const seenKeys          = useRef(new Set<string>());
@@ -577,12 +593,112 @@ export default function WatchScreen() {
   useEffect(() => {
     return () => {
       abortRef.current?.abort();
+      availabilityAbortRef.current?.abort();
       /* إلغاء جميع controllers للمواقع الجارية — يمنع تسرب الذاكرة عند التنقل السريع */
       siteCtrls.current.forEach(c => c.abort());
       siteCtrls.current.clear();
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [anime, epNum]);
+
+  /* ── Availability-only scan: مطابق للويب، بدون روابط تشغيل ──
+     لا نستخدم الكاش ولا نعرض STATIC_PICKER قبل وصول صف موثّق من الخادم. */
+  useEffect(() => {
+    if (!titleStr) return;
+    availabilityAbortRef.current?.abort();
+    const controller = new AbortController();
+    availabilityAbortRef.current = controller;
+    setAvailabilityDone(false);
+    setAvailabilityError(false);
+    setAvailableSlots({});
+    setSlotStatus({});
+
+    const params = new URLSearchParams();
+    params.set("title", titleStr);
+    if (englishStr) params.set("english", englishStr);
+    if (anime) params.set("anime", anime);
+    if (epNum) params.set("ep", String(epNum));
+    if (format) params.set("format", format);
+    if (year) params.set("year", year);
+    if (episodes) params.set("episodes", episodes);
+    if (native) params.set("native", native);
+    if (titleArStr) params.set("titleAr", titleArStr);
+    if (anslayerId) params.set("anslayerId", anslayerId);
+    const titleVariants = [...new Set([titleStr, englishStr, titleArStr].filter(Boolean))];
+    if (titleVariants.length) params.set("titles", JSON.stringify(titleVariants));
+    params.set("mode", "check");
+
+    const allowedSites = new Set(
+      (singleSite ? [singleSite] : Q_KEYS.flatMap(q => STATIC_PICKER[q].map(s => s.site))),
+    );
+    let cancelled = false;
+
+    const applyRow = (row: any) => {
+      const site = String(row?.site || "").trim();
+      const quality = String(row?.quality || "").toLowerCase();
+      const qk: QualityKey | null =
+        quality === "1080p" ? "1080p" :
+        quality === "720p" ? "720p" :
+        quality === "360p" || quality === "480p" ? "360p" : null;
+      if (!site || !qk || !allowedSites.has(site)) return;
+      setAvailableSlots(prev => ({
+        ...prev,
+        [site]: {
+          ...prev[site],
+          [qk]: { serverCount: Math.max(1, Number(row.serverCount) || 1) },
+        },
+      }));
+      setSlotStatus(prev => ({ ...prev, [site]: "ready" }));
+    };
+
+    const run = async () => {
+      try {
+        const response = await secureStreamFetch(
+          `${getBaseUrl()}/api/anime/sources-stream?${params.toString()}`,
+          { signal: controller.signal },
+        );
+        if (!response.ok || !response.body) throw new Error(`availability_${response.status}`);
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+        let currentEvent = "";
+        const consume = (text: string) => {
+          buffer += text;
+          const lines = buffer.split(/\r?\n/);
+          buffer = lines.pop() || "";
+          for (const line of lines) {
+            if (!line) { currentEvent = ""; continue; }
+            if (line.startsWith("event: ")) { currentEvent = line.slice(7).trim(); continue; }
+            if (!line.startsWith("data: ")) continue;
+            const payload = line.slice(6).trim();
+            if (!payload || payload === "[DONE]") continue;
+            try {
+              const row = JSON.parse(payload);
+              if (currentEvent === "source" || row?.checkOnly || row?.available) applyRow(row);
+            } catch {
+              /* تجاهل حدث SSE غير صالح */
+            }
+          }
+        };
+        while (!cancelled) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          if (value) consume(decoder.decode(value, { stream: true }));
+        }
+        consume(decoder.decode());
+      } catch {
+        if (!controller.signal.aborted && isMountedRef.current) setAvailabilityError(true);
+      } finally {
+        if (!cancelled && isMountedRef.current) setAvailabilityDone(true);
+      }
+    };
+    void run();
+    return () => {
+      cancelled = true;
+      controller.abort();
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [anime, epNum, titleStr, englishStr, titleArStr, format, year, episodes, native, anslayerId, singleSite, availabilityAttempt]);
 
   /* ── Orientation lock ── */
   useEffect(() => {
@@ -622,6 +738,7 @@ export default function WatchScreen() {
   /* ── إعادة تعيين حالة المصادر (زر تحديث) — مسح الأخطاء للسماح بالمحاولة مجدداً ── */
   function refreshAllSources() {
     abortRef.current?.abort();
+    availabilityAbortRef.current?.abort();
     /* إلغاء كل طلبات المواقع الجارية — كانت تتراكم بدون إلغاء عند الضغط على تحديث */
     siteCtrls.current.forEach(c => c.abort());
     siteCtrls.current.clear();
@@ -631,6 +748,10 @@ export default function WatchScreen() {
     inFlightSitesRef.current.clear();
     fetchedSitesRef.current.clear();
     setSlotStatus({});
+    setAvailableSlots({});
+    setAvailabilityDone(false);
+    setAvailabilityError(false);
+    setAvailabilityAttempt(v => v + 1);
   }
 
   /* ── Play a source ── */
@@ -735,9 +856,23 @@ export default function WatchScreen() {
         })
         .filter(s => !isBlockedSource(s))
         .filter(s => !(s.isEmbed && s.url && (s.url.includes("mega.nz") || s.url.includes("mega.co.nz"))))
+         .filter(s => isValidSourceUrl(getPlayUrl(s)))
         .filter(s => { const k = getPlayUrl(s); if (!k || seenKeys.current.has(k)) return false; seenKeys.current.add(k); return true; });
 
-      if (!newSrcs.length) { setSlotStatus(prev => ({ ...prev, [site]: "failed" })); return; }
+       if (!newSrcs.length) {
+         setSlotStatus(prev => ({ ...prev, [site]: "failed" }));
+         if (preferredQuality) {
+           setAvailableSlots(prev => {
+             const next = { ...prev };
+             const siteSlots = { ...(next[site] || {}) };
+             delete siteSlots[preferredQuality];
+             if (Object.keys(siteSlots).length) next[site] = siteSlots;
+             else delete next[site];
+             return next;
+           });
+         }
+         return;
+       }
 
       fetchedSitesRef.current.add(fetchKey);
       setSlotStatus(prev => ({ ...prev, [site]: "ready" }));
@@ -752,7 +887,19 @@ export default function WatchScreen() {
       if (best) playSrc(best);
 
     } catch {
-      if (isMountedRef.current) setSlotStatus(prev => ({ ...prev, [site]: "failed" }));
+       if (isMountedRef.current) {
+         setSlotStatus(prev => ({ ...prev, [site]: "failed" }));
+         if (preferredQuality) {
+           setAvailableSlots(prev => {
+             const next = { ...prev };
+             const siteSlots = { ...(next[site] || {}) };
+             delete siteSlots[preferredQuality];
+             if (Object.keys(siteSlots).length) next[site] = siteSlots;
+             else delete next[site];
+             return next;
+           });
+         }
+       }
       fetchedSitesRef.current.delete(fetchKey); // يسمح بإعادة المحاولة
     } finally {
       /* نضمن مسح الـ timeout دائماً — حتى عند abort أو خطأ */
@@ -1241,6 +1388,8 @@ export default function WatchScreen() {
 
   /* ══════════════ PICKER ══════════════ */
 
+  const hasAvailableSlot = Object.values(availableSlots).some(slots => Object.keys(slots).length > 0);
+
   return (
     <View style={{ flex: 1, backgroundColor: "#07070d" }}>
       {coverUrl ? <Image source={{ uri: coverUrl }} style={[StyleSheet.absoluteFill, { opacity: 0.08 }]} blurRadius={Platform.OS === "ios" ? 28 : 10} resizeMode="cover" /> : null}
@@ -1296,6 +1445,29 @@ export default function WatchScreen() {
           </View>
         </View>
 
+         {!availabilityDone && (
+           <View style={d.availabilityState}>
+             <SpinRing size={24} />
+             <Text style={d.availabilityText}>جاري التحقق من المصادر المتاحة…</Text>
+           </View>
+         )}
+
+         {availabilityDone && !hasAvailableSlot && (
+           <View style={d.availabilityEmpty}>
+             <Ionicons name={availabilityError ? "cloud-offline-outline" : "search"} size={34} color="rgba(139,92,246,0.45)" />
+             <Text style={d.availabilityEmptyTitle}>
+               {availabilityError ? "تعذر التحقق من المصادر" : "لا توجد مصادر متاحة لهذه الحلقة"}
+             </Text>
+             <Text style={d.availabilityEmptyText}>
+               {availabilityError ? "تحقق من الاتصال ثم أعد المحاولة." : "لم يُرجع الخادم أي مصدر صالح حالياً."}
+             </Text>
+             <Pressable onPress={refreshAllSources} style={d.retryBigBtn}>
+               <Ionicons name="refresh" size={16} color="#c4b5fd" />
+               <Text style={d.retryBigText}>إعادة المحاولة</Text>
+             </Pressable>
+           </View>
+         )}
+
         {/* ── مجموعات الجودة — نمط الويب ── */}
         {(singleSite === "anslayer" ? (["1080p", "720p"] as QualityKey[]) : Q_KEYS).map(qk => {
           const allSlots = singleSite === "anslayer"
@@ -1303,7 +1475,8 @@ export default function WatchScreen() {
             : singleSite
               ? (STATIC_PICKER[qk] || []).filter(slot => slot.site === singleSite)
               : (STATIC_PICKER[qk] || []);
-          const slots = allSlots;
+           const slots = allSlots.filter(slot => !!availableSlots[slot.site]?.[qk]);
+           if (!slots.length) return null;
           const dotColor = qk === "1080p" ? "#fbbf24" : qk === "720p" ? "#34d399" : "#94a3b8";
           return (
             <View key={qk} style={{ gap: 6 }}>
@@ -1456,6 +1629,11 @@ const d = StyleSheet.create({
   infoEpRow:     { flexDirection: "row", gap: 8, flexWrap: "wrap" },
   infoEpBadge:   { flexDirection: "row", alignItems: "center", gap: 5, backgroundColor: "rgba(124,58,237,0.18)", borderRadius: 8, borderWidth: 1, borderColor: "rgba(139,92,246,0.28)", paddingHorizontal: 10, paddingVertical: 5 },
   infoEpText:    { fontSize: 11, fontFamily: "Cairo_700Bold", color: "#c4b5fd" },
+  availabilityState: { alignItems: "center", justifyContent: "center", gap: 10, paddingVertical: 22 },
+  availabilityText: { fontSize: 12, fontFamily: "Cairo_400Regular", color: "rgba(255,255,255,0.42)", textAlign: "center" },
+  availabilityEmpty: { alignItems: "center", justifyContent: "center", gap: 10, paddingVertical: 42, paddingHorizontal: 18 },
+  availabilityEmptyTitle: { fontSize: 14, fontFamily: "Cairo_700Bold", color: "rgba(255,255,255,0.62)", textAlign: "center" },
+  availabilityEmptyText: { fontSize: 11, fontFamily: "Cairo_400Regular", color: "rgba(255,255,255,0.30)", textAlign: "center" },
 
   /* Scroll */
   scrollContent: { padding: 14, paddingBottom: 100, gap: 12 },

@@ -134,6 +134,16 @@ function resolveUrl(url: string | undefined, base: string): string {
   return url.startsWith("/") ? base + url : url;
 }
 
+function isValidAnimUrl(url: string | undefined): boolean {
+  if (!url) return false;
+  try {
+    const parsed = new URL(url.startsWith("/") ? "https://nova.local" + url : url);
+    return parsed.protocol === "http:" || parsed.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
 function getSrcQuality(src: AnimSrc): Quality {
   const tierStr = (src.tier || "").toLowerCase();
   const lbl = (src.label || "").toLowerCase();
@@ -157,7 +167,7 @@ function getSrcQuality(src: AnimSrc): Quality {
 function isDirectPlayable(src: AnimSrc): boolean {
   if (src.isEmbed) return false;
   const url = (src.proxyUrl || src.directUrl || src.url || "").toLowerCase();
-  if (!url) return false;
+  if (!isValidAnimUrl(src.proxyUrl || src.directUrl || src.url)) return false;
   if (url.includes("mega.nz") || url.includes("mega.co.nz")) return false;
   return true;
 }
@@ -165,7 +175,7 @@ function isDirectPlayable(src: AnimSrc): boolean {
 function isEmbedSrc(src: AnimSrc): boolean {
   if (!src.isEmbed) return false;
   const url = (src.proxyUrl || src.directUrl || src.url || "").toLowerCase();
-  return !!url;
+  return !!url && isValidAnimUrl(src.proxyUrl || src.directUrl || src.url);
 }
 
 function getPlayUrl(src: AnimSrc): string {
@@ -326,7 +336,6 @@ export default function AnimationWatchScreen() {
   const titleStr  = decodeURIComponent(params.title  || "");
   const posterUrl = params.poster ? decodeURIComponent(params.poster) : "";
   const epTitle   = params.etitle ? decodeURIComponent(params.etitle) : undefined;
-  const autoplay  = params.autoplay === "1";
 
   const [screen, setScreen]       = useState<Screen>("picker");
   const [sources, setSources]     = useState<AnimSrc[]>([]);
@@ -347,7 +356,6 @@ export default function AnimationWatchScreen() {
   const seenKeys         = useRef(new Set<string>());
   const autoPlayFiredRef  = useRef(false);
   const autoPlayTimerRef  = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const hasCachedRef      = useRef(false); // هل تم تحميل مصادر من الكاش المحلي؟
   const isMountedRef      = useRef(true);  // يمنع setState بعد unmount → يحمي من crash
 
   const progressKey   = `anim-wp-${tmdbId}-${type}-${season}-${ep}`;
@@ -372,48 +380,6 @@ export default function AnimationWatchScreen() {
       if (v === "false") setSubLang("off");
     });
 
-    /* فحص الكاش المحلي للمصادر — يتيح الفتح الفوري */
-    if (!animSrcCacheKey) return;
-    AsyncStorage.getItem(animSrcCacheKey).then(raw => {
-      if (!raw || !isMountedRef.current) return;
-      try {
-        const { sources: cached, ts }: { sources: AnimSrc[]; ts: number } = JSON.parse(raw);
-        if (!cached?.length || Date.now() - ts > ANIM_SRC_CACHE_TTL) return;
-        if (!isMountedRef.current) return;
-
-        const base = getBaseUrl();
-        const resolved = cached.map(s => ({
-          ...s,
-          directUrl: s.directUrl ? (s.directUrl.startsWith("/") ? base + s.directUrl : s.directUrl) : undefined,
-          url: s.url ? (s.url.startsWith("/") ? base + s.url : s.url) : undefined,
-          proxyUrl: s.proxyUrl ? (s.proxyUrl.startsWith("/") ? base + s.proxyUrl : s.proxyUrl) : undefined,
-        }));
-
-        /* أضف المصادر المحفوظة فوراً وانتقل للـ picker */
-        hasCachedRef.current = true;
-        setSources(resolved);
-        /* ⚠️ لا نبذر seenKeys من الكاش — نتركها فارغة حتى تصل المصادر الطازجة
-           وتحلّ محلّ القديمة per-site. هذا يمنع تشغيل روابط CDN منتهية الصلاحية. */
-        setLoading(false);
-        setScreen("picker");
-
-        /* شغّل تلقائياً من الكاش فقط إذا كان الكاش حديثاً (< 2 دقيقة) —
-           الكاش الأقدم قد يحتوي روابط CDN منتهية الصلاحية تُسبّب الكراش */
-        if (autoplay && Date.now() - ts < 2 * 60 * 1000) {
-          const isDU = (s: AnimSrc) => (s.label || "").toLowerCase().startsWith("dulo");
-          const first =
-            resolved.find(s => isDirectPlayable(s) && isDU(s)) ??
-            resolved.find(s => isDirectPlayable(s));
-          if (first) {
-            autoPlayFiredRef.current = true;
-            setTimeout(() => {
-              if (!isMountedRef.current) return;
-              setPlayingSrc(first); setScreen("webplayer");
-            }, 0);
-          }
-        }
-      } catch { /* تجاهل كاش تالف — يحدث عند الإغلاق القسري للتطبيق */ }
-    }).catch(() => {});
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [progressKey, animSrcCacheKey]);
 
@@ -486,12 +452,9 @@ export default function AnimationWatchScreen() {
     if (!tmdbId) return;
     autoPlayFiredRef.current = false;
     setLoading(true);
-    const hasCached = hasCachedRef.current;
-    if (!hasCached) {
-      setSources([]);
-      seenKeys.current.clear();
-      setScreen("loading");
-    }
+    setSources([]);
+    seenKeys.current.clear();
+    setScreen("loading");
 
     abortRef.current?.abort();
     abortRef.current = new AbortController();
@@ -545,7 +508,7 @@ export default function AnimationWatchScreen() {
                 proxyUrl: resolveUrl(data.proxyUrl, base),
               };
               const key = src.proxyUrl || src.directUrl || src.url || "";
-              if (!key || seenKeys.current.has(key)) continue;
+              if (!isValidAnimUrl(key) || seenKeys.current.has(key)) continue;
               seenKeys.current.add(key);
               freshSrcs.push(src);
 
@@ -619,7 +582,7 @@ export default function AnimationWatchScreen() {
     let next = src;
     if (src.site && !src.isEmbed) {
       try {
-        const response = await fetch(`${getBaseUrl()}/api/animation/source-resolve`, {
+        const response = await secureFetch(`${getBaseUrl()}/api/animation/source-resolve`, {
           method: "POST",
           headers: { "Content-Type": "application/json", "x-nova-client": "mobile" },
           body: JSON.stringify({
@@ -643,6 +606,7 @@ export default function AnimationWatchScreen() {
           status: "ok",
           site: src.site,
         };
+        if (!isValidAnimUrl(getPlayUrl(next))) throw new Error("resolve_invalid_url");
         setSources(prev => prev.map(item => item.site === src.site ? { ...item, ...next } : item));
       } catch {
         setSources(prev => prev.map(item => item.site === src.site ? { ...item, status: "fail" } : item));
@@ -874,7 +838,6 @@ export default function AnimationWatchScreen() {
         onError={() => {
           handleTimeUpdate(lastTimeRef.current);
           if (animSrcCacheKey) AsyncStorage.removeItem(animSrcCacheKey).catch(() => {});
-          hasCachedRef.current = false;
           setSources([]);
           seenKeys.current.clear();
           setScreen("picker");
@@ -925,7 +888,6 @@ export default function AnimationWatchScreen() {
           handleTimeUpdate(lastTimeRef.current);
           /* ⚠️ احذف كاش المصادر التالفة — يمنع تكرار الكراش عند فتح نفس المحتوى مجدداً */
           if (animSrcCacheKey) AsyncStorage.removeItem(animSrcCacheKey).catch(() => {});
-          hasCachedRef.current = false;
           setSources([]);
           seenKeys.current.clear();
           setScreen("picker");
