@@ -1,5 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import * as ScreenOrientation from "expo-screen-orientation";
+import * as FileSystem from "expo-file-system";
 import { StatusBar } from "expo-status-bar";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -209,11 +210,13 @@ export function RiftPlayer({
   useEffect(() => {
     if (!source?.subtitleUrl || subCues.length) return;
     const controller = new AbortController();
-    fetch(source.subtitleUrl, { signal: controller.signal })
-      .then((response) => {
-        if (!response.ok) throw new Error(`subtitle ${response.status}`);
-        return response.text();
-      })
+    const subtitleText = source.subtitleUrl.startsWith("file://")
+      ? FileSystem.readAsStringAsync(source.subtitleUrl)
+      : fetch(source.subtitleUrl, { signal: controller.signal }).then((response) => {
+          if (!response.ok) throw new Error(`subtitle ${response.status}`);
+          return response.text();
+        });
+    subtitleText
       .then((text) => {
         if (!controller.signal.aborted) {
           const cues = parseVtt(text);

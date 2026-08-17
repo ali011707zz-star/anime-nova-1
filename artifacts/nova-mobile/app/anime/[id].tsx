@@ -47,6 +47,13 @@ query ($id: Int) {
   }
 }`;
 
+/* Cards from the latest/source catalogs may carry an AnimeSlayer catalog id
+   rather than an AniList id. The web resolves those cards by title first. */
+const DETAIL_BY_SEARCH_QUERY = DETAIL_QUERY.replace(
+  "query ($id: Int) {\n  Media(id: $id, type: ANIME)",
+  "query ($search: String) {\n  Media(search: $search, type: ANIME)",
+);
+
 /* ── Maps ── */
 const GENRE_MAP: Record<string,string> = {
   Action:"أكشن", Adventure:"مغامرة", Comedy:"كوميدي", Drama:"دراما",
@@ -173,7 +180,14 @@ function CharCard({ e, animeId, animeTitle, favIds, onToggle }: {
 }
 
 export default function AnimeDetailScreen() {
-  const { id } = useLocalSearchParams<{ id: string }>();
+  const { id, src, title, english, cover, ep } = useLocalSearchParams<{
+    id: string;
+    src?: string;
+    title?: string;
+    english?: string;
+    cover?: string;
+    ep?: string;
+  }>();
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const topPad = Platform.OS === "web" ? 0 : insets.top;
@@ -237,13 +251,78 @@ export default function AnimeDetailScreen() {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 15000);
 
-    fetch(`${getBaseUrl()}/api/anilist`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ query: DETAIL_QUERY, variables: { id: parseInt(id) } }),
-      signal: controller.signal,
-    }).then(r => r.json()).then(data => {
-      const a = data.data?.Media;
+    const base = getBaseUrl();
+    const source = Array.isArray(src) ? src[0] : src;
+    const sourceTitle = (Array.isArray(title) ? title[0] : title)
+      || (Array.isArray(english) ? english[0] : english)
+      || "";
+    const sourceCover = (Array.isArray(cover) ? cover[0] : cover) || "";
+    const sourceEpisode = parseInt((Array.isArray(ep) ? ep[0] : ep) || "0", 10) || 0;
+    const useProxy = async (query: string, variables: Record<string, unknown>) => {
+      const response = await fetch(`${base}/api/anime/anilist`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ query, variables }),
+        signal: controller.signal,
+      });
+      return response.json();
+    };
+    const useDirect = async (query: string, variables: Record<string, unknown>) => {
+      const response = await fetch(`${base}/api/anilist`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ query, variables }),
+        signal: controller.signal,
+      });
+      return response.json();
+    };
+    const fetchDetails = async (viaProxy: boolean): Promise<any> => {
+      if ((source === "mal" || source === "kitsu") && id) {
+        const response = await fetch(
+          `${base}/api/anime/meta-by-id?id=${encodeURIComponent(id)}&source=${source}`,
+          { signal: controller.signal },
+        );
+        return response.json();
+      }
+      if (source === "anslayer" && sourceTitle.trim()) {
+        return (viaProxy ? useProxy : useDirect)(
+          DETAIL_BY_SEARCH_QUERY,
+          { search: sourceTitle.trim() },
+        );
+      }
+      return (viaProxy ? useProxy : useDirect)(
+        DETAIL_QUERY,
+        { id: parseInt(id, 10) },
+      );
+    };
+
+    fetchDetails(true).then(async data => {
+      let a = data.data?.Media;
+      if (!a) {
+        try {
+          a = (await fetchDetails(false)).data?.Media;
+        } catch {
+          // The final source-specific fallback below keeps the card usable.
+        }
+      }
+      if (!a && source === "anslayer" && sourceTitle.trim()) {
+        a = {
+          id: parseInt(id, 10),
+          idMal: null,
+          title: { romaji: sourceTitle, english: sourceTitle, native: sourceTitle },
+          description: "",
+          bannerImage: sourceCover || null,
+          coverImage: { large: sourceCover, extraLarge: sourceCover },
+          averageScore: 0, popularity: 0, favourites: 0,
+          status: "RELEASING", episodes: sourceEpisode, duration: 0,
+          seasonYear: null, season: null, format: "TV", source: null,
+          startDate: { year: null, month: null, day: null },
+          endDate: { year: null, month: null, day: null },
+          genres: [], studios: { nodes: [] }, characters: { edges: [] },
+          relations: { edges: [] }, recommendations: { nodes: [] },
+          nextAiringEpisode: null, rankings: [], trailer: null, isAdult: false,
+        };
+      }
       if (!a) { setLoadError(true); return; }
       setAnime(a);
       if (a?.nextAiringEpisode?.timeUntilAiring) {
@@ -256,7 +335,7 @@ export default function AnimeDetailScreen() {
           if (controller.signal.aborted) return;
           if (cached && /[\u0600-\u06FF]/.test(cached)) { setDescAr(cached); setDescLoading(false); return; }
           const stripped = stripHtml(a.description).substring(0, 500);
-          fetch(`${getBaseUrl()}/api/anime/translate?text=${encodeURIComponent(stripped)}&from=en&to=ar&kind=synopsis`, { signal: controller.signal })
+          fetch(`${base}/api/anime/translate?text=${encodeURIComponent(stripped)}&from=en&to=ar&kind=synopsis`, { signal: controller.signal })
             .then(r2 => r2.json()).then(d2 => {
               if (controller.signal.aborted) return;
               const t = d2.translated;
@@ -280,7 +359,7 @@ export default function AnimeDetailScreen() {
     AsyncStorage.getItem(`adult-warn-${id}`).then(v => { if (isMountedRef.current && v === "1") setWarnDismissed(true); });
 
     return () => { clearTimeout(timeoutId); controller.abort(); };
-  }, [id, retryTick]);
+  }, [id, src, title, english, cover, ep, retryTick]);
 
   /* Update countdown timer every minute */
   useEffect(() => {

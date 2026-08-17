@@ -41,8 +41,8 @@ const API_BASE = `${SEARCH_API_BASE}/api`;
 /* ── Types ── */
 interface AnimeResult {
   id: number;
-  title: { romaji: string; english?: string; native?: string };
-  coverImage: { large: string };
+  title: { romaji?: string; english?: string; native?: string };
+  coverImage: { large?: string; extraLarge?: string };
   averageScore?: number;
   episodes?: number;
   format?: string;
@@ -146,8 +146,8 @@ function buildSearchQuery(sort: string, format: string, status: string, genre: s
   const sortArr = sort ? `[SEARCH_MATCH, ${sort}]` : "[SEARCH_MATCH, POPULARITY_DESC]";
   return `query ($search: String, $page: Int, $perPage: Int) {
   Page(page: $page, perPage: $perPage) {
-    media(search: $search, type: ANIME, isAdult: false, genre_not_in: ["Hentai","Ecchi"], sort: ${sortArr}${format ? `, format: ${format}` : ""}${status ? `, status: ${status}` : ""}${genre ? `, genre: "${genre}"` : ""}${season ? `, season: ${season}` : ""}) {
-      id title { romaji english } coverImage { large } averageScore episodes format status startDate { year } genres
+    media(search: $search, type: ANIME, isAdult: false, genre_not_in: ["Hentai"], sort: ${sortArr}${format ? `, format: ${format}` : ""}${status ? `, status: ${status}` : ""}${genre ? `, genre: "${genre}"` : ""}${season ? `, season: ${season}` : ""}) {
+      id title { romaji english native } coverImage { large extraLarge } averageScore episodes format status startDate { year } genres
     }
   }
 }`;
@@ -164,7 +164,22 @@ function buildBrowseQuery(sort: string, format: string, status: string, genre: s
 }
 
 function filterSafe(list: AnimeResult[]): AnimeResult[] {
-  return list.filter(a => !(a.genres || []).some(g => BLOCKED_GENRES.has(g)));
+  const seen = new Set<number>();
+  return list.filter((anime) => {
+    if (!anime?.id || seen.has(anime.id)) return false;
+    seen.add(anime.id);
+    if ((anime.genres || []).some(g => BLOCKED_GENRES.has(g))) return false;
+
+    /* Web search accepts AniList fallback records that have only an
+       English/native title or extraLarge artwork. Normalize those records
+       before rendering instead of dropping them on mobile. */
+    const title = anime.title?.romaji || anime.title?.english || anime.title?.native;
+    const cover = anime.coverImage?.large || anime.coverImage?.extraLarge;
+    if (!title || !cover) return false;
+    if (!anime.title?.romaji) anime.title = { ...anime.title, romaji: title };
+    if (!anime.coverImage?.large) anime.coverImage = { ...anime.coverImage, large: cover };
+    return true;
+  });
 }
 
 /* ── Anime Card ── */

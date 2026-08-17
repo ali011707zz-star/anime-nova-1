@@ -640,7 +640,7 @@ export default function WatchScreen() {
 
     const subtitleUrl = subtitlesDisabledForSite(src.site)
       ? undefined
-      : (src.subtitleUrl || globalSubUrl);
+      : normalizeProviderSubtitleUrl(src.site || "", src.subtitleUrl || globalSubUrl, getBaseUrl());
     setPlayingSrc({ ...src, subtitleUrl });
     setResolveFailed(false);
     /* على web: HLS → embed WebView مع hls-proxy URL مباشرة */
@@ -723,7 +723,16 @@ export default function WatchScreen() {
       if (!rawSrcs.length) { setSlotStatus(prev => ({ ...prev, [site]: "failed" })); return; }
 
       const newSrcs = rawSrcs
-        .map((s): Src => ({ ...s, site: s.site || site, directUrl: resolveUrl(s.directUrl, base), url: resolveUrl(s.url, base) }))
+        .map((s): Src => {
+          const sourceSite = s.site || site;
+          return {
+            ...s,
+            site: sourceSite,
+            directUrl: resolveUrl(s.directUrl, base),
+            url: resolveUrl(s.url, base),
+            subtitleUrl: normalizeProviderSubtitleUrl(sourceSite, s.subtitleUrl, base),
+          };
+        })
         .filter(s => !isBlockedSource(s))
         .filter(s => !(s.isEmbed && s.url && (s.url.includes("mega.nz") || s.url.includes("mega.co.nz"))))
         .filter(s => { const k = getPlayUrl(s); if (!k || seenKeys.current.has(k)) return false; seenKeys.current.add(k); return true; });
@@ -810,9 +819,7 @@ export default function WatchScreen() {
     const subRaw     = subtitlesDisabledForSite(site)
       ? undefined
       : (best.subtitleUrl || globalSubUrl);
-     const subtitleUrl = site === "kawaii"
-       ? normalizeKawaiiSubtitleUrl(subRaw, base)
-       : (subRaw ? resolveUrl(subRaw, base) : undefined);
+     const subtitleUrl = normalizeProviderSubtitleUrl(site, subRaw, base);
 
     const token = await getAuthToken();
     /* Fire-and-forget — يعمل في الخلفية بمستقل عن lifecycle هذه الشاشة */
@@ -881,7 +888,16 @@ export default function WatchScreen() {
       if (!rawSrcs.length) throw new Error("no sources");
 
       const newSrcs = rawSrcs
-        .map((s): Src => ({ ...s, site: s.site || site, directUrl: resolveUrl(s.directUrl, base), url: resolveUrl(s.url, base) }))
+        .map((s): Src => {
+          const sourceSite = s.site || site;
+          return {
+            ...s,
+            site: sourceSite,
+            directUrl: resolveUrl(s.directUrl, base),
+            url: resolveUrl(s.url, base),
+            subtitleUrl: normalizeProviderSubtitleUrl(sourceSite, s.subtitleUrl, base),
+          };
+        })
         .filter(s => !isBlockedSource(s))
         .filter(s => !(s.isEmbed && s.url && (s.url.includes("mega.nz") || s.url.includes("mega.co.nz"))))
         .filter(s => { const k = getPlayUrl(s); if (!k || seenKeys.current.has(k)) return false; seenKeys.current.add(k); return true; });
@@ -900,9 +916,7 @@ export default function WatchScreen() {
       const hdrs      = best.headers || extractProxyHeaders(rawUrl);
       const proxyUrl  = ensureVpsProxy(rawUrl, hdrs, base);
       const subRaw    = best.subtitleUrl || globalSubUrl;
-       const subtitleUrl = site === "kawaii"
-         ? normalizeKawaiiSubtitleUrl(subRaw, base)
-         : (subRaw ? resolveUrl(subRaw, base) : undefined);
+       const subtitleUrl = normalizeProviderSubtitleUrl(site, subRaw, base);
       const token     = await getAuthToken();
        if (DOWNLOAD_SUBTITLE_SITES.has(site) && !subtitleUrl) {
          throw new Error("Arabic subtitle is not ready");

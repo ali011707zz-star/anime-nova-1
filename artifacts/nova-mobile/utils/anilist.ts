@@ -105,8 +105,16 @@ query SeasonalAnime($season: MediaSeason!, $year: Int!) {
 
 export const TOP_RATED_QUERY = `
 query TopRatedAnime {
-  Page(page: 1, perPage: 20) {
-    media(sort: SCORE_DESC, type: ANIME, averageScore_greater: 70) {
+  Page(perPage: 14) {
+    media(
+      sort: SCORE_DESC,
+      type: ANIME,
+      countryOfOrigin: "JP",
+      format_in: [TV, MOVIE],
+      isAdult: false,
+      genre_not_in: ["Hentai"],
+      averageScore_greater: 75
+    ) {
       id title { romaji english } coverImage { large extraLarge } averageScore episodes status format
     }
   }
@@ -194,9 +202,54 @@ query RomanceAnime {
 
 export const ISEKAI_QUERY = `
 query IsekaiAnime {
-  Page(page: 1, perPage: 20) {
-    media(genre: "Isekai", type: ANIME, sort: POPULARITY_DESC, countryOfOrigin: "JP", isAdult: false, genre_not_in: ["Hentai"]) {
+  Page(perPage: 14) {
+    media(
+      type: ANIME,
+      genre_in: ["Isekai"],
+      countryOfOrigin: "JP",
+      format_in: [TV, ONA, MOVIE],
+      isAdult: false
+    ) {
       id title { romaji english } coverImage { large extraLarge } averageScore episodes status format
+    }
+  }
+}`;
+
+/* These are intentionally kept in lockstep with the sections currently
+   shipped by the web home page.  Mobile used to show only the dynamic
+   current-season query, so older web sections were silently missing. */
+export const SPRING_2026_QUERY = `
+query Spring2026Anime {
+  Page(perPage: 20) {
+    media(
+      type: ANIME,
+      season: SPRING,
+      seasonYear: 2026,
+      sort: POPULARITY_DESC,
+      format_in: [TV, ONA],
+      isAdult: false,
+      genre_not_in: ["Hentai"]
+    ) {
+      id title { romaji english } coverImage { large } averageScore episodes
+      nextAiringEpisode { episode } status
+    }
+  }
+}`;
+
+export const FALL_2025_QUERY = `
+query Fall2025Anime {
+  Page(perPage: 14) {
+    media(
+      type: ANIME,
+      season: FALL,
+      seasonYear: 2025,
+      sort: POPULARITY_DESC,
+      format_in: [TV, ONA],
+      isAdult: false,
+      genre_not_in: ["Hentai"]
+    ) {
+      id title { romaji english } coverImage { large } averageScore episodes
+      nextAiringEpisode { episode } status
     }
   }
 }`;

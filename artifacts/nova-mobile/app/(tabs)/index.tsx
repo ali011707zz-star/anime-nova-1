@@ -18,6 +18,7 @@ import {
   AIRING_QUERY, AnilistMedia, anilistQuery,
   POPULAR_QUERY, TRENDING_QUERY,
   SEASONAL_QUERY, TOP_RATED_QUERY, MOVIES_QUERY,
+  ISEKAI_QUERY, SPRING_2026_QUERY, FALL_2025_QUERY,
   fetchAllTodayEpisodes, formatAiringTime,
   getCurrentSeason,
 } from "@/utils/anilist";
@@ -71,11 +72,27 @@ export default function HomeScreen() {
     queryFn: () => anilistQuery<{ Page: { media: AnilistMedia[] } }>(MOVIES_QUERY),
   });
 
+  const { data: spring2026, refetch: refetchSpring } = useQuery({
+    queryKey: ["spring2026"],
+    queryFn: () => anilistQuery<{ Page: { media: AnilistMedia[] } }>(SPRING_2026_QUERY),
+  });
+
+  const { data: fall2025, refetch: refetchFall } = useQuery({
+    queryKey: ["fall2025"],
+    queryFn: () => anilistQuery<{ Page: { media: AnilistMedia[] } }>(FALL_2025_QUERY),
+  });
+
+  const { data: isekai, refetch: refetchIsekai } = useQuery({
+    queryKey: ["isekai"],
+    queryFn: () => anilistQuery<{ Page: { media: AnilistMedia[] } }>(ISEKAI_QUERY),
+  });
+
   /* أحدث الحلقات — نفس كتالوج AnimeSlayer المستخدم في الويب. */
   type TodayEp = {
     animeId: number;
     anslayerId: number;
     name: string;
+    titleAr?: string;
     episode: number;
     cover: string;
     year?: string;
@@ -85,7 +102,21 @@ export default function HomeScreen() {
     const ctrl = new AbortController();
     fetch(`${getBaseUrl()}/api/anime/anslayer-latest`, { signal: ctrl.signal })
       .then(r => r.json())
-      .then((d: { items?: TodayEp[] }) => { if (!ctrl.signal.aborted) setTodayEps(d.items || []); })
+      .then((payload: TodayEp[] | { items?: TodayEp[] }) => {
+        if (ctrl.signal.aborted) return;
+        const raw = Array.isArray(payload) ? payload : payload.items || [];
+        const normalized = raw
+          .map((item: any) => ({
+            ...item,
+            animeId: Number(item.animeId ?? item.anilistId ?? 0),
+            anslayerId: Number(item.anslayerId ?? item.animeId ?? item.anilistId ?? 0),
+            name: String(item.name ?? item.title ?? "").trim(),
+            titleAr: String(item.titleAr ?? item.arabicTitle ?? "").trim(),
+            cover: String(item.cover ?? item.poster ?? "").trim(),
+          }))
+          .filter((item) => item.animeId > 0 && item.name && item.episode != null);
+        setTodayEps(normalized);
+      })
       .catch((e) => { if (e?.name !== "AbortError") console.warn("[Home] anslayer-latest fetch error"); });
     return () => ctrl.abort();
   }, []);
@@ -122,13 +153,19 @@ export default function HomeScreen() {
   const seasonalList = seasonal?.Page?.media || [];
   const topRatedList = topRated?.Page?.media || [];
   const moviesList = movies?.Page?.media || [];
+  const spring2026List = spring2026?.Page?.media || [];
+  const fall2025List = fall2025?.Page?.media || [];
+  const isekaiList = isekai?.Page?.media || [];
 
   /* الويب يبني الـHero من الأكثر شعبية ذات الـbanner، وليس من TRENDING. */
   const heroItems = popularList.filter((m) => m.bannerImage).slice(0, 8);
   const recentHistory = watchHistory.slice(0, 10);
 
   const refresh = async () => {
-    await Promise.all([refetchT(), refetchP(), refetchA(), refetchS(), refetchR(), refetchM()]);
+    await Promise.all([
+      refetchT(), refetchP(), refetchA(), refetchS(), refetchR(), refetchM(),
+      refetchSpring(), refetchFall(), refetchIsekai(),
+    ]);
   };
 
   return (
@@ -232,7 +269,7 @@ export default function HomeScreen() {
               contentContainerStyle={{ paddingHorizontal: 16, gap: 10 }}
               renderItem={({ item: ep }) => (
                 <Pressable
-                  onPress={() => router.push(`/watch?anime=${ep.animeId}&ep=${ep.episode}&title=${encodeURIComponent(ep.name || "")}&english=${encodeURIComponent(ep.name || "")}&cover=${encodeURIComponent(ep.cover || "")}&site=anslayer&anslayerId=${ep.anslayerId}&single=1` as any)}
+                  onPress={() => router.push(`/watch?anime=${ep.animeId}&ep=${ep.episode}&title=${encodeURIComponent(ep.name || "")}&english=${encodeURIComponent(ep.name || "")}&cover=${encodeURIComponent(ep.cover || "")}&titleAr=${encodeURIComponent(ep.titleAr || "")}&site=anslayer&anslayerId=${ep.anslayerId}&single=1` as any)}
                   style={[todayEpStyles.card, { backgroundColor: colors.card, borderColor: colors.border }]}
                 >
                   {ep.cover ? (
@@ -278,6 +315,18 @@ export default function HomeScreen() {
                 onSeeAll={() => router.push({ pathname: "/browse", params: { sort: "POPULARITY_DESC", season, year: String(year) } } as any)}
               />
               <SectionRow
+                title="🌸 أنمي ربيع 2026"
+                items={spring2026List}
+                size="md"
+                onSeeAll={() => router.push({ pathname: "/browse", params: { sort: "POPULARITY_DESC", season: "SPRING", year: "2026" } } as any)}
+              />
+              <SectionRow
+                title="🍂 أنمي خريف 2025"
+                items={fall2025List}
+                size="md"
+                onSeeAll={() => router.push({ pathname: "/browse", params: { sort: "POPULARITY_DESC", season: "FALL", year: "2025" } } as any)}
+              />
+              <SectionRow
                 title="📡 يُعرض حالياً"
                 items={airingList}
                 size="md"
@@ -300,6 +349,12 @@ export default function HomeScreen() {
                 items={moviesList}
                 size="md"
                 onSeeAll={() => router.push({ pathname: "/browse", params: { format: "MOVIE", sort: "POPULARITY_DESC" } } as any)}
+              />
+              <SectionRow
+                title="🌀 إيسيكاي"
+                items={isekaiList}
+                size="md"
+                onSeeAll={() => router.push({ pathname: "/browse", params: { genre: "Isekai", genreAr: "إيسيكاي", sort: "POPULARITY_DESC" } } as any)}
               />
 
               {/* TMDB Animation Movies — disabled */}
