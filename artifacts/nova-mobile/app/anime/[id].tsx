@@ -284,7 +284,10 @@ export default function AnimeDetailScreen() {
         );
         return response.json();
       }
-      if (source === "anslayer" && sourceTitle.trim()) {
+      /* AnimeSlayer cards carry a catalog id, not an AniList id. Search by
+         the title whenever the route explicitly identifies that source, and
+         also when an old card contains a non-numeric catalog id. */
+      if ((source === "anslayer" || !/^\d+$/.test(String(id || ""))) && sourceTitle.trim()) {
         return (viaProxy ? useProxy : useDirect)(
           DETAIL_BY_SEARCH_QUERY,
           { search: sourceTitle.trim() },
@@ -305,7 +308,7 @@ export default function AnimeDetailScreen() {
           // The final source-specific fallback below keeps the card usable.
         }
       }
-      if (!a && source === "anslayer" && sourceTitle.trim()) {
+       if (!a && (source === "anslayer" || !/^\d+$/.test(String(id || ""))) && sourceTitle.trim()) {
         a = {
           id: parseInt(id, 10),
           idMal: null,

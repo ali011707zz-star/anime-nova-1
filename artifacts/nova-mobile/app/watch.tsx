@@ -233,7 +233,12 @@ function resolveUrl(url: string | undefined, base: string): string {
  * إذا كان الرابط بالفعل عبر /api/ → يتركه كما هو.
  * إذا كان رابطاً مباشراً للـ CDN → يلفّه في hls-proxy أو video-proxy.
  */
-function ensureVpsProxy(url: string, headers: Record<string, string> | undefined, base: string): string {
+function ensureVpsProxy(
+  url: string,
+  headers: Record<string, string> | undefined,
+  base: string,
+  hlsHint = false,
+): string {
   if (!url) return url;
   // بالفعل proxy عبر VPS
   if (url.includes("/api/anime/") || url.includes("/api/animation/") || url.includes("/proxy/hls")) return url;
@@ -246,7 +251,7 @@ function ensureVpsProxy(url: string, headers: Record<string, string> | undefined
   // LookMovie CDN — يعمل مباشرة من IP سكني مع Referer؛ يحجب VPS/datacenter
   if (url.includes("lookmovie.")) return url;
   const ref = headers?.Referer || "";
-  const isHls = /\.(m3u8)(\?|$)|\/hls\/|\/playlist\//i.test(url);
+  const isHls = hlsHint || /\.(m3u8)(\?|$)|\/hls\/|\/playlist\//i.test(url);
   if (isHls) {
     return ref
       ? `${base}/api/anime/hls-proxy?url=${encodeURIComponent(url)}&ref=${encodeURIComponent(ref)}`
@@ -371,6 +376,8 @@ const PICKER_QUALITY: Record<QualityKey, Quality> = {
   "720p": "720p HD",
   "360p": "360p SD",
 };
+const SERVER_CHECK_GIF =
+  "https://gifdb.com/images/branded/high/satoru-gojo-vs-ryomen-sukuna-gif-tt4cnmnevgpxt99u.gif";
 
 /* أوّل جودة يظهر فيها كل موقع — يُستخدم لعرض زر التنزيل مرّة واحدة فقط.
    بدون هذا يُضاف اسم الموقع لـ dlFetchingSites فيظهر SpinRing
@@ -731,9 +738,12 @@ export default function WatchScreen() {
     setScreen("picker");
     const coverParam = coverUrl ? `&cover=${encodeURIComponent(coverUrl)}` : "";
     const arParam    = titleArStr ? `&titleAr=${encodeURIComponent(titleArStr)}` : "";
-    router.replace(`/watch?anime=${anime}&ep=${n}&title=${encodeURIComponent(titleStr)}&english=${encodeURIComponent(englishStr)}&format=${encodeURIComponent(format || "")}${coverParam}${arParam}`);
+    const latestParams = singleSite === "anslayer"
+      ? `&site=anslayer&single=1${anslayerId ? `&anslayerId=${encodeURIComponent(anslayerId)}` : ""}`
+      : "";
+    router.replace(`/watch?anime=${anime}&ep=${n}&title=${encodeURIComponent(titleStr)}&english=${encodeURIComponent(englishStr)}&format=${encodeURIComponent(format || "")}${coverParam}${arParam}${latestParams}`);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [saveProgress, coverUrl, titleArStr, router, anime, titleStr, englishStr, format]);
+  }, [saveProgress, coverUrl, titleArStr, router, anime, titleStr, englishStr, format, singleSite, anslayerId]);
 
   /* ── إعادة تعيين حالة المصادر (زر تحديث) — مسح الأخطاء للسماح بالمحاولة مجدداً ── */
   function refreshAllSources() {
@@ -843,7 +853,7 @@ export default function WatchScreen() {
 
       if (!rawSrcs.length) { setSlotStatus(prev => ({ ...prev, [site]: "failed" })); return; }
 
-      const newSrcs = rawSrcs
+       const mappedSrcs = rawSrcs
         .map((s): Src => {
           const sourceSite = s.site || site;
           return {
@@ -856,8 +866,23 @@ export default function WatchScreen() {
         })
         .filter(s => !isBlockedSource(s))
         .filter(s => !(s.isEmbed && s.url && (s.url.includes("mega.nz") || s.url.includes("mega.co.nz"))))
-         .filter(s => isValidSourceUrl(getPlayUrl(s)))
-        .filter(s => { const k = getPlayUrl(s); if (!k || seenKeys.current.has(k)) return false; seenKeys.current.add(k); return true; });
+         .filter(s => isValidSourceUrl(getPlayUrl(s)));
+
+       /* لا تخلط 1080p و720p إذا أعاد الكاش رابطَي AnimeSlayer معاً.
+          الويب يثبت رابطاً واحداً للصف الذي ضغطه المستخدم؛ الموبايل يجب أن
+          يفعل الشيء نفسه حتى لا يشغل أول رابط عشوائياً. */
+       const requestedTier = preferredQuality ? PICKER_QUALITY[preferredQuality] : undefined;
+       const sameTier = requestedTier
+         ? mappedSrcs.filter(s => getSrcQuality(s) === requestedTier)
+         : mappedSrcs;
+       const candidates = requestedTier ? sameTier : mappedSrcs;
+       const selected = [...candidates].sort(
+         (a, b) => (b.qualityRank ?? 0) - (a.qualityRank ?? 0),
+       )[0];
+       const newSrcs = selected && !seenKeys.current.has(getPlayUrl(selected))
+         ? [selected]
+         : [];
+       if (selected && newSrcs.length) seenKeys.current.add(getPlayUrl(selected));
 
        if (!newSrcs.length) {
          setSlotStatus(prev => ({ ...prev, [site]: "failed" }));
@@ -960,7 +985,7 @@ export default function WatchScreen() {
     const rawUrl   = getPlayUrl(best);
     const headers  = best.headers || extractProxyHeaders(rawUrl);
     const base     = getBaseUrl();
-    const proxyUrl = ensureVpsProxy(rawUrl, headers, base);
+    const proxyUrl = ensureVpsProxy(rawUrl, headers, base, best.directType === "hls");
 
     /* ترجمة: استخدم subtitleUrl المصدر أولاً ثم الترجمة العالمية */
     const subRaw     = subtitlesDisabledForSite(site)
@@ -1061,7 +1086,7 @@ export default function WatchScreen() {
 
       const rawUrl    = getPlayUrl(best);
       const hdrs      = best.headers || extractProxyHeaders(rawUrl);
-      const proxyUrl  = ensureVpsProxy(rawUrl, hdrs, base);
+      const proxyUrl  = ensureVpsProxy(rawUrl, hdrs, base, best.directType === "hls");
       const subRaw    = best.subtitleUrl || globalSubUrl;
        const subtitleUrl = normalizeProviderSubtitleUrl(site, subRaw, base);
       const token     = await getAuthToken();
@@ -1203,7 +1228,7 @@ export default function WatchScreen() {
       const headers = s.headers || extractProxyHeaders(rawUrl);
       /* نضمن أن كل الروابط تمرّ عبر VPS proxy — ExoPlayer/AVPlayer لا يُرسل Referer
          بشكل موثوق لـ CDNs، وكثير من CDNs تحجب IPs مراكز البيانات بدون Referer صحيح */
-      const url = ensureVpsProxy(rawUrl, headers, base);
+      const url = ensureVpsProxy(rawUrl, headers, base, s.directType === "hls");
       return {
         url,
         headers,
@@ -1296,7 +1321,7 @@ export default function WatchScreen() {
     /* نحسب الرابط النهائي لـ playingSrc (بعد ensureVpsProxy) لمطابقة صحيحة مع playerSources */
     const _playRaw = getPlayUrl(playingSrc);
     const _playHeaders = playingSrc?.headers || extractProxyHeaders(_playRaw);
-    const _playFinal = ensureVpsProxy(_playRaw, _playHeaders, getBaseUrl());
+    const _playFinal = ensureVpsProxy(_playRaw, _playHeaders, getBaseUrl(), playingSrc?.directType === "hls");
     const startIdx = Math.max(0, playerSources.findIndex(s => playingSrc && s.url === _playFinal));
     return (
       <RiftPlayer
@@ -1445,12 +1470,25 @@ export default function WatchScreen() {
           </View>
         </View>
 
-         {!availabilityDone && (
-           <View style={d.availabilityState}>
-             <SpinRing size={24} />
-             <Text style={d.availabilityText}>جاري التحقق من المصادر المتاحة…</Text>
-           </View>
-         )}
+          {!availabilityDone && (
+            <View style={d.availabilityState}>
+              <View style={d.availabilityGifWrap}>
+                <Image
+                  source={{ uri: SERVER_CHECK_GIF }}
+                  style={d.availabilityGif}
+                  resizeMode="cover"
+                  accessibilityLabel="جاري فحص السيرفرات"
+                />
+                <LinearGradient
+                  colors={["transparent", "rgba(7,7,13,0.82)"]}
+                  style={StyleSheet.absoluteFill}
+                  pointerEvents="none"
+                />
+              </View>
+              <SpinRing size={24} />
+              <Text style={d.availabilityText}>جاري التحقق من المصادر المتاحة…</Text>
+            </View>
+          )}
 
          {availabilityDone && !hasAvailableSlot && (
            <View style={d.availabilityEmpty}>
@@ -1630,6 +1668,8 @@ const d = StyleSheet.create({
   infoEpBadge:   { flexDirection: "row", alignItems: "center", gap: 5, backgroundColor: "rgba(124,58,237,0.18)", borderRadius: 8, borderWidth: 1, borderColor: "rgba(139,92,246,0.28)", paddingHorizontal: 10, paddingVertical: 5 },
   infoEpText:    { fontSize: 11, fontFamily: "Cairo_700Bold", color: "#c4b5fd" },
   availabilityState: { alignItems: "center", justifyContent: "center", gap: 10, paddingVertical: 22 },
+  availabilityGifWrap: { width: "100%", maxWidth: 330, height: 184, borderRadius: 22, overflow: "hidden", backgroundColor: "rgba(255,255,255,0.025)", marginBottom: 2 },
+  availabilityGif: { width: "100%", height: "100%" },
   availabilityText: { fontSize: 12, fontFamily: "Cairo_400Regular", color: "rgba(255,255,255,0.42)", textAlign: "center" },
   availabilityEmpty: { alignItems: "center", justifyContent: "center", gap: 10, paddingVertical: 42, paddingHorizontal: 18 },
   availabilityEmptyTitle: { fontSize: 14, fontFamily: "Cairo_700Bold", color: "rgba(255,255,255,0.62)", textAlign: "center" },

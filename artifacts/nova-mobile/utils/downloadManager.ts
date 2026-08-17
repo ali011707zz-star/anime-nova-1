@@ -403,6 +403,9 @@ function requestHeaders(params: StartDownloadParams): Record<string, string> {
   const headers: Record<string, string> = {
     "X-Nova-Client": "nova-anime-mobile-v1",
     "User-Agent": "NovaAnime/1.0 (Expo; Mobile)",
+    /* DownloadResumable may issue Range requests after a background retry.
+       Explicitly advertise byte-range support to the VPS conversion route. */
+    "Accept": "video/mp4,video/*;q=0.9,*/*;q=0.1",
   };
   if (params.authToken) headers["X-App-Token"] = params.authToken;
   return headers;

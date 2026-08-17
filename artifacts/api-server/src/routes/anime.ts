@@ -15688,6 +15688,12 @@ router.get("/anime/download-mp4", async (req, res) => {
 
     const args = [
       "-hide_banner", "-loglevel", "error", "-y",
+      /* HLS manifests coming from the VPS proxy can contain absolute segment
+         URLs and may take a while to answer on a cold CDN connection. These
+         limits apply to the ffmpeg input only; the HTTP response remains
+         resumable through the Range handling below. */
+      "-rw_timeout", "120000000",
+      "-protocol_whitelist", "file,http,https,tcp,tls,crypto",
       "-i", sourceUrl,
       "-map", "0:v:0",
       "-map", "0:a:0?",
