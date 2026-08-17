@@ -552,11 +552,7 @@ export default function AnimationWatchScreen() {
               /* حد أقصى 20 مصدر — يمنع تراكم مئات المصادر من SSE stream */
               setSources(prev => prev.length >= 20 ? prev : [...prev, src]);
 
-              /* تشغيل تلقائي عند أول مصدر مباشر */
-              if (!autoPlayFiredRef.current && isDirectPlayable(src)) {
-                autoPlayFiredRef.current = true;
-                setTimeout(() => playSrc(src), 0);
-              }
+              /* عرض المصدر فقط؛ التشغيل يبدأ بعد ضغط المستخدم على البطاقة */
 
             } else if (isDone) {
               setLoading(false);
@@ -618,17 +614,52 @@ export default function AnimationWatchScreen() {
   }, [screen]);
 
 
-  /* ── Play a source — AnimHlsPlayer (WebView+hls.js) أولاً، RiftPlayer كـ fallback ── */
-  const playSrc = useCallback((src: AnimSrc) => {
-    setPlayingSrc(src);
-    if (isDirectPlayable(src)) {
+  /* ── Resolve and play only the selected source ── */
+  const playSrc = useCallback(async (src: AnimSrc) => {
+    let next = src;
+    if (src.site && !src.isEmbed) {
+      try {
+        const response = await fetch(`${getBaseUrl()}/api/animation/source-resolve`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "x-nova-client": "mobile" },
+          body: JSON.stringify({
+            sourceId: src.site,
+            title: titleStr,
+            type,
+            tmdbId,
+            season,
+            ep,
+            quality: getSrcQuality(src),
+          }),
+        });
+        if (!response.ok) throw new Error(`resolve_${response.status}`);
+        const resolved = await response.json();
+        next = {
+          ...src,
+          ...resolved,
+          directUrl: resolveUrl(resolved.directUrl, getBaseUrl()),
+          url: resolveUrl(resolved.url, getBaseUrl()),
+          proxyUrl: resolveUrl(resolved.proxyUrl, getBaseUrl()),
+          status: "ok",
+          site: src.site,
+        };
+        setSources(prev => prev.map(item => item.site === src.site ? { ...item, ...next } : item));
+      } catch {
+        setSources(prev => prev.map(item => item.site === src.site ? { ...item, status: "fail" } : item));
+        setScreen("picker");
+        return;
+      }
+    }
+
+    setPlayingSrc(next);
+    if (isDirectPlayable(next)) {
       /* WebView+hls.js: الجهاز يجلب segments مباشرةً بـ IP سكني → لا حجب CDN */
       setScreen("webplayer");
       return;
     }
-    if (needsHiddenResolve(src)) { setScreen("resolving"); return; }
+    if (needsHiddenResolve(next)) { setScreen("resolving"); return; }
     setScreen("embed");
-  }, []);
+  }, [titleStr, type, tmdbId, season, ep]);
 
   /* ── نتيجة استخراج WebView المخفي ── */
   const handleHiddenResolved = useCallback((stream: ResolvedStream) => {

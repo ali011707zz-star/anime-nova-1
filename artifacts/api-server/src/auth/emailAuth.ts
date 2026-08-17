@@ -164,7 +164,7 @@ export function registerEmailAuthRoutes(app: Express): void {
 
   app.post("/api/auth/signup", async (req: Request, res: Response) => {
     try {
-      const { email, password, displayName: rawName, verifyCode } = req.body || {};
+      const { email, password, displayName: rawName } = req.body || {};
       if (!email || !password)
         return res.status(400).json({ error: "البريد الإلكتروني وكلمة المرور مطلوبان" });
       if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(email)))
@@ -173,26 +173,6 @@ export function registerEmailAuthRoutes(app: Express): void {
         return res.status(400).json({ error: "كلمة المرور يجب أن تكون 6 أحرف على الأقل" });
 
       const emailKey = String(email).toLowerCase().trim();
-
-      if (!verifyCode)
-        return res.status(400).json({ error: "كود التحقق مطلوب" });
-
-      const pending = await getPendingCode(emailKey);
-      if (!pending || pending.type !== "signup")
-        return res.status(400).json({ error: "لم يُرسَل كود تحقق لهذا البريد، أرسل الكود أولاً" });
-      if (Date.now() > pending.expiresAt.getTime()) {
-        await deletePendingCode(emailKey);
-        return res.status(400).json({ error: "انتهت صلاحية الكود، أرسل كوداً جديداً" });
-      }
-      const attempts = await incrementAttempts(emailKey);
-      if (attempts > MAX_ATTEMPTS) {
-        await deletePendingCode(emailKey);
-        return res.status(429).json({ error: "تجاوزت عدد المحاولات، أرسل كوداً جديداً" });
-      }
-      if (String(verifyCode).trim() !== pending.code)
-        return res.status(400).json({ error: `الكود غير صحيح (${MAX_ATTEMPTS - attempts + 1} محاولات متبقية)` });
-
-      await deletePendingCode(emailKey);
 
       const already = await sbSelect("users", { email: `eq.${emailKey}` }, { limit: 1 });
       if (already.length > 0)

@@ -293,7 +293,7 @@ export default function AnimationWatch() {
   const posterUrl   = poster ? decodeURIComponent(poster) : "";
   const displayTitle = decodeURIComponent(title);
 
-  const [step, setStep]         = useState<"loading" | "sources" | "playing" | "error">("loading");
+  const [step, setStep]         = useState<"loading" | "sources" | "playing" | "error">("sources");
   const [sources, setSources]   = useState<Source[]>([]);
   const [selSrc, setSelSrc]     = useState<Source | null>(null);
   const [sseDone, setSseDone]   = useState(false);
@@ -301,7 +301,7 @@ export default function AnimationWatch() {
   const [showEpList, setShowEpList] = useState(false);
 
   /* ── User prefs (read once on mount) ── */
-  const prefAutoplay = useRef(localStorage.getItem("pref-autoplay") !== "false");
+  const prefAutoplay = useRef(false); // التشغيل يبدأ بعد اختيار المستخدم للمصدر
   const prefSubSize  = useRef(localStorage.getItem("pref-subsize") || "large");
   const prefAutoSub  = useRef(localStorage.getItem("pref-autosub") !== "false");
 
@@ -327,7 +327,7 @@ export default function AnimationWatch() {
 
 
   /* ── Lazy site picking ── */
-  const [sitePickMode, setSitePickMode] = useState(false); // يبدأ بالتحميل التلقائي (لا picker)
+  const [sitePickMode, setSitePickMode] = useState(true); // اختيار المصدر أولاً — لا تشغيل تلقائي
   const [animSiteStatus, setAnimSiteStatus] = useState<Record<string, "idle" | "fetching" | "done" | "failed">>({});
   const bgSiteTimersRef   = useRef<ReturnType<typeof setTimeout>[]>([]);
   const sseEpochRef       = useRef(0);                     // epoch — يُبطل SSE callbacks القديمة
@@ -380,15 +380,44 @@ export default function AnimationWatch() {
   const onFailRef    = useRef<() => void>(() => {});
   const stableOnFail = useCallback(() => onFailRef.current(), []);
 
-  /* ── Play a source ── */
-  const playSource = useCallback((src: Source) => {
-    setSelSrc(src);
-    setStep("playing");
-    const lbl = (src.label || "").toLowerCase();
-    if (lbl.startsWith("aflaam") || lbl.startsWith("arabseed")) {
-      setSubCues([]); setSubStatus("off");
+  /* ── Resolve and play only the source selected by the user ── */
+  const playSource = useCallback(async (src: Source) => {
+    if (src.isEmbed || !src.site) {
+      setSelSrc(src);
+      setStep("playing");
+      return;
     }
-  }, []); // eslint-disable-line
+
+    try {
+      const response = await fetch(`${API_BASE}/api/animation/source-resolve`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sourceId: src.site,
+          title: displayTitle,
+          type,
+          tmdbId,
+          season,
+          ep,
+          quality: getSourceTier(src),
+        }),
+        signal: AbortSignal.timeout(30_000),
+      });
+      if (!response.ok) throw new Error(`resolve_${response.status}`);
+      const resolved = await response.json() as Partial<Source>;
+      const next: Source = { ...src, ...resolved, status: "ok", site: src.site };
+      setSources(prev => prev.map(item => item.url === src.url ? next : item));
+      setSelSrc(next);
+      setStep("playing");
+      const lbl = (next.label || "").toLowerCase();
+      if (lbl.startsWith("aflaam") || lbl.startsWith("arabseed")) {
+        setSubCues([]); setSubStatus("off");
+      }
+    } catch {
+      setSources(prev => prev.map(item => item.url === src.url ? { ...item, status: "fail" as const } : item));
+      setStep("sources");
+    }
+  }, [displayTitle, type, tmdbId, season, ep]);
 
   /* ── playNext: retry direct URL once, then auto-cascade to next OK source ── */
   const playNext = useCallback(() => {
@@ -680,7 +709,7 @@ export default function AnimationWatch() {
     bgSiteTimersRef.current.forEach(clearTimeout);
     bgSiteTimersRef.current = [];
 
-    setStep("loading"); setSources([]); setSelSrc(null); setSseDone(false);
+    setStep("sources"); setSources([]); setSelSrc(null); setSseDone(false);
     setSitePickMode(false); setAnimSiteStatus({});
     setSubCues([]); setSubStatus("off"); setSubChoice("ar-translated"); setHlsTime(0); setShowSubPanel(false);
     seenUrls.current.clear(); histSavedRef.current = false; autoPlayedRef.current = false; sourceCountRef.current = 0;
@@ -719,7 +748,7 @@ export default function AnimationWatch() {
         if (sseEpochRef.current !== myEpoch) { closeEs(); return; }
         const src = JSON.parse(ev.data) as {
           url: string; label: string; directUrl?: string; proxyUrl?: string;
-          subtitleUrl?: string; isEmbed?: boolean; headers?: Record<string, string>;
+          subtitleUrl?: string; isEmbed?: boolean; site?: string; headers?: Record<string, string>;
         };
 
         // Embed sources (e.g. Mega.nz) — أضفها مباشرة كـ isEmbed بدون proxy wrapping
@@ -727,7 +756,7 @@ export default function AnimationWatch() {
           if (seenUrls.current.has(src.url)) return;
           seenUrls.current.add(src.url);
           sourceCountRef.current++;
-          setSources(prev => [...prev, { url: src.url, label: src.label, subtitleUrl: src.subtitleUrl, status: "ok", isEmbed: true }]);
+          setSources(prev => [...prev, { url: src.url, label: src.label, subtitleUrl: src.subtitleUrl, site: src.site || site, status: "ok", isEmbed: true }]);
           setAnimSiteStatus(prev => ({ ...prev, [site]: "done" }));
           return;
         }
@@ -741,9 +770,9 @@ export default function AnimationWatch() {
           const resolved = src.proxyUrl || src.directUrl!;
           const hl = isHlsUrl(resolved);
           const proxyUrl = src.proxyUrl || (hl ? wrapHls(src.directUrl!, window.location.origin) : wrapMp4(src.directUrl!, window.location.origin));
-          newSrc = { url: src.url, label: src.label, directUrl: src.directUrl, proxyUrl, subtitleUrl: src.subtitleUrl, headers: src.headers, status: "ok" };
+          newSrc = { url: src.url, label: src.label, directUrl: src.directUrl, proxyUrl, subtitleUrl: src.subtitleUrl, headers: src.headers, site: src.site || site, status: "ok" };
         } else {
-          newSrc = { url: src.url, label: src.label, subtitleUrl: src.subtitleUrl, status: "loading" };
+          newSrc = { url: src.url, label: src.label, subtitleUrl: src.subtitleUrl, site: src.site || site, status: "loading" };
           tryExtract(src.url);
         }
         sourceCountRef.current++;
@@ -766,25 +795,13 @@ export default function AnimationWatch() {
     });
   }, [title, type, ep, season, tmdbId, tryExtract]); // eslint-disable-line
 
-  /* ── handlePickAnimSite: اختيار المصدر + تحميل الباقي خلفياً ── */
+  /* ── اختيار مصدر واحد فقط — لا تشغيل للمصادر الأخرى في الخلفية ── */
   const handlePickAnimSite = useCallback((site: string) => {
     setSitePickMode(false);
-    startSseForSite(site, true); // المصدر الأساسي — isPrimary=true
-    let delay = 2500;
-    ANIM_SOURCE_DEFS.forEach(def => {
-      if (def.site === site) return;
-      const tid = setTimeout(() => startSseForSite(def.site, false), delay);
-      bgSiteTimersRef.current.push(tid);
-      delay += 2500;
-    });
+    startSseForSite(site, true);
   }, [startSseForSite]); // eslint-disable-line
 
-  /* ── تشغيل تلقائي عند فتح الصفحة — يبدأ الكشط فوراً بدون انتظار المستخدم ── */
-  useEffect(() => {
-    if (!tmdbId || !ANIM_SOURCE_DEFS.length) return;
-    const tid = setTimeout(() => handlePickAnimSite(ANIM_SOURCE_DEFS[0].site), 100);
-    return () => clearTimeout(tid);
-  }, [title, type, ep, season, tmdbId, handlePickAnimSite]); // eslint-disable-line
+  /* لا يوجد تشغيل تلقائي عند فتح الحلقة؛ المستخدم يختار المصدر أولاً. */
 
   /* ── Subtitle helpers ── */
   const parseTiming = (t: string): number => {

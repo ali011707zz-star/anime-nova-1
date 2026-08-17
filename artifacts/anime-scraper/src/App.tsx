@@ -93,7 +93,7 @@ function PageLoader() {
   );
 }
 
-const NO_GLOBAL_HEADER = ["/watch", "/episodes/", "/anime/", "/settings", "/profile", "/browse", "/animation/", "/auth", "/subscription", "/dubbed/watch", "/aw-dubbed/watch"];
+const NO_GLOBAL_HEADER = ["/watch", "/episodes/", "/anime/", "/settings", "/comments", "/profile", "/browse", "/animation/", "/auth", "/subscription", "/dubbed/watch", "/aw-dubbed/watch"];
 
 function applyTheme(t: string) {
   const root = document.documentElement;

@@ -76,8 +76,8 @@ const SITE_TAG: Record<string, string> = {
   faselhd_db: "FH",
   notorrent: "NO", sanime: "SA", anipm: "PM", anslayer: "AS",
   akwam: "AQ",
-  animekai: "AK",
-  anivexa_re: "RE",
+  anivexa_animegg: "GG", anivexa_anidbapp: "DB", anivexa_2dhive: "2D",
+  anivexa_anibd: "BD", anivexa_senshi: "SE", anivexa_kaa: "KA",
 };
 
 /* ── اسم عرض لكل موقع في منتقي المصادر ── */
@@ -93,8 +93,10 @@ const SITE_LABEL: Record<string, string> = {
   faselhd_db: "FaselHD", animetime: "AnimeTime",
   notorrent: "Notorrent", sanime: "SAnime", anipm: "AniPm", anslayer: "AnimeSlayer",
   akwam: "Akwam",
-  animekai: "AnimeKai",
-  anivexa_re: "RE",
+  anivexa_anikoto: "AniKoto", anivexa_animegg: "AnimeGG",
+  anivexa_anidbapp: "AniDB App", anivexa_2dhive: "2dhive",
+  anivexa_anibd: "AniBD", anivexa_senshi: "Senshi",
+  anivexa_kaa: "Kickassanime",
 };
 function getSiteTag(site: string): string {
   return SITE_TAG[site] || site.slice(0, 2).toUpperCase();
@@ -117,8 +119,11 @@ const SITE_DESC: Record<string, string> = {
   notorrent: "IMDB · مصادر متعددة", sanime: "عربي مدبلج/مترجم · MP4",
   anslayer: "مشغلات خارجية · MixDrop/MediaFire",
   akwam: "عربي مترجم · MP4 مباشر",
-  animekai: "HLS · ياباني + ترجمة",
-  anivexa_re: "Soft Sub · HLS مباشر · متعدد الجودات",
+  anivexa_mkissa: "HLS · صوت خام", anivexa_re: "HLS · FlixCloud · ياباني مترجم",
+  anivexa_anikoto: "HLS · صوت خام", anivexa_animegg: "HLS · صوت خام",
+  anivexa_anidbapp: "HLS · صوت خام", anivexa_2dhive: "HLS · صوت خام",
+  anivexa_anibd: "HLS · صوت خام", anivexa_senshi: "HLS · صوت خام",
+  anivexa_kaa: "HLS · صوت خام",
 };
 function getSiteDesc(site: string): string {
   return SITE_DESC[site] || "";
@@ -126,17 +131,7 @@ function getSiteDesc(site: string): string {
 
 /* Sources disabled by product policy. AniNeko is supported through the
    full VPS HLS proxy, so it must remain available on mobile. */
-const BLOCKED_SOURCE_SITES = new Set([
-  "hianime", "hi",
-  "anivexa_anidbapp",
-  "consumet_world", "consumet_reanime", "consumet_miruro", "consumet_saturn",
-  "consumet_anikoto",
-  "reanime",
-  "mkissa", "mk", "ra", "animegg", "gg", "anibd", "db",
-  "2dhive", "2d", "senshi", "se", "kickassanime", "ka",
-  "anivexa_mkissa", "anivexa_animegg", "anivexa_anibd",
-  "anivexa_2dhive", "anivexa_senshi", "anivexa_kickassanime",
-]);
+const BLOCKED_SOURCE_SITES = new Set(["hianime", "hi", "ak"]);
 function isBlockedSource(src: Pick<Src, "site">): boolean {
   return BLOCKED_SOURCE_SITES.has(String(src.site || "").trim().toLowerCase());
 }
@@ -157,10 +152,12 @@ const Q_LABEL: Record<Quality, string> = {
 
 function getSrcQuality(s: Src): Quality {
   const rank = s.qualityRank ?? 0;
-  const name = (s.label || s.name || s.quality || "").toLowerCase();
-  if (name.includes("1080") || name.includes("fhd")) return "1080p FHD";
-  if (name.includes("720")  || name.includes("hd"))  return "720p HD";
-  if (name.includes("360")  || name.includes("sd"))  return "360p SD";
+  const text = `${s.label || ""} ${s.name || ""} ${s.quality || ""} ${s.url || ""} ${s.directUrl || ""}`.toLowerCase();
+  const pixels = text.match(/(?:^|[^0-9])(2160|1440|1080|720|480|360)(?:p)?(?:[^0-9]|$)/)?.[1];
+  const height = pixels ? Number(pixels) : 0;
+  if (height >= 1080 || /\bfhd\b|\bfull[ ._-]*hd\b/.test(text)) return "1080p FHD";
+  if (height >= 720 || /\bhd\b/.test(text)) return "720p HD";
+  if (height >= 360 || /\bsd\b/.test(text)) return "360p SD";
   if (rank >= 13) return "1080p FHD";
   if (rank >= 9)  return "720p HD";
   return "360p SD";
@@ -256,12 +253,16 @@ function buildEmbeddedDownloadUrl(
     site,
     url: mediaUrl,
   });
-  if (subtitleUrl && site !== "kawaii") {
-    /* KW must stay byte-for-byte separate from subtitles. Its subtitle is
-       fetched by downloadManager after the video and saved as a local VTT
-       sidecar; sending subtitleUrl here would opt the server into the old
-       conversion path. */
-    query.set("subtitleUrl", subtitleUrl);
+  if (subtitleUrl) {
+    // Kawaii MP4 downloads are streamed directly so DownloadResumable can use
+    // Range/resume. The subtitle is saved as a local VTT sidecar after the
+    // video completes; only legacy/non-Kawaii conversions pass it to ffmpeg.
+    const isInternalSubtitle = subtitleUrl.includes("/api/anime/proxy-text")
+      || subtitleUrl.includes("/api/anime/translate-vtt");
+    const downloadSubtitle = site === "kawaii" && !isInternalSubtitle
+      ? `${base}/api/anime/proxy-text?url=${encodeURIComponent(subtitleUrl)}&ref=${encodeURIComponent("https://kawaiianime.cc/")}`
+      : subtitleUrl;
+    if (site !== "kawaii") query.set("subtitleUrl", downloadSubtitle);
   }
   return `${base}/api/anime/download-mp4?${query.toString()}`;
 }
@@ -280,16 +281,17 @@ function normalizeKawaiiSubtitleUrl(url: string | undefined, base: string): stri
 /* ── أولويات المصادر: KW → AW → AF → SA → rest ── */
 const SITE_PRIORITY: Record<string, number> = {
   kawaii: 100, animewitcher: 90,
+  anivexa_mkissa: 88, anivexa_re: 87, anivexa_anikoto: 86,
+  anivexa_animegg: 85, anivexa_anidbapp: 84, anivexa_2dhive: 83,
+  anivexa_anibd: 82, anivexa_senshi: 81, anivexa_kaa: 80,
   animeify: 85, sanime: 80,
-  animekai: 79,
-  anivexa_re: 77,
   dulo_anim: 70, vidlink_anim: 55,
   vidfast: 35,
 };
 
 /* ── قائمة المصادر (KW أولاً — الأولوية القصوى للتشغيل الفوري) ── */
 /* ── Picker ثابت: جودة → مصادر (تظهر فوراً دون أي جلب مسبق) ── */
-type QualityKey = "1080p" | "720p" | "480p";
+type QualityKey = "1080p" | "720p" | "360p";
 
 const STATIC_PICKER: Record<QualityKey, { site: string; name: string; tag: string }[]> = {
   "1080p": [
@@ -300,8 +302,15 @@ const STATIC_PICKER: Record<QualityKey, { site: string; name: string; tag: strin
     { site: "sanime",       name: "سـAnime",      tag: "SA" },
     { site: "animeify",     name: "أنمي فاي",    tag: "AF" },
     { site: "anifox",        name: "ANIFOX",      tag: "FX" },
-    { site: "animekai", name: "AnimeKai", tag: "AK" },
-    { site: "anivexa_re", name: "RE", tag: "RE" },
+    { site: "anivexa_mkissa", name: "MKissa", tag: "MK" },
+    { site: "anivexa_re", name: "Reanime", tag: "RE" },
+    { site: "anivexa_anikoto", name: "AniKoto", tag: "AK" },
+    { site: "anivexa_animegg", name: "AnimeGG", tag: "GG" },
+    { site: "anivexa_anidbapp", name: "AniDB App", tag: "DB" },
+    { site: "anivexa_2dhive", name: "2dhive", tag: "2D" },
+    { site: "anivexa_anibd", name: "AniBD", tag: "BD" },
+    { site: "anivexa_senshi", name: "Senshi", tag: "SE" },
+    { site: "anivexa_kaa", name: "Kickassanime", tag: "KA" },
   ],
   "720p": [
     { site: "anineko",      name: "AniNeko",      tag: "AN" },
@@ -310,27 +319,55 @@ const STATIC_PICKER: Record<QualityKey, { site: string; name: string; tag: strin
     { site: "sanime",       name: "سـAnime",      tag: "SA" },
     { site: "animeify",     name: "أنمي فاي",    tag: "AF" },
     { site: "anifox",        name: "ANIFOX",      tag: "FX" },
-    { site: "animekai", name: "AnimeKai", tag: "AK" },
-    { site: "anivexa_re", name: "RE", tag: "RE" },
+    { site: "anivexa_mkissa", name: "MKissa", tag: "MK" },
+    { site: "anivexa_re", name: "Reanime", tag: "RE" },
+    { site: "anivexa_anikoto", name: "AniKoto", tag: "AK" },
+    { site: "anivexa_animegg", name: "AnimeGG", tag: "GG" },
+    { site: "anivexa_anidbapp", name: "AniDB App", tag: "DB" },
+    { site: "anivexa_2dhive", name: "2dhive", tag: "2D" },
+    { site: "anivexa_anibd", name: "AniBD", tag: "BD" },
+    { site: "anivexa_senshi", name: "Senshi", tag: "SE" },
+    { site: "anivexa_kaa", name: "Kickassanime", tag: "KA" },
   ],
-  "480p": [
+  "360p": [
     { site: "anineko",      name: "AniNeko",      tag: "AN" },
     { site: "animewitcher", name: "AnimeWitcher", tag: "AW" },
     { site: "animeify",     name: "أنمي فاي",    tag: "AF" },
     { site: "anifox",        name: "ANIFOX",      tag: "FX" },
-    { site: "animekai", name: "AnimeKai", tag: "AK" },
-    { site: "anivexa_re", name: "RE", tag: "RE" },
+    { site: "anivexa_mkissa", name: "MKissa", tag: "MK" },
+    { site: "anivexa_re", name: "Reanime", tag: "RE" },
+    { site: "anivexa_anikoto", name: "AniKoto", tag: "AK" },
+    { site: "anivexa_animegg", name: "AnimeGG", tag: "GG" },
+    { site: "anivexa_anidbapp", name: "AniDB App", tag: "DB" },
+    { site: "anivexa_2dhive", name: "2dhive", tag: "2D" },
+    { site: "anivexa_anibd", name: "AniBD", tag: "BD" },
+    { site: "anivexa_senshi", name: "Senshi", tag: "SE" },
+    { site: "anivexa_kaa", name: "Kickassanime", tag: "KA" },
   ],
 };
 
-const Q_KEYS: QualityKey[] = ["1080p", "720p", "480p"];
+const Q_KEYS: QualityKey[] = ["1080p", "720p", "360p"];
+
+/* أحدث الحلقات تستخدم كتالوج AnimeSlayer المباشر فقط. نعرض الصف نفسه
+   مرتين لأن استجابة AnimeSlayer تحتوي رابطَي FHD وHD معاً، ويجب أن يختار
+   المستخدم الجودة التي ضغط عليها بدلاً من تشغيل أول رابط دائماً. */
+const ANSLAYER_PICKER: Record<QualityKey, { site: string; name: string; tag: string }[]> = {
+  "1080p": [{ site: "anslayer", name: "AnimeSlayer", tag: "AS" }],
+  "720p":  [{ site: "anslayer", name: "AnimeSlayer", tag: "AS" }],
+  "360p": [],
+};
+const PICKER_QUALITY: Record<QualityKey, Quality> = {
+  "1080p": "1080p FHD",
+  "720p": "720p HD",
+  "360p": "360p SD",
+};
 
 /* أوّل جودة يظهر فيها كل موقع — يُستخدم لعرض زر التنزيل مرّة واحدة فقط.
    بدون هذا يُضاف اسم الموقع لـ dlFetchingSites فيظهر SpinRing
-   لكل صفوف نفس الموقع في الجودات الثلاث (1080p/720p/480p). */
+   لكل صفوف نفس الموقع في الجودات الثلاث (1080p/720p/360p). */
 const SITE_FIRST_QUALITY: Map<string, QualityKey> = (() => {
   const m = new Map<string, QualityKey>();
-  for (const qk of (["1080p", "720p", "480p"] as QualityKey[])) {
+  for (const qk of (["1080p", "720p", "360p"] as QualityKey[])) {
     for (const slot of (STATIC_PICKER[qk] || [])) {
       if (!m.has(slot.site)) m.set(slot.site, qk);
     }
@@ -340,28 +377,26 @@ const SITE_FIRST_QUALITY: Map<string, QualityKey> = (() => {
 const Q_KEY_LABEL: Record<QualityKey, string> = {
   "1080p": "1080p",
   "720p":  "720p",
-  "480p":  "480p",
+  "360p":  "360p",
 };
 const Q_KEY_SUB: Record<QualityKey, string> = {
   "1080p": "دقة كاملة",
   "720p":  "دقة عالية",
-  "480p":  "دقة متوسطة",
+  "360p":  "دقة متوسطة",
 };
 
 /* timeout موحّد افتراضي */
 const SITE_TIMEOUT_MS = 28_000;
 const SITE_TIMEOUT_MAP: Record<string, number> = {
   anifox:       35_000,
-  animewitcher: 45_000,
-  anslayer:     50_000,
-  animeify:     30_000,
-  sanime:       28_000,
-  // Backend fetch-source allows Kawaii up to 24s. Keep the client alive
-  // longer than that race so a slow signed-URL response is not aborted first.
-  kawaii:       30_000,
+  animewitcher: 38_000,
+  animeify:     22_000,
+  sanime:       18_000,
+  kawaii:       15_000,
   anineko:      45_000,
-  animekai: 35_000,
-  anivexa_re: 90_000,
+  anivexa_re: 32_000, anivexa_anikoto: 32_000, anivexa_animegg: 32_000,
+  anivexa_anidbapp: 32_000, anivexa_2dhive: 32_000,
+  anivexa_anibd: 32_000, anivexa_senshi: 32_000, anivexa_kaa: 32_000,
 };
 
 /* ── Spinning loader ── */
@@ -482,7 +517,7 @@ export default function WatchScreen() {
     const raw = decodeURIComponent(etitle);
     if (!raw || /[\u0600-\u06FF]/.test(raw)) { setArEpTitle(raw); return; }
     const base = getBaseUrl();
-    secureFetch(`${base}/api/anime/translate?text=${encodeURIComponent(raw)}&from=en&to=ar`)
+    secureFetch(`${base}/api/anime/translate?text=${encodeURIComponent(raw)}&from=en&to=ar&kind=title`)
       .then(r => r.ok ? r.json() : null)
       .then((d: any) => { if (!isMountedRef.current) return; if (d?.translated) setArEpTitle(d.translated); })
       .catch(() => {});
@@ -536,6 +571,7 @@ export default function WatchScreen() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [progressKey]);
 
+  /* المصادر تُعرض ثابتة؛ التحقق المسبق غير موثوق لبعض المواقع. */
   /* ── Parallel per-source HTTP fetch (يحل محل SSE تماماً) ── */
   /* ── Cleanup: إلغاء كل طلبات الجلب الجارية عند تغيير الحلقة أو إلغاء mount ── */
   useEffect(() => {
@@ -640,18 +676,22 @@ export default function WatchScreen() {
   }, []);
 
   /* ── جلب مصدر واحد عند ضغط المستخدم على زر المصدر ── */
-  const handlePickSite = useCallback(async (site: string) => {
+  const handlePickSite = useCallback(async (site: string, preferredQuality?: QualityKey) => {
     if (BLOCKED_SOURCE_SITES.has(site.toLowerCase())) return;
     /* منع الضغط المزدوج أثناء الجلب — يسمح بإعادة المحاولة بعد الفشل */
-    if (inFlightSitesRef.current.has(site)) return;
-    /* إذا نجح سابقاً → شغّل أفضل مصدر متاح منه مباشرة */
-    if (fetchedSitesRef.current.has(site)) {
+    const fetchKey = preferredQuality ? `${site}::${preferredQuality}` : site;
+    if (inFlightSitesRef.current.has(fetchKey)) return;
+    /* إذا نجح سابقاً → شغّل أفضل مصدر من نفس الجودة فقط */
+    if (fetchedSitesRef.current.has(fetchKey)) {
       const cached = sources.filter(s => s.site === site);
-      const best = cached.find(isDirectPlayable) ?? cached[0];
+      const preferred = preferredQuality
+        ? cached.find(s => getSrcQuality(s) === PICKER_QUALITY[preferredQuality] && isDirectPlayable(s))
+        : undefined;
+      const best = preferredQuality ? preferred : (cached.find(isDirectPlayable) ?? cached[0]);
       if (best) { playSrc(best); return; }
     }
 
-    inFlightSitesRef.current.add(site);
+    inFlightSitesRef.current.add(fetchKey);
     setSlotStatus(prev => ({ ...prev, [site]: "fetching" }));
 
     const base = getBaseUrl();
@@ -660,6 +700,7 @@ export default function WatchScreen() {
       english: englishStr, format: format || "",
       year: year || "", episodes: episodes || "", native: native || "",
     });
+    if (preferredQuality) qs.set("quality", preferredQuality);
     if (titleArStr) qs.set("titleAr", titleArStr);
     if (site === "anslayer" && anslayerId) qs.set("anslayerId", anslayerId);
 
@@ -684,25 +725,30 @@ export default function WatchScreen() {
       const newSrcs = rawSrcs
         .map((s): Src => ({ ...s, site: s.site || site, directUrl: resolveUrl(s.directUrl, base), url: resolveUrl(s.url, base) }))
         .filter(s => !isBlockedSource(s))
+        .filter(s => !(s.isEmbed && s.url && (s.url.includes("mega.nz") || s.url.includes("mega.co.nz"))))
         .filter(s => { const k = getPlayUrl(s); if (!k || seenKeys.current.has(k)) return false; seenKeys.current.add(k); return true; });
 
       if (!newSrcs.length) { setSlotStatus(prev => ({ ...prev, [site]: "failed" })); return; }
 
-      fetchedSitesRef.current.add(site);
+      fetchedSitesRef.current.add(fetchKey);
       setSlotStatus(prev => ({ ...prev, [site]: "ready" }));
-      setSources(prev => [...prev.filter(s => s.site !== site), ...newSrcs]);
+      const selectedTier = preferredQuality ? PICKER_QUALITY[preferredQuality] : undefined;
+      setSources(prev => [...prev.filter(s => !(s.site === site && (!selectedTier || getSrcQuality(s) === selectedTier))), ...newSrcs]);
 
       /* شغّل فوراً عند النجاح */
-      const best = newSrcs.find(isDirectPlayable) ?? newSrcs[0];
+      const preferred = preferredQuality
+        ? newSrcs.find(s => getSrcQuality(s) === PICKER_QUALITY[preferredQuality] && isDirectPlayable(s))
+        : undefined;
+      const best = preferredQuality ? preferred : (newSrcs.find(isDirectPlayable) ?? newSrcs[0]);
       if (best) playSrc(best);
 
     } catch {
       if (isMountedRef.current) setSlotStatus(prev => ({ ...prev, [site]: "failed" }));
-      fetchedSitesRef.current.delete(site); // يسمح بإعادة المحاولة
+      fetchedSitesRef.current.delete(fetchKey); // يسمح بإعادة المحاولة
     } finally {
       /* نضمن مسح الـ timeout دائماً — حتى عند abort أو خطأ */
       if (tid !== null) clearTimeout(tid);
-      inFlightSitesRef.current.delete(site);
+      inFlightSitesRef.current.delete(fetchKey);
       siteCtrls.current.delete(site); // تنظيف الـ controller بعد انتهاء الطلب
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -833,6 +879,7 @@ export default function WatchScreen() {
       const newSrcs = rawSrcs
         .map((s): Src => ({ ...s, site: s.site || site, directUrl: resolveUrl(s.directUrl, base), url: resolveUrl(s.url, base) }))
         .filter(s => !isBlockedSource(s))
+        .filter(s => !(s.isEmbed && s.url && (s.url.includes("mega.nz") || s.url.includes("mega.co.nz"))))
         .filter(s => { const k = getPlayUrl(s); if (!k || seenKeys.current.has(k)) return false; seenKeys.current.add(k); return true; });
 
       if (!newSrcs.length) throw new Error("no direct sources");
@@ -881,26 +928,48 @@ export default function WatchScreen() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [downloadStates, dlFetchingSites, anime, epNum, titleStr, englishStr, titleArStr, format, year, episodes, native, anslayerId, displayTitle, coverUrl, globalSubUrl, handleDownloadSite]);
 
+  /* ── خروج آمن من شاشة المشاهدة ──
+     مسار "أحدث الحلقات" لا يملك صفحة حلقات خلفه دائماً، كما أن router.back()
+     قد يعيد استخدام شاشة مشاهدة قديمة وتبقى في حالة التحميل. لذلك نعود
+     مباشرةً إلى الرئيسية لهذا المسار، ونبقي الرجوع التقليدي للحلقات العادية. */
+  const leaveWatch = useCallback(() => {
+    saveProgress();
+    abortRef.current?.abort();
+    siteCtrls.current.forEach(c => c.abort());
+    siteCtrls.current.clear();
+    inFlightSitesRef.current.clear();
+    fetchedSitesRef.current.clear();
+    ScreenOrientation.unlockAsync().catch(() => {});
+
+    if (singleSite !== null) {
+      router.replace("/(tabs)" as any);
+      return;
+    }
+    if (router.canGoBack()) router.back();
+    else router.replace(`/episodes/${anime}` as any);
+  }, [saveProgress, singleSite, router, anime]);
+
   /* ── Handle back ── */
   const handleBack = useCallback(() => {
-    if (screen === "native" || screen === "embed") {
+    /* في أحدث الحلقات: الخروج من المشغل يخرج من المسار بالكامل،
+       أما الحلقات العادية فترجع أولاً إلى منتقي السيرفرات. */
+    if (singleSite === null && (screen === "native" || screen === "embed")) {
       saveProgress();
       setScreen("picker");
       return;
     }
-    saveProgress();
-    /* إلغاء جميع طلبات المواقع الجارية عند الخروج الكامل من الشاشة */
-    siteCtrls.current.forEach(c => c.abort());
-    siteCtrls.current.clear();
-    if (router.canGoBack()) router.back();
-    else router.replace(`/episodes/${anime}` as any);
-  }, [screen, anime, router, saveProgress]);
+    leaveWatch();
+  }, [screen, singleSite, saveProgress, leaveWatch]);
 
   /* ── Memoized RiftPlayer callbacks — يمنع إعادة render المشغّل عند كل تغيير في الـ parent ── */
   const onRiftBack = useCallback(() => {
+    if (singleSite !== null) {
+      leaveWatch();
+      return;
+    }
     saveProgress();
     setScreen("picker");
-  }, [saveProgress]);
+  }, [singleSite, leaveWatch, saveProgress]);
 
   const onRiftError = useCallback(() => {
     console.warn("[Anime Watch] جميع المصادر فشلت — العودة للـ picker");
@@ -1094,7 +1163,7 @@ export default function WatchScreen() {
     const resolveUrl2 = getPlayUrl(playingSrc);
     return (
       <View style={{ flex: 1, backgroundColor: "#07070d", alignItems: "center", justifyContent: "center", gap: 14 }}>
-        <Pressable onPress={() => { setScreen("picker"); }} style={[d.playerBackBtn, { position: "absolute", top: topPad + 4, right: 12 }]}>
+        <Pressable onPress={handleBack} style={[d.playerBackBtn, { position: "absolute", top: topPad + 4, right: 12 }]}>
           <Ionicons name="arrow-back" size={18} color="#fff" />
         </Pressable>
         <SpinRing />
@@ -1119,7 +1188,7 @@ export default function WatchScreen() {
     if (Platform.OS === "web") {
       return (
         <View style={{ flex: 1, backgroundColor: "#07070d", alignItems: "center", justifyContent: "center", gap: 16 }}>
-          <Pressable onPress={() => setScreen("picker")} style={[d.playerBackBtn, { position: "absolute", top: topPad + 4, right: 12 }]}>
+          <Pressable onPress={handleBack} style={[d.playerBackBtn, { position: "absolute", top: topPad + 4, right: 12 }]}>
             <Ionicons name="arrow-back" size={18} color="#fff" />
           </Pressable>
           <View style={{ width: 72, height: 72, borderRadius: 36, backgroundColor: "rgba(139,92,246,0.15)", alignItems: "center", justifyContent: "center" }}>
@@ -1135,7 +1204,7 @@ export default function WatchScreen() {
     // Native: no WebView — show info card
     return (
       <View style={{ flex: 1, backgroundColor: "#07070d", alignItems: "center", justifyContent: "center", gap: 16 }}>
-        <Pressable onPress={() => { saveProgress(); setScreen("picker"); }} style={[d.playerBackBtn, { position: "absolute", top: topPad + 4, right: 12 }]}>
+        <Pressable onPress={handleBack} style={[d.playerBackBtn, { position: "absolute", top: topPad + 4, right: 12 }]}>
           <Ionicons name="arrow-back" size={18} color="#fff" />
         </Pressable>
         <View style={{ width: 72, height: 72, borderRadius: 36, backgroundColor: "rgba(139,92,246,0.15)", alignItems: "center", justifyContent: "center" }}>
@@ -1207,8 +1276,13 @@ export default function WatchScreen() {
         </View>
 
         {/* ── مجموعات الجودة — نمط الويب ── */}
-        {(["1080p", "720p", "480p"] as QualityKey[]).map(qk => {
-          const slots = STATIC_PICKER[qk] || [];
+        {(singleSite === "anslayer" ? (["1080p", "720p"] as QualityKey[]) : Q_KEYS).map(qk => {
+          const allSlots = singleSite === "anslayer"
+            ? (ANSLAYER_PICKER[qk] || [])
+            : singleSite
+              ? (STATIC_PICKER[qk] || []).filter(slot => slot.site === singleSite)
+              : (STATIC_PICKER[qk] || []);
+          const slots = allSlots;
           const dotColor = qk === "1080p" ? "#fbbf24" : qk === "720p" ? "#34d399" : "#94a3b8";
           return (
             <View key={qk} style={{ gap: 6 }}>
@@ -1232,7 +1306,7 @@ export default function WatchScreen() {
                   return (
                     <Pressable
                       key={slot.site}
-                      onPress={() => handlePickSite(slot.site)}
+                      onPress={() => handlePickSite(slot.site, qk)}
                       style={({ pressed }) => [
                         d.webRow,
                         idx < slots.length - 1 && d.webRowBorder,
@@ -1295,7 +1369,7 @@ export default function WatchScreen() {
                         ]}
                         numberOfLines={1}
                       >
-                         السيرفر {slot.tag}{slot.site.startsWith("anivexa_") ? ` · ${slot.name}` : ""}
+                        السيرفر {slot.tag}
                       </Text>
 
                       {/* Status only; the download action sits beside اختيار. */}
@@ -1316,6 +1390,8 @@ export default function WatchScreen() {
             </View>
           );
         })}
+
+
 
       </ScrollView>
     </View>

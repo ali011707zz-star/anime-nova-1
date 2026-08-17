@@ -358,11 +358,7 @@ async function fetchReanimeServer(
   return {
     url: decrypted.url,
     kind,
-    // FlixCloud's CDN validates the page that issued the signed manifest,
-    // not just the provider origin. The old Reanime adapter forwarded the
-    // complete embed URL; keeping only https://flixcloud.cc/ makes the source
-    // appear healthy but causes the manifest/segments to be rejected.
-    referer: embed,
+    referer: streamReferer(decrypted.url),
     qualityHint: qualityInfo({ server: server.name || server.type || "" }),
     manifestKey: decrypted.manifestKey,
   };
@@ -539,21 +535,32 @@ export async function getAnivexaSources(
     // unique soft-sub servers concurrently and return as soon as one produces
     // a valid HLS playlist. The direct stream_url is intentionally not used
     // for FlixCloud because Anivexa does not return its manifest key.
-    const embedCandidates = uniqueMatchingServers.slice(0, 4);
+    // HD-2 currently returns a 200 image/webp decoy for every media segment.
+    // Prefer HD-1 deterministically; its media redirects to lock97 and must be
+    // followed by the viewer IP (the VPS itself is Cloudflare-blocked there).
+    const embedCandidates = uniqueMatchingServers
+      .slice(0, 4)
+      .sort((left, right) => {
+        const leftName = normalizeServerName(left.name || left.type || "");
+        const rightName = normalizeServerName(right.name || right.type || "");
+        return Number(!leftName.includes("hd1")) - Number(!rightName.includes("hd1"));
+      });
     const directResults = await Promise.allSettled(
       candidates.map(candidate => makeResolvedSources(provider, candidate)),
     );
-    const firstEmbedSources = embedCandidates.length
-      ? await Promise.any(
-        embedCandidates.map(async server => {
-          const resolved = await fetchReanimeServer(baseUrl, server);
-          if (!resolved) throw new Error("Reanime embed did not resolve");
-          const sources = await makeResolvedSources(provider, resolved);
-          if (!sources.length) throw new Error("Reanime manifest was not playable");
-          return sources;
-        }),
-      ).catch(() => null)
-      : null;
+    let firstEmbedSources: NovaSource[] | null = null;
+    for (const server of embedCandidates) {
+      try {
+        const resolved = await fetchReanimeServer(baseUrl, server);
+        if (!resolved) throw new Error("Reanime embed did not resolve");
+        const sources = await makeResolvedSources(provider, resolved);
+        if (!sources.length) throw new Error("Reanime manifest was not playable");
+        firstEmbedSources = sources;
+        break;
+      } catch (error: any) {
+        console.warn(`[Anivexa] Reanime ${server.name || "server"} failed:`, error?.message || error);
+      }
+    }
     const sources: NovaSource[] = [];
     for (const result of directResults) {
       if (result.status !== "fulfilled") continue;

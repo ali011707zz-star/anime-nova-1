@@ -62,7 +62,12 @@ const SORT_OPTIONS = [
   { label: "الأحدث",       value: "START_DATE_DESC" },
   { label: "الأقدم",       value: "START_DATE" },
 ];
-const BLOCKED_GENRES = new Set(["Hentai"]);
+const BLOCKED_GENRES = new Set(["Hentai", "Ecchi"]);
+
+// The VPS is the canonical API for the legacy alias domain shown in older builds.
+// Keep normal relative routing everywhere else so local previews and the main domain
+// continue to use their configured proxy.
+const SEARCH_API_URL = `${API_BASE}/api/anilist`;
 
 const GENRES = [
   "Action", "Adventure", "Comedy", "Drama", "Fantasy",
@@ -94,10 +99,14 @@ function filterSafe(list: any[]): any[] {
     if (seen.has(a.id)) return false;
     seen.add(a.id);
     
-    // تحقق من البيانات الأساسية
-    if (!a.id || !a.title?.romaji || !a.coverImage?.large) {
+    // AniList fallbacks may return an English/native title or extraLarge art only.
+    const title = a.title?.romaji || a.title?.english || a.title?.native;
+    const cover = a.coverImage?.large || a.coverImage?.extraLarge;
+    if (!a.id || !title || !cover) {
       return false;
     }
+    if (!a.title?.romaji) a.title = { ...a.title, romaji: title };
+    if (!a.coverImage?.large && cover) a.coverImage = { ...a.coverImage, large: cover };
     
     // حذف المحتوى المحظور
     const genres: string[] = a.genres || [];
@@ -115,34 +124,48 @@ const FORMAT_AR: Record<string, string> = {
 
 /* ── Arabic transliteration ── */
 const AR_TO_EN: Record<string, string> = {
-  "ناروتو": "Naruto", "هانتر": "Hunter", "ون بيس": "One Piece",
+  "ناروتو": "Naruto", "هانتر": "Hunter x Hunter", "هنتر": "Hunter x Hunter", "ون بيس": "One Piece",
   "ون بيسي": "One Piece", "دراغون بول": "Dragon Ball", "دراجون بول": "Dragon Ball",
   "ديمون سلاير": "Demon Slayer", "كيميتسو": "Kimetsu", "هجوم العمالقة": "Shingeki no Kyojin",
-  "بوكو نو هيرو": "Boku no Hero", "بلاتش": "Bleach", "بليتش": "Bleach",
+  "بوكو نو هيرو": "Boku no Hero", "بلاتش": "Bleach", "بليتش": "Bleach", "هانتر إكس هانتر": "Hunter x Hunter",
   "فيري تيل": "Fairy Tail", "الكيميائي": "Fullmetal Alchemist",
   "سوورد ارت": "Sword Art Online", "توكيو غول": "Tokyo Ghoul",
   "ريزيرو": "Re:Zero", "تيتان": "Titan", "ابطال": "Hero Academia",
 };
+function normalizeArabicSearch(value: string): string {
+  return value.normalize("NFKC")
+    .replace(/[ًٌٍَُِّْـ]/g, "")
+    .replace(/[أإآ]/g, "ا")
+    .replace(/ة/g, "ه")
+    .replace(/يٰ/g, "ي")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 async function translateQuery(q: string): Promise<string> {
   const trimmed = q.trim();
-  if (AR_TO_EN[trimmed]) return AR_TO_EN[trimmed];
-  if (/[\u0600-\u06FF]/.test(trimmed)) {
-    for (const [ar, en] of Object.entries(AR_TO_EN)) {
-      if (trimmed.includes(ar)) return trimmed.replace(ar, en);
+  if (!/[؀-ۿ]/.test(trimmed)) return trimmed;
+
+  const normalized = normalizeArabicSearch(trimmed);
+  const exact = Object.entries(AR_TO_EN).find(([ar]) => normalizeArabicSearch(ar) === normalized);
+  if (exact) return exact[1];
+
+  const phrase = Object.entries(AR_TO_EN)
+    .filter(([ar]) => normalized.includes(normalizeArabicSearch(ar)))
+    .sort((a, b) => b[0].length - a[0].length)[0];
+  if (phrase) return trimmed.replace(phrase[0], phrase[1]);
+
+  try {
+    const r = await fetch(`${API_BASE}/api/anime/translate?text=${encodeURIComponent(trimmed)}&from=ar&to=en&kind=search`);
+    if (r.ok) {
+      const d = await r.json();
+      const translated = String(d?.translated || "").trim();
+      if (translated && translated !== trimmed && !/[؀-ۿ]/.test(translated)) return translated;
     }
-    // Fall back to backend translation for Arabic not in local dict
-    try {
-      const r = await fetch(`/api/anime/translate?text=${encodeURIComponent(trimmed)}`);
-      if (r.ok) {
-        const d = await r.json();
-        if (d.translated && d.translated !== trimmed && !/[\u0600-\u06FF]/.test(d.translated)) {
-          return d.translated;
-        }
-      }
-    } catch { /* ignore */ }
-  }
+  } catch { /* keep the original for the final fallback */ }
   return trimmed;
 }
+
 
 /* ── GraphQL query builders ── */
 function buildQuery(sort: string, format: string, status: string, genre: string, season: string) {
@@ -299,7 +322,7 @@ export default function Search() {
         } else {
           q = { query: buildBrowseQuery(sort, format, status, genre, season), variables: { page: 1, perPage: 30 } };
         }
-        const res  = await fetch(API_BASE + '/api/anilist', {
+        const res  = await fetch(SEARCH_API_URL, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(q),

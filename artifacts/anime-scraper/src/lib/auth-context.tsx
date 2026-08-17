@@ -16,7 +16,7 @@ interface AuthContextType {
   user: AuthUser | null;
   loading: boolean;
   signIn: (email: string, password: string) => Promise<{ error?: string }>;
-  signUp: (email: string, password: string, displayName?: string, verifyCode?: string) => Promise<{ error?: string }>;
+  signUp: (email: string, password: string, displayName?: string) => Promise<{ error?: string }>;
   signOut: () => Promise<void>;
   updateProfile: (data: {
     displayName?: string;
@@ -84,13 +84,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const signUp = async (email: string, password: string, displayName?: string, verifyCode?: string) => {
+  const signUp = async (email: string, password: string, displayName?: string) => {
     try {
       const res = await fetch(API_BASE + "/api/auth/signup", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
-        body: JSON.stringify({ email, password, displayName, verifyCode }),
+        body: JSON.stringify({ email, password, displayName }),
       });
       const data = await res.json();
       if (!res.ok) return { error: data.error || "حدث خطأ، حاول مرة أخرى" };

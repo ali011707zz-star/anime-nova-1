@@ -151,16 +151,11 @@ async function resolveGogoPlayer(
     });
     if (!megaResponse.ok) return null;
     const megaHtml = await megaResponse.text();
-    // MegaPlay exposes an internal data-id and the real episode id. The
-    // source API expects data-realid; keep data-id only for older pages.
-    const realId = megaHtml.match(/data-realid=["']([^"']+)["']/i)?.[1]
-      || megaHtml.match(/data-real-id=["']([^"']+)["']/i)?.[1]
-      || megaHtml.match(/data-id=["'](\d+)["']/i)?.[1];
-    if (!realId) return null;
-    const megaOrigin = new URL(iframeUrl).origin;
+    const dataId = megaHtml.match(/data-id=["'](\d+)["']/i)?.[1];
+    if (!dataId) return null;
 
     const sourceResponse = await fetch(
-      `${megaOrigin}/stream/getSourcesNew?id=${encodeURIComponent(realId)}&category=sub`,
+      `https://megaplay.buzz/stream/getSourcesNew?id=${dataId}&category=sub`,
       {
         headers: {
           Accept: "application/json",
@@ -610,6 +605,40 @@ async function findEpisode(
   const selectedText = `${String(selected.id)} ${String(selected.title || selected.name || "")}`;
   if (isDubbedSearchVariant(selectedText)) return null;
   return String(selected.id);
+}
+
+/**
+ * Metadata-only episode check. This deliberately stops after Consumet's
+ * search + episode-list calls; it never requests /watch and never resolves
+ * a player URL, HLS manifest, or media segment.
+ */
+export async function checkConsumetEpisode(
+  site: string,
+  title: string,
+  english: string | null,
+  ep: number,
+  variants: string[] = [],
+  anilistId?: number,
+): Promise<{ available: boolean; quality?: string; qualityRank?: number; serverCount?: number }> {
+  const providerInfo = providerForSite(site);
+  const baseUrl = consumetBaseUrl();
+  if (!providerInfo || !baseUrl || !title || !Number.isFinite(ep) || ep < 1) {
+    return { available: false };
+  }
+  try {
+    let searchVariants = variants;
+    const titleMatch = await lookupAniListTitle([title, english || "", ...variants], anilistId);
+    if (titleMatch?.titles.length) {
+      searchVariants = [...new Set([...variants, ...titleMatch.titles])].slice(0, 20);
+    }
+    const episodeId = await findEpisode(baseUrl, providerInfo.provider, title, english, ep, searchVariants);
+    if (!episodeId) return { available: false };
+    // Consumet's episode index does not expose per-variant quality. Report
+    // the verified episode as HD; exact variants resolve only after a click.
+    return { available: true, quality: "720p", qualityRank: 13, serverCount: 1 };
+  } catch {
+    return { available: false };
+  }
 }
 
 export async function getConsumetSources(

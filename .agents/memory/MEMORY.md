@@ -1,7 +1,6 @@
 - [VPS Deployment](vps-deployment.md) — خادم 95.182.93.105 Ubuntu 24.04; Telegram webhook uses self-signed cert uploaded to Telegram API; CHANNEL_ID in .env + DB; token DB-only via config-sync.
 - [VPS-only deployment policy](vps-only-deployment-policy.md) — user explicitly forbids running/installing the app in Replit workspace; it runs only on the VPS via pm2. Replit is code-editing only; verify via SSH+pm2 logs, not local workflows.
 - [VPS manual deploy](vps-manual-deploy-2026-07.md) — app runs only on VPS via pm2, never on Replit; diff files vs VPS working copy before overwriting (VPS had unique unpushed commits); rebuild both frontend+backend after sync.
-- [Kawaii provider rotation and cache](kawaii-provider-cache-rotation.md) — Mewstream URLs require the Megaplay Referer; normalize both fresh and cached KW sources before proxying.
 - [PM2 stale env vars](pm2-stale-env-vars.md) — editing ecosystem.config.cjs/.env on VPS does nothing until pm2 delete+start; caused universal web black-screen bug (broken CF_WORKER_URL never reloaded).
 - [Nova Mobile GitHub builds](nova-mobile-github-builds.md) — user builds APKs through GitHub; sync source to VPS if needed, but never build or install Nova Mobile in Replit.
 - [GitHub push auth](github-push-auth.md) — this workspace's GitHub remote currently rejects pushes because no valid GitHub credential is available; do not force-push or expose tokens.
@@ -72,8 +71,6 @@
 - [GitHub Actions "not acquired by hosted runner"](github-actions-runner-not-acquired.md) — this error means a GitHub-side outage, not a repo/workflow bug; check githubstatus.com before touching CI config.
 - [YouTube embed referrer](youtube-embed-referrer.md) — trailer embeds need youtube-nocookie, strict cross-origin referrer, and an explicit mobile WebView Referer.
 - [Streaming buffer policy](stream-buffer-policy.md) — slow signed CDN segments need aligned Media3/HLS buffers and longer proxy read windows; validate on real clients.
-- [Source request budget](source-request-budget.md) — frontend per-source timeouts must exceed backend scraper races; refresh the anon token once after a transient 403.
-- [Shirayuki/AniKuro bridge](shirayuki-anikuro-bridge.md) — VPS-local Shirayuki runs on 127.0.0.1:3100; main API must proxy its AniList-based HLS sources server-side.
-- [AnimeSlayer provider behavior](anslayer-provider-behavior.md) — catalog is live, but current OK.ru embed pages no longer expose the legacy metadata shape; MediaFire links may expire.
-- [Anikoto API site behavior](anikotoapi-site-behavior.md) — catalog API returns MegaPlay embeds, not m3u8; HTTP 200 can contain an internal 410 deleted-file page.
-- [Reanime encrypted manifests](reanime-encrypted-manifests.md) — FlixCloud stream_url returns an encrypted 200; only the embed-derived manifest key makes the HLS proxy playable.
+- [FlixCloud StrongHole segments](flixcloud-stronghole-segments.md) — keep Reanime media URLs client-routed; StrongHole blocks the VPS IP with Cloudflare 403
+- [Anime4up disabled](anime4up-vps-reachability.md) — Anime4up is intentionally disabled and blocked; do not re-add it to the anime picker
+- [Availability-only provider adapters](availability-only-providers.md) — every provider must accept the explicit metadata-only flag; extra JS arguments are silently ignored

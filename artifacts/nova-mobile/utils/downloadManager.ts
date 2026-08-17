@@ -415,9 +415,9 @@ async function saveCompleted(entry: RuntimeDownload): Promise<void> {
   if (fileSize <= 0) throw new Error("ملف التنزيل فارغ");
 
   let subtitleLocalPath: string | undefined;
-  /* Kawaii MP4s are streamed directly by the VPS so Range/resume remains
-     reliable. Keep its Arabic subtitle as a real local sidecar instead of
-     asking the server to run ffmpeg for every retry. */
+  /* AN and KW are converted by the VPS download endpoint with the Arabic
+     subtitles burned into the MP4. Do not create a misleading sidecar VTT
+     for those downloads; other sources keep the existing sidecar behavior. */
   if (entry.params.subtitleUrl) {
     const subtitlePath = `${entry.localPath.slice(0, -4)}.vtt`;
     try {

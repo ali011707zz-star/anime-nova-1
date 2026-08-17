@@ -32,7 +32,11 @@ function fmtTime(sec: number) {
 }
 
 import { getBaseUrl } from "@/utils/baseUrl";
-const API_BASE = `${getBaseUrl()}/api`;
+const rawApiBase = getBaseUrl().replace(/\/$/, "");
+const SEARCH_API_BASE = /a\.duckdns\.org/i.test(rawApiBase)
+  ? "https://animenovaa.duckdns.org"
+  : rawApiBase;
+const API_BASE = `${SEARCH_API_BASE}/api`;
 
 /* ── Types ── */
 interface AnimeResult {
@@ -90,7 +94,7 @@ const AR_TO_EN: Record<string,string> = {
   "ناروتو":"Naruto","هانتر":"Hunter x Hunter","ون بيس":"One Piece",
   "دراغون بول":"Dragon Ball","ديمون سلاير":"Demon Slayer",
   "هجوم العمالقة":"Shingeki no Kyojin","بوكو نو هيرو":"Boku no Hero Academia",
-  "بليتش":"Bleach","فيري تيل":"Fairy Tail","توكيو غول":"Tokyo Ghoul",
+  "بليتش":"Bleach","هانتر إكس هانتر":"Hunter x Hunter","فيري تيل":"Fairy Tail","توكيو غول":"Tokyo Ghoul",
   "ريزيرو":"Re:Zero","سوورد ارت":"Sword Art Online","فولميتال":"Fullmetal Alchemist",
 };
 function translateQuery(q: string): string {
@@ -216,7 +220,7 @@ export default function SearchScreen() {
       } else {
         body = { query: buildBrowseQuery(so, fo, st, ge, se), variables: { page: 1, perPage: 30 } };
       }
-      const res = await fetch(`${getBaseUrl()}/api/anilist`, {
+      const res = await fetch(`${SEARCH_API_BASE}/api/anilist`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
@@ -224,6 +228,9 @@ export default function SearchScreen() {
       });
       if (signal.aborted) return;
       const json = await res.json();
+      if (!res.ok || (Array.isArray(json?.errors) && json.errors.length > 0)) {
+        throw new Error(json?.error || json?.errors?.[0]?.message || `Search failed (${res.status})`);
+      }
       if (!signal.aborted) setResults(filterSafe(json.data?.Page?.media || []));
     } catch (e: any) {
       if (e?.name === "AbortError") return;

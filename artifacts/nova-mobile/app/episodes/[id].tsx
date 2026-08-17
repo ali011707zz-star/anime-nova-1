@@ -54,13 +54,15 @@ async function saveCommentCounts(animeId: string, counts: Record<number, number>
 
 /* ── Episode thumbnail row ── */
 function EpisodeRow({
-  n, anime, epData, watched, commentCount, onToggleWatched, onWatch, onComment,
+  n, anime, epData, episodeTitlesAr, watched, commentCount, onToggleWatched, onWatch, onComment,
 }: {
-  n: number; anime: any; epData: any[]; watched: boolean; commentCount: number;
+  n: number; anime: any; epData: any[]; episodeTitlesAr: Record<number, string>; watched: boolean; commentCount: number;
   onToggleWatched: (n: number) => void; onWatch: (n: number) => void; onComment: (n: number) => void;
 }) {
   const ep = epData?.find((e: any) => e.mal_id === n || e.episode_id === n);
   const thumb = ep?.images?.jpg?.image_url || anime?.coverImage?.large;
+  const originalTitle = ep?.title_romanji || ep?.title || "";
+  const arabicTitle = episodeTitlesAr[n] || "";
   const durationMin = anime?.duration || 24;
   const dur = durationMin >= 60
     ? `${Math.floor(durationMin / 60)}:${String(durationMin % 60).padStart(2, "0")}:00`
@@ -85,6 +87,8 @@ function EpisodeRow({
       {/* Info */}
       <View style={ep_s.info}>
         <Text style={[ep_s.epNum, watched && { color: "#8B5CF6" }]}>الحلقة {n}</Text>
+        {arabicTitle ? <Text style={ep_s.epTitleAr} numberOfLines={1}>{arabicTitle}</Text> : null}
+        {originalTitle ? <Text style={ep_s.epTitleOriginal} numberOfLines={1}>{originalTitle}</Text> : null}
       </View>
 
       {/* Comment button */}
@@ -118,6 +122,7 @@ export default function EpisodeListScreen() {
   const [anime, setAnime] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [epData, setEpData] = useState<any[]>([]);
+  const [episodeTitlesAr, setEpisodeTitlesAr] = useState<Record<number, string>>({});
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
   const [watched, setWatched] = useState<Set<number>>(new Set());
@@ -135,11 +140,13 @@ export default function EpisodeListScreen() {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ query: ANIME_QUERY, variables: { id: parseInt(id) } }),
+      cache: "no-store",
       signal: ctrl.signal,
     }).then(r => r.json()).then(d => {
       if (ctrl.signal.aborted) return;
       const a = d.data?.Media;
       setAnime(a);
+      setEpisodeTitlesAr({});
       if (a?.idMal) {
         fetch(`https://api.jikan.moe/v4/anime/${a.idMal}/episodes?page=1`, { signal: ctrl.signal })
           .then(r => r.json())
@@ -209,9 +216,12 @@ export default function EpisodeListScreen() {
 
   const total = useMemo(() => {
     if (!anime) return 0;
-    return anime.status === "RELEASING" && anime.nextAiringEpisode?.episode
-      ? anime.nextAiringEpisode.episode - 1
-      : (anime.episodes || anime.nextAiringEpisode?.episode || 12);
+    const airedBySchedule = anime.nextAiringEpisode?.episode
+      ? Math.max(0, anime.nextAiringEpisode.episode - 1)
+      : 0;
+    return anime.status === "RELEASING" && airedBySchedule > 0
+      ? airedBySchedule
+      : (anime.episodes || airedBySchedule || 12);
   }, [anime]);
 
   const allEps = useMemo(() => Array.from({ length: total }, (_, i) => i + 1), [total]);
@@ -232,6 +242,33 @@ export default function EpisodeListScreen() {
     const start = (currentPage - 1) * PAGE_SIZE;
     return allEps.slice(start, start + PAGE_SIZE);
   }, [allEps, filtered, isSearching, currentPage]);
+
+  /* ترجمة عناوين الصفحة الحالية دفعةً بدفعة، مع الاعتماد على كاش الخادم */
+  useEffect(() => {
+    const pending = displayedEps
+      .map(n => ({ n, title: epData.find((e: any) => e.mal_id === n || e.episode_id === n)?.title_romanji || epData.find((e: any) => e.mal_id === n || e.episode_id === n)?.title || "" }))
+      .filter(item => item.title && !episodeTitlesAr[item.n]);
+    if (!pending.length) return;
+    let cancelled = false;
+    (async () => {
+      const translated: Record<number, string> = {};
+      for (let i = 0; i < pending.length; i += 6) {
+        const batch = pending.slice(i, i + 6);
+        const results = await Promise.all(batch.map(async item => {
+          try {
+            const r = await fetch(`${getBaseUrl()}/api/anime/translate?text=${encodeURIComponent(item.title)}&from=auto&to=ar&kind=title`);
+            const d = await r.json();
+            const value = String(d?.translated || "").trim();
+            return /[\u0600-\u06FF]/.test(value) ? { n: item.n, value } : null;
+          } catch { return null; }
+        }));
+        for (const result of results) if (result) translated[result.n] = result.value;
+        if (cancelled) return;
+        if (Object.keys(translated).length) setEpisodeTitlesAr(prev => ({ ...prev, ...translated }));
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [displayedEps, epData, episodeTitlesAr]);
 
   if (loading) return (
     <View style={ep_s.container}>
@@ -361,6 +398,7 @@ export default function EpisodeListScreen() {
             n={n}
             anime={anime}
             epData={epData}
+            episodeTitlesAr={episodeTitlesAr}
             watched={watched.has(n)}
             commentCount={commentCounts[n] || 0}
             onToggleWatched={toggleWatched}
@@ -410,6 +448,8 @@ const ep_s = StyleSheet.create({
   watchedBorder: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, borderWidth: 2, borderColor: "rgba(139,92,246,0.4)", borderRadius: 8 },
   info: { flex: 1 },
   epNum: { fontSize: 11, fontFamily: "Cairo_800ExtraBold", color: "rgba(255,255,255,0.9)" },
+  epTitleAr: { fontSize: 10, fontFamily: "Cairo_700Bold", color: "rgba(196,181,253,0.92)", textAlign: "right" },
+  epTitleOriginal: { fontSize: 8, fontFamily: "Cairo_400Regular", color: "rgba(255,255,255,0.42)", textAlign: "right" },
   commentBtn: {
     width: 27, height: 27, borderRadius: 8, alignItems: "center", justifyContent: "center",
     backgroundColor: "rgba(139,92,246,0.06)", borderWidth: 1, borderColor: "rgba(139,92,246,0.15)",

@@ -20,7 +20,9 @@ import {
   CONSUMET_SOURCES,
   decodeEncryptedHlsPlaylist,
   getConsumetSources,
+  checkConsumetEpisode,
   isConsumetSite,
+  probeHlsManifest,
   probeHlsQuality,
   probeHlsVariants,
 } from "../lib/consumet.js";
@@ -63,6 +65,65 @@ const BASE_HDRS: Record<string, string> = {
   "Accept-Language": "ar,en-US;q=0.9,en;q=0.8",
   Connection: "keep-alive",
 };
+
+// أحدث الحلقات تستخدم معرّف AnimeSlayer في الرابط، بينما مصادر البث
+// (خصوصاً KW) تحتاج AniList ID. نحل العنوان مرة واحدة عند غياب AniList ID.
+const _titleAniListCache = new Map<string, { id: number; ts: number }>();
+const TITLE_ANILIST_TTL = 6 * 60 * 60 * 1000;
+
+function normalizeAniTitle(value: string): string {
+  return value.toLowerCase()
+    .normalize("NFKD")
+    .replace(/\p{Diacritic}/gu, "")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+async function resolveAniListIdForSource(
+  title: string,
+  english: string | null,
+  variants: string[],
+  titleAr: string | null,
+): Promise<number | undefined> {
+  const candidates = Array.from(new Set(
+    [english, title, ...variants, titleAr]
+      .filter((value): value is string => typeof value === "string" && value.trim().length > 1)
+      .map(value => value.trim()),
+  ));
+  if (!candidates.length) return undefined;
+
+  const cacheKey = normalizeAniTitle(candidates[0]);
+  const cached = _titleAniListCache.get(cacheKey);
+  if (cached && Date.now() - cached.ts < TITLE_ANILIST_TTL) return cached.id;
+
+  const query = `query($search:String!){Page(perPage:8){media(search:$search,type:ANIME){id title{romaji english native}}}}`;
+  for (const candidate of candidates) {
+    try {
+      const response = await fetch("https://graphql.anilist.co", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json", ...BASE_HDRS },
+        body: JSON.stringify({ query, variables: { search: candidate } }),
+        signal: AbortSignal.timeout(8000),
+      });
+      if (!response.ok) continue;
+      const payload = await response.json() as any;
+      const media = Array.isArray(payload?.data?.Page?.media) ? payload.data.Page.media : [];
+      const normalizedCandidate = normalizeAniTitle(candidate);
+      const exact = media.find((item: any) =>
+        [item?.title?.romaji, item?.title?.english, item?.title?.native]
+          .filter(Boolean)
+          .some((name: string) => normalizeAniTitle(name) === normalizedCandidate),
+      );
+      const match = exact || media[0];
+      const id = Number(match?.id || 0);
+      if (id > 0) {
+        _titleAniListCache.set(cacheKey, { id, ts: Date.now() });
+        return id;
+      }
+    } catch { /* try the next title variant */ }
+  }
+  return undefined;
+}
 
 /**
  * Upstream source sites occasionally reset connections or return transient
@@ -333,6 +394,9 @@ const _NOVA_PROXY_BASE = process.env.NOVA_PROXY_BASE;
 const CF_PROXY_BASE = _NOVA_PROXY_BASE
   ? `${_NOVA_PROXY_BASE}/api/cfproxy`
   : `http://localhost:${CF_PROXY_PORT}`;
+// The VPS cf-proxy may require its internal key for binary media streams.
+// Keep it server-side; it is never included in client-facing URLs.
+const CF_PROXY_KEY = process.env.CF_PROXY_KEY || "";
 let _cfProxyAlive: boolean | null = null;
 let _cfProxyCheckedAt = 0;
 
@@ -396,6 +460,30 @@ async function cfProxyGet(
 
   // Fallback to regular cfGet
   return cfGet(url, referer ? { Referer: referer } : {});
+}
+
+// Binary companion for the local curl_cffi proxy. Reanime's media CDN
+// rejects the VPS fetch implementation, while the dedicated stream route
+// preserves the browser fingerprint, Referer, Origin, and Range headers.
+async function cfProxyStreamFetch(
+  url: string,
+  referer?: string,
+  range?: string,
+): Promise<Response | null> {
+  try {
+    const streamUrl = new URL(`${CF_PROXY_BASE}/stream`);
+    streamUrl.searchParams.set("url", url);
+    if (referer) streamUrl.searchParams.set("ref", referer);
+    if (CF_PROXY_KEY) streamUrl.searchParams.set("key", CF_PROXY_KEY);
+    const headers: Record<string, string> = {};
+    if (range) headers.Range = range;
+    return await fetch(streamUrl, {
+      headers,
+      signal: AbortSignal.timeout(35_000),
+    });
+  } catch {
+    return null;
+  }
 }
 
 // ════════════════════════════════════════════════════════════════════
@@ -1417,11 +1505,12 @@ async function _getAnifoxCatalog(): Promise<Array<{ content_id: string; content_
 
   _anifoxCatalogInFlight = (async () => {
   const all: Array<{ content_id: string; content_title: string }> = [];
-  // جلب صفحات بالتوازي 5 صفحات × 500 = 2500 أول مرة، ثم 5 أخرى إن وُجدت
-  for (let batch = 0; batch <= 4000; batch += 2500) {
-    const starts = [0, 500, 1000, 1500, 2000].map(s => s + batch);
+  // The endpoint accepts the complete catalog in one bounded response. This
+  // avoids the old 10-page fan-out that made the availability check time out.
+  for (const start of [0]) {
+    const starts = [start];
     const pages = await Promise.allSettled(starts.map(start => {
-      const body = new URLSearchParams({ start: String(start), limit: "500", genre_id: "0", order_by: "content_title", order_direction: "ASC" });
+      const body = new URLSearchParams({ start: String(start), limit: "5000", genre_id: "0", order_by: "content_title", order_direction: "ASC" });
       return fetchSourceWithRetry("https://max-panel.monster/api/Content/searchContent", {
         method: "POST",
         headers: { "Unique-Key": "flix!123", Accept: "application/json", "Content-Type": "application/x-www-form-urlencoded" },
@@ -1466,6 +1555,7 @@ async function getAnifoxSources(
   ep: number,
   variants: string[] = [],
   anilistId?: number,
+  availabilityOnly = false,
 ): Promise<UnifiedSource[]> {
   const out: UnifiedSource[] = [];
   const seen = new Set<string>();
@@ -1521,6 +1611,18 @@ async function getAnifoxSources(
 
     // المصادر مضمّنة في getSeasonByContentID مباشرةً — لا حاجة لـ getSourceByEpisodeID
     const allSources = Array.isArray(episode.sources) ? episode.sources : [];
+    if (availabilityOnly) {
+      return allSources
+        .filter((source: any) => String(source?.source || source?.source_url || "").trim())
+        .map((source: any) => {
+          const quality = String(source?.source_quality || "HD");
+          const name = String(source?.source_title || "Server");
+          return {
+            name: `ANIFOX · ${name} · ${quality}`, url: "", quality,
+            qualityRank: anifoxQualityRank(quality), site: "anifox", verified: true,
+          } as UnifiedSource;
+        });
+    }
     // ── فلتر المصادر الموثوقة فقط — نتجاهل الـ embeds وصفحات الهبوط غير المدعومة ──
     // مصادر مدعومة: archive.org · mediafire · mp4upload · uqload · direct CDN (.mp4/.mkv/.webm)
     const ANIFOX_TRUSTED = (url: string) => {
@@ -5305,7 +5407,7 @@ async function extractMediafireDirect(serverId: string): Promise<string | null> 
   } catch { return null; }
 }
 
-async function getAnimeifySourcesUncached(title: string, english: string | null, ep: number, variants: string[] = []): Promise<UnifiedSource[]> {
+async function getAnimeifySourcesUncached(title: string, english: string | null, ep: number, variants: string[] = [], availabilityOnly = false): Promise<UnifiedSource[]> {
   try {
     const creds = await getAnimeifyCreds();
     if (!creds) return [];
@@ -5384,6 +5486,27 @@ async function getAnimeifySourcesUncached(title: string, english: string | null,
     if (!srvRes) return [];
     const srvData = await srvRes.json() as any;
     const epData = srvData.CurrentEpisode || epItem;
+
+    if (availabilityOnly) {
+      const rows: Array<{ key: string; name: string; quality: string; qualityRank: number }> = [
+        { key: "FDLink", name: "فايل مون", quality: "FHD", qualityRank: 30 },
+        { key: "FRFhdQ", name: "ميديافاير", quality: "FHD", qualityRank: 29 },
+        { key: "FRLink", name: "ميديافاير", quality: "HD", qualityRank: 28 },
+        { key: "FRLowQ", name: "ميديافاير", quality: "SD", qualityRank: 26 },
+        { key: "SVLink", name: "سيندفيد", quality: "HD", qualityRank: 22 },
+        { key: "MALink", name: "MEGA", quality: "FHD", qualityRank: 20 },
+        { key: "OKLink", name: "OK.ru", quality: "SD", qualityRank: 5 },
+        { key: "VKLink", name: "VK Video", quality: "HD", qualityRank: 7 },
+        { key: "DELink", name: "Dailymotion", quality: "HD", qualityRank: 6 },
+      ];
+      return rows
+        .filter(row => String(epData[row.key] || "").trim())
+        .map(row => ({
+          name: `Animeify · ${row.name} · ${row.quality}`, url: "",
+          quality: row.quality, qualityRank: row.qualityRank, site: "animeify",
+          verified: true,
+        } as UnifiedSource));
+    }
 
     const sources: UnifiedSource[] = [];
 
@@ -5645,12 +5768,12 @@ async function getAnimeifySourcesUncached(title: string, english: string | null,
 
 /** Share one AF lookup between the stream picker and background downloads. */
 async function getAnimeifySources(
-  title: string, english: string | null, ep: number, variants: string[] = [],
+  title: string, english: string | null, ep: number, variants: string[] = [], availabilityOnly = false,
 ): Promise<UnifiedSource[]> {
-  const key = `animeify:${normalize(english || title).replace(/\s+/g, "-")}:${ep}`;
+  const key = `animeify:${normalize(english || title).replace(/\s+/g, "-")}:${ep}:${availabilityOnly ? "availability" : "playback"}`;
   const active = _animeifyInFlight.get(key);
   if (active) return active;
-  const promise = getAnimeifySourcesUncached(title, english, ep, variants);
+  const promise = getAnimeifySourcesUncached(title, english, ep, variants, availabilityOnly);
   _animeifyInFlight.set(key, promise);
   try {
     return await promise;
@@ -5827,6 +5950,16 @@ const KAWAII_CDN_HOSTS = new Set([
   "cdn.mewstream.buzz",
 ]);
 
+function kawaiiQualityRank(value: unknown): number {
+  const text = String(value || "").toLowerCase();
+  const m = text.match(/(?:^|[^0-9])(2160|1440|1080|720|480|360)(?:p)?(?:[^0-9]|$)/);
+  const height = m ? Number(m[1]) : 0;
+  if (height >= 1080 || /\bfhd\b|\bfull[ ._-]*hd\b/.test(text)) return 20;
+  if (height >= 720 || /\bhd\b/.test(text)) return 14;
+  if (height >= 480) return 10;
+  return 6;
+}
+
 /**
  * Kawaii rotates the hostname used for signed media URLs. Keep the explicit
  * hosts for compatibility, but also accept a rotated Kawaii subdomain or a
@@ -5858,7 +5991,7 @@ function isTrustedKawaiiCdnUrl(rawUrl: string): boolean {
 }
 
 async function getKawaiiAnimeSources(
-  _title: string, _english: string | null, ep: number, anilistId?: number,
+  _title: string, _english: string | null, ep: number, anilistId?: number, availabilityOnly = false,
 ): Promise<UnifiedSource[]> {
   if (!anilistId) return [];
   try {
@@ -5892,19 +6025,38 @@ async function getKawaiiAnimeSources(
     }
     if (!data?.sources?.length) return [];
 
-    // kawaii يوفر فقط ترجمة إنجليزية — نمررها عبر translate-vtt للحصول على عربي
-    const findSub = (tag: string) => data.subtitles?.find(s =>
-      (s.lang || s.label || "").toLowerCase().includes(tag)
-    );
-    const arEntry  = findSub("arabic") || findSub("arab") || findSub("ar");
-    const enEntry  = findSub("english") || findSub("en");
-    const rawSubUrl = arEntry?.url || enEntry?.url || undefined;
+    if (availabilityOnly) {
+      return data.sources
+        .filter(source => typeof source?.url === "string" && source.url.length > 0)
+        .map((source, index) => {
+          const label = String(source.quality || "1080p");
+          return {
+            name: `كواي أنمي · ${label}`, url: "", quality: label,
+            qualityRank: index === 0 ? 20 : 13, site: "kawaii",
+            verified: true,
+          } as UnifiedSource;
+        });
+    }
 
-    // إذا كانت الترجمة إنجليزية → نترجمها تلقائياً عبر translate-vtt
-    const subtitleUrl = rawSubUrl
-      ? (arEntry
-          ? rawSubUrl
-          : `/api/anime/translate-vtt?url=${encodeURIComponent(rawSubUrl)}&from=en&to=ar`)
+    // Kawaii may return several labels. Match complete language tokens only;
+    // the old includes("ar") misclassified labels such as "Spanish".
+    const languageOf = (s: { lang?: string; label?: string }) =>
+      `${s.lang || ""} ${s.label || ""}`.toLowerCase().trim();
+    const isArabicSub = (s: { lang?: string; label?: string }) =>
+      /(?:^|[\s_\-([])(?:ar|ara|arab|arabic|العربية|عربي)(?:$|[\s_\-])/.test(languageOf(s));
+    const isEnglishSub = (s: { lang?: string; label?: string }) =>
+      /(?:^|[\s_\-([])(?:en|eng|english|الإنجليزية|انجليزي)(?:$|[\s_\-])/.test(languageOf(s));
+    const arEntry  = data.subtitles?.find(isArabicSub);
+    const enEntry  = data.subtitles?.find(isEnglishSub);
+    const rawSubUrl = arEntry?.url || enEntry?.url || data.subtitles?.find(s => !!s.url)?.url || undefined;
+
+    // Always proxy the subtitle first. This fixes CORS/referer failures for Kawaii
+    // and gives both clients one stable input for Arabic translation.
+    const proxiedSubUrl = rawSubUrl
+      ? `/api/anime/proxy-text?url=${encodeURIComponent(rawSubUrl)}&ref=${encodeURIComponent(apiBase + "/")}`
+      : undefined;
+    const subtitleUrl = proxiedSubUrl
+      ? `/api/anime/translate-vtt?url=${encodeURIComponent(proxiedSubUrl)}&from=${arEntry ? "ar" : "en"}&to=ar`
       : undefined;
 
     const subLangLabel = rawSubUrl ? "عربي" : null;
@@ -5984,7 +6136,7 @@ async function getKawaiiAnimeSources(
         name: `كواي أنمي · ${src.quality || "1080p"}${subLangLabel ? ` · ${subLangLabel}` : ""}`,
         url: directUrl,
         quality: src.quality || "1080p",
-        qualityRank: 20,
+        qualityRank: kawaiiQualityRank(`${src.quality || ""} ${src.url}`),
         site: "kawaii",
         directUrl,
         directType: isHls ? "hls" : "mp4",
@@ -6002,6 +6154,144 @@ async function getKawaiiAnimeSources(
       } as UnifiedSource;
     });
   } catch { return []; }
+}
+
+
+// ════════════════════════════════════════════════════════════════════
+//  MEGAPLAY / ANIKOTO — raw Japanese HLS with real master-playlist qualities
+//  MegaPlay's public /api page documents the stream endpoints, while the
+//  playable response is an HTML page -> data-id -> /stream/getSources.
+//  Its external tracks are deliberately ignored: this provider must remain
+//  raw audio with no built-in/bundled subtitles. Arabic subtitles come only
+//  from Kawaii's external VTT track below.
+// ════════════════════════════════════════════════════════════════════
+const MEGAPLAY_RAW_BASE = "https://megaplay.buzz";
+const MEGAPLAY_RAW_REF = `${MEGAPLAY_RAW_BASE}/`;
+
+type MegaPlayVariant = { url: string; quality: string; qualityRank: number };
+
+function megaPlayQuality(height: number, bandwidth = 0): { quality: string; qualityRank: number } {
+  if (height >= 1080 || bandwidth >= 5_000_000) return { quality: "1080p", qualityRank: 18 };
+  if (height >= 720 || bandwidth >= 2_500_000) return { quality: "720p", qualityRank: 13 };
+  if (height >= 480 || bandwidth >= 1_000_000) return { quality: "480p", qualityRank: 9 };
+  return { quality: "360p", qualityRank: 6 };
+}
+
+function parseMegaPlayVariants(masterUrl: string, manifest: string): MegaPlayVariant[] {
+  const lines = manifest.split(/\r?\n/);
+  const out: MegaPlayVariant[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    const info = lines[i].match(/^#EXT-X-STREAM-INF:(.+)$/i)?.[1];
+    if (!info) continue;
+    const resolution = info.match(/(?:^|,)RESOLUTION=(\d+)x(\d+)/i);
+    const bandwidth = Number(info.match(/(?:^|,)BANDWIDTH=(\d+)/i)?.[1] || 0);
+    let child = "";
+    for (let j = i + 1; j < lines.length; j++) {
+      const candidate = lines[j].trim();
+      if (!candidate || candidate.startsWith("#")) continue;
+      child = candidate;
+      break;
+    }
+    if (!child) continue;
+    try {
+      const url = new URL(child, masterUrl).href;
+      const { quality, qualityRank } = megaPlayQuality(Number(resolution?.[2] || 0), bandwidth);
+      if (!out.some(v => v.url === url)) out.push({ url, quality, qualityRank });
+    } catch { /* ignore malformed variant */ }
+  }
+  return out;
+}
+
+async function getMegaPlayAnimeSources(
+  _title: string, _english: string | null, ep: number, anilistId?: number, availabilityOnly = false,
+): Promise<UnifiedSource[]> {
+  if (!anilistId || !Number.isFinite(ep) || ep < 1) return [];
+  try {
+    const embedUrl = `${MEGAPLAY_RAW_BASE}/stream/ani/${anilistId}/${ep}/sub`;
+    const page = await fetchSourceWithRetry(embedUrl, {
+      headers: { ...BASE_HDRS, Referer: "https://hianimez.to/", Accept: "text/html" },
+    }, 14_000);
+    if (!page?.ok) return [];
+    const html = await page.text();
+    const fileId = html.match(/data-id\s*=\s*["']([^"']+)["']/i)?.[1]
+      || html.match(/["']data-id["']\s*:\s*["']([^"']+)["']/i)?.[1];
+    if (!fileId) return [];
+
+    // MegaPlay has served both endpoint names during provider migrations.
+    // Try the documented endpoint first, then the newer endpoint before the
+    // source is considered unavailable.
+    const sourceEndpoints = [
+      `${MEGAPLAY_RAW_BASE}/stream/getSources?id=${encodeURIComponent(fileId)}`,
+      `${MEGAPLAY_RAW_BASE}/stream/getSourcesNew?id=${encodeURIComponent(fileId)}&category=sub`,
+    ];
+    let data: {
+      sources?: { file?: string; url?: string } | Array<{ file?: string; url?: string }>;
+      intro?: { start?: number; end?: number };
+      outro?: { start?: number; end?: number };
+    } | null = null;
+    for (const sourceEndpoint of sourceEndpoints) {
+      try {
+        const sourceResponse = await fetchSourceWithRetry(sourceEndpoint, {
+          headers: {
+            ...BASE_HDRS,
+            Referer: embedUrl,
+            "X-Requested-With": "XMLHttpRequest",
+            Accept: "application/json",
+          },
+        }, 12_000);
+        if (!sourceResponse?.ok) continue;
+        const candidate = await sourceResponse.json().catch(() => null) as typeof data;
+        if (candidate?.sources) { data = candidate; break; }
+      } catch { /* try the migration-compatible endpoint */ }
+    }
+    if (!data) return [];
+    const sourceValue = Array.isArray(data.sources) ? data.sources[0] : data.sources;
+    const masterUrl = String(sourceValue?.file || sourceValue?.url || "").trim();
+    if (!/^https:\/\//i.test(masterUrl) || !/\.m3u8(?:[?#]|$)/i.test(masterUrl)) return [];
+
+    if (availabilityOnly) {
+      return [{
+        name: "MegaPlay · 1080p", url: "", quality: "1080p",
+        qualityRank: 18, site: "megaplay", verified: true,
+      } as UnifiedSource];
+    }
+
+    const manifestResponse = await fetchSourceWithRetry(masterUrl, {
+      headers: { ...BASE_HDRS, Referer: MEGAPLAY_RAW_REF, Accept: "application/vnd.apple.mpegurl" },
+    }, 12_000);
+    const manifest = manifestResponse?.ok ? await manifestResponse.text() : "";
+    const variants = parseMegaPlayVariants(masterUrl, manifest);
+    if (!variants.length) variants.push({ url: masterUrl, ...megaPlayQuality(1080) });
+
+    // This is intentionally the only subtitle path attached to MegaPlay.
+    // MegaPlay's own English tracks are not exposed as built-in subtitles.
+    const kawaiiSubtitle = await getKawaiiSubForSource(anilistId, ep);
+    const skipIntro = data.intro && Number(data.intro.start) >= 0 && Number(data.intro.end) > Number(data.intro.start)
+      ? { start: Number(data.intro.start), end: Number(data.intro.end) } : undefined;
+    const skipOutro = data.outro && Number(data.outro.start) >= 0 && Number(data.outro.end) > Number(data.outro.start)
+      ? { start: Number(data.outro.start), end: Number(data.outro.end) } : undefined;
+
+    return variants.map((variant) => {
+      const directUrl = `/api/anime/hls-proxy?url=${encodeURIComponent(variant.url)}&ref=${encodeURIComponent(MEGAPLAY_RAW_REF)}`;
+      return {
+        name: `MegaPlay · ${variant.quality} · صوت خام${kawaiiSubtitle ? " · ترجمة Kawaii" : ""}`,
+        url: directUrl,
+        quality: variant.quality,
+        qualityRank: variant.qualityRank,
+        site: "megaplay",
+        directUrl,
+        directType: "hls",
+        rawUrl: variant.url,
+        hasBuiltinSub: false,
+        ...(kawaiiSubtitle ? { subtitleUrl: kawaiiSubtitle } : {}),
+        ...(skipIntro ? { skipIntro } : {}),
+        ...(skipOutro ? { skipOutro } : {}),
+      } as UnifiedSource;
+    });
+  } catch (e: any) {
+    console.warn("[megaplay]", e?.message || e);
+    return [];
+  }
 }
 
 
@@ -6189,38 +6479,54 @@ function wrapForMobile(s: { site?: string; directUrl?: string; url?: string; dir
 
 router.get("/anime/kawaii-meta", async (req: Request, res: Response) => {
   const anilistId = parseInt(req.query.anilistId as string || "0");
-  const ep        = parseInt(req.query.ep        as string || "1");
-  const empty = { arabicSubUrl: null, englishSubUrl: null, intro: null, outro: null };
+  const ep = parseInt(req.query.ep as string || "1");
+  const empty = { arabicSubUrl: null, englishSubUrl: null, subtitleRef: null, intro: null, outro: null };
   if (!anilistId) return res.json(empty);
   try {
-    const r = await fetch(`${KAWAII_BASE}/api/watch?anilistId=${anilistId}&ep=${ep}`, {
-      headers: { ...BASE_HDRS, Accept: "application/json", Referer: KAWAII_BASE + "/" },
-      signal: AbortSignal.timeout(8000),
-    });
-    if (!r.ok) return res.json(empty);
-    const data = await r.json() as {
+    type KawaiiMeta = {
       subtitles?: Array<{ url: string; lang?: string; label?: string }>;
+      headers?: Record<string, string>;
       intro?: { start: number; end: number };
       outro?: { start: number; end: number };
     };
-    const findSub = (tag: string) => data.subtitles?.find(s =>
-      (s.lang || s.label || "").toLowerCase().includes(tag)
-    );
-    const arEntry = findSub("arabic") || findSub("arab") || findSub("ar");
-    const enEntry = findSub("english") || findSub("en");
+    let data: KawaiiMeta | null = null;
+    let apiBase = KAWAII_BASE;
+    for (const base of KAWAII_API_BASES) {
+      const r = await fetchSourceWithRetry(`${base}/api/watch?anilistId=${anilistId}&ep=${ep}`, {
+        headers: { ...BASE_HDRS, Accept: "application/json", Referer: `${base}/` },
+      }, 10_000);
+      if (!r) continue;
+      const candidate = await r.json().catch(() => null) as KawaiiMeta | null;
+      if (candidate?.subtitles?.some(s => typeof s?.url === "string" && s.url.length > 0)) {
+        data = candidate;
+        apiBase = base;
+        break;
+      }
+    }
+    if (!data) return res.json(empty);
+    const language = (s: { lang?: string; label?: string }) => `${s.lang || ""} ${s.label || ""}`.toLowerCase().trim();
+    const isArabic = (s: { lang?: string; label?: string }) => {
+      const value = language(s);
+      return value === "ar" || value === "ara" || value.includes("arabic") || value.includes("arab") || value.includes("عربي") || value.includes("العربية");
+    };
+    const isEnglish = (s: { lang?: string; label?: string }) => {
+      const value = language(s);
+      return value === "en" || value === "eng" || value.includes("english") || value.includes("انجليزي");
+    };
+    const arEntry = data.subtitles?.find(isArabic);
+    const enEntry = data.subtitles?.find(isEnglish);
+    const subtitleRef = data.headers?.Referer || data.headers?.referer || `${apiBase}/`;
     return res.json({
-      arabicSubUrl:  arEntry?.url || null,
+      arabicSubUrl: arEntry?.url || null,
       englishSubUrl: enEntry?.url || null,
-      intro: data.intro  || null,
-      outro: data.outro  || null,
+      subtitleRef,
+      intro: data.intro || null,
+      outro: data.outro || null,
     });
   } catch {
     return res.json(empty);
   }
-});
-
-
-// ════════════════════════════════════════════════════════════════════
+});// ════════════════════════════════════════════════════════════════════
 //  ANIKOTO (via megaplay.buzz) — صوت ياباني + ترجمة إنجليزية → عربية
 //  يستخدم AniList ID مباشرة، لا حاجة للبحث عن slug
 // ════════════════════════════════════════════════════════════════════
@@ -6418,6 +6724,7 @@ async function findHiAnimeSlug(title: string, english: string | null): Promise<s
 
 async function getHiAnimeSources(
   title: string, english: string | null, ep: number, _anilistId?: number,
+  availabilityOnly = false,
 ): Promise<UnifiedSource[]> {
   try {
     const slug = await findHiAnimeSlug(title, english);
@@ -6761,12 +7068,19 @@ async function searchAnineko(query: string): Promise<Array<{ slug: string; title
   return results;
 }
 
-async function findAninekoSlug(title: string, english: string | null): Promise<string | null> {
+async function findAninekoSlug(title: string, english: string | null, variants: string[] = []): Promise<string | null> {
   const ck = (title + "|" + (english || "")).toLowerCase();
   const cached = aninekoSlugCache.get(ck);
   if (cached && Date.now() - cached.ts < ANINEKO_SLUG_TTL) return cached.slug;
 
-  const queries = [...new Set([english, title].filter(Boolean) as string[])];
+  // AniNeko often returns a localized/official English title for a Romaji query
+  // (e.g. "Oni no Hanayome" -> "The Ogre's Bride"). Include all client title
+  // variants before falling back to the primary title.
+  const queries = [...new Set(
+    [english, ...variants, title].filter((value): value is string =>
+      typeof value === "string" && value.trim().length > 0
+    )
+  )];
   for (const q of queries) {
     const results = await searchAnineko(q);
     if (!results.length) continue;
@@ -6780,6 +7094,17 @@ async function findAninekoSlug(title: string, english: string | null): Promise<s
         english ? asciiSimilarity(r.slug, english) : 0,
       );
       if (sc > bestSc) { bestSc = sc; bestSlug = r.slug; }
+    }
+    // The AniNeko browser endpoint is already a relevance-ranked search. When
+    // it returns exactly one card, accept that card even if the site uses a
+    // translated title that cannot score against the Romaji title locally.
+    const singleSearchResult = results.length === 1 && q.trim().length >= 4;
+    if (singleSearchResult) {
+      // A localized title can score zero against the Romaji query. The site
+      // search has already narrowed this to one relevant card, so use its slug.
+      const chosenSlug = bestSlug || results[0].slug;
+      aninekoSlugCache.set(ck, { slug: chosenSlug, ts: Date.now() });
+      return chosenSlug;
     }
     if (bestSlug && bestSc >= 0.35) {
       aninekoSlugCache.set(ck, { slug: bestSlug, ts: Date.now() });
@@ -6844,11 +7169,12 @@ async function extractAninekoAllHls(
 const ANINEKO_DISABLED = false; // يعمل مباشرة من VPS IP — لا يحتاج Orkestr
 
 async function getAninekoSources(
-  title: string, english: string | null, ep: number,
+  title: string, english: string | null, ep: number, variants: string[] = [],
+  availabilityOnly = false,
 ): Promise<UnifiedSource[]> {
   if (ANINEKO_DISABLED) return [];
   try {
-    const slug = await findAninekoSlug(title, english);
+    const slug = await findAninekoSlug(title, english, variants);
     if (!slug) return [];
 
     // direct fetch — anineko.to accessible directly from VPS (Orkestr account closed 2026-07)
@@ -6892,9 +7218,30 @@ async function getAninekoSources(
     }
     if (!serverEntries.length) return [];
 
+    /* ViviBebe currently redirects its first media request to an ad host
+       (p16-ad-sg.ibyteimg.com), which makes HLS.js show a permanent black
+       frame. Prefer the real media hosts first; keep ViviBebe only as a
+       last-resort fallback when the episode has no other AN server. */
+    const stableEntries = serverEntries.filter(e => !/vivibebe\.site/i.test(e.embedUrl));
+    const rankedEntries = stableEntries.length ? stableEntries : serverEntries;
+
+    // Availability mode ends at the episode page. Do not resolve an embed,
+    // request a manifest, or build a playable proxy URL here.
+    if (availabilityOnly) {
+      return rankedEntries.slice(0, 8).map((entry, index) => ({
+        name: `AniNeko · ${entry.embedUrl.includes("bibi") ? "BibiEmb" : `Server ${index + 1}`} · 1080p`,
+        url: "",
+        quality: "1080p",
+        qualityRank: 13,
+        site: "anineko",
+        serverCount: 1,
+        verified: true,
+      } as UnifiedSource));
+    }
+
     const sources: UnifiedSource[] = [];
 
-    for (const entry of serverEntries.slice(0, 4)) {
+    for (const entry of rankedEntries.slice(0, 4)) {
       const { embedUrl, rawSubUrl } = entry;
       let m3u8Url: string | null = null;
       let referer = ANINEKO_BASE + "/";
@@ -7389,7 +7736,7 @@ async function kaiResolveMegaup(embedUrl: string): Promise<string | null> {
 }
 
 async function getAnimeKaiSources(
-  title: string, english: string | null, ep: number, _anilistId?: number,
+  title: string, english: string | null, ep: number, _anilistId?: number, availabilityOnly = false,
 ): Promise<UnifiedSource[]> {
   try {
     // 1. Search anikai.cc via CF bypass
@@ -7438,6 +7785,21 @@ async function getAnimeKaiSources(
     let pool = subPool.length ? subPool : dubPool.length ? dubPool : hsubPool;
     if (!pool.length) return [];
     pool.sort((a, b) => kaiHostRank(b.videoUrl) - kaiHostRank(a.videoUrl));
+
+    // Availability mode only confirms that the episode has a subtitle server.
+    // No embed page or HLS manifest is fetched in this path.
+    if (availabilityOnly) {
+      const first = pool[0];
+      return first ? [{
+        name: `AnimeKai · ${first.lang === "dub" ? "مدبلج" : "ياباني · ترجمة ناعمة"} · ${first.name}`,
+        url: "",
+        quality: "1080p",
+        qualityRank: 18,
+        site: "animekai",
+        serverCount: pool.length,
+        verified: true,
+      } as UnifiedSource] : [];
+    }
 
     const sources: UnifiedSource[] = [];
     const seenHlsQualities = new Set<string>();
@@ -8824,13 +9186,37 @@ function re_parseWasm(wasm: Uint8Array): { step: number; transform: (b: number) 
   }
   return { step, transform };
 }
-function re_runDecrypt(wasm: Uint8Array, frag1: Uint8Array, kf2: Uint8Array, T: Uint8Array, seedInt: number): Uint8Array {
-  const { step, transform } = re_parseWasm(wasm);
-  const out = new Uint8Array(frag1.length);
-  for (let i = 0; i < frag1.length; i++) out[i] = transform((frag1[i] ^ kf2[i] ^ T[i]) & 255) ^ ((i * step + seedInt) & 255);
-  return out;
+async function re_runDecrypt(
+  wasm: Uint8Array,
+  frag1: Uint8Array,
+  kf2: Uint8Array,
+  T: Uint8Array,
+  seedInt: number,
+): Promise<{ decryptedKey: Uint8Array; manifestKey: Uint8Array }> {
+  // The WASM module exposes both the video decryption key and the
+  // manifest XOR key. The latter is required by fetch.flixcloud.cc HLS.
+  const instantiated = await WebAssembly.instantiate(wasm, {});
+  const instance = "instance" in instantiated ? instantiated.instance : instantiated;
+  const wasmExports: any = instance.exports;
+  const length = frag1.length;
+  const fragmentPtr = 1000;
+  const keyFragmentPtr = fragmentPtr + length;
+  const tokenPtr = keyFragmentPtr + length;
+  const outputPtr = tokenPtr + length;
+  const requiredBytes = outputPtr + length;
+  while (wasmExports.memory.buffer.byteLength < requiredBytes) wasmExports.memory.grow(1);
+  const memory = new Uint8Array(wasmExports.memory.buffer);
+  memory.set(frag1, fragmentPtr);
+  memory.set(kf2, keyFragmentPtr);
+  memory.set(T, tokenPtr);
+  wasmExports._s(seedInt);
+  wasmExports._r(fragmentPtr, keyFragmentPtr, tokenPtr, outputPtr, length);
+  const decryptedKey = memory.slice(outputPtr, outputPtr + length);
+  const manifestKeyPtr = wasmExports._c();
+  const manifestKey = memory.slice(manifestKeyPtr, manifestKeyPtr + 32);
+  return { decryptedKey, manifestKey };
 }
-async function re_decryptEmbed(html: string): Promise<{ url: string; subtitles: any[]; introChapter: any; outroChapter: any }> {
+async function re_decryptEmbed(html: string): Promise<{ url: string; subtitles: any[]; introChapter: any; outroChapter: any; manifestKey: string }> {
   const raw  = re_extractSsrObj(html);
   const data = re_parseJsLiteral(raw);
   const seed: string = data.obfuscation_seed;
@@ -8870,7 +9256,7 @@ async function re_decryptEmbed(html: string): Promise<{ url: string; subtitles: 
   const seedInt  = parseInt(seed.substring(0, 8), 16);
   const wPayload = re_b64toU8(data.w_payload ?? "");
   if (!wPayload.length) throw new Error("w_payload missing");
-  const wasmOut  = re_runDecrypt(wPayload, frag1, kf2, T_bytes, seedInt);
+  const { decryptedKey: wasmOut, manifestKey } = await re_runDecrypt(wPayload, frag1, kf2, T_bytes, seedInt);
   const keyMat   = await crypto.subtle.importKey("raw", Buffer.from(wasmOut), { name: "PBKDF2" }, false, ["deriveBits"]);
   const derivedBuf = await crypto.subtle.deriveBits(
     { name: "PBKDF2", salt: re_enc.encode(seed), iterations: 1000, hash: "SHA-256" }, keyMat, 256
@@ -8887,6 +9273,7 @@ async function re_decryptEmbed(html: string): Promise<{ url: string; subtitles: 
     subtitles: data.subtitles ?? [],
     introChapter: data.intro_chapter ?? null,
     outroChapter: data.outro_chapter ?? null,
+    manifestKey: Buffer.from(manifestKey).toString("base64"),
   };
 }
 
@@ -8895,7 +9282,7 @@ const REANIME_TTL = 30 * 60_000;
 
 // [2026-07-06] أُعيد تفعيله: reanime.to/api/flix لم يعد يحجب Replit datacenter IPs (فُحص مباشرة).
 // FlixCloud embed page لا يزال محميّاً بـ CF challenge بسيط → يُستخدم cfProxyGet (curl_cffi impersonation) بدلاً من fetch العادي.
-const REANIME_DISABLED = false; // re-enabled 2026-07-20: reanime.to/api/flix works — softsub only
+const REANIME_DISABLED = true; // re-enabled 2026-07-20: reanime.to/api/flix works — softsub only
 async function getReanímeSources(
   title: string, english: string | null, ep: number, anilistId?: number,
 ): Promise<UnifiedSource[]> {
@@ -8914,66 +9301,97 @@ async function getReanímeSources(
     const flixData: any = await flixRes.json();
     // flixData: { servers: [{serverName, dataType, dataLink, ...}] }
     const servers: any[] = flixData?.servers ?? flixData?.episode_links ?? [];
-    const subServer = servers.find((s: any) =>
-      (s.dataType || s.type || "").toLowerCase().includes("sub") ||
-      !(s.dataType || s.type || "").toLowerCase().includes("dub")
-    ) ?? servers[0];
-    if (!subServer) return [];
-    const embedUrl: string = subServer.dataLink || subServer.link || "";
-    if (!embedUrl.startsWith("http")) return [];
+    const subServers = servers.filter((server: any) => {
+      const kind = String(server.dataType || server.type || "").toLowerCase();
+      return kind.includes("sub") && !kind.includes("dub");
+    });
+    const fallbackServers = servers.filter((server: any) => !subServers.includes(server));
+    // HD-1 currently returns a CDN 403 for the media fragments on the VPS;
+    // try HD-2 first because it uses the working StrongHole path. Keep the
+    // other servers as fallbacks for episodes where the provider reverses it.
+    const candidates = [...subServers, ...fallbackServers].sort((a: any, b: any) => {
+      const av = String(a.dataLink || a.link || "").includes("?v=2") ? 1 : 0;
+      const bv = String(b.dataLink || b.link || "").includes("?v=2") ? 1 : 0;
+      return bv - av;
+    });
+    const triedEmbeds = new Set<string>();
+    const collectedSources: UnifiedSource[] = [];
 
-    // جلب صفحة الـ embed وفك تشفيرها — FlixCloud محمي بـ CF challenge بسيط،
-    // يُستخدم cfProxyGet (curl_cffi impersonation) بدلاً من fetch العادي لتجاوزه.
-    let embedHtml = await cfProxyGet(embedUrl, `${REANIME_BASE}/`, 12000) || "";
-    if (!embedHtml) {
-      embedHtml = await fetch(embedUrl, {
-        headers: { "User-Agent": REANIME_UA, "Referer": `${REANIME_BASE}/` },
-        signal: AbortSignal.timeout(12000),
-      }).then(r => r.ok ? r.text() : "").catch(() => "");
+    // FlixCloud can return a dead 500 link before a working HD link.
+    // Try every distinct server and keep the first page that decrypts.
+    for (const server of candidates) {
+      const embedUrl: string = server.dataLink || server.link || "";
+      if (!embedUrl.startsWith("http") || triedEmbeds.has(embedUrl)) continue;
+      triedEmbeds.add(embedUrl);
+
+      try {
+        // جلب صفحة الـ embed وفك تشفيرها — FlixCloud محمي بـ CF challenge بسيط،
+        // يُستخدم cfProxyGet (curl_cffi impersonation) بدلاً من fetch العادي لتجاوزه.
+        let embedHtml = await cfProxyGet(embedUrl, `${REANIME_BASE}/`, 12000) || "";
+        if (!embedHtml) {
+          embedHtml = await fetch(embedUrl, {
+            headers: { "User-Agent": REANIME_UA, "Referer": `${REANIME_BASE}/` },
+            signal: AbortSignal.timeout(12000),
+          }).then(r => r.ok ? r.text() : "").catch(() => "");
+        }
+        if (!embedHtml) continue;
+
+        const decrypted = await re_decryptEmbed(embedHtml);
+        const m3u8Url = String(decrypted?.url || "").trim();
+        const manifestKey = String(decrypted?.manifestKey || "").trim();
+        if (!/^https?:\/\//i.test(m3u8Url)) continue;
+        const subtitles = Array.isArray(decrypted?.subtitles) ? decrypted.subtitles : [];
+        const introChapter = decrypted?.introChapter;
+        const outroChapter = decrypted?.outroChapter;
+
+        // subtitle: أول ترجمة إنجليزية متاحة → ترجم للعربية
+        const subTrack = subtitles.find((s: any) =>
+          (s.label || s.lang || "").toLowerCase().includes("eng") ||
+          (s.label || s.lang || "").toLowerCase().includes("english")
+        ) ?? subtitles[0];
+        let subtitleUrl: string | undefined;
+        if (subTrack?.file || subTrack?.url) {
+          const rawVtt: string = subTrack.file || subTrack.url;
+          const proxyVtt = `/api/anime/proxy-text?url=${encodeURIComponent(rawVtt)}&ref=${encodeURIComponent(embedUrl)}`;
+          subtitleUrl = `/api/anime/translate-vtt?url=${encodeURIComponent(proxyVtt)}&from=en&to=ar`;
+        }
+
+        // intro/outro من embed (intro_chapter له start/end بالثواني)
+        let skipIntro: { start: number; end: number } | undefined;
+        let skipOutro: { start: number; end: number } | undefined;
+        if (introChapter?.start !== undefined && introChapter?.end !== undefined) {
+          skipIntro = { start: Number(introChapter.start), end: Number(introChapter.end) };
+        }
+        if (outroChapter?.start !== undefined && outroChapter?.end !== undefined) {
+          skipOutro = { start: Number(outroChapter.start), end: Number(outroChapter.end) };
+        }
+
+        // أرسل عبر hls-proxy مع مفتاح فك تشفير manifest الخاص بـ FlixCloud.
+        // يجب تشفير المفتاح حتى لا يتحول + في base64 إلى مسافة داخل query string.
+        const manifestKeyParam = manifestKey
+          ? `&mk=${encodeURIComponent(encryptParam(manifestKey))}`
+          : "";
+        const proxied = `/api/anime/hls-proxy?url=${encodeURIComponent(m3u8Url)}&ref=${encodeURIComponent(embedUrl)}${manifestKeyParam}`;
+        const candidateSources: UnifiedSource[] = [{
+          name: `Reanime · FlixCloud ${embedUrl.includes("?v=2") ? "HD-2" : "HD-1"} · ياباني مترجم`,
+          url: m3u8Url, quality: "1080p", qualityRank: embedUrl.includes("?v=2") ? 14 : 6,
+          site: "reanime",
+          directUrl: proxied,
+          directType: "hls",
+          subtitleUrl,
+          skipIntro,
+          skipOutro,
+        }];
+        collectedSources.push(...candidateSources);
+        continue;
+      } catch (candidateError: any) {
+        console.warn(`[reanime] server candidate failed: ${candidateError?.message ?? candidateError}`);
+      }
     }
-    if (!embedHtml) return [];
-
-    const { url: m3u8Url, subtitles, introChapter, outroChapter } = await re_decryptEmbed(embedHtml);
-
-    // subtitle: أول ترجمة إنجليزية متاحة → ترجم للعربية
-    const subTrack = subtitles.find((s: any) =>
-      (s.label || s.lang || "").toLowerCase().includes("eng") ||
-      (s.label || s.lang || "").toLowerCase().includes("english")
-    ) ?? subtitles[0];
-    let subtitleUrl: string | undefined;
-    if (subTrack?.file || subTrack?.url) {
-      const rawVtt: string = subTrack.file || subTrack.url;
-      const proxyVtt = `/api/anime/proxy-text?url=${encodeURIComponent(rawVtt)}&ref=${encodeURIComponent(embedUrl)}`;
-      subtitleUrl = `/api/anime/translate-vtt?url=${encodeURIComponent(proxyVtt)}&from=en&to=ar`;
-    }
-
-    // intro/outro من embed (intro_chapter له start/end بالثواني)
-    let skipIntro: { start: number; end: number } | undefined;
-    let skipOutro: { start: number; end: number } | undefined;
-    if (introChapter?.start !== undefined && introChapter?.end !== undefined) {
-      skipIntro = { start: Number(introChapter.start), end: Number(introChapter.end) };
-    }
-    if (outroChapter?.start !== undefined && outroChapter?.end !== undefined) {
-      skipOutro = { start: Number(outroChapter.start), end: Number(outroChapter.end) };
-    }
-
-    // أرسل عبر hls-proxy
-    const proxied = `/api/anime/hls-proxy?url=${encodeURIComponent(m3u8Url)}&ref=${encodeURIComponent(embedUrl)}`;
-    const sources: UnifiedSource[] = [{
-      name: "Reanime · FlixCloud · ياباني مترجم",
-      url: m3u8Url, quality: "1080p", qualityRank: 9,
-      site: "reanime",
-      directUrl: proxied,
-      directType: "hls",
-      subtitleUrl,
-      skipIntro,
-      skipOutro,
-    }];
-    reanimeSrcCache.set(ck, { sources, ts: Date.now() });
-    return sources;
+    if (collectedSources.length) reanimeSrcCache.set(ck, { sources: collectedSources, ts: Date.now() });
+    return collectedSources;
   } catch (e: any) { console.error("[reanime] error:", e?.message ?? e); return []; }
 }
-
 
 // ════════════════════════════════════════════════════════════════════
 //  ANIME-DAY.COM scraper  (Arabic dubbed anime — مدبلج)
@@ -9749,11 +10167,12 @@ async function getKawaiiSubForSource(anilistId: number | undefined, ep: number):
     const arSub = subs.find(s => (s.lang || "").toLowerCase().includes("arabic") || (s.lang || "").toLowerCase() === "ar");
     let result: string | undefined;
     if (arSub?.url) {
-      result = `/api/anime/proxy-text?url=${encodeURIComponent(arSub.url)}`;
+      const proxied = `/api/anime/proxy-text?url=${encodeURIComponent(arSub.url)}&ref=${encodeURIComponent(KAWAII_BASE + "/")}`;
+      result = `/api/anime/translate-vtt?url=${encodeURIComponent(proxied)}&from=ar&to=ar`;
     } else {
       const enSub = subs.find(s => (s.lang || "").toLowerCase().includes("english") || (s.lang || "").toLowerCase() === "en");
       if (enSub?.url) {
-        const proxied = `/api/anime/proxy-text?url=${encodeURIComponent(enSub.url)}`;
+        const proxied = `/api/anime/proxy-text?url=${encodeURIComponent(enSub.url)}&ref=${encodeURIComponent(KAWAII_BASE + "/")}`;
         result = `/api/anime/translate-vtt?url=${encodeURIComponent(proxied)}&from=en&to=ar`;
       }
     }
@@ -11812,7 +12231,7 @@ function sanimeSeasonNum(s: string | null | undefined): number {
 }
 
 async function getSAnimeSourcesUncached(
-  title: string, english: string | null, ep: number, variants: string[] = [],
+  title: string, english: string | null, ep: number, variants: string[] = [], availabilityOnly = false,
 ): Promise<UnifiedSource[]> {
   const ck = `sanime:${normalize(english || title).replace(/\s+/g, "-")}:${ep}`;
   const hit = _sanimeCacheMap.get(ck);
@@ -11892,6 +12311,13 @@ async function getSAnimeSourcesUncached(
       return out;
     }
 
+    if (availabilityOnly) {
+      return [
+        { name: "SAnime · FHD", url: "", quality: "FHD", qualityRank: 14, site: "sanime", verified: true } as UnifiedSource,
+        { name: "SAnime · HD", url: "", quality: "HD", qualityRank: 9, site: "sanime", verified: true } as UnifiedSource,
+      ];
+    }
+
     // 5. Direct CDN URLs.
     //
     // The info endpoint already confirmed that this episode exists. Waiting for
@@ -11926,12 +12352,12 @@ async function getSAnimeSourcesUncached(
 
 /** Share one upstream SA lookup between stream, picker and download requests. */
 async function getSAnimeSources(
-  title: string, english: string | null, ep: number, variants: string[] = [],
+  title: string, english: string | null, ep: number, variants: string[] = [], availabilityOnly = false,
 ): Promise<UnifiedSource[]> {
-  const key = `sanime:${normalize(english || title).replace(/\s+/g, "-")}:${ep}`;
+  const key = `sanime:${normalize(english || title).replace(/\s+/g, "-")}:${ep}:${availabilityOnly ? "availability" : "playback"}`;
   const active = _sanimeInFlight.get(key);
   if (active) return active;
-  const promise = getSAnimeSourcesUncached(title, english, ep, variants);
+  const promise = getSAnimeSourcesUncached(title, english, ep, variants, availabilityOnly);
   _sanimeInFlight.set(key, promise);
   try {
     return await promise;
@@ -12261,8 +12687,35 @@ async function getAppsAnimeSources(
   }
 }
 
+// ── Availability-only quality classifier ─────────────────────────────
+// Never expose a playable URL during the picker availability pass.
+// Prefer explicit quality labels over provider-specific numeric ranks:
+// several providers use rank 11 for both FHD and HD.
+function sourceCheckQuality(s: any): { quality: "1080p" | "720p" | "480p" | "360p"; qualityRank: number } {
+  // Availability mode only classifies the source. It never probes playback.
+  // Prefer explicit labels because provider numeric ranks are not universal.
+  const explicit = String(s?.quality || "").toLowerCase();
+  const rank = Number(s?.qualityRank) || 0;
+  const classify = (value: string) => {
+    if (/(?:2160|1440|1080)\s*p?|\bfhd\b|full[ ._-]*hd/.test(value)) return { quality: "1080p" as const, qualityRank: rank || 13 };
+    if (/(?:720)\s*p?|(?<!f)\bhd\b/.test(value)) return { quality: "720p" as const, qualityRank: rank || 9 };
+    if (/(?:480)\s*p?/.test(value)) return { quality: "480p" as const, qualityRank: rank || 7 };
+    if (/(?:360)\s*p?|\bsd\b/.test(value)) return { quality: "360p" as const, qualityRank: rank || 5 };
+    return null;
+  };
+  return classify(explicit)
+    || classify(`${s?.name || ""} ${s?.label || ""} ${s?.url || ""}`.toLowerCase())
+    || (rank >= 13
+      ? { quality: "1080p", qualityRank: rank }
+      : rank >= 9
+        ? { quality: "720p", qualityRank: rank }
+        : rank >= 7
+          ? { quality: "480p", qualityRank: rank }
+          : { quality: "360p", qualityRank: rank || 5 });
+}
+
 // ════════════════════════════════════════════════════════════════════
-//  sources-stream  SSE endpoint — runs all 4 scrapers in parallel
+//  sources-stream  SSE endpoint — runs all scrapers in parallel
 //  Streams sources as found (keeps proxy alive), sends [DONE] at end
 //  Frontend waits for [DONE] before rendering all sources at once
 // ════════════════════════════════════════════════════════════════════
@@ -12270,9 +12723,11 @@ router.get("/anime/sources-stream", async (req, res) => {
   const title     = ((req.query.title   as string) || "").trim();
   const english   = ((req.query.english as string) || "").trim() || null;
   const ep        = parseInt((req.query.ep    as string) || "1");
-  const anilistId = parseInt((req.query.anime as string) || (req.query.anilistId as string) || "0") || undefined;
+  let anilistId = parseInt((req.query.anime as string) || (req.query.anilistId as string) || "0") || undefined;
+  const anslayerId = parseInt((req.query.anslayerId as string) || "0") || undefined;
   const format    = ((req.query.format  as string) || "").trim().toUpperCase();
   const isMovie   = format === "MOVIE" || format === "MOVIE_SHORT";
+  const checkOnly = String(req.query.mode || "").toLowerCase() === "check";
 
   // Multi-criteria matching context (enriched from client)
   const reqYear     = parseInt((req.query.year     as string) || "0") || null;
@@ -12290,6 +12745,7 @@ router.get("/anime/sources-stream", async (req, res) => {
     }
   } catch { /* malformed optional title list — keep the primary fields */ }
   const seasonNum   = extractSeasonNum(title) ?? extractSeasonNum(english || "") ?? null;
+
   const matchCtx: MatchCtx = {
     romaji: title, english, native: reqNative,
     year: reqYear, totalEps: reqTotalEps,
@@ -12304,16 +12760,131 @@ router.get("/anime/sources-stream", async (req, res) => {
 
   // globalSeen: cross-scraper dedup used ONLY in sendSrc (not shared with extractAndCollect)
   const globalSeen = new Set<string>();
+  // Availability rows are streamed as verified sources arrive. Keep the
+  // aggregate count so the picker can show the real number of mirrors per
+  // provider/quality instead of a guessed server card.
+  const checkRows = new Map<string, { count: number; site: string; quality: string; qualityRank: number; name: string; label?: string }>();
+  // Avoid inflating serverCount when a provider repeats the same mirror URL.
+  const checkSeen = new Set<string>();
   let closed = false;
   req.on("close", () => { closed = true; });
+
+  // The availability pass does not need AniList resolution. Skipping it here
+  // removes an unrelated network dependency from the first source results.
+  // The full playback path keeps the existing resolution behavior.
+  // Kawaii and MegaPlay are AniList-ID based. Resolve the ID for the
+  // availability pass too; skipping it made KW/MP disappear until a later
+  // refresh happened to reuse a warmed cache.
+  if (!closed && title) {
+    // Some home/latest links carry a catalog id rather than an AniList id.
+    // Resolve by title even when a numeric id was supplied so MP/KW do not
+    // silently disappear because they received the wrong catalog namespace.
+    const resolvedByTitle = await Promise.race([
+      resolveAniListIdForSource(title, english, titleVariants, titleAr),
+      new Promise<number | undefined>(resolve => setTimeout(() => resolve(undefined), 3500)),
+    ]);
+    if (resolvedByTitle) anilistId = resolvedByTitle;
+  }
 
   // Keepalive: send SSE comment every 5 s to prevent proxy timeout
   const keepalive = setInterval(() => {
     if (!closed) res.write(": keepalive\n\n");
   }, 5000);
 
+  function sendCheckSrc(s: UnifiedSource) {
+    if (closed) return;
+    const site = String((s as any).site || "").trim();
+    if (!site) return;
+    const q = sourceCheckQuality(s);
+    const mirrorKey = `${site}|${s.directUrl || s.url || s.name || s.label || ""}|${q.quality}`;
+    if (checkSeen.has(mirrorKey)) return;
+    checkSeen.add(mirrorKey);
+    // One row per provider/quality, updated as every verified mirror arrives.
+    // The playable URL remains server-side in check mode.
+    const key = `${site}|${q.quality}`;
+    const previous = checkRows.get(key);
+    const row = {
+      site,
+      name: (s as any).name || (s as any).label || site,
+      label: (s as any).label,
+      quality: q.quality,
+      qualityRank: Math.max(q.qualityRank, previous?.qualityRank || 0),
+      available: true,
+      verified: true,
+      serverCount: (previous?.count || 0) + 1,
+      checkOnly: true,
+    };
+    checkRows.set(key, { ...row, count: row.serverCount });
+    res.write(`data: ${JSON.stringify(row)}\n\n`);
+  }
+
+  // Availability mode may inspect an HLS master manifest only. It never
+  // requests a segment, tests playback, measures speed, or downloads video.
+  const availabilityJobs = new Set<Promise<void>>();
+  const AVAILABILITY_MANIFEST_TIMEOUT_MS = 2500;
+
+  function getAvailabilityManifestTarget(s: UnifiedSource): { url: string; referer: string } | null {
+    const raw = String(s.directUrl || s.url || "");
+    if (!raw) return null;
+    let target = raw;
+    if (raw.startsWith("/api/")) {
+      try {
+        const parsed = new URL(`http://availability.local${raw}`);
+        target = parsed.searchParams.get("url") || "";
+        if (isEncrypted(target)) target = decryptParam(target);
+      } catch { return null; }
+    }
+    if (!/^https?:\/\//i.test(target) || !/\.m3u8(?:[?#]|$)/i.test(target)) return null;
+    return { url: target, referer: s.headers?.Referer || s.url || "" };
+  }
+
+  async function readAvailabilityManifest(target: { url: string; referer: string }): Promise<Array<{ quality: string; rank: number }>> {
+    try {
+      const response = await fetch(target.url, {
+        headers: { ...BASE_HDRS, ...(target.referer ? { Referer: target.referer } : {}) },
+        redirect: "follow",
+        signal: AbortSignal.timeout(AVAILABILITY_MANIFEST_TIMEOUT_MS),
+      });
+      if (!response.ok) return [];
+      const body = await response.text();
+      if (!body.includes("#EXTM3U") || !body.includes("#EXT-X-STREAM-INF")) return [];
+      const seen = new Set<string>();
+      const out: Array<{ quality: string; rank: number }> = [];
+      const lines = body.split(/\r?\n/).map(line => line.trim());
+      for (const line of lines) {
+        if (!line.startsWith("#EXT-X-STREAM-INF")) continue;
+        const resolution = line.match(/RESOLUTION=\d+x(\d+)/i);
+        const bandwidth = line.match(/BANDWIDTH=(\d+)/i);
+        const height = resolution ? Number(resolution[1]) : 0;
+        const bw = bandwidth ? Number(bandwidth[1]) : 0;
+        const quality = height >= 1080 || bw >= 2_000_000 ? "1080p"
+          : height >= 720 || bw >= 1_000_000 ? "720p"
+          : height >= 480 || bw >= 500_000 ? "480p" : "360p";
+        if (!seen.has(quality)) {
+          seen.add(quality);
+          out.push({ quality, rank: quality === "1080p" ? 13 : quality === "720p" ? 9 : quality === "480p" ? 7 : 5 });
+        }
+      }
+      return out;
+    } catch { return []; }
+  }
+
+  async function emitAvailability(srcs: UnifiedSource[]): Promise<void> {
+    // Metadata-only: do not request an m3u8, segment, MP4, or proxy URL during
+    // the picker scan. The source adapter's episode response and quality label
+    // are enough to render the row; playback starts only after a tap.
+    await Promise.allSettled(srcs.map(async source => sendCheckSrc(source)));
+  }
+
+  function scheduleAvailability(srcs: UnifiedSource[]): void {
+    const job = emitAvailability(srcs);
+    availabilityJobs.add(job);
+    void job.finally(() => availabilityJobs.delete(job));
+  }
+
   function sendSrc(s: UnifiedSource) {
     if (closed) return;
+    if (checkOnly) { sendCheckSrc(s); return; }
     if (!s.directUrl && !s.isEmbed) return;
     // iframe policy: only mega.nz and vidmoly allowed as sandboxed embed
     if (s.isEmbed) {
@@ -12361,11 +12932,11 @@ router.get("/anime/sources-stream", async (req, res) => {
   // ── Hard deadline: أغلق الاتصال بعد 28 ثانية مهما كان ──
   const forceClose = setTimeout(() => {
     if (!closed) { closed = true; res.write("data: [DONE]\n\n"); res.end(); }
-  }, 28_000);
+  }, checkOnly ? 35_000 : 45_000);
 
   try {
-    const SCRAPER_MS = 7000;   // كان 12000 — تقليل وقت انتظار كل مصدر
-    const EXTRACT_MS = 7000;   // كان 15000 — تقليل وقت الاستخراج العميق
+    const SCRAPER_MS = checkOnly ? 11000 : 14000;
+    const EXTRACT_MS = checkOnly ? 5000 : 12000;
     const race = <T>(p: Promise<T>, ms: number, fallback: T) =>
       Promise.race([p, new Promise<T>(r => setTimeout(() => r(fallback), ms))]);
 
@@ -12415,15 +12986,72 @@ router.get("/anime/sources-stream", async (req, res) => {
       } catch { return false; }
     }
 
-    async function probeAndFilter(srcs: UnifiedSource[]): Promise<UnifiedSource[]> {
+    async function probeHttpResource(url: string, referer?: string): Promise<boolean> {
+      if (!/^https?:\/\//i.test(url)) return false;
+      const headers: Record<string, string> = {
+        "User-Agent": BROWSER_UA,
+        Accept: "*/*",
+        ...(referer ? { Referer: referer } : {}),
+      };
+      try {
+        const head = await fetch(url, { method: "HEAD", headers, redirect: "follow", signal: AbortSignal.timeout(4_000) });
+        if (head.ok) return true;
+        if (![403, 405, 416, 429, 501].includes(head.status)) return false;
+      } catch {}
+      try {
+        const ranged = await fetch(url, { method: "GET", headers: { ...headers, Range: "bytes=0-1" }, redirect: "follow", signal: AbortSignal.timeout(5_000) });
+        return ranged.status === 200 || ranged.status === 206 || ranged.status === 416;
+      } catch { return false; }
+    }
+
+    async function probeVerifiedSource(s: UnifiedSource): Promise<boolean> {
+      const raw = s.directUrl || s.url;
+      if (!raw) return false;
+      const referer = s.headers?.Referer || s.url || "https://anime-nova.local/";
+      try {
+        if (raw.startsWith("/api/")) {
+          if (raw.includes("/hls-proxy")) {
+            const params = new URL("http://x" + raw).searchParams;
+            let target = params.get("url") || "";
+            if (isEncrypted(target)) target = decryptParam(target);
+            const ref = params.get("ref") || referer;
+            if (!target.startsWith("http")) return false;
+            return await Promise.race([
+              probeHlsManifest(target, isEncrypted(ref) ? decryptParam(ref) : ref),
+              new Promise<boolean>(resolve => setTimeout(() => resolve(false), 7_000)),
+            ]);
+          }
+          return await probeOwnProxy(s);
+        }
+        if (/(?:\.m3u8(?:[?#]|$)|\/hls(?:\/|$)|\/playlist(?:\/|$))/i.test(raw)) {
+          return await Promise.race([
+            probeHlsManifest(raw, referer),
+            new Promise<boolean>(resolve => setTimeout(() => resolve(false), 7_000)),
+          ]);
+        }
+        return await probeHttpResource(raw, referer);
+      } catch { return false; }
+    }
+
+    async function verifyPlayableSources(srcs: UnifiedSource[]): Promise<UnifiedSource[]> {
+      const candidates = srcs.slice(0, 8);
       const results = await Promise.allSettled(
-        srcs.map(async s => ({ s, ok: await probeOwnProxy(s) }))
+        candidates.map(async s => ({
+          s,
+          ok: await Promise.race([
+            probeVerifiedSource(s),
+            new Promise<boolean>(resolve => setTimeout(() => resolve(false), 3800)),
+          ]),
+        }))
       );
       return results
-        .filter((r): r is PromiseFulfilledResult<{ s: UnifiedSource; ok: boolean }> =>
-          r.status === "fulfilled")
+        .filter((r): r is PromiseFulfilledResult<{ s: UnifiedSource; ok: boolean }> => r.status === "fulfilled")
         .filter(r => r.value.ok)
         .map(r => r.value.s);
+    }
+
+    async function probeAndFilter(srcs: UnifiedSource[]): Promise<UnifiedSource[]> {
+      return verifyPlayableSources(srcs);
     }
 
     // مواقع ذات CDN token قصير الأجل — بياناتها Stale = منتهية الصلاحية حتماً
@@ -12435,8 +13063,9 @@ router.get("/anime/sources-stream", async (req, res) => {
       "xpass_anim",                     // XPass token ~8min
       "anineko", "anikoto",             // vibeplayer.site tokens expire in ~1-2h
       "kawaii",                         // cdn.momentoai.dev signed URLs (md5+expires) — نتجنب الـ cache القديم الذي يحتوي proxy URLs لا تعمل
-      "anivexa_re",                     // RE/FlixCloud manifest URLs rotate and old rows may lack the manifest key
-    ]);
+        "anivexa_re",                     // RE/FlixCloud rows may lack the manifest key
+
+]);
 
     // ── مساعد: كاشط بـ cache + extractAndCollect ──
     async function scrapeCached(
@@ -12446,24 +13075,43 @@ router.get("/anime/sources-stream", async (req, res) => {
       timeoutMs = SCRAPER_MS,
     ) {
       if (!title || closed) return;
+      // Availability is a bounded verification pass. Do not let a provider's normal
+      // playback timeout delay every other provider in the picker.
+      // A short check deadline made late providers vanish on first visit.
+      const effectiveTimeoutMs = checkOnly ? Math.min(timeoutMs, 11000) : timeoutMs;
       const cKey = makeSourceCacheKey(site, title, ep);
       const hit  = await getFromSourceCache(cKey);
+      // Reanime URLs are paired with a per-embed manifest key and cannot use
+      // source-cache rows created before that key was propagated to hls-proxy.
+      // Kawaii signed URLs and episode availability rotate quickly. Never serve
+      // a previous L2/L1 row while a newly aired episode is being requested.
+      const forceFresh = checkOnly || site === "kawaii" || site === "reanime";
 
-      if (hit) {
+      if (hit && !forceFresh) {
         const isStaleOrNearExpiry = hit.stale || shouldRefreshCache(hit.expiresAt);
 
         // مواقع ذات CDN token قصير: لا تُقدَّم بيانات قديمة — كشط مباشر
         if (isStaleOrNearExpiry && SHORT_TTL_NO_STALE.has(site)) {
           // سقوط مباشر للكشط الحي (لا نُرجع شيئاً من الكاش القديم)
         } else {
-          // ✅ تقديم من الـ Cache فوراً (< 5ms)
-          hit.sources.forEach(s => sendSrc(s));
+          // Availability must be fast and must not hide a provider because a CDN
+          // rejected a probe. The click-time fetch/playback path remains the final
+          // verifier, while this pass only discovers active provider rows.
+          if (checkOnly) {
+            // Await only the tiny metadata write so this provider's rows are
+            // guaranteed to reach SSE before the provider promise resolves.
+            // This is still fully parallel across providers and never probes
+            // a CDN, manifest, MP4, or segment.
+            await emitAvailability(hit.sources);
+            return;
+          }
+          hit.sources.forEach(sendSrc);
 
           // تجديد خلفي إذا اقترب الانتهاء أو انتهى فعلاً (stale-while-revalidate)
           if (isStaleOrNearExpiry) {
             setImmediate(async () => {
               try {
-                const srcs = await race(scrape(), timeoutMs, []);
+                const srcs = await race(scrape(), effectiveTimeoutMs, []);
                 if (!srcs.length) return;
                 if (useExtract) {
                   const buf: UnifiedSource[] = [];
@@ -12487,8 +13135,18 @@ router.get("/anime/sources-stream", async (req, res) => {
       }
 
       // ❌ لا يوجد cache → اكشط
-      const srcs = await race(scrape(), timeoutMs, []);
+      const srcs = await race(scrape(), effectiveTimeoutMs, []);
       if (!srcs.length) return;
+
+      // In check mode, verify a small bounded sample before advertising a row.
+      // Clicking a row still performs the complete fetch-source/playback check.
+      if (checkOnly) {
+        // Advertise metadata immediately. Awaiting this only guarantees the
+        // SSE rows are written before this provider resolves; all providers
+        // remain concurrent in the Promise.allSettled wave above.
+        await emitAvailability(srcs);
+        return;
+      }
 
       if (useExtract) {
         const buf: UnifiedSource[] = [];
@@ -12505,6 +13163,65 @@ router.get("/anime/sources-stream", async (req, res) => {
       }
     }
 
+    // Bounded provider queue: every visible source is queried, but only a
+    // few upstream requests run at once so one visitor cannot exhaust RAM.
+    async function runSourceQueue(
+      jobs: Array<() => Promise<unknown>>,
+      concurrency = 4,
+    ): Promise<void> {
+      let cursor = 0;
+      async function worker(): Promise<void> {
+        while (!closed) {
+          const index = cursor++;
+          if (index >= jobs.length) return;
+          try {
+            await jobs[index]();
+          } catch (error: any) {
+            console.warn("[source-queue] provider failed:", error?.message || error);
+          }
+        }
+      }
+      const workers = Math.min(concurrency, jobs.length);
+      await Promise.all(Array.from({ length: workers }, () => worker()));
+    }
+
+    // Availability scan: ask every provider shown in the picker through a
+    // bounded queue. scrapeCached() fetches the provider page/API to
+    // learn whether the requested episode exists, but check mode never runs
+    // extractAndCollect, CDN probing, manifest reads, or video downloads.
+    if (checkOnly) {
+      await Promise.race([runSourceQueue([
+        () => scrapeCached("kawaii",        () => getKawaiiAnimeSources(title, english, ep, anilistId, true), false, 3200),
+        () => scrapeCached("megaplay",      () => getMegaPlayAnimeSources(title, english, ep, anilistId, true), false, 5000),
+        () => scrapeCached("animekai",      () => getAnimeKaiSources(title, english, ep, anilistId, true), false, 5000),
+        () => scrapeCached("anineko",       () => getAninekoSources(title, english, ep, titleVariants, true), false, 5000),
+        () => (async () => {
+          const checked = await checkConsumetEpisode("consumet_gogo", title, english, ep, titleVariants, anilistId);
+          if (checked.available) {
+            sendCheckSrc({
+              name: "GogoAnime · الحلقة موجودة",
+              url: "",
+              quality: checked.quality || "720p",
+              qualityRank: checked.qualityRank || 13,
+              site: "consumet_gogo",
+              serverCount: checked.serverCount || 1,
+              verified: true,
+            } as UnifiedSource);
+          }
+        })(),
+        () => scrapeCached("animewitcher",  () => getAnimeWitcherSources(title, english, ep, anilistId, titleVariants), false, 3200),
+        () => scrapeCached("anslayer",      () => getAnimeSlayerSources(title, english, ep, anslayerId, titleAr), false, 3200),
+        () => scrapeCached("animeify",      () => getAnimeifySources(title, english, ep, titleVariants, true), false, 4000),
+        () => scrapeCached("sanime",        () => getSAnimeSources(title, english, ep, titleVariants, true), false, 4000),
+        () => scrapeCached("anifox",        () => getAnifoxSources(title, english, ep, titleVariants, anilistId, true), false, 4000),
+      ], 4), new Promise<void>(resolve => setTimeout(resolve, 32_000))]);
+      if (availabilityJobs.size) await Promise.allSettled([...availabilityJobs]);
+      clearInterval(keepalive);
+      clearTimeout(forceClose);
+      if (!closed) { closed = true; res.write("data: [DONE]\n\n"); res.end(); }
+      return;
+    }
+
     // جميع الكاشطات تعمل بالتوازي
     await Promise.allSettled([
       // ── مصادر عربية مدبلجة / مترجمة ──────────────────────────────
@@ -12519,7 +13236,6 @@ router.get("/anime/sources-stream", async (req, res) => {
       scrapeCached("animeday",     () => getAnimeDaySources(title, english, ep),    true, 18000),
       // scrapeCached("seepanel",  () => getSeepanelSources(title, english, ep, isMovie)), // DEAD: panel.seepanel.top/api returns 404 (2026-06)
       scrapeCached("arabseed",     () => getArabSeedSources(title, english, ep, isMovie)),
-      scrapeCached("anime4up2",    () => getAnime4up2Sources(title, english, ep),   true, 22000),
       scrapeCached("mycima",       () => getMyCimaSources(title, english, ep, isMovie)),
       // egybest: مُستبعد بطلب المستخدم 2026-07-13 — منطق الاستخراج نفسه مؤكَّد يعمل
       // (بحث WP-JSON + data-embed-url) لكن جودة/أولوية النتائج غير مرضية حالياً؛
@@ -12530,6 +13246,15 @@ router.get("/anime/sources-stream", async (req, res) => {
       scrapeCached("topcinemaa",   () => getTopCimaaSources(title, english, ep, isMovie)),
       // ── ياباني مترجم (AniList ID) ─────────────────────────────────
       scrapeCached("kawaii",       () => getKawaiiAnimeSources(title, english, ep, anilistId), false, 14000),
+      scrapeCached("megaplay",     () => getMegaPlayAnimeSources(title, english, ep, anilistId), false, 18000),
+      // AK and AN are visible in both clients; include them in the first availability pass too.
+      // Previously they existed only in fetch-source, so the picker reported them as missing.
+      scrapeCached("animekai",     () => getAnimeKaiSources(title, english, ep, anilistId),      false, 26000),
+      scrapeCached("anineko",      () => getAninekoSources(title, english, ep, titleVariants),    false, 30000),
+      // FX and GO were fetchable only after a tap, so the availability pass
+      // incorrectly marked them missing. Discover them in the same parallel pass.
+      scrapeCached("anifox",       () => getAnifoxSources(title, english, ep, titleVariants, anilistId), false, 12000),
+      scrapeCached("consumet_gogo",() => getConsumetSources("consumet_gogo", title, english, ep, titleVariants, anilistId), false, 12000),
       scrapeCached("anikototv",    () => getAnikototvSources(title, english, ep),               false, 22000),
       // anikuro: محذوف
       // anivault: محذوف — ترجمة إنجليزية مدمجة في الـ stream
@@ -12580,8 +13305,8 @@ router.get("/anime/sources-stream", async (req, res) => {
       // animegg:      معطّل بطلب المستخدم
       // allmanga: معطّل 2026-07-17 — AA_CRYPTO_MISSING على endpoint الحلقات (AllAnime أضافت anti-scraping)
       // scrapeCached("allmanga", () => getAllMangaSources(title, english, ep, anilistId), false, 18000),
-      // reanime: محذوف بطلب المستخدم 2026-07-24
-      // scrapeCached("reanime",  () => getReanímeSources(title, english, ep, anilistId),   false, 25000),
+      // reanime: re-enabled after live VPS verification
+      // Reanime/RE disabled globally: do not scrape or expose it.
       // animepahe:    mirurotvapi + owocdn AES-128 HLS — 18ث timeout — ثقيل جداً في التشغيل
       // ── مصادر جديدة يوليو 2026 ────────────────────────────────────────────
       scrapeCached("nekowatch",  () => getNekowatchSources(title, english, ep, anilistId),  false, 18000),
@@ -12590,7 +13315,7 @@ router.get("/anime/sources-stream", async (req, res) => {
       // xyra_anim: معطّل مؤقتاً — api.xyra.stream يرجع 502 (Cloudflare) لكل الطلبات منذ 2026-07-09
       // scrapeCached("xyra_anim",  () => getXyraAnimeSources(title, english, ep, anilistId),  false, 18000),
       scrapeCached("sanime",     () => getSAnimeSources(title, english, ep, titleVariants), false, 20000),
-      scrapeCached("anslayer",   () => getAnimeSlayerSources(title, english, ep, undefined, titleAr), false, 45000),
+      scrapeCached("anslayer",   () => getAnimeSlayerSources(title, english, ep, anslayerId, titleAr), false, 45000),
       // animetime / notorrent: أُزيلت كلياً بطلب المستخدم (2026-07-09)
     ]);
 
@@ -12598,6 +13323,9 @@ router.get("/anime/sources-stream", async (req, res) => {
     console.error("sources-stream error:", e?.message ?? e);
   }
 
+  if (checkOnly && availabilityJobs.size) {
+    await Promise.allSettled([...availabilityJobs]);
+  }
   clearInterval(keepalive);
   clearTimeout(forceClose);
   if (!closed) { closed = true; res.write("data: [DONE]\n\n"); res.end(); }
@@ -12612,15 +13340,18 @@ router.get("/anime/sources-stream", async (req, res) => {
 // ════════════════════════════════════════════════════════════════════
 router.get("/anime/fetch-source", async (req, res) => {
   const requestedSite = ((req.query.site as string) || "").trim().toLowerCase();
+  const DISABLED_SOURCE_SITES = new Set<string>();
+  if (DISABLED_SOURCE_SITES.has(requestedSite)) {
+    res.json({ sources: [], disabled: true });
+    return;
+  }
   // Keep old mobile builds working while routing every Reanime request
   // through the Anivexa adapter, which preserves the per-embed manifest key.
-  const site = requestedSite === "reanime" || requestedSite === "consumet_reanime"
-    ? "anivexa_re"
-    : requestedSite;
+  const site = requestedSite === "consumet_reanime" ? "reanime" : requestedSite;
   const title     = ((req.query.title   as string) || "").trim();
   const english   = ((req.query.english as string) || "").trim() || null;
   const ep        = parseInt((req.query.ep    as string) || "1");
-  const anilistId = parseInt((req.query.anime as string) || (req.query.anilistId as string) || "0") || undefined;
+  let anilistId = parseInt((req.query.anime as string) || (req.query.anilistId as string) || "0") || undefined;
   const format    = ((req.query.format  as string) || "").trim().toUpperCase();
   const isMovieParam = (req.query.isMovie as string) === "true";
   const isMovie   = format === "MOVIE" || format === "MOVIE_SHORT" || isMovieParam;
@@ -12637,9 +13368,33 @@ router.get("/anime/fetch-source", async (req, res) => {
     }
   } catch { /* malformed optional title list — keep the primary fields */ }
 
+  /* The picker requests one tier at a time. Keep provider/cache data intact,
+     but serialize only the requested tier back to the client. */
+  const requestedQuality = (() => {
+    const q = String(req.query.quality || '').trim().toLowerCase();
+    if (q === '1080p' || q === 'fhd' || q === '1080') return '1080p' as const;
+    if (q === '720p' || q === 'hd' || q === '720') return '720p' as const;
+    if (q === '360p' || q === '480p' || q === 'sd' || q === '360' || q === '480') return '360p' as const;
+    return null;
+  })();
+  const filterRequestedQuality = <T extends { quality?: string; qualityRank?: number; name?: string; label?: string; url?: string; directUrl?: string }>(rows: T[]): T[] => {
+    if (!requestedQuality) return rows;
+    return rows.filter((s) => sourceCheckQuality(s).quality === requestedQuality);
+  };
+
   if (!site || !title) {
     res.status(400).json({ error: "site and title required", sources: [] });
     return;
+  }
+
+  // روابط “أحدث الحلقات” تحمل AnimeSlayer ID في anime=، لذلك تكون AniList ID مفقودة.
+  // حلّها قبل تشغيل أي مصدر يعتمد على AniList (KW وAnimeWitcher وغيرها).
+  if (site !== "anslayer" && (site === "megaplay" || site === "kawaii" || !anilistId)) {
+    const resolvedByTitle = await Promise.race([
+      resolveAniListIdForSource(title, english, titleVariants, titleAr),
+      new Promise<number | undefined>(resolve => setTimeout(() => resolve(undefined), 3500)),
+    ]);
+    if (resolvedByTitle) anilistId = resolvedByTitle;
   }
 
   // ── تقييد مؤقت (بطلب المستخدم 2026-07-13): تعطيل كل مصادر قسم الأنمي ما عدا
@@ -12648,7 +13403,8 @@ router.get("/anime/fetch-source", async (req, res) => {
   //    السكرابر لا يمر بأي موقع آخر إطلاقاً، نفس نظام قسم الأنيميشن (ANIM_SOURCE_ALLOWLIST).
   //    لإعادة التفعيل: احذف/عدّل ANIME_SOURCE_ALLOWLIST بالأسفل. ─────────────────
   const ANIME_SOURCE_ALLOWLIST: Set<string> | null = new Set([
-    "kawaii",        // ⚡ الأسرع — DB-cached (50ms) ✅
+    "kawaii",
+    "megaplay",        // ⚡ الأسرع — DB-cached (50ms) ✅
     "anineko",       // 🎌 HLS متعدد الجودات — full VPS manifest + segment proxy
     "animewitcher",  // 🗄️ DB-first aw_links (142k) → Algolia fallback ✅
     "anifox",        // 📦 12 مصدر — Archive/MediaFire/MP4Upload/Uqload ✅
@@ -12657,6 +13413,7 @@ router.get("/anime/fetch-source", async (req, res) => {
     "animeify",      // 🎬 أنمي فاي — MEGA/Streamtape/MediaFire ✅ (مُعاد تفعيله)
     "animekai",      // 🎌 AnimeKai direct scraper — HLS/MP4
     ...ANIVEXA_SOURCES.map(source => source.site),
+    ...CONSUMET_SOURCES.map(source => source.site),
     // "anipub":     معطّل
     // ── مُعطَّلة سابقاً ─────────────────────────────────────────────────────
     // "akoam": حُذف 2026-07-28 — كان يستخدم hopxBrowserExtract على كل طلب
@@ -12667,10 +13424,10 @@ router.get("/anime/fetch-source", async (req, res) => {
     "anikoto", "shirayuki_anikoto", "shirayuki_animix",
     "anivexa_anikoto", "anivexa_anidbapp",
     "consumet_world", "consumet_miruro", "consumet_saturn",
-    "consumet_reanime", "consumet_anikoto", "reanime",
+    "consumet_reanime", "consumet_anikoto", "anime4up2",
     // Retired provider ids and legacy short tags. Keep these blocked so stale
     // clients/cache rows cannot resurrect the failed servers.
-    "mkissa", "mk", "reanime", "ra", "animegg", "gg", "anibd", "db",
+    "mkissa", "mk", "ra", "animegg", "gg", "anibd", "db",
     "2dhive", "2d", "senshi", "se", "kickassanime", "ka",
     "anivexa_mkissa", "anivexa_animegg", "anivexa_anibd",
     "anivexa_2dhive", "anivexa_senshi", "anivexa_kickassanime",
@@ -12683,7 +13440,7 @@ router.get("/anime/fetch-source", async (req, res) => {
     return;
   }
   if (isAnivexaSite(site)) {
-    const sources = await getAnivexaSources(site, anilistId, ep, title, english, titleVariants);
+    const sources = filterRequestedQuality(await getAnivexaSources(site, anilistId, ep, title, english, titleVariants));
     const isMobileClient = (req.headers["x-nova-client"] || "").toString().includes("mobile");
     const encSources = sources.map(source => {
       const wrapped = isMobileClient ? wrapForMobile(source) : source;
@@ -12698,7 +13455,7 @@ router.get("/anime/fetch-source", async (req, res) => {
     return;
   }
   if (isConsumetSite(site)) {
-    const sources = await getConsumetSources(site, title, english, ep, titleVariants, anilistId);
+    const sources = filterRequestedQuality(await getConsumetSources(site, title, english, ep, titleVariants, anilistId));
     const isMobileClient = (req.headers["x-nova-client"] || "").toString().includes("mobile");
     const encSources = sources.map(source => {
       const wrapped = isMobileClient ? wrapForMobile(source) : source;
@@ -12724,21 +13481,26 @@ router.get("/anime/fetch-source", async (req, res) => {
     "animekai",             // embed/CDN links are signed and short-lived
     "animewitcher", "animeify",                    // Streamtape/MediaFire ~45min
     "kawaii", "anifox",                             // signed CDN/download URLs
-      "anivexa_re",                                  // RE/FlixCloud signed manifests
     "moviebox", "moviebox_anim",                   // &t= signed URLs ~10min
     "vidlink_encdec", "vidlink_anim",              // stormvv URLs ~45min
     "xpass_anim",                                  // XPass token ~8min
-  ]);
+      "anivexa_re",                                  // RE/FlixCloud signed manifests
+
+]);
   const SHORT_TTL_MAX_AGE_MS = 90 * 60_000; // 90 دقيقة — قبل انتهاء tokens
   // Shirayuki returns short-lived CDN URLs; never serve its cached rows.
   const FORCE_LIVE_FETCH_SITES = new Set([
     "shirayuki_anikoto",
     "shirayuki_animix",
-    "anivexa_re",
+    "anineko", // discard stale ViviBebe rows and prefer live AN media hosts
     // Kawaii links are episode-specific signed URLs and the catalog changes
     // while an episode is still being added. Always ask Kawaii for a fresh URL.
     "kawaii",
-  ]);
+    "megaplay", // MegaPlay HLS tokens rotate; never serve a stale cached URL
+    "reanime", // FlixCloud HLS URLs are signed and must be fetched live
+      "anivexa_re",
+
+]);
   const cKey = makeSourceCacheKey(site, title, ep);
   let cached = await getFromSourceCache(cKey);
   if (cached && site === "anifox") {
@@ -12755,7 +13517,7 @@ router.get("/anime/fetch-source", async (req, res) => {
     (cached.stale === true || (cached.expiresAt - Date.now()) < SHORT_TTL_MAX_AGE_MS);
   if (cached && !FORCE_LIVE_FETCH_SITES.has(site) &&
       !shouldRefreshCache(cached.expiresAt) && !skipCacheForShortTtl) {
-    const enc = cached.sources.map((s: UnifiedSource) => {
+    const enc = filterRequestedQuality(cached.sources).map((s: UnifiedSource) => {
       // Cached Kawaii URLs can outlive a provider rotation. When the cached
       // raw URL points to Mewstream, rebuild the proxy URL and force the
       // provider's required Megaplay Referer instead of reusing a stale
@@ -12856,14 +13618,14 @@ router.get("/anime/fetch-source", async (req, res) => {
       case "animeday":     await runExtract(await race(getAnimeDaySources(title, english, ep),   SCRAPER_MS, [])); break;
       // case "seepanel": DEAD
       case "arabseed":     await runExtract(await race(getArabSeedSources(title, english, ep),   SCRAPER_MS, [])); break;
-      case "anime4up2":    await runExtract(await race(getAnime4up2Sources(title, english, ep),  25000, [])); break;
       case "mycima":       await runExtract(await race(getMyCimaSources(title, english, ep, isMovie), 30000, [])); break;
       case "egybest":      await runExtract(await race(getEgyBestSources(title, english, ep, isMovie), 30000, [])); break;
       // moviz_time: معطّل بطلب المستخدم 2026-07-14 (قسم الأنمي فقط)
       // case "moviz_time":  (await race(getMovizTimeSources(title, english, ep, isMovie), 20000, [])).forEach(collectSrc); break;
       case "topcinemaa":   await runExtract(await race(getTopCimaaSources(title, english, ep, isMovie), SCRAPER_MS, [])); break;
       case "kawaii":      (await race(getKawaiiAnimeSources(title, english, ep, anilistId), 24_000, [])).forEach(collectSrc); break;
-      case "anineko":     (await race(getAninekoSources(title, english, ep),              40_000, [])).forEach(collectSrc); break;
+      case "megaplay":    (await race(getMegaPlayAnimeSources(title, english, ep, anilistId), 24_000, [])).forEach(collectSrc); break;
+      case "anineko":     (await race(getAninekoSources(title, english, ep, titleVariants), 40_000, [])).forEach(collectSrc); break;
       case "anikototv":   (await race(getAnikototvSources(title, english, ep),              25000, [])).forEach(collectSrc); break;
       case "animekai":    (await race(getAnimeKaiSources(title, english, ep, anilistId),  30000, [])).forEach(collectSrc); break;
       // anikuro: محذوف
@@ -12941,7 +13703,7 @@ async function getVidboltAnimeSources(
     }
 
     const isMobileClient = (req.headers["x-nova-client"] || "").toString().includes("mobile");
-    const encSources = sources.map(s => {
+    const encSources = filterRequestedQuality(sources).map(s => {
       /* استخراج headers (Referer/Origin) قبل تشفير directUrl —
          يحتاجها ExoPlayer/AVPlayer للـ CDN segments مباشرةً.
          إذا كان ref مشفَّراً (hex AES) فهو رابط proxy داخلي — لا نُرسله كـ Referer. */
@@ -13057,6 +13819,7 @@ router.get("/anime/anslayer-latest", async (req, res) => {
       const epMatch = String(item.latest_episode_name || "").match(/(\d+)/);
       return {
         animeId: parseInt(item.anime_id, 10),
+        anslayerId: parseInt(item.anime_id, 10),
         name: item.anime_name || "",
         episode: epMatch ? parseInt(epMatch[1], 10) : null,
         cover: item.anime_cover_image_url || "",
@@ -13107,26 +13870,38 @@ router.get("/anime/aw-latest", async (req, res) => {
       res.json({ items: _awLatestCache });
       return;
     }
-    // أحدث 500 صف مرتبة بـ imported_at DESC
+    // اقرأ نافذة أكبر من aw_links لأن AnimeWitcher يخزن عدة صفوف للحلقة
+    // (سيرفر/جودة). ثم اختر أحدث حلقة فعلية لكل أنمي، لا أول صف مستورد فقط.
     const rows = await sbSelect<AwLinkRow>("aw_links", {
       "order": "imported_at.desc",
-    }, { limit: 500, select: "anime_id,anime_name,anilist_id,ep_number,imported_at" });
+    }, { limit: 2000, select: "anime_id,anime_name,anilist_id,ep_number,imported_at" });
 
-    // تجميع: أحدث حلقة لكل أنمي
-    const seen = new Map<string, AwLinkRow>();
+    const latestByAnime = new Map<string, AwLinkRow>();
     for (const row of rows) {
-      if (!seen.has(row.anime_id)) seen.set(row.anime_id, row);
+      const previous = latestByAnime.get(row.anime_id);
+      const rowEp = Number(row.ep_number) || 0;
+      const previousEp = Number(previous?.ep_number) || 0;
+      const rowTime = new Date(row.imported_at).getTime();
+      const previousTime = previous ? new Date(previous.imported_at).getTime() : 0;
+      if (!previous || rowEp > previousEp || (rowEp === previousEp && rowTime > previousTime)) {
+        latestByAnime.set(row.anime_id, row);
+      }
     }
-    const items = Array.from(seen.values())
+
+    const candidates = Array.from(latestByAnime.values())
       .sort((a, b) => new Date(b.imported_at).getTime() - new Date(a.imported_at).getTime())
-      .slice(0, 30)
-      .map(r => ({
-        animeId: r.anilist_id,
-        name:    r.anime_name || r.anime_id,
-        episode: r.ep_number,
-        cover:   r.anilist_id ? `https://img.anili.st/media/${r.anilist_id}` : "",
-        source:  "animewitcher",
-      }));
+      .slice(0, 40);
+    const items = (await Promise.all(candidates.map(async r => {
+      let anilistId = r.anilist_id || undefined;
+      if (!anilistId) anilistId = await resolveAniListIdForSource(r.anime_name || r.anime_id, null, [], null);
+      return {
+        animeId: anilistId || null,
+        name: r.anime_name || r.anime_id,
+        episode: Number(r.ep_number) || null,
+        cover: anilistId ? `https://img.anili.st/media/${anilistId}` : "",
+        source: "animewitcher",
+      };
+    }))).filter(item => item.animeId && item.episode).slice(0, 30);
 
     _awLatestCache = items;
     _awLatestTs    = Date.now();
@@ -13673,575 +14448,138 @@ router.get("/anime/subtitle-tracks", async (req, res) => {
 });
 
 
+const AR_TITLE_ALIASES: Record<string, string> = {
+  "one piece": "ون بيس", "naruto": "ناروتو", "naruto: shippuden": "ناروتو شيبودن",
+  "bleach": "بليتش", "dragon ball": "دراغون بول", "dragon ball z": "دراغون بول زد",
+  "attack on titan": "هجوم العمالقة", "demon slayer": "قاتل الشياطين",
+  "jujutsu kaisen": "جوجوتسو كايسن", "my hero academia": "أكاديمية بطلي",
+  "hunter x hunter": "القناص", "fullmetal alchemist: brotherhood": "فل ميتال ألكيميست: براذرهود",
+  "death note": "مذكرة الموت", "sword art online": "سورد آرت أونلاين",
+  "solo leveling": "سولو ليفلينج", "one punch man": "الرجل ذو اللكمة الواحدة",
+};
+
+const AR_SEARCH_ALIASES: Record<string, string> = {
+  "ناروتو": "Naruto", "ناروتو شيبودن": "Naruto: Shippuden", "ون بيس": "One Piece",
+  "بليتش": "Bleach", "دراغون بول": "Dragon Ball", "هجوم العمالقة": "Attack on Titan",
+  "قاتل الشياطين": "Demon Slayer", "ديمون سلاير": "Demon Slayer", "جوجوتسو كايسن": "Jujutsu Kaisen",
+  "القناص": "Hunter x Hunter", "هانتر": "Hunter x Hunter", "هنتر": "Hunter x Hunter",
+  "أكاديمية بطلي": "My Hero Academia", "فيري تيل": "Fairy Tail", "مذكرة الموت": "Death Note",
+  "سورد آرت أونلاين": "Sword Art Online", "سولو ليفلينج": "Solo Leveling", "الرجل ذو اللكمة الواحدة": "One Punch Man",
+};
+
+function polishArabicTranslation(value: string, kind: string): string {
+  let out = String(value || "")
+    .replace(/&amp;/gi, "&").replace(/&quot;/gi, '"').replace(/&#039;/gi, "'")
+    .replace(/\s+/g, " ").replace(/\s+([،؛.!؟])/g, "$1").trim();
+  // EpisodeList batches titles with this separator. Polish each item separately
+  // so an alias/prefix fix cannot corrupt the neighbouring title.
+  if (kind === "title" && /\n\s*§§§\s*\n/.test(out)) {
+    return out.split(/\n\s*§§§\s*\n/).map(part => polishArabicTranslation(part, kind)).join("\n§§§\n");
+  }
+  if (kind === "title") {
+    const alias = AR_TITLE_ALIASES[out.toLowerCase()];
+    if (alias) return alias;
+    out = out
+      .replace(/^(?:episode|ep\.?|الحلقة)\s*\d*\s*[-:–.)]\s*/i, "")
+      .replace(/^الحلقة\s+\d+\s*[-:–]\s*/, "")
+      .trim();
+  }
+  // Editorial fixes for recurring literal machine-translation phrasing.
+  return out.replace(/تتبع القصة/gi, "تدور أحداث القصة حول")
+    .replace(/في هذا الأنمي،/gi, "تدور الأحداث في هذا الأنمي حول")
+    .replace(/طالب في المدرسة الثانوية/gi, "طالب في المرحلة الثانوية")
+    .replace(/يتمحور حول/gi, "تدور أحداثه حول")
+    .replace(/الشخصية الرئيسية هي/gi, "تتمحور القصة حول");
+}
+
 router.get("/anime/translate", async (req, res) => {
   const text = ((req.query.text as string) || "").trim();
-  const from = ((req.query.from as string) || "en").trim();
-  const to   = ((req.query.to   as string) || "ar").trim();
+  const from = ((req.query.from as string) || "en").trim().toLowerCase();
+  const to   = ((req.query.to   as string) || "ar").trim().toLowerCase();
+  const kind = ((req.query.kind as string) || "subtitle").trim().toLowerCase();
   if (!text) { res.json({ translated: "" }); return; }
-  const cacheKey = `${from}:${to}:${text.substring(0, 200)}`;
 
-  // 1. L1: in-memory cache (instant)
-  if (translateCache.has(cacheKey)) { res.json({ translated: translateCache.get(cacheKey) }); return; }
+  const normalizedArabic = text.normalize("NFKC")
+    .replace(/[ًٌٍَُِّْـ]/g, "").replace(/[أإآ]/g, "ا").replace(/ة/g, "ه").trim();
+  if (from === "ar" && to === "en") {
+    const alias = AR_SEARCH_ALIASES[text] || AR_SEARCH_ALIASES[normalizedArabic];
+    if (alias) { res.setHeader("Cache-Control", "public, max-age=86400"); return res.json({ translated: alias, cached: true }); }
+  }
+  const directAlias = to === "ar" && kind === "title" ? AR_TITLE_ALIASES[text.toLowerCase()] : undefined;
+  if (directAlias) { res.setHeader("Cache-Control", "public, max-age=86400"); return res.json({ translated: directAlias, cached: true }); }
 
-  // 2. L2: PostgreSQL persistent cache
+  const cacheKey = `${kind}:${from}:${to}:${text.substring(0, 600)}`;
+  if (translateCache.has(cacheKey)) return res.json({ translated: translateCache.get(cacheKey), cached: true });
   const cached = await pgTranslateGet(cacheKey);
   if (cached !== null) {
     translateCache.set(cacheKey, cached);
-    res.json({ translated: cached });
-    return;
+    return res.json({ translated: cached, cached: true });
   }
 
-  // 3. Google Translate
-  try {
-    const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=${from}&tl=${to}&dt=t&q=${encodeURIComponent(text)}`;
-    const r = await fetch(url, { headers: { "User-Agent": BROWSER_UA }, signal: AbortSignal.timeout(6000) });
-    if (!r.ok) throw new Error(`translate ${r.status}`);
-    const data = await r.json() as any;
-    const translated = data?.[0]?.map((x: any) => x?.[0] || "").join("") || text;
+  const parts = kind === "title" ? text.split(/\n\s*§§§\s*\n/) : [text];
+  let translatedParts: string[] = [];
+  try { translatedParts = await translateBatchFree(parts, from, to); }
+  catch { translatedParts = parts.slice(); }
 
-    // Save to L1 (memory) + L2 (PostgreSQL) — fire-and-forget
-    translateCache.set(cacheKey, translated);
-    pgTranslateSave(cacheKey, translated, from, to);
-
-    res.json({ translated });
-  } catch { res.json({ translated: text }); }
-});
-
-
-// ════════════════════════════════════════════════════════════════════
-//  trace.moe — بحث الأنمي بالصورة / لقطة الشاشة
-// ════════════════════════════════════════════════════════════════════
-//  GET  /api/anime/trace-search?url={imageUrl}
-//  POST /api/anime/trace-search  (multipart field: image)
-//  Returns: [{ anilistId, title, episode, from, to, similarity, previewImage }]
-// ════════════════════════════════════════════════════════════════════
-router.get("/anime/trace-search", async (req, res) => {
-  const imageUrl = String(req.query.url || "").trim();
-  if (!imageUrl) { res.status(400).json({ error: "url param required" }); return; }
-  try {
-    const r = await fetch(
-      `https://api.trace.moe/search?anilistInfo=1&url=${encodeURIComponent(imageUrl)}`,
-      { headers: { "User-Agent": BROWSER_UA }, signal: AbortSignal.timeout(18_000) }
-    );
-    if (!r.ok) { res.status(r.status).json({ error: `trace.moe: ${r.status}` }); return; }
-    const data = await r.json() as {
-      result?: Array<{
-        anilist: number | { id: number; idMal?: number; title?: { romaji?: string; english?: string; native?: string }; coverImage?: { large?: string }; isAdult?: boolean };
-        episode?: number | string | null;
-        from: number;
-        to: number;
-        similarity: number;
-        image?: string;
-        video?: string;
-      }>;
-    };
-    const results = (data.result || [])
-      .filter(r => r.similarity >= 0.80)
-      .filter(r => {
-        const al = r.anilist;
-        return typeof al === "object" ? !al.isAdult : true;
-      })
-      .slice(0, 5)
-      .map(r => {
-        const al = r.anilist;
-        const anilistId = typeof al === "number" ? al : al.id;
-        const info     = typeof al === "object" ? al : null;
-        return {
-          anilistId,
-          malId:      info?.idMal,
-          title:      info?.title?.romaji || info?.title?.english || `AniList #${anilistId}`,
-          titleEn:    info?.title?.english || "",
-          titleNative:info?.title?.native  || "",
-          coverImage: info?.coverImage?.large,
-          episode:    r.episode ?? null,
-          from:       Math.round(r.from),
-          to:         Math.round(r.to),
-          similarity: Math.round(r.similarity * 100),
-          previewImage: r.image || null,
-        };
-      });
-    res.json({ results });
-  } catch (e: any) {
-    res.status(500).json({ error: String(e?.message || e) });
-  }
-});
-
-// POST (image upload → trace.moe)
-// Accepts: multipart/form-data (field="image"), application/json {image:base64,mimeType}, or raw binary (image/*)
-router.post("/anime/trace-search", async (req, res) => {
-  try {
-    const chunks: Buffer[] = [];
-    req.on("data", c => chunks.push(c));
-    await new Promise(resolve => req.on("end", resolve));
-    const rawBody = Buffer.concat(chunks);
-    const ct = (req.headers["content-type"] || "application/octet-stream").toLowerCase();
-
-    let imageData: Buffer;
-    let imageMime = "image/jpeg";
-
-    if (ct.startsWith("application/json")) {
-      // Mobile: { image: base64string, mimeType: "image/jpeg" }
-      const json = JSON.parse(rawBody.toString("utf8")) as { image?: string; mimeType?: string };
-      if (!json.image) { res.status(400).json({ error: "no image in JSON body" }); return; }
-      imageData = Buffer.from(json.image, "base64");
-      imageMime = json.mimeType || "image/jpeg";
-    } else if (ct.includes("multipart/form-data")) {
-      // Parse multipart: extract raw bytes of the "image" field
-      const bm = ct.match(/boundary=([^\s;]+)/);
-      if (!bm) { res.status(400).json({ error: "missing boundary" }); return; }
-      const boundary = Buffer.from("--" + bm[1].replace(/"/g, ""));
-      let pos = rawBody.indexOf(boundary);
-      let found = false;
-      while (pos >= 0) {
-        const partStart = pos + boundary.length;
-        if (rawBody[partStart] === 0x2d && rawBody[partStart + 1] === 0x2d) break; // end boundary
-        const hdEnd = rawBody.indexOf(Buffer.from("\r\n\r\n"), partStart);
-        if (hdEnd < 0) break;
-        const headers = rawBody.slice(partStart + 2, hdEnd).toString("utf8");
-        if (/name=["']?image["']?/i.test(headers) || /Content-Type:\s*image\//i.test(headers)) {
-          const dataStart = hdEnd + 4;
-          const nextBound = rawBody.indexOf(boundary, dataStart);
-          const dataEnd = nextBound > 0 ? nextBound - 2 : rawBody.length;
-          imageData = rawBody.slice(dataStart, dataEnd);
-          const mimeMatch = headers.match(/Content-Type:\s*(\S+)/i);
-          if (mimeMatch) imageMime = mimeMatch[1].trim();
-          found = true;
-          break;
-        }
-        pos = rawBody.indexOf(boundary, partStart + 1);
-      }
-      if (!found) { res.status(400).json({ error: "no image field in multipart" }); return; }
-    } else {
-      // Raw binary (image/jpeg, image/png, etc.)
-      imageData = rawBody;
-      imageMime = ct.split(";")[0].trim();
-    }
-
-    const r = await fetch("https://api.trace.moe/search?anilistInfo=1", {
-      method: "POST",
-      headers: { "User-Agent": BROWSER_UA, "Content-Type": imageMime },
-      body: imageData,
-      signal: AbortSignal.timeout(20_000),
-    });
-    if (!r.ok) { res.status(r.status).json({ error: `trace.moe: ${r.status}` }); return; }
-    const data = await r.json() as {
-      result?: Array<{
-        anilist: number | { id: number; idMal?: number; title?: { romaji?: string; english?: string; native?: string }; coverImage?: { large?: string }; isAdult?: boolean };
-        episode?: number | string | null;
-        from: number;
-        to: number;
-        similarity: number;
-        image?: string;
-      }>;
-    };
-    const results = (data.result || [])
-      .filter(r => r.similarity >= 0.80)
-      .filter(r => {
-        const al = r.anilist;
-        return typeof al === "object" ? !al.isAdult : true;
-      })
-      .slice(0, 5)
-      .map(r => {
-        const al = r.anilist;
-        const anilistId = typeof al === "number" ? al : al.id;
-        const info     = typeof al === "object" ? al : null;
-        return {
-          anilistId,
-          malId:      info?.idMal,
-          title:      info?.title?.romaji || info?.title?.english || `AniList #${anilistId}`,
-          titleEn:    info?.title?.english || "",
-          titleNative:info?.title?.native  || "",
-          coverImage: info?.coverImage?.large,
-          episode:    r.episode ?? null,
-          from:       Math.round(r.from),
-          to:         Math.round(r.to),
-          similarity: Math.round(r.similarity * 100),
-          previewImage: r.image || null,
-        };
-      });
-    res.json({ results });
-  } catch (e: any) {
-    res.status(500).json({ error: String(e?.message || e) });
-  }
-});
-
-// ════════════════════════════════════════════════════════════════════
-//  arm-ids  GET /api/anime/arm-ids?anilistId={id}
-//  يجلب جميع معرفات الأنمي (MAL, TMDB, AniDB, ...) من arm.haglund.dev
-// ════════════════════════════════════════════════════════════════════
-const armIdsCache = new Map<number, { data: Record<string, unknown>; ts: number }>();
-router.get("/anime/arm-ids", async (req, res) => {
-  const anilistId = parseInt(String(req.query.anilistId || ""), 10);
-  if (!anilistId) { res.status(400).json({ error: "anilistId required" }); return; }
-  const hit = armIdsCache.get(anilistId);
-  if (hit && Date.now() - hit.ts < 3_600_000) { res.json(hit.data); return; }
-  try {
-    const r = await fetch(`https://arm.haglund.dev/api/v2/ids?source=anilist&id=${anilistId}`, {
-      headers: { "User-Agent": BROWSER_UA, "Accept": "application/json" },
-      signal: AbortSignal.timeout(8_000),
-    });
-    if (!r.ok) { res.status(r.status).json({ error: `arm: ${r.status}` }); return; }
-    const data = await r.json() as Record<string, unknown>;
-    armIdsCache.set(anilistId, { data, ts: Date.now() });
-    res.json(data);
-  } catch (e: any) {
-    res.status(500).json({ error: String(e?.message || e) });
-  }
-});
-
-//  aniskip-proxy  GET /api/anime/aniskip?malId=&ep=
-// ════════════════════════════════════════════════════════════════════
-//  AniList GraphQL proxy (avoids CORS issues from browser)
-// ════════════════════════════════════════════════════════════════════
-router.post("/anime/anilist", async (req, res) => {
-  const { query, variables } = req.body || {};
-  if (!query) { res.status(400).json({ error: "query required" }); return; }
-  try {
-    const r = await fetch("https://graphql.anilist.co", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "Accept": "application/json" },
-      body: JSON.stringify({ query, variables }),
-      signal: AbortSignal.timeout(14_000),
-    });
-    if (!r.ok) { res.status(r.status).json({ error: "AniList error" }); return; }
-    const data = await r.json();
-    res.json(data);
-  } catch (e) {
-    res.status(500).json({ error: String(e) });
-  }
-});
-
-// ════════════════════════════════════════════════════════════════════
-//  meta-by-id  GET /api/anime/meta-by-id?id=&source=mal|kitsu
-//  عند عرض قوائم مبنية من Jikan/Kitsu (أثناء انقطاع AniList) تكون الـ id
-//  المُعادة هي MAL/Kitsu id وليست AniList id. الضغط على البوستر يجب أن
-//  يجلب التفاصيل بنفس المصدر مباشرة، بدل معاملتها كـ AniList id (وهو ما
-//  كان يفتح صفحة أنمي مختلف تماماً بسبب تطابق رقمي عشوائي بين النطاقين).
-// ════════════════════════════════════════════════════════════════════
-router.get("/anime/meta-by-id", async (req, res) => {
-  const id = String(req.query.id || "").trim();
-  const source = String(req.query.source || "").trim();
-  if (!id || !["mal", "kitsu"].includes(source)) {
-    res.status(400).json({ error: "id and source (mal|kitsu) required" });
-    return;
-  }
-  try {
-    if (source === "mal") {
-      const r = await fetch(`https://api.jikan.moe/v4/anime/${id}`, {
-        headers: { "Accept": "application/json", "User-Agent": "AnimeNova/1.0" },
-        signal: AbortSignal.timeout(10000),
-      });
-      if (!r.ok) { res.status(r.status).json({ error: "jikan error" }); return; }
-      const d = await r.json();
-      if (!d.data) { res.status(404).json({ error: "not found" }); return; }
-      res.json({ data: { Media: jikanToAniList(d.data) } });
-      return;
-    }
-    // kitsu
-    const r = await fetch(`https://kitsu.io/api/edge/anime/${id}`, {
-      headers: { "Accept": "application/vnd.api+json", "User-Agent": "AnimeNova/1.0" },
-      signal: AbortSignal.timeout(10000),
-    });
-    if (!r.ok) { res.status(r.status).json({ error: "kitsu error" }); return; }
-    const d = await r.json();
-    if (!d.data) { res.status(404).json({ error: "not found" }); return; }
-    res.json({ data: { Media: kitsuToAniList(d.data) } });
-  } catch (e: any) {
-    res.status(500).json({ error: String(e?.message || e) });
-  }
-});
-
-// ════════════════════════════════════════════════════════════════════
-//  Proxies AniSkip API to avoid CORS/network issues from browser
-// ════════════════════════════════════════════════════════════════════
-// ════════════════════════════════════════════════════════════════════
-//  ep-title  GET /api/anime/ep-title?malId=&ep=
-//  يجلب عنوان الحلقة من Jikan (MyAnimeList) عندما يكون AniList فارغاً
-// ════════════════════════════════════════════════════════════════════
-const epTitleCache = new Map<string, { title: string; ts: number }>();
-router.get("/anime/ep-title", async (req, res) => {
-  const malId = String(req.query.malId || "").trim();
-  const ep    = parseInt(String(req.query.ep || "1"), 10);
-  if (!malId || isNaN(ep)) { res.json({ title: "" }); return; }
-  const cKey = `${malId}-${ep}`;
-  const hit = epTitleCache.get(cKey);
-  if (hit && Date.now() - hit.ts < 86400_000) { res.json({ title: hit.title }); return; }
-  try {
-    // Jikan v4: GET https://api.jikan.moe/v4/anime/:id/episodes/:ep
-    const r = await fetch(
-      `https://api.jikan.moe/v4/anime/${malId}/episodes/${ep}`,
-      { headers: { "User-Agent": BROWSER_UA }, signal: AbortSignal.timeout(8_000) }
-    );
-    if (!r.ok) { res.json({ title: "" }); return; }
-    const data = await r.json() as { data?: { title?: string; title_romanji?: string } };
-    const title = data?.data?.title || data?.data?.title_romanji || "";
-    epTitleCache.set(cKey, { title, ts: Date.now() });
-    res.json({ title });
-  } catch { res.json({ title: "" }); }
-});
-
-// ════════════════════════════════════════════════════════════════════
-//  AniZip — GET /api/anime/anizip?anilistId=&ep=
-//  يجلب بيانات الحلقة من api.anizip.moe ويعيد intro/outro skip times
-// ════════════════════════════════════════════════════════════════════
-const anizipCache = new Map<string, { data: any; ts: number }>();
-const ANIZIP_TTL  = 6 * 3_600_000;
-
-router.get("/anime/anizip", async (req, res) => {
-  const anilistId = parseInt(String(req.query.anilistId || "0"), 10);
-  const ep        = parseInt(String(req.query.ep        || "1"), 10);
-  if (!anilistId || isNaN(ep)) { res.json({ found: false }); return; }
-
-  const ck = `anizip:${anilistId}`;
-  const cached = anizipCache.get(ck);
-  let mapping: any = null;
-
-  if (cached && Date.now() - cached.ts < ANIZIP_TTL) {
-    mapping = cached.data;
-  } else {
+  await Promise.allSettled(translatedParts.map(async (value, i) => {
+    if (from === to || !value || value !== parts[i]) return;
     try {
-      const r = await fetch(
-        `https://api.anizip.moe/mappings?anilist_id=${anilistId}`,
-        { headers: { "User-Agent": BROWSER_UA, "Accept": "application/json" }, signal: AbortSignal.timeout(8_000) }
-      );
-      if (!r.ok) { res.json({ found: false }); return; }
-      mapping = await r.json();
-      anizipCache.set(ck, { data: mapping, ts: Date.now() });
-    } catch { res.json({ found: false }); return; }
-  }
+      const mm = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(parts[i].slice(0, 500))}&langpair=${from}|${to}`;
+      const mr = await fetch(mm, { signal: AbortSignal.timeout(5_000), headers: { "User-Agent": BROWSER_UA } });
+      if (mr.ok) {
+        const mt = String((await mr.json() as any)?.responseData?.translatedText || "").trim();
+        if (mt) translatedParts[i] = mt;
+      }
+    } catch {}
+  }));
 
-  const episodes: Record<string, any> = mapping?.episodes ?? {};
-  const epData = episodes[String(ep)];
-  if (!epData) { res.json({ found: false }); return; }
-
-  const intro  = epData.intro  ? { start: Number(epData.intro.start),  end: Number(epData.intro.end)  } : null;
-  const outro  = epData.outro  ? { start: Number(epData.outro.start),  end: Number(epData.outro.end)  } : null;
-  const title  = epData.title?.["en"] || epData.title?.["x-jat"] || epData.title?.["ja"] || null;
-  const image  = epData.image || null;
-  const length = epData.length || null;
-
-  res.json({ found: true, ep, intro, outro, title, image, length });
+  const translated = polishArabicTranslation(
+    translatedParts.map((value, i) => polishArabicTranslation(value || parts[i], kind)).join("\n§§§\n"),
+    kind,
+  );
+  translateCache.set(cacheKey, translated);
+  await pgTranslateSave(cacheKey, translated, from, to);
+  res.setHeader("Cache-Control", "public, max-age=86400");
+  res.json({ translated });
 });
 
-router.get("/anime/aniskip", async (req, res) => {
-  const malId = String(req.query.malId || "");
-  const ep    = String(req.query.ep    || "");
-  if (!malId || !ep) { res.status(400).json({ found: false }); return; }
-  try {
-    const url = `https://api.aniskip.com/v2/skip-times/${malId}/${ep}?types[]=op&types[]=ed&episodeLength=0`;
-    const r   = await fetch(url, {
-      headers: { "User-Agent": BROWSER_UA },
-      signal: AbortSignal.timeout(8_000),
-    });
-    if (!r.ok) { res.json({ found: false }); return; }
-    const data = await r.json();
-    res.json(data);
-  } catch { res.json({ found: false }); }
-});
 
 // ════════════════════════════════════════════════════════════════════
-//  anime-skip  GET /api/anime/anime-skip?anilistId=&ep=
-//  من: surajklmn/animepahe-aniskip — Anime-Skip GraphQL API
-//  يستخدم AniList ID مباشرة (لا يحتاج MAL ID)
-//  الـ timestamps: نقاط تحول بين أقسام الحلقة (op, ed, recap, ...)
 // ════════════════════════════════════════════════════════════════════
-const animeSkipCache = new Map<string, { data: any; ts: number }>();
-const ANIME_SKIP_TTL = 7 * 86_400_000;
-
-router.get("/anime/anime-skip", async (req, res) => {
-  const anilistId = Number(req.query.anilistId || "");
-  const ep        = Number(req.query.ep        || "");
-  if (!anilistId || !ep || isNaN(anilistId) || isNaN(ep)) {
-    res.json({ found: false }); return;
-  }
-
-  const ck = `${anilistId}-${ep}`;
-  const cached = animeSkipCache.get(ck);
-  if (cached && Date.now() - cached.ts < ANIME_SKIP_TTL) {
-    res.json(cached.data); return;
-  }
-
-  try {
-    const query = `{
-      findEpisodesByExternalLinks(anilistId: ${anilistId}, episodeNumber: ${ep}) {
-        timestamps {
-          at
-          type { name }
-        }
-      }
-    }`;
-    const r = await fetch("https://api.anime-skip.com/public-api/graphql", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Accept": "application/json",
-        // Client ID مشترك يستخدمه الـ userscript للوصول العام
-        "X-Client-ID": "WXPpNdxpPfE6FVSmPMjp",
-      },
-      body: JSON.stringify({ query }),
-      signal: AbortSignal.timeout(8_000),
-    });
-    if (!r.ok) { res.json({ found: false }); return; }
-
-    const data = await r.json() as any;
-    const episodes = data?.data?.findEpisodesByExternalLinks as any[] | null;
-    if (!episodes?.length) { res.json({ found: false }); return; }
-
-    // كل حلقة قد تُطابق من مصادر متعددة — خذ أول نتيجة
-    const epData = episodes[0];
-    const rawTs: Array<{ at: number; name: string }> = (epData?.timestamps || [])
-      .map((t: any) => ({ at: Number(t.at), name: (t.type?.name || "").toLowerCase() }))
-      .sort((a: any, b: any) => a.at - b.at);
-
-    // الـ timestamps هي نقاط تحول: (op → next) = نطاق التخطي
-    let op: { start: number; end: number } | undefined;
-    let ed: { start: number; end: number } | undefined;
-
-    for (let i = 0; i < rawTs.length; i++) {
-      const ts    = rawTs[i];
-      const nextAt = rawTs[i + 1]?.at ?? null;
-      if (nextAt === null) continue;
-      if (ts.name === "op" && !op) {
-        op = { start: ts.at, end: nextAt };
-      }
-      if ((ts.name === "ed" || ts.name === "credits" || ts.name === "ending") && !ed) {
-        ed = { start: ts.at, end: nextAt };
-      }
-    }
-
-    const result = { found: !!(op || ed), op: op ?? null, ed: ed ?? null };
-    animeSkipCache.set(ck, { data: result, ts: Date.now() });
-    res.json(result);
-  } catch { res.json({ found: false }); }
-});
-
-// ════════════════════════════════════════════════════════════════════
-//  baha-skip  GET /api/anime/baha-skip?title=&native=&ep=
-//  يجلب توقيتات تخطي المقدمة/الخاتمة من قاعدة baha-anime-skip (GitHub)
-//  عبر البحث في Bahamut Anime API للحصول على SN الحلقة
-// ════════════════════════════════════════════════════════════════════
-
-const BAHA_DB_URL = "https://raw.githubusercontent.com/JacobLinCool/baha-anime-skip/main/packages/baha-anime-skip-db/data.json";
-let bahaDbCache: Record<string, Record<string, [number, number]>> | null = null;
-let bahaDbFetchedAt = 0;
-const BAHA_DB_TTL = 3_600_000; // 1 hour
-
-async function getBahaDb(): Promise<Record<string, Record<string, [number, number]>> | null> {
-  if (bahaDbCache && Date.now() - bahaDbFetchedAt < BAHA_DB_TTL) return bahaDbCache;
-  try {
-    const r = await fetch(BAHA_DB_URL, {
-      headers: { "User-Agent": BROWSER_UA },
-      signal: AbortSignal.timeout(15_000),
-    });
-    if (!r.ok) return bahaDbCache;
-    bahaDbCache = await r.json() as Record<string, Record<string, [number, number]>>;
-    bahaDbFetchedAt = Date.now();
-    return bahaDbCache;
-  } catch { return bahaDbCache; }
-}
-
-// ذاكرة مؤقتة للبحث عن Bahamut SN بالعنوان
-const bahaSearchCache = new Map<string, { sn: string | null; ts: number }>();
-
-async function getBahaAnimeSN(title: string, nativeTitle: string): Promise<string | null> {
-  const cacheKey = `${title}::${nativeTitle}`.toLowerCase();
-  const cached = bahaSearchCache.get(cacheKey);
-  if (cached && Date.now() - cached.ts < BAHA_DB_TTL) return cached.sn;
-
-  const keywords = [nativeTitle, title].filter(Boolean);
-  for (const kw of keywords) {
-    if (!kw) continue;
-    try {
-      const url = `https://api.gamer.com.tw/anime/v1/search.php?keyword=${encodeURIComponent(kw)}`;
-      const r = await cfProxyGet(url, {});
-      if (!r) continue;
-      const data = JSON.parse(r) as any;
-      if (data?.error || !data?.data?.length) continue;
-      const sn = String(data.data[0]?.animeSN || data.data[0]?.sn || "");
-      if (sn) {
-        bahaSearchCache.set(cacheKey, { sn, ts: Date.now() });
-        return sn;
-      }
-    } catch { continue; }
-  }
-  bahaSearchCache.set(cacheKey, { sn: null, ts: Date.now() });
-  return null;
-}
-
-async function getBahaEpSN(animeSN: string, epNum: number): Promise<string | null> {
-  try {
-    const url = `https://api.gamer.com.tw/anime/v1/episode.php?animeSN=${animeSN}&page=0`;
-    const r = await cfProxyGet(url, {});
-    if (!r) return null;
-    const data = JSON.parse(r) as any;
-    const episodes: any[] = data?.data?.episodes || data?.episodes || [];
-    const ep = episodes.find((e: any) => {
-      const n = parseInt(String(e.episode || e.epNumber || e.num || ""), 10);
-      return n === epNum;
-    });
-    if (ep) return String(ep.videoSN || ep.sn || ep.animeSN || "");
-    return null;
-  } catch { return null; }
-}
-
-router.get("/anime/baha-skip", async (req, res) => {
-  const title   = String(req.query.title   || "").trim();
-  const native  = String(req.query.native  || "").trim();
-  const epNum   = parseInt(String(req.query.ep || "1"), 10);
-
-  if (!title && !native) { res.json({ found: false }); return; }
-
-  try {
-    const [db2, animeSN] = await Promise.all([
-      getBahaDb(),
-      getBahaAnimeSN(title, native),
-    ]);
-
-    if (!db2) { res.json({ found: false }); return; }
-
-    if (!animeSN) { res.json({ found: false }); return; }
-
-    const epSN = await getBahaEpSN(animeSN, epNum);
-    if (!epSN) { res.json({ found: false }); return; }
-
-    const skipData = db2[epSN];
-    if (!skipData) { res.json({ found: false }); return; }
-
-    const result: Record<string, { start: number; end: number }> = {};
-    for (const [type, [start, duration]] of Object.entries(skipData)) {
-      result[type.toLowerCase()] = { start, end: start + duration };
-    }
-
-    res.json({ found: true, animeSN, epSN, skip: result });
-  } catch (e: any) {
-    res.json({ found: false, error: e?.message });
-  }
-});
-
-// ════════════════════════════════════════════════════════════════════
-//  proxy-text  GET /api/anime/proxy-text?url=
-//  Fetches a text file (VTT/SRT/plain) server-side and returns body
-//  Used for fetching subtitle files that block browser CORS requests
+//  proxy-text  GET /api/anime/proxy-text?url=&ref=
+//  Fetch a subtitle/text file server-side so browser CORS and provider
+//  Referer restrictions do not prevent VTT loading.
 // ════════════════════════════════════════════════════════════════════
 router.get("/anime/proxy-text", async (req, res) => {
-  const url = String(req.query.url || "");
-  const ref = String(req.query.ref || "");
-  if (!url.startsWith("http")) { res.status(400).json({ error: "bad url" }); return; }
+  const rawUrl = String(req.query.url || "").trim();
+  const ref = String(req.query.ref || "").trim();
+  let url = rawUrl;
+  try { url = decodeURIComponent(rawUrl); } catch { /* Express already decoded it */ }
+  if (!/^https?:\/\//i.test(url)) {
+    res.status(400).json({ error: "bad url" });
+    return;
+  }
   try {
-    const extraHdrs: Record<string, string> = { Accept: "text/plain,text/vtt,*/*" };
-    if (ref) { extraHdrs["Referer"] = ref; extraHdrs["Origin"] = (() => { try { return new URL(ref).origin; } catch { return ref; } })(); }
+    const extraHdrs: Record<string, string> = {
+      Accept: "text/vtt,text/plain,application/x-subrip,*/*",
+    };
+    if (ref) {
+      extraHdrs.Referer = ref;
+      try { extraHdrs.Origin = new URL(ref).origin; } catch { /* optional */ }
+    }
     const text = await cfGet(url, extraHdrs);
-    if (!text) { res.status(502).json({ error: "upstream failed" }); return; }
-    res.setHeader("Content-Type", "text/plain; charset=utf-8");
+    if (!text) {
+      res.status(502).json({ error: "subtitle upstream failed" });
+      return;
+    }
+    res.setHeader("Content-Type", "text/vtt; charset=utf-8");
     res.setHeader("Cache-Control", "public, max-age=3600");
     res.send(text);
   } catch (e: any) {
-    res.status(502).json({ error: e.message });
+    res.status(502).json({ error: e?.message || "subtitle proxy failed" });
   }
 });
 
-
-// ════════════════════════════════════════════════════════════════════
 //  translate-vtt  GET /api/anime/translate-vtt?url=&from=en&to=ar
 //  Fetches a VTT/SRT subtitle file and returns translated cue array
 // ════════════════════════════════════════════════════════════════════
@@ -14316,56 +14654,83 @@ function parseVttCues(text: string): Array<{ timing: string; rawText: string }> 
   return cues;
 }
 
-/** Translate a batch of texts using Google Translate unofficial API (gtx).
- *  Uses ||| separator to preserve cue order even when Google collapses whitespace.
- *  Groups cues into chunks of 10 and processes 6 chunks in parallel. */
-async function translateBatchFree(texts: string[], from: string, to: string): Promise<string[]> {
-  const CHUNK = 10; // Smaller chunks → more reliable separator preservation
-
-  const chunks: string[][] = [];
-  for (let i = 0; i < texts.length; i += CHUNK) {
-    chunks.push(texts.slice(i, i + CHUNK));
+/** Stable single-text fallback used for descriptions and episode titles.
+ * LibreTranslate now requires a key on the public endpoint and MyMemory has
+ * a very small daily quota, so Google\'s public translation endpoint is the
+ * first fallback. It does not require credentials and preserves proper names
+ * much better when titles are translated one at a time. */
+async function translateGoogleSingle(text: string, from: string, to: string): Promise<string | null> {
+  const value = text.trim();
+  if (!value || from === to) return value;
+  try {
+    const endpoint = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=${encodeURIComponent(from)}&tl=${encodeURIComponent(to)}&dt=t&q=${encodeURIComponent(value.slice(0, 5000))}`;
+    const response = await fetch(endpoint, {
+      headers: { Accept: "application/json", "User-Agent": BROWSER_UA },
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!response.ok) return null;
+    const data = await response.json() as any;
+    const translated = Array.isArray(data?.[0])
+      ? data[0].map((part: any) => Array.isArray(part) ? String(part[0] || "") : "").join("").trim()
+      : "";
+    return translated || null;
+  } catch {
+    return null;
   }
+}
 
+/** Translate text with resilient free fallbacks.
+ * LibreTranslate is attempted for batching; Google is used per item when the
+ * batch endpoint is unavailable or returns a broken separator layout. */
+async function translateBatchFree(texts: string[], from: string, to: string): Promise<string[]> {
+  const results = [...texts];
+  const CHUNK = 10;
   const PARALLEL = 6;
-  const results: string[] = new Array(texts.length).fill("");
-  const SEP = " ||| "; // Preserved literally by Google Translate
+  const SEP = " ||| ";
+  const endpoint = process.env.LIBRETRANSLATE_URL || "https://libretranslate.com/translate";
+  const apiKey = process.env.LIBRETRANSLATE_API_KEY || "";
+  const chunks: string[][] = [];
+  for (let i = 0; i < texts.length; i += CHUNK) chunks.push(texts.slice(i, i + CHUNK));
 
   for (let i = 0; i < chunks.length; i += PARALLEL) {
     const batch = chunks.slice(i, i + PARALLEL);
-    await Promise.allSettled(
-      batch.map(async (chunk, batchIdx) => {
-        const start = (i + batchIdx) * CHUNK;
-        // Strip any stray ||| from source text to avoid false splits
-        const cleaned = chunk.map(t => t.replace(/\|\|\|/g, "").trim());
-        const joined = cleaned.join(SEP);
-        try {
-          const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=${from}&tl=${to}&dt=t&q=${encodeURIComponent(joined)}`;
-          const r = await fetch(url, {
-            headers: { "User-Agent": BROWSER_UA, Accept: "application/json" },
-            signal: AbortSignal.timeout(15000),
-          });
-          if (!r.ok) { chunk.forEach((t, j) => { results[start + j] = t; }); return; }
-          const data = await r.json() as any;
-          const translated: string = data?.[0]?.map((x: any) => x?.[0] || "").join("") || "";
-          if (!translated) { chunk.forEach((t, j) => { results[start + j] = t; }); return; }
-          // Split by ||| separator — preserves index alignment even if some cues are empty
-          const parts = translated.split(/\s*\|\|\|\s*/);
-          chunk.forEach((t, j) => { results[start + j] = parts[j]?.trim() || t; });
-        } catch {
-          // Fallback: try MyMemory API for each text individually
-          await Promise.allSettled(chunk.map(async (t, j) => {
-            try {
-              const mmUrl = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(t.slice(0, 300))}&langpair=${from}|${to}`;
-              const mmR = await fetch(mmUrl, { signal: AbortSignal.timeout(8000) });
-              if (!mmR.ok) { results[start + j] = t; return; }
-              const mmData = await mmR.json() as any;
-              results[start + j] = mmData?.responseData?.translatedText || t;
-            } catch { results[start + j] = t; }
-          }));
-        }
-      }),
-    );
+    await Promise.allSettled(batch.map(async (chunk, batchIdx) => {
+      const offset = (i + batchIdx) * CHUNK;
+      const cleaned = chunk.map(t => t.replace(/\|\|\|/g, "").trim());
+      try {
+        const body: Record<string, unknown> = {
+          q: cleaned.join(SEP), source: from, target: to, format: "text",
+        };
+        if (apiKey) body.api_key = apiKey;
+        const r = await fetch(endpoint, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Accept: "application/json" },
+          body: JSON.stringify(body),
+          signal: AbortSignal.timeout(8000),
+        });
+        if (!r.ok) throw new Error(`LibreTranslate ${r.status}`);
+        const data = await r.json() as any;
+        const translated = String(data?.translatedText || "");
+        const parts = translated.split(/\s*\|\|\|\s*/);
+        if (!translated || parts.length !== chunk.length) throw new Error("translation mismatch");
+        chunk.forEach((_, j) => { results[offset + j] = parts[j]?.trim() || chunk[j]; });
+      } catch {
+        await Promise.allSettled(chunk.map(async (text, j) => {
+          const google = await translateGoogleSingle(text, from, to);
+          if (google) {
+            results[offset + j] = google;
+            return;
+          }
+          try {
+            const mm = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(text.slice(0, 500))}&langpair=${from}|${to}`;
+            const r = await fetch(mm, { signal: AbortSignal.timeout(7000) });
+            const data = r.ok ? await r.json() as any : null;
+            const candidate = String(data?.responseData?.translatedText || "").trim();
+            results[offset + j] = candidate && !/^MYMEMORY WARNING/i.test(candidate) ? candidate : text;
+          } catch { results[offset + j] = text; }
+        }));
+      }
+    }));
   }
   return results;
 }
@@ -14494,8 +14859,6 @@ router.get("/anime/translate-vtt-stream", async (req, res) => {
 
     const CHUNK    = 25;
     const PARALLEL = 10;
-    const SEP      = " ||| ";
-
     // Split all cues into chunks of CHUNK
     const allChunks: Array<{ timing: string; rawText: string }[]> = [];
     for (let i = 0; i < cues.length; i += CHUNK) allChunks.push(cues.slice(i, i + CHUNK));
@@ -14513,28 +14876,10 @@ router.get("/anime/translate-vtt-stream", async (req, res) => {
       let translated: string[] = cleaned; // fallback = original
 
       try {
-        const tUrl = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=${from}&tl=${to}&dt=t&q=${encodeURIComponent(cleaned.join(SEP))}`;
-        const tr   = await fetch(tUrl, {
-          headers: { "User-Agent": BROWSER_UA, Accept: "application/json" },
-          signal: AbortSignal.timeout(12000),
-        });
-        if (tr.ok) {
-          const data = await tr.json() as any;
-          const joined: string = data?.[0]?.map((x: any) => x?.[0] || "").join("") || "";
-          if (joined) {
-            const parts = joined.split(/\s*\|\|\|\s*/);
-            translated = chunk.map((_, j) => parts[j]?.trim() || cleaned[j]);
-          }
-        }
+        translated = await translateBatchFree(cleaned, from, to);
       } catch {
-        // MyMemory fallback — one request per cue (parallel)
-        await Promise.allSettled(chunk.map(async (c, j) => {
-          try {
-            const mm  = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(c.rawText.slice(0, 300))}&langpair=${from}|${to}`;
-            const mmR = await fetch(mm, { signal: AbortSignal.timeout(6000) });
-            if (mmR.ok) translated[j] = (await mmR.json() as any)?.responseData?.translatedText || c.rawText;
-          } catch {}
-        }));
+        // The shared helper already falls back per cue; keep the raw cue if
+        // both open translation services are unavailable.
       }
 
       const chunkCues = chunk.map((c, j) => {
@@ -14840,6 +15185,29 @@ function toVpsHlsProxy(absUrl: string, ref: string, manifestKey = ""): string {
   return `${NOVA_PUBLIC_URL}/api/anime/hls-proxy?${params.toString()}`;
 }
 
+// FlixCloud manifests are fetched by the VPS because their signed master and
+// variant playlists need the per-embed manifest key. Their media files then
+// redirect to StrongHole, which blocks the VPS IP with Cloudflare 403. Keep
+// those media URLs client-side so the viewer's IP follows the redirect.
+function isClientRoutedFlixMedia(absUrl: string): boolean {
+  try {
+    const host = new URL(absUrl).hostname.toLowerCase();
+    return host === "flixcloud.cc" || host.endsWith(".flixcloud.cc")
+      || host === "stronghole.site" || host.endsWith(".stronghole.site")
+      || host === "rundowncdn.top" || host.endsWith(".rundowncdn.top");
+  } catch {
+    return false;
+  }
+}
+
+function toVpsSegmentOrClient(absUrl: string, ref: string): string {
+  // Always start same-origin through the VPS. The segment route tries the
+  // curl_cffi stream proxy and only then falls back to a client redirect.
+  // Sending StrongHole directly from the manifest loses the FlixCloud Referer
+  // and makes the source appear available while playback stays black.
+  return toVpsSegProxy(absUrl, ref);
+}
+
 // ── إعادة كتابة M3U8 بروابط مطلقة عبر VPS seg-proxy ─────────────────────────
 // يستخدم السياق (EXT-X-STREAM-INF) لتحديد هل السطر playlist أم segment
 // جميع الروابط مطلقة (https://...) لضمان صحة تفسير ExoPlayer
@@ -14870,7 +15238,7 @@ function rewriteM3u8ForVPS(
         if (t.startsWith("#EXT-X-MEDIA") && /\.m3u8/i.test(uri)) {
           return `URI="${toVpsHlsProxy(abs, ref, manifestKey)}"`;
         }
-        return `URI="${toVpsSegProxy(abs, ref)}"`;
+        return `URI="${toVpsSegmentOrClient(abs, ref)}"`;
       });
       out.push(rewritten); continue;
     }
@@ -14882,7 +15250,7 @@ function rewriteM3u8ForVPS(
     if (nextIsPlaylist || /\.m3u8(\?|#|$)/i.test(t)) {
       out.push(toVpsHlsProxy(abs, ref, manifestKey));
     } else {
-      out.push(toVpsSegProxy(abs, ref));
+      out.push(toVpsSegmentOrClient(abs, ref));
     }
     nextIsPlaylist = false;
   }
@@ -15031,7 +15399,10 @@ async function serveMediaVPS(
   const abortUpstream = () => upstreamAbort.abort();
   res.once("close", abortUpstream);
   try {
-    const r = await fetch(url, { headers: hdrs, signal: upstreamAbort.signal });
+    const cfStreamResponse = isClientRoutedFlixMedia(url)
+      ? await cfProxyStreamFetch(url, ref, req.headers.range ? String(req.headers.range) : undefined)
+      : null;
+    const r = cfStreamResponse ?? await fetch(url, { headers: hdrs, signal: upstreamAbort.signal });
     clearTimeout(connectTimeout);
     res.setHeader("Access-Control-Allow-Origin", "*");
     res.setHeader("Access-Control-Expose-Headers", "Content-Length,Content-Range,Content-Type");
@@ -15361,17 +15732,26 @@ function stripPngWrapper(raw: ArrayBuffer): Buffer | null {
   const buf = Buffer.from(raw);
   // PNG magic: 89 50 4E 47 0D 0A 1A 0A
   if (buf.length < 8 || buf.readUInt32BE(0) !== 0x89504E47) return null;
-  // ابحث عن أول MPEG-TS sync byte (0x47) متبوعاً بـ 0x47 بعد 188 بايت
-  for (let i = 0; i < Math.min(buf.length - 188, 1024); i++) {
-    if (buf[i] === 0x47 && buf[i + 188] === 0x47) {
+  return findTsPayload(buf);
+}
+
+/** Some Reanime fragments are disguised as WebP (RIFF/WEBP) rather than PNG.
+ * The actual MPEG-TS starts later in the image body; locate it by the
+ * 188-byte packet cadence and return a clean media buffer. */
+function findTsPayload(buf: Buffer): Buffer | null {
+  const max = Math.min(buf.length - 376, 1024 * 1024);
+  for (let i = 0; i <= max; i++) {
+    if (buf[i] === 0x47 && buf[i + 188] === 0x47 && buf[i + 376] === 0x47) {
       return buf.slice(i);
     }
   }
-  // لم نجد نمط TS مزدوج — جرّب نمط أول 0x47 فقط (آخر الملف)
-  for (let i = 0; i < Math.min(buf.length, 512); i++) {
-    if (buf[i] === 0x47) return buf.slice(i);
-  }
-  return null; // ليس TS مُغلَّف
+  return null;
+}
+
+function stripImageMediaWrapper(raw: ArrayBuffer): Buffer | null {
+  const buf = Buffer.from(raw);
+  if (buf.length < 377) return null;
+  return findTsPayload(buf);
 }
 
 router.get("/anime/seg-proxy", async (req, res) => {
@@ -15405,7 +15785,7 @@ router.get("/anime/seg-proxy", async (req, res) => {
 
     if (mightBePng) {
       const raw = await r.arrayBuffer();
-      const stripped = stripPngWrapper(raw);
+      const stripped = stripPngWrapper(raw) || (ct.startsWith("image/") ? stripImageMediaWrapper(raw) : null);
       if (stripped) {
         res.setHeader("Content-Type", "video/MP2T");
         res.setHeader("Content-Length", String(stripped.length));
@@ -15414,6 +15794,10 @@ router.get("/anime/seg-proxy", async (req, res) => {
         res.status(200).end(stripped);
         return true;
       }
+      // Reanime CDNs can return an image placeholder with HTTP 200 when
+      // fetched from the VPS IP. Never pass it to hls.js as a segment;
+      // that creates the endless spinner/retry loop.
+      if (ct.startsWith("image/")) return false;
       const cl = r.headers.get("content-length");
       if (cl) res.setHeader("Content-Length", cl);
       res.setHeader("Accept-Ranges", r.headers.get("accept-ranges") || "bytes");
@@ -15497,6 +15881,17 @@ router.get("/anime/seg-proxy", async (req, res) => {
   try {
     // This timeout only covers connection/headers. Do not abort the body
     // after 20s: signed CDNs can deliver a healthy segment slowly.
+    // Reanime/FlixCloud fragments need the same curl_cffi fingerprint and
+    // cookies as the manifest. A plain VPS fetch returns a misleading 200
+    // image placeholder, so use the dedicated binary proxy first.
+    const flixResponse = isClientRoutedFlixMedia(url)
+      ? await cfProxyStreamFetch(url, ref, req.headers.range ? String(req.headers.range) : undefined)
+      : null;
+    if (flixResponse?.ok) {
+      const servedViaCf = await serveSegResponse(flixResponse);
+      if (servedViaCf) return;
+    }
+
     const r = await fetch(url, { headers: hdrs, signal: upstreamAbort.signal });
     clearTimeout(connectTimeout);
 
@@ -16224,6 +16619,69 @@ async function kitsuEnrichBannerImages(mediaList: any[]): Promise<any[]> {
 let _anilistDown = false;
 let _anilistDownSince = 0;
 
+// Common Arabic spellings are normalized server-side so web, mobile, and direct API
+// callers all get the same precise AniList match. Unknown Arabic terms are preserved
+// and can still be matched by AniList's native-title search.
+const SEARCH_ARABIC_ALIASES: Record<string, string> = {
+  "ناروتو": "Naruto",
+  "هانتر": "Hunter x Hunter",
+  "هنتر": "Hunter x Hunter",
+  "هانتر إكس هانتر": "Hunter x Hunter",
+  "ون بيس": "One Piece",
+  "ون بيسي": "One Piece",
+  "دراغون بول": "Dragon Ball",
+  "دراجون بول": "Dragon Ball",
+  "ديمون سلاير": "Demon Slayer",
+  "قاتل الشياطين": "Demon Slayer",
+  "هجوم العمالقة": "Attack on Titan",
+  "بوكو نو هيرو": "My Hero Academia",
+  "أكاديمية بطلي": "My Hero Academia",
+  "بليتش": "Bleach",
+  "جوجوتسو كايسن": "Jujutsu Kaisen",
+  "جوجوتسو": "Jujutsu Kaisen",
+  "سولو ليفلينج": "Solo Leveling",
+  "بلاك كلوفر": "Black Clover",
+  "فيري تيل": "Fairy Tail",
+  "توكيو غول": "Tokyo Ghoul",
+  "ريزيرو": "Re:Zero",
+  "سورد آرت أونلاين": "Sword Art Online",
+  "فول ميتال": "Fullmetal Alchemist",
+};
+
+function normalizeAnimeSearchTerm(value: unknown): string {
+  const raw = typeof value === "string" ? value.trim() : "";
+  if (!raw) return raw;
+  const exact = SEARCH_ARABIC_ALIASES[raw];
+  if (exact) return exact;
+  const folded = raw
+    .replace(/[إأآٱ]/g, "ا")
+    .replace(/[ى]/g, "ي")
+    .replace(/[ة]/g, "ه")
+    .replace(/ـ/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  for (const [arabic, english] of Object.entries(SEARCH_ARABIC_ALIASES)) {
+    const foldedAlias = arabic
+      .replace(/[إأآٱ]/g, "ا")
+      .replace(/[ى]/g, "ي")
+      .replace(/[ة]/g, "ه")
+      .replace(/ـ/g, "")
+      .replace(/\s+/g, " ")
+      .trim();
+    if (folded === foldedAlias) return english;
+  }
+  return raw;
+}
+
+function normalizeAnilistRequest(input: any): any {
+  const search = input?.variables?.search;
+  if (typeof search !== "string" || !search.trim()) return input;
+  return {
+    ...input,
+    variables: { ...input.variables, search: normalizeAnimeSearchTerm(search) },
+  };
+}
+
 /** يجلب من AniList مباشرة ويحدّث الكاش — يُستخدم للتحديث الخلفي */
 async function anilistFetchAndCache(body: any, cacheKey: string, ttl: number): Promise<any | null> {
   try {
@@ -16254,7 +16712,7 @@ async function anilistFetchAndCache(body: any, cacheKey: string, ttl: number): P
 }
 
 router.post("/anilist", async (req, res) => {
-  const body        = req.body;
+  const body        = normalizeAnilistRequest(req.body);
   const cacheKey    = metaHash(body);
   const ttl         = metaTtl(body);
   const isIdQuery   = !!body?.variables?.id;
@@ -16591,5 +17049,64 @@ async function awAutoSync(): Promise<void> {
 // بدء التزامن بعد 3 دقائق من تشغيل السيرفر، ثم كل ساعتين
 setTimeout(() => awAutoSync().catch(() => {}), 3 * 60_000);
 setInterval(() => awAutoSync().catch(() => {}), 2 * 60 * 60_000);
+
+
+// ── Jikan episode catalog ────────────────────────────────────────────────
+// AniList can lag by one episode while a seasonal show is airing. Keep the
+// page list and the current total from Jikan in a short server-side cache so
+// the episode screen stays current without hammering the upstream API.
+const _jikanEpisodeCache = new Map<string, { ts: number; payload: any }>();
+const JIKAN_EPISODE_CACHE_TTL = 10 * 60_000;
+
+router.get("/anime/episode-titles", async (req, res) => {
+  const malId = Number.parseInt(String(req.query.malId || "0"), 10);
+  const page = Math.max(1, Number.parseInt(String(req.query.page || "1"), 10) || 1);
+  if (!Number.isFinite(malId) || malId <= 0) {
+    res.status(400).json({ episodes: [], total: 0, page });
+    return;
+  }
+
+  const key = `${malId}:${page}`;
+  const cached = _jikanEpisodeCache.get(key);
+  if (cached && Date.now() - cached.ts < JIKAN_EPISODE_CACHE_TTL) {
+    res.json(cached.payload);
+    return;
+  }
+
+  let payload: any = null;
+  for (let attempt = 0; attempt < 2 && !payload; attempt++) {
+    try {
+      const upstream = await fetch(
+        `https://api.jikan.moe/v4/anime/${malId}/episodes?page=${page}`,
+        { headers: { ...BASE_HDRS, Accept: "application/json" }, signal: AbortSignal.timeout(8000) },
+      );
+      if (upstream.ok) {
+        const body = await upstream.json() as any;
+        const episodes = Array.isArray(body?.data) ? body.data : [];
+        const paginationTotal = Number(body?.pagination?.items?.total || 0);
+        // Older Jikan responses omit pagination.items.total. Infer a safe
+        // lower bound from the visible page so the client can still size the
+        // list while AniList supplies the live airing total when available.
+        const pageFloor = (page - 1) * 100 + episodes.length;
+        const episodeFloor = episodes.reduce((max: number, item: any) => {
+          const n = Number(item?.mal_id || item?.episode || 0);
+          return Number.isFinite(n) && n > max ? n : max;
+        }, 0);
+        const total = Math.max(paginationTotal, pageFloor, episodeFloor);
+        payload = { episodes, total, page };
+        break;
+      }
+      if (upstream.status === 429 && attempt === 0) {
+        await new Promise(resolve => setTimeout(resolve, 900));
+      }
+    } catch {
+      if (attempt === 0) await new Promise(resolve => setTimeout(resolve, 250));
+    }
+  }
+
+  const result = payload || { episodes: [], total: 0, page };
+  if (payload) _jikanEpisodeCache.set(key, { ts: Date.now(), payload });
+  res.json(result);
+});
 
 export default router;

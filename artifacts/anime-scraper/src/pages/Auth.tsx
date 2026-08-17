@@ -96,7 +96,7 @@ export function AuthModal({ onClose }: { onClose: () => void }) {
 /* ═══════════════════════════════════════════════
    SHARED AUTH CONTENT
 ═══════════════════════════════════════════════ */
-type Flow = "login" | "signup" | "verify" | "forgot" | "reset";
+type Flow = "login" | "signup" | "forgot" | "reset";
 
 function AuthContent({ onClose, isModal }: { onClose: () => void; isModal?: boolean }) {
   const { signIn, signUp } = useAuth();
@@ -132,7 +132,7 @@ function AuthContent({ onClose, isModal }: { onClose: () => void; isModal?: bool
   const iClass = "w-full bg-white/5 border border-white/8 rounded-2xl px-4 py-3.5 text-white text-[13.5px] font-['Cairo'] placeholder-white/20 outline-none focus:border-violet-500/50 transition-all";
 
   /* ── إرسال الكود ── */
-  const sendCode = async (type: "signup" | "reset" = "signup") => {
+  const sendCode = async (type: "reset" = "reset") => {
     if (!email.trim()) { setError("أدخل بريدك الإلكتروني أولاً"); return false; }
     setLoading(true); setError("");
     try {
@@ -163,24 +163,14 @@ function AuthContent({ onClose, isModal }: { onClose: () => void; isModal?: bool
     else onClose();
   };
 
-  /* ── إرسال كود التسجيل ── */
+  /* ── إنشاء الحساب مباشرةً بدون كود تحقق ── */
   const submitSignupRequest = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
     if (!email.trim()) { setError("أدخل بريدك الإلكتروني"); return; }
     if (password.length < 6) { setError("كلمة المرور يجب أن تكون 6 أحرف على الأقل"); return; }
-    const ok = await sendCode("signup");
-    if (ok) { setCode(["", "", "", "", "", ""]); setFlow("verify"); setTimeout(() => codeRefs[0].current?.focus(), 300); }
-  };
-
-  /* ── إتمام التسجيل بعد التحقق ── */
-  const submitSignupVerify = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setError("");
-    const fullCode = code.join("");
-    if (fullCode.length < 6) { setError("أدخل الكود المكوّن من 6 أرقام"); return; }
     setLoading(true);
-    const result = await signUp(email.trim(), password, name.trim() || undefined, fullCode);
+    const result = await signUp(email.trim(), password, name.trim() || undefined);
     setLoading(false);
     if (result.error) setError(result.error);
     else onClose();
@@ -230,7 +220,6 @@ function AuthContent({ onClose, isModal }: { onClose: () => void; isModal?: bool
     if (e.key === "Enter") {
       const full = code.join("");
       if (full.length === 6) {
-        if (flow === "verify") submitSignupVerify(e as any);
         if (flow === "reset") submitReset(e as any);
       }
     }
@@ -248,7 +237,6 @@ function AuthContent({ onClose, isModal }: { onClose: () => void; isModal?: bool
   const titles: Record<Flow, { title: string; sub: string }> = {
     login:  { title: "Anime NOVA", sub: "مرحباً بعودتك" },
     signup: { title: "Anime NOVA", sub: "أنشئ حسابك مجاناً" },
-    verify: { title: "تأكيد البريد", sub: `أُرسل كود إلى ${email}` },
     forgot: { title: "نسيت كلمة المرور", sub: "سنرسل لك كود إعادة تعيين" },
     reset:  { title: "إعادة تعيين", sub: `أُرسل كود إلى ${email}` },
   };
@@ -261,7 +249,7 @@ function AuthContent({ onClose, isModal }: { onClose: () => void; isModal?: bool
         <div className="flex items-center gap-2.5">
           <div className="w-9 h-9 rounded-2xl flex items-center justify-center"
             style={{ background: "linear-gradient(135deg,#7C3AED,#4F46E5)", boxShadow: "0 0 20px rgba(124,58,237,0.35)" }}>
-            {flow === "verify" || flow === "reset"
+            {flow === "reset"
               ? <ShieldCheck className="w-4 h-4 text-white" />
               : <Sparkles className="w-4 h-4 text-white" />}
           </div>
@@ -367,24 +355,10 @@ function AuthContent({ onClose, isModal }: { onClose: () => void; isModal?: bool
             </button>
           </div>
           <ErrorBox error={error} />
-          <SubmitBtn loading={loading} label="أرسل كود التحقق" />
+          <SubmitBtn loading={loading} label="إنشاء الحساب" />
           <p className="text-center text-[10.5px] text-white/25 font-['Cairo'] mt-1 leading-5">
             بإنشاء حساب أنت توافق على شروط الاستخدام
           </p>
-        </form>
-      )}
-
-      {/* ══════════════════════════════════════════
-          VERIFY — إدخال الكود (للتسجيل)
-      ══════════════════════════════════════════ */}
-      {flow === "verify" && (
-        <form onSubmit={submitSignupVerify} className="flex flex-col gap-4">
-          <CodeInfo email={email} />
-          <CodeInput code={code} refs={codeRefs} onChange={handleCodeInput} onKeyDown={handleCodeKey} onPaste={handleCodePaste} />
-          <ErrorBox error={error} />
-          <SubmitBtn loading={loading} label="تحقّق وأنشئ الحساب" />
-          <ResendBtn cooldown={cooldown} loading={loading} onResend={() => sendCode("signup")} />
-          <BackBtn onClick={() => { setFlow("signup"); setError(""); }} />
         </form>
       )}
 

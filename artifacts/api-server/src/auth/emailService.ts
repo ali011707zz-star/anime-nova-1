@@ -173,10 +173,12 @@ async function getTransporter(): Promise<Transporter> {
     getConfig("smtp_port"),
   ]);
 
-  const user = dbUser || process.env.SMTP_USER || process.env.EMAIL_USER;
-  const pass = dbPass || process.env.SMTP_PASS;
-  const host = dbHost || process.env.SMTP_HOST;
-  const port = dbPort ? Number(dbPort) : (process.env.SMTP_PORT ? Number(process.env.SMTP_PORT) : undefined);
+  // Prefer the verified VPS environment values. The DB may contain stale SMTP
+  // credentials from an older provider configuration.
+  const user = process.env.SMTP_USER || dbUser || process.env.EMAIL_USER;
+  const pass = process.env.SMTP_PASS || dbPass;
+  const host = process.env.SMTP_HOST || dbHost;
+  const port = process.env.SMTP_PORT ? Number(process.env.SMTP_PORT) : (dbPort ? Number(dbPort) : undefined);
 
   if (user && pass) {
     const smtpHostname = host || "smtp.gmail.com";
@@ -267,49 +269,46 @@ async function sendEmail(
 ): Promise<SendResult> {
   const providerErrors: string[] = [];
 
-  // 1. Resend (HTTPS/443 — مجاني بدون بطاقة — الأسهل إعداداً)
+  // 1. SMTP on the VPS (verified working and supports any recipient address).
+  try {
+    const t = await getTransporter();
+    const smtpUser = process.env.SMTP_USER || await getConfig("smtp_user") || "";
+    const fromAddr = `"Anime NOVA" <${smtpUser}>`;
+    const info = await t.sendMail({ from: fromAddr, to, subject, html, text });
+    console.log(`[email] ✅ SMTP → ${to}`);
+    return { ok: true, messageId: info.messageId };
+  } catch (err: any) {
+    const msg = err.message === "SMTP_NOT_CONFIGURED" ? "SMTP_NOT_CONFIGURED" : err.message;
+    providerErrors.push(`SMTP: ${msg}`);
+    console.error("[email] SMTP فشل — تجربة البدائل:", msg);
+  }
+
+  // 2. Resend fallback (the current testing sender only accepts its owner address).
   try {
     await sendViaResend(to, subject, html, text);
     return { ok: true };
   } catch (err: any) {
     if (err.message === "RESEND_NOT_CONFIGURED") {
-      console.warn("[email] Resend غير مُهيّأ — الانتقال إلى Gmail API/SMTP");
+      console.warn("[email] Resend غير مُهيّأ — الانتقال إلى Gmail API");
     } else {
       providerErrors.push(`Resend: ${err.message}`);
       console.error("[email] Resend فشل — تجربة البديل:", err.message);
     }
   }
 
-  // 2. Gmail REST API (HTTPS/443 — لا يُحجب)
+  // 3. Gmail REST API (HTTPS/443 — لا يُحجب).
   try {
     await sendViaGmailApi(to, subject, html, text);
     return { ok: true };
   } catch (err: any) {
     if (err.message === "GMAIL_API_NOT_CONFIGURED") {
-      console.warn("[email] Gmail API غير مُهيّأ — الانتقال إلى SMTP");
+      console.warn("[email] Gmail API غير مُهيّأ");
     } else {
       providerErrors.push(`Gmail API: ${err.message}`);
-      console.error("[email] Gmail API فشل — تجربة SMTP:", err.message);
+      console.error("[email] Gmail API فشل:", err.message);
     }
-  }
-
-  // 3. SMTP fallback (يعمل إذا لم تكن المنافذ محجوبة)
-  try {
-    const t = await getTransporter();
-    const smtpUser = process.env.SMTP_USER || await getConfig("smtp_user") || "";
-    const fromAddr = `"Anime NOVA" <${smtpUser}>`;
-    const info     = await t.sendMail({ from: fromAddr, to, subject, html, text });
-    console.log(`[email] ✅ SMTP → ${to}`);
-    return { ok: true, messageId: info.messageId };
-  } catch (err: any) {
-    const msg = err.message === "SMTP_NOT_CONFIGURED"
-      ? "SMTP_NOT_CONFIGURED"
-      : err.message;
-    providerErrors.push(`SMTP: ${msg}`);
-    console.error("[email] SMTP فشل:", msg);
     return {
       ok: false,
-      // التفاصيل تبقى في سجل الخادم ولا تُعرض للمستخدم النهائي.
       error: providerErrors.join(" | ") || "EMAIL_DELIVERY_FAILED",
     };
   }
@@ -333,86 +332,37 @@ export async function sendPasswordResetEmail(to: string, code: string): Promise<
   );
 }
 
+function legacyCodeHtml(
+  code: string,
+  subtitle: string,
+  instruction: string,
+  expiryText: string,
+): string {
+  return `
+  <div dir="rtl" style="font-family:'Segoe UI',Arial,sans-serif;max-width:480px;margin:0 auto;background:#0d0d18;color:#e2e8f0;border-radius:16px;overflow:hidden;">
+    <div style="background:linear-gradient(135deg,#7c3aed,#4f46e5);padding:32px;text-align:center;">
+      <h1 style="margin:0;font-size:26px;font-weight:900;color:#fff;letter-spacing:-0.5px;">ANIME NOVA</h1>
+      <p style="margin:8px 0 0;color:rgba(255,255,255,0.7);font-size:13px;">${subtitle}</p>
+    </div>
+    <div style="padding:32px;text-align:center;">
+      <p style="color:#94a3b8;margin:0 0 24px;font-size:15px;">${instruction}</p>
+      <div style="display:inline-block;background:#1e1b4b;border:2px solid #7c3aed;border-radius:12px;padding:16px 36px;margin-bottom:24px;">
+        <span style="font-size:36px;font-weight:900;letter-spacing:10px;color:#a78bfa;font-family:monospace;">${code}</span>
+      </div>
+      <p style="color:#64748b;font-size:12px;margin:0;">${expiryText}</p>
+    </div>
+    <div style="border-top:1px solid rgba(255,255,255,0.06);padding:16px 32px;text-align:center;">
+      <p style="color:#475569;font-size:11px;margin:0;">إذا لم تطلب هذا، تجاهل هذا البريد.</p>
+    </div>
+  </div>
+`;
+}
+
 function verifyHtml(code: string): string {
-  const digits = code.split("").map(d =>
-    `<td style="padding:0 3px;"><div style="width:44px;height:54px;background:#1a1040;border:2px solid #7c3aed;border-radius:12px;display:inline-flex;align-items:center;justify-content:center;"><span style="font-size:28px;font-weight:900;color:#c4b5fd;font-family:'Courier New',monospace;line-height:1;">${d}</span></div></td>`
-  ).join("");
-  return `<!DOCTYPE html>
-<html dir="rtl" lang="ar">
-<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
-<body style="margin:0;padding:0;background:#07070f;">
-<table width="100%" cellpadding="0" cellspacing="0" style="background:#07070f;padding:32px 0;">
-  <tr><td align="center">
-    <table width="480" cellpadding="0" cellspacing="0" style="max-width:480px;width:100%;background:#0d0d1f;border-radius:20px;overflow:hidden;border:1px solid rgba(124,58,237,0.25);">
-      <tr>
-        <td style="background:linear-gradient(135deg,#6d28d9 0%,#4f46e5 100%);padding:28px 32px;text-align:center;">
-          <p style="margin:0 0 4px;font-size:11px;font-weight:700;color:rgba(255,255,255,0.55);letter-spacing:3px;font-family:Arial,sans-serif;">ANIME</p>
-          <p style="margin:0;font-size:28px;font-weight:900;color:#fff;letter-spacing:-0.5px;font-family:Arial,sans-serif;">NOVA ✦</p>
-          <p style="margin:10px 0 0;color:rgba(196,181,253,0.80);font-size:13px;font-family:Arial,sans-serif;">تحقق من بريدك الإلكتروني</p>
-        </td>
-      </tr>
-      <tr>
-        <td style="padding:36px 32px;text-align:center;">
-          <p style="color:#94a3b8;margin:0 0 28px;font-size:15px;line-height:1.7;font-family:Arial,sans-serif;">
-            مرحباً! استخدم الكود أدناه لتفعيل حسابك.<br>
-            الكود صالح لمدة <strong style="color:#a78bfa;">10 دقائق</strong> فقط.
-          </p>
-          <table cellpadding="0" cellspacing="0" style="margin:0 auto 28px;">
-            <tr>${digits}</tr>
-          </table>
-          <p style="color:#64748b;font-size:12px;margin:0;font-family:Arial,sans-serif;">إذا لم تطلب هذا الكود، تجاهل هذا البريد.</p>
-        </td>
-      </tr>
-      <tr>
-        <td style="padding:18px 32px;text-align:center;border-top:1px solid rgba(124,58,237,0.15);">
-          <p style="color:#334155;font-size:11px;margin:0;font-family:Arial,sans-serif;">Anime NOVA · جميع الحقوق محفوظة 2026</p>
-        </td>
-      </tr>
-    </table>
-  </td></tr>
-</table>
-</body>
-</html>`;
+  return legacyCodeHtml(code, "تحقق من بريدك الإلكتروني", "أدخل هذا الرمز لتأكيد حسابك:", "الرمز صالح لمدة 10 دقائق. لا تشاركه مع أحد.");
 }
 
 function resetHtml(code: string): string {
-  const digits = code.split("").map(d =>
-    `<td style="padding:0 3px;"><div style="width:44px;height:54px;background:#1a1040;border:2px solid #7c3aed;border-radius:12px;display:inline-flex;align-items:center;justify-content:center;"><span style="font-size:28px;font-weight:900;color:#c4b5fd;font-family:'Courier New',monospace;line-height:1;">${d}</span></div></td>`
-  ).join("");
-  return `<!DOCTYPE html>
-<html dir="rtl" lang="ar">
-<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
-<body style="margin:0;padding:0;background:#07070f;">
-<table width="100%" cellpadding="0" cellspacing="0" style="background:#07070f;padding:32px 0;">
-  <tr><td align="center">
-    <table width="480" cellpadding="0" cellspacing="0" style="max-width:480px;width:100%;background:#0d0d1f;border-radius:20px;overflow:hidden;border:1px solid rgba(124,58,237,0.25);">
-      <tr>
-        <td style="background:linear-gradient(135deg,#6d28d9 0%,#4f46e5 100%);padding:28px 32px;text-align:center;">
-          <p style="margin:0 0 4px;font-size:11px;font-weight:700;color:rgba(255,255,255,0.55);letter-spacing:3px;font-family:Arial,sans-serif;">ANIME</p>
-          <p style="margin:0;font-size:28px;font-weight:900;color:#fff;letter-spacing:-0.5px;font-family:Arial,sans-serif;">NOVA ✦</p>
-          <p style="margin:10px 0 0;color:rgba(196,181,253,0.80);font-size:13px;font-family:Arial,sans-serif;">إعادة تعيين كلمة المرور</p>
-        </td>
-      </tr>
-      <tr>
-        <td style="padding:36px 32px;text-align:center;">
-          <p style="color:#94a3b8;margin:0 0 28px;font-size:15px;line-height:1.7;font-family:Arial,sans-serif;">
-            استخدم الكود أدناه لإعادة تعيين كلمة مرورك.<br>
-            الكود صالح لمدة <strong style="color:#a78bfa;">10 دقائق</strong> فقط.
-          </p>
-          <table cellpadding="0" cellspacing="0" style="margin:0 auto 28px;">
-            <tr>${digits}</tr>
-          </table>
-          <p style="color:#64748b;font-size:12px;margin:0;font-family:Arial,sans-serif;">إذا لم تطلب إعادة التعيين، تجاهل هذا البريد.</p>
-        </td>
-      </tr>
-      <tr>
-        <td style="padding:18px 32px;text-align:center;border-top:1px solid rgba(124,58,237,0.15);">
-          <p style="color:#334155;font-size:11px;margin:0;font-family:Arial,sans-serif;">Anime NOVA · جميع الحقوق محفوظة 2026</p>
-        </td>
-      </tr>
-    </table>
-  </td></tr>
-</table>
-</body>
-</html>`;
+  return legacyCodeHtml(code, "إعادة تعيين كلمة المرور", "أدخل هذا الرمز لإعادة تعيين كلمة مرورك:", "الرمز صالح لمدة 10 دقائق. لا تشاركه مع أحد.");
 }
+

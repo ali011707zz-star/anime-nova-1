@@ -2,15 +2,30 @@ import { API_BASE } from "@/lib/apiBase";
 import { animeHref } from "@/lib/animeLink";
 import { useEffect, useState, useCallback, useRef } from "react";
 import { Link } from "wouter";
-import { Play, Loader2, ChevronDown, Star, ChevronLeft, ChevronRight, Info, Flame, Film, RotateCw, Clapperboard, Tv2 } from "lucide-react";
+import {
+  Play,
+  Loader2,
+  ChevronDown,
+  Star,
+  ChevronLeft,
+  ChevronRight,
+  Info,
+  Flame,
+  Film,
+  RotateCw,
+  Clapperboard,
+  Tv2,
+} from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import SEO from "@/components/SEO";
 
 /* ── Module-level cache — survives component unmount/remount so categories
       don't disappear when navigating Home → AnimeDetail → Home ── */
 interface HomeCache {
-  popular: any[]; movies: any[];
-  hero: any; hasMore: boolean;
+  popular: any[];
+  movies: any[];
+  hero: any;
+  hasMore: boolean;
 }
 let _homeCache: HomeCache | null = null;
 // Separate cache for today's airing episodes (independent fetch, persists between navigations)
@@ -22,7 +37,7 @@ interface MergedContinueItem {
   kind: "anime" | "animation";
   id: string | number;
   title: string;
-  cover: string;      // poster/cover url
+  cover: string; // poster/cover url
   ep: number;
   season?: number;
   animType?: "movie" | "tv";
@@ -42,45 +57,84 @@ function loadMergedContinue(): MergedContinueItem[] {
   try {
     const h: any[] = JSON.parse(localStorage.getItem("watch-history") || "[]");
     for (const item of h) {
-      const t = parseFloat(localStorage.getItem(`wp-${item.id}-${item.ep}`) || "0") || 0;
+      const t =
+        parseFloat(localStorage.getItem(`wp-${item.id}-${item.ep}`) || "0") ||
+        0;
       const href = `/watch?anime=${item.id}&ep=${item.ep}&title=${encodeURIComponent(item.title)}&cover=${encodeURIComponent(item.cover || "")}`;
-      out.push({ key: `anime-${item.id}-${item.ep}`, kind: "anime", id: item.id, title: item.title, cover: item.cover || "", ep: item.ep, date: item.date || "", watchTimeSec: t, durationSec: 24 * 60, href });
+      out.push({
+        key: `anime-${item.id}-${item.ep}`,
+        kind: "anime",
+        id: item.id,
+        title: item.title,
+        cover: item.cover || "",
+        ep: item.ep,
+        date: item.date || "",
+        watchTimeSec: t,
+        durationSec: 24 * 60,
+        href,
+      });
     }
-  } catch { /* skip */ }
+  } catch {
+    /* skip */
+  }
   // Animation history
   try {
-    const h: any[] = JSON.parse(localStorage.getItem("anim-watch-history") || "[]");
+    const h: any[] = JSON.parse(
+      localStorage.getItem("anim-watch-history") || "[]",
+    );
     for (const item of h) {
-      const t = parseFloat(localStorage.getItem(`anim-wp-${item.id}-${item.type}-${item.season}-${item.ep}`) || "0") || 0;
+      const t =
+        parseFloat(
+          localStorage.getItem(
+            `anim-wp-${item.id}-${item.type}-${item.season}-${item.ep}`,
+          ) || "0",
+        ) || 0;
       if (t < 30) continue;
       const p = encodeURIComponent(item.poster || "");
       const ti = encodeURIComponent(item.title);
-      const href = item.type === "tv"
-        ? `/animation/watch?title=${ti}&type=tv&id=${item.id}&ep=${item.ep}&season=${item.season}&poster=${p}`
-        : `/animation/watch?title=${ti}&type=movie&id=${item.id}&ep=1&season=1&poster=${p}`;
-      out.push({ key: `anim-${item.id}-${item.type}-${item.ep}`, kind: "animation", id: item.id, title: item.title, cover: item.poster || "", ep: item.ep, season: item.season, animType: item.type, date: item.date || "", watchTimeSec: t, durationSec: item.type === "movie" ? 90 * 60 : 24 * 60, href });
+      const href =
+        item.type === "tv"
+          ? `/animation/watch?title=${ti}&type=tv&id=${item.id}&ep=${item.ep}&season=${item.season}&poster=${p}`
+          : `/animation/watch?title=${ti}&type=movie&id=${item.id}&ep=1&season=1&poster=${p}`;
+      out.push({
+        key: `anim-${item.id}-${item.type}-${item.ep}`,
+        kind: "animation",
+        id: item.id,
+        title: item.title,
+        cover: item.poster || "",
+        ep: item.ep,
+        season: item.season,
+        animType: item.type,
+        date: item.date || "",
+        watchTimeSec: t,
+        durationSec: item.type === "movie" ? 90 * 60 : 24 * 60,
+        href,
+      });
     }
-  } catch { /* skip */ }
+  } catch {
+    /* skip */
+  }
   // Sort by date (most recent first)
   out.sort((a, b) => (b.date > a.date ? 1 : -1));
   return out.slice(0, 10);
 }
 
-const GENRES_AR: { ar: string; en: string; color: string; animeId: number }[] = [
-  { ar: "الكل",       en: "",              color: "#8B5CF6", animeId: 0      },
-  { ar: "أكشن",       en: "Action",        color: "#EF4444", animeId: 21459  },
-  { ar: "مغامرة",     en: "Adventure",     color: "#F97316", animeId: 113415 },
-  { ar: "كوميدي",     en: "Comedy",        color: "#EAB308", animeId: 21202  },
-  { ar: "دراما",      en: "Drama",         color: "#8B5CF6", animeId: 9253   },
-  { ar: "فانتازيا",   en: "Fantasy",       color: "#06B6D4", animeId: 101922 },
-  { ar: "خيال علمي",  en: "Sci-Fi",        color: "#3B82F6", animeId: 5114   },
-  { ar: "رياضة",      en: "Sports",        color: "#10B981", animeId: 124194 },
-  { ar: "رومانسي",    en: "Romance",       color: "#EC4899", animeId: 101921 },
-  { ar: "إيسيكاي",    en: "Isekai",        color: "#059669", animeId: 108632 },
-  { ar: "نفسي",       en: "Psychological", color: "#7C3AED", animeId: 31646  },
-  { ar: "رعب",        en: "Horror",        color: "#6B7280", animeId: 98478  },
-  { ar: "غموض",       en: "Mystery",       color: "#64748B", animeId: 100388 },
-];
+const GENRES_AR: { ar: string; en: string; color: string; animeId: number }[] =
+  [
+    { ar: "الكل", en: "", color: "#8B5CF6", animeId: 0 },
+    { ar: "أكشن", en: "Action", color: "#EF4444", animeId: 21459 },
+    { ar: "مغامرة", en: "Adventure", color: "#F97316", animeId: 113415 },
+    { ar: "كوميدي", en: "Comedy", color: "#EAB308", animeId: 21202 },
+    { ar: "دراما", en: "Drama", color: "#8B5CF6", animeId: 9253 },
+    { ar: "فانتازيا", en: "Fantasy", color: "#06B6D4", animeId: 101922 },
+    { ar: "خيال علمي", en: "Sci-Fi", color: "#3B82F6", animeId: 5114 },
+    { ar: "رياضة", en: "Sports", color: "#10B981", animeId: 124194 },
+    { ar: "رومانسي", en: "Romance", color: "#EC4899", animeId: 101921 },
+    { ar: "إيسيكاي", en: "Isekai", color: "#059669", animeId: 108632 },
+    { ar: "نفسي", en: "Psychological", color: "#7C3AED", animeId: 31646 },
+    { ar: "رعب", en: "Horror", color: "#6B7280", animeId: 98478 },
+    { ar: "غموض", en: "Mystery", color: "#64748B", animeId: 100388 },
+  ];
 
 function genreImg(animeId: number) {
   return animeId ? `https://img.anili.st/media/${animeId}` : "";
@@ -148,7 +202,6 @@ const TODAY_EPISODES_QUERY = `query($gt:Int,$lt:Int){
   }
 }`;
 
-
 function AnimeCard({ anime }: { anime: any }) {
   return (
     <Link href={animeHref(anime)}>
@@ -160,7 +213,9 @@ function AnimeCard({ anime }: { anime: any }) {
               alt={anime.title?.romaji}
               className="w-full h-full object-cover"
               loading="lazy"
-              onError={e => { (e.target as HTMLImageElement).style.display = "none"; }}
+              onError={(e) => {
+                (e.target as HTMLImageElement).style.display = "none";
+              }}
             />
           ) : (
             <div className="w-full h-full bg-gradient-to-b from-[#1e1e2e] to-[#0f0f1a]" />
@@ -168,14 +223,19 @@ function AnimeCard({ anime }: { anime: any }) {
           <div className="absolute inset-0 bg-gradient-to-t from-black via-black/20 to-transparent" />
           {anime.averageScore && (
             <div className="absolute top-1.5 right-1.5 flex items-center gap-0.5 bg-black/70 backdrop-blur-md text-yellow-400 text-[7px] px-1.5 py-0.5 rounded-lg font-black border border-yellow-500/25">
-              <Star className="w-1.5 h-1.5 fill-current" /> {(anime.averageScore / 10).toFixed(1)}
+              <Star className="w-1.5 h-1.5 fill-current" />{" "}
+              {(anime.averageScore / 10).toFixed(1)}
             </div>
           )}
           {anime.format === "MOVIE" && (
-            <div className="absolute top-1.5 left-1.5 bg-primary text-white text-[7px] px-1.5 py-0.5 rounded-md font-black shadow-md shadow-primary/50">فيلم</div>
+            <div className="absolute top-1.5 left-1.5 bg-primary text-white text-[7px] px-1.5 py-0.5 rounded-md font-black shadow-md shadow-primary/50">
+              فيلم
+            </div>
           )}
           <div className="absolute bottom-0 left-0 right-0 px-2 pb-2 pt-4">
-            <h3 className="text-[9.5px] text-white/90 font-bold truncate leading-tight drop-shadow">{anime.title?.romaji}</h3>
+            <h3 className="text-[9.5px] text-white/90 font-bold truncate leading-tight drop-shadow">
+              {anime.title?.romaji}
+            </h3>
           </div>
         </div>
       </motion.div>
@@ -184,39 +244,42 @@ function AnimeCard({ anime }: { anime: any }) {
 }
 
 export default function Home() {
-  const [popular, setPopular]     = useState<any[]>(_homeCache?.popular || []);
-  const [movies, setMovies]       = useState<any[]>(_homeCache?.movies || []);
-  const [loading, setLoading]     = useState(!_homeCache);
+  const [popular, setPopular] = useState<any[]>(_homeCache?.popular || []);
+  const [movies, setMovies] = useState<any[]>(_homeCache?.movies || []);
+  const [loading, setLoading] = useState(!_homeCache);
   const [genreLoading, setGenreLoading] = useState(false);
-  const [page, setPage]           = useState(1);
-  const [hasMore, setHasMore]     = useState(_homeCache?.hasMore ?? true);
+  const [page, setPage] = useState(1);
+  const [hasMore, setHasMore] = useState(_homeCache?.hasMore ?? true);
   const [loadingMore, setLoadingMore] = useState(false);
-  const [topRated, setTopRated]   = useState<any[]>([]);
-  const [fall2025, setFall2025]   = useState<any[]>([]);
+  const [topRated, setTopRated] = useState<any[]>([]);
+  const [fall2025, setFall2025] = useState<any[]>([]);
   const [isekaiList, setIsekaiList] = useState<any[]>([]);
-  const [hero, setHero]           = useState<any>(() => {
+  const [hero, setHero] = useState<any>(() => {
     if (!_homeCache) return null;
     const heroes = _homeCache.popular.filter((a: any) => a.bannerImage);
     if (!heroes.length) return _homeCache.hero;
     return heroes[Math.floor(Math.random() * heroes.length)];
   });
-  const [heroIdx, setHeroIdx]     = useState(0);
-  const [heroDir, setHeroDir]     = useState(1);
+  const [heroIdx, setHeroIdx] = useState(0);
+  const [heroDir, setHeroDir] = useState(1);
   const [selectedGenre, setSelectedGenre] = useState("");
   const touchStartX = useRef<number>(0);
-  const heroList = popular.filter(a => a.bannerImage).slice(0, 8);
+  const heroList = popular.filter((a) => a.bannerImage).slice(0, 8);
   const heroContainerRef = useRef<HTMLDivElement>(null);
   const [heroMouse, setHeroMouse] = useState({ x: 0, y: 0 });
   const [posterTilt, setPosterTilt] = useState({ rx: 0, ry: 0 });
 
-  const handleHeroMouseMove = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
-    if (!heroContainerRef.current) return;
-    const rect = heroContainerRef.current.getBoundingClientRect();
-    const nx = ((e.clientX - rect.left) / rect.width - 0.5) * 2;
-    const ny = ((e.clientY - rect.top) / rect.height - 0.5) * 2;
-    setHeroMouse({ x: nx, y: ny });
-    setPosterTilt({ rx: ny * -12, ry: nx * 15 });
-  }, []);
+  const handleHeroMouseMove = useCallback(
+    (e: React.MouseEvent<HTMLDivElement>) => {
+      if (!heroContainerRef.current) return;
+      const rect = heroContainerRef.current.getBoundingClientRect();
+      const nx = ((e.clientX - rect.left) / rect.width - 0.5) * 2;
+      const ny = ((e.clientY - rect.top) / rect.height - 0.5) * 2;
+      setHeroMouse({ x: nx, y: ny });
+      setPosterTilt({ rx: ny * -12, ry: nx * 15 });
+    },
+    [],
+  );
 
   const handleHeroMouseLeave = useCallback(() => {
     setHeroMouse({ x: 0, y: 0 });
@@ -225,17 +288,20 @@ export default function Home() {
 
   const fetch$ = async (query: string, variables?: any) => {
     const r = await fetch(API_BASE + "/api/anilist", {
-      method: "POST", headers: { "Content-Type": "application/json" },
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ query, variables }),
     });
     return (await r.json()).data?.Page;
   };
 
-  const [mergedContinue, setMergedContinue] = useState<MergedContinueItem[]>([]);
+  const [mergedContinue, setMergedContinue] = useState<MergedContinueItem[]>(
+    [],
+  );
   const [animationMovies, setAnimationMovies] = useState<any[]>([]);
   const [spring2026, setSpring2026] = useState<any[]>([]);
   const [dubbedCards, setDubbedCards] = useState<any[]>([]);
-  const [awCards,     setAwCards]     = useState<any[]>([]);
+  const [awCards, setAwCards] = useState<any[]>([]);
   const [todayEps, setTodayEps] = useState<any[]>(_cachedTodayEps || []);
   const [todayChecking, setTodayChecking] = useState(false);
 
@@ -250,55 +316,76 @@ export default function Home() {
   /* Load Spring 2026 seasonal anime */
   useEffect(() => {
     fetch(API_BASE + "/api/anilist", {
-      method: "POST", headers: { "Content-Type": "application/json" },
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ query: SPRING_2026_QUERY }),
     })
-      .then(r => r.json())
-      .then(d => setSpring2026(d.data?.Page?.media || []))
+      .then((r) => r.json())
+      .then((d) => setSpring2026(d.data?.Page?.media || []))
       .catch(() => {});
   }, []);
 
   /* Load dubbed cartoon cards for Home section */
   useEffect(() => {
     fetch(API_BASE + "/api/dubbed/catalog?page=1")
-      .then(r => r.json())
-      .then(d => setDubbedCards((d.results || d.items || []).slice(0, 8)))
+      .then((r) => r.json())
+      .then((d) => setDubbedCards((d.results || d.items || []).slice(0, 8)))
       .catch(() => {});
   }, []);
 
   /* Load أنيميشن مدبلج (aw-dubbed) cards for Home section */
   useEffect(() => {
     fetch(API_BASE + "/api/aw-dubbed/catalog?page=1")
-      .then(r => r.json())
-      .then(d => setAwCards((d.results || []).slice(0, 8)))
+      .then((r) => r.json())
+      .then((d) => setAwCards((d.results || []).slice(0, 8)))
       .catch(() => {});
   }, []);
 
   /* Load extra sections — Top Rated, Fall 2025, Isekai */
   useEffect(() => {
-    const post = (q: string) => fetch(API_BASE + "/api/anilist", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ query: q }),
-    }).then(r => r.json());
-    post(TOP_RATED_QUERY).then(d => setTopRated(d.data?.Page?.media || [])).catch(() => {});
-    post(FALL_2025_QUERY).then(d => setFall2025(d.data?.Page?.media || [])).catch(() => {});
-    post(ISEKAI_QUERY).then(d => setIsekaiList(d.data?.Page?.media || [])).catch(() => {});
+    const post = (q: string) =>
+      fetch(API_BASE + "/api/anilist", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ query: q }),
+      }).then((r) => r.json());
+    post(TOP_RATED_QUERY)
+      .then((d) => setTopRated(d.data?.Page?.media || []))
+      .catch(() => {});
+    post(FALL_2025_QUERY)
+      .then((d) => setFall2025(d.data?.Page?.media || []))
+      .catch(() => {});
+    post(ISEKAI_QUERY)
+      .then((d) => setIsekaiList(d.data?.Page?.media || []))
+      .catch(() => {});
   }, []);
 
-  /* Load "أحدث الحلقات" — مباشرةً من كتالوج anslayer نفسه (بدون AniList ولا
-     مصادر أخرى)، لأن هذا القسم مخصَّص ليُشغَّل من مصدر anslayer فقط. */
+  /* Load "أحدث الحلقات" directly from AnimeSlayer's published catalog. */
   useEffect(() => {
     if (_cachedTodayEps) return; // already cached — no re-fetch needed
     setTodayChecking(true);
-    fetch(`${API_BASE}/api/anime/anslayer-latest`, { signal: AbortSignal.timeout(20_000) })
-      .then(r => r.json())
-      .then((d: { items?: any[] }) => {
-        const items = d.items || [];
+    fetch(`${API_BASE}/api/anime/anslayer-latest`, {
+      signal: AbortSignal.timeout(20_000),
+    })
+      .then((r) => r.json())
+      .then((payload: any[] | { items?: any[] }) => {
+        const raw = Array.isArray(payload) ? payload : payload.items || [];
+        const items = raw
+          .map((item: any) => ({
+            ...item,
+            animeId: item.animeId ?? item.anilistId,
+            name: item.name ?? item.title ?? "",
+            cover: item.cover ?? item.poster ?? "",
+            source: "anslayer",
+          }))
+          .filter((item: any) => item.animeId && item.name);
         _cachedTodayEps = items;
         setTodayEps(items);
         setTodayChecking(false);
       })
-      .catch(() => { setTodayChecking(false); });
+      .catch(() => {
+        setTodayChecking(false);
+      });
   }, []);
 
   useEffect(() => {
@@ -309,11 +396,16 @@ export default function Home() {
       setLoading(true);
       try {
         /* ── Step 1: load popular first — shows hero + grid immediately ── */
-        const pop = await fetch$(buildPopularQuery(""), { page: 1, perPage: 12 });
+        const pop = await fetch$(buildPopularQuery(""), {
+          page: 1,
+          perPage: 12,
+        });
         const popMedia = pop?.media || [];
         const hasMorePop = pop?.pageInfo?.hasNextPage ?? false;
         const heroes = popMedia.filter((a: any) => a.bannerImage);
-        const heroItem = heroes[Math.floor(Math.random() * Math.max(1, heroes.length))] || popMedia[0];
+        const heroItem =
+          heroes[Math.floor(Math.random() * Math.max(1, heroes.length))] ||
+          popMedia[0];
         setPopular(popMedia);
         setHasMore(hasMorePop);
         setHero(heroItem);
@@ -326,8 +418,10 @@ export default function Home() {
 
         /* ── Persist to module-level cache ── */
         _homeCache = {
-          popular: popMedia, movies: movMedia,
-          hero: heroItem, hasMore: hasMorePop,
+          popular: popMedia,
+          movies: movMedia,
+          hero: heroItem,
+          hasMore: hasMorePop,
         };
       } catch {
         setLoading(false);
@@ -338,11 +432,11 @@ export default function Home() {
 
   useEffect(() => {
     if (!popular.length || selectedGenre) return;
-    const heroes = popular.filter(a => a.bannerImage);
+    const heroes = popular.filter((a) => a.bannerImage);
     if (heroes.length <= 1) return;
     const t = setInterval(() => {
       setHeroDir(1);
-      setHeroIdx(i => {
+      setHeroIdx((i) => {
         const next = (i + 1) % heroes.length;
         setHero(heroes[next]);
         return next;
@@ -356,36 +450,48 @@ export default function Home() {
     setPage(1);
     setGenreLoading(true);
     try {
-      const data = await fetch$(buildPopularQuery(genre), { page: 1, perPage: 12 });
+      const data = await fetch$(buildPopularQuery(genre), {
+        page: 1,
+        perPage: 12,
+      });
       setPopular(data?.media || []);
       setHasMore(data?.pageInfo?.hasNextPage ?? false);
       if (!genre) {
         const heroes = (data?.media || []).filter((a: any) => a.bannerImage);
-        setHero(heroes[0] || data?.media?.[0]); setHeroIdx(0);
+        setHero(heroes[0] || data?.media?.[0]);
+        setHeroIdx(0);
       }
-    } finally { setGenreLoading(false); }
+    } finally {
+      setGenreLoading(false);
+    }
   }, []);
 
   const loadMore = useCallback(async () => {
     if (loadingMore || !hasMore) return;
     setLoadingMore(true);
     const next = page + 1;
-    const data = await fetch$(buildPopularQuery(selectedGenre), { page: next, perPage: 12 });
-    setPopular(prev => [...prev, ...(data?.media || [])]);
+    const data = await fetch$(buildPopularQuery(selectedGenre), {
+      page: next,
+      perPage: 12,
+    });
+    setPopular((prev) => [...prev, ...(data?.media || [])]);
     setHasMore(data?.pageInfo?.hasNextPage ?? false);
     setPage(next);
     setLoadingMore(false);
   }, [loadingMore, hasMore, page, selectedGenre]);
 
-  if (loading) return (
-    <div className="bg-[#09090B] min-h-screen flex flex-col items-center justify-center gap-3">
-      <div className="relative">
-        <div className="w-12 h-12 border-2 border-primary/30 rounded-full" />
-        <div className="w-12 h-12 border-2 border-primary border-t-transparent rounded-full animate-spin absolute inset-0" />
+  if (loading)
+    return (
+      <div className="bg-[#09090B] min-h-screen flex flex-col items-center justify-center gap-3">
+        <div className="relative">
+          <div className="w-12 h-12 border-2 border-primary/30 rounded-full" />
+          <div className="w-12 h-12 border-2 border-primary border-t-transparent rounded-full animate-spin absolute inset-0" />
+        </div>
+        <p className="text-white/40 text-xs font-bold font-['Cairo']">
+          جارٍ التحميل...
+        </p>
       </div>
-      <p className="text-white/40 text-xs font-bold font-['Cairo']">جارٍ التحميل...</p>
-    </div>
-  );
+    );
 
   return (
     <main className="bg-[#09090B] min-h-screen pb-28 text-white" dir="rtl">
@@ -403,8 +509,10 @@ export default function Home() {
           style={{ height: "clamp(260px, 56vw, 340px)" }}
           onMouseMove={handleHeroMouseMove}
           onMouseLeave={handleHeroMouseLeave}
-          onTouchStart={e => { touchStartX.current = e.touches[0].clientX; }}
-          onTouchEnd={e => {
+          onTouchStart={(e) => {
+            touchStartX.current = e.touches[0].clientX;
+          }}
+          onTouchEnd={(e) => {
             const dx = e.changedTouches[0].clientX - touchStartX.current;
             if (Math.abs(dx) < 40) return;
             if (heroList.length <= 1) return;
@@ -427,7 +535,11 @@ export default function Home() {
               transition={{ duration: 0.35, ease: "easeInOut" }}
             >
               <img
-                src={hero.bannerImage || hero.coverImage?.extraLarge || hero.coverImage?.large}
+                src={
+                  hero.bannerImage ||
+                  hero.coverImage?.extraLarge ||
+                  hero.coverImage?.large
+                }
                 alt=""
                 className="w-full h-full object-cover"
                 draggable={false}
@@ -437,17 +549,40 @@ export default function Home() {
           </AnimatePresence>
 
           {/* Cinematic overlays */}
-          <div className="absolute inset-0" style={{ background: "linear-gradient(to top, #09090B 0%, #09090B 5%, rgba(9,9,11,0.88) 40%, rgba(9,9,11,0.3) 75%, rgba(9,9,11,0.1) 100%)" }} />
-          <div className="absolute inset-0" style={{ background: "linear-gradient(to right, rgba(9,9,11,0.92) 0%, rgba(9,9,11,0.5) 45%, transparent 70%)" }} />
-          <div className="absolute inset-0" style={{ background: "radial-gradient(ellipse at 65% 40%, rgba(139,92,246,0.07) 0%, transparent 55%)" }} />
+          <div
+            className="absolute inset-0"
+            style={{
+              background:
+                "linear-gradient(to top, #09090B 0%, #09090B 5%, rgba(9,9,11,0.88) 40%, rgba(9,9,11,0.3) 75%, rgba(9,9,11,0.1) 100%)",
+            }}
+          />
+          <div
+            className="absolute inset-0"
+            style={{
+              background:
+                "linear-gradient(to right, rgba(9,9,11,0.92) 0%, rgba(9,9,11,0.5) 45%, transparent 70%)",
+            }}
+          />
+          <div
+            className="absolute inset-0"
+            style={{
+              background:
+                "radial-gradient(ellipse at 65% 40%, rgba(139,92,246,0.07) 0%, transparent 55%)",
+            }}
+          />
 
           {/* Purple accent glow at bottom */}
-          <div className="absolute bottom-0 left-0 right-0 h-32" style={{ background: "linear-gradient(to top, rgba(109,40,217,0.12), transparent)" }} />
+          <div
+            className="absolute bottom-0 left-0 right-0 h-32"
+            style={{
+              background:
+                "linear-gradient(to top, rgba(109,40,217,0.12), transparent)",
+            }}
+          />
 
           {/* ── Content Row ── */}
           <div className="absolute inset-0 flex items-end pb-7 px-4">
             <div className="flex items-end justify-between w-full gap-4">
-
               {/* Left: Text + Buttons */}
               <AnimatePresence mode="wait">
                 <motion.div
@@ -456,7 +591,11 @@ export default function Home() {
                   initial={{ opacity: 0, x: 20 }}
                   animate={{ opacity: 1, x: 0 }}
                   exit={{ opacity: 0, x: -10, transition: { duration: 0.18 } }}
-                  transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1], delay: 0.02 }}
+                  transition={{
+                    duration: 0.2,
+                    ease: [0.22, 1, 0.36, 1],
+                    delay: 0.02,
+                  }}
                 >
                   {/* Badges row */}
                   <motion.div
@@ -466,18 +605,23 @@ export default function Home() {
                     transition={{ duration: 0.18, delay: 0.035 }}
                   >
                     {hero.genres?.slice(0, 3).map((g: string) => (
-                      <span key={g} className="text-[9px] font-black bg-white/10 backdrop-blur-md text-white/75 px-2.5 py-0.5 rounded-full border border-white/10 tracking-wide">
-                        {GENRES_AR.find(x => x.en === g)?.ar || g}
+                      <span
+                        key={g}
+                        className="text-[9px] font-black bg-white/10 backdrop-blur-md text-white/75 px-2.5 py-0.5 rounded-full border border-white/10 tracking-wide"
+                      >
+                        {GENRES_AR.find((x) => x.en === g)?.ar || g}
                       </span>
                     ))}
                     {hero.averageScore && (
                       <span className="text-[9px] font-black bg-yellow-500/20 border border-yellow-500/30 text-yellow-300 px-2 py-0.5 rounded-full flex items-center gap-0.5">
-                        <Star className="w-2.5 h-2.5 fill-current" /> {(hero.averageScore / 10).toFixed(1)}
+                        <Star className="w-2.5 h-2.5 fill-current" />{" "}
+                        {(hero.averageScore / 10).toFixed(1)}
                       </span>
                     )}
                     {hero.status === "RELEASING" && (
                       <span className="text-[9px] font-black bg-red-500/15 border border-red-500/25 text-red-400 px-2 py-0.5 rounded-full flex items-center gap-1">
-                        <span className="w-1.5 h-1.5 rounded-full bg-red-400 animate-pulse inline-block" /> يُبث الآن
+                        <span className="w-1.5 h-1.5 rounded-full bg-red-400 animate-pulse inline-block" />{" "}
+                        يُبث الآن
                       </span>
                     )}
                   </motion.div>
@@ -485,7 +629,10 @@ export default function Home() {
                   {/* Title — big & bold */}
                   <motion.h1
                     className="font-black text-white mb-1.5 tracking-tight leading-none"
-                    style={{ fontSize: "clamp(21px, 6.5vw, 42px)", textShadow: "0 4px 30px rgba(0,0,0,0.9)" }}
+                    style={{
+                      fontSize: "clamp(21px, 6.5vw, 42px)",
+                      textShadow: "0 4px 30px rgba(0,0,0,0.9)",
+                    }}
                     initial={{ opacity: 0, y: 12 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ duration: 0.18, delay: 0.045 }}
@@ -502,7 +649,13 @@ export default function Home() {
                   >
                     {hero.episodes ? `${hero.episodes} حلقة` : ""}
                     {hero.episodes && hero.format ? " · " : ""}
-                    {hero.format === "MOVIE" ? "فيلم" : hero.format === "ONA" ? "أونا" : hero.format === "OVA" ? "أوفا" : ""}
+                    {hero.format === "MOVIE"
+                      ? "فيلم"
+                      : hero.format === "ONA"
+                        ? "أونا"
+                        : hero.format === "OVA"
+                          ? "أوفا"
+                          : ""}
                   </motion.p>
 
                   {/* CTA Buttons */}
@@ -517,7 +670,11 @@ export default function Home() {
                         whileTap={{ scale: 0.93 }}
                         whileHover={{ scale: 1.03 }}
                         className="relative overflow-hidden text-white text-sm font-black px-5 py-3 rounded-2xl flex items-center gap-2 shadow-2xl"
-                        style={{ background: "linear-gradient(135deg, #8B5CF6 0%, #6D28D9 100%)", boxShadow: "0 8px 28px rgba(109,40,217,0.5)" }}
+                        style={{
+                          background:
+                            "linear-gradient(135deg, #8B5CF6 0%, #6D28D9 100%)",
+                          boxShadow: "0 8px 28px rgba(109,40,217,0.5)",
+                        }}
                       >
                         <Play className="w-4 h-4 fill-current relative z-10" />
                         <span className="relative z-10">مشاهدة الآن</span>
@@ -526,7 +683,10 @@ export default function Home() {
                     <Link href={`/anime/${hero.id}`}>
                       <motion.button
                         whileTap={{ scale: 0.93 }}
-                        whileHover={{ scale: 1.03, backgroundColor: "rgba(255,255,255,0.15)" }}
+                        whileHover={{
+                          scale: 1.03,
+                          backgroundColor: "rgba(255,255,255,0.15)",
+                        }}
                         className="bg-white/8 backdrop-blur-xl text-white text-sm font-black px-3.5 py-3 rounded-2xl border border-white/15 flex items-center gap-1.5 transition-colors"
                       >
                         <Info className="w-4 h-4" /> التفاصيل
@@ -543,8 +703,16 @@ export default function Home() {
                   className="flex-shrink-0"
                   initial={{ opacity: 0, scale: 0.85, y: 20 }}
                   animate={{ opacity: 1, scale: 1, y: 0 }}
-                  exit={{ opacity: 0, scale: 0.9, transition: { duration: 0.2 } }}
-                  transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1], delay: 0.04 }}
+                  exit={{
+                    opacity: 0,
+                    scale: 0.9,
+                    transition: { duration: 0.2 },
+                  }}
+                  transition={{
+                    duration: 0.22,
+                    ease: [0.22, 1, 0.36, 1],
+                    delay: 0.04,
+                  }}
                   style={{ perspective: "600px" }}
                 >
                   <div
@@ -554,12 +722,16 @@ export default function Home() {
                       height: "clamp(114px, 30vw, 160px)",
                       borderRadius: 14,
                       transform: `rotateX(${posterTilt.rx}deg) rotateY(${posterTilt.ry}deg)`,
-                      transition: "transform 0.3s cubic-bezier(0.22, 1, 0.36, 1)",
-                      boxShadow: "0 20px 60px rgba(0,0,0,0.8), 0 0 0 1px rgba(255,255,255,0.1)",
+                      transition:
+                        "transform 0.3s cubic-bezier(0.22, 1, 0.36, 1)",
+                      boxShadow:
+                        "0 20px 60px rgba(0,0,0,0.8), 0 0 0 1px rgba(255,255,255,0.1)",
                     }}
                   >
                     <img
-                      src={hero.coverImage?.extraLarge || hero.coverImage?.large}
+                      src={
+                        hero.coverImage?.extraLarge || hero.coverImage?.large
+                      }
                       alt={hero.title?.romaji}
                       className="w-full h-full object-cover"
                       draggable={false}
@@ -578,10 +750,16 @@ export default function Home() {
                 whileTap={{ scale: 0.88 }}
                 onClick={() => {
                   const next = (heroIdx + 1) % heroList.length;
-                  setHeroDir(1); setHeroIdx(next); setHero(heroList[next]);
+                  setHeroDir(1);
+                  setHeroIdx(next);
+                  setHero(heroList[next]);
                 }}
                 className="absolute left-3 top-1/2 -translate-y-1/2 z-20 w-9 h-9 rounded-full flex items-center justify-center"
-                style={{ background: "rgba(0,0,0,0.55)", backdropFilter: "blur(8px)", border: "1px solid rgba(255,255,255,0.15)" }}
+                style={{
+                  background: "rgba(0,0,0,0.55)",
+                  backdropFilter: "blur(8px)",
+                  border: "1px solid rgba(255,255,255,0.15)",
+                }}
               >
                 <ChevronLeft className="w-5 h-5 text-white" />
               </motion.button>
@@ -590,11 +768,18 @@ export default function Home() {
               <motion.button
                 whileTap={{ scale: 0.88 }}
                 onClick={() => {
-                  const prev = (heroIdx - 1 + heroList.length) % heroList.length;
-                  setHeroDir(-1); setHeroIdx(prev); setHero(heroList[prev]);
+                  const prev =
+                    (heroIdx - 1 + heroList.length) % heroList.length;
+                  setHeroDir(-1);
+                  setHeroIdx(prev);
+                  setHero(heroList[prev]);
                 }}
                 className="absolute right-3 top-1/2 -translate-y-1/2 z-20 w-9 h-9 rounded-full flex items-center justify-center"
-                style={{ background: "rgba(0,0,0,0.55)", backdropFilter: "blur(8px)", border: "1px solid rgba(255,255,255,0.15)" }}
+                style={{
+                  background: "rgba(0,0,0,0.55)",
+                  backdropFilter: "blur(8px)",
+                  border: "1px solid rgba(255,255,255,0.15)",
+                }}
               >
                 <ChevronRight className="w-5 h-5 text-white" />
               </motion.button>
@@ -633,80 +818,159 @@ export default function Home() {
         <div className="mt-5">
           <div className="flex items-center justify-between px-4 mb-3">
             <div className="flex items-center gap-2">
-              <div className="w-7 h-7 rounded-xl flex items-center justify-center"
-                style={{ background: "linear-gradient(135deg,#8B5CF6,#6D28D9)", boxShadow: "0 4px 12px rgba(109,40,217,0.4)" }}>
+              <div
+                className="w-7 h-7 rounded-xl flex items-center justify-center"
+                style={{
+                  background: "linear-gradient(135deg,#8B5CF6,#6D28D9)",
+                  boxShadow: "0 4px 12px rgba(109,40,217,0.4)",
+                }}
+              >
                 <RotateCw className="w-3.5 h-3.5 text-white" />
               </div>
               <div>
-                <h2 className="text-[13px] font-black font-['Cairo'] text-white leading-none">تابع المشاهدة</h2>
-                <p className="text-[9px] text-white/25 font-['Cairo'] mt-0.5">{mergedContinue.length} عنوان</p>
+                <h2 className="text-[13px] font-black font-['Cairo'] text-white leading-none">
+                  تابع المشاهدة
+                </h2>
+                <p className="text-[9px] text-white/25 font-['Cairo'] mt-0.5">
+                  {mergedContinue.length} عنوان
+                </p>
               </div>
             </div>
             <Link href="/history">
               <motion.button
                 whileTap={{ scale: 0.92 }}
                 className="flex items-center gap-1 px-3 py-1.5 rounded-xl text-[11px] font-black font-['Cairo'] transition-colors active:bg-white/10"
-                style={{ background: "rgba(139,92,246,0.12)", border: "1px solid rgba(139,92,246,0.22)", color: "rgba(196,181,253,0.85)" }}>
+                style={{
+                  background: "rgba(139,92,246,0.12)",
+                  border: "1px solid rgba(139,92,246,0.22)",
+                  color: "rgba(196,181,253,0.85)",
+                }}
+              >
                 عرض الكل
               </motion.button>
             </Link>
           </div>
-          <div className="flex gap-3 overflow-x-auto px-4 pb-2" style={{ scrollbarWidth: "none" }}>
-            {mergedContinue.map(item => {
-              const pct = Math.min(100, Math.round((item.watchTimeSec / item.durationSec) * 100));
+          <div
+            className="flex gap-3 overflow-x-auto px-4 pb-2"
+            style={{ scrollbarWidth: "none" }}
+          >
+            {mergedContinue.map((item) => {
+              const pct = Math.min(
+                100,
+                Math.round((item.watchTimeSec / item.durationSec) * 100),
+              );
               const isAnime = item.kind === "anime";
               const accentColor = isAnime ? "#8B5CF6" : "#06B6D4";
-              const accentBg    = isAnime ? "rgba(139,92,246,0.85)" : "rgba(6,182,212,0.85)";
-              const badgeLabel  = isAnime
+              const accentBg = isAnime
+                ? "rgba(139,92,246,0.85)"
+                : "rgba(6,182,212,0.85)";
+              const badgeLabel = isAnime
                 ? `ح ${item.ep}`
-                : (item.animType === "movie" ? "فيلم" : `ح ${item.ep}`);
+                : item.animType === "movie"
+                  ? "فيلم"
+                  : `ح ${item.ep}`;
               return (
                 <Link key={item.key} href={item.href}>
-                  <motion.div whileTap={{ scale: 0.91 }} className="shrink-0 cursor-pointer" style={{ width: 110 }}>
+                  <motion.div
+                    whileTap={{ scale: 0.91 }}
+                    className="shrink-0 cursor-pointer"
+                    style={{ width: 110 }}
+                  >
                     {/* Card */}
-                    <div className="relative rounded-[18px] overflow-hidden bg-[#111] shadow-xl"
-                      style={{ width: 110, height: 156, border: `1px solid ${accentColor}22` }}>
+                    <div
+                      className="relative rounded-[18px] overflow-hidden bg-[#111] shadow-xl"
+                      style={{
+                        width: 110,
+                        height: 156,
+                        border: `1px solid ${accentColor}22`,
+                      }}
+                    >
                       {/* Poster */}
-                      {item.cover
-                        ? <img src={item.cover} alt="" className="w-full h-full object-cover" loading="lazy" />
-                        : <div className="w-full h-full flex items-center justify-center" style={{ background: `${accentColor}18` }}>
-                            <Play className="w-8 h-8" style={{ color: `${accentColor}50` }} />
-                          </div>
-                      }
+                      {item.cover ? (
+                        <img
+                          src={item.cover}
+                          alt=""
+                          className="w-full h-full object-cover"
+                          loading="lazy"
+                        />
+                      ) : (
+                        <div
+                          className="w-full h-full flex items-center justify-center"
+                          style={{ background: `${accentColor}18` }}
+                        >
+                          <Play
+                            className="w-8 h-8"
+                            style={{ color: `${accentColor}50` }}
+                          />
+                        </div>
+                      )}
 
                       {/* Dark gradient */}
-                      <div className="absolute inset-0"
-                        style={{ background: "linear-gradient(to top, rgba(0,0,0,0.96) 0%, rgba(0,0,0,0.0) 55%)" }} />
+                      <div
+                        className="absolute inset-0"
+                        style={{
+                          background:
+                            "linear-gradient(to top, rgba(0,0,0,0.96) 0%, rgba(0,0,0,0.0) 55%)",
+                        }}
+                      />
 
                       {/* Top row: episode badge + time */}
                       <div className="absolute top-2 inset-x-2 flex items-center justify-between">
-                        <span className="text-[7px] font-black text-white px-1.5 py-0.5 rounded-lg"
-                          style={{ background: accentBg, backdropFilter: "blur(8px)" }}>
+                        <span
+                          className="text-[7px] font-black text-white px-1.5 py-0.5 rounded-lg"
+                          style={{
+                            background: accentBg,
+                            backdropFilter: "blur(8px)",
+                          }}
+                        >
                           {badgeLabel}
                         </span>
-                        <span className="text-[7px] font-black text-white/75 px-1.5 py-0.5 rounded-lg font-mono"
-                          style={{ background: "rgba(0,0,0,0.60)", backdropFilter: "blur(8px)", border: "1px solid rgba(255,255,255,0.10)" }}>
+                        <span
+                          className="text-[7px] font-black text-white/75 px-1.5 py-0.5 rounded-lg font-mono"
+                          style={{
+                            background: "rgba(0,0,0,0.60)",
+                            backdropFilter: "blur(8px)",
+                            border: "1px solid rgba(255,255,255,0.10)",
+                          }}
+                        >
                           {fmtMinute(item.watchTimeSec)}
                         </span>
                       </div>
 
                       {/* Kind indicator */}
                       <div className="absolute top-8 right-2">
-                        <span className="text-[6.5px] font-black px-1.5 py-[3px] rounded-md"
-                          style={{ background: isAnime ? "rgba(139,92,246,0.22)" : "rgba(6,182,212,0.22)", color: isAnime ? "#c4b5fd" : "#67e8f9", border: `1px solid ${accentColor}33` }}>
+                        <span
+                          className="text-[6.5px] font-black px-1.5 py-[3px] rounded-md"
+                          style={{
+                            background: isAnime
+                              ? "rgba(139,92,246,0.22)"
+                              : "rgba(6,182,212,0.22)",
+                            color: isAnime ? "#c4b5fd" : "#67e8f9",
+                            border: `1px solid ${accentColor}33`,
+                          }}
+                        >
                           {isAnime ? "أنمي" : "أنيميشن"}
                         </span>
                       </div>
 
                       {/* Progress bar + title */}
                       <div className="absolute bottom-0 inset-x-0 px-2 pb-2.5">
-                        <div className="w-full h-[3px] rounded-full mb-2 overflow-hidden"
-                          style={{ background: "rgba(255,255,255,0.12)" }}>
-                          <motion.div className="h-full rounded-full"
+                        <div
+                          className="w-full h-[3px] rounded-full mb-2 overflow-hidden"
+                          style={{ background: "rgba(255,255,255,0.12)" }}
+                        >
+                          <motion.div
+                            className="h-full rounded-full"
                             initial={{ width: 0 }}
                             animate={{ width: `${pct}%` }}
-                            transition={{ duration: 0.25, ease: [0.22, 1, 0.36, 1] }}
-                            style={{ background: `linear-gradient(90deg, ${accentColor}, ${accentColor}CC)` }} />
+                            transition={{
+                              duration: 0.25,
+                              ease: [0.22, 1, 0.36, 1],
+                            }}
+                            style={{
+                              background: `linear-gradient(90deg, ${accentColor}, ${accentColor}CC)`,
+                            }}
+                          />
                         </div>
                         <p className="text-[9px] text-white/90 font-black truncate leading-tight font-['Cairo']">
                           {item.title}
@@ -714,17 +978,29 @@ export default function Home() {
                       </div>
 
                       {/* Play overlay */}
-                      <div className="absolute inset-0 flex items-center justify-center opacity-0 hover:opacity-100 transition-opacity"
-                        style={{ background: "rgba(0,0,0,0.35)" }}>
-                        <div className="w-10 h-10 rounded-full flex items-center justify-center"
-                          style={{ background: accentBg, backdropFilter: "blur(8px)" }}>
+                      <div
+                        className="absolute inset-0 flex items-center justify-center opacity-0 hover:opacity-100 transition-opacity"
+                        style={{ background: "rgba(0,0,0,0.35)" }}
+                      >
+                        <div
+                          className="w-10 h-10 rounded-full flex items-center justify-center"
+                          style={{
+                            background: accentBg,
+                            backdropFilter: "blur(8px)",
+                          }}
+                        >
                           <Play className="w-4 h-4 text-white fill-white mr-[-2px]" />
                         </div>
                       </div>
                     </div>
                     {/* Progress % below card */}
                     <div className="flex items-center justify-between mt-1.5 px-0.5">
-                      <span className="text-[8.5px] font-black font-['Cairo']" style={{ color: `${accentColor}AA` }}>{pct}%</span>
+                      <span
+                        className="text-[8.5px] font-black font-['Cairo']"
+                        style={{ color: `${accentColor}AA` }}
+                      >
+                        {pct}%
+                      </span>
                     </div>
                   </motion.div>
                 </Link>
@@ -739,13 +1015,21 @@ export default function Home() {
         <div className="mt-5">
           <div className="flex items-center justify-between px-4 mb-3">
             <div className="flex items-center gap-2">
-              <div className="w-7 h-7 rounded-xl flex items-center justify-center shrink-0"
-                style={{ background: "linear-gradient(135deg,#f97316,#ef4444)" }}>
+              <div
+                className="w-7 h-7 rounded-xl flex items-center justify-center shrink-0"
+                style={{
+                  background: "linear-gradient(135deg,#f97316,#ef4444)",
+                }}
+              >
                 <span className="text-white text-[14px] leading-none">📺</span>
               </div>
               <div>
-                <h2 className="text-[13px] font-black text-white font-['Cairo'] leading-none">أحدث الحلقات</h2>
-                <p className="text-[9px] text-white/35 font-['Cairo'] mt-0.5">يتجدد يومياً</p>
+                <h2 className="text-[13px] font-black text-white font-['Cairo'] leading-none">
+                  أحدث الحلقات
+                </h2>
+                <p className="text-[9px] text-white/35 font-['Cairo'] mt-0.5">
+                  يتجدد يومياً
+                </p>
               </div>
             </div>
             {/* Live dot */}
@@ -753,52 +1037,96 @@ export default function Home() {
               <Link
                 href="/schedule"
                 className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl font-['Cairo'] text-[9px] font-black text-orange-300 active:scale-90 transition-transform"
-                style={{ background: "rgba(249,115,22,0.12)", border: "1px solid rgba(249,115,22,0.22)" }}
+                style={{
+                  background: "rgba(249,115,22,0.12)",
+                  border: "1px solid rgba(249,115,22,0.22)",
+                }}
               >
                 عرض المزيد
                 <ChevronLeft className="w-3 h-3" />
               </Link>
               <div className="flex items-center gap-1.5">
                 <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
-                <span className="text-[9px] font-black text-red-400 font-['Cairo']">LIVE</span>
+                <span className="text-[9px] font-black text-red-400 font-['Cairo']">
+                  LIVE
+                </span>
               </div>
             </div>
           </div>
 
-          <div className="flex gap-3 overflow-x-auto px-4 pb-2" style={{ scrollbarWidth: "none" }}>
+          <div
+            className="flex gap-3 overflow-x-auto px-4 pb-2"
+            style={{ scrollbarWidth: "none" }}
+          >
             {todayEps.map((it: any, i: number) => {
               const accentColor = "#ef4444";
-              const accentBg    = "rgba(239,68,68,0.88)";
-              /* site=anslayer + anslayerId + single=1 → صفحة المشاهدة تجلب من anslayer
-                 فقط (بمعرّفه المباشر من كتالوجه)، بدون تشغيل أي مصدر آخر. */
-              const href = `/watch?anime=0&ep=${it.episode}&title=${encodeURIComponent(it.name || "")}&english=${encodeURIComponent(it.name || "")}&cover=${encodeURIComponent(it.cover || "")}&titleAr=${encodeURIComponent(it.name || "")}&site=anslayer&anslayerId=${it.animeId}`;
+              const accentBg = "rgba(239,68,68,0.88)";
+              /* هذه البطاقات مصدرها AnimeSlayer؛ مرّر معرّف الكتالوج المباشر
+                 حتى لا يعتمد التشغيل على مطابقة الاسم أو على AniList. */
+              const href = `/watch?anime=${encodeURIComponent(String(it.animeId))}&anslayerId=${encodeURIComponent(String(it.anslayerId ?? it.animeId))}&ep=${it.episode}&title=${encodeURIComponent(it.name || "")}&english=${encodeURIComponent(it.name || "")}&cover=${encodeURIComponent(it.cover || "")}&titleAr=${encodeURIComponent(it.titleAr || "")}&site=anslayer`;
               return (
                 <Link href={href} key={`${it.animeId}-${it.episode}-${i}`}>
-                  <motion.div whileTap={{ scale: 0.91 }} className="shrink-0 cursor-pointer" style={{ width: 110 }}>
+                  <motion.div
+                    whileTap={{ scale: 0.91 }}
+                    className="shrink-0 cursor-pointer"
+                    style={{ width: 110 }}
+                  >
                     {/* البطاقة */}
-                    <div className="relative rounded-[18px] overflow-hidden shadow-xl"
-                      style={{ width: 110, height: 156, border: `1px solid ${accentColor}22`, background: "#111" }}>
+                    <div
+                      className="relative rounded-[18px] overflow-hidden shadow-xl"
+                      style={{
+                        width: 110,
+                        height: 156,
+                        border: `1px solid ${accentColor}22`,
+                        background: "#111",
+                      }}
+                    >
                       {/* البوستر */}
-                      {it.cover
-                        ? <img src={it.cover} alt={it.name || ""} className="w-full h-full object-cover" loading="lazy" />
-                        : <div className="w-full h-full flex items-center justify-center" style={{ background: `${accentColor}18` }}>
-                            <span className="text-3xl">📺</span>
-                          </div>
-                      }
+                      {it.cover ? (
+                        <img
+                          src={it.cover}
+                          alt={it.name || ""}
+                          className="w-full h-full object-contain bg-[#0b0b10]"
+                          loading="lazy"
+                        />
+                      ) : (
+                        <div
+                          className="w-full h-full flex items-center justify-center"
+                          style={{ background: `${accentColor}18` }}
+                        >
+                          <span className="text-3xl">📺</span>
+                        </div>
+                      )}
                       {/* تدرج داكن من الأسفل */}
-                      <div className="absolute inset-0"
-                        style={{ background: "linear-gradient(to top, rgba(0,0,0,0.95) 0%, rgba(0,0,0,0.0) 55%)" }} />
+                      <div
+                        className="absolute inset-0"
+                        style={{
+                          background:
+                            "linear-gradient(to top, rgba(0,0,0,0.95) 0%, rgba(0,0,0,0.0) 55%)",
+                        }}
+                      />
                       {/* شارة الحلقة — أعلى اليسار */}
                       <div className="absolute top-2 right-2">
-                        <span className="text-[7px] font-black text-white px-1.5 py-0.5 rounded-lg"
-                          style={{ background: accentBg, backdropFilter: "blur(8px)" }}>
+                        <span
+                          className="text-[7px] font-black text-white px-1.5 py-0.5 rounded-lg"
+                          style={{
+                            background: accentBg,
+                            backdropFilter: "blur(8px)",
+                          }}
+                        >
                           ح {it.episode}
                         </span>
                       </div>
                       {/* حالة البث */}
                       <div className="absolute top-8 right-2">
-                        <span className="text-[6.5px] font-black px-1.5 py-[3px] rounded-md"
-                          style={{ background: "rgba(239,68,68,0.18)", color: "#fca5a5", border: `1px solid ${accentColor}33` }}>
+                        <span
+                          className="text-[6.5px] font-black px-1.5 py-[3px] rounded-md"
+                          style={{
+                            background: "rgba(239,68,68,0.18)",
+                            color: "#fca5a5",
+                            border: `1px solid ${accentColor}33`,
+                          }}
+                        >
                           ✓ نزلت
                         </span>
                       </div>
@@ -809,10 +1137,17 @@ export default function Home() {
                         </p>
                       </div>
                       {/* Play overlay عند الضغط */}
-                      <div className="absolute inset-0 flex items-center justify-center opacity-0 hover:opacity-100 transition-opacity"
-                        style={{ background: "rgba(0,0,0,0.32)" }}>
-                        <div className="w-10 h-10 rounded-full flex items-center justify-center"
-                          style={{ background: accentBg, backdropFilter: "blur(8px)" }}>
+                      <div
+                        className="absolute inset-0 flex items-center justify-center opacity-0 hover:opacity-100 transition-opacity"
+                        style={{ background: "rgba(0,0,0,0.32)" }}
+                      >
+                        <div
+                          className="w-10 h-10 rounded-full flex items-center justify-center"
+                          style={{
+                            background: accentBg,
+                            backdropFilter: "blur(8px)",
+                          }}
+                        >
                           <Play className="w-4 h-4 text-white fill-white mr-[-2px]" />
                         </div>
                       </div>
@@ -825,35 +1160,81 @@ export default function Home() {
         </div>
       )}
 
-
       {/* ── قسم الأنيميشن ── مخفي */}
       {false && !selectedGenre && (
-      <div className="mt-5 px-4">
+        <div className="mt-5 px-4">
           {/* Banner */}
           <Link href="/animations">
             <motion.div
               whileTap={{ scale: 0.97 }}
               className="relative w-full h-[110px] rounded-3xl overflow-hidden cursor-pointer mb-3 shadow-2xl shadow-black/60"
-              style={{ background: "linear-gradient(135deg,#1a1040 0%,#2d1b69 40%,#0f3460 100%)" }}
+              style={{
+                background:
+                  "linear-gradient(135deg,#1a1040 0%,#2d1b69 40%,#0f3460 100%)",
+              }}
             >
-              <div className="absolute -top-8 -left-8 w-40 h-40 rounded-full opacity-20" style={{ background: "radial-gradient(circle,#7c3aed,transparent)" }} />
-              <div className="absolute -bottom-6 -right-4 w-32 h-32 rounded-full opacity-15" style={{ background: "radial-gradient(circle,#06b6d4,transparent)" }} />
-              {[{top:"18%",left:"12%",size:2},{top:"60%",left:"25%",size:1.5},{top:"30%",left:"75%",size:2.5},{top:"70%",left:"85%",size:1.5},{top:"15%",left:"55%",size:1}].map((s,i) => (
-                <div key={i} className="absolute rounded-full bg-white/60 animate-pulse" style={{ top:s.top,left:s.left,width:s.size,height:s.size }} />
+              <div
+                className="absolute -top-8 -left-8 w-40 h-40 rounded-full opacity-20"
+                style={{
+                  background: "radial-gradient(circle,#7c3aed,transparent)",
+                }}
+              />
+              <div
+                className="absolute -bottom-6 -right-4 w-32 h-32 rounded-full opacity-15"
+                style={{
+                  background: "radial-gradient(circle,#06b6d4,transparent)",
+                }}
+              />
+              {[
+                { top: "18%", left: "12%", size: 2 },
+                { top: "60%", left: "25%", size: 1.5 },
+                { top: "30%", left: "75%", size: 2.5 },
+                { top: "70%", left: "85%", size: 1.5 },
+                { top: "15%", left: "55%", size: 1 },
+              ].map((s, i) => (
+                <div
+                  key={i}
+                  className="absolute rounded-full bg-white/60 animate-pulse"
+                  style={{
+                    top: s.top,
+                    left: s.left,
+                    width: s.size,
+                    height: s.size,
+                  }}
+                />
               ))}
               <div className="absolute inset-0 flex items-center justify-between px-5">
                 <div className="space-y-1.5">
                   <div className="flex items-center gap-2">
-                    <div className="w-7 h-7 rounded-xl flex items-center justify-center shadow-lg" style={{ background: "linear-gradient(135deg,#7c3aed,#06b6d4)" }}>
+                    <div
+                      className="w-7 h-7 rounded-xl flex items-center justify-center shadow-lg"
+                      style={{
+                        background: "linear-gradient(135deg,#7c3aed,#06b6d4)",
+                      }}
+                    >
                       <Clapperboard className="w-3.5 h-3.5 text-white" />
                     </div>
-                    <span className="text-[10px] text-white/40 font-['Cairo'] tracking-wider uppercase">Animation</span>
+                    <span className="text-[10px] text-white/40 font-['Cairo'] tracking-wider uppercase">
+                      Animation
+                    </span>
                   </div>
-                  <h3 className="text-[20px] font-black text-white font-['Cairo'] leading-tight">عالم الأنيميشن</h3>
-                  <p className="text-[10px] text-white/45 font-['Cairo']">أفلام ومسلسلات كرتون عالمية</p>
+                  <h3 className="text-[20px] font-black text-white font-['Cairo'] leading-tight">
+                    عالم الأنيميشن
+                  </h3>
+                  <p className="text-[10px] text-white/45 font-['Cairo']">
+                    أفلام ومسلسلات كرتون عالمية
+                  </p>
                 </div>
-                <div className="flex items-center gap-1.5 border border-white/20 px-3.5 py-2 rounded-2xl" style={{ background: "rgba(255,255,255,0.07)", backdropFilter: "blur(12px)" }}>
-                  <span className="text-[11px] font-black text-white font-['Cairo']">اكتشف</span>
+                <div
+                  className="flex items-center gap-1.5 border border-white/20 px-3.5 py-2 rounded-2xl"
+                  style={{
+                    background: "rgba(255,255,255,0.07)",
+                    backdropFilter: "blur(12px)",
+                  }}
+                >
+                  <span className="text-[11px] font-black text-white font-['Cairo']">
+                    اكتشف
+                  </span>
                   <ChevronLeft className="w-3.5 h-3.5 text-white" />
                 </div>
               </div>
@@ -865,10 +1246,17 @@ export default function Home() {
             <>
               <div className="flex items-center justify-between mb-2.5">
                 <div className="flex items-center gap-2">
-                  <div className="w-7 h-7 rounded-xl flex items-center justify-center" style={{ background: "linear-gradient(135deg,#7c3aed,#4f46e5)" }}>
+                  <div
+                    className="w-7 h-7 rounded-xl flex items-center justify-center"
+                    style={{
+                      background: "linear-gradient(135deg,#7c3aed,#4f46e5)",
+                    }}
+                  >
                     <Film className="w-3.5 h-3.5 text-white" />
                   </div>
-                  <h2 className="text-[13px] font-black font-['Cairo'] text-white">أفلام أنيميشن</h2>
+                  <h2 className="text-[13px] font-black font-['Cairo'] text-white">
+                    أفلام أنيميشن
+                  </h2>
                 </div>
                 <Link href="/animations">
                   <button className="text-[10px] text-violet-400/80 font-black font-['Cairo'] flex items-center gap-0.5 bg-violet-500/8 px-2.5 py-1 rounded-xl border border-violet-500/15">
@@ -876,23 +1264,40 @@ export default function Home() {
                   </button>
                 </Link>
               </div>
-              <div className="flex gap-3 overflow-x-auto pb-1" style={{ scrollbarWidth: "none" }}>
-                {animationMovies.map(m => (
+              <div
+                className="flex gap-3 overflow-x-auto pb-1"
+                style={{ scrollbarWidth: "none" }}
+              >
+                {animationMovies.map((m) => (
                   <Link key={m.id} href={`/animation/movie/${m.id}`}>
-                    <motion.div whileTap={{ scale: 0.92 }} className="shrink-0 w-[110px] cursor-pointer">
+                    <motion.div
+                      whileTap={{ scale: 0.92 }}
+                      className="shrink-0 w-[110px] cursor-pointer"
+                    >
                       <div className="relative w-[110px] h-[158px] rounded-2xl overflow-hidden bg-[#18181B] border border-white/[0.08] shadow-lg shadow-black/50">
-                        {m.poster_path
-                          ? <img src={`https://image.tmdb.org/t/p/w300${m.poster_path}`} alt="" className="w-full h-full object-cover" loading="lazy" />
-                          : <div className="w-full h-full bg-violet-900/20 flex items-center justify-center"><Film className="w-8 h-8 text-violet-600/30" /></div>
-                        }
+                        {m.poster_path ? (
+                          <img
+                            src={`https://image.tmdb.org/t/p/w300${m.poster_path}`}
+                            alt=""
+                            className="w-full h-full object-cover"
+                            loading="lazy"
+                          />
+                        ) : (
+                          <div className="w-full h-full bg-violet-900/20 flex items-center justify-center">
+                            <Film className="w-8 h-8 text-violet-600/30" />
+                          </div>
+                        )}
                         <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/10 to-transparent" />
                         {m.vote_average > 0 && (
                           <div className="absolute top-2 right-2 flex items-center gap-0.5 bg-black/70 backdrop-blur-md text-yellow-400 text-[7px] px-1.5 py-0.5 rounded-lg font-black border border-yellow-500/20">
-                            <Star className="w-1.5 h-1.5 fill-current" /> {m.vote_average.toFixed(1)}
+                            <Star className="w-1.5 h-1.5 fill-current" />{" "}
+                            {m.vote_average.toFixed(1)}
                           </div>
                         )}
                         <div className="absolute bottom-0 left-0 right-0 px-2 pb-2">
-                          <p className="text-[9px] text-white/90 font-bold line-clamp-2 leading-tight">{m.title}</p>
+                          <p className="text-[9px] text-white/90 font-bold line-clamp-2 leading-tight">
+                            {m.title}
+                          </p>
                         </div>
                       </div>
                     </motion.div>
@@ -901,108 +1306,173 @@ export default function Home() {
               </div>
             </>
           )}
-
         </div>
       )}
 
       {/* ── قسم أنيميشن مدبلج (aw-dubbed) ── */}
       {!selectedGenre && (
-      <div className="mt-5">
-        <div className="flex items-center justify-between px-4 mb-2.5">
-          <div className="flex items-center gap-2">
-            <div className="w-7 h-7 rounded-xl flex items-center justify-center shrink-0" style={{ background: "linear-gradient(135deg,#10b981,#06b6d4)" }}>
-              <Film className="w-3.5 h-3.5 text-white" />
+        <div className="mt-5">
+          <div className="flex items-center justify-between px-4 mb-2.5">
+            <div className="flex items-center gap-2">
+              <div
+                className="w-7 h-7 rounded-xl flex items-center justify-center shrink-0"
+                style={{
+                  background: "linear-gradient(135deg,#10b981,#06b6d4)",
+                }}
+              >
+                <Film className="w-3.5 h-3.5 text-white" />
+              </div>
+              <div>
+                <h2 className="text-[13px] font-black font-['Cairo'] text-white leading-none">
+                  أنيميشن مدبلج 🎬
+                </h2>
+                <p className="text-[9px] text-white/25 font-['Cairo'] mt-0.5">
+                  أنيميشن مدبلج بالعربية
+                </p>
+              </div>
             </div>
-            <div>
-              <h2 className="text-[13px] font-black font-['Cairo'] text-white leading-none">أنيميشن مدبلج 🎬</h2>
-              <p className="text-[9px] text-white/25 font-['Cairo'] mt-0.5">أنيميشن مدبلج بالعربية</p>
-            </div>
+            <Link href="/aw-dubbed">
+              <button className="text-[10px] text-cyan-400/80 font-black font-['Cairo'] flex items-center gap-0.5 bg-cyan-500/8 px-2.5 py-1 rounded-xl border border-cyan-500/15">
+                عرض الكل <ChevronLeft className="w-3 h-3" />
+              </button>
+            </Link>
           </div>
-          <Link href="/aw-dubbed">
-            <button className="text-[10px] text-cyan-400/80 font-black font-['Cairo'] flex items-center gap-0.5 bg-cyan-500/8 px-2.5 py-1 rounded-xl border border-cyan-500/15">
-              عرض الكل <ChevronLeft className="w-3 h-3" />
-            </button>
-          </Link>
+          <div
+            className="flex gap-3 overflow-x-auto pb-1 px-4"
+            style={{ scrollbarWidth: "none" }}
+          >
+            {awCards.length > 0
+              ? awCards.map((c: any, i: number) => {
+                  const imgSrc = c.poster || null;
+                  const toDetail = `/aw-dubbed/${encodeURIComponent(c.key)}?title=${encodeURIComponent(c.title)}&seasons=${encodeURIComponent(JSON.stringify(c.seasons || []))}&img=${encodeURIComponent(c.poster || "")}`;
+                  return (
+                    <Link key={i} href={toDetail}>
+                      <motion.div
+                        whileTap={{ scale: 0.92 }}
+                        className="shrink-0 w-[110px] cursor-pointer"
+                      >
+                        <div className="relative w-[110px] h-[158px] rounded-2xl overflow-hidden bg-[#18181B] border border-white/[0.08] shadow-lg shadow-black/50">
+                          {imgSrc ? (
+                            <img
+                              src={imgSrc}
+                              alt={c.title}
+                              className="w-full h-full object-cover"
+                              loading="lazy"
+                              onError={(e) => {
+                                (e.target as HTMLImageElement).style.display =
+                                  "none";
+                              }}
+                            />
+                          ) : (
+                            <div className="w-full h-full bg-cyan-900/20 flex items-center justify-center">
+                              <Film className="w-8 h-8 text-cyan-600/30" />
+                            </div>
+                          )}
+                          <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/15 to-transparent" />
+                          <div className="absolute bottom-0 left-0 right-0 px-2 pb-2">
+                            <p className="text-[9px] text-white/90 font-bold line-clamp-2 leading-tight">
+                              {c.titleAr || c.title}
+                            </p>
+                          </div>
+                        </div>
+                      </motion.div>
+                    </Link>
+                  );
+                })
+              : Array.from({ length: 5 }).map((_, i) => (
+                  <div
+                    key={i}
+                    className="shrink-0 w-[110px] h-[158px] rounded-2xl bg-white/4 border border-white/6 animate-pulse"
+                  />
+                ))}
+          </div>
         </div>
-        <div className="flex gap-3 overflow-x-auto pb-1 px-4" style={{ scrollbarWidth: "none" }}>
-          {awCards.length > 0 ? awCards.map((c: any, i: number) => {
-            const imgSrc = c.poster || null;
-            const toDetail = `/aw-dubbed/${encodeURIComponent(c.key)}?title=${encodeURIComponent(c.title)}&seasons=${encodeURIComponent(JSON.stringify(c.seasons || []))}&img=${encodeURIComponent(c.poster || "")}`;
-            return (
-              <Link key={i} href={toDetail}>
-                <motion.div whileTap={{ scale: 0.92 }} className="shrink-0 w-[110px] cursor-pointer">
-                  <div className="relative w-[110px] h-[158px] rounded-2xl overflow-hidden bg-[#18181B] border border-white/[0.08] shadow-lg shadow-black/50">
-                    {imgSrc
-                      ? <img src={imgSrc} alt={c.title} className="w-full h-full object-cover" loading="lazy"
-                          onError={e => { (e.target as HTMLImageElement).style.display = "none"; }} />
-                      : <div className="w-full h-full bg-cyan-900/20 flex items-center justify-center"><Film className="w-8 h-8 text-cyan-600/30" /></div>
-                    }
-                    <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/15 to-transparent" />
-                    <div className="absolute bottom-0 left-0 right-0 px-2 pb-2">
-                      <p className="text-[9px] text-white/90 font-bold line-clamp-2 leading-tight">{c.titleAr || c.title}</p>
-                    </div>
-                  </div>
-                </motion.div>
-              </Link>
-            );
-          }) : Array.from({ length: 5 }).map((_, i) => (
-            <div key={i} className="shrink-0 w-[110px] h-[158px] rounded-2xl bg-white/4 border border-white/6 animate-pulse" />
-          ))}
-        </div>
-      </div>
       )}
 
       {/* ── قسم الكرتون المدبلج ── */}
       {!selectedGenre && (
-      <div className="mt-5">
-        {/* Header row */}
-        <div className="flex items-center justify-between px-4 mb-2.5">
-          <div className="flex items-center gap-2">
-            <div className="w-7 h-7 rounded-xl flex items-center justify-center shrink-0" style={{ background: "linear-gradient(135deg,#10b981,#f59e0b)" }}>
-              <Tv2 className="w-3.5 h-3.5 text-white" />
+        <div className="mt-5">
+          {/* Header row */}
+          <div className="flex items-center justify-between px-4 mb-2.5">
+            <div className="flex items-center gap-2">
+              <div
+                className="w-7 h-7 rounded-xl flex items-center justify-center shrink-0"
+                style={{
+                  background: "linear-gradient(135deg,#10b981,#f59e0b)",
+                }}
+              >
+                <Tv2 className="w-3.5 h-3.5 text-white" />
+              </div>
+              <div>
+                <h2 className="text-[13px] font-black font-['Cairo'] text-white leading-none">
+                  كرتون مدبلج 📺
+                </h2>
+                <p className="text-[9px] text-white/25 font-['Cairo'] mt-0.5">
+                  كرتون وأنمي مدبلج للعربية
+                </p>
+              </div>
             </div>
-            <div>
-              <h2 className="text-[13px] font-black font-['Cairo'] text-white leading-none">كرتون مدبلج 📺</h2>
-              <p className="text-[9px] text-white/25 font-['Cairo'] mt-0.5">كرتون وأنمي مدبلج للعربية</p>
-            </div>
+            <Link href="/dubbed">
+              <button className="text-[10px] text-emerald-400/80 font-black font-['Cairo'] flex items-center gap-0.5 bg-emerald-500/8 px-2.5 py-1 rounded-xl border border-emerald-500/15">
+                عرض الكل <ChevronLeft className="w-3 h-3" />
+              </button>
+            </Link>
           </div>
-          <Link href="/dubbed">
-            <button className="text-[10px] text-emerald-400/80 font-black font-['Cairo'] flex items-center gap-0.5 bg-emerald-500/8 px-2.5 py-1 rounded-xl border border-emerald-500/15">
-              عرض الكل <ChevronLeft className="w-3 h-3" />
-            </button>
-          </Link>
+          {/* Horizontal poster cards */}
+          <div
+            className="flex gap-3 overflow-x-auto pb-1 px-4"
+            style={{ scrollbarWidth: "none" }}
+          >
+            {dubbedCards.length > 0
+              ? dubbedCards.map((c: any, i: number) => {
+                  /* نفس منطق imgSrc في DubbedDetail */
+                  const rawImg = c.image || c.img || "";
+                  const imgSrc = rawImg.startsWith("http")
+                    ? rawImg
+                    : rawImg.startsWith("/api/dubbed/img")
+                      ? rawImg
+                      : rawImg
+                        ? `/api/dubbed/img?f=${encodeURIComponent(rawImg.split("?f=")[1] || rawImg.split("/").pop() || rawImg)}`
+                        : null;
+                  const toDetail = `/dubbed/${encodeURIComponent(c.title)}?seasons=${encodeURIComponent(JSON.stringify(c.seasons || [{ label: "الموسم 1", arabicToonsId: c.arabicToonsId }]))}&title=${encodeURIComponent(c.title)}&img=${encodeURIComponent(rawImg)}`;
+                  return (
+                    <Link key={i} href={toDetail}>
+                      <motion.div
+                        whileTap={{ scale: 0.92 }}
+                        className="shrink-0 w-[110px] cursor-pointer"
+                      >
+                        <div className="relative w-[110px] h-[158px] rounded-2xl overflow-hidden bg-[#18181B] border border-white/[0.08] shadow-lg shadow-black/50">
+                          {imgSrc ? (
+                            <img
+                              src={imgSrc}
+                              alt={c.title}
+                              className="w-full h-full object-cover"
+                              loading="lazy"
+                            />
+                          ) : (
+                            <div className="w-full h-full bg-emerald-900/20 flex items-center justify-center">
+                              <Tv2 className="w-8 h-8 text-emerald-600/30" />
+                            </div>
+                          )}
+                          <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/15 to-transparent" />
+                          <div className="absolute bottom-0 left-0 right-0 px-2 pb-2">
+                            <p className="text-[9px] text-white/90 font-bold line-clamp-2 leading-tight">
+                              {c.title}
+                            </p>
+                          </div>
+                        </div>
+                      </motion.div>
+                    </Link>
+                  );
+                })
+              : Array.from({ length: 5 }).map((_, i) => (
+                  <div
+                    key={i}
+                    className="shrink-0 w-[110px] h-[158px] rounded-2xl bg-white/4 border border-white/6 animate-pulse"
+                  />
+                ))}
+          </div>
         </div>
-        {/* Horizontal poster cards */}
-        <div className="flex gap-3 overflow-x-auto pb-1 px-4" style={{ scrollbarWidth: "none" }}>
-          {dubbedCards.length > 0 ? dubbedCards.map((c: any, i: number) => {
-            /* نفس منطق imgSrc في DubbedDetail */
-            const rawImg = c.image || c.img || "";
-            const imgSrc = rawImg.startsWith("http") ? rawImg
-              : rawImg.startsWith("/api/dubbed/img") ? rawImg
-              : rawImg ? `/api/dubbed/img?f=${encodeURIComponent(rawImg.split("?f=")[1] || rawImg.split("/").pop() || rawImg)}`
-              : null;
-            const toDetail = `/dubbed/${encodeURIComponent(c.title)}?seasons=${encodeURIComponent(JSON.stringify(c.seasons || [{ label: "الموسم 1", arabicToonsId: c.arabicToonsId }]))}&title=${encodeURIComponent(c.title)}&img=${encodeURIComponent(rawImg)}`;
-            return (
-              <Link key={i} href={toDetail}>
-                <motion.div whileTap={{ scale: 0.92 }} className="shrink-0 w-[110px] cursor-pointer">
-                  <div className="relative w-[110px] h-[158px] rounded-2xl overflow-hidden bg-[#18181B] border border-white/[0.08] shadow-lg shadow-black/50">
-                    {imgSrc
-                      ? <img src={imgSrc} alt={c.title} className="w-full h-full object-cover" loading="lazy" />
-                      : <div className="w-full h-full bg-emerald-900/20 flex items-center justify-center"><Tv2 className="w-8 h-8 text-emerald-600/30" /></div>
-                    }
-                    <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/15 to-transparent" />
-                    <div className="absolute bottom-0 left-0 right-0 px-2 pb-2">
-                      <p className="text-[9px] text-white/90 font-bold line-clamp-2 leading-tight">{c.title}</p>
-                    </div>
-                  </div>
-                </motion.div>
-              </Link>
-            );
-          }) : Array.from({ length: 5 }).map((_, i) => (
-            <div key={i} className="shrink-0 w-[110px] h-[158px] rounded-2xl bg-white/4 border border-white/6 animate-pulse" />
-          ))}
-        </div>
-      </div>
       )}
 
       {/* ── موسم الربيع 2026 ── */}
@@ -1010,13 +1480,21 @@ export default function Home() {
         <div className="mt-5">
           <div className="flex items-center justify-between px-4 mb-3">
             <div className="flex items-center gap-2">
-              <div className="w-7 h-7 rounded-xl flex items-center justify-center shrink-0"
-                style={{ background: "linear-gradient(135deg,#ec4899,#8b5cf6)" }}>
+              <div
+                className="w-7 h-7 rounded-xl flex items-center justify-center shrink-0"
+                style={{
+                  background: "linear-gradient(135deg,#ec4899,#8b5cf6)",
+                }}
+              >
                 <Tv2 className="w-3.5 h-3.5 text-white" />
               </div>
               <div>
-                <h2 className="text-[13px] font-black font-['Cairo'] text-white leading-none">موسم الربيع 2026 🌸</h2>
-                <p className="text-[9px] text-white/25 font-['Cairo'] mt-0.5">{spring2026.length} أنمي يُبث الآن</p>
+                <h2 className="text-[13px] font-black font-['Cairo'] text-white leading-none">
+                  موسم الربيع 2026 🌸
+                </h2>
+                <p className="text-[9px] text-white/25 font-['Cairo'] mt-0.5">
+                  {spring2026.length} أنمي يُبث الآن
+                </p>
               </div>
             </div>
             <Link href="/browse?year=2026&season=SPRING&format=TV">
@@ -1025,28 +1503,58 @@ export default function Home() {
               </button>
             </Link>
           </div>
-          <div className="flex gap-3 overflow-x-auto px-4 pb-2" style={{ scrollbarWidth: "none" }}>
-            {spring2026.map(anime => {
-              const aired = anime.status === "RELEASING" && anime.nextAiringEpisode?.episode
-                ? anime.nextAiringEpisode.episode - 1
-                : (anime.episodes || 0);
+          <div
+            className="flex gap-3 overflow-x-auto px-4 pb-2"
+            style={{ scrollbarWidth: "none" }}
+          >
+            {spring2026.map((anime) => {
+              const aired =
+                anime.status === "RELEASING" && anime.nextAiringEpisode?.episode
+                  ? anime.nextAiringEpisode.episode - 1
+                  : anime.episodes || 0;
               const total = anime.episodes || 0;
               return (
                 <Link key={anime.id} href={animeHref(anime)}>
-                  <motion.div whileTap={{ scale: 0.91 }} className="shrink-0 cursor-pointer" style={{ width: 92 }}>
-                    <div className="relative rounded-2xl overflow-hidden bg-[#18181B] border border-white/[0.08] shadow-lg shadow-black/50"
-                      style={{ width: 92, height: 132 }}>
-                      {anime.coverImage?.large ? <img src={anime.coverImage.large} alt="" className="w-full h-full object-cover" loading="lazy" onError={e => { (e.target as HTMLImageElement).style.display = "none"; }} /> : <div className="w-full h-full bg-gradient-to-b from-[#1e1e2e] to-[#0f0f1a]" />}
+                  <motion.div
+                    whileTap={{ scale: 0.91 }}
+                    className="shrink-0 cursor-pointer"
+                    style={{ width: 92 }}
+                  >
+                    <div
+                      className="relative rounded-2xl overflow-hidden bg-[#18181B] border border-white/[0.08] shadow-lg shadow-black/50"
+                      style={{ width: 92, height: 132 }}
+                    >
+                      {anime.coverImage?.large ? (
+                        <img
+                          src={anime.coverImage.large}
+                          alt=""
+                          className="w-full h-full object-cover"
+                          loading="lazy"
+                          onError={(e) => {
+                            (e.target as HTMLImageElement).style.display =
+                              "none";
+                          }}
+                        />
+                      ) : (
+                        <div className="w-full h-full bg-gradient-to-b from-[#1e1e2e] to-[#0f0f1a]" />
+                      )}
                       <div className="absolute inset-0 bg-gradient-to-t from-black/95 via-black/15 to-transparent" />
                       {anime.averageScore > 0 && (
                         <div className="absolute top-1.5 right-1.5 flex items-center gap-0.5 bg-black/70 backdrop-blur-md text-yellow-400 text-[6.5px] px-1 py-0.5 rounded-md font-black">
-                          <Star className="w-1.5 h-1.5 fill-current" /> {(anime.averageScore / 10).toFixed(1)}
+                          <Star className="w-1.5 h-1.5 fill-current" />{" "}
+                          {(anime.averageScore / 10).toFixed(1)}
                         </div>
                       )}
                       {aired > 0 && (
-                        <div className="absolute top-1.5 left-1.5 text-[6.5px] font-black px-1.5 py-0.5 rounded-md"
-                          style={{ background: "rgba(236,72,153,0.85)", color: "#fff" }}>
-                          {aired}{total && total > aired ? `/${total}` : ""} ح
+                        <div
+                          className="absolute top-1.5 left-1.5 text-[6.5px] font-black px-1.5 py-0.5 rounded-md"
+                          style={{
+                            background: "rgba(236,72,153,0.85)",
+                            color: "#fff",
+                          }}
+                        >
+                          {aired}
+                          {total && total > aired ? `/${total}` : ""} ح
                         </div>
                       )}
                       {anime.status === "RELEASING" && (
@@ -1071,13 +1579,21 @@ export default function Home() {
         <div className="mt-5">
           <div className="flex items-center justify-between px-4 mb-3">
             <div className="flex items-center gap-2">
-              <div className="w-7 h-7 rounded-xl flex items-center justify-center shrink-0"
-                style={{ background: "linear-gradient(135deg,#f59e0b,#d97706)" }}>
+              <div
+                className="w-7 h-7 rounded-xl flex items-center justify-center shrink-0"
+                style={{
+                  background: "linear-gradient(135deg,#f59e0b,#d97706)",
+                }}
+              >
                 <span className="text-white text-[14px] leading-none">🍂</span>
               </div>
               <div>
-                <h2 className="text-[13px] font-black font-['Cairo'] text-white leading-none">أنمي خريف 2025</h2>
-                <p className="text-[9px] text-white/25 font-['Cairo'] mt-0.5">{fall2025.length} أنمي</p>
+                <h2 className="text-[13px] font-black font-['Cairo'] text-white leading-none">
+                  أنمي خريف 2025
+                </h2>
+                <p className="text-[9px] text-white/25 font-['Cairo'] mt-0.5">
+                  {fall2025.length} أنمي
+                </p>
               </div>
             </div>
             <Link href="/browse?year=2025&season=FALL&format=TV">
@@ -1086,28 +1602,61 @@ export default function Home() {
               </button>
             </Link>
           </div>
-          <div className="flex gap-3 overflow-x-auto px-4 pb-2" style={{ scrollbarWidth: "none" }}>
-            {fall2025.map(anime => {
-              const ep = anime.nextAiringEpisode?.episode ? anime.nextAiringEpisode.episode - 1 : (anime.episodes || 0);
+          <div
+            className="flex gap-3 overflow-x-auto px-4 pb-2"
+            style={{ scrollbarWidth: "none" }}
+          >
+            {fall2025.map((anime) => {
+              const ep = anime.nextAiringEpisode?.episode
+                ? anime.nextAiringEpisode.episode - 1
+                : anime.episodes || 0;
               return (
                 <Link key={anime.id} href={animeHref(anime)}>
-                  <motion.div whileTap={{ scale: 0.91 }} className="shrink-0 cursor-pointer" style={{ width: 92 }}>
-                    <div className="relative rounded-2xl overflow-hidden bg-[#18181B] border border-white/[0.08] shadow-lg" style={{ width: 92, height: 132 }}>
-                      {anime.coverImage?.large ? <img src={anime.coverImage.large} alt="" className="w-full h-full object-cover" loading="lazy" onError={e => { (e.target as HTMLImageElement).style.display = "none"; }} /> : <div className="w-full h-full bg-gradient-to-b from-[#1e1e2e] to-[#0f0f1a]" />}
+                  <motion.div
+                    whileTap={{ scale: 0.91 }}
+                    className="shrink-0 cursor-pointer"
+                    style={{ width: 92 }}
+                  >
+                    <div
+                      className="relative rounded-2xl overflow-hidden bg-[#18181B] border border-white/[0.08] shadow-lg"
+                      style={{ width: 92, height: 132 }}
+                    >
+                      {anime.coverImage?.large ? (
+                        <img
+                          src={anime.coverImage.large}
+                          alt=""
+                          className="w-full h-full object-cover"
+                          loading="lazy"
+                          onError={(e) => {
+                            (e.target as HTMLImageElement).style.display =
+                              "none";
+                          }}
+                        />
+                      ) : (
+                        <div className="w-full h-full bg-gradient-to-b from-[#1e1e2e] to-[#0f0f1a]" />
+                      )}
                       <div className="absolute inset-0 bg-gradient-to-t from-black/95 via-black/15 to-transparent" />
                       {anime.averageScore > 0 && (
                         <div className="absolute top-1.5 right-1.5 flex items-center gap-0.5 bg-black/70 backdrop-blur-md text-yellow-400 text-[6.5px] px-1 py-0.5 rounded-md font-black">
-                          <Star className="w-1.5 h-1.5 fill-current" /> {(anime.averageScore / 10).toFixed(1)}
+                          <Star className="w-1.5 h-1.5 fill-current" />{" "}
+                          {(anime.averageScore / 10).toFixed(1)}
                         </div>
                       )}
                       {ep > 0 && (
-                        <div className="absolute top-1.5 left-1.5 text-[6.5px] font-black px-1.5 py-0.5 rounded-md"
-                          style={{ background: "rgba(245,158,11,0.88)", color: "#fff" }}>
+                        <div
+                          className="absolute top-1.5 left-1.5 text-[6.5px] font-black px-1.5 py-0.5 rounded-md"
+                          style={{
+                            background: "rgba(245,158,11,0.88)",
+                            color: "#fff",
+                          }}
+                        >
                           {ep} ح
                         </div>
                       )}
                       <div className="absolute bottom-0 left-0 right-0 px-1.5 pb-2">
-                        <p className="text-[8.5px] text-white/90 font-black line-clamp-2 leading-tight font-['Cairo']">{anime.title?.romaji}</p>
+                        <p className="text-[8.5px] text-white/90 font-black line-clamp-2 leading-tight font-['Cairo']">
+                          {anime.title?.romaji}
+                        </p>
                       </div>
                     </div>
                   </motion.div>
@@ -1123,10 +1672,17 @@ export default function Home() {
         <div className="mt-6">
           <div className="flex items-center justify-between px-4 mb-3">
             <div className="flex items-center gap-2">
-              <div className="w-7 h-7 rounded-xl flex items-center justify-center" style={{ background: "linear-gradient(135deg,#3B82F6,#1D4ED8)" }}>
+              <div
+                className="w-7 h-7 rounded-xl flex items-center justify-center"
+                style={{
+                  background: "linear-gradient(135deg,#3B82F6,#1D4ED8)",
+                }}
+              >
                 <Film className="w-3.5 h-3.5 text-white" />
               </div>
-              <h2 className="text-[13px] font-black font-['Cairo'] text-white">أفلام أنمي</h2>
+              <h2 className="text-[13px] font-black font-['Cairo'] text-white">
+                أفلام أنمي
+              </h2>
             </div>
             <Link href="/browse?format=MOVIE">
               <button className="text-[10px] text-blue-400/80 font-black font-['Cairo'] flex items-center gap-0.5 bg-blue-500/8 px-2.5 py-1 rounded-xl border border-blue-500/15">
@@ -1134,21 +1690,44 @@ export default function Home() {
               </button>
             </Link>
           </div>
-          <div className="flex gap-3 overflow-x-auto px-4 pb-1" style={{ scrollbarWidth: "none" }}>
-            {movies.map(anime => (
+          <div
+            className="flex gap-3 overflow-x-auto px-4 pb-1"
+            style={{ scrollbarWidth: "none" }}
+          >
+            {movies.map((anime) => (
               <Link key={anime.id} href={animeHref(anime)}>
-                <motion.div whileTap={{ scale: 0.92 }} className="shrink-0 w-[136px] cursor-pointer">
+                <motion.div
+                  whileTap={{ scale: 0.92 }}
+                  className="shrink-0 w-[136px] cursor-pointer"
+                >
                   <div className="relative w-[136px] h-[192px] rounded-2xl overflow-hidden bg-[#18181B] border border-white/[0.08] shadow-lg shadow-black/50">
-                    {anime.coverImage?.large ? <img src={anime.coverImage.large} alt="" className="w-full h-full object-cover" loading="lazy" onError={e => { (e.target as HTMLImageElement).style.display = "none"; }} /> : <div className="w-full h-full bg-gradient-to-b from-[#1a1a2e] to-[#0f0f1a]" />}
+                    {anime.coverImage?.large ? (
+                      <img
+                        src={anime.coverImage.large}
+                        alt=""
+                        className="w-full h-full object-cover"
+                        loading="lazy"
+                        onError={(e) => {
+                          (e.target as HTMLImageElement).style.display = "none";
+                        }}
+                      />
+                    ) : (
+                      <div className="w-full h-full bg-gradient-to-b from-[#1a1a2e] to-[#0f0f1a]" />
+                    )}
                     <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/10 to-transparent" />
-                    <div className="absolute top-2 left-2 bg-blue-500 text-white text-[7px] px-1.5 py-0.5 rounded-md font-black shadow-md shadow-blue-500/50">فيلم</div>
+                    <div className="absolute top-2 left-2 bg-blue-500 text-white text-[7px] px-1.5 py-0.5 rounded-md font-black shadow-md shadow-blue-500/50">
+                      فيلم
+                    </div>
                     {anime.averageScore && (
                       <div className="absolute top-2 right-2 flex items-center gap-0.5 bg-black/70 backdrop-blur-md text-yellow-400 text-[7.5px] px-1.5 py-0.5 rounded-lg font-black border border-yellow-500/20">
-                        <Star className="w-1.5 h-1.5 fill-current" /> {(anime.averageScore / 10).toFixed(1)}
+                        <Star className="w-1.5 h-1.5 fill-current" />{" "}
+                        {(anime.averageScore / 10).toFixed(1)}
                       </div>
                     )}
                     <div className="absolute bottom-0 left-0 right-0 px-2 pb-2.5">
-                      <p className="text-[9.5px] text-white/90 font-bold truncate leading-tight">{anime.title?.romaji}</p>
+                      <p className="text-[9.5px] text-white/90 font-bold truncate leading-tight">
+                        {anime.title?.romaji}
+                      </p>
                     </div>
                   </div>
                 </motion.div>
@@ -1163,13 +1742,21 @@ export default function Home() {
         <div className="mt-5">
           <div className="flex items-center justify-between px-4 mb-3">
             <div className="flex items-center gap-2">
-              <div className="w-7 h-7 rounded-xl flex items-center justify-center shrink-0"
-                style={{ background: "linear-gradient(135deg,#fbbf24,#f59e0b)" }}>
+              <div
+                className="w-7 h-7 rounded-xl flex items-center justify-center shrink-0"
+                style={{
+                  background: "linear-gradient(135deg,#fbbf24,#f59e0b)",
+                }}
+              >
                 <Star className="w-3.5 h-3.5 text-white fill-white" />
               </div>
               <div>
-                <h2 className="text-[13px] font-black font-['Cairo'] text-white leading-none">الأكثر تقييماً</h2>
-                <p className="text-[9px] text-white/25 font-['Cairo'] mt-0.5">أعلى نقاط على AniList</p>
+                <h2 className="text-[13px] font-black font-['Cairo'] text-white leading-none">
+                  الأكثر تقييماً
+                </h2>
+                <p className="text-[9px] text-white/25 font-['Cairo'] mt-0.5">
+                  أعلى نقاط على AniList
+                </p>
               </div>
             </div>
             <Link href="/browse?sort=SCORE">
@@ -1178,12 +1765,34 @@ export default function Home() {
               </button>
             </Link>
           </div>
-          <div className="flex gap-3 overflow-x-auto px-4 pb-2" style={{ scrollbarWidth: "none" }}>
-            {topRated.map(anime => (
+          <div
+            className="flex gap-3 overflow-x-auto px-4 pb-2"
+            style={{ scrollbarWidth: "none" }}
+          >
+            {topRated.map((anime) => (
               <Link key={anime.id} href={animeHref(anime)}>
-                <motion.div whileTap={{ scale: 0.91 }} className="shrink-0 cursor-pointer" style={{ width: 92 }}>
-                  <div className="relative rounded-2xl overflow-hidden bg-[#18181B] border border-yellow-500/10 shadow-lg shadow-yellow-900/20" style={{ width: 92, height: 132 }}>
-                    {anime.coverImage?.large ? <img src={anime.coverImage.large} alt="" className="w-full h-full object-cover" loading="lazy" onError={e => { (e.target as HTMLImageElement).style.display = "none"; }} /> : <div className="w-full h-full bg-gradient-to-b from-[#1e1e2e] to-[#0f0f1a]" />}
+                <motion.div
+                  whileTap={{ scale: 0.91 }}
+                  className="shrink-0 cursor-pointer"
+                  style={{ width: 92 }}
+                >
+                  <div
+                    className="relative rounded-2xl overflow-hidden bg-[#18181B] border border-yellow-500/10 shadow-lg shadow-yellow-900/20"
+                    style={{ width: 92, height: 132 }}
+                  >
+                    {anime.coverImage?.large ? (
+                      <img
+                        src={anime.coverImage.large}
+                        alt=""
+                        className="w-full h-full object-cover"
+                        loading="lazy"
+                        onError={(e) => {
+                          (e.target as HTMLImageElement).style.display = "none";
+                        }}
+                      />
+                    ) : (
+                      <div className="w-full h-full bg-gradient-to-b from-[#1e1e2e] to-[#0f0f1a]" />
+                    )}
                     <div className="absolute inset-0 bg-gradient-to-t from-black/95 via-black/10 to-transparent" />
                     {anime.averageScore > 0 && (
                       <div className="absolute top-1.5 right-1.5 flex items-center gap-0.5 bg-yellow-500/90 text-black text-[6.5px] px-1 py-0.5 rounded-md font-black">
@@ -1191,11 +1800,20 @@ export default function Home() {
                       </div>
                     )}
                     {anime.format === "MOVIE" && (
-                      <div className="absolute top-1.5 left-1.5 text-[6px] font-black px-1 py-0.5 rounded-md"
-                        style={{ background: "rgba(59,130,246,0.88)", color: "#fff" }}>فيلم</div>
+                      <div
+                        className="absolute top-1.5 left-1.5 text-[6px] font-black px-1 py-0.5 rounded-md"
+                        style={{
+                          background: "rgba(59,130,246,0.88)",
+                          color: "#fff",
+                        }}
+                      >
+                        فيلم
+                      </div>
                     )}
                     <div className="absolute bottom-0 left-0 right-0 px-1.5 pb-2">
-                      <p className="text-[8.5px] text-white/90 font-black line-clamp-2 leading-tight font-['Cairo']">{anime.title?.romaji}</p>
+                      <p className="text-[8.5px] text-white/90 font-black line-clamp-2 leading-tight font-['Cairo']">
+                        {anime.title?.romaji}
+                      </p>
                     </div>
                   </div>
                 </motion.div>
@@ -1210,13 +1828,21 @@ export default function Home() {
         <div className="mt-5">
           <div className="flex items-center justify-between px-4 mb-3">
             <div className="flex items-center gap-2">
-              <div className="w-7 h-7 rounded-xl flex items-center justify-center shrink-0"
-                style={{ background: "linear-gradient(135deg,#059669,#10b981)" }}>
+              <div
+                className="w-7 h-7 rounded-xl flex items-center justify-center shrink-0"
+                style={{
+                  background: "linear-gradient(135deg,#059669,#10b981)",
+                }}
+              >
                 <span className="text-white text-[14px] leading-none">⚔️</span>
               </div>
               <div>
-                <h2 className="text-[13px] font-black font-['Cairo'] text-white leading-none">عالم الإيسيكاي</h2>
-                <p className="text-[9px] text-white/25 font-['Cairo'] mt-0.5">انتقال إلى عوالم أخرى</p>
+                <h2 className="text-[13px] font-black font-['Cairo'] text-white leading-none">
+                  عالم الإيسيكاي
+                </h2>
+                <p className="text-[9px] text-white/25 font-['Cairo'] mt-0.5">
+                  انتقال إلى عوالم أخرى
+                </p>
               </div>
             </div>
             <Link href="/browse?genre=Isekai">
@@ -1225,20 +1851,45 @@ export default function Home() {
               </button>
             </Link>
           </div>
-          <div className="flex gap-3 overflow-x-auto px-4 pb-2" style={{ scrollbarWidth: "none" }}>
-            {isekaiList.map(anime => (
+          <div
+            className="flex gap-3 overflow-x-auto px-4 pb-2"
+            style={{ scrollbarWidth: "none" }}
+          >
+            {isekaiList.map((anime) => (
               <Link key={anime.id} href={animeHref(anime)}>
-                <motion.div whileTap={{ scale: 0.91 }} className="shrink-0 cursor-pointer" style={{ width: 92 }}>
-                  <div className="relative rounded-2xl overflow-hidden bg-[#18181B] border border-white/[0.08] shadow-lg" style={{ width: 92, height: 132 }}>
-                    {anime.coverImage?.large ? <img src={anime.coverImage.large} alt="" className="w-full h-full object-cover" loading="lazy" onError={e => { (e.target as HTMLImageElement).style.display = "none"; }} /> : <div className="w-full h-full bg-gradient-to-b from-[#1e1e2e] to-[#0f0f1a]" />}
+                <motion.div
+                  whileTap={{ scale: 0.91 }}
+                  className="shrink-0 cursor-pointer"
+                  style={{ width: 92 }}
+                >
+                  <div
+                    className="relative rounded-2xl overflow-hidden bg-[#18181B] border border-white/[0.08] shadow-lg"
+                    style={{ width: 92, height: 132 }}
+                  >
+                    {anime.coverImage?.large ? (
+                      <img
+                        src={anime.coverImage.large}
+                        alt=""
+                        className="w-full h-full object-cover"
+                        loading="lazy"
+                        onError={(e) => {
+                          (e.target as HTMLImageElement).style.display = "none";
+                        }}
+                      />
+                    ) : (
+                      <div className="w-full h-full bg-gradient-to-b from-[#1e1e2e] to-[#0f0f1a]" />
+                    )}
                     <div className="absolute inset-0 bg-gradient-to-t from-black/95 via-black/10 to-transparent" />
                     {anime.averageScore > 0 && (
                       <div className="absolute top-1.5 right-1.5 flex items-center gap-0.5 bg-black/70 backdrop-blur-md text-yellow-400 text-[6.5px] px-1 py-0.5 rounded-md font-black">
-                        <Star className="w-1.5 h-1.5 fill-current" /> {(anime.averageScore / 10).toFixed(1)}
+                        <Star className="w-1.5 h-1.5 fill-current" />{" "}
+                        {(anime.averageScore / 10).toFixed(1)}
                       </div>
                     )}
                     <div className="absolute bottom-0 left-0 right-0 px-1.5 pb-2">
-                      <p className="text-[8.5px] text-white/90 font-black line-clamp-2 leading-tight font-['Cairo']">{anime.title?.romaji}</p>
+                      <p className="text-[8.5px] text-white/90 font-black line-clamp-2 leading-tight font-['Cairo']">
+                        {anime.title?.romaji}
+                      </p>
                     </div>
                   </div>
                 </motion.div>
@@ -1248,20 +1899,25 @@ export default function Home() {
         </div>
       )}
 
-
       {/* ── Popular grid ── */}
       <div className="mt-6 px-4">
         <div className="flex items-center justify-between mb-3">
           <div className="flex items-center gap-2">
-          <div className="w-7 h-7 rounded-xl flex items-center justify-center shrink-0" style={{ background: "linear-gradient(135deg,#EF4444,#DC2626)" }}>
-            <Flame className="w-3.5 h-3.5 text-white fill-red-200" />
-          </div>
-          <h2 className="text-[13px] font-black font-['Cairo'] text-white">
-            {selectedGenre
-              ? GENRES_AR.find(g => g.en === selectedGenre)?.ar || selectedGenre
-              : "الأكثر شعبية"}
-          </h2>
-          {genreLoading && <Loader2 className="w-3.5 h-3.5 text-primary animate-spin" />}
+            <div
+              className="w-7 h-7 rounded-xl flex items-center justify-center shrink-0"
+              style={{ background: "linear-gradient(135deg,#EF4444,#DC2626)" }}
+            >
+              <Flame className="w-3.5 h-3.5 text-white fill-red-200" />
+            </div>
+            <h2 className="text-[13px] font-black font-['Cairo'] text-white">
+              {selectedGenre
+                ? GENRES_AR.find((g) => g.en === selectedGenre)?.ar ||
+                  selectedGenre
+                : "الأكثر شعبية"}
+            </h2>
+            {genreLoading && (
+              <Loader2 className="w-3.5 h-3.5 text-primary animate-spin" />
+            )}
           </div>
           {!selectedGenre && (
             <Link href="/browse">
@@ -1280,7 +1936,9 @@ export default function Home() {
             transition={{ duration: 0.25 }}
             className="grid grid-cols-3 gap-3"
           >
-            {popular.map(anime => <AnimeCard key={anime.id} anime={anime} />)}
+            {popular.map((anime) => (
+              <AnimeCard key={anime.id} anime={anime} />
+            ))}
           </motion.div>
         </AnimatePresence>
         {hasMore && (

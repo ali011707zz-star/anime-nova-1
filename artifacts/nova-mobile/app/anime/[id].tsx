@@ -215,19 +215,16 @@ export default function AnimeDetailScreen() {
   }, []);
 
   const toggleChar = useCallback(async (char: { id: number; name: string; image?: string; animeId: number; animeTitle: string }) => {
-    const raw = await AsyncStorage.getItem("fav-characters");
-    const arr = raw ? (JSON.parse(raw) as any[]) : [];
-    const exists = arr.findIndex(c => c.id === char.id);
-    let updated: any[];
-    if (exists >= 0) {
-      updated = arr.filter((_: any, i: number) => i !== exists);
-      setFavCharIds(prev => { const next = new Set(prev); next.delete(char.id); return next; });
-    } else {
-      updated = [char, ...arr];
-      setFavCharIds(prev => new Set([...prev, char.id]));
-    }
-    await AsyncStorage.setItem("fav-characters", JSON.stringify(updated));
-    
+    let arr: any[] = [];
+    try {
+      const raw = await AsyncStorage.getItem("fav-characters");
+      const parsed = raw ? JSON.parse(raw) : [];
+      arr = Array.isArray(parsed) ? parsed : [];
+    } catch { arr = []; }
+    const exists = arr.some(c => c?.id === char.id);
+    const updated = exists ? arr.filter(c => c?.id !== char.id) : [char, ...arr];
+    setFavCharIds(new Set(updated.map(c => c.id)));
+    try { await AsyncStorage.setItem("fav-characters", JSON.stringify(updated)); } catch {}
   }, []);
 
   useEffect(() => {
@@ -253,25 +250,29 @@ export default function AnimeDetailScreen() {
         setCountdown(a.nextAiringEpisode.timeUntilAiring);
       }
       if (a?.description) {
+        setDescLoading(true);
         const cacheKey = `desc-ar-${id}`;
         AsyncStorage.getItem(cacheKey).then(cached => {
           if (controller.signal.aborted) return;
-          if (cached) { setDescAr(cached); return; }
+          if (cached && /[\u0600-\u06FF]/.test(cached)) { setDescAr(cached); setDescLoading(false); return; }
           const stripped = stripHtml(a.description).substring(0, 500);
-          fetch(`${getBaseUrl()}/api/anime/translate?text=${encodeURIComponent(stripped)}`, { signal: controller.signal })
+          fetch(`${getBaseUrl()}/api/anime/translate?text=${encodeURIComponent(stripped)}&from=en&to=ar&kind=synopsis`, { signal: controller.signal })
             .then(r2 => r2.json()).then(d2 => {
               if (controller.signal.aborted) return;
               const t = d2.translated;
-              if (t && t !== stripped && t.length > 10) {
+              if (t && /[\u0600-\u06FF]/.test(t) && t.length > 10) {
                 setDescAr(t);
                 AsyncStorage.setItem(cacheKey, t);
-              } else {
-                setDescAr(stripped);
               }
-            }).catch((e) => { if (e?.name !== "AbortError" && !controller.signal.aborted) setDescAr(stripped); });
+              setDescLoading(false);
+            }).catch((e) => {
+              if (e?.name !== "AbortError" && !controller.signal.aborted) setDescLoading(false);
+            });
         });
+      } else {
+        setDescLoading(false);
       }
-    }).catch(() => { if (isMountedRef.current) setLoadError(true); })
+    }).catch(() => { if (isMountedRef.current) { setDescLoading(false); setLoadError(true); } })
       .finally(() => { clearTimeout(timeoutId); if (isMountedRef.current) setLoading(false); });
 
     AsyncStorage.getItem(`my-rating-${id}`).then(v => { if (isMountedRef.current && v) setMyRating(parseInt(v)); });
@@ -361,7 +362,7 @@ export default function AnimeDetailScreen() {
     </View>
   );
 
-  const desc = descAr || stripHtml(anime.description);
+  const desc = descAr || (descLoading ? "جارٍ تجهيز ترجمة عربية احترافية للقصة…" : "لا تتوفر ترجمة عربية للقصة حالياً");
   const mainChars = (anime.characters?.edges || []).filter((e: any) => e.role === "MAIN");
   const suppChars = (anime.characters?.edges || []).filter((e: any) => e.role === "SUPPORTING");
   const related = anime.relations?.edges || [];
@@ -878,7 +879,7 @@ const d = StyleSheet.create({
   charImgWrap: { width: (W - 32 - 60) / 5, aspectRatio: 0.7, borderRadius: 10, overflow: "hidden", borderWidth: 1, borderColor: "rgba(255,255,255,0.08)", backgroundColor: "#1C1C22", position: "relative" },
   charImgMain: { borderColor: "rgba(139,92,246,0.4)", borderWidth: 2 },
   charImg: { width: "100%", height: "100%" },
-  charHeartBtn: { position: "absolute", bottom: 4, right: 4, backgroundColor: "rgba(0,0,0,0.65)", borderRadius: 10, padding: 4, zIndex: 2, borderWidth: 1.5, borderColor: "rgba(255,255,255,0.35)" },
+  charHeartBtn: { position: "absolute", bottom: 4, right: 4, backgroundColor: "rgba(0,0,0,0.65)", borderRadius: 10, padding: 5, zIndex: 20, elevation: 8, borderWidth: 1.5, borderColor: "rgba(255,255,255,0.35)" },
   charHeartBtnActive: { backgroundColor: "rgba(244,63,94,0.85)", borderColor: "#f43f5e" },
   charName: { fontSize: 8, color: "rgba(255,255,255,0.6)", fontFamily: "Cairo_400Regular", textAlign: "center", lineHeight: 12 },
   emptyTabText: { textAlign: "center", color: "rgba(255,255,255,0.2)", fontSize: 12, fontFamily: "Cairo_400Regular", paddingVertical: 20 },

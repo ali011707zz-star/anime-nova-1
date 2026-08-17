@@ -18,7 +18,7 @@ const DEFAULT_CONFIG = {
     animepahe:    true,
     animewitcher: true,
     animekai:      true,
-    anivexa_re:    true,
+    anivexa_re:    false,
     seepanel:     true,
     arabseed:     true,
     animephoenix: true,
@@ -29,7 +29,13 @@ const DEFAULT_CONFIG = {
     vyla:         true,
     aflaam:       true,
     stardima:     true,
+    consumet_gogo: true,
+    consumet_world: true,
+    consumet_reanime: false,
+    consumet_miruro: true,
+    consumet_saturn: true,
     consumet_anikoto: true,
+    anivexa_anibd: true,
   },
   announcements: [] as {
     id: string;

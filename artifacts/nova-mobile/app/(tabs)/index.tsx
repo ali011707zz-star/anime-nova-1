@@ -71,16 +71,15 @@ export default function HomeScreen() {
     queryFn: () => anilistQuery<{ Page: { media: AnilistMedia[] } }>(MOVIES_QUERY),
   });
 
-  /* أحدث الحلقات — مباشرةً من كتالوج anslayer نفسه (نفس مصدر تطبيق الويب تماماً،
-     بدلاً من جدول بث AniList) لضمان تطابق الحلقات المعروضة بين الويب والموبايل. */
+  /* أحدث الحلقات — من قاعدة AnimeWitcher، بعيداً عن مصدر العرض العام. */
   type TodayEp = { animeId: number; name: string; episode: number; cover: string; year?: string };
   const [todayEps, setTodayEps] = useState<TodayEp[]>([]);
   useEffect(() => {
     const ctrl = new AbortController();
-    fetch(`${getBaseUrl()}/api/anime/anslayer-latest`, { signal: ctrl.signal })
+    fetch(`${getBaseUrl()}/api/anime/aw-latest`, { signal: ctrl.signal })
       .then(r => r.json())
       .then((d: { items?: TodayEp[] }) => { if (!ctrl.signal.aborted) setTodayEps(d.items || []); })
-      .catch((e) => { if (e?.name !== "AbortError") console.warn("[Home] anslayer-latest fetch error"); });
+      .catch((e) => { if (e?.name !== "AbortError") console.warn("[Home] aw-latest fetch error"); });
     return () => ctrl.abort();
   }, []);
 
@@ -204,7 +203,7 @@ export default function HomeScreen() {
           </View>
         )}
 
-        {/* أحدث الحلقات — نفس مصدر anslayer المستخدم على الويب */}
+        {/* أحدث الحلقات — AnimeWitcher */}
         {todayEps.length > 0 && (
           <View style={{ marginTop: 24 }}>
             <View style={styles.sectionHeader}>
@@ -225,7 +224,7 @@ export default function HomeScreen() {
               contentContainerStyle={{ paddingHorizontal: 16, gap: 10 }}
               renderItem={({ item: ep }) => (
                 <Pressable
-                  onPress={() => router.push(`/watch?anime=0&ep=${ep.episode}&title=${encodeURIComponent(ep.name || "")}&english=${encodeURIComponent(ep.name || "")}&cover=${encodeURIComponent(ep.cover || "")}&site=anslayer&anslayerId=${ep.animeId}&single=1` as any)}
+                  onPress={() => router.push(`/watch?anime=${ep.animeId}&ep=${ep.episode}&title=${encodeURIComponent(ep.name || "")}&english=${encodeURIComponent(ep.name || "")}&cover=${encodeURIComponent(ep.cover || "")}&site=animewitcher&single=1` as any)}
                   style={[todayEpStyles.card, { backgroundColor: colors.card, borderColor: colors.border }]}
                 >
                   {ep.cover ? (
