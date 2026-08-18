@@ -2,6 +2,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as SecureStore from "expo-secure-store";
 import { Platform } from "react-native";
 import { getBaseUrl } from "./baseUrl";
+import { getRuntimeIntegrity } from "./runtimeIntegrity";
 
 const TOKEN_KEY = "nova_anon_token";
 const TOKEN_EXP_KEY = "nova_anon_token_exp";
@@ -94,6 +95,9 @@ async function fetchFreshToken(): Promise<string | null> {
 }
 
 export async function getAuthToken(): Promise<string | null> {
+  if (!getRuntimeIntegrity().trusted) {
+    throw new Error("Untrusted runtime");
+  }
   if (_cachedToken && Date.now() / 1000 < _cachedExp - 60) return _cachedToken;
   const stored = await getStoredToken();
   if (stored) { _cachedToken = stored; return stored; }
@@ -125,6 +129,9 @@ export async function secureFetch(
   url: string,
   options: RequestInit = {}
 ): Promise<Response> {
+  if (!getRuntimeIntegrity().trusted) {
+    throw new Error("Untrusted runtime");
+  }
   const [token, userToken] = await Promise.all([getAuthToken(), secureGet(USER_TOKEN_KEY)]);
   const buildHeaders = (tok: string | null): Record<string, string> => {
     const h: Record<string, string> = {
@@ -159,6 +166,9 @@ export async function secureStreamFetch(
   url: string,
   options: RequestInit = {}
 ): Promise<Response> {
+  if (!getRuntimeIntegrity().trusted) {
+    throw new Error("Untrusted runtime");
+  }
   const token = await getAuthToken();
   const { fetch: expoFetch } = await import("expo/fetch");
   const headers: Record<string, string> = {

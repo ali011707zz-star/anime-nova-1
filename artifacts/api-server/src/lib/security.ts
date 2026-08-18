@@ -7,17 +7,35 @@ import {
 } from "crypto";
 
 // ── مفتاح السر (APP_SECRET env var) ──────────────────────────────────────────
+// لا يوجد fallback ثابت في الإنتاج. أي fallback ثابت يمكن استخراجه من الكود
+// واستخدامه لتوقيع توكنات وروابط بروكسي مزورة.
 const DEFAULT_SECRET = "anime-nova-default-change-me-aabbccdd";
+let devSecret: Buffer | null = null;
 
 function getSecret(): Buffer {
-  const raw = process.env.APP_SECRET || DEFAULT_SECRET;
-  if (raw === DEFAULT_SECRET) {
-    console.warn(
-      "[security] ⚠️ APP_SECRET يستخدم القيمة الافتراضية — خطر أمني! " +
-      "أضف APP_SECRET كـ environment variable بقيمة عشوائية طويلة."
-    );
+  const raw = process.env.APP_SECRET?.trim();
+  if (!raw || raw === DEFAULT_SECRET) {
+    if (process.env.NODE_ENV === "production") {
+      throw new Error("[security] APP_SECRET must be configured in production");
+    }
+    // التطوير المحلي لا يحتاج سراً ثابتاً، ولا ينبغي أن نضع واحداً في المصدر.
+    devSecret ??= randomBytes(32);
+    return devSecret;
   }
   return Buffer.from(raw.padEnd(32, "0").slice(0, 32));
+}
+
+/** Fail closed before serving requests when the production signing key is missing. */
+export function assertSecurityConfig(): void {
+  const raw = process.env.APP_SECRET?.trim();
+  if (
+    process.env.NODE_ENV === "production" &&
+    (!raw || raw === DEFAULT_SECRET || raw.length < 32)
+  ) {
+    throw new Error(
+      "[security] APP_SECRET is missing or too short; refusing to start in production",
+    );
+  }
 }
 
 // تحقق من مطابقة APP_SECRET (يُستخدم في مسارات الأدمن)
@@ -62,8 +80,19 @@ export function validateAnonToken(token: string): boolean {
   if (parts.length !== 3) return false;
   const [iat, exp, sig] = parts;
   try {
+    const iatNum = Number(iat);
     const expNum = parseInt(exp, 10);
-    if (isNaN(expNum) || Date.now() / 1000 > expNum) return false;
+    const now = Math.floor(Date.now() / 1000);
+    if (
+      !Number.isSafeInteger(iatNum) ||
+      !Number.isSafeInteger(expNum) ||
+      iatNum > now + 30 ||
+      expNum <= iatNum ||
+      expNum - iatNum > TOKEN_TTL ||
+      now > expNum
+    ) {
+      return false;
+    }
     const payload = `${iat}.${exp}`;
     const expectedSig = createHmac("sha256", getSecret())
       .update(payload)
@@ -95,7 +124,8 @@ export function getUserIdFromToken(token: string | undefined): string | null {
   if (parts.length !== 5 || parts[0] !== "user") return null;
   const [, userId, iat, exp, sig] = parts;
   if (!userId || userId.includes(".") || !/^\d+$/.test(iat) || !/^\d+$/.test(exp)) return null;
-  if (Date.now() / 1000 > Number(exp)) return null;
+  const now = Math.floor(Date.now() / 1000);
+  if (Number(iat) > now + 30 || Number(exp) <= Number(iat) || now > Number(exp)) return null;
   const payload = `user.${userId}.${iat}.${exp}`;
   const expected = createHmac("sha256", getSecret()).update(payload).digest("base64url");
   try {
@@ -114,35 +144,56 @@ export function getMobileUserId(req: { headers: Record<string, string | string[]
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// 2. تشفير/فك تشفير قيم URL (AES-256-CBC + IV عشوائي)
-//    المخرج: سلسلة hex-safe لا تحتاج encodeURIComponent
+// 2. تشفير/فك تشفير قيم URL
+//    g2 = AES-256-GCM (سرية + تحقق من سلامة القيمة)
+//    الصيغة: g2:<iv hex>.<tag hex>.<ciphertext hex>
+//    تُقبل الصيغة hex القديمة للروابط المخزنة مسبقاً فقط أثناء الانتقال.
 // ═══════════════════════════════════════════════════════════════════════════════
+const GCM_PREFIX = "g2:";
+const GCM_AAD = Buffer.from("anime-nova-proxy-v2", "utf8");
+
 export function encryptParam(plain: string): string {
-  try {
-    const iv = randomBytes(16);
-    const cipher = createCipheriv("aes-256-cbc", getSecret(), iv);
-    const enc = Buffer.concat([cipher.update(plain, "utf8"), cipher.final()]);
-    return iv.toString("hex") + enc.toString("hex");
-  } catch {
-    return encodeURIComponent(plain);
-  }
+  const iv = randomBytes(12);
+  const cipher = createCipheriv("aes-256-gcm", getSecret(), iv);
+  cipher.setAAD(GCM_AAD);
+  const enc = Buffer.concat([cipher.update(plain, "utf8"), cipher.final()]);
+  const tag = cipher.getAuthTag();
+  return `${GCM_PREFIX}${iv.toString("hex")}.${tag.toString("hex")}.${enc.toString("hex")}`;
 }
 
 export function decryptParam(enc: string): string {
-  try {
+  if (enc.startsWith(GCM_PREFIX)) {
+    const parts = enc.slice(GCM_PREFIX.length).split(".");
+    if (parts.length !== 3) throw new Error("invalid encrypted parameter");
+    const [ivHex, tagHex, dataHex] = parts;
+    const iv = Buffer.from(ivHex, "hex");
+    const tag = Buffer.from(tagHex, "hex");
+    const data = Buffer.from(dataHex, "hex");
+    if (iv.length !== 12 || tag.length !== 16 || data.length === 0) {
+      throw new Error("invalid encrypted parameter");
+    }
+    const decipher = createDecipheriv("aes-256-gcm", getSecret(), iv);
+    decipher.setAAD(GCM_AAD);
+    decipher.setAuthTag(tag);
+    return Buffer.concat([decipher.update(data), decipher.final()]).toString("utf8");
+  }
+
+  // Legacy AES-CBC values remain readable so cached source rows do not all
+  // break at once. New values are always GCM and therefore authenticated.
+  if (/^[0-9a-f]{64,}$/i.test(enc)) {
     const iv = Buffer.from(enc.slice(0, 32), "hex");
     const data = Buffer.from(enc.slice(32), "hex");
+    if (iv.length !== 16 || data.length === 0) throw new Error("invalid encrypted parameter");
     const decipher = createDecipheriv("aes-256-cbc", getSecret(), iv);
     return Buffer.concat([decipher.update(data), decipher.final()]).toString("utf8");
-  } catch {
-    return enc;
   }
+  throw new Error("invalid encrypted parameter");
 }
 
 // هل القيمة مُشفَّرة بـ encryptParam؟ (hex خالص ≥ 64 حرف، لا تبدأ بـ http أو /)
 export function isEncrypted(s: string): boolean {
   if (!s || s.startsWith("http") || s.startsWith("/") || s.startsWith("%")) return false;
-  return /^[0-9a-f]{64,}$/.test(s);
+  return s.startsWith(GCM_PREFIX) || /^[0-9a-f]{64,}$/i.test(s);
 }
 
 // تشفير params في روابط الـ proxy الداخلية

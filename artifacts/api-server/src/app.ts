@@ -19,17 +19,19 @@ import { setupSession, registerEmailAuthRoutes, registerGoogleAuthRoutes, regist
 import sitemapRouter from "./routes/sitemap.js";
 import crashReportRouter from "./routes/crashReport.js";
 import hlsProxyRouter from "./routes/hlsProxy.js";
-import { validateAnonToken, checkRateLimit } from "./lib/security.js";
+import { validateAnonToken, checkRateLimit, assertSecurityConfig } from "./lib/security.js";
 
 // ── المسارات التي تتطلب توكن صالح ──
 const PROTECTED_PATHS = [
   "/api/anime/fetch-source",
   "/api/anime/download-mp4",
+  "/api/animation/sources-stream",
 ];
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 export async function createApp(): Promise<Express> {
+  assertSecurityConfig();
   const app: Express = express();
 
   // ثق بـ Nginx كـ reverse proxy (لقراءة X-Forwarded-For بأمان)
@@ -57,6 +59,9 @@ export async function createApp(): Promise<Express> {
     res.setHeader("X-XSS-Protection", "1; mode=block");
     res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
     res.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
+    if (process.env.NODE_ENV === "production") {
+      res.setHeader("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
+    }
     next();
   });
 
@@ -64,7 +69,9 @@ export async function createApp(): Promise<Express> {
   const ALLOWED_ORIGINS = new Set([
     process.env.FRONTEND_ORIGIN || "",
     process.env.APP_DOMAIN ? `https://${process.env.APP_DOMAIN}` : "",
-    process.env.APP_DOMAIN ? `http://${process.env.APP_DOMAIN}` : "",
+    process.env.NODE_ENV !== "production" && process.env.APP_DOMAIN
+      ? `http://${process.env.APP_DOMAIN}`
+      : "",
     // Replit dev domains
     process.env.REPLIT_DEV_DOMAIN ? `https://${process.env.REPLIT_DEV_DOMAIN}` : "",
     ...(process.env.REPLIT_DOMAINS?.split(",").map(d => `https://${d.trim()}`) ?? []),
@@ -75,16 +82,17 @@ export async function createApp(): Promise<Express> {
       // السماح للطلبات بدون origin (mobile apps, curl, server-to-server)
       if (!origin) return cb(null, true);
       if (ALLOWED_ORIGINS.has(origin)) return cb(null, true);
-      // السماح لـ Replit domains (*.replit.dev, *.repl.co, *.replit.app)
-      if (origin.endsWith(".replit.dev") || origin.endsWith(".repl.co") || origin.endsWith(".replit.app")) {
+      // Development-only origins. Never keep these wildcards in production.
+      if (process.env.NODE_ENV !== "production") {
+        if (origin.endsWith(".replit.dev") || origin.endsWith(".repl.co") || origin.endsWith(".replit.app")) {
+          return cb(null, true);
+        }
+        if (origin.includes("localhost") || origin.includes("127.0.0.1")) return cb(null, true);
+      }
+      // Exact origin used by the mobile OAuth WebView.
+      if (origin === "https://nova-player.local" || origin === "http://nova-player.local") {
         return cb(null, true);
       }
-      // السماح لـ DuckDNS (VPS self-hosted — animenovaa.duckdns.org وما شابهه)
-      if (/^https?:\/\/[a-zA-Z0-9-]+\.duckdns\.org$/.test(origin)) return cb(null, true);
-      // في التطوير: اسمح بأي localhost
-      if (origin.includes("localhost") || origin.includes("127.0.0.1")) return cb(null, true);
-      // السماح لـ nova-player.local (Expo mobile OAuth WebViews)
-      if (origin.includes("nova-player.local") || origin.endsWith(".local")) return cb(null, true);
       cb(new Error(`CORS: ${origin} غير مسموح`));
     },
     credentials: true,

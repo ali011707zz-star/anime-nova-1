@@ -10,7 +10,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Stack } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import React, { useEffect, useState } from "react";
-import { I18nManager, Platform } from "react-native";
+import { I18nManager, Platform, StyleSheet, Text, View } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import * as Sentry from "@sentry/react-native";
@@ -18,12 +18,14 @@ import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { AppProvider } from "@/context/AppContext";
 import { loadRuntimeApiUrl } from "@/utils/baseUrl";
 import { installGlobalCrashHandlers } from "@/utils/crashLogger";
+import { getRuntimeIntegrity, runtimeIntegrityMessage } from "@/utils/runtimeIntegrity";
 
 /* Sentry: يلتقط أعطال JS *و* الأعطال الأصلية (native) — مثل كراش مشغّل الفيديو
    الذي كان يُغلق التطبيق فوراً دون أن يترك أي أثر في نظام تسجيل الأعطال القديم
    (كان يمسك JS فقط). يجب استدعاء init() قبل أي كود آخر قدر الإمكان. */
 const SENTRY_DSN = process.env.EXPO_PUBLIC_SENTRY_DSN;
-if (SENTRY_DSN) {
+const RUNTIME_INTEGRITY = getRuntimeIntegrity();
+if (SENTRY_DSN && RUNTIME_INTEGRITY.trusted) {
   Sentry.init({
     dsn: SENTRY_DSN,
     enableNative: true,
@@ -35,13 +37,19 @@ if (SENTRY_DSN) {
 }
 
 // تحميل عنوان API المخصص من AsyncStorage قبل أي طلب شبكي
-loadRuntimeApiUrl().catch(() => {});
+if (RUNTIME_INTEGRITY.trusted) {
+  loadRuntimeApiUrl().catch(() => {});
+}
 
 // تثبيت معالجات الأعطال العالمية — فوراً عند بدء التشغيل
-installGlobalCrashHandlers();
+if (RUNTIME_INTEGRITY.trusted) {
+  installGlobalCrashHandlers();
+}
 
 // استعادة التنزيلات التي انقطعت بسبب إغلاق التطبيق — تُعرض بحالة خطأ للمستخدم
-import("@/utils/downloadManager").then(m => m.restoreInterruptedDownloads()).catch(() => {});
+if (RUNTIME_INTEGRITY.trusted) {
+  import("@/utils/downloadManager").then(m => m.restoreInterruptedDownloads()).catch(() => {});
+}
 
 SplashScreen.preventAutoHideAsync().catch(() => {});
 
@@ -118,6 +126,17 @@ function RootLayout() {
 
   if (!fontsLoaded && !fontError && !forceShow) return null;
 
+  if (!RUNTIME_INTEGRITY.trusted) {
+    return (
+      <View style={styles.blockedScreen}>
+        <Text style={styles.blockedTitle}>تم إيقاف التشغيل</Text>
+        <Text style={styles.blockedMessage}>
+          {runtimeIntegrityMessage(RUNTIME_INTEGRITY.reason)}
+        </Text>
+      </View>
+    );
+  }
+
   return (
     <SafeAreaProvider>
       <ErrorBoundary>
@@ -132,6 +151,28 @@ function RootLayout() {
     </SafeAreaProvider>
   );
 }
+
+const styles = StyleSheet.create({
+  blockedScreen: {
+    flex: 1,
+    backgroundColor: "#09090B",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 28,
+  },
+  blockedTitle: {
+    color: "#F4F4F5",
+    fontSize: 22,
+    fontWeight: "800",
+    marginBottom: 12,
+  },
+  blockedMessage: {
+    color: "#A1A1AA",
+    fontSize: 15,
+    lineHeight: 24,
+    textAlign: "center",
+  },
+});
 
 /* Sentry.wrap: يضيف مراقبة تلقائية للتنقّل بين الشاشات وأداء الإقلاع،
    ولا يعمل شيء إضافياً إذا لم يُستدعَ Sentry.init() أعلاه (بلا DSN). */

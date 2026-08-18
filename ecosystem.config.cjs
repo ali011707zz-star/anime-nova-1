@@ -93,7 +93,7 @@ module.exports = {
       cwd: '/opt/anime-nova',
       restart_delay: 5000,
       env: {
-        API_PASSWORD:                       'nova_mf_2026',
+         API_PASSWORD:                       _e("MEDIAFLOW_API_PASSWORD"),
         HOST:                               '127.0.0.1',
         PORT:                               '8888',
         PROXY_URL:                          'http://127.0.0.1:8890',

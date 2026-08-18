@@ -4,7 +4,7 @@
  */
 
 const ORKESTR_URL    = "https://animenovaa.duckdns.org";
-const RELAY_SECRET   = process.env.APP_SECRET || "anime-nova-default-change-me-aabbccdd";
+const RELAY_SECRET   = process.env.APP_SECRET || "";
 const POLL_INTERVAL  = 60_000;          // كل دقيقة
 const LOOKBACK_MS    = 12 * 60_000;     // آخر 12 دقيقة (ضعف الـ interval للأمان)
 
@@ -30,7 +30,7 @@ async function sendTelegramMsg(token: string, chatId: string, text: string) {
 async function pollOrkestrReports() {
   const botToken = process.env.TELEGRAM_BOT_TOKEN;
   const chatId   = process.env.TELEGRAM_CHAT_ID;
-  if (!botToken || !chatId) return;
+  if (!botToken || !chatId || !RELAY_SECRET) return;
 
   try {
     const since = new Date(_lastPoll).toISOString();

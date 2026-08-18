@@ -34,7 +34,7 @@
       },
       "package": "com.nova.anime",
       "backgroundColor": "#09090B",
-      "usesCleartextTraffic": true,
+      "usesCleartextTraffic": false,
       "permissions": [
         "android.permission.MODIFY_AUDIO_SETTINGS",
         "android.permission.WRITE_EXTERNAL_STORAGE",
