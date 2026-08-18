@@ -288,6 +288,7 @@ const KAWAII_MOBILE_CDN_HOSTS = new Set([
   "cdn.momentoai.dev",
   "video.kawaii-anime.com",
   "cdn.mewstream.buzz",
+  "cdn.watching.onl",
 ]);
 
 function isKawaiiMobileCdnHost(hostname: string): boolean {
@@ -691,17 +692,14 @@ export default function WatchScreen() {
   const {
     anime, ep, title, english, format, etitle,
     totalEps: totalEpsParam, year, episodes, native, titleAr,
-    titles: titlesParam, site: singleSiteParam, anslayerId, single,
+    titles: titlesParam, anslayerId,
   } = useLocalSearchParams<{
     anime: string; ep: string; title: string; english: string;
     format?: string; etitle?: string; totalEps?: string;
     year?: string; episodes?: string; native?: string; titleAr?: string;
     titles?: string;
-    site?: string; anslayerId?: string; single?: string;
+    anslayerId?: string;
   }>();
-  /* single=1 → آتٍ من قسم "أحدث الحلقات" (مصدر anslayer مباشرةً بمعرّفه الخاص من
-     كتالوجه) — يطابق نظام الويب: يجب ألا يُجلب أي مصدر آخر سوى anslayer نفسه. */
-  const singleSite = single === "1" && singleSiteParam ? singleSiteParam : null;
   const insets   = useSafeAreaInsets();
   const router   = useRouter();
   const { addToHistory } = useApp();
@@ -859,7 +857,7 @@ export default function WatchScreen() {
     params.set("mode", "check");
 
     const allowedSites = new Set(
-      (singleSite ? [singleSite] : Q_KEYS.flatMap(q => STATIC_PICKER[q].map(s => s.site))),
+      Q_KEYS.flatMap(q => STATIC_PICKER[q].map(s => s.site)),
     );
     let cancelled = false;
 
@@ -924,7 +922,7 @@ export default function WatchScreen() {
       controller.abort();
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [anime, epNum, titleStr, englishStr, titleArStr, format, year, episodes, native, anslayerId, singleSite, availabilityAttempt]);
+  }, [anime, epNum, titleStr, englishStr, titleArStr, format, year, episodes, native, anslayerId, availabilityAttempt]);
 
   /* ── Orientation lock ── */
   useEffect(() => {
@@ -957,13 +955,10 @@ export default function WatchScreen() {
     setScreen("picker");
     const coverParam = coverUrl ? `&cover=${encodeURIComponent(coverUrl)}` : "";
     const arParam    = titleArStr ? `&titleAr=${encodeURIComponent(titleArStr)}` : "";
-    const latestParams = [
-      anslayerId ? `&anslayerId=${encodeURIComponent(anslayerId)}` : "",
-      singleSite ? `&single=1&site=${encodeURIComponent(singleSite)}` : "",
-    ].join("");
-    router.replace(`/watch?anime=${anime}&ep=${n}&title=${encodeURIComponent(titleStr)}&english=${encodeURIComponent(englishStr)}&format=${encodeURIComponent(format || "")}${coverParam}${arParam}${latestParams}`);
+    const anslayerParam = anslayerId ? `&anslayerId=${encodeURIComponent(anslayerId)}` : "";
+    router.replace(`/watch?anime=${anime}&ep=${n}&title=${encodeURIComponent(titleStr)}&english=${encodeURIComponent(englishStr)}&format=${encodeURIComponent(format || "")}${coverParam}${arParam}${anslayerParam}`);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [saveProgress, coverUrl, titleArStr, router, anime, titleStr, englishStr, format, singleSite, anslayerId]);
+  }, [saveProgress, coverUrl, titleArStr, router, anime, titleStr, englishStr, format, anslayerId]);
 
   /* ── إعادة تعيين حالة المصادر (زر تحديث) — مسح الأخطاء للسماح بالمحاولة مجدداً ── */
   function refreshAllSources() {
@@ -1404,35 +1399,27 @@ export default function WatchScreen() {
     fetchedSitesRef.current.clear();
     ScreenOrientation.unlockAsync().catch(() => {});
 
-    if (singleSite !== null) {
-      router.replace("/(tabs)" as any);
-      return;
-    }
     if (router.canGoBack()) router.back();
     else router.replace(`/episodes/${anime}` as any);
-  }, [saveProgress, singleSite, router, anime]);
+  }, [saveProgress, router, anime]);
 
   /* ── Handle back ── */
   const handleBack = useCallback(() => {
-    /* في أحدث الحلقات: الخروج من المشغل يخرج من المسار بالكامل،
-       أما الحلقات العادية فترجع أولاً إلى منتقي السيرفرات. */
-    if (singleSite === null && (screen === "native" || screen === "embed")) {
+    /* الخروج من المشغل يرجع أولاً إلى منتقي المصادر حتى لو دخل المستخدم
+       من بطاقة أحدث الحلقات. */
+    if (screen === "native" || screen === "embed") {
       saveProgress();
       setScreen("picker");
       return;
     }
     leaveWatch();
-  }, [screen, singleSite, saveProgress, leaveWatch]);
+  }, [screen, saveProgress, leaveWatch]);
 
   /* ── Memoized RiftPlayer callbacks — يمنع إعادة render المشغّل عند كل تغيير في الـ parent ── */
   const onRiftBack = useCallback(() => {
-    if (singleSite !== null) {
-      leaveWatch();
-      return;
-    }
     saveProgress();
     setScreen("picker");
-  }, [singleSite, leaveWatch, saveProgress]);
+  }, [saveProgress]);
 
   const onRiftError = useCallback(() => {
     console.warn("[Anime Watch] جميع المصادر فشلت — العودة للـ picker");
@@ -1699,10 +1686,10 @@ export default function WatchScreen() {
             <Text style={d.epNavText}>السابقة</Text>
           </Pressable>
           <Pressable
-            disabled={singleSite !== null || (totalEpsCount !== undefined && epNum >= totalEpsCount)}
+            disabled={totalEpsCount !== undefined && epNum >= totalEpsCount}
             onPress={() => goEp(epNum + 1)}
             style={[d.epNavBtn, { borderColor: "rgba(139,92,246,0.35)", backgroundColor: "rgba(139,92,246,0.10)" },
-              (singleSite !== null || (totalEpsCount !== undefined && epNum >= totalEpsCount)) && { opacity: 0.22 }]}>
+              (totalEpsCount !== undefined && epNum >= totalEpsCount) && { opacity: 0.22 }]}>
             <Text style={[d.epNavText, { color: "#c4b5fd" }]}>التالية</Text>
             <Ionicons name="chevron-back" size={12} color="rgba(196,181,253,0.9)" />
           </Pressable>
@@ -1774,12 +1761,10 @@ export default function WatchScreen() {
 
          {/* لا تظهر أي بطاقة أثناء الفحص. هذا هو الفاصل المرئي بين مرحلة
              availability في الويب ومرحلة منتقي المصادر. */}
-            {availabilityDone && (singleSite === "anslayer" ? (["1080p", "720p"] as QualityKey[]) : Q_KEYS).map(qk => {
-           const pickerDefs = singleSite === "anslayer"
-             ? (ANSLAYER_PICKER[qk] || [])
-             : (STATIC_PICKER[qk] || []);
+             {availabilityDone && Q_KEYS.map(qk => {
+            const pickerDefs = STATIC_PICKER[qk] || [];
            const dynamicSlots = Object.entries(availableSlots)
-            .filter(([site, tiers]) => !!tiers[qk] && (!singleSite || site === singleSite))
+             .filter(([, tiers]) => !!tiers[qk])
              .map(([site, tiers]) => {
                const pickerDef = pickerDefs.find(def => def.site === site);
                return {

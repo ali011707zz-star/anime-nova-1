@@ -5976,6 +5976,9 @@ const KAWAII_CDN_HOSTS = new Set([
   "cdn.momentoai.dev",
   "video.kawaii-anime.com",
   "cdn.mewstream.buzz",
+  // Kawaii currently serves some episodes through its rotating Watching CDN.
+  // The URL is still signed and is returned by the trusted Kawaii API.
+  "cdn.watching.onl",
 ]);
 
 function kawaiiQualityRank(value: unknown): number {
