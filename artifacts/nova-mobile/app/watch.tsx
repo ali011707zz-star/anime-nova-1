@@ -738,8 +738,8 @@ export default function WatchScreen() {
     setScreen("picker");
     const coverParam = coverUrl ? `&cover=${encodeURIComponent(coverUrl)}` : "";
     const arParam    = titleArStr ? `&titleAr=${encodeURIComponent(titleArStr)}` : "";
-    const latestParams = singleSite === "anslayer"
-      ? `&site=anslayer&single=1${anslayerId ? `&anslayerId=${encodeURIComponent(anslayerId)}` : ""}`
+    const latestParams = anslayerId
+      ? `&anslayerId=${encodeURIComponent(anslayerId)}`
       : "";
     router.replace(`/watch?anime=${anime}&ep=${n}&title=${encodeURIComponent(titleStr)}&english=${encodeURIComponent(englishStr)}&format=${encodeURIComponent(format || "")}${coverParam}${arParam}${latestParams}`);
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1486,7 +1486,8 @@ export default function WatchScreen() {
                 />
               </View>
               <SpinRing size={24} />
-              <Text style={d.availabilityText}>جاري التحقق من المصادر المتاحة…</Text>
+              <Text style={d.availabilityHeadline}>سوكونا يقاتل غوجو بجهد من اجل السيرفرات</Text>
+              <Text style={d.availabilityText}>يتم فحص جميع السيرفرات… ستظهر دفعة واحدة عند الجاهزية</Text>
             </View>
           )}
 
@@ -1506,8 +1507,9 @@ export default function WatchScreen() {
            </View>
          )}
 
-        {/* ── مجموعات الجودة — نمط الويب ── */}
-        {(singleSite === "anslayer" ? (["1080p", "720p"] as QualityKey[]) : Q_KEYS).map(qk => {
+         {/* لا تظهر أي بطاقة أثناء الفحص. هذا هو الفاصل المرئي بين مرحلة
+             availability في الويب ومرحلة منتقي المصادر. */}
+         {availabilityDone && (singleSite === "anslayer" ? (["1080p", "720p"] as QualityKey[]) : Q_KEYS).map(qk => {
           const allSlots = singleSite === "anslayer"
             ? (ANSLAYER_PICKER[qk] || [])
             : singleSite
@@ -1617,7 +1619,7 @@ export default function WatchScreen() {
                       </View>
                     </Pressable>
                   );
-                })}
+         })}
               </View>
             </View>
           );
@@ -1670,6 +1672,7 @@ const d = StyleSheet.create({
   availabilityState: { alignItems: "center", justifyContent: "center", gap: 10, paddingVertical: 22 },
   availabilityGifWrap: { width: "100%", maxWidth: 330, height: 184, borderRadius: 22, overflow: "hidden", backgroundColor: "rgba(255,255,255,0.025)", marginBottom: 2 },
   availabilityGif: { width: "100%", height: "100%" },
+  availabilityHeadline: { fontSize: 15, fontFamily: "Cairo_800ExtraBold", color: "rgba(255,255,255,0.85)", textAlign: "center", lineHeight: 24 },
   availabilityText: { fontSize: 12, fontFamily: "Cairo_400Regular", color: "rgba(255,255,255,0.42)", textAlign: "center" },
   availabilityEmpty: { alignItems: "center", justifyContent: "center", gap: 10, paddingVertical: 42, paddingHorizontal: 18 },
   availabilityEmptyTitle: { fontSize: 14, fontFamily: "Cairo_700Bold", color: "rgba(255,255,255,0.62)", textAlign: "center" },
