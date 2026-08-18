@@ -278,10 +278,10 @@ export default function HomeScreen() {
               showsHorizontalScrollIndicator={false}
               contentContainerStyle={{ paddingHorizontal: 16, gap: 10 }}
               renderItem={({ item: ep }) => (
-                /* الكتالوج يأتي من AnimeSlayer، لكن المشاهدة تستخدم فحص
-                   المصادر العام حتى تظهر AW وباقي السيرفرات مثل الويب. */
+                /* يطابق الويب: بطاقة أحدث الحلقات تُشغّل AnimeSlayer فقط
+                   باستخدام معرّف الكتالوج المباشر، ولا تستبدل المصدر بصمت. */
                 <Pressable
-                  onPress={() => router.push(`/watch?anime=${ep.animeId}&ep=${ep.episode}&title=${encodeURIComponent(ep.romaji || ep.name || "")}&english=${encodeURIComponent(ep.english || "")}&native=${encodeURIComponent(ep.native || "")}&titles=${encodeURIComponent(JSON.stringify(ep.titleVariants || []))}&cover=${encodeURIComponent(ep.cover || "")}&titleAr=${encodeURIComponent(ep.titleAr || "")}&anslayerId=${ep.anslayerId}` as any)}
+                  onPress={() => router.push(`/watch?anime=${ep.animeId}&ep=${ep.episode}&title=${encodeURIComponent(ep.romaji || ep.name || "")}&english=${encodeURIComponent(ep.english || "")}&native=${encodeURIComponent(ep.native || "")}&titles=${encodeURIComponent(JSON.stringify(ep.titleVariants || []))}&cover=${encodeURIComponent(ep.cover || "")}&titleAr=${encodeURIComponent(ep.titleAr || "")}&anslayerId=${ep.anslayerId}&site=anslayer&single=1` as any)}
                   style={[todayEpStyles.card, { backgroundColor: colors.card, borderColor: colors.border }]}
                 >
                   {ep.cover ? (

@@ -13454,7 +13454,8 @@ router.get("/anime/fetch-source", async (req, res) => {
     const q = String(req.query.quality || '').trim().toLowerCase();
     if (q === '1080p' || q === 'fhd' || q === '1080') return '1080p' as const;
     if (q === '720p' || q === 'hd' || q === '720') return '720p' as const;
-    if (q === '360p' || q === '480p' || q === 'sd' || q === '360' || q === '480') return '360p' as const;
+    if (q === '480p' || q === '480') return '480p' as const;
+    if (q === '360p' || q === 'sd' || q === '360') return '360p' as const;
     return null;
   })();
   const filterRequestedQuality = <T extends { quality?: string; qualityRank?: number; name?: string; label?: string; url?: string; directUrl?: string }>(rows: T[]): T[] => {

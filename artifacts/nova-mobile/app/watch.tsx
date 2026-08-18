@@ -191,6 +191,9 @@ function isEmbedSrc(s: Src): boolean {
   // vidmoly و mega → عرض داخل WebView
   return url.includes("mega.nz") || url.includes("mega.co.nz") || url.includes("vidmoly");
 }
+function isMobilePlayable(s: Src): boolean {
+  return isDirectPlayable(s) || (Boolean(s.isEmbed) && isValidSourceUrl(getPlayUrl(s)));
+}
 function getPlayUrl(s: Src): string {
   /* Mobile responses may contain an encrypted directUrl plus an unencrypted
      /api/... URL in `url`. Prefer the readable proxy URL or the player receives
@@ -447,6 +450,10 @@ const Q_KEY_SUB: Record<QualityKey, string> = {
   "360p":  "دقة متوسطة",
 };
 
+function pickerSlotKey(site: string, quality: QualityKey): string {
+  return `${site}::${quality}`;
+}
+
 function ServerScanAnimation() {
   const pulse = useRef(new Animated.Value(0)).current;
 
@@ -489,16 +496,38 @@ function ServerScanAnimation() {
 /* React Native's Image component is not a reliable animated-GIF renderer on
    all Expo/Android builds.  A tiny WebView keeps the GIF animation smooth,
    matching the web loading screen, without showing the GIFDB page chrome. */
-const SERVER_SCAN_GIF =
-  "https://gifdb.com/images/branded/high/satoru-gojo-vs-ryomen-sukuna-gif-tt4cnmnevgpxt99u.gif";
+/* Keep the animated loading treatment used by the web. The requested Giphy
+   asset is primary; the existing GIFDB asset remains as a network fallback. */
+const SERVER_SCAN_GIFS = [
+  "https://media.giphy.com/media/unGpfM6wCE_2Kotc/giphy.gif",
+  "https://gifdb.com/images/branded/high/satoru-gojo-vs-ryomen-sukuna-gif-tt4cnmnevgpxt99u.gif",
+] as const;
 
 function ServerScanGif() {
+  const [gifIndex, setGifIndex] = useState(0);
   const [failed, setFailed] = useState(false);
-  const html = `<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1"></head><body><img src="${SERVER_SCAN_GIF}" alt="" /></body><style>html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#07070d}img{display:block;width:100%;height:100%;object-fit:cover}</style></html>`;
+  /* Availability SSE causes frequent parent renders. Keep the WebView
+     document stable so the GIF does not restart or disappear per event. */
+  const gifUrl = SERVER_SCAN_GIFS[gifIndex] || SERVER_SCAN_GIFS[0];
+  const html = useMemo(
+    () => `<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1"></head><body><img src="${gifUrl}" alt="" /></body><style>html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#07070d}img{display:block;width:100%;height:100%;object-fit:cover}</style></html>`,
+    [gifUrl],
+  );
+  const webViewSource = useMemo(
+    () => ({ html, baseUrl: "https://media.giphy.com/" }),
+    [html],
+  );
   if (failed) return <ServerScanAnimation />;
+  const handleGifFailure = () => {
+    if (gifIndex < SERVER_SCAN_GIFS.length - 1) {
+      setGifIndex((value) => value + 1);
+    } else {
+      setFailed(true);
+    }
+  };
   return (
     <WebView
-      source={{ html, baseUrl: "https://gifdb.com/gif/satoru-gojo-vs-ryomen-sukuna-gif-tt4cnmnevgpxt99u.html" }}
+      source={webViewSource}
       style={d.availabilityGif}
       originWhitelist={["*"]}
       javaScriptEnabled
@@ -509,7 +538,8 @@ function ServerScanGif() {
       showsHorizontalScrollIndicator={false}
       pointerEvents="none"
       accessible={false}
-      onError={() => setFailed(true)}
+      onError={handleGifFailure}
+      onHttpError={handleGifFailure}
     />
   );
 }
@@ -759,7 +789,7 @@ export default function WatchScreen() {
       const qk: QualityKey | null =
         quality === "1080p" ? "1080p" :
         quality === "720p" ? "720p" :
-        quality === "360p" || quality === "480p" ? "360p" : null;
+        quality === "360p" ? "360p" : null;
       if (!site || !qk || !allowedSites.has(site)) return;
       setAvailableSlots(prev => ({
         ...prev,
@@ -768,7 +798,7 @@ export default function WatchScreen() {
           [qk]: { serverCount: Math.max(1, Number(row.serverCount) || 1) },
         },
       }));
-      setSlotStatus(prev => ({ ...prev, [site]: "ready" }));
+      setSlotStatus(prev => ({ ...prev, [pickerSlotKey(site, qk)]: "ready" }));
     };
 
     const run = async () => {
@@ -930,14 +960,28 @@ export default function WatchScreen() {
     if (fetchedSitesRef.current.has(fetchKey)) {
       const cached = sources.filter(s => s.site === site);
       const preferred = preferredQuality
-        ? cached.find(s => getSrcQuality(s) === PICKER_QUALITY[preferredQuality] && isDirectPlayable(s))
+        ? cached.find(s => getSrcQuality(s) === PICKER_QUALITY[preferredQuality] && isMobilePlayable(s))
         : undefined;
-      const best = preferredQuality ? preferred : (cached.find(isDirectPlayable) ?? cached[0]);
+      const best = preferredQuality ? preferred : (cached.find(isMobilePlayable) ?? cached[0]);
       if (best) { playSrc(best); return; }
+      if (preferredQuality) {
+        setSlotStatus(prev => ({ ...prev, [pickerSlotKey(site, preferredQuality)]: "failed" }));
+        setAvailableSlots(prev => {
+          const next = { ...prev };
+          const siteSlots = { ...(next[site] || {}) };
+          delete siteSlots[preferredQuality];
+          if (Object.keys(siteSlots).length) next[site] = siteSlots;
+          else delete next[site];
+          return next;
+        });
+      }
+      return;
     }
 
     inFlightSitesRef.current.add(fetchKey);
-    setSlotStatus(prev => ({ ...prev, [site]: "fetching" }));
+    if (preferredQuality) {
+      setSlotStatus(prev => ({ ...prev, [pickerSlotKey(site, preferredQuality)]: "fetching" }));
+    }
 
     const base = getBaseUrl();
     const qs = new URLSearchParams({
@@ -966,7 +1010,12 @@ export default function WatchScreen() {
       if (!isMountedRef.current) return;
       const rawSrcs: Src[] = data.sources || [];
 
-      if (!rawSrcs.length) { setSlotStatus(prev => ({ ...prev, [site]: "failed" })); return; }
+      if (!rawSrcs.length) {
+        if (preferredQuality) {
+          setSlotStatus(prev => ({ ...prev, [pickerSlotKey(site, preferredQuality)]: "failed" }));
+        }
+        return;
+      }
 
        const mappedSrcs = rawSrcs
         .map((s): Src => {
@@ -994,13 +1043,15 @@ export default function WatchScreen() {
        const selected = [...candidates].sort(
          (a, b) => (b.qualityRank ?? 0) - (a.qualityRank ?? 0),
        )[0];
-       const newSrcs = selected && !seenKeys.current.has(getPlayUrl(selected))
-         ? [selected]
-         : [];
-       if (selected && newSrcs.length) seenKeys.current.add(getPlayUrl(selected));
+       /* The same adaptive URL can legitimately be advertised for more than
+          one picker tier. Deduplicating it globally here made a later, exact
+          quality click look like a missing source. */
+       const newSrcs = selected ? [selected] : [];
 
        if (!newSrcs.length) {
-         setSlotStatus(prev => ({ ...prev, [site]: "failed" }));
+          if (preferredQuality) {
+            setSlotStatus(prev => ({ ...prev, [pickerSlotKey(site, preferredQuality)]: "failed" }));
+          }
          if (preferredQuality) {
            setAvailableSlots(prev => {
              const next = { ...prev };
@@ -1015,20 +1066,39 @@ export default function WatchScreen() {
        }
 
       fetchedSitesRef.current.add(fetchKey);
-      setSlotStatus(prev => ({ ...prev, [site]: "ready" }));
+       if (preferredQuality) {
+         setSlotStatus(prev => ({ ...prev, [pickerSlotKey(site, preferredQuality)]: "ready" }));
+       }
       const selectedTier = preferredQuality ? PICKER_QUALITY[preferredQuality] : undefined;
       setSources(prev => [...prev.filter(s => !(s.site === site && (!selectedTier || getSrcQuality(s) === selectedTier))), ...newSrcs]);
 
       /* شغّل فوراً عند النجاح */
       const preferred = preferredQuality
-        ? newSrcs.find(s => getSrcQuality(s) === PICKER_QUALITY[preferredQuality] && isDirectPlayable(s))
+         ? newSrcs.find(s => getSrcQuality(s) === PICKER_QUALITY[preferredQuality] && isMobilePlayable(s))
         : undefined;
-      const best = preferredQuality ? preferred : (newSrcs.find(isDirectPlayable) ?? newSrcs[0]);
-      if (best) playSrc(best);
+       const best = preferredQuality ? preferred : (newSrcs.find(isMobilePlayable) ?? newSrcs[0]);
+       /* A successful response is not enough: the selected tier itself must
+          be playable. Never silently fall through to another tier. */
+       if (preferredQuality && !preferred) {
+         fetchedSitesRef.current.delete(fetchKey);
+         setSlotStatus(prev => ({ ...prev, [pickerSlotKey(site, preferredQuality)]: "failed" }));
+         setAvailableSlots(prev => {
+           const next = { ...prev };
+           const siteSlots = { ...(next[site] || {}) };
+           delete siteSlots[preferredQuality];
+           if (Object.keys(siteSlots).length) next[site] = siteSlots;
+           else delete next[site];
+           return next;
+         });
+         return;
+       }
+       if (best && (!preferredQuality || isMobilePlayable(best))) playSrc(best);
 
     } catch {
        if (isMountedRef.current) {
-         setSlotStatus(prev => ({ ...prev, [site]: "failed" }));
+          if (preferredQuality) {
+            setSlotStatus(prev => ({ ...prev, [pickerSlotKey(site, preferredQuality)]: "failed" }));
+          }
          if (preferredQuality) {
            setAvailableSlots(prev => {
              const next = { ...prev };
@@ -1655,7 +1725,7 @@ export default function WatchScreen() {
               {/* قائمة السيرفرات */}
               <View style={d.srcSection}>
                 {slots.map((slot, idx) => {
-                  const status   = slotStatus[slot.site] || "idle";
+                  const status   = slotStatus[pickerSlotKey(slot.site, qk)] || "idle";
                   const firstQuality = Q_KEYS.find(key => !!availableSlots[slot.site]?.[key]) || SITE_FIRST_QUALITY.get(slot.site);
                   const isFetching = status === "fetching";
                   const isFailed   = status === "failed";
