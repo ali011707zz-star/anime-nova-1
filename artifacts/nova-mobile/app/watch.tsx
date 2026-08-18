@@ -397,9 +397,8 @@ const STATIC_PICKER: Record<QualityKey, { site: string; name: string; tag: strin
 
 const Q_KEYS: QualityKey[] = ["1080p", "720p", "360p"];
 
-/* أحدث الحلقات تستخدم كتالوج AnimeSlayer المباشر فقط. نعرض الصف نفسه
-   مرتين لأن استجابة AnimeSlayer تحتوي رابطَي FHD وHD معاً، ويجب أن يختار
-   المستخدم الجودة التي ضغط عليها بدلاً من تشغيل أول رابط دائماً. */
+/* أحدث الحلقات تبدأ من كتالوج AnimeSlayer، لكن صفحة المشاهدة تستخدم فحص
+   المصادر العام حتى تظهر AW وباقي المصادر المتاحة للحلقة مثل الويب. */
 const ANSLAYER_PICKER: Record<QualityKey, { site: string; name: string; tag: string }[]> = {
   "1080p": [{ site: "anslayer", name: "AnimeSlayer", tag: "AS" }],
   "720p":  [{ site: "anslayer", name: "AnimeSlayer", tag: "AS" }],
@@ -410,13 +409,6 @@ const PICKER_QUALITY: Record<QualityKey, Quality> = {
   "720p": "720p HD",
   "360p": "360p SD",
 };
-// The old GifDB file is ~64MB and commonly fails to decode on Android before
-// the picker becomes visible. Keep the visual cue, but use a small GIF that
-// can be decoded quickly on real devices; the Ionicons fallback remains
-// visible if the remote image is unavailable.
-const SERVER_CHECK_GIF =
-  "https://media.giphy.com/media/3o7bu3XilJ5BOiSGic/giphy.gif";
-
 /* أوّل جودة يظهر فيها كل موقع — يُستخدم لعرض زر التنزيل مرّة واحدة فقط.
    بدون هذا يُضاف اسم الموقع لـ dlFetchingSites فيظهر SpinRing
    لكل صفوف نفس الموقع في الجودات الثلاث (1080p/720p/360p). */
@@ -439,6 +431,45 @@ const Q_KEY_SUB: Record<QualityKey, string> = {
   "720p":  "دقة عالية",
   "360p":  "دقة متوسطة",
 };
+
+function ServerScanAnimation() {
+  const pulse = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    const animation = Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulse, {
+          toValue: 1,
+          duration: 900,
+          easing: Easing.inOut(Easing.ease),
+          useNativeDriver: true,
+        }),
+        Animated.timing(pulse, {
+          toValue: 0,
+          duration: 900,
+          easing: Easing.inOut(Easing.ease),
+          useNativeDriver: true,
+        }),
+      ]),
+    );
+    animation.start();
+    return () => animation.stop();
+  }, [pulse]);
+
+  const scale = pulse.interpolate({ inputRange: [0, 1], outputRange: [0.88, 1.12] });
+  const opacity = pulse.interpolate({ inputRange: [0, 1], outputRange: [0.45, 1] });
+
+  return (
+    <Animated.View style={[d.serverScanAnimation, { transform: [{ scale }], opacity }]}>
+      <Ionicons name="radio-outline" size={42} color="#a78bfa" />
+      <View style={d.serverScanDots}>
+        <View style={[d.serverScanDot, { backgroundColor: "#fbbf24" }]} />
+        <View style={[d.serverScanDot, { backgroundColor: "#34d399" }]} />
+        <View style={[d.serverScanDot, { backgroundColor: "#a78bfa" }]} />
+      </View>
+    </Animated.View>
+  );
+}
 
 /* timeout موحّد افتراضي */
 const SITE_TIMEOUT_MS = 28_000;
@@ -557,10 +588,15 @@ export default function WatchScreen() {
   const [downloadProgress, setDownloadProgress] = useState<Record<string, number>>({});
   /* مواقع يجري جلبها خصيصاً للتنزيل (بدون فتح المشغّل) */
   const [dlFetchingSites,  setDlFetchingSites]  = useState<Set<string>>(new Set());
-  /* نتائج الاستعلام المسبق: لا نعرض أي صف ثابت قبل أن يؤكده الخادم */
-  const [availableSlots, setAvailableSlots] = useState<Record<string, Partial<Record<QualityKey, { serverCount: number }>>>>({});
+  /* نتائج الاستعلام المسبق: نفس صفوف المصادر التي يرسلها الخادم للويب */
+  type AvailableSlot = {
+    serverCount: number;
+    name?: string;
+    tag?: string;
+    qualityRank?: number;
+  };
+  const [availableSlots, setAvailableSlots] = useState<Record<string, Partial<Record<QualityKey, AvailableSlot>>>>({});
   const [availabilityDone, setAvailabilityDone] = useState(false);
-  const [serverGifLoaded, setServerGifLoaded] = useState(false);
   const [availabilityError, setAvailabilityError] = useState(false);
   const [availabilityAttempt, setAvailabilityAttempt] = useState(0);
 
@@ -1516,23 +1552,7 @@ export default function WatchScreen() {
           {!availabilityDone && (
             <View style={d.availabilityState}>
               <View style={d.availabilityGifWrap}>
-                {!serverGifLoaded && (
-                  <View style={[StyleSheet.absoluteFill, { alignItems: "center", justifyContent: "center" }]}>
-                    <Ionicons name="tv-outline" size={34} color="rgba(139,92,246,0.42)" />
-                    <Text style={{ marginTop: 8, color: "rgba(255,255,255,0.32)", fontSize: 10, fontFamily: "Cairo_400Regular" }}>
-                      جاري تحميل الصورة…
-                    </Text>
-                  </View>
-                )}
-                <Image
-                  source={{ uri: SERVER_CHECK_GIF }}
-                  style={d.availabilityGif}
-                  resizeMode="cover"
-                  onLoadStart={() => setServerGifLoaded(false)}
-                  onLoad={() => setServerGifLoaded(true)}
-                  onError={() => setServerGifLoaded(false)}
-                  accessibilityLabel="جاري فحص السيرفرات"
-                />
+                <ServerScanAnimation />
                 <LinearGradient
                   colors={["transparent", "rgba(7,7,13,0.82)"]}
                   style={StyleSheet.absoluteFill}
@@ -1564,12 +1584,19 @@ export default function WatchScreen() {
          {/* لا تظهر أي بطاقة أثناء الفحص. هذا هو الفاصل المرئي بين مرحلة
              availability في الويب ومرحلة منتقي المصادر. */}
          {availabilityDone && (singleSite === "anslayer" ? (["1080p", "720p"] as QualityKey[]) : Q_KEYS).map(qk => {
-          const allSlots = singleSite === "anslayer"
+          const staticSlots = singleSite === "anslayer"
             ? (ANSLAYER_PICKER[qk] || [])
             : singleSite
               ? (STATIC_PICKER[qk] || []).filter(slot => slot.site === singleSite)
               : (STATIC_PICKER[qk] || []);
-           const slots = allSlots.filter(slot => !!availableSlots[slot.site]?.[qk]);
+          const dynamicSlots = Object.entries(availableSlots)
+            .filter(([site, tiers]) => !!tiers[qk] && (!singleSite || site === singleSite))
+            .map(([site, tiers]) => ({
+              site,
+              name: tiers[qk]?.name || SITE_LABEL[site] || site,
+              tag: tiers[qk]?.tag || getSiteTag(site),
+            }));
+          const slots = dynamicSlots.length > 0 ? dynamicSlots : staticSlots;
            if (!slots.length) return null;
           const dotColor = qk === "1080p" ? "#fbbf24" : qk === "720p" ? "#34d399" : "#94a3b8";
           return (
@@ -1586,6 +1613,7 @@ export default function WatchScreen() {
               <View style={d.srcSection}>
                 {slots.map((slot, idx) => {
                   const status   = slotStatus[slot.site] || "idle";
+                  const firstQuality = Q_KEYS.find(key => !!availableSlots[slot.site]?.[key]) || SITE_FIRST_QUALITY.get(slot.site);
                   const isFetching = status === "fetching";
                   const isFailed   = status === "failed";
                   const isReady    = status === "ready";
@@ -1617,7 +1645,7 @@ export default function WatchScreen() {
                             <Text style={d.pickBtnText}>اختيار</Text>
                           </View>
                         )}
-                        {dlState === "idle" && SITE_FIRST_QUALITY.get(slot.site) === qk && (
+                        {dlState === "idle" && firstQuality === qk && (
                           <Pressable
                             onPress={(event) => {
                               event.stopPropagation();
@@ -1724,8 +1752,10 @@ const d = StyleSheet.create({
   infoEpBadge:   { flexDirection: "row", alignItems: "center", gap: 5, backgroundColor: "rgba(124,58,237,0.18)", borderRadius: 8, borderWidth: 1, borderColor: "rgba(139,92,246,0.28)", paddingHorizontal: 10, paddingVertical: 5 },
   infoEpText:    { fontSize: 11, fontFamily: "Cairo_700Bold", color: "#c4b5fd" },
   availabilityState: { alignItems: "center", justifyContent: "center", gap: 10, paddingVertical: 22 },
-  availabilityGifWrap: { width: "100%", maxWidth: 330, height: 184, borderRadius: 22, overflow: "hidden", backgroundColor: "rgba(255,255,255,0.025)", marginBottom: 2 },
-  availabilityGif: { width: "100%", height: "100%" },
+  availabilityGifWrap: { width: "100%", maxWidth: 330, height: 184, borderRadius: 22, overflow: "hidden", backgroundColor: "rgba(255,255,255,0.025)", marginBottom: 2, alignItems: "center", justifyContent: "center" },
+  serverScanAnimation: { width: 110, height: 110, borderRadius: 55, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(124,58,237,0.14)", borderWidth: 1, borderColor: "rgba(167,139,250,0.30)" },
+  serverScanDots: { flexDirection: "row", gap: 7, marginTop: 8 },
+  serverScanDot: { width: 7, height: 7, borderRadius: 4 },
   availabilityHeadline: { fontSize: 15, fontFamily: "Cairo_800ExtraBold", color: "rgba(255,255,255,0.85)", textAlign: "center", lineHeight: 24 },
   availabilityText: { fontSize: 12, fontFamily: "Cairo_400Regular", color: "rgba(255,255,255,0.42)", textAlign: "center" },
   availabilityEmpty: { alignItems: "center", justifyContent: "center", gap: 10, paddingVertical: 42, paddingHorizontal: 18 },

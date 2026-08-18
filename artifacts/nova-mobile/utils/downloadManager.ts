@@ -57,6 +57,7 @@ export interface StartDownloadParams {
   url: string;
   authToken?: string | null;
   subtitleUrl?: string;
+  headers?: Record<string, string>;
 }
 
 type DownloadOptions = {
@@ -75,6 +76,7 @@ type PersistedActive = Omit<ActiveDownload, "cancelFn"> & {
   url: string;
   localPath: string;
   subtitleUrl?: string;
+  headers?: Record<string, string>;
   resumeState?: ResumeState;
 };
 
@@ -203,6 +205,7 @@ function persistActive(): void {
     url: entry.params.url,
     localPath: entry.localPath,
     subtitleUrl: entry.params.subtitleUrl,
+    headers: entry.params.headers,
     resumeState: entry.resumeState,
   }));
   persistQueue = persistQueue
@@ -401,6 +404,7 @@ function wait(ms: number): Promise<void> {
 
 function requestHeaders(params: StartDownloadParams): Record<string, string> {
   const headers: Record<string, string> = {
+    ...(params.headers || {}),
     "X-Nova-Client": "nova-anime-mobile-v1",
     "User-Agent": "NovaAnime/1.0 (Expo; Mobile)",
     /* DownloadResumable may issue Range requests after a background retry.
@@ -669,6 +673,7 @@ export async function restoreInterruptedDownloads(): Promise<void> {
         url: record.url,
         authToken: restoredToken,
         subtitleUrl: record.subtitleUrl,
+        headers: record.headers,
       };
       const savedResumeState = record.resumeState
         ? {
