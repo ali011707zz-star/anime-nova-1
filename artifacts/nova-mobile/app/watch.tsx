@@ -290,6 +290,16 @@ const KAWAII_MOBILE_CDN_HOSTS = new Set([
   "cdn.mewstream.buzz",
 ]);
 
+function isKawaiiMobileCdnHost(hostname: string): boolean {
+  const host = hostname.toLowerCase();
+  return (
+    KAWAII_MOBILE_CDN_HOSTS.has(host) ||
+    host.endsWith(".kawaii-anime.com") ||
+    host.endsWith(".momentoai.dev") ||
+    host.endsWith(".mewstream.buzz")
+  );
+}
+
 function normalizeKawaiiMobileSource(source: Src, base: string): Src {
   if (String(source.site || "").toLowerCase() !== "kawaii") return source;
 
@@ -297,7 +307,7 @@ function normalizeKawaiiMobileSource(source: Src, base: string): Src {
     .filter((value): value is string => typeof value === "string" && value.length > 0);
   const rawUrl = candidates.find((value) => {
     try {
-      return KAWAII_MOBILE_CDN_HOSTS.has(new URL(value).hostname.toLowerCase());
+      return isKawaiiMobileCdnHost(new URL(value).hostname);
     } catch {
       return false;
     }
@@ -306,8 +316,9 @@ function normalizeKawaiiMobileSource(source: Src, base: string): Src {
 
   let host = "";
   try { host = new URL(rawUrl).hostname.toLowerCase(); } catch {}
-  const isHls = source.directType === "hls"
-    || /\.m3u8(?:[?#]|$)/i.test(rawUrl)
+  /* Kawaii has historically mislabeled some signed MP4 responses as HLS.
+     The media URL is authoritative, matching the web player and API. */
+  const isHls = /\.m3u8(?:[?#]|$)/i.test(rawUrl)
     || /\/(?:hls|playlist)(?:\/|[?#]|$)/i.test(rawUrl);
   const referer = host === "cdn.mewstream.buzz"
     ? "https://megaplay.buzz/"
@@ -503,6 +514,20 @@ function pickerSlotKey(site: string, quality: QualityKey): string {
   return `${site}::${quality}`;
 }
 
+function getAvailabilityQualityKey(row: any): QualityKey | null {
+  /* Keep the mobile availability parser aligned with the web parser. The API
+     may send "1080p FHD", "FHD 1080", or a provider-specific label instead of
+     the compact picker key. */
+  const text = `${row?.quality || ""} ${row?.name || ""} ${row?.label || ""}`.toLowerCase();
+  if (/(?:2160|1440|1080)\s*p?|\bfhd\b|full[ ._-]*hd/.test(text)) return "1080p";
+  if (/(?:720)\s*p?|(?<!f)\bhd\b/.test(text)) return "720p";
+  if (/(?:480|360)\s*p?|\bsd\b/.test(text)) return "360p";
+  const rank = Number(row?.qualityRank) || 0;
+  if (rank >= 13) return "1080p";
+  if (rank >= 8) return "720p";
+  return "360p";
+}
+
 function ServerScanAnimation() {
   const pulse = useRef(new Animated.Value(0)).current;
 
@@ -543,8 +568,8 @@ function ServerScanAnimation() {
 }
 
 /* React Native's Image component is not a reliable animated-GIF renderer on
-   all Expo/Android builds.  A tiny WebView keeps the GIF animation smooth,
-   matching the web loading screen, without showing the GIFDB page chrome. */
+   all Expo/Android builds. A direct WebView URL keeps the GIF animation smooth
+   without showing the GIFDB page chrome. */
 /* Keep the animated loading treatment used by the web. GIFDB is preferred
    because it is the stable asset for this card; Giphy remains a fallback. */
 const SERVER_SCAN_GIFS = [
@@ -561,13 +586,9 @@ function ServerScanGif() {
   /* Availability SSE causes frequent parent renders. Keep the WebView
      document stable so the GIF does not restart or disappear per event. */
   const gifUrl = SERVER_SCAN_GIFS[gifIndex] || SERVER_SCAN_GIFS[0];
-  const html = useMemo(
-    () => `<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1"></head><body><img src="${gifUrl}" alt="" onerror="window.ReactNativeWebView&&window.ReactNativeWebView.postMessage('gif-error')" /></body><style>html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#07070d}img{display:block;width:100%;height:100%;object-fit:cover}</style></html>`,
-    [gifUrl],
-  );
   const webViewSource = useMemo(
-    () => ({ html, baseUrl: "https://media.giphy.com/" }),
-    [html],
+    () => ({ uri: gifUrl }),
+    [gifUrl],
   );
   if (failed) return <ServerScanAnimation />;
   const handleGifFailure = () => {
@@ -844,11 +865,7 @@ export default function WatchScreen() {
 
     const applyRow = (row: any) => {
       const site = String(row?.site || "").trim();
-      const quality = String(row?.quality || "").toLowerCase();
-      const qk: QualityKey | null =
-        quality === "1080p" ? "1080p" :
-        quality === "720p" ? "720p" :
-        quality === "360p" ? "360p" : null;
+      const qk = getAvailabilityQualityKey(row);
       if (!site || !qk || !allowedSites.has(site)) return;
       setAvailableSlots(prev => ({
         ...prev,
@@ -870,20 +887,20 @@ export default function WatchScreen() {
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
         let buffer = "";
-        let currentEvent = "";
         const consume = (text: string) => {
           buffer += text;
           const lines = buffer.split(/\r?\n/);
           buffer = lines.pop() || "";
           for (const line of lines) {
-            if (!line) { currentEvent = ""; continue; }
-            if (line.startsWith("event: ")) { currentEvent = line.slice(7).trim(); continue; }
+            if (!line || line.startsWith("event: ")) continue;
             if (!line.startsWith("data: ")) continue;
             const payload = line.slice(6).trim();
             if (!payload || payload === "[DONE]") continue;
             try {
-              const row = JSON.parse(payload);
-              if (currentEvent === "source" || row?.checkOnly || row?.available) applyRow(row);
+              /* Match the web picker: a valid availability row is enough.
+                 Some backend versions use a different SSE event name and
+                 still send the same {site, quality} metadata. */
+              applyRow(JSON.parse(payload));
             } catch {
               /* تجاهل حدث SSE غير صالح */
             }
