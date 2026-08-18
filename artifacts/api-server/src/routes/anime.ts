@@ -15779,21 +15779,35 @@ router.get("/anime/download-mp4", async (req, res) => {
   res.on("close", cleanup);
 
   try {
-    // MP4 Kawaii URLs are already signed media files. Stream them through the
-    // same VPS proxy used by the player instead of invoking ffmpeg. This is
-    // critical for DownloadResumable: a retry Range request must not trigger a
-    // second full conversion before the first byte is sent.
+    // A local video-proxy URL already represents a signed MP4 stream. Stream
+    // it through the same VPS proxy used by the player instead of invoking
+    // ffmpeg. The old condition handled only Kawaii, so AN/AK/MP MP4 sources
+    // were incorrectly converted as if they were HLS and DownloadResumable
+    // stayed at 0% until the full conversion finished.
+    //
+    // This is also critical for retries: a Range request must not trigger a
+    // second full conversion before the first byte is sent. HLS URLs still
+    // fall through to ffmpeg below.
+    if (sourceUrl && !kawaiiMediaIsHls(sourceUrl)) {
+      try {
+        const sourcePath = new URL(sourceUrl).pathname;
+        if (sourcePath === "/api/anime/video-proxy" && await streamKawaiiMp4(sourceUrl, req, res)) {
+          return;
+        }
+      } catch {
+        // Fall through to the conversion path when the local URL is invalid.
+      }
+    }
+
+    // Raw Kawaii MP4 URLs are also signed media files. Keep this direct path
+    // for legacy/cache rows that did not pass through localApiUrl().
     if (site === "kawaii" && rawKawaiiUrl && !kawaiiMediaIsHls(rawKawaiiUrl)
-        && !String(req.query.subtitleUrl || "")) {
+        ) {
         res.setHeader("Content-Disposition", `attachment; filename="nova-episode.mp4"`);
         // Mewstream rejects the Kawaii page Referer and only accepts
         // Megaplay. Keep this identical to the playback proxy's routing.
         await serveMediaVPS(rawKawaiiUrl, kawaiiReferrer(rawKawaiiUrl), req, res);
         return;
-    }
-    if (site === "kawaii" && sourceUrl && !kawaiiMediaIsHls(sourceUrl)
-        && !String(req.query.subtitleUrl || "")) {
-      if (await streamKawaiiMp4(sourceUrl, req, res)) return;
     }
 
     if (!sourceUrl) {
