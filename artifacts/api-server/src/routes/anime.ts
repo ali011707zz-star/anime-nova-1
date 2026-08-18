@@ -68,7 +68,15 @@ const BASE_HDRS: Record<string, string> = {
 
 // أحدث الحلقات تستخدم معرّف AnimeSlayer في الرابط، بينما مصادر البث
 // (خصوصاً KW) تحتاج AniList ID. نحل العنوان مرة واحدة عند غياب AniList ID.
-const _titleAniListCache = new Map<string, { id: number; ts: number }>();
+type AniListSourceMeta = {
+  id: number;
+  ts: number;
+  titles: string[];
+  romaji?: string;
+  english?: string;
+  native?: string;
+};
+const _titleAniListCache = new Map<string, AniListSourceMeta>();
 const TITLE_ANILIST_TTL = 6 * 60 * 60 * 1000;
 
 function normalizeAniTitle(value: string): string {
@@ -96,7 +104,7 @@ async function resolveAniListIdForSource(
   const cached = _titleAniListCache.get(cacheKey);
   if (cached && Date.now() - cached.ts < TITLE_ANILIST_TTL) return cached.id;
 
-  const query = `query($search:String!){Page(perPage:8){media(search:$search,type:ANIME){id title{romaji english native}}}}`;
+  const query = `query($search:String!){Page(perPage:8){media(search:$search,type:ANIME){id title{romaji english native userPreferred}}}}`;
   for (const candidate of candidates) {
     try {
       const response = await fetch("https://graphql.anilist.co", {
@@ -117,10 +125,30 @@ async function resolveAniListIdForSource(
       const match = exact || media[0];
       const id = Number(match?.id || 0);
       if (id > 0) {
-        _titleAniListCache.set(cacheKey, { id, ts: Date.now() });
+        const titleValues = [
+          match?.title?.romaji,
+          match?.title?.english,
+          match?.title?.native,
+          match?.title?.userPreferred,
+        ].filter((value): value is string => typeof value === "string" && value.trim().length > 1);
+        _titleAniListCache.set(cacheKey, {
+          id,
+          ts: Date.now(),
+          titles: Array.from(new Set(titleValues)),
+          romaji: match?.title?.romaji || undefined,
+          english: match?.title?.english || undefined,
+          native: match?.title?.native || undefined,
+        });
         return id;
       }
     } catch { /* try the next title variant */ }
+  }
+  return undefined;
+}
+
+function getCachedAniListSourceMeta(id: number): AniListSourceMeta | undefined {
+  for (const meta of _titleAniListCache.values()) {
+    if (meta.id === id) return meta;
   }
   return undefined;
 }
@@ -6007,21 +6035,29 @@ async function getKawaiiAnimeSources(
 
     // Try every live API alias before validating the returned CDN host.
     for (const base of KAWAII_API_BASES) {
-      const apiUrl = `${base}/api/watch?anilistId=${anilistId}&ep=${ep}`;
-      const r = await fetchSourceWithRetry(apiUrl, {
-        headers: {
-          ...BASE_HDRS,
-          Accept: "application/json",
-          Referer: base + "/",
-        },
-      }, 12_000);
-      if (!r) continue;
-      const candidate = await r.json().catch(() => null) as KawaiiApiData | null;
-      if (candidate?.sources?.some(source => typeof source?.url === "string" && source.url.length > 0)) {
-        data = candidate;
-        apiBase = base;
-        break;
+      /* Kawaii's MP4 variant is the reliable mobile path. Its HLS response
+         can advertise a valid row while the CDN rejects the first manifest
+         request with a Referer-dependent 403. */
+      for (const apiUrl of [
+        `${base}/api/watch?anilistId=${anilistId}&ep=${ep}&format=mp4`,
+        `${base}/api/watch?anilistId=${anilistId}&ep=${ep}`,
+      ]) {
+        const r = await fetchSourceWithRetry(apiUrl, {
+          headers: {
+            ...BASE_HDRS,
+            Accept: "application/json",
+            Referer: base + "/",
+          },
+        }, 12_000);
+        if (!r) continue;
+        const candidate = await r.json().catch(() => null) as KawaiiApiData | null;
+        if (candidate?.sources?.some(source => typeof source?.url === "string" && source.url.length > 0)) {
+          data = candidate;
+          apiBase = base;
+          break;
+        }
       }
+      if (data) break;
     }
     if (!data?.sources?.length) return [];
 
@@ -8129,7 +8165,7 @@ async function awDbLookup(anilistId: number, ep: number): Promise<AwLinkRow[]> {
     return await sbSelect<AwLinkRow>("aw_links", {
       "anilist_id": `eq.${anilistId}`,
       "ep_number":  `eq.${ep}`,
-    }, { limit: 20 });
+    }, { limit: 100 });
   } catch { return []; }
 }
 
@@ -8139,7 +8175,7 @@ async function awDbLookupByTitle(animeName: string, ep: number): Promise<AwLinkR
     return await sbSelect<AwLinkRow>("aw_links", {
       "anime_id":  `ilike.${animeName}`,
       "ep_number": `eq.${ep}`,
-    }, { limit: 20 });
+    }, { limit: 100 });
   } catch { return []; }
 }
 
@@ -8319,6 +8355,15 @@ async function getAnimeWitcherSources(
           console.log(`[AW] ✅ DB-path: ${dbSources.length} sources`);
           return dbSources;
         }
+      }
+      /* Latest-episode cards can carry an AniList id that was resolved from a
+         title while the imported AW rows still have a null/older id. Recheck
+         the exact title before falling back to the slower Algolia path so all
+         stored qualities for this episode remain visible. */
+      const titleRows = await awDbLookupByTitle(title, ep);
+      if (titleRows.length) {
+        const titleSources = await awBuildSourcesFromDb(titleRows);
+        if (titleSources.length) return titleSources;
       }
     }
     // title fallback (بدون anilistId)
@@ -13864,10 +13909,18 @@ router.get("/anime/anslayer-latest", async (req, res) => {
 
     // Resolve in parallel so the latest list can use the same AniList-based
     // detail, subtitle, and Japanese-source paths as the normal catalog.
-    const items = (await Promise.all(rawItems.map(async (item: any) => ({
-      ...item,
-      animeId: await resolveAniListIdForSource(item.name, null, [], null),
-    })))).filter((it: any) => it.animeId && it.episode);
+    const items = (await Promise.all(rawItems.map(async (item: any) => {
+      const animeId = await resolveAniListIdForSource(item.name, null, [], null);
+      const meta = animeId ? getCachedAniListSourceMeta(animeId) : undefined;
+      return {
+        ...item,
+        animeId,
+        titleVariants: meta?.titles || [item.name].filter(Boolean),
+        romaji: meta?.romaji || item.name,
+        english: meta?.english || "",
+        native: meta?.native || "",
+      };
+    }))).filter((it: any) => it.animeId && it.episode);
 
     // ── إرسال الحلقات الجديدة لتيليجرام (فقط عند التحديث الفعلي) ──────────
     if (items.length > 0) {

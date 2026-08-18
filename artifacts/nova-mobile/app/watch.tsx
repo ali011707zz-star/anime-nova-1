@@ -469,11 +469,12 @@ export default function WatchScreen() {
   const {
     anime, ep, title, english, format, etitle,
     totalEps: totalEpsParam, year, episodes, native, titleAr,
-    site: singleSiteParam, anslayerId, single,
+    titles: titlesParam, site: singleSiteParam, anslayerId, single,
   } = useLocalSearchParams<{
     anime: string; ep: string; title: string; english: string;
     format?: string; etitle?: string; totalEps?: string;
     year?: string; episodes?: string; native?: string; titleAr?: string;
+    titles?: string;
     site?: string; anslayerId?: string; single?: string;
   }>();
   /* single=1 → آتٍ من قسم "أحدث الحلقات" (مصدر anslayer مباشرةً بمعرّفه الخاص من
@@ -487,6 +488,16 @@ export default function WatchScreen() {
   const titleStr    = title   ? decodeURIComponent(title)   : "";
   const englishStr  = english ? decodeURIComponent(english) : "";
   const titleArStr  = titleAr ? decodeURIComponent(titleAr) : "";
+  const titleVariants = useMemo(() => {
+    const values = [titleStr, englishStr, native ? decodeURIComponent(native) : "", titleArStr];
+    try {
+      const parsed = titlesParam ? JSON.parse(decodeURIComponent(titlesParam)) : [];
+      if (Array.isArray(parsed)) values.push(...parsed);
+    } catch {}
+    return Array.from(new Set(values
+      .filter((value): value is string => typeof value === "string" && value.trim().length > 1)
+      .map(value => value.trim())));
+  }, [titleStr, englishStr, native, titleArStr, titlesParam]);
   const epNum      = parseInt(ep || "1", 10) || 1;
   const cover      = useLocalSearchParams<{ cover?: string }>().cover;
   const coverUrl   = cover ? decodeURIComponent(cover) : "";
@@ -511,6 +522,7 @@ export default function WatchScreen() {
   /* نتائج الاستعلام المسبق: لا نعرض أي صف ثابت قبل أن يؤكده الخادم */
   const [availableSlots, setAvailableSlots] = useState<Record<string, Partial<Record<QualityKey, { serverCount: number }>>>>({});
   const [availabilityDone, setAvailabilityDone] = useState(false);
+  const [serverGifLoaded, setServerGifLoaded] = useState(false);
   const [availabilityError, setAvailabilityError] = useState(false);
   const [availabilityAttempt, setAvailabilityAttempt] = useState(0);
 
@@ -631,7 +643,6 @@ export default function WatchScreen() {
     if (native) params.set("native", native);
     if (titleArStr) params.set("titleAr", titleArStr);
     if (anslayerId) params.set("anslayerId", anslayerId);
-    const titleVariants = [...new Set([titleStr, englishStr, titleArStr].filter(Boolean))];
     if (titleVariants.length) params.set("titles", JSON.stringify(titleVariants));
     params.set("mode", "check");
 
@@ -831,6 +842,7 @@ export default function WatchScreen() {
       english: englishStr, format: format || "",
       year: year || "", episodes: episodes || "", native: native || "",
     });
+    qs.set("titles", JSON.stringify(titleVariants));
     if (preferredQuality) qs.set("quality", preferredQuality);
     if (titleArStr) qs.set("titleAr", titleArStr);
     if (site === "anslayer" && anslayerId) qs.set("anslayerId", anslayerId);
@@ -1041,6 +1053,7 @@ export default function WatchScreen() {
       english: englishStr, format: format || "",
       year: year || "", episodes: episodes || "", native: native || "",
     });
+    qs.set("titles", JSON.stringify(titleVariants));
     if (titleArStr) qs.set("titleAr", titleArStr);
     if (site === "anslayer" && anslayerId) qs.set("anslayerId", anslayerId);
 
@@ -1473,10 +1486,21 @@ export default function WatchScreen() {
           {!availabilityDone && (
             <View style={d.availabilityState}>
               <View style={d.availabilityGifWrap}>
+                {!serverGifLoaded && (
+                  <View style={[StyleSheet.absoluteFill, { alignItems: "center", justifyContent: "center" }]}>
+                    <Ionicons name="tv-outline" size={34} color="rgba(139,92,246,0.42)" />
+                    <Text style={{ marginTop: 8, color: "rgba(255,255,255,0.32)", fontSize: 10, fontFamily: "Cairo_400Regular" }}>
+                      جاري تحميل الصورة…
+                    </Text>
+                  </View>
+                )}
                 <Image
                   source={{ uri: SERVER_CHECK_GIF }}
                   style={d.availabilityGif}
                   resizeMode="cover"
+                  onLoadStart={() => setServerGifLoaded(false)}
+                  onLoad={() => setServerGifLoaded(true)}
+                  onError={() => setServerGifLoaded(false)}
                   accessibilityLabel="جاري فحص السيرفرات"
                 />
                 <LinearGradient

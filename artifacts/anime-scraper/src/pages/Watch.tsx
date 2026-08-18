@@ -4691,6 +4691,17 @@ export default function WatchPage() {
   const ep = parseInt(sp.get("ep") || "1");
   const titleParam = sp.get("title") || "";
   const englishParam = sp.get("english") || "";
+  const latestTitleVariants = (() => {
+    try {
+      const raw = sp.get("titles");
+      const parsed = raw ? JSON.parse(raw) : [];
+      return Array.isArray(parsed)
+        ? parsed.filter((value): value is string => typeof value === "string" && value.trim().length > 1)
+        : [];
+    } catch {
+      return [];
+    }
+  })();
   const anslayerIdParam = parseInt(sp.get("anslayerId") || "0");
   const coverParam = sp.get("cover") || "";
   const titleArParam = sp.get("titleAr") || "";
@@ -5268,6 +5279,7 @@ export default function WatchPage() {
       anime?.title?.native,
       anime?.title?.userPreferred,
       ...(Array.isArray(anime?.synonyms) ? anime.synonyms : []),
+      ...latestTitleVariants,
       titleParam,
       englishParam,
       titleArParam,

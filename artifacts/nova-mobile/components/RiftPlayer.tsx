@@ -90,6 +90,8 @@ export interface SubSettings {
   bgOpacity: number;
   bold: boolean;
   position: "top" | "center" | "bottom";
+  /** Pixel adjustment inside the selected position; negative = higher. */
+  verticalOffset: number;
 }
 
 type Props = {
@@ -157,6 +159,7 @@ const DEFAULT_SUB_SETTINGS: SubSettings = {
   bgOpacity: 0,
   bold: false,
   position: "bottom",
+  verticalOffset: 0,
 };
 
 const QUALITY_COLOR: Record<string, string> = {
@@ -708,12 +711,12 @@ export function RiftPlayer({
           المُشغَّل في الذاكرة → يُضاعف استهلاك الذاكرة. */
     try {
       (p as any).bufferOptions = {
-        preferredForwardBufferDuration: 20, // iOS: مسبق 20ث لتقليل التقطيع
-        waitsToMinimizeStalling: true,      // iOS: لا تبدأ قبل buffer آمن
-        minBufferMs: 3000,                  // Android: الحد الأدنى قبل التشغيل
-        maxBufferMs: 20000,                 // Android: هامش 20ث بدون OOM مبالغ
-        bufferForPlaybackMs: 2000,          // Android: بداية آمنة للـ codec
-        bufferForPlaybackAfterRebufferMs: 4500, // Android: استئناف بعد 4.5ث
+        preferredForwardBufferDuration: 6,  // iOS: لا تنتظر 20ث قبل أول صورة
+        waitsToMinimizeStalling: false,    // ابدأ بعد أول buffer صالح ثم عالج التقطيع
+        minBufferMs: 1000,                 // Android: بداية أسرع للمصادر البطيئة
+        maxBufferMs: 12000,                // Android: يمنع تراكم buffers أثناء fallback
+        bufferForPlaybackMs: 750,          // Android: أول تشغيل بعد buffer صغير آمن
+        bufferForPlaybackAfterRebufferMs: 1800,
         backBufferDurationMs: 3000,         // Android: ذاكرة خلفية صغيرة
       };
     } catch {}
@@ -2068,9 +2071,10 @@ export function RiftPlayer({
   /* ─── Subtitle overlay position ─── */
   function subPositionStyle() {
     const pos = subSettings.position;
-    if (pos === "top")    return { top: showControls ? 70 : 20, bottom: undefined };
-    if (pos === "center") return { top: "45%" as any, bottom: undefined };
-    return { bottom: showControls ? 100 : 24, top: undefined };
+    const translateY = subSettings.verticalOffset || 0;
+    if (pos === "top")    return { top: showControls ? 70 : 20, bottom: undefined, transform: [{ translateY }] };
+    if (pos === "center") return { top: "45%" as any, bottom: undefined, transform: [{ translateY }] };
+    return { bottom: showControls ? 100 : 24, top: undefined, transform: [{ translateY }] };
   }
 
   /* لا نرجع null عند غياب currentSrc — يظهر شاشة رمادية بيضاء.
@@ -2799,6 +2803,27 @@ export function RiftPlayer({
                     >
                       <Text style={s.subPosIcon}>{icon}</Text>
                       <Text style={[s.subChipText, subSettings.position === v && s.subChipTextActive]}>{label}</Text>
+                    </Pressable>
+                  ))}
+                </View>
+
+                {/* ── الضبط الدقيق للارتفاع ── */}
+                <Text style={s.subSectionLabel}>التحريك لأعلى وأسفل</Text>
+                <View style={[s.subRow, { marginBottom: 6 }]}>
+                  <Text style={{ color: "rgba(255,255,255,0.50)", fontSize: 13, fontFamily: "Cairo_600SemiBold" }}>
+                    {subSettings.verticalOffset > 0 ? `+${subSettings.verticalOffset}` : subSettings.verticalOffset}px
+                  </Text>
+                </View>
+                <View style={{ flexDirection: "row", gap: 7 }}>
+                  {([-30, -15, 0, 15, 30] as const).map(value => (
+                    <Pressable
+                      key={value}
+                      style={[s.subChip, { flex: 1, justifyContent: "center" }, subSettings.verticalOffset === value && s.subChipActive]}
+                      onPress={() => updateSubSettings({ verticalOffset: value })}
+                    >
+                      <Text style={[s.subChipText, { textAlign: "center" }, subSettings.verticalOffset === value && s.subChipTextActive]}>
+                        {value === 0 ? "0" : value < 0 ? `↑${Math.abs(value)}` : `↓${value}`}
+                      </Text>
                     </Pressable>
                   ))}
                 </View>

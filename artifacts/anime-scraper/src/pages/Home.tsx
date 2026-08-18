@@ -1063,7 +1063,12 @@ export default function Home() {
               const accentBg = "rgba(239,68,68,0.88)";
               /* هذه البطاقات مصدرها AnimeSlayer؛ مرّر معرّف الكتالوج المباشر
                  حتى لا يعتمد التشغيل على مطابقة الاسم أو على AniList. */
-              const href = `/watch?anime=${encodeURIComponent(String(it.animeId))}&anslayerId=${encodeURIComponent(String(it.anslayerId ?? it.animeId))}&ep=${it.episode}&title=${encodeURIComponent(it.name || "")}&english=${encodeURIComponent(it.name || "")}&cover=${encodeURIComponent(it.cover || "")}&titleAr=${encodeURIComponent(it.titleAr || "")}&site=anslayer`;
+              const titleVariants = Array.isArray(it.titleVariants)
+                ? it.titleVariants.filter((value: unknown): value is string => typeof value === "string" && value.trim().length > 1)
+                : [];
+              const canonicalTitle = it.romaji || it.name || "";
+              const canonicalEnglish = it.english || "";
+              const href = `/watch?anime=${encodeURIComponent(String(it.animeId))}&anslayerId=${encodeURIComponent(String(it.anslayerId ?? it.animeId))}&ep=${it.episode}&title=${encodeURIComponent(canonicalTitle)}&english=${encodeURIComponent(canonicalEnglish)}&titles=${encodeURIComponent(JSON.stringify(titleVariants))}&cover=${encodeURIComponent(it.cover || "")}&titleAr=${encodeURIComponent(it.titleAr || "")}&site=anslayer`;
               return (
                 <Link href={href} key={`${it.animeId}-${it.episode}-${i}`}>
                   <motion.div

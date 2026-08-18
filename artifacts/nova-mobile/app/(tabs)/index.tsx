@@ -92,6 +92,10 @@ export default function HomeScreen() {
     animeId: number;
     anslayerId: number;
     name: string;
+    romaji?: string;
+    english?: string;
+    native?: string;
+    titleVariants?: string[];
     titleAr?: string;
     episode: number;
     cover: string;
@@ -113,6 +117,12 @@ export default function HomeScreen() {
             name: String(item.name ?? item.title ?? "").trim(),
             titleAr: String(item.titleAr ?? item.arabicTitle ?? "").trim(),
             cover: String(item.cover ?? item.poster ?? "").trim(),
+            romaji: String(item.romaji ?? "").trim(),
+            english: String(item.english ?? "").trim(),
+            native: String(item.native ?? "").trim(),
+            titleVariants: Array.isArray(item.titleVariants)
+              ? item.titleVariants.filter((value: unknown): value is string => typeof value === "string" && value.trim().length > 1)
+              : [],
           }))
           .filter((item) => item.animeId > 0 && item.name && item.episode != null);
         setTodayEps(normalized);
@@ -271,7 +281,7 @@ export default function HomeScreen() {
                 /* مثل الويب: أحدث الحلقات تمرّر معرّفي AniList وAnimeSlayer،
                    لكنها لا تقفل منتقي السيرفرات على AnimeSlayer وحده. */
                 <Pressable
-                  onPress={() => router.push(`/watch?anime=${ep.animeId}&ep=${ep.episode}&title=${encodeURIComponent(ep.name || "")}&english=${encodeURIComponent(ep.name || "")}&cover=${encodeURIComponent(ep.cover || "")}&titleAr=${encodeURIComponent(ep.titleAr || "")}&anslayerId=${ep.anslayerId}` as any)}
+                  onPress={() => router.push(`/watch?anime=${ep.animeId}&ep=${ep.episode}&title=${encodeURIComponent(ep.romaji || ep.name || "")}&english=${encodeURIComponent(ep.english || "")}&native=${encodeURIComponent(ep.native || "")}&titles=${encodeURIComponent(JSON.stringify(ep.titleVariants || []))}&cover=${encodeURIComponent(ep.cover || "")}&titleAr=${encodeURIComponent(ep.titleAr || "")}&anslayerId=${ep.anslayerId}` as any)}
                   style={[todayEpStyles.card, { backgroundColor: colors.card, borderColor: colors.border }]}
                 >
                   {ep.cover ? (
