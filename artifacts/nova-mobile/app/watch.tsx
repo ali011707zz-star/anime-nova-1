@@ -61,6 +61,7 @@ const SUBTITLE_DISABLED_SITES = new Set([
   "animewitcher", "aw",
   "sanime", "sa",
   "anifox", "fx",
+  "anslayer", "as",
 ]);
 
 function subtitlesDisabledForSite(site?: string): boolean {
@@ -569,8 +570,9 @@ function ServerScanAnimation() {
 }
 
 /* React Native's Image component is not a reliable animated-GIF renderer on
-   all Expo/Android builds. Load the exact GIF URL in a WebView instead of
-   embedding the GIFDB page or depending on a native image decoder. */
+   all Expo/Android builds. Render the exact GIF URL inside a tiny HTML
+   document. Direct image navigation can remain blank on Android WebView when
+   the CDN returns a redirect or a non-image intermediate response. */
 /* GIFDB is the canonical asset used by the web; Giphy is only a bounded
    fallback for Android networks that cannot reach GIFDB. */
 const SERVER_SCAN_GIFS = [
@@ -600,12 +602,14 @@ function ServerScanGif() {
   }, [gifIndex]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (failed) return <ServerScanAnimation />;
+  const html = `<!doctype html><html><head>
+    <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
+    <style>html,body{margin:0;padding:0;width:100%;height:100%;overflow:hidden;background:transparent}
+    img{display:block;width:100%;height:100%;object-fit:cover}</style>
+    </head><body><img src="${gifUrl.replace(/&/g, "&amp;").replace(/"/g, "&quot;")}" /></body></html>`;
   return (
     <WebView
-      /* Direct image navigation matches the web's <img src=...> path and
-         avoids an extra HTML document that can stay blank on Android while
-         the remote GIF is still decoding. */
-      source={{ uri: gifUrl }}
+      source={{ html, baseUrl: gifUrl }}
       style={d.availabilityGif}
       originWhitelist={["*"]}
       scrollEnabled={false}
@@ -618,6 +622,7 @@ function ServerScanGif() {
       cacheMode="LOAD_DEFAULT"
       androidLayerType="hardware"
       setSupportMultipleWindows={false}
+      javaScriptEnabled={false}
       onError={handleGifFailure}
       onHttpError={handleGifFailure}
     />
@@ -1307,7 +1312,7 @@ export default function WatchScreen() {
     const base     = getBaseUrl();
     const proxyUrl = ensureVpsProxy(rawUrl, headers, base, best.directType === "hls");
 
-    /* ترجمة: استخدم subtitleUrl المصدر أولاً ثم الترجمة العالمية */
+    /* الترجمة الجانبية اختيارية: لا نمنع تنزيل الفيديو إذا لم تتوفر. */
     const subRaw     = subtitlesDisabledForSite(site)
       ? undefined
       : (best.subtitleUrl || globalSubUrl);
@@ -1318,10 +1323,6 @@ export default function WatchScreen() {
 
     const token = await getAuthToken();
     /* Fire-and-forget — يعمل في الخلفية بمستقل عن lifecycle هذه الشاشة */
-    if (DOWNLOAD_SUBTITLE_SITES.has(site) && !subtitleUrl) {
-      Alert.alert("الترجمة غير جاهزة", "تعذر تجهيز الترجمة العربية لهذه الحلقة. أعد المحاولة بعد لحظات.");
-      return;
-    }
     const downloadUrl = DOWNLOAD_SUBTITLE_SITES.has(site)
       ? buildEmbeddedDownloadUrl(site, site === "kawaii" ? (best.rawUrl || proxyUrl) : proxyUrl, subtitleUrl, base)
       : proxyUrl;
@@ -1418,9 +1419,6 @@ export default function WatchScreen() {
          : subRaw;
        const subtitleUrl = normalizeProviderSubtitleUrl(site, subtitleCandidate, base);
       const token     = await getAuthToken();
-       if (DOWNLOAD_SUBTITLE_SITES.has(site) && !subtitleUrl) {
-         throw new Error("Arabic subtitle is not ready");
-       }
        const downloadUrl = DOWNLOAD_SUBTITLE_SITES.has(site)
          ? buildEmbeddedDownloadUrl(site, site === "kawaii" ? (best.rawUrl || proxyUrl) : proxyUrl, subtitleUrl, base)
          : proxyUrl;

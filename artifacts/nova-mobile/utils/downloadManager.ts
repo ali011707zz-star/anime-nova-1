@@ -447,9 +447,9 @@ async function saveCompleted(entry: RuntimeDownload): Promise<void> {
   if (fileSize <= 0) throw new Error("ملف التنزيل فارغ");
 
   let subtitleLocalPath: string | undefined;
-  /* The player uses the sidecar VTT for every supported raw-audio provider.
-     A video is not considered complete until the requested Arabic track is
-     also present locally. */
+  /* The VTT is a best-effort sidecar. A provider can have a healthy video
+     while its translation endpoint is temporarily unavailable; that must not
+     turn a completed video into a failed download. */
   if (entry.params.subtitleUrl) {
     const subtitlePath = `${entry.localPath.slice(0, -4)}.vtt`;
     try {
@@ -486,7 +486,7 @@ async function saveCompleted(entry: RuntimeDownload): Promise<void> {
       subtitleLocalPath = subtitlePath;
     } catch (error) {
       try { await FileSystem.deleteAsync(subtitlePath, { idempotent: true }); } catch {}
-      throw new Error(`تعذر حفظ الترجمة العربية: ${error instanceof Error ? error.message : "unknown error"}`);
+      subtitleLocalPath = undefined;
     }
   }
 

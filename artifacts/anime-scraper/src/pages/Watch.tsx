@@ -546,6 +546,9 @@ const KAWAII_SUBTITLE_SITES = new Set([
    fallback. GO/DB/KO are Japanese raw-audio streams, so they are opted into
    the smart Arabic subtitle path above instead. */
 const RAW_AUDIO_ONLY_SITES = new Set<string>();
+/* AnimeSlayer's external tracks are intentionally disabled. Keep this
+   client-side guard even when a stale cache row still contains subtitleUrl. */
+const SUBTITLE_DISABLED_SITES = new Set(["anslayer", "as"]);
 
 type SlotStatus = "idle" | "fetching" | "ready" | "failed";
 
@@ -5747,14 +5750,15 @@ export default function WatchPage() {
     // إذا لم تصل ترجمة كواي بعد، نعود مؤقتاً لترجمة المصدر نفسه إن وُجدت.
     const skipExternalSub =
       ARABIC_SITES.has(src.site || "") ||
-      RAW_AUDIO_ONLY_SITES.has(src.site || "");
+      RAW_AUDIO_ONLY_SITES.has(src.site || "") ||
+      SUBTITLE_DISABLED_SITES.has(src.site || "");
     const preferredSubUrl = KAWAII_SUBTITLE_SITES.has(src.site || "")
       ? src.site === "kawaii"
         ? kawaiiSubUrl || src.subtitleUrl || undefined
         : kawaiiSubUrl || undefined
       : src.subtitleUrl || undefined;
     setPlayerSubUrl(
-      skipExternalSub && !preferredSubUrl ? undefined : preferredSubUrl,
+      skipExternalSub ? undefined : preferredSubUrl,
     );
     // Keep the episode-level Kawaii track cached so a later AK/AN/GO selection
     // can reuse it. It is masked for Arabic/burned-in providers at render time.

@@ -123,6 +123,7 @@ const SUBTITLE_DISABLED_SITES = new Set([
   "animewitcher", "aw",
   "sanime", "sa",
   "anifox", "fx",
+  "anslayer", "as",
 ]);
 
 function subtitlesDisabledForSite(site?: string): boolean {

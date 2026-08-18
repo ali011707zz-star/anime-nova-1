@@ -13488,6 +13488,8 @@ router.get("/anime/fetch-source", async (req, res) => {
     if (!requestedQuality) return rows;
     return rows.filter((s) => sourceCheckQuality(s).quality === requestedQuality);
   };
+  const stripAnimeSlayerSubtitles = <T extends { subtitleUrl?: string }>(rows: T[]): T[] =>
+    site === "anslayer" ? rows.map(({ subtitleUrl: _subtitleUrl, ...source }) => source as T) : rows;
 
   if (!site || !title) {
     res.status(400).json({ error: "site and title required", sources: [] });
@@ -13547,7 +13549,7 @@ router.get("/anime/fetch-source", async (req, res) => {
     return;
   }
   if (isAnivexaSite(site)) {
-    const sources = filterRequestedQuality(await getAnivexaSources(site, anilistId, ep, title, english, titleVariants));
+    const sources = stripAnimeSlayerSubtitles(filterRequestedQuality(await getAnivexaSources(site, anilistId, ep, title, english, titleVariants)));
     const isMobileClient = (req.headers["x-nova-client"] || "").toString().includes("mobile");
     const encSources = sources.map(source => {
       const wrapped = isMobileClient ? wrapForMobile(source) : source;
@@ -13562,7 +13564,7 @@ router.get("/anime/fetch-source", async (req, res) => {
     return;
   }
   if (isConsumetSite(site)) {
-    const sources = filterRequestedQuality(await getConsumetSources(site, title, english, ep, titleVariants, anilistId));
+    const sources = stripAnimeSlayerSubtitles(filterRequestedQuality(await getConsumetSources(site, title, english, ep, titleVariants, anilistId)));
     const isMobileClient = (req.headers["x-nova-client"] || "").toString().includes("mobile");
     const encSources = sources.map(source => {
       const wrapped = isMobileClient ? wrapForMobile(source) : source;
@@ -13624,7 +13626,7 @@ router.get("/anime/fetch-source", async (req, res) => {
     (cached.stale === true || (cached.expiresAt - Date.now()) < SHORT_TTL_MAX_AGE_MS);
   if (cached && !FORCE_LIVE_FETCH_SITES.has(site) &&
       !shouldRefreshCache(cached.expiresAt) && !skipCacheForShortTtl) {
-    const enc = filterRequestedQuality(cached.sources).map((s: UnifiedSource) => {
+     const enc = stripAnimeSlayerSubtitles(filterRequestedQuality(cached.sources)).map((s: UnifiedSource) => {
       // Cached Kawaii URLs can outlive a provider rotation. When the cached
       // raw URL points to Mewstream, rebuild the proxy URL and force the
       // provider's required Megaplay Referer instead of reusing a stale
@@ -13810,7 +13812,7 @@ async function getVidboltAnimeSources(
     }
 
     const isMobileClient = (req.headers["x-nova-client"] || "").toString().includes("mobile");
-    const encSources = filterRequestedQuality(sources).map(s => {
+    const encSources = stripAnimeSlayerSubtitles(filterRequestedQuality(sources)).map(s => {
       /* استخراج headers (Referer/Origin) قبل تشفير directUrl —
          يحتاجها ExoPlayer/AVPlayer للـ CDN segments مباشرةً.
          إذا كان ref مشفَّراً (hex AES) فهو رابط proxy داخلي — لا نُرسله كـ Referer. */
