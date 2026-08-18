@@ -15645,10 +15645,45 @@ async function streamKawaiiMp4(
   res: Response,
 ): Promise<boolean> {
   const target = proxyTargetFromLocalUrl(sourceUrl);
-  if (!target || target.isHls) return false;
   res.setHeader("Content-Disposition", `attachment; filename="nova-episode.mp4"`);
-  await serveMediaVPS(target.url, target.ref, req, res);
-  return res.headersSent;
+  if (target && !target.isHls) {
+    await serveMediaVPS(target.url, target.ref, req, res);
+    return res.headersSent;
+  }
+
+  // Some valid Kawaii URLs are rejected by the rotating CDN allow-list even
+  // though the local video proxy can fetch them. Reuse that already-verified
+  // route instead of falling back to a slow ffmpeg conversion of an MP4.
+  try {
+    const parsed = new URL(sourceUrl);
+    if (parsed.pathname !== "/api/anime/video-proxy") return false;
+    const controller = new AbortController();
+    const abort = () => controller.abort();
+    req.once("close", abort);
+    try {
+      const headers: Record<string, string> = {};
+      if (req.headers.range) headers.Range = String(req.headers.range);
+      if (req.headers["if-range"]) headers["If-Range"] = String(req.headers["if-range"]);
+      const upstream = await fetch(sourceUrl, { headers, signal: controller.signal });
+      for (const name of ["content-type", "content-length", "content-range", "accept-ranges"]) {
+        const value = upstream.headers.get(name);
+        if (value) res.setHeader(name, value);
+      }
+      res.status(upstream.status);
+      if (upstream.body) {
+        const { Readable } = await import("stream");
+        (Readable.fromWeb as Function)(upstream.body).pipe(res);
+      } else {
+        res.end();
+      }
+      return true;
+    } finally {
+      req.removeListener("close", abort);
+    }
+  } catch {
+    if (!res.headersSent) return false;
+    return true;
+  }
 }
 
 function cuesToVtt(body: string): string {
@@ -16814,7 +16849,7 @@ async function anilistFetchAndCache(body: any, cacheKey: string, ttl: number): P
   } catch { return null; }
 }
 
-router.post("/anilist", async (req, res) => {
+async function handleAnilistRequest(req: Request, res: Response) {
   const body        = normalizeAnilistRequest(req.body);
   const cacheKey    = metaHash(body);
   const ttl         = metaTtl(body);
@@ -16879,7 +16914,13 @@ router.post("/anilist", async (req, res) => {
 
   // 5️⃣ كل المصادر فشلت — هيكل فارغ بدل خطأ
   return res.json({ data: { Page: { media: [], pageInfo: { hasNextPage: false, total: 0 } }, Media: null } });
-});
+}
+
+// Keep both contracts alive: older mobile builds used /api/anime/anilist,
+// while the canonical endpoint is /api/anilist. The compatibility route is
+// intentionally handled by the exact same cache/fallback pipeline.
+router.post("/anilist", handleAnilistRequest);
+router.post("/anime/anilist", handleAnilistRequest);
 
 // ── Poster endpoint — جلب بوستر+قصة بـ AniList ID ─────────────────────────
 router.get("/anime/poster/:id", async (req, res) => {

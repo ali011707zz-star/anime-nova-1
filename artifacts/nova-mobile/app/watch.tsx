@@ -376,8 +376,12 @@ const PICKER_QUALITY: Record<QualityKey, Quality> = {
   "720p": "720p HD",
   "360p": "360p SD",
 };
+// The old GifDB file is ~64MB and commonly fails to decode on Android before
+// the picker becomes visible. Keep the visual cue, but use a small GIF that
+// can be decoded quickly on real devices; the Ionicons fallback remains
+// visible if the remote image is unavailable.
 const SERVER_CHECK_GIF =
-  "https://gifdb.com/images/branded/high/satoru-gojo-vs-ryomen-sukuna-gif-tt4cnmnevgpxt99u.gif";
+  "https://media.giphy.com/media/3o7bu3XilJ5BOiSGic/giphy.gif";
 
 /* أوّل جودة يظهر فيها كل موقع — يُستخدم لعرض زر التنزيل مرّة واحدة فقط.
    بدون هذا يُضاف اسم الموقع لـ dlFetchingSites فيظهر SpinRing

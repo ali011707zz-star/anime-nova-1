@@ -259,12 +259,13 @@ export default function AnimeDetailScreen() {
     const sourceCover = (Array.isArray(cover) ? cover[0] : cover) || "";
     const sourceEpisode = parseInt((Array.isArray(ep) ? ep[0] : ep) || "0", 10) || 0;
     const useProxy = async (query: string, variables: Record<string, unknown>) => {
-      const response = await fetch(`${base}/api/anime/anilist`, {
+      const response = await fetch(`${base}/api/anilist`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ query, variables }),
         signal: controller.signal,
       });
+      if (!response.ok) throw new Error(`anilist_${response.status}`);
       return response.json();
     };
     const useDirect = async (query: string, variables: Record<string, unknown>) => {
@@ -274,6 +275,7 @@ export default function AnimeDetailScreen() {
         body: JSON.stringify({ query, variables }),
         signal: controller.signal,
       });
+      if (!response.ok) throw new Error(`anilist_${response.status}`);
       return response.json();
     };
     const fetchDetails = async (viaProxy: boolean): Promise<any> => {

@@ -166,7 +166,10 @@ export default function EpisodeListScreen() {
           body: JSON.stringify({ query, variables }),
           cache: "no-store",
           signal: ctrl.signal,
-        }).then(r => r.json());
+        }).then(async r => {
+          if (!r.ok) throw new Error(`anilist_${r.status}`);
+          return r.json();
+        });
 
       if ((source === "mal" || source === "kitsu") && id) {
         return fetch(
