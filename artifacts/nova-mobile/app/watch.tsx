@@ -569,14 +569,11 @@ function ServerScanAnimation() {
 }
 
 /* React Native's Image component is not a reliable animated-GIF renderer on
-   all Expo/Android builds. A direct WebView URL keeps the GIF animation smooth
-   without showing the GIFDB page chrome. */
-/* Keep the animated loading treatment used by the web. GIFDB is preferred
-   because it is the stable asset for this card; Giphy remains a fallback. */
+   all Expo/Android builds. Load the exact GIF URL in a WebView instead of
+   embedding the GIFDB page or depending on a native image decoder. */
+/* GIFDB is the canonical asset used by the web; Giphy is only a bounded
+   fallback for Android networks that cannot reach GIFDB. */
 const SERVER_SCAN_GIFS = [
-  /* GIFDB is the same stable asset used by the web loading card.  Keep the
-     Giphy mirror as a fallback because some Android WebViews block one CDN
-     while allowing the other. */
   "https://gifdb.com/images/branded/high/satoru-gojo-vs-ryomen-sukuna-gif-tt4cnmnevgpxt99u.gif",
   "https://media.giphy.com/media/unGpfM6wCE_2Kotc/giphy.gif",
 ] as const;
@@ -587,18 +584,6 @@ function ServerScanGif() {
   /* Availability SSE causes frequent parent renders. Keep the WebView
      document stable so the GIF does not restart or disappear per event. */
   const gifUrl = SERVER_SCAN_GIFS[gifIndex] || SERVER_SCAN_GIFS[0];
-  const webViewSource = useMemo(
-    () => ({
-      html: `<!doctype html>
-<html><head><meta name="viewport" content="width=device-width,initial-scale=1"></head>
-<body style="margin:0;background:transparent;overflow:hidden">
-  <img src="${gifUrl.replace(/"/g, "&quot;")}"
-       style="display:block;width:100%;height:100%;object-fit:cover"
-       onerror="window.ReactNativeWebView && window.ReactNativeWebView.postMessage('gif-error')" />
-</body></html>`,
-    }),
-    [gifUrl],
-  );
   const handleGifFailure = () => {
     if (gifIndex < SERVER_SCAN_GIFS.length - 1) {
       setGifIndex((value) => value + 1);
@@ -617,24 +602,22 @@ function ServerScanGif() {
   if (failed) return <ServerScanAnimation />;
   return (
     <WebView
-      source={webViewSource}
+      /* Direct image navigation matches the web's <img src=...> path and
+         avoids an extra HTML document that can stay blank on Android while
+         the remote GIF is still decoding. */
+      source={{ uri: gifUrl }}
       style={d.availabilityGif}
       originWhitelist={["*"]}
-      javaScriptEnabled
-      domStorageEnabled
       scrollEnabled={false}
       overScrollMode="never"
       showsVerticalScrollIndicator={false}
       showsHorizontalScrollIndicator={false}
       pointerEvents="none"
       accessible={false}
-      cacheEnabled={false}
+      cacheEnabled
       cacheMode="LOAD_DEFAULT"
       androidLayerType="hardware"
       setSupportMultipleWindows={false}
-      onMessage={(event) => {
-        if (event.nativeEvent.data === "gif-error") handleGifFailure();
-      }}
       onError={handleGifFailure}
       onHttpError={handleGifFailure}
     />
@@ -878,18 +861,40 @@ export default function WatchScreen() {
     let cancelled = false;
     let timedOut = false;
 
+    /* Stage availability rows outside React state. The backend emits one row
+       per provider as soon as it finishes, but mobile must reveal the picker
+       only after the complete SSE scan, just like the web. */
+    const stagedSlots: Record<string, Partial<Record<QualityKey, AvailableSlot>>> = {};
+
     const applyRow = (row: any) => {
       const site = String(row?.site || "").trim();
       const qk = getAvailabilityQualityKey(row);
       if (!site || !qk || !allowedSites.has(site)) return;
-      setAvailableSlots(prev => ({
-        ...prev,
-        [site]: {
-          ...prev[site],
-          [qk]: { serverCount: Math.max(1, Number(row.serverCount) || 1) },
+      const previous = stagedSlots[site]?.[qk];
+      stagedSlots[site] = {
+        ...stagedSlots[site],
+        [qk]: {
+          serverCount: Math.max(
+            Number(previous?.serverCount) || 1,
+            Number(row.serverCount) || 1,
+          ),
+          name: typeof row?.name === "string" ? row.name : previous?.name,
+          tag: typeof row?.tag === "string" ? row.tag : previous?.tag,
+          qualityRank: Number(row?.qualityRank) || previous?.qualityRank,
         },
-      }));
-      setSlotStatus(prev => ({ ...prev, [pickerSlotKey(site, qk)]: "ready" }));
+      };
+    };
+
+    const commitRows = () => {
+      if (!isMountedRef.current) return;
+      const nextStatus: Record<string, "ready"> = {};
+      for (const [site, tiers] of Object.entries(stagedSlots)) {
+        for (const qk of Object.keys(tiers) as QualityKey[]) {
+          nextStatus[pickerSlotKey(site, qk)] = "ready";
+        }
+      }
+      setAvailableSlots(stagedSlots);
+      setSlotStatus(nextStatus);
     };
 
     const run = async () => {
@@ -904,13 +909,24 @@ export default function WatchScreen() {
         let buffer = "";
         const consume = (text: string) => {
           buffer += text;
-          const lines = buffer.split(/\r?\n/);
-          buffer = lines.pop() || "";
-          for (const line of lines) {
-            if (!line || line.startsWith("event: ")) continue;
-            if (!line.startsWith("data: ")) continue;
-            const payload = line.slice(6).trim();
-            if (!payload || payload === "[DONE]") continue;
+          const blocks = buffer.split(/\r?\n\r?\n/);
+          buffer = blocks.pop() || "";
+          for (const block of blocks) {
+            /* SSE permits event/data fields in either order and allows more
+               than one data line in a block. Keep only data fields; comments
+               are the server keepalive and must not affect parsing. */
+            const eventName = block
+              .split(/\r?\n/)
+              .find(line => line.startsWith("event:"))
+              ?.slice(6)
+              .trim()
+              .toLowerCase();
+            const payload = block
+              .split(/\r?\n/)
+              .filter(line => line.startsWith("data:"))
+              .map(line => line.slice(5).trim())
+              .join("\n");
+            if (!payload || payload === "[DONE]" || eventName === "done") continue;
             try {
               /* Match the web picker: a valid availability row is enough.
                  Some backend versions use a different SSE event name and
@@ -926,14 +942,36 @@ export default function WatchScreen() {
           if (done) break;
           if (value) consume(decoder.decode(value, { stream: true }));
         }
+        /* Flush TextDecoder and then parse a final SSE block even if the
+           server/proxy closes without appending the usual blank line. */
         consume(decoder.decode());
+        if (buffer.trim()) {
+          const eventName = buffer
+            .split(/\r?\n/)
+            .find(line => line.startsWith("event:"))
+            ?.slice(6)
+            .trim()
+            .toLowerCase();
+          const payload = buffer
+            .split(/\r?\n/)
+            .filter(line => line.startsWith("data:"))
+            .map(line => line.slice(5).trim())
+            .join("\n");
+          if (payload && payload !== "[DONE]" && eventName !== "done") {
+            try { applyRow(JSON.parse(payload)); } catch { /* ignore */ }
+          }
+          buffer = "";
+        }
       } catch {
         if ((timedOut || !controller.signal.aborted) && isMountedRef.current) {
           setAvailabilityError(true);
         }
       } finally {
         clearTimeout(timeoutId);
-        if (!cancelled && isMountedRef.current) setAvailabilityDone(true);
+        if (!cancelled && isMountedRef.current) {
+          commitRows();
+          setAvailabilityDone(true);
+        }
       }
     };
     const timeoutId = setTimeout(() => {
@@ -1764,7 +1802,7 @@ export default function WatchScreen() {
               </View>
               <SpinRing size={24} />
               <Text style={d.availabilityHeadline}>سوكونا يقاتل غوجو بجهد من اجل السيرفرات</Text>
-              <Text style={d.availabilityText}>يتم فحص جميع السيرفرات… ستظهر النتائج تباعاً ويمكنك التشغيل فوراً</Text>
+              <Text style={d.availabilityText}>يتم فحص جميع السيرفرات… ستظهر النتائج دفعة واحدة عند الجاهزية</Text>
             </View>
           )}
 
@@ -1786,7 +1824,7 @@ export default function WatchScreen() {
 
          {/* لا تظهر أي بطاقة أثناء الفحص. هذا هو الفاصل المرئي بين مرحلة
              availability في الويب ومرحلة منتقي المصادر. */}
-          {(availabilityDone || hasAvailableSlot) && Q_KEYS.map(qk => {
+           {availabilityDone && Q_KEYS.map(qk => {
             const pickerDefs = STATIC_PICKER[qk] || [];
            const dynamicSlots = Object.entries(availableSlots)
              .filter(([, tiers]) => !!tiers[qk])
