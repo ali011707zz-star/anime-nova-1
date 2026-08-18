@@ -268,9 +268,9 @@ export default function HomeScreen() {
               showsHorizontalScrollIndicator={false}
               contentContainerStyle={{ paddingHorizontal: 16, gap: 10 }}
               renderItem={({ item: ep }) => (
+                /* مثل الويب: أحدث الحلقات تمرّر معرّفي AniList وAnimeSlayer،
+                   لكنها لا تقفل منتقي السيرفرات على AnimeSlayer وحده. */
                 <Pressable
-                  {/* مثل الويب: أحدث الحلقات تمرّر معرّفي AniList وAnimeSlayer،
-                      لكنها لا تقفل منتقي السيرفرات على AnimeSlayer وحده. */}
                   onPress={() => router.push(`/watch?anime=${ep.animeId}&ep=${ep.episode}&title=${encodeURIComponent(ep.name || "")}&english=${encodeURIComponent(ep.name || "")}&cover=${encodeURIComponent(ep.cover || "")}&titleAr=${encodeURIComponent(ep.titleAr || "")}&anslayerId=${ep.anslayerId}` as any)}
                   style={[todayEpStyles.card, { backgroundColor: colors.card, borderColor: colors.border }]}
                 >
