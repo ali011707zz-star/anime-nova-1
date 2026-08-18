@@ -12956,7 +12956,30 @@ router.get("/anime/sources-stream", async (req, res) => {
     // Metadata-only: do not request an m3u8, segment, MP4, or proxy URL during
     // the picker scan. The source adapter's episode response and quality label
     // are enough to render the row; playback starts only after a tap.
-    await Promise.allSettled(srcs.map(async source => sendCheckSrc(source)));
+    await Promise.allSettled(srcs.map(async source => {
+      /* AnimeWitcher may return one master HLS URL whose database label is
+         only "HD". Inspecting its variant playlist is still availability-only
+         (no segments are requested), and prevents the latest-episodes picker
+         from collapsing 1080/720/480 into one AW row. */
+      if (String((source as any).site || "") === "animewitcher") {
+        const target = getAvailabilityManifestTarget(source);
+        if (target) {
+          const variants = await readAvailabilityManifest(target);
+          if (variants.length) {
+            for (const variant of variants) {
+              sendCheckSrc({
+                ...source,
+                quality: variant.quality,
+                qualityRank: variant.rank,
+                label: `AnimeWitcher · ${variant.quality}`,
+              });
+            }
+            return;
+          }
+        }
+      }
+      sendCheckSrc(source);
+    }));
   }
 
   function scheduleAvailability(srcs: UnifiedSource[]): void {

@@ -588,10 +588,17 @@ function ServerScanGif() {
      document stable so the GIF does not restart or disappear per event. */
   const gifUrl = SERVER_SCAN_GIFS[gifIndex] || SERVER_SCAN_GIFS[0];
   const webViewSource = useMemo(
-    () => ({ uri: gifUrl }),
+    () => ({
+      html: `<!doctype html>
+<html><head><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+<body style="margin:0;background:transparent;overflow:hidden">
+  <img src="${gifUrl.replace(/"/g, "&quot;")}"
+       style="display:block;width:100%;height:100%;object-fit:cover"
+       onerror="window.ReactNativeWebView && window.ReactNativeWebView.postMessage('gif-error')" />
+</body></html>`,
+    }),
     [gifUrl],
   );
-  if (failed) return <ServerScanAnimation />;
   const handleGifFailure = () => {
     if (gifIndex < SERVER_SCAN_GIFS.length - 1) {
       setGifIndex((value) => value + 1);
@@ -599,6 +606,15 @@ function ServerScanGif() {
       setFailed(true);
     }
   };
+  useEffect(() => {
+    /* A blocked CDN can leave WebView waiting forever without firing onError.
+       Give each mirror a bounded window, then use the same local animation
+       fallback as the web card instead of leaving a blank rectangle. */
+    const timeout = setTimeout(handleGifFailure, 10_000);
+    return () => clearTimeout(timeout);
+  }, [gifIndex]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  if (failed) return <ServerScanAnimation />;
   return (
     <WebView
       source={webViewSource}
@@ -612,8 +628,8 @@ function ServerScanGif() {
       showsHorizontalScrollIndicator={false}
       pointerEvents="none"
       accessible={false}
-      cacheEnabled
-      cacheMode="LOAD_CACHE_ELSE_NETWORK"
+      cacheEnabled={false}
+      cacheMode="LOAD_DEFAULT"
       androidLayerType="hardware"
       setSupportMultipleWindows={false}
       onMessage={(event) => {
@@ -860,6 +876,7 @@ export default function WatchScreen() {
       Q_KEYS.flatMap(q => STATIC_PICKER[q].map(s => s.site)),
     );
     let cancelled = false;
+    let timedOut = false;
 
     const applyRow = (row: any) => {
       const site = String(row?.site || "").trim();
@@ -911,14 +928,22 @@ export default function WatchScreen() {
         }
         consume(decoder.decode());
       } catch {
-        if (!controller.signal.aborted && isMountedRef.current) setAvailabilityError(true);
+        if ((timedOut || !controller.signal.aborted) && isMountedRef.current) {
+          setAvailabilityError(true);
+        }
       } finally {
+        clearTimeout(timeoutId);
         if (!cancelled && isMountedRef.current) setAvailabilityDone(true);
       }
     };
+    const timeoutId = setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, 32_000);
     void run();
     return () => {
       cancelled = true;
+      clearTimeout(timeoutId);
       controller.abort();
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1070,7 +1095,7 @@ export default function WatchScreen() {
       await warmAuthToken();
       const siteCtrl = new AbortController();
       /* تسجيل الـ controller لضمان إلغائه عند الخروج من الشاشة */
-      siteCtrls.current.set(site, siteCtrl);
+       siteCtrls.current.set(fetchKey, siteCtrl);
       const timeout = SITE_TIMEOUT_MAP[site] ?? SITE_TIMEOUT_MS;
       tid = setTimeout(() => siteCtrl.abort(), timeout);
       const res = await secureFetch(`${base}/api/anime/fetch-source?site=${site}&${qs}`, { signal: siteCtrl.signal });
@@ -1187,7 +1212,7 @@ export default function WatchScreen() {
       /* نضمن مسح الـ timeout دائماً — حتى عند abort أو خطأ */
       if (tid !== null) clearTimeout(tid);
       inFlightSitesRef.current.delete(fetchKey);
-      siteCtrls.current.delete(site); // تنظيف الـ controller بعد انتهاء الطلب
+       siteCtrls.current.delete(fetchKey); // تنظيف الـ controller بعد انتهاء الطلب
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [anime, epNum, titleStr, englishStr, titleArStr, format, year, episodes, native, playSrc, anslayerId, sources]);
@@ -1761,7 +1786,7 @@ export default function WatchScreen() {
 
          {/* لا تظهر أي بطاقة أثناء الفحص. هذا هو الفاصل المرئي بين مرحلة
              availability في الويب ومرحلة منتقي المصادر. */}
-             {availabilityDone && Q_KEYS.map(qk => {
+          {(availabilityDone || hasAvailableSlot) && Q_KEYS.map(qk => {
             const pickerDefs = STATIC_PICKER[qk] || [];
            const dynamicSlots = Object.entries(availableSlots)
              .filter(([, tiers]) => !!tiers[qk])

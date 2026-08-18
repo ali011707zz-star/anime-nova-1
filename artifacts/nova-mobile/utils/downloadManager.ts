@@ -98,8 +98,22 @@ function isPaused(entry: RuntimeDownload): boolean {
   return entry.status === "paused";
 }
 
-export function makeDownloadId(animeId: number, ep: number): string {
-  return `${animeId}_ep${ep}`;
+function variantKey(value: string | undefined): string {
+  return String(value || "auto")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "") || "auto";
+}
+
+export function makeDownloadId(
+  animeId: number,
+  ep: number,
+  site?: string,
+  quality?: string,
+): string {
+  const base = `${animeId}_ep${ep}`;
+  return site ? `${base}_${variantKey(site)}_${variantKey(quality)}` : base;
 }
 
 export function formatFileSize(bytes: number): string {
@@ -120,7 +134,9 @@ function safePathSegment(value: string): string {
 }
 
 function localPathFor(params: StartDownloadParams): string {
-  return `${DOWNLOADS_ROOT}${safePathSegment(params.title)}/${params.ep}.mp4`;
+  const site = safePathSegment(params.site || "source").toLowerCase();
+  const quality = variantKey(params.quality);
+  return `${DOWNLOADS_ROOT}${safePathSegment(params.title)}/${site}/${params.ep}-${quality}.mp4`;
 }
 
 async function ensureDirectoryFor(fileUri: string): Promise<void> {
@@ -152,9 +168,18 @@ async function saveDownloads(items: DownloadItem[]): Promise<void> {
 }
 
 /** Only a non-empty file is considered playable. */
-export async function isDownloaded(animeId: number, ep: number): Promise<DownloadItem | null> {
+export async function isDownloaded(
+  animeId: number,
+  ep: number,
+  site?: string,
+  quality?: string,
+): Promise<DownloadItem | null> {
   const items = await getDownloads();
-  const item = items.find((entry) => entry.id === makeDownloadId(animeId, ep));
+  const exactId = site ? makeDownloadId(animeId, ep, site, quality) : "";
+  const item = items
+    .filter((entry) => entry.animeId === animeId && entry.ep === ep)
+    .filter((entry) => !exactId || entry.id === exactId)
+    .sort((a, b) => b.downloadedAt - a.downloadedAt)[0];
   if (!item) return null;
 
   try {
@@ -588,7 +613,7 @@ function enqueueDownload(
   localPath?: string,
   autoStart = true,
 ): void {
-  const id = makeDownloadId(params.animeId, params.ep);
+  const id = makeDownloadId(params.animeId, params.ep, params.site, params.quality);
   cancelActiveDownload(id);
 
   const entry: RuntimeDownload = {
@@ -636,7 +661,8 @@ function enqueueDownload(
 export async function startGlobalDownload(params: StartDownloadParams): Promise<void> {
   await ensureDownloadsDir();
   const existing = await getDownloads();
-  const existingItem = existing.find((entry) => entry.id === makeDownloadId(params.animeId, params.ep));
+  const id = makeDownloadId(params.animeId, params.ep, params.site, params.quality);
+  const existingItem = existing.find((entry) => entry.id === id);
   if (existingItem) {
     await deleteDownload(existingItem);
   }
