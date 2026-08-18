@@ -281,6 +281,55 @@ function ensureVpsProxy(
   return url; // لا Referer متاح — استخدم كما هو
 }
 
+/* Kawaii signed media must be fetched by the VPS with the provider Referer.
+   Older API/cache rows can still contain the raw CDN URL, so normalize those
+   rows on mobile before they reach ExoPlayer. */
+const KAWAII_MOBILE_CDN_HOSTS = new Set([
+  "cdn.momentoai.dev",
+  "video.kawaii-anime.com",
+  "cdn.mewstream.buzz",
+]);
+
+function normalizeKawaiiMobileSource(source: Src, base: string): Src {
+  if (String(source.site || "").toLowerCase() !== "kawaii") return source;
+
+  const candidates = [source.rawUrl, source.url, source.directUrl]
+    .filter((value): value is string => typeof value === "string" && value.length > 0);
+  const rawUrl = candidates.find((value) => {
+    try {
+      return KAWAII_MOBILE_CDN_HOSTS.has(new URL(value).hostname.toLowerCase());
+    } catch {
+      return false;
+    }
+  });
+  if (!rawUrl) return source;
+
+  let host = "";
+  try { host = new URL(rawUrl).hostname.toLowerCase(); } catch {}
+  const isHls = source.directType === "hls"
+    || /\.m3u8(?:[?#]|$)/i.test(rawUrl)
+    || /\/(?:hls|playlist)(?:\/|[?#]|$)/i.test(rawUrl);
+  const referer = host === "cdn.mewstream.buzz"
+    ? "https://megaplay.buzz/"
+    : source.headers?.Referer || "https://kawaiianime.cc/";
+  const proxyPath = isHls ? "/api/anime/hls-proxy" : "/api/anime/video-proxy";
+  const proxyUrl = `${base}${proxyPath}?url=${encodeURIComponent(rawUrl)}&ref=${encodeURIComponent(referer)}`;
+
+  return {
+    ...source,
+    url: proxyUrl,
+    directUrl: proxyUrl,
+    rawUrl,
+    directType: isHls ? "hls" : "mp4",
+    corsOk: false,
+    headers: {
+      ...(source.headers || {}),
+      Referer: referer,
+      Origin: new URL(referer).origin,
+    },
+  };
+}
+
 function buildEmbeddedDownloadUrl(
   site: string,
   mediaUrl: string,
@@ -496,11 +545,14 @@ function ServerScanAnimation() {
 /* React Native's Image component is not a reliable animated-GIF renderer on
    all Expo/Android builds.  A tiny WebView keeps the GIF animation smooth,
    matching the web loading screen, without showing the GIFDB page chrome. */
-/* Keep the animated loading treatment used by the web. The requested Giphy
-   asset is primary; the existing GIFDB asset remains as a network fallback. */
+/* Keep the animated loading treatment used by the web. GIFDB is preferred
+   because it is the stable asset for this card; Giphy remains a fallback. */
 const SERVER_SCAN_GIFS = [
-  "https://media.giphy.com/media/unGpfM6wCE_2Kotc/giphy.gif",
+  /* GIFDB is the same stable asset used by the web loading card.  Keep the
+     Giphy mirror as a fallback because some Android WebViews block one CDN
+     while allowing the other. */
   "https://gifdb.com/images/branded/high/satoru-gojo-vs-ryomen-sukuna-gif-tt4cnmnevgpxt99u.gif",
+  "https://media.giphy.com/media/unGpfM6wCE_2Kotc/giphy.gif",
 ] as const;
 
 function ServerScanGif() {
@@ -510,7 +562,7 @@ function ServerScanGif() {
      document stable so the GIF does not restart or disappear per event. */
   const gifUrl = SERVER_SCAN_GIFS[gifIndex] || SERVER_SCAN_GIFS[0];
   const html = useMemo(
-    () => `<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1"></head><body><img src="${gifUrl}" alt="" /></body><style>html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#07070d}img{display:block;width:100%;height:100%;object-fit:cover}</style></html>`,
+    () => `<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1"></head><body><img src="${gifUrl}" alt="" onerror="window.ReactNativeWebView&&window.ReactNativeWebView.postMessage('gif-error')" /></body><style>html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#07070d}img{display:block;width:100%;height:100%;object-fit:cover}</style></html>`,
     [gifUrl],
   );
   const webViewSource = useMemo(
@@ -538,6 +590,13 @@ function ServerScanGif() {
       showsHorizontalScrollIndicator={false}
       pointerEvents="none"
       accessible={false}
+      cacheEnabled
+      cacheMode="LOAD_CACHE_ELSE_NETWORK"
+      androidLayerType="hardware"
+      setSupportMultipleWindows={false}
+      onMessage={(event) => {
+        if (event.nativeEvent.data === "gif-error") handleGifFailure();
+      }}
       onError={handleGifFailure}
       onHttpError={handleGifFailure}
     />
@@ -1017,16 +1076,17 @@ export default function WatchScreen() {
         return;
       }
 
-       const mappedSrcs = rawSrcs
+        const mappedSrcs = rawSrcs
         .map((s): Src => {
           const sourceSite = s.site || site;
-          return {
+           const mapped: Src = {
             ...s,
             site: sourceSite,
             directUrl: resolveUrl(s.directUrl, base),
             url: resolveUrl(s.url, base),
             subtitleUrl: normalizeProviderSubtitleUrl(sourceSite, s.subtitleUrl, base),
           };
+           return normalizeKawaiiMobileSource(mapped, base);
         })
         .filter(s => !isBlockedSource(s))
         .filter(s => !(s.isEmbed && s.url && (s.url.includes("mega.nz") || s.url.includes("mega.co.nz"))))
@@ -1248,16 +1308,17 @@ export default function WatchScreen() {
       const rawSrcs: Src[] = data.sources || [];
       if (!rawSrcs.length) throw new Error("no sources");
 
-      const newSrcs = rawSrcs
+       const newSrcs = rawSrcs
         .map((s): Src => {
           const sourceSite = s.site || site;
-          return {
+           const mapped: Src = {
             ...s,
             site: sourceSite,
             directUrl: resolveUrl(s.directUrl, base),
             url: resolveUrl(s.url, base),
             subtitleUrl: normalizeProviderSubtitleUrl(sourceSite, s.subtitleUrl, base),
           };
+           return normalizeKawaiiMobileSource(mapped, base);
         })
         .filter(s => !isBlockedSource(s))
         .filter(s => !(s.isEmbed && s.url && (s.url.includes("mega.nz") || s.url.includes("mega.co.nz"))))
@@ -1696,20 +1757,25 @@ export default function WatchScreen() {
 
          {/* لا تظهر أي بطاقة أثناء الفحص. هذا هو الفاصل المرئي بين مرحلة
              availability في الويب ومرحلة منتقي المصادر. */}
-          {(availabilityDone || Object.keys(availableSlots).length > 0) && (singleSite === "anslayer" ? (["1080p", "720p"] as QualityKey[]) : Q_KEYS).map(qk => {
-          const staticSlots = singleSite === "anslayer"
-            ? (ANSLAYER_PICKER[qk] || [])
-            : singleSite
-              ? (STATIC_PICKER[qk] || []).filter(slot => slot.site === singleSite)
-              : (STATIC_PICKER[qk] || []);
-          const dynamicSlots = Object.entries(availableSlots)
+            {availabilityDone && (singleSite === "anslayer" ? (["1080p", "720p"] as QualityKey[]) : Q_KEYS).map(qk => {
+           const pickerDefs = singleSite === "anslayer"
+             ? (ANSLAYER_PICKER[qk] || [])
+             : (STATIC_PICKER[qk] || []);
+           const dynamicSlots = Object.entries(availableSlots)
             .filter(([site, tiers]) => !!tiers[qk] && (!singleSite || site === singleSite))
-            .map(([site, tiers]) => ({
-              site,
-              name: tiers[qk]?.name || SITE_LABEL[site] || site,
-              tag: tiers[qk]?.tag || getSiteTag(site),
-            }));
-          const slots = dynamicSlots.length > 0 ? dynamicSlots : staticSlots;
+             .map(([site, tiers]) => {
+               const pickerDef = pickerDefs.find(def => def.site === site);
+               return {
+                 site,
+                 name: pickerDef?.name || tiers[qk]?.name || SITE_LABEL[site] || site,
+                 tag: pickerDef?.tag || tiers[qk]?.tag || getSiteTag(site),
+               };
+             });
+           /* Do not fall back to the static catalog after the scan. The web
+              picker renders only provider/quality rows confirmed by
+              mode=check; using STATIC_PICKER here was the source of phantom
+              mobile rows and web/mobile list drift. */
+           const slots = dynamicSlots;
            if (!slots.length) return null;
           const dotColor = qk === "1080p" ? "#fbbf24" : qk === "720p" ? "#34d399" : "#94a3b8";
           return (

@@ -703,7 +703,7 @@ export function RiftPlayer({
     if (initialPosition && initialPosition > 5) {
       try { p.currentTime = initialPosition; } catch {}
     }
-    /* Buffer tuning — هامش أمامي أكبر لتقليل التقطيع، مع تجنّب buffer ضخم
+     /* Buffer tuning — هامش أمامي أكبر لتقليل التقطيع، مع تجنّب buffer ضخم
        ⚠️ bufferForPlaybackMs=150 كان يُسبّب crash فوري في ExoPlayer على بعض
           الأجهزة لأنه يحاول decode الفيديو قبل أن يجمع Media3 بيانات كافية.
        ⚠️ maxBufferMs=30000 كان يُسبّب OOM على الأجهزة منخفضة الذاكرة.
@@ -711,12 +711,12 @@ export function RiftPlayer({
           المُشغَّل في الذاكرة → يُضاعف استهلاك الذاكرة. */
     try {
       (p as any).bufferOptions = {
-        preferredForwardBufferDuration: 6,  // iOS: لا تنتظر 20ث قبل أول صورة
-        waitsToMinimizeStalling: false,    // ابدأ بعد أول buffer صالح ثم عالج التقطيع
-        minBufferMs: 1000,                 // Android: بداية أسرع للمصادر البطيئة
-        maxBufferMs: 12000,                // Android: يمنع تراكم buffers أثناء fallback
-        bufferForPlaybackMs: 750,          // Android: أول تشغيل بعد buffer صغير آمن
-        bufferForPlaybackAfterRebufferMs: 1800,
+         preferredForwardBufferDuration: 8,  // iOS: هامش أمامي مع بدء سريع
+         waitsToMinimizeStalling: false,    // ابدأ بعد أول buffer صالح ثم عالج التقطيع
+         minBufferMs: 3000,                 // Android: لا يعيد التشغيل بعد كل segment بطيء
+         maxBufferMs: 24000,                // Android: هامش كافٍ للـ CDN مع تجنب OOM
+         bufferForPlaybackMs: 1000,         // Android: أول تشغيل بعد buffer صغير آمن
+         bufferForPlaybackAfterRebufferMs: 3500,
         backBufferDurationMs: 3000,         // Android: ذاكرة خلفية صغيرة
       };
     } catch {}
@@ -846,17 +846,17 @@ export function RiftPlayer({
       if (!aliveRef.current || isStale()) return;
       if (e.status === "loading") {
         setBuffering(true);
-        /* إذا بقي التحميل أكثر من 12ث (شاشة سوداء) نعامله كخطأ ونتجاوز للمصدر التالي.
-           25ث كان طويلاً جداً: 10 مصادر × 25ث = 250ث انتظار + OOM من الـ buffers المتراكمة.
-           12ث كافٍ لأغلب HLS streams مع هامش للشبكات البطيئة. */
+         /* إذا بقي التحميل أكثر من 18ث (شاشة سوداء) نعامله كخطأ ونتجاوز للمصدر التالي.
+            25ث كان طويلاً جداً: 10 مصادر × 25ث = 250ث انتظار + OOM من الـ buffers المتراكمة.
+            18ث يسمح بتأخر أول manifest/segment عبر proxy بدون إبقاء مصدر ميت عالقاً. */
         if (loadTimeoutRef.current) clearTimeout(loadTimeoutRef.current);
         loadTimeoutRef.current = setTimeout(() => {
           loadTimeoutRef.current = null;
           if (!aliveRef.current || isStale()) return;
-          console.warn(`[RiftPlayer] ⏱ timeout (12s) — ${playableSources[srcIdx]?.label || "?"}: ${playableSources[srcIdx]?.url?.slice(0, 80)}`);
+           console.warn(`[RiftPlayer] ⏱ timeout (18s) — ${playableSources[srcIdx]?.label || "?"}: ${playableSources[srcIdx]?.url?.slice(0, 80)}`);
           setError(true);
           setBuffering(false);
-        }, 12000);
+         }, 18000);
       } else {
         /* أي حالة غير loading → ألغِ الـ timeout */
         if (loadTimeoutRef.current) { clearTimeout(loadTimeoutRef.current); loadTimeoutRef.current = null; }
