@@ -261,11 +261,11 @@ export default function AnimeDetail() {
       p.then(d => {
         if (cancelled) return;
         let a = d.data?.Media;
-        if (!a && idSource === "anslayer" && sourceTitle) {
-          /* AnimeSlayer IDs are catalog IDs, not AniList IDs. Some latest-feed
-             titles are absent from AniList or only appear through a different
-             Kitsu fallback result. Never show that different anime; keep the
-             feed title and cover so the details page remains usable. */
+        if (!a && sourceTitle) {
+          /* Catalog cards may carry a provider id, and AniList can also be
+             temporarily unavailable. Never replace the selected card with a
+             different fallback anime; keep its title/cover so episodes remain
+             reachable. */
           const fallbackCover = searchParams.get("cover") || "";
           const fallbackEp = parseInt(searchParams.get("ep") || "0", 10) || 0;
           a = {
@@ -341,6 +341,25 @@ export default function AnimeDetail() {
       }).catch(() => {
         if (!cancelled) {
           if (useProxy) { doFetch(false); return; }
+          if (sourceTitle) {
+            const fallbackCover = searchParams.get("cover") || "";
+            setAnime({
+              id: parseInt(params.id!, 10),
+              idMal: null,
+              title: { romaji: sourceTitle, english: sourceTitle, native: sourceTitle },
+              description: "",
+              bannerImage: fallbackCover || null,
+              coverImage: { large: fallbackCover, extraLarge: fallbackCover },
+              averageScore: 0, popularity: 0, favourites: 0,
+              status: "RELEASING", episodes: parseInt(searchParams.get("ep") || "0", 10) || 0,
+              duration: 0, seasonYear: null, season: null, format: "TV", source: null,
+              startDate: { year: null, month: null, day: null },
+              endDate: { year: null, month: null, day: null },
+              genres: [], studios: { nodes: [] }, characters: { edges: [] },
+              relations: { edges: [] }, recommendations: { nodes: [] },
+              nextAiringEpisode: null, rankings: [], trailer: null, isAdult: false,
+            });
+          }
           setLoading(false);
         }
       });

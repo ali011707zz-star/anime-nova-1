@@ -15694,6 +15694,7 @@ router.get("/anime/download-mp4", async (req, res) => {
          resumable through the Range handling below. */
       "-rw_timeout", "120000000",
       "-protocol_whitelist", "file,http,https,tcp,tls,crypto",
+      "-allowed_extensions", "ALL",
       "-i", sourceUrl,
       "-map", "0:v:0",
       "-map", "0:a:0?",

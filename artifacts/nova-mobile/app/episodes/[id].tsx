@@ -23,6 +23,11 @@ query ($id: Int) {
   }
 }`;
 
+const ANIME_BY_SEARCH_QUERY = ANIME_QUERY.replace(
+  "query ($id: Int) {\n  Media(id: $id, type: ANIME)",
+  "query ($search: String) {\n  Media(search: $search, type: ANIME)",
+);
+
 function extractArabicTitle(synonyms?: string[]): string {
   if (!synonyms) return "";
   return synonyms.find(s => /[\u0600-\u06FF]/.test(s)) || "";
@@ -61,7 +66,7 @@ function EpisodeRow({
 }) {
   const ep = epData?.find((e: any) => e.mal_id === n || e.episode_id === n);
   const thumb = ep?.images?.jpg?.image_url || anime?.coverImage?.large;
-  const originalTitle = ep?.title_romanji || ep?.title || "";
+  const originalTitle = ep?.title || ep?.title_romanji || "";
   const arabicTitle = episodeTitlesAr[n] || "";
   const durationMin = anime?.duration || 24;
   const dur = durationMin >= 60
@@ -114,7 +119,14 @@ function EpisodeRow({
 }
 
 export default function EpisodeListScreen() {
-  const { id } = useLocalSearchParams<{ id: string }>();
+  const { id, src, title, english, cover, ep } = useLocalSearchParams<{
+    id: string;
+    src?: string;
+    title?: string;
+    english?: string;
+    cover?: string;
+    ep?: string;
+  }>();
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const topPad = Platform.OS === "web" ? 0 : insets.top;
@@ -136,22 +148,83 @@ export default function EpisodeListScreen() {
     getWatched(id).then(v => { if (!ctrl.signal.aborted) setWatched(v); });
     getCommentCounts(id).then(v => { if (!ctrl.signal.aborted) setCommentCounts(v); });
 
-    fetch(`${getBaseUrl()}/api/anilist`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ query: ANIME_QUERY, variables: { id: parseInt(id) } }),
-      cache: "no-store",
-      signal: ctrl.signal,
-    }).then(r => r.json()).then(d => {
+    const base = getBaseUrl();
+    const source = Array.isArray(src) ? src[0] : src;
+    const sourceTitle = (
+      (Array.isArray(title) ? title[0] : title)
+      || (Array.isArray(english) ? english[0] : english)
+      || ""
+    ).trim();
+    const sourceCover = (Array.isArray(cover) ? cover[0] : cover) || "";
+    const sourceEpisode = parseInt((Array.isArray(ep) ? ep[0] : ep) || "0", 10) || 0;
+
+    const fetchMeta = async (useProxy: boolean): Promise<any> => {
+      const request = (query: string, variables: Record<string, unknown>) =>
+        fetch(`${base}${useProxy ? "/api/anime/anilist" : "/api/anilist"}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "Accept": "application/json" },
+          body: JSON.stringify({ query, variables }),
+          cache: "no-store",
+          signal: ctrl.signal,
+        }).then(r => r.json());
+
+      if ((source === "mal" || source === "kitsu") && id) {
+        return fetch(
+          `${base}/api/anime/meta-by-id?id=${encodeURIComponent(id)}&source=${source}`,
+          { cache: "no-store", signal: ctrl.signal },
+        ).then(r => r.json());
+      }
+      if ((source === "anslayer" || !/^\d+$/.test(String(id || ""))) && sourceTitle) {
+        return request(ANIME_BY_SEARCH_QUERY, { search: sourceTitle });
+      }
+      return request(ANIME_QUERY, { id: parseInt(id, 10) });
+    };
+
+    fetchMeta(true).then(async d => {
       if (ctrl.signal.aborted) return;
-      const a = d.data?.Media;
+      let a = d.data?.Media;
+
+      // The proxy is the source of truth for the mobile app, but keep a
+      // direct AniList retry for transient VPS/upstream failures.
+      if (!a && source !== "mal" && source !== "kitsu") {
+        try {
+          const direct = await fetchMeta(false);
+          a = direct?.data?.Media;
+        } catch {}
+      }
+
+      // Source cards can use catalog ids that AniList does not know. Keep the
+      // card usable instead of showing a dead details/episodes screen.
+      if (!a && sourceTitle) {
+        a = {
+          id: parseInt(id, 10) || 0,
+          idMal: null,
+          title: { romaji: sourceTitle, english: sourceTitle, native: sourceTitle },
+          coverImage: { large: sourceCover, extraLarge: sourceCover },
+          bannerImage: sourceCover || null,
+          episodes: sourceEpisode || 0,
+          duration: 0, status: "RELEASING", format: "TV",
+          averageScore: 0, genres: [],
+        };
+      }
       setAnime(a);
       setEpisodeTitlesAr({});
       if (a?.idMal) {
-        fetch(`https://api.jikan.moe/v4/anime/${a.idMal}/episodes?page=1`, { signal: ctrl.signal })
+        fetch(`${base}/api/anime/episode-titles?malId=${a.idMal}&page=1`, { signal: ctrl.signal })
           .then(r => r.json())
-          .then(d => { if (!ctrl.signal.aborted && d.data) setEpData(d.data); })
-          .catch((e) => { if (e?.name !== "AbortError") console.warn("[Episodes] jikan fetch error"); });
+          .then(d => {
+            if (!ctrl.signal.aborted && Array.isArray(d?.episodes)) setEpData(d.episodes);
+          })
+          .catch((e) => {
+            if (e?.name === "AbortError") return;
+            // Last resort for an already-rendered details page.
+            fetch(`https://api.jikan.moe/v4/anime/${a.idMal}/episodes?page=1`, { signal: ctrl.signal })
+              .then(r => r.json())
+              .then(fallback => {
+                if (!ctrl.signal.aborted && Array.isArray(fallback?.data)) setEpData(fallback.data);
+              })
+              .catch(() => {});
+          });
       }
     }).catch((e) => { if (e?.name !== "AbortError") console.warn("[Episodes] anilist fetch error"); })
       .finally(() => { if (!ctrl.signal.aborted) setLoading(false); });
@@ -200,7 +273,7 @@ export default function EpisodeListScreen() {
     const eng = encodeURIComponent(anime?.title?.english || "");
     const fmt = encodeURIComponent(anime?.format || "");
     const epInfo = epData?.find((e: any) => e.mal_id === n || e.episode_id === n);
-    const epTitleRaw = epInfo?.title_romanji || epInfo?.title || "";
+    const epTitleRaw = epInfo?.title || epInfo?.title_romanji || "";
     const et = epTitleRaw ? `&etitle=${encodeURIComponent(epTitleRaw)}` : "";
     const totalParam = total > 0 ? `&totalEps=${total}` : "";
     const coverParam = anime?.coverImage?.large ? `&cover=${encodeURIComponent(anime.coverImage.extraLarge || anime.coverImage.large)}` : "";
@@ -246,7 +319,10 @@ export default function EpisodeListScreen() {
   /* ترجمة عناوين الصفحة الحالية دفعةً بدفعة، مع الاعتماد على كاش الخادم */
   useEffect(() => {
     const pending = displayedEps
-      .map(n => ({ n, title: epData.find((e: any) => e.mal_id === n || e.episode_id === n)?.title_romanji || epData.find((e: any) => e.mal_id === n || e.episode_id === n)?.title || "" }))
+      .map(n => {
+        const ep = epData.find((e: any) => e.mal_id === n || e.episode_id === n);
+        return { n, title: ep?.title || ep?.title_romanji || "" };
+      })
       .filter(item => item.title && !episodeTitlesAr[item.n]);
     if (!pending.length) return;
     let cancelled = false;

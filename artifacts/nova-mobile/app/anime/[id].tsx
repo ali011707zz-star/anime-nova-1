@@ -534,7 +534,17 @@ export default function AnimeDetailScreen() {
         {/* ── Watch buttons ── */}
         <View style={{ paddingHorizontal: 16, marginTop: nextEp && countdown && countdown > 0 ? 8 : 16, flexDirection: "row", gap: 10 }}>
           <Pressable
-            onPress={() => router.push({ pathname: "/episodes/[id]", params: { id } } as any)}
+            onPress={() => router.push({
+              pathname: "/episodes/[id]",
+              params: {
+                id,
+                ...(src ? { src } : {}),
+                ...(title ? { title } : {}),
+                ...(english ? { english } : {}),
+                ...(cover ? { cover } : {}),
+                ...(ep ? { ep } : {}),
+              },
+            } as any)}
             style={[d.watchBtn, { flex: 1 }]}
           >
             <View style={d.watchBtnIcon}>
