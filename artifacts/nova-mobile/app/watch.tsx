@@ -310,6 +310,40 @@ function normalizeKawaiiSubtitleUrl(url: string | undefined, base: string): stri
   return normalizeProviderSubtitleUrl("kawaii", url, base);
 }
 
+/**
+ * Reusable subtitle lookup for both the background metadata load and the
+ * download button. The button can be pressed before the effect completes.
+ */
+async function fetchArabicSubtitleUrl(
+  animeId: string,
+  ep: number,
+  base: string,
+  signal?: AbortSignal,
+): Promise<string | undefined> {
+  try {
+    const response = await secureFetch(
+      `${base}/api/anime/kawaii-meta?anilistId=${encodeURIComponent(animeId)}&ep=${ep}`,
+      { signal, headers: { Accept: "application/json" } },
+    );
+    if (!response.ok) return undefined;
+    const data = await response.json() as {
+      arabicSubUrl?: unknown;
+      englishSubUrl?: unknown;
+    };
+    const rawArabic = typeof data.arabicSubUrl === "string" ? data.arabicSubUrl : "";
+    const rawEnglish = typeof data.englishSubUrl === "string" ? data.englishSubUrl : "";
+    const raw = rawArabic || rawEnglish;
+    if (!raw) return undefined;
+    const proxied = normalizeKawaiiSubtitleUrl(raw, base);
+    if (!proxied) return undefined;
+    return rawArabic
+      ? proxied
+      : `${base}/api/anime/translate-vtt?url=${encodeURIComponent(proxied)}&from=en&to=ar`;
+  } catch {
+    return undefined;
+  }
+}
+
 /* ── مصادر تُشغَّل native مباشرةً عبر RiftPlayer (seg-proxy يُعيد روابط مطلقة الآن) ── */
 
 /* ── أولويات المصادر: KW → MP → AN → AK → AW → rest ── */
@@ -575,25 +609,10 @@ export default function WatchScreen() {
     setGlobalSubUrl(undefined);
     const ctrl = new AbortController();
     const base = getBaseUrl();
-    secureFetch(`${base}/api/anime/kawaii-meta?anilistId=${encodeURIComponent(anime)}&ep=${epNum}`, {
-      signal: ctrl.signal,
-      headers: { Accept: "application/json" },
-    })
-      .then(r => r.ok ? r.json() : null)
-      .then((data: any) => {
-        if (ctrl.signal.aborted || !data) return;
-        const rawArabic = typeof data.arabicSubUrl === "string" ? data.arabicSubUrl : "";
-        const rawEnglish = typeof data.englishSubUrl === "string" ? data.englishSubUrl : "";
-        const raw = rawArabic || rawEnglish;
-        if (!raw) return;
-        const proxied = normalizeKawaiiSubtitleUrl(raw, base);
-        if (!proxied) return;
-        const subtitleUrl = rawArabic
-          ? proxied
-          : `${base}/api/anime/translate-vtt?url=${encodeURIComponent(proxied)}&from=en&to=ar`;
-        setGlobalSubUrl(subtitleUrl);
-      })
-      .catch(() => {});
+    fetchArabicSubtitleUrl(anime, epNum, base, ctrl.signal)
+      .then(subtitleUrl => {
+        if (!ctrl.signal.aborted && subtitleUrl) setGlobalSubUrl(subtitleUrl);
+      });
     return () => ctrl.abort();
   }, [anime, epNum]);
 
@@ -753,9 +772,10 @@ export default function WatchScreen() {
     setScreen("picker");
     const coverParam = coverUrl ? `&cover=${encodeURIComponent(coverUrl)}` : "";
     const arParam    = titleArStr ? `&titleAr=${encodeURIComponent(titleArStr)}` : "";
-    const latestParams = anslayerId
-      ? `&anslayerId=${encodeURIComponent(anslayerId)}`
-      : "";
+    const latestParams = [
+      anslayerId ? `&anslayerId=${encodeURIComponent(anslayerId)}` : "",
+      singleSite ? `&single=1&site=${encodeURIComponent(singleSite)}` : "",
+    ].join("");
     router.replace(`/watch?anime=${anime}&ep=${n}&title=${encodeURIComponent(titleStr)}&english=${encodeURIComponent(englishStr)}&format=${encodeURIComponent(format || "")}${coverParam}${arParam}${latestParams}`);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [saveProgress, coverUrl, titleArStr, router, anime, titleStr, englishStr, format, singleSite, anslayerId]);
@@ -1007,7 +1027,10 @@ export default function WatchScreen() {
     const subRaw     = subtitlesDisabledForSite(site)
       ? undefined
       : (best.subtitleUrl || globalSubUrl);
-     const subtitleUrl = normalizeProviderSubtitleUrl(site, subRaw, base);
+    const subtitleCandidate = DOWNLOAD_SUBTITLE_SITES.has(site) && !subtitlesDisabledForSite(site)
+      ? subRaw || (await fetchArabicSubtitleUrl(anime || "0", epNum, base))
+      : subRaw;
+    const subtitleUrl = normalizeProviderSubtitleUrl(site, subtitleCandidate, base);
 
     const token = await getAuthToken();
     /* Fire-and-forget — يعمل في الخلفية بمستقل عن lifecycle هذه الشاشة */
@@ -1105,7 +1128,10 @@ export default function WatchScreen() {
       const hdrs      = best.headers || extractProxyHeaders(rawUrl);
       const proxyUrl  = ensureVpsProxy(rawUrl, hdrs, base, best.directType === "hls");
       const subRaw    = best.subtitleUrl || globalSubUrl;
-       const subtitleUrl = normalizeProviderSubtitleUrl(site, subRaw, base);
+       const subtitleCandidate = DOWNLOAD_SUBTITLE_SITES.has(site) && !subtitlesDisabledForSite(site)
+         ? subRaw || (await fetchArabicSubtitleUrl(anime || "0", epNum, base))
+         : subRaw;
+       const subtitleUrl = normalizeProviderSubtitleUrl(site, subtitleCandidate, base);
       const token     = await getAuthToken();
        if (DOWNLOAD_SUBTITLE_SITES.has(site) && !subtitleUrl) {
          throw new Error("Arabic subtitle is not ready");
@@ -1773,20 +1799,20 @@ const d = StyleSheet.create({
   qPillDot:      { width: 6, height: 6, borderRadius: 3 },
 
   /* ── Web-style server row ── */
-  webRow:         { flexDirection: "row", alignItems: "center", paddingHorizontal: 14, paddingVertical: 14, gap: 10 },
+  webRow:         { flexDirection: "row", alignItems: "center", paddingHorizontal: 10, paddingVertical: 11, gap: 7 },
   webRowBorder:   { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: "rgba(255,255,255,0.06)" },
   webRowPlayIcon: { alignItems: "center", justifyContent: "center", flexShrink: 0 },
-  webRowActions: { flexDirection: "row", alignItems: "center", gap: 6, flexShrink: 0 },
-  webRowName:     { flex: 1, fontSize: 13, fontFamily: "Cairo_800ExtraBold", color: "rgba(255,255,255,0.48)", textAlign: "right" } as any,
-  webRowTag:      { fontFamily: "Cairo_800ExtraBold", letterSpacing: 0.4, fontSize: 11, color: "rgba(255,255,255,0.60)" },
+  webRowActions: { flexDirection: "row", alignItems: "center", gap: 4, flexShrink: 0 },
+  webRowName:     { flex: 1, minWidth: 0, fontSize: 13, fontFamily: "Cairo_800ExtraBold", color: "rgba(255,255,255,0.48)", textAlign: "right" } as any,
+  webRowTag:      { flex: 1, minWidth: 0, flexShrink: 1, fontFamily: "Cairo_800ExtraBold", letterSpacing: 0.2, fontSize: 10, lineHeight: 16, color: "rgba(255,255,255,0.60)" },
   webRowRight:    { flexDirection: "row", alignItems: "center", gap: 7, flexShrink: 0 },
   webRowDot:      { width: 8, height: 8, borderRadius: 4 },
 
   /* ── أزرار الاختيار/التشغيل ── */
-  pickBtn:        { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 10, backgroundColor: "rgba(124,58,237,0.18)", borderWidth: 1, borderColor: "rgba(139,92,246,0.35)" },
-  pickBtnText:    { fontSize: 12, fontFamily: "Cairo_700Bold", color: "#c4b5fd" },
-  playBtnGreen:   { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 11, paddingVertical: 6, borderRadius: 10, backgroundColor: "rgba(16,185,129,0.88)", borderWidth: 1, borderColor: "rgba(52,211,153,0.35)" },
-  playBtnGreenText: { fontSize: 12, fontFamily: "Cairo_800ExtraBold", color: "#fff" },
+  pickBtn:        { paddingHorizontal: 9, paddingVertical: 5, borderRadius: 9, backgroundColor: "rgba(124,58,237,0.18)", borderWidth: 1, borderColor: "rgba(139,92,246,0.35)" },
+  pickBtnText:    { fontSize: 11, fontFamily: "Cairo_700Bold", color: "#c4b5fd" },
+  playBtnGreen:   { flexDirection: "row", alignItems: "center", gap: 3, paddingHorizontal: 9, paddingVertical: 5, borderRadius: 9, backgroundColor: "rgba(16,185,129,0.88)", borderWidth: 1, borderColor: "rgba(52,211,153,0.35)" },
+  playBtnGreenText: { fontSize: 11, fontFamily: "Cairo_800ExtraBold", color: "#fff" },
 
   /* ── Download button ── */
   dlIconBtn:     { width: 40, height: 40, borderRadius: 12, backgroundColor: "rgba(139,92,246,0.14)", borderWidth: 1, borderColor: "rgba(139,92,246,0.28)", alignItems: "center", justifyContent: "center" },
