@@ -5,6 +5,7 @@ import {
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
+import { WebView } from "react-native-webview";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { RiftPlayer, PlayerSource } from "@/components/RiftPlayer";
 import { HiddenResolverWebView, ResolvedStream } from "@/components/HiddenResolverWebView";
@@ -157,7 +158,15 @@ const Q_LABEL: Record<Quality, string> = {
 
 function getSrcQuality(s: Src): Quality {
   const rank = s.qualityRank ?? 0;
-  const text = `${s.label || ""} ${s.name || ""} ${s.quality || ""} ${s.url || ""} ${s.directUrl || ""}`.toLowerCase();
+  /* The API's explicit quality is authoritative.  Looking at the proxy URL
+     first can misread a quality token inside an encoded upstream URL and make
+     the player run a different tier than the row the user selected. */
+  const explicit = String(s.quality || "").toLowerCase();
+  if (/(?:2160|1440|1080)\s*p?|fhd|full[ ._-]*hd/.test(explicit)) return "1080p FHD";
+  if (/(?:720)\s*p?|(?<!f)\bhd\b/.test(explicit)) return "720p HD";
+  if (/(?:480|360)\s*p?|sd/.test(explicit)) return "360p SD";
+
+  const text = `${s.label || ""} ${s.name || ""} ${s.url || ""} ${s.directUrl || ""}`.toLowerCase();
   const pixels = text.match(/(?:^|[^0-9])(2160|1440|1080|720|480|360)(?:p)?(?:[^0-9]|$)/)?.[1];
   const height = pixels ? Number(pixels) : 0;
   if (height >= 1080 || /\bfhd\b|\bfull[ ._-]*hd\b/.test(text)) return "1080p FHD";
@@ -186,6 +195,12 @@ function getPlayUrl(s: Src): string {
   /* Mobile responses may contain an encrypted directUrl plus an unencrypted
      /api/... URL in `url`. Prefer the readable proxy URL or the player receives
      the ciphertext and silently fails. */
+  const candidates = [s.url, s.directUrl].filter((value): value is string => !!value);
+  const readableProxy = candidates.find((value) =>
+    /\/api\/(?:anime|animation)\/(?:hls|video)-proxy/i.test(value)
+    && /[?&]url=(?:https?%3A|https?:\/\/)/i.test(value),
+  );
+  if (readableProxy) return readableProxy;
   if (s.url?.startsWith("/api/")) return s.url;
   if (s.directUrl?.startsWith("/api/")) return s.directUrl;
   return s.directUrl || s.url || "";
@@ -468,6 +483,34 @@ function ServerScanAnimation() {
         <View style={[d.serverScanDot, { backgroundColor: "#a78bfa" }]} />
       </View>
     </Animated.View>
+  );
+}
+
+/* React Native's Image component is not a reliable animated-GIF renderer on
+   all Expo/Android builds.  A tiny WebView keeps the GIF animation smooth,
+   matching the web loading screen, without showing the GIFDB page chrome. */
+const SERVER_SCAN_GIF =
+  "https://gifdb.com/images/branded/high/satoru-gojo-vs-ryomen-sukuna-gif-tt4cnmnevgpxt99u.gif";
+
+function ServerScanGif() {
+  const [failed, setFailed] = useState(false);
+  const html = `<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1"></head><body><img src="${SERVER_SCAN_GIF}" alt="" /></body><style>html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#07070d}img{display:block;width:100%;height:100%;object-fit:cover}</style></html>`;
+  if (failed) return <ServerScanAnimation />;
+  return (
+    <WebView
+      source={{ html, baseUrl: "https://gifdb.com/gif/satoru-gojo-vs-ryomen-sukuna-gif-tt4cnmnevgpxt99u.html" }}
+      style={d.availabilityGif}
+      originWhitelist={["*"]}
+      javaScriptEnabled
+      domStorageEnabled
+      scrollEnabled={false}
+      overScrollMode="never"
+      showsVerticalScrollIndicator={false}
+      showsHorizontalScrollIndicator={false}
+      pointerEvents="none"
+      accessible={false}
+      onError={() => setFailed(true)}
+    />
   );
 }
 
@@ -1552,7 +1595,7 @@ export default function WatchScreen() {
           {!availabilityDone && (
             <View style={d.availabilityState}>
               <View style={d.availabilityGifWrap}>
-                <ServerScanAnimation />
+                <ServerScanGif />
                 <LinearGradient
                   colors={["transparent", "rgba(7,7,13,0.82)"]}
                   style={StyleSheet.absoluteFill}
@@ -1561,7 +1604,7 @@ export default function WatchScreen() {
               </View>
               <SpinRing size={24} />
               <Text style={d.availabilityHeadline}>سوكونا يقاتل غوجو بجهد من اجل السيرفرات</Text>
-              <Text style={d.availabilityText}>يتم فحص جميع السيرفرات… ستظهر دفعة واحدة عند الجاهزية</Text>
+              <Text style={d.availabilityText}>يتم فحص جميع السيرفرات… ستظهر النتائج تباعاً ويمكنك التشغيل فوراً</Text>
             </View>
           )}
 
@@ -1583,7 +1626,7 @@ export default function WatchScreen() {
 
          {/* لا تظهر أي بطاقة أثناء الفحص. هذا هو الفاصل المرئي بين مرحلة
              availability في الويب ومرحلة منتقي المصادر. */}
-         {availabilityDone && (singleSite === "anslayer" ? (["1080p", "720p"] as QualityKey[]) : Q_KEYS).map(qk => {
+          {(availabilityDone || Object.keys(availableSlots).length > 0) && (singleSite === "anslayer" ? (["1080p", "720p"] as QualityKey[]) : Q_KEYS).map(qk => {
           const staticSlots = singleSite === "anslayer"
             ? (ANSLAYER_PICKER[qk] || [])
             : singleSite
@@ -1753,6 +1796,7 @@ const d = StyleSheet.create({
   infoEpText:    { fontSize: 11, fontFamily: "Cairo_700Bold", color: "#c4b5fd" },
   availabilityState: { alignItems: "center", justifyContent: "center", gap: 10, paddingVertical: 22 },
   availabilityGifWrap: { width: "100%", maxWidth: 330, height: 184, borderRadius: 22, overflow: "hidden", backgroundColor: "rgba(255,255,255,0.025)", marginBottom: 2, alignItems: "center", justifyContent: "center" },
+  availabilityGif: { width: "100%", height: "100%", backgroundColor: "transparent" },
   serverScanAnimation: { width: 110, height: 110, borderRadius: 55, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(124,58,237,0.14)", borderWidth: 1, borderColor: "rgba(167,139,250,0.30)" },
   serverScanDots: { flexDirection: "row", gap: 7, marginTop: 8 },
   serverScanDot: { width: 7, height: 7, borderRadius: 4 },
