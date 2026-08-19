@@ -19,7 +19,7 @@ export default function AppOnlyEpisodeDialog({
     <AnimatePresence>
       {open && (
         <motion.div
-          className="fixed inset-0 z-[100] flex items-end justify-center bg-black/75 p-3 backdrop-blur-sm sm:items-center"
+          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/75 p-3 backdrop-blur-sm"
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
@@ -43,8 +43,17 @@ export default function AppOnlyEpisodeDialog({
 
             <button
               type="button"
-              onClick={onClose}
-              className="absolute left-4 top-4 flex h-9 w-9 items-center justify-center rounded-xl border border-white/10 bg-white/5 text-white/55 transition-colors hover:bg-white/10 hover:text-white active:scale-90"
+              onPointerDown={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                onClose();
+              }}
+              onClick={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                onClose();
+              }}
+              className="relative z-10 absolute left-4 top-4 flex h-9 w-9 items-center justify-center rounded-xl border border-white/10 bg-white/5 text-white/55 transition-colors hover:bg-white/10 hover:text-white active:scale-90"
               aria-label="إغلاق التنبيه"
               data-testid="button-close-app-only-dialog"
             >
