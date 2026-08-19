@@ -2226,12 +2226,13 @@ function ScraperPicker({
               style={{ background: "rgba(255,255,255,0.025)" }}
             >
               <img
-                src="https://gifdb.com/images/branded/high/satoru-gojo-vs-ryomen-sukuna-gif-tt4cnmnevgpxt99u.gif"
+                src="/gojo-loading.png"
                 alt=""
                 aria-hidden="true"
                 className="absolute inset-0 w-full h-full object-cover"
                 loading="eager"
                 decoding="async"
+                referrerPolicy="no-referrer"
               />
               <div className="absolute inset-0 bg-gradient-to-t from-[#07070d]/80 via-transparent to-transparent pointer-events-none" />
             </div>

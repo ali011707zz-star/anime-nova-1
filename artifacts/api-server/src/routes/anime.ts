@@ -8236,18 +8236,23 @@ async function awResolveHlsVariants(
 /** بناء UnifiedSources من صفوف aw_links (بدون Algolia/Firestore) */
 async function awBuildSourcesFromDb(rows: AwLinkRow[]): Promise<UnifiedSource[]> {
   const sources: UnifiedSource[] = [];
+  /* AW can advertise the same resolved media URL in several quality/server
+     rows. Keep one entry per provider + quality instead of collapsing the
+     remaining picker qualities. */
   const seenUrls = new Set<string>();
 
   for (const row of rows) {
-    const srvName = row.server.toUpperCase();
-    const q      = String(row.quality || "720p");
+    const srvName = String(row.server || "").toUpperCase();
+    const qText = `${row.quality || ""} ${row.server || ""} ${row.ep_id || ""} ${row.link || ""}`;
+    const q      = normalizeAwQuality(qText);
     const qRank  = q === "1080p" ? 22 : q === "720p" ? 21 : q === "480p" ? 10 : 5;
     const qLabel = q === "1080p" ? "FHD 1080p" : q === "720p" ? "HD 720p" : q;
+    const seenKey = (url: string) => `${srvName}|${q}|${url}`;
 
     if (srvName === "PD") {
       const direct = awResolvePd(row.link);
-      if (!direct || seenUrls.has(direct)) continue;
-      seenUrls.add(direct);
+      if (!direct || seenUrls.has(seenKey(direct))) continue;
+      seenUrls.add(seenKey(direct));
       sources.push({
         name: `AnimeWitcher · ${qLabel} · PD`,
         url: row.link, quality: q, qualityRank: qRank + 2,
@@ -8258,8 +8263,8 @@ async function awBuildSourcesFromDb(rows: AwLinkRow[]): Promise<UnifiedSource[]>
     } else if (srvName === "KF") {
       try {
         const kfDirect = await awResolveKf(row.link);
-        if (kfDirect && !seenUrls.has(kfDirect)) {
-          seenUrls.add(kfDirect);
+        if (kfDirect && !seenUrls.has(seenKey(kfDirect))) {
+          seenUrls.add(seenKey(kfDirect));
           sources.push({
             name: `AnimeWitcher · ${qLabel} · KF`,
             url: row.link, quality: q, qualityRank: qRank + 1,
@@ -8273,8 +8278,8 @@ async function awBuildSourcesFromDb(rows: AwLinkRow[]): Promise<UnifiedSource[]>
     } else if (srvName === "MF" || srvName === "MF2") {
       try {
         const mfDirect = await extractMediafireDirect(row.link);
-        if (mfDirect && !seenUrls.has(mfDirect)) {
-          seenUrls.add(mfDirect);
+        if (mfDirect && !seenUrls.has(seenKey(mfDirect))) {
+          seenUrls.add(seenKey(mfDirect));
           sources.push({
             name: `AnimeWitcher · ${qLabel} · ${srvName}`,
             url: row.link, quality: q, qualityRank: qRank + (srvName === "MF2" ? 1 : 0),
@@ -8291,8 +8296,8 @@ async function awBuildSourcesFromDb(rows: AwLinkRow[]): Promise<UnifiedSource[]>
           signal: AbortSignal.timeout(8_000),
         }).then(r => r.ok ? r.text() : "").catch(() => "");
         const stResult = parseStreamtape(stHtml);
-        if (stResult && !seenUrls.has(stResult.url)) {
-          seenUrls.add(stResult.url);
+        if (stResult && !seenUrls.has(seenKey(stResult.url))) {
+          seenUrls.add(seenKey(stResult.url));
           sources.push({
             name: `AnimeWitcher · ${qLabel} · ST`,
             url: row.link, quality: q, qualityRank: qRank,
@@ -8305,11 +8310,13 @@ async function awBuildSourcesFromDb(rows: AwLinkRow[]): Promise<UnifiedSource[]>
     } else if (srvName === "VT") {
       try {
         const vtResult = await extractVideoDeep(row.link, row.link);
-        if (vtResult && !seenUrls.has(vtResult.url)) {
-          seenUrls.add(vtResult.url);
+        if (vtResult && !seenUrls.has(seenKey(vtResult.url))) {
+          seenUrls.add(seenKey(vtResult.url));
           if (vtResult.type === "hls") {
             const hlsVariants = await awResolveHlsVariants(vtResult.url, row.link);
             for (const variant of hlsVariants) {
+              if (seenUrls.has(seenKey(variant.url))) continue;
+              seenUrls.add(seenKey(variant.url));
               const directUrl = `/api/anime/hls-proxy?url=${encodeURIComponent(variant.url)}&ref=${encodeURIComponent(row.link)}`;
               sources.push({
                 name: `AnimeWitcher · ${variant.label} · VT`,
