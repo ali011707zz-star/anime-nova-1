@@ -20,7 +20,7 @@ const ANIME_QUERY = `
 query ($id: Int) {
   Media(id: $id, type: ANIME) {
     id idMal title { romaji english } coverImage { large extraLarge }
-    bannerImage episodes duration status nextAiringEpisode { episode }
+    bannerImage episodes duration status nextAiringEpisode { episode airingAt }
     averageScore genres
   }
 }`;
@@ -379,6 +379,7 @@ export default function EpisodeListPage() {
   }
 
   function watchEp(n: number) {
+    if (n < 1 || n > total) return;
     setWatched(prev => {
       const next = new Set(prev);
       next.add(n);
@@ -392,14 +393,17 @@ export default function EpisodeListPage() {
   }
 
   const total = anime
-    ? Math.max(
-        Number(anime.episodes || 0),
-        Number(anime.nextAiringEpisode?.episode || 0) > 0
-          ? Number(anime.nextAiringEpisode.episode) - 1
-          : 0,
-        jikanEpisodeTotal,
-        12,
-      )
+    ? anime.status === "NOT_YET_RELEASED"
+      ? 0
+      : anime.status === "RELEASING"
+        ? Math.max(
+            0,
+            Number(anime.nextAiringEpisode?.episode || 0) - 1,
+          )
+        : Math.max(
+            Number(anime.episodes || 0),
+            jikanEpisodeTotal,
+          )
     : 0;
   const allEps = useMemo(() => Array.from({ length: total }, (_, i) => i + 1), [total]);
   const watchedCount = useMemo(() => [...watched].filter(n => n >= 1 && n <= total).length, [watched, total]);

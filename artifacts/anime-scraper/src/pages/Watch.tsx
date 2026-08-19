@@ -39,7 +39,7 @@ const ANILIST_Q = `query ($id: Int) {
   Media(id: $id, type: ANIME) {
     id idMal title { romaji english native userPreferred } synonyms
     episodes coverImage { large extraLarge }
-    nextAiringEpisode { episode }
+    nextAiringEpisode { episode airingAt }
     bannerImage genres averageScore popularity
     format status season seasonYear description(asHtml: false)
     studios(isMain: true) { nodes { name } }
@@ -4796,14 +4796,16 @@ export default function WatchPage() {
   const title =
     anime?.title?.english || anime?.title?.romaji || titleParam || "أنمي";
   const animeTitle = title;
-  const totalEps = Math.max(
-    Number(anime?.episodes || 0),
-    Number(anime?.nextAiringEpisode?.episode || 0) > 0
-      ? Number(anime.nextAiringEpisode.episode) - 1
-      : 0,
-    totalEpsParam > 0 ? totalEpsParam : 0,
-    1,
-  );
+  const totalEps = anime?.status === "NOT_YET_RELEASED"
+    ? 0
+    : anime?.status === "RELEASING"
+      ? Math.max(0, Number(anime?.nextAiringEpisode?.episode || 0) - 1)
+      : Math.max(
+          Number(anime?.episodes || 0),
+          totalEpsParam > 0 ? totalEpsParam : 0,
+          anime ? 1 : 0,
+        );
+  const episodeNotReleased = Boolean(anime) && (ep < 1 || ep > totalEps);
   /* Cover: prefer AniList data, fallback to URL param, then watch history */
   const coverFromHistory = useMemo(() => {
     if (anime) return "";
