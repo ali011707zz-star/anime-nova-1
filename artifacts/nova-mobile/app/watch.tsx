@@ -28,6 +28,20 @@ type Quality    = "1080p FHD" | "720p HD" | "360p SD";
 type Screen     = "loading" | "picker" | "native" | "embed" | "resolving";
 type AvailabilityQuality = "1080p" | "720p" | "360p";
 
+/**
+ * Expo Router may already decode route params, while older links can still
+ * contain percent-encoded values. A malformed/partial percent sequence must
+ * never crash the whole watch route during render.
+ */
+function safeDecodeURIComponent(value: string | undefined): string {
+  if (!value) return "";
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+}
+
 /* ── مواقع محمية بـ Cloudflare/Turnstile يفشل الخادم (VPS) بجلب فيديوها المباشر —
    نحاول أولاً حلّها عبر WebView مخفي (IP سكني حقيقي للجهاز) قبل عرض بطاقة "يحتاج تطبيق أصلي" ── */
 // animephoenix أُزيل من WEBVIEW_RESOLVE_SITES — الآن يُرجع روابط مباشرة (phoenixpr CDN) لا iframes
@@ -725,13 +739,13 @@ export default function WatchScreen() {
   const { addToHistory } = useApp();
   const topPad   = insets.top > 0 ? insets.top : (Platform.OS === "ios" ? 44 : 24);
 
-  const titleStr    = title   ? decodeURIComponent(title)   : "";
-  const englishStr  = english ? decodeURIComponent(english) : "";
-  const titleArStr  = titleAr ? decodeURIComponent(titleAr) : "";
+  const titleStr    = safeDecodeURIComponent(title);
+  const englishStr  = safeDecodeURIComponent(english);
+  const titleArStr  = safeDecodeURIComponent(titleAr);
   const titleVariants = useMemo(() => {
-    const values = [titleStr, englishStr, native ? decodeURIComponent(native) : "", titleArStr];
+    const values = [titleStr, englishStr, safeDecodeURIComponent(native), titleArStr];
     try {
-      const parsed = titlesParam ? JSON.parse(decodeURIComponent(titlesParam)) : [];
+      const parsed = titlesParam ? JSON.parse(safeDecodeURIComponent(titlesParam)) : [];
       if (Array.isArray(parsed)) values.push(...parsed);
     } catch {}
     return Array.from(new Set(values
@@ -740,7 +754,7 @@ export default function WatchScreen() {
   }, [titleStr, englishStr, native, titleArStr, titlesParam]);
   const epNum      = parseInt(ep || "1", 10) || 1;
   const cover      = useLocalSearchParams<{ cover?: string }>().cover;
-  const coverUrl   = cover ? decodeURIComponent(cover) : "";
+  const coverUrl   = safeDecodeURIComponent(cover);
   const totalEpsCount = totalEpsParam ? parseInt(totalEpsParam) || undefined : undefined;
   const displayTitle = titleArStr || englishStr || titleStr;
 
@@ -794,7 +808,7 @@ export default function WatchScreen() {
   /* ── ترجمة عنوان الحلقة من الإنجليزية للعربية ── */
   useEffect(() => {
     if (!etitle) return;
-    const raw = decodeURIComponent(etitle);
+    const raw = safeDecodeURIComponent(etitle);
     if (!raw || /[\u0600-\u06FF]/.test(raw)) { setArEpTitle(raw); return; }
     const base = getBaseUrl();
     secureFetch(`${base}/api/anime/translate?text=${encodeURIComponent(raw)}&from=en&to=ar&kind=title`)
@@ -1679,7 +1693,7 @@ export default function WatchScreen() {
         title={displayTitle}
         episode={epNum}
         anilistId={anime ? parseInt(anime) : undefined}
-        episodeTitle={arEpTitle ?? (etitle ? decodeURIComponent(etitle) : undefined)}
+        episodeTitle={arEpTitle ?? (etitle ? safeDecodeURIComponent(etitle) : undefined)}
         initialPosition={resumeTime}
         totalEps={totalEpsCount}
         onBack={onRiftBack}
