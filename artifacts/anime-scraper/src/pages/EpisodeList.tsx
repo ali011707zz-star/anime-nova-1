@@ -327,7 +327,10 @@ export default function EpisodeListPage() {
       .then(r => r.ok ? r.json() : null)
       .then(d => {
         if (ctrl.signal.aborted) return;
-        if (Number(d?.total) > 0) setJikanEpisodeTotal(Number(d.total));
+        const catalogTotal = anime?.status === "RELEASING"
+          ? Number(d?.releasedTotal || 0)
+          : Number(d?.total || 0);
+        if (catalogTotal > 0) setJikanEpisodeTotal(catalogTotal);
         if (Array.isArray(d?.episodes)) {
           setEpData(prev => {
             const merged = new Map<number, any>();
@@ -398,8 +401,7 @@ export default function EpisodeListPage() {
       : anime.status === "RELEASING"
         ? Math.max(
             0,
-            Number(anime.nextAiringEpisode?.episode || 0) - 1,
-            jikanEpisodeTotal,
+            jikanEpisodeTotal || Number(anime.nextAiringEpisode?.episode || 0) - 1,
           )
         : Math.max(
             Number(anime.episodes || 0),

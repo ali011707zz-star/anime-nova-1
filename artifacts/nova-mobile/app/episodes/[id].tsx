@@ -219,7 +219,10 @@ export default function EpisodeListScreen() {
           .then(d => {
             if (ctrl.signal.aborted) return;
             if (Array.isArray(d?.episodes)) setEpData(d.episodes);
-            if (Number(d?.total) > 0) setEpisodeCatalogTotal(Number(d.total));
+            const catalogTotal = a.status === "RELEASING"
+              ? Number(d?.releasedTotal || 0)
+              : Number(d?.total || 0);
+            if (catalogTotal > 0) setEpisodeCatalogTotal(catalogTotal);
           })
           .catch((e) => {
             if (e?.name === "AbortError") return;
@@ -301,7 +304,7 @@ export default function EpisodeListScreen() {
       : 0;
     if (anime.status === "NOT_YET_RELEASED") return 0;
     if (anime.status === "RELEASING") {
-      return Math.max(airedBySchedule, episodeCatalogTotal);
+      return episodeCatalogTotal || airedBySchedule;
     }
     return Math.max(0, Number(anime.episodes || 0), episodeCatalogTotal);
   }, [anime, episodeCatalogTotal]);

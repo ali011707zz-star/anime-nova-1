@@ -12447,30 +12447,6 @@ async function getSAnimeSourcesUncached(
       });
     }
 
-    // لا تُرسل بطاقة SAnime إذا كان ملفها غير موجود. بعض نسخ الـCDN تعيد
-    // 200 مع صفحة HTML أو 404 متأخراً، فيظهر المصدر ثم يخرج المشغل بصمت.
-    const live = await Promise.all(out.map(async source => {
-      const target = source.directUrl || "";
-      try {
-        const parsed = new URL(`https://nova.local${target}`);
-        const upstream = parsed.searchParams.get("url") || "";
-        if (!upstream) return null;
-        const response = await fetch(upstream, {
-          headers: { "User-Agent": SANIME_UA, Referer: SANIME_REF, Range: "bytes=0-1" },
-          redirect: "follow",
-          signal: AbortSignal.timeout(5_000),
-        });
-        const type = (response.headers.get("content-type") || "").toLowerCase();
-        const playable = [200, 206, 416].includes(response.status)
-          && !type.includes("text/html") && !type.includes("application/json");
-        if (response.body) await response.body.cancel().catch(() => {});
-        return playable ? source : null;
-      } catch {
-        return null;
-      }
-    }));
-    out.splice(0, out.length, ...live.filter((source): source is UnifiedSource => !!source));
-
     console.log(`[SAnime] id=${bestId} ep${ep} → ${out.length} sources (match=${bestScore.toFixed(2)})`);
     if (out.length) _sanimeCacheMap.set(ck, { sources: out, ts: Date.now() });
   } catch (e: any) {
@@ -13532,7 +13508,13 @@ router.get("/anime/fetch-source", async (req, res) => {
   })();
   const filterRequestedQuality = <T extends { quality?: string; qualityRank?: number; name?: string; label?: string; url?: string; directUrl?: string }>(rows: T[]): T[] => {
     if (!requestedQuality) return rows;
-    return rows.filter((s) => sourceCheckQuality(s).quality === requestedQuality);
+    return rows.filter((s) => {
+      const detected = sourceCheckQuality(s).quality;
+      // The picker has no separate 480p row; 480p is the SD/360p tier in
+      // both clients. Keep it available when the user selects that tier.
+      return detected === requestedQuality
+        || (requestedQuality === "360p" && detected === "480p");
+    });
   };
   const stripAnimeSlayerSubtitles = <T extends { subtitleUrl?: string }>(rows: T[]): T[] =>
     site === "anslayer" ? rows.map(({ subtitleUrl: _subtitleUrl, ...source }) => source as T) : rows;
@@ -17442,8 +17424,19 @@ router.get("/anime/episode-titles", async (req, res) => {
         const latestEpisode = anilistId > 0
           ? await getAnsLayerLatestEpisode(anilistId)
           : 0;
+        // Jikan's pagination total is the planned series length and includes
+        // unaired episodes. For a currently airing show, expose only episodes
+        // whose air date has passed; otherwise the episode list can show 12
+        // items while only 7 have actually aired.
+        const now = Date.now();
+        const airedEpisode = episodes.reduce((max: number, item: any) => {
+          const n = Number(item?.mal_id || item?.episode || 0);
+          const airedAt = item?.aired?.from ? Date.parse(String(item.aired.from)) : NaN;
+          return n > 0 && Number.isFinite(airedAt) && airedAt <= now ? Math.max(max, n) : max;
+        }, 0);
+        const releasedTotal = Math.max(airedEpisode, latestEpisode);
         const total = Math.max(paginationTotal, pageFloor, episodeFloor, latestEpisode);
-        payload = { episodes, total, latestEpisode, page };
+        payload = { episodes, total, releasedTotal, latestEpisode, page };
         break;
       }
       if (upstream.status === 429 && attempt === 0) {

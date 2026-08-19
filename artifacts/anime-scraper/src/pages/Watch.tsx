@@ -4796,10 +4796,15 @@ export default function WatchPage() {
   const title =
     anime?.title?.english || anime?.title?.romaji || titleParam || "أنمي";
   const animeTitle = title;
-  const totalEps = anime?.status === "NOT_YET_RELEASED"
+   const totalEps = anime?.status === "NOT_YET_RELEASED"
     ? 0
     : anime?.status === "RELEASING"
-      ? Math.max(0, Number(anime?.nextAiringEpisode?.episode || 0) - 1)
+       ? Math.max(
+           0,
+           totalEpsParam > 0
+             ? totalEpsParam
+             : Number(anime?.nextAiringEpisode?.episode || 0) - 1,
+         )
       : Math.max(
           Number(anime?.episodes || 0),
           totalEpsParam > 0 ? totalEpsParam : 0,
@@ -5409,7 +5414,10 @@ export default function WatchPage() {
       /* The selected picker row is the server. Keep exactly one playable
          result for that server + requested quality. Do not preload the other
          mirrors or let them become player-server choices. */
-      const selectedSrc = [...srcs].sort(
+       const sameTier = srcs.filter((src) => getSrcQualityTier(src) === requestedQuality);
+       const candidates =
+         sameTier.length || !QUALITY_FALLBACK_SITES.has(site) ? sameTier : srcs;
+       const selectedSrc = [...candidates].sort(
         (a, b) => (b.qualityRank ?? 0) - (a.qualityRank ?? 0),
       )[0];
 

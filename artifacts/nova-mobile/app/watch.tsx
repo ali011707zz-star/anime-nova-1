@@ -1206,7 +1206,7 @@ export default function WatchScreen() {
           الويب يثبت رابطاً واحداً للصف الذي ضغطه المستخدم؛ الموبايل يجب أن
           يفعل الشيء نفسه حتى لا يشغل أول رابط عشوائياً. */
        const requestedTier = preferredQuality ? PICKER_QUALITY[preferredQuality] : undefined;
-       const sameTier = requestedTier
+        const sameTier = requestedTier
          ? mappedSrcs.filter(s => getSrcQuality(s) === requestedTier)
          : mappedSrcs;
         const candidates = requestedTier
