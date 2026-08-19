@@ -8333,25 +8333,36 @@ async function getAnimeWitcherSources(
       if (dbRows.length) {
         console.log(`[AW] DB-hit: ${dbRows.length} rows for anilistId=${_anilistId} ep${ep}`);
         if (availabilityOnly) {
+          /* Build the real rows even during availability. For VT master HLS,
+             awBuildSourcesFromDb expands the actual 1080/720 variants; the old
+             DB label-only path collapsed every new episode to one 720 row. */
+          const dbSources = await awBuildSourcesFromDb(dbRows);
+          if (dbSources.length) {
+            return dbSources.map(source => ({
+              ...source,
+              url: source.directUrl || source.url,
+              name: source.name || `AnimeWitcher · ${source.quality || "720p"}`,
+              verified: true,
+            }));
+          }
           const seenQuality = new Set<string>();
-          return dbRows
-            .filter(row => {
-              const quality = String(row.quality || "720p").toLowerCase().replace(/\s+/g, "");
-              if (seenQuality.has(quality)) return false;
-              seenQuality.add(quality);
-              return true;
-            })
-            .map(row => {
+          return dbRows.filter(row => {
               const quality = String(row.quality || "720p").toLowerCase().replace(/\s+/g, "");
               return {
-                name: `AnimeWitcher · ${quality} · الحلقة موجودة`,
-                url: "",
                 quality,
-                qualityRank: quality === "1080p" ? 22 : quality === "720p" ? 21 : quality === "480p" ? 10 : 5,
-                site: "animewitcher",
-                verified: true,
-              } as UnifiedSource;
-            });
+                ok: !seenQuality.has(quality),
+              };
+            }).filter(row => {
+              if (row.ok) { seenQuality.add(row.quality); return true; }
+              return false;
+            }).map(row => ({
+              name: `AnimeWitcher · ${row.quality} · الحلقة موجودة`,
+              url: "",
+              quality: row.quality,
+              qualityRank: row.quality === "1080p" ? 22 : row.quality === "720p" ? 21 : row.quality === "480p" ? 10 : 5,
+              site: "animewitcher",
+              verified: true,
+            } as UnifiedSource));
         }
         const dbSources = await awBuildSourcesFromDb(dbRows);
         if (dbSources.length) {
@@ -12435,6 +12446,30 @@ async function getSAnimeSourcesUncached(
       });
     }
 
+    // لا تُرسل بطاقة SAnime إذا كان ملفها غير موجود. بعض نسخ الـCDN تعيد
+    // 200 مع صفحة HTML أو 404 متأخراً، فيظهر المصدر ثم يخرج المشغل بصمت.
+    const live = await Promise.all(out.map(async source => {
+      const target = source.directUrl || "";
+      try {
+        const parsed = new URL(`https://nova.local${target}`);
+        const upstream = parsed.searchParams.get("url") || "";
+        if (!upstream) return null;
+        const response = await fetch(upstream, {
+          headers: { "User-Agent": SANIME_UA, Referer: SANIME_REF, Range: "bytes=0-1" },
+          redirect: "follow",
+          signal: AbortSignal.timeout(5_000),
+        });
+        const type = (response.headers.get("content-type") || "").toLowerCase();
+        const playable = [200, 206, 416].includes(response.status)
+          && !type.includes("text/html") && !type.includes("application/json");
+        if (response.body) await response.body.cancel().catch(() => {});
+        return playable ? source : null;
+      } catch {
+        return null;
+      }
+    }));
+    out.splice(0, out.length, ...live.filter((source): source is UnifiedSource => !!source));
+
     console.log(`[SAnime] id=${bestId} ep${ep} → ${out.length} sources (match=${bestScore.toFixed(2)})`);
     if (out.length) _sanimeCacheMap.set(ck, { sources: out, ts: Date.now() });
   } catch (e: any) {
@@ -14711,6 +14746,35 @@ router.get("/anime/proxy-text", async (req, res) => {
     res.send(text);
   } catch (e: any) {
     res.status(502).json({ error: e?.message || "subtitle proxy failed" });
+  }
+});
+
+//  scan-gif  GET /api/anime/scan-gif?i=0
+//  Android WebView لا يستطيع دائماً جلب GIFDB/Giphy مباشرة بسبب redirect أو
+//  سياسات CDN. هذه قائمة ثابتة (وليست proxy مفتوحاً) لتمرير صورة الفحص من VPS.
+const SERVER_SCAN_GIF_URLS = [
+  "https://gifdb.com/images/branded/high/satoru-gojo-vs-ryomen-sukuna-gif-tt4cnmnevgpxt99u.gif",
+  "https://media.giphy.com/media/unGpfM6wCE_2IKotc/giphy.gif",
+] as const;
+router.get("/anime/scan-gif", async (req, res) => {
+  const index = Math.max(0, Math.min(SERVER_SCAN_GIF_URLS.length - 1, Number(req.query.i) || 0));
+  try {
+    const upstream = await fetch(SERVER_SCAN_GIF_URLS[index], {
+      headers: { Accept: "image/gif,image/*;q=0.9,*/*;q=0.1", "User-Agent": BROWSER_UA },
+      redirect: "follow",
+      signal: AbortSignal.timeout(8_000),
+    });
+    if (!upstream.ok) {
+      res.status(502).json({ error: "gif upstream failed" });
+      return;
+    }
+    const contentType = upstream.headers.get("content-type") || "image/gif";
+    const body = Buffer.from(await upstream.arrayBuffer());
+    res.setHeader("Content-Type", contentType.includes("image/") ? contentType : "image/gif");
+    res.setHeader("Cache-Control", "public, max-age=86400, stale-while-revalidate=604800");
+    res.send(body);
+  } catch (error: any) {
+    res.status(502).json({ error: error?.message || "gif proxy failed" });
   }
 });
 

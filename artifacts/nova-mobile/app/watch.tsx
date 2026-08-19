@@ -576,8 +576,8 @@ function ServerScanAnimation() {
 /* GIFDB is the canonical asset used by the web; Giphy is only a bounded
    fallback for Android networks that cannot reach GIFDB. */
 const SERVER_SCAN_GIFS = [
-  "https://gifdb.com/images/branded/high/satoru-gojo-vs-ryomen-sukuna-gif-tt4cnmnevgpxt99u.gif",
-  "https://media.giphy.com/media/unGpfM6wCE_2IKotc/giphy.gif",
+  "/api/anime/scan-gif?i=0",
+  "/api/anime/scan-gif?i=1",
 ] as const;
 
 function ServerScanGif() {
@@ -585,7 +585,7 @@ function ServerScanGif() {
   const [failed, setFailed] = useState(false);
   /* Availability SSE causes frequent parent renders. Keep the WebView
      document stable so the GIF does not restart or disappear per event. */
-  const gifUrl = SERVER_SCAN_GIFS[gifIndex] || SERVER_SCAN_GIFS[0];
+  const gifUrl = `${getBaseUrl()}${SERVER_SCAN_GIFS[gifIndex] || SERVER_SCAN_GIFS[0]}`;
   const handleGifFailure = () => {
     if (gifIndex < SERVER_SCAN_GIFS.length - 1) {
       setGifIndex((value) => value + 1);
@@ -605,7 +605,7 @@ function ServerScanGif() {
   const html = `<!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1"></head><body style="margin:0;background:transparent;display:flex;align-items:center;justify-content:center;overflow:hidden"><img src="${gifUrl}" style="width:100%;height:100%;object-fit:contain" onerror="window.ReactNativeWebView.postMessage('gif-error')"></body></html>`;
   return (
     <WebView
-      source={{ html, baseUrl: "https://gifdb.com/" }}
+      source={{ html, baseUrl: getBaseUrl() }}
       style={d.availabilityGif}
       originWhitelist={["*"]}
       scrollEnabled={false}
@@ -642,6 +642,9 @@ const SITE_TIMEOUT_MAP: Record<string, number> = {
   anivexa_anidbapp: 32_000, anivexa_2dhive: 32_000,
   anivexa_anibd: 32_000, anivexa_senshi: 32_000, anivexa_kaa: 32_000,
 };
+/* أحدث الحلقات قد تُعلن جودة من الكاش قبل أن يحدّثها المزود فعلياً.
+   إذا أعاد الطلب بلا فلتر جودة رابطاً حياً، شغّله بدلاً من إسقاط المصدر. */
+const QUALITY_FALLBACK_SITES = new Set(["kawaii", "anineko", "animekai", "animewitcher", "sanime"]);
 
 /* ── Spinning loader ── */
 function SpinRing({ size = 36 }: { size?: number }) {
@@ -1179,7 +1182,9 @@ export default function WatchScreen() {
        const sameTier = requestedTier
          ? mappedSrcs.filter(s => getSrcQuality(s) === requestedTier)
          : mappedSrcs;
-       const candidates = requestedTier ? sameTier : mappedSrcs;
+        const candidates = requestedTier
+          ? (sameTier.length || !QUALITY_FALLBACK_SITES.has(site) ? sameTier : mappedSrcs)
+          : mappedSrcs;
        const selected = [...candidates].sort(
          (a, b) => (b.qualityRank ?? 0) - (a.qualityRank ?? 0),
        )[0];
@@ -1219,7 +1224,7 @@ export default function WatchScreen() {
        const best = preferredQuality ? preferred : (newSrcs.find(isMobilePlayable) ?? newSrcs[0]);
        /* A successful response is not enough: the selected tier itself must
           be playable. Never silently fall through to another tier. */
-       if (preferredQuality && !preferred) {
+        if (preferredQuality && !preferred && !QUALITY_FALLBACK_SITES.has(site)) {
          fetchedSitesRef.current.delete(fetchKey);
          setSlotStatus(prev => ({ ...prev, [pickerSlotKey(site, preferredQuality)]: "failed" }));
          setAvailableSlots(prev => {
