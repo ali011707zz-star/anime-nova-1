@@ -456,11 +456,44 @@ function parseM3u8Attributes(line: string): Record<string, string> {
   return attrs;
 }
 
-function subtitleFormat(url: string, body: string): "vtt" | "srt" | "ass" {
-  const lower = url.toLowerCase();
-  if (lower.includes(".ass") || lower.includes(".ssa") || /^\s*\[script info\]/i.test(body)) return "ass";
-  if (lower.includes(".srt") || /^\s*\d+\s*\r?\n\s*\d{2}:\d{2}:\d{2}[,.]/.test(body)) return "srt";
-  return "vtt";
+function assTimeToVtt(value: string): string {
+  const parts = value.trim().split(":");
+  if (parts.length !== 3) return "00:00:00.000";
+  const seconds = Number(parts[2].replace(",", "."));
+  return `${parts[0].padStart(2, "0")}:${parts[1].padStart(2, "0")}:${Number.isFinite(seconds)
+    ? seconds.toFixed(3).padStart(6, "0")
+    : "00.000"}`;
+}
+
+/** Normalize every supported sidecar into VTT because the existing native
+ * player consumes VTT cues for both streamed and offline playback. */
+function subtitleToVtt(url: string, body: string): string {
+  const trimmed = body.replace(/^\uFEFF/, "").trim();
+  if (/^WEBVTT(?:\s|$)/i.test(trimmed)) return trimmed.endsWith("\n") ? trimmed : `${trimmed}\n`;
+
+  if (/^\s*\[script info\]/i.test(trimmed) || /^\s*dialogue:/im.test(trimmed)) {
+    const cues: string[] = [];
+    for (const line of trimmed.split(/\r?\n/)) {
+      if (!/^dialogue:/i.test(line)) continue;
+      const fields = line.replace(/^dialogue:\s*/i, "").split(",");
+      if (fields.length < 10) continue;
+      const start = assTimeToVtt(fields[1]);
+      const end = assTimeToVtt(fields[2]);
+      const text = fields.slice(9).join(",").replace(/\{[^}]*\}/g, "").replace(/\\N/g, "\n").trim();
+      if (text) cues.push(`${start} --> ${end}\n${text}`);
+    }
+    if (cues.length) return `WEBVTT\n\n${cues.join("\n\n")}\n`;
+  }
+
+  /* SRT timestamps use commas for milliseconds; the current player accepts
+     the WebVTT equivalent after this small normalization. */
+  const srt = trimmed.replace(/(\d{2}:\d{2}:\d{2}),(\d{3})/g, "$1.$2");
+  if (srt.includes("-->")) {
+    const blocks = srt.split(/\n\s*\n/).map((block) => block.trim()).filter(Boolean);
+    return `WEBVTT\n\n${blocks.map((block) => block.replace(/^\d+\s*\n/, "")).join("\n\n")}\n`;
+  }
+  void url;
+  return "";
 }
 
 async function fetchSubtitleResponse(url: string, params: StartDownloadParams): Promise<string> {
@@ -557,9 +590,11 @@ async function saveCompleted(entry: RuntimeDownload): Promise<void> {
       } catch {
         /* Direct VTT/SRT/ASS responses are already usable text. */
       }
+      vtt = subtitleToVtt(subtitleUrl, vtt);
       if (!vtt.includes("-->")) throw new Error("empty subtitle");
-      const extension = subtitleFormat(subtitleUrl, vtt);
-      const subtitlePath = `${entry.localPath.slice(0, -4)}.${extension}`;
+      /* Keep one canonical extension so the current native player can attach
+         the sidecar without adding a second subtitle engine. */
+      const subtitlePath = `${entry.localPath.slice(0, -4)}.vtt`;
       await FileSystem.writeAsStringAsync(subtitlePath, vtt);
       subtitleLocalPath = subtitlePath;
     } catch (error) {
