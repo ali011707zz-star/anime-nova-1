@@ -78,3 +78,4 @@
 - [Canonical episode totals](canonical-episode-totals.md) — episode lists must use the maximum confirmed total across AniList, Jikan, and the latest source catalog; cache keys include anime identity.
 - [Mobile watch loading fallback](mobile-watch-loading-fallback.md) — every render branch in the watch/server-scan flow must import its fallback components; missing ActivityIndicator caused an immediate ErrorBoundary crash.
 - [AnimeWitcher quality preservation](aw-quality-dedup-2026-08.md) — deduplicate AW by provider+quality+URL and classify quality from all row fields, or picker tiers disappear.
+- [Download API CORS headers](download-api-cors-headers.md) — provider Origin/Referer headers must not be forwarded to Nova API download routes, or global CORS rejects HLS downloads.

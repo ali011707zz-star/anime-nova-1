@@ -6,21 +6,81 @@ id = "SN-QxikEub7y8AEaq_2W-"
 uri = "file://tmp_out/anime-rift-patched.apk"
 type = "unspecified"
 title = "Anime Rift - نسخة معدّلة (تثق بشهادات mitmproxy)"
+logical_id = "f2b527b0-66e9-4ba1-9c14-cd0816bb26df"
 
 [[outputs]]
 id = "fnWAFoKSVWXll6VcYAF-O"
 uri = "file://tmp_out/mitmproxy-ca-cert.cer"
 type = "unspecified"
 title = "شهادة mitmproxy CA (لازم تنصيبها على الجهاز)"
+logical_id = "1fa19db2-878d-4c73-8356-b69c750dd03f"
 
 [[outputs]]
 id = "MqPLzpHZcPtnxDqRhdo-F"
 uri = "file://attached_assets/output/AniTaku_patched.apk"
 type = "unspecified"
 title = "AniTaku (معدّل - يتجاوز فحص PCAPdroid)"
+logical_id = "79bd3ed5-2efb-445a-a544-24c8933fcbb9"
 
 [[outputs]]
 id = "wQlF71IryLSUSKnqTsTEb"
 uri = "file://nova-player-build/NOVA-Player.apk"
 type = "unspecified"
 title = "NOVA Player APK"
+logical_id = "464e1ca3-cfe7-465d-819d-577d40b75858"
+
+[[outputs]]
+id = "59z3qP22iR0hNtCBNXLdd"
+uri = "file://attached_assets/generated_images/nova-icon-orbit.png"
+type = "image"
+title = "purple orbit icon"
+description = "Concept icon for Anime NOVA — review before any app replacement."
+logical_id = "e9918a20-f41c-4003-84cf-81c7e58d4b74"
+content_hash = "sha256:0414f017d704a9f27784ceff6268852854762051351dfcec8d297cdd772515cf"
+size = 1193631
+mtime_ms = 1787168531060
+storage_uri = "gcs://replit-rams-assets-sisko/rams/assets/repl:577201e2-4c3d-4cad-8f6e-fddc0396cc28/e9918a20-f41c-4003-84cf-81c7e58d4b74/0f0d08f0-a830-48af-ae26-7f2f4c8366e5"
+storage_version_token = "1787168543118597"
+content_type = "image/png"
+
+[[outputs]]
+id = "K2PmHCgrok456IDhrEyPb"
+uri = "file://attached_assets/generated_images/nova-icon-mask.png"
+type = "image"
+title = "anime mask icon"
+description = "Concept icon for Anime NOVA — review before any app replacement."
+logical_id = "f842718f-45e5-4fb1-a646-47427729cc77"
+content_hash = "sha256:6f08f148d99f13315a191e2cf8fba34f6951e5df1ae9b5587e16f9dff644b941"
+size = 1117590
+mtime_ms = 1787168533812
+storage_uri = "gcs://replit-rams-assets-sisko/rams/assets/repl:577201e2-4c3d-4cad-8f6e-fddc0396cc28/f842718f-45e5-4fb1-a646-47427729cc77/70f76e2e-9792-4205-86a5-6e07ebcc75a1"
+storage_version_token = "1787168544522369"
+content_type = "image/png"
+
+[[outputs]]
+id = "5mSnoUYuqIEhBXyp6HTEg"
+uri = "file://attached_assets/generated_images/nova-icon-play.png"
+type = "image"
+title = "nova play icon"
+description = "Concept icon for Anime NOVA — review before any app replacement."
+logical_id = "78081fd6-b836-471b-9ae9-e1fb58504cc2"
+content_hash = "sha256:be3eebe2c818e2ef17f325119ad59258562ca77c48c8862f2b108066dfb03d4b"
+size = 1199149
+mtime_ms = 1787168540284
+storage_uri = "gcs://replit-rams-assets-sisko/rams/assets/repl:577201e2-4c3d-4cad-8f6e-fddc0396cc28/78081fd6-b836-471b-9ae9-e1fb58504cc2/8f0fab80-e021-49e5-815e-564bb8094607"
+storage_version_token = "1787168545879625"
+content_type = "image/png"
+
+[[outputs]]
+id = "eHbJskhBCYOHJf2MxUo3X"
+uri = "file://attached_assets/generated_images/nova-icon-eye.png"
+type = "image"
+title = "cosmic eye icon"
+description = "Concept icon for Anime NOVA — review before any app replacement."
+logical_id = "c1c77923-d1e7-4612-b540-8d2649e61fc7"
+content_hash = "sha256:5ed74243bb5335f27136ff8d4b52ebb3538157f202cd266ced2b32f0f8954836"
+size = 887202
+mtime_ms = 1787168531940
+storage_uri = "gcs://replit-rams-assets-sisko/rams/assets/repl:577201e2-4c3d-4cad-8f6e-fddc0396cc28/c1c77923-d1e7-4612-b540-8d2649e61fc7/5ec06699-16f2-4fc7-b71b-26a5ac25d463"
+storage_version_token = "1787168547212566"
+content_type = "image/png"
