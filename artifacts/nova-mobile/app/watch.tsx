@@ -1366,7 +1366,8 @@ export default function WatchScreen() {
 
     const token = await getAuthToken();
     /* Fire-and-forget — يعمل في الخلفية بمستقل عن lifecycle هذه الشاشة */
-    const downloadUrl = DOWNLOAD_SUBTITLE_SITES.has(site)
+     const isHlsDownload = best.directType === "hls" || isHlsMediaUrl(proxyUrl);
+     const downloadUrl = (DOWNLOAD_SUBTITLE_SITES.has(site) || isHlsDownload)
       ? buildEmbeddedDownloadUrl(site, site === "kawaii" ? (best.rawUrl || proxyUrl) : proxyUrl, subtitleUrl, base)
       : proxyUrl;
     void startGlobalDownload({
@@ -1380,6 +1381,7 @@ export default function WatchScreen() {
       authToken: token,
       headers,
       subtitleUrl,
+       hlsManifestUrl: isHlsDownload ? proxyUrl : undefined,
     });
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [downloadStates, sources, anime, epNum, displayTitle, coverUrl, globalSubUrl]);
@@ -1461,7 +1463,8 @@ export default function WatchScreen() {
         const subtitleCandidate = subRaw;
        const subtitleUrl = normalizeProviderSubtitleUrl(site, subtitleCandidate, base);
       const token     = await getAuthToken();
-       const downloadUrl = DOWNLOAD_SUBTITLE_SITES.has(site)
+       const isHlsDownload = best.directType === "hls" || isHlsMediaUrl(proxyUrl);
+       const downloadUrl = (DOWNLOAD_SUBTITLE_SITES.has(site) || isHlsDownload)
          ? buildEmbeddedDownloadUrl(site, site === "kawaii" ? (best.rawUrl || proxyUrl) : proxyUrl, subtitleUrl, base)
          : proxyUrl;
 
@@ -1476,6 +1479,7 @@ export default function WatchScreen() {
         authToken:  token,
         headers:    hdrs,
         subtitleUrl,
+         hlsManifestUrl: isHlsDownload ? proxyUrl : undefined,
       });
 
     } catch {
