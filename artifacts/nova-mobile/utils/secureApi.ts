@@ -1,6 +1,7 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as SecureStore from "expo-secure-store";
 import { Platform } from "react-native";
+import Constants from "expo-constants";
 import { getBaseUrl } from "./baseUrl";
 import { getRuntimeIntegrity } from "./runtimeIntegrity";
 
@@ -10,7 +11,12 @@ const USER_TOKEN_KEY = "nova_user_token";
 
 // معرّف ثابت للتطبيق (Client Identifier)
 const CLIENT_ID = "nova-anime-mobile-v1";
-const APP_UA = "NovaAnime/1.0 (Expo; Mobile)";
+const APP_VERSION = Constants.expoConfig?.version || "1.0.0";
+const APP_PACKAGE =
+  Constants.expoConfig?.android?.package ||
+  Constants.expoConfig?.ios?.bundleIdentifier ||
+  "com.nova.anime";
+const APP_UA = `NovaAnime/${APP_VERSION} (Mobile)`;
 
 let _cachedToken: string | null = null;
 let _cachedExp: number = 0;
@@ -63,6 +69,8 @@ async function doFetchFreshToken(): Promise<string | null> {
         headers: {
           "Content-Type": "application/json",
           "X-Nova-Client": CLIENT_ID,
+          "X-Nova-Version": APP_VERSION,
+          "X-Nova-Package": APP_PACKAGE,
           "User-Agent": APP_UA,
         },
       });
@@ -137,6 +145,8 @@ export async function secureFetch(
     const h: Record<string, string> = {
       ...(options.headers as Record<string, string> || {}),
       "X-Nova-Client": CLIENT_ID,
+      "X-Nova-Version": APP_VERSION,
+      "X-Nova-Package": APP_PACKAGE,
       "User-Agent": APP_UA,
     };
     if (tok) h["X-App-Token"] = tok;
@@ -175,6 +185,8 @@ export async function secureStreamFetch(
     ...(options.headers as Record<string, string> || {}),
     Accept: "text/event-stream",
     "X-Nova-Client": CLIENT_ID,
+    "X-Nova-Version": APP_VERSION,
+    "X-Nova-Package": APP_PACKAGE,
     "User-Agent": APP_UA,
   };
   if (token) headers["X-App-Token"] = token;

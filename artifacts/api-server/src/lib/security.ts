@@ -6,6 +6,10 @@ import {
   timingSafeEqual,
 } from "crypto";
 
+export const MOBILE_CLIENT_ID = "nova-anime-mobile-v1";
+export const MOBILE_PACKAGE_NAME = "com.nova.anime";
+export const DEFAULT_MIN_MOBILE_VERSION = "1.0.0";
+
 // ── مفتاح السر (APP_SECRET env var) ──────────────────────────────────────────
 // لا يوجد fallback ثابت في الإنتاج. أي fallback ثابت يمكن استخراجه من الكود
 // واستخدامه لتوقيع توكنات وروابط بروكسي مزورة.
@@ -36,6 +40,47 @@ export function assertSecurityConfig(): void {
       "[security] APP_SECRET is missing or too short; refusing to start in production",
     );
   }
+}
+
+function versionParts(value: string): number[] {
+  return value
+    .trim()
+    .replace(/^v/i, "")
+    .split(".")
+    .map(part => Number.parseInt(part, 10))
+    .map(part => (Number.isFinite(part) && part >= 0 ? part : 0));
+}
+
+function versionAtLeast(current: string, minimum: string): boolean {
+  const a = versionParts(current);
+  const b = versionParts(minimum);
+  for (let i = 0; i < Math.max(a.length, b.length); i++) {
+    const currentPart = a[i] ?? 0;
+    const minimumPart = b[i] ?? 0;
+    if (currentPart !== minimumPart) return currentPart > minimumPart;
+  }
+  return true;
+}
+
+export type MobileAppCheck =
+  | { ok: true }
+  | { ok: false; code: "INVALID_CLIENT" | "INVALID_PACKAGE" | "APP_UPDATE_REQUIRED" };
+
+/** Validate the non-secret release identity sent by the official mobile client. */
+export function validateMobileAppIdentity(
+  headers: Record<string, string | string[] | undefined>,
+): MobileAppCheck {
+  const header = (name: string): string => {
+    const value = headers[name];
+    return Array.isArray(value) ? value[0] ?? "" : value ?? "";
+  };
+  if (header("x-nova-client") !== MOBILE_CLIENT_ID) return { ok: false, code: "INVALID_CLIENT" };
+  if (header("x-nova-package") !== MOBILE_PACKAGE_NAME) return { ok: false, code: "INVALID_PACKAGE" };
+  const minimum = process.env.NOVA_MIN_MOBILE_VERSION?.trim() || DEFAULT_MIN_MOBILE_VERSION;
+  if (!versionAtLeast(header("x-nova-version"), minimum)) {
+    return { ok: false, code: "APP_UPDATE_REQUIRED" };
+  }
+  return { ok: true };
 }
 
 // تحقق من مطابقة APP_SECRET (يُستخدم في مسارات الأدمن)

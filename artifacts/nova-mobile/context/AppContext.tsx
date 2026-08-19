@@ -1,5 +1,6 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import React, { createContext, useCallback, useContext, useEffect, useState } from "react";
+import { StyleSheet, Text, View } from "react-native";
 import { DEFAULT_CONFIG, fetchRemoteConfig, RemoteConfig } from "@/utils/api";
 import { getAuthToken } from "@/utils/secureApi";
 
@@ -48,6 +49,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [favorites, setFavorites] = useState<FavoriteAnime[]>([]);
   const [historyHydrated, setHistoryHydrated] = useState(false);
   const [favoritesHydrated, setFavoritesHydrated] = useState(false);
+  const [officialAppRequired, setOfficialAppRequired] = useState(false);
 
   useEffect(() => {
     loadAll();
@@ -124,8 +126,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   };
 
   const refreshConfig = useCallback(async () => {
-    const cfg = await fetchRemoteConfig();
-    if (cfg) setRemoteConfig({ ...DEFAULT_CONFIG, ...cfg });
+    try {
+      const cfg = await fetchRemoteConfig();
+      if (cfg) setRemoteConfig({ ...DEFAULT_CONFIG, ...cfg });
+    } catch (error) {
+      if (error instanceof Error && error.message === "OFFICIAL_APP_REQUIRED") {
+        setOfficialAppRequired(true);
+      }
+    }
   }, []);
 
   const setTheme = async (t: Theme) => {
@@ -178,7 +186,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   return (
     <AppContext.Provider value={{ theme, setTheme, remoteConfig, refreshConfig, watchHistory, addToHistory, removeFromHistory, favorites, toggleFavorite, isFavorite }}>
-      {children}
+      {officialAppRequired ? (
+        <View style={blockedStyles.container}>
+          <Text style={blockedStyles.title}>النسخة الرسمية مطلوبة</Text>
+          <Text style={blockedStyles.message}>
+            هذه النسخة غير رسمية أو معدلة. حمّل التطبيق الرسمي من موقع Anime NOVA.
+          </Text>
+        </View>
+      ) : children}
     </AppContext.Provider>
   );
 }
@@ -188,3 +203,26 @@ export function useApp() {
   if (!ctx) throw new Error("useApp must be inside AppProvider");
   return ctx;
 }
+
+const blockedStyles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: "#09090B",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 28,
+  },
+  title: {
+    color: "#F4F4F5",
+    fontSize: 22,
+    fontWeight: "800",
+    marginBottom: 12,
+    textAlign: "center",
+  },
+  message: {
+    color: "#A1A1AA",
+    fontSize: 15,
+    lineHeight: 24,
+    textAlign: "center",
+  },
+});

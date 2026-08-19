@@ -19,7 +19,13 @@ import { setupSession, registerEmailAuthRoutes, registerGoogleAuthRoutes, regist
 import sitemapRouter from "./routes/sitemap.js";
 import crashReportRouter from "./routes/crashReport.js";
 import hlsProxyRouter from "./routes/hlsProxy.js";
-import { validateAnonToken, checkRateLimit, assertSecurityConfig } from "./lib/security.js";
+import {
+  validateAnonToken,
+  validateMobileAppIdentity,
+  checkRateLimit,
+  assertSecurityConfig,
+  MOBILE_CLIENT_ID,
+} from "./lib/security.js";
 
 // ── المسارات التي تتطلب توكن صالح ──
 const PROTECTED_PATHS = [
@@ -125,6 +131,41 @@ export async function createApp(): Promise<Express> {
 
   // ── توكن المصادقة (يجب أن يسبق Middleware الحماية) ──
   app.use(authTokenRouter);
+
+  // ── Mobile release gate ───────────────────────────────────────────────────
+  // Web requests remain public as before. Any request identifying itself as the
+  // mobile client must prove its release identity and carry a short-lived token
+  // before it can receive config, catalog, posters, sources, or playback data.
+  app.use((req, res, next) => {
+    const clientHeader = req.headers["x-nova-client"];
+    const isMobileClient =
+      clientHeader === MOBILE_CLIENT_ID ||
+      (Array.isArray(clientHeader) && clientHeader.includes(MOBILE_CLIENT_ID)) ||
+      clientHeader !== undefined;
+    if (!isMobileClient) return next();
+
+    const identity = validateMobileAppIdentity(req.headers);
+    if (!identity.ok) {
+      res.status(403).json({
+        error: "هذه النسخة غير رسمية أو تحتاج إلى تحديث. حمّل النسخة الرسمية من الموقع.",
+        code: identity.code,
+        officialDownloadRequired: true,
+      });
+      return;
+    }
+
+    const tokenHeader = req.headers["x-app-token"];
+    const token = Array.isArray(tokenHeader) ? tokenHeader[0] : tokenHeader;
+    if (!validateAnonToken(token || "")) {
+      res.status(403).json({
+        error: "انتهت جلسة النسخة الرسمية. أعد فتح التطبيق.",
+        code: "INVALID_TOKEN",
+        officialDownloadRequired: true,
+      });
+      return;
+    }
+    next();
+  });
 
   // ── Middleware حماية المسارات الحساسة ──
   app.use((req, res, next) => {
