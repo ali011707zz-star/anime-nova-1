@@ -7172,6 +7172,8 @@ async function extractAninekoAllHls(
   const embedDomain = (() => { try { return new URL(embedUrl).origin; } catch { return ""; } })();
 
   const results: Array<{ quality: string; rank: number; url: string }> = [];
+  const isDeadVibeVibeUrl = (value: string) =>
+    /\.vibevibe\.workers\.dev(?:\/|$)/i.test(value);
 
   if (unpacked) {
     const hlsKeys: Array<{ key: string; quality: string; rank: number }> = [
@@ -7184,7 +7186,10 @@ async function extractAninekoAllHls(
       const m = unpacked.match(new RegExp(`"${key}"\\s*:\\s*["']([^"']+)["']`));
       if (!m) continue;
       const url = m[1].startsWith("/") ? `${embedDomain}${m[1]}` : m[1];
-      if (url.startsWith("http")) results.push({ quality, rank, url: url.replace(/&amp;/g, "&") });
+      if (url.startsWith("http")) {
+        const normalized = url.replace(/&amp;/g, "&");
+        if (!isDeadVibeVibeUrl(normalized)) results.push({ quality, rank, url: normalized });
+      }
     }
   }
 
@@ -7198,7 +7203,11 @@ async function extractAninekoAllHls(
     ];
     for (const pattern of patterns) {
       const m = toSearch.match(pattern);
-      if (m) { results.push({ quality: "1080p", rank: 9, url: m[1].replace(/&amp;/g, "&") }); break; }
+      if (m) {
+        const normalized = m[1].replace(/&amp;/g, "&");
+        if (!isDeadVibeVibeUrl(normalized)) results.push({ quality: "1080p", rank: 9, url: normalized });
+        if (results.length) break;
+      }
     }
   }
 
@@ -12305,9 +12314,9 @@ async function getAnimeSlayerSources(
 // notorrent (NO / addon-osvh.onrender.com): أُزيل كلياً بطلب المستخدم 2026-07-09
 
 const SANIME_API  = "https://app.sanime.net/function/h10.php?page=";
-// The live SAnime CDN uses Video2. The legacy /Video path returns 404 even
-// though the info endpoint confirms that the episode exists.
-const SANIME_CDN  = "https://server.sanime.net/Video2";
+// SAnime's current catalog serves MP4 files from /Video. The /Video2 path
+// returns 404 even though the info endpoint confirms that the episode exists.
+const SANIME_CDN  = "https://server.sanime.net/Video";
 const SANIME_UA   = "IBRAHIMSEVEN";
 const _sanimeCacheMap = new Map<string, { sources: UnifiedSource[]; ts: number }>();
 const _sanimeInFlight = new Map<string, Promise<UnifiedSource[]>>();
@@ -12422,13 +12431,13 @@ async function getSAnimeSourcesUncached(
     // immediately; the VPS video proxy still preserves Range and the player can
     // fall back to SD if the old HD file is unavailable.
     const SANIME_REF = "https://app.sanime.net/";
-    /* SAnime has used both CDN path families over time. Keep Video2 first
-       (current catalog), then expose the legacy Video paths as real fallbacks;
+    /* SAnime has used both CDN path families over time. Keep the known-live
+       Video path first, then expose Video2 as a legacy fallback;
        some older IDs exist on only one family. The player/proxy will skip a
        404 candidate and retain the working quality without an extra probe. */
     const cdnCandidates = [
       { base: SANIME_CDN, tag: "" },
-      { base: "https://server.sanime.net/Video", tag: " · fallback" },
+      { base: "https://server.sanime.net/Video2", tag: " · fallback" },
     ];
     for (const { base, tag } of cdnCandidates) {
       const directHD = `${base}/${bestId}/${ep}.mp4`;
@@ -13207,7 +13216,13 @@ router.get("/anime/sources-stream", async (req, res) => {
       // playback timeout delay every other provider in the picker.
       // A short check deadline made late providers vanish on first visit.
       const effectiveTimeoutMs = checkOnly ? Math.min(timeoutMs, 11000) : timeoutMs;
-      const cKey = makeSourceCacheKey(site, title, ep);
+      // Provider URL formats changed for AniNeko and SAnime. Version their
+      // cache keys so rows containing dead VibeVibe or /Video2 URLs cannot
+      // survive a deploy and get advertised again to web/mobile clients.
+      const cacheSite = site === "anineko" ? "anineko-v2"
+        : site === "sanime" ? "sanime-v2"
+        : site;
+      const cKey = makeSourceCacheKey(cacheSite, title, ep);
       const hit  = await getFromSourceCache(cKey);
       // Reanime URLs are paired with a per-embed manifest key and cannot use
       // source-cache rows created before that key was propagated to hls-proxy.
