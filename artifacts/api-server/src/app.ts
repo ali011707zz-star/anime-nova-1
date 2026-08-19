@@ -75,6 +75,11 @@ export async function createApp(): Promise<Express> {
     // Replit dev domains
     process.env.REPLIT_DEV_DOMAIN ? `https://${process.env.REPLIT_DEV_DOMAIN}` : "",
     ...(process.env.REPLIT_DOMAINS?.split(",").map(d => `https://${d.trim()}`) ?? []),
+    // AniNeko/AnimeKai WebView players make same-API requests with their
+    // embed origin. Keep this explicit instead of opening production CORS.
+    "https://otakuvid.online",
+    "https://otakuhg.online",
+    "https://www3.anikai.cc",
   ].filter(Boolean));
 
   app.use(cors({
