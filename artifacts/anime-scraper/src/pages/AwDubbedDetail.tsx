@@ -5,6 +5,7 @@ import { ChevronRight, Play, Loader2 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { AnimeMascot } from "@/components/AnimeMascot";
 import SEO from "@/components/SEO";
+import AppOnlyEpisodeDialog from "@/components/AppOnlyEpisodeDialog";
 
 interface Season  { label: string; animeId: string; }
 interface Episode { number: number; }
@@ -27,6 +28,7 @@ export default function AwDubbedDetail() {
   const [episodes,   setEpisodes]   = useState<Episode[]>([]);
   const [epLoading,  setEpLoading]  = useState(false);
   const [epProgress, setEpProgress] = useState<Record<number, number>>({});
+  const [exclusiveEpisode, setExclusiveEpisode] = useState<number | null>(null);
   const tabsRef = useRef<HTMLDivElement>(null);
 
   const seasons    = rawSeasons;
@@ -63,16 +65,6 @@ export default function AwDubbedDetail() {
     const active = tabsRef.current.querySelector("[data-active='true']") as HTMLElement | null;
     if (active) active.scrollIntoView({ inline: "center", block: "nearest", behavior: "smooth" });
   }, [selSeason]);
-
-  const watchUrl = (ep: Episode) => {
-    const ps       = encodeURIComponent(poster || "");
-    const tit      = encodeURIComponent(title);
-    const titAr    = encodeURIComponent(titleAr);
-    const sl       = encodeURIComponent(curSeason?.label || "الموسم 1");
-    const ser      = encodeURIComponent(curSeason?.animeId || "");
-    const seasonsE = encodeURIComponent(JSON.stringify(seasons));
-    return `/aw-dubbed/watch?series=${ser}&ep=${ep.number}&title=${tit}&titleAr=${titAr}&season=${sl}&poster=${ps}&seasons=${seasonsE}&img=${encodeURIComponent(rawImg)}&key=${encodeURIComponent(key || "")}`;
-  };
 
   const progressPct = (ep: Episode) => {
     const t = epProgress[ep.number];
@@ -193,7 +185,11 @@ export default function AwDubbedDetail() {
                 initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: Math.min(i * 0.025, 0.3), duration: 0.2 }}
                 whileTap={{ scale: 0.97 }}
-                onClick={() => navigate(watchUrl(ep))}
+                onClick={() => setExclusiveEpisode(ep.number)}
+                role="button"
+                tabIndex={0}
+                aria-label={`فتح تنبيه الحلقة ${ep.number}`}
+                data-testid={`aw-dubbed-episode-exclusive-${ep.number}`}
                 className={`flex items-center gap-3 p-3 rounded-2xl border cursor-pointer active:bg-white/8 transition-colors ${
                   watched ? "bg-white/3 border-white/4 opacity-55" : "bg-[#111116] border-white/6"
                 }`}>
@@ -251,6 +247,11 @@ export default function AwDubbedDetail() {
         )}
       </div>
     </main>
+    <AppOnlyEpisodeDialog
+      open={exclusiveEpisode !== null}
+      episodeLabel={`الحلقة ${exclusiveEpisode ?? ""}`}
+      onClose={() => setExclusiveEpisode(null)}
+    />
     </>
   );
 }
