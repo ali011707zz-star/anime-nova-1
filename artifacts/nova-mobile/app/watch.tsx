@@ -619,7 +619,6 @@ function ServerScanGif() {
       androidLayerType="hardware"
       setSupportMultipleWindows={false}
       javaScriptEnabled
-      onError={handleGifFailure}
       onMessage={(event) => {
         if (event.nativeEvent.data === "gif-error") handleGifFailure();
       }}
