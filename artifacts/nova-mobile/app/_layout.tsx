@@ -8,9 +8,10 @@ import {
 import { Ionicons } from "@expo/vector-icons";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Stack } from "expo-router";
+import { LinearGradient } from "expo-linear-gradient";
 import * as SplashScreen from "expo-splash-screen";
 import React, { useEffect, useState } from "react";
-import { I18nManager, Platform, StyleSheet, Text, View } from "react-native";
+import { Animated, I18nManager, Image, Platform, StyleSheet, Text, View } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import * as Sentry from "@sentry/react-native";
@@ -110,9 +111,11 @@ function RootLayout() {
 
   // إجبار إخفاء الـ splash بعد 3.5 ثانية حتى لو فشل تحميل الخطوط
   const [forceShow, setForceShow] = useState(false);
+  const [brandSplashVisible, setBrandSplashVisible] = useState(true);
   useEffect(() => {
     const t = setTimeout(() => {
       setForceShow(true);
+      setBrandSplashVisible(false);
       SplashScreen.hideAsync().catch(() => {});
     }, 3500);
     return () => clearTimeout(t);
@@ -120,7 +123,11 @@ function RootLayout() {
 
   useEffect(() => {
     if (fontsLoaded || fontError) {
-      SplashScreen.hideAsync().catch(() => {});
+      const t = setTimeout(() => {
+        setBrandSplashVisible(false);
+        SplashScreen.hideAsync().catch(() => {});
+      }, 900);
+      return () => clearTimeout(t);
     }
   }, [fontsLoaded, fontError]);
 
@@ -136,6 +143,10 @@ function RootLayout() {
   }, []);
 
   if (!fontsLoaded && !fontError && !forceShow) return null;
+
+  if (brandSplashVisible) {
+    return <BrandSplash />;
+  }
 
   if (!RUNTIME_INTEGRITY.trusted) {
     return (
@@ -163,7 +174,88 @@ function RootLayout() {
   );
 }
 
+function BrandSplash() {
+  return (
+    <LinearGradient
+      colors={["#05030D", "#11051F", "#09090B"]}
+      start={{ x: 0.15, y: 0 }}
+      end={{ x: 0.9, y: 1 }}
+      style={styles.brandSplash}
+    >
+      <View style={styles.brandGlow} />
+      <Animated.View style={styles.brandContent}>
+        <Image
+          source={require("../assets/images/icon.png")}
+          style={styles.brandLogo}
+          resizeMode="contain"
+          accessibilityLabel="شعار Anime NOVA"
+        />
+        <Text style={styles.brandName}>ANIME NOVA</Text>
+        <Text style={styles.brandTagline}>منصة الأنمي العربية</Text>
+        <View style={styles.brandLoader}>
+          <View style={styles.brandLoaderFill} />
+        </View>
+      </Animated.View>
+    </LinearGradient>
+  );
+}
+
 const styles = StyleSheet.create({
+  brandSplash: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#09090B",
+  },
+  brandContent: {
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 28,
+  },
+  brandLogo: {
+    width: 238,
+    height: 238,
+    borderRadius: 44,
+    marginBottom: 22,
+  },
+  brandName: {
+    color: "#FFFFFF",
+    fontSize: 27,
+    letterSpacing: 4,
+    fontWeight: "800",
+    textAlign: "center",
+  },
+  brandTagline: {
+    color: "#D8B4FE",
+    fontSize: 13,
+    fontFamily: "Cairo_600SemiBold",
+    marginTop: 7,
+    textAlign: "center",
+  },
+  brandGlow: {
+    position: "absolute",
+    width: 330,
+    height: 330,
+    borderRadius: 165,
+    backgroundColor: "rgba(168, 85, 247, 0.13)",
+    shadowColor: "#C026D3",
+    shadowOpacity: 0.9,
+    shadowRadius: 80,
+  },
+  brandLoader: {
+    width: 118,
+    height: 3,
+    borderRadius: 2,
+    backgroundColor: "rgba(255,255,255,0.12)",
+    overflow: "hidden",
+    marginTop: 28,
+  },
+  brandLoaderFill: {
+    width: "62%",
+    height: "100%",
+    borderRadius: 2,
+    backgroundColor: "#D946EF",
+  },
   blockedScreen: {
     flex: 1,
     backgroundColor: "#09090B",
