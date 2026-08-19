@@ -602,9 +602,10 @@ function ServerScanGif() {
   }, [gifIndex]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (failed) return <ServerScanAnimation />;
+  const html = `<!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1"></head><body style="margin:0;background:transparent;display:flex;align-items:center;justify-content:center;overflow:hidden"><img src="${gifUrl}" style="width:100%;height:100%;object-fit:contain" onerror="window.ReactNativeWebView.postMessage('gif-error')"></body></html>`;
   return (
     <WebView
-      source={{ uri: gifUrl }}
+      source={{ html, baseUrl: "https://gifdb.com/" }}
       style={d.availabilityGif}
       originWhitelist={["*"]}
       scrollEnabled={false}
@@ -617,7 +618,11 @@ function ServerScanGif() {
       cacheMode="LOAD_DEFAULT"
       androidLayerType="hardware"
       setSupportMultipleWindows={false}
-      javaScriptEnabled={false}
+      javaScriptEnabled
+      onError={handleGifFailure}
+      onMessage={(event) => {
+        if (event.nativeEvent.data === "gif-error") handleGifFailure();
+      }}
       mixedContentMode="always"
       onError={handleGifFailure}
       onHttpError={handleGifFailure}

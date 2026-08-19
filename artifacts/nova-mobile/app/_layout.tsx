@@ -124,6 +124,17 @@ function RootLayout() {
     }
   }, [fontsLoaded, fontError]);
 
+  useEffect(() => {
+    if (!RUNTIME_INTEGRITY.trusted) return;
+    let stop: (() => void) | undefined;
+    import("@/utils/episodeNotifications")
+      .then(({ startEpisodeNotificationSync }) => {
+        stop = startEpisodeNotificationSync();
+      })
+      .catch(() => {});
+    return () => stop?.();
+  }, []);
+
   if (!fontsLoaded && !fontError && !forceShow) return null;
 
   if (!RUNTIME_INTEGRITY.trusted) {

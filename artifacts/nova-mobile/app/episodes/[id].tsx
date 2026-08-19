@@ -18,7 +18,7 @@ query ($id: Int) {
     synonyms
     coverImage { large extraLarge }
     bannerImage episodes duration status format
-    nextAiringEpisode { episode }
+    nextAiringEpisode { episode airingAt }
     averageScore genres
   }
 }`;
@@ -266,6 +266,7 @@ export default function EpisodeListScreen() {
   }, [id]);
 
   function watchEp(n: number) {
+    if (n < 1 || n > total) return;
     setWatched(prev => {
       const next = new Set(prev);
       next.add(n);
@@ -295,9 +296,9 @@ export default function EpisodeListScreen() {
     const airedBySchedule = anime.nextAiringEpisode?.episode
       ? Math.max(0, anime.nextAiringEpisode.episode - 1)
       : 0;
-    return anime.status === "RELEASING" && airedBySchedule > 0
-      ? airedBySchedule
-      : (anime.episodes || airedBySchedule || 12);
+    if (anime.status === "NOT_YET_RELEASED") return 0;
+    if (anime.status === "RELEASING") return airedBySchedule;
+    return Math.max(0, Number(anime.episodes || 0));
   }, [anime]);
 
   const allEps = useMemo(() => Array.from({ length: total }, (_, i) => i + 1), [total]);

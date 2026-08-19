@@ -146,12 +146,17 @@ router.get("/sanime/src", async (req, res) => {
     const epNum = parseInt(epStr, 10);
     if (isNaN(epNum)) return void res.status(400).json({ error: "invalid ep" });
 
-    const hdUrl = `${SA_CDN}/${id}/${epNum}.mp4`;
-    const sdUrl = `${SA_CDN}/${id}/${epNum}SD.mp4`;
+    // SAnime requires its mobile client UA.  A direct CDN URL works in a
+    // browser but returns 404 when ExoPlayer requests it without that UA.
+    // Keep the CDN URL encoded inside our proxy so the VPS can add the UA
+    // and forward Range requests correctly.
+    const proxyBase = `/api/anime/video-proxy?ref=${encodeURIComponent("https://app.sanime.net/")}&ua=${encodeURIComponent(SA_UA)}`;
+    const hdUrl = `${proxyBase}&url=${encodeURIComponent(`${SA_CDN}/${id}/${epNum}.mp4`)}`;
+    const sdUrl = `${proxyBase}&url=${encodeURIComponent(`${SA_CDN}/${id}/${epNum}SD.mp4`)}`;
 
     // Return direct URLs immediately — SA CDN URLs are permanent & predictable.
     // Skip slow HEAD/openAnd checks that added 5–13s latency; the player handles failures.
-    res.json({ hdUrl, sdUrl, permanent: true });
+    res.json({ hdUrl, sdUrl, permanent: true, proxy: true });
   } catch (e) {
     logger.error({ err: e }, "sanime /src error");
     res.status(500).json({ error: "src error" });

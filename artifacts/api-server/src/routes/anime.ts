@@ -15505,6 +15505,12 @@ async function serveMediaVPS(
     Accept: "*/*",
     "Accept-Encoding": "identity",
   };
+  // SAnime's CDN uses this UA as a lightweight access key.  It is accepted
+  // only through the explicit proxy query parameter and never from a client
+  // supplied arbitrary header.
+  if (String(req.query.ua || "") === "IBRAHIMSEVEN") {
+    hdrs["User-Agent"] = "IBRAHIMSEVEN";
+  }
   // بعض CDNs مثل stormvv.vodvidl.site تُضمِّن headers مطلوبة في ?headers={...}
   // نستخرجها ونُضيفها للطلب، ونحذفها من URL الفعلي قبل الإرسال
   try {
