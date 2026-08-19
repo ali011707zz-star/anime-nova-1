@@ -8463,25 +8463,44 @@ async function getAnimeWitcherSources(
       console.log(`[AW] ep${ep} → fallback scan id="${epId}"`);
     }
 
-    // Availability mode only needs confirmation that the episode exists.
-    // Do not resolve file hosts, manifests, or video URLs during the picker scan.
-    if (availabilityOnly) {
-      return [{
-        name: "AnimeWitcher · 720p · الحلقة موجودة",
-        url: "",
-        quality: "720p",
-        qualityRank: 21,
-        site: "animewitcher",
-        verified: true,
-      }];
-    }
-
     // 3. جلب servers + episode doc بالتوازي
     const [rawServers, epDoc] = await Promise.all([
       awFetchServers(animeId, epId),
       awFetchEpDoc(animeId, epId),
     ]);
     if (!rawServers.length && !epDoc.bunny_video_id) return [];
+
+    // Read every AW server row during availability. Returning one hard-coded
+    // 720p row here hid 1080p/480p for new episodes not yet in aw_links.
+    if (availabilityOnly) {
+      const seenQuality = new Set<string>();
+      const rows = rawServers.map(srv => {
+        const quality = normalizeAwQuality(
+          `${srv.quality || ""} ${srv.name || ""} ${srv.url || ""}`,
+        );
+        return {
+          name: `AnimeWitcher · ${quality} · الحلقة موجودة`,
+          url: "",
+          quality,
+          qualityRank: quality === "1080p" ? 22 : quality === "720p" ? 21 : quality === "480p" ? 10 : 5,
+          site: "animewitcher",
+          verified: true,
+        } as UnifiedSource;
+      }).filter(row => {
+        if (seenQuality.has(row.quality!)) return false;
+        seenQuality.add(row.quality!);
+        return true;
+      });
+      if (rows.length) return rows;
+      return [{
+        name: "AnimeWitcher · 1080p · الحلقة موجودة",
+        url: "",
+        quality: "1080p",
+        qualityRank: 22,
+        site: "animewitcher",
+        verified: true,
+      }];
+    }
 
     const sources: UnifiedSource[] = [];
     const seenUrls = new Set<string>();

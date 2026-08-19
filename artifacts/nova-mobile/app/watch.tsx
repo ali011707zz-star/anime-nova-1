@@ -603,6 +603,7 @@ function ServerScanAnimation() {
    used as a fallback because some Android WebViews do not follow GIFDB's
    redirect reliably. */
 const SERVER_SCAN_GIFS = [
+  "/gojo-loading.gif",
   "https://gifdb.com/images/branded/high/satoru-gojo-vs-ryomen-sukuna-gif-tt4cnmnevgpxt99u.gif",
   "/api/anime/scan-gif?i=0",
 ] as const;
