@@ -347,6 +347,18 @@ function isHlsMediaUrl(url: string): boolean {
   return /\.m3u8(?:[?#]|$)|\/api\/anime\/hls-proxy|\/(?:hls|playlist)(?:\/|$)/i.test(url);
 }
 
+/* These providers sign media for the viewer's device and can reject the
+   VPS/datacenter IP even when the Referer is correct. Keep their original
+   URL on mobile and send provider headers with every ExoPlayer request. */
+const MOBILE_DIRECT_SITES = new Set(["kawaii", "animekai"]);
+
+function getMobileDirectUrl(source: Src): string | null {
+  if (!MOBILE_DIRECT_SITES.has(String(source.site || "").toLowerCase())) return null;
+  const candidate = source.rawUrl;
+  if (!candidate || !isValidSourceUrl(candidate)) return null;
+  return candidate;
+}
+
 /* HLS is a playlist, not an MP4. Route it through the VPS converter; direct
    MP4/proxy streams remain resumable downloads. Subtitles stay sidecars. */
 function buildEmbeddedDownloadUrl(
@@ -573,11 +585,12 @@ function ServerScanAnimation() {
    all Expo/Android builds. Render the exact GIF URL inside a tiny HTML
    document. Direct image navigation can remain blank on Android WebView when
    the CDN returns a redirect or a non-image intermediate response. */
-/* GIFDB is the canonical asset used by the web; Giphy is only a bounded
-   fallback for Android networks that cannot reach GIFDB. */
+/* Keep this identical to the web loading animation. The API mirror is only
+   used as a fallback because some Android WebViews do not follow GIFDB's
+   redirect reliably. */
 const SERVER_SCAN_GIFS = [
+  "https://gifdb.com/images/branded/high/satoru-gojo-vs-ryomen-sukuna-gif-tt4cnmnevgpxt99u.gif",
   "/api/anime/scan-gif?i=0",
-  "/api/anime/scan-gif?i=1",
 ] as const;
 
 function ServerScanGif() {
@@ -595,13 +608,13 @@ function ServerScanGif() {
   };
   useEffect(() => {
     /* A blocked CDN can leave WebView waiting forever without firing onError.
-       Give each mirror a bounded window, then use the same local animation
-       fallback as the web card instead of leaving a blank rectangle. */
+       Give each mirror a bounded window. Do not replace the original GIF with
+       the radio/logo placeholder: the loading state must remain the same as web. */
     const timeout = setTimeout(handleGifFailure, 10_000);
     return () => clearTimeout(timeout);
   }, [gifIndex]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  if (failed) return <ServerScanAnimation />;
+  if (failed) return <ActivityIndicator size="large" color="#a78bfa" />;
   const html = `<!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1"></head><body style="margin:0;background:transparent;display:flex;align-items:center;justify-content:center;overflow:hidden"><img src="${gifUrl}" style="width:100%;height:100%;object-fit:contain" onerror="window.ReactNativeWebView.postMessage('gif-error')"></body></html>`;
   return (
     <WebView
@@ -1550,9 +1563,13 @@ export default function WatchScreen() {
       /* headers: استخدم الـ headers المُرسَلة من الخادم أولاً (Referer/Origin المباشرة)،
          ثم احسبها من رابط الـ proxy كـ fallback للإصدارات القديمة من الكاش */
       const headers = s.headers || extractProxyHeaders(rawUrl);
-      /* نضمن أن كل الروابط تمرّ عبر VPS proxy — ExoPlayer/AVPlayer لا يُرسل Referer
-         بشكل موثوق لـ CDNs، وكثير من CDNs تحجب IPs مراكز البيانات بدون Referer صحيح */
-      const url = ensureVpsProxy(rawUrl, headers, base, s.directType === "hls");
+      const mobileDirectUrl = getMobileDirectUrl(s);
+      /* Kawaii/AnimeKai reject datacenter IPs for some signed media URLs.
+         Their original URL is safe on the device when provider headers travel
+         with every ExoPlayer request. Other sources keep the VPS proxy. */
+      const url = mobileDirectUrl
+        ? mobileDirectUrl
+        : ensureVpsProxy(rawUrl, headers, base, s.directType === "hls");
       return {
         url,
         headers,

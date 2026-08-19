@@ -7879,9 +7879,10 @@ async function getAnimeKaiSources(
             : proxyUrl;
           sources.push({
             name: `AnimeKai · ${langLabel} · ${srv.name} · ${variant.label}`,
-            url: variant.url, quality: variant.label, qualityRank: variant.rank,
+            url: variant.url, rawUrl: variant.url, quality: variant.label, qualityRank: variant.rank,
             site: "animekai", directUrl: variantProxyUrl,
             directType: isHls ? "hls" : "mp4",
+            headers: { Referer: `${KAI_BASE}/`, Origin: KAI_BASE },
           });
         }
       } catch { continue; }

@@ -46,6 +46,8 @@ type NovaVideoSource = string | {
    * encrypted query no longer exposes the upstream `.m3u8` suffix.
    */
   contentType?: "hls";
+  /** Provider headers are needed by signed CDNs on direct mobile playback. */
+  headers?: Record<string, string>;
 };
 
 function isHlsSourceUrl(url: string): boolean {
@@ -60,8 +62,12 @@ function isHlsSourceUrl(url: string): boolean {
 
 function toExpoVideoSource(source: PlayerSource | undefined): NovaVideoSource | null {
   if (!source?.url) return null;
-  return isHlsSourceUrl(source.url)
-    ? { uri: source.url, contentType: "hls" }
+  return isHlsSourceUrl(source.url) || source.headers
+    ? {
+        uri: source.url,
+        ...(isHlsSourceUrl(source.url) ? { contentType: "hls" as const } : {}),
+        ...(source.headers ? { headers: source.headers } : {}),
+      }
     : source.url;
 }
 
