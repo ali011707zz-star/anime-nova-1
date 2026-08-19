@@ -432,8 +432,21 @@ function wait(ms: number): Promise<void> {
 }
 
 function requestHeaders(params: StartDownloadParams): Record<string, string> {
+  /* Provider Referer/Origin headers are needed when the phone talks directly
+     to a CDN, but they must not be forwarded to Nova's own API routes. The
+     global CORS middleware correctly rejects an API request whose Origin is
+     megaplay/mediafire/etc.; the proxy URL already contains the provider
+     referrer and the VPS supplies it upstream. */
+  const isNovaApiUrl = /\/api\/(?:anime|animation)\//i.test(params.url);
+  const sourceHeaders = isNovaApiUrl
+    ? Object.fromEntries(
+        Object.entries(params.headers || {}).filter(
+          ([key]) => !/^(origin|referer|host|content-length)$/i.test(key),
+        ),
+      )
+    : (params.headers || {});
   const headers: Record<string, string> = {
-    ...(params.headers || {}),
+    ...sourceHeaders,
     "X-Nova-Client": "nova-anime-mobile-v1",
     "User-Agent": "NovaAnime/1.0 (Expo; Mobile)",
     /* DownloadResumable may issue Range requests after a background retry.

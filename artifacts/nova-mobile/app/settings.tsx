@@ -11,6 +11,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useColors } from "@/hooks/useColors";
 import { useApp } from "@/context/AppContext";
 import { getBaseUrl } from "@/utils/baseUrl";
+import { CrashEntry, getCrashLog } from "@/utils/crashLogger";
 
 const THEMES: { label: string; value: string; dot: string; desc: string }[] = [
   { label: "داكن",   value: "dark",   dot: "#3F3F46", desc: "رمادي داكن" },
@@ -966,10 +967,16 @@ export default function SettingsScreen() {
   const [showReport, setShowReport] = useState(false);
   const [showAuth, setShowAuth] = useState(false);
   const [showPremium, setShowPremium] = useState(false);
+  const [showCrashLog, setShowCrashLog] = useState(false);
+  const [crashEntries, setCrashEntries] = useState<CrashEntry[]>([]);
   const [currentUser, setCurrentUser] = useState<MobileUser | null>(null);
 
   useEffect(() => {
     AsyncStorage.getItem(AUTH_KEY).then(v => { if (v) { try { setCurrentUser(JSON.parse(v)); } catch {} } });
+  }, []);
+
+  useEffect(() => {
+    getCrashLog().then(setCrashEntries).catch(() => {});
   }, []);
 
   const handleLogout = () => {
