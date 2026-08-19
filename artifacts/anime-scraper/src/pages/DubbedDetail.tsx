@@ -5,6 +5,7 @@ import { ChevronRight, Play, Clock, Loader2, X } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { AnimeMascot } from "@/components/AnimeMascot";
 import SEO from "@/components/SEO";
+import AppOnlyEpisodeDialog from "@/components/AppOnlyEpisodeDialog";
 
 interface Season { label: string; arabicToonsId: string; }
 interface Episode { number: number; epId: string; url: string; thumbnail?: string; }
@@ -43,6 +44,7 @@ export default function DubbedDetail() {
   const [episodes, setEpisodes] = useState<Episode[]>([]);
   const [epLoading, setEpLoading] = useState(false);
   const [epProgress, setEpProgress] = useState<Record<number, number>>({});
+  const [exclusiveEpisode, setExclusiveEpisode] = useState<number | null>(null);
   const tabsRef = useRef<HTMLDivElement>(null);
 
   const seasons = rawSeasons;
@@ -235,7 +237,11 @@ export default function DubbedDetail() {
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: Math.min(i * 0.025, 0.3), duration: 0.2 }}
                 whileTap={{ scale: 0.97 }}
-                onClick={() => navigate(watchUrl(ep))}
+                onClick={() => setExclusiveEpisode(ep.number)}
+                role="button"
+                tabIndex={0}
+                aria-label={`فتح تنبيه الحلقة ${ep.number}`}
+                data-testid={`dubbed-episode-exclusive-${ep.number}`}
                 className={`flex items-center gap-3 p-3 rounded-2xl border cursor-pointer active:bg-white/8 transition-colors ${
                   watched ? "bg-white/3 border-white/4 opacity-55" : "bg-[#111116] border-white/6"
                 }`}
@@ -302,7 +308,11 @@ export default function DubbedDetail() {
         )}
       </div>
     </main>
-
+    <AppOnlyEpisodeDialog
+      open={exclusiveEpisode !== null}
+      episodeLabel={`الحلقة ${exclusiveEpisode ?? ""}`}
+      onClose={() => setExclusiveEpisode(null)}
+    />
     </>
   );
 }
