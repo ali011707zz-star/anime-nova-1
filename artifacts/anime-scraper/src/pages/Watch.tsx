@@ -5372,10 +5372,14 @@ export default function WatchPage() {
           await new Promise((resolve) => setTimeout(resolve, 350));
         }
       }
-      /* Availability rows may advertise 1080p while MegaPlay's current
-         manifest only exposes 720p/360p. Retry without the tier filter so a
-         real MP source is kept instead of deleting the clicked card. */
-      if (!data.sources?.length && site === "megaplay" && !ctrl.signal.aborted) {
+      /* Availability rows may advertise a tier before the provider's live
+         response is updated. Retry without the tier filter for the providers
+         used by the latest-episodes flow, otherwise a healthy source is
+         deleted simply because its current label differs from the card. */
+      const QUALITY_FALLBACK_SITES = new Set([
+        "kawaii", "anineko", "animekai", "animewitcher", "sanime", "megaplay",
+      ]);
+      if (!data.sources?.length && QUALITY_FALLBACK_SITES.has(site) && !ctrl.signal.aborted) {
         const fallbackParams = new URLSearchParams(params);
         fallbackParams.delete("quality");
         try {
