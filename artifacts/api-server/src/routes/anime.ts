@@ -17366,8 +17366,47 @@ setInterval(() => awAutoSync().catch(() => {}), 2 * 60 * 60_000);
 const _jikanEpisodeCache = new Map<string, { ts: number; payload: any }>();
 const JIKAN_EPISODE_CACHE_TTL = 10 * 60_000;
 
+async function getAnsLayerLatestEpisode(anilistId: number): Promise<number> {
+  try {
+    let items = _anslayerLatestCache;
+    if (!items || Date.now() - _anslayerLatestTs >= ANSLAYER_LATEST_TTL) {
+      const data = await anslayerGet("animes/get-published-animes", {
+        list_type: "latest_updated_episode_new",
+        page: 1,
+      });
+      const list: any[] = data?.response?.data || [];
+      const rawItems = list.map((item: any) => {
+        const epMatch = String(item.latest_episode_name || "").match(/(\d+)/);
+        return {
+          anslayerId: parseInt(item.anime_id, 10),
+          name: item.anime_name || "",
+          episode: epMatch ? parseInt(epMatch[1], 10) : null,
+          cover: item.anime_cover_image_url || "",
+          year: item.anime_release_year || "",
+        };
+      }).filter((item: any) => item.anslayerId && item.episode);
+
+      items = (await Promise.all(rawItems.map(async (item: any) => {
+        const resolvedId = await resolveAniListIdForSource(item.name, null, [], null);
+        return { ...item, animeId: resolvedId };
+      }))).filter((item: any) => item.animeId && item.episode);
+      _anslayerLatestCache = items;
+      _anslayerLatestTs = Date.now();
+    }
+    return Math.max(
+      0,
+      ...(items || [])
+        .filter((item: any) => Number(item.animeId) === anilistId)
+        .map((item: any) => Number(item.episode) || 0),
+    );
+  } catch {
+    return 0;
+  }
+}
+
 router.get("/anime/episode-titles", async (req, res) => {
   const malId = Number.parseInt(String(req.query.malId || "0"), 10);
+  const anilistId = Number.parseInt(String(req.query.anilistId || "0"), 10);
   const page = Math.max(1, Number.parseInt(String(req.query.page || "1"), 10) || 1);
   if (!Number.isFinite(malId) || malId <= 0) {
     res.status(400).json({ episodes: [], total: 0, page });
@@ -17400,8 +17439,11 @@ router.get("/anime/episode-titles", async (req, res) => {
           const n = Number(item?.mal_id || item?.episode || 0);
           return Number.isFinite(n) && n > max ? n : max;
         }, 0);
-        const total = Math.max(paginationTotal, pageFloor, episodeFloor);
-        payload = { episodes, total, page };
+        const latestEpisode = anilistId > 0
+          ? await getAnsLayerLatestEpisode(anilistId)
+          : 0;
+        const total = Math.max(paginationTotal, pageFloor, episodeFloor, latestEpisode);
+        payload = { episodes, total, latestEpisode, page };
         break;
       }
       if (upstream.status === 429 && attempt === 0) {
@@ -17412,7 +17454,7 @@ router.get("/anime/episode-titles", async (req, res) => {
     }
   }
 
-  const result = payload || { episodes: [], total: 0, page };
+  const result = payload || { episodes: [], total: 0, latestEpisode: 0, page };
   if (payload) _jikanEpisodeCache.set(key, { ts: Date.now(), payload });
   res.json(result);
 });

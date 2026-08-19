@@ -320,7 +320,7 @@ export default function EpisodeListPage() {
     const malId = Number(anime?.idMal || 0);
     if (!malId || search.trim()) return;
     const ctrl = new AbortController();
-    fetch(`${API_BASE}/api/anime/episode-titles?malId=${malId}&page=${Math.max(1, page)}`, {
+    fetch(`${API_BASE}/api/anime/episode-titles?malId=${malId}&anilistId=${Number(anime?.id || 0)}&page=${Math.max(1, page)}`, {
       signal: ctrl.signal,
       cache: "no-store",
     })
@@ -399,6 +399,7 @@ export default function EpisodeListPage() {
         ? Math.max(
             0,
             Number(anime.nextAiringEpisode?.episode || 0) - 1,
+            jikanEpisodeTotal,
           )
         : Math.max(
             Number(anime.episodes || 0),

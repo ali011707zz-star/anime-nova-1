@@ -134,6 +134,7 @@ export default function EpisodeListScreen() {
   const [anime, setAnime] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [epData, setEpData] = useState<any[]>([]);
+  const [episodeCatalogTotal, setEpisodeCatalogTotal] = useState(0);
   const [episodeTitlesAr, setEpisodeTitlesAr] = useState<Record<number, string>>({});
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
@@ -144,7 +145,7 @@ export default function EpisodeListScreen() {
     if (!id) return;
     const ctrl = new AbortController();
     setLoading(true);
-    setEpData([]); setPage(1); setSearch("");
+    setEpData([]); setEpisodeCatalogTotal(0); setPage(1); setSearch("");
     getWatched(id).then(v => { if (!ctrl.signal.aborted) setWatched(v); });
     getCommentCounts(id).then(v => { if (!ctrl.signal.aborted) setCommentCounts(v); });
 
@@ -213,10 +214,12 @@ export default function EpisodeListScreen() {
       setAnime(a);
       setEpisodeTitlesAr({});
       if (a?.idMal) {
-        fetch(`${base}/api/anime/episode-titles?malId=${a.idMal}&page=1`, { signal: ctrl.signal })
+        fetch(`${base}/api/anime/episode-titles?malId=${a.idMal}&anilistId=${Number(a.id || 0)}&page=1`, { signal: ctrl.signal })
           .then(r => r.json())
           .then(d => {
-            if (!ctrl.signal.aborted && Array.isArray(d?.episodes)) setEpData(d.episodes);
+            if (ctrl.signal.aborted) return;
+            if (Array.isArray(d?.episodes)) setEpData(d.episodes);
+            if (Number(d?.total) > 0) setEpisodeCatalogTotal(Number(d.total));
           })
           .catch((e) => {
             if (e?.name === "AbortError") return;
@@ -297,9 +300,11 @@ export default function EpisodeListScreen() {
       ? Math.max(0, anime.nextAiringEpisode.episode - 1)
       : 0;
     if (anime.status === "NOT_YET_RELEASED") return 0;
-    if (anime.status === "RELEASING") return airedBySchedule;
-    return Math.max(0, Number(anime.episodes || 0));
-  }, [anime]);
+    if (anime.status === "RELEASING") {
+      return Math.max(airedBySchedule, episodeCatalogTotal);
+    }
+    return Math.max(0, Number(anime.episodes || 0), episodeCatalogTotal);
+  }, [anime, episodeCatalogTotal]);
 
   const allEps = useMemo(() => Array.from({ length: total }, (_, i) => i + 1), [total]);
   const watchedCount = useMemo(() => [...watched].filter(n => n >= 1 && n <= total).length, [watched, total]);
