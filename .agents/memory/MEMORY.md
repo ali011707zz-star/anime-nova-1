@@ -75,3 +75,5 @@
 - [Anime4up disabled](anime4up-vps-reachability.md) — Anime4up is intentionally disabled and blocked; do not re-add it to the anime picker
 - [Availability-only provider adapters](availability-only-providers.md) — every provider must accept the explicit metadata-only flag; extra JS arguments are silently ignored
 - [VPS HLS downloads](vps-hls-downloads.md) — HLS must be remuxed to MP4 on the VPS; subtitles remain offline VTT sidecars.
+- [Canonical episode totals](canonical-episode-totals.md) — episode lists must use the maximum confirmed total across AniList, Jikan, and the latest source catalog; cache keys include anime identity.
+- [Mobile watch loading fallback](mobile-watch-loading-fallback.md) — every render branch in the watch/server-scan flow must import its fallback components; missing ActivityIndicator caused an immediate ErrorBoundary crash.
