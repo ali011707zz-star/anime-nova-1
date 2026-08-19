@@ -11,7 +11,6 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useColors } from "@/hooks/useColors";
 import { useApp } from "@/context/AppContext";
 import { getBaseUrl } from "@/utils/baseUrl";
-import { getCrashLog, clearCrashLog, type CrashEntry } from "@/utils/crashLogger";
 
 const THEMES: { label: string; value: string; dot: string; desc: string }[] = [
   { label: "داكن",   value: "dark",   dot: "#3F3F46", desc: "رمادي داكن" },
@@ -968,8 +967,6 @@ export default function SettingsScreen() {
   const [showAuth, setShowAuth] = useState(false);
   const [showPremium, setShowPremium] = useState(false);
   const [currentUser, setCurrentUser] = useState<MobileUser | null>(null);
-  const [showCrashLog, setShowCrashLog] = useState(false);
-  const [crashEntries, setCrashEntries] = useState<CrashEntry[]>([]);
 
   useEffect(() => {
     AsyncStorage.getItem(AUTH_KEY).then(v => { if (v) { try { setCurrentUser(JSON.parse(v)); } catch {} } });
@@ -1316,35 +1313,6 @@ export default function SettingsScreen() {
               label="مسح الكاش والإعدادات"
               sub={`${cacheKb}KB مُخزَّن · يعيد التطبيق للحالة الأولية`}
               onPress={handleClearCache}
-            />
-          </Card>
-        </View>
-
-        {/* ══════ سجل الأعطال (للمطور) ══════ */}
-        <SectionHeader title="سجل الأعطال" icon="🛠️" />
-        <View style={{ paddingHorizontal: 16 }}>
-          <Card>
-            <NavRow
-              icon="bug" iconColor="#f87171" iconBg="rgba(239,68,68,0.10)"
-              label="عرض سجل الأخطاء"
-              sub="يُرفع تلقائياً للسيرفر · للتشخيص فقط"
-              onPress={async () => {
-                const logs = await getCrashLog();
-                setCrashEntries(logs);
-                setShowCrashLog(true);
-              }}
-            />
-            <DangerRow
-              label="مسح سجل الأعطال"
-              sub="يمسح الأخطاء المحفوظة محلياً"
-              onPress={() => openConfirm({
-                open: true,
-                title: "مسح سجل الأعطال؟",
-                desc: "سيتم حذف كل الأخطاء المحفوظة.",
-                confirmLabel: "امسح",
-                danger: true,
-                onConfirm: async () => { await clearCrashLog(); setCrashEntries([]); showToast("تم مسح السجل"); },
-              })}
             />
           </Card>
         </View>
