@@ -603,9 +603,10 @@ function ServerScanAnimation() {
    used as a fallback because some Android WebViews do not follow GIFDB's
    redirect reliably. */
 const SERVER_SCAN_GIFS = [
+  "/api/anime/scan-gif?i=0",
   "/gojo-loading.gif",
   "https://gifdb.com/images/branded/high/satoru-gojo-vs-ryomen-sukuna-gif-tt4cnmnevgpxt99u.gif",
-  "/api/anime/scan-gif?i=0",
+  "/api/anime/scan-gif?i=1",
 ] as const;
 
 function ServerScanGif() {
@@ -663,7 +664,9 @@ const SITE_TIMEOUT_MAP: Record<string, number> = {
   anifox:       35_000,
   animewitcher: 38_000,
   animeify:     22_000,
-  sanime:       18_000,
+  /* Keep this above the backend's 20s SAnime extraction budget. The web
+     client uses 28s; mobile must not abort the same repaired source early. */
+  sanime:       28_000,
   kawaii:       15_000,
   anineko:      45_000,
   anivexa_re: 32_000, anivexa_anikoto: 32_000, anivexa_animegg: 32_000,
@@ -903,7 +906,13 @@ export default function WatchScreen() {
     const stagedSlots: Record<string, Partial<Record<QualityKey, AvailableSlot>>> = {};
 
     const applyRow = (row: any) => {
-      const site = String(row?.site || "").trim();
+      /* Availability may be emitted from a versioned cache namespace while
+         fetch-source still accepts the canonical provider id. Normalize both
+         forms so repaired AN/SA rows are not silently discarded on mobile. */
+      const rawSite = String(row?.site || "").trim().toLowerCase();
+      const site = rawSite === "anineko-v2" || rawSite === "an" ? "anineko"
+        : rawSite === "sanime-v2" || rawSite === "sa" ? "sanime"
+        : rawSite;
       const qk = getAvailabilityQualityKey(row);
       if (!site || !qk || !allowedSites.has(site)) return;
       const previous = stagedSlots[site]?.[qk];
