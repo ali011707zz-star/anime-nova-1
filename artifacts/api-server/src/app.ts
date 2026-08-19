@@ -72,6 +72,11 @@ export async function createApp(): Promise<Express> {
   });
 
   // ── CORS — السماح للواجهة الأمامية وتطبيق الموبايل فقط ─────────────────────
+  // Native players forward the provider's Referer/Origin headers to the
+  // media proxy (for example megaplay.buzz). Those origins must never be
+  // allowed to call the application API, but they also must not be rejected
+  // by this global CORS guard before the proxy can handle the request.
+  const MEDIA_PROXY_PATH = /^\/api\/(?:anime|animation)\/(?:hls-proxy|video-proxy|seg-proxy|download-mp4)$/;
   const ALLOWED_ORIGINS = new Set([
     process.env.FRONTEND_ORIGIN || "",
     process.env.APP_DOMAIN ? `https://${process.env.APP_DOMAIN}` : "",
@@ -88,7 +93,7 @@ export async function createApp(): Promise<Express> {
     "https://www3.anikai.cc",
   ].filter(Boolean));
 
-  app.use(cors({
+  const corsOptions = {
     origin: (origin, cb) => {
       // السماح للطلبات بدون origin (mobile apps, curl, server-to-server)
       if (!origin) return cb(null, true);
@@ -107,7 +112,25 @@ export async function createApp(): Promise<Express> {
       cb(new Error(`CORS: ${origin} غير مسموح`));
     },
     credentials: true,
-  }));
+  };
+
+  app.use((req, res, next) => {
+    if (MEDIA_PROXY_PATH.test(req.path)) {
+      res.setHeader("Access-Control-Allow-Origin", "*");
+      res.setHeader("Access-Control-Allow-Headers", "Range, Content-Type, X-App-Token");
+      res.setHeader(
+        "Access-Control-Expose-Headers",
+        "Accept-Ranges, Content-Length, Content-Range, Content-Type, Content-Disposition",
+      );
+      if (req.method === "OPTIONS") {
+        res.status(204).end();
+        return;
+      }
+      next();
+      return;
+    }
+    cors(corsOptions)(req, res, next);
+  });
 
   // ── Global Rate Limit — 300 طلب/دقيقة لكل IP (حماية من DDoS) ─────────────
   app.use((req, res, next) => {
