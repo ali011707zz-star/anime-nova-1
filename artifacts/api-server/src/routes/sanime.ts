@@ -4,10 +4,11 @@ import { logger } from "../lib/logger";
 const router = Router();
 
 const SA_API = "https://app.sanime.net/function/h10.php?page=";
-// Video2 is the current CDN path. Keep the old endpoint out of the default
-// playback path: it can return a successful-looking source card but a 404
-// media response, which appears as silent playback on mobile players.
+// SAnime has two CDN path families. Video2 is current, while older episodes
+// can exist only on the legacy Video path. Return both through the proxy so
+// the player can keep the working quality instead of showing a dead source.
 const SA_CDN = "https://server.sanime.net/Video2";
+const SA_CDN_FALLBACK = "https://server.sanime.net/Video";
 const SA_UA  = "IBRAHIMSEVEN";
 const saImg  = (id: string | number) => `https://app.sanime.net/api/anime/${id}/image.jpg`;
 
@@ -156,10 +157,12 @@ router.get("/sanime/src", async (req, res) => {
     const proxyBase = `/api/anime/video-proxy?ref=${encodeURIComponent("https://app.sanime.net/")}&ua=${encodeURIComponent(SA_UA)}`;
     const hdUrl = `${proxyBase}&url=${encodeURIComponent(`${SA_CDN}/${id}/${epNum}.mp4`)}`;
     const sdUrl = `${proxyBase}&url=${encodeURIComponent(`${SA_CDN}/${id}/${epNum}SD.mp4`)}`;
+    const hdFallbackUrl = `${proxyBase}&url=${encodeURIComponent(`${SA_CDN_FALLBACK}/${id}/${epNum}.mp4`)}`;
+    const sdFallbackUrl = `${proxyBase}&url=${encodeURIComponent(`${SA_CDN_FALLBACK}/${id}/${epNum}SD.mp4`)}`;
 
     // Return direct URLs immediately — SA CDN URLs are permanent & predictable.
     // Skip slow HEAD/openAnd checks that added 5–13s latency; the player handles failures.
-    res.json({ hdUrl, sdUrl, permanent: true, proxy: true });
+    res.json({ hdUrl, sdUrl, hdFallbackUrl, sdFallbackUrl, permanent: true, proxy: true });
   } catch (e) {
     logger.error({ err: e }, "sanime /src error");
     res.status(500).json({ error: "src error" });
