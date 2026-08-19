@@ -1413,6 +1413,17 @@ function anifoxQualityRank(quality: string): number {
     : 6;
 }
 
+/* AW returns quality in several fields and occasionally embeds it in the
+ * server name or URL. Keep one canonical tier so availability and playback
+ * use the same picker rows. */
+function normalizeAwQuality(value: string): "1080p" | "720p" | "480p" | "360p" {
+  const q = String(value || "").toLowerCase();
+  if (/(?:2160|4k|1080|fhd)/i.test(q)) return "1080p";
+  if (/(?:720|hd)/i.test(q)) return "720p";
+  if (/(?:480|sd)/i.test(q)) return "480p";
+  return "360p";
+}
+
 async function extractAnifoxExternal(
   pageUrl: string,
   quality: string,
@@ -12468,8 +12479,9 @@ async function getSAnimeSourcesUncached(
     for (const { base, tag } of cdnCandidates) {
       const directHD = `${base}/${bestId}/${ep}.mp4`;
       const directSD = `${base}/${bestId}/${ep}SD.mp4`;
-      const proxiedHD = `/api/anime/video-proxy?url=${encodeURIComponent(directHD)}&ref=${encodeURIComponent(SANIME_REF)}`;
-      const proxiedSD = `/api/anime/video-proxy?url=${encodeURIComponent(directSD)}&ref=${encodeURIComponent(SANIME_REF)}`;
+      const sanimeProxyParams = `&ua=${encodeURIComponent(SANIME_UA)}`;
+      const proxiedHD = `/api/anime/video-proxy?url=${encodeURIComponent(directHD)}&ref=${encodeURIComponent(SANIME_REF)}${sanimeProxyParams}`;
+      const proxiedSD = `/api/anime/video-proxy?url=${encodeURIComponent(directSD)}&ref=${encodeURIComponent(SANIME_REF)}${sanimeProxyParams}`;
       out.push({
         name: `SAnime · FHD${tag}`, url: directHD, quality: "FHD", qualityRank: 14,
         site: "sanime", directUrl: proxiedHD, directType: "mp4",

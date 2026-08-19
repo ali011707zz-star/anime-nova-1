@@ -554,6 +554,13 @@ async function saveCompleted(entry: RuntimeDownload): Promise<void> {
   const info = await FileSystem.getInfoAsync(entry.localPath, { size: true });
   if (info.exists) fileSize = (info as { size?: number }).size ?? 0;
   if (fileSize <= 0) throw new Error("ملف التنزيل فارغ");
+  /* Some Android builds report completion before the final progress callback.
+     Use the actual file size so a valid file is not persisted or displayed as
+     a successful zero-byte download. */
+  entry.bytesWritten = fileSize;
+  entry.totalBytes = Math.max(entry.totalBytes, fileSize);
+  entry.progress = 1;
+  notifyListeners();
 
   let subtitleLocalPath: string | undefined;
   /* A subtitle is a best-effort sidecar. It must never turn a healthy video
