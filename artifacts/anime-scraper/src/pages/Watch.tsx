@@ -2226,7 +2226,7 @@ function ScraperPicker({
               style={{ background: "rgba(255,255,255,0.025)" }}
             >
               <img
-                src="/gojo-loading.gif"
+                src="/gojo-loading.webp"
                 alt=""
                 aria-hidden="true"
                 className="absolute inset-0 w-full h-full object-cover"

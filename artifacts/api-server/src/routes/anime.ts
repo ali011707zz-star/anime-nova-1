@@ -14780,9 +14780,19 @@ const SERVER_SCAN_GIF_URLS = [
   "https://gifdb.com/images/branded/high/satoru-gojo-vs-ryomen-sukuna-gif-tt4cnmnevgpxt99u.gif",
   "https://media.giphy.com/media/unGpfM6wCE_2IKotc/giphy.gif",
 ] as const;
+const MAX_SCAN_GIF_BYTES = 8 * 1024 * 1024;
+const scanGifCache = new Map<number, { body: Buffer; contentType: string; expiresAt: number }>();
 router.get("/anime/scan-gif", async (req, res) => {
   const index = Math.max(0, Math.min(SERVER_SCAN_GIF_URLS.length - 1, Number(req.query.i) || 0));
   try {
+    const cached = scanGifCache.get(index);
+    if (cached && cached.expiresAt > Date.now()) {
+      res.setHeader("Content-Type", cached.contentType);
+      res.setHeader("Cache-Control", "public, max-age=86400, stale-while-revalidate=604800");
+      res.setHeader("X-Nova-Gif-Cache", "hit");
+      res.send(cached.body);
+      return;
+    }
     const upstream = await fetch(SERVER_SCAN_GIF_URLS[index], {
       headers: { Accept: "image/gif,image/*;q=0.9,*/*;q=0.1", "User-Agent": BROWSER_UA },
       redirect: "follow",
@@ -14792,10 +14802,21 @@ router.get("/anime/scan-gif", async (req, res) => {
       res.status(502).json({ error: "gif upstream failed" });
       return;
     }
+    const declaredLength = Number(upstream.headers.get("content-length") || 0);
+    if (declaredLength > MAX_SCAN_GIF_BYTES) {
+      res.status(413).json({ error: "gif upstream is too large" });
+      return;
+    }
     const contentType = upstream.headers.get("content-type") || "image/gif";
     const body = Buffer.from(await upstream.arrayBuffer());
+    if (body.byteLength > MAX_SCAN_GIF_BYTES) {
+      res.status(413).json({ error: "gif upstream is too large" });
+      return;
+    }
+    scanGifCache.set(index, { body, contentType: contentType.includes("image/") ? contentType : "image/gif", expiresAt: Date.now() + 24 * 60 * 60 * 1000 });
     res.setHeader("Content-Type", contentType.includes("image/") ? contentType : "image/gif");
     res.setHeader("Cache-Control", "public, max-age=86400, stale-while-revalidate=604800");
+    res.setHeader("X-Nova-Gif-Cache", "miss");
     res.send(body);
   } catch (error: any) {
     res.status(502).json({ error: error?.message || "gif proxy failed" });

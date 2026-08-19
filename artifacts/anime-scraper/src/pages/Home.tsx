@@ -411,18 +411,28 @@ export default function Home() {
         setHero(heroItem);
         setLoading(false); /* ← hero + popular visible now, rest loads below */
 
-        /* ── Step 2: load movies (non-blocking) ── */
-        const mov = await fetch$(MOVIES_QUERY);
-        const movMedia = mov?.media || [];
-        setMovies(movMedia);
-
-        /* ── Persist to module-level cache ── */
-        _homeCache = {
-          popular: popMedia,
-          movies: movMedia,
-          hero: heroItem,
-          hasMore: hasMorePop,
-        };
+        /* ── Step 2: load movies in the background ──
+           Never delay the visible home page or its cache on a slow secondary
+           catalog request. */
+        void fetch$(MOVIES_QUERY)
+          .then((mov) => {
+            const movMedia = mov?.media || [];
+            setMovies(movMedia);
+            _homeCache = {
+              popular: popMedia,
+              movies: movMedia,
+              hero: heroItem,
+              hasMore: hasMorePop,
+            };
+          })
+          .catch(() => {
+            _homeCache = {
+              popular: popMedia,
+              movies: [],
+              hero: heroItem,
+              hasMore: hasMorePop,
+            };
+          });
       } catch {
         setLoading(false);
       }

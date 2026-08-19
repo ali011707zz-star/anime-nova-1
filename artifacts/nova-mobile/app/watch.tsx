@@ -599,13 +599,11 @@ function ServerScanAnimation() {
    all Expo/Android builds. Render the exact GIF URL inside a tiny HTML
    document. Direct image navigation can remain blank on Android WebView when
    the CDN returns a redirect or a non-image intermediate response. */
-/* Keep this identical to the web loading animation. The API mirror is only
-   used as a fallback because some Android WebViews do not follow GIFDB's
-   redirect reliably. */
+/* Keep the loading animation local and small first. The server mirror is a
+   bounded fallback; never make the Android WebView fetch GIFDB directly. */
 const SERVER_SCAN_GIFS = [
+  "/gojo-loading.webp",
   "/api/anime/scan-gif?i=0",
-  "/gojo-loading.gif",
-  "https://gifdb.com/images/branded/high/satoru-gojo-vs-ryomen-sukuna-gif-tt4cnmnevgpxt99u.gif",
   "/api/anime/scan-gif?i=1",
 ] as const;
 
