@@ -3,6 +3,129 @@ import { logger } from "../lib/logger";
 
 const router = Router();
 
+// AnimeWitcher Firestore is the source of truth for dubbed animation.
+// Supabase is intentionally kept as the fast/cache path, but it can lag when
+// an import fails or when the table has no matching conflict constraint.
+const AW_FS_BASE =
+  "https://firestore.googleapis.com/v1/projects/animewitcher-1c66d/databases/(default)/documents";
+const AW_FS_HEADERS = {
+  "User-Agent":
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+  Accept: "application/json",
+};
+
+function awFsValue(value: any): any {
+  if (!value) return "";
+  if ("stringValue" in value) return value.stringValue;
+  if ("integerValue" in value) return Number(value.integerValue);
+  if ("doubleValue" in value) return Number(value.doubleValue);
+  if ("booleanValue" in value) return value.booleanValue;
+  if ("arrayValue" in value) return (value.arrayValue.values || []).map(awFsValue);
+  if ("mapValue" in value) {
+    const result: Record<string, any> = {};
+    for (const [key, child] of Object.entries(value.mapValue.fields || {})) {
+      result[key] = awFsValue(child);
+    }
+    return result;
+  }
+  return "";
+}
+
+function awFsDoc(document: any): Record<string, any> {
+  const result: Record<string, any> = {};
+  for (const [key, value] of Object.entries(document?.fields || {})) {
+    result[key] = awFsValue(value);
+  }
+  return result;
+}
+
+async function fetchAwFirestoreEpisodes(series: string): Promise<number[]> {
+  const numbers: number[] = [];
+  let pageToken = "";
+  do {
+    const url =
+      `${AW_FS_BASE}/anime_list/${encodeURIComponent(series)}/episodes?pageSize=300` +
+      (pageToken ? `&pageToken=${encodeURIComponent(pageToken)}` : "");
+    try {
+      const response = await fetch(url, {
+        headers: AW_FS_HEADERS,
+        signal: AbortSignal.timeout(12000),
+      });
+      if (!response.ok) break;
+      const payload = await response.json() as any;
+      for (const document of payload.documents || []) {
+        const id = String(document.name || "").split("/").pop() || "";
+        const fields = awFsDoc(document);
+        const label = String(fields.name || fields.nameFull || id);
+        const match = label.match(/(\d+(?:\.\d+)?)/);
+        const number = match ? Number(match[1]) : Number(id.replace(/\D/g, ""));
+        if (Number.isFinite(number) && number > 0) numbers.push(number);
+      }
+      pageToken = String(payload.nextPageToken || "");
+    } catch {
+      break;
+    }
+  } while (pageToken);
+  return [...new Set(numbers)].sort((a, b) => a - b);
+}
+
+async function fetchAwFirestoreServers(
+  series: string,
+  episode: number,
+): Promise<{ server: string; quality: string; link: string }[]> {
+  const base = `${AW_FS_BASE}/anime_list/${encodeURIComponent(series)}/episodes`;
+  const ids = [...new Set([
+    String(Math.round(episode)).padStart(3, "0"),
+    String(Math.round(episode)).padStart(4, "0"),
+    String(Math.round(episode)),
+  ])];
+
+  for (const id of ids) {
+    try {
+      const response = await fetch(`${base}/${encodeURIComponent(id)}/servers?pageSize=30`, {
+        headers: AW_FS_HEADERS,
+        signal: AbortSignal.timeout(12000),
+      });
+      if (!response.ok) continue;
+      const payload = await response.json() as any;
+      const documents = Array.isArray(payload.documents) ? payload.documents : [];
+      if (!documents.length) continue;
+      return documents.map((document: any) => {
+        const fields = awFsDoc(document);
+        return {
+          server: String(fields.serverName || fields.name || ""),
+          quality: String(fields.quality || "720p"),
+          link: String(fields.link || fields.url || fields.imageUrl || fields.server || ""),
+        };
+      }).filter((row: any) => row.server && row.link && row.server !== "KF");
+    } catch {
+      // Try the next padding convention.
+    }
+  }
+
+  // Some AW titles store servers as one document instead of a collection.
+  for (const id of ids) {
+    try {
+      const response = await fetch(`${base}/${encodeURIComponent(id)}/servers2/all_servers`, {
+        headers: AW_FS_HEADERS,
+        signal: AbortSignal.timeout(12000),
+      });
+      if (!response.ok) continue;
+      const fields = awFsDoc(await response.json());
+      const servers = Array.isArray(fields.servers) ? fields.servers : [];
+      const rows = servers.map((server: any) => ({
+        server: String(server.serverName || server.name || ""),
+        quality: String(server.quality || "720p"),
+        link: String(server.link || server.url || server.imageUrl || ""),
+      })).filter((row: any) => row.server && row.link && row.server !== "KF");
+      if (rows.length) return rows;
+    } catch {
+      // Continue to the next padding convention.
+    }
+  }
+  return [];
+}
+
 // ── Disk cache for dubbed catalog (يبقى بعد pm2 restart) ──────────────────────
 import { existsSync as _dcExists, readFileSync as _dcRead, writeFileSync as _dcWrite, mkdirSync as _dcMkdir } from "node:fs";
 import { join as _dcJoin } from "node:path";
@@ -673,8 +796,10 @@ router.get("/aw-dubbed/catalog", async (req, res) => {
 
 // ── GET /api/aw-dubbed/episodes?series=anime_id ──
 router.get("/aw-dubbed/episodes", async (req, res) => {
-  const series = (req.query.series as string || "").trim();
-  if (!series) { res.json({ episodes: [] }); return; }
+  // Do not trim the key: legacy AnimeWitcher IDs can intentionally begin or
+  // end with whitespace, and Supabase stores that value verbatim.
+  const series = String(req.query.series || "");
+  if (!series.trim()) { res.json({ episodes: [] }); return; }
 
   const SB_URL = (process.env.SUPABASE_URL || "").replace(/\/$/, "");
   const SB_KEY = process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || "";
@@ -707,6 +832,16 @@ router.get("/aw-dubbed/episodes", async (req, res) => {
         episodes.push({ number: row.ep_number });
       }
     }
+    // Supabase may lag behind AnimeWitcher's Firestore import. Merge the live
+    // list so a failed sync cannot make the mobile detail page look empty.
+    if (episodes.length === 0 || episodes.length < 3) {
+      for (const number of await fetchAwFirestoreEpisodes(series)) {
+        if (!seen.has(number)) {
+          seen.add(number);
+          episodes.push({ number });
+        }
+      }
+    }
     episodes.sort((a, b) => a.number - b.number);
     res.setHeader("Cache-Control", "public, max-age=1800");
     res.json({ episodes });
@@ -715,9 +850,11 @@ router.get("/aw-dubbed/episodes", async (req, res) => {
 
 // ── GET /api/aw-dubbed/watch-src?series=anime_id&ep=N ──
 router.get("/aw-dubbed/watch-src", async (req, res) => {
-  const series = (req.query.series as string || "").trim();
+  // Keep the exact AnimeWitcher/Supabase ID; trimming breaks titles imported
+  // with a leading space and makes valid episodes look unavailable.
+  const series = String(req.query.series || "");
   const ep     = Math.max(1, parseInt(req.query.ep as string || "1", 10) || 1);
-  if (!series) { res.status(400).json({ error: "missing series" }); return; }
+  if (!series.trim()) { res.status(400).json({ error: "missing series" }); return; }
 
   const SB_URL = (process.env.SUPABASE_URL || "").replace(/\/$/, "");
   const SB_KEY = process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || "";
@@ -750,6 +887,11 @@ router.get("/aw-dubbed/watch-src", async (req, res) => {
       if (r.server === "KF") continue; // KrakenFiles: كل روابطه 404 — تخطي مباشر
       const k = `${r.server}|${r.link}`;
       if (!seenSrv.has(k)) { seenSrv.add(k); rows.push(r); }
+    }
+    // A missing DB row must not make a real AW episode unplayable. Fetch the
+    // current server documents directly when the cached tables have no link.
+    if (!rows.length) {
+      rows.push(...await fetchAwFirestoreServers(series, ep));
     }
     // فرز: 1080p أولاً ثم 720p ثم 480p
     rows.sort((a, b) => qualityWeight(b.quality) - qualityWeight(a.quality));
