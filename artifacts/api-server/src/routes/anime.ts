@@ -8336,13 +8336,13 @@ async function getAnimeWitcherSources(
           const seenQuality = new Set<string>();
           return dbRows
             .filter(row => {
-              const quality = String(row.quality || "720p");
+              const quality = String(row.quality || "720p").toLowerCase().replace(/\s+/g, "");
               if (seenQuality.has(quality)) return false;
               seenQuality.add(quality);
               return true;
             })
             .map(row => {
-              const quality = String(row.quality || "720p");
+              const quality = String(row.quality || "720p").toLowerCase().replace(/\s+/g, "");
               return {
                 name: `AnimeWitcher · ${quality} · الحلقة موجودة`,
                 url: "",

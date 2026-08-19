@@ -4,7 +4,10 @@ import { logger } from "../lib/logger";
 const router = Router();
 
 const SA_API = "https://app.sanime.net/function/h10.php?page=";
-const SA_CDN = "https://server.sanime.net/Video";
+// Video2 is the current CDN path. Keep the old endpoint out of the default
+// playback path: it can return a successful-looking source card but a 404
+// media response, which appears as silent playback on mobile players.
+const SA_CDN = "https://server.sanime.net/Video2";
 const SA_UA  = "IBRAHIMSEVEN";
 const saImg  = (id: string | number) => `https://app.sanime.net/api/anime/${id}/image.jpg`;
 

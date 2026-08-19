@@ -577,7 +577,7 @@ function ServerScanAnimation() {
    fallback for Android networks that cannot reach GIFDB. */
 const SERVER_SCAN_GIFS = [
   "https://gifdb.com/images/branded/high/satoru-gojo-vs-ryomen-sukuna-gif-tt4cnmnevgpxt99u.gif",
-  "https://media.giphy.com/media/unGpfM6wCE_2Kotc/giphy.gif",
+  "https://media.giphy.com/media/unGpfM6wCE_2IKotc/giphy.gif",
 ] as const;
 
 function ServerScanGif() {
