@@ -15773,7 +15773,9 @@ function trustedKawaiiMediaUrl(raw: string): string | null {
 }
 
 function kawaiiMediaIsHls(url: string): boolean {
-  return /\.m3u8(?:[?#]|$)/i.test(url) || /\/(?:hls|playlist)(?:\/|$)/i.test(url);
+  return /\.m3u8(?:[?#]|$)/i.test(url)
+    || /\/(?:hls|playlist)(?:\/|$)/i.test(url)
+    || /\/api\/anime\/hls-proxy(?:[/?#]|$)/i.test(url);
 }
 
 function kawaiiReferrer(url: string): string {
