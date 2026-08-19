@@ -97,6 +97,15 @@ function ActiveDownloadCard({
           ]} />
         </View>
 
+        <View style={s.activeProgressMeta}>
+          <Text style={s.activeStatus}>
+            {item.totalBytes > 0
+              ? `${formatFileSize(item.bytesWritten)} من ${formatFileSize(item.totalBytes)}`
+              : "جارٍ حساب حجم الملف"}
+          </Text>
+          <Text style={s.activeStatus}>{isError ? "لم يكتمل" : `${pct}%`}</Text>
+        </View>
+
         <Text style={[s.activeStatus, isError && { color: "rgba(239,68,68,0.65)" }]}>
           {isError
             ? "فشل التنزيل — اضغط × للإغلاق"
@@ -125,27 +134,31 @@ function DownloadCard({
   const dotColor = q.includes("1080") ? "#fbbf24" : q.includes("720") ? "#34d399" : "#94a3b8";
 
   return (
-    <Pressable
-      onPress={() => onPlay(item)}
-      style={({ pressed }) => [s.card, pressed && { opacity: 0.85 }]}
-    >
+    <View style={s.card}>
       {/* Poster */}
-      <View style={s.posterWrap}>
-        {item.cover ? (
-          <Image source={{ uri: item.cover }} style={s.poster} resizeMode="cover" />
-        ) : (
-          <View style={[s.poster, s.posterFallback]}>
-            <Ionicons name="film" size={22} color="rgba(139,92,246,0.4)" />
+      <Pressable
+        onPress={() => onPlay(item)}
+        hitSlop={4}
+        style={({ pressed }) => [s.posterWrap, pressed && { opacity: 0.78 }]}
+        accessibilityRole="button"
+        accessibilityLabel={`تشغيل ${item.title} الحلقة ${item.ep}`}
+        testID={`download-play-poster-${item.id}`}
+      >
+          {item.cover ? (
+            <Image source={{ uri: item.cover }} style={s.poster} resizeMode="cover" />
+          ) : (
+            <View style={[s.poster, s.posterFallback]}>
+              <Ionicons name="film" size={22} color="rgba(139,92,246,0.4)" />
+            </View>
+          )}
+          <LinearGradient
+            colors={["transparent", "rgba(0,0,0,0.5)"]}
+            style={StyleSheet.absoluteFill}
+          />
+          <View style={s.playOverlay}>
+            <Ionicons name="play-circle" size={36} color="rgba(255,255,255,0.9)" />
           </View>
-        )}
-        <LinearGradient
-          colors={["transparent", "rgba(0,0,0,0.5)"]}
-          style={StyleSheet.absoluteFill}
-        />
-        <View style={s.playOverlay}>
-          <Ionicons name="play-circle" size={36} color="rgba(255,255,255,0.9)" />
-        </View>
-      </View>
+      </Pressable>
 
       {/* Info */}
       <View style={s.cardInfo}>
@@ -174,6 +187,16 @@ function DownloadCard({
         <Text style={s.cardDate}>
           {new Date(item.downloadedAt).toLocaleDateString("ar-SA")}
         </Text>
+        <Pressable
+          onPress={() => onPlay(item)}
+          style={({ pressed }) => [s.playButton, pressed && { opacity: 0.72 }]}
+          accessibilityRole="button"
+          accessibilityLabel={`تشغيل الحلقة ${item.ep}`}
+          testID={`download-play-${item.id}`}
+        >
+          <Ionicons name="play" size={12} color="#fff" />
+          <Text style={s.playButtonText}>تشغيل الحلقة</Text>
+        </Pressable>
       </View>
 
       {/* Delete button */}
@@ -181,10 +204,13 @@ function DownloadCard({
         onPress={() => onDelete(item)}
         hitSlop={12}
         style={s.deleteBtn}
+        accessibilityRole="button"
+        accessibilityLabel={`حذف ${item.title} الحلقة ${item.ep}`}
+        testID={`download-delete-${item.id}`}
       >
         <Ionicons name="trash-outline" size={17} color="rgba(239,68,68,0.65)" />
       </Pressable>
-    </Pressable>
+    </View>
   );
 }
 
@@ -338,7 +364,8 @@ export default function DownloadsScreen() {
 
   const handlePlay = useCallback(async (item: DownloadItem) => {
     try {
-      const info = await FileSystem.getInfoAsync(item.localPath, { size: true });
+      const fileUri = toFileUri(item.localPath);
+      const info = await FileSystem.getInfoAsync(fileUri, { size: true });
       const size = (info as { size?: number }).size ?? 0;
       if (!info.exists || size <= 0) {
         Alert.alert(
@@ -448,7 +475,7 @@ export default function DownloadsScreen() {
           </View>
           <Text style={s.emptyTitle}>لا توجد تنزيلات</Text>
           <Text style={s.emptyDesc}>
-            اضغط على زر ⬇ بجانب أي مصدر في شاشة المشاهدة لتحميل الحلقة.
+            اضغط على أيقونة التنزيل بجانب المصدر في شاشة المشاهدة لتحميل الحلقة.
           </Text>
         </View>
       )}
@@ -525,6 +552,9 @@ const s = StyleSheet.create({
     backgroundColor: "#8B5CF6",
   },
   activeStatus: { fontSize: 10, fontFamily: "Cairo_400Regular", color: "rgba(255,255,255,0.35)", textAlign: "right" },
+  activeProgressMeta: {
+    flexDirection: "row", alignItems: "center", justifyContent: "space-between",
+  },
 
   activePctBadge: {
     paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8,
@@ -565,6 +595,13 @@ const s = StyleSheet.create({
   badgeText: { fontSize: 9, fontFamily: "Cairo_700Bold", color: "rgba(255,255,255,0.50)" },
 
   cardDate: { fontSize: 10, fontFamily: "Cairo_400Regular", color: "rgba(255,255,255,0.25)", marginTop: 2 },
+  playButton: {
+    alignSelf: "flex-start", flexDirection: "row", alignItems: "center", gap: 5,
+    paddingHorizontal: 10, paddingVertical: 6, borderRadius: 9,
+    backgroundColor: "rgba(139,92,246,0.20)", borderWidth: 1,
+    borderColor: "rgba(167,139,250,0.30)", marginTop: 2,
+  },
+  playButtonText: { fontSize: 10, fontFamily: "Cairo_700Bold", color: "#ddd6fe" },
 
   deleteBtn: {
     width: 40, height: 40, borderRadius: 12,

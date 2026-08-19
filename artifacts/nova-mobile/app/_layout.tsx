@@ -192,6 +192,22 @@ function BrandSplash() {
         />
         <Text style={styles.brandName}>ANIME NOVA</Text>
         <Text style={styles.brandTagline}>منصة الأنمي العربية</Text>
+        <View style={styles.brandFeatures}>
+          <View style={styles.brandFeature}>
+            <Ionicons name="play" size={11} color="#D8B4FE" />
+            <Text style={styles.brandFeatureText}>شاهد</Text>
+          </View>
+          <View style={styles.brandFeatureDivider} />
+          <View style={styles.brandFeature}>
+            <Ionicons name="bookmark" size={11} color="#D8B4FE" />
+            <Text style={styles.brandFeatureText}>احفظ</Text>
+          </View>
+          <View style={styles.brandFeatureDivider} />
+          <View style={styles.brandFeature}>
+            <Ionicons name="download" size={11} color="#D8B4FE" />
+            <Text style={styles.brandFeatureText}>حمّل</Text>
+          </View>
+        </View>
         <View style={styles.brandLoader}>
           <View style={styles.brandLoaderFill} />
         </View>
@@ -231,6 +247,29 @@ const styles = StyleSheet.create({
     fontFamily: "Cairo_600SemiBold",
     marginTop: 7,
     textAlign: "center",
+  },
+  brandFeatures: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 11,
+    marginTop: 18,
+    paddingHorizontal: 13,
+    paddingVertical: 7,
+    borderRadius: 20,
+    backgroundColor: "rgba(139,92,246,0.10)",
+    borderWidth: 1,
+    borderColor: "rgba(216,180,254,0.16)",
+  },
+  brandFeature: { flexDirection: "row", alignItems: "center", gap: 4 },
+  brandFeatureText: {
+    color: "rgba(255,255,255,0.68)",
+    fontSize: 11,
+    fontFamily: "Cairo_600SemiBold",
+  },
+  brandFeatureDivider: {
+    width: 1,
+    height: 13,
+    backgroundColor: "rgba(216,180,254,0.22)",
   },
   brandGlow: {
     position: "absolute",
