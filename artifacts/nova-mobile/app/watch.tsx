@@ -343,26 +343,26 @@ function normalizeKawaiiMobileSource(source: Src, base: string): Src {
   };
 }
 
+function isHlsMediaUrl(url: string): boolean {
+  return /\.m3u8(?:[?#]|$)|\/api\/anime\/hls-proxy|\/(?:hls|playlist)(?:\/|$)/i.test(url);
+}
+
+/* HLS is a playlist, not an MP4. Route it through the VPS converter; direct
+   MP4/proxy streams remain resumable downloads. Subtitles stay sidecars. */
 function buildEmbeddedDownloadUrl(
   site: string,
   mediaUrl: string,
   subtitleUrl: string | undefined,
   base: string,
 ): string {
+  const needsConversion = site === "kawaii" || isHlsMediaUrl(mediaUrl);
+  if (!needsConversion) return mediaUrl;
   const query = new URLSearchParams({
     site,
     url: mediaUrl,
   });
   if (subtitleUrl) {
-    // The subtitle is always saved as a local VTT sidecar after the video
-    // completes. The API receives it too so non-KW HLS downloads use the
-    // same authenticated conversion contract.
-    const isInternalSubtitle = subtitleUrl.includes("/api/anime/proxy-text")
-      || subtitleUrl.includes("/api/anime/translate-vtt");
-    const downloadSubtitle = site === "kawaii" && !isInternalSubtitle
-      ? `${base}/api/anime/proxy-text?url=${encodeURIComponent(subtitleUrl)}&ref=${encodeURIComponent("https://kawaiianime.cc/")}`
-      : subtitleUrl;
-    query.set("subtitleUrl", downloadSubtitle);
+    query.set("subtitleUrl", subtitleUrl);
   }
   return `${base}/api/anime/download-mp4?${query.toString()}`;
 }
@@ -602,14 +602,9 @@ function ServerScanGif() {
   }, [gifIndex]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (failed) return <ServerScanAnimation />;
-  const html = `<!doctype html><html><head>
-    <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
-    <style>html,body{margin:0;padding:0;width:100%;height:100%;overflow:hidden;background:transparent}
-    img{display:block;width:100%;height:100%;object-fit:cover}</style>
-    </head><body><img src="${gifUrl.replace(/&/g, "&amp;").replace(/"/g, "&quot;")}" /></body></html>`;
   return (
     <WebView
-      source={{ html, baseUrl: gifUrl }}
+      source={{ uri: gifUrl }}
       style={d.availabilityGif}
       originWhitelist={["*"]}
       scrollEnabled={false}
@@ -623,6 +618,7 @@ function ServerScanGif() {
       androidLayerType="hardware"
       setSupportMultipleWindows={false}
       javaScriptEnabled={false}
+      mixedContentMode="always"
       onError={handleGifFailure}
       onHttpError={handleGifFailure}
     />

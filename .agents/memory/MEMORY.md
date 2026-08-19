@@ -74,3 +74,4 @@
 - [FlixCloud StrongHole segments](flixcloud-stronghole-segments.md) — keep Reanime media URLs client-routed; StrongHole blocks the VPS IP with Cloudflare 403
 - [Anime4up disabled](anime4up-vps-reachability.md) — Anime4up is intentionally disabled and blocked; do not re-add it to the anime picker
 - [Availability-only provider adapters](availability-only-providers.md) — every provider must accept the explicit metadata-only flag; extra JS arguments are silently ignored
+- [VPS HLS downloads](vps-hls-downloads.md) — HLS must be remuxed to MP4 on the VPS; subtitles remain offline VTT sidecars.

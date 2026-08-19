@@ -12409,21 +12409,31 @@ async function getSAnimeSourcesUncached(
     // CDN even when normal playback works. Return both quality candidates
     // immediately; the VPS video proxy still preserves Range and the player can
     // fall back to SD if the old HD file is unavailable.
-    const directHD = `${SANIME_CDN}/${bestId}/${ep}.mp4`;
-    const directSD = `${SANIME_CDN}/${bestId}/${ep}SD.mp4`;
     const SANIME_REF = "https://app.sanime.net/";
-    const proxiedHD = `/api/anime/video-proxy?url=${encodeURIComponent(directHD)}&ref=${encodeURIComponent(SANIME_REF)}`;
-    const proxiedSD = `/api/anime/video-proxy?url=${encodeURIComponent(directSD)}&ref=${encodeURIComponent(SANIME_REF)}`;
-    out.push({
-      name: "SAnime · FHD", url: directHD, quality: "FHD", qualityRank: 14,
-      site: "sanime", directUrl: proxiedHD, directType: "mp4",
-      headers: { Referer: SANIME_REF }, corsOk: false,
-    });
-    out.push({
-      name: "SAnime · HD", url: directSD, quality: "HD", qualityRank: 9,
-      site: "sanime", directUrl: proxiedSD, directType: "mp4",
-      headers: { Referer: SANIME_REF }, corsOk: false,
-    });
+    /* SAnime has used both CDN path families over time. Keep Video2 first
+       (current catalog), then expose the legacy Video paths as real fallbacks;
+       some older IDs exist on only one family. The player/proxy will skip a
+       404 candidate and retain the working quality without an extra probe. */
+    const cdnCandidates = [
+      { base: SANIME_CDN, tag: "" },
+      { base: "https://server.sanime.net/Video", tag: " · fallback" },
+    ];
+    for (const { base, tag } of cdnCandidates) {
+      const directHD = `${base}/${bestId}/${ep}.mp4`;
+      const directSD = `${base}/${bestId}/${ep}SD.mp4`;
+      const proxiedHD = `/api/anime/video-proxy?url=${encodeURIComponent(directHD)}&ref=${encodeURIComponent(SANIME_REF)}`;
+      const proxiedSD = `/api/anime/video-proxy?url=${encodeURIComponent(directSD)}&ref=${encodeURIComponent(SANIME_REF)}`;
+      out.push({
+        name: `SAnime · FHD${tag}`, url: directHD, quality: "FHD", qualityRank: 14,
+        site: "sanime", directUrl: proxiedHD, directType: "mp4",
+        headers: { Referer: SANIME_REF }, corsOk: false,
+      });
+      out.push({
+        name: `SAnime · HD${tag}`, url: directSD, quality: "HD", qualityRank: 9,
+        site: "sanime", directUrl: proxiedSD, directType: "mp4",
+        headers: { Referer: SANIME_REF }, corsOk: false,
+      });
+    }
 
     console.log(`[SAnime] id=${bestId} ep${ep} → ${out.length} sources (match=${bestScore.toFixed(2)})`);
     if (out.length) _sanimeCacheMap.set(ck, { sources: out, ts: Date.now() });
@@ -15738,9 +15748,10 @@ function cuesToVtt(body: string): string {
 
 router.get("/anime/download-mp4", async (req, res) => {
   const site = String(req.query.site || "").trim().toLowerCase();
-  const DOWNLOADABLE_SITES = new Set(["kawaii", "anineko", "animekai", "megaplay"]);
-  if (!DOWNLOADABLE_SITES.has(site)) {
-    res.status(400).send("download conversion is only available for KW/AN/AK/MP");
+  // Any trusted Nova HLS/video proxy can use this route. A hard-coded list
+  // previously blocked AnimeWitcher and future HLS providers.
+  if (!site) {
+    res.status(400).send("site required");
     return;
   }
 
