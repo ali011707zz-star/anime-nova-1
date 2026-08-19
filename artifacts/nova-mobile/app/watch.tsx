@@ -1316,9 +1316,10 @@ export default function WatchScreen() {
     const subRaw     = subtitlesDisabledForSite(site)
       ? undefined
       : (best.subtitleUrl || globalSubUrl);
-    const subtitleCandidate = DOWNLOAD_SUBTITLE_SITES.has(site) && !subtitlesDisabledForSite(site)
-      ? subRaw || (await fetchArabicSubtitleUrl(anime || "0", epNum, base))
-      : subRaw;
+    /* Subtitle download is optional. Do not block the video task on a slow
+       fallback translation lookup; source-provided tracks still remain
+       available and the video starts immediately. */
+    const subtitleCandidate = subRaw;
     const subtitleUrl = normalizeProviderSubtitleUrl(site, subtitleCandidate, base);
 
     const token = await getAuthToken();
@@ -1335,6 +1336,7 @@ export default function WatchScreen() {
       quality:  getSrcQuality(best),
       url:      downloadUrl,
       authToken: token,
+      headers,
       subtitleUrl,
     });
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1414,9 +1416,7 @@ export default function WatchScreen() {
       const hdrs      = best.headers || extractProxyHeaders(rawUrl);
       const proxyUrl  = ensureVpsProxy(rawUrl, hdrs, base, best.directType === "hls");
       const subRaw    = best.subtitleUrl || globalSubUrl;
-       const subtitleCandidate = DOWNLOAD_SUBTITLE_SITES.has(site) && !subtitlesDisabledForSite(site)
-         ? subRaw || (await fetchArabicSubtitleUrl(anime || "0", epNum, base))
-         : subRaw;
+        const subtitleCandidate = subRaw;
        const subtitleUrl = normalizeProviderSubtitleUrl(site, subtitleCandidate, base);
       const token     = await getAuthToken();
        const downloadUrl = DOWNLOAD_SUBTITLE_SITES.has(site)
@@ -1432,6 +1432,7 @@ export default function WatchScreen() {
         quality:    getSrcQuality(best),
         url:        downloadUrl,
         authToken:  token,
+        headers:    hdrs,
         subtitleUrl,
       });
 

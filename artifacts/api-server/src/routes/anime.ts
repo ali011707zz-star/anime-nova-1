@@ -15731,6 +15731,45 @@ async function streamKawaiiMp4(
   }
 }
 
+/* A local video-proxy URL is already a resumable MP4 stream. Keep this path
+   provider-agnostic: AK/AN/MP also need their proxy response headers and
+   Range requests preserved, but the old helper only handled Kawaii's raw CDN
+   allow-list. */
+async function streamLocalVideoProxy(
+  sourceUrl: string,
+  req: Request,
+  res: Response,
+): Promise<boolean> {
+  const controller = new AbortController();
+  const abort = () => controller.abort();
+  req.once("close", abort);
+  try {
+    const headers: Record<string, string> = {
+      Accept: "video/mp4,video/*;q=0.9,*/*;q=0.1",
+    };
+    if (req.headers.range) headers.Range = String(req.headers.range);
+    if (req.headers["if-range"]) headers["If-Range"] = String(req.headers["if-range"]);
+    const upstream = await fetch(sourceUrl, { headers, signal: controller.signal });
+    for (const name of ["content-type", "content-length", "content-range", "accept-ranges", "etag"]) {
+      const value = upstream.headers.get(name);
+      if (value) res.setHeader(name, value);
+    }
+    res.setHeader("Content-Disposition", `attachment; filename="nova-episode.mp4"`);
+    res.status(upstream.status);
+    if (upstream.body) {
+      const { Readable } = await import("stream");
+      (Readable.fromWeb as Function)(upstream.body).pipe(res);
+    } else {
+      res.end();
+    }
+    return true;
+  } catch {
+    return false;
+  } finally {
+    req.removeListener("close", abort);
+  }
+}
+
 function cuesToVtt(body: string): string {
   try {
     const payload = JSON.parse(body) as { cues?: Array<{ timing?: string; text?: string }> };
@@ -15810,7 +15849,7 @@ router.get("/anime/download-mp4", async (req, res) => {
     if (sourceUrl && !kawaiiMediaIsHls(sourceUrl)) {
       try {
         const sourcePath = new URL(sourceUrl).pathname;
-        if (sourcePath === "/api/anime/video-proxy" && await streamKawaiiMp4(sourceUrl, req, res)) {
+        if (sourcePath === "/api/anime/video-proxy" && await streamLocalVideoProxy(sourceUrl, req, res)) {
           return;
         }
       } catch {
