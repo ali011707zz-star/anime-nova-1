@@ -62,6 +62,13 @@
       "expo-screen-orientation",
       "expo-brightness",
       [
+        "react-native-google-mobile-ads",
+        {
+          "androidAppId": "ca-app-pub-3940256099942544~3347511713",
+          "iosAppId": "ca-app-pub-3940256099942544~1458002511"
+        }
+      ],
+      [
         "expo-media-library",
         {
           "photosPermission": "يسمح هذا الإذن بحفظ لقطات المشاهدة في معرض الصور.",

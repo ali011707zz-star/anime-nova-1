@@ -23,6 +23,7 @@ import {
 } from "@/utils/downloadManager";
 import * as ScreenOrientation from "expo-screen-orientation";
 import { openIsolatedPlayer } from "@/lib/isolatedPlayer";
+import { ensureDownloadAllowed, ensureWatchAccess, getAdState } from "@/utils/adPolicy";
 
 /* ── Types ── */
 type Quality    = "1080p FHD" | "720p HD" | "360p SD";
@@ -757,6 +758,8 @@ export default function WatchScreen() {
   const [availabilityDone, setAvailabilityDone] = useState(false);
   const [availabilityError, setAvailabilityError] = useState(false);
   const [availabilityAttempt, setAvailabilityAttempt] = useState(0);
+  const [watchUnlocked, setWatchUnlocked] = useState(false);
+  const [watchAdLoading, setWatchAdLoading] = useState(false);
 
   const abortRef          = useRef<AbortController | null>(null);
   const availabilityAbortRef = useRef<AbortController | null>(null);
@@ -776,6 +779,14 @@ export default function WatchScreen() {
   useEffect(() => {
     isMountedRef.current = true;
     return () => { isMountedRef.current = false; };
+  }, []);
+
+  /* The server, not AsyncStorage, decides whether this picker is unlocked.
+     Premium/admin users arrive unlocked; free users see the locked rows. */
+  useEffect(() => {
+    getAdState().then((state) => {
+      if (state && isMountedRef.current) setWatchUnlocked(state.privileged || !state.watchNeedsReward);
+    }).catch(() => {});
   }, []);
 
   /* ── ترجمة عنوان الحلقة من الإنجليزية للعربية ── */
@@ -1101,6 +1112,16 @@ export default function WatchScreen() {
   /* ── جلب مصدر واحد عند ضغط المستخدم على زر المصدر ── */
   const handlePickSite = useCallback(async (site: string, preferredQuality?: QualityKey) => {
     if (BLOCKED_SOURCE_SITES.has(site.toLowerCase())) return;
+    if (!watchUnlocked) {
+      if (watchAdLoading) return;
+      setWatchAdLoading(true);
+      const allowed = await ensureWatchAccess();
+      if (isMountedRef.current) {
+        setWatchAdLoading(false);
+        if (allowed) setWatchUnlocked(true);
+      }
+      if (!allowed) return;
+    }
     /* منع الضغط المزدوج أثناء الجلب — يسمح بإعادة المحاولة بعد الفشل */
     const fetchKey = preferredQuality ? `${site}::${preferredQuality}` : site;
     if (inFlightSitesRef.current.has(fetchKey)) return;
@@ -1354,7 +1375,7 @@ export default function WatchScreen() {
        hlsManifestUrl: isHlsDownload ? proxyUrl : undefined,
     });
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [downloadStates, sources, anime, epNum, displayTitle, coverUrl, globalSubUrl]);
+  }, [downloadStates, sources, anime, epNum, displayTitle, coverUrl, globalSubUrl, watchUnlocked, watchAdLoading]);
 
   /**
    * handleFetchAndDownload — يُنزَّل مباشرةً بدون الحاجة لفتح المشغّل أولاً.
@@ -1366,6 +1387,7 @@ export default function WatchScreen() {
     const dlState = downloadStates[site] || "idle";
     if (dlState === "downloading" || dlState === "done") return;
     if (dlFetchingSites.has(site)) return; // جلب جارٍ بالفعل
+    if (!(await ensureDownloadAllowed())) return;
 
     // إذا كان المصدر مجلوباً → نزّل مباشرةً من sources الحالية
     if (fetchedSitesRef.current.has(site)) {
@@ -1908,13 +1930,19 @@ export default function WatchScreen() {
                       style={({ pressed }) => [
                         d.webRow,
                         idx < slots.length - 1 && d.webRowBorder,
-                        isReady  && { backgroundColor: "rgba(34,197,94,0.035)" },
+                        !watchUnlocked && { opacity: 0.72 },
+                        isReady && watchUnlocked && { backgroundColor: "rgba(34,197,94,0.035)" },
                         isFailed && { opacity: 0.40 },
                         pressed  && { opacity: 0.72 },
                       ]}
                     >
                       <View style={d.webRowActions}>
-                        {isFetching ? (
+                        {!watchUnlocked ? (
+                          <View style={d.lockBtn}>
+                            {watchAdLoading ? <SpinRing size={14} /> : <Ionicons name="lock-closed" size={11} color="#c4b5fd" />}
+                            <Text style={d.lockBtnText}>فتح</Text>
+                          </View>
+                        ) : isFetching ? (
                           <SpinRing size={16} />
                         ) : isReady ? (
                           <View style={d.playBtnGreen}>
@@ -2149,6 +2177,10 @@ const d = StyleSheet.create({
   webRowTag:      { flex: 1, minWidth: 0, flexShrink: 1, fontFamily: "Cairo_800ExtraBold", letterSpacing: 0.2, fontSize: 10, lineHeight: 16, color: "rgba(255,255,255,0.60)" },
   webRowRight:    { flexDirection: "row", alignItems: "center", gap: 7, flexShrink: 0 },
   webRowDot:      { width: 8, height: 8, borderRadius: 4 },
+  lockBtn:        { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 9, paddingVertical: 5, borderRadius: 9, backgroundColor: "rgba(139,92,246,0.15)", borderWidth: 1, borderColor: "rgba(139,92,246,0.30)" },
+  lockBtnText:    { fontSize: 10, fontFamily: "Cairo_700Bold", color: "#c4b5fd" },
+  lockBtn:        { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 9, paddingVertical: 5, borderRadius: 9, backgroundColor: "rgba(139,92,246,0.15)", borderWidth: 1, borderColor: "rgba(139,92,246,0.30)" },
+  lockBtnText:    { fontSize: 10, fontFamily: "Cairo_700Bold", color: "#c4b5fd" },
 
   /* ── Separate download servers ── */
   downloadSection:    { marginTop: 18, gap: 9, padding: 12, borderRadius: 18, backgroundColor: "rgba(14,12,24,0.92)", borderWidth: 1, borderColor: "rgba(139,92,246,0.22)" },

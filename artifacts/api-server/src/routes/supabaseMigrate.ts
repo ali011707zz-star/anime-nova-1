@@ -35,6 +35,12 @@ CREATE TABLE IF NOT EXISTS users (
   updated_at           TIMESTAMPTZ DEFAULT NOW()
 );
 
+CREATE TABLE IF NOT EXISTS app_config (
+  key        TEXT PRIMARY KEY,
+  value      TEXT NOT NULL DEFAULT '',
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
 CREATE TABLE IF NOT EXISTS pending_verifications (
   email      TEXT PRIMARY KEY,
   code       TEXT NOT NULL,

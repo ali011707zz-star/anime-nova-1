@@ -9,6 +9,7 @@ import { AppState, Platform } from "react-native";
 import * as FileSystem from "expo-file-system";
 import * as Notifications from "expo-notifications";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { recordSuccessfulDownload } from "./adPolicy";
 import { getAuthToken } from "./secureApi";
 
 const DOWNLOADS_KEY = "nova-downloads-v3";
@@ -637,6 +638,9 @@ async function saveCompleted(entry: RuntimeDownload): Promise<void> {
   };
   const existing = await getDownloads();
   await saveDownloads([...existing.filter((old) => old.id !== entry.id), item]);
+  /* The ad counter is updated only after the verified non-empty file has
+     been persisted. The server deduplicates the anime/episode pair. */
+  void recordSuccessfulDownload(entry.animeId, entry.ep);
 }
 
 function makeResumable(
