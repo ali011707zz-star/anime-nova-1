@@ -4,6 +4,7 @@ import { promisify } from "node:util";
 import { sendVerifyEmail, sendPasswordResetEmail } from "./emailService.js";
 import { sbSelect, sbInsert, sbUpsert, sbDelete, sbPatch } from "../lib/supabaseClient.js";
 import { getMobileUserId, issueUserToken } from "../lib/security.js";
+import { getUserEntitlement, setDbConfig } from "../lib/dbConfig.js";
 
 const CODE_TTL_MS        = 10 * 60 * 1000;
 const MAX_ATTEMPTS       = 5;
@@ -406,12 +407,14 @@ export async function getEmailUser(req: Request): Promise<any | null> {
     const rows = await sbSelect("users", { id: `eq.${userId}` }, { limit: 1 });
     if (!rows.length) return null;
     const u = rows[0];
+    const entitlement = await getUserEntitlement(String(u.id));
 
     // تحقق من انتهاء صلاحية الاشتراك تلقائياً
-    let plan: string = u.plan ?? "free";
-    if (plan === "premium" && u.expires_at && new Date(u.expires_at) < new Date()) {
+    let plan: string = entitlement?.plan ?? u.plan ?? "free";
+    const expiresAt = entitlement?.expiresAt ?? u.expires_at ?? null;
+    if (plan === "premium" && expiresAt && new Date(expiresAt) < new Date()) {
       try {
-        await sbPatch("users", { id: `eq.${u.id}` }, { plan: "free", expires_at: null });
+        await setDbConfig(`admin_entitlement:${u.id}`, JSON.stringify({ plan: "free", expiresAt: null }));
       } catch { /* silent */ }
       plan = "free";
     }
@@ -426,7 +429,7 @@ export async function getEmailUser(req: Request): Promise<any | null> {
       authType:        "email" as const,
       createdAt:       u.created_at,
       plan,
-      expiresAt:       plan === "free" ? null : u.expires_at ?? null,
+      expiresAt:       plan === "free" ? null : expiresAt,
     };
   } catch { return null; }
 }

@@ -8,6 +8,12 @@ import { sbSelect, sbUpsert } from "./supabaseClient.js";
 const _cache = new Map<string, string>();
 const _cacheTs = new Map<string, number>();
 const CACHE_TTL = 60_000; // 60 ثانية
+const USER_ENTITLEMENT_PREFIX = "admin_entitlement:";
+
+export type UserEntitlement = {
+  plan: "free" | "premium" | "admin";
+  expiresAt: string | null;
+};
 
 export async function getDbConfig(key: string): Promise<string | null> {
   const now = Date.now();
@@ -31,6 +37,18 @@ export async function setDbConfig(key: string, value: string): Promise<void> {
   await sbUpsert("app_config", { key, value, updated_at: new Date().toISOString() }, "key");
   _cache.set(key, value);
   _cacheTs.set(key, Date.now());
+}
+
+export async function getUserEntitlement(userId: string): Promise<UserEntitlement | null> {
+  const raw = await getDbConfig(`${USER_ENTITLEMENT_PREFIX}${userId}`);
+  if (!raw) return null;
+  try {
+    const value = JSON.parse(raw);
+    if (!["free", "premium", "admin"].includes(value?.plan)) return null;
+    return { plan: value.plan, expiresAt: value.expiresAt ?? null };
+  } catch {
+    return null;
+  }
 }
 
 export function clearDbConfigCache(key?: string): void {

@@ -14,6 +14,47 @@ async function hasRelayAccess(req: Request): Promise<boolean> {
 }
 
 const router = Router();
+const ENTITLEMENT_PREFIX = "admin_entitlement:";
+
+type Entitlement = { plan: "free" | "premium" | "admin"; expiresAt: string | null };
+
+async function loadEntitlements(): Promise<Map<string, Entitlement>> {
+  const result = new Map<string, Entitlement>();
+  const rows = await sbSelect<any>("app_config", {}, { limit: 5000 });
+  for (const row of rows) {
+    const key = String(row.key || "");
+    if (!key.startsWith(ENTITLEMENT_PREFIX)) continue;
+    try {
+      const value = JSON.parse(String(row.value || ""));
+      if (["free", "premium", "admin"].includes(value?.plan)) {
+        result.set(key.slice(ENTITLEMENT_PREFIX.length), {
+          plan: value.plan,
+          expiresAt: value.expiresAt ?? null,
+        });
+      }
+    } catch { /* ignore malformed legacy config rows */ }
+  }
+  return result;
+}
+
+function effectiveUser(u: any, entitlement?: Entitlement) {
+  return {
+    id:          u.id,
+    email:       u.email,
+    username:    u.username,
+    displayName: u.display_name,
+    plan:        entitlement?.plan ?? u.plan ?? "free",
+    expiresAt:   entitlement?.expiresAt ?? u.expires_at ?? null,
+    createdAt:   u.created_at,
+  };
+}
+
+async function saveEntitlement(id: string, plan: Entitlement["plan"], expiresAt: string | null): Promise<void> {
+  // The production Supabase REST schema predates the plan columns. Keep the
+  // admin-managed entitlement in the already-available app_config table so
+  // actions work immediately and survive restarts.
+  await setDbConfig(`${ENTITLEMENT_PREFIX}${id}`, JSON.stringify({ plan, expiresAt }));
+}
 
 async function isAdmin(req: Request): Promise<boolean> {
   if (isWebAdmin(req)) return true;
@@ -229,12 +270,12 @@ router.get("/admin/users", async (req: Request, res: Response) => {
     const limit = 50;
 
     const filter: Record<string, string> = { order: "created_at.desc", offset: String(page * limit) };
-    if (plan && ["free", "premium", "admin"].includes(plan)) filter.plan = `eq.${plan}`;
 
     const rows = await sbSelect<any>("users",
       filter,
       { limit: q ? 200 : limit },
     );
+    const entitlements = await loadEntitlements();
 
     const matchedRows = q
       ? rows.filter((u: any) => [u.email, u.username, u.display_name]
@@ -242,15 +283,9 @@ router.get("/admin/users", async (req: Request, res: Response) => {
         .slice(0, limit)
       : rows;
 
-    const users = matchedRows.map((u: any) => ({
-      id:          u.id,
-      email:       u.email,
-      username:    u.username,
-      displayName: u.display_name,
-      plan:        u.plan ?? "free",
-      expiresAt:   u.expires_at ?? null,
-      createdAt:   u.created_at,
-    }));
+    const users = matchedRows
+      .map((u: any) => effectiveUser(u, entitlements.get(String(u.id))))
+      .filter((u: any) => !plan || u.plan === plan);
 
     return res.json({ users, page, total: users.length });
   } catch (err) {
@@ -271,33 +306,28 @@ router.patch("/admin/users/:id/plan", async (req: Request, res: Response) => {
     return res.status(400).json({ error: "plan يجب أن يكون: free | premium | admin" });
 
   try {
-    const updates: Record<string, any> = {
-      plan,
-      updated_at: new Date().toISOString(),
-    };
+    let expiresAt: string | null = null;
 
     if (plan === "free") {
-      updates.expires_at = null;
+      expiresAt = null;
     } else if (expires_at) {
-      updates.expires_at = new Date(expires_at).toISOString();
+      expiresAt = new Date(expires_at).toISOString();
     } else if (plan === "premium") {
       // افتراضي: اشتراك لمدة شهر
       const d = new Date();
       d.setMonth(d.getMonth() + 1);
-      updates.expires_at = d.toISOString();
-    } else {
-      // admin: لا تنتهي صلاحيته
-      updates.expires_at = null;
+      expiresAt = d.toISOString();
     }
 
-    const updated = await sbPatch("users", { id: `eq.${id}` }, updates);
-    if (!updated) return res.status(404).json({ error: "المستخدم غير موجود" });
+    const existing = await sbSelect("users", { id: `eq.${id}` }, { limit: 1 });
+    if (!existing.length) return res.status(404).json({ error: "المستخدم غير موجود" });
+    await saveEntitlement(id, plan, expiresAt);
 
     return res.json({
       ok:        true,
       id,
-      plan:      updates.plan,
-      expiresAt: updates.expires_at,
+      plan,
+      expiresAt,
       message:   `تم تغيير خطة المستخدم إلى ${plan} ✓`,
     });
   } catch (err) {
@@ -321,12 +351,9 @@ router.post("/admin/users/:id/grant", async (req: Request, res: Response) => {
     const d = new Date();
     d.setDate(d.getDate() + days);
 
-    const updated = await sbPatch("users", { id: `eq.${id}` }, {
-      plan:       "premium",
-      expires_at: d.toISOString(),
-      updated_at: new Date().toISOString(),
-    });
-    if (!updated) return res.status(404).json({ error: "المستخدم غير موجود" });
+    const existing = await sbSelect("users", { id: `eq.${id}` }, { limit: 1 });
+    if (!existing.length) return res.status(404).json({ error: "المستخدم غير موجود" });
+    await saveEntitlement(id, "premium", d.toISOString());
 
     return res.json({
       ok:        true,
@@ -360,16 +387,16 @@ router.get("/admin/stats", async (req: Request, res: Response) => {
     return res.status(401).json({ error: "غير مصرّح" });
 
   try {
-    const [allUsers, premiumUsers, cacheRows] = await Promise.allSettled([
+    const [allUsers, cacheRows, entitlements] = await Promise.all([
       sbSelect("users", { select: "id" }, { limit: 1000 }),
-      sbSelect("users", { plan: "eq.premium", select: "id" }, { limit: 1000 }),
       sbSelect("source_cache", { select: "cache_key" }, { limit: 1000 }),
+      loadEntitlements(),
     ]);
 
     return res.json({
-      totalUsers:   allUsers.status === "fulfilled"   ? allUsers.value.length   : "?",
-      premiumUsers: premiumUsers.status === "fulfilled" ? premiumUsers.value.length : "?",
-      cacheEntries: cacheRows.status === "fulfilled"  ? cacheRows.value.length  : "?",
+      totalUsers:   allUsers.length,
+      premiumUsers: [...entitlements.values()].filter((v) => v.plan === "premium").length,
+      cacheEntries: cacheRows.length,
     });
   } catch (err) {
     return res.status(500).json({ error: "خطأ في الخادم" });
