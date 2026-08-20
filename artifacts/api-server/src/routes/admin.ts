@@ -224,18 +224,25 @@ router.get("/admin/users", async (req: Request, res: Response) => {
 
   try {
     const q    = String(req.query.q || "").trim();
+    const plan = String(req.query.plan || "").trim();
     const page = Math.max(0, Number(req.query.page || 0));
     const limit = 50;
 
     const filter: Record<string, string> = { order: "created_at.desc", offset: String(page * limit) };
-    if (q) filter.email = `ilike.*${q}*`;
+    if (plan && ["free", "premium", "admin"].includes(plan)) filter.plan = `eq.${plan}`;
 
-    const rows = await sbSelect("users",
+    const rows = await sbSelect<any>("users",
       filter,
-      { limit },
+      { limit: q ? 200 : limit },
     );
 
-    const users = rows.map((u: any) => ({
+    const matchedRows = q
+      ? rows.filter((u: any) => [u.email, u.username, u.display_name]
+        .some(value => String(value || "").toLocaleLowerCase().includes(q.toLocaleLowerCase())))
+        .slice(0, limit)
+      : rows;
+
+    const users = matchedRows.map((u: any) => ({
       id:          u.id,
       email:       u.email,
       username:    u.username,
@@ -305,11 +312,14 @@ router.post("/admin/users/:id/grant", async (req: Request, res: Response) => {
     return res.status(401).json({ error: "غير مصرّح" });
 
   const { id } = req.params;
-  const { days = 30 } = req.body || {};
+  const rawDays = req.body?.days ?? 30;
+  const days = Number(rawDays);
+  if (!Number.isInteger(days) || days < 1 || days > 3650)
+    return res.status(400).json({ error: "عدد الأيام يجب أن يكون رقماً صحيحاً بين 1 و3650" });
 
   try {
     const d = new Date();
-    d.setDate(d.getDate() + Number(days));
+    d.setDate(d.getDate() + days);
 
     const updated = await sbPatch("users", { id: `eq.${id}` }, {
       plan:       "premium",

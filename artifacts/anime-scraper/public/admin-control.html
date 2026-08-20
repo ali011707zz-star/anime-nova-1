@@ -5,42 +5,53 @@
   <title>Nova Control</title>
   <style>
     :root{color-scheme:dark;font-family:system-ui,-apple-system,"Segoe UI",sans-serif;background:#09090f;color:#f6f3ff}
-    *{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at 80% 0,#2b155e 0,transparent 42%),#09090f;min-height:100vh}
-    main{width:min(1080px,calc(100% - 28px));margin:0 auto;padding:42px 0 80px}.panel{background:#12121bde;border:1px solid #ffffff15;border-radius:22px;box-shadow:0 24px 80px #0008;padding:24px}
-    h1{margin:0 0 6px;font-size:25px}h2{font-size:18px;margin:0 0 18px}.muted{color:#aaa6b8;font-size:13px}.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
-    input,select,button{font:inherit;border-radius:11px;border:1px solid #ffffff1a;background:#0d0d15;color:#fff;padding:11px 13px}input{width:100%}
-    button{cursor:pointer;background:#6d28d9;border-color:#8b5cf680}button.secondary{background:#252532}button.danger{background:#9f1239}
-    .login{max-width:430px;margin:12vh auto}.field{margin:12px 0}.field label{display:block;margin-bottom:7px;color:#d5d0e2;font-size:13px}
-    .error{color:#fb7185;min-height:22px;margin:10px 0}.hidden{display:none}.toolbar{justify-content:space-between;margin:22px 0 14px}
-    table{width:100%;border-collapse:collapse}th,td{text-align:right;padding:12px 8px;border-bottom:1px solid #ffffff10;font-size:13px}th{color:#aaa6b8;font-weight:500}
-    .badge{padding:4px 8px;border-radius:99px;background:#31205d;color:#d8b4fe}.actions{display:flex;gap:6px;flex-wrap:wrap}.actions button{padding:7px 9px;font-size:12px}
-    @media(max-width:650px){main{padding-top:18px}.panel{padding:17px;border-radius:17px}th:nth-child(1),td:nth-child(1){display:none}table{font-size:12px}}
+    *{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at 80% 0,#32136f 0,transparent 38%),#09090f;min-height:100vh}
+    main{width:min(1240px,calc(100% - 28px));margin:0 auto;padding:28px 0 70px}
+    .panel,.card{background:#12121bde;border:1px solid #ffffff15;border-radius:22px;box-shadow:0 24px 80px #0008;padding:22px}
+    h1{margin:0 0 6px;font-size:26px}h2{font-size:20px;margin:0 0 18px}.muted{color:#aaa6b8;font-size:13px}.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+    input,select,button{font:inherit;border-radius:11px;border:1px solid #ffffff1a;background:#0d0d15;color:#fff;padding:11px 13px}
+    input{width:100%}input::placeholder{color:#777386}button{cursor:pointer;background:#6d28d9;border-color:#8b5cf680;transition:.18s transform,.18s filter}button:hover{filter:brightness(1.16);transform:translateY(-1px)}
+    button.secondary{background:#252532}button.danger{background:#9f1239}.login{max-width:430px;margin:12vh auto}.field{margin:12px 0}.field label{display:block;margin-bottom:7px;color:#d5d0e2;font-size:13px}
+    .error{color:#fb7185;min-height:22px;margin:10px 0}.success{color:#86efac;min-height:22px;margin:10px 0}.hidden{display:none}.toolbar{justify-content:space-between;margin:0 0 18px}
+    .eyebrow{color:#c4b5fd;font-size:12px;font-weight:700;letter-spacing:.04em}.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:20px 0}.stat{padding:17px;border-radius:16px;background:linear-gradient(145deg,#1c1630,#151520);border:1px solid #ffffff12}.stat strong{display:block;font-size:26px;margin-top:5px}.stat span{color:#aaa6b8;font-size:12px}
+    .controls{display:grid;grid-template-columns:minmax(220px,1fr) 150px 140px auto;gap:10px;align-items:center;margin:14px 0 18px}.controls input{width:auto}
+    .table-wrap{overflow:auto;border:1px solid #ffffff10;border-radius:16px}table{width:100%;border-collapse:collapse;min-width:860px}th,td{text-align:right;padding:14px 12px;border-bottom:1px solid #ffffff10;font-size:13px;vertical-align:middle}th{color:#aaa6b8;font-weight:600;background:#171522}tbody tr:hover{background:#ffffff04}tbody tr:last-child td{border-bottom:0}
+    .user-name{font-weight:700;color:#fff}.user-handle{font-size:12px;color:#a78bfa;margin-top:3px;direction:ltr;text-align:right}.email{direction:ltr;text-align:right;color:#d8d3e6}.date{white-space:nowrap;color:#d6d0e2}.badge{display:inline-block;padding:5px 9px;border-radius:99px;background:#31205d;color:#d8b4fe;font-size:12px}.badge.premium{background:#164e3b;color:#86efac}.badge.admin{background:#713f12;color:#fde68a}
+    .actions{display:flex;gap:6px;flex-wrap:wrap;align-items:center}.actions button{padding:8px 10px;font-size:12px}.days{width:92px!important;padding:8px 7px!important}.empty{text-align:center!important;color:#aaa6b8;padding:30px}
+    @media(max-width:800px){main{padding-top:16px}.panel{padding:16px;border-radius:18px}.stats{grid-template-columns:repeat(2,1fr)}.controls{grid-template-columns:1fr 1fr}.controls input{grid-column:1/-1}.toolbar{align-items:flex-start}.toolbar h1{font-size:22px}}
+    @media(max-width:500px){main{width:calc(100% - 16px)}.stats{gap:8px}.stat{padding:13px}.stat strong{font-size:22px}.controls{grid-template-columns:1fr}.controls input{grid-column:auto}.login{margin-top:8vh}}
   </style>
 </head>
 <body><main>
   <section id="login" class="panel login">
-    <h1>Nova Control</h1><p class="muted">لوحة الإدارة الخاصة — لا يوجد رابط عام لهذه الصفحة.</p>
-     <form id="loginForm">
-       <div class="field"><label>كلمة المرور</label><input id="password" type="password" autocomplete="current-password" required></div>
+    <div class="eyebrow">PRIVATE ADMIN AREA</div><h1>Nova Control</h1><p class="muted">لوحة الإدارة الخاصة — لا يوجد رابط عام لهذه الصفحة.</p>
+    <form id="loginForm"><div class="field"><label>كلمة المرور</label><input id="password" type="password" autocomplete="current-password" required></div>
       <div id="loginError" class="error"></div><button type="submit">دخول آمن</button>
     </form>
   </section>
   <section id="app" class="panel hidden">
-    <div class="row toolbar"><div><h1>إدارة Anime NOVA</h1><span class="muted">الاشتراكات والصلاحيات من الخادم فقط</span></div><button id="logout" class="secondary">تسجيل الخروج</button></div>
-    <div class="row toolbar"><h2>المستخدمون</h2><div class="row"><input id="search" placeholder="بحث بالبريد أو الاسم" style="width:230px"><button id="refresh" class="secondary">تحديث</button></div></div>
-    <div id="error" class="error"></div><div style="overflow:auto"><table><thead><tr><th>المستخدم</th><th>البريد</th><th>الخطة</th><th>الانتهاء</th><th>إجراء</th></tr></thead><tbody id="users"></tbody></table></div>
+    <div class="row toolbar"><div><div class="eyebrow">NOVA CONTROL / ADMINISTRATION</div><h1>إدارة Anime NOVA</h1><span class="muted">إدارة الاشتراكات والصلاحيات من الخادم فقط</span></div><button id="logout" class="secondary">تسجيل الخروج</button></div>
+    <div class="stats"><div class="stat"><span>إجمالي المستخدمين</span><strong id="totalUsers">—</strong></div><div class="stat"><span>اشتراكات مميزة</span><strong id="premiumUsers">—</strong></div><div class="stat"><span>حسابات مجانية</span><strong id="freeUsers">—</strong></div><div class="stat"><span>آخر تحديث</span><strong id="updatedAt" style="font-size:16px">—</strong></div></div>
+    <div class="row toolbar"><div><h2>المستخدمون والاشتراكات</h2><span class="muted">اختر مدة الأيام ثم اضغط منح للمستخدم المطلوب</span></div></div>
+    <div class="controls"><input id="search" placeholder="بحث بالبريد أو اسم المستخدم أو الاسم الظاهر"><select id="planFilter"><option value="">كل الخطط</option><option value="free">مجاني</option><option value="premium">مميز</option><option value="admin">مدير</option></select><input id="customDays" type="number" min="1" max="3650" value="30" title="عدد الأيام"><button id="refresh" class="secondary">تحديث البيانات</button></div>
+    <div id="error" class="error"></div><div id="success" class="success"></div>
+    <div class="table-wrap"><table><thead><tr><th>المستخدم</th><th>البريد</th><th>الخطة</th><th>ينتهي في</th><th>تاريخ التسجيل</th><th>الإجراء</th></tr></thead><tbody id="users"></tbody></table></div>
   </section>
 </main>
 <script>
 const base=location.pathname.replace(/\/+$/,""),$=id=>document.getElementById(id);
 async function api(path,opt={}){const url=path.startsWith("/api/")?path:base+"/api"+path;const r=await fetch(url,{credentials:"same-origin",headers:{"Content-Type":"application/json",...(opt.headers||{})},...opt});const d=await r.json().catch(()=>({}));if(r.status===401&&path!=="/login"){showLogin();throw new Error("انتهت الجلسة")}if(!r.ok)throw new Error(d.error||"حدث خطأ");return d}
 function showLogin(){$("login").classList.remove("hidden");$("app").classList.add("hidden")}
-function showApp(){$("login").classList.add("hidden");$("app").classList.remove("hidden");loadUsers()}
+function showApp(){$("login").classList.add("hidden");$("app").classList.remove("hidden");loadAll()}
+function clearMessages(){$("error").textContent="";$("success").textContent=""}
+function fmtDate(v){return v?new Date(v).toLocaleString("ar-SA",{dateStyle:"medium",timeStyle:"short"}):"—"}
+function planBadge(plan){const label={free:"مجاني",premium:"مميز",admin:"مدير"}[plan]||plan;return `<span class="badge ${esc(plan)}">${label}</span>`}
+async function loadAll(){clearMessages();await Promise.all([loadStats(),loadUsers()])}
+async function loadStats(){try{const d=await api("/api/admin/stats");$("totalUsers").textContent=d.totalUsers??"—";$("premiumUsers").textContent=d.premiumUsers??"—";$("freeUsers").textContent=typeof d.totalUsers==="number"&&typeof d.premiumUsers==="number"?Math.max(0,d.totalUsers-d.premiumUsers):"—";$("updatedAt").textContent=new Date().toLocaleTimeString("ar-SA")}catch(x){$("error").textContent=x.message}}
+async function loadUsers(){try{const q=encodeURIComponent($("search").value),plan=encodeURIComponent($("planFilter").value);const d=await api("/api/admin/users?q="+q+"&plan="+plan);const rows=d.users||[];$("users").innerHTML=rows.map(u=>`<tr><td><div class="user-name">${esc(u.displayName||"بدون اسم")}</div><div class="user-handle">${u.username?"@"+esc(u.username):"لا يوجد اسم مستخدم"}</div></td><td class="email">${esc(u.email||"—")}</td><td>${planBadge(u.plan)}</td><td class="date">${fmtDate(u.expiresAt)}</td><td class="date">${fmtDate(u.createdAt)}</td><td class="actions">${u.plan==="admin"?"<span class=\"muted\">صلاحية مدير</span>":`<button data-action="grant" data-id="${esc(u.id)}">منح</button><button class="secondary" data-action="free" data-id="${esc(u.id)}">إلغاء</button>`}</td></tr>`).join("")||"<tr><td colspan=6 class=empty>لا يوجد مستخدمون مطابقون للبحث</td></tr>"}catch(x){$("error").textContent=x.message}}
+async function changePlan(id,action){clearMessages();if(action==="free"){if(!confirm("إلغاء الاشتراك لهذا المستخدم؟"))return;await api("/api/admin/users/"+encodeURIComponent(id)+"/plan",{method:"PATCH",body:JSON.stringify({plan:"free"})});$("success").textContent="تم إلغاء الاشتراك بنجاح ✓"}else{const days=Number($("customDays").value);if(!Number.isInteger(days)||days<1||days>3650){$("error").textContent="اختر عدداً صحيحاً بين 1 و3650 يوماً";return}await api("/api/admin/users/"+encodeURIComponent(id)+"/grant",{method:"POST",body:JSON.stringify({days})});$("success").textContent=`تم منح اشتراك مميز لمدة ${days} يوماً ✓`}await loadAll()}
 async function boot(){try{const d=await api("/me");d.authenticated?showApp():showLogin()}catch{showLogin()}}
- $("loginForm").onsubmit=async e=>{e.preventDefault();$("loginError").textContent="";try{await api("/login",{method:"POST",body:JSON.stringify({password:$("password").value})});$("password").value="";showApp()}catch(x){$("loginError").textContent=x.message}};
-$("logout").onclick=async()=>{await api("/logout",{method:"POST"});showLogin()};
-async function loadUsers(){try{const d=await api("/api/admin/users?q="+encodeURIComponent($("search").value));$("users").innerHTML=d.users.map(u=>`<tr><td>${esc(u.displayName||u.username||"—")}</td><td>${esc(u.email)}</td><td><span class="badge">${esc(u.plan)}</span></td><td>${u.expiresAt?new Date(u.expiresAt).toLocaleDateString("ar-SA"):"—"}</td><td class="actions"><button data-id="${u.id}" data-plan="premium">شهر</button><button class="secondary" data-id="${u.id}" data-plan="free">إلغاء</button></td></tr>`).join("")||"<tr><td colspan=5>لا يوجد مستخدمون</td></tr>"}catch(x){$("error").textContent=x.message}}
-function esc(s){return String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]))}
-$("users").onclick=async e=>{const b=e.target.closest("button[data-id]");if(!b)return;try{await api("/api/admin/users/"+b.dataset.id+"/plan",{method:"PATCH",body:JSON.stringify({plan:b.dataset.plan})});loadUsers()}catch(x){$("error").textContent=x.message}};
-$("refresh").onclick=loadUsers;$("search").onkeydown=e=>{if(e.key==="Enter")loadUsers()};boot();
+$("loginForm").onsubmit=async e=>{e.preventDefault();$("loginError").textContent="";try{await api("/login",{method:"POST",body:JSON.stringify({password:$("password").value})});$("password").value="";showApp()}catch(x){$("loginError").textContent=x.message}};
+$("logout").onclick=async()=>{await api("/logout",{method:"POST"});showLogin()};$("refresh").onclick=loadAll;$("search").onkeydown=e=>{if(e.key==="Enter")loadUsers()};$("planFilter").onchange=loadUsers;$("users").onclick=async e=>{const b=e.target.closest("button[data-id]");if(!b)return;try{await changePlan(b.dataset.id,b.dataset.action)}catch(x){$("error").textContent=x.message}};boot();
+function esc(s){return String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]))}
 </script></body></html>

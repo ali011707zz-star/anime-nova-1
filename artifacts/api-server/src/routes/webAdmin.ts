@@ -37,6 +37,9 @@ export function registerWebAdminRoutes(app: Express): void {
   const route = adminPath();
   const page = path.resolve(process.cwd(), "artifacts/anime-scraper/dist/public/admin-control.html");
 
+  // Never expose the admin page through the frontend's static-file handler.
+  app.use("/admin-control.html", (_req, res) => res.status(404).send("Not found"));
+
   app.get(route, (_req, res) => {
     if (!configured()) return res.status(404).send("Not found");
     res.setHeader("Cache-Control", "no-store");
@@ -67,6 +70,14 @@ export function registerWebAdminRoutes(app: Express): void {
 
   app.get(`${route}/api/me`, (req, res) => {
     return res.json({ authenticated: authenticated(req) });
+  });
+
+  // Do not let the frontend SPA fallback turn typos or guessed subpaths into
+  // a successful-looking response under the private admin URL.
+  app.use((req, res, next) => {
+    if (req.path === route || req.path.startsWith(`${route}/`))
+      return res.status(404).send("Not found");
+    return next();
   });
 }
 
