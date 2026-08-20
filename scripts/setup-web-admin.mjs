@@ -9,27 +9,26 @@ const ask = (q) => rl.question(q, { hideEchoBack: true });
 const password = await ask("Nova Control password: ");
 const confirm = await ask("\nRepeat password: ");
 rl.close();
-if (!password || password.length < 12 || password !== confirm) {
-  console.error("\nPassword must match and be at least 12 characters.");
+if (!password || password.length < 16 || password !== confirm) {
+  console.error("\nPassword must match and be at least 16 characters.");
   process.exit(1);
 }
 const salt = crypto.randomBytes(16).toString("hex");
 const hash = crypto.scryptSync(password, salt, 64).toString("hex") + "." + salt;
-const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
-const bytes = crypto.randomBytes(20);
-let bits = "";
-for (const b of bytes) bits += b.toString(2).padStart(8, "0");
-let secret = "";
-for (let i = 0; i < bits.length; i += 5) secret += alphabet[parseInt(bits.slice(i, i + 5).padEnd(5, "0"), 2)];
 const path = "/nova-control-" + crypto.randomBytes(12).toString("hex");
 let env = fs.existsSync(envPath) ? fs.readFileSync(envPath, "utf8") : "";
-for (const [key, value] of [["NOVA_ADMIN_PATH", path], ["NOVA_ADMIN_PASSWORD_HASH", hash], ["NOVA_ADMIN_TOTP_SECRET", secret]]) {
+if (!/^NOVA_ADMIN_BACKUP_PASSWORD_HASH=.+$/m.test(env)) {
+  console.error("\nNo existing backup password was found; refusing to remove your second login path.");
+  process.exit(1);
+}
+for (const [key, value] of [
+  ["NOVA_ADMIN_PATH", path],
+  ["NOVA_ADMIN_PASSWORD_HASH", hash],
+]) {
   const line = `${key}=${value}`;
   const re = new RegExp(`^${key}=.*$`, "m");
   env = re.test(env) ? env.replace(re, line) : `${env.trimEnd()}\n${line}\n`;
 }
 fs.writeFileSync(envPath, env);
 console.log(`\nNova Control URL path: ${path}`);
-console.log(`Google Authenticator secret: ${secret}`);
-console.log(`OTP URI: otpauth://totp/Anime%20NOVA%20Control?secret=${secret}&issuer=Anime%20NOVA`);
-console.log("\nRestart the API after scanning the secret.");
+console.log("\nRestart the API after saving both passwords securely.");

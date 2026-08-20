@@ -1,4 +1,4 @@
-import { createHmac, randomBytes, scrypt, timingSafeEqual } from "node:crypto";
+import { randomBytes, scrypt, timingSafeEqual } from "node:crypto";
 import { promisify } from "node:util";
 import path from "node:path";
 import type { Express, Request, Response } from "express";
@@ -10,44 +10,6 @@ const ADMIN_SESSION_KEY = "novaWebAdmin";
 function adminPath(): string {
   const value = (process.env.NOVA_ADMIN_PATH || "").trim();
   return value.startsWith("/") ? value.replace(/\/+$/, "") : `/${value}`;
-}
-
-function base32Decode(value: string): Buffer {
-  const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
-  const clean = value.toUpperCase().replace(/[\s=-]/g, "");
-  let bits = "";
-  for (const char of clean) {
-    const index = alphabet.indexOf(char);
-    if (index < 0) throw new Error("Invalid TOTP secret");
-    bits += index.toString(2).padStart(5, "0");
-  }
-  const bytes: number[] = [];
-  for (let i = 0; i + 8 <= bits.length; i += 8) bytes.push(Number.parseInt(bits.slice(i, i + 8), 2));
-  return Buffer.from(bytes);
-}
-
-function totp(secret: string, counter: number): string {
-  const key = base32Decode(secret);
-  const message = Buffer.alloc(8);
-  message.writeBigUInt64BE(BigInt(counter));
-  const digest = createHmac("sha1", key).update(message).digest();
-  const offset = digest[digest.length - 1] & 0x0f;
-  const code = ((digest[offset] & 0x7f) << 24) |
-    ((digest[offset + 1] & 0xff) << 16) |
-    ((digest[offset + 2] & 0xff) << 8) |
-    (digest[offset + 3] & 0xff);
-  return String(code % 1_000_000).padStart(6, "0");
-}
-
-function validTotp(secret: string, provided: string): boolean {
-  if (!/^\d{6}$/.test(provided)) return false;
-  const now = Math.floor(Date.now() / 1000 / 30);
-  for (const drift of [-1, 0, 1]) {
-    const expected = Buffer.from(totp(secret, now + drift));
-    const actual = Buffer.from(provided);
-    if (expected.length === actual.length && timingSafeEqual(expected, actual)) return true;
-  }
-  return false;
 }
 
 async function validPassword(password: string, stored: string): Promise<boolean> {
