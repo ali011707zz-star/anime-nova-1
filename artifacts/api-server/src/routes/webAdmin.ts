@@ -78,6 +78,8 @@ export function registerWebAdminRoutes(app: Express): void {
   app.get(route, (_req, res) => {
     if (!configured()) return res.status(404).send("Not found");
     res.setHeader("Cache-Control", "no-store");
+    res.setHeader("X-Robots-Tag", "noindex, nofollow, noarchive");
+    res.setHeader("Referrer-Policy", "no-referrer");
     return res.sendFile(page);
   });
 
