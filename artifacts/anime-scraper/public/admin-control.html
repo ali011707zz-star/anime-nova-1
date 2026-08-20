@@ -34,14 +34,14 @@
 </main>
 <script>
 const base=location.pathname.replace(/\/+$/,""),$=id=>document.getElementById(id);
-async function api(path,opt={}){const r=await fetch(base+"/api"+path,{credentials:"same-origin",headers:{"Content-Type":"application/json",...(opt.headers||{})},...opt});if(r.status===401){showLogin();throw new Error("انتهت الجلسة")}const d=await r.json().catch(()=>({}));if(!r.ok)throw new Error(d.error||"حدث خطأ");return d}
+async function api(path,opt={}){const url=path.startsWith("/api/")?path:base+"/api"+path;const r=await fetch(url,{credentials:"same-origin",headers:{"Content-Type":"application/json",...(opt.headers||{})},...opt});if(r.status===401){showLogin();throw new Error("انتهت الجلسة")}const d=await r.json().catch(()=>({}));if(!r.ok)throw new Error(d.error||"حدث خطأ");return d}
 function showLogin(){$("login").classList.remove("hidden");$("app").classList.add("hidden")}
 function showApp(){$("login").classList.add("hidden");$("app").classList.remove("hidden");loadUsers()}
 async function boot(){try{const d=await api("/me");d.authenticated?showApp():showLogin()}catch{showLogin()}}
 $("loginForm").onsubmit=async e=>{e.preventDefault();$("loginError").textContent="";try{await api("/login",{method:"POST",body:JSON.stringify({password:$("password").value,code:$("code").value})});$("password").value="";$("code").value="";showApp()}catch(x){$("loginError").textContent=x.message}};
 $("logout").onclick=async()=>{await api("/logout",{method:"POST"});showLogin()};
-async function loadUsers(){try{const d=await api("/admin/users?q="+encodeURIComponent($("search").value));$("users").innerHTML=d.users.map(u=>`<tr><td>${esc(u.displayName||u.username||"—")}</td><td>${esc(u.email)}</td><td><span class="badge">${esc(u.plan)}</span></td><td>${u.expiresAt?new Date(u.expiresAt).toLocaleDateString("ar-SA"):"—"}</td><td class="actions"><button data-id="${u.id}" data-plan="premium">شهر</button><button class="secondary" data-id="${u.id}" data-plan="free">إلغاء</button></td></tr>`).join("")||"<tr><td colspan=5>لا يوجد مستخدمون</td></tr>"}catch(x){$("error").textContent=x.message}}
+async function loadUsers(){try{const d=await api("/api/admin/users?q="+encodeURIComponent($("search").value));$("users").innerHTML=d.users.map(u=>`<tr><td>${esc(u.displayName||u.username||"—")}</td><td>${esc(u.email)}</td><td><span class="badge">${esc(u.plan)}</span></td><td>${u.expiresAt?new Date(u.expiresAt).toLocaleDateString("ar-SA"):"—"}</td><td class="actions"><button data-id="${u.id}" data-plan="premium">شهر</button><button class="secondary" data-id="${u.id}" data-plan="free">إلغاء</button></td></tr>`).join("")||"<tr><td colspan=5>لا يوجد مستخدمون</td></tr>"}catch(x){$("error").textContent=x.message}}
 function esc(s){return String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]))}
-$("users").onclick=async e=>{const b=e.target.closest("button[data-id]");if(!b)return;try{await api("/admin/users/"+b.dataset.id+"/plan",{method:"PATCH",body:JSON.stringify({plan:b.dataset.plan})});loadUsers()}catch(x){$("error").textContent=x.message}};
+$("users").onclick=async e=>{const b=e.target.closest("button[data-id]");if(!b)return;try{await api("/api/admin/users/"+b.dataset.id+"/plan",{method:"PATCH",body:JSON.stringify({plan:b.dataset.plan})});loadUsers()}catch(x){$("error").textContent=x.message}};
 $("refresh").onclick=loadUsers;$("search").onkeydown=e=>{if(e.key==="Enter")loadUsers()};boot();
 </script></body></html>

@@ -71,6 +71,7 @@ function authenticated(req: Request): boolean {
 }
 
 export function registerWebAdminRoutes(app: Express): void {
+  if (!process.env.NOVA_ADMIN_PATH?.trim()) return;
   const route = adminPath();
   const page = path.resolve(process.cwd(), "artifacts/anime-scraper/dist/public/admin-control.html");
 
