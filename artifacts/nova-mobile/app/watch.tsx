@@ -6,6 +6,7 @@ import {
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import { WebView } from "react-native-webview";
+import { useVideoPlayer, VideoView } from "expo-video";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { RiftPlayer, PlayerSource } from "@/components/RiftPlayer";
 import { HiddenResolverWebView, ResolvedStream } from "@/components/HiddenResolverWebView";
@@ -595,62 +596,25 @@ function ServerScanAnimation() {
   );
 }
 
-/* React Native's Image component is not a reliable animated-GIF renderer on
-   all Expo/Android builds. Render the exact GIF URL inside a tiny HTML
-   document. Direct image navigation can remain blank on Android WebView when
-   the CDN returns a redirect or a non-image intermediate response. */
-/* Use the small production animated WebP. The old remote GIF fallbacks can
-   exceed Android/WebView limits (GIFDB currently returns 413 from the VPS),
-   while this local asset is lightweight and served by the same origin. */
-const SERVER_SCAN_GIFS = [
-  "/gojo-loading.webp",
-] as const;
-
+/* Native MP4 replaces animated GIF/WebP rendering. This keeps the loading
+   animation reliable on Android and avoids a WebView dependency in this
+   critical screen. */
 function ServerScanGif() {
-  const [gifIndex, setGifIndex] = useState(0);
-  const [failed, setFailed] = useState(false);
-  /* Availability SSE causes frequent parent renders. Keep the WebView
-     document stable so the GIF does not restart or disappear per event. */
-  const gifUrl = `${getBaseUrl()}${SERVER_SCAN_GIFS[gifIndex] || SERVER_SCAN_GIFS[0]}`;
-  const handleGifFailure = () => {
-    if (gifIndex < SERVER_SCAN_GIFS.length - 1) {
-      setGifIndex((value) => value + 1);
-    } else {
-      setFailed(true);
-    }
-  };
-  useEffect(() => {
-    /* A blocked CDN can leave WebView waiting forever without firing onError.
-       Give each mirror a bounded window. Do not replace the original GIF with
-       the radio/logo placeholder: the loading state must remain the same as web. */
-    const timeout = setTimeout(handleGifFailure, 10_000);
-    return () => clearTimeout(timeout);
-  }, [gifIndex]); // eslint-disable-line react-hooks/exhaustive-deps
+  const player = useVideoPlayer(require("../assets/nova-loading.mp4"), (instance) => {
+    instance.loop = true;
+    instance.muted = true;
+    instance.play();
+  });
 
-  if (failed) return <ActivityIndicator size="large" color="#a78bfa" />;
-  const html = `<!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1"></head><body style="margin:0;background:transparent;display:flex;align-items:center;justify-content:center;overflow:hidden"><img src="${gifUrl}" style="width:100%;height:100%;object-fit:contain" onerror="window.ReactNativeWebView.postMessage('gif-error')"></body></html>`;
   return (
-    <WebView
-      source={{ html, baseUrl: getBaseUrl() }}
+    <VideoView
+      player={player}
       style={d.availabilityGif}
-      originWhitelist={["*"]}
-      scrollEnabled={false}
-      overScrollMode="never"
-      showsVerticalScrollIndicator={false}
-      showsHorizontalScrollIndicator={false}
+      nativeControls={false}
+      contentFit="contain"
+      surfaceType={Platform.OS === "android" ? "textureView" : undefined}
       pointerEvents="none"
       accessible={false}
-      cacheEnabled
-      cacheMode="LOAD_DEFAULT"
-      androidLayerType="hardware"
-      setSupportMultipleWindows={false}
-      javaScriptEnabled
-      onMessage={(event) => {
-        if (event.nativeEvent.data === "gif-error") handleGifFailure();
-      }}
-      mixedContentMode="always"
-      onError={handleGifFailure}
-      onHttpError={handleGifFailure}
     />
   );
 }

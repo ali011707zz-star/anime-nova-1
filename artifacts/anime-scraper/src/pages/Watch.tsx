@@ -2225,14 +2225,15 @@ function ScraperPicker({
               className="relative w-full max-w-[330px] aspect-video rounded-3xl overflow-hidden mb-5"
               style={{ background: "rgba(255,255,255,0.025)" }}
             >
-              <img
-                src="/gojo-loading.webp"
-                alt=""
+              <video
+                src="/nova-loading.mp4"
+                autoPlay
+                loop
+                muted
+                playsInline
+                preload="auto"
                 aria-hidden="true"
                 className="absolute inset-0 w-full h-full object-cover"
-                loading="eager"
-                decoding="async"
-                referrerPolicy="no-referrer"
               />
               <div className="absolute inset-0 bg-gradient-to-t from-[#07070d]/80 via-transparent to-transparent pointer-events-none" />
             </div>
