@@ -5,7 +5,7 @@ server = Path("/opt/anime-nova/artifacts/api-server/src/routes/anime.ts")
 s = server.read_text()
 s, n1 = re.subn(r'^[ \t]*scrapeCached\("animeday".*\n', "", s, flags=re.M)
 s, n2 = re.subn(r'^[ \t]*case "animeday":.*\n', "", s, flags=re.M)
-if (n1, n2) != (1, 1):
+if (n1, n2) not in ((1, 1), (0, 0)):
     raise SystemExit(f"AnimeDay removals={n1},{n2}")
 
 sa_start = s.index("async function getSAnimeSourcesUncached(")
