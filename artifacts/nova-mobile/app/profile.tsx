@@ -41,7 +41,6 @@ export default function ProfileScreen() {
   const [tab, setTab] = useState<"profile" | "password">("profile");
 
   const [displayName, setDisplayName] = useState("");
-  const [username, setUsername] = useState("");
   const [currentPass, setCurrentPass] = useState("");
   const [newPass, setNewPass] = useState("");
   const [confirmPass, setConfirmPass] = useState("");
@@ -60,7 +59,6 @@ export default function ProfileScreen() {
           const u = JSON.parse(v) as MobileUser;
           setUser(u);
           setDisplayName(u.displayName || "");
-          setUsername(u.username || "");
         } catch {}
       }
     });
@@ -72,7 +70,6 @@ export default function ProfileScreen() {
         setUser(prev => prev ? {
           ...prev,
           displayName:    d.displayName    || prev.displayName,
-          username:       d.username       || prev.username,
           avatarColor:    d.avatarColor    ?? prev.avatarColor,
           profileImageUrl: d.profileImageUrl || d.profile_image_custom || prev.profileImageUrl || null,
         } : null);
@@ -83,10 +80,7 @@ export default function ProfileScreen() {
   const colorIdx = Math.min((user?.avatarColor ?? 0) % AVATAR_COLORS.length, AVATAR_COLORS.length - 1);
   const [g1, g2] = AVATAR_COLORS[colorIdx];
   const letter = (user?.displayName || user?.email || "N").charAt(0).toUpperCase();
-  const changed = user && (
-    displayName.trim() !== (user.displayName || "") ||
-    (username.trim() || "") !== (user.username || "")
-  );
+  const changed = user && displayName.trim() !== (user.displayName || "");
 
   const showMsg = useCallback((msg: string, ok: boolean) => {
     if (ok) { setSuccess(msg); setError(""); setTimeout(() => setSuccess(""), 2500); }
@@ -101,12 +95,12 @@ export default function ProfileScreen() {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
-        body: JSON.stringify({ displayName: displayName.trim(), username: username.trim() || undefined }),
+        body: JSON.stringify({ displayName: displayName.trim() }),
       });
       const d = await r.json();
       if (!r.ok) { showMsg(d.error || "حدث خطأ", false); }
       else {
-        const updated: MobileUser = { ...user!, displayName: d.displayName || displayName.trim(), username: d.username || username.trim() || user!.username };
+        const updated: MobileUser = { ...user!, displayName: d.displayName || displayName.trim() };
         await AsyncStorage.setItem(AUTH_KEY, JSON.stringify(updated));
         setUser(updated);
         showMsg("تم حفظ التغييرات ✓", true);
@@ -313,18 +307,6 @@ export default function ProfileScreen() {
                 <Ionicons name="person-outline" size={16} color={colors.mutedForeground} />
               </View>
 
-              <Text style={[s.fieldLabel, { color: colors.mutedForeground }]}>اسم المستخدم (إنجليزي)</Text>
-              <View style={[s.fieldWrap, { backgroundColor: colors.card, borderColor: colors.border }]}>
-                <TextInput value={username} onChangeText={v => { setUsername(v.replace(/[^a-zA-Z0-9_.]/g, "").toLowerCase()); setError(""); }}
-                  placeholder="@username"
-                  placeholderTextColor={colors.mutedForeground + "80"}
-                  autoCapitalize="none"
-                  style={[s.fieldInput, { color: colors.text }]}
-                  textAlign="right"
-                />
-                <Ionicons name="at" size={16} color={colors.mutedForeground} />
-              </View>
-
               <Text style={[s.fieldLabel, { color: colors.mutedForeground }]}>البريد الإلكتروني</Text>
               <View style={[s.fieldWrap, { backgroundColor: colors.card, borderColor: colors.border, opacity: 0.5 }]}>
                 <Text style={[s.fieldInput, { color: colors.mutedForeground, paddingVertical: 12 }]}>{user.email}</Text>
@@ -351,11 +333,6 @@ export default function ProfileScreen() {
                 <Text style={[s.dangerBtnText, { color: "#f87171" }]}>تسجيل الخروج</Text>
               </Pressable>
 
-              <Pressable onPress={handleLogout}
-                style={[s.secondaryBtn, { backgroundColor: colors.card, borderColor: colors.border, marginTop: 10 }]}>
-                <Ionicons name="swap-horizontal" size={14} color={colors.mutedForeground} />
-                <Text style={[s.secondaryBtnText, { color: colors.mutedForeground }]}>تبديل الحساب</Text>
-              </Pressable>
             </>
           ) : (
             <>

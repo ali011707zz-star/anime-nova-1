@@ -6053,6 +6053,8 @@ async function getKawaiiAnimeSources(
          can advertise a valid row while the CDN rejects the first manifest
          request with a Referer-dependent 403. */
       for (const apiUrl of [
+        `${base}/api/miruro?anilistId=${anilistId}&ep=${ep}`,
+        `${base}/api/miruro?anilist_id=${anilistId}&episode=${ep}`,
         `${base}/api/watch?anilistId=${anilistId}&ep=${ep}&format=mp4`,
         `${base}/api/watch?anilistId=${anilistId}&ep=${ep}`,
       ]) {
@@ -6064,9 +6066,14 @@ async function getKawaiiAnimeSources(
           },
         }, 12_000);
         if (!r) continue;
-        const candidate = await r.json().catch(() => null) as KawaiiApiData | null;
-        if (candidate?.sources?.some(source => typeof source?.url === "string" && source.url.length > 0)) {
-          data = candidate;
+        const candidate = await r.json().catch(() => null) as (KawaiiApiData & {
+          data?: KawaiiApiData | { sources?: KawaiiApiData["sources"]; subtitles?: KawaiiApiData["subtitles"]; headers?: KawaiiApiData["headers"] };
+        }) | null;
+        const payload = candidate?.data && typeof candidate.data === "object"
+          ? { ...candidate, ...candidate.data }
+          : candidate;
+        if (payload?.sources?.some(source => typeof source?.url === "string" && source.url.length > 0)) {
+          data = payload;
           apiBase = base;
           break;
         }
@@ -6106,7 +6113,9 @@ async function getKawaiiAnimeSources(
       ? `/api/anime/proxy-text?url=${encodeURIComponent(rawSubUrl)}&ref=${encodeURIComponent(apiBase + "/")}`
       : undefined;
     const subtitleUrl = proxiedSubUrl
-      ? `/api/anime/translate-vtt?url=${encodeURIComponent(proxiedSubUrl)}&from=${arEntry ? "ar" : "en"}&to=ar`
+      ? arEntry
+        ? proxiedSubUrl
+        : `/api/anime/translate-vtt?url=${encodeURIComponent(proxiedSubUrl)}&from=en&to=ar`
       : undefined;
 
     const subLangLabel = rawSubUrl ? "عربي" : null;
@@ -10297,19 +10306,30 @@ async function getKawaiiSubForSource(anilistId: number | undefined, ep: number):
   const hit = _kawaiiSubCache.get(cKey);
   if (hit && Date.now() - hit.ts < KAWAII_SUB_TTL) return hit.val;
   try {
-    const r = await fetch(`${KAWAII_BASE}/api/watch?anilistId=${anilistId}&ep=${ep}`, {
-      headers: { ...BASE_HDRS, Accept: "application/json", Referer: KAWAII_BASE + "/" },
-      signal: AbortSignal.timeout(6000),
-    });
-    if (!r.ok) { _kawaiiSubCache.set(cKey, { val: undefined, ts: Date.now() }); return undefined; }
-    const data = await r.json() as { subtitles?: Array<{ url: string; lang?: string }> };
-    const subs = data.subtitles ?? [];
+    let payload: any = null;
+    for (const endpoint of [
+      `${KAWAII_BASE}/api/miruro?anilistId=${anilistId}&ep=${ep}`,
+      `${KAWAII_BASE}/api/miruro?anilist_id=${anilistId}&episode=${ep}`,
+      `${KAWAII_BASE}/api/watch?anilistId=${anilistId}&ep=${ep}`,
+    ]) {
+      const r = await fetch(endpoint, {
+        headers: { ...BASE_HDRS, Accept: "application/json", Referer: KAWAII_BASE + "/" },
+        signal: AbortSignal.timeout(6000),
+      });
+      if (!r.ok) continue;
+      const candidate = await r.json().catch(() => null);
+      payload = candidate?.data && typeof candidate.data === "object"
+        ? { ...candidate, ...candidate.data }
+        : candidate;
+      if (payload?.subtitles?.length) break;
+    }
+    const subs = payload?.subtitles ?? [];
     // الأولوية: عربي مباشر → إنجليزي مترجم
     const arSub = subs.find(s => (s.lang || "").toLowerCase().includes("arabic") || (s.lang || "").toLowerCase() === "ar");
     let result: string | undefined;
     if (arSub?.url) {
       const proxied = `/api/anime/proxy-text?url=${encodeURIComponent(arSub.url)}&ref=${encodeURIComponent(KAWAII_BASE + "/")}`;
-      result = `/api/anime/translate-vtt?url=${encodeURIComponent(proxied)}&from=ar&to=ar`;
+      result = proxied;
     } else {
       const enSub = subs.find(s => (s.lang || "").toLowerCase().includes("english") || (s.lang || "").toLowerCase() === "en");
       if (enSub?.url) {

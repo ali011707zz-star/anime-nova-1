@@ -695,7 +695,6 @@ function ProfileSheet({ open, onClose, user, onUpdate, onLogout }: {
   const base = getBaseUrl();
   const [tab, setTab] = useState<"profile"|"password">("profile");
   const [displayName, setDisplayName] = useState("");
-  const [username, setUsername] = useState("");
   const [currentPass, setCurrentPass] = useState("");
   const [newPass, setNewPass] = useState("");
   const [confirmPass, setConfirmPass] = useState("");
@@ -708,7 +707,6 @@ function ProfileSheet({ open, onClose, user, onUpdate, onLogout }: {
   useEffect(() => {
     if (open && user) {
       setDisplayName(user.displayName || "");
-      setUsername(user.username || "");
       setTab("profile");
       setError(""); setSuccess("");
       setCurrentPass(""); setNewPass(""); setConfirmPass("");
@@ -723,7 +721,7 @@ function ProfileSheet({ open, onClose, user, onUpdate, onLogout }: {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
-        body: JSON.stringify({ displayName: displayName.trim(), username: username.trim() || undefined }),
+        body: JSON.stringify({ displayName: displayName.trim() }),
       });
       const d = await r.json();
       if (!r.ok) { setError(d.error || "حدث خطأ"); }
@@ -731,7 +729,6 @@ function ProfileSheet({ open, onClose, user, onUpdate, onLogout }: {
         const updated: MobileUser = {
           ...user!,
           displayName: d.displayName || displayName.trim(),
-          username: d.username || username.trim() || user!.username,
         };
         await AsyncStorage.setItem(AUTH_KEY, JSON.stringify(updated));
         onUpdate(updated);
@@ -769,7 +766,7 @@ function ProfileSheet({ open, onClose, user, onUpdate, onLogout }: {
 
   const avatarColor = AVATAR_COLORS[(user.avatarColor ?? 0) % AVATAR_COLORS.length];
   const letter = (user.displayName || user.email || "?").charAt(0).toUpperCase();
-  const changed = displayName.trim() !== user.displayName || (username.trim() || "") !== (user.username || "");
+  const changed = displayName.trim() !== user.displayName;
 
   return (
     <Modal transparent animationType="slide" onRequestClose={onClose} statusBarTranslucent>
@@ -841,19 +838,6 @@ function ProfileSheet({ open, onClose, user, onUpdate, onLogout }: {
                   <Ionicons name="person-outline" size={16} color="rgba(255,255,255,0.2)" />
                 </View>
 
-                {/* Username */}
-                <Text style={ts.authFieldLabel}>اسم المستخدم (إنجليزي)</Text>
-                <View style={ts.authFieldWrap}>
-                  <TextInput value={username} onChangeText={v => { setUsername(v.replace(/[^a-zA-Z0-9_.]/g, "").toLowerCase()); setError(""); }}
-                    placeholder="@username"
-                    placeholderTextColor="rgba(255,255,255,0.18)"
-                    autoCapitalize="none"
-                    style={ts.authFieldInput}
-                    textAlign="right"
-                  />
-                  <Ionicons name="at" size={16} color="rgba(255,255,255,0.2)" />
-                </View>
-
                 {/* Email (readonly) */}
                 <Text style={ts.authFieldLabel}>البريد الإلكتروني</Text>
                 <View style={[ts.authFieldWrap, { opacity: 0.5 }]}>
@@ -882,12 +866,6 @@ function ProfileSheet({ open, onClose, user, onUpdate, onLogout }: {
                   <Text style={{ fontSize: 13, fontFamily: "Cairo_800ExtraBold", color: "#f87171" }}>تسجيل الخروج</Text>
                 </Pressable>
 
-                {/* Switch account */}
-                <Pressable onPress={() => { onLogout(); onClose(); }}
-                  style={{ flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 10, paddingVertical: 12, borderRadius: 18, backgroundColor: "rgba(255,255,255,0.04)", borderWidth: 1, borderColor: "rgba(255,255,255,0.08)", marginBottom: 12 }}>
-                  <Ionicons name="swap-horizontal" size={14} color="rgba(255,255,255,0.5)" />
-                  <Text style={{ fontSize: 12, fontFamily: "Cairo_700Bold", color: "rgba(255,255,255,0.50)" }}>تبديل الحساب</Text>
-                </Pressable>
               </>
             ) : (
               <>
