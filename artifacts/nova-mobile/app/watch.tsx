@@ -79,6 +79,14 @@ const SUBTITLE_DISABLED_SITES = new Set([
   "anslayer", "as",
 ]);
 
+/* Playback and download providers are separate product surfaces. */
+const DOWNLOAD_SOURCE_SITES = new Set([
+  "animewitcher", // AW
+  "sanime",       // SA
+  "anslayer",     // AS
+  "anifox",       // FX
+]);
+
 function subtitlesDisabledForSite(site?: string): boolean {
   return SUBTITLE_DISABLED_SITES.has(String(site || "").trim().toLowerCase());
 }
@@ -1303,6 +1311,7 @@ export default function WatchScreen() {
 
   /* ── تنزيل حلقة من موقع معين (Global — يستمر عند التنقل) ── */
   const handleDownloadSite = useCallback(async (site: string) => {
+    if (!DOWNLOAD_SOURCE_SITES.has(site)) return;
     const dlState = downloadStates[site] || "idle";
     if (dlState === "downloading" || dlState === "done") return;
 
@@ -1353,6 +1362,7 @@ export default function WatchScreen() {
    * - إذا لم يُجلب بعد → يجلبه أولاً ثم يبدأ التنزيل.
    */
   const handleFetchAndDownload = useCallback(async (site: string) => {
+    if (!DOWNLOAD_SOURCE_SITES.has(site)) return;
     const dlState = downloadStates[site] || "idle";
     if (dlState === "downloading" || dlState === "done") return;
     if (dlFetchingSites.has(site)) return; // جلب جارٍ بالفعل
@@ -1540,6 +1550,17 @@ export default function WatchScreen() {
     });
     return { directSrcs: direct, embedSrcs: embeds }; // embedSrcs reserved for future WebView fallback
   }, [sources]);
+
+  const downloadSlots = useMemo(() => {
+    const bySite = new Map<string, { site: string; tag: string; quality: QualityKey }>();
+    for (const qk of Q_KEYS) {
+      for (const [site, tiers] of Object.entries(availableSlots)) {
+        if (!DOWNLOAD_SOURCE_SITES.has(site) || !tiers[qk] || bySite.has(site)) continue;
+        bySite.set(site, { site, tag: SITE_TAG[site] || getSiteTag(site), quality: qk });
+      }
+    }
+    return Array.from(bySite.values());
+  }, [availableSlots]);
 
   /* ── RiftPlayer sources (live, used for picker) ── */
   const riftSources = useMemo((): PlayerSource[] => {
@@ -1877,12 +1898,9 @@ export default function WatchScreen() {
               <View style={d.srcSection}>
                 {slots.map((slot, idx) => {
                   const status   = slotStatus[pickerSlotKey(slot.site, qk)] || "idle";
-                  const firstQuality = Q_KEYS.find(key => !!availableSlots[slot.site]?.[key]) || SITE_FIRST_QUALITY.get(slot.site);
                   const isFetching = status === "fetching";
                   const isFailed   = status === "failed";
                   const isReady    = status === "ready";
-                  const dlState    = downloadStates[slot.site] || "idle";
-                  const dlPct      = Math.round((downloadProgress[slot.site] || 0) * 100);
                   return (
                     <Pressable
                       key={slot.site}
@@ -1895,7 +1913,6 @@ export default function WatchScreen() {
                         pressed  && { opacity: 0.72 },
                       ]}
                     >
-                      {/* Keep download immediately beside the server action. */}
                       <View style={d.webRowActions}>
                         {isFetching ? (
                           <SpinRing size={16} />
@@ -1908,34 +1925,6 @@ export default function WatchScreen() {
                           <View style={[d.pickBtn, isFailed && { opacity: 0.4 }]}>
                             <Text style={d.pickBtnText}>اختيار</Text>
                           </View>
-                        )}
-                        {dlState === "idle" && firstQuality === qk && (
-                          <Pressable
-                            onPress={(event) => {
-                              event.stopPropagation();
-                              void handleFetchAndDownload(slot.site);
-                            }}
-                            hitSlop={8}
-                            style={d.dlIconBtn}
-                            accessibilityLabel="تنزيل الحلقة"
-                          >
-                            {dlFetchingSites.has(slot.site) ? (
-                              <SpinRing size={14} />
-                            ) : (
-                              <Ionicons name="download-outline" size={15} color="rgba(139,92,246,0.80)" />
-                            )}
-                          </Pressable>
-                        )}
-                        {dlState === "downloading" && (
-                          <View style={d.dlPctBadge}>
-                            <Text style={d.dlPctText}>{dlPct}%</Text>
-                          </View>
-                        )}
-                        {dlState === "done" && (
-                          <Ionicons name="checkmark-circle" size={16} color="#8B5CF6" />
-                        )}
-                        {dlState === "error" && (
-                          <Ionicons name="close-circle" size={16} color="rgba(239,68,68,0.70)" />
                         )}
                       </View>
 
@@ -1970,6 +1959,62 @@ export default function WatchScreen() {
             </View>
           );
         })}
+
+        {availabilityDone && downloadSlots.length > 0 && (
+          <View style={d.downloadSection}>
+            <View style={d.downloadHeader}>
+              <View style={d.downloadHeaderIcon}>
+                <Ionicons name="download-outline" size={17} color="#c4b5fd" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={d.downloadTitle}>سيرفرات التحميل</Text>
+                <Text style={d.downloadSubtitle}>مصادر مخصصة للتحميل السلس: AW · SA · AS · FX</Text>
+              </View>
+            </View>
+            <Text style={d.downloadHint}>
+              اختر سيرفرًا لتحميل الحلقة. سيرفرات المشاهدة أعلاه مخصصة للمشاهدة فقط.
+            </Text>
+            <View style={d.downloadRows}>
+              {downloadSlots.map((slot) => {
+                const dlState = downloadStates[slot.site] || "idle";
+                const dlPct = Math.round((downloadProgress[slot.site] || 0) * 100);
+                return (
+                  <View key={slot.site} style={d.downloadRow}>
+                    <View style={d.downloadRowInfo}>
+                      <View style={d.downloadTag}>
+                        <Text style={d.downloadTagText}>{slot.tag}</Text>
+                      </View>
+                      <Text style={d.downloadRowLabel}>سيرفر {slot.tag}</Text>
+                      <Text style={d.downloadQuality}>{slot.quality.replace("p", "P")}</Text>
+                    </View>
+                    {dlState === "idle" && (
+                      <Pressable
+                        onPress={() => void handleFetchAndDownload(slot.site)}
+                        hitSlop={8}
+                        style={d.downloadAction}
+                        accessibilityLabel={`تحميل من سيرفر ${slot.tag}`}
+                      >
+                        {dlFetchingSites.has(slot.site) ? <SpinRing size={15} /> : (
+                          <>
+                            <Ionicons name="download-outline" size={15} color="#fff" />
+                            <Text style={d.downloadActionText}>تحميل</Text>
+                          </>
+                        )}
+                      </Pressable>
+                    )}
+                    {dlState === "downloading" && (
+                      <View style={d.dlPctBadge}>
+                        <Text style={d.dlPctText}>{dlPct}%</Text>
+                      </View>
+                    )}
+                    {dlState === "done" && <Ionicons name="checkmark-circle" size={19} color="#8B5CF6" />}
+                    {dlState === "error" && <Ionicons name="close-circle" size={19} color="rgba(239,68,68,0.70)" />}
+                  </View>
+                );
+              })}
+            </View>
+          </View>
+        )}
 
 
 
@@ -2104,6 +2149,23 @@ const d = StyleSheet.create({
   webRowTag:      { flex: 1, minWidth: 0, flexShrink: 1, fontFamily: "Cairo_800ExtraBold", letterSpacing: 0.2, fontSize: 10, lineHeight: 16, color: "rgba(255,255,255,0.60)" },
   webRowRight:    { flexDirection: "row", alignItems: "center", gap: 7, flexShrink: 0 },
   webRowDot:      { width: 8, height: 8, borderRadius: 4 },
+
+  /* ── Separate download servers ── */
+  downloadSection:    { marginTop: 18, gap: 9, padding: 12, borderRadius: 18, backgroundColor: "rgba(14,12,24,0.92)", borderWidth: 1, borderColor: "rgba(139,92,246,0.22)" },
+  downloadHeader:     { flexDirection: "row", alignItems: "center", gap: 9 },
+  downloadHeaderIcon: { width: 32, height: 32, borderRadius: 10, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(139,92,246,0.16)", borderWidth: 1, borderColor: "rgba(139,92,246,0.28)" },
+  downloadTitle:      { fontSize: 13, fontFamily: "Cairo_800ExtraBold", color: "#c4b5fd", textAlign: "right" },
+  downloadSubtitle:   { marginTop: 2, fontSize: 9, fontFamily: "Cairo_400Regular", color: "rgba(255,255,255,0.43)", textAlign: "right" },
+  downloadHint:       { fontSize: 10, lineHeight: 17, fontFamily: "Cairo_400Regular", color: "rgba(255,255,255,0.48)", textAlign: "right" },
+  downloadRows:       { borderRadius: 13, overflow: "hidden", backgroundColor: "rgba(7,7,13,0.40)" },
+  downloadRow:        { minHeight: 52, flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8, paddingHorizontal: 10, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: "rgba(255,255,255,0.07)" },
+  downloadRowInfo:    { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "flex-end", gap: 8 },
+  downloadTag:        { width: 27, height: 27, borderRadius: 8, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(139,92,246,0.16)", borderWidth: 1, borderColor: "rgba(139,92,246,0.26)" },
+  downloadTagText:    { fontSize: 9, fontFamily: "Cairo_800ExtraBold", color: "#c4b5fd" },
+  downloadRowLabel:   { fontSize: 11, fontFamily: "Cairo_700Bold", color: "rgba(255,255,255,0.78)" },
+  downloadQuality:    { fontSize: 9, fontFamily: "Cairo_400Regular", color: "rgba(255,255,255,0.40)" },
+  downloadAction:     { minWidth: 78, height: 36, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 5, borderRadius: 10, backgroundColor: "rgba(124,58,237,0.82)", borderWidth: 1, borderColor: "rgba(196,181,253,0.26)" },
+  downloadActionText: { fontSize: 10, fontFamily: "Cairo_800ExtraBold", color: "#fff" },
 
   /* ── أزرار الاختيار/التشغيل ── */
   pickBtn:        { paddingHorizontal: 9, paddingVertical: 5, borderRadius: 9, backgroundColor: "rgba(124,58,237,0.18)", borderWidth: 1, borderColor: "rgba(139,92,246,0.35)" },

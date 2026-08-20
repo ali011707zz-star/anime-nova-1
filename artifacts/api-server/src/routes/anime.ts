@@ -15916,10 +15916,17 @@ function cuesToVtt(body: string): string {
 
 router.get("/anime/download-mp4", async (req, res) => {
   const site = String(req.query.site || "").trim().toLowerCase();
-  // Any trusted Nova HLS/video proxy can use this route. A hard-coded list
-  // previously blocked AnimeWitcher and future HLS providers.
-  if (!site) {
-    res.status(400).send("site required");
+  /* Download and playback providers are intentionally separate. Keep this
+     allowlist server-side as the final guard: clients and old cached picker
+     rows must not be able to turn a playback-only source into a download. */
+  const DOWNLOAD_SOURCE_SITES = new Set([
+    "animewitcher", // AW
+    "sanime",       // SA
+    "anslayer",     // AS
+    "anifox",       // FX
+  ]);
+  if (!site || !DOWNLOAD_SOURCE_SITES.has(site)) {
+    res.status(403).send("downloads are available only from AW, SA, AS and FX");
     return;
   }
 
