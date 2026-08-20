@@ -1,6 +1,7 @@
 - [VPS Deployment](vps-deployment.md) — خادم 95.182.93.105 Ubuntu 24.04; Telegram webhook uses self-signed cert uploaded to Telegram API; CHANNEL_ID in .env + DB; token DB-only via config-sync.
 - [VPS-only deployment policy](vps-only-deployment-policy.md) — user explicitly forbids running/installing the app in Replit workspace; it runs only on the VPS via pm2. Replit is code-editing only; verify via SSH+pm2 logs, not local workflows.
 - [VPS manual deploy](vps-manual-deploy-2026-07.md) — app runs only on VPS via pm2, never on Replit; diff files vs VPS working copy before overwriting (VPS had unique unpushed commits); rebuild both frontend+backend after sync.
+- [VPS Nova Control drift](vps-nova-control-drift.md) — admin activation requires route source, built HTML/API, and explicit NOVA_ADMIN_* PM2 passthrough; HTTP 200 alone can still be the normal SPA.
 - [PM2 stale env vars](pm2-stale-env-vars.md) — editing ecosystem.config.cjs/.env on VPS does nothing until pm2 delete+start; caused universal web black-screen bug (broken CF_WORKER_URL never reloaded).
 - [Nova Mobile GitHub builds](nova-mobile-github-builds.md) — user builds APKs through GitHub; sync source to VPS if needed, but never build or install Nova Mobile in Replit.
 - [GitHub push auth](github-push-auth.md) — this workspace's GitHub remote currently rejects pushes because no valid GitHub credential is available; do not force-push or expose tokens.
