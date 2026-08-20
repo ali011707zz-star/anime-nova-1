@@ -29,6 +29,7 @@ module.exports = {
         TELEGRAM_BOT_TOKEN: _e("TELEGRAM_BOT_TOKEN"),
         TELEGRAM_CHANNEL_ID: _e("TELEGRAM_CHANNEL_ID"),
         TELEGRAM_CHAT_ID: _e("TELEGRAM_CHAT_ID"),
+        TELEGRAM_SCHEDULER_ENABLED: _e("TELEGRAM_SCHEDULER_ENABLED"),
         SMTP_HOST: "smtp.gmail.com",
         SMTP_PORT: "587",
         SMTP_USER: _e("SMTP_USER"),
