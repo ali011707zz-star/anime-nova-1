@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Nova Control</title>
+  <style>
+    :root{color-scheme:dark;font-family:system-ui,-apple-system,"Segoe UI",sans-serif;background:#09090f;color:#f6f3ff}
+    *{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at 80% 0,#2b155e 0,transparent 42%),#09090f;min-height:100vh}
+    main{width:min(1080px,calc(100% - 28px));margin:0 auto;padding:42px 0 80px}.panel{background:#12121bde;border:1px solid #ffffff15;border-radius:22px;box-shadow:0 24px 80px #0008;padding:24px}
+    h1{margin:0 0 6px;font-size:25px}h2{font-size:18px;margin:0 0 18px}.muted{color:#aaa6b8;font-size:13px}.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+    input,select,button{font:inherit;border-radius:11px;border:1px solid #ffffff1a;background:#0d0d15;color:#fff;padding:11px 13px}input{width:100%}
+    button{cursor:pointer;background:#6d28d9;border-color:#8b5cf680}button.secondary{background:#252532}button.danger{background:#9f1239}
+    .login{max-width:430px;margin:12vh auto}.field{margin:12px 0}.field label{display:block;margin-bottom:7px;color:#d5d0e2;font-size:13px}
+    .error{color:#fb7185;min-height:22px;margin:10px 0}.hidden{display:none}.toolbar{justify-content:space-between;margin:22px 0 14px}
+    table{width:100%;border-collapse:collapse}th,td{text-align:right;padding:12px 8px;border-bottom:1px solid #ffffff10;font-size:13px}th{color:#aaa6b8;font-weight:500}
+    .badge{padding:4px 8px;border-radius:99px;background:#31205d;color:#d8b4fe}.actions{display:flex;gap:6px;flex-wrap:wrap}.actions button{padding:7px 9px;font-size:12px}
+    @media(max-width:650px){main{padding-top:18px}.panel{padding:17px;border-radius:17px}th:nth-child(1),td:nth-child(1){display:none}table{font-size:12px}}
+  </style>
+</head>
+<body><main>
+  <section id="login" class="panel login">
+    <h1>Nova Control</h1><p class="muted">لوحة الإدارة الخاصة — لا يوجد رابط عام لهذه الصفحة.</p>
+    <form id="loginForm">
+      <div class="field"><label>كلمة المرور</label><input id="password" type="password" autocomplete="current-password" required></div>
+      <div class="field"><label>رمز Google Authenticator</label><input id="code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" required></div>
+      <div id="loginError" class="error"></div><button type="submit">دخول آمن</button>
+    </form>
+  </section>
+  <section id="app" class="panel hidden">
+    <div class="row toolbar"><div><h1>إدارة Anime NOVA</h1><span class="muted">الاشتراكات والصلاحيات من الخادم فقط</span></div><button id="logout" class="secondary">تسجيل الخروج</button></div>
+    <div class="row toolbar"><h2>المستخدمون</h2><div class="row"><input id="search" placeholder="بحث بالبريد أو الاسم" style="width:230px"><button id="refresh" class="secondary">تحديث</button></div></div>
+    <div id="error" class="error"></div><div style="overflow:auto"><table><thead><tr><th>المستخدم</th><th>البريد</th><th>الخطة</th><th>الانتهاء</th><th>إجراء</th></tr></thead><tbody id="users"></tbody></table></div>
+  </section>
+</main>
+<script>
+const base=location.pathname.replace(/\/+$/,""),$=id=>document.getElementById(id);
+async function api(path,opt={}){const r=await fetch(base+"/api"+path,{credentials:"same-origin",headers:{"Content-Type":"application/json",...(opt.headers||{})},...opt});if(r.status===401){showLogin();throw new Error("انتهت الجلسة")}const d=await r.json().catch(()=>({}));if(!r.ok)throw new Error(d.error||"حدث خطأ");return d}
+function showLogin(){$("login").classList.remove("hidden");$("app").classList.add("hidden")}
+function showApp(){$("login").classList.add("hidden");$("app").classList.remove("hidden");loadUsers()}
+async function boot(){try{const d=await api("/me");d.authenticated?showApp():showLogin()}catch{showLogin()}}
+$("loginForm").onsubmit=async e=>{e.preventDefault();$("loginError").textContent="";try{await api("/login",{method:"POST",body:JSON.stringify({password:$("password").value,code:$("code").value})});$("password").value="";$("code").value="";showApp()}catch(x){$("loginError").textContent=x.message}};
+$("logout").onclick=async()=>{await api("/logout",{method:"POST"});showLogin()};
+async function loadUsers(){try{const d=await api("/admin/users?q="+encodeURIComponent($("search").value));$("users").innerHTML=d.users.map(u=>`<tr><td>${esc(u.displayName||u.username||"—")}</td><td>${esc(u.email)}</td><td><span class="badge">${esc(u.plan)}</span></td><td>${u.expiresAt?new Date(u.expiresAt).toLocaleDateString("ar-SA"):"—"}</td><td class="actions"><button data-id="${u.id}" data-plan="premium">شهر</button><button class="secondary" data-id="${u.id}" data-plan="free">إلغاء</button></td></tr>`).join("")||"<tr><td colspan=5>لا يوجد مستخدمون</td></tr>"}catch(x){$("error").textContent=x.message}}
+function esc(s){return String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]))}
+$("users").onclick=async e=>{const b=e.target.closest("button[data-id]");if(!b)return;try{await api("/admin/users/"+b.dataset.id+"/plan",{method:"PATCH",body:JSON.stringify({plan:b.dataset.plan})});loadUsers()}catch(x){$("error").textContent=x.message}};
+$("refresh").onclick=loadUsers;$("search").onkeydown=e=>{if(e.key==="Enter")loadUsers()};boot();
+</script></body></html>

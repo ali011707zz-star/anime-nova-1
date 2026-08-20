@@ -19,6 +19,7 @@ import { setupSession, registerEmailAuthRoutes, registerGoogleAuthRoutes, regist
 import sitemapRouter from "./routes/sitemap.js";
 import crashReportRouter from "./routes/crashReport.js";
 import hlsProxyRouter from "./routes/hlsProxy.js";
+import { registerWebAdminRoutes } from "./routes/webAdmin.js";
 import {
   validateAnonToken,
   validateMobileAppIdentity,
@@ -151,6 +152,7 @@ export async function createApp(): Promise<Express> {
   registerEmailAuthRoutes(app);
   registerGoogleAuthRoutes(app);
   registerGithubAuthRoutes(app);
+  registerWebAdminRoutes(app);
 
   // ── توكن المصادقة (يجب أن يسبق Middleware الحماية) ──
   app.use(authTokenRouter);

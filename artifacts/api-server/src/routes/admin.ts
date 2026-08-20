@@ -5,6 +5,7 @@ import { sbSelect, sbPatch, sbDelete } from "../lib/supabaseClient.js";
 import { SETUP_SQL, getTableStatus } from "../lib/supabaseMigrate.js";
 import { setDbConfig, clearDbConfigCache } from "../lib/dbConfig.js";
 import { checkAppSecret } from "../lib/security.js";
+import { isWebAdmin } from "./webAdmin.js";
 
 // دالة مساعدة للتحقق من secret أو صلاحيات الأدمن
 async function hasRelayAccess(req: Request): Promise<boolean> {
@@ -15,6 +16,7 @@ async function hasRelayAccess(req: Request): Promise<boolean> {
 const router = Router();
 
 async function isAdmin(req: Request): Promise<boolean> {
+  if (isWebAdmin(req)) return true;
   const eu = await getEmailUser(req);
   return eu?.plan === "admin";
 }
