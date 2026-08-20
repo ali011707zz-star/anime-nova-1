@@ -34,7 +34,7 @@
 </main>
 <script>
 const base=location.pathname.replace(/\/+$/,""),$=id=>document.getElementById(id);
-async function api(path,opt={}){const url=path.startsWith("/api/")?path:base+"/api"+path;const r=await fetch(url,{credentials:"same-origin",headers:{"Content-Type":"application/json",...(opt.headers||{})},...opt});if(r.status===401){showLogin();throw new Error("انتهت الجلسة")}const d=await r.json().catch(()=>({}));if(!r.ok)throw new Error(d.error||"حدث خطأ");return d}
+async function api(path,opt={}){const url=path.startsWith("/api/")?path:base+"/api"+path;const r=await fetch(url,{credentials:"same-origin",headers:{"Content-Type":"application/json",...(opt.headers||{})},...opt});const d=await r.json().catch(()=>({}));if(r.status===401&&path!=="/login"){showLogin();throw new Error("انتهت الجلسة")}if(!r.ok)throw new Error(d.error||"حدث خطأ");return d}
 function showLogin(){$("login").classList.remove("hidden");$("app").classList.add("hidden")}
 function showApp(){$("login").classList.add("hidden");$("app").classList.remove("hidden");loadUsers()}
 async function boot(){try{const d=await api("/me");d.authenticated?showApp():showLogin()}catch{showLogin()}}
