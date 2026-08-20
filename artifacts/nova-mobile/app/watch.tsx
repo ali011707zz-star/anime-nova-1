@@ -24,6 +24,7 @@ import {
 import * as ScreenOrientation from "expo-screen-orientation";
 import { openIsolatedPlayer } from "@/lib/isolatedPlayer";
 import { ensureDownloadAllowed, ensureWatchAccess, getAdState } from "@/utils/adPolicy";
+import { RewardedAdPrompt } from "@/components/RewardedAdPrompt";
 
 /* ── Types ── */
 type Quality    = "1080p FHD" | "720p HD" | "360p SD";
@@ -1790,6 +1791,7 @@ export default function WatchScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: "#07070d" }}>
+      <RewardedAdPrompt />
       {coverUrl ? <Image source={{ uri: coverUrl }} style={[StyleSheet.absoluteFill, { opacity: 0.08 }]} blurRadius={Platform.OS === "ios" ? 28 : 10} resizeMode="cover" /> : null}
       <LinearGradient colors={["rgba(7,7,13,0.97)", "rgba(7,7,13,0.88)"]} style={StyleSheet.absoluteFill} />
 

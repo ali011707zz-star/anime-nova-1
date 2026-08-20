@@ -1,5 +1,4 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { Alert } from "react-native";
 import { getBaseUrl } from "./baseUrl";
 import { secureFetch } from "./secureApi";
 import { showRewardedTestAd } from "./rewardedAd";
@@ -16,6 +15,31 @@ export type AdState = {
   watchAccessUntil: number | null;
   watchNeedsReward: boolean;
 };
+
+type RewardPromptListener = (
+  kind: RewardKind,
+  confirm: () => Promise<boolean>,
+  resolve: (value: boolean) => void,
+) => void;
+
+const rewardPromptListeners = new Set<RewardPromptListener>();
+
+export function subscribeRewardPrompt(listener: RewardPromptListener): () => void {
+  rewardPromptListeners.add(listener);
+  return () => {
+    rewardPromptListeners.delete(listener);
+  };
+}
+
+function requestRewardPrompt(
+  kind: RewardKind,
+  confirm: () => Promise<boolean>,
+): Promise<boolean> {
+  if (!rewardPromptListeners.size) return Promise.resolve(false);
+  return new Promise((resolve) => {
+    rewardPromptListeners.forEach((listener) => listener(kind, confirm, resolve));
+  });
+}
 
 let deviceIdPromise: Promise<string> | null = null;
 const listeners = new Set<(count: number) => void>();
@@ -39,6 +63,10 @@ async function adFetch(path: string, init: RequestInit = {}): Promise<Response> 
     ...init,
     headers: { "Content-Type": "application/json", "X-Nova-Device": device, ...(init.headers || {}) },
   });
+}
+
+function isJsonResponse(response: Response): boolean {
+  return (response.headers.get("content-type") || "").toLowerCase().includes("application/json");
 }
 
 export async function getAdState(): Promise<AdState | null> {
@@ -93,18 +121,10 @@ async function completeReward(kind: RewardKind): Promise<boolean> {
 export async function ensureDownloadAllowed(): Promise<boolean> {
   try {
     const response = await adFetch("/api/ads/download-start", { method: "POST", body: "{}" });
-    if (response.ok) return true;
+    if (response.ok && isJsonResponse(response)) return true;
     const body = await response.clone().json().catch(() => ({}));
     if (!body.needsReward) return false;
-    return new Promise((resolve) => {
-      Alert.alert("متابعة التنزيل", "شاهد إعلانًا قصيرًا لمتابعة تنزيل الحلقات", [
-        { text: "إلغاء", style: "cancel", onPress: () => resolve(false) },
-        {
-          text: "مشاهدة الإعلان",
-          onPress: () => { void completeReward("download").then(resolve); },
-        },
-      ], { cancelable: true, onDismiss: () => resolve(false) });
-    });
+    return requestRewardPrompt("download", () => completeReward("download"));
   } catch {
     return false;
   }
@@ -129,23 +149,10 @@ export async function recordSuccessfulDownload(animeId: number, ep: number): Pro
 export async function ensureWatchAccess(): Promise<boolean> {
   try {
     const response = await adFetch("/api/ads/watch-start", { method: "POST", body: "{}" });
-    if (response.ok) return true;
+    if (response.ok && isJsonResponse(response)) return true;
     const body = await response.clone().json().catch(() => ({}));
     if (!body.needsReward) return false;
-    return new Promise((resolve) => {
-      Alert.alert(
-        "فتح السيرفرات",
-        "شاهد إعلانًا قصيرًا لفتح السيرفرات ومشاهدة الحلقة لمدة 60 دقيقة",
-        [
-          { text: "إلغاء", style: "cancel", onPress: () => resolve(false) },
-          {
-            text: "مشاهدة الإعلان",
-            onPress: () => { void completeReward("watch").then(resolve); },
-          },
-        ],
-        { cancelable: true, onDismiss: () => resolve(false) },
-      );
-    });
+    return requestRewardPrompt("watch", () => completeReward("watch"));
   } catch {
     return false;
   }
