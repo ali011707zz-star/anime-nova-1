@@ -2,7 +2,7 @@ import { Ionicons } from "@expo/vector-icons";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator, FlatList, KeyboardAvoidingView, Platform,
-  Pressable, StyleSheet, Text, TextInput, View,
+  Image, Pressable, StyleSheet, Text, TextInput, View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter } from "expo-router";
@@ -14,6 +14,7 @@ interface Comment {
   id: string;
   userId: string;
   username: string;
+  displayName?: string | null;
   avatarUrl: string | null;
   text: string;
   likes: number;
@@ -36,9 +37,13 @@ function timeAgo(iso: string) {
   return new Date(iso).toLocaleDateString("ar-EG");
 }
 
-function Avatar({ username }: { username: string }) {
+function Avatar({ username, avatarUrl }: { username: string; avatarUrl?: string | null }) {
+  const [imageFailed, setImageFailed] = useState(false);
   const char = (username || "م")[0].toUpperCase();
   const hue = (username.charCodeAt(0) * 37) % 360;
+  if (avatarUrl && !imageFailed) {
+    return <Image source={{ uri: avatarUrl }} onError={() => setImageFailed(true)} style={s.avatar} />;
+  }
   return (
     <View style={[s.avatar, { backgroundColor: `hsl(${hue},55%,35%)` }]}>
       <Text style={s.avatarText}>{char}</Text>
@@ -106,7 +111,9 @@ export default function CommentsPage() {
     try {
       const body: any = {
         text: text.trim(),
-        username: myUsername || myDisplayName || "مستخدم",
+        username: myDisplayName || myUsername || "مستخدم",
+        userHandle: myUsername || null,
+        avatarUrl: null,
         animeType: params.type || (tmdbId ? "animation" : "anime"),
       };
       if (animeId) body.animeId = animeId;
@@ -163,15 +170,18 @@ export default function CommentsPage() {
   const renderComment = (c: Comment, isReply = false) => (
     <View key={c.id} style={[s.commentWrap, isReply && s.replyWrap]}>
       {isReply && <View style={s.replyLine} />}
-      <Avatar username={c.username} />
+      <Avatar username={c.displayName || c.username} avatarUrl={c.avatarUrl} />
       <View style={{ flex: 1, gap: 4 }}>
         <View style={s.commentMeta}>
-          <Text style={s.commentUser}>{c.username}</Text>
+          <Text style={s.commentUser}>{c.displayName || c.username}</Text>
+          {c.username && c.displayName && c.username !== c.displayName && (
+            <Text style={s.commentHandle}>@{c.username}</Text>
+          )}
           {c.replyToUsername && <Text style={s.replyTag}>↩ {c.replyToUsername}</Text>}
           <Text style={s.commentTime}>{timeAgo(c.createdAt)}</Text>
         </View>
         <Text style={s.commentText}>{c.text}</Text>
-        <View style={s.commentActions}>
+          <View style={s.commentActions}>
           <Pressable onPress={() => toggleLike(c)} style={s.actionBtn} disabled={liking.has(c.id)}>
             <Ionicons name="heart" size={14} color={c.liked ? "#f87171" : "rgba(255,255,255,0.3)"} />
             {c.likes > 0 && <Text style={[s.actionBtnText, c.liked && { color: "#f87171" }]}>{c.likes}</Text>}
@@ -320,7 +330,7 @@ const s = StyleSheet.create({
   emptyText: { fontSize: 16, fontFamily: "Cairo_700Bold", color: "rgba(255,255,255,0.4)" },
   emptySubtext: { fontSize: 12, fontFamily: "Cairo_400Regular", color: "rgba(255,255,255,0.2)" },
   listContent: { padding: 16, gap: 14, paddingBottom: 12 },
-  commentWrap: { flexDirection: "row", gap: 10 },
+  commentWrap: { flexDirection: "row", gap: 10, padding: 12, borderRadius: 16, backgroundColor: "rgba(255,255,255,0.035)", borderWidth: 1, borderColor: "rgba(255,255,255,0.06)" },
   replyWrap: { marginTop: 10, marginRight: 12 },
   replyLine: {
     position: "absolute", left: -8, top: 0, bottom: 0,
@@ -333,6 +343,7 @@ const s = StyleSheet.create({
   avatarText: { fontSize: 13, fontFamily: "Cairo_800ExtraBold", color: "#fff" },
   commentMeta: { flexDirection: "row", alignItems: "center", gap: 6, flexWrap: "wrap" },
   commentUser: { fontSize: 12, fontFamily: "Cairo_800ExtraBold", color: "#e2e2e2" },
+  commentHandle: { fontSize: 10, color: "rgba(196,181,253,0.58)", fontFamily: "Cairo_400Regular" },
   replyTag: { fontSize: 10, color: "rgba(139,92,246,0.7)", fontFamily: "Cairo_700Bold" },
   commentTime: { fontSize: 10, color: "rgba(255,255,255,0.2)", fontFamily: "Cairo_400Regular" },
   commentText: {

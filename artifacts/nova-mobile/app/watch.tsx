@@ -1838,6 +1838,16 @@ export default function WatchScreen() {
 
           {!availabilityDone && (
             <View style={d.availabilityState}>
+              <Pressable
+                onPress={handleBack}
+                hitSlop={10}
+                style={d.scanExitBtn}
+                accessibilityRole="button"
+                accessibilityLabel="الخروج إلى السيرفرات"
+              >
+                <Ionicons name="close" size={16} color="rgba(255,255,255,0.72)" />
+                <Text style={d.scanExitText}>خروج</Text>
+              </Pressable>
               <View style={d.availabilityGifWrap}>
                 <ServerScanGif />
                 <LinearGradient
@@ -2047,6 +2057,8 @@ const d = StyleSheet.create({
   serverScanAnimation: { width: 110, height: 110, borderRadius: 55, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(124,58,237,0.14)", borderWidth: 1, borderColor: "rgba(167,139,250,0.30)" },
   serverScanDots: { flexDirection: "row", gap: 7, marginTop: 8 },
   serverScanDot: { width: 7, height: 7, borderRadius: 4 },
+  scanExitBtn: { alignSelf: "flex-end", flexDirection: "row", alignItems: "center", gap: 5, paddingHorizontal: 12, paddingVertical: 7, borderRadius: 12, backgroundColor: "rgba(255,255,255,0.07)", borderWidth: 1, borderColor: "rgba(255,255,255,0.12)", marginBottom: 12 },
+  scanExitText: { color: "rgba(255,255,255,0.72)", fontFamily: "Cairo_700Bold", fontSize: 11 },
   availabilityHeadline: { fontSize: 15, fontFamily: "Cairo_800ExtraBold", color: "rgba(255,255,255,0.85)", textAlign: "center", lineHeight: 24 },
   availabilityText: { fontSize: 12, fontFamily: "Cairo_400Regular", color: "rgba(255,255,255,0.42)", textAlign: "center" },
   availabilityEmpty: { alignItems: "center", justifyContent: "center", gap: 10, paddingVertical: 42, paddingHorizontal: 18 },

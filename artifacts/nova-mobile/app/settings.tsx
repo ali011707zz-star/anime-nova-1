@@ -4,7 +4,7 @@ import { LinearGradient } from "expo-linear-gradient";
 import React, { useState, useEffect, useCallback } from "react";
 import {
   Alert, KeyboardAvoidingView, Linking, Modal, Platform, Pressable, ScrollView,
-  Share, StyleSheet, Switch, Text, TextInput, View, ActivityIndicator,
+  Image, Share, StyleSheet, Switch, Text, TextInput, View, ActivityIndicator,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -275,7 +275,7 @@ function DangerRow({ label, sub, onPress }: { label: string; sub?: string; onPre
 
 /* ══════════════════════ AUTH TYPES ══════════════════════ */
 type AuthFlow = "login" | "signup" | "verify";
-interface MobileUser { email: string; displayName: string; id: string; username?: string; avatarColor?: number }
+interface MobileUser { email: string; displayName: string; id: string; username?: string; avatarColor?: number; profileImageUrl?: string | null }
 const AUTH_KEY = "nova-mobile-user";
 
 /* ── Auth Sheet ── */
@@ -973,6 +973,16 @@ export default function SettingsScreen() {
 
   useEffect(() => {
     AsyncStorage.getItem(AUTH_KEY).then(v => { if (v) { try { setCurrentUser(JSON.parse(v)); } catch {} } });
+    fetch(`${getBaseUrl()}/api/auth/me`, { credentials: "include" })
+      .then(r => r.ok ? r.json() : null)
+      .then((d: any) => d && setCurrentUser(prev => prev ? {
+        ...prev,
+        displayName: d.displayName || d.display_name || prev.displayName,
+        username: d.username || prev.username,
+        avatarColor: d.avatarColor ?? d.avatar_color ?? prev.avatarColor,
+        profileImageUrl: d.profileImageUrl || d.profile_image_custom || d.profile_image_url || prev.profileImageUrl || null,
+      } : prev))
+      .catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -1092,9 +1102,13 @@ export default function SettingsScreen() {
             <Pressable onPress={() => router.push("/profile" as any)} style={ts.profileCard}>
               {/* Avatar */}
               <View style={[ts.profileAvatar, { backgroundColor: (AVATAR_COLORS[(currentUser.avatarColor ?? 0) % AVATAR_COLORS.length]) + "28", borderColor: (AVATAR_COLORS[(currentUser.avatarColor ?? 0) % AVATAR_COLORS.length]) + "80" }]}>
-                <Text style={{ fontSize: 22, fontFamily: "Cairo_800ExtraBold", color: AVATAR_COLORS[(currentUser.avatarColor ?? 0) % AVATAR_COLORS.length] }}>
-                  {currentUser.displayName.charAt(0).toUpperCase()}
-                </Text>
+                {currentUser.profileImageUrl ? (
+                  <Image source={{ uri: currentUser.profileImageUrl }} style={ts.profileAvatarImage} />
+                ) : (
+                  <Text style={{ fontSize: 22, fontFamily: "Cairo_800ExtraBold", color: AVATAR_COLORS[(currentUser.avatarColor ?? 0) % AVATAR_COLORS.length] }}>
+                    {currentUser.displayName.charAt(0).toUpperCase()}
+                  </Text>
+                )}
               </View>
               {/* Info */}
               <View style={{ flex: 1, alignItems: "flex-end" }}>
@@ -1456,6 +1470,7 @@ const ts = StyleSheet.create({
   /* Profile */
   profileCard: { flexDirection: "row", alignItems: "center", gap: 14, borderRadius: 20, padding: 16, backgroundColor: "rgba(17,17,22,0.95)", borderWidth: 1, borderColor: "rgba(255,255,255,0.07)" },
   profileAvatar: { width: 56, height: 56, borderRadius: 16, backgroundColor: "rgba(255,255,255,0.05)", borderWidth: 1, borderColor: "rgba(255,255,255,0.10)", alignItems: "center", justifyContent: "center" },
+  profileAvatarImage: { width: "100%", height: "100%", borderRadius: 15 },
   profileLoginTitle: { fontSize: 14, fontFamily: "Cairo_800ExtraBold", color: "rgba(255,255,255,0.8)", textAlign: "right" },
   profileLoginSub: { fontSize: 11, fontFamily: "Cairo_400Regular", color: "rgba(255,255,255,0.35)", marginTop: 2, textAlign: "right" },
   profileLoginBtn: { flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 12, backgroundColor: "rgba(139,92,246,0.18)", borderWidth: 1, borderColor: "rgba(139,92,246,0.30)" },
