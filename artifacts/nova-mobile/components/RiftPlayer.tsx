@@ -14,7 +14,7 @@ import { VolumeManager } from "../lib/volume-manager";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator, Alert, Animated, Dimensions, Easing, I18nManager, Linking, Platform,
-  PanResponder, Pressable, ScrollView, StyleSheet, Text, View,
+  BackHandler, PanResponder, Pressable, ScrollView, StyleSheet, Text, View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -419,6 +419,17 @@ export function RiftPlayer({
   onError,
 }: Props) {
   const insets = useSafeAreaInsets();
+
+  /* أثناء فحص المصادر، زر الرجوع في الهاتف يجب أن يعيد المستخدم إلى
+     منتقي السيرفرات داخل نفس شاشة الحلقة، لا إلى صفحة الحلقات. */
+  useEffect(() => {
+    if (Platform.OS !== "android") return;
+    const subscription = BackHandler.addEventListener("hardwareBackPress", () => {
+      onBack();
+      return true;
+    });
+    return () => subscription.remove();
+  }, [onBack]);
 
   /* ─── Source ─── */
   const playableSources = useMemo(() => {
@@ -2159,7 +2170,16 @@ export function RiftPlayer({
 
       {/* ── Auto-cycling: silent "trying next source" indicator ── */}
       {isAutoCycling && (
-        <View style={s.errorWrap} pointerEvents="none">
+        <View style={s.errorWrap} pointerEvents="box-none">
+          <Pressable
+            onPress={onBack}
+            style={[s.autoCycleClose, { top: insets.top + 14 }]}
+            hitSlop={10}
+            accessibilityRole="button"
+            accessibilityLabel="العودة إلى السيرفرات"
+          >
+            <Ionicons name="close" size={20} color="rgba(255,255,255,0.82)" />
+          </Pressable>
           <SpinRing size={44} />
           <Text style={[s.errorTitle, { color: "rgba(167,139,250,0.9)", marginTop: 12 }]}>
             {isWaitingForSources
@@ -2994,6 +3014,7 @@ const s = StyleSheet.create({
 
   /* Spinner — top area of screen */
   errorWrap:   { ...StyleSheet.absoluteFillObject, alignItems: "center", justifyContent: "center", gap: 14, zIndex: 20, backgroundColor: "rgba(0,0,0,0.92)" },
+  autoCycleClose: { position: "absolute", right: 16, width: 40, height: 40, borderRadius: 20, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(255,255,255,0.08)", borderWidth: 1, borderColor: "rgba(255,255,255,0.16)", zIndex: 30 },
   errorIconBox: { width: 68, height: 68, borderRadius: 18, backgroundColor: "rgba(239,68,68,0.10)", borderWidth: 1, borderColor: "rgba(239,68,68,0.25)", alignItems: "center", justifyContent: "center" },
   errorTitle:  { color: "rgba(255,255,255,0.85)", fontSize: 15, fontFamily: "Cairo_700Bold" },
   errorBtn:    { flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: "rgba(239,68,68,0.15)", borderRadius: 20, paddingHorizontal: 22, paddingVertical: 11, borderWidth: 1, borderColor: "rgba(239,68,68,0.35)" },

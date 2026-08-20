@@ -53,7 +53,7 @@ export default function AppOnlyEpisodeDialog({
                 event.stopPropagation();
                 onClose();
               }}
-              className="relative z-10 absolute left-4 top-4 flex h-9 w-9 items-center justify-center rounded-xl border border-white/10 bg-white/5 text-white/55 transition-colors hover:bg-white/10 hover:text-white active:scale-90"
+              className="absolute left-4 right-auto top-4 z-10 flex h-9 w-9 items-center justify-center rounded-xl border border-white/10 bg-white/5 text-white/55 transition-colors hover:bg-white/10 hover:text-white active:scale-90"
               aria-label="إغلاق التنبيه"
               data-testid="button-close-app-only-dialog"
             >

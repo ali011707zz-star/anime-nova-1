@@ -134,7 +134,7 @@ export default function CommentsPage() {
         }
         setText(""); setReplyTo(null);
       } else if (r.status === 401) {
-        setPostError("يجب تسجيل الدخول من تطبيق الويب لإضافة تعليق");
+        setPostError("يلزم تسجيل حساب في التطبيق لإضافة تعليق");
       } else {
         const d = await r.json().catch(() => ({}));
         setPostError(d.error || "حدث خطأ أثناء الإرسال");
