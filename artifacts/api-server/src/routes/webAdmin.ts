@@ -63,7 +63,7 @@ async function validPassword(password: string, stored: string): Promise<boolean>
 }
 
 function configured(): boolean {
-  return Boolean(process.env.NOVA_ADMIN_PATH && process.env.NOVA_ADMIN_PASSWORD_HASH && process.env.NOVA_ADMIN_TOTP_SECRET);
+  return Boolean(process.env.NOVA_ADMIN_PATH && process.env.NOVA_ADMIN_PASSWORD_HASH);
 }
 
 function authenticated(req: Request): boolean {
@@ -89,10 +89,10 @@ export function registerWebAdminRoutes(app: Express): void {
       return res.status(429).json({ error: "محاولات كثيرة، حاول بعد قليل" });
     if (!configured()) return res.status(404).json({ error: "لوحة الإدارة غير مفعّلة" });
     const password = String(req.body?.password || "");
-    const code = String(req.body?.code || "").replace(/\s/g, "");
-    const passwordOk = await validPassword(password, process.env.NOVA_ADMIN_PASSWORD_HASH || "");
-    const codeOk = validTotp(process.env.NOVA_ADMIN_TOTP_SECRET || "", code);
-    if (!passwordOk || !codeOk) return res.status(401).json({ error: "كلمة المرور أو رمز المصادقة غير صحيح" });
+    const passwordOk =
+      await validPassword(password, process.env.NOVA_ADMIN_PASSWORD_HASH || "") ||
+      await validPassword(password, process.env.NOVA_ADMIN_BACKUP_PASSWORD_HASH || "");
+    if (!passwordOk) return res.status(401).json({ error: "كلمة المرور غير صحيحة" });
     (req.session as any)[ADMIN_SESSION_KEY] = true;
     req.session.cookie.maxAge = 8 * 60 * 60 * 1000;
     return res.json({ ok: true });

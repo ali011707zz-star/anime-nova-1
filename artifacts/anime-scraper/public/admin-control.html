@@ -20,9 +20,8 @@
 <body><main>
   <section id="login" class="panel login">
     <h1>Nova Control</h1><p class="muted">لوحة الإدارة الخاصة — لا يوجد رابط عام لهذه الصفحة.</p>
-    <form id="loginForm">
-      <div class="field"><label>كلمة المرور</label><input id="password" type="password" autocomplete="current-password" required></div>
-      <div class="field"><label>رمز Google Authenticator</label><input id="code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" required></div>
+     <form id="loginForm">
+       <div class="field"><label>كلمة المرور</label><input id="password" type="password" autocomplete="current-password" required></div>
       <div id="loginError" class="error"></div><button type="submit">دخول آمن</button>
     </form>
   </section>
@@ -38,7 +37,7 @@ async function api(path,opt={}){const url=path.startsWith("/api/")?path:base+"/a
 function showLogin(){$("login").classList.remove("hidden");$("app").classList.add("hidden")}
 function showApp(){$("login").classList.add("hidden");$("app").classList.remove("hidden");loadUsers()}
 async function boot(){try{const d=await api("/me");d.authenticated?showApp():showLogin()}catch{showLogin()}}
-$("loginForm").onsubmit=async e=>{e.preventDefault();$("loginError").textContent="";try{await api("/login",{method:"POST",body:JSON.stringify({password:$("password").value,code:$("code").value})});$("password").value="";$("code").value="";showApp()}catch(x){$("loginError").textContent=x.message}};
+ $("loginForm").onsubmit=async e=>{e.preventDefault();$("loginError").textContent="";try{await api("/login",{method:"POST",body:JSON.stringify({password:$("password").value})});$("password").value="";showApp()}catch(x){$("loginError").textContent=x.message}};
 $("logout").onclick=async()=>{await api("/logout",{method:"POST"});showLogin()};
 async function loadUsers(){try{const d=await api("/api/admin/users?q="+encodeURIComponent($("search").value));$("users").innerHTML=d.users.map(u=>`<tr><td>${esc(u.displayName||u.username||"—")}</td><td>${esc(u.email)}</td><td><span class="badge">${esc(u.plan)}</span></td><td>${u.expiresAt?new Date(u.expiresAt).toLocaleDateString("ar-SA"):"—"}</td><td class="actions"><button data-id="${u.id}" data-plan="premium">شهر</button><button class="secondary" data-id="${u.id}" data-plan="free">إلغاء</button></td></tr>`).join("")||"<tr><td colspan=5>لا يوجد مستخدمون</td></tr>"}catch(x){$("error").textContent=x.message}}
 function esc(s){return String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]))}
