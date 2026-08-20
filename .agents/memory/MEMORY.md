@@ -79,6 +79,7 @@
 - [Canonical episode totals](canonical-episode-totals.md) — episode lists must use the maximum confirmed total across AniList, Jikan, and the latest source catalog; cache keys include anime identity.
 - [Mobile watch loading fallback](mobile-watch-loading-fallback.md) — every render branch in the watch/server-scan flow must import its fallback components; missing ActivityIndicator caused an immediate ErrorBoundary crash.
 - [AnimeWitcher quality preservation](aw-quality-dedup-2026-08.md) — deduplicate AW by provider+quality+URL and classify quality from all row fields, or picker tiers disappear.
+- [Kawaii current public API](kawaii-current-api.md) — current source retrieval is /api/miruro with a nested data payload; /api/watch now returns APP_KEY_MISSING.
 - [SAnime router registration](sanime-router-registration.md) — /api/sanime can return SPA HTML with 200 when the route file is not mounted in the main Express router.
 - [Download API CORS headers](download-api-cors-headers.md) — provider Origin/Referer headers must not be forwarded to Nova API download routes, or global CORS rejects HLS downloads.
 - [Supabase REST schema drift](supabase-rest-schema-drift.md) — local DATABASE_URL can expose a different schema than production PostgREST; verify the REST project before relying on columns.
