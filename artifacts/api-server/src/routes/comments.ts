@@ -18,13 +18,14 @@ async function getUserId(req: Request): Promise<string | null> {
   return null;
 }
 
-function mapRow(r: any, liked: boolean) {
+function mapRow(r: any, liked: boolean, profile?: any) {
   return {
     id:              r.id,
     userId:          r.user_id,
     username:        r.username,
+    displayName:     profile?.display_name || null,
     userHandle:      r.user_handle  || null,
-    avatarUrl:       r.avatar_url   || null,
+    avatarUrl:       profile?.profile_image_custom || r.avatar_url || null,
     animeId:         r.anime_id     ?? null,
     tmdbId:          r.tmdb_id      ?? null,
     animeType:       r.anime_type   || "anime",
@@ -74,7 +75,13 @@ router.get("/comments", async (req: Request, res: Response) => {
       likedIds = new Set(likeRows.map((l: any) => l.comment_id));
     }
 
-    const result = page.map((r) => mapRow(r, likedIds.has(r.id)));
+    const userIds = Array.from(new Set(page.map((r) => r.user_id).filter(Boolean)));
+    let profiles = new Map<string, any>();
+    if (userIds.length > 0) {
+      const users = await sbSelect("users", { id: `in.(${userIds.join(",")})` }, { limit: userIds.length });
+      profiles = new Map(users.map((u: any) => [String(u.id), u]));
+    }
+    const result = page.map((r) => mapRow(r, likedIds.has(r.id), profiles.get(String(r.user_id))));
     return res.json({ comments: result, total: result.length });
   } catch (err) {
     console.error("[comments] GET:", err);
