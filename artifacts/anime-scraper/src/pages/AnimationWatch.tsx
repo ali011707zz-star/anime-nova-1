@@ -2,6 +2,7 @@ import { API_BASE } from "@/lib/apiBase";
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { AnimeMascot } from "@/components/AnimeMascot";
 import { getAppToken } from "@/lib/appToken";
+import { startWebWatchAnalytics } from "@/lib/analytics";
 import { useLocation } from "wouter";
 import {
   ChevronRight, Play, X,
@@ -299,6 +300,15 @@ export default function AnimationWatch() {
   const [sseDone, setSseDone]   = useState(false);
   const [episodes, setEpisodes] = useState<EpisodeItem[]>([]);
   const [showEpList, setShowEpList] = useState(false);
+
+  useEffect(() => {
+    if (!tmdbId) return;
+    return startWebWatchAnalytics({
+      animeId: tmdbId,
+      episode: ep,
+      title: displayTitle,
+    });
+  }, [tmdbId, ep, displayTitle]);
 
   /* ── User prefs (read once on mount) ── */
   const prefAutoplay = useRef(false); // التشغيل يبدأ بعد اختيار المستخدم للمصدر

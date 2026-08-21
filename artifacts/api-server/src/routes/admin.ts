@@ -387,16 +387,50 @@ router.get("/admin/stats", async (req: Request, res: Response) => {
     return res.status(401).json({ error: "غير مصرّح" });
 
   try {
-    const [allUsers, cacheRows, entitlements] = await Promise.all([
+    const [allUsers, cacheRows, entitlements, sessions, episodeViews, tableStatus] = await Promise.all([
       sbSelect("users", { select: "id" }, { limit: 1000 }),
       sbSelect("source_cache", { select: "cache_key" }, { limit: 1000 }),
       loadEntitlements(),
+      sbSelect<any>("analytics_sessions", { last_seen_at: `gte.${new Date(Date.now() - 5 * 60_000).toISOString()}` }, { limit: 10000 }),
+      sbSelect<any>("analytics_episode_views", { order: "viewed_at.desc" }, { limit: 10000 }),
+      getTableStatus(),
     ]);
+
+    const byPlatform = (platform: string) => sessions.filter((s) => s.platform === platform);
+    const viewsByPlatform = (platform: string) => episodeViews.filter((v) => v.platform === platform);
+    const uniqueActiveUsers = (rows: any[]) => new Set(
+      rows.map((s) => s.user_id ? `user:${s.user_id}` : `visitor:${s.platform}:${s.visitor_id}`),
+    ).size;
+    const dayAgo = Date.now() - 24 * 60 * 60_000;
+    const viewsToday = episodeViews.filter((v) => new Date(v.viewed_at).getTime() >= dayAgo);
+    const topMap = new Map<string, { title: string; episode: number; views: number }>();
+    for (const row of episodeViews) {
+      const key = `${row.anime_id}:${row.episode_number}`;
+      const current = topMap.get(key) || { title: row.anime_title || row.anime_id, episode: Number(row.episode_number), views: 0 };
+      current.views++;
+      topMap.set(key, current);
+    }
 
     return res.json({
       totalUsers:   allUsers.length,
       premiumUsers: [...entitlements.values()].filter((v) => v.plan === "premium").length,
       cacheEntries: cacheRows.length,
+      analytics: {
+        activeUsers: uniqueActiveUsers(sessions),
+        activeWeb: uniqueActiveUsers(byPlatform("web")),
+        activeMobile: uniqueActiveUsers(byPlatform("mobile")),
+        watchingNow: sessions.filter((s) => s.anime_id && s.episode_number !== null).length,
+        watchingWeb: byPlatform("web").filter((s) => s.anime_id).length,
+        watchingMobile: byPlatform("mobile").filter((s) => s.anime_id).length,
+        episodeViews: episodeViews.length,
+        episodeViewsToday: viewsToday.length,
+        episodeViewsWeb: viewsByPlatform("web").length,
+        episodeViewsMobile: viewsByPlatform("mobile").length,
+        topEpisodes: [...topMap.values()].sort((a, b) => b.views - a.views).slice(0, 5),
+        lastEventAt: episodeViews[0]?.viewed_at || null,
+        sampledLimit: 10000,
+        ready: tableStatus.analytics_sessions === true && tableStatus.analytics_episode_views === true,
+      },
     });
   } catch (err) {
     return res.status(500).json({ error: "خطأ في الخادم" });

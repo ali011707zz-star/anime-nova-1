@@ -20,6 +20,7 @@ import sitemapRouter from "./routes/sitemap.js";
 import crashReportRouter from "./routes/crashReport.js";
 import hlsProxyRouter from "./routes/hlsProxy.js";
 import { registerWebAdminRoutes } from "./routes/webAdmin.js";
+import analyticsRouter from "./routes/analytics.js";
 import {
   validateAnonToken,
   validateMobileAppIdentity,
@@ -235,6 +236,7 @@ export async function createApp(): Promise<Express> {
   app.use("/api", notificationsRouter);
   app.use("/api", userdataRouter);
   app.use("/api", commentsRouter);
+  app.use("/api", analyticsRouter);
   app.use("/api", adminRouter);
   app.use("/api", dbRelayRouter);
   app.use(reportRouter);

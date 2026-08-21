@@ -13,6 +13,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { getBaseUrl } from "@/utils/api";
 import { secureFetch, secureStreamFetch } from "@/utils/secureApi";
+import { startMobileWatchAnalytics } from "@/utils/analytics";
 import * as ScreenOrientation from "expo-screen-orientation";
 
 const { width: W, height: H } = Dimensions.get("window");
@@ -336,6 +337,15 @@ export default function AnimationWatchScreen() {
   const titleStr  = decodeURIComponent(params.title  || "");
   const posterUrl = params.poster ? decodeURIComponent(params.poster) : "";
   const epTitle   = params.etitle ? decodeURIComponent(params.etitle) : undefined;
+
+  useEffect(() => {
+    if (!tmdbId) return;
+    return startMobileWatchAnalytics({
+      animeId: tmdbId,
+      episode: ep,
+      title: titleStr,
+    });
+  }, [tmdbId, ep, titleStr]);
 
   const [screen, setScreen]       = useState<Screen>("picker");
   const [sources, setSources]     = useState<AnimSrc[]>([]);

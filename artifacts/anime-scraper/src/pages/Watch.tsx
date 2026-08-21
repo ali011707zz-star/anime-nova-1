@@ -13,6 +13,7 @@ import { getAppToken } from "@/lib/appToken";
 import { useLocation } from "wouter";
 import { useAuth } from "@/lib/auth-context";
 import { saveProgress as saveProgressServer } from "@/lib/db";
+import { startWebWatchAnalytics } from "@/lib/analytics";
 import {
   ChevronRight,
   ChevronLeft,
@@ -4911,6 +4912,15 @@ export default function WatchPage() {
       saveHistory(animeId, titleParam, coverParam, ep, 0, userId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userId]);
+
+  useEffect(() => {
+    if (!animeId) return;
+    return startWebWatchAnalytics({
+      animeId,
+      episode: ep,
+      title: titleParam || anime?.title?.userPreferred || "",
+    });
+  }, [animeId, ep, titleParam, anime?.title?.userPreferred]);
 
   /* ── Fetch kawaii-meta: Arabic subtitle + intro/outro skip times ── */
   useEffect(() => {

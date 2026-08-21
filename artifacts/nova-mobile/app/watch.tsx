@@ -25,6 +25,7 @@ import * as ScreenOrientation from "expo-screen-orientation";
 import { openIsolatedPlayer } from "@/lib/isolatedPlayer";
 import { ensureDownloadAllowed, ensureWatchAccess, getAdState } from "@/utils/adPolicy";
 import { RewardedAdPrompt } from "@/components/RewardedAdPrompt";
+import { startMobileWatchAnalytics } from "@/utils/analytics";
 
 /* ── Types ── */
 type Quality    = "1080p FHD" | "720p HD" | "360p SD";
@@ -732,6 +733,15 @@ export default function WatchScreen() {
   const coverUrl   = safeDecodeURIComponent(cover);
   const totalEpsCount = totalEpsParam ? parseInt(totalEpsParam) || undefined : undefined;
   const displayTitle = titleArStr || englishStr || titleStr;
+
+  useEffect(() => {
+    if (!anime) return;
+    return startMobileWatchAnalytics({
+      animeId: anime,
+      episode: epNum,
+      title: displayTitle,
+    });
+  }, [anime, epNum, displayTitle]);
 
   /* ── State ── */
   const [screen,      setScreen]      = useState<Screen>("picker"); // يبدأ مباشرةً بالـ picker — بدون تشغيل تلقائي
