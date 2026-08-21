@@ -3,12 +3,16 @@ import { createHash, randomBytes } from "node:crypto";
 import { getEmailUser } from "../auth/emailAuth.js";
 import { decryptParam, encryptParam } from "../lib/security.js";
 import { sbInsert, sbPatch, sbSelect } from "../lib/supabaseClient.js";
+import { getDbConfig, setDbConfig } from "../lib/dbConfig.js";
 
 const router = Router();
 const CONFIG_PREFIX = "reward_ads:";
 const DOWNLOAD_LIMIT = 4;
 const WATCH_ACCESS_MS = 60 * 60 * 1000;
+const SETTINGS_KEY = "reward_ads:settings";
+const TEST_REWARDED_ID = "ca-app-pub-3940256099942544/5224354917";
 type RewardKind = "download" | "watch";
+type RewardSettings = { enabled: boolean; rewardedAdUnitId: string };
 type AdState = {
   downloadCount: number;
   completedEpisodes: string[];
@@ -18,6 +22,20 @@ type AdState = {
 
 function emptyState(): AdState {
   return { downloadCount: 0, completedEpisodes: [], watchAccessUntil: 0, pendingRewards: [] };
+}
+
+async function getRewardSettings(): Promise<RewardSettings> {
+  const raw = await getDbConfig(SETTINGS_KEY);
+  if (!raw) return { enabled: true, rewardedAdUnitId: TEST_REWARDED_ID };
+  try {
+    const value = JSON.parse(raw);
+    return {
+      enabled: value?.enabled !== false,
+      rewardedAdUnitId: String(value?.rewardedAdUnitId || TEST_REWARDED_ID).trim() || TEST_REWARDED_ID,
+    };
+  } catch {
+    return { enabled: true, rewardedAdUnitId: TEST_REWARDED_ID };
+  }
 }
 
 async function subjectFor(req: Request): Promise<{ key: string; privileged: boolean }> {
@@ -56,21 +74,24 @@ async function saveState(key: string, state: AdState): Promise<void> {
   else await sbInsert("app_config", { key: configKey, value, updated_at: new Date().toISOString() });
 }
 
-function publicState(state: AdState, privileged: boolean) {
+function publicState(state: AdState, privileged: boolean, settings: RewardSettings) {
   return {
     privileged,
-    downloadCount: privileged ? 0 : state.downloadCount,
+    adsEnabled: settings.enabled,
+    rewardedAdUnitId: settings.rewardedAdUnitId,
+    downloadCount: privileged || !settings.enabled ? 0 : state.downloadCount,
     downloadLimit: DOWNLOAD_LIMIT,
-    downloadNeedsReward: !privileged && state.downloadCount >= DOWNLOAD_LIMIT,
-    watchAccessUntil: privileged ? null : state.watchAccessUntil,
-    watchNeedsReward: !privileged && state.watchAccessUntil <= Date.now(),
+    downloadNeedsReward: settings.enabled && !privileged && state.downloadCount >= DOWNLOAD_LIMIT,
+    watchAccessUntil: privileged || !settings.enabled ? null : state.watchAccessUntil,
+    watchNeedsReward: settings.enabled && !privileged && state.watchAccessUntil <= Date.now(),
   };
 }
 
 router.get("/ads/state", async (req: Request, res: Response) => {
   try {
     const subject = await subjectFor(req);
-    return res.json(publicState(await loadState(subject.key), subject.privileged));
+    const settings = await getRewardSettings();
+    return res.json(publicState(await loadState(subject.key), subject.privileged, settings));
   } catch (error) {
     console.error("[ads/state]", error);
     return res.status(500).json({ error: "تعذر قراءة حالة الإعلانات" });
@@ -79,17 +100,19 @@ router.get("/ads/state", async (req: Request, res: Response) => {
 
 router.post("/ads/download-start", async (req: Request, res: Response) => {
   const subject = await subjectFor(req);
+  const settings = await getRewardSettings();
   const state = await loadState(subject.key);
-  if (!subject.privileged && state.downloadCount >= DOWNLOAD_LIMIT) {
+  if (settings.enabled && !subject.privileged && state.downloadCount >= DOWNLOAD_LIMIT) {
     return res.status(402).json({ needsReward: true, message: "شاهد إعلانًا قصيرًا لمتابعة تنزيل الحلقات" });
   }
-  return res.json({ allowed: true, ...publicState(state, subject.privileged) });
+  return res.json({ allowed: true, ...publicState(state, subject.privileged, settings) });
 });
 
 router.post("/ads/download-complete", async (req: Request, res: Response) => {
   try {
     const subject = await subjectFor(req);
-    if (subject.privileged) return res.json({ counted: false, ...publicState(emptyState(), true) });
+    const settings = await getRewardSettings();
+    if (subject.privileged) return res.json({ counted: false, ...publicState(emptyState(), true, settings) });
     const animeId = String(req.body?.animeId || "").trim();
     const ep = Number(req.body?.ep);
     if (!animeId || !Number.isSafeInteger(ep) || ep < 1) return res.status(400).json({ error: "حلقة غير صالحة" });
@@ -99,9 +122,9 @@ router.post("/ads/download-complete", async (req: Request, res: Response) => {
       state.completedEpisodes.push(episodeKey);
       state.downloadCount = Math.min(DOWNLOAD_LIMIT, state.downloadCount + 1);
       await saveState(subject.key, state);
-      return res.json({ counted: true, ...publicState(state, false) });
+      return res.json({ counted: true, ...publicState(state, false, settings) });
     }
-    return res.json({ counted: false, ...publicState(state, false) });
+    return res.json({ counted: false, ...publicState(state, false, settings) });
   } catch (error) {
     console.error("[ads/download-complete]", error);
     return res.status(500).json({ error: "تعذر تسجيل التنزيل" });
@@ -110,11 +133,12 @@ router.post("/ads/download-complete", async (req: Request, res: Response) => {
 
 router.post("/ads/watch-start", async (req: Request, res: Response) => {
   const subject = await subjectFor(req);
+  const settings = await getRewardSettings();
   const state = await loadState(subject.key);
-  if (!subject.privileged && state.watchAccessUntil <= Date.now()) {
+  if (settings.enabled && !subject.privileged && state.watchAccessUntil <= Date.now()) {
     return res.status(402).json({ needsReward: true, message: "شاهد إعلانًا قصيرًا لفتح السيرفرات ومشاهدة الحلقة لمدة 60 دقيقة" });
   }
-  return res.json({ allowed: true, ...publicState(state, subject.privileged) });
+  return res.json({ allowed: true, ...publicState(state, subject.privileged, settings) });
 });
 
 router.post("/ads/reward/start", async (req: Request, res: Response) => {
@@ -122,7 +146,10 @@ router.post("/ads/reward/start", async (req: Request, res: Response) => {
     const kind = String(req.body?.kind || "") as RewardKind;
     if (kind !== "download" && kind !== "watch") return res.status(400).json({ error: "نوع إعلان غير صالح" });
     const subject = await subjectFor(req);
-    if (subject.privileged) return res.json({ bypass: true, ...publicState(emptyState(), true) });
+    const settings = await getRewardSettings();
+    if (!settings.enabled || subject.privileged) {
+      return res.json({ bypass: true, ...publicState(emptyState(), subject.privileged, settings) });
+    }
     const state = await loadState(subject.key);
     const nonce = randomBytes(18).toString("hex");
     state.pendingRewards.push(nonce);
@@ -133,6 +160,31 @@ router.post("/ads/reward/start", async (req: Request, res: Response) => {
     console.error("[ads/reward-start]", error);
     return res.status(500).json({ error: "تعذر بدء الإعلان" });
   }
+});
+
+router.get("/admin/ads-settings", async (req: Request, res: Response) => {
+  const { isWebAdmin } = await import("./webAdmin.js");
+  const { getEmailUser } = await import("../auth/emailAuth.js");
+  const user = await getEmailUser(req);
+  if (!isWebAdmin(req) && user?.plan !== "admin") return res.status(401).json({ error: "غير مصرّح" });
+  return res.json(await getRewardSettings());
+});
+
+router.patch("/admin/ads-settings", async (req: Request, res: Response) => {
+  const { isWebAdmin } = await import("./webAdmin.js");
+  const { getEmailUser } = await import("../auth/emailAuth.js");
+  const user = await getEmailUser(req);
+  if (!isWebAdmin(req) && user?.plan !== "admin") return res.status(401).json({ error: "غير مصرّح" });
+  const current = await getRewardSettings();
+  const enabled = req.body?.enabled === undefined ? current.enabled : req.body.enabled;
+  const rewardedAdUnitId = req.body?.rewardedAdUnitId === undefined
+    ? current.rewardedAdUnitId
+    : String(req.body.rewardedAdUnitId || "").trim();
+  if (typeof enabled !== "boolean") return res.status(400).json({ error: "enabled يجب أن يكون true أو false" });
+  if (!rewardedAdUnitId) return res.status(400).json({ error: "rewardedAdUnitId مطلوب" });
+  const next = { enabled, rewardedAdUnitId };
+  await setDbConfig(SETTINGS_KEY, JSON.stringify(next));
+  return res.json({ ok: true, ...next });
 });
 
 router.post("/ads/reward/complete", async (req: Request, res: Response) => {
@@ -150,7 +202,8 @@ router.post("/ads/reward/complete", async (req: Request, res: Response) => {
     if (payload.kind === "download") state.downloadCount = 0;
     else state.watchAccessUntil = Date.now() + WATCH_ACCESS_MS;
     await saveState(subject.key, state);
-    return res.json({ ok: true, ...publicState(state, false) });
+    const settings = await getRewardSettings();
+    return res.json({ ok: true, ...publicState(state, false, settings) });
   } catch {
     return res.status(400).json({ error: "تصريح إعلان غير صالح" });
   }

@@ -12,7 +12,7 @@ const configuredRewardedId = process.env.EXPO_PUBLIC_ADMOB_REWARDED_AD_UNIT_ID?.
 
 /** Production stays fail-safe: no configured unit means Google’s test ad. */
 export const NOVA_ADS_TEST_MODE = !configuredRewardedId;
-const REWARDED_AD_UNIT_ID = configuredRewardedId || TEST_REWARDED_ID;
+let rewardedAdUnitId = configuredRewardedId || TEST_REWARDED_ID;
 const AD_LOAD_TIMEOUT_MS = 20_000;
 
 export function showRewardedAd(): Promise<boolean> {
@@ -34,7 +34,7 @@ export function showRewardedAd(): Promise<boolean> {
       resolve(value);
     };
     try {
-      const ad = RewardedAd.createForAdRequest(REWARDED_AD_UNIT_ID, {
+      const ad = RewardedAd.createForAdRequest(rewardedAdUnitId, {
         requestNonPersonalizedAdsOnly: true,
       });
       subscriptions = [
@@ -53,6 +53,11 @@ export function showRewardedAd(): Promise<boolean> {
       finish(false);
     }
   });
+}
+
+export function setRewardedAdUnitId(adUnitId: string | null | undefined): void {
+  const value = adUnitId?.trim();
+  if (value) rewardedAdUnitId = value;
 }
 
 /** Backward-compatible name for callers that still use the old helper. */
