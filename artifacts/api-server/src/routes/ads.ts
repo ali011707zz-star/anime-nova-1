@@ -67,7 +67,7 @@ function publicState(state: AdState, privileged: boolean) {
   };
 }
 
-router.get("/api/ads/state", async (req: Request, res: Response) => {
+router.get("/ads/state", async (req: Request, res: Response) => {
   try {
     const subject = await subjectFor(req);
     return res.json(publicState(await loadState(subject.key), subject.privileged));
@@ -77,7 +77,7 @@ router.get("/api/ads/state", async (req: Request, res: Response) => {
   }
 });
 
-router.post("/api/ads/download-start", async (req: Request, res: Response) => {
+router.post("/ads/download-start", async (req: Request, res: Response) => {
   const subject = await subjectFor(req);
   const state = await loadState(subject.key);
   if (!subject.privileged && state.downloadCount >= DOWNLOAD_LIMIT) {
@@ -86,7 +86,7 @@ router.post("/api/ads/download-start", async (req: Request, res: Response) => {
   return res.json({ allowed: true, ...publicState(state, subject.privileged) });
 });
 
-router.post("/api/ads/download-complete", async (req: Request, res: Response) => {
+router.post("/ads/download-complete", async (req: Request, res: Response) => {
   try {
     const subject = await subjectFor(req);
     if (subject.privileged) return res.json({ counted: false, ...publicState(emptyState(), true) });
@@ -108,7 +108,7 @@ router.post("/api/ads/download-complete", async (req: Request, res: Response) =>
   }
 });
 
-router.post("/api/ads/watch-start", async (req: Request, res: Response) => {
+router.post("/ads/watch-start", async (req: Request, res: Response) => {
   const subject = await subjectFor(req);
   const state = await loadState(subject.key);
   if (!subject.privileged && state.watchAccessUntil <= Date.now()) {
@@ -117,7 +117,7 @@ router.post("/api/ads/watch-start", async (req: Request, res: Response) => {
   return res.json({ allowed: true, ...publicState(state, subject.privileged) });
 });
 
-router.post("/api/ads/reward/start", async (req: Request, res: Response) => {
+router.post("/ads/reward/start", async (req: Request, res: Response) => {
   try {
     const kind = String(req.body?.kind || "") as RewardKind;
     if (kind !== "download" && kind !== "watch") return res.status(400).json({ error: "نوع إعلان غير صالح" });
@@ -135,7 +135,7 @@ router.post("/api/ads/reward/start", async (req: Request, res: Response) => {
   }
 });
 
-router.post("/api/ads/reward/complete", async (req: Request, res: Response) => {
+router.post("/ads/reward/complete", async (req: Request, res: Response) => {
   try {
     const token = String(req.body?.token || "");
     const payload = JSON.parse(decryptParam(token)) as { v?: number; kind?: RewardKind; subject?: string; nonce?: string; exp?: number };
