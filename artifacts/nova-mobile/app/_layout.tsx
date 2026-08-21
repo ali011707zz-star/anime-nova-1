@@ -16,6 +16,7 @@ import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import * as Sentry from "@sentry/react-native";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
+import { TelegramAnnouncementModal } from "@/components/TelegramAnnouncementModal";
 import { AppProvider } from "@/context/AppContext";
 import { loadRuntimeApiUrl } from "@/utils/baseUrl";
 import { installGlobalCrashHandlers } from "@/utils/crashLogger";
@@ -112,6 +113,7 @@ function RootLayout() {
   // إجبار إخفاء الـ splash بعد 3.5 ثانية حتى لو فشل تحميل الخطوط
   const [forceShow, setForceShow] = useState(false);
   const [brandSplashVisible, setBrandSplashVisible] = useState(true);
+  const [telegramAnnouncementVisible, setTelegramAnnouncementVisible] = useState(false);
   useEffect(() => {
     const t = setTimeout(() => {
       setForceShow(true);
@@ -130,6 +132,12 @@ function RootLayout() {
       return () => clearTimeout(t);
     }
   }, [fontsLoaded, fontError]);
+
+  useEffect(() => {
+    if (!brandSplashVisible && RUNTIME_INTEGRITY.trusted) {
+      setTelegramAnnouncementVisible(true);
+    }
+  }, [brandSplashVisible]);
 
   useEffect(() => {
     if (!RUNTIME_INTEGRITY.trusted) return;
@@ -166,6 +174,10 @@ function RootLayout() {
           <AppProvider>
             <GestureHandlerRootView style={{ flex: 1 }}>
               <RootLayoutNav />
+              <TelegramAnnouncementModal
+                visible={telegramAnnouncementVisible}
+                onClose={() => setTelegramAnnouncementVisible(false)}
+              />
             </GestureHandlerRootView>
           </AppProvider>
         </QueryClientProvider>

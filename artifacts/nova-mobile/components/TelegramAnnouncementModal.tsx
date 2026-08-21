@@ -1,0 +1,207 @@
+import { Ionicons } from "@expo/vector-icons";
+import { useVideoPlayer, VideoView } from "expo-video";
+import * as Linking from "expo-linking";
+import React from "react";
+import {
+  Modal,
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
+} from "react-native";
+
+const TELEGRAM_URL = "https://t.me/Anime_NOVA_0";
+
+interface TelegramAnnouncementModalProps {
+  visible: boolean;
+  onClose: () => void;
+}
+
+export function TelegramAnnouncementModal({
+  visible,
+  onClose,
+}: TelegramAnnouncementModalProps) {
+  const player = useVideoPlayer(
+    require("../assets/jjk-lethal-company-dance.mp4"),
+    (instance) => {
+      instance.loop = true;
+      instance.muted = false;
+      instance.play();
+    },
+  );
+
+  const openTelegram = () => {
+    Linking.openURL(TELEGRAM_URL).catch(() => {});
+  };
+
+  return (
+    <Modal
+      visible={visible}
+      transparent
+      animationType="fade"
+      onRequestClose={onClose}
+      statusBarTranslucent
+    >
+      <View style={styles.backdrop}>
+        <View style={styles.card} accessibilityViewIsModal>
+          <Pressable
+            accessibilityLabel="إغلاق"
+            testID="telegram-announcement-close"
+            onPress={onClose}
+            style={({ pressed }) => [
+              styles.closeButton,
+              pressed && styles.pressed,
+            ]}
+          >
+            <Ionicons name="close" size={21} color="#FFFFFF" />
+          </Pressable>
+
+          <View style={styles.videoFrame}>
+            <VideoView
+              player={player}
+              style={styles.video}
+              contentFit="cover"
+              nativeControls={false}
+            />
+          </View>
+
+          <View style={styles.content}>
+            <View style={styles.telegramIcon}>
+              <Ionicons name="paper-plane" size={20} color="#FFFFFF" />
+            </View>
+            <Text style={styles.title}>انضم إلى قناتنا على تلجرام</Text>
+            <Text style={styles.message}>
+              تابع أخبار وتحديثات NOVA Anime عبر قناتنا الرسمية على تلجرام،
+              وأرسل لنا بلاغاتك عن أي مشكلة تواجهك.
+            </Text>
+
+            <Pressable
+              accessibilityLabel="الانضمام إلى قناة تلجرام"
+              testID="telegram-announcement-open"
+              onPress={openTelegram}
+              style={({ pressed }) => [
+                styles.primaryButton,
+                pressed && styles.pressed,
+              ]}
+            >
+              <Ionicons name="paper-plane-outline" size={18} color="#FFFFFF" />
+              <Text style={styles.primaryButtonText}>انضم الآن</Text>
+            </Pressable>
+            <Pressable
+              accessibilityLabel="متابعة إلى التطبيق"
+              testID="telegram-announcement-dismiss"
+              onPress={onClose}
+              style={({ pressed }) => [
+                styles.secondaryButton,
+                pressed && styles.pressed,
+              ]}
+            >
+              <Text style={styles.secondaryButtonText}>متابعة إلى التطبيق</Text>
+            </Pressable>
+          </View>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
+const styles = StyleSheet.create({
+  backdrop: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 20,
+    backgroundColor: "rgba(0, 0, 0, 0.78)",
+  },
+  card: {
+    width: "100%",
+    maxWidth: 420,
+    overflow: "hidden",
+    borderRadius: 26,
+    backgroundColor: "#15111F",
+    borderWidth: 1,
+    borderColor: "rgba(216, 180, 254, 0.24)",
+    shadowColor: "#000000",
+    shadowOpacity: 0.45,
+    shadowRadius: 24,
+    shadowOffset: { width: 0, height: 12 },
+    elevation: 12,
+  },
+  closeButton: {
+    position: "absolute",
+    top: 12,
+    right: 12,
+    zIndex: 2,
+    width: 34,
+    height: 34,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 17,
+    backgroundColor: "rgba(0, 0, 0, 0.48)",
+  },
+  videoFrame: {
+    width: "100%",
+    aspectRatio: 1.78,
+    backgroundColor: "#09090B",
+  },
+  video: {
+    flex: 1,
+  },
+  content: {
+    alignItems: "center",
+    paddingHorizontal: 22,
+    paddingTop: 18,
+    paddingBottom: 20,
+  },
+  telegramIcon: {
+    width: 42,
+    height: 42,
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 9,
+    borderRadius: 21,
+    backgroundColor: "#229ED9",
+  },
+  title: {
+    color: "#FFFFFF",
+    fontFamily: "Cairo_700Bold",
+    fontSize: 19,
+    textAlign: "center",
+  },
+  message: {
+    marginTop: 7,
+    color: "rgba(255, 255, 255, 0.7)",
+    fontFamily: "Cairo_400Regular",
+    fontSize: 13,
+    lineHeight: 22,
+    textAlign: "center",
+  },
+  primaryButton: {
+    width: "100%",
+    height: 46,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    marginTop: 17,
+    borderRadius: 15,
+    backgroundColor: "#229ED9",
+  },
+  primaryButtonText: {
+    color: "#FFFFFF",
+    fontFamily: "Cairo_700Bold",
+    fontSize: 14,
+  },
+  secondaryButton: {
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+  },
+  secondaryButtonText: {
+    color: "rgba(255, 255, 255, 0.55)",
+    fontFamily: "Cairo_600SemiBold",
+    fontSize: 12,
+  },
+  pressed: {
+    opacity: 0.72,
+  },
+});
