@@ -574,8 +574,8 @@ function PremiumSheet({ open, onClose, user }: {
       : "مرحبًا، أريد الاشتراك في Nova Premium.";
     try { await Share.share({ message: msg }); } catch {}
     setTimeout(() => {
-      Linking.openURL("https://t.me/Anime_NOVA_0").catch(() =>
-        Linking.openURL(`tg://resolve?domain=Anime_NOVA_0`)
+      Linking.openURL("https://t.me/L_X_00").catch(() =>
+        Linking.openURL(`tg://resolve?domain=L_X_00`)
       );
     }, 400);
     setSent(true);
@@ -630,6 +630,18 @@ function PremiumSheet({ open, onClose, user }: {
             </View>
           </View>
 
+          {/* One simple monthly plan */}
+          <View style={{ borderRadius: 18, padding: 16, marginBottom: 16, backgroundColor: "rgba(251,191,36,0.10)", borderWidth: 1, borderColor: "rgba(251,191,36,0.32)", flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
+            <View>
+              <Text style={{ fontSize: 14, fontFamily: "Cairo_800ExtraBold", color: "#fff", textAlign: "right" }}>الاشتراك الشهري</Text>
+              <Text style={{ fontSize: 10, color: "rgba(255,255,255,0.48)", fontFamily: "Cairo_400Regular", textAlign: "right", marginTop: 3 }}>باقة Premium الوحيدة</Text>
+            </View>
+            <View style={{ alignItems: "center" }}>
+              <Text style={{ fontSize: 25, fontFamily: "Cairo_800ExtraBold", color: "#fcd34d" }}>1.99$</Text>
+              <Text style={{ fontSize: 9, color: "rgba(253,224,71,0.65)", fontFamily: "Cairo_700Bold" }}>شهرياً</Text>
+            </View>
+          </View>
+
           {/* Features */}
           <View style={ts.premiumFeaturesCard}>
             <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 14 }}>
@@ -660,7 +672,7 @@ function PremiumSheet({ open, onClose, user }: {
             </View>
             {[
               { step: "١", text: "اضغط زر «اشترك الآن» أدناه" },
-              { step: "٢", text: "يفتح تيليجرام مع فريق الدعم" },
+              { step: "٢", text: "يفتح حسابي على تيليجرام" },
               { step: "٣", text: "أرسل رسالة طلب الاشتراك" },
               { step: "٤", text: "سيُفعَّل اشتراكك خلال ٢٤ ساعة" },
             ].map(s => (

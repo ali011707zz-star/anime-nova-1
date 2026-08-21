@@ -415,7 +415,7 @@ export default function AnimationDetailScreen() {
     {/* ── Trailer Modal ── */}
     <Modal visible={showTrailer} animationType="slide" onRequestClose={() => setShowTrailer(false)}>
       <View style={{ flex: 1, backgroundColor: "#000" }}>
-        <View style={[s.trailerHeader, { paddingTop: insets.top + 4 }]}>
+        <View style={[s.trailerHeader, { paddingTop: insets.top + 1 }]}>
           <Pressable onPress={() => setShowTrailer(false)} style={s.trailerClose}>
             <Ionicons name="close" size={20} color="#fff" />
           </Pressable>
@@ -525,6 +525,6 @@ const s = StyleSheet.create({
   trailerLabelWrap: { position: "absolute", bottom: 0, left: 0, right: 0, padding: 12 },
   trailerLabelText: { fontSize: 12, fontFamily: "Cairo_800ExtraBold", color: "#fff" },
   trailerHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 16, paddingBottom: 12 },
-  trailerClose: { width: 36, height: 36, backgroundColor: "rgba(255,255,255,0.1)", borderRadius: 14, alignItems: "center", justifyContent: "center" },
-  trailerHeaderText: { fontSize: 14, fontFamily: "Cairo_800ExtraBold", color: "#fff" },
+  trailerClose: { width: 30, height: 30, backgroundColor: "rgba(255,255,255,0.1)", borderRadius: 11, alignItems: "center", justifyContent: "center" },
+  trailerHeaderText: { fontSize: 12, fontFamily: "Cairo_800ExtraBold", color: "#fff" },
 });

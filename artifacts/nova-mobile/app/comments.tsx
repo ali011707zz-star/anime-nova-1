@@ -24,17 +24,19 @@ interface Comment {
   replyToUsername: string | null;
 }
 
-function timeAgo(iso: string) {
-  const diff = Date.now() - new Date(iso).getTime();
+function timeAgo(value: string | number) {
+  const raw = typeof value === "number" || /^\d+$/.test(String(value)) ? Number(value) : new Date(value).getTime();
+  const timestamp = raw > 0 && raw < 10_000_000_000 ? raw * 1000 : raw;
+  const diff = Math.max(0, Date.now() - timestamp);
   const s = Math.floor(diff / 1000);
   if (s < 60) return "الآن";
   const m = Math.floor(s / 60);
-  if (m < 60) return `منذ ${m} دقيقة`;
+  if (m < 60) return `منذ ${m} ${m === 1 ? "دقيقة" : "دقائق"}`;
   const h = Math.floor(m / 60);
-  if (h < 24) return `منذ ${h} ساعة`;
+  if (h < 24) return `منذ ${h} ${h === 1 ? "ساعة" : "ساعات"}`;
   const d = Math.floor(h / 24);
-  if (d < 30) return `منذ ${d} يوم`;
-  return new Date(iso).toLocaleDateString("ar-EG");
+  if (d < 30) return `منذ ${d} ${d === 1 ? "يوم" : "أيام"}`;
+  return new Date(timestamp).toLocaleDateString("ar-EG");
 }
 
 function Avatar({ username, avatarUrl }: { username: string; avatarUrl?: string | null }) {
@@ -73,6 +75,7 @@ export default function CommentsPage() {
   const [myUsername, setMyUsername]   = useState<string | null>(null);
   const [myDisplayName, setMyDisplayName] = useState<string | null>(null);
   const [liking, setLiking]       = useState<Set<string>>(new Set());
+  const [, refreshRelativeTimes] = useState(0);
   const inputRef  = useRef<TextInput>(null);
   const listRef   = useRef<FlatList>(null);
 
@@ -85,6 +88,11 @@ export default function CommentsPage() {
         setMyDisplayName(d.displayName || d.display_name || null);
       });
     }).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    const timer = setInterval(() => refreshRelativeTimes(value => value + 1), 30_000);
+    return () => clearInterval(timer);
   }, []);
 
   async function loadComments() {
