@@ -184,7 +184,12 @@ setTimeout(() => {
 }, 600);
 
 // ── صنع مفتاح cache ──
-export function makeSourceCacheKey(site: string, title: string, ep: number): string {
+export function makeSourceCacheKey(
+  site: string,
+  title: string,
+  ep: number,
+  identity?: string | number | null,
+): string {
   const norm = title
     .toLowerCase()
     .replace(/[^a-z0-9 ]/g, " ")
@@ -192,7 +197,11 @@ export function makeSourceCacheKey(site: string, title: string, ep: number): str
     .split(/\s+/)
     .slice(0, 5)
     .join("-");
-  return `${site}:${norm}:ep${ep}`;
+  // A title/episode pair is not a unique anime identity.  The previous key
+  // allowed same-titled series (or catalog links carrying a different ID) to
+  // share provider rows, which made one refresh show a different provider.
+  const id = String(identity ?? "").trim().replace(/[^a-zA-Z0-9:_-]/g, "");
+  return `${site}:${norm}:ep${ep}${id ? `:id${id}` : ""}`;
 }
 
 export function makeAnimCacheKey(site: string, tmdbId: string, type: string, season: number, ep: number): string {

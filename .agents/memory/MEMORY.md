@@ -88,3 +88,4 @@
 - [Mobile monetization and admin](mobile-monetization-plan.md) — future mobile-only rewarded ads/subscriptions; owner manages manual entitlements via a hidden web admin with password+TOTP; server gates modified builds.
 - [Rewarded ads VPS routing](rewarded-ads-vps-routing.md) — ads router is mounted under `/api`; route definitions must use `/ads/...`, otherwise requests become `/api/api/ads/...` and SPA HTML is returned.
 - [AW quality persistence](aw-quality-persistence.md) — Supabase `aw_links` must be unique by anime+episode+server+quality; otherwise new quality rows collide and Firestore fallback masks the loss.
+- [Provider list stability](source-identity-stability.md) — source caches need anime identity, availability may reuse metadata safely, and picker/download rows must sort by canonical provider order.

@@ -1588,7 +1588,11 @@ export default function WatchScreen() {
     return Q_KEYS.flatMap((quality) =>
       Object.entries(availableSlots)
         .filter(([site, tiers]) => DOWNLOAD_SOURCE_SITES.has(site) && Boolean(tiers[quality]))
-        .map(([site]) => ({ site, tag: SITE_TAG[site] || getSiteTag(site), quality })),
+        .map(([site]) => ({ site, tag: SITE_TAG[site] || getSiteTag(site), quality }))
+        .sort((a, b) => {
+          const order = (STATIC_PICKER[quality] || []).map(item => item.site);
+          return order.indexOf(a.site) - order.indexOf(b.site);
+        }),
     );
   }, [availableSlots]);
 
@@ -1907,7 +1911,13 @@ export default function WatchScreen() {
                  name: pickerDef?.name || tiers[qk]?.name || SITE_LABEL[site] || site,
                  tag: pickerDef?.tag || tiers[qk]?.tag || getSiteTag(site),
                };
-             });
+            })
+            .sort((a, b) => {
+              const ai = pickerDefs.findIndex(def => def.site === a.site);
+              const bi = pickerDefs.findIndex(def => def.site === b.site);
+              return (ai < 0 ? Number.MAX_SAFE_INTEGER : ai)
+                - (bi < 0 ? Number.MAX_SAFE_INTEGER : bi);
+            });
            /* Do not fall back to the static catalog after the scan. The web
               picker renders only provider/quality rows confirmed by
               mode=check; using STATIC_PICKER here was the source of phantom

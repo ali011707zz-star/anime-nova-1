@@ -13315,7 +13315,12 @@ router.get("/anime/sources-stream", async (req, res) => {
       const cacheSite = site === "anineko" ? "anineko-v2"
         : site === "sanime" ? "sanime-v2"
         : site;
-      const cKey = makeSourceCacheKey(cacheSite, title, ep);
+      const cKey = makeSourceCacheKey(
+        cacheSite,
+        title,
+        ep,
+        anilistId || anslayerId || `${reqYear || ""}:${reqTotalEps || ""}`,
+      );
       const hit  = await getFromSourceCache(cKey);
       // Reanime URLs are paired with a per-embed manifest key and cannot use
       // source-cache rows created before that key was propagated to hls-proxy.
@@ -13327,7 +13332,7 @@ router.get("/anime/sources-stream", async (req, res) => {
         const isStaleOrNearExpiry = hit.stale || shouldRefreshCache(hit.expiresAt);
 
         // مواقع ذات CDN token قصير: لا تُقدَّم بيانات قديمة — كشط مباشر
-        if (isStaleOrNearExpiry && SHORT_TTL_NO_STALE.has(site)) {
+        if (isStaleOrNearExpiry && SHORT_TTL_NO_STALE.has(site) && !checkOnly) {
           // سقوط مباشر للكشط الحي (لا نُرجع شيئاً من الكاش القديم)
         } else {
           // Availability must be fast and must not hide a provider because a CDN
@@ -13746,7 +13751,7 @@ router.get("/anime/fetch-source", async (req, res) => {
       "anivexa_re",
 
 ]);
-  const cKey = makeSourceCacheKey(site, title, ep);
+  const cKey = makeSourceCacheKey(site, title, ep, anilistId || anslayerId);
   let cached = await getFromSourceCache(cKey);
   if (cached && site === "anifox") {
     const liveSources = await filterAnifoxCachedSources(cached.sources);
