@@ -111,12 +111,17 @@ function RootLayout() {
   });
 
   // إجبار إخفاء الـ splash بعد 3.5 ثانية حتى لو فشل تحميل الخطوط
-  const [forceShow, setForceShow] = useState(false);
   const [brandSplashVisible, setBrandSplashVisible] = useState(true);
   const [telegramAnnouncementVisible, setTelegramAnnouncementVisible] = useState(false);
+
+  // أظهر شاشة Anime NOVA المخصصة فوراً بدلاً من إبقاء native splash (الأيقونة فقط)
+  // فوقها أثناء انتظار الخطوط.
+  useEffect(() => {
+    SplashScreen.hideAsync().catch(() => {});
+  }, []);
+
   useEffect(() => {
     const t = setTimeout(() => {
-      setForceShow(true);
       setBrandSplashVisible(false);
       SplashScreen.hideAsync().catch(() => {});
     }, 3500);
@@ -149,8 +154,6 @@ function RootLayout() {
       .catch(() => {});
     return () => stop?.();
   }, []);
-
-  if (!fontsLoaded && !fontError && !forceShow) return null;
 
   if (brandSplashVisible) {
     return <BrandSplash />;
