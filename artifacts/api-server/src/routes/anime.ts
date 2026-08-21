@@ -26,7 +26,7 @@ import {
   probeHlsQuality,
   probeHlsVariants,
 } from "../lib/consumet.js";
-import { sbSelect, sbUpsert } from "../lib/supabaseClient.js";
+import { sbSelect, sbUpsert, sbPatch } from "../lib/supabaseClient.js";
 import pg from "pg";
 // Pool مباشر لـ translations_cache + anime_meta_ar (بدون Supabase REST)
 let _tcPool: pg.Pool | null = null;
@@ -8249,7 +8249,7 @@ async function awDbSaveLinks(
       if (!srv.url) continue;
       const srvName = srv.name.toUpperCase();
       if (!["PD","KF","MF","MF2","ST","VT"].includes(srvName)) continue;
-      await sbUpsert("aw_links", {
+      const row = {
         anime_id:    animeId,
         anime_name:  animeName,
         anilist_id:  anilistId ?? null,
@@ -8259,7 +8259,26 @@ async function awDbSaveLinks(
         quality:     srv.quality || "720p",
         link:        srv.url,
         imported_at: new Date().toISOString(),
-      }, "anime_id,ep_number,server");
+      };
+      /*
+       * aw_links in the live Supabase project predates the composite unique
+       * index used by the old upsert call. PostgREST therefore rejects every
+       * write with 42P10 and new qualities never reach the shared catalogue.
+       * Update the exact logical row when it exists, otherwise insert it.
+       * This works with the current schema and does not create duplicate
+       * provider/quality rows during the periodic sync.
+       */
+      const existing = await sbSelect<{ id?: number }>("aw_links", {
+        anime_id: `eq.${animeId}`,
+        ep_number: `eq.${ep}`,
+        server: `eq.${srvName}`,
+        quality: `eq.${row.quality}`,
+      }, { limit: 1, select: "id" });
+      if (existing[0]?.id != null) {
+        await sbPatch("aw_links", { id: existing[0].id }, row);
+      } else {
+        await sbUpsert("aw_links", row);
+      }
     }
   } catch (e: any) {
     console.warn("[AW-DB] save error:", e?.message);
@@ -8397,7 +8416,10 @@ async function getAnimeWitcherSources(
              awBuildSourcesFromDb expands the actual 1080/720 variants; the old
              DB label-only path collapsed every new episode to one 720 row. */
           const dbSources = await awBuildSourcesFromDb(dbRows);
-          if (dbSources.length) {
+          const dbQualities = new Set(dbSources.map(source => normalizeAwQuality(
+            `${source.quality || ""} ${source.name || ""}`,
+          )));
+          if (dbSources.length && dbQualities.size >= 2) {
             return dbSources.map(source => ({
               ...source,
               url: source.directUrl || source.url,
@@ -8405,30 +8427,17 @@ async function getAnimeWitcherSources(
               verified: true,
             }));
           }
-          const seenQuality = new Set<string>();
-          return dbRows.filter(row => {
-              const quality = String(row.quality || "720p").toLowerCase().replace(/\s+/g, "");
-              return {
-                quality,
-                ok: !seenQuality.has(quality),
-              };
-            }).filter(row => {
-              if (row.ok) { seenQuality.add(row.quality); return true; }
-              return false;
-            }).map(row => ({
-              name: `AnimeWitcher · ${row.quality} · الحلقة موجودة`,
-              url: "",
-              quality: row.quality,
-              qualityRank: row.quality === "1080p" ? 22 : row.quality === "720p" ? 21 : row.quality === "480p" ? 10 : 5,
-              site: "animewitcher",
-              verified: true,
-            } as UnifiedSource));
+          console.log(`[AW] DB availability incomplete (${dbQualities.size} quality tiers) — refreshing Firestore`);
         }
         const dbSources = await awBuildSourcesFromDb(dbRows);
-        if (dbSources.length) {
+        const dbQualities = new Set(dbSources.map(source => normalizeAwQuality(
+          `${source.quality || ""} ${source.name || ""}`,
+        )));
+        if (dbSources.length && dbQualities.size >= 2) {
           console.log(`[AW] ✅ DB-path: ${dbSources.length} sources`);
           return dbSources;
         }
+        console.log(`[AW] DB playback incomplete (${dbQualities.size} quality tiers) — refreshing Firestore`);
       }
       /* Latest-episode cards can carry an AniList id that was resolved from a
          title while the imported AW rows still have a null/older id. Recheck
@@ -8437,7 +8446,10 @@ async function getAnimeWitcherSources(
       const titleRows = await awDbLookupByTitle(title, ep);
       if (titleRows.length) {
         const titleSources = await awBuildSourcesFromDb(titleRows);
-        if (titleSources.length) return titleSources;
+        const titleQualities = new Set(titleSources.map(source => normalizeAwQuality(
+          `${source.quality || ""} ${source.name || ""}`,
+        )));
+        if (titleSources.length && titleQualities.size >= 2) return titleSources;
       }
     }
     // title fallback (بدون anilistId)
@@ -8445,7 +8457,10 @@ async function getAnimeWitcherSources(
       const titleRows = await awDbLookupByTitle(title, ep);
       if (titleRows.length) {
         const titleSources = await awBuildSourcesFromDb(titleRows);
-        if (titleSources.length) return titleSources;
+        const titleQualities = new Set(titleSources.map(source => normalizeAwQuality(
+          `${source.quality || ""} ${source.name || ""}`,
+        )));
+        if (titleSources.length && titleQualities.size >= 2) return titleSources;
       }
     }
 

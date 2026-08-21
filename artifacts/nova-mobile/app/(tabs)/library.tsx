@@ -20,6 +20,35 @@ interface FavChar {
   animeTitle?: string;
 }
 
+function LibraryImage({
+  uri,
+  fallbackId,
+  style,
+}: {
+  uri?: string;
+  fallbackId?: number;
+  style: any;
+}) {
+  const candidates = React.useMemo(() => {
+    const values = [uri, fallbackId ? `https://img.anili.st/media/${fallbackId}` : ""];
+    return [...new Set(values.filter(Boolean))] as string[];
+  }, [uri, fallbackId]);
+  const [index, setIndex] = useState(0);
+  useEffect(() => setIndex(0), [candidates.join("|")]);
+
+  return candidates.length ? (
+    <Image
+      key={candidates[index] || "library-placeholder"}
+      source={{ uri: candidates[index] }}
+      style={style}
+      resizeMode="cover"
+      onError={() => setIndex(current => Math.min(current + 1, candidates.length - 1))}
+    />
+  ) : (
+    <View style={[style, { backgroundColor: "#1C1C22" }]} />
+  );
+}
+
 const TABS = [
   { label: "متابعة",    icon: "play-circle-outline" as const, activeIcon: "play-circle" as const },
   { label: "السجل",     icon: "time-outline" as const,        activeIcon: "time" as const },
@@ -147,11 +176,7 @@ export default function LibraryScreen() {
         />
       </View>
       <View style={s.historyImgWrap}>
-        <Image
-          source={item.thumbnail ? { uri: item.thumbnail } : undefined}
-          style={[s.historyImg, { backgroundColor: "#1C1C22" }]}
-          resizeMode="cover"
-        />
+        <LibraryImage uri={item.thumbnail} fallbackId={item.kind === "anime" ? Number(item.key.split("-")[1]) : undefined} style={[s.historyImg, { backgroundColor: "#1C1C22" }]} />
         <LinearGradient colors={["transparent", "rgba(0,0,0,0.55)"]} style={StyleSheet.absoluteFill} />
         <View style={s.playOverlay}>
           <Ionicons name="play" size={17} color="#fff" />
@@ -303,11 +328,7 @@ export default function LibraryScreen() {
                 onPress={() => router.push(`/anime/${item.id}?title=${encodeURIComponent(item.title)}&english=${encodeURIComponent(item.english)}`)}
                 style={s.favCard}
               >
-                <Image
-                  source={item.thumbnail ? { uri: item.thumbnail } : undefined}
-                  style={[s.favImg, { backgroundColor: "#1C1C22" }]}
-                  resizeMode="cover"
-                />
+                <LibraryImage uri={item.thumbnail} fallbackId={item.id} style={[s.favImg, { backgroundColor: "#1C1C22" }]} />
                 <Pressable
                   onPress={() => toggleFavorite(item)}
                   style={s.favHeart}
@@ -348,11 +369,7 @@ export default function LibraryScreen() {
             showsVerticalScrollIndicator={false}
             renderItem={({ item }) => (
               <View style={s.charCard}>
-                <Image
-                  source={item.image ? { uri: item.image } : undefined}
-                  style={[s.charImg, { backgroundColor: "#1C1C22" }]}
-                  resizeMode="cover"
-                />
+                <LibraryImage uri={item.image} style={[s.charImg, { backgroundColor: "#1C1C22" }]} />
                 <Pressable
                   onPress={() => removeChar(item.id)}
                   style={s.charHeart}
