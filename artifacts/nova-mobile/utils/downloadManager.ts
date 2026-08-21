@@ -97,6 +97,9 @@ const active = new Map<string, RuntimeDownload>();
 const listeners = new Set<() => void>();
 let notificationsReady: Promise<boolean> | null = null;
 let persistQueue = Promise.resolve();
+let lastProgressNotifyAt = 0;
+let lastProgressPersistAt = 0;
+let progressNotifyTimer: ReturnType<typeof setTimeout> | null = null;
 
 function isPaused(entry: RuntimeDownload): boolean {
   return entry.status === "paused";
@@ -249,6 +252,39 @@ function notifyListeners(): void {
     try { listener(); } catch {}
   }
   persistActive();
+}
+
+/* DownloadResumable can report progress much faster than the downloads screen
+   needs. Rendering and persisting every callback floods the React Native
+   bridge, makes the list lose touch/scroll responsiveness, and queues many
+   AsyncStorage writes. User actions still call notifyListeners() directly. */
+function notifyProgressListeners(): void {
+  const now = Date.now();
+  const elapsed = now - lastProgressNotifyAt;
+  if (elapsed >= 750) {
+    lastProgressNotifyAt = now;
+    for (const listener of listeners) {
+      try { listener(); } catch {}
+    }
+    if (now - lastProgressPersistAt >= 3_000) {
+      lastProgressPersistAt = now;
+      persistActive();
+    }
+    return;
+  }
+  if (progressNotifyTimer) return;
+  progressNotifyTimer = setTimeout(() => {
+    progressNotifyTimer = null;
+    lastProgressNotifyAt = Date.now();
+    for (const listener of listeners) {
+      try { listener(); } catch {}
+    }
+    const persistAt = Date.now();
+    if (persistAt - lastProgressPersistAt >= 3_000) {
+      lastProgressPersistAt = persistAt;
+      persistActive();
+    }
+  }, Math.max(50, 750 - elapsed));
 }
 
 async function configureNotifications(): Promise<boolean> {
@@ -680,7 +716,7 @@ function makeResumable(
           resumeData: String(entry.bytesWritten),
         };
       }
-      notifyListeners();
+      notifyProgressListeners();
       updateDownloadNotification(entry);
     },
     state?.resumeData,
