@@ -9,6 +9,8 @@ import { Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { getBaseUrl } from "@/utils/api";
 import { RiftPlayer, type PlayerSource, isValidPlayerSourceUrl } from "@/components/RiftPlayer";
+import { ensureWatchAccess } from "@/utils/adPolicy";
+import { RewardedAdPrompt } from "@/components/RewardedAdPrompt";
 
 const BASE = getBaseUrl(); // e.g. "https://animenovaa.duckdns.org"
 
@@ -83,6 +85,10 @@ export default function AwDubbedWatchScreen() {
     setError(null);
     setSources([]);
     try {
+      if (!(await ensureWatchAccess())) {
+        if (mountedRef.current) setError("شاهد الإعلان لفتح مشاهدة الأنيميشن المدبلج لمدة 60 دقيقة");
+        return;
+      }
       const r = await fetch(
         `${BASE}/api/aw-dubbed/watch-src?series=${encodeURIComponent(series)}&ep=${ep}`,
         { signal: ctrl.signal },
@@ -118,6 +124,7 @@ export default function AwDubbedWatchScreen() {
   if (loading) {
     return (
       <View style={styles.center}>
+        <RewardedAdPrompt />
         <ActivityIndicator color="#10B981" size="large" />
         <Text style={styles.loadingText}>جاري تحميل المصدر...</Text>
       </View>
@@ -127,6 +134,7 @@ export default function AwDubbedWatchScreen() {
   if (error || !sources.length) {
     return (
       <View style={styles.errorContainer}>
+        <RewardedAdPrompt />
         <Pressable onPress={() => router.back()} style={styles.backBtn}>
           <Ionicons name="chevron-back" size={20} color="rgba(255,255,255,0.7)" />
         </Pressable>
@@ -145,15 +153,18 @@ export default function AwDubbedWatchScreen() {
   }
 
   return (
-    <RiftPlayer
-      /* key فريد لكل حلقة — يمنع تراكم موارد native player عبر الحلقات (نفس إصلاح
-         app/watch.tsx). */
-      key={`${series}-${season}-${ep}`}
-      sources={sources}
-      title={displayTitle}
-      episodeTitle={`${season} • الحلقة ${ep}`}
-      onBack={() => router.back()}
-    />
+    <>
+      <RewardedAdPrompt />
+      <RiftPlayer
+        /* key فريد لكل حلقة — يمنع تراكم موارد native player عبر الحلقات (نفس إصلاح
+           app/watch.tsx). */
+        key={`${series}-${season}-${ep}`}
+        sources={sources}
+        title={displayTitle}
+        episodeTitle={`${season} • الحلقة ${ep}`}
+        onBack={() => router.back()}
+      />
+    </>
   );
 }
 

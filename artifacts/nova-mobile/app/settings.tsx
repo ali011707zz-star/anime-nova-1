@@ -569,15 +569,12 @@ function PremiumSheet({ open, onClose, user }: {
   const [sent, setSent] = useState(false);
 
   const handleSubscribe = async () => {
-    const msg = user
-      ? `مرحبًا، أريد الاشتراك في Nova Premium.\nالاسم: ${user.displayName}\nالبريد: ${user.email}\nالمعرّف: ${user.id}`
-      : "مرحبًا، أريد الاشتراك في Nova Premium.";
-    try { await Share.share({ message: msg }); } catch {}
-    setTimeout(() => {
-      Linking.openURL("https://t.me/L_X_00").catch(() =>
-        Linking.openURL(`tg://resolve?domain=L_X_00`)
-      );
-    }, 400);
+    // Open the owner's personal Telegram profile directly. Do not call
+    // Share.share first: on Android it opens the share sheet/clipboard flow
+    // and can route the user to a channel instead of the personal account.
+    Linking.openURL("tg://resolve?domain=L_X_00").catch(() =>
+      Linking.openURL("https://t.me/L_X_00").catch(() => {})
+    );
     setSent(true);
     setTimeout(() => setSent(false), 4000);
   };

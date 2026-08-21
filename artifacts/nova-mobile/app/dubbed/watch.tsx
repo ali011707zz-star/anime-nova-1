@@ -8,6 +8,8 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { RiftPlayer, PlayerSource } from "@/components/RiftPlayer";
 import { getBaseUrl } from "@/utils/api";
+import { ensureWatchAccess } from "@/utils/adPolicy";
+import { RewardedAdPrompt } from "@/components/RewardedAdPrompt";
 
 export default function DubbedWatchScreen() {
   const insets = useSafeAreaInsets();
@@ -47,6 +49,13 @@ export default function DubbedWatchScreen() {
     setLoading(true); setError(null);
 
     const BASE = getBaseUrl();
+    if (!(await ensureWatchAccess())) {
+      if (mountedRef.current) {
+        setError("شاهد الإعلان لفتح مشاهدة المدبلج لمدة 60 دقيقة");
+        setLoading(false);
+      }
+      return;
+    }
 
     // ── الطريقة الأولى: VPS API (يجلب الصفحة ويعيد rawUrl + proxyUrl) ──
     // الـ VPS يستطيع جلب arabic-toons.com بـ UA موبايل؛ الموبايل يشغّل rawUrl مباشرة
@@ -140,6 +149,7 @@ export default function DubbedWatchScreen() {
   if (loading) {
     return (
       <View style={[styles.container, { paddingTop: topPad }]}>
+        <RewardedAdPrompt />
         <View style={styles.header}>
           <Pressable onPress={() => router.back()} style={styles.backBtn}>
             <Ionicons name="chevron-back" size={20} color="rgba(255,255,255,0.7)" />
@@ -161,6 +171,7 @@ export default function DubbedWatchScreen() {
   if (error || sources.length === 0) {
     return (
       <View style={[styles.container, { paddingTop: topPad }]}>
+        <RewardedAdPrompt />
         <View style={styles.header}>
           <Pressable onPress={() => router.back()} style={styles.backBtn}>
             <Ionicons name="chevron-back" size={20} color="rgba(255,255,255,0.7)" />
@@ -186,19 +197,22 @@ export default function DubbedWatchScreen() {
 
   /* ── RiftPlayer ── */
   return (
-    <RiftPlayer
-      /* key فريد لكل حلقة — يمنع تراكم موارد native player عبر الحلقات (نفس إصلاح
-         app/watch.tsx: بدونه router.replace لنفس /dubbed/watch لا يُعيد mount الشاشة). */
-      key={epUrl || `${title}-${season}-${ep}`}
-      sources={sources}
-      title={`${title || ""} · ${season || ""}`}
-      episode={ep ? parseInt(ep, 10) : undefined}
-      onBack={() => router.back()}
-      onError={() => {
-        setSources([]);
-        setError("تعذّر تشغيل مصدر المدبلج — حاول مرة أخرى");
-      }}
-    />
+    <>
+      <RewardedAdPrompt />
+      <RiftPlayer
+        /* key فريد لكل حلقة — يمنع تراكم موارد native player عبر الحلقات (نفس إصلاح
+           app/watch.tsx: بدونه router.replace لنفس /dubbed/watch لا يُعيد mount الشاشة). */
+        key={epUrl || `${title}-${season}-${ep}`}
+        sources={sources}
+        title={`${title || ""} · ${season || ""}`}
+        episode={ep ? parseInt(ep, 10) : undefined}
+        onBack={() => router.back()}
+        onError={() => {
+          setSources([]);
+          setError("تعذّر تشغيل مصدر المدبلج — حاول مرة أخرى");
+        }}
+      />
+    </>
   );
 }
 

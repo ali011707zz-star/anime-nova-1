@@ -14,6 +14,8 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { getBaseUrl } from "@/utils/api";
 import { secureFetch, secureStreamFetch } from "@/utils/secureApi";
 import { startMobileWatchAnalytics } from "@/utils/analytics";
+import { ensureWatchAccess } from "@/utils/adPolicy";
+import { RewardedAdPrompt } from "@/components/RewardedAdPrompt";
 import * as ScreenOrientation from "expo-screen-orientation";
 
 const { width: W, height: H } = Dimensions.get("window");
@@ -589,6 +591,7 @@ export default function AnimationWatchScreen() {
 
   /* ── Resolve and play only the selected source ── */
   const playSrc = useCallback(async (src: AnimSrc) => {
+    if (!(await ensureWatchAccess())) return;
     let next = src;
     if (src.site && !src.isEmbed) {
       try {
@@ -1016,6 +1019,7 @@ export default function AnimationWatchScreen() {
 
   return (
     <View style={[w.container, { paddingTop: topPad }]}>
+      <RewardedAdPrompt />
       {/* Blurred backdrop */}
       {posterUrl ? (
         <Image source={{ uri: posterUrl }} style={[StyleSheet.absoluteFill, { opacity: 0.07 }]} blurRadius={Platform.OS === "ios" ? 28 : 10} resizeMode="cover" />

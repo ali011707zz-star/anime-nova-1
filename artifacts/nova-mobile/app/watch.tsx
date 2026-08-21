@@ -514,6 +514,11 @@ const STATIC_PICKER: Record<QualityKey, { site: string; name: string; tag: strin
 };
 
 const Q_KEYS: QualityKey[] = ["1080p", "720p", "360p"];
+function downloadQualityKey(quality: string): QualityKey {
+  if (quality.includes("1080")) return "1080p";
+  if (quality.includes("720")) return "720p";
+  return "360p";
+}
 
 /* أحدث الحلقات تبدأ من كتالوج AnimeSlayer، لكن صفحة المشاهدة تستخدم فحص
    المصادر العام حتى تظهر AW وباقي المصادر المتاحة للحلقة مثل الويب. */
@@ -527,18 +532,6 @@ const PICKER_QUALITY: Record<QualityKey, Quality> = {
   "720p": "720p HD",
   "360p": "360p SD",
 };
-/* أوّل جودة يظهر فيها كل موقع — يُستخدم لعرض زر التنزيل مرّة واحدة فقط.
-   بدون هذا يُضاف اسم الموقع لـ dlFetchingSites فيظهر SpinRing
-   لكل صفوف نفس الموقع في الجودات الثلاث (1080p/720p/360p). */
-const SITE_FIRST_QUALITY: Map<string, QualityKey> = (() => {
-  const m = new Map<string, QualityKey>();
-  for (const qk of (["1080p", "720p", "360p"] as QualityKey[])) {
-    for (const slot of (STATIC_PICKER[qk] || [])) {
-      if (!m.has(slot.site)) m.set(slot.site, qk);
-    }
-  }
-  return m;
-})();
 const Q_KEY_LABEL: Record<QualityKey, string> = {
   "1080p": "1080p",
   "720p":  "720p",
@@ -753,10 +746,10 @@ export default function WatchScreen() {
   const [arEpTitle,   setArEpTitle]   = useState<string | undefined>();
   /* slotStatus: حالة كل مصدر في المنتقي (idle → fetching → ready/failed) */
   const [slotStatus,  setSlotStatus]  = useState<Record<string, "idle" | "fetching" | "ready" | "failed">>({});
-  /* حالات التنزيل لكل موقع */
+  /* حالات التنزيل لكل موقع وجودة (site:quality) */
   const [downloadStates,   setDownloadStates]   = useState<Record<string, "idle" | "downloading" | "done" | "error">>({});
   const [downloadProgress, setDownloadProgress] = useState<Record<string, number>>({});
-  /* مواقع يجري جلبها خصيصاً للتنزيل (بدون فتح المشغّل) */
+  /* صفوف يجري جلبها خصيصاً للتنزيل (بدون فتح المشغّل) */
   const [dlFetchingSites,  setDlFetchingSites]  = useState<Set<string>>(new Set());
   /* نتائج الاستعلام المسبق: نفس صفوف المصادر التي يرسلها الخادم للويب */
   type AvailableSlot = {
@@ -1310,11 +1303,11 @@ export default function WatchScreen() {
     const animeIdNum = parseInt(anime || "0");
     const sync = () => {
       const snapshot = getActiveDownloadsSnapshot();
-      /* خريطة: site → ActiveDownload للحلقة الحالية فقط */
+      /* خريطة: site:quality → ActiveDownload للحلقة الحالية فقط */
       const activeForEp = new Map(
         snapshot
           .filter(d => d.animeId === animeIdNum && d.ep === epNum)
-          .map(d => [d.site, d])
+          .map(d => [`${d.site}:${downloadQualityKey(d.quality)}`, d])
       );
       setDownloadStates(prev => {
         const next = { ...prev };
@@ -1325,15 +1318,15 @@ export default function WatchScreen() {
           }
         }
         /* حدِّث من الـ snapshot الحالي */
-        for (const [site, d] of activeForEp) {
-          next[site] = d.status === "error" ? "error" : "downloading";
+        for (const [stateKey, d] of activeForEp) {
+          next[stateKey] = d.status === "error" ? "error" : "downloading";
         }
         return next;
       });
       setDownloadProgress(prev => {
         const next = { ...prev };
-        for (const [site, d] of activeForEp) {
-          next[site] = d.progress;
+        for (const [stateKey, d] of activeForEp) {
+          next[stateKey] = d.progress;
         }
         return next;
       });
@@ -1344,13 +1337,17 @@ export default function WatchScreen() {
   }, [anime, epNum]);
 
   /* ── تنزيل حلقة من موقع معين (Global — يستمر عند التنقل) ── */
-  const handleDownloadSite = useCallback(async (site: string) => {
+  const handleDownloadSite = useCallback(async (site: string, preferredQuality?: QualityKey) => {
     if (!DOWNLOAD_SOURCE_SITES.has(site)) return;
-    const dlState = downloadStates[site] || "idle";
+    const stateKey = preferredQuality ? `${site}:${preferredQuality}` : site;
+    const wantedQuality = preferredQuality ? PICKER_QUALITY[preferredQuality] : undefined;
+    const dlState = downloadStates[stateKey] || "idle";
     if (dlState === "downloading" || dlState === "done") return;
 
     const siteSrcs = sources.filter(s => s.site === site);
-    const best = siteSrcs.find(isDirectPlayable) ?? siteSrcs[0];
+    const best = (wantedQuality
+      ? siteSrcs.find(s => getSrcQuality(s) === wantedQuality && isDirectPlayable(s))
+      : undefined) ?? siteSrcs.find(isDirectPlayable) ?? siteSrcs[0];
     if (!best || !isDirectPlayable(best)) return;
 
     const rawUrl   = getPlayUrl(best);
@@ -1395,21 +1392,23 @@ export default function WatchScreen() {
    * - إذا كان المصدر مجلوباً مسبقاً → يُنزَّل من الكاش مباشرةً.
    * - إذا لم يُجلب بعد → يجلبه أولاً ثم يبدأ التنزيل.
    */
-  const handleFetchAndDownload = useCallback(async (site: string) => {
+  const handleFetchAndDownload = useCallback(async (site: string, preferredQuality: QualityKey) => {
     if (!DOWNLOAD_SOURCE_SITES.has(site)) return;
-    const dlState = downloadStates[site] || "idle";
+    const stateKey = `${site}:${preferredQuality}`;
+    const wantedQuality = PICKER_QUALITY[preferredQuality];
+    const dlState = downloadStates[stateKey] || "idle";
     if (dlState === "downloading" || dlState === "done") return;
-    if (dlFetchingSites.has(site)) return; // جلب جارٍ بالفعل
+    if (dlFetchingSites.has(stateKey)) return; // جلب جارٍ بالفعل
     if (!(await ensureDownloadAllowed())) return;
 
     // إذا كان المصدر مجلوباً → نزّل مباشرةً من sources الحالية
     if (fetchedSitesRef.current.has(site)) {
-      await handleDownloadSite(site);
+      await handleDownloadSite(site, preferredQuality);
       return;
     }
 
     // جلب المصدر ثم التنزيل
-    setDlFetchingSites(prev => { const s = new Set(prev); s.add(site); return s; });
+    setDlFetchingSites(prev => { const s = new Set(prev); s.add(stateKey); return s; });
 
     const base = getBaseUrl();
     const qs = new URLSearchParams({
@@ -1458,8 +1457,8 @@ export default function WatchScreen() {
       setSlotStatus(prev => ({ ...prev, [site]: "ready" }));
       setSources(prev => [...prev.filter(s => s.site !== site), ...newSrcs]);
 
-      // ابحث عن أفضل مصدر قابل للتشغيل المباشر
-      const best = newSrcs.find(isDirectPlayable) ?? newSrcs[0];
+      // لا تستخدم أعلى جودة تلقائياً: صف التنزيل يحدد الجودة المطلوبة.
+      const best = newSrcs.find(s => getSrcQuality(s) === wantedQuality && isDirectPlayable(s));
       if (!best || !isDirectPlayable(best)) throw new Error("no playable source");
 
       const rawUrl    = getPlayUrl(best);
@@ -1490,12 +1489,12 @@ export default function WatchScreen() {
 
     } catch {
       if (isMountedRef.current)
-        setDownloadStates(prev => ({ ...prev, [site]: "error" }));
+        setDownloadStates(prev => ({ ...prev, [stateKey]: "error" }));
     } finally {
       if (tid !== null) clearTimeout(tid);
       siteCtrls.current.delete(site); // تنظيف الـ controller بعد انتهاء الطلب
       if (isMountedRef.current)
-        setDlFetchingSites(prev => { const s = new Set(prev); s.delete(site); return s; });
+        setDlFetchingSites(prev => { const s = new Set(prev); s.delete(stateKey); return s; });
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [downloadStates, dlFetchingSites, anime, epNum, titleStr, englishStr, titleArStr, format, year, episodes, native, anslayerId, displayTitle, coverUrl, globalSubUrl, handleDownloadSite]);
@@ -1586,14 +1585,11 @@ export default function WatchScreen() {
   }, [sources]);
 
   const downloadSlots = useMemo(() => {
-    const bySite = new Map<string, { site: string; tag: string; quality: QualityKey }>();
-    for (const qk of Q_KEYS) {
-      for (const [site, tiers] of Object.entries(availableSlots)) {
-        if (!DOWNLOAD_SOURCE_SITES.has(site) || !tiers[qk] || bySite.has(site)) continue;
-        bySite.set(site, { site, tag: SITE_TAG[site] || getSiteTag(site), quality: qk });
-      }
-    }
-    return Array.from(bySite.values());
+    return Q_KEYS.flatMap((quality) =>
+      Object.entries(availableSlots)
+        .filter(([site, tiers]) => DOWNLOAD_SOURCE_SITES.has(site) && Boolean(tiers[quality]))
+        .map(([site]) => ({ site, tag: SITE_TAG[site] || getSiteTag(site), quality })),
+    );
   }, [availableSlots]);
 
   /* ── RiftPlayer sources (live, used for picker) ── */
@@ -2017,10 +2013,11 @@ export default function WatchScreen() {
             </Text>
             <View style={d.downloadRows}>
               {downloadSlots.map((slot) => {
-                const dlState = downloadStates[slot.site] || "idle";
-                const dlPct = Math.round((downloadProgress[slot.site] || 0) * 100);
+                const stateKey = `${slot.site}:${slot.quality}`;
+                const dlState = downloadStates[stateKey] || "idle";
+                const dlPct = Math.round((downloadProgress[stateKey] || 0) * 100);
                 return (
-                  <View key={slot.site} style={d.downloadRow}>
+                  <View key={stateKey} style={d.downloadRow}>
                     <View style={d.downloadRowInfo}>
                       <View style={d.downloadTag}>
                         <Text style={d.downloadTagText}>{slot.tag}</Text>
@@ -2030,12 +2027,12 @@ export default function WatchScreen() {
                     </View>
                     {dlState === "idle" && (
                       <Pressable
-                        onPress={() => void handleFetchAndDownload(slot.site)}
+                        onPress={() => void handleFetchAndDownload(slot.site, slot.quality)}
                         hitSlop={8}
                         style={d.downloadAction}
-                        accessibilityLabel={`تحميل من سيرفر ${slot.tag}`}
+                        accessibilityLabel={`تحميل ${slot.quality} من سيرفر ${slot.tag}`}
                       >
-                        {dlFetchingSites.has(slot.site) ? <SpinRing size={15} /> : (
+                        {dlFetchingSites.has(stateKey) ? <SpinRing size={15} /> : (
                           <>
                             <Ionicons name="download-outline" size={15} color="#fff" />
                             <Text style={d.downloadActionText}>تحميل</Text>
