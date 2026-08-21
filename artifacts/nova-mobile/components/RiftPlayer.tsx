@@ -1088,7 +1088,7 @@ export function RiftPlayer({
           stallRef.current = { lastPos: pos, lastAt: isPlayingRef.current ? Date.now() : 0 };
         }
       } catch {}
-    }, 500);
+    }, 1000);
     progressTimer.current = id;
     return () => {
       clearInterval(id);
