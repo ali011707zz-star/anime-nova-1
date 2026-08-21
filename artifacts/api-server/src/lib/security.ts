@@ -5,10 +5,55 @@ import {
   randomBytes,
   timingSafeEqual,
 } from "crypto";
+import { isIP } from "node:net";
 
 export const MOBILE_CLIENT_ID = "nova-anime-mobile-v1";
 export const MOBILE_PACKAGE_NAME = "com.nova.anime";
 export const DEFAULT_MIN_MOBILE_VERSION = "1.0.0";
+
+/** Reject proxy targets that point back at this host or an internal network. */
+export function isSafeExternalUrl(raw: string): boolean {
+  let parsed: URL;
+  try {
+    parsed = new URL(raw);
+  } catch {
+    return false;
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return false;
+
+  const host = parsed.hostname.toLowerCase().replace(/\.$/, "");
+  if (
+    host === "localhost" ||
+    host.endsWith(".localhost") ||
+    host.endsWith(".local") ||
+    host === "0.0.0.0" ||
+    host === "::" ||
+    host === "::1"
+  ) {
+    return false;
+  }
+
+  const ipVersion = isIP(host);
+  if (ipVersion === 4) {
+    const octets = host.split(".").map(Number);
+    const [a, b] = octets;
+    if (
+      a === 10 ||
+      a === 127 ||
+      (a === 169 && b === 254) ||
+      (a === 172 && b >= 16 && b <= 31) ||
+      (a === 192 && b === 168) ||
+      (a === 100 && b >= 64 && b <= 127) ||
+      (a === 198 && b >= 18 && b <= 19)
+    ) {
+      return false;
+    }
+  }
+  if (ipVersion === 6 && (host === "::1" || host.startsWith("fc") || host.startsWith("fd") || host.startsWith("fe8") || host.startsWith("fe9") || host.startsWith("fea") || host.startsWith("feb"))) {
+    return false;
+  }
+  return true;
+}
 
 // ── مفتاح السر (APP_SECRET env var) ──────────────────────────────────────────
 // لا يوجد fallback ثابت في الإنتاج. أي fallback ثابت يمكن استخراجه من الكود

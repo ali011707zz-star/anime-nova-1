@@ -1,5 +1,5 @@
 import type { Express, Request, Response } from "express";
-import { scrypt, randomBytes, timingSafeEqual } from "node:crypto";
+import { scrypt, randomBytes, randomInt, timingSafeEqual } from "node:crypto";
 import { promisify } from "node:util";
 import { sendVerifyEmail, sendPasswordResetEmail } from "./emailService.js";
 import { sbSelect, sbInsert, sbUpsert, sbDelete, sbPatch } from "../lib/supabaseClient.js";
@@ -11,7 +11,7 @@ const MAX_ATTEMPTS       = 5;
 const RESEND_COOLDOWN_MS = 60 * 1000;
 
 function generateCode(): string {
-  return String(Math.floor(100000 + Math.random() * 900000));
+  return String(randomInt(100000, 1000000));
 }
 
 async function setPendingCode(email: string, code: string, type: "signup" | "reset"): Promise<void> {

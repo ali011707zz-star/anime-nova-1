@@ -146,8 +146,10 @@ export async function createApp(): Promise<Express> {
     next();
   });
 
-  app.use(express.json({ limit: "10mb" }));
-  app.use(express.urlencoded({ extended: true }));
+  // Keep request bodies bounded. Large media never belongs in the API body;
+  // it must be streamed through the dedicated proxy routes.
+  app.use(express.json({ limit: "2mb" }));
+  app.use(express.urlencoded({ extended: false, limit: "64kb" }));
 
   setupSession(app);
   registerEmailAuthRoutes(app);

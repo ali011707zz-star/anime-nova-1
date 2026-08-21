@@ -19,14 +19,25 @@ router.post("/api/report", async (req, res) => {
     return;
   }
 
-  const { message, type, page, userDisplayName } = req.body as {
+  const {
+    message: rawMessage,
+    type,
+    page: rawPage,
+    userDisplayName: rawDisplayName,
+  } = req.body as {
     message?: string;
     type?: string;
     page?: string;
     userDisplayName?: string;
   };
 
-  if (!message?.trim()) {
+  const message = typeof rawMessage === "string" ? rawMessage.trim().slice(0, 4000) : "";
+  const page = typeof rawPage === "string" ? rawPage.trim().slice(0, 500) : "";
+  const userDisplayName = typeof rawDisplayName === "string"
+    ? rawDisplayName.trim().slice(0, 120)
+    : "";
+
+  if (!message) {
     res.status(400).json({ ok: false, error: "الرسالة فارغة" });
     return;
   }
@@ -35,7 +46,7 @@ router.post("/api/report", async (req, res) => {
   try {
     await sbInsert("reports", {
       type:              type || "other",
-      message:           message.trim(),
+      message,
       page:              page || null,
       user_display_name: userDisplayName || null,
     });
@@ -63,7 +74,7 @@ router.post("/api/report", async (req, res) => {
       page           ? `📍 *الصفحة:* ${page}` : "",
       ``,
       `📝 *الرسالة:*`,
-      message.trim(),
+      message,
       ``,
       `🕐 ${new Date().toLocaleString("ar-SA", { timeZone: "Asia/Riyadh" })}`,
     ].filter(l => l !== "");

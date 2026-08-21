@@ -14,7 +14,7 @@ import {
   setSubtitleCache,
 } from "../lib/sourceCache.js";
 import { notifyNewEpisode } from "./telegram.js";
-import { encryptProxyUrl, encryptParam, decryptParam, isEncrypted } from "../lib/security.js";
+import { encryptProxyUrl, encryptParam, decryptParam, isEncrypted, isSafeExternalUrl } from "../lib/security.js";
 import { ANIVEXA_SOURCES, getAnivexaSources, isAnivexaSite } from "../lib/anivexa.js";
 import {
   CONSUMET_SOURCES,
@@ -15772,7 +15772,7 @@ router.get("/anime/hls-proxy", async (req, res) => {
   if (isEncrypted(url)) url = decryptParam(url);
   if (ref && isEncrypted(ref)) ref = decryptParam(ref);
   if (manifestKey && isEncrypted(manifestKey)) manifestKey = decryptParam(manifestKey);
-  if (!url.startsWith("http")) { res.status(400).send("invalid url"); return; }
+  if (!isSafeExternalUrl(url)) { res.status(400).send("invalid external url"); return; }
 
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Headers", "Range, Content-Type");
@@ -15790,7 +15790,7 @@ router.get("/anime/video-proxy", async (req, res) => {
   try { url = decodeURIComponent(rawUrl); } catch { url = rawUrl; }
   if (isEncrypted(url)) url = decryptParam(url);
   if (ref && isEncrypted(ref)) ref = decryptParam(ref);
-  if (!url.startsWith("http")) { res.status(400).send("invalid url"); return; }
+  if (!isSafeExternalUrl(url)) { res.status(400).send("invalid external url"); return; }
 
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Headers", "Range, Content-Type");
@@ -16187,7 +16187,7 @@ router.get("/anime/seg-proxy", async (req, res) => {
   let url: string;
   try { url = decodeURIComponent(rawUrl); } catch { url = rawUrl; }
   if (isEncrypted(url)) url = decryptParam(url);
-  if (!url.startsWith("http")) { res.status(400).send("invalid url"); return; }
+  if (!isSafeExternalUrl(url)) { res.status(400).send("invalid external url"); return; }
 
   let ref = (req.query.ref as string || "").trim();
   try { if (ref) ref = decodeURIComponent(ref); } catch {}
