@@ -760,7 +760,9 @@ export default function WatchScreen() {
   const [availabilityError, setAvailabilityError] = useState(false);
   const [availabilityAttempt, setAvailabilityAttempt] = useState(0);
   const [watchUnlocked, setWatchUnlocked] = useState(false);
-  const [watchAdLoading, setWatchAdLoading] = useState(false);
+  /* Only the pressed server row is waiting for the ad decision. A single
+     boolean here made every server button show a spinner at once. */
+  const [watchAdSite, setWatchAdSite] = useState<string | null>(null);
 
   const abortRef          = useRef<AbortController | null>(null);
   const availabilityAbortRef = useRef<AbortController | null>(null);
@@ -1114,14 +1116,16 @@ export default function WatchScreen() {
   const handlePickSite = useCallback(async (site: string, preferredQuality?: QualityKey) => {
     if (BLOCKED_SOURCE_SITES.has(site.toLowerCase())) return;
     if (!watchUnlocked) {
-      if (watchAdLoading) return;
-      setWatchAdLoading(true);
-      const allowed = await ensureWatchAccess();
-      if (isMountedRef.current) {
-        setWatchAdLoading(false);
-        if (allowed) setWatchUnlocked(true);
+      if (watchAdSite && watchAdSite !== site) return;
+      if (watchAdSite === site) return;
+      setWatchAdSite(site);
+      try {
+        const allowed = await ensureWatchAccess();
+        if (isMountedRef.current && allowed) setWatchUnlocked(true);
+        if (!allowed) return;
+      } finally {
+        if (isMountedRef.current) setWatchAdSite(null);
       }
-      if (!allowed) return;
     }
     /* منع الضغط المزدوج أثناء الجلب — يسمح بإعادة المحاولة بعد الفشل */
     const fetchKey = preferredQuality ? `${site}::${preferredQuality}` : site;
@@ -1376,7 +1380,7 @@ export default function WatchScreen() {
        hlsManifestUrl: isHlsDownload ? proxyUrl : undefined,
     });
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [downloadStates, sources, anime, epNum, displayTitle, coverUrl, globalSubUrl, watchUnlocked, watchAdLoading]);
+  }, [downloadStates, sources, anime, epNum, displayTitle, coverUrl, globalSubUrl, watchUnlocked]);
 
   /**
    * handleFetchAndDownload — يُنزَّل مباشرةً بدون الحاجة لفتح المشغّل أولاً.
@@ -1941,7 +1945,7 @@ export default function WatchScreen() {
                       <View style={d.webRowActions}>
                         {!watchUnlocked ? (
                           <View style={d.lockBtn}>
-                            {watchAdLoading ? <SpinRing size={14} /> : <Ionicons name="lock-closed" size={11} color="#c4b5fd" />}
+                            {watchAdSite === slot.site ? <SpinRing size={14} /> : <Ionicons name="lock-closed" size={11} color="#c4b5fd" />}
                             <Text style={d.lockBtnText}>فتح</Text>
                           </View>
                         ) : isFetching ? (

@@ -69,6 +69,19 @@ function isJsonResponse(response: Response): boolean {
   return (response.headers.get("content-type") || "").toLowerCase().includes("application/json");
 }
 
+async function rewardFromResponse(
+  response: Response,
+  kind: RewardKind,
+): Promise<boolean> {
+  /* A stale VPS/Nginx build can return the SPA HTML for an API route. Do not
+     silently consume the tap in that case: show the same reward prompt and
+     let the reward request fail closed until the API is deployed. */
+  const body = await response.clone().json().catch(() => ({}));
+  if (body?.needsReward) return requestRewardPrompt(kind, () => completeReward(kind));
+  if (!isJsonResponse(response)) return requestRewardPrompt(kind, () => completeReward(kind));
+  return false;
+}
+
 export async function getAdState(): Promise<AdState | null> {
   try {
     const response = await adFetch("/api/ads/state");
@@ -122,9 +135,7 @@ export async function ensureDownloadAllowed(): Promise<boolean> {
   try {
     const response = await adFetch("/api/ads/download-start", { method: "POST", body: "{}" });
     if (response.ok && isJsonResponse(response)) return true;
-    const body = await response.clone().json().catch(() => ({}));
-    if (!body.needsReward) return false;
-    return requestRewardPrompt("download", () => completeReward("download"));
+    return rewardFromResponse(response, "download");
   } catch {
     return false;
   }
@@ -150,9 +161,7 @@ export async function ensureWatchAccess(): Promise<boolean> {
   try {
     const response = await adFetch("/api/ads/watch-start", { method: "POST", body: "{}" });
     if (response.ok && isJsonResponse(response)) return true;
-    const body = await response.clone().json().catch(() => ({}));
-    if (!body.needsReward) return false;
-    return requestRewardPrompt("watch", () => completeReward("watch"));
+    return rewardFromResponse(response, "watch");
   } catch {
     return false;
   }

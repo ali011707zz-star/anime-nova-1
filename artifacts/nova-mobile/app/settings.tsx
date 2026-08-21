@@ -11,6 +11,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useColors } from "@/hooks/useColors";
 import { useApp } from "@/context/AppContext";
 import { getBaseUrl } from "@/utils/baseUrl";
+import { setUserAuthToken } from "@/utils/secureApi";
 import { CrashEntry, getCrashLog } from "@/utils/crashLogger";
 
 const THEMES: { label: string; value: string; dot: string; desc: string }[] = [
@@ -317,6 +318,7 @@ function AuthSheet({ open, onClose, onLogin }: {
       if (!r.ok) { setError(d.error || "بيانات غير صحيحة"); }
       else {
         const u: MobileUser = { email: d.email || email, displayName: d.displayName || d.username || email.split("@")[0], id: d.id || "" };
+        await setUserAuthToken(d.authToken || null);
         await AsyncStorage.setItem(AUTH_KEY, JSON.stringify(u));
         onLogin(u); onClose();
       }
@@ -371,6 +373,7 @@ function AuthSheet({ open, onClose, onLogin }: {
       if (!r.ok) { setError(d.error || "حدث خطأ في إنشاء الحساب"); }
       else {
         const u: MobileUser = { email: d.email || email, displayName: d.displayName || d.username || name || email.split("@")[0], id: d.id || "" };
+        await setUserAuthToken(d.authToken || null);
         await AsyncStorage.setItem(AUTH_KEY, JSON.stringify(u));
         onLogin(u); onClose();
       }
@@ -968,6 +971,7 @@ export default function SettingsScreen() {
   }, []);
 
   const handleLogout = () => {
+    void setUserAuthToken(null);
     AsyncStorage.removeItem(AUTH_KEY);
     setCurrentUser(null);
     showToast("تم تسجيل الخروج");
