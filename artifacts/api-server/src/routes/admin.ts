@@ -387,7 +387,11 @@ router.get("/admin/stats", async (req: Request, res: Response) => {
     return res.status(401).json({ error: "غير مصرّح" });
 
   try {
-    const [allUsers, cacheRows, entitlements, sessions, episodeViews, tableStatus] = await Promise.all([
+    // Analytics must not disappear just because an unrelated legacy table
+    // (for example source_cache) is absent from the production REST schema.
+    // The old all-or-nothing Promise.all made the dashboard show dashes for
+    // every card when any one query failed.
+    const [allUsersResult, cacheRowsResult, entitlementsResult, sessionsResult, episodeViewsResult, tableStatusResult] = await Promise.allSettled([
       sbSelect("users", { select: "id" }, { limit: 1000 }),
       sbSelect("source_cache", { select: "cache_key" }, { limit: 1000 }),
       loadEntitlements(),
@@ -395,6 +399,14 @@ router.get("/admin/stats", async (req: Request, res: Response) => {
       sbSelect<any>("analytics_episode_views", { order: "viewed_at.desc" }, { limit: 10000 }),
       getTableStatus(),
     ]);
+    const valueOr = <T,>(result: PromiseSettledResult<T>, fallback: T): T =>
+      result.status === "fulfilled" ? result.value : fallback;
+    const allUsers = valueOr(allUsersResult, [] as any[]);
+    const cacheRows = valueOr(cacheRowsResult, [] as any[]);
+    const entitlements = valueOr(entitlementsResult, new Map<string, Entitlement>());
+    const sessions = valueOr(sessionsResult, [] as any[]);
+    const episodeViews = valueOr(episodeViewsResult, [] as any[]);
+    const tableStatus = valueOr(tableStatusResult, {});
 
     const byPlatform = (platform: string) => sessions.filter((s) => s.platform === platform);
     const viewsByPlatform = (platform: string) => episodeViews.filter((v) => v.platform === platform);

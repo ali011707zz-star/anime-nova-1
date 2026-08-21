@@ -773,7 +773,7 @@ export default function WatchScreen() {
   const siteCtrls         = useRef<Map<string, AbortController>>(new Map());
   const seenKeys          = useRef(new Set<string>());
   const lastTimeRef       = useRef(0);
-  const lastHistoryWriteRef = useRef(0);
+  const lastDurationRef   = useRef(0);
   const isMountedRef      = useRef(true);
   const fetchEpochRef     = useRef(0);
   const inFlightSitesRef  = useRef<Set<string>>(new Set());
@@ -1029,8 +1029,21 @@ export default function WatchScreen() {
   /* ── Progress save ── */
   const saveProgress = useCallback(async () => {
     const t = lastTimeRef.current;
-    if (t > 10) await AsyncStorage.setItem(progressKey, String(Math.floor(t)));
-  }, [progressKey]);
+    if (t <= 10) return;
+    await AsyncStorage.setItem(progressKey, String(Math.floor(t)));
+    if (anime) {
+      await addToHistory({
+        animeId: parseInt(anime, 10),
+        ep: epNum,
+        title: titleStr,
+        english: englishStr,
+        thumbnail: coverUrl || `https://img.anili.st/media/${anime}`,
+        position: t,
+        duration: lastDurationRef.current || undefined,
+        updatedAt: Date.now(),
+      });
+    }
+  }, [progressKey, anime, epNum, titleStr, englishStr, coverUrl, addToHistory]);
 
   /* ── Navigate episode ── */
   const goEp = useCallback((n: number, _auto = false) => {
@@ -1073,9 +1086,6 @@ export default function WatchScreen() {
 
   /* ── Play a source ── */
   const playSrc = useCallback((src: Src) => {
-    const thumb = coverUrl || (anime ? `https://img.anili.st/media/${anime}` : "");
-    if (anime) addToHistory({ animeId: parseInt(anime), ep: epNum, title: titleStr, english: englishStr, thumbnail: thumb, updatedAt: Date.now() });
-
     const subtitleUrl = subtitlesDisabledForSite(src.site)
       ? undefined
       : normalizeProviderSubtitleUrl(src.site || "", src.subtitleUrl || globalSubUrl, getBaseUrl());
@@ -1091,7 +1101,7 @@ export default function WatchScreen() {
        عبر WebView مخفي (IP الجهاز السكني) قبل عرض بطاقة "يحتاج تطبيق أصلي" */
     if (needsHiddenResolve(src)) { setScreen("resolving"); return; }
     setScreen("embed");
-  }, [anime, epNum, titleStr, englishStr, coverUrl, globalSubUrl]); // eslint-disable-line
+  }, [globalSubUrl]); // eslint-disable-line
 
   /* ── نتيجة استخراج WebView المخفي ── */
   const handleHiddenResolved = useCallback((stream: ResolvedStream) => {
@@ -1548,16 +1558,8 @@ export default function WatchScreen() {
 
   const onRiftProgress = useCallback((pos: number, dur: number) => {
     lastTimeRef.current = pos;
-    const now = Date.now();
-    if (dur > 0 && anime && now - lastHistoryWriteRef.current > 30_000) {
-      lastHistoryWriteRef.current = now;
-      addToHistory({
-        animeId: parseInt(anime), ep: epNum, title: titleStr, english: englishStr,
-        thumbnail: coverUrl || (anime ? `https://img.anili.st/media/${anime}` : ""),
-        position: pos, duration: dur, updatedAt: now,
-      });
-    }
-  }, [progressKey, anime, epNum, titleStr, englishStr, coverUrl, addToHistory]);
+    if (dur > 0) lastDurationRef.current = dur;
+  }, []);
 
   const onRiftNextEpisode = useCallback(() => goEp(epNum + 1, true), [goEp, epNum]);
   const onRiftPrevEpisode = useCallback(() => goEp(epNum - 1), [goEp, epNum]);

@@ -148,12 +148,13 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
    */
   const addToHistory = useCallback(async (item: WatchProgress) => {
     setWatchHistory((prev) => {
-      const exists = prev.find(
+      const withoutCurrent = prev.filter(
         (historyItem) =>
-          historyItem.animeId === item.animeId && historyItem.ep === item.ep,
+          !(historyItem.animeId === item.animeId && historyItem.ep === item.ep),
       );
-      if (exists) return prev;
-      return [...prev.slice(-99), item];
+      // Keep the most recently exited episode at index 0. Home renders this
+      // list from the right, so the latest item must be the first item.
+      return [item, ...withoutCurrent].slice(0, 100);
     });
   }, []);
 

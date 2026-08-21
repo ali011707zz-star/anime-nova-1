@@ -569,12 +569,14 @@ function PremiumSheet({ open, onClose, user }: {
   const [sent, setSent] = useState(false);
 
   const handleSubscribe = async () => {
-    // Open the owner's personal Telegram profile directly. Do not call
-    // Share.share first: on Android it opens the share sheet/clipboard flow
-    // and can route the user to a channel instead of the personal account.
-    Linking.openURL("tg://resolve?domain=L_X_00").catch(() =>
-      Linking.openURL("https://t.me/L_X_00").catch(() => {})
-    );
+    // Use the owner's Telegram user id. A username/deep-link from an old
+    // build could open Telegram Wallet or a channel instead of the account.
+    const telegramUser = `tg://user?id=${TG_OWNER_ID}`;
+    Linking.openURL(telegramUser).catch(() => {
+      // Android's tg:// scheme is the reliable account link. Keep a neutral
+      // fallback instead of sending the user to a wallet or channel.
+      Linking.openURL(`https://t.me/${TG_OWNER_ID}`).catch(() => {});
+    });
     setSent(true);
     setTimeout(() => setSent(false), 4000);
   };
