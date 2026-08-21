@@ -50,3 +50,21 @@ The endpoint requires the existing web-admin/admin authentication. The
 default is `enabled: true`, so the current reward gate is not weakened by
 this change. Changing the unit ID or enabled state takes effect for clients
 when they refresh their ad state; no new APK is required.
+
+## General remote configuration
+
+The same server exposes the protected control endpoint
+`/api/admin/remote-config`. After one APK build containing remote-config
+support, the following can be changed without another APK:
+
+- `maintenanceMode` and `maintenanceMessage`
+- `features.comments`, `watchHistory`, `subscriptions`, `downloads`,
+  `animationSection`
+- individual `sources` switches
+- `limits.downloadLimit` (0–100)
+- `limits.watchAccessMinutes` (1–1440)
+- the existing `announcements` endpoint
+
+Only administrators can read or update this endpoint. These settings control
+behaviour already present in the APK; they cannot add new native code,
+permissions, screens, or dependencies remotely.

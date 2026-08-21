@@ -42,6 +42,7 @@ export type RemoteConfig = {
   maintenanceMode?: boolean;
   maintenanceMessage?: string;
   version?: string;
+  limits?: { downloadLimit: number; watchAccessMinutes: number };
 };
 
 export const DEFAULT_CONFIG: RemoteConfig = {
@@ -64,5 +65,7 @@ export const DEFAULT_CONFIG: RemoteConfig = {
     watchHistory: true,
     subscriptions: true,
     downloads: false,
+    animationSection: true,
   },
+  limits: { downloadLimit: 4, watchAccessMinutes: 60 },
 };

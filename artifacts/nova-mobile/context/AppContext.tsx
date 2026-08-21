@@ -194,6 +194,13 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
             هذه النسخة غير رسمية أو معدلة. حمّل التطبيق الرسمي من موقع Anime NOVA.
           </Text>
         </View>
+      ) : remoteConfig.maintenanceMode ? (
+        <View style={blockedStyles.container}>
+          <Text style={blockedStyles.title}>التطبيق تحت الصيانة</Text>
+          <Text style={blockedStyles.message}>
+            {remoteConfig.maintenanceMessage || "سنعود قريبًا. يرجى المحاولة لاحقًا."}
+          </Text>
+        </View>
       ) : children}
     </AppContext.Provider>
   );
