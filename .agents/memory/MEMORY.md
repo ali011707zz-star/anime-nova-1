@@ -89,3 +89,4 @@
 - [Rewarded ads VPS routing](rewarded-ads-vps-routing.md) — ads router is mounted under `/api`; route definitions must use `/ads/...`, otherwise requests become `/api/api/ads/...` and SPA HTML is returned.
 - [AW quality persistence](aw-quality-persistence.md) — Supabase `aw_links` must be unique by anime+episode+server+quality; otherwise new quality rows collide and Firestore fallback masks the loss.
 - [Provider list stability](source-identity-stability.md) — source caches need anime identity, availability may reuse metadata safely, and picker/download rows must sort by canonical provider order.
+- [VPS HLS manifest cache](vps-hls-manifest-cache.md) — backend no-cache bypassed shared manifest caching; short Nginx micro-cache with lock coalesces VOD requests without caching MP4.
