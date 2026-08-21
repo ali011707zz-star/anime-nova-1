@@ -781,8 +781,6 @@ export default function WatchScreen() {
   const seenKeys          = useRef(new Set<string>());
   const lastTimeRef       = useRef(0);
   const lastHistoryWriteRef = useRef(0);
-  /* آخر كتابة فعلية لـ progressKey — نحدّها بمرة واحدة كل 10ث بدل كل 500ms */
-  const lastProgressSaveRef = useRef(0);
   const isMountedRef      = useRef(true);
   const fetchEpochRef     = useRef(0);
   const inFlightSitesRef  = useRef<Set<string>>(new Set());
@@ -1552,14 +1550,6 @@ export default function WatchScreen() {
   const onRiftProgress = useCallback((pos: number, dur: number) => {
     lastTimeRef.current = pos;
     const now = Date.now();
-    /* لا تكتب كل حدث progress في AsyncStorage. RiftPlayer يرسل حدثاً كل
-       500ms، والكتابة المتكررة تعني طوابير رسائل كثيرة عبر جسر Android وقد
-       تنتهي بـ ANR على بعض أجهزة Android 14. الحفظ الفوري عند الخروج يبقى
-       موجوداً في saveProgress(). */
-    if (pos > 10 && now - lastProgressSaveRef.current >= 10_000) {
-      lastProgressSaveRef.current = now;
-      AsyncStorage.setItem(progressKey, String(Math.floor(pos))).catch(() => {});
-    }
     if (dur > 0 && anime && now - lastHistoryWriteRef.current > 30_000) {
       lastHistoryWriteRef.current = now;
       addToHistory({
