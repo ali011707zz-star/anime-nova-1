@@ -33,6 +33,27 @@ interface DubbedSeries  {
 }
 
 type TabKey = "animation" | "cartoon";
+
+function normalizeAwSeries(item: any): AwSeries | null {
+  if (!item || typeof item !== "object") return null;
+  const key = String(item.key ?? "").trim();
+  if (!key) return null;
+  const seasons = Array.isArray(item.seasons)
+    ? item.seasons
+        .filter((s: any) => s && typeof s === "object" && String(s.animeId ?? "").trim())
+        .map((s: any) => ({
+          label: String(s.label ?? "الحلقات"),
+          animeId: String(s.animeId),
+        }))
+    : [];
+  return {
+    key,
+    title: String(item.title ?? key),
+    titleAr: item.titleAr ? String(item.titleAr) : undefined,
+    poster: item.poster ? String(item.poster) : undefined,
+    seasons: seasons.length ? seasons : [{ label: "الحلقات", animeId: key }],
+  };
+}
 function gridColumnsForWidth(width: number) {
   return width >= 1000 ? 6 : width >= 700 ? 5 : 3;
 }
@@ -101,7 +122,10 @@ function AnimationList({ searchQ }: { searchQ: string }) {
       const r = await fetch(`${BASE}/api/aw-dubbed/catalog?page=${p}`, { signal: ctrl.signal });
       const d = await r.json();
       if (ctrl.signal.aborted) return;
-      setSeries(prev => reset ? (d.results || []) : [...prev, ...(d.results || [])]);
+       const next = Array.isArray(d.results)
+         ? d.results.map(normalizeAwSeries).filter(Boolean) as AwSeries[]
+         : [];
+       setSeries(prev => reset ? next : [...prev, ...next]);
       setTotalPages(d.totalPages || 1);
       setPage(p);
     } catch (e: any) { if (e?.name === "AbortError") return; }
@@ -119,8 +143,10 @@ function AnimationList({ searchQ }: { searchQ: string }) {
     timer.current = setTimeout(async () => {
       try {
         const r = await fetch(`${BASE}/api/aw-dubbed/catalog?q=${encodeURIComponent(q)}&page=1`, { signal: ctrl.signal });
-        const d = await r.json();
-        setSearchRes(d.results || []);
+         const d = await r.json();
+         setSearchRes(Array.isArray(d.results)
+           ? d.results.map(normalizeAwSeries).filter(Boolean) as AwSeries[]
+           : []);
       } catch (e: any) {
         if (e?.name !== "AbortError") setSearchRes([]);
       }

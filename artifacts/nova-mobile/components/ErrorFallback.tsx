@@ -41,11 +41,11 @@ export function ErrorFallback({ error, resetError }: ErrorFallbackProps) {
     <View style={styles.container}>
       <View style={styles.content}>
         <Text style={styles.title}>
-          Something went wrong
+          حدث خطأ غير متوقع
         </Text>
 
         <Text style={styles.message}>
-          Please reload the app to continue.
+          تعذّر فتح هذه الشاشة. أعد المحاولة للمتابعة.
         </Text>
 
         <Pressable
@@ -59,7 +59,7 @@ export function ErrorFallback({ error, resetError }: ErrorFallbackProps) {
           ]}
         >
           <Text style={styles.buttonText}>
-            Try Again
+            إعادة المحاولة
           </Text>
         </Pressable>
       </View>

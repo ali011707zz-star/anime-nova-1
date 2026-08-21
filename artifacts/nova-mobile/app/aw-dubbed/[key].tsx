@@ -17,6 +17,12 @@ const BASE = getBaseUrl();
 interface Season  { label: string; animeId: string; }
 interface Episode { number: number; }
 
+function safeDecode(value: string | string[] | undefined): string {
+  const raw = Array.isArray(value) ? value[0] : value;
+  if (!raw) return "";
+  try { return decodeURIComponent(raw); } catch { return raw; }
+}
+
 export default function AwDubbedDetailScreen() {
   const insets   = useSafeAreaInsets();
   const router   = useRouter();
@@ -26,12 +32,22 @@ export default function AwDubbedDetailScreen() {
     seasons: string; poster: string;
   }>();
 
-  const keyParam  = decodeURIComponent(params.key  || "");
-  const title     = params.title   || "";
-  const titleAr   = params.titleAr || "";
-  const poster    = params.poster ? decodeURIComponent(params.poster) : "";
+  const keyParam  = safeDecode(params.key);
+  const title     = safeDecode(params.title);
+  const titleAr   = safeDecode(params.titleAr);
+  const poster    = safeDecode(params.poster);
   const seasons   = (() => {
-    try { return JSON.parse(decodeURIComponent(params.seasons || "[]")) as Season[]; }
+    try {
+      const decoded = safeDecode(params.seasons);
+      const parsed = JSON.parse(decoded);
+      if (!Array.isArray(parsed)) return [];
+      return parsed
+        .filter((s: any) => s && typeof s === "object" && String(s.animeId ?? "").trim())
+        .map((s: any) => ({
+          label: String(s.label ?? "الحلقات"),
+          animeId: String(s.animeId),
+        })) as Season[];
+    }
     catch { return []; }
   })();
 

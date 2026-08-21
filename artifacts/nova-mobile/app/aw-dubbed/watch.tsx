@@ -39,6 +39,12 @@ function toAbsoluteUrl(url: string | null | undefined): string | null {
   return null;
 }
 
+function safeDecode(value: string | string[] | undefined): string {
+  const raw = Array.isArray(value) ? value[0] : value;
+  if (!raw) return "";
+  try { return decodeURIComponent(raw); } catch { return raw; }
+}
+
 /** تحويل ApiSource[] إلى PlayerSource[] صالحة لـ RiftPlayer */
 function toRiftSources(apiSrcs: ApiSource[]): PlayerSource[] {
   const out: PlayerSource[] = [];
@@ -63,12 +69,12 @@ export default function AwDubbedWatchScreen() {
     seasons: string; key: string;
   }>();
 
-  const series  = params.series  || "";
-  const ep      = params.ep      || "1";
-  const title   = params.title   || "";
-  const titleAr = params.titleAr || "";
-  const season  = params.season  || "الحلقات";
-  const poster  = params.poster ? decodeURIComponent(params.poster) : "";
+  const series  = safeDecode(params.series);
+  const ep      = safeDecode(params.ep) || "1";
+  const title   = safeDecode(params.title);
+  const titleAr = safeDecode(params.titleAr);
+  const season  = safeDecode(params.season) || "الحلقات";
+  const poster  = safeDecode(params.poster);
 
   const [sources,  setSources]  = useState<PlayerSource[]>([]);
   const [loading,  setLoading]  = useState(true);

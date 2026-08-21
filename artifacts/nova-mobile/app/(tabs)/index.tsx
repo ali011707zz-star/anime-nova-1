@@ -395,11 +395,17 @@ export default function HomeScreen() {
                       return (
                         <Pressable
                           onPress={() => {
-                            const seasons = JSON.stringify(item.seasons || [{ label: "الحلقات", animeId: item.key }]);
+                            const key = String(item.key || "").trim();
+                            if (!key) return;
+                            const seasons = JSON.stringify(
+                              Array.isArray(item.seasons) && item.seasons.length
+                                ? item.seasons
+                                : [{ label: "الحلقات", animeId: key }],
+                            );
                             router.push({
                               pathname: "/aw-dubbed/[key]" as any,
                               params: {
-                                key: encodeURIComponent(item.key || ""),
+                                key: encodeURIComponent(key),
                                 title: item.title || "",
                                 titleAr: item.titleAr || "",
                                 seasons: encodeURIComponent(seasons),
