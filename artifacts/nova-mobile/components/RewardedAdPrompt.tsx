@@ -7,6 +7,7 @@ import {
   View,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import { useRouter } from "expo-router";
 import { useVideoPlayer, VideoView } from "expo-video";
 import { subscribeRewardPrompt } from "@/utils/adPolicy";
 import type { RewardKind } from "@/utils/adPolicy";
@@ -20,6 +21,7 @@ type PendingPrompt = {
 export function RewardedAdPrompt() {
   const [pending, setPending] = useState<PendingPrompt | null>(null);
   const [busy, setBusy] = useState(false);
+  const router = useRouter();
   const player = useVideoPlayer(require("../assets/deku-ad.mp4"), (instance) => {
     instance.loop = true;
     instance.muted = true;
@@ -48,11 +50,16 @@ export function RewardedAdPrompt() {
     close(result);
   };
 
+  const openSubscriptions = () => {
+    close(false);
+    router.push({ pathname: "/settings", params: { openPremium: "1" } } as any);
+  };
+
   const isDownload = pending?.kind === "download";
-  const title = isDownload ? "تابع التنزيل" : "افتح السيرفرات";
+  const title = isDownload ? "تابع التنزيل" : "افتح المشاهدة";
   const message = isDownload
     ? "أكملت 4 تنزيلات ناجحة. شاهد إعلانًا قصيرًا لمتابعة تنزيل الحلقات."
-    : "شاهد إعلانًا قصيرًا لفتح السيرفرات ومشاهدة الحلقة لمدة 60 دقيقة.";
+    : "إعلان قصير واحد يتيح لك المشاهدة لمدة 60 دقيقة بدون إعلانات.";
 
   return (
     <Modal
@@ -89,14 +96,19 @@ export function RewardedAdPrompt() {
               accessible={false}
             />
             <View style={styles.mediaShade} />
-            <View style={styles.playBadge}>
-              <Ionicons name="play" size={17} color="#fff" />
-            </View>
           </View>
 
           <Text style={styles.title}>{title}</Text>
           <Text style={styles.message}>{message}</Text>
-          <Text style={styles.note}>لن يظهر الإعلان إلا عند طلب هذه الميزة.</Text>
+          <Text style={styles.note}>يظهر الإعلان فقط عند الحاجة إلى فتح هذه الميزة.</Text>
+
+          <Pressable
+            onPress={openSubscriptions}
+            style={({ pressed }) => [styles.subscribe, pressed && styles.pressed]}
+          >
+            <Ionicons name="sparkles-outline" size={15} color="#fcd34d" />
+            <Text style={styles.subscribeText}>إزالة الإعلانات — اشترك الآن</Text>
+          </Pressable>
 
           <View style={styles.actions}>
             <Pressable
@@ -197,17 +209,6 @@ const styles = StyleSheet.create({
     ...StyleSheet.absoluteFillObject,
     backgroundColor: "rgba(26,12,52,0.20)",
   },
-  playBadge: {
-    position: "absolute",
-    alignSelf: "center",
-    top: 53,
-    width: 36,
-    height: 36,
-    alignItems: "center",
-    justifyContent: "center",
-    borderRadius: 18,
-    backgroundColor: "rgba(124,58,237,0.88)",
-  },
   title: {
     marginTop: 17,
     color: "#fff",
@@ -229,6 +230,23 @@ const styles = StyleSheet.create({
     textAlign: "right",
     fontSize: 10,
     fontFamily: "Cairo_400Regular",
+  },
+  subscribe: {
+    minHeight: 38,
+    marginTop: 13,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    borderRadius: 12,
+    backgroundColor: "rgba(251,191,36,0.09)",
+    borderWidth: 1,
+    borderColor: "rgba(251,191,36,0.22)",
+  },
+  subscribeText: {
+    color: "#fcd34d",
+    fontSize: 11,
+    fontFamily: "Cairo_700Bold",
   },
   actions: {
     flexDirection: "row",

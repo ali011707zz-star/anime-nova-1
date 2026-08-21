@@ -1,5 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
-import { useRouter } from "expo-router";
+import { useLocalSearchParams, useRouter } from "expo-router";
 import { LinearGradient } from "expo-linear-gradient";
 import React, { useState, useEffect, useCallback } from "react";
 import {
@@ -940,6 +940,7 @@ function ProfileSheet({ open, onClose, user, onUpdate, onLogout }: {
 export default function SettingsScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
+  const { openPremium } = useLocalSearchParams<{ openPremium?: string }>();
   const { theme, setTheme, watchHistory, favorites, refreshConfig } = useApp();
   const topPad = Platform.OS === "web" ? 0 : insets.top;
 
@@ -951,6 +952,10 @@ export default function SettingsScreen() {
   const [showCrashLog, setShowCrashLog] = useState(false);
   const [crashEntries, setCrashEntries] = useState<CrashEntry[]>([]);
   const [currentUser, setCurrentUser] = useState<MobileUser | null>(null);
+
+  useEffect(() => {
+    if (openPremium === "1") setShowPremium(true);
+  }, [openPremium]);
 
   useEffect(() => {
     AsyncStorage.getItem(AUTH_KEY).then(v => { if (v) { try { setCurrentUser(JSON.parse(v)); } catch {} } });
