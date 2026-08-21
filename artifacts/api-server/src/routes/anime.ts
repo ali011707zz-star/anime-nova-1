@@ -8261,21 +8261,18 @@ async function awDbSaveLinks(
         imported_at: new Date().toISOString(),
       };
       /*
-       * aw_links in the live Supabase project predates the composite unique
-       * index used by the old upsert call. PostgREST therefore rejects every
-       * write with 42P10 and new qualities never reach the shared catalogue.
-       * Update the exact logical row when it exists, otherwise insert it.
-       * This works with the current schema and does not create duplicate
-       * provider/quality rows during the periodic sync.
+       * The logical key includes quality: the same server can expose several
+       * quality tiers for one episode. Update that exact row when it exists,
+       * otherwise insert it.
        */
       const existing = await sbSelect<{ id?: number }>("aw_links", {
         anime_id: `eq.${animeId}`,
-        ep_number: `eq.${ep}`,
+        ep_id: `eq.${epId}`,
         server: `eq.${srvName}`,
         quality: `eq.${row.quality}`,
       }, { limit: 1, select: "id" });
       if (existing[0]?.id != null) {
-        await sbPatch("aw_links", { id: existing[0].id }, row);
+        await sbPatch("aw_links", { id: `eq.${existing[0].id}` }, row);
       } else {
         await sbUpsert("aw_links", row);
       }

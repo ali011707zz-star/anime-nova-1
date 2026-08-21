@@ -87,3 +87,4 @@
 - [Media proxy CORS bypass](media-proxy-cors-bypass.md) — native players may forward provider Origin headers; bypass global CORS only for HLS/video/segment/download proxy paths, never the application API.
 - [Mobile monetization and admin](mobile-monetization-plan.md) — future mobile-only rewarded ads/subscriptions; owner manages manual entitlements via a hidden web admin with password+TOTP; server gates modified builds.
 - [Rewarded ads VPS routing](rewarded-ads-vps-routing.md) — ads router is mounted under `/api`; route definitions must use `/ads/...`, otherwise requests become `/api/api/ads/...` and SPA HTML is returned.
+- [AW quality persistence](aw-quality-persistence.md) — Supabase `aw_links` must be unique by anime+episode+server+quality; otherwise new quality rows collide and Firestore fallback masks the loss.
