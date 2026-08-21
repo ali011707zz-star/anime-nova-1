@@ -447,6 +447,8 @@ export function RiftPlayer({
   );
   const [srcIdx, setSrcIdx]         = useState(safeInitialIndex);
   const currentSrc                  = playableSources[srcIdx];
+  const isLocalPlayback = playableSources.length > 0
+    && playableSources.every(source => /^(?:file|content):\/\//i.test(source.url));
   const subtitlesDisabled = subtitlesDisabledForSite(currentSrc?.site);
   const aliveRef                    = useRef(true);
   const terminalErrorRef            = useRef(false);
@@ -957,6 +959,11 @@ export function RiftPlayer({
     if (!aliveRef.current) return;
     /* نقرأ الطول من ref — يعكس القيمة الأحدث دون إعادة تشغيل هذا الـ effect */
     const curLen = playableCountRef.current;
+    if (isLocalPlayback) {
+      setIsAutoCycling(false);
+      setIsWaitingForSources(false);
+      return;
+    }
     if (curLen <= 1) {
       /* ── انتظر حتى 8 ثوانٍ لوصول مصادر من الخلفية قبل الاستسلام ──
          هذا يمنع الخروج الفوري عندما يفشل المصدر الأول بينما المصادر الأخرى
@@ -996,7 +1003,7 @@ export function RiftPlayer({
     setIsAutoCycling(true); // suppress full error UI — show silent loading instead
     const t = setTimeout(() => switchSource(nextIdx), 600);
     return () => clearTimeout(t);
-  }, [error, srcIdx]); // eslint-disable-line
+  }, [error, isLocalPlayback, srcIdx]); // eslint-disable-line
 
   /* ── عندما تصل مصادر جديدة أثناء انتظار البديل → جرّب الأول الجديد فوراً ── */
   useEffect(() => {
@@ -1058,7 +1065,7 @@ export function RiftPlayer({
            إذا بقي المشغّل في "يشتغل" (isPlaying=true) بدون تقدّم في الـ position
            لمدة 15ث نعامله كخطأ → auto-advance للمصدر التالي.
            نتجاهل حالة الإيقاف المؤقت أو نهاية الحلقة أو حالة الخطأ الموجودة. */
-        if (isPlayingRef.current && !isErrorRef.current && !isEndedRef.current && dur > 0) {
+        if (isPlayingRef.current && !isErrorRef.current && !isEndedRef.current && !isLocalPlayback && dur > 0) {
           if (pos > stallRef.current.lastPos + 0.1) {
             // تقدّم طبيعي — أعد ضبط العداد وألغِ محاولة الـ nudge السابقة
             stallRef.current = { lastPos: pos, lastAt: Date.now() };
@@ -1094,7 +1101,7 @@ export function RiftPlayer({
       clearInterval(id);
       if (progressTimer.current === id) progressTimer.current = null;
     };
-  }, [player, onProgress]); // eslint-disable-line
+  }, [isLocalPlayback, player, onProgress]); // eslint-disable-line
 
   /* ─── Subtitle cue lookup via rAF ─── */
   /* Vidstack technique: pre-sort once → binary search O(log n) at 60fps */
