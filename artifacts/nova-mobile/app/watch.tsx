@@ -87,6 +87,7 @@ const DOWNLOAD_SOURCE_SITES = new Set([
   "animewitcher", // AW
   "sanime",       // SA
   "anslayer",     // AS
+  "animeify",     // AF — direct MediaFire/FileMoon sources
   "anifox",       // FX
 ]);
 

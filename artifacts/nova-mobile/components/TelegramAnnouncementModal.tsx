@@ -60,7 +60,8 @@ export function TelegramAnnouncementModal({
             <VideoView
               player={player}
               style={styles.video}
-              contentFit="cover"
+              // الإعلان عمودي؛ احتفظ بالإطار الكامل حتى لا يُقصّ الجزء العلوي.
+              contentFit="contain"
               nativeControls={false}
             />
           </View>
@@ -141,7 +142,7 @@ const styles = StyleSheet.create({
   },
   videoFrame: {
     width: "100%",
-    aspectRatio: 1.78,
+    aspectRatio: 498 / 436,
     backgroundColor: "#09090B",
   },
   video: {

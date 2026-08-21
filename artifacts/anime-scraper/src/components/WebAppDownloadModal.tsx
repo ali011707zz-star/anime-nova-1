@@ -27,6 +27,17 @@ export function WebAppDownloadModal() {
         aria-labelledby="web-app-download-title"
         onClick={(event) => event.stopPropagation()}
       >
+        <div className="relative -mx-6 -mt-6 mb-5 aspect-[498/436] overflow-hidden bg-black">
+          <video
+            src="/jjk-lethal-company-dance.mp4"
+            className="h-full w-full object-contain"
+            autoPlay
+            loop
+            muted
+            playsInline
+            aria-label="إعلان قناة Anime NOVA على تلجرام"
+          />
+        </div>
         <div className="pointer-events-none absolute -right-14 -top-16 h-44 w-44 rounded-full bg-violet-600/20 blur-3xl" />
         <button
           type="button"

@@ -15983,10 +15983,11 @@ router.get("/anime/download-mp4", async (req, res) => {
     "animewitcher", // AW
     "sanime",       // SA
     "anslayer",     // AS
+    "animeify",     // AF — direct MediaFire/FileMoon sources are downloadable
     "anifox",       // FX
   ]);
   if (!site || !DOWNLOAD_SOURCE_SITES.has(site)) {
-    res.status(403).send("downloads are available only from AW, SA, AS and FX");
+    res.status(403).send("downloads are available only from AW, SA, AS, AF and FX");
     return;
   }
 

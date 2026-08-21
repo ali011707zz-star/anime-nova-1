@@ -305,6 +305,123 @@ export default function HomeScreen() {
           </View>
         )}
 
+        {/* ── الأقسام المدبلجة — مباشرة بعد أحدث الحلقات ── */}
+        {awDubbedSeries.length > 0 && (
+          <View style={{ marginTop: 24, marginBottom: 24 }}>
+            <View style={styles.sectionHeader}>
+              <View style={styles.sectionLeft}>
+                <View style={[styles.sectionDot, { backgroundColor: "#06b6d4" }]} />
+                <Text style={[styles.sectionTitle, { color: colors.text }]}>✨ أنيميشن مدبلج</Text>
+              </View>
+              <Pressable style={styles.seeAllBtn} onPress={() => router.push("/aw-dubbed" as any)}>
+                <Text style={[styles.seeAllText, { color: colors.primary }]}>عرض الكل</Text>
+                <Ionicons name="chevron-back" size={13} color={colors.primary} />
+              </Pressable>
+            </View>
+            <FlatList
+              data={awDubbedSeries}
+              horizontal
+              keyExtractor={(item: any, idx) => String(item.key || idx)}
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={{ paddingHorizontal: 16, gap: 10 }}
+              renderItem={({ item }: { item: any }) => {
+                const imgUri = item.poster || null;
+                return (
+                  <Pressable
+                    onPress={() => {
+                      const key = String(item.key || "").trim();
+                      if (!key) return;
+                      const seasons = JSON.stringify(
+                        Array.isArray(item.seasons) && item.seasons.length
+                          ? item.seasons
+                          : [{ label: "الحلقات", animeId: key }],
+                      );
+                      router.push({
+                        pathname: "/aw-dubbed/[key]" as any,
+                        params: {
+                          key: encodeURIComponent(key),
+                          title: item.title || "",
+                          titleAr: item.titleAr || "",
+                          seasons: encodeURIComponent(seasons),
+                          poster: encodeURIComponent(imgUri || ""),
+                        },
+                      });
+                    }}
+                    style={[todayStyles.card, { backgroundColor: colors.card, borderColor: colors.border }]}
+                  >
+                    {imgUri ? (
+                      <Image source={{ uri: imgUri }} style={todayStyles.img} resizeMode="cover" />
+                    ) : (
+                      <View style={[todayStyles.img, { backgroundColor: colors.card, alignItems: "center", justifyContent: "center" }]}>
+                        <Ionicons name="film-outline" size={28} color="rgba(255,255,255,0.2)" />
+                      </View>
+                    )}
+                    <LinearGradient colors={["transparent", "rgba(0,0,0,0.92)"]} style={todayStyles.grad}>
+                      <Text style={todayStyles.title} numberOfLines={2}>{item.titleAr || item.title}</Text>
+                    </LinearGradient>
+                  </Pressable>
+                );
+              }}
+              initialNumToRender={5}
+              maxToRenderPerBatch={5}
+              windowSize={3}
+              removeClippedSubviews={Platform.OS !== "web"}
+            />
+          </View>
+        )}
+
+        {dubbedSeries.length > 0 && (
+          <View style={{ marginBottom: 24 }}>
+            <View style={styles.sectionHeader}>
+              <View style={styles.sectionLeft}>
+                <View style={[styles.sectionDot, { backgroundColor: "#f59e0b" }]} />
+                <Text style={[styles.sectionTitle, { color: colors.text }]}>🎬 كرتون مدبلج عربي</Text>
+              </View>
+              <Pressable style={styles.seeAllBtn} onPress={() => router.push("/dubbed" as any)}>
+                <Text style={[styles.seeAllText, { color: colors.primary }]}>عرض الكل</Text>
+                <Ionicons name="chevron-back" size={13} color={colors.primary} />
+              </Pressable>
+            </View>
+            <FlatList
+              data={dubbedSeries}
+              horizontal
+              keyExtractor={(item: any, idx) => String(item.key || item.id || idx)}
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={{ paddingHorizontal: 16, gap: 10 }}
+              renderItem={({ item }: { item: any }) => {
+                const rawImg = item.image || item.poster || "";
+                const imgUri = rawImg
+                  ? rawImg.startsWith("http") ? rawImg : `${BASE_URL}${rawImg}`
+                  : null;
+                return (
+                  <Pressable
+                    onPress={() => {
+                      const seasons = JSON.stringify(item.seasons || [{ label: "الحلقات", arabicToonsId: item.arabicToonsId }]);
+                      router.push({ pathname: "/dubbed/[id]" as any, params: { id: item.key || item.id || item.title, title: item.title, seasons, img: rawImg } });
+                    }}
+                    style={[todayStyles.card, { backgroundColor: colors.card, borderColor: colors.border }]}
+                  >
+                    {imgUri ? (
+                      <Image source={{ uri: imgUri }} style={todayStyles.img} resizeMode="cover" />
+                    ) : (
+                      <View style={[todayStyles.img, { backgroundColor: colors.card, alignItems: "center", justifyContent: "center" }]}>
+                        <Ionicons name="tv" size={28} color="rgba(255,255,255,0.2)" />
+                      </View>
+                    )}
+                    <LinearGradient colors={["transparent", "rgba(0,0,0,0.92)"]} style={todayStyles.grad}>
+                      <Text style={todayStyles.title} numberOfLines={2}>{item.title}</Text>
+                    </LinearGradient>
+                  </Pressable>
+                );
+              }}
+              initialNumToRender={5}
+              maxToRenderPerBatch={5}
+              windowSize={3}
+              removeClippedSubviews={Platform.OS !== "web"}
+            />
+          </View>
+        )}
+
         <View style={{ marginTop: 24 }}>
           {isLoading ? (
             <>
@@ -370,125 +487,6 @@ export default function HomeScreen() {
               />
 
               {/* TMDB Animation Movies — disabled */}
-
-              {/* ── أنيميشن مدبلج (aw-dubbed) Section — فوق كرتون مدبلج ── */}
-              {awDubbedSeries.length > 0 && (
-                <View style={{ marginBottom: 24 }}>
-                  <View style={styles.sectionHeader}>
-                    <View style={styles.sectionLeft}>
-                      <View style={[styles.sectionDot, { backgroundColor: "#06b6d4" }]} />
-                      <Text style={[styles.sectionTitle, { color: colors.text }]}>✨ أنيميشن مدبلج</Text>
-                    </View>
-                    <Pressable style={styles.seeAllBtn} onPress={() => router.push("/aw-dubbed" as any)}>
-                      <Text style={[styles.seeAllText, { color: colors.primary }]}>عرض الكل</Text>
-                      <Ionicons name="chevron-back" size={13} color={colors.primary} />
-                    </Pressable>
-                  </View>
-                  <FlatList
-                    data={awDubbedSeries}
-                    horizontal
-                    keyExtractor={(item: any, idx) => String(item.key || idx)}
-                    showsHorizontalScrollIndicator={false}
-                    contentContainerStyle={{ paddingHorizontal: 16, gap: 10 }}
-                    renderItem={({ item }: { item: any }) => {
-                      const imgUri = item.poster || null;
-                      return (
-                        <Pressable
-                          onPress={() => {
-                            const key = String(item.key || "").trim();
-                            if (!key) return;
-                            const seasons = JSON.stringify(
-                              Array.isArray(item.seasons) && item.seasons.length
-                                ? item.seasons
-                                : [{ label: "الحلقات", animeId: key }],
-                            );
-                            router.push({
-                              pathname: "/aw-dubbed/[key]" as any,
-                              params: {
-                                key: encodeURIComponent(key),
-                                title: item.title || "",
-                                titleAr: item.titleAr || "",
-                                seasons: encodeURIComponent(seasons),
-                                poster: encodeURIComponent(imgUri || ""),
-                              },
-                            });
-                          }}
-                          style={[todayStyles.card, { backgroundColor: colors.card, borderColor: colors.border }]}
-                        >
-                          {imgUri ? (
-                            <Image source={{ uri: imgUri }} style={todayStyles.img} resizeMode="cover" />
-                          ) : (
-                            <View style={[todayStyles.img, { backgroundColor: colors.card, alignItems: "center", justifyContent: "center" }]}>
-                              <Ionicons name="film-outline" size={28} color="rgba(255,255,255,0.2)" />
-                            </View>
-                          )}
-                          <LinearGradient colors={["transparent", "rgba(0,0,0,0.92)"]} style={todayStyles.grad}>
-                            <Text style={todayStyles.title} numberOfLines={2}>{item.titleAr || item.title}</Text>
-                          </LinearGradient>
-                        </Pressable>
-                      );
-                    }}
-                    initialNumToRender={5}
-                    maxToRenderPerBatch={5}
-                    windowSize={3}
-                    removeClippedSubviews={Platform.OS !== "web"}
-                  />
-                </View>
-              )}
-
-              {/* ── Dubbed Cartoons Section ── */}
-              {dubbedSeries.length > 0 && (
-                <View style={{ marginBottom: 24 }}>
-                  <View style={styles.sectionHeader}>
-                    <View style={styles.sectionLeft}>
-                      <View style={[styles.sectionDot, { backgroundColor: "#f59e0b" }]} />
-                      <Text style={[styles.sectionTitle, { color: colors.text }]}>🎬 كرتون مدبلج عربي</Text>
-                    </View>
-                    <Pressable style={styles.seeAllBtn} onPress={() => router.push("/dubbed" as any)}>
-                      <Text style={[styles.seeAllText, { color: colors.primary }]}>عرض الكل</Text>
-                      <Ionicons name="chevron-back" size={13} color={colors.primary} />
-                    </Pressable>
-                  </View>
-                  <FlatList
-                    data={dubbedSeries}
-                    horizontal
-                    keyExtractor={(item: any, idx) => String(item.key || item.id || idx)}
-                    showsHorizontalScrollIndicator={false}
-                    contentContainerStyle={{ paddingHorizontal: 16, gap: 10 }}
-                    renderItem={({ item }: { item: any }) => {
-                      const rawImg = item.image || item.poster || "";
-                      const imgUri = rawImg
-                        ? rawImg.startsWith("http") ? rawImg : `${BASE_URL}${rawImg}`
-                        : null;
-                      return (
-                        <Pressable
-                          onPress={() => {
-                            const seasons = JSON.stringify(item.seasons || [{ label: "الحلقات", arabicToonsId: item.arabicToonsId }]);
-                            router.push({ pathname: "/dubbed/[id]" as any, params: { id: item.key || item.id || item.title, title: item.title, seasons, img: rawImg } });
-                          }}
-                          style={[todayStyles.card, { backgroundColor: colors.card, borderColor: colors.border }]}
-                        >
-                          {imgUri ? (
-                            <Image source={{ uri: imgUri }} style={todayStyles.img} resizeMode="cover" />
-                          ) : (
-                            <View style={[todayStyles.img, { backgroundColor: colors.card, alignItems: "center", justifyContent: "center" }]}>
-                              <Ionicons name="tv" size={28} color="rgba(255,255,255,0.2)" />
-                            </View>
-                          )}
-                          <LinearGradient colors={["transparent", "rgba(0,0,0,0.92)"]} style={todayStyles.grad}>
-                            <Text style={todayStyles.title} numberOfLines={2}>{item.title}</Text>
-                          </LinearGradient>
-                        </Pressable>
-                      );
-                    }}
-                    initialNumToRender={5}
-                    maxToRenderPerBatch={5}
-                    windowSize={3}
-                    removeClippedSubviews={Platform.OS !== "web"}
-                  />
-                </View>
-              )}
-
 
             </>
           )}
