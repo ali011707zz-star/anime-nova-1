@@ -5,15 +5,17 @@ import {
   RewardedAdEventType,
 } from "react-native-google-mobile-ads";
 
-/** Keep this true until a production AdMob app/unit ID is deliberately configured. */
-export const NOVA_ADS_TEST_MODE = true;
-
 // Google’s official Android rewarded test unit ID. Keep this explicit so a
-// platform/library change cannot accidentally switch the app to a live unit.
+// build cannot accidentally switch to a live unit without an environment value.
 const TEST_REWARDED_ID = "ca-app-pub-3940256099942544/5224354917";
+const configuredRewardedId = process.env.EXPO_PUBLIC_ADMOB_REWARDED_AD_UNIT_ID?.trim();
+
+/** Production stays fail-safe: no configured unit means Google’s test ad. */
+export const NOVA_ADS_TEST_MODE = !configuredRewardedId;
+const REWARDED_AD_UNIT_ID = configuredRewardedId || TEST_REWARDED_ID;
 const AD_LOAD_TIMEOUT_MS = 20_000;
 
-export function showRewardedTestAd(): Promise<boolean> {
+export function showRewardedAd(): Promise<boolean> {
   if (Platform.OS === "web") return Promise.resolve(false);
 
   return new Promise((resolve) => {
@@ -32,7 +34,7 @@ export function showRewardedTestAd(): Promise<boolean> {
       resolve(value);
     };
     try {
-      const ad = RewardedAd.createForAdRequest(TEST_REWARDED_ID, {
+      const ad = RewardedAd.createForAdRequest(REWARDED_AD_UNIT_ID, {
         requestNonPersonalizedAdsOnly: true,
       });
       subscriptions = [
@@ -52,3 +54,6 @@ export function showRewardedTestAd(): Promise<boolean> {
     }
   });
 }
+
+/** Backward-compatible name for callers that still use the old helper. */
+export const showRewardedTestAd = showRewardedAd;

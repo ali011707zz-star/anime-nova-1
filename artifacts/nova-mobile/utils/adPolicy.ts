@@ -1,7 +1,7 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { getBaseUrl } from "./baseUrl";
 import { secureFetch } from "./secureApi";
-import { showRewardedTestAd } from "./rewardedAd";
+import { showRewardedAd } from "./rewardedAd";
 
 const DEVICE_KEY = "nova-ads-device-v1";
 export const DOWNLOAD_LIMIT = 4;
@@ -117,7 +117,7 @@ async function completeReward(kind: RewardKind): Promise<boolean> {
   if (challenge.bypass) return true;
   if (!challenge.token) return false;
 
-  const earned = await showRewardedTestAd();
+  const earned = await showRewardedAd();
   if (!earned) return false;
 
   const completed = await adFetch("/api/ads/reward/complete", {
