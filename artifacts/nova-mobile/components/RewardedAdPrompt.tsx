@@ -71,7 +71,6 @@ export function RewardedAdPrompt() {
             </View>
             <Pressable
               accessibilityLabel="إغلاق"
-              disabled={busy}
               onPress={() => close(false)}
               style={({ pressed }) => [styles.close, pressed && styles.pressed]}
             >
@@ -101,7 +100,6 @@ export function RewardedAdPrompt() {
 
           <View style={styles.actions}>
             <Pressable
-              disabled={busy}
               onPress={() => close(false)}
               style={({ pressed }) => [styles.cancel, pressed && styles.pressed]}
             >
