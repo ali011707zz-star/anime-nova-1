@@ -969,22 +969,43 @@ type AnimeSlugRecord = { slugs: string[]; titles: string[] };
 const animeSlugCache = new Map<number, { record: AnimeSlugRecord; ts: number }>();
 const ANIME_SLUG_CACHE_TTL = 24 * 3_600_000;
 
+/**
+ * Production Supabase currently exposes the canonical title as `slug`, while
+ * newer migrations add the richer `slugs` JSONB column. Keep the runtime
+ * representation rich without making source lookup depend on one schema
+ * version. This is intentionally read-compatible with both layouts.
+ */
+function normalizeAnimeSlugRow(row: {
+  slug?: unknown;
+  slugs?: unknown;
+  titles?: unknown;
+}): AnimeSlugRecord {
+  const titles = Array.isArray(row.titles)
+    ? row.titles.filter((value): value is string => typeof value === "string" && value.trim().length > 0)
+    : [];
+  const storedSlugs = Array.isArray(row.slugs)
+    ? row.slugs.filter((value): value is string => typeof value === "string" && value.trim().length > 0)
+    : [];
+  const canonicalSlug = typeof row.slug === "string" ? row.slug.trim() : "";
+  return {
+    titles,
+    slugs: [...new Set([...storedSlugs, canonicalSlug, ...buildAnimeSlugs(titles)])],
+  };
+}
+
 async function getAnimeSlugRecord(anilistId: number): Promise<AnimeSlugRecord | null> {
   if (!anilistId) return null;
   const cached = animeSlugCache.get(anilistId);
   if (cached && Date.now() - cached.ts < ANIME_SLUG_CACHE_TTL) return cached.record;
   try {
-    const rows = await sbSelect<{ slugs?: unknown; titles?: unknown }>(
+    const rows = await sbSelect<{ slug?: unknown; titles?: unknown }>(
       "anime",
       { anilist_id: `eq.${anilistId}` },
-      { limit: 1, select: "slugs,titles" },
+      { limit: 1, select: "slug,titles" },
     );
     const row = rows[0];
     if (!row) return null;
-    const record = {
-      slugs: Array.isArray(row.slugs) ? row.slugs.filter((v): v is string => typeof v === "string") : [],
-      titles: Array.isArray(row.titles) ? row.titles.filter((v): v is string => typeof v === "string") : [],
-    };
+    const record = normalizeAnimeSlugRow(row);
     animeSlugCache.set(anilistId, { record, ts: Date.now() });
     return record;
   } catch { return null; }
@@ -998,7 +1019,9 @@ async function saveAnimeSlugRecord(anilistId: number, titles: string[]): Promise
   animeSlugCache.set(anilistId, { record, ts: Date.now() });
   sbUpsert(
     "anime",
-    { anilist_id: anilistId, titles: record.titles, slugs: record.slugs, updated_at: new Date().toISOString() },
+    // Keep writes compatible with the production schema (`slug` is a scalar).
+    // The in-memory record still retains every generated variant for matching.
+    { anilist_id: anilistId, titles: record.titles, slug: record.slugs[0], updated_at: new Date().toISOString() },
     "anilist_id",
   ).catch(() => {});
   return record;
