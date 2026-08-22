@@ -182,6 +182,67 @@ jobs:
         # Never let npx download a different Expo CLI during the build.
         run: ./node_modules/.bin/expo prebuild --platform android --clean --no-install
 
+      - name: 🔐 Configure stable release signing
+        working-directory: artifacts/nova-mobile/android
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          test -n "$ANDROID_KEYSTORE_BASE64"
+          test -n "$ANDROID_KEYSTORE_PASSWORD"
+          test -n "$ANDROID_KEY_ALIAS"
+          test -n "$ANDROID_KEY_PASSWORD"
+
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > app/nova-release.keystore
+          chmod 600 app/nova-release.keystore
+
+          cat >> gradle.properties <<EOF
+          NOVA_RELEASE_STORE_FILE=nova-release.keystore
+          NOVA_RELEASE_STORE_PASSWORD=$ANDROID_KEYSTORE_PASSWORD
+          NOVA_RELEASE_KEY_ALIAS=$ANDROID_KEY_ALIAS
+          NOVA_RELEASE_KEY_PASSWORD=$ANDROID_KEY_PASSWORD
+          EOF
+
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          path = Path("app/build.gradle")
+          text = path.read_text()
+          signing_block = """        release {
+              storeFile file(NOVA_RELEASE_STORE_FILE)
+              storePassword NOVA_RELEASE_STORE_PASSWORD
+              keyAlias NOVA_RELEASE_KEY_ALIAS
+              keyPassword NOVA_RELEASE_KEY_PASSWORD
+          }
+          """
+          if "storeFile file(NOVA_RELEASE_STORE_FILE)" not in text:
+              marker = "    signingConfigs {\n"
+              if marker not in text:
+                  raise SystemExit("Could not find signingConfigs block in app/build.gradle")
+              text = text.replace(marker, marker + signing_block, 1)
+
+          release_pattern = (
+              r"(buildTypes\s*\{.*?release\s*\{.*?signingConfig\s+)"
+              r"signingConfigs\.debug"
+          )
+          text, replacements = re.subn(
+              release_pattern,
+              r"\1signingConfigs.release",
+              text,
+              count=1,
+              flags=re.S,
+          )
+          if replacements != 1:
+              raise SystemExit("Could not switch release build to the stable signing config")
+          path.write_text(text)
+          PY
+
+          echo "Stable release signing configured"
+
       # ── إصلاح Gradle/Kotlin: تثبيت 8.13 + توافق react-native-video ────────
       # RN 0.81.5 يستخدم deprecated Gradle APIs تُعتبر أخطاءً في 8.8+.
       # 2026-07-10: AGP الحالي يتطلب Gradle 8.13 كحد أدنى (8.10.2 صار يفشل البناء بـ
