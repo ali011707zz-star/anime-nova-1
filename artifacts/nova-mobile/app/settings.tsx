@@ -285,8 +285,13 @@ const AUTH_KEY = "nova-mobile-user";
 // generic app scheme (for example nova-mobile://) is not a registered
 // redirect for the Android client and Google rejects it with invalid_request
 // before the app receives any token.
-const GOOGLE_NATIVE_SCHEME =
-  "com.googleusercontent.apps.413058110781-cbielvl5jhrf2bje392f8l9fnulvegp7";
+const GOOGLE_NATIVE_CLIENT_ID =
+  process.env.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID ||
+  "413058110781-cbielvl5jhrf2bje392f8l9fnulvegp7.apps.googleusercontent.com";
+const GOOGLE_NATIVE_SCHEME = `com.googleusercontent.apps.${GOOGLE_NATIVE_CLIENT_ID.replace(
+  /\.apps\.googleusercontent\.com$/,
+  "",
+)}`;
 const GOOGLE_REDIRECT_URI = makeRedirectUri({
   native: `${GOOGLE_NATIVE_SCHEME}:/oauthredirect`,
 });

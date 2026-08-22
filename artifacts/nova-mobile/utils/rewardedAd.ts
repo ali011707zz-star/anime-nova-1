@@ -8,12 +8,13 @@ import {
 
 // Live Android rewarded unit. The server can also update this value remotely
 // through /api/ads/state after the app refreshes its ad settings.
-const TEST_REWARDED_ID = "ca-app-pub-7738594986393012/4388351429";
+const LIVE_REWARDED_ID = "ca-app-pub-7738594986393012/4388351429";
 const configuredRewardedId = process.env.EXPO_PUBLIC_ADMOB_REWARDED_AD_UNIT_ID?.trim();
 
-/** Keep a valid live fallback when the remote ad setting is unavailable. */
+/** Use only the production unit. A test unit must never be shown to users or
+ * mixed into production reward accounting. */
 export const NOVA_ADS_TEST_MODE = !configuredRewardedId;
-let rewardedAdUnitId = configuredRewardedId || TEST_REWARDED_ID;
+let rewardedAdUnitId = configuredRewardedId || LIVE_REWARDED_ID;
 const AD_LOAD_TIMEOUT_MS = 20_000;
 let adsInitialization: Promise<void> | null = null;
 
@@ -45,9 +46,12 @@ export function showRewardedAd(): Promise<boolean> {
     let settled = false;
     let timeout: ReturnType<typeof setTimeout> | undefined;
     let subscriptions: Array<() => void> = [];
+    let retryCount = 0;
+    const MAX_RETRIES = 1;
     const cleanup = () => {
       if (timeout) clearTimeout(timeout);
       subscriptions.forEach((unsubscribe) => unsubscribe());
+      subscriptions = [];
     };
     const finish = (value: boolean) => {
       if (settled) return;
@@ -55,30 +59,63 @@ export function showRewardedAd(): Promise<boolean> {
       cleanup();
       resolve(value);
     };
-    timeout = setTimeout(() => finish(false), AD_LOAD_TIMEOUT_MS);
+
+    const armTimeout = () => {
+      if (timeout) clearTimeout(timeout);
+      timeout = setTimeout(() => {
+        if (retryCount < MAX_RETRIES) {
+          retryCount += 1;
+          load(rewardedAdUnitId);
+        } else {
+          finish(false);
+        }
+      }, AD_LOAD_TIMEOUT_MS);
+    };
+
+    const load = (unitId: string) => {
+      if (settled) return;
+      cleanup();
+      armTimeout();
+      const ad = RewardedAd.createForAdRequest(unitId, {
+        requestNonPersonalizedAdsOnly: true,
+      });
+      subscriptions = [
+        ad.addAdEventListener(RewardedAdEventType.LOADED, () => {
+          ad.show().catch((error) => {
+            console.warn("[rewarded-ad] show failed", error);
+            if (retryCount < MAX_RETRIES) {
+              retryCount += 1;
+              load(rewardedAdUnitId);
+            } else {
+              finish(false);
+            }
+          });
+        }),
+        ad.addAdEventListener(RewardedAdEventType.EARNED_REWARD, () => {
+          rewarded = true;
+        }),
+        ad.addAdEventListener(AdEventType.ERROR, (error) => {
+          console.warn("[rewarded-ad] load failed", {
+            unitId,
+            code: (error as any)?.code,
+            message: (error as any)?.message,
+          });
+          if (retryCount < MAX_RETRIES) {
+            retryCount += 1;
+            load(rewardedAdUnitId);
+          } else {
+            finish(false);
+          }
+        }),
+        ad.addAdEventListener(AdEventType.CLOSED, () => finish(rewarded)),
+      ];
+      ad.load();
+    };
+
     initializeRewardedAds()
       .then(() => {
         if (settled) return;
-        const ad = RewardedAd.createForAdRequest(rewardedAdUnitId, {
-          requestNonPersonalizedAdsOnly: true,
-        });
-        subscriptions = [
-          ad.addAdEventListener(RewardedAdEventType.LOADED, () => {
-            ad.show().catch((error) => {
-              console.warn("[rewarded-ad] show failed", error);
-              finish(false);
-            });
-          }),
-          ad.addAdEventListener(RewardedAdEventType.EARNED_REWARD, () => {
-            rewarded = true;
-          }),
-          ad.addAdEventListener(AdEventType.ERROR, (error) => {
-            console.warn("[rewarded-ad] load failed", error);
-            finish(false);
-          }),
-          ad.addAdEventListener(AdEventType.CLOSED, () => finish(rewarded)),
-        ];
-        ad.load();
+        load(rewardedAdUnitId);
       })
       .catch((error) => {
         console.warn("[rewarded-ad] initialize failed", error);
