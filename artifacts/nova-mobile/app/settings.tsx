@@ -1,5 +1,8 @@
 import { Ionicons } from "@expo/vector-icons";
+import * as Google from "expo-auth-session/providers/google";
+import { makeRedirectUri } from "expo-auth-session";
 import { useLocalSearchParams, useRouter } from "expo-router";
+import * as WebBrowser from "expo-web-browser";
 import { LinearGradient } from "expo-linear-gradient";
 import React, { useState, useEffect, useCallback } from "react";
 import {
@@ -11,7 +14,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useColors } from "@/hooks/useColors";
 import { useApp } from "@/context/AppContext";
 import { getBaseUrl } from "@/utils/baseUrl";
-import { setUserAuthToken } from "@/utils/secureApi";
+import { secureFetch, setUserAuthToken } from "@/utils/secureApi";
 import { CrashEntry, getCrashLog } from "@/utils/crashLogger";
 
 const THEMES: { label: string; value: string; dot: string; desc: string }[] = [
@@ -278,11 +281,14 @@ function DangerRow({ label, sub, onPress }: { label: string; sub?: string; onPre
 type AuthFlow = "login" | "signup" | "verify";
 interface MobileUser { email: string; displayName: string; id: string; username?: string; avatarColor?: number; profileImageUrl?: string | null }
 const AUTH_KEY = "nova-mobile-user";
+const GOOGLE_REDIRECT_URI = makeRedirectUri({ scheme: "nova-mobile", path: "auth/callback" });
+WebBrowser.maybeCompleteAuthSession();
 
 /* ── Auth Sheet ── */
 function AuthSheet({ open, onClose, onLogin }: {
   open: boolean; onClose: () => void; onLogin: (u: MobileUser) => void;
 }) {
+  const GOOGLE_ONLY = true;
   const [flow, setFlow] = useState<AuthFlow>("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -303,6 +309,68 @@ function AuthSheet({ open, onClose, onLogin }: {
   }, [resendCooldown]);
 
   const base = getBaseUrl();
+  const [googleRequest, googleResponse, promptGoogleAsync] = Google.useAuthRequest({
+    androidClientId: process.env.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID,
+    iosClientId: process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID,
+    webClientId: process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID,
+    redirectUri: GOOGLE_REDIRECT_URI,
+    scopes: ["openid", "profile", "email"],
+    selectAccount: true,
+  });
+
+  const saveGoogleUser = useCallback(async (accessToken: string) => {
+    setLoading(true);
+    setError("");
+    try {
+      const r = await fetch(`${base}/api/auth/google/token`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ accessToken }),
+      });
+      const d = await r.json();
+      if (!r.ok || !d.id || !d.authToken) {
+        setError(d.error || "فشل تسجيل الدخول بحساب Google");
+        return;
+      }
+      const u: MobileUser = {
+        email: d.email || "",
+        displayName: d.displayName || d.username || d.email?.split("@")[0] || "مستخدم",
+        id: String(d.id),
+        username: d.username,
+        avatarColor: d.avatarColor ?? 0,
+        profileImageUrl: d.profileImageUrl || null,
+      };
+      await setUserAuthToken(d.authToken);
+      await AsyncStorage.setItem(AUTH_KEY, JSON.stringify(u));
+      onLogin(u);
+      onClose();
+    } catch {
+      setError("تعذّر الوصول للخادم");
+    } finally {
+      setLoading(false);
+    }
+  }, [base, onClose, onLogin]);
+
+  useEffect(() => {
+    if (googleResponse?.type !== "success") {
+      if (googleResponse?.type === "error") setError("تعذّر تسجيل الدخول عبر Google");
+      return;
+    }
+    const accessToken =
+      googleResponse.authentication?.accessToken ||
+      (googleResponse.params as Record<string, string> | undefined)?.access_token;
+    if (accessToken) saveGoogleUser(accessToken);
+    else setError("لم يصل رمز Google، حاول مرة أخرى");
+  }, [googleResponse, saveGoogleUser]);
+
+  const handleGoogleLogin = async () => {
+    if (!googleRequest) {
+      setError("تسجيل الدخول بـ Google غير مهيأ لهذه النسخة");
+      return;
+    }
+    setError("");
+    await promptGoogleAsync();
+  };
 
   const handleLogin = async () => {
     if (!email.trim() || !password.trim()) { setError("يرجى تعبئة جميع الحقول"); return; }
@@ -416,8 +484,36 @@ function AuthSheet({ open, onClose, onLogin }: {
             <View style={{ width: 36 }} />
           </View>
 
-          {/* Tabs */}
-          {!isVerify && (
+           {GOOGLE_ONLY && (
+             <View style={{ gap: 12 }}>
+               <View style={{ borderRadius: 16, paddingHorizontal: 14, paddingVertical: 12, backgroundColor: "rgba(124,58,237,0.10)", borderWidth: 1, borderColor: "rgba(139,92,246,0.20)" }}>
+                 <Text style={{ fontSize: 12, color: "rgba(255,255,255,0.65)", fontFamily: "Cairo_400Regular", textAlign: "right", lineHeight: 22 }}>
+                   سجّل الدخول أو أنشئ حسابك باستخدام Google فقط. ستبقى سجلات المشاهدة والمفضلات والتعليقات محفوظة.
+                 </Text>
+               </View>
+               <Pressable
+                 onPress={handleGoogleLogin}
+                 disabled={loading}
+                 style={[ts.authSubmitBtn, { backgroundColor: "#fff", borderColor: "rgba(255,255,255,0.25)" }]}
+               >
+                 {loading ? <ActivityIndicator color="#111827" size="small" /> : (
+                   <>
+                     <View style={{ width: 20, height: 20, borderRadius: 10, backgroundColor: "#fff", alignItems: "center", justifyContent: "center" }}>
+                       <Text style={{ color: "#4285F4", fontSize: 15, fontWeight: "800" }}>G</Text>
+                     </View>
+                     <Text style={[ts.authSubmitText, { color: "#111827" }]}>المتابعة باستخدام Google</Text>
+                   </>
+                 )}
+               </Pressable>
+             </View>
+           )}
+
+           {/* Legacy email UI is intentionally hidden. The API remains compatible
+               with existing sessions and records while new access uses Google. */}
+           {!GOOGLE_ONLY && (
+           <>
+           {/* Tabs */}
+           {!isVerify && (
             <View style={{ flexDirection: "row", gap: 4, padding: 4, borderRadius: 16, backgroundColor: "rgba(255,255,255,0.04)", borderWidth: 1, borderColor: "rgba(255,255,255,0.06)", marginBottom: 22 }}>
               {(["login", "signup"] as const).map(t => (
                 <Pressable
@@ -544,7 +640,9 @@ function AuthSheet({ open, onClose, onLogin }: {
                 )}
               </Pressable>
             </>
-          )}
+           )}
+           </>
+           )}
         </ScrollView>
       </View>
     </Modal>
@@ -731,7 +829,7 @@ function ProfileSheet({ open, onClose, user, onUpdate, onLogout }: {
     if (!displayName.trim()) { setError("الاسم الظاهر مطلوب"); return; }
     setLoading(true); setError(""); setSuccess("");
     try {
-      const r = await fetch(`${base}/api/auth/profile`, {
+      const r = await secureFetch(`${base}/api/auth/profile`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
@@ -759,7 +857,7 @@ function ProfileSheet({ open, onClose, user, onUpdate, onLogout }: {
     if (newPass !== confirmPass) { setError("كلمتا المرور غير متطابقتين"); return; }
     setLoading(true); setError(""); setSuccess("");
     try {
-      const r = await fetch(`${base}/api/auth/change-password`, {
+      const r = await secureFetch(`${base}/api/auth/change-password`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
@@ -970,7 +1068,7 @@ export default function SettingsScreen() {
 
   useEffect(() => {
     AsyncStorage.getItem(AUTH_KEY).then(v => { if (v) { try { setCurrentUser(JSON.parse(v)); } catch {} } });
-    fetch(`${getBaseUrl()}/api/auth/me`, { credentials: "include" })
+    secureFetch(`${getBaseUrl()}/api/auth/me`)
       .then(r => r.ok ? r.json() : null)
       .then((d: any) => d && setCurrentUser(prev => prev ? {
         ...prev,

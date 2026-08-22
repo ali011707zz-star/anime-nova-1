@@ -12,6 +12,11 @@ on:
 
 env:
   EXPO_PUBLIC_DOMAIN: ${{ github.event.inputs.backend_domain || 'https://animenovaa.duckdns.org' }}
+  # Google OAuth client IDs are public application identifiers. Configure the
+  # Android value as a repository variable before building a Google-enabled APK.
+  EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID: ${{ vars.GOOGLE_ANDROID_CLIENT_ID }}
+  EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID: ${{ vars.GOOGLE_IOS_CLIENT_ID }}
+  EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID: ${{ vars.GOOGLE_WEB_CLIENT_ID }}
   # Public AdMob rewarded unit for the Android production build.
   EXPO_PUBLIC_ADMOB_REWARDED_AD_UNIT_ID: "ca-app-pub-7738594986393012/4388351429"
   # Sentry DSN — ليست سرّاً حساساً (مصمّمة للتضمين في تطبيقات العميل)، تُستخدم

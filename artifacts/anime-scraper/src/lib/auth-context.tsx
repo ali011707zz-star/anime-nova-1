@@ -8,7 +8,7 @@ export interface AuthUser {
   username?: string | null;
   avatarColor?: number;
   profileImageUrl?: string | null;
-  authType?: "email";
+  authType?: "email" | "google";
   createdAt?: string | null;
 }
 

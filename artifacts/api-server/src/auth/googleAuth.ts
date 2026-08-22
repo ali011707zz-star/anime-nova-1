@@ -1,5 +1,6 @@
 import type { Express, Request, Response } from "express";
 import { sbSelect, sbInsert, sbPatch } from "../lib/supabaseClient.js";
+import { issueUserToken } from "../lib/security.js";
 
 async function generateUniqueUsername(base: string): Promise<string> {
   const clean = base
@@ -25,6 +26,9 @@ function userPayload(u: any) {
     profileImageUrl: u.profile_image_custom ?? u.profile_image_url,
     authType:        "google" as const,
     createdAt:       u.created_at,
+    plan:            u.plan ?? "free",
+    expiresAt:       u.expires_at ?? null,
+    authToken:       issueUserToken(String(u.id)).token,
   };
 }
 

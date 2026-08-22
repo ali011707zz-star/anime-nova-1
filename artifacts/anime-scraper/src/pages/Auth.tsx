@@ -276,32 +276,23 @@ function AuthContent({ onClose, isModal }: { onClose: () => void; isModal?: bool
         )}
       </AnimatePresence>
 
-      {/* ══════════════════════════════════════════
-          TABS (login / signup only)
-      ══════════════════════════════════════════ */}
-      {(flow === "login" || flow === "signup") && (
-        <div className="flex gap-1 p-1 rounded-2xl mb-6"
-          style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.06)" }}>
-          {(["login", "signup"] as const).map(t => (
-            <button key={t} onClick={() => { setFlow(t); setError(""); }}
-              className="flex-1 py-2.5 rounded-xl font-black font-['Cairo'] text-[12.5px] transition-all"
-              style={flow === t ? {
-                background: "linear-gradient(135deg,rgba(124,58,237,0.5),rgba(79,70,229,0.5))",
-                color: "white", border: "1px solid rgba(139,92,246,0.3)",
-                boxShadow: "0 2px 12px rgba(124,58,237,0.2)",
-              } : { color: "rgba(255,255,255,0.35)" }}>
-              {t === "login" ? "تسجيل الدخول" : "حساب جديد"}
-            </button>
-          ))}
-        </div>
-      )}
-
-      {/* OAuth buttons hidden temporarily — will be added later */}
+      <div className="mb-5 rounded-2xl px-4 py-3 text-center"
+        style={{ background: "rgba(124,58,237,0.08)", border: "1px solid rgba(139,92,246,0.18)" }}>
+        <p className="text-[12px] text-white/60 font-['Cairo'] leading-6">
+          سجّل الدخول أو أنشئ حسابك باستخدام حساب Google فقط
+        </p>
+        <p className="text-[10px] text-white/30 font-['Cairo'] mt-1">
+          سيتم حفظ سجلك ومفضلاتك على حسابك
+        </p>
+      </div>
+      <GoogleBtn />
 
       {/* ══════════════════════════════════════════
-          LOGIN
+          Legacy email flow intentionally disabled.
+          Keep the handlers temporarily so existing sessions/API clients
+          remain compatible while all new UI uses Google only.
       ══════════════════════════════════════════ */}
-      {flow === "login" && (
+      {false && flow === "login" && (
         <form onSubmit={submitLogin} className="flex flex-col gap-3">
           <div className="relative">
             <Mail className="absolute right-4 top-1/2 -translate-y-1/2 w-4 h-4 text-white/25 pointer-events-none" />
@@ -331,7 +322,7 @@ function AuthContent({ onClose, isModal }: { onClose: () => void; isModal?: bool
       {/* ══════════════════════════════════════════
           SIGNUP — المرحلة الأولى
       ══════════════════════════════════════════ */}
-      {flow === "signup" && (
+      {false && flow === "signup" && (
         <form onSubmit={submitSignupRequest} className="flex flex-col gap-3">
           <div className="relative">
             <User className="absolute right-4 top-1/2 -translate-y-1/2 w-4 h-4 text-white/25 pointer-events-none" />
@@ -365,7 +356,7 @@ function AuthContent({ onClose, isModal }: { onClose: () => void; isModal?: bool
       {/* ══════════════════════════════════════════
           FORGOT — إدخال البريد لإعادة التعيين
       ══════════════════════════════════════════ */}
-      {flow === "forgot" && (
+      {false && flow === "forgot" && (
         <form onSubmit={submitForgot} className="flex flex-col gap-3">
           <div className="relative">
             <Mail className="absolute right-4 top-1/2 -translate-y-1/2 w-4 h-4 text-white/25 pointer-events-none" />
@@ -382,7 +373,7 @@ function AuthContent({ onClose, isModal }: { onClose: () => void; isModal?: bool
       {/* ══════════════════════════════════════════
           RESET — إدخال الكود + كلمة مرور جديدة
       ══════════════════════════════════════════ */}
-      {flow === "reset" && (
+      {false && flow === "reset" && (
         <form onSubmit={submitReset} className="flex flex-col gap-4">
           <CodeInfo email={email} />
           <CodeInput code={code} refs={codeRefs} onChange={handleCodeInput} onKeyDown={handleCodeKey} onPaste={handleCodePaste} />

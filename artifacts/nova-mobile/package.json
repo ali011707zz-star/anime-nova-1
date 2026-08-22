@@ -30,6 +30,7 @@
     "babel-preset-expo": "~54.0.11",
     "eas-cli": "^20.4.0",
     "expo": "~54.0.27",
+    "expo-auth-session": "~7.0.8",
     "expo-constants": "~18.0.11",
     "expo-font": "~14.0.10",
     "expo-image-picker": "~17.0.9",
