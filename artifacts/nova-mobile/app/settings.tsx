@@ -281,10 +281,15 @@ function DangerRow({ label, sub, onPress }: { label: string; sub?: string; onPre
 type AuthFlow = "login" | "signup" | "verify";
 interface MobileUser { email: string; displayName: string; id: string; username?: string; avatarColor?: number; profileImageUrl?: string | null }
 const AUTH_KEY = "nova-mobile-user";
-// Keep the native redirect at the app scheme root. Adding an arbitrary path
-// makes Google's browser flow reject the request for Android builds with
-// invalid_request before an access token is returned.
-const GOOGLE_REDIRECT_URI = makeRedirectUri({ scheme: "nova-mobile" });
+// Android OAuth clients use Google's reserved native redirect scheme. A
+// generic app scheme (for example nova-mobile://) is not a registered
+// redirect for the Android client and Google rejects it with invalid_request
+// before the app receives any token.
+const GOOGLE_NATIVE_SCHEME =
+  "com.googleusercontent.apps.413058110781-cbielvl5jhrf2bje392f8l9fnulvegp7";
+const GOOGLE_REDIRECT_URI = makeRedirectUri({
+  native: `${GOOGLE_NATIVE_SCHEME}:/oauthredirect`,
+});
 WebBrowser.maybeCompleteAuthSession();
 
 /* ── Auth Sheet ── */
