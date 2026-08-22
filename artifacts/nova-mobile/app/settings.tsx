@@ -281,7 +281,10 @@ function DangerRow({ label, sub, onPress }: { label: string; sub?: string; onPre
 type AuthFlow = "login" | "signup" | "verify";
 interface MobileUser { email: string; displayName: string; id: string; username?: string; avatarColor?: number; profileImageUrl?: string | null }
 const AUTH_KEY = "nova-mobile-user";
-const GOOGLE_REDIRECT_URI = makeRedirectUri({ scheme: "nova-mobile", path: "auth/callback" });
+// Keep the native redirect at the app scheme root. Adding an arbitrary path
+// makes Google's browser flow reject the request for Android builds with
+// invalid_request before an access token is returned.
+const GOOGLE_REDIRECT_URI = makeRedirectUri({ scheme: "nova-mobile" });
 WebBrowser.maybeCompleteAuthSession();
 
 /* ── Auth Sheet ── */
@@ -317,6 +320,7 @@ function AuthSheet({ open, onClose, onLogin }: {
     iosClientId: process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID,
     webClientId: googleWebClientId,
     redirectUri: GOOGLE_REDIRECT_URI,
+    responseType: "token",
     scopes: ["openid", "profile", "email"],
     selectAccount: true,
   });

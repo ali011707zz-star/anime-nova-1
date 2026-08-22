@@ -1,6 +1,7 @@
 import { Platform } from "react-native";
 import {
   AdEventType,
+  MobileAds,
   RewardedAd,
   RewardedAdEventType,
 } from "react-native-google-mobile-ads";
@@ -14,6 +15,27 @@ const configuredRewardedId = process.env.EXPO_PUBLIC_ADMOB_REWARDED_AD_UNIT_ID?.
 export const NOVA_ADS_TEST_MODE = !configuredRewardedId;
 let rewardedAdUnitId = configuredRewardedId || TEST_REWARDED_ID;
 const AD_LOAD_TIMEOUT_MS = 20_000;
+let adsInitialization: Promise<void> | null = null;
+
+/**
+ * The native AdMob SDK must be initialized before creating a rewarded ad.
+ * Calling RewardedAd.createForAdRequest() first can leave the request pending
+ * forever on release builds, which makes the reward prompt look like ads are
+ * unavailable.
+ */
+export function initializeRewardedAds(): Promise<void> {
+  if (Platform.OS === "web") return Promise.resolve();
+  if (!adsInitialization) {
+    adsInitialization = MobileAds()
+      .initialize()
+      .then(() => undefined)
+      .catch((error) => {
+        adsInitialization = null;
+        throw error;
+      });
+  }
+  return adsInitialization;
+}
 
 export function showRewardedAd(): Promise<boolean> {
   if (Platform.OS === "web") return Promise.resolve(false);
@@ -33,32 +55,35 @@ export function showRewardedAd(): Promise<boolean> {
       cleanup();
       resolve(value);
     };
-    try {
-      const ad = RewardedAd.createForAdRequest(rewardedAdUnitId, {
-        requestNonPersonalizedAdsOnly: true,
-      });
-      subscriptions = [
-        ad.addAdEventListener(RewardedAdEventType.LOADED, () => {
-          ad.show().catch((error) => {
-            console.warn("[rewarded-ad] show failed", error);
+    timeout = setTimeout(() => finish(false), AD_LOAD_TIMEOUT_MS);
+    initializeRewardedAds()
+      .then(() => {
+        if (settled) return;
+        const ad = RewardedAd.createForAdRequest(rewardedAdUnitId, {
+          requestNonPersonalizedAdsOnly: true,
+        });
+        subscriptions = [
+          ad.addAdEventListener(RewardedAdEventType.LOADED, () => {
+            ad.show().catch((error) => {
+              console.warn("[rewarded-ad] show failed", error);
+              finish(false);
+            });
+          }),
+          ad.addAdEventListener(RewardedAdEventType.EARNED_REWARD, () => {
+            rewarded = true;
+          }),
+          ad.addAdEventListener(AdEventType.ERROR, (error) => {
+            console.warn("[rewarded-ad] load failed", error);
             finish(false);
-          });
-        }),
-        ad.addAdEventListener(RewardedAdEventType.EARNED_REWARD, () => {
-          rewarded = true;
-        }),
-        ad.addAdEventListener(AdEventType.ERROR, (error) => {
-          console.warn("[rewarded-ad] load failed", error);
-          finish(false);
-        }),
-        ad.addAdEventListener(AdEventType.CLOSED, () => finish(rewarded)),
-      ];
-      timeout = setTimeout(() => finish(false), AD_LOAD_TIMEOUT_MS);
-      ad.load();
-    } catch (error) {
-      console.warn("[rewarded-ad] create failed", error);
-      finish(false);
-    }
+          }),
+          ad.addAdEventListener(AdEventType.CLOSED, () => finish(rewarded)),
+        ];
+        ad.load();
+      })
+      .catch((error) => {
+        console.warn("[rewarded-ad] initialize failed", error);
+        finish(false);
+      });
   });
 }
 

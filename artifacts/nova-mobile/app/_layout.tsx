@@ -15,6 +15,7 @@ import { Animated, I18nManager, Image, Platform, StyleSheet, Text, View } from "
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import * as Sentry from "@sentry/react-native";
+import { initializeRewardedAds } from "@/utils/rewardedAd";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { TelegramAnnouncementModal } from "@/components/TelegramAnnouncementModal";
 import { AppProvider } from "@/context/AppContext";
@@ -150,6 +151,11 @@ function RootLayout() {
 
   useEffect(() => {
     if (!RUNTIME_INTEGRITY.trusted) return;
+    // Warm the native AdMob SDK while the first screen is settling. Without
+    // this, the first rewarded request may be created before AdMob is ready.
+    initializeRewardedAds().catch((error) => {
+      console.warn("[rewarded-ad] startup initialization failed", error);
+    });
     let stop: (() => void) | undefined;
     import("@/utils/episodeNotifications")
       .then(({ startEpisodeNotificationSync }) => {
