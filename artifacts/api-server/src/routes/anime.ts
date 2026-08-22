@@ -66,6 +66,70 @@ const BASE_HDRS: Record<string, string> = {
   Connection: "keep-alive",
 };
 
+// ── Lightweight media telemetry + bounded manifest cache ─────────────────────
+// Keep this cache deliberately small and manifest-only. Segments/MP4s are never
+// buffered here: they must flow through Readable.fromWeb() with backpressure.
+type HlsManifestCacheEntry = {
+  body: string;
+  expiresAt: number;
+};
+const HLS_MANIFEST_CACHE = new Map<string, HlsManifestCacheEntry>();
+const HLS_MANIFEST_INFLIGHT = new Map<string, Promise<string | null>>();
+const HLS_MANIFEST_CACHE_MAX = 256;
+const HLS_MANIFEST_TTL_MS = 4_000;
+const HLS_MASTER_TTL_MS = 30_000;
+const mediaMetrics = {
+  activeMedia: 0,
+  activeManifests: 0,
+  mediaRequests: 0,
+  manifestRequests: 0,
+  upstreamErrors: 0,
+  lastCpuSample: process.cpuUsage(),
+  lastCpuAt: Date.now(),
+  cpuPercent: 0,
+};
+
+function hlsCacheKey(url: string, ref: string, manifestKey: string): string {
+  return `${url}\n${ref}\n${manifestKey}`;
+}
+
+function hlsCacheTtl(url: string, body: string): number {
+  // Never cache beyond an explicit epoch-style expiry embedded in a signed URL.
+  const now = Date.now();
+  let ttl = body.includes("#EXT-X-STREAM-INF") ? HLS_MASTER_TTL_MS : HLS_MANIFEST_TTL_MS;
+  try {
+    const parsed = new URL(url);
+    for (const key of ["expires", "expires_at", "exp", "e"]) {
+      const raw = parsed.searchParams.get(key);
+      const value = raw ? Number(raw) : NaN;
+      if (!Number.isFinite(value)) continue;
+      const expiryMs = value < 10_000_000_000 ? value * 1000 : value;
+      ttl = Math.min(ttl, Math.max(0, expiryMs - now - 1_000));
+    }
+  } catch {}
+  return ttl;
+}
+
+function putHlsManifestCache(key: string, body: string, url: string): void {
+  const ttl = hlsCacheTtl(url, body);
+  if (ttl <= 0) return;
+  if (HLS_MANIFEST_CACHE.size >= HLS_MANIFEST_CACHE_MAX) {
+    const oldest = HLS_MANIFEST_CACHE.keys().next().value;
+    if (oldest) HLS_MANIFEST_CACHE.delete(oldest);
+  }
+  HLS_MANIFEST_CACHE.set(key, { body, expiresAt: Date.now() + ttl });
+}
+
+function sampleMediaCpu(): void {
+  const now = Date.now();
+  const elapsedMs = now - mediaMetrics.lastCpuAt;
+  if (elapsedMs < 500) return;
+  const usage = process.cpuUsage(mediaMetrics.lastCpuSample);
+  mediaMetrics.cpuPercent = Math.min(999, ((usage.user + usage.system) / 1000 / elapsedMs) * 100);
+  mediaMetrics.lastCpuSample = process.cpuUsage();
+  mediaMetrics.lastCpuAt = now;
+}
+
 // أحدث الحلقات تستخدم معرّف AnimeSlayer في الرابط، بينما مصادر البث
 // (خصوصاً KW) تحتاج AniList ID. نحل العنوان مرة واحدة عند غياب AniList ID.
 type AniListSourceMeta = {
@@ -15614,8 +15678,11 @@ async function serveHlsVPS(
   manifestKey: string,
   res: import("express").Response,
 ): Promise<void> {
+  mediaMetrics.activeManifests++;
+  mediaMetrics.manifestRequests++;
   const hdrs: Record<string, string> = { ...BASE_HDRS, Accept: "*/*" };
   if (ref) { hdrs.Referer = ref; try { hdrs.Origin = new URL(ref).origin; } catch {} }
+  const key = hlsCacheKey(url, ref, manifestKey);
 
   // مساعد: إرسال manifest مُعاد كتابته للعميل
   function sendManifest(body: string): void {
@@ -15623,7 +15690,7 @@ async function serveHlsVPS(
     const rewritten = rewriteM3u8ForVPS(body, url, ref, manifestKey);
     res.setHeader("Content-Type", "application/vnd.apple.mpegurl");
     res.setHeader("Access-Control-Allow-Origin", "*");
-    res.setHeader("Cache-Control", "no-cache");
+    res.setHeader("Cache-Control", "public, max-age=2, stale-while-revalidate=2");
     res.send(rewritten);
   }
 
@@ -15631,46 +15698,75 @@ async function serveHlsVPS(
     return body.includes("#EXTM3U") || body.includes("#EXT-X-");
   }
 
-  // ── 1. VPS direct ───────────────────────────────────────────────────────────
-  const fetchDirect = async (): Promise<string | null> => {
-    for (let attempt = 0; attempt < 2; attempt++) {
-      try {
-        const r = await fetch(url, { headers: hdrs, signal: AbortSignal.timeout(8000) });
-        if (r.ok) {
-          const body = decodeEncryptedHlsPlaylist(await r.text(), manifestKey);
-          if (isValidManifest(body)) return body;
-          console.warn(`[hls-proxy] invalid manifest host=${safeHost(url)} status=${r.status} bytes=${body.length}`);
-        } else {
-          console.warn(`[hls-proxy] upstream rejected host=${safeHost(url)} status=${r.status} attempt=${attempt + 1}`);
-        }
-        if (r.status !== 403 && r.status !== 429 && r.status !== 503) break;
-        if (attempt < 1) await new Promise(r2 => setTimeout(r2, 300));
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        console.warn(`[hls-proxy] upstream fetch failed host=${safeHost(url)} attempt=${attempt + 1}: ${message}`);
-        if (attempt < 1) await new Promise(r2 => setTimeout(r2, 300));
-        else break;
-      }
+  const cached = HLS_MANIFEST_CACHE.get(key);
+  if (cached) {
+    if (cached.expiresAt > Date.now()) {
+      sendManifest(cached.body);
+      mediaMetrics.activeManifests--;
+      return;
     }
-    return null;
-  };
+    HLS_MANIFEST_CACHE.delete(key);
+  }
 
-  // ── 2. Hopx parallel ───────────────────────────────────────────────────────
-  const fetchHopx = async (): Promise<string | null> => {
-    if (!_hopxOk) return null;
-    try {
-      const r = await fetchViaHopx(url, ref, 12000);
-      if (!r) return null;
-      const body = decodeEncryptedHlsPlaylist(await r.text(), manifestKey);
-      return isValidManifest(body) ? body : null;
-    } catch { return null; }
-  };
+  // Coalesce a burst of players starting the same episode. Only one upstream
+  // request is made; every waiting player receives the same small manifest.
+  let fetchPromise = HLS_MANIFEST_INFLIGHT.get(key);
+  if (!fetchPromise) {
+    // ── 1. VPS direct ─────────────────────────────────────────────────────────
+    const fetchDirect = async (): Promise<string | null> => {
+      for (let attempt = 0; attempt < 2; attempt++) {
+        try {
+          const r = await fetch(url, { headers: hdrs, signal: AbortSignal.timeout(8000) });
+          if (r.ok) {
+            const body = decodeEncryptedHlsPlaylist(await r.text(), manifestKey);
+            if (isValidManifest(body)) return body;
+            console.warn(`[hls-proxy] invalid manifest host=${safeHost(url)} status=${r.status} bytes=${body.length}`);
+          } else {
+            console.warn(`[hls-proxy] upstream rejected host=${safeHost(url)} status=${r.status} attempt=${attempt + 1}`);
+          }
+          if (r.status !== 403 && r.status !== 429 && r.status !== 503) break;
+          if (attempt < 1) await new Promise(r2 => setTimeout(r2, 300));
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          console.warn(`[hls-proxy] upstream fetch failed host=${safeHost(url)} attempt=${attempt + 1}: ${message}`);
+          if (attempt < 1) await new Promise(r2 => setTimeout(r2, 300));
+          else break;
+        }
+      }
+      return null;
+    };
 
-  // VPS مباشر فقط — Hopx / MediaFlow / CF Worker جميعها معطّلة
-  const body1 = await fetchDirect();
-  if (body1) { sendManifest(body1); return; }
+    // ── 2. Hopx parallel ─────────────────────────────────────────────────────
+    const fetchHopx = async (): Promise<string | null> => {
+      if (!_hopxOk) return null;
+      try {
+        const r = await fetchViaHopx(url, ref, 12000);
+        if (!r) return null;
+        const body = decodeEncryptedHlsPlaylist(await r.text(), manifestKey);
+        return isValidManifest(body) ? body : null;
+      } catch { return null; }
+    };
 
-  if (!res.headersSent) res.status(502).send("upstream error");
+    // VPS مباشر فقط — Hopx / MediaFlow / CF Worker جميعها معطّلة
+    fetchPromise = fetchDirect().then((body) => {
+      if (body) putHlsManifestCache(key, body, url);
+      return body;
+    }).finally(() => {
+      HLS_MANIFEST_INFLIGHT.delete(key);
+    });
+    HLS_MANIFEST_INFLIGHT.set(key, fetchPromise);
+  }
+
+  try {
+    const body = await fetchPromise;
+    if (body) sendManifest(body);
+    else if (!res.headersSent) {
+      mediaMetrics.upstreamErrors++;
+      res.status(502).send("upstream error");
+    }
+  } finally {
+    mediaMetrics.activeManifests--;
+  }
 }
 
 // ── VPS-side segment/video proxy (يُستخدم عند سقوط CF Worker) ─────────────────
@@ -15679,6 +15775,9 @@ async function serveMediaVPS(
   req: import("express").Request,
   res: import("express").Response,
 ): Promise<void> {
+  mediaMetrics.activeMedia++;
+  mediaMetrics.mediaRequests++;
+  sampleMediaCpu();
   // Keep media responses byte-for-byte and let the client control buffering.
   // Compression adds latency and can interfere with Range-based resume.
   const hdrs: Record<string, string> = {
@@ -15745,6 +15844,7 @@ async function serveMediaVPS(
       res.status(206);
     } else {
       res.status(r.ok ? 200 : r.status);
+      if (!r.ok) mediaMetrics.upstreamErrors++;
     }
     // Stream directly — لا نبفّر في الذاكرة (مهم للـ MP4 الكبيرة)
     if (r.body) {
@@ -15754,10 +15854,13 @@ async function serveMediaVPS(
       res.end();
     }
   } catch {
+    mediaMetrics.upstreamErrors++;
     if (!res.headersSent) res.status(502).send("media fetch failed");
   } finally {
     clearTimeout(connectTimeout);
     res.removeListener("close", abortUpstream);
+    mediaMetrics.activeMedia--;
+    sampleMediaCpu();
   }
 }
 
@@ -15797,6 +15900,28 @@ router.get("/anime/video-proxy", async (req, res) => {
   res.setHeader("Access-Control-Expose-Headers", "Accept-Ranges, Content-Length, Content-Range, Content-Type");
 
   await serveMediaVPS(url, ref, req, res);
+});
+
+// Lightweight JSON endpoint for the VPS operator. It reports process-level
+// pressure and active proxy work without inspecting or storing media bytes.
+router.get("/anime/hls-proxy/metrics", (_req, res) => {
+  sampleMediaCpu();
+  const memory = process.memoryUsage();
+  res.setHeader("Cache-Control", "no-store");
+  res.json({
+    uptimeSec: Math.round(process.uptime()),
+    activeMedia: mediaMetrics.activeMedia,
+    activeManifests: mediaMetrics.activeManifests,
+    mediaRequests: mediaMetrics.mediaRequests,
+    manifestRequests: mediaMetrics.manifestRequests,
+    upstreamErrors: mediaMetrics.upstreamErrors,
+    manifestCacheEntries: HLS_MANIFEST_CACHE.size,
+    manifestInflight: HLS_MANIFEST_INFLIGHT.size,
+    cpuPercent: Number(mediaMetrics.cpuPercent.toFixed(1)),
+    rssBytes: memory.rss,
+    heapUsedBytes: memory.heapUsed,
+    externalBytes: memory.external,
+  });
 });
 
 // ── download-mp4: تحويل HLS إلى MP4 للتنزيل دون اتصال ───────────────────────
