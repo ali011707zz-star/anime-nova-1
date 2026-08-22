@@ -92,3 +92,4 @@
 - [VPS HLS manifest cache](vps-hls-manifest-cache.md) — backend no-cache bypassed shared manifest caching; short Nginx micro-cache with lock coalesces VOD requests without caching MP4.
 - [VPS concurrency ceiling](vps-concurrency-test-2026-08.md) — ranged video-proxy load test: 75 already timed out heavily, 125 hit 429s, and 150 made SSH unreachable; do not treat 150 as safe capacity.
 - [VPS source config and Supabase drift](vps-source-config-supabase-drift.md) — provider availability can be healthy while config hides sources; production Supabase schema differs from migration expectations.
+- [Mobile anti-tamper boundary](mobile-anti-tamper-boundary.md) — release/package headers can fail closed for sensitive API paths, but only Google Play Integrity can authenticate an unmodified APK.
