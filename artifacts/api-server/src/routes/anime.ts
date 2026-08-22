@@ -14132,8 +14132,24 @@ router.get("/anime/anslayer-latest", async (req, res) => {
     const list: any[] = data?.response?.data || [];
     const rawItems = list.map((item: any) => {
       const epMatch = String(item.latest_episode_name || "").match(/(\d+)/);
+      /* Some AnimeSlayer catalog responses already include the AniList id,
+         but older code discarded it and always searched by the display title.
+         That is especially harmful here: KW is AniList-ID based, while
+         anslayerId is a different numeric namespace. Preserve every known
+         spelling used by the upstream catalog before falling back to search. */
+      const upstreamAniListId = [
+        item.anilist_id,
+        item.anilistId,
+        item.anilistID,
+        item.anime_anilist_id,
+        item.anime?.anilist_id,
+        item.anime?.anilistId,
+      ]
+        .map((value: unknown) => Number(value))
+        .find((value: number) => Number.isInteger(value) && value > 0);
       return {
         anslayerId: parseInt(item.anime_id, 10),
+        anilistId: upstreamAniListId,
         name: item.anime_name || "",
         episode: epMatch ? parseInt(epMatch[1], 10) : null,
         cover: item.anime_cover_image_url || "",
@@ -14144,11 +14160,14 @@ router.get("/anime/anslayer-latest", async (req, res) => {
     // Resolve in parallel so the latest list can use the same AniList-based
     // detail, subtitle, and Japanese-source paths as the normal catalog.
     const items = (await Promise.all(rawItems.map(async (item: any) => {
-      const animeId = await resolveAniListIdForSource(item.name, null, [], null);
+      const animeId = item.anilistId || await resolveAniListIdForSource(item.name, null, [], null);
       const meta = animeId ? getCachedAniListSourceMeta(animeId) : undefined;
       return {
         ...item,
         animeId,
+        /* Keep an explicit field for clients so a future normalization change
+           cannot accidentally replace the AniList id with anslayerId. */
+        anilistId: animeId,
         titleVariants: meta?.titles || [item.name].filter(Boolean),
         romaji: meta?.romaji || item.name,
         english: meta?.english || "",

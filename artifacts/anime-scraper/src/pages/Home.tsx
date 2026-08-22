@@ -373,7 +373,9 @@ export default function Home() {
         const items = raw
           .map((item: any) => ({
             ...item,
-            animeId: item.animeId ?? item.anilistId,
+            /* KW needs the AniList namespace. The API now exposes it
+               explicitly so this card can never prefer anslayerId. */
+            animeId: item.anilistId ?? item.animeId ?? item.anilist_id,
             name: item.name ?? item.title ?? "",
             cover: item.cover ?? item.poster ?? "",
             source: "anslayer",

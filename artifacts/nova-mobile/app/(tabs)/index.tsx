@@ -112,7 +112,9 @@ export default function HomeScreen() {
         const normalized = raw
           .map((item: any) => ({
             ...item,
-            animeId: Number(item.animeId ?? item.anilistId ?? 0),
+            /* Keep the AniList id separate from AnimeSlayer's id. KW and
+               other AniList-based sources use this value on latest cards. */
+            animeId: Number(item.anilistId ?? item.animeId ?? item.anilist_id ?? 0),
             anslayerId: Number(item.anslayerId ?? item.animeId ?? item.anilistId ?? 0),
             name: String(item.name ?? item.title ?? "").trim(),
             titleAr: String(item.titleAr ?? item.arabicTitle ?? "").trim(),
