@@ -129,7 +129,7 @@ export default function AwDubbedWatchScreen() {
 
   if (loading) {
     return (
-      <View style={styles.center}>
+      <View style={[styles.center, styles.loadingContainer]}>
         <RewardedAdPrompt />
         <ActivityIndicator color="#10B981" size="large" />
         <Text style={styles.loadingText}>جاري تحميل المصدر...</Text>
@@ -176,6 +176,7 @@ export default function AwDubbedWatchScreen() {
 
 const styles = StyleSheet.create({
   center:         { flex: 1, alignItems: "center", justifyContent: "center", gap: 14, padding: 24 },
+  loadingContainer: { backgroundColor: "#09090B" },
   errorContainer: { flex: 1, backgroundColor: "#09090B" },
   backBtn: {
     margin: 16, width: 36, height: 36, borderRadius: 10,

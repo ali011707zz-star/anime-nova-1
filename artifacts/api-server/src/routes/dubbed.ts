@@ -390,10 +390,11 @@ router.get("/dubbed/watch-src", async (req, res) => {
   }
 
   try {
-    // ── جلب صفحة الحلقة — نجرب direct fetch أولاً (أسرع وأكثر موثوقية لـ arabic-toons)
-    // ثم cfGet كـ fallback إن فشل الطلب المباشر
+    // ── جلب صفحة الحلقة — نجرب direct و cfGet بالتوازي.
+    // الانتظار التسلسلي كان يجعل الطلب يستهلك 12s + 18s عند تعثر VPS
+    // في الوصول المباشر، وهو ما كان يظهر للمستخدم كتعليق طويل قبل المشغل.
     let html: string | null = null;
-    try {
+    const fetchDirectPage = async (): Promise<string> => {
       const directR = await fetch(epUrl, {
         headers: {
           "User-Agent": BROWSER_UA,
@@ -405,13 +406,21 @@ router.get("/dubbed/watch-src", async (req, res) => {
         },
         signal: AbortSignal.timeout(12000),
       });
-      if (directR.ok) {
-        const t = await directR.text();
-        if (t.length > 500 && !isCfBlock(t)) html = t;
-      }
-    } catch { /* fall through */ }
-
-    if (!html) html = await cfGet(epUrl, AT_BASE + "/", 18000);
+      if (!directR.ok) throw new Error(`direct_${directR.status}`);
+      const t = await directR.text();
+      if (t.length <= 500 || isCfBlock(t)) throw new Error("direct_invalid");
+      return t;
+    };
+    const fetchCfPage = async (): Promise<string> => {
+      const t = await cfGet(epUrl, AT_BASE + "/", 18000);
+      if (!t || t.length <= 500 || isCfBlock(t)) throw new Error("cf_invalid");
+      return t;
+    };
+    try {
+      // Promise.any keeps the fast successful path and only waits for the
+      // slower path when the first one is blocked or unavailable.
+      html = await Promise.any([fetchDirectPage(), fetchCfPage()]);
+    } catch { /* both retrieval paths failed */ }
     if (!html) { res.status(502).json({ error: "failed to fetch episode page" }); return; }
 
     // Helper: build proxied URL + return rawUrl for mobile clients.
