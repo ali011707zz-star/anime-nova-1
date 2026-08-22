@@ -272,6 +272,11 @@ jobs:
               exit 1
             }
 
+      - name: 🔑 Show release signing fingerprint
+        working-directory: artifacts/nova-mobile/android
+        run: |
+          ./gradlew signingReport --no-daemon --warning-mode=none
+
       - name: 📱 Upload APK
         uses: actions/upload-artifact@v4
         with:
