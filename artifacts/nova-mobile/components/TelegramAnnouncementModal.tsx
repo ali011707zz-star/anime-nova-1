@@ -1,7 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useVideoPlayer, VideoView } from "expo-video";
 import * as Linking from "expo-linking";
-import React from "react";
+import React, { useEffect } from "react";
 import {
   Modal,
   Pressable,
@@ -26,9 +26,15 @@ export function TelegramAnnouncementModal({
     (instance) => {
       instance.loop = true;
       instance.muted = false;
-      instance.play();
     },
   );
+
+  useEffect(() => {
+    try {
+      if (visible) player.play();
+      else player.pause();
+    } catch {}
+  }, [player, visible]);
 
   const openTelegram = () => {
     Linking.openURL(TELEGRAM_URL).catch(() => {});

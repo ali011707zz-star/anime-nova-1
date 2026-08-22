@@ -140,7 +140,11 @@ function RootLayout() {
 
   useEffect(() => {
     if (!brandSplashVisible && RUNTIME_INTEGRITY.trusted) {
-      setTelegramAnnouncementVisible(true);
+      // Let the first screen settle before presenting the announcement. The
+      // native Modal already fades, but opening it on the same frame as the
+      // splash disappears feels like a layout jump on slower devices.
+      const t = setTimeout(() => setTelegramAnnouncementVisible(true), 450);
+      return () => clearTimeout(t);
     }
   }, [brandSplashVisible]);
 

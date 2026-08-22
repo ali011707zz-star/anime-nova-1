@@ -14,7 +14,7 @@ CREATE TABLE IF NOT EXISTS dubbed_anim_links (
   quality      TEXT         NOT NULL DEFAULT '720p',
   link         TEXT         NOT NULL,
   imported_at  TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
-  CONSTRAINT dubbed_anim_links_uniq UNIQUE(series_id, ep_number, server)
+  CONSTRAINT dubbed_anim_links_uniq UNIQUE(series_id, ep_number, server, quality)
 );
 
 CREATE INDEX IF NOT EXISTS dal_series_idx    ON dubbed_anim_links(series_id);
