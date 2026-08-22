@@ -4,7 +4,7 @@ import { makeRedirectUri } from "expo-auth-session";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import * as WebBrowser from "expo-web-browser";
 import { LinearGradient } from "expo-linear-gradient";
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import {
   Alert, KeyboardAvoidingView, Linking, Modal, Platform, Pressable, ScrollView,
   Image, Share, StyleSheet, Switch, Text, TextInput, View, ActivityIndicator,
@@ -298,8 +298,9 @@ function AuthSheet({ open, onClose, onLogin }: {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [resendCooldown, setResendCooldown] = useState(0);
+  const handledGoogleResponse = useRef<string | null>(null);
   useEffect(() => {
-    if (open) { setFlow("login"); setEmail(""); setPassword(""); setName(""); setCode(""); setError(""); setShowPass(false); setResendCooldown(0); }
+    if (open) { setFlow("login"); setEmail(""); setPassword(""); setName(""); setCode(""); setError(""); setShowPass(false); setResendCooldown(0); handledGoogleResponse.current = null; }
   }, [open]);
 
   useEffect(() => {
@@ -328,6 +329,7 @@ function AuthSheet({ open, onClose, onLogin }: {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ accessToken }),
+        signal: AbortSignal.timeout(20000),
       });
       const d = await r.json();
       if (!r.ok || !d.id || !d.authToken) {
@@ -354,8 +356,12 @@ function AuthSheet({ open, onClose, onLogin }: {
   }, [base, onClose, onLogin]);
 
   useEffect(() => {
-    if (googleResponse?.type !== "success") {
-      if (googleResponse?.type === "error") setError("تعذّر تسجيل الدخول عبر Google");
+    if (!googleResponse || googleResponse.type === "dismiss") return;
+    const responseKey = JSON.stringify(googleResponse);
+    if (handledGoogleResponse.current === responseKey) return;
+    handledGoogleResponse.current = responseKey;
+    if (googleResponse.type !== "success") {
+      if (googleResponse.type === "error") setError("تعذّر تسجيل الدخول عبر Google. حاول مرة أخرى.");
       return;
     }
     const accessToken =
@@ -371,7 +377,8 @@ function AuthSheet({ open, onClose, onLogin }: {
       return;
     }
     setError("");
-    await promptGoogleAsync();
+    try { await promptGoogleAsync(); }
+    catch { setError("تعذّر فتح تسجيل الدخول عبر Google. حاول مرة أخرى."); }
   };
 
   const handleLogin = async () => {
@@ -496,7 +503,9 @@ function AuthSheet({ open, onClose, onLogin }: {
                <Pressable
                  onPress={handleGoogleLogin}
                  disabled={loading}
-                 style={[ts.authSubmitBtn, { backgroundColor: "#fff", borderColor: "rgba(255,255,255,0.25)" }]}
+                 accessibilityRole="button"
+                 accessibilityLabel="المتابعة باستخدام Google"
+                 style={[ts.authSubmitBtn, { backgroundColor: "#fff", borderColor: "rgba(255,255,255,0.25)", minHeight: 56, shadowColor: "#000", shadowOpacity: 0.18, shadowRadius: 12, shadowOffset: { width: 0, height: 5 }, elevation: 3 }]}
                >
                  {loading ? <ActivityIndicator color="#111827" size="small" /> : (
                    <>
@@ -507,6 +516,12 @@ function AuthSheet({ open, onClose, onLogin }: {
                    </>
                  )}
                </Pressable>
+               {!!error && (
+                 <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, backgroundColor: "rgba(239,68,68,0.10)", borderWidth: 1, borderColor: "rgba(239,68,68,0.25)", borderRadius: 14, paddingHorizontal: 14, paddingVertical: 10 }}>
+                   <Ionicons name="alert-circle" size={16} color="#f87171" />
+                   <Text style={{ flex: 1, fontSize: 11, color: "#fca5a5", fontFamily: "Cairo_400Regular", textAlign: "right", lineHeight: 20 }}>{error}</Text>
+                 </View>
+               )}
              </View>
            )}
 

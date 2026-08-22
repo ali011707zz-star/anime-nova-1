@@ -496,7 +496,7 @@ function GoogleBtn() {
       type="button"
       disabled={loading}
       onClick={async () => { setLoading(true); await signInWithGoogle(); setLoading(false); }}
-      className="w-full flex items-center justify-center gap-2 py-3 rounded-2xl font-bold font-['Cairo'] text-[12px] transition-all active:scale-[0.98] disabled:opacity-60"
+      className="w-full max-w-sm mx-auto flex items-center justify-center gap-2 py-3 rounded-2xl font-bold font-['Cairo'] text-[12px] transition-all active:scale-[0.98] disabled:opacity-60"
       style={{
         background: "rgba(255,255,255,0.05)",
         border: "1.5px solid rgba(255,255,255,0.10)",
