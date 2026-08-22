@@ -1127,6 +1127,12 @@ export default function WatchScreen() {
   /* ── جلب مصدر واحد عند ضغط المستخدم على زر المصدر ── */
   const handlePickSite = useCallback(async (site: string, preferredQuality?: QualityKey) => {
     if (BLOCKED_SOURCE_SITES.has(site.toLowerCase())) return;
+    /* أظهر استجابة اللمس فوراً. فحص صلاحية المشاهدة/الإعلان قد يستغرق
+       ثواني، ولا ينبغي أن يبدو الزر ميتاً أثناء انتظاره. */
+    const fetchKey = preferredQuality ? `${site}::${preferredQuality}` : site;
+    if (preferredQuality) {
+      setSlotStatus(prev => ({ ...prev, [pickerSlotKey(site, preferredQuality)]: "fetching" }));
+    }
     if (!watchUnlocked) {
       if (watchAdSite && watchAdSite !== site) return;
       if (watchAdSite === site) return;
@@ -1134,13 +1140,17 @@ export default function WatchScreen() {
       try {
         const allowed = await ensureWatchAccess();
         if (isMountedRef.current && allowed) setWatchUnlocked(true);
-        if (!allowed) return;
+        if (!allowed) {
+          if (preferredQuality) {
+            setSlotStatus(prev => ({ ...prev, [pickerSlotKey(site, preferredQuality)]: "idle" }));
+          }
+          return;
+        }
       } finally {
         if (isMountedRef.current) setWatchAdSite(null);
       }
     }
     /* منع الضغط المزدوج أثناء الجلب — يسمح بإعادة المحاولة بعد الفشل */
-    const fetchKey = preferredQuality ? `${site}::${preferredQuality}` : site;
     if (inFlightSitesRef.current.has(fetchKey)) return;
     /* إذا نجح سابقاً → شغّل أفضل مصدر من نفس الجودة فقط */
     if (fetchedSitesRef.current.has(fetchKey)) {
@@ -1165,9 +1175,6 @@ export default function WatchScreen() {
     }
 
     inFlightSitesRef.current.add(fetchKey);
-    if (preferredQuality) {
-      setSlotStatus(prev => ({ ...prev, [pickerSlotKey(site, preferredQuality)]: "fetching" }));
-    }
 
     const base = getBaseUrl();
     const qs = new URLSearchParams({
