@@ -10,7 +10,10 @@ const CONFIG_PREFIX = "reward_ads:";
 const DOWNLOAD_LIMIT = 4;
 const WATCH_ACCESS_MS = 60 * 60 * 1000;
 const SETTINGS_KEY = "reward_ads:settings";
-const TEST_REWARDED_ID = "ca-app-pub-3940256099942544/5224354917";
+// The live Android Rewarded unit configured by the app owner.
+// Ad unit IDs are client-visible by design; the app still fail-closes when
+// Google cannot load or verify the reward.
+const TEST_REWARDED_ID = "ca-app-pub-7738594986393012/4388351429";
 type RewardKind = "download" | "watch";
 type RewardSettings = { enabled: boolean; rewardedAdUnitId: string };
 type AdState = {

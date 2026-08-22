@@ -5,12 +5,12 @@ import {
   RewardedAdEventType,
 } from "react-native-google-mobile-ads";
 
-// Google’s official Android rewarded test unit ID. Keep this explicit so a
-// build cannot accidentally switch to a live unit without an environment value.
-const TEST_REWARDED_ID = "ca-app-pub-3940256099942544/5224354917";
+// Live Android rewarded unit. The server can also update this value remotely
+// through /api/ads/state after the app refreshes its ad settings.
+const TEST_REWARDED_ID = "ca-app-pub-7738594986393012/4388351429";
 const configuredRewardedId = process.env.EXPO_PUBLIC_ADMOB_REWARDED_AD_UNIT_ID?.trim();
 
-/** Production stays fail-safe: no configured unit means Google’s test ad. */
+/** Keep a valid live fallback when the remote ad setting is unavailable. */
 export const NOVA_ADS_TEST_MODE = !configuredRewardedId;
 let rewardedAdUnitId = configuredRewardedId || TEST_REWARDED_ID;
 const AD_LOAD_TIMEOUT_MS = 20_000;

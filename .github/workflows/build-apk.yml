@@ -12,6 +12,8 @@ on:
 
 env:
   EXPO_PUBLIC_DOMAIN: ${{ github.event.inputs.backend_domain || 'https://animenovaa.duckdns.org' }}
+  # Public AdMob rewarded unit for the Android production build.
+  EXPO_PUBLIC_ADMOB_REWARDED_AD_UNIT_ID: "ca-app-pub-7738594986393012/4388351429"
   # Sentry DSN — ليست سرّاً حساساً (مصمّمة للتضمين في تطبيقات العميل)، تُستخدم
   # لالتقاط كراشات native (مثل كراش مشغّل الفيديو) التي لا يراها نظام تسجيل
   # الأعطال القديم القائم على JS فقط.
