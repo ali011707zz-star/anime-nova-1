@@ -39,17 +39,24 @@ export function showRewardedAd(): Promise<boolean> {
       });
       subscriptions = [
         ad.addAdEventListener(RewardedAdEventType.LOADED, () => {
-          ad.show().catch(() => finish(false));
+          ad.show().catch((error) => {
+            console.warn("[rewarded-ad] show failed", error);
+            finish(false);
+          });
         }),
         ad.addAdEventListener(RewardedAdEventType.EARNED_REWARD, () => {
           rewarded = true;
         }),
-        ad.addAdEventListener(AdEventType.ERROR, () => finish(false)),
+        ad.addAdEventListener(AdEventType.ERROR, (error) => {
+          console.warn("[rewarded-ad] load failed", error);
+          finish(false);
+        }),
         ad.addAdEventListener(AdEventType.CLOSED, () => finish(rewarded)),
       ];
       timeout = setTimeout(() => finish(false), AD_LOAD_TIMEOUT_MS);
       ad.load();
-    } catch {
+    } catch (error) {
+      console.warn("[rewarded-ad] create failed", error);
       finish(false);
     }
   });

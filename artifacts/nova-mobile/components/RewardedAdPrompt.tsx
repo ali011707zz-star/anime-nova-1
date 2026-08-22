@@ -21,6 +21,7 @@ type PendingPrompt = {
 export function RewardedAdPrompt() {
   const [pending, setPending] = useState<PendingPrompt | null>(null);
   const [busy, setBusy] = useState(false);
+  const [adError, setAdError] = useState("");
   const router = useRouter();
   const player = useVideoPlayer(require("../assets/deku-ad.mp4"), (instance) => {
     instance.loop = true;
@@ -31,6 +32,7 @@ export function RewardedAdPrompt() {
   useEffect(() => {
     return subscribeRewardPrompt((kind, confirm, resolve) => {
       setBusy(false);
+      setAdError("");
       setPending({ kind, confirm, resolve });
     });
   }, []);
@@ -40,6 +42,7 @@ export function RewardedAdPrompt() {
     const current = pending;
     setPending(null);
     setBusy(false);
+    setAdError("");
     current.resolve(value);
   };
 
@@ -47,7 +50,15 @@ export function RewardedAdPrompt() {
     if (!pending || busy) return;
     setBusy(true);
     const result = await pending.confirm().catch(() => false);
-    close(result);
+    if (result) {
+      close(true);
+    } else {
+      // Keep the prompt visible when AdMob has no fill, the unit is not
+      // configured in this build, or the device is offline. Closing it here
+      // made a failed tap look like the reward had silently been consumed.
+      setBusy(false);
+      setAdError("تعذر تحميل الإعلان الآن. تحقق من الاتصال ثم حاول مرة أخرى.");
+    }
   };
 
   const openSubscriptions = () => {
@@ -101,6 +112,7 @@ export function RewardedAdPrompt() {
           <Text style={styles.title}>{title}</Text>
           <Text style={styles.message}>{message}</Text>
           <Text style={styles.note}>يظهر الإعلان فقط عند الحاجة إلى فتح هذه الميزة.</Text>
+           {adError ? <Text style={styles.error}>{adError}</Text> : null}
 
           <Pressable
             onPress={openSubscriptions}
@@ -230,6 +242,14 @@ const styles = StyleSheet.create({
     textAlign: "right",
     fontSize: 10,
     fontFamily: "Cairo_400Regular",
+  },
+  error: {
+    marginTop: 9,
+    color: "#fca5a5",
+    textAlign: "right",
+    fontSize: 11,
+    lineHeight: 18,
+    fontFamily: "Cairo_700Bold",
   },
   subscribe: {
     minHeight: 38,
