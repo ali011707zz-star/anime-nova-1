@@ -225,18 +225,12 @@ jobs:
                   raise SystemExit("Could not find signingConfigs block in app/build.gradle")
               text = text.replace(marker, marker + signing_block, 1)
 
-          release_pattern = (
-              r"(buildTypes\s*\{.*?release\s*\{.*?signingConfig\s+)"
-              r"signingConfigs\.debug"
-          )
-          text, replacements = re.subn(
-              release_pattern,
-              r"\1signingConfigs.release",
-              text,
-              count=1,
-              flags=re.S,
-          )
-          if replacements != 1:
+          old = "signingConfig signingConfigs.debug"
+          replacements = text.count(old)
+          if replacements < 1:
+              raise SystemExit("Could not find the generated release debug signing config")
+          text = text.replace(old, "signingConfig signingConfigs.release")
+          if "signingConfig signingConfigs.debug" in text:
               raise SystemExit("Could not switch release build to the stable signing config")
           path.write_text(text)
           PY
