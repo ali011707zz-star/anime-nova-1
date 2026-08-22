@@ -37,6 +37,7 @@ module.exports = {
         RESEND_API_KEY: _e("RESEND_API_KEY"),
         RESEND_FROM: _e("RESEND_FROM") || "Anime NOVA <onboarding@resend.dev>",
         APP_DOMAIN: _e("APP_DOMAIN") || "animenovaa.duckdns.org",
+        GOOGLE_CLIENT_ID: _e("GOOGLE_CLIENT_ID"),
         SESSION_SECRET: _e("SESSION_SECRET"),
         APP_SECRET: _e("APP_SECRET"),
         NOVA_ADMIN_PATH: _e("NOVA_ADMIN_PATH"),

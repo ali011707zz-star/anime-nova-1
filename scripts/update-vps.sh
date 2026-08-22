@@ -14,7 +14,11 @@ git pull origin main 2>/dev/null || git pull origin master
 pnpm install --prefer-offline --ignore-scripts 2>/dev/null || pnpm install --ignore-scripts
 
 pnpm --filter @workspace/api-server run build
-VITE_API_URL= NODE_ENV=production pnpm --filter @workspace/anime-scraper run build
+# Google Client IDs are public identifiers, but must be injected at build time
+# because Vite replaces import.meta.env values in the generated web bundle.
+GOOGLE_CLIENT_ID="$(sed -n 's/^[[:space:]]*GOOGLE_CLIENT_ID[[:space:]]*=[[:space:]]*//p' "$APP_DIR/.env" | tail -n 1)"
+GOOGLE_CLIENT_ID="$GOOGLE_CLIENT_ID" VITE_API_URL= NODE_ENV=production \
+  pnpm --filter @workspace/anime-scraper run build
 
 # ⚠️  يجب استخدام delete+start وليس restart
 # pm2 restart لا يُعيد تحميل env vars من ecosystem.config.cjs

@@ -18,6 +18,8 @@
       },
       "env": {
         "EXPO_PUBLIC_DOMAIN": "https://animenovaa.duckdns.org",
+        "EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID": "413058110781-cbielvl5jhrf2bje392f8l9fnulvegp7.apps.googleusercontent.com",
+        "EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID": "413058110781-r8otf4jg4v1e7akp4ujii01brjhv8kg.apps.googleusercontent.com",
         "EXPO_PUBLIC_SENTRY_DSN": "https://f58d23758aeb03d3d03a23a12c91dd8b@o4511863460265984.ingest.us.sentry.io/4511863487266816"
       }
     },
@@ -28,6 +30,8 @@
       "env": {
         "EXPO_PUBLIC_DOMAIN": "https://animenovaa.duckdns.org",
         "EXPO_PUBLIC_API_URL": "https://animenovaa.duckdns.org",
+        "EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID": "413058110781-cbielvl5jhrf2bje392f8l9fnulvegp7.apps.googleusercontent.com",
+        "EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID": "413058110781-r8otf4jg4v1e7akp4ujii01brjhv8kg.apps.googleusercontent.com",
         "EXPO_PUBLIC_SENTRY_DSN": "https://f58d23758aeb03d3d03a23a12c91dd8b@o4511863460265984.ingest.us.sentry.io/4511863487266816"
       }
     }

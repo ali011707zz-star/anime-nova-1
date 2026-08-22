@@ -153,7 +153,9 @@ log "بناء الخادم الخلفي..."
 pnpm --filter @workspace/api-server run build
 
 log "بناء الواجهة الأمامية..."
-VITE_API_URL= NODE_ENV=production pnpm --filter @workspace/anime-scraper run build
+GOOGLE_CLIENT_ID="$(sed -n 's/^[[:space:]]*GOOGLE_CLIENT_ID[[:space:]]*=[[:space:]]*//p' "$ENV_FILE" | tail -n 1)"
+GOOGLE_CLIENT_ID="$GOOGLE_CLIENT_ID" VITE_API_URL= NODE_ENV=production \
+  pnpm --filter @workspace/anime-scraper run build
 
 # ── 9. إعداد PM2 ─────────────────────────────────────────────────────────
 log "إعداد PM2..."
