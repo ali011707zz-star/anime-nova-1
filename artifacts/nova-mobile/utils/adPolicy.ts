@@ -1,7 +1,7 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { getBaseUrl } from "./baseUrl";
 import { secureFetch } from "./secureApi";
-import { setRewardedAdUnitId, showRewardedAd } from "./rewardedAd";
+import { showRewardedAd } from "./rewardedAd";
 
 const DEVICE_KEY = "nova-ads-device-v1";
 export const DOWNLOAD_LIMIT = 4;
@@ -15,7 +15,7 @@ export type AdState = {
   watchAccessUntil: number | null;
   watchNeedsReward: boolean;
   adsEnabled?: boolean;
-  rewardedAdUnitId?: string;
+  rewardedProvider?: "startio";
 };
 
 type RewardPromptListener = (
@@ -89,7 +89,6 @@ export async function getAdState(): Promise<AdState | null> {
     const response = await adFetch("/api/ads/state");
     if (!response.ok) return null;
     const state = await response.json() as AdState;
-    setRewardedAdUnitId(state.rewardedAdUnitId);
     latestCount = state.downloadCount;
     listeners.forEach((listener) => listener(latestCount));
     return state;

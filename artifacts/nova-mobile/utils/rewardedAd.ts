@@ -18,7 +18,7 @@ let adsInitialization: Promise<void> | null = null;
 let adRequestInFlight: Promise<boolean> | null = null;
 
 /**
- * Start.io is the active rewarded provider while AdMob is unavailable.
+ * Start.io is the only rewarded provider in the Android build.
  * The SDK is Android-only for this integration; iOS remains a no-op until
  * an iOS Start.io application ID is supplied.
  */
@@ -105,10 +105,6 @@ export function showRewardedAd(): Promise<boolean> {
   });
   return adRequestInFlight;
 }
-
-// Kept for the existing remote-ad-settings callers. Start.io uses a fixed
-// application ID and does not accept an AdMob unit ID here.
-export function setRewardedAdUnitId(_adUnitId: string | null | undefined): void {}
 
 export const NOVA_ADS_TEST_MODE = false;
 export const showRewardedTestAd = showRewardedAd;

@@ -10,12 +10,8 @@ const CONFIG_PREFIX = "reward_ads:";
 const DOWNLOAD_LIMIT = 4;
 const WATCH_ACCESS_MS = 60 * 60 * 1000;
 const SETTINGS_KEY = "reward_ads:settings";
-// The live Android Rewarded unit configured by the app owner.
-// Ad unit IDs are client-visible by design; the app still fail-closes when
-// Google cannot load or verify the reward.
-const TEST_REWARDED_ID = "ca-app-pub-7738594986393012/4388351429";
 type RewardKind = "download" | "watch";
-type RewardSettings = { enabled: boolean; rewardedAdUnitId: string };
+type RewardSettings = { enabled: boolean };
 type AdState = {
   downloadCount: number;
   completedEpisodes: string[];
@@ -29,15 +25,12 @@ function emptyState(): AdState {
 
 async function getRewardSettings(): Promise<RewardSettings> {
   const raw = await getDbConfig(SETTINGS_KEY);
-  if (!raw) return { enabled: true, rewardedAdUnitId: TEST_REWARDED_ID };
+  if (!raw) return { enabled: true };
   try {
     const value = JSON.parse(raw);
-    return {
-      enabled: value?.enabled !== false,
-      rewardedAdUnitId: String(value?.rewardedAdUnitId || TEST_REWARDED_ID).trim() || TEST_REWARDED_ID,
-    };
+    return { enabled: value?.enabled !== false };
   } catch {
-    return { enabled: true, rewardedAdUnitId: TEST_REWARDED_ID };
+    return { enabled: true };
   }
 }
 
@@ -81,7 +74,7 @@ function publicState(state: AdState, privileged: boolean, settings: RewardSettin
   return {
     privileged,
     adsEnabled: settings.enabled,
-    rewardedAdUnitId: settings.rewardedAdUnitId,
+    rewardedProvider: "startio",
     downloadCount: privileged || !settings.enabled ? 0 : state.downloadCount,
     downloadLimit: DOWNLOAD_LIMIT,
     downloadNeedsReward: settings.enabled && !privileged && state.downloadCount >= DOWNLOAD_LIMIT,
@@ -180,12 +173,8 @@ router.patch("/admin/ads-settings", async (req: Request, res: Response) => {
   if (!isWebAdmin(req) && user?.plan !== "admin") return res.status(401).json({ error: "غير مصرّح" });
   const current = await getRewardSettings();
   const enabled = req.body?.enabled === undefined ? current.enabled : req.body.enabled;
-  const rewardedAdUnitId = req.body?.rewardedAdUnitId === undefined
-    ? current.rewardedAdUnitId
-    : String(req.body.rewardedAdUnitId || "").trim();
   if (typeof enabled !== "boolean") return res.status(400).json({ error: "enabled يجب أن يكون true أو false" });
-  if (!rewardedAdUnitId) return res.status(400).json({ error: "rewardedAdUnitId مطلوب" });
-  const next = { enabled, rewardedAdUnitId };
+  const next = { enabled };
   await setDbConfig(SETTINGS_KEY, JSON.stringify(next));
   return res.json({ ok: true, ...next });
 });
