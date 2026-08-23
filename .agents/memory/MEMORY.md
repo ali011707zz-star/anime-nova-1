@@ -100,3 +100,4 @@
 - [VPS UI release markers](vps-ui-release-version.md) — UI release bumps must update web/mobile display markers and Expo metadata; backend config version is separate.
 - [Mobile typecheck baseline](mobile-typecheck-baseline.md) — full Nova Mobile typecheck currently has unrelated pre-existing errors; validate changed files separately before APK builds.
 - [VPS transfer fallback](vps-transfer-fallback.md) — هذا الخادم لا يحتوي rsync؛ استخدم أرشيف tar عبر SSH لنقل الكود مع استثناء .env والنسخ الاحتياطية.
+- [AniList outage fallback](anilist-outage-fallback.md) — عند تعطّل AniList، أحدث الحلقات تعتمد على AnimeSlayer مباشرة ولا يجب إسقاط البطاقات بسبب فشل مطابقة المعرّف.

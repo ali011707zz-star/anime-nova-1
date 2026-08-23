@@ -14246,10 +14246,12 @@ router.get("/anime/anslayer-latest", async (req, res) => {
       const meta = animeId ? getCachedAniListSourceMeta(animeId) : undefined;
       return {
         ...item,
-        animeId,
+        // Keep the card visible even while AniList is unavailable. The
+        // AnimeSlayer catalog id is still enough for the direct AS source.
+        animeId: animeId || item.anslayerId,
         /* Keep an explicit field for clients so a future normalization change
            cannot accidentally replace the AniList id with anslayerId. */
-        anilistId: animeId,
+        anilistId: animeId || null,
         titleVariants: meta?.titles || [item.name].filter(Boolean),
         romaji: meta?.romaji || item.name,
         english: meta?.english || "",
