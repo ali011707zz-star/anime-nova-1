@@ -14940,7 +14940,9 @@ router.get("/anime/translate", async (req, res) => {
   const directAlias = to === "ar" && kind === "title" ? AR_TITLE_ALIASES[text.toLowerCase()] : undefined;
   if (directAlias) { res.setHeader("Cache-Control", "public, max-age=86400"); return res.json({ translated: directAlias, cached: true }); }
 
-  const cacheKey = `${kind}:${from}:${to}:${text.substring(0, 600)}`;
+  // v3 invalidates entries saved when failed providers returned the source
+  // text as though it were an Arabic translation.
+  const cacheKey = `v3:${kind}:${from}:${to}:${text.substring(0, 600)}`;
   if (translateCache.has(cacheKey)) return res.json({ translated: translateCache.get(cacheKey), cached: true });
   const cached = await pgTranslateGet(cacheKey);
   if (cached !== null) {
@@ -14956,11 +14958,26 @@ router.get("/anime/translate", async (req, res) => {
   await Promise.allSettled(translatedParts.map(async (value, i) => {
     if (from === to || !value || value !== parts[i]) return;
     try {
+      // This endpoint remains available from VPS egress IPs that are
+      // rate-limited by translate.googleapis.com.
+      const chromeUrl = `https://clients5.google.com/translate_a/t?client=dict-chrome-ex&sl=${encodeURIComponent(from)}&tl=${encodeURIComponent(to)}&q=${encodeURIComponent(parts[i].slice(0, 500))}`;
+      const chrome = await fetch(chromeUrl, {
+        signal: AbortSignal.timeout(8_000),
+        headers: { "User-Agent": BROWSER_UA, Accept: "application/json" },
+      });
+      const chromeValue = String(chrome.ok ? ((await chrome.json() as any)?.[0] || "") : "").trim();
+      if (chromeValue && (!to.startsWith("ar") || /[\u0600-\u06ff]/.test(chromeValue))) {
+        translatedParts[i] = chromeValue;
+        return;
+      }
+    } catch {}
+    try {
       const mm = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(parts[i].slice(0, 500))}&langpair=${from}|${to}`;
       const mr = await fetch(mm, { signal: AbortSignal.timeout(5_000), headers: { "User-Agent": BROWSER_UA } });
       if (mr.ok) {
         const mt = String((await mr.json() as any)?.responseData?.translatedText || "").trim();
-        if (mt) translatedParts[i] = mt;
+        if (mt && !/MYMEMORY WARNING|AVAILABLE FREE TRANSLATIONS/i.test(mt) &&
+            (!to.startsWith("ar") || /[\u0600-\u06ff]/.test(mt))) translatedParts[i] = mt;
       }
     } catch {}
   }));
