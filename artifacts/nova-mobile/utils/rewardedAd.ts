@@ -10,10 +10,12 @@ import {
 // Start.io application ID created for Anime NOVA in the Start.io portal.
 // Start.io uses an application ID (not an AdMob ad-unit ID).
 const START_IO_ANDROID_APP_ID = "207356648";
+const AD_INIT_SETTLE_MS = 1_500;
 const AD_LOAD_TIMEOUT_MS = 45_000;
 const AD_LOAD_RETRIES = 2;
 
 let adsInitialization: Promise<void> | null = null;
+let adRequestInFlight: Promise<boolean> | null = null;
 
 /**
  * Start.io is the active rewarded provider while AdMob is unavailable.
@@ -31,7 +33,11 @@ export function initializeRewardedAds(): Promise<void> {
         // Start.io SDK from completing its normal ad-request lifecycle.
         returnAd: true,
       });
-      adsInitialization = Promise.resolve();
+      // Start.io's native initializer is callback-based but the JS wrapper
+      // returns void. Do not race loadAd against that native initialization.
+      adsInitialization = new Promise((resolve) => {
+        setTimeout(resolve, AD_INIT_SETTLE_MS);
+      });
     } catch (error) {
       adsInitialization = null;
       return Promise.reject(error);
@@ -46,8 +52,9 @@ export function initializeRewardedAds(): Promise<void> {
  */
 export function showRewardedAd(): Promise<boolean> {
   if (Platform.OS !== "android") return Promise.resolve(false);
+  if (adRequestInFlight) return adRequestInFlight;
 
-  return new Promise((resolve) => {
+  adRequestInFlight = new Promise((resolve) => {
     let settled = false;
     let timeout: ReturnType<typeof setTimeout> | undefined;
     const finish = (value: boolean) => {
@@ -93,7 +100,10 @@ export function showRewardedAd(): Promise<boolean> {
       console.warn("[rewarded-ad] Start.io lifecycle failed", error);
       finish(false);
     });
+  }).finally(() => {
+    adRequestInFlight = null;
   });
+  return adRequestInFlight;
 }
 
 // Kept for the existing remote-ad-settings callers. Start.io uses a fixed

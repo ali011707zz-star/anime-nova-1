@@ -300,6 +300,21 @@ const GOOGLE_REDIRECT_URI = makeRedirectUri({
 });
 WebBrowser.maybeCompleteAuthSession();
 
+function fetchWithTimeout(
+  input: RequestInfo | URL,
+  init: RequestInit = {},
+  timeoutMs = 20_000,
+): Promise<Response> {
+  // AbortSignal.timeout is not available in every Hermes/Android runtime.
+  // Using an explicit controller keeps OAuth from failing before fetch is
+  // even called, which previously surfaced as "تعذّر الوصول للخادم".
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  return fetch(input, { ...init, signal: init.signal || controller.signal }).finally(() => {
+    clearTimeout(timer);
+  });
+}
+
 /* ── Auth Sheet ── */
 function AuthSheet({ open, onClose, onLogin }: {
   open: boolean; onClose: () => void; onLogin: (u: MobileUser) => void;
@@ -349,7 +364,7 @@ function AuthSheet({ open, onClose, onLogin }: {
         : googleWebClientId;
     if (!clientId) throw new Error("Google OAuth client ID missing");
 
-    const tokenResponse = await fetch("https://oauth2.googleapis.com/token", {
+    const tokenResponse = await fetchWithTimeout("https://oauth2.googleapis.com/token", {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: new URLSearchParams({
@@ -359,7 +374,6 @@ function AuthSheet({ open, onClose, onLogin }: {
         redirect_uri: GOOGLE_REDIRECT_URI,
         grant_type: "authorization_code",
       }).toString(),
-      signal: AbortSignal.timeout(20000),
     });
     const tokenData = await tokenResponse.json().catch(() => ({}));
     if (!tokenResponse.ok || !tokenData.access_token) {
@@ -377,11 +391,10 @@ function AuthSheet({ open, onClose, onLogin }: {
     setLoading(true);
     setError("");
     try {
-      const r = await fetch(`${base}/api/auth/google/token`, {
+      const r = await fetchWithTimeout(`${base}/api/auth/google/token`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ accessToken }),
-        signal: AbortSignal.timeout(20000),
       });
       const d = await r.json();
       // Google auth currently establishes the server session cookie. Older
