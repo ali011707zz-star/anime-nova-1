@@ -88,6 +88,7 @@ function RootLayoutNav() {
       <Stack.Screen name="settings" options={{ headerShown: false }} />
       <Stack.Screen name="schedule" options={{ headerShown: false }} />
       <Stack.Screen name="profile" options={{ headerShown: false, animation: "slide_from_right" }} />
+      <Stack.Screen name="oauth2redirect/google" options={{ headerShown: false }} />
       <Stack.Screen name="aw-dubbed/[key]" options={{ headerShown: false, animation: "slide_from_bottom" }} />
       <Stack.Screen name="aw-dubbed/watch"  options={{ headerShown: false, orientation: "all" }} />
       {/* The cartoon tab intentionally opens the legacy Arabic-Toons
