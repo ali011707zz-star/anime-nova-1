@@ -84,3 +84,17 @@ mtime_ms = 1787168531940
 storage_uri = "gcs://replit-rams-assets-sisko/rams/assets/repl:577201e2-4c3d-4cad-8f6e-fddc0396cc28/c1c77923-d1e7-4612-b540-8d2649e61fc7/5ec06699-16f2-4fc7-b71b-26a5ac25d463"
 storage_version_token = "1787168547212566"
 content_type = "image/png"
+
+[[outputs]]
+id = "fjeCVKWhCBTNcffogjjRl"
+uri = "file://artifacts/mockup-preview/profile-settings-preview.svg"
+type = "image"
+title = "معاينة تصميم الملف الشخصي والإعدادات"
+description = "نموذج بصري مستقل قبل التنفيذ: ملف شخصي غني بالمفضلة والسجل والتنزيلات، وإعدادات محسّنة بدون واجهة تغيير كلمة السر."
+logical_id = "c289d7c1-60dc-47f5-899f-45715b72e5cd"
+content_hash = "sha256:c92c531af5d9c54ce1ac96210ebf83027de9815157aa0064280ba0014b9f8042"
+size = 11653
+mtime_ms = 1787505042897
+storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:5262462a-1c28-49ae-8c7c-631a331a898d/c289d7c1-60dc-47f5-899f-45715b72e5cd/5486b05d-c84b-4d1c-883c-3ff3ff15b3e2"
+storage_version_token = "1787505051659885"
+content_type = "image/svg+xml"
