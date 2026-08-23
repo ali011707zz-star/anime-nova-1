@@ -9,7 +9,7 @@
     "scheme": "com.googleusercontent.apps.413058110781-cbielvl5jhrf2bje392f8l9fnulvegp7",
     "userInterfaceStyle": "dark",
     "backgroundColor": "#09090B",
-    "newArchEnabled": false,
+    "newArchEnabled": true,
     "splash": {
       "image": "./assets/images/icon.png",
       "resizeMode": "contain",
@@ -61,13 +61,6 @@
       "expo-video",
       "expo-screen-orientation",
       "expo-brightness",
-      [
-        "react-native-google-mobile-ads",
-        {
-          "androidAppId": "ca-app-pub-7738594986393012~6244006922",
-          "iosAppId": "ca-app-pub-3940256099942544~1458002511"
-        }
-      ],
       [
         "expo-media-library",
         {

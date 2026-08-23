@@ -1,133 +1,79 @@
 import { Platform } from "react-native";
 import {
-  AdEventType,
-  MobileAds,
-  RewardedAd,
-  RewardedAdEventType,
-} from "react-native-google-mobile-ads";
+  AdResultType,
+  AdType,
+  initializeStartIoSdk,
+  loadAd,
+  showAd,
+} from "react-native-start-io-sdk";
 
-// Live Android rewarded unit. The server can also update this value remotely
-// through /api/ads/state after the app refreshes its ad settings.
-const LIVE_REWARDED_ID = "ca-app-pub-7738594986393012/4388351429";
-const configuredRewardedId = process.env.EXPO_PUBLIC_ADMOB_REWARDED_AD_UNIT_ID?.trim();
-
-/** Use only the production unit. A test unit must never be shown to users or
- * mixed into production reward accounting. */
-export const NOVA_ADS_TEST_MODE = !configuredRewardedId;
-let rewardedAdUnitId = configuredRewardedId || LIVE_REWARDED_ID;
+// Start.io application ID created for Anime NOVA in the Start.io portal.
+// Start.io uses an application ID (not an AdMob ad-unit ID).
+const START_IO_ANDROID_APP_ID = "207356648";
 const AD_LOAD_TIMEOUT_MS = 20_000;
+
 let adsInitialization: Promise<void> | null = null;
 
 /**
- * The native AdMob SDK must be initialized before creating a rewarded ad.
- * Calling RewardedAd.createForAdRequest() first can leave the request pending
- * forever on release builds, which makes the reward prompt look like ads are
- * unavailable.
+ * Start.io is the active rewarded provider while AdMob is unavailable.
+ * The SDK is Android-only for this integration; iOS remains a no-op until
+ * an iOS Start.io application ID is supplied.
  */
 export function initializeRewardedAds(): Promise<void> {
-  if (Platform.OS === "web") return Promise.resolve();
+  if (Platform.OS !== "android") return Promise.resolve();
   if (!adsInitialization) {
-    adsInitialization = MobileAds()
-      .initialize()
-      .then(() => undefined)
-      .catch((error) => {
-        adsInitialization = null;
-        throw error;
+    try {
+      initializeStartIoSdk({
+        androidAppId: START_IO_ANDROID_APP_ID,
+        testAd: false,
+        returnAd: false,
       });
+      adsInitialization = Promise.resolve();
+    } catch (error) {
+      adsInitialization = null;
+      return Promise.reject(error);
+    }
   }
   return adsInitialization;
 }
 
+/**
+ * Loads and shows a Start.io rewarded video. A reward is granted only after
+ * Start.io reports AdRewarded, never merely after the ad is loaded or closed.
+ */
 export function showRewardedAd(): Promise<boolean> {
-  if (Platform.OS === "web") return Promise.resolve(false);
+  if (Platform.OS !== "android") return Promise.resolve(false);
 
   return new Promise((resolve) => {
-    let rewarded = false;
     let settled = false;
     let timeout: ReturnType<typeof setTimeout> | undefined;
-    let subscriptions: Array<() => void> = [];
-    let retryCount = 0;
-    const MAX_RETRIES = 1;
-    const cleanup = () => {
-      if (timeout) clearTimeout(timeout);
-      subscriptions.forEach((unsubscribe) => unsubscribe());
-      subscriptions = [];
-    };
     const finish = (value: boolean) => {
       if (settled) return;
       settled = true;
-      cleanup();
+      if (timeout) clearTimeout(timeout);
       resolve(value);
     };
 
-    const armTimeout = () => {
-      if (timeout) clearTimeout(timeout);
-      timeout = setTimeout(() => {
-        if (retryCount < MAX_RETRIES) {
-          retryCount += 1;
-          load(rewardedAdUnitId);
-        } else {
-          finish(false);
-        }
-      }, AD_LOAD_TIMEOUT_MS);
-    };
-
-    const load = (unitId: string) => {
-      if (settled) return;
-      cleanup();
-      armTimeout();
-      const ad = RewardedAd.createForAdRequest(unitId, {
-        requestNonPersonalizedAdsOnly: true,
-      });
-      subscriptions = [
-        ad.addAdEventListener(RewardedAdEventType.LOADED, () => {
-          ad.show().catch((error) => {
-            console.warn("[rewarded-ad] show failed", error);
-            if (retryCount < MAX_RETRIES) {
-              retryCount += 1;
-              load(rewardedAdUnitId);
-            } else {
-              finish(false);
-            }
-          });
-        }),
-        ad.addAdEventListener(RewardedAdEventType.EARNED_REWARD, () => {
-          rewarded = true;
-        }),
-        ad.addAdEventListener(AdEventType.ERROR, (error) => {
-          console.warn("[rewarded-ad] load failed", {
-            unitId,
-            code: (error as any)?.code,
-            message: (error as any)?.message,
-          });
-          if (retryCount < MAX_RETRIES) {
-            retryCount += 1;
-            load(rewardedAdUnitId);
-          } else {
-            finish(false);
-          }
-        }),
-        ad.addAdEventListener(AdEventType.CLOSED, () => finish(rewarded)),
-      ];
-      ad.load();
-    };
+    timeout = setTimeout(() => finish(false), AD_LOAD_TIMEOUT_MS);
 
     initializeRewardedAds()
+      .then(() => loadAd(AdType.REWARDED_VIDEO))
       .then(() => {
         if (settled) return;
-        load(rewardedAdUnitId);
+        showAd((result) => {
+          finish(result === AdResultType.AdRewarded);
+        });
       })
       .catch((error) => {
-        console.warn("[rewarded-ad] initialize failed", error);
+        console.warn("[rewarded-ad] Start.io load/show failed", error);
         finish(false);
       });
   });
 }
 
-export function setRewardedAdUnitId(adUnitId: string | null | undefined): void {
-  const value = adUnitId?.trim();
-  if (value) rewardedAdUnitId = value;
-}
+// Kept for the existing remote-ad-settings callers. Start.io uses a fixed
+// application ID and does not accept an AdMob unit ID here.
+export function setRewardedAdUnitId(_adUnitId: string | null | undefined): void {}
 
-/** Backward-compatible name for callers that still use the old helper. */
+export const NOVA_ADS_TEST_MODE = false;
 export const showRewardedTestAd = showRewardedAd;

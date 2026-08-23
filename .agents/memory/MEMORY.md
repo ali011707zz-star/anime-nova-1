@@ -95,3 +95,4 @@
 - [VPS source config and Supabase drift](vps-source-config-supabase-drift.md) — provider availability can be healthy while config hides sources; production Supabase schema differs from migration expectations.
 - [Mobile anti-tamper boundary](mobile-anti-tamper-boundary.md) — release/package headers can fail closed for sensitive API paths, but only Google Play Integrity can authenticate an unmodified APK.
 - [Nginx backup placement](nginx-backup-placement.md) — live Nginx backups must stay outside sites-enabled; files there are parsed as configs and can break reload with duplicate upstreams.
+- [Start.io rewarded ads](startio-rewarded-ads.md) — Android uses Start.io app 207356648 via the Nitro SDK; native builds require New Architecture and must happen outside Replit.
