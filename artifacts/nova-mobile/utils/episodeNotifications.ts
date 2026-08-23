@@ -4,7 +4,9 @@ import * as FileSystem from "expo-file-system";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { getBaseUrl } from "./api";
 
-const KNOWN_EPISODES_KEY = "nova-known-latest-episodes-v1";
+const KNOWN_EPISODES_KEY = "nova-known-latest-episodes-v2";
+const LAST_SYNC_KEY = "nova-latest-episodes-last-sync-v1";
+const SYNC_MIN_INTERVAL_MS = 10 * 60_000;
 const CHANNEL_ID = "nova-new-episodes";
 let ready: Promise<boolean> | null = null;
 let syncInFlight: Promise<void> | null = null;
@@ -12,6 +14,7 @@ let syncInFlight: Promise<void> | null = null;
 type LatestEpisode = {
   animeId?: number;
   anilistId?: number;
+  anslayerId?: number;
   episode?: number | string;
   name?: string;
   title?: string;
@@ -59,7 +62,9 @@ function configure(): Promise<boolean> {
 }
 
 function episodeKey(item: LatestEpisode): string {
-  const animeId = Number(item.animeId ?? item.anilistId ?? 0);
+  // Prefer the stable AniList identity, but keep AnimeSlayer as a fallback
+  // for older/cold catalog responses that have not resolved AniList yet.
+  const animeId = Number(item.animeId ?? item.anilistId ?? item.anslayerId ?? 0);
   const episode = Number(item.episode ?? 0);
   return animeId > 0 && episode > 0 ? `${animeId}:${episode}` : "";
 }
@@ -129,6 +134,10 @@ export async function syncLatestEpisodeNotifications(): Promise<void> {
   if (Platform.OS === "web" || syncInFlight) return syncInFlight ?? Promise.resolve();
   syncInFlight = (async () => {
     if (!(await configure())) return;
+    const lastSync = Number(await AsyncStorage.getItem(LAST_SYNC_KEY) || 0);
+    if (Number.isFinite(lastSync) && lastSync > 0 && Date.now() - lastSync < SYNC_MIN_INTERVAL_MS) {
+      return;
+    }
     const response = await fetch(`${getBaseUrl()}/api/anime/anslayer-latest`, {
       cache: "no-store",
     });
@@ -140,15 +149,26 @@ export async function syncLatestEpisodeNotifications(): Promise<void> {
       .filter(({ key }) => Boolean(key));
     if (!normalized.length) return;
 
-    const previous = new Set(JSON.parse(
-      (await AsyncStorage.getItem(KNOWN_EPISODES_KEY)) || "[]",
-    ) as string[]);
+    let previous = new Set<string>();
+    try {
+      const stored = JSON.parse((await AsyncStorage.getItem(KNOWN_EPISODES_KEY)) || "[]");
+      if (Array.isArray(stored)) {
+        previous = new Set(stored.filter((value): value is string => typeof value === "string" && value.length > 0));
+      }
+    } catch {
+      // Corrupt local state should not make every sync look like a first run.
+      previous = new Set();
+    }
     const isFirstSync = previous.size === 0;
     const newItems = isFirstSync
       ? []
       : normalized.filter(({ key }) => !previous.has(key));
-    const next = new Set(normalized.map(({ key }) => key));
-    await AsyncStorage.setItem(KNOWN_EPISODES_KEY, JSON.stringify([...next].slice(0, 300)));
+    // Keep a rolling union rather than replacing the snapshot. The upstream
+    // list is paginated/rolling; replacement causes a reappearing episode to
+    // be notified again after it temporarily falls out of the response.
+    const next = new Set([...previous, ...normalized.map(({ key }) => key)]);
+    await AsyncStorage.setItem(KNOWN_EPISODES_KEY, JSON.stringify([...next].slice(-500)));
+    await AsyncStorage.setItem(LAST_SYNC_KEY, String(Date.now()));
 
     // Keep one rich notification per episode. This lets the user open and
     // identify a specific episode instead of receiving an opaque batch alert.

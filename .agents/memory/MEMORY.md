@@ -94,3 +94,4 @@
 - [VPS concurrency ceiling](vps-concurrency-test-2026-08.md) — ranged video-proxy load test: 75 already timed out heavily, 125 hit 429s, and 150 made SSH unreachable; do not treat 150 as safe capacity.
 - [VPS source config and Supabase drift](vps-source-config-supabase-drift.md) — provider availability can be healthy while config hides sources; production Supabase schema differs from migration expectations.
 - [Mobile anti-tamper boundary](mobile-anti-tamper-boundary.md) — release/package headers can fail closed for sensitive API paths, but only Google Play Integrity can authenticate an unmodified APK.
+- [Nginx backup placement](nginx-backup-placement.md) — live Nginx backups must stay outside sites-enabled; files there are parsed as configs and can break reload with duplicate upstreams.
