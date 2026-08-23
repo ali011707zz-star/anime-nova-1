@@ -382,7 +382,10 @@ function AuthSheet({ open, onClose, onLogin }: {
         signal: AbortSignal.timeout(20000),
       });
       const d = await r.json();
-      if (!r.ok || !d.id || !d.authToken) {
+      // Google auth currently establishes the server session cookie. Older
+      // API builds do not return an app token, so do not reject a valid user
+      // response merely because that optional field is absent.
+      if (!r.ok || !d.id) {
         setError(d.error || "فشل تسجيل الدخول بحساب Google");
         return;
       }
