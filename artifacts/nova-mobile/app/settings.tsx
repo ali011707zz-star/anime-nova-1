@@ -325,15 +325,51 @@ function AuthSheet({ open, onClose, onLogin }: {
   const base = getBaseUrl();
   const googleWebClientId = process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID;
   const googleAndroidClientId = process.env.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID || googleWebClientId;
+  const googleIosClientId = process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID;
   const [googleRequest, googleResponse, promptGoogleAsync] = Google.useAuthRequest({
     androidClientId: googleAndroidClientId,
-    iosClientId: process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID,
+    iosClientId: googleIosClientId,
     webClientId: googleWebClientId,
     redirectUri: GOOGLE_REDIRECT_URI,
-    responseType: "token",
+    responseType: "code",
+    usePKCE: true,
     scopes: ["openid", "profile", "email"],
     selectAccount: true,
   });
+
+  const exchangeGoogleCode = useCallback(async (code: string): Promise<string> => {
+    const codeVerifier = (googleRequest as any)?.codeVerifier;
+    if (!codeVerifier) throw new Error("Google OAuth code verifier missing");
+    const clientId = Platform.OS === "android"
+      ? googleAndroidClientId
+      : Platform.OS === "ios"
+        ? googleIosClientId
+        : googleWebClientId;
+    if (!clientId) throw new Error("Google OAuth client ID missing");
+
+    const tokenResponse = await fetch("https://oauth2.googleapis.com/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        client_id: clientId,
+        code,
+        code_verifier: codeVerifier,
+        redirect_uri: GOOGLE_REDIRECT_URI,
+        grant_type: "authorization_code",
+      }).toString(),
+      signal: AbortSignal.timeout(20000),
+    });
+    const tokenData = await tokenResponse.json().catch(() => ({}));
+    if (!tokenResponse.ok || !tokenData.access_token) {
+      console.warn("[google-auth] code exchange failed", {
+        status: tokenResponse.status,
+        error: tokenData.error,
+        description: tokenData.error_description,
+      });
+      throw new Error(tokenData.error_description || tokenData.error || "Google code exchange failed");
+    }
+    return String(tokenData.access_token);
+  }, [googleAndroidClientId, googleIosClientId, googleRequest, googleWebClientId]);
 
   const saveGoogleUser = useCallback(async (accessToken: string) => {
     setLoading(true);
@@ -370,20 +406,42 @@ function AuthSheet({ open, onClose, onLogin }: {
   }, [base, onClose, onLogin]);
 
   useEffect(() => {
-    if (!googleResponse || googleResponse.type === "dismiss") return;
+    if (!googleResponse) return;
     const responseKey = JSON.stringify(googleResponse);
     if (handledGoogleResponse.current === responseKey) return;
     handledGoogleResponse.current = responseKey;
     if (googleResponse.type !== "success") {
-      if (googleResponse.type === "error") setError("تعذّر تسجيل الدخول عبر Google. حاول مرة أخرى.");
+      if (googleResponse.type === "error") {
+        console.warn("[google-auth] OAuth response error", {
+          error: googleResponse.error?.code,
+          description: googleResponse.error?.description,
+          paramKeys: Object.keys(googleResponse.params || {}),
+        });
+        setError(googleResponse.error?.description || "تعذّر تسجيل الدخول عبر Google. حاول مرة أخرى.");
+      } else if (googleResponse.type === "cancel" || googleResponse.type === "dismiss") {
+        console.info("[google-auth] OAuth flow cancelled", { type: googleResponse.type });
+        setError("تم إلغاء تسجيل الدخول عبر Google.");
+      }
       return;
     }
-    const accessToken =
-      googleResponse.authentication?.accessToken ||
-      (googleResponse.params as Record<string, string> | undefined)?.access_token;
-    if (accessToken) saveGoogleUser(accessToken);
-    else setError("لم يصل رمز Google، حاول مرة أخرى");
-  }, [googleResponse, saveGoogleUser]);
+    const code = (googleResponse.params as Record<string, string> | undefined)?.code;
+    if (!code) {
+      console.warn("[google-auth] OAuth success without authorization code", {
+        responseType: googleResponse.type,
+        params: Object.keys(googleResponse.params || {}),
+      });
+      setError("لم يصل رمز التفويض من Google، حاول مرة أخرى");
+      return;
+    }
+    exchangeGoogleCode(code)
+      .then(saveGoogleUser)
+      .catch((error) => {
+        console.warn("[google-auth] OAuth exchange error", {
+          message: error instanceof Error ? error.message : String(error),
+        });
+        setError("تعذّر إكمال تسجيل الدخول عبر Google. تحقق من إعدادات OAuth ثم حاول مرة أخرى.");
+      });
+  }, [exchangeGoogleCode, googleResponse, saveGoogleUser]);
 
   const handleGoogleLogin = async () => {
     if (!googleRequest) {
