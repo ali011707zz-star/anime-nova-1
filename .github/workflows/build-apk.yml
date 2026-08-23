@@ -246,6 +246,20 @@ jobs:
       - name: 🔧 Fix Gradle compatibility
         working-directory: artifacts/nova-mobile/android
         run: |
+          # Start.io's dynamic 5.+ selector can silently move to 5.3.2,
+          # which brings Kotlin stdlib 2.4.0 and cannot be compiled by the
+          # Kotlin 2.1 compiler used by this React Native/Expo toolchain.
+          # Pin the last compatible SDK release after Expo prebuild generates
+          # the native module project.
+          RNSIO_BUILD="../node_modules/react-native-start-io-sdk/android/build.gradle"
+          if [ ! -f "$RNSIO_BUILD" ]; then
+            echo "❌ react-native-start-io-sdk build.gradle was not found: $RNSIO_BUILD"
+            exit 1
+          fi
+          sed -i 's/com\.startapp:inapp-sdk:5\.\+/com.startapp:inapp-sdk:5.3.0/' "$RNSIO_BUILD"
+          grep -q 'com.startapp:inapp-sdk:5.3.0' "$RNSIO_BUILD"
+          echo "Pinned Start.io in-app SDK to 5.3.0 (Kotlin-compatible)"
+
           sed -i \
             's|distributionUrl=.*|distributionUrl=https\\://services.gradle.org/distributions/gradle-8.13-all.zip|' \
             gradle/wrapper/gradle-wrapper.properties
