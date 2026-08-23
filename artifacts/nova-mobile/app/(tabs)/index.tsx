@@ -30,6 +30,13 @@ const SEASON_AR: Record<string, string> = {
   WINTER: "شتاء", SPRING: "ربيع", SUMMER: "صيف", FALL: "خريف",
 };
 
+function rotateDaily<T>(items: T[]): T[] {
+  if (items.length < 2) return items;
+  const day = Math.floor(Date.now() / 86_400_000);
+  const offset = day % items.length;
+  return [...items.slice(offset), ...items.slice(0, offset)];
+}
+
 export default function HomeScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
@@ -182,7 +189,7 @@ export default function HomeScreen() {
   const isekaiList = isekai?.Page?.media || [];
 
   /* الويب يبني الـHero من الأكثر شعبية ذات الـbanner، وليس من TRENDING. */
-  const heroItems = popularList.filter((m) => m.bannerImage).slice(0, 8);
+  const heroItems = rotateDaily(popularList.filter((m) => m.bannerImage).slice(0, 8));
   const recentHistory = watchHistory.slice(0, 10);
 
   const refresh = async () => {

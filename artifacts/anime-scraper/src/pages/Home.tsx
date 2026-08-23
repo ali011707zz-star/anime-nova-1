@@ -32,6 +32,13 @@ let _homeCache: HomeCache | null = null;
 let _cachedTodayEps: any[] | null = null;
 const TODAY_EPS_STORAGE_KEY = "nova-latest-episodes";
 
+function rotateDaily<T>(items: T[]): T[] {
+  if (items.length < 2) return items;
+  const day = Math.floor(Date.now() / 86_400_000);
+  const offset = day % items.length;
+  return [...items.slice(offset), ...items.slice(0, offset)];
+}
+
 /* ── Continue Watching helpers ── */
 interface MergedContinueItem {
   key: string;
@@ -257,15 +264,15 @@ export default function Home() {
   const [isekaiList, setIsekaiList] = useState<any[]>([]);
   const [hero, setHero] = useState<any>(() => {
     if (!_homeCache) return null;
-    const heroes = _homeCache.popular.filter((a: any) => a.bannerImage);
+    const heroes = rotateDaily(_homeCache.popular.filter((a: any) => a.bannerImage));
     if (!heroes.length) return _homeCache.hero;
-    return heroes[Math.floor(Math.random() * heroes.length)];
+    return heroes[0];
   });
   const [heroIdx, setHeroIdx] = useState(0);
   const [heroDir, setHeroDir] = useState(1);
   const [selectedGenre, setSelectedGenre] = useState("");
   const touchStartX = useRef<number>(0);
-  const heroList = popular.filter((a) => a.bannerImage).slice(0, 8);
+  const heroList = rotateDaily(popular.filter((a) => a.bannerImage).slice(0, 8));
   const heroContainerRef = useRef<HTMLDivElement>(null);
   const [heroMouse, setHeroMouse] = useState({ x: 0, y: 0 });
   const [posterTilt, setPosterTilt] = useState({ rx: 0, ry: 0 });
@@ -412,9 +419,9 @@ export default function Home() {
         });
         const popMedia = pop?.media || [];
         const hasMorePop = pop?.pageInfo?.hasNextPage ?? false;
-        const heroes = popMedia.filter((a: any) => a.bannerImage);
+        const heroes = rotateDaily(popMedia.filter((a: any) => a.bannerImage));
         const heroItem =
-          heroes[Math.floor(Math.random() * Math.max(1, heroes.length))] ||
+          heroes[0] ||
           popMedia[0];
         setPopular(popMedia);
         setHasMore(hasMorePop);

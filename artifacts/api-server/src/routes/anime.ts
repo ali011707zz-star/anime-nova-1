@@ -207,6 +207,53 @@ async function resolveAniListIdForSource(
       }
     } catch { /* try the next title variant */ }
   }
+
+  // AniList can be temporarily disabled (403) while the public catalog is
+  // still available. Kitsu provides the same stable numeric namespace needed
+  // by the clients, so do not make the whole latest-episodes section vanish.
+  for (const candidate of candidates) {
+    try {
+      const search = encodeURIComponent(candidate);
+      const response = await fetch(
+        `https://kitsu.io/api/edge/anime?filter[text]=${search}&page[limit]=5`,
+        {
+          headers: { Accept: "application/vnd.api+json", ...BASE_HDRS },
+          signal: AbortSignal.timeout(8000),
+        },
+      );
+      if (!response.ok) continue;
+      const payload = await response.json() as any;
+      const entries = Array.isArray(payload?.data) ? payload.data : [];
+      const normalizedCandidate = normalizeAniTitle(candidate);
+      const exact = entries.find((entry: any) => {
+        const attr = entry?.attributes || {};
+        return [attr.slug, attr.canonicalTitle, attr.titles?.en, attr.titles?.en_jp, attr.titles?.ja_jp]
+          .filter(Boolean)
+          .some((name: string) => normalizeAniTitle(name) === normalizedCandidate);
+      });
+      const match = exact || entries[0];
+      const id = Number(match?.id || 0);
+      if (id > 0) {
+        const attr = match?.attributes || {};
+        const titleValues = [
+          attr.canonicalTitle,
+          attr.titles?.en,
+          attr.titles?.en_jp,
+          attr.titles?.ja_jp,
+          attr.slug,
+        ].filter((value): value is string => typeof value === "string" && value.trim().length > 1);
+        _titleAniListCache.set(cacheKey, {
+          id,
+          ts: Date.now(),
+          titles: Array.from(new Set(titleValues)),
+          romaji: attr.titles?.en_jp || attr.canonicalTitle || undefined,
+          english: attr.titles?.en || undefined,
+          native: attr.titles?.ja_jp || undefined,
+        });
+        return id;
+      }
+    } catch { /* try the next fallback title */ }
+  }
   return undefined;
 }
 
