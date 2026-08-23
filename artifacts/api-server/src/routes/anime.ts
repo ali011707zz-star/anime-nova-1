@@ -14093,7 +14093,20 @@ async function getVidboltAnimeSources(
   return out;
 }
 
-// ── حفظ في الكاش بعد الكشط ──────────────────────────────────
+    // Kawaii/MegaPlay URLs are signed and normally fetched live, but a
+    // transient provider timeout must not blank the server page when a
+    // previously saved episode URL is still available. Use the cache only
+    // as a last-resort response; the next successful live fetch refreshes it.
+    if (
+      sources.length === 0 &&
+      cached &&
+      (site === "kawaii" || site === "megaplay") &&
+      Array.isArray(cached.sources)
+    ) {
+      cached.sources.forEach(collectSrc);
+    }
+
+    // ── حفظ في الكاش بعد الكشط ──────────────────────────────────
     if (sources.length) {
       setSourceCache(cKey, site, sources).catch(() => {});
     }
@@ -14248,7 +14261,10 @@ router.get("/anime/anslayer-latest", async (req, res) => {
         ...item,
         // Keep the card visible even while AniList is unavailable. The
         // AnimeSlayer catalog id is still enough for the direct AS source.
-        animeId: animeId || item.anslayerId,
+        // Never put the AnimeSlayer id in the AniList field. The two
+        // namespaces are unrelated; using the former as the latter makes
+        // KW/MP look up the wrong anime and disappear from the picker.
+        animeId: animeId || null,
         /* Keep an explicit field for clients so a future normalization change
            cannot accidentally replace the AniList id with anslayerId. */
         anilistId: animeId || null,
@@ -14257,7 +14273,7 @@ router.get("/anime/anslayer-latest", async (req, res) => {
         english: meta?.english || "",
         native: meta?.native || "",
       };
-    }))).filter((it: any) => it.animeId && it.episode);
+    }))).filter((it: any) => (it.animeId || it.anslayerId) && it.episode);
 
     // ── إرسال الحلقات الجديدة لتيليجرام (فقط عند التحديث الفعلي) ──────────
     if (items.length > 0) {

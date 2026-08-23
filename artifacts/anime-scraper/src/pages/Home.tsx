@@ -389,12 +389,14 @@ export default function Home() {
             ...item,
             /* KW needs the AniList namespace. The API now exposes it
                explicitly so this card can never prefer anslayerId. */
-            animeId: item.anilistId ?? item.animeId ?? item.anilist_id,
+            // animeId is the AniList namespace. Keep the AnimeSlayer id
+            // separate so a missing AniList match never poisons KW/MP.
+            animeId: item.anilistId ?? item.anilist_id ?? null,
             name: item.name ?? item.title ?? "",
             cover: item.cover ?? item.poster ?? "",
             source: "anslayer",
           }))
-          .filter((item: any) => item.animeId && item.name);
+          .filter((item: any) => (item.animeId || item.anslayerId) && item.name);
         _cachedTodayEps = items;
         setTodayEps(items);
         try { localStorage.setItem(TODAY_EPS_STORAGE_KEY, JSON.stringify(items)); } catch {}
@@ -1095,7 +1097,7 @@ export default function Home() {
                 : [];
               const canonicalTitle = it.romaji || it.name || "";
               const canonicalEnglish = it.english || "";
-              const href = `/watch?anime=${encodeURIComponent(String(it.animeId))}&anslayerId=${encodeURIComponent(String(it.anslayerId ?? it.animeId))}&ep=${it.episode}&title=${encodeURIComponent(canonicalTitle)}&english=${encodeURIComponent(canonicalEnglish)}&titles=${encodeURIComponent(JSON.stringify(titleVariants))}&cover=${encodeURIComponent(it.cover || "")}&titleAr=${encodeURIComponent(it.titleAr || "")}&site=anslayer`;
+              const href = `/watch?anime=${encodeURIComponent(String(it.animeId || 0))}&anslayerId=${encodeURIComponent(String(it.anslayerId || ""))}&ep=${it.episode}&title=${encodeURIComponent(canonicalTitle)}&english=${encodeURIComponent(canonicalEnglish)}&titles=${encodeURIComponent(JSON.stringify(titleVariants))}&cover=${encodeURIComponent(it.cover || "")}&titleAr=${encodeURIComponent(it.titleAr || "")}&site=anslayer&fromLatest=1`;
               return (
                 <Link href={href} key={`${it.animeId}-${it.episode}-${i}`}>
                   <motion.div
