@@ -8307,6 +8307,7 @@ async function awDbSaveLinks(
   ep: number,
   epId: string,
   servers: Array<{ name: string; url: string; quality: string }>,
+  contentType: "anime" | "dubbed" = "anime",
 ): Promise<void> {
   try {
     for (const srv of servers) {
@@ -8323,6 +8324,7 @@ async function awDbSaveLinks(
         quality:     srv.quality || "720p",
         link:        srv.url,
         imported_at: new Date().toISOString(),
+        content_type: contentType,
       };
       /*
        * The logical key includes quality: the same server can expose several
@@ -8339,6 +8341,30 @@ async function awDbSaveLinks(
         await sbPatch("aw_links", { id: `eq.${existing[0].id}` }, row);
       } else {
         await sbUpsert("aw_links", row);
+      }
+
+      if (contentType === "dubbed") {
+        const dalRow = {
+          series_id: animeId,
+          series_name: animeName,
+          series_name_ar: "",
+          ep_number: ep,
+          ep_id: epId,
+          server: srvName,
+          quality: srv.quality || "720p",
+          link: srv.url,
+          imported_at: new Date().toISOString(),
+        };
+        const dalExisting = await sbSelect<{ id?: number }>("dubbed_anim_links", {
+          series_id: `eq.${animeId}`,
+          ep_number: `eq.${ep}`,
+          server: `eq.${srvName}`,
+        }, { limit: 1, select: "id" });
+        if (dalExisting[0]?.id != null) {
+          await sbPatch("dubbed_anim_links", { id: `eq.${dalExisting[0].id}` }, dalRow);
+        } else {
+          await sbUpsert("dubbed_anim_links", dalRow, "series_id,ep_number,server");
+        }
       }
     }
   } catch (e: any) {
@@ -17555,11 +17581,13 @@ router.get("/cfproxy/:endpoint", async (req: Request, res: Response) => {
 /** يزامن أنمي واحد: يجلب حلقاته من Firestore ويحفظ الجديدة في DB */
 async function awSyncAnime(
   animeId: string, animeName: string, anilistId: number | null,
+  contentType: "anime" | "dubbed" = "anime",
 ): Promise<number> {
   try {
     // آخر ep_number في DB لهذا الأنمي
     const existing = await sbSelect<{ ep_number: number }>("aw_links", {
       "anime_id": `eq.${animeId}`,
+      "content_type": `eq.${contentType}`,
       "order":    "ep_number.desc",
     }, { limit: 1, select: "ep_number" });
     const lastInDb = existing[0]?.ep_number ?? 0;
@@ -17574,7 +17602,7 @@ async function awSyncAnime(
       const epNum    = Math.round(ep.num);
       const servers  = await awFetchServers(animeId, ep.id);
       if (!servers.length) continue;
-      await awDbSaveLinks(animeId, animeName, anilistId ?? undefined, epNum, ep.id, servers);
+      await awDbSaveLinks(animeId, animeName, anilistId ?? undefined, epNum, ep.id, servers, contentType);
       added++;
       await new Promise(r => setTimeout(r, 300)); // rate limit خفيف
     }
@@ -17594,27 +17622,33 @@ async function awAutoSync(): Promise<void> {
   try {
     console.log("[AW-SYNC] بدء التزامن التلقائي...");
 
-    // الأنمي الأكثر نشاطاً (آخر 200 صف من aw_links → أحدث 30 أنمي فريد)
-    const recent = await sbSelect<{ anime_id: string; anime_name: string; anilist_id: number | null }>(
-      "aw_links",
-      { "order": "imported_at.desc" },
-      { limit: 200, select: "anime_id,anime_name,anilist_id" },
-    );
-    const seen   = new Set<string>();
-    const toSync: typeof recent = [];
-    for (const r of recent) {
-      if (!seen.has(r.anime_id)) { seen.add(r.anime_id); toSync.push(r); }
-      if (toSync.length >= 30) break;
-    }
-
     let totalAdded = 0;
-    for (const item of toSync) {
-      const added = await awSyncAnime(item.anime_id, item.anime_name, item.anilist_id);
-      if (added > 0) {
-        console.log(`[AW-SYNC] ${item.anime_name}: +${added} حلقة جديدة`);
-        totalAdded += added;
+    for (const contentType of ["anime", "dubbed"] as const) {
+      // Keep independent queues: otherwise fresh anime rows starve the
+      // dubbed animation rows forever.
+      const recent = await sbSelect<{ anime_id: string; anime_name: string; anilist_id: number | null }>(
+        "aw_links",
+        { "content_type": `eq.${contentType}`, "order": "imported_at.desc" },
+        { limit: 200, select: "anime_id,anime_name,anilist_id" },
+      );
+      const seen = new Set<string>();
+      const toSync: typeof recent = [];
+      for (const r of recent) {
+        if (!seen.has(r.anime_id)) { seen.add(r.anime_id); toSync.push(r); }
+        if (toSync.length >= 30) break;
       }
-      await new Promise(r => setTimeout(r, 500));
+
+      let groupAdded = 0;
+      for (const item of toSync) {
+        const added = await awSyncAnime(item.anime_id, item.anime_name, item.anilist_id, contentType);
+        if (added > 0) {
+          console.log(`[AW-SYNC] ${contentType} ${item.anime_name}: +${added} حلقة جديدة`);
+          totalAdded += added;
+          groupAdded += added;
+        }
+        await new Promise(r => setTimeout(r, 500));
+      }
+      console.log(`[AW-SYNC] ${contentType}: +${groupAdded} حلقة`);
     }
     console.log(`[AW-SYNC] انتهى في ${((Date.now()-start)/1000).toFixed(1)}s — +${totalAdded} حلقة إجمالاً`);
   } catch (e: any) {
