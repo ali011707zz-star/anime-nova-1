@@ -563,6 +563,7 @@ export function RiftPlayer({
   const [showFitMenu, setShowFitMenu]     = useState(false);
   const [showSubPanel, setShowSubPanel]   = useState(false);
   const [subLang, setSubLang]             = useState<"ar" | "en">("ar");
+  const userSelectedSubLangRef            = useRef(false);
   const rawSubUrlRef      = useRef<string | null>(null); // original English VTT URL before translation
   const autoRawSubUrlRef  = useRef<string | null>(null); // English URL discovered by auto-fetch
   const [autoPlayEnabled, setAutoPlayEnabled] = useState(true);
@@ -1513,7 +1514,10 @@ export function RiftPlayer({
         }
 
         /* Pick track based on current language preference */
-        const track = subLang === "en"
+        // Keep Arabic as the default on every source/episode. Only honor
+        // English after the user explicitly selected it; a previous source's
+        // fallback must never silently switch the next source to English.
+        const track = userSelectedSubLangRef.current && subLang === "en"
           ? (enTrack || arTrack || tracks[0])
           : (arTrack || enTrack || tracks[0]);
         if (!track?.url) return;
@@ -2787,7 +2791,7 @@ export function RiftPlayer({
                     <Pressable
                       key={lng}
                       style={[s.subChip, subLang === lng && subOn && s.subChipActive]}
-                      onPress={() => { setSubLang(lng); setSubOn(true); fadeIn(); }}
+                      onPress={() => { userSelectedSubLangRef.current = true; setSubLang(lng); setSubOn(true); fadeIn(); }}
                     >
                       <Text style={[s.subChipText, subLang === lng && subOn && s.subChipTextActive]}>
                         {lng === "ar" ? "عربي" : "إنجليزي"}

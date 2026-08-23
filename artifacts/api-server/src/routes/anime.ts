@@ -10448,15 +10448,24 @@ async function getKawaiiSubForSource(anilistId: number | undefined, ep: number):
         : candidate;
       if (payload?.subtitles?.length) break;
     }
-    const subs = payload?.subtitles ?? [];
+    // Kawaii has returned several equivalent envelopes over time:
+    // subtitles, tracks, and nested data.{subtitles,tracks}. Normalize them
+    // here so the web and mobile clients receive the same stable URL.
+    const subsRaw = payload?.subtitles ?? payload?.tracks ?? payload?.captions ?? [];
+    const subs = Array.isArray(subsRaw) ? subsRaw : [];
+    const normalizedSubs = subs.map((s: any) => ({
+      ...s,
+      lang: s.lang ?? s.language ?? s.label ?? "",
+      url: s.url ?? s.file ?? s.src ?? s.fileUrl ?? "",
+    })).filter((s: any) => s.url);
     // الأولوية: عربي مباشر → إنجليزي مترجم
-    const arSub = subs.find(s => (s.lang || "").toLowerCase().includes("arabic") || (s.lang || "").toLowerCase() === "ar");
+    const arSub = normalizedSubs.find(s => /arabic|arab|العربية|عربي/i.test(s.lang) || s.lang.toLowerCase() === "ar");
     let result: string | undefined;
     if (arSub?.url) {
       const proxied = `/api/anime/proxy-text?url=${encodeURIComponent(arSub.url)}&ref=${encodeURIComponent(KAWAII_BASE + "/")}`;
       result = proxied;
     } else {
-      const enSub = subs.find(s => (s.lang || "").toLowerCase().includes("english") || (s.lang || "").toLowerCase() === "en");
+      const enSub = normalizedSubs.find(s => /english|eng|الإنجليزية|انجليزي/i.test(s.lang) || s.lang.toLowerCase() === "en");
       if (enSub?.url) {
         const proxied = `/api/anime/proxy-text?url=${encodeURIComponent(enSub.url)}&ref=${encodeURIComponent(KAWAII_BASE + "/")}`;
         result = `/api/anime/translate-vtt?url=${encodeURIComponent(proxied)}&from=en&to=ar`;

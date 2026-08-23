@@ -9,6 +9,7 @@ import {
   StyleSheet, Text, View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { AnnouncementBanner } from "@/components/AnnouncementBanner";
 import { DrawerMenu } from "@/components/DrawerMenu";
 import { HeroSection } from "@/components/HeroSection";
@@ -102,8 +103,15 @@ export default function HomeScreen() {
     year?: string;
   };
   const [todayEps, setTodayEps] = useState<TodayEp[]>([]);
+  const [todayChecking, setTodayChecking] = useState(true);
   useEffect(() => {
     const ctrl = new AbortController();
+    AsyncStorage.getItem("nova-latest-episodes").then((stored) => {
+      try {
+        const parsed = JSON.parse(stored || "[]");
+        if (Array.isArray(parsed) && parsed.length) setTodayEps(parsed);
+      } catch {}
+    }).catch(() => {});
     fetch(`${getBaseUrl()}/api/anime/anslayer-latest`, { signal: ctrl.signal })
       .then(r => r.json())
       .then((payload: TodayEp[] | { items?: TodayEp[] }) => {
@@ -127,9 +135,13 @@ export default function HomeScreen() {
               : [],
           }))
           .filter((item) => item.animeId > 0 && item.name && item.episode != null);
-        setTodayEps(normalized);
+         if (normalized.length) {
+           setTodayEps(normalized);
+           AsyncStorage.setItem("nova-latest-episodes", JSON.stringify(normalized)).catch(() => {});
+         }
+         setTodayChecking(false);
       })
-      .catch((e) => { if (e?.name !== "AbortError") console.warn("[Home] anslayer-latest fetch error"); });
+      .catch((e) => { if (e?.name !== "AbortError") console.warn("[Home] anslayer-latest fetch error"); setTodayChecking(false); });
     return () => ctrl.abort();
   }, []);
 
@@ -261,7 +273,7 @@ export default function HomeScreen() {
         )}
 
         {/* أحدث الحلقات — AnimeSlayer (مطابق للويب) */}
-        {todayEps.length > 0 && (
+        {(todayEps.length > 0 || todayChecking) && (
           <View style={{ marginTop: 24 }}>
             <View style={styles.sectionHeader}>
               <View style={styles.sectionLeft}>

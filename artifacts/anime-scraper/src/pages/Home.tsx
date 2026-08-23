@@ -30,6 +30,7 @@ interface HomeCache {
 let _homeCache: HomeCache | null = null;
 // Separate cache for today's airing episodes (independent fetch, persists between navigations)
 let _cachedTodayEps: any[] | null = null;
+const TODAY_EPS_STORAGE_KEY = "nova-latest-episodes";
 
 /* ── Continue Watching helpers ── */
 interface MergedContinueItem {
@@ -302,8 +303,14 @@ export default function Home() {
   const [spring2026, setSpring2026] = useState<any[]>([]);
   const [dubbedCards, setDubbedCards] = useState<any[]>([]);
   const [awCards, setAwCards] = useState<any[]>([]);
-  const [todayEps, setTodayEps] = useState<any[]>(_cachedTodayEps || []);
-  const [todayChecking, setTodayChecking] = useState(false);
+  const [todayEps, setTodayEps] = useState<any[]>(() => {
+    if (_cachedTodayEps) return _cachedTodayEps;
+    try {
+      const stored = JSON.parse(localStorage.getItem(TODAY_EPS_STORAGE_KEY) || "[]");
+      return Array.isArray(stored) ? stored : [];
+    } catch { return []; }
+  });
+  const [todayChecking, setTodayChecking] = useState(true);
 
   /* Load continue-watching from localStorage (fast, synchronous) */
   useEffect(() => {
@@ -383,6 +390,7 @@ export default function Home() {
           .filter((item: any) => item.animeId && item.name);
         _cachedTodayEps = items;
         setTodayEps(items);
+        try { localStorage.setItem(TODAY_EPS_STORAGE_KEY, JSON.stringify(items)); } catch {}
         setTodayChecking(false);
       })
       .catch(() => {
@@ -1023,7 +1031,7 @@ export default function Home() {
       )}
 
       {/* ── حلقات اليوم ── */}
-      {todayEps.length > 0 && (
+      {(todayEps.length > 0 || todayChecking) && (
         <div className="mt-5">
           <div className="flex items-center justify-between px-4 mb-3">
             <div className="flex items-center gap-2">

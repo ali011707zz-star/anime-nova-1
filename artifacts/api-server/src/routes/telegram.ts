@@ -30,12 +30,17 @@ const API     = () => `https://api.telegram.org/bot${TOKEN()}`;
 async function sendMessage(chatId: number | string, text: string, extra: Record<string, any> = {}) {
   const tok = await getToken();
   if (!tok) return;
-  await fetch(`https://api.telegram.org/bot${tok}/sendMessage`, {
+  const payload = { chat_id: chatId, text, parse_mode: "HTML", ...extra };
+  const response = await fetch(`https://api.telegram.org/bot${tok}/sendMessage`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ chat_id: chatId, text, parse_mode: "HTML", ...extra }),
+    body: JSON.stringify(payload),
     signal: AbortSignal.timeout(8_000),
-  }).catch(e => console.warn("[telegram] sendMessage failed:", e.message));
+  }).catch(e => { console.warn("[telegram] sendMessage failed:", e.message); return null; });
+  if (response && !response.ok) {
+    const body = await response.json().catch(() => ({})) as any;
+    console.warn("[telegram] sendMessage API error:", body?.description);
+  }
 }
 
 async function sendChannelPhoto(photoUrl: string, caption: string) {

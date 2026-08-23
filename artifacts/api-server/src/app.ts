@@ -151,6 +151,16 @@ export async function createApp(): Promise<Express> {
   app.use(express.json({ limit: "2mb" }));
   app.use(express.urlencoded({ extended: false, limit: "64kb" }));
 
+  // A malformed client body is a 400, not an internal server failure. In
+  // particular, never turn JSON parser noise into a Telegram alert storm.
+  app.use((err: any, _req: Request, res: Response, next: NextFunction) => {
+    if (err?.type === "entity.parse.failed" || err instanceof SyntaxError) {
+      res.status(400).json({ error: "Invalid JSON request body" });
+      return;
+    }
+    next(err);
+  });
+
   setupSession(app);
   registerEmailAuthRoutes(app);
   registerGoogleAuthRoutes(app);
@@ -286,13 +296,27 @@ export async function createApp(): Promise<Express> {
     const msg = err?.message || String(err);
     logger.error({ err }, "Unhandled server error");
 
-    // أرسل للأدمن عبر Telegram (بدون انتظار)
-    sendAdminAlert(
-      `⚠️ <b>خطأ في الخادم</b>\n\n<code>${msg.slice(0, 300)}</code>`
-    ).catch(() => {});
+    // CORS/rate-limit/client errors must not page the administrator. Also
+    // coalesce identical failures so a broken upstream cannot flood Telegram.
+    const status = Number(err?.status || err?.statusCode || 500);
+    if (status >= 500) {
+      const escaped = msg.slice(0, 300)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;");
+      const alertKey = msg.slice(0, 300);
+      const now = Date.now();
+      const previous = (app as any).__lastTelegramError as { key: string; ts: number } | undefined;
+      if (!previous || previous.key !== alertKey || now - previous.ts > 10 * 60_000) {
+        (app as any).__lastTelegramError = { key: alertKey, ts: now };
+        sendAdminAlert(
+          `⚠️ <b>خطأ في الخادم</b>\n\n<code>${escaped}</code>`
+        ).catch(() => {});
+      }
+    }
 
     if (!res.headersSent) {
-      res.status(500).json({ error: "Internal server error" });
+      res.status(status >= 400 && status < 600 ? status : 500).json({ error: status >= 500 ? "Internal server error" : msg });
     }
   });
 
