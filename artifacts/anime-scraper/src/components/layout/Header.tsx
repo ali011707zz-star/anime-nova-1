@@ -1,7 +1,6 @@
 import { useLocation } from "wouter";
 import { LogIn } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
-import { NotificationPanel } from "./NotificationPanel";
 
 const AVATAR_COLORS: [string, string][] = [
   ["#7C3AED", "#4C1D95"],
@@ -57,10 +56,8 @@ export function Header({ onMenuClick }: HeaderProps) {
           </div>
         </div>
 
-        {/* LEFT: Bell + Profile */}
+        {/* LEFT: Profile */}
         <div className="flex items-center gap-1">
-          <NotificationPanel />
-
           {user ? (
             <button
               onClick={() => navigate("/profile")}
