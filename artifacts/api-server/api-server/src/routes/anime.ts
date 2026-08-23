@@ -9323,7 +9323,9 @@ router.get("/anime/translate", async (req, res) => {
   const from = ((req.query.from as string) || "en").trim();
   const to   = ((req.query.to   as string) || "ar").trim();
   if (!text) { res.json({ translated: "" }); return; }
-  const cacheKey = `${from}:${to}:${text.substring(0, 200)}`;
+  // v2 invalidates entries written before untranslated Google responses were
+  // rejected; otherwise the old English value would keep winning forever.
+  const cacheKey = `v2:${from}:${to}:${text.substring(0, 200)}`;
 
   // 1. L1: in-memory cache (instant)
   if (translateCache.has(cacheKey)) { res.json({ translated: translateCache.get(cacheKey) }); return; }
@@ -9336,20 +9338,76 @@ router.get("/anime/translate", async (req, res) => {
     return;
   }
 
-  // 3. Google Translate
+  // 3. Google Translate, then MyMemory if Google returns the source text.
+  // Google occasionally answers with the original English text from VPS
+  // egress IPs without reporting an HTTP error. That must not be accepted as
+  // an Arabic synopsis, otherwise the UI displays "translation unavailable".
   try {
     const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=${from}&tl=${to}&dt=t&q=${encodeURIComponent(text)}`;
     const r = await fetch(url, { headers: { "User-Agent": BROWSER_UA }, signal: AbortSignal.timeout(6000) });
     if (!r.ok) throw new Error(`translate ${r.status}`);
     const data = await r.json() as any;
-    const translated = data?.[0]?.map((x: any) => x?.[0] || "").join("") || text;
+    const translated = data?.[0]?.map((x: any) => x?.[0] || "").join("") || "";
+    const needsArabic = to.toLowerCase().startsWith("ar");
+    const looksTranslated = translated && (
+      !needsArabic ||
+      /[\u0600-\u06ff]/.test(translated) ||
+      /[\u0600-\u06ff]/.test(text)
+    );
+    if (!looksTranslated) throw new Error("Google returned untranslated text");
 
     // Save to L1 (memory) + L2 (PostgreSQL) — fire-and-forget
     translateCache.set(cacheKey, translated);
     pgTranslateSave(cacheKey, translated, from, to);
 
     res.json({ translated });
-  } catch { res.json({ translated: text }); }
+  } catch {
+    // Chrome's dictionary endpoint is a separate Google service and remains
+    // usable on VPS IPs that are rate-limited by translate_a/single.
+    try {
+      const chromeUrl = `https://clients5.google.com/translate_a/t?client=dict-chrome-ex&sl=${encodeURIComponent(from)}&tl=${encodeURIComponent(to)}&q=${encodeURIComponent(text.slice(0, 500))}`;
+      const chrome = await fetch(chromeUrl, {
+        headers: { "User-Agent": BROWSER_UA, Accept: "application/json" },
+        signal: AbortSignal.timeout(8000),
+      });
+      const chromeData = chrome.ok ? await chrome.json() as any : null;
+      const translated = String(Array.isArray(chromeData) ? chromeData[0] || "" : "").trim();
+      const valid = translated && (
+        !to.toLowerCase().startsWith("ar") ||
+        /[\u0600-\u06ff]/.test(translated) ||
+        /[\u0600-\u06ff]/.test(text)
+      );
+      if (valid) {
+        translateCache.set(cacheKey, translated);
+        pgTranslateSave(cacheKey, translated, from, to);
+        res.json({ translated });
+        return;
+      }
+    } catch {}
+
+    // MyMemory is a final fallback, but do not return its quota warning as
+    // if it were a translated synopsis.
+    try {
+      const mmUrl = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(text.slice(0, 500))}&langpair=${encodeURIComponent(from)}|${encodeURIComponent(to)}`;
+      const mm = await fetch(mmUrl, { signal: AbortSignal.timeout(8000) });
+      const mmData = mm.ok ? await mm.json() as any : null;
+      const translated = String(mmData?.responseData?.translatedText || mmData?.matches?.[0]?.translation || "").trim();
+      const valid = translated && (
+        !to.toLowerCase().startsWith("ar") ||
+        /[\u0600-\u06ff]/.test(translated) ||
+        /[\u0600-\u06ff]/.test(text)
+      ) && !/MYMEMORY WARNING|AVAILABLE FREE TRANSLATIONS/i.test(translated);
+      if (valid) {
+        translateCache.set(cacheKey, translated);
+        pgTranslateSave(cacheKey, translated, from, to);
+        res.json({ translated });
+        return;
+      }
+    } catch {}
+    // Keep the response shape stable, but explicitly signal that the
+    // requested language was unavailable instead of caching English as Arabic.
+    res.json({ translated: "" });
+  }
 });
 
 

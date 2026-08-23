@@ -5571,6 +5571,10 @@ export default function WatchPage() {
       anime?.title?.native,
       anime?.title?.userPreferred,
       ...(Array.isArray(anime?.synonyms) ? anime.synonyms : []),
+      // Latest-episode cards may be backed by a provider catalog rather than
+      // AniList. Preserve every catalog title so AK/AN/KW/MP slug matching
+      // still works when the AniList lookup is incomplete or unavailable.
+      ...latestTitleVariants,
       titleParam,
       englishParam,
       titleArParam,
