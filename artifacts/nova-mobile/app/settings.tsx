@@ -293,7 +293,10 @@ const GOOGLE_NATIVE_SCHEME = `com.googleusercontent.apps.${GOOGLE_NATIVE_CLIENT_
   "",
 )}`;
 const GOOGLE_REDIRECT_URI = makeRedirectUri({
-  native: `${GOOGLE_NATIVE_SCHEME}:/oauthredirect`,
+  // Google Android OAuth clients use this exact native callback path.
+  // Using /oauthredirect causes a redirect mismatch even when the scheme
+  // itself is correct.
+  native: `${GOOGLE_NATIVE_SCHEME}:/oauth2redirect/google`,
 });
 WebBrowser.maybeCompleteAuthSession();
 
