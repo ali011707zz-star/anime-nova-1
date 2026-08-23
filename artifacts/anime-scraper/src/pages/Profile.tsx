@@ -3,8 +3,8 @@ import { useState, useRef, useEffect, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   ChevronRight, Camera, Check, X, Edit2, User, Mail,
-  AtSign, LogOut, Star, Clock, Sparkles, Lock,
-  Eye, EyeOff, ArrowRight, Shield, Trash2, AlertTriangle,
+   AtSign, LogOut, Star, Clock, Sparkles,
+   Shield, Trash2, AlertTriangle,
   TrendingUp, Calendar, Palette,
 } from "lucide-react";
 import { Link, useLocation } from "wouter";
@@ -167,76 +167,6 @@ function Field({ label, value, icon: Icon, iconColor, placeholder, type = "text"
   );
 }
 
-/* ──────────────────────────────────────────
-   PASSWORD CHANGE MODAL
-────────────────────────────────────────── */
-function PasswordModal({ onClose }: { onClose: () => void }) {
-  const { changePassword } = useAuth();
-  const [cur, setCur] = useState(""); const [next, setNext] = useState(""); const [conf, setConf] = useState("");
-  const [showCur, setShowCur] = useState(false); const [showNew, setShowNew] = useState(false);
-  const [loading, setLoading] = useState(false); const [msg, setMsg] = useState<{ text: string; ok: boolean } | null>(null);
-
-  const submit = async () => {
-    if (!cur || !next || !conf) { setMsg({ text: "يرجى تعبئة جميع الحقول", ok: false }); return; }
-    if (next.length < 6) { setMsg({ text: "كلمة المرور يجب أن تكون 6 أحرف على الأقل", ok: false }); return; }
-    if (next !== conf) { setMsg({ text: "كلمتا المرور غير متطابقتين", ok: false }); return; }
-    setLoading(true);
-    const result = await changePassword(cur, next);
-    setLoading(false);
-    if (result.error) { setMsg({ text: result.error, ok: false }); }
-    else { setMsg({ text: "تم تغيير كلمة المرور بنجاح ✓", ok: true }); setTimeout(onClose, 1500); }
-  };
-  const iClass = "w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white text-[13px] font-['Cairo'] placeholder-white/20 outline-none focus:border-violet-500/50 transition-all";
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-6" dir="rtl">
-      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-        className="absolute inset-0 bg-black/70 backdrop-blur-md" onClick={onClose} />
-      <motion.div initial={{ opacity: 0, scale: 0.92, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.92 }}
-        className="relative w-full max-w-sm rounded-3xl p-6"
-        style={{ background: "rgba(14,12,24,0.99)", border: "1px solid rgba(139,92,246,0.20)" }}
-        onClick={e => e.stopPropagation()}>
-        <div className="h-[2px] rounded-full mb-5" style={{ background: "linear-gradient(90deg,#7C3AED,#4F46E5)" }} />
-        <div className="flex items-center justify-between mb-5">
-          <h3 className="text-[15px] font-black font-['Cairo'] text-white">تغيير كلمة المرور</h3>
-          <button onClick={onClose} className="w-8 h-8 rounded-xl flex items-center justify-center"
-            style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.09)" }}>
-            <X className="w-3.5 h-3.5 text-white/40" />
-          </button>
-        </div>
-        <div className="flex flex-col gap-3">
-          <div className="relative">
-            <input type={showCur ? "text" : "password"} value={cur} onChange={e => setCur(e.target.value)} placeholder="كلمة المرور الحالية" className={iClass} />
-            <button type="button" onClick={() => setShowCur(p => !p)} className="absolute left-3 top-1/2 -translate-y-1/2 text-white/25">
-              {showCur ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-            </button>
-          </div>
-          <div className="relative">
-            <input type={showNew ? "text" : "password"} value={next} onChange={e => setNext(e.target.value)} placeholder="كلمة المرور الجديدة" className={iClass} />
-            <button type="button" onClick={() => setShowNew(p => !p)} className="absolute left-3 top-1/2 -translate-y-1/2 text-white/25">
-              {showNew ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-            </button>
-          </div>
-          <input type="password" value={conf} onChange={e => setConf(e.target.value)} placeholder="تأكيد كلمة المرور الجديدة" className={iClass} />
-          <AnimatePresence>
-            {msg && (
-              <motion.p initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-                className={`text-[11.5px] font-['Cairo'] text-center font-bold ${msg.ok ? "text-emerald-400" : "text-red-400"}`}>
-                {msg.text}
-              </motion.p>
-            )}
-          </AnimatePresence>
-          <button onClick={submit} disabled={loading}
-            className="w-full py-3.5 rounded-xl font-black font-['Cairo'] text-[13px] text-white mt-1 flex items-center justify-center gap-2"
-            style={{ background: "linear-gradient(135deg,#7C3AED,#4F46E5)", opacity: loading ? 0.7 : 1 }}>
-            {loading ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : <><ArrowRight className="w-4 h-4" />حفظ التغييرات</>}
-          </button>
-        </div>
-      </motion.div>
-    </div>
-  );
-}
-
 /* ══════════════════════════════════════════════════
    MAIN PROFILE PAGE
 ══════════════════════════════════════════════════ */
@@ -249,7 +179,6 @@ export default function Profile() {
   const [saving, setSaving]           = useState(false);
   const [saved, setSaved]             = useState(false);
   const [saveError, setSaveError]     = useState("");
-  const [showPassModal, setShowPassModal]       = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [showColorPicker, setShowColorPicker]   = useState(false);
   const [deletingAccount, setDeletingAccount]   = useState(false);
@@ -530,26 +459,6 @@ export default function Profile() {
           </div>
         </div>
 
-        {/* ── Security ── */}
-        <div>
-          <p className="text-[9.5px] font-black text-white/20 tracking-[0.18em] px-1 mb-2.5">🛡 الأمان</p>
-          <div className="rounded-2xl overflow-hidden"
-            style={{ background: "rgba(255,255,255,0.025)", border: "1px solid rgba(255,255,255,0.06)" }}>
-            <button onClick={() => setShowPassModal(true)}
-              className="w-full flex items-center gap-3 px-4 py-3.5 transition-colors hover:bg-white/3 active:bg-white/5">
-              <div className="w-8 h-8 rounded-xl flex items-center justify-center shrink-0"
-                style={{ background: "rgba(139,92,246,0.10)", border: "1px solid rgba(139,92,246,0.18)" }}>
-                <Lock className="w-3.5 h-3.5 text-violet-400" />
-              </div>
-              <div className="text-right flex-1">
-                <p className="text-[13px] font-bold font-['Cairo'] text-white/75">تغيير كلمة المرور</p>
-                <p className="text-[10px] text-white/25 font-['Cairo'] mt-0.5">تحديث كلمة مرورك بأمان</p>
-              </div>
-              <ChevronRight className="w-4 h-4 text-white/20 rotate-180" />
-            </button>
-          </div>
-        </div>
-
         {/* ── Quick Links ── */}
         <div>
           <p className="text-[9.5px] font-black text-white/20 tracking-[0.18em] px-1 mb-2.5">📂 روابط سريعة</p>
@@ -658,7 +567,6 @@ export default function Profile() {
 
       {/* ── Password Modal ── */}
       <AnimatePresence>
-        {showPassModal && <PasswordModal onClose={() => setShowPassModal(false)} />}
       </AnimatePresence>
     </main>
   );

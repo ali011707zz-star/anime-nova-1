@@ -6,7 +6,6 @@ import { Header } from "@/components/layout/Header";
 import { BottomNav } from "@/components/layout/BottomNav";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { AuthProvider } from "@/lib/auth-context";
-import { TelegramTopBanner } from "@/components/TelegramTopBanner";
 import { WebAppDownloadModal } from "@/components/WebAppDownloadModal";
 
 class ErrorBoundary extends Component<{ children: ReactNode; resetKey?: string }, { hasError: boolean; lastKey?: string }> {
@@ -253,7 +252,6 @@ function App() {
     <ErrorBoundary resetKey="root">
       <AuthProvider>
         <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, "")}>
-          <TelegramTopBanner />
           <Router onMenuClick={() => setSidebarOpen(true)} />
           <Sidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
           <WebAppDownloadModal />

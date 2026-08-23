@@ -927,13 +927,7 @@ function ProfileSheet({ open, onClose, user, onUpdate, onLogout }: {
   onLogout: () => void;
 }) {
   const base = getBaseUrl();
-  const [tab, setTab] = useState<"profile"|"password">("profile");
   const [displayName, setDisplayName] = useState("");
-  const [currentPass, setCurrentPass] = useState("");
-  const [newPass, setNewPass] = useState("");
-  const [confirmPass, setConfirmPass] = useState("");
-  const [showCurrent, setShowCurrent] = useState(false);
-  const [showNew, setShowNew] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
@@ -941,9 +935,7 @@ function ProfileSheet({ open, onClose, user, onUpdate, onLogout }: {
   useEffect(() => {
     if (open && user) {
       setDisplayName(user.displayName || "");
-      setTab("profile");
       setError(""); setSuccess("");
-      setCurrentPass(""); setNewPass(""); setConfirmPass("");
     }
   }, [open]);
 
@@ -968,29 +960,6 @@ function ProfileSheet({ open, onClose, user, onUpdate, onLogout }: {
         onUpdate(updated);
         setSuccess("تم حفظ التغييرات ✓");
         setTimeout(() => setSuccess(""), 2500);
-      }
-    } catch { setError("تعذّر الوصول للخادم"); }
-    setLoading(false);
-  };
-
-  const handleChangePassword = async () => {
-    if (!currentPass) { setError("أدخل كلمة المرور الحالية"); return; }
-    if (newPass.length < 6) { setError("كلمة المرور الجديدة يجب أن تكون 6 أحرف على الأقل"); return; }
-    if (newPass !== confirmPass) { setError("كلمتا المرور غير متطابقتين"); return; }
-    setLoading(true); setError(""); setSuccess("");
-    try {
-      const r = await secureFetch(`${base}/api/auth/change-password`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify({ currentPassword: currentPass, newPassword: newPass }),
-      });
-      const d = await r.json();
-      if (!r.ok) { setError(d.error || "حدث خطأ"); }
-      else {
-        setSuccess("تم تغيير كلمة المرور بنجاح ✓");
-        setCurrentPass(""); setNewPass(""); setConfirmPass("");
-        setTimeout(() => { setSuccess(""); setTab("profile"); }, 2000);
       }
     } catch { setError("تعذّر الوصول للخادم"); }
     setLoading(false);
@@ -1029,19 +998,6 @@ function ProfileSheet({ open, onClose, user, onUpdate, onLogout }: {
             <Text style={{ fontSize: 11, fontFamily: "Cairo_400Regular", color: "rgba(255,255,255,0.30)" }}>{user.email}</Text>
           </View>
 
-          {/* Tabs */}
-          <View style={{ flexDirection: "row", gap: 4, marginHorizontal: 20, padding: 4, borderRadius: 14, backgroundColor: "rgba(255,255,255,0.04)", borderWidth: 1, borderColor: "rgba(255,255,255,0.06)", marginBottom: 8 }}>
-            {(["profile", "password"] as const).map(t => (
-              <Pressable key={t} onPress={() => { setTab(t); setError(""); setSuccess(""); }}
-                style={[{ flex: 1, paddingVertical: 9, borderRadius: 10, alignItems: "center" },
-                  tab === t && { backgroundColor: "rgba(124,58,237,0.50)", borderWidth: 1, borderColor: "rgba(139,92,246,0.30)" }]}>
-                <Text style={{ fontSize: 12, fontFamily: "Cairo_800ExtraBold", color: tab === t ? "#fff" : "rgba(255,255,255,0.35)" }}>
-                  {t === "profile" ? "بيانات الحساب" : "كلمة المرور"}
-                </Text>
-              </Pressable>
-            ))}
-          </View>
-
           <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 20, paddingBottom: 48 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
 
             {/* Error / Success */}
@@ -1058,8 +1014,7 @@ function ProfileSheet({ open, onClose, user, onUpdate, onLogout }: {
               </View>
             )}
 
-            {tab === "profile" ? (
-              <>
+            <>
                 {/* Display Name */}
                 <Text style={ts.authFieldLabel}>الاسم الظاهر</Text>
                 <View style={ts.authFieldWrap}>
@@ -1100,67 +1055,7 @@ function ProfileSheet({ open, onClose, user, onUpdate, onLogout }: {
                   <Text style={{ fontSize: 13, fontFamily: "Cairo_800ExtraBold", color: "#f87171" }}>تسجيل الخروج</Text>
                 </Pressable>
 
-              </>
-            ) : (
-              <>
-                {/* Current password */}
-                <Text style={ts.authFieldLabel}>كلمة المرور الحالية</Text>
-                <View style={ts.authFieldWrap}>
-                  <Pressable onPress={() => setShowCurrent(p => !p)}>
-                    <Ionicons name={showCurrent ? "eye-off" : "eye"} size={16} color="rgba(255,255,255,0.3)" />
-                  </Pressable>
-                  <TextInput value={currentPass} onChangeText={v => { setCurrentPass(v); setError(""); }}
-                    placeholder="••••••••"
-                    placeholderTextColor="rgba(255,255,255,0.18)"
-                    secureTextEntry={!showCurrent}
-                    style={ts.authFieldInput}
-                    textAlign="right"
-                  />
-                  <Ionicons name="lock-closed-outline" size={16} color="rgba(255,255,255,0.2)" />
-                </View>
-
-                {/* New password */}
-                <Text style={ts.authFieldLabel}>كلمة المرور الجديدة</Text>
-                <View style={ts.authFieldWrap}>
-                  <Pressable onPress={() => setShowNew(p => !p)}>
-                    <Ionicons name={showNew ? "eye-off" : "eye"} size={16} color="rgba(255,255,255,0.3)" />
-                  </Pressable>
-                  <TextInput value={newPass} onChangeText={v => { setNewPass(v); setError(""); }}
-                    placeholder="6 أحرف على الأقل"
-                    placeholderTextColor="rgba(255,255,255,0.18)"
-                    secureTextEntry={!showNew}
-                    style={ts.authFieldInput}
-                    textAlign="right"
-                  />
-                  <Ionicons name="lock-closed-outline" size={16} color="rgba(255,255,255,0.2)" />
-                </View>
-
-                {/* Confirm */}
-                <Text style={ts.authFieldLabel}>تأكيد كلمة المرور الجديدة</Text>
-                <View style={[ts.authFieldWrap, confirmPass ? { borderColor: newPass === confirmPass ? "rgba(52,211,153,0.35)" : "rgba(239,68,68,0.35)" } : {}]}>
-                  <Ionicons name={newPass === confirmPass && confirmPass ? "checkmark-circle" : "ellipse-outline"} size={16} color={newPass === confirmPass && confirmPass ? "#34d399" : "rgba(255,255,255,0.2)"} />
-                  <TextInput value={confirmPass} onChangeText={v => { setConfirmPass(v); setError(""); }}
-                    placeholder="••••••••"
-                    placeholderTextColor="rgba(255,255,255,0.18)"
-                    secureTextEntry
-                    style={ts.authFieldInput}
-                    textAlign="right"
-                  />
-                  <Ionicons name="lock-closed-outline" size={16} color="rgba(255,255,255,0.2)" />
-                </View>
-
-                {/* Save password */}
-                <Pressable onPress={handleChangePassword} disabled={loading}
-                  style={[ts.authSubmitBtn, { marginTop: 6 }]}>
-                  {loading ? <ActivityIndicator color="#fff" size="small" /> : (
-                    <>
-                      <Ionicons name="shield-checkmark" size={16} color="#fff" />
-                      <Text style={ts.authSubmitText}>تغيير كلمة المرور</Text>
-                    </>
-                  )}
-                </Pressable>
-              </>
-            )}
+            </>
           </ScrollView>
         </View>
     </Modal>

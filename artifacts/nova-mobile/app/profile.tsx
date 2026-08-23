@@ -39,15 +39,7 @@ export default function ProfileScreen() {
   const topPad = Platform.OS === "web" ? 0 : Math.max(insets.top, Platform.OS === "android" ? 28 : 44);
 
   const [user, setUser] = useState<MobileUser | null>(null);
-  const [tab, setTab] = useState<"profile" | "password">("profile");
-
   const [displayName, setDisplayName] = useState("");
-  const [currentPass, setCurrentPass] = useState("");
-  const [newPass, setNewPass] = useState("");
-  const [confirmPass, setConfirmPass] = useState("");
-  const [showCurrent, setShowCurrent] = useState(false);
-  const [showNew, setShowNew] = useState(false);
-  const [showConfirm, setShowConfirm] = useState(false);
   const [loading, setLoading] = useState(false);
   const [uploadingImg, setUploadingImg] = useState(false);
   const [error, setError] = useState("");
@@ -105,29 +97,6 @@ export default function ProfileScreen() {
         await AsyncStorage.setItem(AUTH_KEY, JSON.stringify(updated));
         setUser(updated);
         showMsg("تم حفظ التغييرات ✓", true);
-      }
-    } catch { showMsg("تعذّر الوصول للخادم", false); }
-    setLoading(false);
-  };
-
-  const handleChangePassword = async () => {
-    if (!currentPass) { showMsg("أدخل كلمة المرور الحالية", false); return; }
-    if (newPass.length < 6) { showMsg("كلمة المرور الجديدة يجب أن تكون 6 أحرف على الأقل", false); return; }
-    if (newPass !== confirmPass) { showMsg("كلمتا المرور غير متطابقتين", false); return; }
-    setLoading(true); setError(""); setSuccess("");
-    try {
-      const r = await secureFetch(`${base}/api/auth/change-password`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify({ currentPassword: currentPass, newPassword: newPass }),
-      });
-      const d = await r.json();
-      if (!r.ok) { showMsg(d.error || "حدث خطأ", false); }
-      else {
-        showMsg("تم تغيير كلمة المرور بنجاح ✓", true);
-        setCurrentPass(""); setNewPass(""); setConfirmPass("");
-        setTimeout(() => setTab("profile"), 2000);
       }
     } catch { showMsg("تعذّر الوصول للخادم", false); }
     setLoading(false);
@@ -267,19 +236,6 @@ export default function ProfileScreen() {
           </View>
         </View>
 
-        {/* Tabs */}
-        <View style={[s.tabRow, { backgroundColor: colors.card, borderColor: colors.border }]}>
-          {(["profile", "password"] as const).map(t => (
-            <Pressable key={t} onPress={() => { setTab(t); setError(""); setSuccess(""); }}
-              style={[s.tabBtn, tab === t && { backgroundColor: colors.primary + "30", borderColor: colors.primary + "60", borderWidth: 1 }]}>
-              <Ionicons name={t === "profile" ? "person-outline" : "lock-closed-outline"} size={14} color={tab === t ? colors.primary : colors.mutedForeground} />
-              <Text style={[s.tabText, { color: tab === t ? colors.primary : colors.mutedForeground }]}>
-                {t === "profile" ? "بيانات الحساب" : "كلمة المرور"}
-              </Text>
-            </Pressable>
-          ))}
-        </View>
-
         <View style={{ paddingHorizontal: 18, marginTop: 14 }}>
           {/* Error / Success */}
           {!!error && (
@@ -295,8 +251,7 @@ export default function ProfileScreen() {
             </View>
           )}
 
-          {tab === "profile" ? (
-            <>
+          <>
               <Text style={[s.fieldLabel, { color: colors.mutedForeground }]}>الاسم الظاهر</Text>
               <View style={[s.fieldWrap, { backgroundColor: colors.card, borderColor: colors.border }]}>
                 <TextInput value={displayName} onChangeText={v => { setDisplayName(v); setError(""); }}
@@ -334,71 +289,7 @@ export default function ProfileScreen() {
                 <Text style={[s.dangerBtnText, { color: "#f87171" }]}>تسجيل الخروج</Text>
               </Pressable>
 
-            </>
-          ) : (
-            <>
-              <Text style={[s.fieldLabel, { color: colors.mutedForeground }]}>كلمة المرور الحالية</Text>
-              <View style={[s.fieldWrap, { backgroundColor: colors.card, borderColor: colors.border }]}>
-                <Pressable onPress={() => setShowCurrent(p => !p)}>
-                  <Ionicons name={showCurrent ? "eye-off" : "eye"} size={16} color={colors.mutedForeground} />
-                </Pressable>
-                <TextInput value={currentPass} onChangeText={v => { setCurrentPass(v); setError(""); }}
-                  placeholder="••••••••"
-                  placeholderTextColor={colors.mutedForeground + "80"}
-                  secureTextEntry={!showCurrent}
-                  style={[s.fieldInput, { color: colors.text }]}
-                  textAlign="right"
-                />
-                <Ionicons name="lock-closed-outline" size={16} color={colors.mutedForeground} />
-              </View>
-
-              <Text style={[s.fieldLabel, { color: colors.mutedForeground }]}>كلمة المرور الجديدة</Text>
-              <View style={[s.fieldWrap, { backgroundColor: colors.card, borderColor: colors.border }]}>
-                <Pressable onPress={() => setShowNew(p => !p)}>
-                  <Ionicons name={showNew ? "eye-off" : "eye"} size={16} color={colors.mutedForeground} />
-                </Pressable>
-                <TextInput value={newPass} onChangeText={v => { setNewPass(v); setError(""); }}
-                  placeholder="6 أحرف على الأقل"
-                  placeholderTextColor={colors.mutedForeground + "80"}
-                  secureTextEntry={!showNew}
-                  style={[s.fieldInput, { color: colors.text }]}
-                  textAlign="right"
-                />
-                <Ionicons name="lock-closed-outline" size={16} color={colors.mutedForeground} />
-              </View>
-
-              <Text style={[s.fieldLabel, { color: colors.mutedForeground }]}>تأكيد كلمة المرور الجديدة</Text>
-              <View style={[s.fieldWrap, { backgroundColor: colors.card,
-                borderColor: confirmPass ? (newPass === confirmPass ? "#34d39940" : "#ef444440") : colors.border }]}>
-                <Pressable onPress={() => setShowConfirm(p => !p)}>
-                  <Ionicons name={showConfirm ? "eye-off" : "eye"} size={16} color={colors.mutedForeground} />
-                </Pressable>
-                <TextInput value={confirmPass} onChangeText={v => { setConfirmPass(v); setError(""); }}
-                  placeholder="••••••••"
-                  placeholderTextColor={colors.mutedForeground + "80"}
-                  secureTextEntry={!showConfirm}
-                  style={[s.fieldInput, { color: colors.text }]}
-                  textAlign="right"
-                />
-                <Ionicons
-                  name={newPass === confirmPass && confirmPass ? "checkmark-circle" : "ellipse-outline"}
-                  size={16}
-                  color={newPass === confirmPass && confirmPass ? "#34d399" : colors.mutedForeground}
-                />
-              </View>
-
-              <Pressable onPress={handleChangePassword} disabled={loading}
-                style={[s.primaryBtn, { backgroundColor: colors.primary, marginTop: 10 }]}>
-                {loading
-                  ? <ActivityIndicator color="#fff" size="small" />
-                  : (<>
-                    <Ionicons name="shield-checkmark" size={16} color="#fff" />
-                    <Text style={s.primaryBtnText}>تغيير كلمة المرور</Text>
-                  </>)
-                }
-              </Pressable>
-            </>
-          )}
+          </>
         </View>
       </ScrollView>
     </View>
@@ -425,9 +316,6 @@ const s = StyleSheet.create({
   activeBadge: { flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 12, paddingVertical: 5, borderRadius: 20, borderWidth: 1 },
   activeDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: "#22c55e" },
   activeBadgeText: { fontSize: 10.5, fontFamily: "Cairo_700Bold", color: "#4ade80" },
-  tabRow: { flexDirection: "row", marginHorizontal: 18, padding: 4, borderRadius: 16, borderWidth: 1, gap: 4 },
-  tabBtn: { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, paddingVertical: 10, borderRadius: 12 },
-  tabText: { fontSize: 12, fontFamily: "Cairo_800ExtraBold" },
   msgBox: { flexDirection: "row", alignItems: "center", gap: 8, borderWidth: 1, borderRadius: 14, paddingHorizontal: 14, paddingVertical: 10, marginBottom: 14 },
   msgText: { fontSize: 12, fontFamily: "Cairo_400Regular", flex: 1, textAlign: "right" },
   fieldLabel: { fontSize: 11, fontFamily: "Cairo_700Bold", marginBottom: 6, marginTop: 14, textAlign: "right" },

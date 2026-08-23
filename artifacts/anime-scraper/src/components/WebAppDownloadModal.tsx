@@ -29,7 +29,7 @@ export function WebAppDownloadModal() {
       >
         <div className="relative -mx-6 -mt-6 mb-5 aspect-[498/436] overflow-hidden bg-black">
           <video
-            src="/jjk-lethal-company-dance.mp4"
+            src="/deku-ad.mp4"
             className="h-full w-full object-contain"
             autoPlay
             loop
@@ -43,7 +43,7 @@ export function WebAppDownloadModal() {
           type="button"
           onClick={() => setOpen(false)}
           aria-label="إغلاق نافذة تحميل التطبيق"
-          className="absolute left-4 top-4 z-10 flex h-9 w-9 items-center justify-center rounded-xl border border-white/10 bg-white/5 text-white/55 transition-colors hover:bg-white/10 hover:text-white active:scale-90"
+          className="absolute left-3 top-3 z-20 flex h-10 w-10 items-center justify-center rounded-xl border border-white/20 bg-black/60 text-white/80 shadow-lg backdrop-blur-sm transition-colors hover:bg-black/80 hover:text-white active:scale-90"
         >
           <X className="h-4 w-4" />
         </button>
