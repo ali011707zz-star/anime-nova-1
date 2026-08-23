@@ -334,7 +334,6 @@ function AuthSheet({ open, onClose, onLogin }: {
     iosClientId: googleIosClientId,
     webClientId: googleWebClientId,
     redirectUri: GOOGLE_REDIRECT_URI,
-    responseType: "code",
     usePKCE: true,
     scopes: ["openid", "profile", "email"],
     selectAccount: true,
@@ -430,13 +429,28 @@ function AuthSheet({ open, onClose, onLogin }: {
       }
       return;
     }
+    // The native Google flow normally returns an access token directly.
+    // Reading it here avoids a second PKCE exchange whose verifier can be
+    // lost when Android hands the deep link to Expo Router.
+    const accessToken = googleResponse.authentication?.accessToken;
+    if (accessToken) {
+      void saveGoogleUser(accessToken).catch((error) => {
+        console.warn("[google-auth] native token handling error", {
+          message: error instanceof Error ? error.message : String(error),
+        });
+        setError("تعذّر إكمال تسجيل الدخول عبر Google. حاول مرة أخرى.");
+      });
+      return;
+    }
+
     const code = (googleResponse.params as Record<string, string> | undefined)?.code;
     if (!code) {
       console.warn("[google-auth] OAuth success without authorization code", {
         responseType: googleResponse.type,
         params: Object.keys(googleResponse.params || {}),
+        hasAuthentication: !!googleResponse.authentication,
       });
-      setError("لم يصل رمز التفويض من Google، حاول مرة أخرى");
+      setError("لم يصل رمز الدخول من Google، حاول مرة أخرى");
       return;
     }
     exchangeGoogleCode(code)
