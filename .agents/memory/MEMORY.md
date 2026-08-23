@@ -99,6 +99,7 @@
 - [VPS Google OAuth build injection](vps-google-oauth-build-injection.md) — Google Client ID must be verified in the deployed lazy Auth chunk, not only the main index bundle.
 - [VPS UI release markers](vps-ui-release-version.md) — UI release bumps must update web/mobile display markers and Expo metadata; backend config version is separate.
 - [Mobile typecheck baseline](mobile-typecheck-baseline.md) — full Nova Mobile typecheck currently has unrelated pre-existing errors; validate changed files separately before APK builds.
+- [Web build baseline](web-build-baseline.md) — full workspace typecheck has pre-existing API/admin errors; production deploy can use the package build scripts without the aggregate typecheck.
 - [VPS transfer fallback](vps-transfer-fallback.md) — هذا الخادم لا يحتوي rsync؛ استخدم أرشيف tar عبر SSH لنقل الكود مع استثناء .env والنسخ الاحتياطية.
 - [AniList outage fallback](anilist-outage-fallback.md) — عند تعطّل AniList، أحدث الحلقات تعتمد على AnimeSlayer مباشرة ولا يجب إسقاط البطاقات بسبب فشل مطابقة المعرّف.
 - [API source tree](api-source-tree.md) — build يستخدم artifacts/api-server/src؛ يوجد مسار nested قديم لا يدخل في حزمة API المنشورة.

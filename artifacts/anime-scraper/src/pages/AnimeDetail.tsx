@@ -633,16 +633,12 @@ export default function AnimeDetail() {
           whileTap={{ scale: 0.97 }}
           onClick={() => {
             const isMovie = anime?.format === "MOVIE" || anime?.format === "MOVIE_SHORT";
-            const isAnimeSlayer = idSource === "anslayer";
-            const sourceEp = parseInt(searchParams.get("ep") || "1", 10) || 1;
-            const resolvedSourceTitle = anime?.title?.romaji || sourceTitle;
-            const resolvedSourceEnglish = anime?.title?.english || resolvedSourceTitle;
-            const resolvedSourceCover = anime?.coverImage?.large || searchParams.get("cover") || "";
-            if (isAnimeSlayer) {
-              navigate(`/watch?anime=${params.id}&anslayerId=${params.id}&ep=${sourceEp}&title=${encodeURIComponent(resolvedSourceTitle)}&english=${encodeURIComponent(resolvedSourceEnglish)}&cover=${encodeURIComponent(resolvedSourceCover)}&site=anslayer`);
-            } else if (isMovie) {
+            if (isMovie) {
               navigate(`/watch?anime=${params.id}&ep=1&title=${encodeURIComponent(anime?.title?.romaji ?? "")}&english=${encodeURIComponent(anime?.title?.english ?? "")}`);
             } else {
+              // المسلسلات تفتح صفحة الحلقات دائماً. حتى لو جاءت صفحة التفاصيل
+              // من بطاقة "أحدث الحلقات" التابعة لمصدر خارجي، لا ننقل المستخدم
+              // مباشرةً إلى الحلقة الحالية من زر "مشاهدة الأنمي".
               navigate(`/episodes/${params.id}`);
             }
           }}
