@@ -1,4 +1,6 @@
-import { Redirect } from "expo-router";
+import { useEffect } from "react";
+import { ActivityIndicator, View } from "react-native";
+import { useRouter } from "expo-router";
 
 /**
  * Native Google OAuth callback.
@@ -10,5 +12,17 @@ import { Redirect } from "expo-router";
  * remounts the AuthSheet, where useAuthRequest handles the response.
  */
 export default function GoogleOAuthCallback() {
-  return <Redirect href="/settings" />;
+  const router = useRouter();
+
+  useEffect(() => {
+    // Replace the callback entry; pushing /settings here leaves the callback
+    // and every intermediate settings instance behind the visible screen.
+    router.replace("/settings");
+  }, [router]);
+
+  return (
+    <View style={{ flex: 1, backgroundColor: "#08080b", alignItems: "center", justifyContent: "center" }}>
+      <ActivityIndicator color="#a78bfa" />
+    </View>
+  );
 }

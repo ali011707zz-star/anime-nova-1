@@ -424,7 +424,11 @@ function AuthSheet({ open, onClose, onLogin }: {
   }, [base, onClose, onLogin]);
 
   useEffect(() => {
-    if (!googleResponse) return;
+    // The OAuth callback route can remount this component while the sheet is
+    // closed. Never process a stale response from a hidden AuthSheet: doing
+    // so can create another settings route and leave duplicate pages in the
+    // native navigation stack.
+    if (!open || !googleResponse) return;
     const responseKey = JSON.stringify(googleResponse);
     if (handledGoogleResponse.current === responseKey) return;
     handledGoogleResponse.current = responseKey;
@@ -1546,7 +1550,13 @@ export default function SettingsScreen() {
       <AuthSheet
         open={showAuth}
         onClose={() => setShowAuth(false)}
-        onLogin={u => { setCurrentUser(u); showToast(`مرحباً ${u.displayName}! 🎉`); }}
+        onLogin={u => {
+          // Update the already-mounted settings screen instead of navigating
+          // to another settings instance after authentication.
+          setCurrentUser(u);
+          setShowAuth(false);
+          showToast(`مرحباً ${u.displayName}! 🎉`);
+        }}
       />
 
       {/* Premium Sheet */}
