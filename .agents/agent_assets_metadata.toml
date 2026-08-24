@@ -98,3 +98,17 @@ mtime_ms = 1787505042897
 storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:5262462a-1c28-49ae-8c7c-631a331a898d/c289d7c1-60dc-47f5-899f-45715b72e5cd/5486b05d-c84b-4d1c-883c-3ff3ff15b3e2"
 storage_version_token = "1787505051659885"
 content_type = "image/svg+xml"
+
+[[outputs]]
+id = "yM3aYHoBRVaJvmQ9iKZjj"
+uri = "file://artifacts/anime-scraper/public/Anime%20Nova.apk"
+type = "unspecified"
+title = "Anime Nova.apk — GitHub Actions 666"
+description = "ملف APK الحقيقي من تشغيل GitHub Actions رقم 666، باسم Anime Nova.apk وليس ZIP أو app-release.apk."
+logical_id = "12052bb6-84cc-40a3-84d5-2b6310af3919"
+content_hash = "sha256:00d5a833f9105765b43e71623ba0dc02aa5d55697878f282e127c1601e36e1f5"
+size = 93903468
+mtime_ms = 1787601783810
+storage_uri = "gcs://replit-rams-assets-sisko/rams/assets/repl:4470d19a-50dc-48fc-a453-04644cf3d256/12052bb6-84cc-40a3-84d5-2b6310af3919/98b94cc5-bf06-4cd5-b2ba-e48948db9d4c"
+storage_version_token = "1787602210233576"
+content_type = "application/octet-stream"
