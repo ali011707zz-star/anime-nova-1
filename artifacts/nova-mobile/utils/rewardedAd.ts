@@ -13,7 +13,7 @@ import {
 } from "unity-levelplay-mediation";
 
 // This is the Android app key shown in the IronSource/LevelPlay account.
-const LEVELPLAY_ANDROID_APP_KEY = "9qbxrfx8ldw4intrz";
+const LEVELPLAY_ANDROID_APP_KEY = "27bfd367d";
 // LevelPlay's rewarded-ad constructor expects the generated Ad Unit ID,
 // not the human-readable unit name ("DefaultRewardedVideo").
 const LEVELPLAY_REWARDED_AD_UNIT_ID = "0p2nzpuv2zkI178qo";
