@@ -55,7 +55,9 @@ function normalizeAwSeries(item: any): AwSeries | null {
   };
 }
 function gridColumnsForWidth(width: number) {
-  return width >= 1000 ? 6 : width >= 700 ? 5 : 3;
+  // TV has more pixels, not necessarily more decoding headroom. Match the
+  // phone layout so posters stay readable and scrolling stays fluid.
+  return 3;
 }
 
 // ─────────────────────────────────────────────────────────
@@ -184,6 +186,11 @@ function AnimationList({ searchQ }: { searchQ: string }) {
       numColumns={columns}
       contentContainerStyle={shared.grid}
       columnWrapperStyle={{ gap: 10 }}
+      initialNumToRender={6}
+      maxToRenderPerBatch={3}
+      updateCellsBatchingPeriod={50}
+      windowSize={5}
+      removeClippedSubviews={Platform.OS !== "web"}
       renderItem={({ item }) => (
         <View style={{ flex: 1 / columns }}>
           <PosterCard
@@ -316,6 +323,11 @@ function CartoonList({ searchQ }: { searchQ: string }) {
       numColumns={columns}
       contentContainerStyle={shared.grid}
       columnWrapperStyle={{ gap: 10 }}
+      initialNumToRender={6}
+      maxToRenderPerBatch={3}
+      updateCellsBatchingPeriod={50}
+      windowSize={5}
+      removeClippedSubviews={Platform.OS !== "web"}
       renderItem={({ item }) => (
         <View style={{ flex: 1 / columns }}>
           <PosterCard

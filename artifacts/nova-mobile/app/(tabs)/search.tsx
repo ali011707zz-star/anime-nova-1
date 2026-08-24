@@ -218,7 +218,9 @@ export default function SearchScreen() {
   const { width } = useWindowDimensions();
   const router = useRouter();
   const topPad = Platform.OS === "web" ? 0 : insets.top;
-  const gridColumns = width >= 1000 ? 6 : width >= 700 ? 5 : 3;
+  // Three columns remain readable on TV and avoid decoding a whole row of
+  // posters simultaneously on lower-powered Android TV hardware.
+  const gridColumns = 3;
 
   const [query, setQuery]         = useState("");
   const [results, setResults]     = useState<AnimeResult[]>([]);
@@ -536,6 +538,11 @@ export default function SearchScreen() {
             columnWrapperStyle={{ gap: 10, marginBottom: 10 }}
             contentContainerStyle={{ paddingHorizontal: 14, paddingTop: 12, paddingBottom: 100 }}
             showsVerticalScrollIndicator={false}
+            initialNumToRender={6}
+            maxToRenderPerBatch={3}
+            updateCellsBatchingPeriod={50}
+            windowSize={5}
+            removeClippedSubviews={Platform.OS !== "web"}
             ListHeaderComponent={
               activeSeason?.value ? (
                 <View style={s.activeSeasonRow}>

@@ -39,8 +39,9 @@ export const SectionRow = React.memo(function SectionRow({ title, items, onSeeAl
         // off-screen posters out of the native view tree, which matters on
         // tablets where several rails are visible in one session.
         initialNumToRender={5}
-        maxToRenderPerBatch={5}
-        windowSize={3}
+        maxToRenderPerBatch={3}
+        updateCellsBatchingPeriod={50}
+        windowSize={5}
         removeClippedSubviews={Platform.OS !== "web"}
       />
     </View>

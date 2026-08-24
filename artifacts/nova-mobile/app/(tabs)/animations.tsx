@@ -72,7 +72,9 @@ export default function AnimationsScreen() {
   const { width } = useWindowDimensions();
   const router = useRouter();
   const topPad = Platform.OS === "web" ? 0 : insets.top;
-  const gridColumns = width >= 1000 ? 6 : width >= 700 ? 5 : 3;
+  // Keep the same three-card density as mobile on wide displays. This is
+  // lighter for Android TV and keeps titles/posters comfortably readable.
+  const gridColumns = 3;
 
   const [type, setType] = useState<MediaType>("movie");
   const [genre, setGenre] = useState<number>(0);
@@ -392,6 +394,11 @@ export default function AnimationsScreen() {
           contentContainerStyle={s.grid}
           columnWrapperStyle={s.gridRow}
           showsVerticalScrollIndicator={false}
+          initialNumToRender={6}
+          maxToRenderPerBatch={3}
+          updateCellsBatchingPeriod={50}
+          windowSize={5}
+          removeClippedSubviews={Platform.OS !== "web"}
           renderItem={renderItem}
           onEndReached={() => {
             if (hasMore && !loading) {

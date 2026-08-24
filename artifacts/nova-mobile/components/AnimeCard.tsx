@@ -28,6 +28,10 @@ export const AnimeCard = React.memo(function AnimeCard({ anime, size = "sm", pro
   return (
     <Pressable
       onPress={() => router.push(`/anime/${anime.id}?title=${encodeURIComponent(anime.title.romaji)}&english=${encodeURIComponent(anime.title.english || "")}`)}
+      delayPressIn={0}
+      hitSlop={4}
+      pressRetentionOffset={12}
+      android_ripple={{ color: "rgba(139,92,246,0.18)" }}
       style={({ pressed }) => [styles.card, { width: cardW, opacity: pressed ? 0.85 : 1 }]}
     >
       <View style={[styles.imageContainer, { width: cardW, height: cardH, borderRadius: colors.radius - 4 }]}>
@@ -35,7 +39,8 @@ export const AnimeCard = React.memo(function AnimeCard({ anime, size = "sm", pro
           source={{ uri: anime.coverImage.large || anime.coverImage.extraLarge }}
           style={[styles.image, { borderRadius: colors.radius - 4 }]}
           resizeMode="cover"
-          transition={300}
+          fadeDuration={120}
+          resizeMethod="resize"
         />
         {anime.averageScore && (
           <View style={styles.scoreBadge}>

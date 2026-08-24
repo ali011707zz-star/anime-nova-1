@@ -185,7 +185,9 @@ export default function BrowseScreen() {
   }>();
   const router = useRouter();
   const topPad = Platform.OS === "web" ? 0 : insets.top;
-  const gridColumns = width >= 1000 ? 6 : width >= 700 ? 5 : 3;
+  // Keep poster cards at the phone density on TV/tablets. More columns
+  // decode too many large images at once and make remote scrolling janky.
+  const gridColumns = 3;
   const genreColumns = width >= 700 ? 3 : 2;
 
   const routeValue = (value: string | string[] | undefined) =>
@@ -471,6 +473,11 @@ export default function BrowseScreen() {
           contentContainerStyle={{ paddingHorizontal: 12, paddingTop: 12, paddingBottom: 100 }}
           columnWrapperStyle={{ gap: 10, marginBottom: 10 }}
           showsVerticalScrollIndicator={false}
+          initialNumToRender={6}
+          maxToRenderPerBatch={3}
+          updateCellsBatchingPeriod={50}
+          windowSize={5}
+          removeClippedSubviews={Platform.OS !== "web"}
           renderItem={({ item }) => (
             <GenreCard
               item={item}
@@ -499,6 +506,11 @@ export default function BrowseScreen() {
               contentContainerStyle={{ paddingHorizontal: 12, paddingTop: 12, paddingBottom: 100 }}
               columnWrapperStyle={{ gap: 10, marginBottom: 10 }}
               showsVerticalScrollIndicator={false}
+              initialNumToRender={6}
+              maxToRenderPerBatch={3}
+              updateCellsBatchingPeriod={50}
+              windowSize={5}
+              removeClippedSubviews={Platform.OS !== "web"}
                onEndReached={() => { if (!search.trim() && hasMore && !loading) loadItems(page + 1, false); }}
               onEndReachedThreshold={0.4}
               ListEmptyComponent={
