@@ -9,6 +9,7 @@ translation service consuming VPS memory.
 from __future__ import annotations
 
 import json
+import asyncio
 import sys
 
 from googletrans import Translator
@@ -24,7 +25,9 @@ def main() -> int:
     if not text or source == target:
         print(text)
         return 0
-    translated = Translator().translate(text[:5000], src=source, dest=target).text
+    translated = asyncio.run(
+        Translator().translate(text[:5000], src=source, dest=target)
+    ).text
     print(str(translated).strip())
     return 0
 
