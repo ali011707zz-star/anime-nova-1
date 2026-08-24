@@ -13,7 +13,7 @@ export default function AppOnlyEpisodeDialog({
   open,
   episodeLabel,
   onClose,
-  downloadUrl = "",
+  downloadUrl = "/Anime-Nova.apk",
 }: AppOnlyEpisodeDialogProps) {
   return (
     <AnimatePresence>

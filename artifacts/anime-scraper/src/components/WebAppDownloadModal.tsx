@@ -1,7 +1,7 @@
 import { Download, Smartphone, X } from "lucide-react";
 import { useEffect, useState } from "react";
 
-const APK_URL = "/nova-player.apk";
+const APK_URL = "/Anime-Nova.apk";
 
 export function WebAppDownloadModal() {
   const [open, setOpen] = useState(false);
