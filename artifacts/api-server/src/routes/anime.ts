@@ -7,6 +7,7 @@ import {
   makeSourceCacheKey,
   getFromSourceCache,
   setSourceCache,
+  getOrCreateSourceFlight,
   shouldRefreshCache,
   cdnManifestGet,
   cdnManifestSet,
@@ -11080,7 +11081,7 @@ async function getSuperEmbedAnimeSources(title: string, english: string | null, 
 //  Session cookie expires every 8h → cached in module scope
 // ════════════════════════════════════════════════════════════════════
 const DULO_BASE    = "https://dulo.tv";
-const DULO_API_KEY = "WDNUNBUB3HR983Y9ISBADK4O82";
+const DULO_API_KEY = process.env.DULO_API_KEY || "";
 const DULO_HDRS    = {
   "X-API-Key":     DULO_API_KEY,
   "Authorization": `Bearer ${DULO_API_KEY}`,
@@ -13525,7 +13526,10 @@ router.get("/anime/sources-stream", async (req, res) => {
           if (isStaleOrNearExpiry) {
             setImmediate(async () => {
               try {
-                const srcs = await race(scrape(), effectiveTimeoutMs, []);
+                const srcs = await getOrCreateSourceFlight(
+                  `${cKey}:refresh`,
+                  () => race(scrape(), effectiveTimeoutMs, []),
+                );
                 if (!srcs.length) return;
                 if (useExtract) {
                   const buf: UnifiedSource[] = [];
@@ -13549,7 +13553,10 @@ router.get("/anime/sources-stream", async (req, res) => {
       }
 
       // ❌ لا يوجد cache → اكشط
-      const srcs = await race(scrape(), effectiveTimeoutMs, []);
+      const srcs = await getOrCreateSourceFlight(
+        `${cKey}:live`,
+        () => race(scrape(), effectiveTimeoutMs, []),
+      );
       if (!srcs.length) return;
 
       // In check mode, verify a small bounded sample before advertising a row.
@@ -14029,7 +14036,8 @@ router.get("/anime/fetch-source", async (req, res) => {
   // scrapers that use probe-only (no deep extraction)
   const probeOnly = new Set(["animeify","kawaii","anikoto","anikototv","animewitcher","anizone","stardima"]);
 
-  try {
+  const sharedSources = await getOrCreateSourceFlight(`${cKey}:fetch`, async () => {
+    try {
     switch (site) {
       // shahiid/animelek: معطّلة بطلب المستخدم 2026-07-14 (قسم الأنمي فقط)
       // case "shahiid":      await runExtract(await race(getShahiidSources(title, english, ep, isMovie),    SCRAPER_MS, [])); break;
@@ -14046,7 +14054,10 @@ router.get("/anime/fetch-source", async (req, res) => {
       // moviz_time: معطّل بطلب المستخدم 2026-07-14 (قسم الأنمي فقط)
       // case "moviz_time":  (await race(getMovizTimeSources(title, english, ep, isMovie), 20000, [])).forEach(collectSrc); break;
       case "topcinemaa":   await runExtract(await race(getTopCimaaSources(title, english, ep, isMovie), SCRAPER_MS, [])); break;
-      case "kawaii":      (await race(getKawaiiAnimeSources(title, english, ep, anilistId), 24_000, [])).forEach(collectSrc); break;
+      case "kawaii":      (await getOrCreateSourceFlight(
+        `${cKey}:live`,
+        () => race(getKawaiiAnimeSources(title, english, ep, anilistId), 24_000, []),
+      )).forEach(collectSrc); break;
       case "megaplay":    (await race(getMegaPlayAnimeSources(title, english, ep, anilistId), 24_000, [])).forEach(collectSrc); break;
       case "anineko":     (await race(getAninekoSources(title, english, ep, titleVariants), 40_000, [])).forEach(collectSrc); break;
       case "anikototv":   (await race(getAnikototvSources(title, english, ep),              25000, [])).forEach(collectSrc); break;
@@ -14138,8 +14149,15 @@ async function getVidboltAnimeSources(
       setSourceCache(cKey, site, sources).catch(() => {});
     }
 
+    return sources;
+    } catch (e: any) {
+      console.warn(`[fetch-source] shared extraction failed for ${site}:`, e?.message ?? e);
+      return [];
+    }
+  });
+
     const isMobileClient = (req.headers["x-nova-client"] || "").toString().includes("mobile");
-    const encSources = stripAnimeSlayerSubtitles(filterRequestedQuality(sources)).map(s => {
+    const encSources = stripAnimeSlayerSubtitles(filterRequestedQuality(sharedSources)).map(s => {
       /* استخراج headers (Referer/Origin) قبل تشفير directUrl —
          يحتاجها ExoPlayer/AVPlayer للـ CDN segments مباشرةً.
          إذا كان ref مشفَّراً (hex AES) فهو رابط proxy داخلي — لا نُرسله كـ Referer. */
@@ -14302,27 +14320,10 @@ router.get("/anime/anslayer-latest", async (req, res) => {
       };
     }))).filter((it: any) => (it.animeId || it.anslayerId) && it.episode);
 
-    // ── إرسال الحلقات الجديدة لتيليجرام (فقط عند التحديث الفعلي) ──────────
-    if (items.length > 0) {
-      const prevKeys = new Set(
-        (_anslayerLatestCache || []).map((it: any) => `${it.anslayerId || it.animeId}:${it.episode}`)
-      );
-      const newItems = items.filter(
-        (it: any) => !prevKeys.has(`${it.anslayerId || it.animeId}:${it.episode}`)
-      );
-      for (const it of newItems) {
-        try {
-          await notifyNewEpisode(
-            it.anslayerId,
-            it.name,
-            it.episode,
-            it.cover || undefined,
-          );
-        } catch (tgErr: any) {
-          console.warn(`[anslayer-latest] telegram notify failed: ${(tgErr as any)?.message}`);
-        }
-      }
-    }
+    // Telegram notifications are owned by the scheduler. Keeping them out of
+    // this public endpoint prevents every app refresh/cache miss from becoming
+    // a notification attempt. The scheduler polls this same AnimeSlayer feed
+    // and persists a stable episode key before sending.
     _anslayerLatestCache = items;
     _anslayerLatestTs = Date.now();
     res.json({ items });

@@ -267,7 +267,7 @@ async function getMbxAuthAnim(): Promise<{ token: string; cookies: string } | nu
 }
 
 const DULO_TV_BASE    = "https://dulo.tv";
-const DULO_TV_API_KEY = "WDNUNBUB3HR983Y9ISBADK4O82";
+const DULO_TV_API_KEY = process.env.DULO_TV_API_KEY || "";
 let _duloAnimCookie   = "";
 let _duloAnimCookieAt = 0;
 const DULO_SESS_TTL_ANIM = 7 * 3_600_000;
@@ -5136,7 +5136,7 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
         if (!tmdbId) return;
         try {
           send("status", { msg: "NflixMovies: جاري الاستخراج…" });
-          const NFLIX_TOKEN = "tvk_1olLFNOIoDx6xfMYo_RKovws8zFe_hhyUfgf3E0NNR8";
+          const NFLIX_TOKEN = process.env.NFLIX_TOKEN || "";
           const params = new URLSearchParams({ id: String(tmdbId), type: type === "movie" ? "movie" : "tv" });
           if (type !== "movie") { params.set("season", String(season)); params.set("episode", String(epNum)); }
           const r = await fetch(`https://stream.nflixmovies.app/api/v1/play?${params}`, {

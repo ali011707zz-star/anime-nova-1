@@ -4,6 +4,7 @@ import { makeRedirectUri } from "expo-auth-session";
 import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import * as WebBrowser from "expo-web-browser";
 import { LinearGradient } from "expo-linear-gradient";
+import * as ImagePicker from "expo-image-picker";
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import {
   Alert, KeyboardAvoidingView, Linking, Modal, Platform, Pressable, ScrollView,
@@ -933,6 +934,7 @@ function ProfileSheet({ open, onClose, user, onUpdate, onLogout }: {
   const base = getBaseUrl();
   const [displayName, setDisplayName] = useState("");
   const [loading, setLoading] = useState(false);
+  const [uploadingImg, setUploadingImg] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
 
@@ -969,6 +971,87 @@ function ProfileSheet({ open, onClose, user, onUpdate, onLogout }: {
     setLoading(false);
   };
 
+  const handlePickImage = async () => {
+    if (uploadingImg) return;
+    try {
+      const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!permission.granted) {
+        setError("الرجاء السماح بالوصول إلى الصور");
+        return;
+      }
+
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ["images"],
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 0.6,
+        base64: true,
+      });
+      if (result.canceled || !result.assets?.length) return;
+
+      const base64 = result.assets[0].base64;
+      if (!base64) {
+        setError("تعذّر قراءة الصورة");
+        return;
+      }
+
+      setUploadingImg(true);
+      setError("");
+      const response = await secureFetch(`${base}/api/auth/profile`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ profileImageCustom: `data:image/jpeg;base64,${base64}` }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        setError(data.error || "فشل رفع الصورة");
+        return;
+      }
+
+      const updated: MobileUser = {
+        ...user!,
+        profileImageUrl: data.profileImageUrl || data.profile_image_custom || `data:image/jpeg;base64,${base64}`,
+      };
+      await AsyncStorage.setItem(AUTH_KEY, JSON.stringify(updated));
+      onUpdate(updated);
+      setSuccess("تم تحديث صورة الملف الشخصي ✓");
+      setTimeout(() => setSuccess(""), 2500);
+    } catch {
+      setError("تعذّر رفع الصورة، حاول مرة أخرى");
+    } finally {
+      setUploadingImg(false);
+    }
+  };
+
+  const handleRemoveImage = async () => {
+    if (uploadingImg || !user?.profileImageUrl) return;
+    setUploadingImg(true);
+    setError("");
+    try {
+      const response = await secureFetch(`${base}/api/auth/profile`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ profileImageCustom: null }),
+      });
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        setError(data.error || "فشل إزالة الصورة");
+        return;
+      }
+      const updated: MobileUser = { ...user, profileImageUrl: null };
+      await AsyncStorage.setItem(AUTH_KEY, JSON.stringify(updated));
+      onUpdate(updated);
+      setSuccess("تمت إزالة الصورة ✓");
+      setTimeout(() => setSuccess(""), 2500);
+    } catch {
+      setError("تعذّر إزالة الصورة");
+    } finally {
+      setUploadingImg(false);
+    }
+  };
+
   if (!open || !user) return null;
 
   const avatarColor = AVATAR_COLORS[(user.avatarColor ?? 0) % AVATAR_COLORS.length];
@@ -995,8 +1078,33 @@ function ProfileSheet({ open, onClose, user, onUpdate, onLogout }: {
 
           {/* Avatar */}
           <View style={{ alignItems: "center", paddingVertical: 16 }}>
-            <View style={{ width: 72, height: 72, borderRadius: 22, backgroundColor: avatarColor + "28", borderWidth: 2, borderColor: avatarColor + "80", alignItems: "center", justifyContent: "center", marginBottom: 8 }}>
-              <Text style={{ fontSize: 32, fontFamily: "Cairo_800ExtraBold", color: avatarColor }}>{letter}</Text>
+            <Pressable
+              onPress={handlePickImage}
+              disabled={uploadingImg}
+              accessibilityRole="button"
+              accessibilityLabel="تغيير صورة الملف الشخصي"
+              style={{ width: 78, height: 78, borderRadius: 24, backgroundColor: avatarColor + "28", borderWidth: 2, borderColor: avatarColor + "80", alignItems: "center", justifyContent: "center", marginBottom: 8, opacity: uploadingImg ? 0.65 : 1 }}
+            >
+              {user.profileImageUrl ? (
+                <Image source={{ uri: user.profileImageUrl }} style={{ width: "100%", height: "100%", borderRadius: 21 }} />
+              ) : (
+                <Text style={{ fontSize: 32, fontFamily: "Cairo_800ExtraBold", color: avatarColor }}>{letter}</Text>
+              )}
+              <View style={{ position: "absolute", right: -5, bottom: -5, width: 26, height: 26, borderRadius: 13, backgroundColor: "#7C3AED", borderWidth: 2, borderColor: "#0d0b17", alignItems: "center", justifyContent: "center" }}>
+                {uploadingImg ? <ActivityIndicator size="small" color="#fff" /> : <Ionicons name="camera" size={13} color="#fff" />}
+              </View>
+            </Pressable>
+            <View style={{ flexDirection: "row", gap: 8, marginBottom: 8 }}>
+              <Pressable onPress={handlePickImage} disabled={uploadingImg} style={{ flexDirection: "row", alignItems: "center", gap: 6, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 8, backgroundColor: "rgba(139,92,246,0.16)", borderWidth: 1, borderColor: "rgba(139,92,246,0.32)", opacity: uploadingImg ? 0.55 : 1 }}>
+                <Ionicons name="image-outline" size={14} color="#c4b5fd" />
+                <Text style={{ fontSize: 11, fontFamily: "Cairo_700Bold", color: "#c4b5fd" }}>تغيير الصورة</Text>
+              </Pressable>
+              {user.profileImageUrl ? (
+                <Pressable onPress={handleRemoveImage} disabled={uploadingImg} style={{ flexDirection: "row", alignItems: "center", gap: 6, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 8, backgroundColor: "rgba(239,68,68,0.10)", borderWidth: 1, borderColor: "rgba(239,68,68,0.25)", opacity: uploadingImg ? 0.55 : 1 }}>
+                  <Ionicons name="trash-outline" size={14} color="#f87171" />
+                  <Text style={{ fontSize: 11, fontFamily: "Cairo_700Bold", color: "#f87171" }}>إزالة</Text>
+                </Pressable>
+              ) : null}
             </View>
             <Text style={{ fontSize: 14, fontFamily: "Cairo_700Bold", color: "rgba(255,255,255,0.85)" }}>{user.displayName}</Text>
             <Text style={{ fontSize: 11, fontFamily: "Cairo_400Regular", color: "rgba(255,255,255,0.30)" }}>{user.email}</Text>

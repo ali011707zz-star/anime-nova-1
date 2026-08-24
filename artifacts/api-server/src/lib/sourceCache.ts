@@ -120,6 +120,25 @@ export function computeExpiry(site: string, sources: any[]): number {
 // ── L1: ذاكرة العملية (سريعة، تُفقد عند restart) ──
 const l1 = new Map<string, { sources: any[]; expiresAt: number }>();
 
+// Single-flight deduplication: concurrent viewers of the same episode/provider
+// share one live extraction instead of opening one upstream request per viewer.
+// The promise is intentionally process-local; Supabase L2 remains the shared
+// result across PM2 workers/restarts.
+const sourceFlights = new Map<string, Promise<any[]>>();
+
+export function getOrCreateSourceFlight(
+  key: string,
+  loader: () => Promise<any[]>,
+): Promise<any[]> {
+  const existing = sourceFlights.get(key);
+  if (existing) return existing;
+  const flight = loader().finally(() => {
+    if (sourceFlights.get(key) === flight) sourceFlights.delete(key);
+  });
+  sourceFlights.set(key, flight);
+  return flight;
+}
+
 setInterval(() => {
   const now = Date.now();
   for (const [k, v] of l1) { if (now > v.expiresAt) l1.delete(k); }
