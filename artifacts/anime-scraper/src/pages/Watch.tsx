@@ -4712,6 +4712,7 @@ export default function WatchPage() {
   const coverParam = sp.get("cover") || "";
   const titleArParam = sp.get("titleAr") || "";
   const totalEpsParam = parseInt(sp.get("totalEps") || "0");
+  const fromLatestEpisodes = sp.get("fromLatest") === "1";
 
   const [anime, setAnime] = useState<any>(null);
   const [skipTimes, setSkipTimes] = useState<SkipTimes>({});
@@ -5246,10 +5247,10 @@ export default function WatchPage() {
       setShowPicker(true);
       setPhase("picker");
     } else {
-      /* From the server picker, return to the anime details page.
-         Latest-episode cards carry an AnimeSlayer id, not an AniList id;
-         preserve the source title so AnimeDetail can resolve it correctly. */
-      navigate(detailHref);
+      /* From the server picker, return to the page that opened the episode.
+         Latest-episode cards should return home instead of opening a detail
+         page that may not have a matching AniList record. */
+      navigate(fromLatestEpisodes ? "/" : detailHref);
     }
   }
 
@@ -5975,7 +5976,7 @@ export default function WatchPage() {
         )}
         {/* Back button */}
         <button
-          onClick={() => navigate(detailHref)}
+          onClick={() => navigate(fromLatestEpisodes ? "/" : detailHref)}
           className="absolute top-4 right-4 z-20 w-10 h-10 rounded-full flex items-center justify-center active:scale-90 transition-transform"
           style={{
             background: "rgba(0,0,0,0.45)",
