@@ -22,6 +22,7 @@
     "drizzle-orm": "catalog:",
     "express": "^5.2.1",
     "express-session": "^1.19.0",
+    "node-google-translator": "1.0.1",
     "nodemailer": "^8.0.10",
     "openid-client": "^6.8.4",
     "passport": "^0.7.0",

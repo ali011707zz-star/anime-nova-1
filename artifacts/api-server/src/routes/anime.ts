@@ -28,6 +28,7 @@ import {
 } from "../lib/consumet.js";
 import { sbSelect, sbUpsert, sbPatch } from "../lib/supabaseClient.js";
 import pg from "pg";
+import { translate as nodeGoogleTranslate } from "node-google-translator";
 // Pool مباشر لـ translations_cache + anime_meta_ar (بدون Supabase REST)
 let _tcPool: pg.Pool | null = null;
 function getTcPool(): pg.Pool | null {
@@ -15194,22 +15195,17 @@ async function translateGoogleSingle(text: string, from: string, to: string): Pr
   }
 }
 
-/** Optional self-hosted Argos provider. Disabled unless configured on the VPS. */
-async function translateArgosSingle(text: string, from: string, to: string): Promise<string | null> {
-  const endpoint = (process.env.ARGOS_TRANSLATE_URL || "").trim();
+/** Google Translate npm client. It uses the same public Google service as the
+ * direct endpoint, but has a separate request implementation for resilience. */
+async function translateNodeGoogleSingle(text: string, from: string, to: string): Promise<string | null> {
   const value = text.trim();
-  if (!endpoint || !value || from === to) return from === to ? value : null;
+  if (!value || from === to) return from === to ? value : null;
   try {
-    const timeout = Math.min(12_000, Math.max(2_000, Number(process.env.ARGOS_TRANSLATE_TIMEOUT_MS) || 8_000));
-    const response = await fetch(endpoint, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Accept: "application/json" },
-      body: JSON.stringify({ q: value.slice(0, 5000), source: from, target: to, format: "text" }),
-      signal: AbortSignal.timeout(timeout),
-    });
-    if (!response.ok) return null;
-    const data = await response.json() as any;
-    const translated = String(data?.translatedText || data?.translated || "").trim();
+    const result = await Promise.race([
+      nodeGoogleTranslate(value.slice(0, 5000), { from, to }),
+      new Promise<never>((_, reject) => setTimeout(() => reject(new Error("google translator timeout")), 10_000)),
+    ]);
+    const translated = String((result as any)?.text || "").trim();
     if (!translated || translated === value) return null;
     if (to.startsWith("ar") && !/[\u0600-\u06ff]/.test(translated)) return null;
     return translated;
@@ -15218,9 +15214,73 @@ async function translateArgosSingle(text: string, from: string, to: string): Pro
   }
 }
 
-/** Translate text with resilient self-hosted and free fallbacks.
- * Argos is attempted first when configured; the existing LibreTranslate,
- * Google, and MyMemory providers remain fallbacks. */
+/** Python googletrans fallback. It is intentionally one-shot and only runs
+ * after the Node client fails, so it cannot become a resident RAM-heavy
+ * translation service. */
+async function translatePythonGoogleSingle(text: string, from: string, to: string): Promise<string | null> {
+  const value = text.trim();
+  if (!value || from === to) return from === to ? value : null;
+  return new Promise((resolve) => {
+    execFile(
+      "python3",
+      [pathJoin(process.cwd(), "scripts", "googletrans_fallback.py"), JSON.stringify({ text: value, from, to })],
+      { timeout: 12_000, maxBuffer: 16 * 1024 },
+      (error, stdout) => {
+        if (error) return resolve(null);
+        const translated = String(stdout || "").trim();
+        resolve(
+          translated &&
+          translated !== value &&
+          (!to.startsWith("ar") || /[\u0600-\u06ff]/.test(translated))
+            ? translated
+            : null,
+        );
+      },
+    );
+  });
+}
+
+/** Protect tokens that must never be translated or mutated (URLs, handles,
+ * episode numbers, and technical placeholders), then restore them after the
+ * provider returns. This keeps proper names and place names stable when they
+ * are supplied as glossary tokens by the source subtitle. */
+function protectTranslationTokens(value: string): { text: string; restore: (translated: string) => string } {
+  const protectedTokens: string[] = [];
+  const protectedText = value.replace(
+    /https?:\/\/\S+|(?:^|\s)([@#][\w.-]+)|\b(?:S\d{1,2}E\d{1,3}|EP?\s*\.?\s*\d{1,4})\b/gi,
+    (match) => {
+      const leading = /^\s/.test(match) ? match.slice(0, 1) : "";
+      const token = match.slice(leading.length);
+      const marker = `__NOVA_TOKEN_${protectedTokens.length}__`;
+      protectedTokens.push(token);
+      return `${leading}${marker}`;
+    },
+  );
+  return {
+    text: protectedText,
+    restore: (translated) =>
+      translated.replace(/__NOVA_TOKEN_(\d+)__/g, (_, index) => protectedTokens[Number(index)] ?? ""),
+  };
+}
+
+async function translateWithProviders(text: string, from: string, to: string): Promise<string | null> {
+  const protectedInput = protectTranslationTokens(text);
+  const providers = [
+    () => translateNodeGoogleSingle(protectedInput.text, from, to),
+    () => translatePythonGoogleSingle(protectedInput.text, from, to),
+    () => translateGoogleSingle(protectedInput.text, from, to),
+  ];
+  for (const provider of providers) {
+    const result = await provider();
+    if (result) return protectedInput.restore(result);
+  }
+  return null;
+}
+
+/** Translate text with resilient free fallbacks.
+ * Node google translator and Python googletrans are deliberately separate
+ * clients; this gives the VPS a second Google implementation without
+ * keeping a resident translation daemon. */
 async function translateBatchFree(texts: string[], from: string, to: string): Promise<string[]> {
   const results = [...texts];
   const CHUNK = 10;
@@ -15230,20 +15290,6 @@ async function translateBatchFree(texts: string[], from: string, to: string): Pr
   const apiKey = process.env.LIBRETRANSLATE_API_KEY || "";
   const chunks: string[][] = [];
   for (let i = 0; i < texts.length; i += CHUNK) chunks.push(texts.slice(i, i + CHUNK));
-
-  // Bound concurrent local requests so subtitle-heavy episodes do not create
-  // one unbounded request per cue.
-  if ((process.env.ARGOS_TRANSLATE_URL || "").trim() && from !== to && texts.length) {
-    let next = 0;
-    const workers = Math.min(4, texts.length);
-    await Promise.all(Array.from({ length: workers }, async () => {
-      while (next < texts.length) {
-        const index = next++;
-        const translated = await translateArgosSingle(texts[index], from, to);
-        if (translated) results[index] = translated;
-      }
-    }));
-  }
 
   for (let i = 0; i < chunks.length; i += PARALLEL) {
     const batch = chunks.slice(i, i + PARALLEL);
@@ -15280,7 +15326,7 @@ async function translateBatchFree(texts: string[], from: string, to: string): Pr
         });
       } catch {
         await Promise.allSettled(pending.map(async (item) => {
-          const google = await translateGoogleSingle(item.text, from, to);
+          const google = await translateWithProviders(item.text, from, to);
           if (google) {
             results[offset + item.index] = google;
             return;

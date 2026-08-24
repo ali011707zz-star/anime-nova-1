@@ -12,6 +12,7 @@ dependencies = [
     "frida>=17.15.4",
     "frida-tools>=14.10.4",
     "gunicorn>=26.0.0",
+    "googletrans>=4.0.2",
     "hopx-ai>=0.5.0",
     "objection>=1.12.5",
     "orkestr>=0.1.4",
