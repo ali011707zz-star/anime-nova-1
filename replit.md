@@ -29,6 +29,7 @@ A full-stack anime streaming platform with web and mobile clients.
 - **CDN**: Cloudflare Worker (`nova-cdn-proxy`)
 - **Package manager**: pnpm (monorepo)
 - **Crash reporting**: Sentry (`@sentry/react-native`) in `nova-mobile`, added 2026-08-06 to catch *native* crashes (e.g. video player force-closes) that the older JS-only `crashLogger.ts` could never see. DSN is passed as `EXPO_PUBLIC_SENTRY_DSN` (build-apk.yml + eas.json) — Sentry DSNs are safe to embed client-side, not a real secret.
+- **Arabic translation**: the API's existing `/api/anime/translate` and subtitle translation routes optionally use a self-hosted Argos Translate HTTP service first when `ARGOS_TRANSLATE_URL` is set on the VPS. If it is unavailable, LibreTranslate, Google, MyMemory, and source-text fallbacks remain active. This covers titles, descriptions, episode titles, and subtitles for web and mobile clients.
 
 ## User preferences
 

@@ -14956,9 +14956,9 @@ router.get("/anime/translate", async (req, res) => {
   const directAlias = to === "ar" && kind === "title" ? AR_TITLE_ALIASES[text.toLowerCase()] : undefined;
   if (directAlias) { res.setHeader("Cache-Control", "public, max-age=86400"); return res.json({ translated: directAlias, cached: true }); }
 
-  // v3 invalidates entries saved when failed providers returned the source
-  // text as though it were an Arabic translation.
-  const cacheKey = `v3:${kind}:${from}:${to}:${text.substring(0, 600)}`;
+  // v4 invalidates entries saved before the optional self-hosted Argos
+  // provider was introduced.
+  const cacheKey = `v4:${kind}:${from}:${to}:${text.substring(0, 600)}`;
   if (translateCache.has(cacheKey)) return res.json({ translated: translateCache.get(cacheKey), cached: true });
   const cached = await pgTranslateGet(cacheKey);
   if (cached !== null) {
@@ -15194,9 +15194,33 @@ async function translateGoogleSingle(text: string, from: string, to: string): Pr
   }
 }
 
-/** Translate text with resilient free fallbacks.
- * LibreTranslate is attempted for batching; Google is used per item when the
- * batch endpoint is unavailable or returns a broken separator layout. */
+/** Optional self-hosted Argos provider. Disabled unless configured on the VPS. */
+async function translateArgosSingle(text: string, from: string, to: string): Promise<string | null> {
+  const endpoint = (process.env.ARGOS_TRANSLATE_URL || "").trim();
+  const value = text.trim();
+  if (!endpoint || !value || from === to) return from === to ? value : null;
+  try {
+    const timeout = Math.min(12_000, Math.max(2_000, Number(process.env.ARGOS_TRANSLATE_TIMEOUT_MS) || 8_000));
+    const response = await fetch(endpoint, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify({ q: value.slice(0, 5000), source: from, target: to, format: "text" }),
+      signal: AbortSignal.timeout(timeout),
+    });
+    if (!response.ok) return null;
+    const data = await response.json() as any;
+    const translated = String(data?.translatedText || data?.translated || "").trim();
+    if (!translated || translated === value) return null;
+    if (to.startsWith("ar") && !/[\u0600-\u06ff]/.test(translated)) return null;
+    return translated;
+  } catch {
+    return null;
+  }
+}
+
+/** Translate text with resilient self-hosted and free fallbacks.
+ * Argos is attempted first when configured; the existing LibreTranslate,
+ * Google, and MyMemory providers remain fallbacks. */
 async function translateBatchFree(texts: string[], from: string, to: string): Promise<string[]> {
   const results = [...texts];
   const CHUNK = 10;
@@ -15207,12 +15231,32 @@ async function translateBatchFree(texts: string[], from: string, to: string): Pr
   const chunks: string[][] = [];
   for (let i = 0; i < texts.length; i += CHUNK) chunks.push(texts.slice(i, i + CHUNK));
 
+  // Bound concurrent local requests so subtitle-heavy episodes do not create
+  // one unbounded request per cue.
+  if ((process.env.ARGOS_TRANSLATE_URL || "").trim() && from !== to && texts.length) {
+    let next = 0;
+    const workers = Math.min(4, texts.length);
+    await Promise.all(Array.from({ length: workers }, async () => {
+      while (next < texts.length) {
+        const index = next++;
+        const translated = await translateArgosSingle(texts[index], from, to);
+        if (translated) results[index] = translated;
+      }
+    }));
+  }
+
   for (let i = 0; i < chunks.length; i += PARALLEL) {
     const batch = chunks.slice(i, i + PARALLEL);
     await Promise.allSettled(batch.map(async (chunk, batchIdx) => {
       const offset = (i + batchIdx) * CHUNK;
-      const cleaned = chunk.map(t => t.replace(/\|\|\|/g, "").trim());
+      // Argos results are already final for these items; only send the
+      // remaining cues through the remote fallback providers.
+      const pending = chunk
+        .map((text, j) => ({ text, index: j }))
+        .filter(item => results[offset + item.index] === item.text);
+      if (!pending.length) return;
       try {
+        const cleaned = pending.map(item => item.text.replace(/\|\|\|/g, "").trim());
         const body: Record<string, unknown> = {
           q: cleaned.join(SEP), source: from, target: to, format: "text",
         };
@@ -15227,22 +15271,28 @@ async function translateBatchFree(texts: string[], from: string, to: string): Pr
         const data = await r.json() as any;
         const translated = String(data?.translatedText || "");
         const parts = translated.split(/\s*\|\|\|\s*/);
-        if (!translated || parts.length !== chunk.length) throw new Error("translation mismatch");
-        chunk.forEach((_, j) => { results[offset + j] = parts[j]?.trim() || chunk[j]; });
+        if (!translated || parts.length !== pending.length) throw new Error("translation mismatch");
+        pending.forEach((item, j) => {
+          const candidate = parts[j]?.trim();
+          if (candidate && (!to.startsWith("ar") || /[\u0600-\u06ff]/.test(candidate))) {
+            results[offset + item.index] = candidate;
+          }
+        });
       } catch {
-        await Promise.allSettled(chunk.map(async (text, j) => {
-          const google = await translateGoogleSingle(text, from, to);
+        await Promise.allSettled(pending.map(async (item) => {
+          const google = await translateGoogleSingle(item.text, from, to);
           if (google) {
-            results[offset + j] = google;
+            results[offset + item.index] = google;
             return;
           }
           try {
-            const mm = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(text.slice(0, 500))}&langpair=${from}|${to}`;
+            const mm = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(item.text.slice(0, 500))}&langpair=${from}|${to}`;
             const r = await fetch(mm, { signal: AbortSignal.timeout(7000) });
             const data = r.ok ? await r.json() as any : null;
             const candidate = String(data?.responseData?.translatedText || "").trim();
-            results[offset + j] = candidate && !/^MYMEMORY WARNING/i.test(candidate) ? candidate : text;
-          } catch { results[offset + j] = text; }
+            results[offset + item.index] = candidate && !/^MYMEMORY WARNING/i.test(candidate) &&
+              (!to.startsWith("ar") || /[\u0600-\u06ff]/.test(candidate)) ? candidate : item.text;
+          } catch { results[offset + item.index] = item.text; }
         }));
       }
     }));
