@@ -28,7 +28,6 @@ export const AnimeCard = React.memo(function AnimeCard({ anime, size = "sm", pro
   return (
     <Pressable
       onPress={() => router.push(`/anime/${anime.id}?title=${encodeURIComponent(anime.title.romaji)}&english=${encodeURIComponent(anime.title.english || "")}`)}
-      delayPressIn={0}
       hitSlop={4}
       pressRetentionOffset={12}
       android_ripple={{ color: "rgba(139,92,246,0.18)" }}
