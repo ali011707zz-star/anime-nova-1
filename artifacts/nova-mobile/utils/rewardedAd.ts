@@ -1,62 +1,75 @@
 import { Platform } from "react-native";
 import {
-  AdResultType,
-  AdType,
-  initializeStartIoSdk,
-  loadAd,
-  showAd,
-} from "react-native-start-io-sdk";
+  LevelPlay,
+  LevelPlayInitRequest,
+  LevelPlayRewardedAd,
+  type LevelPlayAdError,
+  type LevelPlayAdInfo,
+  type LevelPlayConfiguration,
+  type LevelPlayInitError,
+  type LevelPlayInitListener,
+  type LevelPlayReward,
+  type LevelPlayRewardedAdListener,
+} from "unity-levelplay-mediation";
 
-// Start.io application ID created for Anime NOVA in the Start.io portal.
-// Start.io uses an application ID (not an AdMob ad-unit ID).
-const START_IO_ANDROID_APP_ID = "207356648";
-const AD_INIT_SETTLE_MS = 1_500;
+// This is the Android app key shown in the IronSource/LevelPlay account.
+const LEVELPLAY_ANDROID_APP_KEY = "9qbxrfx8ldw4intrz";
+const LEVELPLAY_REWARDED_AD_UNIT_ID = "DefaultRewardedVideo";
+const LEVELPLAY_REWARDED_PLACEMENT = "Default";
 const AD_LOAD_TIMEOUT_MS = 45_000;
-const AD_LOAD_RETRIES = 2;
 
 let adsInitialization: Promise<void> | null = null;
+let rewardedAd: LevelPlayRewardedAd | null = null;
 let adRequestInFlight: Promise<boolean> | null = null;
 
-/**
- * Start.io is the only rewarded provider in the Android build.
- * The SDK is Android-only for this integration; iOS remains a no-op until
- * an iOS Start.io application ID is supplied.
- */
+function getRewardedAd(): LevelPlayRewardedAd {
+  if (!rewardedAd) {
+    rewardedAd = new LevelPlayRewardedAd(LEVELPLAY_REWARDED_AD_UNIT_ID);
+  }
+  return rewardedAd;
+}
+
+function logAdFailure(label: string, error: LevelPlayAdError | unknown) {
+  console.warn(`[rewarded-ad] LevelPlay ${label}`, error);
+}
+
 export function initializeRewardedAds(): Promise<void> {
   if (Platform.OS !== "android") return Promise.resolve();
   if (!adsInitialization) {
-    try {
-      initializeStartIoSdk({
-        androidAppId: START_IO_ANDROID_APP_ID,
-        testAd: false,
-        // Keep return ads enabled; disabling this option can prevent the
-        // Start.io SDK from completing its normal ad-request lifecycle.
-        returnAd: true,
-      });
-      // Start.io's native initializer is callback-based but the JS wrapper
-      // returns void. Do not race loadAd against that native initialization.
-      adsInitialization = new Promise((resolve) => {
-        setTimeout(resolve, AD_INIT_SETTLE_MS);
-      });
-    } catch (error) {
-      adsInitialization = null;
-      return Promise.reject(error);
-    }
+    adsInitialization = new Promise((resolve, reject) => {
+      const initListener: LevelPlayInitListener = {
+        onInitSuccess: (configuration: LevelPlayConfiguration) => {
+          console.log("[rewarded-ad] LevelPlay initialized", configuration);
+          resolve();
+        },
+        onInitFailed: (error: LevelPlayInitError) => {
+          logAdFailure("initialization failed", error);
+          adsInitialization = null;
+          reject(error);
+        },
+      };
+
+      try {
+        const request = LevelPlayInitRequest.builder(LEVELPLAY_ANDROID_APP_KEY).build();
+        void LevelPlay.init(request, initListener);
+      } catch (error) {
+        adsInitialization = null;
+        reject(error);
+      }
+    });
   }
   return adsInitialization;
 }
 
-/**
- * Loads and shows a Start.io rewarded video. A reward is granted only after
- * Start.io reports AdRewarded, never merely after the ad is loaded or closed.
- */
 export function showRewardedAd(): Promise<boolean> {
   if (Platform.OS !== "android") return Promise.resolve(false);
   if (adRequestInFlight) return adRequestInFlight;
 
-  adRequestInFlight = new Promise((resolve) => {
+  const request = new Promise<boolean>((resolve) => {
     let settled = false;
     let timeout: ReturnType<typeof setTimeout> | undefined;
+    const ad = getRewardedAd();
+
     const finish = (value: boolean) => {
       if (settled) return;
       settled = true;
@@ -64,46 +77,59 @@ export function showRewardedAd(): Promise<boolean> {
       resolve(value);
     };
 
-    timeout = setTimeout(() => finish(false), AD_LOAD_TIMEOUT_MS);
-
-    const loadAndShow = async () => {
-      await initializeRewardedAds();
-      let lastError: unknown;
-      for (let attempt = 1; attempt <= AD_LOAD_RETRIES && !settled; attempt += 1) {
-        try {
-          await loadAd(AdType.REWARDED_VIDEO);
-          if (settled) return;
-          showAd((result) => {
-            if (result === AdResultType.AdRewarded) {
-              finish(true);
-            } else if (
-              result === AdResultType.AdNotDisplayed ||
-              result === AdResultType.AdHidden
-            ) {
-              // Do not leave the caller waiting when Start.io has no fill or
-              // the user closes the creative before it starts.
-              finish(false);
-            }
-          });
-          return;
-        } catch (error) {
-          lastError = error;
-          if (attempt < AD_LOAD_RETRIES) {
-            await new Promise((resolve) => setTimeout(resolve, 1200));
-          }
-        }
-      }
-      console.warn("[rewarded-ad] Start.io load/show failed", lastError);
-      finish(false);
+    const listener: LevelPlayRewardedAdListener = {
+      onAdLoaded: (info: LevelPlayAdInfo) => {
+        console.log("[rewarded-ad] LevelPlay loaded", info);
+      },
+      onAdLoadFailed: (error: LevelPlayAdError) => {
+        logAdFailure("load failed", error);
+        finish(false);
+      },
+      onAdDisplayed: (info: LevelPlayAdInfo) => {
+        console.log("[rewarded-ad] LevelPlay displayed", info);
+      },
+      onAdDisplayFailed: (error: LevelPlayAdError, info: LevelPlayAdInfo) => {
+        logAdFailure("display failed", { error, info });
+        finish(false);
+      },
+      onAdClicked: (info: LevelPlayAdInfo) => {
+        console.log("[rewarded-ad] LevelPlay clicked", info);
+      },
+      onAdClosed: (info: LevelPlayAdInfo) => {
+        console.log("[rewarded-ad] LevelPlay closed", info);
+        finish(false);
+      },
+      onAdRewarded: (reward: LevelPlayReward, info: LevelPlayAdInfo) => {
+        console.log("[rewarded-ad] LevelPlay reward granted", { reward, info });
+        finish(true);
+      },
     };
-    void loadAndShow().catch((error) => {
-      console.warn("[rewarded-ad] Start.io lifecycle failed", error);
+
+    timeout = setTimeout(() => {
+      logAdFailure("timed out", { timeoutMs: AD_LOAD_TIMEOUT_MS });
       finish(false);
-    });
+    }, AD_LOAD_TIMEOUT_MS);
+
+    void initializeRewardedAds()
+      .then(async () => {
+        ad.setListener(listener);
+        await ad.loadAd();
+        if (await ad.isAdReady()) {
+          await ad.showAd(LEVELPLAY_REWARDED_PLACEMENT);
+        } else {
+          finish(false);
+        }
+      })
+      .catch((error) => {
+        logAdFailure("lifecycle failed", error);
+        finish(false);
+      });
   }).finally(() => {
     adRequestInFlight = null;
   });
-  return adRequestInFlight;
+
+  adRequestInFlight = request;
+  return request;
 }
 
 export const NOVA_ADS_TEST_MODE = false;

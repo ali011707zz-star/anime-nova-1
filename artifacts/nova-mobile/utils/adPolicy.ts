@@ -15,7 +15,7 @@ export type AdState = {
   watchAccessUntil: number | null;
   watchNeedsReward: boolean;
   adsEnabled?: boolean;
-  rewardedProvider?: "startio";
+  rewardedProvider?: "levelplay";
 };
 
 type RewardPromptListener = (

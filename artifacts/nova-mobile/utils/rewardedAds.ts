@@ -4,7 +4,7 @@ import { getBaseUrl } from "./baseUrl";
 import { secureFetch } from "./secureApi";
 import {
   initializeRewardedAds,
-  showRewardedAd as showStartIoRewardedAd,
+  showRewardedAd as showLevelPlayRewardedAd,
 } from "./rewardedAd";
 
 let deviceIdPromise: Promise<string> | null = null;
@@ -76,8 +76,8 @@ export async function startRewardAd(kind: "watch" | "download"): Promise<string 
   return data.bypass ? "bypass" : (typeof data.token === "string" ? data.token : null);
 }
 
-/** Shows the active Start.io rewarded video; it never completes a server challenge by itself. */
+/** Shows the active LevelPlay rewarded video; it never completes a server challenge by itself. */
 export async function showRewardedAd(): Promise<boolean> {
   await initializeRewardedAds();
-  return showStartIoRewardedAd();
+  return showLevelPlayRewardedAd();
 }

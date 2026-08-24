@@ -74,7 +74,7 @@ function publicState(state: AdState, privileged: boolean, settings: RewardSettin
   return {
     privileged,
     adsEnabled: settings.enabled,
-    rewardedProvider: "startio",
+    rewardedProvider: "levelplay",
     downloadCount: privileged || !settings.enabled ? 0 : state.downloadCount,
     downloadLimit: DOWNLOAD_LIMIT,
     downloadNeedsReward: settings.enabled && !privileged && state.downloadCount >= DOWNLOAD_LIMIT,
