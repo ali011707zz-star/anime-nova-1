@@ -1,9 +1,9 @@
 import { useQuery } from "@tanstack/react-query";
-import { useRouter } from "expo-router";
+import { useFocusEffect, useRouter } from "expo-router";
 import { LinearGradient } from "expo-linear-gradient";
 import { FlatList, Image } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import {
   Platform, Pressable, RefreshControl, ScrollView,
   StyleSheet, Text, View,
@@ -157,14 +157,19 @@ export default function HomeScreen() {
   /* ── Dubbed cartoon catalog ── */
   const BASE_URL = getBaseUrl();
   const [dubbedSeries, setDubbedSeries] = useState<any[]>([]);
-  useEffect(() => {
-    const ctrl = new AbortController();
-    fetch(`${BASE_URL}/api/dubbed/catalog?page=1`, { signal: ctrl.signal })
+  const refreshDubbed = useCallback(async (forceRefresh = false) => {
+    const refresh = forceRefresh ? "&refresh=1" : "";
+    fetch(`${BASE_URL}/api/dubbed/catalog?page=1${refresh}`, {
+      cache: forceRefresh ? "no-store" : "default",
+    })
       .then(r => r.json())
-      .then(d => { if (!ctrl.signal.aborted) setDubbedSeries((d.results || d.items || d.series || []).slice(0, 14)); })
+      .then(d => setDubbedSeries((d.results || d.items || d.series || []).slice(0, 14)))
       .catch((e) => { if (e?.name !== "AbortError") console.warn("[Home] dubbed/catalog fetch error"); });
-    return () => ctrl.abort();
-  }, []);
+  }, [BASE_URL]);
+  useEffect(() => { void refreshDubbed(); }, [refreshDubbed]);
+  useFocusEffect(useCallback(() => {
+    void refreshDubbed();
+  }, [refreshDubbed]));
 
   /* ── أنيميشن مدبلج (aw-dubbed) catalog ── */
   const [awDubbedSeries, setAwDubbedSeries] = useState<any[]>([]);
@@ -196,6 +201,7 @@ export default function HomeScreen() {
     await Promise.all([
       refetchT(), refetchP(), refetchA(), refetchS(), refetchR(), refetchM(),
       refetchSpring(), refetchFall(), refetchIsekai(),
+      refreshDubbed(true),
     ]);
   };
 

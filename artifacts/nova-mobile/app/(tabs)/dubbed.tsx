@@ -2,12 +2,12 @@ import React, { useState, useEffect, useCallback, useRef } from "react";
 import {
   View, Text, Pressable, TextInput, FlatList, Image,
   ActivityIndicator, StyleSheet, Platform, ScrollView,
-  useWindowDimensions,
+  useWindowDimensions, RefreshControl,
 } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { useRouter } from "expo-router";
+import { useFocusEffect, useRouter } from "expo-router";
 import { getBaseUrl } from "@/utils/api";
 
 interface Season { label: string; arabicToonsId: string; }
@@ -80,13 +80,17 @@ export default function DubbedScreen() {
   const [searchResults, setSearchResults] = useState<Series[]>([]);
   const [searchLoading, setSearchLoading] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
 
   const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const loadPage = useCallback(async (p: number, reset = false) => {
+  const loadPage = useCallback(async (p: number, reset = false, forceRefresh = false) => {
     if (reset) setLoading(true); else setLoadingMore(true);
     try {
-      const r = await fetch(`${BASE}/api/dubbed/catalog?page=${p}`);
+      const refresh = forceRefresh ? "&refresh=1" : "";
+      const r = await fetch(`${BASE}/api/dubbed/catalog?page=${p}${refresh}`, {
+        cache: forceRefresh ? "no-store" : "default",
+      });
       const d = await r.json();
       const results: Series[] = d.results || [];
       setTotalPages(d.totalPages || 1);
@@ -97,7 +101,16 @@ export default function DubbedScreen() {
     setLoadingMore(false);
   }, []);
 
-  useEffect(() => { loadPage(1, true); }, [loadPage]);
+  useFocusEffect(useCallback(() => {
+    const task = loadPage(1, true);
+    return () => { void task; };
+  }, [loadPage]));
+
+  const refreshCatalog = useCallback(async () => {
+    setRefreshing(true);
+    try { await loadPage(1, true, true); }
+    finally { setRefreshing(false); }
+  }, [loadPage]);
 
   useEffect(() => {
     const q = searchQ.trim();
@@ -176,6 +189,13 @@ export default function DubbedScreen() {
           keyExtractor={item => item.key || item.title}
           numColumns={numColumns}
           contentContainerStyle={styles.grid}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={refreshCatalog}
+              tintColor="#7C3AED"
+            />
+          }
           columnWrapperStyle={{ gap: 10 }}
           renderItem={({ item }) => (
             <View style={{ flex: 1 / numColumns }}>

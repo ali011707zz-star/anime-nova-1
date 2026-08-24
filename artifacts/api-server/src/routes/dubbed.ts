@@ -255,15 +255,15 @@ async function cfGet(url: string, referer?: string, timeoutMs = 18000): Promise<
 
 // ── L1 cache for catalog pages ──
 const _catalogCache = new Map<string, { data: any; ts: number }>();
-const CATALOG_TTL = 4 * 60 * 60_000; // 4 ساعات — أطول من قبل (كان 30 دقيقة)
+const CATALOG_TTL = 30 * 60_000; // 30 دقيقة — يبقى سريعاً لكن لا يحبس الإضافات اليومية
 
-async function fetchStarCimaDubbed(path: string): Promise<any> {
+async function fetchStarCimaDubbed(path: string, forceRefresh = false): Promise<any> {
   const hit = _catalogCache.get(path);
-  if (hit && Date.now() - hit.ts < CATALOG_TTL) return hit.data;
+  if (!forceRefresh && hit && Date.now() - hit.ts < CATALOG_TTL) return hit.data;
 
   // جرّب الـ disk cache أولاً (يبقى بعد restart)
-  const diskHit = _dcGet(path);
-  if (diskHit) {
+  const diskHit = forceRefresh ? null : _dcGet(path);
+  if (!forceRefresh && diskHit) {
     _catalogCache.set(path, { data: diskHit, ts: Date.now() - CATALOG_TTL + 10 * 60_000 }); // يُجدَّد خلال 10 دقائق
   }
 
@@ -296,9 +296,10 @@ async function fetchStarCimaDubbed(path: string): Promise<any> {
 // ── GET /api/dubbed/catalog?page=N ──
 router.get("/dubbed/catalog", async (req, res) => {
   const page = parseInt(req.query.page as string || "1", 10) || 1;
-  const data = await fetchStarCimaDubbed(`/api/dubbed/catalog?page=${page}`);
+  const forceRefresh = req.query.refresh === "1";
+  const data = await fetchStarCimaDubbed(`/api/dubbed/catalog?page=${page}`, forceRefresh);
   if (!data) { res.status(502).json({ error: "upstream failed" }); return; }
-  res.setHeader("Cache-Control", "public, max-age=1800");
+  res.setHeader("Cache-Control", forceRefresh ? "no-store" : "public, max-age=300");
   res.json(data);
 });
 
