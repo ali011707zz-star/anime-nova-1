@@ -490,6 +490,16 @@ export function RiftPlayer({
   const [contentFit, setContentFit]     = useState<"contain" | "cover" | "fill">("contain");
   const [screenshotSaved, setScreenshotSaved] = useState(false);
   const [isFlipped, setIsFlipped]       = useState(false);
+  const playerEntryOpacity              = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    const animation = Animated.timing(playerEntryOpacity, {
+      toValue: 1, duration: 360, delay: 70,
+      easing: Easing.out(Easing.cubic), useNativeDriver: true,
+    });
+    animation.start();
+    return () => animation.stop();
+  }, [playerEntryOpacity]);
 
   /* ─── Subtitle state ─── */
   const [subOn, setSubOn]               = useState(subEnabled);
@@ -1159,7 +1169,9 @@ export function RiftPlayer({
 
     /* ── حساب الـ URL الإنجليزي الخام (قبل أي ترجمة) ── */
     const base = getBaseUrl();
-    const alreadyTranslated = rawUrl.includes("translate-vtt") || rawUrl.includes("proxy-text");
+    // proxy-text only fixes CORS/referer; it does not translate. Treating it
+    // as translated caused KW/MP English tracks to bypass Arabic translation.
+    const alreadyTranslated = rawUrl.includes("translate-vtt");
 
     // استخراج الـ URL الداخلي إذا كان translate-vtt
     const innerUrl = alreadyTranslated ? (() => {
@@ -2118,7 +2130,7 @@ export function RiftPlayer({
   );
 
   return (
-    <View ref={rootViewRef} style={[s.root, isFlipped && { transform: [{ rotate: "180deg" }] }]}>
+    <Animated.View ref={rootViewRef} style={[s.root, { opacity: playerEntryOpacity }, isFlipped && { transform: [{ rotate: "180deg" }] }]}>
       <StatusBar hidden />
       {/* ── Video ── */}
       <VideoView
@@ -2131,6 +2143,14 @@ export function RiftPlayer({
            retaining the same native decoder/player. */
         surfaceType={Platform.OS === "android" ? "textureView" : undefined}
       />
+
+      {/* Smooth first-frame handoff instead of a sudden black jump. */}
+      {buffering && position <= 0.25 && !error && !isAutoCycling && (
+        <View style={s.entryLoadingOverlay} pointerEvents="none">
+          <SpinRing size={42} />
+          <Text style={s.entryLoadingText}>جارٍ فتح الحلقة…</Text>
+        </View>
+      )}
 
       {/* ── Brightness: يُضبط عبر expo-brightness (سطوع الشاشة الحقيقي) — لا حاجة لـ overlay ── */}
 
@@ -2938,7 +2958,7 @@ export function RiftPlayer({
         </View>
       )}
 
-    </View>
+    </Animated.View>
   );
 }
 
@@ -2998,6 +3018,8 @@ function AccordionSection({
 /* ─── Styles ─── */
 const s = StyleSheet.create({
   root:  { flex: 1, backgroundColor: "#000", position: "relative" },
+  entryLoadingOverlay: { ...StyleSheet.absoluteFillObject, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(3,3,8,0.44)" },
+  entryLoadingText: { marginTop: 12, color: "rgba(255,255,255,0.78)", fontSize: 13, fontFamily: "System" },
   video: { width: "100%", height: "100%" },
   screenshotSavedBadge: {
     position: "absolute",

@@ -122,8 +122,7 @@ const l1 = new Map<string, { sources: any[]; expiresAt: number }>();
 
 // Single-flight deduplication: concurrent viewers of the same episode/provider
 // share one live extraction instead of opening one upstream request per viewer.
-// The promise is intentionally process-local; Supabase L2 remains the shared
-// result across PM2 workers/restarts.
+// The promise is process-local; Supabase L2 remains the shared result across restarts.
 const sourceFlights = new Map<string, Promise<any[]>>();
 
 export function getOrCreateSourceFlight(
@@ -170,7 +169,8 @@ async function sbUpsertCache(cacheKey: string, site: string, sources: any[], exp
     expires_at: new Date(expiresAt).toISOString() as any,
   };
   try {
-    await cacheUpsert("source_cache", row, "cache_key");
+    const saved = await cacheUpsert("source_cache", row, "cache_key");
+    if (!saved) console.warn(`[sourceCache] L2 write returned no row for ${site}:${cacheKey}`);
   } catch (err: any) {
     // Retry with ms-epoch number in case remote DB still has expires_at as BIGINT (legacy schema)
     const isBigintError = err?.message?.includes("bigint") || err?.code === "22P02";

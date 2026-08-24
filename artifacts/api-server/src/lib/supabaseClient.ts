@@ -275,8 +275,17 @@ export async function sbUpsert<T = any>(
       });
       if (!res.ok) {
         const err = await res.text();
-        console.error(`[sb] sbUpsert "${table}" ${res.status}:`, err.slice(0, 200));
-        return null;
+        if (res.status === 400 && /Could not find the '([^']+)' column/.test(err)) {
+          const missing = err.match(/Could not find the '([^']+)' column/)?.[1];
+          if (missing && Object.prototype.hasOwnProperty.call(row, missing)) {
+            const compatibleRow = { ...row }; delete compatibleRow[missing];
+            const retry = await fetch(url, { method: "POST", headers: h, body: JSON.stringify(compatibleRow), signal: AbortSignal.timeout(10000) });
+            if (retry.ok) { const data = await retry.json(); return (Array.isArray(data) ? data[0] : data) as T | null; }
+            const retryErr = await retry.text();
+            console.error(`[sb] sbUpsert "${table}" compatible retry ${retry.status}:`, retryErr.slice(0, 200)); return null;
+          }
+        }
+        console.error(`[sb] sbUpsert "${table}" ${res.status}:`, err.slice(0, 200)); return null;
       }
       const data = await res.json();
       return (Array.isArray(data) ? data[0] : data) as T | null;

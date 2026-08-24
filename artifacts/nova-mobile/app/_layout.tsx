@@ -152,7 +152,8 @@ function RootLayout() {
 
   useEffect(() => {
     if (!RUNTIME_INTEGRITY.trusted) return;
-    // Warm the native LevelPlay SDK while the first screen is settling.
+    // Warm the native Start.io SDK while the first screen is settling. The
+    // native wrapper needs a short initialization window before loadAd().
     initializeRewardedAds().catch((error) => {
       console.warn("[rewarded-ad] startup initialization failed", error);
     });

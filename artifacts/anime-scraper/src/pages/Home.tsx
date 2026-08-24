@@ -1,6 +1,6 @@
 import { API_BASE } from "@/lib/apiBase";
 import { animeHref } from "@/lib/animeLink";
-import { useEffect, useState, useCallback, useRef } from "react";
+import { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { Link } from "wouter";
 import {
   Play,
@@ -32,11 +32,13 @@ let _homeCache: HomeCache | null = null;
 let _cachedTodayEps: any[] | null = null;
 const TODAY_EPS_STORAGE_KEY = "nova-latest-episodes";
 
-function rotateDaily<T>(items: T[]): T[] {
-  if (items.length < 2) return items;
-  const day = Math.floor(Date.now() / 86_400_000);
-  const offset = day % items.length;
-  return [...items.slice(offset), ...items.slice(0, offset)];
+function randomSample<T>(items: T[], limit = items.length): T[] {
+  const shuffled = [...items];
+  for (let i = shuffled.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+  }
+  return shuffled.slice(0, limit);
 }
 
 /* ── Continue Watching helpers ── */
@@ -264,7 +266,7 @@ export default function Home() {
   const [isekaiList, setIsekaiList] = useState<any[]>([]);
   const [hero, setHero] = useState<any>(() => {
     if (!_homeCache) return null;
-    const heroes = rotateDaily(_homeCache.popular.filter((a: any) => a.bannerImage));
+    const heroes = randomSample(_homeCache.popular.filter((a: any) => a.bannerImage));
     if (!heroes.length) return _homeCache.hero;
     return heroes[0];
   });
@@ -272,7 +274,12 @@ export default function Home() {
   const [heroDir, setHeroDir] = useState(1);
   const [selectedGenre, setSelectedGenre] = useState("");
   const touchStartX = useRef<number>(0);
-  const heroList = rotateDaily(popular.filter((a) => a.bannerImage).slice(0, 8));
+  /* Pick from the full catalog instead of always showing the first popular titles.
+     useMemo keeps the random order stable while the home screen re-renders. */
+  const heroList = useMemo(
+    () => randomSample(popular.filter((a) => a.bannerImage), 8),
+    [popular],
+  );
   const heroContainerRef = useRef<HTMLDivElement>(null);
   const [heroMouse, setHeroMouse] = useState({ x: 0, y: 0 });
   const [posterTilt, setPosterTilt] = useState({ rx: 0, ry: 0 });
@@ -421,7 +428,7 @@ export default function Home() {
         });
         const popMedia = pop?.media || [];
         const hasMorePop = pop?.pageInfo?.hasNextPage ?? false;
-        const heroes = rotateDaily(popMedia.filter((a: any) => a.bannerImage));
+        const heroes = randomSample(popMedia.filter((a: any) => a.bannerImage));
         const heroItem =
           heroes[0] ||
           popMedia[0];

@@ -212,7 +212,12 @@ CREATE TABLE IF NOT EXISTS anime_poster_cache (
 );
 `;
 
-const REQUIRED_TABLES = ["users", "pending_verifications", "watch_history", "favorites", "translations_cache", "anime_meta_ar", "anime_meta_cache", "anime_poster_cache"];
+const REQUIRED_TABLES = [
+  "users", "pending_verifications", "watch_history", "favorites",
+  "translations_cache", "anime_meta_ar", "anime_meta_cache", "anime_poster_cache",
+  // Shared L2 cache tables — verify these at startup so cache failures are visible.
+  "source_cache", "subtitle_cache", "cdn_cache", "telegram_episode_cache",
+];
 
 // ── PostgreSQL direct migration (للـ Replit PostgreSQL) ──────────────────────
 const PG_MIGRATION_SQL = `

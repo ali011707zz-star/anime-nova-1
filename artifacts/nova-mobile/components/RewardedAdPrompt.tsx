@@ -53,11 +53,11 @@ export function RewardedAdPrompt() {
     if (result) {
       close(true);
     } else {
-      // Keep the prompt visible when LevelPlay has no fill or the device is
+      // Keep the prompt visible when Start.io has no fill or the device is
       // offline. Closing it here made a failed tap look like the reward had
       // silently been consumed.
       setBusy(false);
-      setAdError("تعذر تحميل الإعلان الآن. تحقق من الاتصال ثم حاول مرة أخرى.");
+      setAdError("تعذر تحميل إعلان Start.io الآن. تحقق من الاتصال ثم حاول مرة أخرى.");
     }
   };
 

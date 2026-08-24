@@ -67,6 +67,6 @@
     "react-native-video": "^6.9.0",
     "react-native-view-shot": "^5.1.1",
     "react-native-webview": "~13.15.0",
-    "unity-levelplay-mediation": "^9.2.0"
+    "unity-levelplay-mediation": "9.2.0"
   }
 }

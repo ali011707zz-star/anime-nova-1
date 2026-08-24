@@ -3,7 +3,7 @@ import { useFocusEffect, useRouter } from "expo-router";
 import { LinearGradient } from "expo-linear-gradient";
 import { FlatList, Image } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useMemo } from "react";
 import {
   Platform, Pressable, RefreshControl, ScrollView,
   StyleSheet, Text, View,
@@ -30,11 +30,13 @@ const SEASON_AR: Record<string, string> = {
   WINTER: "شتاء", SPRING: "ربيع", SUMMER: "صيف", FALL: "خريف",
 };
 
-function rotateDaily<T>(items: T[]): T[] {
-  if (items.length < 2) return items;
-  const day = Math.floor(Date.now() / 86_400_000);
-  const offset = day % items.length;
-  return [...items.slice(offset), ...items.slice(0, offset)];
+function randomSample<T>(items: T[], limit = items.length): T[] {
+  const shuffled = [...items];
+  for (let i = shuffled.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+  }
+  return shuffled.slice(0, limit);
 }
 
 export default function HomeScreen() {
@@ -194,7 +196,12 @@ export default function HomeScreen() {
   const isekaiList = isekai?.Page?.media || [];
 
   /* الويب يبني الـHero من الأكثر شعبية ذات الـbanner، وليس من TRENDING. */
-  const heroItems = rotateDaily(popularList.filter((m) => m.bannerImage).slice(0, 8));
+  /* Randomize from the full popular catalog so the hero is not fixed to the
+     same first four titles on every client. */
+  const heroItems = useMemo(
+    () => randomSample(popularList.filter((m) => m.bannerImage), 8),
+    [popularList],
+  );
   const recentHistory = watchHistory.slice(0, 10);
 
   const refresh = async () => {

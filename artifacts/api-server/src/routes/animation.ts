@@ -1,4 +1,5 @@
 import { Router, type Request, type Response } from "express";
+import { scraperQueueMiddleware } from "../lib/scraperQueue.js";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { randomBytes, createHash, createDecipheriv, createCipheriv } from "node:crypto";
 import { encryptParam, encryptProxyUrl, isEncrypted, decryptParam } from "../lib/security.js";
@@ -2163,7 +2164,7 @@ router.get("/animation/videasy-fresh", async (req: Request, res: Response) => {
 
 // ── SSE animation sources stream ──────────────────────────────────────────────
 
-router.get("/animation/sources-stream", async (req: Request, res: Response) => {
+router.get("/animation/sources-stream", scraperQueueMiddleware, async (req: Request, res: Response) => {
   const title   = String(req.query.title  || "");
   const type    = String(req.query.type   || "movie");
   const epNum   = parseInt(String(req.query.ep     || "1"), 10) || 1;

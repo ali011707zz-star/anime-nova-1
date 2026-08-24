@@ -334,8 +334,10 @@ export default function AnimeDetail() {
             if (t && t.length > 10 && /[\u0600-\u06FF]/.test(t)) {
               setDescAr(t); localStorage.setItem(`desc-ar-${params.id}`, t);
             } else {
-              // Never fall back to rendering the English synopsis as if it were Arabic.
-              setDescAr("تعذّرت ترجمة الوصف حالياً");
+              // Keep the synopsis readable when a free translation provider is
+              // temporarily unavailable; do not replace it with a misleading
+              // error string that looks like the content itself.
+              setDescAr(stripped);
             }
           }).catch(() => { if (!cancelled) setDescAr(stripped); });
       }).catch(() => {
