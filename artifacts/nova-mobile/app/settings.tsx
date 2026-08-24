@@ -1078,6 +1078,7 @@ export default function SettingsScreen() {
   const [notifs, setNotifs] = useState(true);
   const [showReport, setShowReport] = useState(false);
   const [showAuth, setShowAuth] = useState(false);
+  const [showProfile, setShowProfile] = useState(false);
   const [showPremium, setShowPremium] = useState(false);
   const [showCrashLog, setShowCrashLog] = useState(false);
   const [crashEntries, setCrashEntries] = useState<CrashEntry[]>([]);
@@ -1138,9 +1139,12 @@ export default function SettingsScreen() {
     getCrashLog().then(setCrashEntries).catch(() => {});
   }, []);
 
-  const handleLogout = () => {
-    void setUserAuthToken(null);
-    AsyncStorage.removeItem(AUTH_KEY);
+  const handleLogout = async () => {
+    await setUserAuthToken(null);
+    await AsyncStorage.removeItem(AUTH_KEY);
+    try {
+      await secureFetch(`${getBaseUrl()}/api/auth/signout`, { method: "POST" });
+    } catch {}
     setCurrentUser(null);
     showToast("تم تسجيل الخروج");
   };
@@ -1249,7 +1253,7 @@ export default function SettingsScreen() {
         {/* ── Profile / Login card ── */}
         <View style={{ paddingHorizontal: 16, marginTop: 20 }}>
           {currentUser ? (
-            <Pressable onPress={() => router.push("/profile" as any)} style={ts.profileCard}>
+            <Pressable onPress={() => setShowProfile(true)} style={ts.profileCard}>
               {/* Avatar */}
               <View style={[ts.profileAvatar, { backgroundColor: (AVATAR_COLORS[(currentUser.avatarColor ?? 0) % AVATAR_COLORS.length]) + "28", borderColor: (AVATAR_COLORS[(currentUser.avatarColor ?? 0) % AVATAR_COLORS.length]) + "80" }]}>
                 {currentUser.profileImageUrl ? (
@@ -1590,6 +1594,16 @@ export default function SettingsScreen() {
           setShowAuth(false);
           showToast(`مرحباً ${u.displayName}! 🎉`);
         }}
+      />
+
+      {/* Profile Sheet — stays on the mounted settings screen so navigation
+          does not create a second settings route. */}
+      <ProfileSheet
+        open={showProfile}
+        onClose={() => setShowProfile(false)}
+        user={currentUser}
+        onUpdate={u => setCurrentUser(u)}
+        onLogout={handleLogout}
       />
 
       {/* Premium Sheet */}

@@ -11,7 +11,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColors } from "@/hooks/useColors";
 import { getBaseUrl } from "@/utils/api";
-import { secureFetch } from "@/utils/secureApi";
+import { secureFetch, setUserAuthToken } from "@/utils/secureApi";
 
 const AUTH_KEY = "nova-mobile-user";
 
@@ -163,6 +163,7 @@ export default function ProfileScreen() {
   };
 
   const handleLogout = async () => {
+    await setUserAuthToken(null);
     await AsyncStorage.removeItem(AUTH_KEY);
     try { await secureFetch(`${base}/api/auth/signout`, { method: "POST" }); } catch {}
     router.replace("/settings" as any);
