@@ -14,7 +14,9 @@ import {
 
 // This is the Android app key shown in the IronSource/LevelPlay account.
 const LEVELPLAY_ANDROID_APP_KEY = "9qbxrfx8ldw4intrz";
-const LEVELPLAY_REWARDED_AD_UNIT_ID = "DefaultRewardedVideo";
+// LevelPlay's rewarded-ad constructor expects the generated Ad Unit ID,
+// not the human-readable unit name ("DefaultRewardedVideo").
+const LEVELPLAY_REWARDED_AD_UNIT_ID = "0p2nzpuv2zkI178qo";
 const LEVELPLAY_REWARDED_PLACEMENT = "Default";
 const AD_LOAD_TIMEOUT_MS = 45_000;
 

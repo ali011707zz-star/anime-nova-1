@@ -6,7 +6,8 @@ The Android app uses Unity LevelPlay (IronSource) for rewarded videos.
 
 - Provider: Unity LevelPlay / IronSource
 - Android app key: `9qbxrfx8ldw4intrz`
-- Rewarded ad unit: `DefaultRewardedVideo`
+- Rewarded ad unit name: `DefaultRewardedVideo`
+- Rewarded ad unit ID: `0p2nzpuv2zkI178qo`
 - Placement: `Default`
 - SDK package: `unity-levelplay-mediation`
 
