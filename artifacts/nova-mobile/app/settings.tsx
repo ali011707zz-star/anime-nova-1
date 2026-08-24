@@ -1,7 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import * as Google from "expo-auth-session/providers/google";
 import { makeRedirectUri } from "expo-auth-session";
-import { useLocalSearchParams, useRouter } from "expo-router";
+import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import * as WebBrowser from "expo-web-browser";
 import { LinearGradient } from "expo-linear-gradient";
 import React, { useState, useEffect, useCallback, useRef } from "react";
@@ -1083,23 +1083,56 @@ export default function SettingsScreen() {
   const [crashEntries, setCrashEntries] = useState<CrashEntry[]>([]);
   const [currentUser, setCurrentUser] = useState<MobileUser | null>(null);
 
+  const refreshCurrentUser = useCallback(async () => {
+    let storedUser: MobileUser | null = null;
+    try {
+      const stored = await AsyncStorage.getItem(AUTH_KEY);
+      if (stored) storedUser = JSON.parse(stored) as MobileUser;
+    } catch {}
+
+    if (storedUser) setCurrentUser(storedUser);
+
+    try {
+      const response = await secureFetch(`${getBaseUrl()}/api/auth/me`);
+      if (!response.ok) return;
+      const data = await response.json() as any;
+      if (!data?.id) return;
+
+      const nextUser: MobileUser = {
+        ...(storedUser || {}),
+        id: String(data.id),
+        email: data.email || storedUser?.email || "",
+        displayName:
+          data.displayName ||
+          data.display_name ||
+          storedUser?.displayName ||
+          data.username ||
+          data.email?.split("@")[0] ||
+          "مستخدم",
+        username: data.username || storedUser?.username,
+        avatarColor: data.avatarColor ?? data.avatar_color ?? storedUser?.avatarColor ?? 0,
+        profileImageUrl:
+          data.profileImageUrl ||
+          data.profile_image_custom ||
+          data.profile_image_url ||
+          storedUser?.profileImageUrl ||
+          null,
+      };
+      await AsyncStorage.setItem(AUTH_KEY, JSON.stringify(nextUser));
+      setCurrentUser(nextUser);
+    } catch {}
+  }, []);
+
   useEffect(() => {
     if (openPremium === "1") setShowPremium(true);
   }, [openPremium]);
 
-  useEffect(() => {
-    AsyncStorage.getItem(AUTH_KEY).then(v => { if (v) { try { setCurrentUser(JSON.parse(v)); } catch {} } });
-    secureFetch(`${getBaseUrl()}/api/auth/me`)
-      .then(r => r.ok ? r.json() : null)
-      .then((d: any) => d && setCurrentUser(prev => prev ? {
-        ...prev,
-        displayName: d.displayName || d.display_name || prev.displayName,
-        username: d.username || prev.username,
-        avatarColor: d.avatarColor ?? d.avatar_color ?? prev.avatarColor,
-        profileImageUrl: d.profileImageUrl || d.profile_image_custom || d.profile_image_url || prev.profileImageUrl || null,
-      } : prev))
-      .catch(() => {});
-  }, []);
+  // Re-check when returning from Google OAuth or the profile screen. This
+  // keeps the already-mounted settings page authoritative and avoids making
+  // the user press Back through duplicate settings routes.
+  useFocusEffect(useCallback(() => {
+    void refreshCurrentUser();
+  }, [refreshCurrentUser]));
 
   useEffect(() => {
     getCrashLog().then(setCrashEntries).catch(() => {});

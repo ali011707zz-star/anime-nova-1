@@ -15,9 +15,12 @@ export default function GoogleOAuthCallback() {
   const router = useRouter();
 
   useEffect(() => {
-    // Replace the callback entry; pushing /settings here leaves the callback
-    // and every intermediate settings instance behind the visible screen.
-    router.replace("/settings");
+    // Return to the settings screen that launched Google. Replacing with a
+    // fresh /settings route creates a second instance on the native stack;
+    // repeated sign-in attempts then leave several identical settings pages
+    // behind the callback.
+    if (router.canGoBack()) router.back();
+    else router.replace("/settings");
   }, [router]);
 
   return (
