@@ -14036,7 +14036,8 @@ router.get("/anime/fetch-source", async (req, res) => {
   // scrapers that use probe-only (no deep extraction)
   const probeOnly = new Set(["animeify","kawaii","anikoto","anikototv","animewitcher","anizone","stardima"]);
 
-  const sharedSources = await getOrCreateSourceFlight(`${cKey}:fetch`, async () => {
+  try {
+    const sharedSources = await getOrCreateSourceFlight(`${cKey}:fetch`, async () => {
     try {
     switch (site) {
       // shahiid/animelek: معطّلة بطلب المستخدم 2026-07-14 (قسم الأنمي فقط)
