@@ -6672,9 +6672,21 @@ function wrapForMobile(s: { site?: string; directUrl?: string; url?: string; dir
 
 
 router.get("/anime/kawaii-meta", async (req: Request, res: Response) => {
-  const anilistId = parseInt(req.query.anilistId as string || "0");
+  let anilistId = parseInt(req.query.anilistId as string || "0");
   const ep = parseInt(req.query.ep as string || "1");
+  const title = String(req.query.title || "").trim();
+  const english = String(req.query.english || "").trim() || null;
+  const titleAr = String(req.query.titleAr || "").trim() || null;
   const empty = { arabicSubUrl: null, englishSubUrl: null, subtitleRef: null, intro: null, outro: null };
+  // Latest-episode cards may carry an AnimeSlayer catalog id in `anime`.
+  // Resolve by title before querying Kawaii so subtitle lookup uses the
+  // same AniList identity as the source lookup.
+  if (title) {
+    anilistId = await Promise.race([
+      resolveAniListIdForSource(title, english, [], titleAr),
+      new Promise<number | undefined>(resolve => setTimeout(() => resolve(undefined), 3500)),
+    ]) || anilistId;
+  }
   if (!anilistId) return res.json(empty);
   try {
     type KawaiiMeta = {
@@ -6686,16 +6698,30 @@ router.get("/anime/kawaii-meta", async (req: Request, res: Response) => {
     let data: KawaiiMeta | null = null;
     let apiBase = KAWAII_BASE;
     for (const base of KAWAII_API_BASES) {
-      const r = await fetchSourceWithRetry(`${base}/api/watch?anilistId=${anilistId}&ep=${ep}`, {
-        headers: { ...BASE_HDRS, Accept: "application/json", Referer: `${base}/` },
-      }, 10_000);
-      if (!r) continue;
-      const candidate = await r.json().catch(() => null) as KawaiiMeta | null;
-      if (candidate?.subtitles?.some(s => typeof s?.url === "string" && s.url.length > 0)) {
-        data = candidate;
-        apiBase = base;
-        break;
+      // /api/miruro is the live public endpoint. Keep /api/watch as a
+      // compatibility fallback for older Kawaii mirrors.
+      for (const apiUrl of [
+        `${base}/api/miruro?anilistId=${anilistId}&ep=${ep}`,
+        `${base}/api/miruro?anilist_id=${anilistId}&episode=${ep}`,
+        `${base}/api/watch?anilistId=${anilistId}&ep=${ep}`,
+      ]) {
+        const r = await fetchSourceWithRetry(apiUrl, {
+          headers: { ...BASE_HDRS, Accept: "application/json", Referer: `${base}/` },
+        }, 10_000);
+        if (!r) continue;
+        const candidate = await r.json().catch(() => null) as (KawaiiMeta & {
+          data?: KawaiiMeta;
+        }) | null;
+        const payload = candidate?.data && typeof candidate.data === "object"
+          ? { ...candidate, ...candidate.data }
+          : candidate;
+        if (payload?.subtitles?.some(s => typeof s?.url === "string" && s.url.length > 0)) {
+          data = payload;
+          apiBase = base;
+          break;
+        }
       }
+      if (data) break;
     }
     if (!data) return res.json(empty);
     const language = (s: { lang?: string; label?: string }) => `${s.lang || ""} ${s.label || ""}`.toLowerCase().trim();
@@ -15346,6 +15372,43 @@ async function translateBatchFree(texts: string[], from: string, to: string): Pr
   return results;
 }
 
+async function fetchSubtitleBody(url: string): Promise<{ ok: boolean; status: number; text: string }> {
+  try {
+    const parsed = new URL(url);
+    // Avoid an HTTP loop when translate-vtt receives the app's own
+    // proxy-text URL. Fetch the CDN target directly with the provider
+    // Referer that proxy-text would have used.
+    if (parsed.pathname.endsWith("/api/anime/proxy-text")) {
+      const target = parsed.searchParams.get("url") || "";
+      const ref = parsed.searchParams.get("ref") || "";
+      if (target.startsWith("http")) {
+        const headers: Record<string, string> = {
+          ...BASE_HDRS,
+          Accept: "text/vtt,text/plain,*/*",
+        };
+        if (ref) {
+          headers.Referer = ref;
+          try { headers.Origin = new URL(ref).origin; } catch { /* optional */ }
+        }
+        const response = await fetch(target, { headers, signal: AbortSignal.timeout(12000) });
+        return { ok: response.ok, status: response.status, text: await response.text() };
+      }
+    }
+    const response = await fetch(url, {
+      headers: {
+        ...BASE_HDRS,
+        Accept: "text/vtt,text/plain,*/*",
+        Referer: (() => { try { return new URL(url).origin + "/"; } catch { return url; } })(),
+        Origin: (() => { try { return new URL(url).origin; } catch { return ""; } })(),
+      },
+      signal: AbortSignal.timeout(12000),
+    });
+    return { ok: response.ok, status: response.status, text: await response.text() };
+  } catch {
+    return { ok: false, status: 502, text: "" };
+  }
+}
+
 router.get("/anime/translate-vtt", async (req, res) => {
   const rawUrl = ((req.query.url  as string) || "").trim();
   const from   = ((req.query.from as string) || "en").trim();
@@ -15365,17 +15428,9 @@ router.get("/anime/translate-vtt", async (req, res) => {
   }
 
   try {
-    const r = await fetch(url, {
-      headers: {
-        ...BASE_HDRS,
-        Accept: "text/vtt,text/plain,*/*",
-        Referer: (() => { try { return new URL(url).origin + "/"; } catch { return url; } })(),
-        Origin:  (() => { try { return new URL(url).origin; } catch { return ""; } })(),
-      },
-      signal: AbortSignal.timeout(12000),
-    });
+    const r = await fetchSubtitleBody(url);
     if (!r.ok) { res.status(502).json({ error: `Subtitle fetch failed: ${r.status}` }); return; }
-    const vttText = await r.text();
+    const vttText = r.text;
     const cues = parseVttCues(vttText);
     if (!cues.length) { res.json({ cues: [] }); return; }
 
@@ -15445,17 +15500,9 @@ router.get("/anime/translate-vtt-stream", async (req, res) => {
     }
 
     // ── Fetch source VTT/SRT ──
-    const r = await fetch(url, {
-      headers: {
-        ...BASE_HDRS,
-        Accept: "text/vtt,text/plain,*/*",
-        Referer: (() => { try { return new URL(url).origin + "/"; } catch { return url; } })(),
-        Origin:  (() => { try { return new URL(url).origin;       } catch { return "";  } })(),
-      },
-      signal: AbortSignal.timeout(12000),
-    });
+    const r = await fetchSubtitleBody(url);
     if (!r.ok) { send({ type: "error", message: `Fetch failed: ${r.status}` }); finish(0); return; }
-    const vttText = await r.text();
+    const vttText = r.text;
     const cues    = parseVttCues(vttText);
     if (!cues.length) { finish(0); return; }
 

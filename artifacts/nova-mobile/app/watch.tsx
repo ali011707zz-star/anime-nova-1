@@ -437,23 +437,32 @@ async function fetchArabicSubtitleUrl(
   animeId: string,
   ep: number,
   base: string,
+  title: string,
+  english: string,
   signal?: AbortSignal,
 ): Promise<string | undefined> {
   try {
     const response = await secureFetch(
-      `${base}/api/anime/kawaii-meta?anilistId=${encodeURIComponent(animeId)}&ep=${ep}`,
+      `${base}/api/anime/kawaii-meta?anilistId=${encodeURIComponent(animeId)}&ep=${ep}` +
+      `&title=${encodeURIComponent(title)}&english=${encodeURIComponent(english)}`,
       { signal, headers: { Accept: "application/json" } },
     );
     if (!response.ok) return undefined;
     const data = await response.json() as {
       arabicSubUrl?: unknown;
       englishSubUrl?: unknown;
+      subtitleRef?: unknown;
     };
     const rawArabic = typeof data.arabicSubUrl === "string" ? data.arabicSubUrl : "";
     const rawEnglish = typeof data.englishSubUrl === "string" ? data.englishSubUrl : "";
     const raw = rawArabic || rawEnglish;
     if (!raw) return undefined;
-    const proxied = normalizeKawaiiSubtitleUrl(raw, base);
+    const subtitleRef = typeof data.subtitleRef === "string" && data.subtitleRef
+      ? data.subtitleRef
+      : "https://kawaiianime.cc/";
+    const proxied = raw.includes("/api/anime/translate-vtt") || raw.includes("/api/anime/proxy-text")
+      ? resolveUrl(raw, base)
+      : `${base}/api/anime/proxy-text?url=${encodeURIComponent(raw)}&ref=${encodeURIComponent(subtitleRef)}`;
     if (!proxied) return undefined;
     return rawArabic
       ? proxied
@@ -819,7 +828,7 @@ export default function WatchScreen() {
     setGlobalSubUrl(undefined);
     const ctrl = new AbortController();
     const base = getBaseUrl();
-    fetchArabicSubtitleUrl(anime, epNum, base, ctrl.signal)
+    fetchArabicSubtitleUrl(anime, epNum, base, titleStr, englishStr, ctrl.signal)
       .then(subtitleUrl => {
         if (!ctrl.signal.aborted && subtitleUrl) setGlobalSubUrl(subtitleUrl);
       });

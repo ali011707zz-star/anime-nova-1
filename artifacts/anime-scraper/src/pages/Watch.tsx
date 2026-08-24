@@ -4799,6 +4799,25 @@ export default function WatchPage() {
   const title =
     anime?.title?.english || anime?.title?.romaji || titleParam || "أنمي";
   const animeTitle = title;
+  const availabilityCacheKey = `nova-availability-v2:${animeId}:${ep}:${encodeURIComponent(
+    titleParam || englishParam || title,
+  ).slice(0, 180)}`;
+  const loadAvailabilitySnapshot = (): Record<string, FetchedSrc> => {
+    try {
+      const raw = localStorage.getItem(availabilityCacheKey);
+      if (!raw) return {};
+      const parsed = JSON.parse(raw) as { ts?: number; rows?: FetchedSrc[] };
+      if (!parsed?.ts || Date.now() - parsed.ts > 30 * 60_000 || !Array.isArray(parsed.rows))
+        return {};
+      return Object.fromEntries(
+        parsed.rows
+          .filter((row) => row?.site && row.checkOnly)
+          .map((row) => [`${row.site}::${getSrcQualityTier(row)}`, row]),
+      );
+    } catch {
+      return {};
+    }
+  };
    const totalEps = anime?.status === "NOT_YET_RELEASED"
     ? 0
     : anime?.status === "RELEASING"
@@ -4927,7 +4946,13 @@ export default function WatchPage() {
     if (!animeId) return;
     setKawaiiSubUrl(undefined);
     const ctrl = new AbortController();
-    fetch(`${API_BASE}/api/anime/kawaii-meta?anilistId=${animeId}&ep=${ep}`, {
+    const metaParams = new URLSearchParams({
+      anilistId: animeId,
+      ep: String(ep),
+      title: titleParam || anime?.title?.userPreferred || "",
+      english: anime?.title?.english || "",
+    });
+    fetch(`${API_BASE}/api/anime/kawaii-meta?${metaParams.toString()}`, {
       signal: ctrl.signal,
     })
       .then((r) => (r.ok ? r.json() : null))
@@ -4964,7 +4989,7 @@ export default function WatchPage() {
       })
       .catch(() => {});
     return () => ctrl.abort();
-  }, [animeId, ep]);
+  }, [animeId, ep, titleParam, anime?.title?.userPreferred, anime?.title?.english]);
 
   /* If AK/AN/GO is selected before kawaii-meta resolves, attach the
      shared Arabic track as soon as it arrives instead of leaving the
@@ -5523,8 +5548,25 @@ export default function WatchPage() {
     autoFetchAllRef.current = false;
     availabilityCheckedRef.current = false;
     setAvailabilityDone(false);
-    setSlotSources({});
-    setSlotStatus(EMPTY_SLOTS());
+    const cachedRows = loadAvailabilitySnapshot();
+    if (Object.keys(cachedRows).length) {
+      setSlotSources(
+        Object.values(cachedRows).reduce<Record<string, FetchedSrc[]>>((all, row) => {
+          (all[row.site || ""] ||= []).push(row);
+          return all;
+        }, {}),
+      );
+      setSlotStatus(
+        Object.values(cachedRows).reduce<Record<string, SlotStatus>>(
+          (all, row) => ({ ...all, [row.site || ""]: "ready" }),
+          EMPTY_SLOTS(),
+        ),
+      );
+      setAvailabilityDone(true);
+    } else {
+      setSlotSources({});
+      setSlotStatus(EMPTY_SLOTS());
+    }
     setQualityStatus({});
     abortActiveSourceRequests();
     return () => {
@@ -5545,9 +5587,25 @@ export default function WatchPage() {
     const controller = new AbortController();
     let cancelled = false;
     autoFetchAllRef.current = false;
-    setAvailabilityDone(false);
-    setSlotSources({});
-    setSlotStatus(EMPTY_SLOTS());
+    const cachedRows = loadAvailabilitySnapshot();
+    setAvailabilityDone(Object.keys(cachedRows).length > 0);
+    if (Object.keys(cachedRows).length) {
+      setSlotSources(
+        Object.values(cachedRows).reduce<Record<string, FetchedSrc[]>>((all, row) => {
+          (all[row.site || ""] ||= []).push(row);
+          return all;
+        }, {}),
+      );
+      setSlotStatus(
+        Object.values(cachedRows).reduce<Record<string, SlotStatus>>(
+          (all, row) => ({ ...all, [row.site || ""]: "ready" }),
+          EMPTY_SLOTS(),
+        ),
+      );
+    } else {
+      setSlotSources({});
+      setSlotStatus(EMPTY_SLOTS());
+    }
     setQualityStatus({});
     abortActiveSourceRequests();
 
@@ -5603,6 +5661,14 @@ export default function WatchPage() {
         available: true,
         checkOnly: true,
       };
+      try {
+        const snapshot = loadAvailabilitySnapshot();
+        snapshot[`${site}::${getSrcQualityTier(placeholder)}`] = placeholder;
+        localStorage.setItem(
+          availabilityCacheKey,
+          JSON.stringify({ ts: Date.now(), rows: Object.values(snapshot) }),
+        );
+      } catch {}
       const tier = getSrcQualityTier(placeholder);
       setSlotSources((prev) => {
         const current = prev[site] || [];
@@ -5668,7 +5734,7 @@ export default function WatchPage() {
       controller.abort();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [animeId, ep]);
+  }, [animeId, ep, availabilityCacheKey]);
 
   /* ── Background server accumulation: once player is open, append new sources as scrapers finish ── */
   useEffect(() => {
