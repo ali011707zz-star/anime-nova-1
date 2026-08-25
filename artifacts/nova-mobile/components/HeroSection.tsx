@@ -44,7 +44,7 @@ export function HeroSection({ items }: Props) {
         showsHorizontalScrollIndicator={false}
         scrollEventThrottle={16}
         onMomentumScrollEnd={(e) => {
-          const idx = Math.round(e.nativeEvent.contentOffset.x / W);
+          const idx = Math.round(e.nativeEvent.contentOffset.x / width);
           setActiveIdx(idx);
         }}
       >
