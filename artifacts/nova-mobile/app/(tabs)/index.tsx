@@ -443,7 +443,12 @@ export default function HomeScreen() {
               showsHorizontalScrollIndicator={false}
                contentContainerStyle={{ paddingHorizontal: railSidePadding, gap: railGap }}
               renderItem={({ item }: { item: any }) => {
-                const rawImg = getPosterUri(item);
+                // The dubbed catalog returns its image as a relative API path.
+                // Keep that path so it can be resolved against the production API
+                // base below instead of falling through to the placeholder.
+                const rawImg = typeof item.image === "string" && item.image.trim()
+                  ? item.image.trim()
+                  : getPosterUri(item);
                 const imgUri = rawImg
                   ? rawImg.startsWith("http") ? rawImg : `${BASE_URL}${rawImg}`
                   : null;
