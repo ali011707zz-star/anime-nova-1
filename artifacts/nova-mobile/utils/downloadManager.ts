@@ -9,6 +9,7 @@ import { AppState, Platform } from "react-native";
 import * as FileSystem from "expo-file-system";
 import * as Notifications from "expo-notifications";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import Constants from "expo-constants";
 import { recordSuccessfulDownload } from "./adPolicy";
 import { getAuthToken } from "./secureApi";
 
@@ -17,6 +18,12 @@ const ACTIVE_PENDING_KEY = "nova-downloads-active-v2";
 const DOWNLOADS_ROOT = `${FileSystem.documentDirectory ?? ""}downloads/`;
 const MAX_RETRIES = 3;
 const NOTIFICATION_CHANNEL = "nova-downloads";
+const MOBILE_CLIENT_ID = "nova-anime-mobile-v1";
+const MOBILE_PACKAGE_NAME =
+  Constants.expoConfig?.android?.package ||
+  Constants.expoConfig?.ios?.bundleIdentifier ||
+  "com.nova.anime";
+const MOBILE_VERSION = Constants.expoConfig?.version || "1.0.0";
 
 export interface DownloadItem {
   id: string;
@@ -484,8 +491,14 @@ function requestHeaders(params: StartDownloadParams): Record<string, string> {
     : (params.headers || {});
   const headers: Record<string, string> = {
     ...sourceHeaders,
-    "X-Nova-Client": "nova-anime-mobile-v1",
-    "User-Agent": "NovaAnime/1.0 (Expo; Mobile)",
+    /* The media routes are behind the same mobile release gate as source
+       fetching. DownloadResumable does not use secureFetch, so it must carry
+       the complete release identity itself or the VPS returns 403 before the
+       proxy sees the request. */
+    "X-Nova-Client": MOBILE_CLIENT_ID,
+    "X-Nova-Package": MOBILE_PACKAGE_NAME,
+    "X-Nova-Version": MOBILE_VERSION,
+    "User-Agent": `NovaAnime/${MOBILE_VERSION} (Expo; Mobile)`,
     /* DownloadResumable may issue Range requests after a background retry.
        Explicitly advertise byte-range support to the VPS conversion route. */
     "Accept": "video/mp4,video/*;q=0.9,*/*;q=0.1",

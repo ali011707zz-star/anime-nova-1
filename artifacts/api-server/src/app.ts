@@ -176,6 +176,7 @@ export async function createApp(): Promise<Express> {
   // before it can receive config, catalog, posters, sources, or playback data.
   app.use((req, res, next) => {
     const clientHeader = req.headers["x-nova-client"];
+    const isMediaProxyRequest = MEDIA_PROXY_PATH.test(req.path);
     const isMobileClient =
       clientHeader === MOBILE_CLIENT_ID ||
       (Array.isArray(clientHeader) && clientHeader.includes(MOBILE_CLIENT_ID)) ||
@@ -183,7 +184,16 @@ export async function createApp(): Promise<Express> {
     if (!isMobileClient) return next();
 
     const identity = validateMobileAppIdentity(req.headers);
-    if (!identity.ok) {
+    /* Older installed builds sent only X-Nova-Client on background media
+       downloads. Keep those downloads working while still requiring the
+       exact client id and the short-lived app token below. New builds send
+       package/version as well; non-media API routes remain strict. */
+    const legacyMediaIdentity =
+      isMediaProxyRequest &&
+      clientHeader === MOBILE_CLIENT_ID &&
+      (!identity.ok &&
+        (identity.code === "INVALID_PACKAGE" || identity.code === "APP_UPDATE_REQUIRED"));
+    if (!identity.ok && !legacyMediaIdentity) {
       res.status(403).json({
         error: "هذه النسخة غير رسمية أو تحتاج إلى تحديث. حمّل النسخة الرسمية من الموقع.",
         code: identity.code,
