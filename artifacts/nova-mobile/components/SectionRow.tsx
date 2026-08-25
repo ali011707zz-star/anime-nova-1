@@ -37,7 +37,7 @@ export const SectionRow = React.memo(function SectionRow({ title, items, onSeeAl
           </Pressable>
         )}
       </View>
-      <FlatList
+        <FlatList
         data={items.slice(0, tvMode ? 10 : items.length)}
         horizontal
         keyExtractor={(item) => String(item.id)}
@@ -51,7 +51,9 @@ export const SectionRow = React.memo(function SectionRow({ title, items, onSeeAl
         maxToRenderPerBatch={2}
         updateCellsBatchingPeriod={50}
         windowSize={3}
-        removeClippedSubviews={Platform.OS !== "web"}
+          // Nested horizontal rails on Android TV can permanently lose cards
+          // when RN clips recycled children outside the viewport.
+          removeClippedSubviews={false}
       />
     </View>
   );

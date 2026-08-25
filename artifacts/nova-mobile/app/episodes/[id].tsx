@@ -387,7 +387,7 @@ export default function EpisodeListScreen() {
   );
 
   return (
-    <View style={[ep_s.container, { paddingTop: topPad }]}>
+    <View style={[ep_s.container, { paddingTop: topPad }, tvMode && ep_s.tvContainer]}>
       {/* ── Hero Banner ── */}
       <View style={ep_s.hero}>
         {(anime.bannerImage || anime.coverImage?.extraLarge || anime.coverImage?.large) ? (
@@ -416,7 +416,7 @@ export default function EpisodeListScreen() {
             <Image source={{ uri: anime.coverImage.large }} style={ep_s.heroCover} />
           ) : null}
           <View style={ep_s.heroInfo}>
-            <Text style={ep_s.heroTitle} numberOfLines={1}>{anime.title?.romaji}</Text>
+            <Text style={[ep_s.heroTitle, tvMode && ep_s.tvHeroTitle]} numberOfLines={1}>{anime.title?.romaji}</Text>
             <View style={{ flexDirection: "row", gap: 8, marginTop: 4 }}>
               <Text style={ep_s.heroBadge}>{total} حلقة</Text>
               {watchedCount > 0 && (
@@ -431,7 +431,7 @@ export default function EpisodeListScreen() {
       </View>
 
       {/* ── Sticky controls ── */}
-      <View style={ep_s.controls}>
+      <View style={[ep_s.controls, tvMode && ep_s.tvControls]}>
         {/* Progress bar */}
         <View style={ep_s.progressRow}>
           <View style={ep_s.progressTrack}>
@@ -448,7 +448,7 @@ export default function EpisodeListScreen() {
             placeholder="اذهب لحلقة..."
             placeholderTextColor="rgba(255,255,255,0.25)"
             keyboardType="number-pad"
-            style={ep_s.searchInput}
+            style={[ep_s.searchInput, tvMode && ep_s.tvText]}
           />
           {search ? (
             <Pressable onPress={() => setSearch("")}>
@@ -569,4 +569,8 @@ const ep_s = StyleSheet.create({
   },
   eyeBtn: { width: 27, height: 27, borderRadius: 8, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(255,255,255,0.04)", borderWidth: 1, borderColor: "rgba(255,255,255,0.08)" },
   eyeBtnWatched: { backgroundColor: "rgba(139,92,246,0.15)", borderColor: "rgba(139,92,246,0.3)" },
+  tvContainer: { paddingHorizontal: 24 },
+  tvControls: { paddingHorizontal: 24, paddingTop: 16, paddingBottom: 14 },
+  tvHeroTitle: { fontSize: 23, lineHeight: 30 },
+  tvText: { fontSize: 18 },
 });

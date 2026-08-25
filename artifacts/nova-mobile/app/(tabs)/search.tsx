@@ -73,6 +73,7 @@ const SORT_OPTIONS = [
   { label: "الأحدث", value: "START_DATE_DESC" },
   { label: "الأقدم", value: "START_DATE" },
 ];
+const YEAR_OPTIONS = ["", "2026", "2025", "2024", "2023", "2022", "2021", "2020", "2010"];
 const GENRES = [
   "Action","Adventure","Comedy","Drama","Fantasy","Horror","Mystery","Romance",
   "Sci-Fi","Slice of Life","Sports","Supernatural","Thriller","Mecha","Music",
@@ -143,21 +144,21 @@ async function translateQuery(q: string): Promise<string> {
   return trimmed;
 }
 
-function buildSearchQuery(sort: string, format: string, status: string, genre: string, season: string) {
+function buildSearchQuery(sort: string, format: string, status: string, genre: string, season: string, year: string) {
   const sortArr = sort ? `[SEARCH_MATCH, ${sort}]` : "[SEARCH_MATCH, POPULARITY_DESC]";
   return `query ($search: String, $page: Int, $perPage: Int) {
   Page(page: $page, perPage: $perPage) {
-    media(search: $search, type: ANIME, isAdult: false, genre_not_in: ["Hentai"], sort: ${sortArr}${format ? `, format: ${format}` : ""}${status ? `, status: ${status}` : ""}${genre ? `, genre: "${genre}"` : ""}${season ? `, season: ${season}` : ""}) {
+    media(search: $search, type: ANIME, isAdult: false, genre_not_in: ["Hentai"], sort: ${sortArr}${format ? `, format: ${format}` : ""}${status ? `, status: ${status}` : ""}${genre ? `, genre: "${genre}"` : ""}${season ? `, season: ${season}` : ""}${year ? `, startDate_greater: "${Number(year) - 1}-12-31", startDate_lesser: "${Number(year) + 1}-01-01"` : ""}) {
       id title { romaji english native } coverImage { large extraLarge } averageScore episodes format status startDate { year } genres
     }
   }
 }`;
 }
 
-function buildBrowseQuery(sort: string, format: string, status: string, genre: string, season: string) {
+function buildBrowseQuery(sort: string, format: string, status: string, genre: string, season: string, year: string) {
   return `query ($page: Int, $perPage: Int) {
   Page(page: $page, perPage: $perPage) {
-    media(type: ANIME, isAdult: false, genre_not_in: ["Hentai","Ecchi"], sort: [${sort || "POPULARITY_DESC"}]${format ? `, format: ${format}` : ""}${status ? `, status: ${status}` : ""}${genre ? `, genre: "${genre}"` : ""}${season ? `, season: ${season}` : ""}) {
+    media(type: ANIME, isAdult: false, genre_not_in: ["Hentai","Ecchi"], sort: [${sort || "POPULARITY_DESC"}]${format ? `, format: ${format}` : ""}${status ? `, status: ${status}` : ""}${genre ? `, genre: "${genre}"` : ""}${season ? `, season: ${season}` : ""}${year ? `, startDate_greater: "${Number(year) - 1}-12-31", startDate_lesser: "${Number(year) + 1}-01-01"` : ""}) {
       id title { romaji english } coverImage { large } averageScore episodes format status startDate { year } genres
     }
   }
@@ -239,6 +240,7 @@ export default function SearchScreen() {
   const [status, setStatus]       = useState("");
   const [genre, setGenre]         = useState("");
   const [season, setSeason]       = useState("");
+  const [year, setYear]           = useState("");
   const [showFilters, setShowFilters] = useState(false);
   const [showGenres, setShowGenres]   = useState(false);
   const [history, setHistory]     = useState<string[]>([]);
@@ -253,7 +255,7 @@ export default function SearchScreen() {
   const inputRef = useRef<TextInput>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const activeFilterCount = [format, status, genre, season].filter(Boolean).length;
+  const activeFilterCount = [format, status, genre, season, year].filter(Boolean).length;
 
   useEffect(() => {
     AsyncStorage.getItem("searchHistory")
@@ -263,7 +265,7 @@ export default function SearchScreen() {
   const searchAbortRef = useRef<AbortController | null>(null);
 
   const doSearch = useCallback(async (
-    q: string, so: string, fo: string, st: string, ge: string, se: string,
+    q: string, so: string, fo: string, st: string, ge: string, se: string, ye: string,
     signal: AbortSignal
   ) => {
     setLoading(true);
@@ -271,14 +273,14 @@ export default function SearchScreen() {
       let body: object;
       if (q.trim()) {
         const term = await translateQuery(q);
-        body = { query: buildSearchQuery(so, fo, st, ge, se), variables: { search: term, page: 1, perPage: 30 } };
+        body = { query: buildSearchQuery(so, fo, st, ge, se, ye), variables: { search: term, page: 1, perPage: 30 } };
         setHistory(prev => {
           const updated = [q, ...prev.filter(h => h !== q)].slice(0, 8);
           AsyncStorage.setItem("searchHistory", JSON.stringify(updated));
           return updated;
         });
       } else {
-        body = { query: buildBrowseQuery(so, fo, st, ge, se), variables: { page: 1, perPage: 30 } };
+        body = { query: buildBrowseQuery(so, fo, st, ge, se, ye), variables: { page: 1, perPage: 30 } };
       }
       const res = await fetch(`${SEARCH_API_BASE}/api/anilist`, {
         method: "POST",
@@ -302,22 +304,22 @@ export default function SearchScreen() {
   useEffect(() => {
     if (timer.current) clearTimeout(timer.current);
     searchAbortRef.current?.abort();
-    const hasFilters = format || status || genre || season;
+    const hasFilters = format || status || genre || season || year;
     if (!query.trim() && !hasFilters) { setResults([]); setLoading(false); return; }
     const ctrl = new AbortController();
     searchAbortRef.current = ctrl;
     timer.current = setTimeout(() => {
-      doSearch(query, sort, format, status, genre, season, ctrl.signal);
+      doSearch(query, sort, format, status, genre, season, year, ctrl.signal);
     }, query.trim() ? 400 : 100);
     return () => {
       if (timer.current) clearTimeout(timer.current);
       ctrl.abort();
     };
-  }, [query, sort, format, status, genre, season]);
+  }, [query, sort, format, status, genre, season, year]);
 
-  function clearFilters() { setFormat(""); setStatus(""); setGenre(""); setSeason(""); }
+  function clearFilters() { setFormat(""); setStatus(""); setGenre(""); setSeason(""); setYear(""); }
   const activeSeason = SEASON_OPTIONS.find(opt => opt.value === season);
-  const showEmpty = !query && !format && !status && !genre && !season;
+  const showEmpty = !query && !format && !status && !genre && !season && !year;
 
   /* ── trace.moe handlers ── */
   async function runTraceSearch(imageUri: string, mimeType?: string, base64Data?: string | null) {
@@ -503,6 +505,16 @@ export default function SearchScreen() {
                   ))}
                 </View>
               )}
+              <Text style={s.filterLabel}>السنة</Text>
+              <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
+                {YEAR_OPTIONS.map(y => (
+                  <Pressable key={y || "all-years"} onPress={() => setYear(y)}
+                    focusable={tvMode}
+                    style={({ focused }) => [s.filterChip, year === y && s.filterChipActive, tvMode && tvFocusStyle(focused)]}>
+                    <Text style={[s.filterChipText, year === y && s.filterChipTextActive]}>{y || "كل الأعوام"}</Text>
+                  </Pressable>
+                ))}
+              </View>
             </View>
           )}
         </View>

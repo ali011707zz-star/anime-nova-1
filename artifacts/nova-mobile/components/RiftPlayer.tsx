@@ -2145,11 +2145,13 @@ export function RiftPlayer({
         /* Android SurfaceView is not included by react-native-view-shot and
            produced a black saved image. TextureView is capturable while
            retaining the same native decoder/player. */
-        surfaceType={Platform.OS === "android" ? "textureView" : undefined}
+        // SurfaceView avoids the persistent split-tone compositor artifact
+        // seen on Android TV with TextureView. Screenshots are not used on TV.
+        surfaceType={Platform.OS === "android" && !(Platform as typeof Platform & { isTV?: boolean }).isTV ? "textureView" : undefined}
       />
 
       {/* Smooth first-frame handoff instead of a sudden black jump. */}
-      {buffering && position <= 0.25 && !error && !isAutoCycling && (
+      {buffering && position <= 0.25 && !error && !isAutoCycling && showControls && (
         <View style={s.entryLoadingOverlay} pointerEvents="none">
           <SpinRing size={42} />
           <Text style={s.entryLoadingText}>جارٍ فتح الحلقة…</Text>

@@ -402,6 +402,8 @@ export default function AnimeDetailScreen() {
       episodes: anime.episodes,
       score: anime.averageScore,
       addedAt: Date.now(),
+      startYear: anime.startDate?.year ?? null,
+      genres: anime.genres || [],
     });
   }, [anime, toggleFavorite]);
 
@@ -465,7 +467,7 @@ export default function AnimeDetailScreen() {
 
   return (
     <View style={[d.container, { paddingTop: topPad }]}>
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 100 }}>
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={[{ paddingBottom: 100 }, tvMode && d.tvContent]}>
 
         {/* ── Hero Banner ── */}
         <View style={d.hero}>
@@ -495,11 +497,11 @@ export default function AnimeDetailScreen() {
             <Image source={{ uri: anime.coverImage.extraLarge || anime.coverImage.large }} style={d.cover} />
           ) : null}
           <View style={d.infoText}>
-            <Text style={d.titleMain} numberOfLines={2}>
+            <Text style={[d.titleMain, tvMode && d.tvTitleMain]} numberOfLines={2}>
               {anime.title?.english || anime.title?.romaji}
             </Text>
             {anime.title?.romaji && anime.title?.english && (
-              <Text style={d.titleNative} numberOfLines={1}>{anime.title.romaji}</Text>
+              <Text style={[d.titleNative, tvMode && d.tvTitleNative]} numberOfLines={1}>{anime.title.romaji}</Text>
             )}
             <View style={d.badgeRow}>
               {anime.format && (
@@ -534,7 +536,7 @@ export default function AnimeDetailScreen() {
         {nextEp && countdown && countdown > 0 ? (
           <View style={d.countdownBox}>
             <Ionicons name="time" size={14} color="#a78bfa" />
-            <Text style={d.countdownText}>
+            <Text style={[d.countdownText, tvMode && d.tvBodyText]}>
               الحلقة {nextEp.episode} تُبث بعد {fmtCountdown(countdown)}
             </Text>
           </View>
@@ -560,7 +562,7 @@ export default function AnimeDetailScreen() {
             <View style={d.watchBtnIcon}>
               <Ionicons name="play" size={16} color="#fff" />
             </View>
-            <Text style={d.watchBtnText}>مشاهدة الآن</Text>
+            <Text style={[d.watchBtnText, tvMode && d.tvButtonText]}>مشاهدة الآن</Text>
           </Pressable>
         </View>
 
@@ -638,7 +640,7 @@ export default function AnimeDetailScreen() {
             <SectionHeader title="القصة" />
             <View style={d.descBox}>
               <Text
-                style={d.descText}
+                style={[d.descText, tvMode && d.tvBodyText]}
                 numberOfLines={showFull ? undefined : 4}
               >{desc}</Text>
               {desc.length > 200 && (
@@ -991,6 +993,11 @@ const d = StyleSheet.create({
   charHeartBtnActive: { backgroundColor: "rgba(244,63,94,0.85)", borderColor: "#f43f5e" },
   charName: { fontSize: 8, color: "rgba(255,255,255,0.6)", fontFamily: "Cairo_400Regular", textAlign: "center", lineHeight: 12 },
   emptyTabText: { textAlign: "center", color: "rgba(255,255,255,0.2)", fontSize: 12, fontFamily: "Cairo_400Regular", paddingVertical: 20 },
+  tvContent: { paddingHorizontal: 24, paddingBottom: 140 },
+  tvTitleMain: { fontSize: 28, lineHeight: 36 },
+  tvTitleNative: { fontSize: 17, lineHeight: 25 },
+  tvBodyText: { fontSize: 18, lineHeight: 29 },
+  tvButtonText: { fontSize: 19 },
   relCard: { width: 100, gap: 6 },
   relImgWrap: { width: 100, height: 140, borderRadius: 12, overflow: "hidden", position: "relative", backgroundColor: "#1C1C22" },
   relImg: { width: "100%", height: "100%" },

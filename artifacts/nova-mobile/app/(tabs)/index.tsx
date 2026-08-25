@@ -182,7 +182,7 @@ export default function HomeScreen() {
     const ctrl = new AbortController();
     fetch(`${BASE_URL}/api/aw-dubbed/catalog?page=1`, { signal: ctrl.signal })
       .then(r => r.json())
-      .then(d => { if (!ctrl.signal.aborted) setAwDubbedSeries((d.results || []).slice(0, 10)); })
+      .then(d => { if (!ctrl.signal.aborted) setAwDubbedSeries(d.results || []); })
       .catch((e) => { if (e?.name !== "AbortError") console.warn("[Home] aw-dubbed/catalog fetch error"); });
     return () => ctrl.abort();
   }, []);
@@ -275,7 +275,7 @@ export default function HomeScreen() {
               </Pressable>
             </View>
             <FlatList
-              data={isTvLayout ? recentHistory.slice(0, 10) : recentHistory}
+              data={recentHistory}
               horizontal
               keyExtractor={(h) => `${h.animeId}-${h.ep}`}
               showsHorizontalScrollIndicator={false}
@@ -304,7 +304,7 @@ export default function HomeScreen() {
               initialNumToRender={5}
               maxToRenderPerBatch={5}
               windowSize={3}
-              removeClippedSubviews={Platform.OS !== "web"}
+              removeClippedSubviews={false}
             />
           </View>
         )}
@@ -323,7 +323,7 @@ export default function HomeScreen() {
               </Pressable>
             </View>
             <FlatList
-              data={isTvLayout ? todayEps.slice(0, 10) : todayEps}
+              data={todayEps}
               horizontal
               keyExtractor={(ep) => `${ep.animeId}-${ep.episode}`}
               showsHorizontalScrollIndicator={false}
@@ -352,7 +352,7 @@ export default function HomeScreen() {
               initialNumToRender={5}
               maxToRenderPerBatch={5}
               windowSize={3}
-              removeClippedSubviews={Platform.OS !== "web"}
+              removeClippedSubviews={false}
             />
           </View>
         )}
@@ -371,7 +371,7 @@ export default function HomeScreen() {
               </Pressable>
             </View>
             <FlatList
-              data={isTvLayout ? awDubbedSeries.slice(0, 10) : awDubbedSeries}
+              data={awDubbedSeries}
               horizontal
               keyExtractor={(item: any, idx) => String(item.key || idx)}
               showsHorizontalScrollIndicator={false}
@@ -418,7 +418,7 @@ export default function HomeScreen() {
               initialNumToRender={5}
               maxToRenderPerBatch={5}
               windowSize={3}
-              removeClippedSubviews={Platform.OS !== "web"}
+              removeClippedSubviews={false}
             />
           </View>
         )}
@@ -436,7 +436,7 @@ export default function HomeScreen() {
               </Pressable>
             </View>
             <FlatList
-              data={isTvLayout ? dubbedSeries.slice(0, 10) : dubbedSeries}
+              data={dubbedSeries}
               horizontal
               keyExtractor={(item: any, idx) => String(item.key || item.id || idx)}
               showsHorizontalScrollIndicator={false}
@@ -471,7 +471,7 @@ export default function HomeScreen() {
               initialNumToRender={5}
               maxToRenderPerBatch={5}
               windowSize={3}
-              removeClippedSubviews={Platform.OS !== "web"}
+              removeClippedSubviews={false}
             />
           </View>
         )}

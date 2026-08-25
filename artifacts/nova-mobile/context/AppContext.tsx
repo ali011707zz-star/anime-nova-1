@@ -25,6 +25,8 @@ export type FavoriteAnime = {
   episodes: number | null;
   score: number | null;
   addedAt: number;
+  startYear?: number | null;
+  genres?: string[];
 };
 
 type AppContextType = {

@@ -71,3 +71,16 @@ export function tvLayout(width: number, height: number) {
     sectionGap: tv ? 32 : 24,
   };
 }
+
+/** Shared TV sizing scale. Keep phone values untouched and make remote
+ * targets/text comfortably readable on a ten-foot screen. */
+export function tvScale(tv: boolean, phone: number, television: number) {
+  return tv ? television : phone;
+}
+
+export const tvReadable = {
+  title: { fontSize: 30, lineHeight: 38 },
+  body: { fontSize: 18, lineHeight: 28 },
+  small: { fontSize: 15, lineHeight: 22 },
+  button: { minHeight: 58, paddingHorizontal: 24, paddingVertical: 14 },
+};

@@ -11,7 +11,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useColors } from "@/hooks/useColors";
 import { useApp } from "@/context/AppContext";
-import { isTvDevice } from "@/utils/tv";
+import { isTvDevice, tvFocusStyle } from "@/utils/tv";
 
 interface FavChar {
   id: number;
@@ -56,6 +56,7 @@ const TABS = [
   { label: "المحفوظة",  icon: "bookmark-outline" as const,    activeIcon: "bookmark" as const },
   { label: "الشخصيات",  icon: "people-outline" as const,      activeIcon: "people" as const },
 ];
+const LIBRARY_YEARS = ["", "2026", "2025", "2024", "2023", "2022", "2021", "2020"];
 
 export default function LibraryScreen() {
   const colors = useColors();
@@ -70,6 +71,8 @@ export default function LibraryScreen() {
 
   const [activeTab, setActiveTab] = useState(0);
   const [search, setSearch] = useState("");
+  const [year, setYear] = useState("");
+  const [genre, setGenre] = useState("");
   const [favChars, setFavChars] = useState<FavChar[]>([]);
 
   useEffect(() => {
@@ -131,10 +134,13 @@ export default function LibraryScreen() {
   /* ── Filtered favorites (المحفوظة) ── */
   const filteredFavs = useMemo(() => {
     const sq = search.toLowerCase();
-    return sq
-      ? favorites.filter(f => (f.english || f.title).toLowerCase().includes(sq))
-      : favorites;
-  }, [favorites, search]);
+    return favorites.filter(f => {
+      const matchesSearch = !sq || (f.english || f.title).toLowerCase().includes(sq);
+      const matchesYear = !year || String(f.startYear || new Date(f.addedAt).getFullYear()) === year;
+      const matchesGenre = !genre || (f.genres || []).includes(genre);
+      return matchesSearch && matchesYear && matchesGenre;
+    });
+  }, [favorites, search, year, genre]);
 
   /* ── Filtered characters (الشخصيات) ── */
   const filteredChars = useMemo(() => {
@@ -282,6 +288,26 @@ export default function LibraryScreen() {
           </Pressable>
         )}
       </View>
+      {activeTab === 2 && (
+        <View style={s.libraryFilters}>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.filterChips}>
+            {LIBRARY_YEARS.map(y => (
+              <Pressable key={y || "all-years"} onPress={() => setYear(y)} focusable={tvMode}
+                style={({ focused }) => [s.filterChip, year === y && s.filterChipActive, tvMode && tvFocusStyle(focused)]}>
+                <Text style={[s.filterChipText, year === y && s.filterChipTextActive]}>{y || "كل الأعوام"}</Text>
+              </Pressable>
+            ))}
+          </ScrollView>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.filterChips}>
+            {["", "Action", "Adventure", "Comedy", "Drama", "Fantasy", "Romance", "Mystery", "Sports"].map(g => (
+              <Pressable key={g || "all-genres"} onPress={() => setGenre(g)} focusable={tvMode}
+                style={({ focused }) => [s.filterChip, genre === g && s.filterChipActive, tvMode && tvFocusStyle(focused)]}>
+                <Text style={[s.filterChipText, genre === g && s.filterChipTextActive]}>{g || "كل التصنيفات"}</Text>
+              </Pressable>
+            ))}
+          </ScrollView>
+        </View>
+      )}
 
       {/* ── Tab 0: متابعة ── */}
       {activeTab === 0 && (
@@ -483,4 +509,10 @@ const s = StyleSheet.create({
   emptyDesc: { fontSize: 12, fontFamily: "Cairo_400Regular", textAlign: "center", lineHeight: 20 },
   browseBtn: { flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 22, paddingVertical: 11, borderRadius: 12, marginTop: 4 },
   browseBtnText: { color: "#fff", fontFamily: "Cairo_700Bold", fontSize: 13 },
+  libraryFilters: { gap: 6, marginBottom: 8 },
+  filterChips: { paddingHorizontal: 16, gap: 8 },
+  filterChip: { paddingHorizontal: 12, paddingVertical: 7, borderRadius: 12, backgroundColor: "#18181B", borderWidth: 1, borderColor: "rgba(255,255,255,0.07)" },
+  filterChipActive: { backgroundColor: "rgba(139,92,246,0.22)", borderColor: "rgba(139,92,246,0.5)" },
+  filterChipText: { fontSize: 11, fontFamily: "Cairo_700Bold", color: "rgba(255,255,255,0.5)" },
+  filterChipTextActive: { color: "#c4b5fd" },
 });
