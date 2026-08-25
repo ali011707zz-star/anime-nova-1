@@ -364,6 +364,47 @@ jobs:
           path: artifacts/nova-mobile/android/app/build/outputs/apk/release/*.apk
           retention-days: 30
 
+      # Optional production publishing: add VPS_HOST, VPS_USER, and
+      # VPS_PASSWORD in the repository's GitHub Actions secrets. The APK
+      # remains available as an Actions artifact when these are not configured.
+      - name: 🌐 Publish APK to website
+        if: ${{ secrets.VPS_HOST != '' && secrets.VPS_USER != '' && secrets.VPS_PASSWORD != '' }}
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          password: ${{ secrets.VPS_PASSWORD }}
+          port: 22
+          source: artifacts/nova-mobile/android/app/build/outputs/apk/release/*.apk
+          target: /tmp/anime-nova-apk-${{ github.run_id }}
+          overwrite: true
+
+      - name: 🔁 Activate website APK
+        if: ${{ secrets.VPS_HOST != '' && secrets.VPS_USER != '' && secrets.VPS_PASSWORD != '' }}
+        uses: appleboy/ssh-action@v1.2.2
+        env:
+          RUN_ID: ${{ github.run_id }}
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          password: ${{ secrets.VPS_PASSWORD }}
+          port: 22
+          envs: RUN_ID
+          script: |
+            set -eu
+            apk_dir="/tmp/anime-nova-apk-${RUN_ID}"
+            apk="$(find "$apk_dir" -type f -name '*.apk' | head -1)"
+            test -n "$apk" && test -s "$apk"
+            install -d -m 0755 /opt/anime-nova/public
+            if [ -f "/opt/anime-nova/public/Anime Nova.apk" ]; then
+              cp -p "/opt/anime-nova/public/Anime Nova.apk" \
+                "/opt/anime-nova/public/Anime Nova.apk.bak-${RUN_ID}"
+            fi
+            install -m 0644 "$apk" "/opt/anime-nova/public/Anime Nova.apk"
+            install -m 0644 "$apk" "/opt/anime-nova/public/Anime-Nova.apk"
+            sha256sum "/opt/anime-nova/public/Anime Nova.apk"
+            rm -rf "$apk_dir"
+
       - name: 📤 Upload build log (on failure)
         if: failure()
         uses: actions/upload-artifact@v4
