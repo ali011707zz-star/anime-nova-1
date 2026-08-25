@@ -29,6 +29,10 @@ jobs:
     name: Build Android APK
     runs-on: ubuntu-latest
     timeout-minutes: 90
+    env:
+      VPS_HOST: ${{ secrets.VPS_HOST }}
+      VPS_USER: ${{ secrets.VPS_USER }}
+      VPS_PASSWORD: ${{ secrets.VPS_PASSWORD }}
 
     steps:
       - name: 📦 Checkout
@@ -368,26 +372,26 @@ jobs:
       # VPS_PASSWORD in the repository's GitHub Actions secrets. The APK
       # remains available as an Actions artifact when these are not configured.
       - name: 🌐 Publish APK to website
-        if: ${{ secrets.VPS_HOST != '' && secrets.VPS_USER != '' && secrets.VPS_PASSWORD != '' }}
+        if: ${{ env.VPS_HOST != '' && env.VPS_USER != '' && env.VPS_PASSWORD != '' }}
         uses: appleboy/scp-action@v0.1.7
         with:
-          host: ${{ secrets.VPS_HOST }}
-          username: ${{ secrets.VPS_USER }}
-          password: ${{ secrets.VPS_PASSWORD }}
+          host: ${{ env.VPS_HOST }}
+          username: ${{ env.VPS_USER }}
+          password: ${{ env.VPS_PASSWORD }}
           port: 22
           source: artifacts/nova-mobile/android/app/build/outputs/apk/release/*.apk
           target: /tmp/anime-nova-apk-${{ github.run_id }}
           overwrite: true
 
       - name: 🔁 Activate website APK
-        if: ${{ secrets.VPS_HOST != '' && secrets.VPS_USER != '' && secrets.VPS_PASSWORD != '' }}
+        if: ${{ env.VPS_HOST != '' && env.VPS_USER != '' && env.VPS_PASSWORD != '' }}
         uses: appleboy/ssh-action@v1.2.2
         env:
           RUN_ID: ${{ github.run_id }}
         with:
-          host: ${{ secrets.VPS_HOST }}
-          username: ${{ secrets.VPS_USER }}
-          password: ${{ secrets.VPS_PASSWORD }}
+          host: ${{ env.VPS_HOST }}
+          username: ${{ env.VPS_USER }}
+          password: ${{ env.VPS_PASSWORD }}
           port: 22
           envs: RUN_ID
           script: |
