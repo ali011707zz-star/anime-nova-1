@@ -299,8 +299,18 @@ router.get("/dubbed/catalog", async (req, res) => {
   const forceRefresh = req.query.refresh === "1";
   const data = await fetchStarCimaDubbed(`/api/dubbed/catalog?page=${page}`, forceRefresh);
   if (!data) { res.status(502).json({ error: "upstream failed" }); return; }
+  // Older mobile builds accept only absolute poster URLs. StarCima returns
+  // /api/dubbed/img paths, so expose the same proxy as an absolute URL.
+  const publicBase = (process.env.NOVA_PUBLIC_URL || "https://animenovaa.duckdns.org").replace(/\/$/, "");
+  const results = Array.isArray(data.results) ? data.results.map((item: any) => ({
+    ...item,
+    image: typeof item.image === "string" && item.image.startsWith("/")
+      ? `${publicBase}${item.image}`
+      : item.image,
+  })) : data.results;
+  const responseData = results ? { ...data, results } : data;
   res.setHeader("Cache-Control", forceRefresh ? "no-store" : "public, max-age=300");
-  res.json(data);
+  res.json(responseData);
 });
 
 // ── GET /api/dubbed/search?q= ──
