@@ -397,6 +397,7 @@ function AuthSheet({ open, onClose, onLogin }: {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ accessToken }),
+        credentials: "include",
       });
       const d = await r.json();
       // Google auth currently establishes the server session cookie. Older

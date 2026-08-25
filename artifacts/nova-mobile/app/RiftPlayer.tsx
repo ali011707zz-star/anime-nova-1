@@ -24,6 +24,7 @@ import { TvPressable } from "@/utils/tv";
 const Pressable = TvPressable;
 
 const { width: W, height: H } = Dimensions.get("window");
+const IS_TV = Platform.isTV;
 
 /* ─── Types ─── */
 export type PlayerSource = {
@@ -99,7 +100,7 @@ const SUB_POSITIONS = [
 ];
 
 const DEFAULT_SUB_SETTINGS: SubSettings = {
-  fontSize: 16,
+  fontSize: IS_TV ? 34 : 16,
   color: "#ffffff",
   bgOpacity: 0,
   bold: false,
@@ -1581,7 +1582,10 @@ export function RiftPlayer({
               s.subtitleText,
               i > 0 && { marginTop: 2 },
               {
-                fontSize: subSettings.fontSize,
+                // TV viewing distance needs a much larger subtitle baseline.
+                fontSize: IS_TV
+                  ? Math.max(34, Math.round(subSettings.fontSize * 1.75))
+                  : subSettings.fontSize,
                 color: subSettings.color,
                 fontWeight: subSettings.bold ? "700" : "400",
                 backgroundColor: subSettings.bgOpacity > 0

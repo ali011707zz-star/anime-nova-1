@@ -53,13 +53,13 @@ export function TelegramAnnouncementModal({
       statusBarTranslucent
     >
       <View style={styles.backdrop}>
-        <View style={styles.card} accessibilityViewIsModal>
+        <View style={[styles.card, tvMode && styles.tvCard]} accessibilityViewIsModal>
           <Pressable
             accessibilityLabel="إغلاق"
             testID="telegram-announcement-close"
             onPress={onClose}
             focusable={tvMode}
-            hasTVPreferredFocus={tvMode}
+            hasTVPreferredFocus={false}
             hitSlop={tvMode ? 14 : 8}
             style={({ pressed, focused }) => [
               styles.closeButton,
@@ -81,12 +81,12 @@ export function TelegramAnnouncementModal({
             />
           </View>
 
-          <View style={styles.content}>
+          <View style={[styles.content, tvMode && styles.tvContent]}>
             <View style={styles.telegramIcon}>
               <Ionicons name="paper-plane" size={20} color="#FFFFFF" />
             </View>
-            <Text style={styles.title}>انضم إلى قناتنا على تلجرام</Text>
-            <Text style={styles.message}>
+            <Text style={[styles.title, tvMode && styles.tvTitle]}>انضم إلى قناتنا على تلجرام</Text>
+            <Text style={[styles.message, tvMode && styles.tvMessage]}>
               تابع أخبار وتحديثات NOVA Anime عبر قناتنا الرسمية على تلجرام،
               وأرسل لنا بلاغاتك عن أي مشكلة تواجهك.
             </Text>
@@ -96,6 +96,7 @@ export function TelegramAnnouncementModal({
               testID="telegram-announcement-open"
               onPress={openTelegram}
               focusable={tvMode}
+              hasTVPreferredFocus={tvMode}
               style={({ pressed, focused }) => [
                 styles.primaryButton,
                 tvMode && styles.tvButton,
@@ -104,7 +105,7 @@ export function TelegramAnnouncementModal({
               ]}
             >
               <Ionicons name="paper-plane-outline" size={18} color="#FFFFFF" />
-              <Text style={styles.primaryButtonText}>انضم الآن</Text>
+              <Text style={[styles.primaryButtonText, tvMode && styles.tvPrimaryButtonText]}>انضم الآن</Text>
             </Pressable>
             <Pressable
               accessibilityLabel="متابعة إلى التطبيق"
@@ -118,7 +119,7 @@ export function TelegramAnnouncementModal({
                 pressed && styles.pressed,
               ]}
             >
-              <Text style={styles.secondaryButtonText}>متابعة إلى التطبيق</Text>
+              <Text style={[styles.secondaryButtonText, tvMode && styles.tvSecondaryButtonText]}>متابعة إلى التطبيق</Text>
             </Pressable>
           </View>
         </View>
@@ -149,6 +150,11 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 12 },
     elevation: 12,
   },
+  tvCard: {
+    width: "78%",
+    maxWidth: 760,
+    borderRadius: 30,
+  },
   closeButton: {
     position: "absolute",
     top: 12,
@@ -176,6 +182,11 @@ const styles = StyleSheet.create({
     paddingTop: 18,
     paddingBottom: 20,
   },
+  tvContent: {
+    paddingHorizontal: 44,
+    paddingTop: 28,
+    paddingBottom: 34,
+  },
   telegramIcon: {
     width: 42,
     height: 42,
@@ -191,6 +202,7 @@ const styles = StyleSheet.create({
     fontSize: 19,
     textAlign: "center",
   },
+  tvTitle: { fontSize: 30 },
   message: {
     marginTop: 7,
     color: "rgba(255, 255, 255, 0.7)",
@@ -199,6 +211,7 @@ const styles = StyleSheet.create({
     lineHeight: 22,
     textAlign: "center",
   },
+  tvMessage: { fontSize: 20, lineHeight: 32 },
   primaryButton: {
     width: "100%",
     height: 46,
@@ -215,6 +228,7 @@ const styles = StyleSheet.create({
     fontFamily: "Cairo_700Bold",
     fontSize: 14,
   },
+  tvPrimaryButtonText: { fontSize: 21 },
   tvButton: { height: 62, borderRadius: 16 },
   secondaryButton: {
     paddingVertical: 10,
@@ -225,6 +239,7 @@ const styles = StyleSheet.create({
     fontFamily: "Cairo_600SemiBold",
     fontSize: 12,
   },
+  tvSecondaryButtonText: { fontSize: 18 },
   tvSecondaryButton: { paddingVertical: 16, paddingHorizontal: 24, borderRadius: 14 },
   pressed: {
     opacity: 0.72,
