@@ -13,12 +13,15 @@ import Video, { VideoRef } from "react-native-video";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator, Animated, Dimensions, Easing, I18nManager, Platform,
-  PanResponder, Pressable, ScrollView, StyleSheet, Text, View,
+  PanResponder, ScrollView, StyleSheet, Text, View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as FileSystem from "expo-file-system";
 import { getBaseUrl } from "@/utils/api";
+import { TvPressable } from "@/utils/tv";
+
+const Pressable = TvPressable;
 
 const { width: W, height: H } = Dimensions.get("window");
 

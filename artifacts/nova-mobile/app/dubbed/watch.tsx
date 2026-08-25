@@ -10,10 +10,12 @@ import { RiftPlayer, PlayerSource } from "@/components/RiftPlayer";
 import { getBaseUrl } from "@/utils/api";
 import { ensureWatchAccess } from "@/utils/adPolicy";
 import { RewardedAdPrompt } from "@/components/RewardedAdPrompt";
+import { isTvDevice, tvFocusStyle } from "@/utils/tv";
 
 export default function DubbedWatchScreen() {
   const insets = useSafeAreaInsets();
   const router  = useRouter();
+  const tvMode  = isTvDevice();
   const topPad  = Platform.OS === "web" ? 0 : insets.top;
 
   const { epUrl, title, ep, season } = useLocalSearchParams<{
@@ -151,7 +153,8 @@ export default function DubbedWatchScreen() {
       <View style={[styles.container, { paddingTop: topPad }]}>
         <RewardedAdPrompt />
         <View style={styles.header}>
-          <Pressable onPress={() => router.back()} style={styles.backBtn}>
+           <Pressable onPress={() => router.back()} focusable={tvMode}
+             style={({ focused }) => [styles.backBtn, tvMode && tvFocusStyle(focused)]}>
             <Ionicons name="chevron-back" size={20} color="rgba(255,255,255,0.7)" />
           </Pressable>
           <View style={{ flex: 1 }}>
@@ -173,7 +176,8 @@ export default function DubbedWatchScreen() {
       <View style={[styles.container, { paddingTop: topPad }]}>
         <RewardedAdPrompt />
         <View style={styles.header}>
-          <Pressable onPress={() => router.back()} style={styles.backBtn}>
+           <Pressable onPress={() => router.back()} focusable={tvMode}
+             style={({ focused }) => [styles.backBtn, tvMode && tvFocusStyle(focused)]}>
             <Ionicons name="chevron-back" size={20} color="rgba(255,255,255,0.7)" />
           </Pressable>
           <View style={{ flex: 1 }}>
@@ -186,7 +190,8 @@ export default function DubbedWatchScreen() {
             <Ionicons name="alert-circle" size={36} color="#f87171" />
           </View>
           <Text style={styles.errorText}>{error || "لم يُعثر على مصدر"}</Text>
-          <Pressable onPress={loadSource} style={styles.retryBtn}>
+          <Pressable onPress={loadSource} focusable={tvMode}
+            style={({ focused }) => [styles.retryBtn, tvMode && tvFocusStyle(focused)]}>
             <Ionicons name="refresh" size={16} color="#A78BFA" />
             <Text style={styles.retryText}>إعادة المحاولة</Text>
           </Pressable>

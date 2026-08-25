@@ -11,6 +11,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { getBaseUrl } from "@/utils/api";
+import { isTvDevice, tvFocusStyle } from "@/utils/tv";
 
 const BASE = getBaseUrl();
 
@@ -27,6 +28,7 @@ export default function AwDubbedDetailScreen() {
   const insets   = useSafeAreaInsets();
   const router   = useRouter();
   const topPad   = Platform.OS === "web" ? 0 : insets.top;
+  const tvMode   = isTvDevice();
   const params   = useLocalSearchParams<{
     key: string; title: string; titleAr: string;
     seasons: string; poster: string;
@@ -89,7 +91,8 @@ export default function AwDubbedDetailScreen() {
   const renderEp = useCallback(({ item: ep }: { item: Episode }) => (
     <Pressable
       onPress={() => openWatch(ep)}
-      style={({ pressed }) => [styles.epRow, { opacity: pressed ? 0.7 : 1 }]}
+      focusable={tvMode}
+      style={({ pressed, focused }) => [styles.epRow, { opacity: pressed ? 0.7 : 1 }, tvMode && tvFocusStyle(focused)]}
     >
       <View style={styles.epThumb}>
         {poster && !imgError ? (
@@ -121,7 +124,8 @@ export default function AwDubbedDetailScreen() {
     <View style={[styles.container, { paddingTop: topPad }]}>
       {/* Header */}
       <View style={styles.header}>
-        <Pressable onPress={() => router.back()} style={styles.backBtn}>
+         <Pressable onPress={() => router.back()} focusable={tvMode}
+           style={({ focused }) => [styles.backBtn, tvMode && tvFocusStyle(focused)]}>
           <Ionicons name="chevron-forward" size={20} color="rgba(255,255,255,0.7)" />
         </Pressable>
         <Text style={styles.headerTitle} numberOfLines={1}>{displayTitle}</Text>
@@ -171,7 +175,8 @@ export default function AwDubbedDetailScreen() {
                   contentContainerStyle={styles.seasonsTabs}>
                   {seasons.map((s, i) => (
                     <Pressable key={s.animeId} onPress={() => setSelSeason(i)}
-                      style={[styles.seasonTab, i === selSeason && styles.seasonTabActive]}>
+                      focusable={tvMode}
+                      style={({ focused }) => [styles.seasonTab, i === selSeason && styles.seasonTabActive, tvMode && tvFocusStyle(focused)]}>
                       <Text style={[styles.seasonTabText, i === selSeason && styles.seasonTabTextActive]}>
                         {s.label}
                       </Text>

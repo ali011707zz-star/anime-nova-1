@@ -10,6 +10,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useApp } from "@/context/AppContext";
 import { getBaseUrl } from "@/utils/api";
 import { secureFetch } from "@/utils/secureApi";
+import { isTvDevice, tvFocusStyle } from "@/utils/tv";
 
 const { width: W } = Dimensions.get("window");
 const DRAWER_W = Math.min(W * 0.80, 320);
@@ -64,6 +65,7 @@ type Props = { visible: boolean; onClose: () => void };
 export function DrawerMenu({ visible, onClose }: Props) {
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const tvMode = isTvDevice(Dimensions.get("window").width, Dimensions.get("window").height);
   const topPad = Platform.OS === "web" ? 0 : insets.top;
   const { watchHistory, favorites } = useApp();
   const [userData, setUserData] = React.useState<UserData | null>(null);
@@ -141,13 +143,13 @@ export function DrawerMenu({ visible, onClose }: Props) {
               <Text style={s.logoText}>Anime <Text style={{ color: "#8B5CF6" }}>NOVA</Text></Text>
               <Text style={s.logoSub}>منصة الأنمي العربية</Text>
             </View>
-            <Pressable onPress={onClose} style={s.closeBtn}>
+            <Pressable onPress={onClose} focusable={tvMode} style={({ focused }) => [s.closeBtn, tvMode && tvFocusStyle(focused)]}>
               <Ionicons name="close" size={20} color="rgba(255,255,255,0.5)" />
             </Pressable>
           </View>
 
           {/* ── User card ── */}
-          <Pressable onPress={() => nav("/settings")} style={s.userCard}>
+          <Pressable onPress={() => nav("/settings")} focusable={tvMode} style={({ focused }) => [s.userCard, tvMode && tvFocusStyle(focused)]}>
             <LinearGradient colors={["rgba(139,92,246,0.15)", "rgba(109,40,217,0.08)"]} style={s.userCardInner}>
               {/* Avatar: real photo or gradient letter */}
               {userData?.profileImageUrl ? (
@@ -179,20 +181,20 @@ export function DrawerMenu({ visible, onClose }: Props) {
 
           {/* ── Main navigation ── */}
           <Text style={s.sectionLabel}>القائمة الرئيسية</Text>
-          {NAV_MAIN.map((item) => (
-            <DrawerItem key={item.label} item={item} onPress={() => nav(item.route)} />
+            {NAV_MAIN.map((item) => (
+            <DrawerItem key={item.label} item={item} tvMode={tvMode} onPress={() => nav(item.route)} />
           ))}
 
           {/* ── Library ── */}
           <Text style={s.sectionLabel}>مكتبتي</Text>
           {NAV_LIBRARY.map((item) => (
-            <DrawerItem key={item.label} item={item} onPress={() => nav(item.route)} />
+            <DrawerItem key={item.label} item={item} tvMode={tvMode} onPress={() => nav(item.route)} />
           ))}
 
           {/* ── Other ── */}
           <Text style={s.sectionLabel}>أخرى</Text>
           {NAV_OTHER.map((item) => (
-            <DrawerItem key={item.label} item={item} onPress={() => nav(item.route)} />
+            <DrawerItem key={item.label} item={item} tvMode={tvMode} onPress={() => nav(item.route)} />
           ))}
 
           {/* ── Footer ── */}
@@ -209,9 +211,13 @@ export function DrawerMenu({ visible, onClose }: Props) {
   );
 }
 
-function DrawerItem({ item, onPress }: { item: NavItem; onPress: () => void }) {
+function DrawerItem({ item, onPress, tvMode }: { item: NavItem; onPress: () => void; tvMode: boolean }) {
   return (
-    <Pressable onPress={onPress} style={({ pressed }) => [s.navItem, pressed && { backgroundColor: "rgba(255,255,255,0.04)" }]}>
+    <Pressable onPress={onPress} focusable={tvMode} style={({ pressed, focused }) => [
+      s.navItem,
+      pressed && { backgroundColor: "rgba(255,255,255,0.04)" },
+      tvMode && tvFocusStyle(focused),
+    ]}>
       <View style={[s.navIcon, { backgroundColor: (item.color || "#8B5CF6") + "18" }]}>
         <Ionicons name={item.icon} size={18} color={item.color || "#8B5CF6"} />
       </View>

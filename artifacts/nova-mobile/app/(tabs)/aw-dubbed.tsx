@@ -15,6 +15,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { getBaseUrl } from "@/utils/api";
+import { isTvDevice, tvFocusStyle } from "@/utils/tv";
 
 // ─────────────────────────────────────────────────────────
 // Types
@@ -69,9 +70,11 @@ function PosterCard({ uri, title, seasons, tint, onPress }: {
   tint: string; onPress: () => void;
 }) {
   const [imgErr, setImgErr] = useState(false);
+  const tvMode = isTvDevice();
   const show = !imgErr && !!uri;
   return (
-    <Pressable onPress={onPress} style={({ pressed }) => [card.wrap, { opacity: pressed ? 0.72 : 1 }]}>
+    <Pressable onPress={onPress} focusable={tvMode}
+      style={({ pressed, focused }) => [card.wrap, { opacity: pressed ? 0.72 : 1 }, tvMode && tvFocusStyle(focused)]}>
       <View style={card.poster}>
         {show ? (
           <Image source={{ uri: uri! }} style={StyleSheet.absoluteFill} resizeMode="cover"
@@ -367,6 +370,7 @@ function CartoonList({ searchQ }: { searchQ: string }) {
 
 export default function DubbedTabScreen() {
   const insets = useSafeAreaInsets();
+  const tvMode = isTvDevice();
   const topPad = Platform.OS === "web" ? 0 : insets.top;
 
   const [activeTab, setActiveTab] = useState<TabKey>("animation");
@@ -407,7 +411,8 @@ export default function DubbedTabScreen() {
             if (open) setTimeout(() => searchInput.current?.focus(), 120);
             else setSearchQ("");
           }}
-          style={[s.iconBtn, searchOpen && { backgroundColor: "rgba(139,92,246,0.20)", borderColor: "rgba(139,92,246,0.35)" }]}
+           focusable={tvMode}
+           style={({ focused }) => [s.iconBtn, searchOpen && { backgroundColor: "rgba(139,92,246,0.20)", borderColor: "rgba(139,92,246,0.35)" }, tvMode && tvFocusStyle(focused)]}
         >
           <Ionicons name={searchOpen ? "close" : "search"} size={18} color="rgba(255,255,255,0.7)" />
         </Pressable>
@@ -420,7 +425,8 @@ export default function DubbedTabScreen() {
           const color  = tab === "animation" ? "#10B981" : "#7C3AED";
           return (
             <Pressable key={tab} onPress={() => handleTab(tab)}
-              style={[s.tabBtn, active && { borderColor: `${color}55`, backgroundColor: `${color}12` }]}>
+              focusable={tvMode}
+              style={({ focused }) => [s.tabBtn, active && { borderColor: `${color}55`, backgroundColor: `${color}12` }, tvMode && tvFocusStyle(focused)]}>
               <Text style={[s.tabText, active && { color }]}>
                 {tab === "animation" ? "✨ أنيميشن" : "📺 كرتون"}
               </Text>
@@ -443,7 +449,8 @@ export default function DubbedTabScreen() {
             autoFocus
           />
           {searchQ ? (
-            <Pressable onPress={() => setSearchQ("")} style={{ marginRight: 8 }}>
+             <Pressable onPress={() => setSearchQ("")} focusable={tvMode}
+               style={({ focused }) => [ { marginRight: 8 }, tvMode && tvFocusStyle(focused)]}>
               <Ionicons name="close-circle" size={18} color="rgba(255,255,255,0.4)" />
             </Pressable>
           ) : null}

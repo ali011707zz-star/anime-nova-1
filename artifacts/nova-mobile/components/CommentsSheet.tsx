@@ -8,6 +8,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { getBaseUrl } from "@/utils/api";
 import { secureFetch } from "@/utils/secureApi";
+import { isTvDevice, tvFocusStyle } from "@/utils/tv";
 
 const AUTH_KEY = "nova-mobile-user";
 
@@ -83,6 +84,7 @@ function Avatar({ username, avatarUrl, size = 36 }: { username: string; avatarUr
 
 export function CommentsSheet({ visible, onClose, animeId, tmdbId, episodeNumber, title }: Props) {
   const insets = useSafeAreaInsets();
+  const tvMode = isTvDevice();
   const [comments, setComments] = useState<Comment[]>([]);
   const [loading, setLoading] = useState(false);
   const [posting, setPosting] = useState(false);
@@ -260,7 +262,8 @@ export function CommentsSheet({ visible, onClose, animeId, tmdbId, episodeNumber
         <View style={cs.commentActions}>
           <Pressable
             onPress={() => toggleLike(c)}
-            style={cs.actionBtn}
+            focusable={tvMode}
+            style={({ focused }) => [cs.actionBtn, tvMode && tvFocusStyle(focused)]}
             disabled={liking.has(c.id)}
           >
             <Ionicons
@@ -274,13 +277,15 @@ export function CommentsSheet({ visible, onClose, animeId, tmdbId, episodeNumber
           </Pressable>
           <Pressable
             onPress={() => { setReplyTo(c); setTimeout(() => inputRef.current?.focus(), 100); }}
-            style={cs.actionBtn}
+            focusable={tvMode}
+            style={({ focused }) => [cs.actionBtn, tvMode && tvFocusStyle(focused)]}
           >
             <Ionicons name="return-up-back" size={14} color="rgba(139,92,246,0.7)" />
             <Text style={[cs.actionBtnText, { color: "rgba(139,92,246,0.7)" }]}>رد</Text>
           </Pressable>
           {c.userId === myUser?.id && (
-            <Pressable onPress={() => deleteComment(c)} style={cs.actionBtn}>
+             <Pressable onPress={() => deleteComment(c)} focusable={tvMode}
+               style={({ focused }) => [cs.actionBtn, tvMode && tvFocusStyle(focused)]}>
               <Ionicons name="trash" size={13} color="rgba(239,68,68,0.45)" />
             </Pressable>
           )}

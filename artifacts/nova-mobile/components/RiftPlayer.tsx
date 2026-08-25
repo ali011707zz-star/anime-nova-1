@@ -14,13 +14,17 @@ import { VolumeManager } from "../lib/volume-manager";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator, Alert, Animated, Dimensions, Easing, I18nManager, Linking, Platform,
-  BackHandler, PanResponder, Pressable, ScrollView, StyleSheet, Text, View,
+  BackHandler, PanResponder, ScrollView, StyleSheet, Text, View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { getBaseUrl } from "@/utils/api";
+import { TvPressable } from "@/utils/tv";
 
 const { width: W, height: H } = Dimensions.get("window");
+// Keep the existing player controls in one place while making every control
+// visible to Android TV's D-pad focus engine.
+const Pressable = TvPressable;
 
 /* ─── Types ─── */
 export type PlayerSource = {

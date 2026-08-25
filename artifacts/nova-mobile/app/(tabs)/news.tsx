@@ -9,6 +9,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColors } from "@/hooks/useColors";
 import { CommentsSheet } from "@/components/CommentsSheet";
 import { getBaseUrl } from "@/utils/api";
+import { isTvDevice, tvFocusStyle } from "@/utils/tv";
 
 /* ═══════════════════════════════════════════════════════
    AniList GraphQL queries
@@ -113,6 +114,7 @@ export default function NewsScreen() {
   const colors  = useColors();
   const insets  = useSafeAreaInsets();
   const router  = useRouter();
+  const tvMode  = isTvDevice();
 
   /* AniList state */
   const [tab, setTab]         = useState<Tab>("latestnews");
@@ -247,7 +249,8 @@ export default function NewsScreen() {
     return (
       <Pressable
         onPress={() => Linking.openURL(item.url).catch(() => {})}
-        style={({ pressed }) => [s.newsCard, pressed && { opacity: 0.78 }]}
+        focusable={tvMode}
+        style={({ pressed, focused }) => [s.newsCard, pressed && { opacity: 0.78 }, tvMode && tvFocusStyle(focused)]}
       >
         {/* صورة مصغّرة */}
         {item.thumbnail ? (

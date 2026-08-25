@@ -13,6 +13,7 @@ import { HiddenResolverWebView, ResolvedStream } from "@/components/HiddenResolv
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useApp } from "@/context/AppContext";
+import { isTvDevice, tvFocusStyle } from "@/utils/tv";
 import { getBaseUrl } from "@/utils/api";
 import { secureFetch, secureStreamFetch, warmAuthToken, getAuthToken } from "@/utils/secureApi";
 import {
@@ -680,8 +681,10 @@ function SrcRow({ src, idx, onPlay }: { src: Src; idx: number; onPlay: (s: Src) 
   const q = getSrcQuality(src);
   const qs = QUALITY_STYLE[q];
   const tag = getSiteTag(src.site || "");
+  const tvMode = isTvDevice();
   return (
-    <Pressable onPress={() => onPlay(src)} style={d.srcRow}>
+    <Pressable onPress={() => onPlay(src)} focusable={tvMode}
+      style={({ focused }) => [d.srcRow, tvMode && tvFocusStyle(focused)]}>
       <View style={[d.srcIcon, { backgroundColor: qs.badge, borderColor: qs.border }]}>
         <Ionicons name="play-circle" size={11} color={qs.text} />
       </View>
@@ -719,6 +722,7 @@ export default function WatchScreen() {
   const insets   = useSafeAreaInsets();
   const router   = useRouter();
   const { addToHistory } = useApp();
+  const tvMode   = isTvDevice();
   const topPad   = insets.top > 0 ? insets.top : (Platform.OS === "ios" ? 44 : 24);
 
   const titleStr    = safeDecodeURIComponent(title);
@@ -1695,7 +1699,7 @@ export default function WatchScreen() {
       <View style={{ flex: 1, backgroundColor: "#07070d" }}>
         {coverUrl ? <Image source={{ uri: coverUrl }} style={[StyleSheet.absoluteFill, { opacity: 0.13 }]} blurRadius={Platform.OS === "ios" ? 28 : 10} resizeMode="cover" /> : null}
         <LinearGradient colors={["rgba(7,7,13,0.90)", "rgba(12,8,24,0.60)", "rgba(7,7,13,0.95)"]} style={StyleSheet.absoluteFill} />
-        <Pressable onPress={handleBack} style={[d.ldBackBtn, { top: topPad + 4 }]}>
+        <Pressable onPress={handleBack} focusable={tvMode} style={({ focused }) => [d.ldBackBtn, { top: topPad + 4 }, tvMode && tvFocusStyle(focused)]}>
           <Ionicons name="arrow-back" size={20} color="rgba(255,255,255,0.65)" />
         </Pressable>
         <View style={d.ldContent}>
@@ -1763,7 +1767,7 @@ export default function WatchScreen() {
     const resolveUrl2 = getPlayUrl(playingSrc);
     return (
       <View style={{ flex: 1, backgroundColor: "#07070d", alignItems: "center", justifyContent: "center", gap: 14 }}>
-        <Pressable onPress={handleBack} style={[d.playerBackBtn, { position: "absolute", top: topPad + 4, right: 12 }]}>
+        <Pressable onPress={handleBack} focusable={tvMode} style={({ focused }) => [d.playerBackBtn, { position: "absolute", top: topPad + 4, right: 12 }, tvMode && tvFocusStyle(focused)]}>
           <Ionicons name="arrow-back" size={18} color="#fff" />
         </Pressable>
         <SpinRing />
@@ -1788,14 +1792,15 @@ export default function WatchScreen() {
     if (Platform.OS === "web") {
       return (
         <View style={{ flex: 1, backgroundColor: "#07070d", alignItems: "center", justifyContent: "center", gap: 16 }}>
-          <Pressable onPress={handleBack} style={[d.playerBackBtn, { position: "absolute", top: topPad + 4, right: 12 }]}>
+          <Pressable onPress={handleBack} focusable={tvMode} style={({ focused }) => [d.playerBackBtn, { position: "absolute", top: topPad + 4, right: 12 }, tvMode && tvFocusStyle(focused)]}>
             <Ionicons name="arrow-back" size={18} color="#fff" />
           </Pressable>
           <View style={{ width: 72, height: 72, borderRadius: 36, backgroundColor: "rgba(139,92,246,0.15)", alignItems: "center", justifyContent: "center" }}>
             <Ionicons name="tv-outline" size={36} color="rgba(139,92,246,0.7)" />
           </View>
           <Text style={{ color: "#fff", fontFamily: "Cairo_700Bold", fontSize: 16, textAlign: "center" }}>هذا المصدر يحتاج التطبيق الأصلي</Text>
-          <Pressable onPress={() => setScreen("picker")}>
+          <Pressable onPress={() => setScreen("picker")} focusable={tvMode}
+            style={({ focused }) => [tvMode && tvFocusStyle(focused)]}>
             <Text style={{ color: "rgba(255,255,255,0.35)", fontFamily: "Cairo_400Regular", fontSize: 13 }}>العودة للمصادر</Text>
           </Pressable>
         </View>
@@ -1804,14 +1809,15 @@ export default function WatchScreen() {
     // Native: no WebView — show info card
     return (
       <View style={{ flex: 1, backgroundColor: "#07070d", alignItems: "center", justifyContent: "center", gap: 16 }}>
-        <Pressable onPress={handleBack} style={[d.playerBackBtn, { position: "absolute", top: topPad + 4, right: 12 }]}>
+        <Pressable onPress={handleBack} focusable={tvMode} style={({ focused }) => [d.playerBackBtn, { position: "absolute", top: topPad + 4, right: 12 }, tvMode && tvFocusStyle(focused)]}>
           <Ionicons name="arrow-back" size={18} color="#fff" />
         </Pressable>
         <View style={{ width: 72, height: 72, borderRadius: 36, backgroundColor: "rgba(139,92,246,0.15)", alignItems: "center", justifyContent: "center" }}>
           <Ionicons name="tv-outline" size={36} color="rgba(139,92,246,0.7)" />
         </View>
         <Text style={{ color: "#fff", fontFamily: "Cairo_700Bold", fontSize: 16, textAlign: "center" }}>هذا المصدر يحتاج التطبيق الأصلي</Text>
-        <Pressable onPress={() => { saveProgress(); setScreen("picker"); }}>
+        <Pressable onPress={() => { saveProgress(); setScreen("picker"); }} focusable={tvMode}
+          style={({ focused }) => [tvMode && tvFocusStyle(focused)]}>
           <Text style={{ color: "rgba(255,255,255,0.35)", fontFamily: "Cairo_400Regular", fontSize: 13 }}>العودة للمصادر</Text>
         </Pressable>
       </View>
@@ -1831,20 +1837,22 @@ export default function WatchScreen() {
       {/* ── Header ── */}
       <View style={[d.header, { paddingTop: topPad + 4 }]}>
         <View style={d.headerLeft}>
-          <Pressable disabled={epNum <= 1} onPress={() => epNum > 1 && goEp(epNum - 1)}
-            style={[d.epNavBtn, epNum <= 1 && { opacity: 0.22 }]}>
+          <Pressable disabled={epNum <= 1} onPress={() => epNum > 1 && goEp(epNum - 1)} focusable={tvMode}
+            style={({ focused }) => [d.epNavBtn, epNum <= 1 && { opacity: 0.22 }, tvMode && tvFocusStyle(focused)]}>
             <Ionicons name="chevron-forward" size={12} color="rgba(255,255,255,0.55)" />
             <Text style={d.epNavText}>السابقة</Text>
           </Pressable>
           <Pressable
             disabled={totalEpsCount !== undefined && epNum >= totalEpsCount}
             onPress={() => goEp(epNum + 1)}
+            focusable={tvMode}
             style={[d.epNavBtn, { borderColor: "rgba(139,92,246,0.35)", backgroundColor: "rgba(139,92,246,0.10)" },
               (totalEpsCount !== undefined && epNum >= totalEpsCount) && { opacity: 0.22 }]}>
             <Text style={[d.epNavText, { color: "#c4b5fd" }]}>التالية</Text>
             <Ionicons name="chevron-back" size={12} color="rgba(196,181,253,0.9)" />
           </Pressable>
-          <Pressable onPress={refreshAllSources} style={d.headerRefreshBtn}>
+          <Pressable onPress={refreshAllSources} focusable={tvMode}
+            style={({ focused }) => [d.headerRefreshBtn, tvMode && tvFocusStyle(focused)]}>
             <Ionicons name="refresh" size={13} color="#8B5CF6" />
           </Pressable>
         </View>
@@ -1852,7 +1860,8 @@ export default function WatchScreen() {
           <Text style={d.headerTitle} numberOfLines={1}>{displayTitle}</Text>
           <Text style={d.headerSub}>الحلقة {epNum}</Text>
         </View>
-        <Pressable onPress={handleBack} style={d.headerBack}>
+        <Pressable onPress={handleBack} focusable={tvMode}
+          style={({ focused }) => [d.headerBack, tvMode && tvFocusStyle(focused)]}>
           <Ionicons name="arrow-back" size={17} color="rgba(255,255,255,0.75)" />
         </Pressable>
       </View>

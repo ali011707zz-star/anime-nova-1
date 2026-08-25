@@ -11,6 +11,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { getBaseUrl } from "@/utils/api";
 import { getYoutubeEmbedUrl, getYoutubeReferer } from "@/utils/youtube";
+import { isTvDevice, tvFocusStyle } from "@/utils/tv";
 
 const { width: W } = Dimensions.get("window");
 const IMG_W = "https://image.tmdb.org/t/p/w500";
@@ -54,6 +55,7 @@ export default function AnimationDetailScreen() {
   const { type, id } = useLocalSearchParams<{ type: string; id: string }>();
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const tvMode = isTvDevice();
 
   const [detail, setDetail] = useState<any>(null);
   const [loading, setLoading] = useState(true);
@@ -163,7 +165,8 @@ export default function AnimationDetailScreen() {
       <View style={[s.center, { paddingTop: insets.top }]}>
         <Ionicons name="film" size={48} color="rgba(139,92,246,0.4)" />
         <Text style={s.emptyText}>لم يتم العثور على البيانات</Text>
-        <Pressable onPress={() => router.canGoBack() ? router.back() : router.replace("/(tabs)" as any)} style={s.backBtn}>
+        <Pressable onPress={() => router.canGoBack() ? router.back() : router.replace("/(tabs)" as any)} focusable={tvMode}
+          style={({ focused }) => [s.backBtn, tvMode && tvFocusStyle(focused)]}>
           <Text style={s.backBtnText}>العودة</Text>
         </Pressable>
       </View>
@@ -205,7 +208,8 @@ export default function AnimationDetailScreen() {
           style={StyleSheet.absoluteFillObject}
         />
         <View style={[s.heroTopRow, { paddingTop: insets.top + 8 }]}>
-          <Pressable onPress={() => router.canGoBack() ? router.back() : router.replace("/(tabs)" as any)} style={s.backCircle}>
+           <Pressable onPress={() => router.canGoBack() ? router.back() : router.replace("/(tabs)" as any)} focusable={tvMode}
+             style={({ focused }) => [s.backCircle, tvMode && tvFocusStyle(focused)]}>
             <Ionicons name="chevron-back" size={20} color="#fff" />
           </Pressable>
           {score > 0 && (
@@ -278,8 +282,9 @@ export default function AnimationDetailScreen() {
       {/* ── Watch Button ── */}
       <View style={s.watchBtnWrap}>
         <Pressable
-          style={s.watchBtn}
           onPress={() => router.push((isTV ? getEpisodesUrl() : getWatchUrl()) as any)}
+          focusable={tvMode}
+          style={({ focused }) => [s.watchBtn, tvMode && tvFocusStyle(focused)]}
         >
           <LinearGradient
             colors={["#8B5CF6", "#6D28D9", "#5B21B6"]}
@@ -301,7 +306,8 @@ export default function AnimationDetailScreen() {
 
         <Pressable
           onPress={() => router.push(`/comments?tmdbId=${id}&title=${encodeURIComponent(title)}` as any)}
-          style={s.actionBtn}
+          focusable={tvMode}
+          style={({ focused }) => [s.actionBtn, tvMode && tvFocusStyle(focused)]}
         >
           <Ionicons name="chatbubble" size={20} color="rgba(255,255,255,0.45)" />
           <Text style={s.actionLabel}>التعليقات</Text>
@@ -317,7 +323,8 @@ export default function AnimationDetailScreen() {
               {overview}
             </Text>
             {overview.length > 200 && (
-              <Pressable onPress={() => setShowFull(p => !p)} style={s.showMoreBtn}>
+               <Pressable onPress={() => setShowFull(p => !p)} focusable={tvMode}
+                 style={({ focused }) => [s.showMoreBtn, tvMode && tvFocusStyle(focused)]}>
                 <Text style={s.showMoreText}>{showFull ? "عرض أقل" : "عرض المزيد"}</Text>
                 <Ionicons name={showFull ? "chevron-up" : "chevron-down"} size={13} color="#8B5CF6" />
               </Pressable>

@@ -8,6 +8,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { getBaseUrl } from "@/utils/api";
 import { secureFetch } from "@/utils/secureApi";
+import { isTvDevice, tvFocusStyle } from "@/utils/tv";
 
 /* ── Types ── */
 interface Comment {
@@ -56,6 +57,7 @@ function Avatar({ username, avatarUrl }: { username: string; avatarUrl?: string 
 export default function CommentsPage() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const tvMode = isTvDevice();
   const params = useLocalSearchParams<{ animeId?: string; tmdbId?: string; ep?: string; title?: string; type?: string }>();
 
   const animeId = params.animeId ? parseInt(params.animeId) : undefined;
@@ -190,16 +192,19 @@ export default function CommentsPage() {
         </View>
         <Text style={s.commentText}>{c.text}</Text>
           <View style={s.commentActions}>
-          <Pressable onPress={() => toggleLike(c)} style={s.actionBtn} disabled={liking.has(c.id)}>
+          <Pressable onPress={() => toggleLike(c)} focusable={tvMode}
+            style={({ focused }) => [s.actionBtn, tvMode && tvFocusStyle(focused)]} disabled={liking.has(c.id)}>
             <Ionicons name="heart" size={14} color={c.liked ? "#f87171" : "rgba(255,255,255,0.3)"} />
             {c.likes > 0 && <Text style={[s.actionBtnText, c.liked && { color: "#f87171" }]}>{c.likes}</Text>}
           </Pressable>
-          <Pressable onPress={() => { setReplyTo(c); setTimeout(() => inputRef.current?.focus(), 100); }} style={s.actionBtn}>
+          <Pressable onPress={() => { setReplyTo(c); setTimeout(() => inputRef.current?.focus(), 100); }} focusable={tvMode}
+            style={({ focused }) => [s.actionBtn, tvMode && tvFocusStyle(focused)]}>
             <Ionicons name="return-up-back" size={14} color="rgba(139,92,246,0.7)" />
             <Text style={[s.actionBtnText, { color: "rgba(139,92,246,0.7)" }]}>رد</Text>
           </Pressable>
           {c.userId === myUserId && (
-            <Pressable onPress={() => deleteComment(c)} style={s.actionBtn}>
+            <Pressable onPress={() => deleteComment(c)} focusable={tvMode}
+              style={({ focused }) => [s.actionBtn, tvMode && tvFocusStyle(focused)]}>
               <Ionicons name="trash" size={13} color="rgba(239,68,68,0.45)" />
             </Pressable>
           )}
@@ -213,7 +218,8 @@ export default function CommentsPage() {
     <View style={[s.container, { paddingTop: Platform.OS === "web" ? 0 : insets.top }]}>
       {/* Header */}
       <View style={s.header}>
-        <Pressable onPress={() => router.canGoBack() ? router.back() : router.replace("/(tabs)" as any)} style={s.backBtn}>
+        <Pressable onPress={() => router.canGoBack() ? router.back() : router.replace("/(tabs)" as any)} focusable={tvMode}
+          style={({ focused }) => [s.backBtn, tvMode && tvFocusStyle(focused)]}>
           <Ionicons name="chevron-back" size={20} color="#fff" />
         </Pressable>
         <View style={{ flex: 1 }}>

@@ -7,6 +7,7 @@ import {
   Text,
   View,
 } from "react-native";
+import { isTvDevice, tvFocusStyle } from "@/utils/tv";
 
 export type ErrorFallbackProps = {
   error: Error;
@@ -22,6 +23,7 @@ const VOLATILE_KEYS = ["nova-history", "nova-favorites", "nova-theme"];
  * theme/safe-area hooks that may be part of the failed tree.
  */
 export function ErrorFallback({ error, resetError }: ErrorFallbackProps) {
+  const tvMode = isTvDevice();
   const handleRestart = async () => {
     /* مسح البيانات المتقلبة قبل إعادة التشغيل لتجنب تكرار العطل */
     try {
@@ -50,12 +52,14 @@ export function ErrorFallback({ error, resetError }: ErrorFallbackProps) {
 
         <Pressable
           onPress={handleRestart}
-          style={({ pressed }) => [
+          focusable={tvMode}
+          style={({ pressed, focused }) => [
             styles.button,
             {
               opacity: pressed ? 0.9 : 1,
               transform: [{ scale: pressed ? 0.98 : 1 }],
             },
+            tvMode && tvFocusStyle(focused),
           ]}
         >
           <Text style={styles.buttonText}>

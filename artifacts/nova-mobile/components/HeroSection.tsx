@@ -5,9 +5,10 @@ import { LinearGradient } from "expo-linear-gradient";
 import { useRouter } from "expo-router";
 import React, { useEffect, useRef, useState } from "react";
 import {
-  Dimensions, Pressable, ScrollView, StyleSheet, Text, View,
+  Dimensions, Pressable, ScrollView, StyleSheet, Text, View, useWindowDimensions,
 } from "react-native";
 import { useColors } from "@/hooks/useColors";
+import { isTvDevice, tvFocusStyle } from "@/utils/tv";
 
 const { width: W } = Dimensions.get("window");
 const HERO_H = 290;
@@ -17,6 +18,8 @@ type Props = { items: AnilistMedia[] };
 export function HeroSection({ items }: Props) {
   const colors = useColors();
   const router = useRouter();
+  const { width, height } = useWindowDimensions();
+  const tvMode = isTvDevice(width, height);
   const scrollRef = useRef<ScrollView>(null);
   const [activeIdx, setActiveIdx] = useState(0);
 
@@ -52,7 +55,8 @@ export function HeroSection({ items }: Props) {
           return (
             <Pressable
               key={anime.id}
-              style={{ width: W, height: HERO_H }}
+              focusable={tvMode}
+              style={({ focused }) => [{ width: W, height: HERO_H }, tvMode && tvFocusStyle(focused)]}
               onPress={() => router.push(`/anime/${anime.id}?title=${encodeURIComponent(anime.title.romaji)}&english=${encodeURIComponent(anime.title.english || "")}`)}
             >
               <Image
@@ -92,15 +96,17 @@ export function HeroSection({ items }: Props) {
                 </View>
                 <View style={styles.btnRow}>
                   <Pressable
-                    style={[styles.watchBtn, { backgroundColor: colors.primary }]}
                     onPress={() => router.push({ pathname: "/episodes/[id]", params: { id: anime.id } } as any)}
+                    focusable={tvMode}
+                    style={({ focused }) => [styles.watchBtn, { backgroundColor: colors.primary }, tvMode && tvFocusStyle(focused)]}
                   >
                     <Ionicons name="play" size={16} color="#fff" />
                     <Text style={styles.watchBtnText}>مشاهدة</Text>
                   </Pressable>
                   <Pressable
-                    style={[styles.detailBtn, { borderColor: colors.border }]}
                     onPress={() => router.push(`/anime/${anime.id}?title=${encodeURIComponent(anime.title.romaji)}&english=${encodeURIComponent(anime.title.english || "")}`)}
+                    focusable={tvMode}
+                    style={({ focused }) => [styles.detailBtn, { borderColor: colors.border }, tvMode && tvFocusStyle(focused)]}
                   >
                     <Ionicons name="information-circle" size={16} color="#fff" />
                     <Text style={styles.watchBtnText}>تفاصيل</Text>

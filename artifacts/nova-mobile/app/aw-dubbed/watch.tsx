@@ -11,6 +11,7 @@ import { getBaseUrl } from "@/utils/api";
 import { RiftPlayer, type PlayerSource, isValidPlayerSourceUrl } from "@/components/RiftPlayer";
 import { ensureWatchAccess } from "@/utils/adPolicy";
 import { RewardedAdPrompt } from "@/components/RewardedAdPrompt";
+import { isTvDevice, tvFocusStyle } from "@/utils/tv";
 
 const BASE = getBaseUrl(); // e.g. "https://animenovaa.duckdns.org"
 
@@ -62,6 +63,7 @@ function toRiftSources(apiSrcs: ApiSource[]): PlayerSource[] {
 
 export default function AwDubbedWatchScreen() {
   const router  = useRouter();
+  const tvMode  = isTvDevice();
   const params  = useLocalSearchParams<{
     series: string; ep: string;
     title: string; titleAr: string;
@@ -141,7 +143,8 @@ export default function AwDubbedWatchScreen() {
     return (
       <View style={styles.errorContainer}>
         <RewardedAdPrompt />
-        <Pressable onPress={() => router.back()} style={styles.backBtn}>
+         <Pressable onPress={() => router.back()} focusable={tvMode}
+           style={({ focused }) => [styles.backBtn, tvMode && tvFocusStyle(focused)]}>
           <Ionicons name="chevron-back" size={20} color="rgba(255,255,255,0.7)" />
         </Pressable>
         <View style={styles.center}>
@@ -149,7 +152,8 @@ export default function AwDubbedWatchScreen() {
             <Ionicons name="alert-circle" size={36} color="#f87171" />
           </View>
           <Text style={styles.errorText}>{error || "لا توجد مصادر"}</Text>
-          <Pressable onPress={loadSources} style={styles.retryBtn}>
+           <Pressable onPress={loadSources} focusable={tvMode}
+             style={({ focused }) => [styles.retryBtn, tvMode && tvFocusStyle(focused)]}>
             <Ionicons name="refresh" size={16} color="#A78BFA" />
             <Text style={styles.retryText}>إعادة المحاولة</Text>
           </Pressable>

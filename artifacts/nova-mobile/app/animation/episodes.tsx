@@ -8,6 +8,7 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { getBaseUrl } from "@/utils/api";
+import { isTvDevice, tvFocusStyle } from "@/utils/tv";
 
 const IMG_W = "https://image.tmdb.org/t/p/w500";
 const IMG_S = "https://image.tmdb.org/t/p/w185";
@@ -34,6 +35,7 @@ export default function AnimationEpisodesScreen() {
   }>();
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const tvMode = isTvDevice();
   const tabsRef = useRef<ScrollView>(null);
 
   const initSeason = parseInt(seasonParam || "1", 10) || 1;
@@ -108,7 +110,8 @@ export default function AnimationEpisodesScreen() {
 
     return (
       <Pressable
-        style={[s.epCard, watched && s.epCardWatched]}
+        focusable={tvMode}
+        style={({ focused }) => [s.epCard, watched && s.epCardWatched, tvMode && tvFocusStyle(focused)]}
         onPress={() => goWatch(item.episode_number, item.name)}
       >
         {/* Thumbnail */}
@@ -177,7 +180,8 @@ export default function AnimationEpisodesScreen() {
       {/* ── Header ── */}
       <View style={s.header}>
         <View style={s.headerRow}>
-          <Pressable onPress={() => router.canGoBack() ? router.back() : router.replace("/(tabs)/animations")} style={s.backBtn}>
+           <Pressable onPress={() => router.canGoBack() ? router.back() : router.replace("/(tabs)/animations")} focusable={tvMode}
+             style={({ focused }) => [s.backBtn, tvMode && tvFocusStyle(focused)]}>
             <Ionicons name="chevron-back" size={18} color="rgba(255,255,255,0.7)" />
           </Pressable>
           <View style={s.headerInfo}>
@@ -205,7 +209,8 @@ export default function AnimationEpisodesScreen() {
               return (
                 <Pressable
                   key={season.id}
-                  style={[s.seasonCard, active && s.seasonCardActive]}
+                  focusable={tvMode}
+                  style={({ focused }) => [s.seasonCard, active && s.seasonCardActive, tvMode && tvFocusStyle(focused)]}
                   onPress={() => setSelSeason(season.season_number)}
                 >
                   {season.poster_path ? (

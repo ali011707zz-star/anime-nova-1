@@ -1,12 +1,15 @@
 import { Ionicons } from "@expo/vector-icons";
 import React, { useState } from "react";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { Pressable, StyleSheet, Text, View, useWindowDimensions } from "react-native";
 import { useColors } from "@/hooks/useColors";
 import { useApp } from "@/context/AppContext";
+import { isTvDevice, tvFocusStyle } from "@/utils/tv";
 
 export function AnnouncementBanner() {
   const colors = useColors();
   const { remoteConfig } = useApp();
+  const { width, height } = useWindowDimensions();
+  const tvMode = isTvDevice(width, height);
   const [dismissed, setDismissed] = useState<string[]>([]);
 
   const visible = remoteConfig.announcements.filter((a) => !dismissed.includes(a.id));
@@ -30,7 +33,8 @@ export function AnnouncementBanner() {
         color={style.icon}
       />
       <Text style={[styles.text, { color: colors.text, flex: 1 }]}>{ann.message}</Text>
-      <Pressable onPress={() => setDismissed((p) => [...p, ann.id])}>
+      <Pressable onPress={() => setDismissed((p) => [...p, ann.id])} focusable={tvMode}
+        style={({ focused }) => tvMode && tvFocusStyle(focused)}>
         <Ionicons name="close" size={18} color={colors.mutedForeground} />
       </Pressable>
     </View>

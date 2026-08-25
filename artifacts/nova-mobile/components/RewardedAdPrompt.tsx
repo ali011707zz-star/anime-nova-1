@@ -11,6 +11,7 @@ import { useRouter } from "expo-router";
 import { useVideoPlayer, VideoView } from "expo-video";
 import { subscribeRewardPrompt } from "@/utils/adPolicy";
 import type { RewardKind } from "@/utils/adPolicy";
+import { isTvDevice, tvFocusStyle } from "@/utils/tv";
 
 type PendingPrompt = {
   kind: RewardKind;
@@ -23,6 +24,7 @@ export function RewardedAdPrompt() {
   const [busy, setBusy] = useState(false);
   const [adError, setAdError] = useState("");
   const router = useRouter();
+  const tvMode = isTvDevice();
   const player = useVideoPlayer(require("../assets/deku-ad.mp4"), (instance) => {
     instance.loop = true;
     instance.muted = true;
@@ -90,7 +92,8 @@ export function RewardedAdPrompt() {
             <Pressable
               accessibilityLabel="إغلاق"
               onPress={() => close(false)}
-              style={({ pressed }) => [styles.close, pressed && styles.pressed]}
+              focusable={tvMode}
+              style={({ pressed, focused }) => [styles.close, pressed && styles.pressed, tvMode && tvFocusStyle(focused)]}
             >
               <Ionicons name="close" size={19} color="rgba(255,255,255,0.70)" />
             </Pressable>
@@ -116,7 +119,8 @@ export function RewardedAdPrompt() {
 
           <Pressable
             onPress={openSubscriptions}
-            style={({ pressed }) => [styles.subscribe, pressed && styles.pressed]}
+            focusable={tvMode}
+            style={({ pressed, focused }) => [styles.subscribe, pressed && styles.pressed, tvMode && tvFocusStyle(focused)]}
           >
             <Ionicons name="sparkles-outline" size={15} color="#fcd34d" />
             <Text style={styles.subscribeText}>إزالة الإعلانات — اشترك الآن</Text>
@@ -125,17 +129,20 @@ export function RewardedAdPrompt() {
           <View style={styles.actions}>
             <Pressable
               onPress={() => close(false)}
-              style={({ pressed }) => [styles.cancel, pressed && styles.pressed]}
+              focusable={tvMode}
+              style={({ pressed, focused }) => [styles.cancel, pressed && styles.pressed, tvMode && tvFocusStyle(focused)]}
             >
               <Text style={styles.cancelText}>ليس الآن</Text>
             </Pressable>
             <Pressable
               disabled={busy}
               onPress={() => void confirm()}
+              focusable={tvMode}
               style={({ pressed }) => [
                 styles.confirm,
                 busy && styles.disabled,
                 pressed && styles.pressed,
+                tvMode && tvFocusStyle(false),
               ]}
             >
               {busy ? (

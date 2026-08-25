@@ -9,6 +9,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useFocusEffect, useRouter } from "expo-router";
 import { getBaseUrl } from "@/utils/api";
+import { isTvDevice, tvFocusStyle } from "@/utils/tv";
 
 interface Season { label: string; arabicToonsId: string; }
 interface Series {
@@ -35,10 +36,13 @@ function getImg(s: Series): string | null {
 
 function SeriesCard({ s, onPress }: { s: Series; onPress: () => void }) {
   const imgUri = getImg(s);
+  const { width, height } = useWindowDimensions();
+  const tvMode = isTvDevice(width, height);
   return (
     <Pressable
       onPress={onPress}
-      style={({ pressed }) => [styles.card, { opacity: pressed ? 0.7 : 1 }]}
+      focusable={tvMode}
+      style={({ pressed, focused }) => [styles.card, { opacity: pressed ? 0.7 : 1 }, tvMode && tvFocusStyle(focused)]}
     >
       <View style={styles.cardPoster}>
         {imgUri ? (
@@ -66,7 +70,8 @@ function SeriesCard({ s, onPress }: { s: Series; onPress: () => void }) {
 
 export default function DubbedScreen() {
   const insets = useSafeAreaInsets();
-  const { width } = useWindowDimensions();
+  const { width, height } = useWindowDimensions();
+  const tvMode = isTvDevice(width, height);
   const router = useRouter();
   const topPad = Platform.OS === "web" ? 0 : insets.top;
   const numColumns = 3;
@@ -149,7 +154,8 @@ export default function DubbedScreen() {
       <View style={styles.header}>
         <Pressable
           onPress={() => (router.canGoBack() ? router.back() : router.push("/"))}
-          style={styles.iconBtn}
+          focusable={tvMode}
+          style={({ focused }) => [styles.iconBtn, tvMode && tvFocusStyle(focused)]}
         >
           <Ionicons name="chevron-forward" size={20} color="rgba(255,255,255,0.7)" />
         </Pressable>
@@ -159,7 +165,8 @@ export default function DubbedScreen() {
         </View>
         <Pressable
           onPress={() => setSearchOpen(o => !o)}
-          style={styles.iconBtn}
+          focusable={tvMode}
+          style={({ focused }) => [styles.iconBtn, tvMode && tvFocusStyle(focused)]}
         >
           <Ionicons name={searchOpen ? "close" : "search"} size={18} color="rgba(255,255,255,0.7)" />
         </Pressable>

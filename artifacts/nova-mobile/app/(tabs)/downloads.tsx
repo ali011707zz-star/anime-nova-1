@@ -423,7 +423,8 @@ export default function DownloadsScreen() {
           </View>
         </View>
         {hasCompleted && (
-          <Pressable onPress={handleClearAll} style={s.clearBtn}>
+          <Pressable onPress={handleClearAll} focusable={isTvDevice()}
+            style={({ focused }) => [s.clearBtn, isTvDevice() && tvFocusStyle(focused)]}>
             <Ionicons name="trash-outline" size={14} color="rgba(239,68,68,0.65)" />
             <Text style={s.clearBtnText}>حذف الكل</Text>
           </Pressable>

@@ -12,6 +12,7 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { getBaseUrl } from "@/utils/api";
+import { isTvDevice, tvFocusStyle } from "@/utils/tv";
 import { secureFetch, secureStreamFetch } from "@/utils/secureApi";
 import { startMobileWatchAnalytics } from "@/utils/analytics";
 import { ensureWatchAccess } from "@/utils/adPolicy";
@@ -293,13 +294,15 @@ function getAnimTag(label: string): string {
 function SrcRow({ src, idx, onPlay }: { src: AnimSrc; idx: number; onPlay: (s: AnimSrc) => void }) {
   const q = getSrcQuality(src);
   const qs = QUALITY_STYLE[q];
+  const tvMode = isTvDevice();
   const label = src.label || `مصدر ${idx + 1}`;
   const isEmbed = isEmbedSrc(src);
   const tag = getAnimTag(label);
   const hasSub = !!src.subtitleUrl;
 
   return (
-    <Pressable onPress={() => onPlay(src)} style={w.srcRow}>
+    <Pressable onPress={() => onPlay(src)} focusable={tvMode}
+      style={({ focused }) => [w.srcRow, tvMode && tvFocusStyle(focused)]}>
       <View style={[w.srcIcon, { backgroundColor: qs.badge, borderColor: qs.border }]}>
         <Ionicons name={isEmbed ? "tv" : "play-circle"} size={14} color={qs.text} />
       </View>
@@ -330,6 +333,7 @@ export default function AnimationWatchScreen() {
   }>();
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const tvMode = isTvDevice();
   const topPad = insets.top > 0 ? insets.top : (Platform.OS === "ios" ? 44 : 24);
 
   const tmdbId    = params.id     || "";

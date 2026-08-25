@@ -10,6 +10,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColors } from "@/hooks/useColors";
 import { anilistQuery, SCHEDULE_QUERY, formatAiringTime } from "@/utils/anilist";
+import { isTvDevice, tvFocusStyle } from "@/utils/tv";
 
 const DAYS_AR = ["الأحد", "الإثنين", "الثلاثاء", "الأربعاء", "الخميس", "الجمعة", "السبت"];
 
@@ -29,6 +30,7 @@ export default function ScheduleScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const router = useRouter();
+  const tvMode = isTvDevice();
   const topPad = Platform.OS === "web" ? 0 : Math.max(insets.top, Platform.OS === "android" ? 28 : 44);
 
   const now = new Date();
@@ -59,7 +61,7 @@ export default function ScheduleScreen() {
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       {/* Header */}
       <View style={[styles.header, { paddingTop: topPad + 16 }]}>
-        <Pressable onPress={() => router.back()} style={styles.backBtn}>
+        <Pressable onPress={() => router.back()} focusable={tvMode} style={({ focused }) => [styles.backBtn, tvMode && tvFocusStyle(focused)]}>
           <Ionicons name="arrow-back" size={22} color={colors.text} />
         </Pressable>
         <Text style={[styles.title, { color: colors.text }]}>جدول البث</Text>
@@ -79,8 +81,10 @@ export default function ScheduleScreen() {
             <Pressable
               key={day}
               onPress={() => setSelectedDay(i)}
-              style={[
+              focusable={tvMode}
+              style={({ focused }) => [
                 styles.dayBtn,
+                tvMode && tvFocusStyle(focused),
                 {
                   backgroundColor: isSelected ? colors.primary : colors.card,
                   borderColor: isSelected ? colors.primary : isToday ? colors.primary + "50" : colors.border,
@@ -114,7 +118,8 @@ export default function ScheduleScreen() {
             <Pressable
               key={item.id}
               onPress={() => router.push(`/anime/${item.media.id}?title=${encodeURIComponent(item.media.title.romaji)}&english=${encodeURIComponent(item.media.title.english || "")}`)}
-              style={[styles.scheduleItem, { backgroundColor: colors.card, borderColor: colors.border }]}
+              focusable={tvMode}
+              style={({ focused }) => [styles.scheduleItem, { backgroundColor: colors.card, borderColor: colors.border }, tvMode && tvFocusStyle(focused)]}
             >
               <Image
                 source={{ uri: item.media.coverImage.large }}
