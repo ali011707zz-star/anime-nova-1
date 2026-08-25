@@ -38,8 +38,6 @@ export default function ProfileScreen() {
   const router = useRouter();
   const { width, height } = useWindowDimensions();
   const tvMode = isTvDevice(width, height);
-  const { width, height } = useWindowDimensions();
-  const tvMode = isTvDevice(width, height);
   const base = getBaseUrl();
   const topPad = Platform.OS === "web" ? 0 : Math.max(insets.top, Platform.OS === "android" ? 28 : 44);
 
