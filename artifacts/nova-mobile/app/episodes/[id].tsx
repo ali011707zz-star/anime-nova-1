@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import {
   View, Text, Pressable, TextInput, Image, FlatList,
-  ScrollView, ActivityIndicator, StyleSheet, Platform,
+  ScrollView, ActivityIndicator, StyleSheet, Platform, useWindowDimensions,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
@@ -9,6 +9,7 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { getBaseUrl } from "@/utils/api";
+import { isTvDevice, tvFocusStyle } from "@/utils/tv";
 
 /* ── AniList query ── */
 const ANIME_QUERY = `
@@ -64,6 +65,8 @@ function EpisodeRow({
   n: number; anime: any; epData: any[]; episodeTitlesAr: Record<number, string>; watched: boolean; commentCount: number;
   onToggleWatched: (n: number) => void; onWatch: (n: number) => void; onComment: (n: number) => void;
 }) {
+  const { width, height } = useWindowDimensions();
+  const tvMode = isTvDevice(width, height);
   const ep = epData?.find((e: any) => e.mal_id === n || e.episode_id === n);
   const thumb = ep?.images?.jpg?.image_url || anime?.coverImage?.large;
   const originalTitle = ep?.title || ep?.title_romanji || "";
@@ -76,7 +79,13 @@ function EpisodeRow({
   return (
     <Pressable
       onPress={() => onWatch(n)}
-      style={[ep_s.row, watched && ep_s.rowWatched]}
+      focusable={tvMode}
+      style={({ focused }) => [
+        ep_s.row,
+        tvMode && ep_s.tvRow,
+        tvMode && tvFocusStyle(focused),
+        watched && ep_s.rowWatched,
+      ]}
     >
       {/* Thumbnail */}
       <View style={ep_s.thumbWrap}>
@@ -99,7 +108,8 @@ function EpisodeRow({
       {/* Comment button */}
       <Pressable
         onPress={e => { onComment(n); }}
-        style={ep_s.commentBtn}
+        focusable={tvMode}
+        style={({ focused }) => [ep_s.commentBtn, tvMode && ep_s.tvSmallButton, tvMode && tvFocusStyle(focused)]}
       >
         <Ionicons name="chatbubble-ellipses" size={11} color={commentCount > 0 ? "#c4b5fd" : "rgba(255,255,255,0.2)"} />
         {commentCount > 0 && (
@@ -110,7 +120,8 @@ function EpisodeRow({
       {/* Eye toggle */}
       <Pressable
         onPress={e => { onToggleWatched(n); }}
-        style={[ep_s.eyeBtn, watched && ep_s.eyeBtnWatched]}
+        focusable={tvMode}
+        style={({ focused }) => [ep_s.eyeBtn, watched && ep_s.eyeBtnWatched, tvMode && ep_s.tvSmallButton, tvMode && tvFocusStyle(focused)]}
       >
         <Ionicons name={watched ? "eye" : "eye-off"} size={12} color={watched ? "#8B5CF6" : "rgba(255,255,255,0.2)"} />
       </Pressable>
@@ -129,7 +140,9 @@ export default function EpisodeListScreen() {
   }>();
   const insets = useSafeAreaInsets();
   const router = useRouter();
+  const { width, height } = useWindowDimensions();
   const topPad = Platform.OS === "web" ? 0 : insets.top;
+  const tvMode = isTvDevice(width, height);
 
   const [anime, setAnime] = useState<any>(null);
   const [loading, setLoading] = useState(true);
@@ -389,8 +402,11 @@ export default function EpisodeListScreen() {
         />
 
         {/* Back */}
-        <Pressable onPress={() => router.canGoBack() ? router.back() : router.replace("/(tabs)")}
-          style={[ep_s.backBtn, { top: 12 }]}>
+        <Pressable
+          onPress={() => router.canGoBack() ? router.back() : router.replace("/(tabs)")}
+          focusable={tvMode}
+          style={({ focused }) => [ep_s.backBtn, { top: 12 }, tvMode && tvFocusStyle(focused)]}
+        >
           <Ionicons name="chevron-back" size={18} color="#fff" />
         </Pressable>
 
@@ -450,14 +466,16 @@ export default function EpisodeListScreen() {
               <Pressable
                 onPress={() => setPage(p => Math.max(1, p - 1))}
                 disabled={currentPage <= 1}
-                style={[ep_s.pageBtn, currentPage <= 1 && { opacity: 0.3 }]}>
+                focusable={tvMode}
+                style={({ focused }) => [ep_s.pageBtn, currentPage <= 1 && { opacity: 0.3 }, tvMode && tvFocusStyle(focused)]}>
                 <Ionicons name="chevron-forward" size={14} color="rgba(255,255,255,0.6)" />
               </Pressable>
               <Text style={ep_s.pageNumText}>{currentPage}/{totalPages}</Text>
               <Pressable
                 onPress={() => setPage(p => Math.min(totalPages, p + 1))}
                 disabled={currentPage >= totalPages}
-                style={[ep_s.pageBtn, currentPage >= totalPages && { opacity: 0.3 }]}>
+                focusable={tvMode}
+                style={({ focused }) => [ep_s.pageBtn, currentPage >= totalPages && { opacity: 0.3 }, tvMode && tvFocusStyle(focused)]}>
                 <Ionicons name="chevron-back" size={14} color="rgba(255,255,255,0.6)" />
               </Pressable>
             </View>

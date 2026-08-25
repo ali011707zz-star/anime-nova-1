@@ -8,7 +8,9 @@ import {
   StyleSheet,
   Text,
   View,
+  useWindowDimensions,
 } from "react-native";
+import { isTvDevice, tvFocusStyle } from "../utils/tv";
 
 const TELEGRAM_URL = "https://t.me/Anime_NOVA_0";
 
@@ -21,6 +23,8 @@ export function TelegramAnnouncementModal({
   visible,
   onClose,
 }: TelegramAnnouncementModalProps) {
+  const { width, height } = useWindowDimensions();
+  const tvMode = isTvDevice(width, height);
   const player = useVideoPlayer(
     require("../assets/jjk-lethal-company-dance.mp4"),
     (instance) => {
@@ -54,8 +58,13 @@ export function TelegramAnnouncementModal({
             accessibilityLabel="إغلاق"
             testID="telegram-announcement-close"
             onPress={onClose}
-            style={({ pressed }) => [
+            focusable={tvMode}
+            hasTVPreferredFocus={tvMode}
+            hitSlop={tvMode ? 14 : 8}
+            style={({ pressed, focused }) => [
               styles.closeButton,
+              tvMode && styles.tvCloseButton,
+              tvMode && tvFocusStyle(focused),
               pressed && styles.pressed,
             ]}
           >
@@ -86,8 +95,11 @@ export function TelegramAnnouncementModal({
               accessibilityLabel="الانضمام إلى قناة تلجرام"
               testID="telegram-announcement-open"
               onPress={openTelegram}
-              style={({ pressed }) => [
+              focusable={tvMode}
+              style={({ pressed, focused }) => [
                 styles.primaryButton,
+                tvMode && styles.tvButton,
+                tvMode && tvFocusStyle(focused),
                 pressed && styles.pressed,
               ]}
             >
@@ -98,8 +110,11 @@ export function TelegramAnnouncementModal({
               accessibilityLabel="متابعة إلى التطبيق"
               testID="telegram-announcement-dismiss"
               onPress={onClose}
-              style={({ pressed }) => [
+              focusable={tvMode}
+              style={({ pressed, focused }) => [
                 styles.secondaryButton,
+                tvMode && styles.tvSecondaryButton,
+                tvMode && tvFocusStyle(focused),
                 pressed && styles.pressed,
               ]}
             >
@@ -146,6 +161,7 @@ const styles = StyleSheet.create({
     borderRadius: 17,
     backgroundColor: "rgba(0, 0, 0, 0.48)",
   },
+  tvCloseButton: { width: 52, height: 52, borderRadius: 26, top: 16, right: 16 },
   videoFrame: {
     width: "100%",
     aspectRatio: 498 / 436,
@@ -199,6 +215,7 @@ const styles = StyleSheet.create({
     fontFamily: "Cairo_700Bold",
     fontSize: 14,
   },
+  tvButton: { height: 62, borderRadius: 16 },
   secondaryButton: {
     paddingVertical: 10,
     paddingHorizontal: 16,
@@ -208,6 +225,7 @@ const styles = StyleSheet.create({
     fontFamily: "Cairo_600SemiBold",
     fontSize: 12,
   },
+  tvSecondaryButton: { paddingVertical: 16, paddingHorizontal: 24, borderRadius: 14 },
   pressed: {
     opacity: 0.72,
   },
