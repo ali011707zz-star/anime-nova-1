@@ -1857,8 +1857,8 @@ export default function WatchScreen() {
           </Pressable>
         </View>
         <View style={d.headerCenter}>
-          <Text style={d.headerTitle} numberOfLines={1}>{displayTitle}</Text>
-          <Text style={d.headerSub}>الحلقة {epNum}</Text>
+          <Text style={[d.headerTitle, tvMode && d.tvHeaderTitle]} numberOfLines={1}>{displayTitle}</Text>
+          <Text style={[d.headerSub, tvMode && d.tvHeaderSub]}>الحلقة {epNum}</Text>
         </View>
         <Pressable onPress={handleBack} focusable={tvMode}
           style={({ focused }) => [d.headerBack, tvMode && tvFocusStyle(focused)]}>
@@ -1866,10 +1866,10 @@ export default function WatchScreen() {
         </Pressable>
       </View>
 
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={d.scrollContent}>
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={[d.scrollContent, tvMode && d.tvScrollContent]}>
 
         {/* ── Info card ── */}
-        <View style={d.infoCard}>
+        <View style={[d.infoCard, tvMode && d.tvInfoCard]}>
           {coverUrl ? (
             <View style={d.infoPosterWrap}>
               <View style={d.infoPosterGlow} />
@@ -1979,6 +1979,7 @@ export default function WatchScreen() {
                       onPress={() => handlePickSite(slot.site, qk)}
                       style={({ pressed }) => [
                         d.webRow,
+                        tvMode && d.tvWebRow,
                         idx < slots.length - 1 && d.webRowBorder,
                         !watchUnlocked && { opacity: 0.72 },
                         isReady && watchUnlocked && { backgroundColor: "rgba(34,197,94,0.035)" },
@@ -2125,12 +2126,15 @@ const d = StyleSheet.create({
   headerBack:    { width: 36, height: 36, borderRadius: 12, backgroundColor: "rgba(255,255,255,0.07)", borderWidth: 1, borderColor: "rgba(255,255,255,0.11)", alignItems: "center", justifyContent: "center", flexShrink: 0 },
   headerTitle:   { fontSize: 13, fontFamily: "Cairo_800ExtraBold", color: "#fff", textAlign: "center" },
   headerSub:     { fontSize: 10, color: "rgba(255,255,255,0.35)", fontFamily: "Cairo_400Regular", textAlign: "center" },
+  tvHeaderTitle: { fontSize: 21 },
+  tvHeaderSub: { fontSize: 15 },
   headerRefreshBtn: { width: 32, height: 32, borderRadius: 10, backgroundColor: "rgba(139,92,246,0.12)", borderWidth: 1, borderColor: "rgba(139,92,246,0.25)", alignItems: "center", justifyContent: "center" },
   epNavBtn:      { flexDirection: "row", alignItems: "center", gap: 2, height: 32, borderRadius: 10, backgroundColor: "rgba(255,255,255,0.06)", borderWidth: 1, borderColor: "rgba(255,255,255,0.09)", paddingHorizontal: 8, justifyContent: "center" },
   epNavText:     { fontSize: 10, fontFamily: "Cairo_700Bold", color: "rgba(255,255,255,0.65)" },
 
   /* Info card */
   infoCard:      { flexDirection: "row", alignItems: "flex-start", gap: 14, backgroundColor: "rgba(15,12,28,0.80)", borderRadius: 18, borderWidth: 1, borderColor: "rgba(139,92,246,0.14)", padding: 14 },
+  tvInfoCard:    { padding: 24, gap: 24, borderRadius: 24 },
   infoPosterWrap:{ width: 72, height: 102, position: "relative", alignItems: "center", justifyContent: "center" },
   infoPosterGlow:{ position: "absolute", width: 80, height: 110, borderRadius: 20, backgroundColor: "rgba(109,40,217,0.28)" },
   infoPoster:    { width: 72, height: 102, borderRadius: 12, borderWidth: 1, borderColor: "rgba(139,92,246,0.30)" },
@@ -2155,6 +2159,7 @@ const d = StyleSheet.create({
 
   /* Scroll */
   scrollContent: { padding: 14, paddingBottom: 100, gap: 12 },
+  tvScrollContent: { paddingHorizontal: 56, paddingTop: 24, gap: 20 },
 
   /* Tier sections */
   tierSection:   { gap: 6 },
@@ -2221,6 +2226,7 @@ const d = StyleSheet.create({
 
   /* ── Web-style server row ── */
   webRow:         { flexDirection: "row", alignItems: "center", paddingHorizontal: 10, paddingVertical: 11, gap: 7 },
+  tvWebRow:       { paddingHorizontal: 24, paddingVertical: 20, gap: 16 },
   webRowBorder:   { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: "rgba(255,255,255,0.06)" },
   webRowPlayIcon: { alignItems: "center", justifyContent: "center", flexShrink: 0 },
   webRowActions: { flexDirection: "row", alignItems: "center", gap: 4, flexShrink: 0 },

@@ -1,8 +1,8 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import React, { createContext, useCallback, useContext, useEffect, useState } from "react";
 import { StyleSheet, Text, View } from "react-native";
-import { DEFAULT_CONFIG, fetchRemoteConfig, RemoteConfig } from "@/utils/api";
-import { getAuthToken } from "@/utils/secureApi";
+import { DEFAULT_CONFIG, fetchRemoteConfig, getBaseUrl, RemoteConfig } from "@/utils/api";
+import { getAuthToken, secureFetch, setUserAuthToken } from "@/utils/secureApi";
 
 type Theme = "dark" | "amoled" | "violet" | "blue" | "pink";
 
@@ -29,6 +29,15 @@ export type FavoriteAnime = {
   genres?: string[];
 };
 
+export type MobileUser = {
+  email: string;
+  displayName: string;
+  id: string;
+  username?: string;
+  avatarColor?: number;
+  profileImageUrl?: string | null;
+};
+
 type AppContextType = {
   theme: Theme;
   setTheme: (t: Theme) => void;
@@ -40,6 +49,10 @@ type AppContextType = {
   favorites: FavoriteAnime[];
   toggleFavorite: (anime: FavoriteAnime) => Promise<void>;
   isFavorite: (id: number) => boolean;
+  currentUser: MobileUser | null;
+  authReady: boolean;
+  setCurrentUser: (user: MobileUser | null) => void;
+  restoreAuth: () => Promise<void>;
 };
 
 const AppContext = createContext<AppContextType | null>(null);
@@ -52,13 +65,50 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [historyHydrated, setHistoryHydrated] = useState(false);
   const [favoritesHydrated, setFavoritesHydrated] = useState(false);
   const [officialAppRequired, setOfficialAppRequired] = useState(false);
+  const [currentUser, setCurrentUser] = useState<MobileUser | null>(null);
+  const [authReady, setAuthReady] = useState(false);
+
+  const restoreAuth = useCallback(async () => {
+    try {
+      const stored = await AsyncStorage.getItem("nova-mobile-user");
+      if (stored) {
+        try { setCurrentUser(JSON.parse(stored) as MobileUser); } catch { await AsyncStorage.removeItem("nova-mobile-user"); }
+      }
+      const response = await secureFetch(`${getBaseUrl()}/api/auth/me`);
+      if (!response.ok) {
+        if (response.status === 401 || response.status === 403) {
+          await setUserAuthToken(null);
+          await AsyncStorage.removeItem("nova-mobile-user");
+          setCurrentUser(null);
+        }
+        return;
+      }
+      const data = await response.json() as any;
+      if (!data?.id) return;
+      const next: MobileUser = {
+        id: String(data.id),
+        email: data.email || "",
+        displayName: data.displayName || data.display_name || data.username || data.email?.split("@")[0] || "مستخدم",
+        username: data.username,
+        avatarColor: data.avatarColor ?? data.avatar_color ?? 0,
+        profileImageUrl: data.profileImageUrl || data.profile_image_custom || data.profile_image_url || null,
+      };
+      await AsyncStorage.setItem("nova-mobile-user", JSON.stringify(next));
+      setCurrentUser(next);
+    } catch {
+      // A stored user remains usable while the VPS is temporarily unavailable.
+    } finally {
+      setAuthReady(true);
+    }
+  }, []);
 
   useEffect(() => {
     loadAll();
     refreshConfig();
     // Pre-warm the auth token so first API call is instant
     getAuthToken().catch(() => {});
-  }, []);
+    void restoreAuth();
+  }, [restoreAuth]);
 
   /** حذف مفاتيح الكاش القديمة عند الإطلاق — يمنع امتلاء AsyncStorage (6MB Android limit) */
   const cleanOldCacheKeys = async () => {
@@ -188,7 +238,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const isFavorite = (id: number) => favorites.some((f) => f.id === id);
 
   return (
-    <AppContext.Provider value={{ theme, setTheme, remoteConfig, refreshConfig, watchHistory, addToHistory, removeFromHistory, favorites, toggleFavorite, isFavorite }}>
+    <AppContext.Provider value={{ theme, setTheme, remoteConfig, refreshConfig, watchHistory, addToHistory, removeFromHistory, favorites, toggleFavorite, isFavorite, currentUser, authReady, setCurrentUser, restoreAuth }}>
       {officialAppRequired ? (
         <View style={blockedStyles.container}>
           <Text style={blockedStyles.title}>النسخة الرسمية مطلوبة</Text>

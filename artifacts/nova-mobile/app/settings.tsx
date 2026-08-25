@@ -14,6 +14,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useColors } from "@/hooks/useColors";
 import { useApp } from "@/context/AppContext";
+import type { MobileUser } from "@/context/AppContext";
 import { getBaseUrl } from "@/utils/baseUrl";
 import { secureFetch, setUserAuthToken } from "@/utils/secureApi";
 import { CrashEntry, getCrashLog } from "@/utils/crashLogger";
@@ -281,7 +282,6 @@ function DangerRow({ label, sub, onPress }: { label: string; sub?: string; onPre
 
 /* ══════════════════════ AUTH TYPES ══════════════════════ */
 type AuthFlow = "login" | "signup" | "verify";
-interface MobileUser { email: string; displayName: string; id: string; username?: string; avatarColor?: number; profileImageUrl?: string | null }
 const AUTH_KEY = "nova-mobile-user";
 // Android OAuth clients use Google's reserved native redirect scheme. A
 // generic app scheme (for example nova-mobile://) is not a registered
@@ -333,7 +333,7 @@ function AuthSheet({ open, onClose, onLogin }: {
   const [resendCooldown, setResendCooldown] = useState(0);
   const handledGoogleResponse = useRef<string | null>(null);
   useEffect(() => {
-    if (open) { setFlow("login"); setEmail(""); setPassword(""); setName(""); setCode(""); setError(""); setShowPass(false); setResendCooldown(0); handledGoogleResponse.current = null; }
+    if (open) { setFlow("login"); setEmail(""); setPassword(""); setName(""); setCode(""); setError(""); setShowPass(false); setResendCooldown(0); }
   }, [open]);
 
   useEffect(() => {
@@ -431,7 +431,7 @@ function AuthSheet({ open, onClose, onLogin }: {
     // closed. Never process a stale response from a hidden AuthSheet: doing
     // so can create another settings route and leave duplicate pages in the
     // native navigation stack.
-    if (!open || !googleResponse) return;
+    if (!googleResponse) return;
     const responseKey = JSON.stringify(googleResponse);
     if (handledGoogleResponse.current === responseKey) return;
     handledGoogleResponse.current = responseKey;
@@ -1181,7 +1181,7 @@ export default function SettingsScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { openPremium } = useLocalSearchParams<{ openPremium?: string }>();
-  const { theme, setTheme, watchHistory, favorites, refreshConfig } = useApp();
+  const { theme, setTheme, watchHistory, favorites, refreshConfig, setCurrentUser: setGlobalUser } = useApp();
   const topPad = Platform.OS === "web" ? 0 : insets.top;
 
   const { toast, show: showToast } = useToast();
@@ -1701,6 +1701,7 @@ export default function SettingsScreen() {
           // Update the already-mounted settings screen instead of navigating
           // to another settings instance after authentication.
           setCurrentUser(u);
+          setGlobalUser(u);
           setShowAuth(false);
           showToast(`مرحباً ${u.displayName}! 🎉`);
         }}
@@ -1712,7 +1713,7 @@ export default function SettingsScreen() {
         open={showProfile}
         onClose={() => setShowProfile(false)}
         user={currentUser}
-        onUpdate={u => setCurrentUser(u)}
+        onUpdate={u => { setCurrentUser(u); setGlobalUser(u); }}
         onLogout={handleLogout}
       />
 

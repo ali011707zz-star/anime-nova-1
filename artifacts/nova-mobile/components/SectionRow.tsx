@@ -17,7 +17,7 @@ export const SectionRow = React.memo(function SectionRow({ title, items, onSeeAl
   const colors = useColors();
   const { width, height } = useWindowDimensions();
   const tvMode = isTvDevice(width, height);
-  const cardWidth = getRailCardWidth(width, 3);
+  const cardWidth = getRailCardWidth(width, tvMode ? 5 : 3);
   const sidePadding = getRailSidePadding(width);
 
   if (!items.length) return null;
@@ -25,15 +25,15 @@ export const SectionRow = React.memo(function SectionRow({ title, items, onSeeAl
   return (
     <View style={styles.container}>
       <View style={styles.header}>
-        <Text style={[styles.title, { color: colors.text }]}>{title}</Text>
+            <Text style={[styles.title, tvMode && styles.tvTitle, { color: colors.text }]}>{title}</Text>
         {onSeeAll && (
           <Pressable
             onPress={onSeeAll}
             focusable={tvMode}
             style={({ focused }) => [styles.seeAll, tvMode && tvFocusStyle(focused)]}
           >
-            <Text style={[styles.seeAllText, { color: colors.primary }]}>عرض الكل</Text>
-            <Ionicons name="chevron-back" size={14} color={colors.primary} />
+            <Text style={[styles.seeAllText, tvMode && styles.tvSeeAllText, { color: colors.primary }]}>عرض الكل</Text>
+            <Ionicons name="chevron-back" size={tvMode ? 20 : 14} color={colors.primary} />
           </Pressable>
         )}
       </View>
@@ -80,9 +80,11 @@ const styles = StyleSheet.create({
   container: { marginBottom: 24 },
   header: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 16, marginBottom: 12 },
   title: { fontSize: 17, fontWeight: "800" },
+  tvTitle: { fontSize: 25, lineHeight: 34 },
   seeAll: { flexDirection: "row", alignItems: "center", gap: 2 },
   seeAllText: { fontSize: 13, fontWeight: "600" },
-  scroll: { paddingHorizontal: 16, gap: 10 },
+  tvSeeAllText: { fontSize: 18 },
+  scroll: { paddingHorizontal: 16, gap: 14 },
   skeletonTitle: { width: 140, height: 18, borderRadius: 6, marginHorizontal: 16, marginBottom: 12 },
   skeletonCard: { width: 120, gap: 6 },
   skeletonImg: { width: 120, height: 168, borderRadius: 10 },

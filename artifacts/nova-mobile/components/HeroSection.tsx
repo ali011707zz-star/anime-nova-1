@@ -5,13 +5,10 @@ import { LinearGradient } from "expo-linear-gradient";
 import { useRouter } from "expo-router";
 import React, { useEffect, useRef, useState } from "react";
 import {
-  Dimensions, Pressable, ScrollView, StyleSheet, Text, View, useWindowDimensions,
+  Pressable, ScrollView, StyleSheet, Text, View, useWindowDimensions,
 } from "react-native";
 import { useColors } from "@/hooks/useColors";
 import { isTvDevice, tvFocusStyle } from "@/utils/tv";
-
-const { width: W } = Dimensions.get("window");
-const HERO_H = 290;
 
 type Props = { items: AnilistMedia[] };
 
@@ -20,6 +17,7 @@ export function HeroSection({ items }: Props) {
   const router = useRouter();
   const { width, height } = useWindowDimensions();
   const tvMode = isTvDevice(width, height);
+  const heroHeight = tvMode ? 430 : 290;
   const scrollRef = useRef<ScrollView>(null);
   const [activeIdx, setActiveIdx] = useState(0);
 
@@ -28,7 +26,7 @@ export function HeroSection({ items }: Props) {
     const timer = setInterval(() => {
       setActiveIdx((i) => {
         const next = (i + 1) % items.length;
-        scrollRef.current?.scrollTo({ x: next * W, animated: true });
+        scrollRef.current?.scrollTo({ x: next * width, animated: true });
         return next;
       });
     }, 4000);
@@ -38,7 +36,7 @@ export function HeroSection({ items }: Props) {
   if (!items.length) return null;
 
   return (
-    <View style={{ height: HERO_H }}>
+    <View style={{ height: heroHeight }}>
       <ScrollView
         ref={scrollRef}
         horizontal
@@ -56,7 +54,7 @@ export function HeroSection({ items }: Props) {
             <Pressable
               key={anime.id}
               focusable={tvMode}
-              style={({ focused }) => [{ width: W, height: HERO_H }, tvMode && tvFocusStyle(focused)]}
+              style={({ focused }) => [{ width, height: heroHeight }, tvMode && tvFocusStyle(focused)]}
               onPress={() => router.push(`/anime/${anime.id}?title=${encodeURIComponent(anime.title.romaji)}&english=${encodeURIComponent(anime.title.english || "")}`)}
             >
               <Image
@@ -67,16 +65,16 @@ export function HeroSection({ items }: Props) {
               />
               <LinearGradient
                 colors={["transparent", "rgba(9,9,11,0.7)", "#09090B"]}
-                style={[StyleSheet.absoluteFill, { justifyContent: "flex-end", padding: 20 }]}
+                style={[StyleSheet.absoluteFill, { justifyContent: "flex-end", padding: tvMode ? 48 : 20 }]}
               >
                 <View style={styles.genreRow}>
                   {anime.genres?.slice(0, 3).map((g) => (
-                    <View key={g} style={[styles.genreBadge, { borderColor: colors.primary + "60" }]}>
-                      <Text style={[styles.genreText, { color: colors.primary }]}>{g}</Text>
+                  <View key={g} style={[styles.genreBadge, tvMode && styles.tvGenreBadge, { borderColor: colors.primary + "60" }]}>
+                    <Text style={[styles.genreText, tvMode && styles.tvGenreText, { color: colors.primary }]}>{g}</Text>
                     </View>
                   ))}
                 </View>
-                <Text style={styles.heroTitle} numberOfLines={2}>{title}</Text>
+                <Text style={[styles.heroTitle, tvMode && styles.tvHeroTitle]} numberOfLines={2}>{title}</Text>
                 <View style={styles.infoRow}>
                   {anime.averageScore && (
                     <View style={styles.infoItem}>
@@ -135,7 +133,10 @@ const styles = StyleSheet.create({
   genreRow: { flexDirection: "row", gap: 5, marginBottom: 6, flexWrap: "wrap" },
   genreBadge: { borderWidth: 1, borderRadius: 4, paddingHorizontal: 7, paddingVertical: 2 },
   genreText: { fontSize: 9, fontWeight: "600" },
+  tvGenreBadge: { borderRadius: 8, paddingHorizontal: 12, paddingVertical: 6 },
+  tvGenreText: { fontSize: 16 },
   heroTitle: { color: "#fff", fontSize: 18, fontWeight: "800", marginBottom: 6, textAlign: "left", fontFamily: "Cairo_800ExtraBold" },
+  tvHeroTitle: { fontSize: 32, lineHeight: 42, marginBottom: 12 },
   infoRow: { flexDirection: "row", gap: 10, marginBottom: 12, flexWrap: "wrap" },
   infoItem: { flexDirection: "row", alignItems: "center", gap: 3 },
   infoText: { color: "rgba(255,255,255,0.7)", fontSize: 11 },

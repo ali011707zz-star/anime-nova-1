@@ -1,5 +1,5 @@
 import React from "react";
-import { Platform, Pressable, PressableProps, StyleProp, ViewStyle } from "react-native";
+import { Dimensions, Platform, Pressable, PressableProps, StyleProp, ViewStyle } from "react-native";
 
 /**
  * Android TV and most certified TV boxes expose Platform.isTV through React
@@ -9,9 +9,12 @@ import { Platform, Pressable, PressableProps, StyleProp, ViewStyle } from "react
 export function isTvDevice(width?: number, height?: number) {
   if (Platform.OS !== "android") return false;
   if ((Platform as typeof Platform & { isTV?: boolean }).isTV === true) return true;
-  if (width == null || height == null) return false;
-  const longEdge = Math.max(width, height);
-  const shortEdge = Math.min(width, height);
+  const window = Dimensions.get("window");
+  const measuredWidth = width ?? window.width;
+  const measuredHeight = height ?? window.height;
+  if (measuredWidth == null || measuredHeight == null) return false;
+  const longEdge = Math.max(measuredWidth, measuredHeight);
+  const shortEdge = Math.min(measuredWidth, measuredHeight);
   // Only use the fallback for large TV-like canvases. Certified TV devices
   // are detected by Platform.isTV above, so this should not turn a phone
   // rotating into a TV layout.
@@ -64,11 +67,11 @@ export function tvLayout(width: number, height: number) {
   const tv = isTvDevice(width, height);
   return {
     tv,
-    contentWidth: tv ? Math.min(Math.max(width - 80, 0), 1280) : width,
-    horizontalPadding: tv ? 40 : 16,
-    controlHeight: tv ? 58 : 44,
-    textScale: tv ? 1.18 : 1,
-    sectionGap: tv ? 32 : 24,
+    contentWidth: tv ? Math.min(Math.max(width - 128, 0), 1440) : width,
+    horizontalPadding: tv ? 64 : 16,
+    controlHeight: tv ? 72 : 44,
+    textScale: tv ? 1.32 : 1,
+    sectionGap: tv ? 40 : 24,
   };
 }
 
@@ -79,8 +82,8 @@ export function tvScale(tv: boolean, phone: number, television: number) {
 }
 
 export const tvReadable = {
-  title: { fontSize: 30, lineHeight: 38 },
-  body: { fontSize: 18, lineHeight: 28 },
-  small: { fontSize: 15, lineHeight: 22 },
-  button: { minHeight: 58, paddingHorizontal: 24, paddingVertical: 14 },
+  title: { fontSize: 36, lineHeight: 46 },
+  body: { fontSize: 22, lineHeight: 34 },
+  small: { fontSize: 18, lineHeight: 27 },
+  button: { minHeight: 72, paddingHorizontal: 30, paddingVertical: 18 },
 };

@@ -470,7 +470,7 @@ export default function AnimeDetailScreen() {
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={[{ paddingBottom: 100 }, tvMode && d.tvContent]}>
 
         {/* ── Hero Banner ── */}
-        <View style={d.hero}>
+        <View style={[d.hero, tvMode && d.tvHero]}>
           {(anime.bannerImage || anime.coverImage?.extraLarge || anime.coverImage?.large) ? (
             <Image
               source={{ uri: anime.bannerImage || anime.coverImage?.extraLarge || anime.coverImage?.large }}
@@ -492,9 +492,9 @@ export default function AnimeDetailScreen() {
         </View>
 
         {/* ── Cover + Title ── */}
-        <View style={d.infoRow}>
+        <View style={[d.infoRow, tvMode && d.tvInfoRow]}>
           {anime.coverImage?.large ? (
-            <Image source={{ uri: anime.coverImage.extraLarge || anime.coverImage.large }} style={d.cover} />
+            <Image source={{ uri: anime.coverImage.extraLarge || anime.coverImage.large }} style={[d.cover, tvMode && d.tvCover]} />
           ) : null}
           <View style={d.infoText}>
             <Text style={[d.titleMain, tvMode && d.tvTitleMain]} numberOfLines={2}>
@@ -993,7 +993,10 @@ const d = StyleSheet.create({
   charHeartBtnActive: { backgroundColor: "rgba(244,63,94,0.85)", borderColor: "#f43f5e" },
   charName: { fontSize: 8, color: "rgba(255,255,255,0.6)", fontFamily: "Cairo_400Regular", textAlign: "center", lineHeight: 12 },
   emptyTabText: { textAlign: "center", color: "rgba(255,255,255,0.2)", fontSize: 12, fontFamily: "Cairo_400Regular", paddingVertical: 20 },
-  tvContent: { paddingHorizontal: 24, paddingBottom: 140 },
+  tvContent: { paddingHorizontal: 64, paddingBottom: 160 },
+  tvHero: { height: 360 },
+  tvInfoRow: { paddingHorizontal: 64, gap: 28, marginTop: -88 },
+  tvCover: { width: 190, height: 276, borderRadius: 22 },
   tvTitleMain: { fontSize: 28, lineHeight: 36 },
   tvTitleNative: { fontSize: 17, lineHeight: 25 },
   tvBodyText: { fontSize: 18, lineHeight: 29 },

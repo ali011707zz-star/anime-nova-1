@@ -27,6 +27,7 @@ import {
 import { useApp } from "@/context/AppContext";
 import { getBaseUrl } from "@/utils/api";
 import { isTvDevice, tvFocusStyle } from "@/utils/tv";
+import { getPosterUri } from "@/utils/media";
 
 const SEASON_AR: Record<string, string> = {
   WINTER: "شتاء", SPRING: "ربيع", SUMMER: "صيف", FALL: "خريف",
@@ -207,7 +208,7 @@ export default function HomeScreen() {
   );
   const recentHistory = watchHistory.slice(0, 10);
   const isTvLayout = isTvDevice(width, height);
-  const railCardWidth = getRailCardWidth(width, 3);
+  const railCardWidth = getRailCardWidth(width, isTvLayout ? 5 : 3);
   const railSidePadding = getRailSidePadding(width);
   const railGap = 10;
 
@@ -337,7 +338,7 @@ export default function HomeScreen() {
                    style={({ focused }) => [todayEpStyles.card, { width: railCardWidth, height: Math.round(railCardWidth * 1.46), backgroundColor: colors.card, borderColor: colors.border }, isTvLayout && tvFocusStyle(focused)]}
                 >
                   {ep.cover ? (
-                    <Image source={{ uri: ep.cover }} style={todayEpStyles.img} resizeMode="cover" />
+                   <Image source={{ uri: getPosterUri(ep, ep.animeId ? `https://img.anili.st/media/${ep.animeId}` : "") }} style={todayEpStyles.img} resizeMode="cover" />
                   ) : (
                     <View style={[todayEpStyles.img, { backgroundColor: colors.card, alignItems: "center", justifyContent: "center" }]}>
                       <Ionicons name="tv" size={28} color="rgba(255,255,255,0.2)" />
@@ -377,7 +378,7 @@ export default function HomeScreen() {
               showsHorizontalScrollIndicator={false}
                contentContainerStyle={{ paddingHorizontal: railSidePadding, gap: railGap }}
               renderItem={({ item }: { item: any }) => {
-                const imgUri = item.poster || null;
+                 const imgUri = getPosterUri(item);
                 return (
                    <Pressable
                     onPress={() => {
@@ -442,7 +443,7 @@ export default function HomeScreen() {
               showsHorizontalScrollIndicator={false}
                contentContainerStyle={{ paddingHorizontal: railSidePadding, gap: railGap }}
               renderItem={({ item }: { item: any }) => {
-                const rawImg = item.image || item.poster || "";
+                const rawImg = getPosterUri(item);
                 const imgUri = rawImg
                   ? rawImg.startsWith("http") ? rawImg : `${BASE_URL}${rawImg}`
                   : null;

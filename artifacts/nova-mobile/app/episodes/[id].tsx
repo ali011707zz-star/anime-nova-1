@@ -100,9 +100,9 @@ function EpisodeRow({
 
       {/* Info */}
       <View style={ep_s.info}>
-        <Text style={[ep_s.epNum, watched && { color: "#8B5CF6" }]}>الحلقة {n}</Text>
-        {arabicTitle ? <Text style={ep_s.epTitleAr} numberOfLines={1}>{arabicTitle}</Text> : null}
-        {originalTitle ? <Text style={ep_s.epTitleOriginal} numberOfLines={1}>{originalTitle}</Text> : null}
+        <Text style={[ep_s.epNum, tvMode && ep_s.tvEpNum, watched && { color: "#8B5CF6" }]}>الحلقة {n}</Text>
+        {arabicTitle ? <Text style={[ep_s.epTitleAr, tvMode && ep_s.tvEpTitle]} numberOfLines={1}>{arabicTitle}</Text> : null}
+        {originalTitle ? <Text style={[ep_s.epTitleOriginal, tvMode && ep_s.tvEpOriginal]} numberOfLines={1}>{originalTitle}</Text> : null}
       </View>
 
       {/* Comment button */}
@@ -569,8 +569,18 @@ const ep_s = StyleSheet.create({
   },
   eyeBtn: { width: 27, height: 27, borderRadius: 8, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(255,255,255,0.04)", borderWidth: 1, borderColor: "rgba(255,255,255,0.08)" },
   eyeBtnWatched: { backgroundColor: "rgba(139,92,246,0.15)", borderColor: "rgba(139,92,246,0.3)" },
-  tvContainer: { paddingHorizontal: 24 },
-  tvControls: { paddingHorizontal: 24, paddingTop: 16, paddingBottom: 14 },
-  tvHeroTitle: { fontSize: 23, lineHeight: 30 },
+  tvContainer: { paddingHorizontal: 56 },
+  tvControls: { paddingHorizontal: 56, paddingTop: 22, paddingBottom: 18 },
+  tvHero: { height: 330 },
+  tvHeroTitle: { fontSize: 30, lineHeight: 40 },
   tvText: { fontSize: 18 },
+  tvRow: { paddingHorizontal: 28, paddingVertical: 18, gap: 18 },
+  tvSmallButton: { width: 48, height: 48, borderRadius: 14 },
+  tvSearchBar: { paddingVertical: 14, borderRadius: 16 },
+  tvThumbWrap: { width: 118, height: 66, borderRadius: 12 },
+  tvEpNum: { fontSize: 18 },
+  tvEpTitle: { fontSize: 16, lineHeight: 24 },
+  tvEpOriginal: { fontSize: 13 },
+  tvPageBtn: { width: 48, height: 48, borderRadius: 12 },
+  tvWatchFromBtn: { marginHorizontal: 28, paddingVertical: 18, borderRadius: 18 },
 });

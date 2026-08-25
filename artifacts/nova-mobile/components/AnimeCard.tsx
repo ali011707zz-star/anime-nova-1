@@ -6,6 +6,7 @@ import React from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { useColors } from "@/hooks/useColors";
 import { isTvDevice, tvFocusStyle } from "@/utils/tv";
+import { getPosterUri } from "@/utils/media";
 
 type Props = {
   anime: AnilistMedia;
@@ -18,7 +19,7 @@ type Props = {
 export function getRailCardWidth(windowWidth: number, visibleCards = 3, gap = 10) {
   // Android TV reports a much wider window than a phone. Keep a deliberate,
   // remote-friendly card size instead of stretching cards across the screen.
-  if (windowWidth >= 700) return 176;
+  if (windowWidth >= 700) return 230;
   const maxRailWidth = 900;
   const railWidth = Math.min(Math.max(windowWidth - 32, 0), maxRailWidth);
   return Math.max(96, Math.floor((railWidth - gap * (visibleCards - 1)) / visibleCards));
@@ -36,7 +37,7 @@ export const AnimeCard = React.memo(function AnimeCard({ anime, size = "sm", car
   // Recalculate on rotation/window resize and keep poster widths bounded so
   // tablets do not decode a handful of unnecessarily huge images.
   const smallCardWidth = getRailCardWidth(windowWidth, 3);
-  const cardW = cardWidth ?? (size === "lg" ? 160 : size === "md" ? 130 : smallCardWidth);
+  const cardW = cardWidth ?? (size === "lg" ? 190 : size === "md" ? 160 : smallCardWidth);
   const cardH = cardW * 1.4;
   const tvMode = isTvDevice(windowWidth, windowHeight);
 
@@ -59,7 +60,7 @@ export const AnimeCard = React.memo(function AnimeCard({ anime, size = "sm", car
     >
       <View style={[styles.imageContainer, { width: cardW, height: cardH, borderRadius: colors.radius - 4 }]}>
         <Image
-          source={{ uri: anime.coverImage.large || anime.coverImage.extraLarge }}
+          source={{ uri: getPosterUri(anime, anime.id ? `https://img.anili.st/media/${anime.id}` : "") }}
           style={[styles.image, { borderRadius: colors.radius - 4 }]}
           resizeMode="cover"
           fadeDuration={120}
@@ -117,7 +118,7 @@ const styles = StyleSheet.create({
   },
   progressFill: { height: 3 },
   title: { fontSize: 12, fontWeight: "600", lineHeight: 16 },
-  tvTitle: { fontSize: 16, lineHeight: 21 },
+  tvTitle: { fontSize: 21, lineHeight: 29 },
   epCount: { fontSize: 10 },
-  tvEpCount: { fontSize: 13 },
+  tvEpCount: { fontSize: 16 },
 });
