@@ -9,18 +9,30 @@ import { useColors } from "@/hooks/useColors";
 type Props = {
   anime: AnilistMedia;
   size?: "sm" | "md" | "lg";
+  cardWidth?: number;
   progress?: number;
   showProgress?: boolean;
 };
 
-export const AnimeCard = React.memo(function AnimeCard({ anime, size = "sm", progress, showProgress }: Props) {
+export function getRailCardWidth(windowWidth: number, visibleCards = 3, gap = 10) {
+  const maxRailWidth = 900;
+  const railWidth = Math.min(Math.max(windowWidth - 32, 0), maxRailWidth);
+  return Math.max(96, Math.floor((railWidth - gap * (visibleCards - 1)) / visibleCards));
+}
+
+export function getRailSidePadding(windowWidth: number) {
+  const maxRailWidth = 900;
+  return Math.max(16, Math.floor((windowWidth - Math.min(Math.max(windowWidth - 32, 0), maxRailWidth)) / 2));
+}
+
+export const AnimeCard = React.memo(function AnimeCard({ anime, size = "sm", cardWidth, progress, showProgress }: Props) {
   const router = useRouter();
   const colors = useColors();
   const { width: windowWidth } = useWindowDimensions();
   // Recalculate on rotation/window resize and keep poster widths bounded so
   // tablets do not decode a handful of unnecessarily huge images.
-  const smallCardWidth = Math.max(96, Math.min(130, (windowWidth - 48) / 3));
-  const cardW = size === "lg" ? 160 : size === "md" ? 130 : smallCardWidth;
+  const smallCardWidth = getRailCardWidth(windowWidth, 3);
+  const cardW = cardWidth ?? (size === "lg" ? 160 : size === "md" ? 130 : smallCardWidth);
   const cardH = cardW * 1.4;
 
   const title = anime.title.english || anime.title.romaji;

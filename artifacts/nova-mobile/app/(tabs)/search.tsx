@@ -221,6 +221,7 @@ export default function SearchScreen() {
   // Three columns remain readable on TV and avoid decoding a whole row of
   // posters simultaneously on lower-powered Android TV hardware.
   const gridColumns = 3;
+  const gridWidth = Math.min(Math.max(width - 24, 0), 900);
 
   const [query, setQuery]         = useState("");
   const [results, setResults]     = useState<AnimeResult[]>([]);
@@ -532,6 +533,7 @@ export default function SearchScreen() {
         {!loading && results.length > 0 && (
           <FlatList
             data={results}
+            style={{ width: gridWidth, alignSelf: "center" }}
             key={`search-grid-${gridColumns}`}
             keyExtractor={item => item.id.toString()}
             numColumns={gridColumns}

@@ -100,6 +100,7 @@ function PosterCard({ uri, title, seasons, tint, onPress }: {
 
 function AnimationList({ searchQ }: { searchQ: string }) {
   const { width } = useWindowDimensions();
+  const gridWidth = Math.min(Math.max(width - 24, 0), 900);
   const columns = gridColumnsForWidth(width);
   const router = useRouter();
   const BASE = getBaseUrl();
@@ -181,6 +182,7 @@ function AnimationList({ searchQ }: { searchQ: string }) {
   return (
     <FlatList
       data={displayList}
+      style={{ width: gridWidth, alignSelf: "center" }}
       key={`aw-animation-grid-${columns}`}
       keyExtractor={item => item.key}
       numColumns={columns}
@@ -235,6 +237,7 @@ function dubbedImgUri(s: DubbedSeries, base: string): string | null {
 
 function CartoonList({ searchQ }: { searchQ: string }) {
   const { width } = useWindowDimensions();
+  const gridWidth = Math.min(Math.max(width - 24, 0), 900);
   const columns = gridColumnsForWidth(width);
   const router = useRouter();
   const BASE = getBaseUrl();
@@ -318,6 +321,7 @@ function CartoonList({ searchQ }: { searchQ: string }) {
   return (
     <FlatList
       data={displayList}
+        style={{ width: gridWidth, alignSelf: "center" }}
       key={`aw-cartoon-grid-${columns}`}
       keyExtractor={item => item.key || item.title}
       numColumns={columns}

@@ -75,6 +75,7 @@ export default function AnimationsScreen() {
   // Keep the same three-card density as mobile on wide displays. This is
   // lighter for Android TV and keeps titles/posters comfortably readable.
   const gridColumns = 3;
+  const gridWidth = Math.min(Math.max(width - 24, 0), 900);
 
   const [type, setType] = useState<MediaType>("movie");
   const [genre, setGenre] = useState<number>(0);
@@ -388,6 +389,7 @@ export default function AnimationsScreen() {
       ) : (
         <FlatList
           data={items}
+          style={{ width: gridWidth, alignSelf: "center" }}
           key={`animation-grid-${gridColumns}`}
           keyExtractor={(item, i) => `${item.id}-${i}`}
           numColumns={gridColumns}

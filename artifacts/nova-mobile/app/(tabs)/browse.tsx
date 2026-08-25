@@ -188,7 +188,9 @@ export default function BrowseScreen() {
   // Keep poster cards at the phone density on TV/tablets. More columns
   // decode too many large images at once and make remote scrolling janky.
   const gridColumns = 3;
-  const genreColumns = width >= 700 ? 3 : 2;
+  const genreColumns = 2;
+  const gridWidth = Math.min(Math.max(width - 24, 0), 900);
+  const filterRailWidth = Math.min(Math.max(width - 24, 0), 900);
 
   const routeValue = (value: string | string[] | undefined) =>
     Array.isArray(value) ? value[0] || "" : value || "";
@@ -392,7 +394,7 @@ export default function BrowseScreen() {
         </View>
 
         {/* Format chips */}
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={g.chipRow}>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={[g.chipRow, { width: filterRailWidth, alignSelf: "center" }]}>
           <View style={{ flexDirection: "row", gap: 6 }}>
             {FORMAT_OPTIONS.map(opt => (
               <Pressable key={opt.value}
@@ -407,7 +409,7 @@ export default function BrowseScreen() {
         {/* Sort + Season + Year (only in list mode) */}
         {view === "list" && (
           <>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={[g.chipRow, { marginTop: 4 }]}>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={[g.chipRow, { marginTop: 4, width: filterRailWidth, alignSelf: "center" }]}>
               <View style={{ flexDirection: "row", gap: 6 }}>
                 {SORT_OPTIONS.map(opt => (
                   <Pressable key={opt.value} onPress={() => setSort(opt.value)}
@@ -419,7 +421,7 @@ export default function BrowseScreen() {
             </ScrollView>
 
             {/* Seasons row */}
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={[g.chipRow, { marginTop: 4 }]}>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={[g.chipRow, { marginTop: 4, width: filterRailWidth, alignSelf: "center" }]}>
               <View style={{ flexDirection: "row", gap: 6 }}>
                 {SEASON_OPTIONS.map(opt => (
                   <Pressable key={opt.value} onPress={() => setSeason(opt.value)}
@@ -430,7 +432,7 @@ export default function BrowseScreen() {
               </View>
             </ScrollView>
             {/* Years row — من 1990 حتى السنة الحالية */}
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={[g.chipRow, { marginTop: 4 }]}>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={[g.chipRow, { marginTop: 4, width: filterRailWidth, alignSelf: "center" }]}>
               <View style={{ flexDirection: "row", gap: 6 }}>
                 {YEARS.map(y => {
                   const val = y === "الكل" ? "" : y;
@@ -444,7 +446,7 @@ export default function BrowseScreen() {
               </View>
             </ScrollView>
 
-            <View style={g.searchWrap}>
+            <View style={[g.searchWrap, { width: filterRailWidth, alignSelf: "center" }]}>
               <Ionicons name="search" size={14} color="rgba(255,255,255,0.25)" />
               <TextInput
                 value={search}
@@ -467,6 +469,7 @@ export default function BrowseScreen() {
       {view === "genres" && (
         <FlatList
           data={GENRES_WITH_COVERS}
+          style={{ width: gridWidth, alignSelf: "center" }}
           key={`genres-${genreColumns}`}
           keyExtractor={item => item.genre}
           numColumns={genreColumns}
@@ -500,6 +503,7 @@ export default function BrowseScreen() {
             <FlatList
               ref={listRef}
               data={filteredItems}
+              style={{ width: gridWidth, alignSelf: "center" }}
               key={`anime-grid-${gridColumns}`}
               keyExtractor={(item, i) => `${item.id}-${i}`}
               numColumns={gridColumns}

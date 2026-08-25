@@ -61,7 +61,8 @@ export default function LibraryScreen() {
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
   const topPad = Platform.OS === "web" ? 0 : Math.max(insets.top, 0);
-  const gridColumns = width >= 1000 ? 6 : width >= 700 ? 5 : 4;
+  const gridColumns = 3;
+  const gridWidth = Math.min(Math.max(width - 24, 0), 900);
   const router = useRouter();
   const { watchHistory, favorites, removeFromHistory, toggleFavorite } = useApp();
 
@@ -317,6 +318,7 @@ export default function LibraryScreen() {
         ) : (
           <FlatList
             data={filteredFavs}
+            style={{ width: gridWidth, alignSelf: "center" }}
             keyExtractor={f => f.id.toString()}
             key={`favorites-grid-${gridColumns}`}
             numColumns={gridColumns}
@@ -361,6 +363,7 @@ export default function LibraryScreen() {
         ) : (
           <FlatList
             data={filteredChars}
+            style={{ width: gridWidth, alignSelf: "center" }}
             keyExtractor={c => c.id.toString()}
             key={`characters-grid-${gridColumns}`}
             numColumns={gridColumns}

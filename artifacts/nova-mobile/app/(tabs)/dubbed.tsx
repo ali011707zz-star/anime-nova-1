@@ -69,7 +69,8 @@ export default function DubbedScreen() {
   const { width } = useWindowDimensions();
   const router = useRouter();
   const topPad = Platform.OS === "web" ? 0 : insets.top;
-  const numColumns = width >= 1000 ? 6 : width >= 700 ? 5 : 3;
+  const numColumns = 3;
+  const gridWidth = Math.min(Math.max(width - 24, 0), 900);
 
   const [series, setSeries] = useState<Series[]>([]);
   const [page, setPage] = useState(1);
@@ -185,6 +186,7 @@ export default function DubbedScreen() {
       ) : (
         <FlatList
           data={displayList}
+          style={{ width: gridWidth, alignSelf: "center" }}
           key={`dubbed-grid-${numColumns}`}
           keyExtractor={item => item.key || item.title}
           numColumns={numColumns}

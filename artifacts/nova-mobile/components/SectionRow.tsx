@@ -1,8 +1,8 @@
 import React from "react";
-import { FlatList, Platform, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { FlatList, Platform, Pressable, ScrollView, StyleSheet, Text, View, useWindowDimensions } from "react-native";
 import { useColors } from "@/hooks/useColors";
 import { AnilistMedia } from "@/utils/anilist";
-import { AnimeCard } from "./AnimeCard";
+import { AnimeCard, getRailCardWidth, getRailSidePadding } from "./AnimeCard";
 import { Ionicons } from "@expo/vector-icons";
 
 type Props = {
@@ -14,6 +14,9 @@ type Props = {
 
 export const SectionRow = React.memo(function SectionRow({ title, items, onSeeAll, size = "md" }: Props) {
   const colors = useColors();
+  const { width } = useWindowDimensions();
+  const cardWidth = getRailCardWidth(width, 3);
+  const sidePadding = getRailSidePadding(width);
 
   if (!items.length) return null;
 
@@ -32,9 +35,9 @@ export const SectionRow = React.memo(function SectionRow({ title, items, onSeeAl
         data={items}
         horizontal
         keyExtractor={(item) => String(item.id)}
-        renderItem={({ item }) => <AnimeCard anime={item} size={size} />}
+        renderItem={({ item }) => <AnimeCard anime={item} size={size} cardWidth={cardWidth} />}
         showsHorizontalScrollIndicator={false}
-        contentContainerStyle={styles.scroll}
+        contentContainerStyle={[styles.scroll, { paddingHorizontal: sidePadding }]}
         // These rails are rendered inside the home ScrollView. FlatList keeps
         // off-screen posters out of the native view tree, which matters on
         // tablets where several rails are visible in one session.

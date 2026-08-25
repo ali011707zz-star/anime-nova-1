@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useFocusEffect, useRouter } from "expo-router";
 import { LinearGradient } from "expo-linear-gradient";
-import { FlatList, Image } from "react-native";
+import { FlatList, Image, useWindowDimensions } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import React, { useState, useEffect, useCallback, useMemo } from "react";
 import {
@@ -14,6 +14,7 @@ import { AnnouncementBanner } from "@/components/AnnouncementBanner";
 import { DrawerMenu } from "@/components/DrawerMenu";
 import { HeroSection } from "@/components/HeroSection";
 import { SectionRow, SkeletonRow } from "@/components/SectionRow";
+import { getRailCardWidth, getRailSidePadding } from "@/components/AnimeCard";
 import { useColors } from "@/hooks/useColors";
 import {
   AIRING_QUERY, AnilistMedia, anilistQuery,
@@ -44,6 +45,7 @@ export default function HomeScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { watchHistory } = useApp();
+  const { width } = useWindowDimensions();
   const [showDrawer, setShowDrawer] = useState(false);
 
   const topPad = Platform.OS === "web" ? 0 : insets.top;
@@ -203,6 +205,9 @@ export default function HomeScreen() {
     [popularList],
   );
   const recentHistory = watchHistory.slice(0, 10);
+  const railCardWidth = getRailCardWidth(width, 3);
+  const railSidePadding = getRailSidePadding(width);
+  const railGap = 10;
 
   const refresh = async () => {
     await Promise.all([
@@ -263,11 +268,11 @@ export default function HomeScreen() {
               horizontal
               keyExtractor={(h) => `${h.animeId}-${h.ep}`}
               showsHorizontalScrollIndicator={false}
-              contentContainerStyle={{ paddingHorizontal: 16, gap: 10 }}
+               contentContainerStyle={{ paddingHorizontal: railSidePadding, gap: railGap }}
               renderItem={({ item: h }) => (
                 <Pressable
                   onPress={() => router.push(`/watch?anime=${h.animeId}&ep=${h.ep}&title=${encodeURIComponent(h.title)}&english=${encodeURIComponent(h.english)}${h.thumbnail ? `&cover=${encodeURIComponent(h.thumbnail)}` : ""}`)}
-                  style={[styles.historyCard, { backgroundColor: colors.card, borderColor: colors.border }]}
+                   style={[styles.historyCard, { width: railCardWidth, height: Math.round(railCardWidth * 0.7), backgroundColor: colors.card, borderColor: colors.border }]}
                 >
                   <Image source={{ uri: h.thumbnail || `https://img.anili.st/media/${h.animeId}` }} style={styles.historyImg} resizeMode="cover" />
                   <LinearGradient colors={["transparent", "rgba(0,0,0,0.9)"]} style={styles.historyGrad}>
@@ -310,13 +315,13 @@ export default function HomeScreen() {
               horizontal
               keyExtractor={(ep) => `${ep.animeId}-${ep.episode}`}
               showsHorizontalScrollIndicator={false}
-              contentContainerStyle={{ paddingHorizontal: 16, gap: 10 }}
+               contentContainerStyle={{ paddingHorizontal: railSidePadding, gap: railGap }}
               renderItem={({ item: ep }) => (
                 /* بطاقة أحدث الحلقات تمرر anslayerId كمرجع احتياطي لـ AS،
                    لكن صفحة المشاهدة تفحص كل المصادر المتاحة مثل الويب. */
                 <Pressable
                   onPress={() => router.push(`/watch?anime=${ep.animeId}&ep=${ep.episode}&title=${encodeURIComponent(ep.romaji || ep.name || "")}&english=${encodeURIComponent(ep.english || "")}&native=${encodeURIComponent(ep.native || "")}&titles=${encodeURIComponent(JSON.stringify(ep.titleVariants || []))}&cover=${encodeURIComponent(ep.cover || "")}&titleAr=${encodeURIComponent(ep.titleAr || "")}&anslayerId=${ep.anslayerId}` as any)}
-                  style={[todayEpStyles.card, { backgroundColor: colors.card, borderColor: colors.border }]}
+                   style={[todayEpStyles.card, { width: railCardWidth, height: Math.round(railCardWidth * 1.46), backgroundColor: colors.card, borderColor: colors.border }]}
                 >
                   {ep.cover ? (
                     <Image source={{ uri: ep.cover }} style={todayEpStyles.img} resizeMode="cover" />
@@ -357,7 +362,7 @@ export default function HomeScreen() {
               horizontal
               keyExtractor={(item: any, idx) => String(item.key || idx)}
               showsHorizontalScrollIndicator={false}
-              contentContainerStyle={{ paddingHorizontal: 16, gap: 10 }}
+               contentContainerStyle={{ paddingHorizontal: railSidePadding, gap: railGap }}
               renderItem={({ item }: { item: any }) => {
                 const imgUri = item.poster || null;
                 return (
@@ -381,7 +386,7 @@ export default function HomeScreen() {
                         },
                       });
                     }}
-                    style={[todayStyles.card, { backgroundColor: colors.card, borderColor: colors.border }]}
+                     style={[todayStyles.card, { width: railCardWidth, height: Math.round(railCardWidth * 1.46), backgroundColor: colors.card, borderColor: colors.border }]}
                   >
                     {imgUri ? (
                       <Image source={{ uri: imgUri }} style={todayStyles.img} resizeMode="cover" />
@@ -421,7 +426,7 @@ export default function HomeScreen() {
               horizontal
               keyExtractor={(item: any, idx) => String(item.key || item.id || idx)}
               showsHorizontalScrollIndicator={false}
-              contentContainerStyle={{ paddingHorizontal: 16, gap: 10 }}
+               contentContainerStyle={{ paddingHorizontal: railSidePadding, gap: railGap }}
               renderItem={({ item }: { item: any }) => {
                 const rawImg = item.image || item.poster || "";
                 const imgUri = rawImg
@@ -433,7 +438,7 @@ export default function HomeScreen() {
                       const seasons = JSON.stringify(item.seasons || [{ label: "الحلقات", arabicToonsId: item.arabicToonsId }]);
                       router.push({ pathname: "/dubbed/[id]" as any, params: { id: item.key || item.id || item.title, title: item.title, seasons, img: rawImg } });
                     }}
-                    style={[todayStyles.card, { backgroundColor: colors.card, borderColor: colors.border }]}
+                     style={[todayStyles.card, { width: railCardWidth, height: Math.round(railCardWidth * 1.46), backgroundColor: colors.card, borderColor: colors.border }]}
                   >
                     {imgUri ? (
                       <Image source={{ uri: imgUri }} style={todayStyles.img} resizeMode="cover" />
