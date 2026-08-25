@@ -9,6 +9,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as ImagePicker from "expo-image-picker";
+import { isTvDevice, tvFocusStyle } from "@/utils/tv";
 
 /* ── trace.moe result type ── */
 interface TraceResult {
@@ -184,10 +185,16 @@ function filterSafe(list: AnimeResult[]): AnimeResult[] {
 
 /* ── Anime Card ── */
 function AnimeCard({ anime, onPress, columns }: { anime: AnimeResult; onPress: () => void; columns: number }) {
+  const { width, height } = useWindowDimensions();
+  const tvMode = isTvDevice(width, height);
   const fmt = anime.format ? FORMAT_AR[anime.format] || anime.format : null;
   const isFilm = anime.format === "MOVIE";
   return (
-    <Pressable onPress={onPress} style={[s.card, { flex: 1 / columns }]}>
+    <Pressable
+      onPress={onPress}
+      focusable={tvMode}
+      style={({ focused }) => [s.card, { flex: 1 / columns }, tvMode && tvFocusStyle(focused)]}
+    >
       <View style={s.cardImgWrap}>
         {anime.coverImage?.large ? (
           <Image source={{ uri: anime.coverImage.large }} style={s.cardImg} />
@@ -215,13 +222,14 @@ function AnimeCard({ anime, onPress, columns }: { anime: AnimeResult; onPress: (
 
 export default function SearchScreen() {
   const insets = useSafeAreaInsets();
-  const { width } = useWindowDimensions();
+  const { width, height } = useWindowDimensions();
   const router = useRouter();
   const topPad = Platform.OS === "web" ? 0 : insets.top;
-  // Three columns remain readable on TV and avoid decoding a whole row of
-  // posters simultaneously on lower-powered Android TV hardware.
-  const gridColumns = 3;
-  const gridWidth = Math.min(Math.max(width - 24, 0), 900);
+  // Four TV columns remain readable while avoiding an oversized decode batch
+  // on lower-powered Android TV hardware.
+  const tvMode = isTvDevice(width, height);
+  const gridColumns = tvMode ? 4 : 3;
+  const gridWidth = Math.min(Math.max(width - 24, 0), tvMode ? 1100 : 900);
 
   const [query, setQuery]         = useState("");
   const [results, setResults]     = useState<AnimeResult[]>([]);

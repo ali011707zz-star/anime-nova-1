@@ -16,6 +16,7 @@ import {
 } from "react-native";
 import { useNovaMedia3Player, NovaMedia3View } from "../lib/nova-media3";
 import { openIsolatedPlayer } from "../lib/isolatedPlayer";
+import { isTvDevice, tvFocusStyle } from "../utils/tv";
 import type { PlayerSource, SubCue } from "./RiftPlayer";
 
 type Props = {
@@ -128,6 +129,7 @@ export function RiftPlayer({
   const [duration, setDuration] = useState(0);
   const [isPlaying, setIsPlaying] = useState(true);
   const [buffering, setBuffering] = useState(true);
+  const tvMode = isTvDevice(Dimensions.get("window").width, Dimensions.get("window").height);
   const [failed, setFailed] = useState(!source);
   const [speed, setSpeed] = useState(1);
   const [showSources, setShowSources] = useState(false);
@@ -395,12 +397,18 @@ export function RiftPlayer({
       )}
       <Pressable
         style={StyleSheet.absoluteFill}
+        pointerEvents={tvMode ? "none" : "auto"}
         onPress={() => (controlsVisible ? setControlsVisible(false) : scheduleHide())}
       />
       {controlsVisible && (
         <View pointerEvents="box-none" style={StyleSheet.absoluteFill}>
           <View style={styles.topBar}>
-            <Pressable onPress={onBack} hitSlop={10} style={styles.iconButton}>
+            <Pressable
+              onPress={onBack}
+              focusable={tvMode}
+              hitSlop={tvMode ? 14 : 10}
+              style={({ focused }) => [styles.iconButton, tvMode && tvFocusStyle(focused)]}
+            >
               <Ionicons name="close" size={22} color="#fff" />
             </Pressable>
             <View style={styles.titleBlock}>
@@ -441,18 +449,31 @@ export function RiftPlayer({
             </View>
             <View style={styles.controlsRow}>
               <View style={styles.controlSide}>
-                <Pressable onPress={() => seek(position - 10)} style={styles.control}>
+                <Pressable
+                  onPress={() => seek(position - 10)}
+                  focusable={tvMode}
+                  style={({ focused }) => [styles.control, tvMode && styles.tvControl, tvMode && tvFocusStyle(focused)]}
+                >
                   <Ionicons name="play-back" size={20} color="#fff" />
                   <Text style={styles.controlText}>10</Text>
                 </Pressable>
               </View>
               <View style={styles.controlCenter}>
-                <Pressable onPress={togglePlayback} style={styles.playButton}>
+                <Pressable
+                  onPress={togglePlayback}
+                  focusable={tvMode}
+                  hasTVPreferredFocus={tvMode}
+                  style={({ focused }) => [styles.playButton, tvMode && styles.tvPlayButton, tvMode && tvFocusStyle(focused)]}
+                >
                   <Ionicons name={isPlaying ? "pause" : "play"} size={24} color="#09090b" />
                 </Pressable>
               </View>
               <View style={styles.controlSide}>
-                <Pressable onPress={() => seek(position + 10)} style={styles.control}>
+                <Pressable
+                  onPress={() => seek(position + 10)}
+                  focusable={tvMode}
+                  style={({ focused }) => [styles.control, tvMode && styles.tvControl, tvMode && tvFocusStyle(focused)]}
+                >
                   <Ionicons name="play-forward" size={20} color="#fff" />
                   <Text style={styles.controlText}>10</Text>
                 </Pressable>
@@ -468,21 +489,34 @@ export function RiftPlayer({
                 </Pressable>
               )}
               <View style={styles.flex} />
-              <Pressable onPress={() => setSubOn((value) => !value)} style={[styles.pill, subOn && styles.pillActive]}>
+              <Pressable
+                onPress={() => setSubOn((value) => !value)}
+                focusable={tvMode}
+                style={({ focused }) => [styles.pill, subOn && styles.pillActive, tvMode && styles.tvPill, tvMode && tvFocusStyle(focused)]}
+              >
                 <Text style={styles.pillText}>CC</Text>
               </Pressable>
               <View>
                 {showSources && (
                   <View style={styles.menu}>
                     {playableSources.map((item, index) => (
-                      <Pressable key={`${item.url}-${index}`} onPress={() => { changeSource(index); setShowSources(false); }} style={styles.menuItem}>
+                      <Pressable
+                        key={`${item.url}-${index}`}
+                        onPress={() => { changeSource(index); setShowSources(false); }}
+                        focusable={tvMode}
+                        style={({ focused }) => [styles.menuItem, tvMode && tvFocusStyle(focused)]}
+                      >
                         <Text style={styles.menuText}>{item.quality || item.label}</Text>
                         {index === sourceIndex && <Ionicons name="checkmark" size={15} color="#c4b5fd" />}
                       </Pressable>
                     ))}
                   </View>
                 )}
-                <Pressable onPress={() => { setShowSources((value) => !value); setShowSpeeds(false); }} style={styles.pill}>
+                <Pressable
+                  onPress={() => { setShowSources((value) => !value); setShowSpeeds(false); }}
+                  focusable={tvMode}
+                  style={({ focused }) => [styles.pill, tvMode && styles.tvPill, tvMode && tvFocusStyle(focused)]}
+                >
                   <Text style={styles.pillText}>الجودة</Text>
                 </Pressable>
               </View>
@@ -490,14 +524,23 @@ export function RiftPlayer({
                 {showSpeeds && (
                   <View style={styles.menu}>
                     {SPEEDS.map((item) => (
-                      <Pressable key={item} onPress={() => chooseSpeed(item)} style={styles.menuItem}>
+                      <Pressable
+                        key={item}
+                        onPress={() => chooseSpeed(item)}
+                        focusable={tvMode}
+                        style={({ focused }) => [styles.menuItem, tvMode && tvFocusStyle(focused)]}
+                      >
                         <Text style={styles.menuText}>{item}x</Text>
                         {item === speed && <Ionicons name="checkmark" size={15} color="#c4b5fd" />}
                       </Pressable>
                     ))}
                   </View>
                 )}
-                <Pressable onPress={() => { setShowSpeeds((value) => !value); setShowSources(false); }} style={styles.pill}>
+                <Pressable
+                  onPress={() => { setShowSpeeds((value) => !value); setShowSources(false); }}
+                  focusable={tvMode}
+                  style={({ focused }) => [styles.pill, tvMode && styles.tvPill, tvMode && tvFocusStyle(focused)]}
+                >
                   <Text style={styles.pillText}>{speed}x</Text>
                 </Pressable>
               </View>
@@ -542,10 +585,13 @@ const styles = StyleSheet.create({
   controlSide: { flex: 1, alignItems: "center" },
   controlCenter: { width: 66, alignItems: "center" },
   control: { flexDirection: "row", alignItems: "center", padding: 7 },
+  tvControl: { padding: 14, minWidth: 86, justifyContent: "center" },
   controlText: { color: "#fff", fontSize: 10, marginLeft: -5 },
   playButton: { width: 48, height: 48, borderRadius: 24, backgroundColor: "#c4b5fd", alignItems: "center", justifyContent: "center" },
+  tvPlayButton: { width: 68, height: 68, borderRadius: 34 },
   flex: { flex: 1 },
   pill: { paddingHorizontal: 10, paddingVertical: 8, borderRadius: 10, backgroundColor: "rgba(0,0,0,0.55)" },
+  tvPill: { paddingHorizontal: 18, paddingVertical: 13, minWidth: 80, alignItems: "center" },
   pillActive: { backgroundColor: "rgba(139,92,246,0.65)" },
   pillText: { color: "#fff", fontSize: 11, fontWeight: "700" },
   skip: { paddingHorizontal: 10, paddingVertical: 8, borderRadius: 10, backgroundColor: "#fde68a" },

@@ -5,6 +5,7 @@ import { useRouter } from "expo-router";
 import React from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { useColors } from "@/hooks/useColors";
+import { isTvDevice, tvFocusStyle } from "@/utils/tv";
 
 type Props = {
   anime: AnilistMedia;
@@ -31,22 +32,30 @@ export function getRailSidePadding(windowWidth: number) {
 export const AnimeCard = React.memo(function AnimeCard({ anime, size = "sm", cardWidth, progress, showProgress }: Props) {
   const router = useRouter();
   const colors = useColors();
-  const { width: windowWidth } = useWindowDimensions();
+  const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   // Recalculate on rotation/window resize and keep poster widths bounded so
   // tablets do not decode a handful of unnecessarily huge images.
   const smallCardWidth = getRailCardWidth(windowWidth, 3);
   const cardW = cardWidth ?? (size === "lg" ? 160 : size === "md" ? 130 : smallCardWidth);
   const cardH = cardW * 1.4;
+  const tvMode = isTvDevice(windowWidth, windowHeight);
 
   const title = anime.title.english || anime.title.romaji;
 
   return (
     <Pressable
       onPress={() => router.push(`/anime/${anime.id}?title=${encodeURIComponent(anime.title.romaji)}&english=${encodeURIComponent(anime.title.english || "")}`)}
-      hitSlop={4}
+      focusable={tvMode}
+      hasTVPreferredFocus={false}
+      hitSlop={tvMode ? 8 : 4}
       pressRetentionOffset={12}
       android_ripple={{ color: "rgba(139,92,246,0.18)" }}
-      style={({ pressed }) => [styles.card, { width: cardW, opacity: pressed ? 0.85 : 1 }]}
+      style={({ pressed, focused }) => [
+        styles.card,
+        { width: cardW, opacity: pressed ? 0.85 : 1 },
+        tvMode && styles.tvCard,
+        tvMode && tvFocusStyle(focused),
+      ]}
     >
       <View style={[styles.imageContainer, { width: cardW, height: cardH, borderRadius: colors.radius - 4 }]}>
         <Image
@@ -73,11 +82,11 @@ export const AnimeCard = React.memo(function AnimeCard({ anime, size = "sm", car
           </View>
         )}
       </View>
-      <Text style={[styles.title, { color: colors.text }]} numberOfLines={2}>
+      <Text style={[styles.title, tvMode && styles.tvTitle, { color: colors.text }]} numberOfLines={2}>
         {title}
       </Text>
       {anime.episodes && (
-        <Text style={[styles.epCount, { color: colors.mutedForeground }]}>
+        <Text style={[styles.epCount, tvMode && styles.tvEpCount, { color: colors.mutedForeground }]}>
           {anime.episodes} حلقة
         </Text>
       )}
@@ -87,6 +96,7 @@ export const AnimeCard = React.memo(function AnimeCard({ anime, size = "sm", car
 
 const styles = StyleSheet.create({
   card: { flexDirection: "column", gap: 6 },
+  tvCard: { borderRadius: 10, padding: 5, margin: -5, gap: 8 },
   imageContainer: { overflow: "hidden", backgroundColor: "#1a1a2e", position: "relative" },
   image: { width: "100%", height: "100%" },
   scoreBadge: {
@@ -107,5 +117,7 @@ const styles = StyleSheet.create({
   },
   progressFill: { height: 3 },
   title: { fontSize: 12, fontWeight: "600", lineHeight: 16 },
+  tvTitle: { fontSize: 16, lineHeight: 21 },
   epCount: { fontSize: 10 },
+  tvEpCount: { fontSize: 13 },
 });

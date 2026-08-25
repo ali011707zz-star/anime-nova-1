@@ -7,6 +7,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { getBaseUrl } from "@/utils/api";
+import { isTvDevice, tvFocusStyle } from "@/utils/tv";
 
 /* ── Data ── */
 interface AnimeResult {
@@ -72,8 +73,14 @@ function coverUrl(id: number) { return `https://img.anili.st/media/${id}`; }
 
 /* ── Genre cover card ── */
 function GenreCard({ item, animeId, onPress, columns }: { item: typeof GENRES_WITH_COVERS[0]; animeId?: number; onPress: () => void; columns: number }) {
+  const { width, height } = useWindowDimensions();
+  const tvMode = isTvDevice(width, height);
   return (
-    <Pressable onPress={onPress} style={[g.genreCard, { flex: 1 / columns }]}>
+    <Pressable
+      onPress={onPress}
+      focusable={tvMode}
+      style={({ focused }) => [g.genreCard, { flex: 1 / columns }, tvMode && tvFocusStyle(focused)]}
+    >
       <View style={[g.genreImgWrap, { backgroundColor: item.color + "22" }]}>
         {animeId ? (
           <Image source={{ uri: coverUrl(animeId) }} style={g.genreImg} />
@@ -88,10 +95,16 @@ function GenreCard({ item, animeId, onPress, columns }: { item: typeof GENRES_WI
 
 /* ── Anime card ── */
 function AnimeCard({ anime, onPress, columns }: { anime: AnimeResult; onPress: () => void; columns: number }) {
+  const { width, height } = useWindowDimensions();
+  const tvMode = isTvDevice(width, height);
   const fmt = anime.format ? FORMAT_AR[anime.format] : null;
   const isFilm = anime.format === "MOVIE";
   return (
-    <Pressable onPress={onPress} style={[g.card, { flex: 1 / columns }]}>
+    <Pressable
+      onPress={onPress}
+      focusable={tvMode}
+      style={({ focused }) => [g.card, { flex: 1 / columns }, tvMode && tvFocusStyle(focused)]}
+    >
       <View style={g.cardWrap}>
         {anime.coverImage?.large ? (
           <Image source={{ uri: anime.coverImage.large }} style={g.cardImg} />
@@ -173,7 +186,7 @@ function translateSearchQuery(value: string): string {
 
 export default function BrowseScreen() {
   const insets = useSafeAreaInsets();
-  const { width } = useWindowDimensions();
+  const { width, height } = useWindowDimensions();
   const routeParams = useLocalSearchParams<{
     genre?: string;
     genreAr?: string;
@@ -185,12 +198,13 @@ export default function BrowseScreen() {
   }>();
   const router = useRouter();
   const topPad = Platform.OS === "web" ? 0 : insets.top;
-  // Keep poster cards at the phone density on TV/tablets. More columns
-  // decode too many large images at once and make remote scrolling janky.
-  const gridColumns = 3;
-  const genreColumns = 2;
-  const gridWidth = Math.min(Math.max(width - 24, 0), 900);
-  const filterRailWidth = Math.min(Math.max(width - 24, 0), 900);
+  // TV gets a wider, remote-friendly grid without decoding an excessive
+  // number of posters at once.
+  const tvMode = isTvDevice(width, height);
+  const gridColumns = tvMode ? 4 : 3;
+  const genreColumns = tvMode ? 3 : 2;
+  const gridWidth = Math.min(Math.max(width - 24, 0), tvMode ? 1100 : 900);
+  const filterRailWidth = Math.min(Math.max(width - 24, 0), tvMode ? 1100 : 900);
 
   const routeValue = (value: string | string[] | undefined) =>
     Array.isArray(value) ? value[0] || "" : value || "";

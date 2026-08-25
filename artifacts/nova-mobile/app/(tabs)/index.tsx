@@ -26,6 +26,7 @@ import {
 } from "@/utils/anilist";
 import { useApp } from "@/context/AppContext";
 import { getBaseUrl } from "@/utils/api";
+import { isTvDevice } from "@/utils/tv";
 
 const SEASON_AR: Record<string, string> = {
   WINTER: "شتاء", SPRING: "ربيع", SUMMER: "صيف", FALL: "خريف",
@@ -45,7 +46,7 @@ export default function HomeScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { watchHistory } = useApp();
-  const { width } = useWindowDimensions();
+  const { width, height } = useWindowDimensions();
   const [showDrawer, setShowDrawer] = useState(false);
 
   const topPad = Platform.OS === "web" ? 0 : insets.top;
@@ -205,7 +206,7 @@ export default function HomeScreen() {
     [popularList],
   );
   const recentHistory = watchHistory.slice(0, 10);
-  const isTvLayout = width >= 700;
+  const isTvLayout = isTvDevice(width, height);
   const railCardWidth = getRailCardWidth(width, 3);
   const railSidePadding = getRailSidePadding(width);
   const railGap = 10;

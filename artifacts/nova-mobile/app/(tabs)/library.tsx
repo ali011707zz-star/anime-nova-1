@@ -11,6 +11,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useColors } from "@/hooks/useColors";
 import { useApp } from "@/context/AppContext";
+import { isTvDevice } from "@/utils/tv";
 
 interface FavChar {
   id: number;
@@ -59,10 +60,11 @@ const TABS = [
 export default function LibraryScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  const { width } = useWindowDimensions();
+  const { width, height } = useWindowDimensions();
   const topPad = Platform.OS === "web" ? 0 : Math.max(insets.top, 0);
-  const gridColumns = 3;
-  const gridWidth = Math.min(Math.max(width - 24, 0), 900);
+  const tvMode = isTvDevice(width, height);
+  const gridColumns = tvMode ? 4 : 3;
+  const gridWidth = Math.min(Math.max(width - 24, 0), tvMode ? 1100 : 900);
   const router = useRouter();
   const { watchHistory, favorites, removeFromHistory, toggleFavorite } = useApp();
 

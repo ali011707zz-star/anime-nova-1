@@ -4,6 +4,7 @@ import { useColors } from "@/hooks/useColors";
 import { AnilistMedia } from "@/utils/anilist";
 import { AnimeCard, getRailCardWidth, getRailSidePadding } from "./AnimeCard";
 import { Ionicons } from "@expo/vector-icons";
+import { isTvDevice, tvFocusStyle } from "@/utils/tv";
 
 type Props = {
   title: string;
@@ -14,7 +15,8 @@ type Props = {
 
 export const SectionRow = React.memo(function SectionRow({ title, items, onSeeAll, size = "md" }: Props) {
   const colors = useColors();
-  const { width } = useWindowDimensions();
+  const { width, height } = useWindowDimensions();
+  const tvMode = isTvDevice(width, height);
   const cardWidth = getRailCardWidth(width, 3);
   const sidePadding = getRailSidePadding(width);
 
@@ -25,14 +27,18 @@ export const SectionRow = React.memo(function SectionRow({ title, items, onSeeAl
       <View style={styles.header}>
         <Text style={[styles.title, { color: colors.text }]}>{title}</Text>
         {onSeeAll && (
-          <Pressable onPress={onSeeAll} style={styles.seeAll}>
+          <Pressable
+            onPress={onSeeAll}
+            focusable={tvMode}
+            style={({ focused }) => [styles.seeAll, tvMode && tvFocusStyle(focused)]}
+          >
             <Text style={[styles.seeAllText, { color: colors.primary }]}>عرض الكل</Text>
             <Ionicons name="chevron-back" size={14} color={colors.primary} />
           </Pressable>
         )}
       </View>
       <FlatList
-        data={items.slice(0, width >= 700 ? 10 : items.length)}
+        data={items.slice(0, tvMode ? 10 : items.length)}
         horizontal
         keyExtractor={(item) => String(item.id)}
         renderItem={({ item }) => <AnimeCard anime={item} size={size} cardWidth={cardWidth} />}

@@ -10,6 +10,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { getBaseUrl } from "@/utils/api";
+import { isTvDevice } from "@/utils/tv";
 
 const IMG = "https://image.tmdb.org/t/p/w342";
 
@@ -69,13 +70,13 @@ function hasCjk(s: string) {
 
 export default function AnimationsScreen() {
   const insets = useSafeAreaInsets();
-  const { width } = useWindowDimensions();
+  const { width, height } = useWindowDimensions();
   const router = useRouter();
   const topPad = Platform.OS === "web" ? 0 : insets.top;
-  // Keep the same three-card density as mobile on wide displays. This is
-  // lighter for Android TV and keeps titles/posters comfortably readable.
-  const gridColumns = 3;
-  const gridWidth = Math.min(Math.max(width - 24, 0), 900);
+  // Keep TV cards readable without decoding a large poster batch at once.
+  const tvMode = isTvDevice(width, height);
+  const gridColumns = tvMode ? 4 : 3;
+  const gridWidth = Math.min(Math.max(width - 24, 0), tvMode ? 1100 : 900);
 
   const [type, setType] = useState<MediaType>("movie");
   const [genre, setGenre] = useState<number>(0);
