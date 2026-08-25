@@ -14,7 +14,7 @@ export function isTvDevice(width?: number, height?: number) {
   const shortEdge = Math.min(width, height);
   // Only use the fallback for large TV-like canvases. Certified TV devices
   // are detected by Platform.isTV above, so this should not turn a phone
-  // rotating into landscape into a TV layout.
+  // rotating into a TV layout.
   return longEdge >= 1600 && shortEdge >= 800;
 }
 
