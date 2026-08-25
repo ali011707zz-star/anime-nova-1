@@ -205,6 +205,7 @@ export default function HomeScreen() {
     [popularList],
   );
   const recentHistory = watchHistory.slice(0, 10);
+  const isTvLayout = width >= 700;
   const railCardWidth = getRailCardWidth(width, 3);
   const railSidePadding = getRailSidePadding(width);
   const railGap = 10;
@@ -264,7 +265,7 @@ export default function HomeScreen() {
               </Pressable>
             </View>
             <FlatList
-              data={recentHistory}
+              data={isTvLayout ? recentHistory.slice(0, 10) : recentHistory}
               horizontal
               keyExtractor={(h) => `${h.animeId}-${h.ep}`}
               showsHorizontalScrollIndicator={false}
@@ -311,7 +312,7 @@ export default function HomeScreen() {
               </Pressable>
             </View>
             <FlatList
-              data={todayEps}
+              data={isTvLayout ? todayEps.slice(0, 10) : todayEps}
               horizontal
               keyExtractor={(ep) => `${ep.animeId}-${ep.episode}`}
               showsHorizontalScrollIndicator={false}
@@ -358,7 +359,7 @@ export default function HomeScreen() {
               </Pressable>
             </View>
             <FlatList
-              data={awDubbedSeries}
+              data={isTvLayout ? awDubbedSeries.slice(0, 10) : awDubbedSeries}
               horizontal
               keyExtractor={(item: any, idx) => String(item.key || idx)}
               showsHorizontalScrollIndicator={false}
@@ -422,7 +423,7 @@ export default function HomeScreen() {
               </Pressable>
             </View>
             <FlatList
-              data={dubbedSeries}
+              data={isTvLayout ? dubbedSeries.slice(0, 10) : dubbedSeries}
               horizontal
               keyExtractor={(item: any, idx) => String(item.key || item.id || idx)}
               showsHorizontalScrollIndicator={false}

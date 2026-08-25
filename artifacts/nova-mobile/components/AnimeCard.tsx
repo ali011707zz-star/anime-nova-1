@@ -15,6 +15,9 @@ type Props = {
 };
 
 export function getRailCardWidth(windowWidth: number, visibleCards = 3, gap = 10) {
+  // Android TV reports a much wider window than a phone. Keep a deliberate,
+  // remote-friendly card size instead of stretching cards across the screen.
+  if (windowWidth >= 700) return 176;
   const maxRailWidth = 900;
   const railWidth = Math.min(Math.max(windowWidth - 32, 0), maxRailWidth);
   return Math.max(96, Math.floor((railWidth - gap * (visibleCards - 1)) / visibleCards));
