@@ -1,4 +1,5 @@
-import { Platform } from "react-native";
+import React from "react";
+import { Platform, Pressable, PressableProps, StyleProp, ViewStyle } from "react-native";
 
 /**
  * Android TV and most certified TV boxes expose Platform.isTV through React
@@ -28,4 +29,45 @@ export function tvFocusStyle(focused: boolean) {
         elevation: 8,
       }
     : {};
+}
+
+/**
+ * Use this for every action that is not an image card. Android TV's native
+ * focus engine only sees a control when it is explicitly focusable; keeping
+ * that detail here prevents screens from drifting into different TV behavior.
+ */
+export function TvPressable({
+  style,
+  children,
+  hasTVPreferredFocus = false,
+  ...props
+}: PressableProps & { style?: StyleProp<ViewStyle> }) {
+  return (
+    <Pressable
+      {...props}
+      focusable
+      hasTVPreferredFocus={hasTVPreferredFocus}
+      hitSlop={props.hitSlop ?? 8}
+      pressRetentionOffset={props.pressRetentionOffset ?? 12}
+      style={({ focused, pressed }) => [
+        typeof style === "function" ? style({ focused, pressed }) : style,
+        tvFocusStyle(focused),
+        pressed && { opacity: 0.82 },
+      ]}
+    >
+      {children}
+    </Pressable>
+  );
+}
+
+export function tvLayout(width: number, height: number) {
+  const tv = isTvDevice(width, height);
+  return {
+    tv,
+    contentWidth: tv ? Math.min(Math.max(width - 80, 0), 1280) : width,
+    horizontalPadding: tv ? 40 : 16,
+    controlHeight: tv ? 58 : 44,
+    textScale: tv ? 1.18 : 1,
+    sectionGap: tv ? 32 : 24,
+  };
 }

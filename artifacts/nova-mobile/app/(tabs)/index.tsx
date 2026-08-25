@@ -26,7 +26,7 @@ import {
 } from "@/utils/anilist";
 import { useApp } from "@/context/AppContext";
 import { getBaseUrl } from "@/utils/api";
-import { isTvDevice } from "@/utils/tv";
+import { isTvDevice, tvFocusStyle } from "@/utils/tv";
 
 const SEASON_AR: Record<string, string> = {
   WINTER: "شتاء", SPRING: "ربيع", SUMMER: "صيف", FALL: "خريف",
@@ -237,7 +237,12 @@ export default function HomeScreen() {
             </Text>
           </View>
           <View style={styles.headerRight}>
-            <Pressable onPress={() => setShowDrawer(true)} style={styles.iconBtn}>
+             <Pressable
+               onPress={() => setShowDrawer(true)}
+               focusable={isTvLayout}
+               hitSlop={isTvLayout ? 10 : 6}
+               style={({ focused }) => [styles.iconBtn, isTvLayout && tvFocusStyle(focused)]}
+             >
               <Ionicons name="menu" size={26} color={colors.text} />
             </Pressable>
           </View>
@@ -260,7 +265,11 @@ export default function HomeScreen() {
                 <View style={[styles.sectionDot, { backgroundColor: "#22c55e" }]} />
                 <Text style={[styles.sectionTitle, { color: colors.text }]}>متابعة المشاهدة</Text>
               </View>
-              <Pressable onPress={() => router.push("/(tabs)/library")} style={styles.seeAllBtn}>
+               <Pressable
+                 onPress={() => router.push("/(tabs)/library")}
+                 focusable={isTvLayout}
+                 style={({ focused }) => [styles.seeAllBtn, isTvLayout && tvFocusStyle(focused)]}
+               >
                 <Text style={[styles.seeAllText, { color: colors.primary }]}>عرض الكل</Text>
                 <Ionicons name="chevron-back" size={13} color={colors.primary} />
               </Pressable>
@@ -272,9 +281,10 @@ export default function HomeScreen() {
               showsHorizontalScrollIndicator={false}
                contentContainerStyle={{ paddingHorizontal: railSidePadding, gap: railGap }}
               renderItem={({ item: h }) => (
-                <Pressable
+                 <Pressable
                   onPress={() => router.push(`/watch?anime=${h.animeId}&ep=${h.ep}&title=${encodeURIComponent(h.title)}&english=${encodeURIComponent(h.english)}${h.thumbnail ? `&cover=${encodeURIComponent(h.thumbnail)}` : ""}`)}
-                   style={[styles.historyCard, { width: railCardWidth, height: Math.round(railCardWidth * 0.7), backgroundColor: colors.card, borderColor: colors.border }]}
+                   focusable={isTvLayout}
+                   style={({ focused }) => [styles.historyCard, { width: railCardWidth, height: Math.round(railCardWidth * 0.7), backgroundColor: colors.card, borderColor: colors.border }, isTvLayout && tvFocusStyle(focused)]}
                 >
                   <Image source={{ uri: h.thumbnail || `https://img.anili.st/media/${h.animeId}` }} style={styles.historyImg} resizeMode="cover" />
                   <LinearGradient colors={["transparent", "rgba(0,0,0,0.9)"]} style={styles.historyGrad}>
@@ -321,9 +331,10 @@ export default function HomeScreen() {
               renderItem={({ item: ep }) => (
                 /* بطاقة أحدث الحلقات تمرر anslayerId كمرجع احتياطي لـ AS،
                    لكن صفحة المشاهدة تفحص كل المصادر المتاحة مثل الويب. */
-                <Pressable
+                 <Pressable
                   onPress={() => router.push(`/watch?anime=${ep.animeId}&ep=${ep.episode}&title=${encodeURIComponent(ep.romaji || ep.name || "")}&english=${encodeURIComponent(ep.english || "")}&native=${encodeURIComponent(ep.native || "")}&titles=${encodeURIComponent(JSON.stringify(ep.titleVariants || []))}&cover=${encodeURIComponent(ep.cover || "")}&titleAr=${encodeURIComponent(ep.titleAr || "")}&anslayerId=${ep.anslayerId}` as any)}
-                   style={[todayEpStyles.card, { width: railCardWidth, height: Math.round(railCardWidth * 1.46), backgroundColor: colors.card, borderColor: colors.border }]}
+                   focusable={isTvLayout}
+                   style={({ focused }) => [todayEpStyles.card, { width: railCardWidth, height: Math.round(railCardWidth * 1.46), backgroundColor: colors.card, borderColor: colors.border }, isTvLayout && tvFocusStyle(focused)]}
                 >
                   {ep.cover ? (
                     <Image source={{ uri: ep.cover }} style={todayEpStyles.img} resizeMode="cover" />
@@ -368,7 +379,7 @@ export default function HomeScreen() {
               renderItem={({ item }: { item: any }) => {
                 const imgUri = item.poster || null;
                 return (
-                  <Pressable
+                   <Pressable
                     onPress={() => {
                       const key = String(item.key || "").trim();
                       if (!key) return;
@@ -387,8 +398,9 @@ export default function HomeScreen() {
                           poster: encodeURIComponent(imgUri || ""),
                         },
                       });
-                    }}
-                     style={[todayStyles.card, { width: railCardWidth, height: Math.round(railCardWidth * 1.46), backgroundColor: colors.card, borderColor: colors.border }]}
+                     }}
+                     focusable={isTvLayout}
+                     style={({ focused }) => [todayStyles.card, { width: railCardWidth, height: Math.round(railCardWidth * 1.46), backgroundColor: colors.card, borderColor: colors.border }, isTvLayout && tvFocusStyle(focused)]}
                   >
                     {imgUri ? (
                       <Image source={{ uri: imgUri }} style={todayStyles.img} resizeMode="cover" />
@@ -435,12 +447,13 @@ export default function HomeScreen() {
                   ? rawImg.startsWith("http") ? rawImg : `${BASE_URL}${rawImg}`
                   : null;
                 return (
-                  <Pressable
+                   <Pressable
                     onPress={() => {
                       const seasons = JSON.stringify(item.seasons || [{ label: "الحلقات", arabicToonsId: item.arabicToonsId }]);
                       router.push({ pathname: "/dubbed/[id]" as any, params: { id: item.key || item.id || item.title, title: item.title, seasons, img: rawImg } });
-                    }}
-                     style={[todayStyles.card, { width: railCardWidth, height: Math.round(railCardWidth * 1.46), backgroundColor: colors.card, borderColor: colors.border }]}
+                     }}
+                     focusable={isTvLayout}
+                     style={({ focused }) => [todayStyles.card, { width: railCardWidth, height: Math.round(railCardWidth * 1.46), backgroundColor: colors.card, borderColor: colors.border }, isTvLayout && tvFocusStyle(focused)]}
                   >
                     {imgUri ? (
                       <Image source={{ uri: imgUri }} style={todayStyles.img} resizeMode="cover" />

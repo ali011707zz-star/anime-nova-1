@@ -15,6 +15,7 @@ import {
 } from "@/utils/downloadManager";
 import { RiftPlayer, PlayerSource } from "@/components/RiftPlayer";
 import * as FileSystem from "expo-file-system";
+import { isTvDevice, tvFocusStyle } from "@/utils/tv";
 
 // ── Spinner ───────────────────────────────────────────────────────────────
 
@@ -48,6 +49,7 @@ function ActiveDownloadCard({
   onPause: () => void;
   onResume: () => void;
 }) {
+  const tvMode = isTvDevice();
   const pct = Math.round(item.progress * 100);
   const isPaused = item.status === "paused";
   const isError = item.status === "error";
@@ -59,7 +61,8 @@ function ActiveDownloadCard({
         <Pressable
           onPress={isPaused ? onResume : onPause}
           hitSlop={8}
-          style={[s.activeAction, isPaused && s.activeActionResume]}
+          focusable={tvMode}
+          style={({ focused }) => [s.activeAction, isPaused && s.activeActionResume, tvMode && tvFocusStyle(focused)]}
           accessibilityLabel={isPaused ? "استئناف التنزيل" : "إيقاف التنزيل مؤقتاً"}
         >
           <Ionicons
@@ -68,7 +71,8 @@ function ActiveDownloadCard({
             color={isPaused ? "#c4b5fd" : "rgba(255,255,255,0.65)"}
           />
         </Pressable>
-        <Pressable onPress={onCancel} hitSlop={8} style={[s.activeAction, s.activeCancel]}>
+        <Pressable onPress={onCancel} hitSlop={8} focusable={tvMode}
+          style={({ focused }) => [s.activeAction, s.activeCancel, tvMode && tvFocusStyle(focused)]}>
           <Ionicons name="close" size={18} color="rgba(255,255,255,0.55)" />
         </Pressable>
       </View>
@@ -129,6 +133,7 @@ function DownloadCard({
   onPlay: (item: DownloadItem) => void;
   onDelete: (item: DownloadItem) => void;
 }) {
+  const tvMode = isTvDevice();
   const [expanded, setExpanded] = useState(false);
   const q = item.quality?.toLowerCase() ?? "";
   const dotColor = q.includes("1080") ? "#fbbf24" : q.includes("720") ? "#34d399" : "#94a3b8";
@@ -139,7 +144,8 @@ function DownloadCard({
       <Pressable
         onPress={() => onPlay(item)}
         hitSlop={4}
-        style={({ pressed }) => [s.posterWrap, pressed && { opacity: 0.78 }]}
+         focusable={tvMode}
+         style={({ pressed, focused }) => [s.posterWrap, pressed && { opacity: 0.78 }, tvMode && tvFocusStyle(focused)]}
         accessibilityRole="button"
         accessibilityLabel={`تشغيل ${item.title} الحلقة ${item.ep}`}
         testID={`download-play-poster-${item.id}`}
@@ -189,7 +195,8 @@ function DownloadCard({
         </Text>
         <Pressable
           onPress={() => onPlay(item)}
-          style={({ pressed }) => [s.playButton, pressed && { opacity: 0.72 }]}
+           focusable={tvMode}
+           style={({ pressed, focused }) => [s.playButton, pressed && { opacity: 0.72 }, tvMode && tvFocusStyle(focused)]}
           accessibilityRole="button"
           accessibilityLabel={`تشغيل الحلقة ${item.ep}`}
           testID={`download-play-${item.id}`}
@@ -203,7 +210,8 @@ function DownloadCard({
       <Pressable
         onPress={() => onDelete(item)}
         hitSlop={12}
-        style={s.deleteBtn}
+        focusable={tvMode}
+        style={({ focused }) => [s.deleteBtn, tvMode && tvFocusStyle(focused)]}
         accessibilityRole="button"
         accessibilityLabel={`حذف ${item.title} الحلقة ${item.ep}`}
         testID={`download-delete-${item.id}`}

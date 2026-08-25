@@ -1,19 +1,21 @@
 import { Tabs } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import React from "react";
-import { Platform, StyleSheet, Text, View } from "react-native";
+import { Platform, StyleSheet, Text, View, useWindowDimensions } from "react-native";
 import { useColors } from "@/hooks/useColors";
+import { isTvDevice } from "@/utils/tv";
 
 type TabIconProps = {
   name: keyof typeof Ionicons.glyphMap;
   label: string;
   color: string;
   focused: boolean;
+  tvMode?: boolean;
 };
 
-function TabIcon({ name, label, color, focused }: TabIconProps) {
+function TabIcon({ name, label, color, focused, tvMode = false }: TabIconProps) {
   return (
-    <View style={styles.tabItem}>
+    <View style={[styles.tabItem, tvMode && focused && styles.tabFocused]}>
       <Ionicons name={name} size={20} color={color} />
       <Text
         style={[styles.tabLabel, { color, fontWeight: focused ? "700" : "400" }]}
@@ -29,6 +31,8 @@ function TabIcon({ name, label, color, focused }: TabIconProps) {
 
 export default function TabLayout() {
   const colors = useColors();
+  const { width, height } = useWindowDimensions();
+  const tvMode = isTvDevice(width, height);
   const isIOS = Platform.OS === "ios";
   const isWeb = Platform.OS === "web";
 
@@ -45,13 +49,13 @@ export default function TabLayout() {
           borderTopWidth: 1,
           borderTopColor: colors.border,
           elevation: 0,
-          height: isWeb ? 84 : 62,
-          paddingBottom: isWeb ? 34 : 6,
-          paddingTop: 6,
+          height: tvMode ? 92 : isWeb ? 84 : 62,
+          paddingBottom: tvMode ? 12 : isWeb ? 34 : 6,
+          paddingTop: tvMode ? 10 : 6,
         },
         tabBarIconStyle: {
           width: "100%",
-          height: 50,
+          height: tvMode ? 68 : 50,
           overflow: "visible",
         },
         tabBarBackground: () => null,
@@ -61,7 +65,7 @@ export default function TabLayout() {
         name="index"
         options={{
           tabBarIcon: ({ color, focused }) => (
-            <TabIcon name="home" label="الرئيسية" color={color} focused={focused} />
+            <TabIcon name="home" label="الرئيسية" color={color} focused={focused} tvMode={tvMode} />
           ),
         }}
       />
@@ -69,7 +73,7 @@ export default function TabLayout() {
         name="search"
         options={{
           tabBarIcon: ({ color, focused }) => (
-            <TabIcon name="search" label="بحث" color={color} focused={focused} />
+            <TabIcon name="search" label="بحث" color={color} focused={focused} tvMode={tvMode} />
           ),
         }}
       />
@@ -77,7 +81,7 @@ export default function TabLayout() {
         name="browse"
         options={{
           tabBarIcon: ({ color, focused }) => (
-            <TabIcon name="grid" label="تصفح" color={color} focused={focused} />
+            <TabIcon name="grid" label="تصفح" color={color} focused={focused} tvMode={tvMode} />
           ),
         }}
       />
@@ -97,7 +101,7 @@ export default function TabLayout() {
         name="aw-dubbed"
         options={{
           tabBarIcon: ({ color, focused }) => (
-            <TabIcon name={focused ? "film" : "film-outline"} label="مدبلج" color={color} focused={focused} />
+            <TabIcon name={focused ? "film" : "film-outline"} label="مدبلج" color={color} focused={focused} tvMode={tvMode} />
           ),
         }}
       />
@@ -109,7 +113,7 @@ export default function TabLayout() {
         name="downloads"
         options={{
           tabBarIcon: ({ color, focused }) => (
-            <TabIcon name={focused ? "download" : "download-outline"} label="تنزيلاتي" color={color} focused={focused} />
+            <TabIcon name={focused ? "download" : "download-outline"} label="تنزيلاتي" color={color} focused={focused} tvMode={tvMode} />
           ),
         }}
       />
@@ -117,7 +121,7 @@ export default function TabLayout() {
         name="library"
         options={{
           tabBarIcon: ({ color, focused }) => (
-            <TabIcon name="bookmark" label="قائمتي" color={color} focused={focused} />
+            <TabIcon name="bookmark" label="قائمتي" color={color} focused={focused} tvMode={tvMode} />
           ),
         }}
       />
@@ -132,6 +136,16 @@ const styles = StyleSheet.create({
     gap: 2,
     width: "100%",
     paddingHorizontal: 2,
+  },
+  tabFocused: {
+    borderRadius: 14,
+    borderWidth: 2,
+    borderColor: "#C4B5FD",
+    paddingVertical: 5,
+    shadowColor: "#A78BFA",
+    shadowOpacity: 0.65,
+    shadowRadius: 8,
+    elevation: 6,
   },
   tabLabel: {
     fontSize: 9,

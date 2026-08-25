@@ -416,7 +416,8 @@ export default function SearchScreen() {
           <View style={s.filterRow}>
             <Pressable
               onPress={() => setShowFilters(f => !f)}
-              style={[s.filterToggle, (showFilters || activeFilterCount > 0) && s.filterToggleActive]}>
+              focusable={tvMode}
+              style={({ focused }) => [s.filterToggle, (showFilters || activeFilterCount > 0) && s.filterToggleActive, tvMode && tvFocusStyle(focused)]}>
               <Ionicons name="options" size={12} color={showFilters || activeFilterCount > 0 ? "#c4b5fd" : "rgba(255,255,255,0.45)"} />
               <Text style={[s.filterToggleText, (showFilters || activeFilterCount > 0) && s.filterToggleTextActive]}>
                 فلاتر
@@ -429,14 +430,16 @@ export default function SearchScreen() {
               <View style={{ flexDirection: "row", gap: 6, paddingRight: 8 }}>
                 {SORT_OPTIONS.map(opt => (
                   <Pressable key={opt.value} onPress={() => setSort(opt.value)}
-                    style={[s.sortPill, sort === opt.value && s.sortPillActive]}>
+                    focusable={tvMode}
+                    style={({ focused }) => [s.sortPill, sort === opt.value && s.sortPillActive, tvMode && tvFocusStyle(focused)]}>
                     <Text style={[s.sortPillText, sort === opt.value && s.sortPillTextActive]}>{opt.label}</Text>
                   </Pressable>
                 ))}
               </View>
             </ScrollView>
             {activeFilterCount > 0 && (
-              <Pressable onPress={clearFilters} style={{ paddingHorizontal: 4 }}>
+              <Pressable onPress={clearFilters} focusable={tvMode}
+                style={({ focused }) => [{ paddingHorizontal: 4 }, tvMode && tvFocusStyle(focused)]}>
                 <Text style={{ fontSize: 11, color: "rgba(252,100,100,0.7)", fontFamily: "Cairo_700Bold" }}>مسح</Text>
               </Pressable>
             )}
@@ -447,7 +450,8 @@ export default function SearchScreen() {
             <View style={{ flexDirection: "row", gap: 6 }}>
               {SEASON_OPTIONS.map(opt => (
                 <Pressable key={opt.value} onPress={() => setSeason(opt.value)}
-                  style={[s.seasonChip, season === opt.value && s.seasonChipActive]}>
+                  focusable={tvMode}
+                  style={({ focused }) => [s.seasonChip, season === opt.value && s.seasonChipActive, tvMode && tvFocusStyle(focused)]}>
                   <Text style={{ fontSize: 10 }}>{opt.emoji}</Text>
                   <Text style={[s.seasonChipText, season === opt.value && s.seasonChipTextActive]}>{opt.label}</Text>
                 </Pressable>
@@ -462,7 +466,8 @@ export default function SearchScreen() {
               <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6, marginBottom: 10 }}>
                 {FORMAT_OPTIONS.map(opt => (
                   <Pressable key={opt.value} onPress={() => setFormat(opt.value)}
-                    style={[s.filterChip, format === opt.value && s.filterChipActive]}>
+                    focusable={tvMode}
+                    style={({ focused }) => [s.filterChip, format === opt.value && s.filterChipActive, tvMode && tvFocusStyle(focused)]}>
                     <Text style={[s.filterChipText, format === opt.value && s.filterChipTextActive]}>{opt.label}</Text>
                   </Pressable>
                 ))}
@@ -471,25 +476,28 @@ export default function SearchScreen() {
               <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6, marginBottom: 10 }}>
                 {STATUS_OPTIONS.map(opt => (
                   <Pressable key={opt.value} onPress={() => setStatus(opt.value)}
-                    style={[s.filterChip, status === opt.value && s.filterChipActive]}>
+                    focusable={tvMode}
+                    style={({ focused }) => [s.filterChip, status === opt.value && s.filterChipActive, tvMode && tvFocusStyle(focused)]}>
                     <Text style={[s.filterChipText, status === opt.value && s.filterChipTextActive]}>{opt.label}</Text>
                   </Pressable>
                 ))}
               </View>
-              <Pressable onPress={() => setShowGenres(g => !g)}
-                style={{ flexDirection: "row", alignItems: "center", gap: 6, marginBottom: genre ? 4 : 0 }}>
+               <Pressable onPress={() => setShowGenres(g => !g)} focusable={tvMode}
+                 style={({ focused }) => [{ flexDirection: "row", alignItems: "center", gap: 6, marginBottom: genre ? 4 : 0 }, tvMode && tvFocusStyle(focused)]}>
                 <Text style={s.filterLabel}>التصنيف</Text>
                 {genre ? <Text style={{ fontSize: 10, color: "#c4b5fd", fontFamily: "Cairo_700Bold" }}>· {GENRES_AR[genre] || genre}</Text> : null}
                 <Ionicons name={showGenres ? "chevron-up" : "chevron-down"} size={12} color="rgba(255,255,255,0.3)" />
               </Pressable>
               {showGenres && (
                 <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
-                  <Pressable onPress={() => setGenre("")} style={[s.filterChip, !genre && s.filterChipActive]}>
+                   <Pressable onPress={() => setGenre("")} focusable={tvMode}
+                     style={({ focused }) => [s.filterChip, !genre && s.filterChipActive, tvMode && tvFocusStyle(focused)]}>
                     <Text style={[s.filterChipText, !genre && s.filterChipTextActive]}>الكل</Text>
                   </Pressable>
                   {GENRES.map(g => (
                     <Pressable key={g} onPress={() => setGenre(genre === g ? "" : g)}
-                      style={[s.filterChip, genre === g && s.filterChipActive]}>
+                      focusable={tvMode}
+                      style={({ focused }) => [s.filterChip, genre === g && s.filterChipActive, tvMode && tvFocusStyle(focused)]}>
                       <Text style={[s.filterChipText, genre === g && s.filterChipTextActive]}>{GENRES_AR[g] || g}</Text>
                     </Pressable>
                   ))}

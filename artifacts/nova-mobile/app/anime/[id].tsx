@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from "react";
 import {
   View, Text, Pressable, Image, ScrollView,
   ActivityIndicator, StyleSheet, Platform, Modal,
-  Dimensions, Linking,
+  Dimensions, Linking, useWindowDimensions,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
@@ -15,6 +15,7 @@ import { useApp } from "@/context/AppContext";
 import { getBaseUrl } from "@/utils/api";
 import { secureFetch } from "@/utils/secureApi";
 import { getYoutubeEmbedUrl, getYoutubeReferer } from "@/utils/youtube";
+import { isTvDevice, tvFocusStyle } from "@/utils/tv";
 
 const { width: W } = Dimensions.get("window");
 
@@ -190,6 +191,8 @@ export default function AnimeDetailScreen() {
   }>();
   const insets = useSafeAreaInsets();
   const router = useRouter();
+  const { width, height } = useWindowDimensions();
+  const tvMode = isTvDevice(width, height);
   const topPad = Platform.OS === "web" ? 0 : insets.top;
   const { isFavorite, toggleFavorite } = useApp();
 
@@ -477,7 +480,11 @@ export default function AnimeDetailScreen() {
             style={StyleSheet.absoluteFill}
           />
           {/* Back */}
-          <Pressable onPress={() => router.canGoBack() ? router.back() : router.replace("/(tabs)")} style={d.backBtn}>
+          <Pressable
+            onPress={() => router.canGoBack() ? router.back() : router.replace("/(tabs)")}
+            focusable={tvMode}
+            style={({ focused }) => [d.backBtn, tvMode && tvFocusStyle(focused)]}
+          >
             <Ionicons name="chevron-back" size={20} color="#fff" />
           </Pressable>
         </View>
@@ -547,7 +554,8 @@ export default function AnimeDetailScreen() {
                 ...(ep ? { ep } : {}),
               },
             } as any)}
-            style={[d.watchBtn, { flex: 1 }]}
+            focusable={tvMode}
+            style={({ focused }) => [d.watchBtn, { flex: 1, minHeight: tvMode ? 64 : undefined }, tvMode && tvFocusStyle(focused)]}
           >
             <View style={d.watchBtnIcon}>
               <Ionicons name="play" size={16} color="#fff" />
@@ -560,8 +568,9 @@ export default function AnimeDetailScreen() {
         {ageRating.warn && !warnDismissed && (
           <View style={d.warnBox}>
             <Text style={d.warnText}>🔞 {ageRating.warn}</Text>
-            <Pressable onPress={() => { setWarnDismissed(true); AsyncStorage.setItem(`adult-warn-${id}`, "1"); }}
-              style={d.warnBtn}>
+             <Pressable onPress={() => { setWarnDismissed(true); AsyncStorage.setItem(`adult-warn-${id}`, "1"); }}
+               focusable={tvMode}
+               style={({ focused }) => [d.warnBtn, tvMode && tvFocusStyle(focused)]}>
               <Text style={d.warnBtnText}>فهمتُ، لا تُظهر مجدداً</Text>
             </Pressable>
           </View>
@@ -574,8 +583,8 @@ export default function AnimeDetailScreen() {
             { icon: "heart",       label: "المفضلة",   active: isFav,        activeColor: "#8B5CF6", onPress: handleFavorite },
             { icon: "star",        label: "تقييمي",    active: myRating > 0, activeColor: "#FBBF24", onPress: () => setShowRating(true) },
           ].map(({ icon, label, active, activeColor, onPress }) => (
-            <Pressable key={label} onPress={onPress}
-              style={[d.actionBtn, active && { backgroundColor: activeColor + "18", borderColor: activeColor + "40" }]}>
+             <Pressable key={label} onPress={onPress} focusable={tvMode}
+               style={({ focused }) => [d.actionBtn, active && { backgroundColor: activeColor + "18", borderColor: activeColor + "40" }, tvMode && tvFocusStyle(focused)]}>
               <Ionicons name={icon as any} size={16} color={active ? activeColor : "rgba(255,255,255,0.4)"} />
               <Text style={[d.actionBtnLabel, active && { color: activeColor }]}>{label}</Text>
               {label === "تقييمي" && myRating > 0 ? (
@@ -633,7 +642,8 @@ export default function AnimeDetailScreen() {
                 numberOfLines={showFull ? undefined : 4}
               >{desc}</Text>
               {desc.length > 200 && (
-                <Pressable onPress={() => setShowFull(f => !f)} style={d.readMoreBtn}>
+                 <Pressable onPress={() => setShowFull(f => !f)} focusable={tvMode}
+                   style={({ focused }) => [d.readMoreBtn, tvMode && tvFocusStyle(focused)]}>
                   <Text style={d.readMoreText}>{showFull ? "عرض أقل" : "عرض المزيد"}</Text>
                   <Ionicons name={showFull ? "chevron-up" : "chevron-down"} size={13} color="#8B5CF6" />
                 </Pressable>
@@ -669,10 +679,11 @@ export default function AnimeDetailScreen() {
         {trailerYT ? (
           <View style={d.section}>
             <SectionHeader title="الإعلان الدعائي" />
-            <Pressable
-              onPress={() => setShowTrailer(true)}
-              style={d.trailerBtn}
-            >
+             <Pressable
+               onPress={() => setShowTrailer(true)}
+               focusable={tvMode}
+               style={({ focused }) => [d.trailerBtn, tvMode && tvFocusStyle(focused)]}
+             >
               <Image
                 source={{ uri: anime.trailer?.thumbnail || `https://img.youtube.com/vi/${trailerYT}/hqdefault.jpg` }}
                 style={d.trailerImg}
@@ -703,7 +714,8 @@ export default function AnimeDetailScreen() {
               { key: "related", label: "ذات صلة" },
               { key: "similar", label: "مشابهة" },
             ] as const).map(t => (
-              <Pressable key={t.key} onPress={() => setTab(t.key)} style={d.tabBtn}>
+               <Pressable key={t.key} onPress={() => setTab(t.key)} focusable={tvMode}
+                 style={({ focused }) => [d.tabBtn, tvMode && tvFocusStyle(focused)]}>
                 <Text style={[d.tabBtnText, tab === t.key && d.tabBtnTextActive]}>{t.label}</Text>
                 {tab === t.key && <View style={d.tabIndicator} />}
               </Pressable>
@@ -745,7 +757,8 @@ export default function AnimeDetailScreen() {
                 {related.map((e: any) => {
                   const n = e.node;
                   return (
-                    <Pressable key={n.id} onPress={() => router.push(`/anime/${n.id}`)} style={d.relCard}>
+                     <Pressable key={n.id} onPress={() => router.push(`/anime/${n.id}`)} focusable={tvMode}
+                       style={({ focused }) => [d.relCard, tvMode && tvFocusStyle(focused)]}>
                       <View style={d.relImgWrap}>
                         {n.coverImage?.large ? (
                           <Image source={{ uri: n.coverImage.large }} style={d.relImg} />
@@ -780,7 +793,8 @@ export default function AnimeDetailScreen() {
                   const rec = n.mediaRecommendation;
                   if (!rec) return null;
                   return (
-                    <Pressable key={rec.id} onPress={() => router.push(`/anime/${rec.id}`)} style={d.simCard}>
+                     <Pressable key={rec.id} onPress={() => router.push(`/anime/${rec.id}`)} focusable={tvMode}
+                       style={({ focused }) => [d.simCard, tvMode && tvFocusStyle(focused)]}>
                       <View style={d.simImgWrap}>
                         {rec.coverImage?.large ? (
                           <Image source={{ uri: rec.coverImage.large }} style={d.simImg} />

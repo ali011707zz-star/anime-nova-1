@@ -17,6 +17,7 @@ import { useApp } from "@/context/AppContext";
 import { getBaseUrl } from "@/utils/baseUrl";
 import { secureFetch, setUserAuthToken } from "@/utils/secureApi";
 import { CrashEntry, getCrashLog } from "@/utils/crashLogger";
+import { TvPressable } from "@/utils/tv";
 
 const THEMES: { label: string; value: string; dot: string; desc: string }[] = [
   { label: "داكن",   value: "dark",   dot: "#3F3F46", desc: "رمادي داكن" },
@@ -246,7 +247,7 @@ function NavRow({ icon, iconColor, iconBg, label, sub, badge, onPress, external 
   onPress?: () => void; external?: boolean;
 }) {
   return (
-    <Pressable onPress={onPress} style={ts.navRow}>
+    <TvPressable onPress={onPress} style={ts.navRow}>
       <View style={[ts.navIcon, { backgroundColor: iconBg }]}>
         <Ionicons name={icon} size={16} color={iconColor} />
       </View>
@@ -258,14 +259,14 @@ function NavRow({ icon, iconColor, iconBg, label, sub, badge, onPress, external 
         {sub && <Text style={ts.navSub}>{sub}</Text>}
       </View>
       <Ionicons name={external ? "open" : "chevron-back"} size={14} color="rgba(255,255,255,0.2)" />
-    </Pressable>
+    </TvPressable>
   );
 }
 
 /* ── Danger Row ── */
 function DangerRow({ label, sub, onPress }: { label: string; sub?: string; onPress: () => void }) {
   return (
-    <Pressable onPress={onPress} style={ts.dangerRow}>
+    <TvPressable onPress={onPress} style={ts.dangerRow}>
       <View style={ts.dangerIcon}>
         <Ionicons name="trash" size={16} color="#f87171" />
       </View>
@@ -274,7 +275,7 @@ function DangerRow({ label, sub, onPress }: { label: string; sub?: string; onPre
         {sub && <Text style={ts.dangerSub}>{sub}</Text>}
       </View>
       <Ionicons name="chevron-back" size={14} color="rgba(248,113,113,0.25)" />
-    </Pressable>
+    </TvPressable>
   );
 }
 

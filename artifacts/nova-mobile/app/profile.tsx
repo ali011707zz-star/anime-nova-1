@@ -6,12 +6,13 @@ import * as ImagePicker from "expo-image-picker";
 import React, { useEffect, useState, useCallback } from "react";
 import {
   ActivityIndicator, Image, Platform, Pressable, ScrollView,
-  StyleSheet, Text, TextInput, View,
+  StyleSheet, Text, TextInput, View, useWindowDimensions,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColors } from "@/hooks/useColors";
 import { getBaseUrl } from "@/utils/api";
 import { secureFetch, setUserAuthToken } from "@/utils/secureApi";
+import { isTvDevice, tvFocusStyle } from "@/utils/tv";
 
 const AUTH_KEY = "nova-mobile-user";
 
@@ -35,6 +36,10 @@ export default function ProfileScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const router = useRouter();
+  const { width, height } = useWindowDimensions();
+  const tvMode = isTvDevice(width, height);
+  const { width, height } = useWindowDimensions();
+  const tvMode = isTvDevice(width, height);
   const base = getBaseUrl();
   const topPad = Platform.OS === "web" ? 0 : Math.max(insets.top, Platform.OS === "android" ? 28 : 44);
 
@@ -181,7 +186,8 @@ export default function ProfileScreen() {
     <View style={[s.container, { backgroundColor: colors.background }]}>
       {/* Header */}
       <View style={[s.header, { paddingTop: topPad + 8 }]}>
-        <Pressable onPress={() => router.back()} style={s.backBtn}>
+        <Pressable onPress={() => router.back()} focusable={tvMode}
+          style={({ focused }) => [s.backBtn, tvMode && tvFocusStyle(focused)]}>
           <Ionicons name="arrow-back" size={22} color={colors.text} />
         </Pressable>
         <Text style={[s.headerTitle, { color: colors.text }]}>الملف الشخصي</Text>
@@ -191,7 +197,8 @@ export default function ProfileScreen() {
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 60 }} keyboardShouldPersistTaps="handled">
         {/* Hero Avatar */}
         <View style={s.heroSection}>
-          <Pressable onPress={handlePickImage} style={[s.avatarGlow, { shadowColor: g1 }]} disabled={uploadingImg}>
+          <Pressable onPress={handlePickImage} focusable={tvMode}
+            style={({ focused }) => [s.avatarGlow, { shadowColor: g1 }, tvMode && tvFocusStyle(focused)]} disabled={uploadingImg}>
             {user.profileImageUrl ? (
               <Image source={{ uri: user.profileImageUrl }} style={s.avatarImage} />
             ) : (
@@ -216,14 +223,14 @@ export default function ProfileScreen() {
 
           {/* Image action buttons */}
           <View style={s.imgActions}>
-            <Pressable onPress={handlePickImage} disabled={uploadingImg}
-              style={[s.imgBtn, { backgroundColor: colors.primary + "20", borderColor: colors.primary + "40" }]}>
+            <Pressable onPress={handlePickImage} disabled={uploadingImg} focusable={tvMode}
+              style={({ focused }) => [s.imgBtn, { backgroundColor: colors.primary + "20", borderColor: colors.primary + "40" }, tvMode && tvFocusStyle(focused)]}>
               <Ionicons name="image" size={14} color={colors.primary} />
               <Text style={[s.imgBtnText, { color: colors.primary }]}>تغيير الصورة</Text>
             </Pressable>
             {user.profileImageUrl && (
-              <Pressable onPress={handleRemoveImage} disabled={uploadingImg}
-                style={[s.imgBtn, { backgroundColor: "rgba(239,68,68,0.10)", borderColor: "rgba(239,68,68,0.25)" }]}>
+              <Pressable onPress={handleRemoveImage} disabled={uploadingImg} focusable={tvMode}
+                style={({ focused }) => [s.imgBtn, { backgroundColor: "rgba(239,68,68,0.10)", borderColor: "rgba(239,68,68,0.25)" }, tvMode && tvFocusStyle(focused)]}>
                 <Ionicons name="trash" size={14} color="#f87171" />
                 <Text style={[s.imgBtnText, { color: "#f87171" }]}>إزالة</Text>
               </Pressable>
@@ -270,8 +277,8 @@ export default function ProfileScreen() {
                 <Ionicons name="mail-outline" size={16} color={colors.mutedForeground} />
               </View>
 
-              <Pressable onPress={handleSave} disabled={loading || !changed}
-                style={[s.primaryBtn, { backgroundColor: colors.primary, opacity: !changed ? 0.45 : 1, marginTop: 10 }]}>
+              <Pressable onPress={handleSave} disabled={loading || !changed} focusable={tvMode}
+                style={({ focused }) => [s.primaryBtn, { backgroundColor: colors.primary, opacity: !changed ? 0.45 : 1, marginTop: 10 }, tvMode && tvFocusStyle(focused)]}>
                 {loading
                   ? <ActivityIndicator color="#fff" size="small" />
                   : (<>
@@ -284,8 +291,8 @@ export default function ProfileScreen() {
               <View style={[s.divider, { backgroundColor: colors.border }]} />
 
               {/* Logout */}
-              <Pressable onPress={handleLogout}
-                style={[s.dangerBtn, { backgroundColor: "#ef444410", borderColor: "#ef444430" }]}>
+              <Pressable onPress={handleLogout} focusable={tvMode}
+                style={({ focused }) => [s.dangerBtn, { backgroundColor: "#ef444410", borderColor: "#ef444430" }, tvMode && tvFocusStyle(focused)]}>
                 <Ionicons name="log-out" size={16} color="#f87171" />
                 <Text style={[s.dangerBtnText, { color: "#f87171" }]}>تسجيل الخروج</Text>
               </Pressable>
