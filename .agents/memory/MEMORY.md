@@ -107,3 +107,4 @@
 - [API source tree](api-source-tree.md) — build يستخدم artifacts/api-server/src؛ يوجد مسار nested قديم لا يدخل في حزمة API المنشورة.
  - [VPS surgical rebuilds](vps-surgical-rebuilds.md) — عند فشل esbuild على نسخة VPS متفرعة، احفظ الملف وافحص الإدراج المعطوب قبل النقل؛ قد تنجح الواجهة بينما يفشل الـAPI.
  - [Source catalog collection](source-catalog-collection.md) — AF/AS/SA/FX لكل منها pagination ومسار تشغيل مختلف؛ لا تعتبر العنوان أو الحلقة متاحة قبل فحص media response.
+- [AniNeko quality availability](anineko-availability-quality.md) — AniNeko episode pages use generic HD labels; picker quality must come from the embed/master HLS metadata.

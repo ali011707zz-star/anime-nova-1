@@ -7414,18 +7414,46 @@ async function getAninekoSources(
     const stableEntries = serverEntries.filter(e => !/vivibebe\.site/i.test(e.embedUrl));
     const rankedEntries = stableEntries.length ? stableEntries : serverEntries;
 
-    // Availability mode ends at the episode page. Do not resolve an embed,
-    // request a manifest, or build a playable proxy URL here.
+    // AniNeko is the exception to the cheap episode-page-only availability
+    // pass. Its episode page labels every mirror as "HD", but the actual
+    // quality tiers live in the embed/master playlist. Probe those playlists
+    // here so the mobile picker does not advertise a phantom 1080p row.
     if (availabilityOnly) {
-      return rankedEntries.slice(0, 8).map((entry, index) => ({
-        name: `AniNeko · ${entry.embedUrl.includes("bibi") ? "BibiEmb" : `Server ${index + 1}`} · 1080p`,
-        url: "",
-        quality: "1080p",
-        qualityRank: 13,
-        site: "anineko",
-        serverCount: 1,
-        verified: true,
-      } as UnifiedSource));
+      const available: UnifiedSource[] = [];
+      await Promise.all(rankedEntries.slice(0, 4).map(async (entry, index) => {
+        let qualities: Array<{ quality: string; rank: number; url: string }> = [];
+        const vibeMatch = entry.embedUrl.match(
+          /^https?:\/\/((?:vibeplayer|vivibebe)\.site)\/([a-zA-Z0-9]{8,})/i,
+        );
+        if (vibeMatch) {
+          const vibeDomain = vibeMatch[1];
+          const vibeToken = vibeMatch[2];
+          const masterUrl = `https://${vibeDomain}/public/stream/${vibeToken}/master.m3u8`;
+          qualities = await parseM3u8Qualities(masterUrl, `https://${vibeDomain}/${vibeToken}`);
+        } else {
+          qualities = await extractAninekoAllHls(entry.embedUrl, slug);
+        }
+        if (!qualities.length) return;
+
+        const hostLabel = entry.embedUrl.includes("bibi") ? "BibiEmb"
+          : entry.embedUrl.includes("vivibebe") ? "ViviBebe"
+          : entry.embedUrl.includes("otakuhg") ? "OtakuHG"
+          : entry.embedUrl.includes("otakuvid") ? "OtakuVid"
+          : entry.embedUrl.includes("playmogo") ? "PlayMogo"
+          : `Server ${index + 1}`;
+        for (const q of qualities) {
+          available.push({
+            name: `AniNeko · ${hostLabel} · ${q.quality}`,
+            url: "",
+            quality: q.quality,
+            qualityRank: q.rank,
+            site: "anineko",
+            serverCount: 1,
+            verified: true,
+          } as UnifiedSource);
+        }
+      }));
+      return available.sort((a, b) => (b.qualityRank || 0) - (a.qualityRank || 0));
     }
 
     const sources: UnifiedSource[] = [];
@@ -13403,10 +13431,12 @@ router.get("/anime/sources-stream", scraperQueueMiddleware, async (req, res) => 
       timeoutMs = SCRAPER_MS,
     ) {
       if (!title || closed) return;
-      // Availability is a bounded verification pass. Do not let a provider's normal
-      // playback timeout delay every other provider in the picker.
-      // A short check deadline made late providers vanish on first visit.
-      const effectiveTimeoutMs = checkOnly ? Math.min(timeoutMs, 11000) : timeoutMs;
+      // Availability is a bounded verification pass. Most providers only need
+      // their episode metadata, but AniNeko must also inspect its HLS tiers.
+      // Give that provider enough time to fetch the embed/master playlist.
+      const effectiveTimeoutMs = checkOnly
+        ? site === "anineko" ? Math.min(timeoutMs, 25000) : Math.min(timeoutMs, 11000)
+        : timeoutMs;
       // Provider URL formats changed for AniNeko and SAnime. Version their
       // cache keys so rows containing dead VibeVibe or /Video2 URLs cannot
       // survive a deploy and get advertised again to web/mobile clients.
@@ -13531,15 +13561,15 @@ router.get("/anime/sources-stream", scraperQueueMiddleware, async (req, res) => 
     }
 
     // Availability scan: ask every provider shown in the picker through a
-    // bounded queue. scrapeCached() fetches the provider page/API to
-    // learn whether the requested episode exists, but check mode never runs
-    // extractAndCollect, CDN probing, manifest reads, or video downloads.
+    // bounded queue. Most providers only check their episode page/API.
+    // AniNeko additionally reads its HLS quality metadata so its picker rows
+    // reflect real tiers rather than the page's generic "HD" label.
     if (checkOnly) {
       await Promise.race([runSourceQueue([
         () => scrapeCached("kawaii",        () => getKawaiiAnimeSources(title, english, ep, anilistId, true), false, 3200),
         () => scrapeCached("megaplay",      () => getMegaPlayAnimeSources(title, english, ep, anilistId, true), false, 5000),
         () => scrapeCached("animekai",      () => getAnimeKaiSources(title, english, ep, anilistId, true), false, 5000),
-        () => scrapeCached("anineko",       () => getAninekoSources(title, english, ep, titleVariants, true), false, 5000),
+        () => scrapeCached("anineko",       () => getAninekoSources(title, english, ep, titleVariants, true), false, 25000),
         () => (async () => {
           const checked = await checkConsumetEpisode("consumet_gogo", title, english, ep, titleVariants, anilistId);
           if (checked.available) {
