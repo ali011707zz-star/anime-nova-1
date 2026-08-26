@@ -28,6 +28,12 @@ import {
   probeHlsVariants,
 } from "../lib/consumet.js";
 import { sbSelect, sbUpsert, sbPatch } from "../lib/supabaseClient.js";
+import {
+  catalogQualityRank,
+  getSourceCatalogHint,
+  getSourceCatalogHints,
+  type CatalogEpisodeHint,
+} from "../lib/sourceCatalog.js";
 import pg from "pg";
 import { translate as nodeGoogleTranslate } from "node-google-translator";
 import { translate as googletransTranslate } from "googletrans";
@@ -1690,6 +1696,7 @@ async function getAnifoxSources(
   variants: string[] = [],
   anilistId?: number,
   availabilityOnly = false,
+  catalogHint?: CatalogEpisodeHint | null,
 ): Promise<UnifiedSource[]> {
   const out: UnifiedSource[] = [];
   const seen = new Set<string>();
@@ -1697,7 +1704,7 @@ async function getAnifoxSources(
   try {
     // ── البحث من الكاش (< 1ms بعد أول جلب) بدل 9 HTTP requests متسلسلة ──
     const [catalog, animeRecord] = await Promise.all([
-      _getAnifoxCatalog(),
+      catalogHint?.providerTitleId ? Promise.resolve([]) : _getAnifoxCatalog(),
       ensureAnimeSlugRecord(anilistId, [title, english || "", ...variants]),
     ]);
     const storedSlugs = animeRecord?.slugs ?? [];
@@ -1721,7 +1728,13 @@ async function getAnifoxSources(
       if (score > 0.50) candidates.push({ ...item, score });
     }
     candidates.sort((a, b) => b.score - a.score);
-    const best = candidates[0];
+    const best = catalogHint?.providerTitleId
+      ? {
+          content_id: catalogHint.providerTitleId,
+          content_title: String(catalogHint.title.title || english || title),
+          score: 1,
+        }
+      : candidates[0];
     if (!best?.content_id) { console.log(`[ANIFOX] no match ≥0.50 for "${queries.join(" / ")}"`); return []; }
     console.log(`[ANIFOX] match: "${best.content_title}" score=${best.score.toFixed(2)}`);
 
@@ -5541,7 +5554,14 @@ async function extractMediafireDirect(serverId: string): Promise<string | null> 
   } catch { return null; }
 }
 
-async function getAnimeifySourcesUncached(title: string, english: string | null, ep: number, variants: string[] = [], availabilityOnly = false): Promise<UnifiedSource[]> {
+async function getAnimeifySourcesUncached(
+  title: string,
+  english: string | null,
+  ep: number,
+  variants: string[] = [],
+  availabilityOnly = false,
+  catalogHint?: CatalogEpisodeHint | null,
+): Promise<UnifiedSource[]> {
   try {
     const creds = await getAnimeifyCreds();
     if (!creds) return [];
@@ -5549,7 +5569,15 @@ async function getAnimeifySourcesUncached(title: string, english: string | null,
 
     // Search with both titles; pick best match across SERIES + MOVIE — بالتوازي لسرعة أكبر
     const queries = titleQueries(title, english, variants);
-    let best: { score: number; item: any } = { score: 0, item: null };
+    let best: { score: number; item: any } = catalogHint?.providerTitleId
+      ? {
+          score: 1,
+          item: {
+            AnimeId: catalogHint.providerTitleId,
+            _type: String(catalogHint.title.media_type || "").toUpperCase() === "MOVIE" ? "MOVIE" : "SERIES",
+          },
+        }
+      : { score: 0, item: null };
 
     // Four title variants are enough for the API's fuzzy search. More variants
     // multiplied the same four upstream requests and made AF slower under load.
@@ -5559,39 +5587,41 @@ async function getAnimeifySourcesUncached(title: string, english: string | null,
       )
     );
 
-    const searchResults = await Promise.allSettled(
-      searchCombinations.map(async ({ q, type, lang }) => {
-        const body = new URLSearchParams({
-          UserId: "0", Language: lang, FilterType: "SEARCH",
-          FilterData: q, Type: type, From: "0",
-        });
-        const r = await animeifyPost(base, token, "anime/load_anime_list_v2.php", body);
-        if (!r) return [];
-        const data = await r.json() as any[];
-        if (!Array.isArray(data)) return [];
-        return data.map(item => ({ item, type, q }));
-      })
-    );
+    if (!best.item) {
+      const searchResults = await Promise.allSettled(
+        searchCombinations.map(async ({ q, type, lang }) => {
+          const body = new URLSearchParams({
+            UserId: "0", Language: lang, FilterType: "SEARCH",
+            FilterData: q, Type: type, From: "0",
+          });
+          const r = await animeifyPost(base, token, "anime/load_anime_list_v2.php", body);
+          if (!r) return [];
+          const data = await r.json() as any[];
+          if (!Array.isArray(data)) return [];
+          return data.map(item => ({ item, type, q }));
+        })
+      );
 
-    for (const searchRes of searchResults) {
-      if (searchRes.status !== "fulfilled") continue;
-      for (const { item, type, q } of searchRes.value) {
-        const enTitle  = String(item.EN_Title  || "");
-        const arTitle  = String(item.AR_Title  || "");
-        const synonyms = String(item.Synonyms  || "");
-        const tags     = String(item.Tags      || "");
-        const s = Math.max(
-          enTitle   ? similarity(q, enTitle)   : 0,
-          enTitle   ? asciiSimilarity(q, enTitle) : 0,
-          enTitle   ? similarity(title, enTitle)   : 0,
-          enTitle   ? asciiSimilarity(title, enTitle) : 0,
-          english && enTitle ? similarity(english, enTitle) : 0,
-          english && enTitle ? asciiSimilarity(english, enTitle) : 0,
-          arTitle   ? similarity(q, arTitle)   : 0,
-          synonyms  ? similarity(q, synonyms)  : 0,
-          tags      ? similarity(q, tags)      : 0,
-        );
-        if (s > best.score) best = { score: s, item: { ...item, _type: type } };
+      for (const searchRes of searchResults) {
+        if (searchRes.status !== "fulfilled") continue;
+        for (const { item, type, q } of searchRes.value) {
+          const enTitle  = String(item.EN_Title  || "");
+          const arTitle  = String(item.AR_Title  || "");
+          const synonyms = String(item.Synonyms  || "");
+          const tags      = String(item.Tags      || "");
+          const s = Math.max(
+            enTitle   ? similarity(q, enTitle)   : 0,
+            enTitle   ? asciiSimilarity(q, enTitle) : 0,
+            enTitle   ? similarity(title, enTitle)   : 0,
+            enTitle   ? asciiSimilarity(title, enTitle) : 0,
+            english && enTitle ? similarity(english, enTitle) : 0,
+            english && enTitle ? asciiSimilarity(english, enTitle) : 0,
+            arTitle   ? similarity(q, arTitle)   : 0,
+            synonyms  ? similarity(q, synonyms)  : 0,
+            tags      ? similarity(q, tags)      : 0,
+          );
+          if (s > best.score) best = { score: s, item: { ...item, _type: type } };
+        }
       }
     }
 
@@ -5902,12 +5932,17 @@ async function getAnimeifySourcesUncached(title: string, english: string | null,
 
 /** Share one AF lookup between the stream picker and background downloads. */
 async function getAnimeifySources(
-  title: string, english: string | null, ep: number, variants: string[] = [], availabilityOnly = false,
+  title: string,
+  english: string | null,
+  ep: number,
+  variants: string[] = [],
+  availabilityOnly = false,
+  catalogHint?: CatalogEpisodeHint | null,
 ): Promise<UnifiedSource[]> {
-  const key = `animeify:${normalize(english || title).replace(/\s+/g, "-")}:${ep}:${availabilityOnly ? "availability" : "playback"}`;
+  const key = `animeify:${catalogHint?.providerTitleId || normalize(english || title).replace(/\s+/g, "-")}:${ep}:${availabilityOnly ? "availability" : "playback"}`;
   const active = _animeifyInFlight.get(key);
   if (active) return active;
-  const promise = getAnimeifySourcesUncached(title, english, ep, variants, availabilityOnly);
+  const promise = getAnimeifySourcesUncached(title, english, ep, variants, availabilityOnly, catalogHint);
   _animeifyInFlight.set(key, promise);
   try {
     return await promise;
@@ -12553,9 +12588,14 @@ function sanimeSeasonNum(s: string | null | undefined): number {
 }
 
 async function getSAnimeSourcesUncached(
-  title: string, english: string | null, ep: number, variants: string[] = [], availabilityOnly = false,
+  title: string,
+  english: string | null,
+  ep: number,
+  variants: string[] = [],
+  availabilityOnly = false,
+  catalogHint?: CatalogEpisodeHint | null,
 ): Promise<UnifiedSource[]> {
-  const ck = `sanime:${normalize(english || title).replace(/\s+/g, "-")}:${ep}`;
+  const ck = `sanime:${catalogHint?.providerTitleId || normalize(english || title).replace(/\s+/g, "-")}:${ep}`;
   const hit = _sanimeCacheMap.get(ck);
   if (hit && Date.now() - hit.ts < SANIME_TTL) return hit.sources;
 
@@ -12566,20 +12606,24 @@ async function getSAnimeSourcesUncached(
     const queries = titleQueries(title, english, variants);
     const allResults: any[] = [];
     const seenIds = new Set<string>();
-    const searchResults = await Promise.allSettled(
-      queries.slice(0, 6).map(q =>
-        fetchSourceWithRetry(`${SANIME_API}search&name=${encodeURIComponent(q)}`, {
-          headers: { "User-Agent": SANIME_UA, "Accept": "application/json" },
-        }, 6_000, 1),
-      ),
-    );
-    for (const result of searchResults) {
-      if (result.status !== "fulfilled" || !result.value) continue;
-      const batch: any[] = await result.value.json().catch(() => []);
-      if (!Array.isArray(batch)) continue;
-      for (const r of batch) {
-        const rid = String(r.id ?? "");
-        if (rid && !seenIds.has(rid)) { seenIds.add(rid); allResults.push(r); }
+    if (catalogHint?.providerTitleId) {
+      allResults.push({ id: catalogHint.providerTitleId, name: catalogHint.title.title });
+    } else {
+      const searchResults = await Promise.allSettled(
+        queries.slice(0, 6).map(q =>
+          fetchSourceWithRetry(`${SANIME_API}search&name=${encodeURIComponent(q)}`, {
+            headers: { "User-Agent": SANIME_UA, "Accept": "application/json" },
+          }, 6_000, 1),
+        ),
+      );
+      for (const result of searchResults) {
+        if (result.status !== "fulfilled" || !result.value) continue;
+        const batch: any[] = await result.value.json().catch(() => []);
+        if (!Array.isArray(batch)) continue;
+        for (const r of batch) {
+          const rid = String(r.id ?? "");
+          if (rid && !seenIds.has(rid)) { seenIds.add(rid); allResults.push(r); }
+        }
       }
     }
     if (allResults.length === 0) return out;
@@ -12685,12 +12729,17 @@ async function getSAnimeSourcesUncached(
 
 /** Share one upstream SA lookup between stream, picker and download requests. */
 async function getSAnimeSources(
-  title: string, english: string | null, ep: number, variants: string[] = [], availabilityOnly = false,
+  title: string,
+  english: string | null,
+  ep: number,
+  variants: string[] = [],
+  availabilityOnly = false,
+  catalogHint?: CatalogEpisodeHint | null,
 ): Promise<UnifiedSource[]> {
-  const key = `sanime:${normalize(english || title).replace(/\s+/g, "-")}:${ep}:${availabilityOnly ? "availability" : "playback"}`;
+  const key = `sanime:${catalogHint?.providerTitleId || normalize(english || title).replace(/\s+/g, "-")}:${ep}:${availabilityOnly ? "availability" : "playback"}`;
   const active = _sanimeInFlight.get(key);
   if (active) return active;
-  const promise = getSAnimeSourcesUncached(title, english, ep, variants, availabilityOnly);
+  const promise = getSAnimeSourcesUncached(title, english, ep, variants, availabilityOnly, catalogHint);
   _sanimeInFlight.set(key, promise);
   try {
     return await promise;
@@ -13101,6 +13150,48 @@ router.get("/anime/sources-stream", scraperQueueMiddleware, async (req, res) => 
   const checkSeen = new Set<string>();
   let closed = false;
   req.on("close", () => { closed = true; });
+
+  // Catalog lookups run once per request and are shared by both phases:
+  // availability can advertise a known page immediately, while extraction
+  // receives the provider's stable id and skips its title-wide search.
+  const catalogHintsPromise = getSourceCatalogHints({
+    title,
+    english,
+    titleAr,
+    variants: titleVariants,
+    episode: ep,
+    season: seasonNum,
+    providerTitleId: anslayerId,
+  }).catch(() => ({}));
+  const catalogHintFor = async (provider: "animeify" | "anslayer" | "sanime" | "anifox") =>
+    (await catalogHintsPromise)[provider] || null;
+
+  async function useCatalogAvailability(
+    provider: "animeify" | "anslayer" | "sanime" | "anifox",
+    fallback: () => Promise<unknown>,
+  ): Promise<void> {
+    // Do not hold the picker open for a slow database request. The normal
+    // scraper remains the explicit fallback when the catalog is unavailable.
+    const hints = await Promise.race([
+      catalogHintsPromise,
+      new Promise<Partial<Record<string, CatalogEpisodeHint>>>(resolve => setTimeout(() => resolve({}), 1200)),
+    ]);
+    const hint = hints[provider];
+    if (hint?.servers.length) {
+      for (const server of hint.servers) {
+        sendCheckSrc({
+          name: `${provider} · ${server.server_name || server.server_key || "server"}`,
+          url: server.page_url,
+          quality: server.quality || "HD",
+          qualityRank: catalogQualityRank(server.quality),
+          site: provider,
+          verified: true,
+        } as UnifiedSource);
+      }
+      return;
+    }
+    await fallback();
+  }
 
   // The availability pass does not need AniList resolution. Skipping it here
   // removes an unrelated network dependency from the first source results.
@@ -13585,10 +13676,19 @@ router.get("/anime/sources-stream", scraperQueueMiddleware, async (req, res) => 
           }
         })(),
         () => scrapeCached("animewitcher",  () => getAnimeWitcherSources(title, english, ep, anilistId, titleVariants, true), false, 11000),
-        () => scrapeCached("anslayer",      () => getAnimeSlayerSources(title, english, ep, anslayerId, titleAr), false, 3200),
-        () => scrapeCached("animeify",      () => getAnimeifySources(title, english, ep, titleVariants, true), false, 4000),
-        () => scrapeCached("sanime",        () => getSAnimeSources(title, english, ep, titleVariants, true), false, 4000),
-        () => scrapeCached("anifox",        () => getAnifoxSources(title, english, ep, titleVariants, anilistId, true), false, 4000),
+        () => useCatalogAvailability("anslayer", async () => scrapeCached("anslayer", async () => {
+          const hint = await catalogHintFor("anslayer");
+          return getAnimeSlayerSources(title, english, ep, Number(hint?.providerTitleId || anslayerId || 0) || undefined, titleAr);
+        }, false, 3200)),
+        () => useCatalogAvailability("animeify", async () => scrapeCached("animeify", async () => getAnimeifySources(
+          title, english, ep, titleVariants, true, await catalogHintFor("animeify"),
+        ), false, 4000)),
+        () => useCatalogAvailability("sanime", async () => scrapeCached("sanime", async () => getSAnimeSources(
+          title, english, ep, titleVariants, true, await catalogHintFor("sanime"),
+        ), false, 4000)),
+        () => useCatalogAvailability("anifox", async () => scrapeCached("anifox", async () => getAnifoxSources(
+          title, english, ep, titleVariants, anilistId, true, await catalogHintFor("anifox"),
+        ), false, 4000)),
       ], 4), new Promise<void>(resolve => setTimeout(resolve, 32_000))]);
       if (availabilityJobs.size) await Promise.allSettled([...availabilityJobs]);
       clearInterval(keepalive);
@@ -13607,7 +13707,8 @@ router.get("/anime/sources-stream", scraperQueueMiddleware, async (req, res) => 
       // okanime: معطّل بطلب المستخدم
       // scrapeCached("okanime",      () => getOkAnimeSources(title, english, ep, isMovie, matchCtx), true, 22_000),
       // mitanime: محذوف بطلب المستخدم 2026-07-27
-      scrapeCached("animeify",     () => getAnimeifySources(title, english, ep, titleVariants),  false, 18000),
+      scrapeCached("animeify",     () => catalogHintFor("animeify").then((hint) =>
+        getAnimeifySources(title, english, ep, titleVariants, false, hint)),  false, 18000),
       scrapeCached("animeday",     () => getAnimeDaySources(title, english, ep),    true, 18000),
       // scrapeCached("seepanel",  () => getSeepanelSources(title, english, ep, isMovie)), // DEAD: panel.seepanel.top/api returns 404 (2026-06)
       scrapeCached("arabseed",     () => getArabSeedSources(title, english, ep, isMovie)),
@@ -13628,7 +13729,8 @@ router.get("/anime/sources-stream", scraperQueueMiddleware, async (req, res) => 
       scrapeCached("anineko",      () => getAninekoSources(title, english, ep, titleVariants),    false, 30000),
       // FX and GO were fetchable only after a tap, so the availability pass
       // incorrectly marked them missing. Discover them in the same parallel pass.
-      scrapeCached("anifox",       () => getAnifoxSources(title, english, ep, titleVariants, anilistId), false, 12000),
+      scrapeCached("anifox",       () => catalogHintFor("anifox").then((hint) =>
+        getAnifoxSources(title, english, ep, titleVariants, anilistId, false, hint)), false, 12000),
       scrapeCached("consumet_gogo",() => getConsumetSources("consumet_gogo", title, english, ep, titleVariants, anilistId), false, 12000),
       scrapeCached("anikototv",    () => getAnikototvSources(title, english, ep),               false, 22000),
       // anikuro: محذوف
@@ -13689,8 +13791,10 @@ router.get("/anime/sources-stream", scraperQueueMiddleware, async (req, res) => 
       // vaplayer_anim: محذوف من الأنمي — يُبقى فقط في الأنيميشن (2026-07-15)
       // xyra_anim: معطّل مؤقتاً — api.xyra.stream يرجع 502 (Cloudflare) لكل الطلبات منذ 2026-07-09
       // scrapeCached("xyra_anim",  () => getXyraAnimeSources(title, english, ep, anilistId),  false, 18000),
-      scrapeCached("sanime",     () => getSAnimeSources(title, english, ep, titleVariants), false, 20000),
-      scrapeCached("anslayer",   () => getAnimeSlayerSources(title, english, ep, anslayerId, titleAr), false, 45000),
+      scrapeCached("sanime",     () => catalogHintFor("sanime").then((hint) =>
+        getSAnimeSources(title, english, ep, titleVariants, false, hint)), false, 20000),
+      scrapeCached("anslayer",   () => catalogHintFor("anslayer").then((hint) =>
+        getAnimeSlayerSources(title, english, ep, Number(hint?.providerTitleId || anslayerId || 0) || undefined, titleAr)), false, 45000),
       // animetime / notorrent: أُزيلت كلياً بطلب المستخدم (2026-07-09)
     ]);
 
@@ -13960,6 +14064,21 @@ router.get("/anime/fetch-source", scraperQueueMiddleware, async (req, res) => {
   const race = <T>(p: Promise<T>, ms: number, fallback: T) =>
     Promise.race([p, new Promise<T>(r => setTimeout(() => r(fallback), ms))]);
 
+  const catalogProvider = (["animeify", "anslayer", "sanime", "anifox"] as string[]).includes(site)
+    ? site as "animeify" | "anslayer" | "sanime" | "anifox"
+    : null;
+  const catalogHint = catalogProvider
+    ? await race(getSourceCatalogHint(catalogProvider, {
+        title,
+        english,
+        titleAr,
+        variants: titleVariants,
+        episode: ep,
+        season: extractSeasonNum(title) ?? extractSeasonNum(english || "") ?? null,
+        providerTitleId: catalogProvider === "anslayer" ? anslayerId : undefined,
+      }), 1800, null)
+    : null;
+
   const seen    = new Set<string>();
   const sources: UnifiedSource[] = [];
 
@@ -14002,7 +14121,7 @@ router.get("/anime/fetch-source", scraperQueueMiddleware, async (req, res) => {
       case "animedar":     await runExtract(await race(getAnimadarSources(title, english, ep, isMovie),   SCRAPER_MS, [])); break;
       // case "okanime": معطّل بطلب المستخدم
       // case "mitanime": محذوف بطلب المستخدم 2026-07-27
-      case "animeify":    (await race(getAnimeifySources(title, english, ep, titleVariants),  18000, [])).forEach(collectSrc); break;
+      case "animeify":    (await race(getAnimeifySources(title, english, ep, titleVariants, false, catalogHint),  18000, [])).forEach(collectSrc); break;
       case "animeday":     await runExtract(await race(getAnimeDaySources(title, english, ep),   SCRAPER_MS, [])); break;
       // case "seepanel": DEAD
       case "arabseed":     await runExtract(await race(getArabSeedSources(title, english, ep),   SCRAPER_MS, [])); break;
@@ -14048,9 +14167,9 @@ router.get("/anime/fetch-source", scraperQueueMiddleware, async (req, res) => {
       // case "vaplayer_anim": محذوف من الأنمي 2026-07-15
       // xyra_anim: معطّل مؤقتاً — api.xyra.stream يرجع 502 دائماً (عطل من طرفهم)
       // case "xyra_anim":    (await race(getXyraAnimeSources(title, english, ep, anilistId), 18_000, [])).forEach(collectSrc); break;
-      case "sanime":       (await race(getSAnimeSources(title, english, ep, titleVariants),               20_000, [])).forEach(collectSrc); break;
-      case "anifox":       (await race(getAnifoxSources(title, english, ep, titleVariants, anilistId),    30_000, [])).forEach(collectSrc); break;
-      case "anslayer":     (await race(getAnimeSlayerSources(title, english, ep, anslayerId, titleAr), 45_000, [])).forEach(collectSrc); break;
+      case "sanime":       (await race(getSAnimeSources(title, english, ep, titleVariants, false, catalogHint),               20_000, [])).forEach(collectSrc); break;
+      case "anifox":       (await race(getAnifoxSources(title, english, ep, titleVariants, anilistId, false, catalogHint),    30_000, [])).forEach(collectSrc); break;
+      case "anslayer":     (await race(getAnimeSlayerSources(title, english, ep, Number(catalogHint?.providerTitleId || anslayerId || 0) || undefined, titleAr), 45_000, [])).forEach(collectSrc); break;
       case "ristoanime":   (await race(getRistoAnimeSources(title, english, ep),          22_000, [])).forEach(collectSrc); break;
       // case "allmanga": معطّل 2026-07-17
       // case "nflixmovies_anim": حُذف 2026-07-30 — 0 مصادر (ميت)
