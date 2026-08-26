@@ -112,3 +112,17 @@ mtime_ms = 1787601783810
 storage_uri = "gcs://replit-rams-assets-sisko/rams/assets/repl:4470d19a-50dc-48fc-a453-04644cf3d256/12052bb6-84cc-40a3-84d5-2b6310af3919/98b94cc5-bf06-4cd5-b2ba-e48948db9d4c"
 storage_version_token = "1787602210233576"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "_mgrd8qkQENaq0oKqCB3G"
+uri = "file://SOURCE_CATALOG_AUDIT_2026-08-26.md"
+type = "text"
+title = "تقرير فحص كتالوجات AF وAS وSA وFX"
+description = "تقرير كامل بنتائج فحص AnimeWitcher وخلاصات تعداد الكتالوجات واختبارات الحلقات والروابط من داخل الـVPS فقط."
+logical_id = "f577d858-3ef5-4f93-a85f-c80c67e511bf"
+content_hash = "sha256:b0d7d169527db14f1b624f4fbe12b927a2a8a9fcc75330c793d2c316817c3981"
+size = 22470
+mtime_ms = 1787740179884
+storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:f3373c74-f8b6-467c-955a-be50f4daf34a/f577d858-3ef5-4f93-a85f-c80c67e511bf/6fa2bb62-28e2-4395-ab1f-bd027d20f9e3"
+storage_version_token = "1787740199752196"
+content_type = "text/markdown"
