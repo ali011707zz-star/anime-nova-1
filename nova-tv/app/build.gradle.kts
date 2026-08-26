@@ -11,6 +11,15 @@ android {
         buildConfig = true
     }
 
+    signingConfigs {
+        create("release") {
+            storeFile = file(project.findProperty("NOVA_RELEASE_STORE_FILE") ?: "nova-release.keystore")
+            storePassword = project.findProperty("NOVA_RELEASE_STORE_PASSWORD") as String?
+            keyAlias = project.findProperty("NOVA_RELEASE_KEY_ALIAS") as String?
+            keyPassword = project.findProperty("NOVA_RELEASE_KEY_PASSWORD") as String?
+        }
+    }
+
     defaultConfig {
         applicationId = "com.nova.anime.tv"
         minSdk = 24
@@ -26,6 +35,7 @@ android {
 
     buildTypes {
         release {
+            signingConfig = signingConfigs.getByName("release")
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(
