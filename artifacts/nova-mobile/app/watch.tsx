@@ -1959,8 +1959,8 @@ export default function WatchScreen() {
           return (
             <View key={qk} style={{ gap: 6 }}>
               {/* رأس الجودة */}
-              <View style={d.qPill}>
-                <Text style={[d.qPillText, { color: dotColor }]}>
+                 <View style={[d.qPill, tvMode && d.tvQPill]}>
+                 <Text style={[d.qPillText, tvMode && d.tvQPillText, { color: dotColor }]}>
                   {qk.replace("p", "P")}
                 </Text>
                 <View style={[d.qPillDot, { backgroundColor: dotColor }]} />
@@ -1978,7 +1978,7 @@ export default function WatchScreen() {
                       key={slot.site}
                       onPress={() => handlePickSite(slot.site, qk)}
                       style={({ pressed }) => [
-                        d.webRow,
+                         d.webRow,
                         tvMode && d.tvWebRow,
                         idx < slots.length - 1 && d.webRowBorder,
                         !watchUnlocked && { opacity: 0.72 },
@@ -2010,7 +2010,8 @@ export default function WatchScreen() {
                       {/* Center: السيرفر XX */}
                       <Text
                         style={[
-                          d.webRowTag,
+                           d.webRowTag,
+                           tvMode && d.tvWebRowTag,
                           { flex: 1, textAlign: "right" },
                           isReady  && { color: "rgba(255,255,255,0.90)" },
                           isFailed && { color: "rgba(255,255,255,0.35)" },
@@ -2222,11 +2223,15 @@ const d = StyleSheet.create({
   /* ── Web-style quality pill header ── */
   qPill:         { flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 4 },
   qPillText:     { fontSize: 12, fontFamily: "Cairo_800ExtraBold", letterSpacing: 0.5 },
+  tvQPill:       { paddingHorizontal: 22, paddingVertical: 11, borderRadius: 12 },
+  tvQPillText:   { fontSize: 18 },
   qPillDot:      { width: 6, height: 6, borderRadius: 3 },
 
   /* ── Web-style server row ── */
   webRow:         { flexDirection: "row", alignItems: "center", paddingHorizontal: 10, paddingVertical: 11, gap: 7 },
-  tvWebRow:       { paddingHorizontal: 24, paddingVertical: 20, gap: 16 },
+  tvWebRow:       { minHeight: 92, paddingHorizontal: 28, paddingVertical: 22, gap: 20, borderRadius: 14 },
+  tvWebRowTag:    { fontSize: 20, lineHeight: 28 },
+  tvSiteRowPlayBtn: { minWidth: 130, minHeight: 58, paddingHorizontal: 22, paddingVertical: 14, borderRadius: 14 },
   webRowBorder:   { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: "rgba(255,255,255,0.06)" },
   webRowPlayIcon: { alignItems: "center", justifyContent: "center", flexShrink: 0 },
   webRowActions: { flexDirection: "row", alignItems: "center", gap: 4, flexShrink: 0 },

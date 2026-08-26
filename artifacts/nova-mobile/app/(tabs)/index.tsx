@@ -49,6 +49,7 @@ export default function HomeScreen() {
   const { watchHistory } = useApp();
   const { width, height } = useWindowDimensions();
   const [showDrawer, setShowDrawer] = useState(false);
+  const isTvLayout = isTvDevice(width, height);
 
   const topPad = Platform.OS === "web" ? 0 : insets.top;
   const { season, year } = getCurrentSeason();
@@ -59,16 +60,19 @@ export default function HomeScreen() {
   const { data: trending, isLoading: loadingT, refetch: refetchT } = useQuery({
     queryKey: ["trending"],
     queryFn: () => anilistQuery<{ Page: { media: AnilistMedia[] } }>(TRENDING_QUERY, { page: 1 }),
+    enabled: !isTvLayout,
   });
 
   const { data: popular, isLoading: loadingP, refetch: refetchP } = useQuery({
     queryKey: ["popular"],
     queryFn: () => anilistQuery<{ Page: { media: AnilistMedia[] } }>(POPULAR_QUERY, { page: 1 }),
+    enabled: !isTvLayout,
   });
 
   const { data: airing, isLoading: loadingA, refetch: refetchA } = useQuery({
     queryKey: ["airing"],
     queryFn: () => anilistQuery<{ Page: { media: AnilistMedia[] } }>(AIRING_QUERY),
+    enabled: !isTvLayout,
   });
 
   const { data: seasonal, refetch: refetchS } = useQuery({
@@ -79,26 +83,31 @@ export default function HomeScreen() {
   const { data: topRated, refetch: refetchR } = useQuery({
     queryKey: ["topRated"],
     queryFn: () => anilistQuery<{ Page: { media: AnilistMedia[] } }>(TOP_RATED_QUERY),
+    enabled: !isTvLayout,
   });
 
   const { data: movies, refetch: refetchM } = useQuery({
     queryKey: ["animeMovies"],
     queryFn: () => anilistQuery<{ Page: { media: AnilistMedia[] } }>(MOVIES_QUERY),
+    enabled: !isTvLayout,
   });
 
   const { data: spring2026, refetch: refetchSpring } = useQuery({
     queryKey: ["spring2026"],
     queryFn: () => anilistQuery<{ Page: { media: AnilistMedia[] } }>(SPRING_2026_QUERY),
+    enabled: !isTvLayout,
   });
 
   const { data: fall2025, refetch: refetchFall } = useQuery({
     queryKey: ["fall2025"],
     queryFn: () => anilistQuery<{ Page: { media: AnilistMedia[] } }>(FALL_2025_QUERY),
+    enabled: !isTvLayout,
   });
 
   const { data: isekai, refetch: refetchIsekai } = useQuery({
     queryKey: ["isekai"],
     queryFn: () => anilistQuery<{ Page: { media: AnilistMedia[] } }>(ISEKAI_QUERY),
+    enabled: !isTvLayout,
   });
 
   /* أحدث الحلقات — نفس كتالوج AnimeSlayer المستخدم في الويب. */
@@ -158,7 +167,7 @@ export default function HomeScreen() {
     return () => ctrl.abort();
   }, []);
 
-  const isLoading = loadingT || loadingP || loadingA;
+  const isLoading = !isTvLayout && (loadingT || loadingP || loadingA);
 
   /* ── Dubbed cartoon catalog ── */
   const BASE_URL = getBaseUrl();
@@ -207,7 +216,6 @@ export default function HomeScreen() {
     [popularList],
   );
   const recentHistory = watchHistory.slice(0, 10);
-  const isTvLayout = isTvDevice(width, height);
   const railCardWidth = getRailCardWidth(width, isTvLayout ? 5 : 3);
   const railSidePadding = getRailSidePadding(width);
   const railGap = 10;
@@ -249,17 +257,19 @@ export default function HomeScreen() {
           </View>
         </View>
 
-        <AnnouncementBanner />
+        {!isTvLayout && <AnnouncementBanner />}
 
-        {/* Hero */}
-        {isLoading ? (
+        {/* Hero is intentionally omitted on TV: the screen opens directly on
+            the latest episode rail, which is faster and easier to use with a
+            remote. */}
+        {!isTvLayout && (isLoading ? (
           <View style={{ height: 420, backgroundColor: colors.card }} />
         ) : (
           <HeroSection items={heroItems} />
-        )}
+        ))}
 
         {/* Continue Watching */}
-        {recentHistory.length > 0 && (
+        {!isTvLayout && recentHistory.length > 0 && (
           <View style={{ marginTop: 24 }}>
             <View style={styles.sectionHeader}>
               <View style={styles.sectionLeft}>
@@ -489,65 +499,24 @@ export default function HomeScreen() {
               <SkeletonRow />
               <SkeletonRow />
             </>
+          ) : isTvLayout ? (
+            <SectionRow
+              title={`أنمي هذا الموسم ${SEASON_AR[season] ?? ""} ${year}`}
+              items={seasonalList}
+              size="md"
+              onSeeAll={() => router.push({ pathname: "/browse", params: { sort: "POPULARITY_DESC", season, year: String(year) } } as any)}
+            />
           ) : (
             <>
-              <SectionRow
-                title="🔥 رائج الآن"
-                items={trendingList}
-                size="md"
-                onSeeAll={() => router.push({ pathname: "/browse", params: { sort: "TRENDING_DESC" } } as any)}
-              />
-              <SectionRow
-                title={`🌸 أنمي ${SEASON_AR[season] ?? "الموسم"} ${year}`}
-                items={seasonalList}
-                size="md"
-                onSeeAll={() => router.push({ pathname: "/browse", params: { sort: "POPULARITY_DESC", season, year: String(year) } } as any)}
-              />
-              <SectionRow
-                title="🌸 أنمي ربيع 2026"
-                items={spring2026List}
-                size="md"
-                onSeeAll={() => router.push({ pathname: "/browse", params: { sort: "POPULARITY_DESC", season: "SPRING", year: "2026" } } as any)}
-              />
-              <SectionRow
-                title="🍂 أنمي خريف 2025"
-                items={fall2025List}
-                size="md"
-                onSeeAll={() => router.push({ pathname: "/browse", params: { sort: "POPULARITY_DESC", season: "FALL", year: "2025" } } as any)}
-              />
-              <SectionRow
-                title="📡 يُعرض حالياً"
-                items={airingList}
-                size="md"
-                onSeeAll={() => router.push({ pathname: "/browse", params: { status: "RELEASING", sort: "POPULARITY_DESC" } } as any)}
-              />
-              <SectionRow
-                title="🏆 الأعلى تقييماً على الإطلاق"
-                items={topRatedList}
-                size="md"
-                onSeeAll={() => router.push({ pathname: "/browse", params: { sort: "SCORE_DESC" } } as any)}
-              />
-              <SectionRow
-                title="⭐ الأكثر شعبية"
-                items={popularList}
-                size="md"
-                onSeeAll={() => router.push({ pathname: "/browse", params: { sort: "POPULARITY_DESC" } } as any)}
-              />
-              <SectionRow
-                title="🎬 أفلام الأنمي"
-                items={moviesList}
-                size="md"
-                onSeeAll={() => router.push({ pathname: "/browse", params: { format: "MOVIE", sort: "POPULARITY_DESC" } } as any)}
-              />
-              <SectionRow
-                title="🌀 إيسيكاي"
-                items={isekaiList}
-                size="md"
-                onSeeAll={() => router.push({ pathname: "/browse", params: { genre: "Isekai", genreAr: "إيسيكاي", sort: "POPULARITY_DESC" } } as any)}
-              />
-
-              {/* TMDB Animation Movies — disabled */}
-
+              <SectionRow title="رائج الآن" items={trendingList} size="md" onSeeAll={() => router.push({ pathname: "/browse", params: { sort: "TRENDING_DESC" } } as any)} />
+              <SectionRow title={`أنمي ${SEASON_AR[season] ?? "الموسم"} ${year}`} items={seasonalList} size="md" onSeeAll={() => router.push({ pathname: "/browse", params: { sort: "POPULARITY_DESC", season, year: String(year) } } as any)} />
+              <SectionRow title="أنمي ربيع 2026" items={spring2026List} size="md" onSeeAll={() => router.push({ pathname: "/browse", params: { sort: "POPULARITY_DESC", season: "SPRING", year: "2026" } } as any)} />
+              <SectionRow title="أنمي خريف 2025" items={fall2025List} size="md" onSeeAll={() => router.push({ pathname: "/browse", params: { sort: "POPULARITY_DESC", season: "FALL", year: "2025" } } as any)} />
+              <SectionRow title="يُعرض حالياً" items={airingList} size="md" onSeeAll={() => router.push({ pathname: "/browse", params: { status: "RELEASING", sort: "POPULARITY_DESC" } } as any)} />
+              <SectionRow title="الأعلى تقييماً على الإطلاق" items={topRatedList} size="md" onSeeAll={() => router.push({ pathname: "/browse", params: { sort: "SCORE_DESC" } } as any)} />
+              <SectionRow title="الأكثر شعبية" items={popularList} size="md" onSeeAll={() => router.push({ pathname: "/browse", params: { sort: "POPULARITY_DESC" } } as any)} />
+              <SectionRow title="أفلام الأنمي" items={moviesList} size="md" onSeeAll={() => router.push({ pathname: "/browse", params: { format: "MOVIE", sort: "POPULARITY_DESC" } } as any)} />
+              <SectionRow title="إيسيكاي" items={isekaiList} size="md" onSeeAll={() => router.push({ pathname: "/browse", params: { genre: "Isekai", genreAr: "إيسيكاي", sort: "POPULARITY_DESC" } } as any)} />
             </>
           )}
         </View>

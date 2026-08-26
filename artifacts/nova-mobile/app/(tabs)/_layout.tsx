@@ -72,6 +72,7 @@ export default function TabLayout() {
       <Tabs.Screen
         name="search"
         options={{
+          href: tvMode ? null : undefined,
           tabBarIcon: ({ color, focused }) => (
             <TabIcon name="search" label="بحث" color={color} focused={focused} tvMode={tvMode} />
           ),

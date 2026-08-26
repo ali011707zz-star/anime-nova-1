@@ -64,6 +64,7 @@ export default function LibraryScreen() {
   const { width, height } = useWindowDimensions();
   const topPad = Platform.OS === "web" ? 0 : Math.max(insets.top, 0);
   const tvMode = isTvDevice(width, height);
+  const visibleTabs = tvMode ? TABS.slice(0, 3) : TABS;
   const gridColumns = tvMode ? 4 : 3;
   const gridWidth = Math.min(Math.max(width - 24, 0), tvMode ? 1100 : 900);
   const router = useRouter();
@@ -243,7 +244,7 @@ export default function LibraryScreen() {
         contentContainerStyle={s.tabsRow}
         style={s.tabsScroll}
       >
-        {TABS.map((tab, i) => {
+        {visibleTabs.map((tab, i) => {
           const active = activeTab === i;
           return (
             <Pressable
@@ -251,20 +252,21 @@ export default function LibraryScreen() {
               onPress={() => handleTabPress(i)}
               style={[
                 s.tabBtn,
+                tvMode && s.tvTabBtn,
                 { backgroundColor: active ? colors.primary : colors.card, borderColor: active ? colors.primary : colors.border },
               ]}
             >
               <Ionicons
                 name={active ? tab.activeIcon : tab.icon}
-                size={14}
+                size={tvMode ? 22 : 14}
                 color={active ? "#fff" : colors.mutedForeground}
               />
-              <Text style={[s.tabText, { color: active ? "#fff" : colors.mutedForeground }]}>
+              <Text style={[s.tabText, tvMode && s.tvTabText, { color: active ? "#fff" : colors.mutedForeground }]}>
                 {tab.label}
               </Text>
               {counts[i] > 0 && (
                 <View style={[s.tabBadge, { backgroundColor: active ? "rgba(255,255,255,0.25)" : colors.primary + "30" }]}>
-                  <Text style={[s.tabBadgeText, { color: active ? "#fff" : colors.primary }]}>{counts[i]}</Text>
+                  <Text style={[s.tabBadgeText, tvMode && s.tvBadgeText, { color: active ? "#fff" : colors.primary }]}>{counts[i]}</Text>
                 </View>
               )}
             </Pressable>
@@ -293,16 +295,16 @@ export default function LibraryScreen() {
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.filterChips}>
             {LIBRARY_YEARS.map(y => (
               <Pressable key={y || "all-years"} onPress={() => setYear(y)} focusable={tvMode}
-                style={({ focused }) => [s.filterChip, year === y && s.filterChipActive, tvMode && tvFocusStyle(focused)]}>
-                <Text style={[s.filterChipText, year === y && s.filterChipTextActive]}>{y || "كل الأعوام"}</Text>
+                style={({ focused }) => [s.filterChip, tvMode && s.tvFilterChip, year === y && s.filterChipActive, tvMode && tvFocusStyle(focused)]}>
+                <Text style={[s.filterChipText, tvMode && s.tvFilterChipText, year === y && s.filterChipTextActive]}>{y || "كل الأعوام"}</Text>
               </Pressable>
             ))}
           </ScrollView>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.filterChips}>
             {["", "Action", "Adventure", "Comedy", "Drama", "Fantasy", "Romance", "Mystery", "Sports"].map(g => (
               <Pressable key={g || "all-genres"} onPress={() => setGenre(g)} focusable={tvMode}
-                style={({ focused }) => [s.filterChip, genre === g && s.filterChipActive, tvMode && tvFocusStyle(focused)]}>
-                <Text style={[s.filterChipText, genre === g && s.filterChipTextActive]}>{g || "كل التصنيفات"}</Text>
+                style={({ focused }) => [s.filterChip, tvMode && s.tvFilterChip, genre === g && s.filterChipActive, tvMode && tvFocusStyle(focused)]}>
+                <Text style={[s.filterChipText, tvMode && s.tvFilterChipText, genre === g && s.filterChipTextActive]}>{g || "كل التصنيفات"}</Text>
               </Pressable>
             ))}
           </ScrollView>
@@ -454,9 +456,12 @@ const s = StyleSheet.create({
     paddingHorizontal: 13, paddingVertical: 8,
     borderRadius: 20, borderWidth: 1,
   },
+  tvTabBtn: { paddingHorizontal: 20, paddingVertical: 13, borderRadius: 12 },
   tabText: { fontSize: 12, fontFamily: "Cairo_600SemiBold" },
+  tvTabText: { fontSize: 19 },
   tabBadge: { paddingHorizontal: 5, paddingVertical: 1, borderRadius: 8 },
   tabBadgeText: { fontSize: 9, fontFamily: "Cairo_700Bold" },
+  tvBadgeText: { fontSize: 14 },
 
   searchWrap: {
     flexDirection: "row", alignItems: "center", gap: 8,
@@ -515,4 +520,6 @@ const s = StyleSheet.create({
   filterChipActive: { backgroundColor: "rgba(139,92,246,0.22)", borderColor: "rgba(139,92,246,0.5)" },
   filterChipText: { fontSize: 11, fontFamily: "Cairo_700Bold", color: "rgba(255,255,255,0.5)" },
   filterChipTextActive: { color: "#c4b5fd" },
+  tvFilterChip: { paddingHorizontal: 20, paddingVertical: 12, borderRadius: 10 },
+  tvFilterChipText: { fontSize: 16 },
 });

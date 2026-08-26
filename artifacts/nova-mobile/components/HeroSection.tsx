@@ -22,6 +22,7 @@ export function HeroSection({ items }: Props) {
   const [activeIdx, setActiveIdx] = useState(0);
 
   useEffect(() => {
+    if (tvMode) return;
     if (items.length <= 1) return;
     const timer = setInterval(() => {
       setActiveIdx((i) => {
@@ -31,7 +32,7 @@ export function HeroSection({ items }: Props) {
       });
     }, 4000);
     return () => clearInterval(timer);
-  }, [items.length]);
+  }, [items.length, tvMode]);
 
   if (!items.length) return null;
 

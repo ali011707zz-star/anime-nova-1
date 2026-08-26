@@ -11,6 +11,7 @@ import {
   Image, Share, StyleSheet, Switch, Text, TextInput, View, ActivityIndicator,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { isTvDevice } from "@/utils/tv";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useColors } from "@/hooks/useColors";
 import { useApp } from "@/context/AppContext";
@@ -1183,6 +1184,7 @@ export default function SettingsScreen() {
   const { openPremium } = useLocalSearchParams<{ openPremium?: string }>();
   const { theme, setTheme, watchHistory, favorites, refreshConfig, setCurrentUser: setGlobalUser } = useApp();
   const topPad = Platform.OS === "web" ? 0 : insets.top;
+  const tvMode = isTvDevice();
 
   const { toast, show: showToast } = useToast();
   const [notifs, setNotifs] = useState(true);
@@ -1405,8 +1407,9 @@ export default function SettingsScreen() {
           )}
         </View>
 
-        {/* ── 4-stat grid ── */}
-        <View style={ts.statsGrid}>
+        {/* The stats/premium marketing blocks are useful on phones but add
+            noise and startup work to the TV settings screen. */}
+        {!tvMode && <View style={ts.statsGrid}>
           {[
             { label: "مشاهَدة", val: histCount,      color: "#a78bfa", bg: "rgba(139,92,246,0.10)" },
             { label: "محفوظة",  val: savedCount,     color: "#f472b6", bg: "rgba(236,72,153,0.10)" },
@@ -1421,10 +1424,10 @@ export default function SettingsScreen() {
               <Text style={ts.statLabel}>{s.label}</Text>
             </Pressable>
           ))}
-        </View>
+        </View>}
 
         {/* ── Nova Premium banner ── */}
-        <View style={{ paddingHorizontal: 16, marginTop: 16 }}>
+        {!tvMode && <View style={{ paddingHorizontal: 16, marginTop: 16 }}>
           <Pressable style={ts.premiumCard} onPress={() => setShowPremium(true)}>
             {/* Glow */}
             <View style={ts.premiumGlow} />
@@ -1450,10 +1453,10 @@ export default function SettingsScreen() {
               ))}
             </View>
           </Pressable>
-        </View>
+        </View>}
 
         {/* ══════ المظهر ══════ */}
-        <SectionHeader title="المظهر" icon="🎨" />
+        <SectionHeader title="المظهر" icon="المظهر" />
         <View style={{ paddingHorizontal: 16 }}>
           <Card>
             <View style={{ padding: 16 }}>
@@ -1502,7 +1505,7 @@ export default function SettingsScreen() {
         </View>
 
         {/* ══════ الإشعارات ══════ */}
-        <SectionHeader title="الإشعارات" icon="🔔" />
+        <SectionHeader title="الإشعارات" icon="الإشعارات" />
         <View style={{ paddingHorizontal: 16 }}>
           <Card>
             <Pressable onPress={() => setNotifs(!notifs)} style={ts.navRow}>
@@ -1533,7 +1536,7 @@ export default function SettingsScreen() {
         </View>
 
         {/* ══════ عن التطبيق ══════ */}
-        <SectionHeader title="عن التطبيق" icon="ℹ️" />
+        <SectionHeader title="عن التطبيق" icon="حول" />
         <View style={{ paddingHorizontal: 16 }}>
           <Card>
             {/* Version */}
@@ -1581,7 +1584,7 @@ export default function SettingsScreen() {
         </View>
 
         {/* ══════ البيانات والكاش ══════ */}
-        <SectionHeader title="البيانات والكاش" icon="🗑️" />
+        <SectionHeader title="البيانات والكاش" icon="البيانات" />
         <View style={{ paddingHorizontal: 16 }}>
           <Card>
             <DangerRow

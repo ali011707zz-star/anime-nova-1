@@ -586,9 +586,9 @@ export default function AnimeDetailScreen() {
             { icon: "star",        label: "تقييمي",    active: myRating > 0, activeColor: "#FBBF24", onPress: () => setShowRating(true) },
           ].map(({ icon, label, active, activeColor, onPress }) => (
              <Pressable key={label} onPress={onPress} focusable={tvMode}
-               style={({ focused }) => [d.actionBtn, active && { backgroundColor: activeColor + "18", borderColor: activeColor + "40" }, tvMode && tvFocusStyle(focused)]}>
+               style={({ focused }) => [d.actionBtn, tvMode && d.tvActionBtn, active && { backgroundColor: activeColor + "18", borderColor: activeColor + "40" }, tvMode && tvFocusStyle(focused)]}>
               <Ionicons name={icon as any} size={16} color={active ? activeColor : "rgba(255,255,255,0.4)"} />
-              <Text style={[d.actionBtnLabel, active && { color: activeColor }]}>{label}</Text>
+              <Text style={[d.actionBtnLabel, tvMode && d.tvActionBtnLabel, active && { color: activeColor }]}>{label}</Text>
               {label === "تقييمي" && myRating > 0 ? (
                 <Text style={[d.actionBtnSub, { color: "#FBBF24" }]}>{myRating}/10</Text>
               ) : null}
@@ -645,8 +645,8 @@ export default function AnimeDetailScreen() {
               >{desc}</Text>
               {desc.length > 200 && (
                  <Pressable onPress={() => setShowFull(f => !f)} focusable={tvMode}
-                   style={({ focused }) => [d.readMoreBtn, tvMode && tvFocusStyle(focused)]}>
-                  <Text style={d.readMoreText}>{showFull ? "عرض أقل" : "عرض المزيد"}</Text>
+                   style={({ focused }) => [d.readMoreBtn, tvMode && d.tvReadMoreBtn, tvMode && tvFocusStyle(focused)]}>
+                  <Text style={[d.readMoreText, tvMode && d.tvReadMoreText]}>{showFull ? "عرض أقل" : "عرض المزيد"}</Text>
                   <Ionicons name={showFull ? "chevron-up" : "chevron-down"} size={13} color="#8B5CF6" />
                 </Pressable>
               )}
@@ -821,7 +821,7 @@ export default function AnimeDetailScreen() {
       </ScrollView>
 
       {/* ── Trailer Modal — in-app YouTube player ── */}
-      <Modal visible={showTrailer} animationType="slide" onRequestClose={() => setShowTrailer(false)}>
+      <Modal visible={showTrailer} animationType={tvMode ? "none" : "slide"} onRequestClose={() => setShowTrailer(false)}>
         <View style={{ flex: 1, backgroundColor: "#000" }}>
           <View style={[d.trailerSheetHeader, { paddingTop: topPad + 4 }]}>
             <Ionicons name="logo-youtube" size={20} color="#FF0000" />
@@ -876,7 +876,7 @@ export default function AnimeDetailScreen() {
       </Modal>
 
       {/* ── Rating bottom sheet ── */}
-      <Modal visible={showRating} animationType="slide" transparent onRequestClose={() => setShowRating(false)}>
+      <Modal visible={showRating} animationType={tvMode ? "none" : "slide"} transparent onRequestClose={() => setShowRating(false)}>
         <View style={d.ratingOverlay}>
           <Pressable style={StyleSheet.absoluteFill} onPress={() => setShowRating(false)} />
           <View style={d.ratingSheet}>
@@ -1001,6 +1001,10 @@ const d = StyleSheet.create({
   tvTitleNative: { fontSize: 17, lineHeight: 25 },
   tvBodyText: { fontSize: 18, lineHeight: 29 },
   tvButtonText: { fontSize: 19 },
+  tvActionBtn: { minHeight: 78, paddingVertical: 16, borderRadius: 18, gap: 7 },
+  tvActionBtnLabel: { fontSize: 16 },
+  tvReadMoreBtn: { minHeight: 58, paddingHorizontal: 24, borderRadius: 12, backgroundColor: "rgba(139,92,246,0.10)" },
+  tvReadMoreText: { fontSize: 17 },
   relCard: { width: 100, gap: 6 },
   relImgWrap: { width: 100, height: 140, borderRadius: 12, overflow: "hidden", position: "relative", backgroundColor: "#1C1C22" },
   relImg: { width: "100%", height: "100%" },

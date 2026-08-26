@@ -260,15 +260,14 @@ export function RiftPlayer({
     [duration, onProgress, player, scheduleHide],
   );
 
-  const seekPan = useRef(
-    PanResponder.create({
+  const seekPan = useRef(tvMode ? null : PanResponder.create({
       onStartShouldSetPanResponder: () => true,
       onMoveShouldSetPanResponder: () => true,
       onPanResponderRelease: (event) => {
         const percentage = Math.max(0, Math.min(1, event.nativeEvent.locationX / SCREEN_WIDTH));
         seek(percentage * duration);
       },
-    }),
+    })),
   ).current;
 
   const togglePortrait = useCallback(async () => {
@@ -417,13 +416,13 @@ export function RiftPlayer({
                 {episode != null ? `الحلقة ${episode}` : episodeTitle || ""}
               </Text>
             </View>
-            <Pressable onPress={togglePortrait} hitSlop={10} style={styles.iconButton}>
+            {!tvMode && <Pressable onPress={togglePortrait} hitSlop={10} style={styles.iconButton}>
               <Ionicons name={isPortrait ? "phone-landscape-outline" : "phone-portrait-outline"} size={19} color="#fff" />
-            </Pressable>
-            <Pressable onPress={() => player.enterPictureInPicture()} hitSlop={10} style={styles.iconButton}>
+            </Pressable>}
+            {!tvMode && <Pressable onPress={() => player.enterPictureInPicture()} hitSlop={10} style={styles.iconButton}>
               <Ionicons name="scan-outline" size={19} color="#fff" />
-            </Pressable>
-            {Platform.OS === "android" && (
+            </Pressable>}
+            {Platform.OS === "android" && !tvMode && (
               <Pressable
                 onPress={testIsolatedPlayer}
                 disabled={isolatedTestBusy}
@@ -441,7 +440,7 @@ export function RiftPlayer({
           <View style={styles.bottomArea}>
             <View style={styles.seekRow}>
               <Text style={styles.time}>{formatTime(position)}</Text>
-              <View {...seekPan.panHandlers} style={styles.seekTrack}>
+              <View {...(seekPan ? seekPan.panHandlers : {})} style={styles.seekTrack}>
                 <View style={[styles.seekFill, { width: `${progress * 100}%` }]} />
                 <View style={[styles.seekThumb, { left: `${progress * 100}%` }]} />
               </View>
@@ -478,12 +477,12 @@ export function RiftPlayer({
                   <Text style={styles.controlText}>10</Text>
                 </Pressable>
               </View>
-              {skipIntro && position >= skipIntro.start && position < skipIntro.end && (
+              {skipIntro && position >= skipIntro.start && position < skipIntro.end && !tvMode && (
                 <Pressable onPress={() => seek(skipIntro.end)} style={styles.skip}>
                   <Text style={styles.skipText}>تخطي المقدمة</Text>
                 </Pressable>
               )}
-              {skipOutro && position >= skipOutro.start && position < skipOutro.end && (
+              {skipOutro && position >= skipOutro.start && position < skipOutro.end && !tvMode && (
                 <Pressable onPress={() => seek(skipOutro.end)} style={styles.skip}>
                   <Text style={styles.skipText}>تخطي النهاية</Text>
                 </Pressable>
@@ -492,12 +491,14 @@ export function RiftPlayer({
               <Pressable
                 onPress={() => setSubOn((value) => !value)}
                 focusable={tvMode}
-                style={({ focused }) => [styles.pill, subOn && styles.pillActive, tvMode && styles.tvPill, tvMode && tvFocusStyle(focused)]}
+                style={({ focused }) => [styles.pill, subOn && styles.pillActive, tvMode && styles.tvSubtitlePill, tvMode && tvFocusStyle(focused)]}
               >
-                <Text style={styles.pillText}>CC</Text>
+                <Text style={[styles.pillText, tvMode && styles.tvSubtitleText]}>
+                  {tvMode ? "الترجمة" : "CC"}
+                </Text>
               </Pressable>
               <View>
-                {showSources && (
+                {showSources && !tvMode && (
                   <View style={styles.menu}>
                     {playableSources.map((item, index) => (
                       <Pressable
@@ -512,16 +513,16 @@ export function RiftPlayer({
                     ))}
                   </View>
                 )}
-                <Pressable
+                {!tvMode && <Pressable
                   onPress={() => { setShowSources((value) => !value); setShowSpeeds(false); }}
                   focusable={tvMode}
                   style={({ focused }) => [styles.pill, tvMode && styles.tvPill, tvMode && tvFocusStyle(focused)]}
                 >
                   <Text style={styles.pillText}>الجودة</Text>
-                </Pressable>
+                </Pressable>}
               </View>
               <View>
-                {showSpeeds && (
+                {showSpeeds && !tvMode && (
                   <View style={styles.menu}>
                     {SPEEDS.map((item) => (
                       <Pressable
@@ -536,13 +537,13 @@ export function RiftPlayer({
                     ))}
                   </View>
                 )}
-                <Pressable
+                {!tvMode && <Pressable
                   onPress={() => { setShowSpeeds((value) => !value); setShowSources(false); }}
                   focusable={tvMode}
                   style={({ focused }) => [styles.pill, tvMode && styles.tvPill, tvMode && tvFocusStyle(focused)]}
                 >
                   <Text style={styles.pillText}>{speed}x</Text>
-                </Pressable>
+                </Pressable>}
               </View>
             </View>
             {ended && (
@@ -592,8 +593,10 @@ const styles = StyleSheet.create({
   flex: { flex: 1 },
   pill: { paddingHorizontal: 10, paddingVertical: 8, borderRadius: 10, backgroundColor: "rgba(0,0,0,0.55)" },
   tvPill: { paddingHorizontal: 18, paddingVertical: 13, minWidth: 80, alignItems: "center" },
+  tvSubtitlePill: { minWidth: 150, minHeight: 58, paddingHorizontal: 24, paddingVertical: 15, borderRadius: 14, alignItems: "center", justifyContent: "center" },
   pillActive: { backgroundColor: "rgba(139,92,246,0.65)" },
   pillText: { color: "#fff", fontSize: 11, fontWeight: "700" },
+  tvSubtitleText: { fontSize: 21, fontWeight: "900" },
   skip: { paddingHorizontal: 10, paddingVertical: 8, borderRadius: 10, backgroundColor: "#fde68a" },
   skipText: { color: "#451a03", fontSize: 11, fontWeight: "700" },
   menu: { position: "absolute", bottom: 42, right: 0, minWidth: 130, backgroundColor: "rgba(20,20,25,0.97)", borderRadius: 12, padding: 5 },

@@ -19,7 +19,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { getBaseUrl } from "@/utils/api";
-import { TvPressable } from "@/utils/tv";
+import { TvPressable, isTvDevice } from "@/utils/tv";
 
 const { width: W, height: H } = Dimensions.get("window");
 // Keep the existing player controls in one place while making every control
@@ -423,6 +423,7 @@ export function RiftPlayer({
   onError,
 }: Props) {
   const insets = useSafeAreaInsets();
+  const tvMode = isTvDevice(W, H);
 
   /* أثناء فحص المصادر، زر الرجوع في الهاتف يجب أن يعيد المستخدم إلى
      منتقي السيرفرات داخل نفس شاشة الحلقة، لا إلى صفحة الحلقات. */
@@ -510,7 +511,11 @@ export function RiftPlayer({
   const [loadedCues, setLoadedCues]     = useState<SubCue[]>([]);
   const [subLoading, setSubLoading]     = useState(false);
   const [autoSubSource, setAutoSubSource] = useState<string | null>(null);
-  const [subSettings, setSubSettings]   = useState<SubSettings>(DEFAULT_SUB_SETTINGS);
+  const [subSettings, setSubSettings]   = useState<SubSettings>(() => ({
+    ...DEFAULT_SUB_SETTINGS,
+    fontSize: tvMode ? 30 : DEFAULT_SUB_SETTINGS.fontSize,
+    bold: tvMode ? true : DEFAULT_SUB_SETTINGS.bold,
+  }));
   const [subOpenSection, setSubOpenSection] = useState<string | null>(null);
   const [showOffsetControls, setShowOffsetControls] = useState(false);
   /* subOffset: seconds to shift subtitle timing; positive = show earlier (fix late subs) */
@@ -2498,14 +2503,15 @@ export function RiftPlayer({
             const ccBtn = subtitlesDisabled ? null : (
               <Pressable
                 onPress={() => setShowSubPanel(true)}
-                style={[s.topIconBtn, s.topCCBtn, subOn && s.topCCBtnActive]}
+                style={[s.topIconBtn, s.topCCBtn, tvMode && s.tvCCBtn, subOn && s.topCCBtnActive]}
                 hitSlop={10}
               >
                 <Ionicons
                   name="logo-closed-captioning"
-                  size={18}
+                  size={tvMode ? 26 : 18}
                   color={subOn ? "#c4b5fd" : "rgba(255,255,255,0.75)"}
                 />
+                {tvMode && <Text style={s.tvCCLabel}>الترجمة</Text>}
               </Pressable>
             );
             const btnsBlock = nativeRTL ? (
@@ -2513,31 +2519,31 @@ export function RiftPlayer({
                 <Pressable onPress={handleBack} style={s.topCloseBtn} hitSlop={10}>
                   <Ionicons name="close" size={21} color="rgba(239,68,68,0.90)" />
                 </Pressable>
-                <Pressable onPress={togglePortrait} style={[s.topRotateBtn, isPortrait && s.topRotateBtnActive]} hitSlop={10}>
+                 {!tvMode && <Pressable onPress={togglePortrait} style={[s.topRotateBtn, isPortrait && s.topRotateBtnActive]} hitSlop={10}>
                   <Ionicons
                     name={isPortrait ? "phone-landscape-outline" : "phone-portrait-outline"}
                     size={17}
                     color={isPortrait ? "#c4b5fd" : "rgba(255,255,255,0.85)"}
                   />
-                </Pressable>
+                 </Pressable>}
                 {ccBtn}
-                <Pressable onPress={takeScreenshot} style={s.topIconBtn} hitSlop={10}>
+                 {!tvMode && <Pressable onPress={takeScreenshot} style={s.topIconBtn} hitSlop={10}>
                   <Ionicons name="camera-outline" size={18} color="rgba(255,255,255,0.85)" />
-                </Pressable>
+                 </Pressable>}
               </View>
             ) : (
               <View style={s.topRightRow}>
-                <Pressable onPress={takeScreenshot} style={s.topIconBtn} hitSlop={10}>
+               {!tvMode && <Pressable onPress={takeScreenshot} style={s.topIconBtn} hitSlop={10}>
                   <Ionicons name="camera-outline" size={18} color="rgba(255,255,255,0.85)" />
-                </Pressable>
+               </Pressable>}
                 {ccBtn}
-                <Pressable onPress={togglePortrait} style={[s.topRotateBtn, isPortrait && s.topRotateBtnActive]} hitSlop={10}>
+                 {!tvMode && <Pressable onPress={togglePortrait} style={[s.topRotateBtn, isPortrait && s.topRotateBtnActive]} hitSlop={10}>
                   <Ionicons
                     name={isPortrait ? "phone-landscape-outline" : "phone-portrait-outline"}
                     size={17}
                     color={isPortrait ? "#c4b5fd" : "rgba(255,255,255,0.85)"}
                   />
-                </Pressable>
+                 </Pressable>}
                 <Pressable onPress={handleBack} style={s.topCloseBtn} hitSlop={10}>
                   <Ionicons name="close" size={21} color="rgba(239,68,68,0.90)" />
                 </Pressable>
@@ -2685,7 +2691,8 @@ export function RiftPlayer({
             <View style={s.bottomCtrlRow}>
 
               {/* يسار: قفل + ملء شاشة */}
-              <View style={s.bottomSide}>
+             <View style={s.bottomSide}>
+               {!tvMode && <>
                 <View style={s.controlButtonSlot}>
                   <Pressable onPress={() => setIsLocked(true)} style={s.ctrlIconBtn} hitSlop={10}>
                     <Ionicons name="lock-closed-outline" size={16} color="rgba(255,255,255,0.80)" />
@@ -2716,6 +2723,7 @@ export function RiftPlayer({
                   </Pressable>
                 </View>
               </View>
+               </>}
 
               {/* وسط: تخطي + تشغيل (وضع أفقي فقط) — "10" خارج الدائرة للمحاذاة الصحيحة */}
               <View style={s.bottomCenter}>
@@ -2743,12 +2751,14 @@ export function RiftPlayer({
               </View>
 
               {/* يمين: كتم + تشغيل تلقائي + سرعة */}
-              <View style={[s.bottomSide, { justifyContent: "flex-end" }]}>
+               <View style={[s.bottomSide, { justifyContent: "flex-end" }]}>
+                {!tvMode && <>
                 <View style={s.controlButtonSlot}>
                   <Pressable onPress={() => { setIsMuted(v => !v); fadeIn(); }} style={[s.ctrlIconBtn, isMuted && s.ctrlIconBtnMuted]} hitSlop={10}>
                     <Ionicons name={isMuted ? "volume-mute-outline" : "volume-high-outline"} size={16} color={isMuted ? "#fca5a5" : "rgba(255,255,255,0.80)"} />
                   </Pressable>
-                </View>
+               </View>
+                </>}
                 <View style={s.controlButtonSlot}>
                   {showSpeedMenu && (
                     <View style={s.speedDropdown}>
@@ -2811,15 +2821,15 @@ export function RiftPlayer({
                 </View>
 
                 {/* ── اللغة ── */}
-                <Text style={s.subSectionLabel}>اللغة</Text>
+              <Text style={[s.subSectionLabel, tvMode && s.tvSubSectionLabel]}>اللغة</Text>
                 <View style={s.subChipRow}>
                   {(["ar", "en"] as const).map(lng => (
                     <Pressable
                       key={lng}
-                      style={[s.subChip, subLang === lng && subOn && s.subChipActive]}
+                      style={[s.subChip, tvMode && s.tvSubChip, subLang === lng && subOn && s.subChipActive]}
                       onPress={() => { userSelectedSubLangRef.current = true; setSubLang(lng); setSubOn(true); fadeIn(); }}
                     >
-                      <Text style={[s.subChipText, subLang === lng && subOn && s.subChipTextActive]}>
+                      <Text style={[s.subChipText, tvMode && s.tvSubChipText, subLang === lng && subOn && s.subChipTextActive]}>
                         {lng === "ar" ? "عربي" : "إنجليزي"}
                       </Text>
                     </Pressable>
@@ -3159,6 +3169,8 @@ const s = StyleSheet.create({
 
   /* ── CC button in top bar ── */
   topCCBtn: { minWidth: 38 },
+  tvCCBtn: { minWidth: 150, minHeight: 64, paddingHorizontal: 22, borderRadius: 16, gap: 10 },
+  tvCCLabel: { color: "#fff", fontSize: 22, fontFamily: "Cairo_800ExtraBold" },
   topCCBtnActive: { backgroundColor: "rgba(139,92,246,0.28)", borderColor: "rgba(167,139,250,0.55)" },
   topCCText: { color: "rgba(255,255,255,0.80)", fontSize: 11, fontFamily: "Cairo_700Bold", letterSpacing: 0.5 },
   topCCTextActive: { color: "#c4b5fd" },
@@ -3212,6 +3224,7 @@ const s = StyleSheet.create({
   subPanelBody: { paddingHorizontal: 16, paddingTop: 6, gap: 4 },
 
   subSectionLabel: { color: "rgba(255,255,255,0.40)", fontSize: 11, fontFamily: "Cairo_700Bold", letterSpacing: 0.8, marginTop: 12, marginBottom: 4, textTransform: "uppercase" },
+  tvSubSectionLabel: { fontSize: 19, marginTop: 20, marginBottom: 10 },
 
   /* Toggle row */
   subRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingVertical: 6 },
@@ -3235,6 +3248,8 @@ const s = StyleSheet.create({
   },
   subChipActive: { backgroundColor: "rgba(139,92,246,0.22)", borderColor: "rgba(167,139,250,0.50)" },
   subChipText: { color: "rgba(255,255,255,0.65)", fontSize: 12, fontFamily: "Cairo_600SemiBold" },
+  tvSubChip: { minWidth: 150, minHeight: 64, paddingHorizontal: 24, paddingVertical: 16, borderRadius: 14 },
+  tvSubChipText: { fontSize: 22, fontFamily: "Cairo_800ExtraBold" },
   subChipTextActive: { color: "#c4b5fd" },
   subChipEmoji: { fontSize: 14 },
   subPosIcon: { fontSize: 12, color: "rgba(255,255,255,0.70)" },

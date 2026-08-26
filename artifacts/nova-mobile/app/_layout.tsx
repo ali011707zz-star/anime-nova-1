@@ -11,7 +11,7 @@ import { Stack } from "expo-router";
 import { LinearGradient } from "expo-linear-gradient";
 import * as SplashScreen from "expo-splash-screen";
 import React, { useEffect, useState } from "react";
-import { Animated, I18nManager, Image, Platform, StyleSheet, Text, View } from "react-native";
+import { Animated, Dimensions, I18nManager, Image, Platform, StyleSheet, Text, View } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import * as Sentry from "@sentry/react-native";
@@ -22,6 +22,7 @@ import { AppProvider } from "@/context/AppContext";
 import { loadRuntimeApiUrl } from "@/utils/baseUrl";
 import { installGlobalCrashHandlers } from "@/utils/crashLogger";
 import { getRuntimeIntegrity, runtimeIntegrityMessage } from "@/utils/runtimeIntegrity";
+import { isTvDevice } from "@/utils/tv";
 
 /* Sentry: يلتقط أعطال JS *و* الأعطال الأصلية (native) — مثل كراش مشغّل الفيديو
    الذي كان يُغلق التطبيق فوراً دون أن يترك أي أثر في نظام تسجيل الأعطال القديم
@@ -115,6 +116,7 @@ function RootLayout() {
   // إجبار إخفاء الـ splash بعد 3.5 ثانية حتى لو فشل تحميل الخطوط
   const [brandSplashVisible, setBrandSplashVisible] = useState(true);
   const [telegramAnnouncementVisible, setTelegramAnnouncementVisible] = useState(false);
+  const tvMode = isTvDevice(Dimensions.get("window").width, Dimensions.get("window").height);
 
   // أظهر شاشة Anime NOVA المخصصة فوراً بدلاً من إبقاء native splash (الأيقونة فقط)
   // فوقها أثناء انتظار الخطوط.
@@ -141,30 +143,34 @@ function RootLayout() {
   }, [fontsLoaded, fontError]);
 
   useEffect(() => {
-    if (!brandSplashVisible && RUNTIME_INTEGRITY.trusted) {
+    if (!brandSplashVisible && RUNTIME_INTEGRITY.trusted && !tvMode) {
       // Let the first screen settle before presenting the announcement. The
       // native Modal already fades, but opening it on the same frame as the
       // splash disappears feels like a layout jump on slower devices.
       const t = setTimeout(() => setTelegramAnnouncementVisible(true), 450);
       return () => clearTimeout(t);
     }
-  }, [brandSplashVisible]);
+  }, [brandSplashVisible, tvMode]);
 
   useEffect(() => {
     if (!RUNTIME_INTEGRITY.trusted) return;
     // Warm the native Start.io SDK while the first screen is settling. The
     // native wrapper needs a short initialization window before loadAd().
-    initializeRewardedAds().catch((error) => {
-      console.warn("[rewarded-ad] startup initialization failed", error);
-    });
+    if (!tvMode) {
+      initializeRewardedAds().catch((error) => {
+        console.warn("[rewarded-ad] startup initialization failed", error);
+      });
+    }
     let stop: (() => void) | undefined;
-    import("@/utils/episodeNotifications")
-      .then(({ startEpisodeNotificationSync }) => {
-        stop = startEpisodeNotificationSync();
-      })
-      .catch(() => {});
+    if (!tvMode) {
+      import("@/utils/episodeNotifications")
+        .then(({ startEpisodeNotificationSync }) => {
+          stop = startEpisodeNotificationSync();
+        })
+        .catch(() => {});
+    }
     return () => stop?.();
-  }, []);
+  }, [tvMode]);
 
   if (brandSplashVisible) {
     return <BrandSplash />;
