@@ -47,6 +47,29 @@ jobs:
           test -f nova-tv/app/src/main/AndroidManifest.xml
           ! grep -R -nE "artifacts/nova-mobile|Anime Nova\\.apk" nova-tv
 
+      - name: Configure stable release signing
+        working-directory: nova-tv
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          test -n "$ANDROID_KEYSTORE_BASE64"
+          test -n "$ANDROID_KEYSTORE_PASSWORD"
+          test -n "$ANDROID_KEY_ALIAS"
+          test -n "$ANDROID_KEY_PASSWORD"
+
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > app/nova-release.keystore
+          chmod 600 app/nova-release.keystore
+          cat >> gradle.properties <<EOF
+          NOVA_RELEASE_STORE_FILE=nova-release.keystore
+          NOVA_RELEASE_STORE_PASSWORD=$ANDROID_KEYSTORE_PASSWORD
+          NOVA_RELEASE_KEY_ALIAS=$ANDROID_KEY_ALIAS
+          NOVA_RELEASE_KEY_PASSWORD=$ANDROID_KEY_PASSWORD
+          EOF
+
       - name: Compile NOVA TV release APKs
         working-directory: nova-tv
         run: gradle --no-daemon --stacktrace assembleRelease
@@ -57,6 +80,9 @@ jobs:
           set -eu
           find app/build/outputs/apk/release -type f -name "*.apk" -size +1k -print
           test -n "$(find app/build/outputs/apk/release -type f -name '*.apk' -size +1k -print -quit)"
+          for apk in app/build/outputs/apk/release/*.apk; do
+            "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose "$apk"
+          done
 
       - name: Upload NOVA TV APKs
         uses: actions/upload-artifact@v4
