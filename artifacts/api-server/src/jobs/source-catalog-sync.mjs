@@ -5,8 +5,8 @@
  *   node artifacts/api-server/src/jobs/source-catalog-sync.mjs
  *   node ... --provider=anifox --skip-episodes
  *
- * It writes only stable catalog metadata and provider references. It never
- * resolves or stores final MP4/HLS/video URLs.
+ * It writes stable catalog metadata and the provider/server page URLs needed
+ * for fast later resolution. It never resolves or stores final MP4/HLS URLs.
  */
 import { setDefaultResultOrder } from "node:dns";
 import { readFile } from "node:fs/promises";
@@ -20,7 +20,9 @@ const args = new Set(process.argv.slice(2));
 const providerArg = process.argv.find((arg) => arg.startsWith("--provider="))?.split("=")[1];
 const providers = providerArg ? [providerArg] : PROVIDERS;
 const skipEpisodes = args.has("--skip-episodes");
-const concurrency = Math.max(1, Math.min(8, Number(process.env.CATALOG_CONCURRENCY || 4)));
+const concurrency = Math.max(1, Math.min(8, Number(process.env.CATALOG_CONCURRENCY || 6)));
+const forceDetails = args.has("--force-details");
+const refreshHours = Math.max(1, Number(process.env.CATALOG_REFRESH_HOURS || 12));
 const timeoutMs = 20_000;
 
 // PM2 loads env_file for the app, but one-shot SSH commands do not. Read only
@@ -64,6 +66,41 @@ function jsonArray(value) {
 
 function hostOf(value) {
   try { return new URL(String(value)).hostname.toLowerCase(); } catch { return null; }
+}
+
+function isHttpUrl(value) {
+  return /^https?:\/\/\S+$/i.test(String(value || "").trim());
+}
+
+function animeifyPageUrl(key, value) {
+  const raw = text(value);
+  if (!raw) return null;
+  if (isHttpUrl(raw)) return raw;
+  const id = encodeURIComponent(raw);
+  if (key === "FDLink" || key === "SFLink") return `https://filemoon.sx/e/${id}`;
+  if (key === "SVLink") return `https://sendvid.com/embed/${id}`;
+  if (key === "OKLink") return `https://ok.ru/videoembed/${id}`;
+  if (key === "VKLink") return `https://vk.com/video_ext.php?${raw}`;
+  if (key === "DELink") return `https://www.dailymotion.com/embed/video/${id}`;
+  if (key === "MALink" && (raw.includes("!") || raw.includes("#"))) {
+    const [fileId, keyPart] = raw.split(/[!#]/, 2);
+    return fileId && keyPart ? `https://mega.nz/embed/${fileId}#${keyPart}` : null;
+  }
+  return null;
+}
+
+async function mapConcurrent(items, limit, mapper) {
+  const output = new Array(items.length);
+  let cursor = 0;
+  async function worker() {
+    while (true) {
+      const index = cursor++;
+      if (index >= items.length) return;
+      output[index] = await mapper(items[index], index);
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return output;
 }
 
 function safeMetadata(value) {
@@ -158,25 +195,46 @@ async function animeifyEpisodes(title) {
   const rows = await postForm(`${base}episodes/load_episodes.php`, {
     AnimeID: title.provider_title_id, Token: token,
   });
-  return (Array.isArray(rows) ? rows : []).map((item) => ({
-    provider_episode_id: text(item.eId) || `${title.provider_title_id}:${item.Episode}`,
-    episode_number: numberValue(item.Episode),
-    episode_label: text(item.Episode),
-    title: text(item.Title) || text(item.EpisodeTitle),
-    episode_status: "episode_found",
-    provider_metadata: safeMetadata(item),
-    _servers: Object.entries(item)
-      .filter(([key, value]) => /(?:link|server)/i.test(key) && typeof value === "string" && /^https?:\/\//i.test(value))
-      .map(([key, value]) => ({
-        server_key: key,
-        server_name: key.replace(/Link$/i, ""),
-        quality: /fhd|1080/i.test(key) ? "FHD" : /low|480|sd/i.test(key) ? "SD" : "HD",
-        language: null,
-        source_kind: "provider_reference",
-        source_host: hostOf(value),
-        availability_status: "link_found",
-      })),
-    _raw: item,
+  const episodes = Array.isArray(rows) ? rows : [];
+  const animeType = title?._raw?._type || title.media_type || "SERIES";
+  return (await mapConcurrent(episodes, 6, async (item) => {
+    let episodeData = item;
+    try {
+      const serverResponse = await postForm(`${base}anime/load_servers.php`, {
+        UserId: "0",
+        AnimeId: title.provider_title_id,
+        Episode: String(item.Episode ?? ""),
+        AnimeType: animeType,
+      });
+      episodeData = serverResponse?.CurrentEpisode || item;
+    } catch {}
+
+    const servers = Object.entries(episodeData || {})
+      .filter(([key, value]) => /(?:link|server)/i.test(key) && text(value))
+      .map(([key, value]) => {
+        const pageUrl = animeifyPageUrl(key, value);
+        return {
+          server_key: key,
+          server_name: key.replace(/Link$/i, ""),
+          quality: /fhd|1080/i.test(key) ? "FHD" : /low|480|sd/i.test(key) ? "SD" : "HD",
+          language: null,
+          source_kind: pageUrl ? "provider_page" : "provider_reference",
+          page_url: pageUrl,
+          source_host: hostOf(pageUrl),
+          availability_status: pageUrl ? "link_found" : "unsupported",
+        };
+      });
+
+    return {
+      provider_episode_id: text(item.eId) || `${title.provider_title_id}:${item.Episode}`,
+      episode_number: numberValue(item.Episode),
+      episode_label: text(item.Episode),
+      title: text(item.Title) || text(item.EpisodeTitle),
+      episode_status: servers.some((server) => server.page_url) ? "link_found" : "episode_found",
+      provider_metadata: safeMetadata(item),
+      _servers: servers,
+      _raw: item,
+    };
   })).filter((item) => item.provider_episode_id);
 }
 
@@ -192,6 +250,16 @@ async function anslayerGet(path, params) {
   const url = new URL(`https://anslayer.com/anime/public/${path}`);
   url.searchParams.set("json", JSON.stringify(params));
   return fetchJson(url, { headers: anslayerHeaders() });
+}
+
+async function anslayerMuiltPages(url) {
+  if (!isHttpUrl(url)) return [];
+  try {
+    const data = await fetchJson(url, { headers: { "User-Agent": "okhttp/4.9.3" } }, 10_000);
+    return Array.isArray(data) ? data.filter(isHttpUrl) : [];
+  } catch {
+    return [];
+  }
 }
 
 async function anslayerList() {
@@ -227,28 +295,53 @@ async function anslayerList() {
 async function anslayerEpisodes(title) {
   const data = await anslayerGet("episodes/get-episodes", { anime_id: title.provider_title_id });
   const rows = Array.isArray(data?.response?.data) ? data.response.data : (Array.isArray(data) ? data : []);
-  return rows.map((item, index) => {
+  return (await mapConcurrent(rows, 6, async (item, index) => {
     const episodeNumber = numberValue(item.episode_number ?? item.episode ?? item.episode_name?.match(/\d+(?:\.\d+)?/)?.[0]);
     const urls = Array.isArray(item.episode_urls) ? item.episode_urls : [];
+    const servers = [];
+    for (const [serverIndex, server] of urls.entries()) {
+      const serverName = text(server?.episode_server_name) || `server-${serverIndex + 1}`;
+      const pageUrl = text(server?.episode_url);
+      if (pageUrl && isHttpUrl(pageUrl)) {
+        servers.push({
+          server_key: serverName,
+          server_name: serverName,
+          quality: null,
+          language: null,
+          source_kind: "provider_page",
+          page_url: pageUrl,
+          source_host: hostOf(pageUrl),
+          availability_status: "link_found",
+        });
+      }
+      if (serverName.toLowerCase() === "muilt") {
+        const externalPages = await anslayerMuiltPages(pageUrl);
+        externalPages.forEach((externalPage, externalIndex) => {
+          const externalHost = hostOf(externalPage) || `server-${externalIndex + 1}`;
+          servers.push({
+            server_key: `muilt:${externalHost}`,
+            server_name: `muilt · ${externalHost}`,
+            quality: null,
+            language: null,
+            source_kind: "external_provider_page",
+            page_url: externalPage,
+            source_host: externalHost,
+            availability_status: "link_found",
+          });
+        });
+      }
+    }
     return {
       provider_episode_id: text(item.episode_id) || text(item.id) || `${title.provider_title_id}:${episodeNumber ?? index + 1}`,
       episode_number: episodeNumber,
       episode_label: text(item.episode_name) || text(item.episode_number),
       title: text(item.episode_name),
-      episode_status: "episode_found",
+      episode_status: servers.length ? "link_found" : "episode_found",
       provider_metadata: safeMetadata(item),
-      _servers: urls.map((server) => ({
-        server_key: text(server?.episode_server_name) || `server-${urls.indexOf(server) + 1}`,
-        server_name: text(server?.episode_server_name),
-        quality: null,
-        language: null,
-        source_kind: "provider_reference",
-        source_host: hostOf(server?.episode_url),
-        availability_status: "link_found",
-      })),
+      _servers: servers,
       _raw: item,
     };
-  });
+  })).filter(Boolean);
 }
 
 async function sanimeList() {
@@ -289,15 +382,9 @@ async function sanimeEpisodes(title) {
     air_date: text(item.date),
     episode_status: "episode_found",
     provider_metadata: safeMetadata(item),
-    _servers: [{
-      server_key: "sanime-video",
-      server_name: "SAnime MP4",
-      quality: "HD",
-      language: null,
-      source_kind: "constructed_reference",
-      source_host: "server.sanime.net",
-      availability_status: "link_found",
-    }],
+      // SAnime exposes direct media paths, not a server page. Do not invent
+      // or store a page URL for it.
+      _servers: [],
     _raw: item,
   }));
 }
@@ -351,8 +438,9 @@ async function anifoxEpisodes(title) {
           quality: text(source.source_quality),
           language: null,
           source_kind: "provider_reference",
+          page_url: text(source.source),
           source_host: hostOf(source.source),
-          availability_status: "link_found",
+          availability_status: text(source.source) ? "link_found" : "unsupported",
         })),
         _raw: item,
       };
@@ -380,57 +468,128 @@ async function upsertTitle(client, item) {
       tags=EXCLUDED.tags, media_type=EXCLUDED.media_type, status=EXCLUDED.status,
       release_year=EXCLUDED.release_year, episode_count=EXCLUDED.episode_count,
       poster_url=EXCLUDED.poster_url, backdrop_url=EXCLUDED.backdrop_url,
-      provider_metadata=EXCLUDED.provider_metadata, catalog_status='catalogued',
+      provider_metadata=EXCLUDED.provider_metadata,
       last_seen_at=NOW(), last_error=NULL
-    RETURNING id
+    RETURNING id, provider, provider_title_id, catalog_status, details_checked_at
   `, [
     item.provider, item.provider_title_id, item.title, item.title_en, item.title_ar, item.title_native,
     JSON.stringify(item.synonyms), JSON.stringify(item.genres), JSON.stringify(item.tags),
     item.media_type, item.status, item.release_year, item.episode_count, item.poster_url,
     item.backdrop_url || null, JSON.stringify(item.provider_metadata),
   ]);
-  return result.rows[0].id;
+  return result.rows[0];
 }
 
-async function upsertEpisode(client, titleId, title, item) {
-  const result = await client.query(`
+async function upsertTitlesBatch(client, titles) {
+  const saved = [];
+  const columns = [
+    "provider", "provider_title_id", "title", "title_en", "title_ar",
+    "title_native", "synonyms", "genres", "tags", "media_type", "status",
+    "release_year", "episode_count", "poster_url", "backdrop_url",
+    "provider_metadata",
+  ];
+  for (let start = 0; start < titles.length; start += 250) {
+    const chunk = titles.slice(start, start + 250);
+    const params = [];
+    const tuples = chunk.map((item) => {
+      const values = [
+        item.provider, item.provider_title_id, item.title, item.title_en,
+        item.title_ar, item.title_native, JSON.stringify(item.synonyms),
+        JSON.stringify(item.genres), JSON.stringify(item.tags), item.media_type,
+        item.status, item.release_year, item.episode_count, item.poster_url,
+        item.backdrop_url || null, JSON.stringify(item.provider_metadata || {}),
+      ];
+      const offset = params.length;
+      params.push(...values);
+      return `(${values.map((_, index) => `$${offset + index + 1}`).join(",")})`;
+    });
+    const result = await client.query(`
+      INSERT INTO source_catalog_titles (${columns.join(",")})
+      VALUES ${tuples.join(",")}
+      ON CONFLICT (provider, provider_title_id) DO UPDATE SET
+        title=EXCLUDED.title, title_en=EXCLUDED.title_en, title_ar=EXCLUDED.title_ar,
+        title_native=EXCLUDED.title_native, synonyms=EXCLUDED.synonyms, genres=EXCLUDED.genres,
+        tags=EXCLUDED.tags, media_type=EXCLUDED.media_type, status=EXCLUDED.status,
+        release_year=EXCLUDED.release_year, episode_count=EXCLUDED.episode_count,
+        poster_url=EXCLUDED.poster_url, backdrop_url=EXCLUDED.backdrop_url,
+        provider_metadata=EXCLUDED.provider_metadata, last_seen_at=NOW(), last_error=NULL
+      RETURNING id, provider, provider_title_id, catalog_status, details_checked_at
+    `, params);
+    saved.push(...result.rows);
+  }
+  return saved;
+}
+
+async function upsertEpisodesAndServers(client, titleId, title, episodes) {
+  const validEpisodes = episodes.filter((item) => item?.provider_episode_id);
+  if (!validEpisodes.length) return;
+
+  const episodeParams = [];
+  const episodeTuples = validEpisodes.map((item) => {
+    const values = [
+      titleId, title.provider, item.provider_episode_id, item.season_number || 1,
+      item.episode_number, item.episode_label, item.title, item.air_date || null,
+      item.episode_status || "episode_found", JSON.stringify(item.provider_metadata || {}),
+    ];
+    const offset = episodeParams.length;
+    episodeParams.push(...values);
+    return `(${values.map((_, index) => `$${offset + index + 1}`).join(",")})`;
+  });
+  const episodeResult = await client.query(`
     INSERT INTO source_catalog_episodes
       (title_id, provider, provider_episode_id, season_number, episode_number,
        episode_label, title, air_date, episode_status, provider_metadata,
        last_seen_at, details_checked_at, last_error)
-    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,NOW(),NOW(),NULL)
+    VALUES ${episodeTuples.join(",")}
     ON CONFLICT (title_id, provider_episode_id) DO UPDATE SET
       season_number=EXCLUDED.season_number, episode_number=EXCLUDED.episode_number,
       episode_label=EXCLUDED.episode_label, title=EXCLUDED.title, air_date=EXCLUDED.air_date,
       episode_status=EXCLUDED.episode_status, provider_metadata=EXCLUDED.provider_metadata,
       last_seen_at=NOW(), details_checked_at=NOW(), last_error=NULL
-    RETURNING id
-  `, [
-    titleId, title.provider, item.provider_episode_id, item.season_number || 1,
-    item.episode_number, item.episode_label, item.title, item.air_date || null,
-    item.episode_status || "episode_found", JSON.stringify(item.provider_metadata || {}),
-  ]);
-  return result.rows[0].id;
-}
+    RETURNING id, provider_episode_id
+  `, episodeParams);
+  const episodeIds = new Map(episodeResult.rows.map((row) => [row.provider_episode_id, row.id]));
 
-async function replaceServers(client, episodeId, provider, servers) {
-  if (!Array.isArray(servers) || !servers.length) return;
-  for (const server of servers) {
+  const servers = [];
+  const seen = new Set();
+  for (const episode of validEpisodes) {
+    const episodeId = episodeIds.get(episode.provider_episode_id);
+    for (const server of Array.isArray(episode._servers) ? episode._servers : []) {
+      const pageUrl = text(server.page_url);
+      const quality = text(server.quality) || "";
+      const language = text(server.language) || "";
+      const key = `${episodeId}:${server.server_key}:${quality}:${language}:${pageUrl || ""}`;
+      if (!episodeId || seen.has(key)) continue;
+      seen.add(key);
+      servers.push([
+        episodeId, title.provider, text(server.server_key) || "server",
+        text(server.server_name), quality, language,
+        text(server.source_kind) || "provider_reference", pageUrl,
+        text(server.source_host) || hostOf(pageUrl),
+        text(server.availability_status) || (pageUrl ? "link_found" : "unsupported"),
+      ]);
+    }
+  }
+  for (let start = 0; start < servers.length; start += 250) {
+    const chunk = servers.slice(start, start + 250);
+    const params = [];
+    const tuples = chunk.map((values) => {
+      const offset = params.length;
+      params.push(...values, JSON.stringify({}));
+      return `(${values.map((_, index) => `$${offset + index + 1}`).join(",")},$${params.length}::jsonb,NOW(),NULL)`;
+    });
     await client.query(`
       INSERT INTO source_catalog_servers
         (episode_id, provider, server_key, server_name, quality, language,
-         source_kind, source_host, availability_status, provider_metadata,
-         last_seen_at, last_checked_at)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,NOW(),NULL)
+         source_kind, page_url, source_host, availability_status,
+         provider_metadata, last_seen_at, last_checked_at)
+      VALUES ${tuples.join(",")}
       ON CONFLICT (episode_id, server_key, quality, language) DO UPDATE SET
         server_name=EXCLUDED.server_name, source_kind=EXCLUDED.source_kind,
-        source_host=EXCLUDED.source_host, availability_status=EXCLUDED.availability_status,
+        page_url=EXCLUDED.page_url, source_host=EXCLUDED.source_host,
+        availability_status=EXCLUDED.availability_status,
         provider_metadata=EXCLUDED.provider_metadata, last_seen_at=NOW()
-    `, [
-      episodeId, provider, server.server_key, server.server_name, server.quality || "",
-      server.language || "", server.source_kind, server.source_host, server.availability_status,
-      JSON.stringify({}),
-    ]);
+    `, params);
   }
 }
 
@@ -440,31 +599,45 @@ async function runProvider(provider) {
   try {
     const titles = await adapter.list();
     console.log(`[catalog] ${provider}: fetched ${titles.length} titles`);
-    const titleRows = [];
-    for (const item of titles) {
-      try {
-        await client.query("BEGIN");
-        const titleId = await upsertTitle(client, item);
-        await client.query("COMMIT");
-        titleRows.push({ titleId, item });
-      } catch (error) {
-        await client.query("ROLLBACK").catch(() => {});
-        console.warn(`[catalog] ${provider}: title ${item.provider_title_id} failed: ${String(error?.message || error).slice(0, 160)}`);
+    let titleRows = [];
+    try {
+      const titleByKey = new Map(titles.map((item) =>
+        [`${item.provider}:${item.provider_title_id}`, item]));
+      titleRows = (await upsertTitlesBatch(client, titles)).map((row) => ({
+        titleId: row.id,
+        item: titleByKey.get(`${row.provider}:${row.provider_title_id}`),
+        catalogStatus: row.catalog_status,
+        detailsCheckedAt: row.details_checked_at,
+      })).filter((row) => row.item);
+    } catch (error) {
+      console.warn(`[catalog] ${provider}: batch title upsert failed; falling back to single rows: ${String(error?.message || error).slice(0, 160)}`);
+      for (const item of titles) {
+        try {
+          const row = await upsertTitle(client, item);
+          titleRows.push({ titleId: row.id, item, catalogStatus: row.catalog_status, detailsCheckedAt: row.details_checked_at });
+        } catch (singleError) {
+          console.warn(`[catalog] ${provider}: title ${item.provider_title_id} failed: ${String(singleError?.message || singleError).slice(0, 160)}`);
+        }
       }
     }
     console.log(`[catalog] ${provider}: saved ${titleRows.length}/${titles.length} titles`);
     if (skipEpisodes) return;
 
+    const refreshBefore = Date.now() - refreshHours * 3_600_000;
+    const pendingRows = titleRows.filter((row) =>
+      forceDetails ||
+      row.catalogStatus !== "details_checked" ||
+      !row.detailsCheckedAt ||
+      new Date(row.detailsCheckedAt).getTime() < refreshBefore
+    );
+    console.log(`[catalog] ${provider}: details queued ${pendingRows.length}/${titleRows.length}${forceDetails ? " (forced)" : ""}`);
     let completed = 0;
     async function syncDetails(row) {
       const detailClient = await pool.connect();
       try {
         await detailClient.query("BEGIN");
         const episodes = await adapter.episodes(row.item);
-        for (const episode of episodes) {
-          const episodeId = await upsertEpisode(detailClient, row.titleId, row.item, episode);
-          await replaceServers(detailClient, episodeId, provider, episode._servers);
-        }
+        await upsertEpisodesAndServers(detailClient, row.titleId, row.item, episodes);
         await detailClient.query(
           "UPDATE source_catalog_titles SET catalog_status=$1, details_checked_at=NOW(), last_error=NULL WHERE id=$2",
           [episodes.length ? "details_checked" : "partial", row.titleId],
@@ -483,14 +656,14 @@ async function runProvider(provider) {
       }
     }
 
-    const queue = [...titleRows];
+    const queue = [...pendingRows];
     async function worker() {
       while (queue.length) {
         const row = queue.shift();
         if (row) await syncDetails(row);
       }
     }
-    await Promise.all(Array.from({ length: Math.min(concurrency, titleRows.length) }, worker));
+    await Promise.all(Array.from({ length: Math.min(concurrency, pendingRows.length) }, worker));
     console.log(`[catalog] ${provider}: details complete (${completed}/${titleRows.length})`);
   } finally {
     client.release();

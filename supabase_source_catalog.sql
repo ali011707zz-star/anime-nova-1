@@ -1,5 +1,5 @@
 -- Nova source catalog
--- Metadata only: playback URLs are deliberately not stored in these tables.
+-- Catalog pages are stored; final MP4/HLS playback URLs are resolved on demand.
 -- Apply once to the Supabase project used by the VPS.
 
 CREATE TABLE IF NOT EXISTS source_catalog_titles (
@@ -31,6 +31,8 @@ CREATE TABLE IF NOT EXISTS source_catalog_titles (
 
 CREATE INDEX IF NOT EXISTS source_catalog_titles_provider_idx
   ON source_catalog_titles(provider);
+CREATE INDEX IF NOT EXISTS source_catalog_titles_provider_title_idx
+  ON source_catalog_titles(provider, title);
 CREATE INDEX IF NOT EXISTS source_catalog_titles_title_idx
   ON source_catalog_titles USING gin (to_tsvector('simple', title));
 CREATE INDEX IF NOT EXISTS source_catalog_titles_seen_idx
@@ -57,7 +59,7 @@ CREATE TABLE IF NOT EXISTS source_catalog_episodes (
 );
 
 CREATE INDEX IF NOT EXISTS source_catalog_episodes_title_idx
-  ON source_catalog_episodes(title_id, episode_number);
+  ON source_catalog_episodes(title_id, season_number, episode_number);
 CREATE INDEX IF NOT EXISTS source_catalog_episodes_provider_idx
   ON source_catalog_episodes(provider, last_seen_at DESC);
 
@@ -70,6 +72,7 @@ CREATE TABLE IF NOT EXISTS source_catalog_servers (
   quality TEXT,
   language TEXT,
   source_kind TEXT NOT NULL DEFAULT 'provider_reference',
+  page_url TEXT,
   source_host TEXT,
   availability_status TEXT NOT NULL DEFAULT 'link_found'
     CHECK (availability_status IN ('link_found', 'media_verified', 'dead', 'unsupported')),
@@ -82,8 +85,17 @@ CREATE TABLE IF NOT EXISTS source_catalog_servers (
 
 CREATE INDEX IF NOT EXISTS source_catalog_servers_episode_idx
   ON source_catalog_servers(episode_id);
+CREATE INDEX IF NOT EXISTS source_catalog_servers_episode_quality_idx
+  ON source_catalog_servers(episode_id, quality, availability_status);
 CREATE INDEX IF NOT EXISTS source_catalog_servers_provider_idx
   ON source_catalog_servers(provider, availability_status);
+CREATE INDEX IF NOT EXISTS source_catalog_servers_page_host_idx
+  ON source_catalog_servers(provider, source_host);
+
+-- The tables may already exist from the first catalog import. Keep this file
+-- idempotent and add the page URL column without touching existing records.
+ALTER TABLE source_catalog_servers
+  ADD COLUMN IF NOT EXISTS page_url TEXT;
 
 -- These are public catalog records, not credentials or playback URLs.
 -- Keep RLS enabled and expose only SELECT to the anon role through the API
