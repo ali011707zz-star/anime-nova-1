@@ -159,7 +159,7 @@ class DetailActivity : ComponentActivity() {
             try {
                 val sources = withContext(Dispatchers.IO) { ApiClient.sources(item, episode) }
                     .filter { it.url.isNotBlank() && !it.isEmbed }
-                if (!dialog.isFinishing) dialog.dismiss()
+                if (dialog.isShowing) dialog.dismiss()
                 if (sources.isEmpty()) {
                     showError("لم يتم العثور على مصدر صالح لهذه الحلقة.")
                     return@launch
@@ -173,7 +173,7 @@ class DetailActivity : ComponentActivity() {
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (_: Exception) {
-                if (!dialog.isFinishing) dialog.dismiss()
+                if (dialog.isShowing) dialog.dismiss()
                 showError("تعذر استخراج مصادر هذه الحلقة. جرّب مصدرًا آخر لاحقًا.")
             }
         }
