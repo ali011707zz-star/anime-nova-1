@@ -104,4 +104,5 @@
 - [VPS transfer fallback](vps-transfer-fallback.md) — هذا الخادم لا يحتوي rsync؛ استخدم أرشيف tar عبر SSH لنقل الكود مع استثناء .env والنسخ الاحتياطية.
 - [AniList outage fallback](anilist-outage-fallback.md) — عند تعطّل AniList، أحدث الحلقات تعتمد على AnimeSlayer مباشرة ولا يجب إسقاط البطاقات بسبب فشل مطابقة المعرّف.
 - [API source tree](api-source-tree.md) — build يستخدم artifacts/api-server/src؛ يوجد مسار nested قديم لا يدخل في حزمة API المنشورة.
-- [VPS surgical rebuilds](vps-surgical-rebuilds.md) — عند فشل esbuild على نسخة VPS متفرعة، احفظ الملف وافحص الإدراج المعطوب قبل النقل؛ قد تنجح الواجهة بينما يفشل الـAPI.
+ - [VPS surgical rebuilds](vps-surgical-rebuilds.md) — عند فشل esbuild على نسخة VPS متفرعة، احفظ الملف وافحص الإدراج المعطوب قبل النقل؛ قد تنجح الواجهة بينما يفشل الـAPI.
+ - [Source catalog collection](source-catalog-collection.md) — AF/AS/SA/FX لكل منها pagination ومسار تشغيل مختلف؛ لا تعتبر العنوان أو الحلقة متاحة قبل فحص media response.
