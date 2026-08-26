@@ -7,6 +7,10 @@ android {
     namespace = "com.nova.anime.tv"
     compileSdk = 35
 
+    buildFeatures {
+        buildConfig = true
+    }
+
     defaultConfig {
         applicationId = "com.nova.anime.tv"
         minSdk = 24
