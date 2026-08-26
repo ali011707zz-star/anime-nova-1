@@ -68,6 +68,10 @@ function hostOf(value) {
   try { return new URL(String(value)).hostname.toLowerCase(); } catch { return null; }
 }
 
+const supabaseUrl = text(process.env.SUPABASE_URL)?.replace(/\/$/, "");
+const supabaseKey = text(process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY);
+const useSupabaseRest = Boolean(supabaseUrl && supabaseKey);
+
 function isHttpUrl(value) {
   return /^https?:\/\/\S+$/i.test(String(value || "").trim());
 }
@@ -374,19 +378,34 @@ async function sanimeEpisodes(title) {
     headers: { "User-Agent": "IBRAHIMSEVEN" },
   });
   const rows = Array.isArray(data?.ep) ? data.ep.flat() : [];
-  return rows.filter(Boolean).map((item, index) => ({
-    provider_episode_id: text(item.id) || `${title.provider_title_id}:${index + 1}`,
-    episode_number: numberValue(item.epName?.match(/\d+(?:\.\d+)?/)?.[0]) || index + 1,
-    episode_label: text(item.epName),
-    title: text(item.name),
-    air_date: text(item.date),
-    episode_status: "episode_found",
-    provider_metadata: safeMetadata(item),
-      // SAnime exposes direct media paths, not a server page. Do not invent
-      // or store a page URL for it.
-      _servers: [],
-    _raw: item,
-  }));
+  return rows.filter(Boolean).map((item, index) => {
+    const episodeNumber =
+      numberValue(item.epName?.match(/\d+(?:\.\d+)?/)?.[0]) || index + 1;
+    const pageUrl = `https://server.sanime.net/Video/${encodeURIComponent(title.provider_title_id)}/${encodeURIComponent(episodeNumber)}.mp4`;
+    return {
+      provider_episode_id: text(item.id) || `${title.provider_title_id}:${index + 1}`,
+      episode_number: episodeNumber,
+      episode_label: text(item.epName),
+      title: text(item.name),
+      air_date: text(item.date),
+      episode_status: "link_found",
+      provider_metadata: safeMetadata(item),
+      // SAnime exposes a stable direct MP4 path rather than a server page.
+      // Store it as the catalog's provider media reference; final playback
+      // routing still happens on demand by the existing SAnime player path.
+      _servers: [{
+        server_key: "sanime-video",
+        server_name: "SAnime MP4",
+        quality: "HD",
+        language: null,
+        source_kind: "direct_media",
+        page_url: pageUrl,
+        source_host: "server.sanime.net",
+        availability_status: "link_found",
+      }],
+      _raw: item,
+    };
+  });
 }
 
 async function anifoxList() {
@@ -454,6 +473,189 @@ const adapters = {
   sanime: { list: sanimeList, episodes: sanimeEpisodes },
   anifox: { list: anifoxList, episodes: anifoxEpisodes },
 };
+
+// Production uses Supabase REST for the application, while DATABASE_URL may
+// still point to the VPS's legacy local PostgreSQL. Prefer the same REST
+// database so catalog jobs and public API reads cannot silently diverge.
+async function supabaseRequest(path, options = {}) {
+  const response = await fetch(`${supabaseUrl}/rest/v1/${path}`, {
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      apikey: supabaseKey,
+      Authorization: `Bearer ${supabaseKey}`,
+      Prefer: "return=representation",
+      ...(options.headers || {}),
+    },
+    signal: AbortSignal.timeout(timeoutMs),
+  });
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(`Supabase REST ${response.status}: ${body.slice(0, 240)}`);
+  }
+  if (response.status === 204) return [];
+  return response.json();
+}
+
+async function supabaseUpsert(table, rows, conflict) {
+  if (!rows.length) return [];
+  return supabaseRequest(
+    `${table}?on_conflict=${encodeURIComponent(conflict)}`,
+    {
+      method: "POST",
+      headers: { Prefer: "resolution=merge-duplicates,return=representation" },
+      body: JSON.stringify(rows),
+    },
+  );
+}
+
+async function supabasePatch(table, filter, row) {
+  await supabaseRequest(`${table}?${filter}`, {
+    method: "PATCH",
+    body: JSON.stringify(row),
+  });
+}
+
+function restTitleRow(item) {
+  return {
+    provider: item.provider,
+    provider_title_id: item.provider_title_id,
+    title: item.title,
+    title_en: item.title_en,
+    title_ar: item.title_ar,
+    title_native: item.title_native,
+    synonyms: item.synonyms,
+    genres: item.genres,
+    tags: item.tags,
+    media_type: item.media_type,
+    status: item.status,
+    release_year: item.release_year,
+    episode_count: item.episode_count,
+    poster_url: item.poster_url,
+    backdrop_url: item.backdrop_url || null,
+    provider_metadata: item.provider_metadata || {},
+  };
+}
+
+async function restUpsertTitles(titles) {
+  const saved = [];
+  for (let start = 0; start < titles.length; start += 100) {
+    const rows = await supabaseUpsert(
+      "source_catalog_titles",
+      titles.slice(start, start + 100).map(restTitleRow),
+      "provider,provider_title_id",
+    );
+    saved.push(...rows);
+  }
+  return saved;
+}
+
+async function restUpsertEpisodesAndServers(titleId, title, episodes) {
+  const validEpisodes = episodes.filter((item) => item?.provider_episode_id);
+  if (!validEpisodes.length) return;
+
+  const episodeRows = validEpisodes.map((item) => ({
+    title_id: titleId,
+    provider: title.provider,
+    provider_episode_id: item.provider_episode_id,
+    season_number: item.season_number || 1,
+    episode_number: item.episode_number,
+    episode_label: item.episode_label,
+    title: item.title,
+    air_date: item.air_date || null,
+    episode_status: item.episode_status || "episode_found",
+    provider_metadata: item.provider_metadata || {},
+  }));
+  const savedEpisodes = [];
+  for (let start = 0; start < episodeRows.length; start += 100) {
+    savedEpisodes.push(...await supabaseUpsert(
+      "source_catalog_episodes",
+      episodeRows.slice(start, start + 100),
+      "title_id,provider_episode_id",
+    ));
+  }
+  const episodeIds = new Map(savedEpisodes.map((row) => [row.provider_episode_id, row.id]));
+  const serverRows = [];
+  for (const episode of validEpisodes) {
+    const episodeId = episodeIds.get(episode.provider_episode_id);
+    for (const server of Array.isArray(episode._servers) ? episode._servers : []) {
+      const pageUrl = text(server.page_url);
+      serverRows.push({
+        episode_id: episodeId,
+        provider: title.provider,
+        server_key: text(server.server_key) || "server",
+        server_name: text(server.server_name),
+        quality: text(server.quality) || "",
+        language: text(server.language) || "",
+        source_kind: text(server.source_kind) || "provider_reference",
+        source_host: text(server.source_host) || hostOf(pageUrl),
+        availability_status: text(server.availability_status) || (pageUrl ? "link_found" : "unsupported"),
+        // Legacy production schema has no page_url column. Keep the public
+        // page reference in JSON until the additive SQL migration is applied.
+        provider_metadata: pageUrl ? { page_url: pageUrl } : {},
+      });
+    }
+  }
+  for (let start = 0; start < serverRows.length; start += 100) {
+    await supabaseUpsert(
+      "source_catalog_servers",
+      serverRows.slice(start, start + 100),
+      "episode_id,server_key,quality,language",
+    );
+  }
+}
+
+async function runProviderViaSupabase(provider) {
+  const adapter = adapters[provider];
+  const titles = await adapter.list();
+  console.log(`[catalog] ${provider}: fetched ${titles.length} titles`);
+  const titleByKey = new Map(titles.map((item) => [`${item.provider}:${item.provider_title_id}`, item]));
+  const titleRows = (await restUpsertTitles(titles)).map((row) => ({
+    titleId: row.id,
+    item: titleByKey.get(`${row.provider}:${row.provider_title_id}`),
+    catalogStatus: row.catalog_status,
+    detailsCheckedAt: row.details_checked_at,
+  })).filter((row) => row.item);
+  console.log(`[catalog] ${provider}: saved ${titleRows.length}/${titles.length} titles`);
+  if (skipEpisodes) return;
+
+  const refreshBefore = Date.now() - refreshHours * 3_600_000;
+  const pendingRows = titleRows.filter((row) =>
+    forceDetails ||
+    row.catalogStatus !== "details_checked" ||
+    !row.detailsCheckedAt ||
+    new Date(row.detailsCheckedAt).getTime() < refreshBefore
+  );
+  console.log(`[catalog] ${provider}: details queued ${pendingRows.length}/${titleRows.length}${forceDetails ? " (forced)" : ""}`);
+  let completed = 0;
+  const queue = [...pendingRows];
+  async function worker() {
+    while (queue.length) {
+      const row = queue.shift();
+      if (!row) continue;
+      try {
+        const episodes = await adapter.episodes(row.item);
+        await restUpsertEpisodesAndServers(row.titleId, row.item, episodes);
+        await supabasePatch(
+          "source_catalog_titles",
+          `id=eq.${encodeURIComponent(row.titleId)}`,
+          { catalog_status: episodes.length ? "details_checked" : "partial", details_checked_at: new Date().toISOString(), last_error: null },
+        );
+      } catch (error) {
+        await supabasePatch(
+          "source_catalog_titles",
+          `id=eq.${encodeURIComponent(row.titleId)}`,
+          { catalog_status: "partial", last_error: String(error?.message || error).slice(0, 500), last_seen_at: new Date().toISOString() },
+        ).catch(() => {});
+      } finally {
+        completed++;
+        if (completed % 50 === 0) console.log(`[catalog] ${provider}: details ${completed}/${titleRows.length}`);
+      }
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(concurrency, pendingRows.length) }, worker));
+  console.log(`[catalog] ${provider}: details complete (${completed}/${titleRows.length})`);
+}
 
 async function upsertTitle(client, item) {
   const result = await client.query(`

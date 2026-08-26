@@ -18,6 +18,17 @@ function encodedLike(value: string): string {
   return `ilike.*${value.replace(/[*%,]/g, " ").trim()}*`;
 }
 
+function publicServerRow(row: any): any {
+  const { provider_metadata: metadata, ...publicRow } = row;
+  const metadataPageUrl = metadata && typeof metadata === "object"
+    ? metadata.page_url
+    : undefined;
+  return {
+    ...publicRow,
+    page_url: row.page_url || metadataPageUrl || null,
+  };
+}
+
 // Public catalog endpoints. These return provider/server page URLs, never
 // resolved MP4/HLS URLs. Playback is still resolved by the existing extractors.
 router.get("/source-catalog/providers", async (_req: Request, res: Response) => {
@@ -118,8 +129,10 @@ router.get("/source-catalog/lookup", async (req: Request, res: Response) => {
   };
   const servers = (await sbSelect<any>("source_catalog_servers", serverFilters, {
     limit: 100,
-    select: "id,episode_id,provider,server_key,server_name,quality,language,source_kind,page_url,source_host,availability_status,last_checked_at",
-  })).filter((server) => Boolean(server.page_url));
+    // Production Supabase still has the legacy schema without page_url.
+    // The importer keeps the same public contract in provider_metadata.page_url.
+    select: "id,episode_id,provider,server_key,server_name,quality,language,source_kind,source_host,availability_status,last_checked_at,provider_metadata",
+  })).map(publicServerRow).filter((server) => Boolean(server.page_url));
 
   res.setHeader("Cache-Control", "public, max-age=60");
   res.json({ title, episode: episodeRow, servers, pagesOnly: true });
@@ -135,8 +148,8 @@ router.get("/source-catalog/episodes/:episodeId/servers", async (req: Request, r
     order: "quality.desc",
   }, {
     limit: 100,
-    select: "id,episode_id,provider,server_key,server_name,quality,language,source_kind,page_url,source_host,availability_status,last_checked_at",
-  }).then((servers) => servers.filter((server) => Boolean(server.page_url)));
+    select: "id,episode_id,provider,server_key,server_name,quality,language,source_kind,source_host,availability_status,last_checked_at,provider_metadata",
+  }).then((servers) => servers.map(publicServerRow).filter((server) => Boolean(server.page_url)));
   res.setHeader("Cache-Control", "public, max-age=60");
   res.json({ servers: rows, pagesOnly: true, playback: "resolve-on-demand" });
 });
