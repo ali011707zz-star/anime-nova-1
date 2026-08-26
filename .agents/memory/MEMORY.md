@@ -10,6 +10,7 @@
 - [Anime NOVA startup fix](anime-nova-startup.md) — DB migration must run AFTER server starts listening, not before, or the workflow port-open timeout fails.
 - [Supabase source_cache schema fix](supabase-source-cache-schema-fix.md) — real prod DB is Supabase (not VPS's local legacy Postgres); sandbox has no IPv6 + pooler rejects this project, but VPS reaches db.<ref>.supabase.co directly.
 - [Source catalog database routing](source-catalog-rest-vs-local.md) — importer must prefer the same Supabase REST database as production API; legacy schemas keep page_url in provider_metadata.
+- [PostgREST catalog limits](postgrest-catalog-limits.md) — Supabase REST caps row responses at 1,000; use exact HEAD counts and batched title matching instead of downloading full catalogs.
 - [CF Worker token encryption](cf-token-encryption.md) — AES-256-GCM replaces plain ?url=&key=; encryptCfToken null=fail-closed; wrangler name=nova-cdn-proxy.
 - [Cloudflare Worker CDN Proxy](cf-worker-deployment.md) — nova-cdn-proxy.ali011707zz.workers.dev يحل bandwidth VPS؛ VPS .env يحتاج تحديث + pm2 delete+start
 - [CF Worker key resolution](cf-worker-key-resolution.md) — المفتاح الصحيح في ecosystem.config.cjs.bak؛ VPS .env كان خاطئاً؛ الحل: استعادة القيمة من الـ bak
