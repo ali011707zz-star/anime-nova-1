@@ -23,10 +23,11 @@ import { registerWebAdminRoutes } from "./routes/webAdmin.js";
 import analyticsRouter from "./routes/analytics.js";
 import {
   validateAnonToken,
-  validateMobileAppIdentity,
+  validateNovaAppIdentity,
   checkRateLimit,
   assertSecurityConfig,
   MOBILE_CLIENT_ID,
+  TV_CLIENT_ID,
 } from "./lib/security.js";
 
 // ── المسارات التي تتطلب توكن صالح ──
@@ -180,10 +181,12 @@ export async function createApp(): Promise<Express> {
     const isMobileClient =
       clientHeader === MOBILE_CLIENT_ID ||
       (Array.isArray(clientHeader) && clientHeader.includes(MOBILE_CLIENT_ID)) ||
+      clientHeader === TV_CLIENT_ID ||
+      (Array.isArray(clientHeader) && clientHeader.includes(TV_CLIENT_ID)) ||
       clientHeader !== undefined;
     if (!isMobileClient) return next();
 
-    const identity = validateMobileAppIdentity(req.headers);
+    const identity = validateNovaAppIdentity(req.headers);
     /* Older installed builds sent only X-Nova-Client on background media
        downloads. Keep those downloads working while still requiring the
        exact client id and the short-lived app token below. New builds send

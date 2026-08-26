@@ -10,6 +10,9 @@ import { isIP } from "node:net";
 export const MOBILE_CLIENT_ID = "nova-anime-mobile-v1";
 export const MOBILE_PACKAGE_NAME = "com.nova.anime";
 export const DEFAULT_MIN_MOBILE_VERSION = "1.0.0";
+export const TV_CLIENT_ID = "nova-anime-tv-kotlin-v1";
+export const TV_PACKAGE_NAME = "com.nova.anime.tv";
+export const DEFAULT_MIN_TV_VERSION = "1.0.0";
 
 /** Reject proxy targets that point back at this host or an internal network. */
 export function isSafeExternalUrl(raw: string): boolean {
@@ -122,6 +125,25 @@ export function validateMobileAppIdentity(
   if (header("x-nova-client") !== MOBILE_CLIENT_ID) return { ok: false, code: "INVALID_CLIENT" };
   if (header("x-nova-package") !== MOBILE_PACKAGE_NAME) return { ok: false, code: "INVALID_PACKAGE" };
   const minimum = process.env.NOVA_MIN_MOBILE_VERSION?.trim() || DEFAULT_MIN_MOBILE_VERSION;
+  if (!versionAtLeast(header("x-nova-version"), minimum)) {
+    return { ok: false, code: "APP_UPDATE_REQUIRED" };
+  }
+  return { ok: true };
+}
+
+/** Validate the separate native Android TV release without changing mobile rules. */
+export function validateNovaAppIdentity(
+  headers: Record<string, string | string[] | undefined>,
+): MobileAppCheck {
+  const header = (name: string): string => {
+    const value = headers[name];
+    return Array.isArray(value) ? value[0] ?? "" : value ?? "";
+  };
+  const client = header("x-nova-client");
+  if (client === MOBILE_CLIENT_ID) return validateMobileAppIdentity(headers);
+  if (client !== TV_CLIENT_ID) return { ok: false, code: "INVALID_CLIENT" };
+  if (header("x-nova-package") !== TV_PACKAGE_NAME) return { ok: false, code: "INVALID_PACKAGE" };
+  const minimum = process.env.NOVA_MIN_TV_VERSION?.trim() || DEFAULT_MIN_TV_VERSION;
   if (!versionAtLeast(header("x-nova-version"), minimum)) {
     return { ok: false, code: "APP_UPDATE_REQUIRED" };
   }

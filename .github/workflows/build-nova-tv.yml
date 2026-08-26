@@ -1,0 +1,67 @@
+name: 📺 Build NOVA TV APK
+
+on:
+  push:
+    branches:
+      - nova-tv
+    paths:
+      - "nova-tv/**"
+      - ".github/workflows/build-nova-tv.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-nova-tv:
+    name: Build NOVA TV only
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout NOVA TV branch
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: "platform-tools platforms;android-35 build-tools;35.0.0"
+          accept-android-sdk-licenses: true
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.9"
+
+      - name: Check NOVA TV project boundaries
+        run: |
+          set -eu
+          test -f nova-tv/settings.gradle.kts
+          test -f nova-tv/app/build.gradle.kts
+          test -f nova-tv/app/src/main/AndroidManifest.xml
+          ! grep -R -nE "artifacts/nova-mobile|Anime Nova\\.apk" nova-tv
+
+      - name: Compile NOVA TV release APKs
+        working-directory: nova-tv
+        run: gradle --no-daemon --stacktrace assembleRelease
+
+      - name: Verify release outputs
+        working-directory: nova-tv
+        run: |
+          set -eu
+          find app/build/outputs/apk/release -type f -name "*.apk" -size +1k -print
+          test -n "$(find app/build/outputs/apk/release -type f -name '*.apk' -size +1k -print -quit)"
+
+      - name: Upload NOVA TV APKs
+        uses: actions/upload-artifact@v4
+        with:
+          name: Nova-TV-${{ github.run_number }}
+          path: nova-tv/app/build/outputs/apk/release/*.apk
+          if-no-files-found: error
+          retention-days: 30
