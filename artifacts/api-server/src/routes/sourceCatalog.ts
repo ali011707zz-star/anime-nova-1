@@ -1,5 +1,5 @@
 import { Router, type Request, type Response } from "express";
-import { sbSelect } from "../lib/supabaseClient.js";
+import { sbCount, sbSelect } from "../lib/supabaseClient.js";
 
 const router = Router();
 const PROVIDERS = new Set(["animeify", "anslayer", "sanime", "anifox"]);
@@ -32,17 +32,16 @@ function publicServerRow(row: any): any {
 // Public catalog endpoints. These return provider/server page URLs, never
 // resolved MP4/HLS URLs. Playback is still resolved by the existing extractors.
 router.get("/source-catalog/providers", async (_req: Request, res: Response) => {
-  const rows = await sbSelect<any>(
-    "source_catalog_titles",
-    {},
-    { select: "provider", limit: 10000 },
-  );
-  const counts = Object.fromEntries([...PROVIDERS].map((p) => [
-    p,
-    rows.filter((row) => row.provider === p).length,
-  ]));
+  const entries = await Promise.all([...PROVIDERS].map(async (provider) => [
+    provider,
+    await sbCount("source_catalog_titles", { provider: `eq.${provider}` }),
+  ] as const));
+  const counts = Object.fromEntries(entries);
   res.setHeader("Cache-Control", "public, max-age=300");
-  res.json({ providers: counts });
+  res.json({
+    providers: counts,
+    total: entries.reduce((sum, [, count]) => sum + count, 0),
+  });
 });
 
 router.get("/source-catalog/titles", async (req: Request, res: Response) => {

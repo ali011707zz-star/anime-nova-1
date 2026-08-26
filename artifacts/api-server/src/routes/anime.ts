@@ -1698,6 +1698,10 @@ async function getAnifoxSources(
   availabilityOnly = false,
   catalogHint?: CatalogEpisodeHint | null,
 ): Promise<UnifiedSource[]> {
+  if (!availabilityOnly && catalogHint?.servers.length) {
+    const catalogSources = await getCatalogPageSources("anifox", catalogHint);
+    if (catalogSources.length) return catalogSources;
+  }
   const out: UnifiedSource[] = [];
   const seen = new Set<string>();
   const queries = titleQueries(title, english, variants);
@@ -2964,6 +2968,107 @@ async function extractAndCollect(
       // Exception during extraction → drop
     }
   }));
+}
+
+/**
+ * Resolve the stable provider pages saved by the catalog importer before
+ * falling back to a provider-wide search. Catalog rows are references only:
+ * final MP4/HLS URLs are still resolved on demand and are never persisted.
+ */
+async function getCatalogPageSources(
+  provider: CatalogEpisodeHint["provider"],
+  hint: CatalogEpisodeHint,
+  timeoutMs = 9000,
+): Promise<UnifiedSource[]> {
+  const direct: UnifiedSource[] = [];
+  const pages: UnifiedSource[] = [];
+
+  for (const server of hint.servers) {
+    const pageUrl = String(server.page_url || "").trim();
+    if (!/^https?:\/\//i.test(pageUrl)) continue;
+    if (["dead", "unsupported"].includes(String(server.availability_status || "").toLowerCase())) continue;
+
+    const quality = String(server.quality || "HD");
+    const base: UnifiedSource = {
+      name: `${provider} · ${server.server_name || server.server_key || "server"}`,
+      url: pageUrl,
+      quality,
+      qualityRank: catalogQualityRank(quality),
+      site: provider,
+    };
+
+    if (/\.mp4(?:[?#]|$)/i.test(pageUrl)) {
+      const ref = provider === "sanime" ? "https://app.sanime.net/" : pageUrl;
+      direct.push({
+        ...base,
+        directUrl: `/api/anime/video-proxy?url=${encodeURIComponent(pageUrl)}&ref=${encodeURIComponent(ref)}`,
+        directType: "mp4",
+        headers: { Referer: ref },
+      });
+      continue;
+    }
+    if (/\.m3u8(?:[?#]|$)/i.test(pageUrl)) {
+      direct.push({
+        ...base,
+        directUrl: `/api/anime/hls-proxy?url=${encodeURIComponent(pageUrl)}&ref=${encodeURIComponent(pageUrl)}`,
+        directType: "hls",
+      });
+      continue;
+    }
+    if (/mega(?:\.co)?\.nz\/embed\//i.test(pageUrl)) {
+      direct.push({ ...base, directUrl: pageUrl, isEmbed: true });
+      continue;
+    }
+
+    // MediaFire and OK.ru need provider-specific extraction, but the catalog
+    // already gives us the exact episode page so no title/episode search is
+    // necessary.
+    if (/mediafire\.com/i.test(pageUrl)) {
+      const directMp4 = await extractMediafireDirect(pageUrl).catch(() => null);
+      if (directMp4) {
+        direct.push({
+          ...base,
+          url: pageUrl,
+          directUrl: `/api/anime/video-proxy?url=${encodeURIComponent(directMp4)}&ref=${encodeURIComponent("https://www.mediafire.com/")}`,
+          directType: "mp4",
+          headers: { Referer: "https://www.mediafire.com/", Origin: "https://www.mediafire.com" },
+        });
+      }
+      continue;
+    }
+    const okId = pageUrl.match(/ok\.ru\/(?:video|videoembed)\/(\d+)/i)?.[1];
+    if (okId) {
+      const videos = await Promise.race([
+        extractOkRuVideo(okId),
+        new Promise<[]>(resolve => setTimeout(() => resolve([]), timeoutMs)),
+      ]);
+      const hls = videos.find(video => video.type === "hls" && video.name === "auto");
+      const mp4 = videos
+        .filter(video => video.type !== "hls")
+        .sort((a, b) => (parseInt(b.name, 10) || 0) - (parseInt(a.name, 10) || 0))[0];
+      if (hls) {
+        direct.push({
+          ...base,
+          directUrl: `/api/anime/hls-proxy?url=${encodeURIComponent(hls.url)}&ref=${encodeURIComponent("https://ok.ru/")}`,
+          directType: "hls",
+        });
+      } else if (mp4) {
+        direct.push({
+          ...base,
+          directUrl: `/api/anime/video-proxy?url=${encodeURIComponent(mp4.url)}&ref=${encodeURIComponent("https://ok.ru/")}`,
+          directType: "mp4",
+          headers: { Referer: "https://ok.ru/" },
+        });
+      }
+      continue;
+    }
+    pages.push(base);
+  }
+
+  if (!pages.length) return direct;
+  const extracted: UnifiedSource[] = [];
+  await extractAndCollect(pages, extracted, new Set<string>(), timeoutMs);
+  return [...direct, ...extracted];
 }
 
 
@@ -5563,6 +5668,10 @@ async function getAnimeifySourcesUncached(
   catalogHint?: CatalogEpisodeHint | null,
 ): Promise<UnifiedSource[]> {
   try {
+    if (!availabilityOnly && catalogHint?.servers.length) {
+      const catalogSources = await getCatalogPageSources("animeify", catalogHint);
+      if (catalogSources.length) return catalogSources;
+    }
     const creds = await getAnimeifyCreds();
     if (!creds) return [];
     let { base, token } = creds;
@@ -12372,7 +12481,12 @@ async function anslayerGet(path: string, params: Record<string, any>): Promise<a
 }
 
 async function getAnimeSlayerSourcesUncached(
-  title: string, english: string | null, ep: number, directAnimeId?: number, titleAr?: string | null,
+  title: string,
+  english: string | null,
+  ep: number,
+  directAnimeId?: number,
+  titleAr?: string | null,
+  catalogHint?: CatalogEpisodeHint | null,
 ): Promise<UnifiedSource[]> {
   const ck = directAnimeId
     ? `anslayer:id:${directAnimeId}:${ep}`
@@ -12382,6 +12496,10 @@ async function getAnimeSlayerSourcesUncached(
 
   const out: UnifiedSource[] = [];
   try {
+    if (catalogHint?.servers.length) {
+      const catalogSources = await getCatalogPageSources("anslayer", catalogHint);
+      if (catalogSources.length) return catalogSources;
+    }
     // ── 1) معرّف مباشر (من كتالوج anslayer نفسه — يُستخدم لقسم "أحدث الحلقات" على
     //      الواجهة الرئيسية) أو بحث + أفضل تطابق بالاسم ──
     let best: { score: number; id: number; name: string } | null = directAnimeId
@@ -12548,14 +12666,21 @@ async function getAnimeSlayerSourcesUncached(
  * same time; only one upstream search/extraction should run.
  */
 async function getAnimeSlayerSources(
-  title: string, english: string | null, ep: number, directAnimeId?: number, titleAr?: string | null,
+  title: string,
+  english: string | null,
+  ep: number,
+  directAnimeId?: number,
+  titleAr?: string | null,
+  catalogHint?: CatalogEpisodeHint | null,
 ): Promise<UnifiedSource[]> {
-  const key = directAnimeId
+  const key = catalogHint?.providerTitleId
+    ? `anslayer:catalog:${catalogHint.providerTitleId}:${ep}`
+    : directAnimeId
     ? `anslayer:id:${directAnimeId}:${ep}`
     : `anslayer:${normalize(english || title).replace(/\s+/g, "-")}:${ep}`;
   const active = _anslayerInFlight.get(key);
   if (active) return active;
-  const promise = getAnimeSlayerSourcesUncached(title, english, ep, directAnimeId, titleAr);
+  const promise = getAnimeSlayerSourcesUncached(title, english, ep, directAnimeId, titleAr, catalogHint);
   _anslayerInFlight.set(key, promise);
   try {
     return await promise;
@@ -12601,6 +12726,13 @@ async function getSAnimeSourcesUncached(
 
   const out: UnifiedSource[] = [];
   try {
+    if (!availabilityOnly && catalogHint?.servers.length) {
+      const catalogSources = await getCatalogPageSources("sanime", catalogHint);
+      if (catalogSources.length) {
+        _sanimeCacheMap.set(ck, { sources: catalogSources, ts: Date.now() });
+        return catalogSources;
+      }
+    }
     /* 1. البحث — SAnime يخزّن أسماء عربية ومترجمة، نجرب الإنجليزي أولاً ثم الروماجي.
        ندمج النتائج لتحسين فرص المطابقة (بعض العناوين موجودة بكلا الاسمين). */
     const queries = titleQueries(title, english, variants);
@@ -13678,7 +13810,14 @@ router.get("/anime/sources-stream", scraperQueueMiddleware, async (req, res) => 
         () => scrapeCached("animewitcher",  () => getAnimeWitcherSources(title, english, ep, anilistId, titleVariants, true), false, 11000),
         () => useCatalogAvailability("anslayer", async () => scrapeCached("anslayer", async () => {
           const hint = await catalogHintFor("anslayer");
-          return getAnimeSlayerSources(title, english, ep, Number(hint?.providerTitleId || anslayerId || 0) || undefined, titleAr);
+           return getAnimeSlayerSources(
+             title,
+             english,
+             ep,
+             Number(hint?.providerTitleId || anslayerId || 0) || undefined,
+             titleAr,
+             hint,
+           );
         }, false, 3200)),
         () => useCatalogAvailability("animeify", async () => scrapeCached("animeify", async () => getAnimeifySources(
           title, english, ep, titleVariants, true, await catalogHintFor("animeify"),
@@ -13793,8 +13932,15 @@ router.get("/anime/sources-stream", scraperQueueMiddleware, async (req, res) => 
       // scrapeCached("xyra_anim",  () => getXyraAnimeSources(title, english, ep, anilistId),  false, 18000),
       scrapeCached("sanime",     () => catalogHintFor("sanime").then((hint) =>
         getSAnimeSources(title, english, ep, titleVariants, false, hint)), false, 20000),
-      scrapeCached("anslayer",   () => catalogHintFor("anslayer").then((hint) =>
-        getAnimeSlayerSources(title, english, ep, Number(hint?.providerTitleId || anslayerId || 0) || undefined, titleAr)), false, 45000),
+       scrapeCached("anslayer",   () => catalogHintFor("anslayer").then((hint) =>
+         getAnimeSlayerSources(
+           title,
+           english,
+           ep,
+           Number(hint?.providerTitleId || anslayerId || 0) || undefined,
+           titleAr,
+           hint,
+         )), false, 45000),
       // animetime / notorrent: أُزيلت كلياً بطلب المستخدم (2026-07-09)
     ]);
 
@@ -14169,7 +14315,14 @@ router.get("/anime/fetch-source", scraperQueueMiddleware, async (req, res) => {
       // case "xyra_anim":    (await race(getXyraAnimeSources(title, english, ep, anilistId), 18_000, [])).forEach(collectSrc); break;
       case "sanime":       (await race(getSAnimeSources(title, english, ep, titleVariants, false, catalogHint),               20_000, [])).forEach(collectSrc); break;
       case "anifox":       (await race(getAnifoxSources(title, english, ep, titleVariants, anilistId, false, catalogHint),    30_000, [])).forEach(collectSrc); break;
-      case "anslayer":     (await race(getAnimeSlayerSources(title, english, ep, Number(catalogHint?.providerTitleId || anslayerId || 0) || undefined, titleAr), 45_000, [])).forEach(collectSrc); break;
+      case "anslayer":     (await race(getAnimeSlayerSources(
+        title,
+        english,
+        ep,
+        Number(catalogHint?.providerTitleId || anslayerId || 0) || undefined,
+        titleAr,
+        catalogHint,
+      ), 45_000, [])).forEach(collectSrc); break;
       case "ristoanime":   (await race(getRistoAnimeSources(title, english, ep),          22_000, [])).forEach(collectSrc); break;
       // case "allmanga": معطّل 2026-07-17
       // case "nflixmovies_anim": حُذف 2026-07-30 — 0 مصادر (ميت)
