@@ -379,13 +379,14 @@ async function sanimeEpisodes(title) {
   });
   const rows = Array.isArray(data?.ep) ? data.ep.flat() : [];
   return rows.filter(Boolean).map((item, index) => {
+    const episodeLabel = text(item.epName);
     const episodeNumber =
-      numberValue(item.epName?.match(/\d+(?:\.\d+)?/)?.[0]) || index + 1;
+      numberValue(episodeLabel?.match(/\d+(?:\.\d+)?/)?.[0]) || index + 1;
     const pageUrl = `https://server.sanime.net/Video/${encodeURIComponent(title.provider_title_id)}/${encodeURIComponent(episodeNumber)}.mp4`;
     return {
       provider_episode_id: text(item.id) || `${title.provider_title_id}:${index + 1}`,
       episode_number: episodeNumber,
-      episode_label: text(item.epName),
+      episode_label: episodeLabel,
       title: text(item.name),
       air_date: text(item.date),
       episode_status: "link_found",
@@ -873,6 +874,12 @@ async function runProvider(provider) {
 }
 
 async function main() {
+  if (useSupabaseRest) {
+    console.log("[catalog] using Supabase REST for the application database");
+    for (const provider of providers) await runProviderViaSupabase(provider);
+    await pool.end();
+    return;
+  }
   const migration = await readFile(migrationPath, "utf8");
   await pool.query(migration);
   console.log(`[catalog] schema ready; providers=${providers.join(",")} episodes=${!skipEpisodes}`);
