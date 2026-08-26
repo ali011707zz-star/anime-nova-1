@@ -52,7 +52,7 @@ class SearchActivity : ComponentActivity() {
             setHintTextColor(Color.rgb(161, 161, 170))
             setTextColor(Color.WHITE)
             textSize = 20f
-            singleLine = true
+            setSingleLine(true)
             imeOptions = EditorInfo.IME_ACTION_SEARCH
             inputType = android.text.InputType.TYPE_CLASS_TEXT
             setPadding(dp(18), 0, dp(18), 0)
