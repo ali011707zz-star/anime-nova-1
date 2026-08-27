@@ -198,6 +198,53 @@ export async function sbSelect<T = any>(
   }
 }
 
+/**
+ * Count rows without downloading them. Supabase/PostgREST caps normal
+ * responses at 1,000 rows, so counting a fetched array silently undercounts
+ * large catalog tables.
+ */
+export async function sbCount(
+  table: string,
+  filters: Record<string, string | number | undefined> = {},
+): Promise<number> {
+  if (isSupabaseReady()) {
+    try {
+      const params: Record<string, string | number | undefined> = {
+        ...filters,
+        select: "id",
+        limit: 1,
+      };
+      const url = `${getSbUrl()}/rest/v1/${table}${buildQuery(params)}`;
+      const res = await fetch(url, {
+        headers: { ...sbHeaders(), Prefer: "count=exact" },
+        signal: AbortSignal.timeout(10000),
+      });
+      const range = res.headers.get("content-range") || "";
+      const total = Number(range.split("/").pop());
+      if (Number.isFinite(total)) return total;
+      if (!res.ok) return 0;
+      const rows = await res.json();
+      return Array.isArray(rows) ? rows.length : 0;
+    } catch (e: any) {
+      console.error(`[sb] sbCount "${table}":`, e.message);
+      return 0;
+    }
+  }
+
+  if (!isPgReady()) return 0;
+  try {
+    const { where, values } = buildWhere(filters);
+    const result = await getPool().query(
+      `SELECT count(*)::int AS count FROM "${table}" ${where}`,
+      values,
+    );
+    return Number(result.rows[0]?.count || 0);
+  } catch (e: any) {
+    console.error(`[pg] sbCount "${table}":`, e.message);
+    return 0;
+  }
+}
+
 // ── INSERT ────────────────────────────────────────────────────────────────
 
 export async function sbInsert<T = any>(
