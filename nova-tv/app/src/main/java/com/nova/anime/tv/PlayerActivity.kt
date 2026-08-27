@@ -52,7 +52,7 @@ class PlayerActivity : ComponentActivity() {
             useController = true
             controllerAutoShow = true
             controllerShowTimeoutMs = 5000
-            showBuffering = PlayerView.SHOW_BUFFERING_WHEN_PLAYING
+            setShowBuffering(PlayerView.SHOW_BUFFERING_WHEN_PLAYING)
             resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
             keepScreenOn = true
             setShutterBackgroundColor(Color.BLACK)
