@@ -51,14 +51,53 @@ class PlayerActivity : ComponentActivity() {
         val view = PlayerView(this).apply {
             useController = true
             controllerAutoShow = true
+            controllerShowTimeoutMs = 5000
+            setShowBuffering(PlayerView.SHOW_BUFFERING_WHEN_PLAYING)
             resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
             keepScreenOn = true
+            setShutterBackgroundColor(Color.BLACK)
         }
         root.addView(view, FrameLayout.LayoutParams(-1, -1))
-        errorView = tvText(this, "", 20f, Color.WHITE).apply {
+
+        val topScrim = android.view.View(this).apply {
+            background = android.graphics.drawable.GradientDrawable(
+                android.graphics.drawable.GradientDrawable.Orientation.TOP_BOTTOM,
+                intArrayOf(Color.argb(225, 5, 10, 14), Color.TRANSPARENT),
+            )
+            isClickable = false
+        }
+        root.addView(topScrim, FrameLayout.LayoutParams(-1, dp(150), android.view.Gravity.TOP))
+
+        val topBar = FrameLayout(this)
+        val title = tvText(
+            this,
+            intent.getStringExtra(EXTRA_TITLE).orEmpty().ifBlank { "NOVA TV" },
+            24f,
+            Color.WHITE,
+        ).apply {
+            typeface = android.graphics.Typeface.DEFAULT_BOLD
+            gravity = android.view.Gravity.CENTER_VERTICAL or android.view.Gravity.RIGHT
+            textDirection = View.TEXT_DIRECTION_RTL
+            setPadding(0, 0, dp(26), 0)
+        }
+        topBar.addView(title, FrameLayout.LayoutParams(-1, dp(72), android.view.Gravity.TOP))
+        val back = tvButton(this, "رجوع").apply {
+            textSize = 19f
+            setOnClickListener { finish() }
+        }
+        topBar.addView(
+            back,
+            FrameLayout.LayoutParams(dp(140), dp(58), android.view.Gravity.TOP or android.view.Gravity.START).apply {
+                topMargin = dp(7)
+                leftMargin = dp(28)
+            },
+        )
+        root.addView(topBar, FrameLayout.LayoutParams(-1, dp(82), android.view.Gravity.TOP))
+
+        errorView = tvText(this, "", 21f, Color.WHITE).apply {
             gravity = android.view.Gravity.CENTER
             visibility = View.GONE
-            setBackgroundColor(Color.argb(220, 9, 9, 11))
+            background = roundedBackground(this@PlayerActivity, Color.argb(235, 22, 32, 40), NovaColors.danger, 2, 14)
             setPadding(dp(30), dp(20), dp(30), dp(20))
         }
         root.addView(errorView, FrameLayout.LayoutParams(-1, dp(140), android.view.Gravity.CENTER))

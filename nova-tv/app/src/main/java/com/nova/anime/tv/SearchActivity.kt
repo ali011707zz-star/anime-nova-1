@@ -36,30 +36,30 @@ class SearchActivity : ComponentActivity() {
     private fun buildUi() {
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setBackgroundColor(Color.rgb(9, 9, 11))
-            setPadding(dp(54), dp(30), dp(54), dp(36))
+            setBackgroundColor(NovaColors.background)
+            setPadding(dp(46), dp(28), dp(46), dp(36))
             layoutDirection = View.LAYOUT_DIRECTION_RTL
         }
         val top = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = android.view.Gravity.CENTER_VERTICAL
         }
-        val back = tvButton(this, "رجوع")
+        val back = tvButton(this, "رجوع").apply { textSize = 20f }
         back.setOnClickListener { finish() }
         top.addView(back, LinearLayout.LayoutParams(dp(135), dp(58)))
         input = EditText(this).apply {
             hint = "اكتب اسم الأنمي ثم اضغط بحث"
-            setHintTextColor(Color.rgb(161, 161, 170))
-            setTextColor(Color.WHITE)
-            textSize = 20f
+            setHintTextColor(NovaColors.muted)
+            setTextColor(NovaColors.text)
+            textSize = 22f
             setSingleLine(true)
             imeOptions = EditorInfo.IME_ACTION_SEARCH
             inputType = android.text.InputType.TYPE_CLASS_TEXT
             setPadding(dp(18), 0, dp(18), 0)
             background = android.graphics.drawable.GradientDrawable().apply {
                 cornerRadius = dp(10).toFloat()
-                setColor(Color.rgb(30, 24, 39))
-                setStroke(dp(2), Color.rgb(110, 78, 145))
+                setColor(NovaColors.surface)
+                setStroke(dp(2), NovaColors.divider)
             }
             setOnEditorActionListener { _, action, event ->
                 if (action == EditorInfo.IME_ACTION_SEARCH ||
@@ -73,19 +73,19 @@ class SearchActivity : ComponentActivity() {
         top.addView(input, LinearLayout.LayoutParams(0, dp(58), 1f).apply {
             marginStart = dp(18)
         })
-        val search = tvButton(this, "بحث")
+        val search = tvButton(this, "بحث").apply { textSize = 20f }
         search.setOnClickListener { runSearch() }
         top.addView(search, LinearLayout.LayoutParams(dp(135), dp(58)).apply {
             marginStart = dp(18)
         })
         root.addView(top)
 
-        resultText = tvText(this, "ابحث عن أنمي", 20f, Color.rgb(161, 161, 170))
+        resultText = tvText(this, "ابحث عن أنمي", 22f, NovaColors.muted)
         resultText.setPadding(0, dp(22), 0, dp(8))
         root.addView(resultText)
         progress = ProgressBar(this).apply {
             visibility = View.GONE
-            indeterminateTintList = android.content.res.ColorStateList.valueOf(Color.rgb(192, 132, 252))
+            indeterminateTintList = android.content.res.ColorStateList.valueOf(NovaColors.primary)
         }
         root.addView(progress, LinearLayout.LayoutParams(dp(40), dp(40)))
 
