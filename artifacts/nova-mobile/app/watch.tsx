@@ -1977,9 +1977,13 @@ export default function WatchScreen() {
                     <Pressable
                       key={slot.site}
                       onPress={() => handlePickSite(slot.site, qk)}
-                      style={({ pressed }) => [
+                      focusable={tvMode}
+                      accessibilityRole="button"
+                      accessibilityLabel={`اختيار سيرفر ${slot.tag} بجودة ${qk}`}
+                      style={({ focused, pressed }) => [
                          d.webRow,
                         tvMode && d.tvWebRow,
+                        tvMode && tvFocusStyle(focused),
                         idx < slots.length - 1 && d.webRowBorder,
                         !watchUnlocked && { opacity: 0.72 },
                         isReady && watchUnlocked && { backgroundColor: "rgba(34,197,94,0.035)" },

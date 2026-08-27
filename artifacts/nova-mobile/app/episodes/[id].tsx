@@ -99,32 +99,38 @@ function EpisodeRow({
       </View>
 
       {/* Info */}
-      <View style={ep_s.info}>
+      <View style={[ep_s.info, tvMode && ep_s.tvInfo]}>
         <Text style={[ep_s.epNum, tvMode && ep_s.tvEpNum, watched && { color: "#8B5CF6" }]}>الحلقة {n}</Text>
-        {arabicTitle ? <Text style={[ep_s.epTitleAr, tvMode && ep_s.tvEpTitle]} numberOfLines={1}>{arabicTitle}</Text> : null}
-        {originalTitle ? <Text style={[ep_s.epTitleOriginal, tvMode && ep_s.tvEpOriginal]} numberOfLines={1}>{originalTitle}</Text> : null}
+        {arabicTitle ? <Text style={[ep_s.epTitleAr, tvMode && ep_s.tvEpTitle]} numberOfLines={tvMode ? 2 : 1}>{arabicTitle}</Text> : null}
+        {originalTitle ? <Text style={[ep_s.epTitleOriginal, tvMode && ep_s.tvEpOriginal]} numberOfLines={tvMode ? 2 : 1}>{originalTitle}</Text> : null}
       </View>
 
-      {/* Comment button */}
-      <Pressable
-        onPress={e => { onComment(n); }}
-        focusable={tvMode}
-        style={({ focused }) => [ep_s.commentBtn, tvMode && ep_s.tvSmallButton, tvMode && tvFocusStyle(focused)]}
-      >
-        <Ionicons name="chatbubble-ellipses" size={11} color={commentCount > 0 ? "#c4b5fd" : "rgba(255,255,255,0.2)"} />
-        {commentCount > 0 && (
-          <Text style={ep_s.commentCount}>{commentCount}</Text>
-        )}
-      </Pressable>
+      <View style={[ep_s.episodeActions, tvMode && ep_s.tvEpisodeActions]}>
+        {/* Comment button */}
+        <Pressable
+          onPress={() => onComment(n)}
+          focusable={tvMode}
+          style={({ focused }) => [ep_s.commentBtn, tvMode && ep_s.tvSmallButton, tvMode && tvFocusStyle(focused)]}
+          accessibilityRole="button"
+          accessibilityLabel={`تعليقات الحلقة ${n}`}
+        >
+          <Ionicons name="chatbubble-ellipses" size={tvMode ? 18 : 11} color={commentCount > 0 ? "#c4b5fd" : "rgba(255,255,255,0.2)"} />
+          {commentCount > 0 && (
+            <Text style={ep_s.commentCount}>{commentCount}</Text>
+          )}
+        </Pressable>
 
-      {/* Eye toggle */}
-      <Pressable
-        onPress={e => { onToggleWatched(n); }}
-        focusable={tvMode}
-        style={({ focused }) => [ep_s.eyeBtn, watched && ep_s.eyeBtnWatched, tvMode && ep_s.tvSmallButton, tvMode && tvFocusStyle(focused)]}
-      >
-        <Ionicons name={watched ? "eye" : "eye-off"} size={12} color={watched ? "#8B5CF6" : "rgba(255,255,255,0.2)"} />
-      </Pressable>
+        {/* Eye toggle */}
+        <Pressable
+          onPress={() => onToggleWatched(n)}
+          focusable={tvMode}
+          style={({ focused }) => [ep_s.eyeBtn, watched && ep_s.eyeBtnWatched, tvMode && ep_s.tvSmallButton, tvMode && tvFocusStyle(focused)]}
+          accessibilityRole="button"
+          accessibilityLabel={watched ? `إلغاء مشاهدة الحلقة ${n}` : `تحديد الحلقة ${n} كمشاهدة`}
+        >
+          <Ionicons name={watched ? "eye" : "eye-off"} size={tvMode ? 18 : 12} color={watched ? "#8B5CF6" : "rgba(255,255,255,0.2)"} />
+        </Pressable>
+      </View>
     </Pressable>
   );
 }
@@ -485,14 +491,18 @@ export default function EpisodeListScreen() {
 
       {/* ── Episode list ── */}
       <FlatList
+        key={tvMode ? "tv-episode-grid" : "phone-episode-list"}
         data={displayedEps}
+        numColumns={tvMode ? 4 : 1}
         keyExtractor={n => n.toString()}
         showsVerticalScrollIndicator={false}
-        contentContainerStyle={{ paddingBottom: 100 }}
+        columnWrapperStyle={tvMode ? ep_s.tvColumnWrapper : undefined}
+        contentContainerStyle={[{ paddingBottom: 100 }, tvMode && ep_s.tvListContent]}
         ListHeaderComponent={
           <Pressable
             onPress={() => watchEp(displayedEps[0] || 1)}
-            style={ep_s.watchFromBtn}>
+            focusable={tvMode}
+            style={({ focused }) => [ep_s.watchFromBtn, tvMode && ep_s.tvWatchFromBtn, tvMode && tvFocusStyle(focused)]}>
             <Ionicons name="play" size={14} color="#8B5CF6" />
             <Text style={ep_s.watchFromBtnText}>
               {watchedCount > 0 ? `متابعة من حيث توقفت (${watchedCount + 1})` : "مشاهدة من البداية"}
@@ -553,6 +563,7 @@ const ep_s = StyleSheet.create({
   durText: { position: "absolute", bottom: 3, left: 3, fontSize: 6, color: "#fff", backgroundColor: "rgba(0,0,0,0.7)", borderRadius: 3, paddingHorizontal: 2, paddingVertical: 1, fontWeight: "900" },
   watchedBorder: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, borderWidth: 2, borderColor: "rgba(139,92,246,0.4)", borderRadius: 8 },
   info: { flex: 1 },
+  episodeActions: { flexDirection: "row", alignItems: "center", gap: 8 },
   epNum: { fontSize: 11, fontFamily: "Cairo_800ExtraBold", color: "rgba(255,255,255,0.9)" },
   epTitleAr: { fontSize: 10, fontFamily: "Cairo_700Bold", color: "rgba(196,181,253,0.92)", textAlign: "right" },
   epTitleOriginal: { fontSize: 8, fontFamily: "Cairo_400Regular", color: "rgba(255,255,255,0.42)", textAlign: "right" },
@@ -574,13 +585,17 @@ const ep_s = StyleSheet.create({
   tvHero: { height: 330 },
   tvHeroTitle: { fontSize: 30, lineHeight: 40 },
   tvText: { fontSize: 18 },
-  tvRow: { paddingHorizontal: 28, paddingVertical: 18, gap: 18 },
+  tvRow: { width: "23.5%", minHeight: 246, flexDirection: "column", alignItems: "stretch", paddingHorizontal: 14, paddingVertical: 14, gap: 10, borderRadius: 16, borderWidth: 1, borderBottomWidth: 1, borderColor: "rgba(255,255,255,0.08)", backgroundColor: "rgba(18,16,28,0.76)" },
+  tvColumnWrapper: { justifyContent: "space-between", paddingHorizontal: 28, gap: 18 },
+  tvListContent: { paddingTop: 4, gap: 18 },
   tvSmallButton: { width: 48, height: 48, borderRadius: 14 },
   tvSearchBar: { paddingVertical: 14, borderRadius: 16 },
-  tvThumbWrap: { width: 118, height: 66, borderRadius: 12 },
+  tvThumbWrap: { width: "100%", aspectRatio: 1.72, height: undefined, borderRadius: 12 },
+  tvInfo: { flex: 0, width: "100%", minHeight: 58 },
+  tvEpisodeActions: { width: "100%", justifyContent: "flex-end" },
   tvEpNum: { fontSize: 18 },
   tvEpTitle: { fontSize: 16, lineHeight: 24 },
   tvEpOriginal: { fontSize: 13 },
   tvPageBtn: { width: 48, height: 48, borderRadius: 12 },
-  tvWatchFromBtn: { marginHorizontal: 28, paddingVertical: 18, borderRadius: 18 },
+  tvWatchFromBtn: { marginHorizontal: 28, paddingVertical: 18, minHeight: 72, borderRadius: 18 },
 });

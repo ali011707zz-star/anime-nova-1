@@ -422,7 +422,11 @@ export default function AnimeDetailScreen() {
   if (loading) return (
     <View style={[d.container, { paddingTop: topPad }]}>
       <Pressable onPress={() => router.canGoBack() ? router.back() : router.replace("/(tabs)")}
-        style={{ position: "absolute", right: 14, top: 14, width: 36, height: 36, backgroundColor: "rgba(0,0,0,0.5)", borderRadius: 14, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: "rgba(255,255,255,0.1)", zIndex: 10 }}>
+        focusable={tvMode}
+        style={({ focused }) => [
+          { position: "absolute", right: 14, top: 14, width: 36, height: 36, backgroundColor: "rgba(0,0,0,0.5)", borderRadius: 14, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: "rgba(255,255,255,0.1)", zIndex: 10 },
+          tvMode && tvFocusStyle(focused),
+        ]}>
         <Ionicons name="chevron-back" size={20} color="#fff" />
       </Pressable>
       <View style={d.center}><ActivityIndicator color="#8B5CF6" size="large" /></View>
@@ -431,7 +435,11 @@ export default function AnimeDetailScreen() {
   if (!anime) return (
     <View style={[d.container, { paddingTop: topPad }]}>
       <Pressable onPress={() => router.canGoBack() ? router.back() : router.replace("/(tabs)")}
-        style={{ position: "absolute", right: 14, top: 14, width: 36, height: 36, backgroundColor: "rgba(0,0,0,0.5)", borderRadius: 14, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: "rgba(255,255,255,0.1)", zIndex: 10 }}>
+        focusable={tvMode}
+        style={({ focused }) => [
+          { position: "absolute", right: 14, top: 14, width: 36, height: 36, backgroundColor: "rgba(0,0,0,0.5)", borderRadius: 14, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: "rgba(255,255,255,0.1)", zIndex: 10 },
+          tvMode && tvFocusStyle(focused),
+        ]}>
         <Ionicons name="chevron-back" size={20} color="#fff" />
       </Pressable>
       <View style={[d.center, { paddingHorizontal: 32, gap: 14 }]}>
@@ -443,7 +451,11 @@ export default function AnimeDetailScreen() {
           يبدو أن هناك مشكلة في الاتصال بمصدر البيانات، حاول مرة أخرى
         </Text>
         <Pressable onPress={() => setRetryTick(t => t + 1)}
-          style={{ marginTop: 6, backgroundColor: "#7C3AED", paddingHorizontal: 24, paddingVertical: 12, borderRadius: 14, flexDirection: "row", alignItems: "center", gap: 8 }}>
+          focusable={tvMode}
+          style={({ focused }) => [
+            { marginTop: 6, backgroundColor: "#7C3AED", paddingHorizontal: 24, paddingVertical: 12, borderRadius: 14, flexDirection: "row", alignItems: "center", gap: 8 },
+            tvMode && tvFocusStyle(focused),
+          ]}>
           <Ionicons name="refresh" size={16} color="#fff" />
           <Text style={{ color: "#fff", fontFamily: "Cairo_700Bold", fontSize: 13 }}>إعادة المحاولة</Text>
         </Pressable>
@@ -579,7 +591,7 @@ export default function AnimeDetailScreen() {
         )}
 
         {/* ── 4-col action grid ── */}
-        <View style={d.actionGrid}>
+        <View style={[d.actionGrid, tvMode && d.tvActionGrid]}>
           {[
             { icon: "chatbubble",  label: "التعليقات", active: false,        activeColor: "#8B5CF6", onPress: () => router.push(`/comments?animeId=${anime?.id}&title=${encodeURIComponent(anime?.title?.romaji || "")}` as any) },
             { icon: "heart",       label: "المفضلة",   active: isFav,        activeColor: "#8B5CF6", onPress: handleFavorite },
@@ -885,13 +897,14 @@ export default function AnimeDetailScreen() {
             <View style={d.ratingBtns}>
               {Array.from({ length: 10 }, (_, i) => i + 1).map(n => (
                 <Pressable key={n} onPress={() => submitRating(n)}
-                  style={[d.ratingNum, n <= (myRating) && d.ratingNumActive]}>
+                  focusable={tvMode}
+                  style={({ focused }) => [d.ratingNum, n <= (myRating) && d.ratingNumActive, tvMode && tvFocusStyle(focused)]}>
                   <Text style={[d.ratingNumText, n <= myRating && d.ratingNumTextActive]}>{n}</Text>
                 </Pressable>
               ))}
             </View>
             {myRating > 0 && (
-              <Pressable onPress={() => submitRating(0)} style={{ marginTop: 10 }}>
+              <Pressable onPress={() => submitRating(0)} focusable={tvMode} style={({ focused }) => [{ marginTop: 10 }, tvMode && tvFocusStyle(focused)]}>
                 <Text style={{ color: "rgba(239,68,68,0.6)", fontSize: 11, fontFamily: "Cairo_700Bold", textAlign: "center" }}>
                   حذف التقييم
                 </Text>
@@ -994,6 +1007,7 @@ const d = StyleSheet.create({
   charName: { fontSize: 8, color: "rgba(255,255,255,0.6)", fontFamily: "Cairo_400Regular", textAlign: "center", lineHeight: 12 },
   emptyTabText: { textAlign: "center", color: "rgba(255,255,255,0.2)", fontSize: 12, fontFamily: "Cairo_400Regular", paddingVertical: 20 },
   tvContent: { paddingHorizontal: 64, paddingBottom: 160 },
+  tvActionGrid: { paddingHorizontal: 64, gap: 16, marginTop: 18 },
   tvHero: { height: 360 },
   tvInfoRow: { paddingHorizontal: 64, gap: 28, marginTop: -88 },
   tvCover: { width: 190, height: 276, borderRadius: 22 },

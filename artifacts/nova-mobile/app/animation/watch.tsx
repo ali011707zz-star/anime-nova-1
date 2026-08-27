@@ -302,24 +302,26 @@ function SrcRow({ src, idx, onPlay }: { src: AnimSrc; idx: number; onPlay: (s: A
 
   return (
     <Pressable onPress={() => onPlay(src)} focusable={tvMode}
-      style={({ focused }) => [w.srcRow, tvMode && tvFocusStyle(focused)]}>
-      <View style={[w.srcIcon, { backgroundColor: qs.badge, borderColor: qs.border }]}>
-        <Ionicons name={isEmbed ? "tv" : "play-circle"} size={14} color={qs.text} />
+      style={({ focused }) => [w.srcRow, tvMode && w.tvSrcRow, tvMode && tvFocusStyle(focused)]}
+      accessibilityRole="button"
+      accessibilityLabel={`تشغيل سيرفر ${idx + 1} بجودة ${Q_SHORT[q]}`}>
+      <View style={[w.srcIcon, tvMode && w.tvSrcIcon, { backgroundColor: qs.badge, borderColor: qs.border }]}>
+        <Ionicons name={isEmbed ? "tv" : "play-circle"} size={tvMode ? 24 : 14} color={qs.text} />
       </View>
       <View style={{ flex: 1, minWidth: 0 }}>
         <View style={{ flexDirection: "row", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-          <Text style={w.srcNum}>سيرفر {idx + 1}</Text>
-          <View style={w.srcTag}><Text style={w.srcTagText}>{tag}</Text></View>
-          {hasSub && <View style={w.srcSubBadge}><Text style={w.srcSubText}>ترجمة</Text></View>}
+          <Text style={[w.srcNum, tvMode && w.tvSrcNum]}>سيرفر {idx + 1}</Text>
+          <View style={[w.srcTag, tvMode && w.tvSrcTag]}><Text style={[w.srcTagText, tvMode && w.tvSrcTagText]}>{tag}</Text></View>
+          {hasSub && <View style={[w.srcSubBadge, tvMode && w.tvSrcSubBadge]}><Text style={[w.srcSubText, tvMode && w.tvSrcSubText]}>ترجمة</Text></View>}
         </View>
       </View>
       <View style={w.srcRight}>
-        <View style={[w.srcQBadge, { backgroundColor: qs.badge, borderColor: qs.border }]}>
-          <Text style={[w.srcQText, { color: qs.text }]}>{Q_SHORT[q]}</Text>
+        <View style={[w.srcQBadge, tvMode && w.tvSrcQBadge, { backgroundColor: qs.badge, borderColor: qs.border }]}>
+          <Text style={[w.srcQText, tvMode && w.tvSrcQText, { color: qs.text }]}>{Q_SHORT[q]}</Text>
         </View>
-        <View style={w.srcPlayBtn}>
-          <Ionicons name="play" size={10} color="#fff" />
-          <Text style={w.srcPlayText}>تشغيل</Text>
+        <View style={[w.srcPlayBtn, tvMode && w.tvSrcPlayBtn]}>
+          <Ionicons name="play" size={tvMode ? 18 : 10} color="#fff" />
+          <Text style={[w.srcPlayText, tvMode && w.tvSrcPlayText]}>تشغيل</Text>
         </View>
       </View>
     </Pressable>
@@ -585,12 +587,16 @@ export default function AnimationWatchScreen() {
   /* ── Portrait lock on picker/loading; unlock for embed ── */
   useEffect(() => {
     if (screen === "loading" || screen === "picker") {
-      ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP).catch(() => {});
+      ScreenOrientation.lockAsync(
+        tvMode
+          ? ScreenOrientation.OrientationLock.LANDSCAPE
+          : ScreenOrientation.OrientationLock.PORTRAIT_UP,
+      ).catch(() => {});
     } else if (screen === "embed") {
       ScreenOrientation.unlockAsync().catch(() => {});
     }
     // "native" orientation is handled by RiftPlayer itself
-  }, [screen]);
+  }, [screen, tvMode]);
 
 
   /* ── Resolve and play only the selected source ── */
@@ -1054,7 +1060,11 @@ export default function AnimationWatchScreen() {
         </Pressable>
       </View>
 
-      <ScrollView style={{ flex: 1 }} contentContainerStyle={w.pickerContent} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        style={{ flex: 1 }}
+        contentContainerStyle={[w.pickerContent, tvMode && w.tvPickerContent]}
+        showsVerticalScrollIndicator={false}
+      >
 
         {/* ── Info card ── */}
         <View style={w.infoCard}>
@@ -1208,6 +1218,7 @@ const w = StyleSheet.create({
   retryBtn: { width: 32, height: 32, borderRadius: 10, backgroundColor: "rgba(139,92,246,0.12)", borderWidth: 1, borderColor: "rgba(139,92,246,0.25)", alignItems: "center", justifyContent: "center" },
 
   pickerContent: { padding: 14, paddingBottom: 100, gap: 12 },
+  tvPickerContent: { paddingHorizontal: 56, paddingTop: 24, gap: 20 },
 
   /* ── Info card ── */
   infoCard: { flexDirection: "row", alignItems: "flex-start", gap: 14, backgroundColor: "rgba(15,12,28,0.80)", borderRadius: 18, borderWidth: 1, borderColor: "rgba(139,92,246,0.14)", padding: 14 },
@@ -1249,6 +1260,17 @@ const w = StyleSheet.create({
   srcQText: { fontSize: 9, fontFamily: "Cairo_700Bold" },
   srcPlayBtn: { flexDirection: "row", alignItems: "center", gap: 4, backgroundColor: "rgba(109,40,217,0.88)", borderRadius: 10, paddingHorizontal: 11, paddingVertical: 6, borderWidth: 1, borderColor: "rgba(167,139,250,0.28)" },
   srcPlayText: { fontSize: 10, fontFamily: "Cairo_800ExtraBold", color: "#fff" },
+  tvSrcRow: { minHeight: 92, paddingHorizontal: 28, paddingVertical: 18, gap: 18, borderRadius: 14 },
+  tvSrcIcon: { width: 52, height: 52, borderRadius: 15 },
+  tvSrcNum: { fontSize: 20 },
+  tvSrcTag: { paddingHorizontal: 12, paddingVertical: 5, borderRadius: 9 },
+  tvSrcTagText: { fontSize: 16 },
+  tvSrcSubBadge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8 },
+  tvSrcSubText: { fontSize: 14 },
+  tvSrcQBadge: { paddingHorizontal: 16, paddingVertical: 9, borderRadius: 11 },
+  tvSrcQText: { fontSize: 17 },
+  tvSrcPlayBtn: { minWidth: 128, minHeight: 58, justifyContent: "center", paddingHorizontal: 20, paddingVertical: 14, borderRadius: 14, gap: 8 },
+  tvSrcPlayText: { fontSize: 17 },
 
   empty: { alignItems: "center", justifyContent: "center", gap: 14, paddingVertical: 60 },
   emptyTitle: { fontSize: 15, fontFamily: "Cairo_700Bold", color: "rgba(255,255,255,0.45)" },

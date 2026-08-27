@@ -66,6 +66,7 @@ export function DrawerMenu({ visible, onClose }: Props) {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const tvMode = isTvDevice(Dimensions.get("window").width, Dimensions.get("window").height);
+  const drawerWidth = tvMode ? Math.min(W * 0.42, 520) : DRAWER_W;
   const topPad = Platform.OS === "web" ? 0 : insets.top;
   const { watchHistory, favorites } = useApp();
   const [userData, setUserData] = React.useState<UserData | null>(null);
@@ -89,7 +90,7 @@ export function DrawerMenu({ visible, onClose }: Props) {
   const [g1, g2] = AVATAR_COLORS[colorIdx];
   const avatarLetter = ((userData?.displayName || userData?.username || "م")[0] || "م").toUpperCase();
 
-  const slideX = useRef(new Animated.Value(DRAWER_W)).current;
+  const slideX = useRef(new Animated.Value(drawerWidth)).current;
   const opacity = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
@@ -106,7 +107,7 @@ export function DrawerMenu({ visible, onClose }: Props) {
     } else {
       Animated.parallel([
         Animated.timing(slideX, {
-          toValue: DRAWER_W,
+          toValue: drawerWidth,
           duration: 150,
           easing: Easing.bezier(0.4, 0, 1, 1),
           useNativeDriver: true,
@@ -114,7 +115,7 @@ export function DrawerMenu({ visible, onClose }: Props) {
         Animated.timing(opacity, { toValue: 0, duration: 130, useNativeDriver: true }),
       ]).start();
     }
-  }, [visible]);
+  }, [drawerWidth, visible]);
 
   function nav(route: string) {
     onClose();
@@ -131,25 +132,25 @@ export function DrawerMenu({ visible, onClose }: Props) {
       </Animated.View>
 
       {/* Drawer panel — slides from RIGHT (RTL) */}
-      <Animated.View style={[s.drawer, { transform: [{ translateX: slideX }], paddingTop: topPad }]}>
+      <Animated.View style={[s.drawer, tvMode && s.tvDrawer, { width: drawerWidth, transform: [{ translateX: slideX }], paddingTop: topPad }]}>
         <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: insets.bottom + 24 }}>
 
           {/* ── Logo header ── */}
-          <View style={s.logoRow}>
+          <View style={[s.logoRow, tvMode && s.tvLogoRow]}>
             <LinearGradient colors={["#8B5CF6", "#6D28D9"]} style={s.logoBadge}>
-              <Ionicons name="play" size={14} color="#fff" />
+              <Ionicons name="play" size={tvMode ? 22 : 14} color="#fff" />
             </LinearGradient>
             <View>
-              <Text style={s.logoText}>Anime <Text style={{ color: "#8B5CF6" }}>NOVA</Text></Text>
-              <Text style={s.logoSub}>منصة الأنمي العربية</Text>
+              <Text style={[s.logoText, tvMode && s.tvLogoText]}>Anime <Text style={{ color: "#8B5CF6" }}>NOVA</Text></Text>
+              <Text style={[s.logoSub, tvMode && s.tvLogoSub]}>منصة الأنمي العربية</Text>
             </View>
-            <Pressable onPress={onClose} focusable={tvMode} style={({ focused }) => [s.closeBtn, tvMode && tvFocusStyle(focused)]}>
-              <Ionicons name="close" size={20} color="rgba(255,255,255,0.5)" />
+            <Pressable onPress={onClose} focusable={tvMode} style={({ focused }) => [s.closeBtn, tvMode && s.tvCloseBtn, tvMode && tvFocusStyle(focused)]}>
+              <Ionicons name="close" size={tvMode ? 28 : 20} color="rgba(255,255,255,0.5)" />
             </Pressable>
           </View>
 
           {/* ── User card ── */}
-          <Pressable onPress={() => nav("/settings")} focusable={tvMode} style={({ focused }) => [s.userCard, tvMode && tvFocusStyle(focused)]}>
+          <Pressable onPress={() => nav("/settings")} focusable={tvMode} style={({ focused }) => [s.userCard, tvMode && s.tvUserCard, tvMode && tvFocusStyle(focused)]}>
             <LinearGradient colors={["rgba(139,92,246,0.15)", "rgba(109,40,217,0.08)"]} style={s.userCardInner}>
               {/* Avatar: real photo or gradient letter */}
               {userData?.profileImageUrl ? (
@@ -215,13 +216,14 @@ function DrawerItem({ item, onPress, tvMode }: { item: NavItem; onPress: () => v
   return (
     <Pressable onPress={onPress} focusable={tvMode} style={({ pressed, focused }) => [
       s.navItem,
+      tvMode && s.tvNavItem,
       pressed && { backgroundColor: "rgba(255,255,255,0.04)" },
       tvMode && tvFocusStyle(focused),
     ]}>
-      <View style={[s.navIcon, { backgroundColor: (item.color || "#8B5CF6") + "18" }]}>
-        <Ionicons name={item.icon} size={18} color={item.color || "#8B5CF6"} />
+      <View style={[s.navIcon, tvMode && s.tvNavIcon, { backgroundColor: (item.color || "#8B5CF6") + "18" }]}>
+        <Ionicons name={item.icon} size={tvMode ? 26 : 18} color={item.color || "#8B5CF6"} />
       </View>
-      <Text style={s.navLabel}>{item.label}</Text>
+      <Text style={[s.navLabel, tvMode && s.tvNavLabel]}>{item.label}</Text>
       {item.badge && (
         <View style={s.badge}>
           <Text style={s.badgeText}>{item.badge}</Text>
@@ -249,24 +251,30 @@ const s = StyleSheet.create({
     shadowRadius: 16,
     elevation: 20,
   },
+  tvDrawer: { borderLeftWidth: 2 },
   logoRow: {
     flexDirection: "row", alignItems: "center", gap: 10,
     paddingHorizontal: 20, paddingVertical: 20,
     borderBottomWidth: 1, borderBottomColor: "rgba(255,255,255,0.06)",
   },
+  tvLogoRow: { paddingHorizontal: 28, paddingVertical: 28, gap: 16 },
   logoBadge: {
     width: 34, height: 34, borderRadius: 10,
     alignItems: "center", justifyContent: "center",
   },
   logoText: { fontSize: 17, fontFamily: "Cairo_800ExtraBold", color: "#fff" },
+  tvLogoText: { fontSize: 25 },
   logoSub: { fontSize: 9, fontFamily: "Cairo_400Regular", color: "rgba(255,255,255,0.3)", marginTop: -2 },
+  tvLogoSub: { fontSize: 14, marginTop: 1 },
   closeBtn: {
     marginStart: "auto" as any,
     width: 32, height: 32, borderRadius: 16,
     alignItems: "center", justifyContent: "center",
     backgroundColor: "rgba(255,255,255,0.05)",
   },
+  tvCloseBtn: { width: 48, height: 48, borderRadius: 16 },
   userCard: { marginHorizontal: 14, marginTop: 16, marginBottom: 8, borderRadius: 18, overflow: "hidden", borderWidth: 1, borderColor: "rgba(139,92,246,0.2)" },
+  tvUserCard: { marginHorizontal: 22, marginTop: 24, marginBottom: 14, borderRadius: 22 },
   userCardInner: { flexDirection: "row", alignItems: "center", gap: 12, padding: 14 },
   userAvatar: {
     width: 42, height: 42, borderRadius: 14,
@@ -292,11 +300,14 @@ const s = StyleSheet.create({
     paddingHorizontal: 14, paddingVertical: 11,
     marginHorizontal: 6, borderRadius: 14,
   },
+  tvNavItem: { paddingHorizontal: 22, paddingVertical: 18, marginHorizontal: 14, borderRadius: 18, gap: 18 },
   navIcon: {
     width: 36, height: 36, borderRadius: 10,
     alignItems: "center", justifyContent: "center",
   },
+  tvNavIcon: { width: 52, height: 52, borderRadius: 15 },
   navLabel: { flex: 1, fontSize: 13, fontFamily: "Cairo_700Bold", color: "rgba(255,255,255,0.85)" },
+  tvNavLabel: { fontSize: 19 },
   badge: {
     backgroundColor: "rgba(139,92,246,0.2)",
     borderRadius: 8, paddingHorizontal: 7, paddingVertical: 2,

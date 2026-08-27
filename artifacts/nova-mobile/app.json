@@ -49,6 +49,7 @@
       "favicon": "./assets/images/icon.png"
     },
     "plugins": [
+      "./plugins/withAndroidTv",
       [
         "expo-router",
         {

@@ -151,8 +151,9 @@ export function RiftPlayer({
   const scheduleHide = useCallback(() => {
     if (hideTimer.current) clearTimeout(hideTimer.current);
     setControlsVisible(true);
+    if (tvMode) return;
     hideTimer.current = setTimeout(() => setControlsVisible(false), 4500);
-  }, []);
+  }, [tvMode]);
 
   useEffect(() => {
     scheduleHide();
@@ -401,7 +402,7 @@ export function RiftPlayer({
       />
       {controlsVisible && (
         <View pointerEvents="box-none" style={StyleSheet.absoluteFill}>
-          <View style={styles.topBar}>
+          <View style={[styles.topBar, tvMode && styles.tvTopBar]}>
             <Pressable
               onPress={onBack}
               focusable={tvMode}
@@ -411,8 +412,8 @@ export function RiftPlayer({
               <Ionicons name="close" size={22} color="#fff" />
             </Pressable>
             <View style={styles.titleBlock}>
-              <Text numberOfLines={1} style={styles.title}>{title || "NOVA"}</Text>
-              <Text numberOfLines={1} style={styles.meta}>
+              <Text numberOfLines={1} style={[styles.title, tvMode && styles.tvTitle]}>{title || "NOVA"}</Text>
+              <Text numberOfLines={1} style={[styles.meta, tvMode && styles.tvMeta]}>
                 {episode != null ? `الحلقة ${episode}` : episodeTitle || ""}
               </Text>
             </View>
@@ -437,14 +438,14 @@ export function RiftPlayer({
               </Pressable>
             )}
           </View>
-          <View style={styles.bottomArea}>
+          <View style={[styles.bottomArea, tvMode && styles.tvBottomArea]}>
             <View style={styles.seekRow}>
-              <Text style={styles.time}>{formatTime(position)}</Text>
+              <Text style={[styles.time, tvMode && styles.tvTime]}>{formatTime(position)}</Text>
               <View {...(seekPan ? seekPan.panHandlers : {})} style={styles.seekTrack}>
                 <View style={[styles.seekFill, { width: `${progress * 100}%` }]} />
                 <View style={[styles.seekThumb, { left: `${progress * 100}%` }]} />
               </View>
-              <Text style={styles.time}>{formatTime(duration)}</Text>
+              <Text style={[styles.time, tvMode && styles.tvTime]}>{formatTime(duration)}</Text>
             </View>
             <View style={styles.controlsRow}>
               <View style={styles.controlSide}>
@@ -457,6 +458,18 @@ export function RiftPlayer({
                   <Text style={styles.controlText}>10</Text>
                 </Pressable>
               </View>
+              {tvMode && onPrevEpisode && (
+                <Pressable
+                  onPress={onPrevEpisode}
+                  focusable
+                  style={({ focused }) => [styles.control, styles.tvControl, styles.tvEpisodeControl, tvFocusStyle(focused)]}
+                  accessibilityRole="button"
+                  accessibilityLabel="الحلقة السابقة"
+                >
+                  <Ionicons name="play-skip-back" size={22} color="#fff" />
+                  <Text style={styles.tvEpisodeText}>السابق</Text>
+                </Pressable>
+              )}
               <View style={styles.controlCenter}>
                 <Pressable
                   onPress={togglePlayback}
@@ -467,6 +480,18 @@ export function RiftPlayer({
                   <Ionicons name={isPlaying ? "pause" : "play"} size={24} color="#09090b" />
                 </Pressable>
               </View>
+              {tvMode && canNext && onNextEpisode && (
+                <Pressable
+                  onPress={onNextEpisode}
+                  focusable
+                  style={({ focused }) => [styles.control, styles.tvControl, styles.tvEpisodeControl, tvFocusStyle(focused)]}
+                  accessibilityRole="button"
+                  accessibilityLabel="الحلقة التالية"
+                >
+                  <Text style={styles.tvEpisodeText}>التالي</Text>
+                  <Ionicons name="play-skip-forward" size={22} color="#fff" />
+                </Pressable>
+              )}
               <View style={styles.controlSide}>
                 <Pressable
                   onPress={() => seek(position + 10)}
@@ -572,13 +597,18 @@ const styles = StyleSheet.create({
   message: { color: "rgba(255,255,255,0.75)", fontSize: 14, textAlign: "center" },
   buffering: { ...StyleSheet.absoluteFillObject, alignItems: "center", justifyContent: "center" },
   topBar: { position: "absolute", top: 12, left: 12, right: 12, flexDirection: "row", alignItems: "center", gap: 8 },
+  tvTopBar: { top: 28, left: 40, right: 40, gap: 18 },
   titleBlock: { flex: 1, alignItems: "center" },
   title: { color: "#fff", fontSize: 15, fontWeight: "700" },
+  tvTitle: { fontSize: 24, fontWeight: "800" },
   meta: { color: "rgba(255,255,255,0.6)", fontSize: 11, marginTop: 2 },
+  tvMeta: { fontSize: 16, marginTop: 4 },
   iconButton: { padding: 8, borderRadius: 18, backgroundColor: "rgba(0,0,0,0.45)" },
   bottomArea: { position: "absolute", left: 12, right: 12, bottom: 12 },
+  tvBottomArea: { left: 40, right: 40, bottom: 28 },
   seekRow: { flexDirection: "row", alignItems: "center", gap: 8 },
   time: { color: "#fff", fontSize: 11, minWidth: 35, textAlign: "center" },
+  tvTime: { fontSize: 16, minWidth: 58 },
   seekTrack: { flex: 1, height: 22, justifyContent: "center" },
   seekFill: { height: 4, borderRadius: 2, backgroundColor: "#a78bfa" },
   seekThumb: { position: "absolute", width: 12, height: 12, borderRadius: 6, backgroundColor: "#fff", marginLeft: -6 },
@@ -587,6 +617,8 @@ const styles = StyleSheet.create({
   controlCenter: { width: 66, alignItems: "center" },
   control: { flexDirection: "row", alignItems: "center", padding: 7 },
   tvControl: { padding: 14, minWidth: 86, justifyContent: "center" },
+  tvEpisodeControl: { minWidth: 128, minHeight: 64, borderRadius: 14 },
+  tvEpisodeText: { color: "#fff", fontSize: 16, fontWeight: "800", marginHorizontal: 5 },
   controlText: { color: "#fff", fontSize: 10, marginLeft: -5 },
   playButton: { width: 48, height: 48, borderRadius: 24, backgroundColor: "#c4b5fd", alignItems: "center", justifyContent: "center" },
   tvPlayButton: { width: 68, height: 68, borderRadius: 34 },

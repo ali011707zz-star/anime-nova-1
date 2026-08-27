@@ -14,6 +14,7 @@ import React, { useEffect, useState } from "react";
 import { Animated, Dimensions, I18nManager, Image, Platform, StyleSheet, Text, View } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider } from "react-native-safe-area-context";
+import * as ScreenOrientation from "expo-screen-orientation";
 import * as Sentry from "@sentry/react-native";
 import { initializeRewardedAds } from "@/utils/rewardedAd";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
@@ -117,6 +118,13 @@ function RootLayout() {
   const [brandSplashVisible, setBrandSplashVisible] = useState(true);
   const [telegramAnnouncementVisible, setTelegramAnnouncementVisible] = useState(false);
   const tvMode = isTvDevice(Dimensions.get("window").width, Dimensions.get("window").height);
+
+  // TV uses the same app bundle as phones. Only the detected TV runtime is
+  // locked to landscape; phone orientation behavior remains unchanged.
+  useEffect(() => {
+    if (!tvMode) return;
+    ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE).catch(() => {});
+  }, [tvMode]);
 
   // أظهر شاشة Anime NOVA المخصصة فوراً بدلاً من إبقاء native splash (الأيقونة فقط)
   // فوقها أثناء انتظار الخطوط.
