@@ -1,5 +1,13 @@
 import React from "react";
-import { Dimensions, Platform, Pressable, PressableProps, StyleProp, ViewStyle } from "react-native";
+import {
+  Dimensions,
+  Platform,
+  Pressable,
+  PressableProps,
+  StyleProp,
+  ViewStyle,
+  useWindowDimensions,
+} from "react-native";
 
 /**
  * Android TV and most certified TV boxes expose Platform.isTV through React
@@ -79,6 +87,44 @@ export function tvLayout(width: number, height: number) {
  * targets/text comfortably readable on a ten-foot screen. */
 export function tvScale(tv: boolean, phone: number, television: number) {
   return tv ? television : phone;
+}
+
+/**
+ * Central ten-foot UI metrics.
+ *
+ * Android TV can report a 720p, 1080p, or 4K logical window, so using the
+ * physical pixel width directly would make a 4K TV four times too large.
+ * The TV branch intentionally stays within a 2x–2.4x range over the phone
+ * reference while still responding to split-screen/rotation changes.
+ */
+export function responsiveScale(
+  phoneValue: number,
+  width: number,
+  tv: boolean,
+  tvValue?: number,
+) {
+  if (tv) {
+    const tvScale = Math.max(2, Math.min(2.4, width / 960));
+    return Math.round(tvValue ?? phoneValue * tvScale);
+  }
+  const phoneScale = Math.max(0.88, Math.min(1.1, width / 375));
+  return Math.round(phoneValue * phoneScale);
+}
+
+export function useTvMetrics() {
+  const { width, height } = useWindowDimensions();
+  const tv = isTvDevice(width, height);
+  const size = (phoneValue: number, tvValue?: number) =>
+    responsiveScale(phoneValue, width, tv, tvValue);
+
+  return {
+    width,
+    height,
+    tv,
+    size,
+    horizontalPadding: size(16, 64),
+    controlTarget: size(44, 72),
+  };
 }
 
 export const tvReadable = {

@@ -6,7 +6,6 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   ActivityIndicator,
   Alert,
-  Dimensions,
   PanResponder,
   Platform,
   Pressable,
@@ -16,7 +15,7 @@ import {
 } from "react-native";
 import { useNovaMedia3Player, NovaMedia3View } from "../lib/nova-media3";
 import { openIsolatedPlayer } from "../lib/isolatedPlayer";
-import { isTvDevice, tvFocusStyle } from "../utils/tv";
+import { tvFocusStyle, useTvMetrics } from "../utils/tv";
 import type { PlayerSource, SubCue } from "./RiftPlayer";
 
 type Props = {
@@ -39,7 +38,6 @@ type Props = {
   onError?: () => void;
 };
 
-const { width: SCREEN_WIDTH } = Dimensions.get("window");
 const SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 2];
 
 function validUrl(value: unknown): value is string {
@@ -129,7 +127,7 @@ export function RiftPlayer({
   const [duration, setDuration] = useState(0);
   const [isPlaying, setIsPlaying] = useState(true);
   const [buffering, setBuffering] = useState(true);
-  const tvMode = isTvDevice(Dimensions.get("window").width, Dimensions.get("window").height);
+  const { width: windowWidth, tv: tvMode } = useTvMetrics();
   const [failed, setFailed] = useState(!source);
   const [speed, setSpeed] = useState(1);
   const [showSources, setShowSources] = useState(false);
@@ -265,7 +263,7 @@ export function RiftPlayer({
       onStartShouldSetPanResponder: () => true,
       onMoveShouldSetPanResponder: () => true,
       onPanResponderRelease: (event) => {
-        const percentage = Math.max(0, Math.min(1, event.nativeEvent.locationX / SCREEN_WIDTH));
+        const percentage = Math.max(0, Math.min(1, event.nativeEvent.locationX / Math.max(windowWidth, 1)));
         seek(percentage * duration);
       },
     })),

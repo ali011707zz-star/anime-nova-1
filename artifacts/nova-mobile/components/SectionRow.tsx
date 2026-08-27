@@ -1,10 +1,20 @@
 import React from "react";
-import { FlatList, Platform, Pressable, ScrollView, StyleSheet, Text, View, useWindowDimensions } from "react-native";
+import {
+  FlatList,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TVFocusGuideView,
+  View,
+  useWindowDimensions,
+} from "react-native";
 import { useColors } from "@/hooks/useColors";
 import { AnilistMedia } from "@/utils/anilist";
 import { AnimeCard, getRailCardWidth, getRailSidePadding } from "./AnimeCard";
 import { Ionicons } from "@expo/vector-icons";
-import { isTvDevice, tvFocusStyle } from "@/utils/tv";
+import { isTvDevice, tvFocusStyle, useTvMetrics } from "@/utils/tv";
 
 type Props = {
   title: string;
@@ -17,44 +27,53 @@ export const SectionRow = React.memo(function SectionRow({ title, items, onSeeAl
   const colors = useColors();
   const { width, height } = useWindowDimensions();
   const tvMode = isTvDevice(width, height);
+  const { size: scaleSize } = useTvMetrics();
   const cardWidth = getRailCardWidth(width, tvMode ? 5 : 3);
   const sidePadding = getRailSidePadding(width);
+  const FocusGuide: React.ComponentType<any> = tvMode ? TVFocusGuideView : View;
 
   if (!items.length) return null;
 
   return (
     <View style={styles.container}>
       <View style={styles.header}>
-            <Text style={[styles.title, tvMode && styles.tvTitle, { color: colors.text }]}>{title}</Text>
+            <Text style={[styles.title, { fontSize: scaleSize(17, 25), lineHeight: scaleSize(22, 34), color: colors.text }]}>{title}</Text>
         {onSeeAll && (
           <Pressable
             onPress={onSeeAll}
             focusable={tvMode}
             style={({ focused }) => [styles.seeAll, tvMode && tvFocusStyle(focused)]}
           >
-            <Text style={[styles.seeAllText, tvMode && styles.tvSeeAllText, { color: colors.primary }]}>عرض الكل</Text>
+            <Text style={[styles.seeAllText, { fontSize: scaleSize(13, 18), color: colors.primary }]}>عرض الكل</Text>
             <Ionicons name="chevron-back" size={tvMode ? 20 : 14} color={colors.primary} />
           </Pressable>
         )}
       </View>
+      <FocusGuide autoFocus={false} style={styles.focusGuide}>
         <FlatList
-        data={items.slice(0, tvMode ? 10 : items.length)}
-        horizontal
-        keyExtractor={(item) => String(item.id)}
-        renderItem={({ item }) => <AnimeCard anime={item} size={size} cardWidth={cardWidth} />}
-        showsHorizontalScrollIndicator={false}
-        contentContainerStyle={[styles.scroll, { paddingHorizontal: sidePadding }]}
-        // These rails are rendered inside the home ScrollView. FlatList keeps
-        // off-screen posters out of the native view tree, which matters on
-        // tablets where several rails are visible in one session.
-        initialNumToRender={4}
-        maxToRenderPerBatch={2}
-        updateCellsBatchingPeriod={50}
-        windowSize={3}
+          data={items.slice(0, tvMode ? 10 : items.length)}
+          horizontal
+          keyExtractor={(item) => String(item.id)}
+          renderItem={({ item }) => <AnimeCard anime={item} size={size} cardWidth={cardWidth} />}
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={[styles.scroll, { paddingHorizontal: sidePadding }]}
+          // These rails are rendered inside the home ScrollView. FlatList keeps
+          // off-screen posters out of the native view tree, which matters on
+          // tablets where several rails are visible in one session.
+          initialNumToRender={tvMode ? 5 : 4}
+          maxToRenderPerBatch={tvMode ? 3 : 2}
+          updateCellsBatchingPeriod={50}
+          windowSize={tvMode ? 4 : 3}
+          getItemLayout={(_, index) => ({
+            length: cardWidth + 14,
+            offset: (cardWidth + 14) * index,
+            index,
+          })}
           // Nested horizontal rails on Android TV can permanently lose cards
           // when RN clips recycled children outside the viewport.
-          removeClippedSubviews={false}
-      />
+          removeClippedSubviews={Platform.OS === "android" && !tvMode}
+        />
+      </FocusGuide>
     </View>
   );
 });
@@ -80,9 +99,9 @@ const styles = StyleSheet.create({
   container: { marginBottom: 24 },
   header: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 16, marginBottom: 12 },
   title: { fontSize: 17, fontWeight: "800" },
-  tvTitle: { fontSize: 25, lineHeight: 34 },
   seeAll: { flexDirection: "row", alignItems: "center", gap: 2 },
   seeAllText: { fontSize: 13, fontWeight: "600" },
+  focusGuide: { minHeight: 1 },
   tvSeeAllText: { fontSize: 18 },
   scroll: { paddingHorizontal: 16, gap: 14 },
   skeletonTitle: { width: 140, height: 18, borderRadius: 6, marginHorizontal: 16, marginBottom: 12 },

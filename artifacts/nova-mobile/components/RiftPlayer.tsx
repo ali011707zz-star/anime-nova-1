@@ -19,7 +19,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { getBaseUrl } from "@/utils/api";
-import { TvPressable, isTvDevice } from "@/utils/tv";
+import { TvPressable, useTvMetrics } from "@/utils/tv";
 
 const { width: W, height: H } = Dimensions.get("window");
 // Keep the existing player controls in one place while making every control
@@ -423,7 +423,7 @@ export function RiftPlayer({
   onError,
 }: Props) {
   const insets = useSafeAreaInsets();
-  const tvMode = isTvDevice(W, H);
+  const { tv: tvMode } = useTvMetrics();
 
   /* أثناء فحص المصادر، زر الرجوع في الهاتف يجب أن يعيد المستخدم إلى
      منتقي السيرفرات داخل نفس شاشة الحلقة، لا إلى صفحة الحلقات. */
@@ -2152,7 +2152,10 @@ export function RiftPlayer({
            retaining the same native decoder/player. */
         // SurfaceView avoids the persistent split-tone compositor artifact
         // seen on Android TV with TextureView. Screenshots are not used on TV.
-        surfaceType={Platform.OS === "android" && !(Platform as typeof Platform & { isTV?: boolean }).isTV ? "textureView" : undefined}
+        /* Keep SurfaceView on Android TV: the current TV compositor path avoids
+           the split-tone artifact seen with TextureView on the affected boxes.
+           The phone path keeps TextureView for screenshot support. */
+        surfaceType={Platform.OS === "android" && tvMode ? "surfaceView" : Platform.OS === "android" ? "textureView" : undefined}
       />
 
       {/* Smooth first-frame handoff instead of a sudden black jump. */}

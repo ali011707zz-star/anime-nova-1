@@ -5,7 +5,7 @@ import { useRouter } from "expo-router";
 import React from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { useColors } from "@/hooks/useColors";
-import { isTvDevice, tvFocusStyle } from "@/utils/tv";
+import { isTvDevice, tvFocusStyle, useTvMetrics } from "@/utils/tv";
 import { getPosterUri } from "@/utils/media";
 
 type Props = {
@@ -34,6 +34,7 @@ export const AnimeCard = React.memo(function AnimeCard({ anime, size = "sm", car
   const router = useRouter();
   const colors = useColors();
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();
+  const { size: scaleSize } = useTvMetrics();
   // Recalculate on rotation/window resize and keep poster widths bounded so
   // tablets do not decode a handful of unnecessarily huge images.
   const smallCardWidth = getRailCardWidth(windowWidth, 3);
@@ -83,11 +84,17 @@ export const AnimeCard = React.memo(function AnimeCard({ anime, size = "sm", car
           </View>
         )}
       </View>
-      <Text style={[styles.title, tvMode && styles.tvTitle, { color: colors.text }]} numberOfLines={2}>
+      <Text
+        style={[
+          styles.title,
+          { fontSize: scaleSize(12, 21), lineHeight: scaleSize(16, 29), color: colors.text },
+        ]}
+        numberOfLines={2}
+      >
         {title}
       </Text>
       {anime.episodes && (
-        <Text style={[styles.epCount, tvMode && styles.tvEpCount, { color: colors.mutedForeground }]}>
+        <Text style={[styles.epCount, { fontSize: scaleSize(10, 16), color: colors.mutedForeground }]}>
           {anime.episodes} حلقة
         </Text>
       )}
@@ -118,7 +125,5 @@ const styles = StyleSheet.create({
   },
   progressFill: { height: 3 },
   title: { fontSize: 12, fontWeight: "600", lineHeight: 16 },
-  tvTitle: { fontSize: 21, lineHeight: 29 },
   epCount: { fontSize: 10 },
-  tvEpCount: { fontSize: 16 },
 });
