@@ -38,27 +38,29 @@ class DetailActivity : ComponentActivity() {
 
     private fun buildUi() {
         val scroll = ScrollView(this).apply {
-            setBackgroundColor(Color.rgb(9, 9, 11))
+            setBackgroundColor(NovaColors.background)
         }
         body = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             layoutDirection = View.LAYOUT_DIRECTION_RTL
-            setPadding(dp(54), dp(30), dp(54), dp(54))
+            setPadding(dp(46), dp(28), dp(46), dp(54))
         }
         scroll.addView(body)
 
-        val back = tvButton(this, "رجوع")
+        val back = tvButton(this, "رجوع").apply {
+            textSize = 20f
+        }
         back.setOnClickListener { finish() }
-        body.addView(back, LinearLayout.LayoutParams(dp(140), dp(58)))
+        body.addView(back, LinearLayout.LayoutParams(dp(150), dp(62)))
 
         progress = ProgressBar(this).apply {
-            indeterminateTintList = android.content.res.ColorStateList.valueOf(Color.rgb(192, 132, 252))
+            indeterminateTintList = android.content.res.ColorStateList.valueOf(NovaColors.primary)
         }
         body.addView(progress, LinearLayout.LayoutParams(dp(44), dp(44)).apply {
             gravity = android.view.Gravity.CENTER_HORIZONTAL
             topMargin = dp(28)
         })
-        error = tvText(this, "", 19f, Color.rgb(248, 113, 113)).apply {
+        error = tvText(this, "", 20f, NovaColors.danger).apply {
             gravity = android.view.Gravity.CENTER
             visibility = View.GONE
         }
@@ -96,55 +98,76 @@ class DetailActivity : ComponentActivity() {
             orientation = LinearLayout.HORIZONTAL
             layoutDirection = View.LAYOUT_DIRECTION_RTL
             gravity = android.view.Gravity.TOP
-            setPadding(0, dp(28), 0, dp(20))
+            setPadding(0, dp(26), 0, dp(26))
         }
         val cover = ImageView(this).apply {
             scaleType = ImageView.ScaleType.CENTER_CROP
         }
         ImageLoader.load(cover, item.coverUrl)
-        header.addView(cover, LinearLayout.LayoutParams(dp(220), dp(310)))
+        cover.background = roundedBackground(this, NovaColors.surfaceRaised, NovaColors.divider, 1, 10)
+        cover.clipToOutline = true
+        header.addView(cover, LinearLayout.LayoutParams(dp(260), dp(360)))
 
         val info = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             layoutDirection = View.LAYOUT_DIRECTION_RTL
-            setPadding(dp(28), 0, 0, 0)
+            setPadding(dp(34), 0, 0, 0)
         }
-        val title = tvText(this, item.title, 28f).apply {
+        val title = tvText(this, item.title, 36f, NovaColors.text).apply {
             typeface = android.graphics.Typeface.DEFAULT_BOLD
+            maxLines = 2
+            ellipsize = android.text.TextUtils.TruncateAt.END
         }
-        info.addView(title, LinearLayout.LayoutParams(-1, dp(64)))
+        info.addView(title, LinearLayout.LayoutParams(-1, dp(86)))
         item.englishTitle?.let {
-            info.addView(tvText(this, it, 18f, Color.rgb(161, 161, 170)), LinearLayout.LayoutParams(-1, dp(38)))
+            info.addView(tvText(this, it, 20f, NovaColors.muted), LinearLayout.LayoutParams(-1, dp(42)))
         }
         val meta = listOfNotNull(
             item.episodes?.let { "$it حلقة" },
             item.score?.let { "★ ${it / 10.0}" },
             item.format,
         ).joinToString("  •  ")
-        info.addView(tvText(this, meta, 17f, Color.rgb(216, 180, 254)), LinearLayout.LayoutParams(-1, dp(42)))
+        info.addView(tvText(this, meta, 19f, NovaColors.primaryBright), LinearLayout.LayoutParams(-1, dp(48)))
         val description = stripHtml(item.description).ifBlank { "لا يوجد وصف متاح." }
-        info.addView(tvText(this, description, 17f, Color.rgb(212, 212, 216)).apply {
+        info.addView(tvText(this, description, 19f, Color.rgb(215, 224, 228)).apply {
             maxLines = 8
             ellipsize = android.text.TextUtils.TruncateAt.END
             gravity = android.view.Gravity.TOP
-        }, LinearLayout.LayoutParams(0, dp(180), 1f))
-        header.addView(info, LinearLayout.LayoutParams(0, dp(310), 1f))
+        }, LinearLayout.LayoutParams(0, dp(220), 1f))
+        header.addView(info, LinearLayout.LayoutParams(0, dp(360), 1f))
         body.addView(header)
 
-        body.addView(tvText(this, "الحلقات", 24f).apply {
+        body.addView(tvText(this, "الحلقات", 28f, NovaColors.text).apply {
             typeface = android.graphics.Typeface.DEFAULT_BOLD
-            setPadding(0, dp(8), 0, dp(12))
-        }, LinearLayout.LayoutParams(-1, dp(58)))
+            setPadding(0, dp(14), 0, dp(14))
+        }, LinearLayout.LayoutParams(-1, dp(72)))
 
         val episodeCount = (item.episodes ?: 1).coerceIn(1, 200)
-        for (episode in 1..episodeCount) {
-            val button = tvButton(this, "الحلقة $episode")
-            button.textSize = 18f
-            button.gravity = android.view.Gravity.CENTER_VERTICAL or android.view.Gravity.RIGHT
-            body.addView(button, LinearLayout.LayoutParams(-1, dp(64)).apply {
-                bottomMargin = dp(8)
-            })
-            button.setOnClickListener { loadSources(item, episode) }
+        var episode = 1
+        while (episode <= episodeCount) {
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                layoutDirection = View.LAYOUT_DIRECTION_LTR
+            }
+            repeat(4) {
+                if (episode <= episodeCount) {
+                    val currentEpisode = episode
+                    val button = tvButton(this, "الحلقة $currentEpisode").apply {
+                        textSize = 19f
+                        gravity = android.view.Gravity.CENTER
+                    }
+                    row.addView(button, LinearLayout.LayoutParams(0, dp(70), 1f).apply {
+                        marginStart = dp(6)
+                        marginEnd = dp(6)
+                        bottomMargin = dp(12)
+                    })
+                    button.setOnClickListener { loadSources(item, currentEpisode) }
+                    episode++
+                } else {
+                    row.addView(View(this), LinearLayout.LayoutParams(0, dp(70), 1f))
+                }
+            }
+            body.addView(row, LinearLayout.LayoutParams(-1, dp(82)))
         }
     }
 

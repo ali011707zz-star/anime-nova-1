@@ -1,11 +1,13 @@
 <resources>
     <style name="Theme.NovaTV" parent="Theme.MaterialComponents.DayNight.NoActionBar">
         <item name="android:fontFamily">sans</item>
+        <item name="android:windowBackground">@color/nova_background</item>
         <item name="android:windowActionModeOverlay">true</item>
         <item name="android:colorAccent">@color/nova_primary</item>
         <item name="android:navigationBarColor">@color/nova_background</item>
         <item name="android:statusBarColor">@color/nova_background</item>
         <item name="android:windowLightStatusBar">false</item>
+        <item name="android:forceDarkAllowed">false</item>
         <item name="android:windowNoTitle">true</item>
         <item name="android:windowDisablePreview">true</item>
     </style>
