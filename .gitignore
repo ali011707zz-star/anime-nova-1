@@ -80,6 +80,10 @@ nova-player-build-final/
 *.apk
 *.keystore
 *.jks
+
+# JADX input/output for Nova Mobile 2 (contains embedded third-party keys and
+# the original APK binary; the native project keeps only the required sources)
+artifacts/nova-mobile-2/extracted/
 >>>>>>> 22277ebee9275f51cb7b54c9b3300c5144e2c175
 
 # ── أسرار — لا تُرفع أبداً ──

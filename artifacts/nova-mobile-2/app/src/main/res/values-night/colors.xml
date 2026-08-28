@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="active">#ed3224</color>
+    <color name="backgroundColor">@color/backgroundDarkBlue</color>
+    <color name="comment_box_bg">@color/colorDarkBluePrimary</color>
+    <color name="opaque">#4dffffff</color>
+</resources>

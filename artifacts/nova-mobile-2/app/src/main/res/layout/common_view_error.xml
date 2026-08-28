@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android" xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:gravity="center_horizontal"
+    android:layout_gravity="center"
+    android:orientation="vertical"
+    android:layout_width="wrap_content"
+    android:layout_height="wrap_content">
+    <ImageView
+        android:id="@+id/error_message_icon"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        app:tint="?android:attr/textColorSecondary"/>
+    <TextView
+        android:textSize="16sp"
+        android:id="@+id/error_text"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="16dp"
+        style="@style/TextAppearance.Medium.Title"/>
+    <TextView
+        android:textSize="14sp"
+        android:id="@+id/error_sub_text"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="12dp"/>
+    <Button
+        android:id="@+id/btn_try_again"
+        android:padding="8dp"
+        android:focusable="true"
+        android:clickable="true"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:text="@string/retry"
+        style="@style/Theme.Widget.Button"/>
+</LinearLayout>

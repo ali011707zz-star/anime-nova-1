@@ -1,0 +1,119 @@
+<?xml version="1.0" encoding="utf-8"?>
+<changelog bulletedList="true">
+
+    <changelogversion versionName="v1.5.4" changeDate="">
+        <changelogtext>اصلاح الاخطاء</changelogtext>
+    </changelogversion>
+
+    <changelogversion versionName="v1.5.3" changeDate="">
+        <changelogtext>اصلاح الاخطاء</changelogtext>
+        <changelogtext>حزمة تطويرات</changelogtext>
+    </changelogversion>
+
+    <changelogversion versionName="v1.5.2" changeDate="">
+        <changelogtext>اصلاح الاخطاء</changelogtext>
+        <changelogtext>اضافة الكلمات المحجوبة في الاعدادات (لن يتم عرض التعليقات التي تحتوي على الكلمات المحجوبة)</changelogtext>
+        <changelogtext>يمكنك الآن حظر المستخدمين من التعليقات مباشرة</changelogtext>
+    </changelogversion>
+
+    <changelogversion versionName="v1.5.0" changeDate="">
+        <changelogtext>اضافة القائمة المخصصة</changelogtext>
+        <changelogtext>اضافة بيانات اخرى للملف الشخصي</changelogtext>
+        <changelogtext>اضافة اختيار نوع الانمي من قائمتي</changelogtext>
+        <changelogtext>أضافةابرز المساهمين (الاشخاص الذين يساعدون في اضافة و تعديل بيانات التطبيق)</changelogtext>
+        <changelogtext>يمكنك الان حفظ صور الانمي والشخصيات و...</changelogtext>
+        <changelogtext>يمكنك الان الغاء الاعجاب بالتعليق</changelogtext>
+        <changelogtext>تحسين تصميم التعليقات</changelogtext>
+        <changelogtext>حزمة تطويرات</changelogtext>
+        <changelogtext>اصلاح الاخطاء</changelogtext>
+    </changelogversion>
+
+    <changelogversion versionName="v1.4.0" changeDate="">
+        <changelogtext>أضافة تصنيف المحتوى</changelogtext>
+        <changelogtext>يمكنك الان مشاهدة العرض الدعائي من داخل التطبيق</changelogtext>
+        <changelogtext>اضافة المظهر الداكن الرمادي و الاسود AMOLED</changelogtext>
+        <changelogtext>يمكنك الان استخدام مظهر النظام</changelogtext>
+        <changelogtext>أضافة خيار اخفاء التعليقات الخارجة عن الموضوع</changelogtext>
+        <changelogtext>أضافة ابلاغ عن تعليقات خارجة عن الموضوع</changelogtext>
+        <changelogtext>تم اضافة نظام جديد لترتيب الانميات في التقييم العربي</changelogtext>
+        <changelogtext>فصل المشغل السريع لاضافة ميزات جديدة للمشغل دون الحاجة لتحديث انمي سلاير</changelogtext>
+        <changelogtext>حزمة تطويرات</changelogtext>
+        <changelogtext>اصلاح الاخطاء</changelogtext>
+    </changelogversion>
+
+    <changelogversion versionName="v1.3.0" changeDate="">
+        <changelogtext>أضافة قائمة المواسم</changelogtext>
+        <changelogtext>أضافة الحسابات المرتبطة</changelogtext>
+        <changelogtext>(المشغل السريع) اضافة خيار في الاعدادات للتحكم بمدة تقديم الفيديو</changelogtext>
+        <changelogtext>(المشغل السريع) اضافة خاصية تسريع الفيديو</changelogtext>
+        <changelogtext>(المشغل السريع) اضافة خاصية قفل الفيديو</changelogtext>
+        <changelogtext>يمكنك الان مشاهدة الشخصيات المفضلة للاخرين</changelogtext>
+        <changelogtext>يمكنك الان مشاهدة توصيات الاخرين</changelogtext>
+        <changelogtext>يمكنك الان مسح التوصيات الخاصة بك</changelogtext>
+        <changelogtext>حزمة تطويرات</changelogtext>
+        <changelogtext>اصلاح الاخطاء</changelogtext>
+    </changelogversion>
+
+    <changelogversion versionName="v1.2.2" changeDate="">
+        <changelogtext>اصلاح الاخطاء</changelogtext>
+    </changelogversion>
+
+    <changelogversion versionName="v1.2.0" changeDate="">
+        <changelogtext>اعادة تصميم واجهة التفاصيل</changelogtext>
+        <changelogtext>اضافة شخصيات وطاقم الانمي</changelogtext>
+        <changelogtext>اضافة الشخصيات الاكثر شعبية</changelogtext>
+        <changelogtext>اضافة شخصياتي المفضلة</changelogtext>
+        <changelogtext>اضافة البحث السريع</changelogtext>
+        <changelogtext>اضافة الاحصائيات في تفاصيل الانمي</changelogtext>
+        <changelogtext>اضافة قائمة اكملها لاحقا</changelogtext>
+        <changelogtext>تعديل الملف الشخصي</changelogtext>
+        <changelogtext>حزمة تطويرات</changelogtext>
+        <changelogtext>اصلاح الاخطاء</changelogtext>
+    </changelogversion>
+
+    <changelogversion versionName="v1.1.9" changeDate="">
+        <changelogtext>تقييم الانمي حسب القصة, الرسم والتحريك, الشخصيات, الموسيقى</changelogtext>
+        <changelogtext>أضافة تخطي المقدمة للمشغل (تجريبي)</changelogtext>
+        <changelogtext>يمكنك الان الابلاغ عن الصور المسيئة للاخرين</changelogtext>
+        <changelogtext>أضافة خيار في الاعدادات للتحكم في اظهار التصنيفات في القائمة</changelogtext>
+        <changelogtext>تعديلات بسيطة</changelogtext>
+        <changelogtext>اصلاح الاخطاء</changelogtext>
+    </changelogversion>
+
+    <changelogversion versionName="v1.1.8.1" changeDate="">
+        <changelogtext>حل مشكلة ظهور انمياتك عند ملف الشخصي للاخرين</changelogtext>
+    </changelogversion>
+
+    <changelogversion versionName="v1.1.8" changeDate="">
+        <changelogtext>اضافة التصنيف العالمي</changelogtext>
+        <changelogtext>تحديث واجهة المشغل السريع</changelogtext>
+        <changelogtext>اضافة امكانية تغيير الجودة من داخل المشغل</changelogtext>
+        <changelogtext>أضافة فلتر جديد للحلقات</changelogtext>
+        <changelogtext>أضافة خاصية حظر المستخدمين (اخفاء جميع تعليقات الاشخاص الذين قمت بحظرهم)</changelogtext>
+        <changelogtext>أضافة ازالة الحظر من الملف الشخصي</changelogtext>
+        <changelogtext>أضافة خيار في الملف الشخصي للتحكم بمشاهدة الاخرين لقوائمك</changelogtext>
+        <changelogtext>أضافة فلتر جديد للانميات عن طريق الاستوديو</changelogtext>
+        <changelogtext>أضافة معلومات أضافية في تفاصيل الانمي</changelogtext>
+        <changelogtext>أضافة الترتيب عن طريق السنة والاسم للبحث</changelogtext>
+        <changelogtext>أضافة خاصية الترتيب في "قائمتي"</changelogtext>
+        <changelogtext>حزمة تطويرات</changelogtext>
+        <changelogtext>اصلاح الاخطاء</changelogtext>
+    </changelogversion>
+    <changelogversion versionName="v1.1.7" changeDate="">
+        <changelogtext>تطوير نظام التنبيهات</changelogtext>
+        <changelogtext>اضافة "توصياتي" في الملف الشخصي</changelogtext>
+        <changelogtext>اضافة غلاف في الملف الشخصي</changelogtext>
+        <changelogtext>حزمة تطويرات</changelogtext>
+        <changelogtext>اصلاح الاخطاء</changelogtext>
+    </changelogversion>
+    <changelogversion versionName="v1.1.6" changeDate="">
+        <changelogtext>اضافة نظام تنبيهات للتعليقات تجريبي</changelogtext>
+        <changelogtext>اضافة قائمة تحميلات</changelogtext>
+        <changelogtext>اضافة اعجاب للتوصية</changelogtext>
+        <changelogtext>اخفاء\اظهار حلقات الفلر</changelogtext>
+        <changelogtext>اخفاء\اظهار الحلقات التي تم مشاهدتها</changelogtext>
+        <changelogtext>اخفاء\اظهار حلقات الفلر</changelogtext>
+        <changelogtext>اصلاح الاخطاء</changelogtext>
+    </changelogversion>
+</changelog>
+

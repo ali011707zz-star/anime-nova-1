@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<menu xmlns:android="http://schemas.android.com/apk/res/android" xmlns:app="http://schemas.android.com/apk/res-auto">
+    <item
+        android:icon="@drawable/ic_chat_grey_600_24dp"
+        android:id="@+id/action_comment"
+        android:title="@string/action_comment"
+        app:showAsAction="ifRoom"/>
+    <item
+        android:id="@+id/action_favour"
+        android:title="@string/action_favourite"
+        app:showAsAction="always"/>
+    <item
+        android:id="@+id/add_to_customlist"
+        android:title="@string/add_to_customlist"
+        app:showAsAction="never"/>
+    <item
+        android:id="@+id/top_contributors"
+        android:visible="false"
+        android:title="@string/top_contributors_anime"
+        app:showAsAction="never"/>
+</menu>

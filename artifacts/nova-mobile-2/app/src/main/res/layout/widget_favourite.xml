@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<com.anslayer.widget.ContentViewFlipper xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/widgetFlipper"
+    android:padding="@dimen/mg_margin"
+    android:layout_width="wrap_content"
+    android:layout_height="wrap_content"
+    android:inAnimation="@android:anim/fade_in"
+    android:outAnimation="@android:anim/fade_out">
+    <androidx.appcompat.widget.AppCompatImageView
+        android:id="@+id/widgetIcon"
+        android:background="?attr/selectableItemBackgroundBorderless"
+        android:focusable="true"
+        android:clickable="true"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"/>
+    <ProgressBar
+        android:layout_gravity="center"
+        android:layout_width="@dimen/xl_margin"
+        android:layout_height="@dimen/xl_margin"
+        android:layout_margin="@dimen/md_margin"/>
+</com.anslayer.widget.ContentViewFlipper>

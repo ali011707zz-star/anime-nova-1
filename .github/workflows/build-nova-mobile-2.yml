@@ -1,0 +1,49 @@
+name: Build Nova Mobile 2
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "artifacts/nova-mobile-2/**"
+      - ".github/workflows/build-nova-mobile-2.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Android native APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: "platform-tools platforms;android-35 build-tools;35.0.0"
+          accept-android-sdk-licenses: true
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.9"
+
+      - name: Assemble debug APK
+        working-directory: artifacts/nova-mobile-2
+        run: gradle --no-daemon --stacktrace :app:assembleDebug
+
+      - name: Upload Nova Mobile 2 APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Nova-Mobile-2-debug
+          path: artifacts/nova-mobile-2/app/build/outputs/apk/**/*.apk
+          if-no-files-found: error

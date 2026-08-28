@@ -1,0 +1,10 @@
+package org.apache.http.io;
+
+import java.io.IOException;
+import org.apache.http.HttpException;
+import org.apache.http.HttpMessage;
+
+/* loaded from: classes2.dex */
+public interface HttpMessageWriter {
+    void write(HttpMessage httpMessage) throws IOException, HttpException;
+}

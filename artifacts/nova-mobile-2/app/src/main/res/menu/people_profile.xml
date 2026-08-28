@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<menu xmlns:android="http://schemas.android.com/apk/res/android" xmlns:app="http://schemas.android.com/apk/res-auto">
+    <item
+        android:id="@+id/action_report_user_image"
+        android:title="ابلاغ عن صورة مخلة"
+        app:showAsAction="never"/>
+    <item
+        android:id="@+id/block"
+        android:visible="false"
+        android:title="@string/block"
+        app:showAsAction="never"/>
+    <item
+        android:id="@+id/unblock"
+        android:visible="false"
+        android:title="@string/unblock"
+        app:showAsAction="never"/>
+</menu>
