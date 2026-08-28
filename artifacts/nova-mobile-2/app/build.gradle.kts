@@ -18,14 +18,6 @@ android {
         }
     }
 
-    sourceSets {
-        named("main") {
-            // JADX exported the original R class. Let AGP generate the
-            // com.anslayer.R class from the copied resources instead.
-            java.exclude("com/anslayer/R.java")
-        }
-    }
-
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
