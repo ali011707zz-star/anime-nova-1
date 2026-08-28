@@ -33,7 +33,7 @@ public abstract class d implements ja.e {
 
     /* compiled from: FieldNamingPolicy.java */
     /* loaded from: classes.dex */
-    public enum a extends d {
+    public static final class a extends d {
         public a(String str, int i10) {
             super(str, i10, null);
         }
@@ -139,7 +139,12 @@ public abstract class d implements ja.e {
     }
 
     public static d valueOf(String str) {
-        return (d) Enum.valueOf(d.class, str);
+        for (d value : f9096l) {
+            if (value.name().equals(str)) {
+                return value;
+            }
+        }
+        throw new IllegalArgumentException("No enum constant ja.d." + str);
     }
 
     public static d[] values() {
@@ -148,5 +153,11 @@ public abstract class d implements ja.e {
 
     public /* synthetic */ d(String str, int i10, a aVar) {
         this(str, i10);
+    }
+
+    private final String name() {
+        return new String[]{"IDENTITY", "UPPER_CAMEL_CASE", "UPPER_CAMEL_CASE_WITH_SPACES",
+                "LOWER_CASE_WITH_UNDERSCORES", "LOWER_CASE_WITH_DASHES",
+                "LOWER_CASE_WITH_DOTS"}[java.util.Arrays.asList(f9096l).indexOf(this)];
     }
 }

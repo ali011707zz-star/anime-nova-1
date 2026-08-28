@@ -17,7 +17,7 @@ public abstract class r {
 
     /* compiled from: LongSerializationPolicy.java */
     /* loaded from: classes.dex */
-    public enum a extends r {
+    public static final class a extends r {
         public a(String str, int i10) {
             super(str, i10, null);
         }
@@ -39,7 +39,13 @@ public abstract class r {
     }
 
     public static r valueOf(String str) {
-        return (r) Enum.valueOf(r.class, str);
+        if ("DEFAULT".equals(str)) {
+            return f9144f;
+        }
+        if ("STRING".equals(str)) {
+            return f9145g;
+        }
+        throw new IllegalArgumentException("No enum constant ja.r." + str);
     }
 
     public static r[] values() {

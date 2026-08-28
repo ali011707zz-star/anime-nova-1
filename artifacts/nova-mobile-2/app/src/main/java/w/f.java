@@ -436,27 +436,27 @@ public class f extends l {
             int max6 = Math.max(this.f15182m0, v());
             if (max6 > v()) {
                 C0(max6);
-                r62 = 1;
+                    r62 = 1;
                 this.Y[1] = e.b.FIXED;
                 z13 = true;
                 z12 = true;
             } else {
-                r62 = 1;
+                    r62 = 1;
                 z13 = z17;
             }
             if (!z13) {
                 e.b bVar7 = this.Y[0];
                 e.b bVar8 = e.b.WRAP_CONTENT;
                 if (bVar7 == bVar8 && i11 > 0 && R() > i11) {
-                    this.f15221f1 = r62;
+                    this.f15221f1 = true;
                     this.Y[0] = e.b.FIXED;
                     b1(i11);
                     z13 = true;
                     z12 = true;
                 }
-                if (this.Y[r62] == bVar8 && i10 > 0 && v() > i10) {
-                    this.f15222g1 = r62;
-                    this.Y[r62] = e.b.FIXED;
+                if (this.Y[1] == bVar8 && i10 > 0 && v() > i10) {
+                    this.f15222g1 = true;
+                    this.Y[1] = e.b.FIXED;
                     C0(i10);
                     i12 = 8;
                     z14 = true;

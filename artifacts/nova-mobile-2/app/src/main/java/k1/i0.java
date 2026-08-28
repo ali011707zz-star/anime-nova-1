@@ -823,7 +823,7 @@ public final class i0<Key, Value> {
                 */
                 public Object a(vb.p pVar, ac.d dVar) {
                     C0194a c0194a;
-                    Object r22;
+                    int r22;
                     k0.a aVar;
                     ad.b a10;
                     a aVar2;
@@ -1030,9 +1030,9 @@ public final class i0<Key, Value> {
                                                                 return d13;
                                                             }
                                                             yVar7 = yVar5;
-                                                            r22 = bVar;
+                                        ad.b cleanup1 = bVar;
                                                             vb.p pVar3 = vb.p.f15031a;
-                                                            r22.a(null);
+                                        cleanup1.a(null);
                                                             yVar6 = yVar7;
                                                             aVar8 = aVar10;
                                                             wVar4 = wVar;
@@ -1273,9 +1273,9 @@ public final class i0<Key, Value> {
                                                 }
                                                 yVar2 = yVar16;
                                                 aVar4 = aVar24;
-                                                r22 = bVar4;
+                                                 ad.b cleanup2 = bVar4;
                                                 vb.p pVar5 = vb.p.f15031a;
-                                                r22.a(null);
+                                                 cleanup2.a(null);
                                                 yVar = yVar2;
                                                 aVar3 = aVar4;
                                                 wVar2 = wVar;
@@ -1289,9 +1289,9 @@ public final class i0<Key, Value> {
                                                 yVar2 = (y) c0194a.f9604j;
                                                 aVar4 = (a) c0194a.f9603i;
                                                 vb.k.b(obj);
-                                                r22 = bVar5;
+                                                 ad.b cleanup3 = bVar5;
                                                 vb.p pVar52 = vb.p.f15031a;
-                                                r22.a(null);
+                                                 cleanup3.a(null);
                                                 yVar = yVar2;
                                                 aVar3 = aVar4;
                                                 wVar2 = wVar;
@@ -1385,9 +1385,9 @@ public final class i0<Key, Value> {
                                                 yVar7 = (y) c0194a.f9604j;
                                                 aVar10 = (a) c0194a.f9603i;
                                                 vb.k.b(obj);
-                                                r22 = bVar7;
+                                                 ad.b cleanup4 = bVar7;
                                                 vb.p pVar32 = vb.p.f15031a;
-                                                r22.a(null);
+                                                 cleanup4.a(null);
                                                 yVar6 = yVar7;
                                                 aVar8 = aVar10;
                                                 wVar4 = wVar;
@@ -2732,7 +2732,7 @@ public final class i0<Key, Value> {
     public final /* synthetic */ Object q(y yVar, r rVar, ac.d<? super vb.p> dVar) {
         f fVar;
         Object d10;
-        Object r52;
+        int r52;
         Object obj;
         ad.b bVar;
         Object obj2;
@@ -3164,7 +3164,7 @@ public final class i0<Key, Value> {
                                                                         vVar4 = vVar5;
                                                                         xVar5 = xVar6;
                                                                         uVar3 = uVar4;
-                                                                        r52 = bVar10;
+                                                                        ad.b cleanup = bVar10;
                                                                         v11 = i0Var5.v(k0Var2, yVar6, rVar6.a(), rVar6.c(yVar6) + vVar4.f9192f);
                                                                         xVar5.f9194f = v11;
                                                                         if (v11 == 0 && !(k0Var2.p().d(yVar6) instanceof u.a)) {
@@ -3180,7 +3180,7 @@ public final class i0<Key, Value> {
                                                                         fVar.f9569n = uVar3;
                                                                         fVar.f9570o = aVar8;
                                                                         fVar.f9571p = obj8;
-                                                                        fVar.f9572q = r52;
+                                                                        fVar.f9572q = cleanup;
                                                                         fVar.f9573r = null;
                                                                         fVar.f9574s = null;
                                                                         fVar.f9562g = 10;
