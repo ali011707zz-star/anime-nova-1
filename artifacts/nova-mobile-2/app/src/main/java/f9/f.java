@@ -141,7 +141,7 @@ public class f extends k {
             this.f6482e.clear();
             int i10 = 0;
             while (i10 < hVar.f()) {
-                ?? e10 = hVar3.e(i10);
+                var e10 = hVar3.e(i10);
                 List<Integer> u10 = e10.u();
                 int e02 = e10.e0();
                 if (e10 instanceof c9.a) {

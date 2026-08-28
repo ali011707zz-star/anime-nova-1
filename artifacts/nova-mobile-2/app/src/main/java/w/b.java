@@ -105,7 +105,7 @@ public class b {
             z10 = i19 == 0;
             z11 = i19 == 1;
         }
-        ?? r72 = eVar10;
+        var r72 = eVar10;
         boolean z16 = false;
         while (true) {
             if (z16) {
@@ -164,7 +164,7 @@ public class b {
             }
             d dVar10 = r72.V[i11 + 1].f15142f;
             if (dVar10 != null) {
-                ?? r12 = dVar10.f15140d;
+                var r12 = dVar10.f15140d;
                 d[] dVarArr2 = r12.V;
                 if (dVarArr2[i11].f15142f != null && dVarArr2[i11].f15142f.f15140d == r72) {
                     r22 = r12;

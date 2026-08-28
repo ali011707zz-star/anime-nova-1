@@ -7,9 +7,5 @@ import android.os.Build;
 public interface b {
 
     /* renamed from: e, reason: collision with root package name */
-    public static final boolean f14306e;
-
-    static {
-        f14306e = Build.VERSION.SDK_INT >= 27;
-    }
+    public static final boolean f14306e = Build.VERSION.SDK_INT >= 27;
 }

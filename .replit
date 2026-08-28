@@ -1,4 +1,4 @@
-modules = ["nodejs-20", "python-3.11", "web"]
+modules = ["java-graalvm22.3", "nodejs-20", "python-3.11"]
 
 [deployment]
 router = "application"

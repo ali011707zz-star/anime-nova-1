@@ -2335,7 +2335,7 @@ public class TextInputLayout extends LinearLayout {
     public TextInputLayout(Context context, AttributeSet attributeSet, int i10) {
         super(MaterialThemeOverlay.wrap(context, attributeSet, i10, r9), attributeSet, i10);
         int i11;
-        ?? r22;
+        int r22;
         int i12 = DEF_STYLE_RES;
         this.minWidth = -1;
         this.maxWidth = -1;

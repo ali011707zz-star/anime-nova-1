@@ -188,7 +188,7 @@ public abstract class c<E> implements x<E> {
     /* JADX WARN: Type inference failed for: r1v2 */
     /* JADX WARN: Type inference failed for: r1v3 */
     public u<E> D() {
-        ?? r12;
+        wc.o r12;
         wc.o R;
         wc.m mVar = this.f14142g;
         while (true) {

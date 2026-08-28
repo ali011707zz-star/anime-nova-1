@@ -265,7 +265,7 @@ public final class x<T> extends vc.a<z> implements t<T>, f, vc.l<T> {
                     int length3 = dVarArr.length;
                     dVarArr = dVarArr;
                     if (length >= length3) {
-                        ?? copyOf = Arrays.copyOf(dVarArr, Math.max(2, dVarArr.length * 2));
+                        var copyOf = Arrays.copyOf(dVarArr, Math.max(2, dVarArr.length * 2));
                         jc.l.e(copyOf, "java.util.Arrays.copyOf(this, newSize)");
                         dVarArr = copyOf;
                     }
@@ -616,12 +616,12 @@ public final class x<T> extends vc.a<z> implements t<T>, f, vc.l<T> {
         c cVar;
         Object d10;
         z zVar;
-        ?? r62;
+        x<T> r62;
         x<T> xVar;
         z zVar2;
         c2 c2Var;
         c2 c2Var2;
-        ?? r52;
+        g<? super T> r52;
         Object R;
         x<T> xVar2;
         z zVar3;

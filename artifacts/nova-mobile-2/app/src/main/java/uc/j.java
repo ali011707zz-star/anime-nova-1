@@ -72,7 +72,7 @@ public final /* synthetic */ class j {
         a aVar;
         int i10;
         Object obj;
-        ?? r92;
+        g<? super T> r92;
         Object obj2;
         try {
             if (dVar instanceof a) {

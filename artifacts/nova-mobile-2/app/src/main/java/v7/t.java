@@ -34,7 +34,7 @@ public class t implements p7.d<InputStream> {
     public boolean b(InputStream inputStream, File file, p7.g gVar) {
         byte[] bArr = (byte[]) this.f14947a.e(65536, byte[].class);
         boolean z10 = false;
-        ?? r12 = 0;
+        var r12 = 0;
         r12 = 0;
         try {
             try {

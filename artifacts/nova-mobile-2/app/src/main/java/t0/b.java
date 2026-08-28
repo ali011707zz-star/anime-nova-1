@@ -128,7 +128,7 @@ public final class b {
     public static boolean d(String str, Bundle bundle, d dVar) {
         boolean z10;
         ResultReceiver resultReceiver;
-        ?? r02 = 0;
+        int r02 = 0;
         r02 = 0;
         if (bundle == null) {
             return false;

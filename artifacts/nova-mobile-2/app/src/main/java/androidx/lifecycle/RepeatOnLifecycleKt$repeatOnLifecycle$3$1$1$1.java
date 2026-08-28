@@ -189,7 +189,7 @@ final class RepeatOnLifecycleKt$repeatOnLifecycle$3$1$1$1 implements n {
     /* JADX WARN: Type inference failed for: r9v4, types: [T, rc.c2] */
     @Override // androidx.lifecycle.n
     public final void e(q qVar, k.b bVar) {
-        ?? d10;
+        c2 d10;
         jc.l.f(qVar, "$noName_0");
         jc.l.f(bVar, "event");
         if (bVar == this.f2422f) {

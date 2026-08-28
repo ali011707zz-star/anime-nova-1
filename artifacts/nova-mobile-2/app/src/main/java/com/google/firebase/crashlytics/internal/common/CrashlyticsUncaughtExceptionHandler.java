@@ -58,7 +58,7 @@ class CrashlyticsUncaughtExceptionHandler implements Thread.UncaughtExceptionHan
     /* JADX WARN: Type inference failed for: r6v3, types: [java.util.concurrent.atomic.AtomicBoolean] */
     @Override // java.lang.Thread.UncaughtExceptionHandler
     public void uncaughtException(Thread thread, Throwable th) {
-        ?? r02 = "Completed exception processing. Invoking default exception handler.";
+        var r02 = "Completed exception processing. Invoking default exception handler.";
         this.isHandlingException.set(true);
         try {
             try {

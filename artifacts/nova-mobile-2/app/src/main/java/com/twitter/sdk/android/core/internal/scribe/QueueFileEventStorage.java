@@ -44,7 +44,7 @@ public class QueueFileEventStorage implements EventsStorage {
     /* JADX WARN: Type inference failed for: r3v2, types: [java.io.Closeable, java.io.FileInputStream, java.io.InputStream] */
     private void move(File file, File file2) throws IOException {
         OutputStream outputStream;
-        ?? fileInputStream;
+        FileInputStream fileInputStream;
         OutputStream outputStream2 = null;
         try {
             fileInputStream = new FileInputStream(file);

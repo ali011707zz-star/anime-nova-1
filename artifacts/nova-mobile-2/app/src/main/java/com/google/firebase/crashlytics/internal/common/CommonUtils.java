@@ -240,7 +240,7 @@ public class CommonUtils {
     /* JADX WARN: Type inference failed for: r0v6 */
     public static int getDeviceState(Context context) {
         boolean isEmulator = isEmulator(context);
-        ?? r02 = isEmulator;
+        var r02 = isEmulator;
         if (isRooted(context)) {
             r02 = (isEmulator ? 1 : 0) | 2;
         }

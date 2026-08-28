@@ -200,7 +200,7 @@ public final class zzz extends zzki {
             zzi.zzg();
             Preconditions.checkNotEmpty(str9);
             ContentValues contentValues = new ContentValues();
-            ?? r52 = "current_session_count";
+            var r52 = "current_session_count";
             contentValues.put("current_session_count", (Integer) 0);
             try {
                 r52 = new String[]{str9};
@@ -347,7 +347,7 @@ public final class zzz extends zzki {
                                 zzi4.zzg();
                                 Preconditions.checkNotEmpty(str19);
                                 Map aVar6 = new a();
-                                ?? zzh = zzi4.zzh();
+                                var zzh = zzi4.zzh();
                                 try {
                                     try {
                                         cursor3 = zzh.rawQuery("select audience_id, filter_id from event_filters where app_id = ? and session_scoped = 1 UNION select audience_id, filter_id from property_filters where app_id = ? and session_scoped = 1;", new String[]{str19, str19});

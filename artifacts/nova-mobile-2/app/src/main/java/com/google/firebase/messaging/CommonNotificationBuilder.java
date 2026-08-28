@@ -126,7 +126,7 @@ public final class CommonNotificationBuilder {
     /* JADX WARN: Type inference failed for: r0v6 */
     private static int getConsolidatedDefaults(NotificationParams notificationParams) {
         boolean z10 = notificationParams.getBoolean("gcm.n.default_sound");
-        ?? r02 = z10;
+        var r02 = z10 ? 1 : 0;
         if (notificationParams.getBoolean("gcm.n.default_vibrate_timings")) {
             r02 = (z10 ? 1 : 0) | 2;
         }

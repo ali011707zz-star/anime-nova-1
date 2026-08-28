@@ -650,7 +650,7 @@ public class StaggeredGridLayoutManager extends RecyclerView.p implements Recycl
         int i13;
         int e11;
         boolean t10;
-        ?? r92 = 0;
+        int r92 = 0;
         this.f2806j.set(0, this.f2797a, true);
         if (this.f2803g.f3067i) {
             i11 = mVar.f3063e == 1 ? Api.BaseClientBuilder.API_PRIORITY_OTHER : Integer.MIN_VALUE;

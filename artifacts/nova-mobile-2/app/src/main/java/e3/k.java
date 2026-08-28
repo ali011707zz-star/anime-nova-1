@@ -8,7 +8,7 @@ import com.google.android.material.internal.StaticLayoutBuilderCompat;
 
 /* compiled from: LottieProperty.java */
 /* loaded from: classes.dex */
-public interface k {
+public final class k {
     public static final Float A;
     public static final Float B;
     public static final Float C;

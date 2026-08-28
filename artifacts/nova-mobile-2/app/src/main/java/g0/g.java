@@ -19,7 +19,7 @@ public final class g {
     /* JADX WARN: Type inference failed for: r0v4, types: [java.lang.Object[], java.lang.Object] */
     public static <T> T[] b(T[] tArr, int i10, T t10) {
         if (i10 + 1 > tArr.length) {
-            ?? r02 = (Object[]) Array.newInstance(tArr.getClass().getComponentType(), c(i10));
+            var r02 = (Object[]) Array.newInstance(tArr.getClass().getComponentType(), c(i10));
             System.arraycopy(tArr, 0, r02, 0, i10);
             tArr = r02;
         }

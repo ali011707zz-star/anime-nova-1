@@ -419,7 +419,7 @@ public final class zzat implements Iterable<zzap>, zzap {
                     if (length4 > zzd) {
                         i11--;
                     }
-                    for (?? r02 = z10; r02 < i11; r02++) {
+                    for (int r02 = z10 ? 1 : 0; r02 < i11; r02++) {
                         arrayList.add(new zzat(split[r02]));
                     }
                 }

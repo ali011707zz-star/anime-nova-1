@@ -202,7 +202,7 @@ public final class HttpLoggingInterceptor implements Interceptor {
                         f c11 = source.c();
                         m mVar = null;
                         if ("gzip".equalsIgnoreCase(headers2.get("Content-Encoding"))) {
-                            ?? valueOf = Long.valueOf(c11.N0());
+                            var valueOf = Long.valueOf(c11.N0());
                             try {
                                 m mVar2 = new m(c11.clone());
                                 try {

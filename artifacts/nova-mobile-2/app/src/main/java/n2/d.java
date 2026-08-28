@@ -45,7 +45,7 @@ public class d {
             @Override // java.lang.Runnable
             public void run() {
                 synchronized (a.this.f11199h) {
-                    ?? apply = a.this.f11200i.apply(this.f11202f);
+                    var apply = a.this.f11200i.apply(this.f11202f);
                     a aVar = a.this;
                     Out out = aVar.f11197f;
                     if (out == 0 && apply != 0) {

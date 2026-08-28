@@ -521,7 +521,7 @@ public class GridLayoutManager extends LinearLayoutManager {
         int i17;
         View d10;
         int l10 = this.mOrientationHelper.l();
-        ?? r52 = 0;
+        int r52 = 0;
         boolean z10 = l10 != 1073741824;
         int i18 = getChildCount() > 0 ? this.f2681c[this.f2680b] : 0;
         if (z10) {

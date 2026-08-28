@@ -93,7 +93,7 @@ public class b<T extends b9.b> implements e {
         }
         int f13 = d10.f();
         for (int i10 = 0; i10 < f13; i10++) {
-            ?? e10 = d10.e(i10);
+            var e10 = d10.e(i10);
             if (e10.i0()) {
                 this.f515b.addAll(b(e10, i10, f10, i.a.CLOSEST));
             }

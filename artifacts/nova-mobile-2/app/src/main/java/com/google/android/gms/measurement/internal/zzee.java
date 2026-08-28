@@ -49,10 +49,10 @@ public final class zzee extends zzf {
     */
     private final boolean zzq(int i10, byte[] bArr) {
         SQLiteDatabase sQLiteDatabase;
-        ?? r10;
+        Cursor r10;
         Cursor cursor;
         zzg();
-        ?? r22 = 0;
+        int r22 = 0;
         if (this.zzb) {
             return false;
         }

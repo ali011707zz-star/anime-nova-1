@@ -141,13 +141,13 @@ public final class a implements ExecutorService {
         public static final c f14488a = new C0368a();
 
         /* renamed from: b, reason: collision with root package name */
-        public static final c f14489b;
+        public static final c f14489b = new b();
 
         /* renamed from: c, reason: collision with root package name */
-        public static final c f14490c;
+        public static final c f14490c = new C0369c();
 
         /* renamed from: d, reason: collision with root package name */
-        public static final c f14491d;
+        public static final c f14491d = f14489b;
 
         /* compiled from: GlideExecutor.java */
         /* renamed from: u7.a$c$a, reason: collision with other inner class name */
@@ -176,13 +176,6 @@ public final class a implements ExecutorService {
                     throw new RuntimeException("Request threw uncaught throwable", th);
                 }
             }
-        }
-
-        static {
-            b bVar = new b();
-            f14489b = bVar;
-            f14490c = new C0369c();
-            f14491d = bVar;
         }
 
         void a(Throwable th);

@@ -54,7 +54,7 @@ public class b {
 
     /* JADX WARN: Type inference failed for: r0v0, types: [boolean, int] */
     public int hashCode() {
-        ?? r02 = this.f7537a;
+        var r02 = this.f7537a;
         int i10 = r02;
         if (this.f7538b) {
             i10 = r02 + 16;

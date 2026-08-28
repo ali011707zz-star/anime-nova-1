@@ -823,7 +823,7 @@ public final class i0<Key, Value> {
                 */
                 public Object a(vb.p pVar, ac.d dVar) {
                     C0194a c0194a;
-                    ?? r22;
+                    Object r22;
                     k0.a aVar;
                     ad.b a10;
                     a aVar2;
@@ -2266,7 +2266,7 @@ public final class i0<Key, Value> {
     */
     public final /* synthetic */ Object p(ac.d<? super vb.p> dVar) {
         e eVar;
-        ?? r22;
+        Object r22;
         k0.a<Key, Value> aVar;
         i0 i0Var;
         ad.b bVar;
@@ -2731,8 +2731,8 @@ public final class i0<Key, Value> {
     */
     public final /* synthetic */ Object q(y yVar, r rVar, ac.d<? super vb.p> dVar) {
         f fVar;
-        ?? d10;
-        ?? r52;
+        Object d10;
+        Object r52;
         Object obj;
         ad.b bVar;
         Object obj2;
@@ -2755,7 +2755,7 @@ public final class i0<Key, Value> {
         ad.b bVar4;
         Object v10;
         Object obj3;
-        ?? r13;
+        Object r13;
         jc.x xVar3;
         i0 i0Var3;
         jc.u uVar;
@@ -2813,7 +2813,7 @@ public final class i0<Key, Value> {
         int i12;
         k0.a<Key, Value> aVar11;
         ad.b a12;
-        ?? v11;
+        Object v11;
         f0<Value> v12;
         tc.f<f0<Value>> fVar3;
         ad.b bVar10;
@@ -2823,7 +2823,7 @@ public final class i0<Key, Value> {
         i0 i0Var9;
         Boolean a14;
         Object e10;
-        ?? r12;
+        i0 r12;
         Object obj10;
         y yVar9 = yVar;
         try {

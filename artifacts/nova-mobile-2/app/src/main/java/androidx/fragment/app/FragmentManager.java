@@ -1534,7 +1534,7 @@ public abstract class FragmentManager {
         Code decompiled incorrectly, please refer to instructions dump.
     */
     public final void e0(ArrayList<androidx.fragment.app.a> arrayList, ArrayList<Boolean> arrayList2, int i10, int i11) {
-        ?? r12;
+        int r12;
         boolean z10;
         int i12;
         int i13;

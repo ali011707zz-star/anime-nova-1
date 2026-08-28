@@ -772,7 +772,7 @@ public final class zzaj extends zzki {
     /* JADX WARN: Type inference failed for: r4v2, types: [android.database.Cursor] */
     /* JADX WARN: Type inference failed for: r4v3, types: [boolean] */
     public final void zzW(String str, long j10, long j11, zzkr zzkrVar) {
-        ?? r42;
+        Cursor r42;
         Cursor cursor;
         String str2;
         Cursor rawQuery;
@@ -1541,7 +1541,7 @@ public final class zzaj extends zzki {
         SQLiteException e10;
         Cursor cursor;
         SQLiteDatabase zzh2 = zzh();
-        ?? r12 = 0;
+        var r12 = 0;
         try {
             try {
                 cursor = zzh2.rawQuery("select app_id from queue order by has_realtime desc, rowid asc limit 1;", null);
