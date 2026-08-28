@@ -12,17 +12,21 @@
 - الخادم والـAPI مشتركان مع نسخة الموبايل.
 - المشغل مبني على AndroidX Media3/ExoPlayer مع LoadControl صغير نسبياً.
 - لا يعتمد على Expo أو React Native.
-- الكود والرسومات أصلية لنوفا؛ لا يتم نسخ كود أو موارد تطبيقات أخرى.
+- تم تحليل APK Anime Slayer المرخّص كمرجع نقل، ثم إعادة تنفيذ الوظائف القابلة
+  للصيانة داخل مصدر Nova الأصلي. لا يعتمد التطبيق على حزمة Anime Slayer أو
+  خوادمها أو مفاتيحها.
+- تمت إضافة مكتبة محلية للمفضلة وسجل المتابعة، مع المحافظة على واجهة الهاتف
+  والتلفاز وربط مصادر التشغيل عبر API Nova فقط.
 
 ## البناء
 
 هذا المشروع يُبنى من GitHub Actions عبر Workflow مستقل للنسخة الثانية.
 
-`.github/workflows/build-nova-tv.yml`
+`.github/workflows/build-nova-tv-v2.yml`
 
 ملف Workflow الموبايل `.github/workflows/build-apk.yml` لا يعمل على هذا
 الفرع، ولا يتم استدعاؤه من Workflow التلفاز. الناتج يُرفع كـGitHub Artifact
-باسم `Nova-TV-*`.
+باسم `Nova-TV-v2-debug`.
 
 لا يُشغّل هذا المشروع أو يُبنى داخل Replit؛ Replit مستخدم لتعديل المصدر فقط.
 

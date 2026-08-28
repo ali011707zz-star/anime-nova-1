@@ -63,6 +63,17 @@ class MainActivity : ComponentActivity() {
             typeface = android.graphics.Typeface.DEFAULT_BOLD
         }
         header.addView(brand, LinearLayout.LayoutParams(0, dp(if (profile.isTv) 62 else 54), 1f))
+        val library = tvButton(this, "مكتبتي")
+        library.setOnClickListener {
+            startActivity(android.content.Intent(this, LibraryActivity::class.java))
+        }
+        header.addView(
+            library,
+            LinearLayout.LayoutParams(
+                dp(if (profile.isTv) 150 else 112),
+                dp(if (profile.isTv) 62 else 52),
+            ).apply { marginEnd = dp(if (profile.isTv) 12 else 8) },
+        )
         val search = tvButton(this, "بحث")
         search.setOnClickListener { startActivity(android.content.Intent(this, SearchActivity::class.java)) }
         header.addView(
@@ -111,6 +122,7 @@ class MainActivity : ComponentActivity() {
             try {
                 val home = withContext(Dispatchers.IO) { ApiClient.home() }
                 rowsContainer.removeAllViews()
+                addRow("تابع المشاهدة", NovaStore.recent(this@MainActivity).take(profile.rowItemCount))
                 addRow("الأكثر رواجًا", home.latest)
                 addRow("الأكثر شعبية", home.popular)
                 addRow("الأعلى تقييمًا", home.topRated)
@@ -122,7 +134,13 @@ class MainActivity : ComponentActivity() {
                 throw cancelled
             } catch (errorValue: Exception) {
                 progress.visibility = View.GONE
-                showError("تعذر الاتصال بالخادم. تحقق من الشبكة وحاول مرة أخرى.")
+                if (NovaStore.recent(this@MainActivity).isEmpty()) {
+                    showError("تعذر الاتصال بالخادم. تحقق من الشبكة وحاول مرة أخرى.")
+                } else {
+                    rowsContainer.removeAllViews()
+                    addRow("تابع المشاهدة", NovaStore.recent(this@MainActivity).take(profile.rowItemCount))
+                    showError("تعذر تحديث الكتالوج. عُرض سجل المشاهدة المحفوظ.")
+                }
             }
         }
     }

@@ -13,6 +13,9 @@ data class AnimeItem(
     val score: Int?,
     val status: String?,
     val format: String?,
+    val genres: List<String> = emptyList(),
+    val season: String? = null,
+    val seasonYear: Int? = null,
 ) {
     val displayTitle: String
         get() = englishTitle?.takeIf { it.isNotBlank() } ?: title

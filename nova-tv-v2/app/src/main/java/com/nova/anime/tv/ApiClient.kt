@@ -110,7 +110,7 @@ object ApiClient {
                   media(sort: TRENDING_DESC, type: ANIME, isAdult: false,
                     genre_not_in: ["Hentai"]) {
                     id title { romaji english native } coverImage { large extraLarge }
-                    bannerImage description episodes averageScore status format
+                   bannerImage description episodes averageScore status format genres season seasonYear
                   }
                 }
             """.trimIndent(),
@@ -119,7 +119,7 @@ object ApiClient {
                   media(sort: POPULARITY_DESC, type: ANIME, isAdult: false,
                     genre_not_in: ["Hentai"]) {
                     id title { romaji english native } coverImage { large extraLarge }
-                    bannerImage description episodes averageScore status format
+                   bannerImage description episodes averageScore status format genres season seasonYear
                   }
                 }
             """.trimIndent(),
@@ -128,7 +128,7 @@ object ApiClient {
                   media(sort: SCORE_DESC, type: ANIME, isAdult: false,
                     format_in: [TV, MOVIE], genre_not_in: ["Hentai"]) {
                     id title { romaji english native } coverImage { large extraLarge }
-                    bannerImage description episodes averageScore status format
+                   bannerImage description episodes averageScore status format genres season seasonYear
                   }
                 }
             """.trimIndent(),
@@ -154,7 +154,7 @@ object ApiClient {
                 media(search: ${"$"}search, type: ANIME, isAdult: false,
                   genre_not_in: ["Hentai"]) {
                   id title { romaji english native } coverImage { large extraLarge }
-                  bannerImage description episodes averageScore status format
+                  bannerImage description episodes averageScore status format genres season seasonYear
                 }
               }
             }
@@ -168,7 +168,7 @@ object ApiClient {
               Media(id: ${"$"}id, type: ANIME) {
                 id idMal title { romaji english native }
                 coverImage { large extraLarge } bannerImage description episodes
-                averageScore status format
+                averageScore status format genres season seasonYear
               }
             }
         """.trimIndent()
@@ -214,19 +214,35 @@ object ApiClient {
             val payload = line.removePrefix("data:").trim()
             if (payload.isBlank() || payload == "[DONE]") continue
             val obj = runCatching { JSONObject(payload) }.getOrNull() ?: continue
-            val direct = obj.optString("directUrl").takeIf { it.isNotBlank() }
+            val direct = listOf("directUrl", "direct_url", "rawUrl", "raw_url", "streamUrl", "stream_url")
+                .asSequence()
+                .mapNotNull { obj.optString(it).takeIf(String::isNotBlank) }
+                .firstOrNull()
             val fallback = obj.optString("url").takeIf { it.isNotBlank() }
             val selected = direct ?: fallback ?: continue
-            if (obj.optBoolean("isEmbed", false) && direct.isNullOrBlank()) continue
+            val embed = obj.optBoolean("isEmbed", obj.optBoolean("is_embed", false))
+            if (embed && direct.isNullOrBlank()) continue
             val absolute = if (selected.startsWith("/")) baseUrl() + selected else selected
+            val headersValue = obj.opt("headers")
+            val headers = when (headersValue) {
+                is JSONObject -> headersValue.toString()
+                is String -> headersValue
+                else -> "{}"
+            }
             val sourceItem = VideoSource(
-                site = obj.optString("site", "source"),
-                name = obj.optString("name").ifBlank { obj.optString("label") },
+                site = obj.optString("site").ifBlank { obj.optString("provider", "source") },
+                name = obj.optString("name")
+                    .ifBlank { obj.optString("label") }
+                    .ifBlank { obj.optString("providerName") },
                 url = absolute,
-                subtitleUrl = obj.optString("subtitleUrl").takeIf { it.isNotBlank() },
-                quality = obj.optString("quality").takeIf { it.isNotBlank() },
-                headersJson = obj.optJSONObject("headers")?.toString() ?: "{}",
-                isEmbed = obj.optBoolean("isEmbed", false),
+                subtitleUrl = obj.optString("subtitleUrl")
+                    .ifBlank { obj.optString("subtitle_url") }
+                    .takeIf { it.isNotBlank() },
+                quality = obj.optString("quality")
+                    .ifBlank { obj.optString("resolution") }
+                    .takeIf { it.isNotBlank() },
+                headersJson = headers,
+                isEmbed = embed,
             )
             result["${sourceItem.site}|${sourceItem.quality}|${sourceItem.url}"] = sourceItem
         }
@@ -248,6 +264,10 @@ object ApiClient {
         if (obj == null || !obj.has("id")) return null
         val title = obj.optJSONObject("title")
         val cover = obj.optJSONObject("coverImage")
+        val genresArray = obj.optJSONArray("genres") ?: JSONArray()
+        val genres = (0 until genresArray.length())
+            .map { genresArray.optString(it) }
+            .filter { it.isNotBlank() }
         return AnimeItem(
             id = obj.optInt("id"),
             malId = obj.optInt("idMal").takeIf { it > 0 },
@@ -262,6 +282,9 @@ object ApiClient {
             score = obj.optInt("averageScore").takeIf { it > 0 },
             status = obj.optString("status").takeIf { it.isNotBlank() },
             format = obj.optString("format").takeIf { it.isNotBlank() },
+            genres = genres,
+            season = obj.optString("season").takeIf { it.isNotBlank() },
+            seasonYear = obj.optInt("seasonYear").takeIf { it > 0 },
         )
     }
 }

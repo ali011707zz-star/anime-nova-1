@@ -92,6 +92,7 @@ class DetailActivity : ComponentActivity() {
                 if (current == null) {
                     showError("لم يُعثر على تفاصيل هذا الأنمي.")
                 } else {
+                    NovaStore.saveRecent(this@DetailActivity, current)
                     renderDetail(current)
                 }
             } catch (cancelled: CancellationException) {
@@ -142,14 +143,30 @@ class DetailActivity : ComponentActivity() {
             item.episodes?.let { "$it حلقة" },
             item.score?.let { "★ ${it / 10.0}" },
             item.format,
+            item.status,
+            item.seasonYear?.toString(),
         ).joinToString("  •  ")
         info.addView(tvText(this, meta, 17f, Color.rgb(216, 180, 254)), LinearLayout.LayoutParams(-1, dp(42)))
+        if (item.genres.isNotEmpty()) {
+            info.addView(
+                tvText(this, item.genres.joinToString("  •  "), 15f, Color.rgb(161, 161, 170)),
+                LinearLayout.LayoutParams(-1, dp(34)),
+            )
+        }
         val description = stripHtml(item.description).ifBlank { "لا يوجد وصف متاح." }
-        info.addView(tvText(this, description, 17f, Color.rgb(212, 212, 216)).apply {
+        val descriptionView = tvText(this, description, 17f, Color.rgb(212, 212, 216)).apply {
             maxLines = 8
             ellipsize = android.text.TextUtils.TruncateAt.END
             gravity = android.view.Gravity.TOP
-        }, LinearLayout.LayoutParams(0, dp(180), 1f))
+        }
+        info.addView(
+            descriptionView,
+            if (wideLayout) {
+                LinearLayout.LayoutParams(0, dp(180), 1f)
+            } else {
+                LinearLayout.LayoutParams(-1, dp(180))
+            },
+        )
         header.addView(
             info,
             if (wideLayout) {
@@ -159,6 +176,18 @@ class DetailActivity : ComponentActivity() {
             },
         )
         body.addView(header)
+
+        val favorite = tvButton(
+            this,
+            if (NovaStore.isFavorite(this, item.id)) "إزالة من المفضلة" else "إضافة إلى المفضلة",
+        )
+        favorite.setOnClickListener {
+            val added = NovaStore.toggleFavorite(this, item)
+            favorite.text = if (added) "إزالة من المفضلة" else "إضافة إلى المفضلة"
+        }
+        body.addView(favorite, LinearLayout.LayoutParams(-1, dp(if (profile.isTv) 60 else 52)).apply {
+            bottomMargin = dp(12)
+        })
 
         body.addView(tvText(this, "الحلقات", 24f).apply {
             typeface = android.graphics.Typeface.DEFAULT_BOLD
@@ -209,6 +238,7 @@ class DetailActivity : ComponentActivity() {
     }
 
     private fun startPlayer(source: VideoSource, item: AnimeItem, episode: Int) {
+        NovaStore.saveRecent(this, item)
         startActivity(android.content.Intent(this, PlayerActivity::class.java).apply {
             putExtra(PlayerActivity.EXTRA_SOURCE_URL, source.url)
             putExtra(PlayerActivity.EXTRA_SOURCE_HEADERS, source.headersJson)

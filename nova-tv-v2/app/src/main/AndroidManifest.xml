@@ -33,6 +33,11 @@
             android:exported="false"
             android:screenOrientation="unspecified" />
         <activity
+            android:name=".LibraryActivity"
+            android:configChanges="orientation|screenSize|keyboardHidden|screenLayout|smallestScreenSize|uiMode"
+            android:exported="false"
+            android:screenOrientation="unspecified" />
+        <activity
             android:name=".MainActivity"
             android:configChanges="orientation|screenSize|keyboardHidden|screenLayout|smallestScreenSize|uiMode"
             android:exported="true"
