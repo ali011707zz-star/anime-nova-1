@@ -103,12 +103,9 @@ export function responsiveScale(
   tv: boolean,
   tvValue?: number,
 ) {
-  if (tv) {
-    const tvScale = Math.max(2, Math.min(2.4, width / 960));
-    return Math.round(tvValue ?? phoneValue * tvScale);
-  }
-  const phoneScale = Math.max(0.88, Math.min(1.1, width / 375));
-  return Math.round(phoneValue * phoneScale);
+  if (!tv) return phoneValue;
+  const tvScale = Math.max(2, Math.min(2.4, width / 960));
+  return Math.round(tvValue ?? phoneValue * tvScale);
 }
 
 export function useTvMetrics() {

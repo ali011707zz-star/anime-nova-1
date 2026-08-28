@@ -1993,20 +1993,20 @@ export default function WatchScreen() {
                     >
                       <View style={d.webRowActions}>
                         {!watchUnlocked ? (
-                          <View style={d.lockBtn}>
-                            {watchAdSite === slot.site ? <SpinRing size={14} /> : <Ionicons name="lock-closed" size={11} color="#c4b5fd" />}
-                            <Text style={d.lockBtnText}>فتح</Text>
+                          <View style={[d.lockBtn, tvMode && d.tvLockBtn]}>
+                            {watchAdSite === slot.site ? <SpinRing size={tvMode ? 22 : 14} /> : <Ionicons name="lock-closed" size={tvMode ? 18 : 11} color="#c4b5fd" />}
+                            <Text style={[d.lockBtnText, tvMode && d.tvActionText]}>فتح</Text>
                           </View>
                         ) : isFetching ? (
-                          <SpinRing size={16} />
+                          <SpinRing size={tvMode ? 26 : 16} />
                         ) : isReady ? (
-                          <View style={d.playBtnGreen}>
-                            <Ionicons name="play" size={10} color="#fff" />
-                            <Text style={d.playBtnGreenText}>تشغيل</Text>
+                          <View style={[d.playBtnGreen, tvMode && d.tvPlayBtn]}>
+                            <Ionicons name="play" size={tvMode ? 18 : 10} color="#fff" />
+                            <Text style={[d.playBtnGreenText, tvMode && d.tvActionText]}>تشغيل</Text>
                           </View>
                         ) : (
-                          <View style={[d.pickBtn, isFailed && { opacity: 0.4 }]}>
-                            <Text style={d.pickBtnText}>اختيار</Text>
+                          <View style={[d.pickBtn, tvMode && d.tvPickBtn, isFailed && { opacity: 0.4 }]}>
+                            <Text style={[d.pickBtnText, tvMode && d.tvActionText]}>اختيار</Text>
                           </View>
                         )}
                       </View>
@@ -2028,7 +2028,7 @@ export default function WatchScreen() {
                       {/* Status only; the download action sits beside اختيار. */}
                       <View style={d.webRowRight}>
                         {!isFetching && (
-                          <View style={[d.webRowDot, {
+                          <View style={[d.webRowDot, tvMode && d.tvWebRowDot, {
                             backgroundColor:
                               isReady  ? "#34d399" :
                               isFailed ? "rgba(239,68,68,0.50)" :
@@ -2235,6 +2235,7 @@ const d = StyleSheet.create({
   webRow:         { flexDirection: "row", alignItems: "center", paddingHorizontal: 10, paddingVertical: 11, gap: 7 },
   tvWebRow:       { minHeight: 92, paddingHorizontal: 28, paddingVertical: 22, gap: 20, borderRadius: 14 },
   tvWebRowTag:    { fontSize: 20, lineHeight: 28 },
+  tvWebRowDot:    { width: 14, height: 14, borderRadius: 7 },
   tvSiteRowPlayBtn: { minWidth: 130, minHeight: 58, paddingHorizontal: 22, paddingVertical: 14, borderRadius: 14 },
   webRowBorder:   { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: "rgba(255,255,255,0.06)" },
   webRowPlayIcon: { alignItems: "center", justifyContent: "center", flexShrink: 0 },
@@ -2245,8 +2246,10 @@ const d = StyleSheet.create({
   webRowDot:      { width: 8, height: 8, borderRadius: 4 },
   lockBtn:        { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 9, paddingVertical: 5, borderRadius: 9, backgroundColor: "rgba(139,92,246,0.15)", borderWidth: 1, borderColor: "rgba(139,92,246,0.30)" },
   lockBtnText:    { fontSize: 10, fontFamily: "Cairo_700Bold", color: "#c4b5fd" },
-  lockBtn:        { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 9, paddingVertical: 5, borderRadius: 9, backgroundColor: "rgba(139,92,246,0.15)", borderWidth: 1, borderColor: "rgba(139,92,246,0.30)" },
-  lockBtnText:    { fontSize: 10, fontFamily: "Cairo_700Bold", color: "#c4b5fd" },
+  tvLockBtn:      { minWidth: 116, minHeight: 56, paddingHorizontal: 20, paddingVertical: 14, borderRadius: 14, gap: 8 },
+  tvPickBtn:      { minWidth: 116, minHeight: 56, paddingHorizontal: 20, paddingVertical: 14, borderRadius: 14 },
+  tvPlayBtn:      { minWidth: 132, minHeight: 56, paddingHorizontal: 20, paddingVertical: 14, borderRadius: 14, gap: 8 },
+  tvActionText:   { fontSize: 18, lineHeight: 26 },
 
   /* ── Separate download servers ── */
   downloadSection:    { marginTop: 18, gap: 9, padding: 12, borderRadius: 18, backgroundColor: "rgba(14,12,24,0.92)", borderWidth: 1, borderColor: "rgba(139,92,246,0.22)" },

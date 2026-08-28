@@ -26,3 +26,22 @@ export function getPosterUri(item: MediaWithImages | null | undefined, fallback?
   ];
   return candidates.map(asUrl).find(Boolean) || "";
 }
+
+/** Prefer the smaller AniList image on ten-foot screens.
+ * The TV rails are much wider than phone rails, but do not need the
+ * extraLarge asset for a row of posters. Keep the original helper untouched
+ * so the phone image selection remains exactly the same. */
+export function getTvPosterUri(item: MediaWithImages | null | undefined, fallback?: string): string {
+  const candidates = [
+    item?.poster,
+    item?.image,
+    item?.cover,
+    item?.thumbnail,
+    item?.coverImage?.large,
+    item?.images?.jpg?.image_url,
+    item?.images?.jpg?.large_image_url,
+    item?.coverImage?.extraLarge,
+    fallback,
+  ];
+  return candidates.map(asUrl).find(Boolean) || "";
+}

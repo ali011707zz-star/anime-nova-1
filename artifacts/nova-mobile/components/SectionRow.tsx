@@ -30,9 +30,34 @@ export const SectionRow = React.memo(function SectionRow({ title, items, onSeeAl
   const { size: scaleSize } = useTvMetrics();
   const cardWidth = getRailCardWidth(width, tvMode ? 5 : 3);
   const sidePadding = getRailSidePadding(width);
-  const FocusGuide: React.ComponentType<any> = tvMode ? TVFocusGuideView : View;
 
   if (!items.length) return null;
+
+  const rail = (
+    <FlatList
+      data={items.slice(0, tvMode ? 10 : items.length)}
+      horizontal
+      keyExtractor={(item) => String(item.id)}
+      renderItem={({ item }) => <AnimeCard anime={item} size={size} cardWidth={cardWidth} />}
+      showsHorizontalScrollIndicator={false}
+      contentContainerStyle={[styles.scroll, { paddingHorizontal: sidePadding }]}
+      // These rails are rendered inside the home ScrollView. FlatList keeps
+      // off-screen posters out of the native view tree, which matters on
+      // tablets where several rails are visible in one session.
+      initialNumToRender={tvMode ? 5 : 4}
+      maxToRenderPerBatch={tvMode ? 3 : 2}
+      updateCellsBatchingPeriod={50}
+      windowSize={tvMode ? 4 : 3}
+      getItemLayout={(_, index) => ({
+        length: cardWidth + 14,
+        offset: (cardWidth + 14) * index,
+        index,
+      })}
+      // Keep clipping disabled for the existing nested horizontal rails.
+      // TV needs this especially because clipping can hide focused cards.
+      removeClippedSubviews={false}
+    />
+  );
 
   return (
     <View style={styles.container}>
@@ -49,31 +74,11 @@ export const SectionRow = React.memo(function SectionRow({ title, items, onSeeAl
           </Pressable>
         )}
       </View>
-      <FocusGuide autoFocus={false} style={styles.focusGuide}>
-        <FlatList
-          data={items.slice(0, tvMode ? 10 : items.length)}
-          horizontal
-          keyExtractor={(item) => String(item.id)}
-          renderItem={({ item }) => <AnimeCard anime={item} size={size} cardWidth={cardWidth} />}
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={[styles.scroll, { paddingHorizontal: sidePadding }]}
-          // These rails are rendered inside the home ScrollView. FlatList keeps
-          // off-screen posters out of the native view tree, which matters on
-          // tablets where several rails are visible in one session.
-          initialNumToRender={tvMode ? 5 : 4}
-          maxToRenderPerBatch={tvMode ? 3 : 2}
-          updateCellsBatchingPeriod={50}
-          windowSize={tvMode ? 4 : 3}
-          getItemLayout={(_, index) => ({
-            length: cardWidth + 14,
-            offset: (cardWidth + 14) * index,
-            index,
-          })}
-          // Nested horizontal rails on Android TV can permanently lose cards
-          // when RN clips recycled children outside the viewport.
-          removeClippedSubviews={Platform.OS === "android" && !tvMode}
-        />
-      </FocusGuide>
+      {tvMode ? (
+        <TVFocusGuideView autoFocus={false} style={styles.focusGuide}>
+          {rail}
+        </TVFocusGuideView>
+      ) : rail}
     </View>
   );
 });
@@ -102,7 +107,6 @@ const styles = StyleSheet.create({
   seeAll: { flexDirection: "row", alignItems: "center", gap: 2 },
   seeAllText: { fontSize: 13, fontWeight: "600" },
   focusGuide: { minHeight: 1 },
-  tvSeeAllText: { fontSize: 18 },
   scroll: { paddingHorizontal: 16, gap: 14 },
   skeletonTitle: { width: 140, height: 18, borderRadius: 6, marginHorizontal: 16, marginBottom: 12 },
   skeletonCard: { width: 120, gap: 6 },

@@ -486,7 +486,9 @@ export function RiftPlayer({
   const [isEnded, setIsEnded]         = useState(false);
 
   /* ─── UI state ─── */
-  const [showControls, setShowControls] = useState(true);
+  // Android TV uses expo-video's native controls. Keep the touch-oriented
+  // overlay disabled there so D-pad playback stays light and predictable.
+  const [showControls, setShowControls] = useState(!tvMode);
   const [showSpeedSheet, setShowSpeedSheet] = useState(false);
   const [showViewSheet, setShowViewSheet] = useState(false);
   const [showSubSheet, setShowSubSheet]   = useState(false);
@@ -499,12 +501,12 @@ export function RiftPlayer({
 
   useEffect(() => {
     const animation = Animated.timing(playerEntryOpacity, {
-      toValue: 1, duration: 360, delay: 70,
+      toValue: 1, duration: tvMode ? 0 : 360, delay: tvMode ? 0 : 70,
       easing: Easing.out(Easing.cubic), useNativeDriver: true,
     });
     animation.start();
     return () => animation.stop();
-  }, [playerEntryOpacity]);
+  }, [playerEntryOpacity, tvMode]);
 
   /* ─── Subtitle state ─── */
   const [subOn, setSubOn]               = useState(subEnabled);
@@ -2145,7 +2147,7 @@ export function RiftPlayer({
       <VideoView
         player={player}
         style={s.video}
-        nativeControls={false}
+        nativeControls={tvMode}
         contentFit={contentFit}
         /* Android SurfaceView is not included by react-native-view-shot and
            produced a black saved image. TextureView is capturable while
@@ -2159,7 +2161,7 @@ export function RiftPlayer({
       />
 
       {/* Smooth first-frame handoff instead of a sudden black jump. */}
-      {buffering && position <= 0.25 && !error && !isAutoCycling && showControls && (
+      {buffering && !tvMode && position <= 0.25 && !error && !isAutoCycling && showControls && (
         <View style={s.entryLoadingOverlay} pointerEvents="none">
           <SpinRing size={42} />
           <Text style={s.entryLoadingText}>جارٍ فتح الحلقة…</Text>
@@ -2225,7 +2227,7 @@ export function RiftPlayer({
           >
             <Ionicons name="close" size={20} color="rgba(255,255,255,0.82)" />
           </Pressable>
-          <SpinRing size={44} />
+          {!tvMode && <SpinRing size={44} />}
           <Text style={[s.errorTitle, { color: "rgba(167,139,250,0.9)", marginTop: 12 }]}>
             {isWaitingForSources
               ? "جاري البحث عن مصادر بديلة…"
@@ -2438,32 +2440,34 @@ export function RiftPlayer({
       {/* ════════════════════════════════════════
           GESTURE LAYER
       ════════════════════════════════════════ */}
-      <View
-        style={[StyleSheet.absoluteFill, { zIndex: isLocked ? 15 : 5 }]}
-        {...(isLocked ? {} : panResponder.panHandlers)}
-      >
-        <Pressable
-          style={s.halfLeft}
-          onPress={(e) => handleTap(e.nativeEvent.pageX)}
-          onLongPress={handleLongPress}
-          onPressOut={handleLongPressRelease}
-          delayLongPress={500}
-        />
-        <Pressable
-          style={s.halfRight}
-          onPress={(e) => handleTap(e.nativeEvent.pageX)}
-          onLongPress={handleLongPress}
-          onPressOut={handleLongPressRelease}
-          delayLongPress={500}
-        />
-      </View>
+      {!tvMode && (
+        <View
+          style={[StyleSheet.absoluteFill, { zIndex: isLocked ? 15 : 5 }]}
+          {...(isLocked ? {} : panResponder.panHandlers)}
+        >
+          <Pressable
+            style={s.halfLeft}
+            onPress={(e) => handleTap(e.nativeEvent.pageX)}
+            onLongPress={handleLongPress}
+            onPressOut={handleLongPressRelease}
+            delayLongPress={500}
+          />
+          <Pressable
+            style={s.halfRight}
+            onPress={(e) => handleTap(e.nativeEvent.pageX)}
+            onLongPress={handleLongPress}
+            onPressOut={handleLongPressRelease}
+            delayLongPress={500}
+          />
+        </View>
+      )}
 
       {/* ════════════════════════════════════════
           CONTROLS OVERLAY
       ════════════════════════════════════════ */}
 
 
-      {showControls && !error && !isEnded && !isLocked && (
+      {!tvMode && showControls && !error && !isEnded && !isLocked && (
         <Animated.View
           style={[StyleSheet.absoluteFill, { opacity: controlsOpacity, zIndex: 10, flexDirection: "column" }]}
           pointerEvents="box-none"
@@ -2960,7 +2964,7 @@ export function RiftPlayer({
       )}
 
       {/* ── أزرار تخطي المقدمة/النهاية — مستقلة تماماً عن رؤية الـ controls ── */}
-      {!error && !isEnded && !isLocked && (inIntroRange || inOutroRange) && (
+      {!tvMode && !error && !isEnded && !isLocked && (inIntroRange || inOutroRange) && (
         <View style={s.skipBtnRowFloat} pointerEvents="box-none">
           {inIntroRange && (
             <Pressable onPress={doSkipIntro} style={s.skipPillIntro} hitSlop={8} pointerEvents="auto">

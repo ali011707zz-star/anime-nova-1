@@ -59,10 +59,13 @@ export function HeroSection({ items }: Props) {
               onPress={() => router.push(`/anime/${anime.id}?title=${encodeURIComponent(anime.title.romaji)}&english=${encodeURIComponent(anime.title.english || "")}`)}
             >
               <Image
-                source={{ uri: anime.bannerImage || anime.coverImage.extraLarge || anime.coverImage.large }}
+                source={{ uri: tvMode
+                  ? (anime.bannerImage || anime.coverImage.large || anime.coverImage.extraLarge)
+                  : (anime.bannerImage || anime.coverImage.extraLarge || anime.coverImage.large) }}
                 style={StyleSheet.absoluteFill}
                 resizeMode="cover"
-                transition={400}
+                resizeMethod="resize"
+                transition={tvMode ? 0 : 400}
               />
               <LinearGradient
                 colors={["transparent", "rgba(9,9,11,0.7)", "#09090B"]}

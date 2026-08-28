@@ -6,6 +6,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   ActivityIndicator,
   Alert,
+  Dimensions,
   PanResponder,
   Platform,
   Pressable,
@@ -38,6 +39,7 @@ type Props = {
   onError?: () => void;
 };
 
+const { width: SCREEN_WIDTH } = Dimensions.get("window");
 const SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 2];
 
 function validUrl(value: unknown): value is string {
@@ -263,7 +265,8 @@ export function RiftPlayer({
       onStartShouldSetPanResponder: () => true,
       onMoveShouldSetPanResponder: () => true,
       onPanResponderRelease: (event) => {
-        const percentage = Math.max(0, Math.min(1, event.nativeEvent.locationX / Math.max(windowWidth, 1)));
+        const seekWidth = tvMode ? windowWidth : SCREEN_WIDTH;
+        const percentage = Math.max(0, Math.min(1, event.nativeEvent.locationX / Math.max(seekWidth, 1)));
         seek(percentage * duration);
       },
     })),

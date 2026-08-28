@@ -111,16 +111,16 @@ export default function AnimationEpisodesScreen() {
     return (
       <Pressable
         focusable={tvMode}
-        style={({ focused }) => [s.epCard, watched && s.epCardWatched, tvMode && tvFocusStyle(focused)]}
+        style={({ focused }) => [s.epCard, tvMode && s.tvEpCard, watched && s.epCardWatched, tvMode && tvFocusStyle(focused)]}
         onPress={() => goWatch(item.episode_number, item.name)}
       >
         {/* Thumbnail */}
-        <View style={s.epThumb}>
+        <View style={[s.epThumb, tvMode && s.tvEpThumb]}>
           {item.still_path ? (
             <Image source={{ uri: `${IMG_S}${item.still_path}` }} style={StyleSheet.absoluteFillObject} resizeMode="cover" />
           ) : (
             <View style={s.epThumbPlaceholder}>
-              <Ionicons name="play-circle" size={20} color="rgba(255,255,255,0.15)" />
+              <Ionicons name="play-circle" size={tvMode ? 40 : 20} color="rgba(255,255,255,0.15)" />
             </View>
           )}
           <View style={s.epThumbOverlay} />
@@ -145,22 +145,22 @@ export default function AnimationEpisodesScreen() {
         </View>
 
         {/* Info */}
-        <View style={s.epInfo}>
-          <Text style={s.epTitle} numberOfLines={1}>{item.name}</Text>
+        <View style={[s.epInfo, tvMode && s.tvEpInfo]}>
+          <Text style={[s.epTitle, tvMode && s.tvEpTitle]} numberOfLines={tvMode ? 2 : 1}>{item.name}</Text>
           {item.overview ? (
-            <Text style={s.epOverview} numberOfLines={2}>{item.overview}</Text>
+            <Text style={[s.epOverview, tvMode && s.tvEpOverview]} numberOfLines={tvMode ? 3 : 2}>{item.overview}</Text>
           ) : null}
           <View style={s.epMeta}>
             {item.runtime ? (
               <View style={s.epMetaItem}>
-                <Ionicons name="time" size={9} color="rgba(255,255,255,0.22)" />
-                <Text style={s.epMetaText}>
+                <Ionicons name="time" size={tvMode ? 16 : 9} color="rgba(255,255,255,0.22)" />
+                <Text style={[s.epMetaText, tvMode && s.tvEpMetaText]}>
                   {item.runtime < 60 ? `${item.runtime} دقيقة` : `${Math.floor(item.runtime / 60)} ساعة`}
                 </Text>
               </View>
             ) : null}
             {progressSec > 30 && !watched ? (
-              <Text style={s.epProgressText}>
+              <Text style={[s.epProgressText, tvMode && s.tvEpProgressText]}>
                 {Math.floor(progressSec / 60)}:{String(Math.floor(progressSec % 60)).padStart(2, "0")} ▶
               </Text>
             ) : null}
@@ -168,8 +168,8 @@ export default function AnimationEpisodesScreen() {
         </View>
 
         {/* Play icon */}
-        <View style={s.epPlayIcon}>
-          <Ionicons name="play" size={13} color="#8B5CF6" />
+        <View style={[s.epPlayIcon, tvMode && s.tvEpPlayIcon]}>
+          <Ionicons name="play" size={tvMode ? 24 : 13} color="#8B5CF6" />
         </View>
       </Pressable>
     );
@@ -256,7 +256,7 @@ export default function AnimationEpisodesScreen() {
           data={episodes}
           keyExtractor={ep => String(ep.episode_number)}
           renderItem={renderEpisode}
-          contentContainerStyle={s.listContent}
+          contentContainerStyle={[s.listContent, tvMode && s.tvListContent]}
           showsVerticalScrollIndicator={false}
           ItemSeparatorComponent={() => <View style={{ height: 8 }} />}
         />
@@ -290,9 +290,11 @@ const s = StyleSheet.create({
 
   listContent: { padding: 12, paddingBottom: 100 },
   epCard: { flexDirection: "row", alignItems: "center", gap: 12, padding: 10, borderRadius: 16, backgroundColor: "#111116", borderWidth: 1, borderColor: "rgba(255,255,255,0.07)" },
+  tvEpCard: { minHeight: 210, gap: 20, padding: 18, borderRadius: 20 },
   epCardWatched: { opacity: 0.5, backgroundColor: "rgba(255,255,255,0.02)" },
 
   epThumb: { width: 88, height: 52, borderRadius: 10, overflow: "hidden", backgroundColor: "rgba(255,255,255,0.06)", flexShrink: 0, position: "relative" },
+  tvEpThumb: { width: 300, height: 168, borderRadius: 14 },
   epThumbPlaceholder: { ...StyleSheet.absoluteFillObject, alignItems: "center", justifyContent: "center" },
   epThumbOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: "rgba(0,0,0,0.25)" },
   epNumBadge: { position: "absolute", bottom: 4, right: 5, backgroundColor: "rgba(0,0,0,0.6)", borderRadius: 5, paddingHorizontal: 5, paddingVertical: 1 },
@@ -303,16 +305,23 @@ const s = StyleSheet.create({
   watchedCheck: { width: 20, height: 20, borderRadius: 10, backgroundColor: "rgba(34,197,94,0.85)", alignItems: "center", justifyContent: "center" },
 
   epInfo: { flex: 1 },
+  tvEpInfo: { minHeight: 112, justifyContent: "center" },
   epTitle: { fontSize: 12, fontFamily: "Cairo_700Bold", color: "#fff", lineHeight: 16, textAlign: "right" },
+  tvEpTitle: { fontSize: 23, lineHeight: 33 },
   epOverview: { fontSize: 9, color: "rgba(255,255,255,0.28)", lineHeight: 14, fontFamily: "Cairo_400Regular", textAlign: "right", marginTop: 3 },
+  tvEpOverview: { fontSize: 14, lineHeight: 23, marginTop: 8 },
   epMeta: { flexDirection: "row", alignItems: "center", gap: 10, marginTop: 5, flexWrap: "wrap" },
   epMetaItem: { flexDirection: "row", alignItems: "center", gap: 3 },
   epMetaText: { fontSize: 8, color: "rgba(255,255,255,0.22)", fontFamily: "Cairo_400Regular" },
+  tvEpMetaText: { fontSize: 13 },
   epProgressText: { fontSize: 8, fontFamily: "Cairo_700Bold", color: "rgba(139,92,246,0.65)" },
+  tvEpProgressText: { fontSize: 13 },
 
   epPlayIcon: { width: 32, height: 32, borderRadius: 10, backgroundColor: "rgba(139,92,246,0.12)", borderWidth: 1, borderColor: "rgba(139,92,246,0.22)", alignItems: "center", justifyContent: "center" },
+  tvEpPlayIcon: { width: 60, height: 60, borderRadius: 16 },
 
   center: { flex: 1, alignItems: "center", justifyContent: "center", gap: 12 },
+  tvListContent: { paddingHorizontal: 56, paddingTop: 10, gap: 14 },
   loadingText: { fontSize: 12, color: "rgba(255,255,255,0.3)", fontFamily: "Cairo_400Regular" },
   emptyText: { fontSize: 14, color: "rgba(255,255,255,0.25)", fontFamily: "Cairo_700Bold" },
 });

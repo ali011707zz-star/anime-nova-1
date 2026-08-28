@@ -6,7 +6,7 @@ import React from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { useColors } from "@/hooks/useColors";
 import { isTvDevice, tvFocusStyle, useTvMetrics } from "@/utils/tv";
-import { getPosterUri } from "@/utils/media";
+import { getPosterUri, getTvPosterUri } from "@/utils/media";
 
 type Props = {
   anime: AnilistMedia;
@@ -43,6 +43,9 @@ export const AnimeCard = React.memo(function AnimeCard({ anime, size = "sm", car
   const tvMode = isTvDevice(windowWidth, windowHeight);
 
   const title = anime.title.english || anime.title.romaji;
+  const posterUri = tvMode
+    ? getTvPosterUri(anime, anime.id ? `https://img.anili.st/media/${anime.id}` : "")
+    : getPosterUri(anime, anime.id ? `https://img.anili.st/media/${anime.id}` : "");
 
   return (
     <Pressable
@@ -51,7 +54,7 @@ export const AnimeCard = React.memo(function AnimeCard({ anime, size = "sm", car
       hasTVPreferredFocus={false}
       hitSlop={tvMode ? 8 : 4}
       pressRetentionOffset={12}
-      android_ripple={{ color: "rgba(139,92,246,0.18)" }}
+      android_ripple={tvMode ? undefined : { color: "rgba(139,92,246,0.18)" }}
       style={({ pressed, focused }) => [
         styles.card,
         { width: cardW, opacity: pressed ? 0.85 : 1 },
@@ -61,10 +64,10 @@ export const AnimeCard = React.memo(function AnimeCard({ anime, size = "sm", car
     >
       <View style={[styles.imageContainer, { width: cardW, height: cardH, borderRadius: colors.radius - 4 }]}>
         <Image
-          source={{ uri: getPosterUri(anime, anime.id ? `https://img.anili.st/media/${anime.id}` : "") }}
+          source={{ uri: posterUri }}
           style={[styles.image, { borderRadius: colors.radius - 4 }]}
           resizeMode="cover"
-          fadeDuration={120}
+          fadeDuration={tvMode ? 0 : 120}
           resizeMethod="resize"
         />
         {anime.averageScore && (

@@ -27,7 +27,7 @@ import {
 import { useApp } from "@/context/AppContext";
 import { getBaseUrl } from "@/utils/api";
 import { isTvDevice, tvFocusStyle } from "@/utils/tv";
-import { getPosterUri } from "@/utils/media";
+import { getPosterUri, getTvPosterUri } from "@/utils/media";
 
 const SEASON_AR: Record<string, string> = {
   WINTER: "شتاء", SPRING: "ربيع", SUMMER: "صيف", FALL: "خريف",
@@ -60,19 +60,16 @@ export default function HomeScreen() {
   const { data: trending, isLoading: loadingT, refetch: refetchT } = useQuery({
     queryKey: ["trending"],
     queryFn: () => anilistQuery<{ Page: { media: AnilistMedia[] } }>(TRENDING_QUERY, { page: 1 }),
-    enabled: !isTvLayout,
   });
 
   const { data: popular, isLoading: loadingP, refetch: refetchP } = useQuery({
     queryKey: ["popular"],
     queryFn: () => anilistQuery<{ Page: { media: AnilistMedia[] } }>(POPULAR_QUERY, { page: 1 }),
-    enabled: !isTvLayout,
   });
 
   const { data: airing, isLoading: loadingA, refetch: refetchA } = useQuery({
     queryKey: ["airing"],
     queryFn: () => anilistQuery<{ Page: { media: AnilistMedia[] } }>(AIRING_QUERY),
-    enabled: !isTvLayout,
   });
 
   const { data: seasonal, refetch: refetchS } = useQuery({
@@ -83,31 +80,26 @@ export default function HomeScreen() {
   const { data: topRated, refetch: refetchR } = useQuery({
     queryKey: ["topRated"],
     queryFn: () => anilistQuery<{ Page: { media: AnilistMedia[] } }>(TOP_RATED_QUERY),
-    enabled: !isTvLayout,
   });
 
   const { data: movies, refetch: refetchM } = useQuery({
     queryKey: ["animeMovies"],
     queryFn: () => anilistQuery<{ Page: { media: AnilistMedia[] } }>(MOVIES_QUERY),
-    enabled: !isTvLayout,
   });
 
   const { data: spring2026, refetch: refetchSpring } = useQuery({
     queryKey: ["spring2026"],
     queryFn: () => anilistQuery<{ Page: { media: AnilistMedia[] } }>(SPRING_2026_QUERY),
-    enabled: !isTvLayout,
   });
 
   const { data: fall2025, refetch: refetchFall } = useQuery({
     queryKey: ["fall2025"],
     queryFn: () => anilistQuery<{ Page: { media: AnilistMedia[] } }>(FALL_2025_QUERY),
-    enabled: !isTvLayout,
   });
 
   const { data: isekai, refetch: refetchIsekai } = useQuery({
     queryKey: ["isekai"],
     queryFn: () => anilistQuery<{ Page: { media: AnilistMedia[] } }>(ISEKAI_QUERY),
-    enabled: !isTvLayout,
   });
 
   /* أحدث الحلقات — نفس كتالوج AnimeSlayer المستخدم في الويب. */
@@ -167,7 +159,7 @@ export default function HomeScreen() {
     return () => ctrl.abort();
   }, []);
 
-  const isLoading = !isTvLayout && (loadingT || loadingP || loadingA);
+  const isLoading = loadingT || loadingP || loadingA;
 
   /* ── Dubbed cartoon catalog ── */
   const BASE_URL = getBaseUrl();
@@ -212,8 +204,8 @@ export default function HomeScreen() {
   /* Randomize from the full popular catalog so the hero is not fixed to the
      same first four titles on every client. */
   const heroItems = useMemo(
-    () => randomSample(popularList.filter((m) => m.bannerImage), 8),
-    [popularList],
+    () => randomSample(popularList.filter((m) => m.bannerImage), isTvLayout ? 4 : 8),
+    [popularList, isTvLayout],
   );
   const recentHistory = watchHistory.slice(0, 10);
   const railCardWidth = getRailCardWidth(width, isTvLayout ? 5 : 3);
@@ -259,14 +251,11 @@ export default function HomeScreen() {
 
         {!isTvLayout && <AnnouncementBanner />}
 
-        {/* Hero is intentionally omitted on TV: the screen opens directly on
-            the latest episode rail, which is faster and easier to use with a
-            remote. */}
-        {!isTvLayout && (isLoading ? (
+        {isLoading ? (
           <View style={{ height: 420, backgroundColor: colors.card }} />
         ) : (
           <HeroSection items={heroItems} />
-        ))}
+        )}
 
         {/* Continue Watching */}
         {!isTvLayout && recentHistory.length > 0 && (
@@ -348,7 +337,9 @@ export default function HomeScreen() {
                    style={({ focused }) => [todayEpStyles.card, { width: railCardWidth, height: Math.round(railCardWidth * 1.46), backgroundColor: colors.card, borderColor: colors.border }, isTvLayout && tvFocusStyle(focused)]}
                 >
                   {ep.cover ? (
-                   <Image source={{ uri: getPosterUri(ep, ep.animeId ? `https://img.anili.st/media/${ep.animeId}` : "") }} style={todayEpStyles.img} resizeMode="cover" />
+                   <Image source={{ uri: isTvLayout
+                     ? getTvPosterUri(ep, ep.animeId ? `https://img.anili.st/media/${ep.animeId}` : "")
+                     : getPosterUri(ep, ep.animeId ? `https://img.anili.st/media/${ep.animeId}` : "") }} style={todayEpStyles.img} resizeMode="cover" />
                   ) : (
                     <View style={[todayEpStyles.img, { backgroundColor: colors.card, alignItems: "center", justifyContent: "center" }]}>
                       <Ionicons name="tv" size={28} color="rgba(255,255,255,0.2)" />
@@ -499,13 +490,6 @@ export default function HomeScreen() {
               <SkeletonRow />
               <SkeletonRow />
             </>
-          ) : isTvLayout ? (
-            <SectionRow
-              title={`أنمي هذا الموسم ${SEASON_AR[season] ?? ""} ${year}`}
-              items={seasonalList}
-              size="md"
-              onSeeAll={() => router.push({ pathname: "/browse", params: { sort: "POPULARITY_DESC", season, year: String(year) } } as any)}
-            />
           ) : (
             <>
               <SectionRow title="رائج الآن" items={trendingList} size="md" onSeeAll={() => router.push({ pathname: "/browse", params: { sort: "TRENDING_DESC" } } as any)} />
