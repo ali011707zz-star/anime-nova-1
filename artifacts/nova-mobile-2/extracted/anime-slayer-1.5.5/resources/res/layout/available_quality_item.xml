@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android" xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:gravity="center"
+    android:orientation="horizontal"
+    android:layout_width="match_parent"
+    android:layout_height="50dp">
+    <io.wax911.support.custom.widget.SingleLineTextView
+        android:gravity="center"
+        android:id="@+id/quality_title"
+        android:layout_width="0dp"
+        android:layout_height="match_parent"
+        android:layout_weight="2"/>
+    <io.wax911.support.custom.widget.SingleLineTextView
+        android:textSize="9sp"
+        android:gravity="center"
+        android:id="@+id/quality_size"
+        android:visibility="gone"
+        android:layout_width="wrap_content"
+        android:layout_height="30dp"/>
+    <ProgressBar
+        android:id="@+id/progress"
+        android:visibility="gone"
+        android:layout_width="20dp"
+        android:layout_height="20dp"
+        android:indeterminate="true"
+        android:indeterminateBehavior="repeat"/>
+    <ImageButton
+        android:id="@+id/size_button"
+        android:background="@null"
+        android:layout_width="40dp"
+        android:layout_height="40dp"
+        app:srcCompat="@drawable/ic_cloud_question_grey_24dp"/>
+    <ImageButton
+        android:id="@+id/download_button"
+        android:background="@null"
+        android:layout_width="70dp"
+        android:layout_height="50dp"
+        app:srcCompat="@drawable/ic_file_download_grey_600_24dp"/>
+    <ImageButton
+        android:id="@+id/watch_button"
+        android:background="@null"
+        android:layout_width="70dp"
+        android:layout_height="50dp"
+        app:srcCompat="@drawable/ic_play_circle_outline_grey_600_24dp"/>
+</LinearLayout>

@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<menu xmlns:android="http://schemas.android.com/apk/res/android" xmlns:app="http://schemas.android.com/apk/res-auto">
+    <item
+        android:icon="@drawable/ic_chevron_left_circle_grey_600_24dp"
+        android:id="@+id/action_prev"
+        android:visible="false"
+        android:title="@string/action_prev"
+        app:iconTint="?attr/iconColor"
+        app:showAsAction="ifRoom"/>
+    <item
+        android:icon="@drawable/ic_chevron_right_circle_grey_600_24dp"
+        android:id="@+id/action_next"
+        android:visible="false"
+        android:title="@string/action_next"
+        app:iconTint="?attr/iconColor"
+        app:showAsAction="ifRoom"/>
+    <item
+        android:icon="@drawable/ic_chat_grey_600_24dp"
+        android:id="@+id/action_comment"
+        android:title="@string/action_comment"
+        app:showAsAction="ifRoom"/>
+</menu>

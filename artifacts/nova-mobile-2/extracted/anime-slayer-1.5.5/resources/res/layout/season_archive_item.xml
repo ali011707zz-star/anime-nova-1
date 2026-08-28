@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.constraintlayout.widget.ConstraintLayout xmlns:android="http://schemas.android.com/apk/res/android" xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:paddingBottom="8dp"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content">
+    <TextView
+        android:textAppearance="?attr/textAppearanceHeadline6"
+        android:gravity="center"
+        android:id="@+id/year"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toTopOf="parent"/>
+    <com.google.android.material.button.MaterialButton
+        android:id="@+id/winter"
+        android:layout_marginTop="4dp"
+        android:text="@string/archive_winter"
+        app:layout_constraintEnd_toStartOf="@+id/spring"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toBottomOf="@+id/year"
+        style="@style/Theme.Widget.Button.Archived"/>
+    <com.google.android.material.button.MaterialButton
+        android:id="@+id/spring"
+        android:text="@string/archive_spring"
+        app:layout_constraintEnd_toStartOf="@+id/summer"
+        app:layout_constraintStart_toEndOf="@+id/winter"
+        app:layout_constraintTop_toTopOf="@+id/winter"
+        style="@style/Theme.Widget.Button.Archived"/>
+    <com.google.android.material.button.MaterialButton
+        android:id="@+id/summer"
+        android:text="@string/archive_summer"
+        app:layout_constraintEnd_toStartOf="@+id/fall"
+        app:layout_constraintStart_toEndOf="@+id/spring"
+        app:layout_constraintTop_toTopOf="@+id/winter"
+        style="@style/Theme.Widget.Button.Archived"/>
+    <com.google.android.material.button.MaterialButton
+        android:id="@+id/fall"
+        android:text="@string/archive_fall"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toEndOf="@+id/summer"
+        app:layout_constraintTop_toTopOf="@+id/winter"
+        style="@style/Theme.Widget.Button.Archived"/>
+</androidx.constraintlayout.widget.ConstraintLayout>

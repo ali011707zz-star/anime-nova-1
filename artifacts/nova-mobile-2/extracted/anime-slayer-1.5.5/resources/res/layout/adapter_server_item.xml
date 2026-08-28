@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android" xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:id="@+id/gropid"
+    android:background="?attr/selectableItemBackground"
+    android:padding="5dp"
+    android:focusable="true"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content">
+    <TextView
+        android:textColor="?android:attr/textColorSecondary"
+        android:gravity="center"
+        android:id="@+id/server_name"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="سيرفر 1"
+        android:layout_toLeftOf="@+id/choose"
+        android:layout_toRightOf="@+id/server_state"
+        android:layout_alignBottom="@+id/choose"
+        android:layout_alignParentTop="true"
+        android:layout_toEndOf="@+id/server_state"/>
+    <com.google.android.material.button.MaterialButton
+        android:id="@+id/choose"
+        android:layout_width="wrap_content"
+        android:layout_height="40dp"
+        android:text="أختيار"
+        android:layout_alignParentTop="true"
+        android:layout_alignParentRight="true"
+        style="@style/Theme.Widget.Button.FilledAccent"/>
+    <ImageView
+        android:id="@+id/server_state"
+        android:layout_width="25dp"
+        android:layout_height="wrap_content"
+        android:layout_alignBottom="@+id/server_name"
+        android:layout_alignParentLeft="true"
+        android:layout_alignParentTop="true"
+        android:layout_alignParentStart="true"
+        app:srcCompat="@drawable/ic_info_outline_orange_600_24dp"/>
+</RelativeLayout>

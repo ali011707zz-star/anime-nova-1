@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:orientation="vertical"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent">
+    <com.google.android.material.appbar.AppBarLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content">
+        <com.google.android.material.appbar.MaterialToolbar
+            android:id="@+id/toolbar"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"/>
+    </com.google.android.material.appbar.AppBarLayout>
+    <TextView
+        android:textStyle="bold"
+        android:gravity="center"
+        android:id="@+id/textView2"
+        android:paddingLeft="15dp"
+        android:paddingRight="15dp"
+        android:layout_width="wrap_content"
+        android:layout_height="match_parent"
+        android:text="@string/Disclaimer_content"
+        android:textAlignment="center"
+        android:layout_marginStart="8dp"
+        android:layout_marginEnd="8dp"
+        style="@style/TextAppearance.AppCompat.Large"/>
+</LinearLayout>

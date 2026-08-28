@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:orientation="horizontal"
+    android:background="?attr/selectableItemBackground"
+    android:padding="@dimen/ayp_menu_item_padding"
+    android:focusable="true"
+    android:clickable="true"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content">
+    <TextView
+        android:textSize="@dimen/ayp_menu_item_text_size"
+        android:textColor="@color/ayp_menu_text"
+        android:gravity="center"
+        android:id="@+id/text"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:drawablePadding="12dp"/>
+</LinearLayout>

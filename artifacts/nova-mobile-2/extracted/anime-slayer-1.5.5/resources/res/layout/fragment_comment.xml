@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.appcompat.widget.LinearLayoutCompat xmlns:android="http://schemas.android.com/apk/res/android" xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:orientation="vertical"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent">
+    <androidx.constraintlayout.widget.ConstraintLayout
+        android:id="@+id/comment_location"
+        android:background="?attr/selectableItemBackground"
+        android:padding="16dp"
+        android:visibility="gone"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content">
+        <TextView
+            android:id="@+id/comment_title"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:textAlignment="viewStart"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintTop_toTopOf="parent"
+            style="@style/TextAppearance.AppCompat.Body1"/>
+        <TextView
+            android:id="@+id/comment_eps_name"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="3dp"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintTop_toBottomOf="@+id/comment_title"
+            style="@style/TextAppearance.AppCompat.Body1"/>
+    </androidx.constraintlayout.widget.ConstraintLayout>
+    <FrameLayout
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1">
+        <include
+            android:id="@+id/support_list"
+            layout="@layout/support_list"/>
+    </FrameLayout>
+    <View
+        android:id="@+id/simplebox_divider"
+        android:background="?attr/abstractColorDivider"
+        android:layout_width="match_parent"
+        android:layout_height="1dp"/>
+    <com.anslayer.widget.SlayerComposerWidget
+        android:id="@+id/composerWidget"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"/>
+</androidx.appcompat.widget.LinearLayoutCompat>

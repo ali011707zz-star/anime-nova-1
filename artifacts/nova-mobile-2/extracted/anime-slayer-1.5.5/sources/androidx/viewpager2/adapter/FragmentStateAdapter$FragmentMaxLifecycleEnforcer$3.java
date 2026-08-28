@@ -1,0 +1,13 @@
+package androidx.viewpager2.adapter;
+
+import androidx.lifecycle.k;
+import androidx.lifecycle.n;
+import androidx.lifecycle.q;
+
+/* loaded from: classes.dex */
+class FragmentStateAdapter$FragmentMaxLifecycleEnforcer$3 implements n {
+    @Override // androidx.lifecycle.n
+    public void e(q qVar, k.b bVar) {
+        throw null;
+    }
+}

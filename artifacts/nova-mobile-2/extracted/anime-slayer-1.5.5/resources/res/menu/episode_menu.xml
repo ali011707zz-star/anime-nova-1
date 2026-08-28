@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<menu xmlns:android="http://schemas.android.com/apk/res/android" xmlns:app="http://schemas.android.com/apk/res-auto">
+    <item
+        android:icon="@drawable/ic_sort_grey_600_24dp"
+        android:id="@+id/action_sort_toggle"
+        android:orderInCategory="102"
+        android:title="@string/action_sort_toggle"
+        app:iconTint="?attr/iconColor"
+        app:showAsAction="ifRoom"/>
+    <item
+        android:icon="@drawable/ic_bxl_filter"
+        android:id="@+id/action_filter"
+        android:orderInCategory="103"
+        android:title="@string/action_filter"
+        app:iconTint="?attr/iconColor"
+        app:showAsAction="ifRoom">
+        <menu>
+            <item
+                android:id="@+id/action_filter_watched"
+                android:title="@string/action_filter_watched"
+                android:checkable="true"/>
+            <item
+                android:id="@+id/action_filter_unwatched"
+                android:title="@string/action_filter_unwatched"
+                android:checkable="true"/>
+            <item
+                android:id="@+id/action_filter_filler"
+                android:title="@string/action_filter_fillers"
+                android:checkable="true"/>
+            <item
+                android:id="@+id/action_filter_unfiller"
+                android:title="@string/action_filter_unfillers"
+                android:checkable="true"/>
+            <item
+                android:id="@+id/action_filter_empty"
+                android:title="@string/action_filter_empty"/>
+        </menu>
+    </item>
+</menu>

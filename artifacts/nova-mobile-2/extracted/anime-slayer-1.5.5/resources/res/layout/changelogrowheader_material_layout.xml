@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:gravity="center_vertical"
+    android:orientation="horizontal"
+    android:id="@+id/chg_rowheader"
+    android:paddingLeft="@dimen/chglib_material_keyline1"
+    android:paddingRight="@dimen/chglib_material_keyline1"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:minHeight="@dimen/chglib_material_minHeight">
+    <TextView
+        android:textSize="@dimen/chglib_material_list_suheader_fontsize"
+        android:textStyle="bold"
+        android:textColor="@color/chglib_material_color_text_1"
+        android:gravity="center_vertical"
+        android:id="@+id/chg_headerVersion"
+        android:paddingTop="@dimen/chglib_material_keyline1"
+        android:paddingBottom="@dimen/chglib_material_keyline1"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:textAllCaps="true"
+        android:fontFamily="@string/font_fontFamily_material_item"
+        style="?android:attr/listSeparatorTextViewStyle"/>
+    <TextView
+        android:textSize="@dimen/chglib_material_list_suheader_fontsize"
+        android:textStyle="bold"
+        android:textColor="@color/chglib_material_color_text_1"
+        android:gravity="center_vertical"
+        android:id="@+id/chg_headerDate"
+        android:paddingTop="@dimen/chglib_material_keyline1"
+        android:paddingBottom="@dimen/chglib_material_keyline1"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="JUNE 17,2013"
+        android:textAllCaps="true"
+        android:fontFamily="@string/font_fontFamily_material_item"
+        style="?android:attr/listSeparatorTextViewStyle"/>
+</LinearLayout>

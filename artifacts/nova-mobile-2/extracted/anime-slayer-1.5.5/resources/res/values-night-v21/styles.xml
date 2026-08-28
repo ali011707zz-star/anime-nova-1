@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.Splash" parent="@style/Theme.Anime.DarkBlue">
+        <item name="android:windowBackground">@color/backgroundDarkBlue</item>
+        <item name="android:statusBarColor">@color/backgroundDarkBlue</item>
+        <item name="android:navigationBarColor">@color/backgroundDarkBlue</item>
+    </style>
+</resources>

@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item>
+        <shape android:shape="oval">
+            <padding
+                android:left="3dp"
+                android:top="3dp"
+                android:right="3dp"
+                android:bottom="3dp"/>
+            <solid android:color="@color/color_primary_toolbar"/>
+        </shape>
+    </item>
+    <item android:drawable="@drawable/ic_menu_overflow"/>
+</layer-list>

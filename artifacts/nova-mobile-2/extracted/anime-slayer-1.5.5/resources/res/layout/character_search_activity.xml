@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android" xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:orientation="vertical"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent">
+    <com.google.android.material.appbar.AppBarLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content">
+        <com.google.android.material.appbar.MaterialToolbar
+            android:id="@+id/search_toolbar"
+            android:paddingLeft="8dp"
+            android:paddingRight="8dp"
+            android:clipChildren="false"
+            android:layout_width="match_parent"
+            android:layout_height="?attr/actionBarSize"
+            app:contentInsetStartWithNavigation="0dp">
+            <LinearLayout
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:layout_width="match_parent"
+                android:layout_height="48dp">
+                <androidx.appcompat.widget.SearchView
+                    android:id="@+id/search_query"
+                    android:layout_width="0dp"
+                    android:layout_height="match_parent"
+                    android:layout_weight="1"
+                    android:imeOptions="actionSearch"
+                    app:iconifiedByDefault="false"
+                    app:queryBackground="@android:color/transparent"
+                    app:queryHint="أدخل اسم الشخصية..."
+                    app:searchIcon="@null"/>
+                <ImageButton
+                    android:id="@+id/action_filter"
+                    android:background="?attr/actionBarItemBackground"
+                    android:padding="16dp"
+                    android:visibility="gone"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:tint="?attr/iconColor"
+                    app:srcCompat="@drawable/ic_bxl_filter"/>
+                <ProgressBar
+                    android:id="@+id/progress"
+                    android:background="?attr/actionBarItemBackground"
+                    android:paddingTop="16dp"
+                    android:paddingBottom="16dp"
+                    android:visibility="gone"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"/>
+            </LinearLayout>
+        </com.google.android.material.appbar.MaterialToolbar>
+    </com.google.android.material.appbar.AppBarLayout>
+    <androidx.fragment.app.FragmentContainerView
+        android:id="@+id/fragment_container_view"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"/>
+</LinearLayout>

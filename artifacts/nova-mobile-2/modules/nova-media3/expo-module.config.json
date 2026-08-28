@@ -1,0 +1,13 @@
+{
+  "platforms": ["android", "apple"],
+  "apple": {
+    "modules": ["NovaVolumeModule"]
+  },
+  "android": {
+    "modules": [
+      "expo.modules.novamedia3.NovaMedia3Module",
+      "expo.modules.novamedia3.IsolatedPlayerModule",
+      "expo.modules.novamedia3.NovaVolumeModule"
+    ]
+  }
+}
