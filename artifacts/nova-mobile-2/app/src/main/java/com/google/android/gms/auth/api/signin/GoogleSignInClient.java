@@ -39,12 +39,15 @@ public class GoogleSignInClient extends GoogleApi<GoogleSignInOptions> {
 
     @VisibleForTesting
     /* loaded from: classes.dex */
-    public enum zzd {
+    public static final class zzd {
         public static final int zzau = 1;
         public static final int zzav = 2;
         public static final int zzaw = 3;
         public static final int zzax = 4;
         private static final /* synthetic */ int[] zzay = {1, 2, 3, 4};
+
+        private zzd() {
+        }
 
         public static int[] values$50KLMJ33DTMIUPRFDTJMOP9FC5N68SJFD5I2UPRDECNM2TBKD0NM2S395TPMIPRED5N2UHRFDTJMOPAJD5JMSIBE8DM6IPBEEGI4IRBGDHIMQPBEEHGN8QBFDOTG____0() {
             return (int[]) zzay.clone();

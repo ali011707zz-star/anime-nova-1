@@ -8,11 +8,11 @@ public interface o {
 
     /* renamed from: a, reason: collision with root package name */
     @SuppressLint({"SyntheticAccessor"})
-    public static final b.c f5585a;
+    public static final b.c f5585a = new b.c();
 
     /* renamed from: b, reason: collision with root package name */
     @SuppressLint({"SyntheticAccessor"})
-    public static final b.C0098b f5586b;
+    public static final b.C0098b f5586b = new b.C0098b();
 
     /* compiled from: Operation.java */
     /* loaded from: classes.dex */
@@ -62,8 +62,4 @@ public interface o {
         }
     }
 
-    static {
-        f5585a = new b.c();
-        f5586b = new b.C0098b();
-    }
 }

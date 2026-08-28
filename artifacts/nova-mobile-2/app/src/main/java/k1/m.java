@@ -150,7 +150,7 @@ public final class m<T> {
                                 if (i11 < 0) {
                                     wb.l.p();
                                 }
-                                wb.y<? extends f0<T>> yVar = new wb.y<>(cc.b.b(i11).intValue() - 2147483648, (f0) next);
+                                wb.y<? extends f0<T>> yVar = new wb.y<>(cc.b.b(i11).intValue() - Integer.MIN_VALUE, (f0) next);
                                 aVar.f9673i = bVar;
                                 aVar.f9674j = e1Var2;
                                 aVar.f9675k = e1Var;
