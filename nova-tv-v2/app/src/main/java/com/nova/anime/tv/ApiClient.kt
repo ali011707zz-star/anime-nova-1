@@ -139,7 +139,7 @@ object ApiClient {
                 key to runCatching { anilist(query) }.getOrDefault(emptyList())
             }
         }.awaitAll().toMap()
-        return HomeRows(
+        HomeRows(
             latest = results["latest"].orEmpty(),
             popular = results["popular"].orEmpty(),
             topRated = results["topRated"].orEmpty(),
