@@ -45,5 +45,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: Nova-TV-v2-debug
-          path: nova-tv-v2/app/build/outputs/apk/debug/app-debug.apk
+          path: nova-tv-v2/app/build/outputs/apk/**/*.apk
           if-no-files-found: error
