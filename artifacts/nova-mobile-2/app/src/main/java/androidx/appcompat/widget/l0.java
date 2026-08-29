@@ -16,6 +16,7 @@ import java.util.WeakHashMap;
 import org.xmlpull.v1.XmlPullParser;
 import org.xmlpull.v1.XmlPullParserException;
 import s.d;
+import s.e;
 import s.g;
 import s.h;
 
@@ -55,7 +56,7 @@ public final class l0 {
 
     /* compiled from: ResourceManagerInternal.java */
     /* loaded from: classes.dex */
-    public static class a implements e {
+    public static class a implements ResourceDelegate {
         @Override // androidx.appcompat.widget.l0.e
         public Drawable a(Context context, XmlPullParser xmlPullParser, AttributeSet attributeSet, Resources.Theme theme) {
             try {
@@ -68,7 +69,7 @@ public final class l0 {
 
     /* compiled from: ResourceManagerInternal.java */
     /* loaded from: classes.dex */
-    public static class b implements e {
+    public static class b implements ResourceDelegate {
         @Override // androidx.appcompat.widget.l0.e
         public Drawable a(Context context, XmlPullParser xmlPullParser, AttributeSet attributeSet, Resources.Theme theme) {
             try {
@@ -220,7 +221,7 @@ public final class l0 {
 
     public final void a(String str, e eVar) {
         if (this.f1407b == null) {
-            this.f1407b = new s.g<>();
+            this.f1407b = new g<>();
         }
         this.f1407b.put(str, eVar);
     }
@@ -230,9 +231,9 @@ public final class l0 {
         if (constantState == null) {
             return false;
         }
-        s.d<WeakReference<Drawable.ConstantState>> dVar = this.f1409d.get(context);
+        d<WeakReference<Drawable.ConstantState>> dVar = this.f1409d.get(context);
         if (dVar == null) {
-            dVar = new s.d<>();
+            dVar = new d<>();
             this.f1409d.put(context, dVar);
         }
         dVar.j(j10, new WeakReference<>(constantState));
@@ -243,9 +244,9 @@ public final class l0 {
         if (this.f1406a == null) {
             this.f1406a = new WeakHashMap<>();
         }
-        s.h<ColorStateList> hVar = this.f1406a.get(context);
+        h<ColorStateList> hVar = this.f1406a.get(context);
         if (hVar == null) {
-            hVar = new s.h<>();
+            hVar = new h<>();
             this.f1406a.put(context, hVar);
         }
         hVar.a(i10, colorStateList);
@@ -284,7 +285,7 @@ public final class l0 {
     }
 
     public final synchronized Drawable i(Context context, long j10) {
-        s.d<WeakReference<Drawable.ConstantState>> dVar = this.f1409d.get(context);
+        d<WeakReference<Drawable.ConstantState>> dVar = this.f1409d.get(context);
         if (dVar == null) {
             return null;
         }
@@ -336,8 +337,8 @@ public final class l0 {
     }
 
     public final ColorStateList n(Context context, int i10) {
-        s.h<ColorStateList> hVar;
-        WeakHashMap<Context, s.h<ColorStateList>> weakHashMap = this.f1406a;
+        h<ColorStateList> hVar;
+        WeakHashMap<Context, h<ColorStateList>> weakHashMap = this.f1406a;
         if (weakHashMap == null || (hVar = weakHashMap.get(context)) == null) {
             return null;
         }
@@ -354,18 +355,18 @@ public final class l0 {
 
     public final Drawable r(Context context, int i10) {
         int next;
-        s.g<String, e> gVar = this.f1407b;
+        g<String, ResourceDelegate> gVar = this.f1407b;
         if (gVar == null || gVar.isEmpty()) {
             return null;
         }
-        s.h<String> hVar = this.f1408c;
+        h<String> hVar = this.f1408c;
         if (hVar != null) {
             String e10 = hVar.e(i10);
             if ("appcompat_skip_skip".equals(e10) || (e10 != null && this.f1407b.get(e10) == null)) {
                 return null;
             }
         } else {
-            this.f1408c = new s.h<>();
+            this.f1408c = new h<>();
         }
         if (this.f1410e == null) {
             this.f1410e = new TypedValue();
@@ -413,7 +414,7 @@ public final class l0 {
     }
 
     public synchronized void s(Context context) {
-        s.d<WeakReference<Drawable.ConstantState>> dVar = this.f1409d.get(context);
+        d<WeakReference<Drawable.ConstantState>> dVar = this.f1409d.get(context);
         if (dVar != null) {
             dVar.b();
         }
