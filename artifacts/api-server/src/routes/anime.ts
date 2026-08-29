@@ -6242,6 +6242,18 @@ function kawaiiQualityRank(value: unknown): number {
   return 6;
 }
 
+/* Kawaii sometimes labels an adaptive HLS master as "auto". Availability
+   advertises the first adaptive row as 1080p, so playback must use the same
+   tier or the requested 1080p row is filtered out for mobile only. */
+function kawaiiSourceQuality(value: unknown, index: number): string {
+  const text = String(value || "").trim().toLowerCase();
+  if (/(?:2160|1440|1080)\s*p?|fhd|full[ ._-]*hd/.test(text)) return "1080p";
+  if (/(?:720)\s*p?|(?<!f)\bhd\b/.test(text)) return "720p";
+  if (/(?:480)\s*p?/.test(text)) return "480p";
+  if (/(?:360)\s*p?|sd/.test(text)) return "360p";
+  return index === 0 ? "1080p" : "720p";
+}
+
 /**
  * Kawaii rotates the hostname used for signed media URLs. Keep the explicit
  * hosts for compatibility, but also accept a rotated Kawaii subdomain or a
@@ -6326,10 +6338,10 @@ async function getKawaiiAnimeSources(
       return data.sources
         .filter(source => typeof source?.url === "string" && source.url.length > 0)
         .map((source, index) => {
-          const label = String(source.quality || "1080p");
+          const label = kawaiiSourceQuality(source.quality, index);
           return {
             name: `كواي أنمي · ${label}`, url: "", quality: label,
-            qualityRank: index === 0 ? 20 : 13, site: "kawaii",
+            qualityRank: kawaiiQualityRank(label), site: "kawaii",
             verified: true,
           } as UnifiedSource;
         });
@@ -6404,7 +6416,7 @@ async function getKawaiiAnimeSources(
     // URLs where the API does not include headers.
     const apiReferer = data.headers?.Referer || data.headers?.referer;
 
-    return trustedSources.map((src) => {
+    return trustedSources.map((src, index) => {
       // Kawaii has returned the HLS flag as a boolean, a string ("hls"/"m3u8"),
       // and occasionally omitted it while keeping the playlist-shaped URL.
       // If this is misclassified as MP4, mobile playback and the download
@@ -6431,11 +6443,12 @@ async function getKawaiiAnimeSources(
       const directUrl = isHls
         ? `/api/anime/hls-proxy?url=${encodeURIComponent(src.url)}&ref=${kawaiiRef}`
         : `/api/anime/video-proxy?url=${encodeURIComponent(src.url)}&ref=${kawaiiRef}`;
+      const quality = kawaiiSourceQuality(src.quality, index);
       return {
-        name: `كواي أنمي · ${src.quality || "1080p"}${subLangLabel ? ` · ${subLangLabel}` : ""}`,
+        name: `كواي أنمي · ${quality}${subLangLabel ? ` · ${subLangLabel}` : ""}`,
         url: directUrl,
-        quality: src.quality || "1080p",
-        qualityRank: kawaiiQualityRank(`${src.quality || ""} ${src.url}`),
+        quality,
+        qualityRank: kawaiiQualityRank(quality),
         site: "kawaii",
         directUrl,
         directType: isHls ? "hls" : "mp4",
