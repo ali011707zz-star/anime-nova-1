@@ -1,3 +1,5 @@
+import org.gradle.api.tasks.compile.JavaCompile
+
 plugins {
     id("com.android.application")
 }
@@ -45,25 +47,23 @@ android {
         }
     }
 
-    sourceSets {
-        named("main") {
-            // JADX also emitted the bytecode of third-party libraries into
-            // the source tree. Those sources are not valid source-of-truth
-            // Java: R8-renamed nested types collide when javac sees the
-            // whole tree. Use the original Maven artifacts below and
-            // compile the app-owned and obfuscated application packages.
-            java.exclude(
-                "android/**",
-                "androidx/**",
-                "com/google/**",
-                "com/bumptech/**",
-                "com/pierfrancescosoffritti/**",
-                "com/twitter/**",
-                "okhttp3/**",
-                "retrofit2/**",
-            )
-        }
-    }
+}
+
+tasks.withType<JavaCompile>().configureEach {
+    // JADX also emitted the bytecode of third-party libraries into the source
+    // tree. Those sources are not valid source-of-truth Java: R8-renamed
+    // nested types collide when javac sees the whole tree. Use the original
+    // Maven artifacts below and compile the app-owned packages that remain.
+    exclude(
+        "android/**",
+        "androidx/**",
+        "com/google/**",
+        "com/bumptech/**",
+        "com/pierfrancescosoffritti/**",
+        "com/twitter/**",
+        "okhttp3/**",
+        "retrofit2/**",
+    )
 }
 
 dependencies {
