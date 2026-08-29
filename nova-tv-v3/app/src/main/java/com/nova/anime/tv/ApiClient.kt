@@ -130,22 +130,39 @@ object ApiClient {
     suspend fun home(): HomeRows = coroutineSafeHome()
 
     private suspend fun coroutineSafeHome(): HomeRows = coroutineScope {
+        val (season, year) = currentSeason()
+        val mediaFields = """
+            id idMal title { romaji english native } coverImage { large extraLarge }
+            bannerImage description episodes averageScore status format genres season seasonYear
+        """.trimIndent()
         val queries = listOf(
-            "latest" to """
+            "trending" to """
                 query { Page(page: 1, perPage: 20) {
-                  media(sort: TRENDING_DESC, type: ANIME, isAdult: false,
-                    genre_not_in: ["Hentai"]) {
-                    id title { romaji english native } coverImage { large extraLarge }
-                   bannerImage description episodes averageScore status format genres season seasonYear
+                  media(sort: TRENDING_DESC, type: ANIME, isAdult: false, genre_not_in: ["Hentai"]) {
+                    $mediaFields
+                  }
+                }
+            """.trimIndent(),
+            "seasonal" to """
+                query { Page(page: 1, perPage: 20) {
+                  media(sort: POPULARITY_DESC, type: ANIME, season: $season, seasonYear: $year,
+                    isAdult: false, genre_not_in: ["Hentai"]) {
+                    $mediaFields
+                  }
+                }
+            """.trimIndent(),
+            "airing" to """
+                query { Page(page: 1, perPage: 20) {
+                  media(sort: POPULARITY_DESC, type: ANIME, status: RELEASING,
+                    isAdult: false, genre_not_in: ["Hentai"]) {
+                    $mediaFields
                   }
                 }
             """.trimIndent(),
             "popular" to """
                 query { Page(page: 1, perPage: 20) {
-                  media(sort: POPULARITY_DESC, type: ANIME, isAdult: false,
-                    genre_not_in: ["Hentai"]) {
-                    id title { romaji english native } coverImage { large extraLarge }
-                   bannerImage description episodes averageScore status format genres season seasonYear
+                  media(sort: POPULARITY_DESC, type: ANIME, isAdult: false, genre_not_in: ["Hentai"]) {
+                    $mediaFields
                   }
                 }
             """.trimIndent(),
@@ -153,8 +170,23 @@ object ApiClient {
                 query { Page(page: 1, perPage: 20) {
                   media(sort: SCORE_DESC, type: ANIME, isAdult: false,
                     format_in: [TV, MOVIE], genre_not_in: ["Hentai"]) {
-                    id title { romaji english native } coverImage { large extraLarge }
-                   bannerImage description episodes averageScore status format genres season seasonYear
+                    $mediaFields
+                  }
+                }
+            """.trimIndent(),
+            "movies" to """
+                query { Page(page: 1, perPage: 20) {
+                  media(sort: POPULARITY_DESC, type: ANIME, format: MOVIE,
+                    isAdult: false, genre_not_in: ["Hentai"]) {
+                    $mediaFields
+                  }
+                }
+            """.trimIndent(),
+            "isekai" to """
+                query { Page(page: 1, perPage: 20) {
+                  media(sort: POPULARITY_DESC, type: ANIME, genre: "Isekai",
+                    isAdult: false, genre_not_in: ["Hentai"]) {
+                    $mediaFields
                   }
                 }
             """.trimIndent(),
@@ -166,10 +198,27 @@ object ApiClient {
             }
         }.awaitAll().toMap()
         HomeRows(
-            latest = results["latest"].orEmpty(),
+            latest = results["trending"].orEmpty(),
+            trending = results["trending"].orEmpty(),
+            seasonal = results["seasonal"].orEmpty(),
+            airing = results["airing"].orEmpty(),
             popular = results["popular"].orEmpty(),
             topRated = results["topRated"].orEmpty(),
+            movies = results["movies"].orEmpty(),
+            isekai = results["isekai"].orEmpty(),
         )
+    }
+
+    private fun currentSeason(): Pair<String, Int> {
+        val calendar = java.util.Calendar.getInstance()
+        val month = calendar.get(java.util.Calendar.MONTH) + 1
+        val season = when (month) {
+            in 1..3 -> "WINTER"
+            in 4..6 -> "SPRING"
+            in 7..9 -> "SUMMER"
+            else -> "FALL"
+        }
+        return season to calendar.get(java.util.Calendar.YEAR)
     }
 
     suspend fun search(term: String): List<AnimeItem> {
@@ -544,8 +593,8 @@ object ApiClient {
             title = title?.optString("romaji").orEmpty().ifBlank { "بدون عنوان" },
             englishTitle = title?.optString("english")?.takeIf { it.isNotBlank() },
             nativeTitle = title?.optString("native")?.takeIf { it.isNotBlank() },
-            coverUrl = cover?.optString("extraLarge")?.takeIf { it.isNotBlank() }
-                ?: cover?.optString("large")?.takeIf { it.isNotBlank() },
+            coverUrl = cover?.optString("large")?.takeIf { it.isNotBlank() }
+                ?: cover?.optString("extraLarge")?.takeIf { it.isNotBlank() },
             bannerUrl = obj.optString("bannerImage").takeIf { it.isNotBlank() },
             description = obj.optString("description").takeIf { it.isNotBlank() },
             episodes = obj.optInt("episodes").takeIf { it > 0 },

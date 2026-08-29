@@ -29,12 +29,12 @@ class NavigationActivity : ComponentActivity() {
         val close = tvButton(this, "رجوع")
         close.setOnClickListener { finish() }
         header.addView(close, LinearLayout.LayoutParams(dp(if (profile.isTv) 140 else 104), dp(if (profile.isTv) 56 else 50)))
-        header.addView(tvText(this, "كل أقسام Nova 3", if (profile.isTv) 30f else 24f).apply {
+        header.addView(tvText(this, "كل أقسام Anime NOVA", if (profile.isTv) 30f else 24f).apply {
             gravity = android.view.Gravity.CENTER
             typeface = android.graphics.Typeface.DEFAULT_BOLD
         }, LinearLayout.LayoutParams(0, dp(56), 1f))
         root.addView(header)
-        root.addView(tvText(this, "نفس صفحات وأزرار Nova Mobile، مع انتقالات خفيفة.", 15f, Color.rgb(161, 161, 170)).apply {
+        root.addView(tvText(this, "نفس صفحات وأزرار Anime NOVA الرسمية، مع انتقالات خفيفة.", 15f, Color.rgb(161, 161, 170)).apply {
             setPadding(0, dp(8), 0, dp(18))
         })
 

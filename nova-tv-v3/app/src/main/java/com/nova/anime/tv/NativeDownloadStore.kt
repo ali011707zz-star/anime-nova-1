@@ -16,7 +16,7 @@ data class NativeDownload(
 
 /**
  * Metadata for Android's system DownloadManager. The actual bytes stay under
- * the app's Movies/Nova 3 directory and are never copied into Nova's database.
+ * the app's Movies/Anime NOVA directory and are never copied into Nova's database.
  */
 object NativeDownloadStore {
     private const val PREFS = "nova_tv_downloads"
@@ -40,7 +40,7 @@ object NativeDownloadStore {
             .setDestinationInExternalFilesDir(
                 context,
                 Environment.DIRECTORY_MOVIES,
-                "Nova3/${safeFileName(title)}-ep$episode-${url.hashCode().toString().replace("-", "n")}.mp4",
+                "AnimeNOVA/${safeFileName(title)}-ep$episode-${url.hashCode().toString().replace("-", "n")}.mp4",
             )
         headers.forEach { (key, value) ->
             if (key.isNotBlank() && value.isNotBlank()) request.addRequestHeader(key, value)

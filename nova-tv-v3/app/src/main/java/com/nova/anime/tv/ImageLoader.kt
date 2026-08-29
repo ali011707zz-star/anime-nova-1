@@ -2,6 +2,8 @@ package com.nova.anime.tv
 
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.Color
+import android.graphics.drawable.GradientDrawable
 import android.util.LruCache
 import android.widget.ImageView
 import kotlinx.coroutines.CoroutineScope
@@ -28,7 +30,9 @@ object ImageLoader {
 
     fun load(view: ImageView, url: String?) {
         view.tag = url
-        view.setImageResource(android.R.drawable.ic_menu_gallery)
+        view.setImageDrawable(GradientDrawable().apply {
+            setColor(Color.rgb(17, 17, 22))
+        })
         if (url.isNullOrBlank()) return
         cache.get(url)?.let {
             view.setImageBitmap(it)
@@ -36,7 +40,13 @@ object ImageLoader {
         }
         scope.launch {
             val bitmap = runCatching {
-                val bytes = client.newCall(Request.Builder().url(url).build()).execute().use { response ->
+                val request = Request.Builder()
+                    .url(url)
+                    .header("User-Agent", "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36")
+                    .header("Accept", "image/avif,image/webp,image/apng,image/*,*/*;q=0.8")
+                    .header("Referer", "https://anilist.co/")
+                    .build()
+                val bytes = client.newCall(request).execute().use { response ->
                     if (!response.isSuccessful) return@use null
                     response.body?.bytes()
                 } ?: return@runCatching null

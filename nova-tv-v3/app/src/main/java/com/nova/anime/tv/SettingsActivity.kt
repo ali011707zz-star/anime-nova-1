@@ -61,7 +61,7 @@ class SettingsActivity : AppCompatActivity() {
             setOnClickListener { confirmClearLibrary() }
         }, LinearLayout.LayoutParams(-1, dp(54)))
         body.addView(TextView(this).apply {
-            text = "Nova 3 · ${BuildConfig.NOVA_VERSION}\nالحزمة: ${BuildConfig.NOVA_PACKAGE}"
+            text = "Anime NOVA · ${BuildConfig.NOVA_VERSION}\nالحزمة: ${BuildConfig.NOVA_PACKAGE}"
             textSize = 14f
             setTextColor(Color.rgb(150, 150, 160))
             setPadding(0, dp(26), 0, 0)

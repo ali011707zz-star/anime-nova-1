@@ -21,7 +21,7 @@ android {
     }
 
     defaultConfig {
-        // Keep the production package so Nova 3 can replace the current
+        // Keep the production package so the native build can replace the current
         // React Native Android build as an in-place upgrade.
         applicationId = "com.nova.anime"
         minSdk = 24

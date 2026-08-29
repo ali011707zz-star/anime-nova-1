@@ -1,7 +1,7 @@
 <resources>
     <color name="nova_background">#09090B</color>
-    <color name="nova_surface">#17131F</color>
-    <color name="nova_primary">#C084FC</color>
-    <color name="nova_text">#FAFAFA</color>
-    <color name="nova_muted">#A1A1AA</color>
+    <color name="nova_surface">#111116</color>
+    <color name="nova_primary">#8B5CF6</color>
+    <color name="nova_text">#E8E8F0</color>
+    <color name="nova_muted">#71717A</color>
 </resources>

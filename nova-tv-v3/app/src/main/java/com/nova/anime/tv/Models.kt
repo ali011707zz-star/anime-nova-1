@@ -38,9 +38,16 @@ data class VideoSource(
 }
 
 data class HomeRows(
-    val latest: List<AnimeItem>,
-    val popular: List<AnimeItem>,
-    val topRated: List<AnimeItem>,
+    val latest: List<AnimeItem> = emptyList(),
+    val trending: List<AnimeItem> = emptyList(),
+    val seasonal: List<AnimeItem> = emptyList(),
+    val airing: List<AnimeItem> = emptyList(),
+    val popular: List<AnimeItem> = emptyList(),
+    val topRated: List<AnimeItem> = emptyList(),
+    val movies: List<AnimeItem> = emptyList(),
+    val isekai: List<AnimeItem> = emptyList(),
+    val dubbed: List<NovaContentCard> = emptyList(),
+    val awDubbed: List<NovaContentCard> = emptyList(),
 )
 
 data class NovaContentCard(

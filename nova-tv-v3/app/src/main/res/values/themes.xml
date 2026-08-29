@@ -1,6 +1,6 @@
 <resources>
     <style name="Theme.NovaTV" parent="Theme.MaterialComponents.DayNight.NoActionBar">
-        <item name="android:fontFamily">sans</item>
+        <item name="android:fontFamily">sans-serif</item>
         <item name="android:windowActionModeOverlay">true</item>
         <item name="android:colorAccent">@color/nova_primary</item>
         <item name="android:navigationBarColor">@color/nova_background</item>

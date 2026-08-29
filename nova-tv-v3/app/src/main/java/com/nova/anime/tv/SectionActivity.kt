@@ -157,7 +157,7 @@ class SectionActivity : ComponentActivity() {
         DUBBED -> "كرتون مدبلج"
         NEWS -> "الأخبار"
         SCHEDULE -> "جدول البث"
-        else -> "Nova 3"
+        else -> "Anime NOVA"
     }
 
     override fun onDestroy() {

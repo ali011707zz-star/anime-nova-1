@@ -129,6 +129,8 @@ class AnimeCardView(context: Context) : FrameLayout(context) {
     private val image = ImageView(context)
     private val title = tvText(context, "", profile.cardTitleSp)
     private val meta = tvText(context, "", profile.cardMetaSp, Color.rgb(216, 180, 254))
+    private val scoreBadge = tvText(context, "", 10f, Color.WHITE)
+    private val formatBadge = tvText(context, "", 10f, Color.WHITE)
 
     init {
         isFocusable = true
@@ -138,16 +140,23 @@ class AnimeCardView(context: Context) : FrameLayout(context) {
         setPadding(0, 0, 0, context.dp(if (profile.isTv) 5 else 3))
 
         image.scaleType = ImageView.ScaleType.CENTER_CROP
+        image.setBackgroundColor(Color.rgb(17, 17, 22))
         addView(image, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
 
+        addView(View(context).apply {
+            background = GradientDrawable(
+                GradientDrawable.Orientation.TOP_BOTTOM,
+                intArrayOf(Color.TRANSPARENT, Color.argb(235, 9, 9, 11)),
+            )
+        }, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
+
         val footer = FrameLayout(context).apply {
-            setBackgroundColor(Color.argb(225, 17, 13, 31))
             val pad = if (profile.isTv) 12 else 8
             setPadding(context.dp(pad), context.dp(5), context.dp(pad), context.dp(5))
         }
         val footerParams = LayoutParams(
             LayoutParams.MATCH_PARENT,
-            context.dp(profile.cardFooterDp),
+            context.dp(if (profile.isTv) 78 else 66),
             Gravity.BOTTOM,
         )
         addView(footer, footerParams)
@@ -159,6 +168,31 @@ class AnimeCardView(context: Context) : FrameLayout(context) {
             meta,
             LayoutParams(LayoutParams.MATCH_PARENT, context.dp(22), Gravity.BOTTOM),
         )
+
+        listOf(scoreBadge, formatBadge).forEach { badge ->
+            badge.gravity = Gravity.CENTER
+            badge.setPadding(context.dp(6), 0, context.dp(6), 0)
+            badge.background = GradientDrawable().apply {
+                cornerRadius = context.dp(5).toFloat()
+            }
+            addView(badge, LayoutParams(LayoutParams.WRAP_CONTENT, context.dp(24), Gravity.TOP or Gravity.END).apply {
+                topMargin = context.dp(8)
+                marginEnd = context.dp(8)
+            })
+        }
+        scoreBadge.background = GradientDrawable().apply {
+            cornerRadius = context.dp(5).toFloat()
+            setColor(Color.argb(210, 17, 17, 22))
+        }
+        formatBadge.background = GradientDrawable().apply {
+            cornerRadius = context.dp(5).toFloat()
+            setColor(Color.argb(220, 109, 40, 217))
+        }
+        formatBadge.layoutParams = (formatBadge.layoutParams as LayoutParams).apply {
+            gravity = Gravity.TOP or Gravity.START
+            marginEnd = 0
+            marginStart = context.dp(8)
+        }
 
         setOnFocusChangeListener { view, focused ->
             val scale = if (profile.isTv) 1.045f else 1.02f
@@ -183,6 +217,17 @@ class AnimeCardView(context: Context) : FrameLayout(context) {
             item.episodes?.let { "$it حلقة" },
             item.score?.let { "★ ${it / 10.0}" },
         ).joinToString("  ")
+        scoreBadge.text = item.score?.let { "★ ${"%.1f".format(java.util.Locale.US, it / 10.0)}" }.orEmpty()
+        scoreBadge.visibility = if (item.score != null) View.VISIBLE else View.GONE
+        formatBadge.text = when (item.format) {
+            "MOVIE" -> "فيلم"
+            "TV" -> "مسلسل"
+            "OVA" -> "OVA"
+            "ONA" -> "ONA"
+            "SPECIAL" -> "خاص"
+            else -> ""
+        }
+        formatBadge.visibility = if (formatBadge.text.isNotBlank()) View.VISIBLE else View.GONE
     }
 }
 
