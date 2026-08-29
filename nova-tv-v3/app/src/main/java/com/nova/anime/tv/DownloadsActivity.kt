@@ -6,6 +6,7 @@ import android.os.Bundle
 import android.view.Gravity
 import android.view.View
 import android.widget.Button
+import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
@@ -41,7 +42,7 @@ class DownloadsActivity : AppCompatActivity() {
         }, LinearLayout.LayoutParams(-1, dp(54)))
         list = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         root.addView(ScrollView(this).apply {
-            addView(list, ScrollView.LayoutParams(-1, -2))
+            addView(list, FrameLayout.LayoutParams(-1, -2))
         }, LinearLayout.LayoutParams(-1, 0, 1f))
         return root
     }

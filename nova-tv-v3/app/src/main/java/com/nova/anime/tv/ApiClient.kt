@@ -378,7 +378,7 @@ object ApiClient {
         }
         val dayEnd = (dayStart.clone() as java.util.Calendar).apply {
             add(java.util.Calendar.DAY_OF_YEAR, 1)
-            add(java.util.MILLISECOND, -1)
+            timeInMillis -= 1L
         }
         val query = """
             query Schedule(${"$"}from: Int!, ${"$"}to: Int!) {

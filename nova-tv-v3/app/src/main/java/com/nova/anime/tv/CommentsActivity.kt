@@ -8,6 +8,7 @@ import android.view.inputmethod.InputMethodManager
 import android.content.Context
 import android.widget.Button
 import android.widget.EditText
+import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
@@ -71,7 +72,7 @@ class CommentsActivity : AppCompatActivity() {
         }
         root.addView(ScrollView(this).apply {
             isFillViewport = true
-            addView(list, ScrollView.LayoutParams(-1, -2))
+            addView(list, FrameLayout.LayoutParams(-1, -2))
         }, LinearLayout.LayoutParams(-1, 0, 1f))
 
         val composer = LinearLayout(this).apply {
@@ -81,7 +82,7 @@ class CommentsActivity : AppCompatActivity() {
         }
         input = EditText(this).apply {
             hint = "اكتب تعليقك..."
-            hintTextColor = Color.rgb(125, 125, 135)
+            setHintTextColor(Color.rgb(125, 125, 135))
             setTextColor(Color.WHITE)
             setTextSize(15f)
             setSingleLine(false)

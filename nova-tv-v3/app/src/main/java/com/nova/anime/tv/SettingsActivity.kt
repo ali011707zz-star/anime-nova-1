@@ -6,6 +6,7 @@ import android.os.Bundle
 import android.view.Gravity
 import android.view.View
 import android.widget.Button
+import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.Switch
@@ -66,7 +67,7 @@ class SettingsActivity : AppCompatActivity() {
             setPadding(0, dp(26), 0, 0)
         })
         root.addView(ScrollView(this).apply {
-            addView(body, ScrollView.LayoutParams(-1, -2))
+            addView(body, FrameLayout.LayoutParams(-1, -2))
         }, LinearLayout.LayoutParams(-1, 0, 1f))
         return root
     }

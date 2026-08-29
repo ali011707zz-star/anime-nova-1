@@ -6,6 +6,7 @@ import android.view.Gravity
 import android.view.View
 import android.widget.Button
 import android.widget.EditText
+import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
@@ -49,7 +50,7 @@ class ProfileActivity : AppCompatActivity() {
             orientation = LinearLayout.VERTICAL
         }
         root.addView(ScrollView(this).apply {
-            addView(content, ScrollView.LayoutParams(-1, -2))
+            addView(content, FrameLayout.LayoutParams(-1, -2))
         }, LinearLayout.LayoutParams(-1, 0, 1f))
         return root
     }
@@ -166,7 +167,7 @@ class ProfileActivity : AppCompatActivity() {
     private fun field(hint: String, password: Boolean): EditText =
         EditText(this).apply {
             this.hint = hint
-            hintTextColor = Color.rgb(125, 125, 135)
+            setHintTextColor(Color.rgb(125, 125, 135))
             setTextColor(Color.WHITE)
             textSize = 16f
             setSingleLine(true)
