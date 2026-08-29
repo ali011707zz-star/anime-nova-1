@@ -5,7 +5,7 @@
 - [PM2 stale env vars](pm2-stale-env-vars.md) — editing ecosystem.config.cjs/.env on VPS does nothing until pm2 delete+start; caused universal web black-screen bug (broken CF_WORKER_URL never reloaded).
 - [VPS env file shell quirk](vps-env-file-quirk.md) — VPS .env contains a legacy bare line; extract needed assignments instead of sourcing the whole file.
 - [Nova Mobile GitHub builds](nova-mobile-github-builds.md) — user builds APKs through GitHub; sync source to VPS if needed, but never build or install Nova Mobile in Replit.
-- [GitHub push auth](github-push-auth.md) — this workspace's GitHub remote currently rejects pushes because no valid GitHub credential is available; do not force-push or expose tokens.
+- [GitHub push auth](github-push-auth.md) — GitHub API auth may work while HTTPS push needs a PAT-backed credential helper; never expose the token or force-push.
 - [PG JSON serialization](pg-json-serialization.md) — pg (node-postgres) treats JS arrays as PostgreSQL ARRAY syntax, not jsonb. Must JSON.stringify() objects/arrays before parameterized inserts into jsonb columns. Also: timestamps stored as "timestamptz" need ISO string (not ms epoch); read back with new Date(val).getTime().
 - [Anime NOVA startup fix](anime-nova-startup.md) — DB migration must run AFTER server starts listening, not before, or the workflow port-open timeout fails.
 - [Supabase source_cache schema fix](supabase-source-cache-schema-fix.md) — real prod DB is Supabase (not VPS's local legacy Postgres); sandbox has no IPv6 + pooler rejects this project, but VPS reaches db.<ref>.supabase.co directly.
