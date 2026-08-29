@@ -10,6 +10,7 @@ A full-stack anime streaming platform with web and mobile clients.
 | `anime-scraper` | `artifacts/anime-scraper` | React/Vite web frontend |
 | `nova-mobile` | `artifacts/nova-mobile` | Expo React Native mobile app |
 | `mockup-sandbox` | `artifacts/mockup-sandbox` | Design/mockup canvas sandbox |
+| `nova-tv-v3` | `nova-tv-v3` | Kotlin Android Native client for phone, tablet, and TV |
 
 ## Runtime
 
