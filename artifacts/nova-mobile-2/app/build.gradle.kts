@@ -85,7 +85,7 @@ dependencies {
     implementation("com.google.android.gms:play-services-base:18.5.0")
     implementation("com.google.android.gms:play-services-measurement-api:22.1.2")
     implementation("com.google.firebase:firebase-messaging:24.1.0")
-    implementation("com.bumptech.glide:glide:4.16.0")
+    implementation("com.github.bumptech.glide:glide:4.16.0")
     implementation("com.pierfrancescosoffritti.androidyoutubeplayer:core:12.1.0")
     implementation("com.squareup.duktape:duktape-android:1.4.0")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
