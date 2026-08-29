@@ -394,6 +394,13 @@ function getMobileDirectUrl(source: Src): string | null {
   if (String(source.site || "").toLowerCase() === "kawaii" && isHlsMediaUrl(candidate)) {
     return null;
   }
+  /* Kawaii's rotating CDN now returns HLS for many entries in the latest
+     episodes feed. Keep HLS on the VPS proxy so the manifest and every
+     rewritten segment receive the provider Referer/Origin consistently.
+     Raw direct playback remains useful for signed MP4 responses. */
+  if (String(source.site || "").toLowerCase() === "kawaii" && isHlsMediaUrl(candidate)) {
+    return null;
+  }
   return candidate;
 }
 
