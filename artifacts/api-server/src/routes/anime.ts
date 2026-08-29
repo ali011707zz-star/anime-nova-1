@@ -6229,6 +6229,7 @@ const KAWAII_CDN_HOSTS = new Set([
   // Kawaii currently serves some episodes through its rotating Watching CDN.
   // The URL is still signed and is returned by the trusted Kawaii API.
   "cdn.watching.onl",
+  "cdn.kryntal.top",
 ]);
 
 function kawaiiQualityRank(value: unknown): number {
