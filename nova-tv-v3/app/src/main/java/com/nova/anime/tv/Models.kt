@@ -42,3 +42,12 @@ data class HomeRows(
     val popular: List<AnimeItem>,
     val topRated: List<AnimeItem>,
 )
+
+data class NovaContentCard(
+    val id: String,
+    val title: String,
+    val subtitle: String? = null,
+    val imageUrl: String? = null,
+    val type: String = "content",
+    val description: String? = null,
+)

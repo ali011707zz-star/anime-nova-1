@@ -206,6 +206,137 @@ object ApiClient {
             }
         }
 
+    suspend fun animationBrowse(type: String = "movie"): List<NovaContentCard> =
+        getContent(
+            "/api/animation/browse",
+            mapOf(
+                "type" to type,
+                "genre" to "16",
+                "sort" to "popularity.desc",
+                "year" to "",
+                "page" to "1",
+            ),
+            "animation",
+        )
+
+    suspend fun dubbedCatalog(animation: Boolean = false): List<NovaContentCard> =
+        getContent(
+            if (animation) "/api/aw-dubbed/catalog" else "/api/dubbed/catalog",
+            mapOf("page" to "1"),
+            if (animation) "aw-dubbed" else "dubbed",
+        )
+
+    suspend fun news(): List<NovaContentCard> =
+        getContent("/api/news", mapOf("page" to "1", "limit" to "20"), "news")
+
+    suspend fun schedule(): List<NovaContentCard> = withContext(Dispatchers.IO) {
+        val now = java.util.Calendar.getInstance()
+        val dayStart = (now.clone() as java.util.Calendar).apply {
+            set(java.util.Calendar.HOUR_OF_DAY, 0)
+            set(java.util.Calendar.MINUTE, 0)
+            set(java.util.Calendar.SECOND, 0)
+            set(java.util.Calendar.MILLISECOND, 0)
+        }
+        val dayEnd = (dayStart.clone() as java.util.Calendar).apply {
+            add(java.util.Calendar.DAY_OF_YEAR, 1)
+            add(java.util.MILLISECOND, -1)
+        }
+        val query = """
+            query Schedule(${"$"}from: Int!, ${"$"}to: Int!) {
+              Page(page: 1, perPage: 50) {
+                airingSchedules(airingAt_greater: ${"$"}from, airingAt_lesser: ${"$"}to) {
+                  id airingAt episode
+                  media { id title { romaji english } coverImage { large } }
+                }
+              }
+            }
+        """.trimIndent()
+        val data = authenticatedRequest(
+            "${baseUrl()}/api/anilist",
+            method = "POST",
+            body = JSONObject()
+                .put("query", query)
+                .put(
+                    "variables",
+                    JSONObject()
+                        .put("from", dayStart.timeInMillis / 1000)
+                        .put("to", dayEnd.timeInMillis / 1000),
+                )
+                .toString(),
+        )
+        val schedules = data.optJSONObject("data")?.optJSONObject("Page")
+            ?.optJSONArray("airingSchedules") ?: JSONArray()
+        (0 until schedules.length()).mapNotNull { index ->
+            val schedule = schedules.optJSONObject(index) ?: return@mapNotNull null
+            val media = schedule.optJSONObject("media") ?: return@mapNotNull null
+            val title = media.optJSONObject("title")
+            val cover = media.optJSONObject("coverImage")
+            NovaContentCard(
+                id = media.optInt("id").toString(),
+                title = title?.optString("english").orEmpty()
+                    .ifBlank { title?.optString("romaji").orEmpty() }
+                    .ifBlank { "بدون عنوان" },
+                subtitle = "الحلقة ${schedule.optInt("episode")}",
+                imageUrl = cover?.optString("large")?.takeIf { it.isNotBlank() },
+                type = "schedule",
+            )
+        }
+    }
+
+    private suspend fun getContent(
+        path: String,
+        parameters: Map<String, String>,
+        type: String,
+    ): List<NovaContentCard> = withContext(Dispatchers.IO) {
+        val builder = baseUrl().toHttpUrl().newBuilder().addPathSegments(path.removePrefix("/"))
+        parameters.forEach { (key, value) ->
+            if (value.isNotBlank()) builder.addQueryParameter(key, value)
+        }
+        val data = authenticatedRequest(builder.build().toString())
+        val array = sequenceOf("results", "items", "series", "articles")
+            .mapNotNull { data.optJSONArray(it) }
+            .firstOrNull() ?: JSONArray()
+        (0 until array.length()).mapNotNull { index ->
+            val item = array.optJSONObject(index) ?: return@mapNotNull null
+            val rawId = item.opt("id")?.toString()
+                ?: item.optString("key").takeIf { it.isNotBlank() }
+                ?: item.optString("slug").takeIf { it.isNotBlank() }
+                ?: index.toString()
+            val title = item.optString("title").ifBlank {
+                item.optString("name")
+            }.ifBlank {
+                item.optString("titleAr")
+            }.ifBlank {
+                "بدون عنوان"
+            }
+            val posterPath = item.optString("poster_path")
+            val image = item.optString("poster").ifBlank {
+                item.optString("image")
+            }.ifBlank {
+                item.optString("cover")
+            }.ifBlank {
+                item.optString("thumbnail")
+            }.ifBlank {
+                if (posterPath.isNotBlank()) "https://image.tmdb.org/t/p/w500$posterPath" else ""
+            }
+            val subtitle = item.optString("release_date").ifBlank {
+                item.optString("year")
+            }.ifBlank {
+                item.optString("type")
+            }.takeIf { it.isNotBlank() }
+            NovaContentCard(
+                id = rawId,
+                title = title,
+                subtitle = subtitle,
+                imageUrl = image.takeIf { it.isNotBlank() },
+                type = type,
+                description = item.optString("overview").ifBlank {
+                    item.optString("description")
+                }.takeIf { it.isNotBlank() },
+            )
+        }
+    }
+
     private fun parseSse(source: BufferedSource): List<VideoSource> {
         val result = linkedMapOf<String, VideoSource>()
         while (!source.exhausted()) {
