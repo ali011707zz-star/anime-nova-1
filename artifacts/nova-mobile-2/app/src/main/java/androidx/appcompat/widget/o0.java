@@ -101,9 +101,9 @@ public class o0 extends HorizontalScrollView implements AdapterView.OnItemSelect
         @Override // android.widget.Adapter
         public View getView(int i10, View view, ViewGroup viewGroup) {
             if (view == null) {
-                return o0.this.c((a.c) getItem(i10), true);
+                return o0.this.c((androidx.appcompat.app.a.c) getItem(i10), true);
             }
-            ((d) view).a((a.c) getItem(i10));
+            ((d) view).a((androidx.appcompat.app.a.c) getItem(i10));
             return view;
         }
     }

@@ -5,6 +5,7 @@ import android.text.InputFilter;
 import android.text.method.TransformationMethod;
 import android.util.AttributeSet;
 import android.widget.TextView;
+import a1.f;
 
 /* compiled from: AppCompatEmojiTextHelper.java */
 /* loaded from: classes.dex */
@@ -14,11 +15,11 @@ public class l {
     public final TextView f1401a;
 
     /* renamed from: b, reason: collision with root package name */
-    public final a1.f f1402b;
+    public final f f1402b;
 
     public l(TextView textView) {
         this.f1401a = textView;
-        this.f1402b = new a1.f(textView, false);
+        this.f1402b = new f(textView, false);
     }
 
     public InputFilter[] a(InputFilter[] inputFilterArr) {

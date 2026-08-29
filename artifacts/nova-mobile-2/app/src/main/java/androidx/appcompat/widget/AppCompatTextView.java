@@ -20,7 +20,7 @@ import java.util.concurrent.Future;
 import o0.c;
 
 /* loaded from: classes.dex */
-public class AppCompatTextView extends TextView implements q0.z, u0.n, u0.b {
+public class AppCompatTextView extends TextView {
     private final e mBackgroundTintHelper;
     private l mEmojiTextViewHelper;
     private boolean mIsSetTypefaceProcessing;
@@ -136,7 +136,6 @@ public class AppCompatTextView extends TextView implements q0.z, u0.n, u0.b {
         return u0.j.c(this);
     }
 
-    @Override // q0.z
     public ColorStateList getSupportBackgroundTintList() {
         e eVar = this.mBackgroundTintHelper;
         if (eVar != null) {
@@ -145,7 +144,6 @@ public class AppCompatTextView extends TextView implements q0.z, u0.n, u0.b {
         return null;
     }
 
-    @Override // q0.z
     public PorterDuff.Mode getSupportBackgroundTintMode() {
         e eVar = this.mBackgroundTintHelper;
         if (eVar != null) {
@@ -354,7 +352,6 @@ public class AppCompatTextView extends TextView implements q0.z, u0.n, u0.b {
         u0.j.p(this, cVar);
     }
 
-    @Override // q0.z
     public void setSupportBackgroundTintList(ColorStateList colorStateList) {
         e eVar = this.mBackgroundTintHelper;
         if (eVar != null) {
@@ -362,7 +359,6 @@ public class AppCompatTextView extends TextView implements q0.z, u0.n, u0.b {
         }
     }
 
-    @Override // q0.z
     public void setSupportBackgroundTintMode(PorterDuff.Mode mode) {
         e eVar = this.mBackgroundTintHelper;
         if (eVar != null) {
@@ -370,13 +366,11 @@ public class AppCompatTextView extends TextView implements q0.z, u0.n, u0.b {
         }
     }
 
-    @Override // u0.n
     public void setSupportCompoundDrawablesTintList(ColorStateList colorStateList) {
         this.mTextHelper.w(colorStateList);
         this.mTextHelper.b();
     }
 
-    @Override // u0.n
     public void setSupportCompoundDrawablesTintMode(PorterDuff.Mode mode) {
         this.mTextHelper.x(mode);
         this.mTextHelper.b();
