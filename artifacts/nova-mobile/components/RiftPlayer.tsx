@@ -617,6 +617,16 @@ export function RiftPlayer({
      ويُصلح كثيراً من حالات "شغّال لكن بدون تقدّم" الناتجة عن اختناق مؤقت في
      الـ HLS proxy، بدون الحاجة لإزعاجه بشاشة "البحث عن مصادر بديلة". */
   const stallNudgeTriedRef = useRef(false);
+  /* أثناء seek قد يرسل ExoPlayer حالة loading/error مؤقتة لأن HLS يحتاج
+     جلب segment جديد. لا نعتبرها فشلاً للمصدر ولا نبدأ auto-cycle فوراً. */
+  const seekRecoveryRef = useRef<{
+    target: number;
+    retries: number;
+    restorePending: boolean;
+  } | null>(null);
+  const seekRecoveryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [sourceReloadNonce, setSourceReloadNonce] = useState(0);
+  const nativeLoadNonceRef = useRef(0);
   /** refs للحالات التي يحتاجها الـ polling interval بدون stale closure */
   const isPlayingRef      = useRef(false);
   const isErrorRef        = useRef(false);
@@ -807,6 +817,8 @@ export function RiftPlayer({
       if (waitForSrcTimerRef.current) { clearTimeout(waitForSrcTimerRef.current); waitForSrcTimerRef.current = null; }
       if (replaceSafetyTimerRef.current) { clearTimeout(replaceSafetyTimerRef.current); replaceSafetyTimerRef.current = null; }
       if (replaceCallTimerRef.current) { clearTimeout(replaceCallTimerRef.current); replaceCallTimerRef.current = null; }
+      if (seekRecoveryTimerRef.current) { clearTimeout(seekRecoveryTimerRef.current); seekRecoveryTimerRef.current = null; }
+      seekRecoveryRef.current = null;
       if (subtitleTimeoutRef.current) { clearTimeout(subtitleTimeoutRef.current); subtitleTimeoutRef.current = null; }
       subtitleAbortRef.current?.abort();
       subtitleAbortRef.current = null;
@@ -869,6 +881,34 @@ export function RiftPlayer({
     });
   }, []);
 
+  const beginSeekRecovery = useCallback((target: number) => {
+    if (seekRecoveryTimerRef.current) clearTimeout(seekRecoveryTimerRef.current);
+    if (replayTimeoutRef.current) {
+      clearTimeout(replayTimeoutRef.current);
+      replayTimeoutRef.current = null;
+    }
+    seekRecoveryRef.current = {
+      target,
+      retries: 0,
+      restorePending: false,
+    };
+    /* لا نترك timeout التحميل الخاص ببدء المصدر يفسّر seek بطيئاً كفشل. */
+    if (loadTimeoutRef.current) {
+      clearTimeout(loadTimeoutRef.current);
+      loadTimeoutRef.current = null;
+    }
+    setError(false);
+    setIsAutoCycling(false);
+    setIsWaitingForSources(false);
+    terminalErrorRef.current = false;
+    /* إذا لم تصل readyToPlay، يظل stall detector هو الحارس النهائي بدلاً من
+       تبديل المصدر بعد 18 ثانية بشكل كاذب. */
+    seekRecoveryTimerRef.current = setTimeout(() => {
+      seekRecoveryTimerRef.current = null;
+      seekRecoveryRef.current = null;
+    }, 30_000);
+  }, []);
+
   /* ─── Player events ───
      myGen: يُلتقط جيل التبديل الحالي لحظة تسجيل هذا الـ effect (بعد أي switchSource
      سابق زاد switchGenerationRef). أي حدث يصل من native player بعد أن بدأ تبديل
@@ -888,6 +928,8 @@ export function RiftPlayer({
       if (!aliveRef.current || isStale()) return;
       if (e.status === "loading") {
         setBuffering(true);
+        /* loading الناتج عن تغيير الموضع ليس بداية تحميل مصدر جديد. */
+        if (seekRecoveryRef.current) return;
          /* إذا بقي التحميل أكثر من 18ث (شاشة سوداء) نعامله كخطأ ونتجاوز للمصدر التالي.
             25ث كان طويلاً جداً: 10 مصادر × 25ث = 250ث انتظار + OOM من الـ buffers المتراكمة.
             18ث يسمح بتأخر أول manifest/segment عبر proxy بدون إبقاء مصدر ميت عالقاً. */
@@ -918,6 +960,26 @@ export function RiftPlayer({
           setError(false);
           terminalErrorRef.current = false;
           console.log(`[RiftPlayer] ✅ readyToPlay: ${playableSources[srcIdx]?.label || "?"} → ${playableSources[srcIdx]?.url?.slice(0, 100)}`);
+          const pendingSeek = seekRecoveryRef.current;
+          if (pendingSeek) {
+            if (pendingSeek.restorePending) {
+              /* إعادة تحميل نفس المصدر تعيد الموضع إلى الصفر؛ أعد target بعد
+                 جاهزية الـ pipeline، لا أثناء loading. */
+              pendingSeek.restorePending = false;
+              try { player.currentTime = pendingSeek.target; } catch {}
+              if (seekRecoveryTimerRef.current) clearTimeout(seekRecoveryTimerRef.current);
+              seekRecoveryTimerRef.current = setTimeout(() => {
+                seekRecoveryTimerRef.current = null;
+                seekRecoveryRef.current = null;
+              }, 8_000);
+            } else {
+              if (seekRecoveryTimerRef.current) {
+                clearTimeout(seekRecoveryTimerRef.current);
+                seekRecoveryTimerRef.current = null;
+              }
+              seekRecoveryRef.current = null;
+            }
+          }
           /* ── Restore position on readyToPlay (server-switch or initial resume) ──
              Doing this here (not in the polling timer) ensures we only seek AFTER
              the new stream is actually buffered, preventing conflicts with loading. */
@@ -932,6 +994,34 @@ export function RiftPlayer({
           try { player.play(); } catch {}
         }
         else if (e.status === "error") {
+          const pendingSeek = seekRecoveryRef.current;
+          if (pendingSeek && pendingSeek.retries < 1) {
+            /* بعض إصدارات Media3 تبلغ error عند seek قبل أن تعيد بناء
+               HLS pipeline. أعد نفس المصدر مرة واحدة، من دون إظهار شاشة
+               "مصادر بديلة" أو تدوير القائمة. */
+            pendingSeek.retries += 1;
+            pendingSeek.restorePending = true;
+            setError(false);
+            setBuffering(true);
+            if (replayTimeoutRef.current) clearTimeout(replayTimeoutRef.current);
+            replayTimeoutRef.current = setTimeout(() => {
+              replayTimeoutRef.current = null;
+              if (!aliveRef.current || !seekRecoveryRef.current) return;
+              setSourceReloadNonce(value => value + 1);
+            }, 250);
+            return;
+          }
+          if (pendingSeek) {
+            if (seekRecoveryTimerRef.current) {
+              clearTimeout(seekRecoveryTimerRef.current);
+              seekRecoveryTimerRef.current = null;
+            }
+            if (replayTimeoutRef.current) {
+              clearTimeout(replayTimeoutRef.current);
+              replayTimeoutRef.current = null;
+            }
+            seekRecoveryRef.current = null;
+          }
           setError(true);
           setBuffering(false);
           /* تفاصيل الخطأ — ضرورية لتشخيص مشاكل ExoPlayer/AVPlayer مع المصادر */
@@ -951,7 +1041,7 @@ export function RiftPlayer({
          كان يُزيل الحماية من الـ black-screen بينما المشغّل لا يزال في loading.
          الـ timeout يُلغى فقط في: Master cleanup (unmount) أو statusChange نفسه. */
     };
-  }, [player, initialPosition, srcIdx]); // eslint-disable-line
+  }, [player, initialPosition, srcIdx, beginSeekRecovery]); // eslint-disable-line
   /* ✅ أُزيل playableSources من deps — كان يُعيد تسجيل الـ listeners عند كل وصول
      مصدر جديد مما يُلغي loadTimeoutRef الجاري ويُعطّل حماية الـ black-screen. */
 
@@ -1033,6 +1123,9 @@ export function RiftPlayer({
     if (playableSources.length <= 1) return;
     /* وصل مصدر إضافي → الغِ timer الانتظار وانتقل إليه */
     if (waitForSrcTimerRef.current) { clearTimeout(waitForSrcTimerRef.current); waitForSrcTimerRef.current = null; }
+    if (seekRecoveryTimerRef.current) { clearTimeout(seekRecoveryTimerRef.current); seekRecoveryTimerRef.current = null; }
+    if (replayTimeoutRef.current) { clearTimeout(replayTimeoutRef.current); replayTimeoutRef.current = null; }
+    seekRecoveryRef.current = null;
     setIsWaitingForSources(false);
     setIsAutoCycling(false);
     consecutiveErrorsRef.current = 0;
@@ -1101,6 +1194,7 @@ export function RiftPlayer({
               stallRef.current = { lastPos: pos, lastAt: Date.now() }; // مهلة جديدة أقصر للمحاولة التالية
               try {
                 const nudgeTarget = pos + 0.4;
+                beginSeekRecovery(nudgeTarget);
                 player.currentTime = nudgeTarget;
                 player.play();
               } catch {}
@@ -1123,7 +1217,7 @@ export function RiftPlayer({
       clearInterval(id);
       if (progressTimer.current === id) progressTimer.current = null;
     };
-  }, [isLocalPlayback, player, onProgress]); // eslint-disable-line
+  }, [beginSeekRecovery, isLocalPlayback, player, onProgress]); // eslint-disable-line
 
   /* ─── Subtitle cue lookup via rAF ─── */
   /* Vidstack technique: pre-sort once → binary search O(log n) at 60fps */
@@ -1670,22 +1764,24 @@ export function RiftPlayer({
   const seek = useCallback((secs: number) => {
     fadeIn();
     const target = Math.max(0, Math.min(secs, durationRef.current || duration));
+    beginSeekRecovery(target);
     try { player.currentTime = target; setPosition(target); } catch {}
     /* أعِد ضبط كاشف الـ stall — بدون هذا، القفز للخلف يجعل pos أصغر من
        lastPos المُخزَّن فيبقى عدّاد "بدون تقدّم" السابق للتنقّل يعمل، فيُطلق
        "stall" زائف بعد ثوانٍ قليلة من القفز رغم أن التشغيل طبيعي تماماً —
        هذا هو سبب التجمّد الظاهري بعد التقديم/الإرجاع الذي أبلغ عنه المستخدم. */
     stallRef.current = { lastPos: target, lastAt: Date.now() };
-  }, [player, duration, fadeIn]);
+  }, [beginSeekRecovery, player, duration, fadeIn]);
   seekRef.current = seek;
 
   /* seekSilent: نفس seek لكن بدون إظهار controls (للـ double-tap والـ gestures) */
   const seekSilentRef = useRef<(s: number) => void>(() => {});
   const seekSilent = useCallback((secs: number) => {
     const target = Math.max(0, Math.min(secs, durationRef.current || duration));
+    beginSeekRecovery(target);
     try { player.currentTime = target; setPosition(target); } catch {}
     stallRef.current = { lastPos: target, lastAt: Date.now() };
-  }, [player, duration]);
+  }, [beginSeekRecovery, player, duration]);
   seekSilentRef.current = seekSilent;
 
   const changeSpeed = useCallback((s: number) => {
@@ -1772,8 +1868,12 @@ export function RiftPlayer({
   /* ─── Serialized native source replacement ───
      يُنفّذ بعد effect الـlisteners أعلاه، وبعملية replace واحدة فقط. */
   useEffect(() => {
-    if (nativeSrcIdxRef.current === srcIdx) return;
+    if (
+      nativeSrcIdxRef.current === srcIdx
+      && nativeLoadNonceRef.current === sourceReloadNonce
+    ) return;
     nativeSrcIdxRef.current = srcIdx;
+    nativeLoadNonceRef.current = sourceReloadNonce;
     const nextSrc = playableSources[srcIdx];
     if (!nextSrc || !isValidPlayerSourceUrl(nextSrc.url)) return;
 
@@ -1817,7 +1917,7 @@ export function RiftPlayer({
         replaceCallTimerRef.current = null;
       }
     };
-  }, [player, playableSources, srcIdx]);
+  }, [player, playableSources, sourceReloadNonce, srcIdx]);
 
   /* ─── Whisper audio transcription ─── */
   const triggerWhisper = useCallback(async () => {
