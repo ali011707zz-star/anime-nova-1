@@ -1,5 +1,6 @@
 package androidx.lifecycle;
 
+import m.b;
 import android.annotation.SuppressLint;
 import androidx.lifecycle.k;
 import java.lang.ref.WeakReference;
@@ -146,7 +147,7 @@ public class s extends k {
     }
 
     public final void g(q qVar) {
-        m.b<p, a>.d d10 = this.f2525b.d();
+        b<p, a>.d d10 = this.f2525b.d();
         while (d10.hasNext() && !this.f2530g) {
             Map.Entry next = d10.next();
             a aVar = (a) next.getValue();

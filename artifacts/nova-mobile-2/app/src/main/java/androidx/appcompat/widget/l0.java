@@ -15,6 +15,9 @@ import java.lang.ref.WeakReference;
 import java.util.WeakHashMap;
 import org.xmlpull.v1.XmlPullParser;
 import org.xmlpull.v1.XmlPullParserException;
+import s.d;
+import s.g;
+import s.h;
 
 /* compiled from: ResourceManagerInternal.java */
 /* loaded from: classes.dex */
@@ -24,16 +27,16 @@ public final class l0 {
     public static l0 f1404i;
 
     /* renamed from: a, reason: collision with root package name */
-    public WeakHashMap<Context, s.h<ColorStateList>> f1406a;
+    public WeakHashMap<Context, h<ColorStateList>> f1406a;
 
     /* renamed from: b, reason: collision with root package name */
-    public s.g<String, e> f1407b;
+    public g<String, ResourceDelegate> f1407b;
 
     /* renamed from: c, reason: collision with root package name */
-    public s.h<String> f1408c;
+    public h<String> f1408c;
 
     /* renamed from: d, reason: collision with root package name */
-    public final WeakHashMap<Context, s.d<WeakReference<Drawable.ConstantState>>> f1409d = new WeakHashMap<>(0);
+    public final WeakHashMap<Context, d<WeakReference<Drawable.ConstantState>>> f1409d = new WeakHashMap<>(0);
 
     /* renamed from: e, reason: collision with root package name */
     public TypedValue f1410e;
@@ -78,7 +81,7 @@ public final class l0 {
 
     /* compiled from: ResourceManagerInternal.java */
     /* loaded from: classes.dex */
-    public static class c extends s.e<Integer, PorterDuffColorFilter> {
+    public static class c extends e<Integer, PorterDuffColorFilter> {
         public c(int i10) {
             super(i10);
         }
@@ -98,7 +101,7 @@ public final class l0 {
 
     /* compiled from: ResourceManagerInternal.java */
     /* loaded from: classes.dex */
-    public static class d implements e {
+    public static class d implements ResourceDelegate {
         @Override // androidx.appcompat.widget.l0.e
         public Drawable a(Context context, XmlPullParser xmlPullParser, AttributeSet attributeSet, Resources.Theme theme) {
             String classAttribute = attributeSet.getClassAttribute();
@@ -120,7 +123,7 @@ public final class l0 {
 
     /* compiled from: ResourceManagerInternal.java */
     /* loaded from: classes.dex */
-    public interface e {
+    public interface ResourceDelegate {
         Drawable a(Context context, XmlPullParser xmlPullParser, AttributeSet attributeSet, Resources.Theme theme);
     }
 
@@ -140,7 +143,7 @@ public final class l0 {
 
     /* compiled from: ResourceManagerInternal.java */
     /* loaded from: classes.dex */
-    public static class g implements e {
+    public static class g implements ResourceDelegate {
         @Override // androidx.appcompat.widget.l0.e
         public Drawable a(Context context, XmlPullParser xmlPullParser, AttributeSet attributeSet, Resources.Theme theme) {
             try {

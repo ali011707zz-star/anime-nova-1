@@ -9,6 +9,7 @@ import java.util.List;
 import java.util.Map;
 import m3.d;
 import p3.c;
+import s.d;
 
 /* compiled from: LottieCompositionMoshiParser.java */
 /* loaded from: classes.dex */
@@ -32,7 +33,7 @@ public class w {
         ArrayList arrayList;
         p3.c cVar2 = cVar;
         float e10 = q3.h.e();
-        s.d<m3.d> dVar = new s.d<>();
+        d<m3.d> dVar = new d<>();
         ArrayList arrayList2 = new ArrayList();
         HashMap hashMap2 = new HashMap();
         HashMap hashMap3 = new HashMap();

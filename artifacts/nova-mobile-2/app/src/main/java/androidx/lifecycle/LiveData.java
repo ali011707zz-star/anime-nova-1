@@ -1,6 +1,7 @@
 package androidx.lifecycle;
 
 import androidx.lifecycle.k;
+import m.b;
 
 /* loaded from: classes.dex */
 public abstract class LiveData<T> {
@@ -12,7 +13,7 @@ public abstract class LiveData<T> {
     public final Object f2402a = new Object();
 
     /* renamed from: b, reason: collision with root package name */
-    public m.b<z<? super T>, LiveData<T>.c> f2403b = new m.b<>();
+    public b<z<? super T>, LiveData<T>.c> f2403b = new b<>();
 
     /* renamed from: c, reason: collision with root package name */
     public int f2404c = 0;
@@ -216,7 +217,7 @@ public abstract class LiveData<T> {
                 d(cVar);
                 cVar = null;
             } else {
-                m.b<z<? super T>, LiveData<T>.c>.d d10 = this.f2403b.d();
+                b<z<? super T>, LiveData<T>.c>.d d10 = this.f2403b.d();
                 while (d10.hasNext()) {
                     d((c) d10.next().getValue());
                     if (this.f2410i) {

@@ -7,13 +7,14 @@ import com.google.android.material.internal.StaticLayoutBuilderCompat;
 import java.io.IOException;
 import java.lang.ref.WeakReference;
 import p3.c;
+import s.h;
 
 /* compiled from: KeyframeParser.java */
 /* loaded from: classes.dex */
 public class t {
 
     /* renamed from: b, reason: collision with root package name */
-    public static s.h<WeakReference<Interpolator>> f11727b;
+    public static h<WeakReference<Interpolator>> f11727b;
 
     /* renamed from: a, reason: collision with root package name */
     public static final Interpolator f11726a = new LinearInterpolator();

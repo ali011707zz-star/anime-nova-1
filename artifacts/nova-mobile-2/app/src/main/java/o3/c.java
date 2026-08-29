@@ -10,10 +10,10 @@ import p3.c;
 public class c {
 
     /* renamed from: a, reason: collision with root package name */
-    public static final c.a f11680a = c.a.a("a", "p", "s", "rz", "r", "o", "so", "eo", "sk", "sa");
+    public static final p3.c.a f11680a = p3.c.a.a("a", "p", "s", "rz", "r", "o", "so", "eo", "sk", "sa");
 
     /* renamed from: b, reason: collision with root package name */
-    public static final c.a f11681b = c.a.a("k");
+    public static final p3.c.a f11681b = p3.c.a.a("k");
 
     public static boolean a(k3.e eVar) {
         return eVar == null || (eVar.c() && eVar.b().get(0).f12830b.equals(StaticLayoutBuilderCompat.DEFAULT_LINE_SPACING_ADD, StaticLayoutBuilderCompat.DEFAULT_LINE_SPACING_ADD));
@@ -52,7 +52,7 @@ public class c {
     public static k3.l g(p3.c cVar, e3.d dVar) throws IOException {
         k3.b f10;
         boolean z10 = false;
-        boolean z11 = cVar.V() == c.b.BEGIN_OBJECT;
+        boolean z11 = cVar.V() == p3.c.b.BEGIN_OBJECT;
         if (z11) {
             cVar.h();
         }

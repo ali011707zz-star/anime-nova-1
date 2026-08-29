@@ -1,5 +1,6 @@
 package androidx.lifecycle;
 
+import m.b;
 import java.util.Iterator;
 import java.util.Map;
 
@@ -8,7 +9,7 @@ import java.util.Map;
 public class w<T> extends y<T> {
 
     /* renamed from: l, reason: collision with root package name */
-    public m.b<LiveData<?>, a<?>> f2538l = new m.b<>();
+    public b<LiveData<?>, a<?>> f2538l = new b<>();
 
     /* compiled from: MediatorLiveData.java */
     /* loaded from: classes.dex */

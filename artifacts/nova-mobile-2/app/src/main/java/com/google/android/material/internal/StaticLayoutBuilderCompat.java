@@ -12,7 +12,7 @@ import java.lang.reflect.Constructor;
 import p0.i;
 
 /* loaded from: classes.dex */
-final class StaticLayoutBuilderCompat {
+public final class StaticLayoutBuilderCompat {
     public static final int DEFAULT_HYPHENATION_FREQUENCY;
     public static final float DEFAULT_LINE_SPACING_ADD = 0.0f;
     public static final float DEFAULT_LINE_SPACING_MULTIPLIER = 1.0f;

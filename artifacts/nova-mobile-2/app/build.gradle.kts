@@ -45,3 +45,11 @@ android {
         }
     }
 }
+
+dependencies {
+    // The APK extraction includes source files that retain these library annotations.
+    // They are compile-time only; the runtime implementations are already represented
+    // by the extracted classes in this application.
+    compileOnly("com.google.auto.value:auto-value-annotations:1.11.0")
+    compileOnly("javax.annotation:javax.annotation-api:1.3.2")
+}

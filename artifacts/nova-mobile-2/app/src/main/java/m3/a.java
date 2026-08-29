@@ -11,7 +11,6 @@ import android.graphics.RectF;
 import android.os.Build;
 import com.google.android.material.internal.StaticLayoutBuilderCompat;
 import com.google.android.material.progressindicator.BaseProgressIndicator;
-import h3.a;
 import h3.p;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -24,7 +23,7 @@ import o3.j;
 
 /* compiled from: BaseLayer.java */
 /* loaded from: classes.dex */
-public abstract class a implements g3.e, a.b, j3.f {
+public abstract class a implements g3.e, h3.a.b, j3.f {
     public BlurMaskFilter A;
 
     /* renamed from: a, reason: collision with root package name */

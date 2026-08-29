@@ -10,7 +10,6 @@ import com.anslayer.util.DriveUtil;
 import com.google.android.gms.common.GoogleApiAvailabilityLight;
 import com.google.android.material.behavior.HideBottomViewOnScrollBehavior;
 import com.twitter.sdk.android.core.identity.AuthHandler;
-import i7.b;
 import io.wax911.support.SupportExtentionKt;
 import java.lang.reflect.ParameterizedType;
 import java.lang.reflect.Type;
@@ -27,7 +26,6 @@ import retrofit2.HttpException;
 import tgio.rncryptor.RNCryptorNative;
 import y6.a;
 import y6.c;
-import z3.b;
 
 /* compiled from: ServerViewModel.kt */
 /* loaded from: classes.dex */
@@ -329,11 +327,11 @@ public final class z extends androidx.lifecycle.b {
             } catch (Exception e10) {
                 if (e10 instanceof HttpException) {
                     if (((HttpException) e10).a() == 404) {
-                        b.a aVar = i7.b.f7890a;
+                        i7.b.a aVar = i7.b.f7890a;
                         aVar.j(aVar.h() + 1);
                     }
                 } else if ((e10 instanceof OkHttpException) && ((OkHttpException) e10).a() == 404) {
-                    b.a aVar2 = i7.b.f7890a;
+                    i7.b.a aVar2 = i7.b.f7890a;
                     aVar2.j(aVar2.h() + 1);
                 }
                 z.this.f16604n.o(c.a.f16452a);
@@ -341,7 +339,7 @@ public final class z extends androidx.lifecycle.b {
             if (i10 == 0) {
                 vb.k.b(obj);
                 q0Var = (q0) this.f16628g;
-                b.a aVar3 = i7.b.f7890a;
+                i7.b.a aVar3 = i7.b.f7890a;
                 if (aVar3.g() == null || aVar3.h() > 0) {
                     Application application = z.this.f16592b;
                     this.f16628g = q0Var;
@@ -413,7 +411,7 @@ public final class z extends androidx.lifecycle.b {
             }
             String str = (String) obj;
             if (str != null) {
-                b.a aVar4 = i7.b.f7890a;
+                i7.b.a aVar4 = i7.b.f7890a;
                 aVar4.j(0);
                 aVar4.i(str);
             }
@@ -497,7 +495,7 @@ public final class z extends androidx.lifecycle.b {
                     FormBody n10 = z.this.n();
                     jc.l.e(n10, "analyticsFormBody");
                     Request d11 = x4.e.d(m10, null, n10, 2, null);
-                    b.a aVar = z3.b.f17284d;
+                    z3.b.a aVar = z3.b.f17284d;
                     Application a10 = z.this.a();
                     jc.l.e(a10, "getApplication()");
                     Call newCall = aVar.getInstance(a10).d().newCall(d11);
@@ -553,7 +551,7 @@ public final class z extends androidx.lifecycle.b {
                     FormBody n10 = z.this.n();
                     jc.l.e(n10, "analyticsFormBody");
                     Request d11 = x4.e.d(m10, null, n10, 2, null);
-                    b.a aVar = z3.b.f17284d;
+                    z3.b.a aVar = z3.b.f17284d;
                     Application a10 = z.this.a();
                     jc.l.e(a10, "getApplication()");
                     Call newCall = aVar.getInstance(a10).d().newCall(d11);

@@ -26,7 +26,6 @@ import w.e;
 import w.f;
 import w.j;
 import w.k;
-import x.b;
 
 /* loaded from: classes.dex */
 public class ConstraintLayout extends ViewGroup {
@@ -94,7 +93,7 @@ public class ConstraintLayout extends ViewGroup {
     }
 
     /* loaded from: classes.dex */
-    public class c implements b.InterfaceC0402b {
+    public class c implements x.b.InterfaceC0402b {
 
         /* renamed from: a, reason: collision with root package name */
         public ConstraintLayout f1658a;

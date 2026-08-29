@@ -5,10 +5,11 @@ import android.widget.ImageView;
 import android.widget.TextView;
 import androidx.constraintlayout.widget.ConstraintLayout;
 import com.anslayer.R;
+import a2.a;
 
 /* compiled from: SectionAdBinding.java */
 /* loaded from: classes.dex */
-public final class a2 implements a2.a {
+public final class a2 implements a {
 
     /* renamed from: a, reason: collision with root package name */
     public final ConstraintLayout f8137a;

@@ -5,6 +5,8 @@ import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import s.d;
+import s.h;
 
 /* compiled from: LottieComposition.java */
 /* loaded from: classes.dex */
@@ -23,10 +25,10 @@ public class d {
     public List<j3.h> f6023f;
 
     /* renamed from: g, reason: collision with root package name */
-    public s.h<j3.d> f6024g;
+    public h<j3.d> f6024g;
 
     /* renamed from: h, reason: collision with root package name */
-    public s.d<m3.d> f6025h;
+    public d<m3.d> f6025h;
 
     /* renamed from: i, reason: collision with root package name */
     public List<m3.d> f6026i;

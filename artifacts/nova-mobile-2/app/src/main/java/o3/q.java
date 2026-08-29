@@ -5,7 +5,6 @@ import com.google.android.material.internal.StaticLayoutBuilderCompat;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
-import l3.q;
 import p3.c;
 
 /* compiled from: GradientStrokeParser.java */
@@ -30,8 +29,8 @@ public class q {
         k3.f fVar = null;
         k3.f fVar2 = null;
         k3.b bVar = null;
-        q.b bVar2 = null;
-        q.c cVar4 = null;
+        l3.q.b bVar2 = null;
+        l3.q.c cVar4 = null;
         float f10 = StaticLayoutBuilderCompat.DEFAULT_LINE_SPACING_ADD;
         k3.b bVar3 = null;
         boolean z10 = false;
@@ -78,10 +77,10 @@ public class q {
                     bVar = d.e(cVar, dVar);
                     break;
                 case 7:
-                    bVar2 = q.b.values()[cVar.L() - 1];
+                    bVar2 = l3.q.b.values()[cVar.L() - 1];
                     break;
                 case 8:
-                    cVar4 = q.c.values()[cVar.L() - 1];
+                    cVar4 = l3.q.c.values()[cVar.L() - 1];
                     break;
                 case 9:
                     f10 = (float) cVar.G();
