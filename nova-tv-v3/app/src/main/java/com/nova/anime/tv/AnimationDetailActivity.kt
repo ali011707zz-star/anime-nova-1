@@ -40,6 +40,7 @@ class AnimationDetailActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        ApiClient.setUserToken(NovaSession.userToken(this))
         profile = uiProfile()
         buildUi()
         load()
@@ -166,18 +167,61 @@ class AnimationDetailActivity : ComponentActivity() {
                 AlertDialog.Builder(this@AnimationDetailActivity)
                     .setTitle("اختر مصدر التشغيل")
                     .setItems(sources.map { it.label }.toTypedArray()) { _, which ->
-                        startActivity(Intent(this@AnimationDetailActivity, PlayerActivity::class.java).apply {
-                            putExtra(PlayerActivity.EXTRA_SOURCE_URL, sources[which].url)
-                            putExtra(PlayerActivity.EXTRA_SOURCE_HEADERS, sources[which].headersJson)
-                            putExtra(PlayerActivity.EXTRA_SUBTITLE_URL, sources[which].subtitleUrl)
-                            putExtra(PlayerActivity.EXTRA_TITLE, title)
-                        })
+                        chooseSource(sources[which], title)
                     }
                     .setNegativeButton("إلغاء", null)
                     .show()
             } catch (_: Exception) {
                 if (dialog.isShowing) dialog.dismiss()
                 showError("تعذر استخراج مصادر التشغيل.")
+            }
+        }
+    }
+
+    private fun chooseSource(source: VideoSource, title: String) {
+        AlertDialog.Builder(this)
+            .setTitle(source.label)
+            .setItems(arrayOf("تشغيل الآن", "تنزيل MP4")) { _, which ->
+                if (which == 0) {
+                    startActivity(Intent(this@AnimationDetailActivity, PlayerActivity::class.java).apply {
+                        putExtra(PlayerActivity.EXTRA_SOURCE_URL, source.url)
+                        putExtra(PlayerActivity.EXTRA_SOURCE_HEADERS, source.headersJson)
+                        putExtra(PlayerActivity.EXTRA_SUBTITLE_URL, source.subtitleUrl)
+                        putExtra(PlayerActivity.EXTRA_TITLE, title)
+                    })
+                } else {
+                    startDownload(source, title)
+                }
+            }
+            .setNegativeButton("إلغاء", null)
+            .show()
+    }
+
+    private fun startDownload(source: VideoSource, title: String) {
+        val lowered = source.url.lowercase()
+        if (lowered.contains(".m3u8") || lowered.contains("hls-proxy") || lowered.contains("/hls")) {
+            showError("التنزيل متاح لمصادر MP4 المباشرة فقط.")
+            return
+        }
+        scope.launch {
+            try {
+                val headers = withContext(Dispatchers.IO) { ApiClient.mediaHeaders(source.headersJson) }
+                NativeDownloadStore.enqueue(
+                    context = this@AnimationDetailActivity,
+                    url = source.url,
+                    title = title,
+                    episode = 1,
+                    headers = headers,
+                    allowMetered = getSharedPreferences("nova_tv_settings", MODE_PRIVATE)
+                        .getBoolean("metered_downloads", true),
+                )
+                android.widget.Toast.makeText(
+                    this@AnimationDetailActivity,
+                    "بدأ تنزيل المحتوى",
+                    android.widget.Toast.LENGTH_LONG,
+                ).show()
+            } catch (_: Exception) {
+                showError("تعذر بدء التنزيل لهذا المصدر.")
             }
         }
     }

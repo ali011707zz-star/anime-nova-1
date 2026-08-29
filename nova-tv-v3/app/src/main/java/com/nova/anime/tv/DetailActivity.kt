@@ -33,6 +33,7 @@ class DetailActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        ApiClient.setUserToken(NovaSession.userToken(this))
         profile = uiProfile()
         buildUi()
         loadDetail(intent.getIntExtra(EXTRA_ID, 0))
@@ -189,6 +190,17 @@ class DetailActivity : ComponentActivity() {
             bottomMargin = dp(12)
         })
 
+        val comments = tvButton(this, "التعليقات")
+        comments.setOnClickListener {
+            startActivity(android.content.Intent(this, CommentsActivity::class.java).apply {
+                putExtra(CommentsActivity.EXTRA_ANIME_ID, item.id)
+                putExtra(CommentsActivity.EXTRA_TITLE, item.displayTitle)
+            })
+        }
+        body.addView(comments, LinearLayout.LayoutParams(-1, dp(if (profile.isTv) 60 else 52)).apply {
+            bottomMargin = dp(12)
+        })
+
         body.addView(tvText(this, "الحلقات", 24f).apply {
             typeface = android.graphics.Typeface.DEFAULT_BOLD
             setPadding(0, dp(8), 0, dp(12))
@@ -225,7 +237,7 @@ class DetailActivity : ComponentActivity() {
                 val labels = sources.map { it.label }.toTypedArray()
                 AlertDialog.Builder(this@DetailActivity)
                     .setTitle("اختر مصدر التشغيل")
-                    .setItems(labels) { _, which -> startPlayer(sources[which], item, episode) }
+                    .setItems(labels) { _, which -> chooseSource(sources[which], item, episode) }
                     .setNegativeButton("إلغاء", null)
                     .show()
             } catch (cancelled: CancellationException) {
@@ -233,6 +245,52 @@ class DetailActivity : ComponentActivity() {
             } catch (_: Exception) {
                 if (dialog.isShowing) dialog.dismiss()
                 showError("تعذر استخراج مصادر هذه الحلقة. جرّب مصدرًا آخر لاحقًا.")
+            }
+        }
+    }
+
+    private fun chooseSource(source: VideoSource, item: AnimeItem, episode: Int) {
+        AlertDialog.Builder(this)
+            .setTitle(source.label)
+            .setItems(arrayOf("تشغيل الآن", "تنزيل MP4")) { _, which ->
+                if (which == 0) {
+                    startPlayer(source, item, episode)
+                } else {
+                    startDownload(source, item, episode)
+                }
+            }
+            .setNegativeButton("إلغاء", null)
+            .show()
+    }
+
+    private fun startDownload(source: VideoSource, item: AnimeItem, episode: Int) {
+        val lowered = source.url.lowercase()
+        if (lowered.contains(".m3u8") || lowered.contains("hls-proxy") || lowered.contains("/hls")) {
+            showError("التنزيل متاح لمصادر MP4 المباشرة فقط.")
+            return
+        }
+        scope.launch {
+            try {
+                val headers = withContext(Dispatchers.IO) {
+                    ApiClient.mediaHeaders(source.headersJson)
+                }
+                val requestId = NativeDownloadStore.enqueue(
+                    context = this@DetailActivity,
+                    url = source.url,
+                    title = item.displayTitle,
+                    episode = episode,
+                    headers = headers,
+                    allowMetered = getSharedPreferences("nova_tv_settings", MODE_PRIVATE)
+                        .getBoolean("metered_downloads", true),
+                )
+                android.widget.Toast.makeText(
+                    this@DetailActivity,
+                    "بدأ تنزيل الحلقة $episode",
+                    android.widget.Toast.LENGTH_LONG,
+                ).show()
+                requestId
+            } catch (_: Exception) {
+                showError("تعذر بدء التنزيل لهذا المصدر.")
             }
         }
     }

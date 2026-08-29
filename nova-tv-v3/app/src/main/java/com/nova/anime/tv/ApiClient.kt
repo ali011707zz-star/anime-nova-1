@@ -31,6 +31,11 @@ object ApiClient {
 
     private var anonToken: String? = null
     private var anonTokenExp: Long = 0
+    private var userToken: String? = null
+
+    fun setUserToken(token: String?) {
+        userToken = token?.takeIf { it.isNotBlank() }
+    }
 
     private fun baseUrl(): String = BuildConfig.NOVA_API_URL.trimEnd('/')
 
@@ -42,6 +47,7 @@ object ApiClient {
             .header("X-Nova-Version", VERSION)
             .header("X-Nova-Package", PACKAGE_NAME)
             .header("User-Agent", USER_AGENT)
+            .apply { userToken?.let { header("X-User-Token", it) } }
 
     private suspend fun ensureAnonToken(force: Boolean = false): String? = withContext(Dispatchers.IO) {
         val now = System.currentTimeMillis() / 1000
@@ -93,13 +99,33 @@ object ApiClient {
         val token = ensureAnonToken()
         val builder = commonBuilder(url)
         if (!token.isNullOrBlank()) builder.header("X-App-Token", token)
-        if (method == "POST") {
-            builder.post((body ?: "{}").toRequestBody(jsonType))
-        } else {
-            builder.get()
+        when (method.uppercase()) {
+            "POST" -> builder.post((body ?: "{}").toRequestBody(jsonType))
+            "PATCH" -> builder.patch((body ?: "{}").toRequestBody(jsonType))
+            else -> builder.get()
         }
         return request(builder.build())
     }
+
+    suspend fun mediaHeaders(rawHeaders: String = ""): Map<String, String> =
+        withContext(Dispatchers.IO) {
+            val headers = linkedMapOf<String, String>()
+            runCatching {
+                val json = JSONObject(rawHeaders.ifBlank { "{}" })
+                val keys = json.keys()
+                while (keys.hasNext()) {
+                    val key = keys.next()
+                    val value = json.optString(key).trim()
+                    if (key.isNotBlank() && value.isNotBlank()) headers[key] = value
+                }
+            }
+            headers["X-Nova-Client"] = CLIENT_ID
+            headers["X-Nova-Version"] = VERSION
+            headers["X-Nova-Package"] = PACKAGE_NAME
+            userToken?.let { headers["X-User-Token"] = it }
+            ensureAnonToken()?.let { headers["X-App-Token"] = it }
+            headers
+        }
 
     suspend fun home(): HomeRows = coroutineSafeHome()
 
@@ -183,6 +209,16 @@ object ApiClient {
         return data.optJSONObject("data")?.optJSONObject("Media")?.let(::parseMedia)
     }
 
+    suspend fun animationDetail(type: String, id: String): JSONObject =
+        authenticatedRequest(
+            baseUrl().toHttpUrl().newBuilder()
+                .addPathSegments("api/animation/detail")
+                .addQueryParameter("type", type)
+                .addQueryParameter("id", id)
+                .build()
+                .toString(),
+        )
+
     suspend fun sources(anime: AnimeItem, episode: Int): List<VideoSource> =
         withContext(Dispatchers.IO) {
             val url = baseUrl().toHttpUrl().newBuilder()
@@ -205,6 +241,109 @@ object ApiClient {
                 parseSse(source)
             }
         }
+
+    suspend fun animationSources(
+        title: String,
+        type: String,
+        tmdbId: String,
+        season: Int,
+        episode: Int,
+    ): List<VideoSource> = withContext(Dispatchers.IO) {
+        val url = baseUrl().toHttpUrl().newBuilder()
+            .addPathSegments("api/animation/sources-stream")
+            .addQueryParameter("title", title)
+            .addQueryParameter("type", type)
+            .addQueryParameter("id", tmdbId)
+            .addQueryParameter("season", season.toString())
+            .addQueryParameter("ep", episode.toString())
+            .build()
+        val token = ensureAnonToken()
+        val builder = commonBuilder(url.toString())
+            .header("Accept", "text/event-stream")
+        if (!token.isNullOrBlank()) builder.header("X-App-Token", token)
+        val response = client.newCall(builder.get().build()).execute()
+        response.use {
+            if (!it.isSuccessful) throw IOException("HTTP ${it.code}")
+            val source = it.body?.source() ?: throw IOException("empty source stream")
+            parseSse(source)
+        }
+    }
+
+    suspend fun authMe(): JSONObject =
+        authenticatedRequest("${baseUrl()}/api/auth/me")
+
+    suspend fun signIn(email: String, password: String): JSONObject =
+        authenticatedRequest(
+            "${baseUrl()}/api/auth/signin",
+            method = "POST",
+            body = JSONObject()
+                .put("email", email.trim())
+                .put("password", password)
+                .toString(),
+        )
+
+    suspend fun signUp(email: String, password: String, displayName: String): JSONObject =
+        authenticatedRequest(
+            "${baseUrl()}/api/auth/signup",
+            method = "POST",
+            body = JSONObject()
+                .put("email", email.trim())
+                .put("password", password)
+                .put("displayName", displayName.trim())
+                .toString(),
+        )
+
+    suspend fun updateProfile(displayName: String): JSONObject =
+        authenticatedRequest(
+            "${baseUrl()}/api/auth/profile",
+            method = "PATCH",
+            body = JSONObject().put("displayName", displayName.trim()).toString(),
+        )
+
+    suspend fun signOut(): JSONObject =
+        authenticatedRequest("${baseUrl()}/api/auth/signout", method = "POST")
+
+    suspend fun comments(
+        animeId: Int? = null,
+        tmdbId: String? = null,
+        episode: Int? = null,
+    ): List<NovaComment> = withContext(Dispatchers.IO) {
+        val builder = baseUrl().toHttpUrl().newBuilder().addPathSegments("api/comments")
+        animeId?.let { builder.addQueryParameter("animeId", it.toString()) }
+        tmdbId?.let { builder.addQueryParameter("tmdbId", it) }
+        episode?.let { builder.addQueryParameter("ep", it.toString()) }
+        val array = authenticatedRequest(builder.build().toString()).optJSONArray("comments")
+            ?: JSONArray()
+        (0 until array.length()).mapNotNull { parseComment(array.optJSONObject(it)) }
+    }
+
+    suspend fun postComment(
+        text: String,
+        animeId: Int? = null,
+        tmdbId: String? = null,
+        episode: Int? = null,
+    ): NovaComment? {
+        val body = JSONObject()
+            .put("text", text.trim())
+            .put("username", "مستخدم")
+            .put("animeType", if (tmdbId != null) "animation" else "anime")
+        animeId?.let { body.put("animeId", it) }
+        tmdbId?.let { body.put("tmdbId", it) }
+        episode?.let { body.put("episodeNumber", it) }
+        return authenticatedRequest(
+            "${baseUrl()}/api/comments",
+            method = "POST",
+            body = body.toString(),
+        ).optJSONObject("comment")?.let(::parseComment)
+    }
+
+    suspend fun toggleCommentLike(id: String): Pair<Boolean, Int> {
+        val data = authenticatedRequest(
+            "${baseUrl()}/api/comments/${Uri.encode(id)}/like",
+            method = "POST",
+        )
+        return data.optBoolean("liked") to data.optInt("likes")
+    }
 
     suspend fun animationBrowse(type: String = "movie"): List<NovaContentCard> =
         getContent(
@@ -416,6 +555,22 @@ object ApiClient {
             genres = genres,
             season = obj.optString("season").takeIf { it.isNotBlank() },
             seasonYear = obj.optInt("seasonYear").takeIf { it > 0 },
+        )
+    }
+
+    private fun parseComment(obj: JSONObject?): NovaComment? {
+        if (obj == null || obj.optString("id").isBlank()) return null
+        return NovaComment(
+            id = obj.optString("id"),
+            userId = obj.optString("userId"),
+            username = obj.optString("username").ifBlank { "مستخدم" },
+            displayName = obj.optString("displayName").takeIf { it.isNotBlank() },
+            text = obj.optString("text"),
+            likes = obj.optInt("likes"),
+            liked = obj.optBoolean("liked"),
+            createdAt = obj.optString("createdAt").takeIf { it.isNotBlank() },
+            parentId = obj.optString("parentId").takeIf { it.isNotBlank() },
+            replyToUsername = obj.optString("replyToUsername").takeIf { it.isNotBlank() },
         )
     }
 }

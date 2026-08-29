@@ -42,6 +42,7 @@ class SectionActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        ApiClient.setUserToken(NovaSession.userToken(this))
         profile = uiProfile()
         buildUi()
         load()

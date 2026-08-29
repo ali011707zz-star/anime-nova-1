@@ -28,12 +28,42 @@
             android:exported="false"
             android:screenOrientation="unspecified" />
         <activity
+            android:name=".AnimationDetailActivity"
+            android:configChanges="orientation|screenSize|keyboardHidden|screenLayout|smallestScreenSize|uiMode"
+            android:exported="false"
+            android:screenOrientation="unspecified" />
+        <activity
             android:name=".SearchActivity"
             android:configChanges="orientation|screenSize|keyboardHidden|screenLayout|smallestScreenSize|uiMode"
             android:exported="false"
             android:screenOrientation="unspecified" />
         <activity
             android:name=".LibraryActivity"
+            android:configChanges="orientation|screenSize|keyboardHidden|screenLayout|smallestScreenSize|uiMode"
+            android:exported="false"
+            android:screenOrientation="unspecified" />
+        <activity
+            android:name=".NavigationActivity"
+            android:configChanges="orientation|screenSize|keyboardHidden|screenLayout|smallestScreenSize|uiMode"
+            android:exported="false"
+            android:screenOrientation="unspecified" />
+        <activity
+            android:name=".DownloadsActivity"
+            android:configChanges="orientation|screenSize|keyboardHidden|screenLayout|smallestScreenSize|uiMode"
+            android:exported="false"
+            android:screenOrientation="unspecified" />
+        <activity
+            android:name=".ProfileActivity"
+            android:configChanges="orientation|screenSize|keyboardHidden|screenLayout|smallestScreenSize|uiMode"
+            android:exported="false"
+            android:screenOrientation="unspecified" />
+        <activity
+            android:name=".SettingsActivity"
+            android:configChanges="orientation|screenSize|keyboardHidden|screenLayout|smallestScreenSize|uiMode"
+            android:exported="false"
+            android:screenOrientation="unspecified" />
+        <activity
+            android:name=".CommentsActivity"
             android:configChanges="orientation|screenSize|keyboardHidden|screenLayout|smallestScreenSize|uiMode"
             android:exported="false"
             android:screenOrientation="unspecified" />

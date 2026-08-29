@@ -28,6 +28,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        ApiClient.setUserToken(NovaSession.userToken(this))
         window.requestFeature(Window.FEATURE_NO_TITLE)
         window.setNavigationBarColor(Color.rgb(9, 9, 11))
         window.setStatusBarColor(Color.rgb(9, 9, 11))

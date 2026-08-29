@@ -51,3 +51,16 @@ data class NovaContentCard(
     val type: String = "content",
     val description: String? = null,
 )
+
+data class NovaComment(
+    val id: String,
+    val userId: String,
+    val username: String,
+    val displayName: String?,
+    val text: String,
+    val likes: Int,
+    val liked: Boolean,
+    val createdAt: String?,
+    val parentId: String?,
+    val replyToUsername: String?,
+)

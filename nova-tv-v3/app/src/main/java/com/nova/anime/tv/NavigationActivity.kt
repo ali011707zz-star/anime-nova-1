@@ -14,6 +14,7 @@ class NavigationActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        ApiClient.setUserToken(NovaSession.userToken(this))
         profile = uiProfile()
         val scroll = ScrollView(this).apply { setBackgroundColor(Color.rgb(9, 9, 11)) }
         val root = LinearLayout(this).apply {

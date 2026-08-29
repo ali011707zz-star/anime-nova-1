@@ -38,6 +38,7 @@ class PlayerActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        ApiClient.setUserToken(NovaSession.userToken(this))
         window.requestFeature(Window.FEATURE_NO_TITLE)
         window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         hideSystemUi()
@@ -125,7 +126,8 @@ class PlayerActivity : ComponentActivity() {
                 })
                 exo.setMediaItem(mediaItemBuilder.build())
                 exo.prepare()
-                exo.playWhenReady = true
+                exo.playWhenReady = getSharedPreferences("nova_tv_settings", MODE_PRIVATE)
+                    .getBoolean("autoplay", true)
             }
     }
 
