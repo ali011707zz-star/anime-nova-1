@@ -5235,8 +5235,12 @@ router.post("/animation/source-resolve", async (req: Request, res: Response) => 
 
   try {
     const mobile = String(req.headers["x-nova-client"] || "").includes("mobile");
+    const appToken = req.headers["x-app-token"];
+    const upstreamHeaders: Record<string, string> = {};
+    if (typeof appToken === "string" && appToken) upstreamHeaders["x-app-token"] = appToken;
+    if (mobile) upstreamHeaders["x-nova-client"] = "mobile";
     const upstream = await fetch(`http://127.0.0.1:${port}/api/animation/sources-stream?${params}`, {
-      headers: mobile ? { "x-nova-client": "mobile" } : {},
+      headers: upstreamHeaders,
       signal: controller.signal,
     });
     if (!upstream.ok || !upstream.body) {
