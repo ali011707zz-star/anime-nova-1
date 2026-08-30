@@ -43,6 +43,8 @@ import androidx.media3.ui.PlayerView
 import com.nova.anime.nova2.core.catalog.AnilistRepository
 import com.nova.anime.nova2.core.catalog.AnimeDetails
 import com.nova.anime.nova2.core.catalog.EpisodeItem
+import com.nova.anime.nova2.core.download.DownloadRepository
+import com.nova.anime.nova2.core.library.LibraryStore
 import com.nova.anime.nova2.core.network.NovaApiClient
 import com.nova.anime.nova2.core.playback.PlaybackRepository
 import com.nova.anime.nova2.core.playback.PlaybackSource
@@ -56,6 +58,8 @@ import kotlinx.coroutines.CancellationException
 fun WatchScreen(
     repository: AnilistRepository,
     playbackRepository: PlaybackRepository,
+    libraryStore: LibraryStore,
+    downloadRepository: DownloadRepository,
     id: Int,
     episodeNumber: Int,
     onBack: () -> Unit,
@@ -67,6 +71,7 @@ fun WatchScreen(
     var selectedSubtitle by remember { mutableStateOf<SubtitleTrack?>(null) }
     var loading by remember { mutableStateOf(true) }
     var error by remember { mutableStateOf<String?>(null) }
+    var downloadMessage by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(id, episodeNumber) {
         loading = true
@@ -97,10 +102,16 @@ fun WatchScreen(
                 }
                 sourceJob.await()
                 val tracks = subtitleJob.await()
-                subtitles = tracks
-                if (selectedSubtitle == null) selectedSubtitle = tracks.firstOrNull()
+                subtitles = (subtitles + tracks).distinctBy { it.url }
+                if (selectedSubtitle == null) selectedSubtitle = subtitles.firstOrNull()
             }
             details = loaded
+            libraryStore.recordHistory(
+                animeId = loaded.card.id,
+                title = loaded.card.title,
+                coverUrl = loaded.card.coverUrl,
+                episode = episodeNumber,
+            )
             loading = false
             if (sources.isEmpty()) error = "لم يتم العثور على مصدر تشغيل لهذه الحلقة"
         } catch (cancelled: CancellationException) {
@@ -135,6 +146,18 @@ fun WatchScreen(
                     source = selectedSource!!,
                     subtitle = selectedSubtitle,
                     apiClient = playbackRepository.apiClient,
+                    onProgress = { positionMs, durationMs ->
+                        details?.let { current ->
+                            libraryStore.recordHistory(
+                                animeId = current.card.id,
+                                title = current.card.title,
+                                coverUrl = current.card.coverUrl,
+                                episode = episodeNumber,
+                                positionMs = positionMs,
+                                durationMs = durationMs,
+                            )
+                        }
+                    },
                 )
             }
         } else if (loading) {
@@ -173,6 +196,46 @@ fun WatchScreen(
                         )
                     }
                 }
+            item {
+                Column(modifier = Modifier.padding(horizontal = 16.dp)) {
+                    Button(
+                        enabled = details != null &&
+                            selectedSource?.let {
+                                playbackRepository.apiClient.buildDownloadUrl(it.site, it.url) != null
+                            } == true,
+                        onClick = {
+                            val currentDetails = details
+                            val currentSource = selectedSource
+                            val record = if (currentDetails != null && currentSource != null) {
+                                runCatching {
+                                    downloadRepository.enqueue(
+                                        currentDetails,
+                                        EpisodeItem(episodeNumber),
+                                        currentSource,
+                                    )
+                                }.getOrNull()
+                            } else {
+                                null
+                            }
+                            downloadMessage = if (record != null) {
+                                "تمت إضافة الحلقة إلى التنزيلات"
+                            } else {
+                                "التنزيل متاح للمصادر المسموح بها عبر خادم Nova فقط"
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text("تنزيل الحلقة كـ MP4")
+                    }
+                    downloadMessage?.let {
+                        Text(
+                            it,
+                            modifier = Modifier.padding(top = 4.dp),
+                            color = MaterialTheme.colorScheme.secondary,
+                        )
+                    }
+                }
+            }
             }
         }
         if (subtitles.isNotEmpty()) {
@@ -216,6 +279,7 @@ private fun PlayerSurface(
     source: PlaybackSource,
     subtitle: SubtitleTrack?,
     apiClient: NovaApiClient,
+    onProgress: (positionMs: Long, durationMs: Long) -> Unit,
 ) {
     val context = LocalContext.current
     var playbackError by remember(source.key, subtitle?.key) { mutableStateOf<String?>(null) }
@@ -227,6 +291,17 @@ private fun PlayerSurface(
 
     DisposableEffect(player) {
         onDispose { player.release() }
+    }
+
+    LaunchedEffect(player) {
+        while (true) {
+            kotlinx.coroutines.delay(10_000)
+            val position = player.currentPosition
+            val duration = player.duration
+            if (position >= 0L && duration > 0L) {
+                onProgress(position, duration)
+            }
+        }
     }
 
     Column {

@@ -28,6 +28,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.LayoutDirection
 import com.nova.anime.nova2.core.config.NovaBuildConfig
 import com.nova.anime.nova2.core.catalog.AnilistRepository
+import com.nova.anime.nova2.core.download.DownloadRepository
+import com.nova.anime.nova2.core.library.LibraryStore
 import com.nova.anime.nova2.core.network.NovaApiClient
 import com.nova.anime.nova2.core.playback.PlaybackRepository
 import com.nova.anime.nova2.core.session.AuthMode
@@ -44,6 +46,10 @@ class MainActivity : ComponentActivity() {
     private val apiClient by lazy { NovaApiClient(tokenStore) }
     private val catalogRepository by lazy { AnilistRepository(apiClient) }
     private val playbackRepository by lazy { PlaybackRepository(apiClient) }
+    private val libraryStore by lazy { LibraryStore(applicationContext) }
+    private val downloadRepository by lazy {
+        DownloadRepository(applicationContext, libraryStore, apiClient)
+    }
     private val sessionViewModel by viewModels<SessionViewModel> {
         SessionViewModel.Factory(apiClient, tokenStore)
     }
@@ -57,7 +63,13 @@ class MainActivity : ComponentActivity() {
                         LocalLayoutDirection provides LayoutDirection.Rtl,
                     ) {
                         val state by sessionViewModel.state.collectAsStateWithLifecycle()
-                        NovaNavGraph(catalogRepository, playbackRepository) { onOpenHome ->
+                        NovaNavGraph(
+                            repository = catalogRepository,
+                            playbackRepository = playbackRepository,
+                            libraryStore = libraryStore,
+                            downloadRepository = downloadRepository,
+                            onSignOut = sessionViewModel::signOut,
+                        ) { onOpenHome ->
                             BootstrapScreen(state, sessionViewModel, onOpenHome)
                         }
                     }

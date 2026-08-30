@@ -41,6 +41,7 @@ import com.nova.anime.nova2.core.catalog.AnimeDetails
 import com.nova.anime.nova2.core.catalog.AnilistRepository
 import com.nova.anime.nova2.core.catalog.BrowseFilters
 import com.nova.anime.nova2.core.catalog.EpisodeItem
+import com.nova.anime.nova2.core.library.LibraryStore
 import kotlinx.coroutines.launch
 
 @Composable
@@ -49,6 +50,8 @@ fun HomeScreen(
     onOpenDetails: (Int) -> Unit,
     onOpenBrowse: () -> Unit,
     onOpenSearch: () -> Unit,
+    onOpenLibrary: () -> Unit,
+    onOpenSettings: () -> Unit,
 ) {
     var catalog by remember { mutableStateOf<com.nova.anime.nova2.core.catalog.HomeCatalog?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
@@ -70,6 +73,19 @@ fun HomeScreen(
                 }
                 Button(onClick = onOpenBrowse, modifier = Modifier.weight(1f)) {
                     Text("تصفح")
+                }
+            }
+        }
+        item {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Button(onClick = onOpenLibrary, modifier = Modifier.weight(1f)) {
+                    Text("مكتبتي")
+                }
+                Button(onClick = onOpenSettings, modifier = Modifier.weight(1f)) {
+                    Text("الإعدادات")
                 }
             }
         }
@@ -209,6 +225,7 @@ fun SearchScreen(
 fun DetailsScreen(
     repository: AnilistRepository,
     id: Int,
+    libraryStore: LibraryStore,
     onOpenEpisodes: (Int) -> Unit,
     onBack: () -> Unit,
 ) {
@@ -226,7 +243,7 @@ fun DetailsScreen(
             error != null -> item { ErrorBlock(error!!) }
             details == null -> item { LoadingBlock() }
             else -> item {
-                DetailContent(details!!, onOpenEpisodes)
+                DetailContent(details!!, libraryStore, onOpenEpisodes)
             }
         }
     }
@@ -431,8 +448,13 @@ private fun FilterRail(filters: BrowseFilters, onChange: (BrowseFilters) -> Unit
 }
 
 @Composable
-private fun DetailContent(details: AnimeDetails, onOpenEpisodes: (Int) -> Unit) {
+private fun DetailContent(
+    details: AnimeDetails,
+    libraryStore: LibraryStore,
+    onOpenEpisodes: (Int) -> Unit,
+) {
     val card = details.card
+    var isFavorite by remember(card.id) { mutableStateOf(libraryStore.isFavorite(card.id)) }
     Column(modifier = Modifier.padding(16.dp)) {
         Row(verticalAlignment = Alignment.Top) {
             AsyncImage(
@@ -455,6 +477,12 @@ private fun DetailContent(details: AnimeDetails, onOpenEpisodes: (Int) -> Unit) 
         Spacer(Modifier.height(16.dp))
         Button(onClick = { onOpenEpisodes(card.id) }, modifier = Modifier.fillMaxWidth()) {
             Text("عرض الحلقات")
+        }
+        Button(
+            onClick = { isFavorite = libraryStore.toggleFavorite(card) },
+            modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+        ) {
+            Text(if (isFavorite) "إزالة من المفضلة" else "إضافة إلى المفضلة")
         }
         if (details.description.isNotBlank()) {
             Text("القصة", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(top = 20.dp))

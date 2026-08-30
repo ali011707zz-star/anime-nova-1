@@ -47,6 +47,7 @@ server unavailable، و`OFFICIAL_APP_REQUIRED`. لا تحوّل كل الأخط�
 ## ما لم يُحسم بعد
 
 - الاستجابة الإنتاجية النهائية لكل endpoint بعد schema drift.
-- اعتماد هوية حزمة Nova 2 في release gate.
+- نشر allowlist هوية Nova 2 في release gate (`nova2-android` +
+  `com.nova.anime.nova2`) ثم اختبارها من APK مبني فعليًا.
 - contract التفصيلي لصفحة Home ومصادر SSE في كل بيئة.
 - سياسة الحساب والتنزيلات وPlay Integrity في الإصدار النهائي.

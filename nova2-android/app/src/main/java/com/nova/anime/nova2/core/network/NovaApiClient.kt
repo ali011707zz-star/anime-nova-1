@@ -145,6 +145,25 @@ class NovaApiClient(
     fun resolveUrl(url: String): String =
         if (url.startsWith("/")) NovaBuildConfig.identity.apiUrl.trimEnd('/') + url else url
 
+    fun buildDownloadUrl(site: String, mediaUrl: String): String? {
+        val baseHost = runCatching {
+            NovaBuildConfig.identity.apiUrl.toHttpUrl().host
+        }.getOrNull() ?: return null
+        val parsedMedia = runCatching { mediaUrl.toHttpUrl() }.getOrNull() ?: return null
+        if (parsedMedia.host != baseHost) return null
+        if (parsedMedia.encodedPath !in setOf(
+                "/api/anime/hls-proxy",
+                "/api/anime/video-proxy",
+            )
+        ) {
+            return null
+        }
+        return buildMediaUrl(
+            "/api/anime/download-mp4",
+            mapOf("site" to site, "url" to mediaUrl),
+        )
+    }
+
     fun mediaRequestHeaders(): Map<String, String> = buildMap {
         put("X-Nova-Client", NovaBuildConfig.identity.clientId)
         put("X-Nova-Version", NovaBuildConfig.identity.version)

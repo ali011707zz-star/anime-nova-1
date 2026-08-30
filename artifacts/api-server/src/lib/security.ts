@@ -9,7 +9,10 @@ import { isIP } from "node:net";
 
 export const MOBILE_CLIENT_ID = "nova-anime-mobile-v1";
 export const MOBILE_PACKAGE_NAME = "com.nova.anime";
+export const NOVA2_CLIENT_ID = "nova2-android";
+export const NOVA2_PACKAGE_NAME = "com.nova.anime.nova2";
 export const DEFAULT_MIN_MOBILE_VERSION = "1.0.0";
+export const DEFAULT_MIN_NOVA2_VERSION = "0.1.0";
 
 /** Reject proxy targets that point back at this host or an internal network. */
 export function isSafeExternalUrl(raw: string): boolean {
@@ -119,9 +122,21 @@ export function validateMobileAppIdentity(
     const value = headers[name];
     return Array.isArray(value) ? value[0] ?? "" : value ?? "";
   };
-  if (header("x-nova-client") !== MOBILE_CLIENT_ID) return { ok: false, code: "INVALID_CLIENT" };
-  if (header("x-nova-package") !== MOBILE_PACKAGE_NAME) return { ok: false, code: "INVALID_PACKAGE" };
-  const minimum = process.env.NOVA_MIN_MOBILE_VERSION?.trim() || DEFAULT_MIN_MOBILE_VERSION;
+  const clientId = header("x-nova-client");
+  const packageName = header("x-nova-package");
+  const isLegacyMobile =
+    clientId === MOBILE_CLIENT_ID && packageName === MOBILE_PACKAGE_NAME;
+  const isNova2 =
+    clientId === NOVA2_CLIENT_ID && packageName === NOVA2_PACKAGE_NAME;
+  if (!isLegacyMobile && !isNova2) {
+    if (clientId !== MOBILE_CLIENT_ID && clientId !== NOVA2_CLIENT_ID) {
+      return { ok: false, code: "INVALID_CLIENT" };
+    }
+    return { ok: false, code: "INVALID_PACKAGE" };
+  }
+  const minimum = isNova2
+    ? process.env.NOVA2_MIN_VERSION?.trim() || DEFAULT_MIN_NOVA2_VERSION
+    : process.env.NOVA_MIN_MOBILE_VERSION?.trim() || DEFAULT_MIN_MOBILE_VERSION;
   if (!versionAtLeast(header("x-nova-version"), minimum)) {
     return { ok: false, code: "APP_UPDATE_REQUIRED" };
   }

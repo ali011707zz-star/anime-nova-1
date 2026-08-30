@@ -1,0 +1,52 @@
+name: Build Nova 2 Kotlin Android
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "nova2-android/**"
+      - ".github/workflows/build-nova2.yml"
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Compile Nova 2 debug APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: "platforms;android-35 build-tools;35.0.0"
+          accept-android-sdk-licenses: true
+
+      - name: Configure Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Build debug APK
+        working-directory: nova2-android
+        run: |
+          set -eu
+          if [ -x ./gradlew ]; then
+            ./gradlew :app:assembleDebug --no-daemon --stacktrace
+          else
+            gradle :app:assembleDebug --no-daemon --stacktrace
+          fi
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: nova2-debug-apk-${{ github.run_number }}
+          path: nova2-android/app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+          retention-days: 30
