@@ -755,7 +755,16 @@ export default function WatchScreen() {
   const epNum      = parseInt(ep || "1", 10) || 1;
   const cover      = useLocalSearchParams<{ cover?: string }>().cover;
   const coverUrl   = safeDecodeURIComponent(cover);
-  const totalEpsCount = totalEpsParam ? parseInt(totalEpsParam) || undefined : undefined;
+  /* لا نسمح بالتالية عندما لا نملك حداً مؤكداً. بطاقات «أحدث الحلقات»
+     تمرر الحلقة الحالية كآخر حلقة مؤكدة، بينما شاشة الحلقات تمرر العدد
+     الكامل/المبثوث من الكتالوج. */
+  const totalEpsCount = (() => {
+    const explicit = parseInt(totalEpsParam || "", 10);
+    if (Number.isFinite(explicit) && explicit > 0) return explicit;
+    const legacy = parseInt(episodes || "", 10);
+    return Number.isFinite(legacy) && legacy > 0 ? legacy : undefined;
+  })();
+  const canGoNextEpisode = totalEpsCount !== undefined && epNum < totalEpsCount;
   const displayTitle = titleArStr || englishStr || titleStr;
 
   useEffect(() => {
@@ -909,9 +918,6 @@ export default function WatchScreen() {
     if (titleVariants.length) params.set("titles", JSON.stringify(titleVariants));
     params.set("mode", "check");
 
-    const allowedSites = new Set(
-      Q_KEYS.flatMap(q => STATIC_PICKER[q].map(s => s.site)),
-    );
     let cancelled = false;
     let timedOut = false;
 
@@ -929,7 +935,10 @@ export default function WatchScreen() {
         : rawSite === "sanime-v2" || rawSite === "sa" ? "sanime"
         : rawSite;
       const qk = getAvailabilityQualityKey(row);
-      if (!site || !qk || !allowedSites.has(site)) return;
+      /* The backend is the source of truth. Do not discard a verified
+         provider merely because its label is not in the legacy static
+         catalog; that was why valid sources disappeared from mobile. */
+      if (!site || !qk) return;
       const previous = stagedSlots[site]?.[qk];
       stagedSlots[site] = {
         ...stagedSlots[site],
@@ -1078,6 +1087,10 @@ export default function WatchScreen() {
 
   /* ── Navigate episode ── */
   const goEp = useCallback((n: number, _auto = false) => {
+    /* An unknown upper bound is fail-closed: the next button must never
+       invent a future episode. Previous/explicit episode selection remains
+       available when it is inside a known catalog bound. */
+    if (n < 1 || (n > epNum && (totalEpsCount === undefined || n > totalEpsCount))) return;
     saveProgress();
     abortRef.current?.abort();
     /* إلغاء جميع طلبات المواقع الجارية قبل الانتقال للحلقة التالية */
@@ -1092,9 +1105,10 @@ export default function WatchScreen() {
     const coverParam = coverUrl ? `&cover=${encodeURIComponent(coverUrl)}` : "";
     const arParam    = titleArStr ? `&titleAr=${encodeURIComponent(titleArStr)}` : "";
     const anslayerParam = anslayerId ? `&anslayerId=${encodeURIComponent(anslayerId)}` : "";
-    router.replace(`/watch?anime=${anime}&ep=${n}&title=${encodeURIComponent(titleStr)}&english=${encodeURIComponent(englishStr)}&format=${encodeURIComponent(format || "")}${coverParam}${arParam}${anslayerParam}`);
+    const totalParam = totalEpsCount ? `&totalEps=${totalEpsCount}` : "";
+    router.replace(`/watch?anime=${anime}&ep=${n}&title=${encodeURIComponent(titleStr)}&english=${encodeURIComponent(englishStr)}&format=${encodeURIComponent(format || "")}${totalParam}${coverParam}${arParam}${anslayerParam}`);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [saveProgress, coverUrl, titleArStr, router, anime, titleStr, englishStr, format, anslayerId]);
+  }, [saveProgress, coverUrl, titleArStr, router, anime, titleStr, englishStr, format, anslayerId, epNum, totalEpsCount]);
 
   /* ── إعادة تعيين حالة المصادر (زر تحديث) — مسح الأخطاء للسماح بالمحاولة مجدداً ── */
   function refreshAllSources() {
@@ -1599,7 +1613,9 @@ export default function WatchScreen() {
     if (dur > 0) lastDurationRef.current = dur;
   }, []);
 
-  const onRiftNextEpisode = useCallback(() => goEp(epNum + 1, true), [goEp, epNum]);
+  const onRiftNextEpisode = useCallback(() => {
+    if (canGoNextEpisode) goEp(epNum + 1, true);
+  }, [canGoNextEpisode, goEp, epNum]);
   const onRiftPrevEpisode = useCallback(() => goEp(epNum - 1), [goEp, epNum]);
   const onRiftEpisodeSelect = useCallback((n: number) => goEp(n), [goEp]);
 
@@ -1769,7 +1785,7 @@ export default function WatchScreen() {
         onBack={onRiftBack}
         onError={onRiftError}
         onProgress={onRiftProgress}
-        onNextEpisode={onRiftNextEpisode}
+        onNextEpisode={canGoNextEpisode ? onRiftNextEpisode : undefined}
         onPrevEpisode={epNum > 1 ? onRiftPrevEpisode : undefined}
         onEpisodeSelect={onRiftEpisodeSelect}
       />
@@ -1857,11 +1873,11 @@ export default function WatchScreen() {
             <Text style={d.epNavText}>السابقة</Text>
           </Pressable>
           <Pressable
-            disabled={totalEpsCount !== undefined && epNum >= totalEpsCount}
-            onPress={() => goEp(epNum + 1)}
+            disabled={!canGoNextEpisode}
+            onPress={() => canGoNextEpisode && goEp(epNum + 1)}
             focusable={tvMode}
             style={[d.epNavBtn, { borderColor: "rgba(139,92,246,0.35)", backgroundColor: "rgba(139,92,246,0.10)" },
-              (totalEpsCount !== undefined && epNum >= totalEpsCount) && { opacity: 0.22 }]}>
+              !canGoNextEpisode && { opacity: 0.22 }]}>
             <Text style={[d.epNavText, { color: "#c4b5fd" }]}>التالية</Text>
             <Ionicons name="chevron-back" size={12} color="rgba(196,181,253,0.9)" />
           </Pressable>

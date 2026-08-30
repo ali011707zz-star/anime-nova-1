@@ -300,6 +300,9 @@ export default function AnimationWatch() {
   const [sseDone, setSseDone]   = useState(false);
   const [episodes, setEpisodes] = useState<EpisodeItem[]>([]);
   const [showEpList, setShowEpList] = useState(false);
+  /* A missing season response is not permission to guess an episode count.
+     Keep next-episode navigation disabled until TMDB confirms the season. */
+  const canGoNextEpisode = type === "tv" && episodes.length > 0 && ep < episodes.length;
 
   useEffect(() => {
     if (!tmdbId) return;
@@ -1215,7 +1218,7 @@ export default function AnimationWatch() {
           onTimeUpdate={handleTimeUpdate}
           onFail={stableOnFail}
           onBack={() => setStep("sources")}
-          onNextEp={type === "tv" && ep < (episodes.length || 999)
+          onNextEp={canGoNextEpisode
             ? () => {
                 const np = new URLSearchParams(window.location.search);
                 np.set("ep", String(ep + 1));
@@ -1311,10 +1314,11 @@ export default function AnimationWatch() {
               <span className="text-white/65 text-[12px] font-bold font-['Cairo'] leading-none">السابقة</span>
             </button>
             <button onClick={() => {
+              if (!canGoNextEpisode) return;
               const np = new URLSearchParams(window.location.search);
               np.set("ep", String(ep + 1));
               navigate(`/animation/watch?${np.toString()}`);
-            }} disabled={ep >= (episodes.length || 999)}
+            }} disabled={!canGoNextEpisode}
               className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl transition-all active:scale-90 disabled:opacity-20"
               style={{ background: "rgba(124,58,237,0.22)", border: "1px solid rgba(124,58,237,0.38)" }}>
               <span className="text-violet-300/90 text-[12px] font-bold font-['Cairo'] leading-none">التالية</span>

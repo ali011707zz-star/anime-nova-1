@@ -331,7 +331,7 @@ function SrcRow({ src, idx, onPlay }: { src: AnimSrc; idx: number; onPlay: (s: A
 /* ══════════════════════════════════════════════════════════════ */
 export default function AnimationWatchScreen() {
   const params = useLocalSearchParams<{
-    id: string; type: string; ep: string; season: string; title: string; poster: string; etitle?: string; autoplay?: string;
+    id: string; type: string; ep: string; season: string; title: string; poster: string; etitle?: string; autoplay?: string; totalEps?: string;
   }>();
   const router = useRouter();
   const insets = useSafeAreaInsets();
@@ -342,6 +342,9 @@ export default function AnimationWatchScreen() {
   const type      = params.type   || "movie";
   const ep        = parseInt(params.ep     || "1", 10) || 1;
   const season    = parseInt(params.season || "1", 10) || 1;
+  const totalEpsParam = parseInt(params.totalEps || "", 10);
+  const totalEps = Number.isFinite(totalEpsParam) && totalEpsParam > 0 ? totalEpsParam : 0;
+  const canGoNextEpisode = type === "tv" && totalEps > 0 && ep < totalEps;
   const titleStr  = decodeURIComponent(params.title  || "");
   const posterUrl = params.poster ? decodeURIComponent(params.poster) : "";
   const epTitle   = params.etitle ? decodeURIComponent(params.etitle) : undefined;
@@ -865,10 +868,10 @@ export default function AnimationWatchScreen() {
           seenKeys.current.clear();
           setScreen("picker");
         }}
-        onNextEpisode={type === "tv" ? () => {
+        onNextEpisode={canGoNextEpisode ? () => {
           const t = encodeURIComponent(titleStr);
           const p = encodeURIComponent(posterUrl);
-          router.replace(`/animation/watch?id=${tmdbId}&type=${type}&ep=${ep + 1}&season=${season}&title=${t}&poster=${p}&autoplay=1` as any);
+          router.replace(`/animation/watch?id=${tmdbId}&type=${type}&ep=${ep + 1}&season=${season}&totalEps=${totalEps}&title=${t}&poster=${p}&autoplay=1` as any);
         } : undefined}
         onPrevEpisode={type === "tv" && ep > 1 ? () => {
           const t = encodeURIComponent(titleStr);
@@ -901,6 +904,7 @@ export default function AnimationWatchScreen() {
         initialSourceIndex={startIdx}
         title={titleStr}
         episode={type !== "movie" ? ep : undefined}
+         totalEps={totalEps || undefined}
         initialPosition={resumeTime}
         onBack={() => {
           handleTimeUpdate(lastTimeRef.current);
@@ -915,10 +919,10 @@ export default function AnimationWatchScreen() {
           seenKeys.current.clear();
           setScreen("picker");
         }}
-        onNextEpisode={type === "tv" ? () => {
+        onNextEpisode={canGoNextEpisode ? () => {
           const t = encodeURIComponent(titleStr);
           const p = encodeURIComponent(posterUrl);
-          router.replace(`/animation/watch?id=${tmdbId}&type=${type}&ep=${ep + 1}&season=${season}&title=${t}&poster=${p}&autoplay=1`);
+          router.replace(`/animation/watch?id=${tmdbId}&type=${type}&ep=${ep + 1}&season=${season}&totalEps=${totalEps}&title=${t}&poster=${p}&autoplay=1`);
         } : undefined}
         onPrevEpisode={type === "tv" && ep > 1 ? () => {
           const t = encodeURIComponent(titleStr);

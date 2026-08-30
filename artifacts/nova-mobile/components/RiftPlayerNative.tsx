@@ -101,7 +101,8 @@ export function RiftPlayer({
   subCues = [],
   subEnabled = false,
   autoPlayNext = true,
-  totalEps = 999,
+  /* Unknown totals must be fail-closed instead of assuming 999 episodes. */
+  totalEps = 0,
   episodeTitle,
   onError,
 }: Props) {

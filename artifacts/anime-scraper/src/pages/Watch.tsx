@@ -1786,6 +1786,7 @@ function ScraperPicker({
   onBack,
   onNextEp,
   onPrevEp,
+  nextDisabled = false,
   singleSite,
   availabilityDone = false,
 }: {
@@ -1803,6 +1804,7 @@ function ScraperPicker({
   onBack: () => void;
   onNextEp: () => void;
   onPrevEp: () => void;
+  nextDisabled?: boolean;
   /* عند التحديد — قسم "أحدث الحلقات" يقيّد التشغيل بمصدر واحد فقط، فلا نعرض زر أي مصدر آخر */
   singleSite?: string | null;
   availabilityDone?: boolean;
@@ -1824,15 +1826,15 @@ function ScraperPicker({
   const allScrapersComplete = !anyFetching && !hasIdleScrapers;
   const allDone = !anyFetching;
 
-  /* Next-episode guard: use nextAiringEpisode when totalEps is unknown (999 fallback) */
+  /* Next-episode guard: never guess an upper bound. Long-running series
+     still use their real count, while an unknown total fails closed. */
   const nextAiringEp = anime?.nextAiringEpisode?.episode;
-  const isNextDisabled =
-    totalEps < 900
-      ? ep >= totalEps
-      : nextAiringEp
-        ? ep >= nextAiringEp - 1
-        : false;
   const isMovie = anime?.format === "MOVIE" || anime?.format === "MOVIE_SHORT";
+  const isNextDisabled =
+    isMovie ||
+    totalEps <= 0 ||
+    ep >= totalEps ||
+    (Number(nextAiringEp) > 0 && ep >= Number(nextAiringEp) - 1);
 
   /* تجميع المصادر حسب (موقع + جودة) — صف واحد لكل مجموعة، السيرفرات تتنافس داخلياً */
   const { sourceGroups, embedFallbacks } = useMemo(() => {
@@ -3826,11 +3828,11 @@ function EpisodePlayer({
       {!isMovie && (
         <button
           onClick={onNextEp}
-          disabled={totalEps < 900 && ep >= totalEps}
+          disabled={nextDisabled}
           className="flex items-center gap-1 text-[12px] font-bold font-['Cairo'] active:scale-95 transition-all shrink-0 flex-row-reverse"
           style={{
             color: "rgba(255,255,255,0.42)",
-            opacity: totalEps < 900 && ep >= totalEps ? 0.18 : 1,
+            opacity: nextDisabled ? 0.18 : 1,
           }}
         >
           <ChevronLeft className="w-4 h-4" />
@@ -5199,6 +5201,7 @@ export default function WatchPage() {
   }, [animeId, ep]);
 
   function goEp(n: number) {
+    if (n < 1 || (n > ep && isNextDisabled)) return;
     /* Navigate via wouter — WatchWrapper adds key={search} so Watch remounts with fresh params */
     const goParams: Record<string, string> = {
       anime: String(animeId),
@@ -5207,7 +5210,7 @@ export default function WatchPage() {
       english: englishParam,
       cover,
     };
-    if (totalEps > 0 && totalEps < 990) goParams.totalEps = String(totalEps);
+    if (totalEps > 0) goParams.totalEps = String(totalEps);
     if (anime?.format) goParams.format = anime.format;
     if (titleArParam) goParams.titleAr = titleArParam;
     navigate(`/watch?${new URLSearchParams(goParams)}`);
@@ -5849,8 +5852,9 @@ export default function WatchPage() {
                 onPlaySrc={handlePlaySrc}
                 onBack={handleBack}
                 animeId={animeId}
-                onNextEp={() => (ep < totalEps ? goEp(ep + 1) : undefined)}
+                onNextEp={() => (!isNextDisabled ? goEp(ep + 1) : undefined)}
                 onPrevEp={() => (ep > 1 ? goEp(ep - 1) : undefined)}
+                nextDisabled={isNextDisabled}
                 singleSite={sp.get("single") === "1" ? sp.get("site") : null}
               />
               {/* ── Failed source toast notification ── */}
@@ -6055,7 +6059,7 @@ export default function WatchPage() {
         hideSubtitle={ARABIC_SITES.has(playerSrcSite) && !playerSubUrl}
         skipTimes={skipTimes}
         onBack={handleBack}
-        onNextEp={() => (ep < totalEps ? goEp(ep + 1) : undefined)}
+        onNextEp={() => (!isNextDisabled ? goEp(ep + 1) : undefined)}
         onPrevEp={() => (ep > 1 ? goEp(ep - 1) : undefined)}
         onEpisodeSelect={(n) => {
           handleBack();

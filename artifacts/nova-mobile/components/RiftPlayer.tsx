@@ -418,7 +418,9 @@ export function RiftPlayer({
   subCues,
   subEnabled = false,
   autoPlayNext = true,
-  totalEps = 999,
+  /* Unknown totals must be fail-closed. A synthetic 999 allowed automatic
+     and manual navigation into episodes that do not exist. */
+  totalEps = 0,
   episodeTitle,
   onError,
 }: Props) {
