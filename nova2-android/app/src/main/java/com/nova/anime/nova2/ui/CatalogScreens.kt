@@ -32,6 +32,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -48,6 +49,7 @@ import kotlinx.coroutines.launch
 fun HomeScreen(
     repository: AnilistRepository,
     onOpenDetails: (Int) -> Unit,
+    onOpenEpisodes: (Int) -> Unit,
     onOpenBrowse: () -> Unit,
     onOpenSearch: () -> Unit,
     onOpenLibrary: () -> Unit,
@@ -62,43 +64,42 @@ fun HomeScreen(
             .onFailure { error = it.message ?: "تعذر تحميل الصفحة الرئيسية" }
     }
 
-    CatalogScaffold(title = "الرئيسية") {
-        item {
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                Button(onClick = onOpenSearch, modifier = Modifier.weight(1f)) {
-                    Text("بحث")
-                }
-                Button(onClick = onOpenBrowse, modifier = Modifier.weight(1f)) {
-                    Text("تصفح")
+    val layout = rememberNovaLayout()
+    Column(modifier = Modifier.fillMaxSize()) {
+        LazyColumn(
+            modifier = Modifier.weight(1f),
+            contentPadding = PaddingValues(bottom = if (layout.isTv) 20.dp else 12.dp),
+        ) {
+            item {
+                NovaHeader(onMenu = onOpenSettings)
+            }
+            when {
+                error != null -> item { ErrorBlock(error!!) }
+                catalog == null -> item { LoadingBlock() }
+                else -> {
+                    catalog!!.popular.firstOrNull()?.let { hero ->
+                        item {
+                            NovaHero(
+                                anime = hero,
+                                onDetails = { onOpenDetails(hero.id) },
+                                onEpisodes = { onOpenEpisodes(hero.id) },
+                            )
+                        }
+                    }
+                    item { NovaSection("الأكثر رواجًا", catalog!!.trending, onOpenDetails) }
+                    item { NovaSection("الأكثر شعبية", catalog!!.popular, onOpenDetails) }
+                    item { NovaSection("يُعرض حاليًا", catalog!!.airing, onOpenDetails, Color(0xFF22C55E)) }
+                    item { NovaSection("الموسم الحالي", catalog!!.seasonal, onOpenDetails) }
+                    item { NovaSection("الأعلى تقييمًا", catalog!!.topRated, onOpenDetails, Color(0xFFFFD700)) }
+                    item { NovaSection("أفلام الأنمي", catalog!!.movies, onOpenDetails, Color(0xFF3B82F6)) }
                 }
             }
         }
-        item {
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                Button(onClick = onOpenLibrary, modifier = Modifier.weight(1f)) {
-                    Text("مكتبتي")
-                }
-                Button(onClick = onOpenSettings, modifier = Modifier.weight(1f)) {
-                    Text("الإعدادات")
-                }
-            }
-        }
-        when {
-            error != null -> item { ErrorBlock(error!!) }
-            catalog == null -> item { LoadingBlock() }
-            else -> {
-                item { CatalogSection("الأكثر رواجًا", catalog!!.trending, onOpenDetails) }
-                item { CatalogSection("الأكثر شعبية", catalog!!.popular, onOpenDetails) }
-                item { CatalogSection("يُعرض حاليًا", catalog!!.airing, onOpenDetails) }
-                item { CatalogSection("الموسم الحالي", catalog!!.seasonal, onOpenDetails) }
-                item { CatalogSection("الأعلى تقييمًا", catalog!!.topRated, onOpenDetails) }
-                item { CatalogSection("أفلام الأنمي", catalog!!.movies, onOpenDetails) }
+        NovaBottomNavigation(selected = "الرئيسية") { destination ->
+            when (destination) {
+                "بحث" -> onOpenSearch()
+                "تصفح" -> onOpenBrowse()
+                "مكتبتي", "تنزيلاتي" -> onOpenLibrary()
             }
         }
     }
@@ -136,8 +137,8 @@ fun BrowseScreen(
         }
         if (loading && results.isEmpty()) item { LoadingBlock() }
         error?.let { item { ErrorBlock(it) } }
-        items(results, key = { it.id }) { anime ->
-            AnimeListRow(anime = anime, onClick = { onOpenDetails(anime.id) })
+        if (results.isNotEmpty()) {
+            item { NovaAnimeGrid(results, onOpenDetails) }
         }
         if (!loading && results.size >= 30) {
             item {
@@ -212,8 +213,8 @@ fun SearchScreen(
         }
         if (loading) item { LoadingBlock() }
         error?.let { item { ErrorBlock(it) } }
-        items(results, key = { it.id }) { anime ->
-            AnimeListRow(anime = anime, onClick = { onOpenDetails(anime.id) })
+        if (results.isNotEmpty()) {
+            item { NovaAnimeGrid(results, onOpenDetails) }
         }
         if (!loading && submittedQuery != null && results.isEmpty() && error == null) {
             item { Text("لا توجد نتائج", modifier = Modifier.fillMaxWidth().padding(32.dp)) }
@@ -299,23 +300,16 @@ fun CatalogScaffold(
     onBack: (() -> Unit)? = null,
     content: androidx.compose.foundation.lazy.LazyListScope.() -> Unit,
 ) {
-    LazyColumn(
-        modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(vertical = 16.dp),
-    ) {
-        item {
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                onBack?.let {
-                    Button(onClick = it) { Text("رجوع") }
-                    Spacer(Modifier.width(12.dp))
-                }
-                Text(title, style = MaterialTheme.typography.headlineMedium)
+    Column(modifier = Modifier.fillMaxSize()) {
+        LazyColumn(
+            modifier = Modifier.weight(1f),
+            contentPadding = PaddingValues(bottom = 20.dp),
+        ) {
+            item {
+                NovaHeader(title = title, onBack = onBack)
             }
+            content()
         }
-        content()
     }
 }
 
@@ -456,6 +450,14 @@ private fun DetailContent(
     val card = details.card
     var isFavorite by remember(card.id) { mutableStateOf(libraryStore.isFavorite(card.id)) }
     Column(modifier = Modifier.padding(16.dp)) {
+        if (!card.bannerUrl.isNullOrBlank()) {
+            AsyncImage(
+                model = card.bannerUrl,
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxWidth().height(190.dp).clip(MaterialTheme.shapes.large),
+            )
+        }
         Row(verticalAlignment = Alignment.Top) {
             AsyncImage(
                 model = card.coverUrl,

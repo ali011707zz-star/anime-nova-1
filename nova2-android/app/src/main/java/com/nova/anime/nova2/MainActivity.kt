@@ -5,10 +5,18 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.viewModels
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.background
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.windowsizeclass.ExperimentalMaterial3WindowSizeClassApi
+import androidx.compose.material3.windowsizeclass.calculateWindowSizeClass
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -22,6 +30,8 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -54,13 +64,16 @@ class MainActivity : ComponentActivity() {
         SessionViewModel.Factory(apiClient, tokenStore)
     }
 
+    @OptIn(ExperimentalMaterial3WindowSizeClassApi::class)
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
             NovaTheme {
                 Surface(color = MaterialTheme.colorScheme.background) {
+                    val windowSizeClass = calculateWindowSizeClass(this@MainActivity)
                     androidx.compose.runtime.CompositionLocalProvider(
                         LocalLayoutDirection provides LayoutDirection.Rtl,
+                        com.nova.anime.nova2.ui.LocalNovaWidthClass provides windowSizeClass.widthSizeClass,
                     ) {
                         val state by sessionViewModel.state.collectAsStateWithLifecycle()
                         NovaNavGraph(
@@ -85,45 +98,65 @@ private fun BootstrapScreen(
     viewModel: SessionViewModel,
     onOpenHome: () -> Unit,
 ) {
-    Column(
+    val layout = com.nova.anime.nova2.ui.rememberNovaLayout()
+    Box(
         modifier = Modifier
             .fillMaxSize()
-            .verticalScroll(androidx.compose.foundation.rememberScrollState())
-            .padding(32.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center,
+            .background(
+                Brush.verticalGradient(
+                    listOf(Color(0xFF05030D), Color(0xFF11051F), Color(0xFF09090B)),
+                ),
+            ),
     ) {
-        Text(
-            text = "Anime NOVA 2",
-            style = MaterialTheme.typography.headlineLarge,
-            color = MaterialTheme.colorScheme.primary,
-        )
-        Text(
-            text = "Kotlin · Jetpack Compose · Media3",
-            modifier = Modifier.padding(top = 12.dp),
-            textAlign = TextAlign.Center,
-        )
-        Text(
-            text = "مشروع مستقل. Nova 1 لم يتم تعديله.",
-            modifier = Modifier.padding(top = 8.dp),
-            textAlign = TextAlign.Center,
-        )
-        when (val status = state.status) {
-            BootstrapStatus.Loading -> CircularProgressIndicator(Modifier.padding(top = 24.dp))
-            BootstrapStatus.OfficialAppRequired -> StatusText("الخادم يطلب النسخة الرسمية")
-            BootstrapStatus.Maintenance -> StatusText(
-                state.config?.maintenanceMessage ?: "الخادم تحت الصيانة",
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .verticalScroll(androidx.compose.foundation.rememberScrollState())
+                .padding(horizontal = if (layout.isTv) 96.dp else 24.dp, vertical = 36.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center,
+        ) {
+            Text(
+                text = "Anime NOVA",
+                style = MaterialTheme.typography.displayLarge,
+                color = MaterialTheme.colorScheme.primary,
             )
-            is BootstrapStatus.Error -> {
-                StatusText(status.message)
-                Button(
-                    onClick = viewModel::refresh,
-                    modifier = Modifier.padding(top = 16.dp),
+            Text(
+                text = "منصة الأنمي العربية",
+                modifier = Modifier.padding(top = 4.dp),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center,
+            )
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 28.dp),
+                shape = RoundedCornerShape(22.dp),
+                colors = CardDefaults.cardColors(containerColor = Color(0xCC111116)),
+            ) {
+                Column(
+                    modifier = Modifier.padding(if (layout.isTv) 36.dp else 20.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
-                    Text("إعادة المحاولة")
+                    when (val status = state.status) {
+                        BootstrapStatus.Loading -> CircularProgressIndicator()
+                        BootstrapStatus.OfficialAppRequired -> StatusText("الخادم يطلب النسخة الرسمية")
+                        BootstrapStatus.Maintenance -> StatusText(
+                            state.config?.maintenanceMessage ?: "الخادم تحت الصيانة",
+                        )
+                        is BootstrapStatus.Error -> {
+                            StatusText(status.message)
+                            Button(
+                                onClick = viewModel::refresh,
+                                modifier = Modifier.padding(top = 16.dp),
+                            ) {
+                                Text("إعادة المحاولة")
+                            }
+                        }
+                        BootstrapStatus.Ready -> ReadyContent(state, viewModel, onOpenHome)
+                    }
                 }
             }
-            BootstrapStatus.Ready -> ReadyContent(state, viewModel, onOpenHome)
         }
     }
 }
@@ -187,7 +220,7 @@ private fun ReadyContent(
     }
     Text(
         text = "API: ${NovaBuildConfig.identity.apiUrl}",
-        modifier = Modifier.padding(top = 18.dp),
+            modifier = Modifier.padding(top = 18.dp),
         style = MaterialTheme.typography.labelSmall,
         textAlign = TextAlign.Center,
     )

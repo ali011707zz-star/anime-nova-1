@@ -2,17 +2,21 @@ package com.nova.anime.nova2.ui
 
 import android.content.ActivityNotFoundException
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -84,29 +88,29 @@ private fun FavoritesContent(
         EmptyLibraryMessage("لم تضف أي عمل إلى المفضلة بعد")
         return
     }
-    Column {
-        favorites.forEach { anime ->
+    val layout = rememberNovaLayout()
+    Column(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = layout.horizontalPadding),
+        verticalArrangement = Arrangement.spacedBy(18.dp),
+    ) {
+        favorites.map { it.toAnimeCard() }.chunked(layout.columns).forEach { rowItems ->
             Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable { onOpenDetails(anime.id) }
-                    .padding(horizontal = 16.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(if (layout.isTv) 16.dp else 10.dp),
             ) {
-                AsyncImage(
-                    model = anime.coverUrl,
-                    contentDescription = anime.title,
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier.size(64.dp, 88.dp),
-                )
-                Column(
-                    modifier = Modifier.weight(1f).padding(horizontal = 12.dp),
-                ) {
-                    Text(anime.title, style = MaterialTheme.typography.titleMedium)
-                    anime.englishTitle?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+                rowItems.forEach { anime ->
+                    Column(modifier = Modifier.width(layout.cardWidth)) {
+                        NovaAnimeCard(anime, layout.cardWidth) { onOpenDetails(anime.id) }
+                        TextButton(
+                            onClick = { libraryStore.toggleFavorite(anime) },
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Text("إزالة")
+                        }
+                    }
                 }
-                Button(onClick = { libraryStore.toggleFavorite(anime.toAnimeCard()) }) {
-                    Text("حذف")
+                repeat((layout.columns - rowItems.size).coerceAtLeast(0)) {
+                    Spacer(Modifier.width(layout.cardWidth))
                 }
             }
         }

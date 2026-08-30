@@ -34,6 +34,7 @@ fun NovaNavGraph(
             HomeScreen(
                 repository = repository,
                 onOpenDetails = { navController.navigate("details/$it") },
+                onOpenEpisodes = { navController.navigate("episodes/$it") },
                 onOpenBrowse = { navController.navigate("browse") },
                 onOpenSearch = { navController.navigate("search") },
                 onOpenLibrary = { navController.navigate("library") },
