@@ -65,41 +65,63 @@ fun HomeScreen(
     }
 
     val layout = rememberNovaLayout()
-    Column(modifier = Modifier.fillMaxSize()) {
-        LazyColumn(
-            modifier = Modifier.weight(1f),
-            contentPadding = PaddingValues(bottom = if (layout.isTv) 20.dp else 12.dp),
-        ) {
-            item {
-                NovaHeader(onMenu = onOpenSettings)
-            }
-            when {
-                error != null -> item { ErrorBlock(error!!) }
-                catalog == null -> item { LoadingBlock() }
-                else -> {
-                    catalog!!.popular.firstOrNull()?.let { hero ->
-                        item {
-                            NovaHero(
-                                anime = hero,
-                                onDetails = { onOpenDetails(hero.id) },
-                                onEpisodes = { onOpenEpisodes(hero.id) },
-                            )
-                        }
+    val drawerState = androidx.compose.material3.rememberDrawerState(
+        androidx.compose.material3.DrawerValue.Closed,
+    )
+    val drawerScope = rememberCoroutineScope()
+    androidx.compose.material3.ModalNavigationDrawer(
+        drawerState = drawerState,
+        drawerContent = {
+            NovaDrawerContent(
+                selected = "الرئيسية",
+                onSelect = { destination ->
+                    drawerScope.launch { drawerState.close() }
+                    when (destination) {
+                        "بحث" -> onOpenSearch()
+                        "تصفح" -> onOpenBrowse()
+                        "مكتبتي" -> onOpenLibrary()
+                        "الإعدادات" -> onOpenSettings()
                     }
-                    item { NovaSection("الأكثر رواجًا", catalog!!.trending, onOpenDetails) }
-                    item { NovaSection("الأكثر شعبية", catalog!!.popular, onOpenDetails) }
-                    item { NovaSection("يُعرض حاليًا", catalog!!.airing, onOpenDetails, Color(0xFF22C55E)) }
-                    item { NovaSection("الموسم الحالي", catalog!!.seasonal, onOpenDetails) }
-                    item { NovaSection("الأعلى تقييمًا", catalog!!.topRated, onOpenDetails, Color(0xFFFFD700)) }
-                    item { NovaSection("أفلام الأنمي", catalog!!.movies, onOpenDetails, Color(0xFF3B82F6)) }
+                },
+            )
+        },
+    ) {
+        Column(modifier = Modifier.fillMaxSize()) {
+            LazyColumn(
+                modifier = Modifier.weight(1f),
+                contentPadding = PaddingValues(bottom = if (layout.isTv) 20.dp else 12.dp),
+            ) {
+                item {
+                    NovaHeader(onMenu = { drawerScope.launch { drawerState.open() } })
+                }
+                when {
+                    error != null -> item { ErrorBlock(error!!) }
+                    catalog == null -> item { LoadingBlock() }
+                    else -> {
+                        catalog!!.popular.firstOrNull()?.let { hero ->
+                            item {
+                                NovaHero(
+                                    anime = hero,
+                                    onDetails = { onOpenDetails(hero.id) },
+                                    onEpisodes = { onOpenEpisodes(hero.id) },
+                                )
+                            }
+                        }
+                        item { NovaSection("الأكثر رواجًا", catalog!!.trending, onOpenDetails) }
+                        item { NovaSection("الأكثر شعبية", catalog!!.popular, onOpenDetails) }
+                        item { NovaSection("يُعرض حاليًا", catalog!!.airing, onOpenDetails, Color(0xFF22C55E)) }
+                        item { NovaSection("الموسم الحالي", catalog!!.seasonal, onOpenDetails) }
+                        item { NovaSection("الأعلى تقييمًا", catalog!!.topRated, onOpenDetails, Color(0xFFFFD700)) }
+                        item { NovaSection("أفلام الأنمي", catalog!!.movies, onOpenDetails, Color(0xFF3B82F6)) }
+                    }
                 }
             }
-        }
-        NovaBottomNavigation(selected = "الرئيسية") { destination ->
-            when (destination) {
-                "بحث" -> onOpenSearch()
-                "تصفح" -> onOpenBrowse()
-                "مكتبتي", "تنزيلاتي" -> onOpenLibrary()
+            NovaBottomNavigation(selected = "الرئيسية") { destination ->
+                when (destination) {
+                    "بحث" -> onOpenSearch()
+                    "تصفح" -> onOpenBrowse()
+                    "مكتبتي", "تنزيلاتي" -> onOpenLibrary()
+                }
             }
         }
     }

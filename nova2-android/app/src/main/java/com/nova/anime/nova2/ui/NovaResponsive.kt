@@ -39,6 +39,8 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalDrawerSheet
+import androidx.compose.material3.NavigationDrawerItem
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -142,6 +144,52 @@ fun NovaHeader(
             }
         }
         onMenu?.let { NovaIconButton(Icons.Default.Menu, "القائمة", it) }
+    }
+}
+
+@Composable
+fun NovaDrawerContent(
+    selected: String,
+    onSelect: (String) -> Unit,
+) {
+    val destinations = listOf(
+        NovaNavItem("الرئيسية", Icons.Default.Home),
+        NovaNavItem("تصفح", Icons.Default.GridView),
+        NovaNavItem("بحث", Icons.Default.Search),
+        NovaNavItem("مكتبتي", Icons.Default.Bookmark),
+        NovaNavItem("الإعدادات", Icons.Outlined.Settings),
+    )
+    ModalDrawerSheet(
+        drawerContainerColor = MaterialTheme.colorScheme.surface,
+        drawerShape = RoundedCornerShape(topStart = 24.dp, bottomStart = 24.dp),
+    ) {
+        Column(
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 28.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Text(
+                "Anime NOVA",
+                style = MaterialTheme.typography.headlineSmall,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+            )
+            Text(
+                "منصة الأنمي العربية",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 16.dp),
+            )
+            Spacer(Modifier.height(16.dp))
+            destinations.forEach { item ->
+                NavigationDrawerItem(
+                    label = { Text(item.label) },
+                    icon = { Icon(item.icon, contentDescription = item.label) },
+                    selected = item.label == selected,
+                    onClick = { onSelect(item.label) },
+                    shape = RoundedCornerShape(14.dp),
+                )
+            }
+        }
     }
 }
 

@@ -123,23 +123,13 @@ fun WatchScreen(
     }
 
     val title = details?.card?.title ?: "المشاهدة"
-    LazyColumn(
-        modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(vertical = 16.dp),
-    ) {
-        item {
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Button(onClick = onBack) { Text("رجوع") }
-                Text(
-                    "$title · الحلقة $episodeNumber",
-                    style = MaterialTheme.typography.titleLarge,
-                    modifier = Modifier.padding(start = 12.dp),
-                )
-            }
-        }
+    val layout = rememberNovaLayout()
+    Column(modifier = Modifier.fillMaxSize()) {
+        NovaHeader(title = "$title · الحلقة $episodeNumber", onBack = onBack)
+        LazyColumn(
+            modifier = Modifier.weight(1f),
+            contentPadding = PaddingValues(bottom = 20.dp),
+        ) {
         if (selectedSource != null) {
             item {
                 PlayerSurface(
@@ -271,6 +261,7 @@ fun WatchScreen(
         if (!loading && sources.isEmpty() && error == null) {
             item { Text("لا توجد مصادر تشغيل متاحة", modifier = Modifier.padding(16.dp)) }
         }
+        }
     }
 }
 
@@ -305,6 +296,7 @@ private fun PlayerSurface(
     }
 
     Column {
+        val layout = rememberNovaLayout()
         AndroidView(
             factory = {
                 PlayerView(it).apply {
@@ -313,7 +305,9 @@ private fun PlayerSurface(
                     keepScreenOn = true
                 }
             },
-            modifier = Modifier.fillMaxWidth().height(240.dp),
+            modifier = Modifier.fillMaxWidth().height(
+                if (layout.isTv) 500.dp else if (layout.widthDp >= 600) 360.dp else 240.dp,
+            ),
             update = { it.player = player },
         )
         playbackError?.let {
