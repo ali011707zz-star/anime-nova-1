@@ -5,6 +5,7 @@ import com.nova.anime.nova2.core.model.AnonymousTokenResponse
 import com.nova.anime.nova2.core.model.ApiErrorDto
 import com.nova.anime.nova2.core.model.AuthResponse
 import com.nova.anime.nova2.core.model.BasicOkResponse
+import com.nova.anime.nova2.core.model.GraphQlRequest
 import com.nova.anime.nova2.core.model.RemoteConfigResponse
 import com.nova.anime.nova2.core.model.SignInRequest
 import com.nova.anime.nova2.core.model.SignUpRequest
@@ -71,6 +72,37 @@ class NovaApiClient(
 
     suspend fun signOut(): BasicOkResponse =
         postJson("/api/auth/signout", EmptyJsonRequest())
+
+    suspend fun queryAniList(
+        query: String,
+        variables: JsonObject = JsonObject(emptyMap()),
+    ): JsonObject =
+        postPublicJson("/api/anilist", GraphQlRequest(query, variables))
+
+    suspend fun fetchEpisodeTitles(
+        malId: Int,
+        anilistId: Int,
+        page: Int = 1,
+    ): JsonObject =
+        getJson(
+            "/api/anime/episode-titles",
+            mapOf(
+                "malId" to malId.toString(),
+                "anilistId" to anilistId.toString(),
+                "page" to page.toString(),
+            ),
+        )
+
+    suspend fun translateSearchText(text: String): JsonObject =
+        getJson(
+            "/api/anime/translate",
+            mapOf(
+                "text" to text,
+                "from" to "ar",
+                "to" to "en",
+                "kind" to "search",
+            ),
+        )
 
     suspend fun fetchSingleSource(request: SourceRequest): JsonObject =
         getJson("/api/anime/fetch-source", request.toQuery())

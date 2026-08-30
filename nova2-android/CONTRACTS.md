@@ -18,6 +18,7 @@
 | مصادر الحلقة عبر SSE | `GET /api/anime/sources-stream` |
 | metadata بالمعرف | `GET /api/anime/meta-by-id` |
 | AniList proxy | `POST /api/anilist` أو `POST /api/anime/anilist` |
+| عناوين الحلقات | `GET /api/anime/episode-titles` |
 | ترجمة النص | `GET /api/anime/translate` |
 | subtitles | `GET /api/anime/subtitle-tracks` |
 | manifest HLS | `GET /api/anime/hls-proxy` |

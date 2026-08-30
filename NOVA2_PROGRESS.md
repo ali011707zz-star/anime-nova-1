@@ -2,12 +2,11 @@
 
 ## Current position
 
-- **Current phase:** Phase 2 — independent Nova 2 project foundation.
-- **Status:** Phase 2 config/auth slice implemented — no build or runtime was
+- **Current phase:** Phase 3 — core browsing journey.
+- **Status:** Phase 3 Home/Search/Browse/Details/Episodes slice implemented — no build or runtime was
   executed in Replit.
-- **Last action:** Connected bootstrap config, anonymous-token refresh, session
-  restore, email sign-in, verification-code signup, and sign-out in the isolated
-  `nova2-android` project.
+- **Last action:** Added the real AniList proxy queries, Arabic search translation,
+  browse filters, details, and episode-title loading with Navigation Compose.
 - **Execution boundary:** Nova 1 remains untouched. Replit is being used for code inspection and documentation only; the application is not installed, started, or deployed here.
 - **Runtime target:** The existing VPS deployment, with changes transferred and built there only when implementation begins.
 
@@ -30,6 +29,5 @@
 
 ## Next action
 
-Add redacted contract fixtures and external CI compilation, then begin the real
-Home/Search/Browse migration. Build and device validation remain outside Replit
-on GitHub CI/VPS.
+The next implementation slice is Media3 playback for HLS/MP4/subtitles. Build
+and device validation remain outside Replit on GitHub CI/VPS.

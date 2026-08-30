@@ -27,6 +27,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.LayoutDirection
 import com.nova.anime.nova2.core.config.NovaBuildConfig
+import com.nova.anime.nova2.core.catalog.AnilistRepository
 import com.nova.anime.nova2.core.network.NovaApiClient
 import com.nova.anime.nova2.core.session.AuthMode
 import com.nova.anime.nova2.core.session.BootstrapStatus
@@ -40,6 +41,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 class MainActivity : ComponentActivity() {
     private val tokenStore by lazy { EncryptedTokenStore(applicationContext) }
     private val apiClient by lazy { NovaApiClient(tokenStore) }
+    private val catalogRepository by lazy { AnilistRepository(apiClient) }
     private val sessionViewModel by viewModels<SessionViewModel> {
         SessionViewModel.Factory(apiClient, tokenStore)
     }
@@ -53,7 +55,9 @@ class MainActivity : ComponentActivity() {
                         LocalLayoutDirection provides LayoutDirection.Rtl,
                     ) {
                         val state by sessionViewModel.state.collectAsStateWithLifecycle()
-                        NovaNavGraph { BootstrapScreen(state, sessionViewModel) }
+                        NovaNavGraph(catalogRepository) { onOpenHome ->
+                            BootstrapScreen(state, sessionViewModel, onOpenHome)
+                        }
                     }
                 }
             }
@@ -62,7 +66,11 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-private fun BootstrapScreen(state: SessionUiState, viewModel: SessionViewModel) {
+private fun BootstrapScreen(
+    state: SessionUiState,
+    viewModel: SessionViewModel,
+    onOpenHome: () -> Unit,
+) {
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -101,13 +109,17 @@ private fun BootstrapScreen(state: SessionUiState, viewModel: SessionViewModel) 
                     Text("إعادة المحاولة")
                 }
             }
-            BootstrapStatus.Ready -> ReadyContent(state, viewModel)
+            BootstrapStatus.Ready -> ReadyContent(state, viewModel, onOpenHome)
         }
     }
 }
 
 @Composable
-private fun ReadyContent(state: SessionUiState, viewModel: SessionViewModel) {
+private fun ReadyContent(
+    state: SessionUiState,
+    viewModel: SessionViewModel,
+    onOpenHome: () -> Unit,
+) {
     Text(
         text = state.user?.let { "مرحبًا ${it.displayName ?: it.email ?: "بك"}" }
             ?: "لم يتم تسجيل الدخول",
@@ -146,6 +158,12 @@ private fun ReadyContent(state: SessionUiState, viewModel: SessionViewModel) {
         ) {
             Text("تسجيل الخروج")
         }
+    }
+    Button(
+        onClick = onOpenHome,
+        modifier = Modifier.padding(top = 10.dp),
+    ) {
+        Text("فتح التصفح")
     }
     Button(
         onClick = viewModel::refresh,

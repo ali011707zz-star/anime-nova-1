@@ -2,6 +2,7 @@ package com.nova.anime.nova2.core.model
 
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
 
 @Serializable
 data class AnonymousTokenResponse(
@@ -43,6 +44,12 @@ data class AuthResponse(
 @Serializable
 data class BasicOkResponse(
     val ok: Boolean = false,
+)
+
+@Serializable
+data class GraphQlRequest(
+    val query: String,
+    val variables: JsonObject = JsonObject(emptyMap()),
 )
 
 @Serializable
