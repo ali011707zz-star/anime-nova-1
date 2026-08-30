@@ -1584,25 +1584,50 @@ async function extractAnifoxExternal(
  * Probe the extracted file itself and reject HTML error pages, 404/410, and
  * upstream 5xx responses before returning it or writing it to source_cache.
  */
+const anifoxProbeCache = new Map<string, { ok: boolean; expiresAt: number }>();
+const anifoxProbeInFlight = new Map<string, Promise<boolean>>();
+const ANIFOX_PROBE_OK_TTL = 45_000;
+const ANIFOX_PROBE_FAIL_TTL = 8_000;
+
 async function probeAnifoxDirectUrl(url: string, referer?: string): Promise<boolean> {
-  try {
-    const r = await fetch(url, {
-      headers: {
-        ...BASE_HDRS,
-        ...(referer ? { Referer: referer } : {}),
-        Range: "bytes=0-2048",
-      },
-      signal: AbortSignal.timeout(7000),
-      redirect: "follow",
+  const key = `${url}|${referer || ""}`;
+  const cached = anifoxProbeCache.get(key);
+  if (cached && cached.expiresAt > Date.now()) return cached.ok;
+  const active = anifoxProbeInFlight.get(key);
+  if (active) return active;
+
+  const promise = (async () => {
+    let ok = false;
+    try {
+      const r = await fetch(url, {
+        headers: {
+          ...BASE_HDRS,
+          ...(referer ? { Referer: referer } : {}),
+          Range: "bytes=0-2048",
+        },
+        signal: AbortSignal.timeout(7000),
+        redirect: "follow",
+      });
+      const contentType = (r.headers.get("content-type") || "").toLowerCase();
+      ok = r.status !== 404 && r.status !== 410 && r.status < 500
+        && !contentType.includes("text/html")
+        && !contentType.includes("application/json")
+        && (r.ok || r.status === 206);
+      if (r.body) await r.body.cancel().catch(() => {});
+    } catch {
+      ok = false;
+    }
+    anifoxProbeCache.set(key, {
+      ok,
+      expiresAt: Date.now() + (ok ? ANIFOX_PROBE_OK_TTL : ANIFOX_PROBE_FAIL_TTL),
     });
-    if (r.status === 404 || r.status === 410 || r.status >= 500) return false;
-    const contentType = (r.headers.get("content-type") || "").toLowerCase();
-    if (contentType.includes("text/html") || contentType.includes("application/json")) return false;
-    if (!r.ok && r.status !== 206) return false;
-    if (r.body) await r.body.cancel().catch(() => {});
-    return true;
-  } catch {
-    return false;
+    return ok;
+  })();
+  anifoxProbeInFlight.set(key, promise);
+  try {
+    return await promise;
+  } finally {
+    if (anifoxProbeInFlight.get(key) === promise) anifoxProbeInFlight.delete(key);
   }
 }
 
@@ -1709,7 +1734,9 @@ async function getAnifoxSources(
     // ── البحث من الكاش (< 1ms بعد أول جلب) بدل 9 HTTP requests متسلسلة ──
     const [catalog, animeRecord] = await Promise.all([
       catalogHint?.providerTitleId ? Promise.resolve([]) : _getAnifoxCatalog(),
-      ensureAnimeSlugRecord(anilistId, [title, english || "", ...variants]),
+      catalogHint?.providerTitleId
+        ? Promise.resolve(null)
+        : ensureAnimeSlugRecord(anilistId, [title, english || "", ...variants]),
     ]);
     const storedSlugs = animeRecord?.slugs ?? [];
     const candidates: Array<{ content_id: string; content_title: string; score: number }> = [];
@@ -5615,7 +5642,29 @@ function extractMediafireKey(urlOrKey: string): string | null {
  * Strategy: API (quick_key) → HTML scrape fallback.
  * API URL doesn't need Referer → works on mobile without proxy.
  */
+const mediafireDirectCache = new Map<string, { url: string | null; expiresAt: number }>();
+const mediafireDirectInFlight = new Map<string, Promise<string | null>>();
+const MEDIAFIRE_DIRECT_TTL = 60_000;
+
 async function extractMediafireDirect(serverId: string): Promise<string | null> {
+  const key = String(serverId || "").trim();
+  const cached = mediafireDirectCache.get(key);
+  if (cached && cached.expiresAt > Date.now()) return cached.url;
+  const active = mediafireDirectInFlight.get(key);
+  if (active) return active;
+  const promise = extractMediafireDirectUncached(key).then(url => {
+    mediafireDirectCache.set(key, { url, expiresAt: Date.now() + MEDIAFIRE_DIRECT_TTL });
+    return url;
+  });
+  mediafireDirectInFlight.set(key, promise);
+  try {
+    return await promise;
+  } finally {
+    if (mediafireDirectInFlight.get(key) === promise) mediafireDirectInFlight.delete(key);
+  }
+}
+
+async function extractMediafireDirectUncached(serverId: string): Promise<string | null> {
   // ── 1) Official API (fast, no HTML parsing) ──
   try {
     const key = extractMediafireKey(serverId);
@@ -5739,9 +5788,12 @@ async function getAnimeifySourcesUncached(
     const animeId: string = String(best.item.AnimeId);
     const animeType: string = best.item._type || "SERIES";
 
-    // Refresh creds in case animeifyPost rotated the token
-    const latestCreds = await getAnimeifyCreds();
-    if (latestCreds) { base = latestCreds.base; token = latestCreds.token; }
+    // Search can rotate the token, but catalog-id lookups never call search.
+    // Avoid a redundant credentials read on the fast catalog path.
+    if (!catalogHint?.providerTitleId) {
+      const latestCreds = await getAnimeifyCreds();
+      if (latestCreds) { base = latestCreds.base; token = latestCreds.token; }
+    }
 
     // Get episode list
     const epsRes = await animeifyPost(base, token, "episodes/load_episodes.php",
@@ -5917,123 +5969,138 @@ async function getAnimeifySourcesUncached(
       }
     }
 
-    // ── SFLink → filemoon.sx أولاً (strwish.com محجوب من VPS — 452 bytes) ──
-    //   نفس الـ ID يعمل على filemoon.sx (extractVideoDeep يدعمها عبر cfProxy)
-    const sfLink = String(epData.SFLink || "").trim();
-    if (sfLink) {
-      const sfCandidates = sfLink.startsWith("http")
-        ? [sfLink]
-        : [`https://filemoon.sx/e/${sfLink}`, `https://strwish.com/e/${sfLink}`];
-      for (const sfUrl of sfCandidates) {
+    /*
+     * The remaining AF providers are independent. They used to run in a
+     * serial tail after FileMoon/MediaFire, so an unavailable OK/VK page
+     * delayed every later result. Start all branches together; the final
+     * quality sort keeps the picker deterministic.
+     */
+    await Promise.allSettled([
+      // ── SFLink → filemoon.sx أولاً (strwish.com محجوب من VPS — 452 bytes) ──
+      //   نفس الـ ID يعمل على filemoon.sx (extractVideoDeep يدعمها عبر cfProxy)
+      (async () => {
+        const sfLink = String(epData.SFLink || "").trim();
+        if (!sfLink) return;
+        const sfCandidates = sfLink.startsWith("http")
+          ? [sfLink]
+          : [`https://filemoon.sx/e/${sfLink}`, `https://strwish.com/e/${sfLink}`];
+        for (const sfUrl of sfCandidates) {
+          try {
+            const extracted = await extractVideoDeep(sfUrl, sfUrl);
+            if (extracted?.url) {
+              const proxyUrl = extracted.url.includes(".m3u8")
+                ? `/api/anime/hls-proxy?url=${encodeURIComponent(extracted.url)}&ref=${encodeURIComponent(sfUrl)}`
+                : `/api/anime/video-proxy?url=${encodeURIComponent(extracted.url)}&ref=${encodeURIComponent(sfUrl)}`;
+              sources.push({
+                name: "فايل مون SF · HD",
+                url: sfUrl,
+                quality: "HD",
+                qualityRank: 27,
+                site: "animeify",
+                directUrl: proxyUrl,
+                directType: extracted.url.includes(".m3u8") ? "hls" : "mp4",
+              });
+              break;
+            }
+          } catch {}
+        }
+      })(),
+
+      // ── GDLink (Google Drive) → MP4 مباشر ──
+      (async () => {
+        const gdLink = String(epData.GDLink || "").trim();
+        if (!gdLink) return;
         try {
-          const extracted = await extractVideoDeep(sfUrl, sfUrl);
-          if (extracted?.url) {
-            const proxyUrl = extracted.url.includes(".m3u8")
-              ? `/api/anime/hls-proxy?url=${encodeURIComponent(extracted.url)}&ref=${encodeURIComponent(sfUrl)}`
-              : `/api/anime/video-proxy?url=${encodeURIComponent(extracted.url)}&ref=${encodeURIComponent(sfUrl)}`;
+          let gdId = gdLink;
+          if (gdLink.startsWith("http")) {
+            gdId = new URL(gdLink).searchParams.get("id") ||
+                   gdLink.match(/\/d\/([^/?#]+)/)?.[1] ||
+                   gdLink;
+          }
+          if (gdId) {
+            const gdDownload = `https://drive.google.com/uc?export=download&confirm=t&id=${gdId}`;
+            const proxyUrl = `/api/anime/video-proxy?url=${encodeURIComponent(gdDownload)}&ref=https://drive.google.com/`;
             sources.push({
-              name: "فايل مون SF · HD",
-              url: sfUrl,
+              name: "جوجل درايف · HD",
+              url: gdDownload,
               quality: "HD",
-              qualityRank: 27,
+              qualityRank: 26,
               site: "animeify",
               directUrl: proxyUrl,
-              directType: extracted.url.includes(".m3u8") ? "hls" : "mp4",
+              directType: "mp4",
             });
-            break; // نجح → لا حاجة للـ fallback
           }
         } catch {}
-      }
-    }
+      })(),
 
-    // ── GDLink (Google Drive) → MP4 مباشر ──
-    const gdLink = String(epData.GDLink || "").trim();
-    if (gdLink) {
-      try {
-        let gdId = gdLink;
-        if (gdLink.startsWith("http")) {
-          gdId = new URL(gdLink).searchParams.get("id") ||
-                 gdLink.match(/\/d\/([^/?#]+)/)?.[1] ||
-                 gdLink;
-        }
-        if (gdId) {
-          const gdDownload = `https://drive.google.com/uc?export=download&confirm=t&id=${gdId}`;
-          const proxyUrl = `/api/anime/video-proxy?url=${encodeURIComponent(gdDownload)}&ref=https://drive.google.com/`;
-          sources.push({
-            name: "جوجل درايف · HD",
-            url: gdDownload,
-            quality: "HD",
-            qualityRank: 26,
-            site: "animeify",
-            directUrl: proxyUrl,
-            directType: "mp4",
-          });
-        }
-      } catch {}
-    }
+      // ── OKLink (OK.ru) — جودة متوسطة لكن مستقرة ──
+      (async () => {
+        const okLink = String(epData.OKLink || "").trim();
+        if (!okLink) return;
+        try {
+          const okUrl = okLink.startsWith("http") ? okLink : `https://ok.ru/videoembed/${okLink}`;
+          const extracted = await extractVideoDeep(okUrl, okUrl);
+          if (extracted?.url) {
+            const proxyUrl = `/api/anime/video-proxy?url=${encodeURIComponent(extracted.url)}&ref=${encodeURIComponent(okUrl)}`;
+            sources.push({
+              name: "OK.ru · SD",
+              url: okUrl,
+              quality: "SD",
+              qualityRank: 5,
+              site: "animeify",
+              directUrl: proxyUrl,
+              directType: "mp4",
+            });
+          }
+        } catch {}
+      })(),
 
-    // ── OKLink (OK.ru) — جودة متوسطة لكن مستقرة ──
-    const okLink = String(epData.OKLink || "").trim();
-    if (okLink) {
-      try {
-        const okUrl = okLink.startsWith("http") ? okLink : `https://ok.ru/videoembed/${okLink}`;
-        const extracted = await extractVideoDeep(okUrl, okUrl);
-        if (extracted?.url) {
-          const proxyUrl = `/api/anime/video-proxy?url=${encodeURIComponent(extracted.url)}&ref=${encodeURIComponent(okUrl)}`;
-          sources.push({
-            name: "OK.ru · SD",
-            url: okUrl,
-            quality: "SD",
-            qualityRank: 5,
-            site: "animeify",
-            directUrl: proxyUrl,
-            directType: "mp4",
-          });
-        }
-      } catch {}
-    }
+      // ── VKLink (VK Video) — مشاركة مباشرة ──
+      (async () => {
+        const vkLink = String(epData.VKLink || "").trim();
+        if (!vkLink) return;
+        try {
+          const vkUrl = vkLink.startsWith("http") ? vkLink : `https://vk.com/video_ext.php?${vkLink}`;
+          const extracted = await extractVideoDeep(vkUrl, vkUrl);
+          if (extracted?.url) {
+            const proxyUrl = `/api/anime/video-proxy?url=${encodeURIComponent(extracted.url)}&ref=${encodeURIComponent(vkUrl)}`;
+            sources.push({
+              name: "VK Video · HD",
+              url: vkUrl,
+              quality: "HD",
+              qualityRank: 7,
+              site: "animeify",
+              directUrl: proxyUrl,
+              directType: "mp4",
+            });
+          }
+        } catch {}
+      })(),
 
-    // ── VKLink (VK Video) — مشاركة مباشرة ──
-    const vkLink = String(epData.VKLink || "").trim();
-    if (vkLink) {
-      try {
-        const vkUrl = vkLink.startsWith("http") ? vkLink : `https://vk.com/video_ext.php?${vkLink}`;
-        const extracted = await extractVideoDeep(vkUrl, vkUrl);
-        if (extracted?.url) {
-          const proxyUrl = `/api/anime/video-proxy?url=${encodeURIComponent(extracted.url)}&ref=${encodeURIComponent(vkUrl)}`;
-          sources.push({
-            name: "VK Video · HD",
-            url: vkUrl,
-            quality: "HD",
-            qualityRank: 7,
-            site: "animeify",
-            directUrl: proxyUrl,
-            directType: "mp4",
-          });
-        }
-      } catch {}
-    }
+      // ── DELink (Dailymotion) — جودة متوسطة ──
+      (async () => {
+        const deLink = String(epData.DELink || "").trim();
+        if (!deLink) return;
+        try {
+          const deUrl = deLink.startsWith("http") ? deLink : `https://www.dailymotion.com/embed/video/${deLink}`;
+          const extracted = await extractVideoDeep(deUrl, deUrl);
+          if (extracted?.url) {
+            const proxyUrl = `/api/anime/video-proxy?url=${encodeURIComponent(extracted.url)}&ref=${encodeURIComponent(deUrl)}`;
+            sources.push({
+              name: "Dailymotion · HD",
+              url: deUrl,
+              quality: "HD",
+              qualityRank: 6,
+              site: "animeify",
+              directUrl: proxyUrl,
+              directType: "mp4",
+            });
+          }
+        } catch {}
+      })(),
+    ]);
 
-    // ── DELink (Dailymotion) — جودة متوسطة ──
-    const deLink = String(epData.DELink || "").trim();
-    if (deLink) {
-      try {
-        const deUrl = deLink.startsWith("http") ? deLink : `https://www.dailymotion.com/embed/video/${deLink}`;
-        const extracted = await extractVideoDeep(deUrl, deUrl);
-        if (extracted?.url) {
-          const proxyUrl = `/api/anime/video-proxy?url=${encodeURIComponent(extracted.url)}&ref=${encodeURIComponent(deUrl)}`;
-          sources.push({
-            name: "Dailymotion · HD",
-            url: deUrl,
-            quality: "HD",
-            qualityRank: 6,
-            site: "animeify",
-            directUrl: proxyUrl,
-            directType: "mp4",
-          });
-        }
-      } catch {}
-    }
+    sources.sort((a, b) => b.qualityRank - a.qualityRank || a.name.localeCompare(b.name));
 
     return sources;
   } catch { return []; }
@@ -8578,25 +8645,28 @@ async function awResolveHlsVariants(
 
 /** بناء UnifiedSources من صفوف aw_links (بدون Algolia/Firestore) */
 async function awBuildSourcesFromDb(rows: AwLinkRow[]): Promise<UnifiedSource[]> {
-  const sources: UnifiedSource[] = [];
-  /* AW can advertise the same resolved media URL in several quality/server
-     rows. Keep one entry per provider + quality instead of collapsing the
-     remaining picker qualities. */
-  const seenUrls = new Set<string>();
-
-  for (const row of rows) {
+  /*
+   * Each AW row is independent. The old loop resolved KF/MediaFire/
+   * Streamtape/VT one after another, so one slow host delayed every other
+   * quality. Resolve rows concurrently, then flatten in DB order so picker
+   * ordering remains stable and deduplication still happens centrally.
+   */
+  const rowResults = await Promise.allSettled(rows.map(async row => {
+    const rowSources: Array<{ key: string; source: UnifiedSource }> = [];
     const srvName = String(row.server || "").toUpperCase();
     const qText = `${row.quality || ""} ${row.server || ""} ${row.ep_id || ""} ${row.link || ""}`;
     const q      = normalizeAwQuality(qText);
     const qRank  = q === "1080p" ? 22 : q === "720p" ? 21 : q === "480p" ? 10 : 5;
     const qLabel = q === "1080p" ? "FHD 1080p" : q === "720p" ? "HD 720p" : q;
     const seenKey = (url: string) => `${srvName}|${q}|${url}`;
+    const add = (url: string, source: UnifiedSource) => {
+      if (url) rowSources.push({ key: seenKey(url), source });
+    };
 
     if (srvName === "PD") {
       const direct = awResolvePd(row.link);
-      if (!direct || seenUrls.has(seenKey(direct))) continue;
-      seenUrls.add(seenKey(direct));
-      sources.push({
+      if (!direct) return rowSources;
+      add(direct, {
         name: `AnimeWitcher · ${qLabel} · PD`,
         url: row.link, quality: q, qualityRank: qRank + 2,
         site: "animewitcher",
@@ -8606,9 +8676,8 @@ async function awBuildSourcesFromDb(rows: AwLinkRow[]): Promise<UnifiedSource[]>
     } else if (srvName === "KF") {
       try {
         const kfDirect = await awResolveKf(row.link);
-        if (kfDirect && !seenUrls.has(seenKey(kfDirect))) {
-          seenUrls.add(seenKey(kfDirect));
-          sources.push({
+        if (kfDirect) {
+          add(kfDirect, {
             name: `AnimeWitcher · ${qLabel} · KF`,
             url: row.link, quality: q, qualityRank: qRank + 1,
             site: "animewitcher",
@@ -8621,9 +8690,8 @@ async function awBuildSourcesFromDb(rows: AwLinkRow[]): Promise<UnifiedSource[]>
     } else if (srvName === "MF" || srvName === "MF2") {
       try {
         const mfDirect = await extractMediafireDirect(row.link);
-        if (mfDirect && !seenUrls.has(seenKey(mfDirect))) {
-          seenUrls.add(seenKey(mfDirect));
-          sources.push({
+        if (mfDirect) {
+          add(mfDirect, {
             name: `AnimeWitcher · ${qLabel} · ${srvName}`,
             url: row.link, quality: q, qualityRank: qRank + (srvName === "MF2" ? 1 : 0),
             site: "animewitcher",
@@ -8639,9 +8707,8 @@ async function awBuildSourcesFromDb(rows: AwLinkRow[]): Promise<UnifiedSource[]>
           signal: AbortSignal.timeout(8_000),
         }).then(r => r.ok ? r.text() : "").catch(() => "");
         const stResult = parseStreamtape(stHtml);
-        if (stResult && !seenUrls.has(seenKey(stResult.url))) {
-          seenUrls.add(seenKey(stResult.url));
-          sources.push({
+        if (stResult) {
+          add(stResult.url, {
             name: `AnimeWitcher · ${qLabel} · ST`,
             url: row.link, quality: q, qualityRank: qRank,
             site: "animewitcher",
@@ -8653,15 +8720,12 @@ async function awBuildSourcesFromDb(rows: AwLinkRow[]): Promise<UnifiedSource[]>
     } else if (srvName === "VT") {
       try {
         const vtResult = await extractVideoDeep(row.link, row.link);
-        if (vtResult && !seenUrls.has(seenKey(vtResult.url))) {
-          seenUrls.add(seenKey(vtResult.url));
+        if (vtResult) {
           if (vtResult.type === "hls") {
             const hlsVariants = await awResolveHlsVariants(vtResult.url, row.link);
             for (const variant of hlsVariants) {
-              if (seenUrls.has(seenKey(variant.url))) continue;
-              seenUrls.add(seenKey(variant.url));
               const directUrl = `/api/anime/hls-proxy?url=${encodeURIComponent(variant.url)}&ref=${encodeURIComponent(row.link)}`;
-              sources.push({
+              add(variant.url, {
                 name: `AnimeWitcher · ${variant.label} · VT`,
                 url: row.link, quality: variant.label, qualityRank: variant.rank,
                 site: "animewitcher", directUrl, directType: "hls",
@@ -8669,7 +8733,7 @@ async function awBuildSourcesFromDb(rows: AwLinkRow[]): Promise<UnifiedSource[]>
             }
           } else {
             const directUrl = `/api/anime/video-proxy?url=${encodeURIComponent(vtResult.url)}&ref=${encodeURIComponent(row.link)}`;
-            sources.push({
+            add(vtResult.url, {
               name: `AnimeWitcher · ${qLabel} · VT`,
               url: row.link, quality: q, qualityRank: qRank,
               site: "animewitcher", directUrl, directType: "mp4",
@@ -8677,6 +8741,18 @@ async function awBuildSourcesFromDb(rows: AwLinkRow[]): Promise<UnifiedSource[]>
           }
         }
       } catch {}
+    }
+    return rowSources;
+  }));
+
+  const sources: UnifiedSource[] = [];
+  const seenUrls = new Set<string>();
+  for (const result of rowResults) {
+    if (result.status !== "fulfilled") continue;
+    for (const item of result.value) {
+      if (seenUrls.has(item.key)) continue;
+      seenUrls.add(item.key);
+      sources.push(item.source);
     }
   }
   return sources;
