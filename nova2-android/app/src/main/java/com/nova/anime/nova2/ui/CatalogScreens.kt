@@ -294,7 +294,7 @@ fun EpisodesScreen(
 }
 
 @Composable
-private fun CatalogScaffold(
+fun CatalogScaffold(
     title: String,
     onBack: (() -> Unit)? = null,
     content: androidx.compose.foundation.lazy.LazyListScope.() -> Unit,

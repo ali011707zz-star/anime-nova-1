@@ -196,6 +196,7 @@ fun WatchScreen(
                         )
                     }
                 }
+            }
             item {
                 Column(modifier = Modifier.padding(horizontal = 16.dp)) {
                     Button(

@@ -10,9 +10,11 @@ import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
+import kotlinx.serialization.json.JsonPrimitive
 
 class AnilistRepository(
     private val apiClient: NovaApiClient,
@@ -93,7 +95,7 @@ class AnilistRepository(
             filters.status?.let { put("status", it) }
             filters.season?.let { put("season", it) }
             filters.year?.let { put("year", it) }
-            put("sort", buildJsonArray { add(filters.sort) })
+            put("sort", buildJsonArray { add(JsonPrimitive(filters.sort)) })
         }
 
     private fun mediaList(page: JsonElement?): List<AnimeCard> =

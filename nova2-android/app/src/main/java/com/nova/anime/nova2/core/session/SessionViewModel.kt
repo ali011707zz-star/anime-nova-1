@@ -211,7 +211,7 @@ class SessionViewModel(
     private fun NovaApiException.toArabicMessage(): String = when (this) {
         is NovaApiException.Network -> "تعذر الوصول إلى الخادم"
         is NovaApiException.Timeout -> "انتهت مهلة الاتصال بالخادم"
-        is NovaApiException.Http -> message
+        is NovaApiException.Http -> message ?: "خطأ من الخادم"
         is NovaApiException.Parse -> "تعذر فهم استجابة الخادم"
         is NovaApiException.EmptyResponse -> "استجابة الخادم فارغة"
         is NovaApiException.ServerUnavailable -> "الخادم غير متاح حاليًا"

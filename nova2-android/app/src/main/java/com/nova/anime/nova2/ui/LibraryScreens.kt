@@ -202,6 +202,15 @@ private fun DownloadsContent(
     }
 }
 
+private fun downloadStateLabel(state: DownloadState): String = when (state) {
+    DownloadState.QUEUED -> "في الانتظار"
+    DownloadState.RUNNING -> "جارٍ التنزيل"
+    DownloadState.PAUSED -> "متوقف مؤقتًا"
+    DownloadState.COMPLETE -> "اكتمل التنزيل"
+    DownloadState.FAILED -> "فشل التنزيل"
+    DownloadState.REMOVED -> "أزيل التنزيل"
+}
+
 @Composable
 private fun EmptyLibraryMessage(message: String) {
     Text(

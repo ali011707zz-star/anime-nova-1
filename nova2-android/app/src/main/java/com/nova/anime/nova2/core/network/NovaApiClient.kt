@@ -23,6 +23,7 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.serializer
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -228,7 +229,7 @@ class NovaApiClient(
     ): T = withContext(Dispatchers.IO) {
         val request = baseRequest(path)
             .header("Content-Type", "application/json")
-            .post(json.encodeToString(payload).toRequestBody(JSON_MEDIA_TYPE))
+            .post(json.encodeToString(serializer<B>(), payload).toRequestBody(JSON_MEDIA_TYPE))
             .build()
         val response = executeAuthenticated(request)
         response.use { parseBody(it) }
@@ -240,7 +241,7 @@ class NovaApiClient(
     ): T = withContext(Dispatchers.IO) {
         val request = baseRequest(path)
             .header("Content-Type", "application/json")
-            .post(json.encodeToString(payload).toRequestBody(JSON_MEDIA_TYPE))
+            .post(json.encodeToString(serializer<B>(), payload).toRequestBody(JSON_MEDIA_TYPE))
             .build()
         val response = executePublic(request)
         response.use { parseBody(it) }
