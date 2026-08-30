@@ -104,6 +104,26 @@ class NovaApiClient(
             ),
         )
 
+    suspend fun fetchSubtitleTracks(
+        anilistId: Int,
+        episode: Int,
+        title: String,
+        english: String? = null,
+        malId: Int? = null,
+        season: Int = 1,
+    ): JsonObject =
+        getJson(
+            "/api/anime/subtitle-tracks",
+            buildMap {
+                put("anilistId", anilistId.toString())
+                put("ep", episode.toString())
+                put("season", season.toString())
+                put("title", title)
+                english?.takeIf(String::isNotBlank)?.let { put("english", it) }
+                malId?.let { put("malId", it.toString()) }
+            },
+        )
+
     suspend fun fetchSingleSource(request: SourceRequest): JsonObject =
         getJson("/api/anime/fetch-source", request.toQuery())
 
@@ -122,6 +142,18 @@ class NovaApiClient(
             if (!referer.isNullOrBlank()) put("ref", referer)
         })
 
+    fun resolveUrl(url: String): String =
+        if (url.startsWith("/")) NovaBuildConfig.identity.apiUrl.trimEnd('/') + url else url
+
+    fun mediaRequestHeaders(): Map<String, String> = buildMap {
+        put("X-Nova-Client", NovaBuildConfig.identity.clientId)
+        put("X-Nova-Version", NovaBuildConfig.identity.version)
+        put("X-Nova-Package", NovaBuildConfig.identity.packageName)
+        put("User-Agent", NovaBuildConfig.identity.userAgent)
+        tokenStore.readAnonymousToken()?.value?.let { put("X-App-Token", it) }
+        tokenStore.readUserToken()?.let { put("X-User-Token", it) }
+    }
+
     /**
      * Reads the real SSE contract used by Nova Mobile. Each event's data stays
      * as JsonElement until a feature-specific repository maps it.
@@ -137,6 +169,9 @@ class NovaApiClient(
                 .get()
                 .build(),
         )
+        if (!response.isSuccessful) {
+            response.use { throw parseHttpError(it) }
+        }
         response.use {
             val body = it.body ?: throw NovaApiException.EmptyResponse()
             readServerSentEvents(body.source(), onEvent)
@@ -299,6 +334,12 @@ class NovaApiClient(
         malId?.let { put("malId", it.toString()) }
         anilistId?.let { put("anilistId", it.toString()) }
         season?.let { put("season", it.toString()) }
+        english?.let { put("english", it) }
+        native?.let { put("native", it) }
+        format?.let { put("format", it) }
+        year?.let { put("year", it.toString()) }
+        episodes?.let { put("episodes", it.toString()) }
+        titleAr?.let { put("titleAr", it) }
     }
 
     private suspend fun readServerSentEvents(

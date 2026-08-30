@@ -236,6 +236,7 @@ fun DetailsScreen(
 fun EpisodesScreen(
     repository: AnilistRepository,
     id: Int,
+    onOpenWatch: (Int, Int) -> Unit,
     onBack: () -> Unit,
 ) {
     var details by remember { mutableStateOf<AnimeDetails?>(null) }
@@ -265,7 +266,7 @@ fun EpisodesScreen(
                     )
                 }
                 itemsIndexed(episodes, key = { _, episode -> episode.number }) { _, episode ->
-                    EpisodeRow(episode)
+                    EpisodeRow(episode, onClick = { onOpenWatch(id, episode.number) })
                 }
                 if (episodes.isEmpty()) {
                     item { Text("لا توجد حلقات متاحة", modifier = Modifier.padding(16.dp)) }
@@ -475,9 +476,12 @@ private fun DetailContent(details: AnimeDetails, onOpenEpisodes: (Int) -> Unit) 
 }
 
 @Composable
-private fun EpisodeRow(episode: EpisodeItem) {
+private fun EpisodeRow(episode: EpisodeItem, onClick: () -> Unit) {
     Row(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 7.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 7.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         AsyncImage(
@@ -492,6 +496,8 @@ private fun EpisodeRow(episode: EpisodeItem) {
                 Text(it, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall)
             }
         }
+        Spacer(Modifier.weight(1f))
+        Button(onClick = onClick) { Text("مشاهدة") }
     }
 }
 

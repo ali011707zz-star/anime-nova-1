@@ -13,6 +13,7 @@ private const val START = "bootstrap"
 @Composable
 fun NovaNavGraph(
     repository: AnilistRepository,
+    playbackRepository: com.nova.anime.nova2.core.playback.PlaybackRepository,
     bootstrapContent: @Composable (onOpenHome: () -> Unit) -> Unit,
 ) {
     val navController = rememberNavController()
@@ -64,6 +65,24 @@ fun NovaNavGraph(
             EpisodesScreen(
                 repository = repository,
                 id = entry.arguments?.getInt("id") ?: return@composable,
+                onOpenWatch = { animeId, episode ->
+                    navController.navigate("watch/$animeId/$episode")
+                },
+                onBack = { navController.popBackStack() },
+            )
+        }
+        composable(
+            route = "watch/{id}/{episode}",
+            arguments = listOf(
+                navArgument("id") { type = NavType.IntType },
+                navArgument("episode") { type = NavType.IntType },
+            ),
+        ) { entry ->
+            WatchScreen(
+                repository = repository,
+                playbackRepository = playbackRepository,
+                id = entry.arguments?.getInt("id") ?: return@composable,
+                episodeNumber = entry.arguments?.getInt("episode") ?: return@composable,
                 onBack = { navController.popBackStack() },
             )
         }

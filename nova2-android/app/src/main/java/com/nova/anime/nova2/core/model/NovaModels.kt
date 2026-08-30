@@ -141,6 +141,12 @@ data class SourceRequest(
     val malId: Int? = null,
     val anilistId: Int? = null,
     val season: Int? = null,
+    val english: String? = null,
+    val native: String? = null,
+    val format: String? = null,
+    val year: Int? = null,
+    val episodes: Int? = null,
+    val titleAr: String? = null,
 )
 
 data class SourceStreamEvent(
