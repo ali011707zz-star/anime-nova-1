@@ -1,6 +1,5 @@
 package com.nova.anime.nova2.core.model
 
-import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonElement
 
@@ -8,6 +7,42 @@ import kotlinx.serialization.json.JsonElement
 data class AnonymousTokenResponse(
     val token: String? = null,
     val exp: Long? = null,
+)
+
+@Serializable
+data class SignInRequest(
+    val email: String,
+    val password: String,
+)
+
+@Serializable
+data class SignUpRequest(
+    val email: String,
+    val password: String,
+    val displayName: String? = null,
+    val verifyCode: String? = null,
+)
+
+@Serializable
+data class VerifyCodeRequest(
+    val email: String,
+    val type: String = "signup",
+)
+
+@Serializable
+data class AuthResponse(
+    val id: String? = null,
+    val email: String? = null,
+    val displayName: String? = null,
+    val username: String? = null,
+    val avatarColor: Int? = null,
+    val profileImageUrl: String? = null,
+    val authToken: String? = null,
+)
+
+@Serializable
+data class BasicOkResponse(
+    val ok: Boolean = false,
 )
 
 @Serializable

@@ -3,10 +3,15 @@ package com.nova.anime.nova2.core.network
 import com.nova.anime.nova2.core.config.NovaBuildConfig
 import com.nova.anime.nova2.core.model.AnonymousTokenResponse
 import com.nova.anime.nova2.core.model.ApiErrorDto
+import com.nova.anime.nova2.core.model.AuthResponse
+import com.nova.anime.nova2.core.model.BasicOkResponse
 import com.nova.anime.nova2.core.model.RemoteConfigResponse
+import com.nova.anime.nova2.core.model.SignInRequest
+import com.nova.anime.nova2.core.model.SignUpRequest
 import com.nova.anime.nova2.core.model.SourceRequest
 import com.nova.anime.nova2.core.model.SourceStreamEvent
 import com.nova.anime.nova2.core.model.UserDto
+import com.nova.anime.nova2.core.model.VerifyCodeRequest
 import com.nova.anime.nova2.core.storage.StoredToken
 import com.nova.anime.nova2.core.storage.TokenStore
 import kotlinx.coroutines.Dispatchers
@@ -38,6 +43,34 @@ class NovaApiClient(
 
     suspend fun fetchCurrentUser(): UserDto =
         getJson("/api/auth/me")
+
+    suspend fun signIn(email: String, password: String): AuthResponse =
+        postPublicJson("/api/auth/signin", SignInRequest(email.trim().lowercase(), password))
+
+    suspend fun sendSignupVerificationCode(email: String): JsonObject =
+        postPublicJson(
+            "/api/auth/send-verify-code",
+            VerifyCodeRequest(email.trim().lowercase()),
+        )
+
+    suspend fun signUp(
+        email: String,
+        password: String,
+        displayName: String?,
+        verifyCode: String,
+    ): AuthResponse =
+        postPublicJson(
+            "/api/auth/signup",
+            SignUpRequest(
+                email = email.trim().lowercase(),
+                password = password,
+                displayName = displayName?.trim()?.takeIf { it.isNotEmpty() },
+                verifyCode = verifyCode.trim(),
+            ),
+        )
+
+    suspend fun signOut(): BasicOkResponse =
+        postJson("/api/auth/signout", EmptyJsonRequest())
 
     suspend fun fetchSingleSource(request: SourceRequest): JsonObject =
         getJson("/api/anime/fetch-source", request.toQuery())
@@ -82,7 +115,7 @@ class NovaApiClient(
         val request = baseRequest("/api/auth/anon-token")
             .post("{}".toRequestBody(JSON_MEDIA_TYPE))
             .build()
-        val response = executeUnauthenticated(request)
+        val response = executePublic(request)
         response.use {
             val payload = parseBody<AnonymousTokenResponse>(it)
             val token = payload.token?.takeIf { it.isNotBlank() }
@@ -100,6 +133,30 @@ class NovaApiClient(
     ): T = withContext(Dispatchers.IO) {
         val request = baseRequest(path, query).get().build()
         val response = executeAuthenticated(request)
+        response.use { parseBody(it) }
+    }
+
+    private suspend inline fun <reified T, reified B> postJson(
+        path: String,
+        payload: B,
+    ): T = withContext(Dispatchers.IO) {
+        val request = baseRequest(path)
+            .header("Content-Type", "application/json")
+            .post(json.encodeToString(payload).toRequestBody(JSON_MEDIA_TYPE))
+            .build()
+        val response = executeAuthenticated(request)
+        response.use { parseBody(it) }
+    }
+
+    private suspend inline fun <reified T, reified B> postPublicJson(
+        path: String,
+        payload: B,
+    ): T = withContext(Dispatchers.IO) {
+        val request = baseRequest(path)
+            .header("Content-Type", "application/json")
+            .post(json.encodeToString(payload).toRequestBody(JSON_MEDIA_TYPE))
+            .build()
+        val response = executePublic(request)
         response.use { parseBody(it) }
     }
 
@@ -153,6 +210,9 @@ class NovaApiClient(
             }
         }
 
+    private suspend fun executePublic(request: Request): okhttp3.Response =
+        executeUnauthenticated(request.withClientHeaders())
+
     private fun parseHttpError(response: okhttp3.Response): NovaApiException {
         val body = response.peekBody(MAX_ERROR_BODY_BYTES).string()
         val details = runCatching { json.decodeFromString<ApiErrorDto>(body) }.getOrNull()
@@ -172,15 +232,20 @@ class NovaApiClient(
         Request.Builder().url(buildUrl(path, query)).header("Accept", "application/json")
 
     private fun Request.withNovaHeaders(anonymousToken: String): Request =
+        withClientHeaders()
+            .newBuilder()
+            .header("X-App-Token", anonymousToken)
+            .apply {
+                tokenStore.readUserToken()?.let { header("X-User-Token", it) }
+            }
+            .build()
+
+    private fun Request.withClientHeaders(): Request =
         newBuilder()
             .header("X-Nova-Client", NovaBuildConfig.identity.clientId)
             .header("X-Nova-Version", NovaBuildConfig.identity.version)
             .header("X-Nova-Package", NovaBuildConfig.identity.packageName)
             .header("User-Agent", NovaBuildConfig.identity.userAgent)
-            .header("X-App-Token", anonymousToken)
-            .apply {
-                tokenStore.readUserToken()?.let { header("X-User-Token", it) }
-            }
             .build()
 
     private fun buildMediaUrl(path: String, query: Map<String, String>): String =
@@ -244,3 +309,8 @@ class NovaApiClient(
             .build()
     }
 }
+
+@kotlinx.serialization.Serializable
+private class EmptyJsonRequest(
+    val request: String = "nova2",
+)

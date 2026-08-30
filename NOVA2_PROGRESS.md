@@ -3,9 +3,11 @@
 ## Current position
 
 - **Current phase:** Phase 2 — independent Nova 2 project foundation.
-- **Status:** Phase 2 foundation created — no build or runtime was executed in Replit.
-- **Last action:** Created the isolated `nova2-android` Kotlin/Compose project with
-  the first real API contract and encrypted token-storage boundary.
+- **Status:** Phase 2 config/auth slice implemented — no build or runtime was
+  executed in Replit.
+- **Last action:** Connected bootstrap config, anonymous-token refresh, session
+  restore, email sign-in, verification-code signup, and sign-out in the isolated
+  `nova2-android` project.
 - **Execution boundary:** Nova 1 remains untouched. Replit is being used for code inspection and documentation only; the application is not installed, started, or deployed here.
 - **Runtime target:** The existing VPS deployment, with changes transferred and built there only when implementation begins.
 
@@ -28,6 +30,6 @@
 
 ## Next action
 
-Add redacted contract fixtures and the bootstrap/config/auth flow from the
-verified Nova Mobile behavior, then begin the real Home/Search/Browse migration.
-Build and device validation remain outside Replit on GitHub CI/VPS.
+Add redacted contract fixtures and external CI compilation, then begin the real
+Home/Search/Browse migration. Build and device validation remain outside Replit
+on GitHub CI/VPS.

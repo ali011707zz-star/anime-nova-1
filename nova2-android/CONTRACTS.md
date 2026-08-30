@@ -10,6 +10,10 @@
 | remote config | `GET /api/config` |
 | anonymous token | `POST /api/auth/anon-token` |
 | المستخدم الحالي | `GET /api/auth/me` |
+| تسجيل الدخول | `POST /api/auth/signin` مع `email/password` |
+| إرسال رمز التسجيل | `POST /api/auth/send-verify-code` مع `email/type=signup` |
+| إنشاء الحساب | `POST /api/auth/signup` مع `email/password/displayName/verifyCode` |
+| تسجيل الخروج | `POST /api/auth/signout` |
 | مصدر واحد | `GET /api/anime/fetch-source` |
 | مصادر الحلقة عبر SSE | `GET /api/anime/sources-stream` |
 | metadata بالمعرف | `GET /api/anime/meta-by-id` |
