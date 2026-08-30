@@ -126,3 +126,17 @@ mtime_ms = 1787740179884
 storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:f3373c74-f8b6-467c-955a-be50f4daf34a/f577d858-3ef5-4f93-a85f-c80c67e511bf/6fa2bb62-28e2-4395-ab1f-bd027d20f9e3"
 storage_version_token = "1787740199752196"
 content_type = "text/markdown"
+
+[[outputs]]
+id = "LXMKsXSrj3QFpn89s6Fzj"
+uri = "file://NOVA1_ANALYSIS.md"
+type = "text"
+title = "تقرير تحليل Nova 1"
+description = "جرد شامل لشاشات Nova 1 وتنقله وواجهات API والبيانات والمصادقة والمشغل والترجمة والتنزيلات ودعم الهاتف وAndroid TV، مع قائمة تحقق ونقاط تحتاج اعتماداً قبل بدء Nova 2."
+logical_id = "b086628c-ec58-43dd-a8e6-7867951f7d72"
+content_hash = "sha256:409d4e463e7d0be06bcc8db4532c715b0688b080ecf7c800828da4f11352ea79"
+size = 52429
+mtime_ms = 1788107303504
+storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:67e0d38e-3b0f-42d6-b397-aaf0a89df5ba/b086628c-ec58-43dd-a8e6-7867951f7d72/c020244f-20c1-48d4-8ada-d8a53183fb89"
+storage_version_token = "1788107570291041"
+content_type = "text/markdown"
