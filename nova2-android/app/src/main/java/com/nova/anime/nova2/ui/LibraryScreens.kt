@@ -56,10 +56,10 @@ fun LibraryScreen(
         downloadRepository.refresh()
     }
 
-    CatalogScaffold(title = "مكتبتي", onBack = onBack) {
+    CatalogScaffold(title = "قائمتي", onBack = onBack) {
         item {
             TabRow(selectedTabIndex = selectedTab) {
-                listOf("المفضلة", "السجل", "التنزيلات").forEachIndexed { index, label ->
+                listOf("متابعة", "السجل", "المحفوظة", "التنزيلات").forEachIndexed { index, label ->
                     Tab(
                         selected = selectedTab == index,
                         onClick = { selectedTab = index },
@@ -70,8 +70,14 @@ fun LibraryScreen(
         }
         item {
             when (selectedTab) {
-                0 -> FavoritesContent(favorites, onOpenDetails, libraryStore)
-                1 -> HistoryContent(history, onOpenWatch, libraryStore)
+                0 -> HistoryContent(
+                    history = history.filter { it.positionMs > 30_000L && it.durationMs > it.positionMs },
+                    onOpenWatch = onOpenWatch,
+                    libraryStore = libraryStore,
+                    emptyMessage = "لا توجد مشاهدات قيد المتابعة",
+                )
+                1 -> HistoryContent(history, onOpenWatch, libraryStore, "سيظهر هنا ما شاهدته")
+                2 -> FavoritesContent(favorites, onOpenDetails, libraryStore)
                 else -> DownloadsContent(downloads, downloadRepository)
             }
         }
@@ -122,9 +128,10 @@ private fun HistoryContent(
     history: List<HistoryEntry>,
     onOpenWatch: (Int, Int) -> Unit,
     libraryStore: LibraryStore,
+    emptyMessage: String = "سيظهر هنا ما شاهدته",
 ) {
     if (history.isEmpty()) {
-        EmptyLibraryMessage("سيظهر هنا ما شاهدته")
+        EmptyLibraryMessage(emptyMessage)
         return
     }
     Column {
