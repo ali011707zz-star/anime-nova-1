@@ -237,7 +237,6 @@ fun WatchScreen(
                     }
                 }
             }
-            }
         }
         if (subtitles.isNotEmpty()) {
             item {
