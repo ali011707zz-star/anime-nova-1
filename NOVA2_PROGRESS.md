@@ -2,9 +2,10 @@
 
 ## Current position
 
-- **Current phase:** Phase 1 — analysis of Nova 1.
-- **Status:** Phase 1 complete — awaiting review before implementation.
-- **Last action:** Nova 1 analysis was documented in `NOVA1_ANALYSIS.md`.
+- **Current phase:** Phase 2 — independent Nova 2 project foundation.
+- **Status:** Phase 2 foundation created — no build or runtime was executed in Replit.
+- **Last action:** Created the isolated `nova2-android` Kotlin/Compose project with
+  the first real API contract and encrypted token-storage boundary.
 - **Execution boundary:** Nova 1 remains untouched. Replit is being used for code inspection and documentation only; the application is not installed, started, or deployed here.
 - **Runtime target:** The existing VPS deployment, with changes transferred and built there only when implementation begins.
 
@@ -14,7 +15,7 @@
 2. Produce a detailed inventory of screens, navigation, features, API endpoints, models, authentication, Supabase usage, sources, playback, subtitles, downloads, favorites, history, settings, ads, and error states.
 3. Turn the inventory into a feature checklist and record unknowns or backend dependencies.
 4. Stop before creating or changing Nova 2 until the Phase 1 report is complete.
-5. Create Nova 2 as an independent Kotlin + Jetpack Compose project, separate from Nova 1.
+5. Create Nova 2 as an independent Kotlin + Jetpack Compose project, separate from Nova 1. **In progress.**
 6. Rebuild the verified Nova 1 behavior using the real existing API, then add Media3 playback, adaptive phone/tablet UI, and Compose for TV with remote focus support.
 7. Validate the implementation on the VPS/real Android targets; do not use a Replit workflow as the runtime.
 
@@ -27,4 +28,6 @@
 
 ## Next action
 
-Review `NOVA1_ANALYSIS.md` and confirm the Nova 2 scope/contracts before creating or changing the independent Kotlin/Compose project. No Nova 2 implementation starts before that review.
+Add redacted contract fixtures and the bootstrap/config/auth flow from the
+verified Nova Mobile behavior, then begin the real Home/Search/Browse migration.
+Build and device validation remain outside Replit on GitHub CI/VPS.
