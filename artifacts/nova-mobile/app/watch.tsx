@@ -921,9 +921,9 @@ export default function WatchScreen() {
     let cancelled = false;
     let timedOut = false;
 
-    /* Stage availability rows outside React state. The backend emits one row
-       per provider as soon as it finishes, but mobile must reveal the picker
-       only after the complete SSE scan, just like the web. */
+    /* Keep a local aggregate for the final commit, but publish every row
+       immediately. Waiting for [DONE] makes a slow provider hold the picker
+       open for 20–35 seconds. */
     const stagedSlots: Record<string, Partial<Record<QualityKey, AvailableSlot>>> = {};
 
     const applyRow = (row: any) => {
@@ -952,6 +952,14 @@ export default function WatchScreen() {
           qualityRank: Number(row?.qualityRank) || previous?.qualityRank,
         },
       };
+      setAvailableSlots((current) => ({
+        ...current,
+        [site]: stagedSlots[site],
+      }));
+      setSlotStatus((current) => ({
+        ...current,
+        [pickerSlotKey(site, qk)]: "ready",
+      }));
     };
 
     const commitRows = () => {
@@ -1917,7 +1925,7 @@ export default function WatchScreen() {
           </View>
         </View>
 
-          {!availabilityDone && (
+          {!availabilityDone && !hasAvailableSlot && (
             <View style={d.availabilityState}>
               <Pressable
                 onPress={handleBack}
@@ -1940,7 +1948,14 @@ export default function WatchScreen() {
               </View>
               <SpinRing size={24} />
               <Text style={[d.availabilityHeadline, tvMode && d.tvAvailabilityHeadline]}>سوكونا يقاتل غوجو بجهد من اجل السيرفرات</Text>
-              <Text style={[d.availabilityText, tvMode && d.tvAvailabilityText]}>يتم فحص جميع السيرفرات… ستظهر النتائج دفعة واحدة عند الجاهزية</Text>
+              <Text style={[d.availabilityText, tvMode && d.tvAvailabilityText]}>يتم فحص السيرفرات… ستظهر السيرفرات الجاهزة أولاً</Text>
+            </View>
+          )}
+
+          {!availabilityDone && hasAvailableSlot && (
+            <View style={d.availabilityPartialState}>
+              <SpinRing size={16} />
+              <Text style={d.availabilityPartialText}>يتم فحص باقي السيرفرات…</Text>
             </View>
           )}
 
@@ -1960,9 +1975,9 @@ export default function WatchScreen() {
            </View>
          )}
 
-         {/* لا تظهر أي بطاقة أثناء الفحص. هذا هو الفاصل المرئي بين مرحلة
-             availability في الويب ومرحلة منتقي المصادر. */}
-           {availabilityDone && Q_KEYS.map(qk => {
+          {/* تظهر بطاقات المصادر المؤكدة تدريجيًا أثناء الفحص، ثم تكتمل
+              القائمة عند وصول [DONE] من مرحلة availability. */}
+            {hasAvailableSlot && Q_KEYS.map(qk => {
             const pickerDefs = STATIC_PICKER[qk] || [];
            const dynamicSlots = Object.entries(availableSlots)
              .filter(([, tiers]) => !!tiers[qk])
@@ -2203,6 +2218,8 @@ const d = StyleSheet.create({
   tvAvailabilityHeadline: { fontSize: 24, lineHeight: 36 },
   availabilityText: { fontSize: 12, fontFamily: "Cairo_400Regular", color: "rgba(255,255,255,0.42)", textAlign: "center" },
   tvAvailabilityText: { fontSize: 19, lineHeight: 30 },
+  availabilityPartialState: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, paddingVertical: 8 },
+  availabilityPartialText: { fontSize: 11, fontFamily: "Cairo_400Regular", color: "rgba(255,255,255,0.38)" },
   availabilityEmpty: { alignItems: "center", justifyContent: "center", gap: 10, paddingVertical: 42, paddingHorizontal: 18 },
   availabilityEmptyTitle: { fontSize: 14, fontFamily: "Cairo_700Bold", color: "rgba(255,255,255,0.62)", textAlign: "center" },
   availabilityEmptyText: { fontSize: 11, fontFamily: "Cairo_400Regular", color: "rgba(255,255,255,0.30)", textAlign: "center" },
