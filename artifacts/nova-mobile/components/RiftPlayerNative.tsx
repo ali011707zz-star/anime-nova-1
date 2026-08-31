@@ -270,8 +270,7 @@ export function RiftPlayer({
         const percentage = Math.max(0, Math.min(1, event.nativeEvent.locationX / Math.max(seekWidth, 1)));
         seek(percentage * duration);
       },
-    })),
-  ).current;
+    })).current;
 
   const togglePortrait = useCallback(async () => {
     const next = !isPortrait;
