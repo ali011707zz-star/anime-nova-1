@@ -2248,18 +2248,16 @@ export function RiftPlayer({
       {/* ── Video ── */}
       <VideoView
         player={player}
-        style={s.video}
+        style={tvMode ? s.tvVideo : s.video}
         nativeControls={tvMode}
         contentFit={contentFit}
         /* Android SurfaceView is not included by react-native-view-shot and
            produced a black saved image. TextureView is capturable while
            retaining the same native decoder/player. */
-        // SurfaceView avoids the persistent split-tone compositor artifact
-        // seen on Android TV with TextureView. Screenshots are not used on TV.
-        /* Keep SurfaceView on Android TV: the current TV compositor path avoids
-           the split-tone artifact seen with TextureView on the affected boxes.
-           The phone path keeps TextureView for screenshot support. */
-        surfaceType={Platform.OS === "android" && tvMode ? "surfaceView" : Platform.OS === "android" ? "textureView" : undefined}
+        /* Keep TV in the normal React composition tree. SurfaceView is a
+           separate native surface and can leave a stale split-tone region on
+           one side after Android TV rotates/resizes the player. */
+        surfaceType={Platform.OS === "android" ? "textureView" : undefined}
       />
 
       {/* Smooth first-frame handoff instead of a sudden black jump. */}
@@ -3146,6 +3144,10 @@ const s = StyleSheet.create({
   entryLoadingOverlay: { ...StyleSheet.absoluteFillObject, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(3,3,8,0.44)" },
   entryLoadingText: { marginTop: 12, color: "rgba(255,255,255,0.78)", fontSize: 13, fontFamily: "System" },
   video: { width: "100%", height: "100%" },
+  /* TextureView must be explicitly pinned to the TV viewport after the
+     landscape orientation lock; otherwise the native view can retain a
+     pre-rotation width and expose a differently composited side region. */
+  tvVideo: { ...StyleSheet.absoluteFillObject },
   screenshotSavedBadge: {
     position: "absolute",
     top: 24,
