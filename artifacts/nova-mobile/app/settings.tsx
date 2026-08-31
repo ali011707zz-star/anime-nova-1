@@ -22,8 +22,9 @@ import { CrashEntry, getCrashLog } from "@/utils/crashLogger";
 import { TvPressable } from "@/utils/tv";
 
 const THEMES: { label: string; value: string; dot: string; desc: string }[] = [
-  { label: "داكن",   value: "dark",   dot: "#3F3F46", desc: "رمادي داكن" },
-  { label: "AMOLED", value: "amoled", dot: "#ffffff", desc: "أسود حقيقي" },
+  { label: "أبيض",   value: "light",  dot: "#FFFFFF", desc: "مظهر أبيض مريح" },
+  { label: "أسود",   value: "dark",   dot: "#000000", desc: "أسود كامل" },
+  { label: "AMOLED", value: "amoled", dot: "#111111", desc: "أسود موفّر للطاقة" },
   { label: "بنفسجي", value: "violet", dot: "#a78bfa", desc: "توهّج بنفسجي" },
   { label: "أزرق",   value: "blue",   dot: "#3b82f6", desc: "توهّج أزرق" },
   { label: "وردي",   value: "pink",   dot: "#ec4899", desc: "توهّج وردي" },
@@ -1183,6 +1184,7 @@ export default function SettingsScreen() {
   const router = useRouter();
   const { openPremium } = useLocalSearchParams<{ openPremium?: string }>();
   const { theme, setTheme, watchHistory, favorites, refreshConfig, setCurrentUser: setGlobalUser } = useApp();
+  const colors = useColors();
   const topPad = Platform.OS === "web" ? 0 : insets.top;
   const tvMode = isTvDevice();
 
@@ -1335,7 +1337,7 @@ export default function SettingsScreen() {
   });
 
   return (
-    <View style={{ flex: 1, backgroundColor: "#09090B" }}>
+    <View style={{ flex: 1, backgroundColor: colors.background }}>
       {/* Toast */}
       {toast && (
         <View style={[ts.toastWrap, { top: topPad + 8 }]}>
@@ -1344,19 +1346,19 @@ export default function SettingsScreen() {
       )}
 
       {/* Sticky Header */}
-      <View style={[ts.header, { paddingTop: topPad }]}>
+      <View style={[ts.header, { paddingTop: topPad, backgroundColor: colors.background, borderBottomColor: colors.border }]}>
         <View style={ts.headerBadge}>
           <View style={ts.headerDot} />
           <Text style={ts.headerBadgeText}>ANIME NOVA · v2.4</Text>
         </View>
         <View style={{ flexDirection: "row", alignItems: "center", gap: 10, flex: 1 }}>
           <View style={ts.headerIconWrap}>
-            <Ionicons name="settings" size={16} color="#c4b5fd" />
+            <Ionicons name="settings" size={16} color={colors.primary} />
           </View>
-          <Text style={ts.headerTitle}>الإعدادات</Text>
+          <Text style={[ts.headerTitle, { color: colors.text }]}>الإعدادات</Text>
         </View>
         <Pressable onPress={() => router.back()} style={ts.headerBackBtn}>
-          <Ionicons name="chevron-forward" size={16} color="rgba(255,255,255,0.5)" />
+          <Ionicons name="chevron-forward" size={16} color={colors.mutedForeground} />
         </Pressable>
       </View>
 
@@ -1458,15 +1460,15 @@ export default function SettingsScreen() {
         {/* ══════ المظهر ══════ */}
         <SectionHeader title="المظهر" icon="المظهر" />
         <View style={{ paddingHorizontal: 16 }}>
-          <Card>
+            <Card>
             <View style={{ padding: 16 }}>
               <View style={{ flexDirection: "row", alignItems: "center", gap: 12, marginBottom: 16 }}>
                 <View style={[ts.themePreviewDot, { backgroundColor: currentTheme.dot + "22" }]}>
                   <View style={[ts.themePreviewInner, { backgroundColor: currentTheme.dot }]} />
                 </View>
                 <View style={{ flex: 1, alignItems: "flex-end" }}>
-                  <Text style={ts.navLabel}>ثيم التطبيق</Text>
-                  <Text style={ts.navSub}>الثيم الحالي: {currentTheme.label} · {currentTheme.desc}</Text>
+                  <Text style={[ts.navLabel, { color: colors.text }]}>ثيم التطبيق</Text>
+                  <Text style={[ts.navSub, { color: colors.mutedForeground }]}>الثيم الحالي: {currentTheme.label} · {currentTheme.desc}</Text>
                 </View>
               </View>
               <View style={ts.themesRow}>
@@ -1477,8 +1479,8 @@ export default function SettingsScreen() {
                       key={t.value}
                       onPress={() => handleSetTheme(t.value)}
                       style={[ts.themeBtn, {
-                        backgroundColor: active ? t.dot + "18" : "rgba(255,255,255,0.03)",
-                        borderColor: active ? t.dot + "60" : "rgba(255,255,255,0.06)",
+                         backgroundColor: active ? t.dot + "18" : colors.secondary,
+                         borderColor: active ? t.dot + "60" : colors.border,
                       }]}
                     >
                       <View style={[ts.themeDot, {
@@ -1495,7 +1497,7 @@ export default function SettingsScreen() {
                           </View>
                         )}
                       </View>
-                      <Text style={[ts.themeLabel, { color: active ? t.dot : "rgba(255,255,255,0.30)" }]}>{t.label}</Text>
+                      <Text style={[ts.themeLabel, { color: active ? t.dot : colors.mutedForeground }]}>{t.label}</Text>
                     </Pressable>
                   );
                 })}

@@ -4,7 +4,7 @@ import { StyleSheet, Text, View } from "react-native";
 import { DEFAULT_CONFIG, fetchRemoteConfig, getBaseUrl, RemoteConfig } from "@/utils/api";
 import { getAuthToken, secureFetch, setUserAuthToken } from "@/utils/secureApi";
 
-type Theme = "dark" | "amoled" | "violet" | "blue" | "pink";
+type Theme = "light" | "dark" | "amoled" | "violet" | "blue" | "pink";
 
 export type WatchProgress = {
   animeId: number;
@@ -58,7 +58,8 @@ type AppContextType = {
 const AppContext = createContext<AppContextType | null>(null);
 
 export function AppProvider({ children }: { children: React.ReactNode }) {
-  const [theme, setThemeState] = useState<Theme>("amoled");
+  // White is the first-run default. A saved choice is restored below.
+  const [theme, setThemeState] = useState<Theme>("light");
   const [remoteConfig, setRemoteConfig] = useState<RemoteConfig>(DEFAULT_CONFIG);
   const [watchHistory, setWatchHistory] = useState<WatchProgress[]>([]);
   const [favorites, setFavorites] = useState<FavoriteAnime[]>([]);
@@ -147,7 +148,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       AsyncStorage.getItem("nova-favorites").catch(() => null),
     ]);
     if (themeVal) {
-      try { setThemeState(themeVal as Theme); } catch {}
+      const validThemes: Theme[] = ["light", "dark", "amoled", "violet", "blue", "pink"];
+      if (validThemes.includes(themeVal as Theme)) {
+        setThemeState(themeVal as Theme);
+      }
     }
     if (historyVal) {
       try {

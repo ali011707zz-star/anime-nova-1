@@ -26,14 +26,40 @@ type Palette = {
 
 // ── الثيمات ───────────────────────────────────────────────────────────────────
 
-/** dark — الثيم الافتراضي (بنفسجي داكن) */
+/** light — الثيم الافتراضي (خلفية بيضاء واضحة) */
+const light: Palette = {
+  text:                "#111827",
+  tint:                "#6D28D9",
+  background:          "#FFFFFF",
+  foreground:          "#111827",
+  card:                "#F8FAFC",
+  cardForeground:     "#111827",
+  primary:             "#6D28D9",
+  primaryForeground:   "#FFFFFF",
+  secondary:           "#F1F5F9",
+  secondaryForeground: "#1F2937",
+  muted:               "#F1F5F9",
+  mutedForeground:    "#64748B",
+  accent:              "#7C3AED",
+  accentForeground:    "#FFFFFF",
+  destructive:         "#DC2626",
+  destructiveForeground: "#FFFFFF",
+  border:              "#E2E8F0",
+  input:               "#E2E8F0",
+  violet:              "#7C3AED",
+  violetDark:          "#5B21B6",
+  violetDeep:          "#4C1D95",
+  surface:             "#F8FAFC",
+};
+
+/** dark — أسود كامل مع أسطح داكنة */
 const dark: Palette = {
-  text:                "#E8E8F0",
+  text:                "#F8FAFC",
   tint:                "#8B5CF6",
-  background:          "#09090B",
-  foreground:          "#E8E8F0",
-  card:                "#111116",
-  cardForeground:      "#E8E8F0",
+  background:          "#000000",
+  foreground:          "#F8FAFC",
+  card:                "#0A0A0A",
+  cardForeground:      "#F8FAFC",
   primary:             "#8B5CF6",
   primaryForeground:   "#ffffff",
   secondary:           "#1C1C22",
@@ -157,7 +183,7 @@ const pink: Palette = {
 };
 
 const colors = {
-  light: dark, // backward-compat alias → الثيم الافتراضي
+  light,
   dark,
   amoled,
   violet,

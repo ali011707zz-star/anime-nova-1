@@ -45,7 +45,7 @@ export default function TabLayout() {
         tabBarShowLabel: false,
         tabBarStyle: {
           position: "absolute",
-          backgroundColor: isIOS ? "transparent" : "rgba(9,9,11,0.96)",
+           backgroundColor: isIOS ? "transparent" : colors.background,
           borderTopWidth: 1,
           borderTopColor: colors.border,
           elevation: 0,

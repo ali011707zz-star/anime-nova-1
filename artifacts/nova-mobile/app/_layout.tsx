@@ -20,6 +20,7 @@ import { initializeRewardedAds } from "@/utils/rewardedAd";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { TelegramAnnouncementModal } from "@/components/TelegramAnnouncementModal";
 import { AppProvider } from "@/context/AppContext";
+import { useColors } from "@/hooks/useColors";
 import { loadRuntimeApiUrl } from "@/utils/baseUrl";
 import { installGlobalCrashHandlers } from "@/utils/crashLogger";
 import { getRuntimeIntegrity, runtimeIntegrityMessage } from "@/utils/runtimeIntegrity";
@@ -73,11 +74,13 @@ const queryClient = new QueryClient({
 });
 
 function RootLayoutNav() {
+  const colors = useColors();
+
   return (
     <Stack
       screenOptions={{
         headerShown: false,
-        contentStyle: { backgroundColor: "#09090B" },
+        contentStyle: { backgroundColor: colors.background },
         animation: Platform.OS === "android" ? "fade_from_bottom" : "fade",
         animationDuration: Platform.OS === "android" ? 120 : 180,
       }}
