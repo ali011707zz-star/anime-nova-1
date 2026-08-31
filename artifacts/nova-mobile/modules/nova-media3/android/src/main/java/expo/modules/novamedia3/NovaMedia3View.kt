@@ -2,6 +2,7 @@ package expo.modules.novamedia3
 
 import android.app.PictureInPictureParams
 import android.content.Context
+import android.graphics.Color
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
@@ -12,6 +13,7 @@ import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.DefaultLoadControl
+import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
@@ -64,6 +66,13 @@ class NovaMedia3View(
     )
     playerView.useController = false
     playerView.setShowBuffering(PlayerView.SHOW_BUFFERING_NEVER)
+    /*
+     * Never leave the previous decoded frame visible while a new surface or
+     * source is being attached. On affected TV GPUs that stale buffer can
+     * remain composited over only one half of the view.
+     */
+    playerView.setKeepContentOnPlayerReset(false)
+    playerView.setShutterBackgroundColor(Color.BLACK)
     playerView.resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
     addView(playerView)
     clipChildren = false
@@ -167,11 +176,19 @@ class NovaMedia3View(
       )
       .setBackBuffer(15_000, false)
       .build()
-    val player = ExoPlayer.Builder(context)
+    /*
+     * Use Media3 directly for TV instead of expo-video's renderer wrapper.
+     * Decoder fallback lets Media3 retry with a compatible codec when the
+     * hardware decoder reports a bad surface/color configuration.
+     */
+    val renderersFactory = DefaultRenderersFactory(context)
+      .setEnableDecoderFallback(true)
+    val player = ExoPlayer.Builder(context, renderersFactory)
       .setLoadControl(loadControl)
       .build()
     exoPlayer = player
     playerView.player = player
+    player.videoScalingMode = C.VIDEO_SCALING_MODE_SCALE_TO_FIT
     player.addListener(object : Player.Listener {
       override fun onPlaybackStateChanged(state: Int) {
         when (state) {
