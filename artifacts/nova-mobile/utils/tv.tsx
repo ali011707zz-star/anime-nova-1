@@ -32,12 +32,18 @@ export function isTvDevice(width?: number, height?: number) {
 export function tvFocusStyle(focused: boolean) {
   return focused
     ? {
-        borderColor: "#C4B5FD",
-        borderWidth: 3,
-        shadowColor: "#A78BFA",
-        shadowOpacity: 0.9,
-        shadowRadius: 12,
-        elevation: 8,
+        // A dark tint remains visible on light posters and bright buttons,
+        // while the outline and lift make the focused target obvious from
+        // normal TV viewing distance.
+        backgroundColor: "rgba(0,0,0,0.28)",
+        borderColor: "#A78BFA",
+        borderWidth: 4,
+        shadowColor: "#C4B5FD",
+        shadowOpacity: 0.85,
+        shadowRadius: 14,
+        elevation: 10,
+        zIndex: 20,
+        transform: [{ scale: 1.015 }],
       }
     : {};
 }
