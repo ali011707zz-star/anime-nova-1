@@ -402,7 +402,7 @@ export default function SearchScreen() {
         {/* ── Sticky header ── */}
         <View style={s.header}>
           {/* Search bar */}
-          <View style={s.searchBar}>
+          <View style={[s.searchBar, tvMode && s.tvSearchBar]}>
             <Ionicons name="search" size={15} color="rgba(255,255,255,0.3)" />
             <TextInput
               ref={inputRef}
@@ -410,11 +410,13 @@ export default function SearchScreen() {
               onChangeText={setQuery}
               placeholder="ابحث عن أنمي..."
               placeholderTextColor="rgba(255,255,255,0.25)"
-              style={s.searchInput}
+              style={[s.searchInput, tvMode && s.tvSearchInput]}
               autoFocus
+              focusable
             />
             {query ? (
-              <Pressable onPress={() => { setQuery(""); inputRef.current?.focus(); }}>
+              <Pressable onPress={() => { setQuery(""); inputRef.current?.focus(); }} focusable={tvMode}
+                style={({ focused }) => [tvMode && tvFocusStyle(focused)]}>
                 <Ionicons name="close-circle" size={16} color="rgba(255,255,255,0.35)" />
               </Pressable>
             ) : null}
@@ -435,11 +437,11 @@ export default function SearchScreen() {
               )}
             </Pressable>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flex: 1 }}>
-              <View style={{ flexDirection: "row", gap: 6, paddingRight: 8 }}>
+              <View style={{ flexDirection: "row", gap: tvMode ? 10 : 6, paddingRight: 8 }}>
                 {SORT_OPTIONS.map(opt => (
                   <Pressable key={opt.value} onPress={() => setSort(opt.value)}
                     focusable={tvMode}
-                    style={({ focused }) => [s.sortPill, sort === opt.value && s.sortPillActive, tvMode && tvFocusStyle(focused)]}>
+                    style={({ focused }) => [s.sortPill, tvMode && s.tvPill, sort === opt.value && s.sortPillActive, tvMode && tvFocusStyle(focused)]}>
                     <Text style={[s.sortPillText, sort === opt.value && s.sortPillTextActive]}>{opt.label}</Text>
                   </Pressable>
                 ))}
@@ -459,7 +461,7 @@ export default function SearchScreen() {
               {SEASON_OPTIONS.map(opt => (
                 <Pressable key={opt.value} onPress={() => setSeason(opt.value)}
                   focusable={tvMode}
-                  style={({ focused }) => [s.seasonChip, season === opt.value && s.seasonChipActive, tvMode && tvFocusStyle(focused)]}>
+                  style={({ focused }) => [s.seasonChip, tvMode && s.tvSeasonChip, season === opt.value && s.seasonChipActive, tvMode && tvFocusStyle(focused)]}>
                   <Text style={{ fontSize: 10 }}>{opt.emoji}</Text>
                   <Text style={[s.seasonChipText, season === opt.value && s.seasonChipTextActive]}>{opt.label}</Text>
                 </Pressable>
@@ -545,7 +547,8 @@ export default function SearchScreen() {
                 </View>
                 <View style={s.historyChips}>
                   {history.map((h, i) => (
-                    <Pressable key={i} onPress={() => setQuery(h)} style={s.historyChip}>
+                    <Pressable key={i} onPress={() => setQuery(h)} focusable={tvMode}
+                      style={({ focused }) => [s.historyChip, tvMode && tvFocusStyle(focused)]}>
                       <Ionicons name="time" size={12} color="rgba(255,255,255,0.4)" />
                       <Text style={s.historyChipText}>{h}</Text>
                     </Pressable>
@@ -737,6 +740,8 @@ const s = StyleSheet.create({
   header: { backgroundColor: "#0A0A0F", borderBottomWidth: 1, borderBottomColor: "rgba(255,255,255,0.05)", paddingHorizontal: 14, paddingTop: 10, paddingBottom: 6 },
   searchBar: { flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: "#18181B", borderRadius: 12, paddingHorizontal: 12, paddingVertical: 6, borderWidth: 1, borderColor: "rgba(255,255,255,0.07)", marginBottom: 6 },
   searchInput: { flex: 1, color: "#fff", fontSize: 12, fontFamily: "Cairo_700Bold", textAlign: "right" },
+  tvSearchBar: { minHeight: 72, paddingHorizontal: 22, paddingVertical: 14, borderRadius: 18, gap: 14 },
+  tvSearchInput: { fontSize: 23, lineHeight: 34 },
   filterRow: { flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 6 },
   filterToggle: { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 8, paddingVertical: 5, borderRadius: 10, backgroundColor: "#18181B", borderWidth: 1, borderColor: "rgba(255,255,255,0.05)" },
   filterToggleActive: { backgroundColor: "rgba(139,92,246,0.15)", borderColor: "rgba(139,92,246,0.3)" },
@@ -745,11 +750,13 @@ const s = StyleSheet.create({
   filterCount: { width: 14, height: 14, borderRadius: 7, backgroundColor: "#8B5CF6", alignItems: "center", justifyContent: "center" },
   filterCountText: { fontSize: 8, color: "#fff", fontFamily: "Cairo_700Bold" },
   sortPill: { paddingHorizontal: 9, paddingVertical: 5, borderRadius: 10, backgroundColor: "#18181B", borderWidth: 1, borderColor: "rgba(255,255,255,0.05)" },
+  tvPill: { paddingHorizontal: 24, paddingVertical: 14, minHeight: 64, borderRadius: 16, justifyContent: "center" },
   sortPillActive: { backgroundColor: "#8B5CF6", borderColor: "#8B5CF6" },
   sortPillText: { fontSize: 10, fontFamily: "Cairo_700Bold", color: "rgba(255,255,255,0.45)" },
   sortPillTextActive: { color: "#fff" },
   seasonRow: { marginBottom: 5 },
   seasonChip: { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 9, paddingVertical: 5, borderRadius: 10, backgroundColor: "#18181B", borderWidth: 1, borderColor: "rgba(255,255,255,0.05)" },
+  tvSeasonChip: { paddingHorizontal: 22, paddingVertical: 14, minHeight: 64, borderRadius: 16, gap: 8 },
   seasonChipActive: { backgroundColor: "rgba(139,92,246,0.2)", borderColor: "rgba(139,92,246,0.4)" },
   seasonChipText: { fontSize: 10, fontFamily: "Cairo_700Bold", color: "rgba(255,255,255,0.40)" },
   seasonChipTextActive: { color: "#8B5CF6" },

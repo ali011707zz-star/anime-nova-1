@@ -177,7 +177,12 @@ export default function LibraryScreen() {
   const renderHistoryItem = useCallback(({ item }: { item: typeof historyItems[0] }) => (
     <Pressable
       onPress={item.onPress}
-      style={[s.historyItem, { backgroundColor: colors.card, borderColor: colors.border }]}
+      focusable={tvMode}
+      style={({ focused }) => [
+        s.historyItem,
+        { backgroundColor: colors.card, borderColor: colors.border },
+        tvMode && tvFocusStyle(focused),
+      ]}
     >
       <View style={[
         s.kindBadge,
@@ -212,12 +217,13 @@ export default function LibraryScreen() {
         </Text>
       </View>
       {item.onDelete && (
-        <Pressable onPress={item.onDelete} style={s.deleteBtn} hitSlop={8}>
+        <Pressable onPress={item.onDelete} hitSlop={8} focusable={tvMode}
+          style={({ focused }) => [s.deleteBtn, tvMode && tvFocusStyle(focused)]}>
           <Ionicons name="trash-outline" size={17} color={colors.mutedForeground} />
         </Pressable>
       )}
     </Pressable>
-  ), [colors]);
+  ), [colors, tvMode]);
 
   const emptyIcon = ["play-circle-outline", "time-outline", "bookmark-outline", "people-outline"] as const;
   const emptyTitle = ["لا توجد مشاهدات قيد المتابعة", "السجل فارغ", "لا توجد مفضلات", "لا توجد شخصيات محفوظة"];
@@ -254,10 +260,13 @@ export default function LibraryScreen() {
             <Pressable
               key={tab.label}
               onPress={() => handleTabPress(i)}
-              style={[
+              focusable={tvMode}
+              hasTVPreferredFocus={tvMode && i === activeTab}
+              style={({ focused }) => [
                 s.tabBtn,
                 tvMode && s.tvTabBtn,
                 { backgroundColor: active ? colors.primary : colors.card, borderColor: active ? colors.primary : colors.border },
+                tvMode && tvFocusStyle(focused),
               ]}
             >
               <Ionicons
@@ -279,17 +288,18 @@ export default function LibraryScreen() {
       </ScrollView>
 
       {/* ── Search ── */}
-      <View style={[s.searchWrap, { backgroundColor: colors.card, borderColor: colors.border }]}>
+      <View style={[s.searchWrap, tvMode && s.tvSearchWrap, { backgroundColor: colors.card, borderColor: colors.border }]}>
         <Ionicons name="search-outline" size={16} color={colors.mutedForeground} />
         <TextInput
           value={search}
           onChangeText={setSearch}
           placeholder="ابحث في قائمتك..."
           placeholderTextColor={colors.mutedForeground}
-          style={[s.searchInput, { color: colors.text }]}
+          style={[s.searchInput, tvMode && s.tvSearchInput, { color: colors.text }]}
         />
         {search.length > 0 && (
-          <Pressable onPress={() => setSearch("")} hitSlop={8}>
+          <Pressable onPress={() => setSearch("")} hitSlop={8} focusable={tvMode}
+            style={({ focused }) => [tvMode && tvFocusStyle(focused)]}>
             <Ionicons name="close-circle" size={16} color={colors.mutedForeground} />
           </Pressable>
         )}
@@ -411,7 +421,8 @@ export default function LibraryScreen() {
                 <LibraryImage uri={item.image} style={[s.charImg, { backgroundColor: "#1C1C22" }]} />
                 <Pressable
                   onPress={() => removeChar(item.id)}
-                  style={s.charHeart}
+                  focusable={tvMode}
+                  style={({ focused }) => [s.charHeart, tvMode && tvFocusStyle(focused)]}
                 >
                   <Ionicons name="heart" size={11} color="#f43f5e" />
                 </Pressable>
@@ -526,6 +537,8 @@ const s = StyleSheet.create({
   emptyTitle: { fontSize: 17, fontFamily: "Cairo_700Bold", textAlign: "center" },
   emptyDesc: { fontSize: 12, fontFamily: "Cairo_400Regular", textAlign: "center", lineHeight: 20 },
   browseBtn: { flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 22, paddingVertical: 11, borderRadius: 12, marginTop: 4 },
+  tvSearchWrap: { minHeight: 68, paddingHorizontal: 20, paddingVertical: 14, borderRadius: 16 },
+  tvSearchInput: { fontSize: 21, lineHeight: 32 },
   browseBtnText: { color: "#fff", fontFamily: "Cairo_700Bold", fontSize: 13 },
   libraryFilters: { gap: 6, marginBottom: 8 },
   filterChips: { paddingHorizontal: 16, gap: 8 },

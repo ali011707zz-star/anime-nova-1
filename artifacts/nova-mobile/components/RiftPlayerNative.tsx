@@ -41,6 +41,24 @@ type Props = {
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 const SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 2];
+const TV_SUBTITLE_SETTINGS_KEY = "nova-tv-subtitle-settings";
+const TV_SUBTITLE_SIZES = [
+  { value: 34, label: "كبير", detail: "34" },
+  { value: 46, label: "عملاق", detail: "46" },
+  { value: 62, label: "عملاق جدًا", detail: "TV Huge" },
+] as const;
+
+type TvSubtitleSettings = {
+  fontSize: number;
+  bold: boolean;
+  verticalOffset: number;
+};
+
+const DEFAULT_TV_SUBTITLE_SETTINGS: TvSubtitleSettings = {
+  fontSize: 34,
+  bold: true,
+  verticalOffset: 0,
+};
 
 function validUrl(value: unknown): value is string {
   if (typeof value !== "string" || !value.trim()) return false;
@@ -137,12 +155,56 @@ export function RiftPlayer({
   const [showSpeeds, setShowSpeeds] = useState(false);
   const [subtitles, setSubtitles] = useState<SubCue[]>(subCues);
   const [subOn, setSubOn] = useState(subEnabled);
+  const [subtitleSettings, setSubtitleSettings] = useState<TvSubtitleSettings>(
+    DEFAULT_TV_SUBTITLE_SETTINGS,
+  );
+  const subtitleSettingsHydrated = useRef(false);
+  const [showSubtitleSettings, setShowSubtitleSettings] = useState(false);
   const [isPortrait, setIsPortrait] = useState(false);
   const [ended, setEnded] = useState(false);
   const [controlsVisible, setControlsVisible] = useState(true);
   const lastProgress = useRef(0);
   const restoredInitialPosition = useRef(false);
   const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    AsyncStorage.getItem(TV_SUBTITLE_SETTINGS_KEY)
+      .then((raw) => {
+        if (cancelled) return;
+        if (raw) {
+          try {
+            const parsed = JSON.parse(raw) as Partial<TvSubtitleSettings>;
+            setSubtitleSettings({
+              fontSize: TV_SUBTITLE_SIZES.some((item) => item.value === parsed.fontSize)
+                ? parsed.fontSize!
+                : DEFAULT_TV_SUBTITLE_SETTINGS.fontSize,
+              bold: typeof parsed.bold === "boolean"
+                ? parsed.bold
+                : DEFAULT_TV_SUBTITLE_SETTINGS.bold,
+              verticalOffset: typeof parsed.verticalOffset === "number"
+                ? Math.max(-96, Math.min(96, parsed.verticalOffset))
+                : DEFAULT_TV_SUBTITLE_SETTINGS.verticalOffset,
+            });
+          } catch {}
+        }
+        subtitleSettingsHydrated.current = true;
+      })
+      .catch(() => {
+        if (!cancelled) subtitleSettingsHydrated.current = true;
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!subtitleSettingsHydrated.current) return;
+    AsyncStorage.setItem(
+      TV_SUBTITLE_SETTINGS_KEY,
+      JSON.stringify(subtitleSettings),
+    ).catch(() => {});
+  }, [subtitleSettings]);
 
   const activeCue = useMemo(
     () => subtitles.find((cue) => position >= cue.start && position <= cue.end),
@@ -152,9 +214,15 @@ export function RiftPlayer({
   const scheduleHide = useCallback(() => {
     if (hideTimer.current) clearTimeout(hideTimer.current);
     setControlsVisible(true);
-    if (tvMode) return;
-    hideTimer.current = setTimeout(() => setControlsVisible(false), 4500);
+    hideTimer.current = setTimeout(
+      () => setControlsVisible(false),
+      tvMode ? 8000 : 4500,
+    );
   }, [tvMode]);
+
+  const onTvFocus = useCallback(() => {
+    if (tvMode) scheduleHide();
+  }, [scheduleHide, tvMode]);
 
   useEffect(() => {
     scheduleHide();
@@ -392,8 +460,27 @@ export function RiftPlayer({
         </View>
       )}
       {subOn && activeCue && (
-        <View pointerEvents="none" style={[styles.subtitle, tvMode && styles.tvSubtitle]}>
-          <Text style={[styles.subtitleText, tvMode && styles.tvSubtitleText]}>{activeCue.text}</Text>
+        <View
+          pointerEvents="none"
+          style={[
+            styles.subtitle,
+            tvMode && styles.tvSubtitle,
+            tvMode && { bottom: 172 + subtitleSettings.verticalOffset },
+          ]}
+        >
+          <Text
+            style={[
+              styles.subtitleText,
+              tvMode && styles.tvSubtitleText,
+              tvMode && {
+                fontSize: subtitleSettings.fontSize,
+                lineHeight: Math.round(subtitleSettings.fontSize * 1.4),
+                fontWeight: subtitleSettings.bold ? "900" : "500",
+              },
+            ]}
+          >
+            {activeCue.text}
+          </Text>
         </View>
       )}
       <Pressable
@@ -523,53 +610,68 @@ export function RiftPlayer({
                   {tvMode ? "الترجمة" : "CC"}
                 </Text>
               </Pressable>
+              {tvMode && (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="مظهر الترجمة"
+                  onPress={() => setShowSubtitleSettings(true)}
+                  focusable
+                  style={({ focused }) => [
+                    styles.tvSubtitleSettingsPill,
+                    tvFocusStyle(focused),
+                  ]}
+                >
+                  <Ionicons name="text-outline" size={25} color="#fff" />
+                  <Text style={styles.tvSubtitleSettingsText}>المظهر</Text>
+                </Pressable>
+              )}
               <View>
-                {showSources && !tvMode && (
-                  <View style={styles.menu}>
+                {showSources && (
+                  <View style={[styles.menu, tvMode && styles.tvMenu]}>
                     {playableSources.map((item, index) => (
                       <Pressable
                         key={`${item.url}-${index}`}
                         onPress={() => { changeSource(index); setShowSources(false); }}
                         focusable={tvMode}
-                        style={({ focused }) => [styles.menuItem, tvMode && tvFocusStyle(focused)]}
+                        style={({ focused }) => [styles.menuItem, tvMode && styles.tvMenuItem, tvMode && tvFocusStyle(focused)]}
                       >
-                        <Text style={styles.menuText}>{item.quality || item.label}</Text>
+                        <Text style={[styles.menuText, tvMode && styles.tvMenuText]}>{item.quality || item.label}</Text>
                         {index === sourceIndex && <Ionicons name="checkmark" size={15} color="#c4b5fd" />}
                       </Pressable>
                     ))}
                   </View>
                 )}
-                {!tvMode && <Pressable
+                <Pressable
                   onPress={() => { setShowSources((value) => !value); setShowSpeeds(false); }}
                   focusable={tvMode}
                   style={({ focused }) => [styles.pill, tvMode && styles.tvPill, tvMode && tvFocusStyle(focused)]}
                 >
-                  <Text style={styles.pillText}>الجودة</Text>
-                </Pressable>}
+                  <Text style={[styles.pillText, tvMode && styles.tvPillText]}>الجودة</Text>
+                </Pressable>
               </View>
               <View>
-                {showSpeeds && !tvMode && (
-                  <View style={styles.menu}>
+                {showSpeeds && (
+                  <View style={[styles.menu, tvMode && styles.tvMenu]}>
                     {SPEEDS.map((item) => (
                       <Pressable
                         key={item}
                         onPress={() => chooseSpeed(item)}
                         focusable={tvMode}
-                        style={({ focused }) => [styles.menuItem, tvMode && tvFocusStyle(focused)]}
+                        style={({ focused }) => [styles.menuItem, tvMode && styles.tvMenuItem, tvMode && tvFocusStyle(focused)]}
                       >
-                        <Text style={styles.menuText}>{item}x</Text>
+                        <Text style={[styles.menuText, tvMode && styles.tvMenuText]}>{item}x</Text>
                         {item === speed && <Ionicons name="checkmark" size={15} color="#c4b5fd" />}
                       </Pressable>
                     ))}
                   </View>
                 )}
-                {!tvMode && <Pressable
+                <Pressable
                   onPress={() => { setShowSpeeds((value) => !value); setShowSources(false); }}
                   focusable={tvMode}
                   style={({ focused }) => [styles.pill, tvMode && styles.tvPill, tvMode && tvFocusStyle(focused)]}
                 >
-                  <Text style={styles.pillText}>{speed}x</Text>
-                </Pressable>}
+                  <Text style={[styles.pillText, tvMode && styles.tvPillText]}>{speed}x</Text>
+                </Pressable>
               </View>
             </View>
             {ended && (
@@ -584,6 +686,182 @@ export function RiftPlayer({
             )}
           </View>
         </View>
+      )}
+      {tvMode && showSubtitleSettings && (
+        <View style={styles.tvSettingsLayer} pointerEvents="box-none">
+          <Pressable
+            accessibilityLabel="إغلاق إعدادات الترجمة"
+            style={styles.tvSettingsBackdrop}
+            onPress={() => setShowSubtitleSettings(false)}
+          />
+          <View style={styles.tvSettingsPanel}>
+            <View style={styles.tvSettingsHeader}>
+              <View>
+                <Text style={styles.tvSettingsTitle}>مظهر الترجمة</Text>
+                <Text style={styles.tvSettingsHint}>تحكم سريع مناسب للريموت</Text>
+              </View>
+              <Pressable
+                accessibilityLabel="إغلاق"
+                onPress={() => setShowSubtitleSettings(false)}
+                focusable
+                style={({ focused }) => [
+                  styles.tvSettingsClose,
+                  tvFocusStyle(focused),
+                ]}
+              >
+                <Ionicons name="close" size={24} color="#fff" />
+              </Pressable>
+            </View>
+
+            <Text style={styles.tvSettingsSectionLabel}>حجم الخط</Text>
+            <View style={styles.tvSettingsOptionRow}>
+              {TV_SUBTITLE_SIZES.map((item, index) => (
+                <Pressable
+                  key={item.value}
+                  accessibilityRole="button"
+                  accessibilityLabel={`حجم ${item.label}`}
+                  hasTVPreferredFocus={index === 0}
+                  onPress={() => setSubtitleSettings((current) => ({
+                    ...current,
+                    fontSize: item.value,
+                  }))}
+                  focusable
+                  style={({ focused }) => [
+                    styles.tvSettingsSizeButton,
+                    subtitleSettings.fontSize === item.value && styles.tvSettingsActive,
+                    tvFocusStyle(focused),
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.tvSettingsSizeSample,
+                      {
+                        fontSize: item.value === 62 ? 28 : item.value === 46 ? 24 : 21,
+                      },
+                    ]}
+                  >
+                    ع
+                  </Text>
+                  <Text style={styles.tvSettingsButtonLabel}>{item.label}</Text>
+                  <Text style={styles.tvSettingsButtonDetail}>{item.detail}</Text>
+                </Pressable>
+              ))}
+            </View>
+
+            <Text style={styles.tvSettingsSectionLabel}>شكل النص</Text>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="تفعيل النص العريض"
+              onPress={() => setSubtitleSettings((current) => ({
+                ...current,
+                bold: !current.bold,
+              }))}
+              focusable
+              style={({ focused }) => [
+                styles.tvSettingsBoldButton,
+                subtitleSettings.bold && styles.tvSettingsActive,
+                tvFocusStyle(focused),
+              ]}
+            >
+              <View style={styles.tvSettingsBoldIcon}>
+                <Text style={styles.tvSettingsBoldIconText}>ع</Text>
+              </View>
+              <View style={styles.tvSettingsBoldCopy}>
+                <Text style={styles.tvSettingsButtonLabel}>عريض وواضح</Text>
+                <Text style={styles.tvSettingsButtonDetail}>
+                  {subtitleSettings.bold ? "مفعّل" : "رفيع"}
+                </Text>
+              </View>
+              <Ionicons
+                name={subtitleSettings.bold ? "checkmark-circle" : "ellipse-outline"}
+                size={28}
+                color={subtitleSettings.bold ? "#c4b5fd" : "rgba(255,255,255,0.35)"}
+              />
+            </Pressable>
+
+            <Text style={styles.tvSettingsSectionLabel}>موضع الترجمة</Text>
+            <View style={styles.tvSettingsPositionRow}>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="رفع الترجمة"
+                onPress={() => setSubtitleSettings((current) => ({
+                  ...current,
+                  verticalOffset: Math.min(96, current.verticalOffset + 24),
+                }))}
+                focusable
+                style={({ focused }) => [
+                  styles.tvSettingsPositionButton,
+                  tvFocusStyle(focused),
+                ]}
+              >
+                <Ionicons name="arrow-up" size={27} color="#c4b5fd" />
+                <Text style={styles.tvSettingsButtonLabel}>رفع</Text>
+              </Pressable>
+              <View style={styles.tvSettingsPositionValue}>
+                <Text style={styles.tvSettingsPositionNumber}>
+                  {subtitleSettings.verticalOffset === 0
+                    ? "الوسط"
+                    : `${Math.abs(subtitleSettings.verticalOffset / 24)} خطوة`}
+                </Text>
+                <Text style={styles.tvSettingsButtonDetail}>
+                  {subtitleSettings.verticalOffset > 0
+                    ? "أعلى"
+                    : subtitleSettings.verticalOffset < 0
+                      ? "أسفل"
+                      : "افتراضي"}
+                </Text>
+              </View>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="خفض الترجمة"
+                onPress={() => setSubtitleSettings((current) => ({
+                  ...current,
+                  verticalOffset: Math.max(-96, current.verticalOffset - 24),
+                }))}
+                focusable
+                style={({ focused }) => [
+                  styles.tvSettingsPositionButton,
+                  tvFocusStyle(focused),
+                ]}
+              >
+                <Ionicons name="arrow-down" size={27} color="#c4b5fd" />
+                <Text style={styles.tvSettingsButtonLabel}>خفض</Text>
+              </Pressable>
+            </View>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="إعادة موضع الترجمة"
+              onPress={() => setSubtitleSettings((current) => ({
+                ...current,
+                verticalOffset: 0,
+              }))}
+              focusable
+              style={({ focused }) => [
+                styles.tvSettingsReset,
+                tvFocusStyle(focused),
+              ]}
+            >
+              <Ionicons name="refresh-outline" size={20} color="rgba(255,255,255,0.65)" />
+              <Text style={styles.tvSettingsResetText}>إعادة الموضع الافتراضي</Text>
+            </Pressable>
+          </View>
+        </View>
+      )}
+      {tvMode && !controlsVisible && (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="إظهار أدوات المشغل"
+          hasTVPreferredFocus
+          focusable
+          onFocus={onTvFocus}
+          onPress={onTvFocus}
+          style={styles.tvRevealTarget}
+        >
+          <View style={styles.tvRevealHint}>
+            <Ionicons name="game-controller-outline" size={26} color="#c4b5fd" />
+            <Text style={styles.tvRevealText}>اضغط OK لإظهار أدوات المشغل</Text>
+          </View>
+        </Pressable>
       )}
       {Platform.OS !== "android" && (
         <Text style={styles.message}>المشغل الأصلي متاح على Android فقط</Text>
@@ -627,14 +905,25 @@ const styles = StyleSheet.create({
   pill: { paddingHorizontal: 10, paddingVertical: 8, borderRadius: 10, backgroundColor: "rgba(0,0,0,0.55)" },
   tvPill: { paddingHorizontal: 24, paddingVertical: 18, minWidth: 104, alignItems: "center" },
   tvSubtitlePill: { minWidth: 190, minHeight: 72, paddingHorizontal: 30, paddingVertical: 20, borderRadius: 18, alignItems: "center", justifyContent: "center" },
+  tvSubtitleSettingsPill: {
+    minWidth: 138, minHeight: 72, paddingHorizontal: 22, paddingVertical: 16,
+    borderRadius: 18, alignItems: "center", justifyContent: "center", gap: 3,
+    backgroundColor: "rgba(255,255,255,0.10)",
+    borderWidth: 1, borderColor: "rgba(255,255,255,0.20)",
+  },
+  tvSubtitleSettingsText: { color: "#fff", fontSize: 17, fontWeight: "800" },
   pillActive: { backgroundColor: "rgba(139,92,246,0.65)" },
   pillText: { color: "#fff", fontSize: 11, fontWeight: "700" },
+  tvPillText: { fontSize: 20, fontWeight: "800" },
   tvSubtitleButtonText: { fontSize: 28, lineHeight: 40, fontWeight: "900" },
   skip: { paddingHorizontal: 10, paddingVertical: 8, borderRadius: 10, backgroundColor: "#fde68a" },
   skipText: { color: "#451a03", fontSize: 11, fontWeight: "700" },
   menu: { position: "absolute", bottom: 42, right: 0, minWidth: 130, backgroundColor: "rgba(20,20,25,0.97)", borderRadius: 12, padding: 5 },
   menuItem: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 10, paddingVertical: 9, gap: 15 },
   menuText: { color: "#fff", fontSize: 12 },
+  tvMenu: { bottom: 86, minWidth: 240, borderRadius: 18, padding: 8, borderWidth: 1, borderColor: "rgba(167,139,250,0.35)" },
+  tvMenuItem: { minHeight: 62, paddingHorizontal: 18, paddingVertical: 14, borderRadius: 12 },
+  tvMenuText: { fontSize: 20, fontWeight: "800" },
   subtitle: { position: "absolute", left: 20, right: 20, bottom: 95, alignItems: "center" },
   tvSubtitle: { left: 80, right: 80, bottom: 172 },
   subtitleText: { color: "#fff", fontSize: 18, textAlign: "center", textShadowColor: "#000", textShadowRadius: 5, textShadowOffset: { width: 0, height: 1 } },
@@ -645,4 +934,78 @@ const styles = StyleSheet.create({
   actionText: { color: "#09090b", fontWeight: "700", fontSize: 12 },
   secondaryAction: { paddingHorizontal: 16, paddingVertical: 10 },
   secondaryText: { color: "rgba(255,255,255,0.7)", fontSize: 13 },
+  tvSettingsLayer: { ...StyleSheet.absoluteFillObject, zIndex: 80 },
+  tvSettingsBackdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: "rgba(0,0,0,0.58)" },
+  tvSettingsPanel: {
+    position: "absolute", right: 52, bottom: 132, width: 620,
+    paddingHorizontal: 30, paddingVertical: 26, borderRadius: 26,
+    backgroundColor: "rgba(10,9,22,0.98)",
+    borderWidth: 1.5, borderColor: "rgba(167,139,250,0.38)",
+    shadowColor: "#000", shadowOpacity: 0.8, shadowRadius: 24, elevation: 30,
+  },
+  tvSettingsHeader: {
+    flexDirection: "row", alignItems: "center", justifyContent: "space-between",
+    paddingBottom: 18, borderBottomWidth: 1, borderBottomColor: "rgba(255,255,255,0.10)",
+  },
+  tvSettingsTitle: { color: "#fff", fontSize: 28, fontWeight: "900" },
+  tvSettingsHint: { color: "rgba(255,255,255,0.45)", fontSize: 15, marginTop: 4 },
+  tvSettingsClose: {
+    width: 58, height: 58, borderRadius: 18, alignItems: "center", justifyContent: "center",
+    backgroundColor: "rgba(255,255,255,0.08)",
+    borderWidth: 1, borderColor: "rgba(255,255,255,0.16)",
+  },
+  tvSettingsSectionLabel: {
+    color: "rgba(196,181,253,0.82)", fontSize: 17, fontWeight: "800",
+    marginTop: 18, marginBottom: 10,
+  },
+  tvSettingsOptionRow: { flexDirection: "row", gap: 12 },
+  tvSettingsSizeButton: {
+    flex: 1, minHeight: 102, borderRadius: 16, alignItems: "center", justifyContent: "center",
+    backgroundColor: "rgba(255,255,255,0.06)",
+    borderWidth: 1, borderColor: "rgba(255,255,255,0.14)",
+  },
+  tvSettingsSizeSample: { color: "#fff", fontWeight: "900", lineHeight: 34 },
+  tvSettingsButtonLabel: { color: "#fff", fontSize: 18, fontWeight: "800" },
+  tvSettingsButtonDetail: { color: "rgba(255,255,255,0.42)", fontSize: 13, marginTop: 3 },
+  tvSettingsActive: {
+    backgroundColor: "rgba(139,92,246,0.25)",
+    borderColor: "rgba(196,181,253,0.72)",
+  },
+  tvSettingsBoldButton: {
+    minHeight: 76, borderRadius: 16, paddingHorizontal: 18,
+    flexDirection: "row", alignItems: "center", gap: 14,
+    backgroundColor: "rgba(255,255,255,0.06)",
+    borderWidth: 1, borderColor: "rgba(255,255,255,0.14)",
+  },
+  tvSettingsBoldIcon: {
+    width: 46, height: 46, borderRadius: 14, alignItems: "center", justifyContent: "center",
+    backgroundColor: "rgba(139,92,246,0.30)",
+  },
+  tvSettingsBoldIconText: { color: "#fff", fontSize: 25, fontWeight: "900" },
+  tvSettingsBoldCopy: { flex: 1 },
+  tvSettingsPositionRow: { flexDirection: "row", alignItems: "center", gap: 12 },
+  tvSettingsPositionButton: {
+    flex: 1, minHeight: 78, borderRadius: 16, alignItems: "center", justifyContent: "center",
+    backgroundColor: "rgba(255,255,255,0.06)",
+    borderWidth: 1, borderColor: "rgba(255,255,255,0.14)", gap: 2,
+  },
+  tvSettingsPositionValue: { width: 150, alignItems: "center", justifyContent: "center" },
+  tvSettingsPositionNumber: { color: "#fff", fontSize: 19, fontWeight: "800" },
+  tvSettingsReset: {
+    minHeight: 54, marginTop: 12, borderRadius: 14, flexDirection: "row",
+    alignItems: "center", justifyContent: "center", gap: 8,
+    backgroundColor: "rgba(255,255,255,0.04)",
+    borderWidth: 1, borderColor: "rgba(255,255,255,0.10)",
+  },
+  tvSettingsResetText: { color: "rgba(255,255,255,0.68)", fontSize: 16, fontWeight: "700" },
+  tvRevealTarget: {
+    ...StyleSheet.absoluteFillObject, alignItems: "center", justifyContent: "center",
+  },
+  tvRevealHint: {
+    flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 22,
+    paddingVertical: 14, borderRadius: 18,
+    backgroundColor: "rgba(8,7,18,0.72)",
+    borderWidth: 1, borderColor: "rgba(167,139,250,0.34)",
+  },
+  tvRevealText: { color: "rgba(255,255,255,0.78)", fontSize: 17, fontWeight: "700" },
 });

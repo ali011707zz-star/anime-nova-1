@@ -365,7 +365,8 @@ export default function HomeScreen() {
                 <View style={[styles.sectionDot, { backgroundColor: "#f43f5e" }]} />
                 <Text style={[styles.sectionTitle, { color: colors.text }]}>📺 أحدث الحلقات</Text>
               </View>
-              <Pressable onPress={() => router.push("/schedule" as any)} style={styles.seeAllBtn}>
+               <Pressable onPress={() => router.push("/schedule" as any)} focusable={isTvLayout}
+                 style={({ focused }) => [styles.seeAllBtn, isTvLayout && tvFocusStyle(focused)]}>
                 <Text style={[styles.seeAllText, { color: colors.primary }]}>عرض المزيد</Text>
                 <Ionicons name="chevron-back" size={13} color={colors.primary} />
               </Pressable>
@@ -421,7 +422,9 @@ export default function HomeScreen() {
                 <View style={[styles.sectionDot, { backgroundColor: "#06b6d4" }]} />
                 <Text style={[styles.sectionTitle, { color: colors.text }]}>✨ أنيميشن مدبلج</Text>
               </View>
-              <Pressable style={styles.seeAllBtn} onPress={() => router.push("/aw-dubbed" as any)}>
+               <Pressable onPress={() => router.push("/aw-dubbed" as any)}
+                 focusable={isTvLayout}
+                 style={({ focused }) => [styles.seeAllBtn, isTvLayout && tvFocusStyle(focused)]}>
                 <Text style={[styles.seeAllText, { color: colors.primary }]}>عرض الكل</Text>
                 <Ionicons name="chevron-back" size={13} color={colors.primary} />
               </Pressable>
@@ -486,7 +489,8 @@ export default function HomeScreen() {
                 <View style={[styles.sectionDot, { backgroundColor: "#f59e0b" }]} />
                 <Text style={[styles.sectionTitle, { color: colors.text }]}>🎬 كرتون مدبلج عربي</Text>
               </View>
-              <Pressable style={styles.seeAllBtn} onPress={() => router.push("/dubbed" as any)}>
+               <Pressable onPress={() => router.push("/dubbed" as any)} focusable={isTvLayout}
+                 style={({ focused }) => [styles.seeAllBtn, isTvLayout && tvFocusStyle(focused)]}>
                 <Text style={[styles.seeAllText, { color: colors.primary }]}>عرض الكل</Text>
                 <Ionicons name="chevron-back" size={13} color={colors.primary} />
               </Pressable>

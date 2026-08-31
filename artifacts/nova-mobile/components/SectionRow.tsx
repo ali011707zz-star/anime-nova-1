@@ -30,15 +30,24 @@ export const SectionRow = React.memo(function SectionRow({ title, items, onSeeAl
   const { size: scaleSize } = useTvMetrics();
   const cardWidth = getRailCardWidth(width, tvMode ? 5 : 3);
   const sidePadding = getRailSidePadding(width);
+  const railRef = React.useRef<FlatList<AnilistMedia>>(null);
 
   if (!items.length) return null;
 
   const rail = (
     <FlatList
+      ref={railRef}
       data={items.slice(0, tvMode ? 10 : items.length)}
       horizontal
       keyExtractor={(item) => String(item.id)}
-      renderItem={({ item }) => <AnimeCard anime={item} size={size} cardWidth={cardWidth} />}
+      renderItem={({ item, index }) => (
+        <AnimeCard
+          anime={item}
+          size={size}
+          cardWidth={cardWidth}
+          onFocus={() => railRef.current?.scrollToIndex({ index, animated: true, viewPosition: 0.5 })}
+        />
+      )}
       showsHorizontalScrollIndicator={false}
       contentContainerStyle={[styles.scroll, { paddingHorizontal: sidePadding }]}
       // These rails are rendered inside Home's vertical FlatList. Keeping

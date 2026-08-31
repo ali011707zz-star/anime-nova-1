@@ -60,11 +60,11 @@ export function TelegramAnnouncementModal({
     <Modal
       visible={visible}
       transparent
-      animationType={tvMode ? "none" : "fade"}
+      animationType="fade"
       onRequestClose={onClose}
       statusBarTranslucent
     >
-      <View style={styles.backdrop}>
+      <View style={[styles.backdrop, tvMode && styles.tvBackdrop]}>
         <View style={[styles.card, tvMode && styles.tvCard]} accessibilityViewIsModal>
           <Pressable
             key={`telegram-close-${visible ? "open" : "closed"}`}
@@ -72,7 +72,7 @@ export function TelegramAnnouncementModal({
             testID="telegram-announcement-close"
             onPress={onClose}
             focusable={tvMode}
-            hasTVPreferredFocus={tvMode && visible}
+             hasTVPreferredFocus={false}
             hitSlop={tvMode ? 14 : 8}
             style={({ pressed, focused }) => [
               styles.closeButton,
@@ -85,7 +85,7 @@ export function TelegramAnnouncementModal({
             {tvMode && <Text style={styles.tvCloseLabel}>إغلاق</Text>}
           </Pressable>
 
-          <View style={styles.videoFrame}>
+          <View style={[styles.videoFrame, tvMode && styles.tvVideoFrame]}>
             <VideoView
               player={player}
               style={styles.video}
@@ -110,7 +110,7 @@ export function TelegramAnnouncementModal({
               testID="telegram-announcement-open"
               onPress={openTelegram}
               focusable={tvMode}
-              hasTVPreferredFocus={false}
+               hasTVPreferredFocus={tvMode && visible}
               style={({ pressed, focused }) => [
                 styles.primaryButton,
                 tvMode && styles.tvButton,
@@ -150,6 +150,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     backgroundColor: "rgba(0, 0, 0, 0.78)",
   },
+  tvBackdrop: {
+    paddingHorizontal: 56,
+    backgroundColor: "rgba(2, 2, 8, 0.88)",
+  },
   card: {
     width: "100%",
     maxWidth: 420,
@@ -166,8 +170,10 @@ const styles = StyleSheet.create({
   },
   tvCard: {
     width: "78%",
-    maxWidth: 760,
-    borderRadius: 30,
+    maxWidth: 980,
+    minHeight: 360,
+    borderRadius: 28,
+    flexDirection: "row",
   },
   closeButton: {
     position: "absolute",
@@ -182,11 +188,11 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(0, 0, 0, 0.48)",
   },
   tvCloseButton: {
-    width: 118,
-    height: 66,
-    borderRadius: 20,
-    top: 24,
-    right: 24,
+    width: 96,
+    height: 54,
+    borderRadius: 17,
+    top: 16,
+    right: 16,
     flexDirection: "row",
     gap: 8,
     paddingHorizontal: 16,
@@ -197,12 +203,19 @@ const styles = StyleSheet.create({
   tvCloseLabel: {
     color: "#FFFFFF",
     fontFamily: "Cairo_700Bold",
-    fontSize: 20,
+    fontSize: 17,
   },
   videoFrame: {
     width: "100%",
     aspectRatio: 498 / 436,
     backgroundColor: "#09090B",
+  },
+  tvVideoFrame: {
+    width: "39%",
+    alignSelf: "stretch",
+    aspectRatio: undefined,
+    borderRightWidth: 1,
+    borderRightColor: "rgba(216, 180, 254, 0.16)",
   },
   video: {
     flex: 1,
@@ -214,9 +227,12 @@ const styles = StyleSheet.create({
     paddingBottom: 20,
   },
   tvContent: {
-    paddingHorizontal: 44,
-    paddingTop: 28,
-    paddingBottom: 34,
+    flex: 1,
+    alignItems: "stretch",
+    justifyContent: "center",
+    paddingHorizontal: 42,
+    paddingTop: 30,
+    paddingBottom: 30,
   },
   telegramIcon: {
     width: 42,
@@ -233,7 +249,7 @@ const styles = StyleSheet.create({
     fontSize: 19,
     textAlign: "center",
   },
-  tvTitle: { fontSize: 30 },
+  tvTitle: { fontSize: 28 },
   message: {
     marginTop: 7,
     color: "rgba(255, 255, 255, 0.7)",
@@ -242,7 +258,7 @@ const styles = StyleSheet.create({
     lineHeight: 22,
     textAlign: "center",
   },
-  tvMessage: { fontSize: 20, lineHeight: 32 },
+  tvMessage: { fontSize: 18, lineHeight: 29 },
   primaryButton: {
     width: "100%",
     height: 46,
@@ -259,8 +275,8 @@ const styles = StyleSheet.create({
     fontFamily: "Cairo_700Bold",
     fontSize: 14,
   },
-  tvPrimaryButtonText: { fontSize: 21 },
-  tvButton: { height: 62, borderRadius: 16 },
+  tvPrimaryButtonText: { fontSize: 19 },
+  tvButton: { height: 58, borderRadius: 15 },
   secondaryButton: {
     paddingVertical: 10,
     paddingHorizontal: 16,
@@ -270,11 +286,11 @@ const styles = StyleSheet.create({
     fontFamily: "Cairo_600SemiBold",
     fontSize: 12,
   },
-  tvSecondaryButtonText: { fontSize: 18 },
+  tvSecondaryButtonText: { fontSize: 16 },
   tvSecondaryButton: {
     width: "100%",
-    minHeight: 68,
-    paddingVertical: 16,
+    minHeight: 56,
+    paddingVertical: 13,
     paddingHorizontal: 24,
     borderRadius: 16,
     alignItems: "center",

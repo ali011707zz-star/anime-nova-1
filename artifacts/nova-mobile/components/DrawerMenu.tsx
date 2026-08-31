@@ -144,7 +144,8 @@ export function DrawerMenu({ visible, onClose }: Props) {
               <Text style={[s.logoText, tvMode && s.tvLogoText]}>Anime <Text style={{ color: "#8B5CF6" }}>NOVA</Text></Text>
               <Text style={[s.logoSub, tvMode && s.tvLogoSub]}>منصة الأنمي العربية</Text>
             </View>
-            <Pressable onPress={onClose} focusable={tvMode} style={({ focused }) => [s.closeBtn, tvMode && s.tvCloseBtn, tvMode && tvFocusStyle(focused)]}>
+            <Pressable onPress={onClose} focusable={tvMode} hasTVPreferredFocus={tvMode}
+              style={({ focused }) => [s.closeBtn, tvMode && s.tvCloseBtn, tvMode && tvFocusStyle(focused)]}>
               <Ionicons name="close" size={tvMode ? 28 : 20} color="rgba(255,255,255,0.5)" />
             </Pressable>
           </View>

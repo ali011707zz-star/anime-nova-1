@@ -14,6 +14,7 @@ type Props = {
   cardWidth?: number;
   progress?: number;
   showProgress?: boolean;
+  onFocus?: () => void;
 };
 
 export function getRailCardWidth(windowWidth: number, visibleCards = 3, gap = 10) {
@@ -47,7 +48,7 @@ export function getGridColumnCount(windowWidth: number, windowHeight: number) {
   return 3;
 }
 
-export const AnimeCard = React.memo(function AnimeCard({ anime, size = "sm", cardWidth, progress, showProgress }: Props) {
+export const AnimeCard = React.memo(function AnimeCard({ anime, size = "sm", cardWidth, progress, showProgress, onFocus }: Props) {
   const router = useRouter();
   const colors = useColors();
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();
@@ -71,6 +72,7 @@ export const AnimeCard = React.memo(function AnimeCard({ anime, size = "sm", car
       hasTVPreferredFocus={false}
       hitSlop={tvMode ? 8 : 4}
       pressRetentionOffset={12}
+      onFocus={onFocus}
       android_ripple={tvMode ? undefined : { color: "rgba(139,92,246,0.18)" }}
       style={({ pressed, focused }) => [
         styles.card,

@@ -61,9 +61,11 @@ async function saveCommentCounts(animeId: string, counts: Record<number, number>
 /* ── Episode thumbnail row ── */
 function EpisodeRow({
   n, anime, epData, episodeTitlesAr, watched, commentCount, onToggleWatched, onWatch, onComment,
+  onFocus,
 }: {
   n: number; anime: any; epData: any[]; episodeTitlesAr: Record<number, string>; watched: boolean; commentCount: number;
   onToggleWatched: (n: number) => void; onWatch: (n: number) => void; onComment: (n: number) => void;
+  onFocus?: () => void;
 }) {
   const { width, height } = useWindowDimensions();
   const tvMode = isTvDevice(width, height);
@@ -80,6 +82,7 @@ function EpisodeRow({
     <Pressable
       onPress={() => onWatch(n)}
       focusable={tvMode}
+      onFocus={onFocus}
       style={({ focused }) => [
         ep_s.row,
         tvMode && ep_s.tvRow,
@@ -159,6 +162,7 @@ export default function EpisodeListScreen() {
   const [page, setPage] = useState(1);
   const [watched, setWatched] = useState<Set<number>>(new Set());
   const [commentCounts, setCommentCounts] = useState<Record<number, number>>({});
+  const episodeListRef = useRef<FlatList<number>>(null);
 
   useEffect(() => {
     if (!id) return;
@@ -457,7 +461,8 @@ export default function EpisodeListScreen() {
             style={[ep_s.searchInput, tvMode && ep_s.tvText]}
           />
           {search ? (
-            <Pressable onPress={() => setSearch("")}>
+             <Pressable onPress={() => setSearch("")} focusable={tvMode}
+               style={({ focused }) => [tvMode && tvFocusStyle(focused)]}>
               <Ionicons name="close" size={16} color="rgba(255,255,255,0.3)" />
             </Pressable>
           ) : null}
@@ -491,6 +496,7 @@ export default function EpisodeListScreen() {
 
       {/* ── Episode list ── */}
       <FlatList
+        ref={episodeListRef}
         key={tvMode ? "tv-episode-grid" : "phone-episode-list"}
         data={displayedEps}
         numColumns={tvMode ? 4 : 1}
@@ -520,6 +526,10 @@ export default function EpisodeListScreen() {
             onToggleWatched={toggleWatched}
             onWatch={watchEp}
             onComment={openComments}
+           onFocus={() => {
+             const index = displayedEps.indexOf(n);
+             if (index >= 0) episodeListRef.current?.scrollToIndex({ index, animated: true, viewPosition: 0.35 });
+           }}
           />
         )}
       />
