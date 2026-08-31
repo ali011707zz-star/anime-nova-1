@@ -22,7 +22,6 @@ import { CrashEntry, getCrashLog } from "@/utils/crashLogger";
 import { TvPressable } from "@/utils/tv";
 
 const THEMES: { label: string; value: string; dot: string; desc: string }[] = [
-  { label: "أبيض",   value: "light",  dot: "#FFFFFF", desc: "مظهر أبيض مريح" },
   { label: "أسود",   value: "dark",   dot: "#000000", desc: "أسود كامل" },
   { label: "AMOLED", value: "amoled", dot: "#111111", desc: "أسود موفّر للطاقة" },
   { label: "بنفسجي", value: "violet", dot: "#a78bfa", desc: "توهّج بنفسجي" },

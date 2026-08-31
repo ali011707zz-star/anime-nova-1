@@ -4,7 +4,7 @@ import { StyleSheet, Text, View } from "react-native";
 import { DEFAULT_CONFIG, fetchRemoteConfig, getBaseUrl, RemoteConfig } from "@/utils/api";
 import { getAuthToken, secureFetch, setUserAuthToken } from "@/utils/secureApi";
 
-type Theme = "light" | "dark" | "amoled" | "violet" | "blue" | "pink";
+type Theme = "dark" | "amoled" | "violet" | "blue" | "pink";
 
 export type WatchProgress = {
   animeId: number;
@@ -58,8 +58,8 @@ type AppContextType = {
 const AppContext = createContext<AppContextType | null>(null);
 
 export function AppProvider({ children }: { children: React.ReactNode }) {
-  // White is the first-run default. A saved choice is restored below.
-  const [theme, setThemeState] = useState<Theme>("light");
+  // Nova Mobile is dark-only. A legacy "light" value is migrated below.
+  const [theme, setThemeState] = useState<Theme>("dark");
   const [remoteConfig, setRemoteConfig] = useState<RemoteConfig>(DEFAULT_CONFIG);
   const [watchHistory, setWatchHistory] = useState<WatchProgress[]>([]);
   const [favorites, setFavorites] = useState<FavoriteAnime[]>([]);
@@ -147,8 +147,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       AsyncStorage.getItem("nova-history").catch(() => null),
       AsyncStorage.getItem("nova-favorites").catch(() => null),
     ]);
-    if (themeVal) {
-      const validThemes: Theme[] = ["light", "dark", "amoled", "violet", "blue", "pink"];
+    if (themeVal === "light") {
+      // Remove the retired white mode from existing installations.
+      setThemeState("dark");
+      await AsyncStorage.setItem("nova-theme", "dark").catch(() => {});
+    } else if (themeVal) {
+      const validThemes: Theme[] = ["dark", "amoled", "violet", "blue", "pink"];
       if (validThemes.includes(themeVal as Theme)) {
         setThemeState(themeVal as Theme);
       }
@@ -193,8 +197,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const setTheme = useCallback(async (t: Theme) => {
-    setThemeState(t);
-    await AsyncStorage.setItem("nova-theme", t);
+    // Keep the runtime boundary safe for old callers that may still pass "light".
+    const nextTheme: Theme = (t as string) === "light" ? "dark" : t;
+    setThemeState(nextTheme);
+    await AsyncStorage.setItem("nova-theme", nextTheme);
   }, []);
 
   /*

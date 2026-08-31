@@ -425,7 +425,7 @@ export function RiftPlayer({
   onError,
 }: Props) {
   const insets = useSafeAreaInsets();
-  const { tv: tvMode } = useTvMetrics();
+  const { tv: tvMode, width: tvWidth, height: tvHeight } = useTvMetrics();
 
   /* أثناء فحص المصادر، زر الرجوع في الهاتف يجب أن يعيد المستخدم إلى
      منتقي السيرفرات داخل نفس شاشة الحلقة، لا إلى صفحة الحلقات. */
@@ -499,6 +499,12 @@ export function RiftPlayer({
   const [contentFit, setContentFit]     = useState<"contain" | "cover" | "fill">("contain");
   const [screenshotSaved, setScreenshotSaved] = useState(false);
   const [isFlipped, setIsFlipped]       = useState(false);
+  /* Android TV can keep the old native video buffer attached to one side of
+     the window after the orientation/layout pass. Reattach the surface only
+     after a real size change; the player itself stays alive, so playback and
+     position are preserved. */
+  const [tvSurfaceRevision, setTvSurfaceRevision] = useState(0);
+  const tvSurfaceLayoutRef = useRef("");
   const playerEntryOpacity              = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
@@ -2247,17 +2253,27 @@ export function RiftPlayer({
       <StatusBar hidden />
       {/* ── Video ── */}
       <VideoView
+        key={tvMode ? `tv-video-${tvSurfaceRevision}` : "phone-video"}
         player={player}
         style={tvMode ? s.tvVideo : s.video}
         nativeControls={tvMode}
         contentFit={contentFit}
         /* Android SurfaceView is not included by react-native-view-shot and
            produced a black saved image. TextureView is capturable while
-           retaining the same native decoder/player. */
-        /* Keep TV in the normal React composition tree. SurfaceView is a
-           separate native surface and can leave a stale split-tone region on
-           one side after Android TV rotates/resizes the player. */
-        surfaceType={Platform.OS === "android" ? "textureView" : undefined}
+           retaining the same native decoder/player. TV deliberately uses the
+           default SurfaceView instead: it is composed by Android's display
+           pipeline and avoids the half-frame/tone split seen with TextureView
+           on some Android TV GPU drivers. */
+        surfaceType={Platform.OS === "android" && !tvMode ? "textureView" : undefined}
+        onLayout={tvMode ? (event) => {
+          const { width, height } = event.nativeEvent.layout;
+          if (width < 1 || height < 1) return;
+          const layoutKey = `${Math.round(width)}x${Math.round(height)}:${Math.round(tvWidth)}x${Math.round(tvHeight)}`;
+          if (layoutKey !== tvSurfaceLayoutRef.current) {
+            tvSurfaceLayoutRef.current = layoutKey;
+            setTvSurfaceRevision((revision) => revision + 1);
+          }
+        } : undefined}
       />
 
       {/* Smooth first-frame handoff instead of a sudden black jump. */}
