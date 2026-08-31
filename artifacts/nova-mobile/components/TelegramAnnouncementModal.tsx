@@ -67,11 +67,12 @@ export function TelegramAnnouncementModal({
       <View style={styles.backdrop}>
         <View style={[styles.card, tvMode && styles.tvCard]} accessibilityViewIsModal>
           <Pressable
+            key={`telegram-close-${visible ? "open" : "closed"}`}
             accessibilityLabel="إغلاق"
             testID="telegram-announcement-close"
             onPress={onClose}
             focusable={tvMode}
-            hasTVPreferredFocus={false}
+            hasTVPreferredFocus={tvMode && visible}
             hitSlop={tvMode ? 14 : 8}
             style={({ pressed, focused }) => [
               styles.closeButton,
@@ -81,6 +82,7 @@ export function TelegramAnnouncementModal({
             ]}
           >
             <Ionicons name="close" size={tvMode ? 30 : 21} color="#FFFFFF" />
+            {tvMode && <Text style={styles.tvCloseLabel}>إغلاق</Text>}
           </Pressable>
 
           <View style={styles.videoFrame}>
@@ -108,7 +110,7 @@ export function TelegramAnnouncementModal({
               testID="telegram-announcement-open"
               onPress={openTelegram}
               focusable={tvMode}
-              hasTVPreferredFocus={tvMode}
+              hasTVPreferredFocus={false}
               style={({ pressed, focused }) => [
                 styles.primaryButton,
                 tvMode && styles.tvButton,
@@ -179,7 +181,24 @@ const styles = StyleSheet.create({
     borderRadius: 17,
     backgroundColor: "rgba(0, 0, 0, 0.48)",
   },
-  tvCloseButton: { width: 52, height: 52, borderRadius: 26, top: 16, right: 16 },
+  tvCloseButton: {
+    width: 118,
+    height: 66,
+    borderRadius: 20,
+    top: 24,
+    right: 24,
+    flexDirection: "row",
+    gap: 8,
+    paddingHorizontal: 16,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.24)",
+    backgroundColor: "rgba(20,16,30,0.92)",
+  },
+  tvCloseLabel: {
+    color: "#FFFFFF",
+    fontFamily: "Cairo_700Bold",
+    fontSize: 20,
+  },
   videoFrame: {
     width: "100%",
     aspectRatio: 498 / 436,
@@ -252,7 +271,15 @@ const styles = StyleSheet.create({
     fontSize: 12,
   },
   tvSecondaryButtonText: { fontSize: 18 },
-  tvSecondaryButton: { paddingVertical: 16, paddingHorizontal: 24, borderRadius: 14 },
+  tvSecondaryButton: {
+    width: "100%",
+    minHeight: 68,
+    paddingVertical: 16,
+    paddingHorizontal: 24,
+    borderRadius: 16,
+    alignItems: "center",
+    justifyContent: "center",
+  },
   pressed: {
     opacity: 0.72,
   },
