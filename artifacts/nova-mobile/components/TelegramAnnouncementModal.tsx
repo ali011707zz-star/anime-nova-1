@@ -1,7 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useVideoPlayer, VideoView } from "expo-video";
 import * as Linking from "expo-linking";
-import React, { useEffect } from "react";
+import React, { useCallback, useEffect, useRef } from "react";
 import {
   Modal,
   Pressable,
@@ -25,30 +25,42 @@ export function TelegramAnnouncementModal({
 }: TelegramAnnouncementModalProps) {
   const { width, height } = useWindowDimensions();
   const tvMode = isTvDevice(width, height);
+  const openingTelegramRef = useRef(false);
   const player = useVideoPlayer(
     require("../assets/jjk-lethal-company-dance.mp4"),
     (instance) => {
       instance.loop = true;
-      instance.muted = false;
+      instance.muted = tvMode;
     },
   );
 
   useEffect(() => {
     try {
-      if (visible) player.play();
+      // Keep the native video paused on TV so remote presses are never
+      // competing with video playback for the UI thread.
+      if (visible && !tvMode) player.play();
       else player.pause();
     } catch {}
-  }, [player, visible]);
+  }, [player, tvMode, visible]);
 
-  const openTelegram = () => {
-    Linking.openURL(TELEGRAM_URL).catch(() => {});
-  };
+  const openTelegram = useCallback(() => {
+    if (openingTelegramRef.current) return;
+    openingTelegramRef.current = true;
+    // Close the native Modal first. This releases the TV focus trap before
+    // Android hands control to Telegram.
+    onClose();
+    setTimeout(() => {
+      Linking.openURL(TELEGRAM_URL)
+        .catch(() => {})
+        .finally(() => { openingTelegramRef.current = false; });
+    }, tvMode ? 120 : 0);
+  }, [onClose, tvMode]);
 
   return (
     <Modal
       visible={visible}
       transparent
-      animationType="fade"
+      animationType={tvMode ? "none" : "fade"}
       onRequestClose={onClose}
       statusBarTranslucent
     >
@@ -68,7 +80,7 @@ export function TelegramAnnouncementModal({
               pressed && styles.pressed,
             ]}
           >
-            <Ionicons name="close" size={21} color="#FFFFFF" />
+            <Ionicons name="close" size={tvMode ? 30 : 21} color="#FFFFFF" />
           </Pressable>
 
           <View style={styles.videoFrame}>
@@ -104,7 +116,7 @@ export function TelegramAnnouncementModal({
                 pressed && styles.pressed,
               ]}
             >
-              <Ionicons name="paper-plane-outline" size={18} color="#FFFFFF" />
+              <Ionicons name="paper-plane-outline" size={tvMode ? 25 : 18} color="#FFFFFF" />
               <Text style={[styles.primaryButtonText, tvMode && styles.tvPrimaryButtonText]}>انضم الآن</Text>
             </Pressable>
             <Pressable

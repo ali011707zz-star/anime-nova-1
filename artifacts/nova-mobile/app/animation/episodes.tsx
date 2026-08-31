@@ -182,8 +182,8 @@ export default function AnimationEpisodesScreen() {
       <View style={s.header}>
         <View style={s.headerRow}>
            <Pressable onPress={() => router.canGoBack() ? router.back() : router.replace("/(tabs)/animations")} focusable={tvMode}
-             style={({ focused }) => [s.backBtn, tvMode && tvFocusStyle(focused)]}>
-            <Ionicons name="chevron-back" size={18} color="rgba(255,255,255,0.7)" />
+             style={({ focused }) => [s.backBtn, tvMode && s.tvBackBtn, tvMode && tvFocusStyle(focused)]}>
+            <Ionicons name="chevron-back" size={tvMode ? 30 : 18} color="rgba(255,255,255,0.7)" />
           </Pressable>
           <View style={s.headerInfo}>
             <Text style={s.headerLabel}>الحلقات</Text>
@@ -291,11 +291,11 @@ const s = StyleSheet.create({
 
   listContent: { padding: 12, paddingBottom: 100 },
   epCard: { flexDirection: "row", alignItems: "center", gap: 12, padding: 10, borderRadius: 16, backgroundColor: "#111116", borderWidth: 1, borderColor: "rgba(255,255,255,0.07)" },
-  tvEpCard: { minHeight: 210, gap: 20, padding: 18, borderRadius: 20 },
+  tvEpCard: { minHeight: 280, gap: 28, padding: 24, borderRadius: 24, borderWidth: 2 },
   epCardWatched: { opacity: 0.5, backgroundColor: "rgba(255,255,255,0.02)" },
 
   epThumb: { width: 88, height: 52, borderRadius: 10, overflow: "hidden", backgroundColor: "rgba(255,255,255,0.06)", flexShrink: 0, position: "relative" },
-  tvEpThumb: { width: 300, height: 168, borderRadius: 14 },
+  tvEpThumb: { width: 380, height: 214, borderRadius: 18 },
   epThumbPlaceholder: { ...StyleSheet.absoluteFillObject, alignItems: "center", justifyContent: "center" },
   epThumbOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: "rgba(0,0,0,0.25)" },
   epNumBadge: { position: "absolute", bottom: 4, right: 5, backgroundColor: "rgba(0,0,0,0.6)", borderRadius: 5, paddingHorizontal: 5, paddingVertical: 1 },
@@ -306,23 +306,24 @@ const s = StyleSheet.create({
   watchedCheck: { width: 20, height: 20, borderRadius: 10, backgroundColor: "rgba(34,197,94,0.85)", alignItems: "center", justifyContent: "center" },
 
   epInfo: { flex: 1 },
-  tvEpInfo: { minHeight: 112, justifyContent: "center" },
+  tvEpInfo: { minHeight: 150, justifyContent: "center" },
   epTitle: { fontSize: 12, fontFamily: "Cairo_700Bold", color: "#fff", lineHeight: 16, textAlign: "right" },
-  tvEpTitle: { fontSize: 23, lineHeight: 33 },
+  tvEpTitle: { fontSize: 28, lineHeight: 40 },
   epOverview: { fontSize: 9, color: "rgba(255,255,255,0.28)", lineHeight: 14, fontFamily: "Cairo_400Regular", textAlign: "right", marginTop: 3 },
-  tvEpOverview: { fontSize: 14, lineHeight: 23, marginTop: 8 },
+  tvEpOverview: { fontSize: 17, lineHeight: 28, marginTop: 10 },
   epMeta: { flexDirection: "row", alignItems: "center", gap: 10, marginTop: 5, flexWrap: "wrap" },
   epMetaItem: { flexDirection: "row", alignItems: "center", gap: 3 },
   epMetaText: { fontSize: 8, color: "rgba(255,255,255,0.22)", fontFamily: "Cairo_400Regular" },
-  tvEpMetaText: { fontSize: 13 },
+  tvEpMetaText: { fontSize: 16 },
   epProgressText: { fontSize: 8, fontFamily: "Cairo_700Bold", color: "rgba(139,92,246,0.65)" },
-  tvEpProgressText: { fontSize: 13 },
+  tvEpProgressText: { fontSize: 16 },
 
   epPlayIcon: { width: 32, height: 32, borderRadius: 10, backgroundColor: "rgba(139,92,246,0.12)", borderWidth: 1, borderColor: "rgba(139,92,246,0.22)", alignItems: "center", justifyContent: "center" },
-  tvEpPlayIcon: { width: 60, height: 60, borderRadius: 16 },
+  tvEpPlayIcon: { width: 76, height: 76, borderRadius: 20 },
 
   center: { flex: 1, alignItems: "center", justifyContent: "center", gap: 12 },
-  tvListContent: { paddingHorizontal: 56, paddingTop: 10, gap: 14 },
+  tvBackBtn: { width: 64, height: 64, borderRadius: 20 },
+  tvListContent: { paddingHorizontal: 56, paddingTop: 18, gap: 22 },
   loadingText: { fontSize: 12, color: "rgba(255,255,255,0.3)", fontFamily: "Cairo_400Regular" },
   emptyText: { fontSize: 14, color: "rgba(255,255,255,0.25)", fontFamily: "Cairo_700Bold" },
 });

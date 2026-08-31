@@ -151,7 +151,7 @@ function RootLayout() {
   }, [fontsLoaded, fontError]);
 
   useEffect(() => {
-    if (!brandSplashVisible && RUNTIME_INTEGRITY.trusted && !tvMode) {
+    if (!brandSplashVisible && RUNTIME_INTEGRITY.trusted) {
       // Let the first screen settle before presenting the announcement. The
       // native Modal already fades, but opening it on the same frame as the
       // splash disappears feels like a layout jump on slower devices.

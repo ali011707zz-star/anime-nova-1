@@ -12,6 +12,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useColors } from "@/hooks/useColors";
 import { useApp } from "@/context/AppContext";
 import { isTvDevice, tvFocusStyle } from "@/utils/tv";
+import { getRailCardWidth } from "@/components/AnimeCard";
 
 interface FavChar {
   id: number;
@@ -65,8 +66,11 @@ export default function LibraryScreen() {
   const topPad = Platform.OS === "web" ? 0 : Math.max(insets.top, 0);
   const tvMode = isTvDevice(width, height);
   const visibleTabs = tvMode ? TABS.slice(0, 3) : TABS;
-  const gridColumns = tvMode ? 4 : 3;
-  const gridWidth = Math.min(Math.max(width - 24, 0), tvMode ? 1100 : 900);
+  const gridColumns = tvMode ? 5 : 3;
+  const tvPosterWidth = getRailCardWidth(width, 5, 8);
+  const gridWidth = tvMode
+    ? tvPosterWidth * gridColumns + 8 * (gridColumns - 1) + 32
+    : Math.min(Math.max(width - 24, 0), 900);
   const router = useRouter();
   const { watchHistory, favorites, removeFromHistory, toggleFavorite } = useApp();
 
@@ -358,23 +362,25 @@ export default function LibraryScreen() {
             renderItem={({ item }) => (
               <Pressable
                 onPress={() => router.push(`/anime/${item.id}?title=${encodeURIComponent(item.title)}&english=${encodeURIComponent(item.english)}`)}
-                style={s.favCard}
+                focusable={tvMode}
+                style={({ focused }) => [s.favCard, tvMode && s.tvFavCard, tvMode && tvFocusStyle(focused)]}
               >
-                <LibraryImage uri={item.thumbnail} fallbackId={item.id} style={[s.favImg, { backgroundColor: "#1C1C22" }]} />
+                <LibraryImage uri={item.thumbnail} fallbackId={item.id} style={[s.favImg, tvMode && s.tvFavImg, { backgroundColor: "#1C1C22" }]} />
                 <Pressable
                   onPress={() => toggleFavorite(item)}
-                  style={s.favHeart}
+                  focusable={tvMode}
+                  style={({ focused }) => [s.favHeart, tvMode && s.tvFavHeart, tvMode && tvFocusStyle(focused)]}
                 >
-                  <Ionicons name="heart" size={13} color="#f43f5e" />
+                  <Ionicons name="heart" size={tvMode ? 23 : 13} color="#f43f5e" />
                 </Pressable>
-                <View style={s.favInfo}>
-                  <Text style={[s.favTitle, { color: colors.text }]} numberOfLines={2}>
+                <View style={[s.favInfo, tvMode && s.tvFavInfo]}>
+                  <Text style={[s.favTitle, tvMode && s.tvFavTitle, { color: colors.text }]} numberOfLines={2}>
                     {item.english || item.title}
                   </Text>
                   {item.score && (
-                    <View style={s.favScore}>
-                      <Ionicons name="star" size={9} color="#FBBF24" />
-                      <Text style={[s.favScoreText, { color: colors.mutedForeground }]}>
+                    <View style={[s.favScore, tvMode && s.tvFavScore]}>
+                      <Ionicons name="star" size={tvMode ? 16 : 9} color="#FBBF24" />
+                      <Text style={[s.favScoreText, tvMode && s.tvFavScoreText, { color: colors.mutedForeground }]}>
                         {(item.score / 10).toFixed(1)}
                       </Text>
                     </View>
@@ -495,11 +501,18 @@ const s = StyleSheet.create({
   favGrid: { paddingHorizontal: 16, paddingTop: 4, gap: 12 },
   favCard: { flex: 1, gap: 6, position: "relative" },
   favImg: { width: "100%", aspectRatio: 0.68, borderRadius: 10 },
+  tvFavCard: { gap: 10 },
+  tvFavImg: { aspectRatio: 1 / 1.4, borderRadius: 16, borderWidth: 2, borderColor: "rgba(255,255,255,0.08)" },
   favHeart: { position: "absolute", top: 6, right: 6, backgroundColor: "rgba(0,0,0,0.6)", borderRadius: 10, padding: 4 },
+  tvFavHeart: { top: 12, right: 12, borderRadius: 16, padding: 10 },
   favInfo: { gap: 2 },
   favTitle: { fontSize: 10, fontFamily: "Cairo_600SemiBold", lineHeight: 14 },
+  tvFavInfo: { gap: 4 },
+  tvFavTitle: { fontSize: 18, lineHeight: 27 },
   favScore: { flexDirection: "row", alignItems: "center", gap: 2 },
   favScoreText: { fontSize: 9, fontFamily: "Cairo_400Regular" },
+  tvFavScore: { gap: 5 },
+  tvFavScoreText: { fontSize: 16 },
 
   charGrid: { paddingHorizontal: 16, paddingTop: 4, gap: 14 },
   charCard: { flex: 1, alignItems: "center", gap: 4, position: "relative" },

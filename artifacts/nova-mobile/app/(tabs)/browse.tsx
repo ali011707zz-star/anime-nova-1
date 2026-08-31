@@ -82,13 +82,13 @@ function GenreCard({ item, animeId, onPress, columns }: { item: typeof GENRES_WI
       focusable={tvMode}
       style={({ focused }) => [g.genreCard, { flex: 1 / columns }, tvMode && tvFocusStyle(focused)]}
     >
-      <View style={[g.genreImgWrap, { backgroundColor: item.color + "22" }]}>
+      <View style={[g.genreImgWrap, tvMode && g.tvGenreImgWrap, { backgroundColor: item.color + "22" }]}>
         {animeId ? (
           <Image source={{ uri: coverUrl(animeId) }} style={g.genreImg} />
         ) : null}
         <View style={[StyleSheet.absoluteFill, { backgroundColor: "rgba(0,0,0,0.45)" }]} />
         <View style={[g.genreColorBar, { backgroundColor: item.color }]} />
-        <Text style={g.genreLabel}>{item.ar}</Text>
+        <Text style={[g.genreLabel, tvMode && g.tvGenreLabel]}>{item.ar}</Text>
       </View>
     </Pressable>
   );
@@ -106,7 +106,7 @@ function AnimeCard({ anime, onPress, columns }: { anime: AnimeResult; onPress: (
       focusable={tvMode}
       style={({ focused }) => [g.card, { flex: 1 / columns }, tvMode && tvFocusStyle(focused)]}
     >
-      <View style={g.cardWrap}>
+      <View style={[g.cardWrap, tvMode && g.tvCardWrap]}>
         {anime.coverImage?.large ? (
           <Image
             source={{ uri: tvMode ? anime.coverImage.extraLarge || anime.coverImage.large : anime.coverImage.large }}
@@ -118,18 +118,18 @@ function AnimeCard({ anime, onPress, columns }: { anime: AnimeResult; onPress: (
           <View style={[g.cardImg, g.cardNoImg]} />
         )}
         {anime.averageScore ? (
-          <View style={g.scoreBadge}>
-            <Ionicons name="star" size={7} color="#FBBF24" />
-            <Text style={g.scoreText}>{(anime.averageScore / 10).toFixed(1)}</Text>
+          <View style={[g.scoreBadge, tvMode && g.tvScoreBadge]}>
+            <Ionicons name="star" size={tvMode ? 13 : 7} color="#FBBF24" />
+            <Text style={[g.scoreText, tvMode && g.tvScoreText]}>{(anime.averageScore / 10).toFixed(1)}</Text>
           </View>
         ) : null}
         {fmt ? (
-          <View style={[g.fmtBadge, { backgroundColor: isFilm ? "#3B82F6" : "#7C3AED" }]}>
-            <Text style={g.fmtText}>{fmt}</Text>
+          <View style={[g.fmtBadge, tvMode && g.tvFmtBadge, { backgroundColor: isFilm ? "#3B82F6" : "#7C3AED" }]}>
+            <Text style={[g.fmtText, tvMode && g.tvFmtText]}>{fmt}</Text>
           </View>
         ) : null}
         <View style={g.cardBottom}>
-          <Text style={g.cardTitle} numberOfLines={2}>{anime.title?.romaji}</Text>
+          <Text style={[g.cardTitle, tvMode && g.tvCardTitle]} numberOfLines={2}>{anime.title?.romaji}</Text>
         </View>
       </View>
     </Pressable>
@@ -388,26 +388,27 @@ export default function BrowseScreen() {
   return (
     <View style={[g.container, { paddingTop: topPad }]}>
       {/* ── Header ── */}
-      <View style={g.header}>
+      <View style={[g.header, tvMode && g.tvHeader]}>
         <View style={g.headerRow}>
           <View style={{ flex: 1 }}>
-            <Text style={g.headerTitle}>{browseTitle}</Text>
+            <Text style={[g.headerTitle, tvMode && g.tvHeaderTitle]}>{browseTitle}</Text>
             {activeGenreAr && (
-              <Text style={g.headerSub}>{filteredItems.length} أنمي متاح</Text>
+              <Text style={[g.headerSub, tvMode && g.tvHeaderSub]}>{filteredItems.length} أنمي متاح</Text>
             )}
           </View>
           <View style={{ flexDirection: "row", gap: 6 }}>
             <Pressable
               onPress={() => setView(view === "genres" ? "list" : "genres")}
-              style={[g.genreToggleBtn, view === "genres" && g.genreToggleBtnActive]}
+              focusable={tvMode}
+              style={({ focused }) => [g.genreToggleBtn, tvMode && g.tvGenreToggleBtn, view === "genres" && g.genreToggleBtnActive, tvMode && tvFocusStyle(focused)]}
             >
-              <Ionicons name="grid" size={12} color={view === "genres" ? "#c4b5fd" : "rgba(255,255,255,0.4)"} />
-              <Text style={[g.genreToggleText, view === "genres" && { color: "#c4b5fd" }]}>التصنيفات</Text>
+              <Ionicons name="grid" size={tvMode ? 20 : 12} color={view === "genres" ? "#c4b5fd" : "rgba(255,255,255,0.4)"} />
+              <Text style={[g.genreToggleText, tvMode && g.tvGenreToggleText, view === "genres" && { color: "#c4b5fd" }]}>التصنيفات</Text>
             </Pressable>
             {(view === "list" && hasFilters) && (
-              <Pressable onPress={clearAll} style={g.clearBtn}>
-                <Ionicons name="close" size={14} color="rgba(252,165,165,0.8)" />
-                <Text style={g.clearBtnText}>مسح</Text>
+              <Pressable onPress={clearAll} focusable={tvMode} style={({ focused }) => [g.clearBtn, tvMode && g.tvClearBtn, tvMode && tvFocusStyle(focused)]}>
+                <Ionicons name="close" size={tvMode ? 19 : 14} color="rgba(252,165,165,0.8)" />
+                <Text style={[g.clearBtnText, tvMode && g.tvClearBtnText]}>مسح</Text>
               </Pressable>
             )}
           </View>
@@ -419,8 +420,9 @@ export default function BrowseScreen() {
             {FORMAT_OPTIONS.map(opt => (
               <Pressable key={opt.value}
                 onPress={() => { setFormat(opt.value); setView("list"); setPage(1); }}
-                style={[g.chip, format === opt.value && g.chipActive]}>
-                <Text style={[g.chipText, format === opt.value && g.chipTextActive]}>{opt.label}</Text>
+                focusable={tvMode}
+                style={({ focused }) => [g.chip, tvMode && g.tvChip, format === opt.value && g.chipActive, tvMode && tvFocusStyle(focused)]}>
+                <Text style={[g.chipText, tvMode && g.tvChipText, format === opt.value && g.chipTextActive]}>{opt.label}</Text>
               </Pressable>
             ))}
           </View>
@@ -432,9 +434,9 @@ export default function BrowseScreen() {
             <ScrollView horizontal showsHorizontalScrollIndicator={false} style={[g.chipRow, { marginTop: 4, width: filterRailWidth, alignSelf: "center" }]}>
               <View style={{ flexDirection: "row", gap: 6 }}>
                 {SORT_OPTIONS.map(opt => (
-                  <Pressable key={opt.value} onPress={() => setSort(opt.value)}
-                    style={[g.chip, sort === opt.value && g.chipActive2]}>
-                    <Text style={[g.chipText, sort === opt.value && g.chipText2Active]}>{opt.label}</Text>
+                  <Pressable key={opt.value} onPress={() => setSort(opt.value)} focusable={tvMode}
+                    style={({ focused }) => [g.chip, tvMode && g.tvChip, sort === opt.value && g.chipActive2, tvMode && tvFocusStyle(focused)]}>
+                    <Text style={[g.chipText, tvMode && g.tvChipText, sort === opt.value && g.chipText2Active]}>{opt.label}</Text>
                   </Pressable>
                 ))}
               </View>
@@ -444,9 +446,9 @@ export default function BrowseScreen() {
             <ScrollView horizontal showsHorizontalScrollIndicator={false} style={[g.chipRow, { marginTop: 4, width: filterRailWidth, alignSelf: "center" }]}>
               <View style={{ flexDirection: "row", gap: 6 }}>
                 {SEASON_OPTIONS.map(opt => (
-                  <Pressable key={opt.value} onPress={() => setSeason(opt.value)}
-                    style={[g.chip, season === opt.value && g.chipActive]}>
-                    <Text style={[g.chipText, season === opt.value && g.chipTextActive]}>{opt.label}</Text>
+                  <Pressable key={opt.value} onPress={() => setSeason(opt.value)} focusable={tvMode}
+                    style={({ focused }) => [g.chip, tvMode && g.tvChip, season === opt.value && g.chipActive, tvMode && tvFocusStyle(focused)]}>
+                    <Text style={[g.chipText, tvMode && g.tvChipText, season === opt.value && g.chipTextActive]}>{opt.label}</Text>
                   </Pressable>
                 ))}
               </View>
@@ -457,23 +459,23 @@ export default function BrowseScreen() {
                 {YEARS.map(y => {
                   const val = y === "الكل" ? "" : y;
                   return (
-                    <Pressable key={y} onPress={() => setYear(val)}
-                      style={[g.chip, year === val && g.chipActive]}>
-                      <Text style={[g.chipText, year === val && g.chipTextActive]}>{y}</Text>
+                    <Pressable key={y} onPress={() => setYear(val)} focusable={tvMode}
+                      style={({ focused }) => [g.chip, tvMode && g.tvChip, year === val && g.chipActive, tvMode && tvFocusStyle(focused)]}>
+                      <Text style={[g.chipText, tvMode && g.tvChipText, year === val && g.chipTextActive]}>{y}</Text>
                     </Pressable>
                   );
                 })}
               </View>
             </ScrollView>
 
-            <View style={[g.searchWrap, { width: filterRailWidth, alignSelf: "center" }]}>
-              <Ionicons name="search" size={14} color="rgba(255,255,255,0.25)" />
+            <View style={[g.searchWrap, tvMode && g.tvSearchWrap, { width: filterRailWidth, alignSelf: "center" }]}>
+              <Ionicons name="search" size={tvMode ? 21 : 14} color="rgba(255,255,255,0.25)" />
               <TextInput
                 value={search}
                 onChangeText={setSearch}
                 placeholder="بحث في النتائج..."
                 placeholderTextColor="rgba(255,255,255,0.2)"
-                style={g.searchInput}
+                style={[g.searchInput, tvMode && g.tvSearchInput]}
               />
               {search ? (
                 <Pressable onPress={() => setSearch("")}>
@@ -568,38 +570,57 @@ export default function BrowseScreen() {
 const g = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#09090B" },
   header: { backgroundColor: "#09090B", borderBottomWidth: 1, borderBottomColor: "rgba(255,255,255,0.06)", paddingHorizontal: 12, paddingTop: 8, paddingBottom: 5 },
+  tvHeader: { paddingHorizontal: 64, paddingTop: 22, paddingBottom: 18 },
   headerRow: { flexDirection: "row", alignItems: "center", marginBottom: 6 },
   headerTitle: { fontSize: 17, fontFamily: "Cairo_800ExtraBold", color: "#fff" },
+  tvHeaderTitle: { fontSize: 30, lineHeight: 40 },
   headerSub: { fontSize: 9, color: "rgba(255,255,255,0.3)", fontFamily: "Cairo_400Regular" },
+  tvHeaderSub: { fontSize: 16, lineHeight: 24 },
   clearBtn: { flexDirection: "row", alignItems: "center", gap: 3, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 10, backgroundColor: "rgba(239,68,68,0.1)", borderWidth: 1, borderColor: "rgba(239,68,68,0.2)" },
   clearBtnText: { fontSize: 9, fontFamily: "Cairo_700Bold", color: "rgba(252,165,165,0.8)" },
+  tvClearBtn: { paddingHorizontal: 18, paddingVertical: 12, borderRadius: 14, gap: 7 },
+  tvClearBtnText: { fontSize: 17 },
   genreToggleBtn: { flexDirection: "row", alignItems: "center", gap: 3, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 10, backgroundColor: "rgba(255,255,255,0.05)", borderWidth: 1, borderColor: "rgba(255,255,255,0.1)" },
+  tvGenreToggleBtn: { paddingHorizontal: 20, paddingVertical: 13, borderRadius: 16, gap: 9 },
   genreToggleBtnActive: { backgroundColor: "rgba(139,92,246,0.15)", borderColor: "rgba(139,92,246,0.35)" },
   genreToggleText: { fontSize: 9, fontFamily: "Cairo_700Bold", color: "rgba(255,255,255,0.4)" },
+  tvGenreToggleText: { fontSize: 18 },
   chipRow: { marginBottom: 2 },
   chip: { paddingHorizontal: 9, paddingVertical: 4, borderRadius: 10, backgroundColor: "#18181B", borderWidth: 1, borderColor: "rgba(255,255,255,0.06)" },
+  tvChip: { paddingHorizontal: 22, paddingVertical: 12, borderRadius: 16, minHeight: 58, justifyContent: "center" },
   chipActive: { backgroundColor: "rgba(139,92,246,0.2)", borderColor: "rgba(139,92,246,0.4)" },
   chipText: { fontSize: 10, fontFamily: "Cairo_700Bold", color: "rgba(255,255,255,0.45)" },
+  tvChipText: { fontSize: 18, lineHeight: 28 },
   chipTextActive: { color: "#c4b5fd" },
   chipActive2: { backgroundColor: "#7C3AED", borderColor: "#8B5CF6" },
   chipText2Active: { color: "#fff" },
   searchWrap: { flexDirection: "row", alignItems: "center", gap: 6, backgroundColor: "#18181B", borderRadius: 10, paddingHorizontal: 10, paddingVertical: 4, marginTop: 4, borderWidth: 1, borderColor: "rgba(255,255,255,0.06)" },
+  tvSearchWrap: { minHeight: 64, borderRadius: 16, paddingHorizontal: 18, paddingVertical: 12, gap: 10 },
   searchInput: { flex: 1, color: "#fff", fontSize: 10, fontFamily: "Cairo_400Regular", textAlign: "right" },
+  tvSearchInput: { fontSize: 18, lineHeight: 28 },
   genreCard: { flex: 1 },
   genreImgWrap: { height: 90, borderRadius: 16, overflow: "hidden", position: "relative", borderWidth: 1, borderColor: "rgba(255,255,255,0.07)", justifyContent: "flex-end" },
+  tvGenreImgWrap: { height: 180, borderRadius: 22, borderWidth: 2 },
   genreImg: { ...StyleSheet.absoluteFillObject, width: "100%", height: "100%" },
   genreColorBar: { position: "absolute", bottom: 0, left: 0, right: 0, height: 3 },
   genreLabel: { fontSize: 14, fontFamily: "Cairo_800ExtraBold", color: "#fff", padding: 10, textShadowColor: "rgba(0,0,0,0.8)", textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 4 },
+  tvGenreLabel: { fontSize: 24, lineHeight: 34, padding: 20 },
   card: { flex: 1 },
   cardWrap: { borderRadius: 14, overflow: "hidden", aspectRatio: 2 / 3, backgroundColor: "#18181B", borderWidth: 1, borderColor: "rgba(255,255,255,0.07)", position: "relative" },
+  tvCardWrap: { borderRadius: 22, borderWidth: 2 },
   cardImg: { width: "100%", height: "100%" },
   cardNoImg: { backgroundColor: "rgba(139,92,246,0.1)", alignItems: "center", justifyContent: "center" },
   scoreBadge: { position: "absolute", top: 5, right: 5, flexDirection: "row", alignItems: "center", gap: 2, backgroundColor: "rgba(0,0,0,0.7)", borderRadius: 7, paddingHorizontal: 4, paddingVertical: 2 },
+  tvScoreBadge: { top: 12, right: 12, borderRadius: 11, paddingHorizontal: 10, paddingVertical: 6, gap: 5 },
   scoreText: { fontSize: 7, color: "#fff", fontFamily: "Cairo_700Bold" },
+  tvScoreText: { fontSize: 16 },
   fmtBadge: { position: "absolute", top: 5, left: 5, paddingHorizontal: 5, paddingVertical: 2, borderRadius: 5 },
+  tvFmtBadge: { top: 12, left: 12, paddingHorizontal: 11, paddingVertical: 6, borderRadius: 10 },
   fmtText: { fontSize: 7, color: "#fff", fontFamily: "Cairo_700Bold" },
+  tvFmtText: { fontSize: 15 },
   cardBottom: { position: "absolute", bottom: 0, left: 0, right: 0, padding: 5, backgroundColor: "rgba(0,0,0,0.6)" },
   cardTitle: { fontSize: 9, color: "#fff", fontFamily: "Cairo_700Bold", lineHeight: 13 },
+  tvCardTitle: { fontSize: 18, lineHeight: 27, padding: 10 },
   center: { flex: 1, alignItems: "center", justifyContent: "center", gap: 12, minHeight: 200 },
   emptyText: { fontSize: 14, fontFamily: "Cairo_700Bold", color: "rgba(255,255,255,0.35)", textAlign: "center" },
 });

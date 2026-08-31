@@ -1882,8 +1882,8 @@ export default function WatchScreen() {
             <Ionicons name="chevron-back" size={12} color="rgba(196,181,253,0.9)" />
           </Pressable>
           <Pressable onPress={refreshAllSources} focusable={tvMode}
-            style={({ focused }) => [d.headerRefreshBtn, tvMode && tvFocusStyle(focused)]}>
-            <Ionicons name="refresh" size={13} color="#8B5CF6" />
+            style={({ focused }) => [d.headerRefreshBtn, tvMode && d.tvHeaderActionBtn, tvMode && tvFocusStyle(focused)]}>
+            <Ionicons name="refresh" size={tvMode ? 24 : 13} color="#8B5CF6" />
           </Pressable>
         </View>
         <View style={d.headerCenter}>
@@ -1891,8 +1891,8 @@ export default function WatchScreen() {
           <Text style={[d.headerSub, tvMode && d.tvHeaderSub]}>الحلقة {epNum}</Text>
         </View>
         <Pressable onPress={handleBack} focusable={tvMode}
-          style={({ focused }) => [d.headerBack, tvMode && tvFocusStyle(focused)]}>
-          <Ionicons name="arrow-back" size={17} color="rgba(255,255,255,0.75)" />
+          style={({ focused }) => [d.headerBack, tvMode && d.tvHeaderActionBtn, tvMode && tvFocusStyle(focused)]}>
+          <Ionicons name="arrow-back" size={tvMode ? 25 : 17} color="rgba(255,255,255,0.75)" />
         </Pressable>
       </View>
 
@@ -1901,17 +1901,17 @@ export default function WatchScreen() {
         {/* ── Info card ── */}
         <View style={[d.infoCard, tvMode && d.tvInfoCard]}>
           {coverUrl ? (
-            <View style={d.infoPosterWrap}>
-              <View style={d.infoPosterGlow} />
-              <Image source={{ uri: coverUrl }} style={d.infoPoster} resizeMode="cover" />
+              <View style={[d.infoPosterWrap, tvMode && d.tvInfoPosterWrap]}>
+                <View style={[d.infoPosterGlow, tvMode && d.tvInfoPosterGlow]} />
+                <Image source={{ uri: coverUrl }} style={[d.infoPoster, tvMode && d.tvInfoPoster]} resizeMode="cover" />
             </View>
           ) : null}
           <View style={d.infoMeta}>
-            <Text style={d.infoTitle} numberOfLines={2}>{displayTitle}</Text>
+            <Text style={[d.infoTitle, tvMode && d.tvInfoTitle]} numberOfLines={2}>{displayTitle}</Text>
             <View style={d.infoEpRow}>
-              <View style={d.infoEpBadge}>
-                <Ionicons name="play-circle" size={10} color="#a78bfa" />
-                <Text style={d.infoEpText}>الحلقة {epNum}</Text>
+              <View style={[d.infoEpBadge, tvMode && d.tvInfoEpBadge]}>
+                <Ionicons name="play-circle" size={tvMode ? 22 : 10} color="#a78bfa" />
+                <Text style={[d.infoEpText, tvMode && d.tvInfoEpText]}>الحلقة {epNum}</Text>
               </View>
             </View>
           </View>
@@ -1922,12 +1922,13 @@ export default function WatchScreen() {
               <Pressable
                 onPress={handleBack}
                 hitSlop={10}
-                style={d.scanExitBtn}
+                focusable={tvMode}
+                style={({ focused }) => [d.scanExitBtn, tvMode && d.tvScanExitBtn, tvMode && tvFocusStyle(focused)]}
                 accessibilityRole="button"
                 accessibilityLabel="الخروج إلى السيرفرات"
               >
-                <Ionicons name="close" size={16} color="rgba(255,255,255,0.72)" />
-                <Text style={d.scanExitText}>خروج</Text>
+                <Ionicons name="close" size={tvMode ? 22 : 16} color="rgba(255,255,255,0.72)" />
+                <Text style={[d.scanExitText, tvMode && d.tvScanExitText]}>خروج</Text>
               </Pressable>
               <View style={d.availabilityGifWrap}>
                 <ServerScanGif />
@@ -2024,14 +2025,14 @@ export default function WatchScreen() {
                       <View style={d.webRowActions}>
                         {!watchUnlocked ? (
                           <View style={[d.lockBtn, tvMode && d.tvLockBtn]}>
-                            {watchAdSite === slot.site ? <SpinRing size={tvMode ? 22 : 14} /> : <Ionicons name="lock-closed" size={tvMode ? 18 : 11} color="#c4b5fd" />}
+                            {watchAdSite === slot.site ? <SpinRing size={tvMode ? 28 : 14} /> : <Ionicons name="lock-closed" size={tvMode ? 24 : 11} color="#c4b5fd" />}
                             <Text style={[d.lockBtnText, tvMode && d.tvActionText]}>فتح</Text>
                           </View>
                         ) : isFetching ? (
                           <SpinRing size={tvMode ? 26 : 16} />
                         ) : isReady ? (
                           <View style={[d.playBtnGreen, tvMode && d.tvPlayBtn]}>
-                            <Ionicons name="play" size={tvMode ? 18 : 10} color="#fff" />
+                            <Ionicons name="play" size={tvMode ? 24 : 10} color="#fff" />
                             <Text style={[d.playBtnGreenText, tvMode && d.tvActionText]}>تشغيل</Text>
                           </View>
                         ) : (
@@ -2161,23 +2162,30 @@ const d = StyleSheet.create({
   headerBack:    { width: 36, height: 36, borderRadius: 12, backgroundColor: "rgba(255,255,255,0.07)", borderWidth: 1, borderColor: "rgba(255,255,255,0.11)", alignItems: "center", justifyContent: "center", flexShrink: 0 },
   headerTitle:   { fontSize: 13, fontFamily: "Cairo_800ExtraBold", color: "#fff", textAlign: "center" },
   headerSub:     { fontSize: 10, color: "rgba(255,255,255,0.35)", fontFamily: "Cairo_400Regular", textAlign: "center" },
-  tvHeaderTitle: { fontSize: 21 },
-  tvHeaderSub: { fontSize: 15 },
+  tvHeaderTitle: { fontSize: 28, lineHeight: 38 },
+  tvHeaderSub: { fontSize: 18, lineHeight: 28 },
   headerRefreshBtn: { width: 32, height: 32, borderRadius: 10, backgroundColor: "rgba(139,92,246,0.12)", borderWidth: 1, borderColor: "rgba(139,92,246,0.25)", alignItems: "center", justifyContent: "center" },
+  tvHeaderActionBtn: { width: 58, height: 58, borderRadius: 16 },
   epNavBtn:      { flexDirection: "row", alignItems: "center", gap: 2, height: 32, borderRadius: 10, backgroundColor: "rgba(255,255,255,0.06)", borderWidth: 1, borderColor: "rgba(255,255,255,0.09)", paddingHorizontal: 8, justifyContent: "center" },
   epNavText:     { fontSize: 10, fontFamily: "Cairo_700Bold", color: "rgba(255,255,255,0.65)" },
 
   /* Info card */
   infoCard:      { flexDirection: "row", alignItems: "flex-start", gap: 14, backgroundColor: "rgba(15,12,28,0.80)", borderRadius: 18, borderWidth: 1, borderColor: "rgba(139,92,246,0.14)", padding: 14 },
-  tvInfoCard:    { padding: 24, gap: 24, borderRadius: 24 },
+  tvInfoCard:    { padding: 32, gap: 30, borderRadius: 28 },
   infoPosterWrap:{ width: 72, height: 102, position: "relative", alignItems: "center", justifyContent: "center" },
+  tvInfoPosterWrap: { width: 128, height: 180 },
   infoPosterGlow:{ position: "absolute", width: 80, height: 110, borderRadius: 20, backgroundColor: "rgba(109,40,217,0.28)" },
+  tvInfoPosterGlow: { width: 142, height: 194, borderRadius: 24 },
   infoPoster:    { width: 72, height: 102, borderRadius: 12, borderWidth: 1, borderColor: "rgba(139,92,246,0.30)" },
+  tvInfoPoster: { width: 128, height: 180, borderRadius: 18, borderWidth: 2 },
   infoMeta:      { flex: 1, gap: 8, paddingTop: 2 },
   infoTitle:     { fontSize: 15, fontFamily: "Cairo_800ExtraBold", color: "#fff", textAlign: "right", lineHeight: 22 },
+  tvInfoTitle: { fontSize: 26, lineHeight: 38 },
   infoEpRow:     { flexDirection: "row", gap: 8, flexWrap: "wrap" },
   infoEpBadge:   { flexDirection: "row", alignItems: "center", gap: 5, backgroundColor: "rgba(124,58,237,0.18)", borderRadius: 8, borderWidth: 1, borderColor: "rgba(139,92,246,0.28)", paddingHorizontal: 10, paddingVertical: 5 },
+  tvInfoEpBadge: { gap: 10, borderRadius: 14, paddingHorizontal: 18, paddingVertical: 11 },
   infoEpText:    { fontSize: 11, fontFamily: "Cairo_700Bold", color: "#c4b5fd" },
+  tvInfoEpText: { fontSize: 19, lineHeight: 28 },
   availabilityState: { alignItems: "center", justifyContent: "center", gap: 10, paddingVertical: 22 },
   availabilityGifWrap: { width: "100%", maxWidth: 330, height: 184, borderRadius: 22, overflow: "hidden", backgroundColor: "rgba(255,255,255,0.025)", marginBottom: 2, alignItems: "center", justifyContent: "center" },
   availabilityGif: { width: "100%", height: "100%", backgroundColor: "transparent" },
@@ -2186,6 +2194,8 @@ const d = StyleSheet.create({
   serverScanDot: { width: 7, height: 7, borderRadius: 4 },
   scanExitBtn: { alignSelf: "flex-end", flexDirection: "row", alignItems: "center", gap: 5, paddingHorizontal: 12, paddingVertical: 7, borderRadius: 12, backgroundColor: "rgba(255,255,255,0.07)", borderWidth: 1, borderColor: "rgba(255,255,255,0.12)", marginBottom: 12 },
   scanExitText: { color: "rgba(255,255,255,0.72)", fontFamily: "Cairo_700Bold", fontSize: 11 },
+  tvScanExitBtn: { paddingHorizontal: 22, paddingVertical: 14, borderRadius: 16, gap: 9 },
+  tvScanExitText: { fontSize: 18 },
   availabilityHeadline: { fontSize: 15, fontFamily: "Cairo_800ExtraBold", color: "rgba(255,255,255,0.85)", textAlign: "center", lineHeight: 24 },
   availabilityText: { fontSize: 12, fontFamily: "Cairo_400Regular", color: "rgba(255,255,255,0.42)", textAlign: "center" },
   availabilityEmpty: { alignItems: "center", justifyContent: "center", gap: 10, paddingVertical: 42, paddingHorizontal: 18 },
@@ -2194,7 +2204,7 @@ const d = StyleSheet.create({
 
   /* Scroll */
   scrollContent: { padding: 14, paddingBottom: 100, gap: 12 },
-  tvScrollContent: { paddingHorizontal: 56, paddingTop: 24, gap: 20 },
+  tvScrollContent: { paddingHorizontal: 56, paddingTop: 32, gap: 28 },
 
   /* Tier sections */
   tierSection:   { gap: 6 },
@@ -2257,16 +2267,16 @@ const d = StyleSheet.create({
   /* ── Web-style quality pill header ── */
   qPill:         { flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 4 },
   qPillText:     { fontSize: 12, fontFamily: "Cairo_800ExtraBold", letterSpacing: 0.5 },
-  tvQPill:       { paddingHorizontal: 22, paddingVertical: 11, borderRadius: 12 },
-  tvQPillText:   { fontSize: 18 },
+  tvQPill:       { paddingHorizontal: 28, paddingVertical: 15, borderRadius: 16 },
+  tvQPillText:   { fontSize: 23 },
   qPillDot:      { width: 6, height: 6, borderRadius: 3 },
 
   /* ── Web-style server row ── */
   webRow:         { flexDirection: "row", alignItems: "center", paddingHorizontal: 10, paddingVertical: 11, gap: 7 },
-  tvWebRow:       { minHeight: 92, paddingHorizontal: 28, paddingVertical: 22, gap: 20, borderRadius: 14 },
-  tvWebRowTag:    { fontSize: 20, lineHeight: 28 },
-  tvWebRowDot:    { width: 14, height: 14, borderRadius: 7 },
-  tvSiteRowPlayBtn: { minWidth: 130, minHeight: 58, paddingHorizontal: 22, paddingVertical: 14, borderRadius: 14 },
+  tvWebRow:       { minHeight: 132, paddingHorizontal: 34, paddingVertical: 28, gap: 26, borderRadius: 20 },
+  tvWebRowTag:    { fontSize: 25, lineHeight: 36 },
+  tvWebRowDot:    { width: 18, height: 18, borderRadius: 9 },
+  tvSiteRowPlayBtn: { minWidth: 160, minHeight: 72, paddingHorizontal: 26, paddingVertical: 18, borderRadius: 18 },
   webRowBorder:   { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: "rgba(255,255,255,0.06)" },
   webRowPlayIcon: { alignItems: "center", justifyContent: "center", flexShrink: 0 },
   webRowActions: { flexDirection: "row", alignItems: "center", gap: 4, flexShrink: 0 },
@@ -2276,10 +2286,10 @@ const d = StyleSheet.create({
   webRowDot:      { width: 8, height: 8, borderRadius: 4 },
   lockBtn:        { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 9, paddingVertical: 5, borderRadius: 9, backgroundColor: "rgba(139,92,246,0.15)", borderWidth: 1, borderColor: "rgba(139,92,246,0.30)" },
   lockBtnText:    { fontSize: 10, fontFamily: "Cairo_700Bold", color: "#c4b5fd" },
-  tvLockBtn:      { minWidth: 116, minHeight: 56, paddingHorizontal: 20, paddingVertical: 14, borderRadius: 14, gap: 8 },
-  tvPickBtn:      { minWidth: 116, minHeight: 56, paddingHorizontal: 20, paddingVertical: 14, borderRadius: 14 },
-  tvPlayBtn:      { minWidth: 132, minHeight: 56, paddingHorizontal: 20, paddingVertical: 14, borderRadius: 14, gap: 8 },
-  tvActionText:   { fontSize: 18, lineHeight: 26 },
+  tvLockBtn:      { minWidth: 150, minHeight: 72, paddingHorizontal: 26, paddingVertical: 18, borderRadius: 18, gap: 10 },
+  tvPickBtn:      { minWidth: 150, minHeight: 72, paddingHorizontal: 26, paddingVertical: 18, borderRadius: 18 },
+  tvPlayBtn:      { minWidth: 170, minHeight: 72, paddingHorizontal: 26, paddingVertical: 18, borderRadius: 18, gap: 10 },
+  tvActionText:   { fontSize: 22, lineHeight: 32 },
 
   /* ── Separate download servers ── */
   downloadSection:    { marginTop: 18, gap: 9, padding: 12, borderRadius: 18, backgroundColor: "rgba(14,12,24,0.92)", borderWidth: 1, borderColor: "rgba(139,92,246,0.22)" },
