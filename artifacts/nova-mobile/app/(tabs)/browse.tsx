@@ -402,12 +402,12 @@ export default function BrowseScreen() {
               focusable={tvMode}
               style={({ focused }) => [g.genreToggleBtn, tvMode && g.tvGenreToggleBtn, view === "genres" && g.genreToggleBtnActive, tvMode && tvFocusStyle(focused)]}
             >
-              <Ionicons name="grid" size={tvMode ? 20 : 12} color={view === "genres" ? "#c4b5fd" : "rgba(255,255,255,0.4)"} />
+              <Ionicons name="grid" size={tvMode ? 28 : 12} color={view === "genres" ? "#c4b5fd" : "rgba(255,255,255,0.4)"} />
               <Text style={[g.genreToggleText, tvMode && g.tvGenreToggleText, view === "genres" && { color: "#c4b5fd" }]}>التصنيفات</Text>
             </Pressable>
             {(view === "list" && hasFilters) && (
               <Pressable onPress={clearAll} focusable={tvMode} style={({ focused }) => [g.clearBtn, tvMode && g.tvClearBtn, tvMode && tvFocusStyle(focused)]}>
-                <Ionicons name="close" size={tvMode ? 19 : 14} color="rgba(252,165,165,0.8)" />
+                <Ionicons name="close" size={tvMode ? 25 : 14} color="rgba(252,165,165,0.8)" />
                 <Text style={[g.clearBtnText, tvMode && g.tvClearBtnText]}>مسح</Text>
               </Pressable>
             )}
@@ -570,57 +570,57 @@ export default function BrowseScreen() {
 const g = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#09090B" },
   header: { backgroundColor: "#09090B", borderBottomWidth: 1, borderBottomColor: "rgba(255,255,255,0.06)", paddingHorizontal: 12, paddingTop: 8, paddingBottom: 5 },
-  tvHeader: { paddingHorizontal: 64, paddingTop: 22, paddingBottom: 18 },
+  tvHeader: { paddingHorizontal: 64, paddingTop: 26, paddingBottom: 24 },
   headerRow: { flexDirection: "row", alignItems: "center", marginBottom: 6 },
   headerTitle: { fontSize: 17, fontFamily: "Cairo_800ExtraBold", color: "#fff" },
-  tvHeaderTitle: { fontSize: 30, lineHeight: 40 },
+  tvHeaderTitle: { fontSize: 36, lineHeight: 48 },
   headerSub: { fontSize: 9, color: "rgba(255,255,255,0.3)", fontFamily: "Cairo_400Regular" },
-  tvHeaderSub: { fontSize: 16, lineHeight: 24 },
+  tvHeaderSub: { fontSize: 20, lineHeight: 30 },
   clearBtn: { flexDirection: "row", alignItems: "center", gap: 3, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 10, backgroundColor: "rgba(239,68,68,0.1)", borderWidth: 1, borderColor: "rgba(239,68,68,0.2)" },
   clearBtnText: { fontSize: 9, fontFamily: "Cairo_700Bold", color: "rgba(252,165,165,0.8)" },
-  tvClearBtn: { paddingHorizontal: 18, paddingVertical: 12, borderRadius: 14, gap: 7 },
-  tvClearBtnText: { fontSize: 17 },
+  tvClearBtn: { paddingHorizontal: 24, paddingVertical: 16, borderRadius: 18, gap: 9, minHeight: 68 },
+  tvClearBtnText: { fontSize: 22, lineHeight: 30 },
   genreToggleBtn: { flexDirection: "row", alignItems: "center", gap: 3, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 10, backgroundColor: "rgba(255,255,255,0.05)", borderWidth: 1, borderColor: "rgba(255,255,255,0.1)" },
-  tvGenreToggleBtn: { paddingHorizontal: 20, paddingVertical: 13, borderRadius: 16, gap: 9 },
+  tvGenreToggleBtn: { paddingHorizontal: 26, paddingVertical: 16, borderRadius: 18, gap: 11, minHeight: 72 },
   genreToggleBtnActive: { backgroundColor: "rgba(139,92,246,0.15)", borderColor: "rgba(139,92,246,0.35)" },
   genreToggleText: { fontSize: 9, fontFamily: "Cairo_700Bold", color: "rgba(255,255,255,0.4)" },
-  tvGenreToggleText: { fontSize: 18 },
+  tvGenreToggleText: { fontSize: 22, lineHeight: 32 },
   chipRow: { marginBottom: 2 },
   chip: { paddingHorizontal: 9, paddingVertical: 4, borderRadius: 10, backgroundColor: "#18181B", borderWidth: 1, borderColor: "rgba(255,255,255,0.06)" },
-  tvChip: { paddingHorizontal: 22, paddingVertical: 12, borderRadius: 16, minHeight: 58, justifyContent: "center" },
+  tvChip: { paddingHorizontal: 28, paddingVertical: 16, borderRadius: 18, minHeight: 72, justifyContent: "center" },
   chipActive: { backgroundColor: "rgba(139,92,246,0.2)", borderColor: "rgba(139,92,246,0.4)" },
   chipText: { fontSize: 10, fontFamily: "Cairo_700Bold", color: "rgba(255,255,255,0.45)" },
-  tvChipText: { fontSize: 18, lineHeight: 28 },
+  tvChipText: { fontSize: 24, lineHeight: 36 },
   chipTextActive: { color: "#c4b5fd" },
   chipActive2: { backgroundColor: "#7C3AED", borderColor: "#8B5CF6" },
   chipText2Active: { color: "#fff" },
   searchWrap: { flexDirection: "row", alignItems: "center", gap: 6, backgroundColor: "#18181B", borderRadius: 10, paddingHorizontal: 10, paddingVertical: 4, marginTop: 4, borderWidth: 1, borderColor: "rgba(255,255,255,0.06)" },
-  tvSearchWrap: { minHeight: 64, borderRadius: 16, paddingHorizontal: 18, paddingVertical: 12, gap: 10 },
+  tvSearchWrap: { minHeight: 76, borderRadius: 18, paddingHorizontal: 24, paddingVertical: 16, gap: 14 },
   searchInput: { flex: 1, color: "#fff", fontSize: 10, fontFamily: "Cairo_400Regular", textAlign: "right" },
-  tvSearchInput: { fontSize: 18, lineHeight: 28 },
+  tvSearchInput: { fontSize: 24, lineHeight: 36 },
   genreCard: { flex: 1 },
   genreImgWrap: { height: 90, borderRadius: 16, overflow: "hidden", position: "relative", borderWidth: 1, borderColor: "rgba(255,255,255,0.07)", justifyContent: "flex-end" },
-  tvGenreImgWrap: { height: 180, borderRadius: 22, borderWidth: 2 },
+  tvGenreImgWrap: { height: 220, borderRadius: 26, borderWidth: 2 },
   genreImg: { ...StyleSheet.absoluteFillObject, width: "100%", height: "100%" },
   genreColorBar: { position: "absolute", bottom: 0, left: 0, right: 0, height: 3 },
   genreLabel: { fontSize: 14, fontFamily: "Cairo_800ExtraBold", color: "#fff", padding: 10, textShadowColor: "rgba(0,0,0,0.8)", textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 4 },
-  tvGenreLabel: { fontSize: 24, lineHeight: 34, padding: 20 },
+  tvGenreLabel: { fontSize: 28, lineHeight: 40, padding: 24 },
   card: { flex: 1 },
   cardWrap: { borderRadius: 14, overflow: "hidden", aspectRatio: 2 / 3, backgroundColor: "#18181B", borderWidth: 1, borderColor: "rgba(255,255,255,0.07)", position: "relative" },
-  tvCardWrap: { borderRadius: 22, borderWidth: 2 },
+  tvCardWrap: { borderRadius: 26, borderWidth: 2 },
   cardImg: { width: "100%", height: "100%" },
   cardNoImg: { backgroundColor: "rgba(139,92,246,0.1)", alignItems: "center", justifyContent: "center" },
   scoreBadge: { position: "absolute", top: 5, right: 5, flexDirection: "row", alignItems: "center", gap: 2, backgroundColor: "rgba(0,0,0,0.7)", borderRadius: 7, paddingHorizontal: 4, paddingVertical: 2 },
-  tvScoreBadge: { top: 12, right: 12, borderRadius: 11, paddingHorizontal: 10, paddingVertical: 6, gap: 5 },
+  tvScoreBadge: { top: 16, right: 16, borderRadius: 14, paddingHorizontal: 14, paddingVertical: 8, gap: 6 },
   scoreText: { fontSize: 7, color: "#fff", fontFamily: "Cairo_700Bold" },
-  tvScoreText: { fontSize: 16 },
+  tvScoreText: { fontSize: 20 },
   fmtBadge: { position: "absolute", top: 5, left: 5, paddingHorizontal: 5, paddingVertical: 2, borderRadius: 5 },
-  tvFmtBadge: { top: 12, left: 12, paddingHorizontal: 11, paddingVertical: 6, borderRadius: 10 },
+  tvFmtBadge: { top: 16, left: 16, paddingHorizontal: 14, paddingVertical: 8, borderRadius: 12 },
   fmtText: { fontSize: 7, color: "#fff", fontFamily: "Cairo_700Bold" },
-  tvFmtText: { fontSize: 15 },
+  tvFmtText: { fontSize: 19 },
   cardBottom: { position: "absolute", bottom: 0, left: 0, right: 0, padding: 5, backgroundColor: "rgba(0,0,0,0.6)" },
   cardTitle: { fontSize: 9, color: "#fff", fontFamily: "Cairo_700Bold", lineHeight: 13 },
-  tvCardTitle: { fontSize: 18, lineHeight: 27, padding: 10 },
+  tvCardTitle: { fontSize: 22, lineHeight: 32, padding: 14 },
   center: { flex: 1, alignItems: "center", justifyContent: "center", gap: 12, minHeight: 200 },
   emptyText: { fontSize: 14, fontFamily: "Cairo_700Bold", color: "rgba(255,255,255,0.35)", textAlign: "center" },
 });

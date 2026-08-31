@@ -131,11 +131,11 @@ function getAgeRating(genres: string[], isAdult?: boolean) {
 }
 
 /* ── Sub-components ── */
-function SectionHeader({ title }: { title: string }) {
+function SectionHeader({ title, tvMode = false }: { title: string; tvMode?: boolean }) {
   return (
-    <View style={d.sectionHeader}>
-      <View style={d.sectionBar} />
-      <Text style={d.sectionTitle}>{title}</Text>
+    <View style={[d.sectionHeader, tvMode && d.tvSectionHeader]}>
+      <View style={[d.sectionBar, tvMode && d.tvSectionBar]} />
+      <Text style={[d.sectionTitle, tvMode && d.tvSectionTitle]}>{title}</Text>
     </View>
   );
 }
@@ -599,7 +599,7 @@ export default function AnimeDetailScreen() {
           ].map(({ icon, label, active, activeColor, onPress }) => (
              <Pressable key={label} onPress={onPress} focusable={tvMode}
                style={({ focused }) => [d.actionBtn, tvMode && d.tvActionBtn, active && { backgroundColor: activeColor + "18", borderColor: activeColor + "40" }, tvMode && tvFocusStyle(focused)]}>
-              <Ionicons name={icon as any} size={tvMode ? 25 : 16} color={active ? activeColor : "rgba(255,255,255,0.4)"} />
+              <Ionicons name={icon as any} size={tvMode ? 32 : 16} color={active ? activeColor : "rgba(255,255,255,0.4)"} />
               <Text style={[d.actionBtnLabel, tvMode && d.tvActionBtnLabel, active && { color: activeColor }]}>{label}</Text>
               {label === "تقييمي" && myRating > 0 ? (
                 <Text style={[d.actionBtnSub, { color: "#FBBF24" }]}>{myRating}/10</Text>
@@ -648,8 +648,8 @@ export default function AnimeDetailScreen() {
 
         {/* ── Synopsis ── */}
         {desc ? (
-          <View style={d.section}>
-            <SectionHeader title="القصة" />
+          <View style={[d.section, tvMode && d.tvSection]}>
+            <SectionHeader title="القصة" tvMode={tvMode} />
             <View style={[d.descBox, tvMode && d.tvDescBox]}>
               <Text
                 style={[d.descText, tvMode && d.tvBodyText]}
@@ -659,7 +659,7 @@ export default function AnimeDetailScreen() {
                  <Pressable onPress={() => setShowFull(f => !f)} focusable={tvMode}
                    style={({ focused }) => [d.readMoreBtn, tvMode && d.tvReadMoreBtn, tvMode && tvFocusStyle(focused)]}>
                   <Text style={[d.readMoreText, tvMode && d.tvReadMoreText]}>{showFull ? "عرض أقل" : "عرض المزيد"}</Text>
-                  <Ionicons name={showFull ? "chevron-up" : "chevron-down"} size={13} color="#8B5CF6" />
+                  <Ionicons name={showFull ? "chevron-up" : "chevron-down"} size={tvMode ? 22 : 13} color="#8B5CF6" />
                 </Pressable>
               )}
             </View>
@@ -671,15 +671,15 @@ export default function AnimeDetailScreen() {
           <ScrollView horizontal showsHorizontalScrollIndicator={false}
             contentContainerStyle={{ paddingHorizontal: 16, gap: 8 }} style={{ marginTop: 14 }}>
             {anime.genres.slice(0, 10).map((g: string) => (
-              <View key={g} style={d.genreChip}>
-                <Text style={d.genreChipText}>{GENRE_MAP[g] || g}</Text>
+              <View key={g} style={[d.genreChip, tvMode && d.tvGenreChip]}>
+                <Text style={[d.genreChipText, tvMode && d.tvGenreChipText]}>{GENRE_MAP[g] || g}</Text>
               </View>
             ))}
           </ScrollView>
         )}
 
         {/* ── Metadata ── */}
-        <View style={d.section}>
+        <View style={[d.section, tvMode && d.tvSection]}>
           <View style={d.metaBox}>
             {anime.source ? <MetaRow label="المصدر" value={SOURCE_MAP[anime.source] || anime.source} /> : null}
             {anime.duration ? <MetaRow label="مدة الحلقة" value={fmtRuntime(anime.duration) || ""} /> : null}
@@ -691,8 +691,8 @@ export default function AnimeDetailScreen() {
 
         {/* ── Trailer ── */}
         {trailerYT ? (
-          <View style={d.section}>
-            <SectionHeader title="الإعلان الدعائي" />
+          <View style={[d.section, tvMode && d.tvSection]}>
+            <SectionHeader title="الإعلان الدعائي" tvMode={tvMode} />
              <Pressable
                onPress={() => setShowTrailer(true)}
                focusable={tvMode}
@@ -720,17 +720,17 @@ export default function AnimeDetailScreen() {
         ) : null}
 
         {/* ── Tabs ── */}
-        <View style={d.section}>
+        <View style={[d.section, tvMode && d.tvSection]}>
           {/* Tab nav */}
-          <View style={d.tabNav}>
+          <View style={[d.tabNav, tvMode && d.tvTabNav]}>
             {([
               { key: "chars", label: "الشخصيات" },
               { key: "related", label: "ذات صلة" },
               { key: "similar", label: "مشابهة" },
             ] as const).map(t => (
                <Pressable key={t.key} onPress={() => setTab(t.key)} focusable={tvMode}
-                 style={({ focused }) => [d.tabBtn, tvMode && tvFocusStyle(focused)]}>
-                <Text style={[d.tabBtnText, tab === t.key && d.tabBtnTextActive]}>{t.label}</Text>
+                 style={({ focused }) => [d.tabBtn, tvMode && d.tvTabBtn, tvMode && tvFocusStyle(focused)]}>
+                 <Text style={[d.tabBtnText, tvMode && d.tvTabBtnText, tab === t.key && d.tabBtnTextActive]}>{t.label}</Text>
                 {tab === t.key && <View style={d.tabIndicator} />}
               </Pressable>
             ))}
@@ -1007,22 +1007,31 @@ const d = StyleSheet.create({
   charName: { fontSize: 8, color: "rgba(255,255,255,0.6)", fontFamily: "Cairo_400Regular", textAlign: "center", lineHeight: 12 },
   emptyTabText: { textAlign: "center", color: "rgba(255,255,255,0.2)", fontSize: 12, fontFamily: "Cairo_400Regular", paddingVertical: 20 },
   tvContent: { paddingHorizontal: 64, paddingBottom: 180 },
-  tvActionGrid: { paddingHorizontal: 64, gap: 16, marginTop: 18 },
+  tvSection: { marginTop: 30 },
+  tvSectionHeader: { gap: 14, marginBottom: 18 },
+  tvSectionBar: { width: 6, height: 30, borderRadius: 3 },
+  tvSectionTitle: { fontSize: 28, lineHeight: 40 },
+  tvActionGrid: { paddingHorizontal: 64, gap: 20, marginTop: 24 },
   tvBackBtn: { width: 64, height: 64, borderRadius: 20 },
   tvHero: { height: 440 },
   tvInfoRow: { paddingHorizontal: 64, gap: 32, marginTop: -112 },
   tvCover: { width: 230, height: 334, borderRadius: 26 },
   tvTitleMain: { fontSize: 36, lineHeight: 48 },
   tvTitleNative: { fontSize: 21, lineHeight: 31 },
-  tvBodyText: { fontSize: 26, lineHeight: 42 },
-  tvButtonText: { fontSize: 24 },
-  tvWatchBtn: { minHeight: 92, borderRadius: 26, gap: 16 },
-  tvWatchBtnIcon: { width: 52, height: 52, borderRadius: 18 },
-  tvActionBtn: { minHeight: 108, paddingVertical: 22, borderRadius: 22, gap: 10 },
-  tvActionBtnLabel: { fontSize: 21 },
-  tvDescBox: { padding: 26, borderRadius: 22 },
-  tvReadMoreBtn: { minHeight: 72, paddingHorizontal: 30, borderRadius: 16, backgroundColor: "rgba(139,92,246,0.10)" },
-  tvReadMoreText: { fontSize: 21 },
+  tvBodyText: { fontSize: 30, lineHeight: 48 },
+  tvButtonText: { fontSize: 28, lineHeight: 40 },
+  tvWatchBtn: { minHeight: 112, borderRadius: 30, gap: 20 },
+  tvWatchBtnIcon: { width: 64, height: 64, borderRadius: 20 },
+  tvActionBtn: { minHeight: 132, paddingVertical: 28, borderRadius: 26, gap: 14 },
+  tvActionBtnLabel: { fontSize: 25, lineHeight: 36 },
+  tvDescBox: { padding: 32, borderRadius: 26 },
+  tvReadMoreBtn: { minHeight: 82, paddingHorizontal: 34, borderRadius: 18, backgroundColor: "rgba(139,92,246,0.10)" },
+  tvReadMoreText: { fontSize: 24, lineHeight: 36 },
+  tvGenreChip: { paddingHorizontal: 22, paddingVertical: 12, borderRadius: 24 },
+  tvGenreChipText: { fontSize: 20, lineHeight: 30 },
+  tvTabNav: { marginBottom: 22 },
+  tvTabBtn: { paddingBottom: 18, minHeight: 64 },
+  tvTabBtnText: { fontSize: 24, lineHeight: 36 },
   relCard: { width: 100, gap: 6 },
   relImgWrap: { width: 100, height: 140, borderRadius: 12, overflow: "hidden", position: "relative", backgroundColor: "#1C1C22" },
   relImg: { width: "100%", height: "100%" },

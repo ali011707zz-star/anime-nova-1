@@ -393,8 +393,8 @@ export function RiftPlayer({
         </View>
       )}
       {subOn && activeCue && (
-        <View pointerEvents="none" style={styles.subtitle}>
-          <Text style={styles.subtitleText}>{activeCue.text}</Text>
+        <View pointerEvents="none" style={[styles.subtitle, tvMode && styles.tvSubtitle]}>
+          <Text style={[styles.subtitleText, tvMode && styles.tvSubtitleText]}>{activeCue.text}</Text>
         </View>
       )}
       <Pressable
@@ -520,7 +520,7 @@ export function RiftPlayer({
                 focusable={tvMode}
                 style={({ focused }) => [styles.pill, subOn && styles.pillActive, tvMode && styles.tvSubtitlePill, tvMode && tvFocusStyle(focused)]}
               >
-                <Text style={[styles.pillText, tvMode && styles.tvSubtitleText]}>
+                <Text style={[styles.pillText, tvMode && styles.tvSubtitleButtonText]}>
                   {tvMode ? "الترجمة" : "CC"}
                 </Text>
               </Pressable>
@@ -599,18 +599,18 @@ const styles = StyleSheet.create({
   message: { color: "rgba(255,255,255,0.75)", fontSize: 14, textAlign: "center" },
   buffering: { ...StyleSheet.absoluteFillObject, alignItems: "center", justifyContent: "center" },
   topBar: { position: "absolute", top: 12, left: 12, right: 12, flexDirection: "row", alignItems: "center", gap: 8 },
-  tvTopBar: { top: 28, left: 40, right: 40, gap: 18 },
+  tvTopBar: { top: 34, left: 52, right: 52, gap: 24 },
   titleBlock: { flex: 1, alignItems: "center" },
   title: { color: "#fff", fontSize: 15, fontWeight: "700" },
-  tvTitle: { fontSize: 24, fontWeight: "800" },
+  tvTitle: { fontSize: 30, fontWeight: "800" },
   meta: { color: "rgba(255,255,255,0.6)", fontSize: 11, marginTop: 2 },
-  tvMeta: { fontSize: 16, marginTop: 4 },
+  tvMeta: { fontSize: 20, marginTop: 6 },
   iconButton: { padding: 8, borderRadius: 18, backgroundColor: "rgba(0,0,0,0.45)" },
   bottomArea: { position: "absolute", left: 12, right: 12, bottom: 12 },
-  tvBottomArea: { left: 40, right: 40, bottom: 28 },
+  tvBottomArea: { left: 52, right: 52, bottom: 36 },
   seekRow: { flexDirection: "row", alignItems: "center", gap: 8 },
   time: { color: "#fff", fontSize: 11, minWidth: 35, textAlign: "center" },
-  tvTime: { fontSize: 16, minWidth: 58 },
+  tvTime: { fontSize: 20, minWidth: 72 },
   seekTrack: { flex: 1, height: 22, justifyContent: "center" },
   seekFill: { height: 4, borderRadius: 2, backgroundColor: "#a78bfa" },
   seekThumb: { position: "absolute", width: 12, height: 12, borderRadius: 6, backgroundColor: "#fff", marginLeft: -6 },
@@ -618,26 +618,28 @@ const styles = StyleSheet.create({
   controlSide: { flex: 1, alignItems: "center" },
   controlCenter: { width: 66, alignItems: "center" },
   control: { flexDirection: "row", alignItems: "center", padding: 7 },
-  tvControl: { padding: 14, minWidth: 86, justifyContent: "center" },
-  tvEpisodeControl: { minWidth: 128, minHeight: 64, borderRadius: 14 },
-  tvEpisodeText: { color: "#fff", fontSize: 16, fontWeight: "800", marginHorizontal: 5 },
+  tvControl: { padding: 18, minWidth: 104, justifyContent: "center" },
+  tvEpisodeControl: { minWidth: 160, minHeight: 78, borderRadius: 18 },
+  tvEpisodeText: { color: "#fff", fontSize: 20, fontWeight: "800", marginHorizontal: 7 },
   controlText: { color: "#fff", fontSize: 10, marginLeft: -5 },
   playButton: { width: 48, height: 48, borderRadius: 24, backgroundColor: "#c4b5fd", alignItems: "center", justifyContent: "center" },
-  tvPlayButton: { width: 68, height: 68, borderRadius: 34 },
+  tvPlayButton: { width: 84, height: 84, borderRadius: 42 },
   flex: { flex: 1 },
   pill: { paddingHorizontal: 10, paddingVertical: 8, borderRadius: 10, backgroundColor: "rgba(0,0,0,0.55)" },
-  tvPill: { paddingHorizontal: 18, paddingVertical: 13, minWidth: 80, alignItems: "center" },
-  tvSubtitlePill: { minWidth: 150, minHeight: 58, paddingHorizontal: 24, paddingVertical: 15, borderRadius: 14, alignItems: "center", justifyContent: "center" },
+  tvPill: { paddingHorizontal: 24, paddingVertical: 18, minWidth: 104, alignItems: "center" },
+  tvSubtitlePill: { minWidth: 190, minHeight: 72, paddingHorizontal: 30, paddingVertical: 20, borderRadius: 18, alignItems: "center", justifyContent: "center" },
   pillActive: { backgroundColor: "rgba(139,92,246,0.65)" },
   pillText: { color: "#fff", fontSize: 11, fontWeight: "700" },
-  tvSubtitleText: { fontSize: 21, fontWeight: "900" },
+  tvSubtitleButtonText: { fontSize: 28, lineHeight: 40, fontWeight: "900" },
   skip: { paddingHorizontal: 10, paddingVertical: 8, borderRadius: 10, backgroundColor: "#fde68a" },
   skipText: { color: "#451a03", fontSize: 11, fontWeight: "700" },
   menu: { position: "absolute", bottom: 42, right: 0, minWidth: 130, backgroundColor: "rgba(20,20,25,0.97)", borderRadius: 12, padding: 5 },
   menuItem: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 10, paddingVertical: 9, gap: 15 },
   menuText: { color: "#fff", fontSize: 12 },
   subtitle: { position: "absolute", left: 20, right: 20, bottom: 95, alignItems: "center" },
+  tvSubtitle: { left: 80, right: 80, bottom: 172 },
   subtitleText: { color: "#fff", fontSize: 18, textAlign: "center", textShadowColor: "#000", textShadowRadius: 5, textShadowOffset: { width: 0, height: 1 } },
+  tvSubtitleText: { fontSize: 34, lineHeight: 48, fontWeight: "900", textShadowRadius: 9, textShadowOffset: { width: 0, height: 2 } },
   ended: { position: "absolute", alignSelf: "center", bottom: 65, alignItems: "center", gap: 10 },
   endedText: { color: "#fff", fontSize: 15, fontWeight: "700" },
   action: { paddingHorizontal: 16, paddingVertical: 10, borderRadius: 10, backgroundColor: "#a78bfa" },

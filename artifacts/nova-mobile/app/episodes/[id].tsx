@@ -88,13 +88,13 @@ function EpisodeRow({
       ]}
     >
       {/* Thumbnail */}
-      <View style={ep_s.thumbWrap}>
+      <View style={[ep_s.thumbWrap, tvMode && ep_s.tvThumbWrap]}>
         {thumb ? (
           <Image source={{ uri: thumb }} style={ep_s.thumb} />
         ) : (
           <View style={[ep_s.thumb, ep_s.thumbFallback]} />
         )}
-        <Text style={ep_s.durText}>{dur}</Text>
+        <Text style={[ep_s.durText, tvMode && ep_s.tvDurText]}>{dur}</Text>
         {watched && <View style={ep_s.watchedBorder} />}
       </View>
 
@@ -426,10 +426,10 @@ export default function EpisodeListScreen() {
             <View style={{ flexDirection: "row", gap: 8, marginTop: 4 }}>
               <Text style={[ep_s.heroBadge, tvMode && ep_s.tvHeroBadge]}>{total} حلقة</Text>
               {watchedCount > 0 && (
-                <Text style={[ep_s.heroBadge, { color: "#34D399" }]}>👁 {watchedCount} مشاهدة</Text>
+          <Text style={[ep_s.heroBadge, tvMode && ep_s.tvHeroBadge, { color: "#34D399" }]}>👁 {watchedCount} مشاهدة</Text>
               )}
               {anime.averageScore ? (
-                <Text style={[ep_s.heroBadge, { color: "#FBBF24" }]}>⭐ {(anime.averageScore / 10).toFixed(1)}</Text>
+          <Text style={[ep_s.heroBadge, tvMode && ep_s.tvHeroBadge, { color: "#FBBF24" }]}>⭐ {(anime.averageScore / 10).toFixed(1)}</Text>
               ) : null}
             </View>
           </View>
@@ -443,11 +443,11 @@ export default function EpisodeListScreen() {
           <View style={ep_s.progressTrack}>
             <View style={[ep_s.progressFill, { width: `${pct}%` }]} />
           </View>
-          <Text style={ep_s.pctText}>{pct}%</Text>
+           <Text style={[ep_s.pctText, tvMode && ep_s.tvText]}>{pct}%</Text>
         </View>
         {/* Search */}
         <View style={[ep_s.searchBar, tvMode && ep_s.tvSearchBar]}>
-          <Ionicons name="search" size={15} color="rgba(255,255,255,0.25)" />
+           <Ionicons name="search" size={tvMode ? 24 : 15} color="rgba(255,255,255,0.25)" />
           <TextInput
             value={search}
             onChangeText={setSearch}
@@ -465,7 +465,7 @@ export default function EpisodeListScreen() {
         {/* Page nav */}
         {!isSearching && totalPages > 1 && (
           <View style={ep_s.pageNav}>
-            <Text style={ep_s.pageRangeText}>
+              <Text style={[ep_s.pageRangeText, tvMode && ep_s.tvText]}>
               الحلقات {(currentPage - 1) * PAGE_SIZE + 1}–{Math.min(currentPage * PAGE_SIZE, total)}
             </Text>
             <View style={{ flexDirection: "row", gap: 6 }}>
@@ -474,15 +474,15 @@ export default function EpisodeListScreen() {
                 disabled={currentPage <= 1}
                 focusable={tvMode}
                 style={({ focused }) => [ep_s.pageBtn, currentPage <= 1 && { opacity: 0.3 }, tvMode && ep_s.tvPageBtn, tvMode && tvFocusStyle(focused)]}>
-                <Ionicons name="chevron-forward" size={14} color="rgba(255,255,255,0.6)" />
+                 <Ionicons name="chevron-forward" size={tvMode ? 24 : 14} color="rgba(255,255,255,0.6)" />
               </Pressable>
-              <Text style={ep_s.pageNumText}>{currentPage}/{totalPages}</Text>
+               <Text style={[ep_s.pageNumText, tvMode && ep_s.tvText]}>{currentPage}/{totalPages}</Text>
               <Pressable
                 onPress={() => setPage(p => Math.min(totalPages, p + 1))}
                 disabled={currentPage >= totalPages}
                 focusable={tvMode}
                 style={({ focused }) => [ep_s.pageBtn, currentPage >= totalPages && { opacity: 0.3 }, tvMode && ep_s.tvPageBtn, tvMode && tvFocusStyle(focused)]}>
-                <Ionicons name="chevron-back" size={14} color="rgba(255,255,255,0.6)" />
+                 <Ionicons name="chevron-back" size={tvMode ? 24 : 14} color="rgba(255,255,255,0.6)" />
               </Pressable>
             </View>
           </View>
@@ -584,25 +584,26 @@ const ep_s = StyleSheet.create({
   tvContainer: { paddingHorizontal: 56 },
   tvControls: { paddingHorizontal: 56, paddingTop: 22, paddingBottom: 18 },
   tvHero: { height: 390 },
-  tvBackBtn: { width: 64, height: 64, borderRadius: 20 },
-  tvHeroBottom: { paddingHorizontal: 56, paddingBottom: 24, gap: 24 },
-  tvHeroCover: { width: 150, height: 210, borderRadius: 18 },
-  tvHeroInfo: { paddingBottom: 10 },
-  tvHeroBadge: { fontSize: 17, lineHeight: 26 },
-  tvHeroTitle: { fontSize: 36, lineHeight: 48 },
-  tvText: { fontSize: 20 },
-  tvRow: { width: "23.5%", minHeight: 320, flexDirection: "column", alignItems: "stretch", paddingHorizontal: 20, paddingVertical: 20, gap: 16, borderRadius: 22, borderWidth: 2, borderBottomWidth: 2, borderColor: "rgba(255,255,255,0.08)", backgroundColor: "rgba(18,16,28,0.76)" },
-  tvColumnWrapper: { justifyContent: "space-between", paddingHorizontal: 28, gap: 24 },
-  tvListContent: { paddingTop: 8, gap: 24 },
-  tvSmallButton: { width: 64, height: 64, borderRadius: 18 },
-  tvSearchBar: { minHeight: 64, paddingVertical: 14, paddingHorizontal: 18, borderRadius: 16 },
-  tvThumbWrap: { width: "100%", aspectRatio: 1.72, height: undefined, borderRadius: 16 },
-  tvInfo: { flex: 0, width: "100%", minHeight: 82 },
-  tvEpisodeActions: { width: "100%", justifyContent: "flex-end" },
-  tvEpNum: { fontSize: 23 },
-  tvEpTitle: { fontSize: 20, lineHeight: 30 },
-  tvEpOriginal: { fontSize: 15, lineHeight: 23 },
-  tvPageBtn: { width: 64, height: 64, borderRadius: 16 },
-  tvWatchFromBtn: { marginHorizontal: 28, paddingVertical: 22, minHeight: 88, borderRadius: 22 },
-  tvWatchFromBtnText: { fontSize: 20 },
+  tvBackBtn: { width: 76, height: 76, borderRadius: 24 },
+  tvHeroBottom: { paddingHorizontal: 64, paddingBottom: 30, gap: 30 },
+  tvHeroCover: { width: 170, height: 238, borderRadius: 22 },
+  tvHeroInfo: { paddingBottom: 12 },
+  tvHeroBadge: { fontSize: 21, lineHeight: 32 },
+  tvHeroTitle: { fontSize: 42, lineHeight: 56 },
+  tvText: { fontSize: 24, lineHeight: 34 },
+  tvRow: { width: "23.5%", minHeight: 380, flexDirection: "column", alignItems: "stretch", paddingHorizontal: 24, paddingVertical: 24, gap: 20, borderRadius: 26, borderWidth: 2, borderBottomWidth: 2, borderColor: "rgba(255,255,255,0.08)", backgroundColor: "rgba(18,16,28,0.76)" },
+  tvColumnWrapper: { justifyContent: "space-between", paddingHorizontal: 32, gap: 28 },
+  tvListContent: { paddingTop: 12, gap: 30 },
+  tvSmallButton: { width: 72, height: 72, borderRadius: 20 },
+  tvSearchBar: { minHeight: 76, paddingVertical: 18, paddingHorizontal: 24, borderRadius: 18 },
+  tvThumbWrap: { width: "100%", aspectRatio: 1.72, height: undefined, borderRadius: 18 },
+  tvDurText: { fontSize: 11, paddingHorizontal: 6, paddingVertical: 3, borderRadius: 5 },
+  tvInfo: { flex: 0, width: "100%", minHeight: 98 },
+  tvEpisodeActions: { width: "100%", justifyContent: "flex-end", gap: 12 },
+  tvEpNum: { fontSize: 27, lineHeight: 38 },
+  tvEpTitle: { fontSize: 24, lineHeight: 36 },
+  tvEpOriginal: { fontSize: 18, lineHeight: 28 },
+  tvPageBtn: { width: 72, height: 72, borderRadius: 18 },
+  tvWatchFromBtn: { marginHorizontal: 32, paddingVertical: 26, minHeight: 104, borderRadius: 26 },
+  tvWatchFromBtnText: { fontSize: 24, lineHeight: 36 },
 });
