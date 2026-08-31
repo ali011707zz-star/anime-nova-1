@@ -8,6 +8,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { getBaseUrl } from "@/utils/api";
 import { isTvDevice, tvFocusStyle } from "@/utils/tv";
+import { useTvFocusMemory } from "@/utils/tvFocus";
 import { getGridColumnCount } from "@/components/AnimeCard";
 
 /* ── Data ── */
@@ -240,6 +241,7 @@ export default function BrowseScreen() {
   const [searchLoading, setSearchLoading] = useState(false);
 
   const listRef = useRef<FlatList<AnimeResult>>(null);
+  const { preferredKey, ready, rememberFocus } = useTvFocusMemory("browse");
   const genRef = useRef(0);
   const searchAbortRef = useRef<AbortController | null>(null);
   const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -556,6 +558,12 @@ export default function BrowseScreen() {
                 <AnimeCard
                   anime={item}
                   columns={gridColumns}
+                  hasTVPreferredFocus={tvMode && ready && preferredKey === String(item.id)}
+                  onFocus={() => {
+                    rememberFocus(String(item.id));
+                    const index = filteredItems.findIndex((candidate) => candidate.id === item.id);
+                    if (index >= 0) listRef.current?.scrollToIndex({ index, animated: false, viewPosition: 0.35 });
+                  }}
                   onPress={() => router.push(`/anime/${item.id}?title=${encodeURIComponent(item.title.romaji)}&english=${encodeURIComponent(item.title.english || "")}`)}
                 />
               )}

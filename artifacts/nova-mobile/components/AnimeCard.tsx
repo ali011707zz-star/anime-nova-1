@@ -15,6 +15,7 @@ type Props = {
   progress?: number;
   showProgress?: boolean;
   onFocus?: () => void;
+  hasTVPreferredFocus?: boolean;
 };
 
 export function getRailCardWidth(windowWidth: number, visibleCards = 3, gap = 10) {
@@ -48,7 +49,7 @@ export function getGridColumnCount(windowWidth: number, windowHeight: number) {
   return 3;
 }
 
-export const AnimeCard = React.memo(function AnimeCard({ anime, size = "sm", cardWidth, progress, showProgress, onFocus }: Props) {
+export const AnimeCard = React.memo(function AnimeCard({ anime, size = "sm", cardWidth, progress, showProgress, onFocus, hasTVPreferredFocus = false }: Props) {
   const router = useRouter();
   const colors = useColors();
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();
@@ -69,7 +70,7 @@ export const AnimeCard = React.memo(function AnimeCard({ anime, size = "sm", car
     <Pressable
       onPress={() => router.push(`/anime/${anime.id}?title=${encodeURIComponent(anime.title.romaji)}&english=${encodeURIComponent(anime.title.english || "")}`)}
       focusable={tvMode}
-      hasTVPreferredFocus={false}
+      hasTVPreferredFocus={hasTVPreferredFocus}
       hitSlop={tvMode ? 8 : 4}
       pressRetentionOffset={12}
       onFocus={onFocus}

@@ -16,6 +16,7 @@ import { getBaseUrl } from "@/utils/api";
 import { secureFetch } from "@/utils/secureApi";
 import { getYoutubeEmbedUrl, getYoutubeReferer } from "@/utils/youtube";
 import { isTvDevice, tvFocusStyle } from "@/utils/tv";
+import { useTvFocusMemory } from "@/utils/tvFocus";
 
 const { width: W } = Dimensions.get("window");
 
@@ -195,6 +196,10 @@ export default function AnimeDetailScreen() {
   const tvMode = isTvDevice(width, height);
   const topPad = Platform.OS === "web" ? 0 : insets.top;
   const { isFavorite, toggleFavorite } = useApp();
+  const { preferredKey, ready, rememberFocus } = useTvFocusMemory(`detail:${id || "unknown"}`);
+  const rememberDetailFocus = useCallback((key: string) => {
+    if (tvMode) rememberFocus(key);
+  }, [rememberFocus, tvMode]);
 
   const [anime, setAnime] = useState<any>(null);
   const [loading, setLoading] = useState(true);
@@ -423,6 +428,8 @@ export default function AnimeDetailScreen() {
     <View style={[d.container, { paddingTop: topPad }]}>
       <Pressable onPress={() => router.canGoBack() ? router.back() : router.replace("/(tabs)")}
         focusable={tvMode}
+        hasTVPreferredFocus={tvMode && ready && preferredKey === "back"}
+        onFocus={() => rememberDetailFocus("back")}
         style={({ focused }) => [
           { position: "absolute", right: 14, top: 14, width: 36, height: 36, backgroundColor: "rgba(0,0,0,0.5)", borderRadius: 14, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: "rgba(255,255,255,0.1)", zIndex: 10 },
           tvMode && tvFocusStyle(focused),
@@ -436,6 +443,8 @@ export default function AnimeDetailScreen() {
     <View style={[d.container, { paddingTop: topPad }]}>
       <Pressable onPress={() => router.canGoBack() ? router.back() : router.replace("/(tabs)")}
         focusable={tvMode}
+        hasTVPreferredFocus={tvMode && ready && preferredKey === "back"}
+        onFocus={() => rememberDetailFocus("back")}
         style={({ focused }) => [
           { position: "absolute", right: 14, top: 14, width: 36, height: 36, backgroundColor: "rgba(0,0,0,0.5)", borderRadius: 14, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: "rgba(255,255,255,0.1)", zIndex: 10 },
           tvMode && tvFocusStyle(focused),
@@ -497,6 +506,8 @@ export default function AnimeDetailScreen() {
           <Pressable
             onPress={() => router.canGoBack() ? router.back() : router.replace("/(tabs)")}
             focusable={tvMode}
+            hasTVPreferredFocus={tvMode && ready && preferredKey === "back"}
+            onFocus={() => rememberDetailFocus("back")}
             style={({ focused }) => [d.backBtn, tvMode && d.tvBackBtn, tvMode && tvFocusStyle(focused)]}
           >
             <Ionicons name="chevron-back" size={tvMode ? 30 : 20} color="#fff" />
@@ -569,6 +580,8 @@ export default function AnimeDetailScreen() {
               },
             } as any)}
             focusable={tvMode}
+            hasTVPreferredFocus={tvMode && ready && preferredKey === "watch"}
+            onFocus={() => rememberDetailFocus("watch")}
             style={({ focused }) => [d.watchBtn, tvMode && d.tvWatchBtn, { flex: 1 }, tvMode && tvFocusStyle(focused)]}
           >
             <View style={[d.watchBtnIcon, tvMode && d.tvWatchBtnIcon]}>
@@ -598,6 +611,8 @@ export default function AnimeDetailScreen() {
             { icon: "star",        label: "تقييمي",    active: myRating > 0, activeColor: "#FBBF24", onPress: () => setShowRating(true) },
           ].map(({ icon, label, active, activeColor, onPress }) => (
              <Pressable key={label} onPress={onPress} focusable={tvMode}
+               hasTVPreferredFocus={tvMode && ready && preferredKey === label}
+               onFocus={() => rememberDetailFocus(label)}
                style={({ focused }) => [d.actionBtn, tvMode && d.tvActionBtn, active && { backgroundColor: activeColor + "18", borderColor: activeColor + "40" }, tvMode && tvFocusStyle(focused)]}>
               <Ionicons name={icon as any} size={tvMode ? 32 : 16} color={active ? activeColor : "rgba(255,255,255,0.4)"} />
               <Text style={[d.actionBtnLabel, tvMode && d.tvActionBtnLabel, active && { color: activeColor }]}>{label}</Text>
@@ -657,7 +672,9 @@ export default function AnimeDetailScreen() {
               >{desc}</Text>
               {desc.length > 200 && (
                  <Pressable onPress={() => setShowFull(f => !f)} focusable={tvMode}
-                   style={({ focused }) => [d.readMoreBtn, tvMode && d.tvReadMoreBtn, tvMode && tvFocusStyle(focused)]}>
+                    hasTVPreferredFocus={tvMode && ready && preferredKey === "read-more"}
+                    onFocus={() => rememberDetailFocus("read-more")}
+                    style={({ focused }) => [d.readMoreBtn, tvMode && d.tvReadMoreBtn, tvMode && tvFocusStyle(focused)]}>
                   <Text style={[d.readMoreText, tvMode && d.tvReadMoreText]}>{showFull ? "عرض أقل" : "عرض المزيد"}</Text>
                   <Ionicons name={showFull ? "chevron-up" : "chevron-down"} size={tvMode ? 22 : 13} color="#8B5CF6" />
                 </Pressable>
@@ -693,10 +710,12 @@ export default function AnimeDetailScreen() {
         {trailerYT ? (
           <View style={[d.section, tvMode && d.tvSection]}>
             <SectionHeader title="الإعلان الدعائي" tvMode={tvMode} />
-             <Pressable
-               onPress={() => setShowTrailer(true)}
-               focusable={tvMode}
-               style={({ focused }) => [d.trailerBtn, tvMode && tvFocusStyle(focused)]}
+               <Pressable
+                onPress={() => setShowTrailer(true)}
+                focusable={tvMode}
+                hasTVPreferredFocus={tvMode && ready && preferredKey === "trailer"}
+                onFocus={() => rememberDetailFocus("trailer")}
+                style={({ focused }) => [d.trailerBtn, tvMode && tvFocusStyle(focused)]}
              >
               <Image
                 source={{ uri: anime.trailer?.thumbnail || `https://img.youtube.com/vi/${trailerYT}/hqdefault.jpg` }}
@@ -729,6 +748,8 @@ export default function AnimeDetailScreen() {
               { key: "similar", label: "مشابهة" },
             ] as const).map(t => (
                <Pressable key={t.key} onPress={() => setTab(t.key)} focusable={tvMode}
+                 hasTVPreferredFocus={tvMode && ready && preferredKey === `tab:${t.key}`}
+                 onFocus={() => rememberDetailFocus(`tab:${t.key}`)}
                  style={({ focused }) => [d.tabBtn, tvMode && d.tvTabBtn, tvMode && tvFocusStyle(focused)]}>
                  <Text style={[d.tabBtnText, tvMode && d.tvTabBtnText, tab === t.key && d.tabBtnTextActive]}>{t.label}</Text>
                 {tab === t.key && <View style={d.tabIndicator} />}

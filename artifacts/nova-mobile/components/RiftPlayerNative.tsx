@@ -6,6 +6,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   ActivityIndicator,
   Alert,
+  BackHandler,
   Dimensions,
   PanResponder,
   Platform,
@@ -170,6 +171,43 @@ function TvSubtitleSettingsPanel({
             </Pressable>
           ))}
         </View>
+        <View style={styles.tvSettingsFineTuneRow}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="تصغير حجم الترجمة"
+            onPress={() => setSubtitleSettings((current) => ({
+              ...current,
+              fontSize: Math.max(28, current.fontSize - 4),
+            }))}
+            focusable
+            style={({ focused }) => [
+              styles.tvSettingsFineTuneButton,
+              tvFocusStyle(focused),
+            ]}
+          >
+            <Ionicons name="remove" size={22} color="#c4b5fd" />
+            <Text style={styles.tvSettingsFineTuneText}>أصغر</Text>
+          </Pressable>
+          <Text style={styles.tvSettingsFineTuneValue}>
+            حجم مخصص: {subtitleSettings.fontSize}
+          </Text>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="تكبير حجم الترجمة"
+            onPress={() => setSubtitleSettings((current) => ({
+              ...current,
+              fontSize: Math.min(80, current.fontSize + 4),
+            }))}
+            focusable
+            style={({ focused }) => [
+              styles.tvSettingsFineTuneButton,
+              tvFocusStyle(focused),
+            ]}
+          >
+            <Ionicons name="add" size={22} color="#c4b5fd" />
+            <Text style={styles.tvSettingsFineTuneText}>أكبر</Text>
+          </Pressable>
+        </View>
 
         <Text style={styles.tvSettingsSectionLabel}>شكل النص</Text>
         <Pressable
@@ -330,7 +368,13 @@ function TvPlayerSurface({
         </View>
       )}
       {subOn && activeCue && (
-        <View pointerEvents="none" style={styles.tvCinemaSubtitle}>
+        <View
+          pointerEvents="none"
+          style={[
+            styles.tvCinemaSubtitle,
+            { bottom: 300 + subtitleSettings.verticalOffset },
+          ]}
+        >
           <Text
             style={[
               styles.tvSubtitleText,
@@ -788,6 +832,24 @@ export function RiftPlayer({
       if (hideTimer.current) clearTimeout(hideTimer.current);
     };
   }, [scheduleHide]);
+
+  useEffect(() => {
+    if (Platform.OS !== "android" || !tvMode) return;
+    const subscription = BackHandler.addEventListener("hardwareBackPress", () => {
+      if (showSubtitleSettings) {
+        setShowSubtitleSettings(false);
+        return true;
+      }
+      if (showSources || showSpeeds) {
+        setShowSources(false);
+        setShowSpeeds(false);
+        return true;
+      }
+      onBack();
+      return true;
+    });
+    return () => subscription.remove();
+  }, [onBack, showSources, showSpeeds, showSubtitleSettings, tvMode]);
 
   useEffect(() => {
     const progressSub = player.addListener("progress", (event: any) => {
@@ -1643,6 +1705,15 @@ const styles = StyleSheet.create({
     marginTop: 18, marginBottom: 10,
   },
   tvSettingsOptionRow: { flexDirection: "row", gap: 12 },
+  tvSettingsFineTuneRow: { flexDirection: "row", alignItems: "center", gap: 12, marginTop: 12 },
+  tvSettingsFineTuneButton: {
+    minWidth: 128, minHeight: 58, borderRadius: 14, paddingHorizontal: 16,
+    flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6,
+    backgroundColor: "rgba(255,255,255,0.06)",
+    borderWidth: 1, borderColor: "rgba(255,255,255,0.14)",
+  },
+  tvSettingsFineTuneText: { color: "#fff", fontSize: 16, fontWeight: "800" },
+  tvSettingsFineTuneValue: { flex: 1, color: "rgba(255,255,255,0.58)", fontSize: 15, textAlign: "center", fontWeight: "700" },
   tvSettingsSizeButton: {
     flex: 1, minHeight: 102, borderRadius: 16, alignItems: "center", justifyContent: "center",
     backgroundColor: "rgba(255,255,255,0.06)",

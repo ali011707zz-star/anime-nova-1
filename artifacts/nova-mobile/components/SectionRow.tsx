@@ -15,6 +15,7 @@ import { AnilistMedia } from "@/utils/anilist";
 import { AnimeCard, getRailCardWidth, getRailSidePadding } from "./AnimeCard";
 import { Ionicons } from "@expo/vector-icons";
 import { isTvDevice, tvFocusStyle, useTvMetrics } from "@/utils/tv";
+import { useTvFocusMemory } from "@/utils/tvFocus";
 
 type Props = {
   title: string;
@@ -31,6 +32,7 @@ export const SectionRow = React.memo(function SectionRow({ title, items, onSeeAl
   const cardWidth = getRailCardWidth(width, tvMode ? 5 : 3);
   const sidePadding = getRailSidePadding(width);
   const railRef = React.useRef<FlatList<AnilistMedia>>(null);
+  const { preferredKey, ready, rememberFocus } = useTvFocusMemory("home");
 
   if (!items.length) return null;
 
@@ -45,7 +47,11 @@ export const SectionRow = React.memo(function SectionRow({ title, items, onSeeAl
           anime={item}
           size={size}
           cardWidth={cardWidth}
-          onFocus={() => railRef.current?.scrollToIndex({ index, animated: true, viewPosition: 0.5 })}
+          hasTVPreferredFocus={tvMode && ready && preferredKey === `${title}:${item.id}`}
+          onFocus={() => {
+            rememberFocus(`${title}:${item.id}`);
+            railRef.current?.scrollToIndex({ index, animated: true, viewPosition: 0.5 });
+          }}
         />
       )}
       showsHorizontalScrollIndicator={false}

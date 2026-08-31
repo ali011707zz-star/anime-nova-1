@@ -10,6 +10,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { getBaseUrl } from "@/utils/api";
 import { isTvDevice, tvFocusStyle } from "@/utils/tv";
+import { useTvFocusMemory } from "@/utils/tvFocus";
 
 /* ── AniList query ── */
 const ANIME_QUERY = `
@@ -62,10 +63,12 @@ async function saveCommentCounts(animeId: string, counts: Record<number, number>
 function EpisodeRow({
   n, anime, epData, episodeTitlesAr, watched, commentCount, onToggleWatched, onWatch, onComment,
   onFocus,
+  hasTVPreferredFocus = false,
 }: {
   n: number; anime: any; epData: any[]; episodeTitlesAr: Record<number, string>; watched: boolean; commentCount: number;
   onToggleWatched: (n: number) => void; onWatch: (n: number) => void; onComment: (n: number) => void;
   onFocus?: () => void;
+  hasTVPreferredFocus?: boolean;
 }) {
   const { width, height } = useWindowDimensions();
   const tvMode = isTvDevice(width, height);
@@ -82,6 +85,7 @@ function EpisodeRow({
     <Pressable
       onPress={() => onWatch(n)}
       focusable={tvMode}
+      hasTVPreferredFocus={hasTVPreferredFocus}
       onFocus={onFocus}
       style={({ focused }) => [
         ep_s.row,
@@ -163,6 +167,7 @@ export default function EpisodeListScreen() {
   const [watched, setWatched] = useState<Set<number>>(new Set());
   const [commentCounts, setCommentCounts] = useState<Record<number, number>>({});
   const episodeListRef = useRef<FlatList<number>>(null);
+  const { preferredKey, ready, rememberFocus } = useTvFocusMemory(`episodes:${id || "unknown"}`);
 
   useEffect(() => {
     if (!id) return;
@@ -508,6 +513,8 @@ export default function EpisodeListScreen() {
           <Pressable
             onPress={() => watchEp(displayedEps[0] || 1)}
             focusable={tvMode}
+            hasTVPreferredFocus={tvMode && ready && preferredKey === "continue"}
+            onFocus={() => { if (tvMode) rememberFocus("continue"); }}
             style={({ focused }) => [ep_s.watchFromBtn, tvMode && ep_s.tvWatchFromBtn, tvMode && tvFocusStyle(focused)]}>
             <Ionicons name="play" size={tvMode ? 24 : 14} color="#8B5CF6" />
             <Text style={[ep_s.watchFromBtnText, tvMode && ep_s.tvWatchFromBtnText]}>
@@ -527,9 +534,11 @@ export default function EpisodeListScreen() {
             onWatch={watchEp}
             onComment={openComments}
            onFocus={() => {
+             if (tvMode) rememberFocus(String(n));
              const index = displayedEps.indexOf(n);
              if (index >= 0) episodeListRef.current?.scrollToIndex({ index, animated: true, viewPosition: 0.35 });
            }}
+           hasTVPreferredFocus={tvMode && ready && preferredKey === String(n)}
           />
         )}
       />
