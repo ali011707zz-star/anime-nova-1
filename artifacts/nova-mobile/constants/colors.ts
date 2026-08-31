@@ -26,32 +26,6 @@ type Palette = {
 
 // ── الثيمات ───────────────────────────────────────────────────────────────────
 
-/** light — الثيم الافتراضي (خلفية بيضاء واضحة) */
-const light: Palette = {
-  text:                "#111827",
-  tint:                "#6D28D9",
-  background:          "#FFFFFF",
-  foreground:          "#111827",
-  card:                "#F8FAFC",
-  cardForeground:     "#111827",
-  primary:             "#6D28D9",
-  primaryForeground:   "#FFFFFF",
-  secondary:           "#F1F5F9",
-  secondaryForeground: "#1F2937",
-  muted:               "#F1F5F9",
-  mutedForeground:    "#64748B",
-  accent:              "#7C3AED",
-  accentForeground:    "#FFFFFF",
-  destructive:         "#DC2626",
-  destructiveForeground: "#FFFFFF",
-  border:              "#E2E8F0",
-  input:               "#E2E8F0",
-  violet:              "#7C3AED",
-  violetDark:          "#5B21B6",
-  violetDeep:          "#4C1D95",
-  surface:             "#F8FAFC",
-};
-
 /** dark — أسود كامل مع أسطح داكنة */
 const dark: Palette = {
   text:                "#F8FAFC",
@@ -183,7 +157,6 @@ const pink: Palette = {
 };
 
 const colors = {
-  light,
   dark,
   amoled,
   violet,
