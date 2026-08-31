@@ -111,3 +111,4 @@
  - [Source catalog collection](source-catalog-collection.md) — AF/AS/SA/FX لكل منها pagination ومسار تشغيل مختلف؛ لا تعتبر العنوان أو الحلقة متاحة قبل فحص media response.
 - [AniNeko quality availability](anineko-availability-quality.md) — AniNeko episode pages use generic HD labels; picker quality must come from the embed/master HLS metadata.
 - [Source health controls](source-health-controls.md) — provider waves must use deferred jobs; deadline signals, single-flight dedupe, and short circuit cooldowns protect the VPS.
+- [SSE stream benchmarking](sse-stream-benchmarking.md) — read SSE incrementally; large client reads can hide progressive rows and misreport first-result latency.
