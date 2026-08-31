@@ -3,9 +3,9 @@ import { useFocusEffect, useRouter } from "expo-router";
 import { LinearGradient } from "expo-linear-gradient";
 import { FlatList, Image, useWindowDimensions } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import React, { useState, useEffect, useCallback, useMemo } from "react";
+import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import {
-  Platform, Pressable, RefreshControl, ScrollView,
+  Platform, Pressable, RefreshControl,
   StyleSheet, Text, View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -19,19 +19,12 @@ import { useColors } from "@/hooks/useColors";
 import {
   AIRING_QUERY, AnilistMedia, anilistQuery,
   POPULAR_QUERY, TRENDING_QUERY,
-  SEASONAL_QUERY, TOP_RATED_QUERY, MOVIES_QUERY,
-  ISEKAI_QUERY, SPRING_2026_QUERY, FALL_2025_QUERY,
-  fetchAllTodayEpisodes, formatAiringTime,
-  getCurrentSeason,
+  TOP_RATED_QUERY, MOVIES_QUERY, ISEKAI_QUERY,
 } from "@/utils/anilist";
 import { useApp } from "@/context/AppContext";
 import { getBaseUrl } from "@/utils/api";
 import { isTvDevice, tvFocusStyle } from "@/utils/tv";
 import { getPosterUri, getTvPosterUri } from "@/utils/media";
-
-const SEASON_AR: Record<string, string> = {
-  WINTER: "شتاء", SPRING: "ربيع", SUMMER: "صيف", FALL: "خريف",
-};
 
 function randomSample<T>(items: T[], limit = items.length): T[] {
   const shuffled = [...items];
@@ -52,7 +45,6 @@ export default function HomeScreen() {
   const isTvLayout = isTvDevice(width, height);
 
   const topPad = Platform.OS === "web" ? 0 : insets.top;
-  const { season, year } = getCurrentSeason();
 
   /* TMDB animation movies — disabled (section hidden) */
   const [animMovies] = useState<TmdbMovie[]>([]);
@@ -60,46 +52,37 @@ export default function HomeScreen() {
   const { data: trending, isLoading: loadingT, refetch: refetchT } = useQuery({
     queryKey: ["trending"],
     queryFn: () => anilistQuery<{ Page: { media: AnilistMedia[] } }>(TRENDING_QUERY, { page: 1 }),
+    staleTime: 5 * 60 * 1000,
   });
 
   const { data: popular, isLoading: loadingP, refetch: refetchP } = useQuery({
     queryKey: ["popular"],
     queryFn: () => anilistQuery<{ Page: { media: AnilistMedia[] } }>(POPULAR_QUERY, { page: 1 }),
+    staleTime: 5 * 60 * 1000,
   });
 
   const { data: airing, isLoading: loadingA, refetch: refetchA } = useQuery({
     queryKey: ["airing"],
     queryFn: () => anilistQuery<{ Page: { media: AnilistMedia[] } }>(AIRING_QUERY),
-  });
-
-  const { data: seasonal, refetch: refetchS } = useQuery({
-    queryKey: ["seasonal", season, year],
-    queryFn: () => anilistQuery<{ Page: { media: AnilistMedia[] } }>(SEASONAL_QUERY, { season, year }),
+    staleTime: 5 * 60 * 1000,
   });
 
   const { data: topRated, refetch: refetchR } = useQuery({
     queryKey: ["topRated"],
     queryFn: () => anilistQuery<{ Page: { media: AnilistMedia[] } }>(TOP_RATED_QUERY),
+    staleTime: 5 * 60 * 1000,
   });
 
   const { data: movies, refetch: refetchM } = useQuery({
     queryKey: ["animeMovies"],
     queryFn: () => anilistQuery<{ Page: { media: AnilistMedia[] } }>(MOVIES_QUERY),
-  });
-
-  const { data: spring2026, refetch: refetchSpring } = useQuery({
-    queryKey: ["spring2026"],
-    queryFn: () => anilistQuery<{ Page: { media: AnilistMedia[] } }>(SPRING_2026_QUERY),
-  });
-
-  const { data: fall2025, refetch: refetchFall } = useQuery({
-    queryKey: ["fall2025"],
-    queryFn: () => anilistQuery<{ Page: { media: AnilistMedia[] } }>(FALL_2025_QUERY),
+    staleTime: 5 * 60 * 1000,
   });
 
   const { data: isekai, refetch: refetchIsekai } = useQuery({
     queryKey: ["isekai"],
     queryFn: () => anilistQuery<{ Page: { media: AnilistMedia[] } }>(ISEKAI_QUERY),
+    staleTime: 5 * 60 * 1000,
   });
 
   /* أحدث الحلقات — نفس كتالوج AnimeSlayer المستخدم في الويب. */
@@ -164,18 +147,30 @@ export default function HomeScreen() {
   /* ── Dubbed cartoon catalog ── */
   const BASE_URL = getBaseUrl();
   const [dubbedSeries, setDubbedSeries] = useState<any[]>([]);
+  const dubbedRequestRef = useRef<AbortController | null>(null);
+  const dubbedLastFetchedRef = useRef(0);
   const refreshDubbed = useCallback(async (forceRefresh = false) => {
+    if (!forceRefresh && Date.now() - dubbedLastFetchedRef.current < 5 * 60 * 1000) return;
+    dubbedRequestRef.current?.abort();
+    const controller = new AbortController();
+    dubbedRequestRef.current = controller;
     const refresh = forceRefresh ? "&refresh=1" : "";
     fetch(`${BASE_URL}/api/dubbed/catalog?page=1${refresh}`, {
       cache: forceRefresh ? "no-store" : "default",
+      signal: controller.signal,
     })
       .then(r => r.json())
-      .then(d => setDubbedSeries((d.results || d.items || d.series || []).slice(0, 14)))
+      .then(d => {
+        if (!controller.signal.aborted) {
+          setDubbedSeries((d.results || d.items || d.series || []).slice(0, 14));
+          dubbedLastFetchedRef.current = Date.now();
+        }
+      })
       .catch((e) => { if (e?.name !== "AbortError") console.warn("[Home] dubbed/catalog fetch error"); });
   }, [BASE_URL]);
-  useEffect(() => { void refreshDubbed(); }, [refreshDubbed]);
   useFocusEffect(useCallback(() => {
     void refreshDubbed();
+    return () => dubbedRequestRef.current?.abort();
   }, [refreshDubbed]));
 
   /* ── أنيميشن مدبلج (aw-dubbed) catalog ── */
@@ -193,11 +188,8 @@ export default function HomeScreen() {
   const trendingList = trending?.Page?.media || [];
   const popularList = popular?.Page?.media || [];
   const airingList = airing?.Page?.media || [];
-  const seasonalList = seasonal?.Page?.media || [];
   const topRatedList = topRated?.Page?.media || [];
   const moviesList = movies?.Page?.media || [];
-  const spring2026List = spring2026?.Page?.media || [];
-  const fall2025List = fall2025?.Page?.media || [];
   const isekaiList = isekai?.Page?.media || [];
 
   /* الويب يبني الـHero من الأكثر شعبية ذات الـbanner، وليس من TRENDING. */
@@ -214,19 +206,69 @@ export default function HomeScreen() {
 
   const refresh = async () => {
     await Promise.all([
-      refetchT(), refetchP(), refetchA(), refetchS(), refetchR(), refetchM(),
-      refetchSpring(), refetchFall(), refetchIsekai(),
+      refetchT(), refetchP(), refetchA(), refetchR(), refetchM(), refetchIsekai(),
       refreshDubbed(true),
     ]);
   };
 
+  type HomeRow = {
+    key: string;
+    title: string;
+    items: AnilistMedia[];
+    onSeeAll: () => void;
+  };
+  const homeRows = useMemo<HomeRow[]>(
+    () => [
+      {
+        key: "trending",
+        title: "رائج الآن",
+        items: trendingList,
+        onSeeAll: () => router.push({ pathname: "/browse", params: { sort: "TRENDING_DESC" } } as any),
+      },
+      {
+        key: "airing",
+        title: "يُعرض حالياً",
+        items: airingList,
+        onSeeAll: () => router.push({ pathname: "/browse", params: { status: "RELEASING", sort: "POPULARITY_DESC" } } as any),
+      },
+      {
+        key: "top-rated",
+        title: "الأعلى تقييماً على الإطلاق",
+        items: topRatedList,
+        onSeeAll: () => router.push({ pathname: "/browse", params: { sort: "SCORE_DESC" } } as any),
+      },
+      {
+        key: "popular",
+        title: "الأكثر شعبية",
+        items: popularList,
+        onSeeAll: () => router.push({ pathname: "/browse", params: { sort: "POPULARITY_DESC" } } as any),
+      },
+      {
+        key: "movies",
+        title: "أفلام الأنمي",
+        items: moviesList,
+        onSeeAll: () => router.push({ pathname: "/browse", params: { format: "MOVIE", sort: "POPULARITY_DESC" } } as any),
+      },
+      {
+        key: "isekai",
+        title: "إيسيكاي",
+        items: isekaiList,
+        onSeeAll: () => router.push({ pathname: "/browse", params: { genre: "Isekai", genreAr: "إيسيكاي", sort: "POPULARITY_DESC" } } as any),
+      },
+    ],
+    [airingList, isekaiList, moviesList, popularList, router, topRatedList, trendingList],
+  );
+
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
-      <ScrollView
-        showsVerticalScrollIndicator={false}
-        contentContainerStyle={{ paddingBottom: 90 }}
-        refreshControl={<RefreshControl refreshing={false} onRefresh={refresh} tintColor={colors.primary} />}
-      >
+      <FlatList
+        data={isLoading ? [] : homeRows}
+        keyExtractor={(item) => item.key}
+        renderItem={({ item }) => (
+          <SectionRow title={item.title} items={item.items} size="md" onSeeAll={item.onSeeAll} />
+        )}
+        ListHeaderComponent={
+          <View>
         {/* Header */}
         <View style={[styles.header, { paddingTop: topPad + 6 }]}>
           <View style={styles.logoRow}>
@@ -286,7 +328,13 @@ export default function HomeScreen() {
                    focusable={isTvLayout}
                    style={({ focused }) => [styles.historyCard, { width: railCardWidth, height: Math.round(railCardWidth * 0.7), backgroundColor: colors.card, borderColor: colors.border }, isTvLayout && tvFocusStyle(focused)]}
                 >
-                  <Image source={{ uri: h.thumbnail || `https://img.anili.st/media/${h.animeId}` }} style={styles.historyImg} resizeMode="cover" />
+                  <Image
+                    source={{ uri: h.thumbnail || `https://img.anili.st/media/${h.animeId}` }}
+                    style={styles.historyImg}
+                    resizeMode="cover"
+                    resizeMethod="resize"
+                    fadeDuration={100}
+                  />
                   <LinearGradient colors={["transparent", "rgba(0,0,0,0.9)"]} style={styles.historyGrad}>
                     <Text style={styles.historyEp}>حلقة {h.ep}</Text>
                     <Text style={styles.historyTitle} numberOfLines={1}>{h.english || h.title}</Text>
@@ -337,9 +385,15 @@ export default function HomeScreen() {
                    style={({ focused }) => [todayEpStyles.card, { width: railCardWidth, height: Math.round(railCardWidth * 1.46), backgroundColor: colors.card, borderColor: colors.border }, isTvLayout && tvFocusStyle(focused)]}
                 >
                   {ep.cover ? (
-                   <Image source={{ uri: isTvLayout
-                     ? getTvPosterUri(ep, ep.animeId ? `https://img.anili.st/media/${ep.animeId}` : "")
-                     : getPosterUri(ep, ep.animeId ? `https://img.anili.st/media/${ep.animeId}` : "") }} style={todayEpStyles.img} resizeMode="cover" />
+                    <Image
+                      source={{ uri: isTvLayout
+                        ? getTvPosterUri(ep, ep.animeId ? `https://img.anili.st/media/${ep.animeId}` : "")
+                        : getPosterUri(ep, ep.animeId ? `https://img.anili.st/media/${ep.animeId}` : "") }}
+                      style={todayEpStyles.img}
+                      resizeMode="cover"
+                      resizeMethod="resize"
+                      fadeDuration={isTvLayout ? 0 : 100}
+                    />
                   ) : (
                     <View style={[todayEpStyles.img, { backgroundColor: colors.card, alignItems: "center", justifyContent: "center" }]}>
                       <Ionicons name="tv" size={28} color="rgba(255,255,255,0.2)" />
@@ -405,7 +459,7 @@ export default function HomeScreen() {
                      style={({ focused }) => [todayStyles.card, { width: railCardWidth, height: Math.round(railCardWidth * 1.46), backgroundColor: colors.card, borderColor: colors.border }, isTvLayout && tvFocusStyle(focused)]}
                   >
                     {imgUri ? (
-                      <Image source={{ uri: imgUri }} style={todayStyles.img} resizeMode="cover" />
+                      <Image source={{ uri: imgUri }} style={todayStyles.img} resizeMode="cover" resizeMethod="resize" fadeDuration={isTvLayout ? 0 : 100} />
                     ) : (
                       <View style={[todayStyles.img, { backgroundColor: colors.card, alignItems: "center", justifyContent: "center" }]}>
                         <Ionicons name="film-outline" size={28} color="rgba(255,255,255,0.2)" />
@@ -463,7 +517,7 @@ export default function HomeScreen() {
                      style={({ focused }) => [todayStyles.card, { width: railCardWidth, height: Math.round(railCardWidth * 1.46), backgroundColor: colors.card, borderColor: colors.border }, isTvLayout && tvFocusStyle(focused)]}
                   >
                     {imgUri ? (
-                      <Image source={{ uri: imgUri }} style={todayStyles.img} resizeMode="cover" />
+                       <Image source={{ uri: imgUri }} style={todayStyles.img} resizeMode="cover" resizeMethod="resize" fadeDuration={isTvLayout ? 0 : 100} />
                     ) : (
                       <View style={[todayStyles.img, { backgroundColor: colors.card, alignItems: "center", justifyContent: "center" }]}>
                         <Ionicons name="tv" size={28} color="rgba(255,255,255,0.2)" />
@@ -484,27 +538,25 @@ export default function HomeScreen() {
         )}
 
         <View style={{ marginTop: 24 }}>
-          {isLoading ? (
+          {isLoading && (
             <>
               <SkeletonRow />
               <SkeletonRow />
               <SkeletonRow />
-            </>
-          ) : (
-            <>
-              <SectionRow title="رائج الآن" items={trendingList} size="md" onSeeAll={() => router.push({ pathname: "/browse", params: { sort: "TRENDING_DESC" } } as any)} />
-              <SectionRow title={`أنمي ${SEASON_AR[season] ?? "الموسم"} ${year}`} items={seasonalList} size="md" onSeeAll={() => router.push({ pathname: "/browse", params: { sort: "POPULARITY_DESC", season, year: String(year) } } as any)} />
-              <SectionRow title="أنمي ربيع 2026" items={spring2026List} size="md" onSeeAll={() => router.push({ pathname: "/browse", params: { sort: "POPULARITY_DESC", season: "SPRING", year: "2026" } } as any)} />
-              <SectionRow title="أنمي خريف 2025" items={fall2025List} size="md" onSeeAll={() => router.push({ pathname: "/browse", params: { sort: "POPULARITY_DESC", season: "FALL", year: "2025" } } as any)} />
-              <SectionRow title="يُعرض حالياً" items={airingList} size="md" onSeeAll={() => router.push({ pathname: "/browse", params: { status: "RELEASING", sort: "POPULARITY_DESC" } } as any)} />
-              <SectionRow title="الأعلى تقييماً على الإطلاق" items={topRatedList} size="md" onSeeAll={() => router.push({ pathname: "/browse", params: { sort: "SCORE_DESC" } } as any)} />
-              <SectionRow title="الأكثر شعبية" items={popularList} size="md" onSeeAll={() => router.push({ pathname: "/browse", params: { sort: "POPULARITY_DESC" } } as any)} />
-              <SectionRow title="أفلام الأنمي" items={moviesList} size="md" onSeeAll={() => router.push({ pathname: "/browse", params: { format: "MOVIE", sort: "POPULARITY_DESC" } } as any)} />
-              <SectionRow title="إيسيكاي" items={isekaiList} size="md" onSeeAll={() => router.push({ pathname: "/browse", params: { genre: "Isekai", genreAr: "إيسيكاي", sort: "POPULARITY_DESC" } } as any)} />
             </>
           )}
         </View>
-      </ScrollView>
+          </View>
+        }
+        ListFooterComponent={<View style={{ height: 90 }} />}
+        showsVerticalScrollIndicator={false}
+        refreshControl={<RefreshControl refreshing={false} onRefresh={refresh} tintColor={colors.primary} />}
+        removeClippedSubviews={Platform.OS === "android" && !isTvLayout}
+        initialNumToRender={3}
+        maxToRenderPerBatch={2}
+        updateCellsBatchingPeriod={50}
+        windowSize={5}
+      />
       <DrawerMenu visible={showDrawer} onClose={() => setShowDrawer(false)} />
     </View>
   );

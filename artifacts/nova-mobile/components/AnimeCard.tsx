@@ -17,17 +17,34 @@ type Props = {
 };
 
 export function getRailCardWidth(windowWidth: number, visibleCards = 3, gap = 10) {
-  // Android TV reports a much wider window than a phone. Keep a deliberate,
-  // remote-friendly card size instead of stretching cards across the screen.
-  if (windowWidth >= 700) return 230;
-  const maxRailWidth = 900;
-  const railWidth = Math.min(Math.max(windowWidth - 32, 0), maxRailWidth);
-  return Math.max(96, Math.floor((railWidth - gap * (visibleCards - 1)) / visibleCards));
+  // Keep the same card density on phones, tablets, and ten-foot screens.
+  // A 4K TV can report a very wide logical window, so cap the decoded card
+  // size instead of stretching posters until they become blurry and heavy.
+  const wideLayout = windowWidth >= 700;
+  const maxRailWidth = wideLayout ? 1400 : 960;
+  const railWidth = Math.min(Math.max(windowWidth - (wideLayout ? 64 : 32), 0), maxRailWidth);
+  const targetVisibleCards = wideLayout ? (windowWidth >= 1200 ? 5 : 4) : visibleCards;
+  const minCardWidth = wideLayout ? (windowWidth >= 1400 ? 190 : 145) : 96;
+  const maxCardWidth = wideLayout ? 230 : 180;
+  const calculated = Math.floor((railWidth - gap * (targetVisibleCards - 1)) / targetVisibleCards);
+  return Math.max(minCardWidth, Math.min(maxCardWidth, calculated));
 }
 
 export function getRailSidePadding(windowWidth: number) {
-  const maxRailWidth = 900;
-  return Math.max(16, Math.floor((windowWidth - Math.min(Math.max(windowWidth - 32, 0), maxRailWidth)) / 2));
+  const wideLayout = windowWidth >= 700;
+  const maxRailWidth = wideLayout ? 1400 : 960;
+  const railWidth = Math.min(Math.max(windowWidth - (wideLayout ? 64 : 32), 0), maxRailWidth);
+  return Math.max(wideLayout ? 32 : 16, Math.floor((windowWidth - railWidth) / 2));
+}
+
+export function getGridColumnCount(windowWidth: number, windowHeight: number) {
+  if (isTvDevice(windowWidth, windowHeight)) {
+    const contentWidth = Math.min(Math.max(windowWidth - 128, 0), 1440);
+    return Math.max(4, Math.min(6, Math.floor((contentWidth + 10) / 240)));
+  }
+  if (windowWidth >= 1024) return 5;
+  if (windowWidth >= 600) return 4;
+  return 3;
 }
 
 export const AnimeCard = React.memo(function AnimeCard({ anime, size = "sm", cardWidth, progress, showProgress }: Props) {

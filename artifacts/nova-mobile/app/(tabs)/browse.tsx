@@ -8,6 +8,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { getBaseUrl } from "@/utils/api";
 import { isTvDevice, tvFocusStyle } from "@/utils/tv";
+import { getGridColumnCount } from "@/components/AnimeCard";
 
 /* ── Data ── */
 interface AnimeResult {
@@ -107,7 +108,12 @@ function AnimeCard({ anime, onPress, columns }: { anime: AnimeResult; onPress: (
     >
       <View style={g.cardWrap}>
         {anime.coverImage?.large ? (
-          <Image source={{ uri: anime.coverImage.large }} style={g.cardImg} />
+          <Image
+            source={{ uri: tvMode ? anime.coverImage.extraLarge || anime.coverImage.large : anime.coverImage.large }}
+            style={g.cardImg}
+            resizeMethod="resize"
+            fadeDuration={tvMode ? 0 : 100}
+          />
         ) : (
           <View style={[g.cardImg, g.cardNoImg]} />
         )}
@@ -140,7 +146,7 @@ const BROWSE_QUERY = (sort: string, format: string, season: string, year: string
 query ($page: Int) {
   Page(page: $page, perPage: 30) {
     media(type:ANIME, countryOfOrigin:"JP", isAdult:false, genre_not_in:["Hentai"], sort:[${sort || "POPULARITY_DESC"}]${format ? `, format:${format}` : ""}${season ? `, season:${season}` : ""}${year ? `, seasonYear:${year}` : ""}${genre ? `, genre:"${genre}"` : ""}${status ? `, status:${status}` : ""}) {
-      id title { romaji english } coverImage { large } averageScore episodes format status startDate { year } genres
+      id title { romaji english } coverImage { large extraLarge } averageScore episodes format status startDate { year } genres
     }
   }
 }`;
@@ -201,7 +207,7 @@ export default function BrowseScreen() {
   // TV gets a wider, remote-friendly grid without decoding an excessive
   // number of posters at once.
   const tvMode = isTvDevice(width, height);
-  const gridColumns = tvMode ? 4 : 3;
+  const gridColumns = getGridColumnCount(width, height);
   const genreColumns = tvMode ? 3 : 2;
   const gridWidth = Math.min(Math.max(width - 24, 0), tvMode ? 1100 : 900);
   const filterRailWidth = Math.min(Math.max(width - 24, 0), tvMode ? 1100 : 900);
@@ -494,7 +500,7 @@ export default function BrowseScreen() {
           maxToRenderPerBatch={3}
           updateCellsBatchingPeriod={50}
           windowSize={5}
-          removeClippedSubviews={Platform.OS !== "web"}
+           removeClippedSubviews={Platform.OS !== "web" && !tvMode}
           renderItem={({ item }) => (
             <GenreCard
               item={item}
@@ -528,7 +534,7 @@ export default function BrowseScreen() {
               maxToRenderPerBatch={3}
               updateCellsBatchingPeriod={50}
               windowSize={5}
-              removeClippedSubviews={Platform.OS !== "web"}
+               removeClippedSubviews={Platform.OS !== "web" && !tvMode}
                onEndReached={() => { if (!search.trim() && hasMore && !loading) loadItems(page + 1, false); }}
               onEndReachedThreshold={0.4}
               ListEmptyComponent={

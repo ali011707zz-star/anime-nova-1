@@ -10,6 +10,7 @@ import { useRouter } from "expo-router";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as ImagePicker from "expo-image-picker";
 import { isTvDevice, tvFocusStyle } from "@/utils/tv";
+import { getGridColumnCount } from "@/components/AnimeCard";
 
 /* ── trace.moe result type ── */
 interface TraceResult {
@@ -159,7 +160,7 @@ function buildBrowseQuery(sort: string, format: string, status: string, genre: s
   return `query ($page: Int, $perPage: Int) {
   Page(page: $page, perPage: $perPage) {
     media(type: ANIME, isAdult: false, genre_not_in: ["Hentai","Ecchi"], sort: [${sort || "POPULARITY_DESC"}]${format ? `, format: ${format}` : ""}${status ? `, status: ${status}` : ""}${genre ? `, genre: "${genre}"` : ""}${season ? `, season: ${season}` : ""}${year ? `, startDate_greater: "${Number(year) - 1}-12-31", startDate_lesser: "${Number(year) + 1}-01-01"` : ""}) {
-      id title { romaji english } coverImage { large } averageScore episodes format status startDate { year } genres
+      id title { romaji english } coverImage { large extraLarge } averageScore episodes format status startDate { year } genres
     }
   }
 }`;
@@ -198,7 +199,12 @@ function AnimeCard({ anime, onPress, columns }: { anime: AnimeResult; onPress: (
     >
       <View style={s.cardImgWrap}>
         {anime.coverImage?.large ? (
-          <Image source={{ uri: anime.coverImage.large }} style={s.cardImg} />
+          <Image
+            source={{ uri: tvMode ? anime.coverImage.extraLarge || anime.coverImage.large : anime.coverImage.large }}
+            style={s.cardImg}
+            resizeMethod="resize"
+            fadeDuration={tvMode ? 0 : 100}
+          />
         ) : (
           <View style={[s.cardImg, s.noImg]} />
         )}
@@ -229,7 +235,7 @@ export default function SearchScreen() {
   // Four TV columns remain readable while avoiding an oversized decode batch
   // on lower-powered Android TV hardware.
   const tvMode = isTvDevice(width, height);
-  const gridColumns = tvMode ? 4 : 3;
+  const gridColumns = getGridColumnCount(width, height);
   const gridWidth = Math.min(Math.max(width - 24, 0), tvMode ? 1100 : 900);
 
   const [query, setQuery]         = useState("");
@@ -572,7 +578,7 @@ export default function SearchScreen() {
             maxToRenderPerBatch={3}
             updateCellsBatchingPeriod={50}
             windowSize={5}
-            removeClippedSubviews={Platform.OS !== "web"}
+             removeClippedSubviews={Platform.OS !== "web" && !tvMode}
             ListHeaderComponent={
               activeSeason?.value ? (
                 <View style={s.activeSeasonRow}>

@@ -41,9 +41,9 @@ export const SectionRow = React.memo(function SectionRow({ title, items, onSeeAl
       renderItem={({ item }) => <AnimeCard anime={item} size={size} cardWidth={cardWidth} />}
       showsHorizontalScrollIndicator={false}
       contentContainerStyle={[styles.scroll, { paddingHorizontal: sidePadding }]}
-      // These rails are rendered inside the home ScrollView. FlatList keeps
-      // off-screen posters out of the native view tree, which matters on
-      // tablets where several rails are visible in one session.
+      // These rails are rendered inside Home's vertical FlatList. Keeping
+      // off-screen posters out of the native view tree matters on tablets
+      // where several rails are visible in one session.
       initialNumToRender={tvMode ? 5 : 4}
       maxToRenderPerBatch={tvMode ? 3 : 2}
       updateCellsBatchingPeriod={50}

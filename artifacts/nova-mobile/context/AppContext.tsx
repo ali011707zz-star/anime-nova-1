@@ -1,5 +1,5 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import React, { createContext, useCallback, useContext, useEffect, useState } from "react";
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { StyleSheet, Text, View } from "react-native";
 import { DEFAULT_CONFIG, fetchRemoteConfig, getBaseUrl, RemoteConfig } from "@/utils/api";
 import { getAuthToken, secureFetch, setUserAuthToken } from "@/utils/secureApi";
@@ -188,10 +188,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
-  const setTheme = async (t: Theme) => {
+  const setTheme = useCallback(async (t: Theme) => {
     setThemeState(t);
     await AsyncStorage.setItem("nova-theme", t);
-  };
+  }, []);
 
   /*
    * Keep the state updater pure. React may invoke functional updaters more than
@@ -224,21 +224,52 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     AsyncStorage.setItem("nova-favorites", JSON.stringify(favorites)).catch(() => {});
   }, [favorites, favoritesHydrated]);
 
-  const removeFromHistory = async (animeId: number) => {
+  const removeFromHistory = useCallback(async (animeId: number) => {
     setWatchHistory((prev) => prev.filter((h) => h.animeId !== animeId));
-  };
+  }, []);
 
-  const toggleFavorite = async (anime: FavoriteAnime) => {
+  const toggleFavorite = useCallback(async (anime: FavoriteAnime) => {
     setFavorites((prev) => {
       const exists = prev.find((f) => f.id === anime.id);
       return exists ? prev.filter((f) => f.id !== anime.id) : [anime, ...prev].slice(0, 500);
     });
-  };
+  }, []);
 
-  const isFavorite = (id: number) => favorites.some((f) => f.id === id);
+  const isFavorite = useCallback((id: number) => favorites.some((f) => f.id === id), [favorites]);
+
+  const contextValue = useMemo<AppContextType>(() => ({
+    theme,
+    setTheme,
+    remoteConfig,
+    refreshConfig,
+    watchHistory,
+    addToHistory,
+    removeFromHistory,
+    favorites,
+    toggleFavorite,
+    isFavorite,
+    currentUser,
+    authReady,
+    setCurrentUser,
+    restoreAuth,
+  }), [
+    addToHistory,
+    authReady,
+    currentUser,
+    favorites,
+    isFavorite,
+    refreshConfig,
+    remoteConfig,
+    removeFromHistory,
+    restoreAuth,
+    setTheme,
+    theme,
+    toggleFavorite,
+    watchHistory,
+  ]);
 
   return (
-    <AppContext.Provider value={{ theme, setTheme, remoteConfig, refreshConfig, watchHistory, addToHistory, removeFromHistory, favorites, toggleFavorite, isFavorite, currentUser, authReady, setCurrentUser, restoreAuth }}>
+    <AppContext.Provider value={contextValue}>
       {officialAppRequired ? (
         <View style={blockedStyles.container}>
           <Text style={blockedStyles.title}>النسخة الرسمية مطلوبة</Text>
