@@ -24,6 +24,97 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+  /device-link/request:
+    post:
+      operationId: createDeviceLinkCode
+      tags: [device-link]
+      summary: Create a short-lived TV linking code
+      responses:
+        "200":
+          description: Six-digit linking code created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeviceLinkCode"
+        "401":
+          description: Phone user is not signed in
+        "429":
+          description: Rate limit exceeded
+  /device-link/claim:
+    post:
+      operationId: claimDeviceLinkCode
+      tags: [device-link]
+      summary: Exchange a phone code for a TV session
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DeviceLinkClaimRequest"
+      responses:
+        "200":
+          description: TV linked and user session returned
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeviceLinkUserSession"
+        "400":
+          description: Invalid or already-used code
+        "410":
+          description: Code expired
+        "429":
+          description: Rate limit exceeded
+  /device-link/devices:
+    get:
+      operationId: listLinkedDevices
+      tags: [device-link]
+      summary: List active TV devices for the signed-in phone
+      responses:
+        "200":
+          description: Active linked TVs
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [devices]
+                properties:
+                  devices:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/LinkedDevice"
+        "401":
+          description: User is not signed in
+  /device-link/devices/{id}:
+    delete:
+      operationId: revokeLinkedDevice
+      tags: [device-link]
+      summary: Revoke a linked TV
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Device revoked
+        "401":
+          description: User is not signed in
+        "404":
+          description: Device not found
+  /device-link/heartbeat:
+    post:
+      operationId: linkedDeviceHeartbeat
+      tags: [device-link]
+      summary: Mark a linked TV as recently active
+      responses:
+        "200":
+          description: Heartbeat accepted
+        "401":
+          description: Invalid TV token
+        "403":
+          description: TV link was revoked
 components:
   schemas:
     HealthStatus:
@@ -33,4 +124,89 @@ components:
           type: string
       required:
         - status
+    DeviceLinkCode:
+      type: object
+      required: [ok, requestId, code, expiresAt, ttlSeconds]
+      properties:
+        ok:
+          type: boolean
+        requestId:
+          type: string
+          format: uuid
+        code:
+          type: string
+          pattern: "^[0-9]{6}$"
+        expiresAt:
+          type: string
+          format: date-time
+        ttlSeconds:
+          type: integer
+    DeviceLinkClaimRequest:
+      type: object
+      required: [code, deviceId]
+      properties:
+        code:
+          type: string
+          pattern: "^[0-9]{6}$"
+        deviceId:
+          type: string
+          minLength: 6
+          maxLength: 160
+        deviceName:
+          type: string
+          maxLength: 80
+        platform:
+          type: string
+          maxLength: 30
+    LinkedDevice:
+      type: object
+      required: [id, deviceId, name, platform, linkedAt, lastSeenAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        deviceId:
+          type: string
+        name:
+          type: string
+        platform:
+          type: string
+        linkedAt:
+          type: string
+          format: date-time
+        lastSeenAt:
+          type: string
+          format: date-time
+    DeviceLinkUserSession:
+      type: object
+      required: [ok, id, email, displayName, authType, authToken, deviceId]
+      properties:
+        ok:
+          type: boolean
+        id:
+          type: string
+        email:
+          type: string
+          format: email
+        displayName:
+          type: string
+        username:
+          type: string
+          nullable: true
+        avatarColor:
+          type: integer
+        profileImageUrl:
+          type: string
+          nullable: true
+        authType:
+          type: string
+          enum: [device-link]
+        authToken:
+          type: string
+        authTokenExp:
+          type: integer
+        deviceId:
+          type: string
+        device:
+          $ref: "#/components/schemas/LinkedDevice"
 

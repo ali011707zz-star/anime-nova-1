@@ -242,10 +242,48 @@ export function getUserIdFromToken(token: string | undefined): string | null {
   }
 }
 
+export type DeviceUserTokenInfo = {
+  userId: string;
+  deviceId: string;
+  exp: number;
+};
+
+/** Issue a separate token for a TV. Its device id lets the server revoke it. */
+export function issueDeviceUserToken(userId: string, deviceId: string): { token: string; exp: number } {
+  const now = Math.floor(Date.now() / 1000);
+  const exp = now + USER_TOKEN_TTL;
+  const encodedDeviceId = Buffer.from(deviceId, "utf8").toString("base64url");
+  const payload = `device.${userId}.${encodedDeviceId}.${now}.${exp}`;
+  const sig = createHmac("sha256", getSecret()).update(payload).digest("base64url");
+  return { token: `${payload}.${sig}`, exp };
+}
+
+export function getDeviceUserTokenInfo(token: string | undefined): DeviceUserTokenInfo | null {
+  if (!token) return null;
+  const parts = token.split(".");
+  if (parts.length !== 6 || parts[0] !== "device") return null;
+  const [, userId, encodedDeviceId, iat, exp, sig] = parts;
+  if (!userId || !encodedDeviceId || !/^\d+$/.test(iat) || !/^\d+$/.test(exp)) return null;
+  const now = Math.floor(Date.now() / 1000);
+  if (Number(iat) > now + 30 || Number(exp) <= Number(iat) || now > Number(exp)) return null;
+  const payload = `device.${userId}.${encodedDeviceId}.${iat}.${exp}`;
+  const expected = createHmac("sha256", getSecret()).update(payload).digest("base64url");
+  try {
+    const a = Buffer.from(sig);
+    const b = Buffer.from(expected);
+    if (a.length !== b.length || !timingSafeEqual(a, b)) return null;
+    const deviceId = Buffer.from(encodedDeviceId, "base64url").toString("utf8");
+    if (!/^[A-Za-z0-9._:-]{6,160}$/.test(deviceId)) return null;
+    return { userId, deviceId, exp: Number(exp) };
+  } catch {
+    return null;
+  }
+}
+
 export function getMobileUserId(req: { headers: Record<string, string | string[] | undefined> }): string | null {
   const raw = req.headers["x-user-token"];
   const token = Array.isArray(raw) ? raw[0] : raw;
-  return getUserIdFromToken(token);
+  return getUserIdFromToken(token) || getDeviceUserTokenInfo(token)?.userId || null;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════

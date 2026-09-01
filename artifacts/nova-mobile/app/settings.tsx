@@ -928,11 +928,12 @@ function PremiumSheet({ open, onClose, user }: {
 /* ══════════════════════ PROFILE SHEET ══════════════════════ */
 const AVATAR_COLORS = ["#7c3aed","#2563eb","#db2777","#ea580c","#16a34a","#ca8a04","#0891b2","#dc2626"];
 
-function ProfileSheet({ open, onClose, user, onUpdate, onLogout }: {
+function ProfileSheet({ open, onClose, user, onUpdate, onLogout, onLinkTv }: {
   open: boolean; onClose: () => void;
   user: MobileUser | null;
   onUpdate: (u: MobileUser) => void;
   onLogout: () => void;
+  onLinkTv: () => void;
 }) {
   const base = getBaseUrl();
   const [displayName, setDisplayName] = useState("");
@@ -1160,6 +1161,17 @@ function ProfileSheet({ open, onClose, user, onUpdate, onLogout }: {
                   )}
                 </Pressable>
 
+                {/* Link a TV without exposing the Google session to it */}
+                <Pressable onPress={onLinkTv}
+                  style={{ flexDirection: "row", alignItems: "center", gap: 10, padding: 14, borderRadius: 16, backgroundColor: "rgba(139,92,246,0.10)", borderWidth: 1, borderColor: "rgba(139,92,246,0.24)", marginTop: 18 }}>
+                  <Ionicons name="chevron-back" size={16} color="#a78bfa" />
+                  <View style={{ flex: 1, alignItems: "flex-end" }}>
+                    <Text style={{ fontSize: 13, fontFamily: "Cairo_800ExtraBold", color: "#c4b5fd" }}>ربط جهاز تلفاز</Text>
+                    <Text style={{ fontSize: 10, fontFamily: "Cairo_400Regular", color: "rgba(196,181,253,0.55)", marginTop: 2 }}>رمز مؤقت وآمن لمزامنة حسابك</Text>
+                  </View>
+                  <Ionicons name="tv-outline" size={19} color="#a78bfa" />
+                </Pressable>
+
                 {/* Divider */}
                 <View style={{ height: 1, backgroundColor: "rgba(255,255,255,0.06)", marginVertical: 22 }} />
 
@@ -1173,6 +1185,140 @@ function ProfileSheet({ open, onClose, user, onUpdate, onLogout }: {
             </>
           </ScrollView>
         </View>
+    </Modal>
+  );
+}
+
+/* ══════════════════════ TV LINK SHEET ══════════════════════ */
+function TvLinkSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const base = getBaseUrl();
+  const [code, setCode] = useState("");
+  const [expiresAt, setExpiresAt] = useState("");
+  const [devices, setDevices] = useState<Array<{ id: string; name: string; platform: string; lastSeenAt?: string }>>([]);
+  const [loading, setLoading] = useState(false);
+  const [loadingDevices, setLoadingDevices] = useState(false);
+  const [error, setError] = useState("");
+
+  const loadDevices = useCallback(async () => {
+    setLoadingDevices(true);
+    try {
+      const response = await secureFetch(`${base}/api/device-link/devices`);
+      const data = await response.json().catch(() => ({}));
+      if (response.ok) setDevices(Array.isArray(data.devices) ? data.devices : []);
+    } catch {} finally {
+      setLoadingDevices(false);
+    }
+  }, [base]);
+
+  useEffect(() => {
+    if (!open) return;
+    setCode("");
+    setExpiresAt("");
+    setError("");
+    void loadDevices();
+  }, [open, loadDevices]);
+
+  const createCode = async () => {
+    if (loading) return;
+    setLoading(true);
+    setError("");
+    try {
+      const response = await secureFetch(`${base}/api/device-link/request`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || !data.code) {
+        setError(data.error || "تعذّر إنشاء الرمز");
+        return;
+      }
+      setCode(String(data.code));
+      setExpiresAt(String(data.expiresAt || ""));
+      void loadDevices();
+    } catch {
+      setError("تعذّر الاتصال بالخادم");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const revoke = async (id: string) => {
+    try {
+      const response = await secureFetch(`${base}/api/device-link/devices/${encodeURIComponent(id)}`, { method: "DELETE" });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) { setError(data.error || "تعذّر إلغاء الربط"); return; }
+      await loadDevices();
+    } catch {
+      setError("تعذّر الاتصال بالخادم");
+    }
+  };
+
+  return (
+    <Modal visible={open} animationType="slide" transparent onRequestClose={onClose}>
+      <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.78)", justifyContent: "flex-end" }}>
+        <View style={{ maxHeight: "92%", backgroundColor: "#111116", borderTopLeftRadius: 28, borderTopRightRadius: 28, borderWidth: 1, borderColor: "rgba(255,255,255,0.08)" }}>
+          <View style={{ flexDirection: "row", alignItems: "center", paddingHorizontal: 20, paddingTop: 18, paddingBottom: 14, borderBottomWidth: 1, borderBottomColor: "rgba(255,255,255,0.06)" }}>
+            <Pressable onPress={onClose} style={{ width: 36, height: 36, borderRadius: 12, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(255,255,255,0.06)" }}>
+              <Ionicons name="close" size={20} color="rgba(255,255,255,0.7)" />
+            </Pressable>
+            <View style={{ flex: 1, alignItems: "flex-end", marginRight: 12 }}>
+              <Text style={{ fontSize: 17, fontFamily: "Cairo_800ExtraBold", color: "#fff" }}>ربط التلفاز</Text>
+              <Text style={{ fontSize: 10, fontFamily: "Cairo_400Regular", color: "rgba(255,255,255,0.38)", marginTop: 2 }}>تسجيل آمن بدون حساب Google على التلفاز</Text>
+            </View>
+            <View style={{ width: 38, height: 38, borderRadius: 13, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(139,92,246,0.18)" }}>
+              <Ionicons name="tv-outline" size={20} color="#c4b5fd" />
+            </View>
+          </View>
+
+          <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 38 }} showsVerticalScrollIndicator={false}>
+            <View style={{ borderRadius: 20, padding: 18, backgroundColor: "rgba(139,92,246,0.10)", borderWidth: 1, borderColor: "rgba(139,92,246,0.25)" }}>
+              <Text style={{ fontSize: 13, fontFamily: "Cairo_800ExtraBold", color: "#c4b5fd", textAlign: "right" }}>أنشئ رمزاً للتلفاز</Text>
+              <Text style={{ fontSize: 11, fontFamily: "Cairo_400Regular", color: "rgba(255,255,255,0.55)", lineHeight: 20, textAlign: "right", marginTop: 5 }}>
+                افتح شاشة ربط الحساب على التلفاز، ثم أدخل الرمز الظاهر هنا. الرمز صالح 10 دقائق ويُستخدم مرة واحدة.
+              </Text>
+              {code ? (
+                <>
+                  <Text selectable style={{ fontSize: 36, letterSpacing: 9, fontFamily: "Cairo_800ExtraBold", color: "#fff", textAlign: "center", marginTop: 16 }}>{code}</Text>
+                  <Text style={{ fontSize: 10, fontFamily: "Cairo_400Regular", color: "#a78bfa", textAlign: "center", marginTop: 2 }}>
+                    {expiresAt ? `ينتهي في ${new Date(expiresAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}` : "صالح لمدة 10 دقائق"}
+                  </Text>
+                </>
+              ) : (
+                <Pressable testID="create-tv-link-code" onPress={createCode} disabled={loading} style={{ height: 50, borderRadius: 15, alignItems: "center", justifyContent: "center", flexDirection: "row", gap: 8, marginTop: 16, backgroundColor: "#8b5cf6", opacity: loading ? 0.65 : 1 }}>
+                  {loading ? <ActivityIndicator color="#fff" /> : <Ionicons name="key-outline" size={17} color="#fff" />}
+                  <Text style={{ fontSize: 13, fontFamily: "Cairo_800ExtraBold", color: "#fff" }}>{loading ? "جارٍ إنشاء الرمز…" : "إنشاء رمز مؤقت"}</Text>
+                </Pressable>
+              )}
+              {code ? (
+                <Pressable onPress={createCode} disabled={loading} style={{ alignItems: "center", marginTop: 13 }}>
+                  <Text style={{ fontSize: 11, fontFamily: "Cairo_700Bold", color: "#c4b5fd" }}>إنشاء رمز جديد</Text>
+                </Pressable>
+              ) : null}
+            </View>
+
+            {!!error && <Text style={{ fontSize: 11, fontFamily: "Cairo_600SemiBold", color: "#fca5a5", textAlign: "right", marginTop: 12 }}>{error}</Text>}
+
+            <View style={{ flexDirection: "row", alignItems: "center", marginTop: 24, marginBottom: 10 }}>
+              <Text style={{ flex: 1, fontSize: 13, fontFamily: "Cairo_800ExtraBold", color: "#fff", textAlign: "right" }}>أجهزة التلفاز المرتبطة</Text>
+              {loadingDevices ? <ActivityIndicator size="small" color="#a78bfa" /> : null}
+            </View>
+            {devices.length ? devices.map(device => (
+              <View key={device.id} style={{ flexDirection: "row", alignItems: "center", gap: 10, padding: 13, borderRadius: 15, marginBottom: 8, backgroundColor: "rgba(255,255,255,0.04)", borderWidth: 1, borderColor: "rgba(255,255,255,0.07)" }}>
+                <Pressable testID={`revoke-tv-${device.id}`} onPress={() => revoke(device.id)} style={{ width: 34, height: 34, borderRadius: 10, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(239,68,68,0.10)" }}>
+                  <Ionicons name="unlink-outline" size={16} color="#f87171" />
+                </Pressable>
+                <View style={{ flex: 1, alignItems: "flex-end" }}>
+                  <Text style={{ fontSize: 12, fontFamily: "Cairo_700Bold", color: "#fff" }}>{device.name}</Text>
+                  <Text style={{ fontSize: 10, fontFamily: "Cairo_400Regular", color: "rgba(255,255,255,0.35)", marginTop: 2 }}>مرتبط · يمكن إلغاء الوصول فوراً</Text>
+                </View>
+                <Ionicons name="tv-outline" size={18} color="#a78bfa" />
+              </View>
+            )) : (
+              <Text style={{ fontSize: 11, fontFamily: "Cairo_400Regular", color: "rgba(255,255,255,0.32)", textAlign: "right", paddingVertical: 10 }}>لا توجد أجهزة تلفاز مرتبطة حالياً</Text>
+            )}
+          </ScrollView>
+        </View>
+      </View>
     </Modal>
   );
 }
@@ -1192,6 +1338,7 @@ export default function SettingsScreen() {
   const [showReport, setShowReport] = useState(false);
   const [showAuth, setShowAuth] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
+  const [showTvLink, setShowTvLink] = useState(false);
   const [showPremium, setShowPremium] = useState(false);
   const [showCrashLog, setShowCrashLog] = useState(false);
   const [crashEntries, setCrashEntries] = useState<CrashEntry[]>([]);
@@ -1719,7 +1866,10 @@ export default function SettingsScreen() {
         user={currentUser}
         onUpdate={u => { setCurrentUser(u); setGlobalUser(u); }}
         onLogout={handleLogout}
+        onLinkTv={() => { setShowProfile(false); setShowTvLink(true); }}
       />
+
+      <TvLinkSheet open={showTvLink} onClose={() => setShowTvLink(false)} />
 
       {/* Premium Sheet */}
       <PremiumSheet

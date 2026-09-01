@@ -15,18 +15,21 @@ import authTokenRouter from "./routes/authToken.js";
 import newsRouter from "./routes/news.js";
 import notificationsRouter from "./routes/notifications.js";
 import { logger } from "./lib/logger";
+import { sbSelect } from "./lib/supabaseClient.js";
 import { setupSession, registerEmailAuthRoutes, registerGoogleAuthRoutes, registerGithubAuthRoutes } from "./auth/index.js";
 import sitemapRouter from "./routes/sitemap.js";
 import crashReportRouter from "./routes/crashReport.js";
 import hlsProxyRouter from "./routes/hlsProxy.js";
 import { registerWebAdminRoutes } from "./routes/webAdmin.js";
 import analyticsRouter from "./routes/analytics.js";
+import deviceLinkRouter from "./routes/deviceLink.js";
 import {
   validateAnonToken,
   validateMobileAppIdentity,
   checkRateLimit,
   assertSecurityConfig,
   MOBILE_CLIENT_ID,
+  getDeviceUserTokenInfo,
 } from "./lib/security.js";
 
 // ── المسارات التي تتطلب توكن صالح ──
@@ -116,7 +119,7 @@ export async function createApp(): Promise<Express> {
     credentials: true,
   };
 
-  app.use((req, res, next) => {
+  app.use(async (req, res, next) => {
     if (MEDIA_PROXY_PATH.test(req.path)) {
       res.setHeader("Access-Control-Allow-Origin", "*");
       res.setHeader("Access-Control-Allow-Headers", "Range, Content-Type, X-App-Token");
@@ -212,6 +215,26 @@ export async function createApp(): Promise<Express> {
       });
       return;
     }
+
+    // TV tokens are stateful at the device-link layer: revocation on the phone
+    // must take effect on the next request, unlike the normal stateless mobile token.
+    const userTokenHeader = req.headers["x-user-token"];
+    const userToken = Array.isArray(userTokenHeader) ? userTokenHeader[0] : userTokenHeader;
+    const deviceToken = getDeviceUserTokenInfo(userToken);
+    if (deviceToken) {
+      const linked = await sbSelect("linked_devices", {
+        user_id: `eq.${deviceToken.userId}`,
+        device_id: `eq.${deviceToken.deviceId}`,
+        revoked_at: "is.null",
+      }, { limit: 1 });
+      if (!linked.length) {
+        res.status(403).json({
+          error: "تم إلغاء ربط هذا التلفاز من الهاتف.",
+          code: "DEVICE_REVOKED",
+        });
+        return;
+      }
+    }
     next();
   });
 
@@ -257,6 +280,7 @@ export async function createApp(): Promise<Express> {
   app.use("/api", newsRouter);
   app.use("/api", notificationsRouter);
   app.use("/api", userdataRouter);
+  app.use("/api", deviceLinkRouter);
   app.use("/api", commentsRouter);
   app.use("/api", analyticsRouter);
   app.use("/api", adminRouter);
