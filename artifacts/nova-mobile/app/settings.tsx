@@ -319,8 +319,8 @@ function fetchWithTimeout(
 }
 
 /* ── Auth Sheet ── */
-function AuthSheet({ open, onClose, onLogin }: {
-  open: boolean; onClose: () => void; onLogin: (u: MobileUser) => void;
+function AuthSheet({ open, onClose, onLogin, onLinkDevice }: {
+  open: boolean; onClose: () => void; onLogin: (u: MobileUser) => void; onLinkDevice: () => void;
 }) {
   const GOOGLE_ONLY = true;
   const [flow, setFlow] = useState<AuthFlow>("login");
@@ -635,6 +635,15 @@ function AuthSheet({ open, onClose, onLogin }: {
                    <Text style={{ flex: 1, fontSize: 11, color: "#fca5a5", fontFamily: "Cairo_400Regular", textAlign: "right", lineHeight: 20 }}>{error}</Text>
                  </View>
                )}
+               <Pressable
+                 testID="open-device-link-from-auth"
+                 onPress={onLinkDevice}
+                 disabled={loading}
+                 style={{ flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, paddingVertical: 12, marginTop: 2, borderRadius: 16, borderWidth: 1, borderColor: "rgba(167,139,250,0.28)", backgroundColor: "rgba(139,92,246,0.08)", opacity: loading ? 0.5 : 1 }}
+               >
+                 <Ionicons name="link-outline" size={16} color="#c4b5fd" />
+                 <Text style={{ fontSize: 12, fontFamily: "Cairo_700Bold", color: "#c4b5fd" }}>لدي رمز ربط · ربط جهاز موجود</Text>
+               </Pressable>
              </View>
            )}
 
@@ -1161,15 +1170,15 @@ function ProfileSheet({ open, onClose, user, onUpdate, onLogout, onLinkTv }: {
                   )}
                 </Pressable>
 
-                {/* Link a TV without exposing the Google session to it */}
+                {/* Link another phone or TV without exposing the Google session to it */}
                 <Pressable onPress={onLinkTv}
                   style={{ flexDirection: "row", alignItems: "center", gap: 10, padding: 14, borderRadius: 16, backgroundColor: "rgba(139,92,246,0.10)", borderWidth: 1, borderColor: "rgba(139,92,246,0.24)", marginTop: 18 }}>
                   <Ionicons name="chevron-back" size={16} color="#a78bfa" />
                   <View style={{ flex: 1, alignItems: "flex-end" }}>
-                    <Text style={{ fontSize: 13, fontFamily: "Cairo_800ExtraBold", color: "#c4b5fd" }}>ربط جهاز تلفاز</Text>
-                    <Text style={{ fontSize: 10, fontFamily: "Cairo_400Regular", color: "rgba(196,181,253,0.55)", marginTop: 2 }}>رمز مؤقت وآمن لمزامنة حسابك</Text>
+                    <Text style={{ fontSize: 13, fontFamily: "Cairo_800ExtraBold", color: "#c4b5fd" }}>ربط جهاز جديد</Text>
+                    <Text style={{ fontSize: 10, fontFamily: "Cairo_400Regular", color: "rgba(196,181,253,0.55)", marginTop: 2 }}>هاتف آخر أو تلفاز · رمز مؤقت وآمن</Text>
                   </View>
-                  <Ionicons name="tv-outline" size={19} color="#a78bfa" />
+                  <Ionicons name="link-outline" size={19} color="#a78bfa" />
                 </Pressable>
 
                 {/* Divider */}
@@ -1262,19 +1271,19 @@ function TvLinkSheet({ open, onClose }: { open: boolean; onClose: () => void }) 
               <Ionicons name="close" size={20} color="rgba(255,255,255,0.7)" />
             </Pressable>
             <View style={{ flex: 1, alignItems: "flex-end", marginRight: 12 }}>
-              <Text style={{ fontSize: 17, fontFamily: "Cairo_800ExtraBold", color: "#fff" }}>ربط التلفاز</Text>
-              <Text style={{ fontSize: 10, fontFamily: "Cairo_400Regular", color: "rgba(255,255,255,0.38)", marginTop: 2 }}>تسجيل آمن بدون حساب Google على التلفاز</Text>
+              <Text style={{ fontSize: 17, fontFamily: "Cairo_800ExtraBold", color: "#fff" }}>ربط جهاز جديد</Text>
+              <Text style={{ fontSize: 10, fontFamily: "Cairo_400Regular", color: "rgba(255,255,255,0.38)", marginTop: 2 }}>هاتف آخر أو تلفاز · تسجيل آمن بدون مشاركة جلسة Google</Text>
             </View>
             <View style={{ width: 38, height: 38, borderRadius: 13, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(139,92,246,0.18)" }}>
-              <Ionicons name="tv-outline" size={20} color="#c4b5fd" />
+              <Ionicons name="link-outline" size={20} color="#c4b5fd" />
             </View>
           </View>
 
           <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 38 }} showsVerticalScrollIndicator={false}>
             <View style={{ borderRadius: 20, padding: 18, backgroundColor: "rgba(139,92,246,0.10)", borderWidth: 1, borderColor: "rgba(139,92,246,0.25)" }}>
-              <Text style={{ fontSize: 13, fontFamily: "Cairo_800ExtraBold", color: "#c4b5fd", textAlign: "right" }}>أنشئ رمزاً للتلفاز</Text>
+               <Text style={{ fontSize: 13, fontFamily: "Cairo_800ExtraBold", color: "#c4b5fd", textAlign: "right" }}>رمز ربط الجهاز</Text>
               <Text style={{ fontSize: 11, fontFamily: "Cairo_400Regular", color: "rgba(255,255,255,0.55)", lineHeight: 20, textAlign: "right", marginTop: 5 }}>
-                افتح شاشة ربط الحساب على التلفاز، ثم أدخل الرمز الظاهر هنا. الرمز صالح 10 دقائق ويُستخدم مرة واحدة.
+                 هذا الرمز يظهر على الهاتف المسجّل فقط. افتح شاشة «ربط الحساب» في الهاتف أو التلفاز الآخر، ثم اكتب الرمز الظاهر هنا في الخانة الموجودة هناك. صالح لمدة 10 دقائق ويُستخدم مرة واحدة.
               </Text>
               {code ? (
                 <>
@@ -1299,7 +1308,7 @@ function TvLinkSheet({ open, onClose }: { open: boolean; onClose: () => void }) 
             {!!error && <Text style={{ fontSize: 11, fontFamily: "Cairo_600SemiBold", color: "#fca5a5", textAlign: "right", marginTop: 12 }}>{error}</Text>}
 
             <View style={{ flexDirection: "row", alignItems: "center", marginTop: 24, marginBottom: 10 }}>
-              <Text style={{ flex: 1, fontSize: 13, fontFamily: "Cairo_800ExtraBold", color: "#fff", textAlign: "right" }}>أجهزة التلفاز المرتبطة</Text>
+              <Text style={{ flex: 1, fontSize: 13, fontFamily: "Cairo_800ExtraBold", color: "#fff", textAlign: "right" }}>الأجهزة المرتبطة</Text>
               {loadingDevices ? <ActivityIndicator size="small" color="#a78bfa" /> : null}
             </View>
             {devices.length ? devices.map(device => (
@@ -1311,10 +1320,10 @@ function TvLinkSheet({ open, onClose }: { open: boolean; onClose: () => void }) 
                   <Text style={{ fontSize: 12, fontFamily: "Cairo_700Bold", color: "#fff" }}>{device.name}</Text>
                   <Text style={{ fontSize: 10, fontFamily: "Cairo_400Regular", color: "rgba(255,255,255,0.35)", marginTop: 2 }}>مرتبط · يمكن إلغاء الوصول فوراً</Text>
                 </View>
-                <Ionicons name="tv-outline" size={18} color="#a78bfa" />
+                <Ionicons name={device.platform === "android-tv" ? "tv-outline" : "phone-portrait-outline"} size={18} color="#a78bfa" />
               </View>
             )) : (
-              <Text style={{ fontSize: 11, fontFamily: "Cairo_400Regular", color: "rgba(255,255,255,0.32)", textAlign: "right", paddingVertical: 10 }}>لا توجد أجهزة تلفاز مرتبطة حالياً</Text>
+              <Text style={{ fontSize: 11, fontFamily: "Cairo_400Regular", color: "rgba(255,255,255,0.32)", textAlign: "right", paddingVertical: 10 }}>لا توجد أجهزة مرتبطة حالياً</Text>
             )}
           </ScrollView>
         </View>
@@ -1539,19 +1548,29 @@ export default function SettingsScreen() {
               </View>
             </Pressable>
           ) : (
-            <Pressable onPress={() => setShowAuth(true)} style={ts.profileCard}>
-              <View style={ts.profileAvatar}>
-                <Ionicons name="person" size={24} color="rgba(255,255,255,0.3)" />
-              </View>
-              <View style={{ flex: 1, alignItems: "flex-end" }}>
-                <Text style={ts.profileLoginTitle}>تسجيل الدخول</Text>
-                <Text style={ts.profileLoginSub}>احفظ قائمتك ومتابعتك عبر الأجهزة</Text>
-              </View>
-              <View style={ts.profileLoginBtn}>
-                <Ionicons name="sparkles" size={14} color="#c4b5fd" />
-                <Text style={ts.profileLoginBtnText}>دخول</Text>
-              </View>
-            </Pressable>
+            <View style={{ gap: 10 }}>
+              <Pressable onPress={() => setShowAuth(true)} style={ts.profileCard}>
+                <View style={ts.profileAvatar}>
+                  <Ionicons name="person" size={24} color="rgba(255,255,255,0.3)" />
+                </View>
+                <View style={{ flex: 1, alignItems: "flex-end" }}>
+                  <Text style={ts.profileLoginTitle}>تسجيل الدخول</Text>
+                  <Text style={ts.profileLoginSub}>احفظ قائمتك ومتابعتك عبر الأجهزة</Text>
+                </View>
+                <View style={ts.profileLoginBtn}>
+                  <Ionicons name="sparkles" size={14} color="#c4b5fd" />
+                  <Text style={ts.profileLoginBtnText}>دخول</Text>
+                </View>
+              </Pressable>
+              <Pressable
+                testID="open-device-link"
+                onPress={() => router.push("/tv-link" as any)}
+                style={ts.deviceLinkGuestBtn}
+              >
+                <Ionicons name="link-outline" size={17} color="#c4b5fd" />
+                <Text style={ts.deviceLinkGuestText}>لدي رمز ربط · ربط هاتف أو تلفاز</Text>
+              </Pressable>
+            </View>
           )}
         </View>
 
@@ -1848,6 +1867,10 @@ export default function SettingsScreen() {
       <AuthSheet
         open={showAuth}
         onClose={() => setShowAuth(false)}
+        onLinkDevice={() => {
+          setShowAuth(false);
+          router.push("/tv-link" as any);
+        }}
         onLogin={u => {
           // Update the already-mounted settings screen instead of navigating
           // to another settings instance after authentication.
@@ -1910,6 +1933,8 @@ const ts = StyleSheet.create({
   profileLoginSub: { fontSize: 11, fontFamily: "Cairo_400Regular", color: "rgba(255,255,255,0.35)", marginTop: 2, textAlign: "right" },
   profileLoginBtn: { flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 12, backgroundColor: "rgba(139,92,246,0.18)", borderWidth: 1, borderColor: "rgba(139,92,246,0.30)" },
   profileLoginBtnText: { fontSize: 11, fontFamily: "Cairo_800ExtraBold", color: "#c4b5fd" },
+  deviceLinkGuestBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, paddingVertical: 12, borderRadius: 16, backgroundColor: "rgba(139,92,246,0.08)", borderWidth: 1, borderColor: "rgba(167,139,250,0.28)" },
+  deviceLinkGuestText: { fontSize: 12, fontFamily: "Cairo_700Bold", color: "#c4b5fd" },
 
   /* Stats Grid */
   statsGrid: { flexDirection: "row", gap: 8, paddingHorizontal: 16, marginTop: 12 },

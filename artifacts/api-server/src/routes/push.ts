@@ -107,8 +107,9 @@ export async function sendNewEpisodePush(input: {
       to: row.token,
       sound: "default",
       title: `حلقة جديدة · ${input.title}`,
-      body: `الحلقة ${input.episode} متاحة الآن للمشاهدة في Anime NOVA`,
+      body: `✨ ${input.title} — الحلقة ${input.episode} متاحة الآن\nشاهِدها على Anime NOVA واستمتع!`,
       channelId: "nova-new-episodes",
+      ...(input.posterUrl ? { richContent: { image: input.posterUrl } } : {}),
       data: {
         type: "new-episode",
         animeId: input.animeId,

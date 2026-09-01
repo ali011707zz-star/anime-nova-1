@@ -53,24 +53,27 @@ function ActiveDownloadCard({
   const pct = Math.round(item.progress * 100);
   const isPaused = item.status === "paused";
   const isError = item.status === "error";
+  const canPause = item.pauseSupported !== false;
 
   return (
     <View style={[s.activeCard, isError && s.activeCardError]}>
       {/* Pause/resume + cancel controls. Pausing keeps the partial file. */}
       <View style={s.activeActions}>
-        <Pressable
-          onPress={isPaused ? onResume : onPause}
-          hitSlop={8}
-          focusable={tvMode}
-          style={({ focused }) => [s.activeAction, isPaused && s.activeActionResume, tvMode && tvFocusStyle(focused)]}
-          accessibilityLabel={isPaused ? "استئناف التنزيل" : "إيقاف التنزيل مؤقتاً"}
-        >
-          <Ionicons
-            name={isPaused ? "play" : "pause"}
-            size={18}
-            color={isPaused ? "#c4b5fd" : "rgba(255,255,255,0.65)"}
-          />
-        </Pressable>
+        {canPause && (
+          <Pressable
+            onPress={isPaused ? onResume : onPause}
+            hitSlop={8}
+            focusable={tvMode}
+            style={({ focused }) => [s.activeAction, isPaused && s.activeActionResume, tvMode && tvFocusStyle(focused)]}
+            accessibilityLabel={isPaused ? "استئناف التنزيل" : "إيقاف التنزيل مؤقتاً"}
+          >
+            <Ionicons
+              name={isPaused ? "play" : "pause"}
+              size={18}
+              color={isPaused ? "#c4b5fd" : "rgba(255,255,255,0.65)"}
+            />
+          </Pressable>
+        )}
         <Pressable onPress={onCancel} hitSlop={8} focusable={tvMode}
           style={({ focused }) => [s.activeAction, s.activeCancel, tvMode && tvFocusStyle(focused)]}>
           <Ionicons name="close" size={18} color="rgba(255,255,255,0.55)" />
@@ -113,9 +116,11 @@ function ActiveDownloadCard({
         <Text style={[s.activeStatus, isError && { color: "rgba(239,68,68,0.65)" }]}>
           {isError
             ? "فشل التنزيل — اضغط × للإغلاق"
-            : isPaused
+              : isPaused
               ? "متوقف مؤقتاً — اضغط ▶ للاستئناف"
-              : "يعمل في الخلفية..."}
+                : canPause
+                  ? "يعمل في الخلفية..."
+                  : "تنزيل نظامي — يستمر حتى بعد إغلاق التطبيق"}
         </Text>
       </View>
     </View>

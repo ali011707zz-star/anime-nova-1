@@ -60,6 +60,8 @@ export interface ActiveDownload {
   totalBytes: number;
   retryCount: number;
   status: "downloading" | "paused" | "error";
+  /** Android DownloadManager jobs cannot be paused from the JS bridge. */
+  pauseSupported?: boolean;
   cancelFn: () => void;
 }
 
@@ -584,6 +586,110 @@ async function fetchSubtitleResponse(url: string, params: StartDownloadParams): 
   return response.text();
 }
 
+function nativeFileName(entry: RuntimeDownload): string {
+  return `nova-${entry.id.replace(/[^a-zA-Z0-9_-]/g, "_")}.mp4`;
+}
+
+function nativeMetadata(entry: RuntimeDownload): Record<string, unknown> {
+  /*
+   * Do not persist authToken in the metadata handed to native storage. The
+   * request headers are already attached to the DownloadManager job, while a
+   * reopened app obtains a fresh token before rebuilding its JS record.
+   */
+  return {
+    id: entry.id,
+    animeId: entry.animeId,
+    ep: entry.ep,
+    title: entry.title,
+    cover: entry.cover,
+    site: entry.site,
+    quality: entry.quality,
+    url: entry.params.url,
+    subtitleUrl: entry.params.subtitleUrl,
+    hlsManifestUrl: entry.params.hlsManifestUrl,
+    headers: entry.params.headers,
+  };
+}
+
+async function pollNativeDownload(entry: RuntimeDownload): Promise<void> {
+  if (!active.has(entry.id) || entry.nativeJobId == null) return;
+  try {
+    const records = await listNativeDownloads();
+    const record = records.find((item) => item.appId === entry.id);
+    if (!record) {
+      entry.nativePollTimer = undefined;
+      entry.status = "error";
+      notifyListeners();
+      return;
+    }
+
+    entry.localPath = record.localPath || entry.localPath;
+    entry.bytesWritten = Math.max(0, record.bytesWritten || 0);
+    entry.totalBytes = Math.max(0, record.totalBytes || 0);
+    entry.progress = entry.totalBytes > 0
+      ? Math.min(entry.bytesWritten / entry.totalBytes, 1)
+      : 0;
+
+    if (record.status === "successful") {
+      entry.status = "downloading";
+      await saveCompleted(entry);
+      active.delete(entry.id);
+      entry.nativePollTimer = undefined;
+      await forgetNativeDownload(entry.id);
+      notifyListeners();
+      return;
+    }
+
+    if (record.status === "failed" || record.status === "unknown") {
+      entry.status = "error";
+      entry.nativePollTimer = undefined;
+      notifyListeners();
+      return;
+    }
+
+    entry.status = record.status === "paused" ? "paused" : "downloading";
+    notifyProgressListeners();
+    entry.nativePollTimer = setTimeout(() => {
+      void pollNativeDownload(entry);
+    }, 1000);
+  } catch {
+    // A transient DownloadManager query failure must not turn a live OS job
+    // into a visible error. Keep polling while the app is open.
+    entry.nativePollTimer = setTimeout(() => {
+      void pollNativeDownload(entry);
+    }, 1500);
+  }
+}
+
+async function beginNativeDownload(entry: RuntimeDownload): Promise<void> {
+  try {
+    const result = await enqueueNativeDownload({
+      appId: entry.id,
+      url: entry.params.url,
+      fileName: nativeFileName(entry),
+      title: `تنزيل ${entry.title} · الحلقة ${entry.ep}`,
+      description: `${entry.site} · ${entry.quality}`,
+      headers: requestHeaders(entry.params),
+      metadata: nativeMetadata(entry),
+    });
+    if (!active.has(entry.id)) {
+      await removeNativeDownload(entry.id);
+      return;
+    }
+    entry.nativeJobId = result.jobId;
+    entry.localPath = result.localPath;
+    entry.pauseSupported = false;
+    entry.resumeState = undefined;
+    notifyListeners();
+    void pollNativeDownload(entry);
+  } catch {
+    if (!active.has(entry.id)) return;
+    entry.status = "error";
+    notifyListeners();
+    completeNotification(entry, true);
+  }
+}
+
 /**
  * Finds the first subtitle rendition in an HLS master and materializes an
  * HLS WebVTT media playlist into one offline VTT file. A direct subtitle URL
@@ -828,11 +934,16 @@ function enqueueDownload(
     totalBytes: 0,
     retryCount: 0,
     status: autoStart ? "downloading" : "paused",
+    pauseSupported: true,
     params,
     localPath: localPath ?? localPathFor(params),
     resumeState,
     notificationAt: 0,
     cancelFn: () => {
+      if (entry.nativePollTimer) clearTimeout(entry.nativePollTimer);
+      if (entry.nativeJobId != null) {
+        void removeNativeDownload(entry.id);
+      }
       entry.resumable?.cancelAsync().catch(() => {});
       FileSystem.deleteAsync(entry.localPath, { idempotent: true }).catch(() => {});
       FileSystem.deleteAsync(`${entry.localPath.slice(0, -4)}.vtt`, { idempotent: true }).catch(() => {});
@@ -841,6 +952,12 @@ function enqueueDownload(
   active.set(id, entry);
   notifyListeners();
   if (!autoStart) return;
+  if (Platform.OS === "android" && isNativeDownloadAvailable()) {
+    void configureNotifications()
+      .then(() => beginNativeDownload(entry))
+      .catch(() => beginNativeDownload(entry));
+    return;
+  }
   void ensureDirectoryFor(entry.localPath)
     .then(() => configureNotifications())
     .then(() => runDownload(entry))
@@ -874,6 +991,7 @@ export async function startGlobalDownload(params: StartDownloadParams): Promise<
  */
 export async function restoreInterruptedDownloads(): Promise<void> {
   try {
+    await restoreNativeDownloads();
     const raw = await AsyncStorage.getItem(ACTIVE_PENDING_KEY);
     if (!raw) return;
     const records = JSON.parse(raw) as PersistedActive[];
@@ -925,6 +1043,96 @@ export async function restoreInterruptedDownloads(): Promise<void> {
          : undefined), record.localPath, record.status !== "paused");
     }
   } catch {}
+}
+
+async function restoreNativeDownloads(): Promise<void> {
+  if (Platform.OS !== "android" || !isNativeDownloadAvailable()) return;
+  const records = await listNativeDownloads();
+  if (!records.length) return;
+
+  const restoredToken = await getAuthToken();
+  for (const record of records) {
+    let metadata: Partial<StartDownloadParams> & { id?: string; animeId?: number; ep?: number } = {};
+    try {
+      metadata = JSON.parse(record.metadataJson || "{}");
+    } catch {
+      await forgetNativeDownload(record.appId);
+      continue;
+    }
+    if (!metadata.id || !metadata.url || !metadata.animeId || !metadata.ep) {
+      await forgetNativeDownload(record.appId);
+      continue;
+    }
+
+    const params: StartDownloadParams = {
+      animeId: Number(metadata.animeId),
+      ep: Number(metadata.ep),
+      title: String(metadata.title || "أنمي"),
+      cover: String(metadata.cover || ""),
+      site: String(metadata.site || "source"),
+      quality: String(metadata.quality || "auto"),
+      url: String(metadata.url),
+      authToken: restoredToken,
+      subtitleUrl: metadata.subtitleUrl ? String(metadata.subtitleUrl) : undefined,
+      hlsManifestUrl: metadata.hlsManifestUrl ? String(metadata.hlsManifestUrl) : undefined,
+      headers: metadata.headers && typeof metadata.headers === "object"
+        ? metadata.headers as Record<string, string>
+        : undefined,
+    };
+
+    const id = makeDownloadId(params.animeId, params.ep, params.site, params.quality);
+    if (id !== record.appId) {
+      await forgetNativeDownload(record.appId);
+      continue;
+    }
+
+    if (record.status === "successful") {
+      const restored: RuntimeDownload = {
+        id,
+        animeId: params.animeId,
+        ep: params.ep,
+        title: params.title,
+        cover: params.cover,
+        site: params.site,
+        quality: params.quality,
+        progress: 1,
+        bytesWritten: record.bytesWritten,
+        totalBytes: record.totalBytes,
+        retryCount: 0,
+        status: "downloading",
+        pauseSupported: false,
+        params,
+        localPath: record.localPath,
+        nativeJobId: record.jobId,
+        notificationAt: 0,
+        cancelFn: () => { void removeNativeDownload(id); },
+      };
+      try {
+        await saveCompleted(restored);
+        await forgetNativeDownload(id);
+      } catch {
+        // Leave the OS record visible for the next launch if the file has not
+        // become readable yet.
+      }
+      continue;
+    }
+
+    enqueueDownload(params, undefined, record.localPath, false);
+    const entry = active.get(id);
+    if (!entry) continue;
+    entry.nativeJobId = record.jobId;
+    entry.pauseSupported = false;
+    entry.bytesWritten = record.bytesWritten;
+    entry.totalBytes = record.totalBytes;
+    entry.progress = record.totalBytes > 0
+      ? Math.min(record.bytesWritten / record.totalBytes, 1)
+      : 0;
+    entry.status = record.status === "failed" || record.status === "unknown"
+      ? "error"
+      : record.status === "paused" ? "paused" : "downloading";
+    notifyListeners();
+    if (entry.status === "downloading") void pollNativeDownload(entry);
+  }
 }
 
 /* Keep the service warm at module load. This does not attach any screen. */

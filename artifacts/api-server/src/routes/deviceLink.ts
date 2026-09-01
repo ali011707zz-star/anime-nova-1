@@ -42,12 +42,20 @@ function normalizeDeviceId(value: unknown): string {
   return String(value ?? "").trim().slice(0, 160);
 }
 
+function defaultDeviceName(platform: string): string {
+  if (platform === "android-tv") return "جهاز التلفاز";
+  if (platform === "ios") return "هاتف iPhone";
+  if (platform === "android") return "هاتف Android";
+  return "جهاز جديد";
+}
+
 function deviceSummary(row: any) {
+  const platform = row.platform || "android";
   return {
     id: String(row.id),
     deviceId: row.device_id,
-    name: row.device_name || "جهاز التلفاز",
-    platform: row.platform || "android-tv",
+    name: row.device_name || defaultDeviceName(platform),
+    platform,
     linkedAt: row.linked_at,
     lastSeenAt: row.last_seen_at || row.linked_at,
   };
@@ -121,19 +129,19 @@ router.post("/device-link/request", async (req: Request, res: Response) => {
   }
 });
 
-/** POST /api/device-link/claim — exchange the code for a revocable TV token. */
+/** POST /api/device-link/claim — exchange the code for a revocable device token. */
 router.post("/device-link/claim", async (req: Request, res: Response) => {
   const ip = requestIp(req);
   const code = normalizeCode(req.body?.code);
   const deviceId = normalizeDeviceId(req.body?.deviceId);
-  const deviceName = String(req.body?.deviceName || "Android TV").trim().slice(0, 80) || "Android TV";
-  const platform = String(req.body?.platform || "android-tv").trim().slice(0, 30) || "android-tv";
+  const platform = String(req.body?.platform || "android").trim().slice(0, 30) || "android";
+  const deviceName = String(req.body?.deviceName || defaultDeviceName(platform)).trim().slice(0, 80) || defaultDeviceName(platform);
 
   if (!/^\d{6}$/.test(code)) {
     return res.status(400).json({ error: "أدخل الرمز المكوّن من 6 أرقام" });
   }
   if (!/^[A-Za-z0-9._:-]{6,160}$/.test(deviceId)) {
-    return res.status(400).json({ error: "معرّف جهاز التلفاز غير صالح" });
+    return res.status(400).json({ error: "معرّف الجهاز غير صالح" });
   }
   // Six-digit codes are deliberately short-lived, so keep guessing tightly rate-limited.
   if (!checkRateLimit(`device-link-claim:${ip}`, 10, 60_000)) {
@@ -165,7 +173,7 @@ router.post("/device-link/claim", async (req: Request, res: Response) => {
     }, { limit: MAX_ACTIVE_DEVICES });
     const linkedForDevice = existing.find(row => row.device_id === deviceId);
     if (!linkedForDevice && existing.length >= MAX_ACTIVE_DEVICES) {
-      return res.status(409).json({ error: "وصلت إلى الحد الأقصى وهو 8 أجهزة تلفاز. ألغِ ربط جهاز أولاً." });
+      return res.status(409).json({ error: "وصلت إلى الحد الأقصى وهو 8 أجهزة. ألغِ ربط جهاز أولاً." });
     }
 
     // The conditional update is the one-time-use gate. Concurrent claims cannot both win.
@@ -197,7 +205,7 @@ router.post("/device-link/claim", async (req: Request, res: Response) => {
           last_seen_at: now,
         });
 
-    if (!linked) return res.status(503).json({ error: "تعذّر حفظ جهاز التلفاز. حاول برمز جديد." });
+    if (!linked) return res.status(503).json({ error: "تعذّر حفظ الجهاز. حاول برمز جديد." });
 
     return res.json({
       ok: true,
@@ -210,7 +218,7 @@ router.post("/device-link/claim", async (req: Request, res: Response) => {
   }
 });
 
-/** GET /api/device-link/devices — active TV devices for the signed-in phone. */
+/** GET /api/device-link/devices — active devices for the signed-in phone. */
 router.get("/device-link/devices", async (req: Request, res: Response) => {
   const userId = signedInUserId(req);
   if (!userId) return res.status(401).json({ error: "غير مصرّح" });
@@ -227,7 +235,7 @@ router.get("/device-link/devices", async (req: Request, res: Response) => {
   }
 });
 
-/** DELETE /api/device-link/devices/:id — revoke a TV token immediately. */
+/** DELETE /api/device-link/devices/:id — revoke a linked device immediately. */
 router.delete("/device-link/devices/:id", async (req: Request, res: Response) => {
   const userId = signedInUserId(req);
   if (!userId) return res.status(401).json({ error: "غير مصرّح" });
@@ -245,18 +253,18 @@ router.delete("/device-link/devices/:id", async (req: Request, res: Response) =>
   }
 });
 
-/** POST /api/device-link/heartbeat — update last-seen for an already linked TV. */
+/** POST /api/device-link/heartbeat — update last-seen for an already linked device. */
 router.post("/device-link/heartbeat", async (req: Request, res: Response) => {
   const token = String(req.headers["x-user-token"] || "");
   const info = getDeviceUserTokenInfo(token);
-  if (!info) return res.status(401).json({ error: "توكن التلفاز غير صالح" });
+  if (!info) return res.status(401).json({ error: "توكن الجهاز غير صالح" });
   try {
     const updated = await sbPatch("linked_devices", {
       user_id: `eq.${info.userId}`,
       device_id: `eq.${info.deviceId}`,
       revoked_at: "is.null",
     }, { last_seen_at: new Date().toISOString() });
-    if (!updated) return res.status(403).json({ error: "تم إلغاء ربط هذا التلفاز", code: "DEVICE_REVOKED" });
+    if (!updated) return res.status(403).json({ error: "تم إلغاء ربط هذا الجهاز", code: "DEVICE_REVOKED" });
     return res.json({ ok: true });
   } catch (err) {
     console.error("[device-link] heartbeat:", err);

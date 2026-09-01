@@ -3,6 +3,7 @@ import * as Notifications from "expo-notifications";
 import * as FileSystem from "expo-file-system";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { getBaseUrl } from "./api";
+import { PUSH_REGISTERED_KEY } from "./pushNotifications";
 
 const KNOWN_EPISODES_KEY = "nova-known-latest-episodes-v2";
 const LAST_SYNC_KEY = "nova-latest-episodes-last-sync-v1";
@@ -160,7 +161,8 @@ export async function syncLatestEpisodeNotifications(): Promise<void> {
       previous = new Set();
     }
     const isFirstSync = previous.size === 0;
-    const newItems = isFirstSync
+    const hasRemotePush = (await AsyncStorage.getItem(PUSH_REGISTERED_KEY)) === "1";
+    const newItems = isFirstSync || hasRemotePush
       ? []
       : normalized.filter(({ key }) => !previous.has(key));
     // Keep a rolling union rather than replacing the snapshot. The upstream

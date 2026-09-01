@@ -216,7 +216,7 @@ export async function createApp(): Promise<Express> {
       return;
     }
 
-    // TV tokens are stateful at the device-link layer: revocation on the phone
+    // Linked-device tokens are stateful at the device-link layer: revocation on the phone
     // must take effect on the next request, unlike the normal stateless mobile token.
     const userTokenHeader = req.headers["x-user-token"];
     const userToken = Array.isArray(userTokenHeader) ? userTokenHeader[0] : userTokenHeader;
@@ -229,7 +229,7 @@ export async function createApp(): Promise<Express> {
       }, { limit: 1 });
       if (!linked.length) {
         res.status(403).json({
-          error: "تم إلغاء ربط هذا التلفاز من الهاتف.",
+          error: "تم إلغاء ربط هذا الجهاز من الهاتف.",
           code: "DEVICE_REVOKED",
         });
         return;

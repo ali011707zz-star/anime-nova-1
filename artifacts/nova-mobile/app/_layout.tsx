@@ -174,14 +174,21 @@ function RootLayout() {
       });
     }
     let stop: (() => void) | undefined;
+    let disposed = false;
     if (!tvMode) {
-      import("@/utils/episodeNotifications")
-        .then(({ startEpisodeNotificationSync }) => {
-          stop = startEpisodeNotificationSync();
+      void import("@/utils/pushNotifications")
+        .then(async ({ registerPushNotifications }) => {
+          await registerPushNotifications();
+          if (disposed) return;
+          const { startEpisodeNotificationSync } = await import("@/utils/episodeNotifications");
+          if (!disposed) stop = startEpisodeNotificationSync();
         })
         .catch(() => {});
     }
-    return () => stop?.();
+    return () => {
+      disposed = true;
+      stop?.();
+    };
   }, [tvMode]);
 
   if (brandSplashVisible) {

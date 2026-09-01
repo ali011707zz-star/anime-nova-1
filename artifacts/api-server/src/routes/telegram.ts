@@ -104,12 +104,17 @@ export async function notifyNewEpisode(
   if (notifiedEpisodes.has(key)) return; // لا تُرسل مرتين
   notifiedEpisodes.add(key);
 
+  // Resolve the poster once and reuse it for the in-app record, remote push,
+  // and Telegram. The remote push must receive the same image; otherwise the
+  // OS can only display the small app icon while the app is closed.
+  const poster = posterUrl ?? await fetchAnimePoster(anilistId);
+
   // حفظ الإشعار في قاعدة البيانات (داخل التطبيق)
   await saveNotification({
     type: "anime_episode",
     title,
     body: `الحلقة ${ep} متاحة الآن`,
-    image_url: posterUrl ?? (await fetchAnimePoster(anilistId)) ?? undefined,
+    image_url: poster ?? undefined,
     link_path: `/watch?id=${anilistId}&ep=${ep}`,
     anime_id: anilistId,
     episode_num: ep,
@@ -119,14 +124,13 @@ export async function notifyNewEpisode(
     animeId: anilistId,
     title,
     episode: ep,
-    posterUrl,
+    posterUrl: poster ?? undefined,
   }).catch(() => {});
 
   const channelId = process.env.TELEGRAM_CHANNEL_ID;
   const tok = await getToken();
   if (!channelId || !tok) return;
 
-  const poster  = posterUrl ?? await fetchAnimePoster(anilistId);
   const caption =
     `🌸 <b>حلقة جديدة وصلت!</b>\n\n` +
     `✨ <b>${title}</b>\n` +
