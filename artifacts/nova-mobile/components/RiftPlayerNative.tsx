@@ -48,9 +48,11 @@ const { width: SCREEN_WIDTH } = Dimensions.get("window");
 const SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 2];
 const TV_SUBTITLE_SETTINGS_KEY = "nova-tv-subtitle-settings";
 const TV_SUBTITLE_SIZES = [
-  { value: 34, label: "كبير", detail: "34" },
-  { value: 46, label: "عملاق", detail: "46" },
-  { value: 62, label: "عملاق جدًا", detail: "TV Huge" },
+  { value: 28, label: "صغير", detail: "28" },
+  { value: 34, label: "متوسط", detail: "34" },
+  { value: 46, label: "كبير", detail: "46" },
+  { value: 62, label: "عملاق", detail: "62" },
+  { value: 76, label: "عملاق جدًا", detail: "76" },
 ] as const;
 
 type TvSubtitleSettings = {
@@ -161,9 +163,9 @@ function TvSubtitleSettingsPanel({
               <Text
                 style={[
                   styles.tvSettingsSizeSample,
-                  {
-                    fontSize: item.value === 62 ? 28 : item.value === 46 ? 24 : 21,
-                  },
+                      {
+                        fontSize: Math.min(30, Math.max(21, Math.round(item.value * 0.45))),
+                      },
                 ]}
               >
                 ع
@@ -212,35 +214,66 @@ function TvSubtitleSettingsPanel({
         </View>
 
         <Text style={styles.tvSettingsSectionLabel}>شكل النص</Text>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="تفعيل النص العريض"
-          onPress={() => setSubtitleSettings((current) => ({
-            ...current,
-            bold: !current.bold,
-          }))}
-          focusable
-          style={({ focused }) => [
-            styles.tvSettingsBoldButton,
-            subtitleSettings.bold && styles.tvSettingsActive,
-            tvFocusStyle(focused),
-          ]}
-        >
-          <View style={styles.tvSettingsBoldIcon}>
-            <Text style={styles.tvSettingsBoldIconText}>ع</Text>
-          </View>
-          <View style={styles.tvSettingsBoldCopy}>
-            <Text style={styles.tvSettingsButtonLabel}>عريض وواضح</Text>
-            <Text style={styles.tvSettingsButtonDetail}>
-              {subtitleSettings.bold ? "مفعّل" : "رفيع"}
-            </Text>
-          </View>
-          <Ionicons
-            name={subtitleSettings.bold ? "checkmark-circle" : "ellipse-outline"}
-            size={28}
-            color={subtitleSettings.bold ? "#c4b5fd" : "rgba(255,255,255,0.35)"}
-          />
-        </Pressable>
+        <View style={styles.tvSettingsTextStyleRow}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="تفعيل النص العريض"
+            onPress={() => setSubtitleSettings((current) => ({
+              ...current,
+              bold: !current.bold,
+            }))}
+            focusable
+            style={({ focused }) => [
+              styles.tvSettingsBoldButton,
+              subtitleSettings.bold && styles.tvSettingsActive,
+              tvFocusStyle(focused),
+            ]}
+          >
+            <View style={styles.tvSettingsBoldIcon}>
+              <Text style={styles.tvSettingsBoldIconText}>ع</Text>
+            </View>
+            <View style={styles.tvSettingsBoldCopy}>
+              <Text style={styles.tvSettingsButtonLabel}>عريض وواضح</Text>
+              <Text style={styles.tvSettingsButtonDetail}>
+                {subtitleSettings.bold ? "مفعّل" : "رفيع"}
+              </Text>
+            </View>
+            <Ionicons
+              name={subtitleSettings.bold ? "checkmark-circle" : "ellipse-outline"}
+              size={28}
+              color={subtitleSettings.bold ? "#c4b5fd" : "rgba(255,255,255,0.35)"}
+            />
+          </Pressable>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="تفعيل النص العريض جدًا"
+            onPress={() => setSubtitleSettings((current) => ({
+              ...current,
+              extraBold: !current.extraBold,
+            }))}
+            focusable
+            style={({ focused }) => [
+              styles.tvSettingsBoldButton,
+              subtitleSettings.extraBold && styles.tvSettingsActive,
+              tvFocusStyle(focused),
+            ]}
+          >
+            <View style={styles.tvSettingsBoldIcon}>
+              <Text style={[styles.tvSettingsBoldIconText, { fontWeight: "900" }]}>ع</Text>
+            </View>
+            <View style={styles.tvSettingsBoldCopy}>
+              <Text style={styles.tvSettingsButtonLabel}>عريض جدًا</Text>
+              <Text style={styles.tvSettingsButtonDetail}>
+                {subtitleSettings.extraBold ? "مفعّل" : "أقصى سماكة"}
+              </Text>
+            </View>
+            <Ionicons
+              name={subtitleSettings.extraBold ? "checkmark-circle" : "ellipse-outline"}
+              size={28}
+              color={subtitleSettings.extraBold ? "#c4b5fd" : "rgba(255,255,255,0.35)"}
+            />
+          </Pressable>
+        </View>
 
         <Text style={styles.tvSettingsSectionLabel}>موضع الترجمة</Text>
         <View style={styles.tvSettingsPositionRow}>
@@ -1402,7 +1435,7 @@ export function RiftPlayer({
                     style={[
                       styles.tvSettingsSizeSample,
                       {
-                        fontSize: item.value === 62 ? 28 : item.value === 46 ? 24 : 21,
+                        fontSize: Math.min(30, Math.max(21, Math.round(item.value * 0.45))),
                       },
                     ]}
                   >
@@ -1415,35 +1448,66 @@ export function RiftPlayer({
             </View>
 
             <Text style={styles.tvSettingsSectionLabel}>شكل النص</Text>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="تفعيل النص العريض"
-              onPress={() => setSubtitleSettings((current) => ({
-                ...current,
-                bold: !current.bold,
-              }))}
-              focusable
-              style={({ focused }) => [
-                styles.tvSettingsBoldButton,
-                subtitleSettings.bold && styles.tvSettingsActive,
-                tvFocusStyle(focused),
-              ]}
-            >
-              <View style={styles.tvSettingsBoldIcon}>
-                <Text style={styles.tvSettingsBoldIconText}>ع</Text>
-              </View>
-              <View style={styles.tvSettingsBoldCopy}>
-                <Text style={styles.tvSettingsButtonLabel}>عريض وواضح</Text>
-                <Text style={styles.tvSettingsButtonDetail}>
-                  {subtitleSettings.bold ? "مفعّل" : "رفيع"}
-                </Text>
-              </View>
-              <Ionicons
-                name={subtitleSettings.bold ? "checkmark-circle" : "ellipse-outline"}
-                size={28}
-                color={subtitleSettings.bold ? "#c4b5fd" : "rgba(255,255,255,0.35)"}
-              />
-            </Pressable>
+            <View style={styles.tvSettingsTextStyleRow}>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="تفعيل النص العريض"
+                onPress={() => setSubtitleSettings((current) => ({
+                  ...current,
+                  bold: !current.bold,
+                }))}
+                focusable
+                style={({ focused }) => [
+                  styles.tvSettingsBoldButton,
+                  subtitleSettings.bold && styles.tvSettingsActive,
+                  tvFocusStyle(focused),
+                ]}
+              >
+                <View style={styles.tvSettingsBoldIcon}>
+                  <Text style={styles.tvSettingsBoldIconText}>ع</Text>
+                </View>
+                <View style={styles.tvSettingsBoldCopy}>
+                  <Text style={styles.tvSettingsButtonLabel}>عريض وواضح</Text>
+                  <Text style={styles.tvSettingsButtonDetail}>
+                    {subtitleSettings.bold ? "مفعّل" : "رفيع"}
+                  </Text>
+                </View>
+                <Ionicons
+                  name={subtitleSettings.bold ? "checkmark-circle" : "ellipse-outline"}
+                  size={28}
+                  color={subtitleSettings.bold ? "#c4b5fd" : "rgba(255,255,255,0.35)"}
+                />
+              </Pressable>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="تفعيل النص العريض جدًا"
+                onPress={() => setSubtitleSettings((current) => ({
+                  ...current,
+                  extraBold: !current.extraBold,
+                }))}
+                focusable
+                style={({ focused }) => [
+                  styles.tvSettingsBoldButton,
+                  subtitleSettings.extraBold && styles.tvSettingsActive,
+                  tvFocusStyle(focused),
+                ]}
+              >
+                <View style={styles.tvSettingsBoldIcon}>
+                  <Text style={[styles.tvSettingsBoldIconText, { fontWeight: "900" }]}>ع</Text>
+                </View>
+                <View style={styles.tvSettingsBoldCopy}>
+                  <Text style={styles.tvSettingsButtonLabel}>عريض جدًا</Text>
+                  <Text style={styles.tvSettingsButtonDetail}>
+                    {subtitleSettings.extraBold ? "مفعّل" : "أقصى سماكة"}
+                  </Text>
+                </View>
+                <Ionicons
+                  name={subtitleSettings.extraBold ? "checkmark-circle" : "ellipse-outline"}
+                  size={28}
+                  color={subtitleSettings.extraBold ? "#c4b5fd" : "rgba(255,255,255,0.35)"}
+                />
+              </Pressable>
+            </View>
 
             <Text style={styles.tvSettingsSectionLabel}>موضع الترجمة</Text>
             <View style={styles.tvSettingsPositionRow}>
@@ -1710,6 +1774,7 @@ const styles = StyleSheet.create({
     marginTop: 18, marginBottom: 10,
   },
   tvSettingsOptionRow: { flexDirection: "row", gap: 12 },
+  tvSettingsTextStyleRow: { flexDirection: "row", gap: 12 },
   tvSettingsFineTuneRow: { flexDirection: "row", alignItems: "center", gap: 12, marginTop: 12 },
   tvSettingsFineTuneButton: {
     minWidth: 128, minHeight: 58, borderRadius: 14, paddingHorizontal: 16,
@@ -1732,6 +1797,7 @@ const styles = StyleSheet.create({
     borderColor: "rgba(196,181,253,0.72)",
   },
   tvSettingsBoldButton: {
+    flex: 1,
     minHeight: 76, borderRadius: 16, paddingHorizontal: 18,
     flexDirection: "row", alignItems: "center", gap: 14,
     backgroundColor: "rgba(255,255,255,0.06)",

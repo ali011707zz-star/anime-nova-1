@@ -19,7 +19,8 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { getBaseUrl } from "@/utils/api";
-import { TvPressable, useTvMetrics } from "@/utils/tv";
+import { isTvDevice, TvPressable, useTvMetrics } from "@/utils/tv";
+import { RiftPlayer as NativeRiftPlayer } from "./RiftPlayerNative";
 
 const { width: W, height: H } = Dimensions.get("window");
 // Keep the existing player controls in one place while making every control
@@ -405,9 +406,13 @@ function SpinRing({ size = 52 }: { size?: number }) {
 
 /* ─── Main Component ─── */
 export function RiftPlayer(props: Props) {
-  // Keep one playback implementation for phone and TV. The TV-specific
-  // controls and focus behavior live inside ExpoRiftPlayer, while the video
-  // surface stays on expo-video's explicit TextureView path.
+  // Android TV uses the direct Media3 surface to avoid expo-video's
+  // TextureView composition path, which can leave a differently colored
+  // region after the TV rotates into landscape. Phones keep the existing
+  // expo-video implementation and its capture-friendly TextureView.
+  if (isTvDevice()) {
+    return <NativeRiftPlayer {...props} />;
+  }
   return <ExpoRiftPlayer {...props} />;
 }
 
