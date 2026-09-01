@@ -115,7 +115,7 @@ function ActiveDownloadCard({
 
         <Text style={[s.activeStatus, isError && { color: "rgba(239,68,68,0.65)" }]}>
           {isError
-            ? "فشل التنزيل — اضغط × للإغلاق"
+            ? `${item.errorMessage || "فشل التنزيل"} — اضغط × للإغلاق`
               : isPaused
               ? "متوقف مؤقتاً — اضغط ▶ للاستئناف"
                 : canPause

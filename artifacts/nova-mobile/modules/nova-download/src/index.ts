@@ -16,6 +16,8 @@ export type NativeDownloadRecord = {
   totalBytes: number;
   localPath: string;
   metadataJson: string;
+  reasonCode: number;
+  reasonMessage: string;
 };
 
 type NovaDownloadModule = {

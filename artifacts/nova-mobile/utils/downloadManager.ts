@@ -11,7 +11,7 @@ import * as Notifications from "expo-notifications";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import Constants from "expo-constants";
 import { recordSuccessfulDownload } from "./adPolicy";
-import { getAuthToken } from "./secureApi";
+import { getAuthToken, getDownloadToken } from "./secureApi";
 import {
   enqueueNativeDownload,
   forgetNativeDownload,
@@ -60,6 +60,7 @@ export interface ActiveDownload {
   totalBytes: number;
   retryCount: number;
   status: "downloading" | "paused" | "error";
+  errorMessage?: string;
   /** Android DownloadManager jobs cannot be paused from the JS bridge. */
   pauseSupported?: boolean;
   cancelFn: () => void;
@@ -74,6 +75,7 @@ export interface StartDownloadParams {
   quality: string;
   url: string;
   authToken?: string | null;
+  downloadToken?: string | null;
   subtitleUrl?: string;
   /** Original/proxied HLS manifest used to discover an embedded subtitle track. */
   hlsManifestUrl?: string;
@@ -520,7 +522,35 @@ function requestHeaders(params: StartDownloadParams): Record<string, string> {
     "Accept": "video/mp4,video/*;q=0.9,*/*;q=0.1",
   };
   if (params.authToken) headers["X-App-Token"] = params.authToken;
+  if (params.downloadToken) headers["X-Download-Token"] = params.downloadToken;
   return headers;
+}
+
+function nativeFailureReason(record: NativeDownloadRecord): string {
+  switch (record.reasonCode) {
+    case 1006:
+      return "مساحة التخزين غير كافية. حرّر مساحة ثم أعد التنزيل.";
+    case 1001:
+      return "تعذر إنشاء ملف التنزيل أو الكتابة إليه.";
+    case 1002:
+      return "الخادم رفض طلب التنزيل. أعد المحاولة من داخل التطبيق.";
+    case 1004:
+      return "انقطع نقل البيانات أو وصلت بيانات غير صالحة.";
+    case 1005:
+      return "عدد إعادة التوجيهات من الخادم كبير جداً.";
+    case 1007:
+      return "مجلد التنزيل غير متاح على الجهاز.";
+    case 1008:
+      return "تعذر استئناف التنزيل.";
+    case 1009:
+      return "ملف التنزيل موجود مسبقاً.";
+    case 1010:
+      return "التنزيل محظور من النظام.";
+    case 0:
+      return record.reasonMessage || "تعذر قراءة سبب فشل التنزيل.";
+    default:
+      return record.reasonMessage || `فشل التنزيل من Android (رمز ${record.reasonCode}).`;
+  }
 }
 
 function resolvePlaylistUrl(value: string, base: string): string {
@@ -619,6 +649,7 @@ async function pollNativeDownload(entry: RuntimeDownload): Promise<void> {
     if (!record) {
       entry.nativePollTimer = undefined;
       entry.status = "error";
+      entry.errorMessage = "اختفت مهمة التنزيل من Android قبل اكتمالها.";
       notifyListeners();
       return;
     }
@@ -642,11 +673,13 @@ async function pollNativeDownload(entry: RuntimeDownload): Promise<void> {
 
     if (record.status === "failed" || record.status === "unknown") {
       entry.status = "error";
+      entry.errorMessage = nativeFailureReason(record);
       entry.nativePollTimer = undefined;
       notifyListeners();
       return;
     }
 
+    entry.errorMessage = undefined;
     entry.status = record.status === "paused" ? "paused" : "downloading";
     notifyProgressListeners();
     entry.nativePollTimer = setTimeout(() => {
@@ -685,6 +718,7 @@ async function beginNativeDownload(entry: RuntimeDownload): Promise<void> {
   } catch {
     if (!active.has(entry.id)) return;
     entry.status = "error";
+    entry.errorMessage = "تعذر بدء تنزيل Android.";
     notifyListeners();
     completeNotification(entry, true);
   }
@@ -899,6 +933,9 @@ async function runDownload(entry: RuntimeDownload): Promise<void> {
       }
       if (attempt >= MAX_RETRIES) {
         entry.status = "error";
+        entry.errorMessage = error instanceof Error && error.message
+          ? `فشل التنزيل: ${error.message}`
+          : "فشل التنزيل بعد عدة محاولات.";
         notifyListeners();
         completeNotification(entry, true);
         return;
@@ -1002,7 +1039,10 @@ export async function restoreInterruptedDownloads(): Promise<void> {
     /* download-mp4 is protected by the same anon-token middleware as source
        fetching. Refresh once before rebuilding tasks so an app restart does
        not turn a resumable download into a permanent 403. */
-    const restoredToken = await getAuthToken();
+    const [restoredToken, restoredDownloadToken] = await Promise.all([
+      getAuthToken(),
+      getDownloadToken(),
+    ]);
     for (const record of records) {
       if (!record?.id || completed.some((item) => item.id === record.id)) continue;
       if (!record.url || !record.localPath) continue;
@@ -1015,6 +1055,7 @@ export async function restoreInterruptedDownloads(): Promise<void> {
         quality: record.quality,
         url: record.url,
         authToken: restoredToken,
+        downloadToken: restoredDownloadToken,
         subtitleUrl: record.subtitleUrl,
          hlsManifestUrl: record.hlsManifestUrl,
         headers: record.headers,
@@ -1050,7 +1091,10 @@ async function restoreNativeDownloads(): Promise<void> {
   const records = await listNativeDownloads();
   if (!records.length) return;
 
-  const restoredToken = await getAuthToken();
+  const [restoredToken, restoredDownloadToken] = await Promise.all([
+    getAuthToken(),
+    getDownloadToken(),
+  ]);
   for (const record of records) {
     let metadata: Partial<StartDownloadParams> & { id?: string; animeId?: number; ep?: number } = {};
     try {
@@ -1073,6 +1117,7 @@ async function restoreNativeDownloads(): Promise<void> {
       quality: String(metadata.quality || "auto"),
       url: String(metadata.url),
       authToken: restoredToken,
+      downloadToken: restoredDownloadToken,
       subtitleUrl: metadata.subtitleUrl ? String(metadata.subtitleUrl) : undefined,
       hlsManifestUrl: metadata.hlsManifestUrl ? String(metadata.hlsManifestUrl) : undefined,
       headers: metadata.headers && typeof metadata.headers === "object"
@@ -1130,6 +1175,9 @@ async function restoreNativeDownloads(): Promise<void> {
     entry.status = record.status === "failed" || record.status === "unknown"
       ? "error"
       : record.status === "paused" ? "paused" : "downloading";
+    entry.errorMessage = entry.status === "error"
+      ? nativeFailureReason(record)
+      : undefined;
     notifyListeners();
     if (entry.status === "downloading") void pollNativeDownload(entry);
   }

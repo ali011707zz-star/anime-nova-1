@@ -167,6 +167,7 @@ export function checkAppSecret(provided: string | undefined): boolean {
 // ═══════════════════════════════════════════════════════════════════════════════
 const TOKEN_TTL = 300; // 5 دقائق
 const USER_TOKEN_TTL = 30 * 24 * 60 * 60; // 30 يوماً — جلسة الموبايل
+const DOWNLOAD_TOKEN_TTL = 7 * 24 * 60 * 60; // أسبوع — يكفي للتنزيلات الكبيرة في الخلفية
 
 export function issueAnonToken(): { token: string; exp: number } {
   const now = Math.floor(Date.now() / 1000);
@@ -207,6 +208,46 @@ export function validateAnonToken(token: string): boolean {
     const b = Buffer.from(expectedSig.padEnd(36));
     if (a.length !== b.length) return false;
     return timingSafeEqual(a, b);
+  } catch {
+    return false;
+  }
+}
+
+/** توكن موقّع للتنزيلات التي يملكها DownloadManager بعد إغلاق التطبيق. */
+export function issueDownloadToken(): { token: string; exp: number } {
+  const now = Math.floor(Date.now() / 1000);
+  const exp = now + DOWNLOAD_TOKEN_TTL;
+  const payload = `download.${now}.${exp}`;
+  const sig = createHmac("sha256", getSecret())
+    .update(payload)
+    .digest("base64url");
+  return { token: `${payload}.${sig}`, exp };
+}
+
+export function validateDownloadToken(token: string): boolean {
+  if (!token) return false;
+  const parts = token.split(".");
+  if (parts.length !== 4 || parts[0] !== "download") return false;
+  const [, iat, exp, sig] = parts;
+  try {
+    const iatNum = Number(iat);
+    const expNum = Number(exp);
+    const now = Math.floor(Date.now() / 1000);
+    if (
+      !Number.isSafeInteger(iatNum) ||
+      !Number.isSafeInteger(expNum) ||
+      iatNum > now + 30 ||
+      expNum <= iatNum ||
+      expNum - iatNum > DOWNLOAD_TOKEN_TTL ||
+      now > expNum
+    ) {
+      return false;
+    }
+    const payload = `download.${iat}.${exp}`;
+    const expected = createHmac("sha256", getSecret()).update(payload).digest("base64url");
+    const a = Buffer.from(sig);
+    const b = Buffer.from(expected);
+    return a.length === b.length && timingSafeEqual(a, b);
   } catch {
     return false;
   }

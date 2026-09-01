@@ -8,6 +8,8 @@ import { getRuntimeIntegrity } from "./runtimeIntegrity";
 const TOKEN_KEY = "nova_anon_token";
 const TOKEN_EXP_KEY = "nova_anon_token_exp";
 const USER_TOKEN_KEY = "nova_user_token";
+const DOWNLOAD_TOKEN_KEY = "nova_download_token";
+const DOWNLOAD_TOKEN_EXP_KEY = "nova_download_token_exp";
 
 // معرّف ثابت للتطبيق (Client Identifier)
 const CLIENT_ID = "nova-anime-mobile-v1";
@@ -20,6 +22,8 @@ const APP_UA = `NovaAnime/${APP_VERSION} (Mobile)`;
 
 let _cachedToken: string | null = null;
 let _cachedExp: number = 0;
+let _cachedDownloadToken: string | null = null;
+let _cachedDownloadExp: number = 0;
 
 // Singleton: يمنع 20+ طلب token متوازٍ عند فتح شاشة المشاهدة
 let _inflightFetch: Promise<string | null> | null = null;
@@ -82,6 +86,12 @@ async function doFetchFreshToken(): Promise<string | null> {
       _cachedExp = data.exp;
       await secureSet(TOKEN_KEY, data.token);
       await secureSet(TOKEN_EXP_KEY, data.exp.toString());
+      if (data.downloadToken && data.downloadExp) {
+        _cachedDownloadToken = String(data.downloadToken);
+        _cachedDownloadExp = Number(data.downloadExp);
+        await secureSet(DOWNLOAD_TOKEN_KEY, _cachedDownloadToken);
+        await secureSet(DOWNLOAD_TOKEN_EXP_KEY, _cachedDownloadExp.toString());
+      }
       return data.token;
     } catch {
       if (attempt < MAX_RETRIES - 1) {
@@ -112,6 +122,25 @@ export async function getAuthToken(): Promise<string | null> {
   return fetchFreshToken();
 }
 
+export async function getDownloadToken(): Promise<string | null> {
+  if (!getRuntimeIntegrity().trusted) {
+    throw new Error("Untrusted runtime");
+  }
+  if (_cachedDownloadToken && Date.now() / 1000 < _cachedDownloadExp - 60) {
+    return _cachedDownloadToken;
+  }
+  const stored = await secureGet(DOWNLOAD_TOKEN_KEY);
+  const expStr = await secureGet(DOWNLOAD_TOKEN_EXP_KEY);
+  const exp = Number(expStr);
+  if (stored && Number.isFinite(exp) && Date.now() / 1000 < exp - 60) {
+    _cachedDownloadToken = stored;
+    _cachedDownloadExp = exp;
+    return stored;
+  }
+  await fetchFreshToken();
+  return _cachedDownloadToken;
+}
+
 /** Pre-warm: يُستدعى قبل الطلبات المتوازية لضمان وجود توكن صالح */
 export async function warmAuthToken(): Promise<void> {
   await getAuthToken();
@@ -120,8 +149,12 @@ export async function warmAuthToken(): Promise<void> {
 export async function invalidateToken(): Promise<void> {
   _cachedToken = null;
   _cachedExp = 0;
+  _cachedDownloadToken = null;
+  _cachedDownloadExp = 0;
   await secureDelete(TOKEN_KEY);
   await secureDelete(TOKEN_EXP_KEY);
+  await secureDelete(DOWNLOAD_TOKEN_KEY);
+  await secureDelete(DOWNLOAD_TOKEN_EXP_KEY);
 }
 
 export async function setUserAuthToken(token: string | null): Promise<void> {

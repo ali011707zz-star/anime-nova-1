@@ -15,7 +15,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useApp } from "@/context/AppContext";
 import { isTvDevice, tvFocusStyle } from "@/utils/tv";
 import { getBaseUrl } from "@/utils/api";
-import { secureFetch, secureStreamFetch, warmAuthToken, getAuthToken } from "@/utils/secureApi";
+import { secureFetch, secureStreamFetch, warmAuthToken, getAuthToken, getDownloadToken } from "@/utils/secureApi";
 import {
   startGlobalDownload,
   subscribeActiveDownloads,
@@ -1537,7 +1537,8 @@ export default function WatchScreen() {
       const subRaw    = best.subtitleUrl || globalSubUrl;
         const subtitleCandidate = subRaw;
        const subtitleUrl = normalizeProviderSubtitleUrl(site, subtitleCandidate, base);
-      const token     = await getAuthToken();
+       const token     = await getAuthToken();
+       const downloadToken = await getDownloadToken();
        const isHlsDownload = best.directType === "hls" || isHlsMediaUrl(proxyUrl);
        const downloadUrl = (DOWNLOAD_SUBTITLE_SITES.has(site) || isHlsDownload)
          ? buildEmbeddedDownloadUrl(site, site === "kawaii" ? (best.rawUrl || proxyUrl) : proxyUrl, subtitleUrl, base)
@@ -1552,6 +1553,7 @@ export default function WatchScreen() {
         quality:    getSrcQuality(best),
         url:        downloadUrl,
         authToken:  token,
+        downloadToken,
         headers:    hdrs,
         subtitleUrl,
          hlsManifestUrl: isHlsDownload ? proxyUrl : undefined,

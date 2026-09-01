@@ -30,6 +30,7 @@ import {
   assertSecurityConfig,
   MOBILE_CLIENT_ID,
   getDeviceUserTokenInfo,
+  validateDownloadToken,
 } from "./lib/security.js";
 
 // ── المسارات التي تتطلب توكن صالح ──
@@ -122,7 +123,10 @@ export async function createApp(): Promise<Express> {
   app.use(async (req, res, next) => {
     if (MEDIA_PROXY_PATH.test(req.path)) {
       res.setHeader("Access-Control-Allow-Origin", "*");
-      res.setHeader("Access-Control-Allow-Headers", "Range, Content-Type, X-App-Token");
+      res.setHeader(
+        "Access-Control-Allow-Headers",
+        "Range, Content-Type, X-App-Token, X-Download-Token",
+      );
       res.setHeader(
         "Access-Control-Expose-Headers",
         "Accept-Ranges, Content-Length, Content-Range, Content-Type, Content-Disposition",
@@ -175,8 +179,9 @@ export async function createApp(): Promise<Express> {
 
   // ── Mobile release gate ───────────────────────────────────────────────────
   // Web requests remain public as before. Any request identifying itself as the
-  // mobile client must prove its release identity and carry a short-lived token
+  // mobile client must prove its release identity and carry a valid app token
   // before it can receive config, catalog, posters, sources, or playback data.
+  // Background MP4 downloads may additionally use their longer-lived lease.
   app.use((req, res, next) => {
     const clientHeader = req.headers["x-nova-client"];
     const isMediaProxyRequest = MEDIA_PROXY_PATH.test(req.path);
@@ -207,7 +212,13 @@ export async function createApp(): Promise<Express> {
 
     const tokenHeader = req.headers["x-app-token"];
     const token = Array.isArray(tokenHeader) ? tokenHeader[0] : tokenHeader;
-    if (!validateAnonToken(token || "")) {
+    const isDownloadRequest = req.path === "/api/anime/download-mp4";
+    const downloadTokenHeader = req.headers["x-download-token"];
+    const downloadToken = Array.isArray(downloadTokenHeader) ? downloadTokenHeader[0] : downloadTokenHeader;
+    const hasValidMediaToken =
+      validateAnonToken(token || "") ||
+      (isDownloadRequest && validateDownloadToken(downloadToken || ""));
+    if (!hasValidMediaToken) {
       res.status(403).json({
         error: "انتهت جلسة النسخة الرسمية. أعد فتح التطبيق.",
         code: "INVALID_TOKEN",
@@ -264,8 +275,9 @@ export async function createApp(): Promise<Express> {
     const token =
       (req.headers["x-app-token"] as string) ||
       (req.query._tok as string) || "";
+    const downloadToken = req.headers["x-download-token"] as string;
 
-    if (!validateAnonToken(token)) {
+    if (!validateAnonToken(token) && !(p === "/api/anime/download-mp4" && validateDownloadToken(downloadToken || ""))) {
       res.status(403).json({
         error: "Access denied. Use the official Anime NOVA app.",
         code: "INVALID_TOKEN",
