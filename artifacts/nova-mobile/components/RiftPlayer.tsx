@@ -20,7 +20,6 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { getBaseUrl } from "@/utils/api";
 import { TvPressable, useTvMetrics } from "@/utils/tv";
-import { RiftPlayer as NativeRiftPlayer } from "./RiftPlayerNative";
 
 const { width: W, height: H } = Dimensions.get("window");
 // Keep the existing player controls in one place while making every control
@@ -100,6 +99,7 @@ export interface SubSettings {
   color: string;
   bgOpacity: number;
   bold: boolean;
+  extraBold: boolean;
   position: "top" | "center" | "bottom";
   /** Pixel adjustment inside the selected position; negative = higher. */
   verticalOffset: number;
@@ -149,6 +149,7 @@ const FONT_SIZES = [
   { sz: 16, label: "م", name: "متوسط" },
   { sz: 20, label: "ك", name: "كبير" },
   { sz: 24, label: "ع", name: "عملاق" },
+  { sz: 30, label: "ع+", name: "عملاق جدًا" },
 ];
 
 const SUB_COLORS = [
@@ -170,6 +171,7 @@ const DEFAULT_SUB_SETTINGS: SubSettings = {
   color: "#ffffff",
   bgOpacity: 0,
   bold: false,
+  extraBold: false,
   position: "bottom",
   verticalOffset: 0,
 };
@@ -403,18 +405,9 @@ function SpinRing({ size = 52 }: { size?: number }) {
 
 /* ─── Main Component ─── */
 export function RiftPlayer(props: Props) {
-  const { tv } = useTvMetrics();
-
-  /*
-   * TV playback uses the direct Media3 view rather than expo-video. The
-   * Android TV artifact was previously only reachable through the temporary
-   * test button in RiftPlayerNative, so the normal TV route could still hit
-   * the renderer/surface path that produces the split-color frame.
-   */
-  if (tv) {
-    return <NativeRiftPlayer {...props} />;
-  }
-
+  // Keep one playback implementation for phone and TV. The TV-specific
+  // controls and focus behavior live inside ExpoRiftPlayer, while the video
+  // surface stays on expo-video's explicit TextureView path.
   return <ExpoRiftPlayer {...props} />;
 }
 
@@ -2306,7 +2299,7 @@ function ExpoRiftPlayer({
               {
                 fontSize: subSettings.fontSize,
                 color: subSettings.color,
-                fontWeight: subSettings.bold ? "700" : "400",
+                fontWeight: subSettings.extraBold ? "900" : subSettings.bold ? "700" : "400",
                 backgroundColor: subSettings.bgOpacity > 0
                   ? `rgba(0,0,0,${subSettings.bgOpacity})`
                   : "transparent",
@@ -3010,18 +3003,39 @@ function ExpoRiftPlayer({
                     {subSettings.verticalOffset > 0 ? `+${subSettings.verticalOffset}` : subSettings.verticalOffset}px
                   </Text>
                 </View>
-                <View style={{ flexDirection: "row", gap: 7 }}>
-                  {([-30, -15, 0, 15, 30] as const).map(value => (
-                    <Pressable
-                      key={value}
-                      style={[s.subChip, { flex: 1, justifyContent: "center" }, subSettings.verticalOffset === value && s.subChipActive]}
-                      onPress={() => updateSubSettings({ verticalOffset: value })}
-                    >
-                      <Text style={[s.subChipText, { textAlign: "center" }, subSettings.verticalOffset === value && s.subChipTextActive]}>
-                        {value === 0 ? "0" : value < 0 ? `↑${Math.abs(value)}` : `↓${value}`}
-                      </Text>
-                    </Pressable>
-                  ))}
+                <View style={s.subMoveRow}>
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel="رفع الترجمة"
+                    style={s.subMoveButton}
+                    onPress={() => updateSubSettings({
+                      // Mobile subtitle coordinates use translateY:
+                      // negative values move the subtitle upward.
+                      verticalOffset: Math.max(-120, subSettings.verticalOffset - 24),
+                    })}
+                  >
+                    <Ionicons name="arrow-up" size={20} color="#c4b5fd" />
+                    <Text style={s.subMoveLabel}>رفع</Text>
+                  </Pressable>
+                  <View style={s.subMoveValue}>
+                    <Text style={s.subMoveValueText}>
+                      {subSettings.verticalOffset === 0
+                        ? "الافتراضي"
+                        : `${Math.abs(subSettings.verticalOffset)}px`}
+                    </Text>
+                    <Text style={s.subMoveHint}>كل ضغطة تحركها قليلًا</Text>
+                  </View>
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel="خفض الترجمة"
+                    style={s.subMoveButton}
+                    onPress={() => updateSubSettings({
+                      verticalOffset: Math.min(120, subSettings.verticalOffset + 24),
+                    })}
+                  >
+                    <Ionicons name="arrow-down" size={20} color="#c4b5fd" />
+                    <Text style={s.subMoveLabel}>خفض</Text>
+                  </Pressable>
                 </View>
 
                 {/* ── خلفية النص ── */}
@@ -3044,8 +3058,19 @@ function ExpoRiftPlayer({
                     <Text style={{ color: "#fff", fontWeight: "700", fontSize: 15 }}>ع</Text>
                     <Text style={s.subRowLabel}>نص عريض</Text>
                   </View>
-                  <Pressable style={[s.subToggle, subSettings.bold && s.subToggleOn]} onPress={() => updateSubSettings({ bold: !subSettings.bold })}>
+                  <Pressable style={[s.subToggle, subSettings.bold && !subSettings.extraBold && s.subToggleOn]} onPress={() => updateSubSettings({ bold: !subSettings.bold, extraBold: false })}>
                     <View style={[s.subToggleThumb, subSettings.bold && s.subToggleThumbOn]} />
+                  </Pressable>
+                </View>
+
+                {/* ── عريض جدًا ── */}
+                <View style={[s.subRow, { marginTop: 2 }]}>
+                  <View style={s.subRowLeft}>
+                    <Text style={{ color: "#fff", fontWeight: "900", fontSize: 15 }}>ع</Text>
+                    <Text style={s.subRowLabel}>نص عريض جدًا</Text>
+                  </View>
+                  <Pressable style={[s.subToggle, subSettings.extraBold && s.subToggleOn]} onPress={() => updateSubSettings({ extraBold: !subSettings.extraBold, bold: false })}>
+                    <View style={[s.subToggleThumb, subSettings.extraBold && s.subToggleThumbOn]} />
                   </Pressable>
                 </View>
 

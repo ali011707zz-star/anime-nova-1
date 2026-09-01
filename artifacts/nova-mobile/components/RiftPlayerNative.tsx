@@ -56,12 +56,14 @@ const TV_SUBTITLE_SIZES = [
 type TvSubtitleSettings = {
   fontSize: number;
   bold: boolean;
+  extraBold: boolean;
   verticalOffset: number;
 };
 
 const DEFAULT_TV_SUBTITLE_SETTINGS: TvSubtitleSettings = {
   fontSize: 34,
   bold: true,
+  extraBold: false,
   verticalOffset: 0,
 };
 
@@ -784,6 +786,9 @@ export function RiftPlayer({
               bold: typeof parsed.bold === "boolean"
                 ? parsed.bold
                 : DEFAULT_TV_SUBTITLE_SETTINGS.bold,
+              extraBold: typeof parsed.extraBold === "boolean"
+                ? parsed.extraBold
+                : DEFAULT_TV_SUBTITLE_SETTINGS.extraBold,
               verticalOffset: typeof parsed.verticalOffset === "number"
                 ? Math.max(-96, Math.min(96, parsed.verticalOffset))
                 : DEFAULT_TV_SUBTITLE_SETTINGS.verticalOffset,
@@ -1136,7 +1141,7 @@ export function RiftPlayer({
               tvMode && {
                 fontSize: subtitleSettings.fontSize,
                 lineHeight: Math.round(subtitleSettings.fontSize * 1.4),
-                fontWeight: subtitleSettings.bold ? "900" : "500",
+                fontWeight: subtitleSettings.extraBold ? "900" : subtitleSettings.bold ? "700" : "500",
               },
             ]}
           >
