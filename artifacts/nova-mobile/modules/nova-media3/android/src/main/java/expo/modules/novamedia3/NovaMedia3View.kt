@@ -7,6 +7,7 @@ import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.util.Rational
+import android.view.LayoutInflater
 import android.view.ViewGroup
 import androidx.media3.common.C
 import androidx.media3.common.PlaybackException
@@ -27,7 +28,17 @@ class NovaMedia3View(
   appContext: AppContext
 ) : ExpoView(context, appContext) {
   private val mainHandler = Handler(Looper.getMainLooper())
-  private val playerView = PlayerView(context)
+  /*
+   * PlayerView defaults to SurfaceView. SurfaceView is a separate window
+   * surface, not a normal child of the React Native hierarchy. After the
+   * phone rotates into the TV landscape layout, some TV GPUs can retain the
+   * old surface crop and composite a differently coloured rectangle over one
+   * side of the video. The TV player is always rendered below React Native
+   * controls, so keep it as a TextureView in the same clipped hierarchy.
+   */
+  private val playerView =
+    LayoutInflater.from(context)
+      .inflate(R.layout.nova_media3_player_view, this, false) as PlayerView
   private var exoPlayer: ExoPlayer? = null
   private var currentUrl: String? = null
   private var headersJson = "{}"
@@ -60,6 +71,7 @@ class NovaMedia3View(
   }
 
   init {
+    setBackgroundColor(Color.BLACK)
     playerView.layoutParams = LayoutParams(
       ViewGroup.LayoutParams.MATCH_PARENT,
       ViewGroup.LayoutParams.MATCH_PARENT
@@ -75,7 +87,26 @@ class NovaMedia3View(
     playerView.setShutterBackgroundColor(Color.BLACK)
     playerView.resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
     addView(playerView)
-    clipChildren = false
+    /*
+     * Do not let a video child escape the measured TV viewport. This was
+     * previously false to accommodate animated controls, but controls are
+     * React Native siblings, not children of this native view.
+     */
+    clipChildren = true
+    clipToPadding = true
+  }
+
+  override fun onSizeChanged(width: Int, height: Int, oldWidth: Int, oldHeight: Int) {
+    super.onSizeChanged(width, height, oldWidth, oldHeight)
+    if (width != oldWidth || height != oldHeight) {
+      /*
+       * Orientation changes can arrive before the native PlayerView has
+       * performed its second layout pass. Force the embedded TextureView to
+       * use the new full-screen bounds instead of the pre-rotation bounds.
+       */
+      playerView.requestLayout()
+      playerView.invalidate()
+    }
   }
 
   fun setSourceUrl(value: String?) {

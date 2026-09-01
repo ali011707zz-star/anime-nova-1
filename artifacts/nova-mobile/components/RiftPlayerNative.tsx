@@ -1602,7 +1602,12 @@ export function RiftPlayer({
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: "#000" },
-  tvRoot: { flex: 1, backgroundColor: "#000" },
+  /*
+   * The native Media3 view is absolute-filled under the TV controls. Keep
+   * this root an explicit clipped viewport so a post-rotation native child
+   * cannot expose a stale side region outside the current window bounds.
+   */
+  tvRoot: { flex: 1, position: "relative", overflow: "hidden", backgroundColor: "#000" },
   center: { flex: 1, backgroundColor: "#09090b", alignItems: "center", justifyContent: "center", gap: 14 },
   message: { color: "rgba(255,255,255,0.75)", fontSize: 14, textAlign: "center" },
   buffering: { ...StyleSheet.absoluteFillObject, alignItems: "center", justifyContent: "center" },

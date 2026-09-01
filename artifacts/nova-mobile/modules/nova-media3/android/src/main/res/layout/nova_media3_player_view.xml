@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The TV player is embedded below React Native overlays. A SurfaceView is a
+  separate Android window and can retain a stale crop after the device rotates
+  into landscape, leaving a differently composited rectangle on one side of
+  the video. TextureView stays in the normal view hierarchy, so the video,
+  black background, and TV controls share one clipped composition.
+-->
+<androidx.media3.ui.PlayerView
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@android:color/black"
+    app:resize_mode="fit"
+    app:shutter_background_color="@android:color/black"
+    app:surface_type="texture_view"
+    app:use_controller="false" />
