@@ -49,14 +49,15 @@ ep[pageIndex][episodeIndex]  // ep[0] = الحلقات الأحدث
 
 ### 4. Video CDN — server.sanime.net
 ```
-HD:  https://server.sanime.net/Video/{animeId}/{epNumber}.mp4
-SD:  https://server.sanime.net/Video/{animeId}/{epNumber}SD.mp4
+ HD:  https://server.sanime.net/Video3/{animeId}/{epNumber}.mp4
+ SD:  https://server.sanime.net/Video3/{animeId}/{epNumber}SD.mp4
 ```
 **مميزات:**
-- ✅ لا يحتاج أي auth أو headers
+- ✅ لا يحتاج auth؛ الـproxy يجب أن يرسل User-Agent: IBRAHIMSEVEN
 - ✅ يدعم Range requests (HTTP 206) — streaming مباشر
 - ✅ يدعم HEAD requests — فحص الوجود
 - ✅ يعمل بدون Referer
+- ❌ `/Video` و`/Video2` قد يعيدان 404؛ لا تخمّن عائلة CDN في الكود
 - ❌ الحلقات القديمة قد تكون 404 (server.sanime.net يخزن الجديدة فقط)
 
 **للحصول على URL من openAnd (أكثر موثوقية):**
@@ -64,7 +65,7 @@ SD:  https://server.sanime.net/Video/{animeId}/{epNumber}SD.mp4
 ep_obj = {"id": "653EP-1205", "name": "الحلقة 1205", "epName": 1205, "date": "..."}
 b64 = base64.b64encode(urllib.parse.unquote_to_bytes(urllib.parse.quote(json.dumps(ep_obj)))).decode()
 url = f"https://app.sanime.net/function/h10.php?page=openAnd&id={urllib.parse.quote(b64)}"
-# → {"hd": "https://server.sanime.net/Video/653/1205.mp4", "sd": "...SD.mp4"}
+# → {"hd": "https://server.sanime.net/Video3/653/1205.mp4", "sd": "...SD.mp4"}
 ```
 
 ---
@@ -112,15 +113,7 @@ async function getSAnimeSources(title: string, english: string, ep: number, anim
   const episode = allEps.find(e => e.epName === ep || e.epName === String(ep));
   if (!episode) return [];
   
-  // 5. URL مباشر أولاً
-  const directUrl = `https://server.sanime.net/Video/${match.id}/${ep}.mp4`;
-  const headOk = await fetch(directUrl, { method: 'HEAD', headers: { 'User-Agent': UA } });
-  
-  if (headOk.ok) {
-    return [{ url: directUrl, quality: 'HD', source: 'sanime' }];
-  }
-  
-  // 6. openAnd كـ fallback
+  // 5. openAnd هو المصدر canonical للرابط؛ لا تعتمد على /Video أو /Video2
   const epB64 = btoa(unescape(encodeURIComponent(JSON.stringify(episode))));
   const openRes = await fetch(`https://app.sanime.net/function/h10.php?page=openAnd&id=${encodeURIComponent(epB64)}`,
     { headers: { 'User-Agent': UA } });
