@@ -12,6 +12,7 @@ import dbRelayRouter from "./routes/dbRelay.js";
 import reportRouter from "./routes/report.js";
 import telegramRouter, { sendAdminAlert } from "./routes/telegram.js";
 import authTokenRouter from "./routes/authToken.js";
+import pushRouter from "./routes/push.js";
 import newsRouter from "./routes/news.js";
 import notificationsRouter from "./routes/notifications.js";
 import { logger } from "./lib/logger";
@@ -120,7 +121,7 @@ export async function createApp(): Promise<Express> {
     credentials: true,
   };
 
-  app.use(async (req, res, next) => {
+  app.use((req, res, next) => {
     if (MEDIA_PROXY_PATH.test(req.path)) {
       res.setHeader("Access-Control-Allow-Origin", "*");
       res.setHeader(
@@ -142,7 +143,7 @@ export async function createApp(): Promise<Express> {
   });
 
   // ── Global Rate Limit — 300 طلب/دقيقة لكل IP (حماية من DDoS) ─────────────
-  app.use((req, res, next) => {
+  app.use(async (req, res, next) => {
     const ip =
       (req.headers["x-forwarded-for"] as string)?.split(",")[0].trim() ||
       req.socket.remoteAddress || "unknown";
@@ -182,7 +183,7 @@ export async function createApp(): Promise<Express> {
   // mobile client must prove its release identity and carry a valid app token
   // before it can receive config, catalog, posters, sources, or playback data.
   // Background MP4 downloads may additionally use their longer-lived lease.
-  app.use((req, res, next) => {
+  app.use(async (req, res, next) => {
     const clientHeader = req.headers["x-nova-client"];
     const isMediaProxyRequest = MEDIA_PROXY_PATH.test(req.path);
     const isMobileClient =
@@ -202,6 +203,9 @@ export async function createApp(): Promise<Express> {
       (!identity.ok &&
         (identity.code === "INVALID_PACKAGE" || identity.code === "APP_UPDATE_REQUIRED"));
     if (!identity.ok && !legacyMediaIdentity) {
+      if (isMediaProxyRequest) {
+        console.warn(`[mobile-gate] rejected media path=${req.path} code=${identity.code}`);
+      }
       res.status(403).json({
         error: "هذه النسخة غير رسمية أو تحتاج إلى تحديث. حمّل النسخة الرسمية من الموقع.",
         code: identity.code,
@@ -219,6 +223,9 @@ export async function createApp(): Promise<Express> {
       validateAnonToken(token || "") ||
       (isDownloadRequest && validateDownloadToken(downloadToken || ""));
     if (!hasValidMediaToken) {
+      if (isMediaProxyRequest) {
+        console.warn(`[mobile-gate] rejected media path=${req.path} code=INVALID_TOKEN hasAppToken=${Boolean(token)} hasDownloadToken=${Boolean(downloadToken)}`);
+      }
       res.status(403).json({
         error: "انتهت جلسة النسخة الرسمية. أعد فتح التطبيق.",
         code: "INVALID_TOKEN",
@@ -289,6 +296,7 @@ export async function createApp(): Promise<Express> {
   });
 
   app.use("/api", router);
+  app.use("/api", pushRouter);
   app.use("/api", newsRouter);
   app.use("/api", notificationsRouter);
   app.use("/api", userdataRouter);

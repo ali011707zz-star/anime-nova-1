@@ -210,6 +210,18 @@ CREATE TABLE IF NOT EXISTS anime_poster_cache (
   synopsis    TEXT,
   updated_at  TIMESTAMPTZ DEFAULT NOW()
 );
+
+-- Expo push tokens used by the background episode notification scheduler
+CREATE TABLE IF NOT EXISTS mobile_push_tokens (
+  token        TEXT PRIMARY KEY,
+  platform     TEXT NOT NULL DEFAULT 'android',
+  app_version  TEXT,
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  last_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  disabled_at  TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS idx_mobile_push_tokens_active
+  ON mobile_push_tokens(disabled_at, last_seen_at DESC);
 `;
 
 const REQUIRED_TABLES = [
@@ -217,6 +229,7 @@ const REQUIRED_TABLES = [
   "translations_cache", "anime_meta_ar", "anime_meta_cache", "anime_poster_cache",
   // Shared L2 cache tables — verify these at startup so cache failures are visible.
   "source_cache", "subtitle_cache", "cdn_cache", "telegram_episode_cache",
+  "mobile_push_tokens",
 ];
 
 // ── PostgreSQL direct migration (للـ Replit PostgreSQL) ──────────────────────

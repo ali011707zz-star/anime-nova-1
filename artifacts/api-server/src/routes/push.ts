@@ -18,6 +18,7 @@ function validToken(value: unknown): value is string {
 router.post("/push/register", async (req: Request, res: Response) => {
   const token = req.body?.token;
   if (!validToken(token)) {
+    console.warn("[push] registration rejected: invalid Expo token");
     return res.status(400).json({ error: "Invalid Expo push token" });
   }
 
@@ -25,18 +26,27 @@ router.post("/push/register", async (req: Request, res: Response) => {
   const appVersion = typeof req.body?.appVersion === "string"
     ? req.body.appVersion.slice(0, 32)
     : null;
-  const saved = await sbUpsert(
-    "mobile_push_tokens",
-    {
-      token,
-      platform,
-      app_version: appVersion,
-      last_seen_at: new Date().toISOString(),
-      disabled_at: null,
-    },
-    "token",
-  );
-  if (!saved) return res.status(503).json({ error: "Push registration unavailable" });
+  try {
+    const saved = await sbUpsert(
+      "mobile_push_tokens",
+      {
+        token,
+        platform,
+        app_version: appVersion,
+        last_seen_at: new Date().toISOString(),
+        disabled_at: null,
+      },
+      "token",
+    );
+    if (!saved) {
+      console.warn(`[push] registration unavailable platform=${platform} version=${appVersion || "unknown"}`);
+      return res.status(503).json({ error: "Push registration unavailable" });
+    }
+    console.log(`[push] registered device platform=${platform} version=${appVersion || "unknown"}`);
+  } catch (error: any) {
+    console.error("[push] registration failed:", error?.message || String(error));
+    return res.status(503).json({ error: "Push registration unavailable" });
+  }
   return res.json({ ok: true });
 });
 
@@ -79,7 +89,12 @@ async function sendExpoBatch(messages: Array<Record<string, unknown>>): Promise<
       } else if (result?.details?.error === "DeviceNotRegistered") {
         const token = messages[index]?.to;
         if (typeof token === "string") await disableToken(token);
+      } else if (result?.details?.error) {
+        console.warn(`[push] Expo rejected message ${index + 1}/${messages.length}: ${result.details.error}`);
       }
+    }
+    if (results.length !== messages.length) {
+      console.warn(`[push] Expo returned ${results.length}/${messages.length} results`);
     }
     return sent;
   } catch (error: any) {
@@ -99,7 +114,10 @@ export async function sendNewEpisodePush(input: {
     { disabled_at: "is.null" },
     { limit: 10_000 },
   );
-  if (!rows.length) return 0;
+  if (!rows.length) {
+    console.warn("[push] no active device tokens; notification skipped");
+    return 0;
+  }
 
   const messages = rows
     .filter((row) => validToken(row.token))
@@ -118,12 +136,17 @@ export async function sendNewEpisodePush(input: {
         poster: input.posterUrl || "",
       },
     }));
+  console.log(`[push] preparing episode notification devices=${rows.length} valid=${messages.length}`);
+  if (!messages.length) {
+    console.warn("[push] active rows contained no valid Expo tokens");
+    return 0;
+  }
 
   let sent = 0;
   for (let offset = 0; offset < messages.length; offset += 100) {
     sent += await sendExpoBatch(messages.slice(offset, offset + 100));
   }
-  if (sent) console.log(`[push] أُرسل تنبيه الحلقة إلى ${sent} جهازاً`);
+  console.log(`[push] episode notification result sent=${sent} attempted=${messages.length}`);
   return sent;
 }
 

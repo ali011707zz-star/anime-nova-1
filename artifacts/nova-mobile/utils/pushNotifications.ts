@@ -40,14 +40,20 @@ export async function registerPushNotifications(): Promise<boolean> {
     const permission = current.granted
       ? current
       : await Notifications.requestPermissionsAsync();
-    if (!permission.granted) return false;
+    if (!permission.granted) {
+      console.warn(`[push] notifications permission denied status=${permission.status || "unknown"}`);
+      return false;
+    }
 
     const id = projectId();
     const tokenResponse = await Notifications.getExpoPushTokenAsync(
       id ? { projectId: id } : undefined,
     );
     const token = String(tokenResponse.data || "").trim();
-    if (!token) return false;
+    if (!token) {
+      console.warn("[push] Expo returned an empty device token");
+      return false;
+    }
 
     const response = await fetch(`${getBaseUrl()}/api/push/register`, {
       method: "POST",
@@ -58,7 +64,11 @@ export async function registerPushNotifications(): Promise<boolean> {
         appVersion: Constants.expoConfig?.version || "1.0.0",
       }),
     });
-    if (!response.ok) return false;
+    if (!response.ok) {
+      const detail = (await response.text().catch(() => "")).slice(0, 180);
+      console.warn(`[push] server registration failed status=${response.status}${detail ? ` detail=${detail}` : ""}`);
+      return false;
+    }
 
     await AsyncStorage.multiSet([
       [PUSH_TOKEN_KEY, token],
