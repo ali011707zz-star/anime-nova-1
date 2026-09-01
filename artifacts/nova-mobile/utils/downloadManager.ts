@@ -12,6 +12,14 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import Constants from "expo-constants";
 import { recordSuccessfulDownload } from "./adPolicy";
 import { getAuthToken } from "./secureApi";
+import {
+  enqueueNativeDownload,
+  forgetNativeDownload,
+  isNativeDownloadAvailable,
+  listNativeDownloads,
+  removeNativeDownload,
+  type NativeDownloadRecord,
+} from "expo-nova-download";
 
 const DOWNLOADS_KEY = "nova-downloads-v3";
 const ACTIVE_PENDING_KEY = "nova-downloads-active-v2";
@@ -95,6 +103,8 @@ type RuntimeDownload = ActiveDownload & {
   params: StartDownloadParams;
   localPath: string;
   resumable?: FileSystem.DownloadResumable;
+  nativeJobId?: number;
+  nativePollTimer?: ReturnType<typeof setTimeout>;
   resumeState?: ResumeState;
   notificationAt: number;
   notificationPromise?: Promise<void>;
@@ -228,7 +238,11 @@ export async function clearAllDownloads(): Promise<void> {
 }
 
 function persistActive(): void {
-  const records: PersistedActive[] = Array.from(active.values()).map((entry) => ({
+  const records: PersistedActive[] = Array.from(active.values())
+    // Android DownloadManager owns these jobs and restores them itself. Saving
+    // them as JS resumables would make a reopened app start a duplicate task.
+    .filter((entry) => entry.nativeJobId == null)
+    .map((entry) => ({
     id: entry.id,
     animeId: entry.animeId,
     ep: entry.ep,
@@ -247,7 +261,7 @@ function persistActive(): void {
     hlsManifestUrl: entry.params.hlsManifestUrl,
     headers: entry.params.headers,
     resumeState: entry.resumeState,
-  }));
+    }));
   persistQueue = persistQueue
     .catch(() => {})
     .then(() => AsyncStorage.setItem(ACTIVE_PENDING_KEY, JSON.stringify(records)))
@@ -445,7 +459,7 @@ export function cancelActiveDownload(id: string): void {
  * offset remain in memory and are persisted for the next app launch. */
 export async function pauseActiveDownload(id: string): Promise<void> {
   const entry = active.get(id);
-  if (!entry || entry.status !== "downloading") return;
+  if (!entry || entry.nativeJobId != null || entry.status !== "downloading") return;
 
   entry.status = "paused";
   notifyListeners();
@@ -465,7 +479,7 @@ export async function pauseActiveDownload(id: string): Promise<void> {
 /** Resume a paused task from its saved native offset. */
 export function resumeActiveDownload(id: string): void {
   const entry = active.get(id);
-  if (!entry || entry.status !== "paused") return;
+  if (!entry || entry.nativeJobId != null || entry.status !== "paused") return;
   entry.status = "downloading";
   notifyListeners();
   void runDownload(entry);

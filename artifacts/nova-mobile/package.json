@@ -62,6 +62,7 @@
     "expo-notifications": "~0.32.17",
     "expo-secure-store": "~15.0.8",
     "expo-video": "^3.0.16",
+    "expo-nova-download": "file:./modules/nova-download",
     "react": "19.1.0",
     "react-native": "0.81.5",
     "react-native-nitro-modules": "0.35.2",

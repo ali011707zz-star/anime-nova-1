@@ -30,6 +30,7 @@ type NovaDownloadModule = {
   ): Promise<{ jobId: number; localPath: string }>;
   list(): Promise<NativeDownloadRecord[]>;
   remove(appId: string): Promise<boolean>;
+  forget(appId: string): Promise<boolean>;
 };
 
 const nativeModule = requireOptionalNativeModule<NovaDownloadModule>("NovaDownload");
@@ -69,4 +70,9 @@ export async function listNativeDownloads(): Promise<NativeDownloadRecord[]> {
 export async function removeNativeDownload(appId: string): Promise<boolean> {
   if (!nativeModule) return false;
   return nativeModule.remove(appId);
+}
+
+export async function forgetNativeDownload(appId: string): Promise<boolean> {
+  if (!nativeModule) return false;
+  return nativeModule.forget(appId);
 }

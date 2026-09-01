@@ -8,6 +8,7 @@ import dubbedRouter    from "./dubbed";
 import sanimeRouter   from "./sanime";
 import adsRouter      from "./ads";
 import sourceCatalogRouter from "./sourceCatalog.js";
+import pushRouter from "./push.js";
 
 const router: IRouter = Router();
 
@@ -20,5 +21,6 @@ router.use(sanimeRouter);
 router.use(reportRouter);
 router.use(adsRouter);
 router.use(sourceCatalogRouter);
+router.use(pushRouter);
 
 export default router;

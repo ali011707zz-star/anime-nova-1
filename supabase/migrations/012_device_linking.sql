@@ -27,3 +27,6 @@ CREATE TABLE IF NOT EXISTS linked_devices (
 );
 CREATE INDEX IF NOT EXISTS idx_linked_devices_user_active
   ON linked_devices(user_id, revoked_at, linked_at DESC);
+
+-- The API has a narrowly scoped VPS PostgreSQL fallback when Supabase REST
+-- does not yet expose these tables. Keep both schemas aligned.

@@ -403,6 +403,45 @@ CREATE TABLE IF NOT EXISTS notifications (
 );
 CREATE INDEX IF NOT EXISTS idx_notifications_created ON notifications(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_notifications_unread  ON notifications(is_read) WHERE is_read = FALSE;
+CREATE TABLE IF NOT EXISTS mobile_push_tokens (
+  token        TEXT PRIMARY KEY,
+  platform     TEXT NOT NULL DEFAULT 'android',
+  app_version  TEXT,
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  last_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  disabled_at  TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS idx_mobile_push_tokens_active
+  ON mobile_push_tokens(disabled_at, last_seen_at DESC);
+CREATE TABLE IF NOT EXISTS device_link_codes (
+  id                 UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id            UUID NOT NULL,
+  code_hash          TEXT NOT NULL,
+  expires_at         TIMESTAMPTZ NOT NULL,
+  attempts           INTEGER NOT NULL DEFAULT 0,
+  claimed_at         TIMESTAMPTZ,
+  claimed_device_id  TEXT,
+  created_at         TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+-- The VPS fallback stores users that are owned by Supabase, not local users.
+ALTER TABLE device_link_codes DROP CONSTRAINT IF EXISTS device_link_codes_user_id_fkey;
+CREATE INDEX IF NOT EXISTS idx_device_link_codes_hash_active
+  ON device_link_codes(code_hash, claimed_at, expires_at);
+CREATE INDEX IF NOT EXISTS idx_device_link_codes_user_active
+  ON device_link_codes(user_id, claimed_at, expires_at);
+CREATE TABLE IF NOT EXISTS linked_devices (
+  id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id       UUID NOT NULL,
+  device_id     TEXT NOT NULL,
+  device_name   TEXT NOT NULL DEFAULT 'Android TV',
+  platform      TEXT NOT NULL DEFAULT 'android-tv',
+  linked_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  last_seen_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  revoked_at    TIMESTAMPTZ,
+  UNIQUE(user_id, device_id)
+);
+CREATE INDEX IF NOT EXISTS idx_linked_devices_user_active
+  ON linked_devices(user_id, revoked_at, linked_at DESC);
 `;
 
 /** يُنشئ الجداول مباشرةً في Replit PostgreSQL عند الـ startup */

@@ -10,6 +10,10 @@ import pg from "pg";
 const { Pool } = pg;
 
 let _pool: pg.Pool | null = null;
+// Device linking can be deployed before its Supabase migration is applied.
+// Keep a narrowly scoped PostgreSQL fallback so the feature remains usable
+// without changing the storage behavior of other tables.
+const DEVICE_STORAGE_TABLES = new Set(["device_link_codes", "linked_devices", "mobile_push_tokens"]);
 
 function getPool(): pg.Pool {
   if (!_pool) {
@@ -148,6 +152,8 @@ export async function sbSelect<T = any>(
   filters: Record<string, string | number | undefined> = {},
   opts: { limit?: number; select?: string } = {},
 ): Promise<T[]> {
+  const allowDeviceStorageFallback = DEVICE_STORAGE_TABLES.has(table) && isPgReady();
+
   // Supabase path
   if (isSupabaseReady()) {
     try {
@@ -161,12 +167,13 @@ export async function sbSelect<T = any>(
       if (!res.ok) {
         const err = await res.text();
         console.error(`[sb] sbSelect "${table}" ${res.status}:`, err.slice(0, 200));
-        return [];
+        if (!(res.status === 404 && allowDeviceStorageFallback)) return [];
+      } else {
+        return (await res.json()) as T[];
       }
-      return (await res.json()) as T[];
     } catch (e: any) {
       console.error(`[sb] sbSelect "${table}":`, e.message);
-      return [];
+      if (!allowDeviceStorageFallback) return [];
     }
   }
 
@@ -308,6 +315,8 @@ export async function sbUpsert<T = any>(
   row: Record<string, any>,
   onConflict?: string,
 ): Promise<T | null> {
+  const allowDeviceStorageFallback = DEVICE_STORAGE_TABLES.has(table) && isPgReady();
+
   // Supabase path
   if (isSupabaseReady()) {
     try {
@@ -332,13 +341,20 @@ export async function sbUpsert<T = any>(
             console.error(`[sb] sbUpsert "${table}" compatible retry ${retry.status}:`, retryErr.slice(0, 200)); return null;
           }
         }
-        console.error(`[sb] sbUpsert "${table}" ${res.status}:`, err.slice(0, 200)); return null;
+        console.error(`[sb] sbUpsert "${table}" ${res.status}:`, err.slice(0, 200));
+        if (res.status === 404 && allowDeviceStorageFallback) {
+          console.warn(`[sb] sbUpsert "${table}" Supabase 404 — falling back to PostgreSQL`);
+        } else {
+          return null;
+        }
       }
-      const data = await res.json();
-      return (Array.isArray(data) ? data[0] : data) as T | null;
+      if (res.ok) {
+        const data = await res.json();
+        return (Array.isArray(data) ? data[0] : data) as T | null;
+      }
     } catch (e: any) {
       console.error(`[sb] sbUpsert "${table}":`, e.message);
-      return null;
+      if (!allowDeviceStorageFallback) return null;
     }
   }
 
@@ -382,6 +398,8 @@ export async function sbPatch<T = any>(
   filter: Record<string, string | number>,
   data: Record<string, any>,
 ): Promise<T | null> {
+  const allowDeviceStorageFallback = DEVICE_STORAGE_TABLES.has(table) && isPgReady();
+
   // Supabase path
   if (isSupabaseReady()) {
     try {
@@ -397,13 +415,14 @@ export async function sbPatch<T = any>(
       if (!res.ok) {
         const err = await res.text();
         console.error(`[sb] sbPatch "${table}" ${res.status}:`, err.slice(0, 200));
-        return null;
+        if (!(res.status === 404 && allowDeviceStorageFallback)) return null;
+      } else {
+        const result = await res.json();
+        return (Array.isArray(result) ? result[0] : result) as T | null;
       }
-      const result = await res.json();
-      return (Array.isArray(result) ? result[0] : result) as T | null;
     } catch (e: any) {
       console.error(`[sb] sbPatch "${table}":`, e.message);
-      return null;
+      if (!allowDeviceStorageFallback) return null;
     }
   }
 
@@ -430,6 +449,8 @@ export async function sbDelete(
   table: string,
   filter: Record<string, string | number>,
 ): Promise<boolean> {
+  const allowDeviceStorageFallback = DEVICE_STORAGE_TABLES.has(table) && isPgReady();
+
   // Supabase path
   if (isSupabaseReady()) {
     try {
@@ -441,10 +462,11 @@ export async function sbDelete(
         headers: sbHeaders(),
         signal: AbortSignal.timeout(10000),
       });
-      return res.ok;
+      if (res.ok) return true;
+      if (!(res.status === 404 && allowDeviceStorageFallback)) return false;
     } catch (e: any) {
       console.error(`[sb] sbDelete "${table}":`, e.message);
-      return false;
+      if (!allowDeviceStorageFallback) return false;
     }
   }
 

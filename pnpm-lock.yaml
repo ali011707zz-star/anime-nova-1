@@ -599,6 +599,9 @@ importers:
       expo-media-library:
         specifier: ~17.0.6
         version: 17.0.6(expo@54.0.35)(react-native@0.81.5(@babel/core@7.29.0)(@types/react@19.1.17)(react@19.1.0))
+      expo-nova-download:
+        specifier: file:./modules/nova-download
+        version: link:modules/nova-download
       expo-notifications:
         specifier: ~0.32.17
         version: 0.32.17(expo@54.0.35)(react-native@0.81.5(@babel/core@7.29.0)(@types/react@19.1.17)(react@19.1.0))(react@19.1.0)(typescript@5.9.3)

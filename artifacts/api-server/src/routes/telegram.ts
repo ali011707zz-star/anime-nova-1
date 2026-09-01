@@ -8,6 +8,7 @@ import { Router, type Request, type Response } from "express";
 import { sbInsert, sbSelect } from "../lib/supabaseClient.js";
 import { getEnvOrDb } from "../lib/dbConfig.js";
 import { saveNotification } from "./notifications.js";
+import { sendNewEpisodePush } from "./push.js";
 
 const router = Router();
 
@@ -112,6 +113,13 @@ export async function notifyNewEpisode(
     link_path: `/watch?id=${anilistId}&ep=${ep}`,
     anime_id: anilistId,
     episode_num: ep,
+  }).catch(() => {});
+
+  await sendNewEpisodePush({
+    animeId: anilistId,
+    title,
+    episode: ep,
+    posterUrl,
   }).catch(() => {});
 
   const channelId = process.env.TELEGRAM_CHANNEL_ID;
@@ -378,7 +386,9 @@ async function pollAnimeSlayerDirect(): Promise<void> {
 
 async function runSchedulerCycle(): Promise<void> {
   const tok = await getToken();
-  if (!tok || !process.env.TELEGRAM_CHANNEL_ID) return;
+  const telegramReady = Boolean(tok && process.env.TELEGRAM_CHANNEL_ID);
+  const pushDevices = await sbSelect("mobile_push_tokens", { disabled_at: "is.null" }, { limit: 1 });
+  if (!telegramReady && !pushDevices.length) return;
 
   // ── 1. فحص AnimeSlayer مباشرة (بدون الـ cached endpoint) ──
   await pollAnimeSlayerDirect();
@@ -496,24 +506,19 @@ export function startEpisodeScheduler(): void {
     const channelId = process.env.TELEGRAM_CHANNEL_ID
       || await getEnvOrDb("TELEGRAM_CHANNEL_ID", "telegram_channel_id");
 
-    if (!channelId) {
-      console.warn("[scheduler] ⚠️ TELEGRAM_CHANNEL_ID غير موجود في البيئة أو DB — الـ scheduler لن يعمل");
-      schedulerRunning = false;
-      return;
-    }
-
     // اضبط في البيئة للاستخدام اللاحق
-    if (!process.env.TELEGRAM_CHANNEL_ID) {
+    if (channelId && !process.env.TELEGRAM_CHANNEL_ID) {
       process.env.TELEGRAM_CHANNEL_ID = channelId;
     }
 
     const tok = await getToken();
-    if (!tok) {
-      console.warn("[scheduler] ⚠️ TELEGRAM_BOT_TOKEN غير موجود في البيئة أو DB — الـ scheduler لن يعمل");
+    const pushDevices = await sbSelect("mobile_push_tokens", { disabled_at: "is.null" }, { limit: 1 });
+    if (!tok && !pushDevices.length) {
+      console.warn("[scheduler] لا يوجد Telegram أو أجهزة Push مسجلة — الـ scheduler لن يعمل");
       schedulerRunning = false;
       return;
     }
-    console.log(`[scheduler] 🚀 بدأ — يفحص كل ${INTERVAL_MS / 60_000} دقيقة`);
+    console.log(`[scheduler] 🚀 بدأ — يفحص كل ${INTERVAL_MS / 60_000} دقيقة (Telegram=${Boolean(tok && channelId)}, Push=${pushDevices.length > 0})`);
     runSchedulerCycle().catch(e => console.warn("[scheduler] cycle error:", e.message));
     schedulerTimer = setInterval(() => {
       runSchedulerCycle().catch(e => console.warn("[scheduler] cycle error:", e.message));
