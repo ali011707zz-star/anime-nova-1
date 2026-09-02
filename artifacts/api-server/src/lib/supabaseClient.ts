@@ -167,7 +167,12 @@ export async function sbSelect<T = any>(
       if (!res.ok) {
         const err = await res.text();
         console.error(`[sb] sbSelect "${table}" ${res.status}:`, err.slice(0, 200));
-        if (!(res.status === 404 && allowDeviceStorageFallback)) return [];
+        // Device-link/push tables may intentionally live in the VPS
+        // PostgreSQL fallback until their Supabase migration is applied.
+        // Keep reads consistent with sbInsert/sbPatch: any client/schema
+        // error must use the same fallback instead of returning an empty
+        // result and making a valid code look invalid.
+        if (!(res.status >= 400 && res.status < 500 && allowDeviceStorageFallback)) return [];
       } else {
         return (await res.json()) as T[];
       }
@@ -415,7 +420,7 @@ export async function sbPatch<T = any>(
       if (!res.ok) {
         const err = await res.text();
         console.error(`[sb] sbPatch "${table}" ${res.status}:`, err.slice(0, 200));
-        if (!(res.status === 404 && allowDeviceStorageFallback)) return null;
+        if (!(res.status >= 400 && res.status < 500 && allowDeviceStorageFallback)) return null;
       } else {
         const result = await res.json();
         return (Array.isArray(result) ? result[0] : result) as T | null;
@@ -463,7 +468,7 @@ export async function sbDelete(
         signal: AbortSignal.timeout(10000),
       });
       if (res.ok) return true;
-      if (!(res.status === 404 && allowDeviceStorageFallback)) return false;
+      if (!(res.status >= 400 && res.status < 500 && allowDeviceStorageFallback)) return false;
     } catch (e: any) {
       console.error(`[sb] sbDelete "${table}":`, e.message);
       if (!allowDeviceStorageFallback) return false;

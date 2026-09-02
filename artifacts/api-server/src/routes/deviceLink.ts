@@ -35,7 +35,10 @@ function hashCode(code: string): string {
 }
 
 function normalizeCode(value: unknown): string {
-  return String(value ?? "").replace(/\s/g, "");
+  return String(value ?? "")
+    .replace(/[٠-٩]/g, digit => String(digit.charCodeAt(0) - 0x0660))
+    .replace(/[۰-۹]/g, digit => String(digit.charCodeAt(0) - 0x06f0))
+    .replace(/\s/g, "");
 }
 
 function normalizeDeviceId(value: unknown): string {

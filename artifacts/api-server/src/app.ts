@@ -216,12 +216,11 @@ export async function createApp(): Promise<Express> {
 
     const tokenHeader = req.headers["x-app-token"];
     const token = Array.isArray(tokenHeader) ? tokenHeader[0] : tokenHeader;
-    const isDownloadRequest = req.path === "/api/anime/download-mp4";
     const downloadTokenHeader = req.headers["x-download-token"];
     const downloadToken = Array.isArray(downloadTokenHeader) ? downloadTokenHeader[0] : downloadTokenHeader;
     const hasValidMediaToken =
       validateAnonToken(token || "") ||
-      (isDownloadRequest && validateDownloadToken(downloadToken || ""));
+      (isMediaProxyRequest && validateDownloadToken(downloadToken || ""));
     if (!hasValidMediaToken) {
       if (isMediaProxyRequest) {
         console.warn(`[mobile-gate] rejected media path=${req.path} code=INVALID_TOKEN hasAppToken=${Boolean(token)} hasDownloadToken=${Boolean(downloadToken)}`);

@@ -1436,6 +1436,7 @@ export default function WatchScreen() {
     const subtitleUrl = normalizeProviderSubtitleUrl(site, subtitleCandidate, base);
 
     const token = await getAuthToken();
+    const downloadToken = await getDownloadToken();
     /* Fire-and-forget — يعمل في الخلفية بمستقل عن lifecycle هذه الشاشة */
      const isHlsDownload = best.directType === "hls" || isHlsMediaUrl(proxyUrl);
      const downloadUrl = (DOWNLOAD_SUBTITLE_SITES.has(site) || isHlsDownload)
@@ -1450,6 +1451,7 @@ export default function WatchScreen() {
       quality:  getSrcQuality(best),
       url:      downloadUrl,
       authToken: token,
+      downloadToken,
       headers,
       subtitleUrl,
        hlsManifestUrl: isHlsDownload ? proxyUrl : undefined,

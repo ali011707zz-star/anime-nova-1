@@ -36,6 +36,14 @@ function makeDeviceId(): string {
   return `nova-device-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
+function normalizeLinkCode(value: string): string {
+  return value
+    .replace(/[٠-٩]/g, digit => String(digit.charCodeAt(0) - 0x0660))
+    .replace(/[۰-۹]/g, digit => String(digit.charCodeAt(0) - 0x06f0))
+    .replace(/\D/g, "")
+    .slice(0, 6);
+}
+
 async function getDeviceId(): Promise<string> {
   const stored = await AsyncStorage.getItem(DEVICE_ID_KEY) || await AsyncStorage.getItem(LEGACY_DEVICE_ID_KEY);
   if (stored && /^[A-Za-z0-9._:-]{6,160}$/.test(stored)) return stored;
@@ -71,7 +79,7 @@ export default function TvLinkScreen() {
   }, [router]);
 
   const handleClaim = async () => {
-    const normalized = code.replace(/\D/g, "").slice(0, 6);
+    const normalized = normalizeLinkCode(code);
     if (normalized.length !== 6) {
       setError("أدخل الرمز المكوّن من 6 أرقام");
       return;
@@ -157,7 +165,7 @@ export default function TvLinkScreen() {
         <TextInput
           testID="tv-link-code"
           value={code}
-          onChangeText={value => { setCode(value.replace(/\D/g, "").slice(0, 6)); setError(""); }}
+          onChangeText={value => { setCode(normalizeLinkCode(value)); setError(""); }}
           placeholder="000000"
           placeholderTextColor={colors.mutedForeground + "80"}
           keyboardType="number-pad"
