@@ -515,7 +515,7 @@ export default function EpisodeListScreen() {
           ref={episodeListRef}
           key={tvMode ? "tv-episode-grid" : "phone-episode-list"}
           data={displayedEps}
-          numColumns={tvMode ? 4 : 1}
+          numColumns={1}
           keyExtractor={n => n.toString()}
           showsVerticalScrollIndicator={false}
           removeClippedSubviews={false}
@@ -524,11 +524,11 @@ export default function EpisodeListScreen() {
           windowSize={tvMode ? 7 : 5}
           onScrollToIndexFailed={({ index }) => {
             episodeListRef.current?.scrollToOffset({
-              offset: Math.max(0, index * (tvMode ? 410 : 72)),
+              offset: Math.max(0, index * (tvMode ? 116 : 72)),
               animated: true,
             });
           }}
-          columnWrapperStyle={tvMode ? ep_s.tvColumnWrapper : undefined}
+          columnWrapperStyle={undefined}
           contentContainerStyle={[{ paddingBottom: 100 }, tvMode && ep_s.tvListContent]}
           ListHeaderComponent={
             <Pressable
@@ -633,19 +633,18 @@ const ep_s = StyleSheet.create({
   tvHeroBadge: { fontSize: 14, lineHeight: 22 },
   tvHeroTitle: { fontSize: 25, lineHeight: 34 },
   tvText: { fontSize: 15, lineHeight: 23 },
-  tvRow: { width: "23.5%", minHeight: 190, flexDirection: "column", alignItems: "stretch", paddingHorizontal: 10, paddingVertical: 10, gap: 10, borderRadius: 14, borderWidth: 1, borderBottomWidth: 1, borderColor: "rgba(255,255,255,0.08)", backgroundColor: "rgba(18,16,28,0.76)" },
-  tvEpisodeMain: { width: "100%", flex: 0, flexDirection: "column", alignItems: "stretch", gap: 10, borderRadius: 12 },
-  tvColumnWrapper: { justifyContent: "space-between", paddingHorizontal: 12, gap: 12 },
-  tvListContent: { paddingTop: 6, gap: 14 },
-  tvSmallButton: { width: 44, height: 44, borderRadius: 12 },
+  tvRow: { width: "100%", minHeight: 100, flexDirection: "row", alignItems: "center", paddingHorizontal: 10, paddingVertical: 8, gap: 10, borderRadius: 12, borderWidth: 1, borderBottomWidth: 1, borderColor: "rgba(255,255,255,0.08)", backgroundColor: "rgba(18,16,28,0.76)" },
+  tvEpisodeMain: { flex: 1, flexDirection: "row", alignItems: "center", gap: 10, borderRadius: 10 },
+  tvListContent: { paddingTop: 6, gap: 8 },
+  tvSmallButton: { width: 38, height: 38, borderRadius: 10 },
   tvSearchBar: { minHeight: 48, paddingVertical: 8, paddingHorizontal: 14, borderRadius: 12 },
-  tvThumbWrap: { width: "100%", aspectRatio: 1.72, height: undefined, borderRadius: 10 },
+  tvThumbWrap: { width: 132, height: 74, borderRadius: 9 },
   tvDurText: { fontSize: 8, paddingHorizontal: 4, paddingVertical: 2, borderRadius: 4 },
-  tvInfo: { flex: 0, width: "100%", minHeight: 56 },
-  tvEpisodeActions: { width: "100%", justifyContent: "flex-end", gap: 6 },
-  tvEpNum: { fontSize: 16, lineHeight: 23 },
-  tvEpTitle: { fontSize: 15, lineHeight: 23 },
-  tvEpOriginal: { fontSize: 12, lineHeight: 18 },
+  tvInfo: { flex: 1, minHeight: 0 },
+  tvEpisodeActions: { justifyContent: "flex-end", gap: 5 },
+  tvEpNum: { fontSize: 14, lineHeight: 20 },
+  tvEpTitle: { fontSize: 13, lineHeight: 20 },
+  tvEpOriginal: { fontSize: 11, lineHeight: 16 },
   tvPageBtn: { width: 44, height: 44, borderRadius: 12 },
   tvWatchFromBtn: { marginHorizontal: 12, paddingVertical: 12, minHeight: 58, borderRadius: 16 },
   tvWatchFromBtnText: { fontSize: 15, lineHeight: 23 },

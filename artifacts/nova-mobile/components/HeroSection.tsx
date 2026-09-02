@@ -17,7 +17,7 @@ export function HeroSection({ items }: Props) {
   const router = useRouter();
   const { width, height } = useWindowDimensions();
   const tvMode = isTvDevice(width, height);
-  const heroHeight = tvMode ? 430 : 290;
+  const heroHeight = tvMode ? 340 : 290;
   const scrollRef = useRef<ScrollView>(null);
   const [activeIdx, setActiveIdx] = useState(0);
 
@@ -69,7 +69,7 @@ export function HeroSection({ items }: Props) {
               />
               <LinearGradient
                 colors={["transparent", "rgba(9,9,11,0.7)", "#09090B"]}
-                style={[StyleSheet.absoluteFill, { justifyContent: "flex-end", padding: tvMode ? 48 : 20 }]}
+                style={[StyleSheet.absoluteFill, { justifyContent: "flex-end", padding: tvMode ? 32 : 20 }]}
               >
                 <View style={styles.genreRow}>
                   {anime.genres?.slice(0, 3).map((g) => (
@@ -137,10 +137,10 @@ const styles = StyleSheet.create({
   genreRow: { flexDirection: "row", gap: 5, marginBottom: 6, flexWrap: "wrap" },
   genreBadge: { borderWidth: 1, borderRadius: 4, paddingHorizontal: 7, paddingVertical: 2 },
   genreText: { fontSize: 9, fontWeight: "600" },
-  tvGenreBadge: { borderRadius: 8, paddingHorizontal: 12, paddingVertical: 6 },
-  tvGenreText: { fontSize: 16 },
+  tvGenreBadge: { borderRadius: 7, paddingHorizontal: 10, paddingVertical: 4 },
+  tvGenreText: { fontSize: 14 },
   heroTitle: { color: "#fff", fontSize: 18, fontWeight: "800", marginBottom: 6, textAlign: "left", fontFamily: "Cairo_800ExtraBold" },
-  tvHeroTitle: { fontSize: 32, lineHeight: 42, marginBottom: 12 },
+  tvHeroTitle: { fontSize: 27, lineHeight: 35, marginBottom: 9 },
   infoRow: { flexDirection: "row", gap: 10, marginBottom: 12, flexWrap: "wrap" },
   infoItem: { flexDirection: "row", alignItems: "center", gap: 3 },
   infoText: { color: "rgba(255,255,255,0.7)", fontSize: 11 },
