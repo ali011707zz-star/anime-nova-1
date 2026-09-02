@@ -24,6 +24,64 @@ function getPool(): pg.Pool {
   return _pool;
 }
 
+let _deviceStorageSchemaPromise: Promise<void> | null = null;
+
+/**
+ * Device-link tables may temporarily live in the VPS PostgreSQL fallback
+ * while the Supabase schema is being rolled out. Create them lazily as a
+ * last-mile safeguard for an older process that missed startup migration.
+ */
+async function ensureDeviceStorageSchema(): Promise<void> {
+  if (!isPgReady()) return;
+  if (!_deviceStorageSchemaPromise) {
+    _deviceStorageSchemaPromise = (async () => {
+      await getPool().query(`
+        CREATE TABLE IF NOT EXISTS device_link_codes (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          user_id UUID NOT NULL,
+          code_hash TEXT NOT NULL,
+          expires_at TIMESTAMPTZ NOT NULL,
+          attempts INTEGER NOT NULL DEFAULT 0,
+          claimed_at TIMESTAMPTZ,
+          claimed_device_id TEXT,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+        CREATE INDEX IF NOT EXISTS idx_device_link_codes_hash_active
+          ON device_link_codes(code_hash, claimed_at, expires_at);
+        CREATE INDEX IF NOT EXISTS idx_device_link_codes_user_active
+          ON device_link_codes(user_id, claimed_at, expires_at);
+        CREATE TABLE IF NOT EXISTS linked_devices (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          user_id UUID NOT NULL,
+          device_id TEXT NOT NULL,
+          device_name TEXT NOT NULL DEFAULT 'Android TV',
+          platform TEXT NOT NULL DEFAULT 'android-tv',
+          linked_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          last_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          revoked_at TIMESTAMPTZ,
+          UNIQUE(user_id, device_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_linked_devices_user_active
+          ON linked_devices(user_id, revoked_at, linked_at DESC);
+        CREATE TABLE IF NOT EXISTS mobile_push_tokens (
+          token TEXT PRIMARY KEY,
+          platform TEXT NOT NULL DEFAULT 'android',
+          app_version TEXT,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          last_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          disabled_at TIMESTAMPTZ
+        );
+        CREATE INDEX IF NOT EXISTS idx_mobile_push_tokens_active
+          ON mobile_push_tokens(disabled_at, last_seen_at DESC);
+      `);
+    })().catch(error => {
+      _deviceStorageSchemaPromise = null;
+      throw error;
+    });
+  }
+  await _deviceStorageSchemaPromise;
+}
+
 export function isSupabaseReady(): boolean {
   return !!(process.env.SUPABASE_URL && (process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY));
 }
@@ -185,6 +243,7 @@ export async function sbSelect<T = any>(
   // PostgreSQL fallback
   if (!isPgReady()) return [];
   try {
+    if (allowDeviceStorageFallback) await ensureDeviceStorageSchema();
     const cols = opts.select && opts.select !== "*"
       ? opts.select.split(",").map(c => `"${c.trim()}"`).join(", ")
       : "*";
@@ -267,6 +326,7 @@ export async function sbInsert<T = any>(
   const pgInsert = async (): Promise<T | null> => {
     if (!isPgReady()) return null;
     try {
+      if (DEVICE_STORAGE_TABLES.has(table)) await ensureDeviceStorageSchema();
       const entries = Object.entries(row).filter(([, v]) => v !== undefined);
       const cols = entries.map(([k]) => `"${k}"`).join(", ");
       const placeholders = entries.map((_, i) => `$${i + 1}`).join(", ");
@@ -366,6 +426,7 @@ export async function sbUpsert<T = any>(
   // PostgreSQL fallback
   if (!isPgReady()) return null;
   try {
+    if (allowDeviceStorageFallback) await ensureDeviceStorageSchema();
     const entries = Object.entries(row).filter(([, v]) => v !== undefined);
     const cols = entries.map(([k]) => `"${k}"`).join(", ");
     const placeholders = entries.map((_, i) => `$${i + 1}`).join(", ");
@@ -434,6 +495,7 @@ export async function sbPatch<T = any>(
   // PostgreSQL fallback
   if (!isPgReady()) return null;
   try {
+    if (allowDeviceStorageFallback) await ensureDeviceStorageSchema();
     const setEntries = Object.entries(data).filter(([, v]) => v !== undefined);
     const setClause = setEntries.map(([k], i) => `"${k}" = $${i + 1}`).join(", ");
     const setValues = setEntries.map(([, v]) => v);
@@ -478,6 +540,7 @@ export async function sbDelete(
   // PostgreSQL fallback
   if (!isPgReady()) return false;
   try {
+    if (allowDeviceStorageFallback) await ensureDeviceStorageSchema();
     const { where, values } = buildWhere(filter);
     if (!where) return false; // safety: never delete all rows
     const sql = `DELETE FROM "${table}" ${where}`;
