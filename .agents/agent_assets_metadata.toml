@@ -140,3 +140,17 @@ mtime_ms = 1788107303504
 storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:67e0d38e-3b0f-42d6-b397-aaf0a89df5ba/b086628c-ec58-43dd-a8e6-7867951f7d72/c020244f-20c1-48d4-8ada-d8a53183fb89"
 storage_version_token = "1788107570291041"
 content_type = "text/markdown"
+
+[[outputs]]
+id = "uQkm4vrTdGqRsD0R9GRWy"
+uri = "file://artifacts/nova-mobile/build-output/app-release.apk"
+type = "unspecified"
+title = "Anime NOVA Mobile APK — build 757"
+description = "APK الناتج من آخر بناء ناجح بعد إصلاح تعارض Pressable. أنشئ رمز ربط جديداً من الهاتف قبل الاختبار؛ الرمز السابق أحادي الاستخدام وقصير الصلاحية."
+logical_id = "bb52f139-ccb6-49fe-8d69-5ffdbf1b6ac3"
+content_hash = "sha256:16759a7da97839e2ce655f477c0607e9557544512d9cea4dd3e9f70f16c35158"
+size = 83059764
+mtime_ms = 1788359046000
+storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:7f32ed00-a8c7-4420-bf5e-625a15b65554/bb52f139-ccb6-49fe-8d69-5ffdbf1b6ac3/f5086b5d-a8a9-432c-8cb0-4df3af3576e4"
+storage_version_token = "1788360501026140"
+content_type = "application/octet-stream"
