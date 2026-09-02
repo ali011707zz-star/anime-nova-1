@@ -1201,6 +1201,7 @@ function ProfileSheet({ open, onClose, user, onUpdate, onLogout, onLinkTv }: {
 /* ══════════════════════ TV LINK SHEET ══════════════════════ */
 function TvLinkSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
   const base = getBaseUrl();
+  const tvMode = isTvDevice();
   const [code, setCode] = useState("");
   const [expiresAt, setExpiresAt] = useState("");
   const [devices, setDevices] = useState<Array<{ id: string; name: string; platform: string; lastSeenAt?: string }>>([]);
@@ -1287,22 +1288,73 @@ function TvLinkSheet({ open, onClose }: { open: boolean; onClose: () => void }) 
               </Text>
               {code ? (
                 <>
-                  <Text selectable style={{ fontSize: 36, letterSpacing: 9, fontFamily: "Cairo_800ExtraBold", color: "#fff", textAlign: "center", marginTop: 16 }}>{code}</Text>
-                  <Text style={{ fontSize: 10, fontFamily: "Cairo_400Regular", color: "#a78bfa", textAlign: "center", marginTop: 2 }}>
-                    {expiresAt ? `ينتهي في ${new Date(expiresAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}` : "صالح لمدة 10 دقائق"}
-                  </Text>
+                  <View style={ts.linkCodeDisplay}>
+                    <View style={ts.linkCodeSuccess}>
+                      <Ionicons name="checkmark-circle" size={15} color="#34d399" />
+                      <Text style={ts.linkCodeSuccessText}>تم إنشاء الرمز بنجاح</Text>
+                    </View>
+                    <Text selectable style={ts.linkCodeText}>{code}</Text>
+                    <Text style={ts.linkCodeExpiry}>
+                      {expiresAt ? `ينتهي في ${new Date(expiresAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}` : "صالح لمدة 10 دقائق"}
+                    </Text>
+                  </View>
+                  <Pressable
+                    testID="regenerate-tv-link-code"
+                    onPress={createCode}
+                    disabled={loading}
+                    focusable={tvMode}
+                    hasTVPreferredFocus={tvMode}
+                    accessibilityRole="button"
+                    accessibilityLabel="إعادة إنشاء رمز الربط"
+                    android_ripple={{ color: "rgba(196,181,253,0.14)" }}
+                    style={({ pressed }) => [
+                      ts.linkRegenerateButton,
+                      pressed && ts.linkActionPressed,
+                      loading && ts.linkActionLoading,
+                    ]}
+                  >
+                    <View style={ts.linkRegenerateIcon}>
+                      {loading
+                        ? <ActivityIndicator color="#c4b5fd" size="small" />
+                        : <Ionicons name="refresh-outline" size={18} color="#c4b5fd" />}
+                    </View>
+                    <View style={ts.linkActionCopy}>
+                      <Text style={ts.linkRegenerateTitle}>{loading ? "جارٍ إنشاء رمز جديد…" : "إعادة إنشاء الرمز"}</Text>
+                      <Text style={ts.linkRegenerateHint}>
+                        {loading ? "سيظهر الرمز الجديد بعد لحظات" : "سيتم إلغاء الرمز الحالي"}
+                      </Text>
+                    </View>
+                    {!loading && <Ionicons name="chevron-back" size={17} color="rgba(196,181,253,0.60)" />}
+                  </Pressable>
                 </>
               ) : (
-                <Pressable testID="create-tv-link-code" onPress={createCode} disabled={loading} style={{ height: 50, borderRadius: 15, alignItems: "center", justifyContent: "center", flexDirection: "row", gap: 8, marginTop: 16, backgroundColor: "#8b5cf6", opacity: loading ? 0.65 : 1 }}>
-                  {loading ? <ActivityIndicator color="#fff" /> : <Ionicons name="key-outline" size={17} color="#fff" />}
-                  <Text style={{ fontSize: 13, fontFamily: "Cairo_800ExtraBold", color: "#fff" }}>{loading ? "جارٍ إنشاء الرمز…" : "إنشاء رمز مؤقت"}</Text>
+                <Pressable
+                  testID="create-tv-link-code"
+                  onPress={createCode}
+                  disabled={loading}
+                  focusable={tvMode}
+                  hasTVPreferredFocus={tvMode}
+                  accessibilityRole="button"
+                  accessibilityLabel="إنشاء رمز ربط مؤقت"
+                  android_ripple={{ color: "rgba(255,255,255,0.18)" }}
+                  style={({ pressed }) => [
+                    ts.linkCreateButton,
+                    pressed && ts.linkActionPressed,
+                    loading && ts.linkActionLoading,
+                  ]}
+                >
+                  <View style={ts.linkCreateIcon}>
+                    {loading
+                      ? <ActivityIndicator color="#fff" size="small" />
+                      : <Ionicons name="key-outline" size={19} color="#fff" />}
+                  </View>
+                  <View style={ts.linkActionCopy}>
+                    <Text style={ts.linkCreateTitle}>{loading ? "جارٍ إنشاء الرمز…" : "إنشاء رمز مؤقت"}</Text>
+                    <Text style={ts.linkCreateHint}>{loading ? "نتحقق من الحساب الآن" : "اضغط هنا لإظهاره الآن"}</Text>
+                  </View>
+                  {!loading && <Ionicons name="chevron-back" size={18} color="rgba(255,255,255,0.76)" />}
                 </Pressable>
               )}
-              {code ? (
-                <Pressable onPress={createCode} disabled={loading} style={{ alignItems: "center", marginTop: 13 }}>
-                  <Text style={{ fontSize: 11, fontFamily: "Cairo_700Bold", color: "#c4b5fd" }}>إنشاء رمز جديد</Text>
-                </Pressable>
-              ) : null}
             </View>
 
             {!!error && <Text style={{ fontSize: 11, fontFamily: "Cairo_600SemiBold", color: "#fca5a5", textAlign: "right", marginTop: 12 }}>{error}</Text>}
@@ -1935,6 +1987,80 @@ const ts = StyleSheet.create({
   profileLoginBtnText: { fontSize: 11, fontFamily: "Cairo_800ExtraBold", color: "#c4b5fd" },
   deviceLinkGuestBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, paddingVertical: 12, borderRadius: 16, backgroundColor: "rgba(139,92,246,0.08)", borderWidth: 1, borderColor: "rgba(167,139,250,0.28)" },
   deviceLinkGuestText: { fontSize: 12, fontFamily: "Cairo_700Bold", color: "#c4b5fd" },
+  linkCodeDisplay: {
+    alignItems: "center",
+    marginTop: 16,
+    paddingVertical: 15,
+    borderRadius: 18,
+    backgroundColor: "rgba(7,5,18,0.34)",
+    borderWidth: 1,
+    borderColor: "rgba(196,181,253,0.22)",
+  },
+  linkCodeSuccess: { flexDirection: "row", alignItems: "center", gap: 6 },
+  linkCodeSuccessText: { fontSize: 11, fontFamily: "Cairo_700Bold", color: "#6ee7b7" },
+  linkCodeText: {
+    fontSize: 36,
+    letterSpacing: 9,
+    fontFamily: "Cairo_800ExtraBold",
+    color: "#fff",
+    textAlign: "center",
+    marginTop: 7,
+  },
+  linkCodeExpiry: { fontSize: 10, fontFamily: "Cairo_400Regular", color: "#a78bfa", textAlign: "center", marginTop: 1 },
+  linkCreateButton: {
+    minHeight: 68,
+    borderRadius: 17,
+    paddingHorizontal: 13,
+    paddingVertical: 10,
+    alignItems: "center",
+    flexDirection: "row",
+    gap: 10,
+    marginTop: 16,
+    backgroundColor: "#8b5cf6",
+    borderWidth: 1,
+    borderColor: "rgba(221,214,254,0.28)",
+    elevation: 5,
+    shadowColor: "#7c3aed",
+    shadowOpacity: 0.28,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 5 },
+  },
+  linkCreateIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 13,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(255,255,255,0.16)",
+  },
+  linkCreateTitle: { fontSize: 14, fontFamily: "Cairo_800ExtraBold", color: "#fff", textAlign: "right" },
+  linkCreateHint: { fontSize: 10, fontFamily: "Cairo_400Regular", color: "rgba(255,255,255,0.72)", marginTop: 1, textAlign: "right" },
+  linkActionCopy: { flex: 1, alignItems: "flex-end" },
+  linkActionPressed: { transform: [{ scale: 0.975 }], opacity: 0.88 },
+  linkActionLoading: { opacity: 0.68 },
+  linkRegenerateButton: {
+    minHeight: 62,
+    borderRadius: 17,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+    alignItems: "center",
+    flexDirection: "row",
+    gap: 10,
+    marginTop: 12,
+    backgroundColor: "rgba(196,181,253,0.09)",
+    borderWidth: 1,
+    borderColor: "rgba(196,181,253,0.25)",
+  },
+  linkRegenerateIcon: {
+    width: 38,
+    height: 38,
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(139,92,246,0.20)",
+  },
+  linkRegenerateTitle: { fontSize: 13, fontFamily: "Cairo_800ExtraBold", color: "#ddd6fe", textAlign: "right" },
+  linkRegenerateHint: { fontSize: 10, fontFamily: "Cairo_400Regular", color: "rgba(221,214,254,0.52)", marginTop: 1, textAlign: "right" },
 
   /* Stats Grid */
   statsGrid: { flexDirection: "row", gap: 8, paddingHorizontal: 16, marginTop: 12 },
