@@ -1747,11 +1747,10 @@ function ExpoRiftPlayer({
 
   /* ─── Controls show/hide ─── */
   const schedHide = useCallback(() => {
-    if (tvMode) return;
     if (hideTimer.current) clearTimeout(hideTimer.current);
     hideTimer.current = setTimeout(() => {
       Animated.timing(controlsOpacity, { toValue: 0, duration: 350, useNativeDriver: true }).start(() => setShowControls(false));
-    }, 5000);
+    }, tvMode ? 6500 : 5000);
   }, [tvMode]);
 
   const fadeIn = useCallback(() => {
@@ -2642,7 +2641,7 @@ function ExpoRiftPlayer({
                   size={tvMode ? 26 : 18}
                   color={subOn ? "#c4b5fd" : "rgba(255,255,255,0.75)"}
                 />
-                {tvMode && <Text style={s.tvCCLabel}>الترجمة</Text>}
+                {!tvMode && <Text style={s.tvCCLabel}>الترجمة</Text>}
               </Pressable>
             );
             const btnsBlock = nativeRTL ? (
@@ -2910,6 +2909,21 @@ function ExpoRiftPlayer({
             </View>
           </LinearGradient>
         </Animated.View>
+      )}
+
+      {tvMode && !showControls && !error && !isEnded && !isLocked && (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="إظهار أدوات المشغل"
+          hasTVPreferredFocus
+          onPress={fadeIn}
+          style={s.tvRevealTarget}
+        >
+          <View style={s.tvRevealHint}>
+            <Ionicons name="game-controller-outline" size={26} color="#c4b5fd" />
+            <Text style={s.tvRevealText}>اضغط OK لإظهار أدوات المشغل</Text>
+          </View>
+        </Pressable>
       )}
 
 
@@ -3339,7 +3353,12 @@ const s = StyleSheet.create({
 
   /* ── CC button in top bar ── */
   topCCBtn: { minWidth: 38 },
-  tvCCBtn: { minWidth: 150, minHeight: 64, paddingHorizontal: 22, borderRadius: 16, gap: 10 },
+  /* Keep CC in the same square action rail as screenshot, rotate and close.
+     The old TV-only label made this one button much wider than its neighbours. */
+  tvCCBtn: {
+    width: 60, height: 60, minWidth: 60, minHeight: 60,
+    paddingHorizontal: 0, paddingVertical: 0, borderRadius: 18, gap: 0,
+  },
   tvCCLabel: { color: "#fff", fontSize: 22, fontFamily: "Cairo_800ExtraBold" },
   topCCBtnActive: { backgroundColor: "rgba(139,92,246,0.28)", borderColor: "rgba(167,139,250,0.55)" },
   topCCText: { color: "rgba(255,255,255,0.80)", fontSize: 11, fontFamily: "Cairo_700Bold", letterSpacing: 0.5 },
@@ -3450,9 +3469,9 @@ const s = StyleSheet.create({
     flexDirection: "row", alignItems: "center", justifyContent: "space-between",
   },
   tvTopBar: {
-    minHeight: 112,
-    paddingHorizontal: 48,
-    paddingBottom: 20,
+    minHeight: 104,
+    paddingHorizontal: 40,
+    paddingBottom: 16,
   },
   /* معلومات الأنمي — أقصى اليسار العلوي، حجم صغير لعدم التداخل */
   topInfoWrap: {
@@ -3461,8 +3480,8 @@ const s = StyleSheet.create({
   },
   tvTopInfoWrap: {
     position: "absolute",
-    left: 48,
-    top: 30,
+    left: 40,
+    top: 27,
     width: "38%",
     marginRight: 0,
     gap: 5,
@@ -3511,9 +3530,9 @@ const s = StyleSheet.create({
   topRightRow: { flexDirection: "row", alignItems: "center", gap: 5 },
   tvTopRightRow: {
     position: "absolute",
-    right: 48,
-    top: 24,
-    gap: 12,
+    right: 40,
+    top: 22,
+    gap: 10,
     zIndex: 4,
   },
   topIconBtn: {
@@ -3541,11 +3560,36 @@ const s = StyleSheet.create({
     alignItems: "center", justifyContent: "center",
   },
   tvTopActionBtn: {
-    width: 64, height: 64, borderRadius: 16,
+    width: 60, height: 60, borderRadius: 18,
     paddingHorizontal: 0, paddingVertical: 0,
   },
   tvTopCloseBtn: {
-    width: 64, height: 64, borderRadius: 16,
+    width: 60, height: 60, borderRadius: 18,
+  },
+
+  /* A focusable remote target remains after the chrome hides so OK can bring
+     the same controls back without requiring a touch gesture. */
+  tvRevealTarget: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: "center",
+    justifyContent: "center",
+    zIndex: 12,
+  },
+  tvRevealHint: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    paddingHorizontal: 22,
+    paddingVertical: 14,
+    borderRadius: 18,
+    backgroundColor: "rgba(8,7,18,0.72)",
+    borderWidth: 1,
+    borderColor: "rgba(167,139,250,0.34)",
+  },
+  tvRevealText: {
+    color: "rgba(255,255,255,0.78)",
+    fontSize: 17,
+    fontFamily: "Cairo_700Bold",
   },
 
   /* ── Center overlay ── */

@@ -7,11 +7,11 @@ import {
 } from "@expo-google-fonts/cairo";
 import { Ionicons } from "@expo/vector-icons";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { Stack } from "expo-router";
+import { Stack, usePathname, useRouter } from "expo-router";
 import { LinearGradient } from "expo-linear-gradient";
 import * as SplashScreen from "expo-splash-screen";
-import React, { useEffect, useState } from "react";
-import { Animated, Dimensions, I18nManager, Image, Platform, StyleSheet, Text, View } from "react-native";
+import React, { useEffect, useRef, useState } from "react";
+import { Animated, BackHandler, Dimensions, I18nManager, Image, Platform, StyleSheet, Text, View } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import * as ScreenOrientation from "expo-screen-orientation";
@@ -75,37 +75,96 @@ const queryClient = new QueryClient({
 
 function RootLayoutNav() {
   const colors = useColors();
+  const router = useRouter();
+  const pathname = usePathname();
+  const [tvExitHintVisible, setTvExitHintVisible] = useState(false);
+  const tvExitHintTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastTvBackAt = useRef(0);
+  const tvMode = isTvDevice(Dimensions.get("window").width, Dimensions.get("window").height);
+
+  useEffect(() => {
+    if (Platform.OS !== "android" || !tvMode) return;
+
+    const isAppRoot = pathname === "/" || pathname === "/(tabs)" || pathname === "/(tabs)/index";
+    const subscription = BackHandler.addEventListener("hardwareBackPress", () => {
+      const now = Date.now();
+
+      if (!isAppRoot) {
+        lastTvBackAt.current = 0;
+        setTvExitHintVisible(false);
+        if (router.canGoBack()) {
+          router.back();
+        } else {
+          // Some entry points use replace(), leaving no native stack entry.
+          // Return to the tab root instead of allowing Android to close NOVA.
+          router.replace("/(tabs)" as any);
+        }
+        return true;
+      }
+
+      if (now - lastTvBackAt.current < 2200) {
+        if (tvExitHintTimer.current) clearTimeout(tvExitHintTimer.current);
+        tvExitHintTimer.current = null;
+        BackHandler.exitApp();
+        return true;
+      }
+
+      lastTvBackAt.current = now;
+      setTvExitHintVisible(true);
+      if (tvExitHintTimer.current) clearTimeout(tvExitHintTimer.current);
+      tvExitHintTimer.current = setTimeout(() => {
+        tvExitHintTimer.current = null;
+        setTvExitHintVisible(false);
+      }, 2200);
+      return true;
+    });
+
+    return () => {
+      subscription.remove();
+      if (tvExitHintTimer.current) clearTimeout(tvExitHintTimer.current);
+      tvExitHintTimer.current = null;
+      lastTvBackAt.current = 0;
+    };
+  }, [pathname, router, tvMode]);
 
   return (
-    <Stack
-      screenOptions={{
-        headerShown: false,
-        contentStyle: { backgroundColor: colors.background },
-        animation: Platform.OS === "android" ? "fade_from_bottom" : "fade",
-        animationDuration: Platform.OS === "android" ? 120 : 180,
-      }}
-    >
-      <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-      <Stack.Screen name="anime/[id]" options={{ headerShown: false, animation: "slide_from_bottom" }} />
-      <Stack.Screen name="watch" options={{ headerShown: false, orientation: "all" }} />
-      <Stack.Screen name="animation/[type]/[id]" options={{ headerShown: false, animation: "slide_from_bottom" }} />
-      <Stack.Screen name="animation/watch" options={{ headerShown: false, orientation: "all" }} />
-      <Stack.Screen name="settings" options={{ headerShown: false }} />
-      <Stack.Screen name="schedule" options={{ headerShown: false }} />
-      <Stack.Screen name="profile" options={{ headerShown: false, animation: "slide_from_right" }} />
-      <Stack.Screen name="tv-link" options={{ headerShown: false }} />
-      <Stack.Screen name="oauth2redirect/google" options={{ headerShown: false }} />
-      <Stack.Screen name="aw-dubbed/[key]" options={{ headerShown: false, animation: "slide_from_bottom" }} />
-      <Stack.Screen name="aw-dubbed/watch"  options={{ headerShown: false, orientation: "all" }} />
-      {/* The cartoon tab intentionally opens the legacy Arabic-Toons
-          screens, not the anime-dubbed Supabase screens. Register them in
-          the root stack so native builds resolve the detail and watch routes
-          reliably. */}
-      <Stack.Screen name="dubbed" options={{ headerShown: false }} />
-      <Stack.Screen name="dubbed/[id]" options={{ headerShown: false, animation: "slide_from_bottom" }} />
-      <Stack.Screen name="dubbed/watch" options={{ headerShown: false, orientation: "all" }} />
-      <Stack.Screen name="+not-found" />
-    </Stack>
+    <>
+      <Stack
+        screenOptions={{
+          headerShown: false,
+          contentStyle: { backgroundColor: colors.background },
+          animation: Platform.OS === "android" ? "fade_from_bottom" : "fade",
+          animationDuration: Platform.OS === "android" ? 120 : 180,
+        }}
+      >
+        <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+        <Stack.Screen name="anime/[id]" options={{ headerShown: false, animation: "slide_from_bottom" }} />
+        <Stack.Screen name="watch" options={{ headerShown: false, orientation: "all" }} />
+        <Stack.Screen name="animation/[type]/[id]" options={{ headerShown: false, animation: "slide_from_bottom" }} />
+        <Stack.Screen name="animation/watch" options={{ headerShown: false, orientation: "all" }} />
+        <Stack.Screen name="settings" options={{ headerShown: false }} />
+        <Stack.Screen name="schedule" options={{ headerShown: false }} />
+        <Stack.Screen name="profile" options={{ headerShown: false, animation: "slide_from_right" }} />
+        <Stack.Screen name="tv-link" options={{ headerShown: false }} />
+        <Stack.Screen name="oauth2redirect/google" options={{ headerShown: false }} />
+        <Stack.Screen name="aw-dubbed/[key]" options={{ headerShown: false, animation: "slide_from_bottom" }} />
+        <Stack.Screen name="aw-dubbed/watch"  options={{ headerShown: false, orientation: "all" }} />
+        {/* The cartoon tab intentionally opens the legacy Arabic-Toons
+            screens, not the anime-dubbed Supabase screens. Register them in
+            the root stack so native builds resolve the detail and watch routes
+            reliably. */}
+        <Stack.Screen name="dubbed" options={{ headerShown: false }} />
+        <Stack.Screen name="dubbed/[id]" options={{ headerShown: false, animation: "slide_from_bottom" }} />
+        <Stack.Screen name="dubbed/watch" options={{ headerShown: false, orientation: "all" }} />
+        <Stack.Screen name="+not-found" />
+      </Stack>
+      {tvMode && tvExitHintVisible && (
+        <View pointerEvents="none" style={styles.tvExitHint}>
+          <Ionicons name="information-circle-outline" size={24} color="#D8B4FE" />
+          <Text style={styles.tvExitHintText}>اضغط مرة أخرى للخروج</Text>
+        </View>
+      )}
+    </>
   );
 }
 
@@ -364,6 +423,29 @@ const styles = StyleSheet.create({
     fontSize: 15,
     lineHeight: 24,
     textAlign: "center",
+  },
+  tvExitHint: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    bottom: 34,
+    alignSelf: "center",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 9,
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    borderRadius: 18,
+    backgroundColor: "rgba(11, 8, 24, 0.94)",
+    borderWidth: 1,
+    borderColor: "rgba(216, 180, 254, 0.42)",
+    zIndex: 200,
+  },
+  tvExitHintText: {
+    color: "#FFFFFF",
+    fontSize: 18,
+    fontFamily: "Cairo_700Bold",
   },
 });
 
