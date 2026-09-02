@@ -4,6 +4,7 @@ import {
   Platform,
   Pressable,
   PressableProps,
+  View,
   useWindowDimensions,
 } from "react-native";
 
@@ -74,6 +75,18 @@ export function TvPressable({
       {children}
     </Pressable>
   );
+}
+
+/**
+ * React Native 0.81 no longer exposes TVFocusGuideView on the regular
+ * Android runtime. Keep the shared screen structure safe on phones while
+ * retaining a single compatibility point for TV-focused layouts.
+ */
+export function TvFocusGuideView({
+  autoFocus: _autoFocus,
+  ...props
+}: React.ComponentProps<typeof View> & { autoFocus?: boolean }) {
+  return <View {...props} />;
 }
 
 export function tvLayout(width: number, height: number) {

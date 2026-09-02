@@ -1,14 +1,14 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import {
   View, Text, Image, ScrollView, FlatList,
-  ActivityIndicator, StyleSheet, Platform, TVFocusGuideView,
+  ActivityIndicator, StyleSheet, Platform,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { getBaseUrl } from "@/utils/api";
-import { isTvDevice, tvFocusStyle, TvPressable } from "@/utils/tv";
+import { isTvDevice, tvFocusStyle, TvFocusGuideView, TvPressable } from "@/utils/tv";
 const Pressable = TvPressable;
 
 const IMG_W = "https://image.tmdb.org/t/p/w500";
@@ -257,7 +257,7 @@ export default function AnimationEpisodesScreen() {
           <Text style={s.emptyText}>لا توجد حلقات لهذا الموسم</Text>
         </View>
       ) : (
-        <TVFocusGuideView autoFocus={tvMode} style={s.tvFocusGuide}>
+        <TvFocusGuideView autoFocus={tvMode} style={s.tvFocusGuide}>
           <FlatList
             ref={episodeListRef}
             data={episodes}
@@ -275,7 +275,7 @@ export default function AnimationEpisodesScreen() {
             })}
             ItemSeparatorComponent={() => <View style={{ height: 8 }} />}
           />
-        </TVFocusGuideView>
+        </TvFocusGuideView>
       )}
     </View>
   );

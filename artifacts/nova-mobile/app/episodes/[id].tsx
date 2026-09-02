@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import {
   View, Text, TextInput, Image, FlatList,
-  ScrollView, ActivityIndicator, StyleSheet, Platform, TVFocusGuideView, useWindowDimensions,
+  ScrollView, ActivityIndicator, StyleSheet, Platform, useWindowDimensions,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
@@ -9,7 +9,7 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { getBaseUrl } from "@/utils/api";
-import { isTvDevice, tvFocusStyle, TvPressable } from "@/utils/tv";
+import { isTvDevice, tvFocusStyle, TvFocusGuideView, TvPressable } from "@/utils/tv";
 const Pressable = TvPressable;
 import { useTvFocusMemory } from "@/utils/tvFocus";
 
@@ -510,7 +510,7 @@ export default function EpisodeListScreen() {
       </View>
 
       {/* ── Episode list ── */}
-      <TVFocusGuideView autoFocus={tvMode} style={ep_s.tvFocusGuide}>
+      <TvFocusGuideView autoFocus={tvMode} style={ep_s.tvFocusGuide}>
         <FlatList
           ref={episodeListRef}
           key={tvMode ? "tv-episode-grid" : "phone-episode-list"}
@@ -562,7 +562,7 @@ export default function EpisodeListScreen() {
             />
           )}
         />
-      </TVFocusGuideView>
+      </TvFocusGuideView>
 
     </View>
   );

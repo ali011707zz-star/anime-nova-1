@@ -1,13 +1,13 @@
 import React, { useState, useEffect, useRef } from "react";
 import {
   View, Text, Image, FlatList,
-  ActivityIndicator, StyleSheet, Platform, ScrollView, TVFocusGuideView,
+  ActivityIndicator, StyleSheet, Platform, ScrollView,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { getBaseUrl } from "@/utils/api";
-import { isTvDevice, tvFocusStyle, TvPressable } from "@/utils/tv";
+import { isTvDevice, tvFocusStyle, TvFocusGuideView, TvPressable } from "@/utils/tv";
 const Pressable = TvPressable;
 
 interface Season { label: string; arabicToonsId: string; }
@@ -117,7 +117,7 @@ export default function DubbedDetailScreen() {
         </Pressable>
         </View>
 
-      <TVFocusGuideView autoFocus={tvMode} style={styles.tvFocusGuide}>
+      <TvFocusGuideView autoFocus={tvMode} style={styles.tvFocusGuide}>
         <FlatList
           ref={episodeListRef}
           data={episodes}
@@ -201,7 +201,7 @@ export default function DubbedDetailScreen() {
             <Text style={styles.emptyText}>لا توجد حلقات</Text>
           ) : null}
         />
-      </TVFocusGuideView>
+      </TvFocusGuideView>
     </View>
   );
 }

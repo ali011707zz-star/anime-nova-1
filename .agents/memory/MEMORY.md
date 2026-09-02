@@ -117,3 +117,4 @@
 - [Anime Slayer performance reference](anime-slayer-performance-reference.md) — المرجع يستخدم RecyclerView/Paging وGlide بكاش الذاكرة/القرص وموارد land/sw600dp، لا تمديد الهاتف فقط.
 - [Android TV player surface reset](tv-player-surface-reset.md) — stale TextureView transforms after TV layout changes can split video colors; recreate the opaque surface while preserving the ExoPlayer.
 - [Android TV remote focus](android-tv-remote-focus.md) — keep TV actions on the shared focusable wrapper, avoid nested episode-card targets, and use focus guides for virtualized lists.
+- [TVFocusGuideView compatibility](tvfocusguide-compat.md) — React Native 0.81 does not export this component; use the shared local wrapper instead of a direct import.

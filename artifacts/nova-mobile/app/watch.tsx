@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import {
   View, Text, Image, ScrollView, ActivityIndicator,
-  StyleSheet, Platform, Animated, Easing, Alert, TVFocusGuideView,
+  StyleSheet, Platform, Animated, Easing, Alert,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
@@ -13,7 +13,7 @@ import { HiddenResolverWebView, ResolvedStream } from "@/components/HiddenResolv
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useApp } from "@/context/AppContext";
-import { isTvDevice, tvFocusStyle, TvPressable } from "@/utils/tv";
+import { isTvDevice, tvFocusStyle, TvFocusGuideView, TvPressable } from "@/utils/tv";
 const Pressable = TvPressable;
 import { useTvFocusMemory } from "@/utils/tvFocus";
 import { getBaseUrl } from "@/utils/api";
@@ -1924,7 +1924,7 @@ export default function WatchScreen() {
         </Pressable>
       </View>
 
-      <TVFocusGuideView autoFocus={tvMode} style={d.tvFocusGuide}>
+      <TvFocusGuideView autoFocus={tvMode} style={d.tvFocusGuide}>
         <ScrollView
           showsVerticalScrollIndicator={false}
           removeClippedSubviews={false}
@@ -2183,7 +2183,7 @@ export default function WatchScreen() {
 
 
         </ScrollView>
-      </TVFocusGuideView>
+      </TvFocusGuideView>
     </View>
   );
 }

@@ -4,14 +4,14 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import {
   View, Text, Image, FlatList,
-  ActivityIndicator, StyleSheet, Platform, ScrollView, TVFocusGuideView,
+  ActivityIndicator, StyleSheet, Platform, ScrollView,
 } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { getBaseUrl } from "@/utils/api";
-import { isTvDevice, tvFocusStyle, TvPressable } from "@/utils/tv";
+import { isTvDevice, tvFocusStyle, TvFocusGuideView, TvPressable } from "@/utils/tv";
 const Pressable = TvPressable;
 
 const BASE = getBaseUrl();
@@ -135,7 +135,7 @@ export default function AwDubbedDetailScreen() {
         <View style={{ width: 36 }} />
       </View>
 
-      <TVFocusGuideView autoFocus={tvMode} style={styles.tvFocusGuide}>
+      <TvFocusGuideView autoFocus={tvMode} style={styles.tvFocusGuide}>
         <FlatList
           ref={episodeListRef}
           data={episodes}
@@ -214,7 +214,7 @@ export default function AwDubbedDetailScreen() {
           )
           }
         />
-      </TVFocusGuideView>
+      </TvFocusGuideView>
     </View>
   );
 }

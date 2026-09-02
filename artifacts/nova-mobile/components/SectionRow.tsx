@@ -6,7 +6,6 @@ import {
   ScrollView,
   StyleSheet,
   Text,
-  TVFocusGuideView,
   View,
   useWindowDimensions,
 } from "react-native";
@@ -14,7 +13,7 @@ import { useColors } from "@/hooks/useColors";
 import { AnilistMedia } from "@/utils/anilist";
 import { AnimeCard, getRailCardWidth, getRailSidePadding } from "./AnimeCard";
 import { Ionicons } from "@expo/vector-icons";
-import { isTvDevice, tvFocusStyle, useTvMetrics } from "@/utils/tv";
+import { isTvDevice, tvFocusStyle, TvFocusGuideView, useTvMetrics } from "@/utils/tv";
 import { useTvFocusMemory } from "@/utils/tvFocus";
 
 type Props = {
@@ -90,9 +89,9 @@ export const SectionRow = React.memo(function SectionRow({ title, items, onSeeAl
         )}
       </View>
       {tvMode ? (
-        <TVFocusGuideView autoFocus={false} style={styles.focusGuide}>
+        <TvFocusGuideView autoFocus={false} style={styles.focusGuide}>
           {rail}
-        </TVFocusGuideView>
+        </TvFocusGuideView>
       ) : rail}
     </View>
   );
