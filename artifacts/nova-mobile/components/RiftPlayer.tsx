@@ -2469,6 +2469,19 @@ function ExpoRiftPlayer({
         </View>
       )}
 
+      {isLocked && tvMode && (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="إلغاء قفل المشغل"
+          hasTVPreferredFocus
+          onPress={() => { setIsLocked(false); setShowUnlock(false); }}
+          style={s.tvUnlockTarget}
+        >
+          <Ionicons name="lock-open-outline" size={28} color="#fbbf24" />
+          <Text style={s.tvUnlockText}>اضغط OK لإلغاء القفل</Text>
+        </Pressable>
+      )}
+
       {/* ── Lock screen: elegant swipe-down bar (appears on tap) ── */}
       {isLocked && showUnlock && (
         <Pressable
@@ -2633,36 +2646,36 @@ function ExpoRiftPlayer({
               </Pressable>
             );
             const btnsBlock = nativeRTL ? (
-              <View style={s.topRightRow}>
-                <Pressable onPress={handleBack} style={s.topCloseBtn} hitSlop={10}>
+              <View style={[s.topRightRow, tvMode && s.tvTopRightRow]}>
+                <Pressable onPress={handleBack} style={[s.topCloseBtn, tvMode && s.tvTopCloseBtn]} hitSlop={10}>
                   <Ionicons name="close" size={21} color="rgba(239,68,68,0.90)" />
                 </Pressable>
-                 {!tvMode && <Pressable onPress={togglePortrait} style={[s.topRotateBtn, isPortrait && s.topRotateBtnActive]} hitSlop={10}>
+                 <Pressable onPress={togglePortrait} style={[s.topRotateBtn, tvMode && s.tvTopActionBtn, isPortrait && s.topRotateBtnActive]} hitSlop={10}>
                   <Ionicons
                     name={isPortrait ? "phone-landscape-outline" : "phone-portrait-outline"}
-                    size={17}
+                    size={tvMode ? 28 : 17}
                     color={isPortrait ? "#c4b5fd" : "rgba(255,255,255,0.85)"}
                   />
-                 </Pressable>}
+                 </Pressable>
                 {ccBtn}
-                 {!tvMode && <Pressable onPress={takeScreenshot} style={s.topIconBtn} hitSlop={10}>
-                  <Ionicons name="camera-outline" size={18} color="rgba(255,255,255,0.85)" />
-                 </Pressable>}
+                 <Pressable onPress={takeScreenshot} style={[s.topIconBtn, tvMode && s.tvTopActionBtn]} hitSlop={10}>
+                  <Ionicons name="camera-outline" size={tvMode ? 28 : 18} color="rgba(255,255,255,0.85)" />
+                 </Pressable>
               </View>
             ) : (
-              <View style={s.topRightRow}>
-               {!tvMode && <Pressable onPress={takeScreenshot} style={s.topIconBtn} hitSlop={10}>
-                  <Ionicons name="camera-outline" size={18} color="rgba(255,255,255,0.85)" />
-               </Pressable>}
+              <View style={[s.topRightRow, tvMode && s.tvTopRightRow]}>
+               <Pressable onPress={takeScreenshot} style={[s.topIconBtn, tvMode && s.tvTopActionBtn]} hitSlop={10}>
+                  <Ionicons name="camera-outline" size={tvMode ? 28 : 18} color="rgba(255,255,255,0.85)" />
+               </Pressable>
                 {ccBtn}
-                 {!tvMode && <Pressable onPress={togglePortrait} style={[s.topRotateBtn, isPortrait && s.topRotateBtnActive]} hitSlop={10}>
+                 <Pressable onPress={togglePortrait} style={[s.topRotateBtn, tvMode && s.tvTopActionBtn, isPortrait && s.topRotateBtnActive]} hitSlop={10}>
                   <Ionicons
                     name={isPortrait ? "phone-landscape-outline" : "phone-portrait-outline"}
-                    size={17}
+                    size={tvMode ? 28 : 17}
                     color={isPortrait ? "#c4b5fd" : "rgba(255,255,255,0.85)"}
                   />
-                 </Pressable>}
-                <Pressable onPress={handleBack} style={s.topCloseBtn} hitSlop={10}>
+                 </Pressable>
+                <Pressable onPress={handleBack} style={[s.topCloseBtn, tvMode && s.tvTopCloseBtn]} hitSlop={10}>
                   <Ionicons name="close" size={21} color="rgba(239,68,68,0.90)" />
                 </Pressable>
               </View>
@@ -2808,11 +2821,10 @@ function ExpoRiftPlayer({
             {/* ── صف أزرار التحكم السفلي ── */}
             <View style={[s.bottomCtrlRow, tvMode && s.tvBottomCtrlRow]}>
 
-              {/* يسار: قفل + ملء شاشة */}
+              {/* يسار: قفل + ملء شاشة — نفس أزرار الهاتف، بحجم TV الحالي */}
              <View style={s.bottomSide}>
-               {!tvMode && <>
                 <View style={s.controlButtonSlot}>
-                  <Pressable onPress={() => setIsLocked(true)} style={s.ctrlIconBtn} hitSlop={10}>
+                  <Pressable onPress={() => setIsLocked(true)} style={[s.ctrlIconBtn, tvMode && s.tvCtrlIconBtn]} hitSlop={10}>
                     <Ionicons name="lock-closed-outline" size={16} color="rgba(255,255,255,0.80)" />
                   </Pressable>
                 </View>
@@ -2836,11 +2848,10 @@ function ExpoRiftPlayer({
                       ))}
                     </View>
                   )}
-                  <Pressable onPress={() => { setShowFitMenu(v => !v); setShowSpeedMenu(false); fadeIn(); }} style={[s.ctrlIconBtn, showFitMenu && s.ctrlIconBtnActive]} hitSlop={10}>
-                    <Ionicons name="scan-outline" size={16} color={showFitMenu ? "#c4b5fd" : "rgba(255,255,255,0.80)"} />
+                  <Pressable onPress={() => { setShowFitMenu(v => !v); setShowSpeedMenu(false); fadeIn(); }} style={[s.ctrlIconBtn, tvMode && s.tvCtrlIconBtn, showFitMenu && s.ctrlIconBtnActive]} hitSlop={10}>
+                    <Ionicons name="scan-outline" size={tvMode ? 24 : 16} color={showFitMenu ? "#c4b5fd" : "rgba(255,255,255,0.80)"} />
                   </Pressable>
                  </View>
-               </>}
                </View>
 
               {/* وسط: تخطي + تشغيل (وضع أفقي فقط) — "10" خارج الدائرة للمحاذاة الصحيحة */}
@@ -2868,15 +2879,13 @@ function ExpoRiftPlayer({
                 )}
               </View>
 
-              {/* يمين: كتم + تشغيل تلقائي + سرعة */}
+              {/* يمين: كتم + تشغيل تلقائي + سرعة — نفس أزرار الهاتف */}
                <View style={[s.bottomSide, { justifyContent: "flex-end" }]}>
-                {!tvMode && <>
                 <View style={s.controlButtonSlot}>
-                  <Pressable onPress={() => { setIsMuted(v => !v); fadeIn(); }} style={[s.ctrlIconBtn, isMuted && s.ctrlIconBtnMuted]} hitSlop={10}>
-                    <Ionicons name={isMuted ? "volume-mute-outline" : "volume-high-outline"} size={16} color={isMuted ? "#fca5a5" : "rgba(255,255,255,0.80)"} />
+                  <Pressable onPress={() => { setIsMuted(v => !v); fadeIn(); }} style={[s.ctrlIconBtn, tvMode && s.tvCtrlIconBtn, isMuted && s.ctrlIconBtnMuted]} hitSlop={10}>
+                    <Ionicons name={isMuted ? "volume-mute-outline" : "volume-high-outline"} size={tvMode ? 24 : 16} color={isMuted ? "#fca5a5" : "rgba(255,255,255,0.80)"} />
                   </Pressable>
                </View>
-                </>}
                 <View style={s.controlButtonSlot}>
                   {showSpeedMenu && (
                     <View style={s.speedDropdown}>
@@ -3263,6 +3272,13 @@ const s = StyleSheet.create({
 
   /* Lock — new swipe-down bar design */
   lockDot: { position: "absolute", right: 12, top: "48%", backgroundColor: "rgba(0,0,0,0.55)", borderRadius: 20, padding: 8, borderWidth: 1, borderColor: "rgba(251,191,36,0.25)", zIndex: 25 },
+  tvUnlockTarget: {
+    position: "absolute", left: "35%", right: "35%", top: "44%",
+    minHeight: 88, alignItems: "center", justifyContent: "center", gap: 8,
+    backgroundColor: "rgba(5,5,15,0.84)", borderRadius: 18,
+    borderWidth: 1.5, borderColor: "rgba(251,191,36,0.45)", zIndex: 40,
+  },
+  tvUnlockText: { color: "rgba(253,224,71,0.90)", fontSize: 18, fontFamily: "Cairo_700Bold" },
   swipeUnlockBar: {
     position: "absolute", right: 10, top: "18%", bottom: "18%",
     width: 46,
@@ -3447,7 +3463,7 @@ const s = StyleSheet.create({
     position: "absolute",
     left: 48,
     top: 30,
-    maxWidth: "52%",
+    width: "38%",
     marginRight: 0,
     gap: 5,
     zIndex: 2,
@@ -3493,6 +3509,13 @@ const s = StyleSheet.create({
     color: "rgba(196,181,253,0.85)", fontSize: 9, fontFamily: "Cairo_600SemiBold",
   },
   topRightRow: { flexDirection: "row", alignItems: "center", gap: 5 },
+  tvTopRightRow: {
+    position: "absolute",
+    right: 48,
+    top: 24,
+    gap: 12,
+    zIndex: 4,
+  },
   topIconBtn: {
     width: 38, height: 38, borderRadius: 19,
     backgroundColor: "rgba(255,255,255,0.10)", borderWidth: 1, borderColor: "rgba(255,255,255,0.16)",
@@ -3516,6 +3539,13 @@ const s = StyleSheet.create({
     width: 40, height: 40, borderRadius: 20,
     backgroundColor: "rgba(239,68,68,0.14)", borderWidth: 1.5, borderColor: "rgba(239,68,68,0.40)",
     alignItems: "center", justifyContent: "center",
+  },
+  tvTopActionBtn: {
+    width: 64, height: 64, borderRadius: 16,
+    paddingHorizontal: 0, paddingVertical: 0,
+  },
+  tvTopCloseBtn: {
+    width: 64, height: 64, borderRadius: 16,
   },
 
   /* ── Center overlay ── */
