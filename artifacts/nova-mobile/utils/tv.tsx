@@ -15,17 +15,22 @@ import {
  */
 export function isTvDevice(width?: number, height?: number) {
   if (Platform.OS !== "android") return false;
-  if ((Platform as typeof Platform & { isTV?: boolean }).isTV === true) return true;
+  const nativePlatform = Platform as typeof Platform & {
+    isTV?: boolean;
+    constants?: { uiMode?: string };
+  };
+  const uiMode = String(nativePlatform.constants?.uiMode ?? "").toLowerCase();
+  if (nativePlatform.isTV === true || uiMode === "tv" || uiMode === "television") return true;
   const window = Dimensions.get("window");
   const measuredWidth = width ?? window.width;
   const measuredHeight = height ?? window.height;
   if (measuredWidth == null || measuredHeight == null) return false;
   const longEdge = Math.max(measuredWidth, measuredHeight);
   const shortEdge = Math.min(measuredWidth, measuredHeight);
-  // Only use the fallback for large TV-like canvases. Certified TV devices
-  // are detected by Platform.isTV above, so this should not turn a phone
-  // rotating into a TV layout.
-  return longEdge >= 1600 && shortEdge >= 800;
+  // Android TV commonly reports a logical 960x540 or 1280x720 window even
+  // when its physical output is 1080p/4K. Keep the short edge high enough to
+  // avoid classifying a normal phone in landscape as a TV.
+  return longEdge >= 900 && shortEdge >= 500;
 }
 
 export function tvFocusStyle(focused: boolean) {

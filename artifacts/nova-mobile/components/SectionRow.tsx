@@ -46,7 +46,13 @@ export const SectionRow = React.memo(function SectionRow({ title, items, onSeeAl
           anime={item}
           size={size}
           cardWidth={cardWidth}
-          hasTVPreferredFocus={tvMode && ready && preferredKey === `${title}:${item.id}`}
+          hasTVPreferredFocus={
+            tvMode &&
+            ready &&
+            (preferredKey
+              ? preferredKey === `${title}:${item.id}`
+              : index === 0)
+          }
           onFocus={() => {
             rememberFocus(`${title}:${item.id}`);
             railRef.current?.scrollToIndex({ index, animated: true, viewPosition: 0.5 });

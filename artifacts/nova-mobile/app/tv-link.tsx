@@ -17,7 +17,8 @@ import { useApp } from "@/context/AppContext";
 import { useColors } from "@/hooks/useColors";
 import { getBaseUrl } from "@/utils/baseUrl";
 import { secureFetch, setUserAuthToken } from "@/utils/secureApi";
-import { isTvDevice } from "@/utils/tv";
+import { isTvDevice, TvPressable } from "@/utils/tv";
+const Pressable = TvPressable;
 
 const AUTH_KEY = "nova-mobile-user";
 const DEVICE_ID_KEY = "nova-device-id";
@@ -179,6 +180,8 @@ export default function TvLinkScreen() {
           testID="tv-link-submit"
           onPress={handleClaim}
           disabled={loading}
+          focusable={tvMode}
+          hasTVPreferredFocus={tvMode}
           style={[styles.submit, { backgroundColor: colors.primary, opacity: loading ? 0.6 : 1 }]}
         >
           {loading ? <ActivityIndicator color={colors.primaryForeground} /> : <Ionicons name="link" size={20} color={colors.primaryForeground} />}

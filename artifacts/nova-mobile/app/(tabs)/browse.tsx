@@ -554,11 +554,15 @@ export default function BrowseScreen() {
                   <ActivityIndicator color="#8B5CF6" />
                 </View>
               ) : null}
-              renderItem={({ item }) => (
+              renderItem={({ item, index }) => (
                 <AnimeCard
                   anime={item}
                   columns={gridColumns}
-                  hasTVPreferredFocus={tvMode && ready && preferredKey === String(item.id)}
+                  hasTVPreferredFocus={
+                    tvMode &&
+                    ready &&
+                    (preferredKey ? preferredKey === String(item.id) : index === 0)
+                  }
                   onFocus={() => {
                     rememberFocus(String(item.id));
                     const index = filteredItems.findIndex((candidate) => candidate.id === item.id);

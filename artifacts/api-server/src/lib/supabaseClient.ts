@@ -50,6 +50,11 @@ async function ensureDeviceStorageSchema(): Promise<void> {
           ON device_link_codes(code_hash, claimed_at, expires_at);
         CREATE INDEX IF NOT EXISTS idx_device_link_codes_user_active
           ON device_link_codes(user_id, claimed_at, expires_at);
+        -- Device-link identity belongs to Supabase when Supabase is enabled.
+        -- Do not enforce a foreign key against a different local users table
+        -- when these operational tables are using the PostgreSQL fallback.
+        ALTER TABLE device_link_codes
+          DROP CONSTRAINT IF EXISTS device_link_codes_user_id_fkey;
         CREATE TABLE IF NOT EXISTS linked_devices (
           id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
           user_id UUID NOT NULL,
@@ -63,6 +68,8 @@ async function ensureDeviceStorageSchema(): Promise<void> {
         );
         CREATE INDEX IF NOT EXISTS idx_linked_devices_user_active
           ON linked_devices(user_id, revoked_at, linked_at DESC);
+        ALTER TABLE linked_devices
+          DROP CONSTRAINT IF EXISTS linked_devices_user_id_fkey;
         CREATE TABLE IF NOT EXISTS mobile_push_tokens (
           token TEXT PRIMARY KEY,
           platform TEXT NOT NULL DEFAULT 'android',
