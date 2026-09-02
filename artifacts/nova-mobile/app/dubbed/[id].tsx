@@ -1,13 +1,14 @@
 import React, { useState, useEffect, useRef } from "react";
 import {
-  View, Text, Pressable, Image, FlatList,
-  ActivityIndicator, StyleSheet, Platform, ScrollView,
+  View, Text, Image, FlatList,
+  ActivityIndicator, StyleSheet, Platform, ScrollView, TVFocusGuideView,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { getBaseUrl } from "@/utils/api";
-import { isTvDevice, tvFocusStyle } from "@/utils/tv";
+import { isTvDevice, tvFocusStyle, TvPressable } from "@/utils/tv";
+const Pressable = TvPressable;
 
 interface Season { label: string; arabicToonsId: string; }
 interface Episode { number: number; epId: string; url: string; thumbnail?: string; }
@@ -44,6 +45,7 @@ export default function DubbedDetailScreen() {
   const [episodes, setEpisodes] = useState<Episode[]>([]);
   const [epLoading, setEpLoading] = useState(false);
   const [showSeasonDrop, setShowSeasonDrop] = useState(false);
+  const episodeListRef = useRef<FlatList<Episode>>(null);
 
   const curSeason = seasons[selSeason];
 
@@ -74,12 +76,13 @@ export default function DubbedDetailScreen() {
     });
   };
 
-  const renderEp = ({ item: ep }: { item: Episode }) => {
+  const renderEp = ({ item: ep, index }: { item: Episode; index: number }) => {
     const thumb = thumbSrc(ep.thumbnail);
     return (
       <Pressable
         onPress={() => openWatch(ep)}
-        focusable={tvMode}
+        hasTVPreferredFocus={tvMode && index === 0}
+        onFocus={() => episodeListRef.current?.scrollToIndex({ index, animated: true, viewPosition: 0.35 })}
         style={({ pressed, focused }) => [styles.epRow, { opacity: pressed ? 0.7 : 1 }, tvMode && tvFocusStyle(focused)]}
       >
         <View style={styles.epThumb}>
@@ -114,11 +117,21 @@ export default function DubbedDetailScreen() {
         </Pressable>
         </View>
 
-      <FlatList
-        data={episodes}
-        keyExtractor={ep => ep.epId || String(ep.number)}
-        renderItem={renderEp}
-        ListHeaderComponent={() => (
+      <TVFocusGuideView autoFocus={tvMode} style={styles.tvFocusGuide}>
+        <FlatList
+          ref={episodeListRef}
+          data={episodes}
+          keyExtractor={ep => ep.epId || String(ep.number)}
+          renderItem={renderEp}
+          removeClippedSubviews={false}
+          initialNumToRender={tvMode ? 12 : 6}
+          maxToRenderPerBatch={tvMode ? 10 : 5}
+          windowSize={tvMode ? 7 : 5}
+          onScrollToIndexFailed={({ index }) => episodeListRef.current?.scrollToOffset({
+            offset: Math.max(0, index * (tvMode ? 130 : 72)),
+            animated: true,
+          })}
+          ListHeaderComponent={() => (
           <View>
             {/* Poster */}
             <View style={styles.heroRow}>
@@ -183,17 +196,20 @@ export default function DubbedDetailScreen() {
             )}
           </View>
         )}
-        contentContainerStyle={{ paddingBottom: 100 }}
-        ListEmptyComponent={!epLoading ? (
-          <Text style={styles.emptyText}>لا توجد حلقات</Text>
-        ) : null}
-      />
+          contentContainerStyle={[{ paddingBottom: 100 }, tvMode && styles.tvListContent]}
+          ListEmptyComponent={!epLoading ? (
+            <Text style={styles.emptyText}>لا توجد حلقات</Text>
+          ) : null}
+        />
+      </TVFocusGuideView>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#09090B" },
+  tvFocusGuide: { flex: 1 },
+  tvListContent: { paddingHorizontal: 56, paddingBottom: 140 },
   header: {
     flexDirection: "row", alignItems: "center", gap: 12,
     paddingHorizontal: 16, paddingTop: 12, paddingBottom: 12,

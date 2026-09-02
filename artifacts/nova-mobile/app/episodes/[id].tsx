@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import {
-  View, Text, Pressable, TextInput, Image, FlatList,
-  ScrollView, ActivityIndicator, StyleSheet, Platform, useWindowDimensions,
+  View, Text, TextInput, Image, FlatList,
+  ScrollView, ActivityIndicator, StyleSheet, Platform, TVFocusGuideView, useWindowDimensions,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
@@ -9,7 +9,8 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { getBaseUrl } from "@/utils/api";
-import { isTvDevice, tvFocusStyle } from "@/utils/tv";
+import { isTvDevice, tvFocusStyle, TvPressable } from "@/utils/tv";
+const Pressable = TvPressable;
 import { useTvFocusMemory } from "@/utils/tvFocus";
 
 /* ── AniList query ── */
@@ -82,18 +83,22 @@ function EpisodeRow({
     : `${String(durationMin).padStart(2, "0")}:00`;
 
   return (
-    <Pressable
-      onPress={() => onWatch(n)}
-      focusable={tvMode}
-      hasTVPreferredFocus={hasTVPreferredFocus}
-      onFocus={onFocus}
-      style={({ focused }) => [
-        ep_s.row,
-        tvMode && ep_s.tvRow,
-        tvMode && tvFocusStyle(focused),
-        watched && ep_s.rowWatched,
-      ]}
-    >
+    <View style={[
+      ep_s.row,
+      tvMode && ep_s.tvRow,
+      watched && ep_s.rowWatched,
+    ]}>
+      <Pressable
+        onPress={() => onWatch(n)}
+        hasTVPreferredFocus={hasTVPreferredFocus}
+        onFocus={onFocus}
+        style={({ focused, pressed }) => [
+          ep_s.episodeMain,
+          tvMode && ep_s.tvEpisodeMain,
+          tvMode && tvFocusStyle(focused),
+          pressed && { opacity: 0.82 },
+        ]}
+      >
       {/* Thumbnail */}
       <View style={[ep_s.thumbWrap, tvMode && ep_s.tvThumbWrap]}>
         {thumb ? (
@@ -111,6 +116,7 @@ function EpisodeRow({
         {arabicTitle ? <Text style={[ep_s.epTitleAr, tvMode && ep_s.tvEpTitle]} numberOfLines={tvMode ? 2 : 1}>{arabicTitle}</Text> : null}
         {originalTitle ? <Text style={[ep_s.epTitleOriginal, tvMode && ep_s.tvEpOriginal]} numberOfLines={tvMode ? 2 : 1}>{originalTitle}</Text> : null}
       </View>
+      </Pressable>
 
       <View style={[ep_s.episodeActions, tvMode && ep_s.tvEpisodeActions]}>
         {/* Comment button */}
@@ -138,7 +144,7 @@ function EpisodeRow({
           <Ionicons name={watched ? "eye" : "eye-off"} size={tvMode ? 26 : 12} color={watched ? "#8B5CF6" : "rgba(255,255,255,0.2)"} />
         </Pressable>
       </View>
-    </Pressable>
+    </View>
   );
 }
 
@@ -355,6 +361,10 @@ export default function EpisodeListScreen() {
     const start = (currentPage - 1) * PAGE_SIZE;
     return allEps.slice(start, start + PAGE_SIZE);
   }, [allEps, filtered, isSearching, currentPage]);
+  const preferredEpisodeNumber = Number(preferredKey);
+  const shouldFocusContinue = !preferredKey
+    || preferredKey === "continue"
+    || !displayedEps.includes(preferredEpisodeNumber);
 
   /* ترجمة عناوين الصفحة الحالية دفعةً بدفعة، مع الاعتماد على كاش الخادم */
   useEffect(() => {
@@ -500,48 +510,59 @@ export default function EpisodeListScreen() {
       </View>
 
       {/* ── Episode list ── */}
-      <FlatList
-        ref={episodeListRef}
-        key={tvMode ? "tv-episode-grid" : "phone-episode-list"}
-        data={displayedEps}
-        numColumns={tvMode ? 4 : 1}
-        keyExtractor={n => n.toString()}
-        showsVerticalScrollIndicator={false}
-        columnWrapperStyle={tvMode ? ep_s.tvColumnWrapper : undefined}
-        contentContainerStyle={[{ paddingBottom: 100 }, tvMode && ep_s.tvListContent]}
-        ListHeaderComponent={
-          <Pressable
-            onPress={() => watchEp(displayedEps[0] || 1)}
-            focusable={tvMode}
-            hasTVPreferredFocus={tvMode && ready && preferredKey === "continue"}
-            onFocus={() => { if (tvMode) rememberFocus("continue"); }}
-            style={({ focused }) => [ep_s.watchFromBtn, tvMode && ep_s.tvWatchFromBtn, tvMode && tvFocusStyle(focused)]}>
-            <Ionicons name="play" size={tvMode ? 24 : 14} color="#8B5CF6" />
-            <Text style={[ep_s.watchFromBtnText, tvMode && ep_s.tvWatchFromBtnText]}>
-              {watchedCount > 0 ? `متابعة من حيث توقفت (${watchedCount + 1})` : "مشاهدة من البداية"}
-            </Text>
-          </Pressable>
-        }
-        renderItem={({ item: n }) => (
-          <EpisodeRow
-            n={n}
-            anime={anime}
-            epData={epData}
-            episodeTitlesAr={episodeTitlesAr}
-            watched={watched.has(n)}
-            commentCount={commentCounts[n] || 0}
-            onToggleWatched={toggleWatched}
-            onWatch={watchEp}
-            onComment={openComments}
-           onFocus={() => {
-             if (tvMode) rememberFocus(String(n));
-             const index = displayedEps.indexOf(n);
-             if (index >= 0) episodeListRef.current?.scrollToIndex({ index, animated: true, viewPosition: 0.35 });
-           }}
-           hasTVPreferredFocus={tvMode && ready && preferredKey === String(n)}
-          />
-        )}
-      />
+      <TVFocusGuideView autoFocus={tvMode} style={ep_s.tvFocusGuide}>
+        <FlatList
+          ref={episodeListRef}
+          key={tvMode ? "tv-episode-grid" : "phone-episode-list"}
+          data={displayedEps}
+          numColumns={tvMode ? 4 : 1}
+          keyExtractor={n => n.toString()}
+          showsVerticalScrollIndicator={false}
+          removeClippedSubviews={false}
+          initialNumToRender={tvMode ? 16 : 8}
+          maxToRenderPerBatch={tvMode ? 12 : 8}
+          windowSize={tvMode ? 7 : 5}
+          onScrollToIndexFailed={({ index }) => {
+            episodeListRef.current?.scrollToOffset({
+              offset: Math.max(0, index * (tvMode ? 410 : 72)),
+              animated: true,
+            });
+          }}
+          columnWrapperStyle={tvMode ? ep_s.tvColumnWrapper : undefined}
+          contentContainerStyle={[{ paddingBottom: 100 }, tvMode && ep_s.tvListContent]}
+          ListHeaderComponent={
+            <Pressable
+              onPress={() => watchEp(displayedEps[0] || 1)}
+              hasTVPreferredFocus={tvMode && ready && shouldFocusContinue}
+              onFocus={() => { if (tvMode) rememberFocus("continue"); }}
+              style={({ focused }) => [ep_s.watchFromBtn, tvMode && ep_s.tvWatchFromBtn, tvMode && tvFocusStyle(focused)]}>
+              <Ionicons name="play" size={tvMode ? 24 : 14} color="#8B5CF6" />
+              <Text style={[ep_s.watchFromBtnText, tvMode && ep_s.tvWatchFromBtnText]}>
+                {watchedCount > 0 ? `متابعة من حيث توقفت (${watchedCount + 1})` : "مشاهدة من البداية"}
+              </Text>
+            </Pressable>
+          }
+          renderItem={({ item: n }) => (
+            <EpisodeRow
+              n={n}
+              anime={anime}
+              epData={epData}
+              episodeTitlesAr={episodeTitlesAr}
+              watched={watched.has(n)}
+              commentCount={commentCounts[n] || 0}
+              onToggleWatched={toggleWatched}
+              onWatch={watchEp}
+              onComment={openComments}
+              onFocus={() => {
+                if (tvMode) rememberFocus(String(n));
+                const index = displayedEps.indexOf(n);
+                if (index >= 0) episodeListRef.current?.scrollToIndex({ index, animated: true, viewPosition: 0.35 });
+              }}
+              hasTVPreferredFocus={tvMode && ready && preferredKey === String(n)}
+            />
+          )}
+        />
+      </TVFocusGuideView>
 
     </View>
   );
@@ -575,6 +596,7 @@ const ep_s = StyleSheet.create({
   watchFromBtn: { flexDirection: "row", alignItems: "center", gap: 8, margin: 12, padding: 12, borderRadius: 14, borderWidth: 1, borderColor: "rgba(139,92,246,0.25)", backgroundColor: "rgba(139,92,246,0.07)" },
   watchFromBtnText: { fontSize: 12, fontFamily: "Cairo_700Bold", color: "#8B5CF6" },
   row: { flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 12, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: "rgba(255,255,255,0.05)" },
+  episodeMain: { flex: 1, flexDirection: "row", alignItems: "center", gap: 10 },
   rowWatched: { backgroundColor: "rgba(139,92,246,0.03)", borderBottomColor: "rgba(139,92,246,0.08)" },
   thumbWrap: { width: 72, height: 41, borderRadius: 8, overflow: "hidden", backgroundColor: "#1C1C22", position: "relative" },
   thumb: { width: "100%", height: "100%" },
@@ -601,6 +623,7 @@ const ep_s = StyleSheet.create({
   eyeBtn: { width: 27, height: 27, borderRadius: 8, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(255,255,255,0.04)", borderWidth: 1, borderColor: "rgba(255,255,255,0.08)" },
   eyeBtnWatched: { backgroundColor: "rgba(139,92,246,0.15)", borderColor: "rgba(139,92,246,0.3)" },
   tvContainer: { paddingHorizontal: 56 },
+  tvFocusGuide: { flex: 1 },
   tvControls: { paddingHorizontal: 56, paddingTop: 22, paddingBottom: 18 },
   tvHero: { height: 390 },
   tvBackBtn: { width: 76, height: 76, borderRadius: 24 },
@@ -611,6 +634,7 @@ const ep_s = StyleSheet.create({
   tvHeroTitle: { fontSize: 42, lineHeight: 56 },
   tvText: { fontSize: 24, lineHeight: 34 },
   tvRow: { width: "23.5%", minHeight: 380, flexDirection: "column", alignItems: "stretch", paddingHorizontal: 24, paddingVertical: 24, gap: 20, borderRadius: 26, borderWidth: 2, borderBottomWidth: 2, borderColor: "rgba(255,255,255,0.08)", backgroundColor: "rgba(18,16,28,0.76)" },
+  tvEpisodeMain: { width: "100%", flex: 0, flexDirection: "column", alignItems: "stretch", gap: 20, borderRadius: 20 },
   tvColumnWrapper: { justifyContent: "space-between", paddingHorizontal: 32, gap: 28 },
   tvListContent: { paddingTop: 12, gap: 30 },
   tvSmallButton: { width: 72, height: 72, borderRadius: 20 },

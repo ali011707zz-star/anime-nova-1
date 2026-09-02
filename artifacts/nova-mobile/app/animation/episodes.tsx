@@ -1,14 +1,15 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import {
-  View, Text, Pressable, Image, ScrollView, FlatList,
-  ActivityIndicator, StyleSheet, Platform,
+  View, Text, Image, ScrollView, FlatList,
+  ActivityIndicator, StyleSheet, Platform, TVFocusGuideView,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { getBaseUrl } from "@/utils/api";
-import { isTvDevice, tvFocusStyle } from "@/utils/tv";
+import { isTvDevice, tvFocusStyle, TvPressable } from "@/utils/tv";
+const Pressable = TvPressable;
 
 const IMG_W = "https://image.tmdb.org/t/p/w500";
 const IMG_S = "https://image.tmdb.org/t/p/w185";
@@ -37,6 +38,7 @@ export default function AnimationEpisodesScreen() {
   const insets = useSafeAreaInsets();
   const tvMode = isTvDevice();
   const tabsRef = useRef<ScrollView>(null);
+  const episodeListRef = useRef<FlatList<Episode>>(null);
 
   const initSeason = parseInt(seasonParam || "1", 10) || 1;
 
@@ -112,6 +114,8 @@ export default function AnimationEpisodesScreen() {
     return (
       <Pressable
         focusable={tvMode}
+        hasTVPreferredFocus={tvMode && index === 0}
+        onFocus={() => episodeListRef.current?.scrollToIndex({ index, animated: true, viewPosition: 0.35 })}
         style={({ focused }) => [s.epCard, tvMode && s.tvEpCard, watched && s.epCardWatched, tvMode && tvFocusStyle(focused)]}
         onPress={() => goWatch(item.episode_number, item.name)}
       >
@@ -253,14 +257,25 @@ export default function AnimationEpisodesScreen() {
           <Text style={s.emptyText}>لا توجد حلقات لهذا الموسم</Text>
         </View>
       ) : (
-        <FlatList
-          data={episodes}
-          keyExtractor={ep => String(ep.episode_number)}
-          renderItem={renderEpisode}
-          contentContainerStyle={[s.listContent, tvMode && s.tvListContent]}
-          showsVerticalScrollIndicator={false}
-          ItemSeparatorComponent={() => <View style={{ height: 8 }} />}
-        />
+        <TVFocusGuideView autoFocus={tvMode} style={s.tvFocusGuide}>
+          <FlatList
+            ref={episodeListRef}
+            data={episodes}
+            keyExtractor={ep => String(ep.episode_number)}
+            renderItem={renderEpisode}
+            contentContainerStyle={[s.listContent, tvMode && s.tvListContent]}
+            showsVerticalScrollIndicator={false}
+            removeClippedSubviews={false}
+            initialNumToRender={tvMode ? 10 : 6}
+            maxToRenderPerBatch={tvMode ? 8 : 5}
+            windowSize={tvMode ? 7 : 5}
+            onScrollToIndexFailed={({ index }) => episodeListRef.current?.scrollToOffset({
+              offset: Math.max(0, index * (tvMode ? 310 : 76)),
+              animated: true,
+            })}
+            ItemSeparatorComponent={() => <View style={{ height: 8 }} />}
+          />
+        </TVFocusGuideView>
       )}
     </View>
   );
@@ -323,6 +338,7 @@ const s = StyleSheet.create({
 
   center: { flex: 1, alignItems: "center", justifyContent: "center", gap: 12 },
   tvBackBtn: { width: 64, height: 64, borderRadius: 20 },
+  tvFocusGuide: { flex: 1 },
   tvListContent: { paddingHorizontal: 56, paddingTop: 18, gap: 22 },
   loadingText: { fontSize: 12, color: "rgba(255,255,255,0.3)", fontFamily: "Cairo_400Regular" },
   emptyText: { fontSize: 14, color: "rgba(255,255,255,0.25)", fontFamily: "Cairo_700Bold" },

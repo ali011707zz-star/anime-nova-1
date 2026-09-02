@@ -4,8 +4,6 @@ import {
   Platform,
   Pressable,
   PressableProps,
-  StyleProp,
-  ViewStyle,
   useWindowDimensions,
 } from "react-native";
 
@@ -32,18 +30,18 @@ export function isTvDevice(width?: number, height?: number) {
 export function tvFocusStyle(focused: boolean) {
   return focused
     ? {
-        // A dark tint remains visible on light posters and bright buttons,
-        // while the outline and lift make the focused target obvious from
-        // normal TV viewing distance.
-        backgroundColor: "rgba(0,0,0,0.28)",
-        borderColor: "#A78BFA",
-        borderWidth: 4,
-        shadowColor: "#C4B5FD",
-        shadowOpacity: 0.85,
-        shadowRadius: 14,
-        elevation: 10,
-        zIndex: 20,
-        transform: [{ scale: 1.015 }],
+        // This is intentionally oversized for ten-foot viewing. A thin
+        // border disappears on bright posters and is easy to lose when the
+        // remote moves quickly between neighbouring controls.
+        backgroundColor: "rgba(255,255,255,0.18)",
+        borderColor: "#FFFFFF",
+        borderWidth: 6,
+        shadowColor: "#A78BFA",
+        shadowOpacity: 1,
+        shadowRadius: 24,
+        elevation: 24,
+        zIndex: 100,
+        transform: [{ scale: 1.045 }],
       }
     : {};
 }
@@ -58,17 +56,18 @@ export function TvPressable({
   children,
   hasTVPreferredFocus = false,
   ...props
-}: PressableProps & { style?: StyleProp<ViewStyle> }) {
+}: Omit<PressableProps, "style"> & { style?: PressableProps["style"] }) {
+  const tv = isTvDevice();
   return (
     <Pressable
       {...props}
-      focusable
-      hasTVPreferredFocus={hasTVPreferredFocus}
+      focusable={tv}
+      hasTVPreferredFocus={tv && hasTVPreferredFocus}
       hitSlop={props.hitSlop ?? 8}
       pressRetentionOffset={props.pressRetentionOffset ?? 12}
       style={({ focused, pressed }) => [
-        typeof style === "function" ? style({ focused, pressed }) : style,
-        tvFocusStyle(focused),
+        typeof style === "function" ? style({ focused, pressed } as any) : style,
+        tvFocusStyle(tv && focused),
         pressed && { opacity: 0.82 },
       ]}
     >

@@ -10,7 +10,6 @@ import {
   Dimensions,
   PanResponder,
   Platform,
-  Pressable,
   StyleSheet,
   Text,
   View,
@@ -21,8 +20,9 @@ import {
   type NovaMedia3ViewProps,
 } from "../lib/nova-media3";
 import { openIsolatedPlayer } from "../lib/isolatedPlayer";
-import { tvFocusStyle, useTvMetrics } from "../utils/tv";
+import { tvFocusStyle, useTvMetrics, TvPressable } from "../utils/tv";
 import type { PlayerSource, SubCue } from "./RiftPlayer";
+const Pressable = TvPressable;
 
 type Props = {
   sources: PlayerSource[];
@@ -1332,6 +1332,7 @@ export function RiftPlayer({
                         key={`${item.url}-${index}`}
                         onPress={() => { changeSource(index); setShowSources(false); }}
                         focusable={tvMode}
+                        hasTVPreferredFocus={tvMode && index === 0}
                         style={({ focused }) => [styles.menuItem, tvMode && styles.tvMenuItem, tvMode && tvFocusStyle(focused)]}
                       >
                         <Text style={[styles.menuText, tvMode && styles.tvMenuText]}>{item.quality || item.label}</Text>
@@ -1351,11 +1352,12 @@ export function RiftPlayer({
               <View>
                 {showSpeeds && (
                   <View style={[styles.menu, tvMode && styles.tvMenu]}>
-                    {SPEEDS.map((item) => (
+                    {SPEEDS.map((item, index) => (
                       <Pressable
                         key={item}
                         onPress={() => chooseSpeed(item)}
                         focusable={tvMode}
+                        hasTVPreferredFocus={tvMode && index === 0}
                         style={({ focused }) => [styles.menuItem, tvMode && styles.tvMenuItem, tvMode && tvFocusStyle(focused)]}
                       >
                         <Text style={[styles.menuText, tvMode && styles.tvMenuText]}>{item}x</Text>

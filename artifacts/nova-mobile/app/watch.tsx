@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import {
-  View, Text, Pressable, Image, ScrollView, ActivityIndicator,
-  StyleSheet, Platform, Animated, Easing, Alert,
+  View, Text, Image, ScrollView, ActivityIndicator,
+  StyleSheet, Platform, Animated, Easing, Alert, TVFocusGuideView,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
@@ -13,7 +13,9 @@ import { HiddenResolverWebView, ResolvedStream } from "@/components/HiddenResolv
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useApp } from "@/context/AppContext";
-import { isTvDevice, tvFocusStyle } from "@/utils/tv";
+import { isTvDevice, tvFocusStyle, TvPressable } from "@/utils/tv";
+const Pressable = TvPressable;
+import { useTvFocusMemory } from "@/utils/tvFocus";
 import { getBaseUrl } from "@/utils/api";
 import { secureFetch, secureStreamFetch, warmAuthToken, getAuthToken, getDownloadToken } from "@/utils/secureApi";
 import {
@@ -806,6 +808,20 @@ export default function WatchScreen() {
   /* Only the pressed server row is waiting for the ad decision. A single
      boolean here made every server button show a spinner at once. */
   const [watchAdSite, setWatchAdSite] = useState<string | null>(null);
+  const { preferredKey, ready: focusMemoryReady, rememberFocus } =
+    useTvFocusMemory(`watch-picker:${anime || titleStr}:${epNum}`);
+
+  const visiblePickerKeys = useMemo(
+    () => Q_KEYS.flatMap((quality) =>
+      Object.entries(availableSlots)
+        .filter(([, tiers]) => Boolean(tiers[quality]))
+        .map(([site]) => pickerSlotKey(site, quality)),
+    ),
+    [availableSlots],
+  );
+  const pickerFocusKey = visiblePickerKeys.includes(preferredKey || "")
+    ? preferredKey
+    : (visiblePickerKeys[0] || null);
 
   const abortRef          = useRef<AbortController | null>(null);
   const availabilityAbortRef = useRef<AbortController | null>(null);
@@ -1908,7 +1924,13 @@ export default function WatchScreen() {
         </Pressable>
       </View>
 
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={[d.scrollContent, tvMode && d.tvScrollContent]}>
+      <TVFocusGuideView autoFocus={tvMode} style={d.tvFocusGuide}>
+        <ScrollView
+          showsVerticalScrollIndicator={false}
+          removeClippedSubviews={false}
+          keyboardShouldPersistTaps="handled"
+          contentContainerStyle={[d.scrollContent, tvMode && d.tvScrollContent]}
+        >
 
         {/* ── Info card ── */}
         <View style={[d.infoCard, tvMode && d.tvInfoCard]}>
@@ -1972,7 +1994,7 @@ export default function WatchScreen() {
              <Text style={d.availabilityEmptyText}>
                {availabilityError ? "تحقق من الاتصال ثم أعد المحاولة." : "لم يُرجع الخادم أي مصدر صالح حالياً."}
              </Text>
-             <Pressable onPress={refreshAllSources} style={d.retryBigBtn}>
+              <Pressable onPress={refreshAllSources} accessibilityRole="button" style={d.retryBigBtn}>
                <Ionicons name="refresh" size={16} color="#c4b5fd" />
                <Text style={d.retryBigText}>إعادة المحاولة</Text>
              </Pressable>
@@ -2027,7 +2049,14 @@ export default function WatchScreen() {
                     <Pressable
                       key={slot.site}
                       onPress={() => handlePickSite(slot.site, qk)}
-                      focusable={tvMode}
+                      hasTVPreferredFocus={
+                        tvMode &&
+                        focusMemoryReady &&
+                        pickerFocusKey === pickerSlotKey(slot.site, qk)
+                      }
+                      onFocus={() => {
+                        if (tvMode) rememberFocus(pickerSlotKey(slot.site, qk));
+                      }}
                       accessibilityRole="button"
                       accessibilityLabel={`اختيار سيرفر ${slot.tag} بجودة ${qk}`}
                       style={({ focused, pressed }) => [
@@ -2153,13 +2182,15 @@ export default function WatchScreen() {
 
 
 
-      </ScrollView>
+        </ScrollView>
+      </TVFocusGuideView>
     </View>
   );
 }
 
 /* ═══════════════ STYLES ═══════════════ */
 const d = StyleSheet.create({
+  tvFocusGuide: { flex: 1 },
   /* Loading */
   ldBackBtn:    { position: "absolute", right: 16, width: 36, height: 36, borderRadius: 18, backgroundColor: "rgba(0,0,0,0.45)", alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: "rgba(255,255,255,0.12)", zIndex: 10 },
   ldContent:    { flex: 1, alignItems: "center", justifyContent: "center", gap: 20, paddingHorizontal: 24 },

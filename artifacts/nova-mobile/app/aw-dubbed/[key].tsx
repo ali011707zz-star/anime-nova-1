@@ -3,15 +3,16 @@
  */
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import {
-  View, Text, Pressable, Image, FlatList,
-  ActivityIndicator, StyleSheet, Platform, ScrollView,
+  View, Text, Image, FlatList,
+  ActivityIndicator, StyleSheet, Platform, ScrollView, TVFocusGuideView,
 } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { getBaseUrl } from "@/utils/api";
-import { isTvDevice, tvFocusStyle } from "@/utils/tv";
+import { isTvDevice, tvFocusStyle, TvPressable } from "@/utils/tv";
+const Pressable = TvPressable;
 
 const BASE = getBaseUrl();
 
@@ -58,6 +59,7 @@ export default function AwDubbedDetailScreen() {
   const [epLoading,  setEpLoading]  = useState(false);
   const [imgError,   setImgError]   = useState(false);
   const tabsRef = useRef<ScrollView>(null);
+  const episodeListRef = useRef<FlatList<Episode>>(null);
 
   const curSeason = seasons[selSeason];
   const displayTitle = titleAr || title;
@@ -91,10 +93,11 @@ export default function AwDubbedDetailScreen() {
   const renderEp = useCallback(({ item: ep }: { item: Episode }) => (
     <Pressable
       onPress={() => openWatch(ep)}
-      focusable={tvMode}
-      style={({ pressed, focused }) => [styles.epRow, { opacity: pressed ? 0.7 : 1 }, tvMode && tvFocusStyle(focused)]}
+      hasTVPreferredFocus={tvMode && ep.number === episodes[0]?.number}
+      onFocus={() => episodeListRef.current?.scrollToIndex({ index: episodes.findIndex(item => item.number === ep.number), animated: true, viewPosition: 0.35 })}
+      style={({ pressed, focused }) => [styles.epRow, tvMode && styles.tvEpRow, { opacity: pressed ? 0.7 : 1 }, tvMode && tvFocusStyle(focused)]}
     >
-      <View style={styles.epThumb}>
+      <View style={[styles.epThumb, tvMode && styles.tvEpThumb]}>
         {poster && !imgError ? (
           <Image source={{ uri: poster }} style={StyleSheet.absoluteFill} resizeMode="cover"
             onError={() => setImgError(true)} />
@@ -113,12 +116,12 @@ export default function AwDubbedDetailScreen() {
         </View>
       </View>
       <View style={styles.epInfo}>
-        <Text style={styles.epTitle}>الحلقة {ep.number}</Text>
-        <Text style={styles.epSub}>{curSeason?.label || "الحلقات"}</Text>
+        <Text style={[styles.epTitle, tvMode && styles.tvEpTitle]}>الحلقة {ep.number}</Text>
+        <Text style={[styles.epSub, tvMode && styles.tvEpSub]}>{curSeason?.label || "الحلقات"}</Text>
       </View>
       <Ionicons name="chevron-back" size={16} color="rgba(255,255,255,0.3)" />
     </Pressable>
-  ), [openWatch, poster, imgError, curSeason]);
+  ), [openWatch, poster, imgError, curSeason, episodes, tvMode]);
 
   return (
     <View style={[styles.container, { paddingTop: topPad }]}>
@@ -132,12 +135,22 @@ export default function AwDubbedDetailScreen() {
         <View style={{ width: 36 }} />
       </View>
 
-      <FlatList
-        data={episodes}
-        keyExtractor={ep => String(ep.number)}
-        renderItem={renderEp}
-        contentContainerStyle={styles.listContent}
-        ListHeaderComponent={() => (
+      <TVFocusGuideView autoFocus={tvMode} style={styles.tvFocusGuide}>
+        <FlatList
+          ref={episodeListRef}
+          data={episodes}
+          keyExtractor={ep => String(ep.number)}
+          renderItem={renderEp}
+          removeClippedSubviews={false}
+          initialNumToRender={tvMode ? 12 : 6}
+          maxToRenderPerBatch={tvMode ? 10 : 5}
+          windowSize={tvMode ? 7 : 5}
+          onScrollToIndexFailed={({ index }) => episodeListRef.current?.scrollToOffset({
+            offset: Math.max(0, index * (tvMode ? 100 : 72)),
+            animated: true,
+          })}
+          contentContainerStyle={[styles.listContent, tvMode && styles.tvListContent]}
+          ListHeaderComponent={() => (
           <View>
             {/* Hero */}
             <View style={styles.heroRow}>
@@ -199,14 +212,16 @@ export default function AwDubbedDetailScreen() {
               <Text style={styles.emptyText}>لا توجد حلقات</Text>
             </View>
           )
-        }
-      />
+          }
+        />
+      </TVFocusGuideView>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   container:       { flex: 1, backgroundColor: "#09090B" },
+  tvFocusGuide:    { flex: 1 },
   header:          { flexDirection: "row", alignItems: "center", paddingHorizontal: 12, paddingVertical: 10,
                      borderBottomWidth: 1, borderBottomColor: "rgba(255,255,255,0.05)" },
   backBtn:         { width: 36, height: 36, borderRadius: 10, backgroundColor: "rgba(255,255,255,0.05)",
@@ -214,6 +229,7 @@ const styles = StyleSheet.create({
   headerTitle:     { flex: 1, textAlign: "center", color: "#fff", fontSize: 16, fontWeight: "700",
                      fontFamily: "Cairo_700Bold" },
   listContent:     { paddingBottom: 100 },
+  tvListContent:   { paddingHorizontal: 56, paddingBottom: 140 },
   heroRow:         { height: 200, marginBottom: 16, position: "relative" },
   posterWrap:      { ...StyleSheet.absoluteFillObject, overflow: "hidden" },
   posterPlaceholder: { flex: 1, alignItems: "center", justifyContent: "center",
@@ -236,6 +252,10 @@ const styles = StyleSheet.create({
                      paddingHorizontal: 14, marginBottom: 6, textTransform: "uppercase" },
   epRow:           { flexDirection: "row", alignItems: "center", paddingHorizontal: 12, paddingVertical: 10,
                      gap: 12, borderBottomWidth: 1, borderBottomColor: "rgba(255,255,255,0.04)" },
+  tvEpRow:         { minHeight: 112, paddingHorizontal: 28, paddingVertical: 20, gap: 24, borderBottomWidth: 2, borderRadius: 20, borderWidth: 2, borderColor: "rgba(255,255,255,0.08)", backgroundColor: "rgba(18,16,28,0.78)" },
+  tvEpThumb:       { width: 150, height: 88, borderRadius: 16 },
+  tvEpTitle:       { fontSize: 25, lineHeight: 36 },
+  tvEpSub:         { fontSize: 18, lineHeight: 28 },
   epThumb:         { width: 80, height: 52, borderRadius: 8, backgroundColor: "rgba(255,255,255,0.05)",
                      overflow: "hidden", position: "relative" },
   epPlaceholder:   { flex: 1, alignItems: "center", justifyContent: "center" },
