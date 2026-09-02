@@ -505,6 +505,7 @@ function ExpoRiftPlayer({
   // Keep the normal overlay available on TV; its controls are enlarged below
   // and remain D-pad focusable through TvPressable.
   const [showControls, setShowControls] = useState(true);
+  const [showTvRevealHint, setShowTvRevealHint] = useState(false);
   const [showSpeedSheet, setShowSpeedSheet] = useState(false);
   const [showViewSheet, setShowViewSheet] = useState(false);
   const [showSubSheet, setShowSubSheet]   = useState(false);
@@ -625,6 +626,7 @@ function ExpoRiftPlayer({
 
   /* ─── Refs ─── */
   const hideTimer         = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const revealHintTimer   = useRef<ReturnType<typeof setTimeout> | null>(null);
   const progressTimer     = useRef<ReturnType<typeof setInterval> | null>(null);
   /** كاشف الـ stall: موضع آخر حركة + وقتها (لكشف "يشتغل بدون تقدّم") */
   const stallRef          = useRef<{ lastPos: number; lastAt: number }>({ lastPos: -1, lastAt: 0 });
@@ -817,6 +819,7 @@ function ExpoRiftPlayer({
 
       /* 5. ألغِ hide timer */
       if (hideTimer.current) { clearTimeout(hideTimer.current); hideTimer.current = null; }
+      if (revealHintTimer.current) { clearTimeout(revealHintTimer.current); revealHintTimer.current = null; }
 
       /* 5b. ألغِ كل الـ timers الصغيرة التي لم تكن في cleanup — مسببات الكراش الرئيسية:
              replayTimeout: يستدعي player.play() بعد 120ms من unmount → native crash
@@ -1746,15 +1749,36 @@ function ExpoRiftPlayer({
   }, [isEnded]);
 
   /* ─── Controls show/hide ─── */
+  const showTvRevealHintBriefly = useCallback(() => {
+    setShowTvRevealHint(true);
+    if (revealHintTimer.current) clearTimeout(revealHintTimer.current);
+    revealHintTimer.current = setTimeout(() => {
+      revealHintTimer.current = null;
+      setShowTvRevealHint(false);
+    }, 2200);
+  }, []);
+
   const schedHide = useCallback(() => {
     if (hideTimer.current) clearTimeout(hideTimer.current);
     hideTimer.current = setTimeout(() => {
-      Animated.timing(controlsOpacity, { toValue: 0, duration: 350, useNativeDriver: true }).start(() => setShowControls(false));
-    }, tvMode ? 6500 : 5000);
-  }, [tvMode]);
+      Animated.timing(controlsOpacity, {
+        toValue: 0,
+        duration: 350,
+        useNativeDriver: true,
+      }).start(() => {
+        setShowControls(false);
+        if (tvMode) showTvRevealHintBriefly();
+      });
+    }, tvMode ? 2000 : 5000);
+  }, [showTvRevealHintBriefly, tvMode]);
 
   const fadeIn = useCallback(() => {
     if (hideTimer.current) clearTimeout(hideTimer.current);
+    if (revealHintTimer.current) {
+      clearTimeout(revealHintTimer.current);
+      revealHintTimer.current = null;
+    }
+    setShowTvRevealHint(false);
     Animated.timing(controlsOpacity, { toValue: 1, duration: 200, useNativeDriver: true }).start();
     setShowControls(true);
     schedHide();
@@ -1789,6 +1813,24 @@ function ExpoRiftPlayer({
     stallRef.current = { lastPos: target, lastAt: Date.now() };
   }, [beginSeekRecovery, player, duration, fadeIn]);
   seekRef.current = seek;
+
+  /* على التلفاز يبقى التركيز على شريط التقدم هدفاً حقيقياً للريموت؛
+     السهمان يسحبان الموضع بخطوة التقديم المختارة بدلاً من نقل التركيز
+     إلى زر آخر. ندعم أرقام Android keyCode وأسماء أحداث RN معاً. */
+  const handleTvProgressKeyDown = useCallback((event: any) => {
+    if (!tvMode || !showControls) return;
+    const nativeEvent = event?.nativeEvent || {};
+    const keyCode = Number(nativeEvent.keyCode ?? nativeEvent.keycode);
+    const eventName = String(
+      nativeEvent.eventType ?? nativeEvent.key ?? nativeEvent.action ?? "",
+    ).toLowerCase();
+    const direction =
+      keyCode === 21 || eventName.includes("left") ? -1 :
+      keyCode === 22 || eventName.includes("right") ? 1 : 0;
+    if (!direction) return;
+    seek(positionRef.current + direction * (seekDurationRef.current || 10));
+    event?.preventDefault?.();
+  }, [seek, showControls, tvMode]);
 
   /* seekSilent: نفس seek لكن بدون إظهار controls (للـ double-tap والـ gestures) */
   const seekSilentRef = useRef<(s: number) => void>(() => {});
@@ -2779,6 +2821,18 @@ function ExpoRiftPlayer({
                   }}
                   {...seekBarPan.panHandlers}
                 >
+                  {tvMode && (
+                    <Pressable
+                      accessibilityRole="adjustable"
+                      accessibilityLabel="شريط تقدم الحلقة"
+                      onPress={fadeIn}
+                      onKeyDown={handleTvProgressKeyDown}
+                      style={({ focused }) => [
+                        StyleSheet.absoluteFillObject,
+                        focused && s.tvProgressFocus,
+                      ]}
+                    />
+                  )}
                   <View style={[s.progressBg, tvMode && s.tvProgressBg]} />
                   {bufferedPct > 0 && (
                     <View style={[s.bufferBar, { left: 0, width: `${bufferedPct * 100}%` as any }]} />
@@ -2919,10 +2973,12 @@ function ExpoRiftPlayer({
           onPress={fadeIn}
           style={s.tvRevealTarget}
         >
-          <View style={s.tvRevealHint}>
-            <Ionicons name="game-controller-outline" size={26} color="#c4b5fd" />
-            <Text style={s.tvRevealText}>اضغط OK لإظهار أدوات المشغل</Text>
-          </View>
+          {showTvRevealHint && (
+            <View style={s.tvRevealHint}>
+              <Ionicons name="game-controller-outline" size={26} color="#c4b5fd" />
+              <Text style={s.tvRevealText}>اضغط OK لإظهار أدوات المشغل</Text>
+            </View>
+          )}
         </Pressable>
       )}
 
@@ -3130,18 +3186,32 @@ function ExpoRiftPlayer({
       )}
 
       {/* ── أزرار تخطي المقدمة/النهاية — مستقلة تماماً عن رؤية الـ controls ── */}
-      {!tvMode && !error && !isEnded && !isLocked && (inIntroRange || inOutroRange) && (
+      {!error && !isEnded && !isLocked && (inIntroRange || inOutroRange) && (
         <View style={s.skipBtnRowFloat} pointerEvents="box-none">
           {inIntroRange && (
-            <Pressable onPress={doSkipIntro} style={s.skipPillIntro} hitSlop={8} pointerEvents="auto">
+            <Pressable
+              onPress={doSkipIntro}
+              style={[s.skipPillIntro, tvMode && s.tvSkipPill]}
+              hitSlop={8}
+              pointerEvents="auto"
+              accessibilityRole="button"
+              accessibilityLabel="تخطي المقدمة"
+            >
               <Ionicons name="play-forward" size={13} color="#92400e" />
-              <Text style={s.skipPillIntroText}>تخطي المقدمة</Text>
+              <Text style={[s.skipPillIntroText, tvMode && s.tvSkipPillText]}>تخطي المقدمة</Text>
             </Pressable>
           )}
           {inOutroRange && (
-            <Pressable onPress={doSkipOutro} style={s.skipPillOutro} hitSlop={8} pointerEvents="auto">
+            <Pressable
+              onPress={doSkipOutro}
+              style={[s.skipPillOutro, tvMode && s.tvSkipPill]}
+              hitSlop={8}
+              pointerEvents="auto"
+              accessibilityRole="button"
+              accessibilityLabel="تخطي الخاتمة"
+            >
               <Ionicons name="play-forward" size={13} color="#4c1d95" />
-              <Text style={s.skipPillOutroText}>تخطي النهاية</Text>
+              <Text style={[s.skipPillOutroText, tvMode && s.tvSkipPillText]}>تخطي النهاية</Text>
             </Pressable>
           )}
         </View>
@@ -3250,7 +3320,18 @@ const s = StyleSheet.create({
 
   /* Subtitle */
   subtitleWrap: { position: "absolute", left: 16, right: 16, alignItems: "stretch", zIndex: 8 },
-  subtitleText: { paddingHorizontal: 14, paddingVertical: 6, borderRadius: 10, textAlign: "center", lineHeight: 26, alignSelf: "center", maxWidth: "100%" },
+  subtitleText: {
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+    borderRadius: 10,
+    textAlign: "center",
+    lineHeight: 26,
+    alignSelf: "center",
+    maxWidth: "100%",
+    textShadowColor: "rgba(0,0,0,0.92)",
+    textShadowRadius: 4,
+    textShadowOffset: { width: 1, height: 1 },
+  },
 
   /* Ripples */
   rippleLeft:   { position: "absolute", left: 0, top: "10%", width: "45%", height: "80%", alignItems: "center", justifyContent: "center", zIndex: 25 },
@@ -3350,6 +3431,15 @@ const s = StyleSheet.create({
     shadowColor: "#8B5CF6", shadowOpacity: 0.40, shadowRadius: 8, elevation: 6,
   },
   skipPillOutroText: { color: "#f3f0ff", fontSize: 12, fontFamily: "Cairo_700Bold" },
+  tvSkipPill: {
+    minHeight: 58,
+    paddingHorizontal: 22,
+    paddingVertical: 14,
+    borderRadius: 16,
+    borderWidth: 2,
+    borderColor: "rgba(255,255,255,0.75)",
+  },
+  tvSkipPillText: { fontSize: 18, lineHeight: 27 },
 
   /* ── CC button in top bar ── */
   topCCBtn: { minWidth: 38 },
@@ -3481,9 +3571,9 @@ const s = StyleSheet.create({
   tvTopInfoWrap: {
     position: "absolute",
     /* RN mirrors left/right in RTL: right becomes the physical left side. */
-    right: 40,
-    top: 27,
-    width: "38%",
+    right: 20,
+    top: 22,
+    width: "34%",
     marginRight: 0,
     gap: 5,
     zIndex: 2,
@@ -3716,6 +3806,17 @@ const s = StyleSheet.create({
   /* Progress bar */
   progressWrap: { height: 34, justifyContent: "center", position: "relative", marginHorizontal: 2 },
   tvProgressWrap: { height: 42, marginHorizontal: 0 },
+  tvProgressFocus: {
+    borderWidth: 3,
+    borderColor: "#FFFFFF",
+    borderRadius: 10,
+    backgroundColor: "rgba(139,92,246,0.10)",
+    shadowColor: "#A78BFA",
+    shadowOpacity: 1,
+    shadowRadius: 12,
+    elevation: 12,
+    zIndex: 20,
+  },
   progressWrapDragging: { height: 48 },
   progressBg: { position: "absolute", left: 0, right: 0, height: 6, backgroundColor: "rgba(255,255,255,0.15)", borderRadius: 3 },
   tvProgressBg: { height: 8, borderRadius: 4 },

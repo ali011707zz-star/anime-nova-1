@@ -60,6 +60,7 @@ export const AnimeCard = React.memo(function AnimeCard({ anime, size = "sm", car
   const cardW = cardWidth ?? (size === "lg" ? 170 : size === "md" ? 145 : smallCardWidth);
   const cardH = cardW * 1.4;
   const tvMode = isTvDevice(windowWidth, windowHeight);
+  const [tvFocused, setTvFocused] = React.useState(false);
 
   const title = anime.title.english || anime.title.romaji;
   const posterUri = tvMode
@@ -73,13 +74,19 @@ export const AnimeCard = React.memo(function AnimeCard({ anime, size = "sm", car
       hasTVPreferredFocus={hasTVPreferredFocus}
       hitSlop={tvMode ? 8 : 4}
       pressRetentionOffset={12}
-      onFocus={onFocus}
+      onFocus={() => {
+        if (tvMode) setTvFocused(true);
+        onFocus?.();
+      }}
+      onBlur={() => {
+        if (tvMode) setTvFocused(false);
+      }}
       android_ripple={tvMode ? undefined : { color: "rgba(139,92,246,0.18)" }}
       style={({ pressed, focused }) => [
         styles.card,
         { width: cardW, opacity: pressed ? 0.85 : 1 },
         tvMode && styles.tvCard,
-        tvMode && tvFocusStyle(focused),
+        tvMode && tvFocusStyle(focused || tvFocused),
       ]}
     >
       <View style={[styles.imageContainer, { width: cardW, height: cardH, borderRadius: colors.radius - 4 }]}>

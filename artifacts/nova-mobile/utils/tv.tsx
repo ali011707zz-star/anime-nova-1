@@ -39,13 +39,13 @@ export function tvFocusStyle(focused: boolean) {
         // Keep focus visible without making the focused card jump or grow.
         backgroundColor: "rgba(255,255,255,0.12)",
         borderColor: "#FFFFFF",
-        borderWidth: 2,
+        borderWidth: 3,
         shadowColor: "#A78BFA",
         shadowOpacity: 1,
-        shadowRadius: 10,
-        elevation: 10,
+        shadowRadius: 14,
+        elevation: 14,
         zIndex: 100,
-        transform: [{ scale: 1.015 }],
+        transform: [{ scale: 1.025 }],
       }
     : {};
 }
