@@ -182,10 +182,10 @@ export default function AnimationsScreen() {
 
   const renderItem = ({ item }: { item: TmdbItem }) => (
     <Pressable
-      style={[s.card, { flex: 1 / gridColumns }]}
+      style={[s.card, tvMode && s.tvCard, { flex: 1 / gridColumns }]}
       onPress={() => router.push(`/animation/${type}/${item.id}`)}
     >
-      <View style={s.cardImgWrap}>
+      <View style={[s.cardImgWrap, tvMode && s.tvCardImgWrap]}>
         {item.poster_path ? (
           <Image source={{ uri: `${IMG}${item.poster_path}` }} style={s.cardImg} />
         ) : (
@@ -195,34 +195,34 @@ export default function AnimationsScreen() {
         )}
         <View style={s.cardGrad} />
         {(item.vote_average || 0) > 0 && (
-          <View style={s.scoreBadge}>
+          <View style={[s.scoreBadge, tvMode && s.tvScoreBadge]}>
             <Ionicons name="star" size={8} color="#FBBF24" />
-            <Text style={s.scoreText}>{item.vote_average!.toFixed(1)}</Text>
+            <Text style={[s.scoreText, tvMode && s.tvScoreText]}>{item.vote_average!.toFixed(1)}</Text>
           </View>
         )}
         {yearLabel(item) ? (
-          <Text style={s.yearText}>{yearLabel(item)}</Text>
+          <Text style={[s.yearText, tvMode && s.tvYearText]}>{yearLabel(item)}</Text>
         ) : null}
       </View>
-      <Text style={s.cardTitle} numberOfLines={2}>{displayTitle(item)}</Text>
+      <Text style={[s.cardTitle, tvMode && s.tvCardTitle]} numberOfLines={2}>{displayTitle(item)}</Text>
     </Pressable>
   );
 
   return (
     <View style={[s.container, { paddingTop: topPad }]}>
       {/* ── Header ── */}
-      <View style={s.header}>
-        <View style={s.headerRow}>
+      <View style={[s.header, tvMode && s.tvHeader]}>
+        <View style={[s.headerRow, tvMode && s.tvHeaderRow]}>
           <View style={{ flexDirection: "row", alignItems: "center", gap: 10, flex: 1 }}>
             <Pressable
               onPress={() => (router.canGoBack() ? router.back() : router.push("/"))}
-              style={s.iconBtn}
+              style={[s.iconBtn, tvMode && s.tvIconBtn]}
             >
               <Ionicons name="chevron-forward" size={20} color="rgba(255,255,255,0.55)" />
             </Pressable>
             <View>
-              <Text style={s.headerTitle}>رسوم متحركة</Text>
-              <Text style={s.headerSub}>
+              <Text style={[s.headerTitle, tvMode && s.tvHeaderTitle]}>رسوم متحركة</Text>
+              <Text style={[s.headerSub, tvMode && s.tvHeaderSub]}>
                 {type === "movie" ? "أفلام أنيميشن عالمية" : "مسلسلات كرتون عالمية"}
               </Text>
             </View>
@@ -230,28 +230,28 @@ export default function AnimationsScreen() {
           <View style={{ flexDirection: "row", gap: 8 }}>
             <Pressable
               onPress={() => setShowFilters(o => !o)}
-              style={[s.iconBtn, showFilters && s.iconBtnActive]}
+              style={[s.iconBtn, tvMode && s.tvIconBtn, showFilters && s.iconBtnActive]}
             >
-              <Ionicons name="options" size={18} color={showFilters ? "#c4b5fd" : "rgba(255,255,255,0.55)"} />
+              <Ionicons name="options" size={tvMode ? 20 : 18} color={showFilters ? "#c4b5fd" : "rgba(255,255,255,0.55)"} />
               {activeFilterCount > 0 && (
                 <View style={s.filterBadge}><Text style={s.filterBadgeText}>{activeFilterCount}</Text></View>
               )}
             </Pressable>
             <Pressable
               onPress={() => { setSearchOpen(o => !o); setTimeout(() => searchInput.current?.focus(), 100); }}
-              style={[s.iconBtn, searchOpen && s.iconBtnActive]}
+              style={[s.iconBtn, tvMode && s.tvIconBtn, searchOpen && s.iconBtnActive]}
             >
-              <Ionicons name="search" size={18} color={searchOpen ? "#c4b5fd" : "rgba(255,255,255,0.55)"} />
+              <Ionicons name="search" size={tvMode ? 20 : 18} color={searchOpen ? "#c4b5fd" : "rgba(255,255,255,0.55)"} />
             </Pressable>
           </View>
         </View>
 
         {/* Movie / TV tabs */}
-        <View style={s.typeTabs}>
+        <View style={[s.typeTabs, tvMode && s.tvTypeTabs]}>
           {(["movie", "tv"] as MediaType[]).map((t) => (
             <Pressable key={t} onPress={() => handleTypeChange(t)}
-              style={[s.typeTab, type === t && s.typeTabActive]}>
-              <Text style={[s.typeTabText, type === t && s.typeTabTextActive]}>
+               style={[s.typeTab, tvMode && s.tvTypeTab, type === t && s.typeTabActive]}>
+              <Text style={[s.typeTabText, tvMode && s.tvTypeTabText, type === t && s.typeTabTextActive]}>
                 {t === "movie" ? "أفلام" : "مسلسلات"}
               </Text>
             </Pressable>
@@ -260,16 +260,16 @@ export default function AnimationsScreen() {
 
         {/* Search */}
         {searchOpen && (
-          <View style={s.searchWrap}>
-            <View style={s.searchBar}>
-              <Ionicons name="search" size={16} color="rgba(255,255,255,0.3)" />
+          <View style={[s.searchWrap, tvMode && s.tvSearchWrap]}>
+            <View style={[s.searchBar, tvMode && s.tvSearchBar]}>
+              <Ionicons name="search" size={tvMode ? 18 : 16} color="rgba(255,255,255,0.3)" />
               <TextInput
                 ref={searchInput}
                 value={searchQ}
                 onChangeText={setSearchQ}
                 placeholder={type === "movie" ? "ابحث عن فيلم أنيميشن…" : "ابحث عن مسلسل أنيميشن…"}
                 placeholderTextColor="rgba(255,255,255,0.25)"
-                style={s.searchInput}
+                style={[s.searchInput, tvMode && s.tvSearchInput]}
               />
               {searchQ ? (
                 <Pressable onPress={() => { setSearchQ(""); setSearchResults([]); }}>
@@ -306,49 +306,49 @@ export default function AnimationsScreen() {
 
         {/* Filter panel */}
         {showFilters && (
-          <View style={s.filterPanel}>
-            <Text style={s.filterLabel}>ترتيب حسب</Text>
+          <View style={[s.filterPanel, tvMode && s.tvFilterPanel]}>
+            <Text style={[s.filterLabel, tvMode && s.tvFilterLabel]}>ترتيب حسب</Text>
             <ScrollView horizontal showsHorizontalScrollIndicator={false}>
               <View style={{ flexDirection: "row", gap: 8 }}>
                 {sortOptions.map(opt => (
                   <Pressable key={opt.value} onPress={() => setSort(opt.value)}
-                    style={[s.filterChip, sort === opt.value && s.filterChipActive]}>
-                    <Text style={[s.filterChipText, sort === opt.value && s.filterChipTextActive]}>{opt.label}</Text>
+                     style={[s.filterChip, tvMode && s.tvFilterChip, sort === opt.value && s.filterChipActive]}>
+                     <Text style={[s.filterChipText, tvMode && s.tvFilterChipText, sort === opt.value && s.filterChipTextActive]}>{opt.label}</Text>
                   </Pressable>
                 ))}
               </View>
             </ScrollView>
 
-            <Text style={[s.filterLabel, { marginTop: 10 }]}>السنة</Text>
+             <Text style={[s.filterLabel, tvMode && s.tvFilterLabel, { marginTop: 10 }]}>السنة</Text>
             <ScrollView horizontal showsHorizontalScrollIndicator={false}>
               <View style={{ flexDirection: "row", gap: 8 }}>
                 {YEARS.map(y => {
                   const val = y === "الكل" ? "" : y;
                   return (
                     <Pressable key={y} onPress={() => setYear(val)}
-                      style={[s.filterChip, year === val && s.filterChipActive]}>
-                      <Text style={[s.filterChipText, year === val && s.filterChipTextActive]}>{y}</Text>
+                       style={[s.filterChip, tvMode && s.tvFilterChip, year === val && s.filterChipActive]}>
+                       <Text style={[s.filterChipText, tvMode && s.tvFilterChipText, year === val && s.filterChipTextActive]}>{y}</Text>
                     </Pressable>
                   );
                 })}
               </View>
             </ScrollView>
 
-            <Text style={[s.filterLabel, { marginTop: 10 }]}>النوع</Text>
+             <Text style={[s.filterLabel, tvMode && s.tvFilterLabel, { marginTop: 10 }]}>النوع</Text>
             <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
               {genres.map(g => (
                 <Pressable key={g.id} onPress={() => setGenre(g.id)}
-                  style={[s.filterChip, genre === g.id && s.filterChipActive]}>
-                  <Text style={[s.filterChipText, genre === g.id && s.filterChipTextActive]}>{g.ar}</Text>
+                   style={[s.filterChip, tvMode && s.tvFilterChip, genre === g.id && s.filterChipActive]}>
+                   <Text style={[s.filterChipText, tvMode && s.tvFilterChipText, genre === g.id && s.filterChipTextActive]}>{g.ar}</Text>
                 </Pressable>
               ))}
             </View>
 
             {activeFilterCount > 0 && (
               <Pressable onPress={() => { setGenre(0); setSort("popularity.desc"); setYear(""); }}
-                style={s.clearFiltersBtn}>
+                 style={[s.clearFiltersBtn, tvMode && s.tvClearFiltersBtn]}>
                 <Ionicons name="close" size={14} color="rgba(252,165,165,0.8)" />
-                <Text style={s.clearFiltersText}>مسح الفلاتر ({activeFilterCount})</Text>
+                 <Text style={[s.clearFiltersText, tvMode && s.tvClearFiltersText]}>مسح الفلاتر ({activeFilterCount})</Text>
               </Pressable>
             )}
           </View>
@@ -357,11 +357,11 @@ export default function AnimationsScreen() {
 
       {/* ── Notice banner ── */}
       {!noticeDismissed && (
-        <View style={s.notice}>
+        <View style={[s.notice, tvMode && s.tvNotice]}>
           <Text style={{ fontSize: 16 }}>🙏🏽</Text>
           <View style={{ flex: 1 }}>
-            <Text style={s.noticeTitle}>تنبيه للمستخدمين</Text>
-            <Text style={s.noticeSub}>
+            <Text style={[s.noticeTitle, tvMode && s.tvNoticeTitle]}>تنبيه للمستخدمين</Text>
+            <Text style={[s.noticeSub, tvMode && s.tvNoticeSub]}>
               قد لا تتوفر بعض أعمال الأنيميشن القديمة أو النادرة حالياً بسبب محدودية المصادر 🥺
             </Text>
           </View>
@@ -394,8 +394,8 @@ export default function AnimationsScreen() {
           key={`animation-grid-${gridColumns}`}
           keyExtractor={(item, i) => `${item.id}-${i}`}
           numColumns={gridColumns}
-          contentContainerStyle={s.grid}
-          columnWrapperStyle={s.gridRow}
+           contentContainerStyle={[s.grid, tvMode && s.tvGrid]}
+           columnWrapperStyle={[s.gridRow, tvMode && s.tvGridRow]}
           showsVerticalScrollIndicator={false}
           initialNumToRender={6}
           maxToRenderPerBatch={3}
@@ -426,39 +426,63 @@ const s = StyleSheet.create({
   header: { backgroundColor: "#09090B", borderBottomWidth: 1, borderBottomColor: "rgba(255,255,255,0.06)", paddingHorizontal: 16, paddingTop: 12, paddingBottom: 10 },
   headerRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 12 },
   headerTitle: { fontSize: 22, fontFamily: "Cairo_800ExtraBold", color: "#fff" },
+  tvHeader: { paddingHorizontal: 32, paddingTop: 16, paddingBottom: 12 },
+  tvHeaderRow: { marginBottom: 8 },
+  tvHeaderTitle: { fontSize: 25, lineHeight: 34 },
+  tvHeaderSub: { fontSize: 14, lineHeight: 21 },
   headerSub: { fontSize: 11, color: "rgba(255,255,255,0.3)", fontFamily: "Cairo_400Regular" },
   iconBtn: { width: 36, height: 36, borderRadius: 12, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(255,255,255,0.06)", borderWidth: 1, borderColor: "rgba(255,255,255,0.10)" },
+  tvIconBtn: { width: 44, height: 44, borderRadius: 13 },
   iconBtnActive: { backgroundColor: "rgba(139,92,246,0.22)", borderColor: "rgba(139,92,246,0.4)" },
   filterBadge: { position: "absolute", top: -4, left: -4, width: 16, height: 16, borderRadius: 8, backgroundColor: "#8B5CF6", alignItems: "center", justifyContent: "center" },
   filterBadgeText: { fontSize: 8, color: "#fff", fontWeight: "800" },
   typeTabs: { flexDirection: "row", gap: 8, marginBottom: 10 },
   typeTab: { flex: 1, paddingVertical: 7, borderRadius: 16, alignItems: "center", backgroundColor: "rgba(255,255,255,0.06)", borderWidth: 1, borderColor: "rgba(255,255,255,0.08)" },
+  tvTypeTabs: { gap: 6, marginBottom: 8 },
+  tvTypeTab: { paddingVertical: 8, borderRadius: 13 },
   typeTabActive: { backgroundColor: "#7C3AED", borderColor: "rgba(139,92,246,0.5)" },
   typeTabText: { fontSize: 13, fontFamily: "Cairo_700Bold", color: "rgba(255,255,255,0.45)" },
+  tvTypeTabText: { fontSize: 16, lineHeight: 23 },
   typeTabTextActive: { color: "#fff" },
   searchWrap: { marginBottom: 8 },
+  tvSearchWrap: { marginBottom: 8 },
   searchBar: { flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: "rgba(255,255,255,0.06)", borderRadius: 14, borderWidth: 1, borderColor: "rgba(139,92,246,0.25)", paddingHorizontal: 12, paddingVertical: 10, marginBottom: 8 },
+  tvSearchBar: { borderRadius: 12, paddingHorizontal: 14, paddingVertical: 8, marginBottom: 6 },
   searchInput: { flex: 1, color: "#fff", fontSize: 14, fontFamily: "Cairo_400Regular", textAlign: "right" },
+  tvSearchInput: { fontSize: 16, lineHeight: 24 },
   searchDropdown: { backgroundColor: "rgba(15,12,30,0.97)", borderRadius: 16, borderWidth: 1, borderColor: "rgba(255,255,255,0.08)" },
   searchItem: { flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 14, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: "rgba(255,255,255,0.05)" },
   searchItemImg: { width: 32, height: 44, borderRadius: 8, backgroundColor: "rgba(255,255,255,0.08)" },
   searchItemTitle: { fontSize: 13, fontFamily: "Cairo_700Bold", color: "#fff" },
   searchItemYear: { fontSize: 10, color: "rgba(255,255,255,0.35)", fontFamily: "Cairo_400Regular" },
   filterPanel: { backgroundColor: "rgba(139,92,246,0.07)", borderRadius: 16, borderWidth: 1, borderColor: "rgba(139,92,246,0.18)", padding: 12, marginBottom: 8 },
+  tvFilterPanel: { borderRadius: 14, padding: 10 },
   filterLabel: { fontSize: 9, fontFamily: "Cairo_700Bold", color: "rgba(255,255,255,0.3)", marginBottom: 8, textTransform: "uppercase" },
+  tvFilterLabel: { fontSize: 12, marginBottom: 6 },
   filterChip: { paddingHorizontal: 10, paddingVertical: 5, borderRadius: 10, backgroundColor: "rgba(255,255,255,0.06)", borderWidth: 1, borderColor: "rgba(255,255,255,0.08)" },
+  tvFilterChip: { paddingHorizontal: 13, paddingVertical: 7, borderRadius: 11 },
   filterChipActive: { backgroundColor: "#7C3AED" },
   filterChipText: { fontSize: 10, fontFamily: "Cairo_700Bold", color: "rgba(255,255,255,0.40)" },
+  tvFilterChipText: { fontSize: 13, lineHeight: 19 },
   filterChipTextActive: { color: "#fff" },
   clearFiltersBtn: { flexDirection: "row", alignItems: "center", gap: 6, marginTop: 10, paddingHorizontal: 12, paddingVertical: 7, borderRadius: 12, backgroundColor: "rgba(239,68,68,0.08)", borderWidth: 1, borderColor: "rgba(239,68,68,0.16)", alignSelf: "flex-start" },
   clearFiltersText: { fontSize: 10, fontFamily: "Cairo_700Bold", color: "rgba(252,165,165,0.8)" },
+  tvClearFiltersBtn: { marginTop: 8, paddingHorizontal: 12, paddingVertical: 7 },
+  tvClearFiltersText: { fontSize: 13 },
   notice: { flexDirection: "row", alignItems: "flex-start", gap: 10, margin: 12, padding: 12, borderRadius: 16, backgroundColor: "rgba(251,191,36,0.08)", borderWidth: 1, borderColor: "rgba(251,191,36,0.20)" },
   noticeTitle: { fontSize: 12, fontFamily: "Cairo_700Bold", color: "rgba(251,191,36,0.9)", marginBottom: 3 },
   noticeSub: { fontSize: 11, color: "rgba(251,191,36,0.5)", fontFamily: "Cairo_400Regular", lineHeight: 17 },
+  tvNotice: { margin: 10, padding: 10, borderRadius: 13 },
+  tvNoticeTitle: { fontSize: 13 },
+  tvNoticeSub: { fontSize: 12, lineHeight: 18 },
   grid: { paddingHorizontal: 12, paddingTop: 12, paddingBottom: 100 },
   gridRow: { gap: 10 },
   card: { flex: 1, marginBottom: 14 },
+  tvGrid: { paddingHorizontal: 12, paddingTop: 10 },
+  tvGridRow: { gap: 10, marginBottom: 10 },
+  tvCard: { marginBottom: 10 },
   cardImgWrap: { borderRadius: 14, overflow: "hidden", aspectRatio: 2 / 3, backgroundColor: "rgba(255,255,255,0.05)" },
+  tvCardImgWrap: { borderRadius: 15 },
   cardImg: { width: "100%", height: "100%" },
   noImg: { alignItems: "center", justifyContent: "center", backgroundColor: "rgba(139,92,246,0.08)" },
   cardGrad: { ...StyleSheet.absoluteFillObject, backgroundColor: "transparent",
@@ -466,8 +490,12 @@ const s = StyleSheet.create({
   },
   scoreBadge: { position: "absolute", top: 6, left: 6, flexDirection: "row", alignItems: "center", gap: 2, backgroundColor: "rgba(0,0,0,0.72)", borderRadius: 8, paddingHorizontal: 5, paddingVertical: 3, borderWidth: 1, borderColor: "rgba(251,191,36,0.18)" },
   scoreText: { fontSize: 9, fontFamily: "Cairo_700Bold", color: "#fff" },
+  tvScoreBadge: { top: 7, left: 7, borderRadius: 8, paddingHorizontal: 6, paddingVertical: 3 },
+  tvScoreText: { fontSize: 11 },
   yearText: { position: "absolute", bottom: 6, left: 6, fontSize: 8, color: "rgba(255,255,255,0.35)", fontFamily: "Cairo_400Regular" },
+  tvYearText: { bottom: 7, left: 7, fontSize: 10 },
   cardTitle: { marginTop: 6, fontSize: 10.5, fontFamily: "Cairo_700Bold", color: "rgba(255,255,255,0.80)", lineHeight: 15, textAlign: "right" },
+  tvCardTitle: { marginTop: 5, fontSize: 15, lineHeight: 22 },
   center: { flex: 1, alignItems: "center", justifyContent: "center", gap: 12 },
   emptyText: { fontSize: 13, color: "rgba(255,255,255,0.3)", fontFamily: "Cairo_400Regular" },
   emptyTitle: { fontSize: 15, fontFamily: "Cairo_700Bold", color: "rgba(255,255,255,0.4)" },

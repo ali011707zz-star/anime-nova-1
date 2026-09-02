@@ -19,8 +19,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { getBaseUrl } from "@/utils/api";
-import { isTvDevice, TvPressable, useTvMetrics } from "@/utils/tv";
-import { RiftPlayer as NativeRiftPlayer } from "./RiftPlayerNative";
+import { TvPressable, useTvMetrics } from "@/utils/tv";
 
 const { width: W, height: H } = Dimensions.get("window");
 // Keep the existing player controls in one place while making every control
@@ -134,33 +133,6 @@ type Props = {
  * stale/missing native module. Keep that failure local to the watch screen so
  * the app shell and the rest of the TV navigation remain usable.
  */
-class NativePlayerGuard extends React.Component<
-  { children: React.ReactNode; onError?: () => void },
-  { failed: boolean }
-> {
-  state = { failed: false };
-
-  static getDerivedStateFromError() {
-    return { failed: true };
-  }
-
-  componentDidCatch(error: Error) {
-    console.warn("[RiftPlayer] TV native player render failed", error);
-    this.props.onError?.();
-  }
-
-  render() {
-    if (this.state.failed) {
-      return (
-        <View style={{ flex: 1, backgroundColor: "#09090b", alignItems: "center", justifyContent: "center" }}>
-          <Text style={{ color: "rgba(255,255,255,0.72)", fontSize: 16 }}>تعذّر فتح المشغّل</Text>
-        </View>
-      );
-    }
-    return this.props.children;
-  }
-}
-
 /* هذه المصادر لا يجب أن تظهر معها ترجمة تلقائية أو ترجمة محفوظة من مصدر آخر. */
 const SUBTITLE_DISABLED_SITES = new Set([
   "animeify", "af",
@@ -438,17 +410,8 @@ function SpinRing({ size = 52 }: { size?: number }) {
 
 /* ─── Main Component ─── */
 export function RiftPlayer(props: Props) {
-  // Android TV uses the direct Media3 surface to avoid expo-video's
-  // TextureView composition path, which can leave a differently colored
-  // region after the TV rotates into landscape. Phones keep the existing
-  // expo-video implementation and its capture-friendly TextureView.
-  if (isTvDevice()) {
-    return (
-      <NativePlayerGuard onError={props.onError}>
-        <NativeRiftPlayer {...props} />
-      </NativePlayerGuard>
-    );
-  }
+  // TV reuses the same stable player surface as phones. TV-specific branches
+  // below only adjust sizing and remote-friendly controls.
   return <ExpoRiftPlayer {...props} />;
 }
 
@@ -539,9 +502,9 @@ function ExpoRiftPlayer({
   const [isEnded, setIsEnded]         = useState(false);
 
   /* ─── UI state ─── */
-  // Android TV uses expo-video's native controls. Keep the touch-oriented
-  // overlay disabled there so D-pad playback stays light and predictable.
-  const [showControls, setShowControls] = useState(!tvMode);
+  // Keep the normal overlay available on TV; its controls are enlarged below
+  // and remain D-pad focusable through TvPressable.
+  const [showControls, setShowControls] = useState(true);
   const [showSpeedSheet, setShowSpeedSheet] = useState(false);
   const [showViewSheet, setShowViewSheet] = useState(false);
   const [showSubSheet, setShowSubSheet]   = useState(false);
@@ -1784,11 +1747,12 @@ function ExpoRiftPlayer({
 
   /* ─── Controls show/hide ─── */
   const schedHide = useCallback(() => {
+    if (tvMode) return;
     if (hideTimer.current) clearTimeout(hideTimer.current);
     hideTimer.current = setTimeout(() => {
       Animated.timing(controlsOpacity, { toValue: 0, duration: 350, useNativeDriver: true }).start(() => setShowControls(false));
     }, 5000);
-  }, []);
+  }, [tvMode]);
 
   const fadeIn = useCallback(() => {
     if (hideTimer.current) clearTimeout(hideTimer.current);
@@ -2300,19 +2264,17 @@ function ExpoRiftPlayer({
       <VideoView
         player={player}
         style={tvMode ? s.tvVideo : s.video}
-        nativeControls={tvMode}
+        nativeControls={false}
         contentFit={contentFit}
-        /* Android SurfaceView is not included by react-native-view-shot and
-           produced a black saved image. The TV path is handled by the
-           direct Media3 player above, so this capture-friendly surface remains
-           phone-only. */
+        /* TextureView keeps the shared surface capture-friendly and avoids
+           maintaining a second TV-only native player implementation. */
         surfaceType={Platform.OS === "android" ? "textureView" : undefined}
       />
 
       {/* Smooth first-frame handoff instead of a sudden black jump. */}
-      {buffering && !tvMode && position <= 0.25 && !error && !isAutoCycling && showControls && (
+      {buffering && position <= 0.25 && !error && !isAutoCycling && showControls && (
         <View style={s.entryLoadingOverlay} pointerEvents="none">
-          <SpinRing size={42} />
+          <SpinRing size={tvMode ? 54 : 42} />
           <Text style={s.entryLoadingText}>جارٍ فتح الحلقة…</Text>
         </View>
       )}
@@ -2616,7 +2578,7 @@ function ExpoRiftPlayer({
       ════════════════════════════════════════ */}
 
 
-      {!tvMode && showControls && !error && !isEnded && !isLocked && (
+      {showControls && !error && !isEnded && !isLocked && (
         <Animated.View
           style={[StyleSheet.absoluteFill, { opacity: controlsOpacity, zIndex: 10, flexDirection: "column" }]}
           pointerEvents="box-none"
@@ -2628,24 +2590,24 @@ function ExpoRiftPlayer({
             // نحل الترتيب فقط (لا نغير flexDirection)
             const nativeRTL = Platform.OS !== "web" && I18nManager.isRTL;
             const infoBlock = (
-              <View style={[s.topInfoWrap, nativeRTL && { alignItems: "flex-end" }]}>
+              <View style={[s.topInfoWrap, tvMode && s.tvTopInfoWrap, nativeRTL && !tvMode && { alignItems: "flex-end" }]}>
                 {title ? (
-                  <Text style={s.topInfoTitle} numberOfLines={1}>{title}</Text>
+                  <Text style={[s.topInfoTitle, tvMode && s.tvTopInfoTitle]} numberOfLines={1}>{title}</Text>
                 ) : null}
                 <View style={[s.topInfoRow, nativeRTL && { flexDirection: "row-reverse" }]}>
                   {episode != null && (
-                    <View style={s.topEpBadge}>
-                      <Text style={s.topEpText}>الحلقة {episode}</Text>
+                      <View style={[s.topEpBadge, tvMode && s.tvTopEpBadge]}>
+                        <Text style={[s.topEpText, tvMode && s.tvTopEpText]}>الحلقة {episode}</Text>
                     </View>
                   )}
                   {currentSrc?.quality ? (
-                    <View style={s.topQualityBadge}>
-                      <Text style={s.topQualityText}>{currentSrc.quality}</Text>
+                      <View style={[s.topQualityBadge, tvMode && s.tvTopQualityBadge]}>
+                        <Text style={[s.topQualityText, tvMode && s.tvTopQualityText]}>{currentSrc.quality}</Text>
                     </View>
                   ) : null}
                 </View>
                 {episodeTitle ? (
-                  <Text style={s.topEpTitle} numberOfLines={1}>{episodeTitle}</Text>
+                    <Text style={[s.topEpTitle, tvMode && s.tvTopEpTitle]} numberOfLines={1}>{episodeTitle}</Text>
                 ) : null}
                 {autoSubSource ? (
                   <View style={[s.autoSubBadge, nativeRTL && { alignSelf: "flex-end" }]}>
@@ -2708,7 +2670,7 @@ function ExpoRiftPlayer({
             return (
               <LinearGradient
                 colors={["rgba(0,0,0,0.82)", "transparent"]}
-                style={[s.topBar, { paddingTop: Platform.OS === "web" ? 12 : insets.top + 6 }]}
+                style={[s.topBar, tvMode && s.tvTopBar, { paddingTop: Platform.OS === "web" ? 12 : insets.top + 6 }]}
               >
                 {/* RTL: مجموعة الأزرار أولاً (تظهر يميناً)، معلومات ثانياً (تظهر يساراً) */}
                 {nativeRTL ? <>{btnsBlock}{infoBlock}</> : <>{infoBlock}{btnsBlock}</>}
@@ -2717,21 +2679,21 @@ function ExpoRiftPlayer({
           })()}
 
           {/* ════ CENTER ════ */}
-          <View style={s.centerOverlay} pointerEvents="box-none">
+          <View style={[s.centerOverlay, tvMode && s.tvCenterOverlay]} pointerEvents="box-none">
             {isPortrait ? (
               /* وضع عمودي: أزرار التخطي + التشغيل */
               <View style={s.centerPortraitRow}>
                 {/* زر التخطي للأمام — الأول في JSX → يظهر على اليمين في RTL */}
                 <View style={s.controlButtonSlot}>
-                  <Pressable onPress={() => seek(positionRef.current + 10)} style={s.centerSeekBtn} hitSlop={14}>
-                    <Ionicons name="play-forward" size={24} color="#fff" />
+                  <Pressable onPress={() => seek(positionRef.current + 10)} style={[s.centerSeekBtn, tvMode && s.tvCenterSeekBtn]} hitSlop={14}>
+                    <Ionicons name="play-forward" size={tvMode ? 30 : 24} color="#fff" />
                   </Pressable>
                   <Text style={s.controlButtonLabel}>10</Text>
                 </View>
                 {/* زر المنتصف: play/pause/spinner */}
                 <View style={s.controlButtonSlot}>
                   {!isPlaying && !buffering && <PulseRing />}
-                  <Pressable onPress={togglePlay} style={s.centerPlayBtn} hitSlop={16}>
+                  <Pressable onPress={togglePlay} style={[s.centerPlayBtn, tvMode && s.tvCenterPlayBtn]} hitSlop={16}>
                     {buffering && !error
                       ? <ActivityIndicator size={32} color="#fff" />
                       : <Ionicons
@@ -2743,8 +2705,8 @@ function ExpoRiftPlayer({
                 </View>
                 {/* زر الرجوع — الأخير في JSX → يظهر على اليسار في RTL */}
                 <View style={s.controlButtonSlot}>
-                  <Pressable onPress={() => seek(positionRef.current - 10)} style={s.centerSeekBtn} hitSlop={14}>
-                    <Ionicons name="play-back" size={24} color="#fff" />
+                  <Pressable onPress={() => seek(positionRef.current - 10)} style={[s.centerSeekBtn, tvMode && s.tvCenterSeekBtn]} hitSlop={14}>
+                    <Ionicons name="play-back" size={tvMode ? 30 : 24} color="#fff" />
                   </Pressable>
                   <Text style={s.controlButtonLabel}>10</Text>
                 </View>
@@ -2754,7 +2716,7 @@ function ExpoRiftPlayer({
               <View style={s.centerLandscapeWrap}>
                 <View style={s.controlButtonSlot}>
                   {!isPlaying && !buffering && <PulseRing />}
-                  <Pressable onPress={togglePlay} style={s.centerPlayBtn} hitSlop={16}>
+                  <Pressable onPress={togglePlay} style={[s.centerPlayBtn, tvMode && s.tvCenterPlayBtn]} hitSlop={16}>
                     {buffering && !error
                       ? <ActivityIndicator size={32} color="#fff" />
                       : <Ionicons
@@ -2771,14 +2733,14 @@ function ExpoRiftPlayer({
           {/* ════ BOTTOM SECTION ════ */}
           <LinearGradient
             colors={["transparent", "rgba(0,0,0,0.60)", "rgba(0,0,0,0.96)"]}
-            style={[s.bottomSection, { paddingBottom: Platform.OS === "web" ? 16 : insets.bottom + 12 }]}
+            style={[s.bottomSection, tvMode && s.tvBottomSection, { paddingBottom: Platform.OS === "web" ? 16 : insets.bottom + 12 }]}
           >
             {/* أزرار التخطي انتقلت إلى overlay مستقل خارج showControls */}
 
             {/* الوقت — الوقت الحالي أقصى اليسار الفيزيائي، المدة الكلية أقصى اليمين الفيزيائي */}
             <View style={{ position: "relative", height: 18, marginBottom: 2 }}>
-              <Text style={[s.timeText, { position: "absolute", [_nRTL ? "right" : "left"]: 0 }]}>{fmtTime(position)}</Text>
-              <Text style={[s.timeText, { position: "absolute", [_nRTL ? "left" : "right"]: 0, opacity: 0.45 }]}>{fmtTime(duration)}</Text>
+              <Text style={[s.timeText, tvMode && s.tvTimeText, { position: "absolute", [_nRTL ? "right" : "left"]: 0 }]}>{fmtTime(position)}</Text>
+              <Text style={[s.timeText, tvMode && s.tvTimeText, { position: "absolute", [_nRTL ? "left" : "right"]: 0, opacity: 0.45 }]}>{fmtTime(duration)}</Text>
             </View>
 
             {/* شريط التقدم — يسار=بداية، يمين=نهاية (LTR دائماً، المعيار العالمي لمشغلات الفيديو)
@@ -2793,7 +2755,7 @@ function ExpoRiftPlayer({
               return (
                 <View
                   ref={barRef}
-                  style={[s.progressWrap, isDragging && s.progressWrapDragging,
+                  style={[s.progressWrap, tvMode && s.tvProgressWrap, isDragging && s.progressWrapDragging,
                     _nRTL && { transform: [{ scaleX: -1 }] },
                   ]}
                   onLayout={(e) => {
@@ -2805,7 +2767,7 @@ function ExpoRiftPlayer({
                   }}
                   {...seekBarPan.panHandlers}
                 >
-                  <View style={s.progressBg} />
+                  <View style={[s.progressBg, tvMode && s.tvProgressBg]} />
                   {bufferedPct > 0 && (
                     <View style={[s.bufferBar, { left: 0, width: `${bufferedPct * 100}%` as any }]} />
                   )}
@@ -2825,10 +2787,10 @@ function ExpoRiftPlayer({
                     colors={["#6D28D9", "#8B5CF6", "#a78bfa"]}
                     start={_nRTL ? { x: 1, y: 0 } : { x: 0, y: 0 }}
                     end={_nRTL ? { x: 0, y: 0 } : { x: 1, y: 0 }}
-                    style={[s.progressFill, { left: 0, width: `${fillPct}%` as any }]}
+                    style={[s.progressFill, tvMode && s.tvProgressFill, { left: 0, width: `${fillPct}%` as any }]}
                   />
                   <View style={[
-                    s.thumb,
+                    s.thumb, tvMode && s.tvThumb,
                     { left: `${thumbPct}%` as any },
                     isDragging && s.thumbDragging,
                   ]} />
@@ -2844,7 +2806,7 @@ function ExpoRiftPlayer({
             })()}
 
             {/* ── صف أزرار التحكم السفلي ── */}
-            <View style={s.bottomCtrlRow}>
+            <View style={[s.bottomCtrlRow, tvMode && s.tvBottomCtrlRow]}>
 
               {/* يسار: قفل + ملء شاشة */}
              <View style={s.bottomSide}>
@@ -2882,24 +2844,24 @@ function ExpoRiftPlayer({
                </View>
 
               {/* وسط: تخطي + تشغيل (وضع أفقي فقط) — "10" خارج الدائرة للمحاذاة الصحيحة */}
-              <View style={s.bottomCenter}>
+              <View style={[s.bottomCenter, tvMode && s.tvBottomCenter]}>
                 {!isPortrait && (
                   <View style={s.controlButtonSlot}>
-                    <Pressable onPress={() => seek(positionRef.current + 10)} style={s.seekCtrlBtn} hitSlop={10}>
-                      <Ionicons name="play-forward" size={17} color="rgba(255,255,255,0.90)" />
+                    <Pressable onPress={() => seek(positionRef.current + 10)} style={[s.seekCtrlBtn, tvMode && s.tvSeekCtrlBtn]} hitSlop={10}>
+                      <Ionicons name="play-forward" size={tvMode ? 24 : 17} color="rgba(255,255,255,0.90)" />
                     </Pressable>
                     <Text style={s.controlButtonLabel}>10</Text>
                   </View>
                 )}
                 <View style={s.controlButtonSlot}>
-                  <Pressable onPress={togglePlay} style={s.bottomPlayBtn} hitSlop={10}>
-                    <Ionicons name={isPlaying ? "pause" : "play"} size={23} color="#fff" style={isPlaying ? undefined : { transform: [{ translateX: 2 }] }} />
+                  <Pressable onPress={togglePlay} style={[s.bottomPlayBtn, tvMode && s.tvBottomPlayBtn]} hitSlop={10}>
+                    <Ionicons name={isPlaying ? "pause" : "play"} size={tvMode ? 30 : 23} color="#fff" style={isPlaying ? undefined : { transform: [{ translateX: 2 }] }} />
                   </Pressable>
                 </View>
                 {!isPortrait && (
                   <View style={s.controlButtonSlot}>
-                    <Pressable onPress={() => seek(positionRef.current - 10)} style={s.seekCtrlBtn} hitSlop={10}>
-                      <Ionicons name="play-back" size={17} color="rgba(255,255,255,0.90)" />
+                    <Pressable onPress={() => seek(positionRef.current - 10)} style={[s.seekCtrlBtn, tvMode && s.tvSeekCtrlBtn]} hitSlop={10}>
+                      <Ionicons name="play-back" size={tvMode ? 24 : 17} color="rgba(255,255,255,0.90)" />
                     </Pressable>
                     <Text style={s.controlButtonLabel}>10</Text>
                   </View>
@@ -2930,8 +2892,8 @@ function ExpoRiftPlayer({
                       ))}
                     </View>
                   )}
-                  <Pressable onPress={() => { setShowSpeedMenu(v => !v); setShowFitMenu(false); fadeIn(); }} style={[s.ctrlIconBtn, s.ctrlSpeedBtn, showSpeedMenu && s.ctrlIconBtnActive]} hitSlop={10}>
-                    <Text style={[s.speedLabel, speed !== 1 && s.speedLabelActive]}>{speed}x</Text>
+                  <Pressable onPress={() => { setShowSpeedMenu(v => !v); setShowFitMenu(false); fadeIn(); }} style={[s.ctrlIconBtn, s.ctrlSpeedBtn, tvMode && s.tvCtrlIconBtn, showSpeedMenu && s.ctrlIconBtnActive]} hitSlop={10}>
+                    <Text style={[s.speedLabel, tvMode && s.tvSpeedLabel, speed !== 1 && s.speedLabelActive]}>{speed}x</Text>
                   </Pressable>
                 </View>
               </View>
@@ -3471,15 +3433,30 @@ const s = StyleSheet.create({
     paddingHorizontal: 10, paddingBottom: 12,
     flexDirection: "row", alignItems: "center", justifyContent: "space-between",
   },
+  tvTopBar: {
+    minHeight: 112,
+    paddingHorizontal: 48,
+    paddingBottom: 20,
+  },
   /* معلومات الأنمي — أقصى اليسار العلوي، حجم صغير لعدم التداخل */
   topInfoWrap: {
     flexShrink: 1, maxWidth: "58%", flexDirection: "column", gap: 2, marginRight: 4,
     alignItems: "flex-start",
   },
+  tvTopInfoWrap: {
+    position: "absolute",
+    left: 48,
+    top: 30,
+    maxWidth: "52%",
+    marginRight: 0,
+    gap: 5,
+    zIndex: 2,
+  },
   topInfoTitle: {
     color: "rgba(255,255,255,0.90)", fontSize: 10, fontFamily: "Cairo_700Bold",
     textShadowColor: "rgba(0,0,0,0.85)", textShadowRadius: 5, textShadowOffset: { width: 0, height: 1 },
   },
+  tvTopInfoTitle: { fontSize: 20 },
   topInfoRow: {
     flexDirection: "row", alignItems: "center", gap: 4, flexWrap: "nowrap",
   },
@@ -3502,6 +3479,11 @@ const s = StyleSheet.create({
     maxWidth: 180,
     textShadowColor: "rgba(0,0,0,0.80)", textShadowRadius: 4, textShadowOffset: { width: 0, height: 1 },
   },
+  tvTopEpBadge: { paddingHorizontal: 9, paddingVertical: 4, borderRadius: 8 },
+  tvTopEpText: { fontSize: 15 },
+  tvTopQualityBadge: { paddingHorizontal: 9, paddingVertical: 4, borderRadius: 8 },
+  tvTopQualityText: { fontSize: 14 },
+  tvTopEpTitle: { maxWidth: 420, fontSize: 15 },
   autoSubBadge: {
     marginTop: 3, alignSelf: "flex-start",
     paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6,
@@ -3538,6 +3520,7 @@ const s = StyleSheet.create({
 
   /* ── Center overlay ── */
   centerOverlay: { flex: 1, alignItems: "center", justifyContent: "center", paddingTop: 60 },
+  tvCenterOverlay: { paddingTop: 30 },
   centerLandscapeWrap: { alignItems: "center" },
   centerPortraitRow: { flexDirection: "row", alignItems: "center", gap: 28 },
   controlButtonSlot: { height: 72, justifyContent: "center", alignItems: "center" },
@@ -3547,6 +3530,7 @@ const s = StyleSheet.create({
     backgroundColor: "rgba(0,0,0,0.38)", borderWidth: 1, borderColor: "rgba(255,255,255,0.20)",
     alignItems: "center", justifyContent: "center", gap: 3,
   },
+  tvCenterSeekBtn: { width: 78, height: 78, borderRadius: 39 },
   centerSeekLabel: { color: "rgba(255,255,255,0.80)", fontSize: 11, fontFamily: "Cairo_700Bold", lineHeight: 13 },
   centerPlayBtn: {
     width: 74, height: 74, borderRadius: 37,
@@ -3555,17 +3539,21 @@ const s = StyleSheet.create({
     alignItems: "center", justifyContent: "center",
     shadowColor: "#8B5CF6", shadowOpacity: 0.75, shadowRadius: 24, elevation: 16,
   },
+  tvCenterPlayBtn: { width: 104, height: 104, borderRadius: 52 },
 
   /* ── Bottom section ── */
   bottomSection: { paddingHorizontal: 16, paddingTop: 20, gap: 5 },
+  tvBottomSection: { paddingHorizontal: 48, paddingTop: 24, gap: 8 },
 
   /* ── Bottom controls row ── */
   bottomCtrlRow: {
     flexDirection: "row", alignItems: "center", justifyContent: "space-between",
     marginTop: 4, marginBottom: 2,
   },
+  tvBottomCtrlRow: { marginTop: 8, marginBottom: 4 },
   bottomSide: { flex: 1, flexDirection: "row", alignItems: "center", gap: 8 },
   bottomCenter: { flexDirection: "row", alignItems: "center", gap: 14 },
+  tvBottomCenter: { gap: 24 },
 
   /* ── Seek buttons (in bottom row, landscape) ── */
   seekCtrlBtn: {
@@ -3573,6 +3561,7 @@ const s = StyleSheet.create({
     backgroundColor: "rgba(255,255,255,0.09)", borderWidth: 1, borderColor: "rgba(255,255,255,0.18)",
     alignItems: "center", justifyContent: "center", gap: 2,
   },
+  tvSeekCtrlBtn: { width: 64, height: 64, borderRadius: 32 },
   seekCtrlLabel: { color: "rgba(255,255,255,0.70)", fontSize: 9, fontFamily: "Cairo_700Bold", lineHeight: 11 },
 
   /* ── Bottom play button ── */
@@ -3583,6 +3572,7 @@ const s = StyleSheet.create({
     alignItems: "center", justifyContent: "center",
     shadowColor: "#8B5CF6", shadowOpacity: 0.65, shadowRadius: 18, elevation: 12,
   },
+  tvBottomPlayBtn: { width: 64, height: 64, borderRadius: 32 },
 
   /* ── Icon control buttons ── */
   ctrlIconBtn: {
@@ -3590,10 +3580,12 @@ const s = StyleSheet.create({
     backgroundColor: "rgba(255,255,255,0.09)", borderWidth: 1, borderColor: "rgba(255,255,255,0.15)",
     alignItems: "center", justifyContent: "center",
   },
+  tvCtrlIconBtn: { width: 52, height: 52, borderRadius: 16 },
   ctrlIconBtnActive: { backgroundColor: "rgba(139,92,246,0.28)", borderColor: "rgba(167,139,250,0.50)" },
   ctrlIconBtnMuted:  { backgroundColor: "rgba(239,68,68,0.14)", borderColor: "rgba(239,68,68,0.30)" },
   ctrlSpeedBtn: { paddingHorizontal: 4, minWidth: 42 },
   speedLabel: { color: "rgba(255,255,255,0.75)", fontSize: 12, fontFamily: "Cairo_700Bold" },
+  tvSpeedLabel: { fontSize: 17 },
   speedLabelActive: { color: "#c4b5fd" },
 
   /* ── Dropdown menus ── */
@@ -3642,14 +3634,19 @@ const s = StyleSheet.create({
   bottomBar: { paddingHorizontal: 16, paddingTop: 28, gap: 8 },
   timeRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 2 },
   timeText: { color: "rgba(255,255,255,0.75)", fontSize: 11, fontFamily: "Cairo_400Regular", minWidth: 40, textAlign: "center" },
+  tvTimeText: { fontSize: 14, minWidth: 54 },
 
   /* Progress bar */
   progressWrap: { height: 34, justifyContent: "center", position: "relative", marginHorizontal: 2 },
+  tvProgressWrap: { height: 42, marginHorizontal: 0 },
   progressWrapDragging: { height: 48 },
   progressBg: { position: "absolute", left: 0, right: 0, height: 6, backgroundColor: "rgba(255,255,255,0.15)", borderRadius: 3 },
+  tvProgressBg: { height: 8, borderRadius: 4 },
   skipMarker: { position: "absolute", height: 4, backgroundColor: "rgba(250,204,21,0.80)", borderRadius: 2, top: "50%", marginTop: -2, zIndex: 2 },
   progressFill: { position: "absolute", left: 0, height: 6, backgroundColor: "#8B5CF6", borderRadius: 3, top: "50%", marginTop: -3, zIndex: 3 },
+  tvProgressFill: { height: 8, marginTop: -4, borderRadius: 4 },
   thumb: { position: "absolute", top: "50%", width: 18, height: 18, borderRadius: 9, backgroundColor: "#fff", marginLeft: -9, marginTop: -9, shadowColor: "#8B5CF6", shadowOpacity: 0.5, shadowRadius: 6, elevation: 4, zIndex: 4 },
+  tvThumb: { width: 24, height: 24, borderRadius: 12, marginLeft: -12, marginTop: -12 },
   thumbDragging: { width: 26, height: 26, borderRadius: 13, marginLeft: -13, marginTop: -13, backgroundColor: "#c4b5fd", shadowColor: "#8B5CF6", shadowOpacity: 1, shadowRadius: 14, elevation: 8 },
   dragTooltip: { position: "absolute", bottom: "100%", marginBottom: 6, backgroundColor: "rgba(10,6,30,0.95)", borderRadius: 10, paddingHorizontal: 10, paddingVertical: 5, borderWidth: 1, borderColor: "rgba(139,92,246,0.40)", zIndex: 10 },
   dragTooltipText: { color: "#fff", fontSize: 13, fontFamily: "Cairo_700Bold" },
