@@ -14,7 +14,7 @@ import { VolumeManager } from "../lib/volume-manager";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator, Alert, Animated, Dimensions, Easing, I18nManager, Linking, Platform,
-  BackHandler, PanResponder, ScrollView, StyleSheet, Text, View,
+  BackHandler, PanResponder, ScrollView, StyleSheet, Text, View, useTVEventHandler,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -471,6 +471,9 @@ function ExpoRiftPlayer({
   const isLocalPlayback = playableSources.length > 0
     && playableSources.every(source => /^(?:file|content):\/\//i.test(source.url));
   const subtitlesDisabled = subtitlesDisabledForSite(currentSrc?.site);
+  const subtitleShadowOnly = new Set(["kawaii", "kw", "megaplay", "mp"]).has(
+    String(currentSrc?.site || "").trim().toLowerCase(),
+  );
   const aliveRef                    = useRef(true);
   const terminalErrorRef            = useRef(false);
   /* switchGenerationRef: يُزاد عند كل استدعاء switchSource. أحداث player.replace()
@@ -1786,6 +1789,35 @@ function ExpoRiftPlayer({
     schedHide();
   }, [schedHide]);
 
+  /* أي حركة D-pad تعني أن المستخدم ما زال يتنقل بين أدوات المشغل.
+     أعد تشغيل مؤقت الإخفاء عند كل حركة، حتى يبدأ العد بعد توقفه فعلياً
+     بدلاً من اختفاء الأزرار أثناء الوصول إلى الخيار المطلوب. */
+  const keepTvControlsVisible = useCallback(() => {
+    if (!tvMode) return;
+    if (!showControls) {
+      fadeIn();
+      return;
+    }
+    schedHide();
+  }, [fadeIn, schedHide, showControls, tvMode]);
+
+  useTVEventHandler(useCallback((event: any) => {
+    if (!tvMode) return;
+    const eventName = String(
+      event?.eventType ?? event?.key ?? event?.action ?? "",
+    ).toLowerCase();
+    if (
+      eventName.includes("up") ||
+      eventName.includes("down") ||
+      eventName.includes("left") ||
+      eventName.includes("right") ||
+      eventName.includes("select") ||
+      eventName.includes("playpause")
+    ) {
+      keepTvControlsVisible();
+    }
+  }, [keepTvControlsVisible, tvMode]));
+
   useEffect(() => {
     fadeIn();
     return () => { if (hideTimer.current) clearTimeout(hideTimer.current); };
@@ -2346,11 +2378,13 @@ function ExpoRiftPlayer({
                 fontSize: subSettings.fontSize,
                 color: subSettings.color,
                 fontWeight: subSettings.extraBold ? "900" : subSettings.bold ? "700" : "400",
-                backgroundColor: subSettings.bgOpacity > 0
+                backgroundColor: !subtitleShadowOnly && subSettings.bgOpacity > 0
                   ? `rgba(0,0,0,${subSettings.bgOpacity})`
                   : "transparent",
-                textShadowColor: subSettings.bgOpacity === 0 ? "rgba(0,0,0,0.95)" : "transparent",
-                textShadowRadius: subSettings.bgOpacity === 0 ? 8 : 0,
+                textShadowColor: subtitleShadowOnly || subSettings.bgOpacity === 0
+                  ? "rgba(0,0,0,0.90)"
+                  : "transparent",
+                textShadowRadius: subtitleShadowOnly ? 3 : subSettings.bgOpacity === 0 ? 8 : 0,
                 textShadowOffset: { width: 0, height: 1 },
               },
             ]}>
