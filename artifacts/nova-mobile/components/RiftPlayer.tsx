@@ -14,7 +14,7 @@ import { VolumeManager } from "../lib/volume-manager";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator, Alert, Animated, Dimensions, Easing, I18nManager, Linking, Platform,
-  BackHandler, PanResponder, ScrollView, StyleSheet, Text, View, useTVEventHandler,
+  BackHandler, PanResponder, ScrollView, StyleSheet, Text, View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -1801,22 +1801,21 @@ function ExpoRiftPlayer({
     schedHide();
   }, [fadeIn, schedHide, showControls, tvMode]);
 
-  useTVEventHandler(useCallback((event: any) => {
-    if (!tvMode) return;
-    const eventName = String(
-      event?.eventType ?? event?.key ?? event?.action ?? "",
-    ).toLowerCase();
-    if (
-      eventName.includes("up") ||
-      eventName.includes("down") ||
-      eventName.includes("left") ||
-      eventName.includes("right") ||
-      eventName.includes("select") ||
-      eventName.includes("playpause")
-    ) {
-      keepTvControlsVisible();
-    }
-  }, [keepTvControlsVisible, tvMode]));
+  /* لا نستخدم useTVEventHandler هنا: بعض إصدارات Android TV/Expo تبني
+     الشاشة بنجاح لكن تفشل أثناء تركيب هذا المستمع native. أحداث التركيز
+     التي تمر عبر TvPressable تكفي لإعادة ضبط المؤقت بدون كسر شاشة المشغل. */
+  const Pressable = useCallback((props: React.ComponentProps<typeof TvPressable>) => {
+    const { onFocus, ...pressableProps } = props;
+    return (
+      <TvPressable
+        {...pressableProps}
+        onFocus={(event: any) => {
+          keepTvControlsVisible();
+          onFocus?.(event);
+        }}
+      />
+    );
+  }, [keepTvControlsVisible]);
 
   useEffect(() => {
     fadeIn();
