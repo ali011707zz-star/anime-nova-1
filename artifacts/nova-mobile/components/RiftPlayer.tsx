@@ -3480,7 +3480,8 @@ const s = StyleSheet.create({
   },
   tvTopInfoWrap: {
     position: "absolute",
-    left: 40,
+    /* RN mirrors left/right in RTL: right becomes the physical left side. */
+    right: 40,
     top: 27,
     width: "38%",
     marginRight: 0,
@@ -3530,7 +3531,9 @@ const s = StyleSheet.create({
   topRightRow: { flexDirection: "row", alignItems: "center", gap: 5 },
   tvTopRightRow: {
     position: "absolute",
-    right: 40,
+    /* Use left in RTL so RN places the controls at the physical right,
+       matching the phone player instead of mirroring them to the left. */
+    left: 40,
     top: 22,
     gap: 10,
     zIndex: 4,
