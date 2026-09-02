@@ -115,3 +115,4 @@
 - [Source health controls](source-health-controls.md) — provider waves must use deferred jobs; deadline signals, single-flight dedupe, and short circuit cooldowns protect the VPS.
 - [SSE stream benchmarking](sse-stream-benchmarking.md) — read SSE incrementally; large client reads can hide progressive rows and misreport first-result latency.
 - [Anime Slayer performance reference](anime-slayer-performance-reference.md) — المرجع يستخدم RecyclerView/Paging وGlide بكاش الذاكرة/القرص وموارد land/sw600dp، لا تمديد الهاتف فقط.
+- [Android TV player surface reset](tv-player-surface-reset.md) — stale TextureView transforms after TV layout changes can split video colors; recreate the opaque surface while preserving the ExoPlayer.
