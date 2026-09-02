@@ -47,6 +47,7 @@ class NovaMedia3View(
   private var lastCommandSequence = 0L
   private var attached = false
   private var shouldAutoPlay = true
+  private var playerGeneration = 0L
   private var surfaceResetPending = false
   private var surfacePrimed = false
   private var lastMeasuredWidth = 0
@@ -285,6 +286,7 @@ class NovaMedia3View(
       .setLoadControl(loadControl)
       .build()
     exoPlayer = player
+    val generation = playerGeneration
     playerView.player = player
     player.videoScalingMode = C.VIDEO_SCALING_MODE_SCALE_TO_FIT
     if (!surfacePrimed && width > 0 && height > 0) {
@@ -292,6 +294,7 @@ class NovaMedia3View(
     }
     player.addListener(object : Player.Listener {
       override fun onPlaybackStateChanged(state: Int) {
+        if (exoPlayer !== player || generation != playerGeneration) return
         when (state) {
           Player.STATE_BUFFERING -> emitState("loading", player.isPlaying)
           Player.STATE_READY -> {
@@ -308,11 +311,13 @@ class NovaMedia3View(
       }
 
       override fun onIsPlayingChanged(isPlaying: Boolean) {
+        if (exoPlayer !== player || generation != playerGeneration) return
         emitState(if (player.playbackState == Player.STATE_BUFFERING) "loading" else "readyToPlay", isPlaying)
       }
 
       override fun onPlayerError(error: PlaybackException) {
-        emitError(error)
+        if (exoPlayer !== player || generation != playerGeneration) return
+        emitError(error, player)
       }
     })
 
@@ -347,14 +352,14 @@ class NovaMedia3View(
     )
   }
 
-  private fun emitError(error: Throwable) {
+  private fun emitError(error: Throwable, player: ExoPlayer? = exoPlayer) {
     onPlayerError(
       mapOf(
         "state" to "error",
         "message" to (error.message ?: error.javaClass.simpleName),
         "isPlaying" to false,
-        "currentTime" to (exoPlayer?.currentPosition ?: 0L) / 1000.0,
-        "duration" to durationSeconds(exoPlayer)
+        "currentTime" to (player?.currentPosition ?: 0L) / 1000.0,
+        "duration" to durationSeconds(player)
       )
     )
   }
@@ -365,6 +370,7 @@ class NovaMedia3View(
   }
 
   private fun releasePlayer() {
+    playerGeneration += 1
     playerView.player = null
     exoPlayer?.release()
     exoPlayer = null

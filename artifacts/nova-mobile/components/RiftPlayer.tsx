@@ -129,6 +129,38 @@ type Props = {
   onError?: () => void;
 };
 
+/**
+ * A TV-only native view can fail during React rendering when an APK has a
+ * stale/missing native module. Keep that failure local to the watch screen so
+ * the app shell and the rest of the TV navigation remain usable.
+ */
+class NativePlayerGuard extends React.Component<
+  { children: React.ReactNode; onError?: () => void },
+  { failed: boolean }
+> {
+  state = { failed: false };
+
+  static getDerivedStateFromError() {
+    return { failed: true };
+  }
+
+  componentDidCatch(error: Error) {
+    console.warn("[RiftPlayer] TV native player render failed", error);
+    this.props.onError?.();
+  }
+
+  render() {
+    if (this.state.failed) {
+      return (
+        <View style={{ flex: 1, backgroundColor: "#09090b", alignItems: "center", justifyContent: "center" }}>
+          <Text style={{ color: "rgba(255,255,255,0.72)", fontSize: 16 }}>تعذّر فتح المشغّل</Text>
+        </View>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 /* هذه المصادر لا يجب أن تظهر معها ترجمة تلقائية أو ترجمة محفوظة من مصدر آخر. */
 const SUBTITLE_DISABLED_SITES = new Set([
   "animeify", "af",
@@ -411,7 +443,11 @@ export function RiftPlayer(props: Props) {
   // region after the TV rotates into landscape. Phones keep the existing
   // expo-video implementation and its capture-friendly TextureView.
   if (isTvDevice()) {
-    return <NativeRiftPlayer {...props} />;
+    return (
+      <NativePlayerGuard onError={props.onError}>
+        <NativeRiftPlayer {...props} />
+      </NativePlayerGuard>
+    );
   }
   return <ExpoRiftPlayer {...props} />;
 }

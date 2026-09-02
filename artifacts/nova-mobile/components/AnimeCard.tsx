@@ -24,10 +24,10 @@ export function getRailCardWidth(windowWidth: number, visibleCards = 3, gap = 10
   // size instead of stretching posters until they become blurry and heavy.
   const wideLayout = windowWidth >= 700;
   const maxRailWidth = wideLayout ? 1400 : 960;
-  const railWidth = Math.min(Math.max(windowWidth - (wideLayout ? 64 : 32), 0), maxRailWidth);
-  const targetVisibleCards = wideLayout ? (windowWidth >= 1200 ? 5 : 4) : visibleCards;
-  const minCardWidth = wideLayout ? (windowWidth >= 1400 ? 190 : 145) : 96;
-  const maxCardWidth = wideLayout ? 230 : 180;
+  const railWidth = Math.min(Math.max(windowWidth - (wideLayout ? 80 : 32), 0), maxRailWidth);
+  const targetVisibleCards = wideLayout ? (windowWidth >= 1200 ? 6 : 5) : visibleCards;
+  const minCardWidth = wideLayout ? 128 : 96;
+  const maxCardWidth = wideLayout ? 185 : 180;
   const calculated = Math.floor((railWidth - gap * (targetVisibleCards - 1)) / targetVisibleCards);
   return Math.max(minCardWidth, Math.min(maxCardWidth, calculated));
 }
@@ -35,14 +35,14 @@ export function getRailCardWidth(windowWidth: number, visibleCards = 3, gap = 10
 export function getRailSidePadding(windowWidth: number) {
   const wideLayout = windowWidth >= 700;
   const maxRailWidth = wideLayout ? 1400 : 960;
-  const railWidth = Math.min(Math.max(windowWidth - (wideLayout ? 64 : 32), 0), maxRailWidth);
-  return Math.max(wideLayout ? 32 : 16, Math.floor((windowWidth - railWidth) / 2));
+  const railWidth = Math.min(Math.max(windowWidth - (wideLayout ? 80 : 32), 0), maxRailWidth);
+  return Math.max(wideLayout ? 40 : 16, Math.floor((windowWidth - railWidth) / 2));
 }
 
 export function getGridColumnCount(windowWidth: number, windowHeight: number) {
   if (isTvDevice(windowWidth, windowHeight)) {
-    const contentWidth = Math.min(Math.max(windowWidth - 128, 0), 1440);
-    return Math.max(4, Math.min(6, Math.floor((contentWidth + 10) / 240)));
+    const contentWidth = Math.min(Math.max(windowWidth - 80, 0), 1440);
+    return Math.max(5, Math.min(7, Math.floor((contentWidth + 10) / 205)));
   }
   if (windowWidth >= 1024) return 5;
   if (windowWidth >= 600) return 4;
@@ -57,7 +57,7 @@ export const AnimeCard = React.memo(function AnimeCard({ anime, size = "sm", car
   // Recalculate on rotation/window resize and keep poster widths bounded so
   // tablets do not decode a handful of unnecessarily huge images.
   const smallCardWidth = getRailCardWidth(windowWidth, 3);
-  const cardW = cardWidth ?? (size === "lg" ? 190 : size === "md" ? 160 : smallCardWidth);
+  const cardW = cardWidth ?? (size === "lg" ? 170 : size === "md" ? 145 : smallCardWidth);
   const cardH = cardW * 1.4;
   const tvMode = isTvDevice(windowWidth, windowHeight);
 
