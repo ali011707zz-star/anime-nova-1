@@ -2693,7 +2693,7 @@ function ExpoRiftPlayer({
                 {/* زر المنتصف: play/pause/spinner */}
                 <View style={s.controlButtonSlot}>
                   {!isPlaying && !buffering && <PulseRing />}
-                  <Pressable onPress={togglePlay} style={[s.centerPlayBtn, tvMode && s.tvCenterPlayBtn]} hitSlop={16}>
+                  <Pressable hasTVPreferredFocus={tvMode} onPress={togglePlay} style={[s.centerPlayBtn, tvMode && s.tvCenterPlayBtn]} hitSlop={16}>
                     {buffering && !error
                       ? <ActivityIndicator size={32} color="#fff" />
                       : <Ionicons
@@ -2716,7 +2716,7 @@ function ExpoRiftPlayer({
               <View style={s.centerLandscapeWrap}>
                 <View style={s.controlButtonSlot}>
                   {!isPlaying && !buffering && <PulseRing />}
-                  <Pressable onPress={togglePlay} style={[s.centerPlayBtn, tvMode && s.tvCenterPlayBtn]} hitSlop={16}>
+                  <Pressable hasTVPreferredFocus={tvMode} onPress={togglePlay} style={[s.centerPlayBtn, tvMode && s.tvCenterPlayBtn]} hitSlop={16}>
                     {buffering && !error
                       ? <ActivityIndicator size={32} color="#fff" />
                       : <Ionicons

@@ -462,6 +462,15 @@ async function runSchedulerCycle(): Promise<void> {
       episode_num: ep,
     }).catch(() => {});
 
+    await sendNewEpisodePush({
+      animeId: anilistId,
+      title,
+      episode: ep,
+      posterUrl: poster ?? undefined,
+    }).catch((pushError: any) => {
+      console.warn(`[scheduler] mobile push failed: ${pushError?.message || String(pushError)}`);
+    });
+
     if (poster) {
       await sendChannelPhoto(poster, caption);
     } else {

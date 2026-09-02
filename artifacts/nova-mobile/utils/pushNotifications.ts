@@ -26,6 +26,15 @@ export async function registerPushNotifications(): Promise<boolean> {
   if (Platform.OS === "web") return false;
 
   try {
+    Notifications.setNotificationHandler({
+      handleNotification: async () => ({
+        shouldShowBanner: true,
+        shouldShowList: true,
+        shouldPlaySound: true,
+        shouldSetBadge: true,
+      }),
+    });
+
     if (Platform.OS === "android") {
       await Notifications.setNotificationChannelAsync(CHANNEL_ID, {
         name: "حلقات جديدة",

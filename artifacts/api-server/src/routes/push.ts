@@ -103,11 +103,11 @@ async function sendExpoBatch(messages: Array<Record<string, unknown>>): Promise<
   }
 }
 
-export async function sendNewEpisodePush(input: {
-  animeId: number;
+export async function sendMobilePush(input: {
   title: string;
-  episode: number;
+  body: string;
   posterUrl?: string;
+  data?: Record<string, unknown>;
 }): Promise<number> {
   const rows = await sbSelect<PushTokenRow>(
     "mobile_push_tokens",
@@ -124,19 +124,13 @@ export async function sendNewEpisodePush(input: {
     .map((row) => ({
       to: row.token,
       sound: "default",
-      title: `حلقة جديدة · ${input.title}`,
-      body: `✨ ${input.title} — الحلقة ${input.episode} متاحة الآن\nشاهِدها على Anime NOVA واستمتع!`,
+      title: input.title,
+      body: input.body,
       channelId: "nova-new-episodes",
       ...(input.posterUrl ? { richContent: { image: input.posterUrl } } : {}),
-      data: {
-        type: "new-episode",
-        animeId: input.animeId,
-        episode: input.episode,
-        title: input.title,
-        poster: input.posterUrl || "",
-      },
+      data: input.data || {},
     }));
-  console.log(`[push] preparing episode notification devices=${rows.length} valid=${messages.length}`);
+  console.log(`[push] preparing mobile notification devices=${rows.length} valid=${messages.length}`);
   if (!messages.length) {
     console.warn("[push] active rows contained no valid Expo tokens");
     return 0;
@@ -146,8 +140,28 @@ export async function sendNewEpisodePush(input: {
   for (let offset = 0; offset < messages.length; offset += 100) {
     sent += await sendExpoBatch(messages.slice(offset, offset + 100));
   }
-  console.log(`[push] episode notification result sent=${sent} attempted=${messages.length}`);
+  console.log(`[push] mobile notification result sent=${sent} attempted=${messages.length}`);
   return sent;
+}
+
+export async function sendNewEpisodePush(input: {
+  animeId: number;
+  title: string;
+  episode: number;
+  posterUrl?: string;
+}): Promise<number> {
+  return sendMobilePush({
+    title: `حلقة جديدة · ${input.title}`,
+    body: `✨ ${input.title} — الحلقة ${input.episode} متاحة الآن\nشاهِدها على Anime NOVA واستمتع!`,
+    posterUrl: input.posterUrl,
+    data: {
+      type: "new-episode",
+      animeId: input.animeId,
+      episode: input.episode,
+      title: input.title,
+      poster: input.posterUrl || "",
+    },
+  });
 }
 
 export default router;

@@ -3,6 +3,7 @@
  */
 import { Router, type Request, type Response } from "express";
 import pg from "pg";
+import { sendMobilePush } from "./push.js";
 
 const router = Router();
 
@@ -181,6 +182,21 @@ async function checkNewAnimation(): Promise<void> {
         image_url: poster,
         link_path: `/animation/${id}`,
         tmdb_id: id,
+      });
+      await sendMobilePush({
+        title: `أنيميشن جديد · ${titleAr}`,
+        body: item.release_date
+          ? `${item.release_date.slice(0, 4)} · متاح الآن على Anime NOVA`
+          : "متاح الآن على Anime NOVA",
+        posterUrl: poster,
+        data: {
+          type: "animation-new",
+          tmdbId: id,
+          title: titleAr,
+          poster: poster || "",
+        },
+      }).catch((pushError: any) => {
+        console.warn(`[anim-scheduler] mobile push failed: ${pushError?.message || String(pushError)}`);
       });
       added++;
     }
