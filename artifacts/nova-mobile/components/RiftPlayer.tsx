@@ -1769,7 +1769,9 @@ function ExpoRiftPlayer({
         setShowControls(false);
         if (tvMode) showTvRevealHintBriefly();
       });
-    }, tvMode ? 2000 : 5000);
+    // أدوات المشغل تبقى ظاهرة بالمدة المعتادة؛ التلميح الوسطي وحده
+    // يختفي تلقائياً بعد ثانيتين عبر showTvRevealHintBriefly.
+    }, tvMode ? 6500 : 5000);
   }, [showTvRevealHintBriefly, tvMode]);
 
   const fadeIn = useCallback(() => {
