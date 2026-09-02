@@ -109,6 +109,7 @@
 - [VPS SSH host-key handling](vps-ssh-host-key-handling.md) — جلسات Replit الجديدة قد لا تملك known_hosts؛ sshpass يحتاج StrictHostKeyChecking=no وUserKnownHostsFile=/dev/null.
 - [AniList outage fallback](anilist-outage-fallback.md) — عند تعطّل AniList، أحدث الحلقات تعتمد على AnimeSlayer مباشرة ولا يجب إسقاط البطاقات بسبب فشل مطابقة المعرّف.
 - [API source tree](api-source-tree.md) — build يستخدم artifacts/api-server/src؛ يوجد مسار nested قديم لا يدخل في حزمة API المنشورة.
+- [APK download aliases](apk-download-aliases.md) — keep encoded-space and hyphenated APK URLs mapped to the same current artifact; Nginx fallback can serve stale frontend copies.
  - [VPS surgical rebuilds](vps-surgical-rebuilds.md) — عند فشل esbuild على نسخة VPS متفرعة، احفظ الملف وافحص الإدراج المعطوب قبل النقل؛ قد تنجح الواجهة بينما يفشل الـAPI.
  - [Source catalog collection](source-catalog-collection.md) — AF/AS/SA/FX لكل منها pagination ومسار تشغيل مختلف؛ لا تعتبر العنوان أو الحلقة متاحة قبل فحص media response.
 - [AniNeko quality availability](anineko-availability-quality.md) — AniNeko episode pages use generic HD labels; picker quality must come from the embed/master HLS metadata.
