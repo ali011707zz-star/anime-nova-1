@@ -1389,7 +1389,16 @@ export default function SettingsScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { openPremium } = useLocalSearchParams<{ openPremium?: string }>();
-  const { theme, setTheme, watchHistory, favorites, refreshConfig, setCurrentUser: setGlobalUser } = useApp();
+  const {
+    theme,
+    setTheme,
+    watchHistory,
+    favorites,
+    clearHistory,
+    clearFavorites,
+    refreshConfig,
+    setCurrentUser: setGlobalUser,
+  } = useApp();
   const colors = useColors();
   const topPad = Platform.OS === "web" ? 0 : insets.top;
   const tvMode = isTvDevice();
@@ -1512,7 +1521,7 @@ export default function SettingsScreen() {
     confirmLabel: "امسح السجل",
     danger: true,
     onConfirm: async () => {
-      await AsyncStorage.removeItem("nova-history");
+      await clearHistory();
       setHistCount(0);
       showToast("تم مسح سجل المشاهدة");
     },
@@ -1525,7 +1534,7 @@ export default function SettingsScreen() {
     confirmLabel: "امسح المفضّلة",
     danger: true,
     onConfirm: async () => {
-      await AsyncStorage.removeItem("nova-favorites");
+      await clearFavorites();
       setSavedCount(0);
       showToast("تم مسح قائمة المحفوظات");
     },

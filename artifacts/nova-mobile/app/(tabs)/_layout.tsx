@@ -18,7 +18,7 @@ function TabIcon({ name, label, color, focused, tvMode = false }: TabIconProps) 
     <View style={[styles.tabItem, tvMode && focused && styles.tabFocused]}>
       <Ionicons name={name} size={20} color={color} />
       <Text
-        style={[styles.tabLabel, { color, fontWeight: focused ? "700" : "400" }]}
+        style={[styles.tabLabel, tvMode && styles.tvTabLabel, { color, fontWeight: focused ? "700" : "400" }]}
         numberOfLines={1}
         adjustsFontSizeToFit
         minimumFontScale={0.7}
@@ -72,7 +72,6 @@ export default function TabLayout() {
       <Tabs.Screen
         name="search"
         options={{
-          href: tvMode ? null : undefined,
           tabBarIcon: ({ color, focused }) => (
             <TabIcon name="search" label="بحث" color={color} focused={focused} tvMode={tvMode} />
           ),
@@ -82,7 +81,7 @@ export default function TabLayout() {
         name="browse"
         options={{
           tabBarIcon: ({ color, focused }) => (
-            <TabIcon name="grid" label="تصفح" color={color} focused={focused} tvMode={tvMode} />
+            <TabIcon name="grid" label="كرتون" color={color} focused={focused} tvMode={tvMode} />
           ),
         }}
       />
@@ -101,9 +100,7 @@ export default function TabLayout() {
       <Tabs.Screen
         name="aw-dubbed"
         options={{
-          tabBarIcon: ({ color, focused }) => (
-            <TabIcon name={focused ? "film" : "film-outline"} label="مدبلج" color={color} focused={focused} tvMode={tvMode} />
-          ),
+          href: null,
         }}
       />
       <Tabs.Screen
@@ -155,5 +152,9 @@ const styles = StyleSheet.create({
     includeFontPadding: false,
     textAlign: "center",
     width: "100%",
+  },
+  tvTabLabel: {
+    fontSize: 15,
+    lineHeight: 19,
   },
 });

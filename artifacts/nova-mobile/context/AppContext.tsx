@@ -1,5 +1,5 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { StyleSheet, Text, View } from "react-native";
 import { DEFAULT_CONFIG, fetchRemoteConfig, getBaseUrl, RemoteConfig } from "@/utils/api";
 import { getAuthToken, secureFetch, setUserAuthToken } from "@/utils/secureApi";
@@ -9,6 +9,7 @@ type Theme = "dark" | "amoled" | "violet" | "blue" | "pink";
 export type WatchProgress = {
   animeId: number;
   ep: number;
+  season?: number;
   title: string;
   english: string;
   thumbnail: string;
@@ -46,8 +47,10 @@ type AppContextType = {
   watchHistory: WatchProgress[];
   addToHistory: (item: WatchProgress) => Promise<void>;
   removeFromHistory: (animeId: number) => Promise<void>;
+  clearHistory: () => Promise<void>;
   favorites: FavoriteAnime[];
   toggleFavorite: (anime: FavoriteAnime) => Promise<void>;
+  clearFavorites: () => Promise<void>;
   isFavorite: (id: number) => boolean;
   currentUser: MobileUser | null;
   authReady: boolean;
@@ -56,6 +59,49 @@ type AppContextType = {
 };
 
 const AppContext = createContext<AppContextType | null>(null);
+
+const HISTORY_DELETED_KEY = (userId: string) => `nova-history-deleted:${userId}`;
+const FAVORITES_DELETED_KEY = (userId: string) => `nova-favorites-deleted:${userId}`;
+const HISTORY_CLEAR_PENDING_KEY = (userId: string) => `nova-history-clear-pending:${userId}`;
+const FAVORITES_CLEAR_PENDING_KEY = (userId: string) => `nova-favorites-clear-pending:${userId}`;
+
+function asNumber(value: unknown, fallback = 0): number {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function historyKey(item: Pick<WatchProgress, "animeId" | "ep" | "season">): string {
+  return `${item.animeId}:${item.ep}:${item.season || 1}`;
+}
+
+function mapServerHistory(row: any): WatchProgress | null {
+  const animeId = asNumber(row?.anime_id ?? row?.animeId);
+  const ep = asNumber(row?.episode_number ?? row?.episode ?? row?.ep);
+  if (!animeId || !ep) return null;
+  return {
+    animeId,
+    ep,
+    season: asNumber(row?.season_number ?? row?.season, 1),
+    title: String(row?.anime_title ?? row?.title ?? ""),
+    english: String(row?.english_title ?? row?.english ?? row?.anime_title ?? row?.title ?? ""),
+    thumbnail: String(row?.anime_cover ?? row?.image ?? row?.poster ?? ""),
+    updatedAt: Date.parse(row?.watched_at || row?.updated_at || "") || Date.now(),
+  };
+}
+
+function mapServerFavorite(row: any): FavoriteAnime | null {
+  const id = asNumber(row?.anime_id ?? row?.animeId ?? row?.content_id);
+  if (!id) return null;
+  return {
+    id,
+    title: String(row?.anime_title ?? row?.title ?? ""),
+    english: String(row?.english_title ?? row?.english ?? row?.anime_title ?? row?.title ?? ""),
+    thumbnail: String(row?.anime_cover ?? row?.image ?? row?.poster ?? ""),
+    episodes: row?.episodes == null ? null : asNumber(row.episodes),
+    score: row?.score == null ? null : asNumber(row.score),
+    addedAt: Date.parse(row?.added_at || row?.created_at || "") || Date.now(),
+  };
+}
 
 export function AppProvider({ children }: { children: React.ReactNode }) {
   // Nova Mobile is dark-only. A legacy "light" value is migrated below.
@@ -68,6 +114,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [officialAppRequired, setOfficialAppRequired] = useState(false);
   const [currentUser, setCurrentUser] = useState<MobileUser | null>(null);
   const [authReady, setAuthReady] = useState(false);
+  const syncedUserRef = useRef<string | null>(null);
 
   const restoreAuth = useCallback(async () => {
     try {
@@ -86,6 +133,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       }
       const data = await response.json() as any;
       if (!data?.id) return;
+      if (data.authToken) await setUserAuthToken(String(data.authToken));
       const next: MobileUser = {
         id: String(data.id),
         email: data.email || "",
@@ -110,6 +158,219 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     getAuthToken().catch(() => {});
     void restoreAuth();
   }, [restoreAuth]);
+
+  const accountUrl = useCallback((path: string) => `${getBaseUrl()}/api${path}`, []);
+
+  const readDeletedIds = useCallback(async (key: string): Promise<number[]> => {
+    try {
+      const raw = await AsyncStorage.getItem(key);
+      const parsed = raw ? JSON.parse(raw) : [];
+      return Array.isArray(parsed) ? parsed.map(Number).filter(Number.isFinite) : [];
+    } catch {
+      return [];
+    }
+  }, []);
+
+  const writeDeletedIds = useCallback(async (key: string, ids: number[]) => {
+    await AsyncStorage.setItem(key, JSON.stringify([...new Set(ids)]));
+  }, []);
+
+  const postHistory = useCallback(async (item: WatchProgress): Promise<boolean> => {
+    try {
+      const response = await secureFetch(accountUrl("/user/history"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          animeId: item.animeId,
+          animeTitle: item.english || item.title,
+          animeCover: item.thumbnail || null,
+          animeType: "anime",
+          episodeNumber: item.ep,
+          seasonNumber: item.season || 1,
+        }),
+      });
+      return response.ok;
+    } catch {
+      return false;
+    }
+  }, [accountUrl]);
+
+  const postFavorite = useCallback(async (item: FavoriteAnime): Promise<boolean> => {
+    try {
+      const response = await secureFetch(accountUrl("/user/favorites"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          animeId: item.id,
+          animeTitle: item.english || item.title,
+          animeCover: item.thumbnail || null,
+          animeType: "anime",
+        }),
+      });
+      return response.ok;
+    } catch {
+      return false;
+    }
+  }, [accountUrl]);
+
+  const syncAccountData = useCallback(async (
+    userId: string,
+    localHistory: WatchProgress[],
+    localFavorites: FavoriteAnime[],
+  ): Promise<boolean> => {
+    try {
+      const [historyResponse, favoritesResponse] = await Promise.all([
+        secureFetch(accountUrl("/user/history")),
+        secureFetch(accountUrl("/user/favorites")),
+      ]);
+      if (!historyResponse.ok || !favoritesResponse.ok) return false;
+
+      const [historyPayload, favoritesPayload] = await Promise.all([
+        historyResponse.json() as Promise<any>,
+        favoritesResponse.json() as Promise<any>,
+      ]);
+      const [deletedHistory, deletedFavorites] = await Promise.all([
+        readDeletedIds(HISTORY_DELETED_KEY(userId)),
+        readDeletedIds(FAVORITES_DELETED_KEY(userId)),
+      ]);
+      const deletedHistorySet = new Set(deletedHistory);
+      const deletedFavoritesSet = new Set(deletedFavorites);
+      const [historyClearPending, favoritesClearPending] = await Promise.all([
+        AsyncStorage.getItem(HISTORY_CLEAR_PENDING_KEY(userId)),
+        AsyncStorage.getItem(FAVORITES_CLEAR_PENDING_KEY(userId)),
+      ]);
+
+      const remoteHistory = (Array.isArray(historyPayload?.history) ? historyPayload.history : [])
+        .map(mapServerHistory)
+        .filter((item): item is WatchProgress => Boolean(item));
+      const remoteFavorites = (Array.isArray(favoritesPayload?.favorites) ? favoritesPayload.favorites : [])
+        .map(mapServerFavorite)
+        .filter((item): item is FavoriteAnime => Boolean(item));
+
+      // A local delete wins over a stale remote row. Retry that delete before
+      // clearing its tombstone, so a temporary outage cannot resurrect content.
+      let historyDeletesSucceeded = true;
+      for (const animeId of deletedHistorySet) {
+        try {
+          const response = await secureFetch(accountUrl(`/user/history/anime/${animeId}`), { method: "DELETE" });
+          if (!response.ok) historyDeletesSucceeded = false;
+        } catch {
+          historyDeletesSucceeded = false;
+        }
+      }
+      let favoriteDeletesSucceeded = true;
+      for (const animeId of deletedFavoritesSet) {
+        try {
+          const response = await secureFetch(accountUrl(`/user/favorites/${animeId}`), { method: "DELETE" });
+          if (!response.ok) favoriteDeletesSucceeded = false;
+        } catch {
+          favoriteDeletesSucceeded = false;
+        }
+      }
+
+      if (historyClearPending === "1") {
+        try {
+          const response = await secureFetch(accountUrl("/user/history"), { method: "DELETE" });
+          if (response.ok) await AsyncStorage.removeItem(HISTORY_CLEAR_PENDING_KEY(userId));
+          else historyDeletesSucceeded = false;
+        } catch {
+          historyDeletesSucceeded = false;
+        }
+      }
+      if (favoritesClearPending === "1") {
+        try {
+          const response = await secureFetch(accountUrl("/user/favorites"), { method: "DELETE" });
+          if (response.ok) await AsyncStorage.removeItem(FAVORITES_CLEAR_PENDING_KEY(userId));
+          else favoriteDeletesSucceeded = false;
+        } catch {
+          favoriteDeletesSucceeded = false;
+        }
+      }
+
+      const remoteHistoryByKey = new Map(
+        remoteHistory
+          .filter(item => !deletedHistorySet.has(item.animeId))
+          .map(item => [historyKey(item), item]),
+      );
+      const mergedHistory = new Map<string, WatchProgress>();
+      if (historyClearPending !== "1") {
+        remoteHistoryByKey.forEach((item, key) => mergedHistory.set(key, item));
+      }
+      const historyToUpload: WatchProgress[] = [];
+      for (const item of localHistory) {
+        if (deletedHistorySet.has(item.animeId)) continue;
+        const remote = historyClearPending === "1" ? undefined : remoteHistoryByKey.get(historyKey(item));
+        if (!remote || item.updatedAt >= remote.updatedAt) {
+          mergedHistory.set(historyKey(item), item);
+          if (!remote || item.updatedAt > remote.updatedAt || historyClearPending === "1") {
+            historyToUpload.push(item);
+          }
+        }
+      }
+
+      const remoteFavoritesById = new Map(
+        remoteFavorites
+          .filter(item => !deletedFavoritesSet.has(item.id))
+          .map(item => [item.id, item]),
+      );
+      const mergedFavorites = new Map<number, FavoriteAnime>();
+      if (favoritesClearPending !== "1") {
+        remoteFavoritesById.forEach((item, key) => mergedFavorites.set(key, item));
+      }
+      const favoritesToUpload: FavoriteAnime[] = [];
+      for (const item of localFavorites) {
+        if (deletedFavoritesSet.has(item.id)) continue;
+        const remote = favoritesClearPending === "1" ? undefined : remoteFavoritesById.get(item.id);
+        if (!remote || item.addedAt >= remote.addedAt) {
+          mergedFavorites.set(item.id, item);
+          if (!remote || item.addedAt > remote.addedAt || favoritesClearPending === "1") {
+            favoritesToUpload.push(item);
+          }
+        }
+      }
+
+      // Upload local-only/newer rows. Failures intentionally leave local state
+      // and tombstones intact; the next auth restore can retry safely.
+      const historyUploadResults = await Promise.all(historyToUpload.map(postHistory));
+      const favoriteUploadResults = await Promise.all(favoritesToUpload.map(postFavorite));
+      const historyUploadsSucceeded = historyUploadResults.every(Boolean);
+      const favoriteUploadsSucceeded = favoriteUploadResults.every(Boolean);
+
+      if (historyDeletesSucceeded && historyUploadsSucceeded) {
+        await AsyncStorage.removeItem(HISTORY_DELETED_KEY(userId));
+      }
+      if (favoriteDeletesSucceeded && favoriteUploadsSucceeded) {
+        await AsyncStorage.removeItem(FAVORITES_DELETED_KEY(userId));
+      }
+
+      setWatchHistory([...mergedHistory.values()].sort((a, b) => b.updatedAt - a.updatedAt).slice(0, 100));
+      setFavorites([...mergedFavorites.values()].sort((a, b) => b.addedAt - a.addedAt).slice(0, 500));
+      return historyDeletesSucceeded && favoriteDeletesSucceeded &&
+        historyUploadsSucceeded && favoriteUploadsSucceeded;
+    } catch {
+      // Local state remains the offline source of truth.
+      return false;
+    }
+  }, [accountUrl, postFavorite, postHistory, readDeletedIds]);
+
+  useEffect(() => {
+    if (!currentUser) {
+      syncedUserRef.current = null;
+      return;
+    }
+    if (!authReady || !historyHydrated || !favoritesHydrated) return;
+    if (syncedUserRef.current === currentUser.id) return;
+    syncedUserRef.current = currentUser.id;
+    void syncAccountData(currentUser.id, watchHistory, favorites);
+  }, [
+    authReady,
+    currentUser,
+    favorites,
+    favoritesHydrated,
+    historyHydrated,
+    syncAccountData,
+    watchHistory,
+  ]);
 
   /** حذف مفاتيح الكاش القديمة عند الإطلاق — يمنع امتلاء AsyncStorage (6MB Android limit) */
   const cleanOldCacheKeys = async () => {
@@ -209,16 +470,27 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
    * this callback.
    */
   const addToHistory = useCallback(async (item: WatchProgress) => {
+    const userId = currentUser?.id;
+    if (userId) {
+      const key = HISTORY_DELETED_KEY(userId);
+      const deleted = await readDeletedIds(key);
+      if (deleted.includes(item.animeId)) {
+        await writeDeletedIds(key, deleted.filter(id => id !== item.animeId));
+      }
+      void postHistory(item);
+    }
     setWatchHistory((prev) => {
       const withoutCurrent = prev.filter(
         (historyItem) =>
-          !(historyItem.animeId === item.animeId && historyItem.ep === item.ep),
+          !(historyItem.animeId === item.animeId &&
+            historyItem.ep === item.ep &&
+            (historyItem.season || 1) === (item.season || 1)),
       );
       // Keep the most recently exited episode at index 0. Home renders this
       // list from the right, so the latest item must be the first item.
       return [item, ...withoutCurrent].slice(0, 100);
     });
-  }, []);
+  }, [currentUser?.id, postHistory, readDeletedIds, writeDeletedIds]);
 
   /*
    * Persist after React commits the new state. This keeps storage I/O out of
@@ -236,14 +508,69 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   const removeFromHistory = useCallback(async (animeId: number) => {
     setWatchHistory((prev) => prev.filter((h) => h.animeId !== animeId));
-  }, []);
+    const userId = currentUser?.id;
+    if (!userId) return;
+
+    const key = HISTORY_DELETED_KEY(userId);
+    const deleted = await readDeletedIds(key);
+    await writeDeletedIds(key, [...deleted, animeId]);
+    try {
+      const response = await secureFetch(accountUrl(`/user/history/anime/${animeId}`), { method: "DELETE" });
+      if (response.ok) {
+        await writeDeletedIds(key, deleted.filter(id => id !== animeId));
+      }
+    } catch {}
+  }, [accountUrl, currentUser?.id, readDeletedIds, writeDeletedIds]);
+
+  const clearHistory = useCallback(async () => {
+    setWatchHistory([]);
+    const userId = currentUser?.id;
+    if (!userId) return;
+    const pendingKey = HISTORY_CLEAR_PENDING_KEY(userId);
+    await AsyncStorage.setItem(pendingKey, "1");
+    try {
+      const response = await secureFetch(accountUrl("/user/history"), { method: "DELETE" });
+      if (response.ok) await AsyncStorage.removeItem(pendingKey);
+    } catch {}
+  }, [accountUrl, currentUser?.id]);
 
   const toggleFavorite = useCallback(async (anime: FavoriteAnime) => {
+    const exists = favorites.some((f) => f.id === anime.id);
     setFavorites((prev) => {
-      const exists = prev.find((f) => f.id === anime.id);
       return exists ? prev.filter((f) => f.id !== anime.id) : [anime, ...prev].slice(0, 500);
     });
-  }, []);
+    const userId = currentUser?.id;
+    if (!userId) return;
+
+    const key = FAVORITES_DELETED_KEY(userId);
+    const deleted = await readDeletedIds(key);
+    if (exists) {
+      await writeDeletedIds(key, [...deleted, anime.id]);
+      try {
+        const response = await secureFetch(accountUrl(`/user/favorites/${anime.id}`), { method: "DELETE" });
+        if (response.ok) {
+          await writeDeletedIds(key, deleted.filter(id => id !== anime.id));
+        }
+      } catch {}
+    } else {
+      if (deleted.includes(anime.id)) {
+        await writeDeletedIds(key, deleted.filter(id => id !== anime.id));
+      }
+      void postFavorite(anime);
+    }
+  }, [accountUrl, currentUser?.id, favorites, postFavorite, readDeletedIds, writeDeletedIds]);
+
+  const clearFavorites = useCallback(async () => {
+    setFavorites([]);
+    const userId = currentUser?.id;
+    if (!userId) return;
+    const pendingKey = FAVORITES_CLEAR_PENDING_KEY(userId);
+    await AsyncStorage.setItem(pendingKey, "1");
+    try {
+      const response = await secureFetch(accountUrl("/user/favorites"), { method: "DELETE" });
+      if (response.ok) await AsyncStorage.removeItem(pendingKey);
+    } catch {}
+  }, [accountUrl, currentUser?.id]);
 
   const isFavorite = useCallback((id: number) => favorites.some((f) => f.id === id), [favorites]);
 
@@ -255,8 +582,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     watchHistory,
     addToHistory,
     removeFromHistory,
+    clearHistory,
     favorites,
     toggleFavorite,
+    clearFavorites,
     isFavorite,
     currentUser,
     authReady,
@@ -265,6 +594,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   }), [
     addToHistory,
     authReady,
+    clearFavorites,
+    clearHistory,
     currentUser,
     favorites,
     isFavorite,

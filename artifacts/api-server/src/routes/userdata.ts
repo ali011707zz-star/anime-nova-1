@@ -86,6 +86,25 @@ router.delete("/user/history/:id", async (req: Request, res: Response) => {
   }
 });
 
+// Mobile history is displayed and removed by anime, not by the database row id.
+// Keep this separate from /user/history/:id so the UUID row-delete endpoint
+// remains backwards compatible with existing clients.
+router.delete("/user/history/anime/:animeId", async (req: Request, res: Response) => {
+  const userId = getUserId(req);
+  if (!userId) return res.status(401).json({ error: "غير مصرّح" });
+
+  try {
+    await sbDelete("watch_history", {
+      user_id: userId,
+      anime_id: `eq.${Number(req.params.animeId)}`,
+    });
+    return res.json({ ok: true });
+  } catch (err) {
+    console.error("[userdata] history DELETE anime:", err);
+    return res.status(500).json({ error: "خطأ في الخادم" });
+  }
+});
+
 router.delete("/user/history", async (req: Request, res: Response) => {
   const userId = getUserId(req);
   if (!userId) return res.status(401).json({ error: "غير مصرّح" });
