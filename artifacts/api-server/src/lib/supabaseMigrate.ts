@@ -214,14 +214,18 @@ CREATE TABLE IF NOT EXISTS anime_poster_cache (
 -- Expo push tokens used by the background episode notification scheduler
 CREATE TABLE IF NOT EXISTS mobile_push_tokens (
   token        TEXT PRIMARY KEY,
+  user_id      UUID,
   platform     TEXT NOT NULL DEFAULT 'android',
   app_version  TEXT,
   created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   last_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   disabled_at  TIMESTAMPTZ
 );
+ALTER TABLE mobile_push_tokens ADD COLUMN IF NOT EXISTS user_id UUID;
 CREATE INDEX IF NOT EXISTS idx_mobile_push_tokens_active
   ON mobile_push_tokens(disabled_at, last_seen_at DESC);
+CREATE INDEX IF NOT EXISTS idx_mobile_push_tokens_user_active
+  ON mobile_push_tokens(user_id, disabled_at);
 
 -- Device-link codes are short-lived and stored as hashes only.
 CREATE TABLE IF NOT EXISTS device_link_codes (
@@ -448,14 +452,18 @@ CREATE INDEX IF NOT EXISTS idx_notifications_created ON notifications(created_at
 CREATE INDEX IF NOT EXISTS idx_notifications_unread  ON notifications(is_read) WHERE is_read = FALSE;
 CREATE TABLE IF NOT EXISTS mobile_push_tokens (
   token        TEXT PRIMARY KEY,
+  user_id      UUID,
   platform     TEXT NOT NULL DEFAULT 'android',
   app_version  TEXT,
   created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   last_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   disabled_at  TIMESTAMPTZ
 );
+ALTER TABLE mobile_push_tokens ADD COLUMN IF NOT EXISTS user_id UUID;
 CREATE INDEX IF NOT EXISTS idx_mobile_push_tokens_active
   ON mobile_push_tokens(disabled_at, last_seen_at DESC);
+CREATE INDEX IF NOT EXISTS idx_mobile_push_tokens_user_active
+  ON mobile_push_tokens(user_id, disabled_at);
 CREATE TABLE IF NOT EXISTS device_link_codes (
   id                 UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id            UUID NOT NULL,

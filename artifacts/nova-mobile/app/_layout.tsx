@@ -19,7 +19,7 @@ import * as Sentry from "@sentry/react-native";
 import { initializeRewardedAds } from "@/utils/rewardedAd";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { TelegramAnnouncementModal } from "@/components/TelegramAnnouncementModal";
-import { AppProvider } from "@/context/AppContext";
+import { AppProvider, useApp } from "@/context/AppContext";
 import { useColors } from "@/hooks/useColors";
 import { loadRuntimeApiUrl } from "@/utils/baseUrl";
 import { installGlobalCrashHandlers } from "@/utils/crashLogger";
@@ -75,6 +75,7 @@ const queryClient = new QueryClient({
 
 function RootLayoutNav() {
   const colors = useColors();
+  const { currentUser, authReady } = useApp();
   const router = useRouter();
   const pathname = usePathname();
   const [tvExitHintVisible, setTvExitHintVisible] = useState(false);
@@ -234,7 +235,7 @@ function RootLayout() {
     }
     let stop: (() => void) | undefined;
     let disposed = false;
-    if (!tvMode) {
+    if (!tvMode && authReady) {
       void import("@/utils/pushNotifications")
         .then(async ({ registerPushNotifications }) => {
           await registerPushNotifications();
@@ -248,7 +249,7 @@ function RootLayout() {
       disposed = true;
       stop?.();
     };
-  }, [tvMode]);
+  }, [tvMode, authReady, currentUser?.id]);
 
   if (brandSplashVisible) {
     return <BrandSplash />;

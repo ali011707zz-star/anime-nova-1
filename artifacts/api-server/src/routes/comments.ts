@@ -1,6 +1,7 @@
 import { Router, type Request, type Response } from "express";
 import { sbSelect, sbInsert, sbDelete, sbPatch } from "../lib/supabaseClient.js";
 import { getMobileUserId } from "../lib/security.js";
+import { sendMobilePush } from "./push.js";
 
 const router = Router();
 
@@ -37,6 +38,55 @@ function mapRow(r: any, liked: boolean, profile?: any) {
     replyToUsername: r.reply_to_username || null,
     liked,
   };
+}
+
+async function notifyCommentTargets(input: {
+  comment: any;
+  actorUserId: string;
+  actorName: string;
+}): Promise<void> {
+  const targetIds = new Set<string>();
+  const parentId = input.comment.parent_id;
+
+  if (parentId) {
+    const parents = await sbSelect("comments", { id: `eq.${parentId}` }, { limit: 1 });
+    const parentUserId = parents[0]?.user_id;
+    if (parentUserId && String(parentUserId) !== String(input.actorUserId)) {
+      targetIds.add(String(parentUserId));
+    }
+  }
+
+  const handles = new Set<string>();
+  const text = String(input.comment.text || "");
+  const mentionPattern = /@([a-zA-Z0-9_.]{3,32})/g;
+  let match: RegExpExecArray | null;
+  while ((match = mentionPattern.exec(text)) !== null) handles.add(match[1].toLowerCase());
+
+  for (const username of handles) {
+    const users = await sbSelect("users", { username: `eq.${username}` }, { limit: 1 });
+    const mentionedUserId = users[0]?.id;
+    if (mentionedUserId && String(mentionedUserId) !== String(input.actorUserId)) {
+      targetIds.add(String(mentionedUserId));
+    }
+  }
+
+  if (!targetIds.size) return;
+  await Promise.all([...targetIds].map((userId) =>
+    sendMobilePush({
+      userId,
+      title: parentId ? "رد جديد على تعليقك" : "تم ذكرك في تعليق",
+      body: `${input.actorName || "مستخدم"} أرسل لك إشعارًا في التعليقات`,
+      data: {
+        type: parentId ? "comment-reply" : "comment-mention",
+        commentId: String(input.comment.id),
+        animeId: input.comment.anime_id ?? null,
+        episode: input.comment.episode_number ?? null,
+      },
+    }).catch((error: any) => {
+      console.warn(`[comments] push failed: ${error?.message || String(error)}`);
+      return 0;
+    }),
+  ));
 }
 
 /* ─────────────────────────────────────────
@@ -134,6 +184,14 @@ router.post("/comments", async (req: Request, res: Response) => {
       console.error("[comments] POST: sbInsert returned null after retry");
       return res.status(500).json({ error: "فشل إنشاء التعليق في قاعدة البيانات" });
     }
+
+    void notifyCommentTargets({
+      comment: row,
+      actorUserId: userId,
+      actorName: username || "مستخدم",
+    }).catch((error: any) => {
+      console.warn(`[comments] target notification failed: ${error?.message || String(error)}`);
+    });
 
     return res.status(201).json({ comment: mapRow(row, false) });
   } catch (err) {

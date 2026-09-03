@@ -1,5 +1,6 @@
 import { Router, type Request, type Response } from "express";
 import { sbPatch, sbSelect, sbUpsert } from "../lib/supabaseClient.js";
+import { getMobileUserId } from "../lib/security.js";
 
 const router = Router();
 const EXPO_PUSH_URL = "https://exp.host/--/api/v2/push/send";
@@ -7,6 +8,7 @@ const EXPO_TOKEN_RE = /^(?:Expo|Exponent)PushToken\[[A-Za-z0-9_-]+\]$/;
 
 type PushTokenRow = {
   token: string;
+  user_id?: string;
   platform?: string;
   app_version?: string;
 };
@@ -31,6 +33,7 @@ router.post("/push/register", async (req: Request, res: Response) => {
       "mobile_push_tokens",
       {
         token,
+        user_id: getMobileUserId(req),
         platform,
         app_version: appVersion,
         last_seen_at: new Date().toISOString(),
@@ -107,11 +110,15 @@ export async function sendMobilePush(input: {
   title: string;
   body: string;
   posterUrl?: string;
+  userId?: string;
   data?: Record<string, unknown>;
 }): Promise<number> {
   const rows = await sbSelect<PushTokenRow>(
     "mobile_push_tokens",
-    { disabled_at: "is.null" },
+    {
+      disabled_at: "is.null",
+      ...(input.userId ? { user_id: `eq.${input.userId}` } : {}),
+    },
     { limit: 10_000 },
   );
   if (!rows.length) {

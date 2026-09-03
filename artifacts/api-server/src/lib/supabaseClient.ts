@@ -72,14 +72,18 @@ async function ensureDeviceStorageSchema(): Promise<void> {
           DROP CONSTRAINT IF EXISTS linked_devices_user_id_fkey;
         CREATE TABLE IF NOT EXISTS mobile_push_tokens (
           token TEXT PRIMARY KEY,
+          user_id UUID,
           platform TEXT NOT NULL DEFAULT 'android',
           app_version TEXT,
           created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
           last_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
           disabled_at TIMESTAMPTZ
         );
+        ALTER TABLE mobile_push_tokens ADD COLUMN IF NOT EXISTS user_id UUID;
         CREATE INDEX IF NOT EXISTS idx_mobile_push_tokens_active
           ON mobile_push_tokens(disabled_at, last_seen_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_mobile_push_tokens_user_active
+          ON mobile_push_tokens(user_id, disabled_at);
       `);
     })().catch(error => {
       _deviceStorageSchemaPromise = null;

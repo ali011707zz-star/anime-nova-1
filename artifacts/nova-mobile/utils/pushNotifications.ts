@@ -3,6 +3,7 @@ import Constants from "expo-constants";
 import * as Notifications from "expo-notifications";
 import { Platform } from "react-native";
 import { getBaseUrl } from "./baseUrl";
+import { secureFetch } from "./secureApi";
 
 export const PUSH_REGISTERED_KEY = "nova-push-token-registered-v1";
 const PUSH_TOKEN_KEY = "nova-expo-push-token-v1";
@@ -64,7 +65,7 @@ export async function registerPushNotifications(): Promise<boolean> {
       return false;
     }
 
-    const response = await fetch(`${getBaseUrl()}/api/push/register`, {
+    const response = await secureFetch(`${getBaseUrl()}/api/push/register`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
