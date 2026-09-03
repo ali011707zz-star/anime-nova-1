@@ -108,6 +108,7 @@
 - [Web build baseline](web-build-baseline.md) — full workspace typecheck has pre-existing API/admin errors; production deploy can use the package build scripts without the aggregate typecheck.
 - [VPS transfer fallback](vps-transfer-fallback.md) — هذا الخادم لا يحتوي rsync؛ استخدم أرشيف tar عبر SSH لنقل الكود مع استثناء .env والنسخ الاحتياطية.
 - [VPS SSH host-key handling](vps-ssh-host-key-handling.md) — جلسات Replit الجديدة قد لا تملك known_hosts؛ sshpass يحتاج StrictHostKeyChecking=no وUserKnownHostsFile=/dev/null.
+- [VPS Nginx download routes](vps-nginx-download-routes.md) — تحقق من nginx -T والملف داخل sites-enabled؛ تنزيلات Android تحتاج location صريحًا بلا buffering ومهلة طويلة.
 - [AniList outage fallback](anilist-outage-fallback.md) — عند تعطّل AniList، أحدث الحلقات تعتمد على AnimeSlayer مباشرة ولا يجب إسقاط البطاقات بسبب فشل مطابقة المعرّف.
 - [API source tree](api-source-tree.md) — build يستخدم artifacts/api-server/src؛ يوجد مسار nested قديم لا يدخل في حزمة API المنشورة.
 - [APK download aliases](apk-download-aliases.md) — keep encoded-space and hyphenated APK URLs mapped to the same current artifact; Nginx fallback can serve stale frontend copies.

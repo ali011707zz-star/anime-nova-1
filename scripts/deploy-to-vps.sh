@@ -214,6 +214,49 @@ server {
     client_max_body_size 50M;
 
     # Proxy للـ API
+    # تنزيلات الهاتف تعمل عبر Android DownloadManager حتى بعد إغلاق التطبيق.
+    # لا تجعلها ترث buffering و timeout الخاصين بالـ API العام، لأن تحويل HLS
+    # قد يستغرق وقتاً قبل إرسال أول بايت.
+    location = /api/anime/download-mp4 {
+        proxy_pass http://127.0.0.1:$APP_PORT;
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header Range \$http_range;
+        proxy_set_header If-Range \$http_if_range;
+        proxy_buffering off;
+        proxy_request_buffering off;
+        proxy_cache off;
+        proxy_read_timeout 1800s;
+        proxy_send_timeout 1800s;
+        proxy_connect_timeout 15s;
+    }
+
+    # Direct MP4 downloads also use video-proxy. Keep slow CDN reads alive
+    # while Android DownloadManager is running in the background.
+    location = /api/anime/video-proxy {
+        proxy_pass http://127.0.0.1:$APP_PORT;
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header X-App-Token \$http_x_app_token;
+        proxy_set_header X-Download-Token \$http_x_download_token;
+        proxy_set_header Range \$http_range;
+        proxy_set_header If-Range \$http_if_range;
+        proxy_buffering off;
+        proxy_request_buffering off;
+        proxy_cache off;
+        proxy_read_timeout 1800s;
+        proxy_send_timeout 1800s;
+        proxy_connect_timeout 15s;
+    }
+
     location /api/ {
         proxy_pass http://127.0.0.1:$APP_PORT;
         proxy_http_version 1.1;
