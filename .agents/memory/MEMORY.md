@@ -116,6 +116,7 @@
  - [VPS surgical rebuilds](vps-surgical-rebuilds.md) — عند فشل esbuild على نسخة VPS متفرعة، احفظ الملف وافحص الإدراج المعطوب قبل النقل؛ قد تنجح الواجهة بينما يفشل الـAPI.
  - [Source catalog collection](source-catalog-collection.md) — AF/AS/SA/FX لكل منها pagination ومسار تشغيل مختلف؛ لا تعتبر العنوان أو الحلقة متاحة قبل فحص media response.
 - [AniNeko quality availability](anineko-availability-quality.md) — AniNeko episode pages use generic HD labels; picker quality must come from the embed/master HLS metadata.
+- [Foupix mobile playback](foupix-mobile-playback.md) — direct Foupix MP4 can fail Android TLS and the first CDN request can transiently 403; use the public progressive proxy with retries.
 - [Source health controls](source-health-controls.md) — provider waves must use deferred jobs; deadline signals, single-flight dedupe, and short circuit cooldowns protect the VPS.
 - [SSE stream benchmarking](sse-stream-benchmarking.md) — read SSE incrementally; large client reads can hide progressive rows and misreport first-result latency.
 - [Anime Slayer performance reference](anime-slayer-performance-reference.md) — المرجع يستخدم RecyclerView/Paging وGlide بكاش الذاكرة/القرص وموارد land/sw600dp، لا تمديد الهاتف فقط.
