@@ -354,6 +354,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   }, [accountUrl, postFavorite, postHistory, readDeletedIds]);
 
   useEffect(() => {
+    // Keep the first render offline and deterministic. Account sync must not
+    // run during startup; it can be retried from an authenticated screen.
+    return;
     if (!currentUser) {
       syncedUserRef.current = null;
       return;
