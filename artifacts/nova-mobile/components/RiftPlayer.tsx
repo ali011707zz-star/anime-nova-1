@@ -49,7 +49,7 @@ type NovaVideoSource = string | {
    * expo-video otherwise infers a proxy URL as progressive media because the
    * encrypted query no longer exposes the upstream `.m3u8` suffix.
    */
-  contentType?: "hls";
+  contentType?: "hls" | "progressive";
   /** Provider headers are needed by signed CDNs on direct mobile playback. */
   headers?: Record<string, string>;
 };
@@ -64,12 +64,25 @@ function isHlsSourceUrl(url: string): boolean {
   );
 }
 
+function isProgressiveSourceUrl(url: string): boolean {
+  const lower = url.toLowerCase();
+  return (
+    /\.(?:mp4|m4v|webm|mov)(?:[?#]|$)/i.test(lower) ||
+    lower.includes("/api/dubbed/stream") ||
+    lower.includes("/api/aw-dubbed/mf-stream") ||
+    lower.includes("/api/anime/video-proxy")
+  );
+}
+
 function toExpoVideoSource(source: PlayerSource | undefined): NovaVideoSource | null {
   if (!source?.url) return null;
-  return isHlsSourceUrl(source.url) || source.headers
+  const hls = isHlsSourceUrl(source.url);
+  const progressive = !hls && isProgressiveSourceUrl(source.url);
+  return hls || progressive || source.headers
     ? {
         uri: source.url,
-        ...(isHlsSourceUrl(source.url) ? { contentType: "hls" as const } : {}),
+        ...(hls ? { contentType: "hls" as const } : {}),
+        ...(progressive ? { contentType: "progressive" as const } : {}),
         ...(source.headers ? { headers: source.headers } : {}),
       }
     : source.url;

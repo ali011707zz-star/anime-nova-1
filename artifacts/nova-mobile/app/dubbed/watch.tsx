@@ -121,8 +121,11 @@ export default function DubbedWatchScreen() {
         if (videoUrl) {
           const proxyUrl = `${BASE}/api/dubbed/stream?url=${encodeURIComponent(videoUrl)}`;
           const srcs: PlayerSource[] = [
-            { url: videoUrl, label: "مدبلج عربي", quality: "720p HD", headers: { Referer: "https://www.arabic-toons.com/", Origin: "https://www.arabic-toons.com" } },
-            { url: proxyUrl, label: "مدبلج عربي (احتياطي)", quality: "720p HD" },
+            // The proxy has a valid public TLS certificate and keeps the
+            // provider request on the VPS. The raw foupix URL can fail on
+            // Android because its certificate is too weak for native TLS.
+            { url: proxyUrl, label: "مدبلج عربي", quality: "720p HD" },
+            { url: videoUrl, label: "مدبلج عربي (مباشر)", quality: "720p HD", headers: { Referer: "https://www.arabic-toons.com/", Origin: "https://www.arabic-toons.com" } },
           ];
           if (mountedRef.current) { setSources(srcs); setLoading(false); }
           return;

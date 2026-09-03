@@ -515,10 +515,22 @@ router.get("/dubbed/stream", async (req, res) => {
     const rangeHeader = req.headers["range"];
     if (rangeHeader) fetchHeaders["Range"] = rangeHeader;
 
-    const upstream = await fetch(rawUrl, {
-      headers: fetchHeaders,
-      signal: AbortSignal.timeout(30_000),
-    });
+    // foupix occasionally returns a transient 403 for the first request
+    // even though the same signed URL works immediately afterwards. Retry
+    // the same token before handing the failure to the mobile player.
+    let upstream: Response | null = null;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      upstream = await fetch(rawUrl, {
+        headers: fetchHeaders,
+        signal: AbortSignal.timeout(30_000),
+      });
+      if ((upstream.status !== 401 && upstream.status !== 403) || attempt === 2) break;
+      try { await upstream.body?.cancel(); } catch {}
+      await new Promise(resolve => setTimeout(resolve, 250 * (attempt + 1)));
+    }
+    if (!upstream) {
+      res.status(502).json({ error: "upstream unavailable" }); return;
+    }
 
     // Forward status (206 Partial Content for Range, 200 for full)
     const status = upstream.status;
