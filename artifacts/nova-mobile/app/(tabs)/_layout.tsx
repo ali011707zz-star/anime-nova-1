@@ -80,9 +80,9 @@ export default function TabLayout() {
       <Tabs.Screen
         name="browse"
         options={{
-          tabBarIcon: ({ color, focused }) => (
-            <TabIcon name="grid" label="كرتون" color={color} focused={focused} tvMode={tvMode} />
-          ),
+          // Keep the existing browse route available for internal navigation,
+          // but use the phone/TV "كرتون" tab for the dubbed catalog below.
+          href: null,
         }}
       />
       <Tabs.Screen
@@ -100,7 +100,9 @@ export default function TabLayout() {
       <Tabs.Screen
         name="aw-dubbed"
         options={{
-          href: null,
+          tabBarIcon: ({ color, focused }) => (
+            <TabIcon name="grid" label="كرتون" color={color} focused={focused} tvMode={tvMode} />
+          ),
         }}
       />
       <Tabs.Screen
