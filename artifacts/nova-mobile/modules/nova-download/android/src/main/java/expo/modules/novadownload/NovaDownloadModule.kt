@@ -205,8 +205,6 @@ class NovaDownloadModule : Module() {
           "تعذر استئناف التنزيل"
         DownloadManager.ERROR_FILE_ALREADY_EXISTS ->
           "ملف التنزيل موجود مسبقاً"
-        DownloadManager.ERROR_BLOCKED ->
-          "التنزيل محظور من النظام"
         DownloadManager.ERROR_UNKNOWN ->
           "فشل غير معروف من Android DownloadManager"
         else ->
