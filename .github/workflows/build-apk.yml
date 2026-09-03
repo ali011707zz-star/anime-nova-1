@@ -377,7 +377,9 @@ jobs:
             android/app/build android/build 2>/dev/null || true)"
           if [ -z "$matches" ]; then
             echo "❌ NovaDownloadModule was not present in generated Android sources"
-            find android -path '*autolink*' -o -path '*generated*' | head -80
+            # Do not pipe find into head while pipefail is enabled: head can
+            # close the pipe early and turn a diagnostic into a false failure.
+            find android \( -path '*autolink*' -o -path '*generated*' \) -print -quit
             exit 1
           fi
           echo "✅ NovaDownloadModule compiled through Expo autolinking:"
