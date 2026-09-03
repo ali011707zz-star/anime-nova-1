@@ -184,6 +184,16 @@ jobs:
         # Never let npx download a different Expo CLI during the build.
         run: ./node_modules/.bin/expo prebuild --platform android --clean --no-install
 
+      - name: ✅ Verify NovaDownload native module metadata
+        working-directory: artifacts/nova-mobile
+        run: |
+          set -euo pipefail
+          module_root="node_modules/expo-nova-download"
+          test -f "$module_root/expo-module.config.json"
+          test -f "$module_root/android/build.gradle"
+          test -f "$module_root/android/src/main/AndroidManifest.xml"
+          echo "✅ local Expo module metadata is present"
+
       - name: 🔐 Configure stable release signing
         working-directory: artifacts/nova-mobile/android
         env:
@@ -355,6 +365,23 @@ jobs:
               tail -200 build.log
               exit 1
             }
+
+      - name: 🔎 Verify NovaDownload is compiled into APK
+        working-directory: artifacts/nova-mobile
+        run: |
+          set -euo pipefail
+          matches="$(grep -RIl \
+            --include='*.java' \
+            --include='*.kt' \
+            'NovaDownloadModule' \
+            android/app/build android/build 2>/dev/null || true)"
+          if [ -z "$matches" ]; then
+            echo "❌ NovaDownloadModule was not present in generated Android sources"
+            find android -path '*autolink*' -o -path '*generated*' | head -80
+            exit 1
+          fi
+          echo "✅ NovaDownloadModule compiled through Expo autolinking:"
+          printf '%s\n' "$matches"
 
       - name: 🔑 Show release signing fingerprint
         working-directory: artifacts/nova-mobile/android
