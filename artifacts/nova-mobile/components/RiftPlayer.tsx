@@ -2712,13 +2712,14 @@ function ExpoRiftPlayer({
                 onPress={() => setShowSubPanel(true)}
                 style={[s.topIconBtn, s.topCCBtn, tvMode && s.tvCCBtn, subOn && s.topCCBtnActive]}
                 hitSlop={10}
+                accessibilityRole="button"
+                accessibilityLabel="إعدادات الترجمة"
               >
                 <Ionicons
                   name="logo-closed-captioning"
                   size={tvMode ? 26 : 18}
                   color={subOn ? "#c4b5fd" : "rgba(255,255,255,0.75)"}
                 />
-                {!tvMode && <Text style={s.tvCCLabel}>الترجمة</Text>}
               </Pressable>
             );
             const btnsBlock = nativeRTL ? (
@@ -3484,7 +3485,6 @@ const s = StyleSheet.create({
     width: 60, height: 60, minWidth: 60, minHeight: 60,
     paddingHorizontal: 0, paddingVertical: 0, borderRadius: 18, gap: 0,
   },
-  tvCCLabel: { color: "#fff", fontSize: 22, fontFamily: "Cairo_800ExtraBold" },
   topCCBtnActive: { backgroundColor: "rgba(139,92,246,0.28)", borderColor: "rgba(167,139,250,0.55)" },
   topCCText: { color: "rgba(255,255,255,0.80)", fontSize: 11, fontFamily: "Cairo_700Bold", letterSpacing: 0.5 },
   topCCTextActive: { color: "#c4b5fd" },
