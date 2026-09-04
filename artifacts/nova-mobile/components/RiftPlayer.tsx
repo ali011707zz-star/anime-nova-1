@@ -41,6 +41,9 @@ export type PlayerSource = {
    * ضرورية لـ CDN تتحقق من Referer حين تذهب الـ segments مباشرةً (mobile=1).
    */
   headers?: Record<string, string>;
+  /** أوقات تخطي المقدمة/النهاية التي أعادها مزود المصدر نفسه. */
+  skipIntro?: { start: number; end: number };
+  skipOutro?: { start: number; end: number };
 };
 
 type NovaVideoSource = string | {
@@ -632,8 +635,10 @@ function ExpoRiftPlayer({
   /* ─── AniSkip: fetch skip times if not provided by source ─── */
   const [fetchedSkipIntro, setFetchedSkipIntro] = useState<{ start: number; end: number } | undefined>(undefined);
   const [fetchedSkipOutro, setFetchedSkipOutro] = useState<{ start: number; end: number } | undefined>(undefined);
-  const skipIntro = skipIntroProp ?? fetchedSkipIntro;
-  const skipOutro = skipOutroProp ?? fetchedSkipOutro;
+  /* المصدر قد يملك توقيتًا واحدًا فقط. استخدمه أولًا، ثم املأ الجزء الناقص
+     من AniSkip بدل إسقاط بيانات المصدر بالكامل. */
+  const skipIntro = skipIntroProp ?? currentSrc?.skipIntro ?? fetchedSkipIntro;
+  const skipOutro = skipOutroProp ?? currentSrc?.skipOutro ?? fetchedSkipOutro;
 
   /* ─── Animated values ─── */
   const controlsOpacity   = useRef(new Animated.Value(1)).current;
@@ -1020,8 +1025,8 @@ function ExpoRiftPlayer({
              the new stream is actually buffered, preventing conflicts with loading. */
           const swPos = switchPosRef.current;
           const initPos = initialPosition && initialPosition > 5 ? initialPosition : 0;
-          const restorePos = swPos > 5 ? swPos : initPos;
-          if (!resumedRef.current && restorePos > 5) {
+          const restorePos = swPos > 0.5 ? swPos : initPos;
+          if (!resumedRef.current && restorePos > 0.5) {
             resumedRef.current = true;
             switchPosRef.current = 0;
             try { player.currentTime = restorePos; } catch {}
@@ -1595,9 +1600,13 @@ function ExpoRiftPlayer({
     } catch {}
   }, [isMuted, player]);
 
-  /* ─── AniSkip: جلب أوقات المقدمة/النهاية إذا لم تُوفَّر بالمصدر ─── */
+  /* ─── AniSkip: جلب الجزء الناقص فقط من أوقات المقدمة/النهاية ─── */
   useEffect(() => {
-    if (skipIntroProp || skipOutroProp || !anilistId || !episode) return;
+    const sourceIntro = skipIntroProp ?? currentSrc?.skipIntro;
+    const sourceOutro = skipOutroProp ?? currentSrc?.skipOutro;
+    const needsIntro = !sourceIntro;
+    const needsOutro = !sourceOutro;
+    if ((!needsIntro && !needsOutro) || !anilistId || !episode) return;
     const ctrl = new AbortController();
     (async () => {
       try {
@@ -1619,14 +1628,36 @@ function ExpoRiftPlayer({
         const skipData = await skipRes.json();
         if (ctrl.signal.aborted || !skipData?.found) return;
         for (const r of (skipData.results ?? [])) {
-          const s = { start: r.interval.start_time, end: r.interval.end_time };
-          if (r.skip_type === "op")  setFetchedSkipIntro(s);
-          if (r.skip_type === "ed")  setFetchedSkipOutro(s);
+          const interval = r?.interval ?? r?.timestamps ?? r?.time ?? {};
+          const start = Number(
+            interval.start_time ?? interval.startTime ?? interval.start
+              ?? r?.start_time ?? r?.start,
+          );
+          const end = Number(
+            interval.end_time ?? interval.endTime ?? interval.end
+              ?? r?.end_time ?? r?.end,
+          );
+          if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) continue;
+          const type = String(r?.skip_type ?? r?.skipType ?? r?.type ?? "").toLowerCase();
+          const s = { start, end };
+          if (needsIntro && (type === "op" || type === "opening" || type === "intro")) {
+            setFetchedSkipIntro(s);
+          }
+          if (needsOutro && (type === "ed" || type === "ending" || type === "outro")) {
+            setFetchedSkipOutro(s);
+          }
         }
       } catch {}
     })();
     return () => ctrl.abort();
-  }, [anilistId, episode]);
+  }, [
+    anilistId,
+    episode,
+    skipIntroProp,
+    skipOutroProp,
+    currentSrc?.skipIntro,
+    currentSrc?.skipOutro,
+  ]);
 
   /* ─── Auto-fetch subtitles via subtitle-tracks API (wyzie.ru + SubDL + HiAnime) ─── */
   useEffect(() => {
@@ -1925,8 +1956,13 @@ function ExpoRiftPlayer({
     consecutiveErrorsRef.current = 0;
     setIsWaitingForSources(false);
     /* ── Save current position before replacing source ── */
-    const savedPos = player.currentTime || 0;
-    if (savedPos > 5) switchPosRef.current = savedPos;
+    const nativePos = Number(player.currentTime);
+    const savedPos = Number.isFinite(nativePos) && nativePos > 0
+      ? nativePos
+      : positionRef.current;
+    /* لا نهمل المواضع القصيرة، واستخدم polling كاحتياط إذا أعاد native
+       صفرًا لحظة ضغط زر تبديل السيرفر. */
+    switchPosRef.current = Number.isFinite(savedPos) ? Math.max(0, savedPos) : 0;
     console.log(`[Nova Mobile] تبديل المصدر → ${newSrc.label || "مجهول"} (${safeIdx + 1}/${playableSources.length}): ${newSrc.url?.slice(0, 120)}`);
     setSrcIdx(safeIdx);
     terminalErrorRef.current = false;

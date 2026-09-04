@@ -302,7 +302,7 @@ export default function HomeScreen() {
         )}
 
         {/* Continue Watching */}
-        {!isTvLayout && recentHistory.length > 0 && (
+        {recentHistory.length > 0 && (
           <View style={{ marginTop: 24 }}>
             <View style={styles.sectionHeader}>
               <View style={styles.sectionLeft}>
