@@ -119,7 +119,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [currentUser, setCurrentUser] = useState<MobileUser | null>(null);
   const [authReady, setAuthReady] = useState(false);
   const currentUserRef = useRef<MobileUser | null>(null);
-  const dataOwnerRef = useRef<string | null>(null);
+  // "loading" prevents a user switch from persisting the previous account's
+  // in-memory data into the anonymous cache before the new owner is loaded.
+  const dataOwnerRef = useRef<string | null | "loading">("loading");
 
   useEffect(() => {
     currentUserRef.current = currentUser;
@@ -249,10 +251,16 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         AsyncStorage.getItem(FAVORITES_CLEAR_PENDING_KEY(userId)),
       ]);
 
-      const remoteHistory = (Array.isArray(historyPayload?.history) ? historyPayload.history : [])
+      const remoteHistoryRows: any[] = Array.isArray(historyPayload?.history)
+        ? historyPayload.history
+        : [];
+      const remoteFavoritesRows: any[] = Array.isArray(favoritesPayload?.favorites)
+        ? favoritesPayload.favorites
+        : [];
+      const remoteHistory: WatchProgress[] = remoteHistoryRows
         .map(mapServerHistory)
         .filter((item): item is WatchProgress => Boolean(item));
-      const remoteFavorites = (Array.isArray(favoritesPayload?.favorites) ? favoritesPayload.favorites : [])
+      const remoteFavorites: FavoriteAnime[] = remoteFavoritesRows
         .map(mapServerFavorite)
         .filter((item): item is FavoriteAnime => Boolean(item));
 
@@ -296,7 +304,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         }
       }
 
-      const remoteHistoryByKey = new Map(
+      const remoteHistoryByKey = new Map<string, WatchProgress>(
         remoteHistory
           .filter(item => !deletedHistorySet.has(item.animeId))
           .map(item => [historyKey(item), item]),
@@ -317,7 +325,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         }
       }
 
-      const remoteFavoritesById = new Map(
+      const remoteFavoritesById = new Map<number, FavoriteAnime>(
         remoteFavorites
           .filter(item => !deletedFavoritesSet.has(item.id))
           .map(item => [item.id, item]),
@@ -370,7 +378,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
     let cancelled = false;
     const userId = currentUser?.id || null;
-    dataOwnerRef.current = null;
+    dataOwnerRef.current = "loading";
 
     const parseArray = <T,>(raw: string | null): T[] => {
       if (!raw) return [];
@@ -390,6 +398,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         AsyncStorage.getItem(ANONYMOUS_FAVORITES_KEY),
       ]).then(([historyRaw, favoritesRaw]) => {
         if (cancelled || currentUserRef.current) return;
+        dataOwnerRef.current = null;
         setWatchHistory(parseArray<WatchProgress>(historyRaw));
         setFavorites(parseArray<FavoriteAnime>(favoritesRaw));
       });
@@ -553,17 +562,17 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
    */
   useEffect(() => {
     if (!historyHydrated) return;
-    const key = dataOwnerRef.current
-      ? ACCOUNT_HISTORY_KEY(dataOwnerRef.current)
-      : ANONYMOUS_HISTORY_KEY;
+    const owner = dataOwnerRef.current;
+    if (owner === "loading") return;
+    const key = owner ? ACCOUNT_HISTORY_KEY(owner) : ANONYMOUS_HISTORY_KEY;
     AsyncStorage.setItem(key, JSON.stringify(watchHistory)).catch(() => {});
   }, [historyHydrated, watchHistory, currentUser?.id]);
 
   useEffect(() => {
     if (!favoritesHydrated) return;
-    const key = dataOwnerRef.current
-      ? ACCOUNT_FAVORITES_KEY(dataOwnerRef.current)
-      : ANONYMOUS_FAVORITES_KEY;
+    const owner = dataOwnerRef.current;
+    if (owner === "loading") return;
+    const key = owner ? ACCOUNT_FAVORITES_KEY(owner) : ANONYMOUS_FAVORITES_KEY;
     AsyncStorage.setItem(key, JSON.stringify(favorites)).catch(() => {});
   }, [favorites, favoritesHydrated, currentUser?.id]);
 
