@@ -18165,7 +18165,13 @@ router.get("/anime/episode-titles", async (req, res) => {
         const now = Date.now();
         const airedEpisode = episodes.reduce((max: number, item: any) => {
           const n = Number(item?.mal_id || item?.episode || 0);
-          const airedAt = item?.aired?.from ? Date.parse(String(item.aired.from)) : NaN;
+          /* Jikan v4 commonly returns `aired` as an ISO string, while older
+             payloads used `{ from: ... }`. Support both shapes so released
+             totals do not incorrectly become zero. */
+          const airedValue = typeof item?.aired === "string"
+            ? item.aired
+            : item?.aired?.from;
+          const airedAt = airedValue ? Date.parse(String(airedValue)) : NaN;
           return n > 0 && Number.isFinite(airedAt) && airedAt <= now ? Math.max(max, n) : max;
         }, 0);
         const releasedTotal = Math.max(airedEpisode, latestEpisode);
