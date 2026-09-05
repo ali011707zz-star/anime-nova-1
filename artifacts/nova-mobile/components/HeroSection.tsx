@@ -10,9 +10,9 @@ import {
 import { useColors } from "@/hooks/useColors";
 import { isTvDevice, tvFocusStyle } from "@/utils/tv";
 
-type Props = { items: AnilistMedia[] };
+type Props = { items: AnilistMedia[]; initialTVFocus?: boolean };
 
-export function HeroSection({ items }: Props) {
+export function HeroSection({ items, initialTVFocus = false }: Props) {
   const colors = useColors();
   const router = useRouter();
   const { width, height } = useWindowDimensions();
@@ -49,12 +49,13 @@ export function HeroSection({ items }: Props) {
           setActiveIdx(idx);
         }}
       >
-        {items.map((anime) => {
+        {items.map((anime, index) => {
           const title = anime.title.english || anime.title.romaji;
           return (
             <Pressable
               key={anime.id}
               focusable={tvMode}
+              hasTVPreferredFocus={tvMode && initialTVFocus && index === 0}
               style={({ focused }) => [{ width, height: heroHeight }, tvMode && tvFocusStyle(focused)]}
               onPress={() => router.push(`/anime/${anime.id}?title=${encodeURIComponent(anime.title.romaji)}&english=${encodeURIComponent(anime.title.english || "")}`)}
             >

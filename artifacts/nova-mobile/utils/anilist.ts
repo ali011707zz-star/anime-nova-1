@@ -94,6 +94,14 @@ query AnimeDetail($id: Int!) {
   }
 }`;
 
+export const EPISODE_COUNT_QUERY = `
+query EpisodeCount($id: Int!) {
+  Media(id: $id, type: ANIME) {
+    episodes
+    nextAiringEpisode { episode }
+  }
+}`;
+
 export const TOP_RATED_QUERY = `
 query TopRatedAnime {
   Page(perPage: 14) {

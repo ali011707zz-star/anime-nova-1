@@ -17,6 +17,7 @@ import { isTvDevice, tvFocusStyle, TvFocusGuideView, TvPressable } from "@/utils
 const Pressable = TvPressable;
 import { useTvFocusMemory } from "@/utils/tvFocus";
 import { getBaseUrl } from "@/utils/api";
+import { anilistQuery, EPISODE_COUNT_QUERY } from "@/utils/anilist";
 import { secureFetch, secureStreamFetch, warmAuthToken, getAuthToken, getDownloadToken } from "@/utils/secureApi";
 import {
   startGlobalDownload,
@@ -737,7 +738,7 @@ export default function WatchScreen() {
   }>();
   const insets   = useSafeAreaInsets();
   const router   = useRouter();
-  const { addToHistory } = useApp();
+  const { addToHistory, watchHistory } = useApp();
   const tvMode   = isTvDevice();
   const topPad   = insets.top > 0 ? insets.top : (Platform.OS === "ios" ? 44 : 24);
 
@@ -757,14 +758,50 @@ export default function WatchScreen() {
   const epNum      = parseInt(ep || "1", 10) || 1;
   const cover      = useLocalSearchParams<{ cover?: string }>().cover;
   const coverUrl   = safeDecodeURIComponent(cover);
-  /* لا نسمح بالتالية عندما لا نملك حداً مؤكداً. بطاقات «أحدث الحلقات»
-     تمرر الحلقة الحالية كآخر حلقة مؤكدة، بينما شاشة الحلقات تمرر العدد
-     الكامل/المبثوث من الكتالوج. */
+  const historyTotalEps = watchHistory.find(
+    (item) => item.animeId === Number(anime) && item.ep === epNum,
+  )?.totalEps;
+  const [catalogTotalEps, setCatalogTotalEps] = useState<number | undefined>();
+
+  /* بطاقات «متابعة المشاهدة» القديمة لا تحتوي دائماً على totalEps. جلب
+     العدد من AniList عند الحاجة يعيد تفعيل التالي بدون اختراع حد للحلقات. */
+  useEffect(() => {
+    const explicit = parseInt(totalEpsParam || "", 10);
+    const legacy = parseInt(episodes || "", 10);
+    if (
+      (Number.isFinite(explicit) && explicit > 0) ||
+      (Number.isFinite(legacy) && legacy > 0) ||
+      (historyTotalEps !== undefined && Number.isFinite(historyTotalEps) && historyTotalEps > 0)
+    ) {
+      return;
+    }
+    const id = Number(anime);
+    if (!Number.isInteger(id) || id <= 0) return;
+    let cancelled = false;
+    anilistQuery<{ Media?: { episodes?: number | null; nextAiringEpisode?: { episode?: number | null } | null } }>(
+      EPISODE_COUNT_QUERY,
+      { id },
+    )
+      .then((data) => {
+        if (cancelled) return;
+        const listed = Number(data?.Media?.episodes || 0);
+        const airing = Number(data?.Media?.nextAiringEpisode?.episode || 0) - 1;
+        const total = Math.max(listed, airing);
+        if (total > 0) setCatalogTotalEps(total);
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [anime, episodes, historyTotalEps, totalEpsParam]);
+
+  /* لا نسمح بالتالية عندما لا نملك حداً مؤكداً. شاشة الحلقات تمرر العدد
+     الكامل، وسجل المشاهدة يستخدم القيمة المحفوظة أو جلب AniList الاحتياطي. */
   const totalEpsCount = (() => {
     const explicit = parseInt(totalEpsParam || "", 10);
     if (Number.isFinite(explicit) && explicit > 0) return explicit;
     const legacy = parseInt(episodes || "", 10);
-    return Number.isFinite(legacy) && legacy > 0 ? legacy : undefined;
+    if (Number.isFinite(legacy) && legacy > 0) return legacy;
+    if (historyTotalEps !== undefined && Number.isFinite(historyTotalEps) && historyTotalEps > 0) return historyTotalEps;
+    return catalogTotalEps;
   })();
   const canGoNextEpisode = totalEpsCount !== undefined && epNum < totalEpsCount;
   const displayTitle = titleArStr || englishStr || titleStr;
@@ -1099,6 +1136,7 @@ export default function WatchScreen() {
       await addToHistory({
         animeId: parseInt(anime, 10),
         ep: epNum,
+        totalEps: totalEpsCount,
         title: titleStr,
         english: englishStr,
         thumbnail: coverUrl || `https://img.anili.st/media/${anime}`,
@@ -1130,9 +1168,15 @@ export default function WatchScreen() {
     const arParam    = titleArStr ? `&titleAr=${encodeURIComponent(titleArStr)}` : "";
     const anslayerParam = anslayerId ? `&anslayerId=${encodeURIComponent(anslayerId)}` : "";
     const totalParam = totalEpsCount ? `&totalEps=${totalEpsCount}` : "";
-    router.replace(`/watch?anime=${anime}&ep=${n}&title=${encodeURIComponent(titleStr)}&english=${encodeURIComponent(englishStr)}&format=${encodeURIComponent(format || "")}${totalParam}${coverParam}${arParam}${anslayerParam}`);
+    const nativeParam = native ? `&native=${encodeURIComponent(native)}` : "";
+    const yearParam = year ? `&year=${encodeURIComponent(year)}` : "";
+    const episodesParam = episodes ? `&episodes=${encodeURIComponent(episodes)}` : "";
+    const titlesParam = titleVariants.length
+      ? `&titles=${encodeURIComponent(JSON.stringify(titleVariants))}`
+      : "";
+    router.replace(`/watch?anime=${anime}&ep=${n}&title=${encodeURIComponent(titleStr)}&english=${encodeURIComponent(englishStr)}&format=${encodeURIComponent(format || "")}${totalParam}${coverParam}${arParam}${anslayerParam}${nativeParam}${yearParam}${episodesParam}${titlesParam}`);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [saveProgress, coverUrl, titleArStr, router, anime, titleStr, englishStr, format, anslayerId, epNum, totalEpsCount]);
+  }, [saveProgress, coverUrl, titleArStr, router, anime, titleStr, englishStr, format, anslayerId, epNum, totalEpsCount, native, year, episodes, titleVariants]);
 
   /* ── إعادة تعيين حالة المصادر (زر تحديث) — مسح الأخطاء للسماح بالمحاولة مجدداً ── */
   function refreshAllSources() {

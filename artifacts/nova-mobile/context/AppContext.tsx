@@ -9,6 +9,7 @@ type Theme = "dark" | "amoled" | "violet" | "blue" | "pink";
 export type WatchProgress = {
   animeId: number;
   ep: number;
+  totalEps?: number;
   season?: number;
   title: string;
   english: string;

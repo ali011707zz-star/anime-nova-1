@@ -44,7 +44,7 @@ export default function HomeScreen() {
   const { width, height } = useWindowDimensions();
   const [showDrawer, setShowDrawer] = useState(false);
   const isTvLayout = isTvDevice(width, height);
-  const { preferredKey, ready, rememberFocus } = useTvFocusMemory("home");
+  const { ready } = useTvFocusMemory("home");
 
   const topPad = Platform.OS === "web" ? 0 : insets.top;
 
@@ -298,7 +298,7 @@ export default function HomeScreen() {
         {isLoading ? (
           <View style={{ height: 420, backgroundColor: colors.card }} />
         ) : (
-          <HeroSection items={heroItems} />
+          <HeroSection items={heroItems} initialTVFocus={isTvLayout && ready} />
         )}
 
         {/* Continue Watching */}
@@ -312,8 +312,6 @@ export default function HomeScreen() {
                <Pressable
                  onPress={() => router.push("/(tabs)/library")}
                  focusable={isTvLayout}
-                  hasTVPreferredFocus={isTvLayout && ready && preferredKey === "متابعة المشاهدة:menu"}
-                  onFocus={() => { if (isTvLayout) rememberFocus("متابعة المشاهدة:menu"); }}
                  style={({ focused }) => [styles.seeAllBtn, isTvLayout && tvFocusStyle(focused)]}
                >
                 <Text style={[styles.seeAllText, { color: colors.primary }]}>عرض الكل</Text>
@@ -328,10 +326,8 @@ export default function HomeScreen() {
                contentContainerStyle={{ paddingHorizontal: railSidePadding, gap: railGap }}
               renderItem={({ item: h }) => (
                  <Pressable
-                  onPress={() => router.push(`/watch?anime=${h.animeId}&ep=${h.ep}&title=${encodeURIComponent(h.title)}&english=${encodeURIComponent(h.english)}${h.thumbnail ? `&cover=${encodeURIComponent(h.thumbnail)}` : ""}`)}
+                  onPress={() => router.push(`/watch?anime=${h.animeId}&ep=${h.ep}&title=${encodeURIComponent(h.title)}&english=${encodeURIComponent(h.english)}${h.totalEps ? `&totalEps=${h.totalEps}` : ""}${h.thumbnail ? `&cover=${encodeURIComponent(h.thumbnail)}` : ""}`)}
                    focusable={isTvLayout}
-                    hasTVPreferredFocus={isTvLayout && ready && preferredKey === `متابعة المشاهدة:${h.animeId}-${h.ep}`}
-                    onFocus={() => { if (isTvLayout) rememberFocus(`متابعة المشاهدة:${h.animeId}-${h.ep}`); }}
                    style={({ focused }) => [styles.historyCard, { width: railCardWidth, height: Math.round(railCardWidth * 0.7), backgroundColor: colors.card, borderColor: colors.border }, isTvLayout && tvFocusStyle(focused)]}
                 >
                   <Image
@@ -372,8 +368,6 @@ export default function HomeScreen() {
                 <Text style={[styles.sectionTitle, { color: colors.text }]}>📺 أحدث الحلقات</Text>
               </View>
                <Pressable onPress={() => router.push("/schedule" as any)} focusable={isTvLayout}
-                 hasTVPreferredFocus={isTvLayout && ready && preferredKey === "أحدث الحلقات:menu"}
-                 onFocus={() => { if (isTvLayout) rememberFocus("أحدث الحلقات:menu"); }}
                  style={({ focused }) => [styles.seeAllBtn, isTvLayout && tvFocusStyle(focused)]}>
                 <Text style={[styles.seeAllText, { color: colors.primary }]}>عرض المزيد</Text>
                 <Ionicons name="chevron-back" size={13} color={colors.primary} />
@@ -391,8 +385,6 @@ export default function HomeScreen() {
                  <Pressable
                   onPress={() => router.push(`/watch?anime=${ep.animeId}&ep=${ep.episode}&totalEps=${ep.episode}&title=${encodeURIComponent(ep.romaji || ep.name || "")}&english=${encodeURIComponent(ep.english || "")}&native=${encodeURIComponent(ep.native || "")}&titles=${encodeURIComponent(JSON.stringify(ep.titleVariants || []))}&cover=${encodeURIComponent(ep.cover || "")}&titleAr=${encodeURIComponent(ep.titleAr || "")}&anslayerId=${ep.anslayerId}` as any)}
                    focusable={isTvLayout}
-                    hasTVPreferredFocus={isTvLayout && ready && preferredKey === `أحدث الحلقات:${ep.animeId}-${ep.episode}`}
-                    onFocus={() => { if (isTvLayout) rememberFocus(`أحدث الحلقات:${ep.animeId}-${ep.episode}`); }}
                    style={({ focused }) => [todayEpStyles.card, { width: railCardWidth, height: Math.round(railCardWidth * 1.46), backgroundColor: colors.card, borderColor: colors.border }, isTvLayout && tvFocusStyle(focused)]}
                 >
                   {ep.cover ? (
@@ -434,8 +426,6 @@ export default function HomeScreen() {
               </View>
                <Pressable onPress={() => router.push("/aw-dubbed" as any)}
                  focusable={isTvLayout}
-                  hasTVPreferredFocus={isTvLayout && ready && preferredKey === "أنيميشن مدبلج:menu"}
-                  onFocus={() => { if (isTvLayout) rememberFocus("أنيميشن مدبلج:menu"); }}
                  style={({ focused }) => [styles.seeAllBtn, isTvLayout && tvFocusStyle(focused)]}>
                 <Text style={[styles.seeAllText, { color: colors.primary }]}>عرض الكل</Text>
                 <Ionicons name="chevron-back" size={13} color={colors.primary} />
@@ -471,8 +461,6 @@ export default function HomeScreen() {
                       });
                      }}
                      focusable={isTvLayout}
-                      hasTVPreferredFocus={isTvLayout && ready && preferredKey === `أنيميشن مدبلج:${item.key || ""}`}
-                      onFocus={() => { if (isTvLayout) rememberFocus(`أنيميشن مدبلج:${item.key || ""}`); }}
                      style={({ focused }) => [todayStyles.card, { width: railCardWidth, height: Math.round(railCardWidth * 1.46), backgroundColor: colors.card, borderColor: colors.border }, isTvLayout && tvFocusStyle(focused)]}
                   >
                     {imgUri ? (
@@ -504,8 +492,6 @@ export default function HomeScreen() {
                 <Text style={[styles.sectionTitle, { color: colors.text }]}>🎬 كرتون مدبلج عربي</Text>
               </View>
                <Pressable onPress={() => router.push("/dubbed" as any)} focusable={isTvLayout}
-                  hasTVPreferredFocus={isTvLayout && ready && preferredKey === "كرتون مدبلج عربي:menu"}
-                  onFocus={() => { if (isTvLayout) rememberFocus("كرتون مدبلج عربي:menu"); }}
                  style={({ focused }) => [styles.seeAllBtn, isTvLayout && tvFocusStyle(focused)]}>
                 <Text style={[styles.seeAllText, { color: colors.primary }]}>عرض الكل</Text>
                 <Ionicons name="chevron-back" size={13} color={colors.primary} />
@@ -534,8 +520,6 @@ export default function HomeScreen() {
                       router.push({ pathname: "/dubbed/[id]" as any, params: { id: item.key || item.id || item.title, title: item.title, seasons, img: rawImg } });
                      }}
                      focusable={isTvLayout}
-                     hasTVPreferredFocus={isTvLayout && ready && preferredKey === `كرتون مدبلج عربي:${item.key || item.id || item.title}`}
-                     onFocus={() => { if (isTvLayout) rememberFocus(`كرتون مدبلج عربي:${item.key || item.id || item.title}`); }}
                      style={({ focused }) => [todayStyles.card, { width: railCardWidth, height: Math.round(railCardWidth * 1.46), backgroundColor: colors.card, borderColor: colors.border }, isTvLayout && tvFocusStyle(focused)]}
                   >
                     {imgUri ? (

@@ -110,7 +110,7 @@ export default function LibraryScreen() {
         date: h.updatedAt,
         position: h.position,
         duration: h.duration,
-        onPress: () => router.push(`/watch?anime=${h.animeId}&ep=${h.ep}&title=${encodeURIComponent(h.title)}&english=${encodeURIComponent(h.english)}`),
+        onPress: () => router.push(`/watch?anime=${h.animeId}&ep=${h.ep}&title=${encodeURIComponent(h.title)}&english=${encodeURIComponent(h.english)}${h.totalEps ? `&totalEps=${h.totalEps}` : ""}`),
         onDelete: () => removeFromHistory(h.animeId),
       }));
     const all = animeItems.sort((a, b) => (b.date as number) - (a.date as number));
@@ -129,7 +129,7 @@ export default function LibraryScreen() {
       date: h.updatedAt,
       position: h.position,
       duration: h.duration,
-      onPress: () => router.push(`/watch?anime=${h.animeId}&ep=${h.ep}&title=${encodeURIComponent(h.title)}&english=${encodeURIComponent(h.english)}`),
+        onPress: () => router.push(`/watch?anime=${h.animeId}&ep=${h.ep}&title=${encodeURIComponent(h.title)}&english=${encodeURIComponent(h.english)}${h.totalEps ? `&totalEps=${h.totalEps}` : ""}`),
       onDelete: () => removeFromHistory(h.animeId),
     }));
     const all = animeItems.sort((a, b) => (b.date as number) - (a.date as number));
