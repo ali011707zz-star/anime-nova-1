@@ -1470,12 +1470,13 @@ export default function SettingsScreen() {
   }, []);
 
   const handleLogout = async () => {
-    await setUserAuthToken(null);
-    await AsyncStorage.removeItem(AUTH_KEY);
     try {
       await secureFetch(`${getBaseUrl()}/api/auth/signout`, { method: "POST" });
     } catch {}
+    await setUserAuthToken(null);
+    await AsyncStorage.removeItem(AUTH_KEY);
     setCurrentUser(null);
+    setGlobalUser(null);
     showToast("تم تسجيل الخروج");
   };
   const [confirm, setConfirm] = useState<{

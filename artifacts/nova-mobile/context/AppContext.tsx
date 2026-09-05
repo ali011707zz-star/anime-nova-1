@@ -64,6 +64,10 @@ const HISTORY_DELETED_KEY = (userId: string) => `nova-history-deleted:${userId}`
 const FAVORITES_DELETED_KEY = (userId: string) => `nova-favorites-deleted:${userId}`;
 const HISTORY_CLEAR_PENDING_KEY = (userId: string) => `nova-history-clear-pending:${userId}`;
 const FAVORITES_CLEAR_PENDING_KEY = (userId: string) => `nova-favorites-clear-pending:${userId}`;
+const ACCOUNT_HISTORY_KEY = (userId: string) => `nova-history:account:${userId}`;
+const ACCOUNT_FAVORITES_KEY = (userId: string) => `nova-favorites:account:${userId}`;
+const ANONYMOUS_HISTORY_KEY = "nova-history";
+const ANONYMOUS_FAVORITES_KEY = "nova-favorites";
 
 function asNumber(value: unknown, fallback = 0): number {
   const parsed = Number(value);
@@ -114,7 +118,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [officialAppRequired, setOfficialAppRequired] = useState(false);
   const [currentUser, setCurrentUser] = useState<MobileUser | null>(null);
   const [authReady, setAuthReady] = useState(false);
-  const syncedUserRef = useRef<string | null>(null);
+  const currentUserRef = useRef<MobileUser | null>(null);
+  const dataOwnerRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    currentUserRef.current = currentUser;
+  }, [currentUser]);
 
   const restoreAuth = useCallback(async () => {
     try {
@@ -343,6 +352,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         await AsyncStorage.removeItem(FAVORITES_DELETED_KEY(userId));
       }
 
+      // A logout or account switch may happen while the requests above are in
+      // flight. Never let a previous account repopulate the new account's UI.
+      if (currentUserRef.current?.id !== userId) return false;
       setWatchHistory([...mergedHistory.values()].sort((a, b) => b.updatedAt - a.updatedAt).slice(0, 100));
       setFavorites([...mergedFavorites.values()].sort((a, b) => b.addedAt - a.addedAt).slice(0, 500));
       return historyDeletesSucceeded && favoriteDeletesSucceeded &&
@@ -354,25 +366,65 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   }, [accountUrl, postFavorite, postHistory, readDeletedIds]);
 
   useEffect(() => {
-    // Keep the first render offline and deterministic. Account sync must not
-    // run during startup; it can be retried from an authenticated screen.
-    return;
-    if (!currentUser) {
-      syncedUserRef.current = null;
-      return;
-    }
     if (!authReady || !historyHydrated || !favoritesHydrated) return;
-    if (syncedUserRef.current === currentUser.id) return;
-    syncedUserRef.current = currentUser.id;
-    void syncAccountData(currentUser.id, watchHistory, favorites);
+
+    let cancelled = false;
+    const userId = currentUser?.id || null;
+    dataOwnerRef.current = null;
+
+    const parseArray = <T,>(raw: string | null): T[] => {
+      if (!raw) return [];
+      try {
+        const parsed = JSON.parse(raw);
+        return Array.isArray(parsed) ? parsed : [];
+      } catch {
+        return [];
+      }
+    };
+
+    if (!userId) {
+      // Logout only removes the local identity. Restore the anonymous local
+      // collection without touching any account rows on the backend.
+      void Promise.all([
+        AsyncStorage.getItem(ANONYMOUS_HISTORY_KEY),
+        AsyncStorage.getItem(ANONYMOUS_FAVORITES_KEY),
+      ]).then(([historyRaw, favoritesRaw]) => {
+        if (cancelled || currentUserRef.current) return;
+        setWatchHistory(parseArray<WatchProgress>(historyRaw));
+        setFavorites(parseArray<FavoriteAnime>(favoritesRaw));
+      });
+      return () => { cancelled = true; };
+    }
+
+    void (async () => {
+      const [historyRaw, favoritesRaw] = await Promise.all([
+        AsyncStorage.getItem(ACCOUNT_HISTORY_KEY(userId)).catch(() => null),
+        AsyncStorage.getItem(ACCOUNT_FAVORITES_KEY(userId)).catch(() => null),
+      ]);
+      if (cancelled || currentUserRef.current?.id !== userId) return;
+
+      const localHistory = parseArray<WatchProgress>(historyRaw);
+      const localFavorites = parseArray<FavoriteAnime>(favoritesRaw);
+      dataOwnerRef.current = userId;
+      setWatchHistory(localHistory);
+      setFavorites(localFavorites);
+
+      // Supabase is authoritative for account-owned data. The account-scoped
+      // cache is only an offline queue/cache and is never mixed with anonymous
+      // data or another user's collection.
+      await syncAccountData(userId, localHistory, localFavorites);
+      if (!cancelled && currentUserRef.current?.id === userId) {
+        dataOwnerRef.current = userId;
+      }
+    })();
+
+    return () => { cancelled = true; };
   }, [
     authReady,
-    currentUser,
-    favorites,
+    currentUser?.id,
     favoritesHydrated,
     historyHydrated,
     syncAccountData,
-    watchHistory,
   ]);
 
   /** حذف مفاتيح الكاش القديمة عند الإطلاق — يمنع امتلاء AsyncStorage (6MB Android limit) */
@@ -408,8 +460,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
     const [themeVal, historyVal, favVal] = await Promise.all([
       AsyncStorage.getItem("nova-theme").catch(() => null),
-      AsyncStorage.getItem("nova-history").catch(() => null),
-      AsyncStorage.getItem("nova-favorites").catch(() => null),
+      AsyncStorage.getItem(ANONYMOUS_HISTORY_KEY).catch(() => null),
+      AsyncStorage.getItem(ANONYMOUS_FAVORITES_KEY).catch(() => null),
     ]);
     if (themeVal === "light") {
       // Remove the retired white mode from existing installations.
@@ -501,13 +553,19 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
    */
   useEffect(() => {
     if (!historyHydrated) return;
-    AsyncStorage.setItem("nova-history", JSON.stringify(watchHistory)).catch(() => {});
-  }, [historyHydrated, watchHistory]);
+    const key = dataOwnerRef.current
+      ? ACCOUNT_HISTORY_KEY(dataOwnerRef.current)
+      : ANONYMOUS_HISTORY_KEY;
+    AsyncStorage.setItem(key, JSON.stringify(watchHistory)).catch(() => {});
+  }, [historyHydrated, watchHistory, currentUser?.id]);
 
   useEffect(() => {
     if (!favoritesHydrated) return;
-    AsyncStorage.setItem("nova-favorites", JSON.stringify(favorites)).catch(() => {});
-  }, [favorites, favoritesHydrated]);
+    const key = dataOwnerRef.current
+      ? ACCOUNT_FAVORITES_KEY(dataOwnerRef.current)
+      : ANONYMOUS_FAVORITES_KEY;
+    AsyncStorage.setItem(key, JSON.stringify(favorites)).catch(() => {});
+  }, [favorites, favoritesHydrated, currentUser?.id]);
 
   const removeFromHistory = useCallback(async (animeId: number) => {
     setWatchHistory((prev) => prev.filter((h) => h.animeId !== animeId));

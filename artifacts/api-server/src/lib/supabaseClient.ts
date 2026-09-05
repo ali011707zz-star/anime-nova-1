@@ -219,9 +219,10 @@ function buildWhere(
 export async function sbSelect<T = any>(
   table: string,
   filters: Record<string, string | number | undefined> = {},
-  opts: { limit?: number; select?: string } = {},
+  opts: { limit?: number; select?: string; strict?: boolean } = {},
 ): Promise<T[]> {
   const allowDeviceStorageFallback = DEVICE_STORAGE_TABLES.has(table) && isPgReady();
+  let lastError: Error | null = null;
 
   // Supabase path
   if (isSupabaseReady()) {
@@ -235,24 +236,35 @@ export async function sbSelect<T = any>(
       const res = await fetch(url, { headers: sbHeaders(), signal: AbortSignal.timeout(10000) });
       if (!res.ok) {
         const err = await res.text();
+        lastError = new Error(`Supabase ${res.status}: ${err.slice(0, 200)}`);
         console.error(`[sb] sbSelect "${table}" ${res.status}:`, err.slice(0, 200));
         // Device-link/push tables may intentionally live in the VPS
         // PostgreSQL fallback until their Supabase migration is applied.
         // Keep reads consistent with sbInsert/sbPatch: any client/schema
         // error must use the same fallback instead of returning an empty
         // result and making a valid code look invalid.
-        if (!(res.status >= 400 && res.status < 500 && allowDeviceStorageFallback)) return [];
+        if (!(res.status >= 400 && res.status < 500 && allowDeviceStorageFallback)) {
+          if (opts.strict) throw lastError;
+          return [];
+        }
       } else {
         return (await res.json()) as T[];
       }
     } catch (e: any) {
+      lastError = e instanceof Error ? e : new Error(String(e));
       console.error(`[sb] sbSelect "${table}":`, e.message);
-      if (!allowDeviceStorageFallback) return [];
+      if (!allowDeviceStorageFallback) {
+        if (opts.strict) throw lastError;
+        return [];
+      }
     }
   }
 
   // PostgreSQL fallback
-  if (!isPgReady()) return [];
+  if (!isPgReady()) {
+    if (opts.strict) throw lastError || new Error("No database configured");
+    return [];
+  }
   try {
     if (allowDeviceStorageFallback) await ensureDeviceStorageSchema();
     const cols = opts.select && opts.select !== "*"
@@ -276,6 +288,7 @@ export async function sbSelect<T = any>(
     return result.rows as T[];
   } catch (e: any) {
     console.error(`[pg] sbSelect "${table}":`, e.message);
+    if (opts.strict) throw (e instanceof Error ? e : new Error(String(e)));
     return [];
   }
 }
