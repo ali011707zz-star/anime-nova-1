@@ -126,3 +126,4 @@
 - [TVFocusGuideView compatibility](tvfocusguide-compat.md) — React Native 0.81 does not export this component; use the shared local wrapper instead of a direct import.
 - [Account-owned mobile collections](account-owned-mobile-collections.md) — favorites/history sync only after auth readiness; account-scoped cache stays separate from anonymous local data.
 - [Jikan long-running episode totals](jikan-long-running-episodes.md) — Jikan may omit items.total; use last_visible_page/final-page data before sizing episode lists.
+- [Tablet focus scrolling](tablet-focus-scrolling.md) — never infer Android TV from large window dimensions; focus-driven scroll belongs only to confirmed TV devices.

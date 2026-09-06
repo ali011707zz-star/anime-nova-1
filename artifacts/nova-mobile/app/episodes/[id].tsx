@@ -88,6 +88,7 @@ function EpisodeRow({
     ]}>
       <Pressable
         onPress={() => onWatch(n)}
+        focusable={tvMode}
         hasTVPreferredFocus={hasTVPreferredFocus}
         onFocus={onFocus}
         style={({ focused, pressed }) => [
@@ -533,7 +534,8 @@ export default function EpisodeListScreen() {
               onWatch={watchEp}
               onComment={openComments}
               onFocus={() => {
-                if (tvMode) rememberFocus(String(n));
+                if (!tvMode) return;
+                rememberFocus(String(n));
                 const index = displayedEps.indexOf(n);
                 if (index >= 0) episodeListRef.current?.scrollToIndex({ index, animated: true, viewPosition: 0.35 });
               }}
