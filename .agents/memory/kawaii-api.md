@@ -44,6 +44,8 @@ description: How to scrape kawaii-anime.com — uses AniList IDs natively, has A
 ## CDN rotation
 The API may return HLS URLs on `cdn.mewstream.buzz` (for example, One Piece episode 1173), in addition to the older `cdn.momentoai.dev` and `video.kawaii-anime.com` hosts. The scraper must allowlist the hostname and send the URL through the VPS HLS proxy with the Kawaii referer.
 
+The current `/api/miruro` response has also rotated to HLS URLs on `cdn.imgnex.top` with no query-string signature (observed on September 6, 2026). The existing trust filter rejects these URLs, so valid Kawaii responses become an empty source list.
+
 **Why:** Kawaii's API can rotate its media CDN without changing the API contract; filtering only the old hosts makes an otherwise valid episode disappear and also breaks conversion downloads.
 
 **How to apply:** When Kawaii returns a new CDN, verify the hostname is trusted before adding it to the server-side Kawaii host allowlist. Keep the proxy path and referer handling unchanged.
