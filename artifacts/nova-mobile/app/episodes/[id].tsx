@@ -36,8 +36,6 @@ function extractArabicTitle(synonyms?: string[]): string {
   return synonyms.find(s => /[\u0600-\u06FF]/.test(s)) || "";
 }
 
-const PAGE_SIZE = 100;
-
 /* ── Watch progress storage ── */
 async function getWatched(animeId: string): Promise<Set<number>> {
   try {
@@ -169,7 +167,6 @@ export default function EpisodeListScreen() {
   const [episodeCatalogTotal, setEpisodeCatalogTotal] = useState(0);
   const [episodeTitlesAr, setEpisodeTitlesAr] = useState<Record<number, string>>({});
   const [search, setSearch] = useState("");
-  const [page, setPage] = useState(1);
   const [watched, setWatched] = useState<Set<number>>(new Set());
   const [commentCounts, setCommentCounts] = useState<Record<number, number>>({});
   const episodeListRef = useRef<FlatList<number>>(null);
@@ -179,7 +176,7 @@ export default function EpisodeListScreen() {
     if (!id) return;
     const ctrl = new AbortController();
     setLoading(true);
-    setEpData([]); setEpisodeCatalogTotal(0); setPage(1); setSearch("");
+    setEpData([]); setEpisodeCatalogTotal(0); setSearch("");
     getWatched(id).then(v => { if (!ctrl.signal.aborted) setWatched(v); });
     getCommentCounts(id).then(v => { if (!ctrl.signal.aborted) setCommentCounts(v); });
 
@@ -360,14 +357,14 @@ export default function EpisodeListScreen() {
     return allEps.filter(n => n.toString().includes(search.trim()));
   }, [allEps, search]);
 
-  const totalPages = isSearching ? 1 : Math.ceil(total / PAGE_SIZE);
-  const currentPage = isSearching ? 1 : Math.min(page, totalPages);
-
   const displayedEps = useMemo(() => {
-    if (isSearching) return filtered;
-    const start = (currentPage - 1) * PAGE_SIZE;
-    return allEps.slice(start, start + PAGE_SIZE);
-  }, [allEps, filtered, isSearching, currentPage]);
+    /*
+     * FlatList virtualizes the rows, so there is no need to expose only the
+     * first 100 episodes. That artificial page boundary hid the rest of
+     * long-running series when the catalog total was temporarily incomplete.
+     */
+    return isSearching ? filtered : allEps;
+  }, [allEps, filtered, isSearching]);
   const preferredEpisodeNumber = Number(preferredKey);
   const shouldFocusContinue = !preferredKey
     || preferredKey === "continue"
@@ -489,31 +486,6 @@ export default function EpisodeListScreen() {
             </Pressable>
           ) : null}
         </View>
-        {/* Page nav */}
-        {!isSearching && totalPages > 1 && (
-          <View style={ep_s.pageNav}>
-              <Text style={[ep_s.pageRangeText, tvMode && ep_s.tvText]}>
-              الحلقات {(currentPage - 1) * PAGE_SIZE + 1}–{Math.min(currentPage * PAGE_SIZE, total)}
-            </Text>
-            <View style={{ flexDirection: "row", gap: 6 }}>
-              <Pressable
-                onPress={() => setPage(p => Math.max(1, p - 1))}
-                disabled={currentPage <= 1}
-                focusable={tvMode}
-                style={({ focused }) => [ep_s.pageBtn, currentPage <= 1 && { opacity: 0.3 }, tvMode && ep_s.tvPageBtn, tvMode && tvFocusStyle(focused)]}>
-                 <Ionicons name="chevron-forward" size={tvMode ? 24 : 14} color="rgba(255,255,255,0.6)" />
-              </Pressable>
-               <Text style={[ep_s.pageNumText, tvMode && ep_s.tvText]}>{currentPage}/{totalPages}</Text>
-              <Pressable
-                onPress={() => setPage(p => Math.min(totalPages, p + 1))}
-                disabled={currentPage >= totalPages}
-                focusable={tvMode}
-                style={({ focused }) => [ep_s.pageBtn, currentPage >= totalPages && { opacity: 0.3 }, tvMode && ep_s.tvPageBtn, tvMode && tvFocusStyle(focused)]}>
-                 <Ionicons name="chevron-back" size={tvMode ? 24 : 14} color="rgba(255,255,255,0.6)" />
-              </Pressable>
-            </View>
-          </View>
-        )}
       </View>
 
       {/* ── Episode list ── */}

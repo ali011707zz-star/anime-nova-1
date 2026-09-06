@@ -18147,11 +18147,28 @@ router.get("/anime/episode-titles", async (req, res) => {
         const body = await upstream.json() as any;
         const episodes = Array.isArray(body?.data) ? body.data : [];
         const paginationTotal = Number(body?.pagination?.items?.total || 0);
+        const lastVisiblePage = Number(body?.pagination?.last_visible_page || 0);
+        let catalogEpisodes = episodes;
+        if (page === 1 && lastVisiblePage > 1) {
+          try {
+            const lastPageResponse = await fetch(
+              `https://api.jikan.moe/v4/anime/${malId}/episodes?page=${lastVisiblePage}`,
+              { headers: { ...BASE_HDRS, Accept: "application/json" }, signal: AbortSignal.timeout(8000) },
+            );
+            if (lastPageResponse.ok) {
+              const lastPageBody = await lastPageResponse.json() as any;
+              const lastPageEpisodes = Array.isArray(lastPageBody?.data) ? lastPageBody.data : [];
+              catalogEpisodes = [...episodes, ...lastPageEpisodes];
+            }
+          } catch {
+            /* The first page remains useful if Jikan rate-limits the probe. */
+          }
+        }
         // Older Jikan responses omit pagination.items.total. Infer a safe
         // lower bound from the visible page so the client can still size the
         // list while AniList supplies the live airing total when available.
         const pageFloor = (page - 1) * 100 + episodes.length;
-        const episodeFloor = episodes.reduce((max: number, item: any) => {
+        const episodeFloor = catalogEpisodes.reduce((max: number, item: any) => {
           const n = Number(item?.mal_id || item?.episode || 0);
           return Number.isFinite(n) && n > max ? n : max;
         }, 0);
@@ -18163,7 +18180,7 @@ router.get("/anime/episode-titles", async (req, res) => {
         // whose air date has passed; otherwise the episode list can show 12
         // items while only 7 have actually aired.
         const now = Date.now();
-        const airedEpisode = episodes.reduce((max: number, item: any) => {
+        const airedEpisode = catalogEpisodes.reduce((max: number, item: any) => {
           const n = Number(item?.mal_id || item?.episode || 0);
           /* Jikan v4 commonly returns `aired` as an ISO string, while older
              payloads used `{ from: ... }`. Support both shapes so released
