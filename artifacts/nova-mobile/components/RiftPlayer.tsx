@@ -15,6 +15,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   ActivityIndicator, Alert, Animated, Dimensions, Easing, I18nManager, Linking, Platform,
   BackHandler, PanResponder, ScrollView, StyleSheet, Text, View,
+  useTVEventHandler,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -525,6 +526,8 @@ function ExpoRiftPlayer({
   // and remain D-pad focusable through TvPressable.
   const [showControls, setShowControls] = useState(true);
   const [showTvRevealHint, setShowTvRevealHint] = useState(false);
+  const [progressFocused, setProgressFocused] = useState(false);
+  const lastTvSeekAtRef = useRef(0);
   const [showSpeedSheet, setShowSpeedSheet] = useState(false);
   const [showViewSheet, setShowViewSheet] = useState(false);
   const [showSubSheet, setShowSubSheet]   = useState(false);
@@ -1895,7 +1898,7 @@ function ExpoRiftPlayer({
      السهمان يسحبان الموضع بخطوة التقديم المختارة بدلاً من نقل التركيز
      إلى زر آخر. ندعم أرقام Android keyCode وأسماء أحداث RN معاً. */
   const handleTvProgressKeyDown = useCallback((event: any) => {
-    if (!tvMode || !showControls) return;
+    if (!tvMode || !showControls || !progressFocused) return;
     const nativeEvent = event?.nativeEvent || {};
     const keyCode = Number(nativeEvent.keyCode ?? nativeEvent.keycode);
     const eventName = String(
@@ -1905,9 +1908,12 @@ function ExpoRiftPlayer({
       keyCode === 21 || eventName.includes("left") ? -1 :
       keyCode === 22 || eventName.includes("right") ? 1 : 0;
     if (!direction) return;
+    const now = Date.now();
+    if (now - lastTvSeekAtRef.current < 100) return;
+    lastTvSeekAtRef.current = now;
     seek(positionRef.current + direction * (seekDurationRef.current || 10));
     event?.preventDefault?.();
-  }, [seek, showControls, tvMode]);
+  }, [progressFocused, seek, showControls, tvMode]);
 
   /* seekSilent: نفس seek لكن بدون إظهار controls (للـ double-tap والـ gestures) */
   const seekSilentRef = useRef<(s: number) => void>(() => {});
@@ -2268,6 +2274,48 @@ function ExpoRiftPlayer({
       },
     })
   ).current;
+
+  /* Android TV sends D-pad events through TVEventHandler rather than the
+     Pressable key handlers. Only consume left/right while the progress target
+     owns focus, so normal remote navigation still works everywhere else. */
+  const seekFromTvDirection = useCallback((direction: -1 | 1) => {
+    const now = Date.now();
+    /* Avoid double-seeking when a platform emits both TVEventHandler and
+       Pressable key events for the same physical button press. */
+    if (now - lastTvSeekAtRef.current < 100) return;
+    lastTvSeekAtRef.current = now;
+    seek(positionRef.current + direction * (seekDurationRef.current || 10));
+  }, [seek]);
+
+  useTVEventHandler((event: any) => {
+    if (!tvMode || !showControls || !progressFocused) return;
+    const eventType = String(event?.eventType || event?.key || "").toLowerCase();
+    if (eventType === "left" || eventType === "rewind") {
+      seekFromTvDirection(-1);
+    } else if (eventType === "right" || eventType === "fastforward" || eventType === "fast_forward") {
+      seekFromTvDirection(1);
+    }
+  });
+
+  const commitProgressPercent = useCallback((value: number) => {
+    const safePct = Math.max(0, Math.min(1, Number.isFinite(value) ? value : 0));
+    seek(safePct * durationRef.current);
+    setPostSeekPct(safePct);
+    setIsDragging(false);
+    if (postSeekTimer.current) clearTimeout(postSeekTimer.current);
+    postSeekTimer.current = setTimeout(() => {
+      setPostSeekPct(null);
+      postSeekTimer.current = null;
+    }, 800);
+  }, [seek]);
+
+  const handleTvProgressPress = useCallback((event: any) => {
+    const locationX = Number(event?.nativeEvent?.locationX);
+    const width = Math.max(1, barWidth.current);
+    if (!Number.isFinite(locationX)) return;
+    const raw = Math.max(0, Math.min(1, locationX / width));
+    commitProgressPercent(_nRTL ? 1 - raw : raw);
+  }, [commitProgressPercent, _nRTL]);
 
   /* ─── Skip intro/outro logic ─── */
   const SKIP_BTN_LEAD = 3; // ثوانٍ قبل بداية النطاق لإظهار الزر
@@ -2910,7 +2958,12 @@ function ExpoRiftPlayer({
                     <Pressable
                       accessibilityRole="adjustable"
                       accessibilityLabel="شريط تقدم الحلقة"
-                      onPress={fadeIn}
+                      onPress={handleTvProgressPress}
+                      onFocus={() => {
+                        setProgressFocused(true);
+                        fadeIn();
+                      }}
+                      onBlur={() => setProgressFocused(false)}
                       onKeyDown={handleTvProgressKeyDown}
                       style={({ focused }) => [
                         StyleSheet.absoluteFillObject,
