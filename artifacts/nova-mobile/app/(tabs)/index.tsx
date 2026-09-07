@@ -111,7 +111,7 @@ export default function HomeScreen() {
         if (Array.isArray(parsed) && parsed.length) setTodayEps(parsed);
       } catch {}
     }).catch(() => {});
-    fetch(`${getBaseUrl()}/api/anime/anslayer-latest`, { signal: ctrl.signal })
+    fetch(`${getBaseUrl()}/api/anime/anslayer-latest`, { signal: ctrl.signal, cache: "no-store" })
       .then(r => r.json())
       .then((payload: TodayEp[] | { items?: TodayEp[] }) => {
         if (ctrl.signal.aborted) return;
@@ -133,7 +133,7 @@ export default function HomeScreen() {
               ? item.titleVariants.filter((value: unknown): value is string => typeof value === "string" && value.trim().length > 1)
               : [],
           }))
-          .filter((item) => item.animeId > 0 && item.name && item.episode != null);
+          .filter((item) => (item.animeId > 0 || item.anslayerId > 0) && item.name && item.episode != null);
          if (normalized.length) {
            setTodayEps(normalized);
            AsyncStorage.setItem("nova-latest-episodes", JSON.stringify(normalized)).catch(() => {});
@@ -373,10 +373,10 @@ export default function HomeScreen() {
                 <Ionicons name="chevron-back" size={13} color={colors.primary} />
               </Pressable>
             </View>
-            <FlatList
+              <FlatList
               data={todayEps}
               horizontal
-              keyExtractor={(ep) => `${ep.animeId}-${ep.episode}`}
+              keyExtractor={(ep) => `${ep.animeId || ep.anslayerId}-${ep.episode}`}
               showsHorizontalScrollIndicator={false}
                contentContainerStyle={{ paddingHorizontal: railSidePadding, gap: railGap }}
               renderItem={({ item: ep }) => (

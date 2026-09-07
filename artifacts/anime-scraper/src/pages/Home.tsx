@@ -30,7 +30,9 @@ interface HomeCache {
 let _homeCache: HomeCache | null = null;
 // Separate cache for today's airing episodes (independent fetch, persists between navigations)
 let _cachedTodayEps: any[] | null = null;
+let _cachedTodayEpsAt = 0;
 const TODAY_EPS_STORAGE_KEY = "nova-latest-episodes";
+const TODAY_EPS_CLIENT_TTL = 2 * 60_000;
 
 function randomSample<T>(items: T[], limit = items.length): T[] {
   const shuffled = [...items];
@@ -383,10 +385,14 @@ export default function Home() {
 
   /* Load "أحدث الحلقات" directly from AnimeSlayer's published catalog. */
   useEffect(() => {
-    if (_cachedTodayEps) return; // already cached — no re-fetch needed
+    if (_cachedTodayEps && Date.now() - _cachedTodayEpsAt < TODAY_EPS_CLIENT_TTL) {
+      setTodayChecking(false);
+      return;
+    }
     setTodayChecking(true);
     fetch(`${API_BASE}/api/anime/anslayer-latest`, {
       signal: AbortSignal.timeout(20_000),
+      cache: "no-store",
     })
       .then((r) => r.json())
       .then((payload: any[] | { items?: any[] }) => {
@@ -405,6 +411,7 @@ export default function Home() {
           }))
           .filter((item: any) => (item.animeId || item.anslayerId) && item.name);
         _cachedTodayEps = items;
+        _cachedTodayEpsAt = Date.now();
         setTodayEps(items);
         try { localStorage.setItem(TODAY_EPS_STORAGE_KEY, JSON.stringify(items)); } catch {}
         setTodayChecking(false);

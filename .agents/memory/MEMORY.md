@@ -127,3 +127,5 @@
 - [Account-owned mobile collections](account-owned-mobile-collections.md) — favorites/history sync only after auth readiness; account-scoped cache stays separate from anonymous local data.
 - [Jikan long-running episode totals](jikan-long-running-episodes.md) — Jikan may omit items.total; use last_visible_page/final-page data before sizing episode lists.
 - [Tablet focus scrolling](tablet-focus-scrolling.md) — never infer Android TV from large window dimensions; focus-driven scroll belongs only to confirmed TV devices.
+- [Live airing metadata cache](live-airing-metadata-cache.md) — nextAiringEpisode must use a short-lived, versioned cache namespace; long metadata TTLs show old countdowns.
+- [AnimeSlayer latest fallback](anime-slayer-latest-fallback.md) — keep AnimeSlayer-only latest cards by anslayerId when AniList title resolution is unavailable.

@@ -8919,8 +8919,14 @@ async function getAnimeWitcherSources(
 
     const sources: UnifiedSource[] = [];
     const seenUrls = new Set<string>();
+    const awServerPriority: Record<string, number> = {
+      PD: 100, KF: 80, MF2: 60, MF: 50, ST: 30, VT: 20,
+    };
 
-    for (const srv of rawServers) {
+    for (const srv of [...rawServers].sort(
+      (a, b) => (awServerPriority[String(b.name || "").toUpperCase()] || 0)
+        - (awServerPriority[String(a.name || "").toUpperCase()] || 0),
+    )) {
       const srvName = srv.name.toUpperCase();
       const q       = String(srv.quality || "720p").replace(/p$/i, "p");
       const qRank   = q === "1080p" ? 22 : q === "720p" ? 21 : q === "480p" ? 10 : 5;
@@ -14537,11 +14543,12 @@ router.get("/anime/check-arabic", async (req, res) => {
 // ════════════════════════════════════════════════════════════════════
 let _anslayerLatestCache: any[] | null = null;
 let _anslayerLatestTs = 0;
-const ANSLAYER_LATEST_TTL = 15 * 60_000; // 15 دقيقة — قائمة "آخر تحديث" تتغيّر بسرعة
+const ANSLAYER_LATEST_TTL = 2 * 60_000; // 2 دقيقة — المصدر يتغير بعد نشر الحلقة بسرعة
 
 router.get("/anime/anslayer-latest", async (req, res) => {
   try {
     if (_anslayerLatestCache && Date.now() - _anslayerLatestTs < ANSLAYER_LATEST_TTL) {
+      res.setHeader("Cache-Control", "no-store");
       res.json({ items: _anslayerLatestCache });
       return;
     }
@@ -14580,15 +14587,17 @@ router.get("/anime/anslayer-latest", async (req, res) => {
         english: meta?.english || "",
         native: meta?.native || "",
       };
-    }))).filter((it: any) => it.animeId && it.episode);
+    }))).filter((it: any) => (it.animeId || it.anslayerId) && it.episode);
 
     // Telegram notifications are owned by the scheduler. Keeping them out of
     // this public endpoint prevents app refreshes/cache misses from becoming
     // duplicate notification attempts. The scheduler polls this same feed.
     _anslayerLatestCache = items;
     _anslayerLatestTs = Date.now();
+    res.setHeader("Cache-Control", "no-store");
     res.json({ items });
   } catch (e: any) {
+    res.setHeader("Cache-Control", "no-store");
     res.json({ items: _anslayerLatestCache || [], error: e?.message });
   }
 });
@@ -17167,6 +17176,7 @@ function metaTtl(body: any): number {
   const q    = JSON.stringify(body?.query ?? "");
   const rawQ: string = body?.query ?? "";
   if (q.includes("airingSchedules"))  return 1800;      // 30 دقيقة — الجداول الزمنية
+  if (rawQ.includes("nextAiringEpisode")) return 300;   // live schedule — 5 دقائق
   if (body?.variables?.search)         return 3600;      // 1 ساعة — بحث (نتائج تتغير)
   if (body?.variables?.id)             return 7776000;   // 90 يوم — metadata ثابتة (بوسترات، وصف، تقييم)
   if (q.includes("TRENDING_DESC"))     return 86400;     // 24 ساعة — trending
@@ -17181,7 +17191,11 @@ function metaTtl(body: any): number {
 const META_REFRESH_AGE = 2592000; // 30 يوم بالثواني
 
 function metaHash(body: any): string {
-  return createHash("sha256").update(JSON.stringify(body)).digest("hex").slice(0, 40);
+  const rawQ = String(body?.query || "");
+  // Live airing queries need a separate namespace so old long-lived detail
+  // rows cannot continue serving a stale nextAiringEpisode value.
+  const version = rawQ.includes("nextAiringEpisode") ? "|live-schedule-v2" : "";
+  return createHash("sha256").update(JSON.stringify(body) + version).digest("hex").slice(0, 40);
 }
 
 /** نتيجة الكاش مع عمرها — stale=true يعني تجاوزت 30 يوم ويجب تحديثها خلفياً */
@@ -18081,11 +18095,13 @@ setInterval(() => awAutoSync().catch(() => {}), 2 * 60 * 60_000);
 // the episode screen stays current without hammering the upstream API.
 const _jikanEpisodeCache = new Map<string, { ts: number; payload: any }>();
 const JIKAN_EPISODE_CACHE_TTL = 10 * 60_000;
+let _anslayerResolvedLatestCache: any[] | null = null;
+let _anslayerResolvedLatestTs = 0;
 
 async function getAnsLayerLatestEpisode(anilistId: number): Promise<number> {
   try {
-    let items = _anslayerLatestCache;
-    if (!items || Date.now() - _anslayerLatestTs >= ANSLAYER_LATEST_TTL) {
+    let items = _anslayerResolvedLatestCache;
+    if (!items || Date.now() - _anslayerResolvedLatestTs >= ANSLAYER_LATEST_TTL) {
       const data = await anslayerGet("animes/get-published-animes", {
         list_type: "latest_updated_episode_new",
         page: 1,
@@ -18106,8 +18122,8 @@ async function getAnsLayerLatestEpisode(anilistId: number): Promise<number> {
         const resolvedId = await resolveAniListIdForSource(item.name, null, [], null);
         return { ...item, animeId: resolvedId };
       }))).filter((item: any) => item.animeId && item.episode);
-      _anslayerLatestCache = items;
-      _anslayerLatestTs = Date.now();
+      _anslayerResolvedLatestCache = items;
+      _anslayerResolvedLatestTs = Date.now();
     }
     return Math.max(
       0,
