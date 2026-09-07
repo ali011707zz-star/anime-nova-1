@@ -13333,7 +13333,7 @@ router.get("/anime/sources-stream", scraperQueueMiddleware, async (req, res) => 
   const title     = ((req.query.title   as string) || "").trim();
   const english   = ((req.query.english as string) || "").trim() || null;
   const ep        = parseInt((req.query.ep    as string) || "1");
-  let anilistId = parseInt((req.query.anime as string) || (req.query.anilistId as string) || "0") || undefined;
+  let anilistId = parseInt((req.query.anilistId as string) || (req.query.anime as string) || "0") || undefined;
   const anslayerId = parseInt((req.query.anslayerId as string) || "0") || undefined;
   const format    = ((req.query.format  as string) || "").trim().toUpperCase();
   const isMovie   = format === "MOVIE" || format === "MOVIE_SHORT";
@@ -14072,7 +14072,7 @@ router.get("/anime/fetch-source", scraperQueueMiddleware, async (req, res) => {
   const title     = ((req.query.title   as string) || "").trim();
   const english   = ((req.query.english as string) || "").trim() || null;
   const ep        = parseInt((req.query.ep    as string) || "1");
-  let anilistId = parseInt((req.query.anime as string) || (req.query.anilistId as string) || "0") || undefined;
+  let anilistId = parseInt((req.query.anilistId as string) || (req.query.anime as string) || "0") || undefined;
   const format    = ((req.query.format  as string) || "").trim().toUpperCase();
   const isMovieParam = (req.query.isMovie as string) === "true";
   const isMovie   = format === "MOVIE" || format === "MOVIE_SHORT" || isMovieParam;

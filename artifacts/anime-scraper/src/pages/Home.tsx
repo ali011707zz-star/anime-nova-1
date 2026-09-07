@@ -34,6 +34,45 @@ let _cachedTodayEpsAt = 0;
 const TODAY_EPS_STORAGE_KEY = "nova-latest-episodes";
 const TODAY_EPS_CLIENT_TTL = 2 * 60_000;
 
+function normalizeLatestEpisodeItem(item: any): any {
+  const rawAniListId = Number(item?.anilistId ?? item?.anilist_id ?? 0);
+  const rawAnimeSlayerId = Number(
+    item?.anslayerId ??
+      item?.anime_id ??
+      (item?.source === "anslayer" ? item?.animeId : 0) ??
+      0,
+  );
+  const anilistId = Number.isInteger(rawAniListId) && rawAniListId > 0 ? rawAniListId : null;
+  const anslayerId =
+    Number.isInteger(rawAnimeSlayerId) && rawAnimeSlayerId > 0
+      ? rawAnimeSlayerId
+      : null;
+  const name = item?.name ?? item?.title ?? "";
+  const titleVariants = Array.from(
+    new Set(
+      [
+        ...(Array.isArray(item?.titleVariants) ? item.titleVariants : []),
+        item?.romaji,
+        item?.english,
+        item?.native,
+        name,
+      ].filter(
+        (value): value is string =>
+          typeof value === "string" && value.trim().length > 1,
+      ),
+    ),
+  );
+
+  return {
+    ...item,
+    animeId: anilistId,
+    anilistId,
+    anslayerId,
+    name,
+    titleVariants,
+  };
+}
+
 function randomSample<T>(items: T[], limit = items.length): T[] {
   const shuffled = [...items];
   for (let i = shuffled.length - 1; i > 0; i -= 1) {
@@ -323,7 +362,7 @@ export default function Home() {
     if (_cachedTodayEps) return _cachedTodayEps;
     try {
       const stored = JSON.parse(localStorage.getItem(TODAY_EPS_STORAGE_KEY) || "[]");
-      return Array.isArray(stored) ? stored : [];
+      return Array.isArray(stored) ? stored.map(normalizeLatestEpisodeItem) : [];
     } catch { return []; }
   });
   const [todayChecking, setTodayChecking] = useState(true);
@@ -398,14 +437,10 @@ export default function Home() {
       .then((payload: any[] | { items?: any[] }) => {
         const raw = Array.isArray(payload) ? payload : payload.items || [];
         const items = raw
+          .map(normalizeLatestEpisodeItem)
           .map((item: any) => ({
             ...item,
-            /* KW needs the AniList namespace. The API now exposes it
-               explicitly so this card can never prefer anslayerId. */
-            // animeId is the AniList namespace. Keep the AnimeSlayer id
-            // separate so a missing AniList match never poisons KW/MP.
-            animeId: item.anilistId ?? item.anilist_id ?? null,
-            name: item.name ?? item.title ?? "",
+            /* KW/MP use AniList IDs; AnimeSlayer keeps its own namespace. */
             cover: item.cover ?? item.poster ?? "",
             source: "anslayer",
           }))
@@ -1106,12 +1141,23 @@ export default function Home() {
               const accentBg = "rgba(239,68,68,0.88)";
               /* هذه البطاقات مصدرها AnimeSlayer؛ مرّر معرّف الكتالوج المباشر
                  حتى لا يعتمد التشغيل على مطابقة الاسم أو على AniList. */
-              const titleVariants = Array.isArray(it.titleVariants)
-                ? it.titleVariants.filter((value: unknown): value is string => typeof value === "string" && value.trim().length > 1)
-                : [];
+              const titleVariants = Array.from(
+                new Set(
+                  [
+                    ...(Array.isArray(it.titleVariants) ? it.titleVariants : []),
+                    it.romaji,
+                    it.english,
+                    it.native,
+                    it.name,
+                  ].filter(
+                    (value: unknown): value is string =>
+                      typeof value === "string" && value.trim().length > 1,
+                  ),
+                ),
+              );
               const canonicalTitle = it.romaji || it.name || "";
               const canonicalEnglish = it.english || "";
-              const href = `/watch?anime=${encodeURIComponent(String(it.animeId || 0))}&anslayerId=${encodeURIComponent(String(it.anslayerId || ""))}&ep=${it.episode}&title=${encodeURIComponent(canonicalTitle)}&english=${encodeURIComponent(canonicalEnglish)}&titles=${encodeURIComponent(JSON.stringify(titleVariants))}&cover=${encodeURIComponent(it.cover || "")}&titleAr=${encodeURIComponent(it.titleAr || "")}&site=anslayer&fromLatest=1`;
+              const href = `/watch?anime=${encodeURIComponent(String(it.animeId || 0))}&anilistId=${encodeURIComponent(String(it.anilistId || it.animeId || 0))}&anslayerId=${encodeURIComponent(String(it.anslayerId || ""))}&ep=${it.episode}&title=${encodeURIComponent(canonicalTitle)}&english=${encodeURIComponent(canonicalEnglish)}&titles=${encodeURIComponent(JSON.stringify(titleVariants))}&cover=${encodeURIComponent(it.cover || "")}&titleAr=${encodeURIComponent(it.titleAr || "")}&site=anslayer&fromLatest=1`;
               return (
                 <Link href={href} key={`${it.animeId}-${it.episode}-${i}`}>
                   <motion.div

@@ -4695,7 +4695,9 @@ export default function WatchPage() {
   const userId = user?.id ?? null;
 
   const sp = useRef(new URLSearchParams(window.location.search)).current;
-  const animeId = parseInt(sp.get("anime") || "0");
+  /* Latest-episode links carry both namespaces explicitly. Prefer the
+     AniList field so an AnimeSlayer id can never be sent to KW/MP. */
+  const animeId = parseInt(sp.get("anilistId") || sp.get("anime") || "0");
   const ep = parseInt(sp.get("ep") || "1");
   const titleParam = sp.get("title") || "";
   const englishParam = sp.get("english") || "";
@@ -5205,6 +5207,7 @@ export default function WatchPage() {
     /* Navigate via wouter — WatchWrapper adds key={search} so Watch remounts with fresh params */
     const goParams: Record<string, string> = {
       anime: String(animeId),
+      anilistId: String(animeId),
       ep: String(n),
       title: titleParam,
       english: englishParam,
@@ -5355,6 +5358,7 @@ export default function WatchPage() {
         english: resolvedEnglish,
         ep: String(ep),
         anime: String(animeId || 0),
+        anilistId: String(animeId || 0),
         format: anime?.format || sp.get("format") || "",
       });
       params.set("titles", JSON.stringify(titleVariants));
@@ -5567,7 +5571,10 @@ export default function WatchPage() {
     params.set("title", resolvedTitle);
     if (anime?.title?.english || englishParam)
       params.set("english", anime?.title?.english || englishParam);
-    if (animeId) params.set("anime", String(animeId));
+    if (animeId) {
+      params.set("anime", String(animeId));
+      params.set("anilistId", String(animeId));
+    }
     if (sp.get("anslayerId")) params.set("anslayerId", sp.get("anslayerId")!);
     params.set("ep", String(ep));
     if (anime?.format) params.set("format", String(anime.format));

@@ -728,13 +728,13 @@ export default function WatchScreen() {
   const {
     anime, ep, title, english, format, etitle,
     totalEps: totalEpsParam, year, episodes, native, titleAr,
-    titles: titlesParam, anslayerId,
+    titles: titlesParam, anslayerId, anilistId,
   } = useLocalSearchParams<{
     anime: string; ep: string; title: string; english: string;
     format?: string; etitle?: string; totalEps?: string;
     year?: string; episodes?: string; native?: string; titleAr?: string;
     titles?: string;
-    anslayerId?: string;
+    anslayerId?: string; anilistId?: string;
   }>();
   const insets   = useSafeAreaInsets();
   const router   = useRouter();
@@ -756,6 +756,11 @@ export default function WatchScreen() {
       .map(value => value.trim())));
   }, [titleStr, englishStr, native, titleArStr, titlesParam]);
   const epNum      = parseInt(ep || "1", 10) || 1;
+  /* Latest-episode cards carry AniList and AnimeSlayer ids separately.
+     Use the explicit AniList id for every MP/KW request. */
+  const sourceAnimeId =
+    (anilistId && anilistId !== "0" ? anilistId : "") ||
+    (anime && anime !== "0" ? anime : "");
   const cover      = useLocalSearchParams<{ cover?: string }>().cover;
   const coverUrl   = safeDecodeURIComponent(cover);
   const historyTotalEps = watchHistory.find(
@@ -775,7 +780,7 @@ export default function WatchScreen() {
     ) {
       return;
     }
-    const id = Number(anime);
+    const id = Number(sourceAnimeId);
     if (!Number.isInteger(id) || id <= 0) return;
     let cancelled = false;
     anilistQuery<{ Media?: { episodes?: number | null; nextAiringEpisode?: { episode?: number | null } | null } }>(
@@ -904,19 +909,19 @@ export default function WatchScreen() {
      Kawaii may return Arabic directly or English only; translate the latter
      through Nova after proxying the signed subtitle file server-side. */
   useEffect(() => {
-    if (!anime) {
+    if (!sourceAnimeId) {
       setGlobalSubUrl(undefined);
       return;
     }
     setGlobalSubUrl(undefined);
     const ctrl = new AbortController();
     const base = getBaseUrl();
-    fetchArabicSubtitleUrl(anime, epNum, base, titleStr, englishStr, ctrl.signal)
+    fetchArabicSubtitleUrl(sourceAnimeId, epNum, base, titleStr, englishStr, ctrl.signal)
       .then(subtitleUrl => {
         if (!ctrl.signal.aborted && subtitleUrl) setGlobalSubUrl(subtitleUrl);
       });
     return () => ctrl.abort();
-  }, [anime, epNum]);
+  }, [sourceAnimeId, epNum]);
 
   const progressKey    = `progress-${anime}-${epNum}`;
   const srcCacheKey    = anime ? `anime-srcs-${anime}-e${epNum}` : null;
@@ -960,7 +965,10 @@ export default function WatchScreen() {
     const params = new URLSearchParams();
     params.set("title", titleStr);
     if (englishStr) params.set("english", englishStr);
-    if (anime) params.set("anime", anime);
+    if (sourceAnimeId) {
+      params.set("anime", sourceAnimeId);
+      params.set("anilistId", sourceAnimeId);
+    }
     if (epNum) params.set("ep", String(epNum));
     if (format) params.set("format", format);
     if (year) params.set("year", year);
@@ -1115,7 +1123,7 @@ export default function WatchScreen() {
       controller.abort();
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [anime, epNum, titleStr, englishStr, titleArStr, format, year, episodes, native, anslayerId, availabilityAttempt]);
+  }, [anime, anilistId, sourceAnimeId, epNum, titleStr, englishStr, titleArStr, format, year, episodes, native, anslayerId, availabilityAttempt]);
 
   /* ── Orientation lock ── */
   useEffect(() => {
@@ -1174,9 +1182,12 @@ export default function WatchScreen() {
     const titlesParam = titleVariants.length
       ? `&titles=${encodeURIComponent(JSON.stringify(titleVariants))}`
       : "";
-    router.replace(`/watch?anime=${anime}&ep=${n}&title=${encodeURIComponent(titleStr)}&english=${encodeURIComponent(englishStr)}&format=${encodeURIComponent(format || "")}${totalParam}${coverParam}${arParam}${anslayerParam}${nativeParam}${yearParam}${episodesParam}${titlesParam}`);
+    const anilistParam = sourceAnimeId
+      ? `&anilistId=${encodeURIComponent(sourceAnimeId)}`
+      : "";
+    router.replace(`/watch?anime=${sourceAnimeId || anime}&ep=${n}&title=${encodeURIComponent(titleStr)}&english=${encodeURIComponent(englishStr)}&format=${encodeURIComponent(format || "")}${totalParam}${coverParam}${arParam}${anslayerParam}${nativeParam}${yearParam}${episodesParam}${titlesParam}${anilistParam}`);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [saveProgress, coverUrl, titleArStr, router, anime, titleStr, englishStr, format, anslayerId, epNum, totalEpsCount, native, year, episodes, titleVariants]);
+  }, [saveProgress, coverUrl, titleArStr, router, anime, sourceAnimeId, titleStr, englishStr, format, anslayerId, epNum, totalEpsCount, native, year, episodes, titleVariants]);
 
   /* ── إعادة تعيين حالة المصادر (زر تحديث) — مسح الأخطاء للسماح بالمحاولة مجدداً ── */
   function refreshAllSources() {
@@ -1290,10 +1301,11 @@ export default function WatchScreen() {
 
     const base = getBaseUrl();
     const qs = new URLSearchParams({
-      anime: anime || "0", ep: String(epNum), title: titleStr,
+      anime: sourceAnimeId || "0", ep: String(epNum), title: titleStr,
       english: englishStr, format: format || "",
       year: year || "", episodes: episodes || "", native: native || "",
     });
+    qs.set("anilistId", sourceAnimeId || "0");
     qs.set("titles", JSON.stringify(titleVariants));
     if (preferredQuality) qs.set("quality", preferredQuality);
     if (titleArStr) qs.set("titleAr", titleArStr);
@@ -1426,7 +1438,7 @@ export default function WatchScreen() {
        siteCtrls.current.delete(fetchKey); // تنظيف الـ controller بعد انتهاء الطلب
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [anime, epNum, titleStr, englishStr, titleArStr, format, year, episodes, native, playSrc, anslayerId, sources]);
+  }, [anime, sourceAnimeId, epNum, titleStr, englishStr, titleArStr, format, year, episodes, native, playSrc, anslayerId, sources]);
 
   /* ── مزامنة حالة التنزيل من Global Singleton ── */
   useEffect(() => {
@@ -1544,10 +1556,11 @@ export default function WatchScreen() {
 
     const base = getBaseUrl();
     const qs = new URLSearchParams({
-      anime: anime || "0", ep: String(epNum), title: titleStr,
+      anime: sourceAnimeId || "0", ep: String(epNum), title: titleStr,
       english: englishStr, format: format || "",
       year: year || "", episodes: episodes || "", native: native || "",
     });
+    qs.set("anilistId", sourceAnimeId || "0");
     qs.set("titles", JSON.stringify(titleVariants));
     if (titleArStr) qs.set("titleAr", titleArStr);
     if (site === "anslayer" && anslayerId) qs.set("anslayerId", anslayerId);
@@ -1850,7 +1863,7 @@ export default function WatchScreen() {
         initialSourceIndex={startIdx}
         title={displayTitle}
         episode={epNum}
-        anilistId={anime ? parseInt(anime) : undefined}
+        anilistId={sourceAnimeId ? parseInt(sourceAnimeId) : undefined}
         episodeTitle={arEpTitle ?? (etitle ? safeDecodeURIComponent(etitle) : undefined)}
         initialPosition={resumeTime}
         totalEps={totalEpsCount}

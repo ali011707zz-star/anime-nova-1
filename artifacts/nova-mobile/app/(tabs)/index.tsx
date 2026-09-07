@@ -27,6 +27,48 @@ import { isTvDevice, tvFocusStyle } from "@/utils/tv";
 import { useTvFocusMemory } from "@/utils/tvFocus";
 import { getPosterUri, getTvPosterUri } from "@/utils/media";
 
+function normalizeLatestEpisodeItem(item: any): any {
+  /* The API has two namespaces: anime_id is AnimeSlayer, while anilistId is
+     the identity required by Kawaii/MegaPlay. Never use the former as an
+     AniList fallback on latest cards. */
+  const rawAniListId = Number(item?.anilistId ?? item?.anilist_id ?? 0);
+  const rawAnimeSlayerId = Number(
+    item?.anslayerId ??
+      item?.anime_id ??
+      (!item?.anilistId && !item?.anilist_id ? item?.animeId : 0) ??
+      0,
+  );
+  const animeId = Number.isInteger(rawAniListId) && rawAniListId > 0 ? rawAniListId : 0;
+  const anslayerId =
+    Number.isInteger(rawAnimeSlayerId) && rawAnimeSlayerId > 0
+      ? rawAnimeSlayerId
+      : 0;
+  const name = String(item?.name ?? item?.title ?? "").trim();
+  const titleVariants = Array.from(new Set([
+    ...(Array.isArray(item?.titleVariants) ? item.titleVariants : []),
+    item?.romaji,
+    item?.english,
+    item?.native,
+    name,
+  ].filter(
+    (value: unknown): value is string =>
+      typeof value === "string" && value.trim().length > 1,
+  )));
+  return {
+    ...item,
+    animeId,
+    anilistId: animeId || undefined,
+    anslayerId,
+    name,
+    titleAr: String(item?.titleAr ?? item?.arabicTitle ?? "").trim(),
+    cover: String(item?.cover ?? item?.poster ?? "").trim(),
+    romaji: String(item?.romaji ?? "").trim(),
+    english: String(item?.english ?? "").trim(),
+    native: String(item?.native ?? "").trim(),
+    titleVariants,
+  };
+}
+
 function randomSample<T>(items: T[], limit = items.length): T[] {
   const shuffled = [...items];
   for (let i = shuffled.length - 1; i > 0; i -= 1) {
@@ -90,6 +132,7 @@ export default function HomeScreen() {
   /* أحدث الحلقات — نفس كتالوج AnimeSlayer المستخدم في الويب. */
   type TodayEp = {
     animeId: number;
+    anilistId?: number;
     anslayerId: number;
     name: string;
     romaji?: string;
@@ -108,7 +151,9 @@ export default function HomeScreen() {
     AsyncStorage.getItem("nova-latest-episodes").then((stored) => {
       try {
         const parsed = JSON.parse(stored || "[]");
-        if (Array.isArray(parsed) && parsed.length) setTodayEps(parsed);
+        if (Array.isArray(parsed) && parsed.length) {
+          setTodayEps(parsed.map(normalizeLatestEpisodeItem));
+        }
       } catch {}
     }).catch(() => {});
     fetch(`${getBaseUrl()}/api/anime/anslayer-latest`, { signal: ctrl.signal, cache: "no-store" })
@@ -117,22 +162,7 @@ export default function HomeScreen() {
         if (ctrl.signal.aborted) return;
         const raw = Array.isArray(payload) ? payload : payload.items || [];
         const normalized = raw
-          .map((item: any) => ({
-            ...item,
-            /* Keep the AniList id separate from AnimeSlayer's id. KW and
-               other AniList-based sources use this value on latest cards. */
-            animeId: Number(item.anilistId ?? item.animeId ?? item.anilist_id ?? 0),
-            anslayerId: Number(item.anslayerId ?? item.animeId ?? item.anilistId ?? 0),
-            name: String(item.name ?? item.title ?? "").trim(),
-            titleAr: String(item.titleAr ?? item.arabicTitle ?? "").trim(),
-            cover: String(item.cover ?? item.poster ?? "").trim(),
-            romaji: String(item.romaji ?? "").trim(),
-            english: String(item.english ?? "").trim(),
-            native: String(item.native ?? "").trim(),
-            titleVariants: Array.isArray(item.titleVariants)
-              ? item.titleVariants.filter((value: unknown): value is string => typeof value === "string" && value.trim().length > 1)
-              : [],
-          }))
+          .map(normalizeLatestEpisodeItem)
           .filter((item) => (item.animeId > 0 || item.anslayerId > 0) && item.name && item.episode != null);
          if (normalized.length) {
            setTodayEps(normalized);
@@ -383,7 +413,7 @@ export default function HomeScreen() {
                 /* بطاقة أحدث الحلقات تمرر anslayerId كمرجع احتياطي لـ AS،
                    لكن صفحة المشاهدة تفحص كل المصادر المتاحة مثل الويب. */
                  <Pressable
-                  onPress={() => router.push(`/watch?anime=${ep.animeId}&ep=${ep.episode}&totalEps=${ep.episode}&title=${encodeURIComponent(ep.romaji || ep.name || "")}&english=${encodeURIComponent(ep.english || "")}&native=${encodeURIComponent(ep.native || "")}&titles=${encodeURIComponent(JSON.stringify(ep.titleVariants || []))}&cover=${encodeURIComponent(ep.cover || "")}&titleAr=${encodeURIComponent(ep.titleAr || "")}&anslayerId=${ep.anslayerId}` as any)}
+                    onPress={() => router.push(`/watch?anime=${ep.animeId || 0}&anilistId=${ep.anilistId || ep.animeId || 0}&ep=${ep.episode}&totalEps=${ep.episode}&title=${encodeURIComponent(ep.romaji || ep.name || "")}&english=${encodeURIComponent(ep.english || "")}&native=${encodeURIComponent(ep.native || "")}&titles=${encodeURIComponent(JSON.stringify(ep.titleVariants || []))}&cover=${encodeURIComponent(ep.cover || "")}&titleAr=${encodeURIComponent(ep.titleAr || "")}&anslayerId=${ep.anslayerId}` as any)}
                    focusable={isTvLayout}
                    style={({ focused }) => [todayEpStyles.card, { width: railCardWidth, height: Math.round(railCardWidth * 1.46), backgroundColor: colors.card, borderColor: colors.border }, isTvLayout && tvFocusStyle(focused)]}
                 >
