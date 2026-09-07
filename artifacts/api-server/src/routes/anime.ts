@@ -18120,6 +18120,41 @@ async function getAnsLayerLatestEpisode(anilistId: number): Promise<number> {
   }
 }
 
+const _anilistAiredEpisodeCache = new Map<number, { ts: number; episode: number }>();
+const ANILIST_AIRED_EPISODE_TTL = 5 * 60_000;
+
+async function getAniListAiredEpisode(anilistId: number): Promise<number> {
+  if (!Number.isFinite(anilistId) || anilistId <= 0) return 0;
+  const cached = _anilistAiredEpisodeCache.get(anilistId);
+  if (cached && Date.now() - cached.ts < ANILIST_AIRED_EPISODE_TTL) {
+    return cached.episode;
+  }
+
+  const query = `
+    query ($id: Int) {
+      Media(id: $id, type: ANIME) {
+        status
+        episodes
+        nextAiringEpisode { episode }
+      }
+    }
+  `;
+  const data = await anilistFetchAndCache(
+    { query, variables: { id: anilistId } },
+    `episode-airing:${anilistId}`,
+    ANILIST_AIRED_EPISODE_TTL,
+  );
+  const media = data?.data?.Media;
+  const nextEpisode = Number(media?.nextAiringEpisode?.episode || 0);
+  const listedEpisodes = Number(media?.episodes || 0);
+  const episode = media?.status === "RELEASING" && nextEpisode > 0
+    ? Math.max(0, nextEpisode - 1)
+    : listedEpisodes;
+
+  _anilistAiredEpisodeCache.set(anilistId, { ts: Date.now(), episode });
+  return episode;
+}
+
 router.get("/anime/episode-titles", async (req, res) => {
   const malId = Number.parseInt(String(req.query.malId || "0"), 10);
   const anilistId = Number.parseInt(String(req.query.anilistId || "0"), 10);
@@ -18175,6 +18210,9 @@ router.get("/anime/episode-titles", async (req, res) => {
         const latestEpisode = anilistId > 0
           ? await getAnsLayerLatestEpisode(anilistId)
           : 0;
+        const anilistAiredEpisode = anilistId > 0
+          ? await getAniListAiredEpisode(anilistId)
+          : 0;
         // Jikan's pagination total is the planned series length and includes
         // unaired episodes. For a currently airing show, expose only episodes
         // whose air date has passed; otherwise the episode list can show 12
@@ -18191,9 +18229,15 @@ router.get("/anime/episode-titles", async (req, res) => {
           const airedAt = airedValue ? Date.parse(String(airedValue)) : NaN;
           return n > 0 && Number.isFinite(airedAt) && airedAt <= now ? Math.max(max, n) : max;
         }, 0);
-        const releasedTotal = Math.max(airedEpisode, latestEpisode);
-        const total = Math.max(paginationTotal, pageFloor, episodeFloor, latestEpisode);
-        payload = { episodes, total, releasedTotal, latestEpisode, page };
+        const releasedTotal = Math.max(airedEpisode, latestEpisode, anilistAiredEpisode);
+        const total = Math.max(
+          paginationTotal,
+          pageFloor,
+          episodeFloor,
+          latestEpisode,
+          anilistAiredEpisode,
+        );
+        payload = { episodes, total, releasedTotal, latestEpisode, anilistAiredEpisode, page };
         break;
       }
       if (upstream.status === 429 && attempt === 0) {
