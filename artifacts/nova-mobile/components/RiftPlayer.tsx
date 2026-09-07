@@ -15,7 +15,6 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   ActivityIndicator, Alert, Animated, Dimensions, Easing, I18nManager, Linking, Platform,
   BackHandler, PanResponder, ScrollView, StyleSheet, Text, View,
-  useTVEventHandler,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -1848,7 +1847,7 @@ function ExpoRiftPlayer({
     schedHide();
   }, [fadeIn, schedHide, showControls, tvMode]);
 
-  /* لا نستخدم useTVEventHandler هنا: بعض إصدارات Android TV/Expo تبني
+  /* لا نركّب مستمع D-pad عام هنا: بعض إصدارات Android TV/Expo تبني
      الشاشة بنجاح لكن تفشل أثناء تركيب هذا المستمع native. أحداث التركيز
      التي تمر عبر TvPressable تكفي لإعادة ضبط المؤقت بدون كسر شاشة المشغل. */
   const Pressable = useCallback((props: React.ComponentProps<typeof TvPressable>) => {
@@ -2274,28 +2273,6 @@ function ExpoRiftPlayer({
       },
     })
   ).current;
-
-  /* Android TV sends D-pad events through TVEventHandler rather than the
-     Pressable key handlers. Only consume left/right while the progress target
-     owns focus, so normal remote navigation still works everywhere else. */
-  const seekFromTvDirection = useCallback((direction: -1 | 1) => {
-    const now = Date.now();
-    /* Avoid double-seeking when a platform emits both TVEventHandler and
-       Pressable key events for the same physical button press. */
-    if (now - lastTvSeekAtRef.current < 100) return;
-    lastTvSeekAtRef.current = now;
-    seek(positionRef.current + direction * (seekDurationRef.current || 10));
-  }, [seek]);
-
-  useTVEventHandler((event: any) => {
-    if (!tvMode || !showControls || !progressFocused) return;
-    const eventType = String(event?.eventType || event?.key || "").toLowerCase();
-    if (eventType === "left" || eventType === "rewind") {
-      seekFromTvDirection(-1);
-    } else if (eventType === "right" || eventType === "fastforward" || eventType === "fast_forward") {
-      seekFromTvDirection(1);
-    }
-  });
 
   const commitProgressPercent = useCallback((value: number) => {
     const safePct = Math.max(0, Math.min(1, Number.isFinite(value) ? value : 0));
