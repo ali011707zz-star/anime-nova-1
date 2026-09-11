@@ -18196,7 +18196,12 @@ router.get("/anime/episode-titles", async (req, res) => {
       );
       if (upstream.ok) {
         const body = await upstream.json() as any;
-        const episodes = Array.isArray(body?.data) ? body.data : [];
+        const episodes = (Array.isArray(body?.data) ? body.data : []).map((item: any) => ({
+          ...item,
+          // Keep the client contract explicit even when Jikan omits the field
+          // for non-filler episodes or changes its nullability.
+          filler: item?.filler === true,
+        }));
         const paginationTotal = Number(body?.pagination?.items?.total || 0);
         const lastVisiblePage = Number(body?.pagination?.last_visible_page || 0);
         let catalogEpisodes = episodes;
@@ -18208,7 +18213,10 @@ router.get("/anime/episode-titles", async (req, res) => {
             );
             if (lastPageResponse.ok) {
               const lastPageBody = await lastPageResponse.json() as any;
-              const lastPageEpisodes = Array.isArray(lastPageBody?.data) ? lastPageBody.data : [];
+              const lastPageEpisodes = (Array.isArray(lastPageBody?.data) ? lastPageBody.data : []).map((item: any) => ({
+                ...item,
+                filler: item?.filler === true,
+              }));
               catalogEpisodes = [...episodes, ...lastPageEpisodes];
             }
           } catch {

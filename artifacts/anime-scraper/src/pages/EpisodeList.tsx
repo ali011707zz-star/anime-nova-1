@@ -75,8 +75,13 @@ function EpisodeRow({
 
       {/* Info */}
       <button onClick={() => onWatch(n)} className="flex-1 min-w-0 text-right">
-        <p className={`text-[13px] font-black font-['Cairo'] ${watched ? "text-primary/80" : "text-white/90"}`}>
-          الحلقة {n}
+        <p className={`flex items-center justify-end gap-2 text-[13px] font-black font-['Cairo'] ${watched ? "text-primary/80" : "text-white/90"}`}>
+          {ep?.filler === true && (
+            <span className="inline-flex shrink-0 items-center rounded-sm bg-[#df2f39] px-2 py-0.5 text-[10px] font-bold leading-none text-white">
+              فلر
+            </span>
+          )}
+          <span>الحلقة {n}</span>
         </p>
         {displayTitle && (
           <p className="text-[9px] font-['Cairo'] mt-0.5 line-clamp-2 leading-relaxed text-white/50" dir="rtl">

@@ -72,6 +72,7 @@ function EpisodeRow({
   const { width, height } = useWindowDimensions();
   const tvMode = isTvDevice(width, height);
   const ep = epData?.find((e: any) => e.mal_id === n || e.episode_id === n);
+  const isFiller = ep?.filler === true;
   const thumb = ep?.images?.jpg?.image_url || anime?.coverImage?.large;
   const originalTitle = ep?.title || ep?.title_romanji || "";
   const arabicTitle = episodeTitlesAr[n] || "";
@@ -111,7 +112,10 @@ function EpisodeRow({
 
       {/* Info */}
       <View style={[ep_s.info, tvMode && ep_s.tvInfo]}>
-        <Text style={[ep_s.epNum, tvMode && ep_s.tvEpNum, watched && { color: "#8B5CF6" }]}>الحلقة {n}</Text>
+        <View style={ep_s.epNumRow}>
+          {isFiller ? <Text style={[ep_s.fillerBadge, tvMode && ep_s.tvFillerBadge]}>فلر</Text> : null}
+          <Text style={[ep_s.epNum, tvMode && ep_s.tvEpNum, watched && { color: "#8B5CF6" }]}>الحلقة {n}</Text>
+        </View>
         {arabicTitle ? <Text style={[ep_s.epTitleAr, tvMode && ep_s.tvEpTitle]} numberOfLines={tvMode ? 2 : 1}>{arabicTitle}</Text> : null}
         {originalTitle ? <Text style={[ep_s.epTitleOriginal, tvMode && ep_s.tvEpOriginal]} numberOfLines={tvMode ? 2 : 1}>{originalTitle}</Text> : null}
       </View>
@@ -586,7 +590,9 @@ const ep_s = StyleSheet.create({
   watchedBorder: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, borderWidth: 2, borderColor: "rgba(139,92,246,0.4)", borderRadius: 8 },
   info: { flex: 1 },
   episodeActions: { flexDirection: "row", alignItems: "center", gap: 8 },
+  epNumRow: { flexDirection: "row", alignItems: "center", justifyContent: "flex-end", gap: 6 },
   epNum: { fontSize: 11, fontFamily: "Cairo_800ExtraBold", color: "rgba(255,255,255,0.9)" },
+  fillerBadge: { backgroundColor: "#df2f39", color: "#fff", fontSize: 9, lineHeight: 16, paddingHorizontal: 7, borderRadius: 1, fontFamily: "Cairo_700Bold", overflow: "hidden" },
   epTitleAr: { fontSize: 10, fontFamily: "Cairo_700Bold", color: "rgba(196,181,253,0.92)", textAlign: "right" },
   epTitleOriginal: { fontSize: 8, fontFamily: "Cairo_400Regular", color: "rgba(255,255,255,0.42)", textAlign: "right" },
   commentBtn: {
@@ -624,6 +630,7 @@ const ep_s = StyleSheet.create({
   tvInfo: { flex: 1, minHeight: 0 },
   tvEpisodeActions: { justifyContent: "flex-end", gap: 5 },
   tvEpNum: { fontSize: 14, lineHeight: 20 },
+  tvFillerBadge: { fontSize: 12, lineHeight: 22, paddingHorizontal: 9 },
   tvEpTitle: { fontSize: 13, lineHeight: 20 },
   tvEpOriginal: { fontSize: 11, lineHeight: 16 },
   tvPageBtn: { width: 44, height: 44, borderRadius: 12 },
