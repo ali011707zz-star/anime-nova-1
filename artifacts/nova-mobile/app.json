@@ -50,6 +50,7 @@
     },
     "plugins": [
       "./plugins/withAndroidTv",
+      "./plugins/withAndroidBroadcastGuard",
       [
         "expo-router",
         {
