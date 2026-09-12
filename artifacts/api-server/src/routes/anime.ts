@@ -17816,6 +17816,42 @@ async function handleAnilistRequest(req: Request, res: Response) {
 router.post("/anilist", handleAnilistRequest);
 router.post("/anime/anilist", handleAnilistRequest);
 
+// ── Source-owned metadata ───────────────────────────────────────────────────
+// During an AniList outage the search fallback returns MAL/Kitsu IDs. Those
+// IDs must never be sent back through Media(id), because AniList and the
+// fallback providers do not share an ID namespace.
+router.get("/anime/meta-by-id", async (req, res) => {
+  const id = String(req.query.id || "").trim();
+  const source = String(req.query.source || "").trim().toLowerCase();
+  if (!id || !/^\d+$/.test(id) || !["mal", "kitsu"].includes(source)) {
+    return res.status(400).json({ error: "id/source غير صالحين" });
+  }
+
+  try {
+    if (source === "mal") {
+      const response = await fetch(`https://api.jikan.moe/v4/anime/${id}/full`, {
+        headers: { Accept: "application/json", "User-Agent": "AnimeNova/1.0" },
+        signal: AbortSignal.timeout(10_000),
+      });
+      if (!response.ok) return res.status(502).json({ error: `Jikan ${response.status}` });
+      const payload = await response.json() as any;
+      if (!payload?.data) return res.status(404).json({ error: "الأنمي غير موجود" });
+      return res.json({ data: { Media: jikanToAniList(payload.data) } });
+    }
+
+    const response = await fetch(`https://kitsu.io/api/edge/anime/${encodeURIComponent(id)}`, {
+      headers: { Accept: "application/vnd.api+json", "User-Agent": "AnimeNova/1.0" },
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!response.ok) return res.status(502).json({ error: `Kitsu ${response.status}` });
+    const payload = await response.json() as any;
+    if (!payload?.data) return res.status(404).json({ error: "الأنمي غير موجود" });
+    return res.json({ data: { Media: kitsuToAniList(payload.data) } });
+  } catch (error: any) {
+    return res.status(502).json({ error: error?.name === "TimeoutError" ? "مصدر البيانات لم يستجب" : "تعذر جلب البيانات" });
+  }
+});
+
 // ── Poster endpoint — جلب بوستر+قصة بـ AniList ID ─────────────────────────
 router.get("/anime/poster/:id", async (req, res) => {
   const anilistId = parseInt(req.params.id, 10);
@@ -18202,6 +18238,13 @@ router.get("/anime/episode-titles", async (req, res) => {
           // for non-filler episodes or changes its nullability.
           filler: item?.filler === true,
         }));
+        // A long-running show can legitimately have a final short page, but
+        // an empty 200 response from Jikan is also seen during rate limiting.
+        // Retry once and never retain an empty page in the server cache.
+        if (page > 1 && episodes.length === 0 && attempt === 0) {
+          await new Promise(resolve => setTimeout(resolve, 700));
+          continue;
+        }
         const paginationTotal = Number(body?.pagination?.items?.total || 0);
         const lastVisiblePage = Number(body?.pagination?.last_visible_page || 0);
         let catalogEpisodes = episodes;
@@ -18273,7 +18316,9 @@ router.get("/anime/episode-titles", async (req, res) => {
   }
 
   const result = payload || { episodes: [], total: 0, latestEpisode: 0, page };
-  if (payload) _jikanEpisodeCache.set(key, { ts: Date.now(), payload });
+  if (payload && payload.episodes?.length) {
+    _jikanEpisodeCache.set(key, { ts: Date.now(), payload });
+  }
   res.json(result);
 });
 

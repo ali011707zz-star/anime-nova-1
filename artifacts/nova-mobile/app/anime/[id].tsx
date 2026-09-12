@@ -292,6 +292,7 @@ export default function AnimeDetailScreen() {
           `${base}/api/anime/meta-by-id?id=${encodeURIComponent(id)}&source=${source}`,
           { signal: controller.signal },
         );
+        if (!response.ok) throw new Error(`metadata_${response.status}`);
         return response.json();
       }
       /* AnimeSlayer cards carry a catalog id, not an AniList id. Search by

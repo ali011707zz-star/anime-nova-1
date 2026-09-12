@@ -43,6 +43,7 @@ const API_BASE = `${SEARCH_API_BASE}/api`;
 /* ── Types ── */
 interface AnimeResult {
   id: number;
+  idSource?: "mal" | "kitsu" | string;
   title: { romaji?: string; english?: string; native?: string };
   coverImage: { large?: string; extraLarge?: string };
   averageScore?: number;
@@ -594,7 +595,9 @@ export default function SearchScreen() {
               <AnimeCard
                 anime={item}
                 columns={gridColumns}
-                onPress={() => router.push(`/anime/${item.id}?title=${encodeURIComponent(item.title?.romaji || "")}&english=${encodeURIComponent(item.title?.english || "")}`)}
+                onPress={() => router.push(
+                  `/anime/${item.id}?title=${encodeURIComponent(item.title?.romaji || "")}&english=${encodeURIComponent(item.title?.english || "")}${item.idSource ? `&src=${encodeURIComponent(item.idSource)}` : ""}`
+                )}
               />
             )}
           />

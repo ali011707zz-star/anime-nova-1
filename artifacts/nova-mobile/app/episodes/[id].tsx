@@ -60,18 +60,18 @@ async function saveCommentCounts(animeId: string, counts: Record<number, number>
 
 /* ── Episode thumbnail row ── */
 function EpisodeRow({
-  n, anime, epData, episodeTitlesAr, watched, commentCount, onToggleWatched, onWatch, onComment,
+  n, anime, epByNumber, episodeTitlesAr, watched, commentCount, onToggleWatched, onWatch, onComment,
   onFocus,
   hasTVPreferredFocus = false,
 }: {
-  n: number; anime: any; epData: any[]; episodeTitlesAr: Record<number, string>; watched: boolean; commentCount: number;
+  n: number; anime: any; epByNumber: Map<number, any>; episodeTitlesAr: Record<number, string>; watched: boolean; commentCount: number;
   onToggleWatched: (n: number) => void; onWatch: (n: number) => void; onComment: (n: number) => void;
   onFocus?: () => void;
   hasTVPreferredFocus?: boolean;
 }) {
   const { width, height } = useWindowDimensions();
   const tvMode = isTvDevice(width, height);
-  const ep = epData?.find((e: any) => e.mal_id === n || e.episode_id === n);
+  const ep = epByNumber.get(n);
   const isFiller = ep?.filler === true;
   const thumb = ep?.images?.jpg?.image_url || anime?.coverImage?.large;
   const originalTitle = ep?.title || ep?.title_romanji || "";
@@ -175,7 +175,11 @@ export default function EpisodeListScreen() {
   const [watched, setWatched] = useState<Set<number>>(new Set());
   const [commentCounts, setCommentCounts] = useState<Record<number, number>>({});
   const episodeListRef = useRef<FlatList<number>>(null);
+  const episodePagesFetchedRef = useRef<Set<number>>(new Set());
+  const episodePageControllersRef = useRef<Map<number, AbortController>>(new Map());
+  const fetchEpisodePageRef = useRef<(page: number) => void>(() => {});
   const { preferredKey, ready, rememberFocus } = useTvFocusMemory(`episodes:${id || "unknown"}`);
+  const routeSource = (Array.isArray(src) ? src[0] : src) || "";
 
   useEffect(() => {
     if (!id) return;
@@ -249,36 +253,82 @@ export default function EpisodeListScreen() {
       }
       setAnime(a);
       setEpisodeTitlesAr({});
-      if (a?.idMal) {
-        fetch(`${base}/api/anime/episode-titles?malId=${a.idMal}&anilistId=${Number(a.id || 0)}&page=1`, { signal: ctrl.signal })
-          .then(r => r.json())
-          .then(d => {
-            if (ctrl.signal.aborted) return;
-            if (Array.isArray(d?.episodes)) setEpData(d.episodes);
-            /* Jikan's `total` can be the planned series length, including
-               episodes that have not aired yet. Keep the live/released
-               values only, and also accept the latest source catalog's
-               episode number when Jikan is behind. */
-            const catalogTotal = a.status === "RELEASING"
-              ? Math.max(Number(d?.releasedTotal || 0), Number(d?.latestEpisode || 0))
-              : Number(d?.total || 0);
-            if (catalogTotal > 0) setEpisodeCatalogTotal(catalogTotal);
-          })
-          .catch((e) => {
-            if (e?.name === "AbortError") return;
-            // Last resort for an already-rendered details page.
-            fetch(`https://api.jikan.moe/v4/anime/${a.idMal}/episodes?page=1`, { signal: ctrl.signal })
-              .then(r => r.json())
-              .then(fallback => {
-                if (!ctrl.signal.aborted && Array.isArray(fallback?.data)) setEpData(fallback.data);
-              })
-              .catch(() => {});
-          });
-      }
     }).catch((e) => { if (e?.name !== "AbortError") console.warn("[Episodes] anilist fetch error"); })
       .finally(() => { if (!ctrl.signal.aborted) setLoading(false); });
     return () => ctrl.abort();
   }, [id]);
+
+  /*
+   * Jikan returns 100 episode records per page. The web app loads the page
+   * matching the visible range; mobile used to keep only page 1, so filler
+   * flags and titles disappeared after episode 100 even though the number
+   * list continued. Load metadata lazily as the virtualized list approaches
+   * each page, and allow a direct search to request its page immediately.
+   */
+  const fetchEpisodePage = useCallback((page: number) => {
+    const malId = Number(anime?.idMal || 0);
+    if (!malId || !Number.isFinite(page) || page < 1) return;
+    if (episodePagesFetchedRef.current.has(page) || episodePageControllersRef.current.has(page)) return;
+
+    const pageCtrl = new AbortController();
+    episodePageControllersRef.current.set(page, pageCtrl);
+    const sourceUsesExternalId = anime?.idSource === "mal" || anime?.idSource === "kitsu" || routeSource === "mal" || routeSource === "kitsu";
+    const anilistId = sourceUsesExternalId ? 0 : Number(anime?.id || 0);
+    fetch(`${getBaseUrl()}/api/anime/episode-titles?malId=${malId}&anilistId=${anilistId}&page=${page}`, {
+      signal: pageCtrl.signal,
+      cache: "no-store",
+    })
+      .then(r => r.ok ? r.json() : null)
+      .then(d => {
+        if (!d || pageCtrl.signal.aborted) return;
+        if (Array.isArray(d.episodes)) {
+          setEpData(prev => {
+            const merged = new Map<number, any>();
+            for (const item of prev) {
+              const n = Number(item?.mal_id || item?.episode_id || item?.episode || 0);
+              if (n > 0) merged.set(n, item);
+            }
+            for (const item of d.episodes) {
+              const n = Number(item?.mal_id || item?.episode_id || item?.episode || 0);
+              if (n > 0) merged.set(n, item);
+            }
+            return Array.from(merged.values());
+          });
+        }
+        /* Keep the same aired/total rule as the web episode list. */
+        const catalogTotal = anime?.status === "RELEASING"
+          ? Math.max(Number(d.releasedTotal || 0), Number(d.latestEpisode || 0), Number(d.anilistAiredEpisode || 0))
+          : Number(d.total || 0);
+        if (catalogTotal > 0) setEpisodeCatalogTotal(prev => Math.max(prev, catalogTotal));
+        episodePagesFetchedRef.current.add(page);
+      })
+      .catch(() => {})
+      .finally(() => {
+        episodePageControllersRef.current.delete(page);
+      });
+  }, [anime?.id, anime?.idMal, anime?.idSource, anime?.status, routeSource]);
+
+  fetchEpisodePageRef.current = fetchEpisodePage;
+
+  useEffect(() => {
+    if (!anime?.idMal) return;
+    episodePagesFetchedRef.current.clear();
+    for (const controller of episodePageControllersRef.current.values()) controller.abort();
+    episodePageControllersRef.current.clear();
+    fetchEpisodePage(1);
+    return () => {
+      for (const controller of episodePageControllersRef.current.values()) controller.abort();
+      episodePageControllersRef.current.clear();
+      episodePagesFetchedRef.current.clear();
+    };
+  }, [anime?.id, anime?.idMal, fetchEpisodePage]);
+
+  useEffect(() => {
+    const requestedEpisode = Number.parseInt(search.trim(), 10);
+    if (requestedEpisode > 0) {
+      fetchEpisodePage(Math.ceil(requestedEpisode / 100));
+    }
+  }, [fetchEpisodePage, search]);
 
   /* Load comment counts from server (background, non-blocking) */
   useEffect(() => {
@@ -370,16 +420,33 @@ export default function EpisodeListScreen() {
      */
     return isSearching ? filtered : allEps;
   }, [allEps, filtered, isSearching]);
+  const epByNumber = useMemo(() => {
+    const map = new Map<number, any>();
+    for (const item of epData) {
+      const n = Number(item?.mal_id || item?.episode_id || item?.episode || 0);
+      if (n > 0) map.set(n, item);
+    }
+    return map;
+  }, [epData]);
   const preferredEpisodeNumber = Number(preferredKey);
   const shouldFocusContinue = !preferredKey
     || preferredKey === "continue"
     || !displayedEps.includes(preferredEpisodeNumber);
 
+  const onViewableItemsChanged = useRef(({ viewableItems }: { viewableItems: Array<{ index: number | null }> }) => {
+    const maxIndex = viewableItems.reduce((max, item) => Math.max(max, item.index ?? -1), -1);
+    if (maxIndex >= 0) fetchEpisodePageRef.current(Math.floor(maxIndex / 100) + 1);
+  }).current;
+  const viewabilityConfig = useRef({
+    itemVisiblePercentThreshold: 35,
+    minimumViewTime: 100,
+  }).current;
+
   /* ترجمة عناوين الصفحة الحالية دفعةً بدفعة، مع الاعتماد على كاش الخادم */
   useEffect(() => {
     const pending = displayedEps
       .map(n => {
-        const ep = epData.find((e: any) => e.mal_id === n || e.episode_id === n);
+        const ep = epByNumber.get(n);
         return { n, title: ep?.title || ep?.title_romanji || "" };
       })
       .filter(item => item.title && !episodeTitlesAr[item.n]);
@@ -403,7 +470,7 @@ export default function EpisodeListScreen() {
       }
     })();
     return () => { cancelled = true; };
-  }, [displayedEps, epData, episodeTitlesAr]);
+  }, [displayedEps, epByNumber, episodeTitlesAr]);
 
   if (loading) return (
     <View style={ep_s.container}>
@@ -502,10 +569,18 @@ export default function EpisodeListScreen() {
           numColumns={1}
           keyExtractor={n => n.toString()}
           showsVerticalScrollIndicator={false}
-          removeClippedSubviews={false}
-          initialNumToRender={tvMode ? 16 : 8}
-          maxToRenderPerBatch={tvMode ? 12 : 8}
-          windowSize={tvMode ? 7 : 5}
+          removeClippedSubviews={Platform.OS === "android" && !tvMode}
+          initialNumToRender={tvMode ? 16 : 12}
+          maxToRenderPerBatch={tvMode ? 12 : 12}
+          updateCellsBatchingPeriod={50}
+          windowSize={tvMode ? 7 : 9}
+          onViewableItemsChanged={onViewableItemsChanged}
+          viewabilityConfig={viewabilityConfig}
+          onEndReached={() => {
+            const lastIndex = Math.max(0, displayedEps.length - 1);
+            fetchEpisodePageRef.current(Math.floor(lastIndex / 100) + 1);
+          }}
+          onEndReachedThreshold={0.35}
           onScrollToIndexFailed={({ index }) => {
             episodeListRef.current?.scrollToOffset({
               offset: Math.max(0, index * (tvMode ? 116 : 72)),
@@ -530,7 +605,7 @@ export default function EpisodeListScreen() {
             <EpisodeRow
               n={n}
               anime={anime}
-              epData={epData}
+              epByNumber={epByNumber}
               episodeTitlesAr={episodeTitlesAr}
               watched={watched.has(n)}
               commentCount={commentCounts[n] || 0}

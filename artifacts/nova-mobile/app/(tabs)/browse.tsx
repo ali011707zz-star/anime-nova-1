@@ -14,6 +14,7 @@ import { getGridColumnCount } from "@/components/AnimeCard";
 /* ── Data ── */
 interface AnimeResult {
   id: number;
+  idSource?: "mal" | "kitsu" | string;
   title: { romaji: string; english?: string };
   coverImage: { large: string; extraLarge?: string };
   averageScore?: number;
@@ -568,7 +569,9 @@ export default function BrowseScreen() {
                     const index = filteredItems.findIndex((candidate) => candidate.id === item.id);
                     if (index >= 0) listRef.current?.scrollToIndex({ index, animated: false, viewPosition: 0.35 });
                   }}
-                  onPress={() => router.push(`/anime/${item.id}?title=${encodeURIComponent(item.title.romaji)}&english=${encodeURIComponent(item.title.english || "")}`)}
+                  onPress={() => router.push(
+                    `/anime/${item.id}?title=${encodeURIComponent(item.title.romaji)}&english=${encodeURIComponent(item.title.english || "")}${item.idSource ? `&src=${encodeURIComponent(item.idSource)}` : ""}`
+                  )}
                 />
               )}
             />

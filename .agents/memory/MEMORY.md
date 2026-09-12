@@ -81,6 +81,7 @@
 - [Availability-only provider adapters](availability-only-providers.md) — every provider must accept the explicit metadata-only flag; extra JS arguments are silently ignored
 - [VPS HLS downloads](vps-hls-downloads.md) — HLS must be remuxed to MP4 on the VPS; subtitles remain offline VTT sidecars.
 - [Canonical episode totals](canonical-episode-totals.md) — episode lists must use the maximum confirmed total across AniList, Jikan, and the latest source catalog; cache keys include anime identity.
+- [Mobile episode pagination](mobile-episode-pagination.md) — long-running lists load Jikan metadata by visible 100-episode pages; distant searches request their page directly.
 - [Mobile watch loading fallback](mobile-watch-loading-fallback.md) — every render branch in the watch/server-scan flow must import its fallback components; missing ActivityIndicator caused an immediate ErrorBoundary crash.
 - [AnimeWitcher quality preservation](aw-quality-dedup-2026-08.md) — deduplicate AW by provider+quality+URL and classify quality from all row fields, or picker tiers disappear.
 - [Kawaii current public API](kawaii-current-api.md) — current source retrieval is /api/miruro with a nested data payload; /api/watch now returns APP_KEY_MISSING.
