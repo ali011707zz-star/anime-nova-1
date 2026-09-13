@@ -13335,6 +13335,14 @@ router.get("/anime/sources-stream", scraperQueueMiddleware, async (req, res) => 
   const ep        = parseInt((req.query.ep    as string) || "1");
   let anilistId = parseInt((req.query.anilistId as string) || (req.query.anime as string) || "0") || undefined;
   const anslayerId = parseInt((req.query.anslayerId as string) || "0") || undefined;
+  // Latest-episode links may carry the AnimeSlayer id in `anime` while also
+  // forwarding it as `anilistId`. Do not pass that catalog id to AniList-based
+  // providers; let the title resolver find a verified AniList id instead.
+  if (anilistId && anslayerId && anilistId === anslayerId) anilistId = undefined;
+  // Latest-episode links may carry the AnimeSlayer id in `anime` while also
+  // forwarding it as `anilistId`. Treat that equal pair as unresolved rather
+  // than sending an AnimeSlayer id to AniList-based providers.
+  if (anilistId && anslayerId && anilistId === anslayerId) anilistId = undefined;
   const format    = ((req.query.format  as string) || "").trim().toUpperCase();
   const isMovie   = format === "MOVIE" || format === "MOVIE_SHORT";
   const checkOnly = String(req.query.mode || "").toLowerCase() === "check";
@@ -13885,7 +13893,10 @@ router.get("/anime/sources-stream", scraperQueueMiddleware, async (req, res) => 
     // reflect real tiers rather than the page's generic "HD" label.
     if (checkOnly) {
       await Promise.race([runSourceQueue([
-        () => scrapeCached("kawaii",        () => getKawaiiAnimeSources(title, english, ep, anilistId, true), false, 3200),
+        // Kawaii's API can take several seconds for newly published episodes.
+        // Keep this provider inside the availability pass without letting a slow
+        // response hold the whole picker open.
+        () => scrapeCached("kawaii",        () => getKawaiiAnimeSources(title, english, ep, anilistId, true), false, 10000),
         () => scrapeCached("megaplay",      () => getMegaPlayAnimeSources(title, english, ep, anilistId, true), false, 5000),
         () => scrapeCached("animekai",      () => getAnimeKaiSources(title, english, ep, anilistId, true), false, 5000),
         () => scrapeCached("anineko",       () => getAninekoSources(title, english, ep, titleVariants, true), false, 25000),
@@ -14119,7 +14130,7 @@ router.get("/anime/fetch-source", scraperQueueMiddleware, async (req, res) => {
 
   // روابط “أحدث الحلقات” تحمل AnimeSlayer ID في anime=، لذلك تكون AniList ID مفقودة.
   // حلّها قبل تشغيل أي مصدر يعتمد على AniList (KW وAnimeWitcher وغيرها).
-  if (site !== "anslayer" && (site === "megaplay" || site === "kawaii" || !anilistId)) {
+  if (site !== "anslayer" && !anilistId) {
     const resolvedByTitle = await Promise.race([
       resolveAniListIdForSource(title, english, titleVariants, titleAr),
       new Promise<number | undefined>(resolve => setTimeout(() => resolve(undefined), 3500)),
@@ -14226,7 +14237,6 @@ router.get("/anime/fetch-source", scraperQueueMiddleware, async (req, res) => {
     // Kawaii links are episode-specific signed URLs and the catalog changes
     // while an episode is still being added. Always ask Kawaii for a fresh URL.
     "kawaii",
-    "megaplay", // MegaPlay HLS tokens rotate; never serve a stale cached URL
     "reanime", // FlixCloud HLS URLs are signed and must be fetched live
       "anivexa_re",
 
