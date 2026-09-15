@@ -131,3 +131,4 @@
 - [Live airing metadata cache](live-airing-metadata-cache.md) — nextAiringEpisode must use a short-lived, versioned cache namespace; long metadata TTLs show old countdowns.
 - [AnimeSlayer latest fallback](anime-slayer-latest-fallback.md) — keep AnimeSlayer-only latest cards by anslayerId when AniList title resolution is unavailable.
 - [Mobile runtime API URL](mobile-runtime-api-url.md) — resolve AsyncStorage-overridden API URLs at request time; module-level constants can cause mobile-only empty flows.
+- [Mobile static build cancellation](mobile-static-build-cancellation.md) — Expo build clears static-build before bundling; cancellation can leave the VPS mobile download service without a manifest.
