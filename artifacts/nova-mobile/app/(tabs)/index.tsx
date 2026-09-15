@@ -177,7 +177,6 @@ export default function HomeScreen() {
   const isLoading = loadingT || loadingP || loadingA;
 
   /* ── Dubbed cartoon catalog ── */
-  const BASE_URL = getBaseUrl();
   const [dubbedSeries, setDubbedSeries] = useState<any[]>([]);
   const dubbedRequestRef = useRef<AbortController | null>(null);
   const dubbedLastFetchedRef = useRef(0);
@@ -187,7 +186,7 @@ export default function HomeScreen() {
     const controller = new AbortController();
     dubbedRequestRef.current = controller;
     const refresh = forceRefresh ? "&refresh=1" : "";
-    fetch(`${BASE_URL}/api/dubbed/catalog?page=1${refresh}`, {
+    fetch(`${getBaseUrl()}/api/dubbed/catalog?page=1${refresh}`, {
       cache: forceRefresh ? "no-store" : "default",
       signal: controller.signal,
     })
@@ -199,7 +198,7 @@ export default function HomeScreen() {
         }
       })
       .catch((e) => { if (e?.name !== "AbortError") console.warn("[Home] dubbed/catalog fetch error"); });
-  }, [BASE_URL]);
+  }, []);
   useFocusEffect(useCallback(() => {
     void refreshDubbed();
     return () => dubbedRequestRef.current?.abort();
@@ -209,7 +208,7 @@ export default function HomeScreen() {
   const [awDubbedSeries, setAwDubbedSeries] = useState<any[]>([]);
   useEffect(() => {
     const ctrl = new AbortController();
-    fetch(`${BASE_URL}/api/aw-dubbed/catalog?page=1`, { signal: ctrl.signal })
+    fetch(`${getBaseUrl()}/api/aw-dubbed/catalog?page=1`, { signal: ctrl.signal })
       .then(r => r.json())
       .then(d => { if (!ctrl.signal.aborted) setAwDubbedSeries(d.results || []); })
       .catch((e) => { if (e?.name !== "AbortError") console.warn("[Home] aw-dubbed/catalog fetch error"); });
@@ -541,7 +540,7 @@ export default function HomeScreen() {
                   ? item.image.trim()
                   : getPosterUri(item);
                 const imgUri = rawImg
-                  ? rawImg.startsWith("http") ? rawImg : `${BASE_URL}${rawImg}`
+                  ? rawImg.startsWith("http") ? rawImg : `${getBaseUrl()}${rawImg}`
                   : null;
                 return (
                    <Pressable

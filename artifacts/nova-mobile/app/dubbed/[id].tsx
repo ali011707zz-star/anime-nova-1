@@ -13,15 +13,17 @@ const Pressable = TvPressable;
 interface Season { label: string; arabicToonsId: string; }
 interface Episode { number: number; epId: string; url: string; thumbnail?: string; }
 
-const BASE = getBaseUrl();
-const AT_IMG = `${BASE}/api/dubbed/img?f=`;
+function apiBase(): string {
+  return getBaseUrl().replace(/\/$/, "");
+}
 
 function thumbSrc(t?: string): string | null {
   if (!t) return null;
   if (t.startsWith("http")) return t;
-  if (t.startsWith("/api/dubbed/img")) return `${BASE}${t}`;
+  const base = apiBase();
+  if (t.startsWith("/api/dubbed/img")) return `${base}${t}`;
   const f = t.split("?f=")[1] || t.split("/").pop();
-  return f ? `${AT_IMG}${f}` : null;
+  return f ? `${base}/api/dubbed/img?f=${encodeURIComponent(f)}` : null;
 }
 
 export default function DubbedDetailScreen() {
@@ -39,7 +41,7 @@ export default function DubbedDetailScreen() {
     try { return JSON.parse(decodeURIComponent(seasonsParam || "[]")); } catch { return []; }
   })();
   const imgSrc = img ? decodeURIComponent(img) : null;
-  const posterSrc = imgSrc?.startsWith("http") ? imgSrc : (imgSrc ? `${BASE}${imgSrc}` : null);
+  const posterSrc = imgSrc?.startsWith("http") ? imgSrc : (imgSrc ? `${apiBase()}${imgSrc}` : null);
 
   const [selSeason, setSelSeason] = useState(0);
   const [episodes, setEpisodes] = useState<Episode[]>([]);
@@ -54,9 +56,9 @@ export default function DubbedDetailScreen() {
     const ctrl = new AbortController();
     setEpLoading(true);
     setEpisodes([]);
-    fetch(`${BASE}/api/dubbed/episodes?series=${encodeURIComponent(curSeason.arabicToonsId)}`, { signal: ctrl.signal })
-      .then(r => r.json())
-      .then(d => { if (!ctrl.signal.aborted) { setEpisodes(d.episodes || []); setEpLoading(false); } })
+    fetch(`${apiBase()}/api/dubbed/episodes?series=${encodeURIComponent(curSeason.arabicToonsId)}`, { signal: ctrl.signal })
+      .then(r => { if (!r.ok) throw new Error(`episodes_${r.status}`); return r.json(); })
+      .then(d => { if (!ctrl.signal.aborted) { setEpisodes(Array.isArray(d.episodes) ? d.episodes : []); setEpLoading(false); } })
       .catch((e) => { if (e?.name !== "AbortError") setEpLoading(false); });
     return () => ctrl.abort();
   }, [curSeason?.arabicToonsId]);

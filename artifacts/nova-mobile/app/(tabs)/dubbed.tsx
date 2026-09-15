@@ -22,16 +22,18 @@ interface Series {
   slug?: string;
 }
 
-const BASE = getBaseUrl();
-const AT_IMG = `${BASE}/api/dubbed/img?f=`;
+function apiBase(): string {
+  return getBaseUrl().replace(/\/$/, "");
+}
 
 function getImg(s: Series): string | null {
   const img = s.poster || s.image;
   if (!img) return null;
   if (img.startsWith("http")) return img;
-  if (img.startsWith("/api/dubbed/img")) return `${BASE}${img}`;
+  const base = apiBase();
+  if (img.startsWith("/api/dubbed/img")) return `${base}${img}`;
   const f = img.split("?f=")[1] || img.split("/").pop();
-  return f ? `${AT_IMG}${f}` : null;
+  return f ? `${base}/api/dubbed/img?f=${encodeURIComponent(f)}` : null;
 }
 
 function SeriesCard({ s, onPress }: { s: Series; onPress: () => void }) {
@@ -94,11 +96,12 @@ export default function DubbedScreen() {
     if (reset) setLoading(true); else setLoadingMore(true);
     try {
       const refresh = forceRefresh ? "&refresh=1" : "";
-      const r = await fetch(`${BASE}/api/dubbed/catalog?page=${p}${refresh}`, {
+      const r = await fetch(`${apiBase()}/api/dubbed/catalog?page=${p}${refresh}`, {
         cache: forceRefresh ? "no-store" : "default",
       });
+      if (!r.ok) throw new Error(`catalog_${r.status}`);
       const d = await r.json();
-      const results: Series[] = d.results || [];
+      const results: Series[] = Array.isArray(d.results) ? d.results : [];
       setTotalPages(d.totalPages || 1);
       setSeries(prev => reset ? results : [...prev, ...results]);
       setPage(p);
@@ -125,9 +128,10 @@ export default function DubbedScreen() {
     if (searchTimer.current) clearTimeout(searchTimer.current);
     searchTimer.current = setTimeout(async () => {
       try {
-        const r = await fetch(`${BASE}/api/dubbed/search?q=${encodeURIComponent(q)}`);
+        const r = await fetch(`${apiBase()}/api/dubbed/search?q=${encodeURIComponent(q)}`);
+        if (!r.ok) throw new Error(`search_${r.status}`);
         const d = await r.json();
-        setSearchResults(d.results || []);
+        setSearchResults(Array.isArray(d.results) ? d.results : []);
       } catch { setSearchResults([]); }
       setSearchLoading(false);
     }, 400);
