@@ -88,23 +88,23 @@ export default function DubbedWatchScreen() {
 
         if (rawUrl || proxyUrl) {
           const srcs: PlayerSource[] = [];
-          /* الـ proxy VPS أولاً: foupix يتحقق من UA hash في الـ token.
-             الـ token أُنشئ بـ BROWSER_UA (desktop Chrome) على VPS —
-             ExoPlayer/AVPlayer يستخدم UA مختلف فيُعطي 403 على rawUrl.
-             proxy VPS يُعيد stream بنفس BROWSER_UA → يعمل دائماً. */
-          if (proxyUrl) srcs.push({
-            url: proxyUrl, label: "مدبلج عربي", quality: "720p HD",
-          });
-          // المصدر المباشر احتياطي (IP سكني قد يمر بدون فحص UA)
+           /* Foupix يطابق ua-hash داخل token مع User-Agent الذي استُخدم
+              عند إنشائه. إرسال نفس Chrome UA من الجهاز أسرع بكثير من تمرير
+              أول نطاق فيديو كامل عبر VPS، كما أنه يعمل من شبكات المستخدم
+              السكنية. يبقى proxy احتياطياً للشبكات التي تحجب Foupix. */
           if (rawUrl && rawUrl !== proxyUrl) srcs.push({
             url: rawUrl,
             label: "مدبلج عربي (مباشر)",
             quality: "720p HD",
             headers: {
+               "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
               Referer: "https://www.arabic-toons.com/",
               Origin:  "https://www.arabic-toons.com",
             },
           });
+           if (proxyUrl) srcs.push({
+             url: proxyUrl, label: "مدبلج عربي عبر الخادم", quality: "720p HD",
+           });
           if (mountedRef.current) { setSources(srcs); setLoading(false); }
           return;
         }

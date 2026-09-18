@@ -6293,6 +6293,8 @@ const KAWAII_CDN_HOSTS = new Set([
   "cdn.momentoai.dev",
   "video.kawaii-anime.com",
   "cdn.mewstream.buzz",
+  // Kawaii rotated /api/miruro HLS responses to this unsigned CDN host.
+  "cdn.imgnex.top",
   // Kawaii currently serves some episodes through its rotating Watching CDN.
   // The URL is still signed and is returned by the trusted Kawaii API.
   "cdn.watching.onl",
@@ -6336,7 +6338,8 @@ function isTrustedKawaiiCdnUrl(rawUrl: string): boolean {
       KAWAII_CDN_HOSTS.has(host) ||
       host.endsWith(".kawaii-anime.com") ||
       host.endsWith(".momentoai.dev") ||
-      host.endsWith(".mewstream.buzz")
+      host.endsWith(".mewstream.buzz") ||
+      host.endsWith(".imgnex.top")
     ) return true;
 
     const signed = parsed.searchParams.has("md5") && (
