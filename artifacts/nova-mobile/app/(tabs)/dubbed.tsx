@@ -22,27 +22,6 @@ interface Series {
   slug?: string;
 }
 
-function normalizeSeasons(value: unknown): Season[] {
-  if (!Array.isArray(value)) return [];
-  return value.filter((season): season is Season => (
-    !!season &&
-    typeof season === "object" &&
-    typeof (season as Season).arabicToonsId === "string"
-  )).map(season => ({
-    label: typeof season.label === "string" && season.label ? season.label : "الحلقات",
-    arabicToonsId: season.arabicToonsId,
-  }));
-}
-
-function normalizeSeries(value: any): Series {
-  return {
-    ...value,
-    key: typeof value?.key === "string" ? value.key : "",
-    title: typeof value?.title === "string" ? value.title : "",
-    seasons: normalizeSeasons(value?.seasons),
-  };
-}
-
 function apiBase(): string {
   return getBaseUrl().replace(/\/$/, "");
 }
@@ -122,7 +101,7 @@ export default function DubbedScreen() {
       });
       if (!r.ok) throw new Error(`catalog_${r.status}`);
       const d = await r.json();
-      const results: Series[] = Array.isArray(d.results) ? d.results.map(normalizeSeries) : [];
+      const results: Series[] = Array.isArray(d.results) ? d.results : [];
       setTotalPages(d.totalPages || 1);
       setSeries(prev => reset ? results : [...prev, ...results]);
       setPage(p);
@@ -152,7 +131,7 @@ export default function DubbedScreen() {
         const r = await fetch(`${apiBase()}/api/dubbed/search?q=${encodeURIComponent(q)}`);
         if (!r.ok) throw new Error(`search_${r.status}`);
         const d = await r.json();
-        setSearchResults(Array.isArray(d.results) ? d.results.map(normalizeSeries) : []);
+        setSearchResults(Array.isArray(d.results) ? d.results : []);
       } catch { setSearchResults([]); }
       setSearchLoading(false);
     }, 400);
@@ -165,7 +144,7 @@ export default function DubbedScreen() {
       params: {
         id: encodeURIComponent(s.key || s.title),
         title: s.title,
-        seasons: JSON.stringify(normalizeSeasons(s.seasons)),
+        seasons: JSON.stringify(s.seasons),
         img: s.poster || s.image || "",
       },
     });

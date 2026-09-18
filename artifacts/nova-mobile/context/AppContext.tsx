@@ -180,26 +180,6 @@ function mapServerHistory(row: any): WatchProgress | null {
   };
 }
 
-function mapServerProgress(row: any): WatchProgress | null {
-  const animeId = asNumber(row?.anime_id ?? row?.animeId);
-  const ep = asNumber(row?.episode_number ?? row?.episode ?? row?.ep);
-  if (!animeId || !ep) return null;
-  const encoded = decodeServerAnimeType(row?.anime_type ?? row?.animeType);
-  return {
-    animeId,
-    ep,
-    season: asNumber(row?.season_number ?? row?.season, 1),
-    contentKind: encoded.kind,
-    contentKey: encoded.key || String(animeId),
-    title: "",
-    english: "",
-    thumbnail: "",
-    position: asNumber(row?.progress_seconds ?? row?.progress, 0),
-    duration: asNumber(row?.duration_seconds ?? row?.duration, 0),
-    updatedAt: Date.parse(row?.updated_at || "") || Date.now(),
-  };
-}
-
 function mapServerFavorite(row: any): FavoriteAnime | null {
   const id = asNumber(row?.anime_id ?? row?.animeId ?? row?.content_id);
   if (!id) return null;
@@ -293,31 +273,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     await AsyncStorage.setItem(key, JSON.stringify([...new Set(ids)]));
   }, []);
 
-  const postProgress = useCallback(async (item: WatchProgress): Promise<boolean> => {
-    if (item.position == null || item.position <= 10) return true;
-    try {
-      const response = await secureFetch(accountUrl("/user/progress"), {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          animeId: item.animeId,
-          animeType: serverAnimeType(item),
-          episodeNumber: item.ep,
-          seasonNumber: item.season || 1,
-          progressSeconds: item.position,
-          durationSeconds: item.duration || 0,
-        }),
-      });
-      return response.ok;
-    } catch {
-      return false;
-    }
-  }, [accountUrl]);
-
   const postHistory = useCallback(async (item: WatchProgress): Promise<boolean> => {
     try {
-      const [response, progressOk] = await Promise.all([
-        secureFetch(accountUrl("/user/history"), {
+      const response = await secureFetch(accountUrl("/user/history"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -328,14 +286,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           episodeNumber: item.ep,
           seasonNumber: item.season || 1,
         }),
-        }),
-        postProgress(item),
-      ]);
-      return response.ok && progressOk;
+      });
+      return response.ok;
     } catch {
       return false;
     }
-  }, [accountUrl, postProgress]);
+  }, [accountUrl]);
 
   const postFavorite = useCallback(async (item: FavoriteAnime): Promise<boolean> => {
     try {
@@ -361,17 +317,15 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     localFavorites: FavoriteAnime[],
   ): Promise<boolean> => {
     try {
-      const [historyResponse, favoritesResponse, progressResponse] = await Promise.all([
+      const [historyResponse, favoritesResponse] = await Promise.all([
         secureFetch(accountUrl("/user/history")),
         secureFetch(accountUrl("/user/favorites")),
-        secureFetch(accountUrl("/user/progress/all")),
       ]);
       if (!historyResponse.ok || !favoritesResponse.ok) return false;
 
-      const [historyPayload, favoritesPayload, progressPayload] = await Promise.all([
+      const [historyPayload, favoritesPayload] = await Promise.all([
         historyResponse.json() as Promise<any>,
         favoritesResponse.json() as Promise<any>,
-        progressResponse.ok ? progressResponse.json() as Promise<any> : Promise.resolve({ progress: [] }),
       ]);
       const [deletedHistory, deletedFavorites] = await Promise.all([
         readDeletedIds(HISTORY_DELETED_KEY(userId)),
@@ -390,24 +344,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       const remoteFavoritesRows: any[] = Array.isArray(favoritesPayload?.favorites)
         ? favoritesPayload.favorites
         : [];
-      const remoteProgressRows: any[] = Array.isArray(progressPayload?.progress)
-        ? progressPayload.progress
-        : [];
-      const remoteProgressByKey = new Map<string, WatchProgress>(
-        remoteProgressRows
-          .map(mapServerProgress)
-          .filter((item): item is WatchProgress => Boolean(item))
-          .map(item => [historyKey(item), item]),
-      );
       const remoteHistory: WatchProgress[] = remoteHistoryRows
         .map(mapServerHistory)
-        .filter((item): item is WatchProgress => Boolean(item))
-        .map(item => {
-          const progress = remoteProgressByKey.get(historyKey(item));
-          return progress
-            ? { ...item, position: progress.position, duration: progress.duration, updatedAt: Math.max(item.updatedAt, progress.updatedAt) }
-            : item;
-        });
+        .filter((item): item is WatchProgress => Boolean(item));
       const remoteFavorites: FavoriteAnime[] = remoteFavoritesRows
         .map(mapServerFavorite)
         .filter((item): item is FavoriteAnime => Boolean(item));
@@ -703,7 +642,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     });
     // The caller invokes this when leaving the episode. Keep the network
     // write at that boundary; onProgress only updates an in-memory ref.
-    if (userId) await postHistory(item);
+    if (userId) void postHistory(item);
   }, [currentUser?.id, postHistory, readDeletedIds, writeDeletedIds]);
 
   /*

@@ -5,7 +5,6 @@
  */
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-native";
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { getBaseUrl } from "@/utils/api";
@@ -79,7 +78,7 @@ export default function AwDubbedWatchScreen() {
   const titleAr = safeDecode(params.titleAr);
   const season  = safeDecode(params.season) || "الحلقات";
   const poster  = safeDecode(params.poster);
-  const { watchHistory, addToHistory } = useApp();
+  const { addToHistory } = useApp();
 
   const [sources,  setSources]  = useState<PlayerSource[]>([]);
   const [loading,  setLoading]  = useState(true);
@@ -92,18 +91,6 @@ export default function AwDubbedWatchScreen() {
 
   const episodeNumber = Math.max(1, parseInt(ep || "1", 10) || 1);
   const contentKey = series || "";
-  const savedPosition = watchHistory.find(
-    item => item.contentKind === "aw-dubbed" && item.contentKey === contentKey && item.ep === episodeNumber,
-  )?.position ?? 0;
-  const progressKey = `progress-aw-dubbed-${encodeURIComponent(contentKey)}-${episodeNumber}`;
-  const [resumeTime, setResumeTime] = useState(savedPosition);
-
-  useEffect(() => {
-    AsyncStorage.getItem(progressKey).then(value => {
-      if (value != null) setResumeTime(Math.max(0, parseFloat(value) || 0));
-      else if (savedPosition > 0) setResumeTime(savedPosition);
-    }).catch(() => {});
-  }, [progressKey, savedPosition]);
 
   const loadSources = useCallback(async () => {
     abortRef.current?.abort();
@@ -152,7 +139,6 @@ export default function AwDubbedWatchScreen() {
     const position = lastTimeRef.current;
     if (!contentKey || position <= 10) return;
     const duration = lastDurationRef.current || undefined;
-    await AsyncStorage.setItem(progressKey, String(Math.floor(position))).catch(() => {});
     await addToHistory({
       animeId: getWatchContentId("aw-dubbed", contentKey),
       ep: episodeNumber,
@@ -167,7 +153,7 @@ export default function AwDubbedWatchScreen() {
       duration,
       updatedAt: Date.now(),
     });
-  }, [addToHistory, contentKey, episodeNumber, poster, progressKey, season, title, titleAr]);
+  }, [addToHistory, contentKey, episodeNumber, poster, season, title, titleAr]);
 
   const handleBack = useCallback(() => {
     if (!savedOnExitRef.current) {
@@ -235,7 +221,6 @@ export default function AwDubbedWatchScreen() {
         title={displayTitle}
         episode={episodeNumber}
         episodeTitle={`${season} • الحلقة ${episodeNumber}`}
-        initialPosition={resumeTime}
         onProgress={onProgress}
         onBack={handleBack}
       />

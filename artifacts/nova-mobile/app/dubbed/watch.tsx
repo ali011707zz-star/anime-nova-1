@@ -3,7 +3,6 @@ import {
   View, Text, Pressable, ActivityIndicator,
   StyleSheet, Platform,
 } from "react-native";
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -25,7 +24,7 @@ export default function DubbedWatchScreen() {
     poster: string; at: string;
   }>();
 
-  const { watchHistory, addToHistory } = useApp();
+  const { addToHistory } = useApp();
   const [sources, setSources] = useState<PlayerSource[]>([]);
   const [loading, setLoading] = useState(true);
   const [error,   setError]   = useState<string | null>(null);
@@ -37,19 +36,10 @@ export default function DubbedWatchScreen() {
 
   const episodeNumber = Math.max(1, parseInt(ep || "1", 10) || 1);
   const contentKey = series || epUrl || "";
-  const posterUrl = poster ? decodeURIComponent(poster) : "";
-  const savedPosition = watchHistory.find(
-    item => item.contentKind === "dubbed" && item.contentKey === contentKey && item.ep === episodeNumber,
-  )?.position ?? 0;
-  const progressKey = `progress-dubbed-${encodeURIComponent(contentKey)}-${episodeNumber}`;
-  const [resumeTime, setResumeTime] = useState(savedPosition);
-
-  useEffect(() => {
-    AsyncStorage.getItem(progressKey).then(value => {
-      if (value != null) setResumeTime(Math.max(0, parseFloat(value) || 0));
-      else if (savedPosition > 0) setResumeTime(savedPosition);
-    }).catch(() => {});
-  }, [progressKey, savedPosition]);
+  const posterUrl = (() => {
+    if (!poster) return "";
+    try { return decodeURIComponent(poster); } catch { return poster; }
+  })();
 
   /** استخراج رابط الفيديو من HTML — نفس patterns الباكند */
   function extractVideoFromHtml(html: string): string | null {
@@ -176,7 +166,6 @@ export default function DubbedWatchScreen() {
     const position = lastTimeRef.current;
     if (!contentKey || position <= 10) return;
     const duration = lastDurationRef.current || undefined;
-    await AsyncStorage.setItem(progressKey, String(Math.floor(position))).catch(() => {});
     await addToHistory({
       animeId: getWatchContentId("dubbed", contentKey),
       ep: episodeNumber,
@@ -191,7 +180,7 @@ export default function DubbedWatchScreen() {
       duration,
       updatedAt: Date.now(),
     });
-  }, [addToHistory, contentKey, episodeNumber, epUrl, posterUrl, progressKey, season, title]);
+  }, [addToHistory, contentKey, episodeNumber, epUrl, posterUrl, season, title]);
 
   const handleBack = useCallback(() => {
     if (!savedOnExitRef.current) {
@@ -277,7 +266,6 @@ export default function DubbedWatchScreen() {
         sources={sources}
         title={`${title || ""} · ${season || ""}`}
         episode={episodeNumber}
-        initialPosition={resumeTime}
         onProgress={onProgress}
         onBack={handleBack}
         onError={() => {
