@@ -10,7 +10,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useColors } from "@/hooks/useColors";
-import { useApp } from "@/context/AppContext";
+import { historyRoute, useApp } from "@/context/AppContext";
 import { isTvDevice, tvFocusStyle } from "@/utils/tv";
 import { getRailCardWidth } from "@/components/AnimeCard";
 
@@ -102,15 +102,15 @@ export default function LibraryScreen() {
     const animeItems = watchHistory
       .filter(h => (h.position ?? 0) > 30)
       .map(h => ({
-        key: `anime-${h.animeId}-${h.ep}`,
-        kind: "anime" as const,
+        key: `${h.contentKind || "anime"}-${h.contentKey || h.animeId}-${h.season || 1}-${h.ep}`,
+        kind: h.contentKind === "anime" || !h.contentKind ? "anime" : "dubbed",
         title: h.english || h.title,
         subtitle: `حلقة ${h.ep}`,
         thumbnail: h.thumbnail,
         date: h.updatedAt,
         position: h.position,
         duration: h.duration,
-        onPress: () => router.push(`/watch?anime=${h.animeId}&ep=${h.ep}&title=${encodeURIComponent(h.title)}&english=${encodeURIComponent(h.english)}${h.totalEps ? `&totalEps=${h.totalEps}` : ""}`),
+        onPress: () => router.push(historyRoute(h) as any),
         onDelete: () => removeFromHistory(h.animeId),
       }));
     const all = animeItems.sort((a, b) => (b.date as number) - (a.date as number));
@@ -121,15 +121,15 @@ export default function LibraryScreen() {
   const historyItems = useMemo(() => {
     const sq = search.toLowerCase();
     const animeItems = watchHistory.map(h => ({
-      key: `anime-${h.animeId}-${h.ep}`,
-      kind: "anime" as const,
+      key: `${h.contentKind || "anime"}-${h.contentKey || h.animeId}-${h.season || 1}-${h.ep}`,
+      kind: h.contentKind === "anime" || !h.contentKind ? "anime" : "dubbed",
       title: h.english || h.title,
       subtitle: `حلقة ${h.ep}`,
       thumbnail: h.thumbnail,
       date: h.updatedAt,
       position: h.position,
       duration: h.duration,
-        onPress: () => router.push(`/watch?anime=${h.animeId}&ep=${h.ep}&title=${encodeURIComponent(h.title)}&english=${encodeURIComponent(h.english)}${h.totalEps ? `&totalEps=${h.totalEps}` : ""}`),
+      onPress: () => router.push(historyRoute(h) as any),
       onDelete: () => removeFromHistory(h.animeId),
     }));
     const all = animeItems.sort((a, b) => (b.date as number) - (a.date as number));

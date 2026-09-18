@@ -3,11 +3,13 @@ import {
   View, Text, Pressable, ActivityIndicator,
   StyleSheet, Platform,
 } from "react-native";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { RiftPlayer, PlayerSource } from "@/components/RiftPlayer";
 import { getBaseUrl } from "@/utils/api";
+import { getWatchContentId, useApp } from "@/context/AppContext";
 import { ensureWatchAccess } from "@/utils/adPolicy";
 import { RewardedAdPrompt } from "@/components/RewardedAdPrompt";
 import { isTvDevice, tvFocusStyle } from "@/utils/tv";
@@ -18,16 +20,36 @@ export default function DubbedWatchScreen() {
   const tvMode  = isTvDevice();
   const topPad  = Platform.OS === "web" ? 0 : insets.top;
 
-  const { epUrl, title, ep, season } = useLocalSearchParams<{
-    epUrl: string; title: string; ep: string; season: string;
+  const { epUrl, series, title, ep, season } = useLocalSearchParams<{
+    epUrl: string; series: string; title: string; ep: string; season: string;
     poster: string; at: string;
   }>();
 
+  const { watchHistory, addToHistory } = useApp();
   const [sources, setSources] = useState<PlayerSource[]>([]);
   const [loading, setLoading] = useState(true);
   const [error,   setError]   = useState<string | null>(null);
   const mountedRef = useRef(true);
   const ctrlRef    = useRef<AbortController | null>(null);
+  const lastTimeRef = useRef(0);
+  const lastDurationRef = useRef(0);
+  const savedOnExitRef = useRef(false);
+
+  const episodeNumber = Math.max(1, parseInt(ep || "1", 10) || 1);
+  const contentKey = series || epUrl || "";
+  const posterUrl = poster ? decodeURIComponent(poster) : "";
+  const savedPosition = watchHistory.find(
+    item => item.contentKind === "dubbed" && item.contentKey === contentKey && item.ep === episodeNumber,
+  )?.position ?? 0;
+  const progressKey = `progress-dubbed-${encodeURIComponent(contentKey)}-${episodeNumber}`;
+  const [resumeTime, setResumeTime] = useState(savedPosition);
+
+  useEffect(() => {
+    AsyncStorage.getItem(progressKey).then(value => {
+      if (value != null) setResumeTime(Math.max(0, parseFloat(value) || 0));
+      else if (savedPosition > 0) setResumeTime(savedPosition);
+    }).catch(() => {});
+  }, [progressKey, savedPosition]);
 
   /** استخراج رابط الفيديو من HTML — نفس patterns الباكند */
   function extractVideoFromHtml(html: string): string | null {
@@ -150,6 +172,47 @@ export default function DubbedWatchScreen() {
     };
   }, [loadSource]);
 
+  const saveProgress = useCallback(async () => {
+    const position = lastTimeRef.current;
+    if (!contentKey || position <= 10) return;
+    const duration = lastDurationRef.current || undefined;
+    await AsyncStorage.setItem(progressKey, String(Math.floor(position))).catch(() => {});
+    await addToHistory({
+      animeId: getWatchContentId("dubbed", contentKey),
+      ep: episodeNumber,
+      contentKind: "dubbed",
+      contentKey,
+      episodeUrl: epUrl || "",
+      seasonLabel: season || "الموسم 1",
+      title: title || "كرتون مدبلج",
+      english: title || "كرتون مدبلج",
+      thumbnail: posterUrl,
+      position,
+      duration,
+      updatedAt: Date.now(),
+    });
+  }, [addToHistory, contentKey, episodeNumber, epUrl, posterUrl, progressKey, season, title]);
+
+  const handleBack = useCallback(() => {
+    if (!savedOnExitRef.current) {
+      savedOnExitRef.current = true;
+      void saveProgress();
+    }
+    router.back();
+  }, [router, saveProgress]);
+
+  const onProgress = useCallback((position: number, duration: number) => {
+    lastTimeRef.current = position;
+    if (duration > 0) lastDurationRef.current = duration;
+  }, []);
+
+  useEffect(() => () => {
+    if (!savedOnExitRef.current) {
+      savedOnExitRef.current = true;
+      void saveProgress();
+    }
+  }, [saveProgress]);
+
   /* ── Loading ── */
   if (loading) {
     return (
@@ -213,8 +276,10 @@ export default function DubbedWatchScreen() {
         key={epUrl || `${title}-${season}-${ep}`}
         sources={sources}
         title={`${title || ""} · ${season || ""}`}
-        episode={ep ? parseInt(ep, 10) : undefined}
-        onBack={() => router.back()}
+        episode={episodeNumber}
+        initialPosition={resumeTime}
+        onProgress={onProgress}
+        onBack={handleBack}
         onError={() => {
           setSources([]);
           setError("تعذّر تشغيل مصدر المدبلج — حاول مرة أخرى");

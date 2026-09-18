@@ -69,6 +69,7 @@ export default function DubbedDetailScreen() {
       pathname: "/dubbed/watch",
       params: {
         epUrl: ep.url,
+         series: curSeason?.arabicToonsId || "",
         title,
         ep: String(ep.number),
         season: curSeason?.label || "الموسم 1",

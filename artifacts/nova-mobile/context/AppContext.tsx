@@ -6,11 +6,18 @@ import { getAuthToken, secureFetch, setUserAuthToken } from "@/utils/secureApi";
 
 type Theme = "dark" | "amoled" | "violet" | "blue" | "pink";
 
+export type WatchContentKind = "anime" | "dubbed" | "aw-dubbed";
+
 export type WatchProgress = {
   animeId: number;
   ep: number;
   totalEps?: number;
   season?: number;
+  contentKind?: WatchContentKind;
+  contentKey?: string;
+  episodeUrl?: string;
+  seasonLabel?: string;
+  titleAr?: string;
   title: string;
   english: string;
   thumbnail: string;
@@ -75,22 +82,121 @@ function asNumber(value: unknown, fallback = 0): number {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
-function historyKey(item: Pick<WatchProgress, "animeId" | "ep" | "season">): string {
-  return `${item.animeId}:${item.ep}:${item.season || 1}`;
+export function getWatchContentId(kind: WatchContentKind, key: string): number {
+  if (kind === "anime") {
+    const numeric = Number(key);
+    return Number.isSafeInteger(numeric) && numeric > 0 ? numeric : 0;
+  }
+  // The production watch tables use a numeric anime_id. Keep a stable
+  // positive surrogate for string-based dubbed/animation series IDs while
+  // storing the real key in anime_type.
+  let hash = 2166136261;
+  for (const char of `${kind}:${key}`) {
+    hash ^= char.charCodeAt(0);
+    hash = Math.imul(hash, 16777619);
+  }
+  return 100_000_000 + ((hash >>> 0) % 1_900_000_000);
+}
+
+function historyKey(item: Pick<WatchProgress, "animeId" | "ep" | "season" | "contentKind" | "contentKey">): string {
+  const kind = item.contentKind || "anime";
+  const key = item.contentKey || String(item.animeId);
+  return `${kind}:${key}:${item.ep}:${item.season || 1}`;
+}
+
+function serverAnimeType(item: WatchProgress): string {
+  const kind = item.contentKind || "anime";
+  if (kind === "anime") return "anime";
+  const key = encodeURIComponent(item.contentKey || String(item.animeId));
+  const season = encodeURIComponent(item.seasonLabel || "");
+  const extra = kind === "dubbed" ? `:${encodeURIComponent(item.episodeUrl || "")}` : "";
+  return `${kind}:${key}${extra}:${season}`;
+}
+
+function decodeServerAnimeType(value: unknown): {
+  kind: WatchContentKind;
+  key: string;
+  episodeUrl: string;
+  seasonLabel: string;
+} {
+  const raw = String(value ?? "anime");
+  const match = /^(dubbed|aw-dubbed):(.*)$/.exec(raw);
+  if (!match) return { kind: "anime", key: "", episodeUrl: "", seasonLabel: "" };
+  const parts = match[2].split(":");
+  const decode = (part?: string) => {
+    try { return decodeURIComponent(part || ""); } catch { return part || ""; }
+  };
+  return {
+    kind: match[1] as WatchContentKind,
+    key: decode(parts[0]),
+    episodeUrl: match[1] === "dubbed" ? decode(parts[1]) : "",
+    seasonLabel: decode(match[1] === "dubbed" ? parts[2] : parts[1]),
+  };
+}
+
+export function historyRoute(item: WatchProgress): string {
+  const kind = item.contentKind || "anime";
+  if (kind === "dubbed") {
+    return `/dubbed/watch?epUrl=${encodeURIComponent(item.episodeUrl || "")}` +
+      `&series=${encodeURIComponent(item.contentKey || "")}` +
+      `&title=${encodeURIComponent(item.title)}` +
+      `&ep=${item.ep}` +
+      `&season=${encodeURIComponent(item.seasonLabel || "الموسم 1")}` +
+      `&poster=${encodeURIComponent(item.thumbnail || "")}`;
+  }
+  if (kind === "aw-dubbed") {
+    return `/aw-dubbed/watch?series=${encodeURIComponent(item.contentKey || "")}` +
+      `&ep=${item.ep}` +
+      `&title=${encodeURIComponent(item.title)}` +
+      `&titleAr=${encodeURIComponent(item.titleAr || "")}` +
+      `&season=${encodeURIComponent(item.seasonLabel || "الحلقات")}` +
+      `&poster=${encodeURIComponent(item.thumbnail || "")}`;
+  }
+  return `/watch?anime=${item.animeId}&ep=${item.ep}` +
+    `&title=${encodeURIComponent(item.title)}` +
+    `&english=${encodeURIComponent(item.english)}` +
+    `${item.totalEps ? `&totalEps=${item.totalEps}` : ""}` +
+    `${item.thumbnail ? `&cover=${encodeURIComponent(item.thumbnail)}` : ""}`;
 }
 
 function mapServerHistory(row: any): WatchProgress | null {
   const animeId = asNumber(row?.anime_id ?? row?.animeId);
   const ep = asNumber(row?.episode_number ?? row?.episode ?? row?.ep);
   if (!animeId || !ep) return null;
+  const encoded = decodeServerAnimeType(row?.anime_type ?? row?.animeType);
   return {
     animeId,
     ep,
     season: asNumber(row?.season_number ?? row?.season, 1),
+    contentKind: encoded.kind,
+    contentKey: encoded.key || String(animeId),
+    episodeUrl: encoded.episodeUrl || String(row?.episode_url ?? row?.episodeUrl ?? ""),
+    seasonLabel: encoded.seasonLabel || String(row?.season_label ?? row?.seasonLabel ?? ""),
+    titleAr: String(row?.title_ar ?? row?.titleAr ?? ""),
     title: String(row?.anime_title ?? row?.title ?? ""),
     english: String(row?.english_title ?? row?.english ?? row?.anime_title ?? row?.title ?? ""),
     thumbnail: String(row?.anime_cover ?? row?.image ?? row?.poster ?? ""),
     updatedAt: Date.parse(row?.watched_at || row?.updated_at || "") || Date.now(),
+  };
+}
+
+function mapServerProgress(row: any): WatchProgress | null {
+  const animeId = asNumber(row?.anime_id ?? row?.animeId);
+  const ep = asNumber(row?.episode_number ?? row?.episode ?? row?.ep);
+  if (!animeId || !ep) return null;
+  const encoded = decodeServerAnimeType(row?.anime_type ?? row?.animeType);
+  return {
+    animeId,
+    ep,
+    season: asNumber(row?.season_number ?? row?.season, 1),
+    contentKind: encoded.kind,
+    contentKey: encoded.key || String(animeId),
+    title: "",
+    english: "",
+    thumbnail: "",
+    position: asNumber(row?.progress_seconds ?? row?.progress, 0),
+    duration: asNumber(row?.duration_seconds ?? row?.duration, 0),
+    updatedAt: Date.parse(row?.updated_at || "") || Date.now(),
   };
 }
 
@@ -187,18 +293,19 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     await AsyncStorage.setItem(key, JSON.stringify([...new Set(ids)]));
   }, []);
 
-  const postHistory = useCallback(async (item: WatchProgress): Promise<boolean> => {
+  const postProgress = useCallback(async (item: WatchProgress): Promise<boolean> => {
+    if (item.position == null || item.position <= 10) return true;
     try {
-      const response = await secureFetch(accountUrl("/user/history"), {
+      const response = await secureFetch(accountUrl("/user/progress"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           animeId: item.animeId,
-          animeTitle: item.english || item.title,
-          animeCover: item.thumbnail || null,
-          animeType: "anime",
+          animeType: serverAnimeType(item),
           episodeNumber: item.ep,
           seasonNumber: item.season || 1,
+          progressSeconds: item.position,
+          durationSeconds: item.duration || 0,
         }),
       });
       return response.ok;
@@ -206,6 +313,29 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       return false;
     }
   }, [accountUrl]);
+
+  const postHistory = useCallback(async (item: WatchProgress): Promise<boolean> => {
+    try {
+      const [response, progressOk] = await Promise.all([
+        secureFetch(accountUrl("/user/history"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          animeId: item.animeId,
+          animeTitle: item.english || item.title,
+          animeCover: item.thumbnail || null,
+          animeType: serverAnimeType(item),
+          episodeNumber: item.ep,
+          seasonNumber: item.season || 1,
+        }),
+        }),
+        postProgress(item),
+      ]);
+      return response.ok && progressOk;
+    } catch {
+      return false;
+    }
+  }, [accountUrl, postProgress]);
 
   const postFavorite = useCallback(async (item: FavoriteAnime): Promise<boolean> => {
     try {
@@ -231,15 +361,17 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     localFavorites: FavoriteAnime[],
   ): Promise<boolean> => {
     try {
-      const [historyResponse, favoritesResponse] = await Promise.all([
+      const [historyResponse, favoritesResponse, progressResponse] = await Promise.all([
         secureFetch(accountUrl("/user/history")),
         secureFetch(accountUrl("/user/favorites")),
+        secureFetch(accountUrl("/user/progress/all")),
       ]);
       if (!historyResponse.ok || !favoritesResponse.ok) return false;
 
-      const [historyPayload, favoritesPayload] = await Promise.all([
+      const [historyPayload, favoritesPayload, progressPayload] = await Promise.all([
         historyResponse.json() as Promise<any>,
         favoritesResponse.json() as Promise<any>,
+        progressResponse.ok ? progressResponse.json() as Promise<any> : Promise.resolve({ progress: [] }),
       ]);
       const [deletedHistory, deletedFavorites] = await Promise.all([
         readDeletedIds(HISTORY_DELETED_KEY(userId)),
@@ -258,9 +390,24 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       const remoteFavoritesRows: any[] = Array.isArray(favoritesPayload?.favorites)
         ? favoritesPayload.favorites
         : [];
+      const remoteProgressRows: any[] = Array.isArray(progressPayload?.progress)
+        ? progressPayload.progress
+        : [];
+      const remoteProgressByKey = new Map<string, WatchProgress>(
+        remoteProgressRows
+          .map(mapServerProgress)
+          .filter((item): item is WatchProgress => Boolean(item))
+          .map(item => [historyKey(item), item]),
+      );
       const remoteHistory: WatchProgress[] = remoteHistoryRows
         .map(mapServerHistory)
-        .filter((item): item is WatchProgress => Boolean(item));
+        .filter((item): item is WatchProgress => Boolean(item))
+        .map(item => {
+          const progress = remoteProgressByKey.get(historyKey(item));
+          return progress
+            ? { ...item, position: progress.position, duration: progress.duration, updatedAt: Math.max(item.updatedAt, progress.updatedAt) }
+            : item;
+        });
       const remoteFavorites: FavoriteAnime[] = remoteFavoritesRows
         .map(mapServerFavorite)
         .filter((item): item is FavoriteAnime => Boolean(item));
@@ -542,12 +689,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       if (deleted.includes(item.animeId)) {
         await writeDeletedIds(key, deleted.filter(id => id !== item.animeId));
       }
-      void postHistory(item);
     }
     setWatchHistory((prev) => {
       const withoutCurrent = prev.filter(
         (historyItem) =>
-          !(historyItem.animeId === item.animeId &&
+          !(historyKey(historyItem) === historyKey(item) &&
             historyItem.ep === item.ep &&
             (historyItem.season || 1) === (item.season || 1)),
       );
@@ -555,6 +701,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       // list from the right, so the latest item must be the first item.
       return [item, ...withoutCurrent].slice(0, 100);
     });
+    // The caller invokes this when leaving the episode. Keep the network
+    // write at that boundary; onProgress only updates an in-memory ref.
+    if (userId) await postHistory(item);
   }, [currentUser?.id, postHistory, readDeletedIds, writeDeletedIds]);
 
   /*

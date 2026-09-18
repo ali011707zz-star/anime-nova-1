@@ -1145,6 +1145,8 @@ export default function WatchScreen() {
         animeId: parseInt(anime, 10),
         ep: epNum,
         totalEps: totalEpsCount,
+        contentKind: "anime",
+        contentKey: String(anime),
         title: titleStr,
         english: englishStr,
         thumbnail: coverUrl || `https://img.anili.st/media/${anime}`,
@@ -1668,7 +1670,6 @@ export default function WatchScreen() {
     /* الخروج من المشغل يرجع أولاً إلى منتقي المصادر حتى لو دخل المستخدم
        من بطاقة أحدث الحلقات. */
     if (screen === "native" || screen === "embed") {
-      saveProgress();
       setScreen("picker");
       return;
     }
@@ -1677,13 +1678,11 @@ export default function WatchScreen() {
 
   /* ── Memoized RiftPlayer callbacks — يمنع إعادة render المشغّل عند كل تغيير في الـ parent ── */
   const onRiftBack = useCallback(() => {
-    saveProgress();
     setScreen("picker");
-  }, [saveProgress]);
+  }, []);
 
   const onRiftError = useCallback(() => {
     console.warn("[Anime Watch] جميع المصادر فشلت — العودة للـ picker");
-    saveProgress();
     if (srcCacheKey) AsyncStorage.removeItem(srcCacheKey).catch(() => {});
     inFlightSitesRef.current.clear();
     fetchedSitesRef.current.clear();
@@ -1691,7 +1690,7 @@ export default function WatchScreen() {
     seenKeys.current.clear();
     setSlotStatus({});
     setScreen("picker");
-  }, [saveProgress, srcCacheKey]);
+  }, [srcCacheKey]);
 
   const onRiftProgress = useCallback((pos: number, dur: number) => {
     lastTimeRef.current = pos;
@@ -1931,7 +1930,7 @@ export default function WatchScreen() {
           <Ionicons name="tv-outline" size={36} color="rgba(139,92,246,0.7)" />
         </View>
         <Text style={{ color: "#fff", fontFamily: "Cairo_700Bold", fontSize: 16, textAlign: "center" }}>هذا المصدر يحتاج التطبيق الأصلي</Text>
-        <Pressable onPress={() => { saveProgress(); setScreen("picker"); }} focusable={tvMode}
+        <Pressable onPress={() => setScreen("picker")} focusable={tvMode}
           style={({ focused }) => [tvMode && tvFocusStyle(focused)]}>
           <Text style={{ color: "rgba(255,255,255,0.35)", fontFamily: "Cairo_400Regular", fontSize: 13 }}>العودة للمصادر</Text>
         </Pressable>

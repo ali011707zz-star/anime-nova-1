@@ -21,7 +21,7 @@ import {
   POPULAR_QUERY, TRENDING_QUERY,
   TOP_RATED_QUERY, MOVIES_QUERY, ISEKAI_QUERY,
 } from "@/utils/anilist";
-import { useApp } from "@/context/AppContext";
+import { historyRoute, useApp } from "@/context/AppContext";
 import { getBaseUrl } from "@/utils/api";
 import { isTvDevice, tvFocusStyle } from "@/utils/tv";
 import { useTvFocusMemory } from "@/utils/tvFocus";
@@ -350,12 +350,12 @@ export default function HomeScreen() {
             <FlatList
               data={recentHistory}
               horizontal
-              keyExtractor={(h) => `${h.animeId}-${h.ep}`}
+               keyExtractor={(h) => `${h.contentKind || "anime"}-${h.contentKey || h.animeId}-${h.season || 1}-${h.ep}`}
               showsHorizontalScrollIndicator={false}
                contentContainerStyle={{ paddingHorizontal: railSidePadding, gap: railGap }}
               renderItem={({ item: h }) => (
                  <Pressable
-                  onPress={() => router.push(`/watch?anime=${h.animeId}&ep=${h.ep}&title=${encodeURIComponent(h.title)}&english=${encodeURIComponent(h.english)}${h.totalEps ? `&totalEps=${h.totalEps}` : ""}${h.thumbnail ? `&cover=${encodeURIComponent(h.thumbnail)}` : ""}`)}
+                   onPress={() => router.push(historyRoute(h) as any)}
                    focusable={isTvLayout}
                    style={({ focused }) => [styles.historyCard, { width: railCardWidth, height: Math.round(railCardWidth * 0.7), backgroundColor: colors.card, borderColor: colors.border }, isTvLayout && tvFocusStyle(focused)]}
                 >
