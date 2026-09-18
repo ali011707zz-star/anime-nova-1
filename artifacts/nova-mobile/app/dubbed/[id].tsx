@@ -38,7 +38,20 @@ export default function DubbedDetailScreen() {
 
   const title = titleParam || decodeURIComponent(id || "");
   const seasons: Season[] = (() => {
-    try { return JSON.parse(decodeURIComponent(seasonsParam || "[]")); } catch { return []; }
+    try {
+      const parsed = JSON.parse(decodeURIComponent(seasonsParam || "[]"));
+      if (!Array.isArray(parsed)) return [];
+      return parsed.filter((season): season is Season => (
+        !!season &&
+        typeof season === "object" &&
+        typeof season.arabicToonsId === "string"
+      )).map(season => ({
+        label: typeof season.label === "string" && season.label ? season.label : "الحلقات",
+        arabicToonsId: season.arabicToonsId,
+      }));
+    } catch {
+      return [];
+    }
   })();
   const imgSrc = img ? decodeURIComponent(img) : null;
   const posterSrc = imgSrc?.startsWith("http") ? imgSrc : (imgSrc ? `${apiBase()}${imgSrc}` : null);

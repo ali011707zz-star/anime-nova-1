@@ -20,7 +20,7 @@ export default function DubbedWatchScreen() {
   const tvMode  = isTvDevice();
   const topPad  = Platform.OS === "web" ? 0 : insets.top;
 
-  const { epUrl, series, title, ep, season } = useLocalSearchParams<{
+  const { epUrl, series, title, ep, season, poster } = useLocalSearchParams<{
     epUrl: string; series: string; title: string; ep: string; season: string;
     poster: string; at: string;
   }>();
