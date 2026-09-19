@@ -1,15 +1,21 @@
 import { Download, Smartphone, X } from "lucide-react";
 import { useEffect, useState } from "react";
+import { useLocation } from "wouter";
 
 const APK_URL = "/Anime-Nova.apk";
 
 export function WebAppDownloadModal() {
+  const [location] = useLocation();
   const [open, setOpen] = useState(false);
 
   useEffect(() => {
+    if (location !== "/" && location !== "") {
+      setOpen(false);
+      return;
+    }
     const timer = window.setTimeout(() => setOpen(true), 1800);
     return () => window.clearTimeout(timer);
-  }, []);
+  }, [location]);
 
   if (!open) return null;
 
