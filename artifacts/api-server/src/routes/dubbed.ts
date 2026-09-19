@@ -492,6 +492,24 @@ router.get("/dubbed/watch-src", async (req, res) => {
 // يدعم Range requests للتقديم والتأخير (seeking).
 const FOUPIX_HOSTS = new Set(["stream.foupix.com"]);
 
+/**
+ * Timeout only the connection/headers phase. A timeout attached directly to
+ * fetch() also aborts the response body later, truncating open-ended Range
+ * requests while a large MP4 is still streaming.
+ */
+async function fetchFoupixHeaders(
+  url: string,
+  headers: Record<string, string>,
+): Promise<Response> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 15_000);
+  try {
+    return await fetch(url, { headers, signal: controller.signal });
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 router.get("/dubbed/stream", async (req, res) => {
   const rawUrl = (req.query.url as string || "").trim();
   if (!rawUrl) { res.status(400).json({ error: "missing url" }); return; }
@@ -520,10 +538,7 @@ router.get("/dubbed/stream", async (req, res) => {
     // the same token before handing the failure to the mobile player.
     let upstream: Response | null = null;
     for (let attempt = 0; attempt < 3; attempt += 1) {
-      upstream = await fetch(rawUrl, {
-        headers: fetchHeaders,
-        signal: AbortSignal.timeout(30_000),
-      });
+      upstream = await fetchFoupixHeaders(rawUrl, fetchHeaders);
       if ((upstream.status !== 401 && upstream.status !== 403) || attempt === 2) break;
       try { await upstream.body?.cancel(); } catch {}
       await new Promise(resolve => setTimeout(resolve, 250 * (attempt + 1)));
