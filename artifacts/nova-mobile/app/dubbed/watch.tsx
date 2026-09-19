@@ -72,7 +72,9 @@ export default function DubbedWatchScreen() {
     }
 
     // ── الطريقة الأولى: VPS API (يجلب الصفحة ويعيد rawUrl + proxyUrl) ──
-    // الـ VPS يستطيع جلب arabic-toons.com بـ UA موبايل؛ الموبايل يشغّل rawUrl مباشرة
+    // بروكسي الـVPS هو المصدر الأول: رابط Foupix الموقّع يُنشأ بـ User-Agent
+    // سطح مكتب، بينما ExoPlayer يستخدم User-Agent مختلفًا وقد يفشل الرابط المباشر
+    // بـ 403 أو TLS. الرابط المباشر يبقى احتياطيًا للشبكات التي تسمح به.
     try {
       const r = await fetch(
         `${BASE}/api/dubbed/watch-src?epUrl=${encodeURIComponent(epUrl)}`,
@@ -88,23 +90,21 @@ export default function DubbedWatchScreen() {
 
         if (rawUrl || proxyUrl) {
           const srcs: PlayerSource[] = [];
-           /* Foupix يطابق ua-hash داخل token مع User-Agent الذي استُخدم
-              عند إنشائه. إرسال نفس Chrome UA من الجهاز أسرع بكثير من تمرير
-              أول نطاق فيديو كامل عبر VPS، كما أنه يعمل من شبكات المستخدم
-              السكنية. يبقى proxy احتياطياً للشبكات التي تحجب Foupix. */
+          if (proxyUrl) srcs.push({
+            url: proxyUrl,
+            label: "مدبلج عربي عبر الخادم",
+            quality: "720p HD",
+          });
           if (rawUrl && rawUrl !== proxyUrl) srcs.push({
             url: rawUrl,
             label: "مدبلج عربي (مباشر)",
             quality: "720p HD",
             headers: {
-               "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+              "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
               Referer: "https://www.arabic-toons.com/",
               Origin:  "https://www.arabic-toons.com",
             },
           });
-           if (proxyUrl) srcs.push({
-             url: proxyUrl, label: "مدبلج عربي عبر الخادم", quality: "720p HD",
-           });
           if (mountedRef.current) { setSources(srcs); setLoading(false); }
           return;
         }
@@ -131,12 +131,12 @@ export default function DubbedWatchScreen() {
         if (ctrl.signal.aborted) return;
         const videoUrl = extractVideoFromHtml(html);
         if (videoUrl) {
-          const proxyUrl = `${BASE}/api/dubbed/stream?url=${encodeURIComponent(videoUrl)}`;
+          const proxyUrl = `${BASE}/api/dubbed/stream.mp4?url=${encodeURIComponent(videoUrl)}`;
           const srcs: PlayerSource[] = [
             // The proxy has a valid public TLS certificate and keeps the
-            // provider request on the VPS. The raw foupix URL can fail on
-            // Android because its certificate is too weak for native TLS.
-            { url: proxyUrl, label: "مدبلج عربي", quality: "720p HD" },
+            // provider request on the VPS. The raw Foupix URL remains a
+            // fallback because its certificate or UA check can fail on Android.
+            { url: proxyUrl, label: "مدبلج عربي عبر الخادم", quality: "720p HD" },
             { url: videoUrl, label: "مدبلج عربي (مباشر)", quality: "720p HD", headers: { Referer: "https://www.arabic-toons.com/", Origin: "https://www.arabic-toons.com" } },
           ];
           if (mountedRef.current) { setSources(srcs); setLoading(false); }
