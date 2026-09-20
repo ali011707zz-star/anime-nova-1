@@ -324,6 +324,7 @@ const KAWAII_MOBILE_CDN_HOSTS = new Set([
   "video.kawaii-anime.com",
   "cdn.mewstream.buzz",
   "cdn.watching.onl",
+  "cdn.imgnex.top",
 ]);
 
 function isKawaiiMobileCdnHost(hostname: string): boolean {
@@ -332,7 +333,8 @@ function isKawaiiMobileCdnHost(hostname: string): boolean {
     KAWAII_MOBILE_CDN_HOSTS.has(host) ||
     host.endsWith(".kawaii-anime.com") ||
     host.endsWith(".momentoai.dev") ||
-    host.endsWith(".mewstream.buzz")
+    host.endsWith(".mewstream.buzz") ||
+    host.endsWith(".imgnex.top")
   );
 }
 
@@ -383,27 +385,19 @@ function isHlsMediaUrl(url: string): boolean {
 
 /* These providers sign media for the viewer's device and can reject the
    VPS/datacenter IP even when the Referer is correct. Keep their original
-   URL on mobile and send provider headers with every ExoPlayer request. */
+   URL on mobile and send provider headers with every ExoPlayer request.
+   `corsOk` is an explicit server-side opt-in for providers whose direct
+   media URL is known to be usable from a residential/mobile device. */
 const MOBILE_DIRECT_SITES = new Set(["kawaii", "animekai"]);
 
 function getMobileDirectUrl(source: Src): string | null {
-  if (!MOBILE_DIRECT_SITES.has(String(source.site || "").toLowerCase())) return null;
-  const candidate = source.rawUrl;
+  const site = String(source.site || "").toLowerCase();
+  const directAllowed = MOBILE_DIRECT_SITES.has(site) || source.corsOk === true;
+  if (!directAllowed) return null;
+  const candidate = source.rawUrl || source.directUrl;
   if (!candidate || !isValidSourceUrl(candidate)) return null;
-  /* Kawaii's rotating CDN now returns HLS for many entries in the latest
-     episodes feed. Keep HLS on the VPS proxy so the manifest and every
-     rewritten segment receive the provider Referer/Origin consistently.
-     Raw direct playback remains useful for signed MP4 responses. */
-  if (String(source.site || "").toLowerCase() === "kawaii" && isHlsMediaUrl(candidate)) {
-    return null;
-  }
-  /* Kawaii's rotating CDN now returns HLS for many entries in the latest
-     episodes feed. Keep HLS on the VPS proxy so the manifest and every
-     rewritten segment receive the provider Referer/Origin consistently.
-     Raw direct playback remains useful for signed MP4 responses. */
-  if (String(source.site || "").toLowerCase() === "kawaii" && isHlsMediaUrl(candidate)) {
-    return null;
-  }
+  /* Never treat an already-built API proxy as a direct provider URL. */
+  if (/^https?:\/\/[^/]+\/api\/(?:anime|dubbed)\//i.test(candidate)) return null;
   return candidate;
 }
 
