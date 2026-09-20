@@ -1,7 +1,7 @@
 import React, { useState, useCallback, useEffect, useRef } from "react";
 import {
   View, Text, StyleSheet, Pressable, FlatList,
-  Image, Alert, Platform, Animated, Easing, Modal,
+  Image, Alert, Linking, Platform, Animated, Easing, Modal,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
@@ -12,6 +12,7 @@ import {
   formatFileSize, DownloadItem, ActiveDownload,
   subscribeActiveDownloads, getActiveDownloadsSnapshot, cancelActiveDownload,
   pauseActiveDownload, resumeActiveDownload,
+  saveDownloadToGallery, GalleryPermissionError,
 } from "@/utils/downloadManager";
 import { RiftPlayer, PlayerSource } from "@/components/RiftPlayer";
 import * as FileSystem from "expo-file-system";
@@ -133,10 +134,14 @@ function DownloadCard({
   item,
   onPlay,
   onDelete,
+  onSaveToGallery,
+  savingToGallery,
 }: {
   item: DownloadItem;
   onPlay: (item: DownloadItem) => void;
   onDelete: (item: DownloadItem) => void;
+  onSaveToGallery: (item: DownloadItem) => void;
+  savingToGallery: boolean;
 }) {
   const tvMode = isTvDevice();
   const [expanded, setExpanded] = useState(false);
@@ -198,17 +203,44 @@ function DownloadCard({
         <Text style={s.cardDate}>
           {new Date(item.downloadedAt).toLocaleDateString("ar-SA")}
         </Text>
-        <Pressable
-          onPress={() => onPlay(item)}
-           focusable={tvMode}
-           style={({ pressed, focused }) => [s.playButton, pressed && { opacity: 0.72 }, tvMode && tvFocusStyle(focused)]}
-          accessibilityRole="button"
-          accessibilityLabel={`تشغيل الحلقة ${item.ep}`}
-          testID={`download-play-${item.id}`}
-        >
-          <Ionicons name="play" size={12} color="#fff" />
-          <Text style={s.playButtonText}>تشغيل الحلقة</Text>
-        </Pressable>
+        <View style={s.cardActions}>
+          <Pressable
+            onPress={() => onPlay(item)}
+             focusable={tvMode}
+             style={({ pressed, focused }) => [s.playButton, pressed && { opacity: 0.72 }, tvMode && tvFocusStyle(focused)]}
+            accessibilityRole="button"
+            accessibilityLabel={`تشغيل الحلقة ${item.ep}`}
+            testID={`download-play-${item.id}`}
+          >
+            <Ionicons name="play" size={12} color="#fff" />
+            <Text style={s.playButtonText}>تشغيل الحلقة</Text>
+          </Pressable>
+          {item.gallerySavedAt ? (
+            <View style={s.gallerySavedButton}>
+              <Ionicons name="images-outline" size={12} color="#6ee7b7" />
+              <Text style={s.gallerySavedText}>في المعرض</Text>
+            </View>
+          ) : (
+            <Pressable
+              onPress={() => onSaveToGallery(item)}
+              disabled={savingToGallery}
+              hitSlop={5}
+              focusable={tvMode}
+              style={({ pressed, focused }) => [
+                s.galleryButton,
+                pressed && { opacity: 0.72 },
+                savingToGallery && { opacity: 0.55 },
+                tvMode && tvFocusStyle(focused),
+              ]}
+              accessibilityRole="button"
+              accessibilityLabel={`حفظ الحلقة ${item.ep} في معرض الجهاز`}
+              testID={`download-gallery-${item.id}`}
+            >
+              <Ionicons name={savingToGallery ? "sync-outline" : "images-outline"} size={12} color="#c4b5fd" />
+              <Text style={s.galleryButtonText}>{savingToGallery ? "جارٍ الحفظ" : "حفظ للمعرض"}</Text>
+            </Pressable>
+          )}
+        </View>
       </View>
 
       {/* Delete button */}
@@ -295,6 +327,7 @@ export default function DownloadsScreen() {
   const [downloads, setDownloads] = useState<DownloadItem[]>([]);
   const [activeDownloads, setActiveDownloads] = useState<ActiveDownload[]>(getActiveDownloadsSnapshot);
   const [playingItem, setPlayingItem] = useState<DownloadItem | null>(null);
+  const [gallerySavingId, setGallerySavingId] = useState<string | null>(null);
   const mountedRef = useRef(true);
 
   useEffect(() => {
@@ -395,6 +428,38 @@ export default function DownloadsScreen() {
     }
   }, [loadDownloads]);
 
+  const handleSaveToGallery = useCallback(async (item: DownloadItem) => {
+    if (gallerySavingId || item.galleryAssetId) return;
+    setGallerySavingId(item.id);
+    try {
+      await saveDownloadToGallery(item);
+      await loadDownloads();
+      Alert.alert("تم الحفظ", "أصبحت الحلقة متاحة الآن في معرض الصور والفيديوهات داخل ألبوم Nova Anime.");
+    } catch (error) {
+      if (error instanceof GalleryPermissionError) {
+        Alert.alert(
+          "إذن المعرض مطلوب",
+          error.canAskAgain
+            ? "اسمح للتطبيق بحفظ الفيديو في معرض الجهاز."
+            : "افتح إعدادات الهاتف واسمح للتطبيق بالوصول إلى الصور والفيديوهات.",
+          [
+            { text: "إلغاء", style: "cancel" },
+            ...(!error.canAskAgain
+              ? [{ text: "فتح الإعدادات", onPress: () => Linking.openSettings().catch(() => {}) }]
+              : []),
+          ],
+        );
+      } else {
+        Alert.alert(
+          "تعذر الحفظ في المعرض",
+          error instanceof Error ? error.message : "تحقق من وجود مساحة كافية ثم حاول مرة أخرى.",
+        );
+      }
+    } finally {
+      if (mountedRef.current) setGallerySavingId(null);
+    }
+  }, [gallerySavingId, loadDownloads]);
+
   /* تشغيل محلي — Modal كاملة الشاشة حتى لا يظهر شريط التنقل السفلي */
   const handleClosePlayer = useCallback(() => setPlayingItem(null), []);
 
@@ -468,6 +533,8 @@ export default function DownloadsScreen() {
                     item={item}
                     onPlay={handlePlay}
                     onDelete={handleDelete}
+                    onSaveToGallery={handleSaveToGallery}
+                    savingToGallery={gallerySavingId === item.id}
                   />
                 ))}
               </View>
@@ -609,13 +676,28 @@ const s = StyleSheet.create({
   badgeText: { fontSize: 9, fontFamily: "Cairo_700Bold", color: "rgba(255,255,255,0.50)" },
 
   cardDate: { fontSize: 10, fontFamily: "Cairo_400Regular", color: "rgba(255,255,255,0.25)", marginTop: 2 },
+  cardActions: { flexDirection: "row", alignItems: "center", gap: 6, flexWrap: "wrap", marginTop: 2 },
   playButton: {
-    alignSelf: "flex-start", flexDirection: "row", alignItems: "center", gap: 5,
+    flexDirection: "row", alignItems: "center", gap: 5,
     paddingHorizontal: 10, paddingVertical: 6, borderRadius: 9,
     backgroundColor: "rgba(139,92,246,0.20)", borderWidth: 1,
-    borderColor: "rgba(167,139,250,0.30)", marginTop: 2,
+    borderColor: "rgba(167,139,250,0.30)",
   },
   playButtonText: { fontSize: 10, fontFamily: "Cairo_700Bold", color: "#ddd6fe" },
+  galleryButton: {
+    flexDirection: "row", alignItems: "center", gap: 4,
+    paddingHorizontal: 9, paddingVertical: 6, borderRadius: 9,
+    backgroundColor: "rgba(139,92,246,0.10)", borderWidth: 1,
+    borderColor: "rgba(167,139,250,0.22)",
+  },
+  galleryButtonText: { fontSize: 10, fontFamily: "Cairo_700Bold", color: "#c4b5fd" },
+  gallerySavedButton: {
+    flexDirection: "row", alignItems: "center", gap: 4,
+    paddingHorizontal: 9, paddingVertical: 6, borderRadius: 9,
+    backgroundColor: "rgba(52,211,153,0.10)", borderWidth: 1,
+    borderColor: "rgba(110,231,183,0.25)",
+  },
+  gallerySavedText: { fontSize: 10, fontFamily: "Cairo_700Bold", color: "#6ee7b7" },
 
   deleteBtn: {
     width: 40, height: 40, borderRadius: 12,

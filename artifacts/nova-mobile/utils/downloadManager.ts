@@ -7,6 +7,7 @@
  */
 import { AppState, Platform } from "react-native";
 import * as FileSystem from "expo-file-system";
+import * as MediaLibrary from "expo-media-library";
 import * as Notifications from "expo-notifications";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import Constants from "expo-constants";
@@ -45,6 +46,8 @@ export interface DownloadItem {
   subtitleLocalPath?: string;
   fileSize: number;
   downloadedAt: number;
+  galleryAssetId?: string;
+  gallerySavedAt?: number;
 }
 
 export interface ActiveDownload {
@@ -80,6 +83,16 @@ export interface StartDownloadParams {
   /** Original/proxied HLS manifest used to discover an embedded subtitle track. */
   hlsManifestUrl?: string;
   headers?: Record<string, string>;
+}
+
+export class GalleryPermissionError extends Error {
+  readonly canAskAgain: boolean;
+
+  constructor(canAskAgain: boolean) {
+    super("يلزم السماح للتطبيق بحفظ الفيديو في معرض الجهاز.");
+    this.name = "GalleryPermissionError";
+    this.canAskAgain = canAskAgain;
+  }
 }
 
 type DownloadOptions = {
@@ -228,6 +241,58 @@ export async function deleteDownload(item: DownloadItem): Promise<void> {
   }
   const items = await getDownloads();
   await saveDownloads(items.filter((entry) => entry.id !== item.id));
+}
+
+function localFileUri(path: string): string {
+  if (path.startsWith("file://")) return path;
+  return path.startsWith("/") ? `file://${path}` : path;
+}
+
+/**
+ * Copies a completed app download into the device media library.
+ * The app-private file remains intact so offline playback and the gallery copy
+ * have independent lifecycles.
+ */
+export async function saveDownloadToGallery(item: DownloadItem): Promise<DownloadItem> {
+  if (Platform.OS === "web") {
+    throw new Error("حفظ الفيديو في معرض الجهاز متاح على الهاتف فقط.");
+  }
+  if (item.galleryAssetId) return item;
+
+  const fileUri = localFileUri(item.localPath);
+  const info = await FileSystem.getInfoAsync(fileUri, { size: true });
+  const size = (info as { size?: number }).size ?? 0;
+  if (!info.exists || size <= 0) {
+    throw new Error("ملف الحلقة غير مكتمل أو لم يعد موجودًا على الجهاز.");
+  }
+
+  const permission = await MediaLibrary.requestPermissionsAsync(true);
+  if (permission.status !== "granted") {
+    throw new GalleryPermissionError(permission.canAskAgain !== false);
+  }
+
+  const asset = await MediaLibrary.createAssetAsync(fileUri);
+  const albumName = "Nova Anime";
+  try {
+    const existingAlbum = await MediaLibrary.getAlbumAsync(albumName);
+    if (existingAlbum) {
+      await MediaLibrary.addAssetsToAlbumAsync([asset], existingAlbum, false);
+    } else {
+      await MediaLibrary.createAlbumAsync(albumName, asset, false);
+    }
+  } catch {
+    /* The asset is already in the system gallery even if album creation is
+       unavailable on a particular Android/iOS version. */
+  }
+
+  const updated: DownloadItem = {
+    ...item,
+    galleryAssetId: asset.id,
+    gallerySavedAt: Date.now(),
+  };
+  const items = await getDownloads();
+  await saveDownloads(items.map((entry) => entry.id === item.id ? updated : entry));
+  return updated;
 }
 
 export async function clearAllDownloads(): Promise<void> {
@@ -766,6 +831,62 @@ async function discoverHlsSubtitle(
   return null;
 }
 
+async function attachSubtitleSidecar(entry: RuntimeDownload): Promise<void> {
+  if (!entry.params.subtitleUrl && !entry.params.hlsManifestUrl) return;
+
+  try {
+    let subtitleUrl = entry.params.subtitleUrl;
+    let body = "";
+    if (subtitleUrl) body = await fetchSubtitleResponse(subtitleUrl, entry.params);
+    else if (entry.params.hlsManifestUrl) {
+      const discovered = await discoverHlsSubtitle(entry.params.hlsManifestUrl, entry.params);
+      subtitleUrl = discovered?.url;
+      body = discovered?.body || "";
+    }
+    if (!subtitleUrl || !body) return;
+
+    let vtt = body;
+    try {
+      const payload = JSON.parse(body) as {
+        cues?: Array<{ timing?: string; text?: string }>;
+      };
+      if (Array.isArray(payload.cues)) {
+        vtt = [
+          "WEBVTT",
+          "",
+          ...payload.cues.flatMap((cue, index) => [
+            String(index + 1),
+            cue.timing || "00:00:00.000 --> 00:00:01.000",
+            cue.text || "",
+            "",
+          ]),
+        ].join("\n");
+      }
+    } catch {
+      /* Direct VTT/SRT/ASS responses are already usable text. */
+    }
+    vtt = subtitleToVtt(subtitleUrl, vtt);
+    if (!vtt.includes("-->")) return;
+
+    /* Keep one canonical extension so the current native player can attach
+       the sidecar without adding a second subtitle engine. */
+    const subtitlePath = `${entry.localPath.slice(0, -4)}.vtt`;
+    await FileSystem.writeAsStringAsync(subtitlePath, vtt);
+
+    const items = await getDownloads();
+    const saved = items.find((item) => item.id === entry.id);
+    if (!saved) {
+      await FileSystem.deleteAsync(subtitlePath, { idempotent: true });
+      return;
+    }
+    await saveDownloads(items.map((item) => item.id === entry.id
+      ? { ...item, subtitleLocalPath: subtitlePath }
+      : item));
+  } catch {
+    /* Subtitle retrieval is best-effort and must never delay video completion. */
+  }
+}
+
 async function saveCompleted(entry: RuntimeDownload): Promise<void> {
   let fileSize = 0;
   const info = await FileSystem.getInfoAsync(entry.localPath, { size: true });
@@ -779,53 +900,8 @@ async function saveCompleted(entry: RuntimeDownload): Promise<void> {
   entry.progress = 1;
   notifyListeners();
 
-  let subtitleLocalPath: string | undefined;
-  /* A subtitle is a best-effort sidecar. It must never turn a healthy video
-     into a failed download when a provider track expires. */
-  if (entry.params.subtitleUrl || entry.params.hlsManifestUrl) {
-    try {
-      let subtitleUrl = entry.params.subtitleUrl;
-      let body = "";
-      if (subtitleUrl) body = await fetchSubtitleResponse(subtitleUrl, entry.params);
-      else if (entry.params.hlsManifestUrl) {
-        const discovered = await discoverHlsSubtitle(entry.params.hlsManifestUrl, entry.params);
-        subtitleUrl = discovered?.url;
-        body = discovered?.body || "";
-      }
-      if (!subtitleUrl || !body) throw new Error("no subtitle track");
-
-      let vtt = body;
-      try {
-        const payload = JSON.parse(body) as {
-          cues?: Array<{ timing?: string; text?: string }>;
-        };
-        if (Array.isArray(payload.cues)) {
-          vtt = [
-            "WEBVTT",
-            "",
-            ...payload.cues.flatMap((cue, index) => [
-              String(index + 1),
-              cue.timing || "00:00:00.000 --> 00:00:01.000",
-              cue.text || "",
-              "",
-            ]),
-          ].join("\n");
-        }
-      } catch {
-        /* Direct VTT/SRT/ASS responses are already usable text. */
-      }
-      vtt = subtitleToVtt(subtitleUrl, vtt);
-      if (!vtt.includes("-->")) throw new Error("empty subtitle");
-      /* Keep one canonical extension so the current native player can attach
-         the sidecar without adding a second subtitle engine. */
-      const subtitlePath = `${entry.localPath.slice(0, -4)}.vtt`;
-      await FileSystem.writeAsStringAsync(subtitlePath, vtt);
-      subtitleLocalPath = subtitlePath;
-    } catch (error) {
-      subtitleLocalPath = undefined;
-    }
-  }
-
+  /* Persist the video immediately. Subtitle extraction continues in the
+     background so a slow/expired subtitle endpoint cannot delay completion. */
   const item: DownloadItem = {
     id: entry.id,
     animeId: entry.animeId,
@@ -835,12 +911,12 @@ async function saveCompleted(entry: RuntimeDownload): Promise<void> {
     site: entry.site,
     quality: entry.quality,
     localPath: entry.localPath,
-    subtitleLocalPath,
     fileSize,
     downloadedAt: Date.now(),
   };
   const existing = await getDownloads();
   await saveDownloads([...existing.filter((old) => old.id !== entry.id), item]);
+  void attachSubtitleSidecar(entry);
   /* The ad counter is updated only after the verified non-empty file has
      been persisted. The server deduplicates the anime/episode pair. */
   void recordSuccessfulDownload(entry.animeId, entry.ep);
