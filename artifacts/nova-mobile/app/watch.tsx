@@ -93,6 +93,7 @@ const DOWNLOAD_SOURCE_SITES = new Set([
   "anslayer",     // AS
   "animeify",     // AF — direct MediaFire/FileMoon sources
   "anifox",       // FX
+  "kawaii",       // KW — signed MP4/HLS through the VPS proxy
 ]);
 
 function subtitlesDisabledForSite(site?: string): boolean {
@@ -401,15 +402,15 @@ function getMobileDirectUrl(source: Src): string | null {
   return candidate;
 }
 
-/* HLS is a playlist, not an MP4. Route it through the VPS converter; direct
-   MP4/proxy streams remain resumable downloads. Subtitles stay sidecars. */
+/* HLS is a playlist, not an MP4. Route only HLS through the VPS converter;
+   direct MP4/proxy streams remain resumable downloads. Subtitles stay sidecars. */
 function buildEmbeddedDownloadUrl(
   site: string,
   mediaUrl: string,
   subtitleUrl: string | undefined,
   base: string,
 ): string {
-  const needsConversion = site === "kawaii" || isHlsMediaUrl(mediaUrl);
+  const needsConversion = isHlsMediaUrl(mediaUrl);
   if (!needsConversion) return mediaUrl;
   const query = new URLSearchParams({
     site,
@@ -1505,8 +1506,8 @@ export default function WatchScreen() {
     const downloadToken = await getDownloadToken();
     /* Fire-and-forget — يعمل في الخلفية بمستقل عن lifecycle هذه الشاشة */
      const isHlsDownload = best.directType === "hls" || isHlsMediaUrl(proxyUrl);
-     const downloadUrl = (DOWNLOAD_SUBTITLE_SITES.has(site) || isHlsDownload)
-      ? buildEmbeddedDownloadUrl(site, site === "kawaii" ? (best.rawUrl || proxyUrl) : proxyUrl, subtitleUrl, base)
+    const downloadUrl = (DOWNLOAD_SUBTITLE_SITES.has(site) || isHlsDownload)
+      ? buildEmbeddedDownloadUrl(site, proxyUrl, subtitleUrl, base)
       : proxyUrl;
     void startGlobalDownload({
       animeId:  parseInt(anime || "0"),
@@ -1609,8 +1610,8 @@ export default function WatchScreen() {
        const token     = await getAuthToken();
        const downloadToken = await getDownloadToken();
        const isHlsDownload = best.directType === "hls" || isHlsMediaUrl(proxyUrl);
-       const downloadUrl = (DOWNLOAD_SUBTITLE_SITES.has(site) || isHlsDownload)
-         ? buildEmbeddedDownloadUrl(site, site === "kawaii" ? (best.rawUrl || proxyUrl) : proxyUrl, subtitleUrl, base)
+        const downloadUrl = (DOWNLOAD_SUBTITLE_SITES.has(site) || isHlsDownload)
+          ? buildEmbeddedDownloadUrl(site, proxyUrl, subtitleUrl, base)
          : proxyUrl;
 
       void startGlobalDownload({

@@ -51,3 +51,10 @@ The current `/api/miruro` response has also rotated to HLS URLs on `cdn.imgnex.t
 **How to apply:** When Kawaii returns a new CDN, verify the hostname is trusted before adding it to the server-side Kawaii host allowlist. Keep the proxy path and referer handling unchanged.
 
 **Why:** kawaii's API returns both Arabic and English subtitles for new anime. Old code only looked for English and missed Arabic entirely.
+
+## Mobile download verification
+- `/api/anime/download-mp4` is behind the mobile identity and download-token gate; a bare curl returns 403 before Kawaii URL validation.
+
+**Why:** A manual 403 can be mistaken for a broken provider allowlist even when the route is healthy.
+
+**How to apply:** Obtain the short-lived app/download tokens from `/api/auth/anon-token` with the official mobile headers before testing Kawaii download or Range behavior.
