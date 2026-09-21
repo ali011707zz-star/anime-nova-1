@@ -30,6 +30,8 @@ export default function DubbedWatchScreen() {
   const [error,   setError]   = useState<string | null>(null);
   const mountedRef = useRef(true);
   const ctrlRef    = useRef<AbortController | null>(null);
+  const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const autoRetryCountRef = useRef(0);
   const lastTimeRef = useRef(0);
   const lastDurationRef = useRef(0);
   const savedOnExitRef = useRef(false);
@@ -55,8 +57,9 @@ export default function DubbedWatchScreen() {
     return null;
   }
 
-  const loadSource = useCallback(async () => {
+  const loadSource = useCallback(async (isAutomaticRetry = false) => {
     if (!epUrl) { setError("رابط الحلقة مفقود"); setLoading(false); return; }
+    if (!isAutomaticRetry) autoRetryCountRef.current = 0;
     ctrlRef.current?.abort();
     const ctrl = new AbortController();
     ctrlRef.current = ctrl;
@@ -74,35 +77,46 @@ export default function DubbedWatchScreen() {
     // ── الطريقة الأولى: VPS API (يجلب الصفحة ويعيد proxyUrl) ──
     // لا نمرر رابط Foupix الخام إلى ExoPlayer: الـ token مرتبط بـ User-Agent
     // الذي يستخدمه الخادم، وproxy يحافظ أيضاً على TLS وRange/seek.
-    try {
-      const r = await fetch(
-        `${BASE}/api/dubbed/watch-src?epUrl=${encodeURIComponent(epUrl)}`,
-        { signal: ctrl.signal },
-      );
-      if (ctrl.signal.aborted || !mountedRef.current) return;
-      if (r.ok) {
-        const d = await r.json();
-        if (ctrl.signal.aborted) return;
+    // Foupix signs each page response for a short window. A transient
+    // upstream failure must not make the phone screen discard the episode
+    // permanently; ask the API for a fresh signed URL a few times first.
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      try {
+        const r = await fetch(
+          `${BASE}/api/dubbed/watch-src?epUrl=${encodeURIComponent(epUrl)}`,
+          { signal: ctrl.signal, cache: "no-store" },
+        );
+        if (ctrl.signal.aborted || !mountedRef.current) return;
+        if (r.ok) {
+          const d = await r.json();
+          if (ctrl.signal.aborted) return;
 
-        const proxyUrl = typeof d.hlsUrl  === "string" && d.hlsUrl   ? (d.hlsUrl.startsWith("/") ? `${BASE}${d.hlsUrl}` : d.hlsUrl) : null;
-        const mediaType = d.type === "hls" ? "m3u8" as const : "mp4" as const;
+          const proxyUrl = typeof d.hlsUrl === "string" && d.hlsUrl
+            ? (d.hlsUrl.startsWith("/") ? `${BASE}${d.hlsUrl}` : d.hlsUrl)
+            : null;
+          const mediaType = d.type === "hls" ? "m3u8" as const : "mp4" as const;
 
-        if (proxyUrl) {
-          const srcs: PlayerSource[] = [{
-            url: proxyUrl,
-            type: mediaType,
-            label: "مدبلج عربي عبر الخادم",
-            quality: "720p HD",
-          }];
-          if (mountedRef.current) { setSources(srcs); setLoading(false); }
-          return;
+          if (proxyUrl) {
+            const srcs: PlayerSource[] = [{
+              url: proxyUrl,
+              type: mediaType,
+              label: "مدبلج عربي عبر الخادم",
+              quality: "720p HD",
+            }];
+            if (mountedRef.current) { setSources(srcs); setLoading(false); }
+            return;
+          }
         }
+      } catch (e: any) {
+        if (e?.name === "AbortError" || !mountedRef.current) return;
       }
-    } catch (e: any) {
-      if (e?.name === "AbortError" || !mountedRef.current) return;
-      // VPS API فشل — نجرب الجلب المباشر من الموبايل
+      if (attempt < 2) {
+        await new Promise<void>(resolve => setTimeout(resolve, 700 + attempt * 500));
+        if (ctrl.signal.aborted || !mountedRef.current) return;
+      }
     }
 
+    // VPS API فشل — نجرب الجلب المباشر من الموبايل.
     // ── الطريقة الثانية: الموبايل يجلب الصفحة مباشرة (IP سكني) ──
     try {
       const pageR = await fetch(epUrl, {
@@ -144,7 +158,33 @@ export default function DubbedWatchScreen() {
     return () => {
       mountedRef.current = false;
       ctrlRef.current?.abort();
+      if (retryTimerRef.current) {
+        clearTimeout(retryTimerRef.current);
+        retryTimerRef.current = null;
+      }
     };
+  }, [loadSource]);
+
+  const retryAfterPlaybackError = useCallback(() => {
+    if (!mountedRef.current) return;
+    if (autoRetryCountRef.current >= 2) {
+      setSources([]);
+      setError("تعذّر تشغيل الحلقة بعد عدة محاولات — اضغط إعادة المحاولة");
+      return;
+    }
+
+    autoRetryCountRef.current += 1;
+    ctrlRef.current?.abort();
+    if (retryTimerRef.current) clearTimeout(retryTimerRef.current);
+    // Unmount the native player before replacing its signed URL. This avoids
+    // feeding a stale failed Foupix token back into the same ExoPlayer.
+    setSources([]);
+    setError(null);
+    setLoading(true);
+    retryTimerRef.current = setTimeout(() => {
+      retryTimerRef.current = null;
+      if (mountedRef.current) void loadSource(true);
+    }, 900);
   }, [loadSource]);
 
   const saveProgress = useCallback(async () => {
@@ -253,10 +293,7 @@ export default function DubbedWatchScreen() {
         episode={episodeNumber}
         onProgress={onProgress}
         onBack={handleBack}
-        onError={() => {
-          setSources([]);
-          setError("تعذّر تشغيل مصدر المدبلج — حاول مرة أخرى");
-        }}
+        onError={retryAfterPlaybackError}
       />
     </>
   );
