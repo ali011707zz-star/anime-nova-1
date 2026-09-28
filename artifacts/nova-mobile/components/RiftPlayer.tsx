@@ -682,9 +682,8 @@ function ExpoRiftPlayer({
   const barRef            = useRef<View>(null);
   const barWidth          = useRef(W);   // يبدأ بعرض الشاشة كـ fallback آمن قبل onLayout
   const barPageX          = useRef(0);   // absolute X of bar's left edge on screen (for reliable seek)
-  const barGeometryValid  = useRef(false);
   const lastMoveX         = useRef(0);   // last known absolute X during drag (fallback for release on Android)
-  const lastLocalX        = useRef<number | null>(null);
+  const grantLocationXRef = useRef(0);   // locationX النسبي لحدث Grant (أدق من pageX للنقر السريع)
   const resumedRef        = useRef(false);
   const subRafRef         = useRef<any>(null);
   const durationRef       = useRef(0);
@@ -1608,7 +1607,6 @@ function ExpoRiftPlayer({
         o === ScreenOrientation.Orientation.PORTRAIT_DOWN
       );
       /* A rotation invalidates absolute coordinates used by the seekbar. */
-      barGeometryValid.current = false;
     });
     return () => sub.remove();
   }, []);
@@ -2215,20 +2213,14 @@ function ExpoRiftPlayer({
   ).current;
 
   /* ─── Seekbar drag PanResponder ─── */
-  /* منطقة اللمس والقياس غير معكوسة دائماً. طبقة الرسم فقط تُعكس في RTL،
-     لذلك يبقى locationX المحلي صالحاً للنقرات، ونستخدم moveX كـfallback
-     فقط عندما يخرج الإصبع خارج حدود الـView. */
+  /* شريط التقدم يسير من اليسار إلى اليمين (LTR) — المعيار العالمي لمشغلات الفيديو.
+     نستخدم gestureState.moveX (إحداثي مطلق على الشاشة) بدلاً من locationX
+     لأن locationX على Android غير موثوق أثناء onPanResponderMove خارج حدود الـ View. */
   const _nRTL = Platform.OS !== "web" && I18nManager.isRTL;
-  /* حوّل إحداثيات اللمس الفيزيائية إلى نسبة زمنية منطقية.
-     في واجهة RTL تكون بداية الحلقة (0%) عند اليمين، لذلك نعكس الإحداثي
-     قبل تمريره إلى seek. */
+  /* شريط التقدم يسير دائماً من اليسار (0%) إلى اليمين (100%) بغض النظر عن RTL —
+     هذا هو المعيار العالمي لمشغلات الفيديو حتى في التطبيقات العربية */
   const _calcPctFromAbsolute = (absoluteX: number): number => {
-    if (!Number.isFinite(absoluteX)) return 0;
     const localX = absoluteX - barPageX.current;
-    const raw = Math.min(1, Math.max(0, localX) / Math.max(1, barWidth.current));
-    return _nRTL ? 1 - raw : raw;
-  };
-  const _calcPctFromLocal = (localX: number): number => {
     const raw = Math.min(1, Math.max(0, localX) / Math.max(1, barWidth.current));
     return _nRTL ? 1 - raw : raw;
   };
@@ -2238,70 +2230,61 @@ function ExpoRiftPlayer({
       onMoveShouldSetPanResponder: () => true,
       onPanResponderGrant: (e) => {
         const grantPageX  = e.nativeEvent.pageX;
-        const grantLocX   = Number(e.nativeEvent.locationX); // نسبي للـ View — أدق من pageX للنقرات السريعة
+        const grantLocX   = e.nativeEvent.locationX; // نسبي للـ View — أدق من pageX للنقرات السريعة
         lastMoveX.current        = grantPageX;
-        lastLocalX.current = Number.isFinite(grantLocX) ? grantLocX : null;
+        grantLocationXRef.current = grantLocX;
         // إلغاء أي timer معلّق من الإفلات السابق
         if (postSeekTimer.current) { clearTimeout(postSeekTimer.current); postSeekTimer.current = null; }
         setPostSeekPct(null);
         setIsDragging(true);
 
-        if (Number.isFinite(grantLocX)) {
-          setDragPct(Math.max(0, Math.min(1, _calcPctFromLocal(grantLocX))));
-        } else if (barGeometryValid.current && Number.isFinite(grantPageX)) {
-          setDragPct(Math.max(0, Math.min(1, _calcPctFromAbsolute(grantPageX))));
+        /* حساب فوري: نفضّل locationX (لا يعتمد على barPageX) إن كان ضمن حدود الشريط */
+        const bw = barWidth.current;
+        if (grantLocX >= 0 && grantLocX <= bw + 4) {
+          const raw = Math.min(1, Math.max(0, grantLocX / Math.max(1, bw)));
+          setDragPct(_nRTL ? 1 - raw : raw);
         } else {
-          setDragPct(0);
+          setDragPct(Math.max(0, Math.min(1, _calcPctFromAbsolute(grantPageX))));
         }
 
         /* تحديث القياسات بشكل غير متزامن (يُصلح إن تغيّر تخطيط الشريط) */
         barRef.current?.measureInWindow((px, _py, pw) => {
-          if (Number.isFinite(px) && Number.isFinite(pw) && pw > 1) {
-            barPageX.current = px;
-            barWidth.current = pw;
-            barGeometryValid.current = true;
-          }
+          if (px >= 0) barPageX.current = px;
+          if (pw > 1)  barWidth.current  = pw;
         });
       },
-      onPanResponderMove: (e, gs) => {
-        const localX = Number(e.nativeEvent.locationX);
-        if (Number.isFinite(localX)) {
-          lastLocalX.current = localX;
-          setDragPct(Math.max(0, Math.min(1, _calcPctFromLocal(localX))));
-          return;
-        }
+      onPanResponderMove: (_, gs) => {
+        /* gs.moveX = الإحداثي المطلق للإصبع على الشاشة — موثوق على iOS وAndroid */
         const x = gs.moveX;
-        if (barGeometryValid.current && Number.isFinite(x) && x > 0) {
-          lastMoveX.current = x;
-          setDragPct(Math.max(0, Math.min(1, _calcPctFromAbsolute(x))));
-          return;
-        }
         if (x > 0) lastMoveX.current = x;
-        const pct = lastLocalX.current !== null
-          ? _calcPctFromLocal(lastLocalX.current)
-          : 0;
+        const pct = _calcPctFromAbsolute(x > 0 ? x : lastMoveX.current);
         setDragPct(Math.max(0, Math.min(1, pct)));
       },
-      onPanResponderRelease: (e, gs) => {
-        /* النقر والإفلات على منطقة اللمس الخارجية يستخدمان نفس الإحداثي المحلي.
-           pageX يبقى fallback فقط إذا لم ترسل Android locationX. */
+      onPanResponderRelease: (_, gs) => {
+        /* نقرة سريعة (dx < 8px): نفضّل locationX المحفوظ — لا يعتمد على barPageX/barWidth.
+           لكن locationX قد يكون 0 على Android لأسباب داخلية (موثّق)؛ نتحقق أن الصفر
+           منطقي فعلاً (الطرف الأيسر من الشريط) وإلا نرجع لحساب pageX. */
         let safePct: number;
-        const releaseLocalX = Number(e.nativeEvent.locationX);
-        if (Number.isFinite(releaseLocalX)) {
-          safePct = _calcPctFromLocal(releaseLocalX);
-        } else if (lastLocalX.current !== null) {
-          safePct = _calcPctFromLocal(lastLocalX.current);
+        const isPureTap = Math.abs(gs.dx) < 8 && Math.abs(gs.dy) < 8;
+        if (isPureTap) {
+          const loc = grantLocationXRef.current;
+          const bw  = barWidth.current;
+          /* اعتبر locationX صالحاً إن كان موجباً، أو صفراً مع نقرة في الطرف الأيسر فعلاً */
+          const isEdgeTap = lastMoveX.current <= barPageX.current + 4;
+          const locValid  = loc > 0 || (loc === 0 && isEdgeTap);
+          if (locValid && bw > 1) {
+            const raw = Math.min(1, Math.max(0, loc / bw));
+            safePct = _nRTL ? 1 - raw : raw;
+          } else {
+            /* fallback: pageX-based (Android RTL أو locationX=0 غير طرفي) */
+            const x = lastMoveX.current > 0 ? lastMoveX.current : gs.x0;
+            safePct = Math.max(0, Math.min(1, _calcPctFromAbsolute(x)));
+          }
         } else {
-          const releasePageX = Number(e.nativeEvent.pageX);
-          const absoluteX = releasePageX > 0
-            ? releasePageX
-            : (lastMoveX.current > 0 ? lastMoveX.current : gs.x0);
-          safePct = barGeometryValid.current && Number.isFinite(absoluteX)
-            ? _calcPctFromAbsolute(absoluteX)
-            : 0;
+          const x = gs.moveX > 0 ? gs.moveX : lastMoveX.current;
+          safePct = Math.max(0, Math.min(1, _calcPctFromAbsolute(x)));
         }
-        const timelineDuration = durationRef.current;
-        seekRef.current(safePct * timelineDuration);
+        seekRef.current(safePct * durationRef.current);
         // نُبقي على الموضع المطلوب مرئياً 800ms ريثما يتحدث الـ polling (كل 500ms)
         // هذا يمنع "الخط الوهمي" الذي يملأ ثم يرجع عند الإفلات
         setPostSeekPct(safePct);
@@ -2328,16 +2311,12 @@ function ExpoRiftPlayer({
   }, [seek]);
 
   const handleTvProgressPress = useCallback((event: any) => {
-    const nativeEvent = event?.nativeEvent || {};
-    const pageX = Number(nativeEvent.pageX);
-    const locationX = Number(nativeEvent.locationX);
-    const absoluteX = pageX > 0 ? pageX : NaN;
-    const pct = barGeometryValid.current && Number.isFinite(absoluteX)
-      ? _calcPctFromAbsolute(absoluteX)
-      : (Number.isFinite(locationX) ? _calcPctFromLocal(locationX) : NaN);
-    if (!Number.isFinite(pct)) return;
-    commitProgressPercent(pct);
-  }, [commitProgressPercent]);
+    const locationX = Number(event?.nativeEvent?.locationX);
+    const width = Math.max(1, barWidth.current);
+    if (!Number.isFinite(locationX)) return;
+    const raw = Math.max(0, Math.min(1, locationX / width));
+    commitProgressPercent(_nRTL ? 1 - raw : raw);
+  }, [commitProgressPercent, _nRTL]);
 
   /* ─── Skip intro/outro logic ─── */
   const SKIP_BTN_LEAD = 3; // ثوانٍ قبل بداية النطاق لإظهار الزر
@@ -2952,8 +2931,10 @@ function ExpoRiftPlayer({
               <Text style={[s.timeText, tvMode && s.tvTimeText, { position: "absolute", [_nRTL ? "left" : "right"]: 0, opacity: 0.45 }]}>{fmtTime(duration)}</Text>
             </View>
 
-            {/* شريط التقدم — يبدأ من اليمين في RTL ومن اليسار في LTR.
-                نعكس طبقة الرسم فقط؛ منطقة اللمس والقياس تبقى ثابتة. */}
+            {/* شريط التقدم — يسار=بداية، يمين=نهاية (LTR دائماً، المعيار العالمي لمشغلات الفيديو)
+                direction:'ltr' يُجبر Yoga على تخطيط LTR حتى في التطبيقات العربية RTL،
+                مما يجعل left:0%→100% من اليسار الفيزيائي وليس من يمين RTL.
+                هذا يُصلح: (1) ملء الشريط (2) موضع الـ thumb (3) حساب الـ seek */}
             {(() => {
               const rawFill = (isDragging ? dragPct : postSeekPct !== null ? postSeekPct : progress) * 100;
               const fillPct = Math.min(Math.max(isFinite(rawFill) ? rawFill : 0, 0), 100);
@@ -2963,83 +2944,68 @@ function ExpoRiftPlayer({
                 <View
                   ref={barRef}
                   style={[s.progressWrap, tvMode && s.tvProgressWrap, isDragging && s.progressWrapDragging,
+                    _nRTL && { transform: [{ scaleX: -1 }] },
                   ]}
                   onLayout={(e) => {
                     barWidth.current = e.nativeEvent.layout.width || 1;
-                    barGeometryValid.current = false;
-                    lastLocalX.current = null;
                     // مسح أي seek مؤقت عند تغيير الاتجاه (portrait↔landscape) لتجنب الإحداثيات القديمة
                     setPostSeekPct(null);
                     setIsDragging(false);
-                    barRef.current?.measureInWindow((px, _py, pw) => {
-                      if (Number.isFinite(px) && Number.isFinite(pw) && pw > 1) {
-                        barPageX.current = px;
-                        barWidth.current = pw;
-                        barGeometryValid.current = true;
-                      }
-                    });
+                    barRef.current?.measureInWindow((px) => { if (px >= 0) barPageX.current = px; });
                   }}
                   {...seekBarPan.panHandlers}
                 >
-                  {/* افصل طبقة الرسم المعكوسة عن منطقة اللمس والقياس.
-                      measureInWindow على View عليه scaleX(-1) قد يعيد حدّاً
-                      بصرياً خاطئاً في Android، فيحوّل كل لمس إلى نهاية الحلقة. */}
-                  <View style={[
-                    StyleSheet.absoluteFillObject,
-                    _nRTL && { transform: [{ scaleX: -1 }] },
-                  ]} pointerEvents={tvMode ? "box-none" : "none"}>
-                    {tvMode && (
-                      <Pressable
-                        accessibilityRole="adjustable"
-                        accessibilityLabel="شريط تقدم الحلقة"
-                        onPress={handleTvProgressPress}
-                        onFocus={() => {
-                          setProgressFocused(true);
-                          fadeIn();
-                        }}
-                        onBlur={() => setProgressFocused(false)}
-                        onKeyDown={handleTvProgressKeyDown}
-                        style={({ focused }) => [
-                          StyleSheet.absoluteFillObject,
-                          focused && s.tvProgressFocus,
-                        ]}
-                      />
-                    )}
-                    <View style={[s.progressBg, tvMode && s.tvProgressBg]} />
-                    {bufferedPct > 0 && (
-                      <View style={[s.bufferBar, { left: 0, width: `${bufferedPct * 100}%` as any }]} />
-                    )}
-                    {markerPctIntro && (
-                      <View style={[s.skipMarker, {
-                        left: `${markerPctIntro.start}%` as any,
-                        width: `${Math.max(1.2, markerPctIntro.end - markerPctIntro.start)}%` as any,
-                      }]} />
-                    )}
-                    {markerPctOutro && (
-                      <View style={[s.skipMarker, {
-                        left: `${markerPctOutro.start}%` as any,
-                        width: `${Math.max(1.2, markerPctOutro.end - markerPctOutro.start)}%` as any,
-                      }]} />
-                    )}
-                    <LinearGradient
-                      colors={["#6D28D9", "#8B5CF6", "#a78bfa"]}
-                      start={_nRTL ? { x: 1, y: 0 } : { x: 0, y: 0 }}
-                      end={_nRTL ? { x: 0, y: 0 } : { x: 1, y: 0 }}
-                      style={[s.progressFill, tvMode && s.tvProgressFill, { left: 0, width: `${fillPct}%` as any }]}
+                  {tvMode && (
+                    <Pressable
+                      accessibilityRole="adjustable"
+                      accessibilityLabel="شريط تقدم الحلقة"
+                      onPress={handleTvProgressPress}
+                      onFocus={() => {
+                        setProgressFocused(true);
+                        fadeIn();
+                      }}
+                      onBlur={() => setProgressFocused(false)}
+                      onKeyDown={handleTvProgressKeyDown}
+                      style={({ focused }) => [
+                        StyleSheet.absoluteFillObject,
+                        focused && s.tvProgressFocus,
+                      ]}
                     />
-                    <View style={[
-                      s.thumb, tvMode && s.tvThumb,
-                      { left: `${thumbPct}%` as any },
-                      isDragging && s.thumbDragging,
-                    ]} />
-                    {isDragging && (
-                      <View style={[s.dragTooltip, { left: `${tooltipPct}%` as any },
-                        _nRTL && { transform: [{ scaleX: -1 }] },
-                      ]}>
-                        <Text style={s.dragTooltipText}>{fmtTime(dragPct * (durationRef.current || duration))}</Text>
-                      </View>
-                    )}
-                  </View>
+                  )}
+                  <View style={[s.progressBg, tvMode && s.tvProgressBg]} />
+                  {bufferedPct > 0 && (
+                    <View style={[s.bufferBar, { left: 0, width: `${bufferedPct * 100}%` as any }]} />
+                  )}
+                  {markerPctIntro && (
+                    <View style={[s.skipMarker, {
+                      left: `${markerPctIntro.start}%` as any,
+                      width: `${Math.max(1.2, markerPctIntro.end - markerPctIntro.start)}%` as any,
+                    }]} />
+                  )}
+                  {markerPctOutro && (
+                    <View style={[s.skipMarker, {
+                      left: `${markerPctOutro.start}%` as any,
+                      width: `${Math.max(1.2, markerPctOutro.end - markerPctOutro.start)}%` as any,
+                    }]} />
+                  )}
+                  <LinearGradient
+                    colors={["#6D28D9", "#8B5CF6", "#a78bfa"]}
+                    start={_nRTL ? { x: 1, y: 0 } : { x: 0, y: 0 }}
+                    end={_nRTL ? { x: 0, y: 0 } : { x: 1, y: 0 }}
+                    style={[s.progressFill, tvMode && s.tvProgressFill, { left: 0, width: `${fillPct}%` as any }]}
+                  />
+                  <View style={[
+                    s.thumb, tvMode && s.tvThumb,
+                    { left: `${thumbPct}%` as any },
+                    isDragging && s.thumbDragging,
+                  ]} />
+                  {isDragging && (
+                    <View style={[s.dragTooltip, { left: `${tooltipPct}%` as any },
+                      _nRTL && { transform: [{ scaleX: -1 }] },
+                    ]}>
+                      <Text style={s.dragTooltipText}>{fmtTime(dragPct * (durationRef.current || duration))}</Text>
+                    </View>
+                  )}
                 </View>
               );
             })()}
