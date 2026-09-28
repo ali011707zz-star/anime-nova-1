@@ -682,7 +682,9 @@ function ExpoRiftPlayer({
   const barRef            = useRef<View>(null);
   const barWidth          = useRef(W);   // يبدأ بعرض الشاشة كـ fallback آمن قبل onLayout
   const barPageX          = useRef(0);   // absolute X of bar's left edge on screen (for reliable seek)
+  const barGeometryValid  = useRef(false);
   const lastMoveX         = useRef(0);   // last known absolute X during drag (fallback for release on Android)
+  const lastLocalX        = useRef<number | null>(null);
   const grantLocationXRef = useRef(0);   // locationX النسبي لحدث Grant (أدق من pageX للنقر السريع)
   const resumedRef        = useRef(false);
   const subRafRef         = useRef<any>(null);
@@ -704,6 +706,8 @@ function ExpoRiftPlayer({
   const gestureStartPosRef= useRef(0);
   const gestureStartXRef  = useRef(0);
   const orientLockRef     = useRef<"left" | "right">("left");
+  const orientationPendingRef = useRef<ScreenOrientation.OrientationLock | null>(null);
+  const orientationRunningRef = useRef(false);
   /* timeout لاكتشاف الشاشة السوداء: إذا بقي المشغّل في "loading" أكثر من 25ث
      نعامله كخطأ ونتجاوز للمصدر التالي تلقائياً */
   const loadTimeoutRef    = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -921,6 +925,25 @@ function ExpoRiftPlayer({
       AsyncStorage.setItem("sub-offset-v1", String(next)).catch(() => {});
       return next;
     });
+  }, []);
+
+  /* Android may deliver several orientation requests while the activity is
+     still relaying the previous configuration change. Serialize them and keep
+     only the newest pending lock so rotation never races the video surface. */
+  const requestOrientation = useCallback((lock: ScreenOrientation.OrientationLock) => {
+    orientationPendingRef.current = lock;
+    if (orientationRunningRef.current) return;
+    orientationRunningRef.current = true;
+    void (async () => {
+      while (orientationPendingRef.current !== null) {
+        const next = orientationPendingRef.current;
+        orientationPendingRef.current = null;
+        try {
+          await ScreenOrientation.lockAsync(next);
+        } catch {}
+      }
+      orientationRunningRef.current = false;
+    })();
   }, []);
 
   const beginSeekRecovery = useCallback((target: number) => {
@@ -1489,13 +1512,11 @@ function ExpoRiftPlayer({
 
   /* ─── Screen orientation lock to landscape ─── */
   useEffect(() => {
-    ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE_RIGHT)
-      .then(() => { orientLockRef.current = "right"; })
-      .catch(() => {});
+    requestOrientation(ScreenOrientation.OrientationLock.LANDSCAPE_RIGHT);
     return () => {
-      ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP).catch(() => {});
+      requestOrientation(ScreenOrientation.OrientationLock.PORTRAIT_UP);
     };
-  }, []);
+  }, [requestOrientation]);
 
   /* ─── Flip screen — rotate 180° using CSS transform (no surface recreation = no black flash) ─── */
   const flipScreen = useCallback(() => {
@@ -1503,15 +1524,15 @@ function ExpoRiftPlayer({
   }, []);
 
   /* ─── Portrait / Landscape toggle ─── */
-  const togglePortrait = useCallback(async () => {
-    try {
-      if (isPortrait) {
-        await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE_RIGHT);
-      } else {
-        await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP);
-      }
-    } catch {}
-  }, [isPortrait]);
+  const togglePortrait = useCallback(() => {
+    const nextPortrait = !isPortrait;
+    setIsPortrait(nextPortrait);
+    requestOrientation(
+      nextPortrait
+        ? ScreenOrientation.OrientationLock.PORTRAIT_UP
+        : ScreenOrientation.OrientationLock.LANDSCAPE_RIGHT,
+    );
+  }, [isPortrait, requestOrientation]);
 
   /* ─── Screenshot ─── */
   const rootViewRef = useRef<View>(null);
@@ -1587,6 +1608,8 @@ function ExpoRiftPlayer({
         o === ScreenOrientation.Orientation.PORTRAIT_UP ||
         o === ScreenOrientation.Orientation.PORTRAIT_DOWN
       );
+      /* A rotation invalidates absolute coordinates used by the seekbar. */
+      barGeometryValid.current = false;
     });
     return () => sub.remove();
   }, []);
@@ -1870,9 +1893,9 @@ function ExpoRiftPlayer({
 
   /* ─── Back: lock to portrait then go back ─── */
   const handleBack = useCallback(() => {
-    ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP).catch(() => {});
+    requestOrientation(ScreenOrientation.OrientationLock.PORTRAIT_UP);
     onBack();
-  }, [onBack]);
+  }, [onBack, requestOrientation]);
 
   /* ─── Actions ─── */
   const togglePlay = useCallback(() => {
@@ -1882,7 +1905,11 @@ function ExpoRiftPlayer({
 
   const seek = useCallback((secs: number) => {
     fadeIn();
-    const target = Math.max(0, Math.min(secs, durationRef.current || duration));
+    const maxDuration = durationRef.current > 0 ? durationRef.current : duration;
+    const safeSecs = Number.isFinite(secs) ? secs : 0;
+    const target = maxDuration > 0
+      ? Math.max(0, Math.min(safeSecs, maxDuration))
+      : Math.max(0, safeSecs);
     beginSeekRecovery(target);
     try { player.currentTime = target; setPosition(target); } catch {}
     /* أعِد ضبط كاشف الـ stall — بدون هذا، القفز للخلف يجعل pos أصغر من
@@ -2196,9 +2223,10 @@ function ExpoRiftPlayer({
   /* شريط التقدم يسير دائماً من اليسار (0%) إلى اليمين (100%) بغض النظر عن RTL —
      هذا هو المعيار العالمي لمشغلات الفيديو حتى في التطبيقات العربية */
   const _calcPctFromAbsolute = (absoluteX: number): number => {
+    if (!Number.isFinite(absoluteX)) return 0;
     const localX = absoluteX - barPageX.current;
     const raw = Math.min(1, Math.max(0, localX) / Math.max(1, barWidth.current));
-    return _nRTL ? 1 - raw : raw;
+    return raw;
   };
   const seekBarPan = useRef(
     PanResponder.create({
@@ -2206,9 +2234,10 @@ function ExpoRiftPlayer({
       onMoveShouldSetPanResponder: () => true,
       onPanResponderGrant: (e) => {
         const grantPageX  = e.nativeEvent.pageX;
-        const grantLocX   = e.nativeEvent.locationX; // نسبي للـ View — أدق من pageX للنقرات السريعة
+        const grantLocX   = Number(e.nativeEvent.locationX); // نسبي للـ View — أدق من pageX للنقرات السريعة
         lastMoveX.current        = grantPageX;
         grantLocationXRef.current = grantLocX;
+        lastLocalX.current = Number.isFinite(grantLocX) ? grantLocX : null;
         // إلغاء أي timer معلّق من الإفلات السابق
         if (postSeekTimer.current) { clearTimeout(postSeekTimer.current); postSeekTimer.current = null; }
         setPostSeekPct(null);
@@ -2216,27 +2245,39 @@ function ExpoRiftPlayer({
 
         /* حساب فوري: نفضّل locationX (لا يعتمد على barPageX) إن كان ضمن حدود الشريط */
         const bw = barWidth.current;
-        if (grantLocX >= 0 && grantLocX <= bw + 4) {
+        if (Number.isFinite(grantLocX) && grantLocX >= 0 && grantLocX <= bw + 4) {
           const raw = Math.min(1, Math.max(0, grantLocX / Math.max(1, bw)));
-          setDragPct(_nRTL ? 1 - raw : raw);
+          setDragPct(raw);
         } else {
           setDragPct(Math.max(0, Math.min(1, _calcPctFromAbsolute(grantPageX))));
         }
 
         /* تحديث القياسات بشكل غير متزامن (يُصلح إن تغيّر تخطيط الشريط) */
         barRef.current?.measureInWindow((px, _py, pw) => {
-          if (px >= 0) barPageX.current = px;
-          if (pw > 1)  barWidth.current  = pw;
+          if (Number.isFinite(px) && Number.isFinite(pw) && pw > 1) {
+            barPageX.current = px;
+            barWidth.current = pw;
+            barGeometryValid.current = true;
+          }
         });
       },
-      onPanResponderMove: (_, gs) => {
-        /* gs.moveX = الإحداثي المطلق للإصبع على الشاشة — موثوق على iOS وAndroid */
+      onPanResponderMove: (e, gs) => {
+        /* استخدم الإحداثي المحلي أولاً؛ بعد الدوران قد يصبح moveX مبنياً على
+           قياس الشاشة السابق قبل أن تكتمل إعادة التخطيط. */
+        const localX = Number(e.nativeEvent.locationX);
+        if (Number.isFinite(localX) && localX >= 0 && localX <= barWidth.current + 4) {
+          lastLocalX.current = localX;
+          setDragPct(Math.max(0, Math.min(1, localX / Math.max(1, barWidth.current))));
+          return;
+        }
         const x = gs.moveX;
         if (x > 0) lastMoveX.current = x;
-        const pct = _calcPctFromAbsolute(x > 0 ? x : lastMoveX.current);
+        const pct = barGeometryValid.current
+          ? _calcPctFromAbsolute(x > 0 ? x : lastMoveX.current)
+          : (lastLocalX.current !== null ? lastLocalX.current / Math.max(1, barWidth.current) : 0);
         setDragPct(Math.max(0, Math.min(1, pct)));
       },
-      onPanResponderRelease: (_, gs) => {
+      onPanResponderRelease: (e, gs) => {
         /* نقرة سريعة (dx < 8px): نفضّل locationX المحفوظ — لا يعتمد على barPageX/barWidth.
            لكن locationX قد يكون 0 على Android لأسباب داخلية (موثّق)؛ نتحقق أن الصفر
            منطقي فعلاً (الطرف الأيسر من الشريط) وإلا نرجع لحساب pageX. */
@@ -2245,20 +2286,30 @@ function ExpoRiftPlayer({
         if (isPureTap) {
           const loc = grantLocationXRef.current;
           const bw  = barWidth.current;
-          /* اعتبر locationX صالحاً إن كان موجباً، أو صفراً مع نقرة في الطرف الأيسر فعلاً */
-          const isEdgeTap = lastMoveX.current <= barPageX.current + 4;
-          const locValid  = loc > 0 || (loc === 0 && isEdgeTap);
-          if (locValid && bw > 1) {
+          if (Number.isFinite(loc) && loc >= 0 && loc <= bw + 4 && bw > 1) {
             const raw = Math.min(1, Math.max(0, loc / bw));
-            safePct = _nRTL ? 1 - raw : raw;
+            safePct = raw;
+          } else if (lastLocalX.current !== null && bw > 1) {
+            safePct = Math.min(1, Math.max(0, lastLocalX.current / bw));
           } else {
-            /* fallback: pageX-based (Android RTL أو locationX=0 غير طرفي) */
+            /* fallback: pageX-based only when the post-rotation geometry is valid */
             const x = lastMoveX.current > 0 ? lastMoveX.current : gs.x0;
-            safePct = Math.max(0, Math.min(1, _calcPctFromAbsolute(x)));
+            safePct = barGeometryValid.current
+              ? Math.max(0, Math.min(1, _calcPctFromAbsolute(x)))
+              : 0;
           }
         } else {
-          const x = gs.moveX > 0 ? gs.moveX : lastMoveX.current;
-          safePct = Math.max(0, Math.min(1, _calcPctFromAbsolute(x)));
+          const releaseLocalX = Number(e.nativeEvent.locationX);
+          if (Number.isFinite(releaseLocalX) && releaseLocalX >= 0 && releaseLocalX <= barWidth.current + 4) {
+            safePct = Math.min(1, Math.max(0, releaseLocalX / Math.max(1, barWidth.current)));
+          } else if (lastLocalX.current !== null) {
+            safePct = Math.min(1, Math.max(0, lastLocalX.current / Math.max(1, barWidth.current)));
+          } else {
+            const x = gs.moveX > 0 ? gs.moveX : lastMoveX.current;
+            safePct = barGeometryValid.current
+              ? Math.max(0, Math.min(1, _calcPctFromAbsolute(x)))
+              : 0;
+          }
         }
         seekRef.current(safePct * durationRef.current);
         // نُبقي على الموضع المطلوب مرئياً 800ms ريثما يتحدث الـ polling (كل 500ms)
@@ -2291,8 +2342,8 @@ function ExpoRiftPlayer({
     const width = Math.max(1, barWidth.current);
     if (!Number.isFinite(locationX)) return;
     const raw = Math.max(0, Math.min(1, locationX / width));
-    commitProgressPercent(_nRTL ? 1 - raw : raw);
-  }, [commitProgressPercent, _nRTL]);
+    commitProgressPercent(raw);
+  }, [commitProgressPercent]);
 
   /* ─── Skip intro/outro logic ─── */
   const SKIP_BTN_LEAD = 3; // ثوانٍ قبل بداية النطاق لإظهار الزر
@@ -2903,8 +2954,8 @@ function ExpoRiftPlayer({
 
             {/* الوقت — الوقت الحالي أقصى اليسار الفيزيائي، المدة الكلية أقصى اليمين الفيزيائي */}
             <View style={{ position: "relative", height: 18, marginBottom: 2 }}>
-              <Text style={[s.timeText, tvMode && s.tvTimeText, { position: "absolute", [_nRTL ? "right" : "left"]: 0 }]}>{fmtTime(position)}</Text>
-              <Text style={[s.timeText, tvMode && s.tvTimeText, { position: "absolute", [_nRTL ? "left" : "right"]: 0, opacity: 0.45 }]}>{fmtTime(duration)}</Text>
+              <Text style={[s.timeText, tvMode && s.tvTimeText, { position: "absolute", left: 0 }]}>{fmtTime(position)}</Text>
+              <Text style={[s.timeText, tvMode && s.tvTimeText, { position: "absolute", right: 0, opacity: 0.45 }]}>{fmtTime(duration)}</Text>
             </View>
 
             {/* شريط التقدم — يسار=بداية، يمين=نهاية (LTR دائماً، المعيار العالمي لمشغلات الفيديو)
@@ -2919,15 +2970,21 @@ function ExpoRiftPlayer({
               return (
                 <View
                   ref={barRef}
-                  style={[s.progressWrap, tvMode && s.tvProgressWrap, isDragging && s.progressWrapDragging,
-                    _nRTL && { transform: [{ scaleX: -1 }] },
-                  ]}
+                  style={[s.progressWrap, tvMode && s.tvProgressWrap, isDragging && s.progressWrapDragging]}
                   onLayout={(e) => {
                     barWidth.current = e.nativeEvent.layout.width || 1;
+                    barGeometryValid.current = false;
+                    lastLocalX.current = null;
                     // مسح أي seek مؤقت عند تغيير الاتجاه (portrait↔landscape) لتجنب الإحداثيات القديمة
                     setPostSeekPct(null);
                     setIsDragging(false);
-                    barRef.current?.measureInWindow((px) => { if (px >= 0) barPageX.current = px; });
+                    barRef.current?.measureInWindow((px, _py, pw) => {
+                      if (Number.isFinite(px) && Number.isFinite(pw) && pw > 1) {
+                        barPageX.current = px;
+                        barWidth.current = pw;
+                        barGeometryValid.current = true;
+                      }
+                    });
                   }}
                   {...seekBarPan.panHandlers}
                 >
@@ -2966,8 +3023,8 @@ function ExpoRiftPlayer({
                   )}
                   <LinearGradient
                     colors={["#6D28D9", "#8B5CF6", "#a78bfa"]}
-                    start={_nRTL ? { x: 1, y: 0 } : { x: 0, y: 0 }}
-                    end={_nRTL ? { x: 0, y: 0 } : { x: 1, y: 0 }}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 0 }}
                     style={[s.progressFill, tvMode && s.tvProgressFill, { left: 0, width: `${fillPct}%` as any }]}
                   />
                   <View style={[
@@ -2976,9 +3033,7 @@ function ExpoRiftPlayer({
                     isDragging && s.thumbDragging,
                   ]} />
                   {isDragging && (
-                    <View style={[s.dragTooltip, { left: `${tooltipPct}%` as any },
-                      _nRTL && { transform: [{ scaleX: -1 }] },
-                    ]}>
+                    <View style={[s.dragTooltip, { left: `${tooltipPct}%` as any }]}>
                       <Text style={s.dragTooltipText}>{fmtTime(dragPct * (durationRef.current || duration))}</Text>
                     </View>
                   )}

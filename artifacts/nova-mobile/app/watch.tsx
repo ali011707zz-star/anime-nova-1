@@ -1124,9 +1124,6 @@ export default function WatchScreen() {
   useEffect(() => {
     if (screen === "picker") {
       ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP).catch(() => { });
-    } else if (screen === "embed") {
-      /* LANDSCAPE_RIGHT لمطابقة اتجاه RiftPlayer — كلاهما يقفل نفس الاتجاه */
-      ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE_RIGHT).catch(() => { });
     }
   }, [screen]);
 
