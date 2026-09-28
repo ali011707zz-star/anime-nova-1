@@ -135,3 +135,4 @@
 - [Mobile static build cancellation](mobile-static-build-cancellation.md) — Expo build clears static-build before bundling; cancellation can leave the VPS mobile download service without a manifest.
 - [AnimeWitcher legacy content types](animewitcher-legacy-content-types.md) — older western-animation seasons may be tagged `anime` while newer dubbed seasons use `dubbed`; keep compatibility title-scoped.
 - [Apps Anime APK analysis](apps-anime-apk-analysis.md) — APK is an API client for paged dubbed/translated catalog endpoints; backend is Cloudflare-protected and not a DB dump.
+- [Progress bar transformed hitbox](progress-bar-transformed-hitbox.md) — keep seekbar touch geometry untransformed; apply RTL transforms only to the visual child layer.
