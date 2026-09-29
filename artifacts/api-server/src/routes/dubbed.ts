@@ -640,27 +640,61 @@ interface AwCatalogItem {
   seasons: { label: string; animeId: string }[];
 }
 
+interface AwSourceTitle {
+  animeId: string;
+  title: string;
+  titleAr: string | null;
+  anilistId: number | null;
+}
+
 let _awCatalog: AwCatalogItem[] | null = null;
 let _awCatalogTs = 0;
 const AW_TTL = 2 * 60 * 60_000; // 2 ساعات
 let _awLoadPromise: Promise<AwCatalogItem[]> | null = null;
 
 function awPoster(anilistId: number | null | undefined): string | null {
-  if (!anilistId) return null;
+  if (!Number.isFinite(anilistId) || Number(anilistId) <= 0) return null;
   return `https://img.anili.st/media/${anilistId}`;
 }
 
-// ── TMDB poster cache (عمر الكاش = 24 ساعة مع السيرفر) ──
+// ── Poster caches (عمر الكاش = 24 ساعة مع السيرفر) ──
 const _tmdbPosterCache = new Map<string, string | null>();
+const _tvMazePosterCache = new Map<string, string | null>();
 const TMDB_KEY = "8265bd1679663a7ea12ac168da84d2e8";
 const TMDB_IMG = "https://image.tmdb.org/t/p/w300";
 
-/** استخرج العنوان الأساسي: احذف "Season N" و "Dub" و "Dub Season N" */
+/** احذف لاحقة الموسم/الجزء والوسوم التي لا تدخل في مطابقة العمل الأساسي. */
 function awBaseTitle(title: string): string {
   return title
-    .replace(/\s+Season\s+\d+(\s+Dub)?$/i, "")
-    .replace(/\s+Dub$/i, "")
+    .replace(/[_-]+/g, " ")
+    .replace(/\s*[\[(]\s*(?:season|saison|الموسم|موسم|part|الجزء|جزء)\s*[-_.#]?\s*\d+\s*[\])]\s*/gi, " ")
+    .replace(/\s+(?:season|saison|الموسم|موسم)\s*[-_.#]?\s*\d+\s*(?:dub(?:bed)?|مدبلج)?$/i, "")
+    .replace(/\s+(?:part|الجزء|جزء)\s*[-_.#]?\s*\d+\s*$/i, "")
+    .replace(/\s+s\s*[-_.#]?\s*\d+\s*$/i, "")
+    .replace(/\s+(?:dub(?:bed)?|مدبلج)$/i, "")
+    .replace(/\s+/g, " ")
     .trim();
+}
+
+function awSeasonLabel(title: string, animeId: string): string {
+  const value = `${title} ${animeId}`;
+  const season = value.match(/(?:season|saison|الموسم|موسم)\s*[-_.#]?\s*(\d+)/i)
+    || value.match(/\bs\s*[-_.#]?\s*(\d+)\b/i);
+  if (season) return `Season ${season[1]}`;
+  const part = value.match(/(?:part|الجزء|جزء)\s*[-_.#]?\s*(\d+)/i);
+  if (part) return `Part ${part[1]}`;
+  return "الحلقات";
+}
+
+function awGroupKey(title: string): string {
+  return awBaseTitle(title)
+    .toLocaleLowerCase("en-US")
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .trim();
+}
+
+function awTitleScore(title: string): number {
+  return awSeasonLabel(title, "") !== "الحلقات" ? 2 : title.trim() ? 1 : 0;
 }
 
 /** ابحث عن بوستر في TMDB بالعنوان */
@@ -681,14 +715,48 @@ async function tmdbPosterByTitle(title: string): Promise<string | null> {
   } catch { _tmdbPosterCache.set(base, null); return null; }
 }
 
-/** جلب بوسترات TMDB لقائمة من العناوين (تشغيل متوازٍ بحد أقصى 8) */
-async function fetchTmdbPosters(titles: string[]): Promise<Map<string, string | null>> {
+/** TVMaze fallback لا يحتاج مفتاحاً، ويفيد خصوصاً في الأعمال الغربية المدبلجة. */
+async function tvMazePosterByTitle(title: string): Promise<string | null> {
+  const base = awBaseTitle(title);
+  if (_tvMazePosterCache.has(base)) return _tvMazePosterCache.get(base) ?? null;
+  try {
+    const r = await fetch(`https://api.tvmaze.com/search/shows?q=${encodeURIComponent(base)}`, {
+      signal: AbortSignal.timeout(6000),
+    });
+    if (!r.ok) { _tvMazePosterCache.set(base, null); return null; }
+    const data = await r.json();
+    const normalized = base.toLocaleLowerCase("en-US");
+    const ranked = (Array.isArray(data) ? data : [])
+      .filter((row: any) => row?.show?.image?.original || row?.show?.image?.medium)
+      .sort((a: any, b: any) => {
+        const an = String(a?.show?.name || "").toLocaleLowerCase("en-US");
+        const bn = String(b?.show?.name || "").toLocaleLowerCase("en-US");
+        return Number(bn === normalized) - Number(an === normalized);
+      });
+    const poster = ranked[0]?.show?.image?.original || ranked[0]?.show?.image?.medium || null;
+    _tvMazePosterCache.set(base, poster);
+    return poster;
+  } catch { _tvMazePosterCache.set(base, null); return null; }
+}
+
+async function posterByTitle(title: string): Promise<string | null> {
+  const tmdb = await tmdbPosterByTitle(title);
+  return tmdb || await tvMazePosterByTitle(title);
+}
+
+function awFallbackPoster(title: string): string {
+  const label = awBaseTitle(title).slice(0, 42) || "Anime NOVA";
+  return `https://placehold.co/300x450/111827/FFFFFF/png?text=${encodeURIComponent(label)}`;
+}
+
+/** جلب البوسترات للعناوين التي لا تحمل anilist_id (تشغيل متوازٍ بحد أقصى 8). */
+async function fetchFallbackPosters(titles: string[]): Promise<Map<string, string | null>> {
   const unique = [...new Set(titles.map(awBaseTitle))];
   const results = new Map<string, string | null>();
   // معالجة دُفعات بمعدل 8 طلبات متوازية
   for (let i = 0; i < unique.length; i += 8) {
     const batch = unique.slice(i, i + 8);
-    const posters = await Promise.all(batch.map(t => tmdbPosterByTitle(t)));
+    const posters = await Promise.all(batch.map(t => posterByTitle(t)));
     batch.forEach((t, idx) => results.set(t, posters[idx]));
     if (i + 8 < unique.length) await new Promise(r => setTimeout(r, 250)); // تأخير بسيط
   }
@@ -729,14 +797,15 @@ async function buildAwCatalog(): Promise<AwCatalogItem[]> {
   const SB_KEY = process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || "";
   if (!SB_URL || !SB_KEY) return [];
 
-  const seen = new Map<string, { anime_name: string; anilist_id: number | null; titleAr: string | null }>();
-  let offset = 0;
+  const sources = new Map<string, AwSourceTitle>();
   const batchSize = 1000;
 
   // ── جلب aw_links + dubbed_anim_links بالتوازي ──
   const [, dalMap] = await Promise.all([
-    // aw_links: يملأ seen مباشرةً
+    // aw_links: احتفظ بعنوان واحد موثوق لكل anime_id، مع تفضيل الاسم الذي
+    // يحتوي على رقم موسم إذا كان المصدر يعيد أكثر من نسخة للمعرف نفسه.
     (async () => {
+      let offset = 0;
       while (true) {
         try {
           const url = `${SB_URL}/rest/v1/aw_links?select=anime_id,anime_name,anilist_id&content_type=eq.dubbed&order=anime_id.asc&limit=${batchSize}&offset=${offset}`;
@@ -748,8 +817,19 @@ async function buildAwCatalog(): Promise<AwCatalogItem[]> {
           const rows: { anime_id: string; anime_name: string; anilist_id: number | null }[] = await r.json();
           if (!Array.isArray(rows) || !rows.length) break;
           for (const row of rows) {
-            if (row.anime_id && !seen.has(row.anime_id)) {
-              seen.set(row.anime_id, { anime_name: row.anime_name || row.anime_id, anilist_id: row.anilist_id ?? null, titleAr: null });
+            const animeId = String(row.anime_id ?? "");
+            if (!animeId.trim()) continue;
+            const title = String(row.anime_name || animeId);
+            const previous = sources.get(animeId);
+            if (!previous || awTitleScore(title) > awTitleScore(previous.title)) {
+              sources.set(animeId, {
+                animeId,
+                title,
+                titleAr: previous?.titleAr ?? null,
+                anilistId: row.anilist_id == null ? (previous?.anilistId ?? null) : Number(row.anilist_id),
+              });
+            } else if (previous.anilistId == null && row.anilist_id != null) {
+              previous.anilistId = Number(row.anilist_id);
             }
           }
           if (rows.length < batchSize) break;
@@ -761,43 +841,91 @@ async function buildAwCatalog(): Promise<AwCatalogItem[]> {
     fetchDalCatalog(SB_URL, SB_KEY),
   ]);
 
-  // دمج: أضف سلاسل dubbed_anim_links غير الموجودة في aw_links
+  // دمج: أضف سلاسل dubbed_anim_links غير الموجودة في aw_links، أو استكمل
+  // العنوان العربي للمعرف الموجود في الجدول الأول.
   for (const [sid, info] of dalMap) {
-    if (!seen.has(sid)) {
-      seen.set(sid, { anime_name: info.series_name, anilist_id: null, titleAr: info.series_name_ar });
-    } else {
-      // أضف العنوان العربي لمن وُجد في aw_links دون عنوان عربي
-      const existing = seen.get(sid)!;
-      if (!existing.titleAr && info.series_name_ar) {
-        existing.titleAr = info.series_name_ar;
-      }
+    const existing = sources.get(sid);
+    if (!existing) {
+      sources.set(sid, {
+        animeId: sid,
+        title: info.series_name || sid,
+        titleAr: info.series_name_ar || null,
+        anilistId: null,
+      });
+    } else if (!existing.titleAr && info.series_name_ar) {
+      existing.titleAr = info.series_name_ar;
     }
   }
 
-  // بناء العناصر الأولية
-  const items: AwCatalogItem[] = [];
-  for (const [anime_id, { anime_name, anilist_id, titleAr }] of seen) {
-    items.push({
-      key: anime_id,
-      title: anime_name || anime_id,
-      titleAr: titleAr ?? null,
-      poster: awPoster(anilist_id), // null إذا لم يكن هناك anilist_id
-      seasons: [{ label: "الحلقات", animeId: anime_id }],
-    });
-  }
-  items.sort((a, b) => a.title.localeCompare(b.title, "en-US"));
+  // اجمع نسخ العمل الواحد (مثل Invincible Season 1/2/3) في بطاقة واحدة.
+  // لا نعتمد على عنوان ثابت أو استثناء لعمل بعينه؛ كل ما يهم هو إزالة لاحقة
+  // الموسم/الجزء من الاسم وبناء season لكل anime_id فعلي.
+  const groups = new Map<string, {
+    key: string;
+    title: string;
+    titleAr: string | null;
+    seasons: { label: string; animeId: string }[];
+    anilistIds: number[];
+  }>();
 
-  // جلب بوسترات TMDB للعناصر التي ليس لها بوستر من AniList
-  const needPosters = items.filter(it => !it.poster).map(it => it.title);
+  for (const source of sources.values()) {
+    const baseTitle = awBaseTitle(source.title) || source.title || source.animeId;
+    const groupKey = awGroupKey(baseTitle) || `id:${source.animeId}`;
+    let group = groups.get(groupKey);
+    if (!group) {
+      group = {
+        key: source.animeId,
+        title: baseTitle,
+        titleAr: source.titleAr,
+        seasons: [],
+        anilistIds: [],
+      };
+      groups.set(groupKey, group);
+    } else if (!group.titleAr && source.titleAr) {
+      group.titleAr = source.titleAr;
+    }
+
+    const label = awSeasonLabel(source.title, source.animeId);
+    if (!group.seasons.some(season => season.animeId === source.animeId)) {
+      group.seasons.push({ label, animeId: source.animeId });
+    }
+    if (source.anilistId && Number.isFinite(source.anilistId) && !group.anilistIds.includes(source.anilistId)) {
+      group.anilistIds.push(source.anilistId);
+    }
+  }
+
+  const items: AwCatalogItem[] = [...groups.values()].map(group => {
+    group.seasons.sort((a, b) => {
+      const an = Number(a.label.match(/\d+/)?.[0] || 0);
+      const bn = Number(b.label.match(/\d+/)?.[0] || 0);
+      return an - bn || a.label.localeCompare(b.label, "en-US");
+    });
+    return {
+      key: group.key,
+      title: group.title,
+      titleAr: group.titleAr,
+      poster: awPoster(group.anilistIds[0]),
+      seasons: group.seasons,
+    };
+  });
+
+  // لا تسقط البطاقة عند غياب anilist_id أو فشل AniList image proxy:
+  // جرّب TMDB ثم TVMaze، وكلاهما يعيد رابطاً قابلاً للاستخدام مباشرة من الهاتف.
+  const needPosters = items.filter(item => !item.poster).map(item => item.title);
   if (needPosters.length > 0) {
-    logger.info({ count: needPosters.length }, "[aw-dubbed] جلب بوسترات TMDB...");
-    const posterMap = await fetchTmdbPosters(needPosters);
+    logger.info({ count: needPosters.length }, "[aw-dubbed] fetching fallback posters");
+    const posterMap = await fetchFallbackPosters(needPosters);
     for (const item of items) {
       if (!item.poster) {
-        item.poster = posterMap.get(awBaseTitle(item.title)) ?? null;
+        item.poster = posterMap.get(awBaseTitle(item.title)) ?? awFallbackPoster(item.title);
       }
     }
   }
+  // حتى في حال تعطل TMDB وTVMaze معاً، لا نعيد بطاقة بلا image URL.
+  for (const item of items) {
+    if (!item.poster) item.poster = awFallbackPoster(item.title);
+  }
+  items.sort((a, b) => a.title.localeCompare(b.title, "en-US"));
 
   logger.info({ count: items.length }, "[aw-dubbed] catalog built");
   return items;
@@ -820,17 +948,48 @@ setTimeout(() => { getAwCatalog().catch(() => {}); }, 6000);
 
 const AW_PAGE_SIZE = 36;
 
+function awSearchResults(catalog: AwCatalogItem[], query: string): AwCatalogItem[] {
+  const q = query.toLocaleLowerCase("en-US");
+  const results: AwCatalogItem[] = [];
+
+  for (const item of catalog) {
+    const matchingSeasons = item.seasons.filter(season => {
+      const haystack = [
+        item.title,
+        item.titleAr || "",
+        season.label,
+      ].join(" ").toLocaleLowerCase("en-US");
+      return haystack.includes(q);
+    });
+    if (!matchingSeasons.length) continue;
+
+    // عند البحث، أعد كل موسم كسجل مستقل حتى لا تظهر بطاقة واحدة باسم عام
+    // بينما يضطر المستخدم لاكتشاف الأجزاء من صفحة التفاصيل.
+    if (item.seasons.length > 1) {
+      for (const season of matchingSeasons) {
+        results.push({
+          ...item,
+          key: `${item.key}::${season.animeId}`,
+          title: `${item.title} — ${season.label}`,
+          titleAr: item.titleAr ? `${item.titleAr} — ${season.label}` : null,
+          seasons: [season],
+        });
+      }
+    } else {
+      results.push(item);
+    }
+  }
+  return results;
+}
+
 // ── GET /api/aw-dubbed/catalog?page=N&q=search ──
 router.get("/aw-dubbed/catalog", async (req, res) => {
   const page = Math.max(1, parseInt(req.query.page as string || "1", 10) || 1);
-  const q = (req.query.q as string || "").trim().toLowerCase();
+  const q = (req.query.q as string || "").trim();
   try {
     let catalog = await getAwCatalog();
     if (q.length >= 2) {
-      catalog = catalog.filter(s =>
-        s.title.toLowerCase().includes(q) ||
-        (s.titleAr && s.titleAr.toLowerCase().includes(q))
-      );
+      catalog = awSearchResults(catalog, q);
     }
     const totalPages = Math.max(1, Math.ceil(catalog.length / AW_PAGE_SIZE));
     const results = catalog.slice((page - 1) * AW_PAGE_SIZE, page * AW_PAGE_SIZE);
