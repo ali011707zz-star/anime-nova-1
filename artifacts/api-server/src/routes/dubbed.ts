@@ -650,7 +650,10 @@ interface AwSourceTitle {
 let _awCatalog: AwCatalogItem[] | null = null;
 let _awCatalogTs = 0;
 const AW_TTL = 2 * 60 * 60_000; // 2 ساعات
+const AW_DISK_CACHE_FILE = _dcJoin(_DC_DIR, "aw-catalog.json");
+const AW_DISK_TTL = 7 * 24 * 60 * 60_000;
 let _awLoadPromise: Promise<AwCatalogItem[]> | null = null;
+let _awPosterHydrationPromise: Promise<void> | null = null;
 
 function awPoster(anilistId: number | null | undefined): string | null {
   if (!Number.isFinite(anilistId) || Number(anilistId) <= 0) return null;
@@ -761,6 +764,52 @@ async function fetchFallbackPosters(titles: string[]): Promise<Map<string, strin
     if (i + 8 < unique.length) await new Promise(r => setTimeout(r, 250)); // تأخير بسيط
   }
   return results;
+}
+
+function readAwDiskCatalog(): AwCatalogItem[] | null {
+  try {
+    if (!_dcExists(AW_DISK_CACHE_FILE)) return null;
+    const cached = JSON.parse(_dcRead(AW_DISK_CACHE_FILE, "utf8"));
+    if (!cached?._ts || Date.now() - Number(cached._ts) > AW_DISK_TTL) return null;
+    if (!Array.isArray(cached.data)) return null;
+    return cached.data.filter((item: any) =>
+      item && typeof item.key === "string" &&
+      typeof item.title === "string" &&
+      Array.isArray(item.seasons),
+    ) as AwCatalogItem[];
+  } catch {
+    return null;
+  }
+}
+
+function writeAwDiskCatalog(catalog: AwCatalogItem[]): void {
+  try {
+    _dcWrite(AW_DISK_CACHE_FILE, JSON.stringify({ data: catalog, _ts: Date.now() }), "utf8");
+  } catch {
+    // Disk cache is an optimization; a read-only cache directory must not
+    // prevent the live Supabase catalog from being served.
+  }
+}
+
+function hydrateAwPostersInBackground(
+  catalog: AwCatalogItem[],
+  titles: string[],
+): void {
+  if (!titles.length || _awPosterHydrationPromise) return;
+  _awPosterHydrationPromise = (async () => {
+    logger.info({ count: titles.length }, "[aw-dubbed] background poster hydration started");
+    const posterMap = await fetchFallbackPosters(titles);
+    for (const item of catalog) {
+      const poster = posterMap.get(awBaseTitle(item.title));
+      if (poster) item.poster = poster;
+    }
+    if (_awCatalog === catalog) writeAwDiskCatalog(catalog);
+    logger.info({ count: titles.length }, "[aw-dubbed] background poster hydration finished");
+  })().catch(err => {
+    logger.warn({ err }, "[aw-dubbed] background poster hydration failed");
+  }).finally(() => {
+    _awPosterHydrationPromise = null;
+  });
 }
 
 /** جلب كل السلاسل من جدول dubbed_anim_links (الجديد) */
@@ -909,30 +958,22 @@ async function buildAwCatalog(): Promise<AwCatalogItem[]> {
     };
   });
 
-  // لا تسقط البطاقة عند غياب anilist_id أو فشل AniList image proxy:
-  // جرّب TMDB ثم TVMaze، وكلاهما يعيد رابطاً قابلاً للاستخدام مباشرة من الهاتف.
+  // لا تنتظر TMDB/TVMaze هنا؛ أعد الكتالوج فوراً مع fallback poster، ثم
+  // حدّث البوسترات الحقيقية في الخلفية. هذا يمنع أول طلب بعد restart من
+  // الانتظار لعشرات طلبات الصور الخارجية.
   const needPosters = items.filter(item => !item.poster).map(item => item.title);
-  if (needPosters.length > 0) {
-    logger.info({ count: needPosters.length }, "[aw-dubbed] fetching fallback posters");
-    const posterMap = await fetchFallbackPosters(needPosters);
-    for (const item of items) {
-      if (!item.poster) {
-        item.poster = posterMap.get(awBaseTitle(item.title)) ?? awFallbackPoster(item.title);
-      }
-    }
-  }
-  // حتى في حال تعطل TMDB وTVMaze معاً، لا نعيد بطاقة بلا image URL.
   for (const item of items) {
     if (!item.poster) item.poster = awFallbackPoster(item.title);
   }
   items.sort((a, b) => a.title.localeCompare(b.title, "en-US"));
 
+  writeAwDiskCatalog(items);
+  hydrateAwPostersInBackground(items, needPosters);
   logger.info({ count: items.length }, "[aw-dubbed] catalog built");
   return items;
 }
 
-async function getAwCatalog(): Promise<AwCatalogItem[]> {
-  if (_awCatalog && Date.now() - _awCatalogTs < AW_TTL) return _awCatalog;
+function refreshAwCatalog(): Promise<AwCatalogItem[]> {
   if (_awLoadPromise) return _awLoadPromise;
   _awLoadPromise = buildAwCatalog().then(c => {
     _awCatalog = c;
@@ -941,6 +982,21 @@ async function getAwCatalog(): Promise<AwCatalogItem[]> {
     return c;
   }).catch(() => { _awLoadPromise = null; return _awCatalog || []; });
   return _awLoadPromise;
+}
+
+async function getAwCatalog(): Promise<AwCatalogItem[]> {
+  if (_awCatalog && Date.now() - _awCatalogTs < AW_TTL) return _awCatalog;
+
+  // Survive PM2 restarts: serve the last complete catalog immediately, while
+  // refreshAwCatalog() updates it from Supabase in the background.
+  const diskCatalog = readAwDiskCatalog();
+  if (diskCatalog?.length) {
+    _awCatalog = diskCatalog;
+    _awCatalogTs = Date.now();
+    void refreshAwCatalog();
+    return diskCatalog;
+  }
+  return refreshAwCatalog();
 }
 
 // دفء الكاش عند بدء السيرفر
