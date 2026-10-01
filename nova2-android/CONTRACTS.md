@@ -1,6 +1,6 @@
 # Nova 2 API contract boundary
 
-هذه القائمة مأخوذة من `NOVA1_ANALYSIS.md` وملفات عميل Nova Mobile. لا تضيف
+هذه القائمة مأخوذة من `../docs/research/NOVA1_ANALYSIS.md` وملفات عميل Nova Mobile. لا تضيف
 هذه المرحلة endpoints جديدة ولا تفترض استجابة غير موجودة في Nova 1.
 
 ## عقود البداية

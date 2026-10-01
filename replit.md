@@ -11,7 +11,11 @@ A full-stack anime streaming platform with web and mobile clients.
 | `nova-mobile` | `artifacts/nova-mobile` | Expo React Native mobile app |
 | `mockup-sandbox` | `artifacts/mockup-sandbox` | Design/mockup canvas sandbox |
 | `nova2-android` | `nova2-android` | Independent Kotlin + Jetpack Compose Nova 2 client |
-| `nova-tv-v3` | `nova-tv-v3` | Kotlin Android Native client for phone, tablet, and TV |
+| `nova-tv-v3` | `nova-tv-v3` | Incomplete Kotlin migration prototype for phone, tablet, and TV |
+| Archived Android TV | `archive/android-tv` | Source for the first two legacy Kotlin prototypes |
+
+The root `README.md` is the high-level project map. Deployment, project, and
+research documents are grouped under `docs/`.
 
 ## Runtime
 
@@ -40,4 +44,5 @@ A full-stack anime streaming platform with web and mobile clients.
   Nova consumes only direct HLS/MP4 streams from the approved Anivexa providers;
   AniNeko is not duplicated and subtitle-only providers are filtered out.
 - Do not create, configure, or start Replit workflows for this project; local workflow failures are expected because Replit is code-editing only.
-- Do not restructure or migrate the existing stack.
+- Keep active app, workspace, and deployment paths stable. Repository organization
+  may group documentation and archive legacy apps, but must not change active runtime behavior.

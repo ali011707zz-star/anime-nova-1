@@ -8,7 +8,8 @@
 - هذا المسار مستقل عن Nova 1 وعن `artifacts/nova-mobile`.
 - لم يتم نقل أو حذف أو تعديل أي ملف من Nova 1.
 - تم تجهيز أساس Kotlin + Jetpack Compose + Compose for TV + Media3.
-- طبقة الشبكة تستخدم عقود Nova الحقيقية المعروفة من `NOVA1_ANALYSIS.md`.
+- طبقة الشبكة تستخدم عقود Nova الحقيقية المعروفة من
+  `../docs/research/NOVA1_ANALYSIS.md`.
 - bootstrap يقرأ config الحقيقي، ويستعيد `/api/auth/me` عند وجود user token.
 - تسجيل الدخول، إرسال رمز التسجيل، إنشاء الحساب، وتسجيل الخروج مرتبطة بعقود الخادم الحقيقية.
 - مسار التصفح الأساسي أصبح متاحًا: Home، Search، Browse، Details، وقائمة Episodes.

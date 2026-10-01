@@ -115,7 +115,7 @@ content_type = "application/octet-stream"
 
 [[outputs]]
 id = "_mgrd8qkQENaq0oKqCB3G"
-uri = "file://SOURCE_CATALOG_AUDIT_2026-08-26.md"
+uri = "file://docs/research/SOURCE_CATALOG_AUDIT_2026-08-26.md"
 type = "text"
 title = "تقرير فحص كتالوجات AF وAS وSA وFX"
 description = "تقرير كامل بنتائج فحص AnimeWitcher وخلاصات تعداد الكتالوجات واختبارات الحلقات والروابط من داخل الـVPS فقط."
@@ -129,7 +129,7 @@ content_type = "text/markdown"
 
 [[outputs]]
 id = "LXMKsXSrj3QFpn89s6Fzj"
-uri = "file://NOVA1_ANALYSIS.md"
+uri = "file://docs/research/NOVA1_ANALYSIS.md"
 type = "text"
 title = "تقرير تحليل Nova 1"
 description = "جرد شامل لشاشات Nova 1 وتنقله وواجهات API والبيانات والمصادقة والمشغل والترجمة والتنزيلات ودعم الهاتف وAndroid TV، مع قائمة تحقق ونقاط تحتاج اعتماداً قبل بدء Nova 2."
