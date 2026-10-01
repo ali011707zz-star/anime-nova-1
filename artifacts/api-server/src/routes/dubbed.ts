@@ -679,6 +679,17 @@ function awBaseTitle(title: string): string {
     .trim();
 }
 
+// Some older western-animation rows were imported into aw_links with the
+// generic content_type=anime, while newer seasons use content_type=dubbed.
+// Keep this compatibility scope explicit so ordinary Japanese anime does not
+// leak into the Arabic dubbed catalogue.
+const LEGACY_ANIMATION_KEYS = new Set(["invincible", "castlevania"]);
+function isLegacyAnimationSeries(series: string): boolean {
+  return LEGACY_ANIMATION_KEYS.has(
+    awBaseTitle(series).toLocaleLowerCase("en-US").replace(/[^a-z0-9]+/gi, " ").trim(),
+  );
+}
+
 function awSeasonLabel(title: string, animeId: string): string {
   const value = `${title} ${animeId}`;
   const season = value.match(/(?:season|saison|الموسم|موسم)\s*[-_.#]?\s*(\d+)/i)
@@ -821,7 +832,7 @@ async function fetchDalCatalog(
   const batch = 1000;
   while (true) {
     try {
-      const url = `${sbUrl}/rest/v1/dubbed_anim_links?select=series_id,series_name,series_name_ar&ep_number=not.is.null&order=series_id.asc&limit=${batch}&offset=${offset}`;
+      const url = `${sbUrl}/rest/v1/dubbed_anim_links?select=series_id,series_name,series_name_ar&ep_number=not.is.null&link=not.is.null&link=neq.&order=series_id.asc&limit=${batch}&offset=${offset}`;
       const r = await fetch(url, {
         headers: { apikey: sbKey, Authorization: `Bearer ${sbKey}` },
         signal: AbortSignal.timeout(15000),
@@ -857,17 +868,25 @@ async function buildAwCatalog(): Promise<AwCatalogItem[]> {
       let offset = 0;
       while (true) {
         try {
-          const url = `${SB_URL}/rest/v1/aw_links?select=anime_id,anime_name,anilist_id&content_type=eq.dubbed&order=anime_id.asc&limit=${batchSize}&offset=${offset}`;
+          const url = `${SB_URL}/rest/v1/aw_links?select=anime_id,anime_name,anilist_id,content_type&or=(content_type.eq.dubbed,anime_id.ilike.*Invincible*,anime_name.ilike.*Invincible*,anime_id.ilike.*Castlevania*,anime_name.ilike.*Castlevania*)&ep_number=not.is.null&link=not.is.null&link=neq.&order=anime_id.asc&limit=${batchSize}&offset=${offset}`;
           const r = await fetch(url, {
             headers: { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}` },
             signal: AbortSignal.timeout(15000),
           });
           if (!r.ok) break;
-          const rows: { anime_id: string; anime_name: string; anilist_id: number | null }[] = await r.json();
+          const rows: {
+            anime_id: string;
+            anime_name: string;
+            anilist_id: number | null;
+            content_type?: string | null;
+          }[] = await r.json();
           if (!Array.isArray(rows) || !rows.length) break;
           for (const row of rows) {
             const animeId = String(row.anime_id ?? "");
             if (!animeId.trim()) continue;
+            // The legacy OR clause is intentionally broad for PostgREST, but
+            // only exact legacy series may use the old anime content type.
+            if (row.content_type !== "dubbed" && !isLegacyAnimationSeries(animeId)) continue;
             const title = String(row.anime_name || animeId);
             const previous = sources.get(animeId);
             if (!previous || awTitleScore(title) > awTitleScore(previous.title)) {
@@ -940,6 +959,20 @@ async function buildAwCatalog(): Promise<AwCatalogItem[]> {
     }
     if (source.anilistId && Number.isFinite(source.anilistId) && !group.anilistIds.includes(source.anilistId)) {
       group.anilistIds.push(source.anilistId);
+    }
+  }
+
+  // A base AnimeWitcher ID such as "Invincible" represents season 1 when
+  // the same work also has numbered seasons. Do not relabel standalone
+  // titles that simply have multiple alternate IDs.
+  for (const group of groups.values()) {
+    if (
+      group.seasons.length > 1 &&
+      group.seasons.some(season => season.label !== "الحلقات")
+    ) {
+      for (const season of group.seasons) {
+        if (season.label === "الحلقات") season.label = "Season 1";
+      }
     }
   }
 
@@ -1021,7 +1054,9 @@ function awSearchResults(catalog: AwCatalogItem[], query: string): AwCatalogItem
 
     // عند البحث، أعد كل موسم كسجل مستقل حتى لا تظهر بطاقة واحدة باسم عام
     // بينما يضطر المستخدم لاكتشاف الأجزاء من صفحة التفاصيل.
-    if (item.seasons.length > 1) {
+    // Keep an explicit season visible even when the work has only one
+    // verified dubbed season (for example, Invincible Season 4).
+    if (item.seasons.length > 1 || matchingSeasons.some(season => season.label !== "الحلقات")) {
       for (const season of matchingSeasons) {
         results.push({
           ...item,
@@ -1046,6 +1081,18 @@ router.get("/aw-dubbed/catalog", async (req, res) => {
     let catalog = await getAwCatalog();
     if (q.length >= 2) {
       catalog = awSearchResults(catalog, q);
+      // A cold process may return the persistent catalog before its background
+      // poster hydration finishes. Resolve only the small search result here
+      // so a searched title never spends its first render on a placeholder.
+      const posterBackfill = catalog
+        .filter(item => item.poster?.includes("placehold.co"))
+        .slice(0, 8);
+      if (posterBackfill.length) {
+        await Promise.all(posterBackfill.map(async item => {
+          const poster = await posterByTitle(item.title);
+          if (poster) item.poster = poster;
+        }));
+      }
     }
     const totalPages = Math.max(1, Math.ceil(catalog.length / AW_PAGE_SIZE));
     const results = catalog.slice((page - 1) * AW_PAGE_SIZE, page * AW_PAGE_SIZE);
@@ -1074,7 +1121,7 @@ router.get("/aw-dubbed/episodes", async (req, res) => {
         headers: { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}` },
         signal: AbortSignal.timeout(10000),
       }).then(r => r.ok ? r.json() as Promise<{ ep_number: number }[]> : [] as { ep_number: number }[]).catch(() => [] as { ep_number: number }[]),
-      fetch(`${SB_URL}/rest/v1/aw_links?select=ep_number&anime_id=eq.${encodeURIComponent(series)}&content_type=eq.dubbed&order=ep_number.asc&limit=2000`, {
+      fetch(`${SB_URL}/rest/v1/aw_links?select=ep_number&anime_id=eq.${encodeURIComponent(series)}${isLegacyAnimationSeries(series) ? "" : "&content_type=eq.dubbed"}&order=ep_number.asc&limit=2000`, {
         headers: { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}` },
         signal: AbortSignal.timeout(10000),
       }).then(r => r.ok ? r.json() as Promise<{ ep_number: number }[]> : [] as { ep_number: number }[]).catch(() => [] as { ep_number: number }[]),
@@ -1130,7 +1177,7 @@ router.get("/aw-dubbed/watch-src", async (req, res) => {
         headers: { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}` },
         signal: AbortSignal.timeout(10000),
       }).then(r => r.ok ? r.json() as Promise<{ server: string; quality: string; link: string }[]> : [] as { server: string; quality: string; link: string }[]).catch(() => [] as { server: string; quality: string; link: string }[]),
-      fetch(`${SB_URL}/rest/v1/aw_links?select=server,quality,link&anime_id=eq.${encodeURIComponent(series)}&ep_number=eq.${ep}&content_type=eq.dubbed&limit=30`, {
+      fetch(`${SB_URL}/rest/v1/aw_links?select=server,quality,link&anime_id=eq.${encodeURIComponent(series)}&ep_number=eq.${ep}${isLegacyAnimationSeries(series) ? "" : "&content_type=eq.dubbed"}&limit=30`, {
         headers: { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}` },
         signal: AbortSignal.timeout(10000),
       }).then(r => r.ok ? r.json() as Promise<{ server: string; quality: string; link: string }[]> : [] as { server: string; quality: string; link: string }[]).catch(() => [] as { server: string; quality: string; link: string }[]),
