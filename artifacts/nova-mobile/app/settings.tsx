@@ -27,8 +27,8 @@ import {
 } from "@/utils/pushNotifications";
 
 const THEMES: { label: string; value: string; dot: string; desc: string }[] = [
-  { label: "أبيض", value: "white", dot: paletteColors.white.background, desc: "خلفيات فاتحة ونصوص داكنة" },
-  { label: "أسود", value: "black", dot: paletteColors.black.background, desc: "خلفيات داكنة ونصوص فاتحة" },
+  { label: "أبيض", value: "white", dot: paletteColors.white.background, desc: "خلفيات عاجية مريحة ونصوص واضحة" },
+  { label: "أسود", value: "black", dot: paletteColors.black.background, desc: "خلفيات داكنة وأزرار بنفسجية هادئة" },
 ];
 
 const REPORT_TYPES = [
@@ -1770,6 +1770,9 @@ export default function SettingsScreen() {
                     <Pressable
                       key={t.value}
                       onPress={() => handleSetTheme(t.value)}
+                      android_ripple={{ color: colors.pressFeedback }}
+                      accessibilityRole="button"
+                      accessibilityState={{ selected: active }}
                       style={[ts.themeBtn, {
                           backgroundColor: active ? colors.surfaceElevated : colors.surface,
                           borderColor: active ? colors.accent : colors.border,
@@ -1838,7 +1841,7 @@ export default function SettingsScreen() {
                 onValueChange={(value) => void handleToggleNotifications(value)}
                 disabled={!notifsReady || notifsBusy}
                 trackColor={{ false: colors.border, true: colors.accent }}
-                thumbColor="#fff"
+                thumbColor={notifs ? colors.accent : colors.surfaceElevated}
                 ios_backgroundColor={colors.border}
               />
             </View>
@@ -1850,24 +1853,24 @@ export default function SettingsScreen() {
         <View style={{ paddingHorizontal: 16 }}>
           <Card>
             {/* Version */}
-            <View style={ts.navRow}>
+            <View style={[ts.navRow, { borderBottomColor: colors.border }]}>
               <View style={[ts.navIcon, { backgroundColor: "rgba(139,92,246,0.10)" }]}>
-                <Ionicons name="phone-portrait" size={16} color="#a78bfa" />
+                <Ionicons name="phone-portrait" size={16} color={colors.accent} />
               </View>
               <View style={[ts.navText, { alignItems: "flex-end" }]}>
-                <Text style={ts.navLabel}>إصدار التطبيق</Text>
-                <Text style={ts.navSub}>ANIME NOVA · تطبيق بث الأنمي العربي</Text>
+                <Text style={[ts.navLabel, { color: colors.textPrimary }]}>إصدار التطبيق</Text>
+                <Text style={[ts.navSub, { color: colors.textSecondary }]}>ANIME NOVA · تطبيق بث الأنمي العربي</Text>
               </View>
-              <Text style={{ fontSize: 12, fontFamily: "Cairo_700Bold", color: "#a78bfa" }}>v2.4.0</Text>
+              <Text style={{ fontSize: 12, fontFamily: "Cairo_700Bold", color: colors.accent }}>v2.4.0</Text>
             </View>
             {/* Privacy */}
-            <View style={ts.navRow}>
+            <View style={[ts.navRow, { borderBottomColor: colors.border }]}>
               <View style={[ts.navIcon, { backgroundColor: "rgba(20,184,166,0.10)" }]}>
                 <Ionicons name="shield-checkmark" size={16} color="#2dd4bf" />
               </View>
               <View style={[ts.navText, { alignItems: "flex-end" }]}>
-                <Text style={ts.navLabel}>الخصوصية والأمان</Text>
-                <Text style={ts.navSub}>لا نجمع بيانات · بدون إعلانات · مجاني للجميع</Text>
+                <Text style={[ts.navLabel, { color: colors.textPrimary }]}>الخصوصية والأمان</Text>
+                <Text style={[ts.navSub, { color: colors.textSecondary }]}>لا نجمع بيانات · بدون إعلانات · مجاني للجميع</Text>
               </View>
             </View>
             {/* Report issue */}
@@ -1916,14 +1919,14 @@ export default function SettingsScreen() {
         </View>
 
         {/* ── Disclaimer ── */}
-        <View style={ts.disclaimer}>
+        <View style={[ts.disclaimer, { backgroundColor: colors.accentSurface, borderColor: colors.accentBorder }]}>
           <View style={{ flexDirection: "row", alignItems: "flex-start", gap: 10, marginBottom: 10 }}>
-            <View style={ts.disclaimerIcon}>
-              <Ionicons name="shield" size={14} color="#a78bfa" />
+            <View style={[ts.disclaimerIcon, { backgroundColor: colors.accentSurface, borderColor: colors.accentBorder }]}>
+              <Ionicons name="shield" size={14} color={colors.accent} />
             </View>
-            <Text style={ts.disclaimerTitle}>إخلاء المسؤولية</Text>
+            <Text style={[ts.disclaimerTitle, { color: colors.accent }]}>إخلاء المسؤولية</Text>
           </View>
-          <Text style={ts.disclaimerText}>
+          <Text style={[ts.disclaimerText, { color: colors.textSecondary }]}>
             هذا التطبيق لا يقوم باستضافة أو رفع أي محتوى مرئي.{"\n"}
             جميع المحتويات المعروضة يتم توفيرها من مصادر خارجية متاحة على الإنترنت.{"\n"}
             نحن لا نمتلك حقوق أي من المواد المعروضة، وجميع الحقوق محفوظة لأصحابها الأصليين.
@@ -1933,10 +1936,10 @@ export default function SettingsScreen() {
         {/* ── Footer ── */}
         <View style={ts.footer}>
           <View style={ts.footerLogo}>
-            <Text style={ts.footerLogoText}>ANIME </Text>
-            <Text style={[ts.footerLogoText, { color: "#a78bfa" }]}>NOVA</Text>
+            <Text style={[ts.footerLogoText, { color: colors.textPrimary }]}>ANIME </Text>
+            <Text style={[ts.footerLogoText, { color: colors.accent }]}>NOVA</Text>
           </View>
-          <Text style={ts.footerSub}>v2.4.0 · مجاني للجميع · 2025</Text>
+          <Text style={[ts.footerSub, { color: colors.textMuted }]}>v2.4.0 · مجاني للجميع · 2025</Text>
         </View>
       </ScrollView>
 
@@ -2249,10 +2252,10 @@ const ts = StyleSheet.create({
   successBtnText: { fontSize: 13, fontFamily: "Cairo_800ExtraBold", color: "#fff" },
 
   /* Disclaimer */
-  disclaimer: { marginHorizontal: 16, marginTop: 28, borderRadius: 20, padding: 20, backgroundColor: "rgba(139,92,246,0.06)", borderWidth: 1, borderColor: "rgba(139,92,246,0.15)" },
+  disclaimer: { marginHorizontal: 16, marginTop: 28, borderRadius: 20, padding: 20, borderWidth: 1 },
   disclaimerIcon: { width: 32, height: 32, borderRadius: 12, backgroundColor: "rgba(139,92,246,0.15)", borderWidth: 1, borderColor: "rgba(139,92,246,0.25)", alignItems: "center", justifyContent: "center" },
-  disclaimerTitle: { fontSize: 12, fontFamily: "Cairo_800ExtraBold", color: "#c4b5fd", letterSpacing: 0.5, paddingTop: 6 },
-  disclaimerText: { fontSize: 11, fontFamily: "Cairo_400Regular", color: "rgba(255,255,255,0.50)", lineHeight: 24, textAlign: "right" },
+  disclaimerTitle: { fontSize: 12, fontFamily: "Cairo_800ExtraBold", letterSpacing: 0.5, paddingTop: 6 },
+  disclaimerText: { fontSize: 11, fontFamily: "Cairo_400Regular", lineHeight: 24, textAlign: "right" },
 
   /* Footer */
   footer: { alignItems: "center", gap: 8, paddingTop: 28, paddingBottom: 24 },

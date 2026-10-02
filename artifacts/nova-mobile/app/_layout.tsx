@@ -11,7 +11,7 @@ import { Stack, usePathname, useRouter } from "expo-router";
 import { LinearGradient } from "expo-linear-gradient";
 import * as SplashScreen from "expo-splash-screen";
 import React, { useEffect, useRef, useState } from "react";
-import { Animated, BackHandler, Dimensions, I18nManager, Image, Platform, StyleSheet, Text, View } from "react-native";
+import { Animated, BackHandler, Dimensions, I18nManager, Image, Platform, StatusBar, StyleSheet, Text, View } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import * as ScreenOrientation from "expo-screen-orientation";
@@ -76,6 +76,7 @@ const queryClient = new QueryClient({
 
 function RootLayoutNav() {
   const colors = useColors();
+  const { theme } = useApp();
   const router = useRouter();
   const pathname = usePathname();
   const [tvExitHintVisible, setTvExitHintVisible] = useState(false);
@@ -130,6 +131,10 @@ function RootLayoutNav() {
 
   return (
     <>
+      <StatusBar
+        backgroundColor={colors.background}
+        barStyle={theme === "white" ? "dark-content" : "light-content"}
+      />
       <Stack
         screenOptions={{
           headerShown: false,
@@ -235,7 +240,37 @@ function RootLayout() {
     }
   }, [tvMode]);
 
-  if (brandSplashVisible) {
+  return (
+    <SafeAreaProvider>
+      <ErrorBoundary>
+        <QueryClientProvider client={queryClient}>
+          <AppProvider>
+            <RootContent
+              brandSplashVisible={brandSplashVisible}
+              telegramAnnouncementVisible={telegramAnnouncementVisible}
+              onCloseAnnouncement={() => setTelegramAnnouncementVisible(false)}
+            />
+          </AppProvider>
+        </QueryClientProvider>
+      </ErrorBoundary>
+    </SafeAreaProvider>
+  );
+}
+
+function RootContent({
+  brandSplashVisible,
+  telegramAnnouncementVisible,
+  onCloseAnnouncement,
+}: {
+  brandSplashVisible: boolean;
+  telegramAnnouncementVisible: boolean;
+  onCloseAnnouncement: () => void;
+}) {
+  const colors = useColors();
+  const { themeHydrated } = useApp();
+  const tvMode = isTvDevice(Dimensions.get("window").width, Dimensions.get("window").height);
+
+  if (brandSplashVisible || !themeHydrated) {
     return <BrandSplash />;
   }
 
@@ -251,22 +286,14 @@ function RootLayout() {
   }
 
   return (
-    <SafeAreaProvider>
-      <ErrorBoundary>
-        <QueryClientProvider client={queryClient}>
-          <AppProvider>
-            <PushRegistrationBridge disabled={tvMode || !RUNTIME_INTEGRITY.trusted} />
-            <GestureHandlerRootView style={{ flex: 1 }}>
-              <RootLayoutNav />
-              <TelegramAnnouncementModal
-                visible={telegramAnnouncementVisible}
-                onClose={() => setTelegramAnnouncementVisible(false)}
-              />
-            </GestureHandlerRootView>
-          </AppProvider>
-        </QueryClientProvider>
-      </ErrorBoundary>
-    </SafeAreaProvider>
+    <GestureHandlerRootView style={{ flex: 1, backgroundColor: colors.background }}>
+      <PushRegistrationBridge disabled={tvMode || !RUNTIME_INTEGRITY.trusted} />
+      <RootLayoutNav />
+      <TelegramAnnouncementModal
+        visible={telegramAnnouncementVisible}
+        onClose={onCloseAnnouncement}
+      />
+    </GestureHandlerRootView>
   );
 }
 

@@ -18,6 +18,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as FileSystem from "expo-file-system";
+import { useColors } from "@/hooks/useColors";
 import { getBaseUrl } from "@/utils/api";
 import { TvPressable } from "@/utils/tv";
 
@@ -350,6 +351,7 @@ function wrapSubLine(text: string, maxLen = 30): string[] {
 
 /* ─── Screenshot flash overlay ─── */
 function ScreenshotFlash({ visible }: { visible: boolean }) {
+  const colors = useColors();
   const opacity = useRef(new Animated.Value(0)).current;
   useEffect(() => {
     if (visible) {
@@ -360,7 +362,7 @@ function ScreenshotFlash({ visible }: { visible: boolean }) {
   return (
     <Animated.View
       pointerEvents="none"
-      style={[StyleSheet.absoluteFill, { backgroundColor: "#fff", opacity, zIndex: 99 }]}
+      style={[StyleSheet.absoluteFill, { backgroundColor: colors.background, opacity, zIndex: 99 }]}
     />
   );
 }

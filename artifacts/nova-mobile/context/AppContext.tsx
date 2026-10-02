@@ -49,6 +49,7 @@ export type MobileUser = {
 
 type AppContextType = {
   theme: Theme;
+  themeHydrated: boolean;
   setTheme: (t: Theme) => void;
   remoteConfig: RemoteConfig;
   refreshConfig: () => Promise<void>;
@@ -196,6 +197,7 @@ function mapServerFavorite(row: any): FavoriteAnime | null {
 
 export function AppProvider({ children }: { children: React.ReactNode }) {
   const [theme, setThemeState] = useState<Theme>("white");
+  const [themeHydrated, setThemeHydrated] = useState(false);
   const [remoteConfig, setRemoteConfig] = useState<RemoteConfig>(DEFAULT_CONFIG);
   const [watchHistory, setWatchHistory] = useState<WatchProgress[]>([]);
   const [favorites, setFavorites] = useState<FavoriteAnime[]>([]);
@@ -566,6 +568,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         await AsyncStorage.setItem("nova-theme", nextTheme).catch(() => {});
       }
     }
+    setThemeHydrated(true);
     if (historyVal) {
       try {
         const parsed = JSON.parse(historyVal);
@@ -734,6 +737,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   const contextValue = useMemo<AppContextType>(() => ({
     theme,
+    themeHydrated,
     setTheme,
     remoteConfig,
     refreshConfig,
@@ -764,6 +768,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setTheme,
     theme,
     toggleFavorite,
+    themeHydrated,
     watchHistory,
   ]);
 

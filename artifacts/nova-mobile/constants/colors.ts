@@ -26,6 +26,11 @@ export type Palette = {
   playerBottomGradient: [string, string, string];
   playerTrack: string;
   playerBuffer: string;
+  pressFeedback: string;
+  accentSurface: string;
+  accentBorder: string;
+  destructiveSurface: string;
+  destructiveBorder: string;
 
   // Compatibility aliases for screens that are being moved to semantic tokens.
   text: string;
@@ -45,18 +50,18 @@ export type Palette = {
 }
 
 const white: Palette = {
-  background: "#F3F2EE",
-  surface: "#FAF9F6",
-  surfaceElevated: "#EFEEE9",
-  card: "#FCFBF8",
+  background: "#EEECE6",
+  surface: "#F5F3ED",
+  surfaceElevated: "#E8E5DD",
+  card: "#F7F5F0",
   textPrimary: "#202127",
-  textSecondary: "#454A54",
-  textMuted: "#626A76",
-  button: "#202329",
+  textSecondary: "#4D535E",
+  textMuted: "#666E79",
+  button: "#6047B4",
   buttonText: "#FFFFFF",
-  accent: "#7654C8",
-  border: "#DFDDD7",
-  input: "#F0EFEA",
+  accent: "#674DB7",
+  border: "#D5D2CA",
+  input: "#E8E6E0",
   destructive: "#C62828",
   destructiveForeground: "#FFFFFF",
   success: "#18794E",
@@ -70,35 +75,40 @@ const white: Palette = {
   playerBottomGradient: ["rgba(255,255,255,0)", "rgba(255,255,255,0.66)", "rgba(255,255,255,0.94)"],
   playerTrack: "rgba(20,22,26,0.22)",
   playerBuffer: "rgba(20,22,26,0.48)",
+  pressFeedback: "rgba(42,35,62,0.08)",
+  accentSurface: "#ECE7F5",
+  accentBorder: "#D8CFEA",
+  destructiveSurface: "#F8E9E7",
+  destructiveBorder: "#EBCBC6",
 
   text: "#17191F",
   tint: "#343943",
   foreground: "#17191F",
   cardForeground: "#17191F",
-  primary: "#202329",
+  primary: "#6047B4",
   primaryForeground: "#FFFFFF",
-  secondary: "#F7F8FA",
+  secondary: "#E8E6E0",
   secondaryForeground: "#17191F",
-  muted: "#F0F2F5",
-  mutedForeground: "#747B87",
+  muted: "#E8E6E0",
+  mutedForeground: "#666E79",
   accentForeground: "#FFFFFF",
-  violet: "#7654C8",
-  violetDark: "#5E40AC",
-  violetDeep: "#3D2A78",
+  violet: "#674DB7",
+  violetDark: "#52399E",
+  violetDeep: "#38266F",
 };
 
 const black: Palette = {
   background: "#090A0C",
   surface: "#111317",
-  surfaceElevated: "#191C21",
-  card: "#14171B",
+  surfaceElevated: "#1A1D23",
+  card: "#14171C",
   textPrimary: "#F3F4F6",
-  textSecondary: "#B7BBC4",
-  textMuted: "#858B96",
-  button: "#F0F1F3",
-  buttonText: "#17191F",
-  accent: "#D5D8DE",
-  border: "rgba(255,255,255,0.10)",
+  textSecondary: "#B8BDC7",
+  textMuted: "#9299A5",
+  button: "#7654C8",
+  buttonText: "#FFFFFF",
+  accent: "#A78BFA",
+  border: "rgba(255,255,255,0.12)",
   input: "rgba(255,255,255,0.07)",
   destructive: "#EF5350",
   destructiveForeground: "#FFFFFF",
@@ -113,21 +123,26 @@ const black: Palette = {
   playerBottomGradient: ["rgba(0,0,0,0)", "rgba(0,0,0,0.60)", "rgba(0,0,0,0.96)"],
   playerTrack: "rgba(255,255,255,0.24)",
   playerBuffer: "rgba(255,255,255,0.54)",
+  pressFeedback: "rgba(255,255,255,0.08)",
+  accentSurface: "rgba(139,92,246,0.14)",
+  accentBorder: "rgba(167,139,250,0.28)",
+  destructiveSurface: "rgba(239,83,80,0.12)",
+  destructiveBorder: "rgba(239,83,80,0.28)",
 
   text: "#F3F4F6",
   tint: "#D5D8DE",
   foreground: "#F3F4F6",
   cardForeground: "#F3F4F6",
-  primary: "#F0F1F3",
-  primaryForeground: "#17191F",
-  secondary: "#191C21",
+  primary: "#7654C8",
+  primaryForeground: "#FFFFFF",
+  secondary: "#1A1D23",
   secondaryForeground: "#F3F4F6",
-  muted: "#191C21",
-  mutedForeground: "#858B96",
-  accentForeground: "#17191F",
-  violet: "#D5D8DE",
-  violetDark: "#AEB3BC",
-  violetDeep: "#777D87",
+  muted: "#1A1D23",
+  mutedForeground: "#9299A5",
+  accentForeground: "#21183B",
+  violet: "#A78BFA",
+  violetDark: "#8B6FE0",
+  violetDeep: "#6047A8",
 };
 
 const colors = { white, black, radius: 16 };
