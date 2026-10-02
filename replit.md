@@ -11,8 +11,9 @@ A full-stack anime streaming platform with web and mobile clients.
 | `nova-mobile` | `artifacts/nova-mobile` | One Expo React Native app for phones and Android TV mode |
 | `mockup-sandbox` | `artifacts/mockup-sandbox` | Design/mockup canvas sandbox |
 | `nova2-android` | `nova2-android` | Independent Kotlin + Jetpack Compose Nova 2 client |
-| `nova-tv-v3` | `nova-tv-v3` | Incomplete Kotlin migration prototype for phone, tablet, and TV |
-| Archived Android TV | `archive/android-tv` | Source for the first two legacy Kotlin prototypes |
+| `nova-tv-v3` | `archive/android-tv/nova-tv-v3` | Archived incomplete Kotlin migration prototype; not the current TV app |
+| Archived Nova Mobile 2 | `archive/prototypes/nova-mobile-2` | Historical Android/JADX reference project |
+| Archived Android TV | `archive/android-tv` | Source for three legacy Kotlin prototypes |
 
 The root `README.md` is the high-level project map. Deployment, project, and
 research documents are grouped under `docs/`.
@@ -39,7 +40,7 @@ research documents are grouped under `docs/`.
 ## User preferences
 
 - Do not run or install the app in Replit — VPS only.
-- Keep Android TV mode in the existing `artifacts/nova-mobile` app. `nova-tv-v3` is an incomplete Kotlin prototype, not the current TV app; do not split TV into a separate app.
+- Keep Android TV mode in the existing `artifacts/nova-mobile` app. `archive/android-tv/nova-tv-v3` is an incomplete Kotlin prototype, not the current TV app; do not split TV into a separate app.
 - Anivexa integration: run the imported Anivexa-API service separately on the VPS
   (default `127.0.0.1:8787`) and set `ANIVEXA_API_URL` in `/opt/anime-nova/.env`.
   Nova consumes only direct HLS/MP4 streams from the approved Anivexa providers;
