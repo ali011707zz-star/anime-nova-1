@@ -21,8 +21,23 @@ query ($id: Int) {
     synonyms
     coverImage { large extraLarge }
     bannerImage episodes duration status format
+    seasonYear season startDate { year }
     nextAiringEpisode { episode airingAt }
     averageScore genres
+    relations {
+      edges {
+        relationType
+        node {
+          id idMal title { romaji english }
+          synonyms
+          coverImage { large extraLarge }
+          bannerImage episodes duration status format
+          seasonYear season startDate { year }
+          nextAiringEpisode { episode airingAt }
+          averageScore
+        }
+      }
+    }
   }
 }`;
 
@@ -30,6 +45,199 @@ const ANIME_BY_SEARCH_QUERY = ANIME_QUERY.replace(
   "query ($id: Int) {\n  Media(id: $id, type: ANIME)",
   "query ($search: String) {\n  Media(search: $search, type: ANIME)",
 );
+
+const ANIME_RELATIONS_QUERY = `
+query ($ids: [Int]) {
+  Page(page: 1, perPage: 50) {
+    media(id_in: $ids, type: ANIME) {
+      id idMal title { romaji english }
+      synonyms
+      coverImage { large extraLarge }
+      bannerImage episodes duration status format
+      seasonYear season startDate { year }
+      nextAiringEpisode { episode airingAt }
+      averageScore
+      relations {
+        edges {
+          relationType
+          node {
+            id idMal title { romaji english }
+            synonyms
+            coverImage { large extraLarge }
+            bannerImage episodes duration status format
+            seasonYear season startDate { year }
+            nextAiringEpisode { episode airingAt }
+            averageScore
+          }
+        }
+      }
+    }
+  }
+}`;
+
+const MAIN_SERIES_FORMATS = new Set(["TV", "TV_SHORT", "ONA"]);
+const SERIES_RELATION_TYPES = new Set(["PREQUEL", "SEQUEL"]);
+
+function isMainSeriesEntry(media: any): boolean {
+  return Number(media?.id) > 0
+    && (!media?.format || MAIN_SERIES_FORMATS.has(String(media.format)));
+}
+
+function knownEpisodeCount(media: any): number | null {
+  if (media?.status === "NOT_YET_RELEASED") return 0;
+  if (media?.status === "RELEASING") {
+    const nextEpisode = Number(media?.nextAiringEpisode?.episode || 0);
+    return nextEpisode > 0 ? Math.max(0, nextEpisode - 1) : null;
+  }
+  const count = Number(media?.episodes || 0);
+  return count > 0 ? count : null;
+}
+
+function compareSeriesChronologically(a: any, b: any): number {
+  const yearA = Number(a?.seasonYear || a?.startDate?.year || 9999);
+  const yearB = Number(b?.seasonYear || b?.startDate?.year || 9999);
+  if (yearA !== yearB) return yearA - yearB;
+
+  const seasonOrder: Record<string, number> = {
+    WINTER: 0,
+    SPRING: 1,
+    SUMMER: 2,
+    FALL: 3,
+  };
+  const seasonA = seasonOrder[String(a?.season || "").toUpperCase()] ?? 4;
+  const seasonB = seasonOrder[String(b?.season || "").toUpperCase()] ?? 4;
+  return seasonA - seasonB || Number(a?.id || 0) - Number(b?.id || 0);
+}
+
+function sortAnimeSeries(mediaById: Map<number, any>, links: Array<{ from: number; to: number }>): any[] {
+  const ids = [...mediaById.keys()];
+  const inSeries = new Set(ids);
+  const nextById = new Map<number, Set<number>>();
+  const indegree = new Map<number, number>();
+  for (const id of ids) indegree.set(id, 0);
+
+  for (const link of links) {
+    if (!inSeries.has(link.from) || !inSeries.has(link.to) || link.from === link.to) continue;
+    const next = nextById.get(link.from) || new Set<number>();
+    if (next.has(link.to)) continue;
+    next.add(link.to);
+    nextById.set(link.from, next);
+    indegree.set(link.to, (indegree.get(link.to) || 0) + 1);
+  }
+
+  const compareIds = (idA: number, idB: number) =>
+    compareSeriesChronologically(mediaById.get(idA), mediaById.get(idB));
+  const ready = ids.filter(id => indegree.get(id) === 0).sort(compareIds);
+  const ordered: number[] = [];
+
+  while (ready.length) {
+    const current = ready.shift()!;
+    ordered.push(current);
+    for (const nextId of nextById.get(current) || []) {
+      const nextIndegree = (indegree.get(nextId) || 0) - 1;
+      indegree.set(nextId, nextIndegree);
+      if (nextIndegree === 0) {
+        ready.push(nextId);
+        ready.sort(compareIds);
+      }
+    }
+  }
+
+  if (ordered.length < ids.length) {
+    const remaining = ids.filter(id => !ordered.includes(id)).sort(compareIds);
+    ordered.push(...remaining);
+  }
+  return ordered.map(id => mediaById.get(id)).filter(Boolean);
+}
+
+async function queryAniList(
+  base: string,
+  query: string,
+  variables: Record<string, unknown>,
+  signal: AbortSignal,
+  useProxy = true,
+): Promise<any> {
+  const response = await fetch(`${base}${useProxy ? "/api/anime/anilist" : "/api/anilist"}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "Accept": "application/json" },
+    body: JSON.stringify({ query, variables }),
+    cache: "no-store",
+    signal,
+  });
+  if (!response.ok) throw new Error(`anilist_${response.status}`);
+  const payload = await response.json();
+  if (Array.isArray(payload?.errors) && payload.errors.length) {
+    throw new Error("anilist_graphql_error");
+  }
+  return payload?.data;
+}
+
+async function loadAnimeSeries(root: any, base: string, signal: AbortSignal): Promise<any[]> {
+  const rootId = Number(root?.id);
+  if (!Number.isFinite(rootId) || rootId <= 0 || !isMainSeriesEntry(root)) return root ? [root] : [];
+
+  const mediaById = new Map<number, any>([[rootId, { ...root, relations: undefined }]]);
+  const links: Array<{ from: number; to: number }> = [];
+  const scanned = new Set<number>();
+  let pending = [root];
+
+  try {
+    for (let depth = 0; depth < 8 && mediaById.size < 40; depth += 1) {
+      const nextIds = new Set<number>();
+
+      for (const media of pending) {
+        const fromId = Number(media?.id);
+        if (!Number.isFinite(fromId) || fromId <= 0 || scanned.has(fromId)) continue;
+        scanned.add(fromId);
+
+        const edges = Array.isArray(media?.relations?.edges) ? media.relations.edges : [];
+        for (const edge of edges) {
+          const relationType = String(edge?.relationType || "").toUpperCase();
+          const node = edge?.node;
+          const toId = Number(node?.id);
+          if (!SERIES_RELATION_TYPES.has(relationType) || !isMainSeriesEntry(node) || toId === fromId) continue;
+          if (!mediaById.has(toId) && mediaById.size >= 40) continue;
+
+          mediaById.set(toId, { ...node, relations: undefined });
+          links.push(relationType === "SEQUEL"
+            ? { from: fromId, to: toId }
+            : { from: toId, to: fromId });
+          if (!scanned.has(toId)) nextIds.add(toId);
+        }
+      }
+
+      const ids = [...nextIds].slice(0, Math.max(0, 40 - scanned.size));
+      if (!ids.length) break;
+
+      const fetched: any[] = [];
+      try {
+        for (let index = 0; index < ids.length; index += 25) {
+          const data = await queryAniList(base, ANIME_RELATIONS_QUERY, { ids: ids.slice(index, index + 25) }, signal);
+          const media = data?.Page?.media;
+          if (Array.isArray(media)) fetched.push(...media);
+        }
+      } catch (error: any) {
+        if (signal.aborted) throw error;
+        console.warn("[Episodes] season chain lookup incomplete");
+        break;
+      }
+      if (!fetched.length) break;
+
+      for (const media of fetched) {
+        const mediaId = Number(media?.id);
+        if (Number.isFinite(mediaId) && mediaId > 0) {
+          mediaById.set(mediaId, { ...media, relations: undefined });
+        }
+      }
+      pending = fetched;
+    }
+  } catch (error: any) {
+    if (signal.aborted) throw error;
+    console.warn("[Episodes] season chain lookup incomplete");
+  }
+
+  return sortAnimeSeries(mediaById, links);
+}
 
 function extractArabicTitle(synonyms?: string[]): string {
   if (!synonyms) return "";
@@ -167,6 +375,9 @@ export default function EpisodeListScreen() {
   const tvMode = isTvDevice(width, height);
 
   const [anime, setAnime] = useState<any>(null);
+  const [seasons, setSeasons] = useState<any[]>([]);
+  const [selectedSeasonId, setSelectedSeasonId] = useState("");
+  const [sortOrder, setSortOrder] = useState<"asc" | "desc">("asc");
   const [loading, setLoading] = useState(true);
   const [epData, setEpData] = useState<any[]>([]);
   const [episodeCatalogTotal, setEpisodeCatalogTotal] = useState(0);
@@ -178,16 +389,31 @@ export default function EpisodeListScreen() {
   const episodePagesFetchedRef = useRef<Set<number>>(new Set());
   const episodePageControllersRef = useRef<Map<number, AbortController>>(new Map());
   const fetchEpisodePageRef = useRef<(page: number) => void>(() => {});
-  const { preferredKey, ready, rememberFocus } = useTvFocusMemory(`episodes:${id || "unknown"}`);
   const routeSource = (Array.isArray(src) ? src[0] : src) || "";
+  const selectedAnime = useMemo(
+    () => seasons.find(item => String(item?.id) === selectedSeasonId) || anime,
+    [anime, seasons, selectedSeasonId],
+  );
+  const selectedSeasonAnimeKey = String(selectedAnime?.id || selectedSeasonId || "");
+  const selectedAnimeIsRouteEntry = String(selectedAnime?.id || "") === String(anime?.id || "");
+  const selectedAnimeId = String(
+    selectedAnimeIsRouteEntry ? (id || selectedAnime?.id || "") : (selectedAnime?.id || id || ""),
+  );
+  const selectedSeasonIndex = Math.max(
+    0,
+    seasons.findIndex(item => String(item?.id) === selectedSeasonAnimeKey),
+  );
+  const { preferredKey, ready, rememberFocus } = useTvFocusMemory(`episodes:${selectedAnimeId || "unknown"}`);
 
   useEffect(() => {
     if (!id) return;
     const ctrl = new AbortController();
     setLoading(true);
+    setAnime(null);
+    setSeasons([]);
+    setSelectedSeasonId("");
     setEpData([]); setEpisodeCatalogTotal(0); setSearch("");
-    getWatched(id).then(v => { if (!ctrl.signal.aborted) setWatched(v); });
-    getCommentCounts(id).then(v => { if (!ctrl.signal.aborted) setCommentCounts(v); });
+    setEpisodeTitlesAr({});
 
     const base = getBaseUrl();
     const source = Array.isArray(src) ? src[0] : src;
@@ -252,11 +478,54 @@ export default function EpisodeListScreen() {
         };
       }
       setAnime(a);
-      setEpisodeTitlesAr({});
+      if (!a) {
+        setSeasons([]);
+        return;
+      }
+
+      const rootSeason = { ...a, relations: undefined };
+      setSeasons([rootSeason]);
+      setSelectedSeasonId(String(a.id || id));
+      if (source === "mal" || source === "kitsu" || Number(a.id) <= 0) return;
+
+      loadAnimeSeries(a, base, ctrl.signal)
+        .then(series => {
+          if (ctrl.signal.aborted) return;
+          const nextSeasons = series.length ? series : [rootSeason];
+          setSeasons(nextSeasons);
+          setSelectedSeasonId(current =>
+            nextSeasons.some(item => String(item?.id) === current)
+              ? current
+              : String(a.id || id),
+          );
+        })
+        .catch(error => {
+          if (error?.name !== "AbortError" && !ctrl.signal.aborted) {
+            console.warn("[Episodes] related anime lookup failed");
+            setSeasons([rootSeason]);
+            setSelectedSeasonId(String(a.id || id));
+          }
+        });
     }).catch((e) => { if (e?.name !== "AbortError") console.warn("[Episodes] anilist fetch error"); })
       .finally(() => { if (!ctrl.signal.aborted) setLoading(false); });
     return () => ctrl.abort();
   }, [id]);
+
+  useEffect(() => {
+    if (!selectedAnimeId) return;
+    let cancelled = false;
+    setWatched(new Set());
+    setCommentCounts({});
+    getWatched(selectedAnimeId).then(value => {
+      if (!cancelled) setWatched(value);
+    });
+    getCommentCounts(selectedAnimeId).then(value => {
+      if (!cancelled) setCommentCounts(value);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedAnimeId]);
 
   /*
    * Jikan returns 100 episode records per page. The web app loads the page
@@ -266,14 +535,14 @@ export default function EpisodeListScreen() {
    * each page, and allow a direct search to request its page immediately.
    */
   const fetchEpisodePage = useCallback((page: number) => {
-    const malId = Number(anime?.idMal || 0);
+    const malId = Number(selectedAnime?.idMal || 0);
     if (!malId || !Number.isFinite(page) || page < 1) return;
     if (episodePagesFetchedRef.current.has(page) || episodePageControllersRef.current.has(page)) return;
 
     const pageCtrl = new AbortController();
     episodePageControllersRef.current.set(page, pageCtrl);
-    const sourceUsesExternalId = anime?.idSource === "mal" || anime?.idSource === "kitsu" || routeSource === "mal" || routeSource === "kitsu";
-    const anilistId = sourceUsesExternalId ? 0 : Number(anime?.id || 0);
+    const sourceUsesExternalId = selectedAnime?.idSource === "mal" || selectedAnime?.idSource === "kitsu" || routeSource === "mal" || routeSource === "kitsu";
+    const anilistId = sourceUsesExternalId ? 0 : Number(selectedAnime?.id || 0);
     fetch(`${getBaseUrl()}/api/anime/episode-titles?malId=${malId}&anilistId=${anilistId}&page=${page}`, {
       signal: pageCtrl.signal,
       cache: "no-store",
@@ -296,7 +565,7 @@ export default function EpisodeListScreen() {
           });
         }
         /* Keep the same aired/total rule as the web episode list. */
-        const catalogTotal = anime?.status === "RELEASING"
+        const catalogTotal = selectedAnime?.status === "RELEASING"
           ? Math.max(Number(d.releasedTotal || 0), Number(d.latestEpisode || 0), Number(d.anilistAiredEpisode || 0))
           : Number(d.total || 0);
         if (catalogTotal > 0) setEpisodeCatalogTotal(prev => Math.max(prev, catalogTotal));
@@ -306,22 +575,26 @@ export default function EpisodeListScreen() {
       .finally(() => {
         episodePageControllersRef.current.delete(page);
       });
-  }, [anime?.id, anime?.idMal, anime?.idSource, anime?.status, routeSource]);
+  }, [selectedAnime?.id, selectedAnime?.idMal, selectedAnime?.idSource, selectedAnime?.status, routeSource]);
 
   fetchEpisodePageRef.current = fetchEpisodePage;
 
   useEffect(() => {
-    if (!anime?.idMal) return;
+    setEpData([]);
+    setEpisodeCatalogTotal(0);
+    setEpisodeTitlesAr({});
+    setSearch("");
     episodePagesFetchedRef.current.clear();
     for (const controller of episodePageControllersRef.current.values()) controller.abort();
     episodePageControllersRef.current.clear();
+    if (!selectedAnime?.idMal) return;
     fetchEpisodePage(1);
     return () => {
       for (const controller of episodePageControllersRef.current.values()) controller.abort();
       episodePageControllersRef.current.clear();
       episodePagesFetchedRef.current.clear();
     };
-  }, [anime?.id, anime?.idMal, fetchEpisodePage]);
+  }, [selectedAnime?.id, selectedAnime?.idMal, fetchEpisodePage]);
 
   useEffect(() => {
     const requestedEpisode = Number.parseInt(search.trim(), 10);
@@ -332,9 +605,9 @@ export default function EpisodeListScreen() {
 
   /* Load comment counts from server (background, non-blocking) */
   useEffect(() => {
-    if (!id) return;
+    if (!selectedAnimeId) return;
     const ctrl = new AbortController();
-    fetch(`${getBaseUrl()}/api/comments/count?animeId=${id}`, { signal: ctrl.signal })
+    fetch(`${getBaseUrl()}/api/comments/count?animeId=${encodeURIComponent(selectedAnimeId)}`, { signal: ctrl.signal })
       .then(r => r.json())
       .then(d => {
         if (ctrl.signal.aborted) return;
@@ -345,62 +618,62 @@ export default function EpisodeListScreen() {
             if (!isNaN(n)) numericCounts[n] = v as number;
           }
           setCommentCounts(numericCounts);
-          saveCommentCounts(id, numericCounts);
+          saveCommentCounts(selectedAnimeId, numericCounts);
         }
       })
       .catch((e) => { if (e?.name !== "AbortError") console.warn("[Episodes] comment count error"); });
     return () => ctrl.abort();
-  }, [id]);
+  }, [selectedAnimeId]);
 
   const toggleWatched = useCallback((n: number) => {
     setWatched(prev => {
       const next = new Set(prev);
       if (next.has(n)) next.delete(n); else next.add(n);
-      saveWatched(id, next);
+      saveWatched(selectedAnimeId, next);
       return next;
     });
-  }, [id]);
+  }, [selectedAnimeId]);
 
   function watchEp(n: number) {
     if (n < 1 || n > total) return;
     setWatched(prev => {
       const next = new Set(prev);
       next.add(n);
-      saveWatched(id, next);
+      saveWatched(selectedAnimeId, next);
       return next;
     });
-    const t = encodeURIComponent(anime?.title?.romaji || "");
-    const eng = encodeURIComponent(anime?.title?.english || "");
-    const fmt = encodeURIComponent(anime?.format || "");
+    const t = encodeURIComponent(selectedAnime?.title?.romaji || "");
+    const eng = encodeURIComponent(selectedAnime?.title?.english || "");
+    const fmt = encodeURIComponent(selectedAnime?.format || "");
     const epInfo = epData?.find((e: any) => e.mal_id === n || e.episode_id === n);
     const epTitleRaw = epInfo?.title || epInfo?.title_romanji || "";
     const et = epTitleRaw ? `&etitle=${encodeURIComponent(epTitleRaw)}` : "";
     const totalParam = total > 0 ? `&totalEps=${total}` : "";
-    const coverParam = anime?.coverImage?.large ? `&cover=${encodeURIComponent(anime.coverImage.extraLarge || anime.coverImage.large)}` : "";
-    const arTitle = extractArabicTitle(anime?.synonyms);
+    const coverParam = selectedAnime?.coverImage?.large ? `&cover=${encodeURIComponent(selectedAnime.coverImage.extraLarge || selectedAnime.coverImage.large)}` : "";
+    const arTitle = extractArabicTitle(selectedAnime?.synonyms);
     const arParam = arTitle ? `&titleAr=${encodeURIComponent(arTitle)}` : "";
-    router.push(`/watch?anime=${id}&ep=${n}${t ? `&title=${t}` : ""}${eng ? `&english=${eng}` : ""}${fmt ? `&format=${fmt}` : ""}${et}${totalParam}${coverParam}${arParam}`);
+    router.push(`/watch?anime=${selectedAnimeId}&ep=${n}${t ? `&title=${t}` : ""}${eng ? `&english=${eng}` : ""}${fmt ? `&format=${fmt}` : ""}${et}${totalParam}${coverParam}${arParam}`);
   }
 
   function openComments(n: number) {
-    const t = encodeURIComponent(anime?.title?.romaji || "");
-    router.push(`/comments?animeId=${id}&title=${t}&ep=${n}` as any);
+    const t = encodeURIComponent(selectedAnime?.title?.romaji || "");
+    router.push(`/comments?animeId=${selectedAnimeId}&title=${t}&ep=${n}` as any);
   }
 
   const total = useMemo(() => {
-    if (!anime) return 0;
-    const airedBySchedule = anime.nextAiringEpisode?.episode
-      ? Math.max(0, anime.nextAiringEpisode.episode - 1)
+    if (!selectedAnime) return 0;
+    const airedBySchedule = selectedAnime.nextAiringEpisode?.episode
+      ? Math.max(0, selectedAnime.nextAiringEpisode.episode - 1)
       : 0;
-    if (anime.status === "NOT_YET_RELEASED") return 0;
-    if (anime.status === "RELEASING") {
+    if (selectedAnime.status === "NOT_YET_RELEASED") return 0;
+    if (selectedAnime.status === "RELEASING") {
       /* Do not let a stale Jikan/source catalog hide episodes that AniList
          already scheduled as aired. `nextAiringEpisode` is the boundary:
          episode N+1 is upcoming, so only N episodes are watchable now. */
       return Math.max(episodeCatalogTotal, airedBySchedule);
     }
-    return Math.max(0, Number(anime.episodes || 0), episodeCatalogTotal);
-  }, [anime, episodeCatalogTotal]);
+    return Math.max(0, Number(selectedAnime.episodes || 0), episodeCatalogTotal);
+  }, [selectedAnime, episodeCatalogTotal]);
 
   const allEps = useMemo(() => Array.from({ length: total }, (_, i) => i + 1), [total]);
   const watchedCount = useMemo(() => [...watched].filter(n => n >= 1 && n <= total).length, [watched, total]);
@@ -408,9 +681,10 @@ export default function EpisodeListScreen() {
 
   const isSearching = search.trim().length > 0;
   const filtered = useMemo(() => {
-    if (!isSearching) return allEps;
-    return allEps.filter(n => n.toString().includes(search.trim()));
-  }, [allEps, search]);
+    const ordered = sortOrder === "asc" ? allEps : [...allEps].reverse();
+    if (!isSearching) return ordered;
+    return ordered.filter(n => n.toString().includes(search.trim()));
+  }, [allEps, isSearching, search, sortOrder]);
 
   const displayedEps = useMemo(() => {
     /*
@@ -418,8 +692,8 @@ export default function EpisodeListScreen() {
      * first 100 episodes. That artificial page boundary hid the rest of
      * long-running series when the catalog total was temporarily incomplete.
      */
-    return isSearching ? filtered : allEps;
-  }, [allEps, filtered, isSearching]);
+    return filtered;
+  }, [filtered]);
   const epByNumber = useMemo(() => {
     const map = new Map<number, any>();
     for (const item of epData) {
@@ -433,9 +707,9 @@ export default function EpisodeListScreen() {
     || preferredKey === "continue"
     || !displayedEps.includes(preferredEpisodeNumber);
 
-  const onViewableItemsChanged = useRef(({ viewableItems }: { viewableItems: Array<{ index: number | null }> }) => {
-    const maxIndex = viewableItems.reduce((max, item) => Math.max(max, item.index ?? -1), -1);
-    if (maxIndex >= 0) fetchEpisodePageRef.current(Math.floor(maxIndex / 100) + 1);
+  const onViewableItemsChanged = useRef(({ viewableItems }: { viewableItems: Array<{ item: number; index: number | null }> }) => {
+    const maxEpisode = viewableItems.reduce((max, item) => Math.max(max, Number(item.item) || 0), 0);
+    if (maxEpisode > 0) fetchEpisodePageRef.current(Math.floor((maxEpisode - 1) / 100) + 1);
   }).current;
   const viewabilityConfig = useRef({
     itemVisiblePercentThreshold: 35,
@@ -491,9 +765,9 @@ export default function EpisodeListScreen() {
     <View style={[ep_s.container, { paddingTop: topPad }, tvMode && ep_s.tvContainer]}>
       {/* ── Hero Banner ── */}
       <View style={[ep_s.hero, tvMode && ep_s.tvHero]}>
-        {(anime.bannerImage || anime.coverImage?.extraLarge || anime.coverImage?.large) ? (
+        {(selectedAnime?.bannerImage || selectedAnime?.coverImage?.extraLarge || selectedAnime?.coverImage?.large) ? (
           <Image
-            source={{ uri: anime.bannerImage || anime.coverImage?.extraLarge || anime.coverImage?.large }}
+            source={{ uri: selectedAnime.bannerImage || selectedAnime.coverImage?.extraLarge || selectedAnime.coverImage?.large }}
             style={StyleSheet.absoluteFill}
           />
         ) : null}
@@ -513,18 +787,23 @@ export default function EpisodeListScreen() {
 
         {/* Cover + info */}
         <View style={[ep_s.heroBottom, tvMode && ep_s.tvHeroBottom]}>
-          {anime.coverImage?.large ? (
-            <Image source={{ uri: anime.coverImage.large }} style={[ep_s.heroCover, tvMode && ep_s.tvHeroCover]} />
+          {selectedAnime?.coverImage?.large ? (
+            <Image source={{ uri: selectedAnime.coverImage.large }} style={[ep_s.heroCover, tvMode && ep_s.tvHeroCover]} />
           ) : null}
           <View style={[ep_s.heroInfo, tvMode && ep_s.tvHeroInfo]}>
-            <Text style={[ep_s.heroTitle, tvMode && ep_s.tvHeroTitle]} numberOfLines={1}>{anime.title?.romaji}</Text>
+            <Text style={[ep_s.heroTitle, tvMode && ep_s.tvHeroTitle]} numberOfLines={1}>{selectedAnime?.title?.romaji}</Text>
             <View style={{ flexDirection: "row", gap: 8, marginTop: 4 }}>
               <Text style={[ep_s.heroBadge, tvMode && ep_s.tvHeroBadge]}>{total} حلقة</Text>
+              {seasons.length > 1 && (
+                <Text style={[ep_s.heroBadge, tvMode && ep_s.tvHeroBadge]}>
+                  الموسم {selectedSeasonIndex + 1}
+                </Text>
+              )}
               {watchedCount > 0 && (
           <Text style={[ep_s.heroBadge, tvMode && ep_s.tvHeroBadge, { color: "#34D399" }]}>👁 {watchedCount} مشاهدة</Text>
               )}
-              {anime.averageScore ? (
-          <Text style={[ep_s.heroBadge, tvMode && ep_s.tvHeroBadge, { color: "#FBBF24" }]}>⭐ {(anime.averageScore / 10).toFixed(1)}</Text>
+              {selectedAnime?.averageScore ? (
+          <Text style={[ep_s.heroBadge, tvMode && ep_s.tvHeroBadge, { color: "#FBBF24" }]}>⭐ {(selectedAnime.averageScore / 10).toFixed(1)}</Text>
               ) : null}
             </View>
           </View>
@@ -539,6 +818,81 @@ export default function EpisodeListScreen() {
             <View style={[ep_s.progressFill, { width: `${pct}%` }]} />
           </View>
            <Text style={[ep_s.pctText, tvMode && ep_s.tvText]}>{pct}%</Text>
+        </View>
+        {seasons.length > 1 && (
+          <View style={ep_s.seasonSection}>
+            <View style={ep_s.seasonSectionHeader}>
+              <Text style={[ep_s.seasonSectionTitle, tvMode && ep_s.tvSeasonSectionTitle]}>المواسم</Text>
+              <Text style={[ep_s.seasonTotal, tvMode && ep_s.tvText]}>{seasons.length} مواسم</Text>
+            </View>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={ep_s.seasonTabs}
+            >
+              {seasons.map((season, index) => {
+                const isActive = String(season?.id) === selectedSeasonAnimeKey;
+                const episodeCount = isActive ? total : knownEpisodeCount(season);
+                return (
+                  <Pressable
+                    key={String(season?.id)}
+                    onPress={() => {
+                      setSelectedSeasonId(String(season?.id));
+                      setSearch("");
+                      episodeListRef.current?.scrollToOffset({ offset: 0, animated: false });
+                    }}
+                    focusable={tvMode}
+                    testID={`anime-season-${season?.id}`}
+                    accessibilityRole="button"
+                    accessibilityLabel={`الموسم ${index + 1}${episodeCount === null ? "" : `، ${episodeCount} حلقة`}`}
+                    accessibilityState={{ selected: isActive }}
+                    style={({ focused, pressed }) => [
+                      ep_s.seasonTab,
+                      isActive && ep_s.seasonTabActive,
+                      tvMode && ep_s.tvSeasonTab,
+                      tvMode && tvFocusStyle(focused),
+                      pressed && { opacity: 0.84 },
+                    ]}
+                  >
+                    <Text style={[
+                      ep_s.seasonTabTitle,
+                      tvMode && ep_s.tvSeasonTabTitle,
+                      isActive && ep_s.seasonTabTitleActive,
+                    ]}>
+                      الموسم {index + 1}
+                    </Text>
+                    <Text style={[ep_s.seasonTabCount, tvMode && ep_s.tvSeasonTabCount]}>
+                      {episodeCount === null ? "العدد غير متاح" : `${episodeCount} حلقة`}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </ScrollView>
+          </View>
+        )}
+        <View style={ep_s.episodeTools}>
+          <Text style={[ep_s.episodeSectionTitle, tvMode && ep_s.tvEpisodeSectionTitle]}>الحلقات</Text>
+          <Pressable
+            onPress={() => {
+              setSortOrder(current => current === "asc" ? "desc" : "asc");
+              episodeListRef.current?.scrollToOffset({ offset: 0, animated: false });
+            }}
+            focusable={tvMode}
+            testID="anime-episode-sort"
+            accessibilityRole="button"
+            accessibilityLabel={`ترتيب الحلقات: ${sortOrder === "asc" ? "الأقدم أولاً" : "الأحدث أولاً"}`}
+            style={({ focused, pressed }) => [
+              ep_s.sortButton,
+              tvMode && ep_s.tvSortButton,
+              tvMode && tvFocusStyle(focused),
+              pressed && { opacity: 0.84 },
+            ]}
+          >
+            <Ionicons name="swap-vertical" size={tvMode ? 20 : 14} color="#A78BFA" />
+            <Text style={[ep_s.sortButtonText, tvMode && ep_s.tvSortButtonText]}>
+              {sortOrder === "asc" ? "الأقدم أولاً" : "الأحدث أولاً"}
+            </Text>
+          </Pressable>
         </View>
         {/* Search */}
         <View style={[ep_s.searchBar, tvMode && ep_s.tvSearchBar]}>
@@ -564,7 +918,7 @@ export default function EpisodeListScreen() {
       <TvFocusGuideView autoFocus={tvMode} style={ep_s.tvFocusGuide}>
         <FlatList
           ref={episodeListRef}
-          key={tvMode ? "tv-episode-grid" : "phone-episode-list"}
+          key={`${tvMode ? "tv" : "phone"}-${selectedAnimeId}`}
           data={displayedEps}
           numColumns={1}
           keyExtractor={n => n.toString()}
@@ -577,8 +931,8 @@ export default function EpisodeListScreen() {
           onViewableItemsChanged={onViewableItemsChanged}
           viewabilityConfig={viewabilityConfig}
           onEndReached={() => {
-            const lastIndex = Math.max(0, displayedEps.length - 1);
-            fetchEpisodePageRef.current(Math.floor(lastIndex / 100) + 1);
+            const lastEpisode = displayedEps[displayedEps.length - 1] || 1;
+            fetchEpisodePageRef.current(Math.floor((lastEpisode - 1) / 100) + 1);
           }}
           onEndReachedThreshold={0.35}
           onScrollToIndexFailed={({ index }) => {
@@ -591,7 +945,11 @@ export default function EpisodeListScreen() {
           contentContainerStyle={[{ paddingBottom: 100 }, tvMode && ep_s.tvListContent]}
           ListHeaderComponent={
             <Pressable
-              onPress={() => watchEp(displayedEps[0] || 1)}
+              onPress={() => watchEp(
+                isSearching
+                  ? (displayedEps[0] || 1)
+                  : (watchedCount > 0 ? Math.min(total, watchedCount + 1) : 1),
+              )}
               hasTVPreferredFocus={tvMode && ready && shouldFocusContinue}
               onFocus={() => { if (tvMode) rememberFocus("continue"); }}
               style={({ focused }) => [ep_s.watchFromBtn, tvMode && ep_s.tvWatchFromBtn, tvMode && tvFocusStyle(focused)]}>
@@ -604,7 +962,7 @@ export default function EpisodeListScreen() {
           renderItem={({ item: n }) => (
             <EpisodeRow
               n={n}
-              anime={anime}
+              anime={selectedAnime}
               epByNumber={epByNumber}
               episodeTitlesAr={episodeTitlesAr}
               watched={watched.has(n)}
@@ -643,6 +1001,20 @@ const ep_s = StyleSheet.create({
   heroTitle: { fontSize: 15, fontFamily: "Cairo_800ExtraBold", color: "#fff" },
   heroBadge: { fontSize: 9, fontFamily: "Cairo_700Bold", color: "#8B5CF6" },
   controls: { backgroundColor: "rgba(9,9,11,0.97)", borderBottomWidth: 1, borderBottomColor: "rgba(255,255,255,0.06)", paddingHorizontal: 14, paddingTop: 10, paddingBottom: 8 },
+  seasonSection: { marginTop: 1, marginBottom: 7 },
+  seasonSectionHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 5 },
+  seasonSectionTitle: { fontSize: 11, fontFamily: "Cairo_700Bold", color: "rgba(255,255,255,0.82)" },
+  seasonTotal: { fontSize: 9, fontFamily: "Cairo_400Regular", color: "rgba(255,255,255,0.38)" },
+  seasonTabs: { gap: 7, paddingHorizontal: 1, paddingBottom: 2 },
+  seasonTab: { minWidth: 106, alignItems: "flex-end", paddingHorizontal: 10, paddingVertical: 6, borderRadius: 11, backgroundColor: "#15151B", borderWidth: 1, borderColor: "rgba(255,255,255,0.08)" },
+  seasonTabActive: { backgroundColor: "rgba(139,92,246,0.16)", borderColor: "rgba(139,92,246,0.52)" },
+  seasonTabTitle: { fontSize: 10, lineHeight: 16, fontFamily: "Cairo_700Bold", color: "rgba(255,255,255,0.72)" },
+  seasonTabTitleActive: { color: "#C4B5FD" },
+  seasonTabCount: { fontSize: 8, lineHeight: 13, fontFamily: "Cairo_400Regular", color: "rgba(255,255,255,0.42)" },
+  episodeTools: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginTop: 1, marginBottom: 6 },
+  episodeSectionTitle: { fontSize: 12, fontFamily: "Cairo_800ExtraBold", color: "#fff" },
+  sortButton: { minHeight: 30, flexDirection: "row", alignItems: "center", gap: 5, paddingHorizontal: 9, paddingVertical: 4, borderRadius: 10, backgroundColor: "rgba(139,92,246,0.09)", borderWidth: 1, borderColor: "rgba(139,92,246,0.22)" },
+  sortButtonText: { fontSize: 9, fontFamily: "Cairo_700Bold", color: "#C4B5FD" },
   progressRow: { flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 8 },
   progressTrack: { flex: 1, height: 6, backgroundColor: "rgba(255,255,255,0.08)", borderRadius: 3, overflow: "hidden" },
   progressFill: { height: "100%", backgroundColor: "#8B5CF6", borderRadius: 3 },
@@ -687,6 +1059,13 @@ const ep_s = StyleSheet.create({
   tvContainer: { paddingHorizontal: 28 },
   tvFocusGuide: { flex: 1 },
   tvControls: { paddingHorizontal: 28, paddingTop: 12, paddingBottom: 10 },
+  tvSeasonSectionTitle: { fontSize: 16, lineHeight: 24 },
+  tvSeasonTab: { minWidth: 150, paddingHorizontal: 15, paddingVertical: 9, borderRadius: 14 },
+  tvSeasonTabTitle: { fontSize: 14, lineHeight: 21 },
+  tvSeasonTabCount: { fontSize: 11, lineHeight: 17 },
+  tvEpisodeSectionTitle: { fontSize: 18, lineHeight: 27 },
+  tvSortButton: { minHeight: 44, paddingHorizontal: 14, paddingVertical: 8, borderRadius: 12 },
+  tvSortButtonText: { fontSize: 13, lineHeight: 20 },
   tvHero: { height: 260 },
   tvBackBtn: { width: 46, height: 46, borderRadius: 14 },
   tvHeroBottom: { paddingHorizontal: 28, paddingBottom: 16, gap: 16 },
