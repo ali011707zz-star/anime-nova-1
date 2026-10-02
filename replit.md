@@ -7,8 +7,8 @@ A full-stack anime streaming platform with web and mobile clients.
 | Package | Path | Description |
 |---------|------|-------------|
 | `api-server` | `artifacts/api-server` | Node.js backend — scrapers, HLS proxy, Telegram bot, DB |
-| `anime-scraper` | `artifacts/anime-scraper` | React/Vite web frontend |
-| `nova-mobile` | `artifacts/nova-mobile` | Expo React Native mobile app |
+| `anime-scraper` | `artifacts/anime-scraper` | React/Vite web app; not a standalone scraper service |
+| `nova-mobile` | `artifacts/nova-mobile` | One Expo React Native app for phones and Android TV mode |
 | `mockup-sandbox` | `artifacts/mockup-sandbox` | Design/mockup canvas sandbox |
 | `nova2-android` | `nova2-android` | Independent Kotlin + Jetpack Compose Nova 2 client |
 | `nova-tv-v3` | `nova-tv-v3` | Incomplete Kotlin migration prototype for phone, tablet, and TV |
@@ -39,6 +39,7 @@ research documents are grouped under `docs/`.
 ## User preferences
 
 - Do not run or install the app in Replit — VPS only.
+- Keep Android TV mode in the existing `artifacts/nova-mobile` app. `nova-tv-v3` is an incomplete Kotlin prototype, not the current TV app; do not split TV into a separate app.
 - Anivexa integration: run the imported Anivexa-API service separately on the VPS
   (default `127.0.0.1:8787`) and set `ANIVEXA_API_URL` in `/opt/anime-nova/.env`.
   Nova consumes only direct HLS/MP4 streams from the approved Anivexa providers;

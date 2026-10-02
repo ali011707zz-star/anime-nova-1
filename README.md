@@ -7,12 +7,12 @@
 | المسار | الدور والحالة |
 |---|---|
 | `artifacts/api-server` | API والخدمات الخلفية؛ التشغيل الفعلي على VPS |
-| `artifacts/anime-scraper` | واجهة الويب |
-| `artifacts/nova-mobile` | تطبيق Expo للموبايل |
+| `artifacts/anime-scraper` | تطبيق واجهة الويب React/Vite؛ ليس خدمة scraper منفصلة |
+| `artifacts/nova-mobile` | تطبيق Expo واحد للهاتف والتلفاز؛ وضع Android TV مدمج |
 | `nova2-android` | عميل Kotlin/Compose مستقل، وله GitHub Actions في `.github/workflows/build-nova2.yml` |
-| `nova-tv-v3` | نموذج نقل Kotlin للموبايل والتابلت والتلفاز؛ ما زال غير مكتمل |
+| `nova-tv-v3` | نموذج Kotlin منفصل وغير مكتمل؛ ليس تطبيق التلفاز الحالي |
 
-`nova-tv-v3` ليس بديلاً مكتملاً لتطبيق Expo، كما أن workflow البناء الذي كان README القديم يشير إليه غير موجود حالياً.
+`artifacts/nova-mobile` هو تطبيق Nova الحالي للهاتف والتلفاز معًا؛ وضع TV جزء من تطبيق Expo نفسه. `nova-tv-v3` ليس بديلاً عنه. كما أن workflow البناء الذي كان README القديم يشير إليه غير موجود حالياً.
 
 ## الأرشيف
 
@@ -20,8 +20,12 @@
 |---|---|
 | `archive/android-tv/nova-tv` | مصدر نموذج TV الأول |
 | `archive/android-tv/nova-tv-v2` | مصدر نموذج TV الثاني، مع واجهة للهاتف أيضاً |
+| `archive/backups` | نسخ يدوية محفوظة من ملفات التطبيق وتهيئات Nginx |
+| `archive/api-server/nested-old-copy` | نسخة API متداخلة قديمة؛ ليست مصدر البناء الحالي |
+| `archive/api-server/dist_bak` | مخرجات بناء API احتياطية |
+| `archive/api-server/source-snapshots` | لقطات مصدر API محفوظة |
 
-نُقلت النسختان إلى الأرشيف دون حذف ملفاتهما. لا توجد لهما workflows بناء في المستودع الحالي.
+كل المحتوى أعلاه محفوظ ولم يُحذف. يبني API الحالي من `artifacts/api-server/src/index.ts`؛ لا توجد لنماذج TV القديمة workflows بناء في المستودع الحالي.
 
 ## الوثائق
 
