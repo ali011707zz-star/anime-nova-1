@@ -78,6 +78,7 @@ nova-player-build-final/
 *.apk
 *.keystore
 *.jks
+artifacts/nova-mobile/google-services.json
 
 # JADX input/output for the archived Nova Mobile 2 reference project (contains
 # embedded third-party keys and the original APK binary)

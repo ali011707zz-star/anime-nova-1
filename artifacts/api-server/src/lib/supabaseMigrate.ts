@@ -226,6 +226,23 @@ CREATE INDEX IF NOT EXISTS idx_mobile_push_tokens_active
   ON mobile_push_tokens(disabled_at, last_seen_at DESC);
 CREATE INDEX IF NOT EXISTS idx_mobile_push_tokens_user_active
   ON mobile_push_tokens(user_id, disabled_at);
+CREATE TABLE IF NOT EXISTS mobile_push_deliveries (
+  id BIGSERIAL PRIMARY KEY,
+  event_key TEXT NOT NULL,
+  token TEXT NOT NULL,
+  payload_json TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'queued'
+    CHECK (status IN ('queued', 'retry', 'ticket_pending', 'sent', 'invalid_token', 'failed')),
+  attempts INTEGER NOT NULL DEFAULT 0,
+  next_attempt_at TIMESTAMPTZ,
+  ticket_id TEXT,
+  last_error TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE(event_key, token)
+);
+CREATE INDEX IF NOT EXISTS idx_mobile_push_deliveries_due
+  ON mobile_push_deliveries(status, next_attempt_at);
 
 -- Device-link codes are short-lived and stored as hashes only.
 CREATE TABLE IF NOT EXISTS device_link_codes (
@@ -263,7 +280,7 @@ const REQUIRED_TABLES = [
   "translations_cache", "anime_meta_ar", "anime_meta_cache", "anime_poster_cache",
   // Shared L2 cache tables — verify these at startup so cache failures are visible.
   "source_cache", "subtitle_cache", "cdn_cache", "telegram_episode_cache",
-  "mobile_push_tokens", "device_link_codes", "linked_devices",
+  "mobile_push_tokens", "mobile_push_deliveries", "device_link_codes", "linked_devices",
 ];
 
 // ── PostgreSQL direct migration (للـ Replit PostgreSQL) ──────────────────────
@@ -464,6 +481,23 @@ CREATE INDEX IF NOT EXISTS idx_mobile_push_tokens_active
   ON mobile_push_tokens(disabled_at, last_seen_at DESC);
 CREATE INDEX IF NOT EXISTS idx_mobile_push_tokens_user_active
   ON mobile_push_tokens(user_id, disabled_at);
+CREATE TABLE IF NOT EXISTS mobile_push_deliveries (
+  id BIGSERIAL PRIMARY KEY,
+  event_key TEXT NOT NULL,
+  token TEXT NOT NULL,
+  payload_json TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'queued'
+    CHECK (status IN ('queued', 'retry', 'ticket_pending', 'sent', 'invalid_token', 'failed')),
+  attempts INTEGER NOT NULL DEFAULT 0,
+  next_attempt_at TIMESTAMPTZ,
+  ticket_id TEXT,
+  last_error TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE(event_key, token)
+);
+CREATE INDEX IF NOT EXISTS idx_mobile_push_deliveries_due
+  ON mobile_push_deliveries(status, next_attempt_at);
 CREATE TABLE IF NOT EXISTS device_link_codes (
   id                 UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id            UUID NOT NULL,

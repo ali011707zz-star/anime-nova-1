@@ -1,10 +1,49 @@
 import { Router, type Request, type Response } from "express";
-import { sbPatch, sbSelect, sbUpsert } from "../lib/supabaseClient.js";
+import { randomUUID } from "node:crypto";
+import { sbInsertIgnore, sbPatch, sbSelect, sbUpsert } from "../lib/supabaseClient.js";
 import { getMobileUserId } from "../lib/security.js";
 
 const router = Router();
 const EXPO_PUSH_URL = "https://exp.host/--/api/v2/push/send";
+const EXPO_RECEIPTS_URL = "https://exp.host/--/api/v2/push/getReceipts";
 const EXPO_TOKEN_RE = /^(?:Expo|Exponent)PushToken\[[A-Za-z0-9_-]+\]$/;
+const PUSH_DELIVERIES_TABLE = "mobile_push_deliveries";
+const RECEIPT_DELAY_MS = 15 * 60_000;
+const MAX_RETRY_DELAY_MS = 24 * 60 * 60_000;
+const TRANSIENT_EXPO_ERRORS = new Set([
+  "MessageRateExceeded",
+  "ExpoServerError",
+  "ExpoPushReceiptTimeout",
+  "ServiceUnavailable",
+  "InternalServerError",
+  "GatewayTimeout",
+  "ECONNRESET",
+  "ETIMEDOUT",
+]);
+
+type DeliveryStatus = "queued" | "retry" | "ticket_pending" | "sent" | "invalid_token" | "failed";
+
+type PushDeliveryRow = {
+  id: number;
+  event_key: string;
+  token: string;
+  payload_json: string;
+  status: DeliveryStatus;
+  attempts: number;
+  next_attempt_at: string | null;
+  ticket_id?: string | null;
+  created_at: string;
+  last_error?: string | null;
+};
+
+export type PushDeliverySummary = {
+  eventKey: string;
+  targets: number;
+  delivered: number;
+  pending: number;
+  failed: number;
+  complete: boolean;
+};
 
 type PushTokenRow = {
   token: string;
@@ -33,7 +72,7 @@ router.post("/push/register", async (req: Request, res: Response) => {
       "mobile_push_tokens",
       {
         token,
-        user_id: getMobileUserId(req),
+        user_id: getMobileUserId(req) ?? null,
         platform,
         app_version: appVersion,
         last_seen_at: new Date().toISOString(),
@@ -56,111 +95,427 @@ router.post("/push/register", async (req: Request, res: Response) => {
 router.post("/push/unregister", async (req: Request, res: Response) => {
   const token = req.body?.token;
   if (!validToken(token)) return res.status(400).json({ error: "Invalid Expo push token" });
-  await sbPatch("mobile_push_tokens", { token: `eq.${token}` }, {
+  const updated = await sbPatch("mobile_push_tokens", { token: `eq.${token}` }, {
     disabled_at: new Date().toISOString(),
     last_seen_at: new Date().toISOString(),
   });
+  if (!updated) {
+    console.warn("[push] token unregister failed at database stage");
+    return res.status(503).json({ error: "Push token unregister unavailable" });
+  }
   return res.json({ ok: true });
 });
 
-async function disableToken(token: string): Promise<void> {
-  await sbPatch("mobile_push_tokens", { token: `eq.${token}` }, {
+async function disableToken(token: string): Promise<boolean> {
+  const updated = await sbPatch("mobile_push_tokens", { token: `eq.${token}` }, {
     disabled_at: new Date().toISOString(),
   });
+  return Boolean(updated);
 }
 
-async function sendExpoBatch(messages: Array<Record<string, unknown>>): Promise<number> {
-  if (!messages.length) return 0;
-  try {
-    const response = await fetch(EXPO_PUSH_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Accept: "application/json" },
-      body: JSON.stringify(messages),
-      signal: AbortSignal.timeout(15_000),
-    });
-    if (!response.ok) {
-      console.warn(`[push] Expo HTTP ${response.status}`);
-      return 0;
-    }
-    const body = await response.json() as { data?: Array<{ status?: string; details?: { error?: string } }> };
-    const results = body.data || [];
-    let sent = 0;
-    for (let index = 0; index < results.length; index += 1) {
-      const result = results[index];
-      if (result?.status === "ok") {
-        sent += 1;
-      } else if (result?.details?.error === "DeviceNotRegistered") {
-        const token = messages[index]?.to;
-        if (typeof token === "string") await disableToken(token);
-      } else if (result?.details?.error) {
-        console.warn(`[push] Expo rejected message ${index + 1}/${messages.length}: ${result.details.error}`);
+function retryDelay(attempt: number): number {
+  const base = Math.min(30_000 * 2 ** Math.min(Math.max(attempt - 1, 0), 11), MAX_RETRY_DELAY_MS);
+  return Math.round(base * (0.8 + Math.random() * 0.4));
+}
+
+function retryAt(attempt: number, delayOverride?: number): string {
+  return new Date(Date.now() + (delayOverride ?? retryDelay(attempt))).toISOString();
+}
+
+function cleanErrorCode(value: unknown): string {
+  return typeof value === "string" && /^[A-Za-z0-9_.-]{1,80}$/.test(value)
+    ? value
+    : "UnknownExpoError";
+}
+
+function isRetryableExpoError(code: string): boolean {
+  return TRANSIENT_EXPO_ERRORS.has(code) || code === "InvalidCredentials" || code === "MismatchSenderId";
+}
+
+async function patchDelivery(row: PushDeliveryRow, values: Record<string, unknown>): Promise<boolean> {
+  const updated = await sbPatch<PushDeliveryRow>(
+    PUSH_DELIVERIES_TABLE,
+    { id: `eq.${row.id}` },
+    { ...values, updated_at: new Date().toISOString() },
+  );
+  return Boolean(updated);
+}
+
+async function postExpoJson(url: string, payload: unknown, stage: "ticket" | "receipt") {
+  let lastStatus = 0;
+  let lastError = "NetworkError";
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    try {
+      const response = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify(payload),
+        signal: AbortSignal.timeout(15_000),
+      });
+      lastStatus = response.status;
+      if (response.ok) {
+        try {
+          return { ok: true as const, status: response.status, body: await response.json() as any };
+        } catch {
+          lastError = "InvalidExpoResponse";
+        }
+      } else {
+        lastError = `HTTP${response.status}`;
+        if (response.status < 500 && response.status !== 429) {
+          return { ok: false as const, status: response.status, error: lastError, retryable: false };
+        }
       }
+    } catch (error) {
+      lastError = error instanceof Error ? cleanErrorCode(error.name === "TimeoutError" ? "ETIMEDOUT" : error.name) : "NetworkError";
     }
-    if (results.length !== messages.length) {
-      console.warn(`[push] Expo returned ${results.length}/${messages.length} results`);
+
+    if (attempt < 3) {
+      console.warn(`[push] Expo ${stage} temporary failure attempt=${attempt}/3 status=${lastStatus || "network"} error=${lastError}`);
+      await new Promise((resolve) => setTimeout(resolve, 500 * 2 ** (attempt - 1)));
     }
-    return sent;
-  } catch (error: any) {
-    console.warn("[push] Expo send failed:", error?.message || String(error));
-    return 0;
+  }
+  return {
+    ok: false as const,
+    status: lastStatus,
+    error: lastError,
+    retryable: lastStatus === 0 || lastStatus === 429 || lastStatus >= 500 || lastError === "InvalidExpoResponse",
+  };
+}
+
+async function deferDelivery(
+  row: PushDeliveryRow,
+  code: string,
+  options: { status?: DeliveryStatus; delayMs?: number; clearTicket?: boolean } = {},
+): Promise<void> {
+  const attempts = (row.attempts || 0) + 1;
+  const status = options.status || (isRetryableExpoError(code) ? "retry" : "failed");
+  const updated = await patchDelivery(row, {
+    status,
+    attempts,
+    last_error: code,
+    next_attempt_at: status === "failed" ? null : retryAt(attempts, options.delayMs),
+    ...(options.clearTicket ? { ticket_id: null } : {}),
+  });
+  if (!updated) console.error(`[push] database failed to persist retry state error=${code}`);
+  console.warn(`[push] delivery deferred status=${status} error=${code} attempt=${attempts}`);
+}
+
+async function disableDeliveryToken(row: PushDeliveryRow, code: string): Promise<void> {
+  const disabled = await disableToken(row.token);
+  const updated = await patchDelivery(row, {
+    status: "invalid_token",
+    last_error: disabled ? code : `${code}_database_retry`,
+    next_attempt_at: disabled ? null : retryAt((row.attempts || 0) + 1, 5 * 60_000),
+  });
+  if (!disabled || !updated) {
+    console.error(`[push] failed to disable invalid token at database stage; token suffix=${row.token.slice(-6)}`);
+  } else {
+    console.warn(`[push] invalid token disabled error=${code}`);
   }
 }
 
-export async function sendMobilePush(input: {
+async function sendTicketBatch(rows: PushDeliveryRow[]): Promise<void> {
+  if (!rows.length) return;
+  const messages = rows.map((row) => ({
+    ...JSON.parse(row.payload_json),
+    to: row.token,
+  }));
+  const response = await postExpoJson(EXPO_PUSH_URL, messages, "ticket");
+  if (!response.ok) {
+    for (const row of rows) {
+      await deferDelivery(row, response.error, {
+        status: response.retryable ? "retry" : "failed",
+      });
+    }
+    console.warn(`[push] Expo ticket request failed status=${response.status || "network"} batch=${rows.length}`);
+    return;
+  }
+
+  const tickets = Array.isArray(response.body?.data) ? response.body.data : [];
+  if (tickets.length !== rows.length) {
+    console.warn(`[push] Expo ticket count mismatch received=${tickets.length} expected=${rows.length}`);
+  }
+  for (let index = 0; index < rows.length; index += 1) {
+    const row = rows[index];
+    const ticket = tickets[index];
+    if (ticket?.status === "ok" && typeof ticket.id === "string" && ticket.id) {
+      const saved = await patchDelivery(row, {
+        status: "ticket_pending",
+        ticket_id: ticket.id,
+        attempts: (row.attempts || 0) + 1,
+        next_attempt_at: new Date(Date.now() + RECEIPT_DELAY_MS).toISOString(),
+        last_error: null,
+      });
+      if (!saved) console.error("[push] database failed to save Expo ticket; retrying delivery row");
+      else console.info("[push] Expo ticket accepted; receipt check scheduled");
+      continue;
+    }
+
+    const code = cleanErrorCode(ticket?.details?.error || ticket?.message);
+    if (code === "DeviceNotRegistered") {
+      await disableDeliveryToken(row, code);
+    } else if (isRetryableExpoError(code) || !ticket) {
+      await deferDelivery(row, code === "UnknownExpoError" ? "MissingExpoTicket" : code, { status: "retry" });
+    } else {
+      await deferDelivery(row, code, { status: "failed" });
+    }
+  }
+}
+
+async function processTicketReceipts(rows: PushDeliveryRow[]): Promise<void> {
+  const withTickets = rows.filter((row) => row.ticket_id);
+  for (let offset = 0; offset < withTickets.length; offset += 1000) {
+    const batch = withTickets.slice(offset, offset + 1000);
+    const response = await postExpoJson(
+      EXPO_RECEIPTS_URL,
+      { ids: batch.map((row) => row.ticket_id) },
+      "receipt",
+    );
+    if (!response.ok) {
+      for (const row of batch) {
+        if (response.retryable) {
+          await patchDelivery(row, {
+            status: "ticket_pending",
+            next_attempt_at: retryAt((row.attempts || 0) + 1),
+            last_error: response.error,
+          });
+        } else {
+          await patchDelivery(row, { status: "failed", next_attempt_at: null, last_error: response.error });
+        }
+      }
+      console.warn(`[push] Expo receipt request failed status=${response.status || "network"} batch=${batch.length}`);
+      continue;
+    }
+
+    const receipts = response.body?.data || {};
+    for (const row of batch) {
+      const receipt = row.ticket_id ? receipts[row.ticket_id] : null;
+      if (!receipt) {
+        const age = Date.now() - new Date(row.created_at).getTime();
+        if (age >= 24 * 60 * 60_000) {
+          await patchDelivery(row, { status: "failed", next_attempt_at: null, last_error: "ExpoReceiptExpired" });
+          console.error("[push] Expo receipt missing beyond retention window; delivery marked failed");
+        } else {
+          await patchDelivery(row, {
+            status: "ticket_pending",
+            next_attempt_at: retryAt((row.attempts || 0) + 1, 5 * 60_000),
+            last_error: "ExpoReceiptNotReady",
+          });
+          console.info("[push] Expo receipt not ready; another receipt check is scheduled");
+        }
+        continue;
+      }
+
+      if (receipt.status === "ok") {
+        const updated = await patchDelivery(row, {
+          status: "sent",
+          next_attempt_at: null,
+          last_error: null,
+        });
+        if (updated) console.info("[push] Expo receipt accepted by FCM/APNs");
+        else console.error("[push] database failed to persist successful Expo receipt");
+        continue;
+      }
+
+      const code = cleanErrorCode(receipt.details?.error || receipt.message);
+      if (code === "DeviceNotRegistered") {
+        await disableDeliveryToken(row, code);
+      } else if (isRetryableExpoError(code)) {
+        await deferDelivery(row, code, { clearTicket: true });
+      } else {
+        await deferDelivery(row, code, { status: "failed", clearTicket: true });
+      }
+    }
+  }
+}
+
+let pushCycle: Promise<void> | null = null;
+
+async function processPushCycle(): Promise<void> {
+  const now = new Date().toISOString();
+  const dueTickets = await sbSelect<PushDeliveryRow>(
+    PUSH_DELIVERIES_TABLE,
+    {
+      status: "eq.ticket_pending",
+      next_attempt_at: `lte.${now}`,
+      order: "next_attempt_at.asc",
+    },
+    { limit: 1000, strict: true },
+  );
+  await processTicketReceipts(dueTickets);
+
+  const dueSends = await sbSelect<PushDeliveryRow>(
+    PUSH_DELIVERIES_TABLE,
+    {
+      status: "in.(queued,retry)",
+      next_attempt_at: `lte.${now}`,
+      order: "next_attempt_at.asc",
+    },
+    { limit: 1000, strict: true },
+  );
+  for (let offset = 0; offset < dueSends.length; offset += 100) {
+    await sendTicketBatch(dueSends.slice(offset, offset + 100));
+  }
+
+  const invalidRows = await sbSelect<PushDeliveryRow>(
+    PUSH_DELIVERIES_TABLE,
+    {
+      status: "eq.invalid_token",
+      next_attempt_at: `lte.${now}`,
+    },
+    { limit: 100, strict: true },
+  );
+  for (const row of invalidRows) {
+    const disabled = await disableToken(row.token);
+    await patchDelivery(row, {
+      next_attempt_at: disabled ? null : retryAt((row.attempts || 0) + 1, 5 * 60_000),
+      last_error: disabled ? row.last_error : "DeviceNotRegistered_database_retry",
+    });
+  }
+}
+
+async function runPushCycle(): Promise<void> {
+  if (pushCycle) return pushCycle;
+  pushCycle = processPushCycle()
+    .catch((error) => {
+      console.error("[push] delivery worker failed at database/Expo stage:", error instanceof Error ? error.message : String(error));
+    })
+    .finally(() => {
+      pushCycle = null;
+    });
+  return pushCycle;
+}
+
+export function startPushDeliveryWorker(): void {
+  console.info("[push] durable ticket/receipt worker started interval_seconds=60");
+  void runPushCycle();
+  setInterval(() => void runPushCycle(), 60_000);
+}
+
+export async function sendMobilePushDetailed(input: {
   title: string;
   body: string;
   posterUrl?: string;
   userId?: string;
   data?: Record<string, unknown>;
-}): Promise<number> {
-  const rows = await sbSelect<PushTokenRow>(
-    "mobile_push_tokens",
-    {
-      disabled_at: "is.null",
-      ...(input.userId ? { user_id: `eq.${input.userId}` } : {}),
-    },
-    { limit: 10_000 },
-  );
-  if (!rows.length) {
-    console.warn("[push] no active device tokens; notification skipped");
-    return 0;
+  eventKey?: string;
+}): Promise<PushDeliverySummary> {
+  const eventKey = input.eventKey || `push:${randomUUID()}`;
+  let rows: PushTokenRow[] = [];
+  try {
+    for (let offset = 0; ; offset += 1000) {
+      const page = await sbSelect<PushTokenRow>(
+        "mobile_push_tokens",
+        {
+          disabled_at: "is.null",
+          ...(input.userId ? { user_id: `eq.${input.userId}` } : {}),
+          order: "token.asc",
+        },
+        { limit: 1000, offset, strict: true },
+      );
+      rows.push(...page);
+      if (page.length < 1000) break;
+    }
+  } catch (error) {
+    console.error(`[push] token database query failed event=${eventKey}:`, error instanceof Error ? error.message : String(error));
+    return { eventKey, targets: 0, delivered: 0, pending: 1, failed: 0, complete: false };
   }
 
-  const messages = rows
-    .filter((row) => validToken(row.token))
-    .map((row) => ({
-      to: row.token,
-      sound: "default",
-      title: input.title,
-      body: input.body,
-      channelId: "nova-new-episodes",
-      ...(input.posterUrl ? { richContent: { image: input.posterUrl } } : {}),
-      data: input.data || {},
-    }));
-  console.log(`[push] preparing mobile notification devices=${rows.length} valid=${messages.length}`);
-  if (!messages.length) {
-    console.warn("[push] active rows contained no valid Expo tokens");
-    return 0;
+  const validRows = rows.filter((row) => validToken(row.token));
+  const invalidRows = rows.filter((row) => !validToken(row.token));
+  for (const row of invalidRows) {
+    const disabled = await disableToken(row.token);
+    console.warn(`[push] invalid stored token ${disabled ? "disabled" : "could not be disabled"} suffix=${String(row.token).slice(-6)}`);
+  }
+  if (!validRows.length) {
+    console.info(`[push] no active target devices event=${eventKey}`);
+    return { eventKey, targets: 0, delivered: 0, pending: 0, failed: 0, complete: true };
   }
 
-  let sent = 0;
-  for (let offset = 0; offset < messages.length; offset += 100) {
-    sent += await sendExpoBatch(messages.slice(offset, offset + 100));
+  const payload = {
+    sound: "default",
+    title: input.title,
+    body: input.body,
+    channelId: "nova-new-episodes",
+    ...(input.posterUrl ? { richContent: { image: input.posterUrl } } : {}),
+    data: input.data || {},
+  };
+  const payloadJson = JSON.stringify(payload);
+  try {
+    for (let offset = 0; offset < validRows.length; offset += 100) {
+      const batch = validRows.slice(offset, offset + 100).map((row) => ({
+        event_key: eventKey,
+        token: row.token,
+        payload_json: payloadJson,
+        status: "queued",
+        attempts: 0,
+        next_attempt_at: new Date().toISOString(),
+      }));
+      const inserted = await sbInsertIgnore(PUSH_DELIVERIES_TABLE, batch, "event_key,token");
+      if (!inserted) {
+        const existing = await sbSelect<PushDeliveryRow>(
+          PUSH_DELIVERIES_TABLE,
+          {
+            event_key: `eq.${eventKey}`,
+            token: `in.(${batch.map((row) => row.token).join(",")})`,
+          },
+          { limit: batch.length, strict: true },
+        );
+        if (existing.length < batch.length) throw new Error("Push delivery batch could not be queued");
+      }
+    }
+  } catch (error) {
+    console.error(`[push] delivery queue/database failed event=${eventKey}:`, error instanceof Error ? error.message : String(error));
+    return { eventKey, targets: validRows.length, delivered: 0, pending: validRows.length, failed: 0, complete: false };
   }
-  console.log(`[push] mobile notification result sent=${sent} attempted=${messages.length}`);
-  return sent;
+
+  console.info(`[push] database queue ready event=${eventKey} devices=${validRows.length}`);
+  await runPushCycle();
+  try {
+    const deliveries: PushDeliveryRow[] = [];
+    for (let offset = 0; ; offset += 1000) {
+      const page = await sbSelect<PushDeliveryRow>(
+        PUSH_DELIVERIES_TABLE,
+        { event_key: `eq.${eventKey}`, order: "id.asc" },
+        { limit: 1000, offset, strict: true },
+      );
+      deliveries.push(...page);
+      if (page.length < 1000) break;
+    }
+    const delivered = deliveries.filter((row) => row.status === "sent").length;
+    const pending = deliveries.filter((row) => ["queued", "retry", "ticket_pending"].includes(row.status)).length
+      + Math.max(validRows.length - deliveries.length, 0);
+    const failed = deliveries.filter((row) => row.status === "failed").length;
+    return {
+      eventKey,
+      targets: validRows.length,
+      delivered,
+      pending,
+      failed,
+      complete: pending === 0 && failed === 0 && deliveries.length >= validRows.length,
+    };
+  } catch (error) {
+    console.error(`[push] delivery status query failed event=${eventKey}:`, error instanceof Error ? error.message : String(error));
+    return { eventKey, targets: validRows.length, delivered: 0, pending: validRows.length, failed: 0, complete: false };
+  }
 }
 
-export async function sendNewEpisodePush(input: {
+export async function sendMobilePush(input: Parameters<typeof sendMobilePushDetailed>[0]): Promise<number> {
+  const result = await sendMobilePushDetailed(input);
+  return result.delivered;
+}
+
+export async function sendNewEpisodePushDetailed(input: {
   animeId: number;
   title: string;
   episode: number;
   posterUrl?: string;
-}): Promise<number> {
-  return sendMobilePush({
+}): Promise<PushDeliverySummary> {
+  return sendMobilePushDetailed({
     title: `حلقة جديدة · ${input.title}`,
     body: `✨ ${input.title} — الحلقة ${input.episode} متاحة الآن\nشاهِدها على Anime NOVA واستمتع!`,
     posterUrl: input.posterUrl,
+    eventKey: `episode:${input.animeId}:${input.episode}`,
     data: {
       type: "new-episode",
       animeId: input.animeId,
@@ -169,6 +524,16 @@ export async function sendNewEpisodePush(input: {
       poster: input.posterUrl || "",
     },
   });
+}
+
+export async function sendNewEpisodePush(input: {
+  animeId: number;
+  title: string;
+  episode: number;
+  posterUrl?: string;
+}): Promise<number> {
+  const result = await sendNewEpisodePushDetailed(input);
+  return result.delivered;
 }
 
 export default router;

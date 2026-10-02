@@ -179,6 +179,37 @@ jobs:
                   print(f"SKIP {relative}: already compatible")
           PY
 
+      - name: 🔥 Configure Firebase Android client for FCM
+        working-directory: artifacts/nova-mobile
+        env:
+          FIREBASE_GOOGLE_SERVICES_JSON_BASE64: ${{ secrets.FIREBASE_GOOGLE_SERVICES_JSON_BASE64 }}
+        run: |
+          set -euo pipefail
+          if [ -z "$FIREBASE_GOOGLE_SERVICES_JSON_BASE64" ]; then
+            echo "::error::Set FIREBASE_GOOGLE_SERVICES_JSON_BASE64 to the base64-encoded google-services.json for Android package com.nova.anime."
+            exit 1
+          fi
+          printf '%s' "$FIREBASE_GOOGLE_SERVICES_JSON_BASE64" | base64 --decode > google-services.json
+          node <<'NODE'
+          const fs = require("node:fs");
+          const app = JSON.parse(fs.readFileSync("app.json", "utf8")).expo;
+          const firebase = JSON.parse(fs.readFileSync("google-services.json", "utf8"));
+          const expectedPackage = app.android?.package;
+          const configuredPackages = (firebase.client || [])
+            .map((client) => client.client_info?.android_client_info?.package_name)
+            .filter(Boolean);
+          if (!expectedPackage || !configuredPackages.includes(expectedPackage)) {
+            console.error(`Firebase Android package mismatch. Expected ${expectedPackage || "(missing app package)"}; configured ${configuredPackages.join(", ") || "(none)"}.`);
+            process.exit(1);
+          }
+          if (!firebase.project_info?.project_id || !firebase.project_info?.project_number) {
+            console.error("Firebase google-services.json is missing project_info.project_id or project_info.project_number.");
+            process.exit(1);
+          }
+          console.log(`Firebase client config validated for Android package ${expectedPackage}.`);
+          NODE
+          chmod 600 google-services.json
+
       - name: 🏗️ Expo Prebuild
         working-directory: artifacts/nova-mobile
         # Never let npx download a different Expo CLI during the build.

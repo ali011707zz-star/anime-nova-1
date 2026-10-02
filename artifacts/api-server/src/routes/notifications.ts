@@ -3,7 +3,7 @@
  */
 import { Router, type Request, type Response } from "express";
 import pg from "pg";
-import { sendMobilePush } from "./push.js";
+import { sendMobilePushDetailed } from "./push.js";
 
 const router = Router();
 
@@ -38,7 +38,6 @@ export async function saveNotification(n: NotifInsert): Promise<void> {
 
   const dedupKey = `${n.type}:${n.anime_id ?? n.tmdb_id ?? n.title}:${n.episode_num ?? ""}`;
   if (_addedKeys.has(dedupKey)) return;
-  _addedKeys.add(dedupKey);
 
   try {
     // تحقق أنه غير موجود في آخر 48 ساعة
@@ -47,7 +46,10 @@ export async function saveNotification(n: NotifInsert): Promise<void> {
        AND created_at > NOW() - INTERVAL '48 hours' LIMIT 1`,
       [n.type, n.title, n.episode_num ?? null]
     );
-    if (existing.rows.length > 0) return;
+    if (existing.rows.length > 0) {
+      _addedKeys.add(dedupKey);
+      return;
+    }
 
     await pool.query(
       `INSERT INTO notifications (type, title, title_ar, body, image_url, link_path, anime_id, tmdb_id, episode_num)
@@ -64,6 +66,7 @@ export async function saveNotification(n: NotifInsert): Promise<void> {
         n.episode_num ?? null,
       ]
     );
+    _addedKeys.add(dedupKey);
   } catch (e: any) {
     console.warn("[notifications] saveNotification error:", e.message);
   }
@@ -141,10 +144,16 @@ const TMDB_KEY  = process.env.TMDB_API_KEY || "8265bd1679663a7ea12ac168da84d2e8"
 const TMDB_BASE = "https://api.themoviedb.org/3";
 const _notifiedAnimation = new Set<string>();
 let _animLastPage = 0;
+let _animCheckInFlight = false;
 
 async function checkNewAnimation(): Promise<void> {
+  if (_animCheckInFlight) return;
+  _animCheckInFlight = true;
   const pool = getPool();
-  if (!pool) return;
+  if (!pool) {
+    _animCheckInFlight = false;
+    return;
+  }
 
   try {
     // احضر آخر تنبيهات أنيميشن لتحديث الـ dedup set
@@ -168,7 +177,6 @@ async function checkNewAnimation(): Promise<void> {
     for (const item of results.slice(0, 10)) {
       const id = String(item.id);
       if (_notifiedAnimation.has(id)) continue;
-      _notifiedAnimation.add(id);
 
       const titleAr = item.title || item.name || "";
       const titleEn = item.original_title || item.original_name || titleAr;
@@ -183,7 +191,7 @@ async function checkNewAnimation(): Promise<void> {
         link_path: `/animation/${id}`,
         tmdb_id: id,
       });
-      await sendMobilePush({
+      const result = await sendMobilePushDetailed({
         title: `أنيميشن جديد · ${titleAr}`,
         body: item.release_date
           ? `${item.release_date.slice(0, 4)} · متاح الآن على Anime NOVA`
@@ -195,14 +203,23 @@ async function checkNewAnimation(): Promise<void> {
           title: titleAr,
           poster: poster || "",
         },
+        eventKey: `animation:${id}`,
       }).catch((pushError: any) => {
         console.warn(`[anim-scheduler] mobile push failed: ${pushError?.message || String(pushError)}`);
+        return null;
       });
-      added++;
+      if (result?.complete) {
+        _notifiedAnimation.add(id);
+        added++;
+      } else {
+        console.warn(`[anim-scheduler] delivery remains pending tmdb=${id} pending=${result?.pending ?? "error"} failed=${result?.failed ?? "error"}`);
+      }
     }
     if (added > 0) console.log(`[anim-scheduler] ✅ أُضيف ${added} إشعار أنيميشن`);
   } catch (e: any) {
     console.warn("[anim-scheduler] error:", e.message);
+  } finally {
+    _animCheckInFlight = false;
   }
 }
 

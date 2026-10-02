@@ -62,6 +62,7 @@ const { logger }             = await import("./lib/logger.js");
 const { initEmailService }   = await import("./auth/emailService.js");
 const { registerTelegramWebhook, startEpisodeScheduler } = await import("./routes/telegram.js");
 const { startAnimationNotificationScheduler } = await import("./routes/notifications.js");
+const { startPushDeliveryWorker } = await import("./routes/push.js");
 
 const app  = await createApp();
 const host = "0.0.0.0";
@@ -75,7 +76,7 @@ app.listen(port, host, (err) => {
   logger.info({ port }, "Server listening");
 
   // ── تشغيل migration بعد بدء الاستماع (لا يُعيق فتح المنفذ) ──
-  (async () => {
+  const migrationReady = (async () => {
     try {
       const { runSupabaseMigration } = await import("./lib/supabaseMigrate.js");
       await runSupabaseMigration();
@@ -83,6 +84,7 @@ app.listen(port, host, (err) => {
       console.warn("[bootstrap] ⚠️ فشل migration:", e.message);
     }
   })();
+  void migrationReady.then(() => startPushDeliveryWorker());
 
   // ── مزامنة ENV ↔ DB ثم تشغيل الـ schedulers بعد اكتمال التحميل ──────────
   // ملاحظة: الـ schedulers تبدأ داخل هذا الـ block لتضمن توفر التوكن من DB

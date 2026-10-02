@@ -19,12 +19,13 @@ import * as Sentry from "@sentry/react-native";
 import { initializeRewardedAds } from "@/utils/rewardedAd";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { TelegramAnnouncementModal } from "@/components/TelegramAnnouncementModal";
-import { AppProvider } from "@/context/AppContext";
+import { AppProvider, useApp } from "@/context/AppContext";
 import { useColors } from "@/hooks/useColors";
 import { loadRuntimeApiUrl } from "@/utils/baseUrl";
 import { installGlobalCrashHandlers } from "@/utils/crashLogger";
 import { getRuntimeIntegrity, runtimeIntegrityMessage } from "@/utils/runtimeIntegrity";
 import { isTvDevice } from "@/utils/tv";
+import { registerPushNotifications, subscribeToPushTokenChanges } from "@/utils/pushNotifications";
 
 /* Sentry: يلتقط أعطال JS *و* الأعطال الأصلية (native) — مثل كراش مشغّل الفيديو
    الذي كان يُغلق التطبيق فوراً دون أن يترك أي أثر في نظام تسجيل الأعطال القديم
@@ -232,22 +233,6 @@ function RootLayout() {
         console.warn("[rewarded-ad] startup initialization failed", error);
       });
     }
-    let stop: (() => void) | undefined;
-    let disposed = false;
-    if (!tvMode) {
-      void import("@/utils/pushNotifications")
-        .then(async ({ registerPushNotifications }) => {
-          await registerPushNotifications();
-          if (disposed) return;
-          const { startEpisodeNotificationSync } = await import("@/utils/episodeNotifications");
-          if (!disposed) stop = startEpisodeNotificationSync();
-        })
-        .catch(() => {});
-    }
-    return () => {
-      disposed = true;
-      stop?.();
-    };
   }, [tvMode]);
 
   if (brandSplashVisible) {
@@ -270,6 +255,7 @@ function RootLayout() {
       <ErrorBoundary>
         <QueryClientProvider client={queryClient}>
           <AppProvider>
+            <PushRegistrationBridge disabled={tvMode || !RUNTIME_INTEGRITY.trusted} />
             <GestureHandlerRootView style={{ flex: 1 }}>
               <RootLayoutNav />
               <TelegramAnnouncementModal
@@ -282,6 +268,39 @@ function RootLayout() {
       </ErrorBoundary>
     </SafeAreaProvider>
   );
+}
+
+function PushRegistrationBridge({ disabled }: { disabled: boolean }) {
+  const { authReady, currentUser } = useApp();
+
+  useEffect(() => {
+    if (disabled || Platform.OS === "web" || !authReady) return;
+    let disposed = false;
+    let stopEpisodeSync: (() => void) | undefined;
+    const stopTokenListener = subscribeToPushTokenChanges();
+
+    void registerPushNotifications()
+      .catch((error) => {
+        console.warn("[push] startup registration failed:", error instanceof Error ? error.message : String(error));
+        return false;
+      })
+      .then(async () => {
+        if (disposed) return;
+        const { startEpisodeNotificationSync } = await import("@/utils/episodeNotifications");
+        if (!disposed) stopEpisodeSync = startEpisodeNotificationSync();
+      })
+      .catch((error) => {
+        console.warn("[push] local notification fallback startup failed:", error instanceof Error ? error.message : String(error));
+      });
+
+    return () => {
+      disposed = true;
+      stopTokenListener();
+      stopEpisodeSync?.();
+    };
+  }, [authReady, currentUser?.id, disabled]);
+
+  return null;
 }
 
 function BrandSplash() {

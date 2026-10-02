@@ -8,7 +8,7 @@ import { Router, type Request, type Response } from "express";
 import { sbInsert, sbSelect } from "../lib/supabaseClient.js";
 import { getEnvOrDb } from "../lib/dbConfig.js";
 import { saveNotification } from "./notifications.js";
-import { sendNewEpisodePush } from "./push.js";
+import { sendNewEpisodePushDetailed } from "./push.js";
 
 const router = Router();
 
@@ -30,24 +30,27 @@ const API     = () => `https://api.telegram.org/bot${TOKEN()}`;
 
 async function sendMessage(chatId: number | string, text: string, extra: Record<string, any> = {}) {
   const tok = await getToken();
-  if (!tok) return;
+  if (!tok) return false;
   const payload = { chat_id: chatId, text, parse_mode: "HTML", ...extra };
   const response = await fetch(`https://api.telegram.org/bot${tok}/sendMessage`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
     signal: AbortSignal.timeout(8_000),
-  }).catch(e => { console.warn("[telegram] sendMessage failed:", e.message); return null; });
-  if (response && !response.ok) {
-    const body = await response.json().catch(() => ({})) as any;
-    console.warn("[telegram] sendMessage API error:", body?.description);
+  }).catch(() => { console.warn("[telegram] sendMessage request failed"); return null; });
+  if (!response) return false;
+  const body = await response.json().catch(() => ({})) as any;
+  if (!response.ok || body?.ok !== true) {
+    console.warn("[telegram] sendMessage API error:", body?.description || response.status);
+    return false;
   }
+  return true;
 }
 
 async function sendChannelPhoto(photoUrl: string, caption: string) {
   const channelId = process.env.TELEGRAM_CHANNEL_ID;
   const tok = await getToken();
-  if (!channelId || !tok) return;
+  if (!channelId || !tok) return false;
   const r = await fetch(`https://api.telegram.org/bot${tok}/sendPhoto`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -58,11 +61,14 @@ async function sendChannelPhoto(photoUrl: string, caption: string) {
       parse_mode: "HTML",
     }),
     signal: AbortSignal.timeout(12_000),
-  }).catch(e => { console.warn("[telegram] sendChannelPhoto failed:", e.message); return null; });
-  if (r && !r.ok) {
-    const body = await r.json().catch(() => ({})) as any;
-    console.warn("[telegram] sendChannelPhoto API error:", body?.description);
+  }).catch(() => { console.warn("[telegram] sendChannelPhoto request failed"); return null; });
+  if (!r) return false;
+  const body = await r.json().catch(() => ({})) as any;
+  if (!r.ok || body?.ok !== true) {
+    console.warn("[telegram] sendChannelPhoto API error:", body?.description || r.status);
+    return false;
   }
+  return true;
 }
 
 async function fetchAnimePoster(anilistId: number): Promise<string | null> {
@@ -91,6 +97,7 @@ async function fetchAnimePoster(anilistId: number): Promise<string | null> {
 /* ── تتبّع التنبيهات المُرسَلة (لمنع التكرار) ──────────────────────── */
 // المفتاح: "anilistId:ep" — يُحفظ في ذاكرة العملية
 const notifiedEpisodes = new Set<string>();
+const telegramNotifiedEpisodes = new Set<string>();
 
 /* ── وظيفة التنبيه الرئيسية (تُستدعى من anime.ts) ──────────────────── */
 
@@ -99,10 +106,9 @@ export async function notifyNewEpisode(
   title: string,
   ep: number,
   posterUrl?: string,
-) {
+): Promise<boolean> {
   const key = `${anilistId}:${ep}`;
-  if (notifiedEpisodes.has(key)) return; // لا تُرسل مرتين
-  notifiedEpisodes.add(key);
+  if (notifiedEpisodes.has(key)) return true;
 
   // Resolve the poster once and reuse it for the in-app record, remote push,
   // and Telegram. The remote push must receive the same image; otherwise the
@@ -120,17 +126,18 @@ export async function notifyNewEpisode(
     episode_num: ep,
   }).catch(() => {});
 
-  await sendNewEpisodePush({
+  const pushResult = await sendNewEpisodePushDetailed({
     animeId: anilistId,
     title,
     episode: ep,
     posterUrl: poster ?? undefined,
-  }).catch(() => {});
+  }).catch((error) => {
+    console.warn(`[push] episode delivery failed title=${title} episode=${ep}:`, error instanceof Error ? error.message : String(error));
+    return null;
+  });
 
   const channelId = process.env.TELEGRAM_CHANNEL_ID;
   const tok = await getToken();
-  if (!channelId || !tok) return;
-
   const caption =
     `🌸 <b>حلقة جديدة وصلت!</b>\n\n` +
     `✨ <b>${title}</b>\n` +
@@ -138,12 +145,20 @@ export async function notifyNewEpisode(
     `✅ <b>متاحة الآن للمشاهدة</b> على Anime NOVA 🎮\n\n` +
     `<i>شاهد بجودة عالية · بدون إعلانات 🚀</i>`;
 
-  if (poster) {
-    await sendChannelPhoto(poster, caption);
-  } else {
-    await sendMessage(channelId, caption);
+  let telegramSent = true;
+  if (channelId && tok) {
+    telegramSent = await sendTelegramEpisodeOnce(anilistId, ep, caption, poster || undefined);
   }
-  console.log(`[telegram] ✅ تنبيه الحلقة أُرسل → ${title} ح${ep}`);
+
+  if (!pushResult?.complete || !telegramSent) {
+    console.warn(`[scheduler] episode remains pending push=${pushResult?.pending ?? "error"} failed=${pushResult?.failed ?? "error"} telegram=${telegramSent} title=${title} episode=${ep}`);
+    return false;
+  }
+
+  notifiedEpisodes.add(key);
+  await markNotified(anilistId, ep);
+  console.log(`[scheduler] ✅ episode delivery complete title=${title} episode=${ep} devices=${pushResult.targets}`);
+  return true;
 }
 
 let _cachedAdminId = "";
@@ -219,6 +234,40 @@ async function markNotified(anilistId: number, ep: number): Promise<void> {
   try {
     await sbInsert("app_config", { key, value: String(Date.now()) });
   } catch { /* silent — in-memory Set is enough */ }
+}
+
+async function sendTelegramEpisodeOnce(
+  anilistId: number,
+  ep: number,
+  caption: string,
+  poster?: string,
+): Promise<boolean> {
+  const channelId = process.env.TELEGRAM_CHANNEL_ID;
+  if (!channelId || !(await getToken())) return true;
+
+  const memoryKey = `${anilistId}:${ep}`;
+  const dbKey = `tg_channel:${anilistId}:${ep}`;
+  if (telegramNotifiedEpisodes.has(memoryKey) || await wasNotified(anilistId, ep)) return true;
+  const existing = await sbSelect("app_config", { key: `eq.${dbKey}` }, { limit: 1 });
+  if (existing.length) {
+    telegramNotifiedEpisodes.add(memoryKey);
+    return true;
+  }
+
+  // A broken image URL should not prevent the text announcement from reaching
+  // Telegram, just as it must not block the remote mobile push.
+  let sent = poster ? await sendChannelPhoto(poster, caption) : false;
+  if (!sent) sent = await sendMessage(channelId, caption);
+  if (!sent) return false;
+
+  telegramNotifiedEpisodes.add(memoryKey);
+  const saved = await sbInsert("app_config", { key: dbKey, value: String(Date.now()) });
+  if (!saved) {
+    const confirmed = await sbSelect("app_config", { key: `eq.${dbKey}` }, { limit: 1 });
+    if (!confirmed.length) console.warn(`[telegram] episode channel marker database write failed episode=${ep}`);
+  }
+  console.log(`[telegram] ✅ تنبيه الحلقة أُرسل → ${anilistId} ح${ep}`);
+  return true;
 }
 
 /* ── فحص توفر الحلقة في AnimeWitcher ───────────────────────────────────── */
@@ -366,8 +415,7 @@ async function pollAnimeSlayerDirect(): Promise<void> {
       console.log(`[scheduler] 🎯 AnimeSlayer جديد: ${name} ح${ep}`);
 
       try {
-        await notifyNewEpisode(animeId, name, ep, cover || undefined);
-        sent++;
+        if (await notifyNewEpisode(animeId, name, ep, cover || undefined)) sent++;
       } catch (e: any) {
         console.warn(`[scheduler] notify error (${name}): ${e.message}`);
       }
@@ -388,7 +436,17 @@ async function pollAnimeSlayerDirect(): Promise<void> {
 
 /* ── الدورة الواحدة ────────────────────────────────────────────────────── */
 
-async function runSchedulerCycle(): Promise<void> {
+let schedulerCyclePromise: Promise<void> | null = null;
+
+function runSchedulerCycle(): Promise<void> {
+  if (schedulerCyclePromise) return schedulerCyclePromise;
+  schedulerCyclePromise = runSchedulerCycleInner().finally(() => {
+    schedulerCyclePromise = null;
+  });
+  return schedulerCyclePromise;
+}
+
+async function runSchedulerCycleInner(): Promise<void> {
   const tok = await getToken();
   const telegramReady = Boolean(tok && process.env.TELEGRAM_CHANNEL_ID);
   const pushDevices = await sbSelect("mobile_push_tokens", { disabled_at: "is.null" }, { limit: 1 });
@@ -462,21 +520,29 @@ async function runSchedulerCycle(): Promise<void> {
       episode_num: ep,
     }).catch(() => {});
 
-    await sendNewEpisodePush({
+    const pushResult = await sendNewEpisodePushDetailed({
       animeId: anilistId,
       title,
       episode: ep,
       posterUrl: poster ?? undefined,
     }).catch((pushError: any) => {
       console.warn(`[scheduler] mobile push failed: ${pushError?.message || String(pushError)}`);
+      return null;
     });
 
-    if (poster) {
-      await sendChannelPhoto(poster, caption);
-    } else {
-      await sendMessage(process.env.TELEGRAM_CHANNEL_ID!, caption);
+    const channelId = process.env.TELEGRAM_CHANNEL_ID;
+    const tokForChannel = await getToken();
+    const telegramSent = channelId && tokForChannel
+      ? await sendTelegramEpisodeOnce(anilistId, ep, caption, poster ?? undefined)
+      : true;
+
+    if (!pushResult?.complete || !telegramSent) {
+      console.warn(`[scheduler] episode remains pending push=${pushResult?.pending ?? "error"} failed=${pushResult?.failed ?? "error"} telegram=${telegramSent} title=${title} episode=${ep}`);
+      if (sent < schedules.length) await new Promise(r => setTimeout(r, 1_500));
+      continue;
     }
 
+    notifiedEpisodes.add(`${anilistId}:${ep}`);
     await markNotified(anilistId, ep);
     sent++;
     schedulerSentToday++;

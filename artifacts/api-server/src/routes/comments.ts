@@ -74,6 +74,7 @@ async function notifyCommentTargets(input: {
   await Promise.all([...targetIds].map((userId) =>
     sendMobilePush({
       userId,
+      eventKey: `comment:${String(input.comment.id)}:${userId}`,
       title: parentId ? "رد جديد على تعليقك" : "تم ذكرك في تعليق",
       body: `${input.actorName || "مستخدم"} أرسل لك إشعارًا في التعليقات`,
       data: {
