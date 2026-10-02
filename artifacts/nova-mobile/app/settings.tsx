@@ -14,6 +14,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { isTvDevice } from "@/utils/tv";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useColors } from "@/hooks/useColors";
+import paletteColors from "@/constants/colors";
 import { useApp } from "@/context/AppContext";
 import type { MobileUser } from "@/context/AppContext";
 import { getBaseUrl } from "@/utils/baseUrl";
@@ -22,8 +23,8 @@ import { CrashEntry, getCrashLog } from "@/utils/crashLogger";
 import { TvPressable } from "@/utils/tv";
 
 const THEMES: { label: string; value: string; dot: string; desc: string }[] = [
-  { label: "أبيض", value: "white", dot: "#F3F4F6", desc: "خلفيات فاتحة ونصوص داكنة" },
-  { label: "أسود", value: "black", dot: "#090A0C", desc: "خلفيات داكنة ونصوص فاتحة" },
+  { label: "أبيض", value: "white", dot: paletteColors.white.background, desc: "خلفيات فاتحة ونصوص داكنة" },
+  { label: "أسود", value: "black", dot: paletteColors.black.background, desc: "خلفيات داكنة ونصوص فاتحة" },
 ];
 
 const REPORT_TYPES = [

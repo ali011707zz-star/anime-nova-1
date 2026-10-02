@@ -20,6 +20,10 @@ export type Palette = {
   playerControl: string;
   playerControlBorder: string;
   playerControlIcon: string;
+  playerText: string;
+  playerSecondaryText: string;
+  playerTopGradient: [string, string];
+  playerBottomGradient: [string, string, string];
   playerTrack: string;
   playerBuffer: string;
 
@@ -60,8 +64,12 @@ const white: Palette = {
   playerControl: "rgba(255,255,255,0.92)",
   playerControlBorder: "rgba(20,22,26,0.16)",
   playerControlIcon: "#17191F",
-  playerTrack: "rgba(255,255,255,0.42)",
-  playerBuffer: "rgba(255,255,255,0.72)",
+  playerText: "#17191F",
+  playerSecondaryText: "#4D535E",
+  playerTopGradient: ["rgba(255,255,255,0.94)", "rgba(255,255,255,0)"],
+  playerBottomGradient: ["rgba(255,255,255,0)", "rgba(255,255,255,0.66)", "rgba(255,255,255,0.94)"],
+  playerTrack: "rgba(20,22,26,0.22)",
+  playerBuffer: "rgba(20,22,26,0.48)",
 
   text: "#17191F",
   tint: "#343943",
@@ -99,6 +107,10 @@ const black: Palette = {
   playerControl: "rgba(25,27,31,0.88)",
   playerControlBorder: "rgba(255,255,255,0.18)",
   playerControlIcon: "#F3F4F6",
+  playerText: "#F3F4F6",
+  playerSecondaryText: "rgba(255,255,255,0.70)",
+  playerTopGradient: ["rgba(0,0,0,0.82)", "rgba(0,0,0,0)"],
+  playerBottomGradient: ["rgba(0,0,0,0)", "rgba(0,0,0,0.60)", "rgba(0,0,0,0.96)"],
   playerTrack: "rgba(255,255,255,0.24)",
   playerBuffer: "rgba(255,255,255,0.54)",
 

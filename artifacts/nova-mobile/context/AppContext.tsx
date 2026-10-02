@@ -195,7 +195,7 @@ function mapServerFavorite(row: any): FavoriteAnime | null {
 }
 
 export function AppProvider({ children }: { children: React.ReactNode }) {
-  const [theme, setThemeState] = useState<Theme>("black");
+  const [theme, setThemeState] = useState<Theme>("white");
   const [remoteConfig, setRemoteConfig] = useState<RemoteConfig>(DEFAULT_CONFIG);
   const [watchHistory, setWatchHistory] = useState<WatchProgress[]>([]);
   const [favorites, setFavorites] = useState<FavoriteAnime[]>([]);
