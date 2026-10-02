@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from "react";
+import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import {
   View, Text, Pressable, Image, ScrollView,
   ActivityIndicator, StyleSheet, Platform, Modal,
@@ -17,6 +17,8 @@ import { secureFetch } from "@/utils/secureApi";
 import { getYoutubeEmbedUrl, getYoutubeReferer } from "@/utils/youtube";
 import { isTvDevice, tvFocusStyle } from "@/utils/tv";
 import { useTvFocusMemory } from "@/utils/tvFocus";
+import { useColors } from "@/hooks/useColors";
+import type { ThemePalette } from "@/constants/colors";
 
 const { width: W } = Dimensions.get("window");
 
@@ -132,7 +134,14 @@ function getAgeRating(genres: string[], isAdult?: boolean) {
 }
 
 /* ── Sub-components ── */
+function useDetailStyles() {
+  const colors = useColors();
+  const d = useMemo(() => createDetailStyles(colors), [colors]);
+  return { colors, d };
+}
+
 function SectionHeader({ title, tvMode = false }: { title: string; tvMode?: boolean }) {
+  const { d } = useDetailStyles();
   return (
     <View style={[d.sectionHeader, tvMode && d.tvSectionHeader]}>
       <View style={[d.sectionBar, tvMode && d.tvSectionBar]} />
@@ -142,6 +151,7 @@ function SectionHeader({ title, tvMode = false }: { title: string; tvMode?: bool
 }
 
 function MetaRow({ label, value, badge }: { label: string; value: string; badge?: boolean }) {
+  const { d } = useDetailStyles();
   return (
     <View style={d.metaRow}>
       <Text style={d.metaLabel}>{label}</Text>
@@ -161,6 +171,7 @@ function CharCard({ e, animeId, animeTitle, favIds, onToggle }: {
   favIds: Set<number>;
   onToggle: (c: { id: number; name: string; image?: string; animeId: number; animeTitle: string }) => void;
 }) {
+  const { d } = useDetailStyles();
   const n = e.node;
   const isFav = favIds.has(n.id);
   return (
@@ -182,6 +193,7 @@ function CharCard({ e, animeId, animeTitle, favIds, onToggle }: {
 }
 
 export default function AnimeDetailScreen() {
+  const { colors, d } = useDetailStyles();
   const { id, src, title, english, cover, ep } = useLocalSearchParams<{
     id: string;
     src?: string;
@@ -437,12 +449,12 @@ export default function AnimeDetailScreen() {
         hasTVPreferredFocus={tvMode}
         onFocus={() => rememberDetailFocus("back")}
         style={({ focused }) => [
-          { position: "absolute", right: 14, top: 14, width: 36, height: 36, backgroundColor: "rgba(0,0,0,0.5)", borderRadius: 14, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: "rgba(255,255,255,0.1)", zIndex: 10 },
+          { position: "absolute", right: 14, top: 14, width: 36, height: 36, backgroundColor: colors.surfaceElevated, borderRadius: 14, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: colors.border, zIndex: 10 },
           tvMode && tvFocusStyle(focused),
         ]}>
-        <Ionicons name="chevron-back" size={20} color="#fff" />
+        <Ionicons name="chevron-back" size={20} color={colors.textPrimary} />
       </Pressable>
-      <View style={d.center}><ActivityIndicator color="#8B5CF6" size="large" /></View>
+      <View style={d.center}><ActivityIndicator color={colors.accent} size="large" /></View>
     </View>
   );
   if (!anime) return (
@@ -452,27 +464,27 @@ export default function AnimeDetailScreen() {
         hasTVPreferredFocus={tvMode}
         onFocus={() => rememberDetailFocus("back")}
         style={({ focused }) => [
-          { position: "absolute", right: 14, top: 14, width: 36, height: 36, backgroundColor: "rgba(0,0,0,0.5)", borderRadius: 14, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: "rgba(255,255,255,0.1)", zIndex: 10 },
+          { position: "absolute", right: 14, top: 14, width: 36, height: 36, backgroundColor: colors.surfaceElevated, borderRadius: 14, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: colors.border, zIndex: 10 },
           tvMode && tvFocusStyle(focused),
         ]}>
-        <Ionicons name="chevron-back" size={20} color="#fff" />
+        <Ionicons name="chevron-back" size={20} color={colors.textPrimary} />
       </Pressable>
       <View style={[d.center, { paddingHorizontal: 32, gap: 14 }]}>
-        <Ionicons name="cloud-offline-outline" size={44} color="rgba(255,255,255,0.3)" />
-        <Text style={{ color: "#fff", fontFamily: "Cairo_700Bold", fontSize: 15, textAlign: "center" }}>
+        <Ionicons name="cloud-offline-outline" size={44} color={colors.textMuted} />
+        <Text style={{ color: colors.textPrimary, fontFamily: "Cairo_700Bold", fontSize: 15, textAlign: "center" }}>
           تعذّر تحميل بيانات الأنمي
         </Text>
-        <Text style={{ color: "rgba(255,255,255,0.4)", fontFamily: "Cairo_400Regular", fontSize: 12, textAlign: "center" }}>
+        <Text style={{ color: colors.textSecondary, fontFamily: "Cairo_400Regular", fontSize: 12, textAlign: "center" }}>
           يبدو أن هناك مشكلة في الاتصال بمصدر البيانات، حاول مرة أخرى
         </Text>
         <Pressable onPress={() => setRetryTick(t => t + 1)}
           focusable={tvMode}
           style={({ focused }) => [
-            { marginTop: 6, backgroundColor: "#7C3AED", paddingHorizontal: 24, paddingVertical: 12, borderRadius: 14, flexDirection: "row", alignItems: "center", gap: 8 },
+            { marginTop: 6, backgroundColor: colors.primary, paddingHorizontal: 24, paddingVertical: 12, borderRadius: 14, flexDirection: "row", alignItems: "center", gap: 8 },
             tvMode && tvFocusStyle(focused),
           ]}>
-          <Ionicons name="refresh" size={16} color="#fff" />
-          <Text style={{ color: "#fff", fontFamily: "Cairo_700Bold", fontSize: 13 }}>إعادة المحاولة</Text>
+          <Ionicons name="refresh" size={16} color={colors.primaryForeground} />
+          <Text style={{ color: colors.primaryForeground, fontFamily: "Cairo_700Bold", fontSize: 13 }}>إعادة المحاولة</Text>
         </Pressable>
       </View>
     </View>
@@ -505,7 +517,7 @@ export default function AnimeDetailScreen() {
             />
           ) : null}
           <LinearGradient
-            colors={["rgba(9,9,11,0.2)", "rgba(9,9,11,0.6)", "#09090B"]}
+            colors={["rgba(9,9,11,0.05)", "rgba(9,9,11,0.46)", colors.background]}
             style={StyleSheet.absoluteFill}
           />
           {/* Back */}
@@ -553,8 +565,8 @@ export default function AnimeDetailScreen() {
               ) : null}
               {anime.episodes ? (
                 <View style={d.statItem}>
-                  <Ionicons name="play-circle" size={11} color="rgba(255,255,255,0.4)" />
-                  <Text style={[d.statText, { color: "rgba(255,255,255,0.55)" }]}>{anime.episodes} حلقة</Text>
+                  <Ionicons name="play-circle" size={11} color={colors.textMuted} />
+                  <Text style={[d.statText, { color: colors.textSecondary }]}>{anime.episodes} حلقة</Text>
                 </View>
               ) : null}
             </View>
@@ -564,7 +576,7 @@ export default function AnimeDetailScreen() {
         {/* ── Next episode countdown ── */}
         {nextEp && countdown && countdown > 0 ? (
           <View style={d.countdownBox}>
-            <Ionicons name="time" size={14} color="#a78bfa" />
+            <Ionicons name="time" size={14} color={colors.accent} />
             <Text style={[d.countdownText, tvMode && d.tvBodyText]}>
               الحلقة {nextEp.episode} تُبث بعد {fmtCountdown(countdown)}
             </Text>
@@ -590,7 +602,7 @@ export default function AnimeDetailScreen() {
             style={({ focused }) => [d.watchBtn, tvMode && d.tvWatchBtn, { flex: 1 }, tvMode && tvFocusStyle(focused)]}
           >
             <View style={[d.watchBtnIcon, tvMode && d.tvWatchBtnIcon]}>
-              <Ionicons name="play" size={tvMode ? 25 : 16} color="#fff" />
+              <Ionicons name="play" size={tvMode ? 25 : 16} color={colors.primaryForeground} />
             </View>
             <Text style={[d.watchBtnText, tvMode && d.tvButtonText]}>مشاهدة الآن</Text>
           </Pressable>
@@ -611,20 +623,20 @@ export default function AnimeDetailScreen() {
         {/* ── 4-col action grid ── */}
         <View style={[d.actionGrid, tvMode && d.tvActionGrid]}>
           {[
-            { icon: "chatbubble",  label: "التعليقات", active: false,        activeColor: "#8B5CF6", onPress: () => router.push(`/comments?animeId=${anime?.id}&title=${encodeURIComponent(anime?.title?.romaji || "")}` as any) },
-            { icon: "heart",       label: "المفضلة",   active: isFav,        activeColor: "#8B5CF6", onPress: handleFavorite },
+            { icon: "chatbubble",  label: "التعليقات", active: false,        activeColor: colors.accent, onPress: () => router.push(`/comments?animeId=${anime?.id}&title=${encodeURIComponent(anime?.title?.romaji || "")}` as any) },
+            { icon: "heart",       label: "المفضلة",   active: isFav,        activeColor: colors.accent, onPress: handleFavorite },
             { icon: "star",        label: "تقييمي",    active: myRating > 0, activeColor: "#FBBF24", onPress: () => setShowRating(true) },
           ].map(({ icon, label, active, activeColor, onPress }) => (
              <Pressable key={label} onPress={onPress} focusable={tvMode}
                onFocus={() => rememberDetailFocus(label)}
                style={({ focused }) => [d.actionBtn, tvMode && d.tvActionBtn, active && { backgroundColor: activeColor + "18", borderColor: activeColor + "40" }, tvMode && tvFocusStyle(focused)]}>
-              <Ionicons name={icon as any} size={tvMode ? 32 : 16} color={active ? activeColor : "rgba(255,255,255,0.4)"} />
+              <Ionicons name={icon as any} size={tvMode ? 32 : 16} color={active ? activeColor : colors.textMuted} />
               <Text style={[d.actionBtnLabel, tvMode && d.tvActionBtnLabel, active && { color: activeColor }]}>{label}</Text>
               {label === "تقييمي" && myRating > 0 ? (
                 <Text style={[d.actionBtnSub, { color: "#FBBF24" }]}>{myRating}/10</Text>
               ) : null}
               {label === "المفضلة" && isFav ? (
-                <Text style={[d.actionBtnSub, { color: "#8B5CF6" }]}>مضاف</Text>
+                <Text style={[d.actionBtnSub, { color: colors.accent }]}>مضاف</Text>
               ) : null}
             </Pressable>
           ))}
@@ -650,13 +662,13 @@ export default function AnimeDetailScreen() {
                 </View>
               ) : null}
               {allTimeRank ? (
-                <View style={[d.malStat, { borderLeftWidth: 1, borderLeftColor: "rgba(255,255,255,0.08)" }]}>
+                <View style={[d.malStat, { borderLeftWidth: 1, borderLeftColor: colors.border }]}>
                   <Text style={d.malStatVal}>#{allTimeRank}</Text>
                   <Text style={d.malStatSub}>الترتيب</Text>
                 </View>
               ) : null}
               {(anime.favourites || 0) > 0 ? (
-                <View style={[d.malStat, { borderLeftWidth: 1, borderLeftColor: "rgba(255,255,255,0.08)" }]}>
+                <View style={[d.malStat, { borderLeftWidth: 1, borderLeftColor: colors.border }]}>
                   <Text style={d.malStatVal}>{anime.favourites.toLocaleString()}</Text>
                   <Text style={d.malStatSub}>المفضلة</Text>
                 </View>
@@ -679,7 +691,7 @@ export default function AnimeDetailScreen() {
                     onFocus={() => rememberDetailFocus("read-more")}
                     style={({ focused }) => [d.readMoreBtn, tvMode && d.tvReadMoreBtn, tvMode && tvFocusStyle(focused)]}>
                   <Text style={[d.readMoreText, tvMode && d.tvReadMoreText]}>{showFull ? "عرض أقل" : "عرض المزيد"}</Text>
-                  <Ionicons name={showFull ? "chevron-up" : "chevron-down"} size={tvMode ? 22 : 13} color="#8B5CF6" />
+                  <Ionicons name={showFull ? "chevron-up" : "chevron-down"} size={tvMode ? 22 : 13} color={colors.accent} />
                 </Pressable>
               )}
             </View>
@@ -927,7 +939,7 @@ export default function AnimeDetailScreen() {
             </View>
             {myRating > 0 && (
               <Pressable onPress={() => submitRating(0)} focusable={tvMode} style={({ focused }) => [{ marginTop: 10 }, tvMode && tvFocusStyle(focused)]}>
-                <Text style={{ color: "rgba(239,68,68,0.6)", fontSize: 11, fontFamily: "Cairo_700Bold", textAlign: "center" }}>
+                <Text style={{ color: colors.destructive, fontSize: 11, fontFamily: "Cairo_700Bold", textAlign: "center" }}>
                   حذف التقييم
                 </Text>
               </Pressable>
@@ -939,70 +951,71 @@ export default function AnimeDetailScreen() {
   );
 }
 
-const d = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#09090B" },
+function createDetailStyles(colors: ThemePalette) {
+  return StyleSheet.create({
+  container: { flex: 1, backgroundColor: colors.background },
   center: { flex: 1, alignItems: "center", justifyContent: "center" },
   hero: { height: 240, justifyContent: "flex-end", overflow: "hidden" },
   backBtn: { position: "absolute", right: 14, top: 14, width: 36, height: 36, backgroundColor: "rgba(0,0,0,0.5)", borderRadius: 14, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: "rgba(255,255,255,0.1)" },
   favBtn: { position: "absolute", right: 14, top: 14, width: 36, height: 36, backgroundColor: "rgba(0,0,0,0.5)", borderRadius: 14, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: "rgba(255,255,255,0.1)" },
   infoRow: { flexDirection: "row", paddingHorizontal: 16, marginTop: -52, gap: 14, alignItems: "flex-end" },
-  cover: { width: 100, height: 145, borderRadius: 16, borderWidth: 2, borderColor: "#09090B" },
+  cover: { width: 100, height: 145, borderRadius: 16, borderWidth: 2, borderColor: colors.background },
   infoText: { flex: 1, paddingBottom: 8, gap: 6 },
-  titleMain: { fontSize: 16, fontFamily: "Cairo_800ExtraBold", color: "#fff", lineHeight: 22 },
-  titleNative: { fontSize: 11, color: "rgba(255,255,255,0.35)", fontFamily: "Cairo_400Regular" },
+  titleMain: { fontSize: 16, fontFamily: "Cairo_800ExtraBold", color: colors.textPrimary, lineHeight: 22 },
+  titleNative: { fontSize: 11, color: colors.textSecondary, fontFamily: "Cairo_400Regular" },
   badgeRow: { flexDirection: "row", gap: 6, flexWrap: "wrap" },
   badge: { borderRadius: 8, paddingHorizontal: 8, paddingVertical: 3, borderWidth: 1 },
-  badgePrimary: { backgroundColor: "rgba(139,92,246,0.18)", borderColor: "rgba(139,92,246,0.35)" },
-  badgePrimaryText: { fontSize: 10, fontFamily: "Cairo_700Bold", color: "#c4b5fd" },
-  badgeDefault: { backgroundColor: "rgba(255,255,255,0.06)", borderColor: "rgba(255,255,255,0.1)" },
-  badgeDefaultText: { fontSize: 10, fontFamily: "Cairo_700Bold", color: "rgba(255,255,255,0.55)" },
+  badgePrimary: { backgroundColor: colors.accentSurface, borderColor: colors.accentBorder },
+  badgePrimaryText: { fontSize: 10, fontFamily: "Cairo_700Bold", color: colors.accent },
+  badgeDefault: { backgroundColor: colors.surfaceElevated, borderColor: colors.border },
+  badgeDefaultText: { fontSize: 10, fontFamily: "Cairo_700Bold", color: colors.textSecondary },
   statsRow: { flexDirection: "row", gap: 10 },
   statItem: { flexDirection: "row", alignItems: "center", gap: 4 },
-  statText: { fontSize: 12, fontFamily: "Cairo_700Bold", color: "#fff" },
+  statText: { fontSize: 12, fontFamily: "Cairo_700Bold", color: colors.textPrimary },
   countdownBox: {
     flexDirection: "row", alignItems: "center", gap: 8,
     marginHorizontal: 16, marginTop: 12, paddingHorizontal: 12, paddingVertical: 10,
-    borderRadius: 12, backgroundColor: "rgba(139,92,246,0.08)",
-    borderWidth: 1, borderColor: "rgba(139,92,246,0.2)",
+    borderRadius: 12, backgroundColor: colors.accentSurface,
+    borderWidth: 1, borderColor: colors.accentBorder,
   },
-  countdownText: { fontSize: 12, fontFamily: "Cairo_700Bold", color: "#a78bfa", flex: 1 },
-  watchBtn: { height: 52, borderRadius: 18, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 10, backgroundColor: "#7C3AED" },
-  epListBtn: { height: 52, borderRadius: 18, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, backgroundColor: "rgba(139,92,246,0.15)", borderWidth: 1.5, borderColor: "rgba(139,92,246,0.40)", paddingHorizontal: 18 },
-  epListBtnText: { fontSize: 13, fontFamily: "Cairo_700Bold", color: "#c4b5fd" },
+  countdownText: { fontSize: 12, fontFamily: "Cairo_700Bold", color: colors.accent, flex: 1 },
+  watchBtn: { height: 52, borderRadius: 18, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 10, backgroundColor: colors.primary },
+  epListBtn: { height: 52, borderRadius: 18, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, backgroundColor: colors.accentSurface, borderWidth: 1.5, borderColor: colors.accentBorder, paddingHorizontal: 18 },
+  epListBtnText: { fontSize: 13, fontFamily: "Cairo_700Bold", color: colors.accent },
   watchBtnIcon: { width: 32, height: 32, backgroundColor: "rgba(255,255,255,0.2)", borderRadius: 12, alignItems: "center", justifyContent: "center" },
-  watchBtnText: { fontSize: 15, fontFamily: "Cairo_800ExtraBold", color: "#fff" },
-  warnBox: { margin: 16, borderRadius: 16, backgroundColor: "rgba(239,68,68,0.1)", borderWidth: 1, borderColor: "rgba(239,68,68,0.35)", overflow: "hidden" },
-  warnText: { fontSize: 11, fontFamily: "Cairo_700Bold", color: "#fca5a5", padding: 14, lineHeight: 18 },
-  warnBtn: { borderTopWidth: 1, borderTopColor: "rgba(239,68,68,0.2)", paddingVertical: 10, alignItems: "center", backgroundColor: "rgba(239,68,68,0.07)" },
-  warnBtnText: { fontSize: 11, fontFamily: "Cairo_700Bold", color: "rgba(252,165,165,0.7)" },
+  watchBtnText: { fontSize: 15, fontFamily: "Cairo_800ExtraBold", color: colors.primaryForeground },
+  warnBox: { margin: 16, borderRadius: 16, backgroundColor: colors.destructiveSurface, borderWidth: 1, borderColor: colors.destructiveBorder, overflow: "hidden" },
+  warnText: { fontSize: 11, fontFamily: "Cairo_700Bold", color: colors.destructive, padding: 14, lineHeight: 18 },
+  warnBtn: { borderTopWidth: 1, borderTopColor: colors.destructiveBorder, paddingVertical: 10, alignItems: "center", backgroundColor: colors.destructiveSurface },
+  warnBtnText: { fontSize: 11, fontFamily: "Cairo_700Bold", color: colors.destructive },
   actionGrid: { flexDirection: "row", gap: 8, paddingHorizontal: 16, marginTop: 12 },
-  actionBtn: { flex: 1, alignItems: "center", gap: 4, paddingVertical: 12, borderRadius: 18, backgroundColor: "rgba(255,255,255,0.04)", borderWidth: 1, borderColor: "rgba(255,255,255,0.08)" },
-  actionBtnLabel: { fontSize: 9, fontFamily: "Cairo_800ExtraBold", color: "rgba(255,255,255,0.45)" },
+  actionBtn: { flex: 1, alignItems: "center", gap: 4, paddingVertical: 12, borderRadius: 18, backgroundColor: colors.card, borderWidth: 1, borderColor: colors.border },
+  actionBtnLabel: { fontSize: 9, fontFamily: "Cairo_800ExtraBold", color: colors.textSecondary },
   actionBtnSub: { fontSize: 9, fontFamily: "Cairo_700Bold", opacity: 0.7 },
-  malBox: { borderRadius: 18, overflow: "hidden", borderWidth: 1, borderColor: "rgba(59,130,246,0.25)", backgroundColor: "#1a2d4a", marginTop: 14 },
-  malHeader: { flexDirection: "row", justifyContent: "center", alignItems: "center", gap: 8, paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: "rgba(255,255,255,0.1)" },
-  malTitle: { fontSize: 11, fontFamily: "Cairo_800ExtraBold", color: "rgba(147,197,253,0.8)" },
-  malId: { fontSize: 9, color: "rgba(147,197,253,0.4)", fontFamily: "Cairo_400Regular" },
+  malBox: { borderRadius: 18, overflow: "hidden", borderWidth: 1, borderColor: colors.border, backgroundColor: colors.card, marginTop: 14 },
+  malHeader: { flexDirection: "row", justifyContent: "center", alignItems: "center", gap: 8, paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: colors.border },
+  malTitle: { fontSize: 11, fontFamily: "Cairo_800ExtraBold", color: colors.accent },
+  malId: { fontSize: 9, color: colors.textMuted, fontFamily: "Cairo_400Regular" },
   malStats: { flexDirection: "row" },
   malStat: { flex: 1, alignItems: "center", paddingVertical: 12 },
-  malStatVal: { fontSize: 16, fontFamily: "Cairo_800ExtraBold", color: "#fff" },
-  malStatSub: { fontSize: 9, color: "rgba(255,255,255,0.35)", fontFamily: "Cairo_400Regular", marginTop: 2 },
+  malStatVal: { fontSize: 16, fontFamily: "Cairo_800ExtraBold", color: colors.textPrimary },
+  malStatSub: { fontSize: 9, color: colors.textMuted, fontFamily: "Cairo_400Regular", marginTop: 2 },
   section: { paddingHorizontal: 16, marginTop: 18 },
   sectionHeader: { flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 10 },
-  sectionBar: { width: 3, height: 16, backgroundColor: "#8B5CF6", borderRadius: 2 },
-  sectionTitle: { fontSize: 14, fontFamily: "Cairo_800ExtraBold", color: "#fff" },
-  descBox: { backgroundColor: "rgba(255,255,255,0.03)", borderRadius: 14, padding: 14, borderWidth: 1, borderColor: "rgba(255,255,255,0.06)" },
-  descText: { fontSize: 13, color: "rgba(255,255,255,0.75)", lineHeight: 22, fontFamily: "Cairo_400Regular", textAlign: "right" },
+  sectionBar: { width: 3, height: 16, backgroundColor: colors.accent, borderRadius: 2 },
+  sectionTitle: { fontSize: 14, fontFamily: "Cairo_800ExtraBold", color: colors.textPrimary },
+  descBox: { backgroundColor: colors.card, borderRadius: 14, padding: 14, borderWidth: 1, borderColor: colors.border },
+  descText: { fontSize: 13, color: colors.textPrimary, lineHeight: 22, fontFamily: "Cairo_400Regular", textAlign: "right" },
   readMoreBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 4, marginTop: 10 },
-  readMoreText: { fontSize: 12, color: "#8B5CF6", fontFamily: "Cairo_700Bold" },
-  genreChip: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20, backgroundColor: "rgba(139,92,246,0.12)", borderWidth: 1, borderColor: "rgba(139,92,246,0.25)" },
-  genreChipText: { fontSize: 11, fontFamily: "Cairo_700Bold", color: "#c4b5fd" },
-  metaBox: { backgroundColor: "rgba(255,255,255,0.03)", borderRadius: 14, borderWidth: 1, borderColor: "rgba(255,255,255,0.06)", overflow: "hidden" },
-  metaRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingHorizontal: 14, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: "rgba(255,255,255,0.04)" },
-  metaLabel: { fontSize: 11, color: "rgba(255,255,255,0.35)", fontFamily: "Cairo_400Regular" },
-  metaValue: { fontSize: 11, color: "rgba(255,255,255,0.8)", fontFamily: "Cairo_700Bold", textAlign: "right", flex: 1, marginRight: 8 },
-  metaBadge: { backgroundColor: "rgba(139,92,246,0.15)", borderRadius: 8, paddingHorizontal: 8, paddingVertical: 2 },
-  metaBadgeText: { fontSize: 10, fontFamily: "Cairo_700Bold", color: "#c4b5fd" },
+  readMoreText: { fontSize: 12, color: colors.accent, fontFamily: "Cairo_700Bold" },
+  genreChip: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20, backgroundColor: colors.accentSurface, borderWidth: 1, borderColor: colors.accentBorder },
+  genreChipText: { fontSize: 11, fontFamily: "Cairo_700Bold", color: colors.accent },
+  metaBox: { backgroundColor: colors.card, borderRadius: 14, borderWidth: 1, borderColor: colors.border, overflow: "hidden" },
+  metaRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingHorizontal: 14, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: colors.border },
+  metaLabel: { fontSize: 11, color: colors.textMuted, fontFamily: "Cairo_400Regular" },
+  metaValue: { fontSize: 11, color: colors.textPrimary, fontFamily: "Cairo_700Bold", textAlign: "right", flex: 1, marginRight: 8 },
+  metaBadge: { backgroundColor: colors.accentSurface, borderRadius: 8, paddingHorizontal: 8, paddingVertical: 2 },
+  metaBadgeText: { fontSize: 10, fontFamily: "Cairo_700Bold", color: colors.accent },
   trailerBtn: { height: 180, borderRadius: 16, overflow: "hidden", position: "relative", backgroundColor: "#111" },
   trailerImg: { width: "100%", height: "100%", resizeMode: "cover" },
   trailerPlayBtn: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, alignItems: "center", justifyContent: "center" },
@@ -1010,24 +1023,24 @@ const d = StyleSheet.create({
   trailerBottom: { position: "absolute", bottom: 0, left: 0, right: 0, padding: 12 },
   trailerLabel: { fontSize: 14, fontFamily: "Cairo_800ExtraBold", color: "#fff" },
   trailerSub: { fontSize: 10, color: "rgba(255,255,255,0.55)", fontFamily: "Cairo_400Regular", marginTop: 2 },
-  trailerSheetHeader: { flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 14, paddingVertical: 10, backgroundColor: "#111" },
-  trailerModalTitle: { fontSize: 14, fontFamily: "Cairo_800ExtraBold", color: "#fff" },
-  trailerCloseBtn: { width: 36, height: 36, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(255,255,255,0.08)", borderRadius: 12 },
-  tabNav: { flexDirection: "row", borderBottomWidth: 1, borderBottomColor: "rgba(255,255,255,0.07)", marginBottom: 14 },
+  trailerSheetHeader: { flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 14, paddingVertical: 10, backgroundColor: colors.surface },
+  trailerModalTitle: { fontSize: 14, fontFamily: "Cairo_800ExtraBold", color: colors.textPrimary },
+  trailerCloseBtn: { width: 36, height: 36, alignItems: "center", justifyContent: "center", backgroundColor: colors.surfaceElevated, borderRadius: 12 },
+  tabNav: { flexDirection: "row", borderBottomWidth: 1, borderBottomColor: colors.border, marginBottom: 14 },
   tabBtn: { flex: 1, alignItems: "center", paddingBottom: 10, position: "relative" },
-  tabBtnText: { fontSize: 13, fontFamily: "Cairo_700Bold", color: "rgba(255,255,255,0.35)" },
-  tabBtnTextActive: { color: "#fff" },
-  tabIndicator: { position: "absolute", bottom: 0, left: "20%", right: "20%", height: 2, backgroundColor: "#8B5CF6", borderRadius: 1 },
-  tabSubTitle: { fontSize: 10, color: "rgba(255,255,255,0.3)", fontFamily: "Cairo_700Bold", marginBottom: 10, textAlign: "right" },
+  tabBtnText: { fontSize: 13, fontFamily: "Cairo_700Bold", color: colors.textMuted },
+  tabBtnTextActive: { color: colors.textPrimary },
+  tabIndicator: { position: "absolute", bottom: 0, left: "20%", right: "20%", height: 2, backgroundColor: colors.accent, borderRadius: 1 },
+  tabSubTitle: { fontSize: 10, color: colors.textSecondary, fontFamily: "Cairo_700Bold", marginBottom: 10, textAlign: "right" },
   charGrid: { flexDirection: "row", flexWrap: "wrap", gap: 10 },
   charCard: { width: (W - 32 - 60) / 5, alignItems: "center", gap: 4 },
-  charImgWrap: { width: (W - 32 - 60) / 5, aspectRatio: 0.7, borderRadius: 10, overflow: "hidden", borderWidth: 1, borderColor: "rgba(255,255,255,0.08)", backgroundColor: "#1C1C22", position: "relative" },
-  charImgMain: { borderColor: "rgba(139,92,246,0.4)", borderWidth: 2 },
+  charImgWrap: { width: (W - 32 - 60) / 5, aspectRatio: 0.7, borderRadius: 10, overflow: "hidden", borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surfaceElevated, position: "relative" },
+  charImgMain: { borderColor: colors.accent, borderWidth: 2 },
   charImg: { width: "100%", height: "100%" },
   charHeartBtn: { position: "absolute", bottom: 4, right: 4, backgroundColor: "rgba(0,0,0,0.65)", borderRadius: 10, padding: 5, zIndex: 20, elevation: 8, borderWidth: 1.5, borderColor: "rgba(255,255,255,0.35)" },
   charHeartBtnActive: { backgroundColor: "rgba(244,63,94,0.85)", borderColor: "#f43f5e" },
-  charName: { fontSize: 8, color: "rgba(255,255,255,0.6)", fontFamily: "Cairo_400Regular", textAlign: "center", lineHeight: 12 },
-  emptyTabText: { textAlign: "center", color: "rgba(255,255,255,0.2)", fontSize: 12, fontFamily: "Cairo_400Regular", paddingVertical: 20 },
+  charName: { fontSize: 8, color: colors.textSecondary, fontFamily: "Cairo_400Regular", textAlign: "center", lineHeight: 12 },
+  emptyTabText: { textAlign: "center", color: colors.textMuted, fontSize: 12, fontFamily: "Cairo_400Regular", paddingVertical: 20 },
   tvContent: { paddingHorizontal: 40, paddingBottom: 120 },
   tvSection: { marginTop: 22 },
   tvSectionHeader: { gap: 10, marginBottom: 14 },
@@ -1047,7 +1060,7 @@ const d = StyleSheet.create({
   tvActionBtn: { minHeight: 88, paddingVertical: 18, borderRadius: 20, gap: 10 },
   tvActionBtnLabel: { fontSize: 19, lineHeight: 29 },
   tvDescBox: { padding: 22, borderRadius: 20 },
-  tvReadMoreBtn: { minHeight: 60, paddingHorizontal: 24, borderRadius: 14, backgroundColor: "rgba(139,92,246,0.10)" },
+  tvReadMoreBtn: { minHeight: 60, paddingHorizontal: 24, borderRadius: 14, backgroundColor: colors.accentSurface },
   tvReadMoreText: { fontSize: 19, lineHeight: 29 },
   tvGenreChip: { paddingHorizontal: 16, paddingVertical: 9, borderRadius: 18 },
   tvGenreChipText: { fontSize: 16, lineHeight: 24 },
@@ -1055,25 +1068,26 @@ const d = StyleSheet.create({
   tvTabBtn: { paddingBottom: 12, minHeight: 50 },
   tvTabBtnText: { fontSize: 19, lineHeight: 29 },
   relCard: { width: 100, gap: 6 },
-  relImgWrap: { width: 100, height: 140, borderRadius: 12, overflow: "hidden", position: "relative", backgroundColor: "#1C1C22" },
+  relImgWrap: { width: 100, height: 140, borderRadius: 12, overflow: "hidden", position: "relative", backgroundColor: colors.surfaceElevated },
   relImg: { width: "100%", height: "100%" },
   relTypeBadge: { position: "absolute", top: 5, right: 5, backgroundColor: "rgba(0,0,0,0.75)", borderRadius: 6, paddingHorizontal: 5, paddingVertical: 2 },
   relTypeBadgeText: { fontSize: 7, color: "#fff", fontFamily: "Cairo_700Bold" },
   relScoreBadge: { position: "absolute", bottom: 5, left: 5, flexDirection: "row", alignItems: "center", gap: 2, backgroundColor: "rgba(0,0,0,0.7)", borderRadius: 6, paddingHorizontal: 4, paddingVertical: 2 },
-  relTitle: { fontSize: 10, color: "rgba(255,255,255,0.7)", fontFamily: "Cairo_400Regular", textAlign: "center" },
+  relTitle: { fontSize: 10, color: colors.textSecondary, fontFamily: "Cairo_400Regular", textAlign: "center" },
   simGrid: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   simCard: { width: (W - 32 - 16) / 3, gap: 4 },
-  simImgWrap: { width: "100%", aspectRatio: 0.7, borderRadius: 12, overflow: "hidden", position: "relative", backgroundColor: "#1C1C22" },
+  simImgWrap: { width: "100%", aspectRatio: 0.7, borderRadius: 12, overflow: "hidden", position: "relative", backgroundColor: colors.surfaceElevated },
   simImg: { width: "100%", height: "100%" },
   simScore: { position: "absolute", bottom: 5, left: 5, flexDirection: "row", alignItems: "center", gap: 2, backgroundColor: "rgba(0,0,0,0.7)", borderRadius: 6, paddingHorizontal: 4, paddingVertical: 2 },
-  simTitle: { fontSize: 10, color: "rgba(255,255,255,0.65)", fontFamily: "Cairo_400Regular", textAlign: "center" },
-  ratingOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.6)", justifyContent: "flex-end" },
-  ratingSheet: { backgroundColor: "#18181B", borderTopLeftRadius: 28, borderTopRightRadius: 28, padding: 24, gap: 16, borderTopWidth: 1, borderTopColor: "rgba(255,255,255,0.08)" },
-  ratingTitle: { fontSize: 18, fontFamily: "Cairo_800ExtraBold", color: "#fff", textAlign: "center" },
-  ratingSub: { fontSize: 12, color: "rgba(255,255,255,0.4)", fontFamily: "Cairo_400Regular", textAlign: "center" },
+  simTitle: { fontSize: 10, color: colors.textSecondary, fontFamily: "Cairo_400Regular", textAlign: "center" },
+  ratingOverlay: { flex: 1, backgroundColor: colors.overlay, justifyContent: "flex-end" },
+  ratingSheet: { backgroundColor: colors.surface, borderTopLeftRadius: 28, borderTopRightRadius: 28, padding: 24, gap: 16, borderTopWidth: 1, borderTopColor: colors.border },
+  ratingTitle: { fontSize: 18, fontFamily: "Cairo_800ExtraBold", color: colors.textPrimary, textAlign: "center" },
+  ratingSub: { fontSize: 12, color: colors.textMuted, fontFamily: "Cairo_400Regular", textAlign: "center" },
   ratingBtns: { flexDirection: "row", flexWrap: "wrap", gap: 8, justifyContent: "center" },
-  ratingNum: { width: 44, height: 44, borderRadius: 14, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(255,255,255,0.06)", borderWidth: 1, borderColor: "rgba(255,255,255,0.1)" },
-  ratingNumActive: { backgroundColor: "rgba(139,92,246,0.25)", borderColor: "#8B5CF6" },
-  ratingNumText: { fontSize: 14, fontFamily: "Cairo_800ExtraBold", color: "rgba(255,255,255,0.5)" },
-  ratingNumTextActive: { color: "#fff" },
-});
+  ratingNum: { width: 44, height: 44, borderRadius: 14, alignItems: "center", justifyContent: "center", backgroundColor: colors.surfaceElevated, borderWidth: 1, borderColor: colors.border },
+  ratingNumActive: { backgroundColor: colors.accentSurface, borderColor: colors.accent },
+  ratingNumText: { fontSize: 14, fontFamily: "Cairo_800ExtraBold", color: colors.textSecondary },
+  ratingNumTextActive: { color: colors.textPrimary },
+  });
+}

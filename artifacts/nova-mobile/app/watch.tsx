@@ -4,7 +4,6 @@ import {
   StyleSheet, Platform, Animated, Easing, Alert,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { LinearGradient } from "expo-linear-gradient";
 import { WebView } from "react-native-webview";
 import { useVideoPlayer, VideoView } from "expo-video";
 import { useLocalSearchParams, useRouter } from "expo-router";
@@ -30,6 +29,8 @@ import { openIsolatedPlayer } from "@/lib/isolatedPlayer";
 import { ensureDownloadAllowed, ensureWatchAccess, getAdState } from "@/utils/adPolicy";
 import { RewardedAdPrompt } from "@/components/RewardedAdPrompt";
 import { startMobileWatchAnalytics } from "@/utils/analytics";
+import { useColors } from "@/hooks/useColors";
+import type { ThemePalette } from "@/constants/colors";
 
 /* ── Types ── */
 type Quality    = "1080p FHD" | "720p HD" | "360p SD";
@@ -587,7 +588,14 @@ function getAvailabilityQualityKey(row: any): QualityKey | null {
   return "360p";
 }
 
+function useWatchStyles() {
+  const colors = useColors();
+  const d = useMemo(() => createWatchStyles(colors), [colors]);
+  return { colors, d };
+}
+
 function ServerScanAnimation() {
+  const { colors, d } = useWatchStyles();
   const pulse = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
@@ -616,11 +624,11 @@ function ServerScanAnimation() {
 
   return (
     <Animated.View style={[d.serverScanAnimation, { transform: [{ scale }], opacity }]}>
-      <Ionicons name="radio-outline" size={42} color="#a78bfa" />
+      <Ionicons name="radio-outline" size={42} color={colors.accent} />
       <View style={d.serverScanDots}>
         <View style={[d.serverScanDot, { backgroundColor: "#fbbf24" }]} />
-        <View style={[d.serverScanDot, { backgroundColor: "#34d399" }]} />
-        <View style={[d.serverScanDot, { backgroundColor: "#a78bfa" }]} />
+        <View style={[d.serverScanDot, { backgroundColor: colors.success }]} />
+        <View style={[d.serverScanDot, { backgroundColor: colors.accent }]} />
       </View>
     </Animated.View>
   );
@@ -630,6 +638,7 @@ function ServerScanAnimation() {
    animation reliable on Android and avoids a WebView dependency in this
    critical screen. */
 function ServerScanGif() {
+  const { d } = useWatchStyles();
   const player = useVideoPlayer(require("../assets/nova-loading.mp4"), (instance) => {
     instance.loop = true;
     instance.muted = true;
@@ -670,6 +679,7 @@ const QUALITY_FALLBACK_SITES = new Set(["kawaii", "anineko", "animekai", "animew
 
 /* ── Spinning loader ── */
 function SpinRing({ size = 36 }: { size?: number }) {
+  const { colors } = useWatchStyles();
   const rot = useRef(new Animated.Value(0)).current;
   useEffect(() => {
     const anim = Animated.loop(
@@ -682,14 +692,15 @@ function SpinRing({ size = 36 }: { size?: number }) {
   const r = size / 2;
   return (
     <View style={{ width: size, height: size }}>
-      <View style={[StyleSheet.absoluteFill, { borderRadius: r, borderWidth: 2, borderColor: "rgba(139,92,246,0.15)" }]} />
-      <Animated.View style={[StyleSheet.absoluteFill, { borderRadius: r, borderWidth: 2, borderColor: "transparent", borderTopColor: "#8B5CF6", borderRightColor: "rgba(139,92,246,0.4)", transform: [{ rotate }] }]} />
+      <View style={[StyleSheet.absoluteFill, { borderRadius: r, borderWidth: 2, borderColor: colors.accentSurface }]} />
+      <Animated.View style={[StyleSheet.absoluteFill, { borderRadius: r, borderWidth: 2, borderColor: "transparent", borderTopColor: colors.accent, borderRightColor: colors.accentBorder, transform: [{ rotate }] }]} />
     </View>
   );
 }
 
 /* ── Source row: "السيرفر KW" ── */
 function SrcRow({ src, idx, onPlay }: { src: Src; idx: number; onPlay: (s: Src) => void }) {
+  const { colors, d } = useWatchStyles();
   const q = getSrcQuality(src);
   const qs = QUALITY_STYLE[q];
   const tag = getSiteTag(src.site || "");
@@ -710,7 +721,7 @@ function SrcRow({ src, idx, onPlay }: { src: Src; idx: number; onPlay: (s: Src) 
           <Text style={[d.srcQText, { color: qs.text }]}>{Q_SHORT[q]}</Text>
         </View>
         <View style={d.srcPlayBtn}>
-          <Ionicons name="play" size={10} color="#fff" />
+          <Ionicons name="play" size={10} color={colors.primaryForeground} />
           <Text style={d.srcPlayText}>تشغيل</Text>
         </View>
       </View>
@@ -734,6 +745,7 @@ export default function WatchScreen() {
   const insets   = useSafeAreaInsets();
   const router   = useRouter();
   const { addToHistory, watchHistory } = useApp();
+  const { colors, d } = useWatchStyles();
   const tvMode   = isTvDevice();
   const topPad   = insets.top > 0 ? insets.top : (Platform.OS === "ios" ? 44 : 24);
 
@@ -1803,11 +1815,11 @@ export default function WatchScreen() {
   /* ══════════════ LOADING SCREEN ══════════════ */
   if (screen === "loading") {
     return (
-      <View style={{ flex: 1, backgroundColor: "#07070d" }}>
+      <View style={{ flex: 1, backgroundColor: colors.background }}>
         {coverUrl ? <Image source={{ uri: coverUrl }} style={[StyleSheet.absoluteFill, { opacity: 0.13 }]} blurRadius={Platform.OS === "ios" ? 28 : 10} resizeMode="cover" /> : null}
-        <LinearGradient colors={["rgba(7,7,13,0.90)", "rgba(12,8,24,0.60)", "rgba(7,7,13,0.95)"]} style={StyleSheet.absoluteFill} />
+        <View pointerEvents="none" style={[StyleSheet.absoluteFill, { backgroundColor: colors.background, opacity: 0.92 }]} />
         <Pressable onPress={handleBack} focusable={tvMode} style={({ focused }) => [d.ldBackBtn, { top: topPad + 4 }, tvMode && tvFocusStyle(focused)]}>
-          <Ionicons name="arrow-back" size={20} color="rgba(255,255,255,0.65)" />
+          <Ionicons name="arrow-back" size={20} color={colors.textPrimary} />
         </Pressable>
         <View style={d.ldContent}>
           <Text style={d.ldPrayer}>اللهم صلِّ وسلِّم على نبينا محمد ﷺ</Text>
@@ -1815,18 +1827,18 @@ export default function WatchScreen() {
             {coverUrl ? (
               <Image source={{ uri: coverUrl }} style={d.ldPoster} resizeMode="contain" />
             ) : (
-              <View style={[d.ldPoster, { backgroundColor: "rgba(18,10,40,0.95)", alignItems: "center", justifyContent: "center" }]}>
-                <Ionicons name="film" size={36} color="rgba(139,92,246,0.4)" />
+              <View style={[d.ldPoster, { backgroundColor: colors.surface, alignItems: "center", justifyContent: "center" }]}>
+                <Ionicons name="film" size={36} color={colors.accent} />
               </View>
             )}
           </View>
           {displayTitle ? (
-            <Text style={{ fontSize: 16, fontFamily: "Cairo_700Bold", color: "#fff", textAlign: "center", paddingHorizontal: 12 }} numberOfLines={2}>{displayTitle}</Text>
+            <Text style={{ fontSize: 16, fontFamily: "Cairo_700Bold", color: colors.textPrimary, textAlign: "center", paddingHorizontal: 12 }} numberOfLines={2}>{displayTitle}</Text>
           ) : null}
-          <View style={d.ldEpBadge}><Ionicons name="tv" size={10} color="#a78bfa" /><Text style={d.ldEpText}>الحلقة {epNum}</Text></View>
+          <View style={d.ldEpBadge}><Ionicons name="tv" size={10} color={colors.accent} /><Text style={d.ldEpText}>الحلقة {epNum}</Text></View>
           <View style={{ alignItems: "center", gap: 10 }}>
             <SpinRing />
-            <Text style={{ fontSize: 13, fontFamily: "Cairo_400Regular", color: "rgba(255,255,255,0.45)", textAlign: "center" }}>⏳ جاري تجهيز الحلقة، قد يستغرق بضع ثوانٍ.</Text>
+            <Text style={{ fontSize: 13, fontFamily: "Cairo_400Regular", color: colors.textSecondary, textAlign: "center" }}>⏳ جاري تجهيز الحلقة، قد يستغرق بضع ثوانٍ.</Text>
           </View>
         </View>
       </View>
@@ -1936,31 +1948,31 @@ export default function WatchScreen() {
   const hasAvailableSlot = Object.values(availableSlots).some(slots => Object.keys(slots).length > 0);
 
   return (
-    <View style={{ flex: 1, backgroundColor: "#07070d" }}>
+    <View style={{ flex: 1, backgroundColor: colors.background }}>
       <RewardedAdPrompt />
       {coverUrl ? <Image source={{ uri: coverUrl }} style={[StyleSheet.absoluteFill, { opacity: 0.08 }]} blurRadius={Platform.OS === "ios" ? 28 : 10} resizeMode="cover" /> : null}
-      <LinearGradient colors={["rgba(7,7,13,0.97)", "rgba(7,7,13,0.88)"]} style={StyleSheet.absoluteFill} />
+      <View pointerEvents="none" style={[StyleSheet.absoluteFill, { backgroundColor: colors.background, opacity: 0.93 }]} />
 
       {/* ── Header ── */}
       <View style={[d.header, tvMode && d.tvHeader, { paddingTop: topPad + 4 }]}>
         <View style={d.headerLeft}>
           <Pressable disabled={epNum <= 1} onPress={() => epNum > 1 && goEp(epNum - 1)} focusable={tvMode}
             style={({ focused }) => [d.epNavBtn, tvMode && d.tvEpNavBtn, epNum <= 1 && { opacity: 0.22 }, tvMode && tvFocusStyle(focused)]}>
-            <Ionicons name="chevron-forward" size={tvMode ? 22 : 12} color="rgba(255,255,255,0.55)" />
+            <Ionicons name="chevron-forward" size={tvMode ? 22 : 12} color={colors.textSecondary} />
             <Text style={[d.epNavText, tvMode && d.tvEpNavText]}>السابقة</Text>
           </Pressable>
           <Pressable
             disabled={!canGoNextEpisode}
             onPress={() => canGoNextEpisode && goEp(epNum + 1)}
             focusable={tvMode}
-            style={({ focused }) => [d.epNavBtn, tvMode && d.tvEpNavBtn, { borderColor: "rgba(139,92,246,0.35)", backgroundColor: "rgba(139,92,246,0.10)" },
+            style={({ focused }) => [d.epNavBtn, tvMode && d.tvEpNavBtn, { borderColor: colors.accentBorder, backgroundColor: colors.accentSurface },
               !canGoNextEpisode && { opacity: 0.22 }, tvMode && tvFocusStyle(focused)]}>
-            <Text style={[d.epNavText, tvMode && d.tvEpNavText, { color: "#c4b5fd" }]}>التالية</Text>
-            <Ionicons name="chevron-back" size={tvMode ? 22 : 12} color="rgba(196,181,253,0.9)" />
+            <Text style={[d.epNavText, tvMode && d.tvEpNavText, { color: colors.accent }]}>التالية</Text>
+            <Ionicons name="chevron-back" size={tvMode ? 22 : 12} color={colors.accent} />
           </Pressable>
           <Pressable onPress={refreshAllSources} focusable={tvMode}
             style={({ focused }) => [d.headerRefreshBtn, tvMode && d.tvHeaderActionBtn, tvMode && tvFocusStyle(focused)]}>
-            <Ionicons name="refresh" size={tvMode ? 24 : 13} color="#8B5CF6" />
+            <Ionicons name="refresh" size={tvMode ? 24 : 13} color={colors.accent} />
           </Pressable>
         </View>
         <View style={d.headerCenter}>
@@ -1969,7 +1981,7 @@ export default function WatchScreen() {
         </View>
         <Pressable onPress={handleBack} focusable={tvMode}
           style={({ focused }) => [d.headerBack, tvMode && d.tvHeaderActionBtn, tvMode && tvFocusStyle(focused)]}>
-          <Ionicons name="arrow-back" size={tvMode ? 25 : 17} color="rgba(255,255,255,0.75)" />
+          <Ionicons name="arrow-back" size={tvMode ? 25 : 17} color={colors.textPrimary} />
         </Pressable>
       </View>
 
@@ -1993,7 +2005,7 @@ export default function WatchScreen() {
             <Text style={[d.infoTitle, tvMode && d.tvInfoTitle]} numberOfLines={2}>{displayTitle}</Text>
             <View style={d.infoEpRow}>
               <View style={[d.infoEpBadge, tvMode && d.tvInfoEpBadge]}>
-                <Ionicons name="play-circle" size={tvMode ? 22 : 10} color="#a78bfa" />
+                <Ionicons name="play-circle" size={tvMode ? 22 : 10} color={colors.accent} />
                 <Text style={[d.infoEpText, tvMode && d.tvInfoEpText]}>الحلقة {epNum}</Text>
               </View>
             </View>
@@ -2010,14 +2022,13 @@ export default function WatchScreen() {
                 accessibilityRole="button"
                 accessibilityLabel="الخروج إلى السيرفرات"
               >
-                <Ionicons name="close" size={tvMode ? 22 : 16} color="rgba(255,255,255,0.72)" />
+                <Ionicons name="close" size={tvMode ? 22 : 16} color={colors.textSecondary} />
                 <Text style={[d.scanExitText, tvMode && d.tvScanExitText]}>خروج</Text>
               </Pressable>
               <View style={d.availabilityGifWrap}>
                 <ServerScanGif />
-                <LinearGradient
-                  colors={["transparent", "rgba(7,7,13,0.82)"]}
-                  style={StyleSheet.absoluteFill}
+                <View
+                  style={[StyleSheet.absoluteFill, { backgroundColor: colors.overlay }]}
                   pointerEvents="none"
                 />
               </View>
@@ -2036,7 +2047,7 @@ export default function WatchScreen() {
 
          {availabilityDone && !hasAvailableSlot && (
            <View style={d.availabilityEmpty}>
-             <Ionicons name={availabilityError ? "cloud-offline-outline" : "search"} size={34} color="rgba(139,92,246,0.45)" />
+             <Ionicons name={availabilityError ? "cloud-offline-outline" : "search"} size={34} color={colors.accent} />
              <Text style={d.availabilityEmptyTitle}>
                {availabilityError ? "تعذر التحقق من المصادر" : "لا توجد مصادر متاحة لهذه الحلقة"}
              </Text>
@@ -2044,7 +2055,7 @@ export default function WatchScreen() {
                {availabilityError ? "تحقق من الاتصال ثم أعد المحاولة." : "لم يُرجع الخادم أي مصدر صالح حالياً."}
              </Text>
               <Pressable onPress={refreshAllSources} accessibilityRole="button" style={d.retryBigBtn}>
-               <Ionicons name="refresh" size={16} color="#c4b5fd" />
+               <Ionicons name="refresh" size={16} color={colors.accent} />
                <Text style={d.retryBigText}>إعادة المحاولة</Text>
              </Pressable>
            </View>
@@ -2114,7 +2125,7 @@ export default function WatchScreen() {
                         tvMode && tvFocusStyle(focused),
                         idx < slots.length - 1 && d.webRowBorder,
                         !watchUnlocked && { opacity: 0.72 },
-                        isReady && watchUnlocked && { backgroundColor: "rgba(34,197,94,0.035)" },
+                        isReady && watchUnlocked && { backgroundColor: colors.success + "10" },
                         isFailed && { opacity: 0.40 },
                         pressed  && { opacity: 0.72 },
                       ]}
@@ -2122,14 +2133,14 @@ export default function WatchScreen() {
                       <View style={d.webRowActions}>
                         {!watchUnlocked ? (
                           <View style={[d.lockBtn, tvMode && d.tvLockBtn]}>
-                            {watchAdSite === slot.site ? <SpinRing size={tvMode ? 28 : 14} /> : <Ionicons name="lock-closed" size={tvMode ? 24 : 11} color="#c4b5fd" />}
+                            {watchAdSite === slot.site ? <SpinRing size={tvMode ? 28 : 14} /> : <Ionicons name="lock-closed" size={tvMode ? 24 : 11} color={colors.accent} />}
                             <Text style={[d.lockBtnText, tvMode && d.tvActionText]}>فتح</Text>
                           </View>
                         ) : isFetching ? (
                           <SpinRing size={tvMode ? 26 : 16} />
                         ) : isReady ? (
                           <View style={[d.playBtnGreen, tvMode && d.tvPlayBtn]}>
-                            <Ionicons name="play" size={tvMode ? 24 : 10} color="#fff" />
+                            <Ionicons name="play" size={tvMode ? 24 : 10} color={colors.primaryForeground} />
                             <Text style={[d.playBtnGreenText, tvMode && d.tvActionText]}>تشغيل</Text>
                           </View>
                         ) : (
@@ -2145,8 +2156,8 @@ export default function WatchScreen() {
                            d.webRowTag,
                            tvMode && d.tvWebRowTag,
                           { flex: 1, textAlign: "right" },
-                          isReady  && { color: "rgba(255,255,255,0.90)" },
-                          isFailed && { color: "rgba(255,255,255,0.35)" },
+                          isReady  && { color: colors.textPrimary },
+                          isFailed && { color: colors.destructive },
                         ]}
                         numberOfLines={1}
                       >
@@ -2159,8 +2170,8 @@ export default function WatchScreen() {
                           <View style={[d.webRowDot, tvMode && d.tvWebRowDot, {
                             backgroundColor:
                               isReady  ? "#34d399" :
-                              isFailed ? "rgba(239,68,68,0.50)" :
-                              "rgba(255,255,255,0.18)",
+                              isFailed ? colors.destructive :
+                              colors.border,
                           }]} />
                         )}
                       </View>
@@ -2176,7 +2187,7 @@ export default function WatchScreen() {
           <View style={d.downloadSection}>
             <View style={d.downloadHeader}>
               <View style={d.downloadHeaderIcon}>
-                <Ionicons name="download-outline" size={17} color="#c4b5fd" />
+                <Ionicons name="download-outline" size={17} color={colors.accent} />
               </View>
               <View style={{ flex: 1 }}>
                 <Text style={d.downloadTitle}>سيرفرات التحميل</Text>
@@ -2209,7 +2220,7 @@ export default function WatchScreen() {
                       >
                         {dlFetchingSites.has(stateKey) ? <SpinRing size={15} /> : (
                           <>
-                            <Ionicons name="download-outline" size={15} color="#fff" />
+                            <Ionicons name="download-outline" size={15} color={colors.primaryForeground} />
                             <Text style={d.downloadActionText}>تحميل</Text>
                           </>
                         )}
@@ -2220,8 +2231,8 @@ export default function WatchScreen() {
                         <Text style={d.dlPctText}>{dlPct}%</Text>
                       </View>
                     )}
-                    {dlState === "done" && <Ionicons name="checkmark-circle" size={19} color="#8B5CF6" />}
-                    {dlState === "error" && <Ionicons name="close-circle" size={19} color="rgba(239,68,68,0.70)" />}
+                    {dlState === "done" && <Ionicons name="checkmark-circle" size={19} color={colors.accent} />}
+                    {dlState === "error" && <Ionicons name="close-circle" size={19} color={colors.destructive} />}
                   </View>
                 );
               })}
@@ -2238,16 +2249,17 @@ export default function WatchScreen() {
 }
 
 /* ═══════════════ STYLES ═══════════════ */
-const d = StyleSheet.create({
+function createWatchStyles(colors: ThemePalette) {
+  return StyleSheet.create({
   tvFocusGuide: { flex: 1 },
   /* Loading */
-  ldBackBtn:    { position: "absolute", right: 16, width: 36, height: 36, borderRadius: 18, backgroundColor: "rgba(0,0,0,0.45)", alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: "rgba(255,255,255,0.12)", zIndex: 10 },
+  ldBackBtn:    { position: "absolute", right: 16, width: 36, height: 36, borderRadius: 18, backgroundColor: colors.surfaceElevated, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: colors.border, zIndex: 10 },
   ldContent:    { flex: 1, alignItems: "center", justifyContent: "center", gap: 20, paddingHorizontal: 24 },
-  ldPrayer:     { fontSize: 13, fontFamily: "Cairo_800ExtraBold", color: "rgba(255,255,255,0.85)", textAlign: "center" },
+  ldPrayer:     { fontSize: 13, fontFamily: "Cairo_800ExtraBold", color: colors.textPrimary, textAlign: "center" },
   ldPosterWrap: { position: "relative", alignItems: "center", justifyContent: "center", width: 176, height: 264, overflow: "visible" },
-  ldPoster:     { width: 176, height: 264, borderRadius: 20, borderWidth: 1, borderColor: "rgba(255,255,255,0.09)" },
-  ldEpBadge:    { flexDirection: "row", alignItems: "center", gap: 5, paddingHorizontal: 14, paddingVertical: 5, borderRadius: 20, backgroundColor: "rgba(124,58,237,0.22)", borderWidth: 1, borderColor: "rgba(139,92,246,0.3)" },
-  ldEpText:     { fontSize: 12, fontFamily: "Cairo_700Bold", color: "rgba(196,181,253,0.9)" },
+  ldPoster:     { width: 176, height: 264, borderRadius: 20, borderWidth: 1, borderColor: colors.border },
+  ldEpBadge:    { flexDirection: "row", alignItems: "center", gap: 5, paddingHorizontal: 14, paddingVertical: 5, borderRadius: 20, backgroundColor: colors.accentSurface, borderWidth: 1, borderColor: colors.accentBorder },
+  ldEpText:     { fontSize: 12, fontFamily: "Cairo_700Bold", color: colors.accent },
 
   /* Player chrome */
   playerBackBtn: { width: 36, height: 36, borderRadius: 14, backgroundColor: "rgba(0,0,0,0.5)", alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: "rgba(255,255,255,0.15)" },
@@ -2255,58 +2267,58 @@ const d = StyleSheet.create({
   embedTopRow:   { position: "absolute", top: 0, left: 0, right: 0, flexDirection: "row", alignItems: "center", paddingHorizontal: 14, paddingBottom: 10, backgroundColor: "rgba(0,0,0,0.7)", gap: 10, zIndex: 10 },
 
   /* Picker header */
-  header:        { flexDirection: "row", alignItems: "center", paddingHorizontal: 12, paddingBottom: 10, borderBottomWidth: 1, borderBottomColor: "rgba(255,255,255,0.07)", gap: 8 },
+  header:        { flexDirection: "row", alignItems: "center", paddingHorizontal: 12, paddingBottom: 10, borderBottomWidth: 1, borderBottomColor: colors.border, gap: 8 },
   tvHeader:     { paddingHorizontal: 28, paddingBottom: 10, gap: 8 },
   headerLeft:    { flexDirection: "row", alignItems: "center", gap: 5 },
   headerCenter:  { flex: 1, alignItems: "center" },
-  headerBack:    { width: 36, height: 36, borderRadius: 12, backgroundColor: "rgba(255,255,255,0.07)", borderWidth: 1, borderColor: "rgba(255,255,255,0.11)", alignItems: "center", justifyContent: "center", flexShrink: 0 },
-  headerTitle:   { fontSize: 13, fontFamily: "Cairo_800ExtraBold", color: "#fff", textAlign: "center" },
-  headerSub:     { fontSize: 10, color: "rgba(255,255,255,0.35)", fontFamily: "Cairo_400Regular", textAlign: "center" },
+  headerBack:    { width: 36, height: 36, borderRadius: 12, backgroundColor: colors.surfaceElevated, borderWidth: 1, borderColor: colors.border, alignItems: "center", justifyContent: "center", flexShrink: 0 },
+  headerTitle:   { fontSize: 13, fontFamily: "Cairo_800ExtraBold", color: colors.textPrimary, textAlign: "center" },
+  headerSub:     { fontSize: 10, color: colors.textMuted, fontFamily: "Cairo_400Regular", textAlign: "center" },
   tvHeaderTitle: { fontSize: 19, lineHeight: 27 },
   tvHeaderSub: { fontSize: 13, lineHeight: 20 },
-  headerRefreshBtn: { width: 32, height: 32, borderRadius: 10, backgroundColor: "rgba(139,92,246,0.12)", borderWidth: 1, borderColor: "rgba(139,92,246,0.25)", alignItems: "center", justifyContent: "center" },
+  headerRefreshBtn: { width: 32, height: 32, borderRadius: 10, backgroundColor: colors.accentSurface, borderWidth: 1, borderColor: colors.accentBorder, alignItems: "center", justifyContent: "center" },
   tvHeaderActionBtn: { width: 42, height: 42, borderRadius: 12 },
-  epNavBtn:      { flexDirection: "row", alignItems: "center", gap: 2, height: 32, borderRadius: 10, backgroundColor: "rgba(255,255,255,0.06)", borderWidth: 1, borderColor: "rgba(255,255,255,0.09)", paddingHorizontal: 8, justifyContent: "center" },
+  epNavBtn:      { flexDirection: "row", alignItems: "center", gap: 2, height: 32, borderRadius: 10, backgroundColor: colors.surfaceElevated, borderWidth: 1, borderColor: colors.border, paddingHorizontal: 8, justifyContent: "center" },
   tvEpNavBtn:    { minWidth: 96, height: 44, borderRadius: 12, paddingHorizontal: 12, gap: 5 },
-  epNavText:     { fontSize: 10, fontFamily: "Cairo_700Bold", color: "rgba(255,255,255,0.65)" },
+  epNavText:     { fontSize: 10, fontFamily: "Cairo_700Bold", color: colors.textSecondary },
   tvEpNavText:   { fontSize: 13, lineHeight: 20 },
 
   /* Info card */
-  infoCard:      { flexDirection: "row", alignItems: "flex-start", gap: 14, backgroundColor: "rgba(15,12,28,0.80)", borderRadius: 18, borderWidth: 1, borderColor: "rgba(139,92,246,0.14)", padding: 14 },
+  infoCard:      { flexDirection: "row", alignItems: "flex-start", gap: 14, backgroundColor: colors.card, borderRadius: 18, borderWidth: 1, borderColor: colors.border, padding: 14 },
   tvInfoCard:    { padding: 18, gap: 16, borderRadius: 18 },
   infoPosterWrap:{ width: 72, height: 102, position: "relative", alignItems: "center", justifyContent: "center" },
   tvInfoPosterWrap: { width: 96, height: 136 },
-  infoPosterGlow:{ position: "absolute", width: 80, height: 110, borderRadius: 20, backgroundColor: "rgba(109,40,217,0.28)" },
+  infoPosterGlow:{ position: "absolute", width: 80, height: 110, borderRadius: 20, backgroundColor: colors.accentSurface },
   tvInfoPosterGlow: { width: 92, height: 128, borderRadius: 15 },
-  infoPoster:    { width: 72, height: 102, borderRadius: 12, borderWidth: 1, borderColor: "rgba(139,92,246,0.30)" },
+  infoPoster:    { width: 72, height: 102, borderRadius: 12, borderWidth: 1, borderColor: colors.accentBorder },
   tvInfoPoster: { width: 96, height: 136, borderRadius: 14, borderWidth: 1 },
   infoMeta:      { flex: 1, gap: 8, paddingTop: 2 },
-  infoTitle:     { fontSize: 15, fontFamily: "Cairo_800ExtraBold", color: "#fff", textAlign: "right", lineHeight: 22 },
+  infoTitle:     { fontSize: 15, fontFamily: "Cairo_800ExtraBold", color: colors.textPrimary, textAlign: "right", lineHeight: 22 },
   tvInfoTitle: { fontSize: 19, lineHeight: 28 },
   infoEpRow:     { flexDirection: "row", gap: 8, flexWrap: "wrap" },
-  infoEpBadge:   { flexDirection: "row", alignItems: "center", gap: 5, backgroundColor: "rgba(124,58,237,0.18)", borderRadius: 8, borderWidth: 1, borderColor: "rgba(139,92,246,0.28)", paddingHorizontal: 10, paddingVertical: 5 },
+  infoEpBadge:   { flexDirection: "row", alignItems: "center", gap: 5, backgroundColor: colors.accentSurface, borderRadius: 8, borderWidth: 1, borderColor: colors.accentBorder, paddingHorizontal: 10, paddingVertical: 5 },
   tvInfoEpBadge: { gap: 6, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 7 },
-  infoEpText:    { fontSize: 11, fontFamily: "Cairo_700Bold", color: "#c4b5fd" },
+  infoEpText:    { fontSize: 11, fontFamily: "Cairo_700Bold", color: colors.accent },
   tvInfoEpText: { fontSize: 14, lineHeight: 21 },
   availabilityState: { alignItems: "center", justifyContent: "center", gap: 10, paddingVertical: 22 },
-  availabilityGifWrap: { width: "100%", maxWidth: 330, height: 184, borderRadius: 22, overflow: "hidden", backgroundColor: "rgba(255,255,255,0.025)", marginBottom: 2, alignItems: "center", justifyContent: "center" },
+  availabilityGifWrap: { width: "100%", maxWidth: 330, height: 184, borderRadius: 22, overflow: "hidden", backgroundColor: colors.card, marginBottom: 2, alignItems: "center", justifyContent: "center" },
   availabilityGif: { width: "100%", height: "100%", backgroundColor: "transparent" },
-  serverScanAnimation: { width: 110, height: 110, borderRadius: 55, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(124,58,237,0.14)", borderWidth: 1, borderColor: "rgba(167,139,250,0.30)" },
+  serverScanAnimation: { width: 110, height: 110, borderRadius: 55, alignItems: "center", justifyContent: "center", backgroundColor: colors.accentSurface, borderWidth: 1, borderColor: colors.accentBorder },
   serverScanDots: { flexDirection: "row", gap: 7, marginTop: 8 },
   serverScanDot: { width: 7, height: 7, borderRadius: 4 },
-  scanExitBtn: { alignSelf: "flex-end", flexDirection: "row", alignItems: "center", gap: 5, paddingHorizontal: 12, paddingVertical: 7, borderRadius: 12, backgroundColor: "rgba(255,255,255,0.07)", borderWidth: 1, borderColor: "rgba(255,255,255,0.12)", marginBottom: 12 },
-  scanExitText: { color: "rgba(255,255,255,0.72)", fontFamily: "Cairo_700Bold", fontSize: 11 },
+  scanExitBtn: { alignSelf: "flex-end", flexDirection: "row", alignItems: "center", gap: 5, paddingHorizontal: 12, paddingVertical: 7, borderRadius: 12, backgroundColor: colors.surfaceElevated, borderWidth: 1, borderColor: colors.border, marginBottom: 12 },
+  scanExitText: { color: colors.textSecondary, fontFamily: "Cairo_700Bold", fontSize: 11 },
   tvScanExitBtn: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 11, gap: 6 },
   tvScanExitText: { fontSize: 13 },
-  availabilityHeadline: { fontSize: 15, fontFamily: "Cairo_800ExtraBold", color: "rgba(255,255,255,0.85)", textAlign: "center", lineHeight: 24 },
+  availabilityHeadline: { fontSize: 15, fontFamily: "Cairo_800ExtraBold", color: colors.textPrimary, textAlign: "center", lineHeight: 24 },
   tvAvailabilityHeadline: { fontSize: 17, lineHeight: 26 },
-  availabilityText: { fontSize: 12, fontFamily: "Cairo_400Regular", color: "rgba(255,255,255,0.42)", textAlign: "center" },
+  availabilityText: { fontSize: 12, fontFamily: "Cairo_400Regular", color: colors.textSecondary, textAlign: "center" },
   tvAvailabilityText: { fontSize: 14, lineHeight: 22 },
   availabilityPartialState: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, paddingVertical: 8 },
-  availabilityPartialText: { fontSize: 11, fontFamily: "Cairo_400Regular", color: "rgba(255,255,255,0.38)" },
+  availabilityPartialText: { fontSize: 11, fontFamily: "Cairo_400Regular", color: colors.textSecondary },
   availabilityEmpty: { alignItems: "center", justifyContent: "center", gap: 10, paddingVertical: 42, paddingHorizontal: 18 },
-  availabilityEmptyTitle: { fontSize: 14, fontFamily: "Cairo_700Bold", color: "rgba(255,255,255,0.62)", textAlign: "center" },
-  availabilityEmptyText: { fontSize: 11, fontFamily: "Cairo_400Regular", color: "rgba(255,255,255,0.30)", textAlign: "center" },
+  availabilityEmptyTitle: { fontSize: 14, fontFamily: "Cairo_700Bold", color: colors.textPrimary, textAlign: "center" },
+  availabilityEmptyText: { fontSize: 11, fontFamily: "Cairo_400Regular", color: colors.textMuted, textAlign: "center" },
 
   /* Scroll */
   scrollContent: { padding: 14, paddingBottom: 100, gap: 12 },
@@ -2321,12 +2333,12 @@ const d = StyleSheet.create({
   tierCountText: { fontSize: 9, fontFamily: "Cairo_700Bold" },
 
   /* Source section */
-  srcSection:    { borderRadius: 16, overflow: "hidden", backgroundColor: "rgba(14,12,24,0.92)", borderWidth: 1, borderColor: "rgba(255,255,255,0.07)" },
+  srcSection:    { borderRadius: 16, overflow: "hidden", backgroundColor: colors.card, borderWidth: 1, borderColor: colors.border },
 
   /* Source row: "Server N · KW" */
-  srcRow:        { flexDirection: "row", alignItems: "center", paddingHorizontal: 14, paddingVertical: 8, gap: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: "rgba(255,255,255,0.05)" },
+  srcRow:        { flexDirection: "row", alignItems: "center", paddingHorizontal: 14, paddingVertical: 8, gap: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border },
   srcIcon:       { width: 28, height: 28, borderRadius: 8, alignItems: "center", justifyContent: "center", borderWidth: 1 },
-  srcNum:        { fontSize: 13, fontFamily: "Cairo_800ExtraBold", color: "rgba(255,255,255,0.92)", textAlign: "right", direction: "rtl" } as any,
+  srcNum:        { fontSize: 13, fontFamily: "Cairo_800ExtraBold", color: colors.textPrimary, textAlign: "right", direction: "rtl" } as any,
   srcTagInline:  { fontFamily: "Cairo_800ExtraBold", letterSpacing: 0.5 },
   srcSubBadge:   { backgroundColor: "rgba(34,197,94,0.12)", borderRadius: 5, paddingHorizontal: 5, paddingVertical: 1, borderWidth: 1, borderColor: "rgba(34,197,94,0.25)" },
   srcSubText:    { fontSize: 8, fontFamily: "Cairo_700Bold", color: "rgba(134,239,172,0.85)" },
@@ -2339,36 +2351,36 @@ const d = StyleSheet.create({
   srcPlayText:   { fontSize: 10, fontFamily: "Cairo_800ExtraBold", color: "#fff" },
 
   /* Site selector */
-  siteSelectorCard:   { backgroundColor: "rgba(14,12,24,0.92)", borderRadius: 18, borderWidth: 1, borderColor: "rgba(139,92,246,0.18)", overflow: "hidden" },
-  siteSelectorHeader: { flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 14, paddingVertical: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: "rgba(255,255,255,0.07)" },
-  siteSelectorTitle:  { fontSize: 12, fontFamily: "Cairo_700Bold", color: "#a78bfa" },
+  siteSelectorCard:   { backgroundColor: colors.card, borderRadius: 18, borderWidth: 1, borderColor: colors.border, overflow: "hidden" },
+  siteSelectorHeader: { flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 14, paddingVertical: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border },
+  siteSelectorTitle:  { fontSize: 12, fontFamily: "Cairo_700Bold", color: colors.accent },
   /* قائمة عمودية بدل شبكة */
   siteList:           { flexDirection: "column" },
   siteRow:            { flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 14, paddingVertical: 13 },
-  siteRowBorder:      { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: "rgba(255,255,255,0.06)" },
+  siteRowBorder:      { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border },
   siteRowDot:         { width: 18, alignItems: "center", justifyContent: "center", flexShrink: 0 },
   siteRowDotInner:    { width: 9, height: 9, borderRadius: 5 },
-  siteRowName:        { flex: 1, fontSize: 13, fontFamily: "Cairo_800ExtraBold", color: "rgba(255,255,255,0.55)", textAlign: "right", direction: "rtl" } as any,
+  siteRowName:        { flex: 1, fontSize: 13, fontFamily: "Cairo_800ExtraBold", color: colors.textPrimary, textAlign: "right", direction: "rtl" } as any,
   siteRowTag:         { fontFamily: "Cairo_800ExtraBold", letterSpacing: 0.5 },
   siteRowPlayBtn:     { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 11, paddingVertical: 6, borderRadius: 10, backgroundColor: "rgba(16,185,129,0.88)", borderWidth: 1, borderColor: "rgba(52,211,153,0.35)", flexShrink: 0 },
   siteRowPlayText:    { fontSize: 11, fontFamily: "Cairo_800ExtraBold", color: "#fff" },
-  siteRowSelectBtn:   { paddingHorizontal: 11, paddingVertical: 6, borderRadius: 10, backgroundColor: "rgba(139,92,246,0.15)", borderWidth: 1, borderColor: "rgba(139,92,246,0.30)", flexShrink: 0 },
-  siteRowRetryBtn:    { backgroundColor: "rgba(239,68,68,0.10)", borderColor: "rgba(239,68,68,0.28)" },
-  siteRowSelectText:  { fontSize: 11, fontFamily: "Cairo_800ExtraBold", color: "rgba(196,181,253,0.90)" },
-  loadAllBtn:         { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, paddingVertical: 12, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: "rgba(255,255,255,0.07)" },
-  loadAllText:        { fontSize: 11, fontFamily: "Cairo_700Bold", color: "#c4b5fd" },
+  siteRowSelectBtn:   { paddingHorizontal: 11, paddingVertical: 6, borderRadius: 10, backgroundColor: colors.accentSurface, borderWidth: 1, borderColor: colors.accentBorder, flexShrink: 0 },
+  siteRowRetryBtn:    { backgroundColor: colors.destructiveSurface, borderColor: colors.destructiveBorder },
+  siteRowSelectText:  { fontSize: 11, fontFamily: "Cairo_800ExtraBold", color: colors.accent },
+  loadAllBtn:         { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, paddingVertical: 12, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border },
+  loadAllText:        { fontSize: 11, fontFamily: "Cairo_700Bold", color: colors.accent },
 
   /* Empty state */
   empty:         { alignItems: "center", justifyContent: "center", gap: 14, paddingVertical: 50 },
-  emptyIcon:     { width: 72, height: 72, borderRadius: 36, backgroundColor: "rgba(239,68,68,0.08)", borderWidth: 1, borderColor: "rgba(239,68,68,0.18)", alignItems: "center", justifyContent: "center" },
-  emptyTitle:    { fontSize: 15, fontFamily: "Cairo_700Bold", color: "rgba(255,255,255,0.45)" },
-  emptySub:      { fontSize: 12, color: "rgba(255,255,255,0.22)", fontFamily: "Cairo_400Regular", textAlign: "center", lineHeight: 20, paddingHorizontal: 24 },
-  retryBtn:      { flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: "rgba(139,92,246,0.15)", borderRadius: 14, borderWidth: 1, borderColor: "rgba(139,92,246,0.28)", paddingHorizontal: 20, paddingVertical: 11 },
-  retryBtnText:  { fontSize: 13, fontFamily: "Cairo_700Bold", color: "#c4b5fd" },
-  webAppBtn:     { flexDirection: "row", alignItems: "center", gap: 12, backgroundColor: "rgba(109,40,217,0.10)", borderRadius: 16, borderWidth: 1, borderColor: "rgba(139,92,246,0.22)", paddingHorizontal: 14, paddingVertical: 13, marginTop: 4 },
-  webAppIcon:    { width: 40, height: 40, borderRadius: 12, backgroundColor: "rgba(139,92,246,0.16)", alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: "rgba(139,92,246,0.28)" },
-  webAppTitle:   { fontSize: 13, fontFamily: "Cairo_700Bold", color: "rgba(196,181,253,0.95)", textAlign: "right" },
-  webAppSub:     { fontSize: 10, fontFamily: "Cairo_400Regular", color: "rgba(255,255,255,0.30)", textAlign: "right" },
+  emptyIcon:     { width: 72, height: 72, borderRadius: 36, backgroundColor: colors.destructiveSurface, borderWidth: 1, borderColor: colors.destructiveBorder, alignItems: "center", justifyContent: "center" },
+  emptyTitle:    { fontSize: 15, fontFamily: "Cairo_700Bold", color: colors.textSecondary },
+  emptySub:      { fontSize: 12, color: colors.textMuted, fontFamily: "Cairo_400Regular", textAlign: "center", lineHeight: 20, paddingHorizontal: 24 },
+  retryBtn:      { flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: colors.accentSurface, borderRadius: 14, borderWidth: 1, borderColor: colors.accentBorder, paddingHorizontal: 20, paddingVertical: 11 },
+  retryBtnText:  { fontSize: 13, fontFamily: "Cairo_700Bold", color: colors.accent },
+  webAppBtn:     { flexDirection: "row", alignItems: "center", gap: 12, backgroundColor: colors.accentSurface, borderRadius: 16, borderWidth: 1, borderColor: colors.accentBorder, paddingHorizontal: 14, paddingVertical: 13, marginTop: 4 },
+  webAppIcon:    { width: 40, height: 40, borderRadius: 12, backgroundColor: colors.accentSurface, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: colors.accentBorder },
+  webAppTitle:   { fontSize: 13, fontFamily: "Cairo_700Bold", color: colors.accent, textAlign: "right" },
+  webAppSub:     { fontSize: 10, fontFamily: "Cairo_400Regular", color: colors.textSecondary, textAlign: "right" },
 
   /* ── Web-style quality pill header ── */
   qPill:         { flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 4 },
@@ -2383,45 +2395,46 @@ const d = StyleSheet.create({
   tvWebRowTag:    { fontSize: 16, lineHeight: 24 },
   tvWebRowDot:    { width: 12, height: 12, borderRadius: 6 },
   tvSiteRowPlayBtn: { minWidth: 116, minHeight: 46, paddingHorizontal: 16, paddingVertical: 10, borderRadius: 12 },
-  webRowBorder:   { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: "rgba(255,255,255,0.06)" },
+  webRowBorder:   { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border },
   webRowPlayIcon: { alignItems: "center", justifyContent: "center", flexShrink: 0 },
   webRowActions: { flexDirection: "row", alignItems: "center", gap: 4, flexShrink: 0 },
-  webRowName:     { flex: 1, minWidth: 0, fontSize: 13, fontFamily: "Cairo_800ExtraBold", color: "rgba(255,255,255,0.48)", textAlign: "right" } as any,
-  webRowTag:      { flex: 1, minWidth: 0, flexShrink: 1, fontFamily: "Cairo_800ExtraBold", letterSpacing: 0.2, fontSize: 10, lineHeight: 16, color: "rgba(255,255,255,0.60)" },
+  webRowName:     { flex: 1, minWidth: 0, fontSize: 13, fontFamily: "Cairo_800ExtraBold", color: colors.textPrimary, textAlign: "right" } as any,
+  webRowTag:      { flex: 1, minWidth: 0, flexShrink: 1, fontFamily: "Cairo_800ExtraBold", letterSpacing: 0.2, fontSize: 10, lineHeight: 16, color: colors.textPrimary },
   webRowRight:    { flexDirection: "row", alignItems: "center", gap: 7, flexShrink: 0 },
   webRowDot:      { width: 8, height: 8, borderRadius: 4 },
-  lockBtn:        { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 9, paddingVertical: 5, borderRadius: 9, backgroundColor: "rgba(139,92,246,0.15)", borderWidth: 1, borderColor: "rgba(139,92,246,0.30)" },
-  lockBtnText:    { fontSize: 10, fontFamily: "Cairo_700Bold", color: "#c4b5fd" },
+  lockBtn:        { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 9, paddingVertical: 5, borderRadius: 9, backgroundColor: colors.accentSurface, borderWidth: 1, borderColor: colors.accentBorder },
+  lockBtnText:    { fontSize: 10, fontFamily: "Cairo_700Bold", color: colors.accent },
   tvLockBtn:      { minWidth: 112, minHeight: 46, paddingHorizontal: 16, paddingVertical: 10, borderRadius: 12, gap: 6 },
   tvPickBtn:      { minWidth: 112, minHeight: 46, paddingHorizontal: 16, paddingVertical: 10, borderRadius: 12 },
   tvPlayBtn:      { minWidth: 132, minHeight: 46, paddingHorizontal: 16, paddingVertical: 10, borderRadius: 12, gap: 6 },
   tvActionText:   { fontSize: 15, lineHeight: 23 },
 
   /* ── Separate download servers ── */
-  downloadSection:    { marginTop: 18, gap: 9, padding: 12, borderRadius: 18, backgroundColor: "rgba(14,12,24,0.92)", borderWidth: 1, borderColor: "rgba(139,92,246,0.22)" },
+  downloadSection:    { marginTop: 18, gap: 9, padding: 12, borderRadius: 18, backgroundColor: colors.card, borderWidth: 1, borderColor: colors.border },
   downloadHeader:     { flexDirection: "row", alignItems: "center", gap: 9 },
-  downloadHeaderIcon: { width: 32, height: 32, borderRadius: 10, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(139,92,246,0.16)", borderWidth: 1, borderColor: "rgba(139,92,246,0.28)" },
-  downloadTitle:      { fontSize: 13, fontFamily: "Cairo_800ExtraBold", color: "#c4b5fd", textAlign: "right" },
-  downloadSubtitle:   { marginTop: 2, fontSize: 9, fontFamily: "Cairo_400Regular", color: "rgba(255,255,255,0.43)", textAlign: "right" },
-  downloadHint:       { fontSize: 10, lineHeight: 17, fontFamily: "Cairo_400Regular", color: "rgba(255,255,255,0.48)", textAlign: "right" },
-  downloadRows:       { borderRadius: 13, overflow: "hidden", backgroundColor: "rgba(7,7,13,0.40)" },
-  downloadRow:        { minHeight: 52, flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8, paddingHorizontal: 10, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: "rgba(255,255,255,0.07)" },
+  downloadHeaderIcon: { width: 32, height: 32, borderRadius: 10, alignItems: "center", justifyContent: "center", backgroundColor: colors.accentSurface, borderWidth: 1, borderColor: colors.accentBorder },
+  downloadTitle:      { fontSize: 13, fontFamily: "Cairo_800ExtraBold", color: colors.accent, textAlign: "right" },
+  downloadSubtitle:   { marginTop: 2, fontSize: 9, fontFamily: "Cairo_400Regular", color: colors.textMuted, textAlign: "right" },
+  downloadHint:       { fontSize: 10, lineHeight: 17, fontFamily: "Cairo_400Regular", color: colors.textSecondary, textAlign: "right" },
+  downloadRows:       { borderRadius: 13, overflow: "hidden", backgroundColor: colors.surface },
+  downloadRow:        { minHeight: 52, flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8, paddingHorizontal: 10, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border },
   downloadRowInfo:    { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "flex-end", gap: 8 },
-  downloadTag:        { width: 27, height: 27, borderRadius: 8, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(139,92,246,0.16)", borderWidth: 1, borderColor: "rgba(139,92,246,0.26)" },
-  downloadTagText:    { fontSize: 9, fontFamily: "Cairo_800ExtraBold", color: "#c4b5fd" },
-  downloadRowLabel:   { fontSize: 11, fontFamily: "Cairo_700Bold", color: "rgba(255,255,255,0.78)" },
-  downloadQuality:    { fontSize: 9, fontFamily: "Cairo_400Regular", color: "rgba(255,255,255,0.40)" },
-  downloadAction:     { minWidth: 78, height: 36, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 5, borderRadius: 10, backgroundColor: "rgba(124,58,237,0.82)", borderWidth: 1, borderColor: "rgba(196,181,253,0.26)" },
-  downloadActionText: { fontSize: 10, fontFamily: "Cairo_800ExtraBold", color: "#fff" },
+  downloadTag:        { width: 27, height: 27, borderRadius: 8, alignItems: "center", justifyContent: "center", backgroundColor: colors.accentSurface, borderWidth: 1, borderColor: colors.accentBorder },
+  downloadTagText:    { fontSize: 9, fontFamily: "Cairo_800ExtraBold", color: colors.accent },
+  downloadRowLabel:   { fontSize: 11, fontFamily: "Cairo_700Bold", color: colors.textPrimary },
+  downloadQuality:    { fontSize: 9, fontFamily: "Cairo_400Regular", color: colors.textMuted },
+  downloadAction:     { minWidth: 78, height: 36, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 5, borderRadius: 10, backgroundColor: colors.primary, borderWidth: 1, borderColor: colors.accentBorder },
+  downloadActionText: { fontSize: 10, fontFamily: "Cairo_800ExtraBold", color: colors.primaryForeground },
 
   /* ── أزرار الاختيار/التشغيل ── */
-  pickBtn:        { paddingHorizontal: 9, paddingVertical: 5, borderRadius: 9, backgroundColor: "rgba(124,58,237,0.18)", borderWidth: 1, borderColor: "rgba(139,92,246,0.35)" },
-  pickBtnText:    { fontSize: 11, fontFamily: "Cairo_700Bold", color: "#c4b5fd" },
+  pickBtn:        { paddingHorizontal: 9, paddingVertical: 5, borderRadius: 9, backgroundColor: colors.accentSurface, borderWidth: 1, borderColor: colors.accentBorder },
+  pickBtnText:    { fontSize: 11, fontFamily: "Cairo_700Bold", color: colors.accent },
   playBtnGreen:   { flexDirection: "row", alignItems: "center", gap: 3, paddingHorizontal: 9, paddingVertical: 5, borderRadius: 9, backgroundColor: "rgba(16,185,129,0.88)", borderWidth: 1, borderColor: "rgba(52,211,153,0.35)" },
   playBtnGreenText: { fontSize: 11, fontFamily: "Cairo_800ExtraBold", color: "#fff" },
 
   /* ── Download button ── */
-  dlIconBtn:     { width: 40, height: 40, borderRadius: 12, backgroundColor: "rgba(139,92,246,0.14)", borderWidth: 1, borderColor: "rgba(139,92,246,0.28)", alignItems: "center", justifyContent: "center" },
-  dlPctBadge:    { minWidth: 40, height: 40, paddingHorizontal: 8, borderRadius: 12, backgroundColor: "rgba(139,92,246,0.15)", borderWidth: 1, borderColor: "rgba(139,92,246,0.28)", alignItems: "center", justifyContent: "center" },
-  dlPctText:     { fontSize: 11, fontFamily: "Cairo_800ExtraBold", color: "#c4b5fd" },
-});
+  dlIconBtn:     { width: 40, height: 40, borderRadius: 12, backgroundColor: colors.accentSurface, borderWidth: 1, borderColor: colors.accentBorder, alignItems: "center", justifyContent: "center" },
+  dlPctBadge:    { minWidth: 40, height: 40, paddingHorizontal: 8, borderRadius: 12, backgroundColor: colors.accentSurface, borderWidth: 1, borderColor: colors.accentBorder, alignItems: "center", justifyContent: "center" },
+  dlPctText:     { fontSize: 11, fontFamily: "Cairo_800ExtraBold", color: colors.accent },
+  });
+}
