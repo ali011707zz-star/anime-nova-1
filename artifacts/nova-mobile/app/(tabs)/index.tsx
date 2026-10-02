@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useFocusEffect, useRouter } from "expo-router";
 import { LinearGradient } from "expo-linear-gradient";
 import { FlatList, Image, useWindowDimensions } from "react-native";
@@ -9,7 +9,6 @@ import {
   StyleSheet, Text, View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import { AnnouncementBanner } from "@/components/AnnouncementBanner";
 import { DrawerMenu } from "@/components/DrawerMenu";
 import { HeroSection } from "@/components/HeroSection";
@@ -17,15 +16,74 @@ import { SectionRow, SkeletonRow } from "@/components/SectionRow";
 import { getRailCardWidth, getRailSidePadding } from "@/components/AnimeCard";
 import { useColors } from "@/hooks/useColors";
 import {
-  AIRING_QUERY, AnilistMedia, anilistQuery,
-  POPULAR_QUERY, TRENDING_QUERY,
-  TOP_RATED_QUERY, MOVIES_QUERY, ISEKAI_QUERY,
+  AnilistMedia, anilistQuery, HOME_PRIMARY_QUERY, HOME_SECONDARY_QUERY,
 } from "@/utils/anilist";
 import { historyRoute, useApp } from "@/context/AppContext";
 import { getBaseUrl } from "@/utils/api";
 import { isTvDevice, tvFocusStyle } from "@/utils/tv";
 import { useTvFocusMemory } from "@/utils/tvFocus";
 import { getPosterUri, getTvPosterUri } from "@/utils/media";
+import {
+  emptyHomeCache,
+  readHomeCache,
+  writeHomeCache,
+  type HomeCacheKey,
+  type HomeCacheSnapshot,
+} from "@/utils/homeCache";
+
+type HomePage = { media?: AnilistMedia[] };
+type HomePrimaryData = {
+  trending?: HomePage;
+  popular?: HomePage;
+  airing?: HomePage;
+};
+type HomeSecondaryData = {
+  topRated?: HomePage;
+  movies?: HomePage;
+  isekai?: HomePage;
+};
+type TodayEp = {
+  animeId: number;
+  anilistId?: number;
+  anslayerId: number;
+  name: string;
+  romaji?: string;
+  english?: string;
+  native?: string;
+  titleVariants?: string[];
+  titleAr?: string;
+  episode: number;
+  cover: string;
+  year?: string;
+};
+
+const HOME_PRIMARY_KEY = ["nova-home", "primary"] as const;
+const HOME_SECONDARY_KEY = ["nova-home", "secondary"] as const;
+const HOME_LATEST_KEY = ["nova-home", "latest"] as const;
+const HOME_DUBBED_KEY = ["nova-home", "dubbed"] as const;
+const HOME_AW_DUBBED_KEY = ["nova-home", "aw-dubbed"] as const;
+const HOME_QUERY_STALE_MS = 5 * 60 * 1000;
+const HOME_API_TIMEOUT_MS = 12_000;
+
+async function fetchHomeJson<T>(path: string, signal: AbortSignal): Promise<T> {
+  const controller = new AbortController();
+  const relayAbort = () => controller.abort();
+  const timeout = setTimeout(relayAbort, HOME_API_TIMEOUT_MS);
+  if (signal.aborted) controller.abort();
+  else signal.addEventListener("abort", relayAbort, { once: true });
+
+  try {
+    const response = await fetch(`${getBaseUrl()}${path}`, {
+      signal: controller.signal,
+      headers: { Accept: "application/json" },
+    });
+    if (!response.ok) throw new Error(`Home request failed (${response.status})`);
+    return await response.json() as T;
+  } finally {
+    clearTimeout(timeout);
+    signal.removeEventListener("abort", relayAbort);
+  }
+}
 
 function normalizeLatestEpisodeItem(item: any): any {
   /* The API has two namespaces: anime_id is AnimeSlayer, while anilistId is

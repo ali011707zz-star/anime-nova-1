@@ -20,19 +20,85 @@ export type AnilistMedia = {
   relations?: { edges: { relationType: string; node: { id: number; title: { romaji: string }; coverImage: { large: string }; type: string } }[] };
 };
 
+export type AnilistRequestOptions = {
+  signal?: AbortSignal;
+  timeoutMs?: number;
+};
+
 export async function anilistQuery<T = unknown>(
   query: string,
-  variables?: Record<string, unknown>
+  variables?: Record<string, unknown>,
+  options: AnilistRequestOptions = {},
 ): Promise<T> {
-  const response = await fetch(getAnilistApi(), {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Accept: "application/json" },
-    body: JSON.stringify({ query, variables }),
-  });
-  const json = await response.json();
-  if (json.errors) throw new Error(json.errors[0].message);
-  return json.data as T;
+  const controller = new AbortController();
+  const relayAbort = () => controller.abort();
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+
+  if (options.signal) {
+    if (options.signal.aborted) controller.abort();
+    else options.signal.addEventListener("abort", relayAbort, { once: true });
+  }
+  if (options.timeoutMs && options.timeoutMs > 0) {
+    timeout = setTimeout(relayAbort, options.timeoutMs);
+  }
+
+  try {
+    const response = await fetch(getAnilistApi(), {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify({ query, variables }),
+      signal: controller.signal,
+    });
+    if (!response.ok) throw new Error(`AniList proxy returned ${response.status}`);
+    const json = await response.json();
+    if (json.errors) throw new Error(json.errors[0]?.message || "AniList query failed");
+    return json.data as T;
+  } finally {
+    if (timeout) clearTimeout(timeout);
+    options.signal?.removeEventListener("abort", relayAbort);
+  }
 }
+
+// Home's three first-screen sections are sent as one GraphQL request. Keeping
+// poster fields at `large` avoids downloading extraLarge assets for small rails.
+export const HOME_PRIMARY_QUERY = `
+query NovaHomePrimary {
+  trending: Page(page: 1, perPage: 20) {
+    media(sort: TRENDING_DESC, type: ANIME, countryOfOrigin: "JP", isAdult: false, genre_not_in: ["Hentai"]) {
+      id title { romaji english } coverImage { large } averageScore episodes status format nextAiringEpisode { episode airingAt }
+    }
+  }
+  popular: Page(page: 1, perPage: 20) {
+    media(sort: POPULARITY_DESC, type: ANIME, countryOfOrigin: "JP", isAdult: false, genre_not_in: ["Hentai"]) {
+      id title { romaji english } coverImage { large } bannerImage averageScore episodes status format genres
+    }
+  }
+  airing: Page(page: 1, perPage: 20) {
+    media(status: RELEASING, sort: POPULARITY_DESC, type: ANIME, countryOfOrigin: "JP", isAdult: false, genre_not_in: ["Hentai"]) {
+      id title { romaji english } coverImage { large } averageScore episodes nextAiringEpisode { episode airingAt }
+    }
+  }
+}`;
+
+// Secondary rails share a second request that Home schedules after first paint.
+export const HOME_SECONDARY_QUERY = `
+query NovaHomeSecondary {
+  topRated: Page(page: 1, perPage: 14) {
+    media(sort: SCORE_DESC, type: ANIME, countryOfOrigin: "JP", format_in: [TV, MOVIE], isAdult: false, genre_not_in: ["Hentai"], averageScore_greater: 75) {
+      id title { romaji english } coverImage { large } averageScore episodes status format
+    }
+  }
+  movies: Page(page: 1, perPage: 20) {
+    media(format: MOVIE, type: ANIME, sort: POPULARITY_DESC) {
+      id title { romaji english } coverImage { large } averageScore episodes status format
+    }
+  }
+  isekai: Page(page: 1, perPage: 14) {
+    media(type: ANIME, genre_in: ["Isekai"], countryOfOrigin: "JP", format_in: [TV, ONA, MOVIE], isAdult: false) {
+      id title { romaji english } coverImage { large } averageScore episodes status format
+    }
+  }
+}`;
 
 export const TRENDING_QUERY = `
 query TrendingAnime($page: Int) {
