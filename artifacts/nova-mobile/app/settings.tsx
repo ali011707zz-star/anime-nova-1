@@ -22,11 +22,8 @@ import { CrashEntry, getCrashLog } from "@/utils/crashLogger";
 import { TvPressable } from "@/utils/tv";
 
 const THEMES: { label: string; value: string; dot: string; desc: string }[] = [
-  { label: "أسود",   value: "dark",   dot: "#000000", desc: "أسود كامل" },
-  { label: "AMOLED", value: "amoled", dot: "#111111", desc: "أسود موفّر للطاقة" },
-  { label: "بنفسجي", value: "violet", dot: "#a78bfa", desc: "توهّج بنفسجي" },
-  { label: "أزرق",   value: "blue",   dot: "#3b82f6", desc: "توهّج أزرق" },
-  { label: "وردي",   value: "pink",   dot: "#ec4899", desc: "توهّج وردي" },
+  { label: "أبيض", value: "white", dot: "#F3F4F6", desc: "خلفيات فاتحة ونصوص داكنة" },
+  { label: "أسود", value: "black", dot: "#090A0C", desc: "خلفيات داكنة ونصوص فاتحة" },
 ];
 
 const REPORT_TYPES = [
@@ -224,18 +221,20 @@ function ReportSheet({ open, onClose }: { open: boolean; onClose: () => void }) 
 
 /* ── Section Header ── */
 function SectionHeader({ title, icon }: { title: string; icon: string }) {
+  const colors = useColors();
   return (
     <View style={ts.sectionHeader}>
-      <View style={ts.sectionLine} />
-      <Text style={ts.sectionTitle}>{icon} {title}</Text>
-      <View style={ts.sectionLine} />
+      <View style={[ts.sectionLine, { backgroundColor: colors.border }]} />
+      <Text style={[ts.sectionTitle, { color: colors.textSecondary }]}>{icon} {title}</Text>
+      <View style={[ts.sectionLine, { backgroundColor: colors.border }]} />
     </View>
   );
 }
 /* ── Card ── */
 function Card({ children }: { children: React.ReactNode }) {
+  const colors = useColors();
   return (
-    <View style={ts.card}>
+    <View style={[ts.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
       {children}
     </View>
   );
@@ -1563,16 +1562,16 @@ export default function SettingsScreen() {
       )}
 
       {/* Sticky Header */}
-      <View style={[ts.header, { paddingTop: topPad, backgroundColor: colors.background, borderBottomColor: colors.border }]}>
+      <View style={[ts.header, { paddingTop: topPad, backgroundColor: colors.surface, borderBottomColor: colors.border }]}>
         <View style={ts.headerBadge}>
           <View style={ts.headerDot} />
           <Text style={ts.headerBadgeText}>ANIME NOVA · v2.4</Text>
         </View>
         <View style={{ flexDirection: "row", alignItems: "center", gap: 10, flex: 1 }}>
-          <View style={ts.headerIconWrap}>
+          <View style={[ts.headerIconWrap, { backgroundColor: colors.surfaceElevated, borderColor: colors.border }]}>
             <Ionicons name="settings" size={16} color={colors.primary} />
           </View>
-          <Text style={[ts.headerTitle, { color: colors.text }]}>الإعدادات</Text>
+          <Text style={[ts.headerTitle, { color: colors.textPrimary }]}>الإعدادات</Text>
         </View>
         <Pressable onPress={() => router.back()} style={ts.headerBackBtn}>
           <Ionicons name="chevron-forward" size={16} color={colors.mutedForeground} />
@@ -1584,7 +1583,7 @@ export default function SettingsScreen() {
         {/* ── Profile / Login card ── */}
         <View style={{ paddingHorizontal: 16, marginTop: 20 }}>
           {currentUser ? (
-            <Pressable onPress={() => setShowProfile(true)} style={ts.profileCard}>
+            <Pressable onPress={() => setShowProfile(true)} style={[ts.profileCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
               {/* Avatar */}
               <View style={[ts.profileAvatar, { backgroundColor: (AVATAR_COLORS[(currentUser.avatarColor ?? 0) % AVATAR_COLORS.length]) + "28", borderColor: (AVATAR_COLORS[(currentUser.avatarColor ?? 0) % AVATAR_COLORS.length]) + "80" }]}>
                 {currentUser.profileImageUrl ? (
@@ -1611,7 +1610,7 @@ export default function SettingsScreen() {
             </Pressable>
           ) : (
             <View style={{ gap: 10 }}>
-              <Pressable onPress={() => setShowAuth(true)} style={ts.profileCard}>
+              <Pressable onPress={() => setShowAuth(true)} style={[ts.profileCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
                 <View style={ts.profileAvatar}>
                   <Ionicons name="person" size={24} color="rgba(255,255,255,0.3)" />
                 </View>
@@ -1694,8 +1693,8 @@ export default function SettingsScreen() {
                   <View style={[ts.themePreviewInner, { backgroundColor: currentTheme.dot }]} />
                 </View>
                 <View style={{ flex: 1, alignItems: "flex-end" }}>
-                  <Text style={[ts.navLabel, { color: colors.text }]}>ثيم التطبيق</Text>
-                  <Text style={[ts.navSub, { color: colors.mutedForeground }]}>الثيم الحالي: {currentTheme.label} · {currentTheme.desc}</Text>
+                  <Text style={[ts.navLabel, { color: colors.textPrimary }]}>ثيم التطبيق</Text>
+                  <Text style={[ts.navSub, { color: colors.textMuted }]}>الثيم الحالي: {currentTheme.label} · {currentTheme.desc}</Text>
                 </View>
               </View>
               <View style={ts.themesRow}>
@@ -1706,8 +1705,8 @@ export default function SettingsScreen() {
                       key={t.value}
                       onPress={() => handleSetTheme(t.value)}
                       style={[ts.themeBtn, {
-                         backgroundColor: active ? t.dot + "18" : colors.secondary,
-                         borderColor: active ? t.dot + "60" : colors.border,
+                          backgroundColor: active ? colors.surfaceElevated : colors.surface,
+                          borderColor: active ? colors.accent : colors.border,
                       }]}
                     >
                       <View style={[ts.themeDot, {
@@ -1724,7 +1723,7 @@ export default function SettingsScreen() {
                           </View>
                         )}
                       </View>
-                      <Text style={[ts.themeLabel, { color: active ? t.dot : colors.mutedForeground }]}>{t.label}</Text>
+                      <Text style={[ts.themeLabel, { color: active ? colors.textPrimary : colors.textMuted }]}>{t.label}</Text>
                     </Pressable>
                   );
                 })}

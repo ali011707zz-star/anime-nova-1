@@ -20,6 +20,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { getBaseUrl } from "@/utils/api";
 import { TvPressable, useTvMetrics } from "@/utils/tv";
+import { useColors } from "@/hooks/useColors";
 
 const { width: W, height: H } = Dimensions.get("window");
 // Keep the existing player controls in one place while making every control
@@ -454,6 +455,7 @@ function ExpoRiftPlayer({
   episodeTitle,
   onError,
 }: Props) {
+  const colors = useColors();
   const insets = useSafeAreaInsets();
   const { tv: tvMode } = useTvMetrics();
 
@@ -564,10 +566,12 @@ function ExpoRiftPlayer({
 
   /* ─── Seekbar drag ─── */
   const [isDragging, setIsDragging]     = useState(false);
+  const isDraggingRef                   = useRef(false);
   const [dragPct, setDragPct]           = useState(0);
-  /* postSeekPct: يُبقي الشريط على الموضع الصحيح لـ 800ms بعد الإفلات ريثما يتحدث polling */
+  /* Keep the requested position visible until native playback confirms the seek. */
   const [postSeekPct, setPostSeekPct]   = useState<number | null>(null);
   const postSeekTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingSeekRef = useRef<{ target: number; expiresAt: number } | null>(null);
 
   /* ─── Speed ─── */
   const [speed, setSpeed]             = useState(1);
@@ -680,10 +684,9 @@ function ExpoRiftPlayer({
   const gestureStartY     = useRef(0);
   const gestureStartVal   = useRef(0);
   const barRef            = useRef<View>(null);
-  const barWidth          = useRef(W);   // يبدأ بعرض الشاشة كـ fallback آمن قبل onLayout
-  const barPageX          = useRef(0);   // absolute X of bar's left edge on screen (for reliable seek)
-  const lastMoveX         = useRef(0);   // last known absolute X during drag (fallback for release on Android)
-  const grantLocationXRef = useRef(0);   // locationX النسبي لحدث Grant (أدق من pageX للنقر السريع)
+  const seekBarBoundsRef  = useRef<{ left: number; width: number } | null>(null);
+  const seekBarMeasureGenerationRef = useRef(0);
+  const lastMoveX         = useRef<number | null>(null);
   const resumedRef        = useRef(false);
   const subRafRef         = useRef<any>(null);
   const durationRef       = useRef(0);
@@ -713,6 +716,7 @@ function ExpoRiftPlayer({
   const waitForSrcTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
       /* timers صغيرة غير مُتتبَّعة سابقاً — يجب مسحها في master cleanup لمنع كراش الـ native player */
   const replayTimeoutRef         = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const manualSeekErrorTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const screenshotSavedTimerRef  = useRef<ReturnType<typeof setTimeout> | null>(null);
   /* طلبات الشبكة المرتبطة بالمصدر الحالي — تُلغى قبل تبديل الحلقة أو إغلاقها. */
   const subtitleAbortRef         = useRef<AbortController | null>(null);
@@ -722,6 +726,56 @@ function ExpoRiftPlayer({
   /* يؤجل replace إلى effect بعد إعادة تسجيل listeners الخاصة بالمصدر الجديد. */
   const nativeSrcIdxRef          = useRef(safeInitialIndex);
   const replaceCallTimerRef      = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const measureSeekBar = useCallback(() => {
+    const generation = seekBarMeasureGenerationRef.current;
+    barRef.current?.measureInWindow((left, _top, width) => {
+      if (generation !== seekBarMeasureGenerationRef.current) return;
+      if (Number.isFinite(left) && Number.isFinite(width) && width > 1) {
+        seekBarBoundsRef.current = { left, width };
+      } else {
+        seekBarBoundsRef.current = null;
+      }
+    });
+  }, []);
+
+  useEffect(() => {
+    const subscription = Dimensions.addEventListener("change", () => {
+      seekBarMeasureGenerationRef.current += 1;
+      seekBarBoundsRef.current = null;
+      requestAnimationFrame(measureSeekBar);
+    });
+    return () => subscription.remove();
+  }, [measureSeekBar]);
+
+  useEffect(() => {
+    durationRef.current = 0;
+    positionRef.current = 0;
+    pendingSeekRef.current = null;
+    isDraggingRef.current = false;
+    setPosition(0);
+    setDuration(0);
+    setBufferedPct(0);
+    setIsDragging(false);
+    setPostSeekPct(null);
+    if (postSeekTimer.current) {
+      clearTimeout(postSeekTimer.current);
+      postSeekTimer.current = null;
+    }
+    if (manualSeekErrorTimeoutRef.current) {
+      clearTimeout(manualSeekErrorTimeoutRef.current);
+      manualSeekErrorTimeoutRef.current = null;
+    }
+    if (seekRecoveryTimerRef.current) {
+      clearTimeout(seekRecoveryTimerRef.current);
+      seekRecoveryTimerRef.current = null;
+    }
+    if (replayTimeoutRef.current) {
+      clearTimeout(replayTimeoutRef.current);
+      replayTimeoutRef.current = null;
+    }
+    seekRecoveryRef.current = null;
+  }, [srcIdx, currentSrc?.url]);
 
   useEffect(() => {
     aliveRef.current = true;
@@ -944,6 +998,18 @@ function ExpoRiftPlayer({
     })();
   }, []);
 
+  const cancelSeekRecovery = useCallback(() => {
+    if (seekRecoveryTimerRef.current) {
+      clearTimeout(seekRecoveryTimerRef.current);
+      seekRecoveryTimerRef.current = null;
+    }
+    if (replayTimeoutRef.current) {
+      clearTimeout(replayTimeoutRef.current);
+      replayTimeoutRef.current = null;
+    }
+    seekRecoveryRef.current = null;
+  }, []);
+
   const beginSeekRecovery = useCallback((target: number) => {
     if (seekRecoveryTimerRef.current) clearTimeout(seekRecoveryTimerRef.current);
     if (replayTimeoutRef.current) {
@@ -986,6 +1052,10 @@ function ExpoRiftPlayer({
       if (!aliveRef.current || isStale()) return;
       setIsPlaying(e.isPlaying ?? false);
       setBuffering(false);
+      if (e.isPlaying && manualSeekErrorTimeoutRef.current) {
+        clearTimeout(manualSeekErrorTimeoutRef.current);
+        manualSeekErrorTimeoutRef.current = null;
+      }
     });
     const sub2 = player.addListener("statusChange", (e: any) => {
       if (!aliveRef.current || isStale()) return;
@@ -1021,6 +1091,10 @@ function ExpoRiftPlayer({
         if (e.status === "readyToPlay") {
           setBuffering(false);
           setError(false);
+          if (manualSeekErrorTimeoutRef.current) {
+            clearTimeout(manualSeekErrorTimeoutRef.current);
+            manualSeekErrorTimeoutRef.current = null;
+          }
           terminalErrorRef.current = false;
           console.log(`[RiftPlayer] ✅ readyToPlay: ${playableSources[srcIdx]?.label || "?"} → ${playableSources[srcIdx]?.url?.slice(0, 100)}`);
           const pendingSeek = seekRecoveryRef.current;
@@ -1057,6 +1131,23 @@ function ExpoRiftPlayer({
           try { player.play(); } catch {}
         }
         else if (e.status === "error") {
+          const manualSeek = pendingSeekRef.current;
+          if (manualSeek && Date.now() < manualSeek.expiresAt) {
+            setBuffering(true);
+            if (!manualSeekErrorTimeoutRef.current) {
+              manualSeekErrorTimeoutRef.current = setTimeout(() => {
+                manualSeekErrorTimeoutRef.current = null;
+                if (!aliveRef.current || isStale() || pendingSeekRef.current !== manualSeek) return;
+                if ((player as any).status === "error") {
+                  pendingSeekRef.current = null;
+                  setPostSeekPct(null);
+                  setError(true);
+                  setBuffering(false);
+                }
+              }, 6_000);
+            }
+            return;
+          }
           const pendingSeek = seekRecoveryRef.current;
           if (pendingSeek && pendingSeek.retries < 1) {
             /* بعض إصدارات Media3 تبلغ error عند seek قبل أن تعيد بناء
@@ -1224,26 +1315,64 @@ function ExpoRiftPlayer({
         const rawPos = player.currentTime;
         const rawDur = player.duration;
         const pos = (typeof rawPos === "number" && isFinite(rawPos) && rawPos >= 0) ? rawPos : 0;
-        const dur = (typeof rawDur === "number" && isFinite(rawDur) && rawDur > 0) ? rawDur : 0;
-        setPosition(pos);
-        setDuration(dur);
-        positionRef.current = pos;
-        durationRef.current = dur;
-        if (dur > 0 && onProgress) onProgress(pos, dur);
+        const reportedDuration = (typeof rawDur === "number" && isFinite(rawDur) && rawDur > 0)
+          ? rawDur
+          : 0;
+        if (reportedDuration > 0) {
+          durationRef.current = reportedDuration;
+          setDuration(reportedDuration);
+        }
+        const dur = reportedDuration || durationRef.current;
+        const pendingSeek = pendingSeekRef.current;
+        let awaitingNativeSeek = false;
+        if (pendingSeek) {
+          const tolerance = Math.max(1.5, dur * 0.004);
+          const reachedTarget = Math.abs(pos - pendingSeek.target) <= tolerance;
+          const resumedPastTarget = !!player.playing &&
+            pos > pendingSeek.target &&
+            pos - pendingSeek.target <= Math.max(4, dur * 0.01);
+          if (reachedTarget || resumedPastTarget) {
+            pendingSeekRef.current = null;
+            setPostSeekPct(null);
+            if (postSeekTimer.current) {
+              clearTimeout(postSeekTimer.current);
+              postSeekTimer.current = null;
+            }
+            if (manualSeekErrorTimeoutRef.current) {
+              clearTimeout(manualSeekErrorTimeoutRef.current);
+              manualSeekErrorTimeoutRef.current = null;
+            }
+          } else if (Date.now() < pendingSeek.expiresAt) {
+            awaitingNativeSeek = true;
+            setPosition(pendingSeek.target);
+            positionRef.current = pendingSeek.target;
+          } else {
+            pendingSeekRef.current = null;
+            setPostSeekPct(null);
+          }
+        }
+        if (!awaitingNativeSeek) {
+          positionRef.current = pos;
+          if (!isDraggingRef.current) setPosition(pos);
+          if (dur > 0 && onProgress && !isDraggingRef.current) onProgress(pos, dur);
+        }
         if (dur > 0 && pos >= dur - 0.5) {
           setIsEnded(true);
           setIsPlaying(false);
         }
         /* ── Buffer bar tracking ── */
         try {
-          const buf = (player as any).bufferedPosition || 0;
-          setBufferedPct(dur > 0 ? Math.min(buf / dur, 1) : 0);
+          const rawBuffered = Number((player as any).bufferedPosition);
+          const buf = Number.isFinite(rawBuffered) && rawBuffered > 0 ? rawBuffered : 0;
+          setBufferedPct(dur > 0 ? Math.min(Math.max(buf / dur, 0), 1) : 0);
         } catch {}
         /* ── Stall detection: شاشة سوداء صامتة بدون error event ──
            إذا بقي المشغّل في "يشتغل" (isPlaying=true) بدون تقدّم في الـ position
            لمدة 15ث نعامله كخطأ → auto-advance للمصدر التالي.
            نتجاهل حالة الإيقاف المؤقت أو نهاية الحلقة أو حالة الخطأ الموجودة. */
-        if (isPlayingRef.current && !isErrorRef.current && !isEndedRef.current && !isLocalPlayback && dur > 0) {
+        if (isDraggingRef.current || pendingSeekRef.current) {
+          stallRef.current = { lastPos: pos, lastAt: Date.now() };
+        } else if (isPlayingRef.current && !isErrorRef.current && !isEndedRef.current && !isLocalPlayback && dur > 0) {
           if (pos > stallRef.current.lastPos + 0.1) {
             // تقدّم طبيعي — أعد ضبط العداد وألغِ محاولة الـ nudge السابقة
             stallRef.current = { lastPos: pos, lastAt: Date.now() };
@@ -1900,21 +2029,43 @@ function ExpoRiftPlayer({
     try { if (player.playing) player.pause(); else player.play(); } catch {}
   }, [player, fadeIn]);
 
-  const seek = useCallback((secs: number) => {
-    fadeIn();
-    const maxDuration = durationRef.current > 0 ? durationRef.current : duration;
-    const safeSecs = Number.isFinite(secs) ? secs : 0;
-    const target = maxDuration > 0
-      ? Math.max(0, Math.min(safeSecs, maxDuration))
-      : Math.max(0, safeSecs);
-    beginSeekRecovery(target);
-    try { player.currentTime = target; setPosition(target); } catch {}
+  const applySeek = useCallback((secs: number) => {
+    const maxDuration = durationRef.current;
+    if (!Number.isFinite(secs) || !Number.isFinite(maxDuration) || maxDuration <= 0) return;
+    const target = Math.min(Math.max(secs, 0), maxDuration);
+    if (!Number.isFinite(target)) return;
+    cancelSeekRecovery();
+    if (manualSeekErrorTimeoutRef.current) {
+      clearTimeout(manualSeekErrorTimeoutRef.current);
+      manualSeekErrorTimeoutRef.current = null;
+    }
+    if (postSeekTimer.current) {
+      clearTimeout(postSeekTimer.current);
+      postSeekTimer.current = null;
+    }
+    pendingSeekRef.current = { target, expiresAt: Date.now() + 8_000 };
+    setPostSeekPct(target / maxDuration);
+    setPosition(target);
+    positionRef.current = target;
+    setIsEnded(false);
+    isEndedRef.current = false;
+    try {
+      player.currentTime = target;
+    } catch {
+      pendingSeekRef.current = null;
+      setPostSeekPct(null);
+      return;
+    }
     /* أعِد ضبط كاشف الـ stall — بدون هذا، القفز للخلف يجعل pos أصغر من
        lastPos المُخزَّن فيبقى عدّاد "بدون تقدّم" السابق للتنقّل يعمل، فيُطلق
        "stall" زائف بعد ثوانٍ قليلة من القفز رغم أن التشغيل طبيعي تماماً —
        هذا هو سبب التجمّد الظاهري بعد التقديم/الإرجاع الذي أبلغ عنه المستخدم. */
     stallRef.current = { lastPos: target, lastAt: Date.now() };
-  }, [beginSeekRecovery, player, duration, fadeIn]);
+  }, [cancelSeekRecovery, player]);
+  const seek = useCallback((secs: number) => {
+    fadeIn();
+    applySeek(secs);
+  }, [applySeek, fadeIn]);
   seekRef.current = seek;
 
   /* على التلفاز يبقى التركيز على شريط التقدم هدفاً حقيقياً للريموت؛
@@ -1941,11 +2092,8 @@ function ExpoRiftPlayer({
   /* seekSilent: نفس seek لكن بدون إظهار controls (للـ double-tap والـ gestures) */
   const seekSilentRef = useRef<(s: number) => void>(() => {});
   const seekSilent = useCallback((secs: number) => {
-    const target = Math.max(0, Math.min(secs, durationRef.current || duration));
-    beginSeekRecovery(target);
-    try { player.currentTime = target; setPosition(target); } catch {}
-    stallRef.current = { lastPos: target, lastAt: Date.now() };
-  }, [beginSeekRecovery, player, duration]);
+    applySeek(secs);
+  }, [applySeek]);
   seekSilentRef.current = seekSilent;
 
   const changeSpeed = useCallback((s: number) => {
@@ -2213,110 +2361,88 @@ function ExpoRiftPlayer({
   ).current;
 
   /* ─── Seekbar drag PanResponder ─── */
-  /* شريط التقدم يسير من اليسار إلى اليمين (LTR) — المعيار العالمي لمشغلات الفيديو.
-     نستخدم gestureState.moveX (إحداثي مطلق على الشاشة) بدلاً من locationX
-     لأن locationX على Android غير موثوق أثناء onPanResponderMove خارج حدود الـ View. */
   const _nRTL = Platform.OS !== "web" && I18nManager.isRTL;
-  /* شريط التقدم يسير دائماً من اليسار (0%) إلى اليمين (100%) بغض النظر عن RTL —
-     هذا هو المعيار العالمي لمشغلات الفيديو حتى في التطبيقات العربية */
-  const _calcPctFromAbsolute = (absoluteX: number): number => {
-    const localX = absoluteX - barPageX.current;
-    const raw = Math.min(1, Math.max(0, localX) / Math.max(1, barWidth.current));
-    return _nRTL ? 1 - raw : raw;
-  };
-  const seekBarPan = useRef(
-    PanResponder.create({
-      onStartShouldSetPanResponder: () => true,
-      onMoveShouldSetPanResponder: () => true,
-      onPanResponderGrant: (e) => {
-        const grantPageX  = e.nativeEvent.pageX;
-        const grantLocX   = e.nativeEvent.locationX; // نسبي للـ View — أدق من pageX للنقرات السريعة
-        lastMoveX.current        = grantPageX;
-        grantLocationXRef.current = grantLocX;
-        // إلغاء أي timer معلّق من الإفلات السابق
-        if (postSeekTimer.current) { clearTimeout(postSeekTimer.current); postSeekTimer.current = null; }
-        setPostSeekPct(null);
-        setIsDragging(true);
-
-        /* حساب فوري: نفضّل locationX (لا يعتمد على barPageX) إن كان ضمن حدود الشريط */
-        const bw = barWidth.current;
-        if (grantLocX >= 0 && grantLocX <= bw + 4) {
-          const raw = Math.min(1, Math.max(0, grantLocX / Math.max(1, bw)));
-          setDragPct(_nRTL ? 1 - raw : raw);
-        } else {
-          setDragPct(Math.max(0, Math.min(1, _calcPctFromAbsolute(grantPageX))));
+  const progressPctFromAbsolute = useCallback((absoluteX: number): number | null => {
+    const bounds = seekBarBoundsRef.current;
+    if (!Number.isFinite(absoluteX) || !bounds || bounds.width <= 1) return null;
+    return Math.min(1, Math.max(0, (absoluteX - bounds.left) / bounds.width));
+  }, []);
+  const seekBarPan = useRef<ReturnType<typeof PanResponder.create> | null>(null);
+  if (!seekBarPan.current) {
+    seekBarPan.current = PanResponder.create({
+      onStartShouldSetPanResponder: () => durationRef.current > 0 && seekBarBoundsRef.current !== null,
+      onMoveShouldSetPanResponder: () => durationRef.current > 0 && seekBarBoundsRef.current !== null,
+      onPanResponderGrant: (event) => {
+        const x = Number(event.nativeEvent.pageX);
+        const pct = progressPctFromAbsolute(x);
+        if (pct === null) {
+          measureSeekBar();
+          return;
         }
-
-        /* تحديث القياسات بشكل غير متزامن (يُصلح إن تغيّر تخطيط الشريط) */
-        barRef.current?.measureInWindow((px, _py, pw) => {
-          if (px >= 0) barPageX.current = px;
-          if (pw > 1)  barWidth.current  = pw;
-        });
-      },
-      onPanResponderMove: (_, gs) => {
-        /* gs.moveX = الإحداثي المطلق للإصبع على الشاشة — موثوق على iOS وAndroid */
-        const x = gs.moveX;
-        if (x > 0) lastMoveX.current = x;
-        const pct = _calcPctFromAbsolute(x > 0 ? x : lastMoveX.current);
-        setDragPct(Math.max(0, Math.min(1, pct)));
-      },
-      onPanResponderRelease: (_, gs) => {
-        /* نقرة سريعة (dx < 8px): نفضّل locationX المحفوظ — لا يعتمد على barPageX/barWidth.
-           لكن locationX قد يكون 0 على Android لأسباب داخلية (موثّق)؛ نتحقق أن الصفر
-           منطقي فعلاً (الطرف الأيسر من الشريط) وإلا نرجع لحساب pageX. */
-        let safePct: number;
-        const isPureTap = Math.abs(gs.dx) < 8 && Math.abs(gs.dy) < 8;
-        if (isPureTap) {
-          const loc = grantLocationXRef.current;
-          const bw  = barWidth.current;
-          /* اعتبر locationX صالحاً إن كان موجباً، أو صفراً مع نقرة في الطرف الأيسر فعلاً */
-          const isEdgeTap = lastMoveX.current <= barPageX.current + 4;
-          const locValid  = loc > 0 || (loc === 0 && isEdgeTap);
-          if (locValid && bw > 1) {
-            const raw = Math.min(1, Math.max(0, loc / bw));
-            safePct = _nRTL ? 1 - raw : raw;
-          } else {
-            /* fallback: pageX-based (Android RTL أو locationX=0 غير طرفي) */
-            const x = lastMoveX.current > 0 ? lastMoveX.current : gs.x0;
-            safePct = Math.max(0, Math.min(1, _calcPctFromAbsolute(x)));
-          }
-        } else {
-          const x = gs.moveX > 0 ? gs.moveX : lastMoveX.current;
-          safePct = Math.max(0, Math.min(1, _calcPctFromAbsolute(x)));
-        }
-        seekRef.current(safePct * durationRef.current);
-        // نُبقي على الموضع المطلوب مرئياً 800ms ريثما يتحدث الـ polling (كل 500ms)
-        // هذا يمنع "الخط الوهمي" الذي يملأ ثم يرجع عند الإفلات
-        setPostSeekPct(safePct);
-        setIsDragging(false);
-        if (postSeekTimer.current) clearTimeout(postSeekTimer.current);
-        postSeekTimer.current = setTimeout(() => {
-          setPostSeekPct(null);
+        lastMoveX.current = x;
+        if (postSeekTimer.current) {
+          clearTimeout(postSeekTimer.current);
           postSeekTimer.current = null;
-        }, 800);
+        }
+        setPostSeekPct(null);
+        isDraggingRef.current = true;
+        setIsDragging(true);
+        setDragPct(pct);
+        stallRef.current = { lastPos: positionRef.current, lastAt: Date.now() };
       },
-    })
-  ).current;
+      onPanResponderMove: (_event, gesture) => {
+        const x = Number(gesture.moveX);
+        if (Number.isFinite(x)) lastMoveX.current = x;
+        const pct = progressPctFromAbsolute(x);
+        if (pct !== null) setDragPct(pct);
+      },
+      onPanResponderRelease: (event, gesture) => {
+        const releaseX = Number(event.nativeEvent.pageX);
+        const gestureX = Number(gesture.moveX);
+        const absoluteX = Number.isFinite(releaseX)
+          ? releaseX
+          : Number.isFinite(gestureX)
+            ? gestureX
+            : lastMoveX.current;
+        const pct = absoluteX === null ? null : progressPctFromAbsolute(absoluteX);
+        isDraggingRef.current = false;
+        setIsDragging(false);
+        if (pct !== null && durationRef.current > 0) {
+          seekRef.current(pct * durationRef.current);
+        }
+        lastMoveX.current = null;
+      },
+      onPanResponderTerminate: () => {
+        isDraggingRef.current = false;
+        setIsDragging(false);
+        lastMoveX.current = null;
+      },
+      onPanResponderTerminationRequest: () => false,
+    });
+  }
 
   const commitProgressPercent = useCallback((value: number) => {
-    const safePct = Math.max(0, Math.min(1, Number.isFinite(value) ? value : 0));
-    seek(safePct * durationRef.current);
-    setPostSeekPct(safePct);
+    const dur = durationRef.current;
+    if (!Number.isFinite(value) || !Number.isFinite(dur) || dur <= 0) return;
+    const safePct = Math.max(0, Math.min(1, value));
+    isDraggingRef.current = false;
     setIsDragging(false);
-    if (postSeekTimer.current) clearTimeout(postSeekTimer.current);
-    postSeekTimer.current = setTimeout(() => {
-      setPostSeekPct(null);
-      postSeekTimer.current = null;
-    }, 800);
+    seek(safePct * dur);
   }, [seek]);
 
   const handleTvProgressPress = useCallback((event: any) => {
-    const locationX = Number(event?.nativeEvent?.locationX);
-    const width = Math.max(1, barWidth.current);
-    if (!Number.isFinite(locationX)) return;
-    const raw = Math.max(0, Math.min(1, locationX / width));
-    commitProgressPercent(_nRTL ? 1 - raw : raw);
-  }, [commitProgressPercent, _nRTL]);
+    const native = event?.nativeEvent || {};
+    const bounds = seekBarBoundsRef.current;
+    const pageX = Number(native.pageX);
+    const localX = Number(native.locationX);
+    const absoluteX = Number.isFinite(pageX)
+      ? pageX
+      : bounds && Number.isFinite(localX)
+        ? bounds.left + localX
+        : NaN;
+    const pct = progressPctFromAbsolute(absoluteX);
+    if (pct !== null) commitProgressPercent(pct);
+  }, [commitProgressPercent, progressPctFromAbsolute]);
 
   /* ─── Skip intro/outro logic ─── */
   const SKIP_BTN_LEAD = 3; // ثوانٍ قبل بداية النطاق لإظهار الزر
@@ -2393,6 +2519,14 @@ function ExpoRiftPlayer({
   const progress = (duration > 0 && isFinite(position) && isFinite(duration))
     ? Math.min(Math.max(position / duration, 0), 1)
     : 0;
+  const displayProgress = isDragging
+    ? dragPct
+    : postSeekPct !== null
+      ? postSeekPct
+      : progress;
+  const displayPosition = duration > 0 && isFinite(duration)
+    ? displayProgress * duration
+    : position;
 
   /* ─── Volume sync: player يعمل دائماً بـ 100% — النظام يتحكم بالصوت الفعلي ─── */
   useEffect(() => {
@@ -2925,35 +3059,24 @@ function ExpoRiftPlayer({
           >
             {/* أزرار التخطي انتقلت إلى overlay مستقل خارج showControls */}
 
-            {/* الوقت — في RTL يبدأ الزمن من اليمين ويتدرج بصرياً إلى اليسار */}
+            {/* The progress timeline is left-to-right on every locale. */}
             <View style={{ position: "relative", height: 18, marginBottom: 2 }}>
-              <Text style={[s.timeText, tvMode && s.tvTimeText, { position: "absolute", [_nRTL ? "right" : "left"]: 0 }]}>{fmtTime(position)}</Text>
-              <Text style={[s.timeText, tvMode && s.tvTimeText, { position: "absolute", [_nRTL ? "left" : "right"]: 0, opacity: 0.45 }]}>{fmtTime(duration)}</Text>
+              <Text style={[s.timeText, tvMode && s.tvTimeText, { position: "absolute", left: 0 }]}>{fmtTime(displayPosition)}</Text>
+              <Text style={[s.timeText, tvMode && s.tvTimeText, { position: "absolute", right: 0, opacity: 0.65 }]}>{fmtTime(duration)}</Text>
             </View>
 
-            {/* شريط التقدم — يسار=بداية، يمين=نهاية (LTR دائماً، المعيار العالمي لمشغلات الفيديو)
-                direction:'ltr' يُجبر Yoga على تخطيط LTR حتى في التطبيقات العربية RTL،
-                مما يجعل left:0%→100% من اليسار الفيزيائي وليس من يمين RTL.
-                هذا يُصلح: (1) ملء الشريط (2) موضع الـ thumb (3) حساب الـ seek */}
+            {/* One physical left-to-right timeline, shared by fill, thumb and touch math. */}
             {(() => {
-              const rawFill = (isDragging ? dragPct : postSeekPct !== null ? postSeekPct : progress) * 100;
+              const rawFill = displayProgress * 100;
               const fillPct = Math.min(Math.max(isFinite(rawFill) ? rawFill : 0, 0), 100);
               const thumbPct = fillPct;
               const tooltipPct = Math.max(4, Math.min(88, fillPct - 6));
               return (
                 <View
                   ref={barRef}
-                  style={[s.progressWrap, tvMode && s.tvProgressWrap, isDragging && s.progressWrapDragging,
-                    _nRTL && { transform: [{ scaleX: -1 }] },
-                  ]}
-                  onLayout={(e) => {
-                    barWidth.current = e.nativeEvent.layout.width || 1;
-                    // مسح أي seek مؤقت عند تغيير الاتجاه (portrait↔landscape) لتجنب الإحداثيات القديمة
-                    setPostSeekPct(null);
-                    setIsDragging(false);
-                    barRef.current?.measureInWindow((px) => { if (px >= 0) barPageX.current = px; });
-                  }}
-                  {...seekBarPan.panHandlers}
+                  style={[s.progressWrap, tvMode && s.tvProgressWrap, isDragging && s.progressWrapDragging]}
+                  onLayout={measureSeekBar}
+                  {...(seekBarPan.current?.panHandlers ?? {})}
                 >
                   {tvMode && (
                     <Pressable
@@ -2972,9 +3095,9 @@ function ExpoRiftPlayer({
                       ]}
                     />
                   )}
-                  <View style={[s.progressBg, tvMode && s.tvProgressBg]} />
+                  <View style={[s.progressBg, tvMode && s.tvProgressBg, { backgroundColor: colors.playerTrack }]} />
                   {bufferedPct > 0 && (
-                    <View style={[s.bufferBar, { left: 0, width: `${bufferedPct * 100}%` as any }]} />
+                    <View style={[s.bufferBar, { left: 0, width: `${bufferedPct * 100}%` as any, backgroundColor: colors.playerBuffer }]} />
                   )}
                   {markerPctIntro && (
                     <View style={[s.skipMarker, {
@@ -2989,21 +3112,19 @@ function ExpoRiftPlayer({
                     }]} />
                   )}
                   <LinearGradient
-                    colors={["#6D28D9", "#8B5CF6", "#a78bfa"]}
-                    start={_nRTL ? { x: 1, y: 0 } : { x: 0, y: 0 }}
-                    end={_nRTL ? { x: 0, y: 0 } : { x: 1, y: 0 }}
+                    colors={[colors.violetDark, colors.violet, colors.accent]}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 0 }}
                     style={[s.progressFill, tvMode && s.tvProgressFill, { left: 0, width: `${fillPct}%` as any }]}
                   />
                   <View style={[
                     s.thumb, tvMode && s.tvThumb,
-                    { left: `${thumbPct}%` as any },
+                    { left: `${thumbPct}%` as any, backgroundColor: colors.accent },
                     isDragging && s.thumbDragging,
                   ]} />
                   {isDragging && (
-                    <View style={[s.dragTooltip, { left: `${tooltipPct}%` as any },
-                      _nRTL && { transform: [{ scaleX: -1 }] },
-                    ]}>
-                      <Text style={s.dragTooltipText}>{fmtTime(dragPct * (durationRef.current || duration))}</Text>
+                    <View style={[s.dragTooltip, { left: `${tooltipPct}%` as any, backgroundColor: colors.surfaceElevated, borderColor: colors.border }]}>
+                      <Text style={[s.dragTooltipText, { color: colors.textPrimary }]}>{fmtTime(displayPosition)}</Text>
                     </View>
                   )}
                 </View>

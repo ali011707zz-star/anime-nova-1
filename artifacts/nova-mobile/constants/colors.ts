@@ -1,10 +1,32 @@
-// ── Palette type ──────────────────────────────────────────────────────────────
-type Palette = {
+export type Theme = "white" | "black";
+
+export type Palette = {
+  background: string;
+  surface: string;
+  surfaceElevated: string;
+  card: string;
+  textPrimary: string;
+  textSecondary: string;
+  textMuted: string;
+  button: string;
+  buttonText: string;
+  accent: string;
+  border: string;
+  input: string;
+  destructive: string;
+  destructiveForeground: string;
+  success: string;
+  overlay: string;
+  playerControl: string;
+  playerControlBorder: string;
+  playerControlIcon: string;
+  playerTrack: string;
+  playerBuffer: string;
+
+  // Compatibility aliases for screens that are being moved to semantic tokens.
   text: string;
   tint: string;
-  background: string;
   foreground: string;
-  card: string;
   cardForeground: string;
   primary: string;
   primaryForeground: string;
@@ -12,158 +34,91 @@ type Palette = {
   secondaryForeground: string;
   muted: string;
   mutedForeground: string;
-  accent: string;
   accentForeground: string;
-  destructive: string;
-  destructiveForeground: string;
-  border: string;
-  input: string;
   violet: string;
   violetDark: string;
   violetDeep: string;
-  surface: string;
+}
+
+const white: Palette = {
+  background: "#F3F4F6",
+  surface: "#FFFFFF",
+  surfaceElevated: "#F7F8FA",
+  card: "#FFFFFF",
+  textPrimary: "#17191F",
+  textSecondary: "#4D535E",
+  textMuted: "#747B87",
+  button: "#202329",
+  buttonText: "#FFFFFF",
+  accent: "#343943",
+  border: "#DDE1E7",
+  input: "#F0F2F5",
+  destructive: "#C62828",
+  destructiveForeground: "#FFFFFF",
+  success: "#18794E",
+  overlay: "rgba(17,19,23,0.45)",
+  playerControl: "rgba(255,255,255,0.92)",
+  playerControlBorder: "rgba(20,22,26,0.16)",
+  playerControlIcon: "#17191F",
+  playerTrack: "rgba(255,255,255,0.42)",
+  playerBuffer: "rgba(255,255,255,0.72)",
+
+  text: "#17191F",
+  tint: "#343943",
+  foreground: "#17191F",
+  cardForeground: "#17191F",
+  primary: "#202329",
+  primaryForeground: "#FFFFFF",
+  secondary: "#F7F8FA",
+  secondaryForeground: "#17191F",
+  muted: "#F0F2F5",
+  mutedForeground: "#747B87",
+  accentForeground: "#FFFFFF",
+  violet: "#343943",
+  violetDark: "#252930",
+  violetDeep: "#17191F",
 };
 
-// ── الثيمات ───────────────────────────────────────────────────────────────────
+const black: Palette = {
+  background: "#090A0C",
+  surface: "#111317",
+  surfaceElevated: "#191C21",
+  card: "#14171B",
+  textPrimary: "#F3F4F6",
+  textSecondary: "#B7BBC4",
+  textMuted: "#858B96",
+  button: "#F0F1F3",
+  buttonText: "#17191F",
+  accent: "#D5D8DE",
+  border: "rgba(255,255,255,0.10)",
+  input: "rgba(255,255,255,0.07)",
+  destructive: "#EF5350",
+  destructiveForeground: "#FFFFFF",
+  success: "#4ADE80",
+  overlay: "rgba(0,0,0,0.58)",
+  playerControl: "rgba(25,27,31,0.88)",
+  playerControlBorder: "rgba(255,255,255,0.18)",
+  playerControlIcon: "#F3F4F6",
+  playerTrack: "rgba(255,255,255,0.24)",
+  playerBuffer: "rgba(255,255,255,0.54)",
 
-/** dark — أسود كامل مع أسطح داكنة */
-const dark: Palette = {
-  text:                "#F8FAFC",
-  tint:                "#8B5CF6",
-  background:          "#000000",
-  foreground:          "#F8FAFC",
-  card:                "#0A0A0A",
-  cardForeground:      "#F8FAFC",
-  primary:             "#8B5CF6",
-  primaryForeground:   "#ffffff",
-  secondary:           "#1C1C22",
-  secondaryForeground: "#E8E8F0",
-  muted:               "#1C1C22",
-  mutedForeground:     "#71717A",
-  accent:              "#8B5CF6",
-  accentForeground:    "#ffffff",
-  destructive:         "#ef4444",
-  destructiveForeground: "#ffffff",
-  border:              "rgba(255,255,255,0.07)",
-  input:               "rgba(255,255,255,0.08)",
-  violet:              "#8B5CF6",
-  violetDark:          "#6D28D9",
-  violetDeep:          "#4C1D95",
-  surface:             "#0E0E14",
+  text: "#F3F4F6",
+  tint: "#D5D8DE",
+  foreground: "#F3F4F6",
+  cardForeground: "#F3F4F6",
+  primary: "#F0F1F3",
+  primaryForeground: "#17191F",
+  secondary: "#191C21",
+  secondaryForeground: "#F3F4F6",
+  muted: "#191C21",
+  mutedForeground: "#858B96",
+  accentForeground: "#17191F",
+  violet: "#D5D8DE",
+  violetDark: "#AEB3BC",
+  violetDeep: "#777D87",
 };
 
-/** amoled — أسود نقي لتوفير البطارية */
-const amoled: Palette = {
-  text:                "#E8E8F0",
-  tint:                "#8B5CF6",
-  background:          "#000000",
-  foreground:          "#E8E8F0",
-  card:                "#080808",
-  cardForeground:      "#E8E8F0",
-  primary:             "#8B5CF6",
-  primaryForeground:   "#ffffff",
-  secondary:           "#101010",
-  secondaryForeground: "#E8E8F0",
-  muted:               "#101010",
-  mutedForeground:     "#71717A",
-  accent:              "#8B5CF6",
-  accentForeground:    "#ffffff",
-  destructive:         "#ef4444",
-  destructiveForeground: "#ffffff",
-  border:              "rgba(255,255,255,0.06)",
-  input:               "rgba(255,255,255,0.07)",
-  violet:              "#8B5CF6",
-  violetDark:          "#6D28D9",
-  violetDeep:          "#4C1D95",
-  surface:             "#050505",
-};
-
-/** violet — توهّج بنفسجي */
-const violet: Palette = {
-  text:                "#EDE9FF",
-  tint:                "#A78BFA",
-  background:          "#0A0614",
-  foreground:          "#EDE9FF",
-  card:                "#120D20",
-  cardForeground:      "#EDE9FF",
-  primary:             "#A78BFA",
-  primaryForeground:   "#ffffff",
-  secondary:           "#1A1030",
-  secondaryForeground: "#EDE9FF",
-  muted:               "#1A1030",
-  mutedForeground:     "#7C6FA0",
-  accent:              "#A78BFA",
-  accentForeground:    "#ffffff",
-  destructive:         "#ef4444",
-  destructiveForeground: "#ffffff",
-  border:              "rgba(167,139,250,0.12)",
-  input:               "rgba(167,139,250,0.10)",
-  violet:              "#A78BFA",
-  violetDark:          "#7C3AED",
-  violetDeep:          "#4C1D95",
-  surface:             "#0D0918",
-};
-
-/** blue — توهّج أزرق */
-const blue: Palette = {
-  text:                "#E0EEFF",
-  tint:                "#3B82F6",
-  background:          "#030712",
-  foreground:          "#E0EEFF",
-  card:                "#0A1020",
-  cardForeground:      "#E0EEFF",
-  primary:             "#3B82F6",
-  primaryForeground:   "#ffffff",
-  secondary:           "#0F172A",
-  secondaryForeground: "#E0EEFF",
-  muted:               "#0F172A",
-  mutedForeground:     "#64748B",
-  accent:              "#3B82F6",
-  accentForeground:    "#ffffff",
-  destructive:         "#ef4444",
-  destructiveForeground: "#ffffff",
-  border:              "rgba(59,130,246,0.12)",
-  input:               "rgba(59,130,246,0.10)",
-  violet:              "#3B82F6",
-  violetDark:          "#1D4ED8",
-  violetDeep:          "#1E3A8A",
-  surface:             "#060D1C",
-};
-
-/** pink — توهّج وردي */
-const pink: Palette = {
-  text:                "#FFEDF6",
-  tint:                "#EC4899",
-  background:          "#120614",
-  foreground:          "#FFEDF6",
-  card:                "#1C0A20",
-  cardForeground:      "#FFEDF6",
-  primary:             "#EC4899",
-  primaryForeground:   "#ffffff",
-  secondary:           "#280A30",
-  secondaryForeground: "#FFEDF6",
-  muted:               "#280A30",
-  mutedForeground:     "#9D4E7A",
-  accent:              "#EC4899",
-  accentForeground:    "#ffffff",
-  destructive:         "#ef4444",
-  destructiveForeground: "#ffffff",
-  border:              "rgba(236,72,153,0.12)",
-  input:               "rgba(236,72,153,0.10)",
-  violet:              "#EC4899",
-  violetDark:          "#BE185D",
-  violetDeep:          "#831843",
-  surface:             "#0F0414",
-};
-
-const colors = {
-  dark,
-  amoled,
-  violet,
-  blue,
-  pink,
-  radius: 16,
-};
+const colors = { white, black, radius: 16 };
 
 export type ThemePalette = Palette;
 export default colors;
