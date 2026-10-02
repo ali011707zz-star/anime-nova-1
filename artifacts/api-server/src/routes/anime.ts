@@ -1,5 +1,6 @@
 import { Router, type Request } from "express";
 import { scraperQueueMiddleware } from "../lib/scraperQueue.js";
+import { logger } from "../lib/logger.js";
 import { createHash, createDecipheriv, createCipheriv, randomBytes } from "crypto";
 import { execSync, execFile, spawn } from "child_process";
 import { createReadStream, existsSync, writeFileSync, readFileSync, readdirSync, mkdirSync, rmSync, statSync } from "fs";
@@ -6301,6 +6302,373 @@ const KAWAII_CDN_HOSTS = new Set([
   "cdn.kryntal.top",
 ]);
 
+type SkipInterval = { start: number; end: number };
+type SkipTimes = { intro: SkipInterval | null; outro: SkipInterval | null };
+type SkipTimesCacheEntry = {
+  value: SkipTimes;
+  checkedIntro: boolean;
+  checkedOutro: boolean;
+  expiresAt: number;
+  retryIntroAt?: number;
+  retryOutroAt?: number;
+};
+type SkipNeeds = { intro: boolean; outro: boolean };
+
+const SKIP_TIMES_CACHE = new Map<string, SkipTimesCacheEntry>();
+const SKIP_TIMES_INFLIGHT = new Map<string, Promise<SkipTimesCacheEntry>>();
+const SKIP_MAL_ID_CACHE = new Map<number, { malId: number | null; expiresAt: number }>();
+const SKIP_MAL_ID_INFLIGHT = new Map<number, Promise<number | null>>();
+const SKIP_TIMES_CACHE_MAX = 2_000;
+const SKIP_MAL_ID_CACHE_MAX = 2_000;
+const SKIP_TIMES_CACHE_TTL_MS = 24 * 60 * 60 * 1_000;
+const SKIP_TIMES_FAILURE_TTL_MS = 60 * 1_000;
+
+function normalizeSkipInterval(value: unknown): SkipInterval | null {
+  if (!value || typeof value !== "object") return null;
+  const outer = value as Record<string, unknown>;
+  const nestedValue = outer.interval ?? outer.timestamps ?? outer.time ?? value;
+  if (!nestedValue || typeof nestedValue !== "object") return null;
+  const nested = nestedValue as Record<string, unknown>;
+  const readNumber = (candidate: unknown): number | null => {
+    if (typeof candidate !== "number" && typeof candidate !== "string") return null;
+    if (typeof candidate === "string" && !candidate.trim()) return null;
+    const number = Number(candidate);
+    return Number.isFinite(number) ? number : null;
+  };
+  const start = readNumber(
+    nested.start_time ?? nested.startTime ?? nested.start ?? nested.from
+      ?? outer.start_time ?? outer.startTime ?? outer.start,
+  );
+  const end = readNumber(
+    nested.end_time ?? nested.endTime ?? nested.end ?? nested.to
+      ?? outer.end_time ?? outer.endTime ?? outer.end,
+  );
+  if (start === null || end === null || start < 0 || end <= 0 || end <= start) return null;
+  return { start, end };
+}
+
+function getSkipResultTypes(result: any): string[] {
+  const values = [
+    result?.skip_type,
+    result?.skipType,
+    result?.type,
+    result?.kind,
+    result?.category,
+    ...(Array.isArray(result?.types) ? result.types : []),
+  ];
+  return values.flatMap((value: unknown) => {
+    if (typeof value === "string") return [value.toLowerCase().trim()];
+    if (value && typeof value === "object") {
+      const item = value as Record<string, unknown>;
+      return [item.name, item.type, item.id]
+        .filter((part): part is string => typeof part === "string")
+        .map(part => part.toLowerCase().trim());
+    }
+    return [];
+  });
+}
+
+function skipResultHasType(result: any, aliases: Set<string>): boolean {
+  return getSkipResultTypes(result).some(type =>
+    aliases.has(type) || type.split(/[\s_-]+/).some(part => aliases.has(part)),
+  );
+}
+
+function parseAniSkipPayload(payload: any): SkipTimes {
+  const value: SkipTimes = { intro: null, outro: null };
+  const results = Array.isArray(payload?.results) ? payload.results : [];
+  for (const result of results) {
+    const interval = normalizeSkipInterval(result);
+    if (!interval) continue;
+    if (!value.intro && skipResultHasType(result, new Set(["op", "opening", "intro"]))) {
+      value.intro = interval;
+    }
+    if (!value.outro && skipResultHasType(result, new Set(["ed", "ending", "outro"]))) {
+      value.outro = interval;
+    }
+    if (value.intro && value.outro) break;
+  }
+  return value;
+}
+
+function parseKawaiiSkipPayload(payload: any): SkipTimes {
+  const data = payload?.data && typeof payload.data === "object"
+    ? { ...payload, ...payload.data }
+    : payload;
+  const nested = data?.skipTimes ?? data?.skip_times ?? {};
+  return {
+    intro: normalizeSkipInterval(
+      data?.intro ?? data?.opening ?? data?.op ?? data?.skipIntro
+        ?? nested?.intro ?? nested?.opening ?? nested?.op,
+    ),
+    outro: normalizeSkipInterval(
+      data?.outro ?? data?.ending ?? data?.ed ?? data?.skipOutro
+        ?? nested?.outro ?? nested?.ending ?? nested?.ed,
+    ),
+  };
+}
+
+async function getMalIdForAniList(anilistId: number): Promise<number | null> {
+  const cached = SKIP_MAL_ID_CACHE.get(anilistId);
+  if (cached && cached.expiresAt > Date.now()) return cached.malId;
+  if (cached) SKIP_MAL_ID_CACHE.delete(anilistId);
+
+  const pending = SKIP_MAL_ID_INFLIGHT.get(anilistId);
+  if (pending) return pending;
+
+  const work = (async () => {
+    const body = {
+      query: "query($id:Int){Media(id:$id){idMal}}",
+      variables: { id: anilistId },
+    };
+    const response = await anilistFetchAndCache(body, metaHash(body), metaTtl(body));
+    const rawMalId = response?.data?.Media?.idMal;
+    const malId = Number.isSafeInteger(Number(rawMalId)) && Number(rawMalId) > 0
+      ? Number(rawMalId)
+      : null;
+    SKIP_MAL_ID_CACHE.set(anilistId, {
+      malId,
+      expiresAt: Date.now() + (malId ? SKIP_TIMES_CACHE_TTL_MS : SKIP_TIMES_FAILURE_TTL_MS),
+    });
+    while (SKIP_MAL_ID_CACHE.size > SKIP_MAL_ID_CACHE_MAX) {
+      const oldestId = SKIP_MAL_ID_CACHE.keys().next().value;
+      if (oldestId === undefined) break;
+      SKIP_MAL_ID_CACHE.delete(oldestId);
+    }
+    return malId;
+  })().finally(() => {
+    if (SKIP_MAL_ID_INFLIGHT.get(anilistId) === work) {
+      SKIP_MAL_ID_INFLIGHT.delete(anilistId);
+    }
+  });
+  SKIP_MAL_ID_INFLIGHT.set(anilistId, work);
+  return work;
+}
+
+async function fetchAniSkipTimes(
+  malId: number,
+  episode: number,
+  needs: SkipNeeds,
+): Promise<{ ok: boolean; value: SkipTimes }> {
+  const params = new URLSearchParams();
+  if (needs.intro) params.append("types[]", "op");
+  if (needs.outro) params.append("types[]", "ed");
+  try {
+    const response = await fetch(
+      `https://api.aniskip.com/v1/skip-times/${malId}/${episode}?${params.toString()}`,
+      { headers: { Accept: "application/json" }, signal: AbortSignal.timeout(8_000) },
+    );
+    const payload = await response.json().catch(() => null);
+    // AniSkip may return a JSON `found:false` body with 404 for a genuine
+    // no-result. Other non-success responses are provider failures, not absence.
+    if (!payload || typeof payload !== "object" || (!response.ok && response.status !== 404)) {
+      logger.warn({ provider: "aniskip", status: response.status }, "skip-times provider request failed");
+      return { ok: false, value: { intro: null, outro: null } };
+    }
+    return { ok: true, value: parseAniSkipPayload(payload) };
+  } catch {
+    logger.warn({ provider: "aniskip" }, "skip-times provider request failed");
+    return { ok: false, value: { intro: null, outro: null } };
+  }
+}
+
+async function fetchKawaiiSkipTimes(
+  anilistId: number,
+  episode: number,
+  needs: SkipNeeds,
+): Promise<{ ok: boolean; value: SkipTimes }> {
+  const urls = KAWAII_API_BASES.flatMap(base => [
+    {
+      url: `${base}/api/miruro?anilistId=${anilistId}&ep=${episode}`,
+      referer: `${base}/`,
+    },
+    {
+      url: `${base}/api/watch?anilistId=${anilistId}&ep=${episode}`,
+      referer: `${base}/`,
+    },
+  ]);
+  const responses = await Promise.all(urls.map(async ({ url, referer }) => {
+    try {
+      const response = await fetch(url, {
+        headers: { ...BASE_HDRS, Accept: "application/json", Referer: referer },
+        signal: AbortSignal.timeout(7_000),
+      });
+      if (!response.ok) return null;
+      const payload = await response.json().catch(() => null);
+      return payload && typeof payload === "object" ? parseKawaiiSkipPayload(payload) : null;
+    } catch {
+      return null;
+    }
+  }));
+  const merged: SkipTimes = { intro: null, outro: null };
+  for (const result of responses) {
+    if (!result) continue;
+    if (needs.intro && !merged.intro && result.intro) merged.intro = result.intro;
+    if (needs.outro && !merged.outro && result.outro) merged.outro = result.outro;
+  }
+  const hadSuccessfulResponse = responses.some(result => result !== null);
+  if (!hadSuccessfulResponse) {
+    logger.warn({ provider: "kawaii" }, "skip-times fallback provider request failed");
+  }
+  return { ok: hadSuccessfulResponse, value: merged };
+}
+
+const SKIP_TIMES_FALLBACK_PROVIDERS: Array<{
+  name: string;
+  fetch: (anilistId: number, episode: number, needs: SkipNeeds) =>
+    Promise<{ ok: boolean; value: SkipTimes }>;
+}> = [
+  { name: "kawaii", fetch: fetchKawaiiSkipTimes },
+];
+
+function getSkipTimesCacheEntry(key: string): SkipTimesCacheEntry | null {
+  const entry = SKIP_TIMES_CACHE.get(key);
+  if (!entry) return null;
+  if (entry.expiresAt <= Date.now()) {
+    SKIP_TIMES_CACHE.delete(key);
+    return null;
+  }
+  SKIP_TIMES_CACHE.delete(key);
+  SKIP_TIMES_CACHE.set(key, entry);
+  return entry;
+}
+
+function setSkipTimesCacheEntry(key: string, entry: SkipTimesCacheEntry): void {
+  SKIP_TIMES_CACHE.delete(key);
+  SKIP_TIMES_CACHE.set(key, entry);
+  while (SKIP_TIMES_CACHE.size > SKIP_TIMES_CACHE_MAX) {
+    const oldestKey = SKIP_TIMES_CACHE.keys().next().value;
+    if (oldestKey === undefined) break;
+    SKIP_TIMES_CACHE.delete(oldestKey);
+  }
+}
+
+async function resolveCachedSkipTimes(
+  cacheKey: string,
+  anilistId: number,
+  malId: number | null,
+  episode: number,
+  requested: SkipNeeds,
+): Promise<SkipTimesCacheEntry> {
+  const existing = getSkipTimesCacheEntry(cacheKey);
+  const now = Date.now();
+  const needs: SkipNeeds = {
+    intro: requested.intro && !existing?.checkedIntro
+      && !(existing?.retryIntroAt && existing.retryIntroAt > now),
+    outro: requested.outro && !existing?.checkedOutro
+      && !(existing?.retryOutroAt && existing.retryOutroAt > now),
+  };
+  const empty: SkipTimesCacheEntry = {
+    value: { intro: null, outro: null },
+    checkedIntro: false,
+    checkedOutro: false,
+    expiresAt: now + SKIP_TIMES_CACHE_TTL_MS,
+  };
+  const current: SkipTimesCacheEntry = existing ?? empty;
+  if (!needs.intro && !needs.outro) {
+    return current;
+  }
+
+  let next: SkipTimesCacheEntry = {
+    ...current,
+    value: { ...current.value },
+  };
+  let unresolved: SkipNeeds = { ...needs };
+  let aniSkipChecked = !malId;
+  if (malId) {
+    const aniskip = await fetchAniSkipTimes(malId, episode, unresolved);
+    if (aniskip.ok) {
+      aniSkipChecked = true;
+      if (unresolved.intro && aniskip.value.intro) {
+        next.value.intro = aniskip.value.intro;
+        next.checkedIntro = true;
+      }
+      if (unresolved.outro && aniskip.value.outro) {
+        next.value.outro = aniskip.value.outro;
+        next.checkedOutro = true;
+      }
+      unresolved = {
+        intro: unresolved.intro && !aniskip.value.intro,
+        outro: unresolved.outro && !aniskip.value.outro,
+      };
+    }
+  }
+
+  for (const provider of SKIP_TIMES_FALLBACK_PROVIDERS) {
+    if (!unresolved.intro && !unresolved.outro) break;
+    const result = await provider.fetch(anilistId, episode, unresolved);
+    if (!result.ok) continue;
+    if (unresolved.intro) {
+      if (result.value.intro) {
+        next.value.intro = result.value.intro;
+        next.checkedIntro = true;
+      } else if (aniSkipChecked) {
+        next.checkedIntro = true;
+      }
+    }
+    if (unresolved.outro) {
+      if (result.value.outro) {
+        next.value.outro = result.value.outro;
+        next.checkedOutro = true;
+      } else if (aniSkipChecked) {
+        next.checkedOutro = true;
+      }
+    }
+    unresolved = {
+      intro: unresolved.intro && !result.value.intro && !aniSkipChecked,
+      outro: unresolved.outro && !result.value.outro && !aniSkipChecked,
+    };
+  }
+
+  const resolvedAt = Date.now();
+  next.expiresAt = resolvedAt + SKIP_TIMES_CACHE_TTL_MS;
+  if (needs.intro) {
+    next.retryIntroAt = next.checkedIntro ? undefined : resolvedAt + SKIP_TIMES_FAILURE_TTL_MS;
+  }
+  if (needs.outro) {
+    next.retryOutroAt = next.checkedOutro ? undefined : resolvedAt + SKIP_TIMES_FAILURE_TTL_MS;
+  }
+  setSkipTimesCacheEntry(cacheKey, next);
+  return next;
+}
+
+async function getCachedSkipTimes(
+  cacheKey: string,
+  anilistId: number,
+  malId: number | null,
+  episode: number,
+  requested: SkipNeeds,
+): Promise<SkipTimesCacheEntry> {
+  const cached = getSkipTimesCacheEntry(cacheKey);
+  if (
+    cached
+    && (!requested.intro || cached.checkedIntro)
+    && (!requested.outro || cached.checkedOutro)
+  ) return cached;
+  const now = Date.now();
+  const canResolveIntro = requested.intro && !cached?.checkedIntro
+    && !(cached?.retryIntroAt && cached.retryIntroAt > now);
+  const canResolveOutro = requested.outro && !cached?.checkedOutro
+    && !(cached?.retryOutroAt && cached.retryOutroAt > now);
+  if (!canResolveIntro && !canResolveOutro) return cached ?? {
+    value: { intro: null, outro: null },
+    checkedIntro: false,
+    checkedOutro: false,
+    expiresAt: now + SKIP_TIMES_CACHE_TTL_MS,
+  };
+
+  const inFlight = SKIP_TIMES_INFLIGHT.get(cacheKey);
+  if (inFlight) {
+    await inFlight;
+    return getCachedSkipTimes(cacheKey, anilistId, malId, episode, requested);
+  }
+
+  const work = resolveCachedSkipTimes(cacheKey, anilistId, malId, episode, requested)
+    .finally(() => SKIP_TIMES_INFLIGHT.delete(cacheKey));
+  SKIP_TIMES_INFLIGHT.set(cacheKey, work);
+  return work;
+}
+
 function kawaiiQualityRank(value: unknown): number {
   const text = String(value || "").toLowerCase();
   const m = text.match(/(?:^|[^0-9])(2160|1440|1080|720|480|360)(?:p)?(?:[^0-9]|$)/);
@@ -6443,10 +6811,8 @@ async function getKawaiiAnimeSources(
     const subLangLabel = rawSubUrl ? "عربي" : null;
 
     // بيانات تخطي المقدمة/الخاتمة من API مباشرة
-    const skipIntro = data.intro?.start !== undefined && data.intro?.end !== undefined
-      ? { start: data.intro.start, end: data.intro.end } : undefined;
-    const skipOutro = data.outro?.start !== undefined && data.outro?.end !== undefined
-      ? { start: data.outro.start, end: data.outro.end } : undefined;
+    const skipIntro = normalizeSkipInterval(data.intro) ?? undefined;
+    const skipOutro = normalizeSkipInterval(data.outro) ?? undefined;
 
     // ── kawaii CDN: cdn.momentoai.dev يشترط Referer: kawaiianime.cc ──
     // المتصفح لا يستطيع تعيين Referer كـ forbidden header → التشغيل المباشر يفشل.
@@ -6903,7 +7269,12 @@ router.get("/anime/kawaii-meta", async (req: Request, res: Response) => {
         const payload = candidate?.data && typeof candidate.data === "object"
           ? { ...candidate, ...candidate.data }
           : candidate;
-        if (payload?.subtitles?.some(s => typeof s?.url === "string" && s.url.length > 0)) {
+        const parsedSkips = parseKawaiiSkipPayload(payload);
+        if (
+          payload?.subtitles?.some(s => typeof s?.url === "string" && s.url.length > 0)
+          || parsedSkips.intro
+          || parsedSkips.outro
+        ) {
           data = payload;
           apiBase = base;
           break;
@@ -6928,13 +7299,91 @@ router.get("/anime/kawaii-meta", async (req: Request, res: Response) => {
       arabicSubUrl: arEntry?.url || null,
       englishSubUrl: enEntry?.url || null,
       subtitleRef,
-      intro: data.intro || null,
-      outro: data.outro || null,
+      intro: parseKawaiiSkipPayload(data).intro,
+      outro: parseKawaiiSkipPayload(data).outro,
     });
   } catch {
     return res.json(empty);
   }
 });// ════════════════════════════════════════════════════════════════════
+
+// Skip times are looked up server-side so AniList/MAL mapping and provider
+// requests are cached and coalesced instead of repeated independently by each
+// player instance. A missing field is cached independently from its sibling.
+router.get("/anime/skip-times", async (req, res) => {
+  const anilistId = Number(req.query.anilistId);
+  const episode = Number(req.query.ep);
+  const isRequested = (value: unknown) => {
+    if (value === undefined) return true;
+    const text = String(value).trim().toLowerCase();
+    return !["0", "false", "no", "off"].includes(text);
+  };
+  const requested: SkipNeeds = {
+    intro: isRequested(req.query.intro),
+    outro: isRequested(req.query.outro),
+  };
+
+  if (
+    !Number.isSafeInteger(anilistId) || anilistId <= 0
+    || !Number.isSafeInteger(episode) || episode <= 0
+    || (!requested.intro && !requested.outro)
+  ) {
+    return res.status(400).json({ error: "anilistId و ep يجب أن يكونا عددين موجبين، ويجب طلب نوع واحد على الأقل" });
+  }
+
+  try {
+    let malId: number | null = null;
+    try {
+      malId = await getMalIdForAniList(anilistId);
+    } catch (error) {
+      logger.warn({ provider: "anilist" }, "skip-times MAL ID lookup failed");
+    }
+    const cacheKey = malId
+      ? `mal:${malId}:${episode}`
+      : `al:${anilistId}:${episode}`;
+    const result = await getCachedSkipTimes(
+      cacheKey,
+      anilistId,
+      malId,
+      episode,
+      requested,
+    );
+    const retryAt = Math.max(
+      requested.intro && !result.checkedIntro ? result.retryIntroAt ?? 0 : 0,
+      requested.outro && !result.checkedOutro ? result.retryOutroAt ?? 0 : 0,
+    );
+    const retryAfterMs = Math.max(0, retryAt - Date.now());
+    const response = {
+      ...result.value,
+      checkedIntro: result.checkedIntro,
+      checkedOutro: result.checkedOutro,
+      retryAfterMs,
+    };
+    const requestComplete =
+      (!requested.intro || result.checkedIntro)
+      && (!requested.outro || result.checkedOutro);
+    if (!requestComplete) {
+      res.setHeader("Cache-Control", "no-store");
+      res.setHeader("Retry-After", String(Math.max(1, Math.ceil(retryAfterMs / 1_000))));
+      return res.status(503).json(response);
+    }
+    res.setHeader("Cache-Control", "public, max-age=300");
+    return res.json(response);
+  } catch {
+    logger.warn({ anilistId, episode }, "skip-times resolution failed");
+    res.setHeader("Cache-Control", "no-store");
+    res.setHeader("Retry-After", "60");
+    return res.status(503).json({
+      intro: null,
+      outro: null,
+      checkedIntro: false,
+      checkedOutro: false,
+      retryAfterMs: SKIP_TIMES_FAILURE_TTL_MS,
+    });
+  }
+});
+
+// ════════════════════════════════════════════════════════════════════
 //  ANIKOTO (via megaplay.buzz) — صوت ياباني + ترجمة إنجليزية → عربية
 //  يستخدم AniList ID مباشرة، لا حاجة للبحث عن slug
 // ════════════════════════════════════════════════════════════════════

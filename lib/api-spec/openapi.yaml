@@ -24,6 +24,55 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+  /anime/skip-times:
+    get:
+      operationId: getAnimeSkipTimes
+      tags: [anime]
+      summary: Resolve opening and ending skip times for an episode
+      parameters:
+        - name: anilistId
+          in: query
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+        - name: ep
+          in: query
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+        - name: intro
+          in: query
+          required: false
+          description: Whether to resolve the opening timing; defaults to true.
+          schema:
+            type: string
+            enum: ["0", "1"]
+            default: "1"
+        - name: outro
+          in: query
+          required: false
+          description: Whether to resolve the ending timing; defaults to true.
+          schema:
+            type: string
+            enum: ["0", "1"]
+            default: "1"
+      responses:
+        "200":
+          description: Available skip timings, with missing timings represented as null
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AnimeSkipTimes"
+        "400":
+          description: Invalid episode identity or no timing type requested
+        "503":
+          description: A timing provider could not complete the requested lookup
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AnimeSkipTimes"
   /device-link/request:
     post:
       operationId: createDeviceLinkCode
@@ -124,6 +173,37 @@ components:
           type: string
       required:
         - status
+    SkipInterval:
+      type: object
+      required: [start, end]
+      properties:
+        start:
+          type: number
+          minimum: 0
+        end:
+          type: number
+          exclusiveMinimum: 0
+    AnimeSkipTimes:
+      type: object
+      required: [intro, outro, checkedIntro, checkedOutro, retryAfterMs]
+      properties:
+        intro:
+          oneOf:
+            - $ref: "#/components/schemas/SkipInterval"
+            - type: "null"
+        outro:
+          oneOf:
+            - $ref: "#/components/schemas/SkipInterval"
+            - type: "null"
+        checkedIntro:
+          type: boolean
+          description: Whether all available providers were checked for an opening time.
+        checkedOutro:
+          type: boolean
+          description: Whether all available providers were checked for an ending time.
+        retryAfterMs:
+          type: integer
+          minimum: 0
     DeviceLinkCode:
       type: object
       required: [ok, requestId, code, expiresAt, ttlSeconds]

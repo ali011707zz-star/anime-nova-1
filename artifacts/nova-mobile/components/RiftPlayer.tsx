@@ -21,6 +21,12 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { getBaseUrl } from "@/utils/api";
 import { TvPressable, useTvMetrics } from "@/utils/tv";
 import { useColors } from "@/hooks/useColors";
+import {
+  buildSkipScopeKey,
+  isSkipInRange,
+  resolveSkipTimes,
+  validateSkipInterval,
+} from "@/lib/skipTimes.mjs";
 
 const { width: W, height: H } = Dimensions.get("window");
 // Keep the existing player controls in one place while making every control
@@ -606,11 +612,6 @@ function ExpoRiftPlayer({
   /* ─── Subtitle ─── */
   const [activeCue, setActiveCue]     = useState<SubCue | null>(null);
 
-  /* ─── Skip notification ─── */
-  const skipNotifFired                = useRef(false);
-  const [skipIntroDismissed, setSkipIntroDismissed] = useState(false);
-  const [skipOutroDismissed, setSkipOutroDismissed] = useState(false);
-
   /* ─── Anime Rift features ─── */
   const [seekDuration, setSeekDuration] = useState(10);
   const seekDurationRef               = useRef(10);
@@ -643,13 +644,52 @@ function ExpoRiftPlayer({
   /* ─── Position to restore when switching sources (keeps resumedRef approach) ─── */
   const switchPosRef = useRef(0);
 
-  /* ─── AniSkip: fetch skip times if not provided by source ─── */
-  const [fetchedSkipIntro, setFetchedSkipIntro] = useState<{ start: number; end: number } | undefined>(undefined);
-  const [fetchedSkipOutro, setFetchedSkipOutro] = useState<{ start: number; end: number } | undefined>(undefined);
-  /* المصدر قد يملك توقيتًا واحدًا فقط. استخدمه أولًا، ثم املأ الجزء الناقص
-     من AniSkip بدل إسقاط بيانات المصدر بالكامل. */
-  const skipIntro = skipIntroProp ?? currentSrc?.skipIntro ?? fetchedSkipIntro;
-  const skipOutro = skipOutroProp ?? currentSrc?.skipOutro ?? fetchedSkipOutro;
+  /* ─── Independent source/AniSkip/fallback timings ─── */
+  const sourceIntroTiming = validateSkipInterval(skipIntroProp)
+    ?? validateSkipInterval(currentSrc?.skipIntro);
+  const sourceOutroTiming = validateSkipInterval(skipOutroProp)
+    ?? validateSkipInterval(currentSrc?.skipOutro);
+  const skipScopeKey = buildSkipScopeKey({
+    anilistId,
+    episode,
+    title,
+    sourceSite: currentSrc?.site,
+    sourceUrl: currentSrc?.url,
+    intro: sourceIntroTiming,
+    outro: sourceOutroTiming,
+  });
+  const [fetchedSkipTimes, setFetchedSkipTimes] = useState<{
+    key: string;
+    intro: { start: number; end: number } | null;
+    outro: { start: number; end: number } | null;
+    checkedIntro: boolean;
+    checkedOutro: boolean;
+    retryAt: number;
+  } | null>(null);
+  const [skipFetchRetryTick, setSkipFetchRetryTick] = useState(0);
+  const fetchedSkipForScope = fetchedSkipTimes?.key === skipScopeKey
+    ? fetchedSkipTimes
+    : null;
+  const resolvedSkipTimes = resolveSkipTimes({
+    sourceIntroProp: skipIntroProp,
+    sourceIntro: currentSrc?.skipIntro,
+    sourceOutroProp: skipOutroProp,
+    sourceOutro: currentSrc?.skipOutro,
+    fetchedIntro: fetchedSkipForScope?.intro,
+    fetchedOutro: fetchedSkipForScope?.outro,
+    duration,
+  });
+  const skipIntro = resolvedSkipTimes.intro ?? undefined;
+  const skipOutro = resolvedSkipTimes.outro ?? undefined;
+  const [dismissedSkipRanges, setDismissedSkipRanges] = useState<{
+    key: string;
+    intro: boolean;
+    outro: boolean;
+  }>({ key: "", intro: false, outro: false });
+  const skipIntroDismissed = dismissedSkipRanges.key === skipScopeKey
+    && dismissedSkipRanges.intro;
+  const skipOutroDismissed = dismissedSkipRanges.key === skipScopeKey
+    && dismissedSkipRanges.outro;
 
   /* ─── Animated values ─── */
   const controlsOpacity   = useRef(new Animated.Value(1)).current;
@@ -1756,63 +1796,87 @@ function ExpoRiftPlayer({
     } catch {}
   }, [isMuted, player]);
 
-  /* ─── AniSkip: جلب الجزء الناقص فقط من أوقات المقدمة/النهاية ─── */
+  /* ─── Server-resolved skip timings: only request independently missing parts ─── */
   useEffect(() => {
-    const sourceIntro = skipIntroProp ?? currentSrc?.skipIntro;
-    const sourceOutro = skipOutroProp ?? currentSrc?.skipOutro;
-    const needsIntro = !sourceIntro;
-    const needsOutro = !sourceOutro;
-    if ((!needsIntro && !needsOutro) || !anilistId || !episode) return;
+    const previous = fetchedSkipTimes?.key === skipScopeKey
+      ? fetchedSkipTimes
+      : null;
+    const needsIntro = !resolvedSkipTimes.intro;
+    const needsOutro = !resolvedSkipTimes.outro;
+    const pendingIntro = needsIntro && !previous?.checkedIntro;
+    const pendingOutro = needsOutro && !previous?.checkedOutro;
+    const retryDelay = Math.max(0, (previous?.retryAt ?? 0) - Date.now());
+    if (!pendingIntro && !pendingOutro) return;
+    if (retryDelay > 0) {
+      const timer = setTimeout(() => setSkipFetchRetryTick(value => value + 1), retryDelay);
+      return () => clearTimeout(timer);
+    }
+    const requestIntro = pendingIntro;
+    const requestOutro = pendingOutro;
+    if (!currentSrc?.url || !anilistId || !episode) return;
+    const base = getBaseUrl();
+    if (!base) return;
+
     const ctrl = new AbortController();
     (async () => {
       try {
-        // 1. Get MAL ID from AniList
-        const alRes = await fetch(`${getBaseUrl()}/api/anilist`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ query: "query($id:Int){Media(id:$id){idMal}}", variables: { id: anilistId } }),
-          signal: ctrl.signal,
+        const params = new URLSearchParams({
+          anilistId: String(anilistId),
+          ep: String(episode),
+          intro: requestIntro ? "1" : "0",
+          outro: requestOutro ? "1" : "0",
         });
-        const alData = await alRes.json();
-        const malId: number | null = alData?.data?.Media?.idMal;
-        if (!malId || ctrl.signal.aborted) return;
-        // 2. Fetch skip times from AniSkip
-        const skipRes = await fetch(
-          `https://api.aniskip.com/v1/skip-times/${malId}/${episode}?types[]=op&types[]=ed`,
+        const response = await fetch(
+          `${base}/api/anime/skip-times?${params.toString()}`,
           { signal: ctrl.signal },
         );
-        const skipData = await skipRes.json();
-        if (ctrl.signal.aborted || !skipData?.found) return;
-        for (const r of (skipData.results ?? [])) {
-          const interval = r?.interval ?? r?.timestamps ?? r?.time ?? {};
-          const start = Number(
-            interval.start_time ?? interval.startTime ?? interval.start
-              ?? r?.start_time ?? r?.start,
-          );
-          const end = Number(
-            interval.end_time ?? interval.endTime ?? interval.end
-              ?? r?.end_time ?? r?.end,
-          );
-          if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) continue;
-          const type = String(r?.skip_type ?? r?.skipType ?? r?.type ?? "").toLowerCase();
-          const s = { start, end };
-          if (needsIntro && (type === "op" || type === "opening" || type === "intro")) {
-            setFetchedSkipIntro(s);
-          }
-          if (needsOutro && (type === "ed" || type === "ending" || type === "outro")) {
-            setFetchedSkipOutro(s);
-          }
-        }
+        const payload = await response.json().catch(() => null);
+        if (!payload || ctrl.signal.aborted) return;
+        const nextIntro = validateSkipInterval(payload?.intro);
+        const nextOutro = validateSkipInterval(payload?.outro);
+        const current = fetchedSkipTimes?.key === skipScopeKey
+          ? fetchedSkipTimes
+          : {
+              key: skipScopeKey,
+              intro: null,
+              outro: null,
+              checkedIntro: false,
+              checkedOutro: false,
+              retryAt: 0,
+            };
+        const retryAfterMs = Number(payload?.retryAfterMs);
+        const retryAt = Number.isFinite(retryAfterMs) && retryAfterMs > 0
+          ? Date.now() + retryAfterMs
+          : response.ok ? 0 : Date.now() + 60_000;
+        setFetchedSkipTimes({
+          key: skipScopeKey,
+          intro: nextIntro ?? current.intro,
+          outro: nextOutro ?? current.outro,
+          checkedIntro: current.checkedIntro
+            || (typeof payload?.checkedIntro === "boolean"
+              ? payload.checkedIntro
+              : response.ok && requestIntro),
+          checkedOutro: current.checkedOutro
+            || (typeof payload?.checkedOutro === "boolean"
+              ? payload.checkedOutro
+              : response.ok && requestOutro),
+          retryAt,
+        });
       } catch {}
     })();
     return () => ctrl.abort();
   }, [
     anilistId,
     episode,
-    skipIntroProp,
-    skipOutroProp,
-    currentSrc?.skipIntro,
-    currentSrc?.skipOutro,
+    currentSrc?.url,
+    skipScopeKey,
+    duration,
+    fetchedSkipTimes,
+    skipFetchRetryTick,
+    resolvedSkipTimes.intro?.start,
+    resolvedSkipTimes.intro?.end,
+    resolvedSkipTimes.outro?.start,
+    resolvedSkipTimes.outro?.end,
   ]);
 
   /* ─── Auto-fetch subtitles via subtitle-tracks API (wyzie.ru + SubDL + HiAnime) ─── */
@@ -1920,13 +1984,6 @@ function ExpoRiftPlayer({
       if (v) { const n = Number(v); setSeekDuration(n); seekDurationRef.current = n; }
     });
   }, []);
-
-  /* ─── Skip notification (mark fired when skip data arrives) ─── */
-  useEffect(() => {
-    if ((skipIntro || skipOutro) && !skipNotifFired.current) {
-      skipNotifFired.current = true;
-    }
-  }, [skipIntro, skipOutro]);
 
   /* ─── Sleep timer countdown ─── */
   useEffect(() => {
@@ -2451,30 +2508,32 @@ function ExpoRiftPlayer({
   /* ─── Skip intro/outro logic ─── */
   const SKIP_BTN_LEAD = 3; // ثوانٍ قبل بداية النطاق لإظهار الزر
   /* يظهر الزر عند اقتراب المشغّل من بداية المقدمة (LEAD ثوانٍ قبلها) وحتى نهايتها */
-  const inIntroRange = !!skipIntro && !skipIntroDismissed
-    && position >= Math.max(0, (skipIntro.start ?? 0) - SKIP_BTN_LEAD)
-    && position < skipIntro.end;
-  // النهاية لا تظهر أثناء المقدمة، ولا تظهر قبل بدء نطاق النهاية — زر واحد في كل مرة
-  const inOutroRange = !!skipOutro && !skipOutroDismissed && !inIntroRange
-    && position >= Math.max(0, skipOutro.start - SKIP_BTN_LEAD)
-    && position < skipOutro.end;
-
-  /* إعادة تعيين الإخفاء عند تغيير المصدر — كل حلقة/مصدر جديد يُعيد الزر للظهور */
-  useEffect(() => {
-    setSkipIntroDismissed(false);
-    setSkipOutroDismissed(false);
-  }, [srcIdx]);
+  const inIntroRange = isSkipInRange(
+    skipIntro, position, duration, skipIntroDismissed, SKIP_BTN_LEAD,
+  );
+  // المقدمة والنهاية مستقلتان؛ حتى البيانات المتداخلة لا تُخفي أحد الزرين.
+  const inOutroRange = isSkipInRange(
+    skipOutro, position, duration, skipOutroDismissed, SKIP_BTN_LEAD,
+  );
 
   const doSkipIntro = useCallback(() => {
     if (skipIntro) seekSilent(skipIntro.end);
-    setSkipIntroDismissed(true); // يختفي بعد ضغط المستخدم
-  }, [skipIntro, seekSilent]);
+    setDismissedSkipRanges(current => ({
+      key: skipScopeKey,
+      intro: true,
+      outro: current.key === skipScopeKey ? current.outro : false,
+    }));
+  }, [skipIntro, seekSilent, skipScopeKey]);
 
   const doSkipOutro = useCallback(() => {
     // تخطي النهاية = القفز لنهاية نطاق الـ outro فقط (لا الانتقال للحلقة التالية)
     if (skipOutro) seekSilent(skipOutro.end);
-    setSkipOutroDismissed(true);
-  }, [skipOutro, seekSilent]);
+    setDismissedSkipRanges(current => ({
+      key: skipScopeKey,
+      intro: current.key === skipScopeKey ? current.intro : false,
+      outro: true,
+    }));
+  }, [skipOutro, seekSilent, skipScopeKey]);
 
   /* ─── Tap handler with double-tap detection ─── */
   const handleTap = useCallback((pageX: number) => {
