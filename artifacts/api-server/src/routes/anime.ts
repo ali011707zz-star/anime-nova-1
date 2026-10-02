@@ -16200,7 +16200,7 @@ async function serveHlsVPS(
           } else {
             console.warn(`[hls-proxy] upstream rejected host=${safeHost(url)} status=${r.status} attempt=${attempt + 1}`);
           }
-          if (r.status !== 403 && r.status !== 429 && r.status !== 503) break;
+          if (![403, 429, 502, 503, 504].includes(r.status)) break;
           if (attempt < 1) await new Promise(r2 => setTimeout(r2, 300));
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);

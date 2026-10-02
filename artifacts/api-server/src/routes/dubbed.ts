@@ -537,9 +537,34 @@ router.get("/dubbed/stream", async (req, res) => {
     // even though the same signed URL works immediately afterwards. Retry
     // the same token before handing the failure to the mobile player.
     let upstream: Response | null = null;
+    let networkRetryUsed = false;
+    const retryableNetworkCodes = new Set<string>([
+      "ECONNRESET", "ECONNREFUSED", "EAI_AGAIN", "ETIMEDOUT",
+      "UND_ERR_CONNECT_TIMEOUT", "UND_ERR_SOCKET",
+    ]);
     for (let attempt = 0; attempt < 3; attempt += 1) {
-      upstream = await fetchFoupixHeaders(rawUrl, fetchHeaders);
-      if ((upstream.status !== 401 && upstream.status !== 403) || attempt === 2) break;
+      try {
+        upstream = await fetchFoupixHeaders(rawUrl, fetchHeaders);
+      } catch (error) {
+        const errorName = error instanceof Error ? error.name : "UnknownError";
+        const errorCode = (error as any)?.cause?.code;
+        const retryableNetworkFailure =
+          errorName !== "AbortError" &&
+          (errorName === "TypeError" ||
+            retryableNetworkCodes.has(String(errorCode)));
+        if (retryableNetworkFailure && !networkRetryUsed && attempt < 2) {
+          networkRetryUsed = true;
+          await new Promise(resolve => setTimeout(resolve, 300));
+          continue;
+        }
+        logger.warn({ errorName, errorCode }, "dubbed: stream upstream request failed");
+        res.status(502).json({ error: "upstream unavailable" }); return;
+      }
+      const retryableStatus =
+        upstream.status === 401 ||
+        upstream.status === 403 ||
+        ([502, 503, 504].includes(upstream.status) && attempt === 0);
+      if (!retryableStatus || attempt === 2) break;
       try { await upstream.body?.cancel(); } catch {}
       await new Promise(resolve => setTimeout(resolve, 250 * (attempt + 1)));
     }
