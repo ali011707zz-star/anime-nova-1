@@ -138,3 +138,4 @@
 - [Apps Anime APK analysis](apps-anime-apk-analysis.md) — APK is an API client for paged dubbed/translated catalog endpoints; backend is Cloudflare-protected and not a DB dump.
 - [Progress bar Build 797 touch behavior](progress-bar-transformed-hitbox.md) — pure taps use saved locationX; drag uses moveX; RTL inversion stays in the same interaction block.
 - [VPS Certbot Python path](vps-certbot-pythonpath.md) — Apt Certbot can fail when /usr/local OpenSSL shadows distro modules; pin PYTHONPATH for scheduled renewals.
+- [VPS stream telemetry](vps-stream-telemetry.md) — production Nginx differs from the repo template; sample privacy-safe metrics to `/run` because logrotate is absent.
