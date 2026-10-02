@@ -21,6 +21,10 @@ import { getBaseUrl } from "@/utils/baseUrl";
 import { secureFetch, setUserAuthToken } from "@/utils/secureApi";
 import { CrashEntry, getCrashLog } from "@/utils/crashLogger";
 import { TvPressable } from "@/utils/tv";
+import {
+  getPushNotificationsStatus,
+  setPushNotificationsEnabled,
+} from "@/utils/pushNotifications";
 
 const THEMES: { label: string; value: string; dot: string; desc: string }[] = [
   { label: "أبيض", value: "white", dot: paletteColors.white.background, desc: "خلفيات فاتحة ونصوص داكنة" },
@@ -45,11 +49,12 @@ function useToast() {
 }
 
 function ToastBanner({ toast }: { toast: { msg: string; ok: boolean } | null }) {
+  const colors = useColors();
   if (!toast) return null;
   return (
     <View style={[ts.toast, { backgroundColor: toast.ok ? "rgba(16,185,129,0.18)" : "rgba(239,68,68,0.18)", borderColor: toast.ok ? "rgba(16,185,129,0.38)" : "rgba(239,68,68,0.38)" }]}>
-      <Ionicons name={toast.ok ? "checkmark-circle" : "close-circle"} size={15} color={toast.ok ? "#34d399" : "#f87171"} />
-      <Text style={ts.toastText}>{toast.msg}</Text>
+      <Ionicons name={toast.ok ? "checkmark-circle" : "close-circle"} size={15} color={toast.ok ? colors.success : colors.destructive} />
+      <Text style={[ts.toastText, { color: colors.textPrimary }]}>{toast.msg}</Text>
     </View>
   );
 }
@@ -248,35 +253,37 @@ function NavRow({ icon, iconColor, iconBg, label, sub, badge, onPress, external 
   label: string; sub?: string; badge?: string;
   onPress?: () => void; external?: boolean;
 }) {
+  const colors = useColors();
   return (
-    <TvPressable onPress={onPress} style={ts.navRow}>
-      <View style={[ts.navIcon, { backgroundColor: iconBg }]}>
+    <TvPressable onPress={onPress} style={[ts.navRow, { borderBottomColor: colors.border }]}>
+      <View style={[ts.navIcon, { backgroundColor: iconBg, borderColor: colors.border }]}>
         <Ionicons name={icon} size={16} color={iconColor} />
       </View>
       <View style={ts.navText}>
         <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-          <Text style={ts.navLabel}>{label}</Text>
-          {badge && <View style={ts.navBadge}><Text style={ts.navBadgeText}>{badge}</Text></View>}
+          <Text style={[ts.navLabel, { color: colors.textPrimary }]}>{label}</Text>
+          {badge && <View style={ts.navBadge}><Text style={[ts.navBadgeText, { color: colors.accent }]}>{badge}</Text></View>}
         </View>
-        {sub && <Text style={ts.navSub}>{sub}</Text>}
+        {sub && <Text style={[ts.navSub, { color: colors.textSecondary }]}>{sub}</Text>}
       </View>
-      <Ionicons name={external ? "open" : "chevron-back"} size={14} color="rgba(255,255,255,0.2)" />
+      <Ionicons name={external ? "open" : "chevron-back"} size={14} color={colors.textMuted} />
     </TvPressable>
   );
 }
 
 /* ── Danger Row ── */
 function DangerRow({ label, sub, onPress }: { label: string; sub?: string; onPress: () => void }) {
+  const colors = useColors();
   return (
-    <TvPressable onPress={onPress} style={ts.dangerRow}>
+    <TvPressable onPress={onPress} style={[ts.dangerRow, { borderBottomColor: colors.border }]}>
       <View style={ts.dangerIcon}>
-        <Ionicons name="trash" size={16} color="#f87171" />
+        <Ionicons name="trash" size={16} color={colors.destructive} />
       </View>
       <View style={ts.navText}>
-        <Text style={ts.dangerLabel}>{label}</Text>
-        {sub && <Text style={ts.dangerSub}>{sub}</Text>}
+        <Text style={[ts.dangerLabel, { color: colors.destructive }]}>{label}</Text>
+        {sub && <Text style={[ts.dangerSub, { color: colors.textSecondary }]}>{sub}</Text>}
       </View>
-      <Ionicons name="chevron-back" size={14} color="rgba(248,113,113,0.25)" />
+      <Ionicons name="chevron-back" size={14} color={colors.destructive} />
     </TvPressable>
   );
 }
@@ -1405,6 +1412,9 @@ export default function SettingsScreen() {
 
   const { toast, show: showToast } = useToast();
   const [notifs, setNotifs] = useState(true);
+  const [pushRegistered, setPushRegistered] = useState(false);
+  const [notifsReady, setNotifsReady] = useState(false);
+  const [notifsBusy, setNotifsBusy] = useState(false);
   const [showReport, setShowReport] = useState(false);
   const [showAuth, setShowAuth] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
@@ -1454,6 +1464,18 @@ export default function SettingsScreen() {
     } catch {}
   }, []);
 
+  const refreshPushStatus = useCallback(async () => {
+    try {
+      const status = await getPushNotificationsStatus();
+      setNotifs(status.enabled);
+      setPushRegistered(status.registered);
+    } catch {
+      setPushRegistered(false);
+    } finally {
+      setNotifsReady(true);
+    }
+  }, []);
+
   useEffect(() => {
     if (openPremium === "1") setShowPremium(true);
   }, [openPremium]);
@@ -1464,6 +1486,10 @@ export default function SettingsScreen() {
   useFocusEffect(useCallback(() => {
     void refreshCurrentUser();
   }, [refreshCurrentUser]));
+
+  useFocusEffect(useCallback(() => {
+    void refreshPushStatus();
+  }, [refreshPushStatus]));
 
   useEffect(() => {
     getCrashLog().then(setCrashEntries).catch(() => {});
@@ -1515,6 +1541,45 @@ export default function SettingsScreen() {
     showToast(`تم تغيير الثيم إلى ${THEMES.find(th => th.value === t)?.label}`);
   };
 
+  const handleToggleNotifications = async (enabled: boolean) => {
+    if (notifsBusy) return;
+    setNotifsBusy(true);
+    try {
+      const success = await setPushNotificationsEnabled(enabled);
+      const status = await getPushNotificationsStatus();
+      setNotifs(status.enabled);
+      setPushRegistered(status.registered);
+
+      if (!success && enabled) {
+        Alert.alert(
+          "تعذر تفعيل الإشعارات",
+          "لم يكتمل تسجيل هذا الجهاز لاستقبال التنبيهات خارج التطبيق. تحقق من إذن الإشعارات والاتصال بالإنترنت ثم أعد المحاولة.",
+          [
+            { text: "لاحقاً", style: "cancel" },
+            {
+              text: "إعدادات التطبيق",
+              onPress: () => {
+                if (Platform.OS !== "web") void Linking.openSettings().catch(() => {});
+              },
+            },
+          ],
+        );
+      } else if (!success) {
+        Alert.alert(
+          "الإيقاف قيد الانتظار",
+          "أوقفت الإشعارات على هذا الجهاز، لكن تعذر تأكيد إلغاء التسجيل على الخادم. قد تصل تنبيهات حتى يعود الاتصال ويُعاد طلب الإلغاء.",
+        );
+      } else {
+        showToast(enabled ? "تم تفعيل إشعارات الحلقات خارج التطبيق" : "تم إيقاف إشعارات الحلقات");
+      }
+    } catch {
+      await refreshPushStatus();
+      Alert.alert("تعذر تحديث الإشعارات", "تحقق من الاتصال بالإنترنت ثم أعد المحاولة.");
+    } finally {
+      setNotifsBusy(false);
+    }
+  };
+
   const handleClearHistory = () => openConfirm({
     open: true,
     title: "مسح سجل المشاهدة",
@@ -1564,9 +1629,9 @@ export default function SettingsScreen() {
 
       {/* Sticky Header */}
       <View style={[ts.header, { paddingTop: topPad, backgroundColor: colors.surface, borderBottomColor: colors.border }]}>
-        <View style={ts.headerBadge}>
+        <View style={[ts.headerBadge, { backgroundColor: colors.surfaceElevated, borderColor: colors.border }]}>
           <View style={ts.headerDot} />
-          <Text style={ts.headerBadgeText}>ANIME NOVA · v2.4</Text>
+          <Text style={[ts.headerBadgeText, { color: colors.textMuted }]}>ANIME NOVA · v2.4</Text>
         </View>
         <View style={{ flexDirection: "row", alignItems: "center", gap: 10, flex: 1 }}>
           <View style={[ts.headerIconWrap, { backgroundColor: colors.surfaceElevated, borderColor: colors.border }]}>
@@ -1574,7 +1639,7 @@ export default function SettingsScreen() {
           </View>
           <Text style={[ts.headerTitle, { color: colors.textPrimary }]}>الإعدادات</Text>
         </View>
-        <Pressable onPress={() => router.back()} style={ts.headerBackBtn}>
+        <Pressable onPress={() => router.back()} style={[ts.headerBackBtn, { backgroundColor: colors.surfaceElevated, borderColor: colors.border }]}>
           <Ionicons name="chevron-forward" size={16} color={colors.mutedForeground} />
         </Pressable>
       </View>
@@ -1597,40 +1662,40 @@ export default function SettingsScreen() {
               </View>
               {/* Info */}
               <View style={{ flex: 1, alignItems: "flex-end" }}>
-                <Text style={ts.profileLoginTitle}>{currentUser.displayName}</Text>
+                <Text style={[ts.profileLoginTitle, { color: colors.textPrimary }]}>{currentUser.displayName}</Text>
                 {currentUser.username ? (
-                  <Text style={[ts.profileLoginSub, { color: "rgba(196,181,253,0.5)" }]}>@{currentUser.username}</Text>
+                  <Text style={[ts.profileLoginSub, { color: colors.accent }]}>@{currentUser.username}</Text>
                 ) : null}
-                <Text style={ts.profileLoginSub}>{currentUser.email}</Text>
+                <Text style={[ts.profileLoginSub, { color: colors.textSecondary }]}>{currentUser.email}</Text>
               </View>
               {/* Edit chevron */}
-              <View style={ts.profileLoginBtn}>
-                <Ionicons name="create-outline" size={14} color="#c4b5fd" />
-                <Text style={ts.profileLoginBtnText}>تعديل</Text>
+              <View style={[ts.profileLoginBtn, { backgroundColor: colors.surfaceElevated, borderColor: colors.border }]}>
+                <Ionicons name="create-outline" size={14} color={colors.accent} />
+                <Text style={[ts.profileLoginBtnText, { color: colors.accent }]}>تعديل</Text>
               </View>
             </Pressable>
           ) : (
             <View style={{ gap: 10 }}>
               <Pressable onPress={() => setShowAuth(true)} style={[ts.profileCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
                 <View style={ts.profileAvatar}>
-                  <Ionicons name="person" size={24} color="rgba(255,255,255,0.3)" />
+                  <Ionicons name="person" size={24} color={colors.textMuted} />
                 </View>
                 <View style={{ flex: 1, alignItems: "flex-end" }}>
-                  <Text style={ts.profileLoginTitle}>تسجيل الدخول</Text>
-                  <Text style={ts.profileLoginSub}>احفظ قائمتك ومتابعتك عبر الأجهزة</Text>
+                  <Text style={[ts.profileLoginTitle, { color: colors.textPrimary }]}>تسجيل الدخول</Text>
+                  <Text style={[ts.profileLoginSub, { color: colors.textSecondary }]}>احفظ قائمتك ومتابعتك عبر الأجهزة</Text>
                 </View>
-                <View style={ts.profileLoginBtn}>
-                  <Ionicons name="sparkles" size={14} color="#c4b5fd" />
-                  <Text style={ts.profileLoginBtnText}>دخول</Text>
+                <View style={[ts.profileLoginBtn, { backgroundColor: colors.surfaceElevated, borderColor: colors.border }]}>
+                  <Ionicons name="sparkles" size={14} color={colors.accent} />
+                  <Text style={[ts.profileLoginBtnText, { color: colors.accent }]}>دخول</Text>
                 </View>
               </Pressable>
               <Pressable
                 testID="open-device-link"
                 onPress={() => router.push("/tv-link" as any)}
-                style={ts.deviceLinkGuestBtn}
+                style={[ts.deviceLinkGuestBtn, { backgroundColor: colors.surfaceElevated, borderColor: colors.border }]}
               >
-                <Ionicons name="link-outline" size={17} color="#c4b5fd" />
-                <Text style={ts.deviceLinkGuestText}>لدي رمز ربط · ربط هاتف أو تلفاز</Text>
+                <Ionicons name="link-outline" size={17} color={colors.accent} />
+                <Text style={[ts.deviceLinkGuestText, { color: colors.accent }]}>لدي رمز ربط · ربط هاتف أو تلفاز</Text>
               </Pressable>
             </View>
           )}
@@ -1640,17 +1705,17 @@ export default function SettingsScreen() {
             noise and startup work to the TV settings screen. */}
         {!tvMode && <View style={ts.statsGrid}>
           {[
-            { label: "مشاهَدة", val: histCount,      color: "#a78bfa", bg: "rgba(139,92,246,0.10)" },
-            { label: "محفوظة",  val: savedCount,     color: "#f472b6", bg: "rgba(236,72,153,0.10)" },
-            { label: "الكاش",   val: `${cacheKb}KB`, color: "#22d3ee", bg: "rgba(6,182,212,0.10)" },
-            { label: "مجاني",   val: "∞",            color: "#34d399", bg: "rgba(16,185,129,0.10)" },
+            { label: "مشاهَدة", val: histCount,      color: theme === "white" ? "#5B469A" : "#a78bfa", bg: "rgba(139,92,246,0.10)" },
+            { label: "محفوظة",  val: savedCount,     color: theme === "white" ? "#A12D5B" : "#f472b6", bg: "rgba(236,72,153,0.10)" },
+            { label: "الكاش",   val: `${cacheKb}KB`, color: theme === "white" ? "#08758A" : "#22d3ee", bg: "rgba(6,182,212,0.10)" },
+            { label: "مجاني",   val: "∞",            color: theme === "white" ? "#14764F" : "#34d399", bg: "rgba(16,185,129,0.10)" },
           ].map(s => (
             <Pressable
               key={s.label}
-              style={[ts.statCard, { backgroundColor: s.bg }]}
+              style={[ts.statCard, { backgroundColor: s.bg, borderColor: colors.border }]}
             >
               <Text style={[ts.statVal, { color: s.color }]}>{s.val}</Text>
-              <Text style={ts.statLabel}>{s.label}</Text>
+              <Text style={[ts.statLabel, { color: colors.textSecondary }]}>{s.label}</Text>
             </Pressable>
           ))}
         </View>}
@@ -1665,11 +1730,11 @@ export default function SettingsScreen() {
                 <Ionicons name="ribbon" size={20} color="#fbbf24" />
               </View>
               <View style={{ flex: 1 }}>
-                <Text style={ts.premiumTitle}>Nova Premium ⭐</Text>
-                <Text style={ts.premiumSub}>اشترك الآن · إزالة الإعلانات · مميزات حصرية</Text>
+                <Text style={[ts.premiumTitle, theme === "white" && { color: "#70500B" }]}>Nova Premium ⭐</Text>
+                <Text style={[ts.premiumSub, theme === "white" && { color: "#65552F" }]}>اشترك الآن · إزالة الإعلانات · مميزات حصرية</Text>
               </View>
               <View style={ts.premiumBtn}>
-                <Text style={ts.premiumBtnText}>اشترك</Text>
+                <Text style={[ts.premiumBtnText, theme === "white" && { color: "#70500B" }]}>اشترك</Text>
                 <Ionicons name="chevron-back" size={14} color="#fbbf24" />
               </View>
             </View>
@@ -1677,7 +1742,7 @@ export default function SettingsScreen() {
               {["بدون إعلانات", "جودة أعلى", "تخطي المقدمة"].map(f => (
                 <View key={f} style={ts.premiumFeatureItem}>
                   <Ionicons name="checkmark" size={10} color="#fbbf24" />
-                  <Text style={ts.premiumFeatureText}>{f}</Text>
+                  <Text style={[ts.premiumFeatureText, theme === "white" && { color: "#70500B" }]}>{f}</Text>
                 </View>
               ))}
             </View>
@@ -1737,30 +1802,46 @@ export default function SettingsScreen() {
         <SectionHeader title="الإشعارات" icon="الإشعارات" />
         <View style={{ paddingHorizontal: 16 }}>
           <Card>
-            <Pressable onPress={() => setNotifs(!notifs)} style={ts.navRow}>
+            <View style={[ts.navRow, { borderBottomColor: colors.border }]}>
               <View style={[ts.navIcon, {
-                backgroundColor: notifs ? "rgba(251,191,36,0.10)" : "rgba(255,255,255,0.05)"
+                backgroundColor: pushRegistered ? "rgba(16,185,129,0.10)" : colors.surfaceElevated,
+                borderColor: colors.border,
               }]}>
                 <Ionicons
-                  name={notifs ? "notifications" : "notifications-off"}
+                  name={pushRegistered ? "notifications" : "notifications-off"}
                   size={16}
-                  color={notifs ? "#fbbf24" : "rgba(255,255,255,0.3)"}
+                  color={pushRegistered ? colors.success : colors.textMuted}
                 />
               </View>
-              <View style={[ts.navText, { alignItems: "flex-end" }]}>
-                <Text style={ts.navLabel}>إشعارات الحلقات الجديدة</Text>
-                <Text style={ts.navSub}>
-                  {notifs ? "مفعّلة · ستصلك تنبيهات عند نزول حلقات جديدة" : "موقفة · لن تصلك أي تنبيهات"}
+              <Pressable
+                accessibilityRole="button"
+                disabled={!notifsReady || notifsBusy}
+                onPress={() => void handleToggleNotifications(notifs && !pushRegistered ? true : !notifs)}
+                style={[ts.navText, { alignItems: "flex-end" }]}
+              >
+                <Text style={[ts.navLabel, { color: colors.textPrimary }]}>إشعارات الحلقات الجديدة</Text>
+                <Text style={[ts.navSub, { color: colors.textSecondary }]}>
+                  {notifsBusy
+                    ? "جارٍ تحديث الإشعارات…"
+                    : !notifs
+                      ? "موقفة على هذا الجهاز"
+                      : !notifsReady
+                        ? "جارٍ التحقق من التسجيل…"
+                        : pushRegistered
+                          ? "مفعّلة · تصلك حتى عند إغلاق التطبيق"
+                          : "لم يكتمل التسجيل · اضغط هنا لإعادة المحاولة"}
                 </Text>
-              </View>
+              </Pressable>
               <Switch
+                testID="settings-notifications-switch"
                 value={notifs}
-                onValueChange={setNotifs}
-                trackColor={{ false: "rgba(255,255,255,0.1)", true: "rgba(139,92,246,0.7)" }}
+                onValueChange={(value) => void handleToggleNotifications(value)}
+                disabled={!notifsReady || notifsBusy}
+                trackColor={{ false: colors.border, true: colors.accent }}
                 thumbColor="#fff"
-                ios_backgroundColor="rgba(255,255,255,0.1)"
+                ios_backgroundColor={colors.border}
               />
-            </Pressable>
+            </View>
           </Card>
         </View>
 

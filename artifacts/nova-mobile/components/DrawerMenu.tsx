@@ -8,6 +8,7 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useApp } from "@/context/AppContext";
+import { useColors } from "@/hooks/useColors";
 import { getBaseUrl } from "@/utils/api";
 import { secureFetch } from "@/utils/secureApi";
 import { isTvDevice, tvFocusStyle } from "@/utils/tv";
@@ -68,7 +69,8 @@ export function DrawerMenu({ visible, onClose }: Props) {
   const tvMode = isTvDevice(Dimensions.get("window").width, Dimensions.get("window").height);
   const drawerWidth = tvMode ? Math.min(W * 0.42, 520) : DRAWER_W;
   const topPad = Platform.OS === "web" ? 0 : insets.top;
-  const { watchHistory, favorites } = useApp();
+  const { watchHistory, favorites, theme } = useApp();
+  const colors = useColors();
   const [userData, setUserData] = React.useState<UserData | null>(null);
 
   React.useEffect(() => {
@@ -132,27 +134,30 @@ export function DrawerMenu({ visible, onClose }: Props) {
       </Animated.View>
 
       {/* Drawer panel — slides from RIGHT (RTL) */}
-      <Animated.View style={[s.drawer, tvMode && s.tvDrawer, { width: drawerWidth, transform: [{ translateX: slideX }], paddingTop: topPad }]}>
+      <Animated.View style={[s.drawer, tvMode && s.tvDrawer, { width: drawerWidth, transform: [{ translateX: slideX }], paddingTop: topPad, backgroundColor: colors.surface, borderLeftColor: colors.border }]}>
         <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: insets.bottom + 24 }}>
 
           {/* ── Logo header ── */}
-          <View style={[s.logoRow, tvMode && s.tvLogoRow]}>
+          <View style={[s.logoRow, tvMode && s.tvLogoRow, { borderBottomColor: colors.border }]}>
             <LinearGradient colors={["#8B5CF6", "#6D28D9"]} style={s.logoBadge}>
               <Ionicons name="play" size={tvMode ? 22 : 14} color="#fff" />
             </LinearGradient>
             <View>
-              <Text style={[s.logoText, tvMode && s.tvLogoText]}>Anime <Text style={{ color: "#8B5CF6" }}>NOVA</Text></Text>
-              <Text style={[s.logoSub, tvMode && s.tvLogoSub]}>منصة الأنمي العربية</Text>
+              <Text style={[s.logoText, tvMode && s.tvLogoText, { color: colors.textPrimary }]}>Anime <Text style={{ color: colors.accent }}>NOVA</Text></Text>
+              <Text style={[s.logoSub, tvMode && s.tvLogoSub, { color: colors.textMuted }]}>منصة الأنمي العربية</Text>
             </View>
             <Pressable onPress={onClose} focusable={tvMode} hasTVPreferredFocus={tvMode}
-              style={({ focused }) => [s.closeBtn, tvMode && s.tvCloseBtn, tvMode && tvFocusStyle(focused)]}>
-              <Ionicons name="close" size={tvMode ? 28 : 20} color="rgba(255,255,255,0.5)" />
+              style={({ focused }) => [s.closeBtn, tvMode && s.tvCloseBtn, { backgroundColor: colors.surfaceElevated }, tvMode && tvFocusStyle(focused)]}>
+              <Ionicons name="close" size={tvMode ? 28 : 20} color={colors.textMuted} />
             </Pressable>
           </View>
 
           {/* ── User card ── */}
-          <Pressable onPress={() => nav("/settings")} focusable={tvMode} style={({ focused }) => [s.userCard, tvMode && s.tvUserCard, tvMode && tvFocusStyle(focused)]}>
-            <LinearGradient colors={["rgba(139,92,246,0.15)", "rgba(109,40,217,0.08)"]} style={s.userCardInner}>
+          <Pressable onPress={() => nav("/settings")} focusable={tvMode} style={({ focused }) => [s.userCard, tvMode && s.tvUserCard, { borderColor: colors.border }, tvMode && tvFocusStyle(focused)]}>
+            <LinearGradient
+              colors={theme === "white" ? [colors.surfaceElevated, colors.card] : ["rgba(139,92,246,0.15)", "rgba(109,40,217,0.08)"]}
+              style={s.userCardInner}
+            >
               {/* Avatar: real photo or gradient letter */}
               {userData?.profileImageUrl ? (
                 <Image
@@ -166,45 +171,45 @@ export function DrawerMenu({ visible, onClose }: Props) {
                 </LinearGradient>
               )}
               <View style={{ flex: 1 }}>
-                <Text style={s.userName} numberOfLines={1}>
+                <Text style={[s.userName, { color: colors.textPrimary }]} numberOfLines={1}>
                   {userData?.displayName || userData?.username || "الملف الشخصي"}
                 </Text>
                 {userData?.username ? (
-                  <Text style={s.userSub} numberOfLines={1}>@{userData.username}</Text>
+                  <Text style={[s.userSub, { color: colors.textSecondary }]} numberOfLines={1}>@{userData.username}</Text>
                 ) : (
-                  <Text style={s.userSub}>
+                  <Text style={[s.userSub, { color: colors.textSecondary }]}>
                     {`${watchHistory.length} مشاهدة · ${favorites.length} مفضلة`}
                   </Text>
                 )}
               </View>
-              <Ionicons name="chevron-back" size={16} color="rgba(139,92,246,0.6)" />
+              <Ionicons name="chevron-back" size={16} color={colors.accent} />
             </LinearGradient>
           </Pressable>
 
           {/* ── Main navigation ── */}
-          <Text style={s.sectionLabel}>القائمة الرئيسية</Text>
+          <Text style={[s.sectionLabel, { color: colors.textMuted }]}>القائمة الرئيسية</Text>
             {NAV_MAIN.map((item) => (
-            <DrawerItem key={item.label} item={item} tvMode={tvMode} onPress={() => nav(item.route)} />
+            <DrawerItem key={item.label} item={item} tvMode={tvMode} colors={colors} onPress={() => nav(item.route)} />
           ))}
 
           {/* ── Library ── */}
-          <Text style={s.sectionLabel}>مكتبتي</Text>
+          <Text style={[s.sectionLabel, { color: colors.textMuted }]}>مكتبتي</Text>
           {NAV_LIBRARY.map((item) => (
-            <DrawerItem key={item.label} item={item} tvMode={tvMode} onPress={() => nav(item.route)} />
+            <DrawerItem key={item.label} item={item} tvMode={tvMode} colors={colors} onPress={() => nav(item.route)} />
           ))}
 
           {/* ── Other ── */}
-          <Text style={s.sectionLabel}>أخرى</Text>
+          <Text style={[s.sectionLabel, { color: colors.textMuted }]}>أخرى</Text>
           {NAV_OTHER.map((item) => (
-            <DrawerItem key={item.label} item={item} tvMode={tvMode} onPress={() => nav(item.route)} />
+            <DrawerItem key={item.label} item={item} tvMode={tvMode} colors={colors} onPress={() => nav(item.route)} />
           ))}
 
           {/* ── Footer ── */}
           <View style={s.footer}>
-            <Text style={s.footerText}>Anime NOVA © 2025</Text>
+            <Text style={[s.footerText, { color: colors.textMuted }]}>Anime NOVA © 2025</Text>
             <View style={s.footerDot}>
               <View style={s.onlineDot} />
-              <Text style={s.footerStatus}>متصل</Text>
+              <Text style={[s.footerStatus, { color: colors.success }]}>متصل</Text>
             </View>
           </View>
         </ScrollView>
@@ -213,21 +218,26 @@ export function DrawerMenu({ visible, onClose }: Props) {
   );
 }
 
-function DrawerItem({ item, onPress, tvMode }: { item: NavItem; onPress: () => void; tvMode: boolean }) {
+function DrawerItem({ item, onPress, tvMode, colors }: {
+  item: NavItem;
+  onPress: () => void;
+  tvMode: boolean;
+  colors: ReturnType<typeof useColors>;
+}) {
   return (
     <Pressable onPress={onPress} focusable={tvMode} style={({ pressed, focused }) => [
       s.navItem,
       tvMode && s.tvNavItem,
-      pressed && { backgroundColor: "rgba(255,255,255,0.04)" },
+      pressed && { backgroundColor: colors.surfaceElevated },
       tvMode && tvFocusStyle(focused),
     ]}>
       <View style={[s.navIcon, tvMode && s.tvNavIcon, { backgroundColor: (item.color || "#8B5CF6") + "18" }]}>
         <Ionicons name={item.icon} size={tvMode ? 26 : 18} color={item.color || "#8B5CF6"} />
       </View>
-      <Text style={[s.navLabel, tvMode && s.tvNavLabel]}>{item.label}</Text>
+      <Text style={[s.navLabel, tvMode && s.tvNavLabel, { color: colors.textPrimary }]}>{item.label}</Text>
       {item.badge && (
-        <View style={s.badge}>
-          <Text style={s.badgeText}>{item.badge}</Text>
+        <View style={[s.badge, { backgroundColor: `${colors.accent}18`, borderColor: `${colors.accent}40` }]}>
+          <Text style={[s.badgeText, { color: colors.accent }]}>{item.badge}</Text>
         </View>
       )}
     </Pressable>

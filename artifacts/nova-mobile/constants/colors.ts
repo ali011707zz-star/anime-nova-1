@@ -45,18 +45,18 @@ export type Palette = {
 }
 
 const white: Palette = {
-  background: "#F3F4F6",
-  surface: "#FFFFFF",
-  surfaceElevated: "#F7F8FA",
-  card: "#FFFFFF",
-  textPrimary: "#17191F",
-  textSecondary: "#4D535E",
-  textMuted: "#747B87",
+  background: "#F3F2EE",
+  surface: "#FAF9F6",
+  surfaceElevated: "#EFEEE9",
+  card: "#FCFBF8",
+  textPrimary: "#202127",
+  textSecondary: "#454A54",
+  textMuted: "#626A76",
   button: "#202329",
   buttonText: "#FFFFFF",
-  accent: "#343943",
-  border: "#DDE1E7",
-  input: "#F0F2F5",
+  accent: "#7654C8",
+  border: "#DFDDD7",
+  input: "#F0EFEA",
   destructive: "#C62828",
   destructiveForeground: "#FFFFFF",
   success: "#18794E",
@@ -82,9 +82,9 @@ const white: Palette = {
   muted: "#F0F2F5",
   mutedForeground: "#747B87",
   accentForeground: "#FFFFFF",
-  violet: "#343943",
-  violetDark: "#252930",
-  violetDeep: "#17191F",
+  violet: "#7654C8",
+  violetDark: "#5E40AC",
+  violetDeep: "#3D2A78",
 };
 
 const black: Palette = {
