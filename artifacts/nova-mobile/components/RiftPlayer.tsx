@@ -462,6 +462,11 @@ function ExpoRiftPlayer({
   onError,
 }: Props) {
   const colors = useColors();
+  // Keep the playback timeline physically left-to-right even when the app is RTL.
+  // React Native swaps left/right style properties on native RTL layouts.
+  const timelineNativeRTL = Platform.OS !== "web" && I18nManager.isRTL;
+  const timelineStartEdge: "left" | "right" = timelineNativeRTL ? "right" : "left";
+  const timelineEndEdge: "left" | "right" = timelineNativeRTL ? "left" : "right";
   const playerControlSurface = {
     backgroundColor: colors.playerControl,
     borderColor: colors.playerControlBorder,
@@ -3124,8 +3129,8 @@ function ExpoRiftPlayer({
 
             {/* The progress timeline is left-to-right on every locale. */}
             <View style={{ position: "relative", height: 18, marginBottom: 2 }}>
-              <Text style={[s.timeText, tvMode && s.tvTimeText, { position: "absolute", left: 0, color: colors.playerText }]}>{fmtTime(displayPosition)}</Text>
-              <Text style={[s.timeText, tvMode && s.tvTimeText, { position: "absolute", right: 0, opacity: 0.75, color: colors.playerSecondaryText }]}>{fmtTime(duration)}</Text>
+              <Text style={[s.timeText, tvMode && s.tvTimeText, { position: "absolute", [timelineStartEdge]: 0, color: colors.playerText }]}>{fmtTime(displayPosition)}</Text>
+              <Text style={[s.timeText, tvMode && s.tvTimeText, { position: "absolute", [timelineEndEdge]: 0, opacity: 0.75, color: colors.playerSecondaryText }]}>{fmtTime(duration)}</Text>
             </View>
 
             {/* One physical left-to-right timeline, shared by fill, thumb and touch math. */}
@@ -3167,17 +3172,17 @@ function ExpoRiftPlayer({
                   )}
                   <View style={[s.progressBg, tvMode && s.tvProgressBg, { backgroundColor: colors.playerTrack }]} />
                   {bufferedPct > 0 && (
-                    <View style={[s.bufferBar, { left: 0, width: `${bufferedPct * 100}%` as any, backgroundColor: colors.playerBuffer }]} />
+                    <View style={[s.bufferBar, { [timelineStartEdge]: 0, width: `${bufferedPct * 100}%` as any, backgroundColor: colors.playerBuffer }]} />
                   )}
                   {markerPctIntro && (
                     <View style={[s.skipMarker, {
-                      left: `${markerPctIntro.start}%` as any,
+                      [timelineStartEdge]: `${markerPctIntro.start}%` as any,
                       width: `${Math.max(1.2, markerPctIntro.end - markerPctIntro.start)}%` as any,
                     }]} />
                   )}
                   {markerPctOutro && (
                     <View style={[s.skipMarker, {
-                      left: `${markerPctOutro.start}%` as any,
+                      [timelineStartEdge]: `${markerPctOutro.start}%` as any,
                       width: `${Math.max(1.2, markerPctOutro.end - markerPctOutro.start)}%` as any,
                     }]} />
                   )}
@@ -3185,15 +3190,15 @@ function ExpoRiftPlayer({
                     colors={[colors.violetDark, colors.violet, colors.accent]}
                     start={{ x: 0, y: 0 }}
                     end={{ x: 1, y: 0 }}
-                    style={[s.progressFill, tvMode && s.tvProgressFill, { left: 0, width: `${fillPct}%` as any }]}
+                    style={[s.progressFill, tvMode && s.tvProgressFill, { [timelineStartEdge]: 0, width: `${fillPct}%` as any }]}
                   />
                   <View style={[
                     s.thumb, tvMode && s.tvThumb,
                     isDragging && s.thumbDragging,
-                    { left: `${thumbPct}%` as any, backgroundColor: colors.accent },
+                    { [timelineStartEdge]: `${thumbPct}%` as any, backgroundColor: colors.accent },
                   ]} />
                   {isDragging && (
-                    <View style={[s.dragTooltip, { left: `${tooltipPct}%` as any, backgroundColor: colors.surfaceElevated, borderColor: colors.border }]}>
+                    <View style={[s.dragTooltip, { [timelineStartEdge]: `${tooltipPct}%` as any, backgroundColor: colors.surfaceElevated, borderColor: colors.border }]}>
                       <Text style={[s.dragTooltipText, { color: colors.textPrimary }]}>{fmtTime(displayPosition)}</Text>
                     </View>
                   )}
@@ -4150,7 +4155,7 @@ const s = StyleSheet.create({
   progressBg: { position: "absolute", left: 0, right: 0, height: 6, backgroundColor: "rgba(255,255,255,0.15)", borderRadius: 3 },
   tvProgressBg: { height: 8, borderRadius: 4 },
   skipMarker: { position: "absolute", height: 4, backgroundColor: "rgba(250,204,21,0.80)", borderRadius: 2, top: "50%", marginTop: -2, zIndex: 2 },
-  progressFill: { position: "absolute", left: 0, height: 6, backgroundColor: "#8B5CF6", borderRadius: 3, top: "50%", marginTop: -3, zIndex: 3 },
+  progressFill: { position: "absolute", height: 6, backgroundColor: "#8B5CF6", borderRadius: 3, top: "50%", marginTop: -3, zIndex: 3 },
   tvProgressFill: { height: 8, marginTop: -4, borderRadius: 4 },
   thumb: { position: "absolute", top: "50%", width: 18, height: 18, borderRadius: 9, backgroundColor: "#fff", marginLeft: -9, marginTop: -9, shadowColor: "#8B5CF6", shadowOpacity: 0.5, shadowRadius: 6, elevation: 4, zIndex: 4 },
   tvThumb: { width: 24, height: 24, borderRadius: 12, marginLeft: -12, marginTop: -12 },
@@ -4273,7 +4278,7 @@ const s = StyleSheet.create({
 
   /* ══════ Buffer bar (web player port) ══════ */
   bufferBar: {
-    position: "absolute", left: 0, height: 6,
+    position: "absolute", height: 6,
     backgroundColor: "rgba(255,255,255,0.22)",
     borderRadius: 3, zIndex: 2,
   },
