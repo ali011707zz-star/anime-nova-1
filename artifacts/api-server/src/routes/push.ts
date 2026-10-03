@@ -583,9 +583,10 @@ export async function sendNewEpisodePushDetailed(input: {
   episode: number;
   posterUrl?: string;
 }): Promise<PushDeliverySummary> {
+  // Episode alerts are broadcasts: leave userId unset so every active device gets them.
   return sendMobilePushDetailed({
-    title: `حلقة جديدة · ${input.title}`,
-    body: `✨ ${input.title} — الحلقة ${input.episode} متاحة الآن\nشاهِدها على Anime NOVA واستمتع!`,
+    title: "حلقة جديدة وصلت! 🔥",
+    body: `${input.title} — الحلقة ${input.episode} جاهزة للمشاهدة الآن. افتح Anime NOVA واستمتع 🎬`,
     posterUrl: input.posterUrl,
     eventKey: `episode:${input.animeId}:${input.episode}`,
     data: {
