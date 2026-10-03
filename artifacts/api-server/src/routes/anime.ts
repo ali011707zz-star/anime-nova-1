@@ -16766,6 +16766,224 @@ async function serveHlsVPS(
   }
 }
 
+function parseKawaiiRange(value: string | null | undefined): { start: number; end: number } | null {
+  const match = value?.match(/^bytes\s+(\d+)-(\d+)\/(?:\d+|\*)$/i);
+  if (!match) return null;
+  const start = Number(match[1]);
+  const end = Number(match[2]);
+  return Number.isSafeInteger(start) && Number.isSafeInteger(end) && end >= start ? { start, end } : null;
+}
+
+async function serveKawaiiMediaVPS(
+  url: string,
+  headers: Record<string, string>,
+  req: import("express").Request,
+  res: import("express").Response,
+  fetchWithFallback?: (
+    url: string,
+    headers: Record<string, string>,
+    controller: AbortController,
+  ) => Promise<Response>,
+): Promise<void> {
+  const clientRange = typeof req.headers.range === "string" ? req.headers.range : undefined;
+  const requested = clientRange?.match(/^bytes=(\d+)-(\d*)$/i);
+  const requestedStart = requested ? Number(requested[1]) : 0;
+  let requestedEnd = requested?.[2] ? Number(requested[2]) : null;
+  let streamStart = requestedStart;
+  let expectedBytes: number | null = null;
+  let bytesSent = 0;
+  let canResume = false;
+  let responseStarted = false;
+  const maxAttempts = 4;
+
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Expose-Headers", "Content-Length,Content-Range,Content-Type");
+
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    if (req.aborted || res.destroyed || res.writableEnded) return;
+    const requestHeaders = { ...headers };
+    if (bytesSent > 0) {
+      const resumeAt = streamStart + bytesSent;
+      if (requestedEnd !== null && resumeAt > requestedEnd) {
+        res.end();
+        return;
+      }
+      requestHeaders.Range = `bytes=${resumeAt}-${requestedEnd ?? ""}`;
+    }
+
+    const controller = new AbortController();
+    const abort = () => controller.abort();
+    let timer: ReturnType<typeof setTimeout> | null = setTimeout(abort, 20_000);
+    let reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
+    req.once("aborted", abort);
+    res.once("close", abort);
+    const detach = () => {
+      if (timer) clearTimeout(timer);
+      timer = null;
+      req.removeListener("aborted", abort);
+      res.removeListener("close", abort);
+    };
+
+    try {
+      const upstream = fetchWithFallback
+        ? await fetchWithFallback(url, requestHeaders, controller)
+        : await fetch(url, { headers: requestHeaders, signal: controller.signal });
+      if (timer) clearTimeout(timer);
+      timer = null;
+
+      if (!upstream.ok && upstream.status !== 206) {
+        await upstream.body?.cancel().catch(() => {});
+        detach();
+        const retryable = upstream.status === 408 || upstream.status === 429 || upstream.status >= 500;
+        if (retryable && bytesSent === 0 && attempt + 1 < maxAttempts) {
+          await new Promise(resolve => setTimeout(resolve, 250 * (attempt + 1)));
+          continue;
+        }
+        if (!res.headersSent) res.status(upstream.status).end();
+        return;
+      }
+
+      const contentRange = parseKawaiiRange(upstream.headers.get("content-range"));
+      if (!responseStarted) {
+        if (requested && upstream.status === 206 && contentRange && contentRange.start !== requestedStart) {
+          await upstream.body?.cancel().catch(() => {});
+          detach();
+          res.status(502).send("Kawaii returned an unexpected byte range");
+          return;
+        }
+        streamStart = contentRange?.start ?? (upstream.status === 206 ? requestedStart : 0);
+        if (upstream.status !== 206) requestedEnd = null;
+        const lengthHeader = upstream.headers.get("content-length");
+        const length = lengthHeader === null ? NaN : Number(lengthHeader);
+        expectedBytes = Number.isSafeInteger(length) && length >= 0
+          ? length
+          : contentRange ? contentRange.end - contentRange.start + 1 : null;
+        canResume = (upstream.headers.get("accept-ranges") || "").toLowerCase().includes("bytes")
+          || (upstream.status === 206 && contentRange !== null);
+
+        const mp4Url = /\.mp4(?:[?#]|$)/i.test(url) || /\/video\/[^/?#]+(?:[?#]|$)/i.test(url);
+        let contentType = upstream.headers.get("content-type") || (mp4Url ? "video/mp4" : "video/MP2T");
+        if ((contentType === "application/octet-stream" || contentType === "binary/octet-stream") && mp4Url) {
+          contentType = "video/mp4";
+        }
+        res.setHeader("Content-Type", contentType);
+        for (const [sourceName, outputName] of [
+          ["accept-ranges", "Accept-Ranges"],
+          ["content-length", "Content-Length"],
+          ["content-range", "Content-Range"],
+          ["etag", "ETag"],
+        ] as const) {
+          const value = upstream.headers.get(sourceName);
+          if (value) res.setHeader(outputName, value);
+        }
+        res.status(upstream.status);
+        responseStarted = true;
+      } else if (
+        upstream.status !== 206 ||
+        !contentRange ||
+        contentRange.start !== streamStart + bytesSent
+      ) {
+        await upstream.body?.cancel().catch(() => {});
+        detach();
+        mediaMetrics.upstreamErrors++;
+        res.destroy(new Error("Kawaii CDN did not honor the resume byte range"));
+        return;
+      }
+
+      if (!upstream.body) {
+        detach();
+        if (expectedBytes === null || bytesSent >= expectedBytes) {
+          res.end();
+          return;
+        }
+        throw new Error("Kawaii response ended before its declared length");
+      }
+
+      reader = upstream.body.getReader();
+      let ended = false;
+      while (true) {
+        let idleTimer: ReturnType<typeof setTimeout> | null = null;
+        const result = await Promise.race([
+          reader.read(),
+          new Promise<never>((_, reject) => {
+            idleTimer = setTimeout(() => {
+              controller.abort();
+              reject(new Error("Kawaii upstream stalled"));
+            }, 25_000);
+          }),
+        ]).finally(() => {
+          if (idleTimer) clearTimeout(idleTimer);
+        });
+        if (result.done) {
+          ended = true;
+          break;
+        }
+        if (!result.value?.byteLength) continue;
+        if (!res.write(result.value)) {
+          const drained = await new Promise<boolean>(resolve => {
+            const onDrain = () => { cleanup(); resolve(true); };
+            const onClose = () => { cleanup(); resolve(false); };
+            const cleanup = () => {
+              res.removeListener("drain", onDrain);
+              res.removeListener("close", onClose);
+            };
+            res.once("drain", onDrain);
+            res.once("close", onClose);
+          });
+          if (!drained) {
+            controller.abort();
+            detach();
+            await reader.cancel().catch(() => {});
+            return;
+          }
+        }
+        bytesSent += result.value.byteLength;
+      }
+
+      detach();
+      reader.releaseLock();
+      reader = null;
+      if (ended && (expectedBytes === null || bytesSent >= expectedBytes)) {
+        res.end();
+        return;
+      }
+      throw new Error("Kawaii stream ended before the declared length");
+    } catch (error) {
+      detach();
+      if (reader) {
+        await reader.cancel().catch(() => {});
+        try { reader.releaseLock(); } catch {}
+        reader = null;
+      }
+      if (req.aborted || res.destroyed || res.writableEnded) return;
+
+      mediaMetrics.upstreamErrors++;
+      if (bytesSent === 0 && !res.headersSent && responseStarted) {
+        responseStarted = false;
+        expectedBytes = null;
+        canResume = false;
+        streamStart = requestedStart;
+        requestedEnd = requested?.[2] ? Number(requested[2]) : null;
+        for (const header of ["Content-Type", "Content-Length", "Content-Range", "Accept-Ranges", "ETag"]) {
+          res.removeHeader(header);
+        }
+      }
+      if ((bytesSent === 0 || canResume) && attempt + 1 < maxAttempts) {
+        await new Promise(resolve => setTimeout(resolve, 250 * (attempt + 1)));
+        continue;
+      }
+      if (!responseStarted) res.status(502).send("Kawaii media fetch failed");
+      else res.destroy(error instanceof Error ? error : new Error(String(error)));
+      return;
+    }
+  }
+
+  if (!res.destroyed && !res.writableEnded) {
+    if (!responseStarted) res.status(502).send("Kawaii media fetch failed");
+    else res.destroy(new Error("Kawaii media retry limit reached"));
+  }
+}
+
 // ── VPS-side segment/video proxy (يُستخدم عند سقوط CF Worker) ─────────────────
 async function serveMediaVPS(
   url: string, ref: string,
@@ -16816,6 +17034,11 @@ async function serveMediaVPS(
   const abortUpstream = () => upstreamAbort.abort();
   res.once("close", abortUpstream);
   try {
+    if (isTrustedKawaiiCdnUrl(url) && !kawaiiMediaIsHls(url)) {
+      clearTimeout(connectTimeout);
+      await serveKawaiiMediaVPS(url, hdrs, req, res);
+      return;
+    }
     const cfStreamResponse = isClientRoutedFlixMedia(url)
       ? await cfProxyStreamFetch(url, ref, req.headers.range ? String(req.headers.range) : undefined)
       : null;

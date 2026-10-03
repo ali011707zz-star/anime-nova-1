@@ -1,4 +1,4 @@
-import { useLayoutEffect } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef } from "react";
 import { useNavigation } from "expo-router";
 import { Platform } from "react-native";
 import * as ScreenOrientation from "expo-screen-orientation";
@@ -10,6 +10,13 @@ import * as ScreenOrientation from "expo-screen-orientation";
  */
 export function useWatchPlayerOrientation(playerActive: boolean, tvMode: boolean) {
   const navigation = useNavigation();
+  const pendingLockRef = useRef<Promise<void>>(Promise.resolve());
+  const requestOrientationLock = useCallback((lock: ScreenOrientation.OrientationLock) => {
+    pendingLockRef.current = pendingLockRef.current
+      .catch(() => {})
+      .then(() => ScreenOrientation.lockAsync(lock))
+      .catch(() => {});
+  }, []);
 
   useLayoutEffect(() => {
     navigation.setOptions({
@@ -20,16 +27,21 @@ export function useWatchPlayerOrientation(playerActive: boolean, tvMode: boolean
 
     if (tvMode || Platform.OS === "web") return;
 
-    ScreenOrientation.lockAsync(
+    requestOrientationLock(
       playerActive
         ? ScreenOrientation.OrientationLock.LANDSCAPE_RIGHT
         : ScreenOrientation.OrientationLock.PORTRAIT_UP,
-    ).catch(() => {});
+    );
+  }, [navigation, playerActive, requestOrientationLock, tvMode]);
 
+  // Only restore portrait when the watch route unmounts. The lock effect also
+  // cleans up when playerActive changes; restoring portrait there races the
+  // new landscape lock and can turn the screen upright right after opening.
+  useEffect(() => {
     return () => {
-      if (!tvMode) {
-        ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP).catch(() => {});
+      if (!tvMode && Platform.OS !== "web") {
+        requestOrientationLock(ScreenOrientation.OrientationLock.PORTRAIT_UP);
       }
     };
-  }, [navigation, playerActive, tvMode]);
+  }, [requestOrientationLock, tvMode]);
 }
