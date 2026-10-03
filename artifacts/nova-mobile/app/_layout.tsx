@@ -136,6 +136,7 @@ function RootLayoutNav() {
   return (
     <>
       <StatusBar
+        hidden={Platform.OS === "android" && !tvMode}
         backgroundColor={colors.background}
         barStyle={theme === "white" ? "dark-content" : "light-content"}
       />

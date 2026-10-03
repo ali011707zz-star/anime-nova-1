@@ -51,6 +51,7 @@
     },
     "plugins": [
       "./plugins/withAndroidTv",
+      "./plugins/withAndroidImmersiveBars",
       "./plugins/withAndroidBroadcastGuard",
       [
         "expo-router",
