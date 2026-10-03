@@ -25,8 +25,31 @@ async function getToken(): Promise<string> {
 
 const TOKEN   = () => process.env.TELEGRAM_BOT_TOKEN || _cachedToken;
 const API     = () => `https://api.telegram.org/bot${TOKEN()}`;
+const SITE_URL = "https://animenovaa.duckdns.org/";
 
 /* ── helpers ──────────────────────────────────────────────────────────── */
+
+function escapeTelegramHtml(value: unknown): string {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+function buildEpisodeCaption(title: string, ep: number): string {
+  return [
+    `🌸 <b>حلقة جديدة وصلت!</b>`,
+    ``,
+    `✨ ${escapeTelegramHtml(title)}`,
+    `🎬 الحلقة ${escapeTelegramHtml(ep)}`,
+    ``,
+    `✅ متاحة الآن للمشاهدة على Anime NOVA 🎮`,
+    ``,
+    `شاهد بجودة عالية · بدون إعلانات 🚀`,
+    `🔗 ${SITE_URL}`,
+  ].join("\n");
+}
 
 async function sendMessage(chatId: number | string, text: string, extra: Record<string, any> = {}) {
   const tok = await getToken();
@@ -138,12 +161,7 @@ export async function notifyNewEpisode(
 
   const channelId = process.env.TELEGRAM_CHANNEL_ID;
   const tok = await getToken();
-  const caption =
-    `🌸 <b>حلقة جديدة وصلت!</b>\n\n` +
-    `✨ <b>${title}</b>\n` +
-    `🎬 الحلقة <b>${ep}</b>\n\n` +
-    `✅ <b>متاحة الآن للمشاهدة</b> على Anime NOVA 🎮\n\n` +
-    `<i>شاهد بجودة عالية · بدون إعلانات 🚀</i>`;
+  const caption = buildEpisodeCaption(title, ep);
 
   let telegramSent = true;
   if (channelId && tok) {
@@ -318,22 +336,7 @@ async function checkAnimeWitcherEp(title: string, ep: number): Promise<boolean> 
 
 function buildCaption(media: any, ep: number): string {
   const title  = media.title?.english || media.title?.romaji || media.title?.native || "أنمي";
-  const romaji = media.title?.romaji || "";
-  const genres = (media.genres || []).slice(0, 3).join(" · ");
-
-  const lines: string[] = [
-    `🌸 <b>حلقة جديدة متاحة الآن!</b>`,
-    ``,
-    `✨ <b>${title}</b>`,
-  ];
-  if (romaji && romaji !== title) lines.push(`<i>${romaji}</i>`);
-  lines.push(`🎬 الحلقة <b>${ep}</b>`);
-  if (genres) lines.push(`🎭 ${genres}`);
-  lines.push(``);
-  lines.push(`✅ <b>متاحة الآن على Anime NOVA</b> 🎮`);
-  lines.push(``);
-  lines.push(`🎉 <b>مشاهدة ممتعة!</b> 🌟`);
-  return lines.join("\n");
+  return buildEpisodeCaption(title, ep);
 }
 
 /* ── حالة الـ scheduler ──────────────────────────────────────────────── */
@@ -845,22 +848,25 @@ router.post("/api/telegram/notify-test", async (_req: Request, res: Response) =>
     return;
   }
 
-  // One Piece ح1 كمثال تجريبي
-  const testAnilistId = 21;
-  const testTitle     = "ون بيس";
-  const testEp        = 1;
+  // Goodbye, Lara — عينة الاختبار تطابق المثال الذي طلبه المستخدم.
+  const testAnilistId = 177637;
+  const testTitle     = "Sayonara Lara";
+  const testEp        = 4;
 
   const poster  = await fetchAnimePoster(testAnilistId);
-  const caption =
-    `🎬 <b>اسم الأنمي:</b> ${testTitle}\n` +
-    `📺 <b>الحلقة:</b> ${testEp} (تجريبي)\n` +
-    `✨ تم إضافة الحلقة الجديدة\n\n` +
-    `مشاهدة ممتعة 💙`;
+  const caption = buildEpisodeCaption(testTitle, testEp);
 
-  if (poster) {
-    await sendChannelPhoto(poster, caption);
-  } else {
-    await sendMessage(channelId, caption);
+  const sent = poster
+    ? await sendChannelPhoto(poster, caption)
+    : await sendMessage(channelId, caption);
+  if (!sent) {
+    res.status(502).json({
+      ok: false,
+      error: "تعذر إرسال الاختبار إلى القناة. تحقق من صلاحية البوت ورابط البوستر.",
+      channelId,
+      hasPoster: !!poster,
+    });
+    return;
   }
 
   res.json({ ok: true, channelId, hasPoster: !!poster, caption });
