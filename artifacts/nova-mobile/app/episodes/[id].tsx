@@ -12,6 +12,7 @@ import { getBaseUrl } from "@/utils/api";
 import { isTvDevice, tvFocusStyle, TvFocusGuideView, TvPressable } from "@/utils/tv";
 const Pressable = TvPressable;
 import { useTvFocusMemory } from "@/utils/tvFocus";
+import { useColors } from "@/hooks/useColors";
 
 /* ── AniList query ── */
 const ANIME_QUERY = `
@@ -277,6 +278,7 @@ function EpisodeRow({
   onFocus?: () => void;
   hasTVPreferredFocus?: boolean;
 }) {
+  const colors = useColors();
   const { width, height } = useWindowDimensions();
   const tvMode = isTvDevice(width, height);
   const ep = epByNumber.get(n);
@@ -294,6 +296,7 @@ function EpisodeRow({
       ep_s.row,
       tvMode && ep_s.tvRow,
       watched && ep_s.rowWatched,
+      { backgroundColor: watched ? colors.surfaceElevated : colors.card, borderColor: colors.border },
     ]}>
       <Pressable
         onPress={() => onWatch(n)}
@@ -322,10 +325,10 @@ function EpisodeRow({
       <View style={[ep_s.info, tvMode && ep_s.tvInfo]}>
         <View style={ep_s.epNumRow}>
           {isFiller ? <Text style={[ep_s.fillerBadge, tvMode && ep_s.tvFillerBadge]}>فلر</Text> : null}
-          <Text style={[ep_s.epNum, tvMode && ep_s.tvEpNum, watched && { color: "#8B5CF6" }]}>الحلقة {n}</Text>
+          <Text style={[ep_s.epNum, tvMode && ep_s.tvEpNum, { color: watched ? colors.accent : colors.textPrimary }]}>الحلقة {n}</Text>
         </View>
-        {arabicTitle ? <Text style={[ep_s.epTitleAr, tvMode && ep_s.tvEpTitle]} numberOfLines={tvMode ? 2 : 1}>{arabicTitle}</Text> : null}
-        {originalTitle ? <Text style={[ep_s.epTitleOriginal, tvMode && ep_s.tvEpOriginal]} numberOfLines={tvMode ? 2 : 1}>{originalTitle}</Text> : null}
+        {arabicTitle ? <Text style={[ep_s.epTitleAr, tvMode && ep_s.tvEpTitle, { color: colors.textPrimary }]} numberOfLines={tvMode ? 2 : 1}>{arabicTitle}</Text> : null}
+        {originalTitle ? <Text style={[ep_s.epTitleOriginal, tvMode && ep_s.tvEpOriginal, { color: colors.textSecondary }]} numberOfLines={tvMode ? 2 : 1}>{originalTitle}</Text> : null}
       </View>
       </Pressable>
 
@@ -360,6 +363,7 @@ function EpisodeRow({
 }
 
 export default function EpisodeListScreen() {
+  const colors = useColors();
   const { id, src, title, english, cover, ep } = useLocalSearchParams<{
     id: string;
     src?: string;
@@ -747,7 +751,7 @@ export default function EpisodeListScreen() {
   }, [displayedEps, epByNumber, episodeTitlesAr]);
 
   if (loading) return (
-    <View style={ep_s.container}>
+    <View style={[ep_s.container, { backgroundColor: colors.background }]}>
       <View style={ep_s.center}>
         <ActivityIndicator color="#8B5CF6" size="large" />
       </View>
@@ -756,13 +760,13 @@ export default function EpisodeListScreen() {
   if (!anime) return (
     <View style={ep_s.container}>
       <View style={ep_s.center}>
-        <Text style={ep_s.notFound}>لم يُعثر على الأنمي</Text>
+          <Text style={[ep_s.notFound, { color: colors.textSecondary }]}>لم يُعثر على الأنمي</Text>
       </View>
     </View>
   );
 
   return (
-    <View style={[ep_s.container, { paddingTop: topPad }, tvMode && ep_s.tvContainer]}>
+    <View style={[ep_s.container, tvMode && ep_s.tvContainer, { backgroundColor: colors.background, paddingTop: topPad }]}>
       {/* ── Hero Banner ── */}
       <View style={[ep_s.hero, tvMode && ep_s.tvHero]}>
         {(selectedAnime?.bannerImage || selectedAnime?.coverImage?.extraLarge || selectedAnime?.coverImage?.large) ? (
@@ -811,7 +815,7 @@ export default function EpisodeListScreen() {
       </View>
 
       {/* ── Sticky controls ── */}
-      <View style={[ep_s.controls, tvMode && ep_s.tvControls]}>
+      <View style={[ep_s.controls, tvMode && ep_s.tvControls, { backgroundColor: colors.surface, borderBottomColor: colors.border }]}>
         {/* Progress bar */}
         <View style={ep_s.progressRow}>
           <View style={ep_s.progressTrack}>
@@ -822,8 +826,8 @@ export default function EpisodeListScreen() {
         {seasons.length > 1 && (
           <View style={ep_s.seasonSection}>
             <View style={ep_s.seasonSectionHeader}>
-              <Text style={[ep_s.seasonSectionTitle, tvMode && ep_s.tvSeasonSectionTitle]}>المواسم</Text>
-              <Text style={[ep_s.seasonTotal, tvMode && ep_s.tvText]}>{seasons.length} مواسم</Text>
+              <Text style={[ep_s.seasonSectionTitle, tvMode && ep_s.tvSeasonSectionTitle, { color: colors.textPrimary }]}>المواسم</Text>
+              <Text style={[ep_s.seasonTotal, tvMode && ep_s.tvText, { color: colors.textMuted }]}>{seasons.length} مواسم</Text>
             </View>
             <ScrollView
               horizontal
@@ -871,7 +875,7 @@ export default function EpisodeListScreen() {
           </View>
         )}
         <View style={ep_s.episodeTools}>
-          <Text style={[ep_s.episodeSectionTitle, tvMode && ep_s.tvEpisodeSectionTitle]}>الحلقات</Text>
+          <Text style={[ep_s.episodeSectionTitle, tvMode && ep_s.tvEpisodeSectionTitle, { color: colors.textPrimary }]}>الحلقات</Text>
           <Pressable
             onPress={() => {
               setSortOrder(current => current === "asc" ? "desc" : "asc");
@@ -895,15 +899,15 @@ export default function EpisodeListScreen() {
           </Pressable>
         </View>
         {/* Search */}
-        <View style={[ep_s.searchBar, tvMode && ep_s.tvSearchBar]}>
-           <Ionicons name="search" size={tvMode ? 24 : 15} color="rgba(255,255,255,0.25)" />
+        <View style={[ep_s.searchBar, tvMode && ep_s.tvSearchBar, { backgroundColor: colors.input, borderColor: colors.border }]}>
+           <Ionicons name="search" size={tvMode ? 24 : 15} color={colors.textMuted} />
           <TextInput
             value={search}
             onChangeText={setSearch}
             placeholder="اذهب لحلقة..."
-            placeholderTextColor="rgba(255,255,255,0.25)"
+            placeholderTextColor={colors.textMuted}
             keyboardType="number-pad"
-            style={[ep_s.searchInput, tvMode && ep_s.tvText]}
+            style={[ep_s.searchInput, tvMode && ep_s.tvText, { color: colors.textPrimary }]}
           />
           {search ? (
              <Pressable onPress={() => setSearch("")} focusable={tvMode}

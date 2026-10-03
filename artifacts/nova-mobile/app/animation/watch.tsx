@@ -17,7 +17,7 @@ import { secureFetch, secureStreamFetch } from "@/utils/secureApi";
 import { startMobileWatchAnalytics } from "@/utils/analytics";
 import { ensureWatchAccess } from "@/utils/adPolicy";
 import { RewardedAdPrompt } from "@/components/RewardedAdPrompt";
-import * as ScreenOrientation from "expo-screen-orientation";
+import { useWatchPlayerOrientation } from "@/utils/watchOrientation";
 
 const { width: W, height: H } = Dimensions.get("window");
 
@@ -359,6 +359,10 @@ export default function AnimationWatchScreen() {
   }, [tmdbId, ep, titleStr]);
 
   const [screen, setScreen]       = useState<Screen>("picker");
+  useWatchPlayerOrientation(
+    screen === "native" || screen === "webplayer" || screen === "embed",
+    tvMode,
+  );
   const [sources, setSources]     = useState<AnimSrc[]>([]);
   const [loading, setLoading]     = useState(true);
   const [playingSrc, setPlayingSrc] = useState<AnimSrc | null>(null);
@@ -586,21 +590,6 @@ export default function AnimationWatchScreen() {
     }, 22000);
     return () => clearTimeout(timeout);
   }, [tmdbId, ep, season]);
-
-  /* ── Portrait lock on picker/loading; unlock for embed ── */
-  useEffect(() => {
-    if (screen === "loading" || screen === "picker") {
-      ScreenOrientation.lockAsync(
-        tvMode
-          ? ScreenOrientation.OrientationLock.LANDSCAPE
-          : ScreenOrientation.OrientationLock.PORTRAIT_UP,
-      ).catch(() => {});
-    } else if (screen === "embed") {
-      ScreenOrientation.unlockAsync().catch(() => {});
-    }
-    // "native" orientation is handled by RiftPlayer itself
-  }, [screen, tvMode]);
-
 
   /* ── Resolve and play only the selected source ── */
   const playSrc = useCallback(async (src: AnimSrc) => {

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useMemo } from "react";
 import {
   View, Text, Pressable, Image, ScrollView, Modal,
   ActivityIndicator, StyleSheet, Platform, Dimensions, Linking,
@@ -12,6 +12,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { getBaseUrl } from "@/utils/api";
 import { getYoutubeEmbedUrl, getYoutubeReferer } from "@/utils/youtube";
 import { isTvDevice, tvFocusStyle } from "@/utils/tv";
+import { useColors } from "@/hooks/useColors";
 
 const { width: W } = Dimensions.get("window");
 const IMG_W = "https://image.tmdb.org/t/p/w500";
@@ -34,6 +35,7 @@ function formatRuntime(mins: number) {
 }
 
 function StarRow({ score }: { score: number }) {
+  const colors = useColors();
   return (
     <View style={{ flexDirection: "row", alignItems: "center", gap: 3 }}>
       {[1, 2, 3, 4, 5].map(i => {
@@ -43,7 +45,7 @@ function StarRow({ score }: { score: number }) {
             key={i}
             name={filled ? "star" : "star"}
             size={13}
-            color={filled ? "#FBBF24" : "rgba(255,255,255,0.15)"}
+            color={filled ? "#FBBF24" : colors.textMuted}
           />
         );
       })}
@@ -52,6 +54,8 @@ function StarRow({ score }: { score: number }) {
 }
 
 export default function AnimationDetailScreen() {
+  const colors = useColors();
+  const s = useMemo(() => createStyles(colors), [colors]);
   const { type, id } = useLocalSearchParams<{ type: string; id: string }>();
   const router = useRouter();
   const insets = useSafeAreaInsets();
@@ -189,7 +193,7 @@ export default function AnimationDetailScreen() {
   )?.key || null;
 
   return (
-  <View style={{ flex: 1, backgroundColor: "#09090B" }}>
+  <View style={{ flex: 1, backgroundColor: colors.background }}>
     <ScrollView style={s.container} showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 100 }}>
 
       {/* ── Hero Banner ── */}
@@ -459,13 +463,14 @@ export default function AnimationDetailScreen() {
   );
 }
 
-const s = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#09090B" },
-  center: { flex: 1, backgroundColor: "#09090B", alignItems: "center", justifyContent: "center", gap: 12 },
-  loadingText: { fontSize: 12, color: "rgba(255,255,255,0.3)", fontFamily: "Cairo_400Regular" },
-  emptyText: { fontSize: 15, color: "rgba(255,255,255,0.4)", fontFamily: "Cairo_700Bold" },
-  backBtn: { paddingHorizontal: 20, paddingVertical: 10, borderRadius: 14, backgroundColor: "rgba(139,92,246,0.15)", borderWidth: 1, borderColor: "rgba(139,92,246,0.3)" },
-  backBtnText: { color: "#c4b5fd", fontSize: 13, fontFamily: "Cairo_700Bold" },
+function createStyles(colors: ReturnType<typeof useColors>) {
+return StyleSheet.create({
+  container: { flex: 1, backgroundColor: colors.background },
+  center: { flex: 1, backgroundColor: colors.background, alignItems: "center", justifyContent: "center", gap: 12 },
+  loadingText: { fontSize: 12, color: colors.textSecondary, fontFamily: "Cairo_400Regular" },
+  emptyText: { fontSize: 15, color: colors.textSecondary, fontFamily: "Cairo_700Bold" },
+  backBtn: { paddingHorizontal: 20, paddingVertical: 10, borderRadius: 14, backgroundColor: colors.accentSurface, borderWidth: 1, borderColor: colors.accentBorder },
+  backBtnText: { color: colors.accent, fontSize: 13, fontFamily: "Cairo_700Bold" },
 
   heroTopRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 16 },
   backCircle: { position: "absolute", right: 14, width: 38, height: 38, borderRadius: 19, backgroundColor: "rgba(0,0,0,0.45)", borderWidth: 1, borderColor: "rgba(255,255,255,0.12)", alignItems: "center", justifyContent: "center" },
@@ -479,7 +484,7 @@ const s = StyleSheet.create({
   coverImg: { width: 88, height: 128, borderRadius: 14, borderWidth: 1, borderColor: "rgba(255,255,255,0.12)" },
   coverPlaceholder: { backgroundColor: "rgba(139,92,246,0.1)", alignItems: "center", justifyContent: "center" },
   titleCol: { flex: 1, paddingBottom: 8, gap: 8 },
-  titleText: { fontSize: 16, fontFamily: "Cairo_800ExtraBold", color: "#fff", lineHeight: 22, textAlign: "left" },
+  titleText: { fontSize: 16, fontFamily: "Cairo_800ExtraBold", color: colors.textPrimary, lineHeight: 22, textAlign: "left" },
   metaRow: { flexDirection: "row", flexWrap: "wrap", gap: 6 },
   metaChip: { fontSize: 9, fontFamily: "Cairo_700Bold", color: "rgba(255,255,255,0.38)", paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8, borderWidth: 1, borderColor: "rgba(255,255,255,0.08)", backgroundColor: "rgba(255,255,255,0.05)" },
   metaChipPurple: { color: "#a78bfa", borderColor: "rgba(139,92,246,0.25)", backgroundColor: "rgba(139,92,246,0.1)" },
@@ -502,28 +507,28 @@ const s = StyleSheet.create({
   watchBtnText: { fontSize: 15, fontFamily: "Cairo_800ExtraBold", color: "#fff" },
 
   actionRow: { flexDirection: "row", paddingHorizontal: 16, marginTop: 10, gap: 10 },
-  actionBtn: { flex: 1, alignItems: "center", justifyContent: "center", gap: 5, paddingVertical: 12, borderRadius: 14, backgroundColor: "rgba(255,255,255,0.04)", borderWidth: 1, borderColor: "rgba(255,255,255,0.08)" },
-  actionLabel: { fontSize: 10, fontFamily: "Cairo_700Bold", color: "rgba(255,255,255,0.45)" },
+  actionBtn: { flex: 1, alignItems: "center", justifyContent: "center", gap: 5, paddingVertical: 12, borderRadius: 14, backgroundColor: colors.input, borderWidth: 1, borderColor: colors.border },
+  actionLabel: { fontSize: 10, fontFamily: "Cairo_700Bold", color: colors.textSecondary },
 
   section: { marginTop: 22 },
-  sectionTitle: { fontSize: 13, fontFamily: "Cairo_800ExtraBold", color: "#fff", paddingHorizontal: 16, marginBottom: 10 },
-  storyBox: { marginHorizontal: 16, backgroundColor: "rgba(255,255,255,0.04)", borderRadius: 16, borderWidth: 1, borderColor: "rgba(255,255,255,0.07)", padding: 14 },
-  overviewText: { fontSize: 13, color: "rgba(255,255,255,0.65)", lineHeight: 22, fontFamily: "Cairo_400Regular", textAlign: "right" },
+  sectionTitle: { fontSize: 13, fontFamily: "Cairo_800ExtraBold", color: colors.textPrimary, paddingHorizontal: 16, marginBottom: 10 },
+  storyBox: { marginHorizontal: 16, backgroundColor: colors.surface, borderRadius: 16, borderWidth: 1, borderColor: colors.border, padding: 14 },
+  overviewText: { fontSize: 13, color: colors.textSecondary, lineHeight: 22, fontFamily: "Cairo_400Regular", textAlign: "right" },
   showMoreBtn: { flexDirection: "row", alignItems: "center", gap: 4, marginTop: 10 },
   showMoreText: { fontSize: 12, color: "#8B5CF6", fontFamily: "Cairo_700Bold" },
 
   castCard: { width: 70, alignItems: "center", gap: 5 },
   castImg: { width: 60, height: 60, borderRadius: 30, borderWidth: 1, borderColor: "rgba(255,255,255,0.08)" },
   castPlaceholder: { backgroundColor: "rgba(255,255,255,0.05)", alignItems: "center", justifyContent: "center" },
-  castName: { fontSize: 9, fontFamily: "Cairo_700Bold", color: "rgba(255,255,255,0.7)", textAlign: "center", lineHeight: 13 },
-  castChar: { fontSize: 8, color: "rgba(255,255,255,0.3)", fontFamily: "Cairo_400Regular", textAlign: "center" },
+  castName: { fontSize: 9, fontFamily: "Cairo_700Bold", color: colors.textPrimary, textAlign: "center", lineHeight: 13 },
+  castChar: { fontSize: 8, color: colors.textMuted, fontFamily: "Cairo_400Regular", textAlign: "center" },
 
   recCard: { width: 90 },
   recImg: { width: 90, height: 130, borderRadius: 12, borderWidth: 1, borderColor: "rgba(255,255,255,0.08)", marginBottom: 6 },
   recPlaceholder: { backgroundColor: "rgba(139,92,246,0.08)", alignItems: "center", justifyContent: "center" },
   recScoreBadge: { position: "absolute", top: 5, left: 5, flexDirection: "row", alignItems: "center", gap: 2, backgroundColor: "rgba(0,0,0,0.65)", borderRadius: 6, paddingHorizontal: 4, paddingVertical: 2 },
   recScoreText: { fontSize: 8, fontFamily: "Cairo_700Bold", color: "#fff" },
-  recTitle: { fontSize: 9, fontFamily: "Cairo_700Bold", color: "rgba(255,255,255,0.7)", lineHeight: 13, textAlign: "right" },
+  recTitle: { fontSize: 9, fontFamily: "Cairo_700Bold", color: colors.textPrimary, lineHeight: 13, textAlign: "right" },
 
   trailerBtn: { marginHorizontal: 16, borderRadius: 18, overflow: "hidden", aspectRatio: 16 / 9, borderWidth: 1, borderColor: "rgba(255,255,255,0.08)" },
   trailerImg: { width: "100%", height: "100%" },
@@ -535,3 +540,4 @@ const s = StyleSheet.create({
   trailerClose: { width: 30, height: 30, backgroundColor: "rgba(255,255,255,0.1)", borderRadius: 11, alignItems: "center", justifyContent: "center" },
   trailerHeaderText: { fontSize: 12, fontFamily: "Cairo_800ExtraBold", color: "#fff" },
 });
+}

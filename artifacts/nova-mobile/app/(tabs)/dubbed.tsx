@@ -10,6 +10,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useFocusEffect, useRouter } from "expo-router";
 import { getBaseUrl } from "@/utils/api";
 import { isTvDevice, tvFocusStyle } from "@/utils/tv";
+import { useColors } from "@/hooks/useColors";
 
 interface Season { label: string; arabicToonsId: string; }
 interface Series {
@@ -37,6 +38,7 @@ function getImg(s: Series): string | null {
 }
 
 function SeriesCard({ s, onPress }: { s: Series; onPress: () => void }) {
+  const colors = useColors();
   const imgUri = getImg(s);
   const { width, height } = useWindowDimensions();
   const tvMode = isTvDevice(width, height);
@@ -46,11 +48,11 @@ function SeriesCard({ s, onPress }: { s: Series; onPress: () => void }) {
       focusable={tvMode}
       style={({ pressed, focused }) => [styles.card, { opacity: pressed ? 0.7 : 1 }, tvMode && tvFocusStyle(focused)]}
     >
-      <View style={styles.cardPoster}>
+      <View style={[styles.cardPoster, { backgroundColor: colors.surface }]}>
         {imgUri ? (
           <Image source={{ uri: imgUri }} style={StyleSheet.absoluteFill} resizeMode="cover" />
         ) : (
-          <View style={styles.cardPlaceholder}>
+          <View style={[styles.cardPlaceholder, { backgroundColor: colors.surfaceElevated }]}>
             <Text style={{ fontSize: 24 }}>📺</Text>
           </View>
         )}
@@ -71,6 +73,7 @@ function SeriesCard({ s, onPress }: { s: Series; onPress: () => void }) {
 }
 
 export default function DubbedScreen() {
+  const colors = useColors();
   const insets = useSafeAreaInsets();
   const { width, height } = useWindowDimensions();
   const tvMode = isTvDevice(width, height);
@@ -153,38 +156,38 @@ export default function DubbedScreen() {
   const displayList = searchQ.trim().length >= 2 ? searchResults : series;
 
   return (
-    <View style={[styles.container, { paddingTop: topPad }]}>
+    <View style={[styles.container, { backgroundColor: colors.background, paddingTop: topPad }]}>
       {/* Header */}
       <View style={styles.header}>
         <Pressable
           onPress={() => (router.canGoBack() ? router.back() : router.push("/"))}
           focusable={tvMode}
-          style={({ focused }) => [styles.iconBtn, tvMode && tvFocusStyle(focused)]}
+          style={({ focused }) => [styles.iconBtn, { backgroundColor: colors.input, borderColor: colors.border }, tvMode && tvFocusStyle(focused)]}
         >
-          <Ionicons name="chevron-forward" size={20} color="rgba(255,255,255,0.7)" />
+          <Ionicons name="chevron-forward" size={20} color={colors.textSecondary} />
         </Pressable>
         <View style={{ flex: 1 }}>
-          <Text style={styles.headerTitle}>كرتون مدبلج</Text>
-          <Text style={styles.headerSub}>كرتون وأنمي مدبلج للعربية</Text>
+          <Text style={[styles.headerTitle, { color: colors.textPrimary }]}>كرتون مدبلج</Text>
+          <Text style={[styles.headerSub, { color: colors.textSecondary }]}>كرتون وأنمي مدبلج للعربية</Text>
         </View>
         <Pressable
           onPress={() => setSearchOpen(o => !o)}
           focusable={tvMode}
-          style={({ focused }) => [styles.iconBtn, tvMode && tvFocusStyle(focused)]}
+          style={({ focused }) => [styles.iconBtn, { backgroundColor: colors.input, borderColor: colors.border }, tvMode && tvFocusStyle(focused)]}
         >
-          <Ionicons name={searchOpen ? "close" : "search"} size={18} color="rgba(255,255,255,0.7)" />
+          <Ionicons name={searchOpen ? "close" : "search"} size={18} color={colors.textSecondary} />
         </Pressable>
       </View>
 
       {searchOpen && (
-        <View style={styles.searchBox}>
-          <Ionicons name="search" size={16} color="rgba(255,255,255,0.3)" style={{ marginLeft: 8 }} />
+        <View style={[styles.searchBox, { backgroundColor: colors.input, borderColor: colors.border }]}>
+          <Ionicons name="search" size={16} color={colors.textMuted} style={{ marginLeft: 8 }} />
           <TextInput
             value={searchQ}
             onChangeText={setSearchQ}
             placeholder="ابحث في الكرتون المدبلج..."
-            placeholderTextColor="rgba(255,255,255,0.3)"
-            style={styles.searchInput}
+            placeholderTextColor={colors.textMuted}
+            style={[styles.searchInput, { color: colors.textPrimary }]}
             autoFocus
           />
         </View>
@@ -192,7 +195,7 @@ export default function DubbedScreen() {
 
       {loading ? (
         <View style={styles.center}>
-          <ActivityIndicator color="#7C3AED" size="large" />
+          <ActivityIndicator color={colors.accent} size="large" />
         </View>
       ) : (
         <FlatList
@@ -206,7 +209,7 @@ export default function DubbedScreen() {
             <RefreshControl
               refreshing={refreshing}
               onRefresh={refreshCatalog}
-              tintColor="#7C3AED"
+              tintColor={colors.accent}
             />
           }
           columnWrapperStyle={{ gap: 10 }}
@@ -220,12 +223,12 @@ export default function DubbedScreen() {
           }}
           onEndReachedThreshold={0.3}
           ListFooterComponent={
-            loadingMore ? <ActivityIndicator color="#7C3AED" style={{ marginVertical: 16 }} /> : null
+            loadingMore ? <ActivityIndicator color={colors.accent} style={{ marginVertical: 16 }} /> : null
           }
           ListEmptyComponent={
             !loading ? (
               <View style={styles.center}>
-                <Text style={styles.emptyText}>
+                <Text style={[styles.emptyText, { color: colors.textMuted }]}>
                   {searchQ.length >= 2 ? "لا توجد نتائج" : "لا توجد مسلسلات"}
                 </Text>
               </View>

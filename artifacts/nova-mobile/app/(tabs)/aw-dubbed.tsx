@@ -16,6 +16,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { getBaseUrl } from "@/utils/api";
 import { isTvDevice, tvFocusStyle } from "@/utils/tv";
+import { useColors } from "@/hooks/useColors";
 
 // ─────────────────────────────────────────────────────────
 // Types
@@ -69,13 +70,14 @@ function PosterCard({ uri, title, seasons, tint, onPress }: {
   uri: string | null; title: string; seasons: number;
   tint: string; onPress: () => void;
 }) {
+  const colors = useColors();
   const [imgErr, setImgErr] = useState(false);
   const tvMode = isTvDevice();
   const show = !imgErr && !!uri;
   return (
     <Pressable onPress={onPress} focusable={tvMode}
       style={({ pressed, focused }) => [card.wrap, { opacity: pressed ? 0.72 : 1 }, tvMode && tvFocusStyle(focused)]}>
-      <View style={card.poster}>
+      <View style={[card.poster, { backgroundColor: colors.surface }]}>
         {show ? (
           <Image source={{ uri: uri! }} style={StyleSheet.absoluteFill} resizeMode="cover"
             onError={() => setImgErr(true)} />
@@ -102,6 +104,7 @@ function PosterCard({ uri, title, seasons, tint, onPress }: {
 // ─────────────────────────────────────────────────────────
 
 function AnimationList({ searchQ }: { searchQ: string }) {
+  const colors = useColors();
   const { width } = useWindowDimensions();
   const gridWidth = Math.min(Math.max(width - 24, 0), 900);
   const columns = gridColumnsForWidth(width);
@@ -178,7 +181,7 @@ function AnimationList({ searchQ }: { searchQ: string }) {
 
   if (loading) return (
     <View style={shared.center}>
-      <ActivityIndicator color="#10B981" size="large" />
+      <ActivityIndicator color={colors.accent} size="large" />
     </View>
   );
 
@@ -211,10 +214,10 @@ function AnimationList({ searchQ }: { searchQ: string }) {
         if (!searchQ && !loadingMore && page < totalPages) loadPage(page + 1);
       }}
       onEndReachedThreshold={0.3}
-      ListFooterComponent={loadingMore ? <ActivityIndicator color="#10B981" style={{ marginVertical: 16 }} /> : null}
+      ListFooterComponent={loadingMore ? <ActivityIndicator color={colors.accent} style={{ marginVertical: 16 }} /> : null}
       ListEmptyComponent={
         <View style={shared.center}>
-          <Text style={shared.emptyText}>
+          <Text style={[shared.emptyText, { color: colors.textMuted }]}>
             {searchQ.length >= 2
               ? (searchLoad ? "جاري البحث..." : "لا توجد نتائج")
               : "لا يوجد محتوى"}
@@ -239,6 +242,7 @@ function dubbedImgUri(s: DubbedSeries, base: string): string | null {
 }
 
 function CartoonList({ searchQ }: { searchQ: string }) {
+  const colors = useColors();
   const { width } = useWindowDimensions();
   const gridWidth = Math.min(Math.max(width - 24, 0), 900);
   const columns = gridColumnsForWidth(width);
@@ -306,17 +310,17 @@ function CartoonList({ searchQ }: { searchQ: string }) {
 
   if (loading) return (
     <View style={shared.center}>
-      <ActivityIndicator color="#7C3AED" size="large" />
+      <ActivityIndicator color={colors.accent} size="large" />
     </View>
   );
 
   if (loadError && series.length === 0) return (
     <View style={shared.center}>
       <Ionicons name="cloud-offline-outline" size={42} color="rgba(167,139,250,0.55)" />
-      <Text style={shared.emptyText}>تعذّر تحميل الكرتون المدبلج</Text>
+      <Text style={[shared.emptyText, { color: colors.textMuted }]}>تعذّر تحميل الكرتون المدبلج</Text>
       <Pressable onPress={() => loadPage(1, true)} style={shared.retryBtn}>
         <Ionicons name="refresh" size={15} color="#A78BFA" />
-        <Text style={shared.retryText}>إعادة المحاولة</Text>
+        <Text style={[shared.retryText, { color: colors.buttonText }]}>إعادة المحاولة</Text>
       </Pressable>
     </View>
   );
@@ -350,10 +354,10 @@ function CartoonList({ searchQ }: { searchQ: string }) {
         if (!searchQ && !loadingMore && page < totalPages) loadPage(page + 1);
       }}
       onEndReachedThreshold={0.3}
-      ListFooterComponent={loadingMore ? <ActivityIndicator color="#7C3AED" style={{ marginVertical: 16 }} /> : null}
+      ListFooterComponent={loadingMore ? <ActivityIndicator color={colors.accent} style={{ marginVertical: 16 }} /> : null}
       ListEmptyComponent={
         <View style={shared.center}>
-          <Text style={shared.emptyText}>
+          <Text style={[shared.emptyText, { color: colors.textMuted }]}>
             {searchQ.length >= 2
               ? (searchLoad ? "جاري البحث..." : "لا توجد نتائج")
               : "لا توجد مسلسلات"}
@@ -369,6 +373,7 @@ function CartoonList({ searchQ }: { searchQ: string }) {
 // ─────────────────────────────────────────────────────────
 
 export default function DubbedTabScreen() {
+  const colors = useColors();
   const insets = useSafeAreaInsets();
   const tvMode = isTvDevice();
   const topPad = Platform.OS === "web" ? 0 : insets.top;
@@ -395,12 +400,12 @@ export default function DubbedTabScreen() {
   const tint = activeTab === "animation" ? "#10B981" : "#7C3AED";
 
   return (
-    <View style={[s.screen, { paddingTop: topPad }]}>
+    <View style={[s.screen, { backgroundColor: colors.background, paddingTop: topPad }]}>
       {/* ── Header ── */}
       <View style={s.header}>
         <View style={{ flex: 1 }}>
-          <Text style={s.headerTitle}>رسوم متحركة مدبلجة</Text>
-          <Text style={s.headerSub}>
+          <Text style={[s.headerTitle, { color: colors.textPrimary }]}>رسوم متحركة مدبلجة</Text>
+          <Text style={[s.headerSub, { color: colors.textSecondary }]}>
             {activeTab === "animation" ? "أنيميشن مدبلج بالعربية" : "كرتون مدبلج للعربية"}
           </Text>
         </View>
@@ -412,9 +417,9 @@ export default function DubbedTabScreen() {
             else setSearchQ("");
           }}
            focusable={tvMode}
-           style={({ focused }) => [s.iconBtn, searchOpen && { backgroundColor: "rgba(139,92,246,0.20)", borderColor: "rgba(139,92,246,0.35)" }, tvMode && tvFocusStyle(focused)]}
+           style={({ focused }) => [s.iconBtn, { backgroundColor: colors.input, borderColor: colors.border }, searchOpen && { backgroundColor: colors.accentSurface, borderColor: colors.accentBorder }, tvMode && tvFocusStyle(focused)]}
         >
-          <Ionicons name={searchOpen ? "close" : "search"} size={18} color="rgba(255,255,255,0.7)" />
+          <Ionicons name={searchOpen ? "close" : "search"} size={18} color={colors.textSecondary} />
         </Pressable>
       </View>
 
@@ -427,7 +432,7 @@ export default function DubbedTabScreen() {
             <Pressable key={tab} onPress={() => handleTab(tab)}
               focusable={tvMode}
               style={({ focused }) => [s.tabBtn, active && { borderColor: `${color}55`, backgroundColor: `${color}12` }, tvMode && tvFocusStyle(focused)]}>
-              <Text style={[s.tabText, active && { color }]}>
+              <Text style={[s.tabText, { color: active ? color : colors.textSecondary }]}>
                 {tab === "animation" ? "✨ أنيميشن" : "📺 كرتون"}
               </Text>
             </Pressable>
@@ -437,21 +442,21 @@ export default function DubbedTabScreen() {
 
       {/* ── Search ── */}
       {searchOpen && (
-        <View style={s.searchBox}>
-          <Ionicons name="search" size={16} color="rgba(255,255,255,0.3)" style={{ marginLeft: 8 }} />
+        <View style={[s.searchBox, { backgroundColor: colors.input, borderColor: colors.border }]}>
+          <Ionicons name="search" size={16} color={colors.textMuted} style={{ marginLeft: 8 }} />
           <TextInput
             ref={searchInput}
             value={searchQ}
             onChangeText={setSearchQ}
             placeholder={activeTab === "animation" ? "ابحث في الأنيميشن المدبلج..." : "ابحث في الكرتون المدبلج..."}
-            placeholderTextColor="rgba(255,255,255,0.3)"
-            style={s.searchInput}
+            placeholderTextColor={colors.textMuted}
+            style={[s.searchInput, { color: colors.textPrimary }]}
             autoFocus
           />
           {searchQ ? (
              <Pressable onPress={() => setSearchQ("")} focusable={tvMode}
                style={({ focused }) => [ { marginRight: 8 }, tvMode && tvFocusStyle(focused)]}>
-              <Ionicons name="close-circle" size={18} color="rgba(255,255,255,0.4)" />
+              <Ionicons name="close-circle" size={18} color={colors.textSecondary} />
             </Pressable>
           ) : null}
         </View>

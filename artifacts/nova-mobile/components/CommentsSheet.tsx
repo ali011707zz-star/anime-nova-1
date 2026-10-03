@@ -9,6 +9,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { getBaseUrl } from "@/utils/api";
 import { secureFetch } from "@/utils/secureApi";
 import { isTvDevice, tvFocusStyle } from "@/utils/tv";
+import { useColors } from "@/hooks/useColors";
 
 const AUTH_KEY = "nova-mobile-user";
 
@@ -84,6 +85,7 @@ function Avatar({ username, avatarUrl, size = 36 }: { username: string; avatarUr
 
 export function CommentsSheet({ visible, onClose, animeId, tmdbId, episodeNumber, title }: Props) {
   const insets = useSafeAreaInsets();
+  const colors = useColors();
   const tvMode = isTvDevice();
   const [comments, setComments] = useState<Comment[]>([]);
   const [loading, setLoading] = useState(false);
@@ -245,19 +247,19 @@ export function CommentsSheet({ visible, onClose, animeId, tmdbId, episodeNumber
         <View style={cs.commentMeta}>
           <View style={{ flex: 1 }}>
             <View style={{ flexDirection: "row", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-              <Text style={cs.commentUser} numberOfLines={1}>{c.username}</Text>
+              <Text style={[cs.commentUser, { color: colors.textPrimary }]} numberOfLines={1}>{c.username}</Text>
               {c.userHandle && (
-                <Text style={cs.handleTag}>@{c.userHandle}</Text>
+                <Text style={[cs.handleTag, { color: colors.textMuted }]}>@{c.userHandle}</Text>
               )}
               {c.replyToUsername && (
                 <Text style={cs.replyTag}>↩ {c.replyToUsername}</Text>
               )}
             </View>
-            <Text style={cs.commentTime}>{timeAgo(c.createdAt)}</Text>
+            <Text style={[cs.commentTime, { color: colors.textMuted }]}>{timeAgo(c.createdAt)}</Text>
           </View>
         </View>
 
-        <Text style={cs.commentText}>{c.text}</Text>
+        <Text style={[cs.commentText, { color: colors.textPrimary }]}>{c.text}</Text>
 
         <View style={cs.commentActions}>
           <Pressable
@@ -272,7 +274,7 @@ export function CommentsSheet({ visible, onClose, animeId, tmdbId, episodeNumber
               color={c.liked ? "#f87171" : "rgba(255,255,255,0.3)"}
             />
             {c.likes > 0 && (
-              <Text style={[cs.actionBtnText, c.liked && { color: "#f87171" }]}>{c.likes}</Text>
+              <Text style={[cs.actionBtnText, { color: colors.textSecondary }, c.liked && { color: colors.destructive }]}>{c.likes}</Text>
             )}
           </Pressable>
           <Pressable
@@ -281,7 +283,7 @@ export function CommentsSheet({ visible, onClose, animeId, tmdbId, episodeNumber
             style={({ focused }) => [cs.actionBtn, tvMode && tvFocusStyle(focused)]}
           >
             <Ionicons name="return-up-back" size={14} color="rgba(139,92,246,0.7)" />
-            <Text style={[cs.actionBtnText, { color: "rgba(139,92,246,0.7)" }]}>رد</Text>
+            <Text style={[cs.actionBtnText, { color: colors.accent }]}>رد</Text>
           </Pressable>
           {c.userId === myUser?.id && (
              <Pressable onPress={() => deleteComment(c)} focusable={tvMode}
@@ -304,10 +306,10 @@ export function CommentsSheet({ visible, onClose, animeId, tmdbId, episodeNumber
       transparent
       onRequestClose={onClose}
     >
-      <Pressable style={cs.backdrop} onPress={onClose} />
+      <Pressable style={[cs.backdrop, { backgroundColor: colors.overlay }]} onPress={onClose} />
       <KeyboardAvoidingView
         behavior={Platform.OS === "ios" ? "padding" : "height"}
-        style={[cs.sheet, { paddingBottom: insets.bottom + 8 }]}
+        style={[cs.sheet, { backgroundColor: colors.surface, borderColor: colors.border, paddingBottom: insets.bottom + 8 }]}
       >
         {/* Handle */}
         <View style={cs.handleWrap}>
@@ -317,29 +319,29 @@ export function CommentsSheet({ visible, onClose, animeId, tmdbId, episodeNumber
         {/* Header */}
         <View style={cs.header}>
           <View style={cs.headerLeft}>
-            <Ionicons name="chatbubbles" size={18} color="#8B5CF6" />
-            <Text style={cs.headerTitle}>التعليقات</Text>
+            <Ionicons name="chatbubbles" size={18} color={colors.accent} />
+            <Text style={[cs.headerTitle, { color: colors.textPrimary }]}>التعليقات</Text>
             {comments.length > 0 && (
-              <View style={cs.countBadge}>
-                <Text style={cs.countBadgeText}>{comments.length}</Text>
+              <View style={[cs.countBadge, { backgroundColor: colors.accentSurface, borderColor: colors.accentBorder }]}>
+                <Text style={[cs.countBadgeText, { color: colors.accent }]}>{comments.length}</Text>
               </View>
             )}
           </View>
           <Pressable onPress={loadComments} style={cs.refreshBtn}>
-            <Ionicons name="refresh" size={16} color="rgba(255,255,255,0.4)" />
+            <Ionicons name="refresh" size={16} color={colors.textSecondary} />
           </Pressable>
         </View>
 
         {/* Comment list */}
         {loading ? (
-          <View style={cs.loadingWrap}>
-            <ActivityIndicator color="#8B5CF6" />
+        <View style={cs.loadingWrap}>
+            <ActivityIndicator color={colors.accent} />
           </View>
         ) : comments.length === 0 ? (
           <View style={cs.emptyWrap}>
             <Ionicons name="chatbubble-ellipses" size={40} color="rgba(139,92,246,0.25)" />
-            <Text style={cs.emptyText}>لا توجد تعليقات بعد</Text>
-            <Text style={cs.emptySubtext}>كن أول من يعلّق!</Text>
+            <Text style={[cs.emptyText, { color: colors.textSecondary }]}>لا توجد تعليقات بعد</Text>
+            <Text style={[cs.emptySubtext, { color: colors.textMuted }]}>كن أول من يعلّق!</Text>
           </View>
         ) : (
           <FlatList
@@ -357,21 +359,21 @@ export function CommentsSheet({ visible, onClose, animeId, tmdbId, episodeNumber
           <View style={cs.inputArea}>
             {replyTo && (
               <View style={cs.replyBanner}>
-                <Ionicons name="return-up-back" size={13} color="rgba(139,92,246,0.7)" />
-                <Text style={cs.replyBannerText} numberOfLines={1}>
+                <Ionicons name="return-up-back" size={13} color={colors.accent} />
+                <Text style={[cs.replyBannerText, { color: colors.accent }]} numberOfLines={1}>
                   رد على {replyTo.username}: {replyTo.text}
                 </Text>
                 <Pressable onPress={() => setReplyTo(null)}>
-                  <Ionicons name="close-circle" size={15} color="rgba(255,255,255,0.3)" />
+                  <Ionicons name="close-circle" size={15} color={colors.textMuted} />
                 </Pressable>
               </View>
             )}
             {postError && (
-              <View style={cs.errorBanner}>
+              <View style={[cs.errorBanner, { backgroundColor: colors.destructiveSurface, borderColor: colors.destructiveBorder }]}>
                 <Ionicons name="alert-circle" size={13} color="#f87171" />
-                <Text style={cs.errorBannerText}>{postError}</Text>
+                <Text style={[cs.errorBannerText, { color: colors.destructive }]}>{postError}</Text>
                 <Pressable onPress={() => setPostError(null)}>
-                  <Ionicons name="close" size={13} color="rgba(255,255,255,0.3)" />
+                  <Ionicons name="close" size={13} color={colors.textMuted} />
                 </Pressable>
               </View>
             )}
@@ -384,9 +386,9 @@ export function CommentsSheet({ visible, onClose, animeId, tmdbId, episodeNumber
               />
               <TextInput
                 ref={inputRef}
-                style={cs.input}
+                style={[cs.input, { backgroundColor: colors.input, borderColor: colors.border, color: colors.textPrimary }]}
                 placeholder={replyTo ? `الرد على ${replyTo.username}…` : "أضف تعليقاً…"}
-                placeholderTextColor="rgba(255,255,255,0.25)"
+                placeholderTextColor={colors.textMuted}
                 value={text}
                 onChangeText={t => { setText(t); setPostError(null); }}
                 multiline
@@ -396,7 +398,7 @@ export function CommentsSheet({ visible, onClose, animeId, tmdbId, episodeNumber
               <Pressable
                 onPress={postComment}
                 disabled={!text.trim() || posting}
-                style={[cs.sendBtn, (!text.trim() || posting) && cs.sendBtnDisabled]}
+                style={[cs.sendBtn, { backgroundColor: colors.button }, (!text.trim() || posting) && cs.sendBtnDisabled]}
               >
                 {posting
                   ? <ActivityIndicator size="small" color="#fff" />

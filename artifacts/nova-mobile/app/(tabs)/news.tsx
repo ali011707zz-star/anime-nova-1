@@ -250,7 +250,7 @@ export default function NewsScreen() {
       <Pressable
         onPress={() => Linking.openURL(item.url).catch(() => {})}
         focusable={tvMode}
-        style={({ pressed, focused }) => [s.newsCard, pressed && { opacity: 0.78 }, tvMode && tvFocusStyle(focused)]}
+        style={({ pressed, focused }) => [s.newsCard, { backgroundColor: colors.card, borderColor: colors.border }, pressed && { opacity: 0.78 }, tvMode && tvFocusStyle(focused)]}
       >
         {/* صورة مصغّرة */}
         {item.thumbnail ? (
@@ -271,15 +271,15 @@ export default function NewsScreen() {
             <View style={s.newsCategoryBadge}>
               <Text style={s.newsCategoryText}>{item.category}</Text>
             </View>
-            <Text style={s.newsTime}>{timeAgo(item.publishedAt)}</Text>
+            <Text style={[s.newsTime, { color: colors.textMuted }]}>{timeAgo(item.publishedAt)}</Text>
           </View>
 
           {/* العنوان */}
-          <Text style={s.newsTitle} numberOfLines={2}>{item.title}</Text>
+          <Text style={[s.newsTitle, { color: colors.textPrimary }]} numberOfLines={2}>{item.title}</Text>
 
           {/* الوصف */}
           {!!item.description && (
-            <Text style={s.newsDesc} numberOfLines={2}>{item.description}</Text>
+            <Text style={[s.newsDesc, { color: colors.textSecondary }]} numberOfLines={2}>{item.description}</Text>
           )}
 
           {/* أزرار */}
@@ -290,7 +290,7 @@ export default function NewsScreen() {
               hitSlop={8}
             >
               <Ionicons name="chatbubble-outline" size={14} color="rgba(139,92,246,0.75)" />
-              <Text style={s.newsActionText}>
+              <Text style={[s.newsActionText, { color: colors.accent }]}>
                 {commentCount > 0 ? commentCount : "تعليق"}
               </Text>
             </Pressable>
@@ -300,20 +300,20 @@ export default function NewsScreen() {
               style={s.newsActionBtn}
               hitSlop={8}
             >
-              <Ionicons name="open-outline" size={14} color="rgba(255,255,255,0.3)" />
-              <Text style={[s.newsActionText, { color: "rgba(255,255,255,0.3)" }]}>فتح</Text>
+              <Ionicons name="open-outline" size={14} color={colors.textMuted} />
+              <Text style={[s.newsActionText, { color: colors.textMuted }]}>فتح</Text>
             </Pressable>
           </View>
         </View>
       </Pressable>
     );
-  }, [commentCounts]);
+  }, [commentCounts, colors]);
 
   /* ─── Airing card ─── */
   const renderAiring = ({ item, index }: { item: any; index: number }) => (
     <Pressable
       onPress={() => goAnime(item.media.id)}
-      style={({ pressed }) => [s.card, pressed && { opacity: 0.75 }]}
+      style={({ pressed }) => [s.card, { backgroundColor: colors.card, borderColor: colors.border }, pressed && { opacity: 0.75 }]}
     >
       <Image source={{ uri: item.media.coverImage?.large }} style={s.cover} />
       <View style={s.cardInfo}>
@@ -329,15 +329,15 @@ export default function NewsScreen() {
             </View>
           )}
         </View>
-        <Text style={s.cardTitle} numberOfLines={2}>{item.media.title.romaji}</Text>
+        <Text style={[s.cardTitle, { color: colors.textPrimary }]} numberOfLines={2}>{item.media.title.romaji}</Text>
         <View style={s.metaRow}>
           <Ionicons name="time-outline" size={11} color="#8B5CF6" />
           <Text style={[s.metaText, { color: "#8B5CF6" }]}>{timeAgo(item.airingAt)}</Text>
-          <Text style={s.metaSep}>·</Text>
+          <Text style={[s.metaSep, { color: colors.textMuted }]}>·</Text>
           <Text style={s.metaText}>الحلقة {item.episode}</Text>
           {item.media.averageScore ? (
             <>
-              <Text style={s.metaSep}>·</Text>
+              <Text style={[s.metaSep, { color: colors.textMuted }]}>·</Text>
               <Text style={[s.metaText, { color: "#facc15" }]}>⭐ {(item.media.averageScore / 10).toFixed(1)}</Text>
             </>
           ) : null}
@@ -351,7 +351,7 @@ export default function NewsScreen() {
   const renderUpcoming = ({ item }: { item: any }) => (
     <Pressable
       onPress={() => goAnime(item.id)}
-      style={({ pressed }) => [s.card, pressed && { opacity: 0.75 }]}
+      style={({ pressed }) => [s.card, { backgroundColor: colors.card, borderColor: colors.border }, pressed && { opacity: 0.75 }]}
     >
       <Image source={{ uri: item.coverImage?.large }} style={s.cover} />
       <View style={s.cardInfo}>
@@ -360,9 +360,9 @@ export default function NewsScreen() {
             <Text style={[s.tagText, { color: "#f59e0b" }]}>قريباً</Text>
           </View>
         </View>
-        <Text style={s.cardTitle} numberOfLines={2}>{item.title.romaji}</Text>
+        <Text style={[s.cardTitle, { color: colors.textPrimary }]} numberOfLines={2}>{item.title.romaji}</Text>
         {item.title.english && (
-          <Text style={s.cardSubtitle} numberOfLines={1}>{item.title.english}</Text>
+          <Text style={[s.cardSubtitle, { color: colors.textSecondary }]} numberOfLines={1}>{item.title.english}</Text>
         )}
         <View style={s.metaRow}>
           {item.startDate?.year && (
@@ -375,7 +375,7 @@ export default function NewsScreen() {
           )}
           {item.genres?.[0] && (
             <>
-              <Text style={s.metaSep}>·</Text>
+              <Text style={[s.metaSep, { color: colors.textMuted }]}>·</Text>
               <Text style={s.metaText}>{item.genres[0]}</Text>
             </>
           )}
@@ -389,7 +389,7 @@ export default function NewsScreen() {
   const renderTrending = ({ item, index }: { item: any; index: number }) => (
     <Pressable
       onPress={() => goAnime(item.id)}
-      style={({ pressed }) => [s.trendCard, pressed && { opacity: 0.75 }]}
+      style={({ pressed }) => [s.trendCard, { backgroundColor: colors.card, borderColor: colors.border }, pressed && { opacity: 0.75 }]}
     >
       {item.bannerImage ? (
         <View style={s.bannerWrap}>
@@ -411,9 +411,9 @@ export default function NewsScreen() {
               <Text style={[s.tagText, { color: "#f87171" }]}>#{index + 1} تريندنج</Text>
             </View>
           )}
-          <Text style={s.cardTitle} numberOfLines={1}>{item.title.romaji}</Text>
+          <Text style={[s.cardTitle, { color: colors.textPrimary }]} numberOfLines={1}>{item.title.romaji}</Text>
           {item.description && (
-            <Text style={s.trendDesc} numberOfLines={2}>
+            <Text style={[s.trendDesc, { color: colors.textSecondary }]} numberOfLines={2}>
               {item.description.replace(/<[^>]*>/g, "").slice(0, 110)}...
             </Text>
           )}
@@ -423,13 +423,13 @@ export default function NewsScreen() {
             ) : null}
             {item.nextAiringEpisode && (
               <>
-                <Text style={s.metaSep}>·</Text>
+                <Text style={[s.metaSep, { color: colors.textMuted }]}>·</Text>
                 <Text style={[s.metaText, { color: "#8B5CF6" }]}>ح{item.nextAiringEpisode.episode} قريباً</Text>
               </>
             )}
             {item.popularity ? (
               <>
-                <Text style={s.metaSep}>·</Text>
+                <Text style={[s.metaSep, { color: colors.textMuted }]}>·</Text>
                 <Ionicons name="eye-outline" size={10} color="rgba(255,255,255,0.3)" />
                 <Text style={s.metaText}>{(item.popularity / 1000).toFixed(0)}K</Text>
               </>
@@ -454,12 +454,12 @@ export default function NewsScreen() {
   function AniListError() {
     return (
       <View style={s.loading}>
-        <Ionicons name="cloud-offline-outline" size={48} color="rgba(139,92,246,0.35)" />
-        <Text style={s.errorTitle}>تعذّر الاتصال بـ AniList</Text>
-        <Text style={s.loadingText}>تحقق من اتصالك بالإنترنت</Text>
+        <Ionicons name="cloud-offline-outline" size={48} color={colors.textMuted} />
+        <Text style={[s.errorTitle, { color: colors.textSecondary }]}>تعذّر الاتصال بـ AniList</Text>
+        <Text style={[s.loadingText, { color: colors.textSecondary }]}>تحقق من اتصالك بالإنترنت</Text>
         <Pressable onPress={loadAniList} style={s.retryBtn}>
-          <Ionicons name="refresh" size={14} color="#c4b5fd" />
-          <Text style={s.retryText}>إعادة المحاولة</Text>
+          <Ionicons name="refresh" size={14} color={colors.buttonText} />
+          <Text style={[s.retryText, { color: colors.buttonText }]}>إعادة المحاولة</Text>
         </Pressable>
       </View>
     );
@@ -469,16 +469,16 @@ export default function NewsScreen() {
      Render
   ═══════════════════════════════════════ */
   return (
-    <View style={[s.root, { paddingTop: insets.top }]}>
+    <View style={[s.root, { backgroundColor: colors.background, paddingTop: insets.top }]}>
 
       {/* ── Header ── */}
-      <View style={s.header}>
+      <View style={[s.header, { borderBottomColor: colors.border }]}>
         <View style={s.headerIcon}>
           <Ionicons name="newspaper" size={20} color="#8B5CF6" />
         </View>
         <View>
-          <Text style={s.headerTitle}>أخبار الأنمي</Text>
-          <Text style={s.headerSub}>آخر الأخبار والإضافات والإصدارات</Text>
+          <Text style={[s.headerTitle, { color: colors.textPrimary }]}>أخبار الأنمي</Text>
+          <Text style={[s.headerSub, { color: colors.textSecondary }]}>آخر الأخبار والإضافات والإصدارات</Text>
         </View>
       </View>
 
@@ -489,14 +489,14 @@ export default function NewsScreen() {
             <Pressable
               key={t.id}
               onPress={() => setTab(t.id)}
-              style={[s.tabBtn, tab === t.id && { backgroundColor: "#8B5CF6" }]}
+              style={[s.tabBtn, { backgroundColor: colors.surface, borderColor: colors.border }, tab === t.id && { backgroundColor: colors.button, borderColor: colors.accent }]}
             >
               <Ionicons
                 name={t.icon}
                 size={11}
-                color={tab === t.id ? "#fff" : "rgba(255,255,255,0.35)"}
+                color={tab === t.id ? colors.buttonText : colors.textSecondary}
               />
-              <Text style={[s.tabText, tab === t.id ? { color: "#fff" } : { color: "rgba(255,255,255,0.35)" }]}>
+              <Text style={[s.tabText, { color: tab === t.id ? colors.buttonText : colors.textSecondary }]}>
                 {t.label}
               </Text>
             </Pressable>
@@ -510,17 +510,17 @@ export default function NewsScreen() {
       {tab === "latestnews" && (
         newsLoading ? (
           <View style={s.loading}>
-            <ActivityIndicator size="large" color="#06b6d4" />
-            <Text style={s.loadingText}>جاري تحميل آخر الأخبار...</Text>
+            <ActivityIndicator size="large" color={colors.accent} />
+            <Text style={[s.loadingText, { color: colors.textSecondary }]}>جاري تحميل آخر الأخبار...</Text>
           </View>
         ) : newsError ? (
           <View style={s.loading}>
             <Ionicons name="cloud-offline-outline" size={48} color="rgba(6,182,212,0.3)" />
-            <Text style={s.errorTitle}>تعذّر جلب الأخبار</Text>
-            <Text style={s.loadingText}>تحقق من اتصالك بالإنترنت ثم أعد المحاولة</Text>
+            <Text style={[s.errorTitle, { color: colors.textSecondary }]}>تعذّر جلب الأخبار</Text>
+            <Text style={[s.loadingText, { color: colors.textSecondary }]}>تحقق من اتصالك بالإنترنت ثم أعد المحاولة</Text>
             <Pressable onPress={() => loadNews(1)} style={[s.retryBtn, { borderColor: "rgba(6,182,212,0.3)" }]}>
               <Ionicons name="refresh" size={14} color="#67e8f9" />
-              <Text style={[s.retryText, { color: "#67e8f9" }]}>إعادة المحاولة</Text>
+              <Text style={[s.retryText, { color: colors.buttonText }]}>إعادة المحاولة</Text>
             </Pressable>
           </View>
         ) : (
@@ -545,8 +545,8 @@ export default function NewsScreen() {
       {tab !== "latestnews" && (
         aniLoading ? (
           <View style={s.loading}>
-            <ActivityIndicator size="large" color="#8B5CF6" />
-            <Text style={s.loadingText}>جاري التحميل...</Text>
+            <ActivityIndicator size="large" color={colors.accent} />
+            <Text style={[s.loadingText, { color: colors.textSecondary }]}>جاري التحميل...</Text>
           </View>
         ) : aniError ? (
           <AniListError />

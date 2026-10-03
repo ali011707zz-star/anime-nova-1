@@ -11,6 +11,7 @@ import {
   useWindowDimensions,
 } from "react-native";
 import { isTvDevice, tvFocusStyle } from "../utils/tv";
+import { useColors } from "../hooks/useColors";
 
 const TELEGRAM_URL = "https://t.me/Anime_NOVA_0";
 
@@ -24,6 +25,7 @@ export function TelegramAnnouncementModal({
   onClose,
 }: TelegramAnnouncementModalProps) {
   const { width, height } = useWindowDimensions();
+  const colors = useColors();
   const tvMode = isTvDevice(width, height);
   const openingTelegramRef = useRef(false);
   const player = useVideoPlayer(
@@ -64,8 +66,8 @@ export function TelegramAnnouncementModal({
       onRequestClose={onClose}
       statusBarTranslucent
     >
-      <View style={[styles.backdrop, tvMode && styles.tvBackdrop]}>
-        <View style={[styles.card, tvMode && styles.tvCard]} accessibilityViewIsModal>
+      <View style={[styles.backdrop, { backgroundColor: colors.overlay }, tvMode && styles.tvBackdrop]}>
+        <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }, tvMode && styles.tvCard]} accessibilityViewIsModal>
           <Pressable
             key={`telegram-close-${visible ? "open" : "closed"}`}
             accessibilityLabel="إغلاق"
@@ -76,16 +78,17 @@ export function TelegramAnnouncementModal({
             hitSlop={tvMode ? 14 : 8}
             style={({ pressed, focused }) => [
               styles.closeButton,
+              { backgroundColor: colors.input },
               tvMode && styles.tvCloseButton,
               tvMode && tvFocusStyle(focused),
               pressed && styles.pressed,
             ]}
           >
-            <Ionicons name="close" size={tvMode ? 30 : 21} color="#FFFFFF" />
-            {tvMode && <Text style={styles.tvCloseLabel}>إغلاق</Text>}
+            <Ionicons name="close" size={tvMode ? 30 : 21} color={colors.textPrimary} />
+            {tvMode && <Text style={[styles.tvCloseLabel, { color: colors.textPrimary }]}>إغلاق</Text>}
           </Pressable>
 
-          <View style={[styles.videoFrame, tvMode && styles.tvVideoFrame]}>
+          <View style={[styles.videoFrame, { borderColor: colors.border }, tvMode && styles.tvVideoFrame]}>
             <VideoView
               player={player}
               style={styles.video}
@@ -99,8 +102,8 @@ export function TelegramAnnouncementModal({
             <View style={styles.telegramIcon}>
               <Ionicons name="paper-plane" size={20} color="#FFFFFF" />
             </View>
-            <Text style={[styles.title, tvMode && styles.tvTitle]}>انضم إلى قناتنا على تلجرام</Text>
-            <Text style={[styles.message, tvMode && styles.tvMessage]}>
+            <Text style={[styles.title, { color: colors.textPrimary }, tvMode && styles.tvTitle]}>انضم إلى قناتنا على تلجرام</Text>
+            <Text style={[styles.message, { color: colors.textSecondary }, tvMode && styles.tvMessage]}>
               تابع أخبار وتحديثات NOVA Anime عبر قناتنا الرسمية على تلجرام،
               وأرسل لنا بلاغاتك عن أي مشكلة تواجهك.
             </Text>
@@ -128,12 +131,13 @@ export function TelegramAnnouncementModal({
               focusable={tvMode}
               style={({ pressed, focused }) => [
                 styles.secondaryButton,
+                { backgroundColor: colors.input, borderRadius: 12 },
                 tvMode && styles.tvSecondaryButton,
                 tvMode && tvFocusStyle(focused),
                 pressed && styles.pressed,
               ]}
             >
-              <Text style={[styles.secondaryButtonText, tvMode && styles.tvSecondaryButtonText]}>متابعة إلى التطبيق</Text>
+              <Text style={[styles.secondaryButtonText, { color: colors.textSecondary }, tvMode && styles.tvSecondaryButtonText]}>متابعة إلى التطبيق</Text>
             </Pressable>
           </View>
         </View>

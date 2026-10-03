@@ -12,6 +12,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { getBaseUrl } from "@/utils/api";
 import { isTvDevice, tvFocusStyle, TvFocusGuideView, TvPressable } from "@/utils/tv";
+import { useColors } from "@/hooks/useColors";
 const Pressable = TvPressable;
 
 const BASE = getBaseUrl();
@@ -26,6 +27,7 @@ function safeDecode(value: string | string[] | undefined): string {
 }
 
 export default function AwDubbedDetailScreen() {
+  const colors = useColors();
   const insets   = useSafeAreaInsets();
   const router   = useRouter();
   const topPad   = Platform.OS === "web" ? 0 : insets.top;
@@ -124,14 +126,14 @@ export default function AwDubbedDetailScreen() {
   ), [openWatch, poster, imgError, curSeason, episodes, tvMode]);
 
   return (
-    <View style={[styles.container, { paddingTop: topPad }]}>
+    <View style={[styles.container, { backgroundColor: colors.background, paddingTop: topPad }]}>
       {/* Header */}
-      <View style={styles.header}>
+      <View style={[styles.header, { borderBottomColor: colors.border }]}>
          <Pressable onPress={() => router.back()} focusable={tvMode}
            style={({ focused }) => [styles.backBtn, tvMode && tvFocusStyle(focused)]}>
           <Ionicons name="chevron-forward" size={20} color="rgba(255,255,255,0.7)" />
         </Pressable>
-        <Text style={styles.headerTitle} numberOfLines={1}>{displayTitle}</Text>
+        <Text style={[styles.headerTitle, { color: colors.textPrimary }]} numberOfLines={1}>{displayTitle}</Text>
         <View style={{ width: 36 }} />
       </View>
 
@@ -183,14 +185,14 @@ export default function AwDubbedDetailScreen() {
 
             {/* Season tabs */}
             {seasons.length > 1 && (
-              <View style={styles.seasonsWrap}>
+            <View style={styles.seasonsWrap}>
                 <ScrollView ref={tabsRef} horizontal showsHorizontalScrollIndicator={false}
                   contentContainerStyle={styles.seasonsTabs}>
                   {seasons.map((s, i) => (
                     <Pressable key={s.animeId} onPress={() => setSelSeason(i)}
                       focusable={tvMode}
                       style={({ focused }) => [styles.seasonTab, i === selSeason && styles.seasonTabActive, tvMode && tvFocusStyle(focused)]}>
-                      <Text style={[styles.seasonTabText, i === selSeason && styles.seasonTabTextActive]}>
+                      <Text style={[styles.seasonTabText, { color: i === selSeason ? colors.success : colors.textSecondary }]}>
                         {s.label}
                       </Text>
                     </Pressable>
@@ -199,7 +201,7 @@ export default function AwDubbedDetailScreen() {
               </View>
             )}
 
-            <Text style={styles.sectionTitle}>الحلقات</Text>
+            <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>الحلقات</Text>
           </View>
         )}
         ListEmptyComponent={
@@ -209,7 +211,7 @@ export default function AwDubbedDetailScreen() {
             </View>
           ) : (
             <View style={styles.center}>
-              <Text style={styles.emptyText}>لا توجد حلقات</Text>
+              <Text style={[styles.emptyText, { color: colors.textMuted }]}>لا توجد حلقات</Text>
             </View>
           )
           }

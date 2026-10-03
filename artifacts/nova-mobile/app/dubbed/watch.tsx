@@ -12,8 +12,11 @@ import { getWatchContentId, useApp } from "@/context/AppContext";
 import { ensureWatchAccess } from "@/utils/adPolicy";
 import { RewardedAdPrompt } from "@/components/RewardedAdPrompt";
 import { isTvDevice, tvFocusStyle } from "@/utils/tv";
+import { useColors } from "@/hooks/useColors";
+import { useWatchPlayerOrientation } from "@/utils/watchOrientation";
 
 export default function DubbedWatchScreen() {
+  const colors = useColors();
   const insets = useSafeAreaInsets();
   const router  = useRouter();
   const tvMode  = isTvDevice();
@@ -35,6 +38,8 @@ export default function DubbedWatchScreen() {
   const lastTimeRef = useRef(0);
   const lastDurationRef = useRef(0);
   const savedOnExitRef = useRef(false);
+
+  useWatchPlayerOrientation(!loading && !error && sources.length > 0, tvMode);
 
   const episodeNumber = Math.max(1, parseInt(ep || "1", 10) || 1);
   const contentKey = series || epUrl || "";
@@ -230,21 +235,21 @@ export default function DubbedWatchScreen() {
   /* ── Loading ── */
   if (loading) {
     return (
-      <View style={[styles.container, { paddingTop: topPad }]}>
+      <View style={[styles.container, { backgroundColor: colors.background, paddingTop: topPad }]}>
         <RewardedAdPrompt />
         <View style={styles.header}>
            <Pressable onPress={() => router.back()} focusable={tvMode}
              style={({ focused }) => [styles.backBtn, tvMode && tvFocusStyle(focused)]}>
-            <Ionicons name="chevron-back" size={20} color="rgba(255,255,255,0.7)" />
+            <Ionicons name="chevron-back" size={20} color={colors.textSecondary} />
           </Pressable>
           <View style={{ flex: 1 }}>
-            <Text style={styles.headerTitle} numberOfLines={1}>{title}</Text>
-            <Text style={styles.headerSub}>{season} · الحلقة {ep}</Text>
+            <Text style={[styles.headerTitle, { color: colors.textPrimary }]} numberOfLines={1}>{title}</Text>
+            <Text style={[styles.headerSub, { color: colors.textSecondary }]}>{season} · الحلقة {ep}</Text>
           </View>
         </View>
         <View style={styles.center}>
-          <ActivityIndicator color="#7C3AED" size="large" />
-          <Text style={styles.loadingText}>جاري تحميل الحلقة...</Text>
+          <ActivityIndicator color={colors.accent} size="large" />
+          <Text style={[styles.loadingText, { color: colors.textSecondary }]}>جاري تحميل الحلقة...</Text>
         </View>
       </View>
     );
@@ -253,27 +258,27 @@ export default function DubbedWatchScreen() {
   /* ── Error ── */
   if (error || sources.length === 0) {
     return (
-      <View style={[styles.container, { paddingTop: topPad }]}>
+      <View style={[styles.container, { backgroundColor: colors.background, paddingTop: topPad }]}>
         <RewardedAdPrompt />
         <View style={styles.header}>
            <Pressable onPress={() => router.back()} focusable={tvMode}
              style={({ focused }) => [styles.backBtn, tvMode && tvFocusStyle(focused)]}>
-            <Ionicons name="chevron-back" size={20} color="rgba(255,255,255,0.7)" />
+            <Ionicons name="chevron-back" size={20} color={colors.textSecondary} />
           </Pressable>
           <View style={{ flex: 1 }}>
-            <Text style={styles.headerTitle} numberOfLines={1}>{title}</Text>
-            <Text style={styles.headerSub}>{season} · الحلقة {ep}</Text>
+            <Text style={[styles.headerTitle, { color: colors.textPrimary }]} numberOfLines={1}>{title}</Text>
+            <Text style={[styles.headerSub, { color: colors.textSecondary }]}>{season} · الحلقة {ep}</Text>
           </View>
         </View>
         <View style={styles.center}>
           <View style={styles.errorIcon}>
             <Ionicons name="alert-circle" size={36} color="#f87171" />
           </View>
-          <Text style={styles.errorText}>{error || "لم يُعثر على مصدر"}</Text>
+          <Text style={[styles.errorText, { color: colors.destructive }]}>{error || "لم يُعثر على مصدر"}</Text>
           <Pressable onPress={loadSource} focusable={tvMode}
             style={({ focused }) => [styles.retryBtn, tvMode && tvFocusStyle(focused)]}>
-            <Ionicons name="refresh" size={16} color="#A78BFA" />
-            <Text style={styles.retryText}>إعادة المحاولة</Text>
+            <Ionicons name="refresh" size={16} color={colors.buttonText} />
+            <Text style={[styles.retryText, { color: colors.buttonText }]}>إعادة المحاولة</Text>
           </Pressable>
         </View>
       </View>

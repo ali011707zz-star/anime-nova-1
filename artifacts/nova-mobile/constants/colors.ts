@@ -71,8 +71,10 @@ const white: Palette = {
   playerControlIcon: "#17191F",
   playerText: "#17191F",
   playerSecondaryText: "#4D535E",
-  playerTopGradient: ["rgba(255,255,255,0.94)", "rgba(255,255,255,0)"],
-  playerBottomGradient: ["rgba(255,255,255,0)", "rgba(255,255,255,0.66)", "rgba(255,255,255,0.94)"],
+  // Keep any edge shading neutral and identical across themes. Theme changes
+  // must not recolor or brighten the video itself.
+  playerTopGradient: ["rgba(0,0,0,0.24)", "rgba(0,0,0,0)"],
+  playerBottomGradient: ["rgba(0,0,0,0)", "rgba(0,0,0,0.28)", "rgba(0,0,0,0.48)"],
   playerTrack: "rgba(20,22,26,0.22)",
   playerBuffer: "rgba(20,22,26,0.48)",
   pressFeedback: "rgba(42,35,62,0.08)",
@@ -119,8 +121,8 @@ const black: Palette = {
   playerControlIcon: "#F3F4F6",
   playerText: "#F3F4F6",
   playerSecondaryText: "rgba(255,255,255,0.70)",
-  playerTopGradient: ["rgba(0,0,0,0.82)", "rgba(0,0,0,0)"],
-  playerBottomGradient: ["rgba(0,0,0,0)", "rgba(0,0,0,0.60)", "rgba(0,0,0,0.96)"],
+  playerTopGradient: ["rgba(0,0,0,0.24)", "rgba(0,0,0,0)"],
+  playerBottomGradient: ["rgba(0,0,0,0)", "rgba(0,0,0,0.28)", "rgba(0,0,0,0.48)"],
   playerTrack: "rgba(255,255,255,0.24)",
   playerBuffer: "rgba(255,255,255,0.54)",
   pressFeedback: "rgba(255,255,255,0.08)",

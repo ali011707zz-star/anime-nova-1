@@ -24,13 +24,13 @@ import {
   getActiveDownloadsSnapshot,
   cancelActiveDownload,
 } from "@/utils/downloadManager";
-import * as ScreenOrientation from "expo-screen-orientation";
 import { openIsolatedPlayer } from "@/lib/isolatedPlayer";
 import { ensureDownloadAllowed, ensureWatchAccess, getAdState } from "@/utils/adPolicy";
 import { RewardedAdPrompt } from "@/components/RewardedAdPrompt";
 import { startMobileWatchAnalytics } from "@/utils/analytics";
 import { useColors } from "@/hooks/useColors";
 import type { ThemePalette } from "@/constants/colors";
+import { useWatchPlayerOrientation } from "@/utils/watchOrientation";
 
 /* ── Types ── */
 type Quality    = "1080p FHD" | "720p HD" | "360p SD";
@@ -829,6 +829,7 @@ export default function WatchScreen() {
 
   /* ── State ── */
   const [screen,      setScreen]      = useState<Screen>("picker"); // يبدأ مباشرةً بالـ picker — بدون تشغيل تلقائي
+  useWatchPlayerOrientation(screen === "native" || screen === "embed", tvMode);
   const [sources,     setSources]     = useState<Src[]>([]);
   const [playingSrc,  setPlayingSrc]  = useState<Src | null>(null);
   const [resumeTime,  setResumeTime]  = useState(0);
@@ -1131,13 +1132,6 @@ export default function WatchScreen() {
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [anime, anilistId, sourceAnimeId, epNum, titleStr, englishStr, titleArStr, format, year, episodes, native, anslayerId, availabilityAttempt]);
-
-  /* ── Orientation lock ── */
-  useEffect(() => {
-    if (screen === "picker") {
-      ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP).catch(() => { });
-    }
-  }, [screen]);
 
   /* ── Progress save ── */
   const saveProgress = useCallback(async () => {
@@ -1661,8 +1655,6 @@ export default function WatchScreen() {
     siteCtrls.current.clear();
     inFlightSitesRef.current.clear();
     fetchedSitesRef.current.clear();
-    ScreenOrientation.unlockAsync().catch(() => {});
-
     if (router.canGoBack()) router.back();
     else router.replace(`/episodes/${anime}` as any);
   }, [saveProgress, router, anime]);

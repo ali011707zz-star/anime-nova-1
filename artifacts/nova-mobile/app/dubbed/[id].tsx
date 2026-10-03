@@ -8,6 +8,7 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { getBaseUrl } from "@/utils/api";
 import { isTvDevice, tvFocusStyle, TvFocusGuideView, TvPressable } from "@/utils/tv";
+import { useColors } from "@/hooks/useColors";
 const Pressable = TvPressable;
 
 interface Season { label: string; arabicToonsId: string; }
@@ -27,6 +28,7 @@ function thumbSrc(t?: string): string | null {
 }
 
 export default function DubbedDetailScreen() {
+  const colors = useColors();
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const topPad = Platform.OS === "web" ? 0 : insets.top;
@@ -111,12 +113,12 @@ export default function DubbedDetailScreen() {
   };
 
   return (
-    <View style={[styles.container, { paddingTop: topPad }]}>
+    <View style={[styles.container, { backgroundColor: colors.background, paddingTop: topPad }]}>
       {/* Header */}
-      <View style={styles.header}>
+      <View style={[styles.header, { borderBottomColor: colors.border }]}>
          <Pressable onPress={() => router.back()} focusable={tvMode}
            style={({ focused }) => [styles.backBtn, tvMode && tvFocusStyle(focused)]}>
-          <Ionicons name="chevron-back" size={20} color="rgba(255,255,255,0.7)" />
+          <Ionicons name="chevron-back" size={20} color={colors.textSecondary} />
         </Pressable>
         </View>
 
@@ -148,12 +150,12 @@ export default function DubbedDetailScreen() {
                 )}
               </View>
               <View style={styles.heroInfo}>
-                <Text style={styles.heroTitle}>{title}</Text>
+                <Text style={[styles.heroTitle, { color: colors.textPrimary }]}>{title}</Text>
                 <View style={styles.badge}>
                   <Text style={styles.badgeText}>مدبلج عربي</Text>
                 </View>
                 {episodes.length > 0 && (
-                  <Text style={styles.epCount}>{episodes.length} حلقة</Text>
+                  <Text style={[styles.epCount, { color: colors.textSecondary }]}>{episodes.length} حلقة</Text>
                 )}
                 {seasons.length > 1 && (
                   <Pressable
@@ -161,7 +163,7 @@ export default function DubbedDetailScreen() {
                     style={styles.seasonBtn}
                   >
                     <Text style={styles.seasonBtnText}>{curSeason?.label || "اختر الموسم"}</Text>
-                    <Ionicons name={showSeasonDrop ? "chevron-up" : "chevron-down"} size={14} color="rgba(255,255,255,0.6)" />
+                    <Ionicons name={showSeasonDrop ? "chevron-up" : "chevron-down"} size={14} color={colors.textSecondary} />
                   </Pressable>
                 )}
                 {seasons.length === 1 && (
@@ -190,18 +192,18 @@ export default function DubbedDetailScreen() {
 
             <View style={styles.epSectionHeader}>
               <View style={styles.accentBar} />
-              <Text style={styles.epSectionTitle}>الحلقات</Text>
+              <Text style={[styles.epSectionTitle, { color: colors.textPrimary }]}>الحلقات</Text>
             </View>
             {epLoading && (
               <View style={styles.epLoadingCenter}>
-                <ActivityIndicator color="#7C3AED" />
+                <ActivityIndicator color={colors.accent} />
               </View>
             )}
           </View>
         )}
           contentContainerStyle={[{ paddingBottom: 100 }, tvMode && styles.tvListContent]}
           ListEmptyComponent={!epLoading ? (
-            <Text style={styles.emptyText}>لا توجد حلقات</Text>
+            <Text style={[styles.emptyText, { color: colors.textMuted }]}>لا توجد حلقات</Text>
           ) : null}
         />
       </TvFocusGuideView>

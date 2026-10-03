@@ -20,7 +20,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { getBaseUrl } from "@/utils/api";
 import { TvPressable, useTvMetrics } from "@/utils/tv";
-import paletteColors from "@/constants/colors";
+import { useColors } from "@/hooks/useColors";
 import {
   buildSkipScopeKey,
   isSkipInRange,
@@ -420,16 +420,24 @@ function ExpoRiftPlayer({
   episodeTitle,
   onError,
 }: Props) {
-  // The player keeps one fixed dark visual style, independent of app theme.
-  const colors = paletteColors.black;
+  // Theme updates affect controls only; the video surface remains black.
+  const colors = useColors();
   // Keep the playback timeline physically left-to-right even when the app is RTL.
   // React Native swaps left/right style properties on native RTL layouts.
   const timelineNativeRTL = Platform.OS !== "web" && I18nManager.isRTL;
   const timelineStartEdge: "left" | "right" = timelineNativeRTL ? "right" : "left";
   const timelineEndEdge: "left" | "right" = timelineNativeRTL ? "left" : "right";
   const playerControlSurface = {
-    backgroundColor: "rgba(22,24,29,0.36)",
-    borderColor: "rgba(255,255,255,0.30)",
+    backgroundColor: colors.playerControl,
+    borderColor: colors.playerControlBorder,
+    shadowColor: "transparent",
+    shadowOpacity: 0,
+    shadowRadius: 0,
+    elevation: 0,
+  };
+  const playerSelectedSurface = {
+    backgroundColor: colors.accentSurface,
+    borderColor: colors.accentBorder,
     shadowColor: "transparent",
     shadowOpacity: 0,
     shadowRadius: 0,
@@ -516,17 +524,6 @@ function ExpoRiftPlayer({
   const [contentFit, setContentFit]     = useState<"contain" | "cover" | "fill">("contain");
   const [screenshotSaved, setScreenshotSaved] = useState(false);
   const [isFlipped, setIsFlipped]       = useState(false);
-  const playerEntryOpacity              = useRef(new Animated.Value(0)).current;
-
-  useEffect(() => {
-    const animation = Animated.timing(playerEntryOpacity, {
-      toValue: 1, duration: tvMode ? 0 : 360, delay: tvMode ? 0 : 70,
-      easing: Easing.out(Easing.cubic), useNativeDriver: true,
-    });
-    animation.start();
-    return () => animation.stop();
-  }, [playerEntryOpacity, tvMode]);
-
   /* ─── Subtitle state ─── */
   const [subOn, setSubOn]               = useState(subEnabled);
   const [loadedCues, setLoadedCues]     = useState<SubCue[]>([]);
@@ -1650,14 +1647,6 @@ function ExpoRiftPlayer({
     }
   }, [currentSrc?.subtitleUrl, subtitlesDisabled]);
 
-  /* ─── Screen orientation lock to landscape ─── */
-  useEffect(() => {
-    requestOrientation(ScreenOrientation.OrientationLock.LANDSCAPE_RIGHT);
-    return () => {
-      requestOrientation(ScreenOrientation.OrientationLock.PORTRAIT_UP);
-    };
-  }, [requestOrientation]);
-
   /* ─── Flip screen — rotate 180° using CSS transform (no surface recreation = no black flash) ─── */
   const flipScreen = useCallback(() => {
     setIsFlipped(f => !f);
@@ -2047,11 +2036,10 @@ function ExpoRiftPlayer({
     return () => { if (hideTimer.current) clearTimeout(hideTimer.current); };
   }, []);
 
-  /* ─── Back: lock to portrait then go back ─── */
+  /* ─── Back: the watch route switches back to portrait when the player closes ─── */
   const handleBack = useCallback(() => {
-    requestOrientation(ScreenOrientation.OrientationLock.PORTRAIT_UP);
     onBack();
-  }, [onBack, requestOrientation]);
+  }, [onBack]);
 
   /* ─── Actions ─── */
   const togglePlay = useCallback(() => {
@@ -2587,15 +2575,15 @@ function ExpoRiftPlayer({
      نعرض loading spinner بدلاً حتى تصل المصادر من الخلفية. */
   if (!currentSrc) return (
     <View style={{ flex: 1, backgroundColor: "#000", alignItems: "center", justifyContent: "center" }}>
-      <ActivityIndicator size="large" color="rgba(167,139,250,0.9)" />
-      <Text style={{ color: "rgba(255,255,255,0.45)", marginTop: 12, fontSize: 13, fontFamily: "System" }}>
+      <ActivityIndicator size="large" color={colors.accent} />
+      <Text style={{ color: colors.playerSecondaryText, marginTop: 12, fontSize: 13, fontFamily: "System" }}>
         جاري تحميل المشغّل…
       </Text>
     </View>
   );
 
   return (
-    <Animated.View ref={rootViewRef} style={[s.root, { opacity: playerEntryOpacity }, isFlipped && { transform: [{ rotate: "180deg" }] }]}>
+    <View ref={rootViewRef} style={[s.root, isFlipped && { transform: [{ rotate: "180deg" }] }]}>
       <StatusBar hidden />
       {/* ── Video ── */}
       <VideoView
@@ -2973,7 +2961,7 @@ function ExpoRiftPlayer({
             const ccBtn = subtitlesDisabled ? null : (
               <Pressable
                 onPress={() => setShowSubPanel(true)}
-                style={[s.topIconBtn, s.topCCBtn, tvMode && s.tvCCBtn, subOn && s.topCCBtnActive, playerControlSurface]}
+                style={[s.topIconBtn, s.topCCBtn, tvMode && s.tvCCBtn, playerControlSurface, subOn && playerSelectedSurface]}
                 hitSlop={10}
                 accessibilityRole="button"
                 accessibilityLabel="إعدادات الترجمة"
@@ -2990,7 +2978,7 @@ function ExpoRiftPlayer({
                 <Pressable onPress={handleBack} style={[s.topCloseBtn, tvMode && s.tvTopCloseBtn, playerControlSurface]} hitSlop={10}>
                   <Ionicons name="close" size={21} color="rgba(239,68,68,0.90)" />
                 </Pressable>
-                 <Pressable onPress={togglePortrait} style={[s.topRotateBtn, tvMode && s.tvTopActionBtn, isPortrait && s.topRotateBtnActive, playerControlSurface]} hitSlop={10}>
+                <Pressable onPress={togglePortrait} style={[s.topRotateBtn, tvMode && s.tvTopActionBtn, playerControlSurface, isPortrait && playerSelectedSurface]} hitSlop={10}>
                   <Ionicons
                     name={isPortrait ? "phone-landscape-outline" : "phone-portrait-outline"}
                     size={tvMode ? 28 : 17}
@@ -3008,7 +2996,7 @@ function ExpoRiftPlayer({
                   <Ionicons name="camera-outline" size={tvMode ? 28 : 18} color={colors.playerControlIcon} />
                </Pressable>
                 {ccBtn}
-                 <Pressable onPress={togglePortrait} style={[s.topRotateBtn, tvMode && s.tvTopActionBtn, isPortrait && s.topRotateBtnActive, playerControlSurface]} hitSlop={10}>
+                <Pressable onPress={togglePortrait} style={[s.topRotateBtn, tvMode && s.tvTopActionBtn, playerControlSurface, isPortrait && playerSelectedSurface]} hitSlop={10}>
                   <Ionicons
                     name={isPortrait ? "phone-landscape-outline" : "phone-portrait-outline"}
                     size={tvMode ? 28 : 17}
@@ -3125,7 +3113,10 @@ function ExpoRiftPlayer({
                           {
                             borderColor: colors.accent,
                             backgroundColor: colors.overlay,
-                            shadowColor: colors.accent,
+                            shadowColor: "transparent",
+                            shadowOpacity: 0,
+                            shadowRadius: 0,
+                            elevation: 0,
                           },
                         ],
                       ]}
@@ -3197,7 +3188,7 @@ function ExpoRiftPlayer({
                       ))}
                     </View>
                   )}
-                  <Pressable onPress={() => { setShowFitMenu(v => !v); setShowSpeedMenu(false); fadeIn(); }} style={[s.ctrlIconBtn, tvMode && s.tvCtrlIconBtn, showFitMenu && s.ctrlIconBtnActive, playerControlSurface]} hitSlop={10}>
+                <Pressable onPress={() => { setShowFitMenu(v => !v); setShowSpeedMenu(false); fadeIn(); }} style={[s.ctrlIconBtn, tvMode && s.tvCtrlIconBtn, playerControlSurface, showFitMenu && playerSelectedSurface]} hitSlop={10}>
                     <Ionicons name="scan-outline" size={tvMode ? 24 : 16} color={showFitMenu ? colors.accent : colors.playerControlIcon} />
                   </Pressable>
                  </View>
@@ -3250,7 +3241,7 @@ function ExpoRiftPlayer({
                       ))}
                     </View>
                   )}
-                  <Pressable onPress={() => { setShowSpeedMenu(v => !v); setShowFitMenu(false); fadeIn(); }} style={[s.ctrlIconBtn, s.ctrlSpeedBtn, tvMode && s.tvCtrlIconBtn, showSpeedMenu && s.ctrlIconBtnActive, playerControlSurface]} hitSlop={10}>
+                  <Pressable onPress={() => { setShowSpeedMenu(v => !v); setShowFitMenu(false); fadeIn(); }} style={[s.ctrlIconBtn, s.ctrlSpeedBtn, tvMode && s.tvCtrlIconBtn, playerControlSurface, showSpeedMenu && playerSelectedSurface]} hitSlop={10}>
                     <Text style={[s.speedLabel, tvMode && s.tvSpeedLabel, speed !== 1 && s.speedLabelActive, { color: speed !== 1 ? colors.accent : colors.playerControlIcon }]}>{speed}x</Text>
                   </Pressable>
                 </View>
@@ -3513,7 +3504,7 @@ function ExpoRiftPlayer({
         </View>
       )}
 
-    </Animated.View>
+    </View>
   );
 }
 

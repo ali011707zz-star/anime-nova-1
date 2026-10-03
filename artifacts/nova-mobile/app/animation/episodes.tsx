@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from "react";
+import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import {
   View, Text, Image, ScrollView, FlatList,
   ActivityIndicator, StyleSheet, Platform,
@@ -9,6 +9,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { getBaseUrl } from "@/utils/api";
 import { isTvDevice, tvFocusStyle, TvFocusGuideView, TvPressable } from "@/utils/tv";
+import { useColors } from "@/hooks/useColors";
 const Pressable = TvPressable;
 
 const IMG_W = "https://image.tmdb.org/t/p/w500";
@@ -31,6 +32,8 @@ interface Season {
 }
 
 export default function AnimationEpisodesScreen() {
+  const colors = useColors();
+  const s = useMemo(() => createStyles(colors), [colors]);
   const { id, type, season: seasonParam } = useLocalSearchParams<{
     id: string; type: string; season: string;
   }>();
@@ -116,7 +119,13 @@ export default function AnimationEpisodesScreen() {
         focusable={tvMode}
         hasTVPreferredFocus={tvMode && index === 0}
         onFocus={() => episodeListRef.current?.scrollToIndex({ index, animated: true, viewPosition: 0.35 })}
-        style={({ focused }) => [s.epCard, tvMode && s.tvEpCard, watched && s.epCardWatched, tvMode && tvFocusStyle(focused)]}
+        style={({ focused }) => [
+          s.epCard,
+          tvMode && s.tvEpCard,
+          watched && s.epCardWatched,
+          { backgroundColor: watched ? colors.surfaceElevated : colors.card, borderColor: colors.border },
+          tvMode && tvFocusStyle(focused),
+        ]}
         onPress={() => goWatch(item.episode_number, item.name)}
       >
         {/* Thumbnail */}
@@ -248,12 +257,12 @@ export default function AnimationEpisodesScreen() {
       {/* ── Episodes list ── */}
       {epLoading ? (
         <View style={s.center}>
-          <ActivityIndicator color="#8B5CF6" size="large" />
+          <ActivityIndicator color={colors.accent} size="large" />
           <Text style={s.loadingText}>جاري تحميل الحلقات…</Text>
         </View>
       ) : episodes.length === 0 ? (
         <View style={s.center}>
-          <Ionicons name="play-circle" size={48} color="rgba(255,255,255,0.12)" />
+          <Ionicons name="play-circle" size={48} color={colors.textMuted} />
           <Text style={s.emptyText}>لا توجد حلقات لهذا الموسم</Text>
         </View>
       ) : (
@@ -281,16 +290,17 @@ export default function AnimationEpisodesScreen() {
   );
 }
 
-const s = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#09090B" },
-  header: { backgroundColor: "#09090B", borderBottomWidth: 1, borderBottomColor: "rgba(255,255,255,0.06)" },
+function createStyles(colors: ReturnType<typeof useColors>) {
+return StyleSheet.create({
+  container: { flex: 1, backgroundColor: colors.background },
+  header: { backgroundColor: colors.background, borderBottomWidth: 1, borderBottomColor: colors.border },
   headerRow: { flexDirection: "row", alignItems: "center", gap: 12, paddingHorizontal: 16, paddingTop: 12, paddingBottom: 10 },
-  backBtn: { width: 36, height: 36, borderRadius: 12, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(255,255,255,0.06)", borderWidth: 1, borderColor: "rgba(255,255,255,0.09)" },
+  backBtn: { width: 36, height: 36, borderRadius: 12, alignItems: "center", justifyContent: "center", backgroundColor: colors.input, borderWidth: 1, borderColor: colors.border },
   headerInfo: { flex: 1 },
-  headerLabel: { fontSize: 9, color: "rgba(255,255,255,0.3)", fontFamily: "Cairo_400Regular" },
-  headerTitle: { fontSize: 14, fontFamily: "Cairo_800ExtraBold", color: "#fff", lineHeight: 18 },
-  epCountBadge: { paddingHorizontal: 10, paddingVertical: 5, borderRadius: 10, backgroundColor: "rgba(139,92,246,0.15)", borderWidth: 1, borderColor: "rgba(139,92,246,0.28)" },
-  epCountText: { fontSize: 10, fontFamily: "Cairo_700Bold", color: "#c4b5fd" },
+  headerLabel: { fontSize: 9, color: colors.textMuted, fontFamily: "Cairo_400Regular" },
+  headerTitle: { fontSize: 14, fontFamily: "Cairo_800ExtraBold", color: colors.textPrimary, lineHeight: 18 },
+  epCountBadge: { paddingHorizontal: 10, paddingVertical: 5, borderRadius: 10, backgroundColor: colors.accentSurface, borderWidth: 1, borderColor: colors.accentBorder },
+  epCountText: { fontSize: 10, fontFamily: "Cairo_700Bold", color: colors.accent },
 
   seasonTabs: { marginTop: 4 },
   seasonCard: { width: 78, height: 106, borderRadius: 13, overflow: "hidden", borderWidth: 1, borderColor: "rgba(255,255,255,0.08)", position: "relative" },
@@ -305,7 +315,7 @@ const s = StyleSheet.create({
   seasonEpCountActive: { color: "rgba(196,181,253,0.65)" },
 
   listContent: { padding: 12, paddingBottom: 100 },
-  epCard: { flexDirection: "row", alignItems: "center", gap: 12, padding: 10, borderRadius: 16, backgroundColor: "#111116", borderWidth: 1, borderColor: "rgba(255,255,255,0.07)" },
+  epCard: { flexDirection: "row", alignItems: "center", gap: 12, padding: 10, borderRadius: 16, backgroundColor: colors.card, borderWidth: 1, borderColor: colors.border },
   tvEpCard: { minHeight: 198, gap: 16, padding: 16, borderRadius: 18, borderWidth: 1 },
   epCardWatched: { opacity: 0.5, backgroundColor: "rgba(255,255,255,0.02)" },
 
@@ -322,24 +332,25 @@ const s = StyleSheet.create({
 
   epInfo: { flex: 1 },
   tvEpInfo: { minHeight: 110, justifyContent: "center" },
-  epTitle: { fontSize: 12, fontFamily: "Cairo_700Bold", color: "#fff", lineHeight: 16, textAlign: "right" },
+  epTitle: { fontSize: 12, fontFamily: "Cairo_700Bold", color: colors.textPrimary, lineHeight: 16, textAlign: "right" },
   tvEpTitle: { fontSize: 21, lineHeight: 30 },
-  epOverview: { fontSize: 9, color: "rgba(255,255,255,0.28)", lineHeight: 14, fontFamily: "Cairo_400Regular", textAlign: "right", marginTop: 3 },
+  epOverview: { fontSize: 9, color: colors.textSecondary, lineHeight: 14, fontFamily: "Cairo_400Regular", textAlign: "right", marginTop: 3 },
   tvEpOverview: { fontSize: 14, lineHeight: 22, marginTop: 7 },
   epMeta: { flexDirection: "row", alignItems: "center", gap: 10, marginTop: 5, flexWrap: "wrap" },
   epMetaItem: { flexDirection: "row", alignItems: "center", gap: 3 },
-  epMetaText: { fontSize: 8, color: "rgba(255,255,255,0.22)", fontFamily: "Cairo_400Regular" },
+  epMetaText: { fontSize: 8, color: colors.textMuted, fontFamily: "Cairo_400Regular" },
   tvEpMetaText: { fontSize: 13 },
-  epProgressText: { fontSize: 8, fontFamily: "Cairo_700Bold", color: "rgba(139,92,246,0.65)" },
+  epProgressText: { fontSize: 8, fontFamily: "Cairo_700Bold", color: colors.accent },
   tvEpProgressText: { fontSize: 13 },
 
-  epPlayIcon: { width: 32, height: 32, borderRadius: 10, backgroundColor: "rgba(139,92,246,0.12)", borderWidth: 1, borderColor: "rgba(139,92,246,0.22)", alignItems: "center", justifyContent: "center" },
+  epPlayIcon: { width: 32, height: 32, borderRadius: 10, backgroundColor: colors.accentSurface, borderWidth: 1, borderColor: colors.accentBorder, alignItems: "center", justifyContent: "center" },
   tvEpPlayIcon: { width: 54, height: 54, borderRadius: 16 },
 
   center: { flex: 1, alignItems: "center", justifyContent: "center", gap: 12 },
   tvBackBtn: { width: 48, height: 48, borderRadius: 15 },
   tvFocusGuide: { flex: 1 },
   tvListContent: { paddingHorizontal: 32, paddingTop: 14, gap: 14 },
-  loadingText: { fontSize: 12, color: "rgba(255,255,255,0.3)", fontFamily: "Cairo_400Regular" },
-  emptyText: { fontSize: 14, color: "rgba(255,255,255,0.25)", fontFamily: "Cairo_700Bold" },
+  loadingText: { fontSize: 12, color: colors.textSecondary, fontFamily: "Cairo_400Regular" },
+  emptyText: { fontSize: 14, color: colors.textMuted, fontFamily: "Cairo_700Bold" },
 });
+}

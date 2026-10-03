@@ -12,6 +12,7 @@ import { useVideoPlayer, VideoView } from "expo-video";
 import { subscribeRewardPrompt } from "@/utils/adPolicy";
 import type { RewardKind } from "@/utils/adPolicy";
 import { isTvDevice, tvFocusStyle } from "@/utils/tv";
+import { useColors } from "@/hooks/useColors";
 
 type PendingPrompt = {
   kind: RewardKind;
@@ -20,6 +21,7 @@ type PendingPrompt = {
 };
 
 export function RewardedAdPrompt() {
+  const colors = useColors();
   const [pending, setPending] = useState<PendingPrompt | null>(null);
   const [busy, setBusy] = useState(false);
   const [adError, setAdError] = useState("");
@@ -82,8 +84,8 @@ export function RewardedAdPrompt() {
       statusBarTranslucent
       onRequestClose={() => !busy && close(false)}
     >
-      <View style={styles.backdrop}>
-        <View style={styles.card}>
+      <View style={[styles.backdrop, { backgroundColor: colors.overlay }]}>
+        <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
           <View style={styles.topRow}>
             <View style={styles.badge}>
               <Ionicons name="sparkles" size={14} color="#fcd34d" />
@@ -93,9 +95,9 @@ export function RewardedAdPrompt() {
               accessibilityLabel="إغلاق"
               onPress={() => close(false)}
               focusable={tvMode}
-              style={({ pressed, focused }) => [styles.close, pressed && styles.pressed, tvMode && tvFocusStyle(focused)]}
+              style={({ pressed, focused }) => [styles.close, { backgroundColor: colors.input }, pressed && styles.pressed, tvMode && tvFocusStyle(focused)]}
             >
-              <Ionicons name="close" size={19} color="rgba(255,255,255,0.70)" />
+              <Ionicons name="close" size={19} color={colors.textSecondary} />
             </Pressable>
           </View>
 
@@ -109,13 +111,12 @@ export function RewardedAdPrompt() {
               pointerEvents="none"
               accessible={false}
             />
-            <View style={styles.mediaShade} />
           </View>
 
-          <Text style={styles.title}>{title}</Text>
-          <Text style={styles.message}>{message}</Text>
-          <Text style={styles.note}>يظهر الإعلان فقط عند الحاجة إلى فتح هذه الميزة.</Text>
-           {adError ? <Text style={styles.error}>{adError}</Text> : null}
+          <Text style={[styles.title, { color: colors.textPrimary }]}>{title}</Text>
+          <Text style={[styles.message, { color: colors.textSecondary }]}>{message}</Text>
+          <Text style={[styles.note, { color: colors.textMuted }]}>يظهر الإعلان فقط عند الحاجة إلى فتح هذه الميزة.</Text>
+           {adError ? <Text style={[styles.error, { color: colors.destructive }]}>{adError}</Text> : null}
 
           <Pressable
             onPress={openSubscriptions}
@@ -130,9 +131,9 @@ export function RewardedAdPrompt() {
             <Pressable
               onPress={() => close(false)}
               focusable={tvMode}
-              style={({ pressed, focused }) => [styles.cancel, pressed && styles.pressed, tvMode && tvFocusStyle(focused)]}
+              style={({ pressed, focused }) => [styles.cancel, { backgroundColor: colors.input, borderColor: colors.border }, pressed && styles.pressed, tvMode && tvFocusStyle(focused)]}
             >
-              <Text style={styles.cancelText}>ليس الآن</Text>
+              <Text style={[styles.cancelText, { color: colors.textSecondary }]}>ليس الآن</Text>
             </Pressable>
             <Pressable
               disabled={busy}
@@ -140,17 +141,18 @@ export function RewardedAdPrompt() {
               focusable={tvMode}
               style={({ pressed }) => [
                 styles.confirm,
+                { backgroundColor: colors.button, borderColor: colors.accentBorder },
                 busy && styles.disabled,
                 pressed && styles.pressed,
                 tvMode && tvFocusStyle(false),
               ]}
             >
               {busy ? (
-                <Ionicons name="hourglass-outline" size={16} color="#fff" />
+                <Ionicons name="hourglass-outline" size={16} color={colors.buttonText} />
               ) : (
-                <Ionicons name="play-circle" size={17} color="#fff" />
+                <Ionicons name="play-circle" size={17} color={colors.buttonText} />
               )}
-              <Text style={styles.confirmText}>
+              <Text style={[styles.confirmText, { color: colors.buttonText }]}>
                 {busy ? "جاري التحميل..." : "مشاهدة الإعلان"}
               </Text>
             </Pressable>
@@ -224,10 +226,6 @@ const styles = StyleSheet.create({
     borderColor: "rgba(196,181,253,0.18)",
   },
   media: { width: "100%", height: "100%" },
-  mediaShade: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: "rgba(26,12,52,0.20)",
-  },
   title: {
     marginTop: 17,
     color: "#fff",

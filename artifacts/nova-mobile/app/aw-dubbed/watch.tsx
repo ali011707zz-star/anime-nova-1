@@ -14,6 +14,8 @@ import { RiftPlayer, type PlayerSource, isValidPlayerSourceUrl } from "@/compone
 import { ensureWatchAccess } from "@/utils/adPolicy";
 import { RewardedAdPrompt } from "@/components/RewardedAdPrompt";
 import { isTvDevice, tvFocusStyle } from "@/utils/tv";
+import { useColors } from "@/hooks/useColors";
+import { useWatchPlayerOrientation } from "@/utils/watchOrientation";
 
 const BASE = getBaseUrl(); // e.g. "https://animenovaa.duckdns.org"
 
@@ -64,6 +66,7 @@ function toRiftSources(apiSrcs: ApiSource[]): PlayerSource[] {
 }
 
 export default function AwDubbedWatchScreen() {
+  const colors = useColors();
   const router  = useRouter();
   const tvMode  = isTvDevice();
   const params  = useLocalSearchParams<{
@@ -95,6 +98,11 @@ export default function AwDubbedWatchScreen() {
   const progressKey = `progress-aw-dubbed-${contentKey}-${episodeNumber}`;
   const [resumeTime, setResumeTime] = useState(0);
   const [progressLoaded, setProgressLoaded] = useState(false);
+
+  useWatchPlayerOrientation(
+    !loading && progressLoaded && !error && sources.length > 0,
+    tvMode,
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -211,31 +219,31 @@ export default function AwDubbedWatchScreen() {
 
   if (loading || !progressLoaded) {
     return (
-      <View style={[styles.center, styles.loadingContainer]}>
+      <View style={[styles.center, styles.loadingContainer, { backgroundColor: colors.background }]}>
         <RewardedAdPrompt />
-        <ActivityIndicator color="#10B981" size="large" />
-        <Text style={styles.loadingText}>جاري تحميل المصدر...</Text>
+        <ActivityIndicator color={colors.accent} size="large" />
+        <Text style={[styles.loadingText, { color: colors.textSecondary }]}>جاري تحميل المصدر...</Text>
       </View>
     );
   }
 
   if (error || !sources.length) {
     return (
-      <View style={styles.errorContainer}>
+      <View style={[styles.errorContainer, { backgroundColor: colors.background }]}>
         <RewardedAdPrompt />
          <Pressable onPress={() => router.back()} focusable={tvMode}
            style={({ focused }) => [styles.backBtn, tvMode && tvFocusStyle(focused)]}>
-          <Ionicons name="chevron-back" size={20} color="rgba(255,255,255,0.7)" />
+          <Ionicons name="chevron-back" size={20} color={colors.textSecondary} />
         </Pressable>
         <View style={styles.center}>
           <View style={styles.errorIcon}>
             <Ionicons name="alert-circle" size={36} color="#f87171" />
           </View>
-          <Text style={styles.errorText}>{error || "لا توجد مصادر"}</Text>
+            <Text style={[styles.errorText, { color: colors.destructive }]}>{error || "لا توجد مصادر"}</Text>
            <Pressable onPress={loadSources} focusable={tvMode}
              style={({ focused }) => [styles.retryBtn, tvMode && tvFocusStyle(focused)]}>
-            <Ionicons name="refresh" size={16} color="#A78BFA" />
-            <Text style={styles.retryText}>إعادة المحاولة</Text>
+            <Ionicons name="refresh" size={16} color={colors.buttonText} />
+            <Text style={[styles.retryText, { color: colors.buttonText }]}>إعادة المحاولة</Text>
           </Pressable>
         </View>
       </View>
