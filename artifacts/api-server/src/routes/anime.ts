@@ -571,6 +571,7 @@ async function cfProxyStreamFetch(
   url: string,
   referer?: string,
   range?: string,
+  externalSignal?: AbortSignal,
 ): Promise<Response | null> {
   try {
     const streamUrl = new URL(`${CF_PROXY_BASE}/stream`);
@@ -579,13 +580,78 @@ async function cfProxyStreamFetch(
     if (CF_PROXY_KEY) streamUrl.searchParams.set("key", CF_PROXY_KEY);
     const headers: Record<string, string> = {};
     if (range) headers.Range = range;
+    const timeoutSignal = AbortSignal.timeout(35_000);
+    const signal = externalSignal
+      ? AbortSignal.any([externalSignal, timeoutSignal])
+      : timeoutSignal;
     return await fetch(streamUrl, {
       headers,
-      signal: AbortSignal.timeout(35_000),
+      signal,
     });
   } catch {
     return null;
   }
+}
+
+async function fetchMediaUpstream(
+  url: string,
+  ref: string,
+  headers: Record<string, string>,
+  range: string | undefined,
+  signal: AbortSignal,
+  directAbort: AbortController,
+): Promise<Response> {
+  const directPromise = fetch(url, { headers, signal }).then(
+    response => ({ kind: "direct", response } as const),
+    error => ({ kind: "direct-error", error } as const),
+  );
+  let hedgeTimer: ReturnType<typeof setTimeout> | null = null;
+  const hedgeAbort = new AbortController();
+  const cancelHedge = () => {
+    if (hedgeTimer) clearTimeout(hedgeTimer);
+    hedgeAbort.abort();
+  };
+  const hedgePromise = new Promise<any>(resolve => {
+    hedgeTimer = setTimeout(async () => {
+      try {
+        const response = await cfProxyStreamFetch(url, ref, range, hedgeAbort.signal);
+        if (response?.ok) {
+          resolve({ kind: "cf", response });
+          return;
+        }
+        try { await response?.body?.cancel(); } catch {}
+      } catch {}
+      resolve({ kind: "cf-error" });
+    }, 2500);
+  });
+
+  const first: any = await Promise.race([directPromise, hedgePromise]);
+  if (first.kind === "direct" && first.response.ok) {
+    cancelHedge();
+    return first.response;
+  }
+  if (first.kind === "cf" && first.response.ok) {
+    directAbort.abort();
+    console.info(`[media-hedge] route=cf host=${safeHost(url)}`);
+    return first.response;
+  }
+
+  if (first.kind === "direct" || first.kind === "direct-error") {
+    const alternate: any = await hedgePromise;
+    if (alternate.kind === "cf" && alternate.response.ok) {
+      directAbort.abort();
+      console.info(`[media-hedge] route=cf host=${safeHost(url)}`);
+      return alternate.response;
+    }
+    cancelHedge();
+    if (first.kind === "direct") return first.response;
+    throw first.error;
+  }
+
+  const direct: any = await directPromise;
+  cancelHedge();
+  if (direct.kind === "direct") return direct.response;
+  throw direct.error;
 }
 
 // ════════════════════════════════════════════════════════════════════
@@ -17371,7 +17437,16 @@ router.get("/anime/seg-proxy", async (req, res) => {
       if (servedViaCf) return;
     }
 
-    const r = await fetch(url, { headers: hdrs, signal: upstreamAbort.signal });
+    const r = isClientRoutedFlixMedia(url)
+      ? await fetch(url, { headers: hdrs, signal: upstreamAbort.signal })
+      : await fetchMediaUpstream(
+          url,
+          ref,
+          hdrs,
+          req.headers.range ? String(req.headers.range) : undefined,
+          upstreamAbort.signal,
+          upstreamAbort,
+        );
     clearTimeout(connectTimeout);
 
     if (!r.ok) {
