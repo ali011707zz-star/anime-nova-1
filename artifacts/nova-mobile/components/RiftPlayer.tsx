@@ -29,6 +29,30 @@ import {
 } from "@/lib/skipTimes.mjs";
 
 const { width: W, height: H } = Dimensions.get("window");
+const PLAYER_GLASS_SURFACE = {
+  backgroundColor: "rgba(248,248,252,0.42)",
+  borderColor: "rgba(255,255,255,0.54)",
+  shadowColor: "transparent",
+  shadowOpacity: 0,
+  shadowRadius: 0,
+  elevation: 0,
+};
+const PLAYER_SELECTED_GLASS_SURFACE = {
+  backgroundColor: "rgba(167,139,250,0.36)",
+  borderColor: "rgba(216,180,254,0.68)",
+  shadowColor: "transparent",
+  shadowOpacity: 0,
+  shadowRadius: 0,
+  elevation: 0,
+};
+const PLAYER_DANGER_GLASS_SURFACE = {
+  backgroundColor: "rgba(239,68,68,0.20)",
+  borderColor: "rgba(252,165,165,0.48)",
+};
+const PLAYER_CONTROL_ICON = "rgba(18,20,26,0.94)";
+const PLAYER_ACTIVE_ICON = "#5B3C9A";
+const PLAYER_MUTED_ICON = "#B42332";
+const PLAYER_CONTROL_LABEL = "rgba(18,20,26,0.88)";
 // Keep the existing player controls in one place while making every control
 // visible to Android TV's D-pad focus engine.
 const Pressable = TvPressable;
@@ -427,22 +451,8 @@ function ExpoRiftPlayer({
   const timelineNativeRTL = Platform.OS !== "web" && I18nManager.isRTL;
   const timelineStartEdge: "left" | "right" = timelineNativeRTL ? "right" : "left";
   const timelineEndEdge: "left" | "right" = timelineNativeRTL ? "left" : "right";
-  const playerControlSurface = {
-    backgroundColor: colors.playerControl,
-    borderColor: colors.playerControlBorder,
-    shadowColor: "transparent",
-    shadowOpacity: 0,
-    shadowRadius: 0,
-    elevation: 0,
-  };
-  const playerSelectedSurface = {
-    backgroundColor: colors.accentSurface,
-    borderColor: colors.accentBorder,
-    shadowColor: "transparent",
-    shadowOpacity: 0,
-    shadowRadius: 0,
-    elevation: 0,
-  };
+  const playerControlSurface = PLAYER_GLASS_SURFACE;
+  const playerSelectedSurface = PLAYER_SELECTED_GLASS_SURFACE;
   const insets = useSafeAreaInsets();
   const { tv: tvMode } = useTvMetrics();
 
@@ -2969,7 +2979,7 @@ function ExpoRiftPlayer({
                 <Ionicons
                   name="logo-closed-captioning"
                   size={tvMode ? 26 : 18}
-                  color={subOn ? colors.accent : colors.playerControlIcon}
+                  color={subOn ? PLAYER_ACTIVE_ICON : PLAYER_CONTROL_ICON}
                 />
               </Pressable>
             );
@@ -2982,25 +2992,25 @@ function ExpoRiftPlayer({
                   <Ionicons
                     name={isPortrait ? "phone-landscape-outline" : "phone-portrait-outline"}
                     size={tvMode ? 28 : 17}
-                    color={isPortrait ? colors.accent : colors.playerControlIcon}
+                    color={isPortrait ? PLAYER_ACTIVE_ICON : PLAYER_CONTROL_ICON}
                   />
                  </Pressable>
                 {ccBtn}
                  <Pressable onPress={takeScreenshot} style={[s.topIconBtn, tvMode && s.tvTopActionBtn, playerControlSurface]} hitSlop={10}>
-                  <Ionicons name="camera-outline" size={tvMode ? 28 : 18} color={colors.playerControlIcon} />
+                  <Ionicons name="camera-outline" size={tvMode ? 28 : 18} color={PLAYER_CONTROL_ICON} />
                  </Pressable>
               </View>
             ) : (
               <View style={[s.topRightRow, tvMode && s.tvTopRightRow]}>
                <Pressable onPress={takeScreenshot} style={[s.topIconBtn, tvMode && s.tvTopActionBtn, playerControlSurface]} hitSlop={10}>
-                  <Ionicons name="camera-outline" size={tvMode ? 28 : 18} color={colors.playerControlIcon} />
+                  <Ionicons name="camera-outline" size={tvMode ? 28 : 18} color={PLAYER_CONTROL_ICON} />
                </Pressable>
                 {ccBtn}
                 <Pressable onPress={togglePortrait} style={[s.topRotateBtn, tvMode && s.tvTopActionBtn, playerControlSurface, isPortrait && playerSelectedSurface]} hitSlop={10}>
                   <Ionicons
                     name={isPortrait ? "phone-landscape-outline" : "phone-portrait-outline"}
                     size={tvMode ? 28 : 17}
-                    color={isPortrait ? colors.accent : colors.playerControlIcon}
+                    color={isPortrait ? PLAYER_ACTIVE_ICON : PLAYER_CONTROL_ICON}
                   />
                  </Pressable>
                 <Pressable onPress={handleBack} style={[s.topCloseBtn, tvMode && s.tvTopCloseBtn, playerControlSurface]} hitSlop={10}>
@@ -3027,18 +3037,18 @@ function ExpoRiftPlayer({
                 {/* زر التخطي للأمام — الأول في JSX → يظهر على اليمين في RTL */}
                 <View style={s.controlButtonSlot}>
                   <Pressable onPress={() => seek(positionRef.current + 10)} style={[s.centerSeekBtn, tvMode && s.tvCenterSeekBtn, playerControlSurface]} hitSlop={14}>
-                    <Ionicons name="play-forward" size={tvMode ? 30 : 24} color={colors.playerControlIcon} />
+                    <Ionicons name="play-forward" size={tvMode ? 30 : 24} color={PLAYER_CONTROL_ICON} />
                   </Pressable>
-                  <Text style={[s.controlButtonLabel, { color: colors.playerText }]}>10</Text>
+                  <Text style={[s.controlButtonLabel, { color: PLAYER_CONTROL_LABEL }]}>10</Text>
                 </View>
                 {/* زر المنتصف: play/pause/spinner */}
                 <View style={s.controlButtonSlot}>
                   <Pressable hasTVPreferredFocus={tvMode} onPress={togglePlay} style={[s.centerPlayBtn, tvMode && s.tvCenterPlayBtn, playerControlSurface]} hitSlop={16}>
                     {buffering && !error
-                      ? <ActivityIndicator size={32} color={colors.playerControlIcon} />
+                      ? <ActivityIndicator size={32} color={PLAYER_CONTROL_ICON} />
                       : <Ionicons
                           name={isPlaying ? "pause" : "play"}
-                          size={36} color={colors.playerControlIcon}
+                          size={36} color={PLAYER_CONTROL_ICON}
                           style={isPlaying ? undefined : { transform: [{ translateX: 3 }] }}
                         />}
                   </Pressable>
@@ -3046,9 +3056,9 @@ function ExpoRiftPlayer({
                 {/* زر الرجوع — الأخير في JSX → يظهر على اليسار في RTL */}
                 <View style={s.controlButtonSlot}>
                   <Pressable onPress={() => seek(positionRef.current - 10)} style={[s.centerSeekBtn, tvMode && s.tvCenterSeekBtn, playerControlSurface]} hitSlop={14}>
-                    <Ionicons name="play-back" size={tvMode ? 30 : 24} color={colors.playerControlIcon} />
+                    <Ionicons name="play-back" size={tvMode ? 30 : 24} color={PLAYER_CONTROL_ICON} />
                   </Pressable>
-                  <Text style={[s.controlButtonLabel, { color: colors.playerText }]}>10</Text>
+                  <Text style={[s.controlButtonLabel, { color: PLAYER_CONTROL_LABEL }]}>10</Text>
                 </View>
               </View>
             ) : (
@@ -3057,10 +3067,10 @@ function ExpoRiftPlayer({
                 <View style={s.controlButtonSlot}>
                   <Pressable hasTVPreferredFocus={tvMode} onPress={togglePlay} style={[s.centerPlayBtn, tvMode && s.tvCenterPlayBtn, playerControlSurface]} hitSlop={16}>
                     {buffering && !error
-                      ? <ActivityIndicator size={32} color={colors.playerControlIcon} />
+                      ? <ActivityIndicator size={32} color={PLAYER_CONTROL_ICON} />
                       : <Ionicons
                           name={isPlaying ? "pause" : "play"}
-                          size={36} color={colors.playerControlIcon}
+                          size={36} color={PLAYER_CONTROL_ICON}
                           style={isPlaying ? undefined : { transform: [{ translateX: 3 }] }}
                         />}
                   </Pressable>
@@ -3165,7 +3175,7 @@ function ExpoRiftPlayer({
              <View style={s.bottomSide}>
                 <View style={s.controlButtonSlot}>
                   <Pressable onPress={() => setIsLocked(true)} style={[s.ctrlIconBtn, tvMode && s.tvCtrlIconBtn, playerControlSurface]} hitSlop={10}>
-                    <Ionicons name="lock-closed-outline" size={16} color={colors.playerControlIcon} />
+                    <Ionicons name="lock-closed-outline" size={16} color={PLAYER_CONTROL_ICON} />
                   </Pressable>
                 </View>
                 <View style={s.controlButtonSlot}>
@@ -3189,7 +3199,7 @@ function ExpoRiftPlayer({
                     </View>
                   )}
                 <Pressable onPress={() => { setShowFitMenu(v => !v); setShowSpeedMenu(false); fadeIn(); }} style={[s.ctrlIconBtn, tvMode && s.tvCtrlIconBtn, playerControlSurface, showFitMenu && playerSelectedSurface]} hitSlop={10}>
-                    <Ionicons name="scan-outline" size={tvMode ? 24 : 16} color={showFitMenu ? colors.accent : colors.playerControlIcon} />
+                    <Ionicons name="scan-outline" size={tvMode ? 24 : 16} color={showFitMenu ? PLAYER_ACTIVE_ICON : PLAYER_CONTROL_ICON} />
                   </Pressable>
                  </View>
                </View>
@@ -3199,22 +3209,22 @@ function ExpoRiftPlayer({
                 {!isPortrait && (
                   <View style={s.controlButtonSlot}>
                     <Pressable onPress={() => seek(positionRef.current + 10)} style={[s.seekCtrlBtn, tvMode && s.tvSeekCtrlBtn, playerControlSurface]} hitSlop={10}>
-                      <Ionicons name="play-forward" size={tvMode ? 24 : 17} color={colors.playerControlIcon} />
+                      <Ionicons name="play-forward" size={tvMode ? 24 : 17} color={PLAYER_CONTROL_ICON} />
                     </Pressable>
-                    <Text style={[s.controlButtonLabel, { color: colors.playerText }]}>10</Text>
+                    <Text style={[s.controlButtonLabel, { color: PLAYER_CONTROL_LABEL }]}>10</Text>
                   </View>
                 )}
                 <View style={s.controlButtonSlot}>
                   <Pressable onPress={togglePlay} style={[s.bottomPlayBtn, tvMode && s.tvBottomPlayBtn, playerControlSurface]} hitSlop={10}>
-                    <Ionicons name={isPlaying ? "pause" : "play"} size={tvMode ? 30 : 23} color={colors.playerControlIcon} style={isPlaying ? undefined : { transform: [{ translateX: 2 }] }} />
+                    <Ionicons name={isPlaying ? "pause" : "play"} size={tvMode ? 30 : 23} color={PLAYER_CONTROL_ICON} style={isPlaying ? undefined : { transform: [{ translateX: 2 }] }} />
                   </Pressable>
                 </View>
                 {!isPortrait && (
                   <View style={s.controlButtonSlot}>
                     <Pressable onPress={() => seek(positionRef.current - 10)} style={[s.seekCtrlBtn, tvMode && s.tvSeekCtrlBtn, playerControlSurface]} hitSlop={10}>
-                      <Ionicons name="play-back" size={tvMode ? 24 : 17} color={colors.playerControlIcon} />
+                      <Ionicons name="play-back" size={tvMode ? 24 : 17} color={PLAYER_CONTROL_ICON} />
                     </Pressable>
-                    <Text style={[s.controlButtonLabel, { color: colors.playerText }]}>10</Text>
+                    <Text style={[s.controlButtonLabel, { color: PLAYER_CONTROL_LABEL }]}>10</Text>
                   </View>
                 )}
               </View>
@@ -3222,8 +3232,8 @@ function ExpoRiftPlayer({
               {/* يمين: كتم + تشغيل تلقائي + سرعة — نفس أزرار الهاتف */}
                <View style={[s.bottomSide, { justifyContent: "flex-end" }]}>
                 <View style={s.controlButtonSlot}>
-                  <Pressable onPress={() => { setIsMuted(v => !v); fadeIn(); }} style={[s.ctrlIconBtn, tvMode && s.tvCtrlIconBtn, isMuted && s.ctrlIconBtnMuted, playerControlSurface]} hitSlop={10}>
-                    <Ionicons name={isMuted ? "volume-mute-outline" : "volume-high-outline"} size={tvMode ? 24 : 16} color={isMuted ? colors.destructive : colors.playerControlIcon} />
+                  <Pressable onPress={() => { setIsMuted(v => !v); fadeIn(); }} style={[s.ctrlIconBtn, tvMode && s.tvCtrlIconBtn, playerControlSurface, isMuted && PLAYER_DANGER_GLASS_SURFACE]} hitSlop={10}>
+                    <Ionicons name={isMuted ? "volume-mute-outline" : "volume-high-outline"} size={tvMode ? 24 : 16} color={isMuted ? PLAYER_MUTED_ICON : PLAYER_CONTROL_ICON} />
                   </Pressable>
                </View>
                 <View style={s.controlButtonSlot}>
@@ -3242,7 +3252,7 @@ function ExpoRiftPlayer({
                     </View>
                   )}
                   <Pressable onPress={() => { setShowSpeedMenu(v => !v); setShowFitMenu(false); fadeIn(); }} style={[s.ctrlIconBtn, s.ctrlSpeedBtn, tvMode && s.tvCtrlIconBtn, playerControlSurface, showSpeedMenu && playerSelectedSurface]} hitSlop={10}>
-                    <Text style={[s.speedLabel, tvMode && s.tvSpeedLabel, speed !== 1 && s.speedLabelActive, { color: speed !== 1 ? colors.accent : colors.playerControlIcon }]}>{speed}x</Text>
+                    <Text style={[s.speedLabel, tvMode && s.tvSpeedLabel, speed !== 1 && s.speedLabelActive, { color: speed !== 1 ? PLAYER_ACTIVE_ICON : PLAYER_CONTROL_ICON }]}>{speed}x</Text>
                   </Pressable>
                 </View>
               </View>
