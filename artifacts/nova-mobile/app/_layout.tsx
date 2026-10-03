@@ -83,6 +83,10 @@ function RootLayoutNav() {
   const tvExitHintTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastTvBackAt = useRef(0);
   const tvMode = isTvDevice(Dimensions.get("window").width, Dimensions.get("window").height);
+  const watchScreenOptions = {
+    headerShown: false,
+    ...(tvMode ? { orientation: "landscape" as const } : {}),
+  };
 
   useEffect(() => {
     if (Platform.OS !== "android" || !tvMode) return;
@@ -145,23 +149,23 @@ function RootLayoutNav() {
       >
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
         <Stack.Screen name="anime/[id]" options={{ headerShown: false, animation: "slide_from_bottom" }} />
-        <Stack.Screen name="watch" options={{ headerShown: false, orientation: tvMode ? "landscape" : "portrait" }} />
+        <Stack.Screen name="watch" options={watchScreenOptions} />
         <Stack.Screen name="animation/[type]/[id]" options={{ headerShown: false, animation: "slide_from_bottom" }} />
-        <Stack.Screen name="animation/watch" options={{ headerShown: false, orientation: tvMode ? "landscape" : "portrait" }} />
+        <Stack.Screen name="animation/watch" options={watchScreenOptions} />
         <Stack.Screen name="settings" options={{ headerShown: false }} />
         <Stack.Screen name="schedule" options={{ headerShown: false }} />
         <Stack.Screen name="profile" options={{ headerShown: false, animation: "slide_from_right" }} />
         <Stack.Screen name="tv-link" options={{ headerShown: false }} />
         <Stack.Screen name="oauth2redirect/google" options={{ headerShown: false }} />
         <Stack.Screen name="aw-dubbed/[key]" options={{ headerShown: false, animation: "slide_from_bottom" }} />
-        <Stack.Screen name="aw-dubbed/watch"  options={{ headerShown: false, orientation: tvMode ? "landscape" : "portrait" }} />
+        <Stack.Screen name="aw-dubbed/watch" options={watchScreenOptions} />
         {/* The cartoon tab intentionally opens the legacy Arabic-Toons
             screens, not the anime-dubbed Supabase screens. Register them in
             the root stack so native builds resolve the detail and watch routes
             reliably. */}
         <Stack.Screen name="dubbed" options={{ headerShown: false }} />
         <Stack.Screen name="dubbed/[id]" options={{ headerShown: false, animation: "slide_from_bottom" }} />
-        <Stack.Screen name="dubbed/watch" options={{ headerShown: false, orientation: tvMode ? "landscape" : "portrait" }} />
+        <Stack.Screen name="dubbed/watch" options={watchScreenOptions} />
         <Stack.Screen name="+not-found" />
       </Stack>
       {tvMode && tvExitHintVisible && (

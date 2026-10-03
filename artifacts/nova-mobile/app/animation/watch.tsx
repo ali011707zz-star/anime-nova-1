@@ -359,7 +359,7 @@ export default function AnimationWatchScreen() {
   }, [tmdbId, ep, titleStr]);
 
   const [screen, setScreen]       = useState<Screen>("picker");
-  useWatchPlayerOrientation(
+  const onToggleOrientation = useWatchPlayerOrientation(
     screen === "native" || screen === "webplayer" || screen === "embed",
     tvMode,
   );
@@ -895,6 +895,7 @@ export default function AnimationWatchScreen() {
         episode={type !== "movie" ? ep : undefined}
          totalEps={totalEps || undefined}
         initialPosition={resumeTime}
+        onToggleOrientation={onToggleOrientation}
         onBack={() => {
           handleTimeUpdate(lastTimeRef.current);
           setScreen("picker");

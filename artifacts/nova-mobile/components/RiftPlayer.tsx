@@ -153,6 +153,8 @@ type Props = {
   episode?: number;
   anilistId?: number;
   onBack: () => void;
+  /** Watch routes own phone orientation; standalone player surfaces use the local fallback. */
+  onToggleOrientation?: () => void;
   onNextEpisode?: () => void;
   onPrevEpisode?: () => void;
   onEpisodeSelect?: (ep: number) => void;
@@ -424,6 +426,7 @@ function ExpoRiftPlayer({
   episode,
   anilistId,
   onBack,
+  onToggleOrientation,
   onNextEpisode,
   onPrevEpisode,
   onEpisodeSelect,
@@ -1671,12 +1674,16 @@ function ExpoRiftPlayer({
   const togglePortrait = useCallback(() => {
     const nextPortrait = !isPortrait;
     setIsPortrait(nextPortrait);
+    if (onToggleOrientation) {
+      onToggleOrientation();
+      return;
+    }
     requestOrientation(
       nextPortrait
         ? ScreenOrientation.OrientationLock.PORTRAIT_UP
         : ScreenOrientation.OrientationLock.LANDSCAPE_RIGHT,
     );
-  }, [isPortrait, requestOrientation]);
+  }, [isPortrait, onToggleOrientation, requestOrientation]);
 
   /* ─── Screenshot ─── */
   const rootViewRef = useRef<View>(null);
@@ -1745,7 +1752,9 @@ function ExpoRiftPlayer({
         );
       } catch {}
     };
-    detect();
+    // Watch routes enter with a centrally requested landscape lock. Avoid a
+    // stale pre-lock orientation read changing the player layout on mount.
+    if (!onToggleOrientation) detect();
     const sub = ScreenOrientation.addOrientationChangeListener((e) => {
       const o = e.orientationInfo.orientation;
       setIsPortrait(
@@ -1755,7 +1764,7 @@ function ExpoRiftPlayer({
       /* A rotation invalidates absolute coordinates used by the seekbar. */
     });
     return () => sub.remove();
-  }, []);
+  }, [onToggleOrientation]);
 
   /* ─── Mute sync + initial maximum real volume ─── */
   useEffect(() => {

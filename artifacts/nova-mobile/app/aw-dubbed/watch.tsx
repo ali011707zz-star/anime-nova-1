@@ -99,7 +99,7 @@ export default function AwDubbedWatchScreen() {
   const [resumeTime, setResumeTime] = useState(0);
   const [progressLoaded, setProgressLoaded] = useState(false);
 
-  useWatchPlayerOrientation(
+  const onToggleOrientation = useWatchPlayerOrientation(
     !loading && progressLoaded && !error && sources.length > 0,
     tvMode,
   );
@@ -262,6 +262,7 @@ export default function AwDubbedWatchScreen() {
         episode={episodeNumber}
         episodeTitle={`${season} • الحلقة ${episodeNumber}`}
         initialPosition={resumeTime}
+        onToggleOrientation={onToggleOrientation}
         onProgress={onProgress}
         onBack={handleBack}
       />

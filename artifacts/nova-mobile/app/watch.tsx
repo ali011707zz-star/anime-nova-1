@@ -829,7 +829,7 @@ export default function WatchScreen() {
 
   /* ── State ── */
   const [screen,      setScreen]      = useState<Screen>("picker"); // يبدأ مباشرةً بالـ picker — بدون تشغيل تلقائي
-  useWatchPlayerOrientation(screen === "native" || screen === "embed", tvMode);
+  const onToggleOrientation = useWatchPlayerOrientation(screen === "native" || screen === "embed", tvMode);
   const [sources,     setSources]     = useState<Src[]>([]);
   const [playingSrc,  setPlayingSrc]  = useState<Src | null>(null);
   const [resumeTime,  setResumeTime]  = useState(0);
@@ -1865,6 +1865,7 @@ export default function WatchScreen() {
         initialPosition={resumeTime}
         totalEps={totalEpsCount}
         onBack={onRiftBack}
+        onToggleOrientation={onToggleOrientation}
         onError={onRiftError}
         onProgress={onRiftProgress}
         onNextEpisode={canGoNextEpisode ? onRiftNextEpisode : undefined}

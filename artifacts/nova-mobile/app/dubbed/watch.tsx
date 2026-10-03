@@ -39,7 +39,7 @@ export default function DubbedWatchScreen() {
   const lastDurationRef = useRef(0);
   const savedOnExitRef = useRef(false);
 
-  useWatchPlayerOrientation(!loading && !error && sources.length > 0, tvMode);
+  const onToggleOrientation = useWatchPlayerOrientation(!loading && !error && sources.length > 0, tvMode);
 
   const episodeNumber = Math.max(1, parseInt(ep || "1", 10) || 1);
   const contentKey = series || epUrl || "";
@@ -296,6 +296,7 @@ export default function DubbedWatchScreen() {
         sources={sources}
         title={`${title || ""} · ${season || ""}`}
         episode={episodeNumber}
+        onToggleOrientation={onToggleOrientation}
         onProgress={onProgress}
         onBack={handleBack}
         onError={retryAfterPlaybackError}
