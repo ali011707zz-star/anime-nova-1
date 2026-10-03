@@ -102,6 +102,20 @@ function toExpoVideoSource(source: PlayerSource | undefined): NovaVideoSource | 
     : source.url;
 }
 
+function getPlaybackBufferOptions(animePlayback: boolean, site?: string) {
+  const isKawaii = String(site || "").toLowerCase() === "kawaii";
+  return {
+    preferredForwardBufferDuration: animePlayback ? (isKawaii ? 24 : 16) : 8,
+    waitsToMinimizeStalling: animePlayback,
+    minBufferMs: animePlayback ? (isKawaii ? 8000 : 5000) : 3000,
+    // Keep the cap at 24 seconds; larger values caused OOM on low-memory phones.
+    maxBufferMs: 24000,
+    bufferForPlaybackMs: animePlayback && isKawaii ? 1800 : 1000,
+    bufferForPlaybackAfterRebufferMs: animePlayback ? (isKawaii ? 5000 : 3000) : 3500,
+    backBufferDurationMs: 3000,
+  };
+}
+
 /** Never pass malformed URLs into the native player.
  *  Some Media3/AVPlayer versions crash before emitting statusChange(error)
  *  when the source is empty, relative, or otherwise not an HTTP URL.
@@ -839,9 +853,8 @@ function ExpoRiftPlayer({
   /* ─── expo-video player ─── */
   /* نستخدم ref ثابت للـ VideoSource الأولي حتى لا يُعيد useVideoPlayer
      تهيئة المشغّل عند تغيير srcIdx (التبديل يتم عبر player.replace فقط).
-     روابط HLS تمرّر contentType صراحةً — خصوصاً رابط hls-proxy المشفّر الذي
-     لا يحتوي امتداد .m3u8 ظاهراً. جميع هذه المصادر تمرّ عبر VPS proxy الذي
-     يُضيف Referer/Origin داخلياً، لذا لا نمرّر headers الخام إلى expo-video. */
+     روابط HLS تمرّر contentType صراحةً، وروابط التشغيل المباشر تحتفظ بـ headers
+     التي يحتاجها الـ CDN. */
   const _initSrc = playableSources[safeInitialIndex];
   const _initVideoSrcRef = useRef<NovaVideoSource | null>(toExpoVideoSource(_initSrc));
   const player = useVideoPlayer(_initVideoSrcRef.current || null, (p) => {
@@ -860,15 +873,7 @@ function ExpoRiftPlayer({
        ⚠️ backBufferDurationMs غير محدّد → يبقي ExoPlayer 30ث من المحتوى
           المُشغَّل في الذاكرة → يُضاعف استهلاك الذاكرة. */
     try {
-      (p as any).bufferOptions = {
-         preferredForwardBufferDuration: animePlayback ? 16 : 8, // iOS: هامش إضافي لمصادر الأنمي
-         waitsToMinimizeStalling: animePlayback, // الأنمي ينتظر buffer أنسب لتقليل التوقفات
-         minBufferMs: animePlayback ? 5000 : 3000, // Android: احتفظ بهامش أطول لمصادر الأنمي
-         maxBufferMs: 24000,                // Android: هامش كافٍ للـ CDN مع تجنب OOM
-         bufferForPlaybackMs: 1000,         // Android: أول تشغيل بعد buffer صغير آمن
-         bufferForPlaybackAfterRebufferMs: animePlayback ? 3000 : 3500,
-        backBufferDurationMs: 3000,         // Android: ذاكرة خلفية صغيرة
-      };
+      (p as any).bufferOptions = getPlaybackBufferOptions(animePlayback, _initSrc?.site);
     } catch {}
   });
 
@@ -2252,6 +2257,9 @@ function ExpoRiftPlayer({
       try {
         /* replace() يدير إيقاف الـpipeline السابق داخلياً؛ لا نضيف pause()
            قبله لأن استدعاءين native متتاليين كانا سبباً لسباق الكراش. */
+        try {
+          (player as any).bufferOptions = getPlaybackBufferOptions(animePlayback, nextSrc.site);
+        } catch {}
         player.replace(toExpoVideoSource(nextSrc) as any);
       } catch (e) {
         console.warn("[RiftPlayer] player.replace() رمى استثناء:", e);
@@ -2274,7 +2282,7 @@ function ExpoRiftPlayer({
         replaceCallTimerRef.current = null;
       }
     };
-  }, [player, playableSources, sourceReloadNonce, srcIdx]);
+  }, [player, playableSources, sourceReloadNonce, srcIdx, animePlayback]);
 
   /* ─── Whisper audio transcription ─── */
   const triggerWhisper = useCallback(async () => {

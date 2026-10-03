@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { load } from "cheerio";
 import { logger } from "../lib/logger";
 
 const router = Router();
@@ -258,6 +259,168 @@ async function cfGet(url: string, referer?: string, timeoutMs = 18000): Promise<
 // ── L1 cache for catalog pages ──
 const _catalogCache = new Map<string, { data: any; ts: number }>();
 const CATALOG_TTL = 30 * 60_000; // 30 دقيقة — يبقى سريعاً لكن لا يحبس الإضافات اليومية
+const ARABIC_TOONS_HOSTS = new Set(["arabic-toons.com", "www.arabic-toons.com"]);
+
+function normalizeArabicToonsSeriesUrl(value: string): string | null {
+  try {
+    const url = new URL(value);
+    if (
+      url.protocol !== "https:" ||
+      !ARABIC_TOONS_HOSTS.has(url.hostname.toLowerCase()) ||
+      url.username ||
+      url.password ||
+      url.port ||
+      !/-anime-streaming\.html$/i.test(url.pathname)
+    ) return null;
+    return `${AT_BASE}${url.pathname}`;
+  } catch {
+    return null;
+  }
+}
+
+async function fetchArabicToonsHtml(url: string, referer: string): Promise<string | null> {
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== "https:" || !ARABIC_TOONS_HOSTS.has(parsed.hostname.toLowerCase())) return null;
+    const response = await fetch(url, {
+      headers: {
+        "User-Agent": BROWSER_UA,
+        Referer: referer,
+        Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "ar,en-US;q=0.9,en;q=0.8",
+      },
+      signal: AbortSignal.timeout(10000),
+    });
+    if (!response.ok) return null;
+    const html = await response.text();
+    return html.length > 500 && !isCfBlock(html) ? html : null;
+  } catch {
+    return null;
+  }
+}
+
+async function fetchArabicToonsCatalogPage(page: number): Promise<any | null> {
+  const safePage = Math.max(1, Math.min(1000, Math.floor(page) || 1));
+  const url = new URL(`${AT_BASE}/cartoon.php`);
+  url.searchParams.set("next", String(safePage));
+  const html = await fetchArabicToonsHtml(url.toString(), `${AT_BASE}/cartoon.php`);
+  if (!html) return null;
+
+  const $ = load(html);
+  const results: any[] = [];
+  const seen = new Set<string>();
+  $("a[href]").each((_, element) => {
+    const anchor = $(element);
+    const rawHref = anchor.attr("href") || "";
+    let seriesUrl: URL;
+    try {
+      seriesUrl = new URL(rawHref, AT_BASE);
+    } catch {
+      return;
+    }
+    if (
+      !ARABIC_TOONS_HOSTS.has(seriesUrl.hostname.toLowerCase()) ||
+      !/-anime-streaming\.html$/i.test(seriesUrl.pathname)
+    ) return;
+
+    const canonicalUrl = `${AT_BASE}${seriesUrl.pathname}`;
+    if (seen.has(canonicalUrl)) return;
+    const image = anchor.find("img").first();
+    const rawImage = image.attr("src") || image.attr("data-src") || "";
+    let imageUrl: string | undefined;
+    if (rawImage) {
+      try {
+        const parsedImage = new URL(rawImage, AT_BASE);
+        if (ARABIC_TOONS_HOSTS.has(parsedImage.hostname.toLowerCase())) imageUrl = parsedImage.toString();
+      } catch { /* skip malformed poster URLs */ }
+    }
+    const title = String(
+      image.attr("alt") || anchor.attr("title") || anchor.text() || "",
+    ).replace(/\s+/g, " ").trim();
+    const slug = seriesUrl.pathname.split("/").pop()?.replace(/-anime-streaming\.html$/i, "") || "";
+    if (!slug || !title) return;
+
+    seen.add(canonicalUrl);
+    results.push({
+      key: slug,
+      slug,
+      title,
+      image: imageUrl,
+      poster: imageUrl,
+      seasons: [{ label: "الحلقات", arabicToonsId: canonicalUrl }],
+    });
+  });
+
+  if (!results.length) return null;
+  let totalPages = safePage;
+  const pageLinkPattern = /cartoon\.php\?next=(\d+)/gi;
+  let pageLink: RegExpExecArray | null;
+  while ((pageLink = pageLinkPattern.exec(html))) {
+    totalPages = Math.max(totalPages, Number(pageLink[1]) || safePage);
+  }
+  return { results, page: safePage, totalPages };
+}
+
+function normalizeArabicDigits(value: string): string {
+  return value
+    .replace(/[٠-٩]/g, digit => String("٠١٢٣٤٥٦٧٨٩".indexOf(digit)))
+    .replace(/[۰-۹]/g, digit => String("۰۱۲۳۴۵۶۷۸۹".indexOf(digit)));
+}
+
+function parseArabicToonsEpisodes(html: string, seriesUrl: string): any[] {
+  const $ = load(html);
+  const seriesPath = new URL(seriesUrl).pathname;
+  const seriesStem = seriesPath.replace(/-anime-streaming\.html$/i, "");
+  const episodes = new Map<string, any>();
+
+  $("a[href]").each((_, element) => {
+    const anchor = $(element);
+    let episodeUrl: URL;
+    try {
+      episodeUrl = new URL(anchor.attr("href") || "", seriesUrl);
+    } catch {
+      return;
+    }
+    if (!ARABIC_TOONS_HOSTS.has(episodeUrl.hostname.toLowerCase())) return;
+    const episodeId = episodeUrl.pathname.match(/-(\d+)\.html$/i)?.[1];
+    if (!episodeId || episodeUrl.pathname.replace(/-\d+\.html$/i, "") !== seriesStem) return;
+    if (episodes.has(episodeId)) return;
+
+    const image = anchor.find("img").first();
+    const label = normalizeArabicDigits([
+      anchor.attr("title") || "",
+      anchor.text(),
+      image.attr("alt") || "",
+    ].join(" "));
+    const labelledNumber = label.match(/(?:الحلقة|episode)\s*[:#-]?\s*(\d+(?:\.\d+)?)/i)?.[1];
+    const anyNumber = label.match(/(?:^|[^\d])(\d+(?:\.\d+)?)(?:$|[^\d])/)?.[1];
+    const parsedNumber = Number(labelledNumber || anyNumber);
+    const number = Number.isFinite(parsedNumber) && parsedNumber > 0
+      ? parsedNumber
+      : episodes.size + 1;
+
+    let thumbnail: string | undefined;
+    const rawThumbnail = image.attr("src") || image.attr("data-src") || "";
+    if (rawThumbnail) {
+      try {
+        const parsedThumbnail = new URL(rawThumbnail, AT_BASE);
+        if (ARABIC_TOONS_HOSTS.has(parsedThumbnail.hostname.toLowerCase())) {
+          thumbnail = parsedThumbnail.toString();
+        }
+      } catch { /* skip malformed thumbnails */ }
+    }
+
+    if (!episodeUrl.hash) episodeUrl.hash = "sets";
+    episodes.set(episodeId, {
+      number,
+      epId: episodeId,
+      url: episodeUrl.toString(),
+      ...(thumbnail ? { thumbnail } : {}),
+    });
+  });
+
+  return [...episodes.values()].sort((a, b) => a.number - b.number);
+}
 
 async function fetchStarCimaDubbed(path: string, forceRefresh = false): Promise<any> {
   const hit = _catalogCache.get(path);
@@ -280,18 +443,28 @@ async function fetchStarCimaDubbed(path: string, forceRefresh = false): Promise<
       },
       signal: AbortSignal.timeout(12000),
     });
-    if (!r.ok) {
-      return staleData;
+    if (r.ok) {
+      const data = await r.json();
+      if (!Array.isArray(data?.results)) throw new Error("invalid StarCima dubbed catalog response");
+      _catalogCache.set(path, { data, ts: Date.now() });
+      _dcSet(path, data); // حفظ على القرص للـ restart القادم
+      return data;
     }
-    const data = await r.json();
-    if (!Array.isArray(data?.results)) throw new Error("invalid StarCima dubbed catalog response");
-    _catalogCache.set(path, { data, ts: Date.now() });
-    _dcSet(path, data); // حفظ على القرص للـ restart القادم
-    return data;
+    logger.warn({ status: r.status, path }, "dubbed: StarCima catalog unavailable; trying Arabic-Toons");
   } catch (e) {
-    logger.warn({ err: e }, "dubbed: fetchStarCimaDubbed error");
-    return staleData;
+    logger.warn({ err: e, path }, "dubbed: fetchStarCimaDubbed error; trying Arabic-Toons");
   }
+
+  const page = path.match(/^\/api\/dubbed\/catalog\?page=(\d+)$/);
+  if (page) {
+    const fallback = await fetchArabicToonsCatalogPage(Number(page[1]));
+    if (fallback) {
+      _catalogCache.set(path, { data: fallback, ts: Date.now() });
+      _dcSet(path, fallback);
+      return fallback;
+    }
+  }
+  return staleData;
 }
 
 // ── GET /api/dubbed/catalog?page=N ──
@@ -337,7 +510,33 @@ router.get("/dubbed/episodes", async (req, res) => {
 
   const cacheKey = `/api/dubbed/episodes?series=${series}`;
   const hit = _catalogCache.get(cacheKey);
-  if (hit && Date.now() - hit.ts < CATALOG_TTL) {
+  const arabicToonsSeriesUrl = normalizeArabicToonsSeriesUrl(series);
+  if (
+    arabicToonsSeriesUrl &&
+    hit &&
+    Array.isArray(hit.data) &&
+    hit.data.length > 0 &&
+    Date.now() - hit.ts < CATALOG_TTL
+  ) {
+    res.setHeader("Cache-Control", "public, max-age=1800");
+    res.json({ episodes: hit.data });
+    return;
+  }
+
+  if (arabicToonsSeriesUrl) {
+    const html = await fetchArabicToonsHtml(arabicToonsSeriesUrl, `${AT_BASE}/cartoon.php`);
+    const arabicToonsEpisodes = html
+      ? parseArabicToonsEpisodes(html, arabicToonsSeriesUrl)
+      : [];
+    if (arabicToonsEpisodes.length) {
+      _catalogCache.set(cacheKey, { data: arabicToonsEpisodes, ts: Date.now() });
+      res.setHeader("Cache-Control", "public, max-age=1800");
+      res.json({ episodes: arabicToonsEpisodes });
+      return;
+    }
+  }
+
+  if (hit && Date.now() - hit.ts < CATALOG_TTL && !arabicToonsSeriesUrl) {
     res.setHeader("Cache-Control", "public, max-age=1800");
     res.json({ episodes: hit.data });
     return;
