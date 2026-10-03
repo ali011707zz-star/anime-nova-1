@@ -30,29 +30,29 @@ import {
 
 const { width: W, height: H } = Dimensions.get("window");
 const PLAYER_GLASS_SURFACE = {
-  backgroundColor: "rgba(248,248,252,0.42)",
-  borderColor: "rgba(255,255,255,0.54)",
+  backgroundColor: "rgba(255,255,255,0.10)",
+  borderColor: "rgba(255,255,255,0.16)",
   shadowColor: "transparent",
   shadowOpacity: 0,
   shadowRadius: 0,
   elevation: 0,
 };
 const PLAYER_SELECTED_GLASS_SURFACE = {
-  backgroundColor: "rgba(167,139,250,0.36)",
-  borderColor: "rgba(216,180,254,0.68)",
+  backgroundColor: "rgba(139,92,246,0.28)",
+  borderColor: "rgba(167,139,250,0.50)",
   shadowColor: "transparent",
   shadowOpacity: 0,
   shadowRadius: 0,
   elevation: 0,
 };
 const PLAYER_DANGER_GLASS_SURFACE = {
-  backgroundColor: "rgba(239,68,68,0.20)",
-  borderColor: "rgba(252,165,165,0.48)",
+  backgroundColor: "rgba(239,68,68,0.14)",
+  borderColor: "rgba(239,68,68,0.30)",
 };
-const PLAYER_CONTROL_ICON = "rgba(18,20,26,0.94)";
-const PLAYER_ACTIVE_ICON = "#5B3C9A";
-const PLAYER_MUTED_ICON = "#B42332";
-const PLAYER_CONTROL_LABEL = "rgba(18,20,26,0.88)";
+const PLAYER_CONTROL_ICON = "rgba(255,255,255,0.90)";
+const PLAYER_ACTIVE_ICON = "#c4b5fd";
+const PLAYER_MUTED_ICON = "#fca5a5";
+const PLAYER_CONTROL_LABEL = "rgba(255,255,255,0.80)";
 // Keep the existing player controls in one place while making every control
 // visible to Android TV's D-pad focus engine.
 const Pressable = TvPressable;
@@ -3019,7 +3019,7 @@ function ExpoRiftPlayer({
             );
             const btnsBlock = nativeRTL ? (
               <View style={[s.topRightRow, tvMode && s.tvTopRightRow]}>
-                <Pressable onPress={handleBack} style={[s.topCloseBtn, tvMode && s.tvTopCloseBtn, playerControlSurface]} hitSlop={10}>
+                <Pressable onPress={handleBack} style={[s.topCloseBtn, tvMode && s.tvTopCloseBtn]} hitSlop={10}>
                   <Ionicons name="close" size={21} color="rgba(239,68,68,0.90)" />
                 </Pressable>
                 <Pressable onPress={togglePortrait} style={[s.topRotateBtn, tvMode && s.tvTopActionBtn, playerControlSurface, isPortrait && playerSelectedSurface]} hitSlop={10}>
@@ -3047,7 +3047,7 @@ function ExpoRiftPlayer({
                     color={isPortrait ? PLAYER_ACTIVE_ICON : PLAYER_CONTROL_ICON}
                   />
                  </Pressable>
-                <Pressable onPress={handleBack} style={[s.topCloseBtn, tvMode && s.tvTopCloseBtn, playerControlSurface]} hitSlop={10}>
+                <Pressable onPress={handleBack} style={[s.topCloseBtn, tvMode && s.tvTopCloseBtn]} hitSlop={10}>
                   <Ionicons name="close" size={21} color="rgba(239,68,68,0.90)" />
                 </Pressable>
               </View>
@@ -3070,14 +3070,14 @@ function ExpoRiftPlayer({
               <View style={s.centerPortraitRow}>
                 {/* زر التخطي للأمام — الأول في JSX → يظهر على اليمين في RTL */}
                 <View style={s.controlButtonSlot}>
-                  <Pressable onPress={() => seek(positionRef.current + 10)} style={[s.centerSeekBtn, tvMode && s.tvCenterSeekBtn, playerControlSurface]} hitSlop={14}>
+                  <Pressable onPress={() => seek(positionRef.current + 10)} style={[s.centerSeekBtn, tvMode && s.tvCenterSeekBtn]} hitSlop={14}>
                     <Ionicons name="play-forward" size={tvMode ? 30 : 24} color={PLAYER_CONTROL_ICON} />
                   </Pressable>
                   <Text style={[s.controlButtonLabel, { color: PLAYER_CONTROL_LABEL }]}>10</Text>
                 </View>
                 {/* زر المنتصف: play/pause/spinner */}
                 <View style={s.controlButtonSlot}>
-                  <Pressable hasTVPreferredFocus={tvMode} onPress={togglePlay} style={[s.centerPlayBtn, tvMode && s.tvCenterPlayBtn, playerControlSurface]} hitSlop={16}>
+                  <Pressable hasTVPreferredFocus={tvMode} onPress={togglePlay} style={[s.centerPlayBtn, tvMode && s.tvCenterPlayBtn]} hitSlop={16}>
                     {buffering && !error
                       ? <ActivityIndicator size={32} color={PLAYER_CONTROL_ICON} />
                       : <Ionicons
@@ -3089,7 +3089,7 @@ function ExpoRiftPlayer({
                 </View>
                 {/* زر الرجوع — الأخير في JSX → يظهر على اليسار في RTL */}
                 <View style={s.controlButtonSlot}>
-                  <Pressable onPress={() => seek(positionRef.current - 10)} style={[s.centerSeekBtn, tvMode && s.tvCenterSeekBtn, playerControlSurface]} hitSlop={14}>
+                  <Pressable onPress={() => seek(positionRef.current - 10)} style={[s.centerSeekBtn, tvMode && s.tvCenterSeekBtn]} hitSlop={14}>
                     <Ionicons name="play-back" size={tvMode ? 30 : 24} color={PLAYER_CONTROL_ICON} />
                   </Pressable>
                   <Text style={[s.controlButtonLabel, { color: PLAYER_CONTROL_LABEL }]}>10</Text>
@@ -3099,7 +3099,7 @@ function ExpoRiftPlayer({
               /* وضع أفقي: play/pause في المنتصف دائماً */
               <View style={s.centerLandscapeWrap}>
                 <View style={s.controlButtonSlot}>
-                  <Pressable hasTVPreferredFocus={tvMode} onPress={togglePlay} style={[s.centerPlayBtn, tvMode && s.tvCenterPlayBtn, playerControlSurface]} hitSlop={16}>
+                  <Pressable hasTVPreferredFocus={tvMode} onPress={togglePlay} style={[s.centerPlayBtn, tvMode && s.tvCenterPlayBtn]} hitSlop={16}>
                     {buffering && !error
                       ? <ActivityIndicator size={32} color={PLAYER_CONTROL_ICON} />
                       : <Ionicons
@@ -3203,7 +3203,11 @@ function ExpoRiftPlayer({
             })()}
 
             {/* ── صف أزرار التحكم السفلي ── */}
-            <View style={[s.bottomCtrlRow, tvMode && s.tvBottomCtrlRow]}>
+            <View style={[
+              s.bottomCtrlRow,
+              !tvMode && !isPortrait && s.bottomCtrlRowLandscape,
+              tvMode && s.tvBottomCtrlRow,
+            ]}>
 
               {/* يسار: قفل + ملء شاشة — نفس أزرار الهاتف، بحجم TV الحالي */}
              <View style={s.bottomSide}>
@@ -3239,24 +3243,28 @@ function ExpoRiftPlayer({
                </View>
 
               {/* وسط: تخطي + تشغيل (وضع أفقي فقط) — "10" خارج الدائرة للمحاذاة الصحيحة */}
-              <View style={[s.bottomCenter, tvMode && s.tvBottomCenter]}>
+              <View style={[
+                s.bottomCenter,
+                !tvMode && !isPortrait && s.bottomCenterLandscape,
+                tvMode && s.tvBottomCenter,
+              ]}>
                 {!isPortrait && (
                   <View style={s.controlButtonSlot}>
-                    <Pressable onPress={() => seek(positionRef.current + 10)} style={[s.seekCtrlBtn, tvMode && s.tvSeekCtrlBtn, playerControlSurface]} hitSlop={10}>
-                      <Ionicons name="play-forward" size={tvMode ? 24 : 17} color={PLAYER_CONTROL_ICON} />
+                    <Pressable onPress={() => seek(positionRef.current - 10)} style={[s.seekCtrlBtn, tvMode && s.tvSeekCtrlBtn, playerControlSurface]} hitSlop={10}>
+                      <Ionicons name="play-back" size={tvMode ? 24 : 17} color={PLAYER_CONTROL_ICON} />
                     </Pressable>
                     <Text style={[s.controlButtonLabel, { color: PLAYER_CONTROL_LABEL }]}>10</Text>
                   </View>
                 )}
                 <View style={s.controlButtonSlot}>
-                  <Pressable onPress={togglePlay} style={[s.bottomPlayBtn, tvMode && s.tvBottomPlayBtn, playerControlSurface]} hitSlop={10}>
+                  <Pressable onPress={togglePlay} style={[s.bottomPlayBtn, tvMode && s.tvBottomPlayBtn]} hitSlop={10}>
                     <Ionicons name={isPlaying ? "pause" : "play"} size={tvMode ? 30 : 23} color={PLAYER_CONTROL_ICON} style={isPlaying ? undefined : { transform: [{ translateX: 2 }] }} />
                   </Pressable>
                 </View>
                 {!isPortrait && (
                   <View style={s.controlButtonSlot}>
-                    <Pressable onPress={() => seek(positionRef.current - 10)} style={[s.seekCtrlBtn, tvMode && s.tvSeekCtrlBtn, playerControlSurface]} hitSlop={10}>
-                      <Ionicons name="play-back" size={tvMode ? 24 : 17} color={PLAYER_CONTROL_ICON} />
+                    <Pressable onPress={() => seek(positionRef.current + 10)} style={[s.seekCtrlBtn, tvMode && s.tvSeekCtrlBtn, playerControlSurface]} hitSlop={10}>
+                      <Ionicons name="play-forward" size={tvMode ? 24 : 17} color={PLAYER_CONTROL_ICON} />
                     </Pressable>
                     <Text style={[s.controlButtonLabel, { color: PLAYER_CONTROL_LABEL }]}>10</Text>
                   </View>
@@ -4047,9 +4055,17 @@ const s = StyleSheet.create({
     flexDirection: "row", alignItems: "center", justifyContent: "space-between",
     marginTop: 4, marginBottom: 2,
   },
+  bottomCtrlRowLandscape: { position: "relative", minHeight: 58 },
   tvBottomCtrlRow: { marginTop: 8, marginBottom: 4 },
   bottomSide: { flex: 1, flexDirection: "row", alignItems: "center", gap: 8 },
   bottomCenter: { flexDirection: "row", alignItems: "center", gap: 14 },
+  bottomCenterLandscape: {
+    position: "absolute", top: "50%" as any, left: 0, right: 0,
+    transform: [{ translateY: -29 }],
+    width: 190, alignSelf: "center",
+    flexDirection: "row", alignItems: "center", justifyContent: "space-between",
+    zIndex: 2,
+  },
   tvBottomCenter: { gap: 24 },
 
   /* ── Seek buttons (in bottom row, landscape) ── */
