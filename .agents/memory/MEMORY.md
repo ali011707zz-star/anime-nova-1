@@ -101,7 +101,7 @@
 - [VPS source config and Supabase drift](vps-source-config-supabase-drift.md) — provider availability can be healthy while config hides sources; production Supabase schema differs from migration expectations.
 - [Push notification storage fallback](push-notifications-vps.md) — push route must be mounted explicitly; when Supabase lacks mobile_push_tokens, the VPS PostgreSQL fallback can keep registration working.
 - [Expo push credentials](expo-push-credentials.md) — Expo ticket `InvalidCredentials` points to the EAS project's FCM V1 sender credentials, not Android notification permissions.
-- [Closed push routing](closed-push-routing.md) — register the phone token after auth restore; keep user_id for targeted comment replies while episode pushes remain global.
+- [Global episode push routing](episode-push-routing.md) — latest-feed alerts include the poster and reach every active device; keep episode broadcasts separate from user-targeted pushes.
 - [Mobile anti-tamper boundary](mobile-anti-tamper-boundary.md) — release/package headers can fail closed for sensitive API paths, but only Google Play Integrity can authenticate an unmodified APK.
 - [Nginx backup placement](nginx-backup-placement.md) — live Nginx backups must stay outside sites-enabled; files there are parsed as configs and can break reload with duplicate upstreams.
 - [Start.io rewarded ads](startio-rewarded-ads.md) — Android uses Start.io app 207356648 via the Nitro SDK; native builds require New Architecture and must happen outside Replit.

@@ -150,8 +150,8 @@ export async function notifyNewEpisode(
     telegramSent = await sendTelegramEpisodeOnce(anilistId, ep, caption, poster || undefined);
   }
 
-  if (!pushResult?.complete || !telegramSent) {
-    console.warn(`[scheduler] episode remains pending push=${pushResult?.pending ?? "error"} failed=${pushResult?.failed ?? "error"} telegram=${telegramSent} title=${title} episode=${ep}`);
+  if (!pushResult?.queueReady || !telegramSent) {
+    console.warn(`[scheduler] episode remains pending queue=${pushResult?.queueReady ?? false} push=${pushResult?.pending ?? "error"} failed=${pushResult?.failed ?? "error"} telegram=${telegramSent} title=${title} episode=${ep}`);
     return false;
   }
 
@@ -536,8 +536,8 @@ async function runSchedulerCycleInner(): Promise<void> {
       ? await sendTelegramEpisodeOnce(anilistId, ep, caption, poster ?? undefined)
       : true;
 
-    if (!pushResult?.complete || !telegramSent) {
-      console.warn(`[scheduler] episode remains pending push=${pushResult?.pending ?? "error"} failed=${pushResult?.failed ?? "error"} telegram=${telegramSent} title=${title} episode=${ep}`);
+    if (!pushResult?.queueReady || !telegramSent) {
+      console.warn(`[scheduler] episode remains pending queue=${pushResult?.queueReady ?? false} push=${pushResult?.pending ?? "error"} failed=${pushResult?.failed ?? "error"} telegram=${telegramSent} title=${title} episode=${ep}`);
       if (sent < schedules.length) await new Promise(r => setTimeout(r, 1_500));
       continue;
     }

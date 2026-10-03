@@ -43,6 +43,8 @@ export type PushDeliverySummary = {
   delivered: number;
   pending: number;
   failed: number;
+  /** True when every active target has a durable delivery row (delivery may still be pending). */
+  queueReady: boolean;
   complete: boolean;
 };
 
@@ -490,7 +492,7 @@ export async function sendMobilePushDetailed(input: {
     }
   } catch (error) {
     console.error(`[push] token database query failed event=${eventKey}:`, error instanceof Error ? error.message : String(error));
-    return { eventKey, targets: 0, delivered: 0, pending: 1, failed: 0, complete: false };
+    return { eventKey, targets: 0, delivered: 0, pending: 1, failed: 0, queueReady: false, complete: false };
   }
 
   const validRows = rows.filter((row) => validToken(row.token));
@@ -501,7 +503,7 @@ export async function sendMobilePushDetailed(input: {
   }
   if (!validRows.length) {
     console.info(`[push] no active target devices event=${eventKey}`);
-    return { eventKey, targets: 0, delivered: 0, pending: 0, failed: 0, complete: true };
+    return { eventKey, targets: 0, delivered: 0, pending: 0, failed: 0, queueReady: true, complete: true };
   }
 
   const payload = {
@@ -538,7 +540,7 @@ export async function sendMobilePushDetailed(input: {
     }
   } catch (error) {
     console.error(`[push] delivery queue/database failed event=${eventKey}:`, error instanceof Error ? error.message : String(error));
-    return { eventKey, targets: validRows.length, delivered: 0, pending: validRows.length, failed: 0, complete: false };
+    return { eventKey, targets: validRows.length, delivered: 0, pending: validRows.length, failed: 0, queueReady: false, complete: false };
   }
 
   console.info(`[push] database queue ready event=${eventKey} devices=${validRows.length}`);
@@ -564,11 +566,12 @@ export async function sendMobilePushDetailed(input: {
       delivered,
       pending,
       failed,
+      queueReady: true,
       complete: pending === 0 && failed === 0 && deliveries.length >= validRows.length,
     };
   } catch (error) {
     console.error(`[push] delivery status query failed event=${eventKey}:`, error instanceof Error ? error.message : String(error));
-    return { eventKey, targets: validRows.length, delivered: 0, pending: validRows.length, failed: 0, complete: false };
+    return { eventKey, targets: validRows.length, delivered: 0, pending: validRows.length, failed: 0, queueReady: true, complete: false };
   }
 }
 
@@ -585,8 +588,8 @@ export async function sendNewEpisodePushDetailed(input: {
 }): Promise<PushDeliverySummary> {
   // Episode alerts are broadcasts: leave userId unset so every active device gets them.
   return sendMobilePushDetailed({
-    title: "حلقة جديدة وصلت! 🔥",
-    body: `${input.title} — الحلقة ${input.episode} جاهزة للمشاهدة الآن. افتح Anime NOVA واستمتع 🎬`,
+    title: "🌸 حلقة جديدة وصلت!",
+    body: `✨ ${input.title}\n🎬 الحلقة ${input.episode}`,
     posterUrl: input.posterUrl,
     eventKey: `episode:${input.animeId}:${input.episode}`,
     data: {
