@@ -173,6 +173,8 @@ type Props = {
   episodeTitle?: string;
   /** يُستدعى عند فشل جميع المصادر المتاحة */
   onError?: () => void;
+  /** Use anime-specific buffering and seek handling; other catalogs stay unchanged. */
+  animePlayback?: boolean;
 };
 
 /**
@@ -438,6 +440,7 @@ function ExpoRiftPlayer({
   subCues,
   subEnabled = false,
   autoPlayNext = true,
+  animePlayback = false,
   /* Unknown totals must be fail-closed. A synthetic 999 allowed automatic
      and manual navigation into episodes that do not exist. */
   totalEps = 0,
@@ -880,12 +883,12 @@ function ExpoRiftPlayer({
           المُشغَّل في الذاكرة → يُضاعف استهلاك الذاكرة. */
     try {
       (p as any).bufferOptions = {
-         preferredForwardBufferDuration: 8,  // iOS: هامش أمامي مع بدء سريع
-         waitsToMinimizeStalling: false,    // ابدأ بعد أول buffer صالح ثم عالج التقطيع
-         minBufferMs: 3000,                 // Android: لا يعيد التشغيل بعد كل segment بطيء
+         preferredForwardBufferDuration: animePlayback ? 16 : 8, // iOS: هامش إضافي لمصادر الأنمي
+         waitsToMinimizeStalling: animePlayback, // الأنمي ينتظر buffer أنسب لتقليل التوقفات
+         minBufferMs: animePlayback ? 5000 : 3000, // Android: احتفظ بهامش أطول لمصادر الأنمي
          maxBufferMs: 24000,                // Android: هامش كافٍ للـ CDN مع تجنب OOM
          bufferForPlaybackMs: 1000,         // Android: أول تشغيل بعد buffer صغير آمن
-         bufferForPlaybackAfterRebufferMs: 3500,
+         bufferForPlaybackAfterRebufferMs: animePlayback ? 3000 : 3500,
         backBufferDurationMs: 3000,         // Android: ذاكرة خلفية صغيرة
       };
     } catch {}
@@ -1152,13 +1155,27 @@ function ExpoRiftPlayer({
         }
         else if (e.status === "error") {
           const manualSeek = pendingSeekRef.current;
-          if (manualSeek && Date.now() < manualSeek.expiresAt) {
+          if (
+            manualSeek &&
+            Date.now() < manualSeek.expiresAt &&
+            !(animePlayback && seekRecoveryRef.current)
+          ) {
             setBuffering(true);
             if (!manualSeekErrorTimeoutRef.current) {
               manualSeekErrorTimeoutRef.current = setTimeout(() => {
                 manualSeekErrorTimeoutRef.current = null;
                 if (!aliveRef.current || isStale() || pendingSeekRef.current !== manualSeek) return;
                 if ((player as any).status === "error") {
+                  if (animePlayback && !seekRecoveryRef.current) {
+                    beginSeekRecovery(manualSeek.target);
+                    const recovery = seekRecoveryRef.current;
+                    if (recovery) {
+                      recovery.retries = 1;
+                      recovery.restorePending = true;
+                    }
+                    setSourceReloadNonce(value => value + 1);
+                    return;
+                  }
                   pendingSeekRef.current = null;
                   setPostSeekPct(null);
                   setError(true);
@@ -1215,7 +1232,7 @@ function ExpoRiftPlayer({
          كان يُزيل الحماية من الـ black-screen بينما المشغّل لا يزال في loading.
          الـ timeout يُلغى فقط في: Master cleanup (unmount) أو statusChange نفسه. */
     };
-  }, [player, initialPosition, srcIdx, beginSeekRecovery]); // eslint-disable-line
+  }, [player, initialPosition, srcIdx, beginSeekRecovery, animePlayback]); // eslint-disable-line
   /* ✅ أُزيل playableSources من deps — كان يُعيد تسجيل الـ listeners عند كل وصول
      مصدر جديد مما يُلغي loadTimeoutRef الجاري ويُعطّل حماية الـ black-screen. */
 
@@ -1354,6 +1371,11 @@ function ExpoRiftPlayer({
           if (reachedTarget || resumedPastTarget) {
             pendingSeekRef.current = null;
             setPostSeekPct(null);
+            if (seekRecoveryRef.current?.target === pendingSeek.target) {
+              if (seekRecoveryTimerRef.current) clearTimeout(seekRecoveryTimerRef.current);
+              seekRecoveryTimerRef.current = null;
+              seekRecoveryRef.current = null;
+            }
             if (postSeekTimer.current) {
               clearTimeout(postSeekTimer.current);
               postSeekTimer.current = null;
@@ -2071,14 +2093,26 @@ function ExpoRiftPlayer({
       clearTimeout(postSeekTimer.current);
       postSeekTimer.current = null;
     }
-    pendingSeekRef.current = { target, expiresAt: Date.now() + 8_000 };
+    pendingSeekRef.current = { target, expiresAt: Date.now() + (animePlayback ? 15_000 : 8_000) };
     setPostSeekPct(target / maxDuration);
     setPosition(target);
     positionRef.current = target;
     setIsEnded(false);
     isEndedRef.current = false;
+    if (animePlayback) beginSeekRecovery(target);
     try {
-      player.currentTime = target;
+      const seekPlayer = player as typeof player & {
+        seekTo?: (seconds: number, toleranceBefore?: number, toleranceAfter?: number) => void;
+      };
+      if (animePlayback && typeof seekPlayer.seekTo === "function") {
+        try {
+          seekPlayer.seekTo(target, 1, 1);
+        } catch {
+          player.currentTime = target;
+        }
+      } else {
+        player.currentTime = target;
+      }
     } catch {
       pendingSeekRef.current = null;
       setPostSeekPct(null);
@@ -2089,7 +2123,7 @@ function ExpoRiftPlayer({
        "stall" زائف بعد ثوانٍ قليلة من القفز رغم أن التشغيل طبيعي تماماً —
        هذا هو سبب التجمّد الظاهري بعد التقديم/الإرجاع الذي أبلغ عنه المستخدم. */
     stallRef.current = { lastPos: target, lastAt: Date.now() };
-  }, [cancelSeekRecovery, player]);
+  }, [animePlayback, beginSeekRecovery, cancelSeekRecovery, player]);
   const seek = useCallback((secs: number) => {
     fadeIn();
     applySeek(secs);

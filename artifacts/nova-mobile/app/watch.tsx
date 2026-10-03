@@ -1857,6 +1857,7 @@ export default function WatchScreen() {
         key={`${anime}-${epNum}`}
         sources={playerSources}
         initialSourceIndex={startIdx}
+        animePlayback
         title={displayTitle}
         episode={epNum}
         anilistId={sourceAnimeId ? parseInt(sourceAnimeId) : undefined}

@@ -131,6 +131,7 @@ import { existsSync as _dcExists, readFileSync as _dcRead, writeFileSync as _dcW
 import { join as _dcJoin } from "node:path";
 
 const _DC_DIR = "/opt/nova-cache/dubbed";
+const DUBBED_DISK_MAX_STALE_MS = 30 * 24 * 60 * 60_000;
 try { if (!_dcExists(_DC_DIR)) _dcMkdir(_DC_DIR, { recursive: true }); } catch {}
 
 function _dcGet(key: string): any | null {
@@ -138,7 +139,8 @@ function _dcGet(key: string): any | null {
     const fp = _dcJoin(_DC_DIR, key.replace(/[^a-z0-9_-]/gi,"_") + ".json");
     if (!_dcExists(fp)) return null;
     const r = JSON.parse(_dcRead(fp, "utf8"));
-    if (r._ts && Date.now() - r._ts > CATALOG_TTL * 2) return null; // 2× TTL grace
+    if (!Number.isFinite(r._ts) || Date.now() - r._ts > DUBBED_DISK_MAX_STALE_MS) return null;
+    if (!Array.isArray(r.data?.results)) return null;
     return r.data;
   } catch { return null; }
 }
@@ -261,8 +263,10 @@ async function fetchStarCimaDubbed(path: string, forceRefresh = false): Promise<
   const hit = _catalogCache.get(path);
   if (!forceRefresh && hit && Date.now() - hit.ts < CATALOG_TTL) return hit.data;
 
-  // جرّب الـ disk cache أولاً (يبقى بعد restart)
-  const diskHit = forceRefresh ? null : _dcGet(path);
+  // احتفظ بآخر كتالوج صالح كخطة رجوع حتى لو انتهت مدة حداثته القصيرة.
+  // تعطل المصدر الخارجي لا يجب أن يحول كتالوج الهاتف إلى شاشة فارغة.
+  const diskHit = _dcGet(path);
+  const staleData = diskHit ?? (Array.isArray(hit?.data?.results) ? hit.data : null);
   if (!forceRefresh && diskHit) {
     _catalogCache.set(path, { data: diskHit, ts: Date.now() - CATALOG_TTL + 10 * 60_000 }); // يُجدَّد خلال 10 دقائق
   }
@@ -277,19 +281,16 @@ async function fetchStarCimaDubbed(path: string, forceRefresh = false): Promise<
       signal: AbortSignal.timeout(12000),
     });
     if (!r.ok) {
-      // إذا فشل الشبكة، ارجع للـ disk cache إن وُجد
-      if (diskHit) return diskHit;
-      return null;
+      return staleData;
     }
     const data = await r.json();
+    if (!Array.isArray(data?.results)) throw new Error("invalid StarCima dubbed catalog response");
     _catalogCache.set(path, { data, ts: Date.now() });
     _dcSet(path, data); // حفظ على القرص للـ restart القادم
     return data;
   } catch (e) {
     logger.warn({ err: e }, "dubbed: fetchStarCimaDubbed error");
-    // عند فشل الشبكة (CF block / timeout)، ارجع للـ disk cache إن وُجد
-    if (diskHit) return diskHit;
-    return null;
+    return staleData;
   }
 }
 

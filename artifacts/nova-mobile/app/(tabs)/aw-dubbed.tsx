@@ -5,6 +5,7 @@
  *   • كرتون   — كرتون مدبلج عربي (arabic-toons)
  */
 import React, { useState, useEffect, useCallback, useRef } from "react";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import {
   View, Text, Pressable, TextInput, FlatList, Image,
   ActivityIndicator, StyleSheet, Platform, Animated, Easing,
@@ -35,6 +36,8 @@ interface DubbedSeries  {
 }
 
 type TabKey = "animation" | "cartoon";
+const CARTOON_CATALOG_CACHE_KEY = "nova:cartoon-catalog:v1";
+const CARTOON_CATALOG_CACHE_LIMIT = 60;
 
 function normalizeAwSeries(item: any): AwSeries | null {
   if (!item || typeof item !== "object") return null;
@@ -251,32 +254,93 @@ function CartoonList({ searchQ }: { searchQ: string }) {
   const [series,      setSeries]      = useState<DubbedSeries[]>([]);
   const [page,        setPage]        = useState(1);
   const [totalPages,  setTotalPages]  = useState(1);
-  const [loading,     setLoading]     = useState(false);
+  const [loading,     setLoading]     = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [loadError,   setLoadError]   = useState(false);
   const [searchRes,   setSearchRes]   = useState<DubbedSeries[]>([]);
   const [searchLoad,  setSearchLoad]  = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const seriesRef = useRef<DubbedSeries[]>([]);
+  const catalogCtrlRef = useRef<AbortController | null>(null);
+  const loadingMoreRef = useRef(false);
+  const [cacheReady, setCacheReady] = useState(false);
 
   const loadPage = useCallback(async (p: number, reset = false) => {
-    if (reset) setLoading(true); else setLoadingMore(true);
-    if (reset) setLoadError(false);
+    if (!reset && loadingMoreRef.current) return;
+    if (reset) {
+      catalogCtrlRef.current?.abort();
+      loadingMoreRef.current = false;
+      setLoadingMore(false);
+      setLoadError(false);
+      if (!seriesRef.current.length) setLoading(true);
+    } else {
+      loadingMoreRef.current = true;
+      setLoadingMore(true);
+    }
+    const ctrl = new AbortController();
+    catalogCtrlRef.current = ctrl;
     try {
-      const r = await fetch(`${BASE}/api/dubbed/catalog?page=${p}`);
+      const r = await fetch(`${BASE}/api/dubbed/catalog?page=${p}`, { signal: ctrl.signal });
       if (!r.ok) throw new Error(`catalog ${r.status}`);
       const d = await r.json();
       if (!Array.isArray(d.results)) throw new Error("invalid catalog response");
-      setSeries(prev => reset ? (d.results || []) : [...prev, ...(d.results || [])]);
+      if (ctrl.signal.aborted) return;
+      const next = reset ? d.results : [...seriesRef.current, ...d.results];
+      seriesRef.current = next;
+      setSeries(next);
       setTotalPages(d.totalPages || 1);
       setPage(p);
-    } catch {
-      if (reset) setLoadError(true);
+      if (reset) {
+        void AsyncStorage.setItem(
+          CARTOON_CATALOG_CACHE_KEY,
+          JSON.stringify(next.slice(0, CARTOON_CATALOG_CACHE_LIMIT)),
+        ).catch(() => {});
+      }
+    } catch (error: any) {
+      if (error?.name !== "AbortError" && reset && !seriesRef.current.length) setLoadError(true);
+    } finally {
+      if (catalogCtrlRef.current === ctrl) {
+        catalogCtrlRef.current = null;
+        if (reset) setLoading(false);
+        else {
+          loadingMoreRef.current = false;
+          setLoadingMore(false);
+        }
+      }
     }
-    setLoading(false);
-    setLoadingMore(false);
   }, [BASE]);
 
-  useEffect(() => { loadPage(1, true); }, [loadPage]);
+  useEffect(() => {
+    let active = true;
+    AsyncStorage.getItem(CARTOON_CATALOG_CACHE_KEY)
+      .then(raw => {
+        if (!active || !raw) return;
+        const parsed = JSON.parse(raw);
+        if (!Array.isArray(parsed)) return;
+        const cached = parsed.filter((item: any) =>
+          item && typeof item === "object" &&
+          typeof item.title === "string" &&
+          Array.isArray(item.seasons),
+        ) as DubbedSeries[];
+        if (cached.length) {
+          seriesRef.current = cached;
+          setSeries(cached);
+          setLoadError(false);
+          setLoading(false);
+        }
+      })
+      .catch(() => {})
+      .finally(() => { if (active) setCacheReady(true); });
+    return () => {
+      active = false;
+      catalogCtrlRef.current?.abort();
+      if (timer.current) clearTimeout(timer.current);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (cacheReady) void loadPage(1, true);
+  }, [cacheReady, loadPage]);
 
   useEffect(() => {
     const q = searchQ.trim();
