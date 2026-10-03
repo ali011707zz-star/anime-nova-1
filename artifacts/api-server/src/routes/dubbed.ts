@@ -282,17 +282,10 @@ async function fetchArabicToonsHtml(url: string, referer: string): Promise<strin
   try {
     const parsed = new URL(url);
     if (parsed.protocol !== "https:" || !ARABIC_TOONS_HOSTS.has(parsed.hostname.toLowerCase())) return null;
-    const response = await fetch(url, {
-      headers: {
-        "User-Agent": BROWSER_UA,
-        Referer: referer,
-        Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "Accept-Language": "ar,en-US;q=0.9,en;q=0.8",
-      },
-      signal: AbortSignal.timeout(10000),
-    });
-    if (!response.ok) return null;
-    const html = await response.text();
+    // VPS direct egress can be blocked by Cloudflare. Use the existing
+    // curl_cffi proxy first, then cfGet's direct-fetch fallbacks.
+    const html = await cfGet(url, referer, 18000);
+    if (!html) return null;
     return html.length > 500 && !isCfBlock(html) ? html : null;
   } catch {
     return null;
