@@ -7234,8 +7234,14 @@ function buildStardimaSources(post: any): UnifiedSource[] {
 // ── تغليف روابط CDN المباشرة للموبايل عبر VPS proxy ──────────────────────
 // CDN كثيرة تحجب IPs الموبايل بدون Referer صحيح من الخادم.
 // تُستدعى فقط إذا كان الطلب من تطبيق الموبايل (X-Nova-Client header).
-function wrapForMobile(s: { site?: string; directUrl?: string; url?: string; directType?: string; isEmbed?: boolean; headers?: Record<string,string> }) {
-  if (s.isEmbed) return s;
+function stripKawaiiRawUrl<T extends { site?: string; rawUrl?: string }>(source: T): T {
+  if (source.site !== "kawaii") return source;
+  const { rawUrl: _rawUrl, ...proxyOnlySource } = source;
+  return proxyOnlySource as T;
+}
+
+function wrapForMobile(s: { site?: string; directUrl?: string; url?: string; rawUrl?: string; directType?: string; isEmbed?: boolean; headers?: Record<string,string> }) {
+  if (s.isEmbed) return stripKawaiiRawUrl(s);
   // AniNeko and Kawaii both need the full VPS HLS proxy. A manifest-only
   // proxy leaves child playlists/segments on the device, where the required
   // Referer/Origin is lost and playback fails after the first request.
@@ -7262,7 +7268,7 @@ function wrapForMobile(s: { site?: string; directUrl?: string; url?: string; dir
     const protectedUrl = rawUrl.startsWith("/api/anime/")
       ? encryptProxyUrl(rawUrl)
       : rawUrl;
-    return { ...s, directUrl: protectedUrl, url: protectedUrl, corsOk: false };
+    return stripKawaiiRawUrl({ ...s, directUrl: protectedUrl, url: protectedUrl, corsOk: false });
   }
   // Shirayuki already rewrites child playlists and segments. Wrapping its
   // URL through Nova again creates a proxy-to-proxy request.
@@ -7276,7 +7282,7 @@ function wrapForMobile(s: { site?: string; directUrl?: string; url?: string; dir
   const isHls =
     String(s.directType || "").toLowerCase() === "hls" ||
     /\.m3u8|hls-proxy|\/(?:hls|playlist)(?:\/|$)/i.test(rawUrl);
-  const isMp4 = rawUrl.includes(".mp4") || s.directType === "mp4";
+  const isMp4 = s.site === "kawaii" || rawUrl.includes(".mp4") || s.directType === "mp4";
   let proxied = rawUrl;
   if (isHls) {
     proxied = ref
@@ -7287,7 +7293,7 @@ function wrapForMobile(s: { site?: string; directUrl?: string; url?: string; dir
   } else {
     return s; // MP4 بدون Referer — اتركه للموبايل يتعامل معه مباشرة
   }
-  return { ...s, directUrl: proxied, url: proxied, directType: isHls ? "hls" : s.directType };
+  return stripKawaiiRawUrl({ ...s, directUrl: proxied, url: proxied, directType: isHls ? "hls" : s.directType });
 }
 
 
