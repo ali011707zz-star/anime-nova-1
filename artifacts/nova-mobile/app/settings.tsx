@@ -135,7 +135,7 @@ function ReportSheet({ open, onClose }: { open: boolean; onClose: () => void }) 
             <Ionicons name="close" size={16} color="rgba(255,255,255,0.5)" />
           </Pressable>
           <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-            <View style={ts.reportIconWrap}>
+            <View style={[ts.reportIconWrap, { backgroundColor: colors.accentSurface }]}>
               <Ionicons name="alert-circle" size={16} color="#c4b5fd" />
             </View>
             <Text style={ts.reportTitle}>التواصل معنا</Text>
@@ -951,6 +951,7 @@ function ProfileSheet({ open, onClose, user, onUpdate, onLogout, onLinkTv }: {
   onLogout: () => void;
   onLinkTv: () => void;
 }) {
+  const colors = useColors();
   const base = getBaseUrl();
   const [displayName, setDisplayName] = useState("");
   const [loading, setLoading] = useState(false);
@@ -1080,19 +1081,19 @@ function ProfileSheet({ open, onClose, user, onUpdate, onLogout, onLinkTv }: {
 
   return (
     <Modal transparent animationType="slide" onRequestClose={onClose} statusBarTranslucent>
-      <Pressable style={ts.overlay} onPress={onClose} />
-      <View style={[ts.bottomSheet, { maxHeight: "94%", paddingBottom: 0 }]}>
-          <View style={[ts.sheetAccentBar, { backgroundColor: "#7C3AED" }]} />
-          <View style={ts.sheetHandle} />
+      <Pressable style={[ts.overlay, { backgroundColor: colors.overlay }]} onPress={onClose} />
+      <View style={[ts.bottomSheet, { maxHeight: "94%", paddingBottom: 0, backgroundColor: colors.surface, borderColor: colors.border }]}>
+          <View style={[ts.sheetAccentBar, { backgroundColor: colors.accent }]} />
+          <View style={[ts.sheetHandle, { backgroundColor: colors.border }]} />
 
           {/* Header */}
           <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 20, paddingTop: 4, paddingBottom: 8 }}>
-            <Pressable onPress={onClose} style={ts.reportCloseBtn}>
-              <Ionicons name="close" size={16} color="rgba(255,255,255,0.5)" />
+            <Pressable onPress={onClose} style={[ts.reportCloseBtn, { backgroundColor: colors.input, borderColor: colors.border }]}>
+              <Ionicons name="close" size={16} color={colors.textSecondary} />
             </Pressable>
-            <Text style={{ fontSize: 15, fontFamily: "Cairo_800ExtraBold", color: "#fff" }}>الملف الشخصي</Text>
+            <Text style={{ fontSize: 15, fontFamily: "Cairo_800ExtraBold", color: colors.textPrimary }}>الملف الشخصي</Text>
             <View style={ts.reportIconWrap}>
-              <Ionicons name="person" size={15} color="#c4b5fd" />
+              <Ionicons name="person" size={15} color={colors.accent} />
             </View>
           </View>
 
@@ -1110,60 +1111,60 @@ function ProfileSheet({ open, onClose, user, onUpdate, onLogout, onLinkTv }: {
               ) : (
                 <Text style={{ fontSize: 32, fontFamily: "Cairo_800ExtraBold", color: avatarColor }}>{letter}</Text>
               )}
-              <View style={{ position: "absolute", right: -5, bottom: -5, width: 26, height: 26, borderRadius: 13, backgroundColor: "#7C3AED", borderWidth: 2, borderColor: "#0d0b17", alignItems: "center", justifyContent: "center" }}>
+              <View style={{ position: "absolute", right: -5, bottom: -5, width: 26, height: 26, borderRadius: 13, backgroundColor: colors.accent, borderWidth: 2, borderColor: colors.surface, alignItems: "center", justifyContent: "center" }}>
                 {uploadingImg ? <ActivityIndicator size="small" color="#fff" /> : <Ionicons name="camera" size={13} color="#fff" />}
               </View>
             </Pressable>
             <View style={{ flexDirection: "row", gap: 8, marginBottom: 8 }}>
-              <Pressable onPress={handlePickImage} disabled={uploadingImg} style={{ flexDirection: "row", alignItems: "center", gap: 6, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 8, backgroundColor: "rgba(139,92,246,0.16)", borderWidth: 1, borderColor: "rgba(139,92,246,0.32)", opacity: uploadingImg ? 0.55 : 1 }}>
-                <Ionicons name="image-outline" size={14} color="#c4b5fd" />
-                <Text style={{ fontSize: 11, fontFamily: "Cairo_700Bold", color: "#c4b5fd" }}>تغيير الصورة</Text>
+              <Pressable onPress={handlePickImage} disabled={uploadingImg} style={{ flexDirection: "row", alignItems: "center", gap: 6, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 8, backgroundColor: colors.accentSurface, borderWidth: 1, borderColor: colors.accentBorder, opacity: uploadingImg ? 0.55 : 1 }}>
+                <Ionicons name="image-outline" size={14} color={colors.accent} />
+                <Text style={{ fontSize: 11, fontFamily: "Cairo_700Bold", color: colors.accent }}>تغيير الصورة</Text>
               </Pressable>
               {user.profileImageUrl ? (
-                <Pressable onPress={handleRemoveImage} disabled={uploadingImg} style={{ flexDirection: "row", alignItems: "center", gap: 6, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 8, backgroundColor: "rgba(239,68,68,0.10)", borderWidth: 1, borderColor: "rgba(239,68,68,0.25)", opacity: uploadingImg ? 0.55 : 1 }}>
-                  <Ionicons name="trash-outline" size={14} color="#f87171" />
-                  <Text style={{ fontSize: 11, fontFamily: "Cairo_700Bold", color: "#f87171" }}>إزالة</Text>
+                <Pressable onPress={handleRemoveImage} disabled={uploadingImg} style={{ flexDirection: "row", alignItems: "center", gap: 6, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 8, backgroundColor: colors.destructiveSurface, borderWidth: 1, borderColor: colors.destructiveBorder, opacity: uploadingImg ? 0.55 : 1 }}>
+                  <Ionicons name="trash-outline" size={14} color={colors.destructive} />
+                  <Text style={{ fontSize: 11, fontFamily: "Cairo_700Bold", color: colors.destructive }}>إزالة</Text>
                 </Pressable>
               ) : null}
             </View>
-            <Text style={{ fontSize: 14, fontFamily: "Cairo_700Bold", color: "rgba(255,255,255,0.85)" }}>{user.displayName}</Text>
-            <Text style={{ fontSize: 11, fontFamily: "Cairo_400Regular", color: "rgba(255,255,255,0.30)" }}>{user.email}</Text>
+            <Text style={{ fontSize: 14, fontFamily: "Cairo_700Bold", color: colors.textPrimary }}>{user.displayName}</Text>
+            <Text style={{ fontSize: 11, fontFamily: "Cairo_400Regular", color: colors.textMuted }}>{user.email}</Text>
           </View>
 
           <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 20, paddingBottom: 48 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
 
             {/* Error / Success */}
             {!!error && (
-              <View style={{ flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: "rgba(239,68,68,0.10)", borderWidth: 1, borderColor: "rgba(239,68,68,0.25)", borderRadius: 14, paddingHorizontal: 14, paddingVertical: 10, marginBottom: 14 }}>
-                <Ionicons name="alert-circle" size={14} color="#f87171" />
-                <Text style={{ fontSize: 12, fontFamily: "Cairo_400Regular", color: "#fca5a5", flex: 1, textAlign: "right" }}>{error}</Text>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: colors.destructiveSurface, borderWidth: 1, borderColor: colors.destructiveBorder, borderRadius: 14, paddingHorizontal: 14, paddingVertical: 10, marginBottom: 14 }}>
+                <Ionicons name="alert-circle" size={14} color={colors.destructive} />
+                <Text style={{ fontSize: 12, fontFamily: "Cairo_400Regular", color: colors.destructive, flex: 1, textAlign: "right" }}>{error}</Text>
               </View>
             )}
             {!!success && (
-              <View style={{ flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: "rgba(16,185,129,0.10)", borderWidth: 1, borderColor: "rgba(16,185,129,0.25)", borderRadius: 14, paddingHorizontal: 14, paddingVertical: 10, marginBottom: 14 }}>
-                <Ionicons name="checkmark-circle" size={14} color="#34d399" />
-                <Text style={{ fontSize: 12, fontFamily: "Cairo_400Regular", color: "#6ee7b7", flex: 1, textAlign: "right" }}>{success}</Text>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: colors.success + "18", borderWidth: 1, borderColor: colors.success + "40", borderRadius: 14, paddingHorizontal: 14, paddingVertical: 10, marginBottom: 14 }}>
+                <Ionicons name="checkmark-circle" size={14} color={colors.success} />
+                <Text style={{ fontSize: 12, fontFamily: "Cairo_400Regular", color: colors.success, flex: 1, textAlign: "right" }}>{success}</Text>
               </View>
             )}
 
             <>
                 {/* Display Name */}
-                <Text style={ts.authFieldLabel}>الاسم الظاهر</Text>
-                <View style={ts.authFieldWrap}>
+                <Text style={[ts.authFieldLabel, { color: colors.textMuted }]}>الاسم الظاهر</Text>
+                <View style={[ts.authFieldWrap, { backgroundColor: colors.input, borderColor: colors.border }]}>
                   <TextInput value={displayName} onChangeText={v => { setDisplayName(v); setError(""); }}
                     placeholder="اسمك الظاهر للآخرين"
-                    placeholderTextColor="rgba(255,255,255,0.18)"
-                    style={ts.authFieldInput}
+                    placeholderTextColor={colors.textMuted}
+                    style={[ts.authFieldInput, { color: colors.textPrimary }]}
                     textAlign="right"
                   />
-                  <Ionicons name="person-outline" size={16} color="rgba(255,255,255,0.2)" />
+                  <Ionicons name="person-outline" size={16} color={colors.textMuted} />
                 </View>
 
                 {/* Email (readonly) */}
-                <Text style={ts.authFieldLabel}>البريد الإلكتروني</Text>
-                <View style={[ts.authFieldWrap, { opacity: 0.5 }]}>
-                  <Text style={[ts.authFieldInput, { paddingVertical: 12, color: "rgba(255,255,255,0.5)" }]}>{user.email}</Text>
-                  <Ionicons name="mail-outline" size={16} color="rgba(255,255,255,0.2)" />
+                <Text style={[ts.authFieldLabel, { color: colors.textMuted }]}>البريد الإلكتروني</Text>
+                <View style={[ts.authFieldWrap, { opacity: 0.6, backgroundColor: colors.input, borderColor: colors.border }]}>
+                  <Text style={[ts.authFieldInput, { paddingVertical: 12, color: colors.textSecondary }]}>{user.email}</Text>
+                  <Ionicons name="mail-outline" size={16} color={colors.textMuted} />
                 </View>
 
                 {/* Save */}
@@ -1179,23 +1180,23 @@ function ProfileSheet({ open, onClose, user, onUpdate, onLogout, onLinkTv }: {
 
                 {/* Link another phone or TV without exposing the Google session to it */}
                 <Pressable onPress={onLinkTv}
-                  style={{ flexDirection: "row", alignItems: "center", gap: 10, padding: 14, borderRadius: 16, backgroundColor: "rgba(139,92,246,0.10)", borderWidth: 1, borderColor: "rgba(139,92,246,0.24)", marginTop: 18 }}>
-                  <Ionicons name="chevron-back" size={16} color="#a78bfa" />
+                  style={{ flexDirection: "row", alignItems: "center", gap: 10, padding: 14, borderRadius: 16, backgroundColor: colors.accentSurface, borderWidth: 1, borderColor: colors.accentBorder, marginTop: 18 }}>
+                  <Ionicons name="chevron-back" size={16} color={colors.accent} />
                   <View style={{ flex: 1, alignItems: "flex-end" }}>
-                    <Text style={{ fontSize: 13, fontFamily: "Cairo_800ExtraBold", color: "#c4b5fd" }}>ربط جهاز جديد</Text>
-                    <Text style={{ fontSize: 10, fontFamily: "Cairo_400Regular", color: "rgba(196,181,253,0.55)", marginTop: 2 }}>هاتف آخر أو تلفاز · رمز مؤقت وآمن</Text>
+                    <Text style={{ fontSize: 13, fontFamily: "Cairo_800ExtraBold", color: colors.accent }}>ربط جهاز جديد</Text>
+                    <Text style={{ fontSize: 10, fontFamily: "Cairo_400Regular", color: colors.textSecondary, marginTop: 2 }}>هاتف آخر أو تلفاز · رمز مؤقت وآمن</Text>
                   </View>
-                  <Ionicons name="link-outline" size={19} color="#a78bfa" />
+                  <Ionicons name="link-outline" size={19} color={colors.accent} />
                 </Pressable>
 
                 {/* Divider */}
-                <View style={{ height: 1, backgroundColor: "rgba(255,255,255,0.06)", marginVertical: 22 }} />
+                <View style={{ height: 1, backgroundColor: colors.border, marginVertical: 22 }} />
 
                 {/* Logout */}
                 <Pressable onPress={() => { onLogout(); onClose(); }}
-                  style={{ flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 10, paddingVertical: 14, borderRadius: 18, backgroundColor: "rgba(239,68,68,0.08)", borderWidth: 1, borderColor: "rgba(239,68,68,0.20)", marginBottom: 12 }}>
-                  <Ionicons name="log-out" size={16} color="#f87171" />
-                  <Text style={{ fontSize: 13, fontFamily: "Cairo_800ExtraBold", color: "#f87171" }}>تسجيل الخروج</Text>
+                  style={{ flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 10, paddingVertical: 14, borderRadius: 18, backgroundColor: colors.destructiveSurface, borderWidth: 1, borderColor: colors.destructiveBorder, marginBottom: 12 }}>
+                  <Ionicons name="log-out" size={16} color={colors.destructive} />
+                  <Text style={{ fontSize: 13, fontFamily: "Cairo_800ExtraBold", color: colors.destructive }}>تسجيل الخروج</Text>
                 </Pressable>
 
             </>
@@ -1207,6 +1208,7 @@ function ProfileSheet({ open, onClose, user, onUpdate, onLogout, onLinkTv }: {
 
 /* ══════════════════════ TV LINK SHEET ══════════════════════ */
 function TvLinkSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const colors = useColors();
   const base = getBaseUrl();
   const tvMode = isTvDevice();
   const [code, setCode] = useState("");
@@ -1272,36 +1274,36 @@ function TvLinkSheet({ open, onClose }: { open: boolean; onClose: () => void }) 
 
   return (
     <Modal visible={open} animationType="slide" transparent onRequestClose={onClose}>
-      <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.78)", justifyContent: "flex-end" }}>
-        <View style={{ maxHeight: "92%", backgroundColor: "#111116", borderTopLeftRadius: 28, borderTopRightRadius: 28, borderWidth: 1, borderColor: "rgba(255,255,255,0.08)" }}>
-          <View style={{ flexDirection: "row", alignItems: "center", paddingHorizontal: 20, paddingTop: 18, paddingBottom: 14, borderBottomWidth: 1, borderBottomColor: "rgba(255,255,255,0.06)" }}>
-            <Pressable onPress={onClose} style={{ width: 36, height: 36, borderRadius: 12, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(255,255,255,0.06)" }}>
-              <Ionicons name="close" size={20} color="rgba(255,255,255,0.7)" />
+      <View style={{ flex: 1, backgroundColor: colors.overlay, justifyContent: "flex-end" }}>
+        <View style={{ maxHeight: "92%", backgroundColor: colors.surface, borderTopLeftRadius: 28, borderTopRightRadius: 28, borderWidth: 1, borderColor: colors.border }}>
+          <View style={{ flexDirection: "row", alignItems: "center", paddingHorizontal: 20, paddingTop: 18, paddingBottom: 14, borderBottomWidth: 1, borderBottomColor: colors.border }}>
+            <Pressable onPress={onClose} style={{ width: 36, height: 36, borderRadius: 12, alignItems: "center", justifyContent: "center", backgroundColor: colors.input }}>
+              <Ionicons name="close" size={20} color={colors.textSecondary} />
             </Pressable>
             <View style={{ flex: 1, alignItems: "flex-end", marginRight: 12 }}>
-              <Text style={{ fontSize: 17, fontFamily: "Cairo_800ExtraBold", color: "#fff" }}>ربط جهاز جديد</Text>
-              <Text style={{ fontSize: 10, fontFamily: "Cairo_400Regular", color: "rgba(255,255,255,0.38)", marginTop: 2 }}>هاتف آخر أو تلفاز · تسجيل آمن بدون مشاركة جلسة Google</Text>
+              <Text style={{ fontSize: 17, fontFamily: "Cairo_800ExtraBold", color: colors.textPrimary }}>ربط جهاز جديد</Text>
+              <Text style={{ fontSize: 10, fontFamily: "Cairo_400Regular", color: colors.textMuted, marginTop: 2 }}>هاتف آخر أو تلفاز · تسجيل آمن بدون مشاركة جلسة Google</Text>
             </View>
-            <View style={{ width: 38, height: 38, borderRadius: 13, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(139,92,246,0.18)" }}>
-              <Ionicons name="link-outline" size={20} color="#c4b5fd" />
+            <View style={{ width: 38, height: 38, borderRadius: 13, alignItems: "center", justifyContent: "center", backgroundColor: colors.accentSurface }}>
+              <Ionicons name="link-outline" size={20} color={colors.accent} />
             </View>
           </View>
 
           <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 38 }} showsVerticalScrollIndicator={false}>
-            <View style={{ borderRadius: 20, padding: 18, backgroundColor: "rgba(139,92,246,0.10)", borderWidth: 1, borderColor: "rgba(139,92,246,0.25)" }}>
-               <Text style={{ fontSize: 13, fontFamily: "Cairo_800ExtraBold", color: "#c4b5fd", textAlign: "right" }}>رمز ربط الجهاز</Text>
-              <Text style={{ fontSize: 11, fontFamily: "Cairo_400Regular", color: "rgba(255,255,255,0.55)", lineHeight: 20, textAlign: "right", marginTop: 5 }}>
+            <View style={{ borderRadius: 20, padding: 18, backgroundColor: colors.accentSurface, borderWidth: 1, borderColor: colors.accentBorder }}>
+               <Text style={{ fontSize: 13, fontFamily: "Cairo_800ExtraBold", color: colors.accent, textAlign: "right" }}>رمز ربط الجهاز</Text>
+              <Text style={{ fontSize: 11, fontFamily: "Cairo_400Regular", color: colors.textSecondary, lineHeight: 20, textAlign: "right", marginTop: 5 }}>
                  هذا الرمز يظهر على الهاتف المسجّل فقط. افتح شاشة «ربط الحساب» في الهاتف أو التلفاز الآخر، ثم اكتب الرمز الظاهر هنا في الخانة الموجودة هناك. صالح لمدة 10 دقائق ويُستخدم مرة واحدة.
               </Text>
               {code ? (
                 <>
-                  <View style={ts.linkCodeDisplay}>
+                  <View style={[ts.linkCodeDisplay, { backgroundColor: colors.surfaceElevated, borderColor: colors.border }]}>
                     <View style={ts.linkCodeSuccess}>
-                      <Ionicons name="checkmark-circle" size={15} color="#34d399" />
-                      <Text style={ts.linkCodeSuccessText}>تم إنشاء الرمز بنجاح</Text>
+                      <Ionicons name="checkmark-circle" size={15} color={colors.success} />
+                      <Text style={[ts.linkCodeSuccessText, { color: colors.success }]}>تم إنشاء الرمز بنجاح</Text>
                     </View>
-                    <Text selectable style={ts.linkCodeText}>{code}</Text>
-                    <Text style={ts.linkCodeExpiry}>
+                    <Text selectable style={[ts.linkCodeText, { color: colors.textPrimary }]}>{code}</Text>
+                    <Text style={[ts.linkCodeExpiry, { color: colors.accent }]}>
                       {expiresAt ? `ينتهي في ${new Date(expiresAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}` : "صالح لمدة 10 دقائق"}
                     </Text>
                   </View>
@@ -1316,22 +1318,23 @@ function TvLinkSheet({ open, onClose }: { open: boolean; onClose: () => void }) 
                     android_ripple={{ color: "rgba(196,181,253,0.14)" }}
                     style={({ pressed }) => [
                       ts.linkRegenerateButton,
+                      { backgroundColor: colors.accentSurface, borderColor: colors.accentBorder },
                       pressed && ts.linkActionPressed,
                       loading && ts.linkActionLoading,
                     ]}
                   >
-                    <View style={ts.linkRegenerateIcon}>
+                      <View style={[ts.linkRegenerateIcon, { backgroundColor: colors.accentSurface }]}>
                       {loading
-                        ? <ActivityIndicator color="#c4b5fd" size="small" />
-                        : <Ionicons name="refresh-outline" size={18} color="#c4b5fd" />}
+                        ? <ActivityIndicator color={colors.accent} size="small" />
+                        : <Ionicons name="refresh-outline" size={18} color={colors.accent} />}
                     </View>
                     <View style={ts.linkActionCopy}>
-                      <Text style={ts.linkRegenerateTitle}>{loading ? "جارٍ إنشاء رمز جديد…" : "إعادة إنشاء الرمز"}</Text>
-                      <Text style={ts.linkRegenerateHint}>
+                      <Text style={[ts.linkRegenerateTitle, { color: colors.accent }]}>{loading ? "جارٍ إنشاء رمز جديد…" : "إعادة إنشاء الرمز"}</Text>
+                      <Text style={[ts.linkRegenerateHint, { color: colors.textSecondary }]}>
                         {loading ? "سيظهر الرمز الجديد بعد لحظات" : "سيتم إلغاء الرمز الحالي"}
                       </Text>
                     </View>
-                    {!loading && <Ionicons name="chevron-back" size={17} color="rgba(196,181,253,0.60)" />}
+                    {!loading && <Ionicons name="chevron-back" size={17} color={colors.accent} />}
                   </Pressable>
                 </>
               ) : (
@@ -1364,25 +1367,25 @@ function TvLinkSheet({ open, onClose }: { open: boolean; onClose: () => void }) 
               )}
             </View>
 
-            {!!error && <Text style={{ fontSize: 11, fontFamily: "Cairo_600SemiBold", color: "#fca5a5", textAlign: "right", marginTop: 12 }}>{error}</Text>}
+            {!!error && <Text style={{ fontSize: 11, fontFamily: "Cairo_600SemiBold", color: colors.destructive, textAlign: "right", marginTop: 12 }}>{error}</Text>}
 
             <View style={{ flexDirection: "row", alignItems: "center", marginTop: 24, marginBottom: 10 }}>
-              <Text style={{ flex: 1, fontSize: 13, fontFamily: "Cairo_800ExtraBold", color: "#fff", textAlign: "right" }}>الأجهزة المرتبطة</Text>
-              {loadingDevices ? <ActivityIndicator size="small" color="#a78bfa" /> : null}
+              <Text style={{ flex: 1, fontSize: 13, fontFamily: "Cairo_800ExtraBold", color: colors.textPrimary, textAlign: "right" }}>الأجهزة المرتبطة</Text>
+              {loadingDevices ? <ActivityIndicator size="small" color={colors.accent} /> : null}
             </View>
             {devices.length ? devices.map(device => (
-              <View key={device.id} style={{ flexDirection: "row", alignItems: "center", gap: 10, padding: 13, borderRadius: 15, marginBottom: 8, backgroundColor: "rgba(255,255,255,0.04)", borderWidth: 1, borderColor: "rgba(255,255,255,0.07)" }}>
-                <Pressable testID={`revoke-tv-${device.id}`} onPress={() => revoke(device.id)} style={{ width: 34, height: 34, borderRadius: 10, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(239,68,68,0.10)" }}>
-                  <Ionicons name="unlink-outline" size={16} color="#f87171" />
+              <View key={device.id} style={{ flexDirection: "row", alignItems: "center", gap: 10, padding: 13, borderRadius: 15, marginBottom: 8, backgroundColor: colors.card, borderWidth: 1, borderColor: colors.border }}>
+                <Pressable testID={`revoke-tv-${device.id}`} onPress={() => revoke(device.id)} style={{ width: 34, height: 34, borderRadius: 10, alignItems: "center", justifyContent: "center", backgroundColor: colors.destructiveSurface }}>
+                  <Ionicons name="unlink-outline" size={16} color={colors.destructive} />
                 </Pressable>
                 <View style={{ flex: 1, alignItems: "flex-end" }}>
-                  <Text style={{ fontSize: 12, fontFamily: "Cairo_700Bold", color: "#fff" }}>{device.name}</Text>
-                  <Text style={{ fontSize: 10, fontFamily: "Cairo_400Regular", color: "rgba(255,255,255,0.35)", marginTop: 2 }}>مرتبط · يمكن إلغاء الوصول فوراً</Text>
+                  <Text style={{ fontSize: 12, fontFamily: "Cairo_700Bold", color: colors.textPrimary }}>{device.name}</Text>
+                  <Text style={{ fontSize: 10, fontFamily: "Cairo_400Regular", color: colors.textMuted, marginTop: 2 }}>مرتبط · يمكن إلغاء الوصول فوراً</Text>
                 </View>
-                <Ionicons name={device.platform === "android-tv" ? "tv-outline" : "phone-portrait-outline"} size={18} color="#a78bfa" />
+                <Ionicons name={device.platform === "android-tv" ? "tv-outline" : "phone-portrait-outline"} size={18} color={colors.accent} />
               </View>
             )) : (
-              <Text style={{ fontSize: 11, fontFamily: "Cairo_400Regular", color: "rgba(255,255,255,0.32)", textAlign: "right", paddingVertical: 10 }}>لا توجد أجهزة مرتبطة حالياً</Text>
+              <Text style={{ fontSize: 11, fontFamily: "Cairo_400Regular", color: colors.textMuted, textAlign: "right", paddingVertical: 10 }}>لا توجد أجهزة مرتبطة حالياً</Text>
             )}
           </ScrollView>
         </View>

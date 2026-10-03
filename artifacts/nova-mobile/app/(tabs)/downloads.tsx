@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect, useRef } from "react";
+import React, { useState, useCallback, useEffect, useRef, useMemo } from "react";
 import {
   View, Text, StyleSheet, Pressable, FlatList,
   Image, Alert, Linking, Platform, Animated, Easing, Modal,
@@ -17,10 +17,19 @@ import {
 import { RiftPlayer, PlayerSource } from "@/components/RiftPlayer";
 import * as FileSystem from "expo-file-system";
 import { isTvDevice, tvFocusStyle } from "@/utils/tv";
+import { useColors } from "@/hooks/useColors";
+import type { ThemePalette } from "@/constants/colors";
+
+function useDownloadsTheme() {
+  const colors = useColors();
+  const s = useMemo(() => createDownloadStyles(colors), [colors]);
+  return { colors, s };
+}
 
 // ── Spinner ───────────────────────────────────────────────────────────────
 
 function SpinIcon({ size = 16 }: { size?: number }) {
+  const colors = useColors();
   const rot = useRef(new Animated.Value(0)).current;
   useEffect(() => {
     const anim = Animated.loop(
@@ -32,7 +41,7 @@ function SpinIcon({ size = 16 }: { size?: number }) {
   const rotate = rot.interpolate({ inputRange: [0, 1], outputRange: ["0deg", "360deg"] });
   return (
     <Animated.View style={{ transform: [{ rotate }] }}>
-      <Ionicons name="sync" size={size} color="#8B5CF6" />
+      <Ionicons name="sync" size={size} color={colors.accent} />
     </Animated.View>
   );
 }
@@ -50,6 +59,7 @@ function ActiveDownloadCard({
   onPause: () => void;
   onResume: () => void;
 }) {
+  const { colors, s } = useDownloadsTheme();
   const tvMode = isTvDevice();
   const pct = Math.round(item.progress * 100);
   const isPaused = item.status === "paused";
@@ -71,13 +81,13 @@ function ActiveDownloadCard({
             <Ionicons
               name={isPaused ? "play" : "pause"}
               size={18}
-              color={isPaused ? "#c4b5fd" : "rgba(255,255,255,0.65)"}
+              color={isPaused ? colors.accent : colors.textSecondary}
             />
           </Pressable>
         )}
         <Pressable onPress={onCancel} hitSlop={8} focusable={tvMode}
           style={({ focused }) => [s.activeAction, s.activeCancel, tvMode && tvFocusStyle(focused)]}>
-          <Ionicons name="close" size={18} color="rgba(255,255,255,0.55)" />
+          <Ionicons name="close" size={18} color={colors.textMuted} />
         </Pressable>
       </View>
 
@@ -90,7 +100,7 @@ function ActiveDownloadCard({
           </View>
           {/* Percentage badge */}
           <View style={[s.activePctBadge, isError && s.activePctBadgeError]}>
-            <Text style={[s.activePctText, isError && { color: "rgba(239,68,68,0.85)" }]}>
+            <Text style={[s.activePctText, isError && { color: colors.destructive }]}>
            {isError ? "خطأ" : isPaused ? "متوقف" : `${pct}%`}
             </Text>
           </View>
@@ -101,7 +111,7 @@ function ActiveDownloadCard({
           <View style={[
             s.progressFill,
             { width: `${isError ? 100 : pct}%` as any },
-            isError && { backgroundColor: "rgba(239,68,68,0.45)" },
+            isError && { backgroundColor: colors.destructive },
           ]} />
         </View>
 
@@ -114,7 +124,7 @@ function ActiveDownloadCard({
           <Text style={s.activeStatus}>{isError ? "لم يكتمل" : `${pct}%`}</Text>
         </View>
 
-        <Text style={[s.activeStatus, isError && { color: "rgba(239,68,68,0.65)" }]}>
+        <Text style={[s.activeStatus, isError && { color: colors.destructive }]}>
           {isError
             ? `${item.errorMessage || "فشل التنزيل"} — اضغط × للإغلاق`
               : isPaused
@@ -143,6 +153,7 @@ function DownloadCard({
   onSaveToGallery: (item: DownloadItem) => void;
   savingToGallery: boolean;
 }) {
+  const { colors, s } = useDownloadsTheme();
   const tvMode = isTvDevice();
   const [expanded, setExpanded] = useState(false);
   const q = item.quality?.toLowerCase() ?? "";
@@ -164,7 +175,7 @@ function DownloadCard({
             <Image source={{ uri: item.cover }} style={s.poster} resizeMode="cover" />
           ) : (
             <View style={[s.poster, s.posterFallback]}>
-              <Ionicons name="film" size={22} color="rgba(139,92,246,0.4)" />
+              <Ionicons name="film" size={22} color={colors.accent} />
             </View>
           )}
           <LinearGradient
@@ -180,7 +191,7 @@ function DownloadCard({
       <View style={s.cardInfo}>
         <Text style={s.cardTitle} numberOfLines={2}>{item.title}</Text>
         <View style={{ flexDirection: "row", alignItems: "center", gap: 5 }}>
-          <Ionicons name="checkmark-circle" size={11} color="#34d399" />
+          <Ionicons name="checkmark-circle" size={11} color={colors.success} />
           <Text style={s.cardEp}>الحلقة {item.ep}</Text>
         </View>
 
@@ -190,12 +201,12 @@ function DownloadCard({
             <Text style={[s.badgeText, { color: dotColor }]}>{item.quality || "—"}</Text>
           </View>
           <View style={s.badge}>
-            <Ionicons name="folder-outline" size={9} color="rgba(255,255,255,0.35)" />
+            <Ionicons name="folder-outline" size={9} color={colors.textMuted} />
             <Text style={s.badgeText}>{formatFileSize(item.fileSize)}</Text>
           </View>
           {item.subtitleLocalPath && (
-            <View style={[s.badge, { borderColor: "rgba(52,211,153,0.35)" }]}>
-              <Text style={[s.badgeText, { color: "rgba(110,231,183,0.85)" }]}>ترجمة</Text>
+            <View style={[s.badge, { borderColor: colors.success + "40" }]}>
+              <Text style={[s.badgeText, { color: colors.success }]}>ترجمة</Text>
             </View>
           )}
         </View>
@@ -217,7 +228,7 @@ function DownloadCard({
           </Pressable>
           {item.gallerySavedAt ? (
             <View style={s.gallerySavedButton}>
-              <Ionicons name="images-outline" size={12} color="#6ee7b7" />
+              <Ionicons name="images-outline" size={12} color={colors.success} />
               <Text style={s.gallerySavedText}>في المعرض</Text>
             </View>
           ) : (
@@ -236,7 +247,7 @@ function DownloadCard({
               accessibilityLabel={`حفظ الحلقة ${item.ep} في معرض الجهاز`}
               testID={`download-gallery-${item.id}`}
             >
-              <Ionicons name={savingToGallery ? "sync-outline" : "images-outline"} size={12} color="#c4b5fd" />
+              <Ionicons name={savingToGallery ? "sync-outline" : "images-outline"} size={12} color={colors.accent} />
               <Text style={s.galleryButtonText}>{savingToGallery ? "جارٍ الحفظ" : "حفظ للمعرض"}</Text>
             </Pressable>
           )}
@@ -253,7 +264,7 @@ function DownloadCard({
         accessibilityLabel={`حذف ${item.title} الحلقة ${item.ep}`}
         testID={`download-delete-${item.id}`}
       >
-        <Ionicons name="trash-outline" size={17} color="rgba(239,68,68,0.65)" />
+        <Ionicons name="trash-outline" size={17} color={colors.destructive} />
       </Pressable>
     </View>
   );
@@ -302,17 +313,18 @@ function SectionHeader({
   count: number;
   spinning?: boolean;
 }) {
+  const { colors, s } = useDownloadsTheme();
   return (
     <View style={s.sectionHeader}>
       {spinning ? (
         <SpinIcon size={14} />
       ) : (
-        <Ionicons name={icon as any} size={14} color="#34d399" />
+        <Ionicons name={icon as any} size={14} color={colors.success} />
       )}
-      <Text style={[s.sectionTitle, spinning && { color: "#8B5CF6" }]}>{title}</Text>
+      <Text style={[s.sectionTitle, spinning && { color: colors.accent }]}>{title}</Text>
       {count > 0 && (
-        <View style={[s.sectionBadge, spinning && { backgroundColor: "rgba(139,92,246,0.15)", borderColor: "rgba(139,92,246,0.25)" }]}>
-          <Text style={[s.sectionBadgeText, spinning && { color: "#c4b5fd" }]}>{count}</Text>
+        <View style={[s.sectionBadge, spinning && { backgroundColor: colors.accentSurface, borderColor: colors.accentBorder }]}>
+          <Text style={[s.sectionBadgeText, spinning && { color: colors.accent }]}>{count}</Text>
         </View>
       )}
     </View>
@@ -322,6 +334,7 @@ function SectionHeader({
 // ── Main Screen ───────────────────────────────────────────────────────────
 
 export default function DownloadsScreen() {
+  const { colors, s } = useDownloadsTheme();
   const insets = useSafeAreaInsets();
   const topPad = Platform.OS === "web" ? 0 : Math.max(insets.top, 0);
   const [downloads, setDownloads] = useState<DownloadItem[]>([]);
@@ -485,7 +498,7 @@ export default function DownloadsScreen() {
       <View style={s.header}>
         <View style={s.headerLeft}>
           <View style={s.headerIcon}>
-            <Ionicons name="download" size={16} color="#8B5CF6" />
+            <Ionicons name="download" size={16} color={colors.accent} />
           </View>
           <View>
             <Text style={s.headerTitle}>التنزيلات</Text>
@@ -495,7 +508,7 @@ export default function DownloadsScreen() {
         {hasCompleted && (
           <Pressable onPress={handleClearAll} focusable={isTvDevice()}
             style={({ focused }) => [s.clearBtn, isTvDevice() && tvFocusStyle(focused)]}>
-            <Ionicons name="trash-outline" size={14} color="rgba(239,68,68,0.65)" />
+            <Ionicons name="trash-outline" size={14} color={colors.destructive} />
             <Text style={s.clearBtnText}>حذف الكل</Text>
           </Pressable>
         )}
@@ -552,7 +565,7 @@ export default function DownloadsScreen() {
       {isEmpty && (
         <View style={s.emptyWrap}>
           <View style={s.emptyIcon}>
-            <Ionicons name="download-outline" size={42} color="rgba(139,92,246,0.35)" />
+          <Ionicons name="download-outline" size={42} color={colors.accent} />
           </View>
           <Text style={s.emptyTitle}>لا توجد تنزيلات</Text>
           <Text style={s.emptyDesc}>
@@ -567,142 +580,142 @@ export default function DownloadsScreen() {
 
 // ── Styles ────────────────────────────────────────────────────────────────
 
-const s = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: "#07070d" },
+const createDownloadStyles = (colors: ThemePalette) => StyleSheet.create({
+  screen: { flex: 1, backgroundColor: colors.background },
 
   header: {
     flexDirection: "row", alignItems: "center", justifyContent: "space-between",
     paddingHorizontal: 16, paddingVertical: 14,
-    borderBottomWidth: 1, borderBottomColor: "rgba(255,255,255,0.06)",
+    backgroundColor: colors.surface, borderBottomWidth: 1, borderBottomColor: colors.border,
   },
   headerLeft: { flexDirection: "row", alignItems: "center", gap: 10 },
   headerIcon: {
     width: 36, height: 36, borderRadius: 12,
-    backgroundColor: "rgba(139,92,246,0.14)", borderWidth: 1,
-    borderColor: "rgba(139,92,246,0.25)", alignItems: "center", justifyContent: "center",
+    backgroundColor: colors.accentSurface, borderWidth: 1,
+    borderColor: colors.accentBorder, alignItems: "center", justifyContent: "center",
   },
-  headerTitle: { fontSize: 16, fontFamily: "Cairo_800ExtraBold", color: "#fff" },
-  headerSub:   { fontSize: 11, fontFamily: "Cairo_400Regular", color: "rgba(255,255,255,0.35)" },
+  headerTitle: { fontSize: 16, fontFamily: "Cairo_800ExtraBold", color: colors.textPrimary },
+  headerSub:   { fontSize: 11, fontFamily: "Cairo_400Regular", color: colors.textMuted },
 
   clearBtn: {
     flexDirection: "row", alignItems: "center", gap: 5,
     paddingHorizontal: 12, paddingVertical: 7, borderRadius: 10,
-    backgroundColor: "rgba(239,68,68,0.08)", borderWidth: 1,
-    borderColor: "rgba(239,68,68,0.18)",
+    backgroundColor: colors.destructiveSurface, borderWidth: 1,
+    borderColor: colors.destructiveBorder,
   },
-  clearBtnText: { fontSize: 11, fontFamily: "Cairo_700Bold", color: "rgba(239,68,68,0.65)" },
+  clearBtnText: { fontSize: 11, fontFamily: "Cairo_700Bold", color: colors.destructive },
 
   /* Section header */
   sectionHeader: {
     flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 2,
   },
-  sectionTitle: { flex: 1, fontSize: 13, fontFamily: "Cairo_700Bold", color: "rgba(255,255,255,0.70)" },
+  sectionTitle: { flex: 1, fontSize: 13, fontFamily: "Cairo_700Bold", color: colors.textPrimary },
   sectionBadge: {
     paddingHorizontal: 7, paddingVertical: 2, borderRadius: 7,
-    backgroundColor: "rgba(52,211,153,0.10)", borderWidth: 1,
-    borderColor: "rgba(52,211,153,0.22)",
+    backgroundColor: colors.success + "18", borderWidth: 1,
+    borderColor: colors.success + "40",
   },
-  sectionBadgeText: { fontSize: 10, fontFamily: "Cairo_700Bold", color: "rgba(110,231,183,0.85)" },
+  sectionBadgeText: { fontSize: 10, fontFamily: "Cairo_700Bold", color: colors.success },
 
   /* Active download card */
   activeCard: {
     flexDirection: "row", alignItems: "flex-start", gap: 10,
-    backgroundColor: "rgba(15,12,28,0.95)", borderRadius: 16,
-    borderWidth: 1, borderColor: "rgba(139,92,246,0.20)", padding: 16,
+    backgroundColor: colors.card, borderRadius: 16,
+    borderWidth: 1, borderColor: colors.border, padding: 16,
   },
-  activeCardError: { borderColor: "rgba(239,68,68,0.25)" },
+  activeCardError: { borderColor: colors.destructiveBorder },
   activeCancel: {
-    backgroundColor: "rgba(255,255,255,0.06)",
+    backgroundColor: colors.input,
   },
   activeActions: { flexDirection: "row", alignItems: "center", gap: 8, flexShrink: 0, marginTop: 1 },
   activeAction: {
     width: 40, height: 40, borderRadius: 12,
-    backgroundColor: "rgba(139,92,246,0.13)", borderWidth: 1,
-    borderColor: "rgba(139,92,246,0.24)", alignItems: "center", justifyContent: "center",
+    backgroundColor: colors.accentSurface, borderWidth: 1,
+    borderColor: colors.accentBorder, alignItems: "center", justifyContent: "center",
   },
-  activeActionResume: { backgroundColor: "rgba(52,211,153,0.12)", borderColor: "rgba(52,211,153,0.25)" },
-  activeTitle: { fontSize: 13, fontFamily: "Cairo_800ExtraBold", color: "#fff", textAlign: "right", lineHeight: 19 },
-  activeEp:    { fontSize: 11, fontFamily: "Cairo_700Bold", color: "rgba(196,181,253,0.70)", textAlign: "right" },
+  activeActionResume: { backgroundColor: colors.success + "20", borderColor: colors.success + "40" },
+  activeTitle: { fontSize: 13, fontFamily: "Cairo_800ExtraBold", color: colors.textPrimary, textAlign: "right", lineHeight: 19 },
+  activeEp:    { fontSize: 11, fontFamily: "Cairo_700Bold", color: colors.accent, textAlign: "right" },
 
   progressTrack: {
     height: 4, borderRadius: 2,
-    backgroundColor: "rgba(255,255,255,0.06)", overflow: "hidden",
+    backgroundColor: colors.input, overflow: "hidden",
   },
   progressFill: {
     height: 4, borderRadius: 2,
-    backgroundColor: "#8B5CF6",
+    backgroundColor: colors.accent,
   },
-  activeStatus: { fontSize: 10, fontFamily: "Cairo_400Regular", color: "rgba(255,255,255,0.35)", textAlign: "right" },
+  activeStatus: { fontSize: 10, fontFamily: "Cairo_400Regular", color: colors.textMuted, textAlign: "right" },
   activeProgressMeta: {
     flexDirection: "row", alignItems: "center", justifyContent: "space-between",
   },
 
   activePctBadge: {
     paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8,
-    backgroundColor: "rgba(139,92,246,0.15)", borderWidth: 1,
-    borderColor: "rgba(139,92,246,0.28)", flexShrink: 0,
+    backgroundColor: colors.accentSurface, borderWidth: 1,
+    borderColor: colors.accentBorder, flexShrink: 0,
     alignSelf: "flex-start",
   },
-  activePctBadgeError: { backgroundColor: "rgba(239,68,68,0.10)", borderColor: "rgba(239,68,68,0.25)" },
-  activePctText: { fontSize: 12, fontFamily: "Cairo_800ExtraBold", color: "#c4b5fd" },
+  activePctBadgeError: { backgroundColor: colors.destructiveSurface, borderColor: colors.destructiveBorder },
+  activePctText: { fontSize: 12, fontFamily: "Cairo_800ExtraBold", color: colors.accent },
 
   /* Completed card */
   card: {
     flexDirection: "row", alignItems: "center", gap: 12,
-    backgroundColor: "rgba(15,12,28,0.85)", borderRadius: 16,
-    borderWidth: 1, borderColor: "rgba(139,92,246,0.12)", padding: 10,
+    backgroundColor: colors.card, borderRadius: 16,
+    borderWidth: 1, borderColor: colors.border, padding: 10,
   },
 
   posterWrap: { width: 70, height: 100, borderRadius: 10, overflow: "hidden", flexShrink: 0 },
   poster:     { width: 70, height: 100 },
-  posterFallback: { backgroundColor: "rgba(18,10,40,0.9)", alignItems: "center", justifyContent: "center" },
+  posterFallback: { backgroundColor: colors.surfaceElevated, alignItems: "center", justifyContent: "center" },
   playOverlay: {
     ...StyleSheet.absoluteFillObject as any,
     alignItems: "center", justifyContent: "center",
   },
 
   cardInfo: { flex: 1, gap: 4, paddingTop: 2 },
-  cardTitle: { fontSize: 13, fontFamily: "Cairo_800ExtraBold", color: "#fff", textAlign: "right", lineHeight: 19 },
-  cardEp:    { fontSize: 11, fontFamily: "Cairo_700Bold", color: "#a78bfa" },
+  cardTitle: { fontSize: 13, fontFamily: "Cairo_800ExtraBold", color: colors.textPrimary, textAlign: "right", lineHeight: 19 },
+  cardEp:    { fontSize: 11, fontFamily: "Cairo_700Bold", color: colors.accent },
 
   cardBadges: { flexDirection: "row", gap: 6, flexWrap: "wrap" },
   badge: {
     flexDirection: "row", alignItems: "center", gap: 4,
     paddingHorizontal: 7, paddingVertical: 3, borderRadius: 7,
-    backgroundColor: "rgba(255,255,255,0.04)", borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.09)",
+    backgroundColor: colors.surfaceElevated, borderWidth: 1,
+    borderColor: colors.border,
   },
   badgeDot:  { width: 5, height: 5, borderRadius: 3 },
-  badgeText: { fontSize: 9, fontFamily: "Cairo_700Bold", color: "rgba(255,255,255,0.50)" },
+  badgeText: { fontSize: 9, fontFamily: "Cairo_700Bold", color: colors.textSecondary },
 
-  cardDate: { fontSize: 10, fontFamily: "Cairo_400Regular", color: "rgba(255,255,255,0.25)", marginTop: 2 },
+  cardDate: { fontSize: 10, fontFamily: "Cairo_400Regular", color: colors.textMuted, marginTop: 2 },
   cardActions: { flexDirection: "row", alignItems: "center", gap: 6, flexWrap: "wrap", marginTop: 2 },
   playButton: {
     flexDirection: "row", alignItems: "center", gap: 5,
     paddingHorizontal: 10, paddingVertical: 6, borderRadius: 9,
-    backgroundColor: "rgba(139,92,246,0.20)", borderWidth: 1,
-    borderColor: "rgba(167,139,250,0.30)",
+    backgroundColor: colors.accent, borderWidth: 1,
+    borderColor: colors.accentBorder,
   },
-  playButtonText: { fontSize: 10, fontFamily: "Cairo_700Bold", color: "#ddd6fe" },
+  playButtonText: { fontSize: 10, fontFamily: "Cairo_700Bold", color: colors.buttonText },
   galleryButton: {
     flexDirection: "row", alignItems: "center", gap: 4,
     paddingHorizontal: 9, paddingVertical: 6, borderRadius: 9,
-    backgroundColor: "rgba(139,92,246,0.10)", borderWidth: 1,
-    borderColor: "rgba(167,139,250,0.22)",
+    backgroundColor: colors.accentSurface, borderWidth: 1,
+    borderColor: colors.accentBorder,
   },
-  galleryButtonText: { fontSize: 10, fontFamily: "Cairo_700Bold", color: "#c4b5fd" },
+  galleryButtonText: { fontSize: 10, fontFamily: "Cairo_700Bold", color: colors.accent },
   gallerySavedButton: {
     flexDirection: "row", alignItems: "center", gap: 4,
     paddingHorizontal: 9, paddingVertical: 6, borderRadius: 9,
-    backgroundColor: "rgba(52,211,153,0.10)", borderWidth: 1,
-    borderColor: "rgba(110,231,183,0.25)",
+    backgroundColor: colors.success + "18", borderWidth: 1,
+    borderColor: colors.success + "40",
   },
-  gallerySavedText: { fontSize: 10, fontFamily: "Cairo_700Bold", color: "#6ee7b7" },
+  gallerySavedText: { fontSize: 10, fontFamily: "Cairo_700Bold", color: colors.success },
 
   deleteBtn: {
     width: 40, height: 40, borderRadius: 12,
-    backgroundColor: "rgba(239,68,68,0.07)", borderWidth: 1,
-    borderColor: "rgba(239,68,68,0.15)", alignItems: "center", justifyContent: "center",
+    backgroundColor: colors.destructiveSurface, borderWidth: 1,
+    borderColor: colors.destructiveBorder, alignItems: "center", justifyContent: "center",
     flexShrink: 0,
   },
 
@@ -714,9 +727,9 @@ const s = StyleSheet.create({
   },
   emptyIcon: {
     width: 80, height: 80, borderRadius: 28,
-    backgroundColor: "rgba(139,92,246,0.08)", borderWidth: 1,
-    borderColor: "rgba(139,92,246,0.16)", alignItems: "center", justifyContent: "center",
+    backgroundColor: colors.accentSurface, borderWidth: 1,
+    borderColor: colors.accentBorder, alignItems: "center", justifyContent: "center",
   },
-  emptyTitle: { fontSize: 17, fontFamily: "Cairo_800ExtraBold", color: "rgba(255,255,255,0.7)", textAlign: "center" },
-  emptyDesc:  { fontSize: 13, fontFamily: "Cairo_400Regular", color: "rgba(255,255,255,0.35)", textAlign: "center", lineHeight: 20 },
+  emptyTitle: { fontSize: 17, fontFamily: "Cairo_800ExtraBold", color: colors.textPrimary, textAlign: "center" },
+  emptyDesc:  { fontSize: 13, fontFamily: "Cairo_400Regular", color: colors.textMuted, textAlign: "center", lineHeight: 20 },
 });

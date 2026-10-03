@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from "react";
+import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import {
   View, Text, Pressable, TextInput, FlatList, Image,
   ScrollView, ActivityIndicator, StyleSheet, Platform, useWindowDimensions,
@@ -10,6 +10,14 @@ import { getBaseUrl } from "@/utils/api";
 import { isTvDevice, tvFocusStyle } from "@/utils/tv";
 import { useTvFocusMemory } from "@/utils/tvFocus";
 import { getGridColumnCount } from "@/components/AnimeCard";
+import { useColors } from "@/hooks/useColors";
+import type { ThemePalette } from "@/constants/colors";
+
+function useBrowseTheme() {
+  const colors = useColors();
+  const g = useMemo(() => createBrowseStyles(colors), [colors]);
+  return { colors, g };
+}
 
 /* ── Data ── */
 interface AnimeResult {
@@ -76,6 +84,7 @@ function coverUrl(id: number) { return `https://img.anili.st/media/${id}`; }
 
 /* ── Genre cover card ── */
 function GenreCard({ item, animeId, onPress, columns }: { item: typeof GENRES_WITH_COVERS[0]; animeId?: number; onPress: () => void; columns: number }) {
+  const { g } = useBrowseTheme();
   const { width, height } = useWindowDimensions();
   const tvMode = isTvDevice(width, height);
   return (
@@ -98,6 +107,7 @@ function GenreCard({ item, animeId, onPress, columns }: { item: typeof GENRES_WI
 
 /* ── Anime card ── */
 function AnimeCard({ anime, onPress, columns }: { anime: AnimeResult; onPress: () => void; columns: number }) {
+  const { g } = useBrowseTheme();
   const { width, height } = useWindowDimensions();
   const tvMode = isTvDevice(width, height);
   const fmt = anime.format ? FORMAT_AR[anime.format] : null;
@@ -193,6 +203,7 @@ function translateSearchQuery(value: string): string {
 }
 
 export default function BrowseScreen() {
+  const { colors, g } = useBrowseTheme();
   const insets = useSafeAreaInsets();
   const { width, height } = useWindowDimensions();
   const routeParams = useLocalSearchParams<{
@@ -405,12 +416,12 @@ export default function BrowseScreen() {
               focusable={tvMode}
               style={({ focused }) => [g.genreToggleBtn, tvMode && g.tvGenreToggleBtn, view === "genres" && g.genreToggleBtnActive, tvMode && tvFocusStyle(focused)]}
             >
-              <Ionicons name="grid" size={tvMode ? 28 : 12} color={view === "genres" ? "#c4b5fd" : "rgba(255,255,255,0.4)"} />
-              <Text style={[g.genreToggleText, tvMode && g.tvGenreToggleText, view === "genres" && { color: "#c4b5fd" }]}>التصنيفات</Text>
+              <Ionicons name="grid" size={tvMode ? 28 : 12} color={view === "genres" ? colors.accent : colors.textMuted} />
+              <Text style={[g.genreToggleText, tvMode && g.tvGenreToggleText, view === "genres" && { color: colors.accent }]}>التصنيفات</Text>
             </Pressable>
             {(view === "list" && hasFilters) && (
               <Pressable onPress={clearAll} focusable={tvMode} style={({ focused }) => [g.clearBtn, tvMode && g.tvClearBtn, tvMode && tvFocusStyle(focused)]}>
-                <Ionicons name="close" size={tvMode ? 25 : 14} color="rgba(252,165,165,0.8)" />
+                <Ionicons name="close" size={tvMode ? 25 : 14} color={colors.destructive} />
                 <Text style={[g.clearBtnText, tvMode && g.tvClearBtnText]}>مسح</Text>
               </Pressable>
             )}
@@ -472,17 +483,17 @@ export default function BrowseScreen() {
             </ScrollView>
 
             <View style={[g.searchWrap, tvMode && g.tvSearchWrap, { width: filterRailWidth, alignSelf: "center" }]}>
-              <Ionicons name="search" size={tvMode ? 21 : 14} color="rgba(255,255,255,0.25)" />
+              <Ionicons name="search" size={tvMode ? 21 : 14} color={colors.textMuted} />
               <TextInput
                 value={search}
                 onChangeText={setSearch}
                 placeholder="بحث في النتائج..."
-                placeholderTextColor="rgba(255,255,255,0.2)"
+                placeholderTextColor={colors.textMuted}
                 style={[g.searchInput, tvMode && g.tvSearchInput]}
               />
               {search ? (
                 <Pressable onPress={() => setSearch("")}>
-                  <Ionicons name="close" size={16} color="rgba(255,255,255,0.3)" />
+                  <Ionicons name="close" size={16} color={colors.textMuted} />
                 </Pressable>
               ) : null}
             </View>
@@ -522,7 +533,7 @@ export default function BrowseScreen() {
         <>
           {listLoading && filteredItems.length === 0 ? (
             <View style={g.center}>
-              <ActivityIndicator color="#8B5CF6" size="large" />
+              <ActivityIndicator color={colors.accent} size="large" />
             </View>
           ) : (
             <FlatList
@@ -545,14 +556,14 @@ export default function BrowseScreen() {
               ListEmptyComponent={
                  !listLoading ? (
                   <View style={g.center}>
-                    <Ionicons name="film" size={48} color="rgba(255,255,255,0.15)" />
+                    <Ionicons name="film" size={48} color={colors.textMuted} />
                     <Text style={g.emptyText}>لا توجد أنميات بهذه الفلاتر</Text>
                   </View>
                 ) : null
               }
                ListFooterComponent={listLoading && filteredItems.length > 0 ? (
                 <View style={{ padding: 20, alignItems: "center" }}>
-                  <ActivityIndicator color="#8B5CF6" />
+                  <ActivityIndicator color={colors.accent} />
                 </View>
               ) : null}
               renderItem={({ item, index }) => (
@@ -582,49 +593,49 @@ export default function BrowseScreen() {
   );
 }
 
-const g = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#09090B" },
-  header: { backgroundColor: "#09090B", borderBottomWidth: 1, borderBottomColor: "rgba(255,255,255,0.06)", paddingHorizontal: 12, paddingTop: 8, paddingBottom: 5 },
+const createBrowseStyles = (colors: ThemePalette) => StyleSheet.create({
+  container: { flex: 1, backgroundColor: colors.background },
+  header: { backgroundColor: colors.surface, borderBottomWidth: 1, borderBottomColor: colors.border, paddingHorizontal: 12, paddingTop: 8, paddingBottom: 5 },
   tvHeader: { paddingHorizontal: 32, paddingTop: 16, paddingBottom: 14 },
   headerRow: { flexDirection: "row", alignItems: "center", marginBottom: 6 },
-  headerTitle: { fontSize: 17, fontFamily: "Cairo_800ExtraBold", color: "#fff" },
+  headerTitle: { fontSize: 17, fontFamily: "Cairo_800ExtraBold", color: colors.textPrimary },
   tvHeaderTitle: { fontSize: 26, lineHeight: 36 },
-  headerSub: { fontSize: 9, color: "rgba(255,255,255,0.3)", fontFamily: "Cairo_400Regular" },
+  headerSub: { fontSize: 9, color: colors.textMuted, fontFamily: "Cairo_400Regular" },
   tvHeaderSub: { fontSize: 14, lineHeight: 22 },
-  clearBtn: { flexDirection: "row", alignItems: "center", gap: 3, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 10, backgroundColor: "rgba(239,68,68,0.1)", borderWidth: 1, borderColor: "rgba(239,68,68,0.2)" },
-  clearBtnText: { fontSize: 9, fontFamily: "Cairo_700Bold", color: "rgba(252,165,165,0.8)" },
+  clearBtn: { flexDirection: "row", alignItems: "center", gap: 3, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 10, backgroundColor: colors.destructiveSurface, borderWidth: 1, borderColor: colors.destructiveBorder },
+  clearBtnText: { fontSize: 9, fontFamily: "Cairo_700Bold", color: colors.destructive },
   tvClearBtn: { paddingHorizontal: 16, paddingVertical: 10, borderRadius: 14, gap: 6, minHeight: 46 },
   tvClearBtnText: { fontSize: 16, lineHeight: 23 },
-  genreToggleBtn: { flexDirection: "row", alignItems: "center", gap: 3, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 10, backgroundColor: "rgba(255,255,255,0.05)", borderWidth: 1, borderColor: "rgba(255,255,255,0.1)" },
+  genreToggleBtn: { flexDirection: "row", alignItems: "center", gap: 3, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 10, backgroundColor: colors.input, borderWidth: 1, borderColor: colors.border },
   tvGenreToggleBtn: { paddingHorizontal: 16, paddingVertical: 10, borderRadius: 14, gap: 7, minHeight: 46 },
-  genreToggleBtnActive: { backgroundColor: "rgba(139,92,246,0.15)", borderColor: "rgba(139,92,246,0.35)" },
-  genreToggleText: { fontSize: 9, fontFamily: "Cairo_700Bold", color: "rgba(255,255,255,0.4)" },
+  genreToggleBtnActive: { backgroundColor: colors.accentSurface, borderColor: colors.accentBorder },
+  genreToggleText: { fontSize: 9, fontFamily: "Cairo_700Bold", color: colors.textSecondary },
   tvGenreToggleText: { fontSize: 16, lineHeight: 23 },
   chipRow: { marginBottom: 2 },
-  chip: { paddingHorizontal: 9, paddingVertical: 4, borderRadius: 10, backgroundColor: "#18181B", borderWidth: 1, borderColor: "rgba(255,255,255,0.06)" },
+  chip: { paddingHorizontal: 9, paddingVertical: 4, borderRadius: 10, backgroundColor: colors.input, borderWidth: 1, borderColor: colors.border },
   tvChip: { paddingHorizontal: 11, paddingVertical: 6, borderRadius: 10, minHeight: 36, justifyContent: "center" },
-  chipActive: { backgroundColor: "rgba(139,92,246,0.2)", borderColor: "rgba(139,92,246,0.4)" },
-  chipText: { fontSize: 10, fontFamily: "Cairo_700Bold", color: "rgba(255,255,255,0.45)" },
+  chipActive: { backgroundColor: colors.accentSurface, borderColor: colors.accentBorder },
+  chipText: { fontSize: 10, fontFamily: "Cairo_700Bold", color: colors.textSecondary },
   tvChipText: { fontSize: 13, lineHeight: 19 },
-  chipTextActive: { color: "#c4b5fd" },
-  chipActive2: { backgroundColor: "#7C3AED", borderColor: "#8B5CF6" },
-  chipText2Active: { color: "#fff" },
-  searchWrap: { flexDirection: "row", alignItems: "center", gap: 6, backgroundColor: "#18181B", borderRadius: 10, paddingHorizontal: 10, paddingVertical: 4, marginTop: 4, borderWidth: 1, borderColor: "rgba(255,255,255,0.06)" },
+  chipTextActive: { color: colors.accent },
+  chipActive2: { backgroundColor: colors.accent, borderColor: colors.accent },
+  chipText2Active: { color: colors.buttonText },
+  searchWrap: { flexDirection: "row", alignItems: "center", gap: 6, backgroundColor: colors.input, borderRadius: 10, paddingHorizontal: 10, paddingVertical: 4, marginTop: 4, borderWidth: 1, borderColor: colors.border },
   tvSearchWrap: { minHeight: 44, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 6, gap: 7 },
-  searchInput: { flex: 1, color: "#fff", fontSize: 10, fontFamily: "Cairo_400Regular", textAlign: "right" },
+  searchInput: { flex: 1, color: colors.textPrimary, fontSize: 10, fontFamily: "Cairo_400Regular", textAlign: "right" },
   tvSearchInput: { fontSize: 14, lineHeight: 21 },
   genreCard: { flex: 1 },
-  genreImgWrap: { height: 90, borderRadius: 16, overflow: "hidden", position: "relative", borderWidth: 1, borderColor: "rgba(255,255,255,0.07)", justifyContent: "flex-end" },
+  genreImgWrap: { height: 90, borderRadius: 16, overflow: "hidden", position: "relative", borderWidth: 1, borderColor: colors.border, justifyContent: "flex-end" },
   tvGenreImgWrap: { height: 150, borderRadius: 18, borderWidth: 1 },
   genreImg: { ...StyleSheet.absoluteFillObject, width: "100%", height: "100%" },
   genreColorBar: { position: "absolute", bottom: 0, left: 0, right: 0, height: 3 },
   genreLabel: { fontSize: 14, fontFamily: "Cairo_800ExtraBold", color: "#fff", padding: 10, textShadowColor: "rgba(0,0,0,0.8)", textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 4 },
   tvGenreLabel: { fontSize: 19, lineHeight: 28, padding: 14 },
   card: { flex: 1 },
-  cardWrap: { borderRadius: 14, overflow: "hidden", aspectRatio: 2 / 3, backgroundColor: "#18181B", borderWidth: 1, borderColor: "rgba(255,255,255,0.07)", position: "relative" },
+  cardWrap: { borderRadius: 14, overflow: "hidden", aspectRatio: 2 / 3, backgroundColor: colors.surfaceElevated, borderWidth: 1, borderColor: colors.border, position: "relative" },
   tvCardWrap: { borderRadius: 16, borderWidth: 1 },
   cardImg: { width: "100%", height: "100%" },
-  cardNoImg: { backgroundColor: "rgba(139,92,246,0.1)", alignItems: "center", justifyContent: "center" },
+  cardNoImg: { backgroundColor: colors.accentSurface, alignItems: "center", justifyContent: "center" },
   scoreBadge: { position: "absolute", top: 5, right: 5, flexDirection: "row", alignItems: "center", gap: 2, backgroundColor: "rgba(0,0,0,0.7)", borderRadius: 7, paddingHorizontal: 4, paddingVertical: 2 },
   tvScoreBadge: { top: 8, right: 8, borderRadius: 9, paddingHorizontal: 7, paddingVertical: 4, gap: 3 },
   scoreText: { fontSize: 7, color: "#fff", fontFamily: "Cairo_700Bold" },
@@ -637,5 +648,5 @@ const g = StyleSheet.create({
   cardTitle: { fontSize: 9, color: "#fff", fontFamily: "Cairo_700Bold", lineHeight: 13 },
   tvCardTitle: { fontSize: 16, lineHeight: 23, padding: 8 },
   center: { flex: 1, alignItems: "center", justifyContent: "center", gap: 12, minHeight: 200 },
-  emptyText: { fontSize: 14, fontFamily: "Cairo_700Bold", color: "rgba(255,255,255,0.35)", textAlign: "center" },
+  emptyText: { fontSize: 14, fontFamily: "Cairo_700Bold", color: colors.textMuted, textAlign: "center" },
 });

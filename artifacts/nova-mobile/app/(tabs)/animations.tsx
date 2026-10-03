@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from "react";
+import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import {
   View, Text, Pressable, TextInput, FlatList, Image,
   ScrollView, ActivityIndicator, StyleSheet, Platform,
@@ -11,6 +11,14 @@ import { useRouter } from "expo-router";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { getBaseUrl } from "@/utils/api";
 import { isTvDevice } from "@/utils/tv";
+import { useColors } from "@/hooks/useColors";
+import type { ThemePalette } from "@/constants/colors";
+
+function useAnimationTheme() {
+  const colors = useColors();
+  const s = useMemo(() => createAnimationStyles(colors), [colors]);
+  return { colors, s };
+}
 
 const IMG = "https://image.tmdb.org/t/p/w342";
 
@@ -69,6 +77,7 @@ function hasCjk(s: string) {
 }
 
 export default function AnimationsScreen() {
+  const { colors, s } = useAnimationTheme();
   const insets = useSafeAreaInsets();
   const { width, height } = useWindowDimensions();
   const router = useRouter();
@@ -190,7 +199,7 @@ export default function AnimationsScreen() {
           <Image source={{ uri: `${IMG}${item.poster_path}` }} style={s.cardImg} />
         ) : (
           <View style={[s.cardImg, s.noImg]}>
-            <Ionicons name="film" size={28} color="rgba(255,255,255,0.2)" />
+            <Ionicons name="film" size={28} color={colors.textMuted} />
           </View>
         )}
         <View style={s.cardGrad} />
@@ -218,7 +227,7 @@ export default function AnimationsScreen() {
               onPress={() => (router.canGoBack() ? router.back() : router.push("/"))}
               style={[s.iconBtn, tvMode && s.tvIconBtn]}
             >
-              <Ionicons name="chevron-forward" size={20} color="rgba(255,255,255,0.55)" />
+              <Ionicons name="chevron-forward" size={20} color={colors.textSecondary} />
             </Pressable>
             <View>
               <Text style={[s.headerTitle, tvMode && s.tvHeaderTitle]}>رسوم متحركة</Text>
@@ -232,7 +241,7 @@ export default function AnimationsScreen() {
               onPress={() => setShowFilters(o => !o)}
               style={[s.iconBtn, tvMode && s.tvIconBtn, showFilters && s.iconBtnActive]}
             >
-              <Ionicons name="options" size={tvMode ? 20 : 18} color={showFilters ? "#c4b5fd" : "rgba(255,255,255,0.55)"} />
+              <Ionicons name="options" size={tvMode ? 20 : 18} color={showFilters ? colors.accent : colors.textSecondary} />
               {activeFilterCount > 0 && (
                 <View style={s.filterBadge}><Text style={s.filterBadgeText}>{activeFilterCount}</Text></View>
               )}
@@ -241,7 +250,7 @@ export default function AnimationsScreen() {
               onPress={() => { setSearchOpen(o => !o); setTimeout(() => searchInput.current?.focus(), 100); }}
               style={[s.iconBtn, tvMode && s.tvIconBtn, searchOpen && s.iconBtnActive]}
             >
-              <Ionicons name="search" size={tvMode ? 20 : 18} color={searchOpen ? "#c4b5fd" : "rgba(255,255,255,0.55)"} />
+              <Ionicons name="search" size={tvMode ? 20 : 18} color={searchOpen ? colors.accent : colors.textSecondary} />
             </Pressable>
           </View>
         </View>
@@ -262,18 +271,18 @@ export default function AnimationsScreen() {
         {searchOpen && (
           <View style={[s.searchWrap, tvMode && s.tvSearchWrap]}>
             <View style={[s.searchBar, tvMode && s.tvSearchBar]}>
-              <Ionicons name="search" size={tvMode ? 18 : 16} color="rgba(255,255,255,0.3)" />
+              <Ionicons name="search" size={tvMode ? 18 : 16} color={colors.textMuted} />
               <TextInput
                 ref={searchInput}
                 value={searchQ}
                 onChangeText={setSearchQ}
                 placeholder={type === "movie" ? "ابحث عن فيلم أنيميشن…" : "ابحث عن مسلسل أنيميشن…"}
-                placeholderTextColor="rgba(255,255,255,0.25)"
+                placeholderTextColor={colors.textMuted}
                 style={[s.searchInput, tvMode && s.tvSearchInput]}
               />
               {searchQ ? (
                 <Pressable onPress={() => { setSearchQ(""); setSearchResults([]); }}>
-                  <Ionicons name="close-circle" size={18} color="rgba(255,255,255,0.4)" />
+                  <Ionicons name="close-circle" size={18} color={colors.textMuted} />
                 </Pressable>
               ) : null}
             </View>
@@ -290,7 +299,7 @@ export default function AnimationsScreen() {
                       <Image source={{ uri: `${IMG}${item.poster_path}` }} style={s.searchItemImg} />
                     ) : (
                       <View style={[s.searchItemImg, s.noImg]}>
-                        <Ionicons name="film" size={14} color="rgba(255,255,255,0.3)" />
+                        <Ionicons name="film" size={14} color={colors.textMuted} />
                       </View>
                     )}
                     <View style={{ flex: 1 }}>
@@ -347,7 +356,7 @@ export default function AnimationsScreen() {
             {activeFilterCount > 0 && (
               <Pressable onPress={() => { setGenre(0); setSort("popularity.desc"); setYear(""); }}
                  style={[s.clearFiltersBtn, tvMode && s.tvClearFiltersBtn]}>
-                <Ionicons name="close" size={14} color="rgba(252,165,165,0.8)" />
+                <Ionicons name="close" size={14} color={colors.destructive} />
                  <Text style={[s.clearFiltersText, tvMode && s.tvClearFiltersText]}>مسح الفلاتر ({activeFilterCount})</Text>
               </Pressable>
             )}
@@ -366,7 +375,7 @@ export default function AnimationsScreen() {
             </Text>
           </View>
           <Pressable onPress={() => { setNoticeDismissed(true); AsyncStorage.setItem("animation-notice-dismissed", "1"); }}>
-            <Ionicons name="close" size={18} color="rgba(251,191,36,0.6)" />
+            <Ionicons name="close" size={18} color={colors.textMuted} />
           </Pressable>
         </View>
       )}
@@ -375,12 +384,12 @@ export default function AnimationsScreen() {
       {/* ── Grid ── */}
       {items.length === 0 && loading ? (
         <View style={s.center}>
-          <ActivityIndicator color="#8B5CF6" size="large" />
+                <ActivityIndicator color={colors.accent} size="large" />
           <Text style={s.emptyText}>جارٍ تحميل المحتوى…</Text>
         </View>
       ) : items.length === 0 && !loading ? (
         <View style={s.center}>
-          <Ionicons name="film" size={56} color="rgba(139,92,246,0.4)" />
+          <Ionicons name="film" size={56} color={colors.accent} />
           <Text style={s.emptyTitle}>لا توجد نتائج</Text>
           <Pressable onPress={() => { setGenre(0); setSort("popularity.desc"); setYear(""); }}
             style={s.emptyBtn}>
@@ -412,7 +421,7 @@ export default function AnimationsScreen() {
           onEndReachedThreshold={0.4}
           ListFooterComponent={loading && items.length > 0 ? (
             <View style={{ padding: 20, alignItems: "center" }}>
-              <ActivityIndicator color="#8B5CF6" />
+              <ActivityIndicator color={colors.accent} />
             </View>
           ) : null}
         />
@@ -421,57 +430,57 @@ export default function AnimationsScreen() {
   );
 }
 
-const s = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#09090B" },
-  header: { backgroundColor: "#09090B", borderBottomWidth: 1, borderBottomColor: "rgba(255,255,255,0.06)", paddingHorizontal: 16, paddingTop: 12, paddingBottom: 10 },
+const createAnimationStyles = (colors: ThemePalette) => StyleSheet.create({
+  container: { flex: 1, backgroundColor: colors.background },
+  header: { backgroundColor: colors.surface, borderBottomWidth: 1, borderBottomColor: colors.border, paddingHorizontal: 16, paddingTop: 12, paddingBottom: 10 },
   headerRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 12 },
-  headerTitle: { fontSize: 22, fontFamily: "Cairo_800ExtraBold", color: "#fff" },
+  headerTitle: { fontSize: 22, fontFamily: "Cairo_800ExtraBold", color: colors.textPrimary },
   tvHeader: { paddingHorizontal: 32, paddingTop: 16, paddingBottom: 12 },
   tvHeaderRow: { marginBottom: 8 },
   tvHeaderTitle: { fontSize: 25, lineHeight: 34 },
   tvHeaderSub: { fontSize: 14, lineHeight: 21 },
-  headerSub: { fontSize: 11, color: "rgba(255,255,255,0.3)", fontFamily: "Cairo_400Regular" },
-  iconBtn: { width: 36, height: 36, borderRadius: 12, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(255,255,255,0.06)", borderWidth: 1, borderColor: "rgba(255,255,255,0.10)" },
+  headerSub: { fontSize: 11, color: colors.textMuted, fontFamily: "Cairo_400Regular" },
+  iconBtn: { width: 36, height: 36, borderRadius: 12, alignItems: "center", justifyContent: "center", backgroundColor: colors.input, borderWidth: 1, borderColor: colors.border },
   tvIconBtn: { width: 44, height: 44, borderRadius: 13 },
-  iconBtnActive: { backgroundColor: "rgba(139,92,246,0.22)", borderColor: "rgba(139,92,246,0.4)" },
-  filterBadge: { position: "absolute", top: -4, left: -4, width: 16, height: 16, borderRadius: 8, backgroundColor: "#8B5CF6", alignItems: "center", justifyContent: "center" },
+  iconBtnActive: { backgroundColor: colors.accentSurface, borderColor: colors.accentBorder },
+  filterBadge: { position: "absolute", top: -4, left: -4, width: 16, height: 16, borderRadius: 8, backgroundColor: colors.accent, alignItems: "center", justifyContent: "center" },
   filterBadgeText: { fontSize: 8, color: "#fff", fontWeight: "800" },
   typeTabs: { flexDirection: "row", gap: 8, marginBottom: 10 },
-  typeTab: { flex: 1, paddingVertical: 7, borderRadius: 16, alignItems: "center", backgroundColor: "rgba(255,255,255,0.06)", borderWidth: 1, borderColor: "rgba(255,255,255,0.08)" },
+  typeTab: { flex: 1, paddingVertical: 7, borderRadius: 16, alignItems: "center", backgroundColor: colors.input, borderWidth: 1, borderColor: colors.border },
   tvTypeTabs: { gap: 6, marginBottom: 8 },
   tvTypeTab: { paddingVertical: 8, borderRadius: 13 },
-  typeTabActive: { backgroundColor: "#7C3AED", borderColor: "rgba(139,92,246,0.5)" },
-  typeTabText: { fontSize: 13, fontFamily: "Cairo_700Bold", color: "rgba(255,255,255,0.45)" },
+  typeTabActive: { backgroundColor: colors.accent, borderColor: colors.accent },
+  typeTabText: { fontSize: 13, fontFamily: "Cairo_700Bold", color: colors.textSecondary },
   tvTypeTabText: { fontSize: 16, lineHeight: 23 },
-  typeTabTextActive: { color: "#fff" },
+  typeTabTextActive: { color: colors.buttonText },
   searchWrap: { marginBottom: 8 },
   tvSearchWrap: { marginBottom: 8 },
-  searchBar: { flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: "rgba(255,255,255,0.06)", borderRadius: 14, borderWidth: 1, borderColor: "rgba(139,92,246,0.25)", paddingHorizontal: 12, paddingVertical: 10, marginBottom: 8 },
+  searchBar: { flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: colors.input, borderRadius: 14, borderWidth: 1, borderColor: colors.accentBorder, paddingHorizontal: 12, paddingVertical: 10, marginBottom: 8 },
   tvSearchBar: { borderRadius: 11, paddingHorizontal: 12, paddingVertical: 6, marginBottom: 5 },
-  searchInput: { flex: 1, color: "#fff", fontSize: 14, fontFamily: "Cairo_400Regular", textAlign: "right" },
+  searchInput: { flex: 1, color: colors.textPrimary, fontSize: 14, fontFamily: "Cairo_400Regular", textAlign: "right" },
   tvSearchInput: { fontSize: 14, lineHeight: 21 },
-  searchDropdown: { backgroundColor: "rgba(15,12,30,0.97)", borderRadius: 16, borderWidth: 1, borderColor: "rgba(255,255,255,0.08)" },
-  searchItem: { flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 14, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: "rgba(255,255,255,0.05)" },
-  searchItemImg: { width: 32, height: 44, borderRadius: 8, backgroundColor: "rgba(255,255,255,0.08)" },
-  searchItemTitle: { fontSize: 13, fontFamily: "Cairo_700Bold", color: "#fff" },
-  searchItemYear: { fontSize: 10, color: "rgba(255,255,255,0.35)", fontFamily: "Cairo_400Regular" },
-  filterPanel: { backgroundColor: "rgba(139,92,246,0.07)", borderRadius: 16, borderWidth: 1, borderColor: "rgba(139,92,246,0.18)", padding: 12, marginBottom: 8 },
+  searchDropdown: { backgroundColor: colors.surfaceElevated, borderRadius: 16, borderWidth: 1, borderColor: colors.border },
+  searchItem: { flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 14, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: colors.border },
+  searchItemImg: { width: 32, height: 44, borderRadius: 8, backgroundColor: colors.input },
+  searchItemTitle: { fontSize: 13, fontFamily: "Cairo_700Bold", color: colors.textPrimary },
+  searchItemYear: { fontSize: 10, color: colors.textMuted, fontFamily: "Cairo_400Regular" },
+  filterPanel: { backgroundColor: colors.accentSurface, borderRadius: 16, borderWidth: 1, borderColor: colors.accentBorder, padding: 12, marginBottom: 8 },
   tvFilterPanel: { borderRadius: 14, padding: 10 },
-  filterLabel: { fontSize: 9, fontFamily: "Cairo_700Bold", color: "rgba(255,255,255,0.3)", marginBottom: 8, textTransform: "uppercase" },
+  filterLabel: { fontSize: 9, fontFamily: "Cairo_700Bold", color: colors.textMuted, marginBottom: 8, textTransform: "uppercase" },
   tvFilterLabel: { fontSize: 12, marginBottom: 6 },
-  filterChip: { paddingHorizontal: 10, paddingVertical: 5, borderRadius: 10, backgroundColor: "rgba(255,255,255,0.06)", borderWidth: 1, borderColor: "rgba(255,255,255,0.08)" },
+  filterChip: { paddingHorizontal: 10, paddingVertical: 5, borderRadius: 10, backgroundColor: colors.input, borderWidth: 1, borderColor: colors.border },
   tvFilterChip: { paddingHorizontal: 10, paddingVertical: 5, borderRadius: 9 },
-  filterChipActive: { backgroundColor: "#7C3AED" },
-  filterChipText: { fontSize: 10, fontFamily: "Cairo_700Bold", color: "rgba(255,255,255,0.40)" },
+  filterChipActive: { backgroundColor: colors.accent, borderColor: colors.accent },
+  filterChipText: { fontSize: 10, fontFamily: "Cairo_700Bold", color: colors.textSecondary },
   tvFilterChipText: { fontSize: 11, lineHeight: 17 },
-  filterChipTextActive: { color: "#fff" },
-  clearFiltersBtn: { flexDirection: "row", alignItems: "center", gap: 6, marginTop: 10, paddingHorizontal: 12, paddingVertical: 7, borderRadius: 12, backgroundColor: "rgba(239,68,68,0.08)", borderWidth: 1, borderColor: "rgba(239,68,68,0.16)", alignSelf: "flex-start" },
-  clearFiltersText: { fontSize: 10, fontFamily: "Cairo_700Bold", color: "rgba(252,165,165,0.8)" },
+  filterChipTextActive: { color: colors.buttonText },
+  clearFiltersBtn: { flexDirection: "row", alignItems: "center", gap: 6, marginTop: 10, paddingHorizontal: 12, paddingVertical: 7, borderRadius: 12, backgroundColor: colors.destructiveSurface, borderWidth: 1, borderColor: colors.destructiveBorder, alignSelf: "flex-start" },
+  clearFiltersText: { fontSize: 10, fontFamily: "Cairo_700Bold", color: colors.destructive },
   tvClearFiltersBtn: { marginTop: 8, paddingHorizontal: 12, paddingVertical: 7 },
   tvClearFiltersText: { fontSize: 13 },
-  notice: { flexDirection: "row", alignItems: "flex-start", gap: 10, margin: 12, padding: 12, borderRadius: 16, backgroundColor: "rgba(251,191,36,0.08)", borderWidth: 1, borderColor: "rgba(251,191,36,0.20)" },
-  noticeTitle: { fontSize: 12, fontFamily: "Cairo_700Bold", color: "rgba(251,191,36,0.9)", marginBottom: 3 },
-  noticeSub: { fontSize: 11, color: "rgba(251,191,36,0.5)", fontFamily: "Cairo_400Regular", lineHeight: 17 },
+  notice: { flexDirection: "row", alignItems: "flex-start", gap: 10, margin: 12, padding: 12, borderRadius: 16, backgroundColor: colors.card, borderWidth: 1, borderColor: colors.border },
+  noticeTitle: { fontSize: 12, fontFamily: "Cairo_700Bold", color: colors.textPrimary, marginBottom: 3 },
+  noticeSub: { fontSize: 11, color: colors.textSecondary, fontFamily: "Cairo_400Regular", lineHeight: 17 },
   tvNotice: { margin: 10, padding: 10, borderRadius: 13 },
   tvNoticeTitle: { fontSize: 13 },
   tvNoticeSub: { fontSize: 12, lineHeight: 18 },
@@ -481,10 +490,10 @@ const s = StyleSheet.create({
   tvGrid: { paddingHorizontal: 12, paddingTop: 10 },
   tvGridRow: { gap: 10, marginBottom: 10 },
   tvCard: { marginBottom: 10 },
-  cardImgWrap: { borderRadius: 14, overflow: "hidden", aspectRatio: 2 / 3, backgroundColor: "rgba(255,255,255,0.05)" },
+  cardImgWrap: { borderRadius: 14, overflow: "hidden", aspectRatio: 2 / 3, backgroundColor: colors.surfaceElevated },
   tvCardImgWrap: { borderRadius: 15 },
   cardImg: { width: "100%", height: "100%" },
-  noImg: { alignItems: "center", justifyContent: "center", backgroundColor: "rgba(139,92,246,0.08)" },
+  noImg: { alignItems: "center", justifyContent: "center", backgroundColor: colors.accentSurface },
   cardGrad: { ...StyleSheet.absoluteFillObject, backgroundColor: "transparent",
     // gradient not easily possible, use overlay
   },
@@ -492,22 +501,22 @@ const s = StyleSheet.create({
   scoreText: { fontSize: 9, fontFamily: "Cairo_700Bold", color: "#fff" },
   tvScoreBadge: { top: 7, left: 7, borderRadius: 8, paddingHorizontal: 6, paddingVertical: 3 },
   tvScoreText: { fontSize: 11 },
-  yearText: { position: "absolute", bottom: 6, left: 6, fontSize: 8, color: "rgba(255,255,255,0.35)", fontFamily: "Cairo_400Regular" },
+  yearText: { position: "absolute", bottom: 6, left: 6, fontSize: 8, color: "rgba(255,255,255,0.8)", fontFamily: "Cairo_400Regular" },
   tvYearText: { bottom: 7, left: 7, fontSize: 10 },
-  cardTitle: { marginTop: 6, fontSize: 10.5, fontFamily: "Cairo_700Bold", color: "rgba(255,255,255,0.80)", lineHeight: 15, textAlign: "right" },
+  cardTitle: { marginTop: 6, fontSize: 10.5, fontFamily: "Cairo_700Bold", color: colors.textPrimary, lineHeight: 15, textAlign: "right" },
   tvCardTitle: { marginTop: 5, fontSize: 15, lineHeight: 22 },
   center: { flex: 1, alignItems: "center", justifyContent: "center", gap: 12 },
-  emptyText: { fontSize: 13, color: "rgba(255,255,255,0.3)", fontFamily: "Cairo_400Regular" },
-  emptyTitle: { fontSize: 15, fontFamily: "Cairo_700Bold", color: "rgba(255,255,255,0.4)" },
-  emptyBtn: { paddingHorizontal: 16, paddingVertical: 8, borderRadius: 14, backgroundColor: "rgba(139,92,246,0.15)", borderWidth: 1, borderColor: "rgba(139,92,246,0.28)" },
-  emptyBtnText: { fontSize: 12, fontFamily: "Cairo_700Bold", color: "#c4b5fd" },
+  emptyText: { fontSize: 13, color: colors.textMuted, fontFamily: "Cairo_400Regular" },
+  emptyTitle: { fontSize: 15, fontFamily: "Cairo_700Bold", color: colors.textSecondary },
+  emptyBtn: { paddingHorizontal: 16, paddingVertical: 8, borderRadius: 14, backgroundColor: colors.accentSurface, borderWidth: 1, borderColor: colors.accentBorder },
+  emptyBtnText: { fontSize: 12, fontFamily: "Cairo_700Bold", color: colors.accent },
   dubbedHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 12, marginBottom: 10 },
   dubbedLeft: { flexDirection: "row", alignItems: "center", gap: 7 },
   sectionDot: { width: 6, height: 6, borderRadius: 3 },
-  dubbedTitle: { fontSize: 14, fontFamily: "Cairo_700Bold", color: "#fff" },
+  dubbedTitle: { fontSize: 14, fontFamily: "Cairo_700Bold", color: colors.textPrimary },
   seeAllBtn: { flexDirection: "row", alignItems: "center", gap: 2 },
-  seeAllText: { fontSize: 12, fontFamily: "Cairo_600SemiBold", color: "#8B5CF6" },
-  dubbedCard: { width: 110, borderRadius: 14, overflow: "hidden", backgroundColor: "rgba(255,255,255,0.05)" },
+  seeAllText: { fontSize: 12, fontFamily: "Cairo_600SemiBold", color: colors.accent },
+  dubbedCard: { width: 110, borderRadius: 14, overflow: "hidden", backgroundColor: colors.surfaceElevated },
   dubbedImg: { width: 110, height: 155 },
   dubbedGrad: { ...StyleSheet.absoluteFillObject, justifyContent: "flex-end", padding: 8 },
   dubbedItemTitle: { fontSize: 10, fontFamily: "Cairo_700Bold", color: "#fff", lineHeight: 14 },

@@ -20,7 +20,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { getBaseUrl } from "@/utils/api";
 import { TvPressable, useTvMetrics } from "@/utils/tv";
-import { useColors } from "@/hooks/useColors";
+import paletteColors from "@/constants/colors";
 import {
   buildSkipScopeKey,
   isSkipInRange,
@@ -366,47 +366,6 @@ function parseVTT(text: string): SubCue[] {
   return cues;
 }
 
-/* ─── PulseRing (نبض أرجواني حول زر التشغيل عند الإيقاف المؤقت) ─── */
-function PulseRing() {
-  const scale1 = useRef(new Animated.Value(1)).current;
-  const opacity1 = useRef(new Animated.Value(0.65)).current;
-  const scale2 = useRef(new Animated.Value(1)).current;
-  const opacity2 = useRef(new Animated.Value(0.35)).current;
-  useEffect(() => {
-    const pulse = (sc: Animated.Value, op: Animated.Value, delay: number) =>
-      Animated.loop(Animated.sequence([
-        Animated.delay(delay),
-        Animated.parallel([
-          Animated.timing(sc, { toValue: 1.85, duration: 1200, easing: Easing.out(Easing.quad), useNativeDriver: true }),
-          Animated.timing(op, { toValue: 0, duration: 1200, easing: Easing.out(Easing.quad), useNativeDriver: true }),
-        ]),
-        Animated.parallel([
-          Animated.timing(sc, { toValue: 1, duration: 0, useNativeDriver: true }),
-          Animated.timing(op, { toValue: delay === 0 ? 0.65 : 0.35, duration: 0, useNativeDriver: true }),
-        ]),
-      ]));
-    const a1 = pulse(scale1, opacity1, 0);
-    const a2 = pulse(scale2, opacity2, 550);
-    a1.start();
-    a2.start();
-    return () => { a1.stop(); a2.stop(); };
-  }, []);
-  return (
-    <>
-      <Animated.View pointerEvents="none" style={{
-        position: "absolute", width: 90, height: 90, borderRadius: 45,
-        borderWidth: 2, borderColor: "#8B5CF6",
-        transform: [{ scale: scale1 }], opacity: opacity1,
-      }} />
-      <Animated.View pointerEvents="none" style={{
-        position: "absolute", width: 90, height: 90, borderRadius: 45,
-        borderWidth: 1.5, borderColor: "#a78bfa",
-        transform: [{ scale: scale2 }], opacity: opacity2,
-      }} />
-    </>
-  );
-}
-
 /* ─── SpinRing ─── */
 function SpinRing({ size = 52 }: { size?: number }) {
   const rot = useRef(new Animated.Value(0)).current;
@@ -461,16 +420,20 @@ function ExpoRiftPlayer({
   episodeTitle,
   onError,
 }: Props) {
-  const colors = useColors();
+  // The player keeps one fixed dark visual style, independent of app theme.
+  const colors = paletteColors.black;
   // Keep the playback timeline physically left-to-right even when the app is RTL.
   // React Native swaps left/right style properties on native RTL layouts.
   const timelineNativeRTL = Platform.OS !== "web" && I18nManager.isRTL;
   const timelineStartEdge: "left" | "right" = timelineNativeRTL ? "right" : "left";
   const timelineEndEdge: "left" | "right" = timelineNativeRTL ? "left" : "right";
   const playerControlSurface = {
-    backgroundColor: colors.playerControl,
-    borderColor: colors.playerControlBorder,
-    shadowColor: colors.accent,
+    backgroundColor: "rgba(22,24,29,0.36)",
+    borderColor: "rgba(255,255,255,0.30)",
+    shadowColor: "transparent",
+    shadowOpacity: 0,
+    shadowRadius: 0,
+    elevation: 0,
   };
   const insets = useSafeAreaInsets();
   const { tv: tvMode } = useTvMetrics();
@@ -3024,7 +2987,7 @@ function ExpoRiftPlayer({
             );
             const btnsBlock = nativeRTL ? (
               <View style={[s.topRightRow, tvMode && s.tvTopRightRow]}>
-                <Pressable onPress={handleBack} style={[s.topCloseBtn, tvMode && s.tvTopCloseBtn]} hitSlop={10}>
+                <Pressable onPress={handleBack} style={[s.topCloseBtn, tvMode && s.tvTopCloseBtn, playerControlSurface]} hitSlop={10}>
                   <Ionicons name="close" size={21} color="rgba(239,68,68,0.90)" />
                 </Pressable>
                  <Pressable onPress={togglePortrait} style={[s.topRotateBtn, tvMode && s.tvTopActionBtn, isPortrait && s.topRotateBtnActive, playerControlSurface]} hitSlop={10}>
@@ -3052,7 +3015,7 @@ function ExpoRiftPlayer({
                     color={isPortrait ? colors.accent : colors.playerControlIcon}
                   />
                  </Pressable>
-                <Pressable onPress={handleBack} style={[s.topCloseBtn, tvMode && s.tvTopCloseBtn]} hitSlop={10}>
+                <Pressable onPress={handleBack} style={[s.topCloseBtn, tvMode && s.tvTopCloseBtn, playerControlSurface]} hitSlop={10}>
                   <Ionicons name="close" size={21} color="rgba(239,68,68,0.90)" />
                 </Pressable>
               </View>
@@ -3082,7 +3045,6 @@ function ExpoRiftPlayer({
                 </View>
                 {/* زر المنتصف: play/pause/spinner */}
                 <View style={s.controlButtonSlot}>
-                  {!isPlaying && !buffering && <PulseRing />}
                   <Pressable hasTVPreferredFocus={tvMode} onPress={togglePlay} style={[s.centerPlayBtn, tvMode && s.tvCenterPlayBtn, playerControlSurface]} hitSlop={16}>
                     {buffering && !error
                       ? <ActivityIndicator size={32} color={colors.playerControlIcon} />
@@ -3105,7 +3067,6 @@ function ExpoRiftPlayer({
               /* وضع أفقي: play/pause في المنتصف دائماً */
               <View style={s.centerLandscapeWrap}>
                 <View style={s.controlButtonSlot}>
-                  {!isPlaying && !buffering && <PulseRing />}
                   <Pressable hasTVPreferredFocus={tvMode} onPress={togglePlay} style={[s.centerPlayBtn, tvMode && s.tvCenterPlayBtn, playerControlSurface]} hitSlop={16}>
                     {buffering && !error
                       ? <ActivityIndicator size={32} color={colors.playerControlIcon} />

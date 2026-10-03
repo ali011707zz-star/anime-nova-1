@@ -509,7 +509,7 @@ function TvPlayerSurface({
                   tvFocusStyle(focused),
                 ]}
               >
-                <Ionicons name={isPlaying ? "pause" : "play"} size={42} color="#09090b" />
+                <Ionicons name={isPlaying ? "pause" : "play"} size={42} color="#fff" />
                 <Text style={styles.tvPlayLabel}>{isPlaying ? "إيقاف" : "تشغيل"}</Text>
               </Pressable>
               <Pressable
@@ -1265,7 +1265,7 @@ export function RiftPlayer({
                   hasTVPreferredFocus={tvMode}
                   style={({ focused }) => [styles.playButton, tvMode && styles.tvPlayButton, tvMode && tvFocusStyle(focused)]}
                 >
-                  <Ionicons name={isPlaying ? "pause" : "play"} size={24} color="#09090b" />
+                  <Ionicons name={isPlaying ? "pause" : "play"} size={24} color="#fff" />
                 </Pressable>
               </View>
               {tvMode && canNext && onNextEpisode && (
@@ -1660,9 +1660,10 @@ const styles = StyleSheet.create({
   tvCinemaPlayButton: {
     width: 92, minHeight: 92, borderRadius: 46,
     alignItems: "center", justifyContent: "center",
-    backgroundColor: "#c4b5fd",
+    backgroundColor: "rgba(255,255,255,0.14)",
+    borderWidth: 1, borderColor: "rgba(255,255,255,0.32)",
   },
-  tvPlayLabel: { color: "#09090b", fontSize: 14, fontWeight: "900", marginTop: 2 },
+  tvPlayLabel: { color: "#fff", fontSize: 14, fontWeight: "900", marginTop: 2 },
   tvUtilityRow: {
     flexDirection: "row", alignItems: "center", justifyContent: "center",
     gap: 9, marginTop: 14,
@@ -1692,8 +1693,8 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(8,7,18,0.92)",
   },
   tvEndedText: { color: "#fff", fontSize: 22, fontWeight: "900" },
-  tvNextButton: { paddingHorizontal: 20, paddingVertical: 12, borderRadius: 14, backgroundColor: "#c4b5fd" },
-  tvNextButtonText: { color: "#09090b", fontSize: 17, fontWeight: "900" },
+  tvNextButton: { paddingHorizontal: 20, paddingVertical: 12, borderRadius: 14, backgroundColor: "rgba(255,255,255,0.14)", borderWidth: 1, borderColor: "rgba(255,255,255,0.32)" },
+  tvNextButtonText: { color: "#fff", fontSize: 17, fontWeight: "900" },
   tvCinemaSubtitle: {
     position: "absolute", left: 100, right: 100, bottom: 300,
     alignItems: "center",
@@ -1705,7 +1706,7 @@ const styles = StyleSheet.create({
   tvTitle: { fontSize: 30, fontWeight: "800" },
   meta: { color: "rgba(255,255,255,0.6)", fontSize: 11, marginTop: 2 },
   tvMeta: { fontSize: 20, marginTop: 6 },
-  iconButton: { padding: 8, borderRadius: 18, backgroundColor: "rgba(0,0,0,0.45)" },
+  iconButton: { padding: 8, borderRadius: 18, backgroundColor: "rgba(255,255,255,0.10)", borderWidth: 1, borderColor: "rgba(255,255,255,0.24)" },
   bottomArea: { position: "absolute", left: 12, right: 12, bottom: 12 },
   tvBottomArea: { left: 52, right: 52, bottom: 36 },
   seekRow: { flexDirection: "row", alignItems: "center", gap: 8 },
@@ -1717,15 +1718,15 @@ const styles = StyleSheet.create({
   controlsRow: { flexDirection: "row", alignItems: "center", marginTop: 4 },
   controlSide: { flex: 1, alignItems: "center" },
   controlCenter: { width: 66, alignItems: "center" },
-  control: { flexDirection: "row", alignItems: "center", padding: 7 },
+  control: { flexDirection: "row", alignItems: "center", padding: 7, borderRadius: 14, backgroundColor: "rgba(255,255,255,0.10)", borderWidth: 1, borderColor: "rgba(255,255,255,0.24)" },
   tvControl: { padding: 18, minWidth: 104, justifyContent: "center" },
   tvEpisodeControl: { minWidth: 160, minHeight: 78, borderRadius: 18 },
   tvEpisodeText: { color: "#fff", fontSize: 20, fontWeight: "800", marginHorizontal: 7 },
   controlText: { color: "#fff", fontSize: 10, marginLeft: -5 },
-  playButton: { width: 48, height: 48, borderRadius: 24, backgroundColor: "#c4b5fd", alignItems: "center", justifyContent: "center" },
+  playButton: { width: 48, height: 48, borderRadius: 24, backgroundColor: "rgba(255,255,255,0.14)", borderWidth: 1, borderColor: "rgba(255,255,255,0.32)", alignItems: "center", justifyContent: "center" },
   tvPlayButton: { width: 84, height: 84, borderRadius: 42 },
   flex: { flex: 1 },
-  pill: { paddingHorizontal: 10, paddingVertical: 8, borderRadius: 10, backgroundColor: "rgba(0,0,0,0.55)" },
+  pill: { paddingHorizontal: 10, paddingVertical: 8, borderRadius: 10, backgroundColor: "rgba(255,255,255,0.10)", borderWidth: 1, borderColor: "rgba(255,255,255,0.22)" },
   tvPill: { paddingHorizontal: 24, paddingVertical: 18, minWidth: 104, alignItems: "center" },
   tvSubtitlePill: { minWidth: 190, minHeight: 72, paddingHorizontal: 30, paddingVertical: 20, borderRadius: 18, alignItems: "center", justifyContent: "center" },
   tvSubtitleSettingsPill: {
@@ -1739,8 +1740,8 @@ const styles = StyleSheet.create({
   pillText: { color: "#fff", fontSize: 11, fontWeight: "700" },
   tvPillText: { fontSize: 20, fontWeight: "800" },
   tvSubtitleButtonText: { fontSize: 28, lineHeight: 40, fontWeight: "900" },
-  skip: { paddingHorizontal: 10, paddingVertical: 8, borderRadius: 10, backgroundColor: "#fde68a" },
-  skipText: { color: "#451a03", fontSize: 11, fontWeight: "700" },
+  skip: { paddingHorizontal: 10, paddingVertical: 8, borderRadius: 10, backgroundColor: "rgba(255,255,255,0.10)", borderWidth: 1, borderColor: "rgba(255,255,255,0.22)" },
+  skipText: { color: "#fff", fontSize: 11, fontWeight: "700" },
   menu: { position: "absolute", bottom: 42, right: 0, minWidth: 130, backgroundColor: "rgba(20,20,25,0.97)", borderRadius: 12, padding: 5 },
   menuItem: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 10, paddingVertical: 9, gap: 15 },
   menuText: { color: "#fff", fontSize: 12 },
