@@ -856,20 +856,20 @@ router.post("/api/telegram/notify-test", async (_req: Request, res: Response) =>
   const poster  = await fetchAnimePoster(testAnilistId);
   const caption = buildEpisodeCaption(testTitle, testEp);
 
-  const sent = poster
-    ? await sendChannelPhoto(poster, caption)
-    : await sendMessage(channelId, caption);
+  const photoSent = poster ? await sendChannelPhoto(poster, caption) : false;
+  const sent = photoSent || await sendMessage(channelId, caption);
   if (!sent) {
     res.status(502).json({
       ok: false,
       error: "تعذر إرسال الاختبار إلى القناة. تحقق من صلاحية البوت ورابط البوستر.",
       channelId,
-      hasPoster: !!poster,
+      photoSent: false,
+      posterAvailable: !!poster,
     });
     return;
   }
 
-  res.json({ ok: true, channelId, hasPoster: !!poster, caption });
+  res.json({ ok: true, channelId, hasPoster: photoSent, posterAvailable: !!poster, caption });
 });
 
 /* ── Scheduler status & manual trigger ───────────────────────────────── */
