@@ -2,6 +2,7 @@ import { Router, type Request, type Response } from "express";
 import { randomUUID } from "node:crypto";
 import { sbInsertIgnore, sbPatch, sbSelect, sbUpsert } from "../lib/supabaseClient.js";
 import { getMobileUserId } from "../lib/security.js";
+import { sendFcmMessage } from "../lib/fcm.js";
 
 const router = Router();
 const EXPO_PUSH_URL = "https://exp.host/--/api/v2/push/send";
@@ -52,22 +53,53 @@ type PushTokenRow = {
   app_version?: string;
 };
 
+function isExpoToken(value: string): boolean {
+  return EXPO_TOKEN_RE.test(value);
+}
+
 function validToken(value: unknown): value is string {
-  return typeof value === "string" && value.length <= 255 && EXPO_TOKEN_RE.test(value);
+  return typeof value === "string" &&
+    value.length >= 20 &&
+    value.length <= 4096 &&
+    !/[\u0000-\u0020\u007f]/.test(value) &&
+    (EXPO_TOKEN_RE.test(value) || value.length >= 32);
 }
 
 router.post("/push/register", async (req: Request, res: Response) => {
   const token = req.body?.token;
-  if (!validToken(token)) {
-    console.warn("[push] registration rejected: invalid Expo token");
-    return res.status(400).json({ error: "Invalid Expo push token" });
+  const platform = req.body?.platform === "ios" ? "ios" : "android";
+  if (!validToken(token) || (!isExpoToken(token) && platform !== "android")) {
+    console.warn("[push] registration rejected: invalid push token or provider/platform mismatch");
+    return res.status(400).json({ error: "Invalid push token" });
   }
 
-  const platform = req.body?.platform === "ios" ? "ios" : "android";
   const appVersion = typeof req.body?.appVersion === "string"
     ? req.body.appVersion.slice(0, 32)
     : null;
   try {
+    const previousToken = req.body?.previousToken;
+    if (previousToken !== token && validToken(previousToken)) {
+      const previousDisabled = await sbPatch(
+        "mobile_push_tokens",
+        { token: `eq.${previousToken}` },
+        {
+          disabled_at: new Date().toISOString(),
+          last_seen_at: new Date().toISOString(),
+        },
+      );
+      if (!previousDisabled) {
+        const stillActive = await sbSelect<PushTokenRow>(
+          "mobile_push_tokens",
+          { token: `eq.${previousToken}`, disabled_at: "is.null" },
+          { limit: 1, strict: true },
+        );
+        if (stillActive.length) {
+          console.warn(`[push] previous token could not be disabled during provider migration platform=${platform}`);
+          return res.status(503).json({ error: "Previous push token cleanup unavailable" });
+        }
+      }
+    }
+
     const saved = await sbUpsert(
       "mobile_push_tokens",
       {
@@ -94,7 +126,7 @@ router.post("/push/register", async (req: Request, res: Response) => {
 
 router.post("/push/unregister", async (req: Request, res: Response) => {
   const token = req.body?.token;
-  if (!validToken(token)) return res.status(400).json({ error: "Invalid Expo push token" });
+  if (!validToken(token)) return res.status(400).json({ error: "Invalid push token" });
   const updated = await sbPatch("mobile_push_tokens", { token: `eq.${token}` }, {
     disabled_at: new Date().toISOString(),
     last_seen_at: new Date().toISOString(),
@@ -262,6 +294,43 @@ async function sendTicketBatch(rows: PushDeliveryRow[]): Promise<void> {
   }
 }
 
+async function sendFcmDelivery(row: PushDeliveryRow): Promise<void> {
+  let payload: Parameters<typeof sendFcmMessage>[1];
+  try {
+    payload = JSON.parse(row.payload_json) as Parameters<typeof sendFcmMessage>[1];
+  } catch {
+    await deferDelivery(row, "FCM_INVALID_QUEUED_PAYLOAD", { status: "failed" });
+    return;
+  }
+
+  const result = await sendFcmMessage(row.token, payload);
+  if (result.ok) {
+    const saved = await patchDelivery(row, {
+      status: "sent",
+      attempts: (row.attempts || 0) + 1,
+      next_attempt_at: null,
+      last_error: null,
+    });
+    if (saved) console.info("[push] FCM accepted notification for delivery");
+    else console.error("[push] database failed to persist FCM acceptance");
+    return;
+  }
+
+  if (result.invalidToken) {
+    await disableDeliveryToken(row, result.code);
+    return;
+  }
+  await deferDelivery(row, result.code, {
+    status: result.retryable ? "retry" : "failed",
+  });
+}
+
+async function sendFcmBatch(rows: PushDeliveryRow[]): Promise<void> {
+  for (let offset = 0; offset < rows.length; offset += 10) {
+    await Promise.all(rows.slice(offset, offset + 10).map((row) => sendFcmDelivery(row)));
+  }
+}
+
 async function processTicketReceipts(rows: PushDeliveryRow[]): Promise<void> {
   const withTickets = rows.filter((row) => row.ticket_id);
   for (let offset = 0; offset < withTickets.length; offset += 1000) {
@@ -353,9 +422,12 @@ async function processPushCycle(): Promise<void> {
     },
     { limit: 1000, strict: true },
   );
-  for (let offset = 0; offset < dueSends.length; offset += 100) {
-    await sendTicketBatch(dueSends.slice(offset, offset + 100));
+  const expoRows = dueSends.filter((row) => isExpoToken(row.token));
+  const fcmRows = dueSends.filter((row) => !isExpoToken(row.token));
+  for (let offset = 0; offset < expoRows.length; offset += 100) {
+    await sendTicketBatch(expoRows.slice(offset, offset + 100));
   }
+  await sendFcmBatch(fcmRows);
 
   const invalidRows = await sbSelect<PushDeliveryRow>(
     PUSH_DELIVERIES_TABLE,
@@ -378,7 +450,7 @@ async function runPushCycle(): Promise<void> {
   if (pushCycle) return pushCycle;
   pushCycle = processPushCycle()
     .catch((error) => {
-      console.error("[push] delivery worker failed at database/Expo stage:", error instanceof Error ? error.message : String(error));
+      console.error("[push] delivery worker failed at database/provider stage:", error instanceof Error ? error.message : String(error));
     })
     .finally(() => {
       pushCycle = null;
@@ -387,7 +459,7 @@ async function runPushCycle(): Promise<void> {
 }
 
 export function startPushDeliveryWorker(): void {
-  console.info("[push] durable ticket/receipt worker started interval_seconds=60");
+  console.info("[push] durable Expo ticket/receipt + FCM delivery worker started interval_seconds=60");
   void runPushCycle();
   setInterval(() => void runPushCycle(), 60_000);
 }

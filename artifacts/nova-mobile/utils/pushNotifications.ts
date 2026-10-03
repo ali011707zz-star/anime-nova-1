@@ -75,32 +75,36 @@ async function registerPushNotificationsOnce(): Promise<boolean> {
     }
     console.info(`[push] permission granted status=${permission.status || "unknown"}`);
 
-    phase = "Expo token";
-    const id = projectId();
-    if (!id) {
-      console.error("[push] Expo projectId is missing; cannot create a project-scoped push token");
+    const useDirectFcm = Platform.OS === "android";
+    phase = useDirectFcm ? "native FCM token" : "Expo token";
+    const id = useDirectFcm ? undefined : projectId();
+    if (!useDirectFcm && !id) {
+      console.error("[push] Expo projectId is missing; cannot create an iOS project-scoped push token");
       await AsyncStorage.setItem(PUSH_REGISTERED_KEY, "0").catch(() => {});
       return false;
     }
     let token: string | undefined;
     for (let attempt = 1; attempt <= 3; attempt += 1) {
       try {
-        const tokenResponse = await Notifications.getExpoPushTokenAsync({ projectId: id });
+        const tokenResponse = useDirectFcm
+          ? await Notifications.getDevicePushTokenAsync()
+          : await Notifications.getExpoPushTokenAsync({ projectId: id! });
         token = String(tokenResponse.data || "").trim();
         break;
       } catch (error) {
-        console.warn(`[push] Expo token request failed attempt=${attempt}/3:`, error instanceof Error ? error.message : String(error));
+        console.warn(`[push] ${useDirectFcm ? "FCM" : "Expo"} token request failed attempt=${attempt}/3:`, error instanceof Error ? error.message : String(error));
         if (attempt < 3) await wait(500 * 2 ** (attempt - 1));
       }
     }
     if (!token) {
-      console.warn("[push] Expo returned an empty device token");
+      console.warn(`[push] ${useDirectFcm ? "FCM" : "Expo"} returned an empty device token`);
       await AsyncStorage.setItem(PUSH_REGISTERED_KEY, "0").catch(() => {});
       return false;
     }
-    console.info(`[push] Expo token obtained projectId=${id}`);
+    console.info(useDirectFcm ? "[push] native FCM token obtained" : `[push] Expo token obtained projectId=${id}`);
 
     phase = "Token Registration";
+    const previousToken = await AsyncStorage.getItem(PUSH_TOKEN_KEY);
     let response: Response | undefined;
     for (let attempt = 1; attempt <= 3; attempt += 1) {
       try {
@@ -109,6 +113,7 @@ async function registerPushNotificationsOnce(): Promise<boolean> {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             token,
+            ...(previousToken && previousToken !== token ? { previousToken } : {}),
             platform: Platform.OS,
             appVersion: Constants.expoConfig?.version || "1.0.0",
           }),
@@ -207,15 +212,14 @@ export async function setPushNotificationsEnabled(enabled: boolean): Promise<boo
 }
 
 /**
- * Expo's listener reports a native FCM/APNs token, not an Expo Push Token.
- * Refresh the project-scoped Expo token through getExpoPushTokenAsync before
- * posting to the existing server endpoint.
+ * The native token listener covers FCM/APNs. Refresh the platform's registered
+ * token through the same registration path when the native token rolls.
  */
 export function subscribeToPushTokenChanges(): () => void {
   if (Platform.OS === "web") return () => {};
   tokenListener?.remove();
   tokenListener = Notifications.addPushTokenListener(() => {
-    console.info("[push] native device token changed; refreshing Expo token");
+    console.info("[push] native device token changed; refreshing push registration");
     void registerPushNotifications();
   });
   return () => {
