@@ -154,3 +154,17 @@ mtime_ms = 1788359046000
 storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:7f32ed00-a8c7-4420-bf5e-625a15b65554/bb52f139-ccb6-49fe-8d69-5ffdbf1b6ac3/f5086b5d-a8a9-432c-8cb0-4df3af3576e4"
 storage_version_token = "1788360501026140"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "PJbiplICoZ9O3Vb-NLNFv"
+uri = "file://docs/research/STARDIMA_SOURCE_ASSESSMENT_2026-10-04.md"
+type = "text"
+title = "تقرير فحص كتالوج Stardima"
+description = "تفاصيل أعداد الكتالوج والحلقات، اختبار ثبات الروابط، وإمكانية التخزين في قاعدة Nova."
+logical_id = "596d66b6-5f84-4df1-9185-0910985484a1"
+content_hash = "sha256:d7ccd9920d8fb6f3b1011e83dec372df4d2362699b1f18d04413059fd8177346"
+size = 11269
+mtime_ms = 1791144002640
+storage_uri = "gcs://replit-rams-assets-sisko/rams/assets/repl:6c2ae02d-1a7c-4eab-9225-335fe930071b/596d66b6-5f84-4df1-9185-0910985484a1/52ac87aa-675e-440e-9fd1-2d2926e6a59f"
+storage_version_token = "1791144031241148"
+content_type = "text/markdown"
