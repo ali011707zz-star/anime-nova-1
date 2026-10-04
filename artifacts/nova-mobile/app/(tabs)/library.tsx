@@ -309,8 +309,22 @@ export default function LibraryScreen() {
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.filterChips}>
             {LIBRARY_YEARS.map(y => (
               <Pressable key={y || "all-years"} onPress={() => setYear(y)} focusable={tvMode}
-                style={({ focused }) => [s.filterChip, tvMode && s.tvFilterChip, year === y && s.filterChipActive, tvMode && tvFocusStyle(focused)]}>
-                <Text style={[s.filterChipText, tvMode && s.tvFilterChipText, year === y && s.filterChipTextActive]}>{y || "كل الأعوام"}</Text>
+                style={({ focused }) => [
+                  s.filterChip,
+                  tvMode && s.tvFilterChip,
+                  year === y && s.filterChipActive,
+                  {
+                    backgroundColor: year === y ? colors.accentSurface : colors.surface,
+                    borderColor: year === y ? colors.accentBorder : colors.border,
+                  },
+                  tvMode && tvFocusStyle(focused),
+                ]}>
+                <Text style={[
+                  s.filterChipText,
+                  tvMode && s.tvFilterChipText,
+                  year === y && s.filterChipTextActive,
+                  { color: year === y ? colors.accent : colors.textSecondary },
+                ]}>{y || "كل الأعوام"}</Text>
               </Pressable>
             ))}
           </ScrollView>

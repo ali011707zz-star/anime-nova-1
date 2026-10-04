@@ -279,6 +279,7 @@ function EpisodeRow({
   hasTVPreferredFocus?: boolean;
 }) {
   const colors = useColors();
+  const ep_s = useMemo(() => createEpStyles(colors), [colors]);
   const { width, height } = useWindowDimensions();
   const tvMode = isTvDevice(width, height);
   const ep = epByNumber.get(n);
@@ -341,7 +342,7 @@ function EpisodeRow({
           accessibilityRole="button"
           accessibilityLabel={`تعليقات الحلقة ${n}`}
         >
-          <Ionicons name="chatbubble-ellipses" size={tvMode ? 26 : 11} color={commentCount > 0 ? "#c4b5fd" : "rgba(255,255,255,0.2)"} />
+          <Ionicons name="chatbubble-ellipses" size={tvMode ? 26 : 11} color={commentCount > 0 ? colors.accent : colors.textMuted} />
           {commentCount > 0 && (
             <Text style={[ep_s.commentCount, tvMode && ep_s.tvCommentCount]}>{commentCount}</Text>
           )}
@@ -355,7 +356,7 @@ function EpisodeRow({
           accessibilityRole="button"
           accessibilityLabel={watched ? `إلغاء مشاهدة الحلقة ${n}` : `تحديد الحلقة ${n} كمشاهدة`}
         >
-          <Ionicons name={watched ? "eye" : "eye-off"} size={tvMode ? 26 : 12} color={watched ? "#8B5CF6" : "rgba(255,255,255,0.2)"} />
+          <Ionicons name={watched ? "eye" : "eye-off"} size={tvMode ? 26 : 12} color={watched ? colors.accent : colors.textMuted} />
         </Pressable>
       </View>
     </View>
@@ -364,6 +365,7 @@ function EpisodeRow({
 
 export default function EpisodeListScreen() {
   const colors = useColors();
+  const ep_s = useMemo(() => createEpStyles(colors), [colors]);
   const { id, src, title, english, cover, ep } = useLocalSearchParams<{
     id: string;
     src?: string;
@@ -758,7 +760,7 @@ export default function EpisodeListScreen() {
     </View>
   );
   if (!anime) return (
-    <View style={ep_s.container}>
+    <View style={[ep_s.container, { backgroundColor: colors.background }]}>
       <View style={ep_s.center}>
           <Text style={[ep_s.notFound, { color: colors.textSecondary }]}>لم يُعثر على الأنمي</Text>
       </View>
@@ -818,10 +820,10 @@ export default function EpisodeListScreen() {
       <View style={[ep_s.controls, tvMode && ep_s.tvControls, { backgroundColor: colors.surface, borderBottomColor: colors.border }]}>
         {/* Progress bar */}
         <View style={ep_s.progressRow}>
-          <View style={ep_s.progressTrack}>
+        <View style={[ep_s.progressTrack, { backgroundColor: colors.surfaceElevated }]}>
             <View style={[ep_s.progressFill, { width: `${pct}%` }]} />
           </View>
-           <Text style={[ep_s.pctText, tvMode && ep_s.tvText]}>{pct}%</Text>
+           <Text style={[ep_s.pctText, tvMode && ep_s.tvText, { color: colors.textMuted }]}>{pct}%</Text>
         </View>
         {seasons.length > 1 && (
           <View style={ep_s.seasonSection}>
@@ -854,6 +856,10 @@ export default function EpisodeListScreen() {
                       ep_s.seasonTab,
                       isActive && ep_s.seasonTabActive,
                       tvMode && ep_s.tvSeasonTab,
+                      {
+                        backgroundColor: isActive ? colors.accentSurface : colors.surface,
+                        borderColor: isActive ? colors.accentBorder : colors.border,
+                      },
                       tvMode && tvFocusStyle(focused),
                       pressed && { opacity: 0.84 },
                     ]}
@@ -862,10 +868,11 @@ export default function EpisodeListScreen() {
                       ep_s.seasonTabTitle,
                       tvMode && ep_s.tvSeasonTabTitle,
                       isActive && ep_s.seasonTabTitleActive,
+                      { color: isActive ? colors.accent : colors.textPrimary },
                     ]}>
                       الموسم {index + 1}
                     </Text>
-                    <Text style={[ep_s.seasonTabCount, tvMode && ep_s.tvSeasonTabCount]}>
+                    <Text style={[ep_s.seasonTabCount, tvMode && ep_s.tvSeasonTabCount, { color: colors.textMuted }]}>
                       {episodeCount === null ? "العدد غير متاح" : `${episodeCount} حلقة`}
                     </Text>
                   </Pressable>
@@ -892,8 +899,8 @@ export default function EpisodeListScreen() {
               pressed && { opacity: 0.84 },
             ]}
           >
-            <Ionicons name="swap-vertical" size={tvMode ? 20 : 14} color="#A78BFA" />
-            <Text style={[ep_s.sortButtonText, tvMode && ep_s.tvSortButtonText]}>
+            <Ionicons name="swap-vertical" size={tvMode ? 20 : 14} color={colors.accent} />
+            <Text style={[ep_s.sortButtonText, tvMode && ep_s.tvSortButtonText, { color: colors.accent }]}>
               {sortOrder === "asc" ? "الأقدم أولاً" : "الأحدث أولاً"}
             </Text>
           </Pressable>
@@ -912,7 +919,7 @@ export default function EpisodeListScreen() {
           {search ? (
              <Pressable onPress={() => setSearch("")} focusable={tvMode}
                style={({ focused }) => [tvMode && tvFocusStyle(focused)]}>
-              <Ionicons name="close" size={16} color="rgba(255,255,255,0.3)" />
+              <Ionicons name="close" size={16} color={colors.textMuted} />
             </Pressable>
           ) : null}
         </View>
@@ -990,51 +997,52 @@ export default function EpisodeListScreen() {
   );
 }
 
-const ep_s = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#09090B" },
+function createEpStyles(colors: ReturnType<typeof useColors>) {
+return StyleSheet.create({
+  container: { flex: 1, backgroundColor: colors.background },
   center: { flex: 1, alignItems: "center", justifyContent: "center" },
-  notFound: { fontSize: 14, color: "rgba(255,255,255,0.4)", fontFamily: "Cairo_400Regular" },
+  notFound: { fontSize: 14, color: colors.textSecondary, fontFamily: "Cairo_400Regular" },
   hero: { height: 220, justifyContent: "flex-end", overflow: "hidden" },
   backBtn: { position: "absolute", right: 14, width: 36, height: 36, backgroundColor: "rgba(0,0,0,0.5)", borderRadius: 14, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: "rgba(255,255,255,0.1)" },
   commentsBtn: { position: "absolute", left: 14, top: 12, width: 36, height: 36, backgroundColor: "rgba(139,92,246,0.25)", borderRadius: 14, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: "rgba(139,92,246,0.4)" },
-  commentsListBtn: { flexDirection: "row", alignItems: "center", gap: 8, marginHorizontal: 12, marginBottom: 8, padding: 12, borderRadius: 14, backgroundColor: "rgba(139,92,246,0.06)", borderWidth: 1, borderColor: "rgba(139,92,246,0.18)" },
-  commentsListBtnText: { flex: 1, fontSize: 13, fontFamily: "Cairo_700Bold", color: "rgba(196,181,253,0.85)" },
+  commentsListBtn: { flexDirection: "row", alignItems: "center", gap: 8, marginHorizontal: 12, marginBottom: 8, padding: 12, borderRadius: 14, backgroundColor: colors.accentSurface, borderWidth: 1, borderColor: colors.accentBorder },
+  commentsListBtnText: { flex: 1, fontSize: 13, fontFamily: "Cairo_700Bold", color: colors.accent },
   heroBottom: { flexDirection: "row", alignItems: "flex-end", gap: 12, paddingHorizontal: 14, paddingBottom: 14 },
   heroCover: { width: 64, height: 88, borderRadius: 12, borderWidth: 1, borderColor: "rgba(255,255,255,0.1)" },
   heroInfo: { flex: 1, paddingBottom: 4 },
   heroTitle: { fontSize: 15, fontFamily: "Cairo_800ExtraBold", color: "#fff" },
   heroBadge: { fontSize: 9, fontFamily: "Cairo_700Bold", color: "#8B5CF6" },
-  controls: { backgroundColor: "rgba(9,9,11,0.97)", borderBottomWidth: 1, borderBottomColor: "rgba(255,255,255,0.06)", paddingHorizontal: 14, paddingTop: 10, paddingBottom: 8 },
+  controls: { backgroundColor: colors.surface, borderBottomWidth: 1, borderBottomColor: colors.border, paddingHorizontal: 14, paddingTop: 10, paddingBottom: 8 },
   seasonSection: { marginTop: 1, marginBottom: 7 },
   seasonSectionHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 5 },
-  seasonSectionTitle: { fontSize: 11, fontFamily: "Cairo_700Bold", color: "rgba(255,255,255,0.82)" },
-  seasonTotal: { fontSize: 9, fontFamily: "Cairo_400Regular", color: "rgba(255,255,255,0.38)" },
+  seasonSectionTitle: { fontSize: 11, fontFamily: "Cairo_700Bold", color: colors.textPrimary },
+  seasonTotal: { fontSize: 9, fontFamily: "Cairo_400Regular", color: colors.textMuted },
   seasonTabs: { gap: 7, paddingHorizontal: 1, paddingBottom: 2 },
-  seasonTab: { minWidth: 106, alignItems: "flex-end", paddingHorizontal: 10, paddingVertical: 6, borderRadius: 11, backgroundColor: "#15151B", borderWidth: 1, borderColor: "rgba(255,255,255,0.08)" },
-  seasonTabActive: { backgroundColor: "rgba(139,92,246,0.16)", borderColor: "rgba(139,92,246,0.52)" },
-  seasonTabTitle: { fontSize: 10, lineHeight: 16, fontFamily: "Cairo_700Bold", color: "rgba(255,255,255,0.72)" },
-  seasonTabTitleActive: { color: "#C4B5FD" },
-  seasonTabCount: { fontSize: 8, lineHeight: 13, fontFamily: "Cairo_400Regular", color: "rgba(255,255,255,0.42)" },
+  seasonTab: { minWidth: 106, alignItems: "flex-end", paddingHorizontal: 10, paddingVertical: 6, borderRadius: 11, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border },
+  seasonTabActive: { backgroundColor: colors.accentSurface, borderColor: colors.accentBorder },
+  seasonTabTitle: { fontSize: 10, lineHeight: 16, fontFamily: "Cairo_700Bold", color: colors.textPrimary },
+  seasonTabTitleActive: { color: colors.accent },
+  seasonTabCount: { fontSize: 8, lineHeight: 13, fontFamily: "Cairo_400Regular", color: colors.textMuted },
   episodeTools: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginTop: 1, marginBottom: 6 },
-  episodeSectionTitle: { fontSize: 12, fontFamily: "Cairo_800ExtraBold", color: "#fff" },
-  sortButton: { minHeight: 30, flexDirection: "row", alignItems: "center", gap: 5, paddingHorizontal: 9, paddingVertical: 4, borderRadius: 10, backgroundColor: "rgba(139,92,246,0.09)", borderWidth: 1, borderColor: "rgba(139,92,246,0.22)" },
-  sortButtonText: { fontSize: 9, fontFamily: "Cairo_700Bold", color: "#C4B5FD" },
+  episodeSectionTitle: { fontSize: 12, fontFamily: "Cairo_800ExtraBold", color: colors.textPrimary },
+  sortButton: { minHeight: 30, flexDirection: "row", alignItems: "center", gap: 5, paddingHorizontal: 9, paddingVertical: 4, borderRadius: 10, backgroundColor: colors.accentSurface, borderWidth: 1, borderColor: colors.accentBorder },
+  sortButtonText: { fontSize: 9, fontFamily: "Cairo_700Bold", color: colors.accent },
   progressRow: { flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 8 },
-  progressTrack: { flex: 1, height: 6, backgroundColor: "rgba(255,255,255,0.08)", borderRadius: 3, overflow: "hidden" },
+  progressTrack: { flex: 1, height: 6, backgroundColor: colors.surfaceElevated, borderRadius: 3, overflow: "hidden" },
   progressFill: { height: "100%", backgroundColor: "#8B5CF6", borderRadius: 3 },
-  pctText: { fontSize: 9, color: "rgba(255,255,255,0.3)", fontFamily: "Cairo_700Bold" },
-  searchBar: { flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: "#1C1C22", borderRadius: 12, paddingHorizontal: 12, paddingVertical: 9, borderWidth: 1, borderColor: "rgba(255,255,255,0.06)", marginBottom: 6 },
-  searchInput: { flex: 1, color: "#fff", fontSize: 13, fontFamily: "Cairo_400Regular", textAlign: "right" },
+  pctText: { fontSize: 9, color: colors.textMuted, fontFamily: "Cairo_700Bold" },
+  searchBar: { flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: colors.input, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 9, borderWidth: 1, borderColor: colors.border, marginBottom: 6 },
+  searchInput: { flex: 1, color: colors.textPrimary, fontSize: 13, fontFamily: "Cairo_400Regular", textAlign: "right" },
   pageNav: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
-  pageRangeText: { fontSize: 10, color: "rgba(255,255,255,0.3)", fontFamily: "Cairo_700Bold" },
-  pageBtn: { width: 28, height: 28, borderRadius: 8, backgroundColor: "rgba(255,255,255,0.06)", borderWidth: 1, borderColor: "rgba(255,255,255,0.08)", alignItems: "center", justifyContent: "center" },
-  pageNumText: { fontSize: 11, color: "rgba(255,255,255,0.4)", fontFamily: "Cairo_700Bold", paddingHorizontal: 4 },
-  watchFromBtn: { flexDirection: "row", alignItems: "center", gap: 8, margin: 12, padding: 12, borderRadius: 14, borderWidth: 1, borderColor: "rgba(139,92,246,0.25)", backgroundColor: "rgba(139,92,246,0.07)" },
-  watchFromBtnText: { fontSize: 12, fontFamily: "Cairo_700Bold", color: "#8B5CF6" },
-  row: { flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 12, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: "rgba(255,255,255,0.05)" },
+  pageRangeText: { fontSize: 10, color: colors.textMuted, fontFamily: "Cairo_700Bold" },
+  pageBtn: { width: 28, height: 28, borderRadius: 8, backgroundColor: colors.input, borderWidth: 1, borderColor: colors.border, alignItems: "center", justifyContent: "center" },
+  pageNumText: { fontSize: 11, color: colors.textSecondary, fontFamily: "Cairo_700Bold", paddingHorizontal: 4 },
+  watchFromBtn: { flexDirection: "row", alignItems: "center", gap: 8, margin: 12, padding: 12, borderRadius: 14, borderWidth: 1, borderColor: colors.accentBorder, backgroundColor: colors.accentSurface },
+  watchFromBtnText: { fontSize: 12, fontFamily: "Cairo_700Bold", color: colors.accent },
+  row: { flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 12, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: colors.border },
   episodeMain: { flex: 1, flexDirection: "row", alignItems: "center", gap: 10 },
-  rowWatched: { backgroundColor: "rgba(139,92,246,0.03)", borderBottomColor: "rgba(139,92,246,0.08)" },
-  thumbWrap: { width: 72, height: 41, borderRadius: 8, overflow: "hidden", backgroundColor: "#1C1C22", position: "relative" },
+  rowWatched: { backgroundColor: colors.accentSurface, borderBottomColor: colors.accentBorder },
+  thumbWrap: { width: 72, height: 41, borderRadius: 8, overflow: "hidden", backgroundColor: colors.surfaceElevated, position: "relative" },
   thumb: { width: "100%", height: "100%" },
   thumbFallback: { backgroundColor: "rgba(139,92,246,0.1)" },
   durText: { position: "absolute", bottom: 3, left: 3, fontSize: 6, color: "#fff", backgroundColor: "rgba(0,0,0,0.7)", borderRadius: 3, paddingHorizontal: 2, paddingVertical: 1, fontWeight: "900" },
@@ -1042,13 +1050,13 @@ const ep_s = StyleSheet.create({
   info: { flex: 1 },
   episodeActions: { flexDirection: "row", alignItems: "center", gap: 8 },
   epNumRow: { flexDirection: "row", alignItems: "center", justifyContent: "flex-end", gap: 6 },
-  epNum: { fontSize: 11, fontFamily: "Cairo_800ExtraBold", color: "rgba(255,255,255,0.9)" },
+  epNum: { fontSize: 11, fontFamily: "Cairo_800ExtraBold", color: colors.textPrimary },
   fillerBadge: { backgroundColor: "#df2f39", color: "#fff", fontSize: 9, lineHeight: 16, paddingHorizontal: 7, borderRadius: 1, fontFamily: "Cairo_700Bold", overflow: "hidden" },
   epTitleAr: { fontSize: 10, fontFamily: "Cairo_700Bold", color: "rgba(196,181,253,0.92)", textAlign: "right" },
-  epTitleOriginal: { fontSize: 8, fontFamily: "Cairo_400Regular", color: "rgba(255,255,255,0.42)", textAlign: "right" },
+  epTitleOriginal: { fontSize: 8, fontFamily: "Cairo_400Regular", color: colors.textSecondary, textAlign: "right" },
   commentBtn: {
     width: 27, height: 27, borderRadius: 8, alignItems: "center", justifyContent: "center",
-    backgroundColor: "rgba(139,92,246,0.06)", borderWidth: 1, borderColor: "rgba(139,92,246,0.15)",
+    backgroundColor: colors.accentSurface, borderWidth: 1, borderColor: colors.accentBorder,
     position: "relative",
   },
   commentCount: {
@@ -1058,8 +1066,8 @@ const ep_s = StyleSheet.create({
     textAlign: "center", lineHeight: 12, paddingHorizontal: 2,
   },
   tvCommentCount: { minWidth: 20, height: 20, borderRadius: 10, fontSize: 10, lineHeight: 20, top: -6, right: -6 },
-  eyeBtn: { width: 27, height: 27, borderRadius: 8, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(255,255,255,0.04)", borderWidth: 1, borderColor: "rgba(255,255,255,0.08)" },
-  eyeBtnWatched: { backgroundColor: "rgba(139,92,246,0.15)", borderColor: "rgba(139,92,246,0.3)" },
+  eyeBtn: { width: 27, height: 27, borderRadius: 8, alignItems: "center", justifyContent: "center", backgroundColor: colors.input, borderWidth: 1, borderColor: colors.border },
+  eyeBtnWatched: { backgroundColor: colors.accentSurface, borderColor: colors.accentBorder },
   tvContainer: { paddingHorizontal: 28 },
   tvFocusGuide: { flex: 1 },
   tvControls: { paddingHorizontal: 28, paddingTop: 12, paddingBottom: 10 },
@@ -1078,7 +1086,7 @@ const ep_s = StyleSheet.create({
   tvHeroBadge: { fontSize: 14, lineHeight: 22 },
   tvHeroTitle: { fontSize: 25, lineHeight: 34 },
   tvText: { fontSize: 15, lineHeight: 23 },
-  tvRow: { width: "100%", minHeight: 100, flexDirection: "row", alignItems: "center", paddingHorizontal: 10, paddingVertical: 8, gap: 10, borderRadius: 12, borderWidth: 1, borderBottomWidth: 1, borderColor: "rgba(255,255,255,0.08)", backgroundColor: "rgba(18,16,28,0.76)" },
+  tvRow: { width: "100%", minHeight: 100, flexDirection: "row", alignItems: "center", paddingHorizontal: 10, paddingVertical: 8, gap: 10, borderRadius: 12, borderWidth: 1, borderBottomWidth: 1, borderColor: colors.border, backgroundColor: colors.card },
   tvEpisodeMain: { flex: 1, flexDirection: "row", alignItems: "center", gap: 10, borderRadius: 10 },
   tvListContent: { paddingTop: 6, gap: 8 },
   tvSmallButton: { width: 38, height: 38, borderRadius: 10 },
@@ -1095,3 +1103,4 @@ const ep_s = StyleSheet.create({
   tvWatchFromBtn: { marginHorizontal: 12, paddingVertical: 12, minHeight: 58, borderRadius: 16 },
   tvWatchFromBtnText: { fontSize: 15, lineHeight: 23 },
 });
+}

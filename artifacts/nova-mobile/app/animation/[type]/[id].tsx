@@ -278,7 +278,7 @@ export default function AnimationDetailScreen() {
       {/* ── Studios ── */}
       {studios ? (
         <View style={s.studioRow}>
-          <Ionicons name="business" size={12} color="rgba(255,255,255,0.3)" />
+          <Ionicons name="business" size={12} color={colors.textMuted} />
           <Text style={s.studioText}>{studios}</Text>
         </View>
       ) : null}
@@ -486,19 +486,19 @@ return StyleSheet.create({
   titleCol: { flex: 1, paddingBottom: 8, gap: 8 },
   titleText: { fontSize: 16, fontFamily: "Cairo_800ExtraBold", color: colors.textPrimary, lineHeight: 22, textAlign: "left" },
   metaRow: { flexDirection: "row", flexWrap: "wrap", gap: 6 },
-  metaChip: { fontSize: 9, fontFamily: "Cairo_700Bold", color: "rgba(255,255,255,0.38)", paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8, borderWidth: 1, borderColor: "rgba(255,255,255,0.08)", backgroundColor: "rgba(255,255,255,0.05)" },
-  metaChipPurple: { color: "#a78bfa", borderColor: "rgba(139,92,246,0.25)", backgroundColor: "rgba(139,92,246,0.1)" },
+  metaChip: { fontSize: 9, fontFamily: "Cairo_700Bold", color: colors.textSecondary, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface },
+  metaChipPurple: { color: colors.accent, borderColor: colors.accentBorder, backgroundColor: colors.accentSurface },
 
   scoreRow: { flexDirection: "row", alignItems: "center", gap: 8, marginHorizontal: 16, marginTop: 16, backgroundColor: "rgba(251,191,36,0.07)", borderRadius: 14, borderWidth: 1, borderColor: "rgba(251,191,36,0.18)", paddingHorizontal: 14, paddingVertical: 10 },
-  scoreVal: { fontSize: 16, fontFamily: "Cairo_800ExtraBold", color: "#FCD34D" },
-  scoreDivider: { fontSize: 10, color: "rgba(255,255,255,0.3)", fontFamily: "Cairo_400Regular" },
-  voteCount: { fontSize: 9, color: "rgba(255,255,255,0.25)", fontFamily: "Cairo_400Regular", marginRight: "auto" },
+  scoreVal: { fontSize: 16, fontFamily: "Cairo_800ExtraBold", color: colors.textPrimary },
+  scoreDivider: { fontSize: 10, color: colors.textMuted, fontFamily: "Cairo_400Regular" },
+  voteCount: { fontSize: 9, color: colors.textMuted, fontFamily: "Cairo_400Regular", marginRight: "auto" },
 
   genresScroll: { marginTop: 12 },
-  genreChip: { fontSize: 10, fontFamily: "Cairo_700Bold", color: "rgba(255,255,255,0.55)", paddingHorizontal: 12, paddingVertical: 6, borderRadius: 12, borderWidth: 1, borderColor: "rgba(255,255,255,0.07)", backgroundColor: "#18181B" },
+  genreChip: { fontSize: 10, fontFamily: "Cairo_700Bold", color: colors.textPrimary, paddingHorizontal: 12, paddingVertical: 6, borderRadius: 12, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface },
 
   studioRow: { flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 16, marginTop: 10 },
-  studioText: { fontSize: 10, color: "rgba(255,255,255,0.3)", fontFamily: "Cairo_400Regular" },
+  studioText: { fontSize: 10, color: colors.textSecondary, fontFamily: "Cairo_400Regular" },
 
   watchBtnWrap: { paddingHorizontal: 16, marginTop: 18 },
   watchBtn: { borderRadius: 18, overflow: "hidden", shadowColor: "#7C3AED", shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.45, shadowRadius: 14, elevation: 10 },

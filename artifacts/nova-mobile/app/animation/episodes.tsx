@@ -134,7 +134,7 @@ export default function AnimationEpisodesScreen() {
             <Image source={{ uri: `${IMG_S}${item.still_path}` }} style={StyleSheet.absoluteFillObject} resizeMode="cover" />
           ) : (
             <View style={s.epThumbPlaceholder}>
-              <Ionicons name="play-circle" size={tvMode ? 40 : 20} color="rgba(255,255,255,0.15)" />
+            <Ionicons name="play-circle" size={tvMode ? 40 : 20} color={colors.textMuted} />
             </View>
           )}
           <View style={s.epThumbOverlay} />
@@ -319,7 +319,7 @@ return StyleSheet.create({
   tvEpCard: { minHeight: 198, gap: 16, padding: 16, borderRadius: 18, borderWidth: 1 },
   epCardWatched: { opacity: 0.5, backgroundColor: "rgba(255,255,255,0.02)" },
 
-  epThumb: { width: 88, height: 52, borderRadius: 10, overflow: "hidden", backgroundColor: "rgba(255,255,255,0.06)", flexShrink: 0, position: "relative" },
+  epThumb: { width: 88, height: 52, borderRadius: 10, overflow: "hidden", backgroundColor: colors.surfaceElevated, flexShrink: 0, position: "relative" },
   tvEpThumb: { width: 270, height: 152, borderRadius: 14 },
   epThumbPlaceholder: { ...StyleSheet.absoluteFillObject, alignItems: "center", justifyContent: "center" },
   epThumbOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: "rgba(0,0,0,0.25)" },

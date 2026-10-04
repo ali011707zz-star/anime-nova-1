@@ -185,7 +185,11 @@ export default function ProfileScreen() {
       {/* Header */}
       <View style={[s.header, { paddingTop: topPad + 8 }]}>
         <Pressable onPress={() => router.back()} focusable={tvMode}
-          style={({ focused }) => [s.backBtn, tvMode && tvFocusStyle(focused)]}>
+          style={({ focused }) => [
+            s.backBtn,
+            { backgroundColor: colors.input, borderColor: colors.border, borderWidth: 1 },
+            tvMode && tvFocusStyle(focused),
+          ]}>
           <Ionicons name="arrow-back" size={22} color={colors.text} />
         </Pressable>
         <Text style={[s.headerTitle, { color: colors.text }]}>الملف الشخصي</Text>

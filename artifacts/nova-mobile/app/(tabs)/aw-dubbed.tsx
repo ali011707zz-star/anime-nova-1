@@ -466,7 +466,7 @@ export default function DubbedTabScreen() {
   return (
     <View style={[s.screen, { backgroundColor: colors.background, paddingTop: topPad }]}>
       {/* ── Header ── */}
-      <View style={s.header}>
+      <View style={[s.header, { borderBottomColor: colors.border }]}>
         <View style={{ flex: 1 }}>
           <Text style={[s.headerTitle, { color: colors.textPrimary }]}>رسوم متحركة مدبلجة</Text>
           <Text style={[s.headerSub, { color: colors.textSecondary }]}>
@@ -488,14 +488,19 @@ export default function DubbedTabScreen() {
       </View>
 
       {/* ── Inner tabs ── */}
-      <View style={s.tabsRow}>
+      <View style={[s.tabsRow, { borderBottomColor: colors.border }]}>
         {(["animation", "cartoon"] as TabKey[]).map(tab => {
           const active = activeTab === tab;
           const color  = tab === "animation" ? "#10B981" : "#7C3AED";
           return (
             <Pressable key={tab} onPress={() => handleTab(tab)}
               focusable={tvMode}
-              style={({ focused }) => [s.tabBtn, active && { borderColor: `${color}55`, backgroundColor: `${color}12` }, tvMode && tvFocusStyle(focused)]}>
+              style={({ focused }) => [
+                s.tabBtn,
+                { backgroundColor: colors.surface, borderColor: colors.border },
+                active && { borderColor: `${color}55`, backgroundColor: `${color}12` },
+                tvMode && tvFocusStyle(focused),
+              ]}>
               <Text style={[s.tabText, { color: active ? color : colors.textSecondary }]}>
                 {tab === "animation" ? "✨ أنيميشن" : "📺 كرتون"}
               </Text>

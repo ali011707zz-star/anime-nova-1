@@ -322,8 +322,8 @@ export default function NewsScreen() {
             <Text style={[s.tagText, { color: "#22c55e" }]}>يُبث الآن</Text>
           </View>
           {item.media.format && (
-            <View style={[s.tag, { backgroundColor: "rgba(139,92,246,0.15)", borderColor: "rgba(139,92,246,0.25)" }]}>
-              <Text style={[s.tagText, { color: "#a78bfa" }]}>
+            <View style={[s.tag, { backgroundColor: colors.accentSurface, borderColor: colors.accentBorder }]}>
+              <Text style={[s.tagText, { color: colors.accent }]}>
                 {item.media.format === "TV" ? "مسلسل" : item.media.format}
               </Text>
             </View>
@@ -334,7 +334,7 @@ export default function NewsScreen() {
           <Ionicons name="time-outline" size={11} color="#8B5CF6" />
           <Text style={[s.metaText, { color: "#8B5CF6" }]}>{timeAgo(item.airingAt)}</Text>
           <Text style={[s.metaSep, { color: colors.textMuted }]}>·</Text>
-          <Text style={s.metaText}>الحلقة {item.episode}</Text>
+          <Text style={[s.metaText, { color: colors.textSecondary }]}>الحلقة {item.episode}</Text>
           {item.media.averageScore ? (
             <>
               <Text style={[s.metaSep, { color: colors.textMuted }]}>·</Text>
@@ -376,7 +376,7 @@ export default function NewsScreen() {
           {item.genres?.[0] && (
             <>
               <Text style={[s.metaSep, { color: colors.textMuted }]}>·</Text>
-              <Text style={s.metaText}>{item.genres[0]}</Text>
+              <Text style={[s.metaText, { color: colors.textSecondary }]}>{item.genres[0]}</Text>
             </>
           )}
         </View>
@@ -430,8 +430,8 @@ export default function NewsScreen() {
             {item.popularity ? (
               <>
                 <Text style={[s.metaSep, { color: colors.textMuted }]}>·</Text>
-                <Ionicons name="eye-outline" size={10} color="rgba(255,255,255,0.3)" />
-                <Text style={s.metaText}>{(item.popularity / 1000).toFixed(0)}K</Text>
+                <Ionicons name="eye-outline" size={10} color={colors.textMuted} />
+                <Text style={[s.metaText, { color: colors.textSecondary }]}>{(item.popularity / 1000).toFixed(0)}K</Text>
               </>
             ) : null}
           </View>

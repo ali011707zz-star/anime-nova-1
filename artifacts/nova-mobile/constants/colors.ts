@@ -60,7 +60,7 @@ const white: Palette = {
   button: "#6047B4",
   buttonText: "#FFFFFF",
   accent: "#674DB7",
-  border: "#D5D2CA",
+  border: "#ABA79D",
   input: "#E8E6E0",
   destructive: "#C62828",
   destructiveForeground: "#FFFFFF",
@@ -79,7 +79,7 @@ const white: Palette = {
   playerBuffer: "rgba(20,22,26,0.48)",
   pressFeedback: "rgba(42,35,62,0.08)",
   accentSurface: "#ECE7F5",
-  accentBorder: "#D8CFEA",
+  accentBorder: "#A895D0",
   destructiveSurface: "#F8E9E7",
   destructiveBorder: "#EBCBC6",
 

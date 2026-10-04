@@ -97,15 +97,20 @@ export default function AwDubbedDetailScreen() {
       onPress={() => openWatch(ep)}
       hasTVPreferredFocus={tvMode && ep.number === episodes[0]?.number}
       onFocus={() => episodeListRef.current?.scrollToIndex({ index: episodes.findIndex(item => item.number === ep.number), animated: true, viewPosition: 0.35 })}
-      style={({ pressed, focused }) => [styles.epRow, tvMode && styles.tvEpRow, { opacity: pressed ? 0.7 : 1 }, tvMode && tvFocusStyle(focused)]}
+      style={({ pressed, focused }) => [
+        styles.epRow,
+        tvMode && styles.tvEpRow,
+        { opacity: pressed ? 0.7 : 1, borderBottomColor: colors.border },
+        tvMode && tvFocusStyle(focused),
+      ]}
     >
-      <View style={[styles.epThumb, tvMode && styles.tvEpThumb]}>
+      <View style={[styles.epThumb, { backgroundColor: colors.surfaceElevated }, tvMode && styles.tvEpThumb]}>
         {poster && !imgError ? (
           <Image source={{ uri: poster }} style={StyleSheet.absoluteFill} resizeMode="cover"
             onError={() => setImgError(true)} />
         ) : (
           <View style={styles.epPlaceholder}>
-            <Ionicons name="play-circle-outline" size={22} color="rgba(255,255,255,0.3)" />
+            <Ionicons name="play-circle-outline" size={22} color={colors.textMuted} />
           </View>
         )}
         <View style={styles.epPlayOverlay}>
@@ -118,20 +123,24 @@ export default function AwDubbedDetailScreen() {
         </View>
       </View>
       <View style={styles.epInfo}>
-        <Text style={[styles.epTitle, tvMode && styles.tvEpTitle]}>الحلقة {ep.number}</Text>
-        <Text style={[styles.epSub, tvMode && styles.tvEpSub]}>{curSeason?.label || "الحلقات"}</Text>
+        <Text style={[styles.epTitle, tvMode && styles.tvEpTitle, { color: colors.textPrimary }]}>الحلقة {ep.number}</Text>
+        <Text style={[styles.epSub, tvMode && styles.tvEpSub, { color: colors.textSecondary }]}>{curSeason?.label || "الحلقات"}</Text>
       </View>
-      <Ionicons name="chevron-back" size={16} color="rgba(255,255,255,0.3)" />
+      <Ionicons name="chevron-back" size={16} color={colors.textMuted} />
     </Pressable>
-  ), [openWatch, poster, imgError, curSeason, episodes, tvMode]);
+  ), [openWatch, poster, imgError, curSeason, episodes, tvMode, colors]);
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background, paddingTop: topPad }]}>
       {/* Header */}
       <View style={[styles.header, { borderBottomColor: colors.border }]}>
          <Pressable onPress={() => router.back()} focusable={tvMode}
-           style={({ focused }) => [styles.backBtn, tvMode && tvFocusStyle(focused)]}>
-          <Ionicons name="chevron-forward" size={20} color="rgba(255,255,255,0.7)" />
+           style={({ focused }) => [
+             styles.backBtn,
+             { backgroundColor: colors.input, borderColor: colors.border },
+             tvMode && tvFocusStyle(focused),
+           ]}>
+           <Ionicons name="chevron-forward" size={20} color={colors.textSecondary} />
         </Pressable>
         <Text style={[styles.headerTitle, { color: colors.textPrimary }]} numberOfLines={1}>{displayTitle}</Text>
         <View style={{ width: 36 }} />
@@ -191,7 +200,12 @@ export default function AwDubbedDetailScreen() {
                   {seasons.map((s, i) => (
                     <Pressable key={s.animeId} onPress={() => setSelSeason(i)}
                       focusable={tvMode}
-                      style={({ focused }) => [styles.seasonTab, i === selSeason && styles.seasonTabActive, tvMode && tvFocusStyle(focused)]}>
+                      style={({ focused }) => [
+                        styles.seasonTab,
+                        { backgroundColor: colors.surface, borderColor: colors.border },
+                        i === selSeason && styles.seasonTabActive,
+                        tvMode && tvFocusStyle(focused),
+                      ]}>
                       <Text style={[styles.seasonTabText, { color: i === selSeason ? colors.success : colors.textSecondary }]}>
                         {s.label}
                       </Text>

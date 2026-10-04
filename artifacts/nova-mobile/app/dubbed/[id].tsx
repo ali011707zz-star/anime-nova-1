@@ -88,9 +88,13 @@ export default function DubbedDetailScreen() {
         onPress={() => openWatch(ep)}
         hasTVPreferredFocus={tvMode && index === 0}
         onFocus={() => episodeListRef.current?.scrollToIndex({ index, animated: true, viewPosition: 0.35 })}
-        style={({ pressed, focused }) => [styles.epRow, { opacity: pressed ? 0.7 : 1 }, tvMode && tvFocusStyle(focused)]}
+        style={({ pressed, focused }) => [
+          styles.epRow,
+          { opacity: pressed ? 0.7 : 1, borderBottomColor: colors.border },
+          tvMode && tvFocusStyle(focused),
+        ]}
       >
-        <View style={styles.epThumb}>
+        <View style={[styles.epThumb, { backgroundColor: colors.surfaceElevated }]}>
           {thumb ? (
             <Image source={{ uri: thumb }} style={StyleSheet.absoluteFill} resizeMode="cover" />
           ) : (
@@ -105,7 +109,7 @@ export default function DubbedDetailScreen() {
           </View>
         </View>
         <View style={styles.epInfo}>
-          <Text style={styles.epTitle}>الحلقة {ep.number}</Text>
+        <Text style={[styles.epTitle, { color: colors.textPrimary }]}>الحلقة {ep.number}</Text>
         </View>
         <Ionicons name="chevron-back" size={16} color="rgba(255,255,255,0.3)" />
       </Pressable>
@@ -117,7 +121,7 @@ export default function DubbedDetailScreen() {
       {/* Header */}
       <View style={[styles.header, { borderBottomColor: colors.border }]}>
          <Pressable onPress={() => router.back()} focusable={tvMode}
-           style={({ focused }) => [styles.backBtn, tvMode && tvFocusStyle(focused)]}>
+           style={({ focused }) => [styles.backBtn, { backgroundColor: colors.input, borderColor: colors.border }, tvMode && tvFocusStyle(focused)]}>
           <Ionicons name="chevron-back" size={20} color={colors.textSecondary} />
         </Pressable>
         </View>
@@ -140,7 +144,7 @@ export default function DubbedDetailScreen() {
           <View>
             {/* Poster */}
             <View style={styles.heroRow}>
-              <View style={styles.poster}>
+              <View style={[styles.poster, { backgroundColor: colors.surface, borderColor: colors.border }]}>
                 {posterSrc ? (
                   <Image source={{ uri: posterSrc }} style={StyleSheet.absoluteFill} resizeMode="cover" />
                 ) : (
@@ -151,8 +155,8 @@ export default function DubbedDetailScreen() {
               </View>
               <View style={styles.heroInfo}>
                 <Text style={[styles.heroTitle, { color: colors.textPrimary }]}>{title}</Text>
-                <View style={styles.badge}>
-                  <Text style={styles.badgeText}>مدبلج عربي</Text>
+                <View style={[styles.badge, { backgroundColor: colors.accentSurface, borderColor: colors.accentBorder }]}>
+                  <Text style={[styles.badgeText, { color: colors.accent }]}>مدبلج عربي</Text>
                 </View>
                 {episodes.length > 0 && (
                   <Text style={[styles.epCount, { color: colors.textSecondary }]}>{episodes.length} حلقة</Text>
@@ -160,21 +164,21 @@ export default function DubbedDetailScreen() {
                 {seasons.length > 1 && (
                   <Pressable
                     onPress={() => setShowSeasonDrop(o => !o)}
-                    style={styles.seasonBtn}
+                    style={[styles.seasonBtn, { backgroundColor: colors.input, borderColor: colors.border }]}
                   >
-                    <Text style={styles.seasonBtnText}>{curSeason?.label || "اختر الموسم"}</Text>
+                    <Text style={[styles.seasonBtnText, { color: colors.textPrimary }]}>{curSeason?.label || "اختر الموسم"}</Text>
                     <Ionicons name={showSeasonDrop ? "chevron-up" : "chevron-down"} size={14} color={colors.textSecondary} />
                   </Pressable>
                 )}
                 {seasons.length === 1 && (
-                  <Text style={styles.seasonLabel}>{seasons[0].label}</Text>
+                  <Text style={[styles.seasonLabel, { color: colors.textSecondary }]}>{seasons[0].label}</Text>
                 )}
               </View>
             </View>
 
             {/* Season dropdown */}
             {showSeasonDrop && (
-              <View style={styles.seasonDrop}>
+              <View style={[styles.seasonDrop, { backgroundColor: colors.surface, borderColor: colors.border }]}>
                 {seasons.map((s, i) => (
                   <Pressable
                     key={s.arabicToonsId}
@@ -182,7 +186,11 @@ export default function DubbedDetailScreen() {
                     focusable={tvMode}
                     style={({ focused }) => [styles.seasonItem, i === selSeason && styles.seasonItemActive, tvMode && tvFocusStyle(focused)]}
                   >
-                    <Text style={[styles.seasonItemText, i === selSeason && styles.seasonItemTextActive]}>
+                    <Text style={[
+                      styles.seasonItemText,
+                      i === selSeason && styles.seasonItemTextActive,
+                      { color: i === selSeason ? colors.accent : colors.textPrimary },
+                    ]}>
                       {s.label}
                     </Text>
                   </Pressable>

@@ -158,7 +158,7 @@ export default function DubbedScreen() {
   return (
     <View style={[styles.container, { backgroundColor: colors.background, paddingTop: topPad }]}>
       {/* Header */}
-      <View style={styles.header}>
+      <View style={[styles.header, { borderBottomColor: colors.border }]}>
         <Pressable
           onPress={() => (router.canGoBack() ? router.back() : router.push("/"))}
           focusable={tvMode}
