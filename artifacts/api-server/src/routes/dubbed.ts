@@ -332,14 +332,21 @@ async function fetchArabicToonsCatalogPage(page: number): Promise<any | null> {
     ).replace(/\s+/g, " ").trim();
     const slug = seriesUrl.pathname.split("/").pop()?.replace(/-anime-streaming\.html$/i, "") || "";
     if (!slug || !title) return;
+    let posterImage = imageUrl;
+    if (imageUrl) {
+      const filename = new URL(imageUrl).pathname.match(/^\/images\/anime\/([^/]+)$/)?.[1];
+      if (filename && /^[\w.-]+$/.test(filename)) {
+        posterImage = `/api/dubbed/img?f=${encodeURIComponent(filename)}`;
+      }
+    }
 
     seen.add(canonicalUrl);
     results.push({
       key: slug,
       slug,
       title,
-      image: imageUrl,
-      poster: imageUrl,
+      image: posterImage,
+      poster: posterImage,
       seasons: [{ label: "الحلقات", arabicToonsId: canonicalUrl }],
     });
   });
@@ -469,11 +476,12 @@ router.get("/dubbed/catalog", async (req, res) => {
   // Older mobile builds accept only absolute poster URLs. StarCima returns
   // /api/dubbed/img paths, so expose the same proxy as an absolute URL.
   const publicBase = (process.env.NOVA_PUBLIC_URL || "https://animenovaa.duckdns.org").replace(/\/$/, "");
+  const absoluteImageUrl = (value: any) =>
+    typeof value === "string" && value.startsWith("/") ? `${publicBase}${value}` : value;
   const results = Array.isArray(data.results) ? data.results.map((item: any) => ({
     ...item,
-    image: typeof item.image === "string" && item.image.startsWith("/")
-      ? `${publicBase}${item.image}`
-      : item.image,
+    image: absoluteImageUrl(item.image),
+    poster: absoluteImageUrl(item.poster),
   })) : data.results;
   const responseData = results ? { ...data, results } : data;
   res.setHeader("Cache-Control", forceRefresh ? "no-store" : "public, max-age=300");
@@ -801,45 +809,68 @@ router.get("/dubbed/stream", async (req, res) => {
   }
 });
 
-// ── GET /api/dubbed/img?f= → proxy image through StarCima's own img endpoint ──
-// StarCima hosts/proxies all arabic-toons images via /api/dubbed/img?f=
-// This approach is reliable and avoids CF challenges on arabic-toons.com directly.
-// Supports both series posters (cat_XXXXXXXXXX.jpg) and episode thumbnails (mqdefault_XXXXX.jpg)
+function detectDubbedImageMime(buffer: Buffer): string | null {
+  if (
+    buffer.length >= 8 &&
+    buffer.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))
+  ) return "image/png";
+  if (buffer.length >= 3 && buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) {
+    return "image/jpeg";
+  }
+  const signature = buffer.subarray(0, 6).toString("ascii");
+  if (signature === "GIF87a" || signature === "GIF89a") return "image/gif";
+  if (
+    buffer.length >= 12 &&
+    buffer.subarray(0, 4).toString("ascii") === "RIFF" &&
+    buffer.subarray(8, 12).toString("ascii") === "WEBP"
+  ) return "image/webp";
+  return null;
+}
+
+// ── GET /api/dubbed/img?f= → binary-safe Arabic-Toons poster proxy ──
 router.get("/dubbed/img", async (req, res) => {
   const f = (req.query.f as string || "").trim();
   if (!f || !/^[\w\-\.]+$/.test(f)) { res.status(400).send("bad"); return; }
 
-  // Use StarCima's own image proxy endpoint (confirmed HTTP 200)
-  const scImgUrl = `${SC_BASE}/api/dubbed/img?f=${encodeURIComponent(f)}`;
+  const atImgUrl = `${AT_BASE}/images/anime/${f}`;
+  const sendImage = (buffer: Buffer): boolean => {
+    const mime = detectDubbedImageMime(buffer);
+    if (!mime) return false;
+    res.setHeader("Content-Type", mime);
+    res.setHeader("Cache-Control", "public, max-age=86400");
+    res.send(buffer);
+    return true;
+  };
+
+  // Fetch raw bytes directly; cfGet returns text and corrupts binary PNG/JPEG data.
+  try {
+    const direct = await fetch(atImgUrl, {
+      headers: {
+        "User-Agent": BROWSER_UA,
+        Referer: `${AT_BASE}/`,
+        Accept: "image/*,*/*",
+      },
+      signal: AbortSignal.timeout(8000),
+    });
+    if (direct.ok && sendImage(Buffer.from(await direct.arrayBuffer()))) return;
+  } catch { /* try the StarCima image proxy */ }
 
   try {
+    const scImgUrl = `${SC_BASE}/api/dubbed/img?f=${encodeURIComponent(f)}`;
     const r = await fetch(scImgUrl, {
       headers: {
         "User-Agent": BROWSER_UA,
         Referer: `${SC_BASE}/dubbed`,
         Accept: "image/*,*/*",
       },
-      signal: AbortSignal.timeout(10000),
+      signal: AbortSignal.timeout(8000),
     });
-    if (r.ok) {
-      const ct = r.headers.get("content-type") || "image/jpeg";
-      if (ct.includes("image") || ct.includes("octet")) {
-        const buf = Buffer.from(await r.arrayBuffer());
-        res.setHeader("Content-Type", ct);
-        res.setHeader("Cache-Control", "public, max-age=86400");
-        res.send(buf);
-        return;
-      }
-    }
-    // Fallback: try arabic-toons.com/images/anime/{f} directly via CF proxy
-    const atImgUrl = `${AT_BASE}/images/anime/${f}`;
-    const html2 = await cfGet(atImgUrl, AT_BASE + "/", 8000);
-    if (html2) {
-      res.setHeader("Content-Type", "image/jpeg");
-      res.setHeader("Cache-Control", "public, max-age=86400");
-      res.send(Buffer.from(html2, "binary"));
-      return;
-    }
+    if (r.ok && sendImage(Buffer.from(await r.arrayBuffer()))) return;
+  } catch { /* use the existing CF fallback below */ }
+
+  try {
+    const cfImage = await cfGet(atImgUrl, `${AT_BASE}/`, 8000);
+    if (cfImage && sendImage(Buffer.from(cfImage, "binary"))) return;
     res.status(404).send("not found");
   } catch {
     res.status(502).send("proxy error");

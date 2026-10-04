@@ -74,16 +74,16 @@ function PosterCard({ uri, title, seasons, tint, onPress }: {
   tint: string; onPress: () => void;
 }) {
   const colors = useColors();
-  const [imgErr, setImgErr] = useState(false);
+  const [failedUri, setFailedUri] = useState<string | null>(null);
   const tvMode = isTvDevice();
-  const show = !imgErr && !!uri;
+  const show = !!uri && failedUri !== uri;
   return (
     <Pressable onPress={onPress} focusable={tvMode}
       style={({ pressed, focused }) => [card.wrap, { opacity: pressed ? 0.72 : 1 }, tvMode && tvFocusStyle(focused)]}>
       <View style={[card.poster, { backgroundColor: colors.surface }]}>
         {show ? (
           <Image source={{ uri: uri! }} style={StyleSheet.absoluteFill} resizeMode="cover"
-            onError={() => setImgErr(true)} />
+            onError={() => setFailedUri(uri)} />
         ) : (
           <View style={[card.placeholder, { backgroundColor: `${tint}18` }]}>
             <Text style={{ fontSize: 22 }}>🎬</Text>
