@@ -13,6 +13,7 @@ import { isTvDevice, tvFocusStyle, TvFocusGuideView, TvPressable } from "@/utils
 const Pressable = TvPressable;
 import { useTvFocusMemory } from "@/utils/tvFocus";
 import { useColors } from "@/hooks/useColors";
+import { EpisodeDivider } from "@/components/EpisodeDivider";
 
 /* ── AniList query ── */
 const ANIME_QUERY = `
@@ -990,6 +991,7 @@ export default function EpisodeListScreen() {
               hasTVPreferredFocus={tvMode && ready && preferredKey === String(n)}
             />
           )}
+          ItemSeparatorComponent={() => <EpisodeDivider color={colors.textSecondary} />}
         />
       </TvFocusGuideView>
 
@@ -1039,9 +1041,9 @@ return StyleSheet.create({
   pageNumText: { fontSize: 11, color: colors.textSecondary, fontFamily: "Cairo_700Bold", paddingHorizontal: 4 },
   watchFromBtn: { flexDirection: "row", alignItems: "center", gap: 8, margin: 12, padding: 12, borderRadius: 14, borderWidth: 1, borderColor: colors.accentBorder, backgroundColor: colors.accentSurface },
   watchFromBtnText: { fontSize: 12, fontFamily: "Cairo_700Bold", color: colors.accent },
-  row: { flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 12, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: colors.border },
+  row: { flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 12, paddingVertical: 10 },
   episodeMain: { flex: 1, flexDirection: "row", alignItems: "center", gap: 10 },
-  rowWatched: { backgroundColor: colors.accentSurface, borderBottomColor: colors.accentBorder },
+  rowWatched: { backgroundColor: colors.accentSurface },
   thumbWrap: { width: 72, height: 41, borderRadius: 8, overflow: "hidden", backgroundColor: colors.surfaceElevated, position: "relative" },
   thumb: { width: "100%", height: "100%" },
   thumbFallback: { backgroundColor: "rgba(139,92,246,0.1)" },

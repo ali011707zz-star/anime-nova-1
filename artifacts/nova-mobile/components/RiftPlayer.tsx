@@ -3910,7 +3910,7 @@ const s = StyleSheet.create({
     zIndex: 2,
   },
   topInfoTitle: {
-    color: "rgba(255,255,255,0.90)", fontSize: 10, fontFamily: "Cairo_700Bold",
+    color: "#fff", fontSize: 12, fontFamily: "Cairo_700Bold",
     textShadowColor: "rgba(0,0,0,0.85)", textShadowRadius: 5, textShadowOffset: { width: 0, height: 1 },
   },
   tvTopInfoTitle: { fontSize: 20 },

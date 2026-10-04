@@ -69,14 +69,16 @@ const white: Palette = {
   playerControl: "rgba(255,255,255,0.92)",
   playerControlBorder: "rgba(20,22,26,0.16)",
   playerControlIcon: "#17191F",
-  playerText: "#17191F",
-  playerSecondaryText: "#4D535E",
+  // Player chrome sits over changing video frames, so its text stays white in
+  // both app themes rather than inheriting the light page's dark text color.
+  playerText: "#FFFFFF",
+  playerSecondaryText: "rgba(255,255,255,0.90)",
   // Keep any edge shading neutral and identical across themes. Theme changes
   // must not recolor or brighten the video itself.
   playerTopGradient: ["rgba(0,0,0,0.24)", "rgba(0,0,0,0)"],
   playerBottomGradient: ["rgba(0,0,0,0)", "rgba(0,0,0,0.28)", "rgba(0,0,0,0.48)"],
-  playerTrack: "rgba(20,22,26,0.22)",
-  playerBuffer: "rgba(20,22,26,0.48)",
+  playerTrack: "rgba(255,255,255,0.42)",
+  playerBuffer: "rgba(255,255,255,0.70)",
   pressFeedback: "rgba(42,35,62,0.08)",
   accentSurface: "#ECE7F5",
   accentBorder: "#A895D0",
@@ -123,8 +125,8 @@ const black: Palette = {
   playerSecondaryText: "rgba(255,255,255,0.70)",
   playerTopGradient: ["rgba(0,0,0,0.24)", "rgba(0,0,0,0)"],
   playerBottomGradient: ["rgba(0,0,0,0)", "rgba(0,0,0,0.28)", "rgba(0,0,0,0.48)"],
-  playerTrack: "rgba(255,255,255,0.24)",
-  playerBuffer: "rgba(255,255,255,0.54)",
+  playerTrack: "rgba(255,255,255,0.42)",
+  playerBuffer: "rgba(255,255,255,0.70)",
   pressFeedback: "rgba(255,255,255,0.08)",
   accentSurface: "rgba(139,92,246,0.14)",
   accentBorder: "rgba(167,139,250,0.28)",

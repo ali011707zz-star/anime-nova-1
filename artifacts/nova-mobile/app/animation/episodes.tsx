@@ -10,6 +10,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { getBaseUrl } from "@/utils/api";
 import { isTvDevice, tvFocusStyle, TvFocusGuideView, TvPressable } from "@/utils/tv";
 import { useColors } from "@/hooks/useColors";
+import { EpisodeDivider } from "@/components/EpisodeDivider";
 const Pressable = TvPressable;
 
 const IMG_W = "https://image.tmdb.org/t/p/w500";
@@ -282,7 +283,9 @@ export default function AnimationEpisodesScreen() {
               offset: Math.max(0, index * (tvMode ? 310 : 76)),
               animated: true,
             })}
-            ItemSeparatorComponent={() => <View style={{ height: 8 }} />}
+            ItemSeparatorComponent={() => (
+              <EpisodeDivider color={colors.textSecondary} inset={8} spacing={3} />
+            )}
           />
         </TvFocusGuideView>
       )}

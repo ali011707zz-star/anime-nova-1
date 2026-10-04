@@ -400,12 +400,23 @@ function parseArabicToonsEpisodes(html: string, seriesUrl: string): any[] {
       : episodes.size + 1;
 
     let thumbnail: string | undefined;
-    const rawThumbnail = image.attr("src") || image.attr("data-src") || "";
-    if (rawThumbnail) {
+    const srcsetThumbnail = (image.attr("data-srcset") || image.attr("srcset"))
+      ?.split(",")[0]
+      ?.trim()
+      .split(/\s+/)[0];
+    const thumbnailCandidates = [
+      image.attr("data-src"),
+      image.attr("data-original"),
+      image.attr("data-lazy-src"),
+      srcsetThumbnail,
+      image.attr("src"),
+    ].filter((value): value is string => Boolean(value?.trim()));
+    for (const rawThumbnail of thumbnailCandidates) {
       try {
         const parsedThumbnail = new URL(rawThumbnail, AT_BASE);
         if (ARABIC_TOONS_HOSTS.has(parsedThumbnail.hostname.toLowerCase())) {
           thumbnail = parsedThumbnail.toString();
+          break;
         }
       } catch { /* skip malformed thumbnails */ }
     }

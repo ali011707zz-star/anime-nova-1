@@ -9,6 +9,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { getBaseUrl } from "@/utils/api";
 import { isTvDevice, tvFocusStyle, TvFocusGuideView, TvPressable } from "@/utils/tv";
 import { useColors } from "@/hooks/useColors";
+import { EpisodeDivider } from "@/components/EpisodeDivider";
 const Pressable = TvPressable;
 
 interface Season { label: string; arabicToonsId: string; }
@@ -20,11 +21,54 @@ function apiBase(): string {
 
 function thumbSrc(t?: string): string | null {
   if (!t) return null;
-  if (t.startsWith("http")) return t;
   const base = apiBase();
   if (t.startsWith("/api/dubbed/img")) return `${base}${t}`;
-  const f = t.split("?f=")[1] || t.split("/").pop();
+  if (/^https?:\/\//i.test(t)) {
+    try {
+      const url = new URL(t);
+      const host = url.hostname.toLowerCase();
+      const filename = url.pathname.split("/").pop() || "";
+      if (
+        (host === "arabic-toons.com" || host === "www.arabic-toons.com") &&
+        url.pathname.startsWith("/images/anime/") &&
+        filename
+      ) {
+        return `${base}/api/dubbed/img?f=${encodeURIComponent(filename)}`;
+      }
+    } catch { /* keep valid external image URLs as-is */ }
+    return t;
+  }
+  const f = t.split("?f=")[1] || t.split(/[?#]/)[0].split("/").pop();
   return f ? `${base}/api/dubbed/img?f=${encodeURIComponent(f)}` : null;
+}
+
+function EpisodeArtwork({
+  thumbnailUri,
+  fallbackUri,
+}: {
+  thumbnailUri: string | null;
+  fallbackUri: string | null;
+}) {
+  const [failedUris, setFailedUris] = useState<string[]>([]);
+  const imageCandidates = [...new Set([thumbnailUri, fallbackUri].filter((uri): uri is string => Boolean(uri)))];
+  const uri = imageCandidates.find(candidate => !failedUris.includes(candidate));
+
+  if (!uri) {
+    return (
+      <View style={styles.epThumbPlaceholder}>
+        <Ionicons name="play-circle-outline" size={22} color="rgba(255,255,255,0.3)" />
+      </View>
+    );
+  }
+
+  return (
+    <Image
+      source={{ uri }}
+      style={StyleSheet.absoluteFill}
+      resizeMode="cover"
+      onError={() => setFailedUris(current => current.includes(uri) ? current : [...current, uri])}
+    />
+  );
 }
 
 export default function DubbedDetailScreen() {
@@ -90,18 +134,16 @@ export default function DubbedDetailScreen() {
         onFocus={() => episodeListRef.current?.scrollToIndex({ index, animated: true, viewPosition: 0.35 })}
         style={({ pressed, focused }) => [
           styles.epRow,
-          { opacity: pressed ? 0.7 : 1, borderBottomColor: colors.border },
+          { opacity: pressed ? 0.7 : 1 },
           tvMode && tvFocusStyle(focused),
         ]}
       >
         <View style={[styles.epThumb, { backgroundColor: colors.surfaceElevated }]}>
-          {thumb ? (
-            <Image source={{ uri: thumb }} style={StyleSheet.absoluteFill} resizeMode="cover" />
-          ) : (
-            <View style={styles.epThumbPlaceholder}>
-              <Ionicons name="play-circle-outline" size={22} color="rgba(255,255,255,0.3)" />
-            </View>
-          )}
+          <EpisodeArtwork
+            key={`${curSeason?.arabicToonsId || ""}:${ep.epId || ep.number}:${thumb || ""}:${posterSrc || ""}`}
+            thumbnailUri={thumb}
+            fallbackUri={posterSrc}
+          />
           <View style={styles.epPlayOverlay}>
             <View style={styles.epPlayBtn}>
               <Ionicons name="play" size={10} color="#fff" />
@@ -132,6 +174,7 @@ export default function DubbedDetailScreen() {
           data={episodes}
           keyExtractor={ep => ep.epId || String(ep.number)}
           renderItem={renderEp}
+          ItemSeparatorComponent={() => <EpisodeDivider color={colors.textSecondary} />}
           removeClippedSubviews={false}
           initialNumToRender={tvMode ? 12 : 6}
           maxToRenderPerBatch={tvMode ? 10 : 5}
@@ -285,7 +328,6 @@ const styles = StyleSheet.create({
   epRow: {
     flexDirection: "row", alignItems: "center", gap: 12,
     paddingHorizontal: 16, paddingVertical: 10,
-    borderBottomWidth: 1, borderBottomColor: "rgba(255,255,255,0.04)",
   },
   epThumb: {
     width: 90, aspectRatio: 16 / 9, borderRadius: 8,

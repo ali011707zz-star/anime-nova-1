@@ -13,6 +13,7 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import { getBaseUrl } from "@/utils/api";
 import { isTvDevice, tvFocusStyle, TvFocusGuideView, TvPressable } from "@/utils/tv";
 import { useColors } from "@/hooks/useColors";
+import { EpisodeDivider } from "@/components/EpisodeDivider";
 const Pressable = TvPressable;
 
 const BASE = getBaseUrl();
@@ -100,7 +101,7 @@ export default function AwDubbedDetailScreen() {
       style={({ pressed, focused }) => [
         styles.epRow,
         tvMode && styles.tvEpRow,
-        { opacity: pressed ? 0.7 : 1, borderBottomColor: colors.border },
+        { opacity: pressed ? 0.7 : 1 },
         tvMode && tvFocusStyle(focused),
       ]}
     >
@@ -152,6 +153,7 @@ export default function AwDubbedDetailScreen() {
           data={episodes}
           keyExtractor={ep => String(ep.number)}
           renderItem={renderEp}
+          ItemSeparatorComponent={() => <EpisodeDivider color={colors.textSecondary} />}
           removeClippedSubviews={false}
           initialNumToRender={tvMode ? 12 : 6}
           maxToRenderPerBatch={tvMode ? 10 : 5}
@@ -267,7 +269,7 @@ const styles = StyleSheet.create({
   sectionTitle:    { color: "rgba(255,255,255,0.5)", fontSize: 11, fontFamily: "Cairo_600SemiBold",
                      paddingHorizontal: 14, marginBottom: 6, textTransform: "uppercase" },
   epRow:           { flexDirection: "row", alignItems: "center", paddingHorizontal: 12, paddingVertical: 10,
-                     gap: 12, borderBottomWidth: 1, borderBottomColor: "rgba(255,255,255,0.04)" },
+                     gap: 12 },
   tvEpRow:         { minHeight: 112, paddingHorizontal: 28, paddingVertical: 20, gap: 24, borderBottomWidth: 2, borderRadius: 20, borderWidth: 2, borderColor: "rgba(255,255,255,0.08)", backgroundColor: "rgba(18,16,28,0.78)" },
   tvEpThumb:       { width: 150, height: 88, borderRadius: 16 },
   tvEpTitle:       { fontSize: 25, lineHeight: 36 },
