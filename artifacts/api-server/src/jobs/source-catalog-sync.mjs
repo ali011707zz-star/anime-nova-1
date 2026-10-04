@@ -1,5 +1,5 @@
 /**
- * Full metadata catalog importer for Animeify, AnimeSlayer, SAnime and AniFox.
+ * Full metadata catalog importer for Animeify, AnimeSlayer, SAnime, AniFox and StarDima.
  *
  * Usage from the VPS:
  *   node artifacts/api-server/src/jobs/source-catalog-sync.mjs
@@ -11,14 +11,17 @@
 import { setDefaultResultOrder } from "node:dns";
 import { readFile } from "node:fs/promises";
 import pg from "pg";
+import { stardimaCatalogAdapter } from "./stardima-catalog-client.mjs";
 
 setDefaultResultOrder("ipv4first");
 const { Pool } = pg;
 
-const PROVIDERS = ["animeify", "anslayer", "sanime", "anifox"];
+const PROVIDERS = ["animeify", "anslayer", "sanime", "anifox", "stardima_catalog"];
 const args = new Set(process.argv.slice(2));
 const providerArg = process.argv.find((arg) => arg.startsWith("--provider="))?.split("=")[1];
 const providers = providerArg ? [providerArg] : PROVIDERS;
+const titleLimitArg = process.argv.find((arg) => arg.startsWith("--limit-titles="))?.split("=")[1];
+const titleLimit = Math.max(0, int(titleLimitArg) || 0);
 const skipEpisodes = args.has("--skip-episodes");
 const concurrency = Math.max(1, Math.min(8, Number(process.env.CATALOG_CONCURRENCY || 6)));
 const forceDetails = args.has("--force-details");
@@ -473,6 +476,7 @@ const adapters = {
   anslayer: { list: anslayerList, episodes: anslayerEpisodes },
   sanime: { list: sanimeList, episodes: sanimeEpisodes },
   anifox: { list: anifoxList, episodes: anifoxEpisodes },
+  stardima_catalog: stardimaCatalogAdapter,
 };
 
 // Production uses Supabase REST for the application, while DATABASE_URL may
@@ -608,8 +612,9 @@ async function restUpsertEpisodesAndServers(titleId, title, episodes) {
 
 async function runProviderViaSupabase(provider) {
   const adapter = adapters[provider];
-  const titles = await adapter.list();
-  console.log(`[catalog] ${provider}: fetched ${titles.length} titles`);
+  const discoveredTitles = await adapter.list();
+  const titles = titleLimit ? discoveredTitles.slice(0, titleLimit) : discoveredTitles;
+  console.log(`[catalog] ${provider}: fetched ${discoveredTitles.length} titles${titleLimit ? `; limited to ${titles.length}` : ""}`);
   const titleByKey = new Map(titles.map((item) => [`${item.provider}:${item.provider_title_id}`, item]));
   const titleRows = (await restUpsertTitles(titles)).map((row) => ({
     titleId: row.id,
@@ -800,8 +805,9 @@ async function runProvider(provider) {
   const adapter = adapters[provider];
   const client = await pool.connect();
   try {
-    const titles = await adapter.list();
-    console.log(`[catalog] ${provider}: fetched ${titles.length} titles`);
+    const discoveredTitles = await adapter.list();
+    const titles = titleLimit ? discoveredTitles.slice(0, titleLimit) : discoveredTitles;
+    console.log(`[catalog] ${provider}: fetched ${discoveredTitles.length} titles${titleLimit ? `; limited to ${titles.length}` : ""}`);
     let titleRows = [];
     try {
       const titleByKey = new Map(titles.map((item) =>
@@ -882,7 +888,7 @@ async function main() {
   }
   const migration = await readFile(migrationPath, "utf8");
   await pool.query(migration);
-  console.log(`[catalog] schema ready; providers=${providers.join(",")} episodes=${!skipEpisodes}`);
+  console.log(`[catalog] schema ready; providers=${providers.join(",")} episodes=${!skipEpisodes}${titleLimit ? ` titleLimit=${titleLimit}` : ""}`);
   for (const provider of providers) await runProvider(provider);
   await pool.end();
 }

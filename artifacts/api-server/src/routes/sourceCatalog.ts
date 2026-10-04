@@ -2,7 +2,7 @@ import { Router, type Request, type Response } from "express";
 import { sbCount, sbSelect } from "../lib/supabaseClient.js";
 
 const router = Router();
-const PROVIDERS = new Set(["animeify", "anslayer", "sanime", "anifox"]);
+const PROVIDERS = new Set(["animeify", "anslayer", "sanime", "anifox", "stardima_catalog"]);
 
 function intParam(value: unknown, fallback: number, min: number, max: number): number {
   const n = Number.parseInt(String(value ?? ""), 10);

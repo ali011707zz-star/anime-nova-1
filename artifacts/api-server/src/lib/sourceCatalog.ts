@@ -1,6 +1,6 @@
 import { sbSelect } from "./supabaseClient.js";
 
-export type CatalogProvider = "animeify" | "anslayer" | "sanime" | "anifox";
+export type CatalogProvider = "animeify" | "anslayer" | "sanime" | "anifox" | "stardima_catalog";
 
 export type CatalogServer = {
   id?: number;

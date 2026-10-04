@@ -4,7 +4,7 @@
 
 CREATE TABLE IF NOT EXISTS source_catalog_titles (
   id BIGSERIAL PRIMARY KEY,
-  provider TEXT NOT NULL CHECK (provider IN ('animeify', 'anslayer', 'sanime', 'anifox')),
+  provider TEXT NOT NULL CHECK (provider IN ('animeify', 'anslayer', 'sanime', 'anifox', 'stardima_catalog')),
   provider_title_id TEXT NOT NULL,
   title TEXT NOT NULL,
   title_en TEXT,
@@ -41,7 +41,7 @@ CREATE INDEX IF NOT EXISTS source_catalog_titles_seen_idx
 CREATE TABLE IF NOT EXISTS source_catalog_episodes (
   id BIGSERIAL PRIMARY KEY,
   title_id BIGINT NOT NULL REFERENCES source_catalog_titles(id) ON DELETE CASCADE,
-  provider TEXT NOT NULL CHECK (provider IN ('animeify', 'anslayer', 'sanime', 'anifox')),
+  provider TEXT NOT NULL CHECK (provider IN ('animeify', 'anslayer', 'sanime', 'anifox', 'stardima_catalog')),
   provider_episode_id TEXT NOT NULL,
   season_number INTEGER NOT NULL DEFAULT 1,
   episode_number NUMERIC(10, 2),
@@ -66,7 +66,7 @@ CREATE INDEX IF NOT EXISTS source_catalog_episodes_provider_idx
 CREATE TABLE IF NOT EXISTS source_catalog_servers (
   id BIGSERIAL PRIMARY KEY,
   episode_id BIGINT NOT NULL REFERENCES source_catalog_episodes(id) ON DELETE CASCADE,
-  provider TEXT NOT NULL CHECK (provider IN ('animeify', 'anslayer', 'sanime', 'anifox')),
+  provider TEXT NOT NULL CHECK (provider IN ('animeify', 'anslayer', 'sanime', 'anifox', 'stardima_catalog')),
   server_key TEXT NOT NULL,
   server_name TEXT,
   quality TEXT,
@@ -96,6 +96,26 @@ CREATE INDEX IF NOT EXISTS source_catalog_servers_page_host_idx
 -- idempotent and add the page URL column without touching existing records.
 ALTER TABLE source_catalog_servers
   ADD COLUMN IF NOT EXISTS page_url TEXT;
+
+-- Expand the provider checks on tables that were created before StarDima was
+-- added. This preserves rows while allowing the distinct stardima_catalog ID.
+ALTER TABLE source_catalog_titles
+  DROP CONSTRAINT IF EXISTS source_catalog_titles_provider_check;
+ALTER TABLE source_catalog_titles
+  ADD CONSTRAINT source_catalog_titles_provider_check
+  CHECK (provider IN ('animeify', 'anslayer', 'sanime', 'anifox', 'stardima_catalog'));
+
+ALTER TABLE source_catalog_episodes
+  DROP CONSTRAINT IF EXISTS source_catalog_episodes_provider_check;
+ALTER TABLE source_catalog_episodes
+  ADD CONSTRAINT source_catalog_episodes_provider_check
+  CHECK (provider IN ('animeify', 'anslayer', 'sanime', 'anifox', 'stardima_catalog'));
+
+ALTER TABLE source_catalog_servers
+  DROP CONSTRAINT IF EXISTS source_catalog_servers_provider_check;
+ALTER TABLE source_catalog_servers
+  ADD CONSTRAINT source_catalog_servers_provider_check
+  CHECK (provider IN ('animeify', 'anslayer', 'sanime', 'anifox', 'stardima_catalog'));
 
 -- These are public catalog records, not credentials or playback URLs.
 -- Keep RLS enabled and expose only SELECT to the anon role through the API
