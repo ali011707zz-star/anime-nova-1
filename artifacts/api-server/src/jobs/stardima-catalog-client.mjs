@@ -13,7 +13,7 @@ const ANDROID_APP_VERSION = "1.0.7";
 const ANDROID_APP_BUILD = "1";
 const API_BASE_URL = "https://app.wiib.top";
 const HTTP_TIMEOUT_MS = 20_000;
-const MEDIA_FILE_EXTENSION = /\.(?:m3u8?|mpd|mp4|m4v|mkv|webm|mov|ts|flv|avi|wmv|mp3|m4a|aac|ogg)(?:$|[?#&])/i;
+const MEDIA_FILE_EXTENSION = /\.(?:m3u8?|mpd|mp4|m4v|mkv|webm|mov|ts|flv|avi|wmv|mp3|m4a|aac|ogg)(?:$|[/?#&\s])/i;
 
 let cachedApiHeaders;
 
@@ -196,8 +196,13 @@ function pageReference(value) {
   try {
     const url = new URL(raw);
     if (!["http:", "https:"].includes(url.protocol)) return null;
-    const inspected = `${url.pathname} ${[...url.searchParams.values()].join(" ")}`;
-    if (MEDIA_FILE_EXTENSION.test(inspected)) return null;
+    const candidates = [url.pathname, ...url.searchParams.keys(), ...url.searchParams.values()];
+    for (const candidate of candidates) {
+      if (MEDIA_FILE_EXTENSION.test(candidate)) return null;
+      try {
+        if (MEDIA_FILE_EXTENSION.test(decodeURIComponent(candidate))) return null;
+      } catch {}
+    }
     return url.href;
   } catch {
     return null;
