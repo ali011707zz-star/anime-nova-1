@@ -318,6 +318,8 @@ interface FetchedSrc {
   name?: string;
   site?: string;
   isEmbed?: boolean;
+  directType?: string;
+  headers?: Record<string, string>;
   serverCount?: number;
   verified?: boolean;
   label?: string;
@@ -659,14 +661,41 @@ function normCdnHost(url: string): string {
   }
 }
 
+const KAWAII_CDN_HOSTS = new Set([
+  "cdn.momentoai.dev",
+  "video.kawaii-anime.com",
+  "cdn.mewstream.buzz",
+  "cdn.imgnex.top",
+  "cdn.watching.onl",
+  "cdn.kryntal.top",
+]);
+
+function isKawaiiCdnUrl(url: string): boolean {
+  try {
+    const host = new URL(url, "https://source.invalid").hostname.toLowerCase();
+    return KAWAII_CDN_HOSTS.has(host) ||
+      host.endsWith(".kawaii-anime.com") ||
+      host.endsWith(".momentoai.dev") ||
+      host.endsWith(".mewstream.buzz") ||
+      host.endsWith(".imgnex.top");
+  } catch {
+    return false;
+  }
+}
+
+function isKawaiiHlsUrl(url: string, directType?: string): boolean {
+  return String(directType || "").toLowerCase() === "hls" ||
+    /\.m3u8(?:[?#]|$)/i.test(url) ||
+    /\/(?:hls|playlist)(?:\/|[?#]|$)/i.test(url);
+}
+
 /* ── Detect embed-type URLs (must render in sandboxed iframe, not native video) ── */
 function isIframeUrl(url: string): boolean {
   if (!url || url.startsWith("/")) return false; // our proxy endpoints start with /
   if (url.includes("workers.dev")) return false; // Anime-Phoenix CDN (direct video)
   if (url.includes("streamtape.com")) return false; // direct MP4
   if (url.includes("sendvid.com")) return false; // direct MP4
-  if (url.includes("cdn.momentoai.dev")) return false; // kawaii CDN جديد (cdn.momentoai.dev)
-  if (url.includes("video.kawaii-anime.com")) return false; // kawaii CDN قديم (legacy)
+  if (isKawaiiCdnUrl(url)) return false; // Kawaii rotates among several direct media CDNs
   if (url.includes("missourimonster-vyla.hf.space")) return false; // Vyla proxy (direct HLS)
   if (url.match(/\.(m3u8|mp4|mkv|webm|ts)([?#]|$)/i)) return false; // video file
   return url.startsWith("https://"); // external embed page
@@ -759,16 +788,14 @@ function getServerInfo(url: string, idx: number): ServerInfo {
       isDirect: true,
     };
   }
-  // CORS * CDNs — تشغيل مباشر في المتصفح بدون proxy
-  if (
-    url.includes("cdn.momentoai.dev") ||
-    url.includes("video.kawaii-anime.com")
-  ) {
+  // Kawaii rotates its direct media hostnames; keep new API hosts native-playable.
+  if (isKawaiiCdnUrl(url)) {
+    const isHls = isKawaiiHlsUrl(url);
     return {
       label: "كواي CDN",
-      sublabel: "مباشر · 1080p",
-      isHls: false,
-      isDirect: true,
+      sublabel: isHls ? "HLS · مباشر" : "مباشر · 1080p",
+      isHls,
+      isDirect: !isHls,
     };
   }
   if (url.includes("pixeldrain.com/api/file/")) {
@@ -1789,6 +1816,7 @@ function ScraperPicker({
   nextDisabled = false,
   singleSite,
   availabilityDone = false,
+  availabilityScanFailed = false,
 }: {
   cover: string;
   title: string;
@@ -1808,6 +1836,7 @@ function ScraperPicker({
   /* عند التحديد — قسم "أحدث الحلقات" يقيّد التشغيل بمصدر واحد فقط، فلا نعرض زر أي مصدر آخر */
   singleSite?: string | null;
   availabilityDone?: boolean;
+  availabilityScanFailed?: boolean;
 }) {
   const VISIBLE_DEFS = singleSite
     ? SCRAPER_DEFS.filter((d) => d.site === singleSite)
@@ -2266,8 +2295,17 @@ function ScraperPicker({
                   shouldShowSrc(src) && getSrcQualityTier(src) === tierQ,
               ),
             );
-            if (availabilityDone && availableSlots.length === 0) return null;
-            const visibleSlots = availabilityDone ? availableSlots : VISIBLE_DEFS;
+            const fallbackSlots = STATIC_PICKER_WEB[qk].flatMap(({ site }) => {
+              const def = VISIBLE_DEFS.find((item) => item.site === site);
+              return def ? [def] : [];
+            });
+            const hasReliableAvailability = availabilityDone && !availabilityScanFailed;
+            if (hasReliableAvailability && availableSlots.length === 0) return null;
+            const visibleSlots = hasReliableAvailability
+              ? availableSlots
+              : availabilityScanFailed
+                ? fallbackSlots
+                : VISIBLE_DEFS;
             /* ألوان لكل جودة */
             const qColor =
               qk === "1080p"
@@ -4733,6 +4771,7 @@ export default function WatchPage() {
   );
   const [quality, setQuality] = useState<Quality>("720p HD");
   const [availabilityDone, setAvailabilityDone] = useState(false);
+  const [availabilityScanFailed, setAvailabilityScanFailed] = useState(false);
   const [initialSrv, setInitialSrv] = useState(0);
   /* playKey: يتزايد في كل اختيار مصدر → يجبر EpisodePlayer على إعادة التهيئة الكاملة */
   const [playKey, setPlayKey] = useState(0);
@@ -5537,6 +5576,7 @@ export default function WatchPage() {
     autoFetchAllRef.current = false;
     availabilityCheckedRef.current = false;
     setAvailabilityDone(false);
+    setAvailabilityScanFailed(false);
     setSlotSources({});
     setSlotStatus(EMPTY_SLOTS());
     setQualityStatus({});
@@ -5560,6 +5600,7 @@ export default function WatchPage() {
     let cancelled = false;
     autoFetchAllRef.current = false;
     setAvailabilityDone(false);
+    setAvailabilityScanFailed(false);
     setSlotSources({});
     setSlotStatus(EMPTY_SLOTS());
     setQualityStatus({});
@@ -5647,6 +5688,7 @@ export default function WatchPage() {
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
         let buffer = "";
+        let sawDone = false;
         const consume = (text: string) => {
           buffer += text;
           const blocks = buffer.split(/\n\n/);
@@ -5656,7 +5698,11 @@ export default function WatchPage() {
               .split(/\r?\n/)
               .find((item) => item.startsWith("data:"));
             const payload = line?.slice(5).trim();
-            if (!payload || payload === "[DONE]") continue;
+            if (!payload) continue;
+            if (payload === "[DONE]") {
+              sawDone = true;
+              continue;
+            }
             try {
               applyCheckRow(JSON.parse(payload));
             } catch {
@@ -5670,10 +5716,10 @@ export default function WatchPage() {
           if (value) consume(decoder.decode(value, { stream: true }));
         }
         consume(decoder.decode());
+        if (!cancelled && !sawDone) setAvailabilityScanFailed(true);
       } catch {
         if (!controller.signal.aborted) {
-          // Keep static rows visible; a failed availability scan must not hide
-          // servers or turn it into a playback request.
+          setAvailabilityScanFailed(true);
         }
       } finally {
         if (!cancelled) setAvailabilityDone(true);
@@ -5779,12 +5825,15 @@ export default function WatchPage() {
     /* ── kawaii CDN fallback: إذا فشل التشغيل المباشر، نجرّب عبر VPS proxy بـ Referer الصحيح ──
        cdn.momentoai.dev يشترط Referer: kawaiianime.cc — المتصفح لا يستطيع تعيينه → proxy fallback */
     const isKawaiiCdn =
-      src.site === "kawaii" &&
-      (clickedUrl.includes("cdn.momentoai.dev") ||
-        clickedUrl.includes("video.kawaii-anime.com"));
+      src.site === "kawaii" && isKawaiiCdnUrl(clickedUrl);
     if (isKawaiiCdn) {
-      const kawaiiRef = "https://kawaiianime.cc/";
-      const isHlsKw = /\.m3u8([?#]|$)/i.test(clickedUrl);
+      let host = "";
+      try { host = new URL(clickedUrl).hostname.toLowerCase(); } catch {}
+      const kawaiiRef = src.headers?.Referer?.trim() ||
+        (host.endsWith(".mewstream.buzz")
+          ? "https://megaplay.buzz/"
+          : "https://kawaiianime.cc/");
+      const isHlsKw = isKawaiiHlsUrl(clickedUrl, src.directType);
       const kwProxy = isHlsKw
         ? `/api/anime/hls-proxy?url=${encodeURIComponent(clickedUrl)}&ref=${encodeURIComponent(kawaiiRef)}`
         : `/api/anime/video-proxy?url=${encodeURIComponent(clickedUrl)}&ref=${encodeURIComponent(kawaiiRef)}`;
@@ -5855,6 +5904,7 @@ export default function WatchPage() {
                 slotSources={slotSources}
                 qualityStatus={qualityStatus}
                 availabilityDone={availabilityDone}
+                availabilityScanFailed={availabilityScanFailed}
                 onFetchSite={handleFetchSite}
                 onPlaySrc={handlePlaySrc}
                 onBack={handleBack}

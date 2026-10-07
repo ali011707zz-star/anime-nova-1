@@ -327,6 +327,7 @@ const KAWAII_MOBILE_CDN_HOSTS = new Set([
   "cdn.mewstream.buzz",
   "cdn.watching.onl",
   "cdn.imgnex.top",
+  "cdn.kryntal.top",
 ]);
 
 function isKawaiiMobileCdnHost(hostname: string): boolean {

@@ -14652,9 +14652,18 @@ router.get("/anime/fetch-source", scraperQueueMiddleware, async (req, res) => {
     return;
   }
 
-  // روابط “أحدث الحلقات” تحمل AnimeSlayer ID في anime=، لذلك تكون AniList ID مفقودة.
-  // حلّها قبل تشغيل أي مصدر يعتمد على AniList (KW وAnimeWitcher وغيرها).
-  if (site !== "anslayer" && !anilistId) {
+  // Availability resolves Kawaii from the title even when the client supplied
+  // a numeric id. Match that behavior here: latest/catalog links can carry a
+  // provider id in `anime`, which is not necessarily an AniList id.
+  if (site === "kawaii" && title) {
+    const resolvedByTitle = await Promise.race([
+      resolveAniListIdForSource(title, english, titleVariants, titleAr),
+      new Promise<number | undefined>(resolve => setTimeout(() => resolve(undefined), 3500)),
+    ]);
+    if (resolvedByTitle) anilistId = resolvedByTitle;
+  } else if (site !== "anslayer" && !anilistId) {
+    // Other AniList-dependent sources still need title resolution when no id
+    // was supplied by the caller.
     const resolvedByTitle = await Promise.race([
       resolveAniListIdForSource(title, english, titleVariants, titleAr),
       new Promise<number | undefined>(resolve => setTimeout(() => resolve(undefined), 3500)),

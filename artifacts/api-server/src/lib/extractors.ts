@@ -186,42 +186,110 @@ export async function extractDirectShahiid(urlStr: string) {
 // ─── Kawaii Anime ─────────────────────────────────────────────────────────────
 
 /**
- * BUG 5 FIX (منطق خاطئ كلياً):
- * الكود الأصلي كان يحاول يقرأ ID من URL بهذا الـ regex: `//watch/(\d+)/`
- * وهذا خطأن في نفس الوقت:
- *   - Regex خاطئ: يجب `/\/watch\/(\d+)\//`
- *   - المنطق خاطئ: Kawaii لا يستخدم URL patterns، بل API مباشر بـ AniList ID
- *
- * الحل الصحيح: قبول anilistId و ep مباشرة واستدعاء API الحقيقي.
+ * Kawaii now serves episode data from /api/miruro and wraps it in `data`.
+ * The older /api/watch route can return APP_KEY_MISSING, so try the live API
+ * and its aliases first; keep /api/watch only as a final compatibility path.
  */
+const KAWAII_EXTRACTOR_API_BASES = [
+  "https://kawaiianime.cc",
+  "https://www.kawaii-anime.com",
+  "https://kawaii-anime.com",
+] as const;
+
+type KawaiiExtractorSource = {
+  url: string;
+  quality?: string;
+  isM3U8?: boolean;
+  type?: string;
+};
+
+async function fetchKawaiiExtractorSources(
+  base: string,
+  apiUrl: string,
+): Promise<KawaiiExtractorSource[] | null> {
+  try {
+    const response = await fetch(apiUrl, {
+      headers: {
+        "User-Agent": "Mozilla/5.0",
+        Referer: `${base}/`,
+        Accept: "application/json",
+      },
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!response.ok) return null;
+
+    const candidate = await response.json().catch(() => null) as any;
+    const payload = candidate?.data && typeof candidate.data === "object"
+      ? candidate.data
+      : candidate;
+    const rows = Array.isArray(payload?.sources)
+      ? payload.sources.filter((row: unknown): row is KawaiiExtractorSource =>
+          !!row &&
+          typeof row === "object" &&
+          typeof (row as KawaiiExtractorSource).url === "string" &&
+          (row as KawaiiExtractorSource).url.trim().length > 0)
+      : [];
+    return rows.length ? rows : null;
+  } catch {
+    return null;
+  }
+}
+
 export async function extractDirectKawaiiAnime(anilistId: number, ep: number) {
-  const apiUrl = `https://www.kawaii-anime.com/api/watch?anilistId=${anilistId}&ep=${ep}`;
+  if (!Number.isSafeInteger(anilistId) || anilistId <= 0 ||
+      !Number.isSafeInteger(ep) || ep <= 0) {
+    throw new Error("Kawaii requires a valid AniList ID and episode number");
+  }
 
-  const r = await fetch(apiUrl, {
-    headers: {
-      "User-Agent": "Mozilla/5.0",
-      Referer: "https://www.kawaii-anime.com/",
-      Accept: "application/json",
-    },
-    signal: AbortSignal.timeout(10_000),
-  });
+  let result: { base: string; sources: KawaiiExtractorSource[] } | null = null;
 
-  if (!r.ok) throw new Error(`Kawaii API returned HTTP ${r.status}`);
+  // Prefer the current public endpoint across all known aliases before
+  // falling back to the old app-key-protected endpoint.
+  for (const base of KAWAII_EXTRACTOR_API_BASES) {
+    const urls = [
+      `${base}/api/miruro?anilistId=${anilistId}&ep=${ep}`,
+      `${base}/api/miruro?anilist_id=${anilistId}&episode=${ep}`,
+    ];
+    for (const apiUrl of urls) {
+      const sources = await fetchKawaiiExtractorSources(base, apiUrl);
+      if (sources) {
+        result = { base, sources };
+        break;
+      }
+    }
+    if (result) break;
+  }
 
-  const data = (await r.json()) as {
-    sources?: Array<{ url: string; quality?: string; isM3U8?: boolean }>;
-  };
+  if (!result) {
+    for (const base of KAWAII_EXTRACTOR_API_BASES) {
+      const apiUrl = `${base}/api/watch?anilistId=${anilistId}&ep=${ep}`;
+      const sources = await fetchKawaiiExtractorSources(base, apiUrl);
+      if (!sources) continue;
+      result = { base, sources };
+      break;
+    }
+  }
 
-  if (!data.sources?.length) throw new Error("No sources from Kawaii API");
+  if (!result) throw new Error("No sources from Kawaii API");
+  const { base: sourceBase, sources } = result;
 
   return {
     success: true,
     source: "Kawaii Anime",
-    servers: data.sources.map((s) => ({
-      name: `Kawaii (${s.quality || "HD"})`,
-      url: s.url,
-      type: s.isM3U8 ? "hls" : "direct",
-    })),
+    servers: sources.map((source) => {
+      const url = new URL(source.url, `${sourceBase}/`).toString();
+      const type = String(source.type || "").toLowerCase();
+      const isHls = source.isM3U8 === true ||
+        type === "hls" ||
+        type === "m3u8" ||
+        /\.m3u8(?:[?#]|$)/i.test(url) ||
+        /\/(?:hls|playlist)(?:\/|$)/i.test(url);
+      return {
+        name: `Kawaii (${source.quality || "HD"})`,
+        url,
+        type: isHls ? "hls" : "direct",
+      };
+    }),
   };
 }
 

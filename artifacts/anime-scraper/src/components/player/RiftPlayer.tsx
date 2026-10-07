@@ -15,6 +15,33 @@ import {
   ChevronDown, SkipForward,
 } from "lucide-react";
 
+const KAWAII_CDN_HOSTS = new Set([
+  "cdn.momentoai.dev",
+  "video.kawaii-anime.com",
+  "cdn.mewstream.buzz",
+  "cdn.imgnex.top",
+  "cdn.watching.onl",
+  "cdn.kryntal.top",
+]);
+
+function isKawaiiCdnUrl(value: string): boolean {
+  try {
+    const host = new URL(value, "https://player.invalid").hostname.toLowerCase();
+    return KAWAII_CDN_HOSTS.has(host) ||
+      host.endsWith(".kawaii-anime.com") ||
+      host.endsWith(".momentoai.dev") ||
+      host.endsWith(".mewstream.buzz") ||
+      host.endsWith(".imgnex.top");
+  } catch {
+    return false;
+  }
+}
+
+function isKawaiiHlsUrl(value: string): boolean {
+  return /\.m3u8(?:[?#]|$)/i.test(value) ||
+    /\/(?:hls|playlist)(?:\/|[?#]|$)/i.test(value);
+}
+
 /* ─────────────────────────────────────── helpers ─── */
 function fmtTime(s: number) {
   if (!isFinite(s) || s < 0) return "0:00";
@@ -550,15 +577,14 @@ export default function RiftPlayer({
       return;
     }
 
-    // CDNs with CORS * + Accept-Ranges → play DIRECTLY in browser (no proxy round-trip)
-    // cdn.momentoai.dev (kawaii جديد): CORS * + Range support (MP4 native)
-    // pixeldrain.com/api/file/: confirmed CORS * + Accept-Ranges (MP4 only)
-    const CORS_DIRECT_CDN = ["cdn.momentoai.dev", "video.kawaii-anime.com", "pixeldrain.com/api/file/"];
-    const isCorsDirectCdn = CORS_DIRECT_CDN.some(h => src.includes(h));
-    if (isCorsDirectCdn && !src.match(/\.m3u8([?#]|$)/i)) {
+    // Kawaii rotates direct media hostnames; Pixeldrain is a separate confirmed
+    // CORS + Range source. Playlist-shaped Kawaii links must go through HLS.js.
+    const isKawaiiCdn = isKawaiiCdnUrl(src);
+    const isCorsDirectCdn = isKawaiiCdn || src.includes("pixeldrain.com/api/file/");
+    if (isCorsDirectCdn && !(isKawaiiCdn && isKawaiiHlsUrl(src))) {
       // MP4/non-HLS: native <video> element works fine (CORS *)
       // kawaii CDN: no-Referer=200, wrong-Referer=403 — browser sends page URL as Referer by default
-      if (src.includes("cdn.momentoai.dev") || src.includes("video.kawaii-anime.com")) v.referrerPolicy = "no-referrer";
+      if (isKawaiiCdn) v.referrerPolicy = "no-referrer";
       v.src = src; v.load();
       let done = false;
       const cleanup = () => { done = true; clearTimeout(t); v.removeEventListener("loadedmetadata", onMd); v.removeEventListener("error", onEd); };
@@ -612,7 +638,7 @@ export default function RiftPlayer({
 
       // ── kawaii CDN: XHR لا يستطيع إخفاء Referer (forbidden header) → CDN يُرجع 403.
       // الحل: custom Fetch loader بـ referrerPolicy:"no-referrer" لجميع طلبات kawaii HLS.
-      const isKawaiiHls = m3u8.includes("cdn.momentoai.dev") || m3u8.includes("video.kawaii-anime.com");
+      const isKawaiiHls = isKawaiiCdnUrl(m3u8);
       class KawaiiNoRefLoader {
         private ctrl: AbortController | null = null;
         destroy() { this.ctrl?.abort(); }

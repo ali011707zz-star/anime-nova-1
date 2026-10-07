@@ -3,30 +3,17 @@ name: kawaii-anime.com API
 description: How to scrape kawaii-anime.com — uses AniList IDs natively, has Arabic subtitles for newer anime
 ---
 
-## API Endpoint
-`GET https://www.kawaii-anime.com/api/watch?anilistId={anilistId}&ep={episodeNumber}`
-
-## Response
-```json
-{
-  "source": "cache",
-  "sources": [{"url": "https://video.kawaii-anime.com/video/21-ep1", "quality": "1080p", "isM3U8": false, "type": "mp4"}],
-  "subtitles": [
-    {"url": "https://video.kawaii-anime.com/subtitle/113415-ep1-Arabic-0.vtt", "lang": "Arabic"},
-    {"url": "https://video.kawaii-anime.com/subtitle/113415-ep1-English-1.vtt", "lang": "English"}
-  ],
-  "headers": {"Referer": "https://www.kawaii-anime.com/"},
-  "intro": {"start": 31, "end": 111},
-  "outro": {"start": 1376, "end": 1447}
-}
-```
+## Current API
+- Primary: `GET https://kawaiianime.cc/api/miruro?anilistId={id}&ep={episode}`.
+- Also try the `anilist_id` / `episode` query-name variant and known domain aliases.
+- Responses may put `sources` and subtitles directly at the top level or inside `data`.
+- `/api/watch` is a compatibility fallback only; it has returned `APP_KEY_MISSING`.
+- The playback caller must resolve AniList ID from the title when the incoming numeric ID may be a provider-catalog ID.
 
 ## CDN
-- Base: `video.kawaii-anime.com`
-- URL pattern: `/video/{anilistId}-ep{epNum}` (e.g., `/video/21-ep1`)
-- CORS: `access-control-allow-origin: *`
-- Auth: None required
-- Range: `accept-ranges: bytes` (seeking works)
+- Kawaii rotates among `video.kawaii-anime.com`, `cdn.momentoai.dev`, `cdn.mewstream.buzz`, `cdn.imgnex.top`, `cdn.watching.onl`, and `cdn.kryntal.top`.
+- Keep the API-provided host allowlist synchronized across web, mobile, and server validation.
+- Direct MP4 playback may work in the browser; HLS URLs must use the HLS player path and provider-specific Referer handling.
 
 ## Arabic Subtitle Support
 - **Newer anime have Arabic subtitles** (2020+): JJK (113415, 145064), Demon Slayer (101922) confirmed ✓
@@ -35,20 +22,21 @@ description: How to scrape kawaii-anime.com — uses AniList IDs natively, has A
 - Code must prefer Arabic first: `findSub("arabic") || findSub("arab") || findSub("ar") || findSub("english") || ...`
 
 ## Key Points
-- **AniList IDs are used natively** — no slug lookup needed
+- Kawaii accepts a real AniList ID directly; a nonzero `anime` / `anilistId` parameter can still be a provider catalog ID on latest-episode links.
 - qualityRank = 15 (highest priority, direct MP4)
 - Source name label should reflect subtitle language: "كواي أنمي · 1080p · عربي" vs "إنجليزي"
-- SSE endpoint needs `req.query.anime` extracted as anilistId
 - `lang` vs `label` field inconsistency possible → check both
 
+**Why:** Passing a provider catalog ID to Kawaii can silently produce no source; checking only whether the numeric parameter exists does not prove it is an AniList ID.
+
+**How to apply:** Resolve Kawaii's AniList ID from the title before both availability and click-time fetches, even when a numeric ID was supplied.
+
 ## CDN rotation
-The API may return HLS URLs on `cdn.mewstream.buzz` (for example, One Piece episode 1173), in addition to the older `cdn.momentoai.dev` and `video.kawaii-anime.com` hosts. The scraper must allowlist the hostname and send the URL through the VPS HLS proxy with the Kawaii referer.
+Kawaii can change media hosts and return either HLS or MP4 URLs without changing its API contract. A host omitted from any one client/server allowlist can make a valid episode disappear or fail only on one platform.
 
-The current `/api/miruro` response has also rotated to HLS URLs on `cdn.imgnex.top` with no query-string signature (observed on September 6, 2026). The existing trust filter rejects these URLs, so valid Kawaii responses become an empty source list.
+**Why:** The provider has rotated through several unrelated hostnames and both signed and unsigned media URLs.
 
-**Why:** Kawaii's API can rotate its media CDN without changing the API contract; filtering only the old hosts makes an otherwise valid episode disappear and also breaks conversion downloads.
-
-**How to apply:** When Kawaii returns a new CDN, verify the hostname is trusted before adding it to the server-side Kawaii host allowlist. Keep the proxy path and referer handling unchanged.
+**How to apply:** Verify each new hostname against a live Kawaii API response, then keep the server trust filter, web player, and mobile normalization in sync. Preserve the correct HLS handling and Referer behavior for that host.
 
 **Why:** kawaii's API returns both Arabic and English subtitles for new anime. Old code only looked for English and missed Arabic entirely.
 
