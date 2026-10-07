@@ -6788,6 +6788,47 @@ function isTrustedKawaiiCdnUrl(rawUrl: string): boolean {
   }
 }
 
+function isUsableKawaiiCache(
+  cached: { sources: UnifiedSource[]; expiresAt: number; stale?: boolean } | null,
+): cached is { sources: UnifiedSource[]; expiresAt: number; stale?: boolean } {
+  // Kawaii media URLs are signed or short-lived. Use a cached row only while
+  // its computed safe expiry still has a few minutes remaining.
+  return !!cached &&
+    !cached.stale &&
+    cached.sources.length > 0 &&
+    Number.isFinite(cached.expiresAt) &&
+    cached.expiresAt - Date.now() > 3 * 60_000;
+}
+
+function rebuildKawaiiCachedSources(sources: UnifiedSource[]): UnifiedSource[] {
+  return sources.map(source => {
+    if (source.site !== "kawaii") return source;
+    const cachedSource = source as UnifiedSource & {
+      rawUrl?: string;
+      headers?: Record<string, string>;
+    };
+    const rawUrl = String(cachedSource.rawUrl || "");
+    if (!rawUrl || !isTrustedKawaiiCdnUrl(rawUrl)) return source;
+
+    const host = new URL(rawUrl).hostname.toLowerCase();
+    const referer = host.endsWith(".mewstream.buzz")
+      ? "https://megaplay.buzz/"
+      : cachedSource.headers?.Referer || cachedSource.headers?.referer || `${KAWAII_BASE}/`;
+    const isHls = source.directType === "hls" || kawaiiMediaIsHls(rawUrl);
+    const path = isHls ? "/api/anime/hls-proxy" : "/api/anime/video-proxy";
+    const proxyUrl = `${path}?url=${encodeURIComponent(rawUrl)}&ref=${encodeURIComponent(referer)}`;
+    let origin = referer;
+    try { origin = new URL(referer).origin; } catch {}
+    return {
+      ...source,
+      url: proxyUrl,
+      directUrl: proxyUrl,
+      directType: isHls ? "hls" : "mp4",
+      headers: { ...(cachedSource.headers || {}), Referer: referer, Origin: origin },
+    } as UnifiedSource;
+  });
+}
+
 async function getKawaiiAnimeSources(
   _title: string, _english: string | null, ep: number, anilistId?: number, availabilityOnly = false,
 ): Promise<UnifiedSource[]> {
@@ -6800,11 +6841,47 @@ async function getKawaiiAnimeSources(
       intro?: { start: number; end: number };
       outro?: { start: number; end: number };
     };
-    let data: KawaiiApiData | null = null;
-    let apiBase = KAWAII_BASE;
-
-    // Try every live API alias before validating the returned CDN host.
-    for (const base of KAWAII_API_BASES) {
+    type KawaiiResolved = {
+      data: KawaiiApiData;
+      apiBase: string;
+      trustedSources: NonNullable<KawaiiApiData["sources"]>;
+    };
+    const fetchKawaiiJson = async (
+      apiUrl: string,
+      base: string,
+      parentSignal: AbortSignal,
+    ): Promise<any> => {
+      for (let attempt = 0; attempt < 2; attempt++) {
+        if (parentSignal.aborted) return null;
+        const controller = new AbortController();
+        const abortRequest = () => controller.abort();
+        parentSignal.addEventListener("abort", abortRequest, { once: true });
+        const timeout = setTimeout(abortRequest, 8_000);
+        try {
+          const response = await fetch(apiUrl, {
+            headers: {
+              ...BASE_HDRS,
+              Accept: "application/json",
+              Referer: `${base}/`,
+            },
+            signal: controller.signal,
+          });
+          if (response.ok) return await response.json().catch(() => null);
+          if (response.status < 500 && response.status !== 429) return null;
+        } catch {
+          if (parentSignal.aborted) return null;
+        } finally {
+          clearTimeout(timeout);
+          parentSignal.removeEventListener("abort", abortRequest);
+        }
+        if (attempt === 0) await new Promise(resolve => setTimeout(resolve, 250));
+      }
+      return null;
+    };
+    const resolveFromBase = async (
+      base: string,
+      parentSignal: AbortSignal,
+    ): Promise<KawaiiResolved | null> => {
       /* Kawaii's MP4 variant is the reliable mobile path. Its HLS response
          can advertise a valid row while the CDN rejects the first manifest
          request with a Referer-dependent 403. */
@@ -6814,41 +6891,58 @@ async function getKawaiiAnimeSources(
         `${base}/api/watch?anilistId=${anilistId}&ep=${ep}&format=mp4`,
         `${base}/api/watch?anilistId=${anilistId}&ep=${ep}`,
       ]) {
-        const r = await fetchSourceWithRetry(apiUrl, {
-          headers: {
-            ...BASE_HDRS,
-            Accept: "application/json",
-            Referer: base + "/",
-          },
-        }, 12_000);
-        if (!r) continue;
-        const candidate = await r.json().catch(() => null) as (KawaiiApiData & {
-          data?: KawaiiApiData | { sources?: KawaiiApiData["sources"]; subtitles?: KawaiiApiData["subtitles"]; headers?: KawaiiApiData["headers"] };
+        const candidate = await fetchKawaiiJson(apiUrl, base, parentSignal) as (KawaiiApiData & {
+          data?: KawaiiApiData | {
+            sources?: KawaiiApiData["sources"];
+            subtitles?: KawaiiApiData["subtitles"];
+            headers?: KawaiiApiData["headers"];
+          };
         }) | null;
         const payload = candidate?.data && typeof candidate.data === "object"
           ? { ...candidate, ...candidate.data }
           : candidate;
-        if (payload?.sources?.some(source => typeof source?.url === "string" && source.url.length > 0)) {
-          data = payload;
-          apiBase = base;
-          break;
+        const validSources = (payload?.sources || []).flatMap(source => {
+          if (typeof source?.url !== "string" || !source.url.trim()) return [];
+          try {
+            const url = new URL(source.url, base).toString();
+            return isTrustedKawaiiCdnUrl(url) ? [{ ...source, url }] : [];
+          } catch {
+            return [];
+          }
+        });
+        // A successful JSON response with stale or unsupported media hosts is
+        // not a successful provider result; keep trying the endpoint aliases.
+        if (payload && validSources.length) {
+          return { data: { ...payload, sources: validSources }, apiBase: base, trustedSources: validSources };
         }
       }
-      if (data) break;
-    }
-    if (!data?.sources?.length) return [];
+      return null;
+    };
+
+    // Race the known host aliases so one dead/slow hostname cannot block the
+    // other working domains. Each alias still tries its compatibility routes
+    // in order, and only a payload with trusted media URLs can win.
+    const aliasControllers = KAWAII_API_BASES.map(() => new AbortController());
+    const resolved = await Promise.any(KAWAII_API_BASES.map(async (base, aliasIndex) => {
+      const result = await resolveFromBase(base, aliasControllers[aliasIndex].signal);
+      if (!result) throw new Error("No valid Kawaii sources from this host");
+      return { result, aliasIndex };
+    })).catch(() => null);
+    aliasControllers.forEach((controller, index) => {
+      if (index !== resolved?.aliasIndex) controller.abort();
+    });
+    if (!resolved) return [];
+    const { data, apiBase, trustedSources } = resolved.result;
 
     if (availabilityOnly) {
-      return data.sources
-        .filter(source => typeof source?.url === "string" && source.url.length > 0)
-        .map((source, index) => {
-          const label = kawaiiSourceQuality(source.quality, index);
-          return {
-            name: `كواي أنمي · ${label}`, url: "", quality: label,
-            qualityRank: kawaiiQualityRank(label), site: "kawaii",
-            verified: true,
-          } as UnifiedSource;
-        });
+      return trustedSources.map((source, index) => {
+        const label = kawaiiSourceQuality(source.quality, index);
+        return {
+          name: `كواي أنمي · ${label}`, url: "", quality: label,
+          qualityRank: kawaiiQualityRank(label), site: "kawaii",
+          verified: true,
+        } as UnifiedSource;
+      });
     }
 
     // Kawaii may return several labels. Match complete language tokens only;
@@ -6879,23 +6973,6 @@ async function getKawaiiAnimeSources(
     // بيانات تخطي المقدمة/الخاتمة من API مباشرة
     const skipIntro = normalizeSkipInterval(data.intro) ?? undefined;
     const skipOutro = normalizeSkipInterval(data.outro) ?? undefined;
-
-    // ── kawaii CDN: cdn.momentoai.dev يشترط Referer: kawaiianime.cc ──
-    // المتصفح لا يستطيع تعيين Referer كـ forbidden header → التشغيل المباشر يفشل.
-    // الحل: توجيه كل المصادر عبر VPS proxy مع الـ Referer الصحيح.
-    const trustedSources = data.sources
-      .map(s => {
-        if (!s?.url) return null;
-        try {
-           const url = new URL(s.url, apiBase).toString();
-          return { ...s, url };
-        } catch { return null; }
-      })
-      .filter((s): s is NonNullable<typeof s> => {
-        if (!s) return false;
-         return isTrustedKawaiiCdnUrl(s.url);
-      });
-    if (!trustedSources.length) return [];
 
     /* Prefer the original MP4 when Kawaii returns both MP4 and HLS variants.
        Android can otherwise enter the source-fallback loop on an HLS row even
@@ -14301,6 +14378,12 @@ router.get("/anime/sources-stream", scraperQueueMiddleware, async (req, res) => 
         anilistId || anslayerId || `${reqYear || ""}:${reqTotalEps || ""}`,
       );
       const hit  = await getFromSourceCache(cKey);
+      // Keep the picker populated from an unexpired Kawaii row during a
+      // provider outage; playback still refreshes the signed URL on click.
+      if (site === "kawaii" && checkOnly && isUsableKawaiiCache(hit)) {
+        await emitAvailability(hit.sources);
+        return;
+      }
       // Reanime URLs are paired with a per-embed manifest key and cannot use
       // source-cache rows created before that key was propagated to hls-proxy.
       // Kawaii signed URLs and episode availability rotate quickly. Never serve
@@ -14362,7 +14445,14 @@ router.get("/anime/sources-stream", scraperQueueMiddleware, async (req, res) => 
         `${cKey}:live`,
         () => race(scrape(), effectiveTimeoutMs, []),
       );
-      if (!srcs.length) return;
+      if (!srcs.length) {
+        if (site === "kawaii" && isUsableKawaiiCache(hit)) {
+          const fallbackSources = rebuildKawaiiCachedSources(hit.sources);
+          if (checkOnly) await emitAvailability(fallbackSources);
+          else if (!closed) fallbackSources.forEach(sendSrc);
+        }
+        return;
+      }
 
       // In check mode, verify a small bounded sample before advertising a row.
       // Clicking a row still performs the complete fetch-source/playback check.
@@ -14917,7 +15007,7 @@ router.get("/anime/fetch-source", scraperQueueMiddleware, async (req, res) => {
       case "topcinemaa":   await runExtract(await race(getTopCimaaSources(title, english, ep, isMovie), SCRAPER_MS, [])); break;
       case "kawaii":      (await getOrCreateSourceFlight(
         `${cKey}:live`,
-        () => race(getKawaiiAnimeSources(title, english, ep, anilistId), 24_000, []),
+        () => race(getKawaiiAnimeSources(title, english, ep, anilistId), 15_000, []),
       )).forEach(collectSrc); break;
       case "megaplay":    (await race(getMegaPlayAnimeSources(title, english, ep, anilistId), 24_000, [])).forEach(collectSrc); break;
       case "anineko":     (await race(getAninekoSources(title, english, ep, titleVariants), 40_000, [])).forEach(collectSrc); break;
@@ -14982,8 +15072,15 @@ router.get("/anime/fetch-source", scraperQueueMiddleware, async (req, res) => {
     }
   });
 
+    const fallbackKawaiiCache = site === "kawaii" && !sharedSources.length && isUsableKawaiiCache(cached)
+      ? rebuildKawaiiCachedSources(cached.sources)
+      : [];
+    if (fallbackKawaiiCache.length) {
+      console.warn("[fetch-source] Kawaii live lookup failed; using its unexpired source cache");
+    }
+    const responseSources = fallbackKawaiiCache.length ? fallbackKawaiiCache : sharedSources;
     const isMobileClient = (req.headers["x-nova-client"] || "").toString().includes("mobile");
-    const encSources = stripAnimeSlayerSubtitles(filterRequestedQuality(sharedSources)).map(s => {
+    const encSources = stripAnimeSlayerSubtitles(filterRequestedQuality(responseSources)).map(s => {
       /* استخراج headers (Referer/Origin) قبل تشفير directUrl —
          يحتاجها ExoPlayer/AVPlayer للـ CDN segments مباشرةً.
          إذا كان ref مشفَّراً (hex AES) فهو رابط proxy داخلي — لا نُرسله كـ Referer. */

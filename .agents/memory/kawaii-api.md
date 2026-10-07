@@ -38,6 +38,13 @@ Kawaii can change media hosts and return either HLS or MP4 URLs without changing
 
 **How to apply:** Verify each new hostname against a live Kawaii API response, then keep the server trust filter, web player, and mobile normalization in sync. Preserve the correct HLS handling and Referer behavior for that host.
 
+## Temporary API outages
+Race the known API aliases, but count a response as usable only when it contains at least one source URL on a trusted Kawaii CDN. If the live lookup fails, a cached source may be used only before its computed safe expiry; never extend the signed URL lifetime.
+
+**Why:** A temporary API outage can hide a previously working episode, while expired signed URLs turn a fallback into a playback failure.
+
+**How to apply:** Preserve the source cache's expiry calculation and safety margin when changing Kawaii fallback behavior. Do not serve stale rows past their safe expiry.
+
 **Why:** kawaii's API returns both Arabic and English subtitles for new anime. Old code only looked for English and missed Arabic entirely.
 
 ## Mobile download verification
