@@ -1817,6 +1817,7 @@ function ScraperPicker({
   singleSite,
   availabilityDone = false,
   availabilityScanFailed = false,
+  onRetryAvailability,
 }: {
   cover: string;
   title: string;
@@ -1837,6 +1838,7 @@ function ScraperPicker({
   singleSite?: string | null;
   availabilityDone?: boolean;
   availabilityScanFailed?: boolean;
+  onRetryAvailability: () => void;
 }) {
   const VISIBLE_DEFS = singleSite
     ? SCRAPER_DEFS.filter((d) => d.site === singleSite)
@@ -2283,6 +2285,29 @@ function ScraperPicker({
           </div>
         )}
 
+        {availabilityDone && availabilityScanFailed && (
+          <div
+            role="alert"
+            className="mx-4 mt-4 flex items-center justify-between gap-3 rounded-2xl px-4 py-3"
+            style={{
+              background: "rgba(251,191,36,0.08)",
+              border: "1px solid rgba(251,191,36,0.2)",
+            }}
+          >
+            <p className="text-white/70 text-[12px] font-['Cairo'] leading-relaxed">
+              تعذّر إكمال فحص المصادر. تظهر هنا المصادر التي تأكد توفرها فقط.
+            </p>
+            <button
+              type="button"
+              onClick={onRetryAvailability}
+              className="shrink-0 rounded-xl px-3 py-2 text-[12px] font-bold font-['Cairo'] text-amber-100"
+              style={{ background: "rgba(251,191,36,0.14)" }}
+            >
+              إعادة الفحص
+            </button>
+          </div>
+        )}
+
         {/* ── Static picker: جودات مكدّسة + صفوف (تصميم Aniyomi) ── */}
         <div className={`${availabilityDone ? "" : "hidden"} px-4 mt-4 mb-3`}>
           {WEB_Q_KEYS.map((qk) => {
@@ -2295,17 +2320,8 @@ function ScraperPicker({
                   shouldShowSrc(src) && getSrcQualityTier(src) === tierQ,
               ),
             );
-            const fallbackSlots = STATIC_PICKER_WEB[qk].flatMap(({ site }) => {
-              const def = VISIBLE_DEFS.find((item) => item.site === site);
-              return def ? [def] : [];
-            });
-            const hasReliableAvailability = availabilityDone && !availabilityScanFailed;
-            if (hasReliableAvailability && availableSlots.length === 0) return null;
-            const visibleSlots = hasReliableAvailability
-              ? availableSlots
-              : availabilityScanFailed
-                ? fallbackSlots
-                : VISIBLE_DEFS;
+            if (availabilityDone && availableSlots.length === 0) return null;
+            const visibleSlots = availabilityDone ? availableSlots : VISIBLE_DEFS;
             /* ألوان لكل جودة */
             const qColor =
               qk === "1080p"
@@ -4772,6 +4788,7 @@ export default function WatchPage() {
   const [quality, setQuality] = useState<Quality>("720p HD");
   const [availabilityDone, setAvailabilityDone] = useState(false);
   const [availabilityScanFailed, setAvailabilityScanFailed] = useState(false);
+  const [availabilityRetryKey, setAvailabilityRetryKey] = useState(0);
   const [initialSrv, setInitialSrv] = useState(0);
   /* playKey: يتزايد في كل اختيار مصدر → يجبر EpisodePlayer على إعادة التهيئة الكاملة */
   const [playKey, setPlayKey] = useState(0);
@@ -5731,7 +5748,7 @@ export default function WatchPage() {
       controller.abort();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [animeId, ep]);
+  }, [animeId, ep, availabilityRetryKey]);
 
   /* ── Background server accumulation: once player is open, append new sources as scrapers finish ── */
   useEffect(() => {
@@ -5905,6 +5922,11 @@ export default function WatchPage() {
                 qualityStatus={qualityStatus}
                 availabilityDone={availabilityDone}
                 availabilityScanFailed={availabilityScanFailed}
+                onRetryAvailability={() => {
+                  setAvailabilityDone(false);
+                  setAvailabilityScanFailed(false);
+                  setAvailabilityRetryKey((key) => key + 1);
+                }}
                 onFetchSite={handleFetchSite}
                 onPlaySrc={handlePlaySrc}
                 onBack={handleBack}
