@@ -1,0 +1,174 @@
+diff --git a/artifacts/api-server/src/routes/anime.ts b/artifacts/api-server/src/routes/anime.ts
+--- a/artifacts/api-server/src/routes/anime.ts
++++ b/artifacts/api-server/src/routes/anime.ts
+@@ -297,10 +297,15 @@
+   attempts = 2,
+ ): Promise<Response | null> {
+   for (let attempt = 0; attempt < Math.max(1, attempts); attempt++) {
++    if (init.signal?.aborted) return null;
+     try {
++      const timeoutSignal = AbortSignal.timeout(timeoutMs);
++      const signal = init.signal
++        ? AbortSignal.any([init.signal, timeoutSignal])
++        : timeoutSignal;
+       const response = await fetch(input, {
+         ...init,
+-        signal: AbortSignal.timeout(timeoutMs),
++        signal,
+       });
+       if (response.ok || (response.status < 500 && response.status !== 429)) {
+         return response;
+@@ -6380,6 +6385,66 @@
+   }
+ }
+ 
++function isUsableKawaiiCache(
++  cached: { sources: UnifiedSource[]; expiresAt: number; stale?: boolean } | null,
++): cached is { sources: UnifiedSource[]; expiresAt: number; stale?: boolean } {
++  return !!cached &&
++    !cached.stale &&
++    cached.sources.length > 0 &&
++    Number.isFinite(cached.expiresAt) &&
++    cached.expiresAt - Date.now() > 3 * 60_000;
++}
++
++function rebuildKawaiiCachedSources(sources: UnifiedSource[]): UnifiedSource[] {
++  return sources.flatMap(source => {
++    if (source.site !== "kawaii") return [source];
++    const cachedSource = source as UnifiedSource & {
++      rawUrl?: string;
++      headers?: Record<string, string>;
++    };
++    let rawUrl = String(cachedSource.rawUrl || "");
++    if (!rawUrl) {
++      const savedUrl = String(source.directUrl || source.url || "");
++      if (/^https:\/\//i.test(savedUrl)) {
++        rawUrl = savedUrl;
++      } else {
++        try {
++          rawUrl = new URL(savedUrl, "https://nova.invalid")
++            .searchParams.get("url") || "";
++        } catch {}
++      }
++    }
++    if (!rawUrl || !isTrustedKawaiiCdnUrl(rawUrl)) return [];
++
++    let parsed: URL;
++    try { parsed = new URL(rawUrl, KAWAII_BASE); } catch { return []; }
++    const host = parsed.hostname.toLowerCase();
++    const referer = host.endsWith(".mewstream.buzz")
++      ? "https://megaplay.buzz/"
++      : cachedSource.headers?.Referer || cachedSource.headers?.referer || `${KAWAII_BASE}/`;
++    const isHls = source.directType === "hls" ||
++      /\.m3u8(?:[?#]|$)/i.test(rawUrl) ||
++      /\/(?:hls|playlist)(?:\/|$)/i.test(rawUrl) ||
++      String(source.directUrl || "").includes("/api/anime/hls-proxy");
++    const needsProxy = isHls || host.endsWith(".mewstream.buzz");
++    const proxyPath = isHls ? "/api/anime/hls-proxy" : "/api/anime/video-proxy";
++    const mediaUrl = needsProxy
++      ? `${proxyPath}?url=${encodeURIComponent(parsed.toString())}&ref=${encodeURIComponent(referer)}`
++      : parsed.toString();
++    let origin = referer;
++    try { origin = new URL(referer).origin; } catch {}
++    return [{
++      ...source,
++      url: mediaUrl,
++      directUrl: mediaUrl,
++      directType: isHls ? "hls" : "mp4",
++      rawUrl: parsed.toString(),
++      corsOk: !needsProxy,
++      headers: { ...(cachedSource.headers || {}), Referer: referer, Origin: origin },
++    } as UnifiedSource];
++  });
++}
++
+ async function getKawaiiAnimeSources(
+   _title: string, _english: string | null, ep: number, anilistId?: number, availabilityOnly = false,
+ ): Promise<UnifiedSource[]> {
+@@ -6404,14 +6469,16 @@
+       { base, apiUrl: `${base}/api/miruro?anilistId=${anilistId}&ep=${ep}` },
+       { base, apiUrl: `${base}/api/miruro?anilist_id=${anilistId}&episode=${ep}` },
+     ]);
++    const candidateControllers = kawaiiCandidates.map(() => new AbortController());
+     try {
+-      const winner = await Promise.any(kawaiiCandidates.map(async ({ base, apiUrl }) => {
++      const winner = await Promise.any(kawaiiCandidates.map(async ({ base, apiUrl }, candidateIndex) => {
+         const r = await fetchSourceWithRetry(apiUrl, {
+           headers: {
+             ...BASE_HDRS,
+             Accept: "application/json",
+             Referer: base + "/",
+           },
++          signal: candidateControllers[candidateIndex].signal,
+         }, 12_000);
+         if (!r) throw new Error("kawaii upstream unavailable");
+         const candidate = await r.json().catch(() => null) as (KawaiiApiData & {
+@@ -6420,14 +6487,31 @@
+         const payload = candidate?.data && typeof candidate.data === "object"
+           ? { ...candidate, ...candidate.data }
+           : candidate;
+-        if (!payload?.sources?.some(source => typeof source?.url === "string" && source.url.length > 0)) {
++        const trustedSources = (payload?.sources || []).flatMap(source => {
++          if (typeof source?.url !== "string" || !source.url.trim()) return [];
++          try {
++            const url = new URL(source.url, base).toString();
++            return isTrustedKawaiiCdnUrl(url) ? [{ ...source, url }] : [];
++          } catch {
++            return [];
++          }
++        });
++        if (!trustedSources.length) {
+           throw new Error("kawaii response has no source");
+         }
+-        return { payload, base };
++        return {
++          payload: { ...payload, sources: trustedSources },
++          base,
++          candidateIndex,
++        };
+       }));
+       data = winner.payload;
+       apiBase = winner.base;
++      candidateControllers.forEach((controller, index) => {
++        if (index !== winner.candidateIndex) controller.abort();
++      });
+     } catch {
++      candidateControllers.forEach(controller => controller.abort());
+       // All aliases failed; keep the existing empty-source behavior.
+     }
+     if (!data?.sources?.length) return [];
+@@ -14089,7 +14173,17 @@
+         `${cKey}:live`,
+         () => runProviderWithDeadline(site, scrape, effectiveTimeoutMs),
+       );
+-      if (!srcs.length) return;
++      if (!srcs.length) {
++        if (site === "kawaii" && isUsableKawaiiCache(hit)) {
++          const fallbackSources = rebuildKawaiiCachedSources(hit.sources);
++          if (fallbackSources.length) {
++            if (checkOnly) await emitAvailability(fallbackSources);
++            else if (!closed) fallbackSources.forEach(sendSrc);
++            console.warn("[sources-stream] Kawaii live lookup failed; using unexpired cached sources");
++          }
++        }
++        return;
++      }
+ 
+       // In check mode, verify a small bounded sample before advertising a row.
+       // Clicking a row still performs the complete fetch-source/playback check.
+@@ -14679,7 +14773,14 @@
+     if (trace) traceTimings[`${site}.shared-extract`] = { ms: Date.now() - sharedExtractStartedAt, sources: sharedSources.length };
+ 
+     const isMobileClient = (req.headers["x-nova-client"] || "").toString().includes("mobile");
+-    const orderedSources = [...sharedSources].map(sourceProviderMeta).sort(compareSourcePresentation);
++    const fallbackKawaiiCache = site === "kawaii" && !sharedSources.length && isUsableKawaiiCache(cached)
++      ? rebuildKawaiiCachedSources(cached.sources)
++      : [];
++    if (fallbackKawaiiCache.length) {
++      console.warn("[fetch-source] Kawaii live lookup failed; using unexpired cached sources");
++    }
++    const responseSources = fallbackKawaiiCache.length ? fallbackKawaiiCache : sharedSources;
++    const orderedSources = [...responseSources].map(sourceProviderMeta).sort(compareSourcePresentation);
+     const encSources = stripAnimeSlayerSubtitles(filterRequestedQuality(orderedSources)).map(s => {
+       /* استخراج headers (Referer/Origin) قبل تشفير directUrl —
+          يحتاجها ExoPlayer/AVPlayer للـ CDN segments مباشرةً.
