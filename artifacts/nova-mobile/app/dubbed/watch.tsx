@@ -14,6 +14,7 @@ import { RewardedAdPrompt } from "@/components/RewardedAdPrompt";
 import { isTvDevice, tvFocusStyle } from "@/utils/tv";
 import { useColors } from "@/hooks/useColors";
 import { useWatchPlayerOrientation } from "@/utils/watchOrientation";
+import { createPlaybackTraceId, withPlaybackTrace } from "@/utils/playbackTrace";
 
 export default function DubbedWatchScreen() {
   const colors = useColors();
@@ -26,6 +27,7 @@ export default function DubbedWatchScreen() {
     epUrl: string; series: string; title: string; ep: string; season: string;
     poster: string; at: string;
   }>();
+  const playbackTraceId = React.useMemo(() => createPlaybackTraceId(), [epUrl]);
 
   const { addToHistory } = useApp();
   const [sources, setSources] = useState<PlayerSource[]>([]);
@@ -88,7 +90,7 @@ export default function DubbedWatchScreen() {
     for (let attempt = 0; attempt < 3; attempt += 1) {
       try {
         const r = await fetch(
-          `${BASE}/api/dubbed/watch-src?epUrl=${encodeURIComponent(epUrl)}`,
+          `${BASE}/api/dubbed/watch-src?epUrl=${encodeURIComponent(epUrl)}&trace=${encodeURIComponent(playbackTraceId)}`,
           { signal: ctrl.signal, cache: "no-store" },
         );
         if (ctrl.signal.aborted || !mountedRef.current) return;
@@ -103,7 +105,7 @@ export default function DubbedWatchScreen() {
 
           if (proxyUrl) {
             const srcs: PlayerSource[] = [{
-              url: proxyUrl,
+              url: withPlaybackTrace(proxyUrl, playbackTraceId, BASE),
               type: mediaType,
               label: "مدبلج عربي عبر الخادم",
               quality: "720p HD",
@@ -139,9 +141,18 @@ export default function DubbedWatchScreen() {
         if (ctrl.signal.aborted) return;
         const videoUrl = extractVideoFromHtml(html);
         if (videoUrl) {
-          const proxyUrl = `${BASE}/api/dubbed/stream.mp4?url=${encodeURIComponent(videoUrl)}`;
+          const mediaHost = (() => {
+            try { return new URL(videoUrl).hostname.toLowerCase(); } catch { return ""; }
+          })();
+          const isHls = /\.m3u8(?:[?#]|$)/i.test(videoUrl);
+          const ref = "https://www.arabic-toons.com/";
+          const proxyUrl = isHls
+            ? `${BASE}/api/anime/hls-proxy?url=${encodeURIComponent(videoUrl)}&ref=${encodeURIComponent(ref)}`
+            : mediaHost === "stream.foupix.com"
+              ? `${BASE}/api/dubbed/stream?url=${encodeURIComponent(videoUrl)}`
+              : `${BASE}/api/anime/video-proxy?url=${encodeURIComponent(videoUrl)}&ref=${encodeURIComponent(ref)}`;
           const srcs: PlayerSource[] = [
-            { url: proxyUrl, type: videoUrl.includes(".m3u8") ? "m3u8" : "mp4", label: "مدبلج عربي عبر الخادم", quality: "720p HD" },
+            { url: withPlaybackTrace(proxyUrl, playbackTraceId, BASE), type: isHls ? "m3u8" : "mp4", label: "مدبلج عربي عبر الخادم", quality: "720p HD" },
           ];
           if (mountedRef.current) { setSources(srcs); setLoading(false); }
           return;
@@ -155,7 +166,7 @@ export default function DubbedWatchScreen() {
       setError("تعذّر جلب مصدر الفيديو — تحقق من الاتصال وأعد المحاولة");
       setLoading(false);
     }
-  }, [epUrl]);
+  }, [epUrl, playbackTraceId]);
 
   useEffect(() => {
     mountedRef.current = true;

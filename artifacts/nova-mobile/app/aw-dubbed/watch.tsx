@@ -16,6 +16,7 @@ import { RewardedAdPrompt } from "@/components/RewardedAdPrompt";
 import { isTvDevice, tvFocusStyle } from "@/utils/tv";
 import { useColors } from "@/hooks/useColors";
 import { useWatchPlayerOrientation } from "@/utils/watchOrientation";
+import { createPlaybackTraceId, withPlaybackTrace } from "@/utils/playbackTrace";
 
 const BASE = getBaseUrl(); // e.g. "https://animenovaa.duckdns.org"
 
@@ -51,13 +52,28 @@ function safeDecode(value: string | string[] | undefined): string {
 }
 
 /** تحويل ApiSource[] إلى PlayerSource[] صالحة لـ RiftPlayer */
-function toRiftSources(apiSrcs: ApiSource[]): PlayerSource[] {
+function toRiftSources(apiSrcs: ApiSource[], traceId: string): PlayerSource[] {
   const out: PlayerSource[] = [];
-  for (const s of apiSrcs) {
-    const absUrl = toAbsoluteUrl(s.rawUrl) ?? toAbsoluteUrl(s.hlsUrl);
+  for (const [index, s] of apiSrcs.entries()) {
+    const absUrl = toAbsoluteUrl(s.hlsUrl) ?? toAbsoluteUrl(s.rawUrl);
     if (!absUrl || !isValidPlayerSourceUrl(absUrl)) continue;
+    let proxyUrl = absUrl;
+    try {
+      const parsed = new URL(absUrl);
+      const base = new URL(BASE);
+      const isVpsMediaRoute = parsed.origin === base.origin &&
+        /^\/api\/(?:anime\/(?:hls|video)-proxy|aw-dubbed\/mf-stream)$/i.test(parsed.pathname);
+      if (!isVpsMediaRoute) {
+        const isHls = /\.m3u8(?:[?#]|$)/i.test(absUrl);
+        const ref = "https://animenovaa.duckdns.org/";
+        const path = isHls ? "/api/anime/hls-proxy" : "/api/anime/video-proxy";
+        proxyUrl = `${BASE}${path}?url=${encodeURIComponent(absUrl)}&ref=${encodeURIComponent(ref)}`;
+      }
+    } catch {
+      continue;
+    }
     out.push({
-      url:     absUrl,
+      url:     withPlaybackTrace(proxyUrl, `${traceId}-${index.toString(36)}`, BASE),
       label:   s.name || "مصدر",
       quality: toRiftQuality(s.quality || "720p"),
     });
@@ -75,6 +91,10 @@ export default function AwDubbedWatchScreen() {
     season: string; poster: string;
     seasons: string; key: string;
   }>();
+  const playbackTraceId = React.useMemo(
+    () => createPlaybackTraceId(),
+    [params.series, params.ep],
+  );
 
   const series  = safeDecode(params.series);
   const ep      = safeDecode(params.ep) || "1";
@@ -144,16 +164,21 @@ export default function AwDubbedWatchScreen() {
         if (mountedRef.current) setError("شاهد الإعلان لفتح مشاهدة الأنيميشن المدبلج لمدة 60 دقيقة");
         return;
       }
+      const sourceStartedAt = Date.now();
+      console.info(`[playback-trace] id=${playbackTraceId} component=source stage=request provider=animewitcher`);
       const r = await fetch(
-        `${BASE}/api/aw-dubbed/watch-src?series=${encodeURIComponent(series)}&ep=${ep}`,
+        `${BASE}/api/aw-dubbed/watch-src?series=${encodeURIComponent(series)}&ep=${ep}&trace=${encodeURIComponent(playbackTraceId)}`,
         { signal: ctrl.signal },
+      );
+      console.info(
+        `[playback-trace] id=${playbackTraceId} component=source stage=response provider=animewitcher status=${r.status} elapsed_ms=${Date.now() - sourceStartedAt}`,
       );
       if (ctrl.signal.aborted || !mountedRef.current) return;
       const d = await r.json();
       if (ctrl.signal.aborted || !mountedRef.current) return;
       if (!r.ok) throw new Error(d.error || "فشل تحميل المصادر");
 
-      const riftSrcs = toRiftSources(d.allSources || []);
+      const riftSrcs = toRiftSources(d.allSources || [], playbackTraceId);
       if (!riftSrcs.length) throw new Error("لا توجد مصادر متاحة لهذه الحلقة");
       if (mountedRef.current) setSources(riftSrcs);
     } catch (e: any) {
@@ -163,7 +188,7 @@ export default function AwDubbedWatchScreen() {
       /* لا نُغيّر state بعد unmount أو abort */
       if (mountedRef.current && !ctrl.signal.aborted) setLoading(false);
     }
-  }, [series, ep]);
+  }, [series, ep, playbackTraceId]);
 
   useEffect(() => {
     mountedRef.current = true;

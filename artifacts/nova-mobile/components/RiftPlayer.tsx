@@ -102,6 +102,23 @@ function toExpoVideoSource(source: PlayerSource | undefined): NovaVideoSource | 
     : source.url;
 }
 
+function playbackTraceIdFromUrl(url: string | undefined): string {
+  if (!url) return "";
+  try {
+    const trace = new URL(url).searchParams.get("trace") || "";
+    return /^[a-z0-9_-]{8,36}$/i.test(trace) ? trace : "";
+  } catch {
+    return "";
+  }
+}
+
+function logPlaybackStage(url: string | undefined, stage: string, detail = ""): void {
+  const trace = playbackTraceIdFromUrl(url);
+  if (!trace) return;
+  const safeDetail = detail ? ` ${detail.replace(/[^a-zA-Z0-9_=.:-]/g, "").slice(0, 80)}` : "";
+  console.info(`[playback-trace] id=${trace} component=player stage=${stage}${safeDetail}`);
+}
+
 function getPlaybackBufferOptions(animePlayback: boolean, site?: string) {
   const isKawaii = String(site || "").toLowerCase() === "kawaii";
   return {
@@ -481,6 +498,26 @@ function ExpoRiftPlayer({
   );
   const [srcIdx, setSrcIdx]         = useState(safeInitialIndex);
   const currentSrc                  = playableSources[srcIdx];
+  const playbackTraceStateRef = useRef({
+    url: "",
+    assignedAt: 0,
+    loadingAt: 0,
+    readyLogged: false,
+    playingLogged: false,
+    progressLogged: false,
+  });
+  useEffect(() => {
+    const url = currentSrc?.url || "";
+    playbackTraceStateRef.current = {
+      url,
+      assignedAt: Date.now(),
+      loadingAt: 0,
+      readyLogged: false,
+      playingLogged: false,
+      progressLogged: false,
+    };
+    logPlaybackStage(url, "source_assigned");
+  }, [currentSrc?.url]);
   const isLocalPlayback = playableSources.length > 0
     && playableSources.every(source => /^(?:file|content):\/\//i.test(source.url));
   const subtitlesDisabled = subtitlesDisabledForSite(currentSrc?.site);
@@ -1061,6 +1098,14 @@ function ExpoRiftPlayer({
       if (!aliveRef.current || isStale()) return;
       setIsPlaying(e.isPlaying ?? false);
       setBuffering(false);
+      if (e.isPlaying && !playbackTraceStateRef.current.playingLogged) {
+        playbackTraceStateRef.current.playingLogged = true;
+        logPlaybackStage(
+          playbackTraceStateRef.current.url,
+          "playing",
+          `elapsed_ms=${Date.now() - playbackTraceStateRef.current.assignedAt}`,
+        );
+      }
       if (e.isPlaying && manualSeekErrorTimeoutRef.current) {
         clearTimeout(manualSeekErrorTimeoutRef.current);
         manualSeekErrorTimeoutRef.current = null;
@@ -1072,6 +1117,14 @@ function ExpoRiftPlayer({
         setBuffering(true);
         /* loading الناتج عن تغيير الموضع ليس بداية تحميل مصدر جديد. */
         if (seekRecoveryRef.current) return;
+        if (!playbackTraceStateRef.current.loadingAt) {
+          playbackTraceStateRef.current.loadingAt = Date.now();
+          logPlaybackStage(
+            playbackTraceStateRef.current.url,
+            "loading",
+            `elapsed_ms=${Date.now() - playbackTraceStateRef.current.assignedAt}`,
+          );
+        }
          /* إذا بقي التحميل أكثر من 18ث (شاشة سوداء) نعامله كخطأ ونتجاوز للمصدر التالي.
             25ث كان طويلاً جداً: 10 مصادر × 25ث = 250ث انتظار + OOM من الـ buffers المتراكمة.
             18ث يسمح بتأخر أول manifest/segment عبر proxy بدون إبقاء مصدر ميت عالقاً. */
@@ -1079,7 +1132,8 @@ function ExpoRiftPlayer({
         loadTimeoutRef.current = setTimeout(() => {
           loadTimeoutRef.current = null;
           if (!aliveRef.current || isStale()) return;
-           console.warn(`[RiftPlayer] ⏱ timeout (18s) — ${playableSources[srcIdx]?.label || "?"}: ${playableSources[srcIdx]?.url?.slice(0, 80)}`);
+            logPlaybackStage(playbackTraceStateRef.current.url, "load_timeout", "timeout_ms=18000");
+            console.warn(`[RiftPlayer] ⏱ timeout (18s) — ${playableSources[srcIdx]?.label || "?"}`);
           setError(true);
           setBuffering(false);
          }, 18000);
@@ -1105,7 +1159,15 @@ function ExpoRiftPlayer({
             manualSeekErrorTimeoutRef.current = null;
           }
           terminalErrorRef.current = false;
-          console.log(`[RiftPlayer] ✅ readyToPlay: ${playableSources[srcIdx]?.label || "?"} → ${playableSources[srcIdx]?.url?.slice(0, 100)}`);
+          if (!playbackTraceStateRef.current.readyLogged) {
+            playbackTraceStateRef.current.readyLogged = true;
+            logPlaybackStage(
+              playbackTraceStateRef.current.url,
+              "ready_to_play",
+              `elapsed_ms=${Date.now() - playbackTraceStateRef.current.assignedAt}`,
+            );
+          }
+          console.log(`[RiftPlayer] ✅ readyToPlay: ${playableSources[srcIdx]?.label || "?"}`);
           const pendingSeek = seekRecoveryRef.current;
           if (pendingSeek) {
             if (pendingSeek.restorePending) {
@@ -1202,7 +1264,8 @@ function ExpoRiftPlayer({
           setError(true);
           setBuffering(false);
           /* تفاصيل الخطأ — ضرورية لتشخيص مشاكل ExoPlayer/AVPlayer مع المصادر */
-          console.error(`[RiftPlayer] ❌ خطأ في التشغيل:`, JSON.stringify(e));
+          logPlaybackStage(playbackTraceStateRef.current.url, "player_error");
+          console.error("[RiftPlayer] ❌ خطأ في التشغيل");
         }
       }
     });
@@ -1355,6 +1418,11 @@ function ExpoRiftPlayer({
             pos > pendingSeek.target &&
             pos - pendingSeek.target <= Math.max(4, dur * 0.01);
           if (reachedTarget || resumedPastTarget) {
+            logPlaybackStage(
+              playbackTraceStateRef.current.url,
+              "seek_settled",
+              `target_s=${pendingSeek.target.toFixed(1)} actual_s=${pos.toFixed(1)}`,
+            );
             pendingSeekRef.current = null;
             setPostSeekPct(null);
             if (seekRecoveryRef.current?.target === pendingSeek.target) {
@@ -1375,6 +1443,11 @@ function ExpoRiftPlayer({
             setPosition(pendingSeek.target);
             positionRef.current = pendingSeek.target;
           } else {
+            logPlaybackStage(
+              playbackTraceStateRef.current.url,
+              "seek_timeout",
+              `target_s=${pendingSeek.target.toFixed(1)}`,
+            );
             pendingSeekRef.current = null;
             setPostSeekPct(null);
           }
@@ -1383,6 +1456,14 @@ function ExpoRiftPlayer({
           positionRef.current = pos;
           if (!isDraggingRef.current) setPosition(pos);
           if (dur > 0 && onProgress && !isDraggingRef.current) onProgress(pos, dur);
+          if (pos > 0 && !playbackTraceStateRef.current.progressLogged) {
+            playbackTraceStateRef.current.progressLogged = true;
+            logPlaybackStage(
+              playbackTraceStateRef.current.url,
+              "first_progress",
+              `elapsed_ms=${Date.now() - playbackTraceStateRef.current.assignedAt}`,
+            );
+          }
         }
         if (dur > 0 && pos >= dur - 0.5) {
           setIsEnded(true);
@@ -2086,6 +2167,7 @@ function ExpoRiftPlayer({
       postSeekTimer.current = null;
     }
     pendingSeekRef.current = { target, expiresAt: Date.now() + (animePlayback ? 15_000 : 8_000) };
+    logPlaybackStage(playbackTraceStateRef.current.url, "seek_requested", `target_s=${target.toFixed(1)}`);
     setPostSeekPct(target / maxDuration);
     setPosition(target);
     positionRef.current = target;
@@ -2194,7 +2276,8 @@ function ExpoRiftPlayer({
     /* لا نهمل المواضع القصيرة، واستخدم polling كاحتياط إذا أعاد native
        صفرًا لحظة ضغط زر تبديل السيرفر. */
     switchPosRef.current = Number.isFinite(savedPos) ? Math.max(0, savedPos) : 0;
-    console.log(`[Nova Mobile] تبديل المصدر → ${newSrc.label || "مجهول"} (${safeIdx + 1}/${playableSources.length}): ${newSrc.url?.slice(0, 120)}`);
+    logPlaybackStage(newSrc.url, "source_switch", `index=${safeIdx + 1} total=${playableSources.length}`);
+    console.log(`[Nova Mobile] تبديل المصدر → ${newSrc.label || "مجهول"} (${safeIdx + 1}/${playableSources.length})`);
     setSrcIdx(safeIdx);
     terminalErrorRef.current = false;
     setIsAutoCycling(false);

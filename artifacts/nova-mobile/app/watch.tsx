@@ -28,6 +28,7 @@ import { openIsolatedPlayer } from "@/lib/isolatedPlayer";
 import { ensureDownloadAllowed, ensureWatchAccess, getAdState } from "@/utils/adPolicy";
 import { RewardedAdPrompt } from "@/components/RewardedAdPrompt";
 import { startMobileWatchAnalytics } from "@/utils/analytics";
+import { createPlaybackTraceId, withPlaybackTrace } from "@/utils/playbackTrace";
 import { useColors } from "@/hooks/useColors";
 import type { ThemePalette } from "@/constants/colors";
 import { useWatchPlayerOrientation } from "@/utils/watchOrientation";
@@ -295,17 +296,15 @@ function ensureVpsProxy(
   hlsHint = false,
 ): string {
   if (!url) return url;
-  // بالفعل proxy عبر VPS
-  if (url.includes("/api/anime/") || url.includes("/api/animation/") || url.includes("/proxy/hls")) return url;
-  // Shirayuki already rewrites child playlists and segments. Do not wrap
-  // its proxy URL in Nova's HLS proxy a second time.
-  if (url.includes("proxy.anikuro.ru/")) return url;
-  // روابط embed (mega / vidmoly) — لا نلفّها
-  if (url.includes("mega.nz") || url.includes("mega.co.nz")) return url;
-  if (url.includes("mp4upload")) return url;
-  // LookMovie CDN — يعمل مباشرة من IP سكني مع Referer؛ يحجب VPS/datacenter
-  if (url.includes("lookmovie.")) return url;
-  const ref = headers?.Referer || "";
+  try {
+    const parsed = new URL(url, base);
+    const baseOrigin = new URL(base).origin;
+    const isOwnStreamingRoute =
+      parsed.origin === baseOrigin &&
+      /^\/api\/(?:anime|animation)\//i.test(parsed.pathname);
+    if (isOwnStreamingRoute) return parsed.toString();
+  } catch {}
+  const ref = headers?.Referer || headers?.referer || "";
   const isHls = hlsHint || /\.(m3u8)(\?|$)|\/hls\/|\/playlist\//i.test(url);
   if (isHls) {
     return ref
@@ -315,7 +314,7 @@ function ensureVpsProxy(
   if (ref) {
     return `${base}/api/anime/video-proxy?url=${encodeURIComponent(url)}&ref=${encodeURIComponent(ref)}`;
   }
-  return url; // لا Referer متاح — استخدم كما هو
+  return `${base}/api/anime/video-proxy?url=${encodeURIComponent(url)}`;
 }
 
 /* Kawaii signed media must be fetched by the VPS with the provider Referer.
@@ -384,24 +383,6 @@ function normalizeKawaiiMobileSource(source: Src, base: string): Src {
 
 function isHlsMediaUrl(url: string): boolean {
   return /\.m3u8(?:[?#]|$)|\/api\/anime\/hls-proxy|\/(?:hls|playlist)(?:\/|$)/i.test(url);
-}
-
-/* These providers sign media for the viewer's device and can reject the
-   VPS/datacenter IP even when the Referer is correct. Keep their original
-   URL on mobile and send provider headers with every ExoPlayer request.
-   `corsOk` is an explicit server-side opt-in for providers whose direct
-   media URL is known to be usable from a residential/mobile device. */
-const MOBILE_DIRECT_SITES = new Set(["kawaii", "animekai"]);
-
-function getMobileDirectUrl(source: Src): string | null {
-  const site = String(source.site || "").toLowerCase();
-  const directAllowed = MOBILE_DIRECT_SITES.has(site) || source.corsOk === true;
-  if (!directAllowed) return null;
-  const candidate = source.rawUrl || source.directUrl;
-  if (!candidate || !isValidSourceUrl(candidate)) return null;
-  /* Never treat an already-built API proxy as a direct provider URL. */
-  if (/^https?:\/\/[^/]+\/api\/(?:anime|dubbed)\//i.test(candidate)) return null;
-  return candidate;
 }
 
 /* HLS is a playlist, not an MP4. Route only HLS through the VPS converter;
@@ -764,6 +745,7 @@ export default function WatchScreen() {
       .map(value => value.trim())));
   }, [titleStr, englishStr, native, titleArStr, titlesParam]);
   const epNum      = parseInt(ep || "1", 10) || 1;
+  const playbackTraceId = useMemo(() => createPlaybackTraceId(), [anime, epNum]);
   /* Latest-episode cards carry AniList and AnimeSlayer ids separately.
      Use the explicit AniList id for every MP/KW request. */
   const sourceAnimeId =
@@ -1304,6 +1286,9 @@ export default function WatchScreen() {
       english: englishStr, format: format || "",
       year: year || "", episodes: episodes || "", native: native || "",
     });
+    const lookupSiteTag = site.replace(/[^a-z0-9_-]/gi, "").slice(0, 12) || "source";
+    const lookupTraceId = `${playbackTraceId}-s-${lookupSiteTag}`;
+    qs.set("trace", lookupTraceId);
     qs.set("anilistId", sourceAnimeId || "0");
     qs.set("titles", JSON.stringify(titleVariants));
     if (preferredQuality) qs.set("quality", preferredQuality);
@@ -1318,7 +1303,12 @@ export default function WatchScreen() {
        siteCtrls.current.set(fetchKey, siteCtrl);
       const timeout = SITE_TIMEOUT_MAP[site] ?? SITE_TIMEOUT_MS;
       tid = setTimeout(() => siteCtrl.abort(), timeout);
+      const lookupStartedAt = Date.now();
+      console.info(`[playback-trace] id=${lookupTraceId} component=source stage=request site=${lookupSiteTag}`);
       const res = await secureFetch(`${base}/api/anime/fetch-source?site=${site}&${qs}`, { signal: siteCtrl.signal });
+      console.info(
+        `[playback-trace] id=${lookupTraceId} component=source stage=response site=${lookupSiteTag} status=${res.status} elapsed_ms=${Date.now() - lookupStartedAt}`,
+      );
 
       if (!res.ok || !isMountedRef.current) throw new Error("fetch failed");
       const data = await res.json();
@@ -1437,7 +1427,7 @@ export default function WatchScreen() {
        siteCtrls.current.delete(fetchKey); // تنظيف الـ controller بعد انتهاء الطلب
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [anime, sourceAnimeId, epNum, titleStr, englishStr, titleArStr, format, year, episodes, native, playSrc, anslayerId, sources]);
+  }, [anime, sourceAnimeId, epNum, titleStr, englishStr, titleArStr, format, year, episodes, native, playSrc, anslayerId, sources, playbackTraceId]);
 
   /* ── مزامنة حالة التنزيل من Global Singleton ── */
   useEffect(() => {
@@ -1740,18 +1730,13 @@ export default function WatchScreen() {
     const srcs = directSrcs;
     /* مطابق لـ isArabic في web SCRAPER_DEFS — مصادر عربية لا تحتاج SmartSub */
     const ARABIC_SITES = new Set(["shahiid","animelek","animedar","okanime","arabseed","animeify","animeday","mycima","topcinemaa","anime4up2","animewitcher","ristoanime","faselhd_db","animetime","sanime"]);
-    return srcs.map(s => {
+    return srcs.map((s, index) => {
       const rawUrl = getPlayUrl(s);
       /* headers: استخدم الـ headers المُرسَلة من الخادم أولاً (Referer/Origin المباشرة)،
          ثم احسبها من رابط الـ proxy كـ fallback للإصدارات القديمة من الكاش */
       const headers = s.headers || extractProxyHeaders(rawUrl);
-      const mobileDirectUrl = getMobileDirectUrl(s);
-      /* Kawaii/AnimeKai reject datacenter IPs for some signed media URLs.
-         Their original URL is safe on the device when provider headers travel
-         with every ExoPlayer request. Other sources keep the VPS proxy. */
-      const url = mobileDirectUrl
-        ? mobileDirectUrl
-        : ensureVpsProxy(rawUrl, headers, base, s.directType === "hls");
+      const proxyUrl = ensureVpsProxy(rawUrl, headers, base, s.directType === "hls");
+      const url = withPlaybackTrace(proxyUrl, `${playbackTraceId}-${index.toString(36)}`, base);
       return {
         url,
         headers,
@@ -1769,7 +1754,7 @@ export default function WatchScreen() {
         skipOutro: s.skipOutro,
       };
     }).filter(s => s.url);
-  }, [directSrcs, globalSubUrl]);
+  }, [directSrcs, globalSubUrl, playbackTraceId]);
 
   /* ── Frozen sources: تُجمَّد لحظة اختيار المستخدم للمصدر ولا تتغير أثناء التشغيل.
      هذا يمنع تغيير مصفوفة sources في RiftPlayer بسبب وصول مصادر SSE جديدة.
@@ -1844,7 +1829,13 @@ export default function WatchScreen() {
     /* نحسب الرابط النهائي لـ playingSrc (بعد ensureVpsProxy) لمطابقة صحيحة مع playerSources */
     const _playRaw = getPlayUrl(playingSrc);
     const _playHeaders = playingSrc?.headers || extractProxyHeaders(_playRaw);
-    const _playFinal = ensureVpsProxy(_playRaw, _playHeaders, getBaseUrl(), playingSrc?.directType === "hls");
+    const base = getBaseUrl();
+    const selectedSourceIndex = Math.max(0, directSrcs.indexOf(playingSrc));
+    const _playFinal = withPlaybackTrace(
+      ensureVpsProxy(_playRaw, _playHeaders, base, playingSrc?.directType === "hls"),
+      `${playbackTraceId}-${selectedSourceIndex.toString(36)}`,
+      base,
+    );
     const startIdx = Math.max(0, playerSources.findIndex(s => playingSrc && s.url === _playFinal));
     return (
       <RiftPlayer

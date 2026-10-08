@@ -4,6 +4,35 @@ import { logger } from "../lib/logger";
 
 const router = Router();
 
+const PLAYBACK_TRACE_ID = /^[a-z0-9_-]{8,36}$/i;
+
+function readPlaybackTrace(value: unknown): string {
+  const trace = typeof value === "string" ? value : "";
+  return PLAYBACK_TRACE_ID.test(trace) ? trace : "";
+}
+
+function traceDubbedResponse(
+  res: import("express").Response,
+  trace: string,
+  route: string,
+  host: string,
+  startedAt: number,
+): void {
+  if (!trace) return;
+  let logged = false;
+  const log = (stage: string) => {
+    if (logged) return;
+    logged = true;
+    console.info(
+      `[playback-trace] id=${trace} route=${route} stage=${stage} host=${host} status=${res.statusCode} elapsed_ms=${Date.now() - startedAt}`,
+    );
+  };
+  res.once("finish", () => log("response"));
+  res.once("close", () => {
+    if (!res.writableFinished) log("client_closed");
+  });
+}
+
 // AnimeWitcher Firestore is the source of truth for dubbed animation.
 // Supabase is intentionally kept as the fast/cache path, but it can lag when
 // an import fails or when the table has no matching conflict constraint.
@@ -611,6 +640,12 @@ router.get("/dubbed/watch-src", async (req, res) => {
   } catch {
     res.status(400).json({ error: "invalid epUrl" }); return;
   }
+  const trace = readPlaybackTrace(req.query.trace);
+  const sourceLookupStartedAt = Date.now();
+  if (trace) {
+    console.info(`[playback-trace] id=${trace} route=dubbed-source stage=request host=${parsedEpUrl.hostname}`);
+    traceDubbedResponse(res, trace, "dubbed-source", parsedEpUrl.hostname, sourceLookupStartedAt);
+  }
 
   try {
     // ── جلب صفحة الحلقة — نجرب direct و cfGet بالتوازي.
@@ -734,6 +769,12 @@ router.get("/dubbed/stream", async (req, res) => {
   } catch {
     res.status(400).json({ error: "invalid or disallowed url" }); return;
   }
+  const trace = readPlaybackTrace(req.query.trace);
+  const streamStartedAt = Date.now();
+  if (trace) {
+    console.info(`[playback-trace] id=${trace} route=dubbed-stream stage=request host=${parsed.hostname}`);
+    traceDubbedResponse(res, trace, "dubbed-stream", parsed.hostname, streamStartedAt);
+  }
   try {
     const fetchHeaders: Record<string, string> = {
       "User-Agent": BROWSER_UA,
@@ -757,6 +798,11 @@ router.get("/dubbed/stream", async (req, res) => {
     for (let attempt = 0; attempt < 3; attempt += 1) {
       try {
         upstream = await fetchFoupixHeaders(rawUrl, fetchHeaders);
+        if (trace) {
+          console.info(
+            `[playback-trace] id=${trace} route=dubbed-stream stage=upstream_headers host=${parsed.hostname} status=${upstream.status} elapsed_ms=${Date.now() - streamStartedAt}`,
+          );
+        }
       } catch (error) {
         const errorName = error instanceof Error ? error.name : "UnknownError";
         const errorCode = (error as any)?.cause?.code;
@@ -1424,6 +1470,12 @@ router.get("/aw-dubbed/watch-src", async (req, res) => {
   const series = String(req.query.series || "");
   const ep     = Math.max(1, parseInt(req.query.ep as string || "1", 10) || 1);
   if (!series.trim()) { res.status(400).json({ error: "missing series" }); return; }
+  const trace = readPlaybackTrace(req.query.trace);
+  const sourceStartedAt = Date.now();
+  if (trace) {
+    console.info(`[playback-trace] id=${trace} route=aw-source-lookup stage=request provider=animewitcher`);
+    traceDubbedResponse(res, trace, "aw-source-lookup", "animewitcher", sourceStartedAt);
+  }
 
   const SB_URL = (process.env.SUPABASE_URL || "").replace(/\/$/, "");
   const SB_KEY = process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || "";
@@ -1486,7 +1538,7 @@ router.get("/aw-dubbed/watch-src", async (req, res) => {
       // Pixeldrain: رابط مباشر — RiftPlayer يتعامل معه عبر CORS_DIRECT_CDN (لا حاجة لـ proxy)
       if (srv === "PD" || link.includes("pixeldrain.com/u/")) {
         const id = link.split("/u/").pop()?.split("?")[0];
-        if (id) return `https://pixeldrain.com/api/file/${id}`;
+        if (id) return wrapProxy(`https://pixeldrain.com/api/file/${id}`);
       }
       // Mediafire: لا نحلّ رابط CDN الآن (ينتهي صلاحيته) — نُمرّر صفحة MF عبر mf-stream
       // الـ endpoint يحلّ الرابط وقت التشغيل الفعلي مع TTL cache
@@ -1531,6 +1583,12 @@ router.get("/aw-dubbed/mf-stream", async (req, res) => {
   if (!link || !link.includes("mediafire.com")) {
     res.status(400).json({ error: "invalid mediafire link" }); return;
   }
+  const trace = readPlaybackTrace(req.query.trace);
+  const streamStartedAt = Date.now();
+  if (trace) {
+    console.info(`[playback-trace] id=${trace} route=aw-mediafire-stream stage=request host=mediafire.com`);
+    traceDubbedResponse(res, trace, "aw-mediafire-stream", "mediafire.com", streamStartedAt);
+  }
 
   const cdnUrl = await resolveMfUrl(link);
   if (!cdnUrl) { res.status(502).json({ error: "تعذّر استخراج رابط Mediafire" }); return; }
@@ -1544,6 +1602,13 @@ router.get("/aw-dubbed/mf-stream", async (req, res) => {
 
   try {
     const r = await fetch(cdnUrl, { headers: hdrs, signal: AbortSignal.timeout(30000) });
+    if (trace) {
+      let cdnHost = "invalid";
+      try { cdnHost = new URL(cdnUrl).hostname; } catch {}
+      console.info(
+        `[playback-trace] id=${trace} route=aw-mediafire-stream stage=upstream_headers host=${cdnHost} status=${r.status} elapsed_ms=${Date.now() - streamStartedAt}`,
+      );
+    }
 
     res.setHeader("Access-Control-Allow-Origin", "*");
     res.setHeader("Access-Control-Allow-Headers", "Range");

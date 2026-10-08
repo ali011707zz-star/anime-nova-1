@@ -14686,6 +14686,11 @@ router.get("/anime/sources-stream", scraperQueueMiddleware, async (req, res) => 
 // ════════════════════════════════════════════════════════════════════
 router.get("/anime/fetch-source", scraperQueueMiddleware, async (req, res) => {
   const requestedSite = ((req.query.site as string) || "").trim().toLowerCase();
+  const sourceTrace = readPlaybackTrace(req.query.trace);
+  const sourceTraceSite = /^[a-z0-9_-]{1,32}$/i.test(requestedSite) ? requestedSite : "unknown";
+  const sourceTraceStartedAt = Date.now();
+  tracePlayback(sourceTrace, "source-lookup", "request", sourceTraceSite);
+  traceProxyResponse(res, sourceTrace, "source-lookup", sourceTraceSite, sourceTraceStartedAt);
   const DISABLED_SOURCE_SITES = new Set<string>();
   if (DISABLED_SOURCE_SITES.has(requestedSite)) {
     res.json({ sources: [], disabled: true });
@@ -16638,6 +16643,67 @@ function safeHost(raw: string): string {
   try { return new URL(raw).hostname; } catch { return "invalid"; }
 }
 
+const PLAYBACK_TRACE_ID = /^[a-z0-9_-]{8,36}$/i;
+const FIRST_SEGMENT_TRACE_SEEN = new Map<string, number>();
+
+function readPlaybackTrace(value: unknown): string {
+  const trace = typeof value === "string" ? value : "";
+  return PLAYBACK_TRACE_ID.test(trace) ? trace : "";
+}
+
+function tracePlayback(
+  trace: string,
+  route: string,
+  stage: string,
+  host: string,
+  elapsedMs?: number,
+  detail = "",
+): void {
+  if (!trace) return;
+  const elapsed = elapsedMs === undefined ? "" : ` elapsed_ms=${Math.max(0, elapsedMs)}`;
+  const safeDetail = detail ? ` ${detail.replace(/[^a-zA-Z0-9_=-]/g, "").slice(0, 80)}` : "";
+  console.info(`[playback-trace] id=${trace} route=${route} stage=${stage} host=${host}${elapsed}${safeDetail}`);
+}
+
+function traceProxyResponse(
+  res: import("express").Response,
+  trace: string,
+  route: string,
+  host: string,
+  startedAt: number,
+  firstSegmentOnly = false,
+): void {
+  if (!trace) return;
+  let logged = false;
+  const log = (stage: string) => {
+    if (logged) return;
+    logged = true;
+    const elapsed = Date.now() - startedAt;
+    const status = res.statusCode;
+    if (firstSegmentOnly && status < 400) {
+      const previous = FIRST_SEGMENT_TRACE_SEEN.get(trace);
+      if (previous && Date.now() - previous < 30 * 60_000 && elapsed < 1500) return;
+      FIRST_SEGMENT_TRACE_SEEN.set(trace, Date.now());
+      if (FIRST_SEGMENT_TRACE_SEEN.size > 2048) {
+        const cutoff = Date.now() - 30 * 60_000;
+        for (const [key, at] of FIRST_SEGMENT_TRACE_SEEN) {
+          if (at < cutoff) FIRST_SEGMENT_TRACE_SEEN.delete(key);
+        }
+        while (FIRST_SEGMENT_TRACE_SEEN.size > 2048) {
+          const oldest = FIRST_SEGMENT_TRACE_SEEN.keys().next().value;
+          if (!oldest) break;
+          FIRST_SEGMENT_TRACE_SEEN.delete(oldest);
+        }
+      }
+    }
+    tracePlayback(trace, route, stage, host, elapsed, `status=${status}`);
+  };
+  res.once("finish", () => log("response"));
+  res.once("close", () => {
+    if (!res.writableFinished) log("client_closed");
+  });
+}
+
 // ── Hopx proxy port (يحل CF Worker — كل الفيديو عبر VPS) ───────────────────────
 // ── Hopx / MediaFlow / CF Worker — معطّلة جميعها، كل شيء عبر VPS مباشرة ─────────
 const _mfOk    = false; // معطّل
@@ -16654,23 +16720,24 @@ async function fetchViaHopx(_url: string, _ref: string, _t?: number): Promise<Re
 const NOVA_PUBLIC_URL = (process.env.NOVA_PUBLIC_URL || "https://animenovaa.duckdns.org").replace(/\/$/, "");
 
 // ── بناء رابط seg-proxy مطلق ─────────────────────────────────────────────────
-function toVpsSegProxy(absUrl: string, ref: string): string {
-  return `${NOVA_PUBLIC_URL}/api/anime/seg-proxy?url=${encryptParam(absUrl)}&ref=${encryptParam(ref || absUrl)}`;
+function toVpsSegProxy(absUrl: string, ref: string, trace = ""): string {
+  const traceParam = trace ? `&trace=${encodeURIComponent(trace)}` : "";
+  return `${NOVA_PUBLIC_URL}/api/anime/seg-proxy?url=${encryptParam(absUrl)}&ref=${encryptParam(ref || absUrl)}${traceParam}`;
 }
 
-function toVpsHlsProxy(absUrl: string, ref: string, manifestKey = ""): string {
+function toVpsHlsProxy(absUrl: string, ref: string, manifestKey = "", trace = ""): string {
   const params = new URLSearchParams({
     url: encryptParam(absUrl),
     ref: encryptParam(ref || absUrl),
   });
   if (manifestKey) params.set("mk", encryptParam(manifestKey));
+  if (trace) params.set("trace", trace);
+  params.set("child", "1");
   return `${NOVA_PUBLIC_URL}/api/anime/hls-proxy?${params.toString()}`;
 }
 
-// FlixCloud manifests are fetched by the VPS because their signed master and
-// variant playlists need the per-embed manifest key. Their media files then
-// redirect to StrongHole, which blocks the VPS IP with Cloudflare 403. Keep
-// those media URLs client-side so the viewer's IP follows the redirect.
+// FlixCloud manifests and media are requested server-side; the VPS may use its
+// configured server-side fetch path, but the client must never receive a CDN redirect.
 function isClientRoutedFlixMedia(absUrl: string): boolean {
   try {
     const host = new URL(absUrl).hostname.toLowerCase();
@@ -16682,12 +16749,12 @@ function isClientRoutedFlixMedia(absUrl: string): boolean {
   }
 }
 
-function toVpsSegmentOrClient(absUrl: string, ref: string): string {
+function toVpsSegmentOrClient(absUrl: string, ref: string, trace = ""): string {
   // Always start same-origin through the VPS. The segment route tries the
-  // curl_cffi stream proxy and only then falls back to a client redirect.
+  // curl_cffi stream proxy and fails closed if server-side fetching is blocked.
   // Sending StrongHole directly from the manifest loses the FlixCloud Referer
   // and makes the source appear available while playback stays black.
-  return toVpsSegProxy(absUrl, ref);
+  return toVpsSegProxy(absUrl, ref, trace);
 }
 
 // ── إعادة كتابة M3U8 بروابط مطلقة عبر VPS seg-proxy ─────────────────────────
@@ -16698,6 +16765,7 @@ function rewriteM3u8ForVPS(
   baseUrl: string,
   ref: string,
   manifestKey = "",
+  trace = "",
 ): string {
   const lines = manifest.split("\n");
   const out: string[] = [];
@@ -16718,9 +16786,9 @@ function rewriteM3u8ForVPS(
         const abs = toAbsoluteUrl(uri, baseUrl);
         // EXT-X-MEDIA قد تشير لـ playlist (صوت/ترجمة بديلة)
         if (t.startsWith("#EXT-X-MEDIA") && /\.m3u8/i.test(uri)) {
-          return `URI="${toVpsHlsProxy(abs, ref, manifestKey)}"`;
+            return `URI="${toVpsHlsProxy(abs, ref, manifestKey, trace)}"`;
         }
-        return `URI="${toVpsSegmentOrClient(abs, ref)}"`;
+        return `URI="${toVpsSegmentOrClient(abs, ref, trace)}"`;
       });
       out.push(rewritten); continue;
     }
@@ -16730,9 +16798,9 @@ function rewriteM3u8ForVPS(
     // سطر URL: variant playlist أو segment
     const abs = toAbsoluteUrl(t, baseUrl);
     if (nextIsPlaylist || /\.m3u8(\?|#|$)/i.test(t)) {
-      out.push(toVpsHlsProxy(abs, ref, manifestKey));
+      out.push(toVpsHlsProxy(abs, ref, manifestKey, trace));
     } else {
-      out.push(toVpsSegmentOrClient(abs, ref));
+      out.push(toVpsSegmentOrClient(abs, ref, trace));
     }
     nextIsPlaylist = false;
   }
@@ -16779,8 +16847,11 @@ function isValidMp4File(filePath: string): boolean {
 async function serveHlsVPS(
   url: string, ref: string,
   manifestKey: string,
+  trace: string,
+  traceRoute: string,
   res: import("express").Response,
 ): Promise<void> {
+  const requestStartedAt = Date.now();
   mediaMetrics.activeManifests++;
   mediaMetrics.manifestRequests++;
   const hdrs: Record<string, string> = { ...BASE_HDRS, Accept: "*/*" };
@@ -16790,7 +16861,7 @@ async function serveHlsVPS(
   // مساعد: إرسال manifest مُعاد كتابته للعميل
   function sendManifest(body: string): void {
     if (res.headersSent) return;
-    const rewritten = rewriteM3u8ForVPS(body, url, ref, manifestKey);
+    const rewritten = rewriteM3u8ForVPS(body, url, ref, manifestKey, trace);
     res.setHeader("Content-Type", "application/vnd.apple.mpegurl");
     res.setHeader("Access-Control-Allow-Origin", "*");
     res.setHeader("Cache-Control", "public, max-age=2, stale-while-revalidate=2");
@@ -16804,6 +16875,7 @@ async function serveHlsVPS(
   const cached = HLS_MANIFEST_CACHE.get(key);
   if (cached) {
     if (cached.expiresAt > Date.now()) {
+      tracePlayback(trace, traceRoute, "cache_hit", safeHost(url), Date.now() - requestStartedAt);
       sendManifest(cached.body);
       mediaMetrics.activeManifests--;
       return;
@@ -16817,12 +16889,16 @@ async function serveHlsVPS(
   if (!fetchPromise) {
     // ── 1. VPS direct ─────────────────────────────────────────────────────────
     const fetchDirect = async (): Promise<string | null> => {
+      const fetchStartedAt = Date.now();
       for (let attempt = 0; attempt < 2; attempt++) {
         try {
           const r = await fetch(url, { headers: hdrs, signal: AbortSignal.timeout(8000) });
           if (r.ok) {
             const body = decodeEncryptedHlsPlaylist(await r.text(), manifestKey);
-            if (isValidManifest(body)) return body;
+            if (isValidManifest(body)) {
+              tracePlayback(trace, traceRoute, "upstream_manifest", safeHost(url), Date.now() - fetchStartedAt, `status=${r.status}`);
+              return body;
+            }
             console.warn(`[hls-proxy] invalid manifest host=${safeHost(url)} status=${r.status} bytes=${body.length}`);
           } else {
             console.warn(`[hls-proxy] upstream rejected host=${safeHost(url)} status=${r.status} attempt=${attempt + 1}`);
@@ -16891,6 +16967,8 @@ async function serveKawaiiMediaVPS(
     controller: AbortController,
   ) => Promise<Response>,
 ): Promise<void> {
+  const trace = readPlaybackTrace(req.query.trace);
+  const requestStartedAt = Date.now();
   const clientRange = typeof req.headers.range === "string" ? req.headers.range : undefined;
   const requested = clientRange?.match(/^bytes=(\d+)-(\d*)$/i);
   const requestedStart = requested ? Number(requested[1]) : 0;
@@ -16934,6 +17012,14 @@ async function serveKawaiiMediaVPS(
       const upstream = fetchWithFallback
         ? await fetchWithFallback(url, requestHeaders, controller)
         : await fetch(url, { headers: requestHeaders, signal: controller.signal });
+      tracePlayback(
+        trace,
+        "video",
+        "upstream_headers",
+        safeHost(url),
+        Date.now() - requestStartedAt,
+        `status=${upstream.status} attempt=${attempt + 1}`,
+      );
       if (timer) clearTimeout(timer);
       timer = null;
 
@@ -17096,6 +17182,8 @@ async function serveMediaVPS(
   req: import("express").Request,
   res: import("express").Response,
 ): Promise<void> {
+  const trace = readPlaybackTrace(req.query.trace);
+  const upstreamStartedAt = Date.now();
   mediaMetrics.activeMedia++;
   mediaMetrics.mediaRequests++;
   sampleMediaCpu();
@@ -17150,6 +17238,7 @@ async function serveMediaVPS(
       : null;
     const r = cfStreamResponse ?? await fetch(url, { headers: hdrs, signal: upstreamAbort.signal });
     clearTimeout(connectTimeout);
+    tracePlayback(trace, "video", "upstream_headers", safeHost(url), Date.now() - upstreamStartedAt, `status=${r.status}`);
     res.setHeader("Access-Control-Allow-Origin", "*");
     res.setHeader("Access-Control-Expose-Headers", "Content-Length,Content-Range,Content-Type");
     let ct = r.headers.get("content-type") || "video/MP2T";
@@ -17202,12 +17291,17 @@ router.get("/anime/hls-proxy", async (req, res) => {
   if (ref && isEncrypted(ref)) ref = decryptParam(ref);
   if (manifestKey && isEncrypted(manifestKey)) manifestKey = decryptParam(manifestKey);
   if (!isSafeExternalUrl(url)) { res.status(400).send("invalid external url"); return; }
+  const trace = readPlaybackTrace(req.query.trace);
+  const traceRoute = req.query.child === "1" ? "child-playlist" : "hls-manifest";
+  const startedAt = Date.now();
+  tracePlayback(trace, traceRoute, "request", safeHost(url));
+  traceProxyResponse(res, trace, traceRoute, safeHost(url), startedAt);
 
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Headers", "Range, Content-Type");
   res.setHeader("Access-Control-Expose-Headers", "Accept-Ranges, Content-Length, Content-Range, Content-Type");
 
-  await serveHlsVPS(url, ref, manifestKey, res);
+  await serveHlsVPS(url, ref, manifestKey, trace, traceRoute, res);
 });
 
 // ── video-proxy: VPS يبث الفيديو مع Referer الصحيح ─────────────────────────
@@ -17220,6 +17314,10 @@ router.get("/anime/video-proxy", async (req, res) => {
   if (isEncrypted(url)) url = decryptParam(url);
   if (ref && isEncrypted(ref)) ref = decryptParam(ref);
   if (!isSafeExternalUrl(url)) { res.status(400).send("invalid external url"); return; }
+  const trace = readPlaybackTrace(req.query.trace);
+  const startedAt = Date.now();
+  tracePlayback(trace, "video", "request", safeHost(url));
+  traceProxyResponse(res, trace, "video", safeHost(url), startedAt);
 
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Headers", "Range, Content-Type");
@@ -17645,6 +17743,10 @@ router.get("/anime/seg-proxy", async (req, res) => {
   let ref = (req.query.ref as string || "").trim();
   try { if (ref) ref = decodeURIComponent(ref); } catch {}
   if (ref && isEncrypted(ref)) ref = decryptParam(ref);
+  const trace = readPlaybackTrace(req.query.trace);
+  const startedAt = Date.now();
+  tracePlayback(trace, "hls-segment", "request", safeHost(url));
+  traceProxyResponse(res, trace, "hls-segment", safeHost(url), startedAt, true);
 
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Headers", "Range, Content-Type");
@@ -17743,15 +17845,14 @@ router.get("/anime/seg-proxy", async (req, res) => {
     return true;
   }
 
-  // 307 Redirect → ExoPlayer/browser يجلب السيغمنت بـ IP الجهاز مباشرة (لا VPS IP)
-  // بدلاً من 502 عند حجب CDN للـ VPS، نُعيد توجيه الطلب للـ CDN مباشرة.
-  // ExoPlayer على Android والمتصفح يتبعان الـ redirect بـ IP الجهاز → CDN يسمح.
-  async function segFallback(): Promise<void> {
+  // Fail closed: never redirect an HLS segment to the device, which would
+  // bypass the VPS proxy and change the network path during playback.
+  async function segFallback(reason: string): Promise<void> {
     if (res.headersSent) return;
-    // Keep Range/Referer semantics on fallback instead of redirecting a
-    // byte-range request into a different request shape.
+    mediaMetrics.upstreamErrors++;
+    tracePlayback(trace, "hls-segment", "proxy_failed", safeHost(url), Date.now() - startedAt, `reason=${reason}`);
     res.setHeader("Cache-Control", "no-store");
-    res.redirect(307, url);
+    res.status(502).send("upstream segment unavailable");
   }
 
   const upstreamAbort = new AbortController();
@@ -17768,6 +17869,7 @@ router.get("/anime/seg-proxy", async (req, res) => {
       ? await cfProxyStreamFetch(url, ref, req.headers.range ? String(req.headers.range) : undefined)
       : null;
     if (flixResponse?.ok) {
+      tracePlayback(trace, "hls-segment", "upstream_headers", safeHost(url), Date.now() - upstreamStartedAt, `status=${flixResponse.status}`);
       const servedViaCf = await serveSegResponse(flixResponse);
       if (servedViaCf) return;
     }
@@ -17783,20 +17885,24 @@ router.get("/anime/seg-proxy", async (req, res) => {
           upstreamAbort,
         );
     clearTimeout(connectTimeout);
+    tracePlayback(trace, "hls-segment", "upstream_headers", safeHost(url), Date.now() - upstreamStartedAt, `status=${r.status}`);
 
     if (!r.ok) {
-      // 403/429/5xx → fallback chain (CDN blocks VPS or upstream error)
-      if (r.status === 403 || r.status === 429 || r.status >= 500) { await segFallback(); return; }
+      // VPS-side upstream/CDN failures are visible as 502; never fall back to
+      // direct device playback.
+      if (r.status === 403 || r.status === 429 || r.status >= 500) {
+        await segFallback(`upstream_${r.status}`);
+        return;
+      }
       if (!res.headersSent) res.status(r.status).send("upstream error");
       return;
     }
 
-    // serveSegResponse يُرجع false عند HTML فعلي (صفحة خطأ) → fallback
+    // Invalid upstream HTML becomes a proxy error, never a client redirect.
     const served = await serveSegResponse(r);
-    if (!served) await segFallback();
+    if (!served) await segFallback("invalid_body");
   } catch {
-    // network error / timeout → try fallback chain instead of immediate 502
-    await segFallback();
+    await segFallback("network");
   } finally {
     clearTimeout(connectTimeout);
     res.removeListener("close", abortUpstream);
