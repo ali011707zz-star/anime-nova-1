@@ -7,7 +7,7 @@ description: How to scrape kawaii-anime.com — uses AniList IDs natively, has A
 - Primary: `GET https://kawaiianime.cc/api/miruro?anilistId={id}&ep={episode}`.
 - Also try the `anilist_id` / `episode` query-name variant and known domain aliases.
 - Responses may put `sources` and subtitles directly at the top level or inside `data`.
-- `/api/watch` is a compatibility fallback only; it has returned `APP_KEY_MISSING`.
+- `/api/watch` has returned `APP_KEY_MISSING`; do not include it in automatic fallback chains.
 - The playback caller must resolve AniList ID from the title when the incoming numeric ID may be a provider-catalog ID.
 
 ## CDN
@@ -39,11 +39,13 @@ Kawaii can change media hosts and return either HLS or MP4 URLs without changing
 **How to apply:** Verify each new hostname against a live Kawaii API response, then keep the server trust filter, web player, and mobile normalization in sync. Preserve the correct HLS handling and Referer behavior for that host.
 
 ## Temporary API outages
-Race the known API aliases, but count a response as usable only when it contains at least one source URL on a trusted Kawaii CDN. If the live lookup fails, a cached source may be used only before its computed safe expiry; never extend the signed URL lifetime.
+Use the canonical API on the primary alias first, then bounded fallbacks to other aliases. Do not fan out all aliases and query variants on every playback or availability request. Count a response as usable only when it contains a source URL on a trusted Kawaii CDN.
 
-**Why:** A temporary API outage can hide a previously working episode, while expired signed URLs turn a fallback into a playback failure.
+Availability may reuse an episode-keyed cached row only while its signed URL remains safely unexpired. Fresh Kawaii rows should also populate the stable click-time cache so availability scans and playback do not scrape the same episode twice. After every alias fails with transport, rate-limit, or server errors, use a short cooldown and log host/status only; do not cool down for an ordinary empty episode result.
 
-**How to apply:** Preserve the source cache's expiry calculation and safety margin when changing Kawaii fallback behavior. Do not serve stale rows past their safe expiry.
+**Why:** Forced refreshes combined with concurrent aliases and retries multiply upstream traffic and can turn a temporary provider response into a source-wide block. Expired signed URLs are not a safe fallback.
+
+**How to apply:** Preserve the source cache's expiry calculation and safety margin; keep requests bounded and fallback-first only after primary failure. Never log signed media URLs or extend a cached URL's lifetime.
 
 **Why:** kawaii's API returns both Arabic and English subtitles for new anime. Old code only looked for English and missed Arabic entirely.
 

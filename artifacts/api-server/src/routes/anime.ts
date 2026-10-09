@@ -6851,12 +6851,12 @@ async function getKawaiiAnimeSources(
       base: string,
       parentSignal: AbortSignal,
     ): Promise<any> => {
-      for (let attempt = 0; attempt < 2; attempt++) {
+      for (let attempt = 0; attempt < 1; attempt++) {
         if (parentSignal.aborted) return null;
         const controller = new AbortController();
         const abortRequest = () => controller.abort();
         parentSignal.addEventListener("abort", abortRequest, { once: true });
-        const timeout = setTimeout(abortRequest, 8_000);
+        const timeout = setTimeout(abortRequest, 4_000);
         try {
           const response = await fetch(apiUrl, {
             headers: {
@@ -6888,8 +6888,6 @@ async function getKawaiiAnimeSources(
       for (const apiUrl of [
         `${base}/api/miruro?anilistId=${anilistId}&ep=${ep}`,
         `${base}/api/miruro?anilist_id=${anilistId}&episode=${ep}`,
-        `${base}/api/watch?anilistId=${anilistId}&ep=${ep}&format=mp4`,
-        `${base}/api/watch?anilistId=${anilistId}&ep=${ep}`,
       ]) {
         const candidate = await fetchKawaiiJson(apiUrl, base, parentSignal) as (KawaiiApiData & {
           data?: KawaiiApiData | {
@@ -14386,9 +14384,11 @@ router.get("/anime/sources-stream", scraperQueueMiddleware, async (req, res) => 
       }
       // Reanime URLs are paired with a per-embed manifest key and cannot use
       // source-cache rows created before that key was propagated to hls-proxy.
-      // Kawaii signed URLs and episode availability rotate quickly. Never serve
-      // a previous L2/L1 row while a newly aired episode is being requested.
-      const forceFresh = checkOnly || site === "kawaii" || site === "reanime";
+      // Kawaii cache is episode-keyed and is used only while its signed URL
+      // still has a safe expiry window.
+      const useKawaiiCacheForAvailability =
+        checkOnly && site === "kawaii" && isUsableKawaiiCache(hit);
+      const forceFresh = (checkOnly && !useKawaiiCacheForAvailability) || site === "reanime";
 
       if (hit && !forceFresh) {
         const isStaleOrNearExpiry = hit.stale || shouldRefreshCache(hit.expiresAt);
