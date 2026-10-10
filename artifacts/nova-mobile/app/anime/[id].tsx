@@ -541,8 +541,13 @@ export default function AnimeDetailScreen() {
             <Text style={[d.titleMain, tvMode && d.tvTitleMain]} numberOfLines={2}>
               {anime.title?.english || anime.title?.romaji}
             </Text>
+            {anime.title_ar ? (
+              <Text style={[d.titleArabic, tvMode && d.tvTitleArabic]} numberOfLines={2}>
+                {anime.title_ar}
+              </Text>
+            ) : null}
             {anime.title?.romaji && anime.title?.english && (
-              <Text style={[d.titleNative, tvMode && d.tvTitleNative]} numberOfLines={1}>{anime.title.romaji}</Text>
+              <Text style={[d.titleNative, tvMode && d.tvTitleNative]} numberOfLines={1} writingDirection="ltr">{anime.title.romaji}</Text>
             )}
             <View style={d.badgeRow}>
               {anime.format && (
@@ -961,7 +966,9 @@ function createDetailStyles(colors: ThemePalette) {
   infoRow: { flexDirection: "row", paddingHorizontal: 16, marginTop: -52, gap: 14, alignItems: "flex-end" },
   cover: { width: 100, height: 145, borderRadius: 16, borderWidth: 2, borderColor: colors.background },
   infoText: { flex: 1, paddingBottom: 8, gap: 6 },
-  titleMain: { fontSize: 16, fontFamily: "Cairo_800ExtraBold", color: colors.textPrimary, lineHeight: 22 },
+  titleMain: { fontSize: 16, fontFamily: "Cairo_800ExtraBold", color: colors.textPrimary, lineHeight: 22, writingDirection: "ltr" },
+  titleArabic: { fontSize: 13, color: colors.textSecondary, fontFamily: "Cairo_700Bold", lineHeight: 19, textAlign: "right", writingDirection: "rtl" },
+  tvTitleArabic: { fontSize: 19, lineHeight: 28 },
   titleNative: { fontSize: 11, color: colors.textSecondary, fontFamily: "Cairo_400Regular" },
   badgeRow: { flexDirection: "row", gap: 6, flexWrap: "wrap" },
   badge: { borderRadius: 8, paddingHorizontal: 8, paddingVertical: 3, borderWidth: 1 },

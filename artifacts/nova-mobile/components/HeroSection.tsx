@@ -79,7 +79,12 @@ export function HeroSection({ items, initialTVFocus = false }: Props) {
                     </View>
                   ))}
                 </View>
-                <Text style={[styles.heroTitle, tvMode && styles.tvHeroTitle]} numberOfLines={2}>{title}</Text>
+                <Text style={[styles.heroTitle, tvMode && styles.tvHeroTitle]} numberOfLines={2} writingDirection="ltr">{title}</Text>
+                {anime.title_ar ? (
+                  <Text style={[styles.heroTitleArabic, tvMode && styles.tvHeroTitleArabic]} numberOfLines={1}>
+                    {anime.title_ar}
+                  </Text>
+                ) : null}
                 <View style={styles.infoRow}>
                   {anime.averageScore && (
                     <View style={styles.infoItem}>
@@ -142,6 +147,8 @@ const styles = StyleSheet.create({
   tvGenreText: { fontSize: 14 },
   heroTitle: { color: "#fff", fontSize: 18, fontWeight: "800", marginBottom: 6, textAlign: "left", fontFamily: "Cairo_800ExtraBold" },
   tvHeroTitle: { fontSize: 27, lineHeight: 35, marginBottom: 9 },
+  heroTitleArabic: { color: "rgba(255,255,255,0.78)", fontSize: 13, fontFamily: "Cairo_700Bold", textAlign: "right", writingDirection: "rtl", marginTop: -3, marginBottom: 7 },
+  tvHeroTitleArabic: { fontSize: 19, lineHeight: 27, marginBottom: 10 },
   infoRow: { flexDirection: "row", gap: 10, marginBottom: 12, flexWrap: "wrap" },
   infoItem: { flexDirection: "row", alignItems: "center", gap: 3 },
   infoText: { color: "rgba(255,255,255,0.7)", fontSize: 11 },

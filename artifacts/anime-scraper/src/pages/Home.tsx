@@ -70,6 +70,9 @@ function normalizeLatestEpisodeItem(item: any): any {
     anslayerId,
     name,
     titleVariants,
+    title_ar: typeof item?.title_ar === "string" && /[\u0600-\u06FF]/.test(item.title_ar)
+      ? item.title_ar.trim()
+      : "",
   };
 }
 
@@ -261,7 +264,7 @@ function AnimeCard({ anime }: { anime: any }) {
           {anime.coverImage?.large ? (
             <img
               src={anime.coverImage.large}
-              alt={anime.title?.romaji}
+              alt={anime.title?.english || anime.title?.romaji}
               className="w-full h-full object-cover"
               loading="lazy"
               onError={(e) => {
@@ -285,8 +288,13 @@ function AnimeCard({ anime }: { anime: any }) {
           )}
           <div className="absolute bottom-0 left-0 right-0 px-2 pb-2 pt-4">
             <h3 className="text-[9.5px] text-white/90 font-bold truncate leading-tight drop-shadow">
-              {anime.title?.romaji}
+              {anime.title?.english || anime.title?.romaji}
             </h3>
+            {anime.title_ar && (
+              <p dir="rtl" lang="ar" className="text-[8px] text-white/65 line-clamp-1 leading-tight font-['Cairo'] mt-0.5">
+                {anime.title_ar}
+              </p>
+            )}
           </div>
         </div>
       </motion.div>
@@ -715,8 +723,20 @@ export default function Home() {
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ duration: 0.18, delay: 0.045 }}
                   >
-                    {hero.title?.romaji}
+                    {hero.title?.english || hero.title?.romaji}
                   </motion.h1>
+                  {hero.title_ar && (
+                    <motion.p
+                      dir="rtl"
+                      lang="ar"
+                      className="text-white/70 text-sm font-bold mb-1.5 font-['Cairo']"
+                      initial={{ opacity: 0, y: 8 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ duration: 0.18, delay: 0.05 }}
+                    >
+                      {hero.title_ar}
+                    </motion.p>
+                  )}
 
                   {/* Subtitle */}
                   <motion.p
@@ -1656,8 +1676,9 @@ export default function Home() {
                       )}
                       <div className="absolute bottom-0 left-0 right-0 px-1.5 pb-2">
                         <p className="text-[8.5px] text-white/90 font-black line-clamp-2 leading-tight font-['Cairo']">
-                          {anime.title?.romaji}
+                          {anime.title?.english || anime.title?.romaji}
                         </p>
+                        {anime.title_ar && <p dir="rtl" lang="ar" className="text-[7px] text-white/65 font-['Cairo'] line-clamp-1 mt-0.5">{anime.title_ar}</p>}
                       </div>
                     </div>
                   </motion.div>
@@ -1749,8 +1770,9 @@ export default function Home() {
                       )}
                       <div className="absolute bottom-0 left-0 right-0 px-1.5 pb-2">
                         <p className="text-[8.5px] text-white/90 font-black line-clamp-2 leading-tight font-['Cairo']">
-                          {anime.title?.romaji}
+                          {anime.title?.english || anime.title?.romaji}
                         </p>
+                        {anime.title_ar && <p dir="rtl" lang="ar" className="text-[7px] text-white/65 font-['Cairo'] line-clamp-1 mt-0.5">{anime.title_ar}</p>}
                       </div>
                     </div>
                   </motion.div>
@@ -1820,8 +1842,9 @@ export default function Home() {
                     )}
                     <div className="absolute bottom-0 left-0 right-0 px-2 pb-2.5">
                       <p className="text-[9.5px] text-white/90 font-bold truncate leading-tight">
-                        {anime.title?.romaji}
+                        {anime.title?.english || anime.title?.romaji}
                       </p>
+                      {anime.title_ar && <p dir="rtl" lang="ar" className="text-[7px] text-white/65 font-['Cairo'] line-clamp-1 mt-0.5">{anime.title_ar}</p>}
                     </div>
                   </div>
                 </motion.div>
@@ -1906,8 +1929,9 @@ export default function Home() {
                     )}
                     <div className="absolute bottom-0 left-0 right-0 px-1.5 pb-2">
                       <p className="text-[8.5px] text-white/90 font-black line-clamp-2 leading-tight font-['Cairo']">
-                        {anime.title?.romaji}
+                        {anime.title?.english || anime.title?.romaji}
                       </p>
+                      {anime.title_ar && <p dir="rtl" lang="ar" className="text-[7px] text-white/65 font-['Cairo'] line-clamp-1 mt-0.5">{anime.title_ar}</p>}
                     </div>
                   </div>
                 </motion.div>
@@ -1982,8 +2006,9 @@ export default function Home() {
                     )}
                     <div className="absolute bottom-0 left-0 right-0 px-1.5 pb-2">
                       <p className="text-[8.5px] text-white/90 font-black line-clamp-2 leading-tight font-['Cairo']">
-                        {anime.title?.romaji}
+                        {anime.title?.english || anime.title?.romaji}
                       </p>
+                      {anime.title_ar && <p dir="rtl" lang="ar" className="text-[7px] text-white/65 font-['Cairo'] line-clamp-1 mt-0.5">{anime.title_ar}</p>}
                     </div>
                   </div>
                 </motion.div>

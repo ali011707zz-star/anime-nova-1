@@ -329,7 +329,14 @@ export default function NewsScreen() {
             </View>
           )}
         </View>
-        <Text style={[s.cardTitle, { color: colors.textPrimary }]} numberOfLines={2}>{item.media.title.romaji}</Text>
+        <Text style={[s.cardTitle, { color: colors.textPrimary }]} numberOfLines={2}>
+          {item.media.title.english || item.media.title.romaji}
+        </Text>
+        {item.media.title_ar ? (
+          <Text style={[s.cardSubtitle, { color: colors.textSecondary, textAlign: "right", writingDirection: "rtl" }]} numberOfLines={1}>
+            {item.media.title_ar}
+          </Text>
+        ) : null}
         <View style={s.metaRow}>
           <Ionicons name="time-outline" size={11} color="#8B5CF6" />
           <Text style={[s.metaText, { color: "#8B5CF6" }]}>{timeAgo(item.airingAt)}</Text>
@@ -360,10 +367,14 @@ export default function NewsScreen() {
             <Text style={[s.tagText, { color: "#f59e0b" }]}>قريباً</Text>
           </View>
         </View>
-        <Text style={[s.cardTitle, { color: colors.textPrimary }]} numberOfLines={2}>{item.title.romaji}</Text>
-        {item.title.english && (
-          <Text style={[s.cardSubtitle, { color: colors.textSecondary }]} numberOfLines={1}>{item.title.english}</Text>
-        )}
+        <Text style={[s.cardTitle, { color: colors.textPrimary }]} numberOfLines={2}>
+          {item.title.english || item.title.romaji}
+        </Text>
+        {item.title_ar ? (
+          <Text style={[s.cardSubtitle, { color: colors.textSecondary, textAlign: "right", writingDirection: "rtl" }]} numberOfLines={1}>
+            {item.title_ar}
+          </Text>
+        ) : null}
         <View style={s.metaRow}>
           {item.startDate?.year && (
             <>
@@ -411,7 +422,14 @@ export default function NewsScreen() {
               <Text style={[s.tagText, { color: "#f87171" }]}>#{index + 1} تريندنج</Text>
             </View>
           )}
-          <Text style={[s.cardTitle, { color: colors.textPrimary }]} numberOfLines={1}>{item.title.romaji}</Text>
+          <Text style={[s.cardTitle, { color: colors.textPrimary }]} numberOfLines={1}>
+            {item.title.english || item.title.romaji}
+          </Text>
+          {item.title_ar ? (
+            <Text style={[s.cardSubtitle, { color: colors.textSecondary, textAlign: "right", writingDirection: "rtl" }]} numberOfLines={1}>
+              {item.title_ar}
+            </Text>
+          ) : null}
           {item.description && (
             <Text style={[s.trendDesc, { color: colors.textSecondary }]} numberOfLines={2}>
               {item.description.replace(/<[^>]*>/g, "").slice(0, 110)}...

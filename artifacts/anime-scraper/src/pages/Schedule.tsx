@@ -118,11 +118,16 @@ function AnimeCard({ item, isToday, isPastItem }: { item: any; isToday: boolean;
 
         <div className="flex-1 min-w-0 text-right">
           <h3 className="text-[13px] font-black text-white leading-snug line-clamp-1 font-['Cairo']">
-            {media?.title?.romaji}
+            {media?.title?.english || media?.title?.romaji}
           </h3>
-          {media?.title?.english && media.title.english !== media.title.romaji && (
-            <p className="text-[9.5px] text-white/35 font-['Cairo'] line-clamp-1 mt-0.5">
-              {media.title.english}
+          {media?.title_ar && (
+            <p dir="rtl" lang="ar" className="text-[10px] text-white/65 font-['Cairo'] line-clamp-1 mt-0.5">
+              {media.title_ar}
+            </p>
+          )}
+          {media?.title?.romaji && media.title.romaji !== media.title.english && (
+            <p dir="ltr" lang="ja-Latn" className="text-[8px] text-white/30 font-['Cairo'] line-clamp-1 mt-0.5">
+              {media.title.romaji}
             </p>
           )}
 

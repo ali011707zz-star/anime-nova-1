@@ -61,6 +61,9 @@ function normalizeLatestEpisodeItem(item: any): any {
     anslayerId,
     name,
     titleAr: String(item?.titleAr ?? item?.arabicTitle ?? "").trim(),
+    title_ar: typeof item?.title_ar === "string" && /[\u0600-\u06FF]/.test(item.title_ar)
+      ? item.title_ar.trim()
+      : "",
     cover: String(item?.cover ?? item?.poster ?? "").trim(),
     romaji: String(item?.romaji ?? "").trim(),
     english: String(item?.english ?? "").trim(),
@@ -500,7 +503,12 @@ export default function HomeScreen() {
                       </View>
                     )}
                     <LinearGradient colors={["transparent", "rgba(0,0,0,0.92)"]} style={todayStyles.grad}>
-                      <Text style={todayStyles.title} numberOfLines={2}>{item.titleAr || item.title}</Text>
+                      <Text style={todayStyles.title} numberOfLines={2}>{item.english || item.title}</Text>
+                      {item.title_ar ? (
+                        <Text style={{ color: "rgba(255,255,255,0.75)", fontSize: isTvLayout ? 14 : 9, lineHeight: isTvLayout ? 20 : 13, fontFamily: "Cairo_700Bold", textAlign: "right", writingDirection: "rtl", marginTop: 2 }} numberOfLines={1}>
+                          {item.title_ar}
+                        </Text>
+                      ) : null}
                     </LinearGradient>
                   </Pressable>
                 );

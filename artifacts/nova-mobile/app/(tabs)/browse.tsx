@@ -24,6 +24,7 @@ interface AnimeResult {
   id: number;
   idSource?: "mal" | "kitsu" | string;
   title: { romaji: string; english?: string };
+  title_ar?: string;
   coverImage: { large: string; extraLarge?: string };
   averageScore?: number;
   episodes?: number;
@@ -141,7 +142,14 @@ function AnimeCard({ anime, onPress, columns }: { anime: AnimeResult; onPress: (
           </View>
         ) : null}
         <View style={g.cardBottom}>
-          <Text style={[g.cardTitle, tvMode && g.tvCardTitle]} numberOfLines={2}>{anime.title?.romaji}</Text>
+          <Text style={[g.cardTitle, tvMode && g.tvCardTitle]} numberOfLines={2} writingDirection="ltr">
+            {anime.title?.english || anime.title?.romaji}
+          </Text>
+          {anime.title_ar ? (
+            <Text style={{ color: "rgba(255,255,255,0.72)", fontSize: tvMode ? 13 : 8, lineHeight: tvMode ? 20 : 11, fontFamily: "Cairo_700Bold", textAlign: "right", writingDirection: "rtl", marginTop: 2 }}>
+              {anime.title_ar}
+            </Text>
+          ) : null}
         </View>
       </View>
     </Pressable>

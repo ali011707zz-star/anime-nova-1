@@ -130,6 +130,11 @@ export default function ScheduleScreen() {
                 <Text style={[styles.scheduleTitle, { color: colors.text }]} numberOfLines={2}>
                   {item.media.title.english || item.media.title.romaji}
                 </Text>
+                {item.media.title_ar ? (
+                  <Text style={{ color: colors.mutedForeground, fontSize: tvMode ? 14 : 10, fontFamily: "Cairo_700Bold", textAlign: "right", writingDirection: "rtl" }} numberOfLines={1}>
+                    {item.media.title_ar}
+                  </Text>
+                ) : null}
                 <View style={styles.scheduleRow}>
                   <View style={[styles.epBadge, { backgroundColor: colors.primary + "20" }]}>
                     <Text style={[styles.epBadgeText, { color: colors.primary }]}>حلقة {item.episode}</Text>

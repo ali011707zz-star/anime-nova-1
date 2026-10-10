@@ -56,6 +56,7 @@ interface AnimeResult {
   id: number;
   idSource?: "mal" | "kitsu" | string;
   title: { romaji?: string; english?: string; native?: string };
+  title_ar?: string;
   coverImage: { large?: string; extraLarge?: string };
   averageScore?: number;
   episodes?: number;
@@ -168,6 +169,33 @@ function buildSearchQuery(sort: string, format: string, status: string, genre: s
 }`;
 }
 
+function buildArabicIdQuery(ids: number[], sort: string, format: string, status: string, genre: string, season: string, year: string) {
+  return buildSearchQuery(sort, format, status, genre, season, year)
+    .replace("query ($search: String, $page: Int, $perPage: Int) {", "query ($page: Int, $perPage: Int) {")
+    .replace(
+      "media(search: $search, type: ANIME,",
+      `media(id_in: [${ids.join(",")}], type: ANIME,`,
+    );
+}
+
+async function findArabicTitleIds(query: string, signal: AbortSignal): Promise<number[]> {
+  if (!/[\u0600-\u06FF]/.test(query)) return [];
+  try {
+    const response = await fetch(
+      `${API_BASE}/anime/title-ar/search?q=${encodeURIComponent(query)}`,
+      { signal },
+    );
+    if (!response.ok) return [];
+    const payload = await response.json();
+    return Array.isArray(payload?.items)
+      ? payload.items.map((item: any) => Number(item.id)).filter((id: number) => Number.isSafeInteger(id) && id > 0)
+      : [];
+  } catch (error: any) {
+    if (error?.name === "AbortError") throw error;
+    return [];
+  }
+}
+
 function buildBrowseQuery(sort: string, format: string, status: string, genre: string, season: string, year: string) {
   return `query ($page: Int, $perPage: Int) {
   Page(page: $page, perPage: $perPage) {
@@ -233,7 +261,17 @@ function AnimeCard({ anime, onPress, columns }: { anime: AnimeResult; onPress: (
           </View>
         ) : null}
         <View style={s.cardBottom}>
-          <Text style={s.cardTitle} numberOfLines={2}>{anime.title?.romaji}</Text>
+          <Text style={s.cardTitle} numberOfLines={2} writingDirection="ltr">
+            {anime.title?.english || anime.title?.romaji}
+          </Text>
+          {anime.title_ar ? (
+            <Text
+              numberOfLines={1}
+              style={{ color: "rgba(255,255,255,0.72)", fontSize: tvMode ? 12 : 8, lineHeight: tvMode ? 18 : 11, fontFamily: "Cairo_700Bold", textAlign: "right", writingDirection: "rtl", marginTop: 2 }}
+            >
+              {anime.title_ar}
+            </Text>
+          ) : null}
         </View>
       </View>
     </Pressable>
@@ -292,8 +330,13 @@ export default function SearchScreen() {
     try {
       let body: object;
       if (q.trim()) {
-        const term = await translateQuery(q);
-        body = { query: buildSearchQuery(so, fo, st, ge, se, ye), variables: { search: term, page: 1, perPage: 30 } };
+        const arabicIds = await findArabicTitleIds(q, signal);
+        if (arabicIds.length) {
+          body = { query: buildArabicIdQuery(arabicIds, so, fo, st, ge, se, ye), variables: { page: 1, perPage: 30 } };
+        } else {
+          const term = await translateQuery(q);
+          body = { query: buildSearchQuery(so, fo, st, ge, se, ye), variables: { search: term, page: 1, perPage: 30 } };
+        }
         setHistory(prev => {
           const updated = [q, ...prev.filter(h => h !== q)].slice(0, 8);
           AsyncStorage.setItem("searchHistory", JSON.stringify(updated));

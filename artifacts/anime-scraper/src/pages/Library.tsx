@@ -214,7 +214,7 @@ export default function Library() {
       if (sortBy === "score") return (b.averageScore || 0) - (a.averageScore || 0);
       return 0;
     });
-    return sq ? sorted.filter(a => (a.title?.romaji || a.title?.english || "").toLowerCase().includes(sq)) : sorted;
+    return sq ? sorted.filter(a => [a.title?.english, a.title?.romaji, a.title_ar].some(title => typeof title === "string" && title.toLowerCase().includes(sq))) : sorted;
   }, [savedAnime, sortBy, sq]);
 
   const sortedSaved = filteredSaved;
@@ -663,7 +663,10 @@ export default function Library() {
                           </div>
                           {/* Title below */}
                           <div className="mt-1.5 flex items-start justify-between gap-1">
-                            <p className="text-[11px] text-white/75 font-black font-['Cairo'] line-clamp-2 flex-1">{anime.title?.romaji}</p>
+                            <div className="flex-1 min-w-0">
+                              <p className="text-[11px] text-white/75 font-black font-['Cairo'] line-clamp-1">{anime.title?.english || anime.title?.romaji}</p>
+                              {anime.title_ar && <p dir="rtl" lang="ar" className="text-[9px] text-white/50 font-['Cairo'] line-clamp-1 mt-0.5">{anime.title_ar}</p>}
+                            </div>
                             <ChevronRight className="w-3.5 h-3.5 text-white/20 mt-0.5 shrink-0" />
                           </div>
                         </div>

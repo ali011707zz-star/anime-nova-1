@@ -29,6 +29,7 @@ import {
   probeHlsVariants,
 } from "../lib/consumet.js";
 import { sbSelect, sbUpsert, sbPatch } from "../lib/supabaseClient.js";
+import { attachArabicTitles, findArabicAnimeTitles, getArabicAnimeTitleById } from "../lib/arabicAnimeTitles.js";
 import {
   catalogQualityRank,
   getSourceCatalogHint,
@@ -18741,7 +18742,9 @@ async function handleAnilistRequest(req: Request, res: Response) {
       }
       res.setHeader("Cache-Control", "public, max-age=300");
       res.setHeader("X-Meta-Source", cached.stale ? "cache-stale" : "cache");
-      return res.json(cached.data);
+      return res.json(cached.source === "anilist"
+        ? await attachArabicTitles(cached.data)
+        : cached.data);
     }
   }
 
@@ -18750,7 +18753,7 @@ async function handleAnilistRequest(req: Request, res: Response) {
   if (freshData) {
     res.setHeader("Cache-Control", "public, max-age=60");
     res.setHeader("X-Meta-Source", "anilist");
-    return res.json(freshData);
+    return res.json(await attachArabicTitles(freshData));
   }
 
   // AniList فشلت — سجّل ذلك
@@ -18788,6 +18791,18 @@ async function handleAnilistRequest(req: Request, res: Response) {
   // 5️⃣ كل المصادر فشلت — هيكل فارغ بدل خطأ
   return res.json({ data: { Page: { media: [], pageInfo: { hasNextPage: false, total: 0 } }, Media: null } });
 }
+
+// Exact Arabic-title lookup. The returned IDs are AniList IDs, not fuzzy
+// title matches, so similarly named seasons cannot be substituted.
+router.get("/anime/title-ar/search", async (req, res): Promise<void> => {
+  const query = typeof req.query.q === "string" ? req.query.q.trim() : "";
+  if (query.length > 120) {
+    res.status(400).json({ error: "استعلام العنوان العربي طويل جداً" });
+    return;
+  }
+  res.setHeader("Cache-Control", "public, max-age=300");
+  res.json({ items: await findArabicAnimeTitles(query) });
+});
 
 // Keep both contracts alive: older mobile builds used /api/anime/anilist,
 // while the canonical endpoint is /api/anilist. The compatibility route is
@@ -18942,6 +18957,7 @@ router.get("/anime/new-episodes", async (req, res) => {
     const anilistItems = unique.map((sched: any) => ({
       anilistId:    sched.media.id,
       title:        sched.media.title?.romaji || sched.media.title?.english || "",
+      english:      sched.media.title?.english || "",
       titleAr:      sched.media.title?.native || null,
       episode:      sched.episode,
       airingAt:     sched.airingAt,
@@ -18983,10 +18999,14 @@ router.get("/anime/new-episodes", async (req, res) => {
         if (awPoster) awMap.set(anilistId, awPoster);
       }
     });
-    const confirmed = anilistItems.map((item: any) => ({
+    const confirmedWithPosters = anilistItems.map((item: any) => ({
       ...item,
       poster: awMap.get(item.anilistId) || item.poster,
     }));
+    const confirmed = await Promise.all(confirmedWithPosters.map(async (item: any) => ({
+      ...item,
+      title_ar: await getArabicAnimeTitleById(Number(item.anilistId)),
+    })));
 
     if (confirmed.length > 0) {
       _awNewEpsCache.ts    = Date.now();

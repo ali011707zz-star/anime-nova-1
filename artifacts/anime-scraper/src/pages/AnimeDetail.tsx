@@ -300,23 +300,11 @@ export default function AnimeDetail() {
         setAnime(a);
         setLoading(false);
 
-        // Translate the display title separately from the synopsis. This keeps
-        // proper names consistent and avoids showing a raw English title first.
-        const preferredTitle = a.title?.english || a.title?.romaji || a.title?.native || "";
-        const embeddedArabicTitle = a.title?.arabic || "";
-        const cachedTitle = localStorage.getItem(`title-ar-${params.id}`);
-        if (embeddedArabicTitle) setTitleAr(embeddedArabicTitle);
-        else if (cachedTitle && /[\u0600-\u06FF]/.test(cachedTitle)) setTitleAr(cachedTitle);
-        else if (cachedTitle) localStorage.removeItem(`title-ar-${params.id}`);
-        else if (preferredTitle && !/[\u0600-\u06ff]/i.test(preferredTitle)) {
-          fetch(`${API_BASE}/api/anime/translate?text=${encodeURIComponent(preferredTitle)}&from=en&to=ar&kind=title`, { signal: ctrl.signal })
-            .then(r => r.ok ? r.json() : null).then(d2 => {
-              const t = String(d2?.translated || "").trim();
-              if (!cancelled && t && t !== preferredTitle) {
-                setTitleAr(t); localStorage.setItem(`title-ar-${params.id}`, t);
-              }
-            }).catch(() => {});
-        }
+        // Arabic display names are curated and keyed by AniList ID on the API.
+        // Never reuse or generate a machine-translated title from local storage.
+        const verifiedTitleAr = typeof a.title_ar === "string" &&
+          /[\u0600-\u06FF]/.test(a.title_ar) ? a.title_ar : null;
+        setTitleAr(verifiedTitleAr);
 
         if (!a.description) return;
         const cached = localStorage.getItem(`desc-ar-${params.id}`);
@@ -540,7 +528,7 @@ export default function AnimeDetail() {
   );
 
   const score      = anime.averageScore ? (anime.averageScore / 10).toFixed(2) : null;
-  const displayTitle = titleAr || anime.title?.arabic || anime.title?.english || anime.title?.romaji || "أنمي";
+  const displayTitle = anime.title?.english || anime.title?.romaji || anime.title?.native || "أنمي";
   const descText   = descAr || (anime.description ? "جاري ترجمة الوصف…" : "");
   const statusInfo = STATUS_MAP[anime.status] || { label: anime.status, color: "text-white/50 bg-white/8 border-white/10" };
   const allTimeRank = anime.rankings?.find((r: any) => r.allTime && r.type === "RATED")?.rank;
@@ -589,10 +577,17 @@ export default function AnimeDetail() {
           )}
         </div>
         <div className="flex-1 pb-3 min-w-0 space-y-1.5">
-          <h1 className="text-[17px] font-black text-white leading-snug font-['Cairo'] line-clamp-2">
+          <h1 dir="ltr" lang="en" className="text-[17px] font-black text-white leading-snug font-['Cairo'] line-clamp-2 text-right">
             {displayTitle}
           </h1>
-          <p className="text-[10px] text-white/35 line-clamp-1">{anime.title.romaji}</p>
+          {titleAr && (
+            <p dir="rtl" lang="ar" className="text-[12px] text-white/65 leading-snug font-['Cairo'] line-clamp-2">
+              {titleAr}
+            </p>
+          )}
+          {anime.title?.romaji && anime.title.romaji !== displayTitle && (
+            <p dir="ltr" lang="ja-Latn" className="text-[10px] text-white/35 line-clamp-1">{anime.title.romaji}</p>
+          )}
           <div className="flex flex-wrap gap-1.5">
             <span className={`text-[9px] font-black px-2 py-1 rounded-lg border font-['Cairo'] ${statusInfo.color}`}>
               {statusInfo.label}

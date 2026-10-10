@@ -5,6 +5,7 @@ const getAnilistApi = () => `${getBaseUrl()}/api/anilist`;
 export type AnilistMedia = {
   id: number;
   title: { romaji: string; english: string | null; native: string };
+  title_ar?: string;
   coverImage: { large: string; extraLarge?: string };
   bannerImage: string | null;
   description: string | null;

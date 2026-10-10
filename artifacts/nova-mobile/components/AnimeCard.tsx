@@ -123,6 +123,11 @@ export const AnimeCard = React.memo(function AnimeCard({ anime, size = "sm", car
       >
         {title}
       </Text>
+      {anime.title_ar ? (
+        <Text style={styles.titleArabic} numberOfLines={1}>
+          {anime.title_ar}
+        </Text>
+      ) : null}
       {anime.episodes && (
         <Text style={[styles.epCount, { fontSize: scaleSize(10, 16), color: colors.mutedForeground }]}>
           {anime.episodes} حلقة
@@ -154,6 +159,7 @@ const styles = StyleSheet.create({
     height: 3, backgroundColor: "rgba(255,255,255,0.2)",
   },
   progressFill: { height: 3 },
-  title: { fontSize: 12, fontWeight: "600", lineHeight: 16 },
+  title: { fontSize: 12, fontWeight: "600", lineHeight: 16, writingDirection: "ltr" },
+  titleArabic: { fontSize: 10, fontFamily: "Cairo_700Bold", lineHeight: 14, textAlign: "right", writingDirection: "rtl", opacity: 0.78 },
   epCount: { fontSize: 10 },
 });

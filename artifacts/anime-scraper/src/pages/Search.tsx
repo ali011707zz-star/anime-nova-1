@@ -25,6 +25,7 @@ interface TraceResult {
 interface AnimeResult {
   id: number;
   title: { romaji: string; english?: string; native?: string };
+  title_ar?: string;
   coverImage: { large: string };
   averageScore?: number;
   episodes?: number;
@@ -185,6 +186,33 @@ query ($search: String, $page: Int, $perPage: Int) {
 }`;
 }
 
+function buildIdQuery(ids: number[], sort: string, format: string, status: string, genre: string, season: string) {
+  return buildQuery(sort, format, status, genre, season)
+    .replace("query ($search: String, $page: Int, $perPage: Int) {", "query ($page: Int, $perPage: Int) {")
+    .replace(
+      "media(search: $search, type: ANIME, sort:",
+      `media(id_in: [${ids.join(",")}], type: ANIME, sort:`,
+    );
+}
+
+async function findArabicTitleIds(query: string, signal: AbortSignal): Promise<number[]> {
+  if (!/[\u0600-\u06FF]/.test(query)) return [];
+  try {
+    const response = await fetch(
+      `${API_BASE}/api/anime/title-ar/search?q=${encodeURIComponent(query)}`,
+      { signal },
+    );
+    if (!response.ok) return [];
+    const payload = await response.json();
+    return Array.isArray(payload?.items)
+      ? payload.items.map((item: any) => Number(item.id)).filter((id: number) => Number.isSafeInteger(id) && id > 0)
+      : [];
+  } catch (error: any) {
+    if (error?.name === "AbortError") throw error;
+    return [];
+  }
+}
+
 function buildBrowseQuery(sort: string, format: string, status: string, genre: string, season: string) {
   const formatFilter = format ? `, format: ${format}` : "";
   const statusFilter = status ? `, status: ${status}` : "";
@@ -226,8 +254,13 @@ function AnimeCardSmall({ anime }: { anime: AnimeResult }) {
           )}
           <div className="absolute bottom-0 left-0 right-0 px-2 pb-2">
             <p className="text-[9.5px] text-white/90 font-bold line-clamp-2 leading-tight font-['Cairo']">
-              {anime.title?.romaji}
+              {anime.title?.english || anime.title?.romaji}
             </p>
+            {anime.title_ar && (
+              <p dir="rtl" lang="ar" className="text-[8px] text-white/65 line-clamp-1 leading-tight font-['Cairo'] mt-0.5">
+                {anime.title_ar}
+              </p>
+            )}
             {anime.startDate?.year && (
               <p className="text-[8px] text-white/35 mt-0.5 font-['Cairo']">{anime.startDate.year}</p>
             )}
@@ -314,8 +347,16 @@ export default function Search() {
       try {
         let q: object;
         if (query.trim()) {
-          const searchTerm = await translateQuery(query);
-          q = { query: buildQuery(sort, format, status, genre, season), variables: { search: searchTerm, page: 1, perPage: 30 } };
+          const arabicIds = await findArabicTitleIds(query, controller.signal);
+          if (arabicIds.length) {
+            q = {
+              query: buildIdQuery(arabicIds, sort, format, status, genre, season),
+              variables: { page: 1, perPage: 30 },
+            };
+          } else {
+            const searchTerm = await translateQuery(query);
+            q = { query: buildQuery(sort, format, status, genre, season), variables: { search: searchTerm, page: 1, perPage: 30 } };
+          }
           const updated = [query, ...history.filter(h => h !== query)].slice(0, 8);
           setHistory(updated);
           localStorage.setItem('searchHistory', JSON.stringify(updated));
