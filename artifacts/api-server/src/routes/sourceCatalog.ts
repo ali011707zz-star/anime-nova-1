@@ -53,10 +53,10 @@ router.get("/source-catalog/titles", async (req: Request, res: Response) => {
     provider: provider ? `eq.${provider}` : undefined,
     title: q ? encodedLike(q) : undefined,
     order: "title.asc",
-    offset: (page - 1) * limit,
   };
   const rows = await sbSelect<any>("source_catalog_titles", filters, {
     limit,
+    offset: (page - 1) * limit,
     select: "id,provider,provider_title_id,title,title_en,title_ar,title_native,synonyms,genres,tags,media_type,status,release_year,episode_count,poster_url,backdrop_url,catalog_status,last_seen_at",
   });
   res.setHeader("Cache-Control", "public, max-age=300");
