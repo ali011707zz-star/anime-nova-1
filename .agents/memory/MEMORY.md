@@ -141,3 +141,4 @@
 - [Mobile theme default](mobile-theme-default.md) — the app's initial and missing-preference theme must remain white.
 - [Player control appearance](player-theme-independence.md) — keep Nova Mobile playback buttons theme-independent, using consistent translucent glass surfaces.
 - [Mobile watch-player orientation](mobile-watch-player-orientation.md) — phone picker/exit stays portrait; player starts landscape and its toggle uses one lock owner; TV remains separate.
+- [Arabic title fallback](arabic-title-fallback.md) — use only verified Arabic aliases; keep AniList native titles separate and show English/original when no Arabic title is known.

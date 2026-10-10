@@ -15224,10 +15224,13 @@ router.get("/anime/anslayer-latest", async (req, res) => {
     const items = (await Promise.all(rawItems.map(async (item: any) => {
       const animeId = item.anilistId || await resolveAniListIdForSource(item.name, null, [], null);
       const meta = animeId ? getCachedAniListSourceMeta(animeId) : undefined;
+      const titleAr = animeId ? await getArabicAnimeTitleById(animeId) : null;
       return {
         ...item,
         animeId,
         anilistId: animeId,
+        title_ar: titleAr,
+        titleAr,
         titleVariants: meta?.titles || [item.name].filter(Boolean),
         romaji: meta?.romaji || item.name,
         english: meta?.english || "",
@@ -18958,7 +18961,7 @@ router.get("/anime/new-episodes", async (req, res) => {
       anilistId:    sched.media.id,
       title:        sched.media.title?.romaji || sched.media.title?.english || "",
       english:      sched.media.title?.english || "",
-      titleAr:      sched.media.title?.native || null,
+      native:       sched.media.title?.native || "",
       episode:      sched.episode,
       airingAt:     sched.airingAt,
       poster:       sched.media.coverImage?.extraLarge || sched.media.coverImage?.large || null,
@@ -19003,10 +19006,14 @@ router.get("/anime/new-episodes", async (req, res) => {
       ...item,
       poster: awMap.get(item.anilistId) || item.poster,
     }));
-    const confirmed = await Promise.all(confirmedWithPosters.map(async (item: any) => ({
-      ...item,
-      title_ar: await getArabicAnimeTitleById(Number(item.anilistId)),
-    })));
+    const confirmed = await Promise.all(confirmedWithPosters.map(async (item: any) => {
+      const titleAr = await getArabicAnimeTitleById(Number(item.anilistId));
+      return {
+        ...item,
+        title_ar: titleAr,
+        titleAr,
+      };
+    }));
 
     if (confirmed.length > 0) {
       _awNewEpsCache.ts    = Date.now();

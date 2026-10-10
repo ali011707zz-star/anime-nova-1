@@ -54,16 +54,18 @@ function normalizeLatestEpisodeItem(item: any): any {
     (value: unknown): value is string =>
       typeof value === "string" && value.trim().length > 1,
   )));
+  const title_ar =
+    typeof item?.title_ar === "string" && /[\u0600-\u06FF]/.test(item.title_ar)
+      ? item.title_ar.trim()
+      : "";
   return {
     ...item,
     animeId,
     anilistId: animeId || undefined,
     anslayerId,
     name,
-    titleAr: String(item?.titleAr ?? item?.arabicTitle ?? "").trim(),
-    title_ar: typeof item?.title_ar === "string" && /[\u0600-\u06FF]/.test(item.title_ar)
-      ? item.title_ar.trim()
-      : "",
+    titleAr: title_ar,
+    title_ar,
     cover: String(item?.cover ?? item?.poster ?? "").trim(),
     romaji: String(item?.romaji ?? "").trim(),
     english: String(item?.english ?? "").trim(),

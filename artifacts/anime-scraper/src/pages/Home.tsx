@@ -62,6 +62,10 @@ function normalizeLatestEpisodeItem(item: any): any {
       ),
     ),
   );
+  const title_ar =
+    typeof item?.title_ar === "string" && /[\u0600-\u06FF]/.test(item.title_ar)
+      ? item.title_ar.trim()
+      : "";
 
   return {
     ...item,
@@ -69,10 +73,9 @@ function normalizeLatestEpisodeItem(item: any): any {
     anilistId,
     anslayerId,
     name,
+    titleAr: title_ar,
     titleVariants,
-    title_ar: typeof item?.title_ar === "string" && /[\u0600-\u06FF]/.test(item.title_ar)
-      ? item.title_ar.trim()
-      : "",
+    title_ar,
   };
 }
 
