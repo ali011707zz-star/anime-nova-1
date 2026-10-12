@@ -2792,6 +2792,7 @@ async function getShahiidSources(
 interface UnifiedSource {
   name: string; url: string; quality: string; qualityRank: number; site: string;
   directUrl?: string; directType?: "hls" | "mp4";
+  candidateKey?: string;
   corsOk?: boolean;     // CDN يدعم CORS * + Range → تشغيل مباشر في المتصفح بدون proxy
   isEmbed?: boolean;
   subtitleUrl?: string;
@@ -2968,7 +2969,19 @@ async function extractAndCollect(
   out: UnifiedSource[],
   seenKeys: Set<string>,
   timeoutMs = 14000,
+  options: {
+    concurrency?: number;
+    maxResults?: number;
+    accept?: (source: UnifiedSource) => boolean;
+    onSource?: (source: UnifiedSource) => void;
+    validate?: (source: UnifiedSource) => Promise<boolean>;
+  } = {},
 ): Promise<void> {
+  let cursor = 0;
+  let collected = 0;
+  let stopped = false;
+  if (!sources.length) return;
+
   function collect(s: UnifiedSource) {
     if (!s.directUrl && !s.isEmbed) return;
     // iframe policy: only mega.nz and vidmoly allowed as sandboxed embed
@@ -2983,17 +2996,21 @@ async function extractAndCollect(
       ? "cdn:" + checkUrl.replace(/^https?:\/\/[^/]+/, "")
       : checkUrl;
     if (seenKeys.has(key)) return;
+    if (options.accept && !options.accept(s)) return;
     seenKeys.add(key);
     out.push(s);
+    collected++;
+    try { options.onSource?.(s); } catch { /* delivery errors must not break extraction */ }
+    if (options.maxResults && collected >= options.maxResults) stopped = true;
   }
 
-  await Promise.allSettled(sources.map(async (s) => {
+  async function process(s: UnifiedSource): Promise<void> {
     // isEmbed sources (e.g. mega.nz/embed) pass through without extraction
     if (s.isEmbed) { collect(s); return; }
     // Already has directUrl (e.g. Phoenix direct MKV/MP4)
     if (s.directUrl) {
       const alive = await probeDirectUrl(s.directUrl, s.url);
-      if (alive) collect(s);
+      if (alive && (!options.validate || await options.validate(s))) collect(s);
       return;
     }
     // mega.nz/embed → allowed as sandboxed iframe (MUST be before DEAD_FILE_HOSTS since
@@ -3011,12 +3028,15 @@ async function extractAndCollect(
     // Bare .m3u8 → wrap with hls-proxy to bypass CORS restrictions
     if (s.url.match(/\.m3u8([?#]|$)/i)) {
       const proxied = `/api/anime/hls-proxy?url=${encodeURIComponent(s.url)}&ref=${encodeURIComponent(s.url)}`;
-      collect({ ...s, directUrl: proxied, directType: "hls" });
+      const hlsSource = { ...s, directUrl: proxied, directType: "hls" };
+      if (!options.validate || await options.validate(hlsSource)) collect(hlsSource);
       return;
     }
     // Bare .mp4 → direct MP4
     if (s.url.match(/\.mp4([?#]|$)/i)) {
-      collect({ ...s, directUrl: s.url, directType: "mp4" });
+      const mp4Source = { ...s, directUrl: s.url, directType: "mp4" as const };
+      if (options.validate && !(await probeDirectUrl(s.url, s.url))) return;
+      if (!options.validate || await options.validate(mp4Source)) collect(mp4Source);
       return;
     }
     // Known un-extractable hosts (social media, junk CDNs) → skip entirely (no embed)
@@ -3035,13 +3055,15 @@ async function extractAndCollect(
           // Some CDNs block Replit server IP but allow direct browser HLS.js access — skip proxy
           const NO_HLS_PROXY_HOSTS = ["yaviidcdn.com", "vidcache.net"];
           const skipProxy = NO_HLS_PROXY_HOSTS.some(h => result.url.includes(h));
+          let hlsSource: UnifiedSource;
           if (skipProxy) {
-            collect({ ...s, url: result.url, directUrl: result.url, directType: "hls" });
+            hlsSource = { ...s, url: result.url, directUrl: result.url, directType: "hls" };
           } else {
             // Wrap extracted HLS with hls-proxy to bypass CORS
             const proxied = `/api/anime/hls-proxy?url=${encodeURIComponent(result.url)}&ref=${encodeURIComponent(s.url)}`;
-            collect({ ...s, url: proxied, directUrl: proxied, directType: "hls" });
+            hlsSource = { ...s, url: proxied, directUrl: proxied, directType: "hls" };
           }
+          if (!options.validate || await options.validate(hlsSource)) collect(hlsSource);
         } else {
           // MP4: probe to filter dead links
           const alive = await probeDirectUrl(result.url, s.url);
@@ -3062,7 +3084,21 @@ async function extractAndCollect(
     } catch {
       // Exception during extraction → drop
     }
-  }));
+  }
+
+  async function worker(): Promise<void> {
+    while (!stopped) {
+      const index = cursor++;
+      if (index >= sources.length) return;
+      try { await process(sources[index]); } catch { /* one broken server must not cancel its siblings */ }
+    }
+  }
+
+  const concurrency = Math.max(1, Math.min(
+    sources.length || 1,
+    Math.floor(options.concurrency || sources.length || 1),
+  ));
+  await Promise.all(Array.from({ length: concurrency }, () => worker()));
 }
 
 /**
@@ -14389,7 +14425,15 @@ router.get("/anime/sources-stream", scraperQueueMiddleware, async (req, res) => 
       // still has a safe expiry window.
       const useKawaiiCacheForAvailability =
         checkOnly && site === "kawaii" && isUsableKawaiiCache(hit);
-      const forceFresh = (checkOnly && !useKawaiiCacheForAvailability) || site === "reanime";
+      const usableCheckCache = checkOnly
+        && Boolean(hit)
+        && !hit?.stale
+        && !shouldRefreshCache(hit!.expiresAt);
+      // The availability scan only emits metadata, so a fresh episode-scoped
+      // cache entry is safe to reuse. Stale or near-expiry links still trigger
+      // a live metadata refresh; no availability row is treated as playable.
+      const forceFresh = site === "reanime"
+        || (checkOnly && !usableCheckCache && !useKawaiiCacheForAvailability);
 
       if (hit && !forceFresh) {
         const isStaleOrNearExpiry = hit.stale || shouldRefreshCache(hit.expiresAt);
@@ -14730,11 +14774,29 @@ router.get("/anime/fetch-source", scraperQueueMiddleware, async (req, res) => {
     if (q === '360p' || q === 'sd' || q === '360') return '360p' as const;
     return null;
   })();
+  const progressive = String(req.query.progressive || "") === "1";
+  const isMobileClient = (req.headers["x-nova-client"] || "").toString().includes("mobile");
+  const excludedCandidateKeys = (() => {
+    try {
+      const raw = req.query.exclude;
+      const parsed = typeof raw === "string" ? JSON.parse(raw) : raw;
+      return new Set(
+        (Array.isArray(parsed) ? parsed : [])
+          .filter((value): value is string => typeof value === "string" && /^[a-f0-9]{20}$/i.test(value))
+          .slice(0, 12),
+      );
+    } catch { return new Set<string>(); }
+  })();
   const QUALITY_FALLBACK_FETCH_SITES = new Set([
     "megaplay", "kawaii", "anineko", "animekai", "animewitcher", "sanime",
     "animeify", "anifox", "anslayer",
   ]);
-  const filterRequestedQuality = <T extends { quality?: string; qualityRank?: number; name?: string; label?: string; url?: string; directUrl?: string }>(rows: T[]): T[] => {
+  const matchesRequestedQuality = (source: UnifiedSource): boolean => {
+    if (!requestedQuality) return true;
+    const detected = sourceCheckQuality(source).quality;
+    return detected === requestedQuality || (requestedQuality === "360p" && detected === "480p");
+  };
+  const filterRequestedQuality = <T extends { quality?: string; qualityRank?: number; name?: string; label?: string; url?: string; directUrl?: string }>(rows: T[], strict = false): T[] => {
     if (!requestedQuality) return rows;
     const sameTier = rows.filter((s) => {
       const detected = sourceCheckQuality(s).quality;
@@ -14745,35 +14807,169 @@ router.get("/anime/fetch-source", scraperQueueMiddleware, async (req, res) => {
     });
     // Provider quality labels can differ from the availability tier. If no
     // exact tier exists, preserve real rows instead of returning no source.
-    return sameTier.length || !QUALITY_FALLBACK_FETCH_SITES.has(site)
+    return strict || sameTier.length || !QUALITY_FALLBACK_FETCH_SITES.has(site)
       ? sameTier
       : rows;
   };
   const stripAnimeSlayerSubtitles = <T extends { subtitleUrl?: string }>(rows: T[]): T[] =>
     site === "anslayer" ? rows.map(({ subtitleUrl: _subtitleUrl, ...source }) => source as T) : rows;
 
+  let progressiveStarted = false;
+  let progressiveFinished = false;
+  let progressiveSent = 0;
+  const progressiveSeen = new Set<string>();
+  const progressiveStartedAt = Date.now();
+  const startProgressiveResponse = () => {
+    if (!progressive || progressiveStarted || res.headersSent) return;
+    progressiveStarted = true;
+    res.setHeader("Content-Type", "text/event-stream; charset=utf-8");
+    res.setHeader("Cache-Control", "no-cache, no-transform");
+    res.setHeader("Connection", "keep-alive");
+    res.setHeader("X-Accel-Buffering", "no");
+    res.flushHeaders?.();
+  };
+  const progressiveCandidateKey = (source: UnifiedSource): string => {
+    if (source.candidateKey && /^[a-f0-9]{20}$/i.test(source.candidateKey)) return source.candidateKey;
+    const sourceSite = String(source.site || site);
+    const quality = sourceCheckQuality(source).quality;
+    const rawUrl = String((source as UnifiedSource & { rawUrl?: string }).rawUrl || source.directUrl || source.url || "");
+    let urlIdentity = rawUrl.split("#", 1)[0];
+    try {
+      let parsed = new URL(rawUrl, "http://nova.local");
+      if (parsed.pathname.includes("/hls-proxy") || parsed.pathname.includes("/video-proxy")) {
+        const nested = parsed.searchParams.get("url");
+        if (nested) parsed = new URL(nested);
+      }
+      const volatileParam = /^(?:access_token|auth_token|token|sig(?:nature)?|expires?|exp|timestamp|ts|nonce|rnd|policy)$/i;
+      const stableQuery = [...parsed.searchParams.entries()]
+        .filter(([key]) => !volatileParam.test(key))
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([key, value]) => `${key}=${value}`)
+        .join("&");
+      urlIdentity = `${parsed.hostname.toLowerCase()}${parsed.pathname}${stableQuery ? `?${stableQuery}` : ""}`;
+    } catch { /* retain a fragment-free URL string when provider URLs are unusual */ }
+    const label = String(source.name || "").trim().toLowerCase().replace(/\s+/g, " ");
+    return createHash("sha256").update(`${sourceSite}|${quality}|${label}|${urlIdentity}`).digest("hex").slice(0, 20);
+  };
+  const encodeProgressiveSource = (source: UnifiedSource): UnifiedSource => {
+    const classified = sourceCheckQuality(source);
+    let derivedHeaders = source.headers;
+    if (!derivedHeaders && source.directUrl) {
+      try {
+        const proxyUrl = source.directUrl.startsWith("/") ? `http://x.com${source.directUrl}` : source.directUrl;
+        const ref = new URL(proxyUrl).searchParams.get("ref");
+        if (ref && !isEncrypted(ref)) {
+          let origin = "";
+          try { origin = new URL(ref).origin; } catch {}
+          derivedHeaders = origin ? { Referer: ref, Origin: origin } : { Referer: ref };
+        }
+      } catch { /* no provider referrer to forward */ }
+    }
+    const normalized = {
+      ...source,
+      site: source.site || site,
+      quality: source.quality || classified.quality,
+      qualityRank: source.qualityRank || classified.qualityRank,
+      ...(derivedHeaders ? { headers: derivedHeaders } : {}),
+    };
+    const wrapped = isMobileClient ? wrapForMobile(normalized) : normalized;
+    return {
+      ...wrapped,
+      directUrl: wrapped.directUrl
+        ? (wrapped.corsOk ? wrapped.directUrl : encryptProxyUrl(wrapped.directUrl))
+        : wrapped.directUrl,
+    };
+  };
+  const sendProgressiveCandidate = (source: UnifiedSource) => {
+    if (!progressive || progressiveFinished || progressiveSent >= 2 || res.destroyed) return;
+    if (!matchesRequestedQuality(source)) return;
+    const candidateKey = progressiveCandidateKey(source);
+    if (excludedCandidateKeys.has(candidateKey) || progressiveSeen.has(candidateKey)) return;
+    progressiveSeen.add(candidateKey);
+    startProgressiveResponse();
+    const kind = progressiveSent === 0 ? "primary" : "backup";
+    progressiveSent++;
+    if (kind === "primary") {
+      console.info(
+        `[playback-trace] id=${sourceTrace || "none"} route=fetch-source stage=first_candidate site=${sourceTraceSite} elapsed_ms=${Date.now() - progressiveStartedAt} quality=${sourceCheckQuality(source).quality}`,
+      );
+    }
+    res.write(`event: source\ndata: ${JSON.stringify({
+      kind,
+      candidateKey,
+      source: encodeProgressiveSource(source),
+    })}\n\n`);
+    (res as any).flush?.();
+  };
+  const sendProgressiveRejected = (source: UnifiedSource) => {
+    if (!progressive || progressiveFinished || res.destroyed) return;
+    const candidateKey = progressiveCandidateKey(source);
+    if (excludedCandidateKeys.has(candidateKey) || progressiveSeen.has(candidateKey)) return;
+    progressiveSeen.add(candidateKey);
+    startProgressiveResponse();
+    res.write(`event: rejected\ndata: ${JSON.stringify({ candidateKey })}\n\n`);
+    (res as any).flush?.();
+  };
+  const finishProgressiveResponse = (error?: string) => {
+    if (!progressive || progressiveFinished || res.destroyed) return;
+    startProgressiveResponse();
+    progressiveFinished = true;
+    if (error && progressiveSent === 0) {
+      res.write(`event: error\ndata: ${JSON.stringify({ error })}\n\n`);
+    }
+    res.write(`event: done\ndata: ${JSON.stringify({ count: progressiveSent })}\n\n`);
+    res.end();
+  };
+  const sendProgressiveBatch = async (rows: UnifiedSource[]) => {
+    if (!progressive) return;
+    const ordered = filterRequestedQuality(rows, true)
+      .filter(matchesRequestedQuality)
+      .filter(source => !excludedCandidateKeys.has(progressiveCandidateKey(source)))
+      .sort((a, b) => (b.qualityRank || sourceCheckQuality(b).qualityRank) - (a.qualityRank || sourceCheckQuality(a).qualityRank))
+      .slice(0, 2);
+    await Promise.all(ordered.map(async source => {
+      const candidate = source.candidateKey
+        ? source
+        : { ...source, candidateKey: progressiveCandidateKey(source) };
+      if (await verifyProgressiveLink(candidate)) sendProgressiveCandidate(candidate);
+      else sendProgressiveRejected(candidate);
+    }));
+    finishProgressiveResponse(progressiveSent ? undefined : "no_valid_source");
+  };
+
   if (!site || !title) {
     res.status(400).json({ error: "site and title required", sources: [] });
     return;
   }
+  if (progressive) startProgressiveResponse();
 
   // Availability resolves Kawaii from the title even when the client supplied
   // a numeric id. Match that behavior here: latest/catalog links can carry a
   // provider id in `anime`, which is not necessarily an AniList id.
-  if (site === "kawaii" && title) {
-    const resolvedByTitle = await Promise.race([
-      resolveAniListIdForSource(title, english, titleVariants, titleAr),
-      new Promise<number | undefined>(resolve => setTimeout(() => resolve(undefined), 3500)),
-    ]);
-    if (resolvedByTitle) anilistId = resolvedByTitle;
-  } else if (site !== "anslayer" && !anilistId) {
-    // Other AniList-dependent sources still need title resolution when no id
-    // was supplied by the caller.
-    const resolvedByTitle = await Promise.race([
-      resolveAniListIdForSource(title, english, titleVariants, titleAr),
-      new Promise<number | undefined>(resolve => setTimeout(() => resolve(undefined), 3500)),
-    ]);
-    if (resolvedByTitle) anilistId = resolvedByTitle;
+  const idResolutionStartedAt = Date.now();
+  try {
+    if (site === "kawaii" && title) {
+      const resolvedByTitle = await Promise.race([
+        resolveAniListIdForSource(title, english, titleVariants, titleAr),
+        new Promise<number | undefined>(resolve => setTimeout(() => resolve(undefined), 3500)),
+      ]);
+      if (resolvedByTitle) anilistId = resolvedByTitle;
+    } else if (site !== "anslayer" && !anilistId) {
+      // Other AniList-dependent sources still need title resolution when no id
+      // was supplied by the caller.
+      const resolvedByTitle = await Promise.race([
+        resolveAniListIdForSource(title, english, titleVariants, titleAr),
+        new Promise<number | undefined>(resolve => setTimeout(() => resolve(undefined), 3500)),
+      ]);
+      if (resolvedByTitle) anilistId = resolvedByTitle;
+    }
+  } catch (error: any) {
+    console.warn(`[fetch-source] AniList resolution failed for ${site}:`, error?.message ?? error);
+  }
+  if (site === "kawaii" || !parseInt((req.query.anilistId as string) || (req.query.anime as string) || "0")) {
+    console.info(
+      `[playback-trace] id=${sourceTrace || "none"} route=fetch-source stage=id_resolution site=${sourceTraceSite} elapsed_ms=${Date.now() - idResolutionStartedAt} has_id=${Boolean(anilistId)}`,
+    );
   }
 
   // ── تقييد مؤقت (بطلب المستخدم 2026-07-13): تعطيل كل مصادر قسم الأنمي ما عدا
@@ -14815,12 +15011,19 @@ router.get("/anime/fetch-source", scraperQueueMiddleware, async (req, res) => {
   // Reject retired provider ids before any provider adapter or cache lookup.
   // This keeps old clients and stale cache rows from reintroducing them.
   if (DISABLED_ANIME_SOURCES.has(site)) {
-    res.json({ sources: [] });
+    if (progressive) finishProgressiveResponse("provider_disabled");
+    else res.json({ sources: [] });
     return;
   }
   if (isAnivexaSite(site)) {
-    const sources = stripAnimeSlayerSubtitles(filterRequestedQuality(await getAnivexaSources(site, anilistId, ep, title, english, titleVariants)));
-    const isMobileClient = (req.headers["x-nova-client"] || "").toString().includes("mobile");
+    let sources: UnifiedSource[] = [];
+    try {
+      sources = stripAnimeSlayerSubtitles(filterRequestedQuality(await getAnivexaSources(site, anilistId, ep, title, english, titleVariants)));
+    } catch (error: any) {
+      if (progressive) { finishProgressiveResponse("provider_failed"); return; }
+      throw error;
+    }
+    if (progressive) { await sendProgressiveBatch(sources); return; }
     const encSources = sources.map(source => {
       const wrapped = isMobileClient ? wrapForMobile(source) : source;
       return {
@@ -14834,8 +15037,14 @@ router.get("/anime/fetch-source", scraperQueueMiddleware, async (req, res) => {
     return;
   }
   if (isConsumetSite(site)) {
-    const sources = stripAnimeSlayerSubtitles(filterRequestedQuality(await getConsumetSources(site, title, english, ep, titleVariants, anilistId)));
-    const isMobileClient = (req.headers["x-nova-client"] || "").toString().includes("mobile");
+    let sources: UnifiedSource[] = [];
+    try {
+      sources = stripAnimeSlayerSubtitles(filterRequestedQuality(await getConsumetSources(site, title, english, ep, titleVariants, anilistId)));
+    } catch (error: any) {
+      if (progressive) { finishProgressiveResponse("provider_failed"); return; }
+      throw error;
+    }
+    if (progressive) { await sendProgressiveBatch(sources); return; }
     const encSources = sources.map(source => {
       const wrapped = isMobileClient ? wrapForMobile(source) : source;
       return {
@@ -14849,6 +15058,7 @@ router.get("/anime/fetch-source", scraperQueueMiddleware, async (req, res) => {
     return;
   }
   if (ANIME_SOURCE_ALLOWLIST && !ANIME_SOURCE_ALLOWLIST.has(site) && !isInternalCall) {
+    if (progressive) { await sendProgressiveBatch([]); return; }
     res.json({ sources: [] });
     return;
   }
@@ -14880,7 +15090,12 @@ router.get("/anime/fetch-source", scraperQueueMiddleware, async (req, res) => {
 
 ]);
   const cKey = makeSourceCacheKey(site, title, ep, anilistId || anslayerId);
-  let cached = await getFromSourceCache(cKey);
+  let cached: Awaited<ReturnType<typeof getFromSourceCache>> = null;
+  try {
+    cached = await getFromSourceCache(cKey);
+  } catch (error: any) {
+    console.warn(`[fetch-source] cache read failed for ${site}:`, error?.message ?? error);
+  }
   if (cached && site === "anifox") {
     const liveSources = await filterAnifoxCachedSources(cached.sources);
     if (!liveSources.length) {
@@ -14895,6 +15110,17 @@ router.get("/anime/fetch-source", scraperQueueMiddleware, async (req, res) => {
     (cached.stale === true || (cached.expiresAt - Date.now()) < SHORT_TTL_MAX_AGE_MS);
   if (cached && !FORCE_LIVE_FETCH_SITES.has(site) &&
       !shouldRefreshCache(cached.expiresAt) && !skipCacheForShortTtl) {
+    if (progressive) {
+      const untriedCacheRows = stripAnimeSlayerSubtitles(filterRequestedQuality(cached.sources, true))
+        .filter(source => !excludedCandidateKeys.has(progressiveCandidateKey(source)));
+      if (untriedCacheRows.length) {
+        console.info(
+          `[playback-trace] id=${sourceTrace || "none"} route=fetch-source stage=cache_hit site=${sourceTraceSite} elapsed_ms=${Date.now() - sourceTraceStartedAt}`,
+        );
+        await sendProgressiveBatch(untriedCacheRows);
+        return;
+      }
+    } else {
      const enc = stripAnimeSlayerSubtitles(filterRequestedQuality(cached.sources)).map((s: UnifiedSource) => {
       // Cached Kawaii URLs can outlive a provider rotation. When the cached
       // raw URL points to Mewstream, rebuild the proxy URL and force the
@@ -14947,6 +15173,7 @@ router.get("/anime/fetch-source", scraperQueueMiddleware, async (req, res) => {
     });
     res.json({ sources: enc, fromCache: true });
     return;
+    }
   }
 
   const SCRAPER_MS = 12000;  // لا تقطع المصادر العربية البطيئة أثناء البحث
@@ -14957,6 +15184,7 @@ router.get("/anime/fetch-source", scraperQueueMiddleware, async (req, res) => {
   const catalogProvider = (["animeify", "anslayer", "sanime", "anifox"] as string[]).includes(site)
     ? site as "animeify" | "anslayer" | "sanime" | "anifox"
     : null;
+  const catalogHintStartedAt = Date.now();
   const catalogHint = catalogProvider
     ? await race(getSourceCatalogHint(catalogProvider, {
         title,
@@ -14966,11 +15194,50 @@ router.get("/anime/fetch-source", scraperQueueMiddleware, async (req, res) => {
         episode: ep,
         season: extractSeasonNum(title) ?? extractSeasonNum(english || "") ?? null,
         providerTitleId: catalogProvider === "anslayer" ? anslayerId : undefined,
-      }), 1800, null)
+      }), 1800, null).catch(() => null)
     : null;
+  if (catalogProvider) {
+    console.info(
+      `[playback-trace] id=${sourceTrace || "none"} route=fetch-source stage=catalog_hint site=${sourceTraceSite} elapsed_ms=${Date.now() - catalogHintStartedAt} hit=${Boolean(catalogHint)}`,
+    );
+  }
 
   const seen    = new Set<string>();
   const sources: UnifiedSource[] = [];
+  let publishProgressSource: ((source: UnifiedSource) => void) | null = null;
+
+  async function verifyProgressiveCandidate(source: UnifiedSource): Promise<boolean> {
+    const rawUrl = String(source.directUrl || source.url || "");
+    if (source.directType !== "hls" && !/(?:\.m3u8(?:[?#]|$)|\/hls-proxy\?)/i.test(rawUrl)) return true;
+    let manifestUrl = rawUrl;
+    let referer = String(source.headers?.Referer || source.url || rawUrl);
+    let manifestKey = String((source as UnifiedSource & { manifestKey?: string }).manifestKey || "") || undefined;
+    try {
+      if (rawUrl.startsWith("/api/")) {
+        const params = new URL(`http://nova.local${rawUrl}`).searchParams;
+        manifestUrl = params.get("url") || rawUrl;
+        if (isEncrypted(manifestUrl)) manifestUrl = decryptParam(manifestUrl);
+        referer = params.get("ref") || referer;
+        if (isEncrypted(referer)) referer = decryptParam(referer);
+      }
+      return await Promise.race([
+        probeHlsManifest(manifestUrl, referer, manifestKey),
+        new Promise<boolean>(resolve => setTimeout(() => resolve(false), 3_800)),
+      ]);
+    } catch {
+      return false;
+    }
+  }
+
+  async function verifyProgressiveLink(source: UnifiedSource): Promise<boolean> {
+    if (source.isEmbed) return true;
+    const rawUrl = String(source.directUrl || source.url || "");
+    if (!rawUrl) return false;
+    if (source.directType === "hls" || /(?:\.m3u8(?:[?#]|$)|\/hls-proxy\?)/i.test(rawUrl)) {
+      return verifyProgressiveCandidate(source);
+    }
+    return probeDirectUrl(rawUrl, source.url);
+  }
 
   function collectSrc(s: UnifiedSource) {
     if (!s.directUrl && !s.isEmbed) return;
@@ -14986,11 +15253,37 @@ router.get("/anime/fetch-source", scraperQueueMiddleware, async (req, res) => {
       : checkUrl;
     if (seen.has(key)) return;
     seen.add(key);
+    if (progressive && !s.candidateKey) {
+      s = { ...s, candidateKey: progressiveCandidateKey(s) };
+    }
     sources.push(s);
   }
 
   async function runExtract(rawSrcs: UnifiedSource[]) {
     if (!rawSrcs.length) return;
+    if (progressive) {
+      const extractionStartedAt = Date.now();
+      const candidates = rawSrcs
+        .filter(matchesRequestedQuality)
+        .filter(source => !excludedCandidateKeys.has(progressiveCandidateKey(source)))
+        .sort((a, b) => (b.qualityRank || sourceCheckQuality(b).qualityRank) - (a.qualityRank || sourceCheckQuality(a).qualityRank))
+        .slice(0, 2)
+        .map(source => ({ ...source, candidateKey: progressiveCandidateKey(source) }));
+      await extractAndCollect(candidates, sources, seen, EXTRACT_MS, {
+        concurrency: 2,
+        maxResults: 2,
+        onSource: source => publishProgressSource?.(source),
+        validate: verifyProgressiveCandidate,
+      });
+      const accepted = new Set(sources.map(progressiveCandidateKey));
+      candidates.forEach(source => {
+        if (!accepted.has(progressiveCandidateKey(source))) sendProgressiveRejected(source);
+      });
+      console.info(
+        `[playback-trace] id=${sourceTrace || "none"} route=fetch-source stage=progressive_extract site=${sourceTraceSite} elapsed_ms=${Date.now() - extractionStartedAt} raw_servers=${rawSrcs.length} accepted=${sources.length}`,
+      );
+      return;
+    }
     const buf: UnifiedSource[] = [];
     await extractAndCollect(rawSrcs, buf, new Set<string>(), EXTRACT_MS);
     buf.forEach(collectSrc);
@@ -15002,7 +15295,11 @@ router.get("/anime/fetch-source", scraperQueueMiddleware, async (req, res) => {
   // One flight per provider + anime + episode. Different episodes and different
   // providers remain independent; only identical concurrent requests coalesce.
   try {
-  const sharedSources = await getOrCreateSourceFlight(`${cKey}:fetch`, async () => {
+  const pipelineStartedAt = Date.now();
+  const progressiveFlightKey = `${cKey}:fetch-progressive:${requestedQuality || "any"}:${[...excludedCandidateKeys].sort().join(",")}`;
+  const flightKey = progressive ? progressiveFlightKey : `${cKey}:fetch`;
+  const sharedSources = await getOrCreateSourceFlight(flightKey, async (publish) => {
+    publishProgressSource = publish || null;
     try {
     switch (site) {
       // shahiid/animelek: معطّلة بطلب المستخدم 2026-07-14 (قسم الأنمي فقط)
@@ -15075,8 +15372,20 @@ router.get("/anime/fetch-source", scraperQueueMiddleware, async (req, res) => {
     }
 
     
-// ── حفظ في الكاش بعد الكشط ──────────────────────────────────
-    if (sources.length) {
+    if (progressive) {
+      const directCandidates = [...sources]
+        .filter(matchesRequestedQuality)
+        .filter(source => !excludedCandidateKeys.has(progressiveCandidateKey(source)))
+        .sort((a, b) => (b.qualityRank || sourceCheckQuality(b).qualityRank) - (a.qualityRank || sourceCheckQuality(a).qualityRank))
+        .slice(0, 2);
+      await Promise.all(directCandidates.map(async source => {
+        if (await verifyProgressiveLink(source)) publishProgressSource?.(source);
+        else sendProgressiveRejected(source);
+      }));
+    }
+
+    // ── حفظ في الكاش بعد الكشط ──────────────────────────────────
+    if (sources.length && !progressive) {
       setSourceCache(cKey, site, sources).catch(() => {});
     }
 
@@ -15085,7 +15394,10 @@ router.get("/anime/fetch-source", scraperQueueMiddleware, async (req, res) => {
       console.warn(`[fetch-source] shared extraction failed for ${site}:`, e?.message ?? e);
       return [];
     }
-  });
+  }, progressive ? sendProgressiveCandidate : undefined);
+    console.info(
+      `[playback-trace] id=${sourceTrace || "none"} route=fetch-source stage=provider_extraction_complete site=${sourceTraceSite} elapsed_ms=${Date.now() - pipelineStartedAt} accepted=${sharedSources.length} progressive=${progressive}`,
+    );
 
     const fallbackKawaiiCache = site === "kawaii" && !sharedSources.length && isUsableKawaiiCache(cached)
       ? rebuildKawaiiCachedSources(cached.sources)
@@ -15094,7 +15406,10 @@ router.get("/anime/fetch-source", scraperQueueMiddleware, async (req, res) => {
       console.warn("[fetch-source] Kawaii live lookup failed; using its unexpired source cache");
     }
     const responseSources = fallbackKawaiiCache.length ? fallbackKawaiiCache : sharedSources;
-    const isMobileClient = (req.headers["x-nova-client"] || "").toString().includes("mobile");
+    if (progressive) {
+      await sendProgressiveBatch(stripAnimeSlayerSubtitles(filterRequestedQuality(responseSources, true)));
+      return;
+    }
     const encSources = stripAnimeSlayerSubtitles(filterRequestedQuality(responseSources)).map(s => {
       /* استخراج headers (Referer/Origin) قبل تشفير directUrl —
          يحتاجها ExoPlayer/AVPlayer للـ CDN segments مباشرةً.
@@ -15125,7 +15440,12 @@ router.get("/anime/fetch-source", scraperQueueMiddleware, async (req, res) => {
     });
     res.json({ sources: encSources });
   } catch (e: any) {
-    res.status(500).json({ error: e?.message ?? String(e), sources: [] });
+    if (progressive && res.headersSent) {
+      console.warn(`[fetch-source] progressive stream failed for ${site}:`, e?.message ?? e);
+      finishProgressiveResponse("fetch_failed");
+    } else {
+      res.status(500).json({ error: e?.message ?? String(e), sources: [] });
+    }
   }
 });
 

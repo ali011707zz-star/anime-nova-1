@@ -123,19 +123,40 @@ const l1 = new Map<string, { sources: any[]; expiresAt: number }>();
 // Single-flight deduplication: concurrent viewers of the same episode/provider
 // share one live extraction instead of opening one upstream request per viewer.
 // The promise is process-local; Supabase L2 remains the shared result across restarts.
-const sourceFlights = new Map<string, Promise<any[]>>();
+type SourceFlight = {
+  promise: Promise<any[]>;
+  listeners: Set<(source: any) => void>;
+};
+const sourceFlights = new Map<string, SourceFlight>();
 
 export function getOrCreateSourceFlight(
   key: string,
-  loader: () => Promise<any[]>,
+  loader: (publish?: (source: any) => void) => Promise<any[]>,
+  onProgress?: (source: any) => void,
 ): Promise<any[]> {
   const existing = sourceFlights.get(key);
-  if (existing) return existing;
-  const flight = loader().finally(() => {
-    if (sourceFlights.get(key) === flight) sourceFlights.delete(key);
-  });
-  sourceFlights.set(key, flight);
-  return flight;
+  if (existing) {
+    if (onProgress) existing.listeners.add(onProgress);
+    return existing.promise.finally(() => {
+      if (onProgress) existing.listeners.delete(onProgress);
+    });
+  }
+
+  const listeners = new Set<(source: any) => void>();
+  if (onProgress) listeners.add(onProgress);
+  const publish = (source: any) => {
+    for (const listener of listeners) {
+      try { listener(source); } catch { /* progress listeners must not fail the shared extraction */ }
+    }
+  };
+  const promise = Promise.resolve()
+    .then(() => loader(publish))
+    .finally(() => {
+      if (sourceFlights.get(key)?.promise === promise) sourceFlights.delete(key);
+      listeners.clear();
+    });
+  sourceFlights.set(key, { promise, listeners });
+  return promise;
 }
 
 setInterval(() => {

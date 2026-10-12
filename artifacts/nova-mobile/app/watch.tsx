@@ -74,6 +74,7 @@ interface Src {
   corsOk?: boolean;
   name?: string;
   directType?: string;
+  candidateKey?: string;
   skipIntro?: { start: number; end: number };
   skipOutro?: { start: number; end: number };
   /** Referer/Origin headers مطلوبة للـ CDN — مُعادة من الخادم لتجنب الاعتماد على تحليل رابط الـ proxy */
@@ -648,13 +649,6 @@ const SITE_TIMEOUT_MAP: Record<string, number> = {
   anivexa_anidbapp: 32_000, anivexa_2dhive: 32_000,
   anivexa_anibd: 32_000, anivexa_senshi: 32_000, anivexa_kaa: 32_000,
 };
-/* أحدث الحلقات قد تُعلن جودة من الكاش قبل أن يحدّثها المزود فعلياً.
-   إذا أعاد الطلب بلا فلتر جودة رابطاً حياً، شغّله بدلاً من إسقاط المصدر. */
-const QUALITY_FALLBACK_SITES = new Set([
-  "kawaii", "anineko", "animekai", "animewitcher", "sanime",
-  "megaplay", "animeify", "anifox", "anslayer",
-]);
-
 /* ── Spinning loader ── */
 function SpinRing({ size = 36 }: { size?: number }) {
   const { colors } = useWatchStyles();
@@ -863,6 +857,17 @@ export default function WatchScreen() {
   const fetchEpochRef     = useRef(0);
   const inFlightSitesRef  = useRef<Set<string>>(new Set());
   const fetchedSitesRef   = useRef<Set<string>>(new Set());
+  type ProgressivePlayback = {
+    fetchKey: string;
+    site: string;
+    quality?: QualityKey;
+    fallbackSources: Src[];
+    attemptedKeys: string[];
+    retryPending: boolean;
+    streamOpen: boolean;
+  };
+  const progressivePlaybackRef = useRef<ProgressivePlayback | null>(null);
+  const handlePickSiteRef = useRef<(site: string, quality?: QualityKey, excludeKeys?: string[]) => Promise<void>>(async () => {});
 
   /* ── تعقّب الـ mount ── */
   useEffect(() => {
@@ -1147,6 +1152,7 @@ export default function WatchScreen() {
     seenKeys.current.clear();
     inFlightSitesRef.current.clear();
     fetchedSitesRef.current.clear();
+    progressivePlaybackRef.current = null;
     setSlotStatus({});
     setScreen("picker");
     const coverParam = coverUrl ? `&cover=${encodeURIComponent(coverUrl)}` : "";
@@ -1178,6 +1184,7 @@ export default function WatchScreen() {
     seenKeys.current.clear();
     inFlightSitesRef.current.clear();
     fetchedSitesRef.current.clear();
+    progressivePlaybackRef.current = null;
     setSlotStatus({});
     setAvailableSlots({});
     setAvailabilityDone(false);
@@ -1225,7 +1232,7 @@ export default function WatchScreen() {
   }, []);
 
   /* ── جلب مصدر واحد عند ضغط المستخدم على زر المصدر ── */
-  const handlePickSite = useCallback(async (site: string, preferredQuality?: QualityKey) => {
+  const handlePickSite = useCallback(async (site: string, preferredQuality?: QualityKey, excludeKeys: string[] = []) => {
     if (BLOCKED_SOURCE_SITES.has(site.toLowerCase())) return;
     /* أظهر استجابة اللمس فوراً. فحص صلاحية المشاهدة/الإعلان قد يستغرق
        ثواني، ولا ينبغي أن يبدو الزر ميتاً أثناء انتظاره. */
@@ -1250,16 +1257,41 @@ export default function WatchScreen() {
         if (isMountedRef.current) setWatchAdSite(null);
       }
     }
+    const priorPlayback = progressivePlaybackRef.current;
+    if (priorPlayback && priorPlayback.fetchKey !== fetchKey) {
+      priorPlayback.retryPending = false;
+      priorPlayback.fallbackSources.length = 0;
+      siteCtrls.current.get(priorPlayback.fetchKey)?.abort();
+      progressivePlaybackRef.current = null;
+    }
     /* منع الضغط المزدوج أثناء الجلب — يسمح بإعادة المحاولة بعد الفشل */
     if (inFlightSitesRef.current.has(fetchKey)) return;
     /* إذا نجح سابقاً → شغّل أفضل مصدر من نفس الجودة فقط */
-    if (fetchedSitesRef.current.has(fetchKey)) {
+    if (fetchedSitesRef.current.has(fetchKey) && excludeKeys.length === 0) {
       const cached = sources.filter(s => s.site === site);
       const preferred = preferredQuality
         ? cached.find(s => getSrcQuality(s) === PICKER_QUALITY[preferredQuality] && isMobilePlayable(s))
         : undefined;
       const best = preferredQuality ? preferred : (cached.find(isMobilePlayable) ?? cached[0]);
-      if (best) { playSrc(best); return; }
+      if (best) {
+        const matchingFallbacks = cached.filter(source =>
+          source !== best
+          && (!best.candidateKey || source.candidateKey !== best.candidateKey)
+          && isMobilePlayable(source)
+          && (!preferredQuality || getSrcQuality(source) === PICKER_QUALITY[preferredQuality]),
+        );
+        progressivePlaybackRef.current = {
+          fetchKey,
+          site,
+          quality: preferredQuality,
+          fallbackSources: matchingFallbacks,
+          attemptedKeys: best.candidateKey ? [best.candidateKey] : [],
+          retryPending: false,
+          streamOpen: false,
+        };
+        playSrc(best);
+        return;
+      }
       if (preferredQuality) {
         setSlotStatus(prev => ({ ...prev, [pickerSlotKey(site, preferredQuality)]: "failed" }));
         setAvailableSlots(prev => {
@@ -1275,6 +1307,30 @@ export default function WatchScreen() {
     }
 
     inFlightSitesRef.current.add(fetchKey);
+    const previousPlayback = progressivePlaybackRef.current;
+    const requestExcludeKeys = [...new Set([
+      ...excludeKeys,
+      ...(previousPlayback?.fetchKey === fetchKey ? previousPlayback.attemptedKeys : []),
+    ])].slice(0, 12);
+    const playback: ProgressivePlayback = previousPlayback?.fetchKey === fetchKey
+      ? previousPlayback
+      : {
+          fetchKey,
+          site,
+          quality: preferredQuality,
+          fallbackSources: [],
+          attemptedKeys: [],
+          retryPending: false,
+          streamOpen: false,
+        };
+    playback.site = site;
+    playback.quality = preferredQuality;
+    requestExcludeKeys.forEach(key => {
+      if (!playback.attemptedKeys.includes(key)) playback.attemptedKeys.push(key);
+    });
+    playback.streamOpen = true;
+    progressivePlaybackRef.current = playback;
+    const attemptedBeforeRequest = playback.attemptedKeys.length;
 
     const base = getBaseUrl();
     const qs = new URLSearchParams({
@@ -1285,145 +1341,179 @@ export default function WatchScreen() {
     const lookupSiteTag = site.replace(/[^a-z0-9_-]/gi, "").slice(0, 12) || "source";
     const lookupTraceId = `${playbackTraceId}-s-${lookupSiteTag}`;
     qs.set("trace", lookupTraceId);
+    qs.set("site", site);
     qs.set("anilistId", sourceAnimeId || "0");
     qs.set("titles", JSON.stringify(titleVariants));
     if (preferredQuality) qs.set("quality", preferredQuality);
+    qs.set("progressive", "1");
+    if (requestExcludeKeys.length) qs.set("exclude", JSON.stringify(requestExcludeKeys));
     if (titleArStr) qs.set("titleAr", titleArStr);
     if (site === "anslayer" && anslayerId) qs.set("anslayerId", anslayerId);
 
     let tid: ReturnType<typeof setTimeout> | null = null;
+    let siteCtrl: AbortController | null = null;
+    let receivedCandidate = false;
+    const markQualityFailed = () => {
+      if (!preferredQuality) return;
+      setSlotStatus(prev => ({ ...prev, [pickerSlotKey(site, preferredQuality)]: "failed" }));
+      setAvailableSlots(prev => {
+        const next = { ...prev };
+        const siteSlots = { ...(next[site] || {}) };
+        delete siteSlots[preferredQuality];
+        if (Object.keys(siteSlots).length) next[site] = siteSlots;
+        else delete next[site];
+        return next;
+      });
+    };
     try {
       await warmAuthToken();
-      const siteCtrl = new AbortController();
+      if (!isMountedRef.current || progressivePlaybackRef.current !== playback) return;
+      const currentSiteCtrl = new AbortController();
+      siteCtrl = currentSiteCtrl;
       /* تسجيل الـ controller لضمان إلغائه عند الخروج من الشاشة */
-       siteCtrls.current.set(fetchKey, siteCtrl);
+      siteCtrls.current.set(fetchKey, currentSiteCtrl);
       const timeout = SITE_TIMEOUT_MAP[site] ?? SITE_TIMEOUT_MS;
-      tid = setTimeout(() => siteCtrl.abort(), timeout);
+      tid = setTimeout(() => currentSiteCtrl.abort(), timeout);
       const lookupStartedAt = Date.now();
       console.info(`[playback-trace] id=${lookupTraceId} component=source stage=request site=${lookupSiteTag}`);
-      const res = await secureFetch(`${base}/api/anime/fetch-source?site=${site}&${qs}`, { signal: siteCtrl.signal });
+      const res = await secureStreamFetch(`${base}/api/anime/fetch-source?${qs.toString()}`, { signal: currentSiteCtrl.signal });
       console.info(
         `[playback-trace] id=${lookupTraceId} component=source stage=response site=${lookupSiteTag} status=${res.status} elapsed_ms=${Date.now() - lookupStartedAt}`,
       );
 
-      if (!res.ok || !isMountedRef.current) throw new Error("fetch failed");
-      const data = await res.json();
-      /* تحقق مجدداً بعد await — الـ component قد يكون unmounted أثناء parse الـ JSON */
-      if (!isMountedRef.current) return;
-      const rawSrcs: Src[] = data.sources || [];
+      if (!res.ok || !isMountedRef.current || !res.body) throw new Error("progressive fetch failed");
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let eventBuffer = "";
+      const requestedTier = preferredQuality ? PICKER_QUALITY[preferredQuality] : undefined;
 
-      if (!rawSrcs.length) {
-        if (preferredQuality) {
-          setSlotStatus(prev => ({ ...prev, [pickerSlotKey(site, preferredQuality)]: "failed" }));
+      const handleSseBlock = (block: string) => {
+        let eventName = "message";
+        const dataLines: string[] = [];
+        for (const line of block.split(/\r?\n/)) {
+          if (line.startsWith("event:")) eventName = line.slice(6).trim();
+          else if (line.startsWith("data:")) dataLines.push(line.slice(5).trim());
         }
-        return;
+        if (!dataLines.length) return;
+        let payload: any;
+        try { payload = JSON.parse(dataLines.join("\n")); } catch { return; }
+        if (eventName === "done") {
+          playback.streamOpen = false;
+          return;
+        }
+        if (progressivePlaybackRef.current !== playback) return;
+        if (eventName === "rejected") {
+          const rejectedKey = String(payload?.candidateKey || "");
+          if (
+            /^[a-f0-9]{20}$/i.test(rejectedKey)
+            && !playback.attemptedKeys.includes(rejectedKey)
+          ) playback.attemptedKeys.push(rejectedKey);
+          return;
+        }
+        if (eventName !== "source" || !payload?.source) return;
+        const raw = payload.source as Src;
+        const sourceSite = raw.site || site;
+        const candidateKey = String(payload.candidateKey || raw.candidateKey || "");
+        const mapped = normalizeKawaiiMobileSource({
+          ...raw,
+          candidateKey,
+          site: sourceSite,
+          directUrl: resolveUrl(raw.directUrl, base),
+          url: resolveUrl(raw.url, base),
+          subtitleUrl: normalizeProviderSubtitleUrl(sourceSite, raw.subtitleUrl, base),
+        }, base);
+        if (
+          isBlockedSource(mapped)
+          || (mapped.isEmbed && mapped.url && (mapped.url.includes("mega.nz") || mapped.url.includes("mega.co.nz")))
+          || !isValidSourceUrl(getPlayUrl(mapped))
+          || !isMobilePlayable(mapped)
+          || (requestedTier && getSrcQuality(mapped) !== requestedTier)
+        ) {
+          if (candidateKey && !playback.attemptedKeys.includes(candidateKey)) playback.attemptedKeys.push(candidateKey);
+          return;
+        }
+        receivedCandidate = true;
+        if (payload.kind === "primary") {
+          console.info(
+            `[playback-trace] id=${lookupTraceId} component=source stage=first_candidate site=${lookupSiteTag} elapsed_ms=${Date.now() - lookupStartedAt} quality=${getSrcQuality(mapped)}`,
+          );
+        }
+        fetchedSitesRef.current.add(fetchKey);
+        if (preferredQuality) {
+          setSlotStatus(prev => ({ ...prev, [pickerSlotKey(site, preferredQuality)]: "ready" }));
+        }
+        setSources(prev => prev.some(item => item.candidateKey === candidateKey)
+          ? prev
+          : [...prev, mapped]);
+
+        if (payload.kind === "primary" || playback.retryPending) {
+          playback.retryPending = false;
+          if (candidateKey && !playback.attemptedKeys.includes(candidateKey)) playback.attemptedKeys.push(candidateKey);
+          playSrc(mapped);
+        } else if (!playback.fallbackSources.some(item => item.candidateKey === candidateKey)) {
+          playback.fallbackSources.push(mapped);
+        }
+      };
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        eventBuffer += decoder.decode(value, { stream: true });
+        const blocks = eventBuffer.split(/\r?\n\r?\n/);
+        eventBuffer = blocks.pop() || "";
+        blocks.forEach(handleSseBlock);
       }
-
-        const mappedSrcs = rawSrcs
-        .map((s): Src => {
-          const sourceSite = s.site || site;
-           const mapped: Src = {
-            ...s,
-            site: sourceSite,
-            directUrl: resolveUrl(s.directUrl, base),
-            url: resolveUrl(s.url, base),
-            subtitleUrl: normalizeProviderSubtitleUrl(sourceSite, s.subtitleUrl, base),
-          };
-           return normalizeKawaiiMobileSource(mapped, base);
-        })
-        .filter(s => !isBlockedSource(s))
-        .filter(s => !(s.isEmbed && s.url && (s.url.includes("mega.nz") || s.url.includes("mega.co.nz"))))
-         .filter(s => isValidSourceUrl(getPlayUrl(s)));
-
-       /* لا تخلط 1080p و720p إذا أعاد الكاش رابطَي AnimeSlayer معاً.
-          الويب يثبت رابطاً واحداً للصف الذي ضغطه المستخدم؛ الموبايل يجب أن
-          يفعل الشيء نفسه حتى لا يشغل أول رابط عشوائياً. */
-       const requestedTier = preferredQuality ? PICKER_QUALITY[preferredQuality] : undefined;
-        const sameTier = requestedTier
-         ? mappedSrcs.filter(s => getSrcQuality(s) === requestedTier)
-         : mappedSrcs;
-        const candidates = requestedTier
-          ? (sameTier.length || !QUALITY_FALLBACK_SITES.has(site) ? sameTier : mappedSrcs)
-          : mappedSrcs;
-       const selected = [...candidates].sort(
-         (a, b) => (b.qualityRank ?? 0) - (a.qualityRank ?? 0),
-       )[0];
-       /* The same adaptive URL can legitimately be advertised for more than
-          one picker tier. Deduplicating it globally here made a later, exact
-          quality click look like a missing source. */
-       const newSrcs = selected ? [selected] : [];
-
-       if (!newSrcs.length) {
-          if (preferredQuality) {
-            setSlotStatus(prev => ({ ...prev, [pickerSlotKey(site, preferredQuality)]: "failed" }));
-          }
-         if (preferredQuality) {
-           setAvailableSlots(prev => {
-             const next = { ...prev };
-             const siteSlots = { ...(next[site] || {}) };
-             delete siteSlots[preferredQuality];
-             if (Object.keys(siteSlots).length) next[site] = siteSlots;
-             else delete next[site];
-             return next;
-           });
-         }
-         return;
-       }
-
-      fetchedSitesRef.current.add(fetchKey);
-       if (preferredQuality) {
-         setSlotStatus(prev => ({ ...prev, [pickerSlotKey(site, preferredQuality)]: "ready" }));
-       }
-      const selectedTier = preferredQuality ? PICKER_QUALITY[preferredQuality] : undefined;
-      setSources(prev => [...prev.filter(s => !(s.site === site && (!selectedTier || getSrcQuality(s) === selectedTier))), ...newSrcs]);
-
-      /* شغّل فوراً عند النجاح */
-      const preferred = preferredQuality
-         ? newSrcs.find(s => getSrcQuality(s) === PICKER_QUALITY[preferredQuality] && isMobilePlayable(s))
-        : undefined;
-       const best = preferredQuality ? preferred : (newSrcs.find(isMobilePlayable) ?? newSrcs[0]);
-       /* A successful response is not enough: the selected tier itself must
-          be playable. Never silently fall through to another tier. */
-        if (preferredQuality && !preferred && !QUALITY_FALLBACK_SITES.has(site)) {
-         fetchedSitesRef.current.delete(fetchKey);
-         setSlotStatus(prev => ({ ...prev, [pickerSlotKey(site, preferredQuality)]: "failed" }));
-         setAvailableSlots(prev => {
-           const next = { ...prev };
-           const siteSlots = { ...(next[site] || {}) };
-           delete siteSlots[preferredQuality];
-           if (Object.keys(siteSlots).length) next[site] = siteSlots;
-           else delete next[site];
-           return next;
-         });
-         return;
-       }
-       if (best && (!preferredQuality || isMobilePlayable(best))) playSrc(best);
-
+      eventBuffer += decoder.decode();
+      if (eventBuffer.trim()) handleSseBlock(eventBuffer);
+      playback.streamOpen = false;
+      if (!isMountedRef.current) return;
+      if (!receivedCandidate && !playback.retryPending) {
+        if (
+          playback.attemptedKeys.length > attemptedBeforeRequest
+          && playback.attemptedKeys.length < 12
+        ) {
+          playback.retryPending = true;
+        } else {
+          throw new Error("no playable candidate in requested quality");
+        }
+      }
+      if (receivedCandidate) fetchedSitesRef.current.add(fetchKey);
     } catch {
-       if (isMountedRef.current) {
-          if (preferredQuality) {
-            setSlotStatus(prev => ({ ...prev, [pickerSlotKey(site, preferredQuality)]: "failed" }));
-          }
-         if (preferredQuality) {
-           setAvailableSlots(prev => {
-             const next = { ...prev };
-             const siteSlots = { ...(next[site] || {}) };
-             delete siteSlots[preferredQuality];
-             if (Object.keys(siteSlots).length) next[site] = siteSlots;
-             else delete next[site];
-             return next;
-           });
-         }
-       }
-      fetchedSitesRef.current.delete(fetchKey); // يسمح بإعادة المحاولة
+      playback.streamOpen = false;
+      if (siteCtrl?.signal.aborted) return;
+      if (!receivedCandidate && !playback.retryPending && isMountedRef.current) {
+        if (progressivePlaybackRef.current === playback) {
+          markQualityFailed();
+          fetchedSitesRef.current.delete(fetchKey);
+        }
+      }
     } finally {
       /* نضمن مسح الـ timeout دائماً — حتى عند abort أو خطأ */
       if (tid !== null) clearTimeout(tid);
       inFlightSitesRef.current.delete(fetchKey);
-       siteCtrls.current.delete(fetchKey); // تنظيف الـ controller بعد انتهاء الطلب
+      siteCtrls.current.delete(fetchKey); // تنظيف الـ controller بعد انتهاء الطلب
+      playback.streamOpen = false;
+      if (playback.retryPending && progressivePlaybackRef.current === playback && isMountedRef.current) {
+        playback.retryPending = false;
+        const fallback = playback.fallbackSources.shift();
+        if (fallback) {
+          if (fallback.candidateKey && !playback.attemptedKeys.includes(fallback.candidateKey)) {
+            playback.attemptedKeys.push(fallback.candidateKey);
+          }
+          playSrc(fallback);
+        } else if (playback.attemptedKeys.length < 12) {
+          const excluded = [...playback.attemptedKeys];
+          setTimeout(() => {
+            void handlePickSiteRef.current(site, preferredQuality, excluded);
+          }, 0);
+        } else {
+          markQualityFailed();
+        }
+      }
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [anime, sourceAnimeId, epNum, titleStr, englishStr, titleArStr, format, year, episodes, native, playSrc, anslayerId, sources, playbackTraceId]);
+  handlePickSiteRef.current = handlePickSite;
 
   /* ── مزامنة حالة التنزيل من Global Singleton ── */
   useEffect(() => {
@@ -1642,6 +1732,7 @@ export default function WatchScreen() {
     siteCtrls.current.clear();
     inFlightSitesRef.current.clear();
     fetchedSitesRef.current.clear();
+    progressivePlaybackRef.current = null;
     if (router.canGoBack()) router.back();
     else router.replace(`/episodes/${anime}` as any);
   }, [saveProgress, router, anime]);
@@ -1667,6 +1758,7 @@ export default function WatchScreen() {
   const onRiftError = useCallback(() => {
     const failedSite = playingSrc?.site || "";
     const failedUrl = playingSrc?.rawUrl || (playingSrc ? getPlayUrl(playingSrc) : "");
+    const progressive = progressivePlaybackRef.current;
     console.warn(
       `[Anime Watch] فشل المصدر المحدد site=${failedSite || "unknown"} — العودة للـ picker`,
     );
@@ -1674,9 +1766,6 @@ export default function WatchScreen() {
     if (srcCacheKey) AsyncStorage.removeItem(srcCacheKey).catch(() => {});
     if (failedSite) {
       const fetchKeyPrefix = `${failedSite}::`;
-      for (const key of [...inFlightSitesRef.current]) {
-        if (key === failedSite || key.startsWith(fetchKeyPrefix)) inFlightSitesRef.current.delete(key);
-      }
       for (const key of [...fetchedSitesRef.current]) {
         if (key === failedSite || key.startsWith(fetchKeyPrefix)) fetchedSitesRef.current.delete(key);
       }
@@ -1689,7 +1778,35 @@ export default function WatchScreen() {
       }
     }
     setScreen("picker");
-  }, [playingSrc, saveProgress, srcCacheKey]);
+
+    if (progressive && progressive.site === failedSite) {
+      const failedKey = playingSrc?.candidateKey;
+      if (failedKey && !progressive.attemptedKeys.includes(failedKey)) {
+        progressive.attemptedKeys.push(failedKey);
+      }
+      const fallback = progressive.fallbackSources.shift();
+      if (fallback) {
+        if (fallback.candidateKey && !progressive.attemptedKeys.includes(fallback.candidateKey)) {
+          progressive.attemptedKeys.push(fallback.candidateKey);
+        }
+        playSrc(fallback);
+        return;
+      }
+      if (progressive.streamOpen) {
+        progressive.retryPending = true;
+        return;
+      }
+      if (progressive.attemptedKeys.length < 12) {
+        const quality = progressive.quality;
+        const excluded = [...progressive.attemptedKeys];
+        setTimeout(() => {
+          if (progressivePlaybackRef.current === progressive) {
+            void handlePickSiteRef.current(progressive.site, quality, excluded);
+          }
+        }, 0);
+      }
+    }
+  }, [playingSrc, saveProgress, srcCacheKey, playSrc]);
 
   const onRiftProgress = useCallback((pos: number, dur: number) => {
     lastTimeRef.current = pos;
