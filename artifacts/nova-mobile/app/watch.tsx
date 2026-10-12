@@ -87,6 +87,11 @@ const SUBTITLE_DISABLED_SITES = new Set([
   "anifox", "fx",
   "anslayer", "as",
 ]);
+const ARABIC_PLAYBACK_SITES = new Set([
+  "shahiid", "animelek", "animedar", "okanime", "arabseed", "animeify",
+  "animeday", "mycima", "topcinemaa", "anime4up2", "animewitcher",
+  "ristoanime", "faselhd_db", "animetime", "sanime",
+]);
 
 /* Playback and download providers are separate product surfaces. */
 const DOWNLOAD_SOURCE_SITES = new Set([
@@ -178,7 +183,6 @@ function isBlockedSource(src: Pick<Src, "site">): boolean {
 }
 
 /* ── Quality helpers ── */
-const TIER_RANK: Record<Quality, number> = { "1080p FHD": 3, "720p HD": 2, "360p SD": 1 };
 const QUALITY_STYLE: Record<Quality, { dot: string; badge: string; border: string; text: string }> = {
   "1080p FHD": { dot: "#fbbf24", badge: "rgba(251,191,36,0.10)", border: "rgba(251,191,36,0.26)", text: "rgba(253,224,71,0.95)" },
   "720p HD":   { dot: "#34d399", badge: "rgba(52,211,153,0.09)", border: "rgba(52,211,153,0.24)", text: "rgba(110,231,183,0.92)" },
@@ -472,17 +476,6 @@ async function fetchArabicSubtitleUrl(
 }
 
 /* ── مصادر تُشغَّل native مباشرةً عبر RiftPlayer (seg-proxy يُعيد روابط مطلقة الآن) ── */
-
-/* ── أولويات المصادر: KW → MP → AN → AK → AW → rest ── */
-const SITE_PRIORITY: Record<string, number> = {
-  kawaii: 100, megaplay: 98, anineko: 96, animekai: 94, animewitcher: 90,
-  anivexa_mkissa: 88, anivexa_re: 87, anivexa_anikoto: 86,
-  anivexa_animegg: 85, anivexa_anidbapp: 84, anivexa_2dhive: 83,
-  anivexa_anibd: 82, anivexa_senshi: 81, anivexa_kaa: 80,
-  animeify: 85, sanime: 80,
-  dulo_anim: 70, vidlink_anim: 55,
-  vidfast: 35,
-};
 
 /* ── قائمة المصادر المعتمدة — الصفوف لا تظهر إلا بعد نتيجة mode=check ── */
 type QualityKey = "1080p" | "720p" | "360p";
@@ -1672,16 +1665,31 @@ export default function WatchScreen() {
   }, [saveProgress]);
 
   const onRiftError = useCallback(() => {
-    console.warn("[Anime Watch] جميع المصادر فشلت — العودة للـ picker");
+    const failedSite = playingSrc?.site || "";
+    const failedUrl = playingSrc?.rawUrl || (playingSrc ? getPlayUrl(playingSrc) : "");
+    console.warn(
+      `[Anime Watch] فشل المصدر المحدد site=${failedSite || "unknown"} — العودة للـ picker`,
+    );
     saveProgress();
     if (srcCacheKey) AsyncStorage.removeItem(srcCacheKey).catch(() => {});
-    inFlightSitesRef.current.clear();
-    fetchedSitesRef.current.clear();
-    setSources([]);
-    seenKeys.current.clear();
-    setSlotStatus({});
+    if (failedSite) {
+      const fetchKeyPrefix = `${failedSite}::`;
+      for (const key of [...inFlightSitesRef.current]) {
+        if (key === failedSite || key.startsWith(fetchKeyPrefix)) inFlightSitesRef.current.delete(key);
+      }
+      for (const key of [...fetchedSitesRef.current]) {
+        if (key === failedSite || key.startsWith(fetchKeyPrefix)) fetchedSitesRef.current.delete(key);
+      }
+      if (failedUrl) {
+        setSources(prev => prev.filter(source => {
+          if (source.site !== failedSite) return true;
+          const sourceUrls = [source.rawUrl, getPlayUrl(source), source.url, source.directUrl];
+          return !sourceUrls.includes(failedUrl);
+        }));
+      }
+    }
     setScreen("picker");
-  }, [saveProgress, srcCacheKey]);
+  }, [playingSrc, saveProgress, srcCacheKey]);
 
   const onRiftProgress = useCallback((pos: number, dur: number) => {
     lastTimeRef.current = pos;
@@ -1693,27 +1701,6 @@ export default function WatchScreen() {
   }, [canGoNextEpisode, goEp, epNum]);
   const onRiftPrevEpisode = useCallback(() => goEp(epNum - 1), [goEp, epNum]);
   const onRiftEpisodeSelect = useCallback((n: number) => goEp(n), [goEp]);
-
-  /* ── Group sources ── */
-  const { directSrcs, embedSrcs } = useMemo(() => {
-    const seen = new Set<string>();
-    const direct: Src[] = [];
-    const embeds: Src[] = [];
-    for (const src of sources) {
-      const key = getPlayUrl(src);
-      if (seen.has(key)) continue;
-      seen.add(key);
-      if (isDirectPlayable(src)) direct.push(src);
-      else if (isEmbedSrc(src)) embeds.push(src);
-    }
-    /* ترتيب: جودة أعلى أولاً، ثم أولوية الموقع (KW → AW → HI → DU → rest) */
-    direct.sort((a, b) => {
-      const qDiff = TIER_RANK[getSrcQuality(b)] - TIER_RANK[getSrcQuality(a)];
-      if (qDiff !== 0) return qDiff;
-      return (SITE_PRIORITY[b.site || ""] ?? 0) - (SITE_PRIORITY[a.site || ""] ?? 0);
-    });
-    return { directSrcs: direct, embedSrcs: embeds }; // embedSrcs reserved for future WebView fallback
-  }, [sources]);
 
   const downloadSlots = useMemo(() => {
     return Q_KEYS.flatMap((quality) =>
@@ -1727,67 +1714,35 @@ export default function WatchScreen() {
     );
   }, [availableSlots]);
 
-  /* ── RiftPlayer sources (live, used for picker) ── */
-  const riftSources = useMemo((): PlayerSource[] => {
+  /* ── مرّر المصدر الذي اختاره المستخدم فقط إلى المشغّل.
+     لا نضمّ بقية المصادر هنا، حتى لا يحوّل auto-advance فشل المصدر إلى KW/MP. ── */
+  const playerSources = useMemo((): PlayerSource[] => {
+    if (screen !== "native" || !playingSrc) return [];
     const base = getBaseUrl();
-    const srcs = directSrcs;
-    /* مطابق لـ isArabic في web SCRAPER_DEFS — مصادر عربية لا تحتاج SmartSub */
-    const ARABIC_SITES = new Set(["shahiid","animelek","animedar","okanime","arabseed","animeify","animeday","mycima","topcinemaa","anime4up2","animewitcher","ristoanime","faselhd_db","animetime","sanime"]);
-    return srcs.map((s, index) => {
-      const rawUrl = getPlayUrl(s);
-      /* headers: استخدم الـ headers المُرسَلة من الخادم أولاً (Referer/Origin المباشرة)،
-         ثم احسبها من رابط الـ proxy كـ fallback للإصدارات القديمة من الكاش */
-      const headers = s.headers || extractProxyHeaders(rawUrl);
-      const proxyUrl = ensureVpsProxy(rawUrl, headers, base, s.directType === "hls");
-      const url = withPlaybackTrace(proxyUrl, `${playbackTraceId}-${index.toString(36)}`, base);
-      return {
-        url,
-        headers,
-        label: `سيرفر · ${getSiteTag(s.site || "")}`,
-        quality: getSrcQuality(s),
-        site: s.site,
-        /* Keep the source subtitle URL so KW's translated VTT is available
-           both during streaming and after it is saved with a download. */
-        subtitleUrl: subtitlesDisabledForSite(s.site)
-          ? undefined
-          : (s.subtitleUrl ? resolveUrl(s.subtitleUrl, base) : globalSubUrl),
-        isArabic: ARABIC_SITES.has(s.site || ""),
-        wantsSmartSub: !ARABIC_SITES.has(s.site || ""),
-        skipIntro: s.skipIntro,
-        skipOutro: s.skipOutro,
-      };
-    }).filter(s => s.url);
-  }, [directSrcs, globalSubUrl, playbackTraceId]);
-
-  /* ── Frozen sources: تُجمَّد لحظة اختيار المستخدم للمصدر ولا تتغير أثناء التشغيل.
-     هذا يمنع تغيير مصفوفة sources في RiftPlayer بسبب وصول مصادر SSE جديدة.
-     الإصلاح: نحفظ riftSources في ref حتى نقرأه داخل playSrc بدون إضافته للـ deps ── */
-  const [frozenSources, setFrozenSources] = useState<PlayerSource[]>([]);
-  const riftSourcesRef = useRef<PlayerSource[]>([]);
-  useEffect(() => { riftSourcesRef.current = riftSources; }, [riftSources]);
-
-  /* تجميد قائمة المصادر لحظة دخول المشغّل، ومسحها عند الخروج (picker/embed/loading).
-     — عند دخول native: إذا كانت فارغة نملأها بـ riftSources الحالية (التجميد الأول).
-       إذا وصلت مصادر جديدة أثناء التشغيل نُضيفها للنهاية فقط (append) بدون تغيير
-       المصادر الموجودة حتى لا يُعيد RiftPlayer ترتيبها ويُعطّل التشغيل.
-     — هذا يحل مشكلة auto-play الذي كان يُجمِّد مصدراً واحداً فقط فيُفشل كل المصادر. */
-  useEffect(() => {
-    if (screen === "native") {
-      setFrozenSources(prev => {
-        if (prev.length === 0) return riftSources.length > 0 ? riftSources : prev;
-        // أضف المصادر الجديدة فقط (بدون إزاحة الحالية)
-        const existingUrls = new Set(prev.map(s => s.url));
-        const newOnes = riftSources.filter(s => s.url && !existingUrls.has(s.url));
-        if (!newOnes.length) return prev;
-        /* حد أقصى 10 مصادر في frozenSources — بدون هذا الحد يواصل RiftPlayer
-           الدوران عبر كل المصادر الجديدة (كل منها 12s timeout) → OOM → كراش */
-        return [...prev, ...newOnes].slice(0, 10);
-      });
-    } else {
-      setFrozenSources([]);
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [screen, riftSources]);
+    const rawUrl = getPlayUrl(playingSrc);
+    if (!rawUrl) return [];
+    /* headers: استخدم ما أعاده الخادم أولاً، ثم استخرجها من رابط الـ proxy. */
+    const headers = playingSrc.headers || extractProxyHeaders(rawUrl);
+    const proxyUrl = ensureVpsProxy(rawUrl, headers, base, playingSrc.directType === "hls");
+    const url = withPlaybackTrace(proxyUrl, `${playbackTraceId}-0`, base);
+    if (!url) return [];
+    const site = playingSrc.site || "";
+    const isArabic = ARABIC_PLAYBACK_SITES.has(site);
+    return [{
+      url,
+      headers,
+      label: `سيرفر · ${getSiteTag(site)}`,
+      quality: getSrcQuality(playingSrc),
+      site,
+      subtitleUrl: subtitlesDisabledForSite(site)
+        ? undefined
+        : (playingSrc.subtitleUrl ? resolveUrl(playingSrc.subtitleUrl, base) : globalSubUrl),
+      isArabic,
+      wantsSmartSub: !isArabic,
+      skipIntro: playingSrc.skipIntro,
+      skipOutro: playingSrc.skipOutro,
+    }];
+  }, [screen, playingSrc, globalSubUrl, playbackTraceId]);
 
 
   /* ── loading: صحيح عندما يكون أي موقع قيد الجلب (مرجع للمستقبل) ── */
@@ -1827,19 +1782,7 @@ export default function WatchScreen() {
   }
 
   /* ══════════════ RIFT PLAYER ══════════════ */
-  const playerSources = frozenSources.length > 0 ? frozenSources : riftSources;
   if (screen === "native" && playerSources.length > 0 && playingSrc) {
-    /* نحسب الرابط النهائي لـ playingSrc (بعد ensureVpsProxy) لمطابقة صحيحة مع playerSources */
-    const _playRaw = getPlayUrl(playingSrc);
-    const _playHeaders = playingSrc?.headers || extractProxyHeaders(_playRaw);
-    const base = getBaseUrl();
-    const selectedSourceIndex = Math.max(0, directSrcs.indexOf(playingSrc));
-    const _playFinal = withPlaybackTrace(
-      ensureVpsProxy(_playRaw, _playHeaders, base, playingSrc?.directType === "hls"),
-      `${playbackTraceId}-${selectedSourceIndex.toString(36)}`,
-      base,
-    );
-    const startIdx = Math.max(0, playerSources.findIndex(s => playingSrc && s.url === _playFinal));
     return (
       <RiftPlayer
         /* ⚠️ key فريد لكل حلقة — يجبر React على تفكيك المشغّل بالكامل (unmount حقيقي)
@@ -1851,7 +1794,7 @@ export default function WatchScreen() {
            cleanup الحالي يعمل فعلياً بين كل حلقة وأخرى. */
         key={`${anime}-${epNum}`}
         sources={playerSources}
-        initialSourceIndex={startIdx}
+        initialSourceIndex={0}
         animePlayback
         title={displayTitle}
         episode={epNum}
