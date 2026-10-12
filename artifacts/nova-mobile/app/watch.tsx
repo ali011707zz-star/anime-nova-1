@@ -34,9 +34,9 @@ import type { ThemePalette } from "@/constants/colors";
 import { useWatchPlayerOrientation } from "@/utils/watchOrientation";
 
 /* ── Types ── */
-type Quality    = "1080p FHD" | "720p HD" | "360p SD";
+type Quality    = "1080p FHD" | "720p HD" | "480p SD" | "360p SD";
 type Screen     = "loading" | "picker" | "native" | "embed" | "resolving";
-type AvailabilityQuality = "1080p" | "720p" | "360p";
+type AvailabilityQuality = "1080p" | "720p" | "480p" | "360p";
 
 /**
  * Expo Router may already decode route params, while older links can still
@@ -187,13 +187,15 @@ function isBlockedSource(src: Pick<Src, "site">): boolean {
 const QUALITY_STYLE: Record<Quality, { dot: string; badge: string; border: string; text: string }> = {
   "1080p FHD": { dot: "#fbbf24", badge: "rgba(251,191,36,0.10)", border: "rgba(251,191,36,0.26)", text: "rgba(253,224,71,0.95)" },
   "720p HD":   { dot: "#34d399", badge: "rgba(52,211,153,0.09)", border: "rgba(52,211,153,0.24)", text: "rgba(110,231,183,0.92)" },
+  "480p SD":   { dot: "#60a5fa", badge: "rgba(96,165,250,0.09)", border: "rgba(96,165,250,0.22)", text: "rgba(147,197,253,0.92)" },
   "360p SD":   { dot: "#94a3b8", badge: "rgba(148,163,184,0.07)", border: "rgba(148,163,184,0.16)", text: "rgba(148,163,184,0.70)" },
 };
-const Q_SHORT: Record<Quality, string> = { "1080p FHD": "FHD", "720p HD": "HD", "360p SD": "SD" };
+const Q_SHORT: Record<Quality, string> = { "1080p FHD": "FHD", "720p HD": "HD", "480p SD": "480", "360p SD": "360" };
 const Q_LABEL: Record<Quality, string> = {
   "1080p FHD": "جودة عالية جداً · FHD 1080",
   "720p HD":   "جودة عالية · HD 720",
-  "360p SD":   "جودة متوسطة · SD 360",
+  "480p SD":   "جودة متوسطة · SD 480",
+  "360p SD":   "جودة منخفضة · SD 360",
 };
 
 function getSrcQuality(s: Src): Quality {
@@ -202,18 +204,25 @@ function getSrcQuality(s: Src): Quality {
      first can misread a quality token inside an encoded upstream URL and make
      the player run a different tier than the row the user selected. */
   const explicit = String(s.quality || "").toLowerCase();
-  if (/(?:2160|1440|1080)\s*p?|fhd|full[ ._-]*hd/.test(explicit)) return "1080p FHD";
-  if (/(?:720)\s*p?|(?<!f)\bhd\b/.test(explicit)) return "720p HD";
-  if (/(?:480|360)\s*p?|sd/.test(explicit)) return "360p SD";
+  if (/(?:2160|1440|1080)\s*p?/.test(explicit) || /\bfhd\b|full[ ._-]*hd/.test(explicit)) return "1080p FHD";
+  if (/(?:720)\s*p?/.test(explicit)) return "720p HD";
+  if (/(?:480)\s*p?/.test(explicit)) return "480p SD";
+  if (/(?:360)\s*p?/.test(explicit)) return "360p SD";
+  if (/(?<!f)\bhd\b/.test(explicit)) return "720p HD";
+  if (/\bsd\b/.test(explicit)) return "360p SD";
 
   const text = `${s.label || ""} ${s.name || ""} ${s.url || ""} ${s.directUrl || ""}`.toLowerCase();
   const pixels = text.match(/(?:^|[^0-9])(2160|1440|1080|720|480|360)(?:p)?(?:[^0-9]|$)/)?.[1];
   const height = pixels ? Number(pixels) : 0;
   if (height >= 1080 || /\bfhd\b|\bfull[ ._-]*hd\b/.test(text)) return "1080p FHD";
-  if (height >= 720 || /\bhd\b/.test(text)) return "720p HD";
-  if (height >= 360 || /\bsd\b/.test(text)) return "360p SD";
+  if (height >= 720) return "720p HD";
+  if (height >= 480) return "480p SD";
+  if (height >= 360) return "360p SD";
+  if (/\bhd\b/.test(text)) return "720p HD";
+  if (/\bsd\b/.test(text)) return "360p SD";
   if (rank >= 13) return "1080p FHD";
   if (rank >= 9)  return "720p HD";
+  if (rank >= 7)  return "480p SD";
   return "360p SD";
 }
 function isDirectPlayable(s: Src): boolean {
@@ -479,7 +488,7 @@ async function fetchArabicSubtitleUrl(
 /* ── مصادر تُشغَّل native مباشرةً عبر RiftPlayer (seg-proxy يُعيد روابط مطلقة الآن) ── */
 
 /* ── قائمة المصادر المعتمدة — الصفوف لا تظهر إلا بعد نتيجة mode=check ── */
-type QualityKey = "1080p" | "720p" | "360p";
+type QualityKey = "1080p" | "720p" | "480p" | "360p";
 
 const STATIC_PICKER: Record<QualityKey, { site: string; name: string; tag: string }[]> = {
   "1080p": [
@@ -514,12 +523,81 @@ const STATIC_PICKER: Record<QualityKey, { site: string; name: string; tag: strin
     { site: "animekai",      name: "AnimeKai",   tag: "AK" },
     { site: "consumet_gogo", name: "GogoAnime",  tag: "GO" },
   ],
+  "480p": [
+    { site: "megaplay",     name: "MegaPlay",    tag: "MP" },
+    { site: "anineko",      name: "AniNeko",      tag: "AN" },
+    { site: "animewitcher", name: "AnimeWitcher", tag: "AW" },
+    { site: "animeify",     name: "أنمي فاي",    tag: "AF" },
+    { site: "anifox",        name: "ANIFOX",      tag: "FX" },
+    { site: "animekai",      name: "AnimeKai",   tag: "AK" },
+    { site: "consumet_gogo", name: "GogoAnime",  tag: "GO" },
+  ],
 };
 
-const Q_KEYS: QualityKey[] = ["1080p", "720p", "360p"];
+const Q_KEYS: QualityKey[] = ["1080p", "720p", "480p", "360p"];
+
+type AvailabilityHintSlot = {
+  serverCount: number;
+  name?: string;
+  tag?: string;
+  qualityRank?: number;
+};
+type AvailabilityHintRows = Record<string, Partial<Record<QualityKey, AvailabilityHintSlot>>>;
+const availabilityHintCache = new Map<string, { expiresAt: number; rows: AvailabilityHintRows }>();
+const AVAILABILITY_HINT_TTL_MS = 2 * 60_000;
+const AVAILABILITY_HINT_MAX_ENTRIES = 80;
+
+function makeAvailabilityHintKey(
+  identity: string | number | undefined,
+  title: string,
+  english: string,
+  format: string,
+  year: string | number | undefined,
+): string {
+  const stableId = String(identity || "").trim();
+  const titleKey = `${title}|${english}`.toLowerCase().replace(/\s+/g, " ").trim();
+  return `${stableId ? `id:${stableId}` : `title:${titleKey}`}|${format.toUpperCase()}|${year || ""}`;
+}
+
+function cloneAvailabilityHintRows(rows: AvailabilityHintRows): AvailabilityHintRows {
+  return Object.fromEntries(
+    Object.entries(rows).map(([site, qualities]) => [site, { ...qualities }]),
+  ) as AvailabilityHintRows;
+}
+
+function readAvailabilityHintRows(key: string): AvailabilityHintRows | null {
+  const cached = availabilityHintCache.get(key);
+  if (!cached) return null;
+  if (Date.now() >= cached.expiresAt) {
+    availabilityHintCache.delete(key);
+    return null;
+  }
+  availabilityHintCache.delete(key);
+  availabilityHintCache.set(key, cached);
+  return cloneAvailabilityHintRows(cached.rows);
+}
+
+function storeAvailabilityHintRows(key: string, rows: AvailabilityHintRows): void {
+  if (!Object.keys(rows).length) return;
+  availabilityHintCache.delete(key);
+  availabilityHintCache.set(key, {
+    expiresAt: Date.now() + AVAILABILITY_HINT_TTL_MS,
+    rows: cloneAvailabilityHintRows(rows),
+  });
+  for (const [entryKey, entry] of availabilityHintCache) {
+    if (Date.now() >= entry.expiresAt) availabilityHintCache.delete(entryKey);
+  }
+  while (availabilityHintCache.size > AVAILABILITY_HINT_MAX_ENTRIES) {
+    const oldest = availabilityHintCache.keys().next().value;
+    if (!oldest) break;
+    availabilityHintCache.delete(oldest);
+  }
+}
+
 function downloadQualityKey(quality: string): QualityKey {
   if (quality.includes("1080")) return "1080p";
   if (quality.includes("720")) return "720p";
+  if (quality.includes("480")) return "480p";
   return "360p";
 }
 
@@ -528,22 +606,26 @@ function downloadQualityKey(quality: string): QualityKey {
 const ANSLAYER_PICKER: Record<QualityKey, { site: string; name: string; tag: string }[]> = {
   "1080p": [{ site: "anslayer", name: "AnimeSlayer", tag: "AS" }],
   "720p":  [{ site: "anslayer", name: "AnimeSlayer", tag: "AS" }],
+  "480p": [],
   "360p": [],
 };
 const PICKER_QUALITY: Record<QualityKey, Quality> = {
   "1080p": "1080p FHD",
   "720p": "720p HD",
+  "480p": "480p SD",
   "360p": "360p SD",
 };
 const Q_KEY_LABEL: Record<QualityKey, string> = {
   "1080p": "1080p",
   "720p":  "720p",
+  "480p":  "480p",
   "360p":  "360p",
 };
 const Q_KEY_SUB: Record<QualityKey, string> = {
   "1080p": "دقة كاملة",
   "720p":  "دقة عالية",
-  "360p":  "دقة متوسطة",
+  "480p":  "دقة متوسطة",
+  "360p":  "دقة منخفضة",
 };
 
 function pickerSlotKey(site: string, quality: QualityKey): string {
@@ -555,13 +637,17 @@ function getAvailabilityQualityKey(row: any): QualityKey | null {
      may send "1080p FHD", "FHD 1080", or a provider-specific label instead of
      the compact picker key. */
   const text = `${row?.quality || ""} ${row?.name || ""} ${row?.label || ""}`.toLowerCase();
-  if (/(?:2160|1440|1080)\s*p?|\bfhd\b|full[ ._-]*hd/.test(text)) return "1080p";
-  if (/(?:720)\s*p?|(?<!f)\bhd\b/.test(text)) return "720p";
-  if (/(?:480|360)\s*p?|\bsd\b/.test(text)) return "360p";
+  if (/(?:2160|1440|1080)\s*p?/.test(text) || /\bfhd\b|full[ ._-]*hd/.test(text)) return "1080p";
+  if (/(?:720)\s*p?/.test(text)) return "720p";
+  if (/(?:480)\s*p?/.test(text)) return "480p";
+  if (/(?:360)\s*p?/.test(text)) return "360p";
+  if (/(?<!f)\bhd\b/.test(text)) return "720p";
+  if (/\bsd\b/.test(text)) return "360p";
   const rank = Number(row?.qualityRank) || 0;
   if (rank >= 13) return "1080p";
   if (rank >= 8) return "720p";
-  return "360p";
+  if (rank >= 7) return "480p";
+  return rank > 0 ? "360p" : null;
 }
 
 function useWatchStyles() {
@@ -827,6 +913,14 @@ export default function WatchScreen() {
   const [availabilityDone, setAvailabilityDone] = useState(false);
   const [availabilityError, setAvailabilityError] = useState(false);
   const [availabilityAttempt, setAvailabilityAttempt] = useState(0);
+  const [showingAvailabilityHints, setShowingAvailabilityHints] = useState(false);
+  const availabilityHintKey = makeAvailabilityHintKey(
+    sourceAnimeId || anime,
+    titleStr,
+    englishStr,
+    format || "",
+    year,
+  );
   const [watchUnlocked, setWatchUnlocked] = useState(false);
   /* Only the pressed server row is waiting for the ad decision. A single
      boolean here made every server button show a spinner at once. */
@@ -848,6 +942,7 @@ export default function WatchScreen() {
 
   const abortRef          = useRef<AbortController | null>(null);
   const availabilityAbortRef = useRef<AbortController | null>(null);
+  const forceAvailabilityRefreshRef = useRef(false);
   /* siteCtrls: نتتبع AbortController لكل موقع جارٍ جلبه — لضمان إلغاء كل الطلبات عند الخروج */
   const siteCtrls         = useRef<Map<string, AbortController>>(new Map());
   const seenKeys          = useRef(new Set<string>());
@@ -928,8 +1023,7 @@ export default function WatchScreen() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [progressKey]);
 
-  /* المصادر تُعرض ثابتة؛ التحقق المسبق غير موثوق لبعض المواقع. */
-  /* ── Parallel per-source HTTP fetch (يحل محل SSE تماماً) ── */
+  /* ── Availability SSE: صفوفها تلميحات وليست إثباتاً لقابلية التشغيل ── */
   /* ── Cleanup: إلغاء كل طلبات الجلب الجارية عند تغيير الحلقة أو إلغاء mount ── */
   useEffect(() => {
     return () => {
@@ -942,15 +1036,33 @@ export default function WatchScreen() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [anime, epNum]);
 
-  /* ── Availability-only scan: مطابق للويب، بدون روابط تشغيل ──
-     لا نستخدم الكاش ولا نعرض STATIC_PICKER قبل وصول صف موثّق من الخادم. */
+  /* ── Availability-only scan: بلا روابط تشغيل؛ الجلب الفعلي يبقى عند الضغط ── */
   useEffect(() => {
     if (!titleStr) return;
     availabilityAbortRef.current?.abort();
+    availabilityAbortRef.current = null;
+    const forceFresh = forceAvailabilityRefreshRef.current;
+    forceAvailabilityRefreshRef.current = false;
+    const cachedHints = forceFresh ? null : readAvailabilityHintRows(availabilityHintKey);
+    if (cachedHints) {
+      const cachedStatus: Record<string, "ready"> = {};
+      for (const [site, tiers] of Object.entries(cachedHints)) {
+        for (const quality of Object.keys(tiers) as QualityKey[]) {
+          cachedStatus[pickerSlotKey(site, quality)] = "ready";
+        }
+      }
+      setAvailableSlots(cachedHints);
+      setSlotStatus(cachedStatus);
+      setAvailabilityDone(true);
+      setAvailabilityError(false);
+      setShowingAvailabilityHints(true);
+      return;
+    }
     const controller = new AbortController();
     availabilityAbortRef.current = controller;
     setAvailabilityDone(false);
     setAvailabilityError(false);
+    setShowingAvailabilityHints(false);
     setAvailableSlots({});
     setSlotStatus({});
 
@@ -969,10 +1081,13 @@ export default function WatchScreen() {
     if (titleArStr) params.set("titleAr", titleArStr);
     if (anslayerId) params.set("anslayerId", anslayerId);
     if (titleVariants.length) params.set("titles", JSON.stringify(titleVariants));
+    params.set("trace", playbackTraceId);
     params.set("mode", "check");
 
     let cancelled = false;
     let timedOut = false;
+    let firstAvailabilityRowLogged = false;
+    const availabilityRequestStartedAt = Date.now();
 
     /* Keep a local aggregate for the final commit, but publish every row
        immediately. Waiting for [DONE] makes a slow provider hold the picker
@@ -988,9 +1103,8 @@ export default function WatchScreen() {
         : rawSite === "sanime-v2" || rawSite === "sa" ? "sanime"
         : rawSite;
       const qk = getAvailabilityQualityKey(row);
-      /* The backend is the source of truth. Do not discard a verified
-         provider merely because its label is not in the legacy static
-         catalog; that was why valid sources disappeared from mobile. */
+      /* Availability identifies a provider/quality candidate only. The
+         click-time fetch-source request still resolves this episode's link. */
       if (!site || !qk) return;
       const previous = stagedSlots[site]?.[qk];
       stagedSlots[site] = {
@@ -1009,10 +1123,17 @@ export default function WatchScreen() {
         ...current,
         [site]: stagedSlots[site],
       }));
+      storeAvailabilityHintRows(availabilityHintKey, stagedSlots);
       setSlotStatus((current) => ({
         ...current,
         [pickerSlotKey(site, qk)]: "ready",
       }));
+      if (!firstAvailabilityRowLogged) {
+        firstAvailabilityRowLogged = true;
+        console.info(
+          `[playback-trace] id=${playbackTraceId} component=availability stage=first_row site=${site.replace(/[^a-z0-9_-]/gi, "").slice(0, 20)} quality=${qk} elapsed_ms=${Date.now() - availabilityRequestStartedAt}`,
+        );
+      }
     };
 
     const commitRows = () => {
@@ -1056,7 +1177,13 @@ export default function WatchScreen() {
               .filter(line => line.startsWith("data:"))
               .map(line => line.slice(5).trim())
               .join("\n");
-            if (!payload || payload === "[DONE]" || eventName === "done") continue;
+            if (!payload) continue;
+            if (payload === "[DONE]" || eventName === "done") {
+              console.info(
+                `[playback-trace] id=${playbackTraceId} component=availability stage=stream_done elapsed_ms=${Date.now() - availabilityRequestStartedAt}`,
+              );
+              continue;
+            }
             try {
               /* Match the web picker: a valid availability row is enough.
                  Some backend versions use a different SSE event name and
@@ -1087,7 +1214,11 @@ export default function WatchScreen() {
             .filter(line => line.startsWith("data:"))
             .map(line => line.slice(5).trim())
             .join("\n");
-          if (payload && payload !== "[DONE]" && eventName !== "done") {
+          if (payload === "[DONE]" || eventName === "done") {
+            console.info(
+              `[playback-trace] id=${playbackTraceId} component=availability stage=stream_done elapsed_ms=${Date.now() - availabilityRequestStartedAt}`,
+            );
+          } else if (payload) {
             try { applyRow(JSON.parse(payload)); } catch { /* ignore */ }
           }
           buffer = "";
@@ -1095,12 +1226,19 @@ export default function WatchScreen() {
       } catch {
         if ((timedOut || !controller.signal.aborted) && isMountedRef.current) {
           setAvailabilityError(true);
+          console.warn(
+            `[playback-trace] id=${playbackTraceId} component=availability stage=request_error elapsed_ms=${Date.now() - availabilityRequestStartedAt} reason=${timedOut ? "timeout" : "request"}`,
+          );
         }
       } finally {
         clearTimeout(timeoutId);
         if (!cancelled && isMountedRef.current) {
           commitRows();
           setAvailabilityDone(true);
+          setShowingAvailabilityHints(false);
+          console.info(
+            `[playback-trace] id=${playbackTraceId} component=availability stage=complete elapsed_ms=${Date.now() - availabilityRequestStartedAt} rows=${Object.values(stagedSlots).reduce((sum, tiers) => sum + Object.keys(tiers).length, 0)}`,
+          );
         }
       }
     };
@@ -1115,7 +1253,7 @@ export default function WatchScreen() {
       controller.abort();
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [anime, anilistId, sourceAnimeId, epNum, titleStr, englishStr, titleArStr, format, year, episodes, native, anslayerId, availabilityAttempt]);
+  }, [anime, anilistId, sourceAnimeId, epNum, titleStr, englishStr, titleArStr, format, year, episodes, native, anslayerId, availabilityAttempt, availabilityHintKey, playbackTraceId]);
 
   /* ── Progress save ── */
   const saveProgress = useCallback(async () => {
@@ -1176,6 +1314,7 @@ export default function WatchScreen() {
   function refreshAllSources() {
     abortRef.current?.abort();
     availabilityAbortRef.current?.abort();
+    forceAvailabilityRefreshRef.current = true;
     /* إلغاء كل طلبات المواقع الجارية — كانت تتراكم بدون إلغاء عند الضغط على تحديث */
     siteCtrls.current.forEach(c => c.abort());
     siteCtrls.current.clear();
@@ -1353,6 +1492,9 @@ export default function WatchScreen() {
     let tid: ReturnType<typeof setTimeout> | null = null;
     let siteCtrl: AbortController | null = null;
     let receivedCandidate = false;
+    let receivedCandidateCount = 0;
+    let rejectedCandidateCount = 0;
+    let streamDoneSeen = false;
     const markQualityFailed = () => {
       if (!preferredQuality) return;
       setSlotStatus(prev => ({ ...prev, [pickerSlotKey(site, preferredQuality)]: "failed" }));
@@ -1398,11 +1540,13 @@ export default function WatchScreen() {
         let payload: any;
         try { payload = JSON.parse(dataLines.join("\n")); } catch { return; }
         if (eventName === "done") {
+          streamDoneSeen = true;
           playback.streamOpen = false;
           return;
         }
         if (progressivePlaybackRef.current !== playback) return;
         if (eventName === "rejected") {
+          rejectedCandidateCount++;
           const rejectedKey = String(payload?.candidateKey || "");
           if (
             /^[a-f0-9]{20}$/i.test(rejectedKey)
@@ -1411,6 +1555,7 @@ export default function WatchScreen() {
           return;
         }
         if (eventName !== "source" || !payload?.source) return;
+        const sourceEventCount = receivedCandidateCount + rejectedCandidateCount + 1;
         const raw = payload.source as Src;
         const sourceSite = raw.site || site;
         const candidateKey = String(payload.candidateKey || raw.candidateKey || "");
@@ -1422,20 +1567,29 @@ export default function WatchScreen() {
           url: resolveUrl(raw.url, base),
           subtitleUrl: normalizeProviderSubtitleUrl(sourceSite, raw.subtitleUrl, base),
         }, base);
-        if (
-          isBlockedSource(mapped)
-          || (mapped.isEmbed && mapped.url && (mapped.url.includes("mega.nz") || mapped.url.includes("mega.co.nz")))
-          || !isValidSourceUrl(getPlayUrl(mapped))
-          || !isMobilePlayable(mapped)
-          || (requestedTier && getSrcQuality(mapped) !== requestedTier)
-        ) {
+        const rejectReason = isBlockedSource(mapped) ? "blocked"
+          : (mapped.isEmbed && mapped.url && (mapped.url.includes("mega.nz") || mapped.url.includes("mega.co.nz"))) ? "unsupported_embed"
+          : !isValidSourceUrl(getPlayUrl(mapped)) ? "invalid_url"
+          : !isMobilePlayable(mapped) ? "not_playable"
+          : (requestedTier && getSrcQuality(mapped) !== requestedTier) ? "quality_mismatch"
+          : "";
+        if (rejectReason) {
+          rejectedCandidateCount++;
           if (candidateKey && !playback.attemptedKeys.includes(candidateKey)) playback.attemptedKeys.push(candidateKey);
+          console.info(
+            `[playback-trace] id=${lookupTraceId} component=source stage=candidate_rejected site=${lookupSiteTag} reason=${rejectReason} quality=${getSrcQuality(mapped)} event=${sourceEventCount} elapsed_ms=${Date.now() - lookupStartedAt}`,
+          );
           return;
         }
         receivedCandidate = true;
+        receivedCandidateCount++;
         if (payload.kind === "primary") {
           console.info(
             `[playback-trace] id=${lookupTraceId} component=source stage=first_candidate site=${lookupSiteTag} elapsed_ms=${Date.now() - lookupStartedAt} quality=${getSrcQuality(mapped)}`,
+          );
+        } else {
+          console.info(
+            `[playback-trace] id=${lookupTraceId} component=source stage=backup_candidate site=${lookupSiteTag} elapsed_ms=${Date.now() - lookupStartedAt} quality=${getSrcQuality(mapped)}`,
           );
         }
         fetchedSitesRef.current.add(fetchKey);
@@ -1466,6 +1620,9 @@ export default function WatchScreen() {
       eventBuffer += decoder.decode();
       if (eventBuffer.trim()) handleSseBlock(eventBuffer);
       playback.streamOpen = false;
+      console.info(
+        `[playback-trace] id=${lookupTraceId} component=source stage=stream_end site=${lookupSiteTag} elapsed_ms=${Date.now() - lookupStartedAt} candidates=${receivedCandidateCount} rejected=${rejectedCandidateCount} done=${streamDoneSeen}`,
+      );
       if (!isMountedRef.current) return;
       if (!receivedCandidate && !playback.retryPending) {
         if (
@@ -2060,6 +2217,27 @@ export default function WatchScreen() {
             </View>
           </View>
         </View>
+
+          {showingAvailabilityHints && hasAvailableSlot && (
+            <View style={{ marginBottom: 10, paddingHorizontal: 4 }}>
+              <Text style={d.availabilityPartialText}>
+                قائمة مصادر محفوظة حديثاً لهذه السلسلة؛ لا تؤكد وجود رابط للحلقة الحالية. يجلب التطبيق الرابط ويفحص جودته عند الاختيار.
+              </Text>
+              <Pressable
+                onPress={refreshAllSources}
+                focusable={tvMode}
+                accessibilityRole="button"
+                accessibilityLabel="فحص مصادر الحلقة الحالية"
+                style={({ focused }) => [
+                  d.retryBigBtn,
+                  tvMode && tvFocusStyle(focused),
+                ]}
+              >
+                <Ionicons name="refresh" size={16} color={colors.accent} />
+                <Text style={d.retryBigText}>فحص مصادر هذه الحلقة</Text>
+              </Pressable>
+            </View>
+          )}
 
           {!availabilityDone && !hasAvailableSlot && (
             <View style={d.availabilityState}>

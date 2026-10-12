@@ -13937,16 +13937,21 @@ async function getAppsAnimeSources(
 // Never expose a playable URL during the picker availability pass.
 // Prefer explicit quality labels over provider-specific numeric ranks:
 // several providers use rank 11 for both FHD and HD.
-function sourceCheckQuality(s: any): { quality: "1080p" | "720p" | "480p" | "360p"; qualityRank: number } {
+function sourceCheckQuality(s: any): { quality: "1080p" | "720p" | "480p" | "360p" | "unknown"; qualityRank: number } {
   // Availability mode only classifies the source. It never probes playback.
   // Prefer explicit labels because provider numeric ranks are not universal.
   const explicit = String(s?.quality || "").toLowerCase();
   const rank = Number(s?.qualityRank) || 0;
   const classify = (value: string) => {
-    if (/(?:2160|1440|1080)\s*p?|\bfhd\b|full[ ._-]*hd/.test(value)) return { quality: "1080p" as const, qualityRank: rank || 13 };
-    if (/(?:720)\s*p?|(?<!f)\bhd\b/.test(value)) return { quality: "720p" as const, qualityRank: rank || 9 };
+    // Numeric resolution wins over generic labels such as "HD"; a provider
+    // may describe a 480p stream as "480p HD".
+    if (/(?:2160|1440|1080)\s*p?/.test(value)) return { quality: "1080p" as const, qualityRank: rank || 13 };
+    if (/(?:720)\s*p?/.test(value)) return { quality: "720p" as const, qualityRank: rank || 9 };
     if (/(?:480)\s*p?/.test(value)) return { quality: "480p" as const, qualityRank: rank || 7 };
-    if (/(?:360)\s*p?|\bsd\b/.test(value)) return { quality: "360p" as const, qualityRank: rank || 5 };
+    if (/(?:360)\s*p?/.test(value)) return { quality: "360p" as const, qualityRank: rank || 5 };
+    if (/\bfhd\b|full[ ._-]*hd/.test(value)) return { quality: "1080p" as const, qualityRank: rank || 13 };
+    if (/(?<!f)\bhd\b/.test(value)) return { quality: "720p" as const, qualityRank: rank || 9 };
+    if (/\bsd\b/.test(value)) return { quality: "360p" as const, qualityRank: rank || 5 };
     return null;
   };
   return classify(explicit)
@@ -13957,13 +13962,16 @@ function sourceCheckQuality(s: any): { quality: "1080p" | "720p" | "480p" | "360
         ? { quality: "720p", qualityRank: rank }
         : rank >= 7
           ? { quality: "480p", qualityRank: rank }
-          : { quality: "360p", qualityRank: rank || 5 });
+          : rank > 0
+            ? { quality: "360p", qualityRank: rank }
+            : { quality: "unknown", qualityRank: 0 });
 }
 
 // ════════════════════════════════════════════════════════════════════
 //  sources-stream  SSE endpoint — runs all scrapers in parallel
 //  Streams sources as found (keeps proxy alive), sends [DONE] at end
-//  Frontend waits for [DONE] before rendering all sources at once
+//  Clients can render availability rows as they arrive; check rows contain no
+//  playable URL and fetch-source remains the click-time playback authority.
 // ════════════════════════════════════════════════════════════════════
 router.get("/anime/sources-stream", scraperQueueMiddleware, async (req, res) => {
   const title     = ((req.query.title   as string) || "").trim();
@@ -13982,6 +13990,14 @@ router.get("/anime/sources-stream", scraperQueueMiddleware, async (req, res) => 
   const format    = ((req.query.format  as string) || "").trim().toUpperCase();
   const isMovie   = format === "MOVIE" || format === "MOVIE_SHORT";
   const checkOnly = String(req.query.mode || "").toLowerCase() === "check";
+  const sourceCheckTrace = readPlaybackTrace(req.query.trace);
+  const sourceCheckStartedAt = Date.now();
+  tracePlayback(
+    sourceCheckTrace,
+    "sources-stream",
+    checkOnly ? "check_request" : "request",
+    "availability",
+  );
 
   // Multi-criteria matching context (enriched from client)
   const reqYear     = parseInt((req.query.year     as string) || "0") || null;
@@ -14020,6 +14036,8 @@ router.get("/anime/sources-stream", scraperQueueMiddleware, async (req, res) => 
   const checkRows = new Map<string, { count: number; site: string; quality: string; qualityRank: number; name: string; label?: string }>();
   // Avoid inflating serverCount when a provider repeats the same mirror URL.
   const checkSeen = new Set<string>();
+  const checkTracedSites = new Set<string>();
+  let checkFirstRowLogged = false;
   let closed = false;
   req.on("close", () => { closed = true; });
 
@@ -14065,21 +14083,31 @@ router.get("/anime/sources-stream", scraperQueueMiddleware, async (req, res) => 
     await fallback();
   }
 
-  // The availability pass does not need AniList resolution. Skipping it here
-  // removes an unrelated network dependency from the first source results.
-  // The full playback path keeps the existing resolution behavior.
-  // Kawaii and MegaPlay are AniList-ID based. Resolve the ID for the
-  // availability pass too; skipping it made KW/MP disappear until a later
-  // refresh happened to reuse a warmed cache.
-  if (!closed && title) {
+  // Resolve AniList in parallel with provider checks. Only ID-dependent
+  // providers await this bounded lookup; title/catalog providers can emit
+  // availability rows immediately instead of holding the whole picker.
+  const aniListIdResolution = (!closed && title)
+    ? Promise.race([
+        resolveAniListIdForSource(title, english, titleVariants, titleAr),
+        new Promise<number | undefined>(resolve => setTimeout(() => resolve(undefined), 3500)),
+      ]).then(resolvedByTitle => {
+        if (resolvedByTitle) anilistId = resolvedByTitle;
+        tracePlayback(
+          sourceCheckTrace,
+          "sources-stream",
+          "anilist_resolution",
+          "anilist",
+          Date.now() - sourceCheckStartedAt,
+          `found=${Boolean(resolvedByTitle)}`,
+        );
+        return anilistId;
+      }).catch(() => anilistId)
+    : Promise.resolve(anilistId);
+  if (!checkOnly) {
     // Some home/latest links carry a catalog id rather than an AniList id.
     // Resolve by title even when a numeric id was supplied so MP/KW do not
     // silently disappear because they received the wrong catalog namespace.
-    const resolvedByTitle = await Promise.race([
-      resolveAniListIdForSource(title, english, titleVariants, titleAr),
-      new Promise<number | undefined>(resolve => setTimeout(() => resolve(undefined), 3500)),
-    ]);
-    if (resolvedByTitle) anilistId = resolvedByTitle;
+    anilistId = await aniListIdResolution;
   }
 
   // Keepalive: send SSE comment every 5 s to prevent proxy timeout
@@ -14092,10 +14120,12 @@ router.get("/anime/sources-stream", scraperQueueMiddleware, async (req, res) => 
     const site = String((s as any).site || "").trim();
     if (!site) return;
     const q = sourceCheckQuality(s);
+    if (q.quality === "unknown") return;
     const mirrorKey = `${site}|${s.directUrl || s.url || s.name || s.label || ""}|${q.quality}`;
     if (checkSeen.has(mirrorKey)) return;
     checkSeen.add(mirrorKey);
-    // One row per provider/quality, updated as every verified mirror arrives.
+    // One metadata-only row per provider/quality. `available` means the
+    // provider reports an episode/page candidate, not that playback was tested.
     // The playable URL remains server-side in check mode.
     const key = `${site}|${q.quality}`;
     const previous = checkRows.get(key);
@@ -14106,12 +14136,36 @@ router.get("/anime/sources-stream", scraperQueueMiddleware, async (req, res) => 
       quality: q.quality,
       qualityRank: Math.max(q.qualityRank, previous?.qualityRank || 0),
       available: true,
-      verified: true,
+      verified: false,
+      availabilityOnly: true,
+      playable: false,
       serverCount: (previous?.count || 0) + 1,
       checkOnly: true,
     };
     checkRows.set(key, { ...row, count: row.serverCount });
     res.write(`data: ${JSON.stringify(row)}\n\n`);
+    if (!checkFirstRowLogged) {
+      checkFirstRowLogged = true;
+      tracePlayback(
+        sourceCheckTrace,
+        "sources-stream",
+        "first_row",
+        site,
+        Date.now() - sourceCheckStartedAt,
+        `quality=${q.quality}`,
+      );
+    }
+    if (!checkTracedSites.has(site)) {
+      checkTracedSites.add(site);
+      tracePlayback(
+        sourceCheckTrace,
+        "sources-stream",
+        "provider_first_row",
+        site,
+        Date.now() - sourceCheckStartedAt,
+        `quality=${q.quality}`,
+      );
+    }
   }
 
   // Availability mode may inspect an HLS master manifest only. It never
@@ -14412,7 +14466,18 @@ router.get("/anime/sources-stream", scraperQueueMiddleware, async (req, res) => 
         ep,
         anilistId || anslayerId || `${reqYear || ""}:${reqTotalEps || ""}`,
       );
+      const providerCheckStartedAt = Date.now();
       const hit  = await getFromSourceCache(cKey);
+      if (checkOnly) {
+        tracePlayback(
+          sourceCheckTrace,
+          "sources-stream",
+          hit && !hit.stale ? "cache_hit" : "cache_miss",
+          site,
+          Date.now() - providerCheckStartedAt,
+          `stale=${Boolean(hit?.stale)}`,
+        );
+      }
       // Keep the picker populated from an unexpired Kawaii row during a
       // provider outage; playback still refreshes the signed URL on click.
       if (site === "kawaii" && checkOnly && isUsableKawaiiCache(hit)) {
@@ -14490,6 +14555,16 @@ router.get("/anime/sources-stream", scraperQueueMiddleware, async (req, res) => 
         `${cKey}:live`,
         () => race(scrape(), effectiveTimeoutMs, []),
       );
+      if (checkOnly) {
+        tracePlayback(
+          sourceCheckTrace,
+          "sources-stream",
+          "provider_complete",
+          site,
+          Date.now() - providerCheckStartedAt,
+          `candidates=${srcs.length}`,
+        );
+      }
       if (!srcs.length) {
         if (site === "kawaii" && isUsableKawaiiCache(hit)) {
           const fallbackSources = rebuildKawaiiCachedSources(hit.sources);
@@ -14552,13 +14627,8 @@ router.get("/anime/sources-stream", scraperQueueMiddleware, async (req, res) => 
     // reflect real tiers rather than the page's generic "HD" label.
     if (checkOnly) {
       await Promise.race([runSourceQueue([
-        // Kawaii's API can take several seconds for newly published episodes.
-        // Keep this provider inside the availability pass without letting a slow
-        // response hold the whole picker open.
-        () => scrapeCached("kawaii",        () => getKawaiiAnimeSources(title, english, ep, anilistId, true), false, 10000),
-        () => scrapeCached("megaplay",      () => getMegaPlayAnimeSources(title, english, ep, anilistId, true), false, 5000),
-        () => scrapeCached("animekai",      () => getAnimeKaiSources(title, english, ep, anilistId, true), false, 5000),
-        () => scrapeCached("anineko",       () => getAninekoSources(title, english, ep, titleVariants, true), false, 25000),
+        // Run provider checks that do not need an AniList id first. This lets
+        // the first useful rows reach the picker while the title resolver runs.
         () => (async () => {
           const checked = await checkConsumetEpisode("consumet_gogo", title, english, ep, titleVariants, anilistId);
           if (checked.available) {
@@ -14573,17 +14643,16 @@ router.get("/anime/sources-stream", scraperQueueMiddleware, async (req, res) => 
             } as UnifiedSource);
           }
         })(),
-        () => scrapeCached("animewitcher",  () => getAnimeWitcherSources(title, english, ep, anilistId, titleVariants, true), false, 11000),
         () => useCatalogAvailability("anslayer", async () => scrapeCached("anslayer", async () => {
           const hint = await catalogHintFor("anslayer");
-           return getAnimeSlayerSources(
-             title,
-             english,
-             ep,
-             Number(hint?.providerTitleId || anslayerId || 0) || undefined,
-             titleAr,
-             hint,
-           );
+          return getAnimeSlayerSources(
+            title,
+            english,
+            ep,
+            Number(hint?.providerTitleId || anslayerId || 0) || undefined,
+            titleAr,
+            hint,
+          );
         }, false, 3200)),
         () => useCatalogAvailability("animeify", async () => scrapeCached("animeify", async () => getAnimeifySources(
           title, english, ep, titleVariants, true, await catalogHintFor("animeify"),
@@ -14594,8 +14663,28 @@ router.get("/anime/sources-stream", scraperQueueMiddleware, async (req, res) => 
         () => useCatalogAvailability("anifox", async () => scrapeCached("anifox", async () => getAnifoxSources(
           title, english, ep, titleVariants, anilistId, true, await catalogHintFor("anifox"),
         ), false, 4000)),
+        () => scrapeCached("animewitcher",  () => getAnimeWitcherSources(title, english, ep, anilistId, titleVariants, true), false, 11000),
+        () => scrapeCached("anineko",       () => getAninekoSources(title, english, ep, titleVariants, true), false, 25000),
+        // Kawaii's API can take several seconds for newly published episodes.
+        // Keep this provider inside the availability pass without letting a slow
+        // response hold the whole picker open. Only these providers await the
+        // separately running, 3.5-second-bounded AniList title lookup.
+        () => scrapeCached("kawaii", async () =>
+          getKawaiiAnimeSources(title, english, ep, await aniListIdResolution, true), false, 10000),
+        () => scrapeCached("megaplay", async () =>
+          getMegaPlayAnimeSources(title, english, ep, await aniListIdResolution, true), false, 5000),
+        () => scrapeCached("animekai", async () =>
+          getAnimeKaiSources(title, english, ep, await aniListIdResolution, true), false, 5000),
       ], 4), new Promise<void>(resolve => setTimeout(resolve, 32_000))]);
       if (availabilityJobs.size) await Promise.allSettled([...availabilityJobs]);
+      tracePlayback(
+        sourceCheckTrace,
+        "sources-stream",
+        "check_done",
+        "sources",
+        Date.now() - sourceCheckStartedAt,
+        `providers=${checkTracedSites.size}`,
+      );
       clearInterval(keepalive);
       clearTimeout(forceClose);
       if (!closed) { closed = true; res.write("data: [DONE]\n\n"); res.end(); }
@@ -14787,29 +14876,16 @@ router.get("/anime/fetch-source", scraperQueueMiddleware, async (req, res) => {
       );
     } catch { return new Set<string>(); }
   })();
-  const QUALITY_FALLBACK_FETCH_SITES = new Set([
-    "megaplay", "kawaii", "anineko", "animekai", "animewitcher", "sanime",
-    "animeify", "anifox", "anslayer",
-  ]);
   const matchesRequestedQuality = (source: UnifiedSource): boolean => {
     if (!requestedQuality) return true;
     const detected = sourceCheckQuality(source).quality;
-    return detected === requestedQuality || (requestedQuality === "360p" && detected === "480p");
+    return detected === requestedQuality;
   };
-  const filterRequestedQuality = <T extends { quality?: string; qualityRank?: number; name?: string; label?: string; url?: string; directUrl?: string }>(rows: T[], strict = false): T[] => {
+  const filterRequestedQuality = <T extends { quality?: string; qualityRank?: number; name?: string; label?: string; url?: string; directUrl?: string }>(rows: T[]): T[] => {
     if (!requestedQuality) return rows;
-    const sameTier = rows.filter((s) => {
-      const detected = sourceCheckQuality(s).quality;
-      // The picker has no separate 480p row; 480p is the SD/360p tier in
-      // both clients. Keep it available when the user selects that tier.
-      return detected === requestedQuality
-        || (requestedQuality === "360p" && detected === "480p");
-    });
-    // Provider quality labels can differ from the availability tier. If no
-    // exact tier exists, preserve real rows instead of returning no source.
-    return strict || sameTier.length || !QUALITY_FALLBACK_FETCH_SITES.has(site)
-      ? sameTier
-      : rows;
+    // Never silently return another tier. 480p is represented as its own
+    // picker choice on mobile; an unavailable exact tier stays unavailable.
+    return rows.filter((s) => sourceCheckQuality(s).quality === requestedQuality);
   };
   const stripAnimeSlayerSubtitles = <T extends { subtitleUrl?: string }>(rows: T[]): T[] =>
     site === "anslayer" ? rows.map(({ subtitleUrl: _subtitleUrl, ...source }) => source as T) : rows;
@@ -14893,6 +14969,10 @@ router.get("/anime/fetch-source", scraperQueueMiddleware, async (req, res) => {
       console.info(
         `[playback-trace] id=${sourceTrace || "none"} route=fetch-source stage=first_candidate site=${sourceTraceSite} elapsed_ms=${Date.now() - progressiveStartedAt} quality=${sourceCheckQuality(source).quality}`,
       );
+    } else {
+      console.info(
+        `[playback-trace] id=${sourceTrace || "none"} route=fetch-source stage=backup_candidate site=${sourceTraceSite} elapsed_ms=${Date.now() - progressiveStartedAt} quality=${sourceCheckQuality(source).quality}`,
+      );
     }
     res.write(`event: source\ndata: ${JSON.stringify({
       kind,
@@ -14922,7 +15002,7 @@ router.get("/anime/fetch-source", scraperQueueMiddleware, async (req, res) => {
   };
   const sendProgressiveBatch = async (rows: UnifiedSource[]) => {
     if (!progressive) return;
-    const ordered = filterRequestedQuality(rows, true)
+    const ordered = filterRequestedQuality(rows)
       .filter(matchesRequestedQuality)
       .filter(source => !excludedCandidateKeys.has(progressiveCandidateKey(source)))
       .sort((a, b) => (b.qualityRank || sourceCheckQuality(b).qualityRank) - (a.qualityRank || sourceCheckQuality(a).qualityRank))
@@ -14931,7 +15011,7 @@ router.get("/anime/fetch-source", scraperQueueMiddleware, async (req, res) => {
       const candidate = source.candidateKey
         ? source
         : { ...source, candidateKey: progressiveCandidateKey(source) };
-      if (await verifyProgressiveLink(candidate)) sendProgressiveCandidate(candidate);
+      if (await verifyProgressiveLinkTraced(candidate)) sendProgressiveCandidate(candidate);
       else sendProgressiveRejected(candidate);
     }));
     finishProgressiveResponse(progressiveSent ? undefined : "no_valid_source");
@@ -15111,7 +15191,7 @@ router.get("/anime/fetch-source", scraperQueueMiddleware, async (req, res) => {
   if (cached && !FORCE_LIVE_FETCH_SITES.has(site) &&
       !shouldRefreshCache(cached.expiresAt) && !skipCacheForShortTtl) {
     if (progressive) {
-      const untriedCacheRows = stripAnimeSlayerSubtitles(filterRequestedQuality(cached.sources, true))
+      const untriedCacheRows = stripAnimeSlayerSubtitles(filterRequestedQuality(cached.sources))
         .filter(source => !excludedCandidateKeys.has(progressiveCandidateKey(source)));
       if (untriedCacheRows.length) {
         console.info(
@@ -15239,6 +15319,20 @@ router.get("/anime/fetch-source", scraperQueueMiddleware, async (req, res) => {
     return probeDirectUrl(rawUrl, source.url);
   }
 
+  async function verifyProgressiveLinkTraced(source: UnifiedSource, stage = "candidate_verify"): Promise<boolean> {
+    const startedAt = Date.now();
+    const valid = await verifyProgressiveLink(source);
+    tracePlayback(
+      sourceTrace,
+      "fetch-source",
+      stage,
+      sourceTraceSite,
+      Date.now() - startedAt,
+      `valid=${valid} quality=${sourceCheckQuality(source).quality}`,
+    );
+    return valid;
+  }
+
   function collectSrc(s: UnifiedSource) {
     if (!s.directUrl && !s.isEmbed) return;
     if (s.isEmbed) {
@@ -15273,7 +15367,19 @@ router.get("/anime/fetch-source", scraperQueueMiddleware, async (req, res) => {
         concurrency: 2,
         maxResults: 2,
         onSource: source => publishProgressSource?.(source),
-        validate: verifyProgressiveCandidate,
+        validate: async source => {
+          const startedAt = Date.now();
+          const valid = await verifyProgressiveCandidate(source);
+          tracePlayback(
+            sourceTrace,
+            "fetch-source",
+            "extract_validate",
+            sourceTraceSite,
+            Date.now() - startedAt,
+            `valid=${valid} quality=${sourceCheckQuality(source).quality}`,
+          );
+          return valid;
+        },
       });
       const accepted = new Set(sources.map(progressiveCandidateKey));
       candidates.forEach(source => {
@@ -15407,7 +15513,7 @@ router.get("/anime/fetch-source", scraperQueueMiddleware, async (req, res) => {
     }
     const responseSources = fallbackKawaiiCache.length ? fallbackKawaiiCache : sharedSources;
     if (progressive) {
-      await sendProgressiveBatch(stripAnimeSlayerSubtitles(filterRequestedQuality(responseSources, true)));
+      await sendProgressiveBatch(stripAnimeSlayerSubtitles(filterRequestedQuality(responseSources)));
       return;
     }
     const encSources = stripAnimeSlayerSubtitles(filterRequestedQuality(responseSources)).map(s => {
