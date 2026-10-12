@@ -657,7 +657,10 @@ const SITE_TIMEOUT_MAP: Record<string, number> = {
 };
 /* أحدث الحلقات قد تُعلن جودة من الكاش قبل أن يحدّثها المزود فعلياً.
    إذا أعاد الطلب بلا فلتر جودة رابطاً حياً، شغّله بدلاً من إسقاط المصدر. */
-const QUALITY_FALLBACK_SITES = new Set(["kawaii", "anineko", "animekai", "animewitcher", "sanime"]);
+const QUALITY_FALLBACK_SITES = new Set([
+  "kawaii", "anineko", "animekai", "animewitcher", "sanime",
+  "megaplay", "animeify", "anifox", "anslayer",
+]);
 
 /* ── Spinning loader ── */
 function SpinRing({ size = 36 }: { size?: number }) {

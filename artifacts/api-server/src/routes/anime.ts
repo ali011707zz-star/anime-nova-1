@@ -14730,15 +14730,24 @@ router.get("/anime/fetch-source", scraperQueueMiddleware, async (req, res) => {
     if (q === '360p' || q === 'sd' || q === '360') return '360p' as const;
     return null;
   })();
+  const QUALITY_FALLBACK_FETCH_SITES = new Set([
+    "megaplay", "kawaii", "anineko", "animekai", "animewitcher", "sanime",
+    "animeify", "anifox", "anslayer",
+  ]);
   const filterRequestedQuality = <T extends { quality?: string; qualityRank?: number; name?: string; label?: string; url?: string; directUrl?: string }>(rows: T[]): T[] => {
     if (!requestedQuality) return rows;
-    return rows.filter((s) => {
+    const sameTier = rows.filter((s) => {
       const detected = sourceCheckQuality(s).quality;
       // The picker has no separate 480p row; 480p is the SD/360p tier in
       // both clients. Keep it available when the user selects that tier.
       return detected === requestedQuality
         || (requestedQuality === "360p" && detected === "480p");
     });
+    // Provider quality labels can differ from the availability tier. If no
+    // exact tier exists, preserve real rows instead of returning no source.
+    return sameTier.length || !QUALITY_FALLBACK_FETCH_SITES.has(site)
+      ? sameTier
+      : rows;
   };
   const stripAnimeSlayerSubtitles = <T extends { subtitleUrl?: string }>(rows: T[]): T[] =>
     site === "anslayer" ? rows.map(({ subtitleUrl: _subtitleUrl, ...source }) => source as T) : rows;

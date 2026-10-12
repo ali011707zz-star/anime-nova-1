@@ -5234,11 +5234,17 @@ router.post("/animation/source-resolve", async (req: Request, res: Response) => 
   const timeout = setTimeout(() => controller.abort(), 26_000);
 
   try {
-    const mobile = String(req.headers["x-nova-client"] || "").includes("mobile");
-    const appToken = req.headers["x-app-token"];
     const upstreamHeaders: Record<string, string> = {};
-    if (typeof appToken === "string" && appToken) upstreamHeaders["x-app-token"] = appToken;
-    if (mobile) upstreamHeaders["x-nova-client"] = "mobile";
+    for (const header of [
+      "x-app-token",
+      "x-nova-client",
+      "x-nova-version",
+      "x-nova-package",
+      "user-agent",
+    ] as const) {
+      const value = req.headers[header];
+      if (typeof value === "string" && value) upstreamHeaders[header] = value;
+    }
     const upstream = await fetch(`http://127.0.0.1:${port}/api/animation/sources-stream?${params}`, {
       headers: upstreamHeaders,
       signal: controller.signal,

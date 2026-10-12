@@ -46,7 +46,8 @@ export default function DubbedWatch() {
     if (!epUrl) { setError("رابط الحلقة مفقود"); setLoading(false); return; }
     setLoading(true); setError(null); setSource(null);
 
-    const cacheKey = `dubbed-src-${epUrl}`;
+    // Invalidate cached raw URLs from before the VPS proxy became primary.
+    const cacheKey = `dubbed-src-v2-${epUrl}`;
     try {
       const cached = sessionStorage.getItem(cacheKey);
       if (cached) {
@@ -67,10 +68,9 @@ export default function DubbedWatch() {
       const rawUrl  = typeof d.rawUrl  === "string" ? d.rawUrl  : null;
       const hlsUrl  = typeof d.hlsUrl  === "string" ? d.hlsUrl  : null;
       if (!rawUrl && !hlsUrl) { setError("لم يُعثر على مصدر الفيديو"); setLoading(false); return; }
-      // foupix CDN يتحقق من UA-hash في الـ token ضد الـ User-Agent الذي أنتجه.
-      // rawUrl أولاً: المتصفح يتصل من IP سكني يتجاوز حجب VPS على datacenter IPs.
-      // hlsUrl (/api/dubbed/stream) كـ fallback للحالات التي يفشل فيها rawUrl.
-      const playUrl = rawUrl || hlsUrl!;
+      // Prefer the VPS proxy: it preserves the extraction User-Agent, TLS, and
+      // byte-range/seek support. Raw URLs are only used when no proxy is available.
+      const playUrl = new URL(hlsUrl || rawUrl!, window.location.origin).toString();
       try { sessionStorage.setItem(cacheKey, JSON.stringify({ url: playUrl, ts: Date.now() })); } catch {}
       setSource({ url: playUrl, proxyUrl: playUrl });
       setLoading(false);

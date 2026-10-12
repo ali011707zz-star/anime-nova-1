@@ -5460,11 +5460,11 @@ export default function WatchPage() {
         }
       }
       /* Availability rows may advertise a tier before the provider's live
-         response is updated. Retry without the tier filter for the providers
-         used by the latest-episodes flow, otherwise a healthy source is
-         deleted simply because its current label differs from the card. */
+         response is updated. Retry without the tier filter when a provider's
+         live quality differs from the card, rather than dropping a healthy source. */
       const QUALITY_FALLBACK_SITES = new Set([
         "kawaii", "anineko", "animekai", "animewitcher", "sanime", "megaplay",
+        "animeify", "anifox", "anslayer",
       ]);
       if (!data.sources?.length && QUALITY_FALLBACK_SITES.has(site) && !ctrl.signal.aborted) {
         const fallbackParams = new URLSearchParams(params);
