@@ -18,7 +18,7 @@ import { useRouter } from "expo-router";
 import { getBaseUrl } from "@/utils/api";
 import { isTvDevice, tvFocusStyle } from "@/utils/tv";
 import { useColors } from "@/hooks/useColors";
-import { StardimaCatalogTab } from "@/components/StardimaCatalogTab";
+import { catalogBadge, useDubbedCatalogFeed, type DubbedCatalogTitle } from "@/hooks/useDubbedCatalogFeed";
 
 // ─────────────────────────────────────────────────────────
 // Types
@@ -36,7 +36,7 @@ interface DubbedSeries  {
   seasons: DubbedSeason[]; tmdbId?: number; slug?: string;
 }
 
-type TabKey = "animation" | "cartoon" | "stardima";
+type TabKey = "animation" | "cartoon";
 const CARTOON_CATALOG_CACHE_KEY = "nova:cartoon-catalog:v1";
 const CARTOON_CATALOG_CACHE_LIMIT = 60;
 
@@ -70,9 +70,9 @@ function gridColumnsForWidth(width: number) {
 // Shared card helpers
 // ─────────────────────────────────────────────────────────
 
-function PosterCard({ uri, title, seasons, tint, onPress }: {
+function PosterCard({ uri, title, seasons, tint, badge, badgeTint, meta, onPress }: {
   uri: string | null; title: string; seasons: number;
-  tint: string; onPress: () => void;
+  tint: string; badge?: string; badgeTint?: string; meta?: string; onPress: () => void;
 }) {
   const colors = useColors();
   const [failedUri, setFailedUri] = useState<string | null>(null);
@@ -92,11 +92,18 @@ function PosterCard({ uri, title, seasons, tint, onPress }: {
         )}
         <LinearGradient colors={["transparent", "rgba(0,0,0,0.88)"]}
           style={StyleSheet.absoluteFill} pointerEvents="none" />
+        {badge ? (
+          <View style={[card.badge, { backgroundColor: badgeTint || "#35B955" }]}>
+            <Text style={card.badgeText} numberOfLines={1}>{badge}</Text>
+          </View>
+        ) : null}
         <View style={card.label}>
           <Text style={card.title} numberOfLines={2}>{title}</Text>
-          {seasons > 1 && (
+          {meta ? (
+            <Text style={card.seasons} numberOfLines={1}>{meta}</Text>
+          ) : seasons > 1 ? (
             <Text style={[card.seasons, { color: `${tint}99` }]}>{seasons} مواسم</Text>
-          )}
+          ) : null}
         </View>
       </View>
     </Pressable>
@@ -114,6 +121,7 @@ function AnimationList({ searchQ }: { searchQ: string }) {
   const columns = gridColumnsForWidth(width);
   const router = useRouter();
   const BASE = getBaseUrl();
+  const catalog = useDubbedCatalogFeed("animation", searchQ);
   const [series,      setSeries]      = useState<AwSeries[]>([]);
   const [page,        setPage]        = useState(1);
   const [totalPages,  setTotalPages]  = useState(1);
@@ -181,9 +189,20 @@ function AnimationList({ searchQ }: { searchQ: string }) {
     });
   };
 
-  const displayList = searchQ.trim().length >= 2 ? searchRes : series;
+  const openCatalogDetail = (item: DubbedCatalogTitle) => {
+    router.push({
+      pathname: "/stardima-title" as any,
+      params: { providerTitleId: item.provider_title_id },
+    });
+  };
 
-  if (loading) return (
+  const displayList = searchQ.trim().length >= 2 ? searchRes : series;
+  const rows = [
+    ...displayList.map((item) => ({ kind: "aw" as const, item })),
+    ...catalog.items.map((item) => ({ kind: "catalog" as const, item })),
+  ];
+
+  if (loading && series.length === 0 && catalog.items.length === 0) return (
     <View style={shared.center}>
       <ActivityIndicator color={colors.accent} size="large" />
     </View>
@@ -191,10 +210,10 @@ function AnimationList({ searchQ }: { searchQ: string }) {
 
   return (
     <FlatList
-      data={displayList}
+      data={rows}
       style={{ width: gridWidth, alignSelf: "center" }}
       key={`aw-animation-grid-${columns}`}
-      keyExtractor={item => item.key}
+      keyExtractor={row => row.kind === "aw" ? `aw:${row.item.key}` : `catalog:${row.item.provider_title_id}`}
       numColumns={columns}
       contentContainerStyle={shared.grid}
       columnWrapperStyle={{ gap: 10 }}
@@ -203,29 +222,51 @@ function AnimationList({ searchQ }: { searchQ: string }) {
       updateCellsBatchingPeriod={50}
       windowSize={5}
       removeClippedSubviews={Platform.OS !== "web"}
-      renderItem={({ item }) => (
+       renderItem={({ item: row }) => (
         <View style={{ flex: 1 / columns }}>
-          <PosterCard
-            uri={item.poster || null}
-            title={item.titleAr || item.title}
-            seasons={item.seasons.length}
-            tint="#10B981"
-            onPress={() => openDetail(item)}
-          />
+           {row.kind === "aw" ? (
+             <PosterCard
+               uri={row.item.poster || null}
+               title={row.item.titleAr || row.item.title}
+               seasons={row.item.seasons.length}
+               tint="#10B981"
+               onPress={() => openDetail(row.item)}
+             />
+           ) : (
+             <PosterCard
+               uri={row.item.poster_url || row.item.backdrop_url || null}
+               title={row.item.title_ar || row.item.title || row.item.title_en || "عنوان"}
+               seasons={0}
+               tint="#10B981"
+               badge={catalogBadge(row.item, "animation")}
+               badgeTint="#D94141"
+               meta={`${row.item.media_type === "movie" ? "فيلم" : "مسلسل"}${row.item.episode_count ? ` · ${row.item.episode_count} حلقة` : ""}${row.item.release_year ? ` · ${row.item.release_year}` : ""}`}
+               onPress={() => openCatalogDetail(row.item)}
+             />
+           )}
         </View>
       )}
       onEndReached={() => {
-        if (!searchQ && !loadingMore && page < totalPages) loadPage(page + 1);
+         if (searchQ.trim().length < 2 && !loadingMore && page < totalPages) loadPage(page + 1);
+         void catalog.loadMore();
       }}
       onEndReachedThreshold={0.3}
-      ListFooterComponent={loadingMore ? <ActivityIndicator color={colors.accent} style={{ marginVertical: 16 }} /> : null}
+       ListFooterComponent={loadingMore || catalog.loadingMore ? (
+         <ActivityIndicator color={colors.accent} style={{ marginVertical: 16 }} />
+       ) : catalog.error ? (
+         <Pressable onPress={catalog.retry} style={shared.retryBtn}>
+           <Ionicons name="refresh" size={15} color="#A78BFA" />
+           <Text style={[shared.retryText, { color: colors.buttonText }]}>إعادة تحميل القائمة</Text>
+         </Pressable>
+       ) : null}
       ListEmptyComponent={
         <View style={shared.center}>
-          <Text style={[shared.emptyText, { color: colors.textMuted }]}>
-            {searchQ.length >= 2
-              ? (searchLoad ? "جاري البحث..." : "لا توجد نتائج")
-              : "لا يوجد محتوى"}
-          </Text>
+           {catalog.loading ? <ActivityIndicator color={colors.accent} /> : null}
+           <Text style={[shared.emptyText, { color: colors.textMuted }]}>
+             {searchQ.length >= 2
+               ? (searchLoad || catalog.loading ? "جاري البحث..." : "لا توجد نتائج")
+               : catalog.loading ? "جارٍ تحميل القائمة..." : "لا يوجد محتوى"}
+           </Text>
         </View>
       }
     />
@@ -252,6 +293,7 @@ function CartoonList({ searchQ }: { searchQ: string }) {
   const columns = gridColumnsForWidth(width);
   const router = useRouter();
   const BASE = getBaseUrl();
+  const catalog = useDubbedCatalogFeed("cartoon", searchQ);
   const [series,      setSeries]      = useState<DubbedSeries[]>([]);
   const [page,        setPage]        = useState(1);
   const [totalPages,  setTotalPages]  = useState(1);
@@ -371,19 +413,33 @@ function CartoonList({ searchQ }: { searchQ: string }) {
     });
   };
 
-  const displayList = searchQ.trim().length >= 2 ? searchRes : series;
+  const openCatalogDetail = (item: DubbedCatalogTitle) => {
+    router.push({
+      pathname: "/stardima-title" as any,
+      params: { providerTitleId: item.provider_title_id },
+    });
+  };
 
-  if (loading) return (
+  const displayList = searchQ.trim().length >= 2 ? searchRes : series;
+  const rows = [
+    ...displayList.map((item) => ({ kind: "dubbed" as const, item })),
+    ...catalog.items.map((item) => ({ kind: "catalog" as const, item })),
+  ];
+
+  if (loading && series.length === 0 && catalog.items.length === 0) return (
     <View style={shared.center}>
       <ActivityIndicator color={colors.accent} size="large" />
     </View>
   );
 
-  if (loadError && series.length === 0) return (
+  if (loadError && series.length === 0 && catalog.items.length === 0 && !catalog.loading) return (
     <View style={shared.center}>
       <Ionicons name="cloud-offline-outline" size={42} color="rgba(167,139,250,0.55)" />
       <Text style={[shared.emptyText, { color: colors.textMuted }]}>تعذّر تحميل الكرتون المدبلج</Text>
-      <Pressable onPress={() => loadPage(1, true)} style={shared.retryBtn}>
+      <Pressable onPress={() => {
+        void loadPage(1, true);
+        catalog.retry();
+      }} style={shared.retryBtn}>
         <Ionicons name="refresh" size={15} color="#A78BFA" />
         <Text style={[shared.retryText, { color: colors.buttonText }]}>إعادة المحاولة</Text>
       </Pressable>
@@ -392,10 +448,10 @@ function CartoonList({ searchQ }: { searchQ: string }) {
 
   return (
     <FlatList
-      data={displayList}
+      data={rows}
         style={{ width: gridWidth, alignSelf: "center" }}
       key={`aw-cartoon-grid-${columns}`}
-      keyExtractor={item => item.key || item.title}
+      keyExtractor={row => row.kind === "dubbed" ? `dubbed:${row.item.key || row.item.title}` : `catalog:${row.item.provider_title_id}`}
       numColumns={columns}
       contentContainerStyle={shared.grid}
       columnWrapperStyle={{ gap: 10 }}
@@ -404,28 +460,50 @@ function CartoonList({ searchQ }: { searchQ: string }) {
       updateCellsBatchingPeriod={50}
       windowSize={5}
       removeClippedSubviews={Platform.OS !== "web"}
-      renderItem={({ item }) => (
+      renderItem={({ item: row }) => (
         <View style={{ flex: 1 / columns }}>
-          <PosterCard
-            uri={dubbedImgUri(item, BASE)}
-            title={item.title}
-            seasons={item.seasons.length}
-            tint="#7C3AED"
-            onPress={() => openDetail(item)}
-          />
+          {row.kind === "dubbed" ? (
+            <PosterCard
+              uri={dubbedImgUri(row.item, BASE)}
+              title={row.item.title}
+              seasons={row.item.seasons.length}
+              tint="#7C3AED"
+              onPress={() => openDetail(row.item)}
+            />
+          ) : (
+            <PosterCard
+              uri={row.item.poster_url || row.item.backdrop_url || null}
+              title={row.item.title_ar || row.item.title || row.item.title_en || "عنوان"}
+              seasons={0}
+              tint="#7C3AED"
+              badge={catalogBadge(row.item, "cartoon")}
+              badgeTint="#35B955"
+              meta={`${row.item.media_type === "movie" ? "فيلم" : "مسلسل"}${row.item.episode_count ? ` · ${row.item.episode_count} حلقة` : ""}${row.item.release_year ? ` · ${row.item.release_year}` : ""}`}
+              onPress={() => openCatalogDetail(row.item)}
+            />
+          )}
         </View>
       )}
       onEndReached={() => {
-        if (!searchQ && !loadingMore && page < totalPages) loadPage(page + 1);
+        if (searchQ.trim().length < 2 && !loadingMore && page < totalPages) loadPage(page + 1);
+        void catalog.loadMore();
       }}
       onEndReachedThreshold={0.3}
-      ListFooterComponent={loadingMore ? <ActivityIndicator color={colors.accent} style={{ marginVertical: 16 }} /> : null}
+      ListFooterComponent={loadingMore || catalog.loadingMore ? (
+        <ActivityIndicator color={colors.accent} style={{ marginVertical: 16 }} />
+      ) : catalog.error ? (
+        <Pressable onPress={catalog.retry} style={shared.retryBtn}>
+          <Ionicons name="refresh" size={15} color="#A78BFA" />
+          <Text style={[shared.retryText, { color: colors.buttonText }]}>إعادة تحميل القائمة</Text>
+        </Pressable>
+      ) : null}
       ListEmptyComponent={
         <View style={shared.center}>
+          {catalog.loading ? <ActivityIndicator color={colors.accent} /> : null}
           <Text style={[shared.emptyText, { color: colors.textMuted }]}>
             {searchQ.length >= 2
-              ? (searchLoad ? "جاري البحث..." : "لا توجد نتائج")
-              : "لا توجد مسلسلات"}
+              ? (searchLoad || catalog.loading ? "جاري البحث..." : "لا توجد نتائج")
+              : catalog.loading ? "جارٍ تحميل القائمة..." : "لا توجد مسلسلات"}
           </Text>
         </View>
       }
@@ -455,7 +533,7 @@ export default function DubbedTabScreen() {
     setActiveTab(tab);
     setSearchQ("");
     Animated.timing(slideAnim, {
-      toValue: tab === "animation" ? 0 : tab === "cartoon" ? 1 : 2,
+      toValue: tab === "animation" ? 0 : 1,
       duration: 220,
       easing: Easing.out(Easing.cubic),
       useNativeDriver: false,
@@ -467,13 +545,11 @@ export default function DubbedTabScreen() {
       {/* ── Header ── */}
       <View style={[s.header, { borderBottomColor: colors.border }]}>
         <View style={{ flex: 1 }}>
-          <Text style={[s.headerTitle, { color: colors.textPrimary }]}>رسوم متحركة</Text>
+          <Text style={[s.headerTitle, { color: colors.textPrimary }]}>رسوم متحركة مدبلجة</Text>
           <Text style={[s.headerSub, { color: colors.textSecondary }]}>
             {activeTab === "animation"
-              ? "أنيميشن مدبلج بالعربية"
-              : activeTab === "cartoon"
-                ? "كرتون مدبلج للعربية"
-                : "فهرس StarDima · مدبلج ومترجم"}
+              ? "أنيميشن مدبلج ومترجم"
+              : "كرتون مدبلج بالعربية"}
           </Text>
         </View>
         <Pressable
@@ -492,9 +568,9 @@ export default function DubbedTabScreen() {
 
       {/* ── Inner tabs ── */}
       <View style={[s.tabsRow, { borderBottomColor: colors.border }]}>
-        {(["animation", "cartoon", "stardima"] as TabKey[]).map(tab => {
+        {(["animation", "cartoon"] as TabKey[]).map(tab => {
           const active = activeTab === tab;
-          const color  = tab === "animation" ? "#10B981" : tab === "cartoon" ? "#7C3AED" : colors.accent;
+          const color  = tab === "animation" ? "#10B981" : "#7C3AED";
           return (
             <Pressable key={tab} onPress={() => handleTab(tab)}
               focusable={tvMode}
@@ -505,7 +581,7 @@ export default function DubbedTabScreen() {
                 tvMode && tvFocusStyle(focused),
               ]}>
               <Text style={[s.tabText, { color: active ? color : colors.textSecondary }]}>
-                {tab === "animation" ? "أنيميشن" : tab === "cartoon" ? "كرتون" : "StarDima"}
+                {tab === "animation" ? "أنيميشن مدبلج" : "كرتون مدبلج"}
               </Text>
             </Pressable>
           );
@@ -522,10 +598,8 @@ export default function DubbedTabScreen() {
             onChangeText={setSearchQ}
             placeholder={
               activeTab === "animation"
-                ? "ابحث في الأنيميشن المدبلج..."
-                : activeTab === "cartoon"
-                  ? "ابحث في الكرتون المدبلج..."
-                  : "ابحث في كتالوج StarDima..."
+                ? "ابحث في الأنيميشن المدبلج والمترجم..."
+                : "ابحث في الكرتون المدبلج..."
             }
             placeholderTextColor={colors.textMuted}
             style={[s.searchInput, { color: colors.textPrimary }]}
@@ -543,10 +617,8 @@ export default function DubbedTabScreen() {
       {/* ── Content ── */}
       {activeTab === "animation" ? (
         <AnimationList key="animation" searchQ={searchQ} />
-      ) : activeTab === "cartoon" ? (
-        <CartoonList key="cartoon" searchQ={searchQ} />
       ) : (
-        <StardimaCatalogTab key="stardima" searchQ={searchQ} />
+        <CartoonList key="cartoon" searchQ={searchQ} />
       )}
     </View>
   );
@@ -610,6 +682,8 @@ const card = StyleSheet.create({
   wrap:        { borderRadius: 12, overflow: "hidden" },
   poster:      { aspectRatio: 2 / 3, backgroundColor: "rgba(255,255,255,0.05)", borderRadius: 12, overflow: "hidden" },
   placeholder: { flex: 1, alignItems: "center", justifyContent: "center" },
+  badge:       { position: "absolute", top: 7, right: 7, maxWidth: "88%", paddingHorizontal: 7, paddingVertical: 3, borderRadius: 6 },
+  badgeText:   { color: "#FFFFFF", fontSize: 9, fontFamily: "Cairo_700Bold" },
   label:       { position: "absolute", bottom: 0, left: 0, right: 0, padding: 6 },
   title:       { color: "#fff", fontSize: 10, fontFamily: "Cairo_700Bold", lineHeight: 14 },
   seasons:     { fontSize: 9, fontFamily: "Cairo_400Regular" },

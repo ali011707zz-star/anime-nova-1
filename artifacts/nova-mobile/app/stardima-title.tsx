@@ -19,6 +19,7 @@ import { useColors } from "@/hooks/useColors";
 import { ensureWatchAccess } from "@/utils/adPolicy";
 import { RewardedAdPrompt } from "@/components/RewardedAdPrompt";
 import { EpisodeDivider } from "@/components/EpisodeDivider";
+import { normalizedLocalizationLabel } from "@/hooks/useDubbedCatalogFeed";
 
 const Pressable = TvPressable;
 
@@ -67,7 +68,7 @@ function readParam(value: string | string[] | undefined) {
 }
 
 function titleText(title?: CatalogTitle | null) {
-  return title?.title_ar || title?.title || title?.title_en || "StarDima";
+  return title?.title_ar || title?.title || title?.title_en || "عنوان";
 }
 
 function pageUrl(value: unknown) {
@@ -398,7 +399,7 @@ export default function StardimaTitleScreen() {
         params: {
           pageUrl: url,
           title: titleText(title),
-          server: server.server_name || "StarDima",
+          server: "مشغل خارجي",
         },
       });
     } catch {
@@ -432,7 +433,7 @@ export default function StardimaTitleScreen() {
           </Text>
           <Text style={[styles.episodeMeta, tvMode && { fontSize: 12 }]}>
             {isMovie
-              ? "StarDima"
+              ? "فيلم كامل"
               : `الموسم ${Number(item.season_number) || 1} · الحلقة ${episodeNumber}`}
             {item.episode_status ? ` · ${item.episode_status === "link_found" ? "روابط متاحة" : "الحلقة مسجلة"}` : ""}
           </Text>
@@ -506,14 +507,14 @@ export default function StardimaTitleScreen() {
                       {episodes.length ? ` · ${episodes.length} ${title?.media_type === "movie" ? "رابط محتوى" : "حلقة مسجلة"}` : ""}
                     </Text>
                     <View style={styles.badgeRail}>
-                      <View style={styles.badge}>
-                        <Text style={[styles.badgeText, tvMode && { fontSize: 13 }]}>StarDima</Text>
-                      </View>
-                      {(title?.classification?.localizationLabels || []).map((label) => (
-                        <View key={label} style={styles.badge}>
-                          <Text style={[styles.badgeText, tvMode && { fontSize: 13 }]}>{label}</Text>
-                        </View>
-                      ))}
+                      {[...new Set((title?.classification?.localizationLabels || [])
+                        .map(normalizedLocalizationLabel)
+                        .filter((label): label is string => Boolean(label)))]
+                        .map((label) => (
+                          <View key={label} style={styles.badge}>
+                            <Text style={[styles.badgeText, tvMode && { fontSize: 13 }]}>{label}</Text>
+                          </View>
+                        ))}
                       <View style={styles.badge}>
                         <Text style={[styles.badgeText, tvMode && { fontSize: 13 }]}>
                           {classificationText(title?.classification?.status)}
@@ -614,9 +615,11 @@ export default function StardimaTitleScreen() {
                   >
                     <Ionicons name="play-circle-outline" size={23} color={colors.accent} />
                     <Text numberOfLines={1} style={[styles.serverName, tvMode && { fontSize: 16 }]}>
-                      {server.server_name || server.source_host || "مشغل خارجي"}
+                      مشغل {index + 1}
                       {server.quality ? ` · ${server.quality}` : ""}
-                      {server.language ? ` · ${server.language}` : ""}
+                      {normalizedLocalizationLabel(server.language || "")
+                        ? ` · ${normalizedLocalizationLabel(server.language || "")}`
+                        : ""}
                     </Text>
                     {openingServer ? <ActivityIndicator size="small" color={colors.accent} /> : null}
                     <Ionicons name="chevron-back" size={16} color={colors.textMuted} />

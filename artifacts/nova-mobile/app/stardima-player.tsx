@@ -38,7 +38,7 @@ export default function StardimaPlayerScreen() {
   const tvMode = isTvDevice();
   const params = useLocalSearchParams<{ pageUrl?: string; title?: string; server?: string }>();
   const url = validPageUrl(readParam(params.pageUrl));
-  const title = readParam(params.title) || "StarDima";
+  const title = readParam(params.title) || "تشغيل الفيديو";
   const server = readParam(params.server) || "مشغل خارجي";
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
@@ -163,7 +163,7 @@ export default function StardimaPlayerScreen() {
           url: parsed.href,
           label: server,
           quality: "720p HD",
-          site: "stardima_catalog",
+          site: "external_catalog",
           headers: { Referer: url, Origin: origin },
         }]);
       } catch {
