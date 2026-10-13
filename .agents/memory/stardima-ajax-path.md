@@ -25,3 +25,11 @@ Keep StarDima's source categories, tags, localization labels, and media type dis
 **Why:** The catalog mixes several kinds of labels and many titles have no source category; guessing would create false classifications and hide the remaining gaps.
 
 **How to apply:** Preserve exact source labels and their provenance during imports and backfills. Do not infer content families from network names or from title/poster alone.
+
+## Series detail fallback safety
+
+The catalog's alternate `/api/episodes/{id}` path is not safe to write for a series without normalization: its shared movie mapper can label episodes as `movie` and flatten them to season 1. Live catalog responses have also included episode titles that do not match the parent title. The normal multi-season route can fail when requests overlap even though isolated per-season requests succeed.
+
+**Why:** Blindly importing fallback rows can create incorrect content types, season grouping, or cross-title episode data while appearing to fill catalog gaps.
+
+**How to apply:** Prefer fetching each advertised season independently when the concurrent request fails. Before importing fallback data, compare episode titles and IDs to the parent, restore the source season number and series metadata, and keep the title partial if any advertised season remains unresolved.
