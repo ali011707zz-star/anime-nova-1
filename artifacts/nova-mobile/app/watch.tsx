@@ -637,7 +637,8 @@ function getAvailabilityQualityKey(row: any): QualityKey | null {
      may send "1080p FHD", "FHD 1080", or a provider-specific label instead of
      the compact picker key. */
   const text = `${row?.quality || ""} ${row?.name || ""} ${row?.label || ""}`.toLowerCase();
-  if (/(?:2160|1440|1080)\s*p?/.test(text) || /\bfhd\b|full[ ._-]*hd/.test(text)) return "1080p";
+  if (/(?:2160|1440)\s*p?|\b(?:2k|4k|uhd)\b/.test(text)) return null;
+  if (/(?:1080)\s*p?/.test(text) || /\bfhd\b|full[ ._-]*hd/.test(text)) return "1080p";
   if (/(?:720)\s*p?/.test(text)) return "720p";
   if (/(?:480)\s*p?/.test(text)) return "480p";
   if (/(?:360)\s*p?/.test(text)) return "360p";
@@ -960,6 +961,7 @@ export default function WatchScreen() {
     attemptedKeys: string[];
     retryPending: boolean;
     streamOpen: boolean;
+    hasStartedPlayback: boolean;
   };
   const progressivePlaybackRef = useRef<ProgressivePlayback | null>(null);
   const handlePickSiteRef = useRef<(site: string, quality?: QualityKey, excludeKeys?: string[]) => Promise<void>>(async () => {});
@@ -1056,6 +1058,13 @@ export default function WatchScreen() {
       setAvailabilityDone(true);
       setAvailabilityError(false);
       setShowingAvailabilityHints(true);
+      const hintRows = Object.values(cachedHints).reduce(
+        (sum, tiers) => sum + Object.keys(tiers).length,
+        0,
+      );
+      console.info(
+        `[playback-trace] id=${playbackTraceId} component=availability stage=hint_cache_hit rows=${hintRows}`,
+      );
       return;
     }
     const controller = new AbortController();
@@ -1427,6 +1436,7 @@ export default function WatchScreen() {
           attemptedKeys: best.candidateKey ? [best.candidateKey] : [],
           retryPending: false,
           streamOpen: false,
+          hasStartedPlayback: true,
         };
         playSrc(best);
         return;
@@ -1461,9 +1471,11 @@ export default function WatchScreen() {
           attemptedKeys: [],
           retryPending: false,
           streamOpen: false,
+          hasStartedPlayback: false,
         };
     playback.site = site;
     playback.quality = preferredQuality;
+    if (excludeKeys.length > 0) playback.hasStartedPlayback = false;
     requestExcludeKeys.forEach(key => {
       if (!playback.attemptedKeys.includes(key)) playback.attemptedKeys.push(key);
     });
@@ -1600,8 +1612,12 @@ export default function WatchScreen() {
           ? prev
           : [...prev, mapped]);
 
-        if (payload.kind === "primary" || playback.retryPending) {
+        // The server's primary can still be rejected by the mobile URL/quality
+        // checks. Start the first candidate the client actually accepts, even
+        // if the server labels it as the backup.
+        if (!playback.hasStartedPlayback || playback.retryPending) {
           playback.retryPending = false;
+          playback.hasStartedPlayback = true;
           if (candidateKey && !playback.attemptedKeys.includes(candidateKey)) playback.attemptedKeys.push(candidateKey);
           playSrc(mapped);
         } else if (!playback.fallbackSources.some(item => item.candidateKey === candidateKey)) {
@@ -1635,8 +1651,11 @@ export default function WatchScreen() {
         }
       }
       if (receivedCandidate) fetchedSitesRef.current.add(fetchKey);
-    } catch {
+    } catch (error) {
       playback.streamOpen = false;
+      console.warn(
+        `[playback-trace] id=${lookupTraceId} component=source stage=stream_error site=${lookupSiteTag} elapsed_ms=${Date.now() - lookupStartedAt} reason=${siteCtrl?.signal.aborted ? "aborted" : error instanceof Error ? error.name : "unknown"}`,
+      );
       if (siteCtrl?.signal.aborted) return;
       if (!receivedCandidate && !playback.retryPending && isMountedRef.current) {
         if (progressivePlaybackRef.current === playback) {
@@ -1916,6 +1935,10 @@ export default function WatchScreen() {
     const failedSite = playingSrc?.site || "";
     const failedUrl = playingSrc?.rawUrl || (playingSrc ? getPlayUrl(playingSrc) : "");
     const progressive = progressivePlaybackRef.current;
+    const traceSite = failedSite.replace(/[^a-z0-9_-]/gi, "").slice(0, 12) || "source";
+    console.info(
+      `[playback-trace] id=${playbackTraceId} component=player stage=playback_failure site=${traceSite} quality=${playingSrc ? getSrcQuality(playingSrc) : "unknown"} backup_count=${progressive?.fallbackSources.length || 0} stream_open=${Boolean(progressive?.streamOpen)}`,
+    );
     console.warn(
       `[Anime Watch] فشل المصدر المحدد site=${failedSite || "unknown"} — العودة للـ picker`,
     );
@@ -1946,16 +1969,25 @@ export default function WatchScreen() {
         if (fallback.candidateKey && !progressive.attemptedKeys.includes(fallback.candidateKey)) {
           progressive.attemptedKeys.push(fallback.candidateKey);
         }
+        console.info(
+          `[playback-trace] id=${playbackTraceId} component=player stage=backup_start site=${traceSite} quality=${getSrcQuality(fallback)} remaining=${progressive.fallbackSources.length}`,
+        );
         playSrc(fallback);
         return;
       }
       if (progressive.streamOpen) {
+        console.info(
+          `[playback-trace] id=${playbackTraceId} component=player stage=awaiting_backup site=${traceSite} attempted=${progressive.attemptedKeys.length}`,
+        );
         progressive.retryPending = true;
         return;
       }
       if (progressive.attemptedKeys.length < 12) {
         const quality = progressive.quality;
         const excluded = [...progressive.attemptedKeys];
+        console.info(
+          `[playback-trace] id=${playbackTraceId} component=player stage=expanded_retry site=${traceSite} attempted=${excluded.length}`,
+        );
         setTimeout(() => {
           if (progressivePlaybackRef.current === progressive) {
             void handlePickSiteRef.current(progressive.site, quality, excluded);
@@ -1963,7 +1995,7 @@ export default function WatchScreen() {
         }, 0);
       }
     }
-  }, [playingSrc, saveProgress, srcCacheKey, playSrc]);
+  }, [playingSrc, saveProgress, srcCacheKey, playSrc, playbackTraceId]);
 
   const onRiftProgress = useCallback((pos: number, dur: number) => {
     lastTimeRef.current = pos;
@@ -2261,14 +2293,14 @@ export default function WatchScreen() {
               </View>
               <SpinRing size={24} />
               <Text style={[d.availabilityHeadline, tvMode && d.tvAvailabilityHeadline]}>سوكونا يقاتل غوجو بجهد من اجل السيرفرات</Text>
-              <Text style={[d.availabilityText, tvMode && d.tvAvailabilityText]}>يتم فحص السيرفرات… ستظهر السيرفرات الجاهزة أولاً</Text>
+              <Text style={[d.availabilityText, tvMode && d.tvAvailabilityText]}>يتم فحص توفر المصادر… ستظهر النتائج تدريجياً</Text>
             </View>
           )}
 
           {!availabilityDone && hasAvailableSlot && (
             <View style={d.availabilityPartialState}>
               <SpinRing size={16} />
-              <Text style={d.availabilityPartialText}>يتم فحص باقي السيرفرات…</Text>
+              <Text style={d.availabilityPartialText}>يتم فحص بقية المصادر…</Text>
             </View>
           )}
 
@@ -2279,7 +2311,7 @@ export default function WatchScreen() {
                {availabilityError ? "تعذر التحقق من المصادر" : "لا توجد مصادر متاحة لهذه الحلقة"}
              </Text>
              <Text style={d.availabilityEmptyText}>
-               {availabilityError ? "تحقق من الاتصال ثم أعد المحاولة." : "لم يُرجع الخادم أي مصدر صالح حالياً."}
+                {availabilityError ? "تحقق من الاتصال ثم أعد المحاولة." : "لا توجد نتائج توفر معروفة لهذه الحلقة حالياً."}
              </Text>
               <Pressable onPress={refreshAllSources} accessibilityRole="button" style={d.retryBigBtn}>
                <Ionicons name="refresh" size={16} color={colors.accent} />
@@ -2288,7 +2320,15 @@ export default function WatchScreen() {
            </View>
          )}
 
-          {/* تظهر بطاقات المصادر المؤكدة تدريجيًا أثناء الفحص، ثم تكتمل
+          {hasAvailableSlot && !showingAvailabilityHints && (
+            <View style={[d.availabilityPartialState, { marginBottom: 8 }]}>
+              <Text style={d.availabilityPartialText}>
+                التوفر مؤشر أولي وليس تأكيداً للتشغيل. عند الاختيار يُجلب رابط الحلقة المطلوب، وتُجرّب الروابط الاحتياطية عند فشل التشغيل.
+              </Text>
+            </View>
+          )}
+
+          {/* تظهر بطاقات المصادر تدريجيًا أثناء الفحص، ثم تكتمل
               القائمة عند وصول [DONE] من مرحلة availability. */}
             {hasAvailableSlot && Q_KEYS.map(qk => {
             const pickerDefs = STATIC_PICKER[qk] || [];

@@ -13945,7 +13945,10 @@ function sourceCheckQuality(s: any): { quality: "1080p" | "720p" | "480p" | "360
   const classify = (value: string) => {
     // Numeric resolution wins over generic labels such as "HD"; a provider
     // may describe a 480p stream as "480p HD".
-    if (/(?:2160|1440|1080)\s*p?/.test(value)) return { quality: "1080p" as const, qualityRank: rank || 13 };
+    // 2K/4K tiers do not have a matching picker choice; never relabel them as
+    // 1080p and return them for an exact 1080p request.
+    if (/(?:2160|1440)\s*p?|\b(?:2k|4k|uhd)\b/.test(value)) return { quality: "unknown" as const, qualityRank: 0 };
+    if (/(?:1080)\s*p?/.test(value)) return { quality: "1080p" as const, qualityRank: rank || 13 };
     if (/(?:720)\s*p?/.test(value)) return { quality: "720p" as const, qualityRank: rank || 9 };
     if (/(?:480)\s*p?/.test(value)) return { quality: "480p" as const, qualityRank: rank || 7 };
     if (/(?:360)\s*p?/.test(value)) return { quality: "360p" as const, qualityRank: rank || 5 };
@@ -14660,10 +14663,13 @@ router.get("/anime/sources-stream", scraperQueueMiddleware, async (req, res) => 
         () => useCatalogAvailability("sanime", async () => scrapeCached("sanime", async () => getSAnimeSources(
           title, english, ep, titleVariants, true, await catalogHintFor("sanime"),
         ), false, 4000)),
-        () => useCatalogAvailability("anifox", async () => scrapeCached("anifox", async () => getAnifoxSources(
-          title, english, ep, titleVariants, anilistId, true, await catalogHintFor("anifox"),
-        ), false, 4000)),
-        () => scrapeCached("animewitcher",  () => getAnimeWitcherSources(title, english, ep, anilistId, titleVariants, true), false, 11000),
+        () => useCatalogAvailability("anifox", async () => scrapeCached("anifox", async () => {
+          const hint = await catalogHintFor("anifox");
+          const lookupId = hint?.providerTitleId ? anilistId : await aniListIdResolution;
+          return getAnifoxSources(title, english, ep, titleVariants, lookupId, true, hint);
+        }, false, 4000)),
+        () => scrapeCached("animewitcher", async () =>
+          getAnimeWitcherSources(title, english, ep, await aniListIdResolution, titleVariants, true), false, 11000),
         () => scrapeCached("anineko",       () => getAninekoSources(title, english, ep, titleVariants, true), false, 25000),
         // Kawaii's API can take several seconds for newly published episodes.
         // Keep this provider inside the availability pass without letting a slow
@@ -15402,6 +15408,7 @@ router.get("/anime/fetch-source", scraperQueueMiddleware, async (req, res) => {
   // providers remain independent; only identical concurrent requests coalesce.
   try {
   const pipelineStartedAt = Date.now();
+  tracePlayback(sourceTrace, "fetch-source", "provider_start", sourceTraceSite, 0, `progressive=${progressive}`);
   const progressiveFlightKey = `${cKey}:fetch-progressive:${requestedQuality || "any"}:${[...excludedCandidateKeys].sort().join(",")}`;
   const flightKey = progressive ? progressiveFlightKey : `${cKey}:fetch`;
   const sharedSources = await getOrCreateSourceFlight(flightKey, async (publish) => {
@@ -15477,7 +15484,14 @@ router.get("/anime/fetch-source", scraperQueueMiddleware, async (req, res) => {
       default: break;
     }
 
-    
+    tracePlayback(
+      sourceTrace,
+      "fetch-source",
+      "candidate_pool_ready",
+      sourceTraceSite,
+      Date.now() - pipelineStartedAt,
+      `candidates=${sources.length}`,
+    );
     if (progressive) {
       const directCandidates = [...sources]
         .filter(matchesRequestedQuality)
@@ -15485,7 +15499,7 @@ router.get("/anime/fetch-source", scraperQueueMiddleware, async (req, res) => {
         .sort((a, b) => (b.qualityRank || sourceCheckQuality(b).qualityRank) - (a.qualityRank || sourceCheckQuality(a).qualityRank))
         .slice(0, 2);
       await Promise.all(directCandidates.map(async source => {
-        if (await verifyProgressiveLink(source)) publishProgressSource?.(source);
+        if (await verifyProgressiveLinkTraced(source)) publishProgressSource?.(source);
         else sendProgressiveRejected(source);
       }));
     }
