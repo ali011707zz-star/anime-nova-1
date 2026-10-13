@@ -4,6 +4,8 @@
  * Usage from the VPS:
  *   node artifacts/api-server/src/jobs/source-catalog-sync.mjs
  *   node ... --provider=anifox --skip-episodes
+ *   node ... --provider=stardima_catalog --classify-missing
+ *   node ... --provider=stardima_catalog --classify-missing --apply-classification
  *
  * It writes stable catalog metadata and the provider/server page URLs needed
  * for fast later resolution. It never resolves or stores final MP4/HLS URLs.
@@ -25,6 +27,9 @@ const titleLimit = Math.max(0, int(titleLimitArg) || 0);
 const skipEpisodes = args.has("--skip-episodes");
 const concurrency = Math.max(1, Math.min(8, Number(process.env.CATALOG_CONCURRENCY || 6)));
 const forceDetails = args.has("--force-details");
+const classifyMissing = args.has("--classify-missing");
+const applyClassification = args.has("--apply-classification");
+const forceClassification = args.has("--force-classification");
 const refreshHours = Math.max(1, Number(process.env.CATALOG_REFRESH_HOURS || 12));
 const timeoutMs = 20_000;
 
@@ -41,6 +46,15 @@ try {
 
 if (providers.some((p) => !PROVIDERS.includes(p))) {
   throw new Error(`provider must be one of: ${PROVIDERS.join(", ")}`);
+}
+if (classifyMissing && (providers.length !== 1 || providers[0] !== "stardima_catalog")) {
+  throw new Error("--classify-missing requires --provider=stardima_catalog");
+}
+if (applyClassification && !classifyMissing) {
+  throw new Error("--apply-classification requires --classify-missing");
+}
+if (forceClassification && !classifyMissing) {
+  throw new Error("--force-classification requires --classify-missing");
 }
 if (!process.env.DATABASE_URL) throw new Error("DATABASE_URL is required");
 
@@ -64,7 +78,74 @@ function numberValue(value) {
 function jsonArray(value) {
   if (Array.isArray(value)) return value.filter(Boolean).map(String);
   if (value == null || value === "") return [];
-  return String(value).split(/[|,،]/).map((v) => v.trim()).filter(Boolean);
+  const normalized = String(value).trim();
+  if (normalized.startsWith("[")) {
+    try {
+      const parsed = JSON.parse(normalized);
+      if (Array.isArray(parsed)) return parsed.filter(Boolean).map(String);
+    } catch {}
+  }
+  return normalized.split(/[|,،]/).map((v) => v.trim()).filter(Boolean);
+}
+
+function jsonObject(value) {
+  if (value && typeof value === "object" && !Array.isArray(value)) return value;
+  if (typeof value === "string") {
+    try {
+      const parsed = JSON.parse(value);
+      return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+    } catch {}
+  }
+  return {};
+}
+
+function uniqueStrings(...lists) {
+  return [...new Set(lists.flatMap((list) => jsonArray(list)).map((value) => value.trim()).filter(Boolean))];
+}
+
+function mergeCatalogTitle(item, existing) {
+  if (!existing || item.provider !== "stardima_catalog") return item;
+  const oldMetadata = jsonObject(existing.provider_metadata);
+  const newMetadata = jsonObject(item.provider_metadata);
+  const oldClassification = jsonObject(oldMetadata.classification);
+  const newClassification = jsonObject(newMetadata.classification);
+  const genres = uniqueStrings(
+    existing.genres,
+    item.genres,
+    oldClassification.source_categories,
+    newClassification.source_categories,
+  );
+  const tags = uniqueStrings(
+    existing.tags,
+    item.tags,
+    oldClassification.source_tags,
+    newClassification.source_tags,
+    genres,
+  );
+  const classification = Object.keys(oldClassification).length || Object.keys(newClassification).length
+    ? {
+        ...newClassification,
+        ...oldClassification,
+        source_categories: genres,
+        source_tags: uniqueStrings(oldClassification.source_tags, newClassification.source_tags),
+        content_families: uniqueStrings(oldClassification.content_families, newClassification.content_families),
+        status: oldClassification.status === "manually_reviewed"
+          ? "manually_reviewed"
+          : uniqueStrings(oldClassification.content_families, newClassification.content_families).length
+            ? "classified"
+            : genres.length ? "source_labeled" : (oldClassification.status || newClassification.status || "needs_review"),
+      }
+    : undefined;
+  return {
+    ...item,
+    genres,
+    tags,
+    provider_metadata: {
+      ...oldMetadata,
+      ...newMetadata,
+      ...(classification ? { classification } : {}),
+    },
+  };
 }
 
 function hostOf(value) {
@@ -521,6 +602,25 @@ async function supabasePatch(table, filter, row) {
   });
 }
 
+async function restSelectProviderTitles(provider, select) {
+  const rows = [];
+  const pageSize = 1000;
+  for (let offset = 0; offset < 100_000; offset += pageSize) {
+    const query = new URLSearchParams({
+      provider: `eq.${provider}`,
+      select,
+      order: "id.asc",
+      limit: String(pageSize),
+      offset: String(offset),
+    });
+    const page = await supabaseRequest(`source_catalog_titles?${query}`);
+    if (!Array.isArray(page)) throw new Error("Supabase returned an invalid title page");
+    rows.push(...page);
+    if (page.length < pageSize) return rows;
+  }
+  throw new Error("Catalog title pagination exceeded the safety limit");
+}
+
 function restTitleRow(item) {
   return {
     provider: item.provider,
@@ -543,16 +643,154 @@ function restTitleRow(item) {
 }
 
 async function restUpsertTitles(titles) {
+  let preparedTitles = titles;
+  if (titles[0]?.provider === "stardima_catalog") {
+    const existing = await restSelectProviderTitles(
+      "stardima_catalog",
+      "provider_title_id,genres,tags,provider_metadata",
+    );
+    const byProviderId = new Map(existing.map((row) => [String(row.provider_title_id), row]));
+    preparedTitles = titles.map((item) => mergeCatalogTitle(
+      item,
+      byProviderId.get(String(item.provider_title_id)),
+    ));
+  }
   const saved = [];
-  for (let start = 0; start < titles.length; start += 100) {
+  for (let start = 0; start < preparedTitles.length; start += 100) {
     const rows = await supabaseUpsert(
       "source_catalog_titles",
-      titles.slice(start, start + 100).map(restTitleRow),
+      preparedTitles.slice(start, start + 100).map(restTitleRow),
       "provider,provider_title_id",
     );
     saved.push(...rows);
   }
   return saved;
+}
+
+async function loadClassificationRows(provider) {
+  if (useSupabaseRest) {
+    return restSelectProviderTitles(
+      provider,
+      "id,provider_title_id,title,title_en,title_ar,title_native,genres,tags,media_type,provider_metadata",
+    );
+  }
+  const result = await pool.query(
+    `SELECT id,provider_title_id,title,title_en,title_ar,title_native,genres,tags,media_type,provider_metadata
+       FROM source_catalog_titles
+      WHERE provider=$1
+      ORDER BY id ASC`,
+    [provider],
+  );
+  return result.rows;
+}
+
+async function writeClassificationPatch(rowId, patch) {
+  if (useSupabaseRest) {
+    await supabasePatch("source_catalog_titles", `id=eq.${encodeURIComponent(rowId)}`, patch);
+    return;
+  }
+  await pool.query(
+    `UPDATE source_catalog_titles
+        SET genres=$1::jsonb, tags=$2::jsonb, provider_metadata=$3::jsonb
+      WHERE id=$4 AND provider='stardima_catalog'`,
+    [
+      JSON.stringify(patch.genres || []),
+      JSON.stringify(patch.tags || []),
+      JSON.stringify(patch.provider_metadata || {}),
+      rowId,
+    ],
+  );
+}
+
+async function runClassificationBackfill(provider) {
+  const adapter = adapters[provider];
+  const [discoveredTitles, existingRows] = await Promise.all([
+    adapter.list(),
+    loadClassificationRows(provider),
+  ]);
+  const sourceById = new Map(discoveredTitles.map((item) => [String(item.provider_title_id), item]));
+  const candidates = [];
+  let absentFromSource = 0;
+
+  for (const row of existingRows) {
+    const sourceTitle = sourceById.get(String(row.provider_title_id));
+    if (!sourceTitle) {
+      absentFromSource++;
+      continue;
+    }
+    const mergedTitle = mergeCatalogTitle(sourceTitle, row);
+    const metadata = jsonObject(row.provider_metadata);
+    const previous = jsonObject(metadata.classification);
+    const sourceCategories = jsonArray(sourceTitle.genres);
+    const existingCategories = jsonArray(row.genres);
+    const hasNewSourceCategory = sourceCategories.some((category) => !existingCategories.includes(category));
+    const shouldRefresh = forceClassification ||
+      Number(previous.version || 0) < 1 ||
+      hasNewSourceCategory ||
+      (!mergedTitle.genres.length && !previous.detail_checked_at);
+    if (shouldRefresh) candidates.push({ row, sourceTitle: mergedTitle });
+  }
+
+  const pending = titleLimit ? candidates.slice(0, titleLimit) : candidates;
+  const summary = {
+    provider,
+    mode: applyClassification ? "apply" : "dry-run",
+    sourceTitles: discoveredTitles.length,
+    databaseTitles: existingRows.length,
+    candidates: candidates.length,
+    checked: 0,
+    titlesWithCategories: 0,
+    stillNeedsReview: 0,
+    categoriesAdded: 0,
+    updated: 0,
+    failures: 0,
+    absentFromSource,
+    limitedTo: titleLimit || null,
+  };
+  const categoryCounts = new Map();
+  const queue = [...pending];
+  const classificationConcurrency = Math.max(
+    1,
+    Math.min(3, Number(process.env.CATALOG_CLASSIFICATION_CONCURRENCY || 3)),
+  );
+  async function worker() {
+    while (queue.length) {
+      const candidate = queue.shift();
+      if (!candidate) continue;
+      const before = jsonArray(candidate.row.genres);
+      try {
+        const hasSourceCategories = candidate.sourceTitle.genres.length > 0;
+        const titlePatch = forceClassification || !hasSourceCategories
+          ? await adapter.classify(candidate.sourceTitle)
+          : adapter.classifyFromList(candidate.sourceTitle);
+        const after = jsonArray(titlePatch.genres);
+        summary.checked++;
+        if (after.length) summary.titlesWithCategories++;
+        else summary.stillNeedsReview++;
+        summary.categoriesAdded += after.filter((category) => !before.includes(category)).length;
+        for (const category of after) {
+          categoryCounts.set(category, (categoryCounts.get(category) || 0) + 1);
+        }
+        if (applyClassification) {
+          await writeClassificationPatch(candidate.row.id, titlePatch);
+          summary.updated++;
+        }
+      } catch {
+        summary.failures++;
+      }
+    }
+  }
+  await Promise.all(Array.from(
+    { length: Math.min(classificationConcurrency, pending.length) },
+    worker,
+  ));
+  const categorySummary = [...categoryCounts.entries()]
+    .map(([name, titles]) => ({ name, titles }))
+    .sort((a, b) => b.titles - a.titles || a.name.localeCompare(b.name));
+  console.log(`[catalog] classification summary: ${JSON.stringify({ ...summary, categorySummary })}`);
+  if (!applyClassification) {
+    console.log("[catalog] dry-run only; no database rows were changed");
+  }
 }
 
 async function restUpsertEpisodesAndServers(titleId, title, episodes) {
@@ -610,6 +848,19 @@ async function restUpsertEpisodesAndServers(titleId, title, episodes) {
   }
 }
 
+function unpackEpisodeResult(result) {
+  if (Array.isArray(result)) return { episodes: result, titlePatch: null };
+  if (result && typeof result === "object" && Array.isArray(result.episodes)) {
+    return {
+      episodes: result.episodes,
+      titlePatch: result.titlePatch && typeof result.titlePatch === "object"
+        ? result.titlePatch
+        : null,
+    };
+  }
+  throw new Error("Catalog adapter returned an invalid episode result");
+}
+
 async function runProviderViaSupabase(provider) {
   const adapter = adapters[provider];
   const discoveredTitles = await adapter.list();
@@ -618,7 +869,10 @@ async function runProviderViaSupabase(provider) {
   const titleByKey = new Map(titles.map((item) => [`${item.provider}:${item.provider_title_id}`, item]));
   const titleRows = (await restUpsertTitles(titles)).map((row) => ({
     titleId: row.id,
-    item: titleByKey.get(`${row.provider}:${row.provider_title_id}`),
+    item: mergeCatalogTitle(
+      titleByKey.get(`${row.provider}:${row.provider_title_id}`),
+      row,
+    ),
     catalogStatus: row.catalog_status,
     detailsCheckedAt: row.details_checked_at,
   })).filter((row) => row.item);
@@ -640,12 +894,17 @@ async function runProviderViaSupabase(provider) {
       const row = queue.shift();
       if (!row) continue;
       try {
-        const episodes = await adapter.episodes(row.item);
+        const { episodes, titlePatch } = unpackEpisodeResult(await adapter.episodes(row.item));
         await restUpsertEpisodesAndServers(row.titleId, row.item, episodes);
         await supabasePatch(
           "source_catalog_titles",
           `id=eq.${encodeURIComponent(row.titleId)}`,
-          { catalog_status: episodes.length ? "details_checked" : "partial", details_checked_at: new Date().toISOString(), last_error: null },
+          {
+            ...(titlePatch || {}),
+            catalog_status: episodes.length ? "details_checked" : "partial",
+            details_checked_at: new Date().toISOString(),
+            last_error: null,
+          },
         );
       } catch (error) {
         await supabasePatch(
@@ -806,7 +1065,22 @@ async function runProvider(provider) {
   const client = await pool.connect();
   try {
     const discoveredTitles = await adapter.list();
-    const titles = titleLimit ? discoveredTitles.slice(0, titleLimit) : discoveredTitles;
+    let titles = titleLimit ? discoveredTitles.slice(0, titleLimit) : discoveredTitles;
+    if (provider === "stardima_catalog") {
+      const existingResult = await client.query(
+        `SELECT provider_title_id,genres,tags,provider_metadata
+           FROM source_catalog_titles
+          WHERE provider=$1`,
+        [provider],
+      );
+      const existingById = new Map(
+        existingResult.rows.map((row) => [String(row.provider_title_id), row]),
+      );
+      titles = titles.map((item) => mergeCatalogTitle(
+        item,
+        existingById.get(String(item.provider_title_id)),
+      ));
+    }
     console.log(`[catalog] ${provider}: fetched ${discoveredTitles.length} titles${titleLimit ? `; limited to ${titles.length}` : ""}`);
     let titleRows = [];
     try {
@@ -845,8 +1119,21 @@ async function runProvider(provider) {
       const detailClient = await pool.connect();
       try {
         await detailClient.query("BEGIN");
-        const episodes = await adapter.episodes(row.item);
+        const { episodes, titlePatch } = unpackEpisodeResult(await adapter.episodes(row.item));
         await upsertEpisodesAndServers(detailClient, row.titleId, row.item, episodes);
+        if (titlePatch) {
+          await detailClient.query(
+            `UPDATE source_catalog_titles
+                SET genres=$1::jsonb, tags=$2::jsonb, provider_metadata=$3::jsonb
+              WHERE id=$4`,
+            [
+              JSON.stringify(titlePatch.genres || []),
+              JSON.stringify(titlePatch.tags || []),
+              JSON.stringify(titlePatch.provider_metadata || {}),
+              row.titleId,
+            ],
+          );
+        }
         await detailClient.query(
           "UPDATE source_catalog_titles SET catalog_status=$1, details_checked_at=NOW(), last_error=NULL WHERE id=$2",
           [episodes.length ? "details_checked" : "partial", row.titleId],
@@ -880,6 +1167,11 @@ async function runProvider(provider) {
 }
 
 async function main() {
+  if (classifyMissing) {
+    await runClassificationBackfill("stardima_catalog");
+    await pool.end();
+    return;
+  }
   if (useSupabaseRest) {
     console.log("[catalog] using Supabase REST for the application database");
     for (const provider of providers) await runProviderViaSupabase(provider);

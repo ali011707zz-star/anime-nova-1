@@ -166,13 +166,31 @@ async function stardimaGet(path, params = {}) {
   return requestJson(apiUrl(path, params), { headers });
 }
 
+function taxonomyScalars(value) {
+  if (typeof value === "string" || typeof value === "number") {
+    const textValue = String(value).trim();
+    return textValue ? [textValue] : [];
+  }
+  if (Array.isArray(value)) return value.flatMap(taxonomyScalars);
+  if (!value || typeof value !== "object") return [];
+  const nested = value.name ??
+    value.title ??
+    value.label ??
+    value.category_name ??
+    value.language_name ??
+    value.language ??
+    value.lang ??
+    value.data ??
+    value.items ??
+    value.values ??
+    value.value ??
+    value.slug;
+  return nested == null ? [] : taxonomyScalars(nested);
+}
+
 function stringList(value) {
-  if (Array.isArray(value)) {
-    return value.map((entry) => {
-      if (typeof entry === "string" || typeof entry === "number") return String(entry).trim();
-      if (!entry || typeof entry !== "object") return "";
-      return String(entry.name || entry.title || entry.label || entry.category_name || "").trim();
-    }).filter(Boolean);
+  if (Array.isArray(value) || (value && typeof value === "object")) {
+    return taxonomyScalars(value);
   }
   if (typeof value !== "string") return [];
   const normalized = value.trim();
@@ -184,6 +202,137 @@ function stringList(value) {
     } catch {}
   }
   return normalized.split(/[|,،]/).map((item) => item.trim()).filter(Boolean);
+}
+
+const CATEGORY_KEYS = new Set([
+  "category", "categories", "genre", "genres", "videocategory",
+  "videocategories", "videogenre", "videogenres", "categoryname",
+  "genrename", "videocategoryname",
+]);
+const TAG_KEYS = new Set(["tag", "tags", "videotag", "videotags", "tagname", "videotagname"]);
+const LOCALIZATION_KEYS = new Set([
+  "language", "languages", "audiolanguage", "audiolanguages",
+  "dublanguage", "dublanguages", "subtitlelanguage", "subtitlelanguages",
+  "languagename", "subtitles",
+]);
+const TAXONOMY_WRAPPER_KEYS = new Set([
+  "data", "video", "details", "result", "content", "item",
+  "attributes", "payload", "metadata",
+]);
+
+function normalizedFieldName(value) {
+  return String(value || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+function collectNamedValues(payload, acceptedKeys) {
+  const values = [];
+  const visit = (node, depth = 0) => {
+    if (!node || typeof node !== "object" || depth > 4) return;
+    if (Array.isArray(node)) {
+      for (const entry of node) {
+        if (entry && typeof entry === "object") visit(entry, depth + 1);
+      }
+      return;
+    }
+    for (const [key, value] of Object.entries(node)) {
+      const normalizedKey = normalizedFieldName(key);
+      if (acceptedKeys.has(normalizedKey)) {
+        values.push(...stringList(value));
+      } else if (TAXONOMY_WRAPPER_KEYS.has(normalizedKey)) {
+        visit(value, depth + 1);
+      }
+    }
+  };
+  visit(payload);
+  return unique(values);
+}
+
+function normalizedLabel(value) {
+  return String(value || "")
+    .normalize("NFKC")
+    .toLowerCase()
+    .replace(/\p{Diacritic}/gu, "")
+    .replace(/[ـ]/gu, "")
+    .replace(/[أإآ]/g, "ا")
+    .replace(/ى/g, "ي")
+    .replace(/[^\p{L}\p{N}]+/gu, "");
+}
+
+function explicitContentFamilies(categories) {
+  const families = new Set();
+  for (const category of categories) {
+    const label = normalizedLabel(category);
+    if (["anime", "انمي", "انيمي", "رسوممتحركةيابانية"].includes(label)) {
+      families.add("anime");
+    } else if (["cartoon", "cartoons", "animation", "animated", "كرتون", "رسوممتحركة"].includes(label)) {
+      families.add("animation");
+    }
+  }
+  return [...families].sort();
+}
+
+function makeClassification(sourceCategories, sourceTags, localizationLabels, detailChecked) {
+  const categories = unique(sourceCategories);
+  const tags = unique(sourceTags);
+  const families = explicitContentFamilies(categories);
+  return {
+    version: 1,
+    status: families.length ? "classified" : categories.length ? "source_labeled" : "needs_review",
+    content_families: families,
+    source_categories: categories,
+    source_tags: tags,
+    localization_labels: unique(localizationLabels),
+    source: detailChecked ? "stardima_detail_api" : "stardima_catalog_api",
+    ...(detailChecked ? { detail_checked_at: new Date().toISOString() } : {}),
+  };
+}
+
+function classificationTitlePatch(title, detail = null, detailChecked = false) {
+  const previous = title?.provider_metadata?.classification;
+  const sourceCategories = unique([
+    ...(Array.isArray(previous?.source_categories) ? previous.source_categories : []),
+    ...(Array.isArray(title?.genres) ? title.genres : []),
+    ...collectNamedValues(detail, CATEGORY_KEYS),
+  ]);
+  const sourceTags = unique([
+    ...(Array.isArray(previous?.source_tags) ? previous.source_tags : []),
+    ...collectNamedValues(detail, TAG_KEYS),
+  ]);
+  const localizationLabels = unique([
+    ...(Array.isArray(previous?.localization_labels) ? previous.localization_labels : []),
+    ...collectNamedValues(detail, LOCALIZATION_KEYS),
+  ]);
+  const classification = makeClassification(
+    sourceCategories,
+    sourceTags,
+    localizationLabels,
+    detailChecked,
+  );
+  if (previous?.status === "manually_reviewed") {
+    classification.status = "manually_reviewed";
+    classification.content_families = unique([
+      ...(Array.isArray(previous.content_families) ? previous.content_families : []),
+      ...classification.content_families,
+    ]).sort();
+  } else if (previous?.detail_checked_at && !detailChecked) {
+    classification.source = previous.source || "stardima_detail_api";
+  }
+  return {
+    genres: sourceCategories,
+    tags: unique([
+      ...sourceCategories,
+      ...sourceTags,
+      ...localizationLabels,
+      ...(Array.isArray(title?.tags) ? title.tags : []),
+    ]),
+    provider_metadata: {
+      ...(title?.provider_metadata && typeof title.provider_metadata === "object" ? title.provider_metadata : {}),
+      classification: {
+        ...classification,
+        ...(previous?.detail_checked_at && !detailChecked ? { detail_checked_at: previous.detail_checked_at } : {}),
+      },
+    },
+  };
 }
 
 function unique(values) {
@@ -251,8 +400,10 @@ async function stardimaList() {
     const titleNative = text(item.title_native) || text(item.video_title_japanese);
     const titleAr = text(item.title_ar) ||
       (/\p{Script=Arabic}/u.test(title) ? title : null);
-    const categories = stringList(item.category || item.categories || item.video_genres);
-    const tags = stringList(item.tags || item.video_tags);
+    const categories = collectNamedValues(item, CATEGORY_KEYS);
+    const tags = collectNamedValues(item, TAG_KEYS);
+    const localizationLabels = collectNamedValues(item, LOCALIZATION_KEYS);
+    const classification = makeClassification(categories, tags, localizationLabels, false);
 
     return {
       provider: "stardima_catalog",
@@ -263,7 +414,7 @@ async function stardimaList() {
       title_native: titleNative,
       synonyms: unique([titleEn, titleAr, titleNative]).filter((name) => name !== title),
       genres: unique(categories),
-      tags: unique([...categories, ...tags]),
+      tags: unique([...categories, ...tags, ...localizationLabels]),
       media_type: item._catalog_kind,
       status: text(item.status_text) || text(item.status),
       release_year: int(item.year) || int(item.videoRelease),
@@ -274,6 +425,7 @@ async function stardimaList() {
         content_type: item._catalog_kind,
         source_api: "app.wiib.top",
         original_type: text(item.type),
+        classification,
       },
       _catalog_kind: item._catalog_kind,
     };
@@ -342,24 +494,40 @@ function normalizedSeasons(seasons) {
   }));
 }
 
+async function stardimaClassification(title) {
+  const detail = await stardimaGet(`/api/video/${encodeURIComponent(title.provider_title_id)}`);
+  return classificationTitlePatch(title, detail, true);
+}
+
+function stardimaClassificationFromList(title) {
+  return classificationTitlePatch(title);
+}
+
 async function stardimaEpisodes(title) {
   const detail = await stardimaGet(`/api/video/${encodeURIComponent(title.provider_title_id)}`);
+  const titlePatch = classificationTitlePatch(title, detail, true);
+  let episodes;
   if (title._catalog_kind === "movie" || detail?.type === "movie") {
     const response = await stardimaGet(`/api/episodes/${encodeURIComponent(title.provider_title_id)}/servers`);
-    if (!response || typeof response !== "object") return [];
-    return [mapEpisode(response, title, { season_number: 1 }, 0, true)];
+    episodes = response && typeof response === "object"
+      ? [mapEpisode(response, title, { season_number: 1 }, 0, true)]
+      : [];
+  } else {
+    const seasons = normalizedSeasons(Array.isArray(detail?.seasons) ? detail.seasons : []);
+    const groups = await mapConcurrent(seasons, 3, async (season) => {
+      const response = await stardimaGet(`/api/seasons/${encodeURIComponent(season.id)}/servers`);
+      const rows = Array.isArray(response?.data) ? response.data : [];
+      return rows.map((episode, index) => mapEpisode(episode, title, season, index));
+    });
+    episodes = groups.flat().filter((episode) => episode.provider_episode_id);
   }
 
-  const seasons = normalizedSeasons(Array.isArray(detail?.seasons) ? detail.seasons : []);
-  const groups = await mapConcurrent(seasons, 3, async (season) => {
-    const response = await stardimaGet(`/api/seasons/${encodeURIComponent(season.id)}/servers`);
-    const episodes = Array.isArray(response?.data) ? response.data : [];
-    return episodes.map((episode, index) => mapEpisode(episode, title, season, index));
-  });
-  return groups.flat().filter((episode) => episode.provider_episode_id);
+  return { episodes, titlePatch };
 }
 
 export const stardimaCatalogAdapter = {
   list: stardimaList,
   episodes: stardimaEpisodes,
+  classify: stardimaClassification,
+  classifyFromList: stardimaClassificationFromList,
 };

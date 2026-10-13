@@ -3,6 +3,8 @@ import { sbCount, sbSelect } from "../lib/supabaseClient.js";
 
 const router = Router();
 const PROVIDERS = new Set(["animeify", "anslayer", "sanime", "anifox", "stardima_catalog"]);
+const MEDIA_TYPES = new Set(["series", "movie"]);
+const CATALOG_STATUSES = new Set(["catalogued", "details_checked", "partial", "failed"]);
 
 function intParam(value: unknown, fallback: number, min: number, max: number): number {
   const n = Number.parseInt(String(value ?? ""), 10);
@@ -29,6 +31,30 @@ function publicServerRow(row: any): any {
   };
 }
 
+function publicCatalogTitle(row: any): any {
+  const { provider_metadata: metadata, ...publicRow } = row;
+  const classification = metadata && typeof metadata === "object" && !Array.isArray(metadata)
+    ? metadata.classification
+    : null;
+  const safeList = (value: unknown) =>
+    Array.isArray(value) ? value.map((item) => String(item).trim()).filter(Boolean) : [];
+  return {
+    ...publicRow,
+    classification: classification && typeof classification === "object" && !Array.isArray(classification)
+      ? {
+          version: Number(classification.version) || 1,
+          status: String(classification.status || "source_labeled"),
+          contentFamilies: safeList(classification.content_families),
+          sourceCategories: safeList(classification.source_categories),
+          sourceTags: safeList(classification.source_tags),
+          localizationLabels: safeList(classification.localization_labels),
+          source: String(classification.source || ""),
+          detailCheckedAt: classification.detail_checked_at || null,
+        }
+      : null,
+  };
+}
+
 // Public catalog endpoints. These return provider/server page URLs, never
 // resolved MP4/HLS URLs. Playback is still resolved by the existing extractors.
 router.get("/source-catalog/providers", async (_req: Request, res: Response) => {
@@ -44,23 +70,104 @@ router.get("/source-catalog/providers", async (_req: Request, res: Response) => 
   });
 });
 
+router.get("/source-catalog/categories", async (req: Request, res: Response) => {
+  const provider = providerParam(req.query.provider);
+  if (!provider) return void res.status(400).json({ error: "valid provider required" });
+
+  const categoryCounts = new Map<string, number>();
+  const localizationCounts = new Map<string, number>();
+  let classifiedTitles = 0;
+  const pageSize = 1000;
+  for (let offset = 0; offset < 50_000; offset += pageSize) {
+    const rows = await sbSelect<any>("source_catalog_titles", {
+      provider: `eq.${provider}`,
+      order: "id.asc",
+    }, {
+      limit: pageSize,
+      offset,
+      select: "genres,provider_metadata",
+    });
+    for (const row of rows) {
+      const categories = Array.isArray(row.genres)
+        ? [...new Set(row.genres.map((value: unknown) => String(value).trim()).filter(Boolean))]
+        : [];
+      if (categories.length) classifiedTitles++;
+      for (const category of categories) {
+        categoryCounts.set(category, (categoryCounts.get(category) || 0) + 1);
+      }
+      const classification = row.provider_metadata?.classification;
+      const labels = Array.isArray(classification?.localization_labels)
+        ? [...new Set(classification.localization_labels.map((value: unknown) => String(value).trim()).filter(Boolean))]
+        : [];
+      for (const label of labels) {
+        localizationCounts.set(label, (localizationCounts.get(label) || 0) + 1);
+      }
+    }
+    if (rows.length < pageSize) break;
+  }
+
+  const categories = [...categoryCounts.entries()]
+    .map(([name, titleCount]) => ({ name, titleCount }))
+    .sort((a, b) => b.titleCount - a.titleCount || a.name.localeCompare(b.name));
+  const localizationLabels = [...localizationCounts.entries()]
+    .map(([name, titleCount]) => ({ name, titleCount }))
+    .sort((a, b) => b.titleCount - a.titleCount || a.name.localeCompare(b.name));
+  const totalTitles = await sbCount("source_catalog_titles", { provider: `eq.${provider}` });
+  res.setHeader("Cache-Control", "public, max-age=300");
+  res.json({
+    provider,
+    totalTitles,
+    classifiedTitles,
+    unclassifiedTitles: Math.max(0, totalTitles - classifiedTitles),
+    categories,
+    localizationLabels,
+  });
+});
+
 router.get("/source-catalog/titles", async (req: Request, res: Response) => {
   const provider = providerParam(req.query.provider);
   const page = intParam(req.query.page, 1, 1, 100000);
   const limit = intParam(req.query.limit, 30, 1, 100);
   const q = String(req.query.q ?? "").trim();
+  const rawMediaType = String(req.query.mediaType ?? "").trim().toLowerCase();
+  const rawCatalogStatus = String(req.query.catalogStatus ?? "").trim().toLowerCase();
+  const category = String(req.query.category ?? "").trim();
+  const tag = String(req.query.tag ?? "").trim();
+  if (rawMediaType && !MEDIA_TYPES.has(rawMediaType)) {
+    return void res.status(400).json({ error: "mediaType must be series or movie" });
+  }
+  if (rawCatalogStatus && !CATALOG_STATUSES.has(rawCatalogStatus)) {
+    return void res.status(400).json({ error: "invalid catalogStatus" });
+  }
+  if (category.length > 120 || tag.length > 120) {
+    return void res.status(400).json({ error: "category and tag must be 120 characters or fewer" });
+  }
   const filters: Record<string, string | number | undefined> = {
     provider: provider ? `eq.${provider}` : undefined,
     title: q ? encodedLike(q) : undefined,
+    media_type: rawMediaType ? `eq.${rawMediaType}` : undefined,
+    catalog_status: rawCatalogStatus ? `eq.${rawCatalogStatus}` : undefined,
+    genres: category ? `cs.${JSON.stringify([category])}` : undefined,
+    tags: tag ? `cs.${JSON.stringify([tag])}` : undefined,
     order: "title.asc",
   };
   const rows = await sbSelect<any>("source_catalog_titles", filters, {
     limit,
     offset: (page - 1) * limit,
-    select: "id,provider,provider_title_id,title,title_en,title_ar,title_native,synonyms,genres,tags,media_type,status,release_year,episode_count,poster_url,backdrop_url,catalog_status,last_seen_at",
+    select: "id,provider,provider_title_id,title,title_en,title_ar,title_native,synonyms,genres,tags,media_type,status,release_year,episode_count,poster_url,backdrop_url,provider_metadata,catalog_status,last_seen_at",
   });
   res.setHeader("Cache-Control", "public, max-age=300");
-  res.json({ results: rows, page, limit, provider: provider ?? null, query: q });
+  res.json({
+    results: rows.map(publicCatalogTitle),
+    page,
+    limit,
+    provider: provider ?? null,
+    query: q,
+    mediaType: rawMediaType || null,
+    category: category || null,
+    tag: tag || null,
+    catalogStatus: rawCatalogStatus || null,
+  });
 });
 
 router.get("/source-catalog/titles/:provider/:providerTitleId", async (req: Request, res: Response) => {
@@ -80,7 +187,7 @@ router.get("/source-catalog/titles/:provider/:providerTitleId", async (req: Requ
     select: "id,provider,provider_episode_id,season_number,episode_number,episode_label,title,air_date,episode_status,details_checked_at",
   });
   res.setHeader("Cache-Control", "public, max-age=300");
-  res.json({ title, episodes });
+  res.json({ title: publicCatalogTitle(title), episodes });
 });
 
 // Fast path for clients that already know the provider title id and episode.
@@ -119,7 +226,7 @@ router.get("/source-catalog/lookup", async (req: Request, res: Response) => {
     select: "id,provider,provider_episode_id,season_number,episode_number,episode_label,title,air_date,episode_status,details_checked_at",
   });
   const episodeRow = episodes[0];
-  if (!episodeRow) return void res.status(404).json({ error: "episode not found", title });
+  if (!episodeRow) return void res.status(404).json({ error: "episode not found", title: publicCatalogTitle(title) });
 
   const serverFilters: Record<string, string | number | undefined> = {
     episode_id: `eq.${episodeRow.id}`,
@@ -134,7 +241,7 @@ router.get("/source-catalog/lookup", async (req: Request, res: Response) => {
   })).map(publicServerRow).filter((server) => Boolean(server.page_url));
 
   res.setHeader("Cache-Control", "public, max-age=60");
-  res.json({ title, episode: episodeRow, servers, pagesOnly: true });
+  res.json({ title: publicCatalogTitle(title), episode: episodeRow, servers, pagesOnly: true });
 });
 
 router.get("/source-catalog/episodes/:episodeId/servers", async (req: Request, res: Response) => {

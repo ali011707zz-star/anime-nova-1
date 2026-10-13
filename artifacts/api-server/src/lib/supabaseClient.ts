@@ -169,6 +169,14 @@ function parseFilter(col: string, val: string): { sql: string; value: any } {
     like: "LIKE", ilike: "ILIKE",
   };
 
+  if (op === "cs") {
+    try {
+      return { sql: `"${col}" @> $?::jsonb`, value: JSON.stringify(JSON.parse(raw)) };
+    } catch {
+      return { sql: "FALSE", value: undefined };
+    }
+  }
+
   if (op === "is") {
     if (raw === "null") return { sql: `"${col}" IS NULL`, value: undefined };
     if (raw === "not.null") return { sql: `"${col}" IS NOT NULL`, value: undefined };

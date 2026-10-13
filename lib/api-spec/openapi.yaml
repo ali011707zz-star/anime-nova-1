@@ -10,6 +10,8 @@ servers:
 tags:
   - name: health
     description: Health operations
+  - name: source-catalog
+    description: Read-only provider catalog browsing and filtering
 paths:
   /healthz:
     get:
@@ -73,6 +75,91 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/AnimeSkipTimes"
+  /source-catalog/categories:
+    get:
+      operationId: getSourceCatalogCategories
+      tags: [source-catalog]
+      summary: List categories and coverage for a provider catalog
+      parameters:
+        - name: provider
+          in: query
+          required: true
+          schema:
+            $ref: "#/components/schemas/CatalogProvider"
+      responses:
+        "200":
+          description: Category labels and title counts; categories may overlap
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SourceCatalogCategoriesResponse"
+        "400":
+          description: Missing or unsupported provider
+  /source-catalog/titles:
+    get:
+      operationId: getSourceCatalogTitles
+      tags: [source-catalog]
+      summary: Search and filter source catalog titles
+      parameters:
+        - name: provider
+          in: query
+          required: false
+          schema:
+            $ref: "#/components/schemas/CatalogProvider"
+        - name: mediaType
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [series, movie]
+        - name: category
+          in: query
+          required: false
+          description: Exact provider category; titles can belong to multiple categories
+          schema:
+            type: string
+            maxLength: 120
+        - name: tag
+          in: query
+          required: false
+          schema:
+            type: string
+            maxLength: 120
+        - name: catalogStatus
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [catalogued, details_checked, partial, failed]
+        - name: q
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: page
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 30
+      responses:
+        "200":
+          description: Filtered source catalog titles
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SourceCatalogTitlesResponse"
+        "400":
+          description: Invalid filter
   /device-link/request:
     post:
       operationId: createDeviceLinkCode
@@ -289,4 +376,106 @@ components:
           type: string
         device:
           $ref: "#/components/schemas/LinkedDevice"
+    CatalogProvider:
+      type: string
+      enum: [animeify, anslayer, sanime, anifox, stardima_catalog]
+    SourceCatalogCategoriesResponse:
+      type: object
+      required: [provider, totalTitles, classifiedTitles, unclassifiedTitles, categories, localizationLabels]
+      properties:
+        provider:
+          $ref: "#/components/schemas/CatalogProvider"
+        totalTitles:
+          type: integer
+          minimum: 0
+        classifiedTitles:
+          type: integer
+          minimum: 0
+        unclassifiedTitles:
+          type: integer
+          minimum: 0
+        categories:
+          type: array
+          items:
+            type: object
+            required: [name, titleCount]
+            properties:
+              name:
+                type: string
+              titleCount:
+                type: integer
+                minimum: 1
+        localizationLabels:
+          type: array
+          items:
+            type: object
+            required: [name, titleCount]
+            properties:
+              name:
+                type: string
+              titleCount:
+                type: integer
+                minimum: 1
+    SourceCatalogClassification:
+      type: object
+      required: [version, status, contentFamilies, sourceCategories, sourceTags, localizationLabels, source, detailCheckedAt]
+      properties:
+        version:
+          type: integer
+        status:
+          type: string
+          enum: [classified, source_labeled, needs_review, manually_reviewed]
+        contentFamilies:
+          type: array
+          items:
+            type: string
+        sourceCategories:
+          type: array
+          items:
+            type: string
+        sourceTags:
+          type: array
+          items:
+            type: string
+        localizationLabels:
+          type: array
+          items:
+            type: string
+        source:
+          type: string
+        detailCheckedAt:
+          type: [string, "null"]
+          format: date-time
+    SourceCatalogTitlesResponse:
+      type: object
+      required: [results, page, limit, provider, query, mediaType, category, tag, catalogStatus]
+      properties:
+        results:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+            properties:
+              classification:
+                oneOf:
+                  - $ref: "#/components/schemas/SourceCatalogClassification"
+                  - type: "null"
+        page:
+          type: integer
+        limit:
+          type: integer
+        provider:
+          oneOf:
+            - $ref: "#/components/schemas/CatalogProvider"
+            - type: "null"
+        query:
+          type: string
+        mediaType:
+          type: [string, "null"]
+        category:
+          type: [string, "null"]
+        tag:
+          type: [string, "null"]
+        catalogStatus:
+          type: [string, "null"]
 
