@@ -16,7 +16,13 @@ import {
   getSubtitleCache,
   setSubtitleCache,
 } from "../lib/sourceCache.js";
-import { encryptProxyUrl, encryptParam, decryptParam, isEncrypted, isSafeExternalUrl } from "../lib/security.js";
+import { encryptProxyUrl, encryptParam, decryptParam, isEncrypted, isSafeExternalUrl, checkRateLimit } from "../lib/security.js";
+import {
+  fetchSafeExternalResponse,
+  isAllowedStardimaPageUrl,
+  probeStardimaMediaUrl,
+} from "../lib/stardima-playback.mjs";
+import { stardimaPlayableType } from "../jobs/stardima-catalog-utils.mjs";
 import { ANIVEXA_SOURCES, getAnivexaSources, isAnivexaSite } from "../lib/anivexa.js";
 import {
   CONSUMET_SOURCES,
@@ -2170,9 +2176,32 @@ function parseVidhidePro(html: string): string | null {
   } catch { return null; }
 }
 
+async function readBoundedExternalPage(response: Response, maxBytes = 1_000_000): Promise<string> {
+  const reader = response.body?.getReader();
+  if (!reader) return "";
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    while (total < maxBytes) {
+      const { done, value } = await reader.read();
+      if (done || !value?.length) break;
+      const remaining = maxBytes - total;
+      const part = value.subarray(0, remaining);
+      chunks.push(part);
+      total += part.length;
+      if (part.length < value.length) break;
+    }
+  } finally {
+    try { await reader.cancel(); } catch {}
+    try { reader.releaseLock(); } catch {}
+  }
+  return Buffer.concat(chunks.map((chunk) => Buffer.from(chunk))).toString("utf8");
+}
+
 async function extractVideoDeep(
   startUrl: string,
   referer?: string,
+  options: { safeExternal?: boolean } = {},
 ): Promise<{ url: string; type: "hls" | "mp4" } | null> {
   const visited = new Set<string>();
   let url = startUrl;
@@ -2185,7 +2214,30 @@ async function extractVideoDeep(
       // FileMoon و StreamWish و مشابهاتها تحجب Replit IP → نستخدم CF proxy (curl_cffi)
       const needsCfProxy = url.includes("filemoon") || url.includes("streamwish") ||
         url.includes("wishembed") || url.includes("swdyu") || url.includes("luluvdo");
-      if (needsCfProxy) {
+      if (options.safeExternal) {
+        if (!isSafeExternalUrl(url)) break;
+        const origin = new URL(url).origin;
+        const result = await fetchSafeExternalResponse(url, {
+          safeUrl: isSafeExternalUrl,
+          timeoutMs: 7000,
+          headers: {
+            "User-Agent": BROWSER_UA,
+            Referer: ref,
+            Origin: origin,
+            Accept: "text/html,application/json,text/plain,*/*;q=0.7",
+            "Accept-Language": "ar,en;q=0.9",
+          },
+        });
+        if (!result.response?.ok) break;
+        url = result.url;
+        const contentType = String(result.response.headers.get("content-type") || "");
+        if (/^(?:video\/|audio\/|application\/octet-stream)/i.test(contentType)) {
+          try { await result.response.body?.cancel(); } catch {}
+          break;
+        }
+        html = await readBoundedExternalPage(result.response);
+        if (!html) break;
+      } else if (needsCfProxy) {
         const cfHtml = await cfProxyGet(url, ref, 14000);
         if (!cfHtml) break;
         html = cfHtml;
@@ -2285,6 +2337,7 @@ async function extractVideoDeep(
       if (direct) return direct;
       const nextSrc = extractIframeSrc(html, url);
       if (!nextSrc) break;
+      if (options.safeExternal && !isSafeExternalUrl(nextSrc)) break;
       ref = url;
       url = nextSrc;
     } catch { break; }
@@ -15996,6 +16049,203 @@ router.get("/anime/probe", async (req, res) => {
     res.json({ ok: r.ok || r.status === 206, status: r.status, contentType: r.headers.get("content-type") });
   } catch (e: any) {
     res.json({ ok: false, error: e?.message });
+  }
+});
+
+const STARDIMA_ERROR_MESSAGES: Record<string, string> = {
+  expired: "انتهت صلاحية رابط هذا الخادم أو لم يعد موجودًا. اختر خادمًا آخر.",
+  dead: "رابط هذا الخادم لم يعد موجودًا. اختر خادمًا آخر.",
+  blocked: "المصدر يحجب طلب التشغيل حاليًا. جرّب خادمًا آخر أو أعد المحاولة لاحقًا.",
+  unsupported: "هذا الخادم يعرض صفحة خارجية أو صيغة لا يدعمها المشغل الداخلي.",
+  unreachable: "تعذر التحقق من الوسائط الآن. لم يُسجّل هذا الخادم على أنه صالح.",
+};
+
+function catalogMetadata(value: unknown): Record<string, any> {
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    return { ...(value as Record<string, any>) };
+  }
+  if (typeof value === "string") {
+    try {
+      const parsed = JSON.parse(value);
+      return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+    } catch {}
+  }
+  return {};
+}
+
+function statusForStardimaHealth(state: string): string {
+  if (state === "verified") return "media_verified";
+  if (state === "dead" || state === "expired") return "dead";
+  if (state === "unsupported") return "unsupported";
+  return "link_found";
+}
+
+async function saveStardimaHealth(
+  server: any,
+  pageUrl: string,
+  health: Record<string, unknown>,
+): Promise<boolean> {
+  const checkedAt = String(health.checked_at || new Date().toISOString());
+  const metadata = {
+    ...catalogMetadata(server.provider_metadata),
+    page_url: pageUrl,
+    health,
+  };
+  await sbPatch("source_catalog_servers", { id: `eq.${server.id}` }, {
+    availability_status: statusForStardimaHealth(String(health.state || "")),
+    last_checked_at: checkedAt,
+    provider_metadata: metadata,
+  });
+  const updated = await sbSelect<any>("source_catalog_servers", {
+    id: `eq.${server.id}`,
+    provider: "eq.stardima_catalog",
+  }, {
+    limit: 1,
+    select: "id,availability_status,last_checked_at,provider_metadata",
+    strict: true,
+  });
+  const persisted = updated[0];
+  return Boolean(
+    persisted &&
+    String(persisted.availability_status) === statusForStardimaHealth(String(health.state || "")) &&
+    catalogMetadata(persisted.provider_metadata).health?.checked_at === checkedAt,
+  );
+}
+
+router.post("/anime/stardima/resolve", async (req: Request, res) => {
+  const serverId = Number(req.body?.serverId);
+  if (!Number.isSafeInteger(serverId) || serverId <= 0) {
+    return void res.status(400).json({ error: "معرّف الخادم غير صالح." });
+  }
+  const requestIp = String(req.ip || req.socket.remoteAddress || "unknown");
+  if (!checkRateLimit(`stardima-resolve:${requestIp}`, 12, 60_000)) {
+    return void res.status(429).json({ error: "طلبات فحص كثيرة. انتظر قليلًا ثم أعد المحاولة." });
+  }
+
+  try {
+    const rows = await sbSelect<any>("source_catalog_servers", {
+      id: `eq.${serverId}`,
+      provider: "eq.stardima_catalog",
+    }, {
+      limit: 1,
+      select: "id,episode_id,provider,server_key,server_name,quality,language,source_kind,source_host,availability_status,last_checked_at,provider_metadata",
+      strict: true,
+    });
+    const server = rows[0];
+    if (!server) return void res.status(404).json({ error: "خادم StarDima غير موجود في الكتالوج." });
+
+    const oldMetadata = catalogMetadata(server.provider_metadata);
+    const pageUrl = String(oldMetadata.page_url || "").trim();
+    const fail = async (state: string, reason: string, status: number | null = null, finalUrl: string | null = null) => {
+      const checkedAt = new Date().toISOString();
+      const health = {
+        state,
+        reason,
+        checked_at: checkedAt,
+        ...(status != null ? { http_status: status } : {}),
+        ...(finalUrl && isSafeExternalUrl(finalUrl) ? { final_host: new URL(finalUrl).hostname } : {}),
+      };
+      const persisted = await saveStardimaHealth(server, pageUrl, health);
+      if (!persisted) {
+        logger.warn({ serverId, state }, "stardima health state could not be persisted");
+        return void res.status(503).json({
+          error: "تعذر حفظ نتيجة فحص الخادم. لم يبدأ التشغيل.",
+          state,
+        });
+      }
+      const httpStatus = state === "blocked" || state === "unreachable" ? 502 : 422;
+      return void res.status(httpStatus).json({
+        error: STARDIMA_ERROR_MESSAGES[state] || STARDIMA_ERROR_MESSAGES.unreachable,
+        state,
+        reason,
+      });
+    };
+
+    if (!pageUrl || !isSafeExternalUrl(pageUrl)) {
+      return await fail("unsupported", "unsafe_or_missing_catalog_url");
+    }
+    const page = new URL(pageUrl);
+    if (server.source_host && String(server.source_host).toLowerCase() !== page.hostname.toLowerCase()) {
+      return await fail("unsupported", "catalog_host_mismatch");
+    }
+
+    const directType = stardimaPlayableType(pageUrl);
+    const directReference = String(server.source_kind || "") === "direct_media" || Boolean(directType);
+    let extracted: { url: string; type: "hls" | "mp4" } | null = directReference
+      ? { url: pageUrl, type: directType || "mp4" }
+      : null;
+
+    if (!directReference) {
+      if (!isAllowedStardimaPageUrl(pageUrl)) {
+        return await fail("unsupported", "page_host_not_approved");
+      }
+      try {
+        extracted = await extractVideoDeep(pageUrl, pageUrl, { safeExternal: true });
+      } catch {
+        extracted = null;
+      }
+    }
+    if (!extracted?.url) {
+      return await fail("unsupported", "no_extractable_media");
+    }
+
+    let extractedUrl = "";
+    try {
+      extractedUrl = new URL(extracted.url, pageUrl).href;
+    } catch {}
+    if (!extractedUrl || !isSafeExternalUrl(extractedUrl)) {
+      return await fail("blocked", "unsafe_extracted_media_url");
+    }
+
+    const probe = await probeStardimaMediaUrl(extractedUrl, {
+      referer: pageUrl,
+      safeUrl: isSafeExternalUrl,
+      maxBytes: 2048,
+      timeoutMs: 4500,
+    });
+    if (!probe.ok || !probe.finalUrl || !probe.type) {
+      const state = probe.state === "expired" || probe.state === "dead"
+        ? probe.state
+        : probe.state === "blocked" || probe.state === "unreachable"
+          ? probe.state
+          : "unsupported";
+      return await fail(state, probe.reason || "media_probe_failed", probe.status, probe.finalUrl);
+    }
+
+    const checkedAt = new Date().toISOString();
+    const health = {
+      state: "verified",
+      reason: null,
+      checked_at: checkedAt,
+      http_status: probe.status,
+      media_type: probe.type,
+      content_type: probe.contentType || null,
+      final_host: new URL(probe.finalUrl).hostname,
+    };
+    if (!await saveStardimaHealth(server, pageUrl, health)) {
+      logger.warn({ serverId }, "verified StarDima link could not persist its health state");
+      return void res.status(503).json({
+        error: "تم العثور على وسيط لكن تعذر حفظ نتيجة فحصه. لم يبدأ التشغيل.",
+        state: "unreachable",
+      });
+    }
+
+    res.setHeader("Cache-Control", "no-store");
+    return void res.json({
+      directUrl: probe.finalUrl,
+      type: probe.type,
+      quality: String(server.quality || "").trim() || null,
+      serverName: String(server.server_name || server.source_host || "StarDima"),
+      sourceHost: String(server.source_host || page.hostname),
+      headers: { Referer: pageUrl, Origin: page.origin },
+      health: { state: "verified", checkedAt },
+    });
+  } catch (error: any) {
+    logger.warn({ serverId, error: String(error?.message || error).slice(0, 160) }, "StarDima link resolution failed");
+    return void res.status(503).json({
+      error: "تعذر فحص رابط StarDima الآن. أعد المحاولة أو اختر خادمًا آخر.",
+      state: "unreachable",
+    });
   }
 });
 

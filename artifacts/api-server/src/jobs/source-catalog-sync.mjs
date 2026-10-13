@@ -602,6 +602,49 @@ async function supabasePatch(table, filter, row) {
   });
 }
 
+async function supabaseSelect(table, filters, select) {
+  const rows = [];
+  const pageSize = 1000;
+  for (let offset = 0; offset < 100_000; offset += pageSize) {
+    const query = new URLSearchParams({
+      ...filters,
+      select,
+      order: "id.asc",
+      limit: String(pageSize),
+      offset: String(offset),
+    });
+    const page = await supabaseRequest(`${table}?${query}`);
+    rows.push(...page);
+    if (page.length < pageSize) return rows;
+  }
+  throw new Error(`Supabase ${table} selection exceeded the supported page limit`);
+}
+
+function serverConflictKey(row) {
+  return [
+    row.episode_id,
+    row.server_key || "",
+    row.quality || "",
+    row.language || "",
+  ].join("|");
+}
+
+function pageUrlOfServer(row) {
+  return text(row.page_url) || text(jsonObject(row.provider_metadata).page_url);
+}
+
+function sourceRemovedMetadata(row, checkedAt) {
+  const metadata = jsonObject(row.provider_metadata);
+  return {
+    ...metadata,
+    health: {
+      state: "source_removed",
+      reason: "removed_from_latest_source_list",
+      source_sync_at: checkedAt,
+    },
+  };
+}
+
 async function restSelectProviderTitles(provider, select) {
   const rows = [];
   const pageSize = 1000;
@@ -796,6 +839,8 @@ async function runClassificationBackfill(provider) {
 async function restUpsertEpisodesAndServers(titleId, title, episodes) {
   const validEpisodes = episodes.filter((item) => item?.provider_episode_id);
   if (!validEpisodes.length) return;
+  const syncAt = new Date().toISOString();
+  const reconcileStardima = title.provider === "stardima_catalog";
 
   const episodeRows = validEpisodes.map((item) => ({
     title_id: titleId,
@@ -808,6 +853,7 @@ async function restUpsertEpisodesAndServers(titleId, title, episodes) {
     air_date: item.air_date || null,
     episode_status: item.episode_status || "episode_found",
     provider_metadata: item.provider_metadata || {},
+    ...(reconcileStardima ? { last_seen_at: syncAt, details_checked_at: syncAt } : {}),
   }));
   const savedEpisodes = [];
   for (let start = 0; start < episodeRows.length; start += 100) {
@@ -818,12 +864,29 @@ async function restUpsertEpisodesAndServers(titleId, title, episodes) {
     ));
   }
   const episodeIds = new Map(savedEpisodes.map((row) => [row.provider_episode_id, row.id]));
+  const existingRows = [];
+  if (reconcileStardima) {
+    const episodeIdValues = [...new Set(episodeIds.values())].filter(Number.isSafeInteger);
+    if (!episodeIdValues.length) throw new Error("Source catalog episode upsert returned no IDs");
+    for (let start = 0; start < episodeIdValues.length; start += 100) {
+      const ids = episodeIdValues.slice(start, start + 100);
+      existingRows.push(...await supabaseSelect(
+        "source_catalog_servers",
+        {
+          provider: "eq.stardima_catalog",
+          episode_id: `in.(${ids.join(",")})`,
+        },
+        "id,episode_id,provider,server_key,quality,language,availability_status,last_checked_at,last_seen_at,provider_metadata",
+      ));
+    }
+  }
+  const existingByKey = new Map(existingRows.map((row) => [serverConflictKey(row), row]));
   const serverRows = [];
   for (const episode of validEpisodes) {
     const episodeId = episodeIds.get(episode.provider_episode_id);
     for (const server of Array.isArray(episode._servers) ? episode._servers : []) {
       const pageUrl = text(server.page_url);
-      serverRows.push({
+      const row = {
         episode_id: episodeId,
         provider: title.provider,
         server_key: text(server.server_key) || "server",
@@ -833,18 +896,57 @@ async function restUpsertEpisodesAndServers(titleId, title, episodes) {
         source_kind: text(server.source_kind) || "provider_reference",
         source_host: text(server.source_host) || hostOf(pageUrl),
         availability_status: text(server.availability_status) || (pageUrl ? "link_found" : "unsupported"),
+        ...(reconcileStardima ? { last_seen_at: syncAt } : {}),
         // Legacy production schema has no page_url column. Keep the public
-        // page reference in JSON until the additive SQL migration is applied.
-        provider_metadata: pageUrl ? { page_url: pageUrl } : {},
-      });
+        // page reference and health state together in JSON.
+        provider_metadata: pageUrl
+          ? {
+              page_url: pageUrl,
+              ...(reconcileStardima ? { health: { state: "unverified", reason: "not_checked" } } : {}),
+            }
+          : {},
+      };
+      const previous = existingByKey.get(serverConflictKey(row));
+      if (reconcileStardima && previous) {
+        const previousMetadata = jsonObject(previous.provider_metadata);
+        if (pageUrlOfServer(previous) === pageUrl && previousMetadata.health?.state !== "source_removed") {
+          row.availability_status = previous.availability_status || row.availability_status;
+          row.last_checked_at = previous.last_checked_at || null;
+          row.provider_metadata = { ...previousMetadata, page_url: pageUrl };
+        } else if (previousMetadata.health?.state === "source_removed") {
+          row.availability_status = "link_found";
+          row.last_checked_at = null;
+          row.provider_metadata = {
+            ...previousMetadata,
+            page_url: pageUrl,
+            health: { state: "unverified", reason: "source_reference_returned" },
+          };
+        } else if (pageUrlOfServer(previous) !== pageUrl) {
+          row.availability_status = "link_found";
+          row.last_checked_at = null;
+        }
+      }
+      serverRows.push(row);
     }
   }
+  const currentKeys = new Set(serverRows.map(serverConflictKey));
   for (let start = 0; start < serverRows.length; start += 100) {
     await supabaseUpsert(
       "source_catalog_servers",
       serverRows.slice(start, start + 100),
       "episode_id,server_key,quality,language",
     );
+  }
+  const staleRows = reconcileStardima
+    ? existingRows.filter((row) => !currentKeys.has(serverConflictKey(row)))
+    : [];
+  for (let start = 0; start < staleRows.length; start += 40) {
+    await mapConcurrent(staleRows.slice(start, start + 40), 8, async (row) => {
+      await supabasePatch("source_catalog_servers", `id=eq.${encodeURIComponent(row.id)}`, {
+        availability_status: "dead",
+        provider_metadata: sourceRemovedMetadata(row, syncAt),
+      });
+    });
   }
 }
 
@@ -990,6 +1092,8 @@ async function upsertTitlesBatch(client, titles) {
 async function upsertEpisodesAndServers(client, titleId, title, episodes) {
   const validEpisodes = episodes.filter((item) => item?.provider_episode_id);
   if (!validEpisodes.length) return;
+  const syncAt = new Date().toISOString();
+  const reconcileStardima = title.provider === "stardima_catalog";
 
   const episodeParams = [];
   const episodeTuples = validEpisodes.map((item) => {
@@ -1017,6 +1121,18 @@ async function upsertEpisodesAndServers(client, titleId, title, episodes) {
   `, episodeParams);
   const episodeIds = new Map(episodeResult.rows.map((row) => [row.provider_episode_id, row.id]));
 
+  const episodeIdValues = [...new Set(episodeIds.values())];
+  const existingRows = reconcileStardima && episodeIdValues.length
+    ? (await client.query(
+        `SELECT id,episode_id,provider,server_key,quality,language,page_url,
+                availability_status,last_checked_at,last_seen_at,provider_metadata
+           FROM source_catalog_servers
+          WHERE provider='stardima_catalog' AND episode_id = ANY($1)`,
+        [episodeIdValues],
+      )).rows
+    : [];
+  const existingByKey = new Map(existingRows.map((row) => [serverConflictKey(row), row]));
+
   const servers = [];
   const seen = new Set();
   for (const episode of validEpisodes) {
@@ -1025,15 +1141,44 @@ async function upsertEpisodesAndServers(client, titleId, title, episodes) {
       const pageUrl = text(server.page_url);
       const quality = text(server.quality) || "";
       const language = text(server.language) || "";
-      const key = `${episodeId}:${server.server_key}:${quality}:${language}:${pageUrl || ""}`;
+      const row = {
+        episode_id: episodeId,
+        server_key: text(server.server_key) || "server",
+        quality,
+        language,
+        page_url: pageUrl,
+      };
+      const key = serverConflictKey(row);
       if (!episodeId || seen.has(key)) continue;
       seen.add(key);
+      const previous = existingByKey.get(key);
+      const previousMetadata = jsonObject(previous?.provider_metadata);
+      const previousUrl = pageUrlOfServer(previous || {});
+      const isSameUrl = Boolean(previous && previousUrl === pageUrl);
+      const isReturnedAfterRemoval = previousMetadata.health?.state === "source_removed";
+      const resetAfterUrlChange = previous && !isSameUrl;
+      let status = text(server.availability_status) || (pageUrl ? "link_found" : "unsupported");
+      let lastCheckedAt = null;
+      let metadata = reconcileStardima
+        ? { health: { state: "unverified", reason: "not_checked" } }
+        : {};
+      if (reconcileStardima && isSameUrl && !isReturnedAfterRemoval) {
+        status = previous.availability_status || status;
+        lastCheckedAt = previous.last_checked_at || null;
+        metadata = previousMetadata;
+      } else if (reconcileStardima && (isReturnedAfterRemoval || resetAfterUrlChange)) {
+        status = "link_found";
+        metadata = { health: { state: "unverified", reason: isReturnedAfterRemoval ? "source_reference_returned" : "source_url_changed" } };
+      }
       servers.push([
-        episodeId, title.provider, text(server.server_key) || "server",
+        episodeId, title.provider, row.server_key,
         text(server.server_name), quality, language,
         text(server.source_kind) || "provider_reference", pageUrl,
         text(server.source_host) || hostOf(pageUrl),
-        text(server.availability_status) || (pageUrl ? "link_found" : "unsupported"),
+        status,
+        JSON.stringify(metadata),
+        reconcileStardima ? syncAt : null,
+        lastCheckedAt,
       ]);
     }
   }
@@ -1042,9 +1187,24 @@ async function upsertEpisodesAndServers(client, titleId, title, episodes) {
     const params = [];
     const tuples = chunk.map((values) => {
       const offset = params.length;
-      params.push(...values, JSON.stringify({}));
-      return `(${values.map((_, index) => `$${offset + index + 1}`).join(",")},$${params.length}::jsonb,NOW(),NULL)`;
+      params.push(...values);
+      const base = values.slice(0, 10).map((_, index) => `$${offset + index + 1}`);
+      const metadata = `$${offset + 11}::jsonb`;
+      const lastSeen = `COALESCE($${offset + 12}::timestamptz,NOW())`;
+      const lastChecked = `$${offset + 13}::timestamptz`;
+      return `(${[...base, metadata, lastSeen, lastChecked].join(",")})`;
     });
+    const conflictUpdate = reconcileStardima
+      ? `server_name=EXCLUDED.server_name, source_kind=EXCLUDED.source_kind,
+         page_url=EXCLUDED.page_url, source_host=EXCLUDED.source_host,
+         availability_status=EXCLUDED.availability_status,
+         provider_metadata=EXCLUDED.provider_metadata,
+         last_seen_at=EXCLUDED.last_seen_at,
+         last_checked_at=EXCLUDED.last_checked_at`
+      : `server_name=EXCLUDED.server_name, source_kind=EXCLUDED.source_kind,
+         page_url=EXCLUDED.page_url, source_host=EXCLUDED.source_host,
+         availability_status=EXCLUDED.availability_status,
+         provider_metadata=EXCLUDED.provider_metadata, last_seen_at=NOW()`;
     await client.query(`
       INSERT INTO source_catalog_servers
         (episode_id, provider, server_key, server_name, quality, language,
@@ -1052,11 +1212,29 @@ async function upsertEpisodesAndServers(client, titleId, title, episodes) {
          provider_metadata, last_seen_at, last_checked_at)
       VALUES ${tuples.join(",")}
       ON CONFLICT (episode_id, server_key, quality, language) DO UPDATE SET
-        server_name=EXCLUDED.server_name, source_kind=EXCLUDED.source_kind,
-        page_url=EXCLUDED.page_url, source_host=EXCLUDED.source_host,
-        availability_status=EXCLUDED.availability_status,
-        provider_metadata=EXCLUDED.provider_metadata, last_seen_at=NOW()
+        ${conflictUpdate}
     `, params);
+  }
+  if (reconcileStardima && episodeIdValues.length) {
+    const removedAt = new Date().toISOString();
+    const health = JSON.stringify({
+      state: "source_removed",
+      reason: "removed_from_latest_source_list",
+      source_sync_at: removedAt,
+    });
+    await client.query(`
+      UPDATE source_catalog_servers
+         SET availability_status='dead',
+             provider_metadata=jsonb_set(
+               COALESCE(provider_metadata,'{}'::jsonb),
+               '{health}',
+               $3::jsonb,
+               true
+             )
+       WHERE provider='stardima_catalog'
+         AND episode_id = ANY($1)
+         AND last_seen_at < $2::timestamptz
+    `, [episodeIdValues, syncAt, health]);
   }
 }
 

@@ -41,7 +41,8 @@ const Pressable = TvPressable;
 export type PlayerSource = {
   url: string;
   label: string;
-  quality: "1080p FHD" | "720p HD" | "360p SD";
+  quality?: string;
+  contentType?: "hls" | "progressive";
   site?: string;
   subtitleUrl?: string;
   isArabic?: boolean;
@@ -68,7 +69,9 @@ type NovaVideoSource = string | {
   headers?: Record<string, string>;
 };
 
-function isHlsSourceUrl(url: string): boolean {
+function isHlsSourceUrl(url: string, contentType?: PlayerSource["contentType"]): boolean {
+  if (contentType === "hls") return true;
+  if (contentType === "progressive") return false;
   const lower = url.toLowerCase();
   return (
     /\.m3u8(?:[?#]|$)/i.test(lower) ||
@@ -78,7 +81,9 @@ function isHlsSourceUrl(url: string): boolean {
   );
 }
 
-function isProgressiveSourceUrl(url: string): boolean {
+function isProgressiveSourceUrl(url: string, contentType?: PlayerSource["contentType"]): boolean {
+  if (contentType === "progressive") return true;
+  if (contentType === "hls") return false;
   const lower = url.toLowerCase();
   return (
     /\.(?:mp4|m4v|webm|mov)(?:[?#]|$)/i.test(lower) ||
@@ -90,8 +95,8 @@ function isProgressiveSourceUrl(url: string): boolean {
 
 function toExpoVideoSource(source: PlayerSource | undefined): NovaVideoSource | null {
   if (!source?.url) return null;
-  const hls = isHlsSourceUrl(source.url);
-  const progressive = !hls && isProgressiveSourceUrl(source.url);
+  const hls = isHlsSourceUrl(source.url, source.contentType);
+  const progressive = !hls && isProgressiveSourceUrl(source.url, source.contentType);
   return hls || progressive || source.headers
     ? {
         uri: source.url,

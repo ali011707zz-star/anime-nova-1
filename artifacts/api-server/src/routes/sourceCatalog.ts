@@ -5,6 +5,8 @@ const router = Router();
 const PROVIDERS = new Set(["animeify", "anslayer", "sanime", "anifox", "stardima_catalog"]);
 const MEDIA_TYPES = new Set(["series", "movie"]);
 const CATALOG_STATUSES = new Set(["catalogued", "details_checked", "partial", "failed"]);
+const STARDIMA_FAILURE_RETRY_MS = 6 * 60 * 60_000;
+const STARDIMA_BLOCK_RETRY_MS = 15 * 60_000;
 
 function intParam(value: unknown, fallback: number, min: number, max: number): number {
   const n = Number.parseInt(String(value ?? ""), 10);
@@ -62,10 +64,79 @@ function publicServerRow(row: any): any {
   const metadataPageUrl = metadata && typeof metadata === "object"
     ? metadata.page_url
     : undefined;
+  const health = metadata && typeof metadata === "object" &&
+      metadata.health && typeof metadata.health === "object" && !Array.isArray(metadata.health)
+    ? metadata.health
+    : null;
   return {
     ...publicRow,
     page_url: row.page_url || metadataPageUrl || null,
+    health_state: health?.state || null,
+    health_reason: health?.reason || null,
+    health_checked_at: health?.checked_at || health?.source_sync_at || row.last_checked_at || null,
   };
+}
+
+function dedupeCatalogServerRows(rows: any[], provider: string) {
+  const unique: any[] = [];
+  const seen = new Map<string, number>();
+  let omittedCount = 0;
+  const now = Date.now();
+
+  for (const raw of rows) {
+    const server = publicServerRow(raw);
+    if (!server.page_url) continue;
+    if (provider !== "stardima_catalog") {
+      unique.push(server);
+      continue;
+    }
+
+    const status = String(server.availability_status || "link_found").toLowerCase();
+    const health = String(server.health_state || "").toLowerCase();
+    const checkedAt = Date.parse(String(server.last_checked_at || server.health_checked_at || ""));
+    const age = Number.isFinite(checkedAt) ? Math.max(0, now - checkedAt) : Infinity;
+    if (health === "source_removed") {
+      omittedCount++;
+      continue;
+    }
+    if (["dead", "unsupported"].includes(status) && age < STARDIMA_FAILURE_RETRY_MS) {
+      omittedCount++;
+      continue;
+    }
+    if (health === "blocked" && age < STARDIMA_BLOCK_RETRY_MS) {
+      omittedCount++;
+      continue;
+    }
+
+    let normalizedUrl: string;
+    try {
+      const parsed = new URL(String(server.page_url));
+      parsed.hash = "";
+      normalizedUrl = parsed.href;
+    } catch {
+      omittedCount++;
+      continue;
+    }
+    const candidate = {
+      ...server,
+      needs_recheck:
+        ["dead", "unsupported"].includes(status) ||
+        ["blocked", "unreachable", "source_reference_returned"].includes(health),
+    };
+    const previousIndex = seen.get(normalizedUrl);
+    if (previousIndex === undefined) {
+      seen.set(normalizedUrl, unique.length);
+      unique.push(candidate);
+      continue;
+    }
+    omittedCount++;
+    const previous = unique[previousIndex];
+    if (candidate.availability_status === "media_verified" &&
+        previous.availability_status !== "media_verified") {
+      unique[previousIndex] = candidate;
+    }
+  }
+  return { servers: unique, omittedCount };
 }
 
 function publicCatalogTitle(row: any): any {
@@ -287,29 +358,52 @@ router.get("/source-catalog/lookup", async (req: Request, res: Response) => {
     // The importer keeps the same public contract in provider_metadata.page_url.
     select: "id,episode_id,provider,server_key,server_name,quality,language,source_kind,source_host,availability_status,last_checked_at,provider_metadata",
     strict: true,
-  })).map(publicServerRow).filter((server: any) => Boolean(server.page_url)));
+  })));
   if (!servers) return;
+  const visible = dedupeCatalogServerRows(servers, String(title.provider || ""));
 
-  res.setHeader("Cache-Control", "public, max-age=60");
-  res.json({ title: publicCatalogTitle(title), episode: episodeRow, servers, pagesOnly: true });
+  res.setHeader("Cache-Control", "private, max-age=10");
+  res.json({
+    title: publicCatalogTitle(title),
+    episode: episodeRow,
+    servers: visible.servers,
+    omittedServerCount: visible.omittedCount,
+    pagesOnly: true,
+  });
 });
 
 router.get("/source-catalog/episodes/:episodeId/servers", async (req: Request, res: Response) => {
   const episodeId = Number(String(req.params.episodeId ?? ""));
   if (!Number.isSafeInteger(episodeId) || episodeId <= 0) return void res.status(400).json({ error: "invalid episode id" });
   const quality = String(req.query.quality ?? "").trim();
+  const episodes = await catalogQuery(res, "source catalog episode unavailable", () => sbSelect<any>("source_catalog_episodes", {
+    id: `eq.${episodeId}`,
+  }, {
+    limit: 1,
+    select: "id,provider",
+    strict: true,
+  }));
+  if (!episodes) return;
+  if (!episodes[0]) return void res.status(404).json({ error: "episode not found" });
+  const provider = String(episodes[0].provider || "");
   const rows = await catalogQuery(res, "source catalog servers unavailable", async () => (await sbSelect<any>("source_catalog_servers", {
     episode_id: `eq.${episodeId}`,
     quality: quality && quality.length <= 30 ? `eq.${quality}` : undefined,
     order: "quality.desc",
   }, {
     limit: 100,
-    select: "id,episode_id,provider,server_key,server_name,quality,language,source_kind,source_host,availability_status,last_checked_at,provider_metadata",
+    select: "id,episode_id,provider,server_key,server_name,quality,language,source_kind,source_host,availability_status,last_checked_at,last_seen_at,provider_metadata",
     strict: true,
-  })).map(publicServerRow).filter((server: any) => Boolean(server.page_url)));
+  })));
   if (!rows) return;
-  res.setHeader("Cache-Control", "public, max-age=60");
-  res.json({ servers: rows, pagesOnly: true, playback: "resolve-on-demand" });
+  const visible = dedupeCatalogServerRows(rows, provider);
+  res.setHeader("Cache-Control", "private, max-age=10");
+  res.json({
+    servers: visible.servers,
+    omittedServerCount: visible.omittedCount,
+    pagesOnly: true,
+    playback: provider === "stardima_catalog" ? "internal-resolve-and-verify" : "resolve-on-demand",
+  });
 });
 
 export default router;

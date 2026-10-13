@@ -1,4 +1,9 @@
 import { randomBytes } from "node:crypto";
+import {
+  dedupeStardimaEpisodes,
+  mapStardimaEpisode,
+  mapStardimaServers,
+} from "./stardima-catalog-utils.mjs";
 
 // These are the public Android/Firebase client identifiers embedded in the
 // official StarDima APK. The StarDima API key itself is fetched at runtime
@@ -13,7 +18,6 @@ const ANDROID_APP_VERSION = "1.0.7";
 const ANDROID_APP_BUILD = "1";
 const API_BASE_URL = "https://app.wiib.top";
 const HTTP_TIMEOUT_MS = 20_000;
-const MEDIA_FILE_EXTENSION = /\.(?:m3u8?|mpd|mp4|m4v|mkv|webm|mov|ts|flv|avi|wmv|mp3|m4a|aac|ogg)(?:$|[/?#&\s])/i;
 
 let cachedApiHeaders;
 
@@ -340,33 +344,6 @@ function unique(values) {
   return [...new Set(values.map(text).filter(Boolean))];
 }
 
-function pageReference(value) {
-  const raw = text(value);
-  if (!raw) return null;
-  try {
-    const url = new URL(raw);
-    if (!["http:", "https:"].includes(url.protocol)) return null;
-    const candidates = [url.pathname, ...url.searchParams.keys(), ...url.searchParams.values()];
-    for (const candidate of candidates) {
-      if (MEDIA_FILE_EXTENSION.test(candidate)) return null;
-      try {
-        if (MEDIA_FILE_EXTENSION.test(decodeURIComponent(candidate))) return null;
-      } catch {}
-    }
-    return url.href;
-  } catch {
-    return null;
-  }
-}
-
-function hostOf(value) {
-  try {
-    return new URL(value).hostname.toLowerCase();
-  } catch {
-    return null;
-  }
-}
-
 async function fetchCollection(path) {
   const rows = [];
   let page = 1;
@@ -433,57 +410,6 @@ async function stardimaList() {
   }).filter(Boolean);
 }
 
-function mapServers(servers) {
-  if (!Array.isArray(servers)) return [];
-  return servers.flatMap((server, index) => {
-    if (!server || typeof server !== "object") return [];
-    const pageUrl = pageReference(server.url || server.page_url || server.link || server.embed_url);
-    if (!pageUrl) return [];
-
-    const name = text(server.label) || text(server.name) || text(server.title);
-    const keyPart = text(server.id) || (name || `server-${index + 1}`)
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, "-")
-      .replace(/^-|-$/g, "");
-    return [{
-      server_key: `stardima-${keyPart}-${index + 1}`,
-      server_name: name,
-      quality: text(server.quality) || text(server.resolution) || "",
-      language: text(server.language) || "",
-      source_kind: "provider_page",
-      page_url: pageUrl,
-      source_host: hostOf(pageUrl),
-      availability_status: "link_found",
-    }];
-  });
-}
-
-function mapEpisode(raw, title, season, episodeIndex, isMovie = false) {
-  const episodeNumber = numberValue(raw?.episode_number) ??
-    numberValue(raw?.video_episode) ??
-    (isMovie ? 1 : episodeIndex + 1);
-  const seasonNumber = int(season?.normalizedNumber) || int(season?.season_number) || 1;
-  const servers = mapServers(raw?.servers);
-  const providerEpisodeId = text(raw?.id) ||
-    `${title.provider_title_id}:${season?.id || seasonNumber}:${episodeNumber}`;
-
-  return {
-    provider_episode_id: providerEpisodeId,
-    season_number: seasonNumber,
-    episode_number: episodeNumber,
-    episode_label: text(raw?.episode_number) || (isMovie ? "Movie" : String(episodeNumber)),
-    title: text(raw?.title) || (isMovie ? title.title : null),
-    episode_status: servers.length ? "link_found" : "episode_found",
-    provider_metadata: {
-      content_type: isMovie ? "movie" : "series_episode",
-      ...(season?.id != null ? { season_id: String(season.id) } : {}),
-      ...(text(season?.name) ? { season_name: text(season.name) } : {}),
-      ...(int(season?.season_number) != null ? { original_season_number: int(season.season_number) } : {}),
-    },
-    _servers: servers,
-  };
-}
-
 function normalizedSeasons(seasons) {
   const valid = seasons.filter((season) => season && season.id != null);
   const numbers = valid.map((season, index) => int(season.season_number) || index + 1);
@@ -511,15 +437,15 @@ async function stardimaMovieEpisodes(title, detail) {
     title: text(detail?.title) || title.title,
   };
 
-  if (mapServers(movie.servers).length) {
-    return [mapEpisode(movie, title, { season_number: 1 }, 0, true)];
+  if (mapStardimaEpisode(movie, title, { season_number: 1 }, 0, true)._servers.length) {
+    return [mapStardimaEpisode(movie, title, { season_number: 1 }, 0, true)];
   }
 
   const response = await stardimaGet(`/api/episodes/${encodeURIComponent(title.provider_title_id)}`);
   const listedEpisodes = Array.isArray(response?.data) ? response.data : [];
   const listedMapped = listedEpisodes.map((episode, index) => {
     const seasonNumber = int(episode?.season_number) || 1;
-    return mapEpisode(
+    return mapStardimaEpisode(
       episode,
       title,
       { id: episode?.season_id, season_number: seasonNumber, normalizedNumber: 1 },
@@ -527,7 +453,7 @@ async function stardimaMovieEpisodes(title, detail) {
       true,
     );
   });
-  if (listedMapped.some((episode) => episode._servers.length)) return listedMapped;
+  if (listedMapped.some((episode) => episode._servers.length)) return dedupeStardimaEpisodes(listedMapped);
 
   const seasonIds = [...new Set(listedEpisodes.map((episode) => text(episode?.season_id)).filter(Boolean))];
   if (!seasonIds.length) return listedMapped;
@@ -543,7 +469,7 @@ async function stardimaMovieEpisodes(title, detail) {
   });
   const fromSeasons = groups.flat().map((episode, index) => {
     const seasonNumber = int(episode?.season_number) || 1;
-    return mapEpisode(
+    return mapStardimaEpisode(
       episode,
       title,
       { id: episode?.season_id, season_number: seasonNumber, normalizedNumber: 1 },
@@ -551,7 +477,7 @@ async function stardimaMovieEpisodes(title, detail) {
       true,
     );
   });
-  return fromSeasons.length ? fromSeasons : listedMapped;
+  return dedupeStardimaEpisodes(fromSeasons.length ? fromSeasons : listedMapped);
 }
 
 async function stardimaEpisodes(title) {
@@ -565,9 +491,9 @@ async function stardimaEpisodes(title) {
     const groups = await mapConcurrent(seasons, 3, async (season) => {
       const response = await stardimaGet(`/api/seasons/${encodeURIComponent(season.id)}/servers`);
       const rows = Array.isArray(response?.data) ? response.data : [];
-      return rows.map((episode, index) => mapEpisode(episode, title, season, index));
+      return rows.map((episode, index) => mapStardimaEpisode(episode, title, season, index));
     });
-    episodes = groups.flat().filter((episode) => episode.provider_episode_id);
+    episodes = dedupeStardimaEpisodes(groups.flat().filter((episode) => episode.provider_episode_id));
   }
 
   return { episodes, titlePatch };

@@ -1,8 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { getBaseUrl } from "@/utils/api";
+import {
+  belongsInSection,
+  catalogBadge,
+  normalizedLocalizationLabel,
+} from "./dubbedCatalogClassification.mjs";
 
-export type DubbedCatalogSection = "animation" | "cartoon";
+export type { DubbedCatalogSection } from "./dubbedCatalogClassification.mjs";
 
 export type DubbedCatalogTitle = {
   id: string | number;
@@ -17,6 +22,7 @@ export type DubbedCatalogTitle = {
   backdrop_url?: string | null;
   tags?: string[];
   classification?: {
+    contentFamilies?: string[];
     localizationLabels?: string[];
     sourceTags?: string[];
   } | null;
@@ -30,50 +36,7 @@ const PAGE_SIZE = 30;
 const PAGES_PER_BATCH = 4;
 const MATCHES_PER_BATCH = 12;
 const CACHE_LIMIT = 60;
-const DUBBED_PATTERN = /dub|voice.?over|دبل|مدبلج|فصحى/i;
-const TRANSLATED_PATTERN = /sub|subtitle|translat|caption|ترجم|مترجم/i;
-
-function labelsFor(item: DubbedCatalogTitle) {
-  return [
-    ...(item.classification?.localizationLabels || []),
-    ...(item.classification?.sourceTags || []),
-    ...(item.tags || []),
-  ].map((label) => String(label).trim()).filter(Boolean);
-}
-
-function localizationKinds(item: DubbedCatalogTitle) {
-  const labels = labelsFor(item);
-  return {
-    dubbed: labels.some((label) => DUBBED_PATTERN.test(label)),
-    translated: labels.some((label) => TRANSLATED_PATTERN.test(label)),
-  };
-}
-
-export function catalogBadge(
-  item: DubbedCatalogTitle,
-  section: DubbedCatalogSection,
-): string | undefined {
-  const labels = labelsFor(item);
-  const expected = section === "cartoon" ? DUBBED_PATTERN : TRANSLATED_PATTERN;
-  const match = labels.find((label) => expected.test(label));
-  return match ? normalizedLocalizationLabel(match) : undefined;
-}
-
-export function normalizedLocalizationLabel(label: string): string | undefined {
-  if (DUBBED_PATTERN.test(label)) {
-    return /فصحى/i.test(label) ? "مدبلج فصحى" : "مدبلج";
-  }
-  if (TRANSLATED_PATTERN.test(label)) return "مترجم";
-  return undefined;
-}
-
-function belongsInSection(item: DubbedCatalogTitle, section: DubbedCatalogSection) {
-  const kinds = localizationKinds(item);
-  if (section === "animation") return kinds.translated;
-  // Titles with no clear language label remain visible in the cartoon list;
-  // no label is invented for them.
-  return kinds.dubbed || (!kinds.dubbed && !kinds.translated);
-}
+export { catalogBadge, normalizedLocalizationLabel };
 
 function mergeTitles(current: DubbedCatalogTitle[], incoming: DubbedCatalogTitle[]) {
   const seen = new Set(current.map((item) => String(item.id || item.provider_title_id)));
