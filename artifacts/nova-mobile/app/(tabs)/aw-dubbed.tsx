@@ -18,6 +18,7 @@ import { useRouter } from "expo-router";
 import { getBaseUrl } from "@/utils/api";
 import { isTvDevice, tvFocusStyle } from "@/utils/tv";
 import { useColors } from "@/hooks/useColors";
+import { StardimaCatalogTab } from "@/components/StardimaCatalogTab";
 
 // ─────────────────────────────────────────────────────────
 // Types
@@ -35,7 +36,7 @@ interface DubbedSeries  {
   seasons: DubbedSeason[]; tmdbId?: number; slug?: string;
 }
 
-type TabKey = "animation" | "cartoon";
+type TabKey = "animation" | "cartoon" | "stardima";
 const CARTOON_CATALOG_CACHE_KEY = "nova:cartoon-catalog:v1";
 const CARTOON_CATALOG_CACHE_LIMIT = 60;
 
@@ -454,23 +455,25 @@ export default function DubbedTabScreen() {
     setActiveTab(tab);
     setSearchQ("");
     Animated.timing(slideAnim, {
-      toValue: tab === "animation" ? 0 : 1,
+      toValue: tab === "animation" ? 0 : tab === "cartoon" ? 1 : 2,
       duration: 220,
       easing: Easing.out(Easing.cubic),
       useNativeDriver: false,
     }).start();
   };
 
-  const tint = activeTab === "animation" ? "#10B981" : "#7C3AED";
-
   return (
     <View style={[s.screen, { backgroundColor: colors.background, paddingTop: topPad }]}>
       {/* ── Header ── */}
       <View style={[s.header, { borderBottomColor: colors.border }]}>
         <View style={{ flex: 1 }}>
-          <Text style={[s.headerTitle, { color: colors.textPrimary }]}>رسوم متحركة مدبلجة</Text>
+          <Text style={[s.headerTitle, { color: colors.textPrimary }]}>رسوم متحركة</Text>
           <Text style={[s.headerSub, { color: colors.textSecondary }]}>
-            {activeTab === "animation" ? "أنيميشن مدبلج بالعربية" : "كرتون مدبلج للعربية"}
+            {activeTab === "animation"
+              ? "أنيميشن مدبلج بالعربية"
+              : activeTab === "cartoon"
+                ? "كرتون مدبلج للعربية"
+                : "فهرس StarDima · مدبلج ومترجم"}
           </Text>
         </View>
         <Pressable
@@ -489,9 +492,9 @@ export default function DubbedTabScreen() {
 
       {/* ── Inner tabs ── */}
       <View style={[s.tabsRow, { borderBottomColor: colors.border }]}>
-        {(["animation", "cartoon"] as TabKey[]).map(tab => {
+        {(["animation", "cartoon", "stardima"] as TabKey[]).map(tab => {
           const active = activeTab === tab;
-          const color  = tab === "animation" ? "#10B981" : "#7C3AED";
+          const color  = tab === "animation" ? "#10B981" : tab === "cartoon" ? "#7C3AED" : colors.accent;
           return (
             <Pressable key={tab} onPress={() => handleTab(tab)}
               focusable={tvMode}
@@ -502,7 +505,7 @@ export default function DubbedTabScreen() {
                 tvMode && tvFocusStyle(focused),
               ]}>
               <Text style={[s.tabText, { color: active ? color : colors.textSecondary }]}>
-                {tab === "animation" ? "✨ أنيميشن" : "📺 كرتون"}
+                {tab === "animation" ? "أنيميشن" : tab === "cartoon" ? "كرتون" : "StarDima"}
               </Text>
             </Pressable>
           );
@@ -517,7 +520,13 @@ export default function DubbedTabScreen() {
             ref={searchInput}
             value={searchQ}
             onChangeText={setSearchQ}
-            placeholder={activeTab === "animation" ? "ابحث في الأنيميشن المدبلج..." : "ابحث في الكرتون المدبلج..."}
+            placeholder={
+              activeTab === "animation"
+                ? "ابحث في الأنيميشن المدبلج..."
+                : activeTab === "cartoon"
+                  ? "ابحث في الكرتون المدبلج..."
+                  : "ابحث في كتالوج StarDima..."
+            }
             placeholderTextColor={colors.textMuted}
             style={[s.searchInput, { color: colors.textPrimary }]}
             autoFocus
@@ -532,10 +541,13 @@ export default function DubbedTabScreen() {
       )}
 
       {/* ── Content ── */}
-      {activeTab === "animation"
-        ? <AnimationList key="animation" searchQ={searchQ} />
-        : <CartoonList   key="cartoon"   searchQ={searchQ} />
-      }
+      {activeTab === "animation" ? (
+        <AnimationList key="animation" searchQ={searchQ} />
+      ) : activeTab === "cartoon" ? (
+        <CartoonList key="cartoon" searchQ={searchQ} />
+      ) : (
+        <StardimaCatalogTab key="stardima" searchQ={searchQ} />
+      )}
     </View>
   );
 }
