@@ -13192,7 +13192,38 @@ const ANSLAYER_CID    = "android-app2";
 const ANSLAYER_CSEC   = "7befba6263cc14c90d2f1d6da2c5cf9b251bfbbd";
 const _anslayerCacheMap = new Map<string, { sources: UnifiedSource[]; ts: number }>();
 const _anslayerInFlight = new Map<string, Promise<UnifiedSource[]>>();
-const ANSLAYER_TTL    = 4 * 3_600_000;
+type AnslayerSourceListener = (source: UnifiedSource) => void | Promise<void>;
+const _anslayerProgressListeners = new Map<string, Set<AnslayerSourceListener>>();
+const ANSLAYER_TTL     = 4 * 3_600_000;
+
+async function mapAnslayerLinks(
+  links: string[],
+  work: (link: string) => Promise<UnifiedSource | null>,
+  onSource?: AnslayerSourceListener,
+): Promise<Array<UnifiedSource | null>> {
+  const results: Array<UnifiedSource | null> = new Array(links.length);
+  let cursor = 0;
+  const worker = async () => {
+    while (true) {
+      const index = cursor++;
+      if (index >= links.length) return;
+      let source: UnifiedSource | null = null;
+      try {
+        source = await work(links[index]);
+      } catch {
+        source = null;
+      }
+      results[index] = source;
+      if (source && onSource) {
+        try { await onSource(source); } catch { /* streaming must not fail extraction */ }
+      }
+    }
+  };
+  await Promise.all(
+    Array.from({ length: Math.min(2, links.length) }, () => worker()),
+  );
+  return results;
+}
 
 async function anslayerGet(path: string, params: Record<string, any>): Promise<any | null> {
   try {
@@ -13219,12 +13250,20 @@ async function getAnimeSlayerSourcesUncached(
   directAnimeId?: number,
   titleAr?: string | null,
   catalogHint?: CatalogEpisodeHint | null,
+  onSource?: AnslayerSourceListener,
 ): Promise<UnifiedSource[]> {
   const ck = directAnimeId
     ? `anslayer:id:${directAnimeId}:${ep}`
     : `anslayer:${normalize(english || title).replace(/\s+/g, "-")}:${ep}`;
   const hit = _anslayerCacheMap.get(ck);
-  if (hit && Date.now() - hit.ts < ANSLAYER_TTL) return hit.sources;
+  if (hit && Date.now() - hit.ts < ANSLAYER_TTL) {
+    if (onSource) {
+      for (const source of hit.sources) {
+        try { await onSource(source); } catch { /* streaming must not fail cache reads */ }
+      }
+    }
+    return hit.sources;
+  }
 
   const out: UnifiedSource[] = [];
   try {
@@ -13297,9 +13336,11 @@ async function getAnimeSlayerSourcesUncached(
     const embedLinks: string[] = await r.json().catch(() => []);
     if (!Array.isArray(embedLinks)) return out;
 
-    // معالجة الروابط بالتوازي بدلاً من التسلسل — كل رابط له 10s budget
-    const linkResults = await Promise.allSettled(
-      embedLinks.slice(0, 6).map(async (link): Promise<UnifiedSource | null> => {
+    // Resolve at most two embeds at once and publish each completed source so
+    // progressive playback does not wait for the remaining servers.
+    const linkResults = await mapAnslayerLinks(
+      embedLinks.slice(0, 6),
+      async (link): Promise<UnifiedSource | null> => {
         if (typeof link !== "string" || !link.startsWith("http")) return null;
         if (link.includes("drive.google.com")) return null;
         try {
@@ -13378,11 +13419,10 @@ async function getAnimeSlayerSourcesUncached(
             directType: extracted.type,
           };
         } catch { return null; }
-      })
+      },
+      onSource,
     );
-    for (const r of linkResults) {
-      if (r.status === "fulfilled" && r.value) out.push(r.value);
-    }
+    for (const source of linkResults) if (source) out.push(source);
 
     console.log(`[AnimeSlayer] "${best.name}" ep${ep} → ${out.length} sources`);
     if (out.length) _anslayerCacheMap.set(ck, { sources: out, ts: Date.now() });
@@ -13404,20 +13444,54 @@ async function getAnimeSlayerSources(
   directAnimeId?: number,
   titleAr?: string | null,
   catalogHint?: CatalogEpisodeHint | null,
+  onSource?: AnslayerSourceListener,
 ): Promise<UnifiedSource[]> {
   const key = catalogHint?.providerTitleId
     ? `anslayer:catalog:${catalogHint.providerTitleId}:${ep}`
     : directAnimeId
     ? `anslayer:id:${directAnimeId}:${ep}`
     : `anslayer:${normalize(english || title).replace(/\s+/g, "-")}:${ep}`;
+  if (onSource) {
+    const listeners = _anslayerProgressListeners.get(key) || new Set<AnslayerSourceListener>();
+    listeners.add(onSource);
+    _anslayerProgressListeners.set(key, listeners);
+  }
   const active = _anslayerInFlight.get(key);
-  if (active) return active;
-  const promise = getAnimeSlayerSourcesUncached(title, english, ep, directAnimeId, titleAr, catalogHint);
+  if (active) {
+    try {
+      return await active;
+    } finally {
+      if (onSource) {
+        const listeners = _anslayerProgressListeners.get(key);
+        listeners?.delete(onSource);
+        if (!listeners?.size) _anslayerProgressListeners.delete(key);
+      }
+    }
+  }
+  const promise = getAnimeSlayerSourcesUncached(
+    title,
+    english,
+    ep,
+    directAnimeId,
+    titleAr,
+    catalogHint,
+    async source => {
+      const listeners = [...(_anslayerProgressListeners.get(key) || [])];
+      await Promise.all(listeners.map(listener =>
+        Promise.resolve().then(() => listener(source)).catch(() => {}),
+      ));
+    },
+  );
   _anslayerInFlight.set(key, promise);
   try {
     return await promise;
   } finally {
     if (_anslayerInFlight.get(key) === promise) _anslayerInFlight.delete(key);
+    if (onSource) {
+      const listeners = _anslayerProgressListeners.get(key);
+      listeners?.delete(onSource);
+      if (!listeners?.size) _anslayerProgressListeners.delete(key);
+    }
   }
 }
 
@@ -15011,6 +15085,7 @@ router.get("/anime/fetch-source", scraperQueueMiddleware, async (req, res) => {
     const ordered = filterRequestedQuality(rows)
       .filter(matchesRequestedQuality)
       .filter(source => !excludedCandidateKeys.has(progressiveCandidateKey(source)))
+      .filter(source => !progressiveSeen.has(progressiveCandidateKey(source)))
       .sort((a, b) => (b.qualityRank || sourceCheckQuality(b).qualityRank) - (a.qualityRank || sourceCheckQuality(a).qualityRank))
       .slice(0, 2);
     await Promise.all(ordered.map(async source => {
@@ -15375,7 +15450,7 @@ router.get("/anime/fetch-source", scraperQueueMiddleware, async (req, res) => {
         onSource: source => publishProgressSource?.(source),
         validate: async source => {
           const startedAt = Date.now();
-          const valid = await verifyProgressiveCandidate(source);
+          const valid = await verifyProgressiveLink(source);
           tracePlayback(
             sourceTrace,
             "fetch-source",
@@ -15476,6 +15551,12 @@ router.get("/anime/fetch-source", scraperQueueMiddleware, async (req, res) => {
         Number(catalogHint?.providerTitleId || anslayerId || 0) || undefined,
         titleAr,
         catalogHint,
+        progressive
+          ? async source => {
+              if (progressiveSent >= 2 || excludedCandidateKeys.has(progressiveCandidateKey(source))) return;
+              await runExtract([source]);
+            }
+          : undefined,
       ), 45_000, [])).forEach(collectSrc); break;
       case "ristoanime":   (await race(getRistoAnimeSources(title, english, ep),          22_000, [])).forEach(collectSrc); break;
       // case "allmanga": معطّل 2026-07-17
@@ -15505,7 +15586,7 @@ router.get("/anime/fetch-source", scraperQueueMiddleware, async (req, res) => {
     }
 
     // ── حفظ في الكاش بعد الكشط ──────────────────────────────────
-    if (sources.length && !progressive) {
+    if (sources.length) {
       setSourceCache(cKey, site, sources).catch(() => {});
     }
 
