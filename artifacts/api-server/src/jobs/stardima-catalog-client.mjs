@@ -68,7 +68,8 @@ async function requestJson(url, options = {}) {
       throw error;
     } catch (error) {
       lastError = error;
-      const retryable = !error.status || [408, 429, 500, 502, 503, 504].includes(error.status);
+      // StarDima can transiently return 404 for catalog items that subsequently resolve.
+      const retryable = !error.status || [404, 408, 429, 500, 502, 503, 504].includes(error.status);
       if (!retryable || attempt === 3) {
         throw new Error(`StarDima request failed (${error.status || "network error"})`);
       }
@@ -503,15 +504,62 @@ function stardimaClassificationFromList(title) {
   return classificationTitlePatch(title);
 }
 
+async function stardimaMovieEpisodes(title, detail) {
+  const movie = {
+    ...detail,
+    id: detail?.id ?? title.provider_title_id,
+    title: text(detail?.title) || title.title,
+  };
+
+  if (mapServers(movie.servers).length) {
+    return [mapEpisode(movie, title, { season_number: 1 }, 0, true)];
+  }
+
+  const response = await stardimaGet(`/api/episodes/${encodeURIComponent(title.provider_title_id)}`);
+  const listedEpisodes = Array.isArray(response?.data) ? response.data : [];
+  const listedMapped = listedEpisodes.map((episode, index) => {
+    const seasonNumber = int(episode?.season_number) || 1;
+    return mapEpisode(
+      episode,
+      title,
+      { id: episode?.season_id, season_number: seasonNumber, normalizedNumber: 1 },
+      index,
+      true,
+    );
+  });
+  if (listedMapped.some((episode) => episode._servers.length)) return listedMapped;
+
+  const seasonIds = [...new Set(listedEpisodes.map((episode) => text(episode?.season_id)).filter(Boolean))];
+  if (!seasonIds.length) return listedMapped;
+
+  const groups = await mapConcurrent(seasonIds, 3, async (seasonId) => {
+    const seasonResponse = await stardimaGet(`/api/seasons/${encodeURIComponent(seasonId)}/servers`);
+    const rows = Array.isArray(seasonResponse?.data) ? seasonResponse.data : [];
+    return rows.map((episode) => ({
+      ...episode,
+      season_id: episode?.season_id ?? seasonId,
+      season_number: episode?.season_number ?? 1,
+    }));
+  });
+  const fromSeasons = groups.flat().map((episode, index) => {
+    const seasonNumber = int(episode?.season_number) || 1;
+    return mapEpisode(
+      episode,
+      title,
+      { id: episode?.season_id, season_number: seasonNumber, normalizedNumber: 1 },
+      index,
+      true,
+    );
+  });
+  return fromSeasons.length ? fromSeasons : listedMapped;
+}
+
 async function stardimaEpisodes(title) {
   const detail = await stardimaGet(`/api/video/${encodeURIComponent(title.provider_title_id)}`);
   const titlePatch = classificationTitlePatch(title, detail, true);
   let episodes;
   if (title._catalog_kind === "movie" || detail?.type === "movie") {
-    const response = await stardimaGet(`/api/episodes/${encodeURIComponent(title.provider_title_id)}/servers`);
-    episodes = response && typeof response === "object"
-      ? [mapEpisode(response, title, { season_number: 1 }, 0, true)]
-      : [];
+    episodes = await stardimaMovieEpisodes(title, detail);
   } else {
     const seasons = normalizedSeasons(Array.isArray(detail?.seasons) ? detail.seasons : []);
     const groups = await mapConcurrent(seasons, 3, async (season) => {
