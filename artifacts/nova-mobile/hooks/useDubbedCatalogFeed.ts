@@ -31,17 +31,40 @@ export type DubbedCatalogTitle = {
     sourceCategories?: string[];
     detailCheckedAt?: string | null;
   } | null;
+  synonyms?: string[] | null;
 };
 
 type CatalogPage = {
   results?: DubbedCatalogTitle[];
+  total?: number;
+  providerTotal?: number;
 };
 
 const PAGE_SIZE = 30;
 const PAGES_PER_BATCH = 4;
 const MATCHES_PER_BATCH = 12;
 const CACHE_LIMIT = 60;
-export { catalogBadge, isLegacyCartoonEntry, normalizedLocalizationLabel };
+export {
+  catalogBadge,
+  isLegacyCartoonEntry,
+  mergeCatalogRows,
+  normalizedLocalizationLabel,
+  trustedLegacyBadge,
+};
+
+export type DubbedCatalogFeedStats = {
+  retrievedFromApi: number;
+  acceptedBySection: number;
+  eligibleTotal: number;
+  providerTotal: number;
+};
+
+const EMPTY_STATS: DubbedCatalogFeedStats = {
+  retrievedFromApi: 0,
+  acceptedBySection: 0,
+  eligibleTotal: 0,
+  providerTotal: 0,
+};
 
 function mergeTitles(current: DubbedCatalogTitle[], incoming: DubbedCatalogTitle[]) {
   const seen = new Set(current.map((item) => String(item.id || item.provider_title_id)));
@@ -68,6 +91,7 @@ export function useDubbedCatalogFeed(
   const [hasMore, setHasMore] = useState(false);
   const [error, setError] = useState(false);
   const [retryKey, setRetryKey] = useState(0);
+  const [stats, setStats] = useState<DubbedCatalogFeedStats>(EMPTY_STATS);
   const itemsRef = useRef<DubbedCatalogTitle[]>([]);
   const requestIdRef = useRef(0);
   const pageRef = useRef(0);
@@ -75,7 +99,7 @@ export function useDubbedCatalogFeed(
   const loadingMoreRef = useRef(false);
   const initialRequestRef = useRef<AbortController | null>(null);
   const moreRequestRef = useRef<AbortController | null>(null);
-  const cacheKey = query ? "" : `nova:dubbed-catalog-feed:v3:${section}`;
+  const cacheKey = query ? "" : `nova:dubbed-catalog-feed:v4:${section}`;
 
   const appendTitles = useCallback((incoming: DubbedCatalogTitle[], targetCacheKey: string) => {
     const merged = mergeTitles(itemsRef.current, incoming);
@@ -106,6 +130,7 @@ export function useDubbedCatalogFeed(
     setLoadingMore(false);
     setHasMore(false);
     setError(false);
+    setStats(EMPTY_STATS);
 
     let firstPageReceived = false;
     if (cacheKey) void AsyncStorage.getItem(cacheKey)
@@ -127,6 +152,7 @@ export function useDubbedCatalogFeed(
         for (let attempt = 0; attempt < PAGES_PER_BATCH; attempt += 1) {
           const params = new URLSearchParams({
             provider: "stardima_catalog",
+            section,
             page: String(currentPage),
             limit: String(PAGE_SIZE),
           });
@@ -143,6 +169,12 @@ export function useDubbedCatalogFeed(
           const matches = results.filter((item) => belongsInSection(item, section));
           collected.push(...matches);
           appendTitles(matches, cacheKey);
+          setStats((previous) => ({
+            retrievedFromApi: previous.retrievedFromApi + results.length,
+            acceptedBySection: previous.acceptedBySection + matches.length,
+            eligibleTotal: Number(data.total) || previous.eligibleTotal,
+            providerTotal: Number(data.providerTotal) || previous.providerTotal,
+          }));
           pageRef.current = currentPage;
           more = results.length === PAGE_SIZE;
           if (collected.length >= MATCHES_PER_BATCH || !more) break;
@@ -179,6 +211,7 @@ export function useDubbedCatalogFeed(
       for (let attempt = 0; attempt < PAGES_PER_BATCH; attempt += 1) {
         const params = new URLSearchParams({
           provider: "stardima_catalog",
+          section,
           page: String(currentPage),
           limit: String(PAGE_SIZE),
         });
@@ -191,7 +224,14 @@ export function useDubbedCatalogFeed(
         const data = await response.json() as CatalogPage;
         if (controller.signal.aborted || requestId !== requestIdRef.current) return;
         const results = Array.isArray(data.results) ? data.results : [];
-        collected.push(...results.filter((item) => belongsInSection(item, section)));
+        const matches = results.filter((item) => belongsInSection(item, section));
+        collected.push(...matches);
+        setStats((previous) => ({
+          retrievedFromApi: previous.retrievedFromApi + results.length,
+          acceptedBySection: previous.acceptedBySection + matches.length,
+          eligibleTotal: Number(data.total) || previous.eligibleTotal,
+          providerTotal: Number(data.providerTotal) || previous.providerTotal,
+        }));
         pageRef.current = currentPage;
         more = results.length === PAGE_SIZE;
         if (collected.length >= MATCHES_PER_BATCH || !more) break;
@@ -213,5 +253,5 @@ export function useDubbedCatalogFeed(
 
   const retry = useCallback(() => setRetryKey((value) => value + 1), []);
 
-  return { items, loading, loadingMore, hasMore, error, loadMore, retry };
+  return { items, loading, loadingMore, hasMore, error, loadMore, retry, stats };
 }

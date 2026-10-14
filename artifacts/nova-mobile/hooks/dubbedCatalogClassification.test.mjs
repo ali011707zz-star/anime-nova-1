@@ -4,6 +4,8 @@ import {
   belongsInSection,
   catalogBadge,
   isLegacyCartoonEntry,
+  mergeCatalogRows,
+  trustedLegacyBadge,
 } from "./dubbedCatalogClassification.mjs";
 
 test("a detail-verified dubbed anime stays in the animation feed, not dubbed cartoons", () => {
@@ -33,7 +35,7 @@ test("a detail-verified dubbed cartoon stays in the cartoon feed", () => {
   };
   assert.equal(belongsInSection(title, "cartoon"), true);
   assert.equal(belongsInSection(title, "animation"), false);
-  assert.equal(catalogBadge(title, "cartoon"), "مدبلج فصحى");
+  assert.equal(catalogBadge(title, "cartoon"), "مدبلج");
 });
 
 test("unverified family or missing localization stays out of the official feeds", () => {
@@ -118,7 +120,73 @@ test("a title with both dubbing and subtitles receives an explicit combined badg
     },
   };
   assert.equal(belongsInSection(title, "cartoon"), true);
-  assert.equal(catalogBadge(title, "cartoon"), "مدبلج فصحى ومترجم");
+  assert.equal(catalogBadge(title, "cartoon"), "مدبلج ومترجم");
+});
+
+test("real StarDima fields classify a dubbed cartoon and keep an unlocalized title unbadged", () => {
+  const dubbed = {
+    title: "أطلانتس∶ الإمبراطورية المفقودة",
+    media_type: "movie",
+    tags: ["cartoon", "مدبلج مصري"],
+    classification: {
+      status: "classified",
+      contentFamilies: ["animation"],
+      familyEvidence: "title_detail_taxonomy",
+      detailCheckedAt: "2026-10-13T14:43:39.868Z",
+      sourceTags: ["cartoon", "مدبلج مصري"],
+      sourceCategories: [],
+      localizationLabels: [],
+    },
+  };
+  const unknown = {
+    title: "100 % ذئب مدبلج",
+    tags: ["سبيستون", "loup garou"],
+    classification: {
+      status: "needs_review",
+      contentFamilies: [],
+      familyEvidence: "",
+      detailCheckedAt: "2026-10-13T14:53:18.569Z",
+      sourceTags: ["loup garou", "loup", "caniche"],
+      sourceCategories: ["سبيستون"],
+      localizationLabels: [],
+    },
+  };
+  assert.equal(belongsInSection(dubbed, "cartoon"), true);
+  assert.equal(catalogBadge(dubbed, "cartoon"), "مدبلج");
+  assert.equal(belongsInSection(unknown, "cartoon"), false);
+  assert.equal(catalogBadge(unknown, "cartoon"), undefined);
+});
+
+test("legacy badges require feed provenance rather than a hard-coded label", () => {
+  assert.equal(trustedLegacyBadge({ title: "Mystery title" }, "animewitcher"), undefined);
+  assert.equal(trustedLegacyBadge({ title: "Mystery title", dubbedConfirmed: true }, "animewitcher"), "مدبلج");
+  assert.equal(trustedLegacyBadge({
+    title: "A cartoon",
+    seasons: [{
+      label: "الحلقات",
+      arabicToonsId: "https://www.arabic-toons.com/fixture-anime-streaming.html",
+    }],
+  }, "arabic-toons"), "مدبلج");
+  assert.equal(trustedLegacyBadge({ title: "A cartoon", seasons: [] }, "arabic-toons"), undefined);
+});
+
+test("catalog cards are interleaved near the top and exact legacy duplicates are suppressed", () => {
+  const legacy = [
+    { kind: "dubbed", item: { title: "أبطال التزلج", seasons: [] } },
+    { kind: "dubbed", item: { title: "أبطال ليوكو", seasons: [] } },
+    { kind: "dubbed", item: { title: "غير موجود", seasons: [] } },
+  ];
+  const catalog = [
+    { kind: "catalog", item: { title: "ابطال التزلج", media_type: "series" } },
+    { kind: "catalog", item: { title: "عنوان جديد", media_type: "series" } },
+  ];
+  const merged = mergeCatalogRows(legacy, catalog);
+  assert.deepEqual(merged.map((row) => row.item.title), [
+    "أبطال التزلج",
+    "أبطال ليوكو",
+    "عنوان جديد",
+    "غير موجود",
+  ]);
 });
 
 test("legacy cartoon rows require explicit animation taxonomy or a trusted Arabic-Toons episode URL", () => {

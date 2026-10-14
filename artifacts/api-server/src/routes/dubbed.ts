@@ -944,6 +944,7 @@ interface AwCatalogItem {
   titleAr: string | null;
   poster: string | null;
   seasons: { label: string; animeId: string }[];
+  dubbedConfirmed: boolean;
 }
 
 interface AwSourceTitle {
@@ -951,6 +952,7 @@ interface AwSourceTitle {
   title: string;
   titleAr: string | null;
   anilistId: number | null;
+  dubbedConfirmed: boolean;
 }
 
 let _awCatalog: AwCatalogItem[] | null = null;
@@ -1092,7 +1094,8 @@ function readAwDiskCatalog(): AwCatalogItem[] | null {
     return cached.data.filter((item: any) =>
       item && typeof item.key === "string" &&
       typeof item.title === "string" &&
-      Array.isArray(item.seasons),
+      Array.isArray(item.seasons) &&
+      typeof item.dubbedConfirmed === "boolean",
     ) as AwCatalogItem[];
   } catch {
     return null;
@@ -1132,8 +1135,8 @@ function hydrateAwPostersInBackground(
 /** جلب كل السلاسل من جدول dubbed_anim_links (الجديد) */
 async function fetchDalCatalog(
   sbUrl: string, sbKey: string
-): Promise<Map<string, { series_name: string; series_name_ar: string | null }>> {
-  const result = new Map<string, { series_name: string; series_name_ar: string | null }>();
+): Promise<Map<string, { series_name: string; series_name_ar: string | null; dubbedConfirmed: boolean }>> {
+  const result = new Map<string, { series_name: string; series_name_ar: string | null; dubbedConfirmed: boolean }>();
   let offset = 0;
   const batch = 1000;
   while (true) {
@@ -1148,7 +1151,11 @@ async function fetchDalCatalog(
       if (!Array.isArray(rows) || !rows.length) break;
       for (const row of rows) {
         if (row.series_id && !result.has(row.series_id)) {
-          result.set(row.series_id, { series_name: row.series_name || row.series_id, series_name_ar: row.series_name_ar || null });
+          result.set(row.series_id, {
+            series_name: row.series_name || row.series_id,
+            series_name_ar: row.series_name_ar || null,
+            dubbedConfirmed: true,
+          });
         }
       }
       if (rows.length < batch) break;
@@ -1201,10 +1208,12 @@ async function buildAwCatalog(): Promise<AwCatalogItem[]> {
                 title,
                 titleAr: previous?.titleAr ?? null,
                 anilistId: row.anilist_id == null ? (previous?.anilistId ?? null) : Number(row.anilist_id),
+                dubbedConfirmed: row.content_type === "dubbed",
               });
             } else if (previous.anilistId == null && row.anilist_id != null) {
               previous.anilistId = Number(row.anilist_id);
             }
+            if (previous && row.content_type === "dubbed") previous.dubbedConfirmed = true;
           }
           if (rows.length < batchSize) break;
           offset += batchSize;
@@ -1225,10 +1234,12 @@ async function buildAwCatalog(): Promise<AwCatalogItem[]> {
         title: info.series_name || sid,
         titleAr: info.series_name_ar || null,
         anilistId: null,
+        dubbedConfirmed: info.dubbedConfirmed,
       });
     } else if (!existing.titleAr && info.series_name_ar) {
       existing.titleAr = info.series_name_ar;
     }
+    if (existing && info.dubbedConfirmed) existing.dubbedConfirmed = true;
   }
 
   // اجمع نسخ العمل الواحد (مثل Invincible Season 1/2/3) في بطاقة واحدة.
@@ -1238,7 +1249,7 @@ async function buildAwCatalog(): Promise<AwCatalogItem[]> {
     key: string;
     title: string;
     titleAr: string | null;
-    seasons: { label: string; animeId: string }[];
+    seasons: { label: string; animeId: string; dubbedConfirmed: boolean }[];
     anilistIds: number[];
   }>();
 
@@ -1261,7 +1272,7 @@ async function buildAwCatalog(): Promise<AwCatalogItem[]> {
 
     const label = awSeasonLabel(source.title, source.animeId);
     if (!group.seasons.some(season => season.animeId === source.animeId)) {
-      group.seasons.push({ label, animeId: source.animeId });
+      group.seasons.push({ label, animeId: source.animeId, dubbedConfirmed: source.dubbedConfirmed });
     }
     if (source.anilistId && Number.isFinite(source.anilistId) && !group.anilistIds.includes(source.anilistId)) {
       group.anilistIds.push(source.anilistId);
@@ -1294,6 +1305,7 @@ async function buildAwCatalog(): Promise<AwCatalogItem[]> {
       titleAr: group.titleAr,
       poster: awPoster(group.anilistIds[0]),
       seasons: group.seasons,
+      dubbedConfirmed: group.seasons.some(season => season.dubbedConfirmed),
     };
   });
 

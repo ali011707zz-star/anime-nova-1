@@ -21,6 +21,8 @@ import { useColors } from "@/hooks/useColors";
 import {
   catalogBadge,
   isLegacyCartoonEntry,
+  mergeCatalogRows,
+  trustedLegacyBadge,
   useDubbedCatalogFeed,
   type DubbedCatalogTitle,
 } from "@/hooks/useDubbedCatalogFeed";
@@ -32,7 +34,7 @@ import {
 interface AwSeason  { label: string; animeId: string }
 interface AwSeries  {
   key: string; title: string; titleAr?: string; poster?: string;
-  seasons: AwSeason[];
+  seasons: AwSeason[]; dubbedConfirmed?: boolean;
 }
 
 interface DubbedSeason  { label: string; arabicToonsId: string }
@@ -62,6 +64,7 @@ function normalizeAwSeries(item: any): AwSeries | null {
     title: String(item.title ?? key),
     titleAr: item.titleAr ? String(item.titleAr) : undefined,
     poster: item.poster ? String(item.poster) : undefined,
+    dubbedConfirmed: item.dubbedConfirmed === true,
     seasons: seasons.length ? seasons : [{ label: "الحلقات", animeId: key }],
   };
 }
@@ -75,9 +78,10 @@ function gridColumnsForWidth(width: number) {
 // Shared card helpers
 // ─────────────────────────────────────────────────────────
 
-function PosterCard({ uri, title, seasons, tint, badge, badgeTint, meta, onPress }: {
+function PosterCard({ uri, title, seasons, tint, badge, badgeTint, sourceBadge, meta, onPress }: {
   uri: string | null; title: string; seasons: number;
-  tint: string; badge?: string; badgeTint?: string; meta?: string; onPress: () => void;
+  tint: string; badge?: string; badgeTint?: string; sourceBadge?: string;
+  meta?: string; onPress: () => void;
 }) {
   const colors = useColors();
   const [failedUri, setFailedUri] = useState<string | null>(null);
@@ -100,6 +104,11 @@ function PosterCard({ uri, title, seasons, tint, badge, badgeTint, meta, onPress
         {badge ? (
           <View style={[card.badge, { backgroundColor: badgeTint || "#35B955" }]}>
             <Text style={card.badgeText} numberOfLines={1}>{badge}</Text>
+          </View>
+        ) : null}
+        {sourceBadge ? (
+          <View style={card.sourceBadge}>
+            <Text style={card.sourceBadgeText} numberOfLines={1}>{sourceBadge}</Text>
           </View>
         ) : null}
         <View style={card.label}>
@@ -202,10 +211,36 @@ function AnimationList({ searchQ }: { searchQ: string }) {
   };
 
   const displayList = searchQ.trim().length >= 2 ? searchRes : series;
-  const rows = [
-    ...displayList.map((item) => ({ kind: "aw" as const, item })),
-    ...catalog.items.map((item) => ({ kind: "catalog" as const, item })),
-  ];
+  const rows = mergeCatalogRows(
+    displayList.map((item) => ({ kind: "aw" as const, item })),
+    catalog.items.map((item) => ({ kind: "catalog" as const, item })),
+  );
+  const displayedStarDima = rows.filter((row) => row.kind === "catalog").length;
+
+  useEffect(() => {
+    if (catalog.loading) return;
+    console.info("[dubbed-catalog-feed]", JSON.stringify({
+      section: "animation",
+      retrievedFromApi: catalog.stats.retrievedFromApi,
+      acceptedByBelongsInSection: catalog.stats.acceptedBySection,
+      eligibleTotal: catalog.stats.eligibleTotal,
+      providerTotal: catalog.stats.providerTotal,
+      legacyDisplayed: displayList.length,
+      totalDisplayed: rows.length,
+      starDimaDisplayed: displayedStarDima,
+      duplicatesSuppressed: Math.max(0, catalog.items.length - displayedStarDima),
+    }));
+  }, [
+    catalog.loading,
+    catalog.stats.retrievedFromApi,
+    catalog.stats.acceptedBySection,
+    catalog.stats.eligibleTotal,
+    catalog.stats.providerTotal,
+    catalog.items.length,
+    displayList.length,
+    rows.length,
+    displayedStarDima,
+  ]);
 
   if (loading && series.length === 0 && catalog.items.length === 0) return (
     <View style={shared.center}>
@@ -235,8 +270,8 @@ function AnimationList({ searchQ }: { searchQ: string }) {
                title={row.item.titleAr || row.item.title}
                seasons={row.item.seasons.length}
                tint="#10B981"
-                badge="مدبلج"
-                badgeTint="#35B955"
+                 badge={trustedLegacyBadge(row.item, "animewitcher")}
+                 badgeTint="#35B955"
                onPress={() => openDetail(row.item)}
              />
            ) : (
@@ -247,6 +282,7 @@ function AnimationList({ searchQ }: { searchQ: string }) {
                tint="#10B981"
                badge={catalogBadge(row.item, "animation")}
                 badgeTint={catalogBadge(row.item, "animation")?.includes("مترجم") ? "#D94141" : "#35B955"}
+                sourceBadge="StarDima"
                meta={`${row.item.media_type === "movie" ? "فيلم" : "مسلسل"}${row.item.episode_count ? ` · ${row.item.episode_count} حلقة` : ""}${row.item.release_year ? ` · ${row.item.release_year}` : ""}`}
                onPress={() => openCatalogDetail(row.item)}
              />
@@ -435,10 +471,36 @@ function CartoonList({ searchQ }: { searchQ: string }) {
   };
 
   const displayList = searchQ.trim().length >= 2 ? searchRes : series;
-  const rows = [
-    ...displayList.map((item) => ({ kind: "dubbed" as const, item })),
-    ...catalog.items.map((item) => ({ kind: "catalog" as const, item })),
-  ];
+  const rows = mergeCatalogRows(
+    displayList.map((item) => ({ kind: "dubbed" as const, item })),
+    catalog.items.map((item) => ({ kind: "catalog" as const, item })),
+  );
+  const displayedStarDima = rows.filter((row) => row.kind === "catalog").length;
+
+  useEffect(() => {
+    if (catalog.loading) return;
+    console.info("[dubbed-catalog-feed]", JSON.stringify({
+      section: "cartoon",
+      retrievedFromApi: catalog.stats.retrievedFromApi,
+      acceptedByBelongsInSection: catalog.stats.acceptedBySection,
+      eligibleTotal: catalog.stats.eligibleTotal,
+      providerTotal: catalog.stats.providerTotal,
+      legacyDisplayed: displayList.length,
+      totalDisplayed: rows.length,
+      starDimaDisplayed: displayedStarDima,
+      duplicatesSuppressed: Math.max(0, catalog.items.length - displayedStarDima),
+    }));
+  }, [
+    catalog.loading,
+    catalog.stats.retrievedFromApi,
+    catalog.stats.acceptedBySection,
+    catalog.stats.eligibleTotal,
+    catalog.stats.providerTotal,
+    catalog.items.length,
+    displayList.length,
+    rows.length,
+    displayedStarDima,
+  ]);
 
   if (loading && series.length === 0 && catalog.items.length === 0) return (
     <View style={shared.center}>
@@ -482,7 +544,7 @@ function CartoonList({ searchQ }: { searchQ: string }) {
               title={row.item.title}
               seasons={row.item.seasons.length}
               tint="#7C3AED"
-              badge="مدبلج"
+              badge={trustedLegacyBadge(row.item, "arabic-toons")}
               badgeTint="#35B955"
               onPress={() => openDetail(row.item)}
             />
@@ -494,6 +556,7 @@ function CartoonList({ searchQ }: { searchQ: string }) {
               tint="#7C3AED"
               badge={catalogBadge(row.item, "cartoon")}
               badgeTint={catalogBadge(row.item, "cartoon")?.includes("مترجم") ? "#D94141" : "#35B955"}
+              sourceBadge="StarDima"
               meta={`${row.item.media_type === "movie" ? "فيلم" : "مسلسل"}${row.item.episode_count ? ` · ${row.item.episode_count} حلقة` : ""}${row.item.release_year ? ` · ${row.item.release_year}` : ""}`}
               onPress={() => openCatalogDetail(row.item)}
             />
@@ -708,6 +771,13 @@ const card = StyleSheet.create({
   placeholder: { flex: 1, alignItems: "center", justifyContent: "center" },
   badge:       { position: "absolute", top: 7, right: 7, maxWidth: "88%", paddingHorizontal: 7, paddingVertical: 3, borderRadius: 6 },
   badgeText:   { color: "#FFFFFF", fontSize: 9, fontFamily: "Cairo_700Bold" },
+  sourceBadge: {
+    position: "absolute", top: 7, left: 7, maxWidth: "45%",
+    paddingHorizontal: 6, paddingVertical: 3, borderRadius: 6,
+    backgroundColor: "rgba(18, 18, 24, 0.86)",
+    borderWidth: 1, borderColor: "rgba(167,139,250,0.58)",
+  },
+  sourceBadgeText: { color: "#DDD0FF", fontSize: 8, fontFamily: "Cairo_700Bold" },
   label:       { position: "absolute", bottom: 0, left: 0, right: 0, padding: 6 },
   title:       { color: "#fff", fontSize: 10, fontFamily: "Cairo_700Bold", lineHeight: 14 },
   seasons:     { fontSize: 9, fontFamily: "Cairo_400Regular" },

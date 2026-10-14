@@ -1,11 +1,16 @@
 import { Router, type Request, type Response } from "express";
-import { sbCount, sbSelect } from "../lib/supabaseClient.js";
+import { isSupabaseReady, sbCount, sbSelect } from "../lib/supabaseClient.js";
 import { filterSourceCatalogServerRows } from "../lib/sourceCatalogServerHealth.mjs";
+import { sourceCatalogTitleBelongsInSection } from "../lib/sourceCatalogEligibility.mjs";
 
 const router = Router();
 const PROVIDERS = new Set(["animeify", "anslayer", "sanime", "anifox", "stardima_catalog"]);
 const MEDIA_TYPES = new Set(["series", "movie"]);
 const CATALOG_STATUSES = new Set(["catalogued", "details_checked", "partial", "failed"]);
+const CATALOG_SECTIONS = new Set(["animation", "cartoon"]);
+const SECTION_CACHE_TTL_MS = 60_000;
+const sectionCache = new Map<string, { expiresAt: number; titles: any[]; providerTotal: number }>();
+const sectionCachePending = new Map<string, Promise<{ titles: any[]; providerTotal: number }>>();
 
 function intParam(value: unknown, fallback: number, min: number, max: number): number {
   const n = Number.parseInt(String(value ?? ""), 10);
@@ -105,6 +110,68 @@ function publicCatalogTitle(row: any): any {
   };
 }
 
+async function loadQualifiedStardimaSection(
+  section: "animation" | "cartoon",
+): Promise<{ titles: any[]; providerTotal: number }> {
+  const cached = sectionCache.get(section);
+  if (cached && cached.expiresAt > Date.now()) {
+    return { titles: cached.titles, providerTotal: cached.providerTotal };
+  }
+  const pending = sectionCachePending.get(section);
+  if (pending) return pending;
+
+  const request = (async () => {
+    const family = section === "animation" ? "anime" : "animation";
+    const candidates: any[] = [];
+    const pageSize = 1000;
+    const maxRows = 10_000;
+    for (let offset = 0; offset < maxRows; offset += pageSize) {
+      const filters: Record<string, string | number | undefined> = {
+        provider: "eq.stardima_catalog",
+        order: "title.asc",
+      };
+      if (isSupabaseReady()) {
+        filters["provider_metadata->classification->>status"] =
+          "in.(classified,manually_reviewed)";
+        filters["provider_metadata->classification->content_families"] =
+          `cs.${JSON.stringify([family])}`;
+      }
+      const rows = await sbSelect<any>("source_catalog_titles", filters, {
+        limit: pageSize,
+        offset,
+        select: "id,provider,provider_title_id,title,title_en,title_ar,title_native,synonyms,genres,tags,media_type,release_year,episode_count,poster_url,backdrop_url,provider_metadata,catalog_status,last_seen_at",
+        strict: true,
+      });
+      candidates.push(...rows);
+      if (rows.length < pageSize) break;
+    }
+    if (candidates.length >= maxRows) {
+      throw new Error("StarDima section scan exceeded the safe row limit");
+    }
+
+    const titles = candidates
+      .map(publicCatalogTitle)
+      .filter((item) => sourceCatalogTitleBelongsInSection(item, section))
+      .sort((a, b) => String(a.title || "").localeCompare(String(b.title || "")));
+    const providerTotal = await sbCount(
+      "source_catalog_titles",
+      { provider: "eq.stardima_catalog" },
+    );
+    sectionCache.set(section, {
+      expiresAt: Date.now() + SECTION_CACHE_TTL_MS,
+      titles,
+      providerTotal,
+    });
+    return { titles, providerTotal };
+  })();
+  sectionCachePending.set(section, request);
+  try {
+    return await request;
+  } finally {
+    sectionCachePending.delete(section);
+  }
+}
+
 // Public catalog endpoints. These return provider/server page URLs, never
 // resolved MP4/HLS URLs. Playback is still resolved by the existing extractors.
 router.get("/source-catalog/providers", async (_req: Request, res: Response) => {
@@ -188,6 +255,11 @@ router.get("/source-catalog/titles", async (req: Request, res: Response) => {
   const rawCatalogStatus = String(req.query.catalogStatus ?? "").trim().toLowerCase();
   const category = String(req.query.category ?? "").trim();
   const tag = String(req.query.tag ?? "").trim();
+  const rawSection = String(req.query.section ?? "").trim().toLowerCase();
+  const section = rawSection as "animation" | "cartoon";
+  if (rawSection && (!CATALOG_SECTIONS.has(rawSection) || provider !== "stardima_catalog")) {
+    return void res.status(400).json({ error: "section must be animation or cartoon for stardima_catalog" });
+  }
   if (rawMediaType && !MEDIA_TYPES.has(rawMediaType)) {
     return void res.status(400).json({ error: "mediaType must be series or movie" });
   }
@@ -196,6 +268,40 @@ router.get("/source-catalog/titles", async (req: Request, res: Response) => {
   }
   if (category.length > 120 || tag.length > 120) {
     return void res.status(400).json({ error: "category and tag must be 120 characters or fewer" });
+  }
+  if (section) {
+    const result = await catalogQuery(res, "source catalog titles unavailable", async () => {
+      const qualified = await loadQualifiedStardimaSection(section);
+      const needle = q.toLocaleLowerCase();
+      const matching = needle
+        ? qualified.titles.filter((item) => [
+            item.title,
+            item.title_en,
+            item.title_ar,
+            item.title_native,
+            ...(Array.isArray(item.synonyms) ? item.synonyms : []),
+          ].some((value) => String(value || "").toLocaleLowerCase().includes(needle)))
+        : qualified.titles;
+      return {
+        results: matching.slice((page - 1) * limit, page * limit),
+        total: matching.length,
+        providerTotal: qualified.providerTotal,
+      };
+    });
+    if (!result) return;
+    res.setHeader("Cache-Control", "no-store");
+    return void res.json({
+      ...result,
+      page,
+      limit,
+      provider,
+      section,
+      query: q,
+      mediaType: rawMediaType || null,
+      category: category || null,
+      tag: tag || null,
+      catalogStatus: rawCatalogStatus || null,
+    });
   }
   const filters: Record<string, string | number | undefined> = {
     provider: provider ? `eq.${provider}` : undefined,
