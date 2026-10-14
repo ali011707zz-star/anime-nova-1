@@ -207,6 +207,7 @@ const SUBTITLE_DISABLED_SITES = new Set([
   "sanime", "sa",
   "anifox", "fx",
   "anslayer", "as",
+  "stardima_catalog",
 ]);
 
 function subtitlesDisabledForSite(site?: string): boolean {

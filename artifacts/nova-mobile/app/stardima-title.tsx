@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import {
   ActivityIndicator,
   FlatList,
@@ -10,7 +11,7 @@ import {
   View,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { useLocalSearchParams, useRouter } from "expo-router";
+import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { TvFocusGuideView, TvPressable, isTvDevice, tvFocusStyle } from "@/utils/tv";
 import { getBaseUrl } from "@/utils/api";
@@ -18,6 +19,7 @@ import { useColors } from "@/hooks/useColors";
 import { RewardedAdPrompt } from "@/components/RewardedAdPrompt";
 import { EpisodeDivider } from "@/components/EpisodeDivider";
 import { catalogBadge } from "@/hooks/useDubbedCatalogFeed";
+import { getStardimaProgressKey } from "@/utils/stardimaProgress";
 
 const Pressable = TvPressable;
 
@@ -52,6 +54,8 @@ type CatalogEpisode = {
   title?: string | null;
   episode_status?: string | null;
 };
+
+type EpisodeProgress = { position: number; duration?: number };
 
 function readParam(value: string | string[] | undefined) {
   return Array.isArray(value) ? value[0] || "" : value || "";
@@ -201,6 +205,18 @@ export default function StardimaTitleScreen() {
       textAlign: "right",
       marginTop: 2,
     },
+    progressTrack: {
+      height: 3,
+      marginTop: 6,
+      overflow: "hidden",
+      borderRadius: 3,
+      backgroundColor: colors.border,
+    },
+    progressFill: {
+      height: "100%",
+      borderRadius: 3,
+      backgroundColor: colors.accent,
+    },
     center: { alignItems: "center", justifyContent: "center", padding: 26, gap: 10 },
     stateText: {
       color: colors.textMuted,
@@ -215,6 +231,7 @@ export default function StardimaTitleScreen() {
   const [title, setTitle] = useState<CatalogTitle | null>(null);
   const [episodes, setEpisodes] = useState<CatalogEpisode[]>([]);
   const [selectedSeason, setSelectedSeason] = useState<number | null>(null);
+  const [episodeProgress, setEpisodeProgress] = useState<Record<string, EpisodeProgress>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const requestRef = useRef<AbortController | null>(null);
@@ -259,32 +276,97 @@ export default function StardimaTitleScreen() {
     };
   }, [loadTitle]);
 
-  const seasons = useMemo(
-    () => [...new Set(episodes.map((episode) => Number(episode.season_number) || 1))]
-      .sort((a, b) => a - b),
+  const orderedEpisodes = useMemo(
+    () => [...episodes].sort((a, b) =>
+      (Number(a.season_number) || 1) - (Number(b.season_number) || 1) ||
+      (Number(a.episode_number) || 1) - (Number(b.episode_number) || 1),
+    ),
     [episodes],
   );
-  const visibleEpisodes = useMemo(
-    () => episodes
-      .filter((episode) => (Number(episode.season_number) || 1) === (selectedSeason || 1))
-      .sort((a, b) => Number(a.episode_number) - Number(b.episode_number)),
-    [episodes, selectedSeason],
+  const seasons = useMemo(
+    () => [...new Set(orderedEpisodes.map((episode) => Number(episode.season_number) || 1))]
+      .sort((a, b) => a - b),
+    [orderedEpisodes],
   );
+  const visibleEpisodes = useMemo(
+    () => orderedEpisodes.filter(
+      (episode) => (Number(episode.season_number) || 1) === (selectedSeason || 1),
+    ),
+    [orderedEpisodes, selectedSeason],
+  );
+
+  useFocusEffect(useCallback(() => {
+    let active = true;
+    if (!providerTitleId || visibleEpisodes.length === 0) {
+      setEpisodeProgress({});
+      return () => { active = false; };
+    }
+    const keys = visibleEpisodes.map((episode) => getStardimaProgressKey(providerTitleId, episode.id));
+    void AsyncStorage.multiGet(keys).then((entries) => {
+      if (!active) return;
+      const next: Record<string, EpisodeProgress> = {};
+      entries.forEach(([key, value], index) => {
+        if (!value) return;
+        try {
+          const parsed = JSON.parse(value) as EpisodeProgress;
+          if (Number(parsed.position) > 0) {
+            next[String(visibleEpisodes[index]?.id)] = {
+              position: Number(parsed.position),
+              duration: Number(parsed.duration) > 0 ? Number(parsed.duration) : undefined,
+            };
+            return;
+          }
+        } catch {
+          const position = Number(value);
+          if (position > 0) next[String(visibleEpisodes[index]?.id)] = { position };
+        }
+      });
+      setEpisodeProgress(next);
+    }).catch(() => {
+      if (active) setEpisodeProgress({});
+    });
+    return () => { active = false; };
+  }, [providerTitleId, visibleEpisodes]));
 
   const renderEpisode = ({ item, index }: { item: CatalogEpisode; index: number }) => {
     const episodeNumber = Number(item.episode_number) || index + 1;
     const isMovie = title?.media_type === "movie";
+    const globalIndex = orderedEpisodes.findIndex((episode) => String(episode.id) === String(item.id));
+    const previous = globalIndex > 0 ? orderedEpisodes[globalIndex - 1] : undefined;
+    const next = globalIndex >= 0 ? orderedEpisodes[globalIndex + 1] : undefined;
+    const progress = episodeProgress[String(item.id)];
+    const progressPercent = progress?.duration
+      ? Math.min(100, Math.max(0, (progress.position / progress.duration) * 100))
+      : 0;
     return (
       <Pressable
         onPress={() => router.push({
           pathname: "/stardima-servers" as any,
           params: {
+            providerTitleId,
             episodeId: String(item.id || ""),
             episodeNumber: String(episodeNumber),
             seasonNumber: String(Number(item.season_number) || 1),
             episodeTitle: isMovie ? "الفيلم" : item.title || "",
             title: titleText(title),
             mediaType: isMovie ? "movie" : "series",
+            poster: title?.poster_url || "",
+            episodeIndex: String(Math.max(0, globalIndex)),
+            totalEpisodes: String(orderedEpisodes.length),
+            ...(previous ? {
+              prevEpisodeId: String(previous.id),
+              prevEpisodeNumber: String(Number(previous.episode_number) || 1),
+              prevSeasonNumber: String(Number(previous.season_number) || 1),
+              prevEpisodeTitle: previous.title || `الحلقة ${previous.episode_number}`,
+              prevEpisodeIndex: String(globalIndex - 1),
+            } : {}),
+            ...(next ? {
+              nextEpisodeId: String(next.id),
+              nextEpisodeNumber: String(Number(next.episode_number) || 1),
+              nextSeasonNumber: String(Number(next.season_number) || 1),
+              nextEpisodeTitle: next.title || `الحلقة ${next.episode_number}`,
+              nextEpisodeIndex: String(globalIndex + 1),
+            } : {}),
           },
         })}
         focusable={tvMode}
@@ -308,7 +390,16 @@ export default function StardimaTitleScreen() {
               ? "فيلم كامل"
               : `الموسم ${Number(item.season_number) || 1} · الحلقة ${episodeNumber}`}
             {item.episode_status ? " · حلقة مفهرسة" : ""}
+            {progress?.position ? ` · متابعة من ${Math.floor(progress.position / 60)} دقيقة` : ""}
           </Text>
+          {progressPercent > 0 && progressPercent < 90 ? (
+            <View style={styles.progressTrack}>
+              <View style={[styles.progressFill, { width: `${progressPercent}%` }]} />
+            </View>
+          ) : null}
+          {progressPercent >= 90 ? (
+            <Text style={[styles.episodeMeta, { color: colors.accent }]}>تمت المشاهدة</Text>
+          ) : null}
         </View>
         <Ionicons name="chevron-back" size={17} color={colors.textMuted} />
       </Pressable>

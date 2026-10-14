@@ -6,7 +6,7 @@ import { getAuthToken, secureFetch, setUserAuthToken } from "@/utils/secureApi";
 
 export type Theme = "white" | "black";
 
-export type WatchContentKind = "anime" | "dubbed" | "aw-dubbed";
+export type WatchContentKind = "anime" | "dubbed" | "aw-dubbed" | "stardima";
 
 export type WatchProgress = {
   animeId: number;
@@ -16,6 +16,9 @@ export type WatchProgress = {
   contentKind?: WatchContentKind;
   contentKey?: string;
   episodeUrl?: string;
+  catalogEpisodeId?: string;
+  catalogMediaType?: "movie" | "series";
+  episodeTitle?: string;
   seasonLabel?: string;
   titleAr?: string;
   title: string;
@@ -110,6 +113,11 @@ function serverAnimeType(item: WatchProgress): string {
   if (kind === "anime") return "anime";
   const key = encodeURIComponent(item.contentKey || String(item.animeId));
   const season = encodeURIComponent(item.seasonLabel || "");
+  if (kind === "stardima") {
+    return `stardima:${key}:${encodeURIComponent(item.catalogEpisodeId || "")}:` +
+      `${encodeURIComponent(item.catalogMediaType || "series")}:${season}:` +
+      encodeURIComponent(item.episodeTitle || "");
+  }
   const extra = kind === "dubbed" ? `:${encodeURIComponent(item.episodeUrl || "")}` : "";
   return `${kind}:${key}${extra}:${season}`;
 }
@@ -118,20 +126,30 @@ function decodeServerAnimeType(value: unknown): {
   kind: WatchContentKind;
   key: string;
   episodeUrl: string;
+  catalogEpisodeId: string;
+  catalogMediaType: "movie" | "series";
+  episodeTitle: string;
   seasonLabel: string;
 } {
   const raw = String(value ?? "anime");
-  const match = /^(dubbed|aw-dubbed):(.*)$/.exec(raw);
-  if (!match) return { kind: "anime", key: "", episodeUrl: "", seasonLabel: "" };
+  const match = /^(dubbed|aw-dubbed|stardima):(.*)$/.exec(raw);
+  if (!match) {
+    return { kind: "anime", key: "", episodeUrl: "", catalogEpisodeId: "", catalogMediaType: "series", episodeTitle: "", seasonLabel: "" };
+  }
   const parts = match[2].split(":");
   const decode = (part?: string) => {
     try { return decodeURIComponent(part || ""); } catch { return part || ""; }
   };
+  const kind = match[1] as WatchContentKind;
+  const catalogMediaType = decode(parts[kind === "stardima" ? 2 : -1]) === "movie" ? "movie" : "series";
   return {
-    kind: match[1] as WatchContentKind,
+    kind,
     key: decode(parts[0]),
-    episodeUrl: match[1] === "dubbed" ? decode(parts[1]) : "",
-    seasonLabel: decode(match[1] === "dubbed" ? parts[2] : parts[1]),
+    episodeUrl: kind === "dubbed" ? decode(parts[1]) : "",
+    catalogEpisodeId: kind === "stardima" ? decode(parts[1]) : "",
+    catalogMediaType: kind === "stardima" ? catalogMediaType : "series",
+    episodeTitle: kind === "stardima" ? decode(parts[4]) : "",
+    seasonLabel: decode(kind === "dubbed" ? parts[2] : kind === "stardima" ? parts[3] : parts[1]),
   };
 }
 
@@ -153,6 +171,16 @@ export function historyRoute(item: WatchProgress): string {
       `&season=${encodeURIComponent(item.seasonLabel || "الحلقات")}` +
       `&poster=${encodeURIComponent(item.thumbnail || "")}`;
   }
+  if (kind === "stardima") {
+    return `/stardima-servers?providerTitleId=${encodeURIComponent(item.contentKey || "")}` +
+      `&episodeId=${encodeURIComponent(item.catalogEpisodeId || "")}` +
+      `&episodeNumber=${item.ep}` +
+      `&seasonNumber=${item.season || 1}` +
+      `&episodeTitle=${encodeURIComponent(item.episodeTitle || (item.catalogMediaType === "movie" ? "الفيلم" : `الحلقة ${item.ep}`))}` +
+      `&title=${encodeURIComponent(item.title || "StarDima")}` +
+      `&mediaType=${item.catalogMediaType || "series"}` +
+      `&poster=${encodeURIComponent(item.thumbnail || "")}`;
+  }
   return `/watch?anime=${item.animeId}&ep=${item.ep}` +
     `&title=${encodeURIComponent(item.title)}` +
     `&english=${encodeURIComponent(item.english)}` +
@@ -172,6 +200,9 @@ function mapServerHistory(row: any): WatchProgress | null {
     contentKind: encoded.kind,
     contentKey: encoded.key || String(animeId),
     episodeUrl: encoded.episodeUrl || String(row?.episode_url ?? row?.episodeUrl ?? ""),
+    catalogEpisodeId: encoded.catalogEpisodeId,
+    catalogMediaType: encoded.catalogMediaType,
+    episodeTitle: encoded.episodeTitle,
     seasonLabel: encoded.seasonLabel || String(row?.season_label ?? row?.seasonLabel ?? ""),
     titleAr: String(row?.title_ar ?? row?.titleAr ?? ""),
     title: String(row?.anime_title ?? row?.title ?? ""),

@@ -29,6 +29,7 @@ import { getPosterUri, getTvPosterUri } from "@/utils/media";
 import {
   catalogBadge,
   isLegacyCartoonEntry,
+  mergeCatalogRows,
   useDubbedCatalogFeed,
 } from "@/hooks/useDubbedCatalogFeed";
 
@@ -97,6 +98,7 @@ export default function HomeScreen() {
   const [showDrawer, setShowDrawer] = useState(false);
   const isTvLayout = isTvDevice(width, height);
   const { ready } = useTvFocusMemory("home");
+  const stardimaAnimation = useDubbedCatalogFeed("animation", "");
   const stardimaCartoon = useDubbedCatalogFeed("cartoon", "");
 
   const topPad = Platform.OS === "web" ? 0 : insets.top;
@@ -234,10 +236,14 @@ export default function HomeScreen() {
 
   const trendingList = trending?.Page?.media || [];
   const popularList = popular?.Page?.media || [];
-  const dubbedHomeRows = useMemo(() => [
-    ...dubbedSeries.slice(0, 7).map((item) => ({ kind: "legacy" as const, item })),
-    ...stardimaCartoon.items.slice(0, 7).map((item) => ({ kind: "stardima" as const, item })),
-  ], [dubbedSeries, stardimaCartoon.items]);
+  const dubbedHomeRows = useMemo(() => mergeCatalogRows(
+    dubbedSeries.slice(0, 7).map((item) => ({ kind: "legacy" as const, item })),
+    stardimaCartoon.items.slice(0, 7).map((item) => ({ kind: "stardima" as const, item })),
+  ), [dubbedSeries, stardimaCartoon.items]);
+  const animationHomeRows = useMemo(() => mergeCatalogRows(
+    awDubbedSeries.slice(0, 7).map((item) => ({ kind: "legacy" as const, item })),
+    stardimaAnimation.items.slice(0, 7).map((item) => ({ kind: "stardima" as const, item })),
+  ), [awDubbedSeries, stardimaAnimation.items]);
   const airingList = airing?.Page?.media || [];
   const topRatedList = topRated?.Page?.media || [];
   const moviesList = movies?.Page?.media || [];
@@ -466,12 +472,12 @@ export default function HomeScreen() {
         )}
 
         {/* ── الأقسام المدبلجة — مباشرة بعد أحدث الحلقات ── */}
-        {awDubbedSeries.length > 0 && (
+        {animationHomeRows.length > 0 && (
           <View style={{ marginTop: 24, marginBottom: 24 }}>
             <View style={styles.sectionHeader}>
               <View style={styles.sectionLeft}>
                 <View style={[styles.sectionDot, { backgroundColor: "#06b6d4" }]} />
-                <Text style={[styles.sectionTitle, { color: colors.text }]}>✨ أنيميشن مدبلج</Text>
+                <Text style={[styles.sectionTitle, { color: colors.text }]}>✨ أنيميشن مدبلج ومترجم</Text>
               </View>
                <Pressable onPress={() => router.push("/aw-dubbed" as any)}
                  focusable={isTvLayout}
@@ -481,16 +487,37 @@ export default function HomeScreen() {
               </Pressable>
             </View>
             <FlatList
-              data={awDubbedSeries}
+              data={animationHomeRows}
               horizontal
-              keyExtractor={(item: any, idx) => String(item.key || idx)}
+              keyExtractor={(row, idx) => row.kind === "stardima"
+                ? `stardima:${row.item.provider_title_id}`
+                : `aw:${row.item.key || idx}`}
               showsHorizontalScrollIndicator={false}
                contentContainerStyle={{ paddingHorizontal: railSidePadding, gap: railGap }}
-              renderItem={({ item }: { item: any }) => {
-                 const imgUri = getPosterUri(item);
+              renderItem={({ item: row }) => {
+                const item = row.item;
+                const stardima = row.kind === "stardima";
+                const rawImg = stardima
+                  ? String(item.poster_url || item.backdrop_url || "").trim()
+                  : getPosterUri(item) || "";
+                const imgUri = rawImg
+                  ? rawImg.startsWith("http") ? rawImg : `${getBaseUrl()}${rawImg}`
+                  : null;
+                const titleText = stardima
+                  ? item.title_ar || item.title || item.title_en || "عنوان"
+                  : item.english || item.title;
+                const badgeText = stardima ? catalogBadge(item, "animation") : "مدبلج";
+                const badgeColor = badgeText?.includes("مترجم") ? "#D94141" : "#35B955";
                 return (
                    <Pressable
                     onPress={() => {
+                       if (stardima) {
+                         router.push({
+                           pathname: "/stardima-title" as any,
+                           params: { providerTitleId: item.provider_title_id },
+                         });
+                         return;
+                       }
                       const key = String(item.key || "").trim();
                       if (!key) return;
                       const seasons = JSON.stringify(
@@ -527,17 +554,17 @@ export default function HomeScreen() {
                       paddingHorizontal: 8,
                       paddingVertical: 3,
                       borderRadius: 7,
-                      backgroundColor: "#35B955",
+                      backgroundColor: badgeColor,
                     }}>
                       <Text style={{
                         color: "#fff",
                         fontFamily: "Cairo_700Bold",
                         fontSize: isTvLayout ? 12 : 9,
-                      }}>مدبلج</Text>
+                      }}>{badgeText || "مدبلج"}</Text>
                     </View>
                     <LinearGradient colors={["transparent", "rgba(0,0,0,0.92)"]} style={todayStyles.grad}>
-                      <Text style={todayStyles.title} numberOfLines={2}>{item.english || item.title}</Text>
-                      {item.title_ar ? (
+                      <Text style={todayStyles.title} numberOfLines={2}>{titleText}</Text>
+                      {(item.title_ar && !stardima) ? (
                         <Text style={{ color: "rgba(255,255,255,0.75)", fontSize: isTvLayout ? 14 : 9, lineHeight: isTvLayout ? 20 : 13, fontFamily: "Cairo_700Bold", textAlign: "right", writingDirection: "rtl", marginTop: 2 }} numberOfLines={1}>
                           {item.title_ar}
                         </Text>

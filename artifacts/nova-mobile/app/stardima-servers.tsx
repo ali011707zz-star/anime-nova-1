@@ -71,13 +71,28 @@ export default function StardimaServersScreen() {
   const insets = useSafeAreaInsets();
   const tvMode = isTvDevice();
   const params = useLocalSearchParams<{
+    providerTitleId?: string | string[];
     episodeId?: string | string[];
     episodeNumber?: string | string[];
     seasonNumber?: string | string[];
     episodeTitle?: string | string[];
     title?: string | string[];
     mediaType?: string | string[];
+    poster?: string | string[];
+    episodeIndex?: string | string[];
+    totalEpisodes?: string | string[];
+    prevEpisodeId?: string | string[];
+    prevEpisodeNumber?: string | string[];
+    prevSeasonNumber?: string | string[];
+    prevEpisodeTitle?: string | string[];
+    prevEpisodeIndex?: string | string[];
+    nextEpisodeId?: string | string[];
+    nextEpisodeNumber?: string | string[];
+    nextSeasonNumber?: string | string[];
+    nextEpisodeTitle?: string | string[];
+    nextEpisodeIndex?: string | string[];
   }>();
+  const providerTitleId = readParam(params.providerTitleId);
   const episodeId = readParam(params.episodeId);
   const title = readParam(params.title) || "StarDima";
   const episodeTitle = readParam(params.episodeTitle) || "الحلقة";
@@ -273,6 +288,24 @@ export default function StardimaServersScreen() {
           serverId,
           serverName: String(server.server_name || server.source_host || "StarDima"),
           quality: String(server.quality || ""),
+          providerTitleId,
+          episodeId,
+          episodeNumber: readParam(params.episodeNumber),
+          seasonNumber: readParam(params.seasonNumber),
+          mediaType: readParam(params.mediaType) || "series",
+          poster: readParam(params.poster),
+          episodeIndex: readParam(params.episodeIndex),
+          totalEpisodes: readParam(params.totalEpisodes),
+          prevEpisodeId: readParam(params.prevEpisodeId),
+          prevEpisodeNumber: readParam(params.prevEpisodeNumber),
+          prevSeasonNumber: readParam(params.prevSeasonNumber),
+          prevEpisodeTitle: readParam(params.prevEpisodeTitle),
+          prevEpisodeIndex: readParam(params.prevEpisodeIndex),
+          nextEpisodeId: readParam(params.nextEpisodeId),
+          nextEpisodeNumber: readParam(params.nextEpisodeNumber),
+          nextSeasonNumber: readParam(params.nextSeasonNumber),
+          nextEpisodeTitle: readParam(params.nextEpisodeTitle),
+          nextEpisodeIndex: readParam(params.nextEpisodeIndex),
           title,
           episodeTitle: episodeSubheading,
         },
@@ -282,7 +315,7 @@ export default function StardimaServersScreen() {
     } finally {
       setOpeningServerId("");
     }
-  }, [episodeSubheading, openingServerId, router, title]);
+  }, [episodeId, episodeSubheading, openingServerId, params, providerTitleId, router, title]);
 
   return (
     <View style={styles.screen}>

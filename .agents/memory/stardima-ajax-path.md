@@ -33,3 +33,11 @@ The catalog's alternate `/api/episodes/{id}` path is not safe to write for a ser
 **Why:** Blindly importing fallback rows can create incorrect content types, season grouping, or cross-title episode data while appearing to fill catalog gaps.
 
 **How to apply:** Prefer fetching each advertised season independently when the concurrent request fails. Before importing fallback data, compare episode titles and IDs to the parent, restore the source season number and series metadata, and keep the title partial if any advertised season remains unresolved.
+
+## Cross-platform integration scope
+
+StarDima belongs in both web and mobile flows for dubbed cartoons, animation, and translated titles. It should use the same end-to-end experience as dubbed animation: title details, season and episode browsing, quality/server selection, playback, resume, history, and adjacent-episode navigation.
+
+**Why:** the user asked.
+
+**How to apply:** Keep the three content/localization paths visible in the correct sections, use verified catalog labels rather than title guesses, and preserve equivalent episode and player behavior across web and mobile.

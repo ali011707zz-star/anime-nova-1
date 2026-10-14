@@ -7,6 +7,13 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { useLocation } from "wouter";
 import { Search, X, ChevronDown, Loader2 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
+import {
+  catalogBadge,
+  isLegacyCartoonEntry,
+  mergeCatalogRows,
+  type StardimaCatalogTitle,
+} from "@/lib/dubbedCatalogUtils.mjs";
+import { useStardimaCatalogFeed } from "@/hooks/useStardimaCatalogFeed";
 
 // ── Types ─────────────────────────────────────────────────────────────────
 
@@ -57,7 +64,7 @@ function AtCard({ s, onClick }: { s: AtSeries; onClick: () => void }) {
     ? (img.startsWith("/api/dubbed/img") ? img : img.startsWith("http") ? img : `${AT_IMG}${img}`)
     : null;
   return (
-    <motion.div whileTap={{ scale: 0.96 }} onClick={onClick} className="cursor-pointer group">
+    <motion.div whileTap={{ scale: 0.96 }} onClick={onClick} data-testid={`card-dubbed-cartoon-${s.key || s.title}`} className="cursor-pointer group">
       <div className="relative aspect-[2/3] rounded-xl overflow-hidden bg-white/5 border border-white/8 shadow-lg">
         {imgSrc ? (
           <img src={imgSrc} alt={s.title}
@@ -68,6 +75,9 @@ function AtCard({ s, onClick }: { s: AtSeries; onClick: () => void }) {
           </div>
         )}
         <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/10 to-transparent" />
+        <span className="absolute top-2 right-2 rounded-md border border-emerald-400/25 bg-emerald-500/85 px-2 py-0.5 text-[9px] font-bold text-white font-['Cairo']">
+          مدبلج
+        </span>
         <div className="absolute bottom-0 inset-x-0 p-2">
           <p className="text-white text-xs font-bold font-['Cairo'] line-clamp-2 leading-tight">{s.title}</p>
           {s.seasons.length > 1 && <span className="text-white/60 text-[10px] font-['Cairo']">{s.seasons.length} مواسم</span>}
@@ -77,9 +87,74 @@ function AtCard({ s, onClick }: { s: AtSeries; onClick: () => void }) {
   );
 }
 
+function StardimaCard({ title, onClick }: { title: StardimaCatalogTitle; onClick: () => void }) {
+  const image = title.poster_url || title.backdrop_url || "";
+  const badge = catalogBadge(title);
+  const titleText = title.title_ar || title.title || title.title_en || "عنوان";
+  return (
+    <motion.div
+      whileTap={{ scale: 0.96 }}
+      onClick={onClick}
+      role="button"
+      tabIndex={0}
+      onKeyDown={(event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          onClick();
+        }
+      }}
+      data-testid={`card-stardima-${title.provider_title_id}`}
+      aria-label={`فتح ${titleText}`}
+      className="cursor-pointer group"
+    >
+      <div className="relative aspect-[2/3] rounded-xl overflow-hidden bg-white/5 border border-white/8 shadow-lg">
+        {image ? (
+          <img src={image} alt={titleText}
+            className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
+            loading="lazy" onError={event => { (event.target as HTMLImageElement).style.display = "none"; }} />
+        ) : (
+          <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-emerald-900/40 to-teal-900/30">
+            <span className="text-2xl">📺</span>
+          </div>
+        )}
+        <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/10 to-transparent" />
+        <span className="absolute top-2 left-2 rounded-md border border-white/15 bg-black/70 px-2 py-0.5 text-[8px] font-bold text-white/85 font-['Cairo']">
+          StarDima
+        </span>
+        {badge ? (
+          <span className={`absolute top-2 right-2 rounded-md border px-2 py-0.5 text-[9px] font-bold font-['Cairo'] ${
+            badge.includes("مترجم")
+              ? "border-red-400/30 bg-red-600/85 text-white"
+              : "border-emerald-400/25 bg-emerald-500/85 text-white"
+          }`}>
+            {badge}
+          </span>
+        ) : null}
+        <div className="absolute bottom-0 inset-x-0 p-2">
+          <p className="text-white text-xs font-bold font-['Cairo'] line-clamp-2 leading-tight">{titleText}</p>
+          <span className="text-white/55 text-[9px] font-['Cairo']">
+            {title.media_type === "movie" ? "فيلم" : "مسلسل"}
+            {title.episode_count ? ` · ${title.episode_count} حلقة` : ""}
+            {title.release_year ? ` · ${title.release_year}` : ""}
+          </span>
+        </div>
+      </div>
+    </motion.div>
+  );
+}
+
 // ── Animation tab content ─────────────────────────────────────────────────
 
-function AnimationList({ searchQ, onNavigate }: { searchQ: string; onNavigate: (s: AwSeries) => void }) {
+function AnimationList({
+  searchQ,
+  onNavigate,
+  onCatalogNavigate,
+}: {
+  searchQ: string;
+  onNavigate: (s: AwSeries) => void;
+  onCatalogNavigate: (title: StardimaCatalogTitle) => void;
+}) {
+  const catalog = useStardimaCatalogFeed("animation", searchQ);
   const [series,      setSeries]      = useState<AwSeries[]>([]);
   const [page,        setPage]        = useState(1);
   const [totalPages,  setTotalPages]  = useState(1);
@@ -109,10 +184,11 @@ function AnimationList({ searchQ, onNavigate }: { searchQ: string; onNavigate: (
     const obs = new IntersectionObserver(entries => {
       if (entries[0].isIntersecting && !loadingMore && !loading && page < totalPages)
         loadPage(page + 1);
+      if (entries[0].isIntersecting && catalog.hasMore) void catalog.loadMore();
     }, { threshold: 0.1 });
     obs.observe(loaderRef.current);
     return () => obs.disconnect();
-  }, [page, totalPages, loadingMore, loading, loadPage]);
+  }, [page, totalPages, loadingMore, loading, loadPage, catalog.hasMore, catalog.loadMore]);
 
   useEffect(() => {
     const q = searchQ.trim();
@@ -131,8 +207,12 @@ function AnimationList({ searchQ, onNavigate }: { searchQ: string; onNavigate: (
   }, [searchQ]);
 
   const displayList = searchQ.trim().length >= 2 ? searchResults : series;
+  const rows = mergeCatalogRows(
+    displayList.map((item) => ({ kind: "legacy", item })),
+    catalog.items.map((item) => ({ kind: "catalog", item })),
+  );
 
-  if (loading) return (
+  if (loading && series.length === 0 && catalog.loading && catalog.items.length === 0) return (
     <div className="flex items-center justify-center py-20">
       <Loader2 className="w-8 h-8 animate-spin text-emerald-500" />
     </div>
@@ -147,18 +227,37 @@ function AnimationList({ searchQ, onNavigate }: { searchQ: string; onNavigate: (
       )}
       <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 gap-3">
         <AnimatePresence mode="popLayout">
-          {displayList.map((s) => (
-            <AwCard key={s.key} s={s} onClick={() => onNavigate(s)} />
+          {rows.map((row) => row.kind === "catalog" ? (
+            <StardimaCard
+              key={`stardima:${(row.item as StardimaCatalogTitle).provider_title_id}`}
+              title={row.item as StardimaCatalogTitle}
+              onClick={() => onCatalogNavigate(row.item as StardimaCatalogTitle)}
+            />
+          ) : (
+            <AwCard key={`aw:${(row.item as AwSeries).key}`} s={row.item as AwSeries}
+              onClick={() => onNavigate(row.item as AwSeries)} />
           ))}
         </AnimatePresence>
       </div>
-      {!searchQ && (
+      {!searchQ.trim() && (
         <div ref={loaderRef} className="flex items-center justify-center py-8">
           {loadingMore && <Loader2 className="w-6 h-6 animate-spin text-emerald-500" />}
-          {!loadingMore && page >= totalPages && series.length > 0 && (
+          {catalog.loadingMore && <Loader2 className="w-6 h-6 animate-spin text-emerald-500" />}
+          {!loadingMore && !catalog.loadingMore && page >= totalPages && !catalog.hasMore && series.length + catalog.items.length > 0 && (
             <p className="text-xs text-white/30 font-['Cairo']">تم تحميل جميع المسلسلات ({series.length})</p>
           )}
+          {catalog.error ? (
+            <button onClick={catalog.retry} data-testid="button-retry-stardima-animation"
+              className="text-xs text-emerald-300 font-['Cairo'] px-3 py-2">
+              تعذر تحميل StarDima — أعد المحاولة
+            </button>
+          ) : null}
         </div>
+      )}
+      {searchQ.trim().length >= 2 && (
+        <p className="text-xs text-white/35 font-['Cairo'] text-center mt-3">
+          {catalog.loading ? "جارٍ تحميل نتائج StarDima..." : ""}
+        </p>
       )}
     </>
   );
@@ -166,7 +265,16 @@ function AnimationList({ searchQ, onNavigate }: { searchQ: string; onNavigate: (
 
 // ── Cartoon tab content ───────────────────────────────────────────────────
 
-function CartoonList({ searchQ, onNavigate }: { searchQ: string; onNavigate: (s: AtSeries) => void }) {
+function CartoonList({
+  searchQ,
+  onNavigate,
+  onCatalogNavigate,
+}: {
+  searchQ: string;
+  onNavigate: (s: AtSeries) => void;
+  onCatalogNavigate: (title: StardimaCatalogTitle) => void;
+}) {
+  const catalog = useStardimaCatalogFeed("cartoon", searchQ);
   const [series,      setSeries]      = useState<AtSeries[]>([]);
   const [page,        setPage]        = useState(1);
   const [totalPages,  setTotalPages]  = useState(1);
@@ -183,7 +291,8 @@ function CartoonList({ searchQ, onNavigate }: { searchQ: string; onNavigate: (s:
       const r = await fetch(`${API_BASE}/api/dubbed/catalog?page=${p}`);
       const d = await r.json();
       setTotalPages(d.totalPages || 1);
-      setSeries(prev => reset ? (d.results || []) : [...prev, ...(d.results || [])]);
+      const eligible = Array.isArray(d.results) ? d.results.filter(isLegacyCartoonEntry) : [];
+      setSeries(prev => reset ? eligible : [...prev, ...eligible]);
       setPage(p);
     } catch {}
     setLoading(false); setLoadingMore(false);
@@ -196,10 +305,11 @@ function CartoonList({ searchQ, onNavigate }: { searchQ: string; onNavigate: (s:
     const obs = new IntersectionObserver(entries => {
       if (entries[0].isIntersecting && !loadingMore && !loading && page < totalPages)
         loadPage(page + 1);
+      if (entries[0].isIntersecting && catalog.hasMore) void catalog.loadMore();
     }, { threshold: 0.1 });
     obs.observe(loaderRef.current);
     return () => obs.disconnect();
-  }, [page, totalPages, loadingMore, loading, loadPage]);
+  }, [page, totalPages, loadingMore, loading, loadPage, catalog.hasMore, catalog.loadMore]);
 
   useEffect(() => {
     const q = searchQ.trim();
@@ -210,7 +320,7 @@ function CartoonList({ searchQ, onNavigate }: { searchQ: string; onNavigate: (s:
       try {
         const r = await fetch(`${API_BASE}/api/dubbed/search?q=${encodeURIComponent(q)}`);
         const d = await r.json();
-        setSearchResults(d.results || []);
+        setSearchResults(Array.isArray(d.results) ? d.results.filter(isLegacyCartoonEntry) : []);
       } catch { setSearchResults([]); }
       setSearchLoading(false);
     }, 350);
@@ -218,8 +328,12 @@ function CartoonList({ searchQ, onNavigate }: { searchQ: string; onNavigate: (s:
   }, [searchQ]);
 
   const displayList = searchQ.trim().length >= 2 ? searchResults : series;
+  const rows = mergeCatalogRows(
+    displayList.map((item) => ({ kind: "legacy", item })),
+    catalog.items.map((item) => ({ kind: "catalog", item })),
+  );
 
-  if (loading) return (
+  if (loading && series.length === 0 && catalog.loading && catalog.items.length === 0) return (
     <div className="flex items-center justify-center py-20">
       <Loader2 className="w-8 h-8 animate-spin text-[#7C3AED]" />
     </div>
@@ -234,18 +348,38 @@ function CartoonList({ searchQ, onNavigate }: { searchQ: string; onNavigate: (s:
       )}
       <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 gap-3">
         <AnimatePresence mode="popLayout">
-          {displayList.map((s) => (
-            <AtCard key={s.key || s.title} s={s} onClick={() => onNavigate(s)} />
+          {rows.map((row) => row.kind === "catalog" ? (
+            <StardimaCard
+              key={`stardima:${(row.item as StardimaCatalogTitle).provider_title_id}`}
+              title={row.item as StardimaCatalogTitle}
+              onClick={() => onCatalogNavigate(row.item as StardimaCatalogTitle)}
+            />
+          ) : (
+            <AtCard key={`arabic-toons:${(row.item as AtSeries).key || (row.item as AtSeries).title}`}
+              s={row.item as AtSeries}
+              onClick={() => onNavigate(row.item as AtSeries)} />
           ))}
         </AnimatePresence>
       </div>
-      {!searchQ && (
+      {!searchQ.trim() && (
         <div ref={loaderRef} className="flex items-center justify-center py-8">
           {loadingMore && <Loader2 className="w-6 h-6 animate-spin text-[#7C3AED]" />}
-          {!loadingMore && page >= totalPages && series.length > 0 && (
+          {catalog.loadingMore && <Loader2 className="w-6 h-6 animate-spin text-emerald-500" />}
+          {!loadingMore && !catalog.loadingMore && page >= totalPages && !catalog.hasMore && series.length + catalog.items.length > 0 && (
             <p className="text-xs text-white/30 font-['Cairo']">تم تحميل جميع الكرتون ({series.length})</p>
           )}
+          {catalog.error ? (
+            <button onClick={catalog.retry} data-testid="button-retry-stardima-cartoon"
+              className="text-xs text-emerald-300 font-['Cairo'] px-3 py-2">
+              تعذر تحميل StarDima — أعد المحاولة
+            </button>
+          ) : null}
         </div>
+      )}
+      {searchQ.trim().length >= 2 && (
+        <p className="text-xs text-white/35 font-['Cairo'] text-center mt-3">
+          {catalog.loading ? "جارٍ تحميل نتائج StarDima..." : ""}
+        </p>
       )}
     </>
   );
@@ -254,8 +388,8 @@ function CartoonList({ searchQ, onNavigate }: { searchQ: string; onNavigate: (s:
 // ── Main Combined Page ────────────────────────────────────────────────────
 
 const TABS: { id: Tab; label: string; color: string }[] = [
-  { id: "animation", label: "أنيميشن مدبلج", color: "emerald" },
-  { id: "cartoon",   label: "كرتون مدبلج",   color: "violet"  },
+  { id: "animation", label: "أنيميشن مدبلج ومترجم", color: "emerald" },
+  { id: "cartoon",   label: "كرتون مدبلج ومترجم",   color: "violet"  },
 ];
 
 export default function DubbedCombinedLibrary() {
@@ -287,7 +421,13 @@ export default function DubbedCombinedLibrary() {
     navigate(`/dubbed/${key}?seasons=${seasons}&title=${encodeURIComponent(s.title)}&img=${img}`);
   };
 
-  const placeholder = tab === "animation" ? "ابحث في الأنيميشن المدبلج..." : "ابحث في الكرتون المدبلج...";
+  const openCatalogDetail = (title: StardimaCatalogTitle) => {
+    navigate(`/stardima/title/${encodeURIComponent(title.provider_title_id)}`);
+  };
+
+  const placeholder = tab === "animation"
+    ? "ابحث في الأنيميشن المدبلج والمترجم..."
+    : "ابحث في الكرتون المدبلج والمترجم...";
   const searchId    = `dubbed-combined-search-${tab}`;
 
   return (
@@ -302,7 +442,7 @@ export default function DubbedCombinedLibrary() {
           </button>
           <div className="flex-1">
             <h1 className="text-lg font-black font-['Cairo'] text-white">مدبلج بالعربية</h1>
-            <p className="text-xs text-white/40 font-['Cairo']">كرتون وأنيميشن مدبلج للعربية</p>
+            <p className="text-xs text-white/40 font-['Cairo']">كرتون وأنيميشن مدبلج ومترجم للعربية</p>
           </div>
           <button
             onClick={() => { setSearchOpen(o => !o); if (!searchOpen) setTimeout(() => document.getElementById(searchId)?.focus(), 50); }}
@@ -354,8 +494,8 @@ export default function DubbedCombinedLibrary() {
           <motion.div key={tab} initial={{ opacity: 0 }} animate={{ opacity: 1 }}
             exit={{ opacity: 0 }} transition={{ duration: 0.1 }}>
             {tab === "animation"
-              ? <AnimationList searchQ={searchQ} onNavigate={openAwDetail} />
-              : <CartoonList   searchQ={searchQ} onNavigate={openAtDetail} />
+              ? <AnimationList searchQ={searchQ} onNavigate={openAwDetail} onCatalogNavigate={openCatalogDetail} />
+              : <CartoonList   searchQ={searchQ} onNavigate={openAtDetail} onCatalogNavigate={openCatalogDetail} />
             }
           </motion.div>
         </AnimatePresence>

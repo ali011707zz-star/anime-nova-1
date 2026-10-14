@@ -1,4 +1,5 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import {
   ActivityIndicator,
   Platform,
@@ -15,6 +16,16 @@ import { isTvDevice, tvFocusStyle } from "@/utils/tv";
 import { getBaseUrl } from "@/utils/api";
 import { RiftPlayer, type PlayerSource } from "@/components/RiftPlayer";
 import { useWatchPlayerOrientation } from "@/utils/watchOrientation";
+import { getWatchContentId, useApp } from "@/context/AppContext";
+import { getStardimaProgressKey } from "@/utils/stardimaProgress";
+
+type CatalogEpisode = {
+  id: string | number;
+  season_number: number;
+  episode_number: number;
+  episode_label?: string | null;
+  title?: string | null;
+};
 
 function readParam(value: string | string[] | undefined) {
   return Array.isArray(value) ? value[0] || "" : value || "";
@@ -25,23 +36,53 @@ export default function StardimaPlayerScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const tvMode = isTvDevice();
+  const { addToHistory } = useApp();
   const params = useLocalSearchParams<{
     serverId?: string;
     serverName?: string;
     quality?: string;
     episodeTitle?: string;
     title?: string;
+    providerTitleId?: string;
+    episodeId?: string;
+    episodeNumber?: string;
+    seasonNumber?: string;
+    mediaType?: string;
+    poster?: string;
+    episodeIndex?: string;
+    totalEpisodes?: string;
+    prevEpisodeId?: string;
+    prevEpisodeNumber?: string;
+    prevSeasonNumber?: string;
+    prevEpisodeTitle?: string;
+    prevEpisodeIndex?: string;
+    nextEpisodeId?: string;
+    nextEpisodeNumber?: string;
+    nextSeasonNumber?: string;
+    nextEpisodeTitle?: string;
+    nextEpisodeIndex?: string;
   }>();
   const serverId = readParam(params.serverId);
   const title = readParam(params.title) || "تشغيل الفيديو";
   const episodeTitle = readParam(params.episodeTitle);
   const requestedQuality = readParam(params.quality).trim();
+  const providerTitleId = readParam(params.providerTitleId);
+  const episodeId = readParam(params.episodeId);
+  const episodeNumber = Math.max(1, Number(readParam(params.episodeNumber)) || 1);
+  const seasonNumber = Math.max(1, Number(readParam(params.seasonNumber)) || 1);
+  const mediaType = readParam(params.mediaType) === "movie" ? "movie" : "series";
+  const poster = readParam(params.poster);
+  const progressKey = getStardimaProgressKey(providerTitleId, episodeId);
   const [serverName, setServerName] = useState(readParam(params.serverName) || "StarDima");
   const [selectedQuality, setSelectedQuality] = useState(requestedQuality);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
   const [reloadKey, setReloadKey] = useState(0);
   const [directSource, setDirectSource] = useState<PlayerSource[] | null>(null);
+  const [resumeTime, setResumeTime] = useState(0);
+  const [resumeReady, setResumeReady] = useState(false);
+  const [episodeSequence, setEpisodeSequence] = useState<CatalogEpisode[]>([]);
+  const progressRef = useRef({ position: 0, duration: 0 });
   const onToggleOrientation = useWatchPlayerOrientation(
     Boolean(directSource?.length),
     tvMode,
@@ -113,6 +154,163 @@ export default function StardimaPlayerScreen() {
     },
     actionText: { color: colors.accent, fontFamily: "Cairo_700Bold", fontSize: 12 },
   }), [colors, insets.top]);
+
+  useEffect(() => {
+    let active = true;
+    setResumeReady(false);
+    if (!providerTitleId || !episodeId) {
+      setResumeTime(0);
+      setResumeReady(true);
+      return () => { active = false; };
+    }
+    void AsyncStorage.getItem(progressKey).then((value) => {
+      if (!active || !value) return;
+      try {
+        const parsed = JSON.parse(value) as { position?: number; duration?: number };
+        const position = Number(parsed.position) || 0;
+        const duration = Number(parsed.duration) || 0;
+        setResumeTime(position);
+        progressRef.current = { position, duration };
+      } catch {
+        const position = Number(value) || 0;
+        setResumeTime(position);
+        progressRef.current = { position, duration: 0 };
+      }
+    }).catch(() => {
+      if (active) setResumeTime(0);
+    }).finally(() => {
+      if (active) setResumeReady(true);
+    });
+    return () => { active = false; };
+  }, [episodeId, progressKey, providerTitleId]);
+
+  useEffect(() => {
+    if (!providerTitleId) {
+      setEpisodeSequence([]);
+      return;
+    }
+    const controller = new AbortController();
+    void fetch(
+      `${getBaseUrl()}/api/source-catalog/titles/stardima_catalog/${encodeURIComponent(providerTitleId)}`,
+      { signal: controller.signal },
+    ).then(async (response) => {
+      if (!response.ok) return null;
+      return await response.json() as { episodes?: CatalogEpisode[] };
+    }).then((data) => {
+      if (controller.signal.aborted) return;
+      const rows = Array.isArray(data?.episodes) ? data.episodes : [];
+      rows.sort((a, b) =>
+        (Number(a.season_number) || 1) - (Number(b.season_number) || 1) ||
+        (Number(a.episode_number) || 1) - (Number(b.episode_number) || 1),
+      );
+      setEpisodeSequence(rows);
+    }).catch(() => {
+      if (!controller.signal.aborted) setEpisodeSequence([]);
+    });
+    return () => controller.abort();
+  }, [providerTitleId]);
+
+  const currentEpisodeIndex = episodeSequence.findIndex(
+    (episode) => String(episode.id) === episodeId,
+  );
+
+  const saveProgress = useCallback(async (position = progressRef.current.position) => {
+    if (position <= 10 || !providerTitleId || !episodeId) return;
+    const duration = progressRef.current.duration;
+    try {
+      await AsyncStorage.setItem(progressKey, JSON.stringify({ position: Math.floor(position), duration }));
+    } catch {}
+    try {
+      await addToHistory({
+        animeId: getWatchContentId("stardima", providerTitleId),
+        ep: episodeNumber,
+        totalEps: episodeSequence.length || undefined,
+        season: seasonNumber,
+        contentKind: "stardima",
+        contentKey: providerTitleId,
+        catalogEpisodeId: episodeId,
+        catalogMediaType: mediaType,
+        episodeTitle: episodeTitle || (mediaType === "movie" ? "الفيلم" : `الحلقة ${episodeNumber}`),
+        seasonLabel: `الموسم ${seasonNumber}`,
+        title: title || "StarDima",
+        english: title || "StarDima",
+        thumbnail: poster,
+        position: Math.floor(position),
+        duration: duration > 0 ? Math.floor(duration) : undefined,
+        updatedAt: Date.now(),
+      });
+    } catch {}
+  }, [
+    addToHistory,
+    episodeId,
+    episodeNumber,
+    episodeSequence.length,
+    mediaType,
+    poster,
+    progressKey,
+    providerTitleId,
+    seasonNumber,
+    title,
+  ]);
+
+  const openAdjacentEpisode = useCallback(async (direction: "next" | "prev") => {
+    try { await saveProgress(); } catch {}
+    const fallbackId = readParam(direction === "next" ? params.nextEpisodeId : params.prevEpisodeId);
+    const targetIndex = currentEpisodeIndex + (direction === "next" ? 1 : -1);
+    const target = episodeSequence[targetIndex];
+    const fallbackEpisode = readParam(direction === "next" ? params.nextEpisodeNumber : params.prevEpisodeNumber);
+    const fallbackSeason = readParam(direction === "next" ? params.nextSeasonNumber : params.prevSeasonNumber);
+    const fallbackTitle = readParam(direction === "next" ? params.nextEpisodeTitle : params.prevEpisodeTitle);
+    if (!target && !fallbackId) return;
+    const episode = target || {
+      id: fallbackId,
+      episode_number: Number(fallbackEpisode) || 1,
+      season_number: Number(fallbackSeason) || 1,
+      title: fallbackTitle,
+    };
+    const targetPosition = target ? targetIndex : Number(readParam(
+      direction === "next" ? params.nextEpisodeIndex : params.prevEpisodeIndex,
+    )) || 0;
+    const previous = target ? episodeSequence[targetPosition - 1] : undefined;
+    const next = target ? episodeSequence[targetPosition + 1] : undefined;
+    const targetParams: Record<string, string> = {
+      providerTitleId,
+      episodeId: String(episode.id),
+      episodeNumber: String(Number(episode.episode_number) || 1),
+      seasonNumber: String(Number(episode.season_number) || 1),
+      episodeTitle: mediaType === "movie" ? "الفيلم" : episode.title || `الحلقة ${episode.episode_number}`,
+      title,
+      mediaType,
+      poster,
+      episodeIndex: String(targetPosition),
+      totalEpisodes: String(episodeSequence.length || Number(readParam(params.totalEpisodes)) || targetPosition + 1),
+    };
+    if (previous) {
+      targetParams.prevEpisodeId = String(previous.id);
+      targetParams.prevEpisodeNumber = String(Number(previous.episode_number) || 1);
+      targetParams.prevSeasonNumber = String(Number(previous.season_number) || 1);
+      targetParams.prevEpisodeTitle = previous.title || `الحلقة ${previous.episode_number}`;
+      targetParams.prevEpisodeIndex = String(targetPosition - 1);
+    }
+    if (next) {
+      targetParams.nextEpisodeId = String(next.id);
+      targetParams.nextEpisodeNumber = String(Number(next.episode_number) || 1);
+      targetParams.nextSeasonNumber = String(Number(next.season_number) || 1);
+      targetParams.nextEpisodeTitle = next.title || `الحلقة ${next.episode_number}`;
+      targetParams.nextEpisodeIndex = String(targetPosition + 1);
+    }
+    router.replace({ pathname: "/stardima-servers" as any, params: targetParams });
+  }, [
+    currentEpisodeIndex,
+    episodeSequence,
+    mediaType,
+    params,
+    poster,
+    providerTitleId,
+    router,
+    saveProgress,
+    title,
+  ]);
 
   const resolveSelectedServer = useCallback(async (signal: AbortSignal) => {
     if (!/^\d+$/.test(serverId)) {
@@ -192,20 +390,34 @@ export default function StardimaPlayerScreen() {
     };
   }, [reloadKey, resolveSelectedServer]);
 
-  if (directSource?.length) {
+  if (directSource?.length && resumeReady) {
     return (
       <RiftPlayer
         key={`${serverId}-${reloadKey}`}
         sources={directSource}
         title={title}
+        episode={currentEpisodeIndex >= 0 ? currentEpisodeIndex + 1 : Number(readParam(params.episodeIndex)) + 1}
+        totalEps={episodeSequence.length || Number(readParam(params.totalEpisodes)) || 1}
+        initialPosition={resumeTime}
         episodeTitle={[
           episodeTitle,
           serverName,
           selectedQuality,
         ].filter(Boolean).join(" · ")}
-        onBack={() => router.back()}
+        onBack={() => { void saveProgress().finally(() => router.back()); }}
+        onProgress={(position, duration) => {
+          progressRef.current = { position, duration };
+        }}
+        onPrevEpisode={currentEpisodeIndex > 0 || readParam(params.prevEpisodeId)
+          ? () => { void openAdjacentEpisode("prev"); }
+          : undefined}
+        onNextEpisode={(
+          (currentEpisodeIndex >= 0 && currentEpisodeIndex + 1 < episodeSequence.length) ||
+          Boolean(readParam(params.nextEpisodeId))
+        ) ? () => { void openAdjacentEpisode("next"); } : undefined}
         onToggleOrientation={onToggleOrientation}
         onError={() => {
+          void saveProgress();
           setDirectSource(null);
           setLoadError("تعذر تشغيل الوسائط بعد فحص الرابط. ارجع واختر خادمًا آخر.");
         }}
@@ -237,11 +449,13 @@ export default function StardimaPlayerScreen() {
         </View>
       </View>
 
-      {loading ? (
+      {loading || (directSource?.length && !resumeReady) ? (
         <View style={styles.overlay}>
           <ActivityIndicator size="large" color={colors.accent} />
           <Text style={styles.message}>
-            جارٍ الاستعلام عن {requestedQuality ? `جودة ${requestedQuality} في ` : ""}الخادم المختار واستخراج رابط الوسائط...
+            {directSource?.length && !resumeReady
+              ? "جارٍ استعادة موضع المشاهدة..."
+              : `جارٍ الاستعلام عن ${requestedQuality ? `جودة ${requestedQuality} في ` : ""}الخادم المختار واستخراج رابط الوسائط...`}
           </Text>
         </View>
       ) : loadError ? (

@@ -116,7 +116,7 @@
 - [APK download aliases](apk-download-aliases.md) — keep encoded-space and hyphenated APK URLs mapped to the same current artifact; Nginx fallback can serve stale frontend copies.
 - [VPS APK publication](vps-apk-publication.md) — verify the GitHub artifact SHA before replacing the two Nginx aliases; avoid concurrent SSH sessions on this VPS.
  - [VPS surgical rebuilds](vps-surgical-rebuilds.md) — عند فشل esbuild على نسخة VPS متفرعة، احفظ الملف وافحص الإدراج المعطوب قبل النقل؛ قد تنجح الواجهة بينما يفشل الـAPI.
-- [StarDima catalog taxonomy and fallbacks](stardima-ajax-path.md) — Preserve source labels; verify each series fallback's content type, season, and episode titles before importing.
+- [StarDima catalog taxonomy and fallbacks](stardima-ajax-path.md) — Preserve source labels and keep its web/mobile episode-and-player flow consistent across dubbed cartoon, animation, and translated titles.
 - [AniNeko quality availability](anineko-availability-quality.md) — AniNeko episode pages use generic HD labels; picker quality must come from the embed/master HLS metadata.
 - [Foupix mobile playback](foupix-mobile-playback.md) — direct Foupix MP4 can fail Android TLS and the first CDN request can transiently 403; use the public progressive proxy with retries.
 - [Source health controls](source-health-controls.md) — provider waves must use deferred jobs; deadline signals, single-flight dedupe, and short circuit cooldowns protect the VPS.
