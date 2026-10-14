@@ -2215,10 +2215,10 @@ async function extractVideoDeep(
       const needsCfProxy = url.includes("filemoon") || url.includes("streamwish") ||
         url.includes("wishembed") || url.includes("swdyu") || url.includes("luluvdo");
       if (options.safeExternal) {
-        if (!isSafeExternalUrl(url)) break;
+        if (!isAllowedStardimaPageUrl(url)) break;
         const origin = new URL(url).origin;
         const result = await fetchSafeExternalResponse(url, {
-          safeUrl: isSafeExternalUrl,
+          safeUrl: isAllowedStardimaPageUrl,
           timeoutMs: 7000,
           headers: {
             "User-Agent": BROWSER_UA,
@@ -16137,6 +16137,12 @@ router.post("/anime/stardima/resolve", async (req: Request, res) => {
 
     const oldMetadata = catalogMetadata(server.provider_metadata);
     const pageUrl = String(oldMetadata.page_url || "").trim();
+    if (oldMetadata.health?.state === "source_removed") {
+      return void res.status(410).json({
+        error: "أزال StarDima هذا الخادم من قائمة الحلقة. حدّث القائمة واختر خادمًا آخر.",
+        state: "source_removed",
+      });
+    }
     const fail = async (state: string, reason: string, status: number | null = null, finalUrl: string | null = null) => {
       const checkedAt = new Date().toISOString();
       const health = {

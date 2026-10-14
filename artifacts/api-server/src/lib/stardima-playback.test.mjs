@@ -142,3 +142,19 @@ test("redirects are followed manually and private redirect targets are rejected"
   assert.equal(blocked.error, "unsafe_redirect");
   assert.equal(blocked.response, null);
 });
+
+test("StarDima page extraction stops redirects to unapproved ad or player hosts", async () => {
+  let calls = 0;
+  const result = await fetchSafeExternalResponse("https://strema.top/embed?id=1", {
+    safeUrl: isAllowedStardimaPageUrl,
+    fetchImpl: async () => {
+      calls += 1;
+      return new Response(null, {
+        status: 302,
+        headers: { location: "https://unreviewed-ads.example/landing" },
+      });
+    },
+  });
+  assert.equal(result.error, "unsafe_redirect");
+  assert.equal(calls, 1);
+});
