@@ -160,6 +160,65 @@ paths:
                 $ref: "#/components/schemas/SourceCatalogTitlesResponse"
         "400":
           description: Invalid filter
+  /source-catalog/episodes/{episodeId}/servers:
+    get:
+      operationId: getSourceCatalogEpisodeServers
+      tags: [source-catalog]
+      summary: List server references for one episode without resolving media
+      parameters:
+        - name: episodeId
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+        - name: quality
+          in: query
+          required: false
+          schema:
+            type: string
+            maxLength: 30
+      responses:
+        "200":
+          description: Server page references for this episode only; media is resolved after selection
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SourceCatalogEpisodeServersResponse"
+        "400":
+          description: Invalid episode identifier
+        "404":
+          description: Episode not found
+  /anime/stardima/resolve:
+    post:
+      operationId: resolveSelectedStardimaServer
+      tags: [source-catalog]
+      summary: Resolve and verify only the StarDima server selected by the user
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/StardimaResolveRequest"
+      responses:
+        "200":
+          description: A verified internal-player media URL for the selected server
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StardimaResolveResponse"
+        "400":
+          description: Invalid server ID
+        "404":
+          description: Selected server is not in the StarDima catalog
+        "422":
+          description: Selected link is dead, unsupported, expired, or cannot be extracted
+        "429":
+          description: Resolution rate limit exceeded
+        "502":
+          description: Upstream blocked or unreachable
+        "503":
+          description: Health result could not be persisted
   /device-link/request:
     post:
       operationId: createDeviceLinkCode
@@ -418,7 +477,7 @@ components:
                 minimum: 1
     SourceCatalogClassification:
       type: object
-      required: [version, status, contentFamilies, sourceCategories, sourceTags, localizationLabels, source, detailCheckedAt]
+      required: [version, status, contentFamilies, familyEvidence, sourceCategories, sourceTags, localizationLabels, source, detailCheckedAt]
       properties:
         version:
           type: integer
@@ -429,6 +488,9 @@ components:
           type: array
           items:
             type: string
+        familyEvidence:
+          type: string
+          enum: [title_detail, catalog_list, ""]
         sourceCategories:
           type: array
           items:
@@ -478,4 +540,99 @@ components:
           type: [string, "null"]
         catalogStatus:
           type: [string, "null"]
+    SourceCatalogEpisodeServersResponse:
+      type: object
+      required: [servers, omittedServerCount, pagesOnly, playback]
+      properties:
+        servers:
+          type: array
+          items:
+            $ref: "#/components/schemas/SourceCatalogServer"
+        omittedServerCount:
+          type: integer
+          minimum: 0
+        pagesOnly:
+          type: boolean
+          const: true
+        playback:
+          type: string
+          enum: [internal-resolve-and-verify, resolve-on-demand]
+    SourceCatalogServer:
+      type: object
+      required: [id, provider, page_url, availability_status]
+      properties:
+        id:
+          type: integer
+        provider:
+          $ref: "#/components/schemas/CatalogProvider"
+        page_url:
+          type: [string, "null"]
+          format: uri
+        server_key:
+          type: [string, "null"]
+        server_name:
+          type: [string, "null"]
+        source_host:
+          type: [string, "null"]
+        quality:
+          type: [string, "null"]
+        language:
+          type: [string, "null"]
+        availability_status:
+          type: string
+          enum: [link_found, media_verified, dead, unsupported]
+        health_state:
+          type: [string, "null"]
+        health_reason:
+          type: [string, "null"]
+        health_checked_at:
+          type: [string, "null"]
+          format: date-time
+        last_checked_at:
+          type: [string, "null"]
+          format: date-time
+        needs_recheck:
+          type: boolean
+    StardimaResolveRequest:
+      type: object
+      required: [serverId]
+      properties:
+        serverId:
+          type: integer
+          minimum: 1
+    StardimaResolveResponse:
+      type: object
+      required: [directUrl, type, serverName, sourceHost, headers, health]
+      properties:
+        directUrl:
+          type: string
+          format: uri
+        type:
+          type: string
+          enum: [hls, mp4]
+        quality:
+          type: [string, "null"]
+        serverName:
+          type: string
+        sourceHost:
+          type: string
+        headers:
+          type: object
+          properties:
+            Referer:
+              type: string
+              format: uri
+            Origin:
+              type: string
+              format: uri
+        health:
+          type: object
+          required: [state, checkedAt]
+          properties:
+            state:
+              type: string
+              const: verified
+            checkedAt:
+              type: string
+              format: date-time
 

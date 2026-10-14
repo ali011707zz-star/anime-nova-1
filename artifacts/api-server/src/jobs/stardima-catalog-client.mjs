@@ -276,14 +276,15 @@ function explicitContentFamilies(categories) {
   return [...families].sort();
 }
 
-function makeClassification(sourceCategories, sourceTags, localizationLabels, detailChecked) {
+function makeClassification(sourceCategories, sourceTags, localizationLabels, detailChecked, detailCategories = []) {
   const categories = unique(sourceCategories);
   const tags = unique(sourceTags);
-  const families = explicitContentFamilies(categories);
+  const families = explicitContentFamilies(detailCategories);
   return {
     version: 1,
     status: families.length ? "classified" : categories.length ? "source_labeled" : "needs_review",
     content_families: families,
+    family_evidence: detailChecked ? "title_detail" : "catalog_list",
     source_categories: categories,
     source_tags: tags,
     localization_labels: unique(localizationLabels),
@@ -292,8 +293,9 @@ function makeClassification(sourceCategories, sourceTags, localizationLabels, de
   };
 }
 
-function classificationTitlePatch(title, detail = null, detailChecked = false) {
+export function classificationTitlePatch(title, detail = null, detailChecked = false) {
   const previous = title?.provider_metadata?.classification;
+  const detailCategories = detailChecked ? collectNamedValues(detail, CATEGORY_KEYS) : [];
   const sourceCategories = unique([
     ...(Array.isArray(previous?.source_categories) ? previous.source_categories : []),
     ...(Array.isArray(title?.genres) ? title.genres : []),
@@ -312,6 +314,7 @@ function classificationTitlePatch(title, detail = null, detailChecked = false) {
     sourceTags,
     localizationLabels,
     detailChecked,
+    detailCategories,
   );
   if (previous?.status === "manually_reviewed") {
     classification.status = "manually_reviewed";
@@ -321,6 +324,9 @@ function classificationTitlePatch(title, detail = null, detailChecked = false) {
     ]).sort();
   } else if (previous?.detail_checked_at && !detailChecked) {
     classification.source = previous.source || "stardima_detail_api";
+    classification.status = previous.status || classification.status;
+    classification.content_families = unique(previous.content_families || []);
+    classification.family_evidence = previous.family_evidence || "title_detail";
   }
   return {
     genres: sourceCategories,

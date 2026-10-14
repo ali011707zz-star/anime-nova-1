@@ -22,9 +22,12 @@ export type DubbedCatalogTitle = {
   backdrop_url?: string | null;
   tags?: string[];
   classification?: {
+    status?: string;
     contentFamilies?: string[];
+    familyEvidence?: string;
     localizationLabels?: string[];
     sourceTags?: string[];
+    detailCheckedAt?: string | null;
   } | null;
 };
 
@@ -70,7 +73,7 @@ export function useDubbedCatalogFeed(
   const loadingMoreRef = useRef(false);
   const initialRequestRef = useRef<AbortController | null>(null);
   const moreRequestRef = useRef<AbortController | null>(null);
-  const cacheKey = query ? "" : `nova:dubbed-catalog-feed:v1:${section}`;
+  const cacheKey = query ? "" : `nova:dubbed-catalog-feed:v2:${section}`;
 
   const appendTitles = useCallback((incoming: DubbedCatalogTitle[], targetCacheKey: string) => {
     const merged = mergeTitles(itemsRef.current, incoming);

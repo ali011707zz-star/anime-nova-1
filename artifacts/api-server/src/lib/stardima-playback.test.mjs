@@ -55,6 +55,61 @@ test("a page returning HTML is unsupported even when its HTTP status is 200", as
   assert.equal(result.reason, "external_player_page_only");
 });
 
+test("HLS is verified only after a bounded request reaches a real segment", async () => {
+  const calls = [];
+  const ts = new Uint8Array(752);
+  ts[0] = 0x47;
+  ts[188] = 0x47;
+  ts[376] = 0x47;
+  const fakeFetch = async (url, init) => {
+    calls.push({ url, method: init.method });
+    if (init.method === "HEAD") return new Response(null, { status: 405 });
+    if (url.endsWith("/master.m3u8")) {
+      return new Response("#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=500000\n720/index.m3u8\n", {
+        status: 206,
+        headers: { "content-type": "application/vnd.apple.mpegurl" },
+      });
+    }
+    if (url.endsWith("/720/index.m3u8")) {
+      return new Response("#EXTM3U\n#EXTINF:4,\nseg-001.ts\n", {
+        status: 206,
+        headers: { "content-type": "application/vnd.apple.mpegurl" },
+      });
+    }
+    return new Response(ts, { status: 206, headers: { "content-type": "video/mp2t" } });
+  };
+  const result = await probeStardimaMediaUrl("https://cdn.example.org/master.m3u8", {
+    fetchImpl: fakeFetch,
+    safeUrl: () => true,
+    maxBytes: 1024,
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.type, "hls");
+  assert.deepEqual(calls.map((call) => call.method), ["HEAD", "GET", "GET", "GET"]);
+  assert.equal(calls.some((call) => call.url.endsWith("/seg-001.ts")), true);
+});
+
+test("an HLS manifest whose first media segment is blocked is not marked working", async () => {
+  const fakeFetch = async (url, init) => {
+    if (init.method === "HEAD") return new Response(null, { status: 405 });
+    if (url.endsWith("/media.m3u8")) {
+      return new Response("#EXTM3U\n#EXTINF:4,\nseg-001.ts\n", {
+        status: 206,
+        headers: { "content-type": "application/vnd.apple.mpegurl" },
+      });
+    }
+    return new Response(null, { status: 403 });
+  };
+  const result = await probeStardimaMediaUrl("https://cdn.example.org/media.m3u8", {
+    fetchImpl: fakeFetch,
+    safeUrl: () => true,
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.state, "blocked");
+});
+
 test("expired and inaccessible responses are distinguished from unsupported HTML", async () => {
   const expired = await probeStardimaMediaUrl("https://cdn.example.org/expired", {
     safeUrl: () => true,

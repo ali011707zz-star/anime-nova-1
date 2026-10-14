@@ -73,7 +73,7 @@ function publicServerRow(row: any): any {
     page_url: row.page_url || metadataPageUrl || null,
     health_state: health?.state || null,
     health_reason: health?.reason || null,
-    health_checked_at: health?.checked_at || health?.source_sync_at || row.last_checked_at || null,
+    health_checked_at: health?.checked_at || row.last_checked_at || null,
   };
 }
 
@@ -153,6 +153,7 @@ function publicCatalogTitle(row: any): any {
           version: Number(classification.version) || 1,
           status: String(classification.status || "source_labeled"),
           contentFamilies: safeList(classification.content_families),
+          familyEvidence: String(classification.family_evidence || ""),
           sourceCategories: safeList(classification.source_categories),
           sourceTags: safeList(classification.source_tags),
           localizationLabels: safeList(classification.localization_labels),
@@ -275,7 +276,7 @@ router.get("/source-catalog/titles", async (req: Request, res: Response) => {
     strict: true,
   }));
   if (!rows) return;
-  res.setHeader("Cache-Control", "public, max-age=300");
+  res.setHeader("Cache-Control", provider === "stardima_catalog" ? "no-store" : "public, max-age=300");
   res.json({
     results: rows.map(publicCatalogTitle),
     page,
@@ -356,13 +357,13 @@ router.get("/source-catalog/lookup", async (req: Request, res: Response) => {
     limit: 100,
     // Production Supabase still has the legacy schema without page_url.
     // The importer keeps the same public contract in provider_metadata.page_url.
-    select: "id,episode_id,provider,server_key,server_name,quality,language,source_kind,source_host,availability_status,last_checked_at,provider_metadata",
+    select: "id,episode_id,provider,server_key,server_name,quality,language,source_kind,source_host,availability_status,last_checked_at,last_seen_at,provider_metadata",
     strict: true,
   })));
   if (!servers) return;
   const visible = dedupeCatalogServerRows(servers, String(title.provider || ""));
 
-  res.setHeader("Cache-Control", "private, max-age=10");
+  res.setHeader("Cache-Control", provider === "stardima_catalog" ? "no-store" : "private, max-age=10");
   res.json({
     title: publicCatalogTitle(title),
     episode: episodeRow,
@@ -397,7 +398,7 @@ router.get("/source-catalog/episodes/:episodeId/servers", async (req: Request, r
   })));
   if (!rows) return;
   const visible = dedupeCatalogServerRows(rows, provider);
-  res.setHeader("Cache-Control", "private, max-age=10");
+  res.setHeader("Cache-Control", provider === "stardima_catalog" ? "no-store" : "private, max-age=10");
   res.json({
     servers: visible.servers,
     omittedServerCount: visible.omittedCount,

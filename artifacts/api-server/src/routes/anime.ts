@@ -2263,6 +2263,7 @@ async function extractVideoDeep(
           url.includes("luluvdo.com") || url.includes("darkibox.com") || url.includes("hydracker.com") ||
           url.includes("1vid.xyz") || url.includes("1vid1shar.space") ||
           url.includes("uqload.is") || url.includes("uqload.co") ||
+          (options.safeExternal && url.includes("uqload.vc")) ||
           url.includes("voe.sx") || url.includes("vidoza.net") ||
           url.includes("bigwarp.io") || url.includes("forafile.com") ||
           url.includes("anafast.com") || url.includes("listeamed.net") ||

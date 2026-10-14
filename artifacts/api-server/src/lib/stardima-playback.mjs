@@ -169,6 +169,89 @@ async function readBoundedPrefix(response, maxBytes) {
   }
 }
 
+function firstPlaylistReference(manifest) {
+  const lines = String(manifest || "").split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  for (let i = 0; i < lines.length; i += 1) {
+    if (/^#EXT-X-STREAM-INF\b/i.test(lines[i])) {
+      const next = lines.slice(i + 1).find((line) => !line.startsWith("#"));
+      if (next) return next;
+    }
+  }
+  return lines.find((line) => !line.startsWith("#")) || null;
+}
+
+function isHtmlPrefix(prefix, contentType) {
+  return /text\/html|application\/xhtml\+xml/i.test(contentType) ||
+    /^<(?:!doctype\s+html|html|head|body|script|iframe)\b/i.test(
+      Buffer.from(prefix).toString("utf8").trimStart(),
+    );
+}
+
+function isMediaSegment(prefix, contentType) {
+  const bytes = Buffer.from(prefix || []);
+  if (isHtmlPrefix(bytes, contentType) || !bytes.length) return false;
+  if (bytes.length >= 8 && ["ftyp", "styp", "moof"].includes(bytes.toString("ascii", 4, 8))) return true;
+  if (bytes.length > 188 && bytes[0] === 0x47 && bytes[188] === 0x47) return true;
+  return /^(?:video\/|audio\/)/i.test(String(contentType || ""));
+}
+
+async function verifyHlsMediaReference(manifestUrl, manifestPrefix, options, depth = 0) {
+  const reference = firstPlaylistReference(Buffer.from(manifestPrefix).toString("utf8"));
+  if (!reference) {
+    return { ok: false, state: "unsupported", reason: "hls_playlist_has_no_media", status: null };
+  }
+  let mediaUrl;
+  try {
+    mediaUrl = new URL(reference, manifestUrl).href;
+  } catch {
+    return { ok: false, state: "unsupported", reason: "invalid_hls_media_reference", status: null };
+  }
+  if (!options.safeUrl(mediaUrl)) {
+    return { ok: false, state: "blocked", reason: "unsafe_hls_media_reference", status: null };
+  }
+  const result = await requestWithCheckedRedirects(mediaUrl, {
+    method: "GET",
+    headers: { ...options.headers, Range: `bytes=0-${options.maxBytes - 1}` },
+    timeoutMs: options.timeoutMs,
+  }, options.fetchImpl, options.safeUrl);
+  if (result.error || !result.response) {
+    return {
+      ok: false,
+      state: result.error === "unsafe_redirect" ? "blocked" : "unreachable",
+      reason: result.error || "hls_media_request_failed",
+      status: null,
+    };
+  }
+  const response = result.response;
+  const status = response.status;
+  if (status === 404 || status === 410 || status === 401 || status === 403 || status === 407 || status === 429) {
+    cancelBody(response);
+    return httpFailure(status, result.url);
+  }
+  if (!(response.ok || status === 206)) {
+    cancelBody(response);
+    return httpFailure(status, result.url);
+  }
+  const contentType = response.headers?.get?.("content-type") || "";
+  const prefix = await readBoundedPrefix(response, options.maxBytes);
+  const nestedType = readMediaSignature(prefix, contentType);
+  if (nestedType === "hls") {
+    if (depth >= 2) {
+      return { ok: false, state: "unsupported", reason: "hls_playlist_nesting_limit", status };
+    }
+    return verifyHlsMediaReference(result.url, prefix, options, depth + 1);
+  }
+  if (!isMediaSegment(prefix, contentType)) {
+    return {
+      ok: false,
+      state: "unsupported",
+      reason: isHtmlPrefix(prefix, contentType) ? "hls_reference_returned_html" : "hls_media_reference_unverified",
+      status,
+    };
+  }
+  return { ok: true, status };
+}
+
 export async function probeStardimaMediaUrl(value, options = {}) {
   const safeUrl = options.safeUrl || isSafeExternalHttpUrl;
   const fetchImpl = options.fetchImpl || fetch;
@@ -237,6 +320,25 @@ export async function probeStardimaMediaUrl(value, options = {}) {
       finalUrl,
       contentType: contentType.slice(0, 120),
     };
+  }
+  if (type === "hls") {
+    const hlsCheck = await verifyHlsMediaReference(finalUrl, prefix, {
+      safeUrl,
+      fetchImpl,
+      maxBytes,
+      timeoutMs: options.timeoutMs || 4500,
+      headers: baseHeaders,
+    });
+    if (!hlsCheck.ok) {
+      return {
+        ok: false,
+        state: hlsCheck.state,
+        reason: hlsCheck.reason,
+        status: hlsCheck.status ?? status,
+        finalUrl,
+        contentType: contentType.slice(0, 120),
+      };
+    }
   }
   return {
     ok: true,

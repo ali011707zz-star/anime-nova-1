@@ -39,6 +39,7 @@ type CatalogTitle = {
     status?: string;
     localizationLabels?: string[];
     contentFamilies?: string[];
+    detailCheckedAt?: string | null;
   } | null;
 };
 
@@ -53,13 +54,17 @@ type CatalogEpisode = {
 };
 
 type CatalogServer = {
-  id?: number;
+  id?: number | string;
   server_key?: string;
   server_name?: string | null;
   source_host?: string | null;
   quality?: string | null;
   language?: string | null;
   availability_status?: string | null;
+  health_state?: string | null;
+  health_reason?: string | null;
+  health_checked_at?: string | null;
+  needs_recheck?: boolean;
   page_url?: string | null;
 };
 
@@ -69,6 +74,28 @@ function readParam(value: string | string[] | undefined) {
 
 function titleText(title?: CatalogTitle | null) {
   return title?.title_ar || title?.title || title?.title_en || "عنوان";
+}
+
+function healthReasonText(reason?: string | null) {
+  const labels: Record<string, string> = {
+    external_player_page_only: "صفحة مشغل خارجية فقط",
+    unsupported_media_format: "صيغة وسائط غير مدعومة",
+    upstream_expired: "انتهت صلاحية الرابط",
+    upstream_not_found: "الرابط غير موجود",
+    upstream_access_blocked: "المصدر يحجب الطلب",
+    upstream_server_error: "خطأ في خادم المصدر",
+    upstream_unreachable: "تعذر الوصول للمصدر",
+    no_extractable_media: "تعذر استخراج الوسائط",
+    hls_playlist_has_no_media: "قائمة HLS بلا مقاطع",
+    hls_reference_returned_html: "رابط المقطع أعاد صفحة HTML",
+    hls_media_reference_unverified: "تعذر التحقق من مقطع HLS",
+    page_host_not_approved: "مضيف الصفحة غير معتمد",
+    catalog_host_mismatch: "مضيف الرابط لا يطابق الكتالوج",
+    unsafe_redirect: "إعادة توجيه غير آمنة",
+    unsafe_media_url: "رابط الوسائط غير آمن",
+    removed_from_latest_source_list: "أزيل من قائمة StarDima",
+  };
+  return reason ? labels[reason] || "سبب الفشل مسجل" : "";
 }
 
 function pageUrl(value: unknown) {
@@ -274,6 +301,13 @@ export default function StardimaTitleScreen() {
       fontSize: 12,
       textAlign: "right",
     },
+    serverStatus: {
+      marginTop: 2,
+      color: colors.textMuted,
+      fontFamily: "Cairo_400Regular",
+      fontSize: 10,
+      textAlign: "right",
+    },
   }), [colors, insets.bottom]);
 
   const [title, setTitle] = useState<CatalogTitle | null>(null);
@@ -283,6 +317,7 @@ export default function StardimaTitleScreen() {
   const [error, setError] = useState("");
   const [selectedEpisode, setSelectedEpisode] = useState<CatalogEpisode | null>(null);
   const [servers, setServers] = useState<CatalogServer[]>([]);
+  const [omittedServerCount, setOmittedServerCount] = useState(0);
   const [serversLoading, setServersLoading] = useState(false);
   const [serversError, setServersError] = useState("");
   const [openingServer, setOpeningServer] = useState(false);
@@ -348,6 +383,7 @@ export default function StardimaTitleScreen() {
       setServersError("لا يوجد معرّف لهذه الحلقة في الكتالوج.");
       setSelectedEpisode(episode);
       setServers([]);
+      setOmittedServerCount(0);
       setServersLoading(false);
       return;
     }
@@ -355,6 +391,7 @@ export default function StardimaTitleScreen() {
     serversRequestRef.current = controller;
     setSelectedEpisode(episode);
     setServers([]);
+    setOmittedServerCount(0);
     setServersError("");
     setServersLoading(true);
     try {
@@ -363,13 +400,20 @@ export default function StardimaTitleScreen() {
         { signal: controller.signal },
       );
       if (!response.ok) throw new Error("تعذر تحميل روابط المشاهدة.");
-      const data = await response.json() as { servers?: CatalogServer[] };
+      const data = await response.json() as { servers?: CatalogServer[]; omittedServerCount?: number };
       if (controller.signal.aborted) return;
       const usable = (Array.isArray(data.servers) ? data.servers : [])
-        .filter((server) => pageUrl(server.page_url))
-        .filter((server) => !["dead", "unsupported"].includes(String(server.availability_status || "").toLowerCase()));
+        .filter((server) => Boolean(server.id) && Boolean(pageUrl(server.page_url)))
+        .filter((server) => String(server.health_state || "").toLowerCase() !== "source_removed");
       setServers(usable);
-      if (!usable.length) setServersError("لا توجد روابط مشاهدة مسجلة لهذه الحلقة بعد.");
+      setOmittedServerCount(Math.max(0, Number(data.omittedServerCount) || 0));
+      if (!usable.length) {
+        setServersError(
+          Number(data.omittedServerCount) > 0
+            ? "أُخفيت روابط فشل فحصها مؤخرًا. لا يوجد خادم متاح لهذه الحلقة الآن."
+            : "لا توجد روابط مشاهدة مسجلة لهذه الحلقة بعد.",
+        );
+      }
     } catch (loadError: any) {
       if (!controller.signal.aborted) setServersError(loadError?.message || "تعذر تحميل روابط المشاهدة.");
     } finally {
@@ -380,26 +424,28 @@ export default function StardimaTitleScreen() {
   const closeServers = useCallback(() => {
     serversRequestRef.current?.abort();
     setSelectedEpisode(null);
+    setServers([]);
+    setOmittedServerCount(0);
+    setServersError("");
     setServersLoading(false);
     setOpeningServer(false);
   }, []);
 
   const openServer = useCallback(async (server: CatalogServer) => {
-    const url = pageUrl(server.page_url);
-    if (!url || openingServer) return;
+    if (!server.id || !pageUrl(server.page_url) || openingServer) return;
     setOpeningServer(true);
     try {
       if (!(await ensureWatchAccess())) {
         setServersError("لم يتم فتح المشاهدة. حاول مرة أخرى.");
         return;
       }
-      setSelectedEpisode(null);
       router.push({
         pathname: "/stardima-player" as any,
         params: {
-          pageUrl: url,
+          serverId: String(server.id),
+          serverName: String(server.server_name || server.source_host || "StarDima"),
+          quality: String(server.quality || ""),
           title: titleText(title),
-          server: "مشغل خارجي",
         },
       });
     } catch {
@@ -435,7 +481,7 @@ export default function StardimaTitleScreen() {
             {isMovie
               ? "فيلم كامل"
               : `الموسم ${Number(item.season_number) || 1} · الحلقة ${episodeNumber}`}
-            {item.episode_status ? ` · ${item.episode_status === "link_found" ? "روابط متاحة" : "الحلقة مسجلة"}` : ""}
+            {item.episode_status ? " · حلقة مفهرسة" : ""}
           </Text>
         </View>
         <Ionicons name="chevron-back" size={17} color={colors.textMuted} />
@@ -598,33 +644,85 @@ export default function StardimaTitleScreen() {
             ) : serversError ? (
               <View style={styles.center}>
                 <Text style={styles.stateText}>{serversError}</Text>
+                {selectedEpisode ? (
+                  <Pressable
+                    style={({ focused, pressed }) => [
+                      {
+                        flexDirection: "row",
+                        alignItems: "center",
+                        gap: 7,
+                        marginTop: 10,
+                        paddingHorizontal: 14,
+                        paddingVertical: 9,
+                        borderRadius: 12,
+                        backgroundColor: colors.surface,
+                        borderWidth: 1,
+                        borderColor: colors.border,
+                        opacity: pressed ? 0.7 : 1,
+                      },
+                      tvMode && focused && tvFocusStyle(true),
+                    ]}
+                    onPress={() => void loadServers(selectedEpisode)}
+                    focusable={tvMode}
+                    accessibilityRole="button"
+                    accessibilityLabel="إعادة تحميل خوادم الحلقة"
+                  >
+                    <Ionicons name="refresh" size={15} color={colors.accent} />
+                    <Text style={{ color: colors.accent, fontFamily: "Cairo_700Bold", fontSize: 12 }}>
+                      إعادة تحميل القائمة
+                    </Text>
+                  </Pressable>
+                ) : null}
               </View>
             ) : (
               <ScrollView>
-                {servers.map((server, index) => (
-                  <Pressable
-                    key={server.id || server.server_key || `${server.server_name}-${index}`}
-                    onPress={() => void openServer(server)}
-                    focusable={tvMode}
-                    accessibilityRole="button"
-                    style={({ focused, pressed }) => [
-                      styles.serverRow,
-                      { opacity: pressed || openingServer ? 0.7 : 1 },
-                      tvMode && focused && tvFocusStyle(true),
-                    ]}
-                  >
-                    <Ionicons name="play-circle-outline" size={23} color={colors.accent} />
-                    <Text numberOfLines={1} style={[styles.serverName, tvMode && { fontSize: 16 }]}>
-                      مشغل {index + 1}
-                      {server.quality ? ` · ${server.quality}` : ""}
-                      {normalizedLocalizationLabel(server.language || "")
-                        ? ` · ${normalizedLocalizationLabel(server.language || "")}`
-                        : ""}
-                    </Text>
-                    {openingServer ? <ActivityIndicator size="small" color={colors.accent} /> : null}
-                    <Ionicons name="chevron-back" size={16} color={colors.textMuted} />
-                  </Pressable>
-                ))}
+                {servers.map((server) => {
+                  const serverLabel = String(server.server_name || server.source_host || "StarDima");
+                  const localization = String(server.language || "").trim();
+                  const languageLabel = localization
+                    ? normalizedLocalizationLabel(localization) || localization
+                    : "";
+                  const statusLabel = server.health_state === "verified" || server.availability_status === "media_verified"
+                    ? "تحقق سابق — سيُعاد الفحص قبل التشغيل"
+                    : server.needs_recheck
+                      ? `حالة قديمة — ${healthReasonText(server.health_reason) || "أعد فحصه عند الاختيار"}`
+                      : server.health_state === "blocked"
+                        ? `حُجب الفحص سابقًا — ${healthReasonText(server.health_reason) || "يمكن إعادة المحاولة"}`
+                        : "غير مفحوص — افحصه قبل التشغيل";
+                  return (
+                    <Pressable
+                      key={server.id || server.server_key || serverLabel}
+                      onPress={() => void openServer(server)}
+                      focusable={tvMode}
+                      accessibilityRole="button"
+                      accessibilityLabel={`فحص وتشغيل ${serverLabel}`}
+                      style={({ focused, pressed }) => [
+                        styles.serverRow,
+                        { opacity: pressed || openingServer ? 0.7 : 1 },
+                        tvMode && focused && tvFocusStyle(true),
+                      ]}
+                    >
+                      <Ionicons name="play-circle-outline" size={23} color={colors.accent} />
+                      <View style={{ flex: 1 }}>
+                        <Text numberOfLines={1} style={[styles.serverName, tvMode && { fontSize: 16 }]}>
+                          {serverLabel}
+                          {server.quality ? ` · ${server.quality}` : ""}
+                          {languageLabel ? ` · ${languageLabel}` : ""}
+                        </Text>
+                        <Text numberOfLines={1} style={[styles.serverStatus, tvMode && { fontSize: 12 }]}>
+                          {statusLabel}
+                        </Text>
+                      </View>
+                      {openingServer ? <ActivityIndicator size="small" color={colors.accent} /> : null}
+                      <Ionicons name="chevron-back" size={16} color={colors.textMuted} />
+                    </Pressable>
+                  );
+                })}
+                {omittedServerCount > 0 ? (
+                  <Text style={[styles.stateText, { paddingVertical: 8 }]}>
+                    أُخفي {omittedServerCount} رابطًا فشل فحصه مؤخرًا.
+                  </Text>
+                ) : null}
               </ScrollView>
             )}
           </View>
