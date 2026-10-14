@@ -26,6 +26,11 @@ import { getBaseUrl } from "@/utils/api";
 import { isTvDevice, tvFocusStyle } from "@/utils/tv";
 import { useTvFocusMemory } from "@/utils/tvFocus";
 import { getPosterUri, getTvPosterUri } from "@/utils/media";
+import {
+  catalogBadge,
+  isLegacyCartoonEntry,
+  useDubbedCatalogFeed,
+} from "@/hooks/useDubbedCatalogFeed";
 
 function normalizeLatestEpisodeItem(item: any): any {
   /* The API has two namespaces: anime_id is AnimeSlayer, while anilistId is
@@ -92,6 +97,7 @@ export default function HomeScreen() {
   const [showDrawer, setShowDrawer] = useState(false);
   const isTvLayout = isTvDevice(width, height);
   const { ready } = useTvFocusMemory("home");
+  const stardimaCartoon = useDubbedCatalogFeed("cartoon", "");
 
   const topPad = Platform.OS === "web" ? 0 : insets.top;
 
@@ -198,7 +204,12 @@ export default function HomeScreen() {
       .then(r => r.json())
       .then(d => {
         if (!controller.signal.aborted) {
-          setDubbedSeries((d.results || d.items || d.series || []).slice(0, 14));
+          const results = d.results || d.items || d.series || [];
+          setDubbedSeries(
+            (Array.isArray(results) ? results : [])
+              .filter(isLegacyCartoonEntry)
+              .slice(0, 14),
+          );
           dubbedLastFetchedRef.current = Date.now();
         }
       })
@@ -223,6 +234,10 @@ export default function HomeScreen() {
 
   const trendingList = trending?.Page?.media || [];
   const popularList = popular?.Page?.media || [];
+  const dubbedHomeRows = useMemo(() => [
+    ...dubbedSeries.slice(0, 7).map((item) => ({ kind: "legacy" as const, item })),
+    ...stardimaCartoon.items.slice(0, 7).map((item) => ({ kind: "stardima" as const, item })),
+  ], [dubbedSeries, stardimaCartoon.items]);
   const airingList = airing?.Page?.media || [];
   const topRatedList = topRated?.Page?.media || [];
   const moviesList = movies?.Page?.media || [];
@@ -504,6 +519,22 @@ export default function HomeScreen() {
                         <Ionicons name="film-outline" size={28} color="rgba(255,255,255,0.2)" />
                       </View>
                     )}
+                    <View style={{
+                      position: "absolute",
+                      top: 8,
+                      right: 8,
+                      zIndex: 2,
+                      paddingHorizontal: 8,
+                      paddingVertical: 3,
+                      borderRadius: 7,
+                      backgroundColor: "#35B955",
+                    }}>
+                      <Text style={{
+                        color: "#fff",
+                        fontFamily: "Cairo_700Bold",
+                        fontSize: isTvLayout ? 12 : 9,
+                      }}>مدبلج</Text>
+                    </View>
                     <LinearGradient colors={["transparent", "rgba(0,0,0,0.92)"]} style={todayStyles.grad}>
                       <Text style={todayStyles.title} numberOfLines={2}>{item.english || item.title}</Text>
                       {item.title_ar ? (
@@ -523,38 +554,57 @@ export default function HomeScreen() {
           </View>
         )}
 
-        {dubbedSeries.length > 0 && (
+        {dubbedHomeRows.length > 0 && (
           <View style={{ marginBottom: 24 }}>
             <View style={styles.sectionHeader}>
               <View style={styles.sectionLeft}>
                 <View style={[styles.sectionDot, { backgroundColor: "#f59e0b" }]} />
-                <Text style={[styles.sectionTitle, { color: colors.text }]}>🎬 كرتون مدبلج عربي</Text>
+                <Text style={[styles.sectionTitle, { color: colors.text }]}>🎬 كرتون مدبلج ومترجم</Text>
               </View>
-               <Pressable onPress={() => router.push("/dubbed" as any)} focusable={isTvLayout}
+               <Pressable onPress={() => router.push({ pathname: "/aw-dubbed" as any, params: { tab: "cartoon" } })}
+                 focusable={isTvLayout}
                  style={({ focused }) => [styles.seeAllBtn, isTvLayout && tvFocusStyle(focused)]}>
                 <Text style={[styles.seeAllText, { color: colors.primary }]}>عرض الكل</Text>
                 <Ionicons name="chevron-back" size={13} color={colors.primary} />
               </Pressable>
             </View>
             <FlatList
-              data={dubbedSeries}
+              data={dubbedHomeRows}
               horizontal
-              keyExtractor={(item: any, idx) => String(item.key || item.id || idx)}
+              keyExtractor={(row, idx) => row.kind === "stardima"
+                ? `stardima:${row.item.provider_title_id}`
+                : `dubbed:${row.item.key || row.item.id || idx}`}
               showsHorizontalScrollIndicator={false}
                contentContainerStyle={{ paddingHorizontal: railSidePadding, gap: railGap }}
-              renderItem={({ item }: { item: any }) => {
+              renderItem={({ item: row }) => {
+                const item = row.item;
+                const stardima = row.kind === "stardima";
                 // The dubbed catalog returns its image as a relative API path.
                 // Keep that path so it can be resolved against the production API
                 // base below instead of falling through to the placeholder.
-                const rawImg = typeof item.image === "string" && item.image.trim()
-                  ? item.image.trim()
-                  : getPosterUri(item);
+                const rawImg = stardima
+                  ? String(item.poster_url || item.backdrop_url || "").trim()
+                  : typeof item.image === "string" && item.image.trim()
+                    ? item.image.trim()
+                    : getPosterUri(item);
                 const imgUri = rawImg
                   ? rawImg.startsWith("http") ? rawImg : `${getBaseUrl()}${rawImg}`
                   : null;
+                const titleText = stardima
+                  ? item.title_ar || item.title || item.title_en || "عنوان"
+                  : item.title;
+                const badgeText = stardima ? catalogBadge(item, "cartoon") : "مدبلج";
+                const badgeColor = badgeText?.includes("مترجم") ? "#D94141" : "#35B955";
                 return (
                    <Pressable
                     onPress={() => {
+                      if (stardima) {
+                        router.push({
+                          pathname: "/stardima-title" as any,
+                          params: { providerTitleId: item.provider_title_id },
+                        });
+                        return;
+                      }
                       const seasons = JSON.stringify(item.seasons || [{ label: "الحلقات", arabicToonsId: item.arabicToonsId }]);
                       router.push({ pathname: "/dubbed/[id]" as any, params: { id: item.key || item.id || item.title, title: item.title, seasons, img: rawImg } });
                      }}
@@ -568,8 +618,26 @@ export default function HomeScreen() {
                         <Ionicons name="tv" size={28} color="rgba(255,255,255,0.2)" />
                       </View>
                     )}
+                    {badgeText ? (
+                      <View style={{
+                        position: "absolute",
+                        top: 8,
+                        right: 8,
+                        zIndex: 2,
+                        paddingHorizontal: 8,
+                        paddingVertical: 3,
+                        borderRadius: 7,
+                        backgroundColor: badgeColor,
+                      }}>
+                        <Text style={{
+                          color: "#fff",
+                          fontFamily: "Cairo_700Bold",
+                          fontSize: isTvLayout ? 12 : 9,
+                        }}>{badgeText}</Text>
+                      </View>
+                    ) : null}
                     <LinearGradient colors={["transparent", "rgba(0,0,0,0.92)"]} style={todayStyles.grad}>
-                      <Text style={todayStyles.title} numberOfLines={2}>{item.title}</Text>
+                      <Text style={todayStyles.title} numberOfLines={2}>{titleText}</Text>
                     </LinearGradient>
                   </Pressable>
                 );

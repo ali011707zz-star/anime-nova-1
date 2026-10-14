@@ -4,6 +4,7 @@ import { getBaseUrl } from "@/utils/api";
 import {
   belongsInSection,
   catalogBadge,
+  isLegacyCartoonEntry,
   normalizedLocalizationLabel,
 } from "./dubbedCatalogClassification.mjs";
 
@@ -27,6 +28,7 @@ export type DubbedCatalogTitle = {
     familyEvidence?: string;
     localizationLabels?: string[];
     sourceTags?: string[];
+    sourceCategories?: string[];
     detailCheckedAt?: string | null;
   } | null;
 };
@@ -39,7 +41,7 @@ const PAGE_SIZE = 30;
 const PAGES_PER_BATCH = 4;
 const MATCHES_PER_BATCH = 12;
 const CACHE_LIMIT = 60;
-export { catalogBadge, normalizedLocalizationLabel };
+export { catalogBadge, isLegacyCartoonEntry, normalizedLocalizationLabel };
 
 function mergeTitles(current: DubbedCatalogTitle[], incoming: DubbedCatalogTitle[]) {
   const seen = new Set(current.map((item) => String(item.id || item.provider_title_id)));
@@ -73,7 +75,7 @@ export function useDubbedCatalogFeed(
   const loadingMoreRef = useRef(false);
   const initialRequestRef = useRef<AbortController | null>(null);
   const moreRequestRef = useRef<AbortController | null>(null);
-  const cacheKey = query ? "" : `nova:dubbed-catalog-feed:v2:${section}`;
+  const cacheKey = query ? "" : `nova:dubbed-catalog-feed:v3:${section}`;
 
   const appendTitles = useCallback((incoming: DubbedCatalogTitle[], targetCacheKey: string) => {
     const merged = mergeTitles(itemsRef.current, incoming);

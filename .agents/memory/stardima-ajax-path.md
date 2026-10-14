@@ -22,9 +22,9 @@ description: StarDima's legacy AJAX routes and the no-guess policy for mixed sou
 
 Keep StarDima's source categories, tags, localization labels, and media type distinct. A category may be a genre, broadcaster/network, franchise/collection, or dubbing/subtitle label; do not treat channel names as proof of content family. Map only explicit category names to standardized families. If reliable labels are absent, leave the title as `needs_review` rather than guessing from its title, poster, or neighboring records.
 
-**Why:** The catalog mixes several kinds of labels and many titles have no source category; guessing would create false classifications and hide the remaining gaps.
+**Why:** The catalog mixes several kinds of labels and many titles have no source category; guessing would create false classifications. Legacy dubbed feeds also mix animation with live-action films and series.
 
-**How to apply:** Preserve exact source labels and their provenance during imports and backfills. Do not infer content families from network names or from title/poster alone.
+**How to apply:** Preserve exact source labels and their provenance during imports and backfills. Do not infer content families from network names or from title/poster alone. In legacy cartoon feeds, keep only entries with explicit animation taxonomy or a verified Arabic-Toons cartoon episode URL; hide unknown families.
 
 ## Series detail fallback safety
 

@@ -1,5 +1,5 @@
 /**
- * (tabs)/aw-dubbed.tsx — تبويب "رسوم متحركة مدبلجة"
+ * (tabs)/aw-dubbed.tsx — تبويب "رسوم متحركة مدبلجة ومترجمة"
  * يجمع قسمين بتبويبين داخليين:
  *   • أنيميشن — أنيميشن مدبلج (aw_links / Supabase)
  *   • كرتون   — كرتون مدبلج عربي (arabic-toons)
@@ -14,11 +14,16 @@ import {
 import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { useRouter } from "expo-router";
+import { useLocalSearchParams, useRouter } from "expo-router";
 import { getBaseUrl } from "@/utils/api";
 import { isTvDevice, tvFocusStyle } from "@/utils/tv";
 import { useColors } from "@/hooks/useColors";
-import { catalogBadge, useDubbedCatalogFeed, type DubbedCatalogTitle } from "@/hooks/useDubbedCatalogFeed";
+import {
+  catalogBadge,
+  isLegacyCartoonEntry,
+  useDubbedCatalogFeed,
+  type DubbedCatalogTitle,
+} from "@/hooks/useDubbedCatalogFeed";
 
 // ─────────────────────────────────────────────────────────
 // Types
@@ -37,7 +42,7 @@ interface DubbedSeries  {
 }
 
 type TabKey = "animation" | "cartoon";
-const CARTOON_CATALOG_CACHE_KEY = "nova:cartoon-catalog:v1";
+const CARTOON_CATALOG_CACHE_KEY = "nova:cartoon-catalog:v2";
 const CARTOON_CATALOG_CACHE_LIMIT = 60;
 
 function normalizeAwSeries(item: any): AwSeries | null {
@@ -230,6 +235,8 @@ function AnimationList({ searchQ }: { searchQ: string }) {
                title={row.item.titleAr || row.item.title}
                seasons={row.item.seasons.length}
                tint="#10B981"
+                badge="مدبلج"
+                badgeTint="#35B955"
                onPress={() => openDetail(row.item)}
              />
            ) : (
@@ -239,7 +246,7 @@ function AnimationList({ searchQ }: { searchQ: string }) {
                seasons={0}
                tint="#10B981"
                badge={catalogBadge(row.item, "animation")}
-               badgeTint="#D94141"
+                badgeTint={catalogBadge(row.item, "animation")?.includes("مترجم") ? "#D94141" : "#35B955"}
                meta={`${row.item.media_type === "movie" ? "فيلم" : "مسلسل"}${row.item.episode_count ? ` · ${row.item.episode_count} حلقة` : ""}${row.item.release_year ? ` · ${row.item.release_year}` : ""}`}
                onPress={() => openCatalogDetail(row.item)}
              />
@@ -328,7 +335,10 @@ function CartoonList({ searchQ }: { searchQ: string }) {
       const d = await r.json();
       if (!Array.isArray(d.results)) throw new Error("invalid catalog response");
       if (ctrl.signal.aborted) return;
-      const next = reset ? d.results : [...seriesRef.current, ...d.results];
+      const filteredResults = d.results.filter(isLegacyCartoonEntry) as DubbedSeries[];
+      const next = reset
+        ? filteredResults
+        : [...seriesRef.current, ...filteredResults];
       seriesRef.current = next;
       setSeries(next);
       setTotalPages(d.totalPages || 1);
@@ -363,7 +373,8 @@ function CartoonList({ searchQ }: { searchQ: string }) {
         const cached = parsed.filter((item: any) =>
           item && typeof item === "object" &&
           typeof item.title === "string" &&
-          Array.isArray(item.seasons),
+          Array.isArray(item.seasons) &&
+          isLegacyCartoonEntry(item),
         ) as DubbedSeries[];
         if (cached.length) {
           seriesRef.current = cached;
@@ -394,7 +405,10 @@ function CartoonList({ searchQ }: { searchQ: string }) {
       try {
         const r = await fetch(`${BASE}/api/dubbed/search?q=${encodeURIComponent(q)}`);
         const d = await r.json();
-        setSearchRes(d.results || []);
+        setSearchRes(
+          (Array.isArray(d.results) ? d.results : [])
+            .filter(isLegacyCartoonEntry),
+        );
       } catch { setSearchRes([]); }
       setSearchLoad(false);
     }, 400);
@@ -468,6 +482,8 @@ function CartoonList({ searchQ }: { searchQ: string }) {
               title={row.item.title}
               seasons={row.item.seasons.length}
               tint="#7C3AED"
+              badge="مدبلج"
+              badgeTint="#35B955"
               onPress={() => openDetail(row.item)}
             />
           ) : (
@@ -477,7 +493,7 @@ function CartoonList({ searchQ }: { searchQ: string }) {
               seasons={0}
               tint="#7C3AED"
               badge={catalogBadge(row.item, "cartoon")}
-              badgeTint="#35B955"
+              badgeTint={catalogBadge(row.item, "cartoon")?.includes("مترجم") ? "#D94141" : "#35B955"}
               meta={`${row.item.media_type === "movie" ? "فيلم" : "مسلسل"}${row.item.episode_count ? ` · ${row.item.episode_count} حلقة` : ""}${row.item.release_year ? ` · ${row.item.release_year}` : ""}`}
               onPress={() => openCatalogDetail(row.item)}
             />
@@ -503,7 +519,7 @@ function CartoonList({ searchQ }: { searchQ: string }) {
           <Text style={[shared.emptyText, { color: colors.textMuted }]}>
             {searchQ.length >= 2
               ? (searchLoad || catalog.loading ? "جاري البحث..." : "لا توجد نتائج")
-              : catalog.loading ? "جارٍ تحميل القائمة..." : "لا توجد مسلسلات"}
+              : catalog.loading ? "جارٍ تحميل القائمة..." : "لا توجد أعمال كرتونية"}
           </Text>
         </View>
       }
@@ -520,14 +536,22 @@ export default function DubbedTabScreen() {
   const insets = useSafeAreaInsets();
   const tvMode = isTvDevice();
   const topPad = Platform.OS === "web" ? 0 : insets.top;
+  const routeParams = useLocalSearchParams<{ tab?: string | string[] }>();
+  const requestedTab = (Array.isArray(routeParams.tab) ? routeParams.tab[0] : routeParams.tab) === "cartoon"
+    ? "cartoon"
+    : "animation";
 
-  const [activeTab, setActiveTab] = useState<TabKey>("animation");
+  const [activeTab, setActiveTab] = useState<TabKey>(requestedTab);
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQ,    setSearchQ]    = useState("");
   const searchInput = useRef<TextInput>(null);
 
   // Tab underline slide animation
-  const slideAnim = useRef(new Animated.Value(0)).current;
+  const slideAnim = useRef(new Animated.Value(requestedTab === "animation" ? 0 : 1)).current;
+  useEffect(() => {
+    setActiveTab(requestedTab);
+    slideAnim.setValue(requestedTab === "animation" ? 0 : 1);
+  }, [requestedTab, slideAnim]);
   const handleTab = (tab: TabKey) => {
     if (tab === activeTab) return;
     setActiveTab(tab);
@@ -545,11 +569,11 @@ export default function DubbedTabScreen() {
       {/* ── Header ── */}
       <View style={[s.header, { borderBottomColor: colors.border }]}>
         <View style={{ flex: 1 }}>
-          <Text style={[s.headerTitle, { color: colors.textPrimary }]}>رسوم متحركة مدبلجة</Text>
+          <Text style={[s.headerTitle, { color: colors.textPrimary }]}>رسوم متحركة مدبلجة ومترجمة</Text>
           <Text style={[s.headerSub, { color: colors.textSecondary }]}>
             {activeTab === "animation"
               ? "أنيميشن مدبلج ومترجم"
-              : "كرتون مدبلج بالعربية"}
+              : "كرتون مدبلج أو مترجم للعربية"}
           </Text>
         </View>
         <Pressable
@@ -581,7 +605,7 @@ export default function DubbedTabScreen() {
                 tvMode && tvFocusStyle(focused),
               ]}>
               <Text style={[s.tabText, { color: active ? color : colors.textSecondary }]}>
-                {tab === "animation" ? "أنيميشن مدبلج" : "كرتون مدبلج"}
+                {tab === "animation" ? "أنيميشن مدبلج ومترجم" : "كرتون مدبلج ومترجم"}
               </Text>
             </Pressable>
           );
@@ -599,7 +623,7 @@ export default function DubbedTabScreen() {
             placeholder={
               activeTab === "animation"
                 ? "ابحث في الأنيميشن المدبلج والمترجم..."
-                : "ابحث في الكرتون المدبلج..."
+                : "ابحث في الكرتون المدبلج والمترجم..."
             }
             placeholderTextColor={colors.textMuted}
             style={[s.searchInput, { color: colors.textPrimary }]}

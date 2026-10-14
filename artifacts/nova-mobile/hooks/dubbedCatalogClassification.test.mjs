@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { belongsInSection, catalogBadge } from "./dubbedCatalogClassification.mjs";
+import {
+  belongsInSection,
+  catalogBadge,
+  isLegacyCartoonEntry,
+} from "./dubbedCatalogClassification.mjs";
 
 test("a detail-verified dubbed anime stays in the animation feed, not dubbed cartoons", () => {
   const title = {
@@ -32,7 +36,7 @@ test("a detail-verified dubbed cartoon stays in the cartoon feed", () => {
   assert.equal(catalogBadge(title, "cartoon"), "مدبلج فصحى");
 });
 
-test("unverified family, untranslated, or ambiguous content stays out of the official feeds", () => {
+test("unverified family or missing localization stays out of the official feeds", () => {
   assert.equal(belongsInSection({ title: "Unknown" }, "cartoon"), false);
   assert.equal(belongsInSection({
     classification: {
@@ -58,7 +62,16 @@ test("unverified family, untranslated, or ambiguous content stays out of the off
       contentFamilies: ["animation"],
       localizationLabels: ["مترجم"],
     },
-  }, "cartoon"), false);
+  }, "cartoon"), true);
+  assert.equal(catalogBadge({
+    classification: {
+      status: "classified",
+      familyEvidence: "title_detail",
+      detailCheckedAt: "2026-10-14T00:00:00.000Z",
+      contentFamilies: ["animation"],
+      localizationLabels: ["مترجم"],
+    },
+  }, "cartoon"), "مترجم");
 });
 
 test("manual review can confirm a dubbed title without a detail timestamp", () => {
@@ -93,4 +106,43 @@ test("a movie is allowed only when its source-confirmed family is animation and 
   };
   assert.equal(belongsInSection(animatedMovie, "cartoon"), true);
   assert.equal(belongsInSection(uncertainLiveActionMovie, "cartoon"), false);
+});
+
+test("a title with both dubbing and subtitles receives an explicit combined badge", () => {
+  const title = {
+    classification: {
+      status: "manually_reviewed",
+      contentFamilies: ["animation"],
+      localizationLabels: ["مدبلج فصحى"],
+      sourceTags: ["مترجم"],
+    },
+  };
+  assert.equal(belongsInSection(title, "cartoon"), true);
+  assert.equal(catalogBadge(title, "cartoon"), "مدبلج فصحى ومترجم");
+});
+
+test("legacy cartoon rows require explicit animation taxonomy or a trusted Arabic-Toons episode URL", () => {
+  assert.equal(isLegacyCartoonEntry({
+    title: "Shrek",
+    genres: [{ id: 16, name: "Animation" }],
+  }), true);
+  assert.equal(isLegacyCartoonEntry({
+    title: "Shrek",
+    genre_ids: [16],
+  }), true);
+  assert.equal(isLegacyCartoonEntry({
+    title: "300",
+    genres: [{ id: 28, name: "Action" }, { id: 10752, name: "War" }],
+  }), false);
+  assert.equal(isLegacyCartoonEntry({
+    title: "17 Again",
+    media_type: "movie",
+  }), false);
+  assert.equal(isLegacyCartoonEntry({
+    title: "Arabic-Toons cartoon",
+    seasons: [{
+      label: "الموسم الأول",
+      arabicToonsId: "https://www.arabic-toons.com/fixture-anime-streaming.html",
+    }],
+  }), true);
 });

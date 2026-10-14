@@ -25,10 +25,19 @@ export default function StardimaPlayerScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const tvMode = isTvDevice();
-  const params = useLocalSearchParams<{ serverId?: string; serverName?: string; title?: string }>();
+  const params = useLocalSearchParams<{
+    serverId?: string;
+    serverName?: string;
+    quality?: string;
+    episodeTitle?: string;
+    title?: string;
+  }>();
   const serverId = readParam(params.serverId);
   const title = readParam(params.title) || "تشغيل الفيديو";
+  const episodeTitle = readParam(params.episodeTitle);
+  const requestedQuality = readParam(params.quality).trim();
   const [serverName, setServerName] = useState(readParam(params.serverName) || "StarDima");
+  const [selectedQuality, setSelectedQuality] = useState(requestedQuality);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
   const [reloadKey, setReloadKey] = useState(0);
@@ -149,11 +158,14 @@ export default function StardimaPlayerScreen() {
           headers[key] = parsed.href;
         }
       }
-      setServerName(String(data.serverName || params.serverName || "StarDima"));
+      const resolvedServerName = String(data.serverName || params.serverName || "StarDima");
+      const resolvedQuality = String(data.quality || requestedQuality || "").trim();
+      setServerName(resolvedServerName);
+      setSelectedQuality(resolvedQuality);
       setDirectSource([{
         url: directUrl.href,
-        label: String(data.serverName || params.serverName || "StarDima"),
-        ...(data.quality ? { quality: String(data.quality) } : {}),
+        label: resolvedQuality ? `${resolvedServerName} · ${resolvedQuality}` : resolvedServerName,
+        ...(resolvedQuality ? { quality: resolvedQuality } : {}),
         contentType: data.type === "hls" ? "hls" : "progressive",
         site: "stardima_catalog",
         ...(Object.keys(headers).length ? { headers } : {}),
@@ -167,7 +179,7 @@ export default function StardimaPlayerScreen() {
     } finally {
       if (!signal.aborted) setLoading(false);
     }
-  }, [params.serverName, serverId]);
+  }, [params.serverName, requestedQuality, serverId]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -186,7 +198,11 @@ export default function StardimaPlayerScreen() {
         key={`${serverId}-${reloadKey}`}
         sources={directSource}
         title={title}
-        episodeTitle={serverName}
+        episodeTitle={[
+          episodeTitle,
+          serverName,
+          selectedQuality,
+        ].filter(Boolean).join(" · ")}
         onBack={() => router.back()}
         onToggleOrientation={onToggleOrientation}
         onError={() => {
@@ -211,14 +227,22 @@ export default function StardimaPlayerScreen() {
         </Pressable>
         <View style={{ flex: 1 }}>
           <Text numberOfLines={1} style={[styles.heading, tvMode && { fontSize: 20 }]}>{title}</Text>
-          <Text numberOfLines={1} style={[styles.subheading, tvMode && { fontSize: 13 }]}>{serverName}</Text>
+          <Text numberOfLines={1} style={[styles.subheading, tvMode && { fontSize: 13 }]}>
+            {[
+              episodeTitle,
+              serverName,
+              selectedQuality,
+            ].filter(Boolean).join(" · ")}
+          </Text>
         </View>
       </View>
 
       {loading ? (
         <View style={styles.overlay}>
           <ActivityIndicator size="large" color={colors.accent} />
-          <Text style={styles.message}>جارٍ فحص الخادم الذي اخترته فقط واستخراج رابط الوسائط...</Text>
+          <Text style={styles.message}>
+            جارٍ الاستعلام عن {requestedQuality ? `جودة ${requestedQuality} في ` : ""}الخادم المختار واستخراج رابط الوسائط...
+          </Text>
         </View>
       ) : loadError ? (
         <View style={styles.overlay}>

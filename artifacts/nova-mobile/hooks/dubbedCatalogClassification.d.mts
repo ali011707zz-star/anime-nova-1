@@ -7,6 +7,7 @@ export type DubbedCatalogClassificationInput = {
     familyEvidence?: string;
     localizationLabels?: string[];
     sourceTags?: string[];
+    sourceCategories?: string[];
     detailCheckedAt?: string | null;
   } | null;
 };
@@ -19,3 +20,4 @@ export function belongsInSection(
   item: DubbedCatalogClassificationInput,
   section: DubbedCatalogSection,
 ): boolean;
+export function isLegacyCartoonEntry(item: unknown): boolean;

@@ -11,6 +11,7 @@ import { useFocusEffect, useRouter } from "expo-router";
 import { getBaseUrl } from "@/utils/api";
 import { isTvDevice, tvFocusStyle } from "@/utils/tv";
 import { useColors } from "@/hooks/useColors";
+import { isLegacyCartoonEntry } from "@/hooks/useDubbedCatalogFeed";
 
 interface Season { label: string; arabicToonsId: string; }
 interface Series {
@@ -56,6 +57,9 @@ function SeriesCard({ s, onPress }: { s: Series; onPress: () => void }) {
             <Text style={{ fontSize: 24 }}>📺</Text>
           </View>
         )}
+        <View style={styles.badge}>
+          <Text style={styles.badgeText}>مدبلج</Text>
+        </View>
         <LinearGradient
           colors={["transparent", "rgba(0,0,0,0.85)"]}
           style={StyleSheet.absoluteFill}
@@ -104,7 +108,9 @@ export default function DubbedScreen() {
       });
       if (!r.ok) throw new Error(`catalog_${r.status}`);
       const d = await r.json();
-      const results: Series[] = Array.isArray(d.results) ? d.results : [];
+      const results: Series[] = Array.isArray(d.results)
+        ? d.results.filter(isLegacyCartoonEntry)
+        : [];
       setTotalPages(d.totalPages || 1);
       setSeries(prev => reset ? results : [...prev, ...results]);
       setPage(p);
@@ -134,7 +140,11 @@ export default function DubbedScreen() {
         const r = await fetch(`${apiBase()}/api/dubbed/search?q=${encodeURIComponent(q)}`);
         if (!r.ok) throw new Error(`search_${r.status}`);
         const d = await r.json();
-        setSearchResults(Array.isArray(d.results) ? d.results : []);
+        setSearchResults(
+          Array.isArray(d.results)
+            ? d.results.filter(isLegacyCartoonEntry)
+            : [],
+        );
       } catch { setSearchResults([]); }
       setSearchLoading(false);
     }, 400);
@@ -168,7 +178,7 @@ export default function DubbedScreen() {
         </Pressable>
         <View style={{ flex: 1 }}>
           <Text style={[styles.headerTitle, { color: colors.textPrimary }]}>كرتون مدبلج</Text>
-          <Text style={[styles.headerSub, { color: colors.textSecondary }]}>كرتون وأنمي مدبلج للعربية</Text>
+          <Text style={[styles.headerSub, { color: colors.textSecondary }]}>كرتون مدبلج للعربية</Text>
         </View>
         <Pressable
           onPress={() => setSearchOpen(o => !o)}
@@ -229,7 +239,7 @@ export default function DubbedScreen() {
             !loading ? (
               <View style={styles.center}>
                 <Text style={[styles.emptyText, { color: colors.textMuted }]}>
-                  {searchQ.length >= 2 ? "لا توجد نتائج" : "لا توجد مسلسلات"}
+                  {searchQ.length >= 2 ? "لا توجد نتائج كرتونية" : "لا توجد أعمال كرتونية"}
                 </Text>
               </View>
             ) : null
@@ -270,6 +280,12 @@ const styles = StyleSheet.create({
   card: { borderRadius: 12, overflow: "hidden" },
   cardPoster: { aspectRatio: 2 / 3, backgroundColor: "rgba(255,255,255,0.05)", borderRadius: 12, overflow: "hidden" },
   cardPlaceholder: { flex: 1, alignItems: "center", justifyContent: "center" },
+  badge: {
+    position: "absolute", top: 8, right: 8, zIndex: 2,
+    paddingHorizontal: 8, paddingVertical: 3, borderRadius: 7,
+    backgroundColor: "#35B955",
+  },
+  badgeText: { color: "#fff", fontSize: 9, fontFamily: "Cairo_700Bold" },
   cardLabel: { position: "absolute", bottom: 0, left: 0, right: 0, padding: 6 },
   cardTitle: {
     color: "#fff", fontSize: 10, fontWeight: "700",
