@@ -5,7 +5,9 @@ import {
   belongsInSection,
   catalogBadge,
   isLegacyCartoonEntry,
+  mergeCatalogRows,
   normalizedLocalizationLabel,
+  trustedLegacyBadge,
 } from "./dubbedCatalogClassification.mjs";
 
 export type { DubbedCatalogSection } from "./dubbedCatalogClassification.mjs";

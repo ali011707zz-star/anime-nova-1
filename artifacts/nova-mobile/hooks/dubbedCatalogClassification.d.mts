@@ -21,3 +21,8 @@ export function belongsInSection(
   section: DubbedCatalogSection,
 ): boolean;
 export function isLegacyCartoonEntry(item: unknown): boolean;
+export function mergeCatalogRows<TLegacy, TCatalog>(
+  legacyRows: TLegacy[],
+  catalogRows: TCatalog[],
+): Array<TLegacy | TCatalog>;
+export function trustedLegacyBadge(item: unknown, feed: string): string | undefined;
