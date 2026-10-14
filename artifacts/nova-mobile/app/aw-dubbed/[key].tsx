@@ -79,19 +79,21 @@ export default function AwDubbedDetailScreen() {
 
   const openWatch = useCallback((ep: Episode) => {
     router.push({
-      pathname: "/aw-dubbed/watch",
+      pathname: "/watch",
       params: {
-        series:  curSeason?.animeId || "",
+        mode: "aw-dubbed",
+        awSeries: curSeason?.animeId || "",
         ep:      String(ep.number),
         title,
         titleAr,
-        season:  curSeason?.label || "الحلقات",
-        poster:  poster ? encodeURIComponent(poster) : "",
-        seasons: encodeURIComponent(JSON.stringify(seasons)),
-        key:     encodeURIComponent(keyParam || ""),
+        awSeasonLabel: curSeason?.label || "الحلقات",
+        awSeasonIndex: String(selSeason),
+        cover: poster ? encodeURIComponent(poster) : "",
+        awSeasons: encodeURIComponent(JSON.stringify(seasons)),
+        awKey: encodeURIComponent(keyParam || ""),
       },
     });
-  }, [curSeason, title, titleAr, poster, seasons, keyParam, router]);
+  }, [curSeason, selSeason, title, titleAr, poster, seasons, keyParam, router]);
 
   const renderEp = useCallback(({ item: ep }: { item: Episode }) => (
     <Pressable

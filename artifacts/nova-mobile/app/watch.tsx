@@ -11,7 +11,7 @@ import { RiftPlayer, PlayerSource } from "@/components/RiftPlayer";
 import { HiddenResolverWebView, ResolvedStream } from "@/components/HiddenResolverWebView";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { useApp } from "@/context/AppContext";
+import { getWatchContentId, useApp } from "@/context/AppContext";
 import { isTvDevice, tvFocusStyle, TvFocusGuideView, TvPressable } from "@/utils/tv";
 const Pressable = TvPressable;
 import { useTvFocusMemory } from "@/utils/tvFocus";
@@ -32,6 +32,11 @@ import { createPlaybackTraceId, withPlaybackTrace } from "@/utils/playbackTrace"
 import { useColors } from "@/hooks/useColors";
 import type { ThemePalette } from "@/constants/colors";
 import { useWatchPlayerOrientation } from "@/utils/watchOrientation";
+import {
+  getAdjacentAwEpisode,
+  hasAwEpisode,
+  normalizeAwWatchSources,
+} from "@/utils/awWatchExperience.mjs";
 
 /* ── Types ── */
 type Quality    = "1080p FHD" | "720p HD" | "480p SD" | "360p SD";
@@ -75,6 +80,8 @@ interface Src {
   name?: string;
   directType?: string;
   candidateKey?: string;
+  awPickerKey?: string;
+  awQualityKey?: QualityKey;
   skipIntro?: { start: number; end: number };
   skipOutro?: { start: number; end: number };
   /** Referer/Origin headers مطلوبة للـ CDN — مُعادة من الخادم لتجنب الاعتماد على تحليل رابط الـ proxy */
@@ -794,12 +801,16 @@ export default function WatchScreen() {
     anime, ep, title, english, format, etitle,
     totalEps: totalEpsParam, year, episodes, native, titleAr,
     titles: titlesParam, anslayerId, anilistId,
+    mode, awSeries: awSeriesParam, awSeasonLabel: awSeasonLabelParam,
+    awSeasonIndex: awSeasonIndexParam, awSeasons: awSeasonsParam, awKey: awKeyParam,
   } = useLocalSearchParams<{
     anime: string; ep: string; title: string; english: string;
     format?: string; etitle?: string; totalEps?: string;
     year?: string; episodes?: string; native?: string; titleAr?: string;
     titles?: string;
     anslayerId?: string; anilistId?: string;
+    mode?: string; awSeries?: string; awSeasonLabel?: string;
+    awSeasonIndex?: string; awSeasons?: string; awKey?: string;
   }>();
   const insets   = useSafeAreaInsets();
   const router   = useRouter();
@@ -811,6 +822,33 @@ export default function WatchScreen() {
   const titleStr    = safeDecodeURIComponent(title);
   const englishStr  = safeDecodeURIComponent(english);
   const titleArStr  = safeDecodeURIComponent(titleAr);
+  const isAwDubbed = mode === "aw-dubbed";
+  const awSeries = safeDecodeURIComponent(awSeriesParam);
+  const awSeasonLabelParamValue = safeDecodeURIComponent(awSeasonLabelParam) || "الحلقات";
+  const awKey = safeDecodeURIComponent(awKeyParam);
+  const awSeasons = useMemo(() => {
+    if (!isAwDubbed) return [];
+    try {
+      const parsed = JSON.parse(safeDecodeURIComponent(awSeasonsParam));
+      const valid = Array.isArray(parsed)
+        ? parsed
+          .filter((season: any) => season && typeof season === "object" && String(season.animeId ?? "").trim())
+          .map((season: any) => ({
+            label: String(season.label ?? "الحلقات"),
+            animeId: String(season.animeId),
+          }))
+        : [];
+      if (valid.length) return valid;
+    } catch {}
+    return awSeries ? [{ label: awSeasonLabelParamValue, animeId: awSeries }] : [];
+  }, [isAwDubbed, awSeasonsParam, awSeries, awSeasonLabelParamValue]);
+  const requestedAwSeasonIndex = Math.max(0, Number.parseInt(awSeasonIndexParam || "0", 10) || 0);
+  const matchingAwSeasonIndex = awSeasons.findIndex((season) => season.animeId === awSeries);
+  const awSeasonIndex = matchingAwSeasonIndex >= 0
+    ? matchingAwSeasonIndex
+    : Math.min(requestedAwSeasonIndex, Math.max(0, awSeasons.length - 1));
+  const awCurrentSeason = awSeasons[awSeasonIndex]
+    || { label: awSeasonLabelParamValue, animeId: awSeries };
   const titleVariants = useMemo(() => {
     const values = [titleStr, englishStr, safeDecodeURIComponent(native), titleArStr];
     try {
@@ -834,6 +872,9 @@ export default function WatchScreen() {
     (item) => item.animeId === Number(anime) && item.ep === epNum,
   )?.totalEps;
   const [catalogTotalEps, setCatalogTotalEps] = useState<number | undefined>();
+  const [awEpisodeNumbersBySeason, setAwEpisodeNumbersBySeason] =
+    useState<Record<string, number[]>>({});
+  const [awEpisodesReady, setAwEpisodesReady] = useState(false);
 
   /* بطاقات «متابعة المشاهدة» القديمة لا تحتوي دائماً على totalEps. جلب
      العدد من AniList عند الحاجة يعيد تفعيل التالي بدون اختراع حد للحلقات. */
@@ -875,17 +916,39 @@ export default function WatchScreen() {
     if (historyTotalEps !== undefined && Number.isFinite(historyTotalEps) && historyTotalEps > 0) return historyTotalEps;
     return catalogTotalEps;
   })();
-  const canGoNextEpisode = totalEpsCount !== undefined && epNum < totalEpsCount;
+  const currentAwEpisodeNumbers = awEpisodeNumbersBySeason[awSeries] || [];
+  const awPreviousTarget = useMemo(
+    () => isAwDubbed && awEpisodesReady
+      ? getAdjacentAwEpisode(awSeasons, awEpisodeNumbersBySeason, awSeasonIndex, epNum, -1)
+      : null,
+    [isAwDubbed, awEpisodesReady, awSeasons, awEpisodeNumbersBySeason, awSeasonIndex, epNum],
+  );
+  const awNextTarget = useMemo(
+    () => isAwDubbed && awEpisodesReady
+      ? getAdjacentAwEpisode(awSeasons, awEpisodeNumbersBySeason, awSeasonIndex, epNum, 1)
+      : null,
+    [isAwDubbed, awEpisodesReady, awSeasons, awEpisodeNumbersBySeason, awSeasonIndex, epNum],
+  );
+  const canGoNextEpisode = isAwDubbed
+    ? Boolean(awNextTarget)
+    : totalEpsCount !== undefined && epNum < totalEpsCount;
+  const canGoPrevEpisode = isAwDubbed ? Boolean(awPreviousTarget) : epNum > 1;
+  const playerTotalEps = isAwDubbed
+    ? Math.max(
+      currentAwEpisodeNumbers[currentAwEpisodeNumbers.length - 1] || epNum,
+      canGoNextEpisode ? epNum + 1 : epNum,
+    )
+    : totalEpsCount;
   const displayTitle = titleArStr || englishStr || titleStr;
 
   useEffect(() => {
-    if (!anime) return;
+    if (isAwDubbed || !anime) return;
     return startMobileWatchAnalytics({
       animeId: anime,
       episode: epNum,
       title: displayTitle,
     });
-  }, [anime, epNum, displayTitle]);
+  }, [isAwDubbed, anime, epNum, displayTitle]);
 
   /* ── State ── */
   const [screen,      setScreen]      = useState<Screen>("picker"); // يبدأ مباشرةً بالـ picker — بدون تشغيل تلقائي
@@ -927,7 +990,7 @@ export default function WatchScreen() {
      boolean here made every server button show a spinner at once. */
   const [watchAdSite, setWatchAdSite] = useState<string | null>(null);
   const { preferredKey, ready: focusMemoryReady, rememberFocus } =
-    useTvFocusMemory(`watch-picker:${anime || titleStr}:${epNum}`);
+    useTvFocusMemory(`watch-picker:${isAwDubbed ? awSeries : anime || titleStr}:${epNum}`);
 
   const visiblePickerKeys = useMemo(
     () => Q_KEYS.flatMap((quality) =>
@@ -980,9 +1043,48 @@ export default function WatchScreen() {
     }).catch(() => {});
   }, []);
 
+  /* AW episode lists remain in their own catalogue. Fetch every listed season
+     so next/previous and season transitions are based on real episode numbers. */
+  useEffect(() => {
+    if (!isAwDubbed || !awSeasons.length) {
+      setAwEpisodeNumbersBySeason({});
+      setAwEpisodesReady(false);
+      return;
+    }
+    const controller = new AbortController();
+    let active = true;
+    setAwEpisodeNumbersBySeason({});
+    setAwEpisodesReady(false);
+    void Promise.all(awSeasons.map(async (season) => {
+      try {
+        const response = await fetch(
+          `${getBaseUrl()}/api/aw-dubbed/episodes?series=${encodeURIComponent(season.animeId)}`,
+          { signal: controller.signal },
+        );
+        if (!response.ok) return [season.animeId, []] as const;
+        const data = await response.json();
+        const numbers = Array.isArray(data?.episodes)
+          ? data.episodes.map((item: any) => Number(item?.number ?? item))
+            .filter((number: number) => Number.isFinite(number) && number > 0)
+          : [];
+        return [season.animeId, [...new Set(numbers)].sort((a, b) => a - b)] as const;
+      } catch {
+        return [season.animeId, []] as const;
+      }
+    })).then((entries) => {
+      if (!active || controller.signal.aborted) return;
+      setAwEpisodeNumbersBySeason(Object.fromEntries(entries));
+      setAwEpisodesReady(true);
+    });
+    return () => {
+      active = false;
+      controller.abort();
+    };
+  }, [isAwDubbed, awSeasons]);
+
   /* ── ترجمة عنوان الحلقة من الإنجليزية للعربية ── */
   useEffect(() => {
-    if (!etitle) return;
+    if (isAwDubbed || !etitle) return;
     const raw = safeDecodeURIComponent(etitle);
     if (!raw || /[\u0600-\u06FF]/.test(raw)) { setArEpTitle(raw); return; }
     const base = getBaseUrl();
@@ -998,7 +1100,7 @@ export default function WatchScreen() {
      Kawaii may return Arabic directly or English only; translate the latter
      through Nova after proxying the signed subtitle file server-side. */
   useEffect(() => {
-    if (!sourceAnimeId) {
+    if (isAwDubbed || !sourceAnimeId) {
       setGlobalSubUrl(undefined);
       return;
     }
@@ -1010,20 +1112,35 @@ export default function WatchScreen() {
         if (!ctrl.signal.aborted && subtitleUrl) setGlobalSubUrl(subtitleUrl);
       });
     return () => ctrl.abort();
-  }, [sourceAnimeId, epNum]);
+  }, [isAwDubbed, sourceAnimeId, epNum]);
 
-  const progressKey    = `progress-${anime}-${epNum}`;
-  const srcCacheKey    = anime ? `anime-srcs-${anime}-e${epNum}` : null;
+  const progressKey    = isAwDubbed
+    ? `progress-aw-dubbed-${awSeries}-${epNum}`
+    : `progress-${anime}-${epNum}`;
+  const srcCacheKey    = !isAwDubbed && anime ? `anime-srcs-${anime}-e${epNum}` : null;
   const SRC_CACHE_TTL  = 5 * 60 * 1000; // 5 minutes
 
   /* ── Load resume time فقط ── */
   useEffect(() => {
+    let active = true;
+    if (isAwDubbed) setResumeTime(0);
+    const historyPosition = isAwDubbed
+      ? watchHistory.find((item) =>
+        item.contentKind === "aw-dubbed"
+        && item.contentKey === awSeries
+        && item.ep === epNum,
+      )?.position || 0
+      : 0;
     AsyncStorage.getItem(progressKey).then(v => {
-      if (!isMountedRef.current) return;
-      if (v) setResumeTime(parseFloat(v) || 0);
-    }).catch(() => {});
+      if (!active || !isMountedRef.current) return;
+      const storedPosition = Number.parseFloat(v || "") || 0;
+      setResumeTime(storedPosition > 0 ? storedPosition : historyPosition);
+    }).catch(() => {
+      if (active && isMountedRef.current) setResumeTime(historyPosition);
+    });
+    return () => { active = false; };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [progressKey]);
+  }, [progressKey, isAwDubbed, awSeries, epNum]);
 
   /* ── Availability SSE: صفوفها تلميحات وليست إثباتاً لقابلية التشغيل ── */
   /* ── Cleanup: إلغاء كل طلبات الجلب الجارية عند تغيير الحلقة أو إلغاء mount ── */
@@ -1038,9 +1155,91 @@ export default function WatchScreen() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [anime, epNum]);
 
+  /* AW uses the same picker, but its rows come only from the AW catalogue.
+     This path never enters the anime availability or fetch-source endpoints. */
+  useEffect(() => {
+    if (!isAwDubbed) return;
+    const controller = new AbortController();
+    let active = true;
+    setScreen("picker");
+    setPlayingSrc(null);
+    setSources([]);
+    setAvailableSlots({});
+    setSlotStatus({});
+    setAvailabilityDone(false);
+    setAvailabilityError(false);
+    setShowingAvailabilityHints(false);
+
+    const run = async () => {
+      try {
+        if (!awSeries) throw new Error("missing_aw_series");
+        const allowed = await ensureWatchAccess();
+        if (!active || controller.signal.aborted) return;
+        if (!allowed) {
+          setAvailabilityError(true);
+          setAvailabilityDone(true);
+          return;
+        }
+        setWatchUnlocked(true);
+
+        const response = await fetch(
+          `${getBaseUrl()}/api/aw-dubbed/watch-src?series=${encodeURIComponent(awSeries)}&ep=${epNum}`,
+          { signal: controller.signal },
+        );
+        if (!response.ok) throw new Error(`aw_sources_${response.status}`);
+        const data = await response.json();
+        if (!active || controller.signal.aborted) return;
+
+        const entries = normalizeAwWatchSources(data?.allSources, getBaseUrl());
+        const nextSources: Src[] = entries.map((entry) => ({
+          site: "animewitcher",
+          name: entry.serverName,
+          label: entry.serverName,
+          quality: entry.quality,
+          url: entry.url,
+          rawUrl: entry.url,
+          directUrl: entry.url,
+          isEmbed: false,
+          awPickerKey: entry.pickerKey,
+          awQualityKey: entry.qualityKey,
+        }));
+        const nextSlots: Record<string, Partial<Record<QualityKey, AvailableSlot>>> = {};
+        const nextStatus: Record<string, "ready"> = {};
+        for (const entry of entries) {
+          nextSlots[entry.pickerKey] = {
+            [entry.qualityKey]: {
+              serverCount: 1,
+              name: entry.serverName,
+              tag: `${entry.serverName} · ${entry.quality}`,
+            },
+          };
+          nextStatus[pickerSlotKey(entry.pickerKey, entry.qualityKey)] = "ready";
+        }
+        setSources(nextSources);
+        setAvailableSlots(nextSlots);
+        setSlotStatus(nextStatus);
+        setAvailabilityError(false);
+        setAvailabilityDone(true);
+      } catch (error) {
+        if (!active || controller.signal.aborted) return;
+        console.warn("[AW Watch] فشل تحميل مصادر الحلقة:", error);
+        setSources([]);
+        setAvailableSlots({});
+        setSlotStatus({});
+        setAvailabilityError(true);
+        setAvailabilityDone(true);
+      }
+    };
+    void run();
+    return () => {
+      active = false;
+      controller.abort();
+    };
+  }, [isAwDubbed, awSeries, epNum, availabilityAttempt, playbackTraceId]);
+
   /* ── Availability-only scan: بلا روابط تشغيل؛ الجلب الفعلي يبقى عند الضغط ── */
   useEffect(() => {
-    if (!titleStr) return;
+    if (isAwDubbed || !titleStr) return;
     availabilityAbortRef.current?.abort();
     availabilityAbortRef.current = null;
     const forceFresh = forceAvailabilityRefreshRef.current;
@@ -1262,13 +1461,31 @@ export default function WatchScreen() {
       controller.abort();
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [anime, anilistId, sourceAnimeId, epNum, titleStr, englishStr, titleArStr, format, year, episodes, native, anslayerId, availabilityAttempt, availabilityHintKey, playbackTraceId]);
+  }, [isAwDubbed, anime, anilistId, sourceAnimeId, epNum, titleStr, englishStr, titleArStr, format, year, episodes, native, anslayerId, availabilityAttempt, availabilityHintKey, playbackTraceId]);
 
   /* ── Progress save ── */
   const saveProgress = useCallback(async () => {
     const t = lastTimeRef.current;
     if (t <= 10) return;
     await AsyncStorage.setItem(progressKey, String(Math.floor(t)));
+    if (isAwDubbed && awSeries) {
+      await addToHistory({
+        animeId: getWatchContentId("aw-dubbed", awSeries),
+        ep: epNum,
+        totalEps: currentAwEpisodeNumbers[currentAwEpisodeNumbers.length - 1],
+        contentKind: "aw-dubbed",
+        contentKey: awSeries,
+        seasonLabel: awCurrentSeason.label,
+        title: titleStr,
+        english: englishStr || titleStr,
+        titleAr: titleArStr || undefined,
+        thumbnail: coverUrl,
+        position: t,
+        duration: lastDurationRef.current || undefined,
+        updatedAt: Date.now(),
+      });
+      return;
+    }
     if (anime) {
       await addToHistory({
         animeId: parseInt(anime, 10),
@@ -1282,10 +1499,68 @@ export default function WatchScreen() {
         updatedAt: Date.now(),
       });
     }
-  }, [progressKey, anime, epNum, titleStr, englishStr, coverUrl, addToHistory]);
+  }, [
+    progressKey, isAwDubbed, awSeries, epNum, currentAwEpisodeNumbers, awCurrentSeason,
+    titleStr, englishStr, titleArStr, coverUrl, anime, totalEpsCount, addToHistory,
+  ]);
 
   /* ── Navigate episode ── */
+  const goToAwEpisode = useCallback((seasonIndex: number, episodeNumber: number) => {
+    const season = awSeasons[seasonIndex];
+    if (
+      !isAwDubbed
+      || !season
+      || !hasAwEpisode(awSeasons, awEpisodeNumbersBySeason, seasonIndex, episodeNumber)
+      || (seasonIndex === awSeasonIndex && episodeNumber === epNum)
+    ) return;
+
+    void saveProgress();
+    abortRef.current?.abort();
+    availabilityAbortRef.current?.abort();
+    siteCtrls.current.forEach(controller => controller.abort());
+    siteCtrls.current.clear();
+    ++fetchEpochRef.current;
+    setSources([]);
+    setPlayingSrc(null);
+    setAvailableSlots({});
+    setSlotStatus({});
+    setAvailabilityDone(false);
+    setAvailabilityError(false);
+    seenKeys.current.clear();
+    inFlightSitesRef.current.clear();
+    fetchedSitesRef.current.clear();
+    progressivePlaybackRef.current = null;
+    lastTimeRef.current = 0;
+    lastDurationRef.current = 0;
+    setResumeTime(0);
+    setScreen("picker");
+
+    router.replace({
+      pathname: "/watch",
+      params: {
+        mode: "aw-dubbed",
+        awSeries: season.animeId,
+        ep: String(episodeNumber),
+        title: titleStr,
+        english: englishStr || titleStr,
+        titleAr: titleArStr || undefined,
+        cover: coverUrl || undefined,
+        awSeasonLabel: season.label,
+        awSeasonIndex: String(seasonIndex),
+        awSeasons: JSON.stringify(awSeasons),
+        awKey: awKey || undefined,
+      },
+    } as any);
+  }, [
+    isAwDubbed, awSeasons, awEpisodeNumbersBySeason, awSeasonIndex, epNum,
+    saveProgress, router, titleStr, englishStr, titleArStr, coverUrl, awKey,
+  ]);
+
   const goEp = useCallback((n: number, _auto = false) => {
+    if (isAwDubbed) {
+      goToAwEpisode(awSeasonIndex, n);
+      return;
+    }
     /* An unknown upper bound is fail-closed: the next button must never
        invent a future episode. Previous/explicit episode selection remains
        available when it is inside a known catalog bound. */
@@ -1317,13 +1592,17 @@ export default function WatchScreen() {
       : "";
     router.replace(`/watch?anime=${sourceAnimeId || anime}&ep=${n}&title=${encodeURIComponent(titleStr)}&english=${encodeURIComponent(englishStr)}&format=${encodeURIComponent(format || "")}${totalParam}${coverParam}${arParam}${anslayerParam}${nativeParam}${yearParam}${episodesParam}${titlesParam}${anilistParam}`);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [saveProgress, coverUrl, titleArStr, router, anime, sourceAnimeId, titleStr, englishStr, format, anslayerId, epNum, totalEpsCount, native, year, episodes, titleVariants]);
+  }, [
+    isAwDubbed, goToAwEpisode, awSeasonIndex, saveProgress, coverUrl, titleArStr,
+    router, anime, sourceAnimeId, titleStr, englishStr, format, anslayerId,
+    epNum, totalEpsCount, native, year, episodes, titleVariants,
+  ]);
 
   /* ── إعادة تعيين حالة المصادر (زر تحديث) — مسح الأخطاء للسماح بالمحاولة مجدداً ── */
   function refreshAllSources() {
     abortRef.current?.abort();
     availabilityAbortRef.current?.abort();
-    forceAvailabilityRefreshRef.current = true;
+    if (!isAwDubbed) forceAvailabilityRefreshRef.current = true;
     /* إلغاء كل طلبات المواقع الجارية — كانت تتراكم بدون إلغاء عند الضغط على تحديث */
     siteCtrls.current.forEach(c => c.abort());
     siteCtrls.current.clear();
@@ -1381,6 +1660,19 @@ export default function WatchScreen() {
 
   /* ── جلب مصدر واحد عند ضغط المستخدم على زر المصدر ── */
   const handlePickSite = useCallback(async (site: string, preferredQuality?: QualityKey, excludeKeys: string[] = []) => {
+    if (isAwDubbed) {
+      if (!preferredQuality) return;
+      const selected = sources.find(source =>
+        source.awPickerKey === site && source.awQualityKey === preferredQuality,
+      );
+      if (!selected) {
+        setSlotStatus(prev => ({ ...prev, [pickerSlotKey(site, preferredQuality)]: "failed" }));
+        return;
+      }
+      setSlotStatus(prev => ({ ...prev, [pickerSlotKey(site, preferredQuality)]: "ready" }));
+      playSrc(selected);
+      return;
+    }
     if (BLOCKED_SOURCE_SITES.has(site.toLowerCase())) return;
     /* أظهر استجابة اللمس فوراً. فحص صلاحية المشاهدة/الإعلان قد يستغرق
        ثواني، ولا ينبغي أن يبدو الزر ميتاً أثناء انتظاره. */
@@ -1904,14 +2196,28 @@ export default function WatchScreen() {
   const leaveWatch = useCallback(() => {
     saveProgress();
     abortRef.current?.abort();
+    availabilityAbortRef.current?.abort();
     siteCtrls.current.forEach(c => c.abort());
     siteCtrls.current.clear();
     inFlightSitesRef.current.clear();
     fetchedSitesRef.current.clear();
     progressivePlaybackRef.current = null;
     if (router.canGoBack()) router.back();
+    else if (isAwDubbed && awKey) {
+      router.replace({
+        pathname: "/aw-dubbed/[key]",
+        params: {
+          key: awKey,
+          title: titleStr,
+          titleAr: titleArStr || undefined,
+          poster: coverUrl || undefined,
+          seasons: JSON.stringify(awSeasons),
+        },
+      } as any);
+    }
+    else if (isAwDubbed) router.replace("/aw-dubbed" as any);
     else router.replace(`/episodes/${anime}` as any);
-  }, [saveProgress, router, anime]);
+  }, [saveProgress, router, anime, isAwDubbed, awKey, titleStr, titleArStr, coverUrl, awSeasons]);
 
   /* ── Handle back ── */
   const handleBack = useCallback(() => {
@@ -1932,6 +2238,18 @@ export default function WatchScreen() {
   }, [saveProgress]);
 
   const onRiftError = useCallback(() => {
+    if (isAwDubbed) {
+      saveProgress();
+      if (playingSrc?.awPickerKey && playingSrc.awQualityKey) {
+        setSlotStatus(prev => ({
+          ...prev,
+          [pickerSlotKey(playingSrc.awPickerKey!, playingSrc.awQualityKey!)]: "failed",
+        }));
+      }
+      setPlayingSrc(null);
+      setScreen("picker");
+      return;
+    }
     const failedSite = playingSrc?.site || "";
     const failedUrl = playingSrc?.rawUrl || (playingSrc ? getPlayUrl(playingSrc) : "");
     const progressive = progressivePlaybackRef.current;
@@ -1995,7 +2313,7 @@ export default function WatchScreen() {
         }, 0);
       }
     }
-  }, [playingSrc, saveProgress, srcCacheKey, playSrc, playbackTraceId]);
+  }, [isAwDubbed, playingSrc, saveProgress, srcCacheKey, playSrc, playbackTraceId]);
 
   const onRiftProgress = useCallback((pos: number, dur: number) => {
     lastTimeRef.current = pos;
@@ -2003,9 +2321,19 @@ export default function WatchScreen() {
   }, []);
 
   const onRiftNextEpisode = useCallback(() => {
+    if (isAwDubbed) {
+      if (awNextTarget) goToAwEpisode(awNextTarget.seasonIndex, awNextTarget.episode);
+      return;
+    }
     if (canGoNextEpisode) goEp(epNum + 1, true);
-  }, [canGoNextEpisode, goEp, epNum]);
-  const onRiftPrevEpisode = useCallback(() => goEp(epNum - 1), [goEp, epNum]);
+  }, [isAwDubbed, awNextTarget, goToAwEpisode, canGoNextEpisode, goEp, epNum]);
+  const onRiftPrevEpisode = useCallback(() => {
+    if (isAwDubbed) {
+      if (awPreviousTarget) goToAwEpisode(awPreviousTarget.seasonIndex, awPreviousTarget.episode);
+      return;
+    }
+    goEp(epNum - 1);
+  }, [isAwDubbed, awPreviousTarget, goToAwEpisode, goEp, epNum]);
   const onRiftEpisodeSelect = useCallback((n: number) => goEp(n), [goEp]);
 
   const downloadSlots = useMemo(() => {
@@ -2029,15 +2357,19 @@ export default function WatchScreen() {
     if (!rawUrl) return [];
     /* headers: استخدم ما أعاده الخادم أولاً، ثم استخرجها من رابط الـ proxy. */
     const headers = playingSrc.headers || extractProxyHeaders(rawUrl);
-    const proxyUrl = ensureVpsProxy(rawUrl, headers, base, playingSrc.directType === "hls");
+    const proxyUrl = isAwDubbed
+      ? resolveUrl(rawUrl, base)
+      : ensureVpsProxy(rawUrl, headers, base, playingSrc.directType === "hls");
     const url = withPlaybackTrace(proxyUrl, `${playbackTraceId}-0`, base);
     if (!url) return [];
     const site = playingSrc.site || "";
-    const isArabic = ARABIC_PLAYBACK_SITES.has(site);
+    const isArabic = isAwDubbed || ARABIC_PLAYBACK_SITES.has(site);
     return [{
       url,
       headers,
-      label: `سيرفر · ${getSiteTag(site)}`,
+      label: isAwDubbed
+        ? `سيرفر · ${playingSrc.name || "AW"}`
+        : `سيرفر · ${getSiteTag(site)}`,
       quality: getSrcQuality(playingSrc),
       site,
       subtitleUrl: subtitlesDisabledForSite(site)
@@ -2048,7 +2380,7 @@ export default function WatchScreen() {
       skipIntro: playingSrc.skipIntro,
       skipOutro: playingSrc.skipOutro,
     }];
-  }, [screen, playingSrc, globalSubUrl, playbackTraceId]);
+  }, [screen, playingSrc, globalSubUrl, playbackTraceId, isAwDubbed]);
 
 
   /* ── loading: صحيح عندما يكون أي موقع قيد الجلب (مرجع للمستقبل) ── */
@@ -2098,22 +2430,24 @@ export default function WatchScreen() {
            حتى يحدث OOM أصلي (native) يُغلق التطبيق بصمت دون أي سجل خطأ JS.
            هذا الـ key يحل المشكلة جذرياً: كل حلقة = مشغّل native جديد تماماً + Master
            cleanup الحالي يعمل فعلياً بين كل حلقة وأخرى. */
-        key={`${anime}-${epNum}`}
+        key={`${isAwDubbed ? `aw-${awSeries}` : anime}-${epNum}`}
         sources={playerSources}
         initialSourceIndex={0}
-        animePlayback
+        animePlayback={!isAwDubbed}
         title={displayTitle}
         episode={epNum}
-        anilistId={sourceAnimeId ? parseInt(sourceAnimeId) : undefined}
-        episodeTitle={arEpTitle ?? (etitle ? safeDecodeURIComponent(etitle) : undefined)}
+        anilistId={!isAwDubbed && sourceAnimeId ? parseInt(sourceAnimeId) : undefined}
+        episodeTitle={isAwDubbed
+          ? `${awCurrentSeason.label} · الحلقة ${epNum}`
+          : (arEpTitle ?? (etitle ? safeDecodeURIComponent(etitle) : undefined))}
         initialPosition={resumeTime}
-        totalEps={totalEpsCount}
+        totalEps={playerTotalEps}
         onBack={onRiftBack}
         onToggleOrientation={onToggleOrientation}
         onError={onRiftError}
         onProgress={onRiftProgress}
         onNextEpisode={canGoNextEpisode ? onRiftNextEpisode : undefined}
-        onPrevEpisode={epNum > 1 ? onRiftPrevEpisode : undefined}
+        onPrevEpisode={canGoPrevEpisode ? onRiftPrevEpisode : undefined}
         onEpisodeSelect={onRiftEpisodeSelect}
       />
     );
@@ -2194,14 +2528,14 @@ export default function WatchScreen() {
       {/* ── Header ── */}
       <View style={[d.header, tvMode && d.tvHeader, { paddingTop: topPad + 4 }]}>
         <View style={d.headerLeft}>
-          <Pressable disabled={epNum <= 1} onPress={() => epNum > 1 && goEp(epNum - 1)} focusable={tvMode}
-            style={({ focused }) => [d.epNavBtn, tvMode && d.tvEpNavBtn, epNum <= 1 && { opacity: 0.22 }, tvMode && tvFocusStyle(focused)]}>
+          <Pressable disabled={!canGoPrevEpisode} onPress={onRiftPrevEpisode} focusable={tvMode}
+            style={({ focused }) => [d.epNavBtn, tvMode && d.tvEpNavBtn, !canGoPrevEpisode && { opacity: 0.22 }, tvMode && tvFocusStyle(focused)]}>
             <Ionicons name="chevron-forward" size={tvMode ? 22 : 12} color={colors.textSecondary} />
             <Text style={[d.epNavText, tvMode && d.tvEpNavText]}>السابقة</Text>
           </Pressable>
           <Pressable
             disabled={!canGoNextEpisode}
-            onPress={() => canGoNextEpisode && goEp(epNum + 1)}
+            onPress={onRiftNextEpisode}
             focusable={tvMode}
             style={({ focused }) => [d.epNavBtn, tvMode && d.tvEpNavBtn, { borderColor: colors.accentBorder, backgroundColor: colors.accentSurface },
               !canGoNextEpisode && { opacity: 0.22 }, tvMode && tvFocusStyle(focused)]}>
