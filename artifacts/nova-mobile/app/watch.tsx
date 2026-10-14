@@ -1193,8 +1193,8 @@ export default function WatchScreen() {
         const entries = normalizeAwWatchSources(data?.allSources, getBaseUrl());
         const nextSources: Src[] = entries.map((entry) => ({
           site: "animewitcher",
-          name: entry.serverName,
-          label: entry.serverName,
+          name: `السيرفر ${entry.serverNumber}`,
+          label: `السيرفر ${entry.serverNumber}`,
           quality: entry.quality,
           url: entry.url,
           rawUrl: entry.url,
@@ -1209,8 +1209,8 @@ export default function WatchScreen() {
           nextSlots[entry.pickerKey] = {
             [entry.qualityKey]: {
               serverCount: 1,
-              name: entry.serverName,
-              tag: `${entry.serverName} · ${entry.quality}`,
+              name: `السيرفر ${entry.serverNumber}`,
+              tag: String(entry.serverNumber),
             },
           };
           nextStatus[pickerSlotKey(entry.pickerKey, entry.qualityKey)] = "ready";

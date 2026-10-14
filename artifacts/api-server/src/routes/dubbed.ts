@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { load } from "cheerio";
 import { logger } from "../lib/logger";
+import { mergeAwSourceRows } from "../lib/awSourceRows.mjs";
 
 const router = Router();
 
@@ -102,7 +103,9 @@ async function fetchAwFirestoreEpisodes(series: string): Promise<number[]> {
 async function fetchAwFirestoreServers(
   series: string,
   episode: number,
+  timeoutMs = 12000,
 ): Promise<{ server: string; quality: string; link: string }[]> {
+  const deadline = Date.now() + timeoutMs;
   const base = `${AW_FS_BASE}/anime_list/${encodeURIComponent(series)}/episodes`;
   const ids = [...new Set([
     String(Math.round(episode)).padStart(3, "0"),
@@ -111,10 +114,12 @@ async function fetchAwFirestoreServers(
   ])];
 
   for (const id of ids) {
+    const remainingMs = deadline - Date.now();
+    if (remainingMs <= 0) break;
     try {
       const response = await fetch(`${base}/${encodeURIComponent(id)}/servers?pageSize=30`, {
         headers: AW_FS_HEADERS,
-        signal: AbortSignal.timeout(12000),
+        signal: AbortSignal.timeout(remainingMs),
       });
       if (!response.ok) continue;
       const payload = await response.json() as any;
@@ -135,10 +140,12 @@ async function fetchAwFirestoreServers(
 
   // Some AW titles store servers as one document instead of a collection.
   for (const id of ids) {
+    const remainingMs = deadline - Date.now();
+    if (remainingMs <= 0) break;
     try {
       const response = await fetch(`${base}/${encodeURIComponent(id)}/servers2/all_servers`, {
         headers: AW_FS_HEADERS,
-        signal: AbortSignal.timeout(12000),
+        signal: AbortSignal.timeout(remainingMs),
       });
       if (!response.ok) continue;
       const fields = awFsDoc(await response.json());
@@ -1494,9 +1501,10 @@ router.get("/aw-dubbed/watch-src", async (req, res) => {
   if (!SB_URL || !SB_KEY) { res.status(502).json({ error: "not configured" }); return; }
 
   try {
-    // جلب من الجدولين بالتوازي — dubbed_anim_links أولاً ثم aw_links
+    // Supabase is the fast cache; Firestore is the source of truth and may
+    // contain rows/qualities missing from either Supabase table.
     // ملاحظة: order=quality.desc يفرز نصياً (720p > 480p > 1080p) — نفرز بعدها رقمياً في الكود
-    const [dalRows, awRows] = await Promise.all([
+    const [dalRows, awRows, firestoreRows] = await Promise.all([
       fetch(`${SB_URL}/rest/v1/dubbed_anim_links?select=server,quality,link&series_id=eq.${encodeURIComponent(series)}&ep_number=eq.${ep}&limit=30`, {
         headers: { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}` },
         signal: AbortSignal.timeout(10000),
@@ -1505,6 +1513,7 @@ router.get("/aw-dubbed/watch-src", async (req, res) => {
         headers: { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}` },
         signal: AbortSignal.timeout(10000),
       }).then(r => r.ok ? r.json() as Promise<{ server: string; quality: string; link: string }[]> : [] as { server: string; quality: string; link: string }[]).catch(() => [] as { server: string; quality: string; link: string }[]),
+      fetchAwFirestoreServers(series, ep, 4500).catch(() => [] as { server: string; quality: string; link: string }[]),
     ]);
 
     // وزن الجودة الرقمي للفرز الصحيح
@@ -1513,19 +1522,13 @@ router.get("/aw-dubbed/watch-src", async (req, res) => {
       return n; // 1080 > 720 > 480 > 360
     }
 
-    // دمج: dubbed_anim_links أولاً، ثم aw_links — مع تخطي KF (روابطه محذوفة)
-    const seenSrv = new Set<string>();
-    const rows: { server: string; quality: string; link: string }[] = [];
-    for (const r of [...(Array.isArray(dalRows) ? dalRows : []), ...(Array.isArray(awRows) ? awRows : [])]) {
-      if (r.server === "KF") continue; // KrakenFiles: كل روابطه 404 — تخطي مباشر
-      const k = `${r.server}|${r.link}`;
-      if (!seenSrv.has(k)) { seenSrv.add(k); rows.push(r); }
-    }
-    // A missing DB row must not make a real AW episode unplayable. Fetch the
-    // current server documents directly when the cached tables have no link.
-    if (!rows.length) {
-      rows.push(...await fetchAwFirestoreServers(series, ep));
-    }
+    // Merge Supabase and Firestore, but only collapse the same server, quality,
+    // and link. A single server URL can be recorded under more than one quality.
+    const rows = mergeAwSourceRows(
+      Array.isArray(dalRows) ? dalRows : [],
+      Array.isArray(awRows) ? awRows : [],
+      firestoreRows,
+    );
     // فرز: 1080p أولاً ثم 720p ثم 480p
     rows.sort((a, b) => qualityWeight(b.quality) - qualityWeight(a.quality));
     if (!rows.length) { res.status(404).json({ error: "no sources found" }); return; }

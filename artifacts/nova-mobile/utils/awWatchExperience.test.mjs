@@ -24,6 +24,8 @@ test("AW source rows preserve the actual server, quality, and selected URL", () 
   ], "https://nova.example");
 
   assert.equal(sources.length, 2);
+  assert.equal(sources[0].serverNumber, 1);
+  assert.equal(sources[1].serverNumber, 2);
   assert.equal(sources[1].serverName, "Mediafire");
   assert.equal(sources[1].quality, "720p");
   assert.equal(sources[1].qualityKey, "720p");

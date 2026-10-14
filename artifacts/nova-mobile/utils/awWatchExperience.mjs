@@ -21,7 +21,8 @@ export function normalizeAwWatchSources(rows, baseUrl) {
     return [];
   }
 
-  return rows.flatMap((row, index) => {
+  let serverNumber = 0;
+  return rows.flatMap((row) => {
     const rawUrl = String(row?.hlsUrl || row?.rawUrl || "").trim();
     const quality = String(row?.quality || "720p").trim() || "720p";
     const serverName = String(row?.name || row?.server || "").trim();
@@ -31,8 +32,10 @@ export function normalizeAwWatchSources(rows, baseUrl) {
       const url = new URL(rawUrl, base);
       if (url.protocol !== "http:" && url.protocol !== "https:") return [];
       const qualityKey = qualityBucket(quality);
+      serverNumber += 1;
       return [{
-        pickerKey: `aw-${index}-${qualityKey}`,
+        pickerKey: `aw-${serverNumber}-${qualityKey}`,
+        serverNumber,
         serverName,
         quality,
         qualityKey,

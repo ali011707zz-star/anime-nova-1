@@ -2,6 +2,7 @@ export type AwWatchQualityKey = "1080p" | "720p" | "480p" | "360p";
 export type AwWatchSeason = { label: string; animeId: string };
 export type AwWatchSource = {
   pickerKey: string;
+  serverNumber: number;
   serverName: string;
   quality: string;
   qualityKey: AwWatchQualityKey;
