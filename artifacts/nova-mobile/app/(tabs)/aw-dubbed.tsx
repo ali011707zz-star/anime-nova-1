@@ -15,7 +15,7 @@ import {
 import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { useLocalSearchParams, useRouter } from "expo-router";
+import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { getBaseUrl } from "@/utils/api";
 import { isTvDevice, tvFocusStyle } from "@/utils/tv";
 import { useColors } from "@/hooks/useColors";
@@ -116,15 +116,17 @@ function gridColumnsForWidth(width: number) {
 // Shared card helpers
 // ─────────────────────────────────────────────────────────
 
-function PosterCard({ uri, title, seasons, tint, badge, badgeTint, sourceBadge, meta, testID, onPress }: {
+function PosterCard({ uri, title, seasons, tint, badge, badgeTint, sourceBadge, meta, testID, onPress, retryToken, retryDelayMs }: {
   uri: string | null; title: string; seasons: number;
   tint: string; badge?: string; badgeTint?: string; sourceBadge?: string;
   meta?: string; testID?: string; onPress: () => void;
+  retryToken?: number; retryDelayMs?: number;
 }) {
   const colors = useColors();
   const [failedUri, setFailedUri] = useState<string | null>(null);
   const [imageRetry, setImageRetry] = useState(0);
   const imageRetryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastRetryTokenRef = useRef(retryToken ?? 0);
   const tvMode = isTvDevice();
   const show = !!uri && failedUri !== uri;
 
@@ -138,6 +140,26 @@ function PosterCard({ uri, title, seasons, tint, badge, badgeTint, sourceBadge, 
     };
   }, [uri]);
 
+  useEffect(() => {
+    if (retryToken === undefined || retryToken === lastRetryTokenRef.current) return;
+    lastRetryTokenRef.current = retryToken;
+    if (!uri || failedUri !== uri) return;
+
+    if (imageRetryTimerRef.current) clearTimeout(imageRetryTimerRef.current);
+    imageRetryTimerRef.current = setTimeout(() => {
+      imageRetryTimerRef.current = null;
+      setFailedUri(null);
+      // Bypass a potentially stale native image-cache entry on recovery.
+      setImageRetry(1);
+    }, Math.max(0, retryDelayMs ?? 0));
+    return () => {
+      if (imageRetryTimerRef.current) {
+        clearTimeout(imageRetryTimerRef.current);
+        imageRetryTimerRef.current = null;
+      }
+    };
+  }, [failedUri, retryDelayMs, retryToken, uri]);
+
   return (
     <Pressable onPress={onPress} testID={testID} focusable={tvMode}
       style={({ pressed, focused }) => [card.wrap, { opacity: pressed ? 0.72 : 1 }, tvMode && tvFocusStyle(focused)]}>
@@ -145,9 +167,11 @@ function PosterCard({ uri, title, seasons, tint, badge, badgeTint, sourceBadge, 
         {show ? (
           <Image
             key={`${uri}:${imageRetry}`}
-            source={{ uri: uri!, cache: "force-cache" }}
+            source={{ uri: uri!, cache: imageRetry > 0 ? "reload" : "force-cache" }}
             style={StyleSheet.absoluteFill}
             resizeMode="cover"
+            resizeMethod="resize"
+            fadeDuration={0}
             onError={() => {
               if (imageRetry < 2) {
                 if (imageRetryTimerRef.current) clearTimeout(imageRetryTimerRef.current);
@@ -672,6 +696,10 @@ function SpacetoonList({ searchQ }: { searchQ: string }) {
   const gridWidth = Math.min(Math.max(width - 24, 0), 900);
   const columns = gridColumnsForWidth(width);
   const router = useRouter();
+  const [posterRetryToken, setPosterRetryToken] = useState(0);
+  useFocusEffect(useCallback(() => {
+    setPosterRetryToken(token => token + 1);
+  }, []));
   const BASE = getBaseUrl();
   const queryKey = spacetoonQueryKey(searchQ);
   const initialCache = spacetoonCatalogCache.get(queryKey);
@@ -822,8 +850,8 @@ function SpacetoonList({ searchQ }: { searchQ: string }) {
       initialNumToRender={6}
       maxToRenderPerBatch={3}
       updateCellsBatchingPeriod={50}
-      windowSize={5}
-      removeClippedSubviews={false}
+      windowSize={tvMode ? 7 : Platform.OS === "android" ? 3 : 5}
+      removeClippedSubviews={Platform.OS === "android" && !tvMode}
       renderItem={({ item }) => (
         <View style={{ flex: 1 / columns }}>
           <PosterCard
@@ -831,6 +859,8 @@ function SpacetoonList({ searchQ }: { searchQ: string }) {
             title={item.title}
             seasons={0}
             tint="#06B6D4"
+            retryToken={posterRetryToken}
+            retryDelayMs={(item.id % 5) * 90}
             meta={`${item.isMovie ? "فيلم" : "مسلسل"}${item.episodeCount ? ` · ${item.episodeCount} حلقة` : ""}${item.year ? ` · ${item.year}` : ""}`}
             testID={`spacetoon-title-${item.id}`}
             onPress={() => openDetail(item)}

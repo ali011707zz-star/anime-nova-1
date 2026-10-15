@@ -67,6 +67,8 @@ function EpisodeArtwork({
       source={{ uri }}
       style={StyleSheet.absoluteFill}
       resizeMode="cover"
+      resizeMethod="resize"
+      fadeDuration={0}
       onError={() => setFailedUris(current => current.includes(uri) ? current : [...current, uri])}
     />
   );
@@ -204,10 +206,10 @@ export default function DubbedDetailScreen() {
           keyExtractor={ep => ep.epId || String(ep.number)}
           renderItem={renderEp}
           ItemSeparatorComponent={() => <EpisodeDivider color={colors.textSecondary} />}
-          removeClippedSubviews={false}
+          removeClippedSubviews={Platform.OS === "android" && !tvMode}
           initialNumToRender={tvMode ? 12 : 6}
           maxToRenderPerBatch={tvMode ? 10 : 5}
-          windowSize={tvMode ? 7 : 5}
+          windowSize={tvMode ? 7 : Platform.OS === "android" ? 3 : 5}
           onScrollToIndexFailed={({ index }) => episodeListRef.current?.scrollToOffset({
             offset: Math.max(0, index * (tvMode ? 130 : 72)),
             animated: true,
@@ -218,7 +220,13 @@ export default function DubbedDetailScreen() {
             <View style={styles.heroRow}>
               <View style={[styles.poster, { backgroundColor: colors.surface, borderColor: colors.border }]}>
                 {posterSrc ? (
-                  <Image source={{ uri: posterSrc }} style={StyleSheet.absoluteFill} resizeMode="cover" />
+                  <Image
+                    source={{ uri: posterSrc }}
+                    style={StyleSheet.absoluteFill}
+                    resizeMode="cover"
+                    resizeMethod="resize"
+                    fadeDuration={0}
+                  />
                 ) : (
                   <View style={styles.posterPlaceholder}>
                     <Text style={{ fontSize: 36 }}>📺</Text>

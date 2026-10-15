@@ -168,8 +168,21 @@ function RootLayoutNav() {
             the root stack so native builds resolve the detail and watch routes
             reliably. */}
         <Stack.Screen name="dubbed" options={{ headerShown: false }} />
-        <Stack.Screen name="dubbed/[id]" options={{ headerShown: false, animation: "fade", animationDuration: 140 }} />
-        <Stack.Screen name="dubbed/watch" options={watchScreenOptions} />
+        <Stack.Screen
+          name="dubbed/[id]"
+          options={{
+            headerShown: false,
+            animation: Platform.OS === "android" ? "none" : "fade",
+            animationDuration: 140,
+          }}
+        />
+        <Stack.Screen
+          name="dubbed/watch"
+          options={{
+            ...watchScreenOptions,
+            ...(Platform.OS === "android" ? { animation: "none" as const } : {}),
+          }}
+        />
         <Stack.Screen name="+not-found" />
       </Stack>
       {tvMode && tvExitHintVisible && (
