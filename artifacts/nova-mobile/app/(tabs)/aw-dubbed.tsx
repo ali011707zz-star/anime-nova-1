@@ -56,9 +56,34 @@ interface SpacetoonSeries {
   year: string;
 }
 
+interface SpacetoonCatalogCacheEntry {
+  series: SpacetoonSeries[];
+  page: number;
+  totalPages: number;
+  savedAt: number;
+}
+
 type TabKey = "animation" | "spacetoon" | "cartoon";
 const CARTOON_CATALOG_CACHE_KEY = "nova:cartoon-catalog:v2";
 const CARTOON_CATALOG_CACHE_LIMIT = 60;
+const SPACETOON_CATALOG_CACHE_TTL_MS = 10 * 60_000;
+const SPACETOON_CATALOG_CACHE_LIMIT = 6;
+const spacetoonCatalogCache = new Map<string, SpacetoonCatalogCacheEntry>();
+
+function spacetoonQueryKey(searchQ: string): string {
+  const query = searchQ.trim();
+  return query.length >= 2 ? query.toLocaleLowerCase("ar") : "";
+}
+
+function rememberSpacetoonCatalog(key: string, entry: SpacetoonCatalogCacheEntry): void {
+  spacetoonCatalogCache.delete(key);
+  spacetoonCatalogCache.set(key, entry);
+  while (spacetoonCatalogCache.size > SPACETOON_CATALOG_CACHE_LIMIT) {
+    const oldestKey = spacetoonCatalogCache.keys().next().value;
+    if (oldestKey === undefined) break;
+    spacetoonCatalogCache.delete(oldestKey);
+  }
+}
 
 function normalizeAwSeries(item: any): AwSeries | null {
   if (!item || typeof item !== "object") return null;
@@ -98,15 +123,43 @@ function PosterCard({ uri, title, seasons, tint, badge, badgeTint, sourceBadge, 
 }) {
   const colors = useColors();
   const [failedUri, setFailedUri] = useState<string | null>(null);
+  const [imageRetry, setImageRetry] = useState(0);
+  const imageRetryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const tvMode = isTvDevice();
   const show = !!uri && failedUri !== uri;
+
+  useEffect(() => {
+    setFailedUri(null);
+    setImageRetry(0);
+    if (imageRetryTimerRef.current) clearTimeout(imageRetryTimerRef.current);
+    imageRetryTimerRef.current = null;
+    return () => {
+      if (imageRetryTimerRef.current) clearTimeout(imageRetryTimerRef.current);
+    };
+  }, [uri]);
+
   return (
     <Pressable onPress={onPress} testID={testID} focusable={tvMode}
       style={({ pressed, focused }) => [card.wrap, { opacity: pressed ? 0.72 : 1 }, tvMode && tvFocusStyle(focused)]}>
       <View style={[card.poster, { backgroundColor: colors.surface }]}>
         {show ? (
-          <Image source={{ uri: uri! }} style={StyleSheet.absoluteFill} resizeMode="cover"
-            onError={() => setFailedUri(uri)} />
+          <Image
+            key={`${uri}:${imageRetry}`}
+            source={{ uri: uri!, cache: "force-cache" }}
+            style={StyleSheet.absoluteFill}
+            resizeMode="cover"
+            onError={() => {
+              if (imageRetry < 2) {
+                if (imageRetryTimerRef.current) clearTimeout(imageRetryTimerRef.current);
+                imageRetryTimerRef.current = setTimeout(() => {
+                  imageRetryTimerRef.current = null;
+                  setImageRetry(current => current + 1);
+                }, 500 * (imageRetry + 1));
+              } else {
+                setFailedUri(uri);
+              }
+            }}
+          />
         ) : (
           <View style={[card.placeholder, { backgroundColor: `${tint}18` }]}>
             <Text style={{ fontSize: 22 }}>🎬</Text>
@@ -620,13 +673,15 @@ function SpacetoonList({ searchQ }: { searchQ: string }) {
   const columns = gridColumnsForWidth(width);
   const router = useRouter();
   const BASE = getBaseUrl();
-  const [series, setSeries] = useState<SpacetoonSeries[]>([]);
-  const [page, setPage] = useState(1);
-  const [totalPages, setTotalPages] = useState(1);
-  const [totalResults, setTotalResults] = useState(0);
-  const [loading, setLoading] = useState(true);
+  const queryKey = spacetoonQueryKey(searchQ);
+  const initialCache = spacetoonCatalogCache.get(queryKey);
+  const [series, setSeries] = useState<SpacetoonSeries[]>(() => initialCache?.series ?? []);
+  const [page, setPage] = useState(() => initialCache?.page ?? 1);
+  const [totalPages, setTotalPages] = useState(() => initialCache?.totalPages ?? 1);
+  const [loading, setLoading] = useState(() => !initialCache?.series.length);
   const [loadingMore, setLoadingMore] = useState(false);
   const [loadError, setLoadError] = useState(false);
+  const [failedPage, setFailedPage] = useState<number | null>(null);
   const loadingMoreRef = useRef(false);
   const requestIdRef = useRef(0);
 
@@ -634,13 +689,15 @@ function SpacetoonList({ searchQ }: { searchQ: string }) {
     if (!reset && loadingMoreRef.current) return;
     const requestId = ++requestIdRef.current;
     if (reset) {
+      const cached = spacetoonCatalogCache.get(queryKey);
       loadingMoreRef.current = false;
-      setLoading(true);
+      setLoading(!cached?.series.length);
       setLoadingMore(false);
       setLoadError(false);
-      setSeries([]);
-      setPage(1);
-      setTotalResults(0);
+      setFailedPage(null);
+      setSeries(cached?.series ?? []);
+      setPage(cached?.page ?? 1);
+      setTotalPages(cached?.totalPages ?? 1);
     } else {
       loadingMoreRef.current = true;
       setLoadingMore(true);
@@ -662,13 +719,39 @@ function SpacetoonList({ searchQ }: { searchQ: string }) {
       const results = Array.isArray(data.results)
         ? data.results.filter(isSpacetoonSeries)
         : [];
-      setSeries(previous => reset ? results : [...previous, ...results]);
-      setPage(Number(data.page) || nextPage);
-      setTotalPages(Math.max(1, Number(data.totalPages) || 1));
-      setTotalResults(Math.max(0, Number(data.totalResults) || 0));
+      const responsePage = Number(data.page) || nextPage;
+      const responseTotalPages = Math.max(1, Number(data.totalPages) || 1);
+      const cached = spacetoonCatalogCache.get(queryKey);
+      const merged = new Map<number, SpacetoonSeries>();
+      if (reset) {
+        for (const item of results) merged.set(item.id, item);
+        for (const item of cached?.series ?? []) {
+          if (!merged.has(item.id)) merged.set(item.id, item);
+        }
+      } else {
+        for (const item of cached?.series ?? []) merged.set(item.id, item);
+        for (const item of results) merged.set(item.id, item);
+      }
+      const nextSeries = [...merged.values()];
+      const nextCachedPage = reset && cached?.series.length
+        ? Math.max(responsePage, cached.page)
+        : responsePage;
+      rememberSpacetoonCatalog(queryKey, {
+        series: nextSeries,
+        page: nextCachedPage,
+        totalPages: responseTotalPages,
+        savedAt: Date.now(),
+      });
+      setSeries(nextSeries);
+      setPage(nextCachedPage);
+      setTotalPages(responseTotalPages);
       setLoadError(false);
+      setFailedPage(null);
     } catch {
-      if (requestId === requestIdRef.current) setLoadError(true);
+      if (requestId === requestIdRef.current) {
+        setLoadError(true);
+        setFailedPage(nextPage);
+      }
     } finally {
       if (requestId === requestIdRef.current) {
         setLoading(false);
@@ -676,12 +759,37 @@ function SpacetoonList({ searchQ }: { searchQ: string }) {
         loadingMoreRef.current = false;
       }
     }
-  }, [BASE, searchQ]);
+  }, [BASE, queryKey, searchQ]);
 
   useEffect(() => {
-    const timer = setTimeout(() => { void loadPage(1, true); }, searchQ.trim().length >= 2 ? 300 : 0);
+    requestIdRef.current += 1;
+    loadingMoreRef.current = false;
+    const cached = spacetoonCatalogCache.get(queryKey);
+    if (cached) {
+      setSeries(cached.series);
+      setPage(cached.page);
+      setTotalPages(cached.totalPages);
+      setLoading(false);
+      setLoadingMore(false);
+      loadingMoreRef.current = false;
+      setLoadError(false);
+      setFailedPage(null);
+    } else {
+      setSeries([]);
+      setPage(1);
+      setTotalPages(1);
+      setLoading(true);
+      setLoadError(false);
+      setFailedPage(null);
+    }
+
+    if (cached && Date.now() - cached.savedAt < SPACETOON_CATALOG_CACHE_TTL_MS) {
+      return;
+    }
+
+    const timer = setTimeout(() => { void loadPage(1, true); }, queryKey ? 300 : 0);
     return () => clearTimeout(timer);
-  }, [loadPage]);
+  }, [loadPage, queryKey]);
 
   useEffect(() => () => {
     requestIdRef.current += 1;
@@ -715,12 +823,7 @@ function SpacetoonList({ searchQ }: { searchQ: string }) {
       maxToRenderPerBatch={3}
       updateCellsBatchingPeriod={50}
       windowSize={5}
-      removeClippedSubviews={Platform.OS !== "web"}
-      ListHeaderComponent={totalResults > 0 ? (
-        <Text style={[shared.emptyText, { color: colors.textMuted, marginBottom: 4 }]}>
-          {totalResults} عملًا من سبيستون
-        </Text>
-      ) : null}
+      removeClippedSubviews={false}
       renderItem={({ item }) => (
         <View style={{ flex: 1 / columns }}>
           <PosterCard
@@ -728,8 +831,6 @@ function SpacetoonList({ searchQ }: { searchQ: string }) {
             title={item.title}
             seasons={0}
             tint="#06B6D4"
-            badge="سبيستون"
-            badgeTint="#0891B2"
             meta={`${item.isMovie ? "فيلم" : "مسلسل"}${item.episodeCount ? ` · ${item.episodeCount} حلقة` : ""}${item.year ? ` · ${item.year}` : ""}`}
             testID={`spacetoon-title-${item.id}`}
             onPress={() => openDetail(item)}
@@ -743,7 +844,13 @@ function SpacetoonList({ searchQ }: { searchQ: string }) {
       ListFooterComponent={loadingMore ? (
         <ActivityIndicator color="#22D3EE" style={{ marginVertical: 16 }} />
       ) : loadError && series.length > 0 ? (
-        <Pressable onPress={() => { void loadPage(page + 1); }} style={shared.retryBtn}>
+        <Pressable
+          onPress={() => {
+            const retryPage = failedPage ?? page + 1;
+            void loadPage(retryPage, retryPage === 1);
+          }}
+          style={shared.retryBtn}
+        >
           <Ionicons name="refresh" size={15} color="#22D3EE" />
           <Text style={[shared.retryText, { color: colors.buttonText }]}>تعذّر تحميل المزيد — أعد المحاولة</Text>
         </Pressable>

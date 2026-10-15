@@ -15,6 +15,7 @@ import { isTvDevice, tvFocusStyle } from "@/utils/tv";
 import { useColors } from "@/hooks/useColors";
 import { useWatchPlayerOrientation } from "@/utils/watchOrientation";
 import { createPlaybackTraceId, withPlaybackTrace } from "@/utils/playbackTrace";
+import { parseCarateenEpisodeUrl } from "@/utils/carateenEpisodeRef.mjs";
 
 export default function DubbedWatchScreen() {
   const colors = useColors();
@@ -30,9 +31,16 @@ export default function DubbedWatchScreen() {
     epUrl: string; series: string; title: string; ep: string; season: string;
     poster: string; at: string; provider?: string; showId?: string; episodeId?: string;
   }>();
-  const provider = Array.isArray(providerParam) ? providerParam[0] : providerParam;
-  const showId = Array.isArray(showIdParam) ? showIdParam[0] : showIdParam;
-  const episodeId = Array.isArray(episodeIdParam) ? episodeIdParam[0] : episodeIdParam;
+  const parsedEpisodeRef = parseCarateenEpisodeUrl(epUrl);
+  const requestedProvider = Array.isArray(providerParam) ? providerParam[0] : providerParam;
+  const requestedShowId = Array.isArray(showIdParam) ? showIdParam[0] : showIdParam;
+  const requestedEpisodeId = Array.isArray(episodeIdParam) ? episodeIdParam[0] : episodeIdParam;
+  const provider =
+    requestedProvider === "sp" || requestedProvider === "carateen"
+      ? requestedProvider
+      : parsedEpisodeRef?.provider;
+  const showId = requestedShowId || parsedEpisodeRef?.showId || "";
+  const episodeId = requestedEpisodeId || parsedEpisodeRef?.episodeId || "";
   const isCarateenSource = provider === "sp" || provider === "carateen";
   const playbackTraceId = React.useMemo(() => createPlaybackTraceId(), [epUrl]);
 

@@ -168,7 +168,7 @@ function RootLayoutNav() {
             the root stack so native builds resolve the detail and watch routes
             reliably. */}
         <Stack.Screen name="dubbed" options={{ headerShown: false }} />
-        <Stack.Screen name="dubbed/[id]" options={{ headerShown: false, animation: "slide_from_bottom" }} />
+        <Stack.Screen name="dubbed/[id]" options={{ headerShown: false, animation: "fade", animationDuration: 140 }} />
         <Stack.Screen name="dubbed/watch" options={watchScreenOptions} />
         <Stack.Screen name="+not-found" />
       </Stack>
