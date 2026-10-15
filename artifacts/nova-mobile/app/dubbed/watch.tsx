@@ -23,10 +23,17 @@ export default function DubbedWatchScreen() {
   const tvMode  = isTvDevice();
   const topPad  = Platform.OS === "web" ? 0 : insets.top;
 
-  const { epUrl, series, title, ep, season, poster } = useLocalSearchParams<{
+  const {
+    epUrl, series, title, ep, season, poster,
+    provider: providerParam, showId: showIdParam, episodeId: episodeIdParam,
+  } = useLocalSearchParams<{
     epUrl: string; series: string; title: string; ep: string; season: string;
-    poster: string; at: string;
+    poster: string; at: string; provider?: string; showId?: string; episodeId?: string;
   }>();
+  const provider = Array.isArray(providerParam) ? providerParam[0] : providerParam;
+  const showId = Array.isArray(showIdParam) ? showIdParam[0] : showIdParam;
+  const episodeId = Array.isArray(episodeIdParam) ? episodeIdParam[0] : episodeIdParam;
+  const isCarateenSource = provider === "sp" || provider === "carateen";
   const playbackTraceId = React.useMemo(() => createPlaybackTraceId(), [epUrl]);
 
   const { addToHistory } = useApp();
@@ -65,7 +72,12 @@ export default function DubbedWatchScreen() {
   }
 
   const loadSource = useCallback(async (isAutomaticRetry = false) => {
-    if (!epUrl) { setError("رابط الحلقة مفقود"); setLoading(false); return; }
+    if (isCarateenSource && (!showId || !episodeId)) {
+      setError("بيانات الحلقة مفقودة");
+      setLoading(false);
+      return;
+    }
+    if (!isCarateenSource && !epUrl) { setError("رابط الحلقة مفقود"); setLoading(false); return; }
     if (!isAutomaticRetry) autoRetryCountRef.current = 0;
     ctrlRef.current?.abort();
     const ctrl = new AbortController();
@@ -89,8 +101,11 @@ export default function DubbedWatchScreen() {
     // permanently; ask the API for a fresh signed URL a few times first.
     for (let attempt = 0; attempt < 3; attempt += 1) {
       try {
+        const sourceUrl = isCarateenSource
+          ? `${BASE}/api/dubbed/carateen/watch-src?provider=${encodeURIComponent(provider || "")}&showId=${encodeURIComponent(showId || "")}&episodeId=${encodeURIComponent(episodeId || "")}`
+          : `${BASE}/api/dubbed/watch-src?epUrl=${encodeURIComponent(epUrl)}&trace=${encodeURIComponent(playbackTraceId)}`;
         const r = await fetch(
-          `${BASE}/api/dubbed/watch-src?epUrl=${encodeURIComponent(epUrl)}&trace=${encodeURIComponent(playbackTraceId)}`,
+          sourceUrl,
           { signal: ctrl.signal, cache: "no-store" },
         );
         if (ctrl.signal.aborted || !mountedRef.current) return;
@@ -121,6 +136,14 @@ export default function DubbedWatchScreen() {
         await new Promise<void>(resolve => setTimeout(resolve, 700 + attempt * 500));
         if (ctrl.signal.aborted || !mountedRef.current) return;
       }
+    }
+
+    if (isCarateenSource) {
+      if (mountedRef.current) {
+        setError("تعذّر استخراج رابط الحلقة — اضغط إعادة المحاولة");
+        setLoading(false);
+      }
+      return;
     }
 
     // VPS API فشل — نجرب الجلب المباشر من الموبايل.
@@ -166,7 +189,7 @@ export default function DubbedWatchScreen() {
       setError("تعذّر جلب مصدر الفيديو — تحقق من الاتصال وأعد المحاولة");
       setLoading(false);
     }
-  }, [epUrl, playbackTraceId]);
+  }, [epUrl, playbackTraceId, isCarateenSource, provider, showId, episodeId]);
 
   useEffect(() => {
     mountedRef.current = true;

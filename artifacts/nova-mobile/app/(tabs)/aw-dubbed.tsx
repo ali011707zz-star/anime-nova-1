@@ -1,7 +1,8 @@
 /**
  * (tabs)/aw-dubbed.tsx — تبويب "رسوم متحركة مدبلجة ومترجمة"
- * يجمع قسمين بتبويبين داخليين:
+ * يجمع ثلاثة أقسام بتبويبات داخلية:
  *   • أنيميشن — أنيميشن مدبلج (aw_links / Supabase)
+ *   • سبيستون — المسلسلات والحلقات من مصدر سبيستون
  *   • كرتون   — كرتون مدبلج عربي (arabic-toons)
  */
 import React, { useState, useEffect, useCallback, useRef } from "react";
@@ -43,7 +44,19 @@ interface DubbedSeries  {
   seasons: DubbedSeason[]; tmdbId?: number; slug?: string;
 }
 
-type TabKey = "animation" | "cartoon";
+interface SpacetoonSeries {
+  id: number;
+  provider: "sp";
+  providerLabel: string;
+  title: string;
+  image: string;
+  category: string;
+  episodeCount: number;
+  isMovie: boolean;
+  year: string;
+}
+
+type TabKey = "animation" | "spacetoon" | "cartoon";
 const CARTOON_CATALOG_CACHE_KEY = "nova:cartoon-catalog:v2";
 const CARTOON_CATALOG_CACHE_LIMIT = 60;
 
@@ -78,17 +91,17 @@ function gridColumnsForWidth(width: number) {
 // Shared card helpers
 // ─────────────────────────────────────────────────────────
 
-function PosterCard({ uri, title, seasons, tint, badge, badgeTint, sourceBadge, meta, onPress }: {
+function PosterCard({ uri, title, seasons, tint, badge, badgeTint, sourceBadge, meta, testID, onPress }: {
   uri: string | null; title: string; seasons: number;
   tint: string; badge?: string; badgeTint?: string; sourceBadge?: string;
-  meta?: string; onPress: () => void;
+  meta?: string; testID?: string; onPress: () => void;
 }) {
   const colors = useColors();
   const [failedUri, setFailedUri] = useState<string | null>(null);
   const tvMode = isTvDevice();
   const show = !!uri && failedUri !== uri;
   return (
-    <Pressable onPress={onPress} focusable={tvMode}
+    <Pressable onPress={onPress} testID={testID} focusable={tvMode}
       style={({ pressed, focused }) => [card.wrap, { opacity: pressed ? 0.72 : 1 }, tvMode && tvFocusStyle(focused)]}>
       <View style={[card.poster, { backgroundColor: colors.surface }]}>
         {show ? (
@@ -591,6 +604,173 @@ function CartoonList({ searchQ }: { searchQ: string }) {
 }
 
 // ─────────────────────────────────────────────────────────
+// مسلسلات سبيستون list
+// ─────────────────────────────────────────────────────────
+
+function isSpacetoonSeries(item: unknown): item is SpacetoonSeries {
+  if (!item || typeof item !== "object") return false;
+  const row = item as Partial<SpacetoonSeries>;
+  return row.provider === "sp" && Number.isSafeInteger(row.id) && typeof row.title === "string";
+}
+
+function SpacetoonList({ searchQ }: { searchQ: string }) {
+  const colors = useColors();
+  const { width } = useWindowDimensions();
+  const gridWidth = Math.min(Math.max(width - 24, 0), 900);
+  const columns = gridColumnsForWidth(width);
+  const router = useRouter();
+  const BASE = getBaseUrl();
+  const [series, setSeries] = useState<SpacetoonSeries[]>([]);
+  const [page, setPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [totalResults, setTotalResults] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [loadError, setLoadError] = useState(false);
+  const loadingMoreRef = useRef(false);
+  const requestIdRef = useRef(0);
+
+  const loadPage = useCallback(async (nextPage: number, reset = false) => {
+    if (!reset && loadingMoreRef.current) return;
+    const requestId = ++requestIdRef.current;
+    if (reset) {
+      loadingMoreRef.current = false;
+      setLoading(true);
+      setLoadingMore(false);
+      setLoadError(false);
+      setSeries([]);
+      setPage(1);
+      setTotalResults(0);
+    } else {
+      loadingMoreRef.current = true;
+      setLoadingMore(true);
+    }
+
+    try {
+      const query = searchQ.trim().length >= 2 ? searchQ.trim() : "";
+      const params = new URLSearchParams({
+        page: String(nextPage),
+        limit: "36",
+        provider: "sp",
+      });
+      if (query) params.set("q", query);
+      const response = await fetch(`${BASE}/api/dubbed/carateen/catalog?${params}`);
+      if (!response.ok) throw new Error(`catalog_${response.status}`);
+      const data = await response.json();
+      if (requestId !== requestIdRef.current) return;
+
+      const results = Array.isArray(data.results)
+        ? data.results.filter(isSpacetoonSeries)
+        : [];
+      setSeries(previous => reset ? results : [...previous, ...results]);
+      setPage(Number(data.page) || nextPage);
+      setTotalPages(Math.max(1, Number(data.totalPages) || 1));
+      setTotalResults(Math.max(0, Number(data.totalResults) || 0));
+      setLoadError(false);
+    } catch {
+      if (requestId === requestIdRef.current) setLoadError(true);
+    } finally {
+      if (requestId === requestIdRef.current) {
+        setLoading(false);
+        setLoadingMore(false);
+        loadingMoreRef.current = false;
+      }
+    }
+  }, [BASE, searchQ]);
+
+  useEffect(() => {
+    const timer = setTimeout(() => { void loadPage(1, true); }, searchQ.trim().length >= 2 ? 300 : 0);
+    return () => clearTimeout(timer);
+  }, [loadPage]);
+
+  useEffect(() => () => {
+    requestIdRef.current += 1;
+    loadingMoreRef.current = false;
+  }, []);
+
+  const openDetail = (item: SpacetoonSeries) => {
+    router.push({
+      pathname: "/dubbed/[id]",
+      params: {
+        id: `sp-${item.id}`,
+        provider: "sp",
+        showId: String(item.id),
+        isMovie: item.isMovie ? "1" : "0",
+        title: item.title,
+        img: item.image,
+      },
+    });
+  };
+
+  return (
+    <FlatList
+      data={series}
+      style={{ width: gridWidth, alignSelf: "center" }}
+      key={`spacetoon-grid-${columns}`}
+      keyExtractor={item => `sp:${item.id}`}
+      numColumns={columns}
+      contentContainerStyle={shared.grid}
+      columnWrapperStyle={{ gap: 10 }}
+      initialNumToRender={6}
+      maxToRenderPerBatch={3}
+      updateCellsBatchingPeriod={50}
+      windowSize={5}
+      removeClippedSubviews={Platform.OS !== "web"}
+      ListHeaderComponent={totalResults > 0 ? (
+        <Text style={[shared.emptyText, { color: colors.textMuted, marginBottom: 4 }]}>
+          {totalResults} عملًا من سبيستون
+        </Text>
+      ) : null}
+      renderItem={({ item }) => (
+        <View style={{ flex: 1 / columns }}>
+          <PosterCard
+            uri={item.image || null}
+            title={item.title}
+            seasons={0}
+            tint="#06B6D4"
+            badge="سبيستون"
+            badgeTint="#0891B2"
+            meta={`${item.isMovie ? "فيلم" : "مسلسل"}${item.episodeCount ? ` · ${item.episodeCount} حلقة` : ""}${item.year ? ` · ${item.year}` : ""}`}
+            testID={`spacetoon-title-${item.id}`}
+            onPress={() => openDetail(item)}
+          />
+        </View>
+      )}
+      onEndReached={() => {
+        if (!loading && !loadingMore && page < totalPages) void loadPage(page + 1);
+      }}
+      onEndReachedThreshold={0.35}
+      ListFooterComponent={loadingMore ? (
+        <ActivityIndicator color="#22D3EE" style={{ marginVertical: 16 }} />
+      ) : loadError && series.length > 0 ? (
+        <Pressable onPress={() => { void loadPage(page + 1); }} style={shared.retryBtn}>
+          <Ionicons name="refresh" size={15} color="#22D3EE" />
+          <Text style={[shared.retryText, { color: colors.buttonText }]}>تعذّر تحميل المزيد — أعد المحاولة</Text>
+        </Pressable>
+      ) : null}
+      ListEmptyComponent={
+        <View style={shared.center}>
+          {loading ? <ActivityIndicator color="#22D3EE" /> : null}
+          {loadError && !loading ? (
+            <>
+              <Text style={[shared.emptyText, { color: colors.textMuted }]}>تعذّر تحميل مسلسلات سبيستون</Text>
+              <Pressable onPress={() => { void loadPage(1, true); }} style={shared.retryBtn}>
+                <Ionicons name="refresh" size={15} color="#22D3EE" />
+                <Text style={[shared.retryText, { color: colors.buttonText }]}>إعادة المحاولة</Text>
+              </Pressable>
+            </>
+          ) : !loading ? (
+            <Text style={[shared.emptyText, { color: colors.textMuted }]}>
+              {searchQ.trim().length >= 2 ? "لا توجد نتائج مطابقة" : "لا توجد مسلسلات سبيستون"}
+            </Text>
+          ) : null}
+        </View>
+      }
+    />
+  );
+}
+
+// ─────────────────────────────────────────────────────────
 // Main Screen
 // ─────────────────────────────────────────────────────────
 
@@ -600,9 +780,12 @@ export default function DubbedTabScreen() {
   const tvMode = isTvDevice();
   const topPad = Platform.OS === "web" ? 0 : insets.top;
   const routeParams = useLocalSearchParams<{ tab?: string | string[] }>();
-  const requestedTab = (Array.isArray(routeParams.tab) ? routeParams.tab[0] : routeParams.tab) === "cartoon"
+  const routeTab = Array.isArray(routeParams.tab) ? routeParams.tab[0] : routeParams.tab;
+  const requestedTab: TabKey = routeTab === "cartoon"
     ? "cartoon"
-    : "animation";
+    : routeTab === "spacetoon"
+      ? "spacetoon"
+      : "animation";
 
   const [activeTab, setActiveTab] = useState<TabKey>(requestedTab);
   const [searchOpen, setSearchOpen] = useState(false);
@@ -610,17 +793,18 @@ export default function DubbedTabScreen() {
   const searchInput = useRef<TextInput>(null);
 
   // Tab underline slide animation
-  const slideAnim = useRef(new Animated.Value(requestedTab === "animation" ? 0 : 1)).current;
+  const tabPosition = (tab: TabKey) => tab === "animation" ? 0 : tab === "spacetoon" ? 1 : 2;
+  const slideAnim = useRef(new Animated.Value(tabPosition(requestedTab))).current;
   useEffect(() => {
     setActiveTab(requestedTab);
-    slideAnim.setValue(requestedTab === "animation" ? 0 : 1);
+    slideAnim.setValue(tabPosition(requestedTab));
   }, [requestedTab, slideAnim]);
   const handleTab = (tab: TabKey) => {
     if (tab === activeTab) return;
     setActiveTab(tab);
     setSearchQ("");
     Animated.timing(slideAnim, {
-      toValue: tab === "animation" ? 0 : 1,
+      toValue: tabPosition(tab),
       duration: 220,
       easing: Easing.out(Easing.cubic),
       useNativeDriver: false,
@@ -636,7 +820,9 @@ export default function DubbedTabScreen() {
           <Text style={[s.headerSub, { color: colors.textSecondary }]}>
             {activeTab === "animation"
               ? "أنيميشن مدبلج ومترجم"
-              : "كرتون مدبلج أو مترجم للعربية"}
+              : activeTab === "spacetoon"
+                ? "مسلسلات سبيستون"
+                : "كرتون مدبلج أو مترجم للعربية"}
           </Text>
         </View>
         <Pressable
@@ -655,11 +841,11 @@ export default function DubbedTabScreen() {
 
       {/* ── Inner tabs ── */}
       <View style={[s.tabsRow, { borderBottomColor: colors.border }]}>
-        {(["animation", "cartoon"] as TabKey[]).map(tab => {
+        {(["animation", "spacetoon", "cartoon"] as TabKey[]).map(tab => {
           const active = activeTab === tab;
-          const color  = tab === "animation" ? "#10B981" : "#7C3AED";
+          const color = tab === "animation" ? "#10B981" : tab === "spacetoon" ? "#06B6D4" : "#7C3AED";
           return (
-            <Pressable key={tab} onPress={() => handleTab(tab)}
+              <Pressable key={tab} testID={`dubbed-tab-${tab}`} onPress={() => handleTab(tab)}
               focusable={tvMode}
               style={({ focused }) => [
                 s.tabBtn,
@@ -668,7 +854,11 @@ export default function DubbedTabScreen() {
                 tvMode && tvFocusStyle(focused),
               ]}>
               <Text style={[s.tabText, { color: active ? color : colors.textSecondary }]}>
-                {tab === "animation" ? "أنيميشن مدبلج ومترجم" : "كرتون مدبلج ومترجم"}
+                {tab === "animation"
+                  ? "أنيميشن مدبلج ومترجم"
+                  : tab === "spacetoon"
+                    ? "مسلسلات سبيستون"
+                    : "كرتون مدبلج ومترجم"}
               </Text>
             </Pressable>
           );
@@ -686,7 +876,9 @@ export default function DubbedTabScreen() {
             placeholder={
               activeTab === "animation"
                 ? "ابحث في الأنيميشن المدبلج والمترجم..."
-                : "ابحث في الكرتون المدبلج والمترجم..."
+                : activeTab === "spacetoon"
+                  ? "ابحث في مسلسلات سبيستون..."
+                  : "ابحث في الكرتون المدبلج والمترجم..."
             }
             placeholderTextColor={colors.textMuted}
             style={[s.searchInput, { color: colors.textPrimary }]}
@@ -704,6 +896,8 @@ export default function DubbedTabScreen() {
       {/* ── Content ── */}
       {activeTab === "animation" ? (
         <AnimationList key="animation" searchQ={searchQ} />
+      ) : activeTab === "spacetoon" ? (
+        <SpacetoonList key="spacetoon" searchQ={searchQ} />
       ) : (
         <CartoonList key="cartoon" searchQ={searchQ} />
       )}
@@ -741,7 +935,8 @@ const s = StyleSheet.create({
     borderWidth: 1, borderColor: "rgba(255,255,255,0.07)",
   },
   tabText: {
-    fontSize: 13, fontFamily: "Cairo_700Bold",
+    fontSize: 11, lineHeight: 16, textAlign: "center",
+    fontFamily: "Cairo_700Bold",
     color: "rgba(255,255,255,0.38)",
   },
   searchBox: {

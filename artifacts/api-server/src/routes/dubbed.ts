@@ -543,16 +543,26 @@ router.get("/dubbed/carateen/catalog", async (req, res) => {
   const page = Math.max(1, Number.parseInt(String(req.query.page || "1"), 10) || 1);
   const limit = Math.min(60, Math.max(12, Number.parseInt(String(req.query.limit || "36"), 10) || 36));
   const query = normalizeCarateenText(String(req.query.q || ""));
+  const provider = req.query.provider === undefined
+    ? null
+    : parseCarateenProvider(req.query.provider);
+  if (req.query.provider !== undefined && !provider) {
+    res.status(400).json({ error: "provider must be sp or carateen" });
+    return;
+  }
 
   try {
     const all = await getCarateenCatalog(req.query.refresh === "1");
+    const providerRows = provider
+      ? all.filter((entry) => entry.provider === provider)
+      : all;
     const filtered = query
-      ? all.filter((entry) =>
+      ? providerRows.filter((entry) =>
           normalizeCarateenText(
             `${entry.title} ${entry.category} ${entry.providerLabel}`,
           ).includes(query),
         )
-      : all;
+      : providerRows;
     const totalPages = Math.max(1, Math.ceil(filtered.length / limit));
     const start = (page - 1) * limit;
     res.setHeader("Cache-Control", req.query.refresh === "1" ? "no-store" : "public, max-age=300");

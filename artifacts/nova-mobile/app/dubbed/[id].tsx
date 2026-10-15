@@ -14,6 +14,7 @@ const Pressable = TvPressable;
 
 interface Season { label: string; arabicToonsId: string; }
 interface Episode { number: number; epId: string; url: string; thumbnail?: string; }
+type CarateenProvider = "sp" | "carateen";
 
 function apiBase(): string {
   return getBaseUrl().replace(/\/$/, "");
@@ -78,14 +79,33 @@ export default function DubbedDetailScreen() {
   const topPad = Platform.OS === "web" ? 0 : insets.top;
   const tvMode = isTvDevice();
 
-  const { id, title: titleParam, seasons: seasonsParam, img } = useLocalSearchParams<{
+  const {
+    id,
+    title: titleParam,
+    seasons: seasonsParam,
+    img,
+    provider: providerParam,
+    showId: showIdParam,
+    isMovie: isMovieParam,
+  } = useLocalSearchParams<{
     id: string; title: string; seasons: string; img: string;
+    provider?: string; showId?: string; isMovie?: string;
   }>();
 
   const title = titleParam || decodeURIComponent(id || "");
-  const seasons: Season[] = (() => {
+  const providerValue = Array.isArray(providerParam) ? providerParam[0] : providerParam;
+  const carateenProvider: CarateenProvider | null =
+    providerValue === "sp" || providerValue === "carateen" ? providerValue : null;
+  const showIdValue = Array.isArray(showIdParam) ? showIdParam[0] : showIdParam;
+  const showId = Number(showIdValue);
+  const isCarateenEntry = !!carateenProvider && Number.isSafeInteger(showId) && showId > 0;
+  const isMovie = (Array.isArray(isMovieParam) ? isMovieParam[0] : isMovieParam) === "1";
+  const legacySeasons: Season[] = (() => {
     try { return JSON.parse(decodeURIComponent(seasonsParam || "[]")); } catch { return []; }
   })();
+  const seasons: Season[] = isCarateenEntry
+    ? [{ label: "قائمة الحلقات", arabicToonsId: `${carateenProvider}:${showId}` }]
+    : legacySeasons;
   const imgSrc = img ? decodeURIComponent(img) : null;
   const posterSrc = imgSrc?.startsWith("http") ? imgSrc : (imgSrc ? `${apiBase()}${imgSrc}` : null);
 
@@ -102,12 +122,15 @@ export default function DubbedDetailScreen() {
     const ctrl = new AbortController();
     setEpLoading(true);
     setEpisodes([]);
-    fetch(`${apiBase()}/api/dubbed/episodes?series=${encodeURIComponent(curSeason.arabicToonsId)}`, { signal: ctrl.signal })
+    const endpoint = isCarateenEntry
+      ? `${apiBase()}/api/dubbed/carateen/episodes?provider=${carateenProvider}&showId=${showId}`
+      : `${apiBase()}/api/dubbed/episodes?series=${encodeURIComponent(curSeason.arabicToonsId)}`;
+    fetch(endpoint, { signal: ctrl.signal })
       .then(r => { if (!r.ok) throw new Error(`episodes_${r.status}`); return r.json(); })
       .then(d => { if (!ctrl.signal.aborted) { setEpisodes(Array.isArray(d.episodes) ? d.episodes : []); setEpLoading(false); } })
       .catch((e) => { if (e?.name !== "AbortError") setEpLoading(false); });
     return () => ctrl.abort();
-  }, [curSeason?.arabicToonsId]);
+  }, [curSeason?.arabicToonsId, isCarateenEntry, carateenProvider, showId]);
 
   const openWatch = (ep: Episode) => {
     const at = seasons.map(s => s.arabicToonsId).join(",");
@@ -115,12 +138,18 @@ export default function DubbedDetailScreen() {
       pathname: "/dubbed/watch",
       params: {
         epUrl: ep.url,
-         series: curSeason?.arabicToonsId || "",
+        series: isCarateenEntry
+          ? `${carateenProvider}:${showId}`
+          : curSeason?.arabicToonsId || "",
         title,
         ep: String(ep.number),
         season: curSeason?.label || "الموسم 1",
         poster: imgSrc || "",
-        at,
+        at: isCarateenEntry ? `${carateenProvider}:${showId}` : at,
+        provider: isCarateenEntry ? carateenProvider || "" : "",
+        showId: isCarateenEntry ? String(showId) : "",
+        episodeId: isCarateenEntry ? ep.epId : "",
+        isMovie: isMovie ? "1" : "0",
       },
     });
   };
@@ -199,7 +228,9 @@ export default function DubbedDetailScreen() {
               <View style={styles.heroInfo}>
                 <Text style={[styles.heroTitle, { color: colors.textPrimary }]}>{title}</Text>
                 <View style={[styles.badge, { backgroundColor: colors.accentSurface, borderColor: colors.accentBorder }]}>
-                  <Text style={[styles.badgeText, { color: colors.accent }]}>مدبلج عربي</Text>
+                  <Text style={[styles.badgeText, { color: colors.accent }]}>
+                    {isCarateenEntry && carateenProvider === "sp" ? "سبيستون" : "مدبلج عربي"}
+                  </Text>
                 </View>
                 {episodes.length > 0 && (
                   <Text style={[styles.epCount, { color: colors.textSecondary }]}>{episodes.length} حلقة</Text>
