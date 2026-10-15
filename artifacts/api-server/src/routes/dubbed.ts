@@ -2,6 +2,7 @@ import { Router } from "express";
 import { load } from "cheerio";
 import { logger } from "../lib/logger";
 import { mergeAwSourceRows } from "../lib/awSourceRows.mjs";
+import { parseCarateenEpisodeUrl } from "../lib/carateenEpisodeRef.mjs";
 import {
   getCarateenCatalog,
   getCarateenEpisodes,
@@ -791,6 +792,40 @@ const ALLOWED_DUBBED_HOSTNAMES = new Set([
 
 router.get("/dubbed/watch-src", async (req, res) => {
   const epUrl = (req.query.epUrl as string || "").trim();
+  const carateenRef = parseCarateenEpisodeUrl(epUrl);
+  if (carateenRef) {
+    const provider = carateenRef.provider;
+    const showId = parsePositiveId(carateenRef.showId);
+    const episodeId = parsePositiveId(carateenRef.episodeId);
+    if (!showId || !episodeId) {
+      res.status(400).json({ error: "invalid Carateen episode reference" });
+      return;
+    }
+
+    try {
+      const rawUrl = await getCarateenEpisodeStream(provider, showId, episodeId);
+      if (!isAllowedCarateenStreamUrl(rawUrl)) {
+        res.status(502).json({ error: "مصدر الحلقة غير مدعوم" });
+        return;
+      }
+      const mediaUrl = new URL(rawUrl);
+      const isHls = /\.m3u8$/i.test(mediaUrl.pathname);
+      const proxyPath = isHls ? "/api/anime/hls-proxy" : "/api/anime/video-proxy";
+      const proxiedUrl =
+        `${proxyPath}?url=${encodeURIComponent(rawUrl)}` +
+        `&ref=${encodeURIComponent("https://carateen.tv/")}`;
+      res.setHeader("Cache-Control", "no-store");
+      res.json({ hlsUrl: proxiedUrl, type: isHls ? "hls" : "mp4" });
+    } catch (error) {
+      logger.warn(
+        { err: error, provider, showId, episodeId },
+        "dubbed: Carateen legacy watch-src unavailable",
+      );
+      res.status(502).json({ error: "تعذر استخراج رابط الحلقة" });
+    }
+    return;
+  }
+
   // صلاحية الـ URL: يجب أن يكون https ومن نطاق arabic-toons.com فقط
   let parsedEpUrl: URL;
   try {
