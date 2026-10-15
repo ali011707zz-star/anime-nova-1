@@ -8,7 +8,13 @@ import SEO from "@/components/SEO";
 import AppOnlyEpisodeDialog from "@/components/AppOnlyEpisodeDialog";
 
 interface Season { label: string; arabicToonsId: string; }
-interface Episode { number: number; epId: string; url: string; thumbnail?: string; }
+interface Episode {
+  number: number;
+  epId: string;
+  url: string;
+  title?: string;
+  thumbnail?: string;
+}
 
 const AT_IMG = "/api/dubbed/img?f=";
 
@@ -36,6 +42,15 @@ export default function DubbedDetail() {
   const params = new URLSearchParams(search);
   const title = params.get("title") || decodeURIComponent(key || "");
   const rawImg = params.get("img") || "";
+  const providerValue = params.get("provider") || "";
+  const carateenProvider =
+    providerValue === "sp" || providerValue === "carateen"
+      ? providerValue
+      : null;
+  const showId = Number(params.get("showId") || 0);
+  const isCarateenEntry =
+    !!carateenProvider && Number.isSafeInteger(showId) && showId > 0;
+  const isMovie = params.get("isMovie") === "1";
   const rawSeasons: Season[] = (() => {
     try { return JSON.parse(decodeURIComponent(params.get("seasons") || "[]")); } catch { return []; }
   })();
@@ -47,20 +62,33 @@ export default function DubbedDetail() {
   const [exclusiveEpisode, setExclusiveEpisode] = useState<number | null>(null);
   const tabsRef = useRef<HTMLDivElement>(null);
 
-  const seasons = rawSeasons;
+  const seasons = isCarateenEntry
+    ? [{ label: "قائمة الحلقات", arabicToonsId: `${carateenProvider}:${showId}` }]
+    : rawSeasons;
   const curSeason = seasons[selSeason];
   const poster = rawImg ? decodeURIComponent(rawImg) : null;
   const posterSrc = poster ? imgSrc(poster) : null;
 
   useEffect(() => {
     if (!curSeason) return;
+    const controller = new AbortController();
     setEpLoading(true);
     setEpisodes([]);
-    fetch(`${API_BASE}/api/dubbed/episodes?series=${encodeURIComponent(curSeason.arabicToonsId)}`)
+    const endpoint = isCarateenEntry
+      ? `${API_BASE}/api/dubbed/carateen/episodes?provider=${carateenProvider}&showId=${showId}`
+      : `${API_BASE}/api/dubbed/episodes?series=${encodeURIComponent(curSeason.arabicToonsId)}`;
+    fetch(endpoint, { signal: controller.signal })
       .then(r => r.json())
-      .then(d => { setEpisodes(d.episodes || []); setEpLoading(false); })
-      .catch(() => setEpLoading(false));
-  }, [curSeason?.arabicToonsId]);
+      .then(d => {
+        if (controller.signal.aborted) return;
+        setEpisodes(Array.isArray(d.episodes) ? d.episodes : []);
+        setEpLoading(false);
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) setEpLoading(false);
+      });
+    return () => controller.abort();
+  }, [curSeason?.arabicToonsId, isCarateenEntry, carateenProvider, showId]);
 
   useEffect(() => {
     if (!episodes.length || !curSeason) return;
@@ -86,7 +114,18 @@ export default function DubbedDetail() {
     const tit = encodeURIComponent(title);
     const sl = encodeURIComponent(curSeason?.label || "الموسم 1");
     const seasonsEnc = encodeURIComponent(JSON.stringify(seasons));
-    return `/dubbed/watch?epUrl=${encodeURIComponent(ep.url)}&title=${tit}&ep=${ep.number}&season=${sl}&poster=${ps}&at=${encodeURIComponent(at)}&seasons=${seasonsEnc}&img=${encodeURIComponent(rawImg)}&key=${encodeURIComponent(key || "")}`;
+    const carateenParams = isCarateenEntry
+      ? `&provider=${carateenProvider}&showId=${showId}&episodeId=${encodeURIComponent(ep.epId)}&isMovie=${isMovie ? "1" : "0"}`
+      : "";
+    return `/dubbed/watch?epUrl=${encodeURIComponent(ep.url)}&title=${tit}&ep=${ep.number}&season=${sl}&poster=${ps}&at=${encodeURIComponent(at)}&seasons=${seasonsEnc}&img=${encodeURIComponent(rawImg)}&key=${encodeURIComponent(key || "")}${carateenParams}`;
+  };
+
+  const handleEpisodeClick = (episode: Episode) => {
+    if (isCarateenEntry) {
+      navigate(watchUrl(episode));
+      return;
+    }
+    setExclusiveEpisode(episode.number);
   };
 
   const progressPct = (ep: Episode) => {
@@ -101,7 +140,7 @@ export default function DubbedDetail() {
     <main className="bg-[#09090B] min-h-screen text-white pb-28" dir="rtl">
       <SEO
         title={`${title} مدبلج`}
-        description={`مشاهدة أنمي ${title} مدبلج بالعربية مجاناً بجودة عالية على أنمي نوفا.`}
+        description={`مشاهدة ${isMovie ? "فيلم" : "مسلسل"} ${title} مدبلج بالعربية على أنمي نوفا.`}
         image={posterSrc || undefined}
         path={`/dubbed/${key}`}
       />
@@ -116,7 +155,11 @@ export default function DubbedDetail() {
             <ChevronRight className="w-4 h-4 text-white/70" />
           </button>
           <div className="flex-1 min-w-0">
-            <p className="text-[10px] text-white/30 font-['Cairo']">كرتون مدبلج</p>
+            <p className="text-[10px] text-white/30 font-['Cairo']">
+              {isCarateenEntry
+                ? `${carateenProvider === "sp" ? "سبيستون" : "كراتين"}${isMovie ? " · فيلم" : " مدبلج"}`
+                : "كرتون مدبلج"}
+            </p>
             <h1 className="text-[14px] font-black text-white font-['Cairo'] truncate leading-tight">{title}</h1>
           </div>
           {episodes.length > 0 && (
@@ -237,10 +280,10 @@ export default function DubbedDetail() {
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: Math.min(i * 0.025, 0.3), duration: 0.2 }}
                 whileTap={{ scale: 0.97 }}
-                onClick={() => setExclusiveEpisode(ep.number)}
+                onClick={() => handleEpisodeClick(ep)}
                 role="button"
                 tabIndex={0}
-                aria-label={`فتح تنبيه الحلقة ${ep.number}`}
+                aria-label={`${isCarateenEntry ? "مشاهدة" : "فتح تنبيه"} الحلقة ${ep.number}`}
                 data-testid={`dubbed-episode-exclusive-${ep.number}`}
                 className={`flex items-center gap-3 p-3 rounded-2xl border cursor-pointer active:bg-white/8 transition-colors ${
                   watched ? "bg-white/3 border-white/4 opacity-55" : "bg-[#111116] border-white/6"
@@ -287,7 +330,9 @@ export default function DubbedDetail() {
 
                 {/* Info */}
                 <div className="flex-1 min-w-0 text-right">
-                  <p className="text-[12px] font-black text-white font-['Cairo'] leading-tight">الحلقة {ep.number}</p>
+                  <p className="text-[12px] font-black text-white font-['Cairo'] leading-tight">
+                    الحلقة {ep.number}{ep.title ? ` · ${ep.title}` : ""}
+                  </p>
                   {progSec > 30 && !watched && (
                     <span className="text-[8.5px] text-[#A78BFA]/70 font-['Cairo'] font-bold mt-0.5 block">
                       {Math.floor(progSec / 60)}:{String(Math.floor(progSec % 60)).padStart(2, "0")} ▶
@@ -309,7 +354,7 @@ export default function DubbedDetail() {
       </div>
     </main>
     <AppOnlyEpisodeDialog
-      open={exclusiveEpisode !== null}
+      open={!isCarateenEntry && exclusiveEpisode !== null}
       episodeLabel={`الحلقة ${exclusiveEpisode ?? ""}`}
       onClose={() => setExclusiveEpisode(null)}
     />

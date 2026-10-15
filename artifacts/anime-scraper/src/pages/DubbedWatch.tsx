@@ -20,6 +20,11 @@ export default function DubbedWatch() {
   const seasonsParam = params.get("seasons") || "";
   const imgParam     = params.get("img") || "";
   const keyParam     = params.get("key") || "";
+  const provider     = params.get("provider") || "";
+  const showId       = params.get("showId") || "";
+  const episodeId    = params.get("episodeId") || "";
+  const isMovieEntry = params.get("isMovie") === "1";
+  const isCarateenSource = provider === "sp" || provider === "carateen";
 
   const posterUrl = poster ? decodeURIComponent(poster) : "";
   const atIds = at ? at.split(",") : [];
@@ -36,32 +41,51 @@ export default function DubbedWatch() {
       window.history.back();
     } else if (keyParam) {
       const k = encodeURIComponent(decodeURIComponent(keyParam));
-      navigate(`/dubbed/${k}?seasons=${encodeURIComponent(seasonsParam)}&title=${encodeURIComponent(title)}&img=${encodeURIComponent(imgParam)}`);
+      const sourceParams = isCarateenSource
+        ? `&provider=${provider}&showId=${encodeURIComponent(showId)}&isMovie=${isMovieEntry ? "1" : "0"}`
+        : "";
+      navigate(`/dubbed/${k}?seasons=${encodeURIComponent(seasonsParam)}&title=${encodeURIComponent(title)}&img=${encodeURIComponent(imgParam)}${sourceParams}`);
     } else {
       navigate("/dubbed");
     }
-  }, [keyParam, seasonsParam, title, imgParam, navigate]);
+  }, [keyParam, seasonsParam, title, imgParam, navigate, isCarateenSource, provider, showId, isMovieEntry]);
 
   const loadSource = useCallback(async () => {
-    if (!epUrl) { setError("رابط الحلقة مفقود"); setLoading(false); return; }
+    if (isCarateenSource && (!showId || !episodeId)) {
+      setError("بيانات الحلقة مفقودة");
+      setLoading(false);
+      return;
+    }
+    if (!isCarateenSource && !epUrl) {
+      setError("رابط الحلقة مفقود");
+      setLoading(false);
+      return;
+    }
     setLoading(true); setError(null); setSource(null);
 
     // Invalidate cached raw URLs from before the VPS proxy became primary.
-    const cacheKey = `dubbed-src-v2-${epUrl}`;
-    try {
-      const cached = sessionStorage.getItem(cacheKey);
-      if (cached) {
-        const c = JSON.parse(cached);
-        if (Date.now() - c.ts < 5 * 60_000) {
-          setSource({ url: c.url, proxyUrl: c.url });
-          setLoading(false);
-          return;
+    const cacheKey = isCarateenSource
+      ? `carateen-src-v1-${provider}-${showId}-${episodeId}`
+      : `dubbed-src-v2-${epUrl}`;
+    if (!isCarateenSource) {
+      try {
+        const cached = sessionStorage.getItem(cacheKey);
+        if (cached) {
+          const c = JSON.parse(cached);
+          if (Date.now() - c.ts < 5 * 60_000) {
+            setSource({ url: c.url, proxyUrl: c.url });
+            setLoading(false);
+            return;
+          }
         }
-      }
-    } catch {}
+      } catch {}
+    }
 
     try {
-      const r = await fetch(`${API_BASE}/api/dubbed/watch-src?epUrl=${encodeURIComponent(epUrl)}`);
+      const sourceEndpoint = isCarateenSource
+        ? `${API_BASE}/api/dubbed/carateen/watch-src?provider=${provider}&showId=${encodeURIComponent(showId)}&episodeId=${encodeURIComponent(episodeId)}`
+        : `${API_BASE}/api/dubbed/watch-src?epUrl=${encodeURIComponent(epUrl)}`;
+      const r = await fetch(sourceEndpoint);
       if (!mountedRef.current) return;
       if (!r.ok) { setError("تعذّر تحميل الحلقة"); setLoading(false); return; }
       const d = await r.json();
@@ -70,8 +94,10 @@ export default function DubbedWatch() {
       if (!rawUrl && !hlsUrl) { setError("لم يُعثر على مصدر الفيديو"); setLoading(false); return; }
       // Prefer the VPS proxy: it preserves the extraction User-Agent, TLS, and
       // byte-range/seek support. Raw URLs are only used when no proxy is available.
-      const playUrl = new URL(hlsUrl || rawUrl!, window.location.origin).toString();
-      try { sessionStorage.setItem(cacheKey, JSON.stringify({ url: playUrl, ts: Date.now() })); } catch {}
+      const playUrl = new URL(hlsUrl || rawUrl!, API_BASE || window.location.origin).toString();
+      if (!isCarateenSource) {
+        try { sessionStorage.setItem(cacheKey, JSON.stringify({ url: playUrl, ts: Date.now() })); } catch {}
+      }
       setSource({ url: playUrl, proxyUrl: playUrl });
       setLoading(false);
     } catch {
@@ -79,7 +105,7 @@ export default function DubbedWatch() {
       setError("خطأ في الاتصال بالخادم");
       setLoading(false);
     }
-  }, [epUrl]);
+  }, [epUrl, isCarateenSource, provider, showId, episodeId]);
 
   useEffect(() => {
     mountedRef.current = true;

@@ -2,6 +2,13 @@ import { Router } from "express";
 import { load } from "cheerio";
 import { logger } from "../lib/logger";
 import { mergeAwSourceRows } from "../lib/awSourceRows.mjs";
+import {
+  getCarateenCatalog,
+  getCarateenEpisodes,
+  getCarateenEpisodeStream,
+  isAllowedCarateenStreamUrl,
+  type CarateenProvider,
+} from "../lib/carateenSource.js";
 
 const router = Router();
 
@@ -513,6 +520,143 @@ async function fetchStarCimaDubbed(path: string, forceRefresh = false): Promise<
   }
   return staleData;
 }
+
+function parseCarateenProvider(value: unknown): CarateenProvider | null {
+  return value === "sp" || value === "carateen" ? value : null;
+}
+
+function parsePositiveId(value: unknown): number | null {
+  const id = Number(value);
+  return Number.isSafeInteger(id) && id > 0 ? id : null;
+}
+
+function normalizeCarateenText(value: string): string {
+  return value
+    .normalize("NFKD")
+    .replace(/[\u064B-\u065F\u0670]/g, "")
+    .toLocaleLowerCase("ar")
+    .trim();
+}
+
+// ── Carateen + Spacetoon catalogs ──
+router.get("/dubbed/carateen/catalog", async (req, res) => {
+  const page = Math.max(1, Number.parseInt(String(req.query.page || "1"), 10) || 1);
+  const limit = Math.min(60, Math.max(12, Number.parseInt(String(req.query.limit || "36"), 10) || 36));
+  const query = normalizeCarateenText(String(req.query.q || ""));
+
+  try {
+    const all = await getCarateenCatalog(req.query.refresh === "1");
+    const filtered = query
+      ? all.filter((entry) =>
+          normalizeCarateenText(
+            `${entry.title} ${entry.category} ${entry.providerLabel}`,
+          ).includes(query),
+        )
+      : all;
+    const totalPages = Math.max(1, Math.ceil(filtered.length / limit));
+    const start = (page - 1) * limit;
+    res.setHeader("Cache-Control", req.query.refresh === "1" ? "no-store" : "public, max-age=300");
+    res.json({
+      results: filtered.slice(start, start + limit),
+      page,
+      limit,
+      totalResults: filtered.length,
+      totalPages,
+      sourceCounts: {
+        sp: all.filter((entry) => entry.provider === "sp").length,
+        carateen: all.filter((entry) => entry.provider === "carateen").length,
+      },
+    });
+  } catch (error) {
+    logger.warn({ err: error }, "dubbed: Carateen catalog unavailable");
+    res.status(502).json({ error: "تعذر تحميل كتالوج كراتين وسبيستون" });
+  }
+});
+
+router.get("/dubbed/carateen/episodes", async (req, res) => {
+  const provider = parseCarateenProvider(req.query.provider);
+  const showId = parsePositiveId(req.query.showId);
+  if (!provider || !showId) {
+    res.status(400).json({ error: "provider and showId are required" });
+    return;
+  }
+
+  try {
+    const rows = await getCarateenEpisodes(provider, showId, req.query.refresh === "1");
+    const episodes = rows
+      .map((episode, index) => {
+        const rawNumber = Number(episode.number || episode.order_id || index + 1);
+        const number = Number.isFinite(rawNumber) && rawNumber > 0 ? rawNumber : index + 1;
+        const episodeId = parsePositiveId(episode.id);
+        if (!episodeId) return null;
+        const imageValue =
+          provider === "sp"
+            ? episode.cover_full_path
+            : episode.thumbnail;
+        let thumbnail = "";
+        if (typeof imageValue === "string" && imageValue.startsWith("https://")) {
+          try {
+            const imageUrl = new URL(imageValue);
+            if (
+              imageUrl.hostname === "cdn.spacetoongo.com" ||
+              imageUrl.hostname.endsWith(".spacetoongo.com")
+            ) {
+              thumbnail = imageUrl.toString();
+            }
+          } catch {}
+        }
+        const title = String(episode.pref || episode.title || "").trim();
+        return {
+          number,
+          epId: String(episodeId),
+          url: `carateen://${provider}/${showId}/${episodeId}`,
+          title,
+          thumbnail,
+          season: episode.season ?? null,
+        };
+      })
+      .filter((episode): episode is NonNullable<typeof episode> => episode !== null)
+      .sort((a, b) => a.number - b.number);
+
+    res.setHeader("Cache-Control", req.query.refresh === "1" ? "no-store" : "public, max-age=900");
+    res.json({ episodes });
+  } catch (error) {
+    logger.warn({ err: error, provider, showId }, "dubbed: Carateen episodes unavailable");
+    res.status(502).json({ error: "تعذر تحميل حلقات هذا العمل" });
+  }
+});
+
+router.get("/dubbed/carateen/watch-src", async (req, res) => {
+  const provider = parseCarateenProvider(req.query.provider);
+  const showId = parsePositiveId(req.query.showId);
+  const episodeId = parsePositiveId(req.query.episodeId);
+  if (!provider || !showId || !episodeId) {
+    res.status(400).json({ error: "provider, showId and episodeId are required" });
+    return;
+  }
+
+  try {
+    const rawUrl = await getCarateenEpisodeStream(provider, showId, episodeId);
+    if (!isAllowedCarateenStreamUrl(rawUrl)) {
+      res.status(502).json({ error: "مصدر الحلقة غير مدعوم" });
+      return;
+    }
+    const mediaUrl = new URL(rawUrl);
+    const isHls = /\.m3u8$/i.test(mediaUrl.pathname);
+    const proxyPath = isHls ? "/api/anime/hls-proxy" : "/api/anime/video-proxy";
+    const proxiedUrl =
+      `${proxyPath}?url=${encodeURIComponent(rawUrl)}` +
+      `&ref=${encodeURIComponent("https://carateen.tv/")}`;
+    res.setHeader("Cache-Control", "no-store");
+    res.json({ hlsUrl: proxiedUrl, type: isHls ? "hls" : "mp4" });
+  } catch (error) {
+    logger.warn(
+      { err: error, provider, showId, episodeId },
+      "dubbed: Carateen stream unavailable",
+    );
+    res.status(502).json({ error: "تعذر استخراج رابط الحلقة" });
+  }
+});
 
 // ── GET /api/dubbed/catalog?page=N ──
 router.get("/dubbed/catalog", async (req, res) => {
