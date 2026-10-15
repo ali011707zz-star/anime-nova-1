@@ -4,6 +4,8 @@ import { logger } from "../lib/logger.js";
 import {
   SOURCE_AVAILABILITY_CONCURRENCY,
   orderAvailabilityJobs,
+  sourceAvailabilityJobTimeoutMs,
+  sourceAvailabilityScanTimeoutMs,
   sourceAvailabilityTimeoutMs,
 } from "../lib/sourceAvailabilityPolicy.mjs";
 import {
@@ -14259,6 +14261,7 @@ router.get("/anime/sources-stream", scraperQueueMiddleware, async (req, res) => 
   let checkFirstRowLogged = false;
   let closed = false;
   let availabilityDeadlineReached = false;
+  const availabilityProviderTimeouts = new Set<string>();
   const activeAvailabilityControllers = new Set<AbortController>();
   const abortActiveAvailabilityRequests = () => {
     for (const controller of activeAvailabilityControllers) controller.abort();
@@ -14349,7 +14352,7 @@ router.get("/anime/sources-stream", scraperQueueMiddleware, async (req, res) => 
   }, 5000);
 
   function sendCheckSrc(s: UnifiedSource) {
-    if (closed) return;
+    if (closed || availabilityDeadlineReached) return;
     const site = String((s as any).site || "").trim();
     if (!site) return;
     const q = sourceCheckQuality(s);
@@ -14562,15 +14565,25 @@ router.get("/anime/sources-stream", scraperQueueMiddleware, async (req, res) => 
     setSourceAvailabilityCache(cacheKey, rows);
   }
 
-  // ── Hard deadline: أغلق الاتصال بعد 28 ثانية مهما كان ──
-  const forceClose = setTimeout(() => {
-    if (!closed) {
+  // The normal playback stream keeps its existing 45s ceiling. Availability
+  // gets a queue-derived deadline below and must report partial scans clearly.
+  let forceClose: ReturnType<typeof setTimeout> | undefined;
+  const scheduleForceClose = (timeoutMs: number) => {
+    if (forceClose) clearTimeout(forceClose);
+    forceClose = setTimeout(() => {
+      if (closed) return;
+      if (checkOnly) {
+        availabilityDeadlineReached = true;
+        abortActiveAvailabilityRequests();
+        res.write("data: [INCOMPLETE]\n\n");
+      }
+      clearInterval(keepalive);
       closed = true;
-      abortActiveAvailabilityRequests();
       res.write("data: [DONE]\n\n");
       res.end();
-    }
-  }, checkOnly ? 35_000 : 45_000);
+    }, timeoutMs);
+  };
+  scheduleForceClose(checkOnly ? 95_000 : 45_000);
 
   try {
     const SCRAPER_MS = checkOnly ? 11000 : 14000;
@@ -14607,6 +14620,7 @@ router.get("/anime/sources-stream", scraperQueueMiddleware, async (req, res) => 
         });
         const result = await Promise.race([work, aborted, deadline]);
         if (timedOut) {
+          availabilityProviderTimeouts.add(site);
           logger.warn(
             { provider: site, timeout_ms: timeoutMs },
             "source availability provider timed out",
@@ -14933,7 +14947,7 @@ router.get("/anime/sources-stream", scraperQueueMiddleware, async (req, res) => 
     // Bounded provider queue: every visible source is queried, but only a
     // few upstream requests run at once so one visitor cannot exhaust RAM.
     async function runSourceQueue(
-      jobs: Array<{ site: string; run: () => Promise<unknown> }>,
+      jobs: Array<{ site: string; timeoutMs: number; run: () => Promise<unknown> }>,
       concurrency = 4,
     ): Promise<void> {
       let cursor = 0;
@@ -14942,8 +14956,30 @@ router.get("/anime/sources-stream", scraperQueueMiddleware, async (req, res) => 
           const index = cursor++;
           if (index >= jobs.length) return;
           try {
-            await jobs[index].run();
+            const job = jobs[index];
+            const jobTimeoutMs = job.timeoutMs;
+            const completed = await race(
+              Promise.resolve().then(() => job.run()).then(() => true),
+              jobTimeoutMs,
+              false,
+            );
+            if (!completed) {
+              availabilityProviderTimeouts.add(job.site);
+              logger.warn(
+                { provider: job.site, timeout_ms: jobTimeoutMs },
+                "source availability provider job timed out",
+              );
+              tracePlayback(
+                sourceCheckTrace,
+                "sources-stream",
+                "provider_job_deadline",
+                job.site,
+                Date.now() - sourceCheckStartedAt,
+                `timeout_ms=${jobTimeoutMs}`,
+              );
+            }
           } catch (error: any) {
+            availabilityProviderTimeouts.add(jobs[index].site);
             logger.warn(
               { provider: jobs[index].site, errorName: error instanceof Error ? error.name : "unknown" },
               "availability provider failed",
@@ -14963,27 +14999,32 @@ router.get("/anime/sources-stream", scraperQueueMiddleware, async (req, res) => 
       const providerJobs = orderAvailabilityJobs([
         {
           site: "kawaii",
+          timeoutMs: sourceAvailabilityJobTimeoutMs("kawaii", 10_000),
           run: () => scrapeCached("kawaii", async signal =>
             getKawaiiAnimeSources(title, english, ep, await aniListIdResolution, true, signal), false, 10000),
         },
         {
           site: "megaplay",
+          timeoutMs: sourceAvailabilityJobTimeoutMs("megaplay", 5_000),
           run: () => scrapeCached("megaplay", async signal =>
             getMegaPlayAnimeSources(title, english, ep, await aniListIdResolution, true, signal), false, 5000),
         },
         {
           site: "animewitcher",
+          timeoutMs: sourceAvailabilityJobTimeoutMs("animewitcher", 20_000),
           run: () => scrapeCached("animewitcher", async signal =>
             getAnimeWitcherSources(title, english, ep, await aniListIdResolution, titleVariants, true, signal), false, 20000),
         },
         {
           site: "sanime",
+          timeoutMs: sourceAvailabilityJobTimeoutMs("sanime", 4_000),
           run: () => useCatalogAvailability("sanime", async () => scrapeCached("sanime", async signal =>
             getSAnimeSources(title, english, ep, titleVariants, true, await catalogHintFor("sanime"), signal),
           false, 4000)),
         },
         {
           site: "consumet_gogo",
+          timeoutMs: sourceAvailabilityTimeoutMs("consumet_gogo", 40_000),
           run: async () => {
             const checked = await checkConsumetEpisode("consumet_gogo", title, english, ep, titleVariants, anilistId);
             if (checked.available) {
@@ -15001,6 +15042,7 @@ router.get("/anime/sources-stream", scraperQueueMiddleware, async (req, res) => 
         },
         {
           site: "anslayer",
+          timeoutMs: sourceAvailabilityJobTimeoutMs("anslayer", 15_000),
           run: () => useCatalogAvailability("anslayer", async () => scrapeCached("anslayer", async () => {
             const hint = await catalogHintFor("anslayer");
             return getAnimeSlayerSources(
@@ -15017,12 +15059,14 @@ router.get("/anime/sources-stream", scraperQueueMiddleware, async (req, res) => 
         },
         {
           site: "animeify",
+          timeoutMs: sourceAvailabilityJobTimeoutMs("animeify", 4_000),
           run: () => useCatalogAvailability("animeify", async () => scrapeCached("animeify", async () => getAnimeifySources(
             title, english, ep, titleVariants, true, await catalogHintFor("animeify"),
           ), false, 4000)),
         },
         {
           site: "anifox",
+          timeoutMs: sourceAvailabilityJobTimeoutMs("anifox", 18_000),
           run: () => useCatalogAvailability("anifox", async () => scrapeCached("anifox", async () => {
             const hint = await catalogHintFor("anifox");
             const lookupId = hint?.providerTitleId ? anilistId : await aniListIdResolution;
@@ -15031,22 +15075,31 @@ router.get("/anime/sources-stream", scraperQueueMiddleware, async (req, res) => 
         },
         {
           site: "anineko",
+          timeoutMs: sourceAvailabilityJobTimeoutMs("anineko", 25_000),
           run: () => scrapeCached("anineko", () => getAninekoSources(title, english, ep, titleVariants, true), false, 25000),
         },
         {
           site: "animekai",
+          timeoutMs: sourceAvailabilityJobTimeoutMs("animekai", 5_000),
           run: () => scrapeCached("animekai", async () =>
             getAnimeKaiSources(title, english, ep, await aniListIdResolution, true), false, 5000),
         },
       ]);
+      const scanDeadlineMs = sourceAvailabilityScanTimeoutMs(
+        providerJobs,
+        SOURCE_AVAILABILITY_CONCURRENCY,
+      );
+      // Keep the SSE open for the actual FIFO provider schedule, not a fixed
+      // 32-second cap that can cut off healthy sources in later queue waves.
+      scheduleForceClose(scanDeadlineMs + 8_000);
       const providerQueueFinished = await race(
         runSourceQueue(providerJobs, SOURCE_AVAILABILITY_CONCURRENCY).then(() => true),
-        32_000,
+        scanDeadlineMs,
         false,
       );
       if (!providerQueueFinished) {
         availabilityDeadlineReached = true;
-        logger.warn({ timeout_ms: 32_000 }, "source availability scan hit its overall deadline");
+        logger.warn({ timeout_ms: scanDeadlineMs }, "source availability scan hit its overall deadline");
       }
       abortActiveAvailabilityRequests();
       if (availabilityJobs.size) await Promise.allSettled([...availabilityJobs]);
@@ -15056,11 +15109,18 @@ router.get("/anime/sources-stream", scraperQueueMiddleware, async (req, res) => 
         "check_done",
         "sources",
         Date.now() - sourceCheckStartedAt,
-        `providers=${checkTracedSites.size}`,
+        `providers=${checkTracedSites.size};timed_out=${availabilityProviderTimeouts.size}`,
       );
       clearInterval(keepalive);
-      clearTimeout(forceClose);
-      if (!closed) { closed = true; res.write("data: [DONE]\n\n"); res.end(); }
+      if (forceClose) clearTimeout(forceClose);
+      if (!closed) {
+        if (!providerQueueFinished || availabilityProviderTimeouts.size > 0) {
+          res.write("data: [INCOMPLETE]\n\n");
+        }
+        closed = true;
+        res.write("data: [DONE]\n\n");
+        res.end();
+      }
       return;
     }
 
@@ -15180,7 +15240,7 @@ router.get("/anime/sources-stream", scraperQueueMiddleware, async (req, res) => 
     await Promise.allSettled([...availabilityJobs]);
   }
   clearInterval(keepalive);
-  clearTimeout(forceClose);
+  if (forceClose) clearTimeout(forceClose);
   if (!closed) { closed = true; res.write("data: [DONE]\n\n"); res.end(); }
 });
 

@@ -5346,6 +5346,10 @@ export default function WatchPage() {
        resolved between the time they were scheduled and the time they fire.
        "failed" مسموح — يُعيد المحاولة عند النقر بدل إجبار المستخدم على تحديث الصفحة. */
     const qualityKey = `${site}::${requestedQuality}`;
+    const hadKnownCandidate = (slotSources[site] || []).some(
+      (src) =>
+        getSrcQualityTier(src) !== requestedQuality || !!src.checkOnly,
+    );
     const cachedForTier = (slotSources[site] || []).filter(
       (s) =>
         getSrcQualityTier(s) === requestedQuality && !!(s.directUrl || s.url),
@@ -5525,22 +5529,31 @@ export default function WatchPage() {
       } else {
         setSlotSources((prev) => ({
           ...prev,
-          [site]: (prev[site] || []).filter(
-            (src) => getSrcQualityTier(src) !== requestedQuality,
+          [site]: (prev[site] || []).filter((src) =>
+            getSrcQualityTier(src) !== requestedQuality || !!src.checkOnly,
           ),
         }));
-        setSlotStatus((prev) => ({ ...prev, [site]: "failed" }));
+        // A transient click-time miss must not erase a positive availability
+        // row and make the source disappear. Keep its URL-free check row so
+        // the user can retry; only remove stale playable URLs for this tier.
+        setSlotStatus((prev) => ({
+          ...prev,
+          [site]: hadKnownCandidate ? "ready" : "failed",
+        }));
         setQualityStatus((prev) => ({ ...prev, [qualityKey]: "failed" }));
       }
     } catch {
       if (ctrl.signal.aborted) return;
       setSlotSources((prev) => ({
         ...prev,
-        [site]: (prev[site] || []).filter(
-          (src) => getSrcQualityTier(src) !== requestedQuality,
+        [site]: (prev[site] || []).filter((src) =>
+          getSrcQualityTier(src) !== requestedQuality || !!src.checkOnly,
         ),
       }));
-      setSlotStatus((prev) => ({ ...prev, [site]: "failed" }));
+      setSlotStatus((prev) => ({
+        ...prev,
+        [site]: hadKnownCandidate ? "ready" : "failed",
+      }));
       setQualityStatus((prev) => ({ ...prev, [qualityKey]: "failed" }));
     } finally {
       clearTimeout(timeoutId);
@@ -5706,6 +5719,7 @@ export default function WatchPage() {
         const decoder = new TextDecoder();
         let buffer = "";
         let sawDone = false;
+        let scanIncomplete = false;
         const consume = (text: string) => {
           buffer += text;
           const blocks = buffer.split(/\n\n/);
@@ -5716,6 +5730,10 @@ export default function WatchPage() {
               .find((item) => item.startsWith("data:"));
             const payload = line?.slice(5).trim();
             if (!payload) continue;
+            if (payload === "[INCOMPLETE]") {
+              scanIncomplete = true;
+              continue;
+            }
             if (payload === "[DONE]") {
               sawDone = true;
               continue;
@@ -5733,7 +5751,9 @@ export default function WatchPage() {
           if (value) consume(decoder.decode(value, { stream: true }));
         }
         consume(decoder.decode());
-        if (!cancelled && !sawDone) setAvailabilityScanFailed(true);
+        if (!cancelled && (!sawDone || scanIncomplete)) {
+          setAvailabilityScanFailed(true);
+        }
       } catch {
         if (!controller.signal.aborted) {
           setAvailabilityScanFailed(true);

@@ -7,7 +7,9 @@ export const SOURCE_AVAILABILITY_PRIORITY = Object.freeze([
 export const SOURCE_AVAILABILITY_CONCURRENCY = 6;
 
 const MIN_TIMEOUT_MS = Object.freeze({
-  consumet_gogo: 11_000,
+  // Search + episode-list requests are sequential; the full metadata check can
+  // legitimately take several per-request timeouts.
+  consumet_gogo: 40_000,
   animeify: 12_000,
   anslayer: 15_000,
   anifox: 18_000,
@@ -34,4 +36,29 @@ export function orderAvailabilityJobs(jobs) {
 export function sourceAvailabilityTimeoutMs(site, requestedMs) {
   const requested = Number.isFinite(requestedMs) && requestedMs > 0 ? requestedMs : 11_000;
   return Math.max(requested, MIN_TIMEOUT_MS[site] ?? 11_000);
+}
+
+export function sourceAvailabilityJobTimeoutMs(site, requestedMs) {
+  return sourceAvailabilityTimeoutMs(site, requestedMs) + 5_000;
+}
+
+/**
+ * Bound the whole scan by simulating the same FIFO worker assignment used by
+ * runSourceQueue. A fixed route deadline can otherwise expire while valid
+ * providers are still waiting behind slower providers in the first wave.
+ */
+export function sourceAvailabilityScanTimeoutMs(jobs, concurrency, graceMs = 12_000) {
+  const workerCount = Math.max(1, Math.floor(Number(concurrency) || 1));
+  const workerFinishTimes = Array(workerCount).fill(0);
+  for (const job of jobs) {
+    let workerIndex = 0;
+    for (let index = 1; index < workerFinishTimes.length; index++) {
+      if (workerFinishTimes[index] < workerFinishTimes[workerIndex]) workerIndex = index;
+    }
+    const timeoutMs = Number.isFinite(job.timeoutMs) && job.timeoutMs > 0
+      ? job.timeoutMs
+      : sourceAvailabilityJobTimeoutMs(job.site, 11_000);
+    workerFinishTimes[workerIndex] += timeoutMs;
+  }
+  return Math.max(...workerFinishTimes, 0) + Math.max(0, Number(graceMs) || 0);
 }
