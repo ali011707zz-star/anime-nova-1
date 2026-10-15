@@ -118,7 +118,7 @@ function subtitlesDisabledForSite(site?: string): boolean {
 /* ── Site → 2-letter tag (mirrors web SCRAPER_DEFS tags exactly) ── */
 const SITE_TAG: Record<string, string> = {
   shahiid: "SH", animelek: "EK", animedar: "AD", okanime: "OK",
-  ristoanime: "RS", animeify: "AF", anifox: "FX", animeday: "DY", arabseed: "AR",
+  ristoanime: "RS", animeify: "AF", animeday: "DY", arabseed: "AR",
   anime4up2: "4U", mycima: "MC", topcinemaa: "TC",
   animewitcher: "AW", kawaii: "KW", megaplay: "MP", anineko: "AN",
   animekai: "AK", consumet_gogo: "GO",
@@ -140,7 +140,7 @@ const SITE_LABEL: Record<string, string> = {
   anikototv: "AniKotoTV", mitanime: "MITanime", vidfast: "VidFast",
   animepahe: "AnimePahe", shahiid: "Shahiid", animelek: "Animelek",
   animedar: "Animedar", okanime: "OkAnime", ristoanime: "RistoAnime",
-  animeify: "AnimeIfy", anifox: "ANIFOX", animeday: "AnimeDay", arabseed: "ArabSeed",
+  animeify: "AnimeIfy", animeday: "AnimeDay", arabseed: "ArabSeed",
   anime4up2: "Anime4Up", mycima: "MyCima", topcinemaa: "TopCinema",
   faselhd_db: "FaselHD", animetime: "AnimeTime",
   notorrent: "Notorrent", sanime: "SAnime", anipm: "AniPm", anslayer: "AnimeSlayer",
@@ -560,11 +560,10 @@ function makeAvailabilityHintKey(
   english: string,
   format: string,
   year: string | number | undefined,
-  episode: number,
 ): string {
   const stableId = String(identity || "").trim();
   const titleKey = `${title}|${english}`.toLowerCase().replace(/\s+/g, " ").trim();
-  return `${stableId ? `id:${stableId}` : `title:${titleKey}`}|${format.toUpperCase()}|${year || ""}|episode:${episode}`;
+  return `${stableId ? `id:${stableId}` : `title:${titleKey}`}|${format.toUpperCase()}|${year || ""}`;
 }
 
 function cloneAvailabilityHintRows(rows: AvailabilityHintRows): AvailabilityHintRows {
@@ -985,7 +984,6 @@ export default function WatchScreen() {
     englishStr,
     format || "",
     year,
-    epNum,
   );
   const [watchUnlocked, setWatchUnlocked] = useState(false);
   /* Only the pressed server row is waiting for the ad decision. A single
@@ -2589,7 +2587,7 @@ export default function WatchScreen() {
           {showingAvailabilityHints && hasAvailableSlot && (
             <View style={{ marginBottom: 10, paddingHorizontal: 4 }}>
               <Text style={d.availabilityPartialText}>
-                قائمة مصادر محفوظة حديثاً لهذه الحلقة؛ لا تؤكد وجود رابط قابل للتشغيل. يجلب التطبيق الرابط ويفحص جودته عند الاختيار.
+                قائمة مصادر محفوظة حديثاً لهذه السلسلة؛ لا تؤكد وجود رابط للحلقة الحالية. يجلب التطبيق الرابط ويفحص جودته عند الاختيار.
               </Text>
               <Pressable
                 onPress={refreshAllSources}

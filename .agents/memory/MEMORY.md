@@ -121,6 +121,7 @@
 - [Foupix mobile playback](foupix-mobile-playback.md) — direct Foupix MP4 can fail Android TLS and the first CDN request can transiently 403; use the public progressive proxy with retries.
 - [Source health controls](source-health-controls.md) — provider waves must use deferred jobs; deadline signals, single-flight dedupe, and short circuit cooldowns protect the VPS.
 - [SSE stream benchmarking](sse-stream-benchmarking.md) — read SSE incrementally; large client reads can hide progressive rows and misreport first-result latency.
+- [SSE disconnect tracking](sse-disconnect-tracking.md) — use response closure for long-lived streams; the request can close while provider checks are still running.
 - [Anime Slayer performance reference](anime-slayer-performance-reference.md) — المرجع يستخدم RecyclerView/Paging وGlide بكاش الذاكرة/القرص وموارد land/sw600dp، لا تمديد الهاتف فقط.
 - [Android TV player surface reset](tv-player-surface-reset.md) — stale TextureView transforms after TV layout changes can split video colors; recreate the opaque surface while preserving the ExoPlayer.
 - [Android TV remote focus](android-tv-remote-focus.md) — keep TV actions on the shared focusable wrapper, avoid nested episode-card targets, and use focus guides for virtualized lists.
@@ -143,4 +144,3 @@
 - [Mobile watch-player orientation](mobile-watch-player-orientation.md) — phone picker/exit stays portrait; player starts landscape and its toggle uses one lock owner; TV remains separate.
 - [Arabic title fallback](arabic-title-fallback.md) — use only verified Arabic aliases; keep AniList native titles separate and show English/original when no Arabic title is known.
 - [End-to-end playback validation](playback-end-to-end-validation.md) — source discovery can return rows while selected-source resolution still fails; test resolution and a bounded media response.
-- [Episode-scoped source availability](episode-scoped-source-availability.md) — cache provider hints per episode; reusing one anime-wide entry can hide providers on newly released episodes.

@@ -44,7 +44,7 @@ export function scraperQueueMiddleware(req: Request, res: Response, next: NextFu
   };
   const enter = () => {
     if (waiter.cancelled) return;
-    req.removeListener("close", cancel);
+    res.removeListener("close", cancel);
     if (traceQueuedPlayback) {
       console.info(
         `[playback-trace] id=${playbackTrace} route=fetch-source stage=queue_wait elapsed_ms=${Date.now() - queueStartedAt}`,
@@ -104,7 +104,7 @@ export function scraperQueueMiddleware(req: Request, res: Response, next: NextFu
       });
       return;
     }
-    req.once("close", cancel);
+    res.once("close", cancel);
     (availability ? availabilityWaiters : waiters).push(waiter);
     const queued = waiters.length + availabilityWaiters.length;
     peakQueued = Math.max(peakQueued, queued);

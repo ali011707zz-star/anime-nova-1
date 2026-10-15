@@ -13249,6 +13249,7 @@ const _anslayerInFlight = new Map<string, Promise<UnifiedSource[]>>();
 type AnslayerSourceListener = (source: UnifiedSource) => void | Promise<void>;
 const _anslayerProgressListeners = new Map<string, Set<AnslayerSourceListener>>();
 const ANSLAYER_TTL     = 4 * 3_600_000;
+const ANSLAYER_AVAILABILITY_TTL = 2 * 60_000;
 
 async function mapAnslayerLinks(
   links: string[],
@@ -13305,12 +13306,14 @@ async function getAnimeSlayerSourcesUncached(
   titleAr?: string | null,
   catalogHint?: CatalogEpisodeHint | null,
   onSource?: AnslayerSourceListener,
+  availabilityOnly = false,
 ): Promise<UnifiedSource[]> {
-  const ck = directAnimeId
+  const ck = `${availabilityOnly ? "availability:" : ""}${directAnimeId
     ? `anslayer:id:${directAnimeId}:${ep}`
-    : `anslayer:${normalize(english || title).replace(/\s+/g, "-")}:${ep}`;
+    : `anslayer:${normalize(english || title).replace(/\s+/g, "-")}:${ep}`}`;
   const hit = _anslayerCacheMap.get(ck);
-  if (hit && Date.now() - hit.ts < ANSLAYER_TTL) {
+  const cacheTtl = availabilityOnly ? ANSLAYER_AVAILABILITY_TTL : ANSLAYER_TTL;
+  if (hit && Date.now() - hit.ts < cacheTtl) {
     if (onSource) {
       for (const source of hit.sources) {
         try { await onSource(source); } catch { /* streaming must not fail cache reads */ }
@@ -13381,6 +13384,20 @@ async function getAnimeSlayerSourcesUncached(
     const urls: any[] = Array.isArray(epItem.episode_urls) ? epItem.episode_urls : [];
     const muiltUrl = urls.find((u: any) => u.episode_server_name === "muilt")?.episode_url;
     if (!muiltUrl) return out;
+    if (availabilityOnly) {
+      // Confirm this exact episode without resolving external players;
+      // fetch-source resolves the links only after the user selects the source.
+      const availabilityRows: UnifiedSource[] = [{
+        name: "AnimeSlayer · الحلقة موجودة",
+        url: "",
+        quality: "720p",
+        qualityRank: 9,
+        site: "anslayer",
+        verified: true,
+      }];
+      _anslayerCacheMap.set(ck, { sources: availabilityRows, ts: Date.now() });
+      return availabilityRows;
+    }
 
     // ── 3) روابط المشغلات الخارجية ──
     const r = await fetchSourceWithRetry(muiltUrl, {
@@ -13499,12 +13516,13 @@ async function getAnimeSlayerSources(
   titleAr?: string | null,
   catalogHint?: CatalogEpisodeHint | null,
   onSource?: AnslayerSourceListener,
+  availabilityOnly = false,
 ): Promise<UnifiedSource[]> {
-  const key = catalogHint?.providerTitleId
+  const key = `${availabilityOnly ? "availability:" : ""}${catalogHint?.providerTitleId
     ? `anslayer:catalog:${catalogHint.providerTitleId}:${ep}`
     : directAnimeId
     ? `anslayer:id:${directAnimeId}:${ep}`
-    : `anslayer:${normalize(english || title).replace(/\s+/g, "-")}:${ep}`;
+    : `anslayer:${normalize(english || title).replace(/\s+/g, "-")}:${ep}`}`;
   if (onSource) {
     const listeners = _anslayerProgressListeners.get(key) || new Set<AnslayerSourceListener>();
     listeners.add(onSource);
@@ -13535,6 +13553,7 @@ async function getAnimeSlayerSources(
         Promise.resolve().then(() => listener(source)).catch(() => {}),
       ));
     },
+    availabilityOnly,
   );
   _anslayerInFlight.set(key, promise);
   try {
@@ -14170,7 +14189,13 @@ router.get("/anime/sources-stream", scraperQueueMiddleware, async (req, res) => 
   const checkTracedSites = new Set<string>();
   let checkFirstRowLogged = false;
   let closed = false;
-  req.on("close", () => { closed = true; });
+  // A GET request can emit req.close as soon as its request body is complete,
+  // while this SSE response is still streaming. Only treat an unfinished
+  // response close as a client disconnect; otherwise later providers are
+  // incorrectly suppressed after the first fast scraper returns.
+  res.on("close", () => {
+    if (!res.writableEnded) closed = true;
+  });
 
   // Catalog lookups run once per request and are shared by both phases:
   // availability can advertise a known page immediately, while extraction
@@ -14582,8 +14607,13 @@ router.get("/anime/sources-stream", scraperQueueMiddleware, async (req, res) => 
       // Availability is a bounded verification pass. Most providers only need
       // their episode metadata, but AniNeko must also inspect its HLS tiers.
       // Give that provider enough time to fetch the embed/master playlist.
+      const availabilityTimeoutLimit = site === "anineko" ? 25_000
+        : site === "animewitcher" ? 20_000
+        : site === "anslayer" ? 15_000
+        : site === "anifox" ? 18_000
+        : 11_000;
       const effectiveTimeoutMs = checkOnly
-        ? site === "anineko" ? Math.min(timeoutMs, 25000) : Math.min(timeoutMs, 11000)
+        ? Math.min(timeoutMs, availabilityTimeoutLimit)
         : timeoutMs;
       // Provider URL formats changed for AniNeko and SAnime. Version their
       // cache keys so rows containing dead VibeVibe or /Video2 URLs cannot
@@ -14783,8 +14813,10 @@ router.get("/anime/sources-stream", scraperQueueMiddleware, async (req, res) => 
             Number(hint?.providerTitleId || anslayerId || 0) || undefined,
             titleAr,
             hint,
+            undefined,
+            true,
           );
-        }, false, 3200)),
+        }, false, 15_000)),
         () => useCatalogAvailability("animeify", async () => scrapeCached("animeify", async () => getAnimeifySources(
           title, english, ep, titleVariants, true, await catalogHintFor("animeify"),
         ), false, 4000)),
@@ -14795,9 +14827,9 @@ router.get("/anime/sources-stream", scraperQueueMiddleware, async (req, res) => 
           const hint = await catalogHintFor("anifox");
           const lookupId = hint?.providerTitleId ? anilistId : await aniListIdResolution;
           return getAnifoxSources(title, english, ep, titleVariants, lookupId, true, hint);
-        }, false, 4000)),
+        }, false, 18_000)),
         () => scrapeCached("animewitcher", async () =>
-          getAnimeWitcherSources(title, english, ep, await aniListIdResolution, titleVariants, true), false, 11000),
+          getAnimeWitcherSources(title, english, ep, await aniListIdResolution, titleVariants, true), false, 20_000),
         () => scrapeCached("anineko",       () => getAninekoSources(title, english, ep, titleVariants, true), false, 25000),
         // Kawaii's API can take several seconds for newly published episodes.
         // Keep this provider inside the availability pass without letting a slow
