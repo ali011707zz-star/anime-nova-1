@@ -14294,7 +14294,7 @@ router.get("/anime/sources-stream", scraperQueueMiddleware, async (req, res) => 
 
   async function useCatalogAvailability(
     provider: "animeify" | "anslayer" | "sanime" | "anifox",
-    fallback: () => Promise<unknown>,
+    fallback: (hint: CatalogEpisodeHint | null) => Promise<unknown>,
   ): Promise<void> {
     // Do not hold the picker open for a slow database request. The normal
     // scraper remains the explicit fallback when the catalog is unavailable.
@@ -14302,7 +14302,7 @@ router.get("/anime/sources-stream", scraperQueueMiddleware, async (req, res) => 
       catalogHintsPromise,
       new Promise<Partial<Record<string, CatalogEpisodeHint>>>(resolve => setTimeout(() => resolve({}), 1200)),
     ]);
-    const hint = hints[provider];
+    const hint = hints[provider] || null;
     if (hint?.servers.length) {
       for (const server of hint.servers) {
         sendCheckSrc({
@@ -14316,7 +14316,11 @@ router.get("/anime/sources-stream", scraperQueueMiddleware, async (req, res) => 
       }
       return;
     }
-    await fallback();
+    // Pass the bounded lookup result through instead of awaiting the original
+    // catalog promise again inside the fallback. Otherwise a slow catalog
+    // request defeats this 1.2s bound and can consume the provider's entire
+    // availability deadline before its scraper even starts.
+    await fallback(hint);
   }
 
   // Resolve AniList in parallel with provider checks. Only ID-dependent
@@ -15018,8 +15022,8 @@ router.get("/anime/sources-stream", scraperQueueMiddleware, async (req, res) => 
         {
           site: "sanime",
           timeoutMs: sourceAvailabilityJobTimeoutMs("sanime", 4_000),
-          run: () => useCatalogAvailability("sanime", async () => scrapeCached("sanime", async signal =>
-            getSAnimeSources(title, english, ep, titleVariants, true, await catalogHintFor("sanime"), signal),
+          run: () => useCatalogAvailability("sanime", hint => scrapeCached("sanime", signal =>
+            getSAnimeSources(title, english, ep, titleVariants, true, hint, signal),
           false, 4000)),
         },
         {
@@ -15043,8 +15047,7 @@ router.get("/anime/sources-stream", scraperQueueMiddleware, async (req, res) => 
         {
           site: "anslayer",
           timeoutMs: sourceAvailabilityJobTimeoutMs("anslayer", 15_000),
-          run: () => useCatalogAvailability("anslayer", async () => scrapeCached("anslayer", async () => {
-            const hint = await catalogHintFor("anslayer");
+          run: () => useCatalogAvailability("anslayer", hint => scrapeCached("anslayer", async () => {
             return getAnimeSlayerSources(
               title,
               english,
@@ -15060,15 +15063,14 @@ router.get("/anime/sources-stream", scraperQueueMiddleware, async (req, res) => 
         {
           site: "animeify",
           timeoutMs: sourceAvailabilityJobTimeoutMs("animeify", 4_000),
-          run: () => useCatalogAvailability("animeify", async () => scrapeCached("animeify", async () => getAnimeifySources(
-            title, english, ep, titleVariants, true, await catalogHintFor("animeify"),
+          run: () => useCatalogAvailability("animeify", hint => scrapeCached("animeify", async () => getAnimeifySources(
+            title, english, ep, titleVariants, true, hint,
           ), false, 4000)),
         },
         {
           site: "anifox",
           timeoutMs: sourceAvailabilityJobTimeoutMs("anifox", 18_000),
-          run: () => useCatalogAvailability("anifox", async () => scrapeCached("anifox", async () => {
-            const hint = await catalogHintFor("anifox");
+          run: () => useCatalogAvailability("anifox", async hint => scrapeCached("anifox", async () => {
             const lookupId = hint?.providerTitleId ? anilistId : await aniListIdResolution;
             return getAnifoxSources(title, english, ep, titleVariants, lookupId, true, hint);
           }, false, 18_000)),
@@ -15109,7 +15111,7 @@ router.get("/anime/sources-stream", scraperQueueMiddleware, async (req, res) => 
         "check_done",
         "sources",
         Date.now() - sourceCheckStartedAt,
-        `providers=${checkTracedSites.size};timed_out=${availabilityProviderTimeouts.size}`,
+        `providers=${checkTracedSites.size};timed_out=${availabilityProviderTimeouts.size};timed_out_sites=${[...availabilityProviderTimeouts].join(",") || "none"}`,
       );
       clearInterval(keepalive);
       if (forceClose) clearTimeout(forceClose);

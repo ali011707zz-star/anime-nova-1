@@ -145,3 +145,4 @@
 - [Mobile watch-player orientation](mobile-watch-player-orientation.md) — phone picker/exit stays portrait; player starts landscape and its toggle uses one lock owner; TV remains separate.
 - [Arabic title fallback](arabic-title-fallback.md) — use only verified Arabic aliases; keep AniList native titles separate and show English/original when no Arabic title is known.
 - [End-to-end playback validation](playback-end-to-end-validation.md) — source discovery can return rows while selected-source resolution still fails; test resolution and a bounded media response.
+- [Source availability deadlines](source-availability-deadlines.md) — keep mobile/web wait limits above server scan and provider budgets; surface partial scans and don't block fallbacks on slow catalog lookups.

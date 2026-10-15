@@ -729,7 +729,10 @@ function ServerScanGif() {
 }
 
 /* timeout موحّد افتراضي */
-const SITE_TIMEOUT_MS = 28_000;
+// Leave room for the API's slowest provider deadline plus scraper-queue wait.
+// Per-provider values below must never force-cancel a request before that.
+const SITE_TIMEOUT_MS = 60_000;
+const AVAILABILITY_TIMEOUT_MS = 90_000;
 const SITE_TIMEOUT_MAP: Record<string, number> = {
   anifox:       35_000,
   animewitcher: 38_000,
@@ -1366,6 +1369,8 @@ export default function WatchScreen() {
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
         let buffer = "";
+        let sawDone = false;
+        let scanIncomplete = false;
         const consume = (text: string) => {
           buffer += text;
           const blocks = buffer.split(/\r?\n\r?\n/);
@@ -1386,7 +1391,12 @@ export default function WatchScreen() {
               .map(line => line.slice(5).trim())
               .join("\n");
             if (!payload) continue;
+            if (payload === "[INCOMPLETE]") {
+              scanIncomplete = true;
+              continue;
+            }
             if (payload === "[DONE]" || eventName === "done") {
+              sawDone = true;
               console.info(
                 `[playback-trace] id=${playbackTraceId} component=availability stage=stream_done elapsed_ms=${Date.now() - availabilityRequestStartedAt}`,
               );
@@ -1422,7 +1432,10 @@ export default function WatchScreen() {
             .filter(line => line.startsWith("data:"))
             .map(line => line.slice(5).trim())
             .join("\n");
-          if (payload === "[DONE]" || eventName === "done") {
+          if (payload === "[INCOMPLETE]") {
+            scanIncomplete = true;
+          } else if (payload === "[DONE]" || eventName === "done") {
+            sawDone = true;
             console.info(
               `[playback-trace] id=${playbackTraceId} component=availability stage=stream_done elapsed_ms=${Date.now() - availabilityRequestStartedAt}`,
             );
@@ -1430,6 +1443,12 @@ export default function WatchScreen() {
             try { applyRow(JSON.parse(payload)); } catch { /* ignore */ }
           }
           buffer = "";
+        }
+        if (!cancelled && (!sawDone || scanIncomplete) && isMountedRef.current) {
+          setAvailabilityError(true);
+          console.warn(
+            `[playback-trace] id=${playbackTraceId} component=availability stage=incomplete elapsed_ms=${Date.now() - availabilityRequestStartedAt} reason=${scanIncomplete ? "server_incomplete" : "missing_done"}`,
+          );
         }
       } catch {
         if ((timedOut || !controller.signal.aborted) && isMountedRef.current) {
@@ -1453,7 +1472,7 @@ export default function WatchScreen() {
     const timeoutId = setTimeout(() => {
       timedOut = true;
       controller.abort();
-    }, 32_000);
+    }, AVAILABILITY_TIMEOUT_MS);
     void run();
     return () => {
       cancelled = true;
@@ -1820,7 +1839,7 @@ export default function WatchScreen() {
       siteCtrl = currentSiteCtrl;
       /* تسجيل الـ controller لضمان إلغائه عند الخروج من الشاشة */
       siteCtrls.current.set(fetchKey, currentSiteCtrl);
-      const timeout = SITE_TIMEOUT_MAP[site] ?? SITE_TIMEOUT_MS;
+      const timeout = Math.max(SITE_TIMEOUT_MS, SITE_TIMEOUT_MAP[site] ?? 0);
       tid = setTimeout(() => currentSiteCtrl.abort(), timeout);
       console.info(`[playback-trace] id=${lookupTraceId} component=source stage=request site=${lookupSiteTag}`);
       const res = await secureStreamFetch(`${base}/api/anime/fetch-source?${qs.toString()}`, { signal: currentSiteCtrl.signal });
@@ -2115,7 +2134,7 @@ export default function WatchScreen() {
       const siteCtrl = new AbortController();
       /* تسجيل الـ controller — يُلغى عند navigation/refresh/goEp تماماً كـ handlePickSite */
       siteCtrls.current.set(site, siteCtrl);
-      const timeout = SITE_TIMEOUT_MAP[site] ?? SITE_TIMEOUT_MS;
+      const timeout = Math.max(SITE_TIMEOUT_MS, SITE_TIMEOUT_MAP[site] ?? 0);
       tid = setTimeout(() => siteCtrl.abort(), timeout);
       const res = await secureFetch(`${base}/api/anime/fetch-source?site=${site}&${qs}`, { signal: siteCtrl.signal });
 
@@ -2654,6 +2673,22 @@ export default function WatchScreen() {
              </Pressable>
            </View>
          )}
+
+          {availabilityDone && availabilityError && hasAvailableSlot && (
+            <View style={[d.availabilityPartialState, { marginBottom: 8 }]}>
+              <Text style={d.availabilityPartialText}>
+                لم يكتمل فحص بعض المصادر؛ النتائج الظاهرة متاحة، ويمكنك إعادة الفحص للمصادر المتأخرة.
+              </Text>
+              <Pressable
+                onPress={refreshAllSources}
+                accessibilityRole="button"
+                style={d.retryBigBtn}
+              >
+                <Ionicons name="refresh" size={16} color={colors.accent} />
+                <Text style={d.retryBigText}>إعادة الفحص</Text>
+              </Pressable>
+            </View>
+          )}
 
           {hasAvailableSlot && !showingAvailabilityHints && (
             <View style={[d.availabilityPartialState, { marginBottom: 8 }]}>

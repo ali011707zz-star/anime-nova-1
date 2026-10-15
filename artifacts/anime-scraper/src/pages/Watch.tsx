@@ -5405,7 +5405,10 @@ export default function WatchPage() {
       // hianime: معطّل 2026-07-30
       anipm: 24000, // backend = 20s + هامش 4s
     };
-    const siteTimeout = SITE_REQUEST_TIMEOUTS[site] ?? 24000;
+    // The API can legitimately spend up to 45s on a provider, in addition to
+    // time spent waiting in its queue. Never let an older per-site budget abort
+    // the request before the server can return its primary/backup candidates.
+    const siteTimeout = Math.max(60_000, SITE_REQUEST_TIMEOUTS[site] ?? 24_000);
     const ctrl = new AbortController();
     const requestControllerKey = `${site}:${animeId}:${ep}`;
     fetchControllersRef.current[requestControllerKey] = ctrl;
