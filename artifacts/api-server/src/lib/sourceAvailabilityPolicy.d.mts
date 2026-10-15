@@ -4,6 +4,6 @@ export interface AvailabilityJob {
 }
 
 export const SOURCE_AVAILABILITY_PRIORITY: readonly string[];
+export const SOURCE_AVAILABILITY_CONCURRENCY: number;
 export function orderAvailabilityJobs<T extends AvailabilityJob>(jobs: T[]): T[];
 export function sourceAvailabilityTimeoutMs(site: string, requestedMs: number): number;
-export function sourceFlightKey(cacheKey: string, availabilityOnly: boolean): string;

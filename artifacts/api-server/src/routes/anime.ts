@@ -2,10 +2,14 @@ import { Router, type Request } from "express";
 import { scraperQueueMiddleware } from "../lib/scraperQueue.js";
 import { logger } from "../lib/logger.js";
 import {
+  SOURCE_AVAILABILITY_CONCURRENCY,
   orderAvailabilityJobs,
   sourceAvailabilityTimeoutMs,
-  sourceFlightKey,
 } from "../lib/sourceAvailabilityPolicy.mjs";
+import {
+  getSourceAvailabilityCache,
+  setSourceAvailabilityCache,
+} from "../lib/sourceAvailabilityCache.mjs";
 import {
   SANIME_API_PREFIX,
   SANIME_USER_AGENT,
@@ -7247,8 +7251,16 @@ async function getMegaPlayAnimeSources(
       intro?: { start?: number; end?: number };
       outro?: { start?: number; end?: number };
     } | null = null;
-    for (const sourceEndpoint of sourceEndpoints) {
-      try {
+    const endpointControllers = sourceEndpoints.map(() => new AbortController());
+    let winningEndpointIndex: number | null = null;
+    const abortEndpoints = () => endpointControllers.forEach(controller => controller.abort());
+    signal?.addEventListener("abort", abortEndpoints, { once: true });
+    if (signal?.aborted) abortEndpoints();
+    try {
+      const resolvedEndpoint = await Promise.any(sourceEndpoints.map(async (sourceEndpoint, index) => {
+        const endpointSignal = signal
+          ? AbortSignal.any([signal, endpointControllers[index].signal])
+          : endpointControllers[index].signal;
         const sourceResponse = await fetchSourceWithRetry(sourceEndpoint, {
           headers: {
             ...BASE_HDRS,
@@ -7256,11 +7268,21 @@ async function getMegaPlayAnimeSources(
             "X-Requested-With": "XMLHttpRequest",
             Accept: "application/json",
           },
-        }, availabilityOnly ? 8_000 : 12_000, availabilityOnly ? 1 : 2, signal);
-        if (!sourceResponse?.ok) continue;
+        }, availabilityOnly ? 8_000 : 12_000, availabilityOnly ? 1 : 2, endpointSignal);
+        if (!sourceResponse?.ok) throw new Error("MegaPlay source endpoint unavailable");
         const candidate = await sourceResponse.json().catch(() => null) as typeof data;
-        if (candidate?.sources) { data = candidate; break; }
-      } catch { /* try the migration-compatible endpoint */ }
+        if (!candidate?.sources) throw new Error("MegaPlay source endpoint returned no sources");
+        winningEndpointIndex = index;
+        return candidate;
+      }));
+      data = resolvedEndpoint;
+    } catch {
+      data = null;
+    } finally {
+      signal?.removeEventListener("abort", abortEndpoints);
+      endpointControllers.forEach((controller, index) => {
+        if (index !== winningEndpointIndex) controller.abort();
+      });
     }
     if (!data) return [];
     const sourceValue = Array.isArray(data.sources) ? data.sources[0] : data.sources;
@@ -9044,6 +9066,11 @@ const AW_ALGOLIA_KEY   = "b56c01ef52540ef334bcdbaa00ded9e4";
 const AW_ALGOLIA_INDEX = "all_anime";
 const AW_ALGOLIA_URL   = `https://${AW_ALGOLIA_APP.toLowerCase()}-dsn.algolia.net/1/indexes/${AW_ALGOLIA_INDEX}/query`;
 
+function awRequestSignal(parentSignal: AbortSignal | undefined, timeoutMs: number): AbortSignal {
+  const timeoutSignal = AbortSignal.timeout(timeoutMs);
+  return parentSignal ? AbortSignal.any([parentSignal, timeoutSignal]) : timeoutSignal;
+}
+
 /** helper: استخراج قيمة Firestore field */
 function _awFv(v: any): any {
   if (!v) return "";
@@ -9066,7 +9093,7 @@ function _awDoc(doc: any): Record<string, any> {
 }
 
 /** بحث Algolia — credentials D8LH9I7ZL7 تعمل مباشرة من VPS */
-async function awAlgoliaSearch(query: string): Promise<any[]> {
+async function awAlgoliaSearch(query: string, parentSignal?: AbortSignal): Promise<any[]> {
   try {
     const res = await fetch(AW_ALGOLIA_URL, {
       method: "POST",
@@ -9076,7 +9103,7 @@ async function awAlgoliaSearch(query: string): Promise<any[]> {
         "Content-Type":             "application/json",
       },
       body: JSON.stringify({ query, hitsPerPage: 6, attributesToRetrieve: ["objectID","name","type","details"] }),
-      signal: AbortSignal.timeout(10_000),
+      signal: awRequestSignal(parentSignal, 10_000),
     });
     if (!res.ok) { console.warn("[AW] Algolia", res.status); return []; }
     const data = await res.json() as any;
@@ -9088,14 +9115,15 @@ async function awAlgoliaSearch(query: string): Promise<any[]> {
 }
 
 /** جلب الحلقات مباشرة من Firestore (تجاوز HF Space كلياً) */
-async function awFetchEpisodes(animeId: string): Promise<Array<{ id: string; num: number }>> {
+async function awFetchEpisodes(animeId: string, parentSignal?: AbortSignal): Promise<Array<{ id: string; num: number }>> {
   const eps: Array<{ id: string; num: number }> = [];
   let token: string | null = null;
   do {
+    if (parentSignal?.aborted) break;
     const url = `${AW_FS_BASE}/anime_list/${encodeURIComponent(animeId)}/episodes?pageSize=300`
       + (token ? `&pageToken=${token}` : "");
     try {
-      const r = await fetch(url, { headers: BASE_HDRS, signal: AbortSignal.timeout(12_000) });
+      const r = await fetch(url, { headers: BASE_HDRS, signal: awRequestSignal(parentSignal, 12_000) });
       if (!r.ok) break;
       const data = await r.json() as any;
       for (const doc of (data.documents || [])) {
@@ -9117,7 +9145,7 @@ async function awFetchEpisodes(animeId: string): Promise<Array<{ id: string; num
  * نمط AnimeWitcher: pad3 أو pad4 أو رقم عادي (مثلاً ep1→"001", ep10→"010", ep100→"100")
  * يجرب المرشحين بالتوازي — أول رد ناجح يُرجعه.
  */
-async function awDirectEpId(animeId: string, ep: number): Promise<string | null> {
+async function awDirectEpId(animeId: string, ep: number, parentSignal?: AbortSignal): Promise<string | null> {
   const n = Math.round(ep);
   const candidates = [
     String(n).padStart(3, "0"),   // "001", "010", "100", "1000"
@@ -9127,12 +9155,13 @@ async function awDirectEpId(animeId: string, ep: number): Promise<string | null>
   // احذف المكرر (مثلاً ep=100 → "100" يظهر مرتين)
   const unique = [...new Set(candidates)];
   const base = `${AW_FS_BASE}/anime_list/${encodeURIComponent(animeId)}/episodes`;
+  if (parentSignal?.aborted) return null;
 
   const results = await Promise.allSettled(
     unique.map(id =>
       fetch(`${base}/${encodeURIComponent(id)}`, {
         headers: BASE_HDRS,
-        signal: AbortSignal.timeout(6_000),
+        signal: awRequestSignal(parentSignal, 6_000),
       }).then(r => r.ok ? id : null).catch(() => null)
     )
   );
@@ -9144,12 +9173,17 @@ async function awDirectEpId(animeId: string, ep: number): Promise<string | null>
 }
 
 /** جلب servers من Firestore — يجرب collection ثم document-fallback */
-async function awFetchServers(animeId: string, epId: string): Promise<Array<{name:string;url:string;quality:string;visible:boolean}>> {
+async function awFetchServers(
+  animeId: string,
+  epId: string,
+  parentSignal?: AbortSignal,
+): Promise<Array<{name:string;url:string;quality:string;visible:boolean}>> {
+  if (parentSignal?.aborted) return [];
   const base = `${AW_FS_BASE}/anime_list/${encodeURIComponent(animeId)}/episodes/${encodeURIComponent(epId)}`;
 
   // 1. collection /servers
   try {
-    const r = await fetch(`${base}/servers?pageSize=30`, { headers: BASE_HDRS, signal: AbortSignal.timeout(12_000) });
+    const r = await fetch(`${base}/servers?pageSize=30`, { headers: BASE_HDRS, signal: awRequestSignal(parentSignal, 12_000) });
     if (r.ok) {
       const data = await r.json() as any;
       const docs = (data.documents || []) as any[];
@@ -9163,9 +9197,10 @@ async function awFetchServers(animeId: string, epId: string): Promise<Array<{nam
     }
   } catch {}
 
+  if (parentSignal?.aborted) return [];
   // 2. document /servers2/all_servers
   try {
-    const r = await fetch(`${base}/servers2/all_servers`, { headers: BASE_HDRS, signal: AbortSignal.timeout(12_000) });
+    const r = await fetch(`${base}/servers2/all_servers`, { headers: BASE_HDRS, signal: awRequestSignal(parentSignal, 12_000) });
     if (r.ok) {
       const data = await r.json() as any;
       const f = _awDoc(data);
@@ -9190,7 +9225,7 @@ function awResolvePd(pageUrl: string): string | null {
 }
 
 /** Resolve KrakenFiles — HTML scraping (API blocked by CF from datacenter IPs) */
-async function awResolveKf(pageUrl: string): Promise<string | null> {
+async function awResolveKf(pageUrl: string, parentSignal?: AbortSignal): Promise<string | null> {
   const m = pageUrl.match(/krakenfiles\.com\/view\/([A-Za-z0-9_-]+)/);
   if (!m) return null;
   const fileId = m[1];
@@ -9206,7 +9241,7 @@ async function awResolveKf(pageUrl: string): Promise<string | null> {
   let html = "";
   try {
     const r = await fetch(`https://krakenfiles.com/view/${fileId}/file.html`, {
-      headers: KF_HDRS, signal: AbortSignal.timeout(12_000),
+      headers: KF_HDRS, signal: awRequestSignal(parentSignal, 12_000),
     });
     if (r.ok) html = await r.text();
   } catch {}
@@ -9230,7 +9265,7 @@ async function awResolveKf(pageUrl: string): Promise<string | null> {
           headers: { ...KF_HDRS, "Content-Type": "application/x-www-form-urlencoded" },
           body,
           redirect: "manual",
-          signal: AbortSignal.timeout(12_000),
+          signal: awRequestSignal(parentSignal, 12_000),
         });
         const loc = fr.headers.get("location") || fr.headers.get("Location") || "";
         if (loc && (loc.includes("krakencloud") || loc.includes(".mp4"))) return loc;
@@ -9250,7 +9285,7 @@ async function awResolveKf(pageUrl: string): Promise<string | null> {
       {
         method: "POST",
         headers: { ...BASE_HDRS, "Content-Type": "application/json", "Referer": `https://krakenfiles.com/view/${fileId}/file.html`, "Origin": "https://krakenfiles.com" },
-        signal: AbortSignal.timeout(8_000),
+        signal: awRequestSignal(parentSignal, 8_000),
       },
     );
     if (r.ok) {
@@ -9264,11 +9299,12 @@ async function awResolveKf(pageUrl: string): Promise<string | null> {
 }
 
 /** جلب episode doc كاملاً للحصول على bunny_video_id + bunny_library_id */
-async function awFetchEpDoc(animeId: string, epId: string): Promise<Record<string, any>> {
+async function awFetchEpDoc(animeId: string, epId: string, parentSignal?: AbortSignal): Promise<Record<string, any>> {
+  if (parentSignal?.aborted) return {};
   try {
     const r = await fetch(
       `${AW_FS_BASE}/anime_list/${encodeURIComponent(animeId)}/episodes/${encodeURIComponent(epId)}`,
-      { headers: BASE_HDRS, signal: AbortSignal.timeout(8_000) },
+      { headers: BASE_HDRS, signal: awRequestSignal(parentSignal, 8_000) },
     );
     if (!r.ok) return {};
     const doc = await r.json() as any;
@@ -9372,7 +9408,7 @@ async function awResolveHlsVariants(
 }
 
 /** بناء UnifiedSources من صفوف aw_links (بدون Algolia/Firestore) */
-async function awBuildSourcesFromDb(rows: AwLinkRow[]): Promise<UnifiedSource[]> {
+async function awBuildSourcesFromDb(rows: AwLinkRow[], parentSignal?: AbortSignal): Promise<UnifiedSource[]> {
   /*
    * Each AW row is independent. The old loop resolved KF/MediaFire/
    * Streamtape/VT one after another, so one slow host delayed every other
@@ -9381,6 +9417,7 @@ async function awBuildSourcesFromDb(rows: AwLinkRow[]): Promise<UnifiedSource[]>
    */
   const rowResults = await Promise.allSettled(rows.map(async row => {
     const rowSources: Array<{ key: string; source: UnifiedSource }> = [];
+    if (parentSignal?.aborted) return rowSources;
     const srvName = String(row.server || "").toUpperCase();
     const qText = `${row.quality || ""} ${row.server || ""} ${row.ep_id || ""} ${row.link || ""}`;
     const q      = normalizeAwQuality(qText);
@@ -9403,7 +9440,7 @@ async function awBuildSourcesFromDb(rows: AwLinkRow[]): Promise<UnifiedSource[]>
       });
     } else if (srvName === "KF") {
       try {
-        const kfDirect = await awResolveKf(row.link);
+        const kfDirect = await awResolveKf(row.link, parentSignal);
         if (kfDirect) {
           add(kfDirect, {
             name: `AnimeWitcher · ${qLabel} · KF`,
@@ -9432,7 +9469,7 @@ async function awBuildSourcesFromDb(rows: AwLinkRow[]): Promise<UnifiedSource[]>
       try {
         const stHtml = await fetch(row.link, {
           headers: { ...BASE_HDRS, Referer: "https://streamtape.com/" },
-          signal: AbortSignal.timeout(8_000),
+          signal: awRequestSignal(parentSignal, 8_000),
         }).then(r => r.ok ? r.text() : "").catch(() => "");
         const stResult = parseStreamtape(stHtml);
         if (stResult) {
@@ -9447,6 +9484,7 @@ async function awBuildSourcesFromDb(rows: AwLinkRow[]): Promise<UnifiedSource[]>
       } catch {}
     } else if (srvName === "VT") {
       try {
+        if (parentSignal?.aborted) return rowSources;
         const vtResult = await extractVideoDeep(row.link, row.link);
         if (vtResult) {
           if (vtResult.type === "hls") {
@@ -9488,19 +9526,22 @@ async function awBuildSourcesFromDb(rows: AwLinkRow[]): Promise<UnifiedSource[]>
 
 async function getAnimeWitcherSources(
   title: string, english: string | null, ep: number, _anilistId?: number, variants: string[] = [],
-  availabilityOnly = false,
+  availabilityOnly = false, signal?: AbortSignal,
 ): Promise<UnifiedSource[]> {
   try {
+    if (signal?.aborted) return [];
     // ── DB-first path: aw_links (142k pre-loaded) — أسرع بـ ~10x من Algolia ─
     if (_anilistId) {
       const dbRows = await awDbLookup(_anilistId, ep);
+      if (signal?.aborted) return [];
       if (dbRows.length) {
         console.log(`[AW] DB-hit: ${dbRows.length} rows for anilistId=${_anilistId} ep${ep}`);
         if (availabilityOnly) {
           /* Build the real rows even during availability. For VT master HLS,
              awBuildSourcesFromDb expands the actual 1080/720 variants; the old
              DB label-only path collapsed every new episode to one 720 row. */
-          const dbSources = await awBuildSourcesFromDb(dbRows);
+          const dbSources = await awBuildSourcesFromDb(dbRows, signal);
+          if (signal?.aborted) return [];
           const dbQualities = new Set(dbSources.map(source => normalizeAwQuality(
             `${source.quality || ""} ${source.name || ""}`,
           )));
@@ -9514,7 +9555,8 @@ async function getAnimeWitcherSources(
           }
           console.log(`[AW] DB availability incomplete (${dbQualities.size} quality tiers) — refreshing Firestore`);
         }
-        const dbSources = await awBuildSourcesFromDb(dbRows);
+        const dbSources = await awBuildSourcesFromDb(dbRows, signal);
+        if (signal?.aborted) return [];
         const dbQualities = new Set(dbSources.map(source => normalizeAwQuality(
           `${source.quality || ""} ${source.name || ""}`,
         )));
@@ -9529,8 +9571,10 @@ async function getAnimeWitcherSources(
          the exact title before falling back to the slower Algolia path so all
          stored qualities for this episode remain visible. */
       const titleRows = await awDbLookupByTitle(title, ep);
+      if (signal?.aborted) return [];
       if (titleRows.length) {
-        const titleSources = await awBuildSourcesFromDb(titleRows);
+        const titleSources = await awBuildSourcesFromDb(titleRows, signal);
+        if (signal?.aborted) return [];
         const titleQualities = new Set(titleSources.map(source => normalizeAwQuality(
           `${source.quality || ""} ${source.name || ""}`,
         )));
@@ -9540,8 +9584,10 @@ async function getAnimeWitcherSources(
     // title fallback (بدون anilistId)
     if (!_anilistId) {
       const titleRows = await awDbLookupByTitle(title, ep);
+      if (signal?.aborted) return [];
       if (titleRows.length) {
-        const titleSources = await awBuildSourcesFromDb(titleRows);
+        const titleSources = await awBuildSourcesFromDb(titleRows, signal);
+        if (signal?.aborted) return [];
         const titleQualities = new Set(titleSources.map(source => normalizeAwQuality(
           `${source.quality || ""} ${source.name || ""}`,
         )));
@@ -9555,7 +9601,8 @@ async function getAnimeWitcherSources(
 
     const queries = titleQueries(title, english, variants);
     for (const q of queries) {
-      const hits = await awAlgoliaSearch(q);
+      if (signal?.aborted) return [];
+      const hits = await awAlgoliaSearch(q, signal);
       if (!hits.length) continue;
 
       let bestHit: any = null, bestScore = 0, bestIdScore = 0;
@@ -9590,14 +9637,15 @@ async function getAnimeWitcherSources(
     if (!animeId) return [];
 
     // 2. جلب episode ID — fast path أولاً (بناء مباشر)، ثم full scan fallback
-    let epId: string | null = await awDirectEpId(animeId, ep);
+    let epId: string | null = await awDirectEpId(animeId, ep, signal);
 
     if (epId) {
       console.log(`[AW] ep${ep} → direct id="${epId}"`);
     } else {
+      if (signal?.aborted) return [];
       // fallback: جلب قائمة كاملة (بطيء لأنمي طويل مثل One Piece)
       console.log(`[AW] direct miss for ep${ep} — falling back to full scan`);
-      const eps = await awFetchEpisodes(animeId);
+      const eps = await awFetchEpisodes(animeId, signal);
       if (!eps.length) { console.warn(`[AW] no episodes for "${animeId}"`); return []; }
       const epObj = eps.find(e => Math.round(e.num) === ep)
         || eps.find(e => Math.abs(e.num - ep) < 0.6);
@@ -9608,9 +9656,10 @@ async function getAnimeWitcherSources(
 
     // 3. جلب servers + episode doc بالتوازي
     const [rawServers, epDoc] = await Promise.all([
-      awFetchServers(animeId, epId),
-      awFetchEpDoc(animeId, epId),
+      awFetchServers(animeId, epId, signal),
+      awFetchEpDoc(animeId, epId, signal),
     ]);
+    if (signal?.aborted) return [];
     if (!rawServers.length && !epDoc.bunny_video_id) return [];
 
     // Read every AW server row during availability. Returning one hard-coded
@@ -13708,7 +13757,7 @@ async function getSAnimeSourcesUncached(
     // 3. info + episodes
     const infoRes = await fetchSourceWithRetry(`${SANIME_API}info&id=${bestId}`, {
       headers: { "User-Agent": SANIME_UA, "Accept": "application/json" },
-    }, availabilityOnly ? 8_000 : 12_000, 2, signal);
+    }, availabilityOnly ? 8_000 : 9_000, 2, signal);
     if (!infoRes) { console.warn("[SAnime] info request failed"); return out; }
     const info: any = await infoRes.json().catch(() => null);
     if (!info?.ep) return out;
@@ -14209,6 +14258,7 @@ router.get("/anime/sources-stream", scraperQueueMiddleware, async (req, res) => 
   const checkTracedSites = new Set<string>();
   let checkFirstRowLogged = false;
   let closed = false;
+  let availabilityDeadlineReached = false;
   const activeAvailabilityControllers = new Set<AbortController>();
   const abortActiveAvailabilityRequests = () => {
     for (const controller of activeAvailabilityControllers) controller.abort();
@@ -14402,7 +14452,8 @@ router.get("/anime/sources-stream", scraperQueueMiddleware, async (req, res) => 
     } catch { return []; }
   }
 
-  async function emitAvailability(srcs: UnifiedSource[]): Promise<void> {
+  async function emitAvailability(srcs: UnifiedSource[]): Promise<UnifiedSource[]> {
+    const emittedRows: UnifiedSource[] = [];
     // Metadata-only: do not request an m3u8, segment, MP4, or proxy URL during
     // the picker scan. The source adapter's episode response and quality label
     // are enough to render the row; playback starts only after a tap.
@@ -14417,19 +14468,23 @@ router.get("/anime/sources-stream", scraperQueueMiddleware, async (req, res) => 
           const variants = await readAvailabilityManifest(target);
           if (variants.length) {
             for (const variant of variants) {
-              sendCheckSrc({
+              const row = {
                 ...source,
                 quality: variant.quality,
                 qualityRank: variant.rank,
                 label: `AnimeWitcher · ${variant.quality}`,
-              });
+              };
+              emittedRows.push(row);
+              sendCheckSrc(row);
             }
             return;
           }
         }
       }
+      emittedRows.push(source);
       sendCheckSrc(source);
     }));
+    return emittedRows;
   }
 
   function scheduleAvailability(srcs: UnifiedSource[]): void {
@@ -14485,6 +14540,28 @@ router.get("/anime/sources-stream", scraperQueueMiddleware, async (req, res) => 
     res.write(`data: ${JSON.stringify(toSend)}\n\n`);
   }
 
+  function rememberAvailabilityRows(cacheKey: string, site: string, sources: UnifiedSource[]): void {
+    const seen = new Set<string>();
+    const rows: UnifiedSource[] = [];
+    for (const source of sources) {
+      const normalized = sourceCheckQuality(source);
+      if (normalized.quality === "unknown") continue;
+      const provider = String(source.site || site);
+      const key = `${provider}|${normalized.quality}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      rows.push({
+        name: source.name || `${provider} · ${normalized.quality}`,
+        url: "",
+        quality: normalized.quality,
+        qualityRank: normalized.qualityRank,
+        site: provider,
+        verified: true,
+      });
+    }
+    setSourceAvailabilityCache(cacheKey, rows);
+  }
+
   // ── Hard deadline: أغلق الاتصال بعد 28 ثانية مهما كان ──
   const forceClose = setTimeout(() => {
     if (!closed) {
@@ -14498,8 +14575,15 @@ router.get("/anime/sources-stream", scraperQueueMiddleware, async (req, res) => 
   try {
     const SCRAPER_MS = checkOnly ? 11000 : 14000;
     const EXTRACT_MS = checkOnly ? 5000 : 12000;
-    const race = <T>(p: Promise<T>, ms: number, fallback: T) =>
-      Promise.race([p, new Promise<T>(r => setTimeout(() => r(fallback), ms))]);
+    const race = <T>(p: Promise<T>, ms: number, fallback: T): Promise<T> => {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const deadline = new Promise<T>(resolve => {
+        timer = setTimeout(() => resolve(fallback), ms);
+      });
+      return Promise.race([p, deadline]).finally(() => {
+        if (timer) clearTimeout(timer);
+      });
+    };
     async function scrapeAvailabilityWithDeadline(
       site: string,
       scrape: (signal: AbortSignal) => Promise<UnifiedSource[]>,
@@ -14523,6 +14607,10 @@ router.get("/anime/sources-stream", scraperQueueMiddleware, async (req, res) => 
         });
         const result = await Promise.race([work, aborted, deadline]);
         if (timedOut) {
+          logger.warn(
+            { provider: site, timeout_ms: timeoutMs },
+            "source availability provider timed out",
+          );
           tracePlayback(
             sourceCheckTrace,
             "sources-stream",
@@ -14691,6 +14779,21 @@ router.get("/anime/sources-stream", scraperQueueMiddleware, async (req, res) => 
         anilistId || anslayerId || `${reqYear || ""}:${reqTotalEps || ""}`,
       );
       const providerCheckStartedAt = Date.now();
+      if (checkOnly) {
+        const availabilityHit = getSourceAvailabilityCache<UnifiedSource>(cKey);
+        if (availabilityHit) {
+          tracePlayback(
+            sourceCheckTrace,
+            "sources-stream",
+            "positive_cache_hit",
+            site,
+            Date.now() - providerCheckStartedAt,
+            `rows=${availabilityHit.length}`,
+          );
+          await emitAvailability(availabilityHit);
+          return;
+        }
+      }
       const hit  = await getFromSourceCache(cKey);
       if (checkOnly) {
         tracePlayback(
@@ -14705,7 +14808,7 @@ router.get("/anime/sources-stream", scraperQueueMiddleware, async (req, res) => 
       // Keep the picker populated from an unexpired Kawaii row during a
       // provider outage; playback still refreshes the signed URL on click.
       if (site === "kawaii" && checkOnly && isUsableKawaiiCache(hit)) {
-        await emitAvailability(hit.sources);
+        rememberAvailabilityRows(cKey, site, await emitAvailability(hit.sources));
         return;
       }
       // Reanime URLs are paired with a per-embed manifest key and cannot use
@@ -14739,7 +14842,7 @@ router.get("/anime/sources-stream", scraperQueueMiddleware, async (req, res) => 
             // guaranteed to reach SSE before the provider promise resolves.
             // This is still fully parallel across providers and never probes
             // a CDN, manifest, MP4, or segment.
-            await emitAvailability(hit.sources);
+            rememberAvailabilityRows(cKey, site, await emitAvailability(hit.sources));
             return;
           }
           hit.sources.forEach(sendSrc);
@@ -14775,12 +14878,12 @@ router.get("/anime/sources-stream", scraperQueueMiddleware, async (req, res) => 
       }
 
       // ❌ لا يوجد cache → اكشط
-      const srcs = await getOrCreateSourceFlight(
-        sourceFlightKey(cKey, checkOnly),
-        () => checkOnly
-          ? scrapeAvailabilityWithDeadline(site, signal => scrape(signal), effectiveTimeoutMs)
-          : race(scrape(), effectiveTimeoutMs, []),
-      );
+      const srcs = checkOnly
+        ? await scrapeAvailabilityWithDeadline(site, signal => scrape(signal), effectiveTimeoutMs)
+        : await getOrCreateSourceFlight(
+            `${cKey}:live`,
+            () => race(scrape(), effectiveTimeoutMs, []),
+          );
       if (checkOnly) {
         tracePlayback(
           sourceCheckTrace,
@@ -14794,7 +14897,9 @@ router.get("/anime/sources-stream", scraperQueueMiddleware, async (req, res) => 
       if (!srcs.length) {
         if (site === "kawaii" && isUsableKawaiiCache(hit)) {
           const fallbackSources = rebuildKawaiiCachedSources(hit.sources);
-          if (checkOnly) await emitAvailability(fallbackSources);
+          if (checkOnly) {
+            rememberAvailabilityRows(cKey, site, await emitAvailability(fallbackSources));
+          }
           else if (!closed) fallbackSources.forEach(sendSrc);
         }
         return;
@@ -14806,7 +14911,7 @@ router.get("/anime/sources-stream", scraperQueueMiddleware, async (req, res) => 
         // Advertise metadata immediately. Awaiting this only guarantees the
         // SSE rows are written before this provider resolves; all providers
         // remain concurrent in the Promise.allSettled wave above.
-        await emitAvailability(srcs);
+        rememberAvailabilityRows(cKey, site, await emitAvailability(srcs));
         return;
       }
 
@@ -14833,13 +14938,13 @@ router.get("/anime/sources-stream", scraperQueueMiddleware, async (req, res) => 
     ): Promise<void> {
       let cursor = 0;
       async function worker(): Promise<void> {
-        while (!closed) {
+        while (!closed && !availabilityDeadlineReached) {
           const index = cursor++;
           if (index >= jobs.length) return;
           try {
             await jobs[index].run();
           } catch (error: any) {
-            req.log.warn(
+            logger.warn(
               { provider: jobs[index].site, errorName: error instanceof Error ? error.name : "unknown" },
               "availability provider failed",
             );
@@ -14934,7 +15039,15 @@ router.get("/anime/sources-stream", scraperQueueMiddleware, async (req, res) => 
             getAnimeKaiSources(title, english, ep, await aniListIdResolution, true), false, 5000),
         },
       ]);
-      await Promise.race([runSourceQueue(providerJobs, 4), new Promise<void>(resolve => setTimeout(resolve, 32_000))]);
+      const providerQueueFinished = await race(
+        runSourceQueue(providerJobs, SOURCE_AVAILABILITY_CONCURRENCY).then(() => true),
+        32_000,
+        false,
+      );
+      if (!providerQueueFinished) {
+        availabilityDeadlineReached = true;
+        logger.warn({ timeout_ms: 32_000 }, "source availability scan hit its overall deadline");
+      }
       abortActiveAvailabilityRequests();
       if (availabilityJobs.size) await Promise.allSettled([...availabilityJobs]);
       tracePlayback(
@@ -15046,7 +15159,7 @@ router.get("/anime/sources-stream", scraperQueueMiddleware, async (req, res) => 
       // xyra_anim: معطّل مؤقتاً — api.xyra.stream يرجع 502 (Cloudflare) لكل الطلبات منذ 2026-07-09
       // scrapeCached("xyra_anim",  () => getXyraAnimeSources(title, english, ep, anilistId),  false, 18000),
       scrapeCached("sanime",     () => catalogHintFor("sanime").then((hint) =>
-        getSAnimeSources(title, english, ep, titleVariants, false, hint)), false, 20000),
+        getSAnimeSources(title, english, ep, titleVariants, false, hint)), false, 25000),
        scrapeCached("anslayer",   () => catalogHintFor("anslayer").then((hint) =>
          getAnimeSlayerSources(
            title,
@@ -15689,7 +15802,7 @@ router.get("/anime/fetch-source", scraperQueueMiddleware, async (req, res) => {
         `${cKey}:live`,
         () => race(getKawaiiAnimeSources(title, english, ep, anilistId), 15_000, []),
       )).forEach(collectSrc); break;
-      case "megaplay":    (await race(getMegaPlayAnimeSources(title, english, ep, anilistId), 24_000, [])).forEach(collectSrc); break;
+      case "megaplay":    (await race(getMegaPlayAnimeSources(title, english, ep, anilistId), 32_000, [])).forEach(collectSrc); break;
       case "anineko":     (await race(getAninekoSources(title, english, ep, titleVariants), 40_000, [])).forEach(collectSrc); break;
       case "anikototv":   (await race(getAnikototvSources(title, english, ep),              25000, [])).forEach(collectSrc); break;
       case "animekai":    (await race(getAnimeKaiSources(title, english, ep, anilistId),  30000, [])).forEach(collectSrc); break;
@@ -15722,7 +15835,7 @@ router.get("/anime/fetch-source", scraperQueueMiddleware, async (req, res) => {
       // case "vaplayer_anim": محذوف من الأنمي 2026-07-15
       // xyra_anim: معطّل مؤقتاً — api.xyra.stream يرجع 502 دائماً (عطل من طرفهم)
       // case "xyra_anim":    (await race(getXyraAnimeSources(title, english, ep, anilistId), 18_000, [])).forEach(collectSrc); break;
-      case "sanime":       (await race(getSAnimeSources(title, english, ep, titleVariants, false, catalogHint),               20_000, [])).forEach(collectSrc); break;
+      case "sanime":       (await race(getSAnimeSources(title, english, ep, titleVariants, false, catalogHint),               25_000, [])).forEach(collectSrc); break;
       case "anifox":       (await race(getAnifoxSources(title, english, ep, titleVariants, anilistId, false, catalogHint),    30_000, [])).forEach(collectSrc); break;
       case "anslayer":     (await race(getAnimeSlayerSources(
         title,

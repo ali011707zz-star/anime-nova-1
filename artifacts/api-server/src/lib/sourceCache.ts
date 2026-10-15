@@ -51,7 +51,8 @@ export const SITE_TTL: Record<string, number> = {
   moviebox:       10 * 60_000,    // CDN URLs مُوقَّعة بـ &t= تنتهي بسرعة → 10 دقائق فقط
   moviebox_anim:  10 * 60_000,    // نفس السبب — Animation version
   // ── روابط دائمة — MP4/HLS مباشر بدون tokens ─────────────────────
-  sanime:         30 * 24 * 3_600_000,  // server.sanime.net/Video/{id}/{ep}.mp4
+  sanime:         30 * 24 * 3_600_000,  // server.sanime.net permanent MP4 links
+  "sanime-v2":    30 * 24 * 3_600_000,  // same permanent links under the versioned cache key
   dahmermovies:   30 * 24 * 3_600_000,  // a.111477.xyz → p.111477.xyz direct MP4/MKV
   dahmermovies_anim: 30 * 24 * 3_600_000,
 };
@@ -60,7 +61,7 @@ const DEFAULT_TTL = 2 * 3_600_000;
 // URLs من هذه الأنماط تُعامَل كدائمة (TTL=30 يوم بدل حساب expiry من URL)
 const PERMANENT_URL_PATTERNS: Array<[RegExp, number]> = [
   // ── مدة 30 يوم ─────────────────────────────────────────────────────
-  [/server\.sanime\.net\/Video\//i,     30 * 24 * 3_600_000], // SAnime MP4 مباشر
+  [/server\.sanime\.net\/Video2?\//i,   30 * 24 * 3_600_000], // SAnime MP4: current and legacy CDN paths
   [/[ap]\.111477\.xyz\//i,              30 * 24 * 3_600_000], // DahmerMovies MP4
   [/mega\.nz\/(embed|file)\//i,         30 * 24 * 3_600_000], // Mega — ملفات دائمة
   [/drive\.google\.com\/file\//i,       30 * 24 * 3_600_000], // Google Drive

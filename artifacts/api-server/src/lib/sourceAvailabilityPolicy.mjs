@@ -4,6 +4,7 @@ export const SOURCE_AVAILABILITY_PRIORITY = Object.freeze([
   "animewitcher",
   "sanime",
 ]);
+export const SOURCE_AVAILABILITY_CONCURRENCY = 6;
 
 const MIN_TIMEOUT_MS = Object.freeze({
   consumet_gogo: 11_000,
@@ -12,8 +13,8 @@ const MIN_TIMEOUT_MS = Object.freeze({
   anifox: 18_000,
   animewitcher: 24_000,
   anineko: 25_000,
-  kawaii: 11_000,
-  megaplay: 25_000,
+  kawaii: 15_000,
+  megaplay: 18_000,
   sanime: 24_000,
   animekai: 15_000,
 });
@@ -33,8 +34,4 @@ export function orderAvailabilityJobs(jobs) {
 export function sourceAvailabilityTimeoutMs(site, requestedMs) {
   const requested = Number.isFinite(requestedMs) && requestedMs > 0 ? requestedMs : 11_000;
   return Math.max(requested, MIN_TIMEOUT_MS[site] ?? 11_000);
-}
-
-export function sourceFlightKey(cacheKey, availabilityOnly) {
-  return availabilityOnly ? `${cacheKey}:availability:live` : `${cacheKey}:live`;
 }

@@ -2,7 +2,6 @@ import { Router } from "express";
 import { logger } from "../lib/logger";
 import {
   SANIME_API_PREFIX,
-  SANIME_CDN_BASES,
   SANIME_USER_AGENT,
   sanimeEpisodeVariants,
 } from "../lib/sanimeSource.mjs";

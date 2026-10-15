@@ -1,9 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  SOURCE_AVAILABILITY_CONCURRENCY,
   orderAvailabilityJobs,
   sourceAvailabilityTimeoutMs,
-  sourceFlightKey,
 } from "./sourceAvailabilityPolicy.mjs";
 
 test("prioritizes the user's core anime providers without reordering peers", () => {
@@ -15,15 +15,15 @@ test("prioritizes the user's core anime providers without reordering peers", () 
   );
 });
 
-test("availability budgets cannot undercut the providers' request chains", () => {
-  assert.equal(sourceAvailabilityTimeoutMs("sanime", 4_000), 24_000);
-  assert.equal(sourceAvailabilityTimeoutMs("megaplay", 5_000), 25_000);
-  assert.equal(sourceAvailabilityTimeoutMs("animewitcher", 20_000), 24_000);
-  assert.equal(sourceAvailabilityTimeoutMs("anifox", 30_000), 30_000);
-  assert.equal(sourceAvailabilityTimeoutMs("unknown", 2_000), 11_000);
+test("availability checks stay under a bounded outbound concurrency", () => {
+  assert.equal(SOURCE_AVAILABILITY_CONCURRENCY, 6);
 });
 
-test("availability metadata and playable extraction never share a live flight", () => {
-  assert.notEqual(sourceFlightKey("kawaii:show:ep1", true), sourceFlightKey("kawaii:show:ep1", false));
-  assert.equal(sourceFlightKey("kawaii:show:ep1", true), "kawaii:show:ep1:availability:live");
+test("availability budgets cannot undercut the providers' request chains", () => {
+  assert.equal(sourceAvailabilityTimeoutMs("sanime", 4_000), 24_000);
+  assert.equal(sourceAvailabilityTimeoutMs("megaplay", 5_000), 18_000);
+  assert.equal(sourceAvailabilityTimeoutMs("animewitcher", 20_000), 24_000);
+  assert.equal(sourceAvailabilityTimeoutMs("kawaii", 10_000), 15_000);
+  assert.equal(sourceAvailabilityTimeoutMs("anifox", 30_000), 30_000);
+  assert.equal(sourceAvailabilityTimeoutMs("unknown", 2_000), 11_000);
 });
