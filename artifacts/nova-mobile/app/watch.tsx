@@ -1799,6 +1799,7 @@ export default function WatchScreen() {
     let receivedCandidateCount = 0;
     let rejectedCandidateCount = 0;
     let streamDoneSeen = false;
+    let lookupStartedAt = Date.now();
     const markQualityFailed = () => {
       if (!preferredQuality) return;
       setSlotStatus(prev => ({ ...prev, [pickerSlotKey(site, preferredQuality)]: "failed" }));
@@ -1813,6 +1814,7 @@ export default function WatchScreen() {
     };
     try {
       await warmAuthToken();
+      lookupStartedAt = Date.now();
       if (!isMountedRef.current || progressivePlaybackRef.current !== playback) return;
       const currentSiteCtrl = new AbortController();
       siteCtrl = currentSiteCtrl;
@@ -1820,7 +1822,6 @@ export default function WatchScreen() {
       siteCtrls.current.set(fetchKey, currentSiteCtrl);
       const timeout = SITE_TIMEOUT_MAP[site] ?? SITE_TIMEOUT_MS;
       tid = setTimeout(() => currentSiteCtrl.abort(), timeout);
-      const lookupStartedAt = Date.now();
       console.info(`[playback-trace] id=${lookupTraceId} component=source stage=request site=${lookupSiteTag}`);
       const res = await secureStreamFetch(`${base}/api/anime/fetch-source?${qs.toString()}`, { signal: currentSiteCtrl.signal });
       console.info(
