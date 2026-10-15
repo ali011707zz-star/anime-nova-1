@@ -216,6 +216,9 @@ function subtitlesDisabledForSite(site?: string): boolean {
 
 /* ─── Constants ─── */
 const SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 2];
+// Watch routes remount RiftPlayer between episodes; retain the user's choice
+// for the next native player created in this app session.
+let preferredPlaybackSpeed = 1;
 
 const FONT_SIZES = [
   { sz: 13, label: "ص", name: "صغير" },
@@ -601,7 +604,7 @@ function ExpoRiftPlayer({
   const pendingSeekRef = useRef<{ target: number; expiresAt: number } | null>(null);
 
   /* ─── Speed ─── */
-  const [speed, setSpeed]             = useState(1);
+  const [speed, setSpeed]             = useState(preferredPlaybackSpeed);
   const [longPressSpeed, setLongPressSpeed] = useState(false);
   const prevSpeedRef                  = useRef(1);
 
@@ -904,6 +907,9 @@ function ExpoRiftPlayer({
   const _initSrc = playableSources[safeInitialIndex];
   const _initVideoSrcRef = useRef<NovaVideoSource | null>(toExpoVideoSource(_initSrc));
   const player = useVideoPlayer(_initVideoSrcRef.current || null, (p) => {
+    // expo-video 3.0.16's Android native player defaults this to false.
+    p.preservesPitch = true;
+    p.playbackRate = preferredPlaybackSpeed;
     p.loop = false;
     p.volume = 1;
     /* ⚠️ لا نستدعي p.play() هنا مباشرةً — بعض إصدارات ExoPlayer/AVPlayer تُطلق
@@ -2239,6 +2245,7 @@ function ExpoRiftPlayer({
   seekSilentRef.current = seekSilent;
 
   const changeSpeed = useCallback((s: number) => {
+    preferredPlaybackSpeed = s;
     setSpeed(s);
     try { player.playbackRate = s; } catch {}
     setShowSpeedSheet(false);
