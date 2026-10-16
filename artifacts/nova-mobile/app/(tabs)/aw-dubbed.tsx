@@ -696,6 +696,7 @@ function SpacetoonList({ searchQ }: { searchQ: string }) {
   const gridWidth = Math.min(Math.max(width - 24, 0), 900);
   const columns = gridColumnsForWidth(width);
   const router = useRouter();
+  const tvMode = isTvDevice();
   const [posterRetryToken, setPosterRetryToken] = useState(0);
   useFocusEffect(useCallback(() => {
     setPosterRetryToken(token => token + 1);

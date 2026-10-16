@@ -1,4 +1,3 @@
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import React from "react";
 import {
   Platform,
@@ -14,9 +13,6 @@ export type ErrorFallbackProps = {
   resetError: () => void;
 };
 
-/* مفاتيح AsyncStorage التي قد تتسبب في أعطال عند فسادها */
-const VOLATILE_KEYS = ["nova-history", "nova-favorites", "nova-theme"];
-
 /*
  * Keep the fallback dependency-free. It is rendered while the tree is
  * already recovering from an exception, so it must not use context or any
@@ -25,10 +21,6 @@ const VOLATILE_KEYS = ["nova-history", "nova-favorites", "nova-theme"];
 export function ErrorFallback({ error, resetError }: ErrorFallbackProps) {
   const tvMode = isTvDevice();
   const handleRestart = async () => {
-    /* مسح البيانات المتقلبة قبل إعادة التشغيل لتجنب تكرار العطل */
-    try {
-      await Promise.all(VOLATILE_KEYS.map(k => AsyncStorage.removeItem(k)));
-    } catch {}
     try {
       const expoModule = await import("expo");
       if (typeof (expoModule as any).reloadAppAsync === "function") {
