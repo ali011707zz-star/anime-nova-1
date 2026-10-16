@@ -1,4 +1,5 @@
 import React, { Component, ComponentType, PropsWithChildren } from "react";
+import * as Sentry from "@sentry/react-native";
 
 import { ErrorFallback, ErrorFallbackProps } from "@/components/ErrorFallback";
 import { logCrash } from "@/utils/crashLogger";
@@ -31,12 +32,20 @@ export class ErrorBoundary extends Component<
   }
 
   componentDidCatch(error: Error, info: { componentStack: string }): void {
-    // سجِّل العطل في AsyncStorage لتشخيصه لاحقاً
+    // احفظ تفاصيل خطأ العرض محلياً وارفعها للخادم، حتى في نسخة الإنتاج.
     logCrash({
       type: "render",
+      isFatal: true,
       message: error?.message ?? String(error),
+      context: "React ErrorBoundary",
       stack: (error?.stack ?? "") + "\n\nComponent Stack:" + info.componentStack.slice(0, 400),
     }).catch(() => {});
+    try {
+      Sentry.withScope((scope) => {
+        scope.setExtra("componentStack", info.componentStack);
+        Sentry.captureException(error);
+      });
+    } catch {}
     if (typeof this.props.onError === "function") {
       this.props.onError(error, info.componentStack);
     }

@@ -3,7 +3,7 @@
     "name": "ANIME NOVA",
     "slug": "anime-nova-",
     "owner": "ali011707s-team",
-    "version": "1.0.1",
+    "version": "1.0.2",
     "orientation": "default",
     "icon": "./assets/images/icon.png",
     "scheme": "com.googleusercontent.apps.413058110781-cbielvl5jhrf2bje392f8l9fnulvegp7",
@@ -34,7 +34,7 @@
         "backgroundColor": "#09090B"
       },
       "package": "com.nova.anime",
-      "versionCode": 2,
+      "versionCode": 3,
       "backgroundColor": "#09090B",
       "usesCleartextTraffic": false,
       "permissions": [
