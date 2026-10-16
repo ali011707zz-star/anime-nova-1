@@ -31,7 +31,11 @@ function isKawaiiCdnUrl(value: string): boolean {
       host.endsWith(".kawaii-anime.com") ||
       host.endsWith(".momentoai.dev") ||
       host.endsWith(".mewstream.buzz") ||
-      host.endsWith(".imgnex.top");
+      host.endsWith(".imgnex.top") ||
+      host.endsWith(".watching.onl") ||
+      host.endsWith(".kryntal.top") ||
+      (new URL(value, "https://player.invalid").searchParams.has("md5") &&
+        /^(cdn|video)([.-][a-z0-9-]+)*\./i.test(host));
   } catch {
     return false;
   }

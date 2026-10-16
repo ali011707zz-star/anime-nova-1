@@ -350,25 +350,46 @@ const KAWAII_MOBILE_CDN_HOSTS = new Set([
   "cdn.kryntal.top",
 ]);
 
-function isKawaiiMobileCdnHost(hostname: string): boolean {
-  const host = hostname.toLowerCase();
-  return (
-    KAWAII_MOBILE_CDN_HOSTS.has(host) ||
-    host.endsWith(".kawaii-anime.com") ||
-    host.endsWith(".momentoai.dev") ||
-    host.endsWith(".mewstream.buzz") ||
-    host.endsWith(".imgnex.top")
-  );
+function isKawaiiMobileCdnUrl(value: string): boolean {
+  try {
+    const parsed = new URL(value);
+    const host = parsed.hostname.toLowerCase();
+    const trusted = KAWAII_MOBILE_CDN_HOSTS.has(host) ||
+      host.endsWith(".kawaii-anime.com") ||
+      host.endsWith(".momentoai.dev") ||
+      host.endsWith(".mewstream.buzz") ||
+      host.endsWith(".imgnex.top") ||
+      host.endsWith(".watching.onl") ||
+      host.endsWith(".kryntal.top");
+    const signed = parsed.searchParams.has("md5") && (
+      parsed.searchParams.has("expires") ||
+      parsed.searchParams.has("expire") ||
+      parsed.searchParams.has("exp") ||
+      parsed.searchParams.has("validto")
+    );
+    return trusted || (signed && /^(cdn|video)([.-][a-z0-9-]+)*\./i.test(host));
+  } catch {
+    return false;
+  }
 }
 
 function normalizeKawaiiMobileSource(source: Src, base: string): Src {
   if (String(source.site || "").toLowerCase() !== "kawaii") return source;
 
   const candidates = [source.rawUrl, source.url, source.directUrl]
-    .filter((value): value is string => typeof value === "string" && value.length > 0);
+    .filter((value): value is string => typeof value === "string" && value.length > 0)
+    .map(value => {
+      try {
+        const parsed = new URL(value, base);
+        if (/^\/api\/(?:anime|animation)\/(?:video|hls|seg)-proxy$/i.test(parsed.pathname)) {
+          return parsed.searchParams.get("url") || value;
+        }
+      } catch {}
+      return value;
+    });
   const rawUrl = candidates.find((value) => {
     try {
-      return isKawaiiMobileCdnHost(new URL(value).hostname);
+      return isKawaiiMobileCdnUrl(value);
     } catch {
       return false;
     }
@@ -379,9 +400,19 @@ function normalizeKawaiiMobileSource(source: Src, base: string): Src {
   try { host = new URL(rawUrl).hostname.toLowerCase(); } catch {}
   /* Kawaii has historically mislabeled some signed MP4 responses as HLS.
      The media URL is authoritative, matching the web player and API. */
-  const isHls = /\.m3u8(?:[?#]|$)/i.test(rawUrl)
-    || /\/(?:hls|playlist)(?:\/|[?#]|$)/i.test(rawUrl);
-  const referer = host === "cdn.mewstream.buzz"
+  const sourceType = String(
+    (source as Src & { directType?: string; type?: string }).directType ||
+    (source as Src & { type?: string }).type ||
+    "",
+  ).toLowerCase();
+  const explicitMp4 = /\.mp4(?:[?#]|$)/i.test(rawUrl);
+  const isHls = !explicitMp4 && (
+    sourceType === "hls" ||
+    sourceType === "m3u8" ||
+    /\.m3u8(?:[?#]|$)/i.test(rawUrl) ||
+    /\/(?:hls|playlist)(?:\/|[?#]|$)/i.test(rawUrl)
+  );
+  const referer = host === "cdn.mewstream.buzz" || host.endsWith(".mewstream.buzz")
     ? "https://megaplay.buzz/"
     : source.headers?.Referer || "https://kawaiianime.cc/";
   const proxyPath = isHls ? "/api/anime/hls-proxy" : "/api/anime/video-proxy";

@@ -17,6 +17,10 @@ import {
   SANIME_USER_AGENT,
   sanimeEpisodeVariants,
 } from "../lib/sanimeSource.mjs";
+import { createKawaiiApiResolver } from "../lib/kawaiiApiFailover.mjs";
+import { readExpressDecodedQueryString } from "../lib/proxyUrlPolicy.mjs";
+import { buildMediaRequestHeaders, copyMediaResponse } from "../lib/mediaProxyCore.mjs";
+import { rewriteHlsManifest } from "../lib/hlsManifestRewrite.mjs";
 import { createHash, createDecipheriv, createCipheriv, randomBytes } from "crypto";
 import { execSync, execFile, spawn } from "child_process";
 import { createReadStream, existsSync, writeFileSync, readFileSync, readdirSync, mkdirSync, rmSync, statSync } from "fs";
@@ -6473,6 +6477,7 @@ const KAWAII_API_BASES = [
   "https://www.kawaii-anime.com",
   "https://kawaii-anime.com",
 ] as const;
+const kawaiiApiResolver = createKawaiiApiResolver();
 const KAWAII_CDN_HOSTS = new Set([
   "cdn.momentoai.dev",
   "video.kawaii-anime.com",
@@ -6890,7 +6895,9 @@ function isTrustedKawaiiCdnUrl(rawUrl: string): boolean {
       host.endsWith(".kawaii-anime.com") ||
       host.endsWith(".momentoai.dev") ||
       host.endsWith(".mewstream.buzz") ||
-      host.endsWith(".imgnex.top")
+      host.endsWith(".imgnex.top") ||
+      host.endsWith(".watching.onl") ||
+      host.endsWith(".kryntal.top")
     ) return true;
 
     const signed = parsed.searchParams.has("md5") && (
@@ -6953,6 +6960,7 @@ async function getKawaiiAnimeSources(
   anilistId?: number,
   availabilityOnly = false,
   parentSignal?: AbortSignal,
+  traceId = "",
 ): Promise<UnifiedSource[]> {
   if (!anilistId) return [];
   try {
@@ -6968,60 +6976,28 @@ async function getKawaiiAnimeSources(
       apiBase: string;
       trustedSources: NonNullable<KawaiiApiData["sources"]>;
     };
-    const fetchKawaiiJson = async (
-      apiUrl: string,
-      base: string,
-      parentSignal: AbortSignal,
-    ): Promise<any> => {
-      for (let attempt = 0; attempt < 1; attempt++) {
-        if (parentSignal.aborted) return null;
-        const controller = new AbortController();
-        const abortRequest = () => controller.abort();
-        parentSignal.addEventListener("abort", abortRequest, { once: true });
-        const timeout = setTimeout(abortRequest, 4_000);
-        try {
-          const response = await fetch(apiUrl, {
-            headers: {
-              ...BASE_HDRS,
-              Accept: "application/json",
-              Referer: `${base}/`,
-            },
-            signal: controller.signal,
-          });
-          if (response.ok) return await response.json().catch(() => null);
-          if (response.status < 500 && response.status !== 429) return null;
-        } catch {
-          if (parentSignal.aborted) return null;
-        } finally {
-          clearTimeout(timeout);
-          parentSignal.removeEventListener("abort", abortRequest);
-        }
-        if (attempt === 0) await new Promise(resolve => setTimeout(resolve, 250));
-      }
-      return null;
-    };
-    const resolveFromBase = async (
-      base: string,
-      parentSignal: AbortSignal,
-    ): Promise<KawaiiResolved | null> => {
-      /* Kawaii's MP4 variant is the reliable mobile path. Its HLS response
-         can advertise a valid row while the CDN rejects the first manifest
-         request with a Referer-dependent 403. */
-      for (const apiUrl of [
-        `${base}/api/miruro?anilistId=${anilistId}&ep=${ep}`,
-        `${base}/api/miruro?anilist_id=${anilistId}&episode=${ep}`,
-      ]) {
-        const candidate = await fetchKawaiiJson(apiUrl, base, parentSignal) as (KawaiiApiData & {
-          data?: KawaiiApiData | {
-            sources?: KawaiiApiData["sources"];
-            subtitles?: KawaiiApiData["subtitles"];
-            headers?: KawaiiApiData["headers"];
-          };
+    const endpoints = KAWAII_API_BASES.map((base, index) => ({
+      base,
+      url: `${base}/api/miruro?anilistId=${anilistId}&ep=${ep}`,
+      ...(index === 0
+        ? { fallbackUrl: `${base}/api/miruro?anilist_id=${anilistId}&episode=${ep}` }
+        : {}),
+    }));
+    const resolved = await kawaiiApiResolver.resolve<KawaiiResolved>({
+      endpoints,
+      headers: { ...BASE_HDRS, Accept: "application/json" },
+      parentSignal,
+      timeoutMs: 5_000,
+      budgetMs: 14_000,
+      maxRequests: 4,
+      validate: (candidate, base) => {
+        const data = candidate as (KawaiiApiData & {
+          data?: KawaiiApiData & { sources?: KawaiiApiData["sources"] };
         }) | null;
-        const payload = candidate?.data && typeof candidate.data === "object"
-          ? { ...candidate, ...candidate.data }
-          : candidate;
-        const validSources = (payload?.sources || []).flatMap(source => {
+        const payload = data?.data && typeof data.data === "object"
+          ? { ...data, ...data.data }
+          : data;
+        const trustedSources = (payload?.sources || []).flatMap(source => {
           if (typeof source?.url !== "string" || !source.url.trim()) return [];
           try {
             const url = new URL(source.url, base).toString();
@@ -7030,37 +7006,24 @@ async function getKawaiiAnimeSources(
             return [];
           }
         });
-        // A successful JSON response with stale or unsupported media hosts is
-        // not a successful provider result; keep trying the endpoint aliases.
-        if (payload && validSources.length) {
-          return { data: { ...payload, sources: validSources }, apiBase: base, trustedSources: validSources };
-        }
-      }
-      return null;
-    };
-
-    // Race the known host aliases so one dead/slow hostname cannot block the
-    // other working domains. Each alias still tries its compatibility routes
-    // in order, and only a payload with trusted media URLs can win.
-    const aliasControllers = KAWAII_API_BASES.map(() => new AbortController());
-    const abortAliases = () => aliasControllers.forEach(controller => controller.abort());
-    parentSignal?.addEventListener("abort", abortAliases, { once: true });
-    if (parentSignal?.aborted) abortAliases();
-    let resolved: { result: KawaiiResolved; aliasIndex: number } | null = null;
-    try {
-      resolved = await Promise.any(KAWAII_API_BASES.map(async (base, aliasIndex) => {
-        const result = await resolveFromBase(base, aliasControllers[aliasIndex].signal);
-        if (!result) throw new Error("No valid Kawaii sources from this host");
-        return { result, aliasIndex };
-      })).catch(() => null);
-    } finally {
-      parentSignal?.removeEventListener("abort", abortAliases);
-      aliasControllers.forEach((controller, index) => {
-        if (index !== resolved?.aliasIndex) controller.abort();
-      });
-    }
+        if (!payload || !trustedSources.length) return null;
+        return {
+          data: { ...payload, sources: trustedSources },
+          apiBase: base,
+          trustedSources,
+        };
+      },
+      onAttempt: event => tracePlayback(
+        traceId,
+        "kawaii-api",
+        event.outcome,
+        safeHost(event.base),
+        event.elapsedMs,
+        `status=${event.status} endpoint=${event.endpoint || "primary"}`,
+      ),
+    });
     if (!resolved) return [];
-    const { data, apiBase, trustedSources } = resolved.result;
+    const { data, apiBase, trustedSources } = resolved.value;
 
     if (availabilityOnly) {
       return trustedSources.map((source, index) => {
