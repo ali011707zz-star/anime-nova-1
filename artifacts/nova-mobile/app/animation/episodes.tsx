@@ -8,7 +8,13 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { getBaseUrl } from "@/utils/api";
-import { isTvDevice, tvFocusStyle, TvFocusGuideView, TvPressable } from "@/utils/tv";
+import {
+  isTvDevice,
+  tvFocusStyle,
+  TvFocusGuideView,
+  TvPressable,
+  useTvListFocusScroll,
+} from "@/utils/tv";
 import { useColors } from "@/hooks/useColors";
 import { EpisodeDivider } from "@/components/EpisodeDivider";
 const Pressable = TvPressable;
@@ -43,6 +49,7 @@ export default function AnimationEpisodesScreen() {
   const tvMode = isTvDevice();
   const tabsRef = useRef<ScrollView>(null);
   const episodeListRef = useRef<FlatList<Episode>>(null);
+  const episodeFocusScroll = useTvListFocusScroll(episodeListRef, 0.35);
 
   const initSeason = parseInt(seasonParam || "1", 10) || 1;
 
@@ -119,7 +126,7 @@ export default function AnimationEpisodesScreen() {
       <Pressable
         focusable={tvMode}
         hasTVPreferredFocus={tvMode && index === 0}
-        onFocus={() => episodeListRef.current?.scrollToIndex({ index, animated: true, viewPosition: 0.35 })}
+        onFocus={() => episodeFocusScroll.scrollToFocusedIndex(index)}
         style={({ focused }) => [
           s.epCard,
           tvMode && s.tvEpCard,
@@ -273,6 +280,8 @@ export default function AnimationEpisodesScreen() {
             data={episodes}
             keyExtractor={ep => String(ep.episode_number)}
             renderItem={renderEpisode}
+            onViewableItemsChanged={episodeFocusScroll.onViewableItemsChanged}
+            viewabilityConfig={episodeFocusScroll.viewabilityConfig}
             contentContainerStyle={[s.listContent, tvMode && s.tvListContent]}
             showsVerticalScrollIndicator={false}
             removeClippedSubviews={false}
@@ -281,7 +290,7 @@ export default function AnimationEpisodesScreen() {
             windowSize={tvMode ? 7 : 5}
             onScrollToIndexFailed={({ index }) => episodeListRef.current?.scrollToOffset({
               offset: Math.max(0, index * (tvMode ? 310 : 76)),
-              animated: true,
+              animated: false,
             })}
             ItemSeparatorComponent={() => (
               <EpisodeDivider color={colors.textSecondary} inset={8} spacing={3} />

@@ -393,6 +393,7 @@ export default function EpisodeListScreen() {
   const [watched, setWatched] = useState<Set<number>>(new Set());
   const [commentCounts, setCommentCounts] = useState<Record<number, number>>({});
   const episodeListRef = useRef<FlatList<number>>(null);
+  const visibleEpisodeIndicesRef = useRef<Set<number>>(new Set());
   const episodePagesFetchedRef = useRef<Set<number>>(new Set());
   const episodePageControllersRef = useRef<Map<number, AbortController>>(new Map());
   const fetchEpisodePageRef = useRef<(page: number) => void>(() => {});
@@ -715,6 +716,11 @@ export default function EpisodeListScreen() {
     || !displayedEps.includes(preferredEpisodeNumber);
 
   const onViewableItemsChanged = useRef(({ viewableItems }: { viewableItems: Array<{ item: number; index: number | null }> }) => {
+    const visibleIndices = new Set<number>();
+    for (const item of viewableItems) {
+      if (typeof item.index === "number") visibleIndices.add(item.index);
+    }
+    visibleEpisodeIndicesRef.current = visibleIndices;
     const maxEpisode = viewableItems.reduce((max, item) => Math.max(max, Number(item.item) || 0), 0);
     if (maxEpisode > 0) fetchEpisodePageRef.current(Math.floor((maxEpisode - 1) / 100) + 1);
   }).current;
@@ -950,7 +956,7 @@ export default function EpisodeListScreen() {
           onScrollToIndexFailed={({ index }) => {
             episodeListRef.current?.scrollToOffset({
               offset: Math.max(0, index * (tvMode ? 116 : 72)),
-              animated: true,
+              animated: false,
             });
           }}
           columnWrapperStyle={undefined}
@@ -986,7 +992,9 @@ export default function EpisodeListScreen() {
                 if (!tvMode) return;
                 rememberFocus(String(n));
                 const index = displayedEps.indexOf(n);
-                if (index >= 0) episodeListRef.current?.scrollToIndex({ index, animated: true, viewPosition: 0.35 });
+                if (index >= 0 && !visibleEpisodeIndicesRef.current.has(index)) {
+                  episodeListRef.current?.scrollToIndex({ index, animated: false, viewPosition: 0.35 });
+                }
               }}
               hasTVPreferredFocus={tvMode && ready && preferredKey === String(n)}
             />

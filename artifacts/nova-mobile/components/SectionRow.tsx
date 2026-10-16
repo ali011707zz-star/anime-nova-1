@@ -13,7 +13,13 @@ import { useColors } from "@/hooks/useColors";
 import { AnilistMedia } from "@/utils/anilist";
 import { AnimeCard, getRailCardWidth, getRailSidePadding } from "./AnimeCard";
 import { Ionicons } from "@expo/vector-icons";
-import { isTvDevice, tvFocusStyle, TvFocusGuideView, useTvMetrics } from "@/utils/tv";
+import {
+  isTvDevice,
+  tvFocusStyle,
+  TvFocusGuideView,
+  useTvListFocusScroll,
+  useTvMetrics,
+} from "@/utils/tv";
 
 type Props = {
   title: string;
@@ -30,6 +36,7 @@ export const SectionRow = React.memo(function SectionRow({ title, items, onSeeAl
   const cardWidth = getRailCardWidth(width, tvMode ? 5 : 3);
   const sidePadding = getRailSidePadding(width);
   const railRef = React.useRef<FlatList<AnilistMedia>>(null);
+  const focusScroll = useTvListFocusScroll(railRef, 0.5);
 
   if (!items.length) return null;
 
@@ -47,11 +54,11 @@ export const SectionRow = React.memo(function SectionRow({ title, items, onSeeAl
           hasTVPreferredFocus={
             false
           }
-          onFocus={() => {
-            railRef.current?.scrollToIndex({ index, animated: true, viewPosition: 0.5 });
-          }}
+          onFocus={() => focusScroll.scrollToFocusedIndex(index)}
         />
       )}
+      onViewableItemsChanged={focusScroll.onViewableItemsChanged}
+      viewabilityConfig={focusScroll.viewabilityConfig}
       showsHorizontalScrollIndicator={false}
       contentContainerStyle={[styles.scroll, { paddingHorizontal: sidePadding }]}
       // These rails are rendered inside Home's vertical FlatList. Keeping

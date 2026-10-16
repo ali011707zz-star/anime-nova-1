@@ -4,16 +4,50 @@ import { useCallback, useEffect, useState } from "react";
 type FocusMap = Record<string, string>;
 
 const TV_FOCUS_KEY = "nova-tv-focus-v1";
+const FOCUS_SAVE_DEBOUNCE_MS = 400;
 
-async function readFocusMap(): Promise<FocusMap> {
+let focusMapCache: FocusMap | null = null;
+let focusMapReadInFlight: Promise<FocusMap> | null = null;
+let focusMapSaveTimer: ReturnType<typeof setTimeout> | null = null;
+let focusMapWriteQueue: Promise<void> = Promise.resolve();
+
+function parseFocusMap(raw: string | null): FocusMap {
+  if (!raw) return {};
   try {
-    const raw = await AsyncStorage.getItem(TV_FOCUS_KEY);
-    if (!raw) return {};
     const parsed = JSON.parse(raw);
     return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
   } catch {
     return {};
   }
+}
+
+function readFocusMap(): Promise<FocusMap> {
+  if (focusMapCache) return Promise.resolve(focusMapCache);
+  if (!focusMapReadInFlight) {
+    focusMapReadInFlight = AsyncStorage.getItem(TV_FOCUS_KEY)
+      .then(parseFocusMap)
+      .catch(() => ({}))
+      .then((map) => {
+        focusMapCache = map;
+        return map;
+      })
+      .finally(() => {
+        focusMapReadInFlight = null;
+      });
+  }
+  return focusMapReadInFlight;
+}
+
+function scheduleFocusMapSave() {
+  if (focusMapSaveTimer) clearTimeout(focusMapSaveTimer);
+  focusMapSaveTimer = setTimeout(() => {
+    focusMapSaveTimer = null;
+    const snapshot = JSON.stringify(focusMapCache || {});
+    focusMapWriteQueue = focusMapWriteQueue
+      .catch(() => {})
+      .then(() => AsyncStorage.setItem(TV_FOCUS_KEY, snapshot))
+      .catch(() => {});
+  }, FOCUS_SAVE_DEBOUNCE_MS);
 }
 
 /**
@@ -24,6 +58,7 @@ async function readFocusMap(): Promise<FocusMap> {
 export function useTvFocusMemory(scope: string) {
   const [preferredKey, setPreferredKey] = useState<string | null>(null);
   const [ready, setReady] = useState(false);
+  const preferredKeyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -35,17 +70,32 @@ export function useTvFocusMemory(scope: string) {
     });
     return () => {
       cancelled = true;
+      if (preferredKeyTimerRef.current) {
+        clearTimeout(preferredKeyTimerRef.current);
+        preferredKeyTimerRef.current = null;
+      }
     };
   }, [scope]);
 
   const rememberFocus = useCallback((key: string) => {
     const normalized = String(key).trim();
     if (!normalized) return;
-    setPreferredKey(normalized);
-    readFocusMap().then((map) => {
-      map[scope] = normalized;
-      AsyncStorage.setItem(TV_FOCUS_KEY, JSON.stringify(map)).catch(() => {});
-    });
+    const rememberInMap = (map: FocusMap) => {
+      const current = focusMapCache || map;
+      if (current[scope] !== normalized) {
+        current[scope] = normalized;
+        focusMapCache = current;
+        scheduleFocusMapSave();
+      }
+    };
+    if (focusMapCache) rememberInMap(focusMapCache);
+    else void readFocusMap().then(rememberInMap);
+
+    if (preferredKeyTimerRef.current) clearTimeout(preferredKeyTimerRef.current);
+    preferredKeyTimerRef.current = setTimeout(() => {
+      preferredKeyTimerRef.current = null;
+      setPreferredKey(normalized);
+    }, FOCUS_SAVE_DEBOUNCE_MS);
   }, [scope]);
 
   return { preferredKey, ready, rememberFocus };

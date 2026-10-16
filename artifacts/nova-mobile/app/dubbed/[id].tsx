@@ -7,7 +7,13 @@ import { Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { getBaseUrl } from "@/utils/api";
-import { isTvDevice, tvFocusStyle, TvFocusGuideView, TvPressable } from "@/utils/tv";
+import {
+  isTvDevice,
+  tvFocusStyle,
+  TvFocusGuideView,
+  TvPressable,
+  useTvListFocusScroll,
+} from "@/utils/tv";
 import { useColors } from "@/hooks/useColors";
 import { EpisodeDivider } from "@/components/EpisodeDivider";
 const Pressable = TvPressable;
@@ -116,6 +122,7 @@ export default function DubbedDetailScreen() {
   const [epLoading, setEpLoading] = useState(false);
   const [showSeasonDrop, setShowSeasonDrop] = useState(false);
   const episodeListRef = useRef<FlatList<Episode>>(null);
+  const episodeFocusScroll = useTvListFocusScroll(episodeListRef, 0.35);
 
   const curSeason = seasons[selSeason];
 
@@ -161,8 +168,9 @@ export default function DubbedDetailScreen() {
     return (
       <Pressable
         onPress={() => openWatch(ep)}
+        focusable={tvMode}
         hasTVPreferredFocus={tvMode && index === 0}
-        onFocus={() => episodeListRef.current?.scrollToIndex({ index, animated: true, viewPosition: 0.35 })}
+        onFocus={() => episodeFocusScroll.scrollToFocusedIndex(index)}
         style={({ pressed, focused }) => [
           styles.epRow,
           { opacity: pressed ? 0.7 : 1 },
@@ -205,6 +213,8 @@ export default function DubbedDetailScreen() {
           data={episodes}
           keyExtractor={ep => ep.epId || String(ep.number)}
           renderItem={renderEp}
+          onViewableItemsChanged={episodeFocusScroll.onViewableItemsChanged}
+          viewabilityConfig={episodeFocusScroll.viewabilityConfig}
           ItemSeparatorComponent={() => <EpisodeDivider color={colors.textSecondary} />}
           removeClippedSubviews={Platform.OS === "android" && !tvMode}
           initialNumToRender={tvMode ? 12 : 6}
@@ -212,7 +222,7 @@ export default function DubbedDetailScreen() {
           windowSize={tvMode ? 7 : Platform.OS === "android" ? 3 : 5}
           onScrollToIndexFailed={({ index }) => episodeListRef.current?.scrollToOffset({
             offset: Math.max(0, index * (tvMode ? 130 : 72)),
-            animated: true,
+            animated: false,
           })}
           ListHeaderComponent={() => (
           <View>

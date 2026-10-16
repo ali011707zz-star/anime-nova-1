@@ -7,6 +7,7 @@ import {
   View,
   useWindowDimensions,
 } from "react-native";
+import type { FlatList, FlatListProps } from "react-native";
 
 /**
  * Android TV and most certified TV boxes expose Platform.isTV through React
@@ -36,18 +37,46 @@ export function isTvDevice(width?: number, height?: number) {
 export function tvFocusStyle(focused: boolean) {
   return focused
     ? {
-        // Keep focus visible without making the focused card jump or grow.
-        backgroundColor: "rgba(255,255,255,0.12)",
-        borderColor: "#FFFFFF",
+        // Use a high-contrast ring on both white and black themes. Avoid
+        // shadows and transforms here: this style is recalculated on every
+        // D-pad movement and those effects are expensive on TV hardware.
+        backgroundColor: "rgba(124,58,237,0.12)",
+        borderColor: "#6D28D9",
         borderWidth: 3,
-        shadowColor: "#A78BFA",
-        shadowOpacity: 1,
-        shadowRadius: 14,
-        elevation: 14,
-        zIndex: 100,
-        transform: [{ scale: 1.025 }],
+        zIndex: 20,
       }
     : {};
+}
+
+export const TV_FOCUS_VIEWABILITY_CONFIG = {
+  itemVisiblePercentThreshold: 75,
+};
+
+/** Scroll a virtualized list only when D-pad focus reaches an off-screen row. */
+export function useTvListFocusScroll<T>(
+  listRef: React.RefObject<FlatList<T> | null>,
+  viewPosition = 0.35,
+) {
+  const visibleIndicesRef = React.useRef<Set<number> | null>(null);
+  const onViewableItemsChanged = React.useRef<
+    NonNullable<FlatListProps<T>["onViewableItemsChanged"]>
+  >(({ viewableItems }) => {
+    const next = new Set<number>();
+    for (const item of viewableItems) {
+      if (item.isViewable && typeof item.index === "number") next.add(item.index);
+    }
+    visibleIndicesRef.current = next;
+  }).current;
+  const scrollToFocusedIndex = React.useCallback((index: number) => {
+    if (!isTvDevice() || visibleIndicesRef.current?.has(index) || !visibleIndicesRef.current) return;
+    listRef.current?.scrollToIndex({ index, animated: false, viewPosition });
+  }, [listRef, viewPosition]);
+
+  return {
+    onViewableItemsChanged,
+    viewabilityConfig: TV_FOCUS_VIEWABILITY_CONFIG,
+    scrollToFocusedIndex,
+  };
 }
 
 /**

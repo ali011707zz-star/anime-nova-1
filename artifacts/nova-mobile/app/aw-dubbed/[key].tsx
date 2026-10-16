@@ -11,7 +11,13 @@ import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { getBaseUrl } from "@/utils/api";
-import { isTvDevice, tvFocusStyle, TvFocusGuideView, TvPressable } from "@/utils/tv";
+import {
+  isTvDevice,
+  tvFocusStyle,
+  TvFocusGuideView,
+  TvPressable,
+  useTvListFocusScroll,
+} from "@/utils/tv";
 import { useColors } from "@/hooks/useColors";
 import { EpisodeDivider } from "@/components/EpisodeDivider";
 const Pressable = TvPressable;
@@ -63,6 +69,7 @@ export default function AwDubbedDetailScreen() {
   const [imgError,   setImgError]   = useState(false);
   const tabsRef = useRef<ScrollView>(null);
   const episodeListRef = useRef<FlatList<Episode>>(null);
+  const episodeFocusScroll = useTvListFocusScroll(episodeListRef, 0.35);
 
   const curSeason = seasons[selSeason];
   const displayTitle = titleAr || title;
@@ -95,11 +102,12 @@ export default function AwDubbedDetailScreen() {
     });
   }, [curSeason, selSeason, title, titleAr, poster, seasons, keyParam, router]);
 
-  const renderEp = useCallback(({ item: ep }: { item: Episode }) => (
+  const renderEp = useCallback(({ item: ep, index }: { item: Episode; index: number }) => (
     <Pressable
       onPress={() => openWatch(ep)}
+      focusable={tvMode}
       hasTVPreferredFocus={tvMode && ep.number === episodes[0]?.number}
-      onFocus={() => episodeListRef.current?.scrollToIndex({ index: episodes.findIndex(item => item.number === ep.number), animated: true, viewPosition: 0.35 })}
+      onFocus={() => episodeFocusScroll.scrollToFocusedIndex(index)}
       style={({ pressed, focused }) => [
         styles.epRow,
         tvMode && styles.tvEpRow,
@@ -131,7 +139,7 @@ export default function AwDubbedDetailScreen() {
       </View>
       <Ionicons name="chevron-back" size={16} color={colors.textMuted} />
     </Pressable>
-  ), [openWatch, poster, imgError, curSeason, episodes, tvMode, colors]);
+  ), [openWatch, poster, imgError, curSeason, episodes, tvMode, colors, episodeFocusScroll.scrollToFocusedIndex]);
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background, paddingTop: topPad }]}>
@@ -155,6 +163,8 @@ export default function AwDubbedDetailScreen() {
           data={episodes}
           keyExtractor={ep => String(ep.number)}
           renderItem={renderEp}
+            onViewableItemsChanged={episodeFocusScroll.onViewableItemsChanged}
+            viewabilityConfig={episodeFocusScroll.viewabilityConfig}
           ItemSeparatorComponent={() => <EpisodeDivider color={colors.textSecondary} />}
           removeClippedSubviews={false}
           initialNumToRender={tvMode ? 12 : 6}
@@ -162,7 +172,7 @@ export default function AwDubbedDetailScreen() {
           windowSize={tvMode ? 7 : 5}
           onScrollToIndexFailed={({ index }) => episodeListRef.current?.scrollToOffset({
             offset: Math.max(0, index * (tvMode ? 100 : 72)),
-            animated: true,
+            animated: false,
           })}
           contentContainerStyle={[styles.listContent, tvMode && styles.tvListContent]}
           ListHeaderComponent={() => (
