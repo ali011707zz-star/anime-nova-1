@@ -391,6 +391,48 @@ jobs:
               exit 1
             }
 
+      - name: 🧪 Prepare Android cold-start smoke test
+        shell: bash
+        run: |
+          cat > "$RUNNER_TEMP/nova-android-cold-start-smoke.sh" <<'BASH'
+          set -euo pipefail
+          APK="$(find "$GITHUB_WORKSPACE/artifacts/nova-mobile/android/app/build/outputs/apk/release" -name '*.apk' -print -quit)"
+          test -n "$APK" && test -s "$APK"
+
+          adb install -r "$APK"
+          adb shell pm grant com.nova.anime android.permission.POST_NOTIFICATIONS 2>/dev/null || true
+          adb logcat -c
+          adb shell am force-stop com.nova.anime
+          adb shell am start -W -n com.nova.anime/.MainActivity
+          sleep 15
+
+          if ! adb shell pidof com.nova.anime >/dev/null; then
+            echo "❌ Anime NOVA process exited after cold start"
+            adb logcat -d -t 3000
+            exit 1
+          fi
+
+          RESUMED="$(adb shell dumpsys activity activities | grep -E 'mResumedActivity|topResumedActivity' | tail -n 1 | tr -d '\r' || true)"
+          echo "Resumed activity: $RESUMED"
+          echo "$RESUMED" | grep -Fq 'com.nova.anime'
+
+          adb shell uiautomator dump /sdcard/nova-startup-window.xml >/dev/null
+          adb exec-out cat /sdcard/nova-startup-window.xml > "$RUNNER_TEMP/nova-startup-window.xml"
+          if grep -Fq 'حدث خطأ غير متوقع' "$RUNNER_TEMP/nova-startup-window.xml"; then
+            echo "❌ React ErrorBoundary fallback appeared during app startup"
+            cat "$RUNNER_TEMP/nova-startup-window.xml"
+            exit 1
+          fi
+
+          adb logcat -d -v time -s AndroidRuntime:E ReactNativeJS:E > "$RUNNER_TEMP/nova-startup-errors.log"
+          if grep -E 'FATAL EXCEPTION|Unhandled JS Exception|ReferenceError.*useRef|useRef is not defined' "$RUNNER_TEMP/nova-startup-errors.log"; then
+            echo "❌ Startup crash/error detected in Android logcat"
+            exit 1
+          fi
+          echo "✅ Android cold start stayed alive and did not render the error screen"
+          BASH
+          chmod 700 "$RUNNER_TEMP/nova-android-cold-start-smoke.sh"
+
       - name: 🚀 Android cold-start smoke test
         uses: reactivecircus/android-emulator-runner@v2
         with:
@@ -398,42 +440,7 @@ jobs:
           arch: x86_64
           profile: pixel_2
           disable-animations: true
-          script: |
-            set -eu
-            APK="$(find artifacts/nova-mobile/android/app/build/outputs/apk/release -name '*.apk' -print -quit)"
-            test -n "$APK" && test -s "$APK"
-
-            adb install -r "$APK"
-            adb shell pm grant com.nova.anime android.permission.POST_NOTIFICATIONS 2>/dev/null || true
-            adb logcat -c
-            adb shell am force-stop com.nova.anime
-            adb shell am start -W -n com.nova.anime/.MainActivity
-            sleep 15
-
-            if ! adb shell pidof com.nova.anime >/dev/null; then
-              echo "❌ Anime NOVA process exited after cold start"
-              adb logcat -d -t 3000
-              exit 1
-            fi
-
-            RESUMED="$(adb shell dumpsys activity activities | grep -E 'mResumedActivity|topResumedActivity' | tail -n 1 | tr -d '\r' || true)"
-            echo "Resumed activity: $RESUMED"
-            echo "$RESUMED" | grep -Fq 'com.nova.anime'
-
-            adb shell uiautomator dump /sdcard/nova-startup-window.xml >/dev/null
-            adb exec-out cat /sdcard/nova-startup-window.xml > "$RUNNER_TEMP/nova-startup-window.xml"
-            if grep -Fq 'حدث خطأ غير متوقع' "$RUNNER_TEMP/nova-startup-window.xml"; then
-              echo "❌ React ErrorBoundary fallback appeared during app startup"
-              cat "$RUNNER_TEMP/nova-startup-window.xml"
-              exit 1
-            fi
-
-            adb logcat -d -v time -s AndroidRuntime:E ReactNativeJS:E > "$RUNNER_TEMP/nova-startup-errors.log"
-            if grep -E 'FATAL EXCEPTION|Unhandled JS Exception|ReferenceError.*useRef|useRef is not defined' "$RUNNER_TEMP/nova-startup-errors.log"; then
-              echo "❌ Startup crash/error detected in Android logcat"
-              exit 1
-            fi
-            echo "✅ Android cold start stayed alive and did not render the error screen"
+          script: bash "$RUNNER_TEMP/nova-android-cold-start-smoke.sh"
 
       - name: 🔑 Show release signing fingerprint
         working-directory: artifacts/nova-mobile/android
