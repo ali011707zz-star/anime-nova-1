@@ -4,13 +4,12 @@ import * as Linking from "expo-linking";
 import React, { useCallback, useEffect, useRef } from "react";
 import {
   Modal,
-  Pressable,
   StyleSheet,
   Text,
   View,
   useWindowDimensions,
 } from "react-native";
-import { isTvDevice, tvFocusStyle } from "../utils/tv";
+import { isTvDevice, tvFocusStyle, TvPressable as Pressable } from "../utils/tv";
 import { useColors } from "../hooks/useColors";
 
 const TELEGRAM_URL = "https://t.me/Anime_NOVA_0";

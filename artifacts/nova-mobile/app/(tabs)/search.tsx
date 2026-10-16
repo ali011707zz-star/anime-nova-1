@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import {
-  View, Text, Pressable, TextInput, FlatList, Image,
+  View, Text, TextInput, FlatList, Image,
   ScrollView, ActivityIndicator, StyleSheet, Platform,
   KeyboardAvoidingView, Modal, Alert, useWindowDimensions,
 } from "react-native";
@@ -9,7 +9,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as ImagePicker from "expo-image-picker";
-import { isTvDevice, tvFocusStyle } from "@/utils/tv";
+import { isTvDevice, tvFocusStyle, TvPressable as Pressable } from "@/utils/tv";
 import { getGridColumnCount } from "@/components/AnimeCard";
 import { useColors } from "@/hooks/useColors";
 import type { ThemePalette } from "@/constants/colors";
@@ -261,7 +261,7 @@ function AnimeCard({ anime, onPress, columns }: { anime: AnimeResult; onPress: (
           </View>
         ) : null}
         <View style={s.cardBottom}>
-          <Text style={s.cardTitle} numberOfLines={2} writingDirection="ltr">
+          <Text style={[s.cardTitle, { writingDirection: "ltr" }]} numberOfLines={2}>
             {anime.title?.english || anime.title?.romaji}
           </Text>
           {anime.title_ar ? (

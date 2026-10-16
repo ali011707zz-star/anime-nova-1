@@ -2,13 +2,13 @@ import { Ionicons } from "@expo/vector-icons";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator, FlatList, KeyboardAvoidingView, Platform,
-  Image, Pressable, StyleSheet, Text, TextInput, View,
+  Image, StyleSheet, Text, TextInput, View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { getBaseUrl } from "@/utils/api";
 import { secureFetch } from "@/utils/secureApi";
-import { isTvDevice, tvFocusStyle } from "@/utils/tv";
+import { isTvDevice, tvFocusStyle, TvPressable as Pressable } from "@/utils/tv";
 import { useColors } from "@/hooks/useColors";
 import type { ThemePalette } from "@/constants/colors";
 

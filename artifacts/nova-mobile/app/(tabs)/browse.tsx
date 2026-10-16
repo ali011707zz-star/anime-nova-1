@@ -1,13 +1,13 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import {
-  View, Text, Pressable, TextInput, FlatList, Image,
+  View, Text, TextInput, FlatList, Image,
   ScrollView, ActivityIndicator, StyleSheet, Platform, useWindowDimensions,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { getBaseUrl } from "@/utils/api";
-import { isTvDevice, tvFocusStyle } from "@/utils/tv";
+import { isTvDevice, tvFocusStyle, TvPressable as Pressable } from "@/utils/tv";
 import { useTvFocusMemory } from "@/utils/tvFocus";
 import { getGridColumnCount } from "@/components/AnimeCard";
 import { useColors } from "@/hooks/useColors";
@@ -107,7 +107,19 @@ function GenreCard({ item, animeId, onPress, columns }: { item: typeof GENRES_WI
 }
 
 /* ── Anime card ── */
-function AnimeCard({ anime, onPress, columns }: { anime: AnimeResult; onPress: () => void; columns: number }) {
+function AnimeCard({
+  anime,
+  onPress,
+  columns,
+  hasTVPreferredFocus,
+  onFocus,
+}: {
+  anime: AnimeResult;
+  onPress: () => void;
+  columns: number;
+  hasTVPreferredFocus?: boolean;
+  onFocus?: () => void;
+}) {
   const { g } = useBrowseTheme();
   const { width, height } = useWindowDimensions();
   const tvMode = isTvDevice(width, height);
@@ -117,6 +129,8 @@ function AnimeCard({ anime, onPress, columns }: { anime: AnimeResult; onPress: (
     <Pressable
       onPress={onPress}
       focusable={tvMode}
+      hasTVPreferredFocus={hasTVPreferredFocus}
+      onFocus={onFocus}
       style={({ focused }) => [g.card, { flex: 1 / columns }, tvMode && tvFocusStyle(focused)]}
     >
       <View style={[g.cardWrap, tvMode && g.tvCardWrap]}>
@@ -142,7 +156,7 @@ function AnimeCard({ anime, onPress, columns }: { anime: AnimeResult; onPress: (
           </View>
         ) : null}
         <View style={g.cardBottom}>
-          <Text style={[g.cardTitle, tvMode && g.tvCardTitle]} numberOfLines={2} writingDirection="ltr">
+          <Text style={[g.cardTitle, tvMode && g.tvCardTitle, { writingDirection: "ltr" }]} numberOfLines={2}>
             {anime.title?.english || anime.title?.romaji}
           </Text>
           {anime.title_ar ? (

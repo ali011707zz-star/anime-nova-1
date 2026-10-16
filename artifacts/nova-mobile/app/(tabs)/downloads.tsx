@@ -1,6 +1,6 @@
 import React, { useState, useCallback, useEffect, useRef, useMemo } from "react";
 import {
-  View, Text, StyleSheet, Pressable, FlatList,
+  View, Text, StyleSheet, FlatList,
   Image, Alert, Linking, Platform, Animated, Easing, Modal,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
@@ -16,7 +16,7 @@ import {
 } from "@/utils/downloadManager";
 import { RiftPlayer, PlayerSource } from "@/components/RiftPlayer";
 import * as FileSystem from "expo-file-system";
-import { isTvDevice, tvFocusStyle } from "@/utils/tv";
+import { isTvDevice, tvFocusStyle, TvPressable as Pressable } from "@/utils/tv";
 import { useColors } from "@/hooks/useColors";
 import type { ThemePalette } from "@/constants/colors";
 

@@ -3,7 +3,6 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import {
   ActivityIndicator,
   Platform,
-  Pressable,
   StyleSheet,
   Text,
   View,
@@ -12,7 +11,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColors } from "@/hooks/useColors";
-import { isTvDevice, tvFocusStyle } from "@/utils/tv";
+import { isTvDevice, tvFocusStyle, TvPressable as Pressable } from "@/utils/tv";
 import { getBaseUrl } from "@/utils/api";
 import { RiftPlayer, type PlayerSource } from "@/components/RiftPlayer";
 import { useWatchPlayerOrientation } from "@/utils/watchOrientation";

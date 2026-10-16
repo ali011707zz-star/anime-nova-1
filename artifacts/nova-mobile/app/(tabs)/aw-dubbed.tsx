@@ -8,7 +8,7 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import {
-  View, Text, Pressable, TextInput, FlatList, Image,
+  View, Text, TextInput, FlatList, Image,
   ActivityIndicator, StyleSheet, Platform, Animated, Easing,
   useWindowDimensions,
 } from "react-native";
@@ -17,7 +17,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { getBaseUrl } from "@/utils/api";
-import { isTvDevice, tvFocusStyle } from "@/utils/tv";
+import { isTvDevice, tvFocusStyle, TvPressable as Pressable } from "@/utils/tv";
 import { useColors } from "@/hooks/useColors";
 import {
   catalogBadge,

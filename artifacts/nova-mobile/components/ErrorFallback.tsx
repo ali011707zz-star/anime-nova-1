@@ -1,12 +1,11 @@
 import React from "react";
 import {
   Platform,
-  Pressable,
   StyleSheet,
   Text,
   View,
 } from "react-native";
-import { isTvDevice, tvFocusStyle } from "@/utils/tv";
+import { isTvDevice, tvFocusStyle, TvPressable as Pressable } from "@/utils/tv";
 
 export type ErrorFallbackProps = {
   error: Error;

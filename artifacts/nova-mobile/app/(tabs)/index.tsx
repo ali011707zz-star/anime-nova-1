@@ -5,7 +5,7 @@ import { FlatList, Image, useWindowDimensions } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import {
-  Platform, Pressable, RefreshControl,
+  Platform, RefreshControl,
   StyleSheet, Text, View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -23,7 +23,7 @@ import {
 } from "@/utils/anilist";
 import { historyRoute, useApp } from "@/context/AppContext";
 import { getBaseUrl } from "@/utils/api";
-import { isTvDevice, tvFocusStyle } from "@/utils/tv";
+import { isTvDevice, tvFocusStyle, TvPressable as Pressable } from "@/utils/tv";
 import { useTvFocusMemory } from "@/utils/tvFocus";
 import { getPosterUri, getTvPosterUri } from "@/utils/media";
 import {
@@ -102,9 +102,6 @@ export default function HomeScreen() {
   const stardimaCartoon = useDubbedCatalogFeed("cartoon", "");
 
   const topPad = Platform.OS === "web" ? 0 : insets.top;
-
-  /* TMDB animation movies — disabled (section hidden) */
-  const [animMovies] = useState<TmdbMovie[]>([]);
 
   const { data: trending, isLoading: loadingT, refetch: refetchT } = useQuery({
     queryKey: ["trending"],

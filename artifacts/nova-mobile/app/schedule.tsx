@@ -4,13 +4,13 @@ import { Image } from "react-native";
 import { useRouter } from "expo-router";
 import React, { useState } from "react";
 import {
-  ActivityIndicator, Platform, Pressable,
+  ActivityIndicator, Platform,
   ScrollView, StyleSheet, Text, View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColors } from "@/hooks/useColors";
 import { anilistQuery, SCHEDULE_QUERY, formatAiringTime } from "@/utils/anilist";
-import { isTvDevice, tvFocusStyle } from "@/utils/tv";
+import { isTvDevice, tvFocusStyle, TvPressable as Pressable } from "@/utils/tv";
 
 const DAYS_AR = ["الأحد", "الإثنين", "الثلاثاء", "الأربعاء", "الخميس", "الجمعة", "السبت"];
 
@@ -21,6 +21,7 @@ type AiringSchedule = {
   media: {
     id: number;
     title: { romaji: string; english: string | null };
+    title_ar?: string | null;
     coverImage: { large: string };
     averageScore: number | null;
   };

@@ -21,5 +21,6 @@
     {
       "path": "../../lib/api-client-react"
     }
-  ]
+  ],
+  "exclude": ["components/RiftPlayer.expo-video.backup.tsx"]
 }

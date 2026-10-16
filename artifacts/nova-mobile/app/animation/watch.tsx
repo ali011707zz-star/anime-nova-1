@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import {
-  View, Text, Pressable, Image, ScrollView, StyleSheet,
+  View, Text, Image, ScrollView, StyleSheet,
   Platform, Dimensions, Animated, Easing, ActivityIndicator, Alert,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
@@ -12,7 +12,7 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { getBaseUrl } from "@/utils/api";
-import { isTvDevice, tvFocusStyle } from "@/utils/tv";
+import { isTvDevice, tvFocusStyle, TvPressable as Pressable } from "@/utils/tv";
 import { secureFetch, secureStreamFetch } from "@/utils/secureApi";
 import { startMobileWatchAnalytics } from "@/utils/analytics";
 import { ensureWatchAccess } from "@/utils/adPolicy";
@@ -1210,6 +1210,8 @@ const w = StyleSheet.create({
   headerTitle: { fontSize: 13, fontFamily: "Cairo_800ExtraBold", color: "#fff", textAlign: "center" },
   headerSub: { fontSize: 10, color: "rgba(255,255,255,0.35)", fontFamily: "Cairo_400Regular", textAlign: "center" },
   retryBtn: { width: 32, height: 32, borderRadius: 10, backgroundColor: "rgba(139,92,246,0.12)", borderWidth: 1, borderColor: "rgba(139,92,246,0.25)", alignItems: "center", justifyContent: "center" },
+  commentsBtn: { alignSelf: "flex-end", flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 10, backgroundColor: "rgba(139,92,246,0.10)", borderWidth: 1, borderColor: "rgba(139,92,246,0.22)" },
+  commentsBtnText: { fontSize: 11, fontFamily: "Cairo_700Bold", color: "rgba(196,181,253,0.92)" },
 
   pickerContent: { padding: 14, paddingBottom: 100, gap: 12 },
   tvPickerContent: { paddingHorizontal: 56, paddingTop: 24, gap: 20 },

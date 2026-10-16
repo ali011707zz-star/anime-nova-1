@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import {
-  View, Text, Pressable, Image, ScrollView,
+  View, Text, Image, ScrollView,
   ActivityIndicator, StyleSheet, Platform, Modal,
   Dimensions, Linking, useWindowDimensions,
 } from "react-native";
@@ -15,7 +15,7 @@ import { useApp } from "@/context/AppContext";
 import { getBaseUrl } from "@/utils/api";
 import { secureFetch } from "@/utils/secureApi";
 import { getYoutubeEmbedUrl, getYoutubeReferer } from "@/utils/youtube";
-import { isTvDevice, tvFocusStyle } from "@/utils/tv";
+import { isTvDevice, tvFocusStyle, TvPressable as Pressable } from "@/utils/tv";
 import { useTvFocusMemory } from "@/utils/tvFocus";
 import { useColors } from "@/hooks/useColors";
 import type { ThemePalette } from "@/constants/colors";
@@ -547,7 +547,7 @@ export default function AnimeDetailScreen() {
               </Text>
             ) : null}
             {anime.title?.romaji && anime.title?.english && (
-              <Text style={[d.titleNative, tvMode && d.tvTitleNative]} numberOfLines={1} writingDirection="ltr">{anime.title.romaji}</Text>
+              <Text style={[d.titleNative, tvMode && d.tvTitleNative, { writingDirection: "ltr" }]} numberOfLines={1}>{anime.title.romaji}</Text>
             )}
             <View style={d.badgeRow}>
               {anime.format && (

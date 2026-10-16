@@ -3,9 +3,9 @@ import { Ionicons } from "@expo/vector-icons";
 import { Image, useWindowDimensions } from "react-native";
 import { useRouter } from "expo-router";
 import React from "react";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { StyleSheet, Text, View } from "react-native";
 import { useColors } from "@/hooks/useColors";
-import { isTvDevice, tvFocusStyle, useTvMetrics } from "@/utils/tv";
+import { isTvDevice, tvFocusStyle, TvPressable as Pressable, useTvMetrics } from "@/utils/tv";
 import { getPosterUri, getTvPosterUri } from "@/utils/media";
 
 type Props = {

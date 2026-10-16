@@ -1,6 +1,6 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import {
-  View, Text, StyleSheet, Pressable,
+  View, Text, StyleSheet,
   Image, ActivityIndicator, FlatList, Linking,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
@@ -9,7 +9,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColors } from "@/hooks/useColors";
 import { CommentsSheet } from "@/components/CommentsSheet";
 import { getBaseUrl } from "@/utils/api";
-import { isTvDevice, tvFocusStyle } from "@/utils/tv";
+import { isTvDevice, tvFocusStyle, TvPressable as Pressable } from "@/utils/tv";
 
 /* ═══════════════════════════════════════════════════════
    AniList GraphQL queries

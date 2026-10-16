@@ -5,14 +5,14 @@ import { useRouter } from "expo-router";
 import * as ImagePicker from "expo-image-picker";
 import React, { useEffect, useState, useCallback } from "react";
 import {
-  ActivityIndicator, Image, Platform, Pressable, ScrollView,
+  ActivityIndicator, Image, Platform, ScrollView,
   StyleSheet, Text, TextInput, View, useWindowDimensions,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColors } from "@/hooks/useColors";
 import { getBaseUrl } from "@/utils/api";
 import { secureFetch, setUserAuthToken } from "@/utils/secureApi";
-import { isTvDevice, tvFocusStyle } from "@/utils/tv";
+import { isTvDevice, tvFocusStyle, TvPressable as Pressable } from "@/utils/tv";
 
 const AUTH_KEY = "nova-mobile-user";
 

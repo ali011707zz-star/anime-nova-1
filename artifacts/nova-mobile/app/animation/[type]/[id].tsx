@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo } from "react";
 import {
-  View, Text, Pressable, Image, ScrollView, Modal,
+  View, Text, Image, ScrollView, Modal,
   ActivityIndicator, StyleSheet, Platform, Dimensions, Linking,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
@@ -11,7 +11,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { getBaseUrl } from "@/utils/api";
 import { getYoutubeEmbedUrl, getYoutubeReferer } from "@/utils/youtube";
-import { isTvDevice, tvFocusStyle } from "@/utils/tv";
+import { isTvDevice, tvFocusStyle, TvPressable as Pressable } from "@/utils/tv";
 import { useColors } from "@/hooks/useColors";
 
 const { width: W } = Dimensions.get("window");

@@ -4,14 +4,14 @@ import { LinearGradient } from "expo-linear-gradient";
 import { useRouter } from "expo-router";
 import React, { useState, useEffect, useCallback, useMemo } from "react";
 import {
-  FlatList, Platform, Pressable, ScrollView,
+  FlatList, Platform, ScrollView,
   StyleSheet, Text, View, TextInput, useWindowDimensions,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useColors } from "@/hooks/useColors";
 import { historyRoute, useApp } from "@/context/AppContext";
-import { isTvDevice, tvFocusStyle } from "@/utils/tv";
+import { isTvDevice, tvFocusStyle, TvPressable as Pressable } from "@/utils/tv";
 import { getRailCardWidth } from "@/components/AnimeCard";
 
 interface FavChar {

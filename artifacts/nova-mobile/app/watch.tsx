@@ -1101,7 +1101,7 @@ export default function WatchScreen() {
           ? data.episodes.map((item: any) => Number(item?.number ?? item))
             .filter((number: number) => Number.isFinite(number) && number > 0)
           : [];
-        return [season.animeId, [...new Set(numbers)].sort((a, b) => a - b)] as const;
+        return [season.animeId, [...new Set<number>(numbers)].sort((a, b) => a - b)] as const;
       } catch {
         return [season.animeId, []] as const;
       }
@@ -3045,6 +3045,8 @@ function createWatchStyles(colors: ThemePalette) {
   emptySub:      { fontSize: 12, color: colors.textMuted, fontFamily: "Cairo_400Regular", textAlign: "center", lineHeight: 20, paddingHorizontal: 24 },
   retryBtn:      { flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: colors.accentSurface, borderRadius: 14, borderWidth: 1, borderColor: colors.accentBorder, paddingHorizontal: 20, paddingVertical: 11 },
   retryBtnText:  { fontSize: 13, fontFamily: "Cairo_700Bold", color: colors.accent },
+  retryBigBtn:   { flexDirection: "row", alignItems: "center", gap: 10, backgroundColor: colors.accentSurface, borderRadius: 14, borderWidth: 1, borderColor: colors.accentBorder, paddingHorizontal: 20, paddingVertical: 13 },
+  retryBigText:  { fontSize: 13, fontFamily: "Cairo_700Bold", color: colors.accent },
   webAppBtn:     { flexDirection: "row", alignItems: "center", gap: 12, backgroundColor: colors.accentSurface, borderRadius: 16, borderWidth: 1, borderColor: colors.accentBorder, paddingHorizontal: 14, paddingVertical: 13, marginTop: 4 },
   webAppIcon:    { width: 40, height: 40, borderRadius: 12, backgroundColor: colors.accentSurface, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: colors.accentBorder },
   webAppTitle:   { fontSize: 13, fontFamily: "Cairo_700Bold", color: colors.accent, textAlign: "right" },

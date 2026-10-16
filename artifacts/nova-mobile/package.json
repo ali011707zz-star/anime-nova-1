@@ -59,6 +59,7 @@
     "expo-brightness": "~13.0.1",
     "expo-file-system": "~18.0.7",
     "expo-media-library": "~17.0.6",
+    "expo-modules-core": "3.0.30",
     "expo-notifications": "~0.32.17",
     "expo-secure-store": "~15.0.8",
     "expo-video": "^3.0.16",

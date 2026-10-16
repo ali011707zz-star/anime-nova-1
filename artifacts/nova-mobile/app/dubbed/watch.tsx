@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import {
-  View, Text, Pressable, ActivityIndicator,
+  View, Text, ActivityIndicator,
   StyleSheet, Platform,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
@@ -11,7 +11,7 @@ import { getBaseUrl } from "@/utils/api";
 import { getWatchContentId, useApp } from "@/context/AppContext";
 import { ensureWatchAccess } from "@/utils/adPolicy";
 import { RewardedAdPrompt } from "@/components/RewardedAdPrompt";
-import { isTvDevice, tvFocusStyle } from "@/utils/tv";
+import { isTvDevice, tvFocusStyle, TvPressable as Pressable } from "@/utils/tv";
 import { useColors } from "@/hooks/useColors";
 import { useWatchPlayerOrientation } from "@/utils/watchOrientation";
 import { createPlaybackTraceId, withPlaybackTrace } from "@/utils/playbackTrace";
@@ -129,7 +129,7 @@ export default function DubbedWatchScreen() {
           if (proxyUrl) {
             const srcs: PlayerSource[] = [{
               url: withPlaybackTrace(proxyUrl, playbackTraceId, BASE),
-              type: mediaType,
+              contentType: mediaType === "m3u8" ? "hls" : "progressive",
               label: "مدبلج عربي عبر الخادم",
               quality: "720p HD",
             }];
@@ -183,7 +183,7 @@ export default function DubbedWatchScreen() {
               ? `${BASE}/api/dubbed/stream?url=${encodeURIComponent(videoUrl)}`
               : `${BASE}/api/anime/video-proxy?url=${encodeURIComponent(videoUrl)}&ref=${encodeURIComponent(ref)}`;
           const srcs: PlayerSource[] = [
-            { url: withPlaybackTrace(proxyUrl, playbackTraceId, BASE), type: isHls ? "m3u8" : "mp4", label: "مدبلج عربي عبر الخادم", quality: "720p HD" },
+            { url: withPlaybackTrace(proxyUrl, playbackTraceId, BASE), contentType: isHls ? "hls" : "progressive", label: "مدبلج عربي عبر الخادم", quality: "720p HD" },
           ];
           if (mountedRef.current) { setSources(srcs); setLoading(false); }
           return;
@@ -317,7 +317,7 @@ export default function DubbedWatchScreen() {
             <Ionicons name="alert-circle" size={36} color="#f87171" />
           </View>
           <Text style={[styles.errorText, { color: colors.destructive }]}>{error || "لم يُعثر على مصدر"}</Text>
-          <Pressable onPress={loadSource} focusable={tvMode}
+          <Pressable onPress={() => void loadSource()} focusable={tvMode}
             style={({ focused }) => [styles.retryBtn, tvMode && tvFocusStyle(focused)]}>
             <Ionicons name="refresh" size={16} color={colors.buttonText} />
             <Text style={[styles.retryText, { color: colors.buttonText }]}>إعادة المحاولة</Text>

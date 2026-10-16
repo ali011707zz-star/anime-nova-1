@@ -1530,7 +1530,6 @@ export function RiftPlayer({
         rate={rate}
         repeat={false}
         useTextureView={true}
-        secureView={false}
         resizeMode={contentFit === "cover" ? "cover" : contentFit === "fill" ? "stretch" : "contain"}
         controls={false}
         progressUpdateInterval={500}

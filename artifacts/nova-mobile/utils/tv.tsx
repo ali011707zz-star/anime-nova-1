@@ -3,11 +3,17 @@ import {
   Dimensions,
   Platform,
   Pressable,
-  PressableProps,
   View,
   useWindowDimensions,
 } from "react-native";
-import type { FlatList, FlatListProps } from "react-native";
+import type {
+  FlatList,
+  FlatListProps,
+  PressableProps,
+  PressableStateCallbackType,
+  StyleProp,
+  ViewStyle,
+} from "react-native";
 
 /**
  * Android TV and most certified TV boxes expose Platform.isTV through React
@@ -84,13 +90,24 @@ export function useTvListFocusScroll<T>(
  * focus engine only sees a control when it is explicitly focusable; keeping
  * that detail here prevents screens from drifting into different TV behavior.
  */
+type TvPressableState = PressableStateCallbackType & { focused: boolean };
+
+type TvPressableProps = Omit<PressableProps, "style"> & {
+  style?: StyleProp<ViewStyle> | ((state: TvPressableState) => StyleProp<ViewStyle>);
+  onKeyDown?: (event: any) => void;
+};
+
 export function TvPressable({
   style,
   children,
   hasTVPreferredFocus = false,
+  onFocus,
+  onBlur,
   ...props
-}: Omit<PressableProps, "style"> & { style?: PressableProps["style"] }) {
+}: TvPressableProps) {
   const tv = isTvDevice();
+  const [focused, setFocused] = React.useState(false);
+
   return (
     <Pressable
       {...props}
@@ -98,8 +115,16 @@ export function TvPressable({
       hasTVPreferredFocus={tv && hasTVPreferredFocus}
       hitSlop={props.hitSlop ?? 8}
       pressRetentionOffset={props.pressRetentionOffset ?? 12}
-      style={({ focused, pressed }) => [
-        typeof style === "function" ? style({ focused, pressed } as any) : style,
+      onFocus={(event) => {
+        setFocused(true);
+        onFocus?.(event);
+      }}
+      onBlur={(event) => {
+        setFocused(false);
+        onBlur?.(event);
+      }}
+      style={({ pressed }) => [
+        typeof style === "function" ? style({ focused, pressed }) : style,
         tvFocusStyle(tv && focused),
         pressed && { opacity: 0.82 },
       ]}

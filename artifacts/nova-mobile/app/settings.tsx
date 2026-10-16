@@ -95,6 +95,7 @@ function ConfirmSheet({ open, title, desc, confirmLabel = "تأكيد", danger =
 
 /* ── Report Sheet ── */
 function ReportSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const colors = useColors();
   const [type, setType] = useState("bug");
   const [msg, setMsg] = useState("");
   const [status, setStatus] = useState<"idle" | "sending" | "ok" | "err">("idle");

@@ -9,8 +9,9 @@ import {
   normalizedLocalizationLabel,
   trustedLegacyBadge,
 } from "./dubbedCatalogClassification.mjs";
+import type { DubbedCatalogSection } from "./dubbedCatalogClassification.mjs";
 
-export type { DubbedCatalogSection } from "./dubbedCatalogClassification.mjs";
+export type { DubbedCatalogSection };
 
 export type DubbedCatalogTitle = {
   id: string | number;

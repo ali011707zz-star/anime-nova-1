@@ -5,10 +5,10 @@ import { LinearGradient } from "expo-linear-gradient";
 import { useRouter } from "expo-router";
 import React, { useEffect, useRef, useState } from "react";
 import {
-  Pressable, ScrollView, StyleSheet, Text, View, useWindowDimensions,
+  ScrollView, StyleSheet, Text, View, useWindowDimensions,
 } from "react-native";
 import { useColors } from "@/hooks/useColors";
-import { isTvDevice, tvFocusStyle } from "@/utils/tv";
+import { isTvDevice, tvFocusStyle, TvPressable as Pressable } from "@/utils/tv";
 
 type Props = { items: AnilistMedia[]; initialTVFocus?: boolean };
 
@@ -66,7 +66,7 @@ export function HeroSection({ items, initialTVFocus = false }: Props) {
                 style={StyleSheet.absoluteFill}
                 resizeMode="cover"
                 resizeMethod="resize"
-                transition={tvMode ? 0 : 400}
+                fadeDuration={tvMode ? 0 : 400}
               />
               <LinearGradient
                 colors={["transparent", "rgba(9,9,11,0.7)", "#09090B"]}
@@ -79,7 +79,7 @@ export function HeroSection({ items, initialTVFocus = false }: Props) {
                     </View>
                   ))}
                 </View>
-                <Text style={[styles.heroTitle, tvMode && styles.tvHeroTitle]} numberOfLines={2} writingDirection="ltr">{title}</Text>
+                <Text style={[styles.heroTitle, tvMode && styles.tvHeroTitle, { writingDirection: "ltr" }]} numberOfLines={2}>{title}</Text>
                 {anime.title_ar ? (
                   <Text style={[styles.heroTitleArabic, tvMode && styles.tvHeroTitleArabic]} numberOfLines={1}>
                     {anime.title_ar}

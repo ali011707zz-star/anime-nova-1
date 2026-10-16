@@ -58,6 +58,12 @@ export type PlayerSource = {
   skipOutro?: { start: number; end: number };
 };
 
+type SeekRecoveryState = {
+  target: number;
+  retries: number;
+  restorePending: boolean;
+};
+
 type NovaVideoSource = string | {
   uri: string;
   /**
@@ -728,11 +734,8 @@ function ExpoRiftPlayer({
   const stallNudgeTriedRef = useRef(false);
   /* أثناء seek قد يرسل ExoPlayer حالة loading/error مؤقتة لأن HLS يحتاج
      جلب segment جديد. لا نعتبرها فشلاً للمصدر ولا نبدأ auto-cycle فوراً. */
-  const seekRecoveryRef = useRef<{
-    target: number;
-    retries: number;
-    restorePending: boolean;
-  } | null>(null);
+  const seekRecoveryRef = useRef<SeekRecoveryState | null>(null);
+  const fadeInRef = useRef<(() => void) | null>(null);
   const seekRecoveryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [sourceReloadNonce, setSourceReloadNonce] = useState(0);
   const nativeLoadNonceRef = useRef(0);
@@ -1228,7 +1231,7 @@ function ExpoRiftPlayer({
                 if ((player as any).status === "error") {
                   if (animePlayback && !seekRecoveryRef.current) {
                     beginSeekRecovery(manualSeek.target);
-                    const recovery = seekRecoveryRef.current;
+                    const recovery = seekRecoveryRef.current as SeekRecoveryState | null;
                     if (recovery) {
                       recovery.retries = 1;
                       recovery.restorePending = true;
@@ -1829,10 +1832,10 @@ function ExpoRiftPlayer({
     } finally {
       if (wasShowingControls && aliveRef.current) {
         setShowControls(true);
-        fadeIn();
+        fadeInRef.current?.();
       }
     }
-  }, [fadeIn, showControls]);
+  }, [showControls]);
 
   /* ─── Orientation change listener ─── */
   useEffect(() => {
@@ -2119,6 +2122,7 @@ function ExpoRiftPlayer({
     setShowControls(true);
     schedHide();
   }, [schedHide]);
+  fadeInRef.current = fadeIn;
 
   /* أي حركة D-pad تعني أن المستخدم ما زال يتنقل بين أدوات المشغل.
      أعد تشغيل مؤقت الإخفاء عند كل حركة، حتى يبدأ العد بعد توقفه فعلياً
@@ -2317,7 +2321,7 @@ function ExpoRiftPlayer({
        URL فارغ أو بدون بروتوكول يُسبِّب native crash بدل statusChange→error */
     const srcUrl = newSrc?.url;
     if (!isValidPlayerSourceUrl(srcUrl)) {
-      console.warn(`[RiftPlayer] ⛔ URL غير صالح للمصدر ${safeIdx + 1}: "${srcUrl?.slice(0, 60) ?? "فارغ"}"`);
+      console.warn(`[RiftPlayer] ⛔ URL غير صالح للمصدر ${safeIdx + 1}: "${String(srcUrl ?? "").slice(0, 60) || "فارغ"}"`);
       setError(true);
       setBuffering(false);
       return;
@@ -3748,6 +3752,12 @@ const s = StyleSheet.create({
 
   /* Subtitle */
   subtitleWrap: { position: "absolute", left: 16, right: 16, alignItems: "stretch", zIndex: 8 },
+  subMoveRow: { flexDirection: "row", alignItems: "center", gap: 8, marginTop: 8 },
+  subMoveButton: { minWidth: 58, paddingHorizontal: 10, paddingVertical: 8, borderRadius: 10, backgroundColor: "rgba(139,92,246,0.14)", borderWidth: 1, borderColor: "rgba(139,92,246,0.28)", alignItems: "center", justifyContent: "center" },
+  subMoveLabel: { fontSize: 11, color: "#c4b5fd", fontFamily: "Cairo_700Bold" },
+  subMoveValue: { flex: 1, alignItems: "center" },
+  subMoveValueText: { fontSize: 12, color: "#fff", fontFamily: "Cairo_700Bold" },
+  subMoveHint: { fontSize: 9, color: "rgba(255,255,255,0.42)", fontFamily: "Cairo_400Regular", marginTop: 2, textAlign: "center" },
   subtitleText: {
     paddingHorizontal: 14,
     paddingVertical: 6,

@@ -2,7 +2,6 @@ import React from "react";
 import {
   FlatList,
   Platform,
-  Pressable,
   ScrollView,
   StyleSheet,
   Text,
@@ -16,6 +15,7 @@ import { Ionicons } from "@expo/vector-icons";
 import {
   isTvDevice,
   tvFocusStyle,
+  TvPressable as Pressable,
   TvFocusGuideView,
   useTvListFocusScroll,
   useTvMetrics,

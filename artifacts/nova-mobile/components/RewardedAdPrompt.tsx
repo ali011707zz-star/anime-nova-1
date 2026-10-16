@@ -1,7 +1,6 @@
 import React, { useEffect, useState } from "react";
 import {
   Modal,
-  Pressable,
   StyleSheet,
   Text,
   View,
@@ -11,7 +10,7 @@ import { useRouter } from "expo-router";
 import { useVideoPlayer, VideoView } from "expo-video";
 import { subscribeRewardPrompt } from "@/utils/adPolicy";
 import type { RewardKind } from "@/utils/adPolicy";
-import { isTvDevice, tvFocusStyle } from "@/utils/tv";
+import { isTvDevice, tvFocusStyle, TvPressable as Pressable } from "@/utils/tv";
 import { useColors } from "@/hooks/useColors";
 
 type PendingPrompt = {

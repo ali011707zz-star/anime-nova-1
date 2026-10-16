@@ -4,7 +4,7 @@ import {
   FlatList,
   Image,
   Modal,
-  Pressable,
+  Platform,
   ScrollView,
   StyleSheet,
   Text,
@@ -18,7 +18,7 @@ import { useRouter } from "expo-router";
 import { useColors } from "@/hooks/useColors";
 import type { ThemePalette } from "@/constants/colors";
 import { getBaseUrl } from "@/utils/api";
-import { isTvDevice, tvFocusStyle } from "@/utils/tv";
+import { isTvDevice, tvFocusStyle, TvPressable as Pressable } from "@/utils/tv";
 
 type Facet = { name: string; titleCount: number };
 type Classification = {
