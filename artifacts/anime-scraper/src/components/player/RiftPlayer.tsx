@@ -22,6 +22,7 @@ const KAWAII_CDN_HOSTS = new Set([
   "cdn.imgnex.top",
   "cdn.watching.onl",
   "cdn.kryntal.top",
+  "fetch.nexabloom.top",
 ]);
 
 function isKawaiiCdnUrl(value: string): boolean {

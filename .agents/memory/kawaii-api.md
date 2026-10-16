@@ -11,7 +11,7 @@ description: How to scrape kawaii-anime.com — uses AniList IDs natively, has A
 - The playback caller must resolve AniList ID from the title when the incoming numeric ID may be a provider-catalog ID.
 
 ## CDN
-- Kawaii rotates among `video.kawaii-anime.com`, `cdn.momentoai.dev`, `cdn.mewstream.buzz`, `cdn.imgnex.top`, `cdn.watching.onl`, and `cdn.kryntal.top`.
+- Kawaii rotates among `video.kawaii-anime.com`, `cdn.momentoai.dev`, `cdn.mewstream.buzz`, `cdn.imgnex.top`, `cdn.watching.onl`, `cdn.kryntal.top`, `hls.krussdomi.com`, and `fetch.nexabloom.top`.
 - Keep the API-provided host allowlist synchronized across web, mobile, and server validation.
 - Direct MP4 playback may work in the browser; HLS URLs must use the HLS player path and provider-specific Referer handling.
 
@@ -34,9 +34,9 @@ description: How to scrape kawaii-anime.com — uses AniList IDs natively, has A
 ## CDN rotation
 Kawaii can change media hosts and return either HLS or MP4 URLs without changing its API contract. A host omitted from any one client/server allowlist can make a valid episode disappear or fail only on one platform.
 
-**Why:** The provider has rotated through several unrelated hostnames and both signed and unsigned media URLs.
+**Why:** The provider rotates among unrelated hostnames and can return either HLS or MP4 for a newly released episode; a valid provider response can still be rejected by one app layer.
 
-**How to apply:** Verify each new hostname against a live Kawaii API response, then keep the server trust filter, web player, and mobile normalization in sync. Preserve the correct HLS handling and Referer behavior for that host.
+**How to apply:** Verify each new hostname against a live Kawaii API response and the actual click-time playback route; probe only a bounded manifest or byte range. Add the exact hostname to the server trust filter, web player, and mobile normalization rather than widening a domain suffix. Preserve HLS handling and Referer behavior.
 
 ## Temporary API outages
 Use the canonical API on the primary alias first, then bounded fallbacks to other aliases. Do not fan out all aliases and query variants on every playback or availability request. Count a response as usable only when it contains a source URL on a trusted Kawaii CDN.

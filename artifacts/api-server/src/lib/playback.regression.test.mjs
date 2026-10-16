@@ -125,10 +125,11 @@ test("signed Kawaii URLs expire through a persisted L2 cache row after a simulat
   assert.equal(isSourceCacheEntryStale([{ rawUrl: validTarget }], now + 90_000, now), false);
 });
 
-test("web, mobile, and API Kawaii CDN allowlists stay aligned", () => {
+test("web, mobile, picker, and API Kawaii CDN allowlists stay aligned", () => {
   const server = readProjectFile("artifacts/api-server/src/routes/anime.ts");
   const mobile = readProjectFile("artifacts/nova-mobile/app/watch.tsx");
   const web = readProjectFile("artifacts/anime-scraper/src/components/player/RiftPlayer.tsx");
+  const picker = readProjectFile("artifacts/anime-scraper/src/pages/Watch.tsx");
   const extractHosts = (text, constant) => {
     const start = text.indexOf(`const ${constant} = new Set([`);
     assert.notEqual(start, -1, `${constant} must exist`);
@@ -136,8 +137,17 @@ test("web, mobile, and API Kawaii CDN allowlists stay aligned", () => {
     assert.notEqual(end, -1, `${constant} must close`);
     return [...text.slice(start, end).matchAll(/"([^"]+)"/g)].map(match => match[1]).sort();
   };
-  assert.deepEqual(extractHosts(server, "KAWAII_CDN_HOSTS"), extractHosts(mobile, "KAWAII_MOBILE_CDN_HOSTS"));
-  assert.deepEqual(extractHosts(server, "KAWAII_CDN_HOSTS"), extractHosts(web, "KAWAII_CDN_HOSTS"));
+  const serverHosts = extractHosts(server, "KAWAII_CDN_HOSTS");
+  assert.deepEqual(serverHosts, extractHosts(mobile, "KAWAII_MOBILE_CDN_HOSTS"));
+  assert.deepEqual(serverHosts, extractHosts(web, "KAWAII_CDN_HOSTS"));
+  assert.deepEqual(serverHosts, extractHosts(picker, "KAWAII_CDN_HOSTS"));
+  assert.ok(serverHosts.includes("fetch.nexabloom.top"));
+});
+
+test("failed picker lookups retain availability rows for retry", () => {
+  const watch = readProjectFile("artifacts/anime-scraper/src/pages/Watch.tsx");
+  assert.match(watch, /getSrcQualityTier\(src\) !== requestedQuality \|\| !!src\.checkOnly/);
+  assert.match(watch, /hadKnownCandidate \? "ready" : "failed"/);
 });
 
 async function listen(server) {

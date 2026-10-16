@@ -348,6 +348,7 @@ const KAWAII_MOBILE_CDN_HOSTS = new Set([
   "cdn.watching.onl",
   "cdn.imgnex.top",
   "cdn.kryntal.top",
+  "fetch.nexabloom.top",
 ]);
 
 function isKawaiiMobileCdnUrl(value: string): boolean {
