@@ -399,7 +399,7 @@ jobs:
           profile: pixel_2
           disable-animations: true
           script: |
-            set -euo pipefail
+            set -eu
             APK="$(find artifacts/nova-mobile/android/app/build/outputs/apk/release -name '*.apk' -print -quit)"
             test -n "$APK" && test -s "$APK"
 
