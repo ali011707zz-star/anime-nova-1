@@ -196,7 +196,9 @@ async function requestPlaylist(url, referer, fetchImpl, timeoutMs) {
     }
     const body = await readLimitedText(response, 256 * 1024);
     if (body === null) return { state: "unknown" };
-    if (!isValidHlsPlaylist(body)) return { state: "dead" };
+    // A 200 response containing an HTML challenge or malformed playlist is
+    // inconclusive; only a definitive 404/410 should hide a source.
+    if (!isValidHlsPlaylist(body)) return { state: "unknown" };
     return { state: "available", body, finalUrl: response.url || url };
   } catch {
     return { state: "unknown" };
@@ -228,7 +230,7 @@ export async function inspectHlsAvailability(
   }
 
   const parsed = parseMasterVariants(master.body, master.finalUrl);
-  if (!parsed.length) return { state: "dead", isMaster: true, variants: [] };
+  if (!parsed.length) return { state: "unknown", isMaster: true, variants: [] };
 
   const groups = new Map();
   for (const variant of parsed) {
@@ -254,44 +256,4 @@ export async function inspectHlsAvailability(
     });
   }
   return { state: "available", isMaster: true, variants };
-}
-
-/**
- * A one-byte media probe catches retired URLs and HTML error pages. A 403,
- * timeout, or provider error is inconclusive because some CDNs allow clients
- * but block server-side checks.
- */
-export async function probeDirectMediaAvailability(
-  url,
-  referer = "",
-  { fetchImpl = globalThis.fetch, timeoutMs = 2_500 } = {},
-) {
-  if (typeof fetchImpl !== "function" || !/^https?:\/\//i.test(String(url || ""))) {
-    return "unknown";
-  }
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const response = await fetchImpl(url, {
-      headers: {
-        Range: "bytes=0-1",
-        Accept: "video/*,application/octet-stream,*/*;q=0.1",
-        "User-Agent": "Mozilla/5.0",
-        ...(referer ? { Referer: referer } : {}),
-      },
-      redirect: "follow",
-      signal: controller.signal,
-    });
-    const status = response.status;
-    const contentType = String(response.headers?.get?.("content-type") || "").toLowerCase();
-    try { await response.body?.cancel(); } catch {}
-    if (status === 404 || status === 410) return "dead";
-    if (status !== 200 && status !== 206 && status !== 416) return "unknown";
-    if (/text\/html|application\/(?:json|xml)/i.test(contentType)) return "dead";
-    return "available";
-  } catch {
-    return "unknown";
-  } finally {
-    clearTimeout(timer);
-  }
 }

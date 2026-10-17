@@ -25,9 +25,3 @@ export function inspectHlsAvailability(
     maxVariantsPerQuality?: number;
   },
 ): Promise<HlsAvailabilityResult>;
-
-export function probeDirectMediaAvailability(
-  url: string,
-  referer?: string,
-  options?: { fetchImpl?: typeof fetch; timeoutMs?: number },
-): Promise<"available" | "dead" | "unknown">;

@@ -21,8 +21,8 @@ import { createKawaiiApiResolver } from "../lib/kawaiiApiFailover.mjs";
 import {
   classifySourceQuality,
   inspectHlsAvailability,
-  probeDirectMediaAvailability,
 } from "../lib/sourceAvailabilityCheck.mjs";
+import { findExactAniListTitleMatch, normalizeAniListTitle } from "../lib/aniListTitleMatch.mjs";
 import { markKawaiiRecovered, notifyKawaiiIncident } from "../lib/kawaiiHealthAlert.js";
 import { readExpressDecodedQueryString } from "../lib/proxyUrlPolicy.mjs";
 import { buildMediaRequestHeaders, copyMediaResponse } from "../lib/mediaProxyCore.mjs";
@@ -187,11 +187,7 @@ const _titleAniListCache = new Map<string, AniListSourceMeta>();
 const TITLE_ANILIST_TTL = 6 * 60 * 60 * 1000;
 
 function normalizeAniTitle(value: string): string {
-  return value.toLowerCase()
-    .normalize("NFKD")
-    .replace(/\p{Diacritic}/gu, "")
-    .replace(/[^a-z0-9]+/g, " ")
-    .trim();
+  return normalizeAniListTitle(value);
 }
 
 async function resolveAniListIdForSource(
@@ -223,13 +219,8 @@ async function resolveAniListIdForSource(
       if (!response.ok) continue;
       const payload = await response.json() as any;
       const media = Array.isArray(payload?.data?.Page?.media) ? payload.data.Page.media : [];
-      const normalizedCandidate = normalizeAniTitle(candidate);
-      const exact = media.find((item: any) =>
-        [item?.title?.romaji, item?.title?.english, item?.title?.native]
-          .filter(Boolean)
-          .some((name: string) => normalizeAniTitle(name) === normalizedCandidate),
-      );
-      const match = exact || media[0];
+      const match = findExactAniListTitleMatch(candidate, media);
+      if (!match) continue;
       const id = Number(match?.id || 0);
       if (id > 0) {
         const titleValues = [
@@ -14400,8 +14391,8 @@ router.get("/anime/sources-stream", scraperQueueMiddleware, async (req, res) => 
     }
   }
 
-  // Availability mode may inspect an HLS master manifest only. It never
-  // requests a segment, tests playback, measures speed, or downloads video.
+  // Availability mode may inspect bounded HLS manifests and child playlists.
+  // It never requests media segments or downloads video.
   const availabilityJobs = new Set<Promise<void>>();
   const AVAILABILITY_MANIFEST_TIMEOUT_MS = 2500;
 
@@ -14459,27 +14450,6 @@ router.get("/anime/sources-stream", scraperQueueMiddleware, async (req, res) => 
               }
               continue;
             }
-          }
-          const rawUrl = String(
-            (source as UnifiedSource & { rawUrl?: string }).rawUrl
-              || source.directUrl
-              || source.url
-              || "",
-          );
-          const isHls = source.directType === "hls"
-            || /\.m3u8(?:[?#]|$)/i.test(rawUrl)
-            || /\/(?:hls|playlist)(?:\/|[?#]|$)/i.test(rawUrl);
-          const isDirectMp4 = !source.isEmbed && !isHls && (
-            source.directType === "mp4"
-            || /\.mp4(?:[?#]|$)/i.test(rawUrl)
-          );
-          if (isDirectMp4 && /^https?:\/\//i.test(rawUrl)) {
-            const state = await probeDirectMediaAvailability(
-              rawUrl,
-              source.headers?.Referer || source.headers?.referer || "",
-              { timeoutMs: AVAILABILITY_MANIFEST_TIMEOUT_MS },
-            );
-            if (state === "dead") continue;
           }
         }
         emittedRows.push(source);

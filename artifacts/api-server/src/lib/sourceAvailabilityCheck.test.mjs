@@ -3,7 +3,6 @@ import test from "node:test";
 import {
   classifySourceQuality,
   inspectHlsAvailability,
-  probeDirectMediaAvailability,
 } from "./sourceAvailabilityCheck.mjs";
 
 test("specific resolutions take precedence over generic HD labels", () => {
@@ -71,25 +70,11 @@ test("transient or CDN-blocked HLS probes stay unknown instead of hiding a sourc
   assert.equal(result.state, "unknown");
 });
 
-test("direct media probes reject dead URLs and HTML error pages only", async () => {
-  assert.equal(
-    await probeDirectMediaAvailability("https://cdn.test/dead.mp4", "", {
-      fetchImpl: async () => new Response("", { status: 410 }),
+test("a 200 HTML challenge is inconclusive, not a dead HLS link", async () => {
+  const result = await inspectHlsAvailability("https://cdn.test/master.m3u8", "", {
+    fetchImpl: async () => new Response("<html>access check</html>", {
+      headers: { "content-type": "text/html" },
     }),
-    "dead",
-  );
-  assert.equal(
-    await probeDirectMediaAvailability("https://cdn.test/error.mp4", "", {
-      fetchImpl: async () => new Response("<html>expired</html>", {
-        headers: { "content-type": "text/html" },
-      }),
-    }),
-    "dead",
-  );
-  assert.equal(
-    await probeDirectMediaAvailability("https://cdn.test/blocked.mp4", "", {
-      fetchImpl: async () => new Response("", { status: 403 }),
-    }),
-    "unknown",
-  );
+  });
+  assert.equal(result.state, "unknown");
 });
