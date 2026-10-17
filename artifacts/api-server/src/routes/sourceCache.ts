@@ -11,7 +11,6 @@
  */
 
 import { cacheSelect, cacheUpsert, cacheDelete, isCacheDbReady } from "./supabaseCacheClient.js";
-import { createHash } from "node:crypto";
 
 // ── TTL بالميلي ثانية لكل موقع ──────────────────────────────────
 export const SITE_TTL: Record<string, number> = {
@@ -228,7 +227,7 @@ export function makeSourceCacheKey(
   site: string,
   title: string,
   ep: number,
-  identity?: number | string,
+  identity?: string | number | null,
 ): string {
   const fullNorm = title
     .toLowerCase()
@@ -238,16 +237,8 @@ export function makeSourceCacheKey(
     .filter(Boolean)
     .join("-");
   const norm = fullNorm.split("-").slice(0, 5).join("-");
-  // Kawaii call sites already pass the AniList identity. Keep it in the key:
-  // title-only keys can collide between similarly named shows/season entries,
-  // causing a valid cached signed URL for one anime to be reused for another.
-  const rawIdentity = String(identity ?? "").trim();
-  const kawaiiScope = /^kawaii(?:-|$)/i.test(site)
-    ? rawIdentity && /^\d+$/.test(rawIdentity)
-      ? `:id-${rawIdentity}`
-      : `:title-${createHash("sha256").update(fullNorm).digest("hex").slice(0, 16)}`
-    : "";
-  return `${site}:${norm}${kawaiiScope}:ep${ep}`;
+  const id = String(identity ?? "").trim().replace(/[^a-zA-Z0-9:_-]/g, "");
+  return `${site}:${norm}:ep${ep}${id ? `:id${id}` : ""}`;
 }
 
 export function makeAnimCacheKey(site: string, tmdbId: string, type: string, season: number, ep: number): string {

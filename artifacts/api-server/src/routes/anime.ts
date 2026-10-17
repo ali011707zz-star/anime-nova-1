@@ -18,6 +18,7 @@ import {
   sanimeEpisodeVariants,
 } from "../lib/sanimeSource.mjs";
 import { createKawaiiApiResolver } from "../lib/kawaiiApiFailover.mjs";
+import { markKawaiiRecovered, notifyKawaiiIncident } from "../lib/kawaiiHealthAlert.js";
 import { readExpressDecodedQueryString } from "../lib/proxyUrlPolicy.mjs";
 import { buildMediaRequestHeaders, copyMediaResponse } from "../lib/mediaProxyCore.mjs";
 import { rewriteHlsManifest } from "../lib/hlsManifestRewrite.mjs";
@@ -6984,6 +6985,11 @@ async function getKawaiiAnimeSources(
         ? { fallbackUrl: `${base}/api/miruro?anilist_id=${anilistId}&episode=${ep}` }
         : {}),
     }));
+    const attemptEvents: Array<{ outcome: string; status: number | null; host?: string }> = [];
+    const untrustedMediaHosts = new Set<string>();
+    let sawUntrustedMediaHost = false;
+    let sawMalformedPayload = false;
+    let sawValidEmptyPayload = false;
     const resolved = await kawaiiApiResolver.resolve<KawaiiResolved>({
       endpoints,
       headers: { ...BASE_HDRS, Accept: "application/json" },
@@ -6998,32 +7004,78 @@ async function getKawaiiAnimeSources(
         const payload = data?.data && typeof data.data === "object"
           ? { ...data, ...data.data }
           : data;
-        const trustedSources = (payload?.sources || []).flatMap(source => {
+        if (!payload || !Array.isArray(payload.sources)) {
+          sawMalformedPayload = true;
+          return null;
+        }
+        const rawSources = payload.sources;
+        if (rawSources.length === 0) {
+          sawValidEmptyPayload = true;
+          return null;
+        }
+        const urlSources = rawSources.filter(source =>
+          typeof source?.url === "string" && !!source.url.trim()
+        );
+        if (!urlSources.length) {
+          sawMalformedPayload = true;
+          return null;
+        }
+        const trustedSources = urlSources.flatMap(source => {
           if (typeof source?.url !== "string" || !source.url.trim()) return [];
           try {
             const url = new URL(source.url, base).toString();
-            return isTrustedKawaiiCdnUrl(url) ? [{ ...source, url }] : [];
+            if (isTrustedKawaiiCdnUrl(url)) return [{ ...source, url }];
+            untrustedMediaHosts.add(new URL(url).hostname.toLowerCase());
+            return [];
           } catch {
             return [];
           }
         });
-        if (!payload || !trustedSources.length) return null;
+        if (trustedSources.length === 0) {
+          sawUntrustedMediaHost = true;
+        }
+        if (!trustedSources.length) return null;
         return {
           data: { ...payload, sources: trustedSources },
           apiBase: base,
           trustedSources,
         };
       },
-      onAttempt: event => tracePlayback(
-        traceId,
-        "kawaii-api",
-        event.outcome,
-        safeHost(event.base),
-        event.elapsedMs,
-        `status=${event.status} endpoint=${event.endpoint || "primary"}`,
-      ),
+      onAttempt: event => {
+        attemptEvents.push({
+          outcome: typeof event.outcome === "string" ? event.outcome : "unknown",
+          status: typeof event.status === "number" ? event.status : null,
+          host: typeof event.base === "string" ? safeHost(event.base) : undefined,
+        });
+        tracePlayback(
+          traceId,
+          "kawaii-api",
+          event.outcome,
+          safeHost(event.base),
+          event.elapsedMs,
+          `status=${event.status} endpoint=${event.endpoint || "primary"}`,
+        );
+      },
     });
-    if (!resolved) return [];
+    if (!resolved) {
+      const systemicFailure = attemptEvents.length > 0 && attemptEvents.every(({ outcome, status }) =>
+        ["timeout", "budget_timeout", "network_error", "invalid_json"].includes(outcome || "") ||
+        (outcome === "http_error" && status !== null && status >= 400 && status <= 599)
+      );
+      const malformedApiFailure = !sawValidEmptyPayload && sawMalformedPayload && attemptEvents.length > 0;
+      const incidentContext = {
+        anilistId,
+        episode: ep,
+        mediaHosts: [...untrustedMediaHosts].slice(0, 5),
+      };
+      if (sawUntrustedMediaHost) {
+        notifyKawaiiIncident("untrusted_media_host", attemptEvents, incidentContext);
+      } else if (systemicFailure || malformedApiFailure) {
+        notifyKawaiiIncident("api_unavailable", attemptEvents, incidentContext);
+      }
+      return [];
+    }
+    markKawaiiRecovered();
     const { data, apiBase, trustedSources } = resolved.value;
 
     if (availabilityOnly) {

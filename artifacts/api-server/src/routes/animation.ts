@@ -2287,7 +2287,9 @@ router.get("/animation/sources-stream", scraperQueueMiddleware, async (req: Requ
   ) {
     if (siteParam && site !== siteParam) return;
     if (ANIM_SOURCE_ALLOWLIST && !ANIM_SOURCE_ALLOWLIST.has(site)) return;
-    const cKey = makeAnimCacheKey(site, tmdbId || title.slice(0, 20), type, season, epNum);
+    const animCacheIdentity = tmdbId ||
+      `title-${createHash("sha256").update(title.trim().toLowerCase()).digest("hex").slice(0, 16)}`;
+    const cKey = makeAnimCacheKey(site, animCacheIdentity, type, season, epNum);
     const hit  = await getFromSourceCache(cKey);
 
     if (hit) {

@@ -85,7 +85,7 @@
 - [Anime season grouping scope](anime-season-grouping-scope.md) — season tabs and linked-series episode selection apply only to anime, not dubbed content.
 - [Mobile watch loading fallback](mobile-watch-loading-fallback.md) — every render branch in the watch/server-scan flow must import its fallback components; missing ActivityIndicator caused an immediate ErrorBoundary crash.
 - [AnimeWitcher quality preservation](aw-quality-dedup-2026-08.md) — deduplicate AW by provider+quality+URL and classify quality from all row fields, or picker tiers disappear.
-- [Kawaii API & playback recovery](kawaii-api.md) — race API aliases, validate the CDN URL, and use cached links only before their safe expiry.
+- [Kawaii API & playback recovery](kawaii-api.md) — distinguish API outages, untrusted CDN hosts, and empty episodes; verify the exact episode and alert safely.
 - [SAnime router registration](sanime-router-registration.md) — /api/sanime can return SPA HTML with 200 when the route file is not mounted in the main Express router.
 - [Download API CORS headers](download-api-cors-headers.md) — provider Origin/Referer headers must not be forwarded to Nova API download routes, or global CORS rejects HLS downloads.
 - [Supabase REST schema drift](supabase-rest-schema-drift.md) — local DATABASE_URL can expose a different schema than production PostgREST; verify the REST project before relying on columns.

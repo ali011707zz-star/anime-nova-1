@@ -338,8 +338,11 @@ async function sendTelegramEpisodeOnce(
 const AW_HF = "https://1we323-witcher.hf.space";
 const _awEpCache = new Map<string, { available: boolean; ts: number }>();
 
-async function checkAnimeWitcherEp(title: string, ep: number): Promise<boolean> {
-  const cacheKey = `${title.toLowerCase()}:${ep}`;
+async function checkAnimeWitcherEp(title: string, ep: number, anilistId?: number): Promise<boolean> {
+  const identity = Number.isSafeInteger(anilistId) && Number(anilistId) > 0
+    ? `id:${anilistId}`
+    : `title:${title.trim().toLowerCase()}`;
+  const cacheKey = `${identity}:${ep}`;
   const hit = _awEpCache.get(cacheKey);
   if (hit && Date.now() - hit.ts < 10 * 60_000) return hit.available;
 
@@ -523,7 +526,7 @@ async function runSchedulerCycleInner(): Promise<void> {
     // إذا فشل الفحص أو انتهت المهلة → أرسل الإشعار مباشرة (لا تتأخر)
     let awAvailable = false;
     try {
-      const awPromise = checkAnimeWitcherEp(titleToCheck, ep);
+      const awPromise = checkAnimeWitcherEp(titleToCheck, ep, anilistId);
       awAvailable = await Promise.race([
         awPromise,
         new Promise<boolean>(resolve => setTimeout(() => resolve(true), 5_000)), // fallback: أرسل بعد 5s

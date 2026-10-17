@@ -47,6 +47,17 @@ Availability may reuse an episode-keyed cached row only while its signed URL rem
 
 **How to apply:** Preserve the source cache's expiry calculation and safety margin; keep requests bounded and fallback-first only after primary failure. Never log signed media URLs or extend a cached URL's lifetime.
 
+## Incident diagnosis and cache identity
+The earlier suspicion that Kawaii's shared source-cache identity was missing was incorrect: it came from inspecting a duplicate helper that was not in the active request path. Verify the actual import and call chain before attributing an outage to a cache key.
+
+For future Kawaii incidents, check the exact AniList ID and episode. A generic API 200 or a successful media byte-range probe only verifies that sample, not the failing episode. Classify all-alias transport/HTTP failures or invalid JSON/source-list payloads as API failure; classify a returned but untrusted media host as CDN-host validation/rotation; an ordinary `sources: []` episode result is not an outage. The admin alert may include AniList ID, episode, sanitized hostnames, and reason/status categories, but never titles, signed URLs, or query strings. Clear the incident after a trusted source succeeds so a later outage alerts immediately.
+
+For other source caches, stable provider IDs should take precedence; when no ID exists, use the complete normalized title (or a hash of it), not a truncated title prefix.
+
+**Why:** The initial diagnosis was based on the wrong helper, and sample health checks can pass while a particular episode or rotated CDN host still fails.
+
+**How to apply:** Trace the active route first, inspect the exact episode's API outcomes and host-validation result, and separate genuine transport/host failures from empty search results before changing cache behavior or notifying the admin.
+
 **Why:** kawaii's API returns both Arabic and English subtitles for new anime. Old code only looked for English and missed Arabic entirely.
 
 ## Mobile download verification
