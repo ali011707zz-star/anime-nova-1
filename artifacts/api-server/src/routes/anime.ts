@@ -6479,6 +6479,9 @@ const KAWAII_CDN_HOSTS = new Set([
   "cdn.momentoai.dev",
   "video.kawaii-anime.com",
   "cdn.mewstream.buzz",
+  // Kawaii rotates among these exact krussdomi media hosts.
+  "hls.krussdomi.com",
+  "bl.krussdomi.com",
   // Kawaii rotated /api/miruro HLS responses to this unsigned CDN host.
   "cdn.imgnex.top",
   // Kawaii currently serves some episodes through its rotating Watching CDN.
