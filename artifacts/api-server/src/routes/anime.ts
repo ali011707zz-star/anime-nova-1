@@ -18,6 +18,11 @@ import {
   sanimeEpisodeVariants,
 } from "../lib/sanimeSource.mjs";
 import { createKawaiiApiResolver } from "../lib/kawaiiApiFailover.mjs";
+import {
+  classifySourceQuality,
+  inspectHlsAvailability,
+  probeDirectMediaAvailability,
+} from "../lib/sourceAvailabilityCheck.mjs";
 import { markKawaiiRecovered, notifyKawaiiIncident } from "../lib/kawaiiHealthAlert.js";
 import { readExpressDecodedQueryString } from "../lib/proxyUrlPolicy.mjs";
 import { buildMediaRequestHeaders, copyMediaResponse } from "../lib/mediaProxyCore.mjs";
@@ -14172,36 +14177,7 @@ async function getAppsAnimeSources(
 // Prefer explicit quality labels over provider-specific numeric ranks:
 // several providers use rank 11 for both FHD and HD.
 function sourceCheckQuality(s: any): { quality: "1080p" | "720p" | "480p" | "360p" | "unknown"; qualityRank: number } {
-  // Availability mode only classifies the source. It never probes playback.
-  // Prefer explicit labels because provider numeric ranks are not universal.
-  const explicit = String(s?.quality || "").toLowerCase();
-  const rank = Number(s?.qualityRank) || 0;
-  const classify = (value: string) => {
-    // Numeric resolution wins over generic labels such as "HD"; a provider
-    // may describe a 480p stream as "480p HD".
-    // 2K/4K tiers do not have a matching picker choice; never relabel them as
-    // 1080p and return them for an exact 1080p request.
-    if (/(?:2160|1440)\s*p?|\b(?:2k|4k|uhd)\b/.test(value)) return { quality: "unknown" as const, qualityRank: 0 };
-    if (/(?:1080)\s*p?/.test(value)) return { quality: "1080p" as const, qualityRank: rank || 13 };
-    if (/(?:720)\s*p?/.test(value)) return { quality: "720p" as const, qualityRank: rank || 9 };
-    if (/(?:480)\s*p?/.test(value)) return { quality: "480p" as const, qualityRank: rank || 7 };
-    if (/(?:360)\s*p?/.test(value)) return { quality: "360p" as const, qualityRank: rank || 5 };
-    if (/\bfhd\b|full[ ._-]*hd/.test(value)) return { quality: "1080p" as const, qualityRank: rank || 13 };
-    if (/(?<!f)\bhd\b/.test(value)) return { quality: "720p" as const, qualityRank: rank || 9 };
-    if (/\bsd\b/.test(value)) return { quality: "360p" as const, qualityRank: rank || 5 };
-    return null;
-  };
-  return classify(explicit)
-    || classify(`${s?.name || ""} ${s?.label || ""} ${s?.url || ""}`.toLowerCase())
-    || (rank >= 13
-      ? { quality: "1080p", qualityRank: rank }
-      : rank >= 9
-        ? { quality: "720p", qualityRank: rank }
-        : rank >= 7
-          ? { quality: "480p", qualityRank: rank }
-          : rank > 0
-            ? { quality: "360p", qualityRank: rank }
-            : { quality: "unknown", qualityRank: 0 });
+  return classifySourceQuality(s);
 }
 
 // ════════════════════════════════════════════════════════════════════
@@ -14433,80 +14409,86 @@ router.get("/anime/sources-stream", scraperQueueMiddleware, async (req, res) => 
     const raw = String(s.directUrl || s.url || "");
     if (!raw) return null;
     let target = raw;
+    let referer = s.headers?.Referer || s.headers?.referer || "";
     if (raw.startsWith("/api/")) {
       try {
         const parsed = new URL(`http://availability.local${raw}`);
         target = parsed.searchParams.get("url") || "";
+        const proxyReferer = parsed.searchParams.get("ref") || "";
+        if (proxyReferer) referer = isEncrypted(proxyReferer) ? decryptParam(proxyReferer) : proxyReferer;
         if (isEncrypted(target)) target = decryptParam(target);
       } catch { return null; }
     }
     if (!/^https?:\/\//i.test(target) || !/\.m3u8(?:[?#]|$)/i.test(target)) return null;
-    return { url: target, referer: s.headers?.Referer || s.url || "" };
+    if (!referer && /^https?:\/\//i.test(s.url || "")) referer = s.url;
+    return { url: target, referer };
   }
 
-  async function readAvailabilityManifest(target: { url: string; referer: string }): Promise<Array<{ quality: string; rank: number }>> {
-    try {
-      const response = await fetch(target.url, {
-        headers: { ...BASE_HDRS, ...(target.referer ? { Referer: target.referer } : {}) },
-        redirect: "follow",
-        signal: AbortSignal.timeout(AVAILABILITY_MANIFEST_TIMEOUT_MS),
-      });
-      if (!response.ok) return [];
-      const body = await response.text();
-      if (!body.includes("#EXTM3U") || !body.includes("#EXT-X-STREAM-INF")) return [];
-      const seen = new Set<string>();
-      const out: Array<{ quality: string; rank: number }> = [];
-      const lines = body.split(/\r?\n/).map(line => line.trim());
-      for (const line of lines) {
-        if (!line.startsWith("#EXT-X-STREAM-INF")) continue;
-        const resolution = line.match(/RESOLUTION=\d+x(\d+)/i);
-        const bandwidth = line.match(/BANDWIDTH=(\d+)/i);
-        const height = resolution ? Number(resolution[1]) : 0;
-        const bw = bandwidth ? Number(bandwidth[1]) : 0;
-        const quality = height >= 1080 || bw >= 2_000_000 ? "1080p"
-          : height >= 720 || bw >= 1_000_000 ? "720p"
-          : height >= 480 || bw >= 500_000 ? "480p" : "360p";
-        if (!seen.has(quality)) {
-          seen.add(quality);
-          out.push({ quality, rank: quality === "1080p" ? 13 : quality === "720p" ? 9 : quality === "480p" ? 7 : 5 });
-        }
-      }
-      return out;
-    } catch { return []; }
+  async function readAvailabilityManifest(target: { url: string; referer: string }) {
+    return inspectHlsAvailability(target.url, target.referer, {
+      timeoutMs: AVAILABILITY_MANIFEST_TIMEOUT_MS,
+    });
   }
 
   async function emitAvailability(srcs: UnifiedSource[]): Promise<UnifiedSource[]> {
     const emittedRows: UnifiedSource[] = [];
-    // Metadata-only: do not request an m3u8, segment, MP4, or proxy URL during
-    // the picker scan. The source adapter's episode response and quality label
-    // are enough to render the row; playback starts only after a tap.
-    await Promise.allSettled(srcs.map(async source => {
-      /* AnimeWitcher may return one master HLS URL whose database label is
-         only "HD". Inspecting its variant playlist is still availability-only
-         (no segments are requested), and prevents the latest-episodes picker
-         from collapsing 1080/720/480 into one AW row. */
-      if (String((source as any).site || "") === "animewitcher") {
-        const target = getAvailabilityManifestTarget(source);
-        if (target) {
-          const variants = await readAvailabilityManifest(target);
-          if (variants.length) {
-            for (const variant of variants) {
-              const row = {
-                ...source,
-                quality: variant.quality,
-                qualityRank: variant.rank,
-                label: `AnimeWitcher · ${variant.quality}`,
-              };
-              emittedRows.push(row);
-              sendCheckSrc(row);
+    let cursor = 0;
+    const worker = async () => {
+      while (cursor < srcs.length) {
+        const source = srcs[cursor++];
+        const site = String((source as any).site || "");
+        // Preserve Kawaii's existing quality and availability behavior. Its
+        // playback path uses fresh links and is handled separately.
+        if (site !== "kawaii") {
+          const target = getAvailabilityManifestTarget(source);
+          if (target) {
+            const inspection = await readAvailabilityManifest(target);
+            if (inspection.state === "dead") continue;
+            if (inspection.isMaster) {
+              const variants = inspection.variants.filter(variant => variant.state !== "dead");
+              if (!variants.length) continue;
+              for (const variant of variants) {
+                const row = {
+                  ...source,
+                  quality: variant.quality,
+                  qualityRank: variant.qualityRank,
+                  label: `${site || "Source"} · ${variant.quality}`,
+                };
+                emittedRows.push(row);
+                sendCheckSrc(row);
+              }
+              continue;
             }
-            return;
+          }
+          const rawUrl = String(
+            (source as UnifiedSource & { rawUrl?: string }).rawUrl
+              || source.directUrl
+              || source.url
+              || "",
+          );
+          const isHls = source.directType === "hls"
+            || /\.m3u8(?:[?#]|$)/i.test(rawUrl)
+            || /\/(?:hls|playlist)(?:\/|[?#]|$)/i.test(rawUrl);
+          const isDirectMp4 = !source.isEmbed && !isHls && (
+            source.directType === "mp4"
+            || /\.mp4(?:[?#]|$)/i.test(rawUrl)
+          );
+          if (isDirectMp4 && /^https?:\/\//i.test(rawUrl)) {
+            const state = await probeDirectMediaAvailability(
+              rawUrl,
+              source.headers?.Referer || source.headers?.referer || "",
+              { timeoutMs: AVAILABILITY_MANIFEST_TIMEOUT_MS },
+            );
+            if (state === "dead") continue;
           }
         }
+        emittedRows.push(source);
+        sendCheckSrc(source);
       }
-      emittedRows.push(source);
-      sendCheckSrc(source);
-    }));
+    };
+    await Promise.all(
+      Array.from({ length: Math.min(4, srcs.length) }, () => worker()),
+    );
     return emittedRows;
   }
 
