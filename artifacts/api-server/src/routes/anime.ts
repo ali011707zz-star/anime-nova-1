@@ -15950,7 +15950,15 @@ router.get("/anime/fetch-source", scraperQueueMiddleware, async (req, res) => {
           }
         } catch { /* ignore */ }
       }
-      /* تغليف روابط CDN المباشرة للموبايل — يضمن المرور عبر VPS */
+      // Existing mobile clients normalize Kawaii MP4 links back to
+      // video-proxy. Mark only those requests so the server can hand the
+      // signed URL through to the device instead of relaying every byte.
+      if (isMobileClient && s.site === "kawaii" && s.directType === "mp4") {
+        derivedHeaders = {
+          ...(derivedHeaders || {}),
+          "X-Nova-Kawaii-Direct": "1",
+        };
+      }
       const wrapped = isMobileClient ? wrapForMobile({ ...s, headers: derivedHeaders || s.headers }) : s;
       // corsOk=true: لا تشفير على directUrl — RiftPlayer يحتاج URL الخام لكشف kawaii CDN
       const encDirectUrl = wrapped.directUrl
@@ -18382,6 +18390,17 @@ router.get("/anime/video-proxy", async (req, res) => {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Headers", "Range, Content-Type");
   res.setHeader("Access-Control-Expose-Headers", "Accept-Ranges, Content-Length, Content-Range, Content-Type");
+
+  if (
+    req.headers["x-nova-kawaii-direct"] === "1" &&
+    isTrustedKawaiiCdnUrl(url) &&
+    !kawaiiMediaIsHls(url)
+  ) {
+    tracePlayback(trace, "video", "client_kawaii_redirect", safeHost(url), Date.now() - startedAt);
+    res.setHeader("Cache-Control", "no-store");
+    res.status(307).setHeader("Location", url).end();
+    return;
+  }
 
   await serveMediaVPS(url, ref, req, res);
 });
