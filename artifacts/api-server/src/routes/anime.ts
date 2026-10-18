@@ -30,6 +30,8 @@ import { rewriteHlsManifest } from "../lib/hlsManifestRewrite.mjs";
 import { createHash, createDecipheriv, createCipheriv, randomBytes } from "crypto";
 import { execSync, execFile, spawn } from "child_process";
 import { createReadStream, existsSync, writeFileSync, readFileSync, readdirSync, mkdirSync, rmSync, statSync } from "fs";
+import { Readable } from "node:stream";
+import { pipeline } from "node:stream/promises";
 import { join as pathJoin } from "path";
 import {
   makeSourceCacheKey,
@@ -98,6 +100,17 @@ async function pgTranslateSave(key: string, translated: string, from: string, to
   } catch { /* silent */ }
 }
 const router = Router();
+
+async function pipeWebMediaBody(
+  body: ReadableStream<Uint8Array> | null,
+  res: import("express").Response,
+): Promise<void> {
+  if (!body) {
+    res.end();
+    return;
+  }
+  await pipeline(Readable.fromWeb(body as any), res);
+}
 
 const BROWSER_UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
@@ -18333,14 +18346,13 @@ async function serveMediaVPS(
       if (!r.ok) mediaMetrics.upstreamErrors++;
     }
     // Stream directly — لا نبفّر في الذاكرة (مهم للـ MP4 الكبيرة)
-    if (r.body) {
-      const { Readable } = await import("stream");
-      (Readable.fromWeb as Function)(r.body).pipe(res);
-    } else {
-      res.end();
-    }
-  } catch {
+    await pipeWebMediaBody(r.body, res);
+  } catch (error) {
     mediaMetrics.upstreamErrors++;
+    if (!req.aborted && !res.destroyed) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.warn(`[media-proxy] relay failed host=${safeHost(url)} error=${message.slice(0, 180)}`);
+    }
     if (!res.headersSent) res.status(502).send("media fetch failed");
   } finally {
     clearTimeout(connectTimeout);
@@ -18518,7 +18530,7 @@ async function streamKawaiiMp4(
     if (parsed.pathname !== "/api/anime/video-proxy") return false;
     const controller = new AbortController();
     const abort = () => controller.abort();
-    req.once("close", abort);
+    res.once("close", abort);
     try {
       const headers: Record<string, string> = {};
       if (req.headers.range) headers.Range = String(req.headers.range);
@@ -18529,15 +18541,10 @@ async function streamKawaiiMp4(
         if (value) res.setHeader(name, value);
       }
       res.status(upstream.status);
-      if (upstream.body) {
-        const { Readable } = await import("stream");
-        (Readable.fromWeb as Function)(upstream.body).pipe(res);
-      } else {
-        res.end();
-      }
+      await pipeWebMediaBody(upstream.body, res);
       return true;
     } finally {
-      req.removeListener("close", abort);
+      res.removeListener("close", abort);
     }
   } catch {
     if (!res.headersSent) return false;
@@ -18556,7 +18563,7 @@ async function streamLocalVideoProxy(
 ): Promise<boolean> {
   const controller = new AbortController();
   const abort = () => controller.abort();
-  req.once("close", abort);
+  res.once("close", abort);
   try {
     const headers: Record<string, string> = {
       Accept: "video/mp4,video/*;q=0.9,*/*;q=0.1",
@@ -18570,17 +18577,12 @@ async function streamLocalVideoProxy(
     }
     res.setHeader("Content-Disposition", `attachment; filename="nova-episode.mp4"`);
     res.status(upstream.status);
-    if (upstream.body) {
-      const { Readable } = await import("stream");
-      (Readable.fromWeb as Function)(upstream.body).pipe(res);
-    } else {
-      res.end();
-    }
+    await pipeWebMediaBody(upstream.body, res);
     return true;
   } catch {
-    return false;
+    return res.headersSent || res.destroyed;
   } finally {
-    req.removeListener("close", abort);
+    res.removeListener("close", abort);
   }
 }
 
@@ -18696,7 +18698,7 @@ router.get("/anime/download-mp4", async (req, res) => {
       return;
     }
 
-    const args = [
+    const inputArgs = [
       "-hide_banner", "-loglevel", "error", "-y",
       /* HLS manifests coming from the VPS proxy can contain absolute segment
          URLs and may take a while to answer on a cold CDN connection. These
@@ -18709,32 +18711,55 @@ router.get("/anime/download-mp4", async (req, res) => {
       "-map", "0:v:0",
       "-map", "0:a:0?",
     ];
-    args.push(
-      "-c:v", "libx264",
-      "-preset", "veryfast",
-      "-crf", "23",
-      "-pix_fmt", "yuv420p",
-      "-c:a", "aac",
-      "-b:a", "128k",
-      "-movflags", "+faststart",
-      outputPath,
-    );
-
-    await new Promise<void>((resolve, reject) => {
+    const runFfmpeg = (args: string[]) => new Promise<void>((resolve, reject) => {
       const child = spawn("/usr/bin/ffmpeg", args, { stdio: ["ignore", "ignore", "pipe"] });
       let stderr = "";
       child.stderr.on("data", (chunk: Buffer) => {
         stderr = (stderr + chunk.toString()).slice(-4000);
       });
-      child.once("error", reject);
+      const cancelIfClientLeaves = () => {
+        if (!res.writableFinished && !child.killed) child.kill("SIGTERM");
+      };
+      res.once("close", cancelIfClientLeaves);
+      child.once("error", error => {
+        res.removeListener("close", cancelIfClientLeaves);
+        reject(error);
+      });
       child.once("close", code => {
+        res.removeListener("close", cancelIfClientLeaves);
         if (code === 0) resolve();
         else reject(new Error(`ffmpeg exited ${code}: ${stderr}`));
       });
-      req.once("close", () => {
-        if (!res.headersSent) child.kill("SIGTERM");
-      });
     });
+
+    // Most anime HLS streams already contain MP4-compatible H.264/AAC.
+    // Remuxing avoids a full software transcode on every download and keeps
+    // the source quality. Re-encode only when MP4 cannot mux the source codec.
+    try {
+      await runFfmpeg([
+        ...inputArgs,
+        "-c", "copy",
+        "-movflags", "+faststart",
+        outputPath,
+      ]);
+    } catch (remuxError) {
+      const message = remuxError instanceof Error ? remuxError.message : String(remuxError);
+      if (!/could not write header|could not find tag for codec|codec .* not currently supported in container|unsupported codec/i.test(message)) {
+        throw remuxError;
+      }
+      rmSync(outputPath, { force: true });
+      await runFfmpeg([
+        ...inputArgs,
+        "-c:v", "libx264",
+        "-preset", "veryfast",
+        "-crf", "23",
+        "-pix_fmt", "yuv420p",
+        "-c:a", "aac",
+        "-b:a", "128k",
+        "-movflags", "+faststart",
+        outputPath,
+      ]);
+    }
 
     const size = statSync(outputPath).size;
     if (size <= 0) throw new Error("empty converted video");
@@ -18775,9 +18800,11 @@ router.get("/anime/download-mp4", async (req, res) => {
       res.setHeader("Content-Range", `bytes ${streamStart}-${streamEnd}/${size}`);
     }
     res.setHeader("Content-Disposition", `attachment; filename="nova-episode.mp4"`);
-    createReadStream(outputPath, { start: streamStart, end: streamEnd }).pipe(res);
+    await pipeline(createReadStream(outputPath, { start: streamStart, end: streamEnd }), res);
   } catch (error: any) {
-    if (!res.headersSent) res.status(502).send(`video conversion failed: ${error?.message || "unknown error"}`);
+    if (!res.headersSent && !res.destroyed) {
+      res.status(502).send(`video conversion failed: ${error?.message || "unknown error"}`);
+    }
   }
 });
 
@@ -18918,12 +18945,7 @@ router.get("/anime/seg-proxy", async (req, res) => {
     } else {
       res.status(200);
     }
-    if (r.body) {
-      const { Readable } = await import("stream");
-      (Readable.fromWeb as Function)(r.body).pipe(res);
-    } else {
-      res.end();
-    }
+    await pipeWebMediaBody(r.body, res);
     return true;
   }
 
