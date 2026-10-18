@@ -345,6 +345,8 @@ const KAWAII_MOBILE_CDN_HOSTS = new Set([
   "cdn.momentoai.dev",
   "video.kawaii-anime.com",
   "cdn.mewstream.buzz",
+  "hls.krussdomi.com",
+  "bl.krussdomi.com",
   "cdn.watching.onl",
   "cdn.imgnex.top",
   "cdn.kryntal.top",
