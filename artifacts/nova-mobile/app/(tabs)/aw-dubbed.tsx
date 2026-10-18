@@ -70,6 +70,15 @@ const SPACETOON_CATALOG_CACHE_TTL_MS = 10 * 60_000;
 const SPACETOON_CATALOG_CACHE_LIMIT = 6;
 const spacetoonCatalogCache = new Map<string, SpacetoonCatalogCacheEntry>();
 
+function posterRequestUri(uri: string | null): string | null {
+  if (!uri) return null;
+  const match = uri.match(
+    /^https:\/\/image\.tmdb\.org\/t\/p\/(w92|w154|w185|w342|w500|w780|w1280|original)\/([A-Za-z0-9_-]+\.(?:jpe?g|png|webp))(?:\?[^#]*)?(?:#.*)?$/i,
+  );
+  if (!match) return uri;
+  return `${getBaseUrl().replace(/\/+$/, "")}/api/source-catalog/tmdb-poster/${match[1]}/${match[2]}`;
+}
+
 function spacetoonQueryKey(searchQ: string): string {
   const query = searchQ.trim();
   return query.length >= 2 ? query.toLocaleLowerCase("ar") : "";
@@ -128,7 +137,8 @@ function PosterCard({ uri, title, seasons, tint, badge, badgeTint, sourceBadge, 
   const imageRetryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastRetryTokenRef = useRef(retryToken ?? 0);
   const tvMode = isTvDevice();
-  const show = !!uri && failedUri !== uri;
+  const imageUri = posterRequestUri(uri);
+  const show = !!imageUri && failedUri !== uri;
 
   useEffect(() => {
     setFailedUri(null);
@@ -167,7 +177,7 @@ function PosterCard({ uri, title, seasons, tint, badge, badgeTint, sourceBadge, 
         {show ? (
           <Image
             key={`${uri}:${imageRetry}`}
-            source={{ uri: uri!, cache: imageRetry > 0 ? "reload" : "force-cache" }}
+            source={{ uri: imageUri!, cache: imageRetry > 0 ? "reload" : "force-cache" }}
             style={StyleSheet.absoluteFill}
             resizeMode="cover"
             resizeMethod="resize"

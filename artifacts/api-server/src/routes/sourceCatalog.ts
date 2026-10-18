@@ -11,6 +11,9 @@ const CATALOG_SECTIONS = new Set(["animation", "cartoon"]);
 const SECTION_CACHE_TTL_MS = 60_000;
 const sectionCache = new Map<string, { expiresAt: number; titles: any[]; providerTotal: number }>();
 const sectionCachePending = new Map<string, Promise<{ titles: any[]; providerTotal: number }>>();
+const PUBLIC_BASE = new URL(process.env.NOVA_PUBLIC_URL || "https://animenovaa.duckdns.org").origin;
+const TMDB_IMAGE_SIZES = new Set(["w92", "w154", "w185", "w342", "w500", "w780", "w1280", "original"]);
+const TMDB_IMAGE_FILE = /^[A-Za-z0-9_-]+\.(?:jpe?g|png|webp)$/i;
 
 function intParam(value: unknown, fallback: number, min: number, max: number): number {
   const n = Number.parseInt(String(value ?? ""), 10);
@@ -85,6 +88,21 @@ function dedupeCatalogServerRows(rows: any[], provider: string) {
   return filterSourceCatalogServerRows(rows.map(publicServerRow), provider);
 }
 
+function publicCatalogImageUrl(value: unknown): string | null {
+  const raw = String(value ?? "").trim();
+  if (!raw) return null;
+  try {
+    const imageUrl = new URL(raw);
+    const match = imageUrl.pathname.match(
+      /^\/t\/p\/(w92|w154|w185|w342|w500|w780|w1280|original)\/([A-Za-z0-9_-]+\.(?:jpe?g|png|webp))$/i,
+    );
+    if (imageUrl.protocol !== "https:" || imageUrl.hostname !== "image.tmdb.org" || !match) return raw;
+    return `${PUBLIC_BASE}/api/source-catalog/tmdb-poster/${match[1]}/${match[2]}`;
+  } catch {
+    return raw;
+  }
+}
+
 function publicCatalogTitle(row: any): any {
   const { provider_metadata: metadata, ...publicRow } = row;
   const classification = metadata && typeof metadata === "object" && !Array.isArray(metadata)
@@ -94,6 +112,8 @@ function publicCatalogTitle(row: any): any {
     Array.isArray(value) ? value.map((item) => String(item).trim()).filter(Boolean) : [];
   return {
     ...publicRow,
+    poster_url: publicCatalogImageUrl(publicRow.poster_url),
+    backdrop_url: publicCatalogImageUrl(publicRow.backdrop_url),
     classification: classification && typeof classification === "object" && !Array.isArray(classification)
       ? {
           version: Number(classification.version) || 1,
@@ -174,6 +194,44 @@ async function loadQualifiedStardimaSection(
 
 // Public catalog endpoints. These return provider/server page URLs, never
 // resolved MP4/HLS URLs. Playback is still resolved by the existing extractors.
+router.get("/source-catalog/tmdb-poster/:size/:file", async (req: Request, res: Response) => {
+  const size = String(req.params.size ?? "");
+  const file = String(req.params.file ?? "");
+  if (!TMDB_IMAGE_SIZES.has(size) || !TMDB_IMAGE_FILE.test(file)) {
+    return void res.status(400).send("invalid poster path");
+  }
+
+  try {
+    const upstream = await fetch(`https://image.tmdb.org/t/p/${size}/${file}`, {
+      headers: {
+        Accept: "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
+        "User-Agent": "NovaAnime/1.0",
+      },
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!upstream.ok) {
+      return void res.status(upstream.status === 404 ? 404 : 502).send("poster unavailable");
+    }
+    const contentType = (upstream.headers.get("content-type") || "").split(";")[0].trim().toLowerCase();
+    if (!["image/jpeg", "image/png", "image/webp", "image/avif"].includes(contentType)) {
+      return void res.status(502).send("invalid poster response");
+    }
+    const contentLength = Number(upstream.headers.get("content-length") || 0);
+    if (contentLength > 8 * 1024 * 1024) return void res.status(502).send("poster too large");
+    const image = Buffer.from(await upstream.arrayBuffer());
+    if (!image.length || image.length > 8 * 1024 * 1024) {
+      return void res.status(502).send("invalid poster size");
+    }
+
+    res.setHeader("Content-Type", contentType);
+    res.setHeader("Cache-Control", "public, max-age=2592000, immutable");
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    return void res.send(image);
+  } catch {
+    if (!res.headersSent && !res.destroyed) res.status(502).send("poster unavailable");
+  }
+});
+
 router.get("/source-catalog/providers", async (_req: Request, res: Response) => {
   const entries = await catalogQuery(res, "source catalog counts unavailable", () => Promise.all([...PROVIDERS].map(async (provider) => [
     provider,
@@ -283,7 +341,7 @@ router.get("/source-catalog/titles", async (req: Request, res: Response) => {
           ].some((value) => String(value || "").toLocaleLowerCase().includes(needle)))
         : qualified.titles;
       return {
-        results: matching.slice((page - 1) * limit, page * limit),
+        results: matching.slice((page - 1) * limit, page * limit).map(publicCatalogTitle),
         total: matching.length,
         providerTotal: qualified.providerTotal,
       };
