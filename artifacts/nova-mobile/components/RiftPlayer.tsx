@@ -133,7 +133,7 @@ function logPlaybackStage(url: string | undefined, stage: string, detail = ""): 
 function getPlaybackBufferOptions(animePlayback: boolean, site?: string) {
   const isKawaii = String(site || "").toLowerCase() === "kawaii";
   return {
-    preferredForwardBufferDuration: animePlayback ? (isKawaii ? 24 : 16) : 8,
+    preferredForwardBufferDuration: animePlayback ? (isKawaii ? 24 : 22) : 8,
     waitsToMinimizeStalling: animePlayback,
     minBufferMs: animePlayback ? (isKawaii ? 8000 : 5000) : 3000,
     // Keep the cap at 24 seconds; larger values caused OOM on low-memory phones.
@@ -1410,7 +1410,10 @@ function ExpoRiftPlayer({
 
   /* ─── Progress polling ─── */
   useEffect(() => {
-    const STALL_TIMEOUT_MS = 15000; // 15ث بدون تقدّم = stall
+    // Some signed CDN segments take 17+ seconds to arrive. Do not switch away
+    // from a healthy source while that request is still within its normal range.
+    const STALL_TIMEOUT_MS = 25_000;
+    const STALL_RECOVERY_TIMEOUT_MS = 12_000;
     const id = setInterval(() => {
       try {
         const rawPos = player.currentTime;
@@ -1491,8 +1494,8 @@ function ExpoRiftPlayer({
           setBufferedPct(dur > 0 ? Math.min(Math.max(buf / dur, 0), 1) : 0);
         } catch {}
         /* ── Stall detection: شاشة سوداء صامتة بدون error event ──
-           إذا بقي المشغّل في "يشتغل" (isPlaying=true) بدون تقدّم في الـ position
-           لمدة 15ث نعامله كخطأ → auto-advance للمصدر التالي.
+           ننتظر استجابة CDN بطيئة قبل اعتبار المصدر معطلاً، ثم نعطي محاولة
+           إنعاش واحدة بمهلة أقصر قبل الانتقال للمصدر التالي.
            نتجاهل حالة الإيقاف المؤقت أو نهاية الحلقة أو حالة الخطأ الموجودة. */
         if (isDraggingRef.current || pendingSeekRef.current) {
           stallRef.current = { lastPos: pos, lastAt: Date.now() };
@@ -1501,7 +1504,11 @@ function ExpoRiftPlayer({
             // تقدّم طبيعي — أعد ضبط العداد وألغِ محاولة الـ nudge السابقة
             stallRef.current = { lastPos: pos, lastAt: Date.now() };
             stallNudgeTriedRef.current = false;
-          } else if (stallRef.current.lastAt > 0 && Date.now() - stallRef.current.lastAt > STALL_TIMEOUT_MS) {
+          } else if (
+            stallRef.current.lastAt > 0
+            && Date.now() - stallRef.current.lastAt
+              > (stallNudgeTriedRef.current ? STALL_RECOVERY_TIMEOUT_MS : STALL_TIMEOUT_MS)
+          ) {
             if (!stallNudgeTriedRef.current) {
               /* محاولة إنعاش أولى بدون إزعاج المستخدم: نفس ما يفعله يدوياً بالتقديم
                  قليلاً — كثيراً ما يكفي لتحرير اختناق مؤقت في HLS proxy. */

@@ -2,6 +2,7 @@ export const SOURCE_AVAILABILITY_PRIORITY = Object.freeze([
   "kawaii",
   "megaplay",
   "animewitcher",
+  "anifox",
   "sanime",
 ]);
 export const SOURCE_AVAILABILITY_CONCURRENCY = 6;
@@ -12,8 +13,10 @@ const MIN_TIMEOUT_MS = Object.freeze({
   consumet_gogo: 40_000,
   animeify: 12_000,
   anslayer: 15_000,
-  anifox: 18_000,
-  animewitcher: 24_000,
+  // Both providers can need sequential catalog + episode lookups on a cold
+  // cache. Keep their scan budgets above those upstream request windows.
+  anifox: 35_000,
+  animewitcher: 45_000,
   anineko: 25_000,
   kawaii: 15_000,
   megaplay: 18_000,

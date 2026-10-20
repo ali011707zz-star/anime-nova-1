@@ -108,7 +108,7 @@ function getHlsBufferConfig() {
     const medium = !slow && (dl < 3.5 || eff === "3g");
     return {
       /* Keep enough future media to cover a slow 10–26s segment response. */
-      maxBufferLength:       slow ? 15  : medium ? 25  : 35,
+      maxBufferLength:       slow ? 25  : medium ? 25  : 35,
       maxMaxBufferLength:    slow ? 60  : medium ? 120 : 240,
       backBufferLength:      isMobile ? (slow ? 10 : 15) : 45,
       maxBufferSize:         (isMobile ? 60 : 160) * 1024 * 1024,
