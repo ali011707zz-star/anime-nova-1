@@ -246,9 +246,22 @@ router.get("/source-catalog/providers", async (_req: Request, res: Response) => 
   });
 });
 
+const STARDIMA_ARCHIVE_FEED_HIDDEN = true;
+
 router.get("/source-catalog/categories", async (req: Request, res: Response) => {
   const provider = providerParam(req.query.provider);
   if (!provider) return void res.status(400).json({ error: "valid provider required" });
+  if (provider === "stardima_catalog" && STARDIMA_ARCHIVE_FEED_HIDDEN) {
+    res.setHeader("Cache-Control", "no-store");
+    return void res.json({
+      provider,
+      totalTitles: 0,
+      classifiedTitles: 0,
+      unclassifiedTitles: 0,
+      categories: [],
+      localizationLabels: [],
+    });
+  }
 
   const result = await catalogQuery(res, "source catalog categories unavailable", async () => {
     const categoryCounts = new Map<string, number>();
@@ -326,6 +339,22 @@ router.get("/source-catalog/titles", async (req: Request, res: Response) => {
   }
   if (category.length > 120 || tag.length > 120) {
     return void res.status(400).json({ error: "category and tag must be 120 characters or fewer" });
+  }
+  if (provider === "stardima_catalog" && STARDIMA_ARCHIVE_FEED_HIDDEN && !section) {
+    res.setHeader("Cache-Control", "no-store");
+    return void res.json({
+      results: [],
+      page,
+      limit,
+      provider,
+      query: q,
+      mediaType: rawMediaType || null,
+      category: category || null,
+      tag: tag || null,
+      catalogStatus: rawCatalogStatus || null,
+      total: 0,
+      providerTotal: 0,
+    });
   }
   if (section) {
     const result = await catalogQuery(res, "source catalog titles unavailable", async () => {

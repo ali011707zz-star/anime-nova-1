@@ -130,16 +130,15 @@ function logPlaybackStage(url: string | undefined, stage: string, detail = ""): 
   console.info(`[playback-trace] id=${trace} component=player stage=${stage}${safeDetail}`);
 }
 
-function getPlaybackBufferOptions(animePlayback: boolean, site?: string) {
-  const isKawaii = String(site || "").toLowerCase() === "kawaii";
+function getPlaybackBufferOptions(animePlayback: boolean) {
   return {
-    preferredForwardBufferDuration: animePlayback ? (isKawaii ? 24 : 22) : 8,
+    preferredForwardBufferDuration: animePlayback ? 24 : 8,
     waitsToMinimizeStalling: animePlayback,
-    minBufferMs: animePlayback ? (isKawaii ? 8000 : 5000) : 3000,
+    minBufferMs: animePlayback ? 8000 : 3000,
     // Keep the cap at 24 seconds; larger values caused OOM on low-memory phones.
     maxBufferMs: 24000,
-    bufferForPlaybackMs: animePlayback && isKawaii ? 1800 : 1000,
-    bufferForPlaybackAfterRebufferMs: animePlayback ? (isKawaii ? 5000 : 3000) : 3500,
+    bufferForPlaybackMs: animePlayback ? 1800 : 1000,
+    bufferForPlaybackAfterRebufferMs: animePlayback ? 5000 : 3500,
     backBufferDurationMs: 3000,
   };
 }
@@ -928,7 +927,7 @@ function ExpoRiftPlayer({
        ⚠️ backBufferDurationMs غير محدّد → يبقي ExoPlayer 30ث من المحتوى
           المُشغَّل في الذاكرة → يُضاعف استهلاك الذاكرة. */
     try {
-      (p as any).bufferOptions = getPlaybackBufferOptions(animePlayback, _initSrc?.site);
+      (p as any).bufferOptions = getPlaybackBufferOptions(animePlayback);
     } catch {}
   });
 
@@ -2374,7 +2373,7 @@ function ExpoRiftPlayer({
         /* replace() يدير إيقاف الـpipeline السابق داخلياً؛ لا نضيف pause()
            قبله لأن استدعاءين native متتاليين كانا سبباً لسباق الكراش. */
         try {
-          (player as any).bufferOptions = getPlaybackBufferOptions(animePlayback, nextSrc.site);
+          (player as any).bufferOptions = getPlaybackBufferOptions(animePlayback);
         } catch {}
         player.replace(toExpoVideoSource(nextSrc) as any);
       } catch (e) {
