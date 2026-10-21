@@ -15219,7 +15219,7 @@ router.get("/anime/sources-stream", scraperQueueMiddleware, async (req, res) => 
       const providerJobs = orderAvailabilityJobs([
         {
           site: "reanime",
-          timeoutMs: sourceAvailabilityJobTimeoutMs("reanime", 15_000),
+          timeoutMs: sourceAvailabilityJobTimeoutMs("reanime", 25_000),
           run: async () => {
             const checked = await checkReanimeEpisode(
               await aniListIdResolution,
@@ -15399,7 +15399,7 @@ router.get("/anime/sources-stream", scraperQueueMiddleware, async (req, res) => 
       // ── ياباني مترجم (AniList ID) ─────────────────────────────────
       scrapeCached("kawaii",       () => getKawaiiAnimeSources(title, english, ep, anilistId), false, 14000),
       scrapeCached("megaplay",     () => getMegaPlayAnimeSources(title, english, ep, anilistId), false, 18000),
-      scrapeCached("reanime",      () => getReanimeSources(anilistId, ep, title, english, titleVariants), false, 70000),
+      scrapeCached("reanime",      () => getReanimeSources(anilistId, ep, title, english, titleVariants), false, 110000),
       // AK and AN are visible in both clients; include them in the first availability pass too.
       // Previously they existed only in fetch-source, so the picker reported them as missing.
       scrapeCached("animekai",     () => getAnimeKaiSources(title, english, ep, anilistId),      false, 26000),

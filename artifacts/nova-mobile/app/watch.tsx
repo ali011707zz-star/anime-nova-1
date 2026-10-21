@@ -774,7 +774,7 @@ const AVAILABILITY_TIMEOUT_MS = 90_000;
 const SITE_TIMEOUT_MAP: Record<string, number> = {
   anifox:       35_000,
   animewitcher: 38_000,
-  reanime:      45_000,
+  reanime:      135_000,
   animeify:     22_000,
   /* Keep this above the backend's 20s SAnime extraction budget. The web
      client uses 28s; mobile must not abort the same repaired source early. */

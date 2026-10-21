@@ -5406,6 +5406,7 @@ export default function WatchPage() {
     /* timeout مُصمَّم لكل موقع — يجب أن يكون >= timeout الباكند لنفس الموقع
        حتى لا يُقتل الطلب قبل أن يرد الباكند (مشكلة جذرية لفقدان المصادر في cache البارد) */
     const SITE_REQUEST_TIMEOUTS: Record<string, number> = {
+      reanime: 135000, // AP0DL can take 70s plus catalog lookup and HLS variant probing
       animewitcher: 42000, // backend = 38s + هامش 4s
       animekai: 36000, // backend = 30s + هامش 6s
       consumet_gogo: 36000,
