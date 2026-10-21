@@ -178,6 +178,36 @@ export function mergeCatalogRows(legacyRows, catalogRows) {
   return merged;
 }
 
+export function mergeDubbedCatalogFeedTitles(current, incoming) {
+  const merged = current.slice();
+  const indexByKey = new Map(
+    merged.map((item, index) => [
+      String(item?.id || item?.provider_title_id || ""),
+      index,
+    ]),
+  );
+
+  for (const item of incoming) {
+    const key = String(item?.id || item?.provider_title_id || "");
+    const existingIndex = indexByKey.get(key);
+    if (existingIndex === undefined) {
+      indexByKey.set(key, merged.length);
+      merged.push(item);
+      continue;
+    }
+
+    const existing = merged[existingIndex];
+    merged[existingIndex] = {
+      ...existing,
+      ...item,
+      poster_url: item?.poster_url || existing?.poster_url || null,
+      backdrop_url: item?.backdrop_url || existing?.backdrop_url || null,
+    };
+  }
+
+  return merged;
+}
+
 function collectTaxonomyLabels(value, output, depth = 0) {
   if (depth > 4 || value == null) return;
   if (typeof value === "string" || typeof value === "number") {

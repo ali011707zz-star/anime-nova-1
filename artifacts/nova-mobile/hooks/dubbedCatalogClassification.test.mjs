@@ -5,6 +5,7 @@ import {
   catalogBadge,
   isLegacyCartoonEntry,
   mergeCatalogRows,
+  mergeDubbedCatalogFeedTitles,
   trustedLegacyBadge,
 } from "./dubbedCatalogClassification.mjs";
 
@@ -187,6 +188,28 @@ test("catalog cards are interleaved near the top and exact legacy duplicates are
     "عنوان جديد",
     "غير موجود",
   ]);
+});
+
+test("new poster metadata refreshes matching cached dubbed-animation rows", () => {
+  const cached = {
+    id: 42,
+    provider_title_id: "42",
+    title: "Sample anime",
+    poster_url: null,
+    backdrop_url: null,
+  };
+  const fresh = {
+    id: 42,
+    provider_title_id: "42",
+    title: "Sample anime",
+    poster_url: "https://images.example/poster.jpg",
+    backdrop_url: "https://images.example/backdrop.jpg",
+  };
+
+  const merged = mergeDubbedCatalogFeedTitles([cached], [fresh]);
+  assert.equal(merged.length, 1);
+  assert.equal(merged[0].poster_url, fresh.poster_url);
+  assert.equal(merged[0].backdrop_url, fresh.backdrop_url);
 });
 
 test("legacy cartoon rows require explicit animation taxonomy or a trusted Arabic-Toons episode URL", () => {

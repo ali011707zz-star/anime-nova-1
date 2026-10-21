@@ -6,6 +6,7 @@ import {
   catalogBadge,
   isLegacyCartoonEntry,
   mergeCatalogRows,
+  mergeDubbedCatalogFeedTitles,
   normalizedLocalizationLabel,
   trustedLegacyBadge,
 } from "./dubbedCatalogClassification.mjs";
@@ -69,19 +70,6 @@ const EMPTY_STATS: DubbedCatalogFeedStats = {
   providerTotal: 0,
 };
 
-function mergeTitles(current: DubbedCatalogTitle[], incoming: DubbedCatalogTitle[]) {
-  const seen = new Set(current.map((item) => String(item.id || item.provider_title_id)));
-  return [
-    ...current,
-    ...incoming.filter((item) => {
-      const key = String(item.id || item.provider_title_id);
-      if (seen.has(key)) return false;
-      seen.add(key);
-      return true;
-    }),
-  ];
-}
-
 export function useDubbedCatalogFeed(
   section: DubbedCatalogSection,
   searchText: string,
@@ -105,7 +93,7 @@ export function useDubbedCatalogFeed(
   const cacheKey = query ? "" : `nova:dubbed-catalog-feed:v4:${section}`;
 
   const appendTitles = useCallback((incoming: DubbedCatalogTitle[], targetCacheKey: string) => {
-    const merged = mergeTitles(itemsRef.current, incoming);
+    const merged = mergeDubbedCatalogFeedTitles(itemsRef.current, incoming);
     itemsRef.current = merged;
     setItems(merged);
     if (targetCacheKey) {
