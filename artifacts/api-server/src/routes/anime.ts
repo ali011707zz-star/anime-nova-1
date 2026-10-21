@@ -52,7 +52,7 @@ import {
 } from "../lib/stardima-playback.mjs";
 import { stardimaPlayableType } from "../jobs/stardima-catalog-utils.mjs";
 import { ANIVEXA_SOURCES, getAnivexaSources, isAnivexaSite } from "../lib/anivexa.js";
-import { decodeReanimeImageSegment, getReanimeSources } from "../lib/reanimeSource.js";
+import { checkReanimeEpisode, decodeReanimeImageSegment, getReanimeSources } from "../lib/reanimeSource.js";
 import {
   CONSUMET_SOURCES,
   decodeEncryptedHlsPlaylist,
@@ -15218,6 +15218,29 @@ router.get("/anime/sources-stream", scraperQueueMiddleware, async (req, res) => 
     if (checkOnly) {
       const providerJobs = orderAvailabilityJobs([
         {
+          site: "reanime",
+          timeoutMs: sourceAvailabilityJobTimeoutMs("reanime", 15_000),
+          run: async () => {
+            const checked = await checkReanimeEpisode(
+              await aniListIdResolution,
+              ep,
+              title,
+              english,
+              titleVariants,
+            );
+            if (!checked.available) return;
+            sendCheckSrc({
+              name: "Re:Anime · الحلقة موجودة",
+              url: "",
+              quality: "720p",
+              qualityRank: 13,
+              site: "reanime",
+              serverCount: checked.serverCount || 1,
+              verified: true,
+            } as UnifiedSource);
+          },
+        },
+        {
           site: "kawaii",
           timeoutMs: sourceAvailabilityJobTimeoutMs("kawaii", 10_000),
           run: () => scrapeCached("kawaii", async signal =>
@@ -15376,6 +15399,7 @@ router.get("/anime/sources-stream", scraperQueueMiddleware, async (req, res) => 
       // ── ياباني مترجم (AniList ID) ─────────────────────────────────
       scrapeCached("kawaii",       () => getKawaiiAnimeSources(title, english, ep, anilistId), false, 14000),
       scrapeCached("megaplay",     () => getMegaPlayAnimeSources(title, english, ep, anilistId), false, 18000),
+      scrapeCached("reanime",      () => getReanimeSources(anilistId, ep, title, english, titleVariants), false, 40000),
       // AK and AN are visible in both clients; include them in the first availability pass too.
       // Previously they existed only in fetch-source, so the picker reported them as missing.
       scrapeCached("animekai",     () => getAnimeKaiSources(title, english, ep, anilistId),      false, 26000),
@@ -15435,8 +15459,7 @@ router.get("/anime/sources-stream", scraperQueueMiddleware, async (req, res) => 
       // animegg:      معطّل بطلب المستخدم
       // allmanga: معطّل 2026-07-17 — AA_CRYPTO_MISSING على endpoint الحلقات (AllAnime أضافت anti-scraping)
       // scrapeCached("allmanga", () => getAllMangaSources(title, english, ep, anilistId), false, 18000),
-      // reanime: re-enabled after live VPS verification
-      // Reanime/RE disabled globally: do not scrape or expose it.
+      // Reanime is checked through the current v1 catalog and resolved on click.
       // animepahe:    mirurotvapi + owocdn AES-128 HLS — 18ث timeout — ثقيل جداً في التشغيل
       // ── مصادر جديدة يوليو 2026 ────────────────────────────────────────────
       scrapeCached("nekowatch",  () => getNekowatchSources(title, english, ep, anilistId),  false, 18000),

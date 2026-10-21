@@ -1,17 +1,20 @@
 import { encryptParam } from "./security.js";
-import { lookupAniListTitle } from "./anilist-title.js";
 import { probeHlsQuality, probeHlsVariants, probeHlsManifest } from "./consumet.js";
+import { buildReanimeFlixUrl, resolveReanimeEpisode } from "./reanimeCatalog.mjs";
 
 const REANIME_BASE = "https://reanime.to";
 const FLIX_ORIGIN = "https://flixcloud.cc";
 const ENC_DEC_BASE = "https://enc-dec.app";
-const REQUEST_TIMEOUT_MS = 8_000;
+const REQUEST_TIMEOUT_MS = 15_000;
 const DEFAULT_XOR_MASK = [157, 42, 241, 71, 179, 142, 92, 112, 166, 25, 228, 59, 216, 98, 15, 197];
 
 type ReanimeServer = {
   serverName?: string;
+  server_name?: string;
   dataLink?: string;
+  data_link?: string;
   dataType?: string;
+  data_type?: string;
   softsub?: boolean;
 };
 
@@ -158,7 +161,7 @@ function parseJsObject(source: string): Record<string, any> {
 }
 
 async function resolveFlixStream(server: ReanimeServer): Promise<{ masterUrl: string; wPayload: string; serverName: string }> {
-  const dataLink = String(server.dataLink || "").trim();
+  const dataLink = String(server.dataLink || server.data_link || "").trim();
   if (!dataLink) throw new Error("missing server embed");
   const embedUrl = new URL(dataLink, `${REANIME_BASE}/`).toString();
   const embedResponse = await fetch(embedUrl, {
@@ -215,7 +218,11 @@ async function resolveFlixStream(server: ReanimeServer): Promise<{ masterUrl: st
   const masterUrl = new URL(`${ENC_DEC_BASE}/api/parse-flixcloud`);
   masterUrl.searchParams.set("url", streamUrl);
   masterUrl.searchParams.set("w_payload", wPayload);
-  return { masterUrl: masterUrl.toString(), wPayload, serverName: server.serverName || "FlixCloud" };
+  return {
+    masterUrl: masterUrl.toString(),
+    wPayload,
+    serverName: server.serverName || server.server_name || "FlixCloud",
+  };
 }
 
 function proxiedVariantUrl(url: string): string {
@@ -235,22 +242,23 @@ export async function getReanimeSources(
   titleVariants: string[] = [],
 ): Promise<ReanimeSource[]> {
   if (!Number.isFinite(ep) || ep < 1) return [];
-  let resolvedAniListId = anilistId;
-  if (!resolvedAniListId) {
-    const match = await lookupAniListTitle([title, english || "", ...titleVariants]);
-    resolvedAniListId = match?.id;
-  }
-  if (!resolvedAniListId) return [];
 
   try {
+    const animeEpisode = await resolveReanimeEpisode({
+      anilistId,
+      episodeNumber: ep,
+      titleCandidates: [title, english || "", ...titleVariants],
+    });
+    if (!animeEpisode) return [];
+
     const response = await getJson<{ success?: boolean; servers?: ReanimeServer[] }>(
-      `${REANIME_BASE}/api/flix/${resolvedAniListId}/${encodeURIComponent(String(ep))}`,
-      `${REANIME_BASE}/`,
+      buildReanimeFlixUrl(animeEpisode.anilistId, animeEpisode.episodeNumber),
+      animeEpisode.watchUrl,
     );
     if (response.success === false) return [];
     const servers = (Array.isArray(response.servers) ? response.servers : [])
       .filter(server => {
-        const audio = String(server.dataType || "sub").trim().toLowerCase();
+        const audio = String(server.dataType || server.data_type || "sub").trim().toLowerCase();
         return audio === "sub" || audio === "raw";
       })
       .slice(0, 8);
@@ -298,8 +306,31 @@ export async function getReanimeSources(
       if (!unique.has(source.directUrl)) unique.set(source.directUrl, source);
     }
     return [...unique.values()].sort((a, b) => b.qualityRank - a.qualityRank);
-  } catch {
+  } catch (error) {
+    console.warn("[Reanime] source resolution failed:", error instanceof Error ? error.message : "unknown error");
     return [];
+  }
+}
+
+export async function checkReanimeEpisode(
+  anilistId: number | undefined,
+  ep: number,
+  title = "",
+  english: string | null = null,
+  titleVariants: string[] = [],
+): Promise<{ available: boolean; serverCount?: number }> {
+  if (!Number.isFinite(ep) || ep < 1) return { available: false };
+  try {
+    const animeEpisode = await resolveReanimeEpisode({
+      anilistId,
+      episodeNumber: ep,
+      titleCandidates: [title, english || "", ...titleVariants],
+    });
+    return animeEpisode
+      ? { available: true, serverCount: 1 }
+      : { available: false };
+  } catch {
+    return { available: false };
   }
 }
 
