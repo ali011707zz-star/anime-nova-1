@@ -6,6 +6,7 @@ import { isWebAdmin } from "./webAdmin.js";
 
 const router = Router();
 const REMOTE_CONFIG_KEY = "remote_config";
+const TEMPORARILY_DISABLED_SOURCES = ["anifox"] as const;
 
 const DEFAULT_CONFIG = {
   version: "1.0.0",
@@ -24,7 +25,7 @@ const DEFAULT_CONFIG = {
     animekai:      true,
     megaplay:      true,
     anineko:       true,
-    anifox:        true,
+    anifox:        false,
     anslayer:      true,
     sanime:        true,
     anipm:         true,
@@ -70,13 +71,15 @@ const DEFAULT_CONFIG = {
 };
 
 function mergeConfig(value: any) {
-  return {
+  const merged = {
     ...DEFAULT_CONFIG,
     ...(value && typeof value === "object" ? value : {}),
     sources: { ...DEFAULT_CONFIG.sources, ...(value?.sources || {}) },
     features: { ...DEFAULT_CONFIG.features, ...(value?.features || {}) },
     limits: { ...DEFAULT_CONFIG.limits, ...(value?.limits || {}) },
   };
+  for (const source of TEMPORARILY_DISABLED_SOURCES) merged.sources[source] = false;
+  return merged;
 }
 
 async function isAdmin(req: any): Promise<boolean> {

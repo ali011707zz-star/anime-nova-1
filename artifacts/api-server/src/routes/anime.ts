@@ -100,6 +100,8 @@ async function pgTranslateSave(key: string, translated: string, from: string, to
   } catch { /* silent */ }
 }
 const router = Router();
+// FX/AniFox is paused until its provider API is reachable again.
+const TEMPORARILY_DISABLED_SOURCE_SITES = new Set(["anifox"]);
 
 async function pipeWebMediaBody(
   body: ReadableStream<Uint8Array> | null,
@@ -1757,6 +1759,7 @@ function unwrapSourceProxyUrl(value: string): string | null {
 }
 
 async function filterAnifoxCachedSources(sources: UnifiedSource[]): Promise<UnifiedSource[]> {
+  if (TEMPORARILY_DISABLED_SOURCE_SITES.has("anifox")) return [];
   const checked = await Promise.allSettled(sources.map(async source => {
     const raw = source.directUrl ? unwrapSourceProxyUrl(source.directUrl) : null;
     if (!raw) return null;
@@ -1837,6 +1840,7 @@ async function getAnifoxSources(
   availabilityOnly = false,
   catalogHint?: CatalogEpisodeHint | null,
 ): Promise<UnifiedSource[]> {
+  if (TEMPORARILY_DISABLED_SOURCE_SITES.has("anifox")) return [];
   if (!availabilityOnly && catalogHint?.servers.length) {
     const catalogSources = await getCatalogPageSources("anifox", catalogHint);
     if (catalogSources.length) return catalogSources;
@@ -14765,6 +14769,7 @@ router.get("/anime/sources-stream", scraperQueueMiddleware, async (req, res) => 
       timeoutMs = SCRAPER_MS,
     ) {
       if (!title || closed) return;
+      if (TEMPORARILY_DISABLED_SOURCE_SITES.has(site)) return;
       const effectiveTimeoutMs = checkOnly
         ? sourceAvailabilityTimeoutMs(site, timeoutMs)
         : timeoutMs;
@@ -15070,7 +15075,7 @@ router.get("/anime/sources-stream", scraperQueueMiddleware, async (req, res) => 
           run: () => scrapeCached("animekai", async () =>
             getAnimeKaiSources(title, english, ep, await aniListIdResolution, true), false, 5000),
         },
-      ]);
+      ].filter(job => !TEMPORARILY_DISABLED_SOURCE_SITES.has(job.site)));
       const scanDeadlineMs = sourceAvailabilityScanTimeoutMs(
         providerJobs,
         SOURCE_AVAILABILITY_CONCURRENCY,
