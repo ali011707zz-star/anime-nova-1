@@ -52,6 +52,7 @@ import {
 } from "../lib/stardima-playback.mjs";
 import { stardimaPlayableType } from "../jobs/stardima-catalog-utils.mjs";
 import { ANIVEXA_SOURCES, getAnivexaSources, isAnivexaSite } from "../lib/anivexa.js";
+import { decodeReanimeImageSegment, getReanimeSources } from "../lib/reanimeSource.js";
 import {
   CONSUMET_SOURCES,
   decodeEncryptedHlsPlaylist,
@@ -15738,6 +15739,7 @@ router.get("/anime/fetch-source", scraperQueueMiddleware, async (req, res) => {
   const DISABLED_ANIME_SOURCES = new Set([
     "anikoto", "shirayuki_anikoto", "shirayuki_animix",
     "anivexa_anikoto", "anivexa_anidbapp",
+    "anivexa_re",
     "consumet_world", "consumet_miruro", "consumet_saturn",
     "consumet_reanime", "consumet_anikoto", "anime4up2",
     // Retired provider ids and legacy short tags. Keep these blocked so stale
@@ -15753,6 +15755,30 @@ router.get("/anime/fetch-source", scraperQueueMiddleware, async (req, res) => {
   if (DISABLED_ANIME_SOURCES.has(site)) {
     if (progressive) finishProgressiveResponse("provider_disabled");
     else res.json({ sources: [] });
+    return;
+  }
+  if (site === "reanime") {
+    let sources: UnifiedSource[] = [];
+    try {
+      sources = filterRequestedQuality(
+        await getReanimeSources(anilistId, ep, title, english, titleVariants),
+      );
+    } catch (error: any) {
+      logger.warn({ provider: "reanime", error: error?.message || "provider failed" }, "Reanime source fetch failed");
+      if (progressive) { finishProgressiveResponse("provider_failed"); return; }
+      throw error;
+    }
+    if (progressive) { await sendProgressiveBatch(sources); return; }
+    const encSources = sources.map(source => {
+      const wrapped = isMobileClient ? wrapForMobile(source) : source;
+      return {
+        ...wrapped,
+        directUrl: wrapped.directUrl
+          ? (wrapped.corsOk ? wrapped.directUrl : encryptProxyUrl(wrapped.directUrl))
+          : wrapped.directUrl,
+      };
+    });
+    res.json({ sources: encSources });
     return;
   }
   if (isAnivexaSite(site)) {
@@ -18095,6 +18121,18 @@ function toVpsSegmentOrClient(absUrl: string, ref: string, trace = ""): string {
   return toVpsSegProxy(absUrl, ref, trace);
 }
 
+function hlsRefererForTarget(absUrl: string, fallbackRef: string): string {
+  try {
+    const host = new URL(absUrl).hostname.toLowerCase();
+    if (host === "enc-dec.app" || host.endsWith(".enc-dec.app")) return "https://enc-dec.app/";
+    if (
+      /(?:^|\/)enc-dec\.app(?:\/|$)/i.test(fallbackRef) ||
+      /flixcloud\.cc/i.test(fallbackRef)
+    ) return "https://flixcloud.cc/";
+  } catch {}
+  return fallbackRef;
+}
+
 // ── إعادة كتابة M3U8 بروابط مطلقة عبر VPS seg-proxy ─────────────────────────
 // يستخدم السياق (EXT-X-STREAM-INF) لتحديد هل السطر playlist أم segment
 // جميع الروابط مطلقة (https://...) لضمان صحة تفسير ExoPlayer
@@ -18122,11 +18160,12 @@ function rewriteM3u8ForVPS(
     if ((t.startsWith("#EXT-X-KEY") || t.startsWith("#EXT-X-MEDIA") || t.startsWith("#EXT-X-MAP")) && t.includes('URI="')) {
       const rewritten = t.replace(/URI="([^"]+)"/g, (_, uri) => {
         const abs = toAbsoluteUrl(uri, baseUrl);
+        const targetRef = hlsRefererForTarget(abs, ref);
         // EXT-X-MEDIA قد تشير لـ playlist (صوت/ترجمة بديلة)
         if (t.startsWith("#EXT-X-MEDIA") && /\.m3u8/i.test(uri)) {
-            return `URI="${toVpsHlsProxy(abs, ref, manifestKey, trace)}"`;
+            return `URI="${toVpsHlsProxy(abs, targetRef, manifestKey, trace)}"`;
         }
-        return `URI="${toVpsSegmentOrClient(abs, ref, trace)}"`;
+        return `URI="${toVpsSegmentOrClient(abs, targetRef, trace)}"`;
       });
       out.push(rewritten); continue;
     }
@@ -18135,10 +18174,11 @@ function rewriteM3u8ForVPS(
 
     // سطر URL: variant playlist أو segment
     const abs = toAbsoluteUrl(t, baseUrl);
+    const targetRef = hlsRefererForTarget(abs, ref);
     if (nextIsPlaylist || /\.m3u8(\?|#|$)/i.test(t)) {
-      out.push(toVpsHlsProxy(abs, ref, manifestKey, trace));
+      out.push(toVpsHlsProxy(abs, targetRef, manifestKey, trace));
     } else {
-      out.push(toVpsSegmentOrClient(abs, ref, trace));
+      out.push(toVpsSegmentOrClient(abs, targetRef, trace));
     }
     nextIsPlaylist = false;
   }
@@ -19122,6 +19162,27 @@ router.get("/anime/seg-proxy", async (req, res) => {
   /** مساعد داخلي: يخدم segment من response جاهز (مع دعم PNG wrapper + تصحيح Content-Type) */
   async function serveSegResponse(r: Response): Promise<boolean> {
     const ct = (r.headers.get("content-type") || "").toLowerCase();
+    const reanimeFlixReferer = /^https?:\/\/(?:www\.)?flixcloud\.cc(?:\/|$)/i.test(ref);
+    if (reanimeFlixReferer && (Number(r.headers.get("content-length") || 0) <= 30 * 1024 * 1024)) {
+      const raw = await r.arrayBuffer();
+      const decoded = await decodeReanimeImageSegment(raw);
+      if (decoded) {
+        res.setHeader("Content-Type", "video/MP2T");
+        res.setHeader("Content-Length", String(decoded.length));
+        res.setHeader("Accept-Ranges", "bytes");
+        res.setHeader("Cache-Control", "public, max-age=60");
+        res.status(200).end(decoded);
+        return true;
+      }
+      const original = Buffer.from(raw);
+      if (ct.startsWith("image/")) return false;
+      res.setHeader("Content-Type", r.headers.get("content-type") || "video/MP2T");
+      res.setHeader("Content-Length", String(original.length));
+      res.setHeader("Accept-Ranges", "bytes");
+      res.setHeader("Cache-Control", "public, max-age=60");
+      res.status(200).end(original);
+      return true;
+    }
     const mightBePng =
       ct.startsWith("image/") ||
       ct === "application/octet-stream" ||

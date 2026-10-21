@@ -33,6 +33,7 @@ const DEFAULT_CONFIG = {
     vidfast:       true,
     vidlink_anim:  true,
     anivexa_re:    false,
+    reanime:       true,
     seepanel:     true,
     arabseed:     true,
     animephoenix: true,

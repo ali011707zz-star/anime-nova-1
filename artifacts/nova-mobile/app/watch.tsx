@@ -120,7 +120,7 @@ const SITE_TAG: Record<string, string> = {
   ristoanime: "RS", animeify: "AF", animeday: "DY", arabseed: "AR",
   anime4up2: "4U", mycima: "MC", topcinemaa: "TC",
   animewitcher: "AW", kawaii: "KW", megaplay: "MP", anineko: "AN",
-  animekai: "AK", consumet_gogo: "GO",
+  animekai: "AK", consumet_gogo: "GO", reanime: "RE",
   vidlink_anim: "VL", vidfast: "VF",
   animetime: "AT", animepahe: "AP", dulo_anim: "DL",
   faselhd_db: "FH",
@@ -132,7 +132,7 @@ const SITE_TAG: Record<string, string> = {
 
 /* ── اسم عرض لكل موقع في منتقي المصادر ── */
 const SITE_LABEL: Record<string, string> = {
-  kawaii: "Kawaii", megaplay: "MegaPlay", animekai: "AnimeKai",
+  kawaii: "Kawaii", megaplay: "MegaPlay", reanime: "Re:Anime", animekai: "AnimeKai",
   consumet_gogo: "GogoAnime", animewitcher: "AnimeWitcher",
   anineko: "AniNeko",
   dulo_anim: "Dulo",
@@ -156,6 +156,7 @@ function getSiteTag(site: string): string {
 /* ── وصف قصير لكل مصدر في شبكة الاختيار (يطابق نظام الويب) ── */
 const SITE_DESC: Record<string, string> = {
   kawaii: "1080p · مباشر", megaplay: "HLS · صوت خام · ترجمة Kawaii",
+  reanime: "HLS · صوت خام · ترجمة Kawaii",
   anineko: "HLS · متعدد الجودات", animekai: "HLS · ياباني + ترجمة",
   consumet_gogo: "HLS · صوت خام · كل الجودات", animewitcher: "PD/ST · مباشر",
   dulo_anim: "ياباني/إنجليزي · HLS مباشر",
@@ -461,7 +462,7 @@ function buildEmbeddedDownloadUrl(
 
 /* Web's canonical Arabic subtitle policy: KW supplies the track for the
    Japanese raw-audio providers AN/AK/MP as well as for KW itself. */
-const KAWAII_SUBTITLE_SITES = new Set(["kawaii", "anineko", "animekai", "megaplay"]);
+const KAWAII_SUBTITLE_SITES = new Set(["kawaii", "reanime", "anineko", "animekai", "megaplay"]);
 const DOWNLOAD_SUBTITLE_SITES = KAWAII_SUBTITLE_SITES;
 
 function normalizeProviderSubtitleUrl(
@@ -534,6 +535,7 @@ const STATIC_PICKER: Record<QualityKey, { site: string; name: string; tag: strin
   "1080p": [
     { site: "kawaii",       name: "كواي أنمي",   tag: "KW" },
     { site: "megaplay",     name: "MegaPlay",    tag: "MP" },
+    { site: "reanime",      name: "Re:Anime",    tag: "RE" },
     { site: "anineko",      name: "AniNeko",      tag: "AN" },
     { site: "animewitcher", name: "AnimeWitcher", tag: "AW" },
     { site: "anslayer",     name: "AnimeSlayer",  tag: "AS" },
@@ -545,6 +547,7 @@ const STATIC_PICKER: Record<QualityKey, { site: string; name: string; tag: strin
   ],
   "720p": [
     { site: "megaplay",     name: "MegaPlay",    tag: "MP" },
+    { site: "reanime",      name: "Re:Anime",    tag: "RE" },
     { site: "anineko",      name: "AniNeko",      tag: "AN" },
     { site: "animewitcher", name: "AnimeWitcher", tag: "AW" },
     { site: "anslayer",     name: "AnimeSlayer",  tag: "AS" },
@@ -556,6 +559,7 @@ const STATIC_PICKER: Record<QualityKey, { site: string; name: string; tag: strin
   ],
   "360p": [
     { site: "megaplay",     name: "MegaPlay",    tag: "MP" },
+    { site: "reanime",      name: "Re:Anime",    tag: "RE" },
     { site: "anineko",      name: "AniNeko",      tag: "AN" },
     { site: "animewitcher", name: "AnimeWitcher", tag: "AW" },
     { site: "animeify",     name: "أنمي فاي",    tag: "AF" },
@@ -565,6 +569,7 @@ const STATIC_PICKER: Record<QualityKey, { site: string; name: string; tag: strin
   ],
   "480p": [
     { site: "megaplay",     name: "MegaPlay",    tag: "MP" },
+    { site: "reanime",      name: "Re:Anime",    tag: "RE" },
     { site: "anineko",      name: "AniNeko",      tag: "AN" },
     { site: "animewitcher", name: "AnimeWitcher", tag: "AW" },
     { site: "animeify",     name: "أنمي فاي",    tag: "AF" },
@@ -769,6 +774,7 @@ const AVAILABILITY_TIMEOUT_MS = 90_000;
 const SITE_TIMEOUT_MAP: Record<string, number> = {
   anifox:       35_000,
   animewitcher: 38_000,
+  reanime:      45_000,
   animeify:     22_000,
   /* Keep this above the backend's 20s SAnime extraction budget. The web
      client uses 28s; mobile must not abort the same repaired source early. */
