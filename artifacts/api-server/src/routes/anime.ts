@@ -3204,15 +3204,45 @@ async function extractAndCollect(
  * falling back to a provider-wide search. Catalog rows are references only:
  * final MP4/HLS URLs are still resolved on demand and are never persisted.
  */
+type ProviderQualityTier = "1080p" | "720p" | "480p" | "360p";
+
+function providerQualityTier(value: unknown): ProviderQualityTier | null {
+  const text = String(value ?? "").toLowerCase();
+  if (/(2160|1440|1080|uhd|fhd)/.test(text)) return "1080p";
+  if (/(720|hd)/.test(text)) return "720p";
+  if (/(480|sd)/.test(text)) return "480p";
+  if (/360/.test(text)) return "360p";
+  return null;
+}
+
 async function getCatalogPageSources(
   provider: CatalogEpisodeHint["provider"],
   hint: CatalogEpisodeHint,
   timeoutMs = 9000,
+  options: { requestedQuality?: ProviderQualityTier | null; firstPlayable?: boolean } = {},
 ): Promise<UnifiedSource[]> {
   const direct: UnifiedSource[] = [];
   const pages: UnifiedSource[] = [];
+  const eligibleServers = hint.servers.filter(server =>
+    !options.requestedQuality ||
+    providerQualityTier(server.quality) === options.requestedQuality,
+  );
 
-  for (const server of hint.servers) {
+  if (options.firstPlayable && options.requestedQuality) {
+    // Try same-quality catalog mirrors in their stored order. Stop at the first
+    // playable server, using the next mirror only when the preferred one fails.
+    for (const server of eligibleServers) {
+      const resolved = await getCatalogPageSources(
+        provider,
+        { ...hint, servers: [server] },
+        timeoutMs,
+      );
+      if (resolved.length) return resolved.slice(0, 1);
+    }
+    return [];
+  }
+
+  for (const server of eligibleServers) {
     const pageUrl = String(server.page_url || "").trim();
     if (!/^https?:\/\//i.test(pageUrl)) continue;
     if (["dead", "unsupported"].includes(String(server.availability_status || "").toLowerCase())) continue;
@@ -5917,10 +5947,16 @@ async function getAnimeifySourcesUncached(
   variants: string[] = [],
   availabilityOnly = false,
   catalogHint?: CatalogEpisodeHint | null,
+  requestedQuality?: ProviderQualityTier | null,
 ): Promise<UnifiedSource[]> {
   try {
     if (!availabilityOnly && catalogHint?.servers.length) {
-      const catalogSources = await getCatalogPageSources("animeify", catalogHint);
+      const catalogSources = await getCatalogPageSources(
+        "animeify",
+        catalogHint,
+        9000,
+        { requestedQuality, firstPlayable: Boolean(requestedQuality) },
+      );
       if (catalogSources.length) return catalogSources;
     }
     const creds = await getAnimeifyCreds();
@@ -6033,6 +6069,133 @@ async function getAnimeifySourcesUncached(
           quality: row.quality, qualityRank: row.qualityRank, site: "animeify",
           verified: true,
         } as UnifiedSource));
+    }
+
+    if (requestedQuality) {
+      const resolveMediaFire = async (
+        key: string,
+        name: string,
+        quality: "FHD" | "HD" | "SD",
+        qualityRank: number,
+      ): Promise<UnifiedSource | null> => {
+        const pageUrl = String(epData[key] || "").trim();
+        if (!pageUrl) return null;
+        const direct = await extractMediafireDirect(pageUrl).catch(() => null);
+        if (!direct) return null;
+        return {
+          name: `Animeify · ${name} · ${quality}`,
+          url: pageUrl,
+          quality,
+          qualityRank,
+          site: "animeify",
+          directUrl: `/api/anime/video-proxy?url=${encodeURIComponent(direct)}&ref=${encodeURIComponent("https://www.mediafire.com/")}`,
+          directType: "mp4",
+        };
+      };
+      const resolveFileMoon = async (
+        value: string,
+        quality: "FHD" | "HD",
+        qualityRank: number,
+      ): Promise<UnifiedSource | null> => {
+        const link = String(value || "").trim();
+        if (!link) return null;
+        const pageUrl = link.startsWith("http") ? link : `https://filemoon.sx/e/${link}`;
+        const extracted = await extractVideoDeep(pageUrl, pageUrl).catch(() => null);
+        if (!extracted?.url) return null;
+        return {
+          name: `Animeify · FileMoon · ${quality}`,
+          url: pageUrl,
+          quality,
+          qualityRank,
+          site: "animeify",
+          directUrl: extracted.type === "hls"
+            ? `/api/anime/hls-proxy?url=${encodeURIComponent(extracted.url)}&ref=${encodeURIComponent(pageUrl)}`
+            : `/api/anime/video-proxy?url=${encodeURIComponent(extracted.url)}&ref=${encodeURIComponent(pageUrl)}`,
+          directType: extracted.type,
+        };
+      };
+      const resolveEmbed = (
+        value: string,
+        name: string,
+        quality: "HD" | "SD",
+        qualityRank: number,
+      ): UnifiedSource | null => {
+        const link = String(value || "").trim();
+        if (!link) return null;
+        const url = link.startsWith("http") ? link : `https://sendvid.com/embed/${link}`;
+        return {
+          name: `Animeify · ${name} · ${quality}`,
+          url,
+          quality,
+          qualityRank,
+          site: "animeify",
+          directUrl: url,
+          isEmbed: true,
+        };
+      };
+      const resolveDirectDeep = async (
+        value: string,
+        name: string,
+        quality: "HD" | "SD",
+        qualityRank: number,
+        makeUrl: (value: string) => string,
+      ): Promise<UnifiedSource | null> => {
+        const raw = String(value || "").trim();
+        if (!raw) return null;
+        const pageUrl = makeUrl(raw);
+        const extracted = await extractVideoDeep(pageUrl, pageUrl).catch(() => null);
+        if (!extracted?.url) return null;
+        return {
+          name: `Animeify · ${name} · ${quality}`,
+          url: pageUrl,
+          quality,
+          qualityRank,
+          site: "animeify",
+          directUrl: extracted.type === "hls"
+            ? `/api/anime/hls-proxy?url=${encodeURIComponent(extracted.url)}&ref=${encodeURIComponent(pageUrl)}`
+            : `/api/anime/video-proxy?url=${encodeURIComponent(extracted.url)}&ref=${encodeURIComponent(pageUrl)}`,
+          directType: extracted.type,
+        };
+      };
+      const targetCandidates: Array<() => Promise<UnifiedSource | null>> =
+        requestedQuality === "1080p"
+          ? [
+              () => resolveMediaFire("FRFhdQ", "MediaFire", "FHD", 29),
+              () => resolveFileMoon(String(epData.FDLink || ""), "FHD", 30),
+            ]
+          : requestedQuality === "720p"
+            ? [
+                () => resolveMediaFire("FRLink", "MediaFire", "HD", 28),
+                async () => resolveEmbed(String(epData.SVLink || ""), "SendVid", "HD", 22),
+                () => resolveFileMoon(String(epData.SFLink || ""), "HD", 27),
+                () => resolveDirectDeep(
+                  String(epData.GDLink || ""),
+                  "Google Drive",
+                  "HD",
+                  26,
+                  value => {
+                    if (!value.startsWith("http")) return `https://drive.google.com/uc?export=download&confirm=t&id=${value}`;
+                    const id = new URL(value).searchParams.get("id") || value.match(/\/d\/([^/?#]+)/)?.[1];
+                    return id ? `https://drive.google.com/uc?export=download&confirm=t&id=${id}` : value;
+                  },
+                ),
+                () => resolveDirectDeep(String(epData.VKLink || ""), "VK Video", "HD", 7,
+                  value => value.startsWith("http") ? value : `https://vk.com/video_ext.php?${value}`),
+                () => resolveDirectDeep(String(epData.DELink || ""), "Dailymotion", "HD", 6,
+                  value => value.startsWith("http") ? value : `https://www.dailymotion.com/embed/video/${value}`),
+              ]
+            : requestedQuality === "480p"
+              ? [
+                  () => resolveMediaFire("FRLowQ", "MediaFire", "SD", 26),
+                  () => resolveDirectDeep(String(epData.OKLink || ""), "OK.ru", "SD", 5,
+                    value => value.startsWith("http") ? value : `https://ok.ru/videoembed/${value}`),
+                ]
+              : [];
+      for (const resolve of targetCandidates) {
+        const source = await resolve().catch(() => null);
+        if (source && providerQualityTier(source.quality) === requestedQuality) return [source];
+      }
+      return [];
     }
 
     const sources: UnifiedSource[] = [];
@@ -6316,11 +6479,12 @@ async function getAnimeifySources(
   variants: string[] = [],
   availabilityOnly = false,
   catalogHint?: CatalogEpisodeHint | null,
+  requestedQuality?: ProviderQualityTier | null,
 ): Promise<UnifiedSource[]> {
-  const key = `animeify:${catalogHint?.providerTitleId || normalize(english || title).replace(/\s+/g, "-")}:${ep}:${availabilityOnly ? "availability" : "playback"}`;
+  const key = `animeify:${catalogHint?.providerTitleId || normalize(english || title).replace(/\s+/g, "-")}:${ep}:${availabilityOnly ? "availability" : `playback:${requestedQuality || "any"}`}`;
   const active = _animeifyInFlight.get(key);
   if (active) return active;
-  const promise = getAnimeifySourcesUncached(title, english, ep, variants, availabilityOnly, catalogHint);
+  const promise = getAnimeifySourcesUncached(title, english, ep, variants, availabilityOnly, catalogHint, requestedQuality);
   _animeifyInFlight.set(key, promise);
   try {
     return await promise;
@@ -9560,10 +9724,34 @@ async function awBuildSourcesFromDb(rows: AwLinkRow[], parentSignal?: AbortSigna
 
 async function getAnimeWitcherSources(
   title: string, english: string | null, ep: number, _anilistId?: number, variants: string[] = [],
-  availabilityOnly = false, signal?: AbortSignal,
+  availabilityOnly = false, signal?: AbortSignal, requestedQuality?: ProviderQualityTier | null,
 ): Promise<UnifiedSource[]> {
   try {
     if (signal?.aborted) return [];
+    const buildAwSources = async (rows: AwLinkRow[]): Promise<UnifiedSource[]> => {
+      if (availabilityOnly || !requestedQuality) return awBuildSourcesFromDb(rows, signal);
+      const priority: Record<string, number> = { PD: 100, KF: 80, MF2: 60, MF: 50, ST: 30, VT: 20 };
+      const candidates = rows
+        .filter(row => {
+          const server = String(row.server || "").toUpperCase();
+          return server === "VT" || normalizeAwQuality(
+            `${row.quality || ""} ${row.server || ""} ${row.ep_id || ""} ${row.link || ""}`,
+          ) === requestedQuality;
+        })
+        .sort((a, b) =>
+          (priority[String(b.server || "").toUpperCase()] || 0) -
+          (priority[String(a.server || "").toUpperCase()] || 0),
+        );
+      for (const row of candidates) {
+        if (signal?.aborted) return [];
+        const resolved = await awBuildSourcesFromDb([row], signal);
+        const exactQuality = resolved.filter(source =>
+          normalizeAwQuality(`${source.quality || ""} ${source.name || ""}`) === requestedQuality,
+        );
+        if (exactQuality.length) return exactQuality.slice(0, 1);
+      }
+      return [];
+    };
     // ── DB-first path: aw_links (142k pre-loaded) — أسرع بـ ~10x من Algolia ─
     if (_anilistId) {
       const dbRows = await awDbLookup(_anilistId, ep);
@@ -9589,12 +9777,12 @@ async function getAnimeWitcherSources(
           }
           console.log(`[AW] DB availability incomplete (${dbQualities.size} quality tiers) — refreshing Firestore`);
         }
-        const dbSources = await awBuildSourcesFromDb(dbRows, signal);
+        const dbSources = await buildAwSources(dbRows);
         if (signal?.aborted) return [];
         const dbQualities = new Set(dbSources.map(source => normalizeAwQuality(
           `${source.quality || ""} ${source.name || ""}`,
         )));
-        if (dbSources.length && dbQualities.size >= 2) {
+        if (dbSources.length && (requestedQuality || dbQualities.size >= 2)) {
           console.log(`[AW] ✅ DB-path: ${dbSources.length} sources`);
           return dbSources;
         }
@@ -9607,12 +9795,12 @@ async function getAnimeWitcherSources(
       const titleRows = await awDbLookupByTitle(title, ep);
       if (signal?.aborted) return [];
       if (titleRows.length) {
-        const titleSources = await awBuildSourcesFromDb(titleRows, signal);
+        const titleSources = await buildAwSources(titleRows);
         if (signal?.aborted) return [];
         const titleQualities = new Set(titleSources.map(source => normalizeAwQuality(
           `${source.quality || ""} ${source.name || ""}`,
         )));
-        if (titleSources.length && titleQualities.size >= 2) return titleSources;
+        if (titleSources.length && (requestedQuality || titleQualities.size >= 2)) return titleSources;
       }
     }
     // title fallback (بدون anilistId)
@@ -9620,12 +9808,12 @@ async function getAnimeWitcherSources(
       const titleRows = await awDbLookupByTitle(title, ep);
       if (signal?.aborted) return [];
       if (titleRows.length) {
-        const titleSources = await awBuildSourcesFromDb(titleRows, signal);
+        const titleSources = await buildAwSources(titleRows);
         if (signal?.aborted) return [];
         const titleQualities = new Set(titleSources.map(source => normalizeAwQuality(
           `${source.quality || ""} ${source.name || ""}`,
         )));
-        if (titleSources.length && titleQualities.size >= 2) return titleSources;
+        if (titleSources.length && (requestedQuality || titleQualities.size >= 2)) return titleSources;
       }
     }
 
@@ -9740,6 +9928,11 @@ async function getAnimeWitcherSources(
     )) {
       const srvName = srv.name.toUpperCase();
       const q       = String(srv.quality || "720p").replace(/p$/i, "p");
+      if (
+        requestedQuality &&
+        srvName !== "VT" &&
+        normalizeAwQuality(`${q} ${srv.name || ""} ${srv.url || ""}`) !== requestedQuality
+      ) continue;
       const qRank   = q === "1080p" ? 22 : q === "720p" ? 21 : q === "480p" ? 10 : 5;
       const qLabel  = q === "1080p" ? "FHD 1080p" : q === "720p" ? "HD 720p" : q;
 
@@ -9817,6 +10010,7 @@ async function getAnimeWitcherSources(
             if (vtResult.type === "hls") {
               const hlsVariants = await awResolveHlsVariants(vtResult.url, srv.url);
               for (const variant of hlsVariants) {
+                if (requestedQuality && normalizeAwQuality(variant.label) !== requestedQuality) continue;
                 const directUrl = `/api/anime/hls-proxy?url=${encodeURIComponent(variant.url)}&ref=${encodeURIComponent(srv.url)}`;
                 sources.push({
                   name: `AnimeWitcher · ${variant.label} · VT`,
@@ -9835,6 +10029,7 @@ async function getAnimeWitcherSources(
           }
         } catch {}
       }
+      if (requestedQuality && sources.length) return sources.slice(0, 1);
     }
 
     // BUNNY: محذوف 2026-07-28 — vz-*.b-cdn.net "Domain suspended or not configured"
@@ -13376,17 +13571,22 @@ async function mapAnslayerLinks(
   links: string[],
   work: (link: string) => Promise<UnifiedSource | null>,
   onSource?: AnslayerSourceListener,
+  requestedQuality?: ProviderQualityTier | null,
 ): Promise<Array<UnifiedSource | null>> {
   const results: Array<UnifiedSource | null> = new Array(links.length);
   let cursor = 0;
   const worker = async () => {
     while (true) {
+      if (requestedQuality && results.some(Boolean)) return;
       const index = cursor++;
       if (index >= links.length) return;
       let source: UnifiedSource | null = null;
       try {
         source = await work(links[index]);
       } catch {
+        source = null;
+      }
+      if (source && requestedQuality && providerQualityTier(`${source.quality || ""} ${source.name || ""}`) !== requestedQuality) {
         source = null;
       }
       results[index] = source;
@@ -13428,10 +13628,11 @@ async function getAnimeSlayerSourcesUncached(
   catalogHint?: CatalogEpisodeHint | null,
   onSource?: AnslayerSourceListener,
   availabilityOnly = false,
+  requestedQuality?: ProviderQualityTier | null,
 ): Promise<UnifiedSource[]> {
   const ck = `${availabilityOnly ? "availability:" : ""}${directAnimeId
     ? `anslayer:id:${directAnimeId}:${ep}`
-    : `anslayer:${normalize(english || title).replace(/\s+/g, "-")}:${ep}`}`;
+    : `anslayer:${normalize(english || title).replace(/\s+/g, "-")}:${ep}`}${requestedQuality ? `:quality:${requestedQuality}` : ""}`;
   const hit = _anslayerCacheMap.get(ck);
   const cacheTtl = availabilityOnly ? ANSLAYER_AVAILABILITY_TTL : ANSLAYER_TTL;
   if (hit && Date.now() - hit.ts < cacheTtl) {
@@ -13613,6 +13814,7 @@ async function getAnimeSlayerSourcesUncached(
         } catch { return null; }
       },
       onSource,
+      requestedQuality,
     );
     for (const source of linkResults) if (source) out.push(source);
 
@@ -13638,12 +13840,13 @@ async function getAnimeSlayerSources(
   catalogHint?: CatalogEpisodeHint | null,
   onSource?: AnslayerSourceListener,
   availabilityOnly = false,
+  requestedQuality?: ProviderQualityTier | null,
 ): Promise<UnifiedSource[]> {
   const key = `${availabilityOnly ? "availability:" : ""}${catalogHint?.providerTitleId
     ? `anslayer:catalog:${catalogHint.providerTitleId}:${ep}`
     : directAnimeId
     ? `anslayer:id:${directAnimeId}:${ep}`
-    : `anslayer:${normalize(english || title).replace(/\s+/g, "-")}:${ep}`}`;
+    : `anslayer:${normalize(english || title).replace(/\s+/g, "-")}:${ep}`}${requestedQuality ? `:quality:${requestedQuality}` : ""}`;
   if (onSource) {
     const listeners = _anslayerProgressListeners.get(key) || new Set<AnslayerSourceListener>();
     listeners.add(onSource);
@@ -13675,6 +13878,7 @@ async function getAnimeSlayerSources(
       ));
     },
     availabilityOnly,
+    requestedQuality,
   );
   _anslayerInFlight.set(key, promise);
   try {
@@ -14214,6 +14418,8 @@ router.get("/anime/sources-stream", scraperQueueMiddleware, async (req, res) => 
   const format    = ((req.query.format  as string) || "").trim().toUpperCase();
   const isMovie   = format === "MOVIE" || format === "MOVIE_SHORT";
   const checkOnly = String(req.query.mode || "").toLowerCase() === "check";
+  const fromLatest = String(req.query.fromLatest || "") === "1";
+  const latestSource = String(req.query.latestSource || "").trim().toLowerCase();
   const sourceCheckTrace = readPlaybackTrace(req.query.trace);
   const sourceCheckStartedAt = Date.now();
   tracePlayback(
@@ -15035,19 +15241,27 @@ router.get("/anime/sources-stream", scraperQueueMiddleware, async (req, res) => 
         },
         {
           site: "anslayer",
-          timeoutMs: sourceAvailabilityJobTimeoutMs("anslayer", 15_000),
-          run: () => useCatalogAvailability("anslayer", hint => scrapeCached("anslayer", async () => {
-            return getAnimeSlayerSources(
-              title,
-              english,
-              ep,
-              Number(hint?.providerTitleId || anslayerId || 0) || undefined,
-              titleAr,
-              hint,
-              undefined,
-              true,
-            );
-          }, false, 15_000)),
+          timeoutMs: fromLatest && latestSource === "anslayer"
+            ? 45_000
+            : sourceAvailabilityJobTimeoutMs("anslayer", 15_000),
+          run: () => useCatalogAvailability("anslayer", async hint => {
+            const directId = Number(hint?.providerTitleId || anslayerId || 0) || undefined;
+            if (fromLatest && latestSource === "anslayer") {
+              const availabilityWrites: Promise<UnifiedSource[]>[] = [];
+              const onSource: AnslayerSourceListener = source => {
+                availabilityWrites.push(emitAvailability([source]));
+              };
+              const resolved = await getAnimeSlayerSources(
+                title, english, ep, directId, titleAr, hint, onSource, false,
+              );
+              availabilityWrites.push(emitAvailability(resolved));
+              await Promise.all(availabilityWrites);
+              return resolved;
+            }
+            return scrapeCached("anslayer", async () => getAnimeSlayerSources(
+              title, english, ep, directId, titleAr, hint, undefined, true,
+            ), false, 15_000);
+          }, false, fromLatest && latestSource === "anslayer" ? 45_000 : 15_000),
         },
         {
           site: "animeify",
@@ -15840,7 +16054,7 @@ router.get("/anime/fetch-source", scraperQueueMiddleware, async (req, res) => {
       case "animedar":     await runExtract(await race(getAnimadarSources(title, english, ep, isMovie),   SCRAPER_MS, [])); break;
       // case "okanime": معطّل بطلب المستخدم
       // case "mitanime": محذوف بطلب المستخدم 2026-07-27
-      case "animeify":    (await race(getAnimeifySources(title, english, ep, titleVariants, false, catalogHint),  18000, [])).forEach(collectSrc); break;
+      case "animeify":    (await race(getAnimeifySources(title, english, ep, titleVariants, false, catalogHint, requestedQuality),  18000, [])).forEach(collectSrc); break;
       case "animeday":     await runExtract(await race(getAnimeDaySources(title, english, ep),   SCRAPER_MS, [])); break;
       // case "seepanel": DEAD
       case "arabseed":     await runExtract(await race(getArabSeedSources(title, english, ep),   SCRAPER_MS, [])); break;
@@ -15860,7 +16074,7 @@ router.get("/anime/fetch-source", scraperQueueMiddleware, async (req, res) => {
       // anikuro: محذوف
       // anivault: محذوف
       // case "hianime": معطّل بطلب المستخدم 2026-07-30
-      case "animewitcher":(await race(getAnimeWitcherSources(title, english, ep, anilistId, titleVariants),38000, [])).forEach(collectSrc); break;
+      case "animewitcher":(await race(getAnimeWitcherSources(title, english, ep, anilistId, titleVariants, false, undefined, requestedQuality),38000, [])).forEach(collectSrc); break;
       case "stardima":    (await race(getStardimaSources(title, english, ep, isMovie),       20000, [])).forEach(collectSrc); break;
       case "anipm":         (await race(getAniPmSources(title, english, ep, anilistId),       20_000,     [])).forEach(collectSrc); break;
       case "anizone":       (await race(getAniZoneSources(title, english, ep),               18_000,     [])).forEach(collectSrc); break;
@@ -15901,6 +16115,8 @@ router.get("/anime/fetch-source", scraperQueueMiddleware, async (req, res) => {
               await runExtract([source]);
             }
           : undefined,
+        false,
+        requestedQuality,
       ), 45_000, [])).forEach(collectSrc); break;
       case "ristoanime":   (await race(getRistoAnimeSources(title, english, ep),          22_000, [])).forEach(collectSrc); break;
       // case "allmanga": معطّل 2026-07-17
@@ -15930,7 +16146,10 @@ router.get("/anime/fetch-source", scraperQueueMiddleware, async (req, res) => {
     }
 
     // ── حفظ في الكاش بعد الكشط ──────────────────────────────────
-    if (sources.length) {
+    if (sources.length && !(
+      requestedQuality &&
+      ["animeify", "animewitcher", "anslayer"].includes(site)
+    )) {
       setSourceCache(cKey, site, sources).catch(() => {});
     }
 
@@ -16171,14 +16390,23 @@ router.get("/anime/aw-latest", async (req, res) => {
     const items = (await Promise.all(candidates.map(async r => {
       let anilistId = r.anilist_id || undefined;
       if (!anilistId) anilistId = await resolveAniListIdForSource(r.anime_name || r.anime_id, null, [], null);
+      const meta = anilistId ? getCachedAniListSourceMeta(anilistId) : undefined;
+      const titleAr = anilistId ? await getArabicAnimeTitleById(anilistId) : null;
       return {
         animeId: anilistId || null,
+        anilistId: anilistId || null,
+        awAnimeId: String(r.anime_id || ""),
         name: r.anime_name || r.anime_id,
         episode: Number(r.ep_number) || null,
         cover: anilistId ? `https://img.anili.st/media/${anilistId}` : "",
+        titleAr,
+        titleVariants: meta?.titles || [r.anime_name || r.anime_id].filter(Boolean),
+        romaji: meta?.romaji || r.anime_name || r.anime_id,
+        english: meta?.english || "",
+        native: meta?.native || "",
         source: "animewitcher",
       };
-    }))).filter(item => item.animeId && item.episode).slice(0, 30);
+    }))).filter(item => item.name && item.episode).slice(0, 30);
 
     _awLatestCache = items;
     _awLatestTs    = Date.now();

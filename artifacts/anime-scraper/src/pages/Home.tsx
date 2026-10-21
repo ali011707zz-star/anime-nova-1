@@ -42,6 +42,8 @@ function normalizeLatestEpisodeItem(item: any): any {
       (item?.source === "anslayer" ? item?.animeId : 0) ??
       0,
   );
+  const rawAwAnimeId = item?.awAnimeId ?? item?.aw_anime_id ??
+    (item?.source === "animewitcher" ? item?.anime_id : "");
   const anilistId = Number.isInteger(rawAniListId) && rawAniListId > 0 ? rawAniListId : null;
   const anslayerId =
     Number.isInteger(rawAnimeSlayerId) && rawAnimeSlayerId > 0
@@ -72,6 +74,8 @@ function normalizeLatestEpisodeItem(item: any): any {
     animeId: anilistId,
     anilistId,
     anslayerId,
+    awAnimeId: String(rawAwAnimeId || "").trim(),
+    source: item?.source === "animewitcher" ? "animewitcher" : "anslayer",
     name,
     titleAr: title_ar,
     titleVariants,
@@ -433,36 +437,40 @@ export default function Home() {
       .catch(() => {});
   }, []);
 
-  /* Load "أحدث الحلقات" directly from AnimeSlayer's published catalog. */
+  /* Load latest episodes from both provider catalogs. */
   useEffect(() => {
     if (_cachedTodayEps && Date.now() - _cachedTodayEpsAt < TODAY_EPS_CLIENT_TTL) {
       setTodayChecking(false);
       return;
     }
     setTodayChecking(true);
-    fetch(`${API_BASE}/api/anime/anslayer-latest`, {
-      signal: AbortSignal.timeout(20_000),
-      cache: "no-store",
-    })
-      .then((r) => r.json())
-      .then((payload: any[] | { items?: any[] }) => {
-        const raw = Array.isArray(payload) ? payload : payload.items || [];
-        const items = raw
-          .map(normalizeLatestEpisodeItem)
-          .map((item: any) => ({
-            ...item,
-            /* KW/MP use AniList IDs; AnimeSlayer keeps its own namespace. */
-            cover: item.cover ?? item.poster ?? "",
-            source: "anslayer",
-          }))
-          .filter((item: any) => (item.animeId || item.anslayerId) && item.name);
+    const fetchLatest = async (endpoint: string, source: string) => {
+      const response = await fetch(`${API_BASE}/api/anime/${endpoint}`, {
+        signal: AbortSignal.timeout(20_000),
+        cache: "no-store",
+      });
+      if (!response.ok) throw new Error(`${endpoint}_${response.status}`);
+      const payload: any = await response.json();
+      const raw = Array.isArray(payload) ? payload : payload.items || [];
+      return raw
+        .map((item: any) => normalizeLatestEpisodeItem({ ...item, source }))
+        .map((item: any) => ({ ...item, cover: item.cover ?? item.poster ?? "" }))
+        .filter((item: any) =>
+          (item.animeId || item.anslayerId || item.awAnimeId) && item.name && item.episode,
+        );
+    };
+    Promise.allSettled([
+      fetchLatest("anslayer-latest", "anslayer"),
+      fetchLatest("aw-latest", "animewitcher"),
+    ]).then((results) => {
+        const items = results.flatMap(result =>
+          result.status === "fulfilled" ? result.value : [],
+        );
+        items.sort((a: any, b: any) => Number(b.episode) - Number(a.episode));
         _cachedTodayEps = items;
         _cachedTodayEpsAt = Date.now();
         setTodayEps(items);
         try { localStorage.setItem(TODAY_EPS_STORAGE_KEY, JSON.stringify(items)); } catch {}
-        setTodayChecking(false);
-      })
-      .catch(() => {
         setTodayChecking(false);
       });
   }, []);
@@ -1162,8 +1170,8 @@ export default function Home() {
             {todayEps.map((it: any, i: number) => {
               const accentColor = "#ef4444";
               const accentBg = "rgba(239,68,68,0.88)";
-              /* هذه البطاقات مصدرها AnimeSlayer؛ مرّر معرّف الكتالوج المباشر
-                 حتى لا يعتمد التشغيل على مطابقة الاسم أو على AniList. */
+              /* مرّر معرّف المصدر المباشر عند توفره، مع الاحتفاظ بالعنوان
+                 كمسار احتياطي لعناصر AW التي لا تملك ربط AniList. */
               const titleVariants = Array.from(
                 new Set(
                   [
@@ -1180,9 +1188,9 @@ export default function Home() {
               );
               const canonicalTitle = it.romaji || it.name || "";
               const canonicalEnglish = it.english || "";
-              const href = `/watch?anime=${encodeURIComponent(String(it.animeId || 0))}&anilistId=${encodeURIComponent(String(it.anilistId || it.animeId || 0))}&anslayerId=${encodeURIComponent(String(it.anslayerId || ""))}&ep=${it.episode}&title=${encodeURIComponent(canonicalTitle)}&english=${encodeURIComponent(canonicalEnglish)}&titles=${encodeURIComponent(JSON.stringify(titleVariants))}&cover=${encodeURIComponent(it.cover || "")}&titleAr=${encodeURIComponent(it.titleAr || "")}&site=anslayer&fromLatest=1`;
+              const href = `/watch?anime=${encodeURIComponent(String(it.animeId || 0))}&anilistId=${encodeURIComponent(String(it.anilistId || it.animeId || 0))}&anslayerId=${encodeURIComponent(String(it.anslayerId || ""))}&awAnimeId=${encodeURIComponent(String(it.awAnimeId || ""))}&ep=${it.episode}&title=${encodeURIComponent(canonicalTitle)}&english=${encodeURIComponent(canonicalEnglish)}&titles=${encodeURIComponent(JSON.stringify(titleVariants))}&cover=${encodeURIComponent(it.cover || "")}&titleAr=${encodeURIComponent(it.titleAr || "")}&site=${encodeURIComponent(it.source || "anslayer")}&fromLatest=1&latestSource=${encodeURIComponent(it.source || "anslayer")}`;
               return (
-                <Link href={href} key={`${it.animeId}-${it.episode}-${i}`}>
+                <Link href={href} key={`${it.source}-${it.animeId || it.anslayerId || it.awAnimeId}-${it.episode}-${i}`}>
                   <motion.div
                     whileTap={{ scale: 0.91 }}
                     className="shrink-0 cursor-pointer"
