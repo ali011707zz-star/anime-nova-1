@@ -5275,6 +5275,15 @@ export default function WatchPage() {
     if (totalEps > 0) goParams.totalEps = String(totalEps);
     if (anime?.format) goParams.format = anime.format;
     if (titleArParam) goParams.titleAr = titleArParam;
+    if (anslayerIdParam > 0) goParams.anslayerId = String(anslayerIdParam);
+    if (sp.get("awAnimeId")) goParams.awAnimeId = sp.get("awAnimeId")!;
+    if (fromLatestEpisodes) {
+      goParams.fromLatest = "1";
+      const latestSource = sp.get("latestSource") || sp.get("site");
+      if (latestSource) goParams.latestSource = latestSource;
+      const latestSite = sp.get("site");
+      if (latestSite) goParams.site = latestSite;
+    }
     navigate(`/watch?${new URLSearchParams(goParams)}`);
   }
 
@@ -5441,6 +5450,8 @@ export default function WatchPage() {
          titleAr: العنوان العربي يُحسَّن البحث على AnimeSlayer (يبحث بالعربي أولاً). */
       if (site === "anslayer" && sp.get("anslayerId"))
         params.set("anslayerId", sp.get("anslayerId")!);
+      if (site === "animewitcher" && sp.get("awAnimeId"))
+        params.set("awAnimeId", sp.get("awAnimeId")!);
       if (site === "anslayer" && titleArParam)
         params.set("titleAr", titleArParam);
       // Provider pages/CDN tokens are occasionally transient. Retry one time
@@ -5653,6 +5664,12 @@ export default function WatchPage() {
       params.set("anilistId", String(animeId));
     }
     if (sp.get("anslayerId")) params.set("anslayerId", sp.get("anslayerId")!);
+    if (sp.get("awAnimeId")) params.set("awAnimeId", sp.get("awAnimeId")!);
+    const latestSource = sp.get("latestSource") || sp.get("site") || "";
+    if (fromLatestEpisodes && latestSource) {
+      params.set("fromLatest", "1");
+      params.set("latestSource", latestSource);
+    }
     params.set("ep", String(ep));
     if (anime?.format) params.set("format", String(anime.format));
     if (anime?.seasonYear) params.set("year", String(anime.seasonYear));

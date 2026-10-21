@@ -9538,6 +9538,16 @@ async function awDbLookup(anilistId: number, ep: number): Promise<AwLinkRow[]> {
   } catch { return []; }
 }
 
+/** Exact AnimeWitcher catalog id lookup for latest-episode cards. */
+async function awDbLookupById(animeId: string, ep: number): Promise<AwLinkRow[]> {
+  try {
+    return await sbSelect<AwLinkRow>("aw_links", {
+      "anime_id":  `eq.${animeId}`,
+      "ep_number": `eq.${ep}`,
+    }, { limit: 100 });
+  } catch { return []; }
+}
+
 /** DB lookup بالعنوان (fallback إذا لم يكن anilistId متاحاً) */
 async function awDbLookupByTitle(animeName: string, ep: number): Promise<AwLinkRow[]> {
   try {
@@ -9725,6 +9735,7 @@ async function awBuildSourcesFromDb(rows: AwLinkRow[], parentSignal?: AbortSigna
 async function getAnimeWitcherSources(
   title: string, english: string | null, ep: number, _anilistId?: number, variants: string[] = [],
   availabilityOnly = false, signal?: AbortSignal, requestedQuality?: ProviderQualityTier | null,
+  directAwAnimeId?: string,
 ): Promise<UnifiedSource[]> {
   try {
     if (signal?.aborted) return [];
@@ -9752,6 +9763,14 @@ async function getAnimeWitcherSources(
       }
       return [];
     };
+    if (directAwAnimeId) {
+      const directRows = await awDbLookupById(directAwAnimeId, ep);
+      if (signal?.aborted) return [];
+      if (directRows.length) {
+        const directSources = await buildAwSources(directRows);
+        if (directSources.length) return directSources;
+      }
+    }
     // ── DB-first path: aw_links (142k pre-loaded) — أسرع بـ ~10x من Algolia ─
     if (_anilistId) {
       const dbRows = await awDbLookup(_anilistId, ep);
@@ -13732,7 +13751,7 @@ async function getAnimeSlayerSourcesUncached(
     // Resolve at most two embeds at once and publish each completed source so
     // progressive playback does not wait for the remaining servers.
     const linkResults = await mapAnslayerLinks(
-      embedLinks.slice(0, 6),
+      embedLinks,
       async (link): Promise<UnifiedSource | null> => {
         if (typeof link !== "string" || !link.startsWith("http")) return null;
         if (link.includes("drive.google.com")) return null;
@@ -14407,6 +14426,7 @@ router.get("/anime/sources-stream", scraperQueueMiddleware, async (req, res) => 
   const ep        = parseInt((req.query.ep    as string) || "1");
   let anilistId = parseInt((req.query.anilistId as string) || (req.query.anime as string) || "0") || undefined;
   const anslayerId = parseInt((req.query.anslayerId as string) || "0") || undefined;
+  const awAnimeId = String(req.query.awAnimeId || "").trim() || undefined;
   // Latest-episode links may carry the AnimeSlayer id in `anime` while also
   // forwarding it as `anilistId`. Do not pass that catalog id to AniList-based
   // providers; let the title resolver find a verified AniList id instead.
@@ -15212,7 +15232,7 @@ router.get("/anime/sources-stream", scraperQueueMiddleware, async (req, res) => 
           site: "animewitcher",
           timeoutMs: sourceAvailabilityJobTimeoutMs("animewitcher", 20_000),
           run: () => scrapeCached("animewitcher", async signal =>
-            getAnimeWitcherSources(title, english, ep, await aniListIdResolution, titleVariants, true, signal), false, 20000),
+            getAnimeWitcherSources(title, english, ep, await aniListIdResolution, titleVariants, true, signal, undefined, awAnimeId), false, 20000),
         },
         {
           site: "sanime",
@@ -15242,7 +15262,7 @@ router.get("/anime/sources-stream", scraperQueueMiddleware, async (req, res) => 
         {
           site: "anslayer",
           timeoutMs: fromLatest && latestSource === "anslayer"
-            ? 45_000
+            ? 90_000
             : sourceAvailabilityJobTimeoutMs("anslayer", 15_000),
           run: () => useCatalogAvailability("anslayer", async hint => {
             const directId = Number(hint?.providerTitleId || anslayerId || 0) || undefined;
@@ -15261,7 +15281,7 @@ router.get("/anime/sources-stream", scraperQueueMiddleware, async (req, res) => 
             return scrapeCached("anslayer", async () => getAnimeSlayerSources(
               title, english, ep, directId, titleAr, hint, undefined, true,
             ), false, 15_000);
-          }, false, fromLatest && latestSource === "anslayer" ? 45_000 : 15_000),
+          }, false, fromLatest && latestSource === "anslayer" ? 90_000 : 15_000),
         },
         {
           site: "animeify",
@@ -15373,7 +15393,7 @@ router.get("/anime/sources-stream", scraperQueueMiddleware, async (req, res) => 
       scrapeCached("anipm",        () => getAniPmSources(title, english, ep, anilistId),        false, 20000),
       scrapeCached("anizone",      () => getAniZoneSources(title, english, ep),                 false, 18000),
       // 2dhive (2D): removed with the failed provider set shown in the client.
-      scrapeCached("animewitcher", () => getAnimeWitcherSources(title, english, ep, anilistId, titleVariants), false, 38000),
+      scrapeCached("animewitcher", () => getAnimeWitcherSources(title, english, ep, anilistId, titleVariants, false, undefined, undefined, awAnimeId), false, 38000),
       // ── مدبلج عربي/كرتون (WordPress REST) ───────────────────────────
       scrapeCached("stardima",     () => getStardimaSources(title, english, ep, isMovie),      false, 20000),
       // ── ياباني مترجم (بدون ID) ────────────────────────────────────
@@ -15479,6 +15499,7 @@ router.get("/anime/fetch-source", scraperQueueMiddleware, async (req, res) => {
   const isMovieParam = (req.query.isMovie as string) === "true";
   const isMovie   = format === "MOVIE" || format === "MOVIE_SHORT" || isMovieParam;
   const anslayerId = parseInt((req.query.anslayerId as string) || "0") || undefined;
+  const awAnimeId = String(req.query.awAnimeId || "").trim() || undefined;
   const titleAr    = ((req.query.titleAr as string) || "").trim() || null;
   let titleVariants: string[] = [];
   try {
@@ -16074,7 +16095,7 @@ router.get("/anime/fetch-source", scraperQueueMiddleware, async (req, res) => {
       // anikuro: محذوف
       // anivault: محذوف
       // case "hianime": معطّل بطلب المستخدم 2026-07-30
-      case "animewitcher":(await race(getAnimeWitcherSources(title, english, ep, anilistId, titleVariants, false, undefined, requestedQuality),38000, [])).forEach(collectSrc); break;
+      case "animewitcher":(await race(getAnimeWitcherSources(title, english, ep, anilistId, titleVariants, false, undefined, requestedQuality, awAnimeId),38000, [])).forEach(collectSrc); break;
       case "stardima":    (await race(getStardimaSources(title, english, ep, isMovie),       20000, [])).forEach(collectSrc); break;
       case "anipm":         (await race(getAniPmSources(title, english, ep, anilistId),       20_000,     [])).forEach(collectSrc); break;
       case "anizone":       (await race(getAniZoneSources(title, english, ep),               18_000,     [])).forEach(collectSrc); break;
@@ -18851,10 +18872,9 @@ router.get("/anime/download-mp4", async (req, res) => {
     "anslayer",     // AS
     "animeify",     // AF — direct MediaFire/FileMoon sources are downloadable
     "anifox",       // FX
-    "kawaii",       // KW — signed MP4 via the resumable video proxy
   ]);
   if (!site || !DOWNLOAD_SOURCE_SITES.has(site)) {
-    res.status(403).send("downloads are available only from AW, SA, AS, AF, FX and KW");
+    res.status(403).send("downloads are available only from AW, SA, AS, AF and FX");
     return;
   }
 

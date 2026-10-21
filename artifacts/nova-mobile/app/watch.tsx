@@ -108,7 +108,6 @@ const DOWNLOAD_SOURCE_SITES = new Set([
   "anslayer",     // AS
   "animeify",     // AF — direct MediaFire/FileMoon sources
   "anifox",       // FX
-  "kawaii",       // KW — signed MP4/HLS through the VPS proxy
 ]);
 
 function subtitlesDisabledForSite(site?: string): boolean {
@@ -838,6 +837,8 @@ export default function WatchScreen() {
     anime, ep, title, english, format, etitle,
     totalEps: totalEpsParam, year, episodes, native, titleAr,
     titles: titlesParam, anslayerId, anilistId,
+    awAnimeId,
+    fromLatest, latestSource: latestSourceParam,
     mode, awSeries: awSeriesParam, awSeasonLabel: awSeasonLabelParam,
     awSeasonIndex: awSeasonIndexParam, awSeasons: awSeasonsParam, awKey: awKeyParam,
   } = useLocalSearchParams<{
@@ -846,6 +847,8 @@ export default function WatchScreen() {
     year?: string; episodes?: string; native?: string; titleAr?: string;
     titles?: string;
     anslayerId?: string; anilistId?: string;
+    awAnimeId?: string;
+    fromLatest?: string; latestSource?: string;
     mode?: string; awSeries?: string; awSeasonLabel?: string;
     awSeasonIndex?: string; awSeasons?: string; awKey?: string;
   }>();
@@ -860,6 +863,8 @@ export default function WatchScreen() {
   const englishStr  = safeDecodeURIComponent(english);
   const titleArStr  = safeDecodeURIComponent(titleAr);
   const isAwDubbed = mode === "aw-dubbed";
+  const isFromLatest = fromLatest === "1";
+  const latestSource = String(latestSourceParam || "").trim().toLowerCase();
   const awSeries = safeDecodeURIComponent(awSeriesParam);
   const awSeasonLabelParamValue = safeDecodeURIComponent(awSeasonLabelParam) || "الحلقات";
   const awKey = safeDecodeURIComponent(awKeyParam);
@@ -1015,13 +1020,13 @@ export default function WatchScreen() {
   const [availabilityError, setAvailabilityError] = useState(false);
   const [availabilityAttempt, setAvailabilityAttempt] = useState(0);
   const [showingAvailabilityHints, setShowingAvailabilityHints] = useState(false);
-  const availabilityHintKey = makeAvailabilityHintKey(
+  const availabilityHintKey = `${makeAvailabilityHintKey(
     sourceAnimeId || anime,
     titleStr,
     englishStr,
     format || "",
     year,
-  );
+  )}|latest:${isFromLatest ? latestSource || "unknown" : "no"}`;
   const [watchUnlocked, setWatchUnlocked] = useState(false);
   /* Only the pressed server row is waiting for the ad decision. A single
      boolean here made every server button show a spinner at once. */
@@ -1281,7 +1286,9 @@ export default function WatchScreen() {
     availabilityAbortRef.current = null;
     const forceFresh = forceAvailabilityRefreshRef.current;
     forceAvailabilityRefreshRef.current = false;
-    const cachedHints = forceFresh ? null : readAvailabilityHintRows(availabilityHintKey);
+    const cachedHints = forceFresh || (isFromLatest && latestSource === "anslayer")
+      ? null
+      : readAvailabilityHintRows(availabilityHintKey);
     if (cachedHints) {
       const cachedStatus: Record<string, "ready"> = {};
       for (const [site, tiers] of Object.entries(cachedHints)) {
@@ -1325,6 +1332,11 @@ export default function WatchScreen() {
     if (native) params.set("native", native);
     if (titleArStr) params.set("titleAr", titleArStr);
     if (anslayerId) params.set("anslayerId", anslayerId);
+    if (awAnimeId) params.set("awAnimeId", awAnimeId);
+    if (isFromLatest && latestSource) {
+      params.set("fromLatest", "1");
+      params.set("latestSource", latestSource);
+    }
     if (titleVariants.length) params.set("titles", JSON.stringify(titleVariants));
     params.set("trace", playbackTraceId);
     params.set("mode", "check");
@@ -1503,10 +1515,14 @@ export default function WatchScreen() {
         }
       }
     };
+    const availabilityTimeoutMs =
+      isFromLatest && latestSource === "anslayer"
+        ? 110_000
+        : AVAILABILITY_TIMEOUT_MS;
     const timeoutId = setTimeout(() => {
       timedOut = true;
       controller.abort();
-    }, AVAILABILITY_TIMEOUT_MS);
+    }, availabilityTimeoutMs);
     void run();
     return () => {
       cancelled = true;
@@ -1514,7 +1530,7 @@ export default function WatchScreen() {
       controller.abort();
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isAwDubbed, anime, anilistId, sourceAnimeId, epNum, titleStr, englishStr, titleArStr, format, year, episodes, native, anslayerId, availabilityAttempt, availabilityHintKey, playbackTraceId]);
+  }, [isAwDubbed, anime, anilistId, sourceAnimeId, epNum, titleStr, englishStr, titleArStr, format, year, episodes, native, anslayerId, awAnimeId, isFromLatest, latestSource, availabilityAttempt, availabilityHintKey, playbackTraceId]);
 
   /* ── Progress save ── */
   const saveProgress = useCallback(async () => {
@@ -1633,6 +1649,10 @@ export default function WatchScreen() {
     const coverParam = coverUrl ? `&cover=${encodeURIComponent(coverUrl)}` : "";
     const arParam    = titleArStr ? `&titleAr=${encodeURIComponent(titleArStr)}` : "";
     const anslayerParam = anslayerId ? `&anslayerId=${encodeURIComponent(anslayerId)}` : "";
+    const awAnimeParam = awAnimeId ? `&awAnimeId=${encodeURIComponent(awAnimeId)}` : "";
+    const latestParams = isFromLatest && latestSource
+      ? `&fromLatest=1&latestSource=${encodeURIComponent(latestSource)}`
+      : "";
     const totalParam = totalEpsCount ? `&totalEps=${totalEpsCount}` : "";
     const nativeParam = native ? `&native=${encodeURIComponent(native)}` : "";
     const yearParam = year ? `&year=${encodeURIComponent(year)}` : "";
@@ -1643,11 +1663,12 @@ export default function WatchScreen() {
     const anilistParam = sourceAnimeId
       ? `&anilistId=${encodeURIComponent(sourceAnimeId)}`
       : "";
-    router.replace(`/watch?anime=${sourceAnimeId || anime}&ep=${n}&title=${encodeURIComponent(titleStr)}&english=${encodeURIComponent(englishStr)}&format=${encodeURIComponent(format || "")}${totalParam}${coverParam}${arParam}${anslayerParam}${nativeParam}${yearParam}${episodesParam}${titlesParam}${anilistParam}`);
+    router.replace(`/watch?anime=${sourceAnimeId || anime}&ep=${n}&title=${encodeURIComponent(titleStr)}&english=${encodeURIComponent(englishStr)}&format=${encodeURIComponent(format || "")}${totalParam}${coverParam}${arParam}${anslayerParam}${awAnimeParam}${latestParams}${nativeParam}${yearParam}${episodesParam}${titlesParam}${anilistParam}`);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     isAwDubbed, goToAwEpisode, awSeasonIndex, saveProgress, coverUrl, titleArStr,
-    router, anime, sourceAnimeId, titleStr, englishStr, format, anslayerId,
+    router, anime, sourceAnimeId, titleStr, englishStr, format, anslayerId, awAnimeId,
+    isFromLatest, latestSource,
     epNum, totalEpsCount, native, year, episodes, titleVariants,
   ]);
 
@@ -1845,6 +1866,7 @@ export default function WatchScreen() {
     if (requestExcludeKeys.length) qs.set("exclude", JSON.stringify(requestExcludeKeys));
     if (titleArStr) qs.set("titleAr", titleArStr);
     if (site === "anslayer" && anslayerId) qs.set("anslayerId", anslayerId);
+    if (site === "animewitcher" && awAnimeId) qs.set("awAnimeId", awAnimeId);
 
     let tid: ReturnType<typeof setTimeout> | null = null;
     let siteCtrl: AbortController | null = null;
@@ -2161,6 +2183,7 @@ export default function WatchScreen() {
     qs.set("titles", JSON.stringify(titleVariants));
     if (titleArStr) qs.set("titleAr", titleArStr);
     if (site === "anslayer" && anslayerId) qs.set("anslayerId", anslayerId);
+    if (site === "animewitcher" && awAnimeId) qs.set("awAnimeId", awAnimeId);
 
     let tid: ReturnType<typeof setTimeout> | null = null;
     try {
