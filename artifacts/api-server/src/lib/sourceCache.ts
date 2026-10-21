@@ -307,16 +307,9 @@ export async function setSourceCache(
   sbUpsertCache(key, site, sources, expiresAt);
 }
 
-export function shouldRefreshCache(expiresAt: number, site?: string): boolean {
-  // AF/AW links use a 45-minute cache. A generic 90-minute window made every
-  // fresh result look near-expiry and forced the next playback to scrape again.
-  // Refresh these two providers during the final 20% of their effective TTL;
-  // computeExpiry already caps this at the URL's actual signed-link expiry.
-  const providerTtl = site ? SITE_TTL[site] : undefined;
-  const refreshWindow = site === "animeify" || site === "animewitcher"
-    ? Math.min(90 * 60_000, Math.max(2 * 60_000, (providerTtl ?? 45 * 60_000) * 0.2))
-    : 90 * 60_000;
-  return expiresAt - Date.now() < refreshWindow;
+export function shouldRefreshCache(expiresAt: number): boolean {
+  // تجديد خلفي عندما يبقى أقل من 90 دقيقة على الانتهاء (كان 45 دقيقة)
+  return expiresAt - Date.now() < 90 * 60_000;
 }
 
 export function getCacheStats(): { l1Size: number; supabaseEnabled: boolean } {

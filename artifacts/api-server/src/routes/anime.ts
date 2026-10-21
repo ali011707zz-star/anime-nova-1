@@ -15033,7 +15033,7 @@ router.get("/anime/sources-stream", scraperQueueMiddleware, async (req, res) => 
       const usableCheckCache = checkOnly
         && Boolean(hit)
         && !hit?.stale
-        && !shouldRefreshCache(hit!.expiresAt, site);
+        && !shouldRefreshCache(hit!.expiresAt);
       // The availability scan only emits metadata, so a fresh episode-scoped
       // cache entry is safe to reuse. Stale or near-expiry links still trigger
       // a live metadata refresh; no availability row is treated as playable.
@@ -15041,7 +15041,7 @@ router.get("/anime/sources-stream", scraperQueueMiddleware, async (req, res) => 
         || (checkOnly && !usableCheckCache && !useKawaiiCacheForAvailability);
 
       if (hit && !forceFresh) {
-        const isStaleOrNearExpiry = hit.stale || shouldRefreshCache(hit.expiresAt, site);
+        const isStaleOrNearExpiry = hit.stale || shouldRefreshCache(hit.expiresAt);
 
         // مواقع ذات CDN token قصير: لا تُقدَّم بيانات قديمة — كشط مباشر
         if (isStaleOrNearExpiry && SHORT_TTL_NO_STALE.has(site) && !checkOnly) {
@@ -15823,12 +15823,12 @@ router.get("/anime/fetch-source", scraperQueueMiddleware, async (req, res) => {
       setSourceCache(cKey, site, liveSources).catch(() => {});
     }
   }
-  // Short-lived providers are refreshed according to the actual cache expiry
-  // window. AF/AW use a shorter provider-specific window than the 90m default.
+  const SHORT_TTL_MAX_AGE_MS = 90 * 60_000; // 90 دقيقة — قبل انتهاء tokens
+  // للمواقع قصيرة الـ TTL: إذا بقي للكاش أقل من 90 دقيقة أو انتهى → اكشط مباشرةً
   const skipCacheForShortTtl = cached !== null && SHORT_TTL_FETCH_SITES.has(site) &&
-    (cached.stale === true || shouldRefreshCache(cached.expiresAt, site));
+    (cached.stale === true || (cached.expiresAt - Date.now()) < SHORT_TTL_MAX_AGE_MS);
   if (cached && !FORCE_LIVE_FETCH_SITES.has(site) &&
-      !shouldRefreshCache(cached.expiresAt, site) && !skipCacheForShortTtl) {
+      !shouldRefreshCache(cached.expiresAt) && !skipCacheForShortTtl) {
     if (progressive) {
       const untriedCacheRows = stripAnimeSlayerSubtitles(filterRequestedQuality(cached.sources))
         .filter(source => !excludedCandidateKeys.has(progressiveCandidateKey(source)));
