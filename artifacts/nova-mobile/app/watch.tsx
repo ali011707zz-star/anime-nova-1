@@ -1788,7 +1788,7 @@ export default function WatchScreen() {
     /* منع الضغط المزدوج أثناء الجلب — يسمح بإعادة المحاولة بعد الفشل */
     if (inFlightSitesRef.current.has(fetchKey)) return;
     /* إذا نجح سابقاً → شغّل أفضل مصدر من نفس الجودة فقط */
-    if (fetchedSitesRef.current.has(fetchKey) && excludeKeys.length === 0) {
+    if (fetchedSitesRef.current.has(fetchKey) && excludeKeys.length === 0 && site !== "anslayer") {
       const cached = sources.filter(s => s.site === site);
       const preferred = preferredQuality
         ? cached.find(s => getSrcQuality(s) === PICKER_QUALITY[preferredQuality] && isMobilePlayable(s))

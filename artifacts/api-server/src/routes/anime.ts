@@ -16017,7 +16017,7 @@ router.get("/anime/fetch-source", scraperQueueMiddleware, async (req, res) => {
     if (source.directType === "hls" || /(?:\.m3u8(?:[?#]|$)|\/hls-proxy\?)/i.test(rawUrl)) {
       return verifyProgressiveCandidate(source);
     }
-    if (source.site === "anslayer" && !isMobileClient) {
+    if (source.site === "anslayer") {
       let targetUrl = rawUrl;
       let referer = String(source.headers?.Referer || source.url || "");
       try {

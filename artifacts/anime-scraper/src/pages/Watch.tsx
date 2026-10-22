@@ -5432,7 +5432,7 @@ export default function WatchPage() {
       (s) =>
         getSrcQualityTier(s) === requestedQuality && !!(s.directUrl || s.url),
     );
-    if (cachedForTier.length) {
+    if (cachedForTier.length && site !== "anslayer") {
       const bestCached = [...cachedForTier].sort(
         (a, b) => (b.qualityRank ?? 0) - (a.qualityRank ?? 0),
       )[0];
