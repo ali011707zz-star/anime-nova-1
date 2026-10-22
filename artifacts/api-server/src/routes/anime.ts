@@ -13665,10 +13665,9 @@ async function getAnimeSlayerSourcesUncached(
 
   const out: UnifiedSource[] = [];
   try {
-    if (catalogHint?.servers.length) {
-      const catalogSources = await getCatalogPageSources("anslayer", catalogHint);
-      if (catalogSources.length) return catalogSources;
-    }
+    // Keep the catalog ID for matching, but don't trust saved server URLs here:
+    // AnimeSlayer periodically replaces its external player links. Resolve the
+    // selected episode through its current API instead.
     // ── 1) معرّف مباشر (من كتالوج anslayer نفسه — يُستخدم لقسم "أحدث الحلقات" على
     //      الواجهة الرئيسية) أو بحث + أفضل تطابق بالاسم ──
     let best: { score: number; id: number; name: string } | null = directAnimeId
@@ -13946,13 +13945,8 @@ async function getSAnimeSourcesUncached(
 
   const out: UnifiedSource[] = [];
   try {
-    if (!availabilityOnly && catalogHint?.servers.length) {
-      const catalogSources = await getCatalogPageSources("sanime", catalogHint);
-      if (catalogSources.length) {
-        _sanimeCacheMap.set(ck, { sources: catalogSources, ts: Date.now() });
-        return catalogSources;
-      }
-    }
+    // The catalog can retain old SAnime CDN families. Use the live info API
+    // to confirm the episode, then build the current Video3 URLs below.
     /* 1. البحث — SAnime يخزّن أسماء عربية ومترجمة، نجرب الإنجليزي أولاً ثم الروماجي.
        ندمج النتائج لتحسين فرص المطابقة (بعض العناوين موجودة بكلا الاسمين). */
     const queries = titleQueries(title, english, variants);
@@ -14045,20 +14039,18 @@ async function getSAnimeSourcesUncached(
     // immediately; the VPS video proxy still preserves Range and the player can
     // fall back to SD if the old HD file is unavailable.
     const SANIME_REF = "https://app.sanime.net/";
-    /* Keep this ordered exactly like /api/sanime/src: Video2 is current,
-       Video remains a fallback for older episodes. */
+    /* Keep this aligned with /api/sanime/src: Video3 is the current CDN path. */
     for (const variant of sanimeEpisodeVariants(bestId, ep)) {
-      const tag = variant.family === "Video2" ? "" : " · fallback";
       const sanimeProxyParams = `&ua=${encodeURIComponent(SANIME_UA)}`;
       const proxiedHD = `/api/anime/video-proxy?url=${encodeURIComponent(variant.hdUrl)}&ref=${encodeURIComponent(SANIME_REF)}${sanimeProxyParams}`;
       const proxiedSD = `/api/anime/video-proxy?url=${encodeURIComponent(variant.sdUrl)}&ref=${encodeURIComponent(SANIME_REF)}${sanimeProxyParams}`;
       out.push({
-        name: `SAnime · FHD${tag}`, url: variant.hdUrl, quality: "FHD", qualityRank: 14,
+        name: "SAnime · FHD", url: variant.hdUrl, quality: "FHD", qualityRank: 14,
         site: "sanime", directUrl: proxiedHD, directType: "mp4",
         headers: { Referer: SANIME_REF }, corsOk: false,
       });
       out.push({
-        name: `SAnime · HD${tag}`, url: variant.sdUrl, quality: "HD", qualityRank: 9,
+        name: "SAnime · HD", url: variant.sdUrl, quality: "HD", qualityRank: 9,
         site: "sanime", directUrl: proxiedSD, directType: "mp4",
         headers: { Referer: SANIME_REF }, corsOk: false,
       });
@@ -14524,6 +14516,7 @@ router.get("/anime/sources-stream", scraperQueueMiddleware, async (req, res) => 
   async function useCatalogAvailability(
     provider: "animeify" | "anslayer" | "sanime" | "anifox",
     fallback: (hint: CatalogEpisodeHint | null) => Promise<unknown>,
+    allowCatalogServers = true,
   ): Promise<void> {
     // Do not hold the picker open for a slow database request. The normal
     // scraper remains the explicit fallback when the catalog is unavailable.
@@ -14532,7 +14525,7 @@ router.get("/anime/sources-stream", scraperQueueMiddleware, async (req, res) => 
       new Promise<Partial<Record<string, CatalogEpisodeHint>>>(resolve => setTimeout(() => resolve({}), 1200)),
     ]);
     const hint = hints[provider] || null;
-    if (hint?.servers.length) {
+    if (allowCatalogServers && hint?.servers.length) {
       for (const server of hint.servers) {
         sendCheckSrc({
           name: `${provider} · ${server.server_name || server.server_key || "server"}`,
@@ -14997,11 +14990,12 @@ router.get("/anime/sources-stream", scraperQueueMiddleware, async (req, res) => 
       const effectiveTimeoutMs = checkOnly
         ? sourceAvailabilityTimeoutMs(site, timeoutMs)
         : timeoutMs;
-      // Provider URL formats changed for AniNeko and SAnime. Version their
-      // cache keys so rows containing dead VibeVibe or /Video2 URLs cannot
+      // Provider URL formats changed for AniNeko, SAnime, and AnimeSlayer.
+      // Version their cache keys so stale provider URLs cannot
       // survive a deploy and get advertised again to web/mobile clients.
       const cacheSite = site === "anineko" ? "anineko-v2"
         : site === "sanime" ? "sanime-v2"
+        : site === "anslayer" ? "anslayer-v2"
         : site;
       // AnimeWitcher latest cards carry the provider's own catalog id. Keep
       // their availability/source caches separate from title/AniList lookups;
@@ -15242,7 +15236,7 @@ router.get("/anime/sources-stream", scraperQueueMiddleware, async (req, res) => 
           timeoutMs: sourceAvailabilityJobTimeoutMs("sanime", 4_000),
           run: () => useCatalogAvailability("sanime", hint => scrapeCached("sanime", signal =>
             getSAnimeSources(title, english, ep, titleVariants, true, hint, signal),
-          false, 4000)),
+          false, 4000), false),
         },
         {
           site: "consumet_gogo",
@@ -15284,7 +15278,7 @@ router.get("/anime/sources-stream", scraperQueueMiddleware, async (req, res) => 
             return scrapeCached("anslayer", async () => getAnimeSlayerSources(
               title, english, ep, directId, titleAr, hint, undefined, true,
             ), false, 15_000);
-          }, false, fromLatest && latestSource === "anslayer" ? 90_000 : 15_000),
+          }, false),
         },
         {
           site: "animeify",
@@ -15836,7 +15830,10 @@ router.get("/anime/fetch-source", scraperQueueMiddleware, async (req, res) => {
   const cacheAnimeIdentity = site === "animewitcher" && awAnimeId
     ? `aw:${awAnimeId}`
     : anilistId || anslayerId;
-  const cKey = makeSourceCacheKey(site, title, ep, cacheAnimeIdentity);
+  const cacheSite = site === "sanime" ? "sanime-v2"
+    : site === "anslayer" ? "anslayer-v2"
+    : site;
+  const cKey = makeSourceCacheKey(cacheSite, title, ep, cacheAnimeIdentity);
   let cached: Awaited<ReturnType<typeof getFromSourceCache>> = null;
   try {
     cached = await getFromSourceCache(cKey);

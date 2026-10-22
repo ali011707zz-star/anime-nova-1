@@ -466,7 +466,7 @@ async function sanimeEpisodes(title) {
     const episodeLabel = text(item.epName);
     const episodeNumber =
       numberValue(episodeLabel?.match(/\d+(?:\.\d+)?/)?.[0]) || index + 1;
-    const pageUrl = `https://server.sanime.net/Video/${encodeURIComponent(title.provider_title_id)}/${encodeURIComponent(episodeNumber)}.mp4`;
+    const pageUrl = `https://server.sanime.net/Video3/${encodeURIComponent(title.provider_title_id)}/${encodeURIComponent(episodeNumber)}.mp4`;
     return {
       provider_episode_id: text(item.id) || `${title.provider_title_id}:${index + 1}`,
       episode_number: episodeNumber,

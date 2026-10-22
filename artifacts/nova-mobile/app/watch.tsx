@@ -1815,15 +1815,8 @@ export default function WatchScreen() {
         return;
       }
       if (preferredQuality) {
+        fetchedSitesRef.current.delete(fetchKey);
         setSlotStatus(prev => ({ ...prev, [pickerSlotKey(site, preferredQuality)]: "failed" }));
-        setAvailableSlots(prev => {
-          const next = { ...prev };
-          const siteSlots = { ...(next[site] || {}) };
-          delete siteSlots[preferredQuality];
-          if (Object.keys(siteSlots).length) next[site] = siteSlots;
-          else delete next[site];
-          return next;
-        });
       }
       return;
     }
@@ -1885,14 +1878,6 @@ export default function WatchScreen() {
     const markQualityFailed = () => {
       if (!preferredQuality) return;
       setSlotStatus(prev => ({ ...prev, [pickerSlotKey(site, preferredQuality)]: "failed" }));
-      setAvailableSlots(prev => {
-        const next = { ...prev };
-        const siteSlots = { ...(next[site] || {}) };
-        delete siteSlots[preferredQuality];
-        if (Object.keys(siteSlots).length) next[site] = siteSlots;
-        else delete next[site];
-        return next;
-      });
     };
     try {
       await warmAuthToken();
@@ -2031,7 +2016,13 @@ export default function WatchScreen() {
       console.warn(
         `[playback-trace] id=${lookupTraceId} component=source stage=stream_error site=${lookupSiteTag} elapsed_ms=${Date.now() - lookupStartedAt} reason=${siteCtrl?.signal.aborted ? "aborted" : error instanceof Error ? error.name : "unknown"}`,
       );
-      if (siteCtrl?.signal.aborted) return;
+      if (siteCtrl?.signal.aborted) {
+        if (isMountedRef.current && progressivePlaybackRef.current === playback) {
+          fetchedSitesRef.current.delete(fetchKey);
+          markQualityFailed();
+        }
+        return;
+      }
       if (!receivedCandidate && !playback.retryPending && isMountedRef.current) {
         if (progressivePlaybackRef.current === playback) {
           markQualityFailed();
@@ -2827,7 +2818,6 @@ export default function WatchScreen() {
                         idx < slots.length - 1 && d.webRowBorder,
                         !watchUnlocked && { opacity: 0.72 },
                         isReady && watchUnlocked && { backgroundColor: colors.success + "10" },
-                        isFailed && { opacity: 0.40 },
                         pressed  && { opacity: 0.72 },
                       ]}
                     >
@@ -2845,8 +2835,8 @@ export default function WatchScreen() {
                             <Text style={[d.playBtnGreenText, tvMode && d.tvActionText]}>تشغيل</Text>
                           </View>
                         ) : (
-                          <View style={[d.pickBtn, tvMode && d.tvPickBtn, isFailed && { opacity: 0.4 }]}>
-                            <Text style={[d.pickBtnText, tvMode && d.tvActionText]}>اختيار</Text>
+                          <View style={[d.pickBtn, tvMode && d.tvPickBtn]}>
+                            <Text style={[d.pickBtnText, tvMode && d.tvActionText]}>{isFailed ? "إعادة المحاولة" : "اختيار"}</Text>
                           </View>
                         )}
                       </View>

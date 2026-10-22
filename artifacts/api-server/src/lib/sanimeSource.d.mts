@@ -3,7 +3,7 @@ export const SANIME_USER_AGENT: string;
 export const SANIME_CDN_BASES: readonly string[];
 
 export interface SanimeEpisodeVariant {
-  family: "Video2" | "Video";
+  family: "Video3";
   hdUrl: string;
   sdUrl: string;
 }

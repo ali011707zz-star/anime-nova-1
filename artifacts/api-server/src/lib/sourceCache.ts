@@ -61,7 +61,7 @@ const DEFAULT_TTL = 2 * 3_600_000;
 // URLs من هذه الأنماط تُعامَل كدائمة (TTL=30 يوم بدل حساب expiry من URL)
 const PERMANENT_URL_PATTERNS: Array<[RegExp, number]> = [
   // ── مدة 30 يوم ─────────────────────────────────────────────────────
-  [/server\.sanime\.net\/Video2?\//i,   30 * 24 * 3_600_000], // SAnime MP4: current and legacy CDN paths
+  [/server\.sanime\.net\/Video3\//i,    30 * 24 * 3_600_000], // SAnime MP4: canonical CDN path
   [/[ap]\.111477\.xyz\//i,              30 * 24 * 3_600_000], // DahmerMovies MP4
   [/mega\.nz\/(embed|file)\//i,         30 * 24 * 3_600_000], // Mega — ملفات دائمة
   [/drive\.google\.com\/file\//i,       30 * 24 * 3_600_000], // Google Drive

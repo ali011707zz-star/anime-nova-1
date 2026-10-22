@@ -155,20 +155,18 @@ router.get("/sanime/src", async (req, res) => {
     // Keep the CDN URL encoded inside our proxy so the VPS can add the UA
     // and forward Range requests correctly.
     const proxyBase = `/api/anime/video-proxy?ref=${encodeURIComponent("https://app.sanime.net/")}&ua=${encodeURIComponent(SA_UA)}`;
-    const [current, legacy] = sanimeEpisodeVariants(id, epNum);
-    if (!current || !legacy) {
+    const [current] = sanimeEpisodeVariants(id, epNum);
+    if (!current) {
       res.status(400).json({ error: "invalid episode identity" });
       return;
     }
     const proxyUrl = (url: string) => `${proxyBase}&url=${encodeURIComponent(url)}`;
     const hdUrl = proxyUrl(current.hdUrl);
     const sdUrl = proxyUrl(current.sdUrl);
-    const hdFallbackUrl = proxyUrl(legacy.hdUrl);
-    const sdFallbackUrl = proxyUrl(legacy.sdUrl);
 
     // Return direct URLs immediately — SA CDN URLs are permanent & predictable.
     // Skip slow HEAD/openAnd checks that added 5–13s latency; the player handles failures.
-    res.json({ hdUrl, sdUrl, hdFallbackUrl, sdFallbackUrl, permanent: true, proxy: true });
+    res.json({ hdUrl, sdUrl, permanent: true, proxy: true });
   } catch (e) {
     logger.error({ err: e }, "sanime /src error");
     res.status(500).json({ error: "src error" });
