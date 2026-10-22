@@ -15003,14 +15003,18 @@ router.get("/anime/sources-stream", scraperQueueMiddleware, async (req, res) => 
       const cacheSite = site === "anineko" ? "anineko-v2"
         : site === "sanime" ? "sanime-v2"
         : site;
-      const cKey = makeSourceCacheKey(
-        cacheSite,
-        title,
-        ep,
-        anilistId || anslayerId || `${reqYear || ""}:${reqTotalEps || ""}`,
-      );
+      // AnimeWitcher latest cards carry the provider's own catalog id. Keep
+      // their availability/source caches separate from title/AniList lookups;
+      // otherwise an older row for the same episode can hide a newly imported
+      // AW entry.
+      const cacheAnimeIdentity = site === "animewitcher" && awAnimeId
+        ? `aw:${awAnimeId}`
+        : anilistId || anslayerId || `${reqYear || ""}:${reqTotalEps || ""}`;
+      const cKey = makeSourceCacheKey(cacheSite, title, ep, cacheAnimeIdentity);
+      const forceLatestAwCheck =
+        checkOnly && fromLatest && latestSource === "animewitcher" && site === "animewitcher";
       const providerCheckStartedAt = Date.now();
-      if (checkOnly) {
+      if (checkOnly && !forceLatestAwCheck) {
         const availabilityHit = getSourceAvailabilityCache<UnifiedSource>(cKey);
         if (availabilityHit) {
           tracePlayback(
@@ -15055,7 +15059,9 @@ router.get("/anime/sources-stream", scraperQueueMiddleware, async (req, res) => 
       // The availability scan only emits metadata, so a fresh episode-scoped
       // cache entry is safe to reuse. Stale or near-expiry links still trigger
       // a live metadata refresh; no availability row is treated as playable.
-      const forceFresh = checkOnly && !usableCheckCache && !useKawaiiCacheForAvailability;
+      const forceFresh = checkOnly
+        && (forceLatestAwCheck || !usableCheckCache)
+        && !useKawaiiCacheForAvailability;
 
       if (hit && !forceFresh) {
         const isStaleOrNearExpiry = hit.stale || shouldRefreshCache(hit.expiresAt);
@@ -15827,7 +15833,10 @@ router.get("/anime/fetch-source", scraperQueueMiddleware, async (req, res) => {
       "anivexa_re",
 
 ]);
-  const cKey = makeSourceCacheKey(site, title, ep, anilistId || anslayerId);
+  const cacheAnimeIdentity = site === "animewitcher" && awAnimeId
+    ? `aw:${awAnimeId}`
+    : anilistId || anslayerId;
+  const cKey = makeSourceCacheKey(site, title, ep, cacheAnimeIdentity);
   let cached: Awaited<ReturnType<typeof getFromSourceCache>> = null;
   try {
     cached = await getFromSourceCache(cKey);

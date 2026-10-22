@@ -1029,7 +1029,9 @@ export default function WatchScreen() {
     englishStr,
     format || "",
     year,
-  )}|latest:${isFromLatest ? latestSource || "unknown" : "no"}`;
+  )}|latest:${isFromLatest ? latestSource || "unknown" : "no"}${
+    isFromLatest && latestSource === "animewitcher" ? `|aw:${awAnimeId || "unknown"}` : ""
+  }`;
   const [watchUnlocked, setWatchUnlocked] = useState(false);
   /* Only the pressed server row is waiting for the ad decision. A single
      boolean here made every server button show a spinner at once. */
@@ -1289,7 +1291,9 @@ export default function WatchScreen() {
     availabilityAbortRef.current = null;
     const forceFresh = forceAvailabilityRefreshRef.current;
     forceAvailabilityRefreshRef.current = false;
-    const cachedHints = forceFresh || (isFromLatest && latestSource === "anslayer")
+    const cachedHints = forceFresh || (
+      isFromLatest && (latestSource === "anslayer" || latestSource === "animewitcher")
+    )
       ? null
       : readAvailabilityHintRows(availabilityHintKey);
     if (cachedHints) {
