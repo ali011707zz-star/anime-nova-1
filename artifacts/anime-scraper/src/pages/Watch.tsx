@@ -337,6 +337,65 @@ interface FetchedSrc {
   skipOutro?: { start: number; end: number };
 }
 
+async function readFetchedSources(
+  response: Response,
+  progressive: boolean,
+): Promise<FetchedSrc[]> {
+  if (!progressive) {
+    const data = (await response.json()) as { sources?: FetchedSrc[] };
+    return Array.isArray(data.sources) ? data.sources : [];
+  }
+
+  const reader = response.body?.getReader();
+  if (!reader) return [];
+
+  const sources: FetchedSrc[] = [];
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  const readBlock = (block: string): boolean => {
+    let eventName = "message";
+    const dataLines: string[] = [];
+    for (const line of block.split(/\r?\n/)) {
+      if (line.startsWith("event:")) eventName = line.slice(6).trim();
+      else if (line.startsWith("data:")) dataLines.push(line.slice(5).trim());
+    }
+    if (eventName !== "source" || !dataLines.length) return false;
+    try {
+      const payload = JSON.parse(dataLines.join("\n"));
+      if (payload?.source && typeof payload.source === "object") {
+        sources.push(payload.source as FetchedSrc);
+        return true;
+      }
+    } catch {
+      // Ignore malformed SSE blocks; the endpoint sends an explicit done event.
+    }
+    return false;
+  };
+
+  const consume = (text: string): boolean => {
+    buffer += text;
+    const blocks = buffer.split(/\r?\n\r?\n/);
+    buffer = blocks.pop() || "";
+    for (const block of blocks) {
+      if (readBlock(block)) return true;
+    }
+    return false;
+  };
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    if (value && consume(decoder.decode(value, { stream: true }))) {
+      try { await reader.cancel(); } catch {}
+      return sources;
+    }
+  }
+  if (consume(decoder.decode())) return sources;
+  if (buffer.trim()) readBlock(buffer);
+  return sources;
+}
+
 /* Only sources explicitly disabled by product policy remain hidden. */
 const BLOCKED_SOURCE_SITES = new Set([
   "hianime",
@@ -5461,6 +5520,11 @@ export default function WatchPage() {
         params.set("awAnimeId", sp.get("awAnimeId")!);
       if (site === "anslayer" && titleArParam)
         params.set("titleAr", titleArParam);
+      /* AnimeSlayer can return stale external links. Use the API's progressive
+         probe so a dead link never switches away from the picker before the
+         player has a candidate that passed the server-side check. */
+      const useProgressiveResponse = site === "anslayer";
+      if (useProgressiveResponse) params.set("progressive", "1");
       // Provider pages/CDN tokens are occasionally transient. Retry one time
       // with a short backoff before marking the source failed; this keeps a
       // healthy provider from disappearing because of one 5xx/empty response.
@@ -5480,7 +5544,7 @@ export default function WatchPage() {
           });
         }
         if (r.ok) {
-          data = (await r.json()) as { sources?: FetchedSrc[] };
+          data = { sources: await readFetchedSources(r, useProgressiveResponse) };
           if (Array.isArray(data.sources) && data.sources.length > 0) break;
         }
         if (attempt === 0 && !ctrl.signal.aborted) {
@@ -5503,7 +5567,12 @@ export default function WatchPage() {
             headers: token ? { "X-App-Token": token } : {},
           });
           if (fallbackResponse.ok) {
-            data = (await fallbackResponse.json()) as { sources?: FetchedSrc[] };
+            data = {
+              sources: await readFetchedSources(
+                fallbackResponse,
+                useProgressiveResponse,
+              ),
+            };
           }
         } catch {
           /* The normal failure path below keeps the row state consistent. */

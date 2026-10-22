@@ -3063,6 +3063,42 @@ async function probeDirectUrl(url: string, referer?: string): Promise<boolean> {
   } catch { return true; }
 }
 
+async function probeAnslayerDirectUrl(url: string, referer?: string): Promise<boolean> {
+  if (!/^https?:\/\//i.test(url)) return false;
+  try {
+    const response = await fetch(url, {
+      headers: {
+        "User-Agent": BROWSER_UA,
+        Accept: "*/*",
+        Range: "bytes=0-1023",
+        ...(referer ? { Referer: referer } : {}),
+      },
+      signal: AbortSignal.timeout(5_000),
+      redirect: "follow",
+    });
+    const contentType = response.headers.get("content-type") || "";
+    const reader = response.body?.getReader();
+    const firstChunk = await reader?.read();
+    const prefix = firstChunk?.value
+      ? new TextDecoder().decode(firstChunk.value.subarray(0, 64)).trimStart().toLowerCase()
+      : "";
+    const normalizedContentType = contentType.toLowerCase();
+    const valid = (response.ok || response.status === 206)
+      && !!firstChunk?.value?.byteLength
+      && !normalizedContentType.includes("text/html")
+      && !normalizedContentType.includes("application/json");
+    const looksLikeErrorPage = prefix.startsWith("<!doctype html")
+      || prefix.startsWith("<html")
+      || /^\{\s*"(?:error|message)"/.test(prefix);
+    try { await reader?.cancel(); } catch {}
+    return valid && !looksLikeErrorPage;
+  } catch {
+    // AnimeSlayer links are external and often stale; fail closed so a dead
+    // candidate does not replace the source picker with a blank player.
+    return false;
+  }
+}
+
 async function extractAndCollect(
   sources: UnifiedSource[],
   out: UnifiedSource[],
@@ -15980,6 +16016,22 @@ router.get("/anime/fetch-source", scraperQueueMiddleware, async (req, res) => {
     if (!rawUrl) return false;
     if (source.directType === "hls" || /(?:\.m3u8(?:[?#]|$)|\/hls-proxy\?)/i.test(rawUrl)) {
       return verifyProgressiveCandidate(source);
+    }
+    if (source.site === "anslayer" && !isMobileClient) {
+      let targetUrl = rawUrl;
+      let referer = String(source.headers?.Referer || source.url || "");
+      try {
+        const parsed = new URL(rawUrl, "http://nova.local");
+        if (parsed.pathname.endsWith("/video-proxy")) {
+          targetUrl = parsed.searchParams.get("url") || "";
+          referer = parsed.searchParams.get("ref") || referer;
+        }
+        if (isEncrypted(targetUrl)) targetUrl = decryptParam(targetUrl);
+        if (isEncrypted(referer)) referer = decryptParam(referer);
+      } catch {
+        return false;
+      }
+      return probeAnslayerDirectUrl(targetUrl, referer);
     }
     return probeDirectUrl(rawUrl, source.url);
   }
