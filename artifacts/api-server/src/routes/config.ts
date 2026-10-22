@@ -7,6 +7,7 @@ import { isWebAdmin } from "./webAdmin.js";
 const router = Router();
 const REMOTE_CONFIG_KEY = "remote_config";
 const TEMPORARILY_DISABLED_SOURCES = ["anifox"] as const;
+const PERMANENTLY_DISABLED_SOURCES = ["anivexa_re", "reanime", "consumet_reanime"] as const;
 
 const DEFAULT_CONFIG = {
   version: "1.0.0",
@@ -33,7 +34,7 @@ const DEFAULT_CONFIG = {
     vidfast:       true,
     vidlink_anim:  true,
     anivexa_re:    false,
-    reanime:       true,
+    reanime:       false,
     seepanel:     true,
     arabseed:     true,
     animephoenix: true,
@@ -80,6 +81,7 @@ function mergeConfig(value: any) {
     limits: { ...DEFAULT_CONFIG.limits, ...(value?.limits || {}) },
   };
   for (const source of TEMPORARILY_DISABLED_SOURCES) merged.sources[source] = false;
+  for (const source of PERMANENTLY_DISABLED_SOURCES) merged.sources[source] = false;
   return merged;
 }
 

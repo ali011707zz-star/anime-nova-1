@@ -196,6 +196,11 @@ function loadLastSrc(
     const raw = localStorage.getItem(key);
     if (!raw) return null;
     const d = JSON.parse(raw);
+    const savedSite = String(d?.site || "").trim().toLowerCase();
+    if (savedSite && BLOCKED_SOURCE_SITES.has(savedSite)) {
+      localStorage.removeItem(key);
+      return null;
+    }
     // Expire after 6 hours — sources (especially HLS) expire on CDN
     if (!d?.url || Date.now() - (d.ts || 0) > 6 * 60 * 60_000) {
       localStorage.removeItem(key);
@@ -344,6 +349,8 @@ const BLOCKED_SOURCE_SITES = new Set([
   "consumet_reanime",
   "consumet_anikoto",
   "anivexa_re",
+  "reanime",
+  "re",
   "mkissa",
   "mk",
   "ra",
@@ -385,7 +392,6 @@ const SCRAPER_DEFS: {
     desc: "HLS · صوت خام · ترجمة Kawaii",
     tag: "MP",
   },
-  { site: "reanime", name: "Re:Anime", desc: "HLS · صوت خام · ترجمة Kawaii", tag: "RE" },
   { site: "anineko", name: "AniNeko", desc: "HLS · متعدد الجودات", tag: "AN" },
   // hianime: معطّل بطلب المستخدم 2026-07-30 — تفوّت حلقات
   {
@@ -462,7 +468,6 @@ const STATIC_PICKER_WEB: Record<
   "1080p": [
     { site: "kawaii", tag: "KW" },
     { site: "megaplay", tag: "MP" },
-    { site: "reanime", tag: "RE" },
     { site: "anineko", tag: "AN" },
     { site: "animewitcher", tag: "AW" },
     { site: "anslayer", tag: "AS" },
@@ -474,7 +479,6 @@ const STATIC_PICKER_WEB: Record<
   ],
   "720p": [
     { site: "megaplay", tag: "MP" },
-    { site: "reanime", tag: "RE" },
     { site: "anineko", tag: "AN" },
     { site: "animewitcher", tag: "AW" },
     { site: "anslayer", tag: "AS" },
@@ -486,7 +490,6 @@ const STATIC_PICKER_WEB: Record<
   ],
   "360p": [
     { site: "megaplay", tag: "MP" },
-    { site: "reanime", tag: "RE" },
     { site: "anineko", tag: "AN" },
     { site: "animewitcher", tag: "AW" },
     { site: "animeify", tag: "AF" },
@@ -543,7 +546,6 @@ const PROVIDER_WANTS_SMART_SUB = new Set([
    when Kawaii has not returned a track for that episode yet. */
 const KAWAII_SUBTITLE_SITES = new Set([
   "kawaii",
-  "reanime",
   "anineko", // AN
   "animekai", // AK
   "megaplay", // MP
@@ -5406,7 +5408,6 @@ export default function WatchPage() {
     /* timeout مُصمَّم لكل موقع — يجب أن يكون >= timeout الباكند لنفس الموقع
        حتى لا يُقتل الطلب قبل أن يرد الباكند (مشكلة جذرية لفقدان المصادر في cache البارد) */
     const SITE_REQUEST_TIMEOUTS: Record<string, number> = {
-      reanime: 135000, // AP0DL can take 70s plus catalog lookup and HLS variant probing
       animewitcher: 42000, // backend = 38s + هامش 4s
       animekai: 36000, // backend = 30s + هامش 6s
       consumet_gogo: 36000,

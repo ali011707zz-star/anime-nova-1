@@ -52,7 +52,7 @@ import {
 } from "../lib/stardima-playback.mjs";
 import { stardimaPlayableType } from "../jobs/stardima-catalog-utils.mjs";
 import { ANIVEXA_SOURCES, getAnivexaSources, isAnivexaSite } from "../lib/anivexa.js";
-import { checkReanimeEpisode, decodeReanimeImageSegment, getReanimeSources } from "../lib/reanimeSource.js";
+import { decodeReanimeImageSegment } from "../lib/reanimeSource.js";
 import {
   CONSUMET_SOURCES,
   decodeEncryptedHlsPlaylist,
@@ -10857,9 +10857,8 @@ async function re_decryptEmbed(html: string): Promise<{ url: string; subtitles: 
 const reanimeSrcCache = new Map<string, { sources: UnifiedSource[]; ts: number }>();
 const REANIME_TTL = 30 * 60_000;
 
-// [2026-07-06] أُعيد تفعيله: reanime.to/api/flix لم يعد يحجب Replit datacenter IPs (فُحص مباشرة).
-// FlixCloud embed page لا يزال محميّاً بـ CF challenge بسيط → يُستخدم cfProxyGet (curl_cffi impersonation) بدلاً من fetch العادي.
-const REANIME_DISABLED = true; // re-enabled 2026-07-20: reanime.to/api/flix works — softsub only
+// Legacy implementation is retained, but this provider is intentionally disabled.
+const REANIME_DISABLED = true;
 async function getReanímeSources(
   title: string, english: string | null, ep: number, anilistId?: number,
 ): Promise<UnifiedSource[]> {
@@ -14984,9 +14983,7 @@ router.get("/anime/sources-stream", scraperQueueMiddleware, async (req, res) => 
       "xpass_anim",                     // XPass token ~8min
       "anineko", "anikoto",             // vibeplayer.site tokens expire in ~1-2h
       "kawaii",                         // cdn.momentoai.dev signed URLs (md5+expires) — نتجنب الـ cache القديم الذي يحتوي proxy URLs لا تعمل
-        "anivexa_re",                     // RE/FlixCloud rows may lack the manifest key
-
-]);
+    ]);
 
     // ── مساعد: كاشط بـ cache + extractAndCollect ──
     async function scrapeCached(
@@ -15058,8 +15055,7 @@ router.get("/anime/sources-stream", scraperQueueMiddleware, async (req, res) => 
       // The availability scan only emits metadata, so a fresh episode-scoped
       // cache entry is safe to reuse. Stale or near-expiry links still trigger
       // a live metadata refresh; no availability row is treated as playable.
-      const forceFresh = site === "reanime"
-        || (checkOnly && !usableCheckCache && !useKawaiiCacheForAvailability);
+      const forceFresh = checkOnly && !usableCheckCache && !useKawaiiCacheForAvailability;
 
       if (hit && !forceFresh) {
         const isStaleOrNearExpiry = hit.stale || shouldRefreshCache(hit.expiresAt);
@@ -15217,29 +15213,6 @@ router.get("/anime/sources-stream", scraperQueueMiddleware, async (req, res) => 
     // reflect real tiers rather than the page's generic "HD" label.
     if (checkOnly) {
       const providerJobs = orderAvailabilityJobs([
-        {
-          site: "reanime",
-          timeoutMs: sourceAvailabilityJobTimeoutMs("reanime", 25_000),
-          run: async () => {
-            const checked = await checkReanimeEpisode(
-              await aniListIdResolution,
-              ep,
-              title,
-              english,
-              titleVariants,
-            );
-            if (!checked.available) return;
-            sendCheckSrc({
-              name: "Re:Anime · الحلقة موجودة",
-              url: "",
-              quality: "720p",
-              qualityRank: 13,
-              site: "reanime",
-              serverCount: checked.serverCount || 1,
-              verified: true,
-            } as UnifiedSource);
-          },
-        },
         {
           site: "kawaii",
           timeoutMs: sourceAvailabilityJobTimeoutMs("kawaii", 10_000),
@@ -15399,7 +15372,6 @@ router.get("/anime/sources-stream", scraperQueueMiddleware, async (req, res) => 
       // ── ياباني مترجم (AniList ID) ─────────────────────────────────
       scrapeCached("kawaii",       () => getKawaiiAnimeSources(title, english, ep, anilistId), false, 14000),
       scrapeCached("megaplay",     () => getMegaPlayAnimeSources(title, english, ep, anilistId), false, 18000),
-      scrapeCached("reanime",      () => getReanimeSources(anilistId, ep, title, english, titleVariants), false, 110000),
       // AK and AN are visible in both clients; include them in the first availability pass too.
       // Previously they existed only in fetch-source, so the picker reported them as missing.
       scrapeCached("animekai",     () => getAnimeKaiSources(title, english, ep, anilistId),      false, 26000),
@@ -15459,7 +15431,6 @@ router.get("/anime/sources-stream", scraperQueueMiddleware, async (req, res) => 
       // animegg:      معطّل بطلب المستخدم
       // allmanga: معطّل 2026-07-17 — AA_CRYPTO_MISSING على endpoint الحلقات (AllAnime أضافت anti-scraping)
       // scrapeCached("allmanga", () => getAllMangaSources(title, english, ep, anilistId), false, 18000),
-      // Reanime is checked through the current v1 catalog and resolved on click.
       // animepahe:    mirurotvapi + owocdn AES-128 HLS — 18ث timeout — ثقيل جداً في التشغيل
       // ── مصادر جديدة يوليو 2026 ────────────────────────────────────────────
       scrapeCached("nekowatch",  () => getNekowatchSources(title, english, ep, anilistId),  false, 18000),
@@ -15507,14 +15478,17 @@ router.get("/anime/fetch-source", scraperQueueMiddleware, async (req, res) => {
   const sourceTraceStartedAt = Date.now();
   tracePlayback(sourceTrace, "source-lookup", "request", sourceTraceSite);
   traceProxyResponse(res, sourceTrace, "source-lookup", sourceTraceSite, sourceTraceStartedAt);
-  const DISABLED_SOURCE_SITES = new Set<string>();
+  const DISABLED_SOURCE_SITES = new Set<string>([
+    "reanime",
+    "re",
+    "anivexa_re",
+    "consumet_reanime",
+  ]);
   if (DISABLED_SOURCE_SITES.has(requestedSite)) {
     res.json({ sources: [], disabled: true });
     return;
   }
-  // Keep old mobile builds working while routing every Reanime request
-  // through the Anivexa adapter, which preserves the per-embed manifest key.
-  const site = requestedSite === "consumet_reanime" ? "reanime" : requestedSite;
+  const site = requestedSite;
   const title     = ((req.query.title   as string) || "").trim();
   const english   = ((req.query.english as string) || "").trim() || null;
   const ep        = parseInt((req.query.ep    as string) || "1");
@@ -15762,7 +15736,7 @@ router.get("/anime/fetch-source", scraperQueueMiddleware, async (req, res) => {
   const DISABLED_ANIME_SOURCES = new Set([
     "anikoto", "shirayuki_anikoto", "shirayuki_animix",
     "anivexa_anikoto", "anivexa_anidbapp",
-    "anivexa_re",
+    "reanime", "re", "anivexa_re",
     "consumet_world", "consumet_miruro", "consumet_saturn",
     "consumet_reanime", "consumet_anikoto", "anime4up2",
     // Retired provider ids and legacy short tags. Keep these blocked so stale
@@ -15778,30 +15752,6 @@ router.get("/anime/fetch-source", scraperQueueMiddleware, async (req, res) => {
   if (DISABLED_ANIME_SOURCES.has(site)) {
     if (progressive) finishProgressiveResponse("provider_disabled");
     else res.json({ sources: [] });
-    return;
-  }
-  if (site === "reanime") {
-    let sources: UnifiedSource[] = [];
-    try {
-      sources = filterRequestedQuality(
-        await getReanimeSources(anilistId, ep, title, english, titleVariants),
-      );
-    } catch (error: any) {
-      logger.warn({ provider: "reanime", error: error?.message || "provider failed" }, "Reanime source fetch failed");
-      if (progressive) { finishProgressiveResponse("provider_failed"); return; }
-      throw error;
-    }
-    if (progressive) { await sendProgressiveBatch(sources); return; }
-    const encSources = sources.map(source => {
-      const wrapped = isMobileClient ? wrapForMobile(source) : source;
-      return {
-        ...wrapped,
-        directUrl: wrapped.directUrl
-          ? (wrapped.corsOk ? wrapped.directUrl : encryptProxyUrl(wrapped.directUrl))
-          : wrapped.directUrl,
-      };
-    });
-    res.json({ sources: encSources });
     return;
   }
   if (isAnivexaSite(site)) {
