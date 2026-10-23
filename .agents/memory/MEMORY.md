@@ -37,6 +37,7 @@
 - [SAnime Deep Analysis](sanime-deep-analysis.md) — UA=IBRAHIMSEVEN يفتح ep[]; Video: server.sanime.net/Video/{id}/{ep}.mp4; 289 anime مع حلقات; scraper blueprint كامل.
 - [Animatoo app analysis](animatoo-analysis.md) — Supabase مفتوح بـ anon key؛ 6339 أنمي + 77395 حلقة كلها anime3rb slugs؛ tmdb_id→slug lookup قيّم لـ anime3rb scraper.
 - [Proxy VPS fallback](proxy-vps-fallback.md) — hls/video/seg-proxy: CF Worker أولاً ثم VPS fallback؛ _cfh.ok=false مبدئياً؛ OPTIONS health check كل 45s.
+- [Hedged media abort lifecycle](media-proxy-abort-lifecycle.md) — Keep client-disconnect and losing-direct cancellation separate; the winning stream must remain abortable until its body ends.
 - [CineSrc integration](cinesrc-integration.md) — cinesrc.st in animation.ts+anime.ts; VPS IP blocked for server actions (graceful fail); SubtleCrypto Proxy patch documented.
 - [Orkestr removal + scraper timeout fixes](orkestr-scraper-fixes-2026-07.md) — anineko direct fetch ✅ (no orkestGet needed); anikoto/hianime/anineko timeouts fixed 7s→20-30s; witanime no-empty-cache fix.
 - [seg-proxy text/html MPEG TS fix](seg-proxy-content-type-fix.md) — بعض CDNs تُرجع TS binary بـ text/html خاطئ → ExoPlayer يرفضه → شاشة سوداء؛ fix: كشف 0x47 sync byte وتصحيح Content-Type + CF Worker fallback.
