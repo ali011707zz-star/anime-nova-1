@@ -138,7 +138,7 @@ function getPlaybackBufferOptions(animePlayback: boolean) {
     // Keep the cap at 24 seconds; larger values caused OOM on low-memory phones.
     maxBufferMs: 24000,
     bufferForPlaybackMs: animePlayback ? 1800 : 1000,
-    bufferForPlaybackAfterRebufferMs: animePlayback ? 5000 : 3500,
+    bufferForPlaybackAfterRebufferMs: animePlayback ? 7000 : 3500,
     backBufferDurationMs: 3000,
   };
 }
@@ -519,6 +519,8 @@ function ExpoRiftPlayer({
     readyLogged: false,
     playingLogged: false,
     progressLogged: false,
+    rebufferStartedAt: 0,
+    rebufferCount: 0,
   });
   useEffect(() => {
     const url = currentSrc?.url || "";
@@ -529,6 +531,8 @@ function ExpoRiftPlayer({
       readyLogged: false,
       playingLogged: false,
       progressLogged: false,
+      rebufferStartedAt: 0,
+      rebufferCount: 0,
     };
     logPlaybackStage(url, "source_assigned");
   }, [currentSrc?.url]);
@@ -1129,6 +1133,17 @@ function ExpoRiftPlayer({
       if (!aliveRef.current || isStale()) return;
       if (e.status === "loading") {
         setBuffering(true);
+        const traceState = playbackTraceStateRef.current;
+        const isSeekLoading = !!seekRecoveryRef.current || !!pendingSeekRef.current;
+        if (traceState.playingLogged && !isSeekLoading && !traceState.rebufferStartedAt) {
+          traceState.rebufferStartedAt = Date.now();
+          traceState.rebufferCount += 1;
+          logPlaybackStage(
+            traceState.url,
+            "rebuffer_start",
+            `count=${traceState.rebufferCount}`,
+          );
+        }
         /* loading الناتج عن تغيير الموضع ليس بداية تحميل مصدر جديد. */
         if (seekRecoveryRef.current) return;
         if (!playbackTraceStateRef.current.loadingAt) {
@@ -1157,6 +1172,16 @@ function ExpoRiftPlayer({
         /* انتهت عملية replace() الجارية (نجاحاً أو فشلاً) — حرِّر القفل ونفِّذ أي
            تبديل مصدر تراكم أثناء الانتظار (انظر replaceInFlightRef أعلاه). */
         if (e.status === "readyToPlay" || e.status === "error") {
+          const traceState = playbackTraceStateRef.current;
+          if (traceState.rebufferStartedAt) {
+            const rebufferDuration = Date.now() - traceState.rebufferStartedAt;
+            traceState.rebufferStartedAt = 0;
+            logPlaybackStage(
+              traceState.url,
+              e.status === "readyToPlay" ? "rebuffer_end" : "rebuffer_error",
+              `duration_ms=${rebufferDuration} count=${traceState.rebufferCount}`,
+            );
+          }
           if (replaceSafetyTimerRef.current) { clearTimeout(replaceSafetyTimerRef.current); replaceSafetyTimerRef.current = null; }
           replaceInFlightRef.current = false;
           const pending = pendingSwitchIdxRef.current;
