@@ -7,6 +7,13 @@ import { createKawaiiApiResolver } from "./kawaiiApiFailover.mjs";
 import { rewriteHlsManifest } from "./hlsManifestRewrite.mjs";
 import { buildMediaRequestHeaders, copyMediaResponse } from "./mediaProxyCore.mjs";
 import {
+  collectInspectedBody,
+  fetchWithHeaderTimeout,
+  inspectReadableBody,
+  startDelayedAbortableRequest,
+  streamInspectedBody,
+} from "./mediaStreamTools.mjs";
+import {
   hasExpiredSignedSource,
   isSourceCacheEntryStale,
   readExpressDecodedQueryString,
@@ -15,6 +22,122 @@ import {
 
 const root = new URL("../../../../", import.meta.url);
 const readProjectFile = path => readFileSync(new URL(path, root), "utf8");
+
+test("media proxy header deadline does not abort a response body after headers", async () => {
+  let fetchSignal;
+  const response = await fetchWithHeaderTimeout(
+    async (_input, init) => {
+      fetchSignal = init.signal;
+      return new Response(new ReadableStream({
+        start(controller) {
+          setTimeout(() => {
+            controller.enqueue(new TextEncoder().encode("streaming-body"));
+            controller.close();
+          }, 20);
+        },
+      }));
+    },
+    "https://media.example/stream",
+    {},
+    5,
+  );
+
+  assert.equal(await response.text(), "streaming-body");
+  assert.equal(fetchSignal.aborted, false);
+});
+
+test("media proxy header deadline still aborts a request that never returns headers", async () => {
+  await assert.rejects(
+    fetchWithHeaderTimeout(
+      (_input, { signal }) => new Promise((_resolve, reject) => {
+        if (signal.aborted) {
+          reject(new Error("header timeout"));
+          return;
+        }
+        signal.addEventListener("abort", () => reject(new Error("header timeout")), { once: true });
+      }),
+      "https://media.example/stalled",
+      {},
+      5,
+    ),
+    /header timeout/,
+  );
+});
+
+test("cancelled media hedges do not launch or keep an upstream request alive", async () => {
+  const beforeLaunch = new AbortController();
+  let launched = false;
+  const queued = startDelayedAbortableRequest(30, beforeLaunch.signal, async () => {
+    launched = true;
+    return new Response("unexpected");
+  });
+  beforeLaunch.abort();
+  assert.equal(await queued.promise, null);
+  await new Promise(resolve => setTimeout(resolve, 35));
+  assert.equal(launched, false);
+
+  const duringRequest = new AbortController();
+  let hedgeSignal;
+  let requestStarted;
+  const started = new Promise(resolve => { requestStarted = resolve; });
+  const pending = startDelayedAbortableRequest(0, duringRequest.signal, signal => {
+    hedgeSignal = signal;
+    requestStarted();
+    return new Promise((_resolve, reject) => {
+      signal.addEventListener("abort", () => reject(new Error("cancelled")), { once: true });
+    });
+  });
+  await started;
+  duringRequest.abort();
+  assert.equal(await pending.promise, null);
+  assert.equal(hedgeSignal.aborted, true);
+});
+
+test("a winning hedge survives direct-request cancellation but stops on client disconnect", async () => {
+  const clientAbort = new AbortController();
+  const directRaceAbort = new AbortController();
+  const directSignal = AbortSignal.any([clientAbort.signal, directRaceAbort.signal]);
+  const pending = startDelayedAbortableRequest(0, clientAbort.signal, async signal => signal);
+  const hedgeSignal = await pending.promise;
+
+  directRaceAbort.abort();
+  assert.equal(directSignal.aborted, true);
+  assert.equal(hedgeSignal.aborted, false);
+
+  clientAbort.abort();
+  assert.equal(hedgeSignal.aborted, true);
+});
+
+test("segment prefix inspection streams the untouched remainder and supports bounded buffering", async () => {
+  const body = new ReadableStream({
+    start(controller) {
+      controller.enqueue(Buffer.from("ABCD"));
+      controller.enqueue(Buffer.from("EFGH"));
+      controller.close();
+    },
+  });
+  const inspected = await inspectReadableBody(body, 4);
+  assert.equal(inspected.prefix.toString(), "ABCD");
+  const streamed = [];
+  for await (const chunk of streamInspectedBody(inspected)) streamed.push(Buffer.from(chunk));
+  assert.equal(Buffer.concat(streamed).toString(), "ABCDEFGH");
+
+  const buffered = await inspectReadableBody(new Response("12345678").body, 3);
+  assert.equal((await collectInspectedBody(buffered, 8)).toString(), "12345678");
+});
+
+test("Anime seg-proxy sniffs a prefix, streams media, and preserves upstream ranges", () => {
+  const source = readProjectFile("artifacts/api-server/src/routes/anime.ts");
+  const start = source.indexOf("async function serveSegResponse");
+  const end = source.indexOf("\n  // Fail closed", start);
+  assert.ok(start >= 0 && end > start, "Anime seg-proxy response handler must exist");
+  const handler = source.slice(start, end);
+  assert.match(handler, /inspectReadableBody\(r\.body, 4096\)/);
+  assert.match(handler, /Readable\.from\(streamInspectedBody\(inspected\)\)/);
+  assert.match(handler, /content-range/);
+  assert.match(handler, /res\.status\(r\.status\)/);
+  assert.doesNotMatch(handler, /await r\.arrayBuffer\(\)/);
+});
 
 function endpoints() {
   return [

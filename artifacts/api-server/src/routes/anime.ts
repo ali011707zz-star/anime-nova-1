@@ -26,6 +26,14 @@ import { findExactAniListTitleMatch, normalizeAniListTitle } from "../lib/aniLis
 import { markKawaiiRecovered, notifyKawaiiIncident } from "../lib/kawaiiHealthAlert.js";
 import { readExpressDecodedQueryString } from "../lib/proxyUrlPolicy.mjs";
 import { buildMediaRequestHeaders, copyMediaResponse } from "../lib/mediaProxyCore.mjs";
+import {
+  cancelInspectedBody,
+  collectInspectedBody,
+  fetchWithHeaderTimeout,
+  inspectReadableBody,
+  startDelayedAbortableRequest,
+  streamInspectedBody,
+} from "../lib/mediaStreamTools.mjs";
 import { rewriteHlsManifest } from "../lib/hlsManifestRewrite.mjs";
 import { createHash, createDecipheriv, createCipheriv, randomBytes } from "crypto";
 import { execSync, execFile, spawn } from "child_process";
@@ -630,14 +638,12 @@ async function cfProxyStreamFetch(
     if (CF_PROXY_KEY) streamUrl.searchParams.set("key", CF_PROXY_KEY);
     const headers: Record<string, string> = {};
     if (range) headers.Range = range;
-    const timeoutSignal = AbortSignal.timeout(35_000);
-    const signal = externalSignal
-      ? AbortSignal.any([externalSignal, timeoutSignal])
-      : timeoutSignal;
-    return await fetch(streamUrl, {
-      headers,
-      signal,
-    });
+    return await fetchWithHeaderTimeout(
+      fetch,
+      streamUrl,
+      { headers, ...(externalSignal ? { signal: externalSignal } : {}) },
+      35_000,
+    );
   } catch {
     return null;
   }
@@ -649,30 +655,23 @@ async function fetchMediaUpstream(
   headers: Record<string, string>,
   range: string | undefined,
   signal: AbortSignal,
-  directAbort: AbortController,
 ): Promise<Response> {
-  const directPromise = fetch(url, { headers, signal }).then(
+  const directRaceAbort = new AbortController();
+  const directSignal = AbortSignal.any([signal, directRaceAbort.signal]);
+  const directPromise = fetch(url, { headers, signal: directSignal }).then(
     response => ({ kind: "direct", response } as const),
     error => ({ kind: "direct-error", error } as const),
   );
-  let hedgeTimer: ReturnType<typeof setTimeout> | null = null;
-  const hedgeAbort = new AbortController();
-  const cancelHedge = () => {
-    if (hedgeTimer) clearTimeout(hedgeTimer);
-    hedgeAbort.abort();
-  };
-  const hedgePromise = new Promise<any>(resolve => {
-    hedgeTimer = setTimeout(async () => {
-      try {
-        const response = await cfProxyStreamFetch(url, ref, range, hedgeAbort.signal);
-        if (response?.ok) {
-          resolve({ kind: "cf", response });
-          return;
-        }
-        try { await response?.body?.cancel(); } catch {}
-      } catch {}
-      resolve({ kind: "cf-error" });
-    }, 2500);
+  const pendingHedge = startDelayedAbortableRequest(
+    2500,
+    signal,
+    hedgeSignal => cfProxyStreamFetch(url, ref, range, hedgeSignal),
+  );
+  const cancelHedge = () => pendingHedge.cancel();
+  const hedgePromise = pendingHedge.promise.then(async response => {
+    if (response?.ok) return { kind: "cf", response };
+    try { await response?.body?.cancel(); } catch {}
+    return { kind: "cf-error" };
   });
 
   const first: any = await Promise.race([directPromise, hedgePromise]);
@@ -681,7 +680,7 @@ async function fetchMediaUpstream(
     return first.response;
   }
   if (first.kind === "cf" && first.response.ok) {
-    directAbort.abort();
+    directRaceAbort.abort();
     console.info(`[media-hedge] route=cf host=${safeHost(url)}`);
     return first.response;
   }
@@ -689,7 +688,7 @@ async function fetchMediaUpstream(
   if (first.kind === "direct" || first.kind === "direct-error") {
     const alternate: any = await hedgePromise;
     if (alternate.kind === "cf" && alternate.response.ok) {
-      directAbort.abort();
+      directRaceAbort.abort();
       console.info(`[media-hedge] route=cf host=${safeHost(url)}`);
       return alternate.response;
     }
@@ -19139,7 +19138,7 @@ router.get("/anime/download-mp4", async (req, res) => {
 // وأول 4 بايته هي PNG magic سيُعالَج تلقائياً.
 
 /** يكشف PNG-wrapped MPEG-TS ويُرجع المخزن المؤقت بعد إزالة غلاف PNG */
-function stripPngWrapper(raw: ArrayBuffer): Buffer | null {
+function stripPngWrapper(raw: ArrayBuffer | Buffer): Buffer | null {
   const buf = Buffer.from(raw);
   // PNG magic: 89 50 4E 47 0D 0A 1A 0A
   if (buf.length < 8 || buf.readUInt32BE(0) !== 0x89504E47) return null;
@@ -19159,7 +19158,7 @@ function findTsPayload(buf: Buffer): Buffer | null {
   return null;
 }
 
-function stripImageMediaWrapper(raw: ArrayBuffer): Buffer | null {
+function stripImageMediaWrapper(raw: ArrayBuffer | Buffer): Buffer | null {
   const buf = Buffer.from(raw);
   if (buf.length < 377) return null;
   return findTsPayload(buf);
@@ -19194,9 +19193,51 @@ router.get("/anime/seg-proxy", async (req, res) => {
   async function serveSegResponse(r: Response): Promise<boolean> {
     const ct = (r.headers.get("content-type") || "").toLowerCase();
     const reanimeFlixReferer = /^https?:\/\/(?:www\.)?flixcloud\.cc(?:\/|$)/i.test(ref);
-    if (reanimeFlixReferer && (Number(r.headers.get("content-length") || 0) <= 30 * 1024 * 1024)) {
-      const raw = await r.arrayBuffer();
-      const decoded = await decodeReanimeImageSegment(raw);
+    const isGenericBinary = ct === "application/octet-stream" || ct === "binary/octet-stream";
+    const shouldInspect =
+      reanimeFlixReferer ||
+      ct.startsWith("image/") ||
+      isGenericBinary ||
+      ct.startsWith("text/") ||
+      /^(?:application\/(?:javascript|json))/.test(ct);
+
+    if (!shouldInspect) {
+      res.setHeader("Content-Type", r.headers.get("content-type") || "video/MP2T");
+      for (const [sourceName, outputName] of [
+        ["content-length", "Content-Length"],
+        ["content-range", "Content-Range"],
+        ["accept-ranges", "Accept-Ranges"],
+        ["etag", "ETag"],
+      ] as const) {
+        const value = r.headers.get(sourceName);
+        if (value) res.setHeader(outputName, value);
+      }
+      res.setHeader("Cache-Control", "public, max-age=60");
+      res.status(r.status);
+      await pipeWebMediaBody(r.body, res);
+      return true;
+    }
+
+    const inspected = await inspectReadableBody(r.body, 4096);
+    const prefix = inspected.prefix;
+    const hasPngSignature =
+      prefix.length >= 8 && prefix.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
+    const hasWebpSignature =
+      prefix.length >= 12 &&
+      prefix.toString("ascii", 0, 4) === "RIFF" &&
+      prefix.toString("ascii", 8, 12) === "WEBP";
+    const hasImageWrapper = hasPngSignature || hasWebpSignature;
+    const maxWrappedSegmentBytes = 30 * 1024 * 1024;
+
+    if (reanimeFlixReferer && hasImageWrapper) {
+      let raw: Buffer;
+      try {
+        raw = await collectInspectedBody(inspected, maxWrappedSegmentBytes);
+      } catch {
+        return false;
+      }
+      const rawArrayBuffer = raw.buffer.slice(raw.byteOffset, raw.byteOffset + raw.byteLength);
+      const decoded = await decodeReanimeImageSegment(rawArrayBuffer);
       if (decoded) {
         res.setHeader("Content-Type", "video/MP2T");
         res.setHeader("Content-Length", String(decoded.length));
@@ -19205,23 +19246,23 @@ router.get("/anime/seg-proxy", async (req, res) => {
         res.status(200).end(decoded);
         return true;
       }
-      const original = Buffer.from(raw);
       if (ct.startsWith("image/")) return false;
       res.setHeader("Content-Type", r.headers.get("content-type") || "video/MP2T");
-      res.setHeader("Content-Length", String(original.length));
+      res.setHeader("Content-Length", String(raw.length));
       res.setHeader("Accept-Ranges", "bytes");
       res.setHeader("Cache-Control", "public, max-age=60");
-      res.status(200).end(original);
+      res.status(200).end(raw);
       return true;
     }
-    const mightBePng =
-      ct.startsWith("image/") ||
-      ct === "application/octet-stream" ||
-      ct === "binary/octet-stream";
 
-    if (mightBePng) {
-      const raw = await r.arrayBuffer();
-      const stripped = stripPngWrapper(raw) || (ct.startsWith("image/") ? stripImageMediaWrapper(raw) : null);
+    if (ct.startsWith("image/") || (isGenericBinary && hasImageWrapper)) {
+      let raw: Buffer;
+      try {
+        raw = await collectInspectedBody(inspected, maxWrappedSegmentBytes);
+      } catch {
+        return false;
+      }
+      const stripped = stripPngWrapper(raw) || stripImageMediaWrapper(raw);
       if (stripped) {
         res.setHeader("Content-Type", "video/MP2T");
         res.setHeader("Content-Length", String(stripped.length));
@@ -19233,64 +19274,43 @@ router.get("/anime/seg-proxy", async (req, res) => {
       // Reanime CDNs can return an image placeholder with HTTP 200 when
       // fetched from the VPS IP. Never pass it to hls.js as a segment;
       // that creates the endless spinner/retry loop.
-      if (ct.startsWith("image/")) return false;
-      const cl = r.headers.get("content-length");
-      if (cl) res.setHeader("Content-Length", cl);
-      res.setHeader("Accept-Ranges", r.headers.get("accept-ranges") || "bytes");
-      res.setHeader("Cache-Control", "public, max-age=60");
-      // AniNeko's newer CDNs sometimes return a real MPEG-TS/fMP4 segment
-      // with a generic image/octet-stream content type. ExoPlayer trusts this
-      // header and then rejects the otherwise valid segment. Classify the
-      // bytes before passing the response through.
-      const magic = mediaMagic(Buffer.from(raw));
-      const correctedCt = magic === "ts"
-        ? "video/MP2T"
-        : magic === "mp4"
-          ? "video/mp4"
-          : (ct === "application/octet-stream" || ct === "binary/octet-stream") && /\.mp4(\?|$)/i.test(url)
-            ? "video/mp4"
-            : ct;
-      res.setHeader("Content-Type", correctedCt);
-      res.status(200).end(Buffer.from(raw));
-      return true;
-    }
-
-    // ── كشف Content-Type خاطئ من CDN (text/html مع بيانات TS حقيقية) ──────────
-    // بعض CDNs (مثل startupmomentumengine.site) تُرجع video/TS بـ text/html
-    // ExoPlayer يرفض text/html → شاشة سوداء حتى لو البيانات صحيحة
-    if (ct.startsWith("text/html")) {
-      const raw = await r.arrayBuffer();
-      const buf  = Buffer.from(raw);
-      // MPEG TS sync byte = 0x47, packet size = 188 bytes
-      if (buf.length > 1000 && mediaMagic(buf) === "ts") {
-        // بيانات TS حقيقية بـ Content-Type خاطئ → صحّح وأرسل
-        res.setHeader("Content-Type", "video/MP2T");
-        res.setHeader("Content-Length", String(buf.length));
-        res.setHeader("Accept-Ranges", "bytes");
-        res.setHeader("Cache-Control", "public, max-age=60");
-        res.status(200).end(buf);
-        return true;
-      }
-      // محتوى HTML فعلي (صفحة خطأ/حجب CDN) → أرجع false للـ fallback
       return false;
     }
 
-    // Content-Type طبيعي — بثّ نفس response الذي جُلب للتو.
-    // إعادة استدعاء serveMediaVPS هنا كانت تجلب كل segment مرتين، ما يسبب
-    // تأخيراً/توقفاً متقطعاً عندما يقترب المشغل من نهاية الـ buffer.
-    res.setHeader("Content-Type", r.headers.get("content-type") || "video/MP2T");
-    const cl = r.headers.get("content-length");
-    if (cl) res.setHeader("Content-Length", cl);
-    res.setHeader("Accept-Ranges", r.headers.get("accept-ranges") || "bytes");
-    res.setHeader("Cache-Control", "public, max-age=60");
-    if (r.status === 206) {
-      const cr = r.headers.get("content-range");
-      if (cr) res.setHeader("Content-Range", cr);
-      res.status(206);
-    } else {
-      res.status(200);
+    const magic = mediaMagic(prefix);
+    const mislabeledText =
+      ct.startsWith("text/") ||
+      /^(?:application\/(?:javascript|json))/.test(ct);
+    const mp4UrlHint = /\.(?:mp4|m4s)(?:[?#]|$)/i.test(url);
+    const validMedia = magic === "ts" || magic === "mp4" || (isGenericBinary && mp4UrlHint);
+
+    // HTML/JSON challenge pages often arrive with HTTP 200. Reject them before
+    // forwarding so the player doesn't retry a non-media response forever.
+    if ((mislabeledText || isGenericBinary) && !validMedia && isHtmlOrJsonBody(prefix)) {
+      await cancelInspectedBody(inspected);
+      return false;
     }
-    await pipeWebMediaBody(r.body, res);
+
+    // Sniff only a small prefix, then stream the same upstream response with
+    // backpressure. Preserve Range semantics, including Content-Range on 206.
+    const correctedCt = magic === "ts"
+      ? "video/MP2T"
+      : magic === "mp4" || (mp4UrlHint && (isGenericBinary || mislabeledText))
+        ? "video/mp4"
+        : r.headers.get("content-type") || "video/MP2T";
+    res.setHeader("Content-Type", correctedCt);
+    for (const [sourceName, outputName] of [
+      ["content-length", "Content-Length"],
+      ["content-range", "Content-Range"],
+      ["accept-ranges", "Accept-Ranges"],
+      ["etag", "ETag"],
+    ] as const) {
+      const value = r.headers.get(sourceName);
+      if (value) res.setHeader(outputName, value);
+    }
+    res.setHeader("Cache-Control", "public, max-age=60");
+    res.status(r.status);
+    await pipeline(Readable.from(streamInspectedBody(inspected)), res);
     return true;
   }
 
@@ -19331,7 +19351,6 @@ router.get("/anime/seg-proxy", async (req, res) => {
           hdrs,
           req.headers.range ? String(req.headers.range) : undefined,
           upstreamAbort.signal,
-          upstreamAbort,
         );
     clearTimeout(connectTimeout);
     tracePlayback(trace, "hls-segment", "upstream_headers", safeHost(url), Date.now() - upstreamStartedAt, `status=${r.status}`);
