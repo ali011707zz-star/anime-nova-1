@@ -31,7 +31,8 @@ let _homeCache: HomeCache | null = null;
 // Separate cache for today's airing episodes (independent fetch, persists between navigations)
 let _cachedTodayEps: any[] | null = null;
 let _cachedTodayEpsAt = 0;
-const TODAY_EPS_STORAGE_KEY = "nova-latest-episodes";
+const TODAY_EPS_STORAGE_KEY = "nova-latest-episodes-v2";
+const LEGACY_TODAY_EPS_STORAGE_KEY = "nova-latest-episodes";
 const TODAY_EPS_CLIENT_TTL = 2 * 60_000;
 
 function normalizeLatestEpisodeItem(item: any): any {
@@ -437,8 +438,11 @@ export default function Home() {
       .catch(() => {});
   }, []);
 
-  /* Load latest episodes from both provider catalogs. */
+  /* AnimeSlayer preserves actual latest-update order. AW's catalog is ordered
+     by import time and can include movies or older episodes, so it is not a
+     reliable source for the "latest episodes" rail. */
   useEffect(() => {
+    try { localStorage.removeItem(LEGACY_TODAY_EPS_STORAGE_KEY); } catch {}
     if (_cachedTodayEps && Date.now() - _cachedTodayEpsAt < TODAY_EPS_CLIENT_TTL) {
       setTodayChecking(false);
       return;
@@ -459,18 +463,15 @@ export default function Home() {
           (item.animeId || item.anslayerId || item.awAnimeId) && item.name && item.episode,
         );
     };
-    Promise.allSettled([
-      fetchLatest("anslayer-latest", "anslayer"),
-      fetchLatest("aw-latest", "animewitcher"),
-    ]).then((results) => {
-        const items = results.flatMap(result =>
-          result.status === "fulfilled" ? result.value : [],
-        );
-        items.sort((a: any, b: any) => Number(b.episode) - Number(a.episode));
+    fetchLatest("anslayer-latest", "anslayer")
+      .then((items) => {
         _cachedTodayEps = items;
         _cachedTodayEpsAt = Date.now();
         setTodayEps(items);
         try { localStorage.setItem(TODAY_EPS_STORAGE_KEY, JSON.stringify(items)); } catch {}
+      })
+      .catch(() => {})
+      .finally(() => {
         setTodayChecking(false);
       });
   }, []);
