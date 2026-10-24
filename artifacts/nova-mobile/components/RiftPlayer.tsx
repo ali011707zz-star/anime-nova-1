@@ -8,7 +8,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import * as ScreenOrientation from "expo-screen-orientation";
 import { StatusBar } from "expo-status-bar";
-import { useVideoPlayer, VideoView } from "expo-video";
+import { useVideoPlayer, VideoView, type BufferOptions } from "expo-video";
 import * as Brightness from "expo-brightness";
 import { VolumeManager } from "../lib/volume-manager";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -130,16 +130,14 @@ function logPlaybackStage(url: string | undefined, stage: string, detail = ""): 
   console.info(`[playback-trace] id=${trace} component=player stage=${stage}${safeDetail}`);
 }
 
-function getPlaybackBufferOptions(animePlayback: boolean) {
+function getPlaybackBufferOptions(animePlayback: boolean): BufferOptions {
+  /* expo-video 3.x accepts buffer durations in seconds. Android maps
+     preferredForwardBufferDuration to its target buffer duration; the old
+     Media3 millisecond keys and backBufferDurationMs are not part of this API. */
   return {
     preferredForwardBufferDuration: animePlayback ? 24 : 8,
     waitsToMinimizeStalling: animePlayback,
-    minBufferMs: animePlayback ? 8000 : 3000,
-    // Keep the cap at 24 seconds; larger values caused OOM on low-memory phones.
-    maxBufferMs: 24000,
-    bufferForPlaybackMs: animePlayback ? 1800 : 1000,
-    bufferForPlaybackAfterRebufferMs: animePlayback ? 7000 : 3500,
-    backBufferDurationMs: 3000,
+    minBufferForPlayback: animePlayback ? 3 : 2,
   };
 }
 
@@ -744,6 +742,9 @@ function ExpoRiftPlayer({
   const nativeLoadNonceRef = useRef(0);
   /** refs للحالات التي يحتاجها الـ polling interval بدون stale closure */
   const isPlayingRef      = useRef(false);
+  /* Keep explicit Anime play/pause intent across source replacement. Native
+     readyToPlay can arrive after a user pauses while a new source is loading. */
+  const animePlaybackIntentRef = useRef(true);
   const isErrorRef        = useRef(false);
   const isEndedRef        = useRef(false);
   const lastTap           = useRef<{ time: number; side: "L" | "R" } | null>(null);
@@ -924,14 +925,10 @@ function ExpoRiftPlayer({
     if (initialPosition && initialPosition > 5) {
       try { p.currentTime = initialPosition; } catch {}
     }
-     /* Buffer tuning — هامش أمامي أكبر لتقليل التقطيع، مع تجنّب buffer ضخم
-       ⚠️ bufferForPlaybackMs=150 كان يُسبّب crash فوري في ExoPlayer على بعض
-          الأجهزة لأنه يحاول decode الفيديو قبل أن يجمع Media3 بيانات كافية.
-       ⚠️ maxBufferMs=30000 كان يُسبّب OOM على الأجهزة منخفضة الذاكرة.
-       ⚠️ backBufferDurationMs غير محدّد → يبقي ExoPlayer 30ث من المحتوى
-          المُشغَّل في الذاكرة → يُضاعف استهلاك الذاكرة. */
+     /* Use expo-video's public buffer contract; do not pass Media3-only millisecond
+        options that this Expo version silently ignores. */
     try {
-      (p as any).bufferOptions = getPlaybackBufferOptions(animePlayback);
+       p.bufferOptions = getPlaybackBufferOptions(animePlayback);
     } catch {}
   });
 
@@ -1154,18 +1151,31 @@ function ExpoRiftPlayer({
             `elapsed_ms=${Date.now() - playbackTraceStateRef.current.assignedAt}`,
           );
         }
-         /* إذا بقي التحميل أكثر من 18ث (شاشة سوداء) نعامله كخطأ ونتجاوز للمصدر التالي.
-            25ث كان طويلاً جداً: 10 مصادر × 25ث = 250ث انتظار + OOM من الـ buffers المتراكمة.
-            18ث يسمح بتأخر أول manifest/segment عبر proxy بدون إبقاء مصدر ميت عالقاً. */
-        if (loadTimeoutRef.current) clearTimeout(loadTimeoutRef.current);
-        loadTimeoutRef.current = setTimeout(() => {
-          loadTimeoutRef.current = null;
-          if (!aliveRef.current || isStale()) return;
-            logPlaybackStage(playbackTraceStateRef.current.url, "load_timeout", "timeout_ms=18000");
-            console.warn(`[RiftPlayer] ⏱ timeout (18s) — ${playableSources[srcIdx]?.label || "?"}`);
-          setError(true);
-          setBuffering(false);
-         }, 18000);
+        /* Anime CDNs can deliver a first segment slowly. Allow 25s for startup,
+           and 40s for a rebuffer; the 25s + 12s stall recovery remains the
+           earlier guard for a player that claims to be playing but makes no progress. */
+        const loadTimeoutMs = animePlayback
+          ? (traceState.playingLogged ? 40_000 : 25_000)
+          : 18_000;
+        /* Repeated native loading notifications must not keep extending the
+           Anime deadline indefinitely. Other player modes keep their prior behavior. */
+        if (!animePlayback || !loadTimeoutRef.current) {
+          if (loadTimeoutRef.current) clearTimeout(loadTimeoutRef.current);
+          loadTimeoutRef.current = setTimeout(() => {
+            loadTimeoutRef.current = null;
+            if (!aliveRef.current || isStale()) return;
+            logPlaybackStage(
+              playbackTraceStateRef.current.url,
+              "load_timeout",
+              `timeout_ms=${loadTimeoutMs}`,
+            );
+            console.warn(
+              `[RiftPlayer] ⏱ timeout (${Math.round(loadTimeoutMs / 1000)}s) — ${playableSources[srcIdx]?.label || "?"}`,
+            );
+            setError(true);
+            setBuffering(false);
+          }, loadTimeoutMs);
+        }
       } else {
         /* أي حالة غير loading → ألغِ الـ timeout */
         if (loadTimeoutRef.current) { clearTimeout(loadTimeoutRef.current); loadTimeoutRef.current = null; }
@@ -1188,6 +1198,9 @@ function ExpoRiftPlayer({
           pendingSwitchIdxRef.current = null;
           if (pending !== null && !isStale() && aliveRef.current) {
             switchSourceRef.current?.(pending);
+            /* This status belongs to the source that just finished replacing.
+               Do not let its ready/error branch alter the newly selected source. */
+            return;
           }
         }
         if (e.status === "readyToPlay") {
@@ -1238,7 +1251,10 @@ function ExpoRiftPlayer({
             switchPosRef.current = 0;
             try { player.currentTime = restorePos; } catch {}
           }
-          try { player.play(); } catch {}
+          try {
+            if (!animePlayback || animePlaybackIntentRef.current) player.play();
+            else player.pause();
+          } catch {}
         }
         else if (e.status === "error") {
           const manualSeek = pendingSeekRef.current;
@@ -1543,7 +1559,7 @@ function ExpoRiftPlayer({
                 const nudgeTarget = pos + 0.4;
                 beginSeekRecovery(nudgeTarget);
                 player.currentTime = nudgeTarget;
-                player.play();
+                if (!animePlayback || animePlaybackIntentRef.current) player.play();
               } catch {}
             } else {
               console.warn(`[RiftPlayer] 🔴 stall persists after nudge — switching source`);
@@ -1564,7 +1580,7 @@ function ExpoRiftPlayer({
       clearInterval(id);
       if (progressTimer.current === id) progressTimer.current = null;
     };
-  }, [beginSeekRecovery, isLocalPlayback, player, onProgress]); // eslint-disable-line
+  }, [animePlayback, beginSeekRecovery, isLocalPlayback, player, onProgress]); // eslint-disable-line
 
   /* ─── Subtitle cue lookup via rAF ─── */
   /* Vidstack technique: pre-sort once → binary search O(log n) at 60fps */
@@ -2101,7 +2117,10 @@ function ExpoRiftPlayer({
       setSleepRemaining(r => {
         if (r <= 1) {
           clearInterval(tick);
-          if (aliveRef.current) { try { player.pause(); } catch {} }
+          if (aliveRef.current) {
+            if (animePlayback) animePlaybackIntentRef.current = false;
+            try { player.pause(); } catch {}
+          }
           setSleepTimer(0);
           return 0;
         }
@@ -2109,7 +2128,7 @@ function ExpoRiftPlayer({
       });
     }, 1000);
     return () => clearInterval(tick);
-  }, [sleepTimer]); // eslint-disable-line
+  }, [sleepTimer, animePlayback]); // eslint-disable-line
 
   /* ─── Auto-play countdown — DISABLED: user must press next manually ─── */
   useEffect(() => {
@@ -2196,8 +2215,14 @@ function ExpoRiftPlayer({
   /* ─── Actions ─── */
   const togglePlay = useCallback(() => {
     fadeIn();
-    try { if (player.playing) player.pause(); else player.play(); } catch {}
-  }, [player, fadeIn]);
+    const shouldPlay = animePlayback ? animePlaybackIntentRef.current : !!player.playing;
+    const nextShouldPlay = !shouldPlay;
+    if (animePlayback) animePlaybackIntentRef.current = nextShouldPlay;
+    try {
+      if (nextShouldPlay) player.play();
+      else player.pause();
+    } catch {}
+  }, [player, fadeIn, animePlayback]);
 
   const applySeek = useCallback((secs: number) => {
     const maxDuration = durationRef.current;
@@ -2386,19 +2411,25 @@ function ExpoRiftPlayer({
 
       replaceInFlightRef.current = true;
       if (replaceSafetyTimerRef.current) clearTimeout(replaceSafetyTimerRef.current);
+      /* Keep the Anime replacement lock beyond its maximum loading deadline;
+         releasing it sooner can start a second native replace while the first
+         source is still loading. */
+      const replaceSafetyTimeoutMs = animePlayback
+        ? (playbackTraceStateRef.current.playingLogged ? 45_000 : 30_000)
+        : 10_000;
       replaceSafetyTimerRef.current = setTimeout(() => {
         replaceSafetyTimerRef.current = null;
         replaceInFlightRef.current = false;
         const pending = pendingSwitchIdxRef.current;
         pendingSwitchIdxRef.current = null;
         if (pending !== null && aliveRef.current) switchSourceRef.current?.(pending);
-      }, 10_000);
+      }, replaceSafetyTimeoutMs);
 
       try {
         /* replace() يدير إيقاف الـpipeline السابق داخلياً؛ لا نضيف pause()
            قبله لأن استدعاءين native متتاليين كانا سبباً لسباق الكراش. */
         try {
-          (player as any).bufferOptions = getPlaybackBufferOptions(animePlayback);
+          player.bufferOptions = getPlaybackBufferOptions(animePlayback);
         } catch {}
         player.replace(toExpoVideoSource(nextSrc) as any);
       } catch (e) {
@@ -3023,6 +3054,7 @@ function ExpoRiftPlayer({
             <Pressable
               onPress={() => {
                 setIsEnded(false);
+                if (animePlayback) animePlaybackIntentRef.current = true;
                 const genAtPress = switchGenerationRef.current;
                 try { player.currentTime = 0; } catch {}
                 if (replayTimeoutRef.current) clearTimeout(replayTimeoutRef.current);
