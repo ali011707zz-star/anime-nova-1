@@ -16,7 +16,6 @@ import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import * as ScreenOrientation from "expo-screen-orientation";
 import * as Sentry from "@sentry/react-native";
-import { initializeRewardedAds } from "@/utils/rewardedAd";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { TelegramAnnouncementModal } from "@/components/TelegramAnnouncementModal";
 import { AppProvider, useApp } from "@/context/AppContext";
@@ -249,17 +248,6 @@ function RootLayout() {
       return () => clearTimeout(t);
     }
   }, [brandSplashVisible, tvMode]);
-
-  useEffect(() => {
-    if (!RUNTIME_INTEGRITY.trusted) return;
-    // Warm the native Start.io SDK while the first screen is settling. The
-    // native wrapper needs a short initialization window before loadAd().
-    if (!tvMode) {
-      initializeRewardedAds().catch((error) => {
-        console.warn("[rewarded-ad] startup initialization failed", error);
-      });
-    }
-  }, [tvMode]);
 
   return (
     <SafeAreaProvider>
