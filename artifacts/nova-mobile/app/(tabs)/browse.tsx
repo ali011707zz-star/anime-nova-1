@@ -434,22 +434,6 @@ export default function BrowseScreen() {
           </View>
           <View style={{ flexDirection: "row", gap: 6 }}>
             <Pressable
-              onPress={() => router.push("/stardima-catalog" as any)}
-              focusable={tvMode}
-              accessibilityRole="button"
-              accessibilityLabel="تصفح فئات StarDima"
-              style={({ focused }) => [
-                g.genreToggleBtn,
-                tvMode && g.tvGenreToggleBtn,
-                tvMode && tvFocusStyle(focused),
-              ]}
-            >
-              <Ionicons name="library-outline" size={tvMode ? 23 : 13} color={colors.accent} />
-              <Text style={[g.genreToggleText, tvMode && g.tvGenreToggleText, { color: colors.accent }]}>
-                StarDima
-              </Text>
-            </Pressable>
-            <Pressable
               onPress={() => setView(view === "genres" ? "list" : "genres")}
               focusable={tvMode}
               style={({ focused }) => [g.genreToggleBtn, tvMode && g.tvGenreToggleBtn, view === "genres" && g.genreToggleBtnActive, tvMode && tvFocusStyle(focused)]}
