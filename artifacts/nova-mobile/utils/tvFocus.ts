@@ -58,23 +58,23 @@ function scheduleFocusMapSave() {
 export function useTvFocusMemory(scope: string) {
   const [preferredKey, setPreferredKey] = useState<string | null>(null);
   const [ready, setReady] = useState(false);
-  const preferredKeyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const preferredKeyRef = useRef<string | null>(null);
+  const focusedDuringLoadRef = useRef(false);
 
   useEffect(() => {
     let cancelled = false;
+    preferredKeyRef.current = null;
+    focusedDuringLoadRef.current = false;
     setReady(false);
     readFocusMap().then((map) => {
       if (cancelled) return;
-      setPreferredKey(typeof map[scope] === "string" ? map[scope] : null);
+      const savedKey = typeof map[scope] === "string" ? map[scope] : null;
+      const initialKey = focusedDuringLoadRef.current ? null : savedKey;
+      preferredKeyRef.current = initialKey;
+      setPreferredKey(initialKey);
       setReady(true);
     });
-    return () => {
-      cancelled = true;
-      if (preferredKeyTimerRef.current) {
-        clearTimeout(preferredKeyTimerRef.current);
-        preferredKeyTimerRef.current = null;
-      }
-    };
+    return () => { cancelled = true; };
   }, [scope]);
 
   const rememberFocus = useCallback((key: string) => {
@@ -91,11 +91,15 @@ export function useTvFocusMemory(scope: string) {
     if (focusMapCache) rememberInMap(focusMapCache);
     else void readFocusMap().then(rememberInMap);
 
-    if (preferredKeyTimerRef.current) clearTimeout(preferredKeyTimerRef.current);
-    preferredKeyTimerRef.current = setTimeout(() => {
-      preferredKeyTimerRef.current = null;
-      setPreferredKey(normalized);
-    }, FOCUS_SAVE_DEBOUNCE_MS);
+    focusedDuringLoadRef.current = true;
+    // The saved key only drives the one-time initial focus. Updating it for
+    // every remote movement re-rendered whole screens shortly after focus
+    // settled, which could delay the next button press on slower TV devices.
+    // Persist each new key, but clear the initial-focus override only once.
+    if (preferredKeyRef.current !== null && preferredKeyRef.current !== normalized) {
+      preferredKeyRef.current = null;
+      setPreferredKey(null);
+    }
   }, [scope]);
 
   return { preferredKey, ready, rememberFocus };
