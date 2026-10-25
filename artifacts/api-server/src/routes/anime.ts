@@ -686,6 +686,9 @@ async function fetchMediaUpstream(
   }
 
   if (first.kind === "direct" || first.kind === "direct-error") {
+    // A definitive primary failure makes the alternate useful immediately;
+    // do not wait out the remaining hedge delay before starting it.
+    pendingHedge.start();
     const alternate: any = await hedgePromise;
     if (alternate.kind === "cf" && alternate.response.ok) {
       directRaceAbort.abort();
