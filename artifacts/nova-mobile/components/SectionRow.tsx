@@ -73,9 +73,10 @@ export const SectionRow = React.memo(function SectionRow({ title, items, onSeeAl
         offset: (cardWidth + 14) * index,
         index,
       })}
-      // Keep clipping disabled for the existing nested horizontal rails.
-      // TV needs this especially because clipping can hide focused cards.
-      removeClippedSubviews={false}
+      // Clip off-screen native views on Android phones to reduce the amount of
+      // UI work and memory retained by the nested home rails. Keep clipping
+      // disabled on TV so remote-focused cards are never detached.
+      removeClippedSubviews={Platform.OS === "android" && !tvMode}
     />
   );
 

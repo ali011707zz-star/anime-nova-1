@@ -427,7 +427,7 @@ export default function HomeScreen() {
               initialNumToRender={5}
               maxToRenderPerBatch={5}
               windowSize={3}
-              removeClippedSubviews={false}
+              removeClippedSubviews={Platform.OS === "android" && !isTvLayout}
             />
           </View>
         )}
@@ -484,7 +484,7 @@ export default function HomeScreen() {
               initialNumToRender={5}
               maxToRenderPerBatch={5}
               windowSize={3}
-              removeClippedSubviews={false}
+              removeClippedSubviews={Platform.OS === "android" && !isTvLayout}
             />
           </View>
         )}
@@ -594,7 +594,7 @@ export default function HomeScreen() {
               initialNumToRender={5}
               maxToRenderPerBatch={5}
               windowSize={3}
-              removeClippedSubviews={false}
+              removeClippedSubviews={Platform.OS === "android" && !isTvLayout}
             />
           </View>
         )}
@@ -690,7 +690,7 @@ export default function HomeScreen() {
               initialNumToRender={5}
               maxToRenderPerBatch={5}
               windowSize={3}
-              removeClippedSubviews={false}
+              removeClippedSubviews={Platform.OS === "android" && !isTvLayout}
             />
           </View>
         )}
