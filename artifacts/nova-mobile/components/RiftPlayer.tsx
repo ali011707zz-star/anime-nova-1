@@ -575,7 +575,7 @@ function ExpoRiftPlayer({
   // and remain D-pad focusable through TvPressable.
   const [showControls, setShowControls] = useState(true);
   const [showTvRevealHint, setShowTvRevealHint] = useState(false);
-  const [progressFocused, setProgressFocused] = useState(false);
+  const progressFocusedRef = useRef(false);
   const lastTvSeekAtRef = useRef(0);
   const [showSpeedSheet, setShowSpeedSheet] = useState(false);
   const [showViewSheet, setShowViewSheet] = useState(false);
@@ -2280,7 +2280,7 @@ function ExpoRiftPlayer({
      السهمان يسحبان الموضع بخطوة التقديم المختارة بدلاً من نقل التركيز
      إلى زر آخر. ندعم أرقام Android keyCode وأسماء أحداث RN معاً. */
   const handleTvProgressKeyDown = useCallback((event: any) => {
-    if (!tvMode || !showControls || !progressFocused) return;
+    if (!tvMode || !showControls || !progressFocusedRef.current) return;
     const nativeEvent = event?.nativeEvent || {};
     const keyCode = Number(nativeEvent.keyCode ?? nativeEvent.keycode);
     const eventName = String(
@@ -2295,7 +2295,7 @@ function ExpoRiftPlayer({
     lastTvSeekAtRef.current = now;
     seek(positionRef.current + direction * (seekDurationRef.current || 10));
     event?.preventDefault?.();
-  }, [progressFocused, seek, showControls, tvMode]);
+  }, [seek, showControls, tvMode]);
 
   /* seekSilent: نفس seek لكن بدون إظهار controls (للـ double-tap والـ gestures) */
   const seekSilentRef = useRef<(s: number) => void>(() => {});
@@ -3303,10 +3303,10 @@ function ExpoRiftPlayer({
                       accessibilityLabel="شريط تقدم الحلقة"
                       onPress={handleTvProgressPress}
                       onFocus={() => {
-                        setProgressFocused(true);
+                        progressFocusedRef.current = true;
                         fadeIn();
                       }}
-                      onBlur={() => setProgressFocused(false)}
+                      onBlur={() => { progressFocusedRef.current = false; }}
                       onKeyDown={handleTvProgressKeyDown}
                       style={({ focused }) => [
                         StyleSheet.absoluteFillObject,

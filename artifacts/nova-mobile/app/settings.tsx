@@ -7,7 +7,7 @@ import { LinearGradient } from "expo-linear-gradient";
 import * as ImagePicker from "expo-image-picker";
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import {
-  Alert, KeyboardAvoidingView, Linking, Modal, Platform, Pressable, ScrollView,
+  Alert, KeyboardAvoidingView, Linking, Modal, Platform, Pressable as NativePressable, ScrollView,
   Image, Share, StyleSheet, Switch, Text, TextInput, View, ActivityIndicator,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -30,6 +30,15 @@ const THEMES: { label: string; value: string; dot: string; desc: string }[] = [
   { label: "أبيض", value: "white", dot: paletteColors.white.background, desc: "خلفيات عاجية مريحة ونصوص واضحة" },
   { label: "أسود", value: "black", dot: paletteColors.black.background, desc: "خلفيات داكنة وأزرار بنفسجية هادئة" },
 ];
+
+type SettingsPressableProps = React.ComponentProps<typeof NativePressable>;
+
+function Pressable(props: SettingsPressableProps) {
+  if (isTvDevice()) {
+    return <TvPressable {...(props as React.ComponentProps<typeof TvPressable>)} />;
+  }
+  return <NativePressable {...props} />;
+}
 
 const REPORT_TYPES = [
   { id: "bug",        label: "خلل تقني",     icon: "bug" as const,        color: "#f87171",   bg: "rgba(239,68,68,0.12)",    border: "rgba(239,68,68,0.25)" },
@@ -67,7 +76,7 @@ function ConfirmSheet({ open, title, desc, confirmLabel = "تأكيد", danger =
   if (!open) return null;
   return (
     <Modal transparent animationType="slide" onRequestClose={onCancel}>
-      <Pressable style={ts.overlay} onPress={onCancel} />
+      <Pressable style={ts.overlay} onPress={onCancel} focusable={false} />
       <View style={ts.bottomSheet}>
         <LinearGradient
           colors={["transparent", danger ? "rgba(239,68,68,0.0)" : "rgba(124,58,237,0.0)"]}
@@ -126,7 +135,7 @@ function ReportSheet({ open, onClose }: { open: boolean; onClose: () => void }) 
 
   return (
     <Modal transparent animationType="slide" onRequestClose={onClose}>
-      <Pressable style={ts.overlay} onPress={onClose} />
+      <Pressable style={ts.overlay} onPress={onClose} focusable={false} />
       <View style={[ts.bottomSheet, { maxHeight: "92%" }]}>
         <View style={[ts.sheetAccentBar, { backgroundColor: "#7C3AED" }]} />
         <View style={ts.sheetHandle} />
@@ -585,7 +594,7 @@ function AuthSheet({ open, onClose, onLogin, onLinkDevice }: {
 
   return (
     <Modal transparent animationType="slide" onRequestClose={onClose}>
-      <Pressable style={ts.overlay} onPress={onClose} />
+      <Pressable style={ts.overlay} onPress={onClose} focusable={false} />
       <View style={[ts.bottomSheet, { paddingBottom: 0 }]}>
         <View style={[ts.sheetAccentBar, { backgroundColor: "#7C3AED" }]} />
         <View style={ts.sheetHandle} />
@@ -830,7 +839,7 @@ function PremiumSheet({ open, onClose, user }: {
 
   return (
     <Modal transparent animationType="slide" onRequestClose={onClose}>
-      <Pressable style={ts.overlay} onPress={onClose} />
+      <Pressable style={ts.overlay} onPress={onClose} focusable={false} />
       <View style={[ts.bottomSheet, { maxHeight: "92%", paddingBottom: 0 }]}>
         <View style={[ts.sheetAccentBar, { backgroundColor: "#f59e0b" }]} />
         <View style={ts.sheetHandle} />
@@ -1082,7 +1091,7 @@ function ProfileSheet({ open, onClose, user, onUpdate, onLogout, onLinkTv }: {
 
   return (
     <Modal transparent animationType="slide" onRequestClose={onClose} statusBarTranslucent>
-      <Pressable style={[ts.overlay, { backgroundColor: colors.overlay }]} onPress={onClose} />
+      <Pressable style={[ts.overlay, { backgroundColor: colors.overlay }]} onPress={onClose} focusable={false} />
       <View style={[ts.bottomSheet, { maxHeight: "94%", paddingBottom: 0, backgroundColor: colors.surface, borderColor: colors.border }]}>
           <View style={[ts.sheetAccentBar, { backgroundColor: colors.accent }]} />
           <View style={[ts.sheetHandle, { backgroundColor: colors.border }]} />
@@ -1964,7 +1973,7 @@ export default function SettingsScreen() {
       {/* Crash Log Modal */}
       {showCrashLog && (
         <Modal transparent animationType="slide" onRequestClose={() => setShowCrashLog(false)}>
-          <Pressable style={ts.overlay} onPress={() => setShowCrashLog(false)} />
+          <Pressable style={ts.overlay} onPress={() => setShowCrashLog(false)} focusable={false} />
           <View style={[ts.bottomSheet, { maxHeight: "88%" }]}>
             <View style={[ts.sheetAccentBar, { backgroundColor: "#ef4444" }]} />
             <View style={ts.sheetHandle} />

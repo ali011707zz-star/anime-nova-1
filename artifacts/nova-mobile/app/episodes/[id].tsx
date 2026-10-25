@@ -977,7 +977,7 @@ export default function EpisodeListScreen() {
               </Text>
             </Pressable>
           }
-          renderItem={({ item: n }) => (
+          renderItem={({ item: n, index }) => (
             <EpisodeRow
               n={n}
               anime={selectedAnime}
@@ -991,8 +991,7 @@ export default function EpisodeListScreen() {
               onFocus={() => {
                 if (!tvMode) return;
                 rememberFocus(String(n));
-                const index = displayedEps.indexOf(n);
-                if (index >= 0 && !visibleEpisodeIndicesRef.current.has(index)) {
+                if (!visibleEpisodeIndicesRef.current.has(index)) {
                   episodeListRef.current?.scrollToIndex({ index, animated: false, viewPosition: 0.35 });
                 }
               }}

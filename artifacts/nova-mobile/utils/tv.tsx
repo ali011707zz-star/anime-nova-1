@@ -101,6 +101,7 @@ export function TvPressable({
   style,
   children,
   hasTVPreferredFocus = false,
+  focusable,
   onFocus,
   onBlur,
   ...props
@@ -111,7 +112,7 @@ export function TvPressable({
   return (
     <Pressable
       {...props}
-      focusable={tv}
+      focusable={tv && focusable !== false}
       hasTVPreferredFocus={tv && hasTVPreferredFocus}
       hitSlop={props.hitSlop ?? 8}
       pressRetentionOffset={props.pressRetentionOffset ?? 12}
