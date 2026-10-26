@@ -168,3 +168,17 @@ mtime_ms = 1791144002640
 storage_uri = "gcs://replit-rams-assets-sisko/rams/assets/repl:6c2ae02d-1a7c-4eab-9225-335fe930071b/596d66b6-5f84-4df1-9185-0910985484a1/52ac87aa-675e-440e-9fd1-2d2926e6a59f"
 storage_version_token = "1791144031241148"
 content_type = "text/markdown"
+
+[[outputs]]
+id = "eG8t7DylGABSFTu-4BINR"
+uri = "file://docs/prompts/gemini-kotlin-native-parity-ar.md"
+type = "text"
+title = "برومت Gemini لإكمال نسخة Anime NOVA بـ Kotlin"
+description = "برومت عربي مفصل يطلب تدقيق المستودع أولًا ثم إكمال تطبيق Kotlin ومطابقة المشغل والهاتف وAndroid TV، مع قواعد آمنة لفحص الـVPS للقراءة فقط."
+logical_id = "8ec35140-6c7d-4774-83f3-a5033faf2e62"
+content_hash = "sha256:0732065d19a851c40abfa2358c35c45eb0bd9867e7572bdd8a64ed93311ca590"
+size = 23929
+mtime_ms = 1793053499253
+storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:92340f18-c683-43b5-8d60-69db18fbc356/8ec35140-6c7d-4774-83f3-a5033faf2e62/bd1c7a75-aaa3-4885-8833-a25fae1b71cc"
+storage_version_token = "1793053535254025"
+content_type = "text/markdown"
