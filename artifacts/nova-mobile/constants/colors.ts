@@ -31,6 +31,7 @@ export type Palette = {
   accentBorder: string;
   destructiveSurface: string;
   destructiveBorder: string;
+  homeAccent: string;
 
   // Compatibility aliases for screens that are being moved to semantic tokens.
   text: string;
@@ -84,6 +85,7 @@ const white: Palette = {
   accentBorder: "#A895D0",
   destructiveSurface: "#F8E9E7",
   destructiveBorder: "#EBCBC6",
+  homeAccent: "#087DA8",
 
   text: "#17191F",
   tint: "#343943",
@@ -132,6 +134,7 @@ const black: Palette = {
   accentBorder: "rgba(167,139,250,0.28)",
   destructiveSurface: "rgba(239,83,80,0.12)",
   destructiveBorder: "rgba(239,83,80,0.28)",
+  homeAccent: "#12B8E6",
 
   text: "#F3F4F6",
   tint: "#D5D8DE",

@@ -17,7 +17,8 @@ export function HeroSection({ items, initialTVFocus = false }: Props) {
   const router = useRouter();
   const { width, height } = useWindowDimensions();
   const tvMode = isTvDevice(width, height);
-  const heroHeight = tvMode ? 340 : 290;
+  const heroWidth = tvMode ? width : width - 32;
+  const heroHeight = tvMode ? 340 : Math.max(178, Math.min(380, heroWidth * 0.53));
   const scrollRef = useRef<ScrollView>(null);
   const [activeIdx, setActiveIdx] = useState(0);
 
@@ -27,25 +28,27 @@ export function HeroSection({ items, initialTVFocus = false }: Props) {
     const timer = setInterval(() => {
       setActiveIdx((i) => {
         const next = (i + 1) % items.length;
-        scrollRef.current?.scrollTo({ x: next * width, animated: true });
+        scrollRef.current?.scrollTo({ x: next * heroWidth, animated: true });
         return next;
       });
     }, 4000);
     return () => clearInterval(timer);
-  }, [items.length, tvMode]);
+  }, [heroWidth, items.length, tvMode]);
 
   if (!items.length) return null;
 
   return (
-    <View style={{ height: heroHeight }}>
+    <View style={[styles.carousel, { height: heroHeight + (tvMode ? 0 : 24), width }]}>
       <ScrollView
         ref={scrollRef}
         horizontal
         pagingEnabled
+        style={[styles.heroViewport, { width: heroWidth, height: heroHeight }]}
+        contentContainerStyle={styles.heroTrack}
         showsHorizontalScrollIndicator={false}
         scrollEventThrottle={16}
         onMomentumScrollEnd={(e) => {
-          const idx = Math.round(e.nativeEvent.contentOffset.x / width);
+          const idx = Math.round(e.nativeEvent.contentOffset.x / heroWidth);
           setActiveIdx(idx);
         }}
       >
@@ -56,7 +59,17 @@ export function HeroSection({ items, initialTVFocus = false }: Props) {
               key={anime.id}
               focusable={tvMode}
               hasTVPreferredFocus={tvMode && initialTVFocus && index === 0}
-              style={({ focused }) => [{ width, height: heroHeight }, tvMode && tvFocusStyle(focused)]}
+              style={({ focused }) => [
+                styles.heroSlide,
+                {
+                  width: heroWidth,
+                  height: heroHeight,
+                  borderRadius: tvMode ? 8 : 22,
+                  borderColor: colors.border,
+                  borderWidth: tvMode ? 0 : 1,
+                },
+                tvMode && tvFocusStyle(focused),
+              ]}
               onPress={() => router.push(`/anime/${anime.id}?title=${encodeURIComponent(anime.title.romaji)}&english=${encodeURIComponent(anime.title.english || "")}`)}
             >
               <Image
@@ -70,7 +83,7 @@ export function HeroSection({ items, initialTVFocus = false }: Props) {
               />
               <LinearGradient
                 colors={["transparent", "rgba(9,9,11,0.7)", "#09090B"]}
-                style={[StyleSheet.absoluteFill, { justifyContent: "flex-end", padding: tvMode ? 32 : 20 }]}
+                style={[StyleSheet.absoluteFill, { justifyContent: "flex-end", padding: tvMode ? 32 : 14 }]}
               >
                 <View style={styles.genreRow}>
                   {anime.genres?.slice(0, 3).map((g) => (
@@ -126,7 +139,7 @@ export function HeroSection({ items, initialTVFocus = false }: Props) {
         })}
       </ScrollView>
       {items.length > 1 && (
-        <View style={styles.dots}>
+        <View style={[styles.dots, { top: heroHeight + 8 }]}>
           {items.map((_, i) => (
             <View
               key={i}
@@ -140,6 +153,10 @@ export function HeroSection({ items, initialTVFocus = false }: Props) {
 }
 
 const styles = StyleSheet.create({
+  carousel: { alignSelf: "center", alignItems: "center", overflow: "visible" },
+  heroViewport: { alignSelf: "center", borderRadius: 22 },
+  heroTrack: { alignItems: "flex-start" },
+  heroSlide: { overflow: "hidden", position: "relative" },
   genreRow: { flexDirection: "row", gap: 5, marginBottom: 6, flexWrap: "wrap" },
   genreBadge: { borderWidth: 1, borderRadius: 4, paddingHorizontal: 7, paddingVertical: 2 },
   genreText: { fontSize: 9, fontWeight: "600" },
@@ -156,6 +173,6 @@ const styles = StyleSheet.create({
   watchBtn: { flexDirection: "row", alignItems: "center", gap: 5, paddingHorizontal: 16, paddingVertical: 8, borderRadius: 10 },
   detailBtn: { flexDirection: "row", alignItems: "center", gap: 5, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 10, borderWidth: 1 },
   watchBtnText: { color: "#fff", fontWeight: "700", fontSize: 13, fontFamily: "Cairo_700Bold" },
-  dots: { position: "absolute", bottom: 10, left: 0, right: 0, flexDirection: "row", justifyContent: "center", gap: 4 },
+  dots: { position: "absolute", left: 0, right: 0, flexDirection: "row", justifyContent: "center", gap: 4 },
   dot: { height: 5, borderRadius: 2.5 },
 });

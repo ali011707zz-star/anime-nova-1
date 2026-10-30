@@ -278,6 +278,9 @@ export default function HomeScreen() {
   const railCardWidth = getRailCardWidth(width, isTvLayout ? 5 : 3);
   const railSidePadding = getRailSidePadding(width);
   const railGap = 10;
+  const historyCardWidth = isTvLayout
+    ? railCardWidth
+    : Math.floor((width - 34) / 3);
 
   const refresh = async () => {
     await Promise.all([
@@ -378,17 +381,22 @@ export default function HomeScreen() {
         {recentHistory.length > 0 && (
           <View style={{ marginTop: 24 }}>
             <View style={styles.sectionHeader}>
-              <View style={styles.sectionLeft}>
-                <View style={[styles.sectionDot, { backgroundColor: "#22c55e" }]} />
-                <Text style={[styles.sectionTitle, { color: colors.text }]}>متابعة المشاهدة</Text>
+              <View style={styles.continueHeading}>
+                <View style={[styles.continueAccent, { backgroundColor: colors.homeAccent }]} />
+                <View style={styles.continueTitleWrap}>
+                  <Text style={[styles.sectionTitle, { color: colors.text }]}>متابعة المشاهدة</Text>
+                  <Text style={[styles.continueSubtitle, { color: colors.mutedForeground }]}>
+                    أكمل حلقاتك من حيث توقفت
+                  </Text>
+                </View>
               </View>
                <Pressable
                  onPress={() => router.push("/(tabs)/library")}
                  focusable={isTvLayout}
-                 style={({ focused }) => [styles.seeAllBtn, isTvLayout && tvFocusStyle(focused)]}
+                 style={({ focused }) => [styles.seeAllBtn, isTvLayout && styles.seeAllTvBtn, isTvLayout && tvFocusStyle(focused)]}
                >
-                <Text style={[styles.seeAllText, { color: colors.primary }]}>عرض الكل</Text>
-                <Ionicons name="chevron-back" size={13} color={colors.primary} />
+                <Ionicons name="chevron-back" size={13} color={isTvLayout ? colors.primary : colors.text} />
+                <Text style={[styles.seeAllText, { color: isTvLayout ? colors.primary : colors.text }]}>السجل الكامل</Text>
               </Pressable>
             </View>
             <FlatList
@@ -396,34 +404,107 @@ export default function HomeScreen() {
               horizontal
                keyExtractor={(h) => `${h.contentKind || "anime"}-${h.contentKey || h.animeId}-${h.season || 1}-${h.ep}`}
               showsHorizontalScrollIndicator={false}
-               contentContainerStyle={{ paddingHorizontal: railSidePadding, gap: railGap }}
-              renderItem={({ item: h }) => (
-                 <Pressable
-                   onPress={() => router.push(historyRoute(h) as any)}
-                   focusable={isTvLayout}
-                   style={({ focused }) => [styles.historyCard, { width: railCardWidth, height: Math.round(railCardWidth * 0.7), backgroundColor: colors.card, borderColor: colors.border }, isTvLayout && tvFocusStyle(focused)]}
-                >
-                  <Image
-                    source={{ uri: h.thumbnail || `https://img.anili.st/media/${h.animeId}` }}
-                    style={styles.historyImg}
-                    resizeMode="cover"
-                    resizeMethod="resize"
-                    fadeDuration={100}
-                  />
-                  <LinearGradient colors={["transparent", "rgba(0,0,0,0.9)"]} style={styles.historyGrad}>
-                    <Text style={styles.historyEp}>حلقة {h.ep}</Text>
-                    <Text style={styles.historyTitle} numberOfLines={1}>{h.english || h.title}</Text>
-                    {h.position && h.duration && (
-                      <View style={styles.historyProgress}>
-                        <View style={[styles.historyProgressFill, { width: `${Math.min((h.position / h.duration) * 100, 100)}%`, backgroundColor: colors.primary }]} />
+               contentContainerStyle={{
+                 paddingHorizontal: isTvLayout ? railSidePadding : 10,
+                 gap: isTvLayout ? railGap : 6,
+               }}
+              renderItem={({ item: h }) => {
+                const hasPlaybackPosition =
+                  typeof h.position === "number" &&
+                  typeof h.duration === "number" &&
+                  h.duration > 0;
+                const completionPercent = hasPlaybackPosition
+                  ? Math.max(0, Math.min(100, Math.round((h.position! / h.duration!) * 100)))
+                  : null;
+                const remainingMinutes = hasPlaybackPosition
+                  ? Math.max(1, Math.ceil((h.duration! - h.position!) / 60))
+                  : null;
+                const remainingEpisodes =
+                  typeof h.totalEps === "number" && h.totalEps > h.ep
+                    ? h.totalEps - h.ep
+                    : null;
+                return (
+                  <Pressable
+                    onPress={() => router.push(historyRoute(h) as any)}
+                    focusable={isTvLayout}
+                    style={({ focused }) => [
+                      styles.historyCard,
+                      {
+                        width: historyCardWidth,
+                        height: isTvLayout ? Math.round(historyCardWidth * 0.7) : Math.round(historyCardWidth * 0.82),
+                        backgroundColor: colors.card,
+                        borderColor: colors.border,
+                        borderRadius: isTvLayout ? 12 : 15,
+                      },
+                      isTvLayout && tvFocusStyle(focused),
+                    ]}
+                  >
+                    <Image
+                      source={{ uri: h.thumbnail || `https://img.anili.st/media/${h.animeId}` }}
+                      style={styles.historyImg}
+                      resizeMode="cover"
+                      resizeMethod="resize"
+                      fadeDuration={100}
+                    />
+                    {!isTvLayout && (
+                      <>
+                        <View style={[styles.historyBadge, styles.historyRemainingBadge]}>
+                          <Text style={styles.historyBadgeText}>
+                            {remainingMinutes !== null
+                              ? `متبقي ${remainingMinutes} د`
+                              : remainingEpisodes !== null
+                                ? `متبقي ${remainingEpisodes} حلقة`
+                                : "متابعة"}
+                          </Text>
+                        </View>
+                        <View style={[styles.historyBadge, styles.historyEpisodeBadge]}>
+                          <Text style={styles.historyBadgeText}>الحلقة {h.ep}</Text>
+                        </View>
+                      </>
+                    )}
+                    <LinearGradient
+                      colors={["transparent", "rgba(0,0,0,0.94)"]}
+                      style={[styles.historyGrad, isTvLayout && styles.historyGradTv]}
+                    >
+                      {isTvLayout && <Text style={styles.historyEp}>حلقة {h.ep}</Text>}
+                      <Text
+                        style={[styles.historyTitle, isTvLayout && styles.historyTitleTv]}
+                        numberOfLines={1}
+                      >
+                        {h.titleAr || h.english || h.title}
+                      </Text>
+                      {!isTvLayout && (
+                        <>
+                          <View style={styles.historyResumeRow}>
+                            <Text style={styles.historyPercent}>
+                              {completionPercent !== null ? `${completionPercent}%` : `الحلقة ${h.ep}`}
+                            </Text>
+                            <Text style={styles.historyResumeText} numberOfLines={1}>
+                              استئناف المشاهدة الآن
+                            </Text>
+                          </View>
+                          <View style={styles.historyProgress}>
+                            <View
+                              style={[
+                                styles.historyProgressFill,
+                                {
+                                  width: `${completionPercent ?? 0}%`,
+                                  backgroundColor: colors.homeAccent,
+                                },
+                              ]}
+                            />
+                          </View>
+                        </>
+                      )}
+                    </LinearGradient>
+                    {isTvLayout && (
+                      <View style={styles.playOverlay}>
+                        <Ionicons name="play-circle" size={28} color="rgba(255,255,255,0.85)" />
                       </View>
                     )}
-                  </LinearGradient>
-                  <View style={styles.playOverlay}>
-                    <Ionicons name="play-circle" size={28} color="rgba(255,255,255,0.85)" />
-                  </View>
-                </Pressable>
-              )}
+                  </Pressable>
+                );
+              }}
               initialNumToRender={5}
               maxToRenderPerBatch={5}
               windowSize={3}
@@ -441,9 +522,9 @@ export default function HomeScreen() {
                 <Text style={[styles.sectionTitle, { color: colors.text }]}>📺 أحدث الحلقات</Text>
               </View>
                <Pressable onPress={() => router.push("/schedule" as any)} focusable={isTvLayout}
-                 style={({ focused }) => [styles.seeAllBtn, isTvLayout && tvFocusStyle(focused)]}>
-                <Text style={[styles.seeAllText, { color: colors.primary }]}>عرض المزيد</Text>
-                <Ionicons name="chevron-back" size={13} color={colors.primary} />
+                  style={({ focused }) => [styles.seeAllBtn, isTvLayout && styles.seeAllTvBtn, isTvLayout && tvFocusStyle(focused)]}>
+                <Ionicons name="chevron-back" size={13} color={isTvLayout ? colors.primary : colors.text} />
+                <Text style={[styles.seeAllText, { color: isTvLayout ? colors.primary : colors.text }]}>عرض الكل</Text>
               </Pressable>
             </View>
               <FlatList
@@ -499,9 +580,9 @@ export default function HomeScreen() {
               </View>
                <Pressable onPress={() => router.push("/aw-dubbed" as any)}
                  focusable={isTvLayout}
-                 style={({ focused }) => [styles.seeAllBtn, isTvLayout && tvFocusStyle(focused)]}>
-                <Text style={[styles.seeAllText, { color: colors.primary }]}>عرض الكل</Text>
-                <Ionicons name="chevron-back" size={13} color={colors.primary} />
+                  style={({ focused }) => [styles.seeAllBtn, isTvLayout && styles.seeAllTvBtn, isTvLayout && tvFocusStyle(focused)]}>
+                <Ionicons name="chevron-back" size={13} color={isTvLayout ? colors.primary : colors.text} />
+                <Text style={[styles.seeAllText, { color: isTvLayout ? colors.primary : colors.text }]}>عرض الكل</Text>
               </Pressable>
             </View>
             <FlatList
@@ -608,9 +689,9 @@ export default function HomeScreen() {
               </View>
                <Pressable onPress={() => router.push({ pathname: "/aw-dubbed" as any, params: { tab: "cartoon" } })}
                  focusable={isTvLayout}
-                 style={({ focused }) => [styles.seeAllBtn, isTvLayout && tvFocusStyle(focused)]}>
-                <Text style={[styles.seeAllText, { color: colors.primary }]}>عرض الكل</Text>
-                <Ionicons name="chevron-back" size={13} color={colors.primary} />
+                  style={({ focused }) => [styles.seeAllBtn, isTvLayout && styles.seeAllTvBtn, isTvLayout && tvFocusStyle(focused)]}>
+                <Ionicons name="chevron-back" size={13} color={isTvLayout ? colors.primary : colors.text} />
+                <Text style={[styles.seeAllText, { color: isTvLayout ? colors.primary : colors.text }]}>عرض الكل</Text>
               </Pressable>
             </View>
             <FlatList
@@ -736,15 +817,30 @@ const styles = StyleSheet.create({
   headerRight: { flexDirection: "row", alignItems: "center", gap: 4 },
   iconBtn: { padding: 6 },
   sectionHeader: {
-    flexDirection: "row", alignItems: "center",
+    flexDirection: "row-reverse", alignItems: "center",
     justifyContent: "space-between",
     paddingHorizontal: 16, marginBottom: 12,
   },
-  sectionLeft: { flexDirection: "row", alignItems: "center", gap: 8 },
+  sectionLeft: { flexDirection: "row-reverse", alignItems: "center", gap: 8 },
   sectionDot: { width: 8, height: 8, borderRadius: 4 },
   sectionTitle: { fontSize: 16, fontFamily: "Cairo_700Bold" },
-  seeAllBtn: { flexDirection: "row", alignItems: "center", gap: 2 },
-  seeAllText: { fontSize: 13, fontFamily: "Cairo_600SemiBold" },
+  continueHeading: { flex: 1, flexDirection: "row-reverse", alignItems: "center", gap: 9 },
+  continueAccent: { width: 3, height: 24, borderRadius: 2 },
+  continueTitleWrap: { alignItems: "flex-end", gap: 1 },
+  continueSubtitle: { fontSize: 11, fontFamily: "Cairo_400Regular" },
+  seeAllBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    backgroundColor: "rgba(255,255,255,0.07)",
+    borderColor: "rgba(255,255,255,0.14)",
+    borderWidth: 1,
+    borderRadius: 18,
+  },
+  seeAllTvBtn: { paddingHorizontal: 0, paddingVertical: 0, backgroundColor: "transparent", borderWidth: 0 },
+  seeAllText: { fontSize: 11, fontFamily: "Cairo_600SemiBold" },
   historyCard: {
     width: 150, height: 105, borderRadius: 12,
     overflow: "hidden", borderWidth: 1, position: "relative",
@@ -752,18 +848,29 @@ const styles = StyleSheet.create({
   historyImg: { width: "100%", height: "100%" },
   historyGrad: {
     position: "absolute", bottom: 0, left: 0, right: 0,
-    padding: 8, gap: 2,
+    paddingHorizontal: 8, paddingTop: 28, paddingBottom: 7, gap: 2,
   },
-  historyEp: { color: "#8B5CF6", fontSize: 10, fontFamily: "Cairo_700Bold" },
-  historyTitle: { color: "#fff", fontSize: 11, fontFamily: "Cairo_600SemiBold" },
+  historyGradTv: { padding: 8 },
+  historyEp: { color: "#fff", fontSize: 10, fontFamily: "Cairo_700Bold" },
+  historyTitle: { color: "#fff", fontSize: 10, fontFamily: "Cairo_700Bold", textAlign: "right" },
+  historyTitleTv: { fontSize: 11, fontFamily: "Cairo_600SemiBold" },
+  historyBadge: {
+    position: "absolute", top: 7, zIndex: 2,
+    paddingHorizontal: 7, paddingVertical: 3, borderRadius: 12,
+    backgroundColor: "rgba(7,9,13,0.78)",
+  },
+  historyRemainingBadge: { left: 7 },
+  historyEpisodeBadge: { right: 7 },
+  historyBadgeText: { color: "#fff", fontSize: 8, fontFamily: "Cairo_700Bold" },
+  historyResumeRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 4 },
+  historyPercent: { color: "#F3F4F6", fontSize: 9, fontWeight: "700" },
+  historyResumeText: { flex: 1, color: "#F3F4F6", fontSize: 8, fontFamily: "Cairo_600SemiBold", textAlign: "right" },
   historyProgress: {
-    height: 2, backgroundColor: "rgba(255,255,255,0.2)",
-    borderRadius: 1, marginTop: 2,
+    height: 3, backgroundColor: "rgba(255,255,255,0.2)",
+    borderRadius: 2, marginTop: 2, overflow: "hidden",
   },
-  historyProgressFill: { height: 2, borderRadius: 1 },
-  playOverlay: {
-    position: "absolute", top: 8, right: 8,
-  },
+  historyProgressFill: { height: 3, borderRadius: 2 },
+  playOverlay: { position: "absolute", top: 8, right: 8 },
 });
 
 const todayStyles = StyleSheet.create({

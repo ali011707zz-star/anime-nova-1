@@ -152,6 +152,11 @@ function RootLayoutNav() {
         <Stack.Screen name="stardima-servers" options={{ headerShown: false, animation: "slide_from_right" }} />
         <Stack.Screen name="stardima-player" options={watchScreenOptions} />
         <Stack.Screen name="anime/[id]" options={{ headerShown: false, animation: "slide_from_bottom" }} />
+        <Stack.Screen name="manga" options={{ headerShown: false }} />
+        <Stack.Screen name="manga/[id]" options={{ headerShown: false, animation: "slide_from_bottom" }} />
+        <Stack.Screen name="seasons" options={{ headerShown: false }} />
+        <Stack.Screen name="stats" options={{ headerShown: false }} />
+        <Stack.Screen name="upcoming" options={{ headerShown: false }} />
         <Stack.Screen name="watch" options={watchScreenOptions} />
         <Stack.Screen name="animation/[type]/[id]" options={{ headerShown: false, animation: "slide_from_bottom" }} />
         <Stack.Screen name="animation/watch" options={watchScreenOptions} />
