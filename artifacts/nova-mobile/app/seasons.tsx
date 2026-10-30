@@ -104,8 +104,8 @@ export default function SeasonsScreen() {
               ]}
             >
               <Ionicons
-                name="chevron-forward"
-                size={21}
+                name="chevron-back"
+                size={20}
                 color={colors.textPrimary}
                 style={styles.seasonArrow}
               />
@@ -139,21 +139,34 @@ const styles = StyleSheet.create({
   screen: { flex: 1 },
   seasonList: { paddingBottom: 100 },
   seasonRow: {
-    minHeight: 69,
+    minHeight: 84,
     borderBottomWidth: StyleSheet.hairlineWidth,
     justifyContent: "center",
-    paddingLeft: 50,
-    paddingRight: 22,
+    alignItems: "center",
+    paddingHorizontal: 58,
   },
-  seasonArrow: { position: "absolute", right: 16 },
-  seasonText: { fontSize: 17, textAlign: "right", fontFamily: "Cairo_700Bold" },
+  seasonArrow: {
+    position: "absolute",
+    end: 20,
+    top: "50%",
+    transform: [{ translateY: -10 }],
+  },
+  seasonText: {
+    alignSelf: "stretch",
+    fontSize: 18,
+    textAlign: "center",
+    writingDirection: "rtl",
+    fontFamily: "Cairo_700Bold",
+  },
   catalog: { flex: 1 },
   sectionTitle: {
     fontSize: 16,
     fontFamily: "Cairo_700Bold",
     textAlign: "right",
+    writingDirection: "rtl",
+    alignSelf: "stretch",
     paddingHorizontal: 18,
-    paddingTop: 15,
-    paddingBottom: 2,
+    paddingTop: 18,
+    paddingBottom: 8,
   },
 });

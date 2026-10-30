@@ -1,6 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import React, { useState } from "react";
-import { Platform, ScrollView, StyleSheet, Text, View } from "react-native";
+import { I18nManager, Platform, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { DrawerMenu } from "@/components/DrawerMenu";
@@ -34,7 +34,7 @@ export function CatalogPageHeader({ title, onBack }: HeaderProps) {
   return (
     <>
       <View style={[styles.header, { height: topInset + 54, paddingTop: topInset, borderBottomColor: colors.border }]}>
-        <View style={[styles.actions, { top: topInset + 6 }]}>
+        <View style={[styles.actions, I18nManager.isRTL && styles.rtlActions, { top: topInset + 6 }]}>
           <Pressable
             accessibilityLabel="فتح القائمة"
             onPress={() => setDrawerVisible(true)}
@@ -134,11 +134,12 @@ const styles = StyleSheet.create({
   },
   actions: {
     position: "absolute",
-    left: 14,
+    end: 14,
     flexDirection: "row",
     gap: 8,
     zIndex: 2,
   },
+  rtlActions: { flexDirection: "row-reverse" },
   iconButton: {
     width: 38,
     height: 38,
@@ -149,8 +150,8 @@ const styles = StyleSheet.create({
   },
   title: {
     position: "absolute",
-    left: 104,
-    right: 60,
+    start: 60,
+    end: 104,
     textAlign: "right",
     textAlignVertical: "center",
     fontSize: 18,
@@ -158,7 +159,7 @@ const styles = StyleSheet.create({
   },
   backButton: {
     position: "absolute",
-    right: 14,
+    start: 14,
     width: 38,
     height: 38,
     borderRadius: 12,
