@@ -164,17 +164,17 @@ function MetaCard({ label, value, badge, wide }: { label: string; value: string;
   );
 }
 
-function CharCard({ e, animeId, animeTitle, favIds, onToggle, tvMode = false }: {
+function CharCard({ e, animeId, animeTitle, favIds, onToggle, tvMode = false, columns = 3 }: {
   e: any;
   animeId: number;
   animeTitle: string;
   favIds: Set<number>;
   onToggle: (c: { id: number; name: string; image?: string; animeId: number; animeTitle: string }) => void;
   tvMode?: boolean;
+  columns?: number;
 }) {
   const { d } = useDetailStyles();
   const { width } = useWindowDimensions();
-  const columns = 5;
   const gap = tvMode ? 14 : 12;
   const cardWidth = (width - (tvMode ? 80 : 32) - gap * (columns - 1)) / columns;
   const n = e.node;
@@ -456,7 +456,7 @@ export default function AnimeDetailScreen() {
           hasTVPreferredFocus={tvMode}
           onFocus={() => rememberDetailFocus("back")}
           style={({ focused }) => [d.topBarBack, d.topBarBackRight, tvMode && d.tvTopBarBack, tvMode && tvFocusStyle(focused)]}>
-          <Ionicons name="arrow-back" size={20} color={colors.textPrimary} />
+          <Ionicons name="chevron-forward" size={20} color={colors.textPrimary} />
         </Pressable>
         <Text style={d.topBarTitle} numberOfLines={1}>
           {(Array.isArray(title) ? title[0] : title) || (Array.isArray(english) ? english[0] : english) || "تفاصيل الأنمي"}
@@ -474,7 +474,7 @@ export default function AnimeDetailScreen() {
           hasTVPreferredFocus={tvMode}
           onFocus={() => rememberDetailFocus("back")}
           style={({ focused }) => [d.topBarBack, d.topBarBackRight, tvMode && d.tvTopBarBack, tvMode && tvFocusStyle(focused)]}>
-          <Ionicons name="arrow-back" size={20} color={colors.textPrimary} />
+          <Ionicons name="chevron-forward" size={20} color={colors.textPrimary} />
         </Pressable>
         <Text style={d.topBarTitle} numberOfLines={1}>
           {(Array.isArray(title) ? title[0] : title) || (Array.isArray(english) ? english[0] : english) || "تفاصيل الأنمي"}
@@ -543,7 +543,7 @@ export default function AnimeDetailScreen() {
           hasTVPreferredFocus={tvMode}
           onFocus={() => rememberDetailFocus("back")}
           style={({ focused }) => [d.topBarBack, d.topBarBackRight, tvMode && d.tvTopBarBack, tvMode && tvFocusStyle(focused)]}>
-          <Ionicons name="arrow-back" size={tvMode ? 26 : 20} color={colors.textPrimary} />
+          <Ionicons name="chevron-forward" size={tvMode ? 26 : 20} color={colors.textPrimary} />
         </Pressable>
       </View>
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={[{ paddingBottom: 100 }, tvMode && d.tvContent]}>
@@ -612,7 +612,7 @@ export default function AnimeDetailScreen() {
         ) : null}
 
         {/* ── Watch buttons ── */}
-        <View style={{ paddingHorizontal: 16, marginTop: nextEp && countdown && countdown > 0 ? 8 : 16, flexDirection: "row", gap: 9 }}>
+        <View style={{ paddingHorizontal: 16, marginTop: nextEp && countdown && countdown > 0 ? 8 : 16 }}>
           <Pressable
             onPress={() => router.push({
               pathname: "/episodes/[id]",
@@ -627,33 +627,12 @@ export default function AnimeDetailScreen() {
             } as any)}
             focusable={tvMode}
             onFocus={() => rememberDetailFocus("watch")}
-            style={({ focused }) => [d.watchBtn, tvMode && d.tvWatchBtn, { flex: 1.15 }, tvMode && tvFocusStyle(focused)]}
+            style={({ focused }) => [d.watchBtn, tvMode && d.tvWatchBtn, { width: "100%" }, tvMode && tvFocusStyle(focused)]}
           >
             <View style={[d.watchBtnIcon, tvMode && d.tvWatchBtnIcon]}>
               <Ionicons name="play" size={tvMode ? 25 : 16} color={colors.primaryForeground} />
             </View>
             <Text style={[d.watchBtnText, tvMode && d.tvButtonText]}>مشاهدة الآن</Text>
-          </Pressable>
-          <Pressable
-            onPress={() => router.push({
-              pathname: "/episodes/[id]",
-              params: {
-                id,
-                ...(src ? { src } : {}),
-                ...(title ? { title } : {}),
-                ...(english ? { english } : {}),
-                ...(cover ? { cover } : {}),
-                ...(ep ? { ep } : {}),
-              },
-            } as any)}
-            focusable={tvMode}
-            onFocus={() => rememberDetailFocus("episode-list")}
-            accessibilityRole="button"
-            accessibilityLabel="قائمة الحلقات"
-            style={({ focused }) => [d.epListBtn, tvMode && d.tvWatchBtn, { flex: 0.85 }, tvMode && tvFocusStyle(focused)]}
-          >
-            <Ionicons name="list" size={tvMode ? 23 : 17} color={colors.accent} />
-            <Text style={[d.epListBtnText, tvMode && d.tvButtonText]}>الحلقات</Text>
           </Pressable>
         </View>
 
@@ -729,7 +708,7 @@ export default function AnimeDetailScreen() {
         {/* ── Synopsis ── */}
         {desc ? (
           <View style={[d.section, tvMode && d.tvSection]}>
-            <SectionHeader title="القصة" tvMode={tvMode} />
+            <SectionHeader title="قصة الأنمي" tvMode={tvMode} />
             <View style={[d.descBox, tvMode && d.tvDescBox]}>
               <Text
                 style={[d.descText, tvMode && d.tvBodyText]}
@@ -739,7 +718,7 @@ export default function AnimeDetailScreen() {
                   <Pressable onPress={() => setShowFull(f => !f)} focusable={tvMode}
                     onFocus={() => rememberDetailFocus("read-more")}
                     style={({ focused }) => [d.readMoreBtn, tvMode && d.tvReadMoreBtn, tvMode && tvFocusStyle(focused)]}>
-                  <Text style={[d.readMoreText, tvMode && d.tvReadMoreText]}>{showFull ? "عرض أقل" : "عرض المزيد"}</Text>
+                  <Text style={[d.readMoreText, tvMode && d.tvReadMoreText]}>{showFull ? "عرض أقل" : "قراءة القصة كاملة"}</Text>
                   <Ionicons name={showFull ? "chevron-up" : "chevron-down"} size={tvMode ? 22 : 13} color={colors.accent} />
                 </Pressable>
               )}
@@ -816,9 +795,13 @@ export default function AnimeDetailScreen() {
             ] as const).map(t => (
                <Pressable key={t.key} onPress={() => setTab(t.key)} focusable={tvMode}
                  onFocus={() => rememberDetailFocus(`tab:${t.key}`)}
-                 style={({ focused }) => [d.tabBtn, tvMode && d.tvTabBtn, tvMode && tvFocusStyle(focused)]}>
-                 <Text style={[d.tabBtnText, tvMode && d.tvTabBtnText, tab === t.key && d.tabBtnTextActive]}>{t.label}</Text>
-                {tab === t.key && <View style={d.tabIndicator} />}
+                style={({ focused }) => [
+                  d.tabBtn,
+                  tab === t.key && d.tabBtnActive,
+                  tvMode && d.tvTabBtn,
+                  tvMode && tvFocusStyle(focused),
+                ]}>
+                <Text style={[d.tabBtnText, tvMode && d.tvTabBtnText, tab === t.key && d.tabBtnTextActive]}>{t.label}</Text>
               </Pressable>
             ))}
           </View>
@@ -829,17 +812,19 @@ export default function AnimeDetailScreen() {
               {mainChars.length > 0 && (
                 <>
                   <Text style={d.tabSubTitle}>الشخصيات الرئيسية</Text>
-              <View style={[d.charGrid, tvMode && d.tvCharGrid]}>
-                    {mainChars.map((e: any) => <CharCard key={e.node.id} e={e} animeId={anime.id} animeTitle={anime.title?.romaji || ""} favIds={favCharIds} onToggle={toggleChar} tvMode={tvMode} />)}
+                  <View style={[d.charGrid, tvMode && d.tvCharGrid]}>
+                    {mainChars.map((e: any) => <CharCard key={e.node.id} e={e} animeId={anime.id} animeTitle={anime.title?.romaji || ""} favIds={favCharIds} onToggle={toggleChar} tvMode={tvMode} columns={tvMode ? 5 : 3} />)}
                   </View>
                 </>
               )}
               {suppChars.length > 0 && (
                 <>
                   <Text style={[d.tabSubTitle, { marginTop: 12 }]}>الشخصيات المساعدة</Text>
-                  <View style={[d.charGrid, tvMode && d.tvCharGrid]}>
-                    {suppChars.slice(0, 8).map((e: any) => <CharCard key={e.node.id} e={e} animeId={anime.id} animeTitle={anime.title?.romaji || ""} favIds={favCharIds} onToggle={toggleChar} tvMode={tvMode} />)}
-                  </View>
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                    <View style={[d.charGrid, d.charGridHorizontal, tvMode && d.tvCharGrid]}>
+                      {suppChars.slice(0, 8).map((e: any) => <CharCard key={e.node.id} e={e} animeId={anime.id} animeTitle={anime.title?.romaji || ""} favIds={favCharIds} onToggle={toggleChar} tvMode={tvMode} columns={5} />)}
+                    </View>
+                  </ScrollView>
                 </>
               )}
               {mainChars.length === 0 && suppChars.length === 0 && (
@@ -1009,11 +994,11 @@ function createDetailStyles(colors: ThemePalette) {
   container: { flex: 1, backgroundColor: colors.background },
   center: { flex: 1, alignItems: "center", justifyContent: "center" },
   topBar: { height: 52, flexDirection: "row", alignItems: "center", justifyContent: "center", paddingHorizontal: 14, backgroundColor: colors.surface, borderBottomWidth: 1, borderBottomColor: colors.border, position: "relative" },
-  topBarTitle: { position: "absolute", left: 62, right: 100, textAlign: "right", color: colors.textPrimary, fontSize: 13, lineHeight: 20, fontFamily: "Cairo_800ExtraBold" },
-  topBarStatus: { position: "absolute", right: 14, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 9, backgroundColor: colors.accentSurface, borderWidth: 1, borderColor: colors.accentBorder },
+  topBarTitle: { position: "absolute", left: 100, right: 62, textAlign: "right", color: colors.textPrimary, fontSize: 13, lineHeight: 20, fontFamily: "Cairo_800ExtraBold" },
+  topBarStatus: { position: "absolute", left: 14, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 9, backgroundColor: colors.accentSurface, borderWidth: 1, borderColor: colors.accentBorder },
   topBarStatusText: { fontSize: 9, lineHeight: 14, fontFamily: "Cairo_700Bold", color: colors.accent },
   topBarBack: { width: 38, height: 38, borderRadius: 12, alignItems: "center", justifyContent: "center", backgroundColor: colors.surfaceElevated, borderWidth: 1, borderColor: colors.border },
-  topBarBackRight: { position: "absolute", left: 12, top: 7 },
+  topBarBackRight: { position: "absolute", right: 12, top: 7 },
   topBarSpacer: { width: 50 },
   hero: { height: 250, justifyContent: "flex-end", overflow: "hidden" },
   favBtn: { position: "absolute", right: 14, top: 14, width: 36, height: 36, backgroundColor: "rgba(0,0,0,0.5)", borderRadius: 14, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: "rgba(255,255,255,0.1)" },
@@ -1042,8 +1027,6 @@ function createDetailStyles(colors: ThemePalette) {
   },
   countdownText: { fontSize: 12, fontFamily: "Cairo_700Bold", color: colors.accent, flex: 1 },
   watchBtn: { height: 54, borderRadius: 15, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 10, backgroundColor: colors.primary },
-  epListBtn: { height: 54, borderRadius: 15, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, backgroundColor: colors.accentSurface, borderWidth: 1.5, borderColor: colors.accentBorder, paddingHorizontal: 10 },
-  epListBtnText: { fontSize: 13, fontFamily: "Cairo_700Bold", color: colors.accent },
   watchBtnIcon: { width: 32, height: 32, backgroundColor: "rgba(255,255,255,0.2)", borderRadius: 12, alignItems: "center", justifyContent: "center" },
   watchBtnText: { fontSize: 15, fontFamily: "Cairo_800ExtraBold", color: colors.primaryForeground },
   warnBox: { margin: 16, borderRadius: 16, backgroundColor: colors.destructiveSurface, borderWidth: 1, borderColor: colors.destructiveBorder, overflow: "hidden" },
@@ -1068,7 +1051,7 @@ function createDetailStyles(colors: ThemePalette) {
   sectionTitle: { fontSize: 14, fontFamily: "Cairo_800ExtraBold", color: colors.textPrimary },
   descBox: { backgroundColor: colors.card, borderRadius: 12, padding: 14, borderWidth: 1, borderColor: colors.border },
   descText: { fontSize: 13, color: colors.textPrimary, lineHeight: 22, fontFamily: "Cairo_400Regular", textAlign: "right" },
-  readMoreBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 4, marginTop: 10 },
+  readMoreBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 5, marginTop: 12, paddingTop: 10, borderTopWidth: 1, borderTopColor: colors.border },
   readMoreText: { fontSize: 12, color: colors.accent, fontFamily: "Cairo_700Bold" },
   genreChip: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20, backgroundColor: colors.accentSurface, borderWidth: 1, borderColor: colors.accentBorder },
   genreChipText: { fontSize: 11, fontFamily: "Cairo_700Bold", color: colors.accent },
@@ -1089,15 +1072,16 @@ function createDetailStyles(colors: ThemePalette) {
   trailerSheetHeader: { flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 14, paddingVertical: 10, backgroundColor: colors.surface },
   trailerModalTitle: { fontSize: 14, fontFamily: "Cairo_800ExtraBold", color: colors.textPrimary },
   trailerCloseBtn: { width: 36, height: 36, alignItems: "center", justifyContent: "center", backgroundColor: colors.surfaceElevated, borderRadius: 12 },
-  tabNav: { flexDirection: "row", borderBottomWidth: 1, borderBottomColor: colors.border, marginBottom: 14 },
-  tabBtn: { flex: 1, alignItems: "center", paddingBottom: 10, position: "relative" },
+  tabNav: { flexDirection: "row", gap: 4, padding: 4, borderRadius: 14, backgroundColor: colors.surfaceElevated, borderWidth: 1, borderColor: colors.border, marginBottom: 14 },
+  tabBtn: { flex: 1, minHeight: 40, alignItems: "center", justifyContent: "center", paddingHorizontal: 5, borderRadius: 10, position: "relative" },
+  tabBtnActive: { backgroundColor: colors.accent },
   tabBtnText: { fontSize: 13, fontFamily: "Cairo_700Bold", color: colors.textMuted },
-  tabBtnTextActive: { color: colors.textPrimary },
-  tabIndicator: { position: "absolute", bottom: 0, left: "20%", right: "20%", height: 2, backgroundColor: colors.accent, borderRadius: 1 },
+  tabBtnTextActive: { color: colors.primaryForeground },
   tabSubTitle: { fontSize: 10, color: colors.textSecondary, fontFamily: "Cairo_700Bold", marginBottom: 10, textAlign: "right" },
-  charGrid: { flexDirection: "row", flexWrap: "wrap", columnGap: 12, rowGap: 12 },
-  charCard: { width: (W - 32 - 60) / 5, alignItems: "center", gap: 4 },
-  charImgWrap: { width: (W - 32 - 60) / 5, aspectRatio: 0.72, borderRadius: 10, overflow: "hidden", borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surfaceElevated, position: "relative" },
+  charGrid: { flexDirection: "row", flexWrap: "wrap", justifyContent: "flex-end", columnGap: 12, rowGap: 12 },
+  charGridHorizontal: { flexWrap: "nowrap", justifyContent: "flex-start" },
+  charCard: { alignItems: "center", gap: 4 },
+  charImgWrap: { aspectRatio: 0.72, borderRadius: 10, overflow: "hidden", borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surfaceElevated, position: "relative" },
   charImgMain: { borderColor: colors.accent, borderWidth: 2 },
   charImg: { width: "100%", height: "100%" },
   charHeartBtn: { position: "absolute", bottom: 4, right: 4, backgroundColor: "rgba(0,0,0,0.65)", borderRadius: 10, padding: 5, zIndex: 20, elevation: 8, borderWidth: 1.5, borderColor: "rgba(255,255,255,0.35)" },
@@ -1106,10 +1090,10 @@ function createDetailStyles(colors: ThemePalette) {
   emptyTabText: { textAlign: "center", color: colors.textMuted, fontSize: 12, fontFamily: "Cairo_400Regular", paddingVertical: 20 },
   tvContent: { paddingHorizontal: 40, paddingBottom: 120 },
   tvTopBar: { height: 62, paddingHorizontal: 28 },
-  tvTopBarTitle: { left: 84, right: 140, fontSize: 18, lineHeight: 27 },
-  tvTopBarStatus: { right: 28, paddingHorizontal: 12, paddingVertical: 5, borderRadius: 11 },
+  tvTopBarTitle: { left: 140, right: 84, fontSize: 18, lineHeight: 27 },
+  tvTopBarStatus: { left: 28, paddingHorizontal: 12, paddingVertical: 5, borderRadius: 11 },
   tvTopBarStatusText: { fontSize: 13, lineHeight: 20 },
-  tvTopBarBack: { width: 48, height: 48, borderRadius: 14 },
+  tvTopBarBack: { width: 48, height: 48, right: 18, borderRadius: 14 },
   tvCharGrid: { columnGap: 14, rowGap: 14 },
   tvSection: { marginTop: 22 },
   tvSectionHeader: { gap: 10, marginBottom: 14 },
