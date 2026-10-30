@@ -33,6 +33,7 @@ type NavItem = {
   sub?: string;
   route: string;
   badge?: string;
+  showChevron?: boolean;
   color?: string;
 };
 
@@ -50,8 +51,8 @@ const NAV_MAIN: NavItem[] = [
 ];
 
 const NAV_LIBRARY: NavItem[] = [
-  { icon: "heart",           label: "المفضلة",               route: "/(tabs)/library",     color: "#f43f5e" },
-  { icon: "time",            label: "سجل المشاهدة",          route: "/(tabs)/library",     color: "#f59e0b" },
+  { icon: "heart",           label: "المفضلة",               route: "/(tabs)/library",     showChevron: false, color: "#f43f5e" },
+  { icon: "time",            label: "سجل المشاهدة",          route: "/(tabs)/library",     showChevron: false, color: "#f59e0b" },
 ];
 
 const NAV_OTHER: NavItem[] = [
@@ -191,19 +192,26 @@ export function DrawerMenu({ visible, onClose }: Props) {
           </Pressable>
 
           {/* ── Main navigation ── */}
-          <Text style={[s.sectionLabel, { color: colors.textMuted }]}>القائمة الرئيسية</Text>
-            {NAV_MAIN.map((item) => (
+          <SectionHeading label="القائمة الرئيسية" colors={colors} />
+          {NAV_MAIN.map((item) => (
             <DrawerItem key={item.label} item={item} tvMode={tvMode} colors={colors} onPress={() => nav(item.route)} />
           ))}
 
           {/* ── Library ── */}
-          <Text style={[s.sectionLabel, { color: colors.textMuted }]}>مكتبتي</Text>
+          <SectionHeading label="مكتبتي" colors={colors} />
           {NAV_LIBRARY.map((item) => (
-            <DrawerItem key={item.label} item={item} tvMode={tvMode} colors={colors} onPress={() => nav(item.route)} />
+            <DrawerItem
+              key={item.label}
+              item={item}
+              badge={item.label === "المفضلة" ? favorites.length : watchHistory.length}
+              tvMode={tvMode}
+              colors={colors}
+              onPress={() => nav(item.route)}
+            />
           ))}
 
           {/* ── Other ── */}
-          <Text style={[s.sectionLabel, { color: colors.textMuted }]}>أخرى</Text>
+          <SectionHeading label="أخرى" colors={colors} />
           {NAV_OTHER.map((item) => (
             <DrawerItem key={item.label} item={item} tvMode={tvMode} colors={colors} onPress={() => nav(item.route)} />
           ))}
@@ -222,16 +230,34 @@ export function DrawerMenu({ visible, onClose }: Props) {
   );
 }
 
-function DrawerItem({ item, onPress, tvMode, colors }: {
+function SectionHeading({ label, colors }: {
+  label: string;
+  colors: ReturnType<typeof useColors>;
+}) {
+  return (
+    <View style={s.sectionHeading}>
+      <Text style={[s.sectionLabel, { color: colors.textMuted }]}>{label}</Text>
+      <View style={[s.sectionRule, { backgroundColor: colors.border }]} />
+    </View>
+  );
+}
+
+function DrawerItem({ item, onPress, tvMode, colors, badge }: {
   item: NavItem;
   onPress: () => void;
   tvMode: boolean;
   colors: ReturnType<typeof useColors>;
+  badge?: number;
 }) {
+  const badgeLabel = badge !== undefined
+    ? badge > 0 ? String(badge) : undefined
+    : item.badge;
+
   return (
     <Pressable onPress={onPress} focusable={tvMode} style={({ pressed, focused }) => [
       s.navItem,
       tvMode && s.tvNavItem,
+      { backgroundColor: colors.card, borderColor: colors.border },
       pressed && { backgroundColor: colors.surfaceElevated },
       tvMode && tvFocusStyle(focused),
     ]}>
@@ -239,10 +265,13 @@ function DrawerItem({ item, onPress, tvMode, colors }: {
         <Ionicons name={item.icon} size={tvMode ? 26 : 18} color={item.color || "#8B5CF6"} />
       </View>
       <Text style={[s.navLabel, tvMode && s.tvNavLabel, { color: colors.textPrimary }]}>{item.label}</Text>
-      {item.badge && (
-        <View style={[s.badge, { backgroundColor: `${colors.accent}18`, borderColor: `${colors.accent}40` }]}>
-          <Text style={[s.badgeText, { color: colors.accent }]}>{item.badge}</Text>
+      {badgeLabel && (
+        <View style={[s.badge, { backgroundColor: colors.surfaceElevated, borderColor: colors.border }]}>
+          <Text style={[s.badgeText, { color: colors.textSecondary }]}>{badgeLabel}</Text>
         </View>
+      )}
+      {item.showChevron !== false && (
+        <Ionicons name="chevron-back" size={15} color={colors.textMuted} />
       )}
     </Pressable>
   );
@@ -303,32 +332,38 @@ const s = StyleSheet.create({
   userAvatarText: { fontSize: 17, fontFamily: "Cairo_800ExtraBold", color: "#fff" },
   userName: { fontSize: 14, fontFamily: "Cairo_800ExtraBold", color: "#fff" },
   userSub: { fontSize: 10, fontFamily: "Cairo_400Regular", color: "rgba(255,255,255,0.35)", marginTop: 2 },
+  sectionHeading: {
+    flexDirection: "row", alignItems: "center", gap: 10,
+    paddingHorizontal: 18, paddingTop: 14, paddingBottom: 8,
+  },
   sectionLabel: {
     fontSize: 9, fontFamily: "Cairo_700Bold",
-    color: "rgba(255,255,255,0.2)",
     textTransform: "uppercase",
     letterSpacing: 1.2,
-    paddingHorizontal: 20, paddingTop: 18, paddingBottom: 6,
+  },
+  sectionRule: {
+    flex: 1, height: StyleSheet.hairlineWidth,
   },
   navItem: {
-    flexDirection: "row", alignItems: "center", gap: 14,
-    paddingHorizontal: 14, paddingVertical: 11,
-    marginHorizontal: 6, borderRadius: 14,
+    flexDirection: "row", alignItems: "center", gap: 12,
+    paddingHorizontal: 12, paddingVertical: 10,
+    marginHorizontal: 14, marginBottom: 6,
+    borderRadius: 16, borderWidth: 1,
   },
-  tvNavItem: { paddingHorizontal: 22, paddingVertical: 18, marginHorizontal: 14, borderRadius: 18, gap: 18 },
+  tvNavItem: { paddingHorizontal: 22, paddingVertical: 18, marginHorizontal: 22, marginBottom: 10, borderRadius: 18, gap: 18 },
   navIcon: {
-    width: 36, height: 36, borderRadius: 10,
+    width: 38, height: 38, borderRadius: 11,
     alignItems: "center", justifyContent: "center",
   },
   tvNavIcon: { width: 52, height: 52, borderRadius: 15 },
-  navLabel: { flex: 1, fontSize: 13, fontFamily: "Cairo_700Bold", color: "rgba(255,255,255,0.85)" },
+  navLabel: { flex: 1, fontSize: 13, fontFamily: "Cairo_700Bold" },
   tvNavLabel: { fontSize: 19 },
   badge: {
-    backgroundColor: "rgba(139,92,246,0.2)",
-    borderRadius: 8, paddingHorizontal: 7, paddingVertical: 2,
-    borderWidth: 1, borderColor: "rgba(139,92,246,0.35)",
+    width: 28, height: 28, borderRadius: 14,
+    alignItems: "center", justifyContent: "center",
+    borderWidth: 1,
   },
-  badgeText: { fontSize: 9, fontFamily: "Cairo_700Bold", color: "#c4b5fd" },
+  badgeText: { fontSize: 10, fontFamily: "Cairo_700Bold" },
   footer: {
     marginTop: 24, paddingHorizontal: 20,
     flexDirection: "row", alignItems: "center", justifyContent: "space-between",
