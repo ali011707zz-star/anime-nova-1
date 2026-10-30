@@ -150,15 +150,15 @@ function SectionHeader({ title, tvMode = false }: { title: string; tvMode?: bool
   );
 }
 
-function MetaRow({ label, value, badge }: { label: string; value: string; badge?: boolean }) {
+function MetaCard({ label, value, badge, wide }: { label: string; value: string; badge?: boolean; wide?: boolean }) {
   const { d } = useDetailStyles();
   return (
-    <View style={d.metaRow}>
+    <View style={[d.metaCard, wide && d.metaCardWide]}>
       <Text style={d.metaLabel}>{label}</Text>
       {badge ? (
         <View style={d.metaBadge}><Text style={d.metaBadgeText}>{value}</Text></View>
       ) : (
-        <Text style={d.metaValue}>{value}</Text>
+        <Text style={d.metaCardValue} numberOfLines={2}>{value}</Text>
       )}
     </View>
   );
@@ -174,7 +174,7 @@ function CharCard({ e, animeId, animeTitle, favIds, onToggle, tvMode = false }: 
 }) {
   const { d } = useDetailStyles();
   const { width } = useWindowDimensions();
-  const columns = tvMode ? 5 : 3;
+  const columns = 5;
   const gap = tvMode ? 14 : 12;
   const cardWidth = (width - (tvMode ? 80 : 32) - gap * (columns - 1)) / columns;
   const n = e.node;
@@ -513,7 +513,16 @@ export default function AnimeDetailScreen() {
   const score = anime.meanScore ? (anime.meanScore / 10).toFixed(1) : null;
   const allTimeRank = anime.rankings?.find((r: any) => r.allTime && r.type === "RATED")?.rank;
   const ageRating = getAgeRating(anime.genres || [], anime.isAdult);
-  const studio = anime.studios?.nodes?.find((s: any) => s.isAnimationStudio)?.name || anime.studios?.nodes?.[0]?.name;
+  const studio = anime.studios?.nodes
+    ?.filter((s: any) => s.isAnimationStudio)
+    .map((s: any) => s.name)
+    .filter(Boolean)
+    .slice(0, 2)
+    .join(" / ") || anime.studios?.nodes?.[0]?.name;
+  const airingPeriod = [
+    STATUS_MAP[anime.status] || anime.status,
+    anime.seasonYear || anime.startDate?.year,
+  ].filter(Boolean).join(" · ") || null;
   const nextEp = anime.nextAiringEpisode;
 
   return (
@@ -686,8 +695,8 @@ export default function AnimeDetailScreen() {
         {(score || allTimeRank || anime.idMal) && (
           <View style={[d.malBox, { marginHorizontal: 16 }]}>
             <View style={d.malHeader}>
-              <Text style={d.malTitle}>MyAnimeList</Text>
-              {anime.idMal ? <Text style={d.malId}>#{anime.idMal}</Text> : null}
+              <Text style={d.malId}>{anime.idMal ? `MAL #${anime.idMal}` : "MyAnimeList"}</Text>
+              <Text style={d.malTitle}>الإحصائيات والتقييم العالمي</Text>
             </View>
             <View style={d.malStats}>
               {score ? (
@@ -752,12 +761,16 @@ export default function AnimeDetailScreen() {
 
         {/* ── Metadata ── */}
         <View style={[d.section, tvMode && d.tvSection]}>
-          <View style={d.metaBox}>
-            {anime.source ? <MetaRow label="المصدر" value={SOURCE_MAP[anime.source] || anime.source} /> : null}
-            {anime.duration ? <MetaRow label="مدة الحلقة" value={fmtRuntime(anime.duration) || ""} /> : null}
-            {(startD || endD) ? <MetaRow label="عرض من : إلى" value={`${startD || "؟"} : ${endD || "مستمر"}`} /> : null}
-            {studio ? <MetaRow label="الاستوديو" value={studio} badge /> : null}
-            {anime.title?.english ? <MetaRow label="الاسم الإنجليزي" value={anime.title.english} /> : null}
+          <SectionHeader title="معلومات الإنتاج" tvMode={tvMode} />
+          <View style={d.metaGrid}>
+            {studio ? <MetaCard label="الاستوديو المنتج" value={studio} badge /> : null}
+            {anime.source ? <MetaCard label="المصدر الأصلي" value={SOURCE_MAP[anime.source] || anime.source} /> : null}
+            {anime.duration ? <MetaCard label="مدة الحلقة" value={fmtRuntime(anime.duration) || ""} /> : null}
+            {airingPeriod ? <MetaCard label="فترة العرض" value={airingPeriod} /> : null}
+            {anime.title?.english ? <MetaCard label="الاسم الإنجليزي" value={anime.title.english} wide /> : null}
+            {(startD || endD) ? (
+              <MetaCard label="عرض من : إلى" value={`${startD || "؟"} : ${endD || "مستمر"}`} wide />
+            ) : null}
           </View>
         </View>
 
@@ -1042,8 +1055,8 @@ function createDetailStyles(colors: ThemePalette) {
   actionBtnLabel: { fontSize: 9, fontFamily: "Cairo_800ExtraBold", color: colors.textSecondary },
   actionBtnSub: { fontSize: 9, fontFamily: "Cairo_700Bold", opacity: 0.7 },
   malBox: { borderRadius: 18, overflow: "hidden", borderWidth: 1, borderColor: colors.border, backgroundColor: colors.card, marginTop: 14 },
-  malHeader: { flexDirection: "row", justifyContent: "center", alignItems: "center", gap: 8, paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: colors.border },
-  malTitle: { fontSize: 11, fontFamily: "Cairo_800ExtraBold", color: colors.accent },
+   malHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", gap: 8, paddingHorizontal: 12, paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: colors.border },
+   malTitle: { fontSize: 10, fontFamily: "Cairo_800ExtraBold", color: colors.textPrimary },
   malId: { fontSize: 9, color: colors.textMuted, fontFamily: "Cairo_400Regular" },
   malStats: { flexDirection: "row" },
   malStat: { flex: 1, alignItems: "center", paddingVertical: 12 },
@@ -1059,11 +1072,12 @@ function createDetailStyles(colors: ThemePalette) {
   readMoreText: { fontSize: 12, color: colors.accent, fontFamily: "Cairo_700Bold" },
   genreChip: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20, backgroundColor: colors.accentSurface, borderWidth: 1, borderColor: colors.accentBorder },
   genreChipText: { fontSize: 11, fontFamily: "Cairo_700Bold", color: colors.accent },
-  metaBox: { backgroundColor: colors.card, borderRadius: 14, borderWidth: 1, borderColor: colors.border, overflow: "hidden" },
-  metaRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingHorizontal: 14, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: colors.border },
-  metaLabel: { fontSize: 11, color: colors.textMuted, fontFamily: "Cairo_400Regular" },
-  metaValue: { fontSize: 11, color: colors.textPrimary, fontFamily: "Cairo_700Bold", textAlign: "right", flex: 1, marginRight: 8 },
-  metaBadge: { backgroundColor: colors.accentSurface, borderRadius: 8, paddingHorizontal: 8, paddingVertical: 2 },
+   metaGrid: { flexDirection: "row-reverse", flexWrap: "wrap", columnGap: 8, rowGap: 8 },
+   metaCard: { width: "48%", minHeight: 68, justifyContent: "space-between", gap: 7, padding: 11, borderRadius: 14, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.card },
+   metaCardWide: { width: "100%" },
+   metaLabel: { fontSize: 10, color: colors.textMuted, fontFamily: "Cairo_400Regular", textAlign: "right" },
+   metaCardValue: { fontSize: 12, color: colors.textPrimary, fontFamily: "Cairo_700Bold", textAlign: "right" },
+   metaBadge: { alignSelf: "flex-end", backgroundColor: colors.accentSurface, borderRadius: 8, paddingHorizontal: 8, paddingVertical: 2, maxWidth: "100%" },
   metaBadgeText: { fontSize: 10, fontFamily: "Cairo_700Bold", color: colors.accent },
   trailerBtn: { height: 180, borderRadius: 16, overflow: "hidden", position: "relative", backgroundColor: "#111" },
   trailerImg: { width: "100%", height: "100%", resizeMode: "cover" },

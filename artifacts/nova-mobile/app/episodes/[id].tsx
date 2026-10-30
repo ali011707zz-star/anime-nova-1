@@ -390,6 +390,7 @@ export default function EpisodeListScreen() {
   const [episodeCatalogTotal, setEpisodeCatalogTotal] = useState(0);
   const [episodeTitlesAr, setEpisodeTitlesAr] = useState<Record<number, string>>({});
   const [search, setSearch] = useState("");
+  const [rangeStart, setRangeStart] = useState<number | null>(null);
   const [watched, setWatched] = useState<Set<number>>(new Set());
   const [commentCounts, setCommentCounts] = useState<Record<number, number>>({});
   const episodeListRef = useRef<FlatList<number>>(null);
@@ -420,7 +421,7 @@ export default function EpisodeListScreen() {
     setAnime(null);
     setSeasons([]);
     setSelectedSeasonId("");
-    setEpData([]); setEpisodeCatalogTotal(0); setSearch("");
+    setEpData([]); setEpisodeCatalogTotal(0); setSearch(""); setRangeStart(null);
     setEpisodeTitlesAr({});
 
     const base = getBaseUrl();
@@ -592,6 +593,7 @@ export default function EpisodeListScreen() {
     setEpisodeCatalogTotal(0);
     setEpisodeTitlesAr({});
     setSearch("");
+    setRangeStart(null);
     episodePagesFetchedRef.current.clear();
     for (const controller of episodePageControllersRef.current.values()) controller.abort();
     episodePageControllersRef.current.clear();
@@ -683,16 +685,31 @@ export default function EpisodeListScreen() {
     return Math.max(0, Number(selectedAnime.episodes || 0), episodeCatalogTotal);
   }, [selectedAnime, episodeCatalogTotal]);
 
+  const rangeOptions = useMemo(() => {
+    if (total <= 0) return [];
+    const options: Array<{ start: number | null; end: number; label: string }> = [
+      { start: null, end: total, label: `الكل (${total})` },
+    ];
+    for (let start = 1; start <= total; start += 12) {
+      options.push({ start, end: Math.min(total, start + 11), label: `${start} - ${Math.min(total, start + 11)}` });
+    }
+    return options;
+  }, [total]);
+
   const allEps = useMemo(() => Array.from({ length: total }, (_, i) => i + 1), [total]);
   const watchedCount = useMemo(() => [...watched].filter(n => n >= 1 && n <= total).length, [watched, total]);
+  const continueEpisode = watchedCount > 0 ? Math.min(total, watchedCount + 1) : 1;
   const pct = total > 0 ? Math.round((watchedCount / total) * 100) : 0;
 
   const isSearching = search.trim().length > 0;
   const filtered = useMemo(() => {
     const ordered = sortOrder === "asc" ? allEps : [...allEps].reverse();
-    if (!isSearching) return ordered;
-    return ordered.filter(n => n.toString().includes(search.trim()));
-  }, [allEps, isSearching, search, sortOrder]);
+    const inRange = rangeStart === null
+      ? ordered
+      : ordered.filter(n => n >= rangeStart && n <= Math.min(total, rangeStart + 11));
+    if (!isSearching) return inRange;
+    return inRange.filter(n => n.toString().includes(search.trim()));
+  }, [allEps, isSearching, rangeStart, search, sortOrder, total]);
 
   const displayedEps = useMemo(() => {
     /*
@@ -904,6 +921,7 @@ export default function EpisodeListScreen() {
                     onPress={() => {
                       setSelectedSeasonId(String(season?.id));
                       setSearch("");
+                      setRangeStart(null);
                       episodeListRef.current?.scrollToOffset({ offset: 0, animated: false });
                     }}
                     focusable={tvMode}
@@ -964,24 +982,95 @@ export default function EpisodeListScreen() {
             </Text>
           </Pressable>
         </View>
-        {/* Search */}
-        <View style={[ep_s.searchBar, tvMode && ep_s.tvSearchBar, { backgroundColor: colors.input, borderColor: colors.border }]}>
-           <Ionicons name="search" size={tvMode ? 24 : 15} color={colors.textMuted} />
-          <TextInput
-            value={search}
-            onChangeText={setSearch}
-            placeholder="اذهب لحلقة..."
-            placeholderTextColor={colors.textMuted}
-            keyboardType="number-pad"
-            style={[ep_s.searchInput, tvMode && ep_s.tvText, { color: colors.textPrimary }]}
-          />
-          {search ? (
-             <Pressable onPress={() => setSearch("")} focusable={tvMode}
-               style={({ focused }) => [tvMode && tvFocusStyle(focused)]}>
-              <Ionicons name="close" size={16} color={colors.textMuted} />
+        {/* Search and continue watching */}
+        <View style={[ep_s.episodeQuickRow, tvMode && ep_s.tvEpisodeQuickRow]}>
+          <View style={[ep_s.searchBar, ep_s.quickSearchBar, tvMode && ep_s.tvSearchBar, { backgroundColor: colors.input, borderColor: colors.border }]}>
+            <Ionicons name="search" size={tvMode ? 24 : 15} color={colors.textMuted} />
+            <TextInput
+              value={search}
+              onChangeText={value => {
+                setSearch(value);
+                if (value.trim()) {
+                  setRangeStart(null);
+                  episodeListRef.current?.scrollToOffset({ offset: 0, animated: false });
+                }
+              }}
+              placeholder="اذهب لحلقة..."
+              placeholderTextColor={colors.textMuted}
+              keyboardType="number-pad"
+              style={[ep_s.searchInput, tvMode && ep_s.tvText, { color: colors.textPrimary }]}
+            />
+            {search ? (
+              <Pressable onPress={() => setSearch("")} focusable={tvMode}
+                style={({ focused }) => [tvMode && tvFocusStyle(focused)]}>
+                <Ionicons name="close" size={16} color={colors.textMuted} />
+              </Pressable>
+            ) : null}
+          </View>
+          {total > 0 ? (
+            <Pressable
+              onPress={() => watchEp(continueEpisode)}
+              focusable={tvMode}
+              hasTVPreferredFocus={tvMode && ready && shouldFocusContinue}
+              onFocus={() => { if (tvMode) rememberFocus("continue"); }}
+              testID="anime-continue-watching"
+              accessibilityRole="button"
+              accessibilityLabel={watchedCount > 0 ? `متابعة من الحلقة ${continueEpisode}` : "مشاهدة من البداية"}
+              style={({ focused, pressed }) => [
+                ep_s.quickWatchBtn,
+                tvMode && ep_s.tvQuickWatchBtn,
+                tvMode && tvFocusStyle(focused),
+                pressed && { opacity: 0.84 },
+              ]}>
+              <Ionicons name="play" size={tvMode ? 24 : 13} color={colors.accent} />
+              <Text style={[ep_s.quickWatchBtnText, tvMode && ep_s.tvQuickWatchBtnText]} numberOfLines={1}>
+                {watchedCount > 0 ? `متابعة ح ${continueEpisode}` : "مشاهدة من البداية"}
+              </Text>
             </Pressable>
           ) : null}
         </View>
+        {total > 12 ? (
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={ep_s.rangeChips}
+            style={ep_s.rangeControls}
+            accessibilityLabel="تصفية نطاق الحلقات"
+          >
+            {rangeOptions.map(option => {
+              const isActive = rangeStart === option.start;
+              return (
+                <Pressable
+                  key={option.start === null ? "all" : option.start}
+                  onPress={() => {
+                    setSearch("");
+                    setRangeStart(option.start);
+                    episodeListRef.current?.scrollToOffset({ offset: 0, animated: false });
+                  }}
+                  focusable={tvMode}
+                  accessibilityRole="button"
+                  accessibilityLabel={option.start === null
+                    ? `كل الحلقات، ${total}`
+                    : `الحلقات من ${option.start} إلى ${option.end}`}
+                  accessibilityState={{ selected: isActive }}
+                  style={({ focused, pressed }) => [
+                    ep_s.rangeChip,
+                    isActive && ep_s.rangeChipActive,
+                    tvMode && ep_s.tvRangeChip,
+                    tvMode && tvFocusStyle(focused),
+                    pressed && { opacity: 0.84 },
+                  ]}
+                >
+                  <Text style={[
+                    ep_s.rangeChipText,
+                    isActive && ep_s.rangeChipTextActive,
+                    tvMode && ep_s.tvRangeChipText,
+                  ]}>{option.label}</Text>
+                </Pressable>
+              );
+            })}
+          </ScrollView>
+        ) : null}
       </View>
 
       {/* ── Episode list ── */}
@@ -1013,22 +1102,6 @@ export default function EpisodeListScreen() {
           }}
           columnWrapperStyle={undefined}
           contentContainerStyle={[{ paddingBottom: 100 }, tvMode && ep_s.tvListContent]}
-          ListHeaderComponent={
-            <Pressable
-              onPress={() => watchEp(
-                isSearching
-                  ? (displayedEps[0] || 1)
-                  : (watchedCount > 0 ? Math.min(total, watchedCount + 1) : 1),
-              )}
-              hasTVPreferredFocus={tvMode && ready && shouldFocusContinue}
-              onFocus={() => { if (tvMode) rememberFocus("continue"); }}
-              style={({ focused }) => [ep_s.watchFromBtn, tvMode && ep_s.tvWatchFromBtn, tvMode && tvFocusStyle(focused)]}>
-              <Ionicons name="play" size={tvMode ? 24 : 14} color="#8B5CF6" />
-              <Text style={[ep_s.watchFromBtnText, tvMode && ep_s.tvWatchFromBtnText]}>
-                {watchedCount > 0 ? `متابعة من حيث توقفت (${watchedCount + 1})` : "مشاهدة من البداية"}
-              </Text>
-            </Pressable>
-          }
           renderItem={({ item: n, index }) => (
             <EpisodeRow
               n={n}
@@ -1105,14 +1178,22 @@ return StyleSheet.create({
   progressTrack: { flex: 1, height: 7, backgroundColor: colors.surfaceElevated, borderRadius: 4, overflow: "hidden" },
   progressFill: { height: "100%", backgroundColor: colors.accent, borderRadius: 3 },
   pctText: { fontSize: 9, color: colors.textMuted, fontFamily: "Cairo_700Bold" },
+  episodeQuickRow: { flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 6 },
+  quickWatchBtn: { minHeight: 40, maxWidth: 138, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 5, paddingHorizontal: 10, borderRadius: 12, borderWidth: 1, borderColor: colors.accentBorder, backgroundColor: colors.accentSurface },
+  quickWatchBtnText: { maxWidth: 100, fontSize: 9, fontFamily: "Cairo_700Bold", color: colors.accent },
   searchBar: { flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: colors.input, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 9, borderWidth: 1, borderColor: colors.border, marginBottom: 6 },
+  quickSearchBar: { flex: 1, minWidth: 0, marginBottom: 0 },
   searchInput: { flex: 1, color: colors.textPrimary, fontSize: 13, fontFamily: "Cairo_400Regular", textAlign: "right" },
+  rangeControls: { marginBottom: 6 },
+  rangeChips: { gap: 7, paddingHorizontal: 1, paddingBottom: 2 },
+  rangeChip: { minHeight: 31, alignItems: "center", justifyContent: "center", paddingHorizontal: 12, borderRadius: 18, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface },
+  rangeChipActive: { backgroundColor: colors.accent, borderColor: colors.accent },
+  rangeChipText: { fontSize: 9, fontFamily: "Cairo_700Bold", color: colors.textSecondary },
+  rangeChipTextActive: { color: colors.primaryForeground },
   pageNav: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
   pageRangeText: { fontSize: 10, color: colors.textMuted, fontFamily: "Cairo_700Bold" },
   pageBtn: { width: 28, height: 28, borderRadius: 8, backgroundColor: colors.input, borderWidth: 1, borderColor: colors.border, alignItems: "center", justifyContent: "center" },
   pageNumText: { fontSize: 11, color: colors.textSecondary, fontFamily: "Cairo_700Bold", paddingHorizontal: 4 },
-  watchFromBtn: { flexDirection: "row", alignItems: "center", gap: 8, margin: 12, padding: 12, borderRadius: 14, borderWidth: 1, borderColor: colors.accentBorder, backgroundColor: colors.accentSurface },
-  watchFromBtnText: { fontSize: 12, fontFamily: "Cairo_700Bold", color: colors.accent },
   row: { flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 12, paddingVertical: 10 },
   episodeMain: { flex: 1, flexDirection: "row", alignItems: "center", gap: 10 },
   rowWatched: { backgroundColor: colors.accentSurface },
@@ -1145,6 +1226,11 @@ return StyleSheet.create({
   tvContainer: { paddingHorizontal: 28 },
   tvFocusGuide: { flex: 1 },
   tvControls: { paddingHorizontal: 28, paddingTop: 12, paddingBottom: 10 },
+  tvEpisodeQuickRow: { gap: 12, marginBottom: 10 },
+  tvQuickWatchBtn: { minHeight: 48, maxWidth: 220, paddingHorizontal: 16, borderRadius: 14 },
+  tvQuickWatchBtnText: { maxWidth: 180, fontSize: 13, lineHeight: 20 },
+  tvRangeChip: { minHeight: 42, paddingHorizontal: 16, borderRadius: 20 },
+  tvRangeChipText: { fontSize: 12, lineHeight: 18 },
   tvSeasonSectionTitle: { fontSize: 16, lineHeight: 24 },
   tvSeasonTab: { minWidth: 150, paddingHorizontal: 15, paddingVertical: 9, borderRadius: 14 },
   tvSeasonTabTitle: { fontSize: 14, lineHeight: 21 },
@@ -1174,7 +1260,5 @@ return StyleSheet.create({
   tvEpTitle: { fontSize: 13, lineHeight: 20 },
   tvEpOriginal: { fontSize: 11, lineHeight: 16 },
   tvPageBtn: { width: 44, height: 44, borderRadius: 12 },
-  tvWatchFromBtn: { marginHorizontal: 12, paddingVertical: 12, minHeight: 58, borderRadius: 16 },
-  tvWatchFromBtnText: { fontSize: 15, lineHeight: 23 },
 });
 }
