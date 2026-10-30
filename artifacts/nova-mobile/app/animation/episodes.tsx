@@ -213,7 +213,7 @@ export default function AnimationEpisodesScreen() {
           )}
           <Pressable onPress={() => router.canGoBack() ? router.back() : router.replace("/(tabs)/animations")} focusable={tvMode}
              style={({ focused }) => [s.backBtn, tvMode && s.tvBackBtn, tvMode && tvFocusStyle(focused)]}>
-            <Ionicons name="arrow-back" size={tvMode ? 30 : 18} color="rgba(255,255,255,0.7)" />
+            <Ionicons name="arrow-back" size={tvMode ? 30 : 18} color="rgba(255,255,255,0.7)" style={{ transform: [{ scaleX: -1 }] }} />
           </Pressable>
         </View>
 

@@ -186,7 +186,7 @@ export default function ProfileScreen() {
             tvMode && tvFocusStyle(focused),
           ]}
         >
-          <Ionicons name="arrow-back" size={22} color={colors.text} />
+          <Ionicons name="arrow-back" size={22} color={colors.text} style={{ transform: [{ scaleX: -1 }] }} />
         </Pressable>
         <ActivityIndicator color={colors.primary} size="large" />
       </View>
@@ -205,7 +205,7 @@ export default function ProfileScreen() {
             { backgroundColor: colors.input, borderColor: colors.border, borderWidth: 1 },
             tvMode && tvFocusStyle(focused),
           ]}>
-          <Ionicons name="arrow-back" size={22} color={colors.text} />
+          <Ionicons name="arrow-back" size={22} color={colors.text} style={{ transform: [{ scaleX: -1 }] }} />
         </Pressable>
       </View>
 

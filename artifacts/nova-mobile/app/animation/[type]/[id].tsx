@@ -169,7 +169,7 @@ export default function AnimationDetailScreen() {
             tvMode && tvFocusStyle(focused),
           ]}
         >
-          <Ionicons name="arrow-back" size={20} color="#fff" />
+          <Ionicons name="arrow-back" size={20} color="#fff" style={{ transform: [{ scaleX: -1 }] }} />
         </Pressable>
         <ActivityIndicator color="#8B5CF6" size="large" />
         <Text style={s.loadingText}>جاري تحميل التفاصيل…</Text>
@@ -191,7 +191,7 @@ export default function AnimationDetailScreen() {
             tvMode && tvFocusStyle(focused),
           ]}
         >
-          <Ionicons name="arrow-back" size={20} color="#fff" />
+          <Ionicons name="arrow-back" size={20} color="#fff" style={{ transform: [{ scaleX: -1 }] }} />
         </Pressable>
         <Ionicons name="film" size={48} color="rgba(139,92,246,0.4)" />
         <Text style={s.emptyText}>لم يتم العثور على البيانات</Text>
@@ -236,7 +236,7 @@ export default function AnimationDetailScreen() {
         <View style={[s.heroTopRow, { paddingTop: insets.top + 8 }]}>
            <Pressable onPress={() => router.canGoBack() ? router.back() : router.replace("/(tabs)" as any)} focusable={tvMode}
              style={({ focused }) => [s.backCircle, tvMode && tvFocusStyle(focused)]}>
-            <Ionicons name="arrow-back" size={20} color="#fff" />
+            <Ionicons name="arrow-back" size={20} color="#fff" style={{ transform: [{ scaleX: -1 }] }} />
           </Pressable>
           {score > 0 && (
             <View style={s.scorePill}>

@@ -19,7 +19,7 @@ export default function NotFoundScreen() {
           accessibilityLabel="رجوع"
           style={styles.backButton}
         >
-          <Ionicons name="arrow-back" size={22} color={colors.foreground} />
+          <Ionicons name="arrow-back" size={22} color={colors.foreground} style={{ transform: [{ scaleX: -1 }] }} />
         </Pressable>
         <Text style={[styles.title, { color: colors.foreground }]}>
           This screen doesn&apos;t exist.

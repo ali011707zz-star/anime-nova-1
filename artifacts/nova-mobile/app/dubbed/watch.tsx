@@ -287,7 +287,7 @@ export default function DubbedWatchScreen() {
           </View>
           <Pressable onPress={handleBack} focusable={tvMode}
              style={({ focused }) => [styles.backBtn, tvMode && tvFocusStyle(focused)]}>
-            <Ionicons name="arrow-back" size={20} color={colors.textSecondary} />
+            <Ionicons name="arrow-back" size={20} color={colors.textSecondary} style={{ transform: [{ scaleX: -1 }] }} />
           </Pressable>
         </View>
         <View style={styles.center}>
@@ -310,7 +310,7 @@ export default function DubbedWatchScreen() {
           </View>
           <Pressable onPress={handleBack} focusable={tvMode}
              style={({ focused }) => [styles.backBtn, tvMode && tvFocusStyle(focused)]}>
-            <Ionicons name="arrow-back" size={20} color={colors.textSecondary} />
+            <Ionicons name="arrow-back" size={20} color={colors.textSecondary} style={{ transform: [{ scaleX: -1 }] }} />
           </Pressable>
         </View>
         <View style={styles.center}>

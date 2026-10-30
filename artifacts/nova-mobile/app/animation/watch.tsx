@@ -777,7 +777,7 @@ export default function AnimationWatchScreen() {
 
         {/* Back button */}
         <Pressable onPress={handleBack} style={[w.loadBackBtn, { top: topPad + 4 }]}>
-          <Ionicons name="chevron-back" size={20} color="rgba(255,255,255,0.65)" />
+          <Ionicons name="chevron-back" size={20} color="rgba(255,255,255,0.65)" style={{ transform: [{ scaleX: -1 }] }} />
         </Pressable>
 
         {/* Center content */}
@@ -928,7 +928,7 @@ export default function AnimationWatchScreen() {
     return (
       <View style={[w.container, { alignItems: "center", justifyContent: "center", gap: 16 }]}>
         <Pressable onPress={() => setScreen("picker")} style={[w.videoBackBtn, { position: "absolute", top: topPad + 4, left: 12 }]}>
-          <Ionicons name="arrow-back" size={18} color="#fff" />
+          <Ionicons name="arrow-back" size={18} color="#fff" style={{ transform: [{ scaleX: -1 }] }} />
         </Pressable>
         <View style={{ width: 72, height: 72, borderRadius: 36, backgroundColor: "rgba(139,92,246,0.15)", alignItems: "center", justifyContent: "center" }}>
           <Ionicons name="play-circle-outline" size={42} color="rgba(139,92,246,0.8)" />
@@ -952,7 +952,7 @@ export default function AnimationWatchScreen() {
     return (
       <View style={{ flex: 1, backgroundColor: "#07070d", alignItems: "center", justifyContent: "center", gap: 14 }}>
         <Pressable onPress={() => setScreen("picker")} style={[w.videoBackBtn, { position: "absolute", top: topPad + 4, left: 12 }]}>
-          <Ionicons name="arrow-back" size={18} color="#fff" />
+          <Ionicons name="arrow-back" size={18} color="#fff" style={{ transform: [{ scaleX: -1 }] }} />
         </Pressable>
         <SpinRing />
         <Text style={{ fontSize: 13, fontFamily: "Cairo_400Regular", color: "rgba(255,255,255,0.45)", textAlign: "center" }}>
@@ -976,7 +976,7 @@ export default function AnimationWatchScreen() {
       return (
         <View style={[w.container, { alignItems: "center", justifyContent: "center", gap: 16 }]}>
           <Pressable onPress={() => setScreen("picker")} style={[w.videoBackBtn, { position: "absolute", top: topPad + 4, left: 12 }]}>
-            <Ionicons name="arrow-back" size={18} color="#fff" />
+            <Ionicons name="arrow-back" size={18} color="#fff" style={{ transform: [{ scaleX: -1 }] }} />
           </Pressable>
           <View style={{ width: 72, height: 72, borderRadius: 36, backgroundColor: "rgba(139,92,246,0.15)", alignItems: "center", justifyContent: "center" }}>
             <Ionicons name="tv-outline" size={36} color="rgba(139,92,246,0.7)" />
@@ -999,7 +999,7 @@ export default function AnimationWatchScreen() {
     return (
       <View style={[w.container, { alignItems: "center", justifyContent: "center", gap: 16 }]}>
         <Pressable onPress={() => setScreen("picker")} style={[w.videoBackBtn, { position: "absolute", top: topPad + 4, left: 12 }]}>
-          <Ionicons name="arrow-back" size={18} color="#fff" />
+          <Ionicons name="arrow-back" size={18} color="#fff" style={{ transform: [{ scaleX: -1 }] }} />
         </Pressable>
         <View style={{ width: 72, height: 72, borderRadius: 36, backgroundColor: "rgba(139,92,246,0.15)", alignItems: "center", justifyContent: "center" }}>
           <Ionicons name="tv-outline" size={36} color="rgba(139,92,246,0.7)" />
@@ -1050,7 +1050,7 @@ export default function AnimationWatchScreen() {
         </View>
         {/* Right: back button (always same position) */}
         <Pressable onPress={handleBack} style={w.headerBack}>
-          <Ionicons name="arrow-back" size={17} color="rgba(255,255,255,0.75)" />
+          <Ionicons name="arrow-back" size={17} color="rgba(255,255,255,0.75)" style={{ transform: [{ scaleX: -1 }] }} />
         </Pressable>
       </View>
 

@@ -6,7 +6,7 @@ import {
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { useRouter } from "expo-router";
+import { useLocalSearchParams, useRouter } from "expo-router";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as ImagePicker from "expo-image-picker";
 import { isTvDevice, tvFocusStyle, TvPressable as Pressable } from "@/utils/tv";
@@ -283,6 +283,8 @@ export default function SearchScreen() {
   const insets = useSafeAreaInsets();
   const { width, height } = useWindowDimensions();
   const router = useRouter();
+  const { q: routeQuery } = useLocalSearchParams<{ q?: string | string[] }>();
+  const initialQuery = typeof routeQuery === "string" ? routeQuery : "";
   const topPad = Platform.OS === "web" ? 0 : insets.top;
   // Four TV columns remain readable while avoiding an oversized decode batch
   // on lower-powered Android TV hardware.
@@ -290,7 +292,7 @@ export default function SearchScreen() {
   const gridColumns = getGridColumnCount(width, height);
   const gridWidth = Math.min(Math.max(width - 24, 0), tvMode ? 1100 : 900);
 
-  const [query, setQuery]         = useState("");
+  const [query, setQuery]         = useState(initialQuery);
   const [results, setResults]     = useState<AnimeResult[]>([]);
   const [loading, setLoading]     = useState(false);
   const [sort, setSort]           = useState("POPULARITY_DESC");
@@ -319,6 +321,10 @@ export default function SearchScreen() {
     AsyncStorage.getItem("searchHistory")
       .then(v => { if (v) setHistory(JSON.parse(v)); });
   }, []);
+
+  useEffect(() => {
+    setQuery(initialQuery);
+  }, [initialQuery]);
 
   const searchAbortRef = useRef<AbortController | null>(null);
 

@@ -363,32 +363,35 @@ export default function HomeScreen() {
           >
             <Ionicons name="menu" size={24} color={colors.text} />
           </Pressable>
-          <View style={[styles.headerSearch, { backgroundColor: colors.input, borderColor: colors.border }]}>
-            <Ionicons name="search" size={18} color={colors.textMuted} />
-            <TextInput
-              value={headerSearch}
-              onChangeText={setHeaderSearch}
-              onSubmitEditing={() => {
-                const q = headerSearch.trim();
-                router.push(
-                  q
-                    ? ({ pathname: "/(tabs)/search", params: { q } } as any)
-                    : ("/(tabs)/search" as any),
-                );
-                setHeaderSearch("");
-              }}
-              placeholder="بحث..."
-              placeholderTextColor={colors.textMuted}
-              returnKeyType="search"
-              accessibilityLabel="البحث عن أنمي"
-              style={[styles.headerSearchInput, { color: colors.text }]}
-            />
-          </View>
-          <View style={styles.logoRow}>
-            <View style={[styles.logoAccent, { backgroundColor: colors.primary }]} />
-            <Text style={[styles.logoText, { color: colors.text }]}>
-              ANIME <Text style={{ color: colors.primary }}>NOVA</Text>
-            </Text>
+          <View style={styles.headerSpacer} />
+          <View style={styles.headerBrandGroup}>
+            <View style={[styles.headerSearch, { backgroundColor: colors.input, borderColor: colors.border }]}>
+              <Ionicons name="search" size={15} color={colors.textMuted} />
+              <TextInput
+                value={headerSearch}
+                onChangeText={setHeaderSearch}
+                onSubmitEditing={() => {
+                  const q = headerSearch.trim();
+                  router.push(
+                    q
+                      ? ({ pathname: "/(tabs)/search", params: { q } } as any)
+                      : ("/(tabs)/search" as any),
+                  );
+                  setHeaderSearch("");
+                }}
+                placeholder="بحث..."
+                placeholderTextColor={colors.textMuted}
+                returnKeyType="search"
+                accessibilityLabel="البحث عن أنمي"
+                style={[styles.headerSearchInput, { color: colors.text }]}
+              />
+            </View>
+            <View style={styles.logoRow}>
+              <View style={[styles.logoAccent, { backgroundColor: colors.primary }]} />
+              <Text style={[styles.logoText, { color: colors.text }]}>
+                ANIME <Text style={{ color: colors.primary }}>NOVA</Text>
+              </Text>
+            </View>
           </View>
         </View>
 
@@ -830,6 +833,8 @@ const styles = StyleSheet.create({
     flexDirection: "row", direction: "ltr", alignItems: "center",
     gap: 10, paddingHorizontal: 16, paddingBottom: 8,
   },
+  headerSpacer: { flex: 1, minWidth: 0 },
+  headerBrandGroup: { flexDirection: "row", direction: "ltr", alignItems: "center", gap: 10, flexShrink: 1, minWidth: 0 },
   logoRow: { flexDirection: "row", direction: "ltr", alignItems: "center", gap: 7, flexShrink: 0 },
   logoAccent: { width: 3, height: 26, borderRadius: 2 },
   logoText: { fontSize: 16, letterSpacing: 0.7, fontFamily: "Cairo_800ExtraBold" },
@@ -838,7 +843,7 @@ const styles = StyleSheet.create({
     alignItems: "center", justifyContent: "center", flexShrink: 0,
   },
   headerSearch: {
-    height: 44, flex: 1, minWidth: 88, maxWidth: 220,
+    height: 44, width: 128, minWidth: 88, maxWidth: 160, flexShrink: 1,
     flexDirection: "row", direction: "rtl", alignItems: "center", gap: 8,
     borderWidth: 1, borderRadius: 15, paddingHorizontal: 12,
   },

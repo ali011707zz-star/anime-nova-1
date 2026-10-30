@@ -253,7 +253,7 @@ export default function AnimationsScreen() {
             onPress={() => (router.canGoBack() ? router.back() : router.push("/"))}
             style={[s.iconBtn, tvMode && s.tvIconBtn]}
           >
-            <Ionicons name="arrow-back" size={20} color={colors.textSecondary} />
+            <Ionicons name="arrow-back" size={20} color={colors.textSecondary} style={{ transform: [{ scaleX: -1 }] }} />
           </Pressable>
         </View>
 

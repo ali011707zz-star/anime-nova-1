@@ -153,7 +153,7 @@ export default function AwDubbedDetailScreen() {
              { backgroundColor: colors.input, borderColor: colors.border },
              tvMode && tvFocusStyle(focused),
            ]}>
-           <Ionicons name="arrow-back" size={20} color={colors.textSecondary} />
+           <Ionicons name="arrow-back" size={20} color={colors.textSecondary} style={{ transform: [{ scaleX: -1 }] }} />
         </Pressable>
       </View>
 

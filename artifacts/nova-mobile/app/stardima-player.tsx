@@ -449,7 +449,7 @@ export default function StardimaPlayerScreen() {
           focusable={tvMode}
           style={({ focused }) => [styles.back, tvMode && focused && tvFocusStyle(true)]}
         >
-          <Ionicons name="arrow-back" size={21} color={colors.textPrimary} />
+          <Ionicons name="arrow-back" size={21} color={colors.textPrimary} style={{ transform: [{ scaleX: -1 }] }} />
         </Pressable>
       </View>
 
@@ -488,7 +488,7 @@ export default function StardimaPlayerScreen() {
             style={({ focused }) => [styles.action, tvMode && focused && tvFocusStyle(true)]}
           >
             <Text style={styles.actionText}>اختيار خادم آخر</Text>
-            <Ionicons name="arrow-back" size={16} color={colors.accent} />
+            <Ionicons name="arrow-back" size={16} color={colors.accent} style={{ transform: [{ scaleX: -1 }] }} />
           </Pressable>
         </View>
       ) : null}

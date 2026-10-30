@@ -420,7 +420,7 @@ export default function StardimaTitleScreen() {
           accessibilityLabel="رجوع"
           style={({ focused }) => [styles.back, tvMode && focused && tvFocusStyle(true)]}
         >
-          <Ionicons name="arrow-back" size={21} color={colors.textPrimary} />
+          <Ionicons name="arrow-back" size={21} color={colors.textPrimary} style={{ transform: [{ scaleX: -1 }] }} />
         </Pressable>
       </View>
 

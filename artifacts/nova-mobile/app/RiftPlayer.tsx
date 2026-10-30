@@ -1636,7 +1636,7 @@ export function RiftPlayer({
             </Pressable>
           )}
           <Pressable onPress={onBack} style={s.errorBtnBack}>
-            <Ionicons name="arrow-back" size={14} color="rgba(255,255,255,0.6)" />
+            <Ionicons name="arrow-back" size={14} color="rgba(255,255,255,0.6)" style={{ transform: [{ scaleX: -1 }] }} />
             <Text style={s.errorBtnBackText}>العودة</Text>
           </Pressable>
         </View>
@@ -1782,7 +1782,7 @@ export function RiftPlayer({
 
           <View style={s.endBtnRow}>
             <Pressable onPress={() => { setIsEnded(false); onBack(); }} style={s.endBackBtn}>
-              <Ionicons name="arrow-back" size={16} color="rgba(255,255,255,0.65)" />
+              <Ionicons name="arrow-back" size={16} color="rgba(255,255,255,0.65)" style={{ transform: [{ scaleX: -1 }] }} />
               <Text style={[s.endBtnLabel, { color: "rgba(255,255,255,0.65)" }]}>رجوع</Text>
             </Pressable>
             <Pressable

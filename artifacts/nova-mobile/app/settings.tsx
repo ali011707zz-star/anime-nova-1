@@ -1658,7 +1658,7 @@ export default function SettingsScreen() {
           accessibilityLabel="رجوع"
           style={[ts.headerBackBtn, { backgroundColor: colors.surfaceElevated, borderColor: colors.border }]}
         >
-          <Ionicons name="arrow-back" size={16} color={colors.mutedForeground} />
+          <Ionicons name="arrow-back" size={16} color={colors.mutedForeground} style={{ transform: [{ scaleX: -1 }] }} />
         </Pressable>
       </View>
 

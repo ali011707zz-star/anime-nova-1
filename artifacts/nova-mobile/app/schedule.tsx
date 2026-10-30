@@ -65,7 +65,7 @@ export default function ScheduleScreen() {
         <View style={{ width: 30 }} />
         <Text style={[styles.title, { color: colors.text }]}>جدول البث</Text>
         <Pressable onPress={() => router.canGoBack() ? router.back() : router.replace("/(tabs)" as any)} focusable={tvMode} style={({ focused }) => [styles.backBtn, tvMode && tvFocusStyle(focused)]}>
-          <Ionicons name="arrow-back" size={22} color={colors.text} />
+          <Ionicons name="arrow-back" size={22} color={colors.text} style={{ transform: [{ scaleX: -1 }] }} />
         </Pressable>
       </View>
 

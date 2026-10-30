@@ -72,7 +72,7 @@ export function CatalogPageHeader({ title, onBack }: HeaderProps) {
           focusable={tvMode}
           style={[styles.backButton, { top: topInset + 6, backgroundColor: colors.surface, borderColor: colors.border }, tvMode && tvFocusStyle(focusedAction === "back")]}
         >
-          <Ionicons name="arrow-back" size={21} color={colors.textPrimary} />
+          <Ionicons name="arrow-back" size={21} color={colors.textPrimary} style={{ transform: [{ scaleX: -1 }] }} />
         </Pressable>
       </View>
       <DrawerMenu visible={drawerVisible} onClose={() => setDrawerVisible(false)} />

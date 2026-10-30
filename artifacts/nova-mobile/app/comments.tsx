@@ -243,7 +243,7 @@ export default function CommentsPage() {
         </View>
         <Pressable onPress={() => router.canGoBack() ? router.back() : router.replace("/(tabs)" as any)} focusable={tvMode}
           style={({ focused }) => [s.backBtn, tvMode && tvFocusStyle(focused)]}>
-          <Ionicons name="arrow-back" size={20} color={colors.textPrimary} />
+          <Ionicons name="arrow-back" size={20} color={colors.textPrimary} style={{ transform: [{ scaleX: -1 }] }} />
         </Pressable>
       </View>
 

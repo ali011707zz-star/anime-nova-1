@@ -617,7 +617,7 @@ export default function StarDimaCatalogScreen() {
           accessibilityLabel="رجوع"
           style={({ focused }) => [styles.backButton, tvMode && focused && tvFocusStyle(true)]}
         >
-          <Ionicons name="arrow-back" size={tvMode ? 28 : 21} color={colors.textPrimary} />
+          <Ionicons name="arrow-back" size={tvMode ? 28 : 21} color={colors.textPrimary} style={{ transform: [{ scaleX: -1 }] }} />
         </Pressable>
       </View>
 

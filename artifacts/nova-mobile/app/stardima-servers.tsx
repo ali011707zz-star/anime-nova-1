@@ -335,7 +335,7 @@ export default function StardimaServersScreen() {
           focusable={tvMode}
           style={({ focused }) => [styles.back, tvMode && focused && tvFocusStyle(true)]}
         >
-          <Ionicons name="arrow-back" size={21} color={colors.textPrimary} />
+          <Ionicons name="arrow-back" size={21} color={colors.textPrimary} style={{ transform: [{ scaleX: -1 }] }} />
         </TvPressable>
       </View>
 

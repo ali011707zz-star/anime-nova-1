@@ -203,7 +203,7 @@ export default function DubbedDetailScreen() {
       <View style={[styles.header, { borderBottomColor: colors.border }]}>
          <Pressable onPress={() => router.canGoBack() ? router.back() : router.replace("/(tabs)" as any)} focusable={tvMode}
            style={({ focused }) => [styles.backBtn, { backgroundColor: colors.input, borderColor: colors.border }, tvMode && tvFocusStyle(focused)]}>
-          <Ionicons name="arrow-back" size={20} color={colors.textSecondary} />
+          <Ionicons name="arrow-back" size={20} color={colors.textSecondary} style={{ transform: [{ scaleX: -1 }] }} />
         </Pressable>
         </View>
 

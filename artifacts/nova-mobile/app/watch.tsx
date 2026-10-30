@@ -2468,7 +2468,7 @@ export default function WatchScreen() {
         {coverUrl ? <Image source={{ uri: coverUrl }} style={[StyleSheet.absoluteFill, { opacity: 0.13 }]} blurRadius={Platform.OS === "ios" ? 28 : 10} resizeMode="cover" /> : null}
         <View pointerEvents="none" style={[StyleSheet.absoluteFill, { backgroundColor: colors.background, opacity: 0.92 }]} />
         <Pressable onPress={handleBack} focusable={tvMode} style={({ focused }) => [d.ldBackBtn, { top: topPad + 4 }, tvMode && tvFocusStyle(focused)]}>
-          <Ionicons name="arrow-back" size={20} color={colors.textPrimary} />
+          <Ionicons name="arrow-back" size={20} color={colors.textPrimary} style={{ transform: [{ scaleX: -1 }] }} />
         </Pressable>
         <View style={d.ldContent}>
           <Text style={d.ldPrayer}>اللهم صلِّ وسلِّم على نبينا محمد ﷺ</Text>
@@ -2534,7 +2534,7 @@ export default function WatchScreen() {
     return (
       <View style={{ flex: 1, backgroundColor: "#07070d", alignItems: "center", justifyContent: "center", gap: 14 }}>
         <Pressable onPress={handleBack} focusable={tvMode} style={({ focused }) => [d.playerBackBtn, { position: "absolute", top: topPad + 4, left: 12 }, tvMode && tvFocusStyle(focused)]}>
-          <Ionicons name="arrow-back" size={18} color="#fff" />
+          <Ionicons name="arrow-back" size={18} color="#fff" style={{ transform: [{ scaleX: -1 }] }} />
         </Pressable>
         <SpinRing />
         <Text style={{ fontSize: 13, fontFamily: "Cairo_400Regular", color: "rgba(255,255,255,0.45)", textAlign: "center" }}>
@@ -2559,7 +2559,7 @@ export default function WatchScreen() {
       return (
         <View style={{ flex: 1, backgroundColor: "#07070d", alignItems: "center", justifyContent: "center", gap: 16 }}>
           <Pressable onPress={handleBack} focusable={tvMode} style={({ focused }) => [d.playerBackBtn, { position: "absolute", top: topPad + 4, left: 12 }, tvMode && tvFocusStyle(focused)]}>
-            <Ionicons name="arrow-back" size={18} color="#fff" />
+            <Ionicons name="arrow-back" size={18} color="#fff" style={{ transform: [{ scaleX: -1 }] }} />
           </Pressable>
           <View style={{ width: 72, height: 72, borderRadius: 36, backgroundColor: "rgba(139,92,246,0.15)", alignItems: "center", justifyContent: "center" }}>
             <Ionicons name="tv-outline" size={36} color="rgba(139,92,246,0.7)" />
@@ -2576,7 +2576,7 @@ export default function WatchScreen() {
     return (
       <View style={{ flex: 1, backgroundColor: "#07070d", alignItems: "center", justifyContent: "center", gap: 16 }}>
         <Pressable onPress={handleBack} focusable={tvMode} style={({ focused }) => [d.playerBackBtn, { position: "absolute", top: topPad + 4, left: 12 }, tvMode && tvFocusStyle(focused)]}>
-          <Ionicons name="arrow-back" size={18} color="#fff" />
+          <Ionicons name="arrow-back" size={18} color="#fff" style={{ transform: [{ scaleX: -1 }] }} />
         </Pressable>
         <View style={{ width: 72, height: 72, borderRadius: 36, backgroundColor: "rgba(139,92,246,0.15)", alignItems: "center", justifyContent: "center" }}>
           <Ionicons name="tv-outline" size={36} color="rgba(139,92,246,0.7)" />
@@ -2628,7 +2628,7 @@ export default function WatchScreen() {
         </View>
         <Pressable onPress={handleBack} focusable={tvMode}
           style={({ focused }) => [d.headerBack, tvMode && d.tvHeaderActionBtn, tvMode && tvFocusStyle(focused)]}>
-          <Ionicons name="arrow-back" size={tvMode ? 25 : 17} color={colors.textPrimary} />
+          <Ionicons name="arrow-back" size={tvMode ? 25 : 17} color={colors.textPrimary} style={{ transform: [{ scaleX: -1 }] }} />
         </Pressable>
       </View>
 

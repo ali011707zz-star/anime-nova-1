@@ -147,7 +147,7 @@ export default function TvLinkScreen() {
           focusable={tvMode}
           style={[styles.backButton, { top: insets.top + 8 }]}
         >
-          <Ionicons name="arrow-back" size={22} color={colors.text} />
+          <Ionicons name="arrow-back" size={22} color={colors.text} style={{ transform: [{ scaleX: -1 }] }} />
         </Pressable>
         <ActivityIndicator color={colors.primary} />
       </View>
@@ -166,7 +166,7 @@ export default function TvLinkScreen() {
         focusable={tvMode}
         style={[styles.backButton, { top: insets.top + 8 }]}
       >
-        <Ionicons name="arrow-back" size={22} color={colors.text} />
+        <Ionicons name="arrow-back" size={22} color={colors.text} style={{ transform: [{ scaleX: -1 }] }} />
       </Pressable>
       <View style={styles.brand}>
         <View style={[styles.logo, { backgroundColor: colors.primary + "20", borderColor: colors.primary + "55" }]}>
