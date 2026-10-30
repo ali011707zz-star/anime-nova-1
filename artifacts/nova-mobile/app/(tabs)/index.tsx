@@ -5,7 +5,7 @@ import { FlatList, Image, useWindowDimensions } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import {
-  Platform, RefreshControl,
+  Platform, RefreshControl, TextInput,
   StyleSheet, Text, View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -101,6 +101,7 @@ export default function HomeScreen() {
   const { watchHistory } = useApp();
   const { width, height } = useWindowDimensions();
   const [showDrawer, setShowDrawer] = useState(false);
+  const [headerSearch, setHeaderSearch] = useState("");
   const isTvLayout = isTvDevice(width, height);
   const { ready } = useTvFocusMemory("home");
   const stardimaAnimation = useDubbedCatalogFeed("animation", "");
@@ -349,23 +350,45 @@ export default function HomeScreen() {
           <View>
         {/* Header */}
         <View style={[styles.header, { paddingTop: topPad + 6 }]}>
-          <View style={styles.logoRow}>
-            <LinearGradient colors={["#8B5CF6", "#6D28D9"]} style={styles.logoBadge}>
-              <Ionicons name="play" size={10} color="#fff" />
-            </LinearGradient>
-            <Text style={[styles.logoText, { color: colors.text }]}>
-              Anime <Text style={{ color: colors.primary }}>NOVA</Text>
-            </Text>
+          <Pressable
+            accessibilityLabel="فتح القائمة"
+            onPress={() => setShowDrawer(true)}
+            focusable={isTvLayout}
+            hitSlop={isTvLayout ? 10 : 6}
+            style={({ focused }) => [
+              styles.iconBtn,
+              { backgroundColor: colors.surface, borderColor: colors.border },
+              isTvLayout && tvFocusStyle(focused),
+            ]}
+          >
+            <Ionicons name="menu" size={24} color={colors.text} />
+          </Pressable>
+          <View style={[styles.headerSearch, { backgroundColor: colors.input, borderColor: colors.border }]}>
+            <Ionicons name="search" size={18} color={colors.textMuted} />
+            <TextInput
+              value={headerSearch}
+              onChangeText={setHeaderSearch}
+              onSubmitEditing={() => {
+                const q = headerSearch.trim();
+                router.push(
+                  q
+                    ? ({ pathname: "/(tabs)/search", params: { q } } as any)
+                    : ("/(tabs)/search" as any),
+                );
+                setHeaderSearch("");
+              }}
+              placeholder="بحث..."
+              placeholderTextColor={colors.textMuted}
+              returnKeyType="search"
+              accessibilityLabel="البحث عن أنمي"
+              style={[styles.headerSearchInput, { color: colors.text }]}
+            />
           </View>
-          <View style={styles.headerRight}>
-             <Pressable
-               onPress={() => setShowDrawer(true)}
-               focusable={isTvLayout}
-               hitSlop={isTvLayout ? 10 : 6}
-               style={({ focused }) => [styles.iconBtn, isTvLayout && tvFocusStyle(focused)]}
-             >
-              <Ionicons name="menu" size={26} color={colors.text} />
-            </Pressable>
+          <View style={styles.logoRow}>
+            <View style={[styles.logoAccent, { backgroundColor: colors.primary }]} />
+            <Text style={[styles.logoText, { color: colors.text }]}>
+              ANIME <Text style={{ color: colors.primary }}>NOVA</Text>
+            </Text>
           </View>
         </View>
 
@@ -804,18 +827,25 @@ export default function HomeScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1 },
   header: {
-    flexDirection: "row", alignItems: "center",
-    justifyContent: "space-between",
-    paddingHorizontal: 16, paddingBottom: 8,
+    flexDirection: "row", direction: "ltr", alignItems: "center",
+    gap: 10, paddingHorizontal: 16, paddingBottom: 8,
   },
-  logoRow: { flexDirection: "row", alignItems: "center", gap: 8 },
-  logoBadge: {
-    width: 22, height: 22, borderRadius: 6,
-    alignItems: "center", justifyContent: "center",
+  logoRow: { flexDirection: "row", direction: "ltr", alignItems: "center", gap: 7, flexShrink: 0 },
+  logoAccent: { width: 3, height: 26, borderRadius: 2 },
+  logoText: { fontSize: 16, letterSpacing: 0.7, fontFamily: "Cairo_800ExtraBold" },
+  iconBtn: {
+    width: 48, height: 48, borderRadius: 14, borderWidth: 1,
+    alignItems: "center", justifyContent: "center", flexShrink: 0,
   },
-  logoText: { fontSize: 15, fontFamily: "Cairo_800ExtraBold" },
-  headerRight: { flexDirection: "row", alignItems: "center", gap: 4 },
-  iconBtn: { padding: 6 },
+  headerSearch: {
+    height: 44, flex: 1, minWidth: 88, maxWidth: 220,
+    flexDirection: "row", direction: "rtl", alignItems: "center", gap: 8,
+    borderWidth: 1, borderRadius: 15, paddingHorizontal: 12,
+  },
+  headerSearchInput: {
+    flex: 1, minWidth: 0, paddingVertical: 0,
+    fontSize: 13, fontFamily: "Cairo_400Regular", textAlign: "right",
+  },
   sectionHeader: {
     flexDirection: "row-reverse", alignItems: "center",
     justifyContent: "space-between",
