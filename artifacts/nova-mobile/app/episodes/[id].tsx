@@ -776,6 +776,26 @@ export default function EpisodeListScreen() {
 
   return (
     <View style={[ep_s.container, tvMode && ep_s.tvContainer, { backgroundColor: colors.background, paddingTop: topPad }]}>
+      <View style={[ep_s.topBar, tvMode && ep_s.tvTopBar]}>
+        <Text style={[ep_s.topBarTitle, tvMode && ep_s.tvTopBarTitle]} numberOfLines={1}>
+          {extractArabicTitle(selectedAnime?.synonyms)
+            || selectedAnime?.title?.english
+            || selectedAnime?.title?.romaji
+            || (Array.isArray(title) ? title[0] : title)
+            || "الحلقات"}
+        </Text>
+        <Pressable
+          onPress={() => router.canGoBack() ? router.back() : router.replace("/(tabs)")}
+          focusable={tvMode}
+          hasTVPreferredFocus={tvMode && ready && (!preferredKey || preferredKey === "back")}
+          onFocus={() => { if (tvMode) rememberFocus("back"); }}
+          accessibilityRole="button"
+          accessibilityLabel="رجوع"
+          style={({ focused }) => [ep_s.topBarBack, tvMode && ep_s.tvTopBarBack, tvMode && tvFocusStyle(focused)]}
+        >
+          <Ionicons name="chevron-forward" size={tvMode ? 26 : 20} color={colors.textPrimary} />
+        </Pressable>
+      </View>
       {/* ── Hero Banner ── */}
       <View style={[ep_s.hero, tvMode && ep_s.tvHero]}>
         {(selectedAnime?.bannerImage || selectedAnime?.coverImage?.extraLarge || selectedAnime?.coverImage?.large) ? (
@@ -789,22 +809,20 @@ export default function EpisodeListScreen() {
           style={StyleSheet.absoluteFill}
         />
 
-        {/* Back */}
-        <Pressable
-          onPress={() => router.canGoBack() ? router.back() : router.replace("/(tabs)")}
-          focusable={tvMode}
-          style={({ focused }) => [ep_s.backBtn, { top: 12 }, tvMode && ep_s.tvBackBtn, tvMode && tvFocusStyle(focused)]}
-        >
-          <Ionicons name="chevron-back" size={tvMode ? 30 : 18} color="#fff" />
-        </Pressable>
-
         {/* Cover + info */}
         <View style={[ep_s.heroBottom, tvMode && ep_s.tvHeroBottom]}>
           {selectedAnime?.coverImage?.large ? (
             <Image source={{ uri: selectedAnime.coverImage.large }} style={[ep_s.heroCover, tvMode && ep_s.tvHeroCover]} />
           ) : null}
           <View style={[ep_s.heroInfo, tvMode && ep_s.tvHeroInfo]}>
-            <Text style={[ep_s.heroTitle, tvMode && ep_s.tvHeroTitle]} numberOfLines={1}>{selectedAnime?.title?.romaji}</Text>
+            <Text style={[ep_s.heroTitle, tvMode && ep_s.tvHeroTitle]} numberOfLines={1}>
+              {selectedAnime?.title?.english || selectedAnime?.title?.romaji}
+            </Text>
+            {extractArabicTitle(selectedAnime?.synonyms) ? (
+              <Text style={[ep_s.heroArabicTitle, tvMode && ep_s.tvHeroArabicTitle]} numberOfLines={1}>
+                {extractArabicTitle(selectedAnime?.synonyms)}
+              </Text>
+            ) : null}
             <View style={{ flexDirection: "row", gap: 8, marginTop: 4 }}>
               <Text style={[ep_s.heroBadge, tvMode && ep_s.tvHeroBadge]}>{total} حلقة</Text>
               {seasons.length > 1 && (
@@ -813,10 +831,16 @@ export default function EpisodeListScreen() {
                 </Text>
               )}
               {watchedCount > 0 && (
-          <Text style={[ep_s.heroBadge, tvMode && ep_s.tvHeroBadge, { color: "#34D399" }]}>👁 {watchedCount} مشاهدة</Text>
+                <View style={ep_s.heroMetric}>
+                  <Ionicons name="eye" size={tvMode ? 17 : 11} color={colors.success} />
+                  <Text style={[ep_s.heroBadge, tvMode && ep_s.tvHeroBadge, { color: colors.success }]}>{watchedCount} مشاهدة</Text>
+                </View>
               )}
               {selectedAnime?.averageScore ? (
-          <Text style={[ep_s.heroBadge, tvMode && ep_s.tvHeroBadge, { color: "#FBBF24" }]}>⭐ {(selectedAnime.averageScore / 10).toFixed(1)}</Text>
+                <View style={ep_s.heroMetric}>
+                  <Ionicons name="star" size={tvMode ? 17 : 11} color="#FBBF24" />
+                  <Text style={[ep_s.heroBadge, tvMode && ep_s.tvHeroBadge, { color: "#FBBF24" }]}>{(selectedAnime.averageScore / 10).toFixed(1)}</Text>
+                </View>
               ) : null}
             </View>
           </View>
@@ -826,11 +850,17 @@ export default function EpisodeListScreen() {
       {/* ── Sticky controls ── */}
       <View style={[ep_s.controls, tvMode && ep_s.tvControls, { backgroundColor: colors.surface, borderBottomColor: colors.border }]}>
         {/* Progress bar */}
+        <View style={ep_s.progressSummaryRow}>
+          <View style={ep_s.progressSummary}>
+            <Text style={[ep_s.progressLabel, tvMode && ep_s.tvText, { color: colors.textSecondary }]}>تقدم المشاهدة</Text>
+            <Text style={[ep_s.progressCount, tvMode && ep_s.tvText, { color: colors.textPrimary }]}>{watchedCount} / {total}</Text>
+          </View>
+          <Text style={[ep_s.pctText, tvMode && ep_s.tvText, { color: colors.textMuted }]}>{pct}%</Text>
+        </View>
         <View style={ep_s.progressRow}>
         <View style={[ep_s.progressTrack, { backgroundColor: colors.surfaceElevated }]}>
             <View style={[ep_s.progressFill, { width: `${pct}%` }]} />
           </View>
-           <Text style={[ep_s.pctText, tvMode && ep_s.tvText, { color: colors.textMuted }]}>{pct}%</Text>
         </View>
         {seasons.length > 1 && (
           <View style={ep_s.seasonSection}>
@@ -1009,6 +1039,12 @@ export default function EpisodeListScreen() {
 function createEpStyles(colors: ReturnType<typeof useColors>) {
 return StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
+  topBar: { height: 52, backgroundColor: colors.surface, borderBottomWidth: 1, borderBottomColor: colors.border, justifyContent: "center", position: "relative" },
+  topBarTitle: { position: "absolute", left: 16, right: 62, textAlign: "right", color: colors.textPrimary, fontSize: 13, lineHeight: 20, fontFamily: "Cairo_800ExtraBold" },
+  topBarBack: { position: "absolute", right: 12, top: 7, width: 38, height: 38, borderRadius: 12, alignItems: "center", justifyContent: "center", backgroundColor: colors.surfaceElevated, borderWidth: 1, borderColor: colors.border },
+  tvTopBar: { height: 62 },
+  tvTopBarTitle: { left: 28, right: 84, fontSize: 18, lineHeight: 27 },
+  tvTopBarBack: { width: 48, height: 48, top: 7, right: 18, borderRadius: 14 },
   center: { flex: 1, alignItems: "center", justifyContent: "center" },
   notFound: { fontSize: 14, color: colors.textSecondary, fontFamily: "Cairo_400Regular" },
   hero: { height: 220, justifyContent: "flex-end", overflow: "hidden" },
@@ -1020,7 +1056,10 @@ return StyleSheet.create({
   heroCover: { width: 64, height: 88, borderRadius: 12, borderWidth: 1, borderColor: "rgba(255,255,255,0.1)" },
   heroInfo: { flex: 1, paddingBottom: 4 },
   heroTitle: { fontSize: 15, fontFamily: "Cairo_800ExtraBold", color: "#fff" },
-  heroBadge: { fontSize: 9, fontFamily: "Cairo_700Bold", color: "#8B5CF6" },
+  heroArabicTitle: { fontSize: 12, lineHeight: 19, fontFamily: "Cairo_700Bold", color: "rgba(255,255,255,0.78)", textAlign: "right" },
+  tvHeroArabicTitle: { fontSize: 17, lineHeight: 25 },
+  heroMetric: { flexDirection: "row", alignItems: "center", gap: 3 },
+  heroBadge: { fontSize: 9, fontFamily: "Cairo_700Bold", color: colors.accent },
   controls: { backgroundColor: colors.surface, borderBottomWidth: 1, borderBottomColor: colors.border, paddingHorizontal: 14, paddingTop: 10, paddingBottom: 8 },
   seasonSection: { marginTop: 1, marginBottom: 7 },
   seasonSectionHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 5 },
@@ -1036,9 +1075,13 @@ return StyleSheet.create({
   episodeSectionTitle: { fontSize: 12, fontFamily: "Cairo_800ExtraBold", color: colors.textPrimary },
   sortButton: { minHeight: 30, flexDirection: "row", alignItems: "center", gap: 5, paddingHorizontal: 9, paddingVertical: 4, borderRadius: 10, backgroundColor: colors.accentSurface, borderWidth: 1, borderColor: colors.accentBorder },
   sortButtonText: { fontSize: 9, fontFamily: "Cairo_700Bold", color: colors.accent },
-  progressRow: { flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 8 },
-  progressTrack: { flex: 1, height: 6, backgroundColor: colors.surfaceElevated, borderRadius: 3, overflow: "hidden" },
-  progressFill: { height: "100%", backgroundColor: "#8B5CF6", borderRadius: 3 },
+  progressSummaryRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 5 },
+  progressSummary: { flexDirection: "row", alignItems: "center", gap: 7 },
+  progressLabel: { fontSize: 10, lineHeight: 16, fontFamily: "Cairo_400Regular" },
+  progressCount: { fontSize: 10, lineHeight: 16, fontFamily: "Cairo_700Bold" },
+  progressRow: { flexDirection: "row", alignItems: "center", marginBottom: 8 },
+  progressTrack: { flex: 1, height: 7, backgroundColor: colors.surfaceElevated, borderRadius: 4, overflow: "hidden" },
+  progressFill: { height: "100%", backgroundColor: colors.accent, borderRadius: 3 },
   pctText: { fontSize: 9, color: colors.textMuted, fontFamily: "Cairo_700Bold" },
   searchBar: { flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: colors.input, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 9, borderWidth: 1, borderColor: colors.border, marginBottom: 6 },
   searchInput: { flex: 1, color: colors.textPrimary, fontSize: 13, fontFamily: "Cairo_400Regular", textAlign: "right" },

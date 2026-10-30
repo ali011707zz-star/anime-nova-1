@@ -149,3 +149,4 @@
 - [End-to-end playback validation](playback-end-to-end-validation.md) — source discovery can return rows while selected-source resolution still fails; test resolution and a bounded media response.
 - [Source availability deadlines](source-availability-deadlines.md) — keep mobile/web wait limits above server scan and provider budgets; surface partial scans and don't block fallbacks on slow catalog lookups.
 - [Vite build output override](vite-build-arg-forwarding.md) — `pnpm run build -- --outDir` passed a literal separator, so Vite used the configured live output path.
+- [Detail trailer preservation](anime-detail-trailer-preservation.md) — leave the existing trailer section and player unchanged unless the user explicitly requests changes.
