@@ -439,7 +439,10 @@ jobs:
           api-level: 35
           arch: x86_64
           profile: pixel_2
-          disable-animations: true
+          # The emulator reached boot after a long delay but adb failed with
+          # Broken pipe while this optional action tried to change system
+          # animation settings. The smoke test does not depend on animations.
+          disable-animations: false
           script: bash "$RUNNER_TEMP/nova-android-cold-start-smoke.sh"
 
       - name: 🔑 Show release signing fingerprint
