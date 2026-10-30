@@ -255,7 +255,7 @@ export default function DubbedScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#09090B" },
   header: {
-    flexDirection: "row", alignItems: "center", paddingHorizontal: 16,
+    flexDirection: "row", direction: "ltr", alignItems: "center", paddingHorizontal: 16,
     paddingTop: 12, paddingBottom: 12, borderBottomWidth: 1,
     borderBottomColor: "rgba(255,255,255,0.05)",
   },

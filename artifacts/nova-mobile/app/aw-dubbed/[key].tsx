@@ -252,7 +252,7 @@ export default function AwDubbedDetailScreen() {
 const styles = StyleSheet.create({
   container:       { flex: 1, backgroundColor: "#09090B" },
   tvFocusGuide:    { flex: 1 },
-  header:          { flexDirection: "row", alignItems: "center", paddingHorizontal: 12, paddingVertical: 10,
+  header:          { flexDirection: "row", direction: "ltr", alignItems: "center", paddingHorizontal: 12, paddingVertical: 10,
                      borderBottomWidth: 1, borderBottomColor: "rgba(255,255,255,0.05)" },
   backBtn:         { width: 36, height: 36, borderRadius: 10, backgroundColor: "rgba(255,255,255,0.05)",
                      alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: "rgba(255,255,255,0.08)" },

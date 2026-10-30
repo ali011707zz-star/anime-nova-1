@@ -435,7 +435,7 @@ export default function AnimationsScreen() {
 const createAnimationStyles = (colors: ThemePalette) => StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
   header: { backgroundColor: colors.surface, borderBottomWidth: 1, borderBottomColor: colors.border, paddingHorizontal: 16, paddingTop: 12, paddingBottom: 10 },
-  headerRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 12 },
+  headerRow: { flexDirection: "row", direction: "ltr", alignItems: "center", justifyContent: "space-between", marginBottom: 12 },
   headerTitle: { fontSize: 22, fontFamily: "Cairo_800ExtraBold", color: colors.textPrimary },
   tvHeader: { paddingHorizontal: 32, paddingTop: 16, paddingBottom: 12 },
   tvHeaderRow: { marginBottom: 8 },

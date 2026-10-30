@@ -2533,7 +2533,7 @@ export default function WatchScreen() {
     const resolveUrl2 = getPlayUrl(playingSrc);
     return (
       <View style={{ flex: 1, backgroundColor: "#07070d", alignItems: "center", justifyContent: "center", gap: 14 }}>
-        <Pressable onPress={handleBack} focusable={tvMode} style={({ focused }) => [d.playerBackBtn, { position: "absolute", top: topPad + 4, left: 12 }, tvMode && tvFocusStyle(focused)]}>
+        <Pressable onPress={handleBack} focusable={tvMode} style={({ focused }) => [d.playerBackBtn, { position: "absolute", top: topPad + 4, right: 12 }, tvMode && tvFocusStyle(focused)]}>
           <Ionicons name="arrow-back" size={18} color="#fff" style={{ transform: [{ scaleX: -1 }] }} />
         </Pressable>
         <SpinRing />
@@ -2558,7 +2558,7 @@ export default function WatchScreen() {
     if (Platform.OS === "web") {
       return (
         <View style={{ flex: 1, backgroundColor: "#07070d", alignItems: "center", justifyContent: "center", gap: 16 }}>
-          <Pressable onPress={handleBack} focusable={tvMode} style={({ focused }) => [d.playerBackBtn, { position: "absolute", top: topPad + 4, left: 12 }, tvMode && tvFocusStyle(focused)]}>
+          <Pressable onPress={handleBack} focusable={tvMode} style={({ focused }) => [d.playerBackBtn, { position: "absolute", top: topPad + 4, right: 12 }, tvMode && tvFocusStyle(focused)]}>
             <Ionicons name="arrow-back" size={18} color="#fff" style={{ transform: [{ scaleX: -1 }] }} />
           </Pressable>
           <View style={{ width: 72, height: 72, borderRadius: 36, backgroundColor: "rgba(139,92,246,0.15)", alignItems: "center", justifyContent: "center" }}>
@@ -2575,7 +2575,7 @@ export default function WatchScreen() {
     // Native: no WebView — show info card
     return (
       <View style={{ flex: 1, backgroundColor: "#07070d", alignItems: "center", justifyContent: "center", gap: 16 }}>
-        <Pressable onPress={handleBack} focusable={tvMode} style={({ focused }) => [d.playerBackBtn, { position: "absolute", top: topPad + 4, left: 12 }, tvMode && tvFocusStyle(focused)]}>
+        <Pressable onPress={handleBack} focusable={tvMode} style={({ focused }) => [d.playerBackBtn, { position: "absolute", top: topPad + 4, right: 12 }, tvMode && tvFocusStyle(focused)]}>
           <Ionicons name="arrow-back" size={18} color="#fff" style={{ transform: [{ scaleX: -1 }] }} />
         </Pressable>
         <View style={{ width: 72, height: 72, borderRadius: 36, backgroundColor: "rgba(139,92,246,0.15)", alignItems: "center", justifyContent: "center" }}>
@@ -2944,7 +2944,7 @@ function createWatchStyles(colors: ThemePalette) {
   return StyleSheet.create({
   tvFocusGuide: { flex: 1 },
   /* Loading */
-  ldBackBtn:    { position: "absolute", left: 16, width: 36, height: 36, borderRadius: 18, backgroundColor: colors.surfaceElevated, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: colors.border, zIndex: 10 },
+  ldBackBtn:    { position: "absolute", right: 16, width: 36, height: 36, borderRadius: 18, backgroundColor: colors.surfaceElevated, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: colors.border, zIndex: 10 },
   ldContent:    { flex: 1, alignItems: "center", justifyContent: "center", gap: 20, paddingHorizontal: 24 },
   ldPrayer:     { fontSize: 13, fontFamily: "Cairo_800ExtraBold", color: colors.textPrimary, textAlign: "center" },
   ldPosterWrap: { position: "relative", alignItems: "center", justifyContent: "center", width: 176, height: 264, overflow: "visible" },
@@ -2958,7 +2958,7 @@ function createWatchStyles(colors: ThemePalette) {
   embedTopRow:   { position: "absolute", top: 0, left: 0, right: 0, flexDirection: "row", alignItems: "center", paddingHorizontal: 14, paddingBottom: 10, backgroundColor: "rgba(0,0,0,0.7)", gap: 10, zIndex: 10 },
 
   /* Picker header */
-  header:        { flexDirection: "row", alignItems: "center", paddingHorizontal: 12, paddingBottom: 10, borderBottomWidth: 1, borderBottomColor: colors.border, gap: 8 },
+  header:        { flexDirection: "row", direction: "ltr", alignItems: "center", paddingHorizontal: 12, paddingBottom: 10, borderBottomWidth: 1, borderBottomColor: colors.border, gap: 8 },
   tvHeader:     { paddingHorizontal: 28, paddingBottom: 10, gap: 8 },
   headerLeft:    { flexDirection: "row", alignItems: "center", gap: 5 },
   headerCenter:  { flex: 1, alignItems: "center" },

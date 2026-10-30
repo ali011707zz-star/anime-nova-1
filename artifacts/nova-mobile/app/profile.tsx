@@ -182,7 +182,7 @@ export default function ProfileScreen() {
           focusable={tvMode}
           style={({ focused }) => [
             s.backBtn,
-            { position: "absolute", left: 16, top: topPad + 8, backgroundColor: colors.input, borderColor: colors.border, borderWidth: 1 },
+            { position: "absolute", right: 16, top: topPad + 8, backgroundColor: colors.input, borderColor: colors.border, borderWidth: 1 },
             tvMode && tvFocusStyle(focused),
           ]}
         >
@@ -196,7 +196,7 @@ export default function ProfileScreen() {
   return (
     <View style={[s.container, { backgroundColor: colors.background }]}>
       {/* Header */}
-      <View style={[s.header, { paddingTop: topPad + 8 }]}>
+      <View style={[s.header, { paddingTop: topPad + 8, direction: "ltr" }]}>
         <View style={{ width: 38 }} />
         <Text style={[s.headerTitle, { color: colors.text }]}>الملف الشخصي</Text>
         <Pressable onPress={() => router.canGoBack() ? router.back() : router.replace("/(tabs)" as any)} focusable={tvMode}
@@ -321,7 +321,7 @@ export default function ProfileScreen() {
 
 const s = StyleSheet.create({
   container: { flex: 1 },
-  header: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 16, paddingBottom: 12 },
+  header: { flexDirection: "row", direction: "ltr", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 16, paddingBottom: 12 },
   backBtn: { width: 38, height: 38, borderRadius: 12, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(255,255,255,0.06)" },
   headerTitle: { fontSize: 17, fontFamily: "Cairo_800ExtraBold" },
   heroSection: { alignItems: "center", paddingVertical: 24, paddingHorizontal: 20 },

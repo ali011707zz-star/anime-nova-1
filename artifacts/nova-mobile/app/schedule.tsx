@@ -61,7 +61,7 @@ export default function ScheduleScreen() {
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       {/* Header */}
-      <View style={[styles.header, { paddingTop: topPad + 16 }]}>
+      <View style={[styles.header, { paddingTop: topPad + 16, direction: "ltr" }]}>
         <View style={{ width: 30 }} />
         <Text style={[styles.title, { color: colors.text }]}>جدول البث</Text>
         <Pressable onPress={() => router.canGoBack() ? router.back() : router.replace("/(tabs)" as any)} focusable={tvMode} style={({ focused }) => [styles.backBtn, tvMode && tvFocusStyle(focused)]}>

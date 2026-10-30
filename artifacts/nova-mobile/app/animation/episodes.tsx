@@ -306,7 +306,7 @@ function createStyles(colors: ReturnType<typeof useColors>) {
 return StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
   header: { backgroundColor: colors.background, borderBottomWidth: 1, borderBottomColor: colors.border },
-  headerRow: { flexDirection: "row", alignItems: "center", gap: 12, paddingHorizontal: 16, paddingTop: 12, paddingBottom: 10 },
+  headerRow: { flexDirection: "row", direction: "ltr", alignItems: "center", gap: 12, paddingHorizontal: 16, paddingTop: 12, paddingBottom: 10 },
   backBtn: { width: 36, height: 36, borderRadius: 12, alignItems: "center", justifyContent: "center", backgroundColor: colors.input, borderWidth: 1, borderColor: colors.border },
   headerInfo: { flex: 1 },
   headerLabel: { fontSize: 9, color: colors.textMuted, fontFamily: "Cairo_400Regular" },

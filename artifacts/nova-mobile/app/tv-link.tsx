@@ -220,7 +220,7 @@ const styles = StyleSheet.create({
   center: { flex: 1, alignItems: "center", justifyContent: "center" },
   backButton: {
     position: "absolute",
-    left: 16,
+    right: 16,
     zIndex: 2,
     width: 42,
     height: 42,

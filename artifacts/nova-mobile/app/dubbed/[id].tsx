@@ -316,12 +316,12 @@ const styles = StyleSheet.create({
   tvFocusGuide: { flex: 1 },
   tvListContent: { paddingHorizontal: 56, paddingBottom: 140 },
   header: {
-    position: "relative", flexDirection: "row", alignItems: "center", gap: 12,
+    position: "relative", flexDirection: "row", direction: "ltr", alignItems: "center", gap: 12,
     paddingHorizontal: 16, paddingTop: 12, paddingBottom: 12,
     borderBottomWidth: 1, borderBottomColor: "rgba(255,255,255,0.05)",
   },
   backBtn: {
-    position: "absolute", left: 12, width: 36, height: 36, borderRadius: 10,
+    position: "absolute", right: 12, width: 36, height: 36, borderRadius: 10,
     backgroundColor: "rgba(255,255,255,0.05)",
     borderWidth: 1, borderColor: "rgba(255,255,255,0.08)",
     alignItems: "center", justifyContent: "center",

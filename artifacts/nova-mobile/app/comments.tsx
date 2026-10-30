@@ -326,7 +326,7 @@ function createCommentStyles(colors: ThemePalette) {
   return StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
   header: {
-    flexDirection: "row", alignItems: "center", gap: 10,
+    flexDirection: "row", direction: "ltr", alignItems: "center", gap: 10,
     paddingHorizontal: 14, paddingVertical: 12,
     borderBottomWidth: 1, borderBottomColor: colors.border,
     backgroundColor: colors.background,

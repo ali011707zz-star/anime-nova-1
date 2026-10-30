@@ -2077,7 +2077,7 @@ const ts = StyleSheet.create({
 
   /* Header */
   header: {
-    flexDirection: "row", alignItems: "center", gap: 10,
+    flexDirection: "row", direction: "ltr", alignItems: "center", gap: 10,
     paddingHorizontal: 16, paddingBottom: 14,
     backgroundColor: "rgba(9,9,11,0.92)",
     borderBottomWidth: 1, borderBottomColor: "rgba(255,255,255,0.05)",

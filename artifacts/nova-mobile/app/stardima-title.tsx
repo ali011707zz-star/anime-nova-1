@@ -86,6 +86,7 @@ export default function StardimaTitleScreen() {
     header: {
       minHeight: 54,
       flexDirection: "row",
+      direction: "ltr",
       alignItems: "center",
       gap: 12,
       paddingHorizontal: 14,

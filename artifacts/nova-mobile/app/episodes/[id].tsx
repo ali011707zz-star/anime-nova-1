@@ -1159,7 +1159,7 @@ return StyleSheet.create({
   center: { flex: 1, alignItems: "center", justifyContent: "center" },
   notFound: { fontSize: 14, color: colors.textSecondary, fontFamily: "Cairo_400Regular" },
   hero: { height: 220, justifyContent: "flex-end", overflow: "hidden" },
-  backBtn: { position: "absolute", left: 14, width: 36, height: 36, backgroundColor: "rgba(0,0,0,0.5)", borderRadius: 14, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: "rgba(255,255,255,0.1)" },
+  backBtn: { position: "absolute", right: 14, width: 36, height: 36, backgroundColor: "rgba(0,0,0,0.5)", borderRadius: 14, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: "rgba(255,255,255,0.1)" },
   commentsBtn: { position: "absolute", right: 14, top: 12, width: 36, height: 36, backgroundColor: "rgba(139,92,246,0.25)", borderRadius: 14, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: "rgba(139,92,246,0.4)" },
   commentsListBtn: { flexDirection: "row", alignItems: "center", gap: 8, marginHorizontal: 12, marginBottom: 8, padding: 12, borderRadius: 14, backgroundColor: colors.accentSurface, borderWidth: 1, borderColor: colors.accentBorder },
   commentsListBtnText: { flex: 1, fontSize: 13, fontFamily: "Cairo_700Bold", color: colors.accent },

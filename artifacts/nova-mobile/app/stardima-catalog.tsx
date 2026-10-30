@@ -70,6 +70,7 @@ function createStyles(colors: ThemePalette) {
     listHeader: { width: "100%" },
     header: {
       flexDirection: "row",
+      direction: "ltr",
       alignItems: "center",
       gap: 12,
       paddingHorizontal: 16,

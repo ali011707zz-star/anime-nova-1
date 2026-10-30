@@ -70,7 +70,7 @@ export function CatalogPageHeader({ title, onBack }: HeaderProps) {
           onFocus={() => setFocusedAction("back")}
           onBlur={() => setFocusedAction((current) => current === "back" ? null : current)}
           focusable={tvMode}
-          style={[styles.backButton, { top: topInset + 6, backgroundColor: colors.surface, borderColor: colors.border }, tvMode && tvFocusStyle(focusedAction === "back")]}
+          style={[styles.backButton, tvMode && styles.tvBackButton, { top: topInset + 6, backgroundColor: colors.surface, borderColor: colors.border }, tvMode && tvFocusStyle(focusedAction === "back")]}
         >
           <Ionicons name="arrow-back" size={21} color={colors.textPrimary} style={{ transform: [{ scaleX: -1 }] }} />
         </Pressable>
@@ -159,7 +159,7 @@ const styles = StyleSheet.create({
   },
   backButton: {
     position: "absolute",
-    left: 14,
+    right: 14,
     width: 38,
     height: 38,
     borderRadius: 12,
@@ -168,6 +168,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     zIndex: 2,
   },
+  tvBackButton: { left: 14, right: undefined },
   tabsFrame: { borderBottomWidth: StyleSheet.hairlineWidth },
   tabsContent: { alignItems: "stretch", gap: 20, paddingHorizontal: 14 },
   tab: { minHeight: 49, justifyContent: "center", alignItems: "center", paddingHorizontal: 3, position: "relative" },

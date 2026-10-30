@@ -10,6 +10,7 @@ import { getBaseUrl } from "@/utils/api";
 import { isTvDevice, tvFocusStyle, TvPressable as Pressable } from "@/utils/tv";
 import { useTvFocusMemory } from "@/utils/tvFocus";
 import { getGridColumnCount } from "@/components/AnimeCard";
+import { AnimeFilterSheet, type AnimeFilterOption } from "@/components/AnimeFilterSheet";
 import { useColors } from "@/hooks/useColors";
 import type { ThemePalette } from "@/constants/colors";
 
@@ -41,6 +42,12 @@ const FORMAT_OPTIONS = [
 ];
 
 const SORT_OPTIONS = [
+  { label: "الأكثر شعبية", value: "POPULARITY_DESC" },
+  { label: "الأعلى تقييماً", value: "SCORE_DESC" },
+  { label: "بواسطة الاسم", value: "TITLE_ROMAJI" },
+  { label: "الأحدث", value: "START_DATE_DESC" },
+];
+const TV_SORT_OPTIONS = [
   { label: "رائج", value: "TRENDING_DESC" },
   { label: "الأشهر", value: "POPULARITY_DESC" },
   { label: "الأعلى تقييماً", value: "SCORE_DESC" },
@@ -48,6 +55,13 @@ const SORT_OPTIONS = [
 ];
 
 const SEASON_OPTIONS = [
+  { label: "كل المواسم", value: "" },
+  { label: "موسم الشتاء", value: "WINTER" },
+  { label: "موسم الربيع", value: "SPRING" },
+  { label: "موسم الصيف", value: "SUMMER" },
+  { label: "موسم الخريف", value: "FALL" },
+];
+const TV_SEASON_OPTIONS = [
   { label: "الكل", value: "" },
   { label: "❄️ شتاء", value: "WINTER" },
   { label: "🌸 ربيع", value: "SPRING" },
@@ -58,6 +72,15 @@ const SEASON_OPTIONS = [
 const CUR_YEAR = new Date().getFullYear();
 const START_YEAR = 1990;
 const YEARS = ["الكل", ...Array.from({ length: CUR_YEAR - START_YEAR + 1 }, (_, i) => String(CUR_YEAR - i))];
+const STATUS_OPTIONS = [
+  { label: "الكل", value: "" },
+  { label: "يعرض حالياً", value: "RELEASING" },
+  { label: "مكتمل", value: "FINISHED" },
+];
+const FILTER_GENRES: AnimeFilterOption[] = [
+  { label: "الكل", value: "" },
+  ...GENRES_WITH_COVERS.map(({ genre, ar }) => ({ label: ar, value: genre })),
+];
 
 const GENRES_WITH_COVERS = [
   { genre: "Action",       ar: "أكشن",       color: "#EF4444" },
@@ -84,7 +107,7 @@ const BLOCKED = new Set(["Hentai"]);
 function coverUrl(id: number) { return `https://img.anili.st/media/${id}`; }
 
 /* ── Genre cover card ── */
-function GenreCard({ item, animeId, onPress, columns }: { item: typeof GENRES_WITH_COVERS[0]; animeId?: number; onPress: () => void; columns: number }) {
+function GenreCard({ item, animeId, onPress, columns, horizontal = false }: { item: typeof GENRES_WITH_COVERS[0]; animeId?: number; onPress: () => void; columns: number; horizontal?: boolean }) {
   const { g } = useBrowseTheme();
   const { width, height } = useWindowDimensions();
   const tvMode = isTvDevice(width, height);
@@ -92,9 +115,9 @@ function GenreCard({ item, animeId, onPress, columns }: { item: typeof GENRES_WI
     <Pressable
       onPress={onPress}
       focusable={tvMode}
-      style={({ focused }) => [g.genreCard, { flex: 1 / columns }, tvMode && tvFocusStyle(focused)]}
+      style={({ focused }) => [g.genreCard, horizontal ? g.horizontalGenreCard : { flex: 1 / columns }, tvMode && tvFocusStyle(focused)]}
     >
-      <View style={[g.genreImgWrap, tvMode && g.tvGenreImgWrap, { backgroundColor: item.color + "22" }]}>
+        <View style={[g.genreImgWrap, horizontal && g.horizontalGenreImgWrap, tvMode && g.tvGenreImgWrap, { backgroundColor: item.color + "22" }]}>
         {animeId ? (
           <Image source={{ uri: coverUrl(animeId) }} style={g.genreImg} />
         ) : null}
@@ -259,11 +282,12 @@ export default function BrowseScreen() {
   const [activeGenre, setActiveGenre] = useState(routeValue(routeParams.genre));
   const [activeGenreAr, setActiveGenreAr] = useState(routeValue(routeParams.genreAr));
   const [format, setFormat] = useState(FORMAT_OPTIONS.some(opt => opt.value === routeFormat) ? routeFormat : "");
-  const [sort, setSort] = useState(SORT_OPTIONS.some(opt => opt.value === routeSort) ? routeSort : "POPULARITY_DESC");
+  const [sort, setSort] = useState([...SORT_OPTIONS, ...TV_SORT_OPTIONS].some(opt => opt.value === routeSort) ? routeSort : "POPULARITY_DESC");
   const [season, setSeason] = useState(SEASON_OPTIONS.some(opt => opt.value === routeSeason) ? routeSeason : "");
   const [year, setYear] = useState(/^\d{4}$/.test(routeYear) ? routeYear : "");
-  const [status, setStatus] = useState(routeStatus === "RELEASING" ? routeStatus : "");
+  const [status, setStatus] = useState(["RELEASING", "FINISHED"].includes(routeStatus) ? routeStatus : "");
   const [search, setSearch] = useState("");
+  const [filterVisible, setFilterVisible] = useState(false);
 
   const [items, setItems] = useState<AnimeResult[]>([]);
   const [loading, setLoading] = useState(false);
@@ -288,10 +312,10 @@ export default function BrowseScreen() {
     setActiveGenre(routeValue(routeParams.genre));
     setActiveGenreAr(routeValue(routeParams.genreAr));
     setFormat(FORMAT_OPTIONS.some(opt => opt.value === routeFormat) ? routeFormat : "");
-    setSort(SORT_OPTIONS.some(opt => opt.value === routeSort) ? routeSort : "POPULARITY_DESC");
+    setSort([...SORT_OPTIONS, ...TV_SORT_OPTIONS].some(opt => opt.value === routeSort) ? routeSort : "POPULARITY_DESC");
     setSeason(SEASON_OPTIONS.some(opt => opt.value === routeSeason) ? routeSeason : "");
     setYear(/^\d{4}$/.test(routeYear) ? routeYear : "");
-    setStatus(routeStatus === "RELEASING" ? routeStatus : "");
+    setStatus(["RELEASING", "FINISHED"].includes(routeStatus) ? routeStatus : "");
     setView("list");
   }, [routeParams.genre, routeParams.genreAr, routeParams.format, routeParams.sort, routeParams.season, routeParams.year, routeParams.status]);
 
@@ -407,13 +431,13 @@ export default function BrowseScreen() {
   }
   function clearAll() {
     setView("list"); setActiveGenre(""); setActiveGenreAr("");
-    setFormat(""); setSort("POPULARITY_DESC"); setSeason(""); setYear(""); setStatus("");
+    setFormat(""); setSort("POPULARITY_DESC"); setSeason(""); setYear(""); setStatus(""); setSearch("");
   }
 
   const filteredItems = search.trim() ? searchItems : items;
   const listLoading = search.trim() ? searchLoading : loading;
 
-  const hasFilters = format || sort !== "POPULARITY_DESC" || season || year || status;
+  const hasFilters = format || sort !== "POPULARITY_DESC" || season || year || status || activeGenre;
   const browseTitle = activeGenreAr
     ? `${activeGenreAr}`
     : status === "RELEASING" ? "يُعرض حالياً"
@@ -425,6 +449,71 @@ export default function BrowseScreen() {
     <View style={[g.container, { paddingTop: topPad }]}>
       {/* ── Header ── */}
       <View style={[g.header, tvMode && g.tvHeader]}>
+        {!tvMode ? (
+          <>
+            <View style={g.mobileHeaderRow}>
+              <View style={g.mobileActions}>
+                <Pressable
+                  accessibilityLabel="فتح الفلاتر"
+                  onPress={() => setFilterVisible(true)}
+                  style={({ pressed }) => [g.mobileFilterButton, hasFilters && g.mobileFilterButtonActive, pressed && { opacity: 0.82 }]}
+                >
+                  <Ionicons name="options-outline" size={18} color={hasFilters ? colors.buttonText : colors.textPrimary} />
+                </Pressable>
+                <View style={g.modeSwitch}>
+                  <Pressable onPress={() => setView("list")} style={[g.modeButton, g.modeButtonActive]}>
+                    <Text style={[g.modeButtonText, g.modeButtonTextActive]}>تصفح</Text>
+                    <Ionicons name="compass-outline" size={14} color={colors.buttonText} />
+                  </Pressable>
+                  <Pressable onPress={() => router.push("/(tabs)/search" as any)} style={g.modeButton}>
+                    <Text style={g.modeButtonText}>بحث</Text>
+                    <Ionicons name="search" size={14} color={colors.textMuted} />
+                  </Pressable>
+                </View>
+              </View>
+              <View style={g.mobileTitleGroup}>
+                <Text numberOfLines={1} style={[g.mobileTitle, { flexShrink: 1 }]}>
+                  {activeGenreAr || "المكتبة والتصفح"}
+                </Text>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="رجوع"
+                  onPress={() => router.canGoBack() ? router.back() : router.replace("/(tabs)" as any)}
+                  style={g.mobileBackButton}
+                >
+                  <Ionicons name="chevron-forward" size={21} color={colors.textPrimary} />
+                </Pressable>
+              </View>
+            </View>
+
+            <Pressable onPress={() => setFilterVisible(true)} style={g.mobileSortButton}>
+              <Ionicons name="chevron-down" size={17} color={colors.textSecondary} />
+              <Text numberOfLines={1} style={g.mobileSortText}>
+                {SORT_OPTIONS.find((option) => option.value === sort)?.label || "الأكثر شعبية"}
+              </Text>
+              <Ionicons name="options-outline" size={17} color={colors.textSecondary} />
+            </Pressable>
+
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              style={g.mobileGenreRail}
+              contentContainerStyle={g.mobileGenreRailContent}
+            >
+              {GENRES_WITH_COVERS.map((item) => (
+                <GenreCard
+                  key={item.genre}
+                  item={item}
+                  animeId={genreCovers[item.genre]}
+                  columns={genreColumns}
+                  horizontal
+                  onPress={() => openGenre(item.genre, item.ar)}
+                />
+              ))}
+            </ScrollView>
+          </>
+        ) : (
+          <>
         <View style={g.headerRow}>
           <View style={{ flex: 1 }}>
             <Text style={[g.headerTitle, tvMode && g.tvHeaderTitle]}>{browseTitle}</Text>
@@ -469,7 +558,7 @@ export default function BrowseScreen() {
           <>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} style={[g.chipRow, { marginTop: 4, width: filterRailWidth, alignSelf: "center" }]}>
               <View style={{ flexDirection: "row", gap: 6 }}>
-                {SORT_OPTIONS.map(opt => (
+                {TV_SORT_OPTIONS.map(opt => (
                   <Pressable key={opt.value} onPress={() => setSort(opt.value)} focusable={tvMode}
                     style={({ focused }) => [g.chip, tvMode && g.tvChip, sort === opt.value && g.chipActive2, tvMode && tvFocusStyle(focused)]}>
                     <Text style={[g.chipText, tvMode && g.tvChipText, sort === opt.value && g.chipText2Active]}>{opt.label}</Text>
@@ -481,7 +570,7 @@ export default function BrowseScreen() {
             {/* Seasons row */}
             <ScrollView horizontal showsHorizontalScrollIndicator={false} style={[g.chipRow, { marginTop: 4, width: filterRailWidth, alignSelf: "center" }]}>
               <View style={{ flexDirection: "row", gap: 6 }}>
-                {SEASON_OPTIONS.map(opt => (
+                {TV_SEASON_OPTIONS.map(opt => (
                   <Pressable key={opt.value} onPress={() => setSeason(opt.value)} focusable={tvMode}
                     style={({ focused }) => [g.chip, tvMode && g.tvChip, season === opt.value && g.chipActive, tvMode && tvFocusStyle(focused)]}>
                     <Text style={[g.chipText, tvMode && g.tvChipText, season === opt.value && g.chipTextActive]}>{opt.label}</Text>
@@ -519,6 +608,8 @@ export default function BrowseScreen() {
                 </Pressable>
               ) : null}
             </View>
+          </>
+        )}
           </>
         )}
       </View>
@@ -583,6 +674,13 @@ export default function BrowseScreen() {
                   </View>
                 ) : null
               }
+              ListHeaderComponent={!tvMode ? (
+                <View style={g.resultsHeading}>
+                  <Text style={g.resultsHeadingText}>
+                    {search.trim() ? "نتائج البحث" : "قائمة الأنمي"} ({filteredItems.length} عمل)
+                  </Text>
+                </View>
+              ) : null}
                ListFooterComponent={listLoading && filteredItems.length > 0 ? (
                 <View style={{ padding: 20, alignItems: "center" }}>
                   <ActivityIndicator color={colors.accent} />
@@ -611,6 +709,35 @@ export default function BrowseScreen() {
           )}
         </>
       )}
+      {!tvMode && (
+        <AnimeFilterSheet
+          visible={filterVisible}
+          resultCount={filteredItems.length}
+          sortOptions={SORT_OPTIONS}
+          formatOptions={FORMAT_OPTIONS}
+          statusOptions={STATUS_OPTIONS}
+          seasonOptions={SEASON_OPTIONS}
+          genreOptions={FILTER_GENRES}
+          years={YEARS}
+          sort={sort}
+          format={format}
+          status={status}
+          season={season}
+          genre={activeGenre}
+          year={year}
+          onSortChange={setSort}
+          onFormatChange={(value) => { setFormat(value); setView("list"); }}
+          onStatusChange={setStatus}
+          onSeasonChange={setSeason}
+          onGenreChange={(value) => {
+            setActiveGenre(value);
+            setActiveGenreAr(FILTER_GENRES.find((option) => option.value === value)?.label || "");
+          }}
+          onYearChange={setYear}
+          onReset={clearAll}
+          onClose={() => setFilterVisible(false)}
+        />
+      )}
     </View>
   );
 }
@@ -619,6 +746,24 @@ const createBrowseStyles = (colors: ThemePalette) => StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
   header: { backgroundColor: colors.surface, borderBottomWidth: 1, borderBottomColor: colors.border, paddingHorizontal: 12, paddingTop: 8, paddingBottom: 5 },
   tvHeader: { paddingHorizontal: 32, paddingTop: 16, paddingBottom: 14 },
+  mobileHeaderRow: { flexDirection: "row", direction: "ltr", alignItems: "center", justifyContent: "space-between", minHeight: 44, gap: 8 },
+  mobileActions: { flexDirection: "row", direction: "ltr", alignItems: "center", gap: 6 },
+  mobileFilterButton: { width: 40, height: 40, borderRadius: 12, alignItems: "center", justifyContent: "center", backgroundColor: colors.input, borderWidth: 1, borderColor: colors.border },
+  mobileFilterButtonActive: { backgroundColor: colors.destructive, borderColor: colors.destructive },
+  modeSwitch: { flexDirection: "row", direction: "ltr", alignItems: "center", padding: 3, borderRadius: 13, backgroundColor: colors.input, borderWidth: 1, borderColor: colors.border },
+  modeButton: { minHeight: 32, flexDirection: "row", direction: "ltr", alignItems: "center", justifyContent: "center", gap: 5, paddingHorizontal: 9, borderRadius: 10 },
+  modeButtonActive: { backgroundColor: colors.homeAccent },
+  modeButtonText: { color: colors.textSecondary, fontFamily: "Cairo_700Bold", fontSize: 10 },
+  modeButtonTextActive: { color: colors.buttonText },
+  mobileTitleGroup: { flexDirection: "row", direction: "ltr", alignItems: "center", gap: 9, minWidth: 0 },
+  mobileTitle: { color: colors.textPrimary, fontSize: 17, fontFamily: "Cairo_800ExtraBold", textAlign: "right", writingDirection: "rtl" },
+  mobileBackButton: { width: 40, height: 40, borderRadius: 12, alignItems: "center", justifyContent: "center", backgroundColor: colors.input, borderWidth: 1, borderColor: colors.border },
+  mobileSortButton: { minHeight: 44, flexDirection: "row", direction: "ltr", alignItems: "center", gap: 8, marginTop: 10, paddingHorizontal: 12, borderRadius: 14, backgroundColor: colors.input, borderWidth: 1, borderColor: colors.border },
+  mobileSortText: { flex: 1, color: colors.textPrimary, fontSize: 13, fontFamily: "Cairo_700Bold", textAlign: "right", writingDirection: "rtl" },
+  mobileGenreRail: { marginTop: 12, marginHorizontal: -12 },
+  mobileGenreRailContent: { flexDirection: "row", direction: "rtl", gap: 8, paddingHorizontal: 12, paddingBottom: 8 },
+  resultsHeading: { paddingTop: 2, paddingBottom: 10, alignItems: "flex-end" },
+  resultsHeadingText: { color: colors.textSecondary, fontSize: 11, fontFamily: "Cairo_700Bold", textAlign: "right", writingDirection: "rtl" },
   headerRow: { flexDirection: "row", alignItems: "center", marginBottom: 6 },
   headerTitle: { fontSize: 17, fontFamily: "Cairo_800ExtraBold", color: colors.textPrimary },
   tvHeaderTitle: { fontSize: 26, lineHeight: 36 },
@@ -647,7 +792,9 @@ const createBrowseStyles = (colors: ThemePalette) => StyleSheet.create({
   searchInput: { flex: 1, color: colors.textPrimary, fontSize: 10, fontFamily: "Cairo_400Regular", textAlign: "right" },
   tvSearchInput: { fontSize: 14, lineHeight: 21 },
   genreCard: { flex: 1 },
+  horizontalGenreCard: { width: 126, flexGrow: 0 },
   genreImgWrap: { height: 90, borderRadius: 16, overflow: "hidden", position: "relative", borderWidth: 1, borderColor: colors.border, justifyContent: "flex-end" },
+  horizontalGenreImgWrap: { height: 58, borderRadius: 13 },
   tvGenreImgWrap: { height: 150, borderRadius: 18, borderWidth: 1 },
   genreImg: { ...StyleSheet.absoluteFillObject, width: "100%", height: "100%" },
   genreColorBar: { position: "absolute", bottom: 0, left: 0, right: 0, height: 3 },

@@ -120,6 +120,7 @@ export default function StardimaServersScreen() {
       minHeight: 56 + (Platform.OS === "web" ? 0 : insets.top),
       paddingTop: Platform.OS === "web" ? 0 : insets.top,
       flexDirection: "row",
+      direction: "ltr",
       alignItems: "center",
       gap: 10,
       paddingHorizontal: 12,

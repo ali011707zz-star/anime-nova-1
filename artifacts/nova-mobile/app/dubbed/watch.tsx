@@ -351,7 +351,7 @@ export default function DubbedWatchScreen() {
 const styles = StyleSheet.create({
   container:   { flex: 1, backgroundColor: "#000" },
   header: {
-    flexDirection: "row", alignItems: "center", gap: 12,
+    flexDirection: "row", direction: "ltr", alignItems: "center", gap: 12,
     paddingHorizontal: 16, paddingTop: 12, paddingBottom: 12,
     borderBottomWidth: 1, borderBottomColor: "rgba(255,255,255,0.05)",
   },
