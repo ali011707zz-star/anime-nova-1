@@ -201,9 +201,9 @@ export default function DubbedDetailScreen() {
     <View style={[styles.container, { backgroundColor: colors.background, paddingTop: topPad }]}>
       {/* Header */}
       <View style={[styles.header, { borderBottomColor: colors.border }]}>
-         <Pressable onPress={() => router.back()} focusable={tvMode}
+         <Pressable onPress={() => router.canGoBack() ? router.back() : router.replace("/(tabs)" as any)} focusable={tvMode}
            style={({ focused }) => [styles.backBtn, { backgroundColor: colors.input, borderColor: colors.border }, tvMode && tvFocusStyle(focused)]}>
-          <Ionicons name="chevron-back" size={20} color={colors.textSecondary} />
+          <Ionicons name="arrow-back" size={20} color={colors.textSecondary} />
         </Pressable>
         </View>
 
@@ -316,12 +316,12 @@ const styles = StyleSheet.create({
   tvFocusGuide: { flex: 1 },
   tvListContent: { paddingHorizontal: 56, paddingBottom: 140 },
   header: {
-    flexDirection: "row", alignItems: "center", gap: 12,
+    position: "relative", flexDirection: "row", alignItems: "center", gap: 12,
     paddingHorizontal: 16, paddingTop: 12, paddingBottom: 12,
     borderBottomWidth: 1, borderBottomColor: "rgba(255,255,255,0.05)",
   },
   backBtn: {
-    width: 36, height: 36, borderRadius: 10,
+    position: "absolute", left: 12, width: 36, height: 36, borderRadius: 10,
     backgroundColor: "rgba(255,255,255,0.05)",
     borderWidth: 1, borderColor: "rgba(255,255,255,0.08)",
     alignItems: "center", justifyContent: "center",

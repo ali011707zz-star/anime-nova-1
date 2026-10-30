@@ -222,13 +222,7 @@ export default function AnimationsScreen() {
       {/* ── Header ── */}
       <View style={[s.header, tvMode && s.tvHeader]}>
         <View style={[s.headerRow, tvMode && s.tvHeaderRow]}>
-          <View style={{ flexDirection: "row", alignItems: "center", gap: 10, flex: 1 }}>
-            <Pressable
-              onPress={() => (router.canGoBack() ? router.back() : router.push("/"))}
-              style={[s.iconBtn, tvMode && s.tvIconBtn]}
-            >
-              <Ionicons name="chevron-forward" size={20} color={colors.textSecondary} />
-            </Pressable>
+          <View style={{ flex: 1 }}>
             <View>
               <Text style={[s.headerTitle, tvMode && s.tvHeaderTitle]}>رسوم متحركة</Text>
               <Text style={[s.headerSub, tvMode && s.tvHeaderSub]}>
@@ -253,6 +247,14 @@ export default function AnimationsScreen() {
               <Ionicons name="search" size={tvMode ? 20 : 18} color={searchOpen ? colors.accent : colors.textSecondary} />
             </Pressable>
           </View>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="رجوع"
+            onPress={() => (router.canGoBack() ? router.back() : router.push("/"))}
+            style={[s.iconBtn, tvMode && s.tvIconBtn]}
+          >
+            <Ionicons name="arrow-back" size={20} color={colors.textSecondary} />
+          </Pressable>
         </View>
 
         {/* Movie / TV tabs */}

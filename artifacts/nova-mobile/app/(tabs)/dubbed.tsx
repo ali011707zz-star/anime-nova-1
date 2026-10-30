@@ -170,22 +170,24 @@ export default function DubbedScreen() {
       {/* Header */}
       <View style={[styles.header, { borderBottomColor: colors.border }]}>
         <Pressable
-          onPress={() => (router.canGoBack() ? router.back() : router.push("/"))}
+          onPress={() => setSearchOpen(o => !o)}
           focusable={tvMode}
           style={({ focused }) => [styles.iconBtn, { backgroundColor: colors.input, borderColor: colors.border }, tvMode && tvFocusStyle(focused)]}
         >
-          <Ionicons name="chevron-forward" size={20} color={colors.textSecondary} />
+          <Ionicons name={searchOpen ? "close" : "search"} size={18} color={colors.textSecondary} />
         </Pressable>
         <View style={{ flex: 1 }}>
           <Text style={[styles.headerTitle, { color: colors.textPrimary }]}>كرتون مدبلج</Text>
           <Text style={[styles.headerSub, { color: colors.textSecondary }]}>كرتون مدبلج للعربية</Text>
         </View>
         <Pressable
-          onPress={() => setSearchOpen(o => !o)}
+          accessibilityRole="button"
+          accessibilityLabel="رجوع"
+          onPress={() => (router.canGoBack() ? router.back() : router.push("/"))}
           focusable={tvMode}
           style={({ focused }) => [styles.iconBtn, { backgroundColor: colors.input, borderColor: colors.border }, tvMode && tvFocusStyle(focused)]}
         >
-          <Ionicons name={searchOpen ? "close" : "search"} size={18} color={colors.textSecondary} />
+          <Ionicons name="arrow-back" size={20} color={colors.textSecondary} />
         </Pressable>
       </View>
 

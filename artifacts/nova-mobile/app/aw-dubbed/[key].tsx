@@ -145,16 +145,16 @@ export default function AwDubbedDetailScreen() {
     <View style={[styles.container, { backgroundColor: colors.background, paddingTop: topPad }]}>
       {/* Header */}
       <View style={[styles.header, { borderBottomColor: colors.border }]}>
-         <Pressable onPress={() => router.back()} focusable={tvMode}
+        <View style={{ width: 36 }} />
+        <Text style={[styles.headerTitle, { color: colors.textPrimary }]} numberOfLines={1}>{displayTitle}</Text>
+        <Pressable onPress={() => router.canGoBack() ? router.back() : router.replace("/(tabs)" as any)} focusable={tvMode}
            style={({ focused }) => [
              styles.backBtn,
              { backgroundColor: colors.input, borderColor: colors.border },
              tvMode && tvFocusStyle(focused),
            ]}>
-           <Ionicons name="chevron-forward" size={20} color={colors.textSecondary} />
+           <Ionicons name="arrow-back" size={20} color={colors.textSecondary} />
         </Pressable>
-        <Text style={[styles.headerTitle, { color: colors.textPrimary }]} numberOfLines={1}>{displayTitle}</Text>
-        <View style={{ width: 36 }} />
       </View>
 
       <TvFocusGuideView autoFocus={tvMode} style={styles.tvFocusGuide}>

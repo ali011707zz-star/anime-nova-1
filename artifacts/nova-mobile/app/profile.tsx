@@ -175,6 +175,19 @@ export default function ProfileScreen() {
   if (!user) {
     return (
       <View style={[s.container, { backgroundColor: colors.background, justifyContent: "center", alignItems: "center" }]}>
+        <Pressable
+          onPress={() => router.canGoBack() ? router.back() : router.replace("/(tabs)" as any)}
+          accessibilityRole="button"
+          accessibilityLabel="رجوع"
+          focusable={tvMode}
+          style={({ focused }) => [
+            s.backBtn,
+            { position: "absolute", left: 16, top: topPad + 8, backgroundColor: colors.input, borderColor: colors.border, borderWidth: 1 },
+            tvMode && tvFocusStyle(focused),
+          ]}
+        >
+          <Ionicons name="arrow-back" size={22} color={colors.text} />
+        </Pressable>
         <ActivityIndicator color={colors.primary} size="large" />
       </View>
     );
@@ -184,7 +197,9 @@ export default function ProfileScreen() {
     <View style={[s.container, { backgroundColor: colors.background }]}>
       {/* Header */}
       <View style={[s.header, { paddingTop: topPad + 8 }]}>
-        <Pressable onPress={() => router.back()} focusable={tvMode}
+        <View style={{ width: 38 }} />
+        <Text style={[s.headerTitle, { color: colors.text }]}>الملف الشخصي</Text>
+        <Pressable onPress={() => router.canGoBack() ? router.back() : router.replace("/(tabs)" as any)} focusable={tvMode}
           style={({ focused }) => [
             s.backBtn,
             { backgroundColor: colors.input, borderColor: colors.border, borderWidth: 1 },
@@ -192,8 +207,6 @@ export default function ProfileScreen() {
           ]}>
           <Ionicons name="arrow-back" size={22} color={colors.text} />
         </Pressable>
-        <Text style={[s.headerTitle, { color: colors.text }]}>الملف الشخصي</Text>
-        <View style={{ width: 38 }} />
       </View>
 
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 60 }} keyboardShouldPersistTaps="handled">

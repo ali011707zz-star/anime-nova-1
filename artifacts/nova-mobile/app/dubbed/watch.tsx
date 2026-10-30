@@ -259,7 +259,8 @@ export default function DubbedWatchScreen() {
       savedOnExitRef.current = true;
       void saveProgress();
     }
-    router.back();
+    if (router.canGoBack()) router.back();
+    else router.replace("/(tabs)" as any);
   }, [router, saveProgress]);
 
   const onProgress = useCallback((position: number, duration: number) => {
@@ -280,14 +281,14 @@ export default function DubbedWatchScreen() {
       <View style={[styles.container, { backgroundColor: colors.background, paddingTop: topPad }]}>
         <RewardedAdPrompt />
         <View style={styles.header}>
-           <Pressable onPress={() => router.back()} focusable={tvMode}
-             style={({ focused }) => [styles.backBtn, tvMode && tvFocusStyle(focused)]}>
-            <Ionicons name="chevron-back" size={20} color={colors.textSecondary} />
-          </Pressable>
           <View style={{ flex: 1 }}>
             <Text style={[styles.headerTitle, { color: colors.textPrimary }]} numberOfLines={1}>{title}</Text>
             <Text style={[styles.headerSub, { color: colors.textSecondary }]}>{season} · الحلقة {ep}</Text>
           </View>
+          <Pressable onPress={handleBack} focusable={tvMode}
+             style={({ focused }) => [styles.backBtn, tvMode && tvFocusStyle(focused)]}>
+            <Ionicons name="arrow-back" size={20} color={colors.textSecondary} />
+          </Pressable>
         </View>
         <View style={styles.center}>
           <ActivityIndicator color={colors.accent} size="large" />
@@ -303,14 +304,14 @@ export default function DubbedWatchScreen() {
       <View style={[styles.container, { backgroundColor: colors.background, paddingTop: topPad }]}>
         <RewardedAdPrompt />
         <View style={styles.header}>
-           <Pressable onPress={() => router.back()} focusable={tvMode}
-             style={({ focused }) => [styles.backBtn, tvMode && tvFocusStyle(focused)]}>
-            <Ionicons name="chevron-back" size={20} color={colors.textSecondary} />
-          </Pressable>
           <View style={{ flex: 1 }}>
             <Text style={[styles.headerTitle, { color: colors.textPrimary }]} numberOfLines={1}>{title}</Text>
             <Text style={[styles.headerSub, { color: colors.textSecondary }]}>{season} · الحلقة {ep}</Text>
           </View>
+          <Pressable onPress={handleBack} focusable={tvMode}
+             style={({ focused }) => [styles.backBtn, tvMode && tvFocusStyle(focused)]}>
+            <Ionicons name="arrow-back" size={20} color={colors.textSecondary} />
+          </Pressable>
         </View>
         <View style={styles.center}>
           <View style={styles.errorIcon}>

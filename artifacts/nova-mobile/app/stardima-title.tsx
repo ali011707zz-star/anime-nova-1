@@ -410,18 +410,18 @@ export default function StardimaTitleScreen() {
     <View style={[styles.screen, { paddingTop: topPad }]}>
       <RewardedAdPrompt />
       <View style={[styles.header, { minHeight: tvMode ? 68 : 54 }]}>
+        <Text numberOfLines={1} style={[styles.heading, tvMode && { fontSize: 22 }]}>
+          {titleText(title)}
+        </Text>
         <Pressable
-          onPress={() => router.back()}
+          onPress={() => router.canGoBack() ? router.back() : router.replace("/(tabs)/browse" as any)}
           focusable={tvMode}
           accessibilityRole="button"
           accessibilityLabel="رجوع"
           style={({ focused }) => [styles.back, tvMode && focused && tvFocusStyle(true)]}
         >
-          <Ionicons name="chevron-forward" size={21} color={colors.textPrimary} />
+          <Ionicons name="arrow-back" size={21} color={colors.textPrimary} />
         </Pressable>
-        <Text numberOfLines={1} style={[styles.heading, tvMode && { fontSize: 22 }]}>
-          {titleText(title)}
-        </Text>
       </View>
 
       {loading ? (

@@ -72,7 +72,7 @@ export function CatalogPageHeader({ title, onBack }: HeaderProps) {
           focusable={tvMode}
           style={[styles.backButton, { top: topInset + 6, backgroundColor: colors.surface, borderColor: colors.border }, tvMode && tvFocusStyle(focusedAction === "back")]}
         >
-          <Ionicons name="chevron-forward" size={21} color={colors.textPrimary} />
+          <Ionicons name="arrow-back" size={21} color={colors.textPrimary} />
         </Pressable>
       </View>
       <DrawerMenu visible={drawerVisible} onClose={() => setDrawerVisible(false)} />
@@ -134,7 +134,7 @@ const styles = StyleSheet.create({
   },
   actions: {
     position: "absolute",
-    end: 14,
+    right: 14,
     flexDirection: "row",
     gap: 8,
     zIndex: 2,
@@ -150,8 +150,8 @@ const styles = StyleSheet.create({
   },
   title: {
     position: "absolute",
-    start: 60,
-    end: 104,
+    left: 60,
+    right: 104,
     textAlign: "right",
     textAlignVertical: "center",
     fontSize: 18,
@@ -159,7 +159,7 @@ const styles = StyleSheet.create({
   },
   backButton: {
     position: "absolute",
-    start: 14,
+    left: 14,
     width: 38,
     height: 38,
     borderRadius: 12,

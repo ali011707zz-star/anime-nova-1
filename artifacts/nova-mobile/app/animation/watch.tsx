@@ -927,7 +927,7 @@ export default function AnimationWatchScreen() {
   if (screen === "external") {
     return (
       <View style={[w.container, { alignItems: "center", justifyContent: "center", gap: 16 }]}>
-        <Pressable onPress={() => setScreen("picker")} style={[w.videoBackBtn, { position: "absolute", top: topPad + 4, right: 12 }]}>
+        <Pressable onPress={() => setScreen("picker")} style={[w.videoBackBtn, { position: "absolute", top: topPad + 4, left: 12 }]}>
           <Ionicons name="arrow-back" size={18} color="#fff" />
         </Pressable>
         <View style={{ width: 72, height: 72, borderRadius: 36, backgroundColor: "rgba(139,92,246,0.15)", alignItems: "center", justifyContent: "center" }}>
@@ -951,7 +951,7 @@ export default function AnimationWatchScreen() {
     const resolveUrl2 = getPlayUrl(playingSrc);
     return (
       <View style={{ flex: 1, backgroundColor: "#07070d", alignItems: "center", justifyContent: "center", gap: 14 }}>
-        <Pressable onPress={() => setScreen("picker")} style={[w.videoBackBtn, { position: "absolute", top: topPad + 4, right: 12 }]}>
+        <Pressable onPress={() => setScreen("picker")} style={[w.videoBackBtn, { position: "absolute", top: topPad + 4, left: 12 }]}>
           <Ionicons name="arrow-back" size={18} color="#fff" />
         </Pressable>
         <SpinRing />
@@ -975,7 +975,7 @@ export default function AnimationWatchScreen() {
     if (Platform.OS === "web") {
       return (
         <View style={[w.container, { alignItems: "center", justifyContent: "center", gap: 16 }]}>
-          <Pressable onPress={() => setScreen("picker")} style={[w.videoBackBtn, { position: "absolute", top: topPad + 4, right: 12 }]}>
+          <Pressable onPress={() => setScreen("picker")} style={[w.videoBackBtn, { position: "absolute", top: topPad + 4, left: 12 }]}>
             <Ionicons name="arrow-back" size={18} color="#fff" />
           </Pressable>
           <View style={{ width: 72, height: 72, borderRadius: 36, backgroundColor: "rgba(139,92,246,0.15)", alignItems: "center", justifyContent: "center" }}>
@@ -998,7 +998,7 @@ export default function AnimationWatchScreen() {
     // Native: no WebView — show info card
     return (
       <View style={[w.container, { alignItems: "center", justifyContent: "center", gap: 16 }]}>
-        <Pressable onPress={() => setScreen("picker")} style={[w.videoBackBtn, { position: "absolute", top: topPad + 4, right: 12 }]}>
+        <Pressable onPress={() => setScreen("picker")} style={[w.videoBackBtn, { position: "absolute", top: topPad + 4, left: 12 }]}>
           <Ionicons name="arrow-back" size={18} color="#fff" />
         </Pressable>
         <View style={{ width: 72, height: 72, borderRadius: 36, backgroundColor: "rgba(139,92,246,0.15)", alignItems: "center", justifyContent: "center" }}>
@@ -1181,7 +1181,7 @@ const w = StyleSheet.create({
 
   /* Loading screen — redesigned */
   loadTopBar: { flexDirection: "row", alignItems: "center", gap: 12, paddingHorizontal: 14, paddingBottom: 10, zIndex: 10 },
-  loadBackBtn: { position: "absolute", right: 16, width: 36, height: 36, borderRadius: 18, backgroundColor: "rgba(0,0,0,0.45)", borderWidth: 1, borderColor: "rgba(255,255,255,0.12)", alignItems: "center", justifyContent: "center", zIndex: 10 },
+  loadBackBtn: { position: "absolute", left: 16, width: 36, height: 36, borderRadius: 18, backgroundColor: "rgba(0,0,0,0.45)", borderWidth: 1, borderColor: "rgba(255,255,255,0.12)", alignItems: "center", justifyContent: "center", zIndex: 10 },
   loadTopTitle: { fontSize: 13, fontFamily: "Cairo_700Bold", color: "rgba(255,255,255,0.88)" },
   loadTopSub: { fontSize: 10, color: "rgba(255,255,255,0.35)", fontFamily: "Cairo_400Regular" },
   loadCard: { flex: 1, alignItems: "center", justifyContent: "center", gap: 22, paddingHorizontal: 28, paddingBottom: 40 },

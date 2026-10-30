@@ -1652,8 +1652,13 @@ export default function SettingsScreen() {
           </View>
           <Text style={[ts.headerTitle, { color: colors.textPrimary }]}>الإعدادات</Text>
         </View>
-        <Pressable onPress={() => router.back()} style={[ts.headerBackBtn, { backgroundColor: colors.surfaceElevated, borderColor: colors.border }]}>
-          <Ionicons name="chevron-forward" size={16} color={colors.mutedForeground} />
+        <Pressable
+          onPress={() => router.canGoBack() ? router.back() : router.replace("/(tabs)" as any)}
+          accessibilityRole="button"
+          accessibilityLabel="رجوع"
+          style={[ts.headerBackBtn, { backgroundColor: colors.surfaceElevated, borderColor: colors.border }]}
+        >
+          <Ionicons name="arrow-back" size={16} color={colors.mutedForeground} />
         </Pressable>
       </View>
 

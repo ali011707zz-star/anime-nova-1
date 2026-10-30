@@ -761,6 +761,17 @@ export default function EpisodeListScreen() {
 
   if (loading) return (
     <View style={[ep_s.container, { backgroundColor: colors.background }]}>
+      <View style={[ep_s.topBar, tvMode && ep_s.tvTopBar]}>
+        <Pressable
+          onPress={() => router.canGoBack() ? router.back() : router.replace("/(tabs)")}
+          focusable={tvMode}
+          accessibilityRole="button"
+          accessibilityLabel="رجوع"
+          style={({ focused }) => [ep_s.topBarBack, tvMode && ep_s.tvTopBarBack, tvMode && tvFocusStyle(focused)]}
+        >
+          <Ionicons name="arrow-back" size={20} color={colors.textPrimary} />
+        </Pressable>
+      </View>
       <View style={ep_s.center}>
         <ActivityIndicator color="#8B5CF6" size="large" />
       </View>
@@ -768,8 +779,19 @@ export default function EpisodeListScreen() {
   );
   if (!anime) return (
     <View style={[ep_s.container, { backgroundColor: colors.background }]}>
+      <View style={[ep_s.topBar, tvMode && ep_s.tvTopBar]}>
+        <Pressable
+          onPress={() => router.canGoBack() ? router.back() : router.replace("/(tabs)")}
+          focusable={tvMode}
+          accessibilityRole="button"
+          accessibilityLabel="رجوع"
+          style={({ focused }) => [ep_s.topBarBack, tvMode && ep_s.tvTopBarBack, tvMode && tvFocusStyle(focused)]}
+        >
+          <Ionicons name="arrow-back" size={20} color={colors.textPrimary} />
+        </Pressable>
+      </View>
       <View style={ep_s.center}>
-          <Text style={[ep_s.notFound, { color: colors.textSecondary }]}>لم يُعثر على الأنمي</Text>
+        <Text style={[ep_s.notFound, { color: colors.textSecondary }]}>لم يُعثر على الأنمي</Text>
       </View>
     </View>
   );
@@ -793,7 +815,7 @@ export default function EpisodeListScreen() {
           accessibilityLabel="رجوع"
           style={({ focused }) => [ep_s.topBarBack, tvMode && ep_s.tvTopBarBack, tvMode && tvFocusStyle(focused)]}
         >
-          <Ionicons name="chevron-forward" size={tvMode ? 26 : 20} color={colors.textPrimary} />
+          <Ionicons name="arrow-back" size={tvMode ? 26 : 20} color={colors.textPrimary} />
         </Pressable>
       </View>
       {/* ── Hero Banner ── */}
@@ -1040,16 +1062,16 @@ function createEpStyles(colors: ReturnType<typeof useColors>) {
 return StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
   topBar: { height: 52, backgroundColor: colors.surface, borderBottomWidth: 1, borderBottomColor: colors.border, justifyContent: "center", position: "relative" },
-  topBarTitle: { position: "absolute", left: 16, right: 62, textAlign: "right", color: colors.textPrimary, fontSize: 13, lineHeight: 20, fontFamily: "Cairo_800ExtraBold" },
-  topBarBack: { position: "absolute", right: 12, top: 7, width: 38, height: 38, borderRadius: 12, alignItems: "center", justifyContent: "center", backgroundColor: colors.surfaceElevated, borderWidth: 1, borderColor: colors.border },
+  topBarTitle: { position: "absolute", left: 62, right: 16, textAlign: "right", color: colors.textPrimary, fontSize: 13, lineHeight: 20, fontFamily: "Cairo_800ExtraBold" },
+  topBarBack: { position: "absolute", left: 12, top: 7, width: 38, height: 38, borderRadius: 12, alignItems: "center", justifyContent: "center", backgroundColor: colors.surfaceElevated, borderWidth: 1, borderColor: colors.border },
   tvTopBar: { height: 62 },
-  tvTopBarTitle: { left: 28, right: 84, fontSize: 18, lineHeight: 27 },
-  tvTopBarBack: { width: 48, height: 48, top: 7, right: 18, borderRadius: 14 },
+  tvTopBarTitle: { left: 84, right: 28, fontSize: 18, lineHeight: 27 },
+  tvTopBarBack: { width: 48, height: 48, top: 7, left: 18, borderRadius: 14 },
   center: { flex: 1, alignItems: "center", justifyContent: "center" },
   notFound: { fontSize: 14, color: colors.textSecondary, fontFamily: "Cairo_400Regular" },
   hero: { height: 220, justifyContent: "flex-end", overflow: "hidden" },
-  backBtn: { position: "absolute", right: 14, width: 36, height: 36, backgroundColor: "rgba(0,0,0,0.5)", borderRadius: 14, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: "rgba(255,255,255,0.1)" },
-  commentsBtn: { position: "absolute", left: 14, top: 12, width: 36, height: 36, backgroundColor: "rgba(139,92,246,0.25)", borderRadius: 14, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: "rgba(139,92,246,0.4)" },
+  backBtn: { position: "absolute", left: 14, width: 36, height: 36, backgroundColor: "rgba(0,0,0,0.5)", borderRadius: 14, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: "rgba(255,255,255,0.1)" },
+  commentsBtn: { position: "absolute", right: 14, top: 12, width: 36, height: 36, backgroundColor: "rgba(139,92,246,0.25)", borderRadius: 14, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: "rgba(139,92,246,0.4)" },
   commentsListBtn: { flexDirection: "row", alignItems: "center", gap: 8, marginHorizontal: 12, marginBottom: 8, padding: 12, borderRadius: 14, backgroundColor: colors.accentSurface, borderWidth: 1, borderColor: colors.accentBorder },
   commentsListBtnText: { flex: 1, fontSize: 13, fontFamily: "Cairo_700Bold", color: colors.accent },
   heroBottom: { flexDirection: "row", alignItems: "flex-end", gap: 12, paddingHorizontal: 14, paddingBottom: 14 },

@@ -224,9 +224,8 @@ export default function CommentsPage() {
     <View style={[s.container, { paddingTop: Platform.OS === "web" ? 0 : insets.top }]}>
       {/* Header */}
       <View style={s.header}>
-        <Pressable onPress={() => router.canGoBack() ? router.back() : router.replace("/(tabs)" as any)} focusable={tvMode}
-          style={({ focused }) => [s.backBtn, tvMode && tvFocusStyle(focused)]}>
-          <Ionicons name="chevron-back" size={20} color={colors.textPrimary} />
+        <Pressable onPress={loadComments} style={s.refreshBtn}>
+          <Ionicons name="refresh" size={18} color={colors.textMuted} />
         </Pressable>
         <View style={{ flex: 1 }}>
           <View style={s.headerTitleRow}>
@@ -242,8 +241,9 @@ export default function CommentsPage() {
             <Text style={s.headerSub} numberOfLines={1}>{pageTitle}</Text>
           )}
         </View>
-        <Pressable onPress={loadComments} style={s.refreshBtn}>
-          <Ionicons name="refresh" size={18} color={colors.textMuted} />
+        <Pressable onPress={() => router.canGoBack() ? router.back() : router.replace("/(tabs)" as any)} focusable={tvMode}
+          style={({ focused }) => [s.backBtn, tvMode && tvFocusStyle(focused)]}>
+          <Ionicons name="arrow-back" size={20} color={colors.textPrimary} />
         </Pressable>
       </View>
 

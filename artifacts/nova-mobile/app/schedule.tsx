@@ -62,11 +62,11 @@ export default function ScheduleScreen() {
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       {/* Header */}
       <View style={[styles.header, { paddingTop: topPad + 16 }]}>
-        <Pressable onPress={() => router.back()} focusable={tvMode} style={({ focused }) => [styles.backBtn, tvMode && tvFocusStyle(focused)]}>
+        <View style={{ width: 30 }} />
+        <Text style={[styles.title, { color: colors.text }]}>جدول البث</Text>
+        <Pressable onPress={() => router.canGoBack() ? router.back() : router.replace("/(tabs)" as any)} focusable={tvMode} style={({ focused }) => [styles.backBtn, tvMode && tvFocusStyle(focused)]}>
           <Ionicons name="arrow-back" size={22} color={colors.text} />
         </Pressable>
-        <Text style={[styles.title, { color: colors.text }]}>جدول البث</Text>
-        <View style={{ width: 30 }} />
       </View>
 
       {/* Day Selector */}

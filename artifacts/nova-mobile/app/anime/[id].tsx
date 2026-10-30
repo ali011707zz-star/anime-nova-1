@@ -456,7 +456,7 @@ export default function AnimeDetailScreen() {
           hasTVPreferredFocus={tvMode}
           onFocus={() => rememberDetailFocus("back")}
           style={({ focused }) => [d.topBarBack, d.topBarBackRight, tvMode && d.tvTopBarBack, tvMode && tvFocusStyle(focused)]}>
-          <Ionicons name="chevron-forward" size={20} color={colors.textPrimary} />
+          <Ionicons name="arrow-back" size={20} color={colors.textPrimary} />
         </Pressable>
         <Text style={d.topBarTitle} numberOfLines={1}>
           {(Array.isArray(title) ? title[0] : title) || (Array.isArray(english) ? english[0] : english) || "تفاصيل الأنمي"}
@@ -474,7 +474,7 @@ export default function AnimeDetailScreen() {
           hasTVPreferredFocus={tvMode}
           onFocus={() => rememberDetailFocus("back")}
           style={({ focused }) => [d.topBarBack, d.topBarBackRight, tvMode && d.tvTopBarBack, tvMode && tvFocusStyle(focused)]}>
-          <Ionicons name="chevron-forward" size={20} color={colors.textPrimary} />
+          <Ionicons name="arrow-back" size={20} color={colors.textPrimary} />
         </Pressable>
         <Text style={d.topBarTitle} numberOfLines={1}>
           {(Array.isArray(title) ? title[0] : title) || (Array.isArray(english) ? english[0] : english) || "تفاصيل الأنمي"}
@@ -534,7 +534,7 @@ export default function AnimeDetailScreen() {
           hasTVPreferredFocus={tvMode}
           onFocus={() => rememberDetailFocus("back")}
           style={({ focused }) => [d.topBarBack, d.topBarBackRight, tvMode && d.tvTopBarBack, tvMode && tvFocusStyle(focused)]}>
-          <Ionicons name="chevron-forward" size={tvMode ? 26 : 20} color={colors.textPrimary} />
+          <Ionicons name="arrow-back" size={tvMode ? 26 : 20} color={colors.textPrimary} />
         </Pressable>
       </View>
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={[{ paddingBottom: 100 }, tvMode && d.tvContent]}>
@@ -996,11 +996,11 @@ function createDetailStyles(colors: ThemePalette) {
   container: { flex: 1, backgroundColor: colors.background },
   center: { flex: 1, alignItems: "center", justifyContent: "center" },
   topBar: { height: 52, flexDirection: "row", alignItems: "center", justifyContent: "center", paddingHorizontal: 14, backgroundColor: colors.surface, borderBottomWidth: 1, borderBottomColor: colors.border, position: "relative" },
-  topBarTitle: { position: "absolute", left: 96, right: 62, textAlign: "right", color: colors.textPrimary, fontSize: 13, lineHeight: 20, fontFamily: "Cairo_800ExtraBold" },
-  topBarStatus: { position: "absolute", left: 14, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 9, backgroundColor: colors.accentSurface, borderWidth: 1, borderColor: colors.accentBorder },
+  topBarTitle: { position: "absolute", left: 62, right: 100, textAlign: "right", color: colors.textPrimary, fontSize: 13, lineHeight: 20, fontFamily: "Cairo_800ExtraBold" },
+  topBarStatus: { position: "absolute", right: 14, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 9, backgroundColor: colors.accentSurface, borderWidth: 1, borderColor: colors.accentBorder },
   topBarStatusText: { fontSize: 9, lineHeight: 14, fontFamily: "Cairo_700Bold", color: colors.accent },
   topBarBack: { width: 38, height: 38, borderRadius: 12, alignItems: "center", justifyContent: "center", backgroundColor: colors.surfaceElevated, borderWidth: 1, borderColor: colors.border },
-  topBarBackRight: { position: "absolute", right: 12, top: 7 },
+  topBarBackRight: { position: "absolute", left: 12, top: 7 },
   topBarSpacer: { width: 50 },
   hero: { height: 250, justifyContent: "flex-end", overflow: "hidden" },
   favBtn: { position: "absolute", right: 14, top: 14, width: 36, height: 36, backgroundColor: "rgba(0,0,0,0.5)", borderRadius: 14, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: "rgba(255,255,255,0.1)" },
@@ -1092,8 +1092,8 @@ function createDetailStyles(colors: ThemePalette) {
   emptyTabText: { textAlign: "center", color: colors.textMuted, fontSize: 12, fontFamily: "Cairo_400Regular", paddingVertical: 20 },
   tvContent: { paddingHorizontal: 40, paddingBottom: 120 },
   tvTopBar: { height: 62, paddingHorizontal: 28 },
-  tvTopBarTitle: { left: 130, right: 90, fontSize: 18, lineHeight: 27 },
-  tvTopBarStatus: { left: 28, paddingHorizontal: 12, paddingVertical: 5, borderRadius: 11 },
+  tvTopBarTitle: { left: 84, right: 140, fontSize: 18, lineHeight: 27 },
+  tvTopBarStatus: { right: 28, paddingHorizontal: 12, paddingVertical: 5, borderRadius: 11 },
   tvTopBarStatusText: { fontSize: 13, lineHeight: 20 },
   tvTopBarBack: { width: 48, height: 48, borderRadius: 14 },
   tvCharGrid: { columnGap: 14, rowGap: 14 },

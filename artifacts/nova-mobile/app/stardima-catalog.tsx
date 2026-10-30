@@ -604,6 +604,12 @@ export default function StarDimaCatalogScreen() {
   const listHeader = (
     <View style={[styles.listHeader, { width: contentWidth }]}>
       <View style={[styles.header, { paddingTop: Math.max(8, insets.top ? 2 : 8) }]}>
+        <View style={styles.heading}>
+          <Text style={[styles.title, tvMode && { fontSize: 27, lineHeight: 37 }]}>فهرس StarDima</Text>
+          <Text style={[styles.subtitle, tvMode && { fontSize: 15, lineHeight: 22 }]}>
+            فئات المصدر ووسوم الصوت والترجمة
+          </Text>
+        </View>
         <Pressable
           onPress={() => router.canGoBack() ? router.back() : router.replace("/(tabs)/browse" as any)}
           focusable={tvMode}
@@ -611,14 +617,8 @@ export default function StarDimaCatalogScreen() {
           accessibilityLabel="رجوع"
           style={({ focused }) => [styles.backButton, tvMode && focused && tvFocusStyle(true)]}
         >
-          <Ionicons name="chevron-forward" size={tvMode ? 28 : 21} color={colors.textPrimary} />
+          <Ionicons name="arrow-back" size={tvMode ? 28 : 21} color={colors.textPrimary} />
         </Pressable>
-        <View style={styles.heading}>
-          <Text style={[styles.title, tvMode && { fontSize: 27, lineHeight: 37 }]}>فهرس StarDima</Text>
-          <Text style={[styles.subtitle, tvMode && { fontSize: 15, lineHeight: 22 }]}>
-            فئات المصدر ووسوم الصوت والترجمة
-          </Text>
-        </View>
       </View>
 
       <Text style={[styles.summary, tvMode && { fontSize: 14 }]}>

@@ -403,7 +403,12 @@ export default function StardimaPlayerScreen() {
           serverName,
           selectedQuality,
         ].filter(Boolean).join(" · ")}
-        onBack={() => { void saveProgress().finally(() => router.back()); }}
+        onBack={() => {
+          void saveProgress().finally(() => {
+            if (router.canGoBack()) router.back();
+            else router.replace("/(tabs)/browse" as any);
+          });
+        }}
         onProgress={(position, duration) => {
           progressRef.current = { position, duration };
         }}
@@ -427,15 +432,6 @@ export default function StardimaPlayerScreen() {
   return (
     <View style={styles.screen}>
       <View style={styles.header}>
-        <Pressable
-          onPress={() => router.back()}
-          accessibilityRole="button"
-          accessibilityLabel="رجوع"
-          focusable={tvMode}
-          style={({ focused }) => [styles.back, tvMode && focused && tvFocusStyle(true)]}
-        >
-          <Ionicons name="chevron-forward" size={21} color={colors.textPrimary} />
-        </Pressable>
         <View style={{ flex: 1 }}>
           <Text numberOfLines={1} style={[styles.heading, tvMode && { fontSize: 20 }]}>{title}</Text>
           <Text numberOfLines={1} style={[styles.subheading, tvMode && { fontSize: 13 }]}>
@@ -446,6 +442,15 @@ export default function StardimaPlayerScreen() {
             ].filter(Boolean).join(" · ")}
           </Text>
         </View>
+        <Pressable
+          onPress={() => router.canGoBack() ? router.back() : router.replace("/(tabs)/browse" as any)}
+          accessibilityRole="button"
+          accessibilityLabel="رجوع"
+          focusable={tvMode}
+          style={({ focused }) => [styles.back, tvMode && focused && tvFocusStyle(true)]}
+        >
+          <Ionicons name="arrow-back" size={21} color={colors.textPrimary} />
+        </Pressable>
       </View>
 
       {loading || (directSource?.length && !resumeReady) ? (
@@ -476,14 +481,14 @@ export default function StardimaPlayerScreen() {
             <Ionicons name="refresh" size={16} color={colors.accent} />
           </Pressable>
           <Pressable
-            onPress={() => router.back()}
+            onPress={() => router.canGoBack() ? router.back() : router.replace("/(tabs)/browse" as any)}
             accessibilityRole="button"
             accessibilityLabel="اختيار خادم آخر"
             focusable={tvMode}
             style={({ focused }) => [styles.action, tvMode && focused && tvFocusStyle(true)]}
           >
             <Text style={styles.actionText}>اختيار خادم آخر</Text>
-            <Ionicons name="chevron-forward" size={16} color={colors.accent} />
+            <Ionicons name="arrow-back" size={16} color={colors.accent} />
           </Pressable>
         </View>
       ) : null}

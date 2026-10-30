@@ -320,15 +320,6 @@ export default function StardimaServersScreen() {
   return (
     <View style={styles.screen}>
       <View style={styles.header}>
-        <TvPressable
-          onPress={() => router.back()}
-          accessibilityRole="button"
-          accessibilityLabel="رجوع إلى الحلقات"
-          focusable={tvMode}
-          style={({ focused }) => [styles.back, tvMode && focused && tvFocusStyle(true)]}
-        >
-          <Ionicons name="chevron-forward" size={21} color={colors.textPrimary} />
-        </TvPressable>
         <View style={{ flex: 1 }}>
           <Text numberOfLines={1} style={[styles.heading, tvMode && { fontSize: 20 }]}>
             {title}
@@ -337,6 +328,15 @@ export default function StardimaServersScreen() {
             {episodeSubheading}
           </Text>
         </View>
+        <TvPressable
+          onPress={() => router.canGoBack() ? router.back() : router.replace("/(tabs)/browse" as any)}
+          accessibilityRole="button"
+          accessibilityLabel="رجوع إلى الحلقات"
+          focusable={tvMode}
+          style={({ focused }) => [styles.back, tvMode && focused && tvFocusStyle(true)]}
+        >
+          <Ionicons name="arrow-back" size={21} color={colors.textPrimary} />
+        </TvPressable>
       </View>
 
       {loading ? (
