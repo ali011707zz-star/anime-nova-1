@@ -5,7 +5,7 @@ import { FlatList, Image, useWindowDimensions } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import {
-  Platform, RefreshControl, TextInput,
+  I18nManager, Platform, RefreshControl, TextInput,
   StyleSheet, Text, View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -349,7 +349,7 @@ export default function HomeScreen() {
         ListHeaderComponent={
           <View>
         {/* Header */}
-        <View style={[styles.header, { paddingTop: topPad + 6 }]}>
+        <View style={[styles.header, { paddingTop: topPad + 6, flexDirection: I18nManager.isRTL ? "row-reverse" : "row" }]}>
           <Pressable
             accessibilityLabel="فتح القائمة"
             onPress={() => setShowDrawer(true)}
@@ -830,12 +830,12 @@ export default function HomeScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1 },
   header: {
-    flexDirection: "row", direction: "ltr", alignItems: "center",
+    alignItems: "center",
     gap: 10, paddingHorizontal: 16, paddingBottom: 8,
   },
   headerSpacer: { flex: 1, minWidth: 0 },
-  headerBrandGroup: { flexDirection: "row", direction: "ltr", alignItems: "center", gap: 10, flexShrink: 1, minWidth: 0 },
-  logoRow: { flexDirection: "row", direction: "ltr", alignItems: "center", gap: 7, flexShrink: 0 },
+  headerBrandGroup: { flexDirection: I18nManager.isRTL ? "row-reverse" : "row", alignItems: "center", gap: 10, flexShrink: 1, minWidth: 0 },
+  logoRow: { flexDirection: I18nManager.isRTL ? "row-reverse" : "row", alignItems: "center", gap: 7, flexShrink: 0 },
   logoAccent: { width: 3, height: 26, borderRadius: 2 },
   logoText: { fontSize: 16, letterSpacing: 0.7, fontFamily: "Cairo_800ExtraBold" },
   iconBtn: {
