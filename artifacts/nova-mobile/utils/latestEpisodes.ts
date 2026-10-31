@@ -111,7 +111,11 @@ export async function fetchLatestEpisodes(signal?: AbortSignal): Promise<LatestE
   );
   if (fulfilled.length === 0) throw new Error("تعذّر تحميل أحدث الحلقات من المصادر");
 
-  return fulfilled
+  const items = fulfilled
     .flatMap((result) => result.value)
     .sort((a, b) => Number(b.episode) - Number(a.episode));
+  if (items.length === 0) {
+    throw new Error("لم تصل بيانات أحدث الحلقات من المصادر");
+  }
+  return items;
 }

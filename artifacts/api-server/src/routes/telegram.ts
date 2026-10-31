@@ -27,6 +27,13 @@ const TOKEN   = () => process.env.TELEGRAM_BOT_TOKEN || _cachedToken;
 const API     = () => `https://api.telegram.org/bot${TOKEN()}`;
 const SITE_URL = "https://animenovaa.duckdns.org/";
 
+function internalApiBaseUrl(): string {
+  const configured = process.env.NOVA_INTERNAL_API_URL?.trim().replace(/\/+$/, "");
+  if (configured) return configured;
+  const port = Number.parseInt(process.env.PORT || "5000", 10);
+  return `http://127.0.0.1:${Number.isInteger(port) && port > 0 && port <= 65_535 ? port : 5000}`;
+}
+
 /* ── helpers ──────────────────────────────────────────────────────────── */
 
 function escapeTelegramHtml(value: unknown): string {
@@ -397,13 +404,31 @@ let schedulerSentToday = 0;
 let schedulerTimer: ReturnType<typeof setTimeout> | null = null;
 
 const INTERVAL_MS = 10 * 60 * 1000; // كل 10 دقائق (كان 30)
+const STARTUP_EPISODE_WINDOW_MS = 30 * 60 * 1000;
+
+function wasRecentlyUpdated(item: any): boolean {
+  const value = item?.updatedAt ?? item?.updated_at ?? item?.latest_episode_at ?? item?.latest_episode_date;
+  let timestamp: number;
+  if (typeof value === "number" && Number.isFinite(value)) {
+    timestamp = value < 1_000_000_000_000 ? value * 1000 : value;
+  } else if (typeof value === "string" && value.trim()) {
+    timestamp = Date.parse(value);
+  } else {
+    return false;
+  }
+  if (!Number.isFinite(timestamp)) return false;
+  const age = Date.now() - timestamp;
+  return age >= -5 * 60_000 && age <= STARTUP_EPISODE_WINDOW_MS;
+}
 
 /* ── poll the same normalized feed shown in the homepage's latest episodes ── */
 
 async function pollAnimeSlayerDirect(): Promise<void> {
   try {
-    // Read the same normalized feed as the homepage's "أحدث الحلقات" section.
-    const resp = await fetch(`${SITE_URL}api/anime/anslayer-latest`, {
+    // Read the same normalized feed as the homepage, but through loopback:
+    // calling the public hostname from the VPS depends on external DNS/TLS and
+    // can fail even while the API itself is healthy.
+    const resp = await fetch(`${internalApiBaseUrl()}/api/anime/anslayer-latest`, {
       headers: { "User-Agent": "NovaBot/1.0", Accept: "application/json" },
       signal: AbortSignal.timeout(25_000),
     });
@@ -412,28 +437,44 @@ async function pollAnimeSlayerDirect(): Promise<void> {
       return;
     }
     const data = await resp.json() as any;
-    const list: any[] = Array.isArray(data?.items) ? data.items : [];
+    const list: any[] = Array.isArray(data?.items)
+      ? data.items
+      : Array.isArray(data)
+        ? data
+        : [];
 
     if (!list.length) {
       console.log("[scheduler] 🔄 latest episodes feed: لا بيانات في الرد");
       return;
     }
 
-    // ── أول تشغيل بعد restart: نبذر الكاش فقط بدون إرسال ──────────────────
-    // لتفادي إغراق Telegram بكل الحلقات الحالية دفعة واحدة
+    // عند إعادة التشغيل نتجنب إرسال السجل القديم دفعة واحدة، مع عدم إسقاط
+    // الحلقة التي نُشرت للتو أثناء توقف الخادم.
     if (schedulerFirstRun) {
       schedulerFirstRun = false;
       let seeded = 0;
+      let recentSent = 0;
       for (const item of list) {
         const animeId = Number(item.animeId || item.anilistId || item.anslayerId);
         const ep = Number(item.episode);
         if (!animeId || !ep) continue;
         if (!(await wasNotified(animeId, ep))) {
-          await markNotified(animeId, ep);
-          seeded++;
+          if (wasRecentlyUpdated(item)) {
+            const title = item.english || item.romaji || item.name || "أنمي";
+            const sent = await notifyNewEpisode(animeId, title, ep, item.cover || undefined)
+              .catch((error) => {
+                console.warn(`[scheduler] startup episode notification failed title=${title} episode=${ep}:`, error instanceof Error ? error.message : String(error));
+                return false;
+              });
+            if (sent) recentSent++;
+            await new Promise((resolve) => setTimeout(resolve, 1_500));
+          } else {
+            await markNotified(animeId, ep);
+            seeded++;
+          }
         }
       }
-      console.log(`[scheduler] 🌱 AnimeSlayer seed: ${seeded} حلقة موجودة مُسجَّلة (لن تُرسل) — الدورات القادمة ستُرسل الجديد فقط`);
+      console.log(`[scheduler] 🌱 AnimeSlayer startup: seeded=${seeded} recent_sent=${recentSent}`);
       return;
     }
 

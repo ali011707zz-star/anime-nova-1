@@ -16380,7 +16380,27 @@ router.get("/anime/anslayer-latest", async (req, res) => {
       return;
     }
     const data = await anslayerGet("animes/get-published-animes", { list_type: "latest_updated_episode_new", page: 1 });
-    const list: any[] = data?.response?.data || [];
+    const candidates = [
+      data?.response?.data,
+      data?.response?.data?.items,
+      data?.data?.items,
+      data?.items,
+      data?.data,
+    ];
+    const list: any[] =
+      candidates.find((value) => Array.isArray(value) && value.length > 0) ||
+      candidates.find(Array.isArray) ||
+      [];
+    if (list.length === 0) {
+      if (_anslayerLatestCache?.length) {
+        res.setHeader("Cache-Control", "no-store");
+        res.json({ items: _anslayerLatestCache, stale: true });
+        return;
+      }
+      res.setHeader("Cache-Control", "no-store");
+      res.status(503).json({ items: [], error: "AnimeSlayer latest feed unavailable" });
+      return;
+    }
     const rawItems = list.map((item: any) => {
       const epMatch = String(item.latest_episode_name || "").match(/(\d+)/);
       /* Preserve an AniList id supplied by AnimeSlayer. Its anime_id is a
@@ -16421,6 +16441,17 @@ router.get("/anime/anslayer-latest", async (req, res) => {
       };
     }))).filter((it: any) => (it.animeId || it.anslayerId) && it.episode);
 
+    if (items.length === 0) {
+      if (_anslayerLatestCache?.length) {
+        res.setHeader("Cache-Control", "no-store");
+        res.json({ items: _anslayerLatestCache, stale: true });
+        return;
+      }
+      res.setHeader("Cache-Control", "no-store");
+      res.status(503).json({ items: [], error: "AnimeSlayer latest feed returned no usable episodes" });
+      return;
+    }
+
     // Telegram notifications are owned by the scheduler. Keeping them out of
     // this public endpoint prevents app refreshes/cache misses from becoming
     // duplicate notification attempts. The scheduler polls this same feed.
@@ -16429,8 +16460,13 @@ router.get("/anime/anslayer-latest", async (req, res) => {
     res.setHeader("Cache-Control", "no-store");
     res.json({ items });
   } catch (e: any) {
+    console.warn("[AnimeSlayer] latest feed request failed:", e?.message || String(e));
     res.setHeader("Cache-Control", "no-store");
-    res.json({ items: _anslayerLatestCache || [], error: e?.message });
+    if (_anslayerLatestCache?.length) {
+      res.json({ items: _anslayerLatestCache, stale: true });
+      return;
+    }
+    res.status(503).json({ items: [], error: "AnimeSlayer latest feed unavailable" });
   }
 });
 
