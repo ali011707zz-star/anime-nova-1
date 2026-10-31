@@ -46,6 +46,7 @@ const REPORT_TYPES = [
   { id: "content",    label: "محتوى مفقود",   icon: "film" as const,        color: "#a78bfa",   bg: "rgba(139,92,246,0.12)",   border: "rgba(139,92,246,0.25)" },
   { id: "other",      label: "أخرى",          icon: "chatbubble" as const,  color: "#38bdf8",   bg: "rgba(56,189,248,0.10)",   border: "rgba(56,189,248,0.22)" },
 ];
+const OFFICIAL_SITE = "https://animenovaa.duckdns.org/";
 
 /* ── Toast ── */
 function useToast() {
@@ -1881,26 +1882,10 @@ export default function SettingsScreen() {
               </View>
               <Text style={{ fontSize: 12, fontFamily: "Cairo_700Bold", color: colors.accent }}>v2.4.0</Text>
             </View>
-            {/* Privacy */}
-            <View style={[ts.navRow, { borderBottomColor: colors.border }]}>
-              <View style={[ts.navIcon, { backgroundColor: "rgba(20,184,166,0.10)" }]}>
-                <Ionicons name="shield-checkmark" size={16} color="#2dd4bf" />
-              </View>
-              <View style={[ts.navText, { alignItems: "flex-end" }]}>
-                <Text style={[ts.navLabel, { color: colors.textPrimary }]}>الخصوصية والأمان</Text>
-                <Text style={[ts.navSub, { color: colors.textSecondary }]}>لا نجمع بيانات · بدون إعلانات · مجاني للجميع</Text>
-              </View>
-            </View>
             {/* Report issue */}
             <NavRow
               icon="alert-circle" iconColor="#38bdf8" iconBg="rgba(56,189,248,0.10)"
               label="الإبلاغ عن مشكلة" sub="أخبرنا إذا واجهت أي خلل · يصلنا مباشرة"
-              onPress={() => setShowReport(true)}
-            />
-            {/* Contact */}
-            <NavRow
-              icon="chatbubble" iconColor="#f472b6" iconBg="rgba(236,72,153,0.10)"
-              label="تواصل معنا" sub="اقتراحات · شراكات · مساعدة · يصلنا فوراً"
               onPress={() => setShowReport(true)}
             />
             {/* Telegram */}
@@ -1936,19 +1921,60 @@ export default function SettingsScreen() {
           </Card>
         </View>
 
-        {/* ── Disclaimer ── */}
-        <View style={[ts.disclaimer, { backgroundColor: colors.accentSurface, borderColor: colors.accentBorder }]}>
-          <View style={{ flexDirection: "row", alignItems: "flex-start", gap: 10, marginBottom: 10 }}>
-            <View style={[ts.disclaimerIcon, { backgroundColor: colors.accentSurface, borderColor: colors.accentBorder }]}>
-              <Ionicons name="shield" size={14} color={colors.accent} />
-            </View>
-            <Text style={[ts.disclaimerTitle, { color: colors.accent }]}>إخلاء المسؤولية</Text>
-          </View>
-          <Text style={[ts.disclaimerText, { color: colors.textSecondary }]}>
-            هذا التطبيق لا يقوم باستضافة أو رفع أي محتوى مرئي.{"\n"}
-            جميع المحتويات المعروضة يتم توفيرها من مصادر خارجية متاحة على الإنترنت.{"\n"}
-            نحن لا نمتلك حقوق أي من المواد المعروضة، وجميع الحقوق محفوظة لأصحابها الأصليين.
-          </Text>
+        {/* ══════ أخرى — الروابط والمعلومات في نهاية الإعدادات ══════ */}
+        <SectionHeader title="أخرى" icon="المزيد" />
+        <View style={{ paddingHorizontal: 16 }}>
+          <Card>
+            <NavRow
+              icon="globe-outline" iconColor="#38bdf8" iconBg="rgba(56,189,248,0.10)"
+              label="الموقع الرسمي" sub={OFFICIAL_SITE}
+              external
+              onPress={() => {
+                void Linking.openURL(OFFICIAL_SITE).catch(() =>
+                  Alert.alert("تعذّر فتح الموقع", "تحقق من اتصال الإنترنت ثم حاول مرة أخرى."),
+                );
+              }}
+            />
+            <NavRow
+              icon="mail" iconColor="#f472b6" iconBg="rgba(236,72,153,0.10)"
+              label="تواصل معنا" sub="اقتراحات · شراكات · مساعدة"
+              onPress={() => setShowReport(true)}
+            />
+            <NavRow
+              icon="share-social" iconColor="#34d399" iconBg="rgba(16,185,129,0.10)"
+              label="مشاركة التطبيق" sub="شارك Anime NOVA مع أصدقائك"
+              onPress={() => {
+                void Share.share({
+                  message: `Anime NOVA — شاهد الأنمي واكتشف أحدث الحلقات\n${OFFICIAL_SITE}`,
+                  url: OFFICIAL_SITE,
+                }).catch(() => {});
+              }}
+            />
+            <NavRow
+              icon="shield-checkmark" iconColor="#f59e0b" iconBg="rgba(245,158,11,0.10)"
+              label="إخلاء المسؤولية" sub="مصادر المحتوى وحقوق النشر"
+              onPress={() => Alert.alert(
+                "إخلاء المسؤولية",
+                "هذا التطبيق لا يستضيف أو يرفع محتوى مرئياً. المحتويات المعروضة توفرها مصادر خارجية متاحة على الإنترنت. لا نمتلك حقوق المواد المعروضة؛ الحقوق محفوظة لأصحابها.",
+              )}
+            />
+            <NavRow
+              icon="lock-closed" iconColor="#2dd4bf" iconBg="rgba(20,184,166,0.10)"
+              label="سياسة الخصوصية" sub="معلومات الحساب والمزامنة"
+              onPress={() => Alert.alert(
+                "سياسة الخصوصية",
+                "يُستخدم تسجيل الدخول لتشغيل مزايا الحساب ومزامنة المفضلة وسجل المشاهدة والتعليقات بين أجهزتك. لا تشارك بيانات الدخول مع أي شخص.",
+              )}
+            />
+            <NavRow
+              icon="information-circle" iconColor="#a78bfa" iconBg="rgba(139,92,246,0.10)"
+              label="عن التطبيق" sub="ANIME NOVA · إصدار 2.4.0"
+              onPress={() => Alert.alert(
+                "عن Anime NOVA",
+                "تطبيق لمتابعة الأنمي واكتشاف الحلقات الجديدة والمحتوى المترجم والمدبلج.",
+              )}
+            />
+          </Card>
         </View>
 
         {/* ── Footer ── */}

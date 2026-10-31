@@ -11,15 +11,13 @@ import {
 import { useColors } from "@/hooks/useColors";
 import { AnilistMedia } from "@/utils/anilist";
 import { AnimeCard, getRailCardWidth, getRailSidePadding } from "./AnimeCard";
-import { Ionicons } from "@expo/vector-icons";
 import {
   isTvDevice,
-  tvFocusStyle,
-  TvPressable as Pressable,
   TvFocusGuideView,
   useTvListFocusScroll,
   useTvMetrics,
 } from "@/utils/tv";
+import { SectionHeader } from "./SectionHeader";
 
 type Props = {
   title: string;
@@ -82,19 +80,11 @@ export const SectionRow = React.memo(function SectionRow({ title, items, onSeeAl
 
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
-            <Text style={[styles.title, { fontSize: scaleSize(17, 25), lineHeight: scaleSize(22, 34), color: colors.text }]}>{title}</Text>
-        {onSeeAll && (
-          <Pressable
-            onPress={onSeeAll}
-            focusable={tvMode}
-            style={({ focused }) => [styles.seeAll, tvMode && tvFocusStyle(focused)]}
-          >
-            <Text style={[styles.seeAllText, { fontSize: scaleSize(13, 18), color: colors.primary }]}>عرض الكل</Text>
-            <Ionicons name="chevron-back" size={tvMode ? 20 : 14} color={colors.primary} />
-          </Pressable>
-        )}
-      </View>
+      <SectionHeader onSeeAll={onSeeAll} focusable={tvMode}>
+        <Text style={[styles.title, { fontSize: scaleSize(17, 25), lineHeight: scaleSize(22, 34), color: colors.text }]}>
+          {title}
+        </Text>
+      </SectionHeader>
       {tvMode ? (
         <TvFocusGuideView autoFocus={false} style={styles.focusGuide}>
           {rail}
@@ -123,10 +113,7 @@ export function SkeletonRow() {
 
 const styles = StyleSheet.create({
   container: { marginBottom: 24 },
-  header: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 16, marginBottom: 12 },
   title: { fontSize: 17, fontWeight: "800" },
-  seeAll: { flexDirection: "row", alignItems: "center", gap: 2 },
-  seeAllText: { fontSize: 13, fontWeight: "600" },
   focusGuide: { minHeight: 1 },
   scroll: { paddingHorizontal: 16, gap: 14 },
   skeletonTitle: { width: 140, height: 18, borderRadius: 6, marginHorizontal: 16, marginBottom: 12 },

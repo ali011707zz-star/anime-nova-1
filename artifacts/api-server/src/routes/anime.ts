@@ -16397,6 +16397,8 @@ router.get("/anime/anslayer-latest", async (req, res) => {
         episode: epMatch ? parseInt(epMatch[1], 10) : null,
         cover: item.anime_cover_image_url || "",
         year: item.anime_release_year || "",
+        updatedAt: item.latest_episode_at || item.latest_episode_date ||
+          item.updated_at || item.updatedAt || null,
       };
     }).filter((it: any) => it.anslayerId && it.episode);
 
@@ -16479,6 +16481,7 @@ router.get("/anime/aw-latest", async (req, res) => {
         name: r.anime_name || r.anime_id,
         episode: Number(r.ep_number) || null,
         cover: anilistId ? `https://img.anili.st/media/${anilistId}` : "",
+        updatedAt: r.imported_at || null,
         titleAr,
         titleVariants: meta?.titles || [r.anime_name || r.anime_id].filter(Boolean),
         romaji: meta?.romaji || r.anime_name || r.anime_id,

@@ -91,6 +91,32 @@ async function notifyCommentTargets(input: {
 }
 
 /* ─────────────────────────────────────────
+   GET /api/comments/mine?limit=&offset=
+   Authenticated profile feed. The user ID always comes from the session/token,
+   never from a client-supplied query parameter.
+───────────────────────────────────────── */
+router.get("/comments/mine", async (req: Request, res: Response) => {
+  const userId = await getUserId(req);
+  if (!userId) return res.status(401).json({ error: "يجب تسجيل الدخول" });
+
+  try {
+    const parsedLimit = Number.parseInt(String(req.query.limit || "50"), 10);
+    const parsedOffset = Number.parseInt(String(req.query.offset || "0"), 10);
+    const limit = Math.min(Math.max(Number.isFinite(parsedLimit) ? parsedLimit : 50, 1), 100);
+    const offset = Math.max(Number.isFinite(parsedOffset) ? parsedOffset : 0, 0);
+    const rows = await sbSelect("comments", {
+      user_id: `eq.${userId}`,
+      order: "created_at.desc",
+    }, { limit: Math.min(limit + offset, 500) });
+    const comments = rows.slice(offset, offset + limit).map((row) => mapRow(row, false));
+    return res.json({ comments, total: rows.length });
+  } catch (err) {
+    console.error("[comments] mine:", err);
+    return res.status(500).json({ error: "تعذّر تحميل تعليقات الحساب" });
+  }
+});
+
+/* ─────────────────────────────────────────
    GET /api/comments?animeId=&ep=&limit=&offset=
    GET /api/comments?tmdbId=&ep=&limit=&offset=
 ───────────────────────────────────────── */

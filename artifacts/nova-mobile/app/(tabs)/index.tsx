@@ -13,6 +13,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { AnnouncementBanner } from "@/components/AnnouncementBanner";
 import { DrawerMenu } from "@/components/DrawerMenu";
 import { HeroSection } from "@/components/HeroSection";
+import { SectionHeader } from "@/components/SectionHeader";
 import { SectionRow, SkeletonRow } from "@/components/SectionRow";
 import { getRailCardWidth, getRailSidePadding } from "@/components/AnimeCard";
 import { useColors } from "@/hooks/useColors";
@@ -32,58 +33,11 @@ import {
   mergeCatalogRows,
   useDubbedCatalogFeed,
 } from "@/hooks/useDubbedCatalogFeed";
-
-function normalizeLatestEpisodeItem(item: any): any {
-  /* The API has two namespaces: anime_id is AnimeSlayer, while anilistId is
-     the identity required by Kawaii/MegaPlay. Never use the former as an
-     AniList fallback on latest cards. */
-  const source = String(item?.source || "").trim().toLowerCase();
-  const rawAniListId = Number(item?.anilistId ?? item?.anilist_id ?? 0);
-  const rawAnimeSlayerId = Number(
-    item?.anslayerId ??
-      item?.anime_id ??
-      (source === "anslayer" && !item?.anilistId && !item?.anilist_id ? item?.animeId : 0) ??
-      0,
-  );
-  const rawAwAnimeId = item?.awAnimeId ?? item?.aw_anime_id ??
-    (source === "animewitcher" ? item?.anime_id : "");
-  const animeId = Number.isInteger(rawAniListId) && rawAniListId > 0 ? rawAniListId : 0;
-  const anslayerId =
-    Number.isInteger(rawAnimeSlayerId) && rawAnimeSlayerId > 0
-      ? rawAnimeSlayerId
-      : 0;
-  const name = String(item?.name ?? item?.title ?? "").trim();
-  const titleVariants = Array.from(new Set([
-    ...(Array.isArray(item?.titleVariants) ? item.titleVariants : []),
-    item?.romaji,
-    item?.english,
-    item?.native,
-    name,
-  ].filter(
-    (value: unknown): value is string =>
-      typeof value === "string" && value.trim().length > 1,
-  )));
-  const title_ar =
-    typeof item?.title_ar === "string" && /[\u0600-\u06FF]/.test(item.title_ar)
-      ? item.title_ar.trim()
-      : "";
-  return {
-    ...item,
-    animeId,
-    anilistId: animeId || undefined,
-    anslayerId,
-    awAnimeId: String(rawAwAnimeId || "").trim(),
-    source,
-    name,
-    titleAr: title_ar,
-    title_ar,
-    cover: String(item?.cover ?? item?.poster ?? "").trim(),
-    romaji: String(item?.romaji ?? "").trim(),
-    english: String(item?.english ?? "").trim(),
-    native: String(item?.native ?? "").trim(),
-    titleVariants,
-  };
-}
+import {
+  fetchLatestEpisodes,
+  normalizeLatestEpisodeItem,
+  type LatestEpisodeItem,
+} from "@/utils/latestEpisodes";
 
 function randomSample<T>(items: T[], limit = items.length): T[] {
   const shuffled = [...items];
@@ -146,22 +100,7 @@ export default function HomeScreen() {
   });
 
   /* أحدث الحلقات — نفس كتالوج AnimeSlayer المستخدم في الويب. */
-  type TodayEp = {
-    animeId: number;
-    anilistId?: number;
-    anslayerId: number;
-    awAnimeId?: string;
-    source: string;
-    name: string;
-    romaji?: string;
-    english?: string;
-    native?: string;
-    titleVariants?: string[];
-    titleAr?: string;
-    episode: number;
-    cover: string;
-    year?: string;
-  };
+  type TodayEp = LatestEpisodeItem;
   const [todayEps, setTodayEps] = useState<TodayEp[]>([]);
   const [todayChecking, setTodayChecking] = useState(true);
   useEffect(() => {
@@ -174,35 +113,16 @@ export default function HomeScreen() {
         }
       } catch {}
     }).catch(() => {});
-    const fetchLatest = async (endpoint: string, source: string): Promise<TodayEp[]> => {
-      const response = await fetch(`${getBaseUrl()}/api/anime/${endpoint}`, {
-        signal: ctrl.signal,
-        cache: "no-store",
-      });
-      if (!response.ok) throw new Error(`${endpoint}_${response.status}`);
-      const payload = await response.json();
-      const raw = Array.isArray(payload) ? payload : payload?.items || [];
-      return raw
-        .map((item: any) => normalizeLatestEpisodeItem({ ...item, source }))
-        .filter((item: TodayEp) =>
-          (item.animeId > 0 || item.anslayerId > 0 || Boolean(item.awAnimeId)) &&
-          item.name && item.episode != null,
-        );
-    };
-    Promise.allSettled([
-      fetchLatest("anslayer-latest", "anslayer"),
-      fetchLatest("aw-latest", "animewitcher"),
-    ]).then((results) => {
-      if (ctrl.signal.aborted) return;
-      const normalized = results.flatMap(result =>
-        result.status === "fulfilled" ? result.value : [],
-      ).sort((a, b) => b.episode - a.episode);
-      if (results.some(result => result.status === "fulfilled")) {
+    fetchLatestEpisodes(ctrl.signal)
+      .then((normalized) => {
+        if (ctrl.signal.aborted) return;
         setTodayEps(normalized);
         AsyncStorage.setItem("nova-latest-episodes", JSON.stringify(normalized)).catch(() => {});
-      }
-      setTodayChecking(false);
-    });
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (!ctrl.signal.aborted) setTodayChecking(false);
+      });
     return () => ctrl.abort();
   }, []);
 
@@ -406,25 +326,21 @@ export default function HomeScreen() {
         {/* Continue Watching */}
         {recentHistory.length > 0 && (
           <View style={{ marginTop: 24 }}>
-            <View style={styles.sectionHeader}>
+            <SectionHeader
+              onSeeAll={() => router.push("/(tabs)/library")}
+              focusable={isTvLayout}
+              seeAllLabel="السجل الكامل"
+            >
               <View style={styles.continueHeading}>
                 <View style={[styles.continueAccent, { backgroundColor: colors.homeAccent }]} />
                 <View style={styles.continueTitleWrap}>
-                  <Text style={[styles.sectionTitle, { color: colors.text }]}>متابعة المشاهدة</Text>
+                  <Text style={[styles.sectionTitle, isTvLayout && styles.tvSectionTitle, { color: colors.text }]}>متابعة المشاهدة</Text>
                   <Text style={[styles.continueSubtitle, { color: colors.mutedForeground }]}>
                     أكمل حلقاتك من حيث توقفت
                   </Text>
                 </View>
               </View>
-               <Pressable
-                 onPress={() => router.push("/(tabs)/library")}
-                 focusable={isTvLayout}
-                 style={({ focused }) => [styles.seeAllBtn, isTvLayout && styles.seeAllTvBtn, isTvLayout && tvFocusStyle(focused)]}
-               >
-                <Ionicons name="chevron-back" size={13} color={isTvLayout ? colors.primary : colors.text} />
-                <Text style={[styles.seeAllText, { color: isTvLayout ? colors.primary : colors.text }]}>السجل الكامل</Text>
-              </Pressable>
-            </View>
+            </SectionHeader>
             <FlatList
               data={recentHistory}
               horizontal
@@ -542,17 +458,15 @@ export default function HomeScreen() {
         {/* أحدث الحلقات — AnimeSlayer (مطابق للويب) */}
         {(todayEps.length > 0 || todayChecking) && (
           <View style={{ marginTop: 24 }}>
-            <View style={styles.sectionHeader}>
+            <SectionHeader
+              onSeeAll={() => router.push("/latest" as any)}
+              focusable={isTvLayout}
+            >
               <View style={styles.sectionLeft}>
                 <View style={[styles.sectionDot, { backgroundColor: "#f43f5e" }]} />
-                <Text style={[styles.sectionTitle, { color: colors.text }]}>📺 أحدث الحلقات</Text>
+                <Text style={[styles.sectionTitle, isTvLayout && styles.tvSectionTitle, { color: colors.text }]}>📺 أحدث الحلقات</Text>
               </View>
-               <Pressable onPress={() => router.push("/schedule" as any)} focusable={isTvLayout}
-                  style={({ focused }) => [styles.seeAllBtn, isTvLayout && styles.seeAllTvBtn, isTvLayout && tvFocusStyle(focused)]}>
-                <Ionicons name="chevron-back" size={13} color={isTvLayout ? colors.primary : colors.text} />
-                <Text style={[styles.seeAllText, { color: isTvLayout ? colors.primary : colors.text }]}>عرض الكل</Text>
-              </Pressable>
-            </View>
+            </SectionHeader>
               <FlatList
               data={todayEps}
               horizontal
@@ -599,18 +513,15 @@ export default function HomeScreen() {
         {/* ── الأقسام المدبلجة — مباشرة بعد أحدث الحلقات ── */}
         {animationHomeRows.length > 0 && (
           <View style={{ marginTop: 24, marginBottom: 24 }}>
-            <View style={styles.sectionHeader}>
+            <SectionHeader
+              onSeeAll={() => router.push("/aw-dubbed" as any)}
+              focusable={isTvLayout}
+            >
               <View style={styles.sectionLeft}>
                 <View style={[styles.sectionDot, { backgroundColor: "#06b6d4" }]} />
-                <Text style={[styles.sectionTitle, { color: colors.text }]}>✨ أنيميشن مدبلج ومترجم</Text>
+                <Text style={[styles.sectionTitle, isTvLayout && styles.tvSectionTitle, { color: colors.text }]}>✨ أنيميشن مدبلج ومترجم</Text>
               </View>
-               <Pressable onPress={() => router.push("/aw-dubbed" as any)}
-                 focusable={isTvLayout}
-                  style={({ focused }) => [styles.seeAllBtn, isTvLayout && styles.seeAllTvBtn, isTvLayout && tvFocusStyle(focused)]}>
-                <Ionicons name="chevron-back" size={13} color={isTvLayout ? colors.primary : colors.text} />
-                <Text style={[styles.seeAllText, { color: isTvLayout ? colors.primary : colors.text }]}>عرض الكل</Text>
-              </Pressable>
-            </View>
+            </SectionHeader>
             <FlatList
               data={animationHomeRows}
               horizontal
@@ -708,18 +619,15 @@ export default function HomeScreen() {
 
         {dubbedHomeRows.length > 0 && (
           <View style={{ marginBottom: 24 }}>
-            <View style={styles.sectionHeader}>
+            <SectionHeader
+              onSeeAll={() => router.push({ pathname: "/aw-dubbed" as any, params: { tab: "cartoon" } })}
+              focusable={isTvLayout}
+            >
               <View style={styles.sectionLeft}>
                 <View style={[styles.sectionDot, { backgroundColor: "#f59e0b" }]} />
-                <Text style={[styles.sectionTitle, { color: colors.text }]}>🎬 كرتون مدبلج ومترجم</Text>
+                <Text style={[styles.sectionTitle, isTvLayout && styles.tvSectionTitle, { color: colors.text }]}>🎬 كرتون مدبلج ومترجم</Text>
               </View>
-               <Pressable onPress={() => router.push({ pathname: "/aw-dubbed" as any, params: { tab: "cartoon" } })}
-                 focusable={isTvLayout}
-                  style={({ focused }) => [styles.seeAllBtn, isTvLayout && styles.seeAllTvBtn, isTvLayout && tvFocusStyle(focused)]}>
-                <Ionicons name="chevron-back" size={13} color={isTvLayout ? colors.primary : colors.text} />
-                <Text style={[styles.seeAllText, { color: isTvLayout ? colors.primary : colors.text }]}>عرض الكل</Text>
-              </Pressable>
-            </View>
+            </SectionHeader>
             <FlatList
               data={dubbedHomeRows}
               horizontal
@@ -851,31 +759,14 @@ const styles = StyleSheet.create({
     flex: 1, minWidth: 0, paddingVertical: 0,
     fontSize: 13, fontFamily: "Cairo_400Regular", textAlign: "right",
   },
-  sectionHeader: {
-    flexDirection: "row-reverse", alignItems: "center",
-    justifyContent: "space-between",
-    paddingHorizontal: 16, marginBottom: 12,
-  },
-  sectionLeft: { flexDirection: "row-reverse", alignItems: "center", gap: 8 },
+  sectionLeft: { flexDirection: "row", direction: "ltr", alignItems: "center", gap: 8 },
   sectionDot: { width: 8, height: 8, borderRadius: 4 },
-  sectionTitle: { fontSize: 16, fontFamily: "Cairo_700Bold" },
-  continueHeading: { flex: 1, flexDirection: "row-reverse", alignItems: "center", gap: 9 },
+  sectionTitle: { fontSize: 17, fontFamily: "Cairo_700Bold" },
+  tvSectionTitle: { fontSize: 25, lineHeight: 34 },
+  continueHeading: { flex: 1, flexDirection: "row", direction: "ltr", alignItems: "center", gap: 9 },
   continueAccent: { width: 3, height: 24, borderRadius: 2 },
   continueTitleWrap: { alignItems: "flex-end", gap: 1 },
   continueSubtitle: { fontSize: 11, fontFamily: "Cairo_400Regular" },
-  seeAllBtn: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 4,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    backgroundColor: "rgba(255,255,255,0.07)",
-    borderColor: "rgba(255,255,255,0.14)",
-    borderWidth: 1,
-    borderRadius: 18,
-  },
-  seeAllTvBtn: { paddingHorizontal: 0, paddingVertical: 0, backgroundColor: "transparent", borderWidth: 0 },
-  seeAllText: { fontSize: 11, fontFamily: "Cairo_600SemiBold" },
   historyCard: {
     width: 150, height: 105, borderRadius: 12,
     overflow: "hidden", borderWidth: 1, position: "relative",

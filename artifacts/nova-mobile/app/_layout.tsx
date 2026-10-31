@@ -162,6 +162,7 @@ function RootLayoutNav() {
         <Stack.Screen name="animation/watch" options={watchScreenOptions} />
         <Stack.Screen name="settings" options={{ headerShown: false }} />
         <Stack.Screen name="schedule" options={{ headerShown: false }} />
+        <Stack.Screen name="latest" options={{ headerShown: false, animation: "slide_from_right" }} />
         <Stack.Screen name="profile" options={{ headerShown: false, animation: "slide_from_right" }} />
         <Stack.Screen name="tv-link" options={{ headerShown: false }} />
         <Stack.Screen name="oauth2redirect/google" options={{ headerShown: false }} />
