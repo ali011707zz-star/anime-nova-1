@@ -168,7 +168,7 @@ export default function ProfileScreen() {
   const base = getBaseUrl();
   const topPad = Platform.OS === "web" ? 0 : Math.max(insets.top, Platform.OS === "android" ? 28 : 44);
 
-  const { favorites, removeFavorite, setCurrentUser: setGlobalUser } = useApp();
+  const { favorites, toggleFavorite, setCurrentUser: setGlobalUser } = useApp();
 
   const [activeTab, setActiveTab] = useState<ProfileTab>("username");
   const [user, setUser] = useState<MobileUser | null>(null);
@@ -335,16 +335,17 @@ export default function ProfileScreen() {
     ? favorites.map(f => ({
         id: f.id,
         title: f.title,
-        titleEn: f.titleEn || f.title,
-        coverImage: f.coverImage,
+        titleEn: f.english || f.title,
+        coverImage: f.thumbnail,
         score: f.score ? Number((f.score > 10 ? f.score / 10 : f.score).toFixed(1)) : 8.8,
         episodes: f.episodes || 12,
       }))
     : extraFavorites;
 
   const handleRemoveFavoriteItem = async (id: number) => {
-    if (favorites.some(f => f.id === id)) {
-      await removeFavorite(id);
+    const existing = favorites.find(f => f.id === id);
+    if (existing) {
+      await toggleFavorite(existing);
     } else {
       setExtraFavorites(prev => prev.filter(item => item.id !== id));
     }
