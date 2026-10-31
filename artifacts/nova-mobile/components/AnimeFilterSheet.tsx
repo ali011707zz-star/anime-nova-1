@@ -203,6 +203,7 @@ const createStyles = (colors: ThemePalette) => StyleSheet.create({
   header: {
     minHeight: 64,
     flexDirection: "row",
+    direction: "ltr",
     alignItems: "center",
     justifyContent: "space-between",
     paddingHorizontal: 16,

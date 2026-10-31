@@ -1193,7 +1193,7 @@ const w = StyleSheet.create({
   loadEpBadgeText: { fontSize: 11, fontFamily: "Cairo_700Bold", color: "#c4b5fd" },
   loadHintNew: { fontSize: 13, color: "rgba(255,255,255,0.75)", fontFamily: "Cairo_700Bold", textAlign: "center", lineHeight: 22, paddingHorizontal: 16 },
   loadPrayerText: { fontSize: 13, color: "rgba(255,255,255,0.85)", fontFamily: "Cairo_800ExtraBold", textAlign: "center" },
-  topBackBtn: { position: "absolute", left: 16, zIndex: 10, width: 36, height: 36, borderRadius: 18, backgroundColor: "rgba(0,0,0,0.5)", borderWidth: 1, borderColor: "rgba(255,255,255,0.12)", alignItems: "center", justifyContent: "center" },
+  topBackBtn: { position: "absolute", right: 16, zIndex: 10, width: 36, height: 36, borderRadius: 18, backgroundColor: "rgba(0,0,0,0.5)", borderWidth: 1, borderColor: "rgba(255,255,255,0.12)", alignItems: "center", justifyContent: "center" },
   /* Video top bar */
   videoTopBar: { position: "absolute", top: 0, left: 0, right: 0, flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 12, paddingBottom: 20 },
   videoBackBtn: { width: 34, height: 34, borderRadius: 17, backgroundColor: "rgba(0,0,0,0.5)", alignItems: "center", justifyContent: "center" },
