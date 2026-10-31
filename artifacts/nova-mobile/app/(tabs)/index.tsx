@@ -285,27 +285,22 @@ export default function HomeScreen() {
           </Pressable>
           <View style={styles.headerSpacer} />
           <View style={styles.headerBrandGroup}>
-            <View style={[styles.headerSearch, { backgroundColor: colors.input, borderColor: colors.border }]}>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="البحث عن أنمي"
+              onPress={() => router.push("/(tabs)/search" as any)}
+              focusable={isTvLayout}
+              style={({ focused }) => [
+                styles.headerSearch,
+                { backgroundColor: colors.input, borderColor: colors.border },
+                isTvLayout && tvFocusStyle(focused),
+              ]}
+            >
               <Ionicons name="search" size={15} color={colors.textMuted} />
-              <TextInput
-                value={headerSearch}
-                onChangeText={setHeaderSearch}
-                onSubmitEditing={() => {
-                  const q = headerSearch.trim();
-                  router.push(
-                    q
-                      ? ({ pathname: "/(tabs)/search", params: { q } } as any)
-                      : ("/(tabs)/search" as any),
-                  );
-                  setHeaderSearch("");
-                }}
-                placeholder="بحث..."
-                placeholderTextColor={colors.textMuted}
-                returnKeyType="search"
-                accessibilityLabel="البحث عن أنمي"
-                style={[styles.headerSearchInput, { color: colors.text }]}
-              />
-            </View>
+              <Text style={[styles.headerSearchInput, { color: colors.textMuted }]} numberOfLines={1}>
+                بحث...
+              </Text>
+            </Pressable>
             <View style={styles.logoRow}>
               <View style={[styles.logoAccent, { backgroundColor: colors.primary }]} />
               <Text style={[styles.logoText, { color: colors.text }]}>
@@ -329,7 +324,7 @@ export default function HomeScreen() {
             <SectionHeader
               onSeeAll={() => router.push("/(tabs)/library")}
               focusable={isTvLayout}
-              seeAllLabel="السجل الكامل"
+              seeAllLabel="عرض الكل"
             >
               <View style={styles.continueHeading}>
                 <View style={[styles.continueAccent, { backgroundColor: colors.homeAccent }]} />

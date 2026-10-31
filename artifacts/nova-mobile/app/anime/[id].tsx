@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from "react"
 import {
   View, Text, Image, ScrollView,
   ActivityIndicator, StyleSheet, Platform, Modal,
-  Dimensions, Linking, useWindowDimensions,
+  Dimensions, Linking, useWindowDimensions, I18nManager,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
@@ -19,6 +19,8 @@ import { isTvDevice, tvFocusStyle, TvPressable as Pressable } from "@/utils/tv";
 import { useTvFocusMemory } from "@/utils/tvFocus";
 import { useColors } from "@/hooks/useColors";
 import type { ThemePalette } from "@/constants/colors";
+
+const ROW_RTL = I18nManager.isRTL ? "row" : "row-reverse";
 
 const { width: W } = Dimensions.get("window");
 
@@ -528,6 +530,13 @@ export default function AnimeDetailScreen() {
   return (
     <View style={[d.container, { paddingTop: topPad }]}>
       <View style={[d.topBar, tvMode && d.tvTopBar]}>
+        <Pressable onPress={() => router.canGoBack() ? router.back() : router.replace("/(tabs)")}
+          focusable={tvMode}
+          hasTVPreferredFocus={tvMode}
+          onFocus={() => rememberDetailFocus("back")}
+          style={({ focused }) => [d.topBarBack, tvMode && d.tvTopBarBack, tvMode && tvFocusStyle(focused)]}>
+          <Ionicons name="chevron-forward" size={tvMode ? 26 : 20} color={colors.textPrimary} />
+        </Pressable>
         <Text style={[d.topBarTitle, tvMode && d.tvTopBarTitle]} numberOfLines={1}>
           {arabicTitle || anime.title?.english || anime.title?.romaji || "تفاصيل الأنمي"}
         </Text>
@@ -538,13 +547,6 @@ export default function AnimeDetailScreen() {
             </Text>
           </View>
         ) : <View style={d.topBarSpacer} />}
-        <Pressable onPress={() => router.canGoBack() ? router.back() : router.replace("/(tabs)")}
-          focusable={tvMode}
-          hasTVPreferredFocus={tvMode}
-          onFocus={() => rememberDetailFocus("back")}
-          style={({ focused }) => [d.topBarBack, d.topBarBackRight, tvMode && d.tvTopBarBack, tvMode && tvFocusStyle(focused)]}>
-          <Ionicons name="chevron-forward" size={tvMode ? 26 : 20} color={colors.textPrimary} />
-        </Pressable>
       </View>
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={[{ paddingBottom: 100 }, tvMode && d.tvContent]}>
 
@@ -993,12 +995,12 @@ function createDetailStyles(colors: ThemePalette) {
   return StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
   center: { flex: 1, alignItems: "center", justifyContent: "center" },
-  topBar: { height: 52, flexDirection: "row", alignItems: "center", justifyContent: "center", paddingHorizontal: 14, backgroundColor: colors.surface, borderBottomWidth: 1, borderBottomColor: colors.border, position: "relative" },
-  topBarTitle: { position: "absolute", left: 100, right: 62, textAlign: "right", color: colors.textPrimary, fontSize: 13, lineHeight: 20, fontFamily: "Cairo_800ExtraBold" },
-  topBarStatus: { position: "absolute", left: 14, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 9, backgroundColor: colors.accentSurface, borderWidth: 1, borderColor: colors.accentBorder },
+  topBar: { height: 52, flexDirection: ROW_RTL, alignItems: "center", justifyContent: "space-between", gap: 10, paddingHorizontal: 14, backgroundColor: colors.surface, borderBottomWidth: 1, borderBottomColor: colors.border },
+  topBarTitle: { flex: 1, textAlign: "right", color: colors.textPrimary, fontSize: 13, lineHeight: 20, fontFamily: "Cairo_800ExtraBold" },
+  topBarStatus: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 9, backgroundColor: colors.accentSurface, borderWidth: 1, borderColor: colors.accentBorder },
   topBarStatusText: { fontSize: 9, lineHeight: 14, fontFamily: "Cairo_700Bold", color: colors.accent },
   topBarBack: { width: 38, height: 38, borderRadius: 12, alignItems: "center", justifyContent: "center", backgroundColor: colors.surfaceElevated, borderWidth: 1, borderColor: colors.border },
-  topBarBackRight: { position: "absolute", right: 12, top: 7 },
+  topBarBackRight: {},
   topBarSpacer: { width: 50 },
   hero: { height: 250, justifyContent: "flex-end", overflow: "hidden" },
   favBtn: { position: "absolute", right: 14, top: 14, width: 36, height: 36, backgroundColor: "rgba(0,0,0,0.5)", borderRadius: 14, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: "rgba(255,255,255,0.1)" },

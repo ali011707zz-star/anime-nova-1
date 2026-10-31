@@ -1,8 +1,10 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import {
   View, Text, Image, ScrollView, FlatList,
-  ActivityIndicator, StyleSheet, Platform,
+  ActivityIndicator, StyleSheet, Platform, I18nManager,
 } from "react-native";
+
+const ROW_RTL = I18nManager.isRTL ? "row" : "row-reverse";
 import { Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -202,6 +204,10 @@ export default function AnimationEpisodesScreen() {
       {/* ── Header ── */}
       <View style={s.header}>
         <View style={s.headerRow}>
+          <Pressable onPress={() => router.canGoBack() ? router.back() : router.replace("/(tabs)/animations")} focusable={tvMode}
+             style={({ focused }) => [s.backBtn, tvMode && s.tvBackBtn, tvMode && tvFocusStyle(focused)]}>
+            <Ionicons name="chevron-forward" size={tvMode ? 30 : 18} color="rgba(255,255,255,0.7)" />
+          </Pressable>
           <View style={s.headerInfo}>
             <Text style={s.headerLabel}>الحلقات</Text>
             <Text style={s.headerTitle} numberOfLines={1}>{title}</Text>
@@ -211,10 +217,6 @@ export default function AnimationEpisodesScreen() {
               <Text style={s.epCountText}>{episodes.length} حلقة</Text>
             </View>
           )}
-          <Pressable onPress={() => router.canGoBack() ? router.back() : router.replace("/(tabs)/animations")} focusable={tvMode}
-             style={({ focused }) => [s.backBtn, tvMode && s.tvBackBtn, tvMode && tvFocusStyle(focused)]}>
-            <Ionicons name="arrow-back" size={tvMode ? 30 : 18} color="rgba(255,255,255,0.7)" style={{ transform: [{ scaleX: -1 }] }} />
-          </Pressable>
         </View>
 
         {/* Season tabs */}
@@ -306,9 +308,9 @@ function createStyles(colors: ReturnType<typeof useColors>) {
 return StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
   header: { backgroundColor: colors.background, borderBottomWidth: 1, borderBottomColor: colors.border },
-  headerRow: { flexDirection: "row", direction: "ltr", alignItems: "center", gap: 12, paddingHorizontal: 16, paddingTop: 12, paddingBottom: 10 },
+  headerRow: { flexDirection: ROW_RTL, alignItems: "center", gap: 12, paddingHorizontal: 16, paddingTop: 12, paddingBottom: 10 },
   backBtn: { width: 36, height: 36, borderRadius: 12, alignItems: "center", justifyContent: "center", backgroundColor: colors.input, borderWidth: 1, borderColor: colors.border },
-  headerInfo: { flex: 1 },
+  headerInfo: { flex: 1, alignItems: "flex-end" },
   headerLabel: { fontSize: 9, color: colors.textMuted, fontFamily: "Cairo_400Regular" },
   headerTitle: { fontSize: 14, fontFamily: "Cairo_800ExtraBold", color: colors.textPrimary, lineHeight: 18 },
   epCountBadge: { paddingHorizontal: 10, paddingVertical: 5, borderRadius: 10, backgroundColor: colors.accentSurface, borderWidth: 1, borderColor: colors.accentBorder },

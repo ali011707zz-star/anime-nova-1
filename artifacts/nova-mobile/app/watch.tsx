@@ -1,8 +1,10 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import {
   View, Text, Image, ScrollView, ActivityIndicator,
-  StyleSheet, Platform, Animated, Easing, Alert,
+  StyleSheet, Platform, Animated, Easing, Alert, I18nManager,
 } from "react-native";
+
+const ROW_RTL = I18nManager.isRTL ? "row" : "row-reverse";
 import { Ionicons } from "@expo/vector-icons";
 import { WebView } from "react-native-webview";
 import { useVideoPlayer, VideoView } from "expo-video";
@@ -2602,6 +2604,14 @@ export default function WatchScreen() {
 
       {/* ── Header ── */}
       <View style={[d.header, tvMode && d.tvHeader, { paddingTop: topPad + 4 }]}>
+        <Pressable onPress={handleBack} focusable={tvMode}
+          style={({ focused }) => [d.headerBack, tvMode && d.tvHeaderActionBtn, tvMode && tvFocusStyle(focused)]}>
+          <Ionicons name="chevron-forward" size={tvMode ? 25 : 19} color={colors.textPrimary} />
+        </Pressable>
+        <View style={d.headerCenter}>
+          <Text style={[d.headerTitle, tvMode && d.tvHeaderTitle]} numberOfLines={1}>{displayTitle}</Text>
+          <Text style={[d.headerSub, tvMode && d.tvHeaderSub]}>الحلقة {epNum}</Text>
+        </View>
         <View style={d.headerLeft}>
           <Pressable disabled={!canGoPrevEpisode} onPress={onRiftPrevEpisode} focusable={tvMode}
             style={({ focused }) => [d.epNavBtn, tvMode && d.tvEpNavBtn, !canGoPrevEpisode && { opacity: 0.22 }, tvMode && tvFocusStyle(focused)]}>
@@ -2622,14 +2632,6 @@ export default function WatchScreen() {
             <Ionicons name="refresh" size={tvMode ? 24 : 13} color={colors.accent} />
           </Pressable>
         </View>
-        <View style={d.headerCenter}>
-          <Text style={[d.headerTitle, tvMode && d.tvHeaderTitle]} numberOfLines={1}>{displayTitle}</Text>
-          <Text style={[d.headerSub, tvMode && d.tvHeaderSub]}>الحلقة {epNum}</Text>
-        </View>
-        <Pressable onPress={handleBack} focusable={tvMode}
-          style={({ focused }) => [d.headerBack, tvMode && d.tvHeaderActionBtn, tvMode && tvFocusStyle(focused)]}>
-          <Ionicons name="arrow-back" size={tvMode ? 25 : 17} color={colors.textPrimary} style={{ transform: [{ scaleX: -1 }] }} />
-        </Pressable>
       </View>
 
       <TvFocusGuideView autoFocus={tvMode} style={d.tvFocusGuide}>
@@ -2958,10 +2960,10 @@ function createWatchStyles(colors: ThemePalette) {
   embedTopRow:   { position: "absolute", top: 0, left: 0, right: 0, flexDirection: "row", alignItems: "center", paddingHorizontal: 14, paddingBottom: 10, backgroundColor: "rgba(0,0,0,0.7)", gap: 10, zIndex: 10 },
 
   /* Picker header */
-  header:        { flexDirection: "row", direction: "ltr", alignItems: "center", paddingHorizontal: 12, paddingBottom: 10, borderBottomWidth: 1, borderBottomColor: colors.border, gap: 8 },
+  header:        { flexDirection: ROW_RTL, alignItems: "center", paddingHorizontal: 12, paddingBottom: 10, borderBottomWidth: 1, borderBottomColor: colors.border, gap: 8 },
   tvHeader:     { paddingHorizontal: 28, paddingBottom: 10, gap: 8 },
-  headerLeft:    { flexDirection: "row", alignItems: "center", gap: 5 },
-  headerCenter:  { flex: 1, alignItems: "center" },
+  headerLeft:    { flexDirection: ROW_RTL, alignItems: "center", gap: 5 },
+  headerCenter:  { flex: 1, alignItems: "flex-end" },
   headerBack:    { width: 36, height: 36, borderRadius: 12, backgroundColor: colors.surfaceElevated, borderWidth: 1, borderColor: colors.border, alignItems: "center", justifyContent: "center", flexShrink: 0 },
   headerTitle:   { fontSize: 13, fontFamily: "Cairo_800ExtraBold", color: colors.textPrimary, textAlign: "center" },
   headerSub:     { fontSize: 10, color: colors.textMuted, fontFamily: "Cairo_400Regular", textAlign: "center" },

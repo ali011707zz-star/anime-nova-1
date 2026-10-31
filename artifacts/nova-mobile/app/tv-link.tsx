@@ -10,6 +10,7 @@ import {
   Text,
   TextInput,
   View,
+  I18nManager,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useApp } from "@/context/AppContext";
@@ -220,7 +221,7 @@ const styles = StyleSheet.create({
   center: { flex: 1, alignItems: "center", justifyContent: "center" },
   backButton: {
     position: "absolute",
-    right: 16,
+    ...(I18nManager.isRTL ? { left: 16 } : { right: 16 }),
     zIndex: 2,
     width: 42,
     height: 42,

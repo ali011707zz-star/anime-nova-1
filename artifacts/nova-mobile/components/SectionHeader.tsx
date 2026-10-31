@@ -1,6 +1,6 @@
 import React from "react";
 import { Ionicons } from "@expo/vector-icons";
-import { StyleSheet, Text, View } from "react-native";
+import { I18nManager, StyleSheet, Text, View } from "react-native";
 import { useColors } from "@/hooks/useColors";
 import { tvFocusStyle, TvPressable as Pressable, useTvMetrics } from "@/utils/tv";
 
@@ -10,6 +10,8 @@ type Props = {
   focusable?: boolean;
   seeAllLabel?: string;
 };
+
+const ROW_RTL = I18nManager.isRTL ? "row" : "row-reverse";
 
 export function SectionHeader({
   children,
@@ -30,12 +32,19 @@ export function SectionHeader({
           hitSlop={8}
           onPress={onSeeAll}
           focusable={focusable}
-          style={({ focused }) => [styles.seeAll, focused && tvFocusStyle(focused)]}
+          style={({ focused }) => [
+            styles.seeAll,
+            {
+              backgroundColor: colors.card,
+              borderColor: colors.border,
+            },
+            focused && tvFocusStyle(focused),
+          ]}
         >
-          <Text style={[styles.seeAllText, { fontSize: scaleSize(13, 18), color: colors.primary }]}>
+          <Ionicons name="chevron-back" size={scaleSize(13, 18)} color={colors.textPrimary} />
+          <Text style={[styles.seeAllText, { fontSize: scaleSize(12, 17), color: colors.textPrimary }]}>
             {seeAllLabel}
           </Text>
-          <Ionicons name="chevron-back" size={scaleSize(14, 20)} color={colors.primary} />
         </Pressable>
       )}
     </View>
@@ -44,8 +53,7 @@ export function SectionHeader({
 
 const styles = StyleSheet.create({
   header: {
-    flexDirection: "row",
-    direction: "ltr",
+    flexDirection: ROW_RTL,
     alignItems: "center",
     justifyContent: "space-between",
     paddingHorizontal: 16,
@@ -53,11 +61,15 @@ const styles = StyleSheet.create({
   },
   heading: { flex: 1, minWidth: 0 },
   seeAll: {
-    minHeight: 32,
-    flexDirection: "row",
-    direction: "rtl",
+    minHeight: 34,
+    flexDirection: ROW_RTL,
     alignItems: "center",
-    gap: 2,
+    justifyContent: "center",
+    gap: 4,
+    paddingHorizontal: 14,
+    paddingVertical: 5,
+    borderRadius: 999,
+    borderWidth: 1,
   },
-  seeAllText: { fontFamily: "Cairo_600SemiBold" },
+  seeAllText: { fontFamily: "Cairo_700Bold" },
 });

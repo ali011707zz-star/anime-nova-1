@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from "react"
 import {
   View, Text, TextInput, FlatList, Image,
   ScrollView, ActivityIndicator, StyleSheet, Platform,
-  KeyboardAvoidingView, Modal, Alert, useWindowDimensions,
+  KeyboardAvoidingView, Modal, Alert, useWindowDimensions, I18nManager,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -14,6 +14,8 @@ import { getGridColumnCount } from "@/components/AnimeCard";
 import { AnimeFilterSheet, type AnimeFilterOption } from "@/components/AnimeFilterSheet";
 import { useColors } from "@/hooks/useColors";
 import type { ThemePalette } from "@/constants/colors";
+
+const ROW_RTL = I18nManager.isRTL ? "row" : "row-reverse";
 
 function useSearchTheme() {
   const colors = useColors();
@@ -482,18 +484,7 @@ export default function SearchScreen() {
           {!tvMode ? (
             <>
               <View style={s.mobileHeaderTop}>
-                <View style={s.mobileModeSwitch}>
-                  <Pressable onPress={() => router.push("/(tabs)/browse" as any)} style={s.mobileModeButton}>
-                    <Text style={s.mobileModeText}>تصفح</Text>
-                    <Ionicons name="compass-outline" size={14} color={colors.textMuted} />
-                  </Pressable>
-                  <Pressable style={[s.mobileModeButton, s.mobileModeButtonActive]}>
-                    <Text style={[s.mobileModeText, s.mobileModeTextActive]}>بحث</Text>
-                    <Ionicons name="search" size={14} color={colors.buttonText} />
-                  </Pressable>
-                </View>
                 <View style={s.mobileTitleGroup}>
-                  <Text style={s.mobileTitle}>البحث</Text>
                   <Pressable
                     accessibilityRole="button"
                     accessibilityLabel="رجوع"
@@ -501,6 +492,17 @@ export default function SearchScreen() {
                     style={s.mobileBackButton}
                   >
                     <Ionicons name="chevron-forward" size={21} color={colors.textPrimary} />
+                  </Pressable>
+                  <Text style={s.mobileTitle}>البحث</Text>
+                </View>
+                <View style={s.mobileModeSwitch}>
+                  <Pressable onPress={() => router.push("/(tabs)/browse" as any)} style={s.mobileModeButton}>
+                    <Ionicons name="compass-outline" size={14} color={colors.textMuted} />
+                    <Text style={s.mobileModeText}>تصفح</Text>
+                  </Pressable>
+                  <Pressable style={[s.mobileModeButton, s.mobileModeButtonActive]}>
+                    <Ionicons name="search" size={14} color="#ffffff" />
+                    <Text style={[s.mobileModeText, s.mobileModeTextActive]}>بحث</Text>
                   </Pressable>
                 </View>
               </View>
@@ -536,7 +538,7 @@ export default function SearchScreen() {
                     <Ionicons name="close-circle" size={17} color={colors.textMuted} />
                   </Pressable>
                 ) : null}
-                <Ionicons name="search" size={19} color={colors.homeAccent} />
+                <Ionicons name="search" size={19} color="#0ea5e9" />
               </View>
             </>
           ) : (
@@ -915,16 +917,16 @@ const createSearchStyles = (colors: ThemePalette) => StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
   header: { backgroundColor: colors.surface, borderBottomWidth: 1, borderBottomColor: colors.border, paddingHorizontal: 14, paddingTop: 10, paddingBottom: 6 },
   tvHeader: { paddingHorizontal: 32, paddingTop: 16, paddingBottom: 14 },
-  mobileHeaderTop: { minHeight: 42, flexDirection: "row", direction: "ltr", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 10 },
-  mobileModeSwitch: { flexDirection: "row", direction: "ltr", alignItems: "center", padding: 3, borderRadius: 13, backgroundColor: colors.input, borderWidth: 1, borderColor: colors.border },
-  mobileModeButton: { minHeight: 32, flexDirection: "row", direction: "ltr", alignItems: "center", justifyContent: "center", gap: 5, paddingHorizontal: 9, borderRadius: 10 },
-  mobileModeButtonActive: { backgroundColor: colors.homeAccent },
+  mobileHeaderTop: { minHeight: 42, flexDirection: ROW_RTL, alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 10 },
+  mobileModeSwitch: { flexDirection: ROW_RTL, alignItems: "center", padding: 3, borderRadius: 13, backgroundColor: colors.input, borderWidth: 1, borderColor: colors.border },
+  mobileModeButton: { minHeight: 32, flexDirection: ROW_RTL, alignItems: "center", justifyContent: "center", gap: 5, paddingHorizontal: 9, borderRadius: 10 },
+  mobileModeButtonActive: { backgroundColor: "#0ea5e9" },
   mobileModeText: { color: colors.textSecondary, fontSize: 10, fontFamily: "Cairo_700Bold" },
-  mobileModeTextActive: { color: colors.buttonText },
-  mobileTitleGroup: { flexDirection: "row", direction: "ltr", alignItems: "center", gap: 9 },
+  mobileModeTextActive: { color: "#ffffff" },
+  mobileTitleGroup: { flexDirection: ROW_RTL, alignItems: "center", gap: 9 },
   mobileTitle: { color: colors.textPrimary, fontSize: 18, fontFamily: "Cairo_800ExtraBold" },
   mobileBackButton: { width: 40, height: 40, alignItems: "center", justifyContent: "center", borderRadius: 12, backgroundColor: colors.input, borderWidth: 1, borderColor: colors.border },
-  mobileSearchBar: { minHeight: 52, flexDirection: "row", direction: "ltr", alignItems: "center", gap: 8, paddingHorizontal: 9, borderRadius: 14, backgroundColor: colors.input, borderWidth: 1, borderColor: colors.border },
+  mobileSearchBar: { minHeight: 52, flexDirection: ROW_RTL, alignItems: "center", gap: 8, paddingHorizontal: 9, borderRadius: 14, backgroundColor: colors.input, borderWidth: 1, borderColor: colors.border },
   mobileFilterButton: { width: 34, height: 34, alignItems: "center", justifyContent: "center", borderRadius: 10, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, position: "relative" },
   mobileFilterButtonActive: { backgroundColor: colors.destructive, borderColor: colors.destructive },
   mobileFilterCount: { position: "absolute", top: -5, right: -5, minWidth: 15, height: 15, alignItems: "center", justifyContent: "center", borderRadius: 8, backgroundColor: colors.destructive, borderWidth: 1, borderColor: colors.surface },

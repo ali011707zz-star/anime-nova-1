@@ -3,7 +3,7 @@ import { LinearGradient } from "expo-linear-gradient";
 import { useRouter } from "expo-router";
 import React, { useEffect, useRef } from "react";
 import {
-  Animated, Dimensions, Easing, Image, Modal, Platform,
+  Animated, Dimensions, Easing, I18nManager, Image, Modal, Platform,
   ScrollView, StyleSheet, Text, View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -142,14 +142,16 @@ export function DrawerMenu({ visible, onClose }: Props) {
       <Animated.View style={[s.drawer, tvMode && s.tvDrawer, { width: drawerWidth, transform: [{ translateX: slideX }], paddingTop: topPad, backgroundColor: colors.surface, borderLeftColor: colors.border }]}>
         <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: insets.bottom + 24 }}>
 
-          {/* ── Logo header ── */}
-          <View style={[s.logoRow, tvMode && s.tvLogoRow, { borderBottomColor: colors.border }]}>
-            <LinearGradient colors={["#8B5CF6", "#6D28D9"]} style={s.logoBadge}>
-              <Ionicons name="play" size={tvMode ? 22 : 14} color="#fff" />
-            </LinearGradient>
-            <View>
-              <Text style={[s.logoText, tvMode && s.tvLogoText, { color: colors.textPrimary }]}>Anime <Text style={{ color: colors.accent }}>NOVA</Text></Text>
-              <Text style={[s.logoSub, tvMode && s.tvLogoSub, { color: colors.textMuted }]}>منصة الأنمي العربية</Text>
+          {/* ── Logo header (matches Home screen | ANIME NOVA logo) ── */}
+          <View style={[s.logoRow, tvMode && s.tvLogoRow, { borderBottomColor: colors.border, flexDirection: I18nManager.isRTL ? "row" : "row-reverse", justifyContent: "space-between" }]}>
+            <View style={{ flexDirection: I18nManager.isRTL ? "row" : "row-reverse", alignItems: "center", gap: 9 }}>
+              <View style={[s.logoAccent, { backgroundColor: colors.homeAccent }]} />
+              <View style={{ alignItems: "flex-end" }}>
+                <Text style={[s.logoText, tvMode && s.tvLogoText, { color: colors.textPrimary }]}>
+                  ANIME <Text style={{ color: colors.homeAccent }}>NOVA</Text>
+                </Text>
+                <Text style={[s.logoSub, tvMode && s.tvLogoSub, { color: colors.textMuted }]}>منصة الأنمي العربية</Text>
+              </View>
             </View>
             <Pressable onPress={onClose} focusable={tvMode} hasTVPreferredFocus={tvMode}
               style={({ focused }) => [s.closeBtn, tvMode && s.tvCloseBtn, { backgroundColor: colors.surfaceElevated }, tvMode && tvFocusStyle(focused)]}>
@@ -306,12 +308,14 @@ const s = StyleSheet.create({
     width: 34, height: 34, borderRadius: 10,
     alignItems: "center", justifyContent: "center",
   },
-  logoText: { fontSize: 17, fontFamily: "Cairo_800ExtraBold", color: "#fff" },
+  logoAccent: {
+    width: 3.5, height: 28, borderRadius: 2,
+  },
+  logoText: { fontSize: 17, letterSpacing: 0.7, fontFamily: "Cairo_800ExtraBold", color: "#fff" },
   tvLogoText: { fontSize: 25 },
-  logoSub: { fontSize: 9, fontFamily: "Cairo_400Regular", color: "rgba(255,255,255,0.3)", marginTop: -2 },
+  logoSub: { fontSize: 9, fontFamily: "Cairo_400Regular", color: "rgba(255,255,255,0.3)", marginTop: -2, textAlign: "right" },
   tvLogoSub: { fontSize: 14, marginTop: 1 },
   closeBtn: {
-    marginStart: "auto" as any,
     width: 32, height: 32, borderRadius: 16,
     alignItems: "center", justifyContent: "center",
     backgroundColor: "rgba(255,255,255,0.05)",

@@ -8,10 +8,12 @@ import * as ImagePicker from "expo-image-picker";
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import {
   Alert, KeyboardAvoidingView, Linking, Modal, Platform, Pressable as NativePressable, ScrollView,
-  Image, Share, StyleSheet, Switch, Text, TextInput, View, ActivityIndicator,
+  Image, Share, StyleSheet, Switch, Text, TextInput, View, ActivityIndicator, I18nManager,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { isTvDevice } from "@/utils/tv";
+
+const ROW_RTL = I18nManager.isRTL ? "row" : "row-reverse";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useColors } from "@/hooks/useColors";
 import paletteColors from "@/constants/colors";
@@ -1434,6 +1436,8 @@ export default function SettingsScreen() {
   const [showProfile, setShowProfile] = useState(false);
   const [showTvLink, setShowTvLink] = useState(false);
   const [showPremium, setShowPremium] = useState(false);
+  const [showDonation, setShowDonation] = useState(false);
+  const [selectedDonationTier, setSelectedDonationTier] = useState<"1" | "3" | "5">("1");
   const [showCrashLog, setShowCrashLog] = useState(false);
   const [crashEntries, setCrashEntries] = useState<CrashEntry[]>([]);
   const [currentUser, setCurrentUser] = useState<MobileUser | null>(null);
@@ -1641,26 +1645,26 @@ export default function SettingsScreen() {
         </View>
       )}
 
-      {/* Sticky Header */}
+      {/* Sticky Header: Back Button + Title on Physical Right, Version Badge on Physical Left */}
       <View style={[ts.header, { paddingTop: topPad, backgroundColor: colors.surface, borderBottomColor: colors.border }]}>
-        <View style={[ts.headerBadge, { backgroundColor: colors.surfaceElevated, borderColor: colors.border }]}>
-          <View style={ts.headerDot} />
-          <Text style={[ts.headerBadgeText, { color: colors.textMuted }]}>ANIME NOVA · v2.4</Text>
-        </View>
-        <View style={{ flexDirection: "row", alignItems: "center", gap: 10, flex: 1 }}>
-          <View style={[ts.headerIconWrap, { backgroundColor: colors.surfaceElevated, borderColor: colors.border }]}>
-            <Ionicons name="settings" size={16} color={colors.primary} />
-          </View>
-          <Text style={[ts.headerTitle, { color: colors.textPrimary }]}>الإعدادات</Text>
-        </View>
         <Pressable
           onPress={() => router.canGoBack() ? router.back() : router.replace("/(tabs)" as any)}
           accessibilityRole="button"
           accessibilityLabel="رجوع"
           style={[ts.headerBackBtn, { backgroundColor: colors.surfaceElevated, borderColor: colors.border }]}
         >
-          <Ionicons name="arrow-back" size={16} color={colors.mutedForeground} style={{ transform: [{ scaleX: -1 }] }} />
+          <Ionicons name="chevron-forward" size={18} color={colors.textPrimary} />
         </Pressable>
+        <View style={{ flexDirection: ROW_RTL, alignItems: "center", gap: 10, flex: 1 }}>
+          <View style={[ts.headerIconWrap, { backgroundColor: colors.surfaceElevated, borderColor: colors.border }]}>
+            <Ionicons name="settings" size={16} color={colors.primary} />
+          </View>
+          <Text style={[ts.headerTitle, { color: colors.textPrimary }]}>الإعدادات</Text>
+        </View>
+        <View style={[ts.headerBadge, { backgroundColor: colors.surfaceElevated, borderColor: colors.border }]}>
+          <View style={ts.headerDot} />
+          <Text style={[ts.headerBadgeText, { color: colors.textMuted }]}>ANIME NOVA · v2.4</Text>
+        </View>
       </View>
 
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 60 }}>
@@ -1668,7 +1672,7 @@ export default function SettingsScreen() {
         {/* ── Profile / Login card ── */}
         <View style={{ paddingHorizontal: 16, marginTop: 20 }}>
           {currentUser ? (
-            <Pressable onPress={() => setShowProfile(true)} style={[ts.profileCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+            <Pressable onPress={() => router.push("/profile" as any)} style={[ts.profileCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
               {/* Avatar */}
               <View style={[ts.profileAvatar, { backgroundColor: (AVATAR_COLORS[(currentUser.avatarColor ?? 0) % AVATAR_COLORS.length]) + "28", borderColor: (AVATAR_COLORS[(currentUser.avatarColor ?? 0) % AVATAR_COLORS.length]) + "80" }]}>
                 {currentUser.profileImageUrl ? (
@@ -1757,16 +1761,41 @@ export default function SettingsScreen() {
                 <Ionicons name="chevron-back" size={14} color="#fbbf24" />
               </View>
             </View>
-            <View style={ts.premiumFeatures}>
-              {["بدون إعلانات", "جودة أعلى", "تخطي المقدمة"].map(f => (
-                <View key={f} style={ts.premiumFeatureItem}>
-                  <Ionicons name="checkmark" size={10} color="#fbbf24" />
-                  <Text style={[ts.premiumFeatureText, theme === "white" && { color: "#70500B" }]}>{f}</Text>
+              <View style={ts.premiumFeatures}>
+                {["بدون إعلانات", "جودة أعلى", "تخطي المقدمة"].map(f => (
+                  <View key={f} style={ts.premiumFeatureItem}>
+                    <Ionicons name="checkmark" size={10} color="#fbbf24" />
+                    <Text style={[ts.premiumFeatureText, theme === "white" && { color: "#70500B" }]}>{f}</Text>
+                  </View>
+                ))}
+              </View>
+            </Pressable>
+
+            {/* ── التبرع ودعم التطبيق (تحت زر الاشتراكات مباشرة) ── */}
+            <Pressable
+              testID="open-donation-modal"
+              style={ts.donationCard}
+              onPress={() => setShowDonation(true)}
+            >
+              <View style={{ flexDirection: ROW_RTL, alignItems: "center", gap: 12 }}>
+                <View style={ts.donationIconBox}>
+                  <Ionicons name="heart" size={20} color="#10b981" />
                 </View>
-              ))}
-            </View>
-          </Pressable>
-        </View>}
+                <View style={{ flex: 1, alignItems: "flex-end" }}>
+                  <Text style={[ts.donationTitle, theme === "white" && { color: "#065f46" }]}>
+                    ادعمني ليستمر التطبيق بالعمل مجاناً ❤️
+                  </Text>
+                  <Text style={[ts.donationSub, theme === "white" && { color: "#047857" }]}>
+                    دعمك بالنجوم أو الهدايا يحافظ على خوادم الحلقات السريعة بدون رسوم إجبارية
+                  </Text>
+                </View>
+                <View style={ts.donationPillBtn}>
+                  <Text style={ts.donationPillBtnText}>تبرع الآن</Text>
+                  <Ionicons name="chevron-back" size={13} color="#10b981" />
+                </View>
+              </View>
+            </Pressable>
+          </View>}
 
         {/* ══════ المظهر ══════ */}
         <SectionHeader title="المظهر" icon="المظهر" />
@@ -2090,6 +2119,107 @@ export default function SettingsScreen() {
         onClose={() => setShowPremium(false)}
         user={currentUser}
       />
+
+      {/* Donation Modal */}
+      {showDonation && (
+        <Modal transparent animationType="fade" onRequestClose={() => setShowDonation(false)}>
+          <View style={ts.donationOverlay}>
+            <Pressable style={StyleSheet.absoluteFill} onPress={() => setShowDonation(false)} focusable={false} />
+            <View style={ts.donationDialog}>
+              {/* Header */}
+              <View style={ts.donationModalHeader}>
+                <View style={{ flexDirection: ROW_RTL, alignItems: "center", gap: 12, flex: 1 }}>
+                  <View style={ts.donationHeartBadge}>
+                    <Ionicons name="heart" size={20} color="#10b981" />
+                  </View>
+                  <View style={{ flex: 1, alignItems: "flex-end" }}>
+                    <Text style={ts.donationModalTitle}>ادعمني ليستمر التطبيق بالعمل مجاناً</Text>
+                    <Text style={ts.donationModalSub}>
+                      دعمك يحافظ على خوادم الحلقات السريعة بدون رسوم إجبارية
+                    </Text>
+                  </View>
+                </View>
+                <Pressable onPress={() => setShowDonation(false)} style={ts.donationCloseBtn}>
+                  <Ionicons name="close" size={18} color="#cbd5e1" />
+                </Pressable>
+              </View>
+
+              {/* Telegram Stars Banner */}
+              <View style={ts.donationTelegramBanner}>
+                <View style={{ flex: 1, alignItems: "flex-end" }}>
+                  <Text style={ts.donationBannerTitle}>ادعمني بنجوم أو هدايا تلجرام ⭐🎁</Text>
+                  <Text style={ts.donationBannerDesc}>
+                    يمكنك إرسال نجوم تلجرام (Telegram Stars) أو هدايا رمزية لدعم استمرار سيرفرات المشاهدة والتحميل
+                  </Text>
+                </View>
+                <View style={ts.telegramTagPill}>
+                  <Text style={ts.telegramTagText}>Telegram ★</Text>
+                </View>
+              </View>
+
+              <Text style={ts.donationSelectLabel}>اختر مبلغ الدعم أو الهدية عبر تلجرام:</Text>
+
+              {/* 3 Tier Options */}
+              <View style={ts.donationTiersRow}>
+                {[
+                  { id: "1" as const, price: "1$", stars: "⭐ 50 نجمة", desc: "قهوة للمطور" },
+                  { id: "3" as const, price: "3$", stars: "⭐ 150 نجمة", desc: "دعم السيرفر" },
+                  { id: "5" as const, price: "5$", stars: "🎁 هدية تلجرام", desc: "الراعي الذهبي" },
+                ].map(tier => {
+                  const active = selectedDonationTier === tier.id;
+                  return (
+                    <Pressable
+                      key={tier.id}
+                      onPress={() => setSelectedDonationTier(tier.id)}
+                      style={[ts.donationTierCard, active && ts.donationTierCardActive]}
+                    >
+                      <Text style={[ts.donationTierPrice, active && { color: "#0ea5e9" }]}>{tier.price}</Text>
+                      <Text style={ts.donationTierStars}>{tier.stars}</Text>
+                      <Text style={ts.donationTierDesc}>{tier.desc}</Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+
+              {/* Selected Tier Action Box */}
+              <View style={ts.donationActionBox}>
+                <View style={ts.donationActionTopRow}>
+                  <Text style={ts.donationChosenText}>
+                    {selectedDonationTier === "1"
+                      ? "تم اختيار باقة الدعم ($1 · 50 نجمة)"
+                      : selectedDonationTier === "3"
+                        ? "تم اختيار باقة الدعم ($3 · 150 نجمة)"
+                        : "تم اختيار باقة الدعم ($5 · هدية تلجرام)"}
+                  </Text>
+                  <Text style={ts.donationTelegramHandle}>ANIME_N0VA@</Text>
+                </View>
+
+                <Pressable
+                  onPress={() => void Linking.openURL("https://t.me/ANIME_N0VA").catch(() => {})}
+                  style={ts.donationGoTelegramBtn}
+                >
+                  <Ionicons name="open-outline" size={16} color="#ffffff" />
+                  <Text style={ts.donationGoTelegramText}>اذهب إلى تلجرام</Text>
+                </Pressable>
+              </View>
+
+              {/* Share App Button */}
+              <Pressable
+                onPress={() => {
+                  void Share.share({
+                    message: `Anime NOVA — شاهد الأنمي واكتشف أحدث الحلقات مجاناً\n${OFFICIAL_SITE}`,
+                    url: OFFICIAL_SITE,
+                  }).catch(() => {});
+                  showToast("تم نسخ رابط التطبيق للمشاركة ✓");
+                }}
+                style={ts.donationShareBtn}
+              >
+                <Text style={ts.donationShareBtnText}>نسخ رابط التطبيق ومشاركته مع أصدقائك</Text>
+              </Pressable>
+            </View>
+          </View>
+        </Modal>
+      )}
     </View>
   );
 }
@@ -2103,7 +2233,7 @@ const ts = StyleSheet.create({
 
   /* Header */
   header: {
-    flexDirection: "row", direction: "ltr", alignItems: "center", gap: 10,
+    flexDirection: ROW_RTL, alignItems: "center", gap: 10,
     paddingHorizontal: 16, paddingBottom: 14,
     backgroundColor: "rgba(9,9,11,0.92)",
     borderBottomWidth: 1, borderBottomColor: "rgba(255,255,255,0.05)",
@@ -2320,4 +2450,243 @@ const ts = StyleSheet.create({
   premiumFeaturesCard: { borderRadius: 20, overflow: "hidden", backgroundColor: "rgba(17,17,22,0.95)", borderWidth: 1, borderColor: "rgba(255,255,255,0.07)", marginBottom: 16, padding: 16 },
   subscribeBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 10, paddingVertical: 18, borderRadius: 22, backgroundColor: "rgba(251,191,36,0.18)", borderWidth: 1.5, borderColor: "rgba(251,191,36,0.40)" },
   subscribeBtnText: { fontSize: 15, fontFamily: "Cairo_800ExtraBold", color: "#fcd34d" },
+
+  /* Donation Card & Modal */
+  donationCard: {
+    marginTop: 12,
+    borderRadius: 20,
+    padding: 15,
+    backgroundColor: "rgba(16,185,129,0.08)",
+    borderWidth: 1.5,
+    borderColor: "rgba(16,185,129,0.32)",
+  },
+  donationIconBox: {
+    width: 44,
+    height: 44,
+    borderRadius: 14,
+    backgroundColor: "rgba(16,185,129,0.18)",
+    borderWidth: 1,
+    borderColor: "rgba(16,185,129,0.38)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  donationTitle: {
+    fontSize: 13.5,
+    fontFamily: "Cairo_800ExtraBold",
+    color: "#34d399",
+    textAlign: "right",
+  },
+  donationSub: {
+    fontSize: 10,
+    fontFamily: "Cairo_600SemiBold",
+    color: "rgba(167,243,208,0.75)",
+    marginTop: 2,
+    textAlign: "right",
+  },
+  donationPillBtn: {
+    flexDirection: ROW_RTL,
+    alignItems: "center",
+    gap: 4,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 12,
+    backgroundColor: "rgba(16,185,129,0.16)",
+    borderWidth: 1,
+    borderColor: "rgba(16,185,129,0.35)",
+  },
+  donationPillBtnText: {
+    fontSize: 11,
+    fontFamily: "Cairo_800ExtraBold",
+    color: "#34d399",
+  },
+  donationOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.78)",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 16,
+  },
+  donationDialog: {
+    width: "100%",
+    maxWidth: 420,
+    borderRadius: 26,
+    padding: 18,
+    backgroundColor: "#0d131a",
+    borderWidth: 1.5,
+    borderColor: "rgba(20,184,166,0.3)",
+  },
+  donationModalHeader: {
+    flexDirection: ROW_RTL,
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 10,
+    marginBottom: 14,
+  },
+  donationHeartBadge: {
+    width: 44,
+    height: 44,
+    borderRadius: 14,
+    backgroundColor: "rgba(16,185,129,0.16)",
+    borderWidth: 1,
+    borderColor: "rgba(16,185,129,0.4)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  donationModalTitle: {
+    fontSize: 15,
+    fontFamily: "Cairo_800ExtraBold",
+    color: "#ffffff",
+    textAlign: "right",
+  },
+  donationModalSub: {
+    fontSize: 10.5,
+    fontFamily: "Cairo_600SemiBold",
+    color: "#94a3b8",
+    textAlign: "right",
+    marginTop: 2,
+  },
+  donationCloseBtn: {
+    width: 34,
+    height: 34,
+    borderRadius: 11,
+    backgroundColor: "rgba(255,255,255,0.06)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.1)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  donationTelegramBanner: {
+    flexDirection: ROW_RTL,
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+    padding: 14,
+    borderRadius: 18,
+    backgroundColor: "rgba(14,165,233,0.1)",
+    borderWidth: 1,
+    borderColor: "rgba(14,165,233,0.28)",
+    marginBottom: 14,
+  },
+  donationBannerTitle: {
+    fontSize: 13.5,
+    fontFamily: "Cairo_800ExtraBold",
+    color: "#ffffff",
+    textAlign: "right",
+  },
+  donationBannerDesc: {
+    fontSize: 10.5,
+    fontFamily: "Cairo_600SemiBold",
+    color: "#cbd5e1",
+    textAlign: "right",
+    marginTop: 4,
+    lineHeight: 17,
+  },
+  telegramTagPill: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 999,
+    backgroundColor: "rgba(14,165,233,0.18)",
+    borderWidth: 1,
+    borderColor: "rgba(14,165,233,0.42)",
+  },
+  telegramTagText: {
+    fontSize: 11,
+    fontFamily: "Cairo_800ExtraBold",
+    color: "#38bdf8",
+  },
+  donationSelectLabel: {
+    fontSize: 11.5,
+    fontFamily: "Cairo_700Bold",
+    color: "#e2e8f0",
+    textAlign: "right",
+    marginBottom: 10,
+  },
+  donationTiersRow: {
+    flexDirection: ROW_RTL,
+    gap: 10,
+    marginBottom: 14,
+  },
+  donationTierCard: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 14,
+    paddingHorizontal: 6,
+    borderRadius: 18,
+    backgroundColor: "#141a24",
+    borderWidth: 1.5,
+    borderColor: "rgba(255,255,255,0.08)",
+    gap: 4,
+  },
+  donationTierCardActive: {
+    backgroundColor: "rgba(14,165,233,0.15)",
+    borderColor: "#0ea5e9",
+  },
+  donationTierPrice: {
+    fontSize: 20,
+    fontFamily: "Cairo_800ExtraBold",
+    color: "#ffffff",
+  },
+  donationTierStars: {
+    fontSize: 11,
+    fontFamily: "Cairo_700Bold",
+    color: "#38bdf8",
+  },
+  donationTierDesc: {
+    fontSize: 10,
+    fontFamily: "Cairo_600SemiBold",
+    color: "#94a3b8",
+  },
+  donationActionBox: {
+    padding: 14,
+    borderRadius: 18,
+    backgroundColor: "rgba(14,165,233,0.1)",
+    borderWidth: 1,
+    borderColor: "rgba(14,165,233,0.35)",
+    marginBottom: 12,
+    gap: 10,
+  },
+  donationActionTopRow: {
+    flexDirection: ROW_RTL,
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  donationChosenText: {
+    fontSize: 11.5,
+    fontFamily: "Cairo_800ExtraBold",
+    color: "#ffffff",
+  },
+  donationTelegramHandle: {
+    fontSize: 11.5,
+    fontFamily: "Cairo_800ExtraBold",
+    color: "#38bdf8",
+  },
+  donationGoTelegramBtn: {
+    flexDirection: ROW_RTL,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    paddingVertical: 12,
+    borderRadius: 14,
+    backgroundColor: "#2563eb",
+  },
+  donationGoTelegramText: {
+    fontSize: 13,
+    fontFamily: "Cairo_800ExtraBold",
+    color: "#ffffff",
+  },
+  donationShareBtn: {
+    paddingVertical: 13,
+    borderRadius: 16,
+    backgroundColor: "#141923",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.08)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  donationShareBtnText: {
+    fontSize: 12,
+    fontFamily: "Cairo_700Bold",
+    color: "#e2e8f0",
+  },
 });

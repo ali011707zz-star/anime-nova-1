@@ -11,6 +11,7 @@ import {
   Text,
   View,
   useWindowDimensions,
+  I18nManager,
 } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { useRouter } from "expo-router";
@@ -23,6 +24,7 @@ import { getPosterUri, getTvPosterUri } from "@/utils/media";
 import { isTvDevice, tvFocusStyle, TvPressable as Pressable } from "@/utils/tv";
 
 const CACHE_KEY = "nova-latest-episodes";
+const ROW_RTL = I18nManager.isRTL ? "row" : "row-reverse";
 const RATING_QUERY = `
   query LatestEpisodeRatings($ids: [Int]) {
     Page {
@@ -172,16 +174,24 @@ export default function LatestEpisodesScreen() {
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       <View style={[styles.header, { paddingTop: topPad + 10 }]}>
         <View style={styles.headerRow}>
-          <View style={styles.headerActions}>
+          <View style={styles.heading}>
             <Pressable
               accessibilityRole="button"
-              accessibilityLabel="فتح القائمة"
-              onPress={() => setShowDrawer(true)}
+              accessibilityLabel="رجوع"
+              onPress={() => router.canGoBack() ? router.back() : router.replace("/(tabs)" as any)}
               focusable={tvMode}
               style={({ focused }) => [styles.iconButton, { backgroundColor: colors.card, borderColor: colors.border }, tvMode && tvFocusStyle(focused)]}
             >
-              <Ionicons name="menu" size={21} color={colors.text} />
+              <Ionicons name="chevron-forward" size={20} color={colors.text} />
             </Pressable>
+            <View style={styles.headingText}>
+              <Text style={[styles.title, { color: colors.text }]}>أحدث الحلقات</Text>
+              <Text style={[styles.subtitle, { color: colors.mutedForeground }]}>
+                جميع الحلقات الجديدة المترجمة بجودة فائقة
+              </Text>
+            </View>
+          </View>
+          <View style={styles.headerActions}>
             <Pressable
               accessibilityRole="button"
               accessibilityLabel="البحث"
@@ -191,23 +201,15 @@ export default function LatestEpisodesScreen() {
             >
               <Ionicons name="search" size={19} color={colors.text} />
             </Pressable>
-          </View>
-          <View style={styles.heading}>
-          <View style={styles.headingText}>
-            <Text style={[styles.title, { color: colors.text }]}>أحدث الحلقات</Text>
-            <Text style={[styles.subtitle, { color: colors.mutedForeground }]}>
-              جميع الحلقات الجديدة المترجمة بجودة فائقة
-            </Text>
-          </View>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="رجوع"
-            onPress={() => router.canGoBack() ? router.back() : router.replace("/(tabs)" as any)}
-            focusable={tvMode}
-            style={({ focused }) => [styles.iconButton, { backgroundColor: colors.card, borderColor: colors.border }, tvMode && tvFocusStyle(focused)]}
-          >
-            <Ionicons name="chevron-forward" size={20} color={colors.text} />
-          </Pressable>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="فتح القائمة"
+              onPress={() => setShowDrawer(true)}
+              focusable={tvMode}
+              style={({ focused }) => [styles.iconButton, { backgroundColor: colors.card, borderColor: colors.border }, tvMode && tvFocusStyle(focused)]}
+            >
+              <Ionicons name="menu" size={21} color={colors.text} />
+            </Pressable>
           </View>
         </View>
       </View>
@@ -354,10 +356,10 @@ export default function LatestEpisodesScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1 },
   header: { paddingHorizontal: 16, paddingBottom: 14 },
-  headerRow: { flexDirection: "row", direction: "ltr", alignItems: "center", gap: 10 },
-  headerActions: { flexDirection: "row", gap: 8 },
-  heading: { flex: 1, flexDirection: "row", direction: "ltr", alignItems: "center", justifyContent: "space-between" },
-  headingText: { flex: 1, alignItems: "flex-end", paddingRight: 8 },
+  headerRow: { flexDirection: ROW_RTL, alignItems: "center", gap: 10 },
+  headerActions: { flexDirection: ROW_RTL, gap: 8 },
+  heading: { flex: 1, flexDirection: ROW_RTL, alignItems: "center", gap: 10 },
+  headingText: { flex: 1, alignItems: "flex-end" },
   title: { fontSize: 20, fontFamily: "Cairo_800ExtraBold", textAlign: "right" },
   subtitle: { fontSize: 11, fontFamily: "Cairo_400Regular", marginTop: 2, textAlign: "right" },
   iconButton: { width: 42, height: 42, borderRadius: 13, borderWidth: 1, alignItems: "center", justifyContent: "center" },

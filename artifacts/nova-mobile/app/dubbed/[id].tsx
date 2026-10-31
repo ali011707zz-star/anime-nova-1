@@ -1,8 +1,10 @@
 import React, { useState, useEffect, useRef } from "react";
 import {
   View, Text, Image, FlatList,
-  ActivityIndicator, StyleSheet, Platform, ScrollView,
+  ActivityIndicator, StyleSheet, Platform, ScrollView, I18nManager,
 } from "react-native";
+
+const ROW_RTL = I18nManager.isRTL ? "row" : "row-reverse";
 import { Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -201,11 +203,12 @@ export default function DubbedDetailScreen() {
     <View style={[styles.container, { backgroundColor: colors.background, paddingTop: topPad }]}>
       {/* Header */}
       <View style={[styles.header, { borderBottomColor: colors.border }]}>
-         <Pressable onPress={() => router.canGoBack() ? router.back() : router.replace("/(tabs)" as any)} focusable={tvMode}
-           style={({ focused }) => [styles.backBtn, { backgroundColor: colors.input, borderColor: colors.border }, tvMode && tvFocusStyle(focused)]}>
-          <Ionicons name="arrow-back" size={20} color={colors.textSecondary} style={{ transform: [{ scaleX: -1 }] }} />
+        <Pressable onPress={() => router.canGoBack() ? router.back() : router.replace("/(tabs)" as any)} focusable={tvMode}
+          style={({ focused }) => [styles.backBtn, { backgroundColor: colors.input, borderColor: colors.border }, tvMode && tvFocusStyle(focused)]}>
+          <Ionicons name="chevron-forward" size={20} color={colors.textSecondary} />
         </Pressable>
-        </View>
+        <Text numberOfLines={1} style={[styles.headerTitle, { color: colors.textPrimary }]}>{title}</Text>
+      </View>
 
       <TvFocusGuideView autoFocus={tvMode} style={styles.tvFocusGuide}>
         <FlatList
@@ -316,12 +319,12 @@ const styles = StyleSheet.create({
   tvFocusGuide: { flex: 1 },
   tvListContent: { paddingHorizontal: 56, paddingBottom: 140 },
   header: {
-    position: "relative", flexDirection: "row", direction: "ltr", alignItems: "center", gap: 12,
+    flexDirection: ROW_RTL, alignItems: "center", gap: 10,
     paddingHorizontal: 16, paddingTop: 12, paddingBottom: 12,
     borderBottomWidth: 1, borderBottomColor: "rgba(255,255,255,0.05)",
   },
   backBtn: {
-    position: "absolute", right: 12, width: 36, height: 36, borderRadius: 10,
+    width: 36, height: 36, borderRadius: 10,
     backgroundColor: "rgba(255,255,255,0.05)",
     borderWidth: 1, borderColor: "rgba(255,255,255,0.08)",
     alignItems: "center", justifyContent: "center",

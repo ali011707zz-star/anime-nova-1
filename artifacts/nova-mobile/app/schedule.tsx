@@ -5,13 +5,14 @@ import { useRouter } from "expo-router";
 import React, { useState } from "react";
 import {
   ActivityIndicator, Platform,
-  ScrollView, StyleSheet, Text, View,
+  ScrollView, StyleSheet, Text, View, I18nManager,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColors } from "@/hooks/useColors";
 import { anilistQuery, SCHEDULE_QUERY, formatAiringTime } from "@/utils/anilist";
 import { isTvDevice, tvFocusStyle, TvPressable as Pressable } from "@/utils/tv";
 
+const ROW_RTL = I18nManager.isRTL ? "row" : "row-reverse";
 const DAYS_AR = ["الأحد", "الإثنين", "الثلاثاء", "الأربعاء", "الخميس", "الجمعة", "السبت"];
 
 type AiringSchedule = {
@@ -61,12 +62,12 @@ export default function ScheduleScreen() {
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       {/* Header */}
-      <View style={[styles.header, { paddingTop: topPad + 16, direction: "ltr" }]}>
-        <View style={{ width: 30 }} />
-        <Text style={[styles.title, { color: colors.text }]}>جدول البث</Text>
+      <View style={[styles.header, { paddingTop: topPad + 16 }]}>
         <Pressable onPress={() => router.canGoBack() ? router.back() : router.replace("/(tabs)" as any)} focusable={tvMode} style={({ focused }) => [styles.backBtn, tvMode && tvFocusStyle(focused)]}>
-          <Ionicons name="arrow-back" size={22} color={colors.text} style={{ transform: [{ scaleX: -1 }] }} />
+          <Ionicons name="chevron-forward" size={22} color={colors.text} />
         </Pressable>
+        <Text style={[styles.title, { color: colors.text }]}>جدول البث</Text>
+        <View style={{ width: 30 }} />
       </View>
 
       {/* Day Selector */}
@@ -166,7 +167,7 @@ export default function ScheduleScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  header: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 16, paddingBottom: 12 },
+  header: { flexDirection: ROW_RTL, alignItems: "center", justifyContent: "space-between", paddingHorizontal: 16, paddingBottom: 12 },
   backBtn: { padding: 4 },
   title: { fontSize: 20, fontFamily: "Cairo_800ExtraBold" },
   daysRow: { paddingHorizontal: 16, paddingVertical: 4, marginBottom: 12, alignItems: "center", flexDirection: "row" },

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import {
-  View, Text, TextInput, FlatList, Image,
+  View, Text, TextInput, FlatList, Image, I18nManager,
   ScrollView, ActivityIndicator, StyleSheet, Platform, useWindowDimensions,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
@@ -77,23 +77,25 @@ const STATUS_OPTIONS = [
   { label: "يعرض حالياً", value: "RELEASING" },
   { label: "مكتمل", value: "FINISHED" },
 ];
+const ROW_RTL = I18nManager.isRTL ? "row" : "row-reverse";
+
 const GENRES_WITH_COVERS = [
-  { genre: "Action",       ar: "أكشن",       color: "#EF4444" },
-  { genre: "Romance",      ar: "رومانسي",    color: "#EC4899" },
-  { genre: "Comedy",       ar: "كوميدي",     color: "#F59E0B" },
-  { genre: "Fantasy",      ar: "خيال",        color: "#8B5CF6" },
-  { genre: "Drama",        ar: "دراما",       color: "#3B82F6" },
-  { genre: "Sci-Fi",       ar: "خيال علمي",  color: "#06B6D4" },
-  { genre: "Horror",       ar: "رعب",         color: "#374151" },
-  { genre: "Adventure",    ar: "مغامرة",     color: "#10B981" },
-  { genre: "Supernatural", ar: "خوارق",      color: "#7C3AED" },
-  { genre: "Sports",       ar: "رياضة",       color: "#22C55E" },
-  { genre: "Slice of Life",ar: "حياة يومية", color: "#F97316" },
-  { genre: "Mystery",      ar: "غموض",        color: "#6366F1" },
-  { genre: "Psychological",ar: "نفسي",       color: "#DC2626" },
-  { genre: "Music",        ar: "موسيقى",      color: "#D946EF" },
-  { genre: "Mecha",        ar: "ميكا",        color: "#64748B" },
-  { genre: "Isekai",       ar: "إيسيكاي",    color: "#0EA5E9" },
+  { genre: "Adventure",    ar: "مغامرة",      color: "#D97706", poster: "https://s4.anilist.co/file/anilistcdn/media/anime/cover/medium/bx21-YCDoj1EkAxFn.jpg" },
+  { genre: "Action",       ar: "أكشن",        color: "#CA8A04", poster: "https://s4.anilist.co/file/anilistcdn/media/anime/cover/medium/bx101922-PEn1CTc93blC.jpg" },
+  { genre: "Comedy",       ar: "كوميديا",     color: "#EAB308", poster: "https://s4.anilist.co/file/anilistcdn/media/anime/cover/medium/bx21087-UV2tu6exrfXz.jpg" },
+  { genre: "Fantasy",      ar: "فانتازيا",    color: "#7C3AED", poster: "https://s4.anilist.co/file/anilistcdn/media/anime/cover/medium/bx113415-bbBWj4pEFseh.jpg" },
+  { genre: "Drama",        ar: "دراما",       color: "#DB2777", poster: "https://s4.anilist.co/file/anilistcdn/media/anime/cover/medium/bx16498-C6FPmWm59CyP.jpg" },
+  { genre: "Romance",      ar: "رومانسي",     color: "#EC4899", poster: "https://s4.anilist.co/file/anilistcdn/media/anime/cover/medium/bx154587-n1fmjRv4JQUd.jpg" },
+  { genre: "Sci-Fi",       ar: "خيال علمي",   color: "#0891B2", poster: "https://s4.anilist.co/file/anilistcdn/media/anime/cover/medium/bx151807-m1gX3iwfIsLu.png" },
+  { genre: "Supernatural", ar: "خوارق",       color: "#6D28D9", poster: "https://s4.anilist.co/file/anilistcdn/media/anime/cover/medium/bx269-d2GmRkJbMopq.jpg" },
+  { genre: "Mystery",      ar: "غموض",        color: "#4F46E5", poster: "https://s4.anilist.co/file/anilistcdn/media/anime/cover/medium/bx1535-lawCwhzhi96X.jpg" },
+  { genre: "Sports",       ar: "رياضة",       color: "#16A34A", poster: "https://s4.anilist.co/file/anilistcdn/media/anime/cover/medium/bx20464-eW7ZDBOcn74a.jpg" },
+  { genre: "Slice of Life",ar: "حياة يومية",  color: "#EA580C", poster: "https://s4.anilist.co/file/anilistcdn/media/anime/cover/medium/bx154587-n1fmjRv4JQUd.jpg" },
+  { genre: "Horror",       ar: "رعب",         color: "#DC2626", poster: "https://s4.anilist.co/file/anilistcdn/media/anime/cover/medium/bx20605-f3PCf32c9abH.jpg" },
+  { genre: "Psychological",ar: "نفسي",        color: "#9333EA", poster: "https://s4.anilist.co/file/anilistcdn/media/anime/cover/medium/bx1535-lawCwhzhi96X.jpg" },
+  { genre: "Music",        ar: "موسيقى",      color: "#C026D3", poster: "https://s4.anilist.co/file/anilistcdn/media/anime/cover/medium/bx20665-CnzR2zV0xtR9.jpg" },
+  { genre: "Mecha",        ar: "ميكا",        color: "#2563EB", poster: "https://s4.anilist.co/file/anilistcdn/media/anime/cover/medium/bx1575-Z7efX2ab8f5E.jpg" },
+  { genre: "Isekai",       ar: "إيسيكاي",     color: "#0284C7", poster: "https://s4.anilist.co/file/anilistcdn/media/anime/cover/medium/bx151807-m1gX3iwfIsLu.png" },
 ];
 
 const FILTER_GENRES: AnimeFilterOption[] = [
@@ -106,8 +108,8 @@ const BLOCKED = new Set(["Hentai"]);
 
 function coverUrl(id: number) { return `https://img.anili.st/media/${id}`; }
 
-/* ── Genre cover card ── */
-function GenreCard({ item, animeId, onPress, columns, horizontal = false }: { item: typeof GENRES_WITH_COVERS[0]; animeId?: number; onPress: () => void; columns: number; horizontal?: boolean }) {
+/* ── Genre cover card (matches Screenshot_20261031-192003_2_7bc0e764.jpg) ── */
+function GenreCard({ item, onPress, columns, horizontal = false }: { item: typeof GENRES_WITH_COVERS[0]; animeId?: number; onPress: () => void; columns: number; horizontal?: boolean }) {
   const { g } = useBrowseTheme();
   const { width, height } = useWindowDimensions();
   const tvMode = isTvDevice(width, height);
@@ -115,15 +117,30 @@ function GenreCard({ item, animeId, onPress, columns, horizontal = false }: { it
     <Pressable
       onPress={onPress}
       focusable={tvMode}
-      style={({ focused }) => [g.genreCard, horizontal ? g.horizontalGenreCard : { flex: 1 / columns }, tvMode && tvFocusStyle(focused)]}
+      style={({ focused }) => [
+        g.genreCard,
+        horizontal ? g.horizontalGenreCard : { flex: 1 / columns },
+        tvMode && tvFocusStyle(focused),
+      ]}
     >
-        <View style={[g.genreImgWrap, horizontal && g.horizontalGenreImgWrap, tvMode && g.tvGenreImgWrap, { backgroundColor: item.color + "22" }]}>
-        {animeId ? (
-          <Image source={{ uri: coverUrl(animeId) }} style={g.genreImg} />
-        ) : null}
-        <View style={[StyleSheet.absoluteFill, { backgroundColor: "rgba(0,0,0,0.45)" }]} />
-        <View style={[g.genreColorBar, { backgroundColor: item.color }]} />
-        <Text style={[g.genreLabel, tvMode && g.tvGenreLabel]}>{item.ar}</Text>
+      <View
+        style={[
+          g.genrePillWrap,
+          horizontal && g.horizontalGenrePillWrap,
+          tvMode && g.tvGenreImgWrap,
+          { backgroundColor: item.color },
+        ]}
+      >
+        <Text numberOfLines={1} style={[g.genreLabel, tvMode && g.tvGenreLabel]}>
+          {item.ar}
+        </Text>
+        <View style={g.genreFloatingPosterWrap}>
+          <Image
+            source={{ uri: item.poster }}
+            style={g.genreFloatingPoster}
+            resizeMode="cover"
+          />
+        </View>
       </View>
     </Pressable>
   );
@@ -452,29 +469,7 @@ export default function BrowseScreen() {
         {!tvMode ? (
           <>
             <View style={g.mobileHeaderRow}>
-              <View style={g.mobileActions}>
-                <Pressable
-                  accessibilityLabel="فتح الفلاتر"
-                  onPress={() => setFilterVisible(true)}
-                  style={({ pressed }) => [g.mobileFilterButton, hasFilters && g.mobileFilterButtonActive, pressed && { opacity: 0.82 }]}
-                >
-                  <Ionicons name="options-outline" size={18} color={hasFilters ? colors.buttonText : colors.textPrimary} />
-                </Pressable>
-                <View style={g.modeSwitch}>
-                  <Pressable onPress={() => setView("list")} style={[g.modeButton, g.modeButtonActive]}>
-                    <Text style={[g.modeButtonText, g.modeButtonTextActive]}>تصفح</Text>
-                    <Ionicons name="compass-outline" size={14} color={colors.buttonText} />
-                  </Pressable>
-                  <Pressable onPress={() => router.push("/(tabs)/search" as any)} style={g.modeButton}>
-                    <Text style={g.modeButtonText}>بحث</Text>
-                    <Ionicons name="search" size={14} color={colors.textMuted} />
-                  </Pressable>
-                </View>
-              </View>
               <View style={g.mobileTitleGroup}>
-                <Text numberOfLines={1} style={[g.mobileTitle, { flexShrink: 1 }]}>
-                  {activeGenreAr || "المكتبة والتصفح"}
-                </Text>
                 <Pressable
                   accessibilityRole="button"
                   accessibilityLabel="رجوع"
@@ -483,15 +478,37 @@ export default function BrowseScreen() {
                 >
                   <Ionicons name="chevron-forward" size={21} color={colors.textPrimary} />
                 </Pressable>
+                <Text numberOfLines={1} style={[g.mobileTitle, { flexShrink: 1 }]}>
+                  {activeGenreAr || "المكتبة والتصفح"}
+                </Text>
+              </View>
+              <View style={g.mobileActions}>
+                <View style={g.modeSwitch}>
+                  <Pressable onPress={() => router.push("/(tabs)/search" as any)} style={g.modeButton}>
+                    <Ionicons name="search" size={14} color={colors.textMuted} />
+                    <Text style={g.modeButtonText}>بحث</Text>
+                  </Pressable>
+                  <Pressable onPress={() => setView("list")} style={[g.modeButton, g.modeButtonActive]}>
+                    <Ionicons name="compass-outline" size={14} color={colors.buttonText} />
+                    <Text style={[g.modeButtonText, g.modeButtonTextActive]}>تصفح</Text>
+                  </Pressable>
+                </View>
+                <Pressable
+                  accessibilityLabel="فتح الفلاتر"
+                  onPress={() => setFilterVisible(true)}
+                  style={({ pressed }) => [g.mobileFilterButton, hasFilters && g.mobileFilterButtonActive, pressed && { opacity: 0.82 }]}
+                >
+                  <Ionicons name="options-outline" size={18} color={hasFilters ? colors.buttonText : colors.textPrimary} />
+                </Pressable>
               </View>
             </View>
 
             <Pressable onPress={() => setFilterVisible(true)} style={g.mobileSortButton}>
-              <Ionicons name="chevron-down" size={17} color={colors.textSecondary} />
+              <Ionicons name="options-outline" size={17} color={colors.textSecondary} />
               <Text numberOfLines={1} style={g.mobileSortText}>
                 {SORT_OPTIONS.find((option) => option.value === sort)?.label || "الأكثر شعبية"}
               </Text>
-              <Ionicons name="options-outline" size={17} color={colors.textSecondary} />
+              <Ionicons name="chevron-down" size={17} color={colors.textSecondary} />
             </Pressable>
 
             <ScrollView
@@ -746,22 +763,22 @@ const createBrowseStyles = (colors: ThemePalette) => StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
   header: { backgroundColor: colors.surface, borderBottomWidth: 1, borderBottomColor: colors.border, paddingHorizontal: 12, paddingTop: 8, paddingBottom: 5 },
   tvHeader: { paddingHorizontal: 32, paddingTop: 16, paddingBottom: 14 },
-  mobileHeaderRow: { flexDirection: "row", direction: "ltr", alignItems: "center", justifyContent: "space-between", minHeight: 44, gap: 8 },
-  mobileActions: { flexDirection: "row", direction: "ltr", alignItems: "center", gap: 6 },
+  mobileHeaderRow: { flexDirection: ROW_RTL, alignItems: "center", justifyContent: "space-between", minHeight: 44, gap: 8 },
+  mobileActions: { flexDirection: ROW_RTL, alignItems: "center", gap: 6 },
   mobileFilterButton: { width: 40, height: 40, borderRadius: 12, alignItems: "center", justifyContent: "center", backgroundColor: colors.input, borderWidth: 1, borderColor: colors.border },
   mobileFilterButtonActive: { backgroundColor: colors.destructive, borderColor: colors.destructive },
-  modeSwitch: { flexDirection: "row", direction: "ltr", alignItems: "center", padding: 3, borderRadius: 13, backgroundColor: colors.input, borderWidth: 1, borderColor: colors.border },
-  modeButton: { minHeight: 32, flexDirection: "row", direction: "ltr", alignItems: "center", justifyContent: "center", gap: 5, paddingHorizontal: 9, borderRadius: 10 },
-  modeButtonActive: { backgroundColor: colors.homeAccent },
+  modeSwitch: { flexDirection: ROW_RTL, alignItems: "center", padding: 3, borderRadius: 13, backgroundColor: colors.input, borderWidth: 1, borderColor: colors.border },
+  modeButton: { minHeight: 32, flexDirection: ROW_RTL, alignItems: "center", justifyContent: "center", gap: 5, paddingHorizontal: 9, borderRadius: 10 },
+  modeButtonActive: { backgroundColor: "#0ea5e9" },
   modeButtonText: { color: colors.textSecondary, fontFamily: "Cairo_700Bold", fontSize: 10 },
-  modeButtonTextActive: { color: colors.buttonText },
-  mobileTitleGroup: { flexDirection: "row", direction: "ltr", alignItems: "center", gap: 9, minWidth: 0 },
+  modeButtonTextActive: { color: "#ffffff" },
+  mobileTitleGroup: { flexDirection: ROW_RTL, alignItems: "center", gap: 9, minWidth: 0 },
   mobileTitle: { color: colors.textPrimary, fontSize: 17, fontFamily: "Cairo_800ExtraBold", textAlign: "right", writingDirection: "rtl" },
   mobileBackButton: { width: 40, height: 40, borderRadius: 12, alignItems: "center", justifyContent: "center", backgroundColor: colors.input, borderWidth: 1, borderColor: colors.border },
-  mobileSortButton: { minHeight: 44, flexDirection: "row", direction: "ltr", alignItems: "center", gap: 8, marginTop: 10, paddingHorizontal: 12, borderRadius: 14, backgroundColor: colors.input, borderWidth: 1, borderColor: colors.border },
+  mobileSortButton: { minHeight: 44, flexDirection: ROW_RTL, alignItems: "center", gap: 8, marginTop: 10, paddingHorizontal: 12, borderRadius: 14, backgroundColor: colors.input, borderWidth: 1, borderColor: colors.border },
   mobileSortText: { flex: 1, color: colors.textPrimary, fontSize: 13, fontFamily: "Cairo_700Bold", textAlign: "right", writingDirection: "rtl" },
   mobileGenreRail: { marginTop: 12, marginHorizontal: -12 },
-  mobileGenreRailContent: { flexDirection: "row", direction: "rtl", gap: 8, paddingHorizontal: 12, paddingBottom: 8 },
+  mobileGenreRailContent: { flexDirection: ROW_RTL, gap: 10, paddingHorizontal: 12, paddingTop: 18, paddingBottom: 8 },
   resultsHeading: { paddingTop: 2, paddingBottom: 10, alignItems: "flex-end" },
   resultsHeadingText: { color: colors.textSecondary, fontSize: 11, fontFamily: "Cairo_700Bold", textAlign: "right", writingDirection: "rtl" },
   headerRow: { flexDirection: "row", alignItems: "center", marginBottom: 6 },
@@ -792,7 +809,56 @@ const createBrowseStyles = (colors: ThemePalette) => StyleSheet.create({
   searchInput: { flex: 1, color: colors.textPrimary, fontSize: 10, fontFamily: "Cairo_400Regular", textAlign: "right" },
   tvSearchInput: { fontSize: 14, lineHeight: 21 },
   genreCard: { flex: 1 },
-  horizontalGenreCard: { width: 126, flexGrow: 0 },
+  horizontalGenreCard: { width: 154, flexGrow: 0 },
+  genreCardWrap: { paddingTop: 16, position: "relative" },
+  horizontalGenreCardWrap: { paddingTop: 14, position: "relative" },
+  genrePillWrap: {
+    height: 62,
+    borderRadius: 16,
+    flexDirection: ROW_RTL,
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 12,
+    position: "relative",
+    overflow: "visible",
+  },
+  horizontalGenrePillWrap: {
+    height: 54,
+    borderRadius: 15,
+  },
+  genreFloatingPosterWrap: {
+    width: 54,
+    height: 72,
+    borderRadius: 11,
+    overflow: "hidden",
+    marginTop: -22,
+    borderWidth: 1.5,
+    borderColor: "rgba(255,255,255,0.68)",
+    backgroundColor: "#18181b",
+    elevation: 6,
+    shadowColor: "#000",
+    shadowOpacity: 0.35,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 3 },
+  },
+  horizontalGenreFloatingPosterWrap: {
+    width: 50,
+    height: 68,
+    borderRadius: 11,
+    marginTop: -20,
+  },
+  genreFloatingPoster: { width: "100%", height: "100%" },
+  genrePillLabel: {
+    flex: 1,
+    fontSize: 14,
+    fontFamily: "Cairo_800ExtraBold",
+    color: "#ffffff",
+    textAlign: "right",
+    paddingHorizontal: 6,
+    textShadowColor: "rgba(0,0,0,0.28)",
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 3,
+  },
   genreImgWrap: { height: 90, borderRadius: 16, overflow: "hidden", position: "relative", borderWidth: 1, borderColor: colors.border, justifyContent: "flex-end" },
   horizontalGenreImgWrap: { height: 58, borderRadius: 13 },
   tvGenreImgWrap: { height: 150, borderRadius: 18, borderWidth: 1 },

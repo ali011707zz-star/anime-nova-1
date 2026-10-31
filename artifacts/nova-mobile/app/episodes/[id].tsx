@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import {
   View, Text, TextInput, Image, FlatList,
-  ScrollView, ActivityIndicator, StyleSheet, Platform, useWindowDimensions,
+  ScrollView, ActivityIndicator, StyleSheet, Platform, useWindowDimensions, I18nManager,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
@@ -13,6 +13,8 @@ import { isTvDevice, tvFocusStyle, TvFocusGuideView, TvPressable } from "@/utils
 const Pressable = TvPressable;
 import { useTvFocusMemory } from "@/utils/tvFocus";
 import { useColors } from "@/hooks/useColors";
+
+const ROW_RTL = I18nManager.isRTL ? "row" : "row-reverse";
 
 /* ── AniList query ── */
 const ANIME_QUERY = `
@@ -816,6 +818,30 @@ export default function EpisodeListScreen() {
     <View style={[ep_s.container, tvMode && ep_s.tvContainer, { backgroundColor: colors.background, paddingTop: topPad }]}>
       <View style={[ep_s.topBar, tvMode && ep_s.tvTopBar]}>
         <Pressable
+          onPress={() => router.canGoBack() ? router.back() : router.replace("/(tabs)")}
+          focusable={tvMode}
+          hasTVPreferredFocus={tvMode && ready && (!preferredKey || preferredKey === "back")}
+          onFocus={() => { if (tvMode) rememberFocus("back"); }}
+          accessibilityRole="button"
+          accessibilityLabel="رجوع"
+          style={({ focused }) => [ep_s.topBarBack, tvMode && ep_s.tvTopBarBack, tvMode && tvFocusStyle(focused)]}
+        >
+          <Ionicons name="chevron-forward" size={tvMode ? 26 : 20} color={colors.textPrimary} />
+        </Pressable>
+        <View style={[ep_s.topBarHeading, tvMode && ep_s.tvTopBarHeading]}>
+          <Text style={[ep_s.topBarTitle, tvMode && ep_s.tvTopBarTitle]} numberOfLines={1}>
+            {extractArabicTitle(selectedAnime?.synonyms)
+              || selectedAnime?.title?.english
+              || selectedAnime?.title?.romaji
+              || (Array.isArray(title) ? title[0] : title)
+              || "الحلقات"}
+          </Text>
+          <Text style={[ep_s.topBarSubtitle, tvMode && ep_s.tvText]} numberOfLines={1}>
+            {seasons.length > 1 ? `الموسم ${selectedSeasonIndex + 1} · ` : ""}
+            {total} حلقة{watchedCount > 0 ? ` · ${pct}% مكتمل` : ""}
+          </Text>
+        </View>
+        <Pressable
           onPress={() => {
             setSortOrder(current => current === "asc" ? "desc" : "asc");
             episodeListRef.current?.scrollToOffset({ offset: 0, animated: false });
@@ -835,30 +861,6 @@ export default function EpisodeListScreen() {
           <Text style={[ep_s.topBarSortText, tvMode && ep_s.tvText, { color: colors.textPrimary }]}>
             {sortOrder === "asc" ? "الأقدم" : "الأحدث"}
           </Text>
-        </Pressable>
-        <View style={[ep_s.topBarHeading, tvMode && ep_s.tvTopBarHeading]}>
-          <Text style={[ep_s.topBarTitle, tvMode && ep_s.tvTopBarTitle]} numberOfLines={1}>
-            {extractArabicTitle(selectedAnime?.synonyms)
-              || selectedAnime?.title?.english
-              || selectedAnime?.title?.romaji
-              || (Array.isArray(title) ? title[0] : title)
-              || "الحلقات"}
-          </Text>
-          <Text style={[ep_s.topBarSubtitle, tvMode && ep_s.tvText]} numberOfLines={1}>
-            {seasons.length > 1 ? `الموسم ${selectedSeasonIndex + 1} · ` : ""}
-            {total} حلقة{watchedCount > 0 ? ` · ${pct}% مكتمل` : ""}
-          </Text>
-        </View>
-        <Pressable
-          onPress={() => router.canGoBack() ? router.back() : router.replace("/(tabs)")}
-          focusable={tvMode}
-          hasTVPreferredFocus={tvMode && ready && (!preferredKey || preferredKey === "back")}
-          onFocus={() => { if (tvMode) rememberFocus("back"); }}
-          accessibilityRole="button"
-          accessibilityLabel="رجوع"
-          style={({ focused }) => [ep_s.topBarBack, tvMode && ep_s.tvTopBarBack, tvMode && tvFocusStyle(focused)]}
-        >
-          <Ionicons name="chevron-forward" size={tvMode ? 26 : 20} color={colors.textPrimary} />
         </Pressable>
       </View>
       {/* ── Hero Banner ── */}
@@ -1144,18 +1146,18 @@ export default function EpisodeListScreen() {
 function createEpStyles(colors: ReturnType<typeof useColors>) {
 return StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
-  topBar: { height: 58, backgroundColor: colors.surface, borderBottomWidth: 1, borderBottomColor: colors.border, justifyContent: "center", position: "relative" },
-  topBarHeading: { position: "absolute", left: 106, right: 62, alignItems: "flex-end", justifyContent: "center", gap: 1 },
+  topBar: { height: 58, flexDirection: ROW_RTL, alignItems: "center", justifyContent: "space-between", gap: 10, paddingHorizontal: 12, backgroundColor: colors.surface, borderBottomWidth: 1, borderBottomColor: colors.border },
+  topBarHeading: { flex: 1, alignItems: "flex-end", justifyContent: "center", gap: 1 },
   topBarTitle: { color: colors.textPrimary, fontSize: 13, lineHeight: 19, fontFamily: "Cairo_800ExtraBold", textAlign: "right", maxWidth: "100%" },
   topBarSubtitle: { color: colors.textMuted, fontSize: 9, lineHeight: 14, fontFamily: "Cairo_400Regular", textAlign: "right", maxWidth: "100%" },
-  topBarSort: { position: "absolute", left: 12, top: 13, minHeight: 31, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 5, paddingHorizontal: 9, borderRadius: 10, backgroundColor: colors.surfaceElevated, borderWidth: 1, borderColor: colors.border },
+  topBarSort: { minHeight: 31, flexDirection: ROW_RTL, alignItems: "center", justifyContent: "center", gap: 5, paddingHorizontal: 9, borderRadius: 10, backgroundColor: colors.surfaceElevated, borderWidth: 1, borderColor: colors.border },
   topBarSortText: { fontSize: 9, lineHeight: 14, fontFamily: "Cairo_700Bold" },
-  topBarBack: { position: "absolute", right: 12, top: 9, width: 38, height: 38, borderRadius: 12, alignItems: "center", justifyContent: "center", backgroundColor: colors.surfaceElevated, borderWidth: 1, borderColor: colors.border },
-  tvTopBar: { height: 68 },
-  tvTopBarHeading: { left: 150, right: 82 },
+  topBarBack: { width: 38, height: 38, borderRadius: 12, alignItems: "center", justifyContent: "center", backgroundColor: colors.surfaceElevated, borderWidth: 1, borderColor: colors.border },
+  tvTopBar: { height: 68, paddingHorizontal: 22 },
+  tvTopBarHeading: {},
   tvTopBarTitle: { fontSize: 18, lineHeight: 25 },
-  tvTopBarBack: { width: 48, height: 48, top: 10, right: 18, borderRadius: 14 },
-  tvTopBarSort: { minHeight: 42, top: 13, left: 28, paddingHorizontal: 14, borderRadius: 12 },
+  tvTopBarBack: { width: 48, height: 48, borderRadius: 14 },
+  tvTopBarSort: { minHeight: 42, paddingHorizontal: 14, borderRadius: 12 },
   center: { flex: 1, alignItems: "center", justifyContent: "center" },
   notFound: { fontSize: 14, color: colors.textSecondary, fontFamily: "Cairo_400Regular" },
   hero: { height: 220, justifyContent: "flex-end", overflow: "hidden" },

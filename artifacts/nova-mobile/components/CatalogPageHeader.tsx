@@ -7,6 +7,8 @@ import { DrawerMenu } from "@/components/DrawerMenu";
 import { useColors } from "@/hooks/useColors";
 import { isTvDevice, tvFocusStyle, TvPressable as Pressable } from "@/utils/tv";
 
+const ROW_RTL = I18nManager.isRTL ? "row" : "row-reverse";
+
 type HeaderProps = {
   title: string;
   onBack?: () => void;
@@ -34,17 +36,27 @@ export function CatalogPageHeader({ title, onBack }: HeaderProps) {
   return (
     <>
       <View style={[styles.header, { height: topInset + 54, paddingTop: topInset, borderBottomColor: colors.border }]}>
-        <View style={[styles.actions, I18nManager.isRTL && styles.rtlActions, { top: topInset + 6 }]}>
+        <View style={styles.rightTitleGroup}>
           <Pressable
-            accessibilityLabel="فتح القائمة"
-            onPress={() => setDrawerVisible(true)}
-            onFocus={() => setFocusedAction("menu")}
-            onBlur={() => setFocusedAction((current) => current === "menu" ? null : current)}
+            accessibilityLabel="رجوع"
+            onPress={goBack}
+            onFocus={() => setFocusedAction("back")}
+            onBlur={() => setFocusedAction((current) => current === "back" ? null : current)}
             focusable={tvMode}
-            style={[styles.iconButton, { backgroundColor: colors.surface, borderColor: colors.border }, tvMode && tvFocusStyle(focusedAction === "menu")]}
+            style={[styles.backButton, { backgroundColor: colors.surface, borderColor: colors.border }, tvMode && tvFocusStyle(focusedAction === "back")]}
           >
-            <Ionicons name="menu" size={21} color={colors.textPrimary} />
+            <Ionicons name="chevron-forward" size={21} color={colors.textPrimary} />
           </Pressable>
+
+          <Text
+            numberOfLines={1}
+            style={[styles.title, { color: colors.textPrimary }]}
+          >
+            {title}
+          </Text>
+        </View>
+
+        <View style={styles.actions}>
           <Pressable
             accessibilityLabel="البحث"
             onPress={() => router.push("/(tabs)/search" as any)}
@@ -55,25 +67,17 @@ export function CatalogPageHeader({ title, onBack }: HeaderProps) {
           >
             <Ionicons name="search" size={19} color={colors.textPrimary} />
           </Pressable>
+          <Pressable
+            accessibilityLabel="فتح القائمة"
+            onPress={() => setDrawerVisible(true)}
+            onFocus={() => setFocusedAction("menu")}
+            onBlur={() => setFocusedAction((current) => current === "menu" ? null : current)}
+            focusable={tvMode}
+            style={[styles.iconButton, { backgroundColor: colors.surface, borderColor: colors.border }, tvMode && tvFocusStyle(focusedAction === "menu")]}
+          >
+            <Ionicons name="menu" size={21} color={colors.textPrimary} />
+          </Pressable>
         </View>
-
-        <Text
-          numberOfLines={1}
-          style={[styles.title, { color: colors.textPrimary, top: topInset, bottom: 0 }]}
-        >
-          {title}
-        </Text>
-
-        <Pressable
-          accessibilityLabel="رجوع"
-          onPress={goBack}
-          onFocus={() => setFocusedAction("back")}
-          onBlur={() => setFocusedAction((current) => current === "back" ? null : current)}
-          focusable={tvMode}
-          style={[styles.backButton, tvMode && styles.tvBackButton, { top: topInset + 6, backgroundColor: colors.surface, borderColor: colors.border }, tvMode && tvFocusStyle(focusedAction === "back")]}
-        >
-          <Ionicons name="arrow-back" size={21} color={colors.textPrimary} style={{ transform: [{ scaleX: -1 }] }} />
-        </Pressable>
       </View>
       <DrawerMenu visible={drawerVisible} onClose={() => setDrawerVisible(false)} />
     </>
@@ -128,18 +132,24 @@ export function CatalogTabs({ tabs, activeId, onSelect }: TabsProps) {
 
 const styles = StyleSheet.create({
   header: {
-    position: "relative",
+    flexDirection: ROW_RTL,
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 14,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    justifyContent: "center",
+  },
+  rightTitleGroup: {
+    flexDirection: ROW_RTL,
+    alignItems: "center",
+    gap: 10,
+    flex: 1,
+    minWidth: 0,
   },
   actions: {
-    position: "absolute",
-    right: 14,
-    flexDirection: "row",
+    flexDirection: ROW_RTL,
+    alignItems: "center",
     gap: 8,
-    zIndex: 2,
   },
-  rtlActions: { flexDirection: "row-reverse" },
   iconButton: {
     width: 38,
     height: 38,
@@ -149,26 +159,19 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   title: {
-    position: "absolute",
-    left: 60,
-    right: 104,
+    flex: 1,
     textAlign: "right",
-    textAlignVertical: "center",
     fontSize: 18,
     fontFamily: "Cairo_800ExtraBold",
   },
   backButton: {
-    position: "absolute",
-    right: 14,
     width: 38,
     height: 38,
     borderRadius: 12,
     borderWidth: 1,
     alignItems: "center",
     justifyContent: "center",
-    zIndex: 2,
   },
-  tvBackButton: { left: 14, right: undefined },
   tabsFrame: { borderBottomWidth: StyleSheet.hairlineWidth },
   tabsContent: { alignItems: "stretch", gap: 20, paddingHorizontal: 14 },
   tab: { minHeight: 49, justifyContent: "center", alignItems: "center", paddingHorizontal: 3, position: "relative" },

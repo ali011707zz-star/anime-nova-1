@@ -2,7 +2,7 @@ import { Ionicons } from "@expo/vector-icons";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator, FlatList, KeyboardAvoidingView, Platform,
-  Image, StyleSheet, Text, TextInput, View,
+  Image, StyleSheet, Text, TextInput, View, I18nManager,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter } from "expo-router";
@@ -11,6 +11,8 @@ import { secureFetch } from "@/utils/secureApi";
 import { isTvDevice, tvFocusStyle, TvPressable as Pressable } from "@/utils/tv";
 import { useColors } from "@/hooks/useColors";
 import type { ThemePalette } from "@/constants/colors";
+
+const ROW_RTL = I18nManager.isRTL ? "row" : "row-reverse";
 
 /* ── Types ── */
 interface Comment {
@@ -224,10 +226,11 @@ export default function CommentsPage() {
     <View style={[s.container, { paddingTop: Platform.OS === "web" ? 0 : insets.top }]}>
       {/* Header */}
       <View style={s.header}>
-        <Pressable onPress={loadComments} style={s.refreshBtn}>
-          <Ionicons name="refresh" size={18} color={colors.textMuted} />
+        <Pressable onPress={() => router.canGoBack() ? router.back() : router.replace("/(tabs)" as any)} focusable={tvMode}
+          style={({ focused }) => [s.backBtn, tvMode && tvFocusStyle(focused)]}>
+          <Ionicons name="chevron-forward" size={20} color={colors.textPrimary} />
         </Pressable>
-        <View style={{ flex: 1 }}>
+        <View style={{ flex: 1, alignItems: "flex-end" }}>
           <View style={s.headerTitleRow}>
             <Ionicons name="chatbubbles" size={16} color={colors.accent} />
             <Text style={s.headerTitle} numberOfLines={1}>التعليقات</Text>
@@ -241,9 +244,8 @@ export default function CommentsPage() {
             <Text style={s.headerSub} numberOfLines={1}>{pageTitle}</Text>
           )}
         </View>
-        <Pressable onPress={() => router.canGoBack() ? router.back() : router.replace("/(tabs)" as any)} focusable={tvMode}
-          style={({ focused }) => [s.backBtn, tvMode && tvFocusStyle(focused)]}>
-          <Ionicons name="arrow-back" size={20} color={colors.textPrimary} style={{ transform: [{ scaleX: -1 }] }} />
+        <Pressable onPress={loadComments} style={s.refreshBtn}>
+          <Ionicons name="refresh" size={18} color={colors.textMuted} />
         </Pressable>
       </View>
 
@@ -326,7 +328,7 @@ function createCommentStyles(colors: ThemePalette) {
   return StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
   header: {
-    flexDirection: "row", direction: "ltr", alignItems: "center", gap: 10,
+    flexDirection: ROW_RTL, alignItems: "center", gap: 10,
     paddingHorizontal: 14, paddingVertical: 12,
     borderBottomWidth: 1, borderBottomColor: colors.border,
     backgroundColor: colors.background,
@@ -336,7 +338,7 @@ function createCommentStyles(colors: ThemePalette) {
     backgroundColor: colors.surfaceElevated,
     alignItems: "center", justifyContent: "center",
   },
-  headerTitleRow: { flexDirection: "row", alignItems: "center", gap: 6 },
+  headerTitleRow: { flexDirection: ROW_RTL, alignItems: "center", gap: 6 },
   headerTitle: { fontSize: 16, fontFamily: "Cairo_800ExtraBold", color: colors.textPrimary },
   headerSub: { fontSize: 10, fontFamily: "Cairo_400Regular", color: colors.textMuted, marginTop: 1 },
   countBadge: {
