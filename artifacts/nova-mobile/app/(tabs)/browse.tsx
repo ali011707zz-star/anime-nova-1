@@ -77,11 +77,6 @@ const STATUS_OPTIONS = [
   { label: "يعرض حالياً", value: "RELEASING" },
   { label: "مكتمل", value: "FINISHED" },
 ];
-const FILTER_GENRES: AnimeFilterOption[] = [
-  { label: "الكل", value: "" },
-  ...GENRES_WITH_COVERS.map(({ genre, ar }) => ({ label: ar, value: genre })),
-];
-
 const GENRES_WITH_COVERS = [
   { genre: "Action",       ar: "أكشن",       color: "#EF4444" },
   { genre: "Romance",      ar: "رومانسي",    color: "#EC4899" },
@@ -99,6 +94,11 @@ const GENRES_WITH_COVERS = [
   { genre: "Music",        ar: "موسيقى",      color: "#D946EF" },
   { genre: "Mecha",        ar: "ميكا",        color: "#64748B" },
   { genre: "Isekai",       ar: "إيسيكاي",    color: "#0EA5E9" },
+];
+
+const FILTER_GENRES: AnimeFilterOption[] = [
+  { label: "الكل", value: "" },
+  ...GENRES_WITH_COVERS.map(({ genre, ar }) => ({ label: ar, value: genre })),
 ];
 
 const FORMAT_AR: Record<string,string> = { TV:"مسلسل", MOVIE:"فيلم", OVA:"OVA", ONA:"ONA", SPECIAL:"خاص" };
