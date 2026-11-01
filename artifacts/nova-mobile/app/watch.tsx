@@ -38,7 +38,7 @@ import {
   getAdjacentAwEpisode,
   hasAwEpisode,
   normalizeAwWatchSources,
-} from "@/utils/awWatchExperience.mjs";
+} from "@/utils/awWatchExperience";
 
 /* ── Types ── */
 type Quality    = "1080p FHD" | "720p HD" | "480p SD" | "360p SD";

@@ -1,1 +1,2 @@
-/** ✅ Mobile App Player Utilities for Enhanced Controls */\n\nexport * from './RiftPlayer.config';\n"
+/** Player components are imported directly from their files. */
+export {};

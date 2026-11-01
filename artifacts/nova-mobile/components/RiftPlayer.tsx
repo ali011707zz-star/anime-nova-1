@@ -26,7 +26,7 @@ import {
   isSkipInRange,
   resolveSkipTimes,
   validateSkipInterval,
-} from "@/lib/skipTimes.mjs";
+} from "@/lib/skipTimes";
 
 const { width: W, height: H } = Dimensions.get("window");
 const PLAYER_CONTROL_ICON = "rgba(255,255,255,0.90)";
