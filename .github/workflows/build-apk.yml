@@ -232,6 +232,35 @@ jobs:
             'android.suppressUnsupportedCompileSdk=35' \
             'android.defaults.buildfeatures.buildconfig=true' >> gradle.properties
 
+          # LevelPlay 9.2.0 is pinned because 9.3+ requires Kotlin 2.0, while
+          # this project keeps Kotlin 1.9.25 for react-native-video compatibility.
+          APP_BUILD="app/build.gradle"
+          if [ ! -f "$APP_BUILD" ]; then
+            echo "❌ Generated Android app build.gradle was not found: $APP_BUILD"
+            exit 1
+          fi
+          python3 - "$APP_BUILD" <<'PY'
+          import pathlib
+          import sys
+
+          path = pathlib.Path(sys.argv[1])
+          content = path.read_text()
+          marker = "play-services-appset:16.0.2"
+          if marker in content:
+              print("SKIP LevelPlay Play Services: already present")
+          else:
+              needle = "dependencies {\n"
+              if needle not in content:
+                  raise SystemExit(f"Could not find dependencies block in {path}")
+              additions = (
+                  "dependencies {\n"
+                  "    implementation 'com.google.android.gms:play-services-appset:16.0.2'\n"
+                  "    implementation 'com.google.android.gms:play-services-ads-identifier:18.0.1'\n"
+              )
+              path.write_text(content.replace(needle, additions, 1))
+              print("OK added LevelPlay Play Services dependencies")
+          PY
+
           echo "=== gradle-wrapper.properties ==="
           cat gradle/wrapper/gradle-wrapper.properties
           echo "=== root build.gradle (last 5 lines) ==="
