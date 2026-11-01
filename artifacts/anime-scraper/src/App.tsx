@@ -227,6 +227,8 @@ function Router({ onMenuClick }: { onMenuClick: () => void }) {
                 <Route path="/comments"                component={CommentsPage} />
                 <Route path="/subscription"            component={Subscription} />
                 <Route path="/episodes/:id"            component={EpisodeList} />
+                <Route path="/nova-control">{() => { window.location.replace("/nova-control"); return null; }}</Route>
+                <Route path="/admin">{() => { window.location.replace("/nova-control"); return null; }}</Route>
                 <Route                                 component={NotFound} />
               </Switch>
             </motion.div>

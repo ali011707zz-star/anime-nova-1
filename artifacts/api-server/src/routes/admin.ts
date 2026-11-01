@@ -5,6 +5,7 @@ import { sbSelect, sbPatch, sbDelete } from "../lib/supabaseClient.js";
 import { SETUP_SQL, getTableStatus } from "../lib/supabaseMigrate.js";
 import { setDbConfig, clearDbConfigCache } from "../lib/dbConfig.js";
 import { checkAppSecret } from "../lib/security.js";
+import { isWebAdmin } from "./webAdmin.js";
 
 // دالة مساعدة للتحقق من secret أو صلاحيات الأدمن
 async function hasRelayAccess(req: Request): Promise<boolean> {
@@ -13,8 +14,50 @@ async function hasRelayAccess(req: Request): Promise<boolean> {
 }
 
 const router = Router();
+const ENTITLEMENT_PREFIX = "admin_entitlement:";
+
+type Entitlement = { plan: "free" | "premium" | "admin"; expiresAt: string | null };
+
+async function loadEntitlements(): Promise<Map<string, Entitlement>> {
+  const result = new Map<string, Entitlement>();
+  const rows = await sbSelect<any>("app_config", {}, { limit: 5000 });
+  for (const row of rows) {
+    const key = String(row.key || "");
+    if (!key.startsWith(ENTITLEMENT_PREFIX)) continue;
+    try {
+      const value = JSON.parse(String(row.value || ""));
+      if (["free", "premium", "admin"].includes(value?.plan)) {
+        result.set(key.slice(ENTITLEMENT_PREFIX.length), {
+          plan: value.plan,
+          expiresAt: value.expiresAt ?? null,
+        });
+      }
+    } catch { /* ignore malformed legacy config rows */ }
+  }
+  return result;
+}
+
+function effectiveUser(u: any, entitlement?: Entitlement) {
+  return {
+    id:          u.id,
+    email:       u.email,
+    username:    u.username,
+    displayName: u.display_name,
+    plan:        entitlement?.plan ?? u.plan ?? "free",
+    expiresAt:   entitlement?.expiresAt ?? u.expires_at ?? null,
+    createdAt:   u.created_at,
+  };
+}
+
+async function saveEntitlement(id: string, plan: Entitlement["plan"], expiresAt: string | null): Promise<void> {
+  // The production Supabase REST schema predates the plan columns. Keep the
+  // admin-managed entitlement in the already-available app_config table so
+  // actions work immediately and survive restarts.
+  await setDbConfig(`${ENTITLEMENT_PREFIX}${id}`, JSON.stringify({ plan, expiresAt }));
+}
 
 async function isAdmin(req: Request): Promise<boolean> {
+  if (isWebAdmin(req)) return true;
   const eu = await getEmailUser(req);
   return eu?.plan === "admin";
 }
@@ -222,26 +265,27 @@ router.get("/admin/users", async (req: Request, res: Response) => {
 
   try {
     const q    = String(req.query.q || "").trim();
+    const plan = String(req.query.plan || "").trim();
     const page = Math.max(0, Number(req.query.page || 0));
     const limit = 50;
 
     const filter: Record<string, string> = { order: "created_at.desc", offset: String(page * limit) };
-    if (q) filter.email = `ilike.*${q}*`;
 
-    const rows = await sbSelect("users",
+    const rows = await sbSelect<any>("users",
       filter,
-      { limit },
+      { limit: q ? 200 : limit },
     );
+    const entitlements = await loadEntitlements();
 
-    const users = rows.map((u: any) => ({
-      id:          u.id,
-      email:       u.email,
-      username:    u.username,
-      displayName: u.display_name,
-      plan:        u.plan ?? "free",
-      expiresAt:   u.expires_at ?? null,
-      createdAt:   u.created_at,
-    }));
+    const matchedRows = q
+      ? rows.filter((u: any) => [u.email, u.username, u.display_name]
+        .some(value => String(value || "").toLocaleLowerCase().includes(q.toLocaleLowerCase())))
+        .slice(0, limit)
+      : rows;
+
+    const users = matchedRows
+      .map((u: any) => effectiveUser(u, entitlements.get(String(u.id))))
+      .filter((u: any) => !plan || u.plan === plan);
 
     return res.json({ users, page, total: users.length });
   } catch (err) {
@@ -262,33 +306,28 @@ router.patch("/admin/users/:id/plan", async (req: Request, res: Response) => {
     return res.status(400).json({ error: "plan يجب أن يكون: free | premium | admin" });
 
   try {
-    const updates: Record<string, any> = {
-      plan,
-      updated_at: new Date().toISOString(),
-    };
+    let expiresAt: string | null = null;
 
     if (plan === "free") {
-      updates.expires_at = null;
+      expiresAt = null;
     } else if (expires_at) {
-      updates.expires_at = new Date(expires_at).toISOString();
+      expiresAt = new Date(expires_at).toISOString();
     } else if (plan === "premium") {
       // افتراضي: اشتراك لمدة شهر
       const d = new Date();
       d.setMonth(d.getMonth() + 1);
-      updates.expires_at = d.toISOString();
-    } else {
-      // admin: لا تنتهي صلاحيته
-      updates.expires_at = null;
+      expiresAt = d.toISOString();
     }
 
-    const updated = await sbPatch("users", { id: `eq.${id}` }, updates);
-    if (!updated) return res.status(404).json({ error: "المستخدم غير موجود" });
+    const existing = await sbSelect("users", { id: `eq.${id}` }, { limit: 1 });
+    if (!existing.length) return res.status(404).json({ error: "المستخدم غير موجود" });
+    await saveEntitlement(id, plan, expiresAt);
 
     return res.json({
       ok:        true,
       id,
-      plan:      updates.plan,
-      expiresAt: updates.expires_at,
+      plan,
+      expiresAt,
       message:   `تم تغيير خطة المستخدم إلى ${plan} ✓`,
     });
   } catch (err) {
@@ -303,18 +342,18 @@ router.post("/admin/users/:id/grant", async (req: Request, res: Response) => {
     return res.status(401).json({ error: "غير مصرّح" });
 
   const { id } = req.params;
-  const { days = 30 } = req.body || {};
+  const rawDays = req.body?.days ?? 30;
+  const days = Number(rawDays);
+  if (!Number.isInteger(days) || days < 1 || days > 3650)
+    return res.status(400).json({ error: "عدد الأيام يجب أن يكون رقماً صحيحاً بين 1 و3650" });
 
   try {
     const d = new Date();
-    d.setDate(d.getDate() + Number(days));
+    d.setDate(d.getDate() + days);
 
-    const updated = await sbPatch("users", { id: `eq.${id}` }, {
-      plan:       "premium",
-      expires_at: d.toISOString(),
-      updated_at: new Date().toISOString(),
-    });
-    if (!updated) return res.status(404).json({ error: "المستخدم غير موجود" });
+    const existing = await sbSelect("users", { id: `eq.${id}` }, { limit: 1 });
+    if (!existing.length) return res.status(404).json({ error: "المستخدم غير موجود" });
+    await saveEntitlement(id, "premium", d.toISOString());
 
     return res.json({
       ok:        true,
@@ -342,22 +381,77 @@ router.delete("/admin/users/:id", async (req: Request, res: Response) => {
   }
 });
 
+// إحصائيات الاستخدام الفعلية للوحة Nova Control.
+async function loadUsageAnalytics() {
+  const empty = {
+    ready: false, activeUsers: 0, watchingNow: 0, watchingWeb: 0, watchingMobile: 0,
+    activeWeb: 0, activeMobile: 0, episodeViews: 0, episodeViewsToday: 0,
+    episodeViewsWeb: 0, episodeViewsMobile: 0, lastEventAt: null, topEpisodes: [],
+  };
+  try {
+    const [sessions, views] = await Promise.all([
+      sbSelect<any>("analytics_sessions", {}, { select: "platform,visitor_id,user_id,last_seen_at,anime_id", limit: 5000 }),
+      sbSelect<any>("analytics_episode_views", {}, { select: "platform,anime_id,episode_number,anime_title,viewed_at", limit: 5000 }),
+    ]);
+    const cutoff = Date.now() - 5 * 60 * 1000;
+    const active = sessions.filter((row) => {
+      const timestamp = Date.parse(String(row.last_seen_at || ""));
+      return Number.isFinite(timestamp) && timestamp >= cutoff;
+    });
+    const unique = new Set(active.map((row) => String(row.user_id || row.visitor_id || "")).filter(Boolean));
+    const top = new Map<string, { title: string; episode: number; views: number }>();
+    for (const row of views) {
+      const key = `${row.anime_id}:${row.episode_number}`;
+      const item = top.get(key) || { title: String(row.anime_title || "بدون عنوان"), episode: Number(row.episode_number), views: 0 };
+      item.views += 1;
+      top.set(key, item);
+    }
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const todayMs = today.getTime();
+    const last = views.reduce((value, row) => {
+      const time = Date.parse(String(row.viewed_at || ""));
+      return Number.isFinite(time) && time > value ? time : value;
+    }, 0);
+    return {
+      ready: true,
+      activeUsers: unique.size,
+      watchingNow: active.filter((row) => row.anime_id).length,
+      watchingWeb: active.filter((row) => row.platform === "web" && row.anime_id).length,
+      watchingMobile: active.filter((row) => row.platform === "mobile" && row.anime_id).length,
+      activeWeb: active.filter((row) => row.platform === "web").length,
+      activeMobile: active.filter((row) => row.platform === "mobile").length,
+      episodeViews: views.length,
+      episodeViewsToday: views.filter((row) => Date.parse(String(row.viewed_at || "")) >= todayMs).length,
+      episodeViewsWeb: views.filter((row) => row.platform === "web").length,
+      episodeViewsMobile: views.filter((row) => row.platform === "mobile").length,
+      lastEventAt: last ? new Date(last).toISOString() : null,
+      topEpisodes: [...top.values()].sort((a, b) => b.views - a.views).slice(0, 10),
+    };
+  } catch (err: any) {
+    console.warn("[admin/stats] analytics unavailable:", err?.message || err);
+    return empty;
+  }
+}
+
 // حالة الخادم للمدير
 router.get("/admin/stats", async (req: Request, res: Response) => {
   if (!(await isAdmin(req)))
     return res.status(401).json({ error: "غير مصرّح" });
 
   try {
-    const [allUsers, premiumUsers, cacheRows] = await Promise.allSettled([
+    const [allUsers, cacheRows, entitlements, analytics] = await Promise.all([
       sbSelect("users", { select: "id" }, { limit: 1000 }),
-      sbSelect("users", { plan: "eq.premium", select: "id" }, { limit: 1000 }),
       sbSelect("source_cache", { select: "cache_key" }, { limit: 1000 }),
+      loadEntitlements(),
+      loadUsageAnalytics(),
     ]);
 
     return res.json({
-      totalUsers:   allUsers.status === "fulfilled"   ? allUsers.value.length   : "?",
-      premiumUsers: premiumUsers.status === "fulfilled" ? premiumUsers.value.length : "?",
-      cacheEntries: cacheRows.status === "fulfilled"  ? cacheRows.value.length  : "?",
+      totalUsers: allUsers.length,
+      premiumUsers: [...entitlements.values()].filter((v) => v.plan === "premium").length,
+      cacheEntries: cacheRows.length,
+      analytics,
     });
   } catch (err) {
     return res.status(500).json({ error: "خطأ في الخادم" });

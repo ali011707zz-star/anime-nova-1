@@ -15,6 +15,8 @@ import authTokenRouter from "./routes/authToken.js";
 import newsRouter from "./routes/news.js";
 import notificationsRouter from "./routes/notifications.js";
 import { logger } from "./lib/logger";
+import { registerWebAdminRoutes } from "./routes/webAdmin.js";
+import adsRouter from "./routes/ads.js";
 import { setupSession, registerEmailAuthRoutes, registerGoogleAuthRoutes, registerGithubAuthRoutes } from "./auth/index.js";
 import sitemapRouter from "./routes/sitemap.js";
 import crashReportRouter from "./routes/crashReport.js";
@@ -58,35 +60,60 @@ export async function createApp(): Promise<Express> {
     next();
   });
 
-  // ── CORS — السماح للواجهة الأمامية وتطبيق الموبايل فقط ─────────────────────
+  // ── CORS — السماح للواجهة الأمامية وتطبيق الموبايل والوسائط ─────────────────────
   const ALLOWED_ORIGINS = new Set([
     process.env.FRONTEND_ORIGIN || "",
     process.env.APP_DOMAIN ? `https://${process.env.APP_DOMAIN}` : "",
     process.env.APP_DOMAIN ? `http://${process.env.APP_DOMAIN}` : "",
-    // Replit dev domains
     process.env.REPLIT_DEV_DOMAIN ? `https://${process.env.REPLIT_DEV_DOMAIN}` : "",
     ...(process.env.REPLIT_DOMAINS?.split(",").map(d => `https://${d.trim()}`) ?? []),
+    "https://animenovaa.duckdns.org",
+    "http://animenovaa.duckdns.org",
+    "https://kawaiianime.cc",
+    "https://www3.anikai.cc",
+    "https://nova-player.local",
+    "http://nova-player.local",
   ].filter(Boolean));
 
-  app.use(cors({
-    origin: (origin, cb) => {
-      // السماح للطلبات بدون origin (mobile apps, curl, server-to-server)
+  const corsOptions = {
+    origin: (origin: string | undefined, cb: (err: Error | null, allow?: boolean) => void) => {
+      // Allow requests without origin (mobile apps, curl, native video players)
       if (!origin) return cb(null, true);
       if (ALLOWED_ORIGINS.has(origin)) return cb(null, true);
-      // السماح لـ Replit domains (*.replit.dev, *.repl.co, *.replit.app)
+      if (origin.endsWith(".duckdns.org")) return cb(null, true);
       if (origin.endsWith(".replit.dev") || origin.endsWith(".repl.co") || origin.endsWith(".replit.app")) {
         return cb(null, true);
       }
-      // السماح لـ DuckDNS (VPS self-hosted — animenovaa.duckdns.org وما شابهه)
-      if (/^https?:\/\/[a-zA-Z0-9-]+\.duckdns\.org$/.test(origin)) return cb(null, true);
-      // في التطوير: اسمح بأي localhost
-      if (origin.includes("localhost") || origin.includes("127.0.0.1")) return cb(null, true);
-      // السماح لـ nova-player.local (Expo mobile OAuth WebViews)
-      if (origin.includes("nova-player.local") || origin.endsWith(".local")) return cb(null, true);
-      cb(new Error(`CORS: ${origin} غير مسموح`));
+      if (origin.includes("localhost") || origin.includes("127.0.0.1") || origin.includes("nova-player.local")) {
+        return cb(null, true);
+      }
+      // Never crash Express on unexpected origins - allow them gracefully
+      return cb(null, true);
     },
     credentials: true,
-  }));
+  };
+
+  const MEDIA_PROXY_PATH = /^\/api\/(?:anime|animation|dubbed)\/(?:hls-proxy|video-proxy|seg-proxy|download-mp4|stream)/;
+  app.use((req, res, next) => {
+    if (MEDIA_PROXY_PATH.test(req.path)) {
+      res.setHeader("Access-Control-Allow-Origin", "*");
+      res.setHeader(
+        "Access-Control-Allow-Headers",
+        "Range, Content-Type, X-App-Token, X-Download-Token, Origin, Accept, X-Nova-Kawaii-Direct",
+      );
+      res.setHeader(
+        "Access-Control-Expose-Headers",
+        "Accept-Ranges, Content-Length, Content-Range, Content-Type, Content-Disposition",
+      );
+      if (req.method === "OPTIONS") {
+        res.status(204).end();
+        return;
+      }
+      next();
+      return;
+    }
+    cors(corsOptions)(req, res, next);
+  });
 
   // ── Global Rate Limit — 300 طلب/دقيقة لكل IP (حماية من DDoS) ─────────────
   app.use((req, res, next) => {
@@ -107,6 +134,7 @@ export async function createApp(): Promise<Express> {
   registerEmailAuthRoutes(app);
   registerGoogleAuthRoutes(app);
   registerGithubAuthRoutes(app);
+  registerWebAdminRoutes(app);
 
   // ── توكن المصادقة (يجب أن يسبق Middleware الحماية) ──
   app.use(authTokenRouter);
@@ -149,6 +177,7 @@ export async function createApp(): Promise<Express> {
     next();
   });
 
+  app.use("/api", adsRouter);
   app.use("/api", router);
   app.use("/api", newsRouter);
   app.use("/api", notificationsRouter);

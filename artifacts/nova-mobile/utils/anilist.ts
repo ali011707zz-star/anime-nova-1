@@ -1,10 +1,11 @@
-import { getBaseUrl } from "./baseUrl";
+import { getBaseUrl } from './baseUrl';
 // يستخدم proxy الـ VPS بدلاً من AniList مباشرة — يدعم Jikan + Kitsu fallback تلقائياً
 const getAnilistApi = () => `${getBaseUrl()}/api/anilist`;
 
 export type AnilistMedia = {
   id: number;
   title: { romaji: string; english: string | null; native: string };
+  title_ar?: string;
   coverImage: { large: string; extraLarge?: string };
   bannerImage: string | null;
   description: string | null;
@@ -20,19 +21,85 @@ export type AnilistMedia = {
   relations?: { edges: { relationType: string; node: { id: number; title: { romaji: string }; coverImage: { large: string }; type: string } }[] };
 };
 
+export type AnilistRequestOptions = {
+  signal?: AbortSignal;
+  timeoutMs?: number;
+};
+
 export async function anilistQuery<T = unknown>(
   query: string,
-  variables?: Record<string, unknown>
+  variables?: Record<string, unknown>,
+  options: AnilistRequestOptions = {},
 ): Promise<T> {
-  const response = await fetch(getAnilistApi(), {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Accept: "application/json" },
-    body: JSON.stringify({ query, variables }),
-  });
-  const json = await response.json();
-  if (json.errors) throw new Error(json.errors[0].message);
-  return json.data as T;
+  const controller = new AbortController();
+  const relayAbort = () => controller.abort();
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+
+  if (options.signal) {
+    if (options.signal.aborted) controller.abort();
+    else options.signal.addEventListener('abort', relayAbort, { once: true });
+  }
+  if (options.timeoutMs && options.timeoutMs > 0) {
+    timeout = setTimeout(relayAbort, options.timeoutMs);
+  }
+
+  try {
+    const response = await fetch(getAnilistApi(), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify({ query, variables }),
+      signal: controller.signal,
+    });
+    if (!response.ok) throw new Error(`AniList proxy returned ${response.status}`);
+    const json = await response.json();
+    if (json.errors) throw new Error(json.errors[0]?.message || 'AniList query failed');
+    return json.data as T;
+  } finally {
+    if (timeout) clearTimeout(timeout);
+    options.signal?.removeEventListener('abort', relayAbort);
+  }
 }
+
+// Home's three first-screen sections are sent as one GraphQL request. Keeping
+// poster fields at `large` avoids downloading extraLarge assets for small rails.
+export const HOME_PRIMARY_QUERY = `
+query NovaHomePrimary {
+  trending: Page(page: 1, perPage: 20) {
+    media(sort: TRENDING_DESC, type: ANIME, countryOfOrigin: "JP", isAdult: false, genre_not_in: ["Hentai"]) {
+      id title { romaji english } coverImage { large } averageScore episodes status format nextAiringEpisode { episode airingAt }
+    }
+  }
+  popular: Page(page: 1, perPage: 20) {
+    media(sort: POPULARITY_DESC, type: ANIME, countryOfOrigin: "JP", isAdult: false, genre_not_in: ["Hentai"]) {
+      id title { romaji english } coverImage { large } bannerImage averageScore episodes status format genres
+    }
+  }
+  airing: Page(page: 1, perPage: 20) {
+    media(status: RELEASING, sort: POPULARITY_DESC, type: ANIME, countryOfOrigin: "JP", isAdult: false, genre_not_in: ["Hentai"]) {
+      id title { romaji english } coverImage { large } averageScore episodes nextAiringEpisode { episode airingAt }
+    }
+  }
+}`;
+
+// Secondary rails share a second request that Home schedules after first paint.
+export const HOME_SECONDARY_QUERY = `
+query NovaHomeSecondary {
+  topRated: Page(page: 1, perPage: 14) {
+    media(sort: SCORE_DESC, type: ANIME, countryOfOrigin: "JP", format_in: [TV, MOVIE], isAdult: false, genre_not_in: ["Hentai"], averageScore_greater: 75) {
+      id title { romaji english } coverImage { large } averageScore episodes status format
+    }
+  }
+  movies: Page(page: 1, perPage: 20) {
+    media(format: MOVIE, type: ANIME, sort: POPULARITY_DESC) {
+      id title { romaji english } coverImage { large } averageScore episodes status format
+    }
+  }
+  isekai: Page(page: 1, perPage: 14) {
+    media(type: ANIME, genre_in: ["Isekai"], countryOfOrigin: "JP", format_in: [TV, ONA, MOVIE], isAdult: false) {
+      id title { romaji english } coverImage { large } averageScore episodes status format
+    }
+  }
+}`;
 
 export const TRENDING_QUERY = `
 query TrendingAnime($page: Int) {
@@ -47,7 +114,8 @@ export const POPULAR_QUERY = `
 query PopularAnime($page: Int) {
   Page(page: $page, perPage: 20) {
     media(sort: POPULARITY_DESC, type: ANIME, countryOfOrigin: "JP", isAdult: false, genre_not_in: ["Hentai"]) {
-      id title { romaji english } coverImage { large extraLarge } averageScore episodes status format
+      id title { romaji english } coverImage { large extraLarge } bannerImage
+      averageScore episodes status format genres
     }
   }
 }`;
@@ -93,19 +161,26 @@ query AnimeDetail($id: Int!) {
   }
 }`;
 
-export const SEASONAL_QUERY = `
-query SeasonalAnime($season: MediaSeason!, $year: Int!) {
-  Page(page: 1, perPage: 30) {
-    media(season: $season, seasonYear: $year, type: ANIME, sort: POPULARITY_DESC) {
-      id title { romaji english } coverImage { large } averageScore episodes status format nextAiringEpisode { episode airingAt }
-    }
+export const EPISODE_COUNT_QUERY = `
+query EpisodeCount($id: Int!) {
+  Media(id: $id, type: ANIME) {
+    episodes
+    nextAiringEpisode { episode }
   }
 }`;
 
 export const TOP_RATED_QUERY = `
 query TopRatedAnime {
-  Page(page: 1, perPage: 20) {
-    media(sort: SCORE_DESC, type: ANIME, averageScore_greater: 70) {
+  Page(perPage: 14) {
+    media(
+      sort: SCORE_DESC,
+      type: ANIME,
+      countryOfOrigin: "JP",
+      format_in: [TV, MOVIE],
+      isAdult: false,
+      genre_not_in: ["Hentai"],
+      averageScore_greater: 75
+    ) {
       id title { romaji english } coverImage { large extraLarge } averageScore episodes status format
     }
   }
@@ -128,6 +203,25 @@ query UpcomingAnime {
     }
   }
 }`;
+
+export const SEASONAL_QUERY = `
+query SeasonalAnime($season: MediaSeason, $year: Int) {
+  Page(page: 1, perPage: 20) {
+    media(season: $season, seasonYear: $year, type: ANIME, sort: POPULARITY_DESC) {
+      id title { romaji english } coverImage { large extraLarge } averageScore episodes status format
+    }
+  }
+}`;
+
+export function getCurrentSeason() {
+  const month = new Date().getMonth();
+  const year = new Date().getFullYear();
+  let season: 'WINTER' | 'SPRING' | 'SUMMER' | 'FALL' = 'WINTER';
+  if (month >= 2 && month <= 4) season = 'SPRING';
+  else if (month >= 5 && month <= 7) season = 'SUMMER';
+  else if (month >= 8 && month <= 10) season = 'FALL';
+  return { season, year };
+}
 
 export const TODAY_EPISODES_QUERY = `
 query TodayEpisodes($gt: Int!, $lt: Int!) {
@@ -193,8 +287,14 @@ query RomanceAnime {
 
 export const ISEKAI_QUERY = `
 query IsekaiAnime {
-  Page(page: 1, perPage: 20) {
-    media(genre: "Isekai", type: ANIME, sort: POPULARITY_DESC, countryOfOrigin: "JP", isAdult: false, genre_not_in: ["Hentai"]) {
+  Page(perPage: 14) {
+    media(
+      type: ANIME,
+      genre_in: ["Isekai"],
+      countryOfOrigin: "JP",
+      format_in: [TV, ONA, MOVIE],
+      isAdult: false
+    ) {
       id title { romaji english } coverImage { large extraLarge } averageScore episodes status format
     }
   }
@@ -219,23 +319,12 @@ query Schedule($airingAt_greater: Int!, $airingAt_lesser: Int!) {
   }
 }`;
 
-export function getCurrentSeason(): { season: string; year: number } {
-  const now = new Date();
-  const month = now.getMonth() + 1;
-  const year = now.getFullYear();
-  let season = "WINTER";
-  if (month >= 4 && month <= 6) season = "SPRING";
-  else if (month >= 7 && month <= 9) season = "SUMMER";
-  else if (month >= 10 && month <= 12) season = "FALL";
-  return { season, year };
-}
-
 export function stripHtml(html: string | null): string {
-  if (!html) return "";
-  return html.replace(/<[^>]*>/g, "").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&#039;/g, "'").replace(/&quot;/g, '"').trim();
+  if (!html) return '';
+  return html.replace(/<[^>]*>/g, '').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&#039;/g, "'").replace(/&quot;/g, '"').trim();
 }
 
 export function formatAiringTime(airingAt: number): string {
   const date = new Date(airingAt * 1000);
-  return date.toLocaleTimeString("ar-SA", { hour: "2-digit", minute: "2-digit" });
+  return date.toLocaleTimeString('ar-SA', { hour: '2-digit', minute: '2-digit' });
 }

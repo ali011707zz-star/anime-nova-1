@@ -155,7 +155,7 @@ export async function recordSuccessfulDownload(animeId: number, ep: number): Pro
   return latestCount;
 }
 
-export async function ensureWatchAccess(): Promise<boolean> {
+export async function ensureWatchAccess(): Promise<boolean> { return true; 
   // The server currently reports adsEnabled=false. Do not gate playback on a
   // stale ad challenge or on a transient ads endpoint failure.
   return true;
@@ -167,7 +167,7 @@ export async function resetDownloadAdCount(): Promise<void> {
   listeners.forEach((listener) => listener(0));
 }
 
-export async function hasWatchAccess(): Promise<boolean> {
+export async function hasWatchAccess(): Promise<boolean> { return true; 
   const state = await getAdState();
   return !!state && (state.privileged || !state.watchNeedsReward);
 }
