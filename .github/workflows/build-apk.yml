@@ -172,6 +172,32 @@ jobs:
                   print(f"SKIP {relative}: already compatible")
           PY
 
+      - name: 🔐 Restore Firebase Android config
+        env:
+          FIREBASE_GOOGLE_SERVICES_JSON_BASE64: ${{ secrets.FIREBASE_GOOGLE_SERVICES_JSON_BASE64 }}
+        run: |
+          set -euo pipefail
+          if [ -z "${FIREBASE_GOOGLE_SERVICES_JSON_BASE64:-}" ]; then
+            echo "❌ Missing GitHub Actions secret: FIREBASE_GOOGLE_SERVICES_JSON_BASE64"
+            exit 1
+          fi
+
+          CONFIG_PATH="artifacts/nova-mobile/google-services.json"
+          printf '%s' "$FIREBASE_GOOGLE_SERVICES_JSON_BASE64" | base64 --decode > "$CONFIG_PATH"
+          node - "$CONFIG_PATH" <<'NODE'
+          const fs = require("node:fs");
+          const config = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+          const hasProjectId = Boolean(config.project_info?.project_id);
+          const hasPackage = (config.client ?? []).some(
+            (client) => client.client_info?.android_client_info?.package_name === "com.nova.anime"
+          );
+          if (!hasProjectId || !hasPackage) {
+            throw new Error("Firebase config is invalid or does not contain the com.nova.anime Android client");
+          }
+          console.log("✅ Firebase Android config restored and package id verified (contents redacted)");
+          NODE
+          chmod 600 "$CONFIG_PATH"
+
       - name: 🏗️ Expo Prebuild
         working-directory: artifacts/nova-mobile
         # Never let npx download a different Expo CLI during the build.
