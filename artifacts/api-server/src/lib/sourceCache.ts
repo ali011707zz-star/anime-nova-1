@@ -376,3 +376,19 @@ setInterval(() => {
     if (now - v.ts > SUB_L1_TTL) SUB_L1.delete(k);
   }
 }, 3_600_000);
+
+/**
+ * Dedupes concurrent source-fetching requests (request collapsing).
+ * If a request for the same key is already in flight, returns its promise.
+ */
+const _sourceFlights = new Map<string, Promise<any>>();
+export async function getOrCreateSourceFlight(key: string, fetcher: () => Promise<any>): Promise<any> {
+  const existing = _sourceFlights.get(key);
+  if (existing) return existing;
+
+  const p = fetcher().finally(() => {
+    _sourceFlights.delete(key);
+  });
+  _sourceFlights.set(key, p);
+  return p;
+}

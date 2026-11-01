@@ -1,18 +1,18 @@
-import { Router, type IRouter } from "express";
-import healthRouter    from "./health";
-import animeRouter     from "./anime";
-// import animationRouter from "./animation"; // disabled — hidden section, saves RAM
-import reportRouter    from "./report";
-import configRouter    from "./config";
-import dubbedRouter    from "./dubbed";
+import { Router, type IRouter } from 'express';
+import healthRouter    from './health';
+import animeRouter     from './anime';
+import reportRouter    from './report';
+import configRouter    from './config';
+import dubbedRouter    from './dubbed';
+import mangaRouter     from './manga';
+import statsRouter     from './stats';
 
 const router: IRouter = Router();
-
 router.use(configRouter);
 router.use(healthRouter);
 router.use(animeRouter);
-// router.use(animationRouter); // disabled — hidden section, saves RAM
 router.use(dubbedRouter);
+router.use(mangaRouter);
+router.use(statsRouter);
 router.use(reportRouter);
-
 export default router;

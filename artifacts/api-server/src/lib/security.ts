@@ -186,3 +186,23 @@ export function checkRateLimit(
   entry.count++;
   return true;
 }
+
+/**
+ * Checks if a URL is safe to be proxied/accessed externally.
+ */
+export function isSafeExternalUrl(url: string): boolean {
+  if (!url) return false;
+  try {
+    const u = new URL(url);
+    // Allow only http and https protocols
+    if (u.protocol !== 'http:' && u.protocol !== 'https:') return false;
+    // Block internal network IPs
+    const host = u.hostname.toLowerCase();
+    if (host === 'localhost' || host === '127.0.0.1' || host === '0.0.0.0' || host.includes('192.168.') || host.includes('10.')) {
+      return false;
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
