@@ -6,11 +6,11 @@ import {
   ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
-// Pressable,
   StyleSheet,
   Text,
   TextInput,
   View,
+  I18nManager,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useApp } from "@/context/AppContext";
@@ -59,6 +59,7 @@ export default function TvLinkScreen() {
   const router = useRouter();
   const { setCurrentUser } = useApp();
   const tvMode = isTvDevice();
+  const goBack = () => router.canGoBack() ? router.back() : router.replace("/(tabs)" as any);
   const [code, setCode] = useState("");
   const [deviceId, setDeviceId] = useState<string | null>(null);
   const [checking, setChecking] = useState(true);
@@ -140,6 +141,15 @@ export default function TvLinkScreen() {
   if (checking) {
     return (
       <View style={[styles.center, { backgroundColor: colors.background, paddingTop: insets.top }]}>
+        <Pressable
+          onPress={goBack}
+          accessibilityRole="button"
+          accessibilityLabel="رجوع"
+          focusable={tvMode}
+          style={[styles.backButton, { top: insets.top + 8 }]}
+        >
+          <Ionicons name="arrow-back" size={22} color={colors.text} style={{ transform: [{ scaleX: -1 }] }} />
+        </Pressable>
         <ActivityIndicator color={colors.primary} />
       </View>
     );
@@ -150,6 +160,15 @@ export default function TvLinkScreen() {
       style={[styles.page, { backgroundColor: colors.background, paddingTop: insets.top, paddingBottom: Math.max(insets.bottom, 24) }]}
       behavior={Platform.OS === "ios" ? "padding" : undefined}
     >
+      <Pressable
+        onPress={goBack}
+        accessibilityRole="button"
+        accessibilityLabel="رجوع"
+        focusable={tvMode}
+        style={[styles.backButton, { top: insets.top + 8 }]}
+      >
+        <Ionicons name="arrow-back" size={22} color={colors.text} style={{ transform: [{ scaleX: -1 }] }} />
+      </Pressable>
       <View style={styles.brand}>
         <View style={[styles.logo, { backgroundColor: colors.primary + "20", borderColor: colors.primary + "55" }]}>
           <Ionicons name={tvMode ? "tv-outline" : "phone-portrait-outline"} size={30} color={colors.primary} />
@@ -200,6 +219,19 @@ export default function TvLinkScreen() {
 const styles = StyleSheet.create({
   page: { flex: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: 36 },
   center: { flex: 1, alignItems: "center", justifyContent: "center" },
+  backButton: {
+    position: "absolute",
+    ...(I18nManager.isRTL ? { left: 16 } : { right: 16 }),
+    zIndex: 2,
+    width: 42,
+    height: 42,
+    borderRadius: 14,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(255,255,255,0.06)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.12)",
+  },
   brand: { alignItems: "center", marginBottom: 28 },
   logo: { width: 72, height: 72, borderRadius: 24, borderWidth: 1, alignItems: "center", justifyContent: "center", marginBottom: 16 },
   title: { fontSize: 25, fontFamily: "Cairo_800ExtraBold", textAlign: "center" },

@@ -65,7 +65,11 @@ export async function openIsolatedPlayer(
     throw new Error("openIsolatedPlayer requires a non-empty sourceUrl.");
   }
 
-  return getNativeModule().open({
+  const module = getNativeModule();
+  if (!module) {
+    throw new Error("NovaIsolatedPlayer native module is unavailable.");
+  }
+  return module.open({
     sourceUrl: config.sourceUrl,
     sourceHeaders: config.sourceHeaders ? JSON.stringify(config.sourceHeaders) : undefined,
     subtitleUrl: config.subtitleUrl,

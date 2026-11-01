@@ -1,20 +1,16 @@
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import React from "react";
 import {
   Platform,
-  Pressable,
   StyleSheet,
   Text,
   View,
 } from "react-native";
+import { isTvDevice, tvFocusStyle, TvPressable as Pressable } from "@/utils/tv";
 
 export type ErrorFallbackProps = {
   error: Error;
   resetError: () => void;
 };
-
-/* مفاتيح AsyncStorage التي قد تتسبب في أعطال عند فسادها */
-const VOLATILE_KEYS = ["nova-history", "nova-favorites", "nova-theme"];
 
 /*
  * Keep the fallback dependency-free. It is rendered while the tree is
@@ -22,11 +18,8 @@ const VOLATILE_KEYS = ["nova-history", "nova-favorites", "nova-theme"];
  * theme/safe-area hooks that may be part of the failed tree.
  */
 export function ErrorFallback({ error, resetError }: ErrorFallbackProps) {
+  const tvMode = isTvDevice();
   const handleRestart = async () => {
-    /* مسح البيانات المتقلبة قبل إعادة التشغيل لتجنب تكرار العطل */
-    try {
-      await Promise.all(VOLATILE_KEYS.map(k => AsyncStorage.removeItem(k)));
-    } catch {}
     try {
       const expoModule = await import("expo");
       if (typeof (expoModule as any).reloadAppAsync === "function") {
@@ -41,25 +34,27 @@ export function ErrorFallback({ error, resetError }: ErrorFallbackProps) {
     <View style={styles.container}>
       <View style={styles.content}>
         <Text style={styles.title}>
-          Something went wrong
+          حدث خطأ غير متوقع
         </Text>
 
         <Text style={styles.message}>
-          Please reload the app to continue.
+          تعذّر فتح هذه الشاشة. أعد المحاولة للمتابعة.
         </Text>
 
         <Pressable
           onPress={handleRestart}
-          style={({ pressed }) => [
+          focusable={tvMode}
+          style={({ pressed, focused }) => [
             styles.button,
             {
               opacity: pressed ? 0.9 : 1,
               transform: [{ scale: pressed ? 0.98 : 1 }],
             },
+            tvMode && tvFocusStyle(focused),
           ]}
         >
           <Text style={styles.buttonText}>
-            Try Again
+            إعادة المحاولة
           </Text>
         </Pressable>
       </View>

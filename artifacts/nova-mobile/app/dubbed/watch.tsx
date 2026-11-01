@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import {
-  View, Text, Pressable, ActivityIndicator,
+  View, Text, ActivityIndicator,
   StyleSheet, Platform,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
@@ -8,22 +8,62 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { RiftPlayer, PlayerSource } from "@/components/RiftPlayer";
 import { getBaseUrl } from "@/utils/api";
+import { getWatchContentId, useApp } from "@/context/AppContext";
+import { ensureWatchAccess } from "@/utils/adPolicy";
+import { RewardedAdPrompt } from "@/components/RewardedAdPrompt";
+import { isTvDevice, tvFocusStyle, TvPressable as Pressable } from "@/utils/tv";
+import { useColors } from "@/hooks/useColors";
+import { useWatchPlayerOrientation } from "@/utils/watchOrientation";
+import { createPlaybackTraceId, withPlaybackTrace } from "@/utils/playbackTrace";
+import { parseCarateenEpisodeUrl } from "@/utils/carateenEpisodeRef.mjs";
 
 export default function DubbedWatchScreen() {
+  const colors = useColors();
   const insets = useSafeAreaInsets();
   const router  = useRouter();
+  const tvMode  = isTvDevice();
   const topPad  = Platform.OS === "web" ? 0 : insets.top;
 
-  const { epUrl, title, ep, season } = useLocalSearchParams<{
-    epUrl: string; title: string; ep: string; season: string;
-    poster: string; at: string;
+  const {
+    epUrl, series, title, ep, season, poster,
+    provider: providerParam, showId: showIdParam, episodeId: episodeIdParam,
+  } = useLocalSearchParams<{
+    epUrl: string; series: string; title: string; ep: string; season: string;
+    poster: string; at: string; provider?: string; showId?: string; episodeId?: string;
   }>();
+  const parsedEpisodeRef = parseCarateenEpisodeUrl(epUrl);
+  const requestedProvider = Array.isArray(providerParam) ? providerParam[0] : providerParam;
+  const requestedShowId = Array.isArray(showIdParam) ? showIdParam[0] : showIdParam;
+  const requestedEpisodeId = Array.isArray(episodeIdParam) ? episodeIdParam[0] : episodeIdParam;
+  const provider =
+    requestedProvider === "sp" || requestedProvider === "carateen"
+      ? requestedProvider
+      : parsedEpisodeRef?.provider;
+  const showId = requestedShowId || parsedEpisodeRef?.showId || "";
+  const episodeId = requestedEpisodeId || parsedEpisodeRef?.episodeId || "";
+  const isCarateenSource = provider === "sp" || provider === "carateen";
+  const playbackTraceId = React.useMemo(() => createPlaybackTraceId(), [epUrl]);
 
+  const { addToHistory } = useApp();
   const [sources, setSources] = useState<PlayerSource[]>([]);
   const [loading, setLoading] = useState(true);
   const [error,   setError]   = useState<string | null>(null);
   const mountedRef = useRef(true);
   const ctrlRef    = useRef<AbortController | null>(null);
+  const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const autoRetryCountRef = useRef(0);
+  const lastTimeRef = useRef(0);
+  const lastDurationRef = useRef(0);
+  const savedOnExitRef = useRef(false);
+
+  const onToggleOrientation = useWatchPlayerOrientation(!loading && !error && sources.length > 0, tvMode);
+
+  const episodeNumber = Math.max(1, parseInt(ep || "1", 10) || 1);
+  const contentKey = series || epUrl || "";
+  const posterUrl = (() => {
+    if (!poster) return "";
+    try { return decodeURIComponent(poster); } catch { return poster; }
+  })();
 
   /** استخراج رابط الفيديو من HTML — نفس patterns الباكند */
   function extractVideoFromHtml(html: string): string | null {
@@ -39,58 +79,82 @@ export default function DubbedWatchScreen() {
     return null;
   }
 
-  const loadSource = useCallback(async () => {
-    if (!epUrl) { setError("رابط الحلقة مفقود"); setLoading(false); return; }
+  const loadSource = useCallback(async (isAutomaticRetry = false) => {
+    if (isCarateenSource && (!showId || !episodeId)) {
+      setError("بيانات الحلقة مفقودة");
+      setLoading(false);
+      return;
+    }
+    if (!isCarateenSource && !epUrl) { setError("رابط الحلقة مفقود"); setLoading(false); return; }
+    if (!isAutomaticRetry) autoRetryCountRef.current = 0;
     ctrlRef.current?.abort();
     const ctrl = new AbortController();
     ctrlRef.current = ctrl;
     setLoading(true); setError(null);
 
     const BASE = getBaseUrl();
-
-    // ── الطريقة الأولى: VPS API (يجلب الصفحة ويعيد rawUrl + proxyUrl) ──
-    // الـ VPS يستطيع جلب arabic-toons.com بـ UA موبايل؛ الموبايل يشغّل rawUrl مباشرة
-    try {
-      const r = await fetch(
-        `${BASE}/api/dubbed/watch-src?epUrl=${encodeURIComponent(epUrl)}`,
-        { signal: ctrl.signal },
-      );
-      if (ctrl.signal.aborted || !mountedRef.current) return;
-      if (r.ok) {
-        const d = await r.json();
-        if (ctrl.signal.aborted) return;
-
-        const rawUrl   = typeof d.rawUrl  === "string" && d.rawUrl   ? d.rawUrl  : null;
-        const proxyUrl = typeof d.hlsUrl  === "string" && d.hlsUrl   ? (d.hlsUrl.startsWith("/") ? `${BASE}${d.hlsUrl}` : d.hlsUrl) : null;
-
-        if (rawUrl || proxyUrl) {
-          const srcs: PlayerSource[] = [];
-          /* الـ proxy VPS أولاً: foupix يتحقق من UA hash في الـ token.
-             الـ token أُنشئ بـ BROWSER_UA (desktop Chrome) على VPS —
-             ExoPlayer/AVPlayer يستخدم UA مختلف فيُعطي 403 على rawUrl.
-             proxy VPS يُعيد stream بنفس BROWSER_UA → يعمل دائماً. */
-          if (proxyUrl) srcs.push({
-            url: proxyUrl, label: "مدبلج عربي", quality: "720p HD",
-          });
-          // المصدر المباشر احتياطي (IP سكني قد يمر بدون فحص UA)
-          if (rawUrl && rawUrl !== proxyUrl) srcs.push({
-            url: rawUrl,
-            label: "مدبلج عربي (مباشر)",
-            quality: "720p HD",
-            headers: {
-              Referer: "https://www.arabic-toons.com/",
-              Origin:  "https://www.arabic-toons.com",
-            },
-          });
-          if (mountedRef.current) { setSources(srcs); setLoading(false); }
-          return;
-        }
+    if (!(await ensureWatchAccess())) {
+      if (mountedRef.current) {
+        setError("شاهد الإعلان لفتح مشاهدة المدبلج لمدة 60 دقيقة");
+        setLoading(false);
       }
-    } catch (e: any) {
-      if (e?.name === "AbortError" || !mountedRef.current) return;
-      // VPS API فشل — نجرب الجلب المباشر من الموبايل
+      return;
     }
 
+    // ── الطريقة الأولى: VPS API (يجلب الصفحة ويعيد proxyUrl) ──
+    // لا نمرر رابط Foupix الخام إلى ExoPlayer: الـ token مرتبط بـ User-Agent
+    // الذي يستخدمه الخادم، وproxy يحافظ أيضاً على TLS وRange/seek.
+    // Foupix signs each page response for a short window. A transient
+    // upstream failure must not make the phone screen discard the episode
+    // permanently; ask the API for a fresh signed URL a few times first.
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      try {
+        const sourceUrl = isCarateenSource
+          ? `${BASE}/api/dubbed/carateen/watch-src?provider=${encodeURIComponent(provider || "")}&showId=${encodeURIComponent(showId || "")}&episodeId=${encodeURIComponent(episodeId || "")}`
+          : `${BASE}/api/dubbed/watch-src?epUrl=${encodeURIComponent(epUrl)}&trace=${encodeURIComponent(playbackTraceId)}`;
+        const r = await fetch(
+          sourceUrl,
+          { signal: ctrl.signal, cache: "no-store" },
+        );
+        if (ctrl.signal.aborted || !mountedRef.current) return;
+        if (r.ok) {
+          const d = await r.json();
+          if (ctrl.signal.aborted) return;
+
+          const proxyUrl = typeof d.hlsUrl === "string" && d.hlsUrl
+            ? (d.hlsUrl.startsWith("/") ? `${BASE}${d.hlsUrl}` : d.hlsUrl)
+            : null;
+          const mediaType = d.type === "hls" ? "m3u8" as const : "mp4" as const;
+
+          if (proxyUrl) {
+            const srcs: PlayerSource[] = [{
+              url: withPlaybackTrace(proxyUrl, playbackTraceId, BASE),
+              contentType: mediaType === "m3u8" ? "hls" : "progressive",
+              label: "مدبلج عربي عبر الخادم",
+              quality: "720p HD",
+            }];
+            if (mountedRef.current) { setSources(srcs); setLoading(false); }
+            return;
+          }
+        }
+      } catch (e: any) {
+        if (e?.name === "AbortError" || !mountedRef.current) return;
+      }
+      if (attempt < 2) {
+        await new Promise<void>(resolve => setTimeout(resolve, 700 + attempt * 500));
+        if (ctrl.signal.aborted || !mountedRef.current) return;
+      }
+    }
+
+    if (isCarateenSource) {
+      if (mountedRef.current) {
+        setError("تعذّر استخراج رابط الحلقة — اضغط إعادة المحاولة");
+        setLoading(false);
+      }
+      return;
+    }
+
+    // VPS API فشل — نجرب الجلب المباشر من الموبايل.
     // ── الطريقة الثانية: الموبايل يجلب الصفحة مباشرة (IP سكني) ──
     try {
       const pageR = await fetch(epUrl, {
@@ -108,10 +172,18 @@ export default function DubbedWatchScreen() {
         if (ctrl.signal.aborted) return;
         const videoUrl = extractVideoFromHtml(html);
         if (videoUrl) {
-          const proxyUrl = `${BASE}/api/dubbed/stream?url=${encodeURIComponent(videoUrl)}`;
+          const mediaHost = (() => {
+            try { return new URL(videoUrl).hostname.toLowerCase(); } catch { return ""; }
+          })();
+          const isHls = /\.m3u8(?:[?#]|$)/i.test(videoUrl);
+          const ref = "https://www.arabic-toons.com/";
+          const proxyUrl = isHls
+            ? `${BASE}/api/anime/hls-proxy?url=${encodeURIComponent(videoUrl)}&ref=${encodeURIComponent(ref)}`
+            : mediaHost === "stream.foupix.com"
+              ? `${BASE}/api/dubbed/stream?url=${encodeURIComponent(videoUrl)}`
+              : `${BASE}/api/anime/video-proxy?url=${encodeURIComponent(videoUrl)}&ref=${encodeURIComponent(ref)}`;
           const srcs: PlayerSource[] = [
-            { url: videoUrl, label: "مدبلج عربي", quality: "720p HD", headers: { Referer: "https://www.arabic-toons.com/", Origin: "https://www.arabic-toons.com" } },
-            { url: proxyUrl, label: "مدبلج عربي (احتياطي)", quality: "720p HD" },
+            { url: withPlaybackTrace(proxyUrl, playbackTraceId, BASE), contentType: isHls ? "hls" : "progressive", label: "مدبلج عربي عبر الخادم", quality: "720p HD" },
           ];
           if (mountedRef.current) { setSources(srcs); setLoading(false); }
           return;
@@ -125,7 +197,7 @@ export default function DubbedWatchScreen() {
       setError("تعذّر جلب مصدر الفيديو — تحقق من الاتصال وأعد المحاولة");
       setLoading(false);
     }
-  }, [epUrl]);
+  }, [epUrl, playbackTraceId, isCarateenSource, provider, showId, episodeId]);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -133,25 +205,94 @@ export default function DubbedWatchScreen() {
     return () => {
       mountedRef.current = false;
       ctrlRef.current?.abort();
+      if (retryTimerRef.current) {
+        clearTimeout(retryTimerRef.current);
+        retryTimerRef.current = null;
+      }
     };
   }, [loadSource]);
+
+  const retryAfterPlaybackError = useCallback(() => {
+    if (!mountedRef.current) return;
+    if (autoRetryCountRef.current >= 2) {
+      setSources([]);
+      setError("تعذّر تشغيل الحلقة بعد عدة محاولات — اضغط إعادة المحاولة");
+      return;
+    }
+
+    autoRetryCountRef.current += 1;
+    ctrlRef.current?.abort();
+    if (retryTimerRef.current) clearTimeout(retryTimerRef.current);
+    // Unmount the native player before replacing its signed URL. This avoids
+    // feeding a stale failed Foupix token back into the same ExoPlayer.
+    setSources([]);
+    setError(null);
+    setLoading(true);
+    retryTimerRef.current = setTimeout(() => {
+      retryTimerRef.current = null;
+      if (mountedRef.current) void loadSource(true);
+    }, 900);
+  }, [loadSource]);
+
+  const saveProgress = useCallback(async () => {
+    const position = lastTimeRef.current;
+    if (!contentKey || position <= 10) return;
+    const duration = lastDurationRef.current || undefined;
+    await addToHistory({
+      animeId: getWatchContentId("dubbed", contentKey),
+      ep: episodeNumber,
+      contentKind: "dubbed",
+      contentKey,
+      episodeUrl: epUrl || "",
+      seasonLabel: season || "الموسم 1",
+      title: title || "كرتون مدبلج",
+      english: title || "كرتون مدبلج",
+      thumbnail: posterUrl,
+      position,
+      duration,
+      updatedAt: Date.now(),
+    });
+  }, [addToHistory, contentKey, episodeNumber, epUrl, posterUrl, season, title]);
+
+  const handleBack = useCallback(() => {
+    if (!savedOnExitRef.current) {
+      savedOnExitRef.current = true;
+      void saveProgress();
+    }
+    if (router.canGoBack()) router.back();
+    else router.replace("/(tabs)" as any);
+  }, [router, saveProgress]);
+
+  const onProgress = useCallback((position: number, duration: number) => {
+    lastTimeRef.current = position;
+    if (duration > 0) lastDurationRef.current = duration;
+  }, []);
+
+  useEffect(() => () => {
+    if (!savedOnExitRef.current) {
+      savedOnExitRef.current = true;
+      void saveProgress();
+    }
+  }, [saveProgress]);
 
   /* ── Loading ── */
   if (loading) {
     return (
-      <View style={[styles.container, { paddingTop: topPad }]}>
+      <View style={[styles.container, { backgroundColor: colors.background, paddingTop: topPad }]}>
+        <RewardedAdPrompt />
         <View style={styles.header}>
-          <Pressable onPress={() => router.back()} style={styles.backBtn}>
-            <Ionicons name="chevron-back" size={20} color="rgba(255,255,255,0.7)" />
-          </Pressable>
           <View style={{ flex: 1 }}>
-            <Text style={styles.headerTitle} numberOfLines={1}>{title}</Text>
-            <Text style={styles.headerSub}>{season} · الحلقة {ep}</Text>
+            <Text style={[styles.headerTitle, { color: colors.textPrimary }]} numberOfLines={1}>{title}</Text>
+            <Text style={[styles.headerSub, { color: colors.textSecondary }]}>{season} · الحلقة {ep}</Text>
           </View>
+          <Pressable onPress={handleBack} focusable={tvMode}
+             style={({ focused }) => [styles.backBtn, tvMode && tvFocusStyle(focused)]}>
+            <Ionicons name="arrow-back" size={20} color={colors.textSecondary} style={{ transform: [{ scaleX: -1 }] }} />
+          </Pressable>
         </View>
         <View style={styles.center}>
-          <ActivityIndicator color="#7C3AED" size="large" />
-          <Text style={styles.loadingText}>جاري تحميل الحلقة...</Text>
+          <ActivityIndicator color={colors.accent} size="large" />
+          <Text style={[styles.loadingText, { color: colors.textSecondary }]}>جاري تحميل الحلقة...</Text>
         </View>
       </View>
     );
@@ -160,24 +301,27 @@ export default function DubbedWatchScreen() {
   /* ── Error ── */
   if (error || sources.length === 0) {
     return (
-      <View style={[styles.container, { paddingTop: topPad }]}>
+      <View style={[styles.container, { backgroundColor: colors.background, paddingTop: topPad }]}>
+        <RewardedAdPrompt />
         <View style={styles.header}>
-          <Pressable onPress={() => router.back()} style={styles.backBtn}>
-            <Ionicons name="chevron-back" size={20} color="rgba(255,255,255,0.7)" />
-          </Pressable>
           <View style={{ flex: 1 }}>
-            <Text style={styles.headerTitle} numberOfLines={1}>{title}</Text>
-            <Text style={styles.headerSub}>{season} · الحلقة {ep}</Text>
+            <Text style={[styles.headerTitle, { color: colors.textPrimary }]} numberOfLines={1}>{title}</Text>
+            <Text style={[styles.headerSub, { color: colors.textSecondary }]}>{season} · الحلقة {ep}</Text>
           </View>
+          <Pressable onPress={handleBack} focusable={tvMode}
+             style={({ focused }) => [styles.backBtn, tvMode && tvFocusStyle(focused)]}>
+            <Ionicons name="arrow-back" size={20} color={colors.textSecondary} style={{ transform: [{ scaleX: -1 }] }} />
+          </Pressable>
         </View>
         <View style={styles.center}>
           <View style={styles.errorIcon}>
             <Ionicons name="alert-circle" size={36} color="#f87171" />
           </View>
-          <Text style={styles.errorText}>{error || "لم يُعثر على مصدر"}</Text>
-          <Pressable onPress={loadSource} style={styles.retryBtn}>
-            <Ionicons name="refresh" size={16} color="#A78BFA" />
-            <Text style={styles.retryText}>إعادة المحاولة</Text>
+          <Text style={[styles.errorText, { color: colors.destructive }]}>{error || "لم يُعثر على مصدر"}</Text>
+          <Pressable onPress={() => void loadSource()} focusable={tvMode}
+            style={({ focused }) => [styles.retryBtn, tvMode && tvFocusStyle(focused)]}>
+            <Ionicons name="refresh" size={16} color={colors.buttonText} />
+            <Text style={[styles.retryText, { color: colors.buttonText }]}>إعادة المحاولة</Text>
           </Pressable>
         </View>
       </View>
@@ -186,26 +330,28 @@ export default function DubbedWatchScreen() {
 
   /* ── RiftPlayer ── */
   return (
-    <RiftPlayer
-      /* key فريد لكل حلقة — يمنع تراكم موارد native player عبر الحلقات (نفس إصلاح
-         app/watch.tsx: بدونه router.replace لنفس /dubbed/watch لا يُعيد mount الشاشة). */
-      key={epUrl || `${title}-${season}-${ep}`}
-      sources={sources}
-      title={`${title || ""} · ${season || ""}`}
-      episode={ep ? parseInt(ep, 10) : undefined}
-      onBack={() => router.back()}
-      onError={() => {
-        setSources([]);
-        setError("تعذّر تشغيل مصدر المدبلج — حاول مرة أخرى");
-      }}
-    />
+    <>
+      <RewardedAdPrompt />
+      <RiftPlayer
+        /* key فريد لكل حلقة — يمنع تراكم موارد native player عبر الحلقات (نفس إصلاح
+           app/watch.tsx: بدونه router.replace لنفس /dubbed/watch لا يُعيد mount الشاشة). */
+        key={epUrl || `${title}-${season}-${ep}`}
+        sources={sources}
+        title={`${title || ""} · ${season || ""}`}
+        episode={episodeNumber}
+        onToggleOrientation={onToggleOrientation}
+        onProgress={onProgress}
+        onBack={handleBack}
+        onError={retryAfterPlaybackError}
+      />
+    </>
   );
 }
 
 const styles = StyleSheet.create({
   container:   { flex: 1, backgroundColor: "#000" },
   header: {
-    flexDirection: "row", alignItems: "center", gap: 12,
+    flexDirection: "row", direction: "ltr", alignItems: "center", gap: 12,
     paddingHorizontal: 16, paddingTop: 12, paddingBottom: 12,
     borderBottomWidth: 1, borderBottomColor: "rgba(255,255,255,0.05)",
   },

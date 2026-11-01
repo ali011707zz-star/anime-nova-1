@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import {
-  View, Text, Pressable, Image, ScrollView, StyleSheet,
+  View, Text, Image, ScrollView, StyleSheet,
   Platform, Dimensions, Animated, Easing, ActivityIndicator, Alert,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
@@ -12,8 +12,12 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { getBaseUrl } from "@/utils/api";
+import { isTvDevice, tvFocusStyle, TvPressable as Pressable } from "@/utils/tv";
 import { secureFetch, secureStreamFetch } from "@/utils/secureApi";
-import * as ScreenOrientation from "expo-screen-orientation";
+import { startMobileWatchAnalytics } from "@/utils/analytics";
+import { ensureWatchAccess } from "@/utils/adPolicy";
+import { RewardedAdPrompt } from "@/components/RewardedAdPrompt";
+import { useWatchPlayerOrientation } from "@/utils/watchOrientation";
 
 const { width: W, height: H } = Dimensions.get("window");
 
@@ -134,6 +138,16 @@ function resolveUrl(url: string | undefined, base: string): string {
   return url.startsWith("/") ? base + url : url;
 }
 
+function isValidAnimUrl(url: string | undefined): boolean {
+  if (!url) return false;
+  try {
+    const parsed = new URL(url.startsWith("/") ? "https://nova.local" + url : url);
+    return parsed.protocol === "http:" || parsed.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
 function getSrcQuality(src: AnimSrc): Quality {
   const tierStr = (src.tier || "").toLowerCase();
   const lbl = (src.label || "").toLowerCase();
@@ -157,7 +171,7 @@ function getSrcQuality(src: AnimSrc): Quality {
 function isDirectPlayable(src: AnimSrc): boolean {
   if (src.isEmbed) return false;
   const url = (src.proxyUrl || src.directUrl || src.url || "").toLowerCase();
-  if (!url) return false;
+  if (!isValidAnimUrl(src.proxyUrl || src.directUrl || src.url)) return false;
   if (url.includes("mega.nz") || url.includes("mega.co.nz")) return false;
   return true;
 }
@@ -165,7 +179,7 @@ function isDirectPlayable(src: AnimSrc): boolean {
 function isEmbedSrc(src: AnimSrc): boolean {
   if (!src.isEmbed) return false;
   const url = (src.proxyUrl || src.directUrl || src.url || "").toLowerCase();
-  return !!url;
+  return !!url && isValidAnimUrl(src.proxyUrl || src.directUrl || src.url);
 }
 
 function getPlayUrl(src: AnimSrc): string {
@@ -280,30 +294,34 @@ function getAnimTag(label: string): string {
 function SrcRow({ src, idx, onPlay }: { src: AnimSrc; idx: number; onPlay: (s: AnimSrc) => void }) {
   const q = getSrcQuality(src);
   const qs = QUALITY_STYLE[q];
+  const tvMode = isTvDevice();
   const label = src.label || `مصدر ${idx + 1}`;
   const isEmbed = isEmbedSrc(src);
   const tag = getAnimTag(label);
   const hasSub = !!src.subtitleUrl;
 
   return (
-    <Pressable onPress={() => onPlay(src)} style={w.srcRow}>
-      <View style={[w.srcIcon, { backgroundColor: qs.badge, borderColor: qs.border }]}>
-        <Ionicons name={isEmbed ? "tv" : "play-circle"} size={14} color={qs.text} />
+    <Pressable onPress={() => onPlay(src)} focusable={tvMode}
+      style={({ focused }) => [w.srcRow, tvMode && w.tvSrcRow, tvMode && tvFocusStyle(focused)]}
+      accessibilityRole="button"
+      accessibilityLabel={`تشغيل سيرفر ${idx + 1} بجودة ${Q_SHORT[q]}`}>
+      <View style={[w.srcIcon, tvMode && w.tvSrcIcon, { backgroundColor: qs.badge, borderColor: qs.border }]}>
+        <Ionicons name={isEmbed ? "tv" : "play-circle"} size={tvMode ? 24 : 14} color={qs.text} />
       </View>
       <View style={{ flex: 1, minWidth: 0 }}>
         <View style={{ flexDirection: "row", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-          <Text style={w.srcNum}>سيرفر {idx + 1}</Text>
-          <View style={w.srcTag}><Text style={w.srcTagText}>{tag}</Text></View>
-          {hasSub && <View style={w.srcSubBadge}><Text style={w.srcSubText}>ترجمة</Text></View>}
+          <Text style={[w.srcNum, tvMode && w.tvSrcNum]}>سيرفر {idx + 1}</Text>
+          <View style={[w.srcTag, tvMode && w.tvSrcTag]}><Text style={[w.srcTagText, tvMode && w.tvSrcTagText]}>{tag}</Text></View>
+          {hasSub && <View style={[w.srcSubBadge, tvMode && w.tvSrcSubBadge]}><Text style={[w.srcSubText, tvMode && w.tvSrcSubText]}>ترجمة</Text></View>}
         </View>
       </View>
       <View style={w.srcRight}>
-        <View style={[w.srcQBadge, { backgroundColor: qs.badge, borderColor: qs.border }]}>
-          <Text style={[w.srcQText, { color: qs.text }]}>{Q_SHORT[q]}</Text>
+        <View style={[w.srcQBadge, tvMode && w.tvSrcQBadge, { backgroundColor: qs.badge, borderColor: qs.border }]}>
+          <Text style={[w.srcQText, tvMode && w.tvSrcQText, { color: qs.text }]}>{Q_SHORT[q]}</Text>
         </View>
-        <View style={w.srcPlayBtn}>
-          <Ionicons name="play" size={10} color="#fff" />
-          <Text style={w.srcPlayText}>تشغيل</Text>
+        <View style={[w.srcPlayBtn, tvMode && w.tvSrcPlayBtn]}>
+          <Ionicons name="play" size={tvMode ? 18 : 10} color="#fff" />
+          <Text style={[w.srcPlayText, tvMode && w.tvSrcPlayText]}>تشغيل</Text>
         </View>
       </View>
     </Pressable>
@@ -313,22 +331,38 @@ function SrcRow({ src, idx, onPlay }: { src: AnimSrc; idx: number; onPlay: (s: A
 /* ══════════════════════════════════════════════════════════════ */
 export default function AnimationWatchScreen() {
   const params = useLocalSearchParams<{
-    id: string; type: string; ep: string; season: string; title: string; poster: string; etitle?: string; autoplay?: string;
+    id: string; type: string; ep: string; season: string; title: string; poster: string; etitle?: string; autoplay?: string; totalEps?: string;
   }>();
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const tvMode = isTvDevice();
   const topPad = insets.top > 0 ? insets.top : (Platform.OS === "ios" ? 44 : 24);
 
   const tmdbId    = params.id     || "";
   const type      = params.type   || "movie";
   const ep        = parseInt(params.ep     || "1", 10) || 1;
   const season    = parseInt(params.season || "1", 10) || 1;
+  const totalEpsParam = parseInt(params.totalEps || "", 10);
+  const totalEps = Number.isFinite(totalEpsParam) && totalEpsParam > 0 ? totalEpsParam : 0;
+  const canGoNextEpisode = type === "tv" && totalEps > 0 && ep < totalEps;
   const titleStr  = decodeURIComponent(params.title  || "");
   const posterUrl = params.poster ? decodeURIComponent(params.poster) : "";
   const epTitle   = params.etitle ? decodeURIComponent(params.etitle) : undefined;
-  const autoplay  = params.autoplay === "1";
+
+  useEffect(() => {
+    if (!tmdbId) return;
+    return startMobileWatchAnalytics({
+      animeId: tmdbId,
+      episode: ep,
+      title: titleStr,
+    });
+  }, [tmdbId, ep, titleStr]);
 
   const [screen, setScreen]       = useState<Screen>("picker");
+  const onToggleOrientation = useWatchPlayerOrientation(
+    screen === "native" || screen === "webplayer" || screen === "embed",
+    tvMode,
+  );
   const [sources, setSources]     = useState<AnimSrc[]>([]);
   const [loading, setLoading]     = useState(true);
   const [playingSrc, setPlayingSrc] = useState<AnimSrc | null>(null);
@@ -347,7 +381,6 @@ export default function AnimationWatchScreen() {
   const seenKeys         = useRef(new Set<string>());
   const autoPlayFiredRef  = useRef(false);
   const autoPlayTimerRef  = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const hasCachedRef      = useRef(false); // هل تم تحميل مصادر من الكاش المحلي؟
   const isMountedRef      = useRef(true);  // يمنع setState بعد unmount → يحمي من crash
 
   const progressKey   = `anim-wp-${tmdbId}-${type}-${season}-${ep}`;
@@ -372,48 +405,6 @@ export default function AnimationWatchScreen() {
       if (v === "false") setSubLang("off");
     });
 
-    /* فحص الكاش المحلي للمصادر — يتيح الفتح الفوري */
-    if (!animSrcCacheKey) return;
-    AsyncStorage.getItem(animSrcCacheKey).then(raw => {
-      if (!raw || !isMountedRef.current) return;
-      try {
-        const { sources: cached, ts }: { sources: AnimSrc[]; ts: number } = JSON.parse(raw);
-        if (!cached?.length || Date.now() - ts > ANIM_SRC_CACHE_TTL) return;
-        if (!isMountedRef.current) return;
-
-        const base = getBaseUrl();
-        const resolved = cached.map(s => ({
-          ...s,
-          directUrl: s.directUrl ? (s.directUrl.startsWith("/") ? base + s.directUrl : s.directUrl) : undefined,
-          url: s.url ? (s.url.startsWith("/") ? base + s.url : s.url) : undefined,
-          proxyUrl: s.proxyUrl ? (s.proxyUrl.startsWith("/") ? base + s.proxyUrl : s.proxyUrl) : undefined,
-        }));
-
-        /* أضف المصادر المحفوظة فوراً وانتقل للـ picker */
-        hasCachedRef.current = true;
-        setSources(resolved);
-        /* ⚠️ لا نبذر seenKeys من الكاش — نتركها فارغة حتى تصل المصادر الطازجة
-           وتحلّ محلّ القديمة per-site. هذا يمنع تشغيل روابط CDN منتهية الصلاحية. */
-        setLoading(false);
-        setScreen("picker");
-
-        /* شغّل تلقائياً من الكاش فقط إذا كان الكاش حديثاً (< 2 دقيقة) —
-           الكاش الأقدم قد يحتوي روابط CDN منتهية الصلاحية تُسبّب الكراش */
-        if (autoplay && Date.now() - ts < 2 * 60 * 1000) {
-          const isDU = (s: AnimSrc) => (s.label || "").toLowerCase().startsWith("dulo");
-          const first =
-            resolved.find(s => isDirectPlayable(s) && isDU(s)) ??
-            resolved.find(s => isDirectPlayable(s));
-          if (first) {
-            autoPlayFiredRef.current = true;
-            setTimeout(() => {
-              if (!isMountedRef.current) return;
-              setPlayingSrc(first); setScreen("webplayer");
-            }, 0);
-          }
-        }
-      } catch { /* تجاهل كاش تالف — يحدث عند الإغلاق القسري للتطبيق */ }
-    }).catch(() => {});
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [progressKey, animSrcCacheKey]);
 
@@ -486,12 +477,9 @@ export default function AnimationWatchScreen() {
     if (!tmdbId) return;
     autoPlayFiredRef.current = false;
     setLoading(true);
-    const hasCached = hasCachedRef.current;
-    if (!hasCached) {
-      setSources([]);
-      seenKeys.current.clear();
-      setScreen("loading");
-    }
+    setSources([]);
+    seenKeys.current.clear();
+    setScreen("loading");
 
     abortRef.current?.abort();
     abortRef.current = new AbortController();
@@ -545,18 +533,14 @@ export default function AnimationWatchScreen() {
                 proxyUrl: resolveUrl(data.proxyUrl, base),
               };
               const key = src.proxyUrl || src.directUrl || src.url || "";
-              if (!key || seenKeys.current.has(key)) continue;
+              if (!isValidAnimUrl(key) || seenKeys.current.has(key)) continue;
               seenKeys.current.add(key);
               freshSrcs.push(src);
 
               /* حد أقصى 20 مصدر — يمنع تراكم مئات المصادر من SSE stream */
               setSources(prev => prev.length >= 20 ? prev : [...prev, src]);
 
-              /* تشغيل تلقائي عند أول مصدر مباشر */
-              if (!autoPlayFiredRef.current && isDirectPlayable(src)) {
-                autoPlayFiredRef.current = true;
-                setTimeout(() => playSrc(src), 0);
-              }
+              /* عرض المصدر فقط؛ التشغيل يبدأ بعد ضغط المستخدم على البطاقة */
 
             } else if (isDone) {
               setLoading(false);
@@ -607,28 +591,54 @@ export default function AnimationWatchScreen() {
     return () => clearTimeout(timeout);
   }, [tmdbId, ep, season]);
 
-  /* ── Portrait lock on picker/loading; unlock for embed ── */
-  useEffect(() => {
-    if (screen === "loading" || screen === "picker") {
-      ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP).catch(() => {});
-    } else if (screen === "embed") {
-      ScreenOrientation.unlockAsync().catch(() => {});
+  /* ── Resolve and play only the selected source ── */
+  const playSrc = useCallback(async (src: AnimSrc) => {
+    if (!(await ensureWatchAccess())) return;
+    let next = src;
+    if (src.site && !src.isEmbed) {
+      try {
+        const response = await secureFetch(`${getBaseUrl()}/api/animation/source-resolve`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "x-nova-client": "mobile" },
+          body: JSON.stringify({
+            sourceId: src.site,
+            title: titleStr,
+            type,
+            tmdbId,
+            season,
+            ep,
+            quality: getSrcQuality(src),
+          }),
+        });
+        if (!response.ok) throw new Error(`resolve_${response.status}`);
+        const resolved = await response.json();
+        next = {
+          ...src,
+          ...resolved,
+          directUrl: resolveUrl(resolved.directUrl, getBaseUrl()),
+          url: resolveUrl(resolved.url, getBaseUrl()),
+          proxyUrl: resolveUrl(resolved.proxyUrl, getBaseUrl()),
+          status: "ok",
+          site: src.site,
+        };
+        if (!isValidAnimUrl(getPlayUrl(next))) throw new Error("resolve_invalid_url");
+        setSources(prev => prev.map(item => item.site === src.site ? { ...item, ...next } : item));
+      } catch {
+        setSources(prev => prev.map(item => item.site === src.site ? { ...item, status: "fail" } : item));
+        setScreen("picker");
+        return;
+      }
     }
-    // "native" orientation is handled by RiftPlayer itself
-  }, [screen]);
 
-
-  /* ── Play a source — AnimHlsPlayer (WebView+hls.js) أولاً، RiftPlayer كـ fallback ── */
-  const playSrc = useCallback((src: AnimSrc) => {
-    setPlayingSrc(src);
-    if (isDirectPlayable(src)) {
+    setPlayingSrc(next);
+    if (isDirectPlayable(next)) {
       /* WebView+hls.js: الجهاز يجلب segments مباشرةً بـ IP سكني → لا حجب CDN */
       setScreen("webplayer");
       return;
     }
-    if (needsHiddenResolve(src)) { setScreen("resolving"); return; }
+    if (needsHiddenResolve(next)) { setScreen("resolving"); return; }
     setScreen("embed");
-  }, []);
+  }, [titleStr, type, tmdbId, season, ep]);
 
   /* ── نتيجة استخراج WebView المخفي ── */
   const handleHiddenResolved = useCallback((stream: ResolvedStream) => {
@@ -767,7 +777,7 @@ export default function AnimationWatchScreen() {
 
         {/* Back button */}
         <Pressable onPress={handleBack} style={[w.loadBackBtn, { top: topPad + 4 }]}>
-          <Ionicons name="chevron-back" size={20} color="rgba(255,255,255,0.65)" />
+          <Ionicons name="chevron-back" size={20} color="rgba(255,255,255,0.65)" style={{ transform: [{ scaleX: -1 }] }} />
         </Pressable>
 
         {/* Center content */}
@@ -843,15 +853,14 @@ export default function AnimationWatchScreen() {
         onError={() => {
           handleTimeUpdate(lastTimeRef.current);
           if (animSrcCacheKey) AsyncStorage.removeItem(animSrcCacheKey).catch(() => {});
-          hasCachedRef.current = false;
           setSources([]);
           seenKeys.current.clear();
           setScreen("picker");
         }}
-        onNextEpisode={type === "tv" ? () => {
+        onNextEpisode={canGoNextEpisode ? () => {
           const t = encodeURIComponent(titleStr);
           const p = encodeURIComponent(posterUrl);
-          router.replace(`/animation/watch?id=${tmdbId}&type=${type}&ep=${ep + 1}&season=${season}&title=${t}&poster=${p}&autoplay=1` as any);
+          router.replace(`/animation/watch?id=${tmdbId}&type=${type}&ep=${ep + 1}&season=${season}&totalEps=${totalEps}&title=${t}&poster=${p}&autoplay=1` as any);
         } : undefined}
         onPrevEpisode={type === "tv" && ep > 1 ? () => {
           const t = encodeURIComponent(titleStr);
@@ -884,7 +893,9 @@ export default function AnimationWatchScreen() {
         initialSourceIndex={startIdx}
         title={titleStr}
         episode={type !== "movie" ? ep : undefined}
+         totalEps={totalEps || undefined}
         initialPosition={resumeTime}
+        onToggleOrientation={onToggleOrientation}
         onBack={() => {
           handleTimeUpdate(lastTimeRef.current);
           setScreen("picker");
@@ -894,15 +905,14 @@ export default function AnimationWatchScreen() {
           handleTimeUpdate(lastTimeRef.current);
           /* ⚠️ احذف كاش المصادر التالفة — يمنع تكرار الكراش عند فتح نفس المحتوى مجدداً */
           if (animSrcCacheKey) AsyncStorage.removeItem(animSrcCacheKey).catch(() => {});
-          hasCachedRef.current = false;
           setSources([]);
           seenKeys.current.clear();
           setScreen("picker");
         }}
-        onNextEpisode={type === "tv" ? () => {
+        onNextEpisode={canGoNextEpisode ? () => {
           const t = encodeURIComponent(titleStr);
           const p = encodeURIComponent(posterUrl);
-          router.replace(`/animation/watch?id=${tmdbId}&type=${type}&ep=${ep + 1}&season=${season}&title=${t}&poster=${p}&autoplay=1`);
+          router.replace(`/animation/watch?id=${tmdbId}&type=${type}&ep=${ep + 1}&season=${season}&totalEps=${totalEps}&title=${t}&poster=${p}&autoplay=1`);
         } : undefined}
         onPrevEpisode={type === "tv" && ep > 1 ? () => {
           const t = encodeURIComponent(titleStr);
@@ -918,7 +928,7 @@ export default function AnimationWatchScreen() {
     return (
       <View style={[w.container, { alignItems: "center", justifyContent: "center", gap: 16 }]}>
         <Pressable onPress={() => setScreen("picker")} style={[w.videoBackBtn, { position: "absolute", top: topPad + 4, right: 12 }]}>
-          <Ionicons name="arrow-back" size={18} color="#fff" />
+          <Ionicons name="arrow-back" size={18} color="#fff" style={{ transform: [{ scaleX: -1 }] }} />
         </Pressable>
         <View style={{ width: 72, height: 72, borderRadius: 36, backgroundColor: "rgba(139,92,246,0.15)", alignItems: "center", justifyContent: "center" }}>
           <Ionicons name="play-circle-outline" size={42} color="rgba(139,92,246,0.8)" />
@@ -942,7 +952,7 @@ export default function AnimationWatchScreen() {
     return (
       <View style={{ flex: 1, backgroundColor: "#07070d", alignItems: "center", justifyContent: "center", gap: 14 }}>
         <Pressable onPress={() => setScreen("picker")} style={[w.videoBackBtn, { position: "absolute", top: topPad + 4, right: 12 }]}>
-          <Ionicons name="arrow-back" size={18} color="#fff" />
+          <Ionicons name="arrow-back" size={18} color="#fff" style={{ transform: [{ scaleX: -1 }] }} />
         </Pressable>
         <SpinRing />
         <Text style={{ fontSize: 13, fontFamily: "Cairo_400Regular", color: "rgba(255,255,255,0.45)", textAlign: "center" }}>
@@ -966,7 +976,7 @@ export default function AnimationWatchScreen() {
       return (
         <View style={[w.container, { alignItems: "center", justifyContent: "center", gap: 16 }]}>
           <Pressable onPress={() => setScreen("picker")} style={[w.videoBackBtn, { position: "absolute", top: topPad + 4, right: 12 }]}>
-            <Ionicons name="arrow-back" size={18} color="#fff" />
+            <Ionicons name="arrow-back" size={18} color="#fff" style={{ transform: [{ scaleX: -1 }] }} />
           </Pressable>
           <View style={{ width: 72, height: 72, borderRadius: 36, backgroundColor: "rgba(139,92,246,0.15)", alignItems: "center", justifyContent: "center" }}>
             <Ionicons name="tv-outline" size={36} color="rgba(139,92,246,0.7)" />
@@ -989,7 +999,7 @@ export default function AnimationWatchScreen() {
     return (
       <View style={[w.container, { alignItems: "center", justifyContent: "center", gap: 16 }]}>
         <Pressable onPress={() => setScreen("picker")} style={[w.videoBackBtn, { position: "absolute", top: topPad + 4, right: 12 }]}>
-          <Ionicons name="arrow-back" size={18} color="#fff" />
+          <Ionicons name="arrow-back" size={18} color="#fff" style={{ transform: [{ scaleX: -1 }] }} />
         </Pressable>
         <View style={{ width: 72, height: 72, borderRadius: 36, backgroundColor: "rgba(139,92,246,0.15)", alignItems: "center", justifyContent: "center" }}>
           <Ionicons name="tv-outline" size={36} color="rgba(139,92,246,0.7)" />
@@ -1013,6 +1023,7 @@ export default function AnimationWatchScreen() {
 
   return (
     <View style={[w.container, { paddingTop: topPad }]}>
+      <RewardedAdPrompt />
       {/* Blurred backdrop */}
       {posterUrl ? (
         <Image source={{ uri: posterUrl }} style={[StyleSheet.absoluteFill, { opacity: 0.07 }]} blurRadius={Platform.OS === "ios" ? 28 : 10} resizeMode="cover" />
@@ -1039,11 +1050,15 @@ export default function AnimationWatchScreen() {
         </View>
         {/* Right: back button (always same position) */}
         <Pressable onPress={handleBack} style={w.headerBack}>
-          <Ionicons name="arrow-back" size={17} color="rgba(255,255,255,0.75)" />
+          <Ionicons name="arrow-back" size={17} color="rgba(255,255,255,0.75)" style={{ transform: [{ scaleX: -1 }] }} />
         </Pressable>
       </View>
 
-      <ScrollView style={{ flex: 1 }} contentContainerStyle={w.pickerContent} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        style={{ flex: 1 }}
+        contentContainerStyle={[w.pickerContent, tvMode && w.tvPickerContent]}
+        showsVerticalScrollIndicator={false}
+      >
 
         {/* ── Info card ── */}
         <View style={w.infoCard}>
@@ -1178,7 +1193,7 @@ const w = StyleSheet.create({
   loadEpBadgeText: { fontSize: 11, fontFamily: "Cairo_700Bold", color: "#c4b5fd" },
   loadHintNew: { fontSize: 13, color: "rgba(255,255,255,0.75)", fontFamily: "Cairo_700Bold", textAlign: "center", lineHeight: 22, paddingHorizontal: 16 },
   loadPrayerText: { fontSize: 13, color: "rgba(255,255,255,0.85)", fontFamily: "Cairo_800ExtraBold", textAlign: "center" },
-  topBackBtn: { position: "absolute", left: 16, zIndex: 10, width: 36, height: 36, borderRadius: 18, backgroundColor: "rgba(0,0,0,0.5)", borderWidth: 1, borderColor: "rgba(255,255,255,0.12)", alignItems: "center", justifyContent: "center" },
+  topBackBtn: { position: "absolute", right: 16, zIndex: 10, width: 36, height: 36, borderRadius: 18, backgroundColor: "rgba(0,0,0,0.5)", borderWidth: 1, borderColor: "rgba(255,255,255,0.12)", alignItems: "center", justifyContent: "center" },
   /* Video top bar */
   videoTopBar: { position: "absolute", top: 0, left: 0, right: 0, flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 12, paddingBottom: 20 },
   videoBackBtn: { width: 34, height: 34, borderRadius: 17, backgroundColor: "rgba(0,0,0,0.5)", alignItems: "center", justifyContent: "center" },
@@ -1188,15 +1203,18 @@ const w = StyleSheet.create({
   srcSwitchText: { fontSize: 10, fontFamily: "Cairo_700Bold", color: "rgba(255,255,255,0.8)" },
 
   /* ── Picker header: 3-zone fixed layout ── */
-  header: { flexDirection: "row", alignItems: "center", paddingHorizontal: 12, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: "rgba(255,255,255,0.07)", gap: 8 },
+  header: { flexDirection: "row", direction: "ltr", alignItems: "center", paddingHorizontal: 12, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: "rgba(255,255,255,0.07)", gap: 8 },
   headerLeft: { width: 36, alignItems: "flex-start", justifyContent: "center" },
   headerCenter: { flex: 1, alignItems: "center" },
   headerBack: { width: 36, height: 36, borderRadius: 12, backgroundColor: "rgba(255,255,255,0.07)", borderWidth: 1, borderColor: "rgba(255,255,255,0.11)", alignItems: "center", justifyContent: "center", flexShrink: 0 },
   headerTitle: { fontSize: 13, fontFamily: "Cairo_800ExtraBold", color: "#fff", textAlign: "center" },
   headerSub: { fontSize: 10, color: "rgba(255,255,255,0.35)", fontFamily: "Cairo_400Regular", textAlign: "center" },
   retryBtn: { width: 32, height: 32, borderRadius: 10, backgroundColor: "rgba(139,92,246,0.12)", borderWidth: 1, borderColor: "rgba(139,92,246,0.25)", alignItems: "center", justifyContent: "center" },
+  commentsBtn: { alignSelf: "flex-end", flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 10, backgroundColor: "rgba(139,92,246,0.10)", borderWidth: 1, borderColor: "rgba(139,92,246,0.22)" },
+  commentsBtnText: { fontSize: 11, fontFamily: "Cairo_700Bold", color: "rgba(196,181,253,0.92)" },
 
   pickerContent: { padding: 14, paddingBottom: 100, gap: 12 },
+  tvPickerContent: { paddingHorizontal: 56, paddingTop: 24, gap: 20 },
 
   /* ── Info card ── */
   infoCard: { flexDirection: "row", alignItems: "flex-start", gap: 14, backgroundColor: "rgba(15,12,28,0.80)", borderRadius: 18, borderWidth: 1, borderColor: "rgba(139,92,246,0.14)", padding: 14 },
@@ -1238,6 +1256,17 @@ const w = StyleSheet.create({
   srcQText: { fontSize: 9, fontFamily: "Cairo_700Bold" },
   srcPlayBtn: { flexDirection: "row", alignItems: "center", gap: 4, backgroundColor: "rgba(109,40,217,0.88)", borderRadius: 10, paddingHorizontal: 11, paddingVertical: 6, borderWidth: 1, borderColor: "rgba(167,139,250,0.28)" },
   srcPlayText: { fontSize: 10, fontFamily: "Cairo_800ExtraBold", color: "#fff" },
+  tvSrcRow: { minHeight: 128, paddingHorizontal: 34, paddingVertical: 26, gap: 26, borderRadius: 20 },
+  tvSrcIcon: { width: 72, height: 72, borderRadius: 20 },
+  tvSrcNum: { fontSize: 25 },
+  tvSrcTag: { paddingHorizontal: 16, paddingVertical: 8, borderRadius: 12 },
+  tvSrcTagText: { fontSize: 20 },
+  tvSrcSubBadge: { paddingHorizontal: 14, paddingVertical: 7, borderRadius: 10 },
+  tvSrcSubText: { fontSize: 17 },
+  tvSrcQBadge: { paddingHorizontal: 22, paddingVertical: 13, borderRadius: 14 },
+  tvSrcQText: { fontSize: 22 },
+  tvSrcPlayBtn: { minWidth: 170, minHeight: 76, justifyContent: "center", paddingHorizontal: 26, paddingVertical: 18, borderRadius: 18, gap: 10 },
+  tvSrcPlayText: { fontSize: 21 },
 
   empty: { alignItems: "center", justifyContent: "center", gap: 14, paddingVertical: 60 },
   emptyTitle: { fontSize: 15, fontFamily: "Cairo_700Bold", color: "rgba(255,255,255,0.45)" },

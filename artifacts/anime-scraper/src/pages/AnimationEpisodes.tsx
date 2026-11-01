@@ -1,8 +1,9 @@
 import { API_BASE } from "@/lib/apiBase";
 import { useState, useEffect, useMemo, useRef } from "react";
 import { AnimeMascot } from "@/components/AnimeMascot";
-import { useParams, useLocation, useSearch, Link } from "wouter";
-import { ChevronRight, Play, Clock, X } from "lucide-react";
+import AppOnlyEpisodeDialog from "@/components/AppOnlyEpisodeDialog";
+import { useParams, useLocation, useSearch } from "wouter";
+import { ChevronRight, Play, Clock, X, MessageCircle } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 
 const IMG_W = "https://image.tmdb.org/t/p/w500";
@@ -30,6 +31,7 @@ export default function AnimationEpisodes() {
   const [episodes, setEpisodes]   = useState<Episode[]>([]);
   const [epLoading, setEpLoading] = useState(true);
   const [epProgress, setEpProgress] = useState<Record<number, number>>({});
+  const [exclusiveEpisode, setExclusiveEpisode] = useState<number | null>(null);
 
   const tabsRef = useRef<HTMLDivElement>(null);
 
@@ -77,14 +79,6 @@ export default function AnimationEpisodes() {
   const title = detail
     ? (detail.original_title || detail.original_name || detail.title || detail.name || "الحلقات")
     : "الحلقات";
-
-  const watchUrl = (ep: number) => {
-    const t = encodeURIComponent(title);
-    const poster = encodeURIComponent(
-      detail?.poster_path ? `${IMG_W}${detail.poster_path}` : ""
-    );
-    return `/animation/watch?title=${t}&type=${type}&id=${id}&ep=${ep}&season=${selSeason}&poster=${poster}`;
-  };
 
   return (
     <>
@@ -202,12 +196,17 @@ export default function AnimationEpisodes() {
             const progressPct  = progressSec > 0 ? Math.min(100, Math.round((progressSec / estDuration) * 100)) : 0;
             const watched      = progressPct >= 90;
             return (
-              <Link key={epItem.episode_number} href={watchUrl(epItem.episode_number)}>
-                <motion.div
+              <motion.div
+                key={epItem.episode_number}
                   initial={{ opacity: 0, y: 8 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ delay: Math.min(i * 0.025, 0.3), duration: 0.2 }}
                   whileTap={{ scale: 0.97 }}
+                  onClick={() => setExclusiveEpisode(epItem.episode_number)}
+                  role="button"
+                  tabIndex={0}
+                  aria-label={`فتح تنبيه الحلقة ${epItem.episode_number}`}
+                  data-testid={`animation-episode-exclusive-${epItem.episode_number}`}
                   className={`flex items-center gap-3 p-3 rounded-2xl border active:bg-white/8 transition-colors ${
                     watched ? "bg-white/3 border-white/4 opacity-55" : "bg-[#111116] border-white/6"
                   }`}
@@ -287,12 +286,16 @@ export default function AnimationEpisodes() {
                     </button>
                   </div>
                 </motion.div>
-              </Link>
             );
           })
         )}
       </div>
     </main>
+    <AppOnlyEpisodeDialog
+      open={exclusiveEpisode !== null}
+      episodeLabel={`الحلقة ${exclusiveEpisode ?? ""}`}
+      onClose={() => setExclusiveEpisode(null)}
+    />
     </>
   );
 }

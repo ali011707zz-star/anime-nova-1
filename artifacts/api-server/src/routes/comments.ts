@@ -1,6 +1,7 @@
 import { Router, type Request, type Response } from "express";
 import { sbSelect, sbInsert, sbDelete, sbPatch } from "../lib/supabaseClient.js";
 import { getMobileUserId } from "../lib/security.js";
+import { sendMobilePush } from "./push.js";
 
 const router = Router();
 
@@ -18,13 +19,14 @@ async function getUserId(req: Request): Promise<string | null> {
   return null;
 }
 
-function mapRow(r: any, liked: boolean) {
+function mapRow(r: any, liked: boolean, profile?: any) {
   return {
     id:              r.id,
     userId:          r.user_id,
     username:        r.username,
+    displayName:     profile?.display_name || null,
     userHandle:      r.user_handle  || null,
-    avatarUrl:       r.avatar_url   || null,
+    avatarUrl:       profile?.profile_image_custom || r.avatar_url || null,
     animeId:         r.anime_id     ?? null,
     tmdbId:          r.tmdb_id      ?? null,
     animeType:       r.anime_type   || "anime",
@@ -37,6 +39,82 @@ function mapRow(r: any, liked: boolean) {
     liked,
   };
 }
+
+async function notifyCommentTargets(input: {
+  comment: any;
+  actorUserId: string;
+  actorName: string;
+}): Promise<void> {
+  const targetIds = new Set<string>();
+  const parentId = input.comment.parent_id;
+
+  if (parentId) {
+    const parents = await sbSelect("comments", { id: `eq.${parentId}` }, { limit: 1 });
+    const parentUserId = parents[0]?.user_id;
+    if (parentUserId && String(parentUserId) !== String(input.actorUserId)) {
+      targetIds.add(String(parentUserId));
+    }
+  }
+
+  const handles = new Set<string>();
+  const text = String(input.comment.text || "");
+  const mentionPattern = /@([a-zA-Z0-9_.]{3,32})/g;
+  let match: RegExpExecArray | null;
+  while ((match = mentionPattern.exec(text)) !== null) handles.add(match[1].toLowerCase());
+
+  for (const username of handles) {
+    const users = await sbSelect("users", { username: `eq.${username}` }, { limit: 1 });
+    const mentionedUserId = users[0]?.id;
+    if (mentionedUserId && String(mentionedUserId) !== String(input.actorUserId)) {
+      targetIds.add(String(mentionedUserId));
+    }
+  }
+
+  if (!targetIds.size) return;
+  await Promise.all([...targetIds].map((userId) =>
+    sendMobilePush({
+      userId,
+      eventKey: `comment:${String(input.comment.id)}:${userId}`,
+      title: parentId ? "رد جديد على تعليقك" : "تم ذكرك في تعليق",
+      body: `${input.actorName || "مستخدم"} أرسل لك إشعارًا في التعليقات`,
+      data: {
+        type: parentId ? "comment-reply" : "comment-mention",
+        commentId: String(input.comment.id),
+        animeId: input.comment.anime_id ?? null,
+        episode: input.comment.episode_number ?? null,
+      },
+    }).catch((error: any) => {
+      console.warn(`[comments] push failed: ${error?.message || String(error)}`);
+      return 0;
+    }),
+  ));
+}
+
+/* ─────────────────────────────────────────
+   GET /api/comments/mine?limit=&offset=
+   Authenticated profile feed. The user ID always comes from the session/token,
+   never from a client-supplied query parameter.
+───────────────────────────────────────── */
+router.get("/comments/mine", async (req: Request, res: Response) => {
+  const userId = await getUserId(req);
+  if (!userId) return res.status(401).json({ error: "يجب تسجيل الدخول" });
+
+  try {
+    const parsedLimit = Number.parseInt(String(req.query.limit || "50"), 10);
+    const parsedOffset = Number.parseInt(String(req.query.offset || "0"), 10);
+    const limit = Math.min(Math.max(Number.isFinite(parsedLimit) ? parsedLimit : 50, 1), 100);
+    const offset = Math.max(Number.isFinite(parsedOffset) ? parsedOffset : 0, 0);
+    const rows = await sbSelect("comments", {
+      user_id: `eq.${userId}`,
+      order: "created_at.desc",
+    }, { limit: Math.min(limit + offset, 500) });
+    const comments = rows.slice(offset, offset + limit).map((row) => mapRow(row, false));
+    return res.json({ comments, total: rows.length });
+  } catch (err) {
+    console.error("[comments] mine:", err);
+    return res.status(500).json({ error: "تعذّر تحميل تعليقات الحساب" });
+  }
+});
 
 /* ─────────────────────────────────────────
    GET /api/comments?animeId=&ep=&limit=&offset=
@@ -74,7 +152,13 @@ router.get("/comments", async (req: Request, res: Response) => {
       likedIds = new Set(likeRows.map((l: any) => l.comment_id));
     }
 
-    const result = page.map((r) => mapRow(r, likedIds.has(r.id)));
+    const userIds = Array.from(new Set(page.map((r) => r.user_id).filter(Boolean)));
+    let profiles = new Map<string, any>();
+    if (userIds.length > 0) {
+      const users = await sbSelect("users", { id: `in.(${userIds.join(",")})` }, { limit: userIds.length });
+      profiles = new Map(users.map((u: any) => [String(u.id), u]));
+    }
+    const result = page.map((r) => mapRow(r, likedIds.has(r.id), profiles.get(String(r.user_id))));
     return res.json({ comments: result, total: result.length });
   } catch (err) {
     console.error("[comments] GET:", err);
@@ -127,6 +211,14 @@ router.post("/comments", async (req: Request, res: Response) => {
       console.error("[comments] POST: sbInsert returned null after retry");
       return res.status(500).json({ error: "فشل إنشاء التعليق في قاعدة البيانات" });
     }
+
+    void notifyCommentTargets({
+      comment: row,
+      actorUserId: userId,
+      actorName: username || "مستخدم",
+    }).catch((error: any) => {
+      console.warn(`[comments] target notification failed: ${error?.message || String(error)}`);
+    });
 
     return res.status(201).json({ comment: mapRow(row, false) });
   } catch (err) {

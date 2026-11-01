@@ -1,20 +1,26 @@
-import { Router, type IRouter } from 'express';
-import healthRouter    from './health';
-import animeRouter     from './anime';
-import reportRouter    from './report';
-import configRouter    from './config';
-import dubbedRouter    from './dubbed';
-import carateenRouter  from './carateen';
-import mangaRouter     from './manga';
-import statsRouter     from './stats';
+import { Router, type IRouter } from "express";
+import healthRouter    from "./health";
+import animeRouter     from "./anime";
+import animationRouter from "./animation.js";
+import reportRouter    from "./report";
+import configRouter    from "./config";
+import dubbedRouter    from "./dubbed";
+import sanimeRouter   from "./sanime";
+import adsRouter      from "./ads";
+import sourceCatalogRouter from "./sourceCatalog.js";
+import pushRouter from "./push.js";
 
 const router: IRouter = Router();
+
 router.use(configRouter);
 router.use(healthRouter);
 router.use(animeRouter);
+router.use(animationRouter);
 router.use(dubbedRouter);
-router.use(carateenRouter);
-router.use(mangaRouter);
-router.use(statsRouter);
+router.use(sanimeRouter);
 router.use(reportRouter);
+router.use(adsRouter);
+router.use(sourceCatalogRouter);
+router.use(pushRouter);
+
 export default router;

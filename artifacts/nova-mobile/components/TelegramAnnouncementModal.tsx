@@ -1,16 +1,16 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useVideoPlayer, VideoView } from "expo-video";
 import * as Linking from "expo-linking";
-import React, { useEffect } from "react";
+import React, { useCallback, useEffect, useRef } from "react";
 import {
   Modal,
-  Pressable,
   StyleSheet,
   Text,
   View,
   useWindowDimensions,
 } from "react-native";
-import { isTvDevice, tvFocusStyle } from "../utils/tv";
+import { isTvDevice, tvFocusStyle, TvPressable as Pressable } from "../utils/tv";
+import { useColors } from "../hooks/useColors";
 
 const TELEGRAM_URL = "https://t.me/Anime_NOVA_0";
 
@@ -24,25 +24,38 @@ export function TelegramAnnouncementModal({
   onClose,
 }: TelegramAnnouncementModalProps) {
   const { width, height } = useWindowDimensions();
+  const colors = useColors();
   const tvMode = isTvDevice(width, height);
+  const openingTelegramRef = useRef(false);
   const player = useVideoPlayer(
     require("../assets/jjk-lethal-company-dance.mp4"),
     (instance) => {
       instance.loop = true;
-      instance.muted = false;
+      instance.muted = tvMode;
     },
   );
 
   useEffect(() => {
     try {
-      if (visible) player.play();
+      // Keep the native video paused on TV so remote presses are never
+      // competing with video playback for the UI thread.
+      if (visible && !tvMode) player.play();
       else player.pause();
     } catch {}
-  }, [player, visible]);
+  }, [player, tvMode, visible]);
 
-  const openTelegram = () => {
-    Linking.openURL(TELEGRAM_URL).catch(() => {});
-  };
+  const openTelegram = useCallback(() => {
+    if (openingTelegramRef.current) return;
+    openingTelegramRef.current = true;
+    // Close the native Modal first. This releases the TV focus trap before
+    // Android hands control to Telegram.
+    onClose();
+    setTimeout(() => {
+      Linking.openURL(TELEGRAM_URL)
+        .catch(() => {})
+        .finally(() => { openingTelegramRef.current = false; });
+    }, tvMode ? 120 : 0);
+  }, [onClose, tvMode]);
 
   return (
     <Modal
@@ -52,26 +65,29 @@ export function TelegramAnnouncementModal({
       onRequestClose={onClose}
       statusBarTranslucent
     >
-      <View style={styles.backdrop}>
-        <View style={[styles.card, tvMode && styles.tvCard]} accessibilityViewIsModal>
+      <View style={[styles.backdrop, { backgroundColor: colors.overlay }, tvMode && styles.tvBackdrop]}>
+        <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }, tvMode && styles.tvCard]} accessibilityViewIsModal>
           <Pressable
+            key={`telegram-close-${visible ? "open" : "closed"}`}
             accessibilityLabel="إغلاق"
             testID="telegram-announcement-close"
             onPress={onClose}
             focusable={tvMode}
-            hasTVPreferredFocus={false}
+             hasTVPreferredFocus={false}
             hitSlop={tvMode ? 14 : 8}
             style={({ pressed, focused }) => [
               styles.closeButton,
+              { backgroundColor: colors.input },
               tvMode && styles.tvCloseButton,
               tvMode && tvFocusStyle(focused),
               pressed && styles.pressed,
             ]}
           >
-            <Ionicons name="close" size={21} color="#FFFFFF" />
+            <Ionicons name="close" size={tvMode ? 30 : 21} color={colors.textPrimary} />
+            {tvMode && <Text style={[styles.tvCloseLabel, { color: colors.textPrimary }]}>إغلاق</Text>}
           </Pressable>
 
-          <View style={styles.videoFrame}>
+          <View style={[styles.videoFrame, { borderColor: colors.border }, tvMode && styles.tvVideoFrame]}>
             <VideoView
               player={player}
               style={styles.video}
@@ -85,8 +101,8 @@ export function TelegramAnnouncementModal({
             <View style={styles.telegramIcon}>
               <Ionicons name="paper-plane" size={20} color="#FFFFFF" />
             </View>
-            <Text style={[styles.title, tvMode && styles.tvTitle]}>انضم إلى قناتنا على تلجرام</Text>
-            <Text style={[styles.message, tvMode && styles.tvMessage]}>
+            <Text style={[styles.title, { color: colors.textPrimary }, tvMode && styles.tvTitle]}>انضم إلى قناتنا على تلجرام</Text>
+            <Text style={[styles.message, { color: colors.textSecondary }, tvMode && styles.tvMessage]}>
               تابع أخبار وتحديثات NOVA Anime عبر قناتنا الرسمية على تلجرام،
               وأرسل لنا بلاغاتك عن أي مشكلة تواجهك.
             </Text>
@@ -96,7 +112,7 @@ export function TelegramAnnouncementModal({
               testID="telegram-announcement-open"
               onPress={openTelegram}
               focusable={tvMode}
-              hasTVPreferredFocus={tvMode}
+               hasTVPreferredFocus={tvMode && visible}
               style={({ pressed, focused }) => [
                 styles.primaryButton,
                 tvMode && styles.tvButton,
@@ -104,7 +120,7 @@ export function TelegramAnnouncementModal({
                 pressed && styles.pressed,
               ]}
             >
-              <Ionicons name="paper-plane-outline" size={18} color="#FFFFFF" />
+              <Ionicons name="paper-plane-outline" size={tvMode ? 25 : 18} color="#FFFFFF" />
               <Text style={[styles.primaryButtonText, tvMode && styles.tvPrimaryButtonText]}>انضم الآن</Text>
             </Pressable>
             <Pressable
@@ -114,12 +130,13 @@ export function TelegramAnnouncementModal({
               focusable={tvMode}
               style={({ pressed, focused }) => [
                 styles.secondaryButton,
+                { backgroundColor: colors.input, borderRadius: 12 },
                 tvMode && styles.tvSecondaryButton,
                 tvMode && tvFocusStyle(focused),
                 pressed && styles.pressed,
               ]}
             >
-              <Text style={[styles.secondaryButtonText, tvMode && styles.tvSecondaryButtonText]}>متابعة إلى التطبيق</Text>
+              <Text style={[styles.secondaryButtonText, { color: colors.textSecondary }, tvMode && styles.tvSecondaryButtonText]}>متابعة إلى التطبيق</Text>
             </Pressable>
           </View>
         </View>
@@ -135,6 +152,10 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     paddingHorizontal: 20,
     backgroundColor: "rgba(0, 0, 0, 0.78)",
+  },
+  tvBackdrop: {
+    paddingHorizontal: 56,
+    backgroundColor: "rgba(2, 2, 8, 0.88)",
   },
   card: {
     width: "100%",
@@ -152,8 +173,10 @@ const styles = StyleSheet.create({
   },
   tvCard: {
     width: "78%",
-    maxWidth: 760,
-    borderRadius: 30,
+    maxWidth: 980,
+    minHeight: 360,
+    borderRadius: 28,
+    flexDirection: "row",
   },
   closeButton: {
     position: "absolute",
@@ -167,11 +190,35 @@ const styles = StyleSheet.create({
     borderRadius: 17,
     backgroundColor: "rgba(0, 0, 0, 0.48)",
   },
-  tvCloseButton: { width: 52, height: 52, borderRadius: 26, top: 16, right: 16 },
+  tvCloseButton: {
+    width: 96,
+    height: 54,
+    borderRadius: 17,
+    top: 16,
+    right: 16,
+    flexDirection: "row",
+    gap: 8,
+    paddingHorizontal: 16,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.24)",
+    backgroundColor: "rgba(20,16,30,0.92)",
+  },
+  tvCloseLabel: {
+    color: "#FFFFFF",
+    fontFamily: "Cairo_700Bold",
+    fontSize: 17,
+  },
   videoFrame: {
     width: "100%",
     aspectRatio: 498 / 436,
     backgroundColor: "#09090B",
+  },
+  tvVideoFrame: {
+    width: "39%",
+    alignSelf: "stretch",
+    aspectRatio: undefined,
+    borderRightWidth: 1,
+    borderRightColor: "rgba(216, 180, 254, 0.16)",
   },
   video: {
     flex: 1,
@@ -183,9 +230,12 @@ const styles = StyleSheet.create({
     paddingBottom: 20,
   },
   tvContent: {
-    paddingHorizontal: 44,
-    paddingTop: 28,
-    paddingBottom: 34,
+    flex: 1,
+    alignItems: "stretch",
+    justifyContent: "center",
+    paddingHorizontal: 42,
+    paddingTop: 30,
+    paddingBottom: 30,
   },
   telegramIcon: {
     width: 42,
@@ -202,7 +252,7 @@ const styles = StyleSheet.create({
     fontSize: 19,
     textAlign: "center",
   },
-  tvTitle: { fontSize: 30 },
+  tvTitle: { fontSize: 28 },
   message: {
     marginTop: 7,
     color: "rgba(255, 255, 255, 0.7)",
@@ -211,7 +261,7 @@ const styles = StyleSheet.create({
     lineHeight: 22,
     textAlign: "center",
   },
-  tvMessage: { fontSize: 20, lineHeight: 32 },
+  tvMessage: { fontSize: 18, lineHeight: 29 },
   primaryButton: {
     width: "100%",
     height: 46,
@@ -228,8 +278,8 @@ const styles = StyleSheet.create({
     fontFamily: "Cairo_700Bold",
     fontSize: 14,
   },
-  tvPrimaryButtonText: { fontSize: 21 },
-  tvButton: { height: 62, borderRadius: 16 },
+  tvPrimaryButtonText: { fontSize: 19 },
+  tvButton: { height: 58, borderRadius: 15 },
   secondaryButton: {
     paddingVertical: 10,
     paddingHorizontal: 16,
@@ -239,8 +289,16 @@ const styles = StyleSheet.create({
     fontFamily: "Cairo_600SemiBold",
     fontSize: 12,
   },
-  tvSecondaryButtonText: { fontSize: 18 },
-  tvSecondaryButton: { paddingVertical: 16, paddingHorizontal: 24, borderRadius: 14 },
+  tvSecondaryButtonText: { fontSize: 16 },
+  tvSecondaryButton: {
+    width: "100%",
+    minHeight: 56,
+    paddingVertical: 13,
+    paddingHorizontal: 24,
+    borderRadius: 16,
+    alignItems: "center",
+    justifyContent: "center",
+  },
   pressed: {
     opacity: 0.72,
   },

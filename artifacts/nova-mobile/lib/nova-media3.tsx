@@ -19,6 +19,7 @@ type NativePlaybackEvent = {
 export type NovaMedia3ViewProps = {
   sourceUrl?: string;
   sourceHeaders?: string;
+  initialPosition?: number;
   command?: string;
   onPlaybackState?: (event: NativePlaybackEvent) => void;
   onProgress?: (event: NativePlaybackEvent) => void;
@@ -158,6 +159,7 @@ export function useNovaMedia3Player(
     () => ({
       sourceUrl,
       sourceHeaders,
+      initialPosition: initialPositionRef.current,
       command,
       onPlaybackState,
       onProgress,

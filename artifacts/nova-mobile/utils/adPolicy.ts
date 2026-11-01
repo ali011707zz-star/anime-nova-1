@@ -134,9 +134,13 @@ async function completeReward(kind: RewardKind): Promise<boolean> {
 }
 
 export async function ensureDownloadAllowed(): Promise<boolean> {
-  // Rewarded ads are disabled on the Nova servers. Keep this compatibility
-  // entry point permissive so older download callers cannot show a stale lock.
-  return true;
+  try {
+    const response = await adFetch("/api/ads/download-start", { method: "POST", body: "{}" });
+    if (response.ok && isJsonResponse(response)) return true;
+    return rewardFromResponse(response, "download");
+  } catch {
+    return false;
+  }
 }
 
 /** Called only after DownloadResumable saved a non-empty completed file. */
@@ -155,10 +159,14 @@ export async function recordSuccessfulDownload(animeId: number, ep: number): Pro
   return latestCount;
 }
 
-export async function ensureWatchAccess(): Promise<boolean> { return true; 
-  // The server currently reports adsEnabled=false. Do not gate playback on a
-  // stale ad challenge or on a transient ads endpoint failure.
-  return true;
+export async function ensureWatchAccess(): Promise<boolean> {
+  try {
+    const response = await adFetch("/api/ads/watch-start", { method: "POST", body: "{}" });
+    if (response.ok && isJsonResponse(response)) return true;
+    return rewardFromResponse(response, "watch");
+  } catch {
+    return false;
+  }
 }
 
 export async function resetDownloadAdCount(): Promise<void> {
@@ -167,7 +175,7 @@ export async function resetDownloadAdCount(): Promise<void> {
   listeners.forEach((listener) => listener(0));
 }
 
-export async function hasWatchAccess(): Promise<boolean> { return true; 
+export async function hasWatchAccess(): Promise<boolean> {
   const state = await getAdState();
   return !!state && (state.privileged || !state.watchNeedsReward);
 }

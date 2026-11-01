@@ -82,68 +82,56 @@ export function HeroSection({ items, initialTVFocus = false }: Props) {
                 fadeDuration={tvMode ? 0 : 400}
               />
               <LinearGradient
-                colors={["transparent", "rgba(9,9,11,0.55)", "rgba(9,9,11,0.95)"]}
-                style={[StyleSheet.absoluteFill, { justifyContent: "space-between", padding: tvMode ? 28 : 14 }]}
+                colors={["transparent", "rgba(9,9,11,0.7)", "#09090B"]}
+                style={[StyleSheet.absoluteFill, { justifyContent: "flex-end", padding: tvMode ? 32 : 14 }]}
               >
-                {/* Top Badges Row */}
-                <View style={styles.topBadgesRow}>
-                  {anime.averageScore ? (
-                    <View style={styles.ratingBadge}>
-                      <Text style={styles.ratingText}>{(anime.averageScore / 10).toFixed(1)}</Text>
-                      <Ionicons name="star" size={11} color="#FFD700" />
+                <View style={styles.genreRow}>
+                  {anime.genres?.slice(0, 3).map((g) => (
+                  <View key={g} style={[styles.genreBadge, tvMode && styles.tvGenreBadge, { borderColor: colors.primary + "60" }]}>
+                    <Text style={[styles.genreText, tvMode && styles.tvGenreText, { color: colors.primary }]}>{g}</Text>
                     </View>
-                  ) : <View />}
-                  <View style={styles.featuredBadge}>
-                    <View style={styles.featuredDot} />
-                    <Text style={styles.featuredText}>مختارات الموسم #{index + 1}</Text>
+                  ))}
+                </View>
+                <Text style={[styles.heroTitle, tvMode && styles.tvHeroTitle, { writingDirection: "ltr" }]} numberOfLines={2}>{title}</Text>
+                {anime.title_ar ? (
+                  <Text style={[styles.heroTitleArabic, tvMode && styles.tvHeroTitleArabic]} numberOfLines={1}>
+                    {anime.title_ar}
+                  </Text>
+                ) : null}
+                <View style={styles.infoRow}>
+                  {anime.averageScore && (
+                    <View style={styles.infoItem}>
+                      <Ionicons name="star" size={12} color="#FFD700" />
+                      <Text style={styles.infoText}>{(anime.averageScore / 10).toFixed(1)}</Text>
+                    </View>
+                  )}
+                  {anime.episodes && (
+                    <View style={styles.infoItem}>
+                      <Ionicons name="play-circle" size={12} color={colors.mutedForeground} />
+                      <Text style={styles.infoText}>{anime.episodes} حلقة</Text>
+                    </View>
+                  )}
+                  <View style={styles.infoItem}>
+                    <Text style={styles.infoText}>{anime.format}</Text>
                   </View>
                 </View>
-
-                {/* Bottom Details Section */}
-                <View>
-                  {/* Genre Tags */}
-                  <View style={styles.genreRow}>
-                    {anime.genres?.slice(0, 3).map((g) => (
-                      <View key={g} style={styles.genreBadge}>
-                        <Text style={styles.genreText}>{g}</Text>
-                      </View>
-                    ))}
-                  </View>
-
-                  {/* Title & Arabic Title */}
-                  <Text style={styles.heroTitleArabic} numberOfLines={1}>
-                    {anime.title_ar || anime.title.romaji || title}
-                  </Text>
-                  <Text style={styles.heroTitleEnglish} numberOfLines={1}>
-                    {title}
-                  </Text>
-
-                  {/* Metadata Row */}
-                  <View style={styles.infoRow}>
-                    <Text style={styles.infoText}>
-                      {anime.episodes ? `${anime.episodes} حلقة` : "مستمر"} • {anime.seasonYear || "2024"} • {anime.format || "TV"}
-                    </Text>
-                  </View>
-
-                  {/* CTAs */}
-                  <View style={styles.btnRow}>
-                    <Pressable
-                      onPress={() => router.push({ pathname: "/episodes/[id]", params: { id: anime.id } } as any)}
-                      focusable={tvMode}
-                      style={({ focused }) => [styles.watchBtn, tvMode && tvFocusStyle(focused)]}
-                    >
-                      <Ionicons name="play" size={15} color="#fff" />
-                      <Text style={styles.watchBtnText}>مشاهدة الآن</Text>
-                    </Pressable>
-                    <Pressable
-                      onPress={() => router.push(`/anime/${anime.id}?title=${encodeURIComponent(anime.title.romaji)}&english=${encodeURIComponent(anime.title.english || "")}`)}
-                      focusable={tvMode}
-                      style={({ focused }) => [styles.detailBtn, tvMode && tvFocusStyle(focused)]}
-                    >
-                      <Ionicons name="information-circle-outline" size={16} color="#fff" />
-                      <Text style={styles.detailBtnText}>تفاصيل</Text>
-                    </Pressable>
-                  </View>
+                <View style={styles.btnRow}>
+                  <Pressable
+                    onPress={() => router.push({ pathname: "/episodes/[id]", params: { id: anime.id } } as any)}
+                    focusable={tvMode}
+                    style={({ focused }) => [styles.watchBtn, { backgroundColor: colors.primary }, tvMode && tvFocusStyle(focused)]}
+                  >
+                    <Ionicons name="play" size={16} color="#fff" />
+                    <Text style={styles.watchBtnText}>مشاهدة</Text>
+                  </Pressable>
+                  <Pressable
+                    onPress={() => router.push(`/anime/${anime.id}?title=${encodeURIComponent(anime.title.romaji)}&english=${encodeURIComponent(anime.title.english || "")}`)}
+                    focusable={tvMode}
+                    style={({ focused }) => [styles.detailBtn, { borderColor: colors.border }, tvMode && tvFocusStyle(focused)]}
+                  >
+                    <Ionicons name="information-circle" size={16} color="#fff" />
+                    <Text style={styles.watchBtnText}>تفاصيل</Text>
+                  </Pressable>
                 </View>
               </LinearGradient>
             </Pressable>
@@ -151,17 +139,11 @@ export function HeroSection({ items, initialTVFocus = false }: Props) {
         })}
       </ScrollView>
       {items.length > 1 && (
-        <View style={styles.dots}>
-          {items.slice(0, 5).map((_, i) => (
+        <View style={[styles.dots, { top: heroHeight + 8 }]}>
+          {items.map((_, i) => (
             <View
               key={i}
-              style={[
-                styles.dot,
-                {
-                  backgroundColor: i === (activeIdx % 5) ? "#06b6d4" : "rgba(255,255,255,0.22)",
-                  width: i === (activeIdx % 5) ? 22 : 12,
-                },
-              ]}
+              style={[styles.dot, { backgroundColor: i === activeIdx ? colors.primary : "rgba(255,255,255,0.3)", width: i === activeIdx ? 16 : 6 }]}
             />
           ))}
         </View>
@@ -175,24 +157,22 @@ const styles = StyleSheet.create({
   heroViewport: { alignSelf: "center", borderRadius: 22 },
   heroTrack: { alignItems: "flex-start" },
   heroSlide: { overflow: "hidden", position: "relative" },
-  topBadgesRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginTop: 2 },
-  ratingBadge: { flexDirection: "row", alignItems: "center", gap: 3, backgroundColor: "rgba(15, 23, 42, 0.85)", paddingHorizontal: 9, paddingVertical: 4, borderRadius: 12, borderWidth: 1, borderColor: "rgba(255, 255, 255, 0.12)" },
-  ratingText: { color: "#fff", fontSize: 11, fontFamily: "Cairo_700Bold" },
-  featuredBadge: { flexDirection: "row", alignItems: "center", gap: 5, backgroundColor: "rgba(15, 23, 42, 0.85)", paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12, borderWidth: 1, borderColor: "rgba(168, 85, 247, 0.35)" },
-  featuredDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: "#a855f7" },
-  featuredText: { color: "#e9d5ff", fontSize: 10, fontFamily: "Cairo_700Bold" },
-  genreRow: { flexDirection: "row", gap: 5, marginBottom: 6, flexWrap: "wrap", justifyContent: "flex-end" },
-  genreBadge: { backgroundColor: "rgba(30, 41, 59, 0.75)", paddingHorizontal: 9, paddingVertical: 3, borderRadius: 8, borderWidth: 1, borderColor: "rgba(255, 255, 255, 0.10)" },
-  genreText: { fontSize: 10, color: "rgba(255, 255, 255, 0.85)", fontFamily: "Cairo_600SemiBold" },
-  heroTitleArabic: { color: "#fff", fontSize: 19, fontFamily: "Cairo_800ExtraBold", textAlign: "right", writingDirection: "rtl", marginBottom: 2 },
-  heroTitleEnglish: { color: "rgba(255, 255, 255, 0.75)", fontSize: 12, fontFamily: "Cairo_600SemiBold", textAlign: "right", marginBottom: 6 },
-  infoRow: { flexDirection: "row", justifyContent: "flex-end", marginBottom: 10 },
-  infoText: { color: "rgba(255, 255, 255, 0.65)", fontSize: 11, fontFamily: "Cairo_400Regular" },
-  btnRow: { flexDirection: "row-reverse", gap: 8, marginTop: 2 },
-  watchBtn: { flexDirection: "row-reverse", alignItems: "center", gap: 6, backgroundColor: "#06b6d4", paddingHorizontal: 18, paddingVertical: 9, borderRadius: 12 },
-  detailBtn: { flexDirection: "row-reverse", alignItems: "center", gap: 6, backgroundColor: "rgba(15, 23, 42, 0.80)", paddingHorizontal: 16, paddingVertical: 9, borderRadius: 12, borderWidth: 1, borderColor: "rgba(255, 255, 255, 0.20)" },
-  watchBtnText: { color: "#fff", fontSize: 12, fontFamily: "Cairo_700Bold" },
-  detailBtnText: { color: "#fff", fontSize: 12, fontFamily: "Cairo_600SemiBold" },
-  dots: { marginTop: 10, flexDirection: "row", justifyContent: "center", gap: 5 },
-  dot: { height: 4, borderRadius: 2 },
+  genreRow: { flexDirection: "row", gap: 5, marginBottom: 6, flexWrap: "wrap" },
+  genreBadge: { borderWidth: 1, borderRadius: 4, paddingHorizontal: 7, paddingVertical: 2 },
+  genreText: { fontSize: 9, fontWeight: "600" },
+  tvGenreBadge: { borderRadius: 7, paddingHorizontal: 10, paddingVertical: 4 },
+  tvGenreText: { fontSize: 14 },
+  heroTitle: { color: "#fff", fontSize: 18, fontWeight: "800", marginBottom: 6, textAlign: "left", fontFamily: "Cairo_800ExtraBold" },
+  tvHeroTitle: { fontSize: 27, lineHeight: 35, marginBottom: 9 },
+  heroTitleArabic: { color: "rgba(255,255,255,0.78)", fontSize: 13, fontFamily: "Cairo_700Bold", textAlign: "right", writingDirection: "rtl", marginTop: -3, marginBottom: 7 },
+  tvHeroTitleArabic: { fontSize: 19, lineHeight: 27, marginBottom: 10 },
+  infoRow: { flexDirection: "row", gap: 10, marginBottom: 12, flexWrap: "wrap" },
+  infoItem: { flexDirection: "row", alignItems: "center", gap: 3 },
+  infoText: { color: "rgba(255,255,255,0.7)", fontSize: 11 },
+  btnRow: { flexDirection: "row", gap: 8 },
+  watchBtn: { flexDirection: "row", alignItems: "center", gap: 5, paddingHorizontal: 16, paddingVertical: 8, borderRadius: 10 },
+  detailBtn: { flexDirection: "row", alignItems: "center", gap: 5, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 10, borderWidth: 1 },
+  watchBtnText: { color: "#fff", fontWeight: "700", fontSize: 13, fontFamily: "Cairo_700Bold" },
+  dots: { position: "absolute", left: 0, right: 0, flexDirection: "row", justifyContent: "center", gap: 4 },
+  dot: { height: 5, borderRadius: 2.5 },
 });

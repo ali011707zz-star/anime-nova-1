@@ -223,15 +223,22 @@ setTimeout(() => {
 }, 600);
 
 // ── صنع مفتاح cache ──
-export function makeSourceCacheKey(site: string, title: string, ep: number): string {
-  const norm = title
+export function makeSourceCacheKey(
+  site: string,
+  title: string,
+  ep: number,
+  identity?: string | number | null,
+): string {
+  const fullNorm = title
     .toLowerCase()
     .replace(/[^a-z0-9 ]/g, " ")
     .trim()
     .split(/\s+/)
-    .slice(0, 5)
+    .filter(Boolean)
     .join("-");
-  return `${site}:${norm}:ep${ep}`;
+  const norm = fullNorm.split("-").slice(0, 5).join("-");
+  const id = String(identity ?? "").trim().replace(/[^a-zA-Z0-9:_-]/g, "");
+  return `${site}:${norm}:ep${ep}${id ? `:id${id}` : ""}`;
 }
 
 export function makeAnimCacheKey(site: string, tmdbId: string, type: string, season: number, ep: number): string {

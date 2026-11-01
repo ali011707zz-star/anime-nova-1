@@ -131,7 +131,7 @@ async function resolveGogoPlayer(
       headers: {
         Accept: "text/html,*/*",
         Referer: "https://gogoanime.me.uk/",
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124 Safari/537.36",
       },
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     });
@@ -145,7 +145,7 @@ async function resolveGogoPlayer(
       headers: {
         Accept: "text/html,*/*",
         Referer: "https://gogoanime.me.uk/",
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124 Safari/537.36",
       },
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     });
@@ -160,7 +160,7 @@ async function resolveGogoPlayer(
         headers: {
           Accept: "application/json",
           Referer: iframeUrl,
-          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124 Safari/537.36",
           "X-Requested-With": "XMLHttpRequest",
         },
         signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
@@ -300,7 +300,7 @@ export async function probeHlsVariants(url: string, referer: string, manifestKey
       headers: {
         Accept: "application/vnd.apple.mpegurl,application/x-mpegURL,*/*",
         Referer: referer,
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124 Safari/537.36",
       },
       // Reanime/Anivexa signed manifests can take a few seconds on the VPS.
       // A short probe timeout made a healthy master fall back to Auto/360.
@@ -352,7 +352,7 @@ export async function probeHlsManifest(url: string, referer: string, manifestKey
       headers: {
         Accept: "application/vnd.apple.mpegurl,application/x-mpegURL,*/*",
         Referer: referer,
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124 Safari/537.36",
       },
       signal: AbortSignal.timeout(12_000),
     });
@@ -388,7 +388,7 @@ export async function probeHlsQuality(
       headers: {
         Accept: "application/vnd.apple.mpegurl,application/x-mpegURL,*/*",
         Referer: referer,
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124 Safari/537.36",
       },
       signal: AbortSignal.timeout(5_000),
     });

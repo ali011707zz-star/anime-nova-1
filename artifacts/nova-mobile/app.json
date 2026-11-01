@@ -3,10 +3,10 @@
     "name": "ANIME NOVA",
     "slug": "anime-nova-",
     "owner": "ali011707s-team",
-    "version": "1.0.0",
+    "version": "1.0.2",
     "orientation": "default",
     "icon": "./assets/images/icon.png",
-    "scheme": "nova-mobile",
+    "scheme": "com.googleusercontent.apps.413058110781-cbielvl5jhrf2bje392f8l9fnulvegp7",
     "userInterfaceStyle": "dark",
     "backgroundColor": "#09090B",
     "newArchEnabled": false,
@@ -28,19 +28,21 @@
       }
     },
     "android": {
+      "googleServicesFile": "./google-services.json",
       "adaptiveIcon": {
-        "foregroundImage": "./assets/images/adaptive-icon.png",
+        "foregroundImage": "./assets/images/icon.png",
         "backgroundColor": "#09090B"
       },
       "package": "com.nova.anime",
+      "versionCode": 3,
       "backgroundColor": "#09090B",
-      "usesCleartextTraffic": true,
+      "usesCleartextTraffic": false,
       "permissions": [
         "android.permission.MODIFY_AUDIO_SETTINGS",
+        "android.permission.POST_NOTIFICATIONS",
         "android.permission.WRITE_EXTERNAL_STORAGE",
         "android.permission.READ_EXTERNAL_STORAGE",
-        "android.permission.READ_MEDIA_IMAGES",
-        "com.google.android.gms.permission.AD_ID"
+        "android.permission.READ_MEDIA_IMAGES"
       ]
     },
     "web": {
@@ -49,6 +51,9 @@
       "favicon": "./assets/images/icon.png"
     },
     "plugins": [
+      "./plugins/withAndroidTv",
+      "./plugins/withAndroidImmersiveBars",
+      "./plugins/withAndroidBroadcastGuard",
       [
         "expo-router",
         {

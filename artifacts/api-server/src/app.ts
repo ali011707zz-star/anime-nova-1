@@ -12,24 +12,39 @@ import dbRelayRouter from "./routes/dbRelay.js";
 import reportRouter from "./routes/report.js";
 import telegramRouter, { sendAdminAlert } from "./routes/telegram.js";
 import authTokenRouter from "./routes/authToken.js";
+import pushRouter from "./routes/push.js";
 import newsRouter from "./routes/news.js";
 import notificationsRouter from "./routes/notifications.js";
 import { logger } from "./lib/logger";
-import { registerWebAdminRoutes } from "./routes/webAdmin.js";
-import adsRouter from "./routes/ads.js";
+import { sbSelect } from "./lib/supabaseClient.js";
 import { setupSession, registerEmailAuthRoutes, registerGoogleAuthRoutes, registerGithubAuthRoutes } from "./auth/index.js";
 import sitemapRouter from "./routes/sitemap.js";
 import crashReportRouter from "./routes/crashReport.js";
-import { validateAnonToken, checkRateLimit } from "./lib/security.js";
+import hlsProxyRouter from "./routes/hlsProxy.js";
+import { registerWebAdminRoutes } from "./routes/webAdmin.js";
+import analyticsRouter from "./routes/analytics.js";
+import deviceLinkRouter from "./routes/deviceLink.js";
+import {
+  validateAnonToken,
+  validateMobileAppIdentity,
+  checkRateLimit,
+  assertSecurityConfig,
+  MOBILE_CLIENT_ID,
+  getDeviceUserTokenInfo,
+  validateDownloadToken,
+} from "./lib/security.js";
 
 // ── المسارات التي تتطلب توكن صالح ──
 const PROTECTED_PATHS = [
   "/api/anime/fetch-source",
+  "/api/anime/download-mp4",
+  "/api/animation/sources-stream",
 ];
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 export async function createApp(): Promise<Express> {
+  assertSecurityConfig();
   const app: Express = express();
 
   // ثق بـ Nginx كـ reverse proxy (لقراءة X-Forwarded-For بأمان)
@@ -57,49 +72,61 @@ export async function createApp(): Promise<Express> {
     res.setHeader("X-XSS-Protection", "1; mode=block");
     res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
     res.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
+    if (process.env.NODE_ENV === "production") {
+      res.setHeader("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
+    }
     next();
   });
 
-  // ── CORS — السماح للواجهة الأمامية وتطبيق الموبايل والوسائط ─────────────────────
+  // ── CORS — السماح للواجهة الأمامية وتطبيق الموبايل فقط ─────────────────────
+  // Native players forward the provider's Referer/Origin headers to the
+  // media proxy (for example megaplay.buzz). Those origins must never be
+  // allowed to call the application API, but they also must not be rejected
+  // by this global CORS guard before the proxy can handle the request.
+  const MEDIA_PROXY_PATH = /^\/api\/(?:anime|animation)\/(?:hls-proxy|video-proxy|seg-proxy|download-mp4)$/;
   const ALLOWED_ORIGINS = new Set([
     process.env.FRONTEND_ORIGIN || "",
     process.env.APP_DOMAIN ? `https://${process.env.APP_DOMAIN}` : "",
-    process.env.APP_DOMAIN ? `http://${process.env.APP_DOMAIN}` : "",
+    process.env.NODE_ENV !== "production" && process.env.APP_DOMAIN
+      ? `http://${process.env.APP_DOMAIN}`
+      : "",
+    // Replit dev domains
     process.env.REPLIT_DEV_DOMAIN ? `https://${process.env.REPLIT_DEV_DOMAIN}` : "",
     ...(process.env.REPLIT_DOMAINS?.split(",").map(d => `https://${d.trim()}`) ?? []),
-    "https://animenovaa.duckdns.org",
-    "http://animenovaa.duckdns.org",
-    "https://kawaiianime.cc",
+    // AniNeko/AnimeKai WebView players make same-API requests with their
+    // embed origin. Keep this explicit instead of opening production CORS.
+    "https://otakuvid.online",
+    "https://otakuhg.online",
     "https://www3.anikai.cc",
-    "https://nova-player.local",
-    "http://nova-player.local",
   ].filter(Boolean));
 
   const corsOptions = {
-    origin: (origin: string | undefined, cb: (err: Error | null, allow?: boolean) => void) => {
-      // Allow requests without origin (mobile apps, curl, native video players)
+    origin: (origin, cb) => {
+      // السماح للطلبات بدون origin (mobile apps, curl, server-to-server)
       if (!origin) return cb(null, true);
       if (ALLOWED_ORIGINS.has(origin)) return cb(null, true);
-      if (origin.endsWith(".duckdns.org")) return cb(null, true);
-      if (origin.endsWith(".replit.dev") || origin.endsWith(".repl.co") || origin.endsWith(".replit.app")) {
+      // Development-only origins. Never keep these wildcards in production.
+      if (process.env.NODE_ENV !== "production") {
+        if (origin.endsWith(".replit.dev") || origin.endsWith(".repl.co") || origin.endsWith(".replit.app")) {
+          return cb(null, true);
+        }
+        if (origin.includes("localhost") || origin.includes("127.0.0.1")) return cb(null, true);
+      }
+      // Exact origin used by the mobile OAuth WebView.
+      if (origin === "https://nova-player.local" || origin === "http://nova-player.local") {
         return cb(null, true);
       }
-      if (origin.includes("localhost") || origin.includes("127.0.0.1") || origin.includes("nova-player.local")) {
-        return cb(null, true);
-      }
-      // Never crash Express on unexpected origins - allow them gracefully
-      return cb(null, true);
+      cb(new Error(`CORS: ${origin} غير مسموح`));
     },
     credentials: true,
   };
 
-  const MEDIA_PROXY_PATH = /^\/api\/(?:anime|animation|dubbed)\/(?:hls-proxy|video-proxy|seg-proxy|download-mp4|stream)/;
   app.use((req, res, next) => {
     if (MEDIA_PROXY_PATH.test(req.path)) {
       res.setHeader("Access-Control-Allow-Origin", "*");
       res.setHeader(
         "Access-Control-Allow-Headers",
-        "Range, Content-Type, X-App-Token, X-Download-Token, Origin, Accept, X-Nova-Kawaii-Direct",
+        "Range, Content-Type, X-App-Token, X-Download-Token",
       );
       res.setHeader(
         "Access-Control-Expose-Headers",
@@ -116,7 +143,7 @@ export async function createApp(): Promise<Express> {
   });
 
   // ── Global Rate Limit — 300 طلب/دقيقة لكل IP (حماية من DDoS) ─────────────
-  app.use((req, res, next) => {
+  app.use(async (req, res, next) => {
     const ip =
       (req.headers["x-forwarded-for"] as string)?.split(",")[0].trim() ||
       req.socket.remoteAddress || "unknown";
@@ -127,8 +154,20 @@ export async function createApp(): Promise<Express> {
     next();
   });
 
-  app.use(express.json({ limit: "10mb" }));
-  app.use(express.urlencoded({ extended: true }));
+  // Keep request bodies bounded. Large media never belongs in the API body;
+  // it must be streamed through the dedicated proxy routes.
+  app.use(express.json({ limit: "2mb" }));
+  app.use(express.urlencoded({ extended: false, limit: "64kb" }));
+
+  // A malformed client body is a 400, not an internal server failure. In
+  // particular, never turn JSON parser noise into a Telegram alert storm.
+  app.use((err: any, _req: Request, res: Response, next: NextFunction) => {
+    if (err?.type === "entity.parse.failed" || err instanceof SyntaxError) {
+      res.status(400).json({ error: "Invalid JSON request body" });
+      return;
+    }
+    next(err);
+  });
 
   setupSession(app);
   registerEmailAuthRoutes(app);
@@ -138,6 +177,83 @@ export async function createApp(): Promise<Express> {
 
   // ── توكن المصادقة (يجب أن يسبق Middleware الحماية) ──
   app.use(authTokenRouter);
+
+  // ── Mobile release gate ───────────────────────────────────────────────────
+  // Web requests remain public as before. Any request identifying itself as the
+  // mobile client must prove its release identity and carry a valid app token
+  // before it can receive config, catalog, posters, sources, or playback data.
+  // Background MP4 downloads may additionally use their longer-lived lease.
+  app.use(async (req, res, next) => {
+    const clientHeader = req.headers["x-nova-client"];
+    const isMediaProxyRequest = MEDIA_PROXY_PATH.test(req.path);
+    const isMobileClient =
+      clientHeader === MOBILE_CLIENT_ID ||
+      (Array.isArray(clientHeader) && clientHeader.includes(MOBILE_CLIENT_ID)) ||
+      clientHeader !== undefined;
+    if (!isMobileClient) return next();
+
+    const identity = validateMobileAppIdentity(req.headers);
+    /* Older installed builds sent only X-Nova-Client on background media
+       downloads. Keep those downloads working while still requiring the
+       exact client id and the short-lived app token below. New builds send
+       package/version as well; non-media API routes remain strict. */
+    const legacyMediaIdentity =
+      isMediaProxyRequest &&
+      clientHeader === MOBILE_CLIENT_ID &&
+      (!identity.ok &&
+        (identity.code === "INVALID_PACKAGE" || identity.code === "APP_UPDATE_REQUIRED"));
+    if (!identity.ok && !legacyMediaIdentity) {
+      if (isMediaProxyRequest) {
+        console.warn(`[mobile-gate] rejected media path=${req.path} code=${identity.code}`);
+      }
+      res.status(403).json({
+        error: "هذه النسخة غير رسمية أو تحتاج إلى تحديث. حمّل النسخة الرسمية من الموقع.",
+        code: identity.code,
+        officialDownloadRequired: true,
+      });
+      return;
+    }
+
+    const tokenHeader = req.headers["x-app-token"];
+    const token = Array.isArray(tokenHeader) ? tokenHeader[0] : tokenHeader;
+    const downloadTokenHeader = req.headers["x-download-token"];
+    const downloadToken = Array.isArray(downloadTokenHeader) ? downloadTokenHeader[0] : downloadTokenHeader;
+    const hasValidMediaToken =
+      validateAnonToken(token || "") ||
+      (isMediaProxyRequest && validateDownloadToken(downloadToken || ""));
+    if (!hasValidMediaToken) {
+      if (isMediaProxyRequest) {
+        console.warn(`[mobile-gate] rejected media path=${req.path} code=INVALID_TOKEN hasAppToken=${Boolean(token)} hasDownloadToken=${Boolean(downloadToken)}`);
+      }
+      res.status(403).json({
+        error: "انتهت جلسة النسخة الرسمية. أعد فتح التطبيق.",
+        code: "INVALID_TOKEN",
+        officialDownloadRequired: true,
+      });
+      return;
+    }
+
+    // Linked-device tokens are stateful at the device-link layer: revocation on the phone
+    // must take effect on the next request, unlike the normal stateless mobile token.
+    const userTokenHeader = req.headers["x-user-token"];
+    const userToken = Array.isArray(userTokenHeader) ? userTokenHeader[0] : userTokenHeader;
+    const deviceToken = getDeviceUserTokenInfo(userToken);
+    if (deviceToken) {
+      const linked = await sbSelect("linked_devices", {
+        user_id: `eq.${deviceToken.userId}`,
+        device_id: `eq.${deviceToken.deviceId}`,
+        revoked_at: "is.null",
+      }, { limit: 1 });
+      if (!linked.length) {
+        res.status(403).json({
+          error: "تم إلغاء ربط هذا الجهاز من الهاتف.",
+          code: "DEVICE_REVOKED",
+        });
+        return;
+      }
+    }
+    next();
+  });
 
   // ── Middleware حماية المسارات الحساسة ──
   app.use((req, res, next) => {
@@ -165,8 +281,9 @@ export async function createApp(): Promise<Express> {
     const token =
       (req.headers["x-app-token"] as string) ||
       (req.query._tok as string) || "";
+    const downloadToken = req.headers["x-download-token"] as string;
 
-    if (!validateAnonToken(token)) {
+    if (!validateAnonToken(token) && !(p === "/api/anime/download-mp4" && validateDownloadToken(downloadToken || ""))) {
       res.status(403).json({
         error: "Access denied. Use the official Anime NOVA app.",
         code: "INVALID_TOKEN",
@@ -177,17 +294,22 @@ export async function createApp(): Promise<Express> {
     next();
   });
 
-  app.use("/api", adsRouter);
   app.use("/api", router);
+  app.use("/api", pushRouter);
   app.use("/api", newsRouter);
   app.use("/api", notificationsRouter);
   app.use("/api", userdataRouter);
+  app.use("/api", deviceLinkRouter);
   app.use("/api", commentsRouter);
+  app.use("/api", analyticsRouter);
   app.use("/api", adminRouter);
   app.use("/api", dbRelayRouter);
   app.use(reportRouter);
   app.use(telegramRouter);
   app.use("/api/crash-report", crashReportRouter);
+  // Manifest-only proxy used by the mobile AniNeko player. Segment URLs are
+  // rewritten to absolute upstream URLs and are fetched directly by ExoPlayer.
+  app.use(hlsProxyRouter);
 
   // ── Proxy /nova-mobile/* → port 3000 (Nova Mobile static server) ──
   app.use("/nova-mobile", (req, res) => {
@@ -227,13 +349,27 @@ export async function createApp(): Promise<Express> {
     const msg = err?.message || String(err);
     logger.error({ err }, "Unhandled server error");
 
-    // أرسل للأدمن عبر Telegram (بدون انتظار)
-    sendAdminAlert(
-      `⚠️ <b>خطأ في الخادم</b>\n\n<code>${msg.slice(0, 300)}</code>`
-    ).catch(() => {});
+    // CORS/rate-limit/client errors must not page the administrator. Also
+    // coalesce identical failures so a broken upstream cannot flood Telegram.
+    const status = Number(err?.status || err?.statusCode || 500);
+    if (status >= 500) {
+      const escaped = msg.slice(0, 300)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;");
+      const alertKey = msg.slice(0, 300);
+      const now = Date.now();
+      const previous = (app as any).__lastTelegramError as { key: string; ts: number } | undefined;
+      if (!previous || previous.key !== alertKey || now - previous.ts > 10 * 60_000) {
+        (app as any).__lastTelegramError = { key: alertKey, ts: now };
+        sendAdminAlert(
+          `⚠️ <b>خطأ في الخادم</b>\n\n<code>${escaped}</code>`
+        ).catch(() => {});
+      }
+    }
 
     if (!res.headersSent) {
-      res.status(500).json({ error: "Internal server error" });
+      res.status(status >= 400 && status < 600 ? status : 500).json({ error: status >= 500 ? "Internal server error" : msg });
     }
   });
 

@@ -3,39 +3,92 @@ import { Ionicons } from "@expo/vector-icons";
 import { Image, useWindowDimensions } from "react-native";
 import { useRouter } from "expo-router";
 import React from "react";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { StyleSheet, Text, View } from "react-native";
 import { useColors } from "@/hooks/useColors";
+import { isTvDevice, tvFocusStyle, TvPressable as Pressable, useTvMetrics } from "@/utils/tv";
+import { getPosterUri, getTvPosterUri } from "@/utils/media";
 
 type Props = {
   anime: AnilistMedia;
   size?: "sm" | "md" | "lg";
+  cardWidth?: number;
   progress?: number;
   showProgress?: boolean;
+  onFocus?: () => void;
+  hasTVPreferredFocus?: boolean;
 };
 
-export const AnimeCard = React.memo(function AnimeCard({ anime, size = "sm", progress, showProgress }: Props) {
+export function getRailCardWidth(windowWidth: number, visibleCards = 3, gap = 10) {
+  // Keep the same card density on phones, tablets, and ten-foot screens.
+  // A 4K TV can report a very wide logical window, so cap the decoded card
+  // size instead of stretching posters until they become blurry and heavy.
+  const wideLayout = windowWidth >= 700;
+  const maxRailWidth = wideLayout ? 1400 : 960;
+  const railWidth = Math.min(Math.max(windowWidth - (wideLayout ? 80 : 32), 0), maxRailWidth);
+  const targetVisibleCards = wideLayout ? (windowWidth >= 1200 ? 6 : 5) : visibleCards;
+  const minCardWidth = wideLayout ? 128 : 96;
+  const maxCardWidth = wideLayout ? 185 : 180;
+  const calculated = Math.floor((railWidth - gap * (targetVisibleCards - 1)) / targetVisibleCards);
+  return Math.max(minCardWidth, Math.min(maxCardWidth, calculated));
+}
+
+export function getRailSidePadding(windowWidth: number) {
+  const wideLayout = windowWidth >= 700;
+  const maxRailWidth = wideLayout ? 1400 : 960;
+  const railWidth = Math.min(Math.max(windowWidth - (wideLayout ? 80 : 32), 0), maxRailWidth);
+  return Math.max(wideLayout ? 40 : 16, Math.floor((windowWidth - railWidth) / 2));
+}
+
+export function getGridColumnCount(windowWidth: number, windowHeight: number) {
+  if (isTvDevice(windowWidth, windowHeight)) {
+    const contentWidth = Math.min(Math.max(windowWidth - 80, 0), 1440);
+    return Math.max(5, Math.min(7, Math.floor((contentWidth + 10) / 205)));
+  }
+  if (windowWidth >= 1024) return 5;
+  if (windowWidth >= 600) return 4;
+  return 3;
+}
+
+export const AnimeCard = React.memo(function AnimeCard({ anime, size = "sm", cardWidth, progress, showProgress, onFocus, hasTVPreferredFocus = false }: Props) {
   const router = useRouter();
   const colors = useColors();
-  const { width: windowWidth } = useWindowDimensions();
+  const { width: windowWidth, height: windowHeight } = useWindowDimensions();
+  const { size: scaleSize } = useTvMetrics();
   // Recalculate on rotation/window resize and keep poster widths bounded so
   // tablets do not decode a handful of unnecessarily huge images.
-  const smallCardWidth = Math.max(96, Math.min(130, (windowWidth - 48) / 3));
-  const cardW = size === "lg" ? 160 : size === "md" ? 130 : smallCardWidth;
+  const smallCardWidth = getRailCardWidth(windowWidth, 3);
+  const cardW = cardWidth ?? (size === "lg" ? 170 : size === "md" ? 145 : smallCardWidth);
   const cardH = cardW * 1.4;
+  const tvMode = isTvDevice(windowWidth, windowHeight);
 
   const title = anime.title.english || anime.title.romaji;
+  const posterUri = tvMode
+    ? getTvPosterUri(anime, anime.id ? `https://img.anili.st/media/${anime.id}` : "")
+    : getPosterUri(anime, anime.id ? `https://img.anili.st/media/${anime.id}` : "");
 
   return (
     <Pressable
       onPress={() => router.push(`/anime/${anime.id}?title=${encodeURIComponent(anime.title.romaji)}&english=${encodeURIComponent(anime.title.english || "")}`)}
-      style={({ pressed }) => [styles.card, { width: cardW, opacity: pressed ? 0.85 : 1 }]}
+      focusable={tvMode}
+      hasTVPreferredFocus={hasTVPreferredFocus}
+      hitSlop={tvMode ? 8 : 4}
+      pressRetentionOffset={12}
+      onFocus={onFocus}
+      android_ripple={tvMode ? undefined : { color: "rgba(139,92,246,0.18)" }}
+      style={({ pressed, focused }) => [
+        styles.card,
+        { width: cardW, opacity: pressed ? 0.85 : 1 },
+        tvMode && styles.tvCard,
+        tvMode && tvFocusStyle(focused),
+      ]}
     >
       <View style={[styles.imageContainer, { width: cardW, height: cardH, borderRadius: colors.radius - 4 }]}>
         <Image
-          source={{ uri: anime.coverImage.large || anime.coverImage.extraLarge }}
+          source={{ uri: posterUri }}
           style={[styles.image, { borderRadius: colors.radius - 4 }]}
           resizeMode="cover"
-          transition={300}
+          fadeDuration={tvMode ? 0 : 120}
+          resizeMethod="resize"
         />
         {anime.averageScore && (
           <View style={styles.scoreBadge}>
@@ -54,11 +107,22 @@ export const AnimeCard = React.memo(function AnimeCard({ anime, size = "sm", pro
           </View>
         )}
       </View>
-      <Text style={[styles.title, { color: colors.text }]} numberOfLines={2}>
+      <Text
+        style={[
+          styles.title,
+          { fontSize: scaleSize(12, 21), lineHeight: scaleSize(16, 29), color: colors.text },
+        ]}
+        numberOfLines={2}
+      >
         {title}
       </Text>
+      {anime.title_ar ? (
+        <Text style={styles.titleArabic} numberOfLines={1}>
+          {anime.title_ar}
+        </Text>
+      ) : null}
       {anime.episodes && (
-        <Text style={[styles.epCount, { color: colors.mutedForeground }]}>
+        <Text style={[styles.epCount, { fontSize: scaleSize(10, 16), color: colors.mutedForeground }]}>
           {anime.episodes} حلقة
         </Text>
       )}
@@ -68,6 +132,7 @@ export const AnimeCard = React.memo(function AnimeCard({ anime, size = "sm", pro
 
 const styles = StyleSheet.create({
   card: { flexDirection: "column", gap: 6 },
+  tvCard: { borderRadius: 10, padding: 5, margin: -5, gap: 8 },
   imageContainer: { overflow: "hidden", backgroundColor: "#1a1a2e", position: "relative" },
   image: { width: "100%", height: "100%" },
   scoreBadge: {
@@ -87,6 +152,7 @@ const styles = StyleSheet.create({
     height: 3, backgroundColor: "rgba(255,255,255,0.2)",
   },
   progressFill: { height: 3 },
-  title: { fontSize: 12, fontWeight: "600", lineHeight: 16 },
+  title: { fontSize: 12, fontWeight: "600", lineHeight: 16, writingDirection: "ltr" },
+  titleArabic: { fontSize: 10, fontFamily: "Cairo_700Bold", lineHeight: 14, textAlign: "right", writingDirection: "rtl", opacity: 0.78 },
   epCount: { fontSize: 10 },
 });

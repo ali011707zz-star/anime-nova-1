@@ -210,9 +210,78 @@ CREATE TABLE IF NOT EXISTS anime_poster_cache (
   synopsis    TEXT,
   updated_at  TIMESTAMPTZ DEFAULT NOW()
 );
+
+-- Expo push tokens used by the background episode notification scheduler
+CREATE TABLE IF NOT EXISTS mobile_push_tokens (
+  token        TEXT PRIMARY KEY,
+  user_id      UUID,
+  platform     TEXT NOT NULL DEFAULT 'android',
+  app_version  TEXT,
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  last_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  disabled_at  TIMESTAMPTZ
+);
+ALTER TABLE mobile_push_tokens ADD COLUMN IF NOT EXISTS user_id UUID;
+CREATE INDEX IF NOT EXISTS idx_mobile_push_tokens_active
+  ON mobile_push_tokens(disabled_at, last_seen_at DESC);
+CREATE INDEX IF NOT EXISTS idx_mobile_push_tokens_user_active
+  ON mobile_push_tokens(user_id, disabled_at);
+CREATE TABLE IF NOT EXISTS mobile_push_deliveries (
+  id BIGSERIAL PRIMARY KEY,
+  event_key TEXT NOT NULL,
+  token TEXT NOT NULL,
+  payload_json TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'queued'
+    CHECK (status IN ('queued', 'retry', 'ticket_pending', 'sent', 'invalid_token', 'failed')),
+  attempts INTEGER NOT NULL DEFAULT 0,
+  next_attempt_at TIMESTAMPTZ,
+  ticket_id TEXT,
+  last_error TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE(event_key, token)
+);
+CREATE INDEX IF NOT EXISTS idx_mobile_push_deliveries_due
+  ON mobile_push_deliveries(status, next_attempt_at);
+
+-- Device-link codes are short-lived and stored as hashes only.
+CREATE TABLE IF NOT EXISTS device_link_codes (
+  id                 UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id            UUID NOT NULL,
+  code_hash          TEXT NOT NULL,
+  expires_at         TIMESTAMPTZ NOT NULL,
+  attempts           INTEGER NOT NULL DEFAULT 0,
+  claimed_at         TIMESTAMPTZ,
+  claimed_device_id  TEXT,
+  created_at         TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_device_link_codes_hash_active
+  ON device_link_codes(code_hash, claimed_at, expires_at);
+CREATE INDEX IF NOT EXISTS idx_device_link_codes_user_active
+  ON device_link_codes(user_id, claimed_at, expires_at);
+
+CREATE TABLE IF NOT EXISTS linked_devices (
+  id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id       UUID NOT NULL,
+  device_id     TEXT NOT NULL,
+  device_name   TEXT NOT NULL DEFAULT 'Android TV',
+  platform      TEXT NOT NULL DEFAULT 'android-tv',
+  linked_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  last_seen_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  revoked_at    TIMESTAMPTZ,
+  UNIQUE(user_id, device_id)
+);
+CREATE INDEX IF NOT EXISTS idx_linked_devices_user_active
+  ON linked_devices(user_id, revoked_at, linked_at DESC);
 `;
 
-const REQUIRED_TABLES = ["users", "pending_verifications", "watch_history", "favorites", "translations_cache", "anime_meta_ar", "anime_meta_cache", "anime_poster_cache"];
+const REQUIRED_TABLES = [
+  "users", "pending_verifications", "watch_history", "favorites",
+  "translations_cache", "anime_meta_ar", "anime_meta_cache", "anime_poster_cache",
+  // Shared L2 cache tables — verify these at startup so cache failures are visible.
+  "source_cache", "subtitle_cache", "cdn_cache", "telegram_episode_cache",
+  "mobile_push_tokens", "mobile_push_deliveries", "device_link_codes", "linked_devices",
+];
 
 // ── PostgreSQL direct migration (للـ Replit PostgreSQL) ──────────────────────
 const PG_MIGRATION_SQL = `
@@ -398,6 +467,66 @@ CREATE TABLE IF NOT EXISTS notifications (
 );
 CREATE INDEX IF NOT EXISTS idx_notifications_created ON notifications(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_notifications_unread  ON notifications(is_read) WHERE is_read = FALSE;
+CREATE TABLE IF NOT EXISTS mobile_push_tokens (
+  token        TEXT PRIMARY KEY,
+  user_id      UUID,
+  platform     TEXT NOT NULL DEFAULT 'android',
+  app_version  TEXT,
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  last_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  disabled_at  TIMESTAMPTZ
+);
+ALTER TABLE mobile_push_tokens ADD COLUMN IF NOT EXISTS user_id UUID;
+CREATE INDEX IF NOT EXISTS idx_mobile_push_tokens_active
+  ON mobile_push_tokens(disabled_at, last_seen_at DESC);
+CREATE INDEX IF NOT EXISTS idx_mobile_push_tokens_user_active
+  ON mobile_push_tokens(user_id, disabled_at);
+CREATE TABLE IF NOT EXISTS mobile_push_deliveries (
+  id BIGSERIAL PRIMARY KEY,
+  event_key TEXT NOT NULL,
+  token TEXT NOT NULL,
+  payload_json TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'queued'
+    CHECK (status IN ('queued', 'retry', 'ticket_pending', 'sent', 'invalid_token', 'failed')),
+  attempts INTEGER NOT NULL DEFAULT 0,
+  next_attempt_at TIMESTAMPTZ,
+  ticket_id TEXT,
+  last_error TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE(event_key, token)
+);
+CREATE INDEX IF NOT EXISTS idx_mobile_push_deliveries_due
+  ON mobile_push_deliveries(status, next_attempt_at);
+CREATE TABLE IF NOT EXISTS device_link_codes (
+  id                 UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id            UUID NOT NULL,
+  code_hash          TEXT NOT NULL,
+  expires_at         TIMESTAMPTZ NOT NULL,
+  attempts           INTEGER NOT NULL DEFAULT 0,
+  claimed_at         TIMESTAMPTZ,
+  claimed_device_id  TEXT,
+  created_at         TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+-- The VPS fallback stores users that are owned by Supabase, not local users.
+ALTER TABLE device_link_codes DROP CONSTRAINT IF EXISTS device_link_codes_user_id_fkey;
+CREATE INDEX IF NOT EXISTS idx_device_link_codes_hash_active
+  ON device_link_codes(code_hash, claimed_at, expires_at);
+CREATE INDEX IF NOT EXISTS idx_device_link_codes_user_active
+  ON device_link_codes(user_id, claimed_at, expires_at);
+CREATE TABLE IF NOT EXISTS linked_devices (
+  id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id       UUID NOT NULL,
+  device_id     TEXT NOT NULL,
+  device_name   TEXT NOT NULL DEFAULT 'Android TV',
+  platform      TEXT NOT NULL DEFAULT 'android-tv',
+  linked_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  last_seen_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  revoked_at    TIMESTAMPTZ,
+  UNIQUE(user_id, device_id)
+);
+CREATE INDEX IF NOT EXISTS idx_linked_devices_user_active
+  ON linked_devices(user_id, revoked_at, linked_at DESC);
 `;
 
 /** يُنشئ الجداول مباشرةً في Replit PostgreSQL عند الـ startup */

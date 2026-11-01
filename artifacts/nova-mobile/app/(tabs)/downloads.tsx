@@ -655,34 +655,6 @@ export default function DownloadsScreen() {
 
     <View style={[s.screen, { paddingTop: topPad }]}>
       <View style={[s.header, tvMode && s.tvHeader]}>
-        {/* Right Section: Back Button + Icon + Title */}
-        <View style={[s.headerRightSection, tvMode && s.tvHeaderRight]}>
-          <Pressable
-            onPress={handleHeaderBack}
-            focusable={tvMode}
-            style={({ focused }) => [s.headerBack, tvMode && s.tvHeaderBack, tvMode && tvFocusStyle(focused)]}
-            accessibilityRole="button"
-            accessibilityLabel={selectedGroup ? "العودة إلى التنزيلات" : "رجوع"}
-            testID="downloads-back"
-          >
-            <Ionicons name="chevron-back" size={21} color={colors.textPrimary} style={{ transform: [{ scaleX: -1 }] }} />
-          </Pressable>
-          <View style={[s.headerIcon, tvMode && s.tvHeaderIcon]}>
-            <Ionicons name="download" size={19} color={colors.buttonText} />
-          </View>
-          <View style={s.headerInfo}>
-            <Text style={[s.headerTitle, tvMode && s.tvHeaderTitle]} numberOfLines={1}>
-              {selectedGroup?.title ?? "تنزيلاتي"}
-            </Text>
-            <Text style={[s.headerSub, tvMode && s.tvHeaderSub]} numberOfLines={1}>
-              {selectedGroup
-                ? `${selectedGroup.items.length} حلقات محملة · ${formatFileSize(selectedGroup.totalSize)}`
-                : `${downloadGroups.length} أعمال · ${downloads.length} حلقات محملة · ${formatFileSize(totalDownloadedBytes)}`}
-            </Text>
-          </View>
-        </View>
-
-        {/* Left Section: Clear All Button */}
         {hasCompleted && !selectedGroup && (
           <Pressable
             onPress={handleClearAll}
@@ -695,6 +667,31 @@ export default function DownloadsScreen() {
             <Text style={s.clearBtnText}>حذف الكل</Text>
           </Pressable>
         )}
+        <View style={[s.headerRight, tvMode && s.tvHeaderRight]}>
+          <View style={s.headerInfo}>
+            <Text style={[s.headerTitle, tvMode && s.tvHeaderTitle]} numberOfLines={1}>
+              {selectedGroup?.title ?? "تنزيلاتي"}
+            </Text>
+            <Text style={[s.headerSub, tvMode && s.tvHeaderSub]} numberOfLines={1}>
+              {selectedGroup
+                ? `${selectedGroup.items.length} حلقات محملة · ${formatFileSize(selectedGroup.totalSize)}`
+                : `${downloadGroups.length} أعمال · ${downloads.length} حلقات محملة · ${formatFileSize(totalDownloadedBytes)}`}
+            </Text>
+          </View>
+          <View style={[s.headerIcon, tvMode && s.tvHeaderIcon]}>
+            <Ionicons name="download" size={19} color={colors.buttonText} />
+          </View>
+          <Pressable
+            onPress={handleHeaderBack}
+            focusable={tvMode}
+            style={({ focused }) => [s.headerBack, tvMode && s.tvHeaderBack, tvMode && tvFocusStyle(focused)]}
+            accessibilityRole="button"
+            accessibilityLabel={selectedGroup ? "العودة إلى التنزيلات" : "رجوع"}
+            testID="downloads-back"
+          >
+            <Ionicons name="chevron-forward" size={21} color={colors.textPrimary} />
+          </Pressable>
+        </View>
       </View>
 
       <ScrollView
@@ -874,11 +871,12 @@ const createDownloadStyles = (colors: ThemePalette) => StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.background },
 
   header: {
-    height: 64, flexDirection: "row-reverse", alignItems: "center", justifyContent: "space-between",
-    paddingHorizontal: 14, backgroundColor: colors.surface, borderBottomWidth: 1, borderBottomColor: colors.border,
+    height: 64, justifyContent: "center", position: "relative",
+    backgroundColor: colors.surface, borderBottomWidth: 1, borderBottomColor: colors.border,
   },
-  headerRightSection: {
-    flexDirection: "row-reverse", alignItems: "center", gap: 10, flex: 1,
+  headerRight: {
+    position: "absolute", top: 6, bottom: 6, left: 112, right: 14,
+    flexDirection: "row", alignItems: "center", gap: 8, direction: "ltr",
   },
   headerInfo: { flex: 1, minWidth: 0, alignItems: "flex-end", gap: 1 },
   headerIcon: {
@@ -894,7 +892,8 @@ const createDownloadStyles = (colors: ThemePalette) => StyleSheet.create({
   headerSub:   { maxWidth: "100%", fontSize: 9, lineHeight: 14, fontFamily: "Cairo_400Regular", color: colors.textMuted, textAlign: "right" },
 
   clearBtn: {
-    flexDirection: "row-reverse", alignItems: "center", gap: 5,
+    position: "absolute", left: 14, top: 15,
+    flexDirection: "row", alignItems: "center", gap: 5,
     paddingHorizontal: 11, paddingVertical: 8, borderRadius: 12,
     backgroundColor: colors.destructiveSurface, borderWidth: 1,
     borderColor: colors.destructiveBorder,

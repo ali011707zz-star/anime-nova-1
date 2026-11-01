@@ -6,6 +6,7 @@ import { Header } from "@/components/layout/Header";
 import { BottomNav } from "@/components/layout/BottomNav";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { AuthProvider } from "@/lib/auth-context";
+import { WebAppDownloadModal } from "@/components/WebAppDownloadModal";
 
 class ErrorBoundary extends Component<{ children: ReactNode; resetKey?: string }, { hasError: boolean; lastKey?: string }> {
   constructor(props: { children: ReactNode; resetKey?: string }) {
@@ -75,6 +76,9 @@ const DubbedWatch        = lazy(() => import("@/pages/DubbedWatch"));
 const AwDubbedLibrary    = lazy(() => import("@/pages/AwDubbedLibrary"));
 const AwDubbedDetail     = lazy(() => import("@/pages/AwDubbedDetail"));
 const AwDubbedWatch      = lazy(() => import("@/pages/AwDubbedWatch"));
+const StardimaTitle      = lazy(() => import("@/pages/StardimaTitle"));
+const StardimaServers    = lazy(() => import("@/pages/StardimaServers"));
+const StardimaWatch      = lazy(() => import("@/pages/StardimaWatch"));
 const Updates            = lazy(() => import("@/pages/Updates"));
 const AuthPage           = lazy(() => import("@/pages/Auth"));
 const AuthCallback       = lazy(() => import("@/pages/AuthCallback"));
@@ -93,7 +97,7 @@ function PageLoader() {
   );
 }
 
-const NO_GLOBAL_HEADER = ["/watch", "/episodes/", "/anime/", "/settings", "/profile", "/browse", "/animation/", "/auth", "/subscription", "/dubbed/watch", "/aw-dubbed/watch"];
+const NO_GLOBAL_HEADER = ["/watch", "/episodes/", "/anime/", "/settings", "/comments", "/profile", "/browse", "/animation/", "/auth", "/subscription", "/dubbed/watch", "/aw-dubbed/watch", "/stardima/"];
 
 function applyTheme(t: string) {
   const root = document.documentElement;
@@ -224,11 +228,12 @@ function Router({ onMenuClick }: { onMenuClick: () => void }) {
                 <Route path="/aw-dubbed"                       component={DubbedCombinedLibrary} />
                 <Route path="/aw-dubbed/watch"                 component={AwDubbedWatch} />
                 <Route path="/aw-dubbed/:key"                  component={AwDubbedDetail} />
+                <Route path="/stardima/title/:providerTitleId" component={StardimaTitle} />
+                <Route path="/stardima/servers"                component={StardimaServers} />
+                <Route path="/stardima/watch"                  component={StardimaWatch} />
                 <Route path="/comments"                component={CommentsPage} />
                 <Route path="/subscription"            component={Subscription} />
                 <Route path="/episodes/:id"            component={EpisodeList} />
-                <Route path="/nova-control">{() => { window.location.replace("/nova-control"); return null; }}</Route>
-                <Route path="/admin">{() => { window.location.replace("/nova-control"); return null; }}</Route>
                 <Route                                 component={NotFound} />
               </Switch>
             </motion.div>
@@ -255,6 +260,7 @@ function App() {
         <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, "")}>
           <Router onMenuClick={() => setSidebarOpen(true)} />
           <Sidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
+          <WebAppDownloadModal />
         </WouterRouter>
       </AuthProvider>
     </ErrorBoundary>

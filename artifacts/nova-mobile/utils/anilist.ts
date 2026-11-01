@@ -1,4 +1,4 @@
-import { getBaseUrl } from './baseUrl';
+import { getBaseUrl } from "./baseUrl";
 // يستخدم proxy الـ VPS بدلاً من AniList مباشرة — يدعم Jikan + Kitsu fallback تلقائياً
 const getAnilistApi = () => `${getBaseUrl()}/api/anilist`;
 
@@ -37,7 +37,7 @@ export async function anilistQuery<T = unknown>(
 
   if (options.signal) {
     if (options.signal.aborted) controller.abort();
-    else options.signal.addEventListener('abort', relayAbort, { once: true });
+    else options.signal.addEventListener("abort", relayAbort, { once: true });
   }
   if (options.timeoutMs && options.timeoutMs > 0) {
     timeout = setTimeout(relayAbort, options.timeoutMs);
@@ -45,18 +45,18 @@ export async function anilistQuery<T = unknown>(
 
   try {
     const response = await fetch(getAnilistApi(), {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
       body: JSON.stringify({ query, variables }),
       signal: controller.signal,
     });
     if (!response.ok) throw new Error(`AniList proxy returned ${response.status}`);
     const json = await response.json();
-    if (json.errors) throw new Error(json.errors[0]?.message || 'AniList query failed');
+    if (json.errors) throw new Error(json.errors[0]?.message || "AniList query failed");
     return json.data as T;
   } finally {
     if (timeout) clearTimeout(timeout);
-    options.signal?.removeEventListener('abort', relayAbort);
+    options.signal?.removeEventListener("abort", relayAbort);
   }
 }
 
@@ -204,25 +204,6 @@ query UpcomingAnime {
   }
 }`;
 
-export const SEASONAL_QUERY = `
-query SeasonalAnime($season: MediaSeason, $year: Int) {
-  Page(page: 1, perPage: 20) {
-    media(season: $season, seasonYear: $year, type: ANIME, sort: POPULARITY_DESC) {
-      id title { romaji english } coverImage { large extraLarge } averageScore episodes status format
-    }
-  }
-}`;
-
-export function getCurrentSeason() {
-  const month = new Date().getMonth();
-  const year = new Date().getFullYear();
-  let season: 'WINTER' | 'SPRING' | 'SUMMER' | 'FALL' = 'WINTER';
-  if (month >= 2 && month <= 4) season = 'SPRING';
-  else if (month >= 5 && month <= 7) season = 'SUMMER';
-  else if (month >= 8 && month <= 10) season = 'FALL';
-  return { season, year };
-}
-
 export const TODAY_EPISODES_QUERY = `
 query TodayEpisodes($gt: Int!, $lt: Int!) {
   Page(page: 1, perPage: 20) {
@@ -320,11 +301,11 @@ query Schedule($airingAt_greater: Int!, $airingAt_lesser: Int!) {
 }`;
 
 export function stripHtml(html: string | null): string {
-  if (!html) return '';
-  return html.replace(/<[^>]*>/g, '').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&#039;/g, "'").replace(/&quot;/g, '"').trim();
+  if (!html) return "";
+  return html.replace(/<[^>]*>/g, "").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&#039;/g, "'").replace(/&quot;/g, '"').trim();
 }
 
 export function formatAiringTime(airingAt: number): string {
   const date = new Date(airingAt * 1000);
-  return date.toLocaleTimeString('ar-SA', { hour: '2-digit', minute: '2-digit' });
+  return date.toLocaleTimeString("ar-SA", { hour: "2-digit", minute: "2-digit" });
 }

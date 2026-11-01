@@ -22,6 +22,7 @@ export interface CrashEntry {
   isFatal?: boolean;
   appVersion?: string;
   deviceModel?: string;
+  platform?: string;
 }
 
 /* ─── حفظ محلي ─── */
@@ -98,7 +99,7 @@ export async function clearCrashLog(): Promise<void> {
 export function installGlobalCrashHandlers(): void {
   // ── JS exceptions ──
   try {
-    const ErrorUtils = (global as any).ErrorUtils;
+    const ErrorUtils = (globalThis as any).ErrorUtils;
     if (ErrorUtils?.setGlobalHandler) {
       const prev = ErrorUtils.getGlobalHandler?.();
       ErrorUtils.setGlobalHandler((error: Error, isFatal?: boolean) => {
@@ -116,7 +117,7 @@ export function installGlobalCrashHandlers(): void {
 
   // ── Unhandled Promise rejections ──
   try {
-    const win = global as any;
+    const win = globalThis as any;
     if (typeof win.addEventListener === "function") {
       win.addEventListener("unhandledrejection", (event: any) => {
         const reason = event?.reason;

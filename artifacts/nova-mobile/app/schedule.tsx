@@ -4,13 +4,15 @@ import { Image } from "react-native";
 import { useRouter } from "expo-router";
 import React, { useState } from "react";
 import {
-  ActivityIndicator, Platform, Pressable,
-  ScrollView, StyleSheet, Text, View,
+  ActivityIndicator, Platform,
+  ScrollView, StyleSheet, Text, View, I18nManager,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColors } from "@/hooks/useColors";
 import { anilistQuery, SCHEDULE_QUERY, formatAiringTime } from "@/utils/anilist";
+import { isTvDevice, tvFocusStyle, TvPressable as Pressable } from "@/utils/tv";
 
+const ROW_RTL = I18nManager.isRTL ? "row" : "row-reverse";
 const DAYS_AR = ["الأحد", "الإثنين", "الثلاثاء", "الأربعاء", "الخميس", "الجمعة", "السبت"];
 
 type AiringSchedule = {
@@ -20,6 +22,7 @@ type AiringSchedule = {
   media: {
     id: number;
     title: { romaji: string; english: string | null };
+    title_ar?: string | null;
     coverImage: { large: string };
     averageScore: number | null;
   };
@@ -29,6 +32,7 @@ export default function ScheduleScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const router = useRouter();
+  const tvMode = isTvDevice();
   const topPad = Platform.OS === "web" ? 0 : Math.max(insets.top, Platform.OS === "android" ? 28 : 44);
 
   const now = new Date();
@@ -59,8 +63,8 @@ export default function ScheduleScreen() {
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       {/* Header */}
       <View style={[styles.header, { paddingTop: topPad + 16 }]}>
-        <Pressable onPress={() => router.back()} style={styles.backBtn}>
-          <Ionicons name="arrow-back" size={22} color={colors.text} />
+        <Pressable onPress={() => router.canGoBack() ? router.back() : router.replace("/(tabs)" as any)} focusable={tvMode} style={({ focused }) => [styles.backBtn, tvMode && tvFocusStyle(focused)]}>
+          <Ionicons name="chevron-forward" size={22} color={colors.text} />
         </Pressable>
         <Text style={[styles.title, { color: colors.text }]}>جدول البث</Text>
         <View style={{ width: 30 }} />
@@ -79,8 +83,10 @@ export default function ScheduleScreen() {
             <Pressable
               key={day}
               onPress={() => setSelectedDay(i)}
-              style={[
+              focusable={tvMode}
+              style={({ focused }) => [
                 styles.dayBtn,
+                tvMode && tvFocusStyle(focused),
                 {
                   backgroundColor: isSelected ? colors.primary : colors.card,
                   borderColor: isSelected ? colors.primary : isToday ? colors.primary + "50" : colors.border,
@@ -114,7 +120,8 @@ export default function ScheduleScreen() {
             <Pressable
               key={item.id}
               onPress={() => router.push(`/anime/${item.media.id}?title=${encodeURIComponent(item.media.title.romaji)}&english=${encodeURIComponent(item.media.title.english || "")}`)}
-              style={[styles.scheduleItem, { backgroundColor: colors.card, borderColor: colors.border }]}
+              focusable={tvMode}
+              style={({ focused }) => [styles.scheduleItem, { backgroundColor: colors.card, borderColor: colors.border }, tvMode && tvFocusStyle(focused)]}
             >
               <Image
                 source={{ uri: item.media.coverImage.large }}
@@ -125,6 +132,11 @@ export default function ScheduleScreen() {
                 <Text style={[styles.scheduleTitle, { color: colors.text }]} numberOfLines={2}>
                   {item.media.title.english || item.media.title.romaji}
                 </Text>
+                {item.media.title_ar ? (
+                  <Text style={{ color: colors.mutedForeground, fontSize: tvMode ? 14 : 10, fontFamily: "Cairo_700Bold", textAlign: "right", writingDirection: "rtl" }} numberOfLines={1}>
+                    {item.media.title_ar}
+                  </Text>
+                ) : null}
                 <View style={styles.scheduleRow}>
                   <View style={[styles.epBadge, { backgroundColor: colors.primary + "20" }]}>
                     <Text style={[styles.epBadgeText, { color: colors.primary }]}>حلقة {item.episode}</Text>
@@ -155,7 +167,7 @@ export default function ScheduleScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  header: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 16, paddingBottom: 12 },
+  header: { flexDirection: ROW_RTL, alignItems: "center", justifyContent: "space-between", paddingHorizontal: 16, paddingBottom: 12 },
   backBtn: { padding: 4 },
   title: { fontSize: 20, fontFamily: "Cairo_800ExtraBold" },
   daysRow: { paddingHorizontal: 16, paddingVertical: 4, marginBottom: 12, alignItems: "center", flexDirection: "row" },

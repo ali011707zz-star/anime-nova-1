@@ -8,6 +8,7 @@ import { Router, type Request, type Response } from "express";
 import { sbInsert, sbSelect } from "../lib/supabaseClient.js";
 import { getEnvOrDb } from "../lib/dbConfig.js";
 import { saveNotification } from "./notifications.js";
+import { sendNewEpisodePushDetailed } from "./push.js";
 
 const router = Router();
 
@@ -24,24 +25,63 @@ async function getToken(): Promise<string> {
 
 const TOKEN   = () => process.env.TELEGRAM_BOT_TOKEN || _cachedToken;
 const API     = () => `https://api.telegram.org/bot${TOKEN()}`;
+const SITE_URL = "https://animenovaa.duckdns.org/";
+
+function internalApiBaseUrl(): string {
+  const configured = process.env.NOVA_INTERNAL_API_URL?.trim().replace(/\/+$/, "");
+  if (configured) return configured;
+  const port = Number.parseInt(process.env.PORT || "5000", 10);
+  return `http://127.0.0.1:${Number.isInteger(port) && port > 0 && port <= 65_535 ? port : 5000}`;
+}
 
 /* ── helpers ──────────────────────────────────────────────────────────── */
 
+function escapeTelegramHtml(value: unknown): string {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+function buildEpisodeCaption(title: string, ep: number): string {
+  return [
+    `🌸 <b>حلقة جديدة وصلت!</b>`,
+    ``,
+    `✨ ${escapeTelegramHtml(title)}`,
+    `🎬 الحلقة ${escapeTelegramHtml(ep)}`,
+    ``,
+    `✅ متاحة الآن للمشاهدة على Anime NOVA 🎮`,
+    ``,
+    `شاهد بجودة عالية · بدون إعلانات 🚀`,
+    `📲 شاهد الأنمي وحمّل تطبيق Anime NOVA من هنا:`,
+    `🔗 ${SITE_URL}`,
+  ].join("\n");
+}
+
 async function sendMessage(chatId: number | string, text: string, extra: Record<string, any> = {}) {
   const tok = await getToken();
-  if (!tok) return;
-  await fetch(`https://api.telegram.org/bot${tok}/sendMessage`, {
+  if (!tok) return false;
+  const payload = { chat_id: chatId, text, parse_mode: "HTML", ...extra };
+  const response = await fetch(`https://api.telegram.org/bot${tok}/sendMessage`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ chat_id: chatId, text, parse_mode: "HTML", ...extra }),
+    body: JSON.stringify(payload),
     signal: AbortSignal.timeout(8_000),
-  }).catch(e => console.warn("[telegram] sendMessage failed:", e.message));
+  }).catch(() => { console.warn("[telegram] sendMessage request failed"); return null; });
+  if (!response) return false;
+  const body = await response.json().catch(() => ({})) as any;
+  if (!response.ok || body?.ok !== true) {
+    console.warn("[telegram] sendMessage API error:", body?.description || response.status);
+    return false;
+  }
+  return true;
 }
 
 async function sendChannelPhoto(photoUrl: string, caption: string) {
   const channelId = process.env.TELEGRAM_CHANNEL_ID;
   const tok = await getToken();
-  if (!channelId || !tok) return;
+  if (!channelId || !tok) return false;
   const r = await fetch(`https://api.telegram.org/bot${tok}/sendPhoto`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -52,11 +92,14 @@ async function sendChannelPhoto(photoUrl: string, caption: string) {
       parse_mode: "HTML",
     }),
     signal: AbortSignal.timeout(12_000),
-  }).catch(e => { console.warn("[telegram] sendChannelPhoto failed:", e.message); return null; });
-  if (r && !r.ok) {
-    const body = await r.json().catch(() => ({})) as any;
-    console.warn("[telegram] sendChannelPhoto API error:", body?.description);
+  }).catch(() => { console.warn("[telegram] sendChannelPhoto request failed"); return null; });
+  if (!r) return false;
+  const body = await r.json().catch(() => ({})) as any;
+  if (!r.ok || body?.ok !== true) {
+    console.warn("[telegram] sendChannelPhoto API error:", body?.description || r.status);
+    return false;
   }
+  return true;
 }
 
 async function fetchAnimePoster(anilistId: number): Promise<string | null> {
@@ -85,6 +128,9 @@ async function fetchAnimePoster(anilistId: number): Promise<string | null> {
 /* ── تتبّع التنبيهات المُرسَلة (لمنع التكرار) ──────────────────────── */
 // المفتاح: "anilistId:ep" — يُحفظ في ذاكرة العملية
 const notifiedEpisodes = new Set<string>();
+const telegramNotifiedEpisodes = new Set<string>();
+const episodeNotificationFlights = new Map<string, Promise<boolean>>();
+const telegramSendFlights = new Map<string, Promise<boolean>>();
 
 /* ── وظيفة التنبيه الرئيسية (تُستدعى من anime.ts) ──────────────────── */
 
@@ -93,40 +139,80 @@ export async function notifyNewEpisode(
   title: string,
   ep: number,
   posterUrl?: string,
-) {
+): Promise<boolean> {
   const key = `${anilistId}:${ep}`;
-  if (notifiedEpisodes.has(key)) return; // لا تُرسل مرتين
-  notifiedEpisodes.add(key);
+  if (notifiedEpisodes.has(key)) return true;
+  const existingFlight = episodeNotificationFlights.get(key);
+  if (existingFlight) return existingFlight;
+
+  const flight = Promise.resolve().then(() =>
+    deliverNewEpisodeNotification(anilistId, title, ep, posterUrl),
+  );
+  episodeNotificationFlights.set(key, flight);
+  try {
+    return await flight;
+  } finally {
+    if (episodeNotificationFlights.get(key) === flight) {
+      episodeNotificationFlights.delete(key);
+    }
+  }
+}
+
+async function deliverNewEpisodeNotification(
+  anilistId: number,
+  title: string,
+  ep: number,
+  posterUrl?: string,
+): Promise<boolean> {
+  if (await wasNotified(anilistId, ep)) {
+    notifiedEpisodes.add(`${anilistId}:${ep}`);
+    return true;
+  }
+
+  // Resolve the poster once and reuse it for the in-app record, remote push,
+  // and Telegram. The remote push must receive the same image; otherwise the
+  // OS can only display the small app icon while the app is closed.
+  const poster = posterUrl ?? await fetchAnimePoster(anilistId);
 
   // حفظ الإشعار في قاعدة البيانات (داخل التطبيق)
   await saveNotification({
     type: "anime_episode",
     title,
     body: `الحلقة ${ep} متاحة الآن`,
-    image_url: posterUrl ?? (await fetchAnimePoster(anilistId)) ?? undefined,
+    image_url: poster ?? undefined,
     link_path: `/watch?id=${anilistId}&ep=${ep}`,
     anime_id: anilistId,
     episode_num: ep,
   }).catch(() => {});
 
+  const pushResult = await sendNewEpisodePushDetailed({
+    animeId: anilistId,
+    title,
+    episode: ep,
+    posterUrl: poster ?? undefined,
+  }).catch((error) => {
+    console.warn(`[push] episode delivery failed title=${title} episode=${ep}:`, error instanceof Error ? error.message : String(error));
+    return null;
+  });
+
   const channelId = process.env.TELEGRAM_CHANNEL_ID;
   const tok = await getToken();
-  if (!channelId || !tok) return;
+  const caption = buildEpisodeCaption(title, ep);
 
-  const poster  = posterUrl ?? await fetchAnimePoster(anilistId);
-  const caption =
-    `🌸 <b>حلقة جديدة وصلت!</b>\n\n` +
-    `✨ <b>${title}</b>\n` +
-    `🎬 الحلقة <b>${ep}</b>\n\n` +
-    `✅ <b>متاحة الآن للمشاهدة</b> على Anime NOVA 🎮\n\n` +
-    `<i>شاهد بجودة عالية · بدون إعلانات 🚀</i>`;
-
-  if (poster) {
-    await sendChannelPhoto(poster, caption);
-  } else {
-    await sendMessage(channelId, caption);
+  let telegramSent = true;
+  if (channelId && tok) {
+    telegramSent = await sendTelegramEpisodeOnce(anilistId, ep, caption, poster || undefined);
   }
-  console.log(`[telegram] ✅ تنبيه الحلقة أُرسل → ${title} ح${ep}`);
+
+  if (!pushResult?.queueReady || !telegramSent) {
+    console.warn(`[scheduler] episode remains pending queue=${pushResult?.queueReady ?? false} push=${pushResult?.pending ?? "error"} failed=${pushResult?.failed ?? "error"} telegram=${telegramSent} title=${title} episode=${ep}`);
+    return false;
+  }
+
+  notifiedEpisodes.add(key);
+  await markNotified(anilistId, ep);
+  console.log(`[scheduler] ✅ episode delivery complete title=${title} episode=${ep} devices=${pushResult.targets}`);
+  return true;
 }
 
 let _cachedAdminId = "";
@@ -204,13 +290,66 @@ async function markNotified(anilistId: number, ep: number): Promise<void> {
   } catch { /* silent — in-memory Set is enough */ }
 }
 
+async function sendTelegramEpisodeOnce(
+  anilistId: number,
+  ep: number,
+  caption: string,
+  poster?: string,
+): Promise<boolean> {
+  const channelId = process.env.TELEGRAM_CHANNEL_ID;
+  if (!channelId || !(await getToken())) return true;
+
+  const memoryKey = `${anilistId}:${ep}`;
+  const dbKey = `tg_channel:${anilistId}:${ep}`;
+  if (telegramNotifiedEpisodes.has(memoryKey)) return true;
+  const existingFlight = telegramSendFlights.get(memoryKey);
+  if (existingFlight) return existingFlight;
+
+  const flight = Promise.resolve().then(async () => {
+    // Use a Telegram-specific durable marker. Push delivery state must not
+    // suppress a channel post that is still pending.
+    const existing = await sbSelect("app_config", { key: `eq.${dbKey}` }, { limit: 1 });
+    if (existing.length) {
+      telegramNotifiedEpisodes.add(memoryKey);
+      return true;
+    }
+
+    // A broken image URL should not prevent the text announcement from reaching
+    // Telegram, just as it must not block the remote mobile push.
+    let sent = poster ? await sendChannelPhoto(poster, caption) : false;
+    if (!sent) sent = await sendMessage(channelId, caption);
+    if (!sent) return false;
+
+    telegramNotifiedEpisodes.add(memoryKey);
+    const saved = await sbInsert("app_config", { key: dbKey, value: String(Date.now()) });
+    if (!saved) {
+      const confirmed = await sbSelect("app_config", { key: `eq.${dbKey}` }, { limit: 1 });
+      if (!confirmed.length) console.warn(`[telegram] episode channel marker database write failed episode=${ep}`);
+    }
+    console.log(`[telegram] ✅ تنبيه الحلقة أُرسل → ${anilistId} ح${ep}`);
+    return true;
+  });
+
+  telegramSendFlights.set(memoryKey, flight);
+  try {
+    return await flight;
+  } finally {
+    if (telegramSendFlights.get(memoryKey) === flight) {
+      telegramSendFlights.delete(memoryKey);
+    }
+  }
+}
+
 /* ── فحص توفر الحلقة في AnimeWitcher ───────────────────────────────────── */
 
 const AW_HF = "https://1we323-witcher.hf.space";
 const _awEpCache = new Map<string, { available: boolean; ts: number }>();
 
-async function checkAnimeWitcherEp(title: string, ep: number): Promise<boolean> {
-  const cacheKey = `${title.toLowerCase()}:${ep}`;
+async function checkAnimeWitcherEp(title: string, ep: number, anilistId?: number): Promise<boolean> {
+  const identity = Number.isSafeInteger(anilistId) && Number(anilistId) > 0
+    ? `id:${anilistId}`
+    : `title:${title.trim().toLowerCase()}`;
+  const cacheKey = `${identity}:${ep}`;
   const hit = _awEpCache.get(cacheKey);
   if (hit && Date.now() - hit.ts < 10 * 60_000) return hit.available;
 
@@ -252,22 +391,7 @@ async function checkAnimeWitcherEp(title: string, ep: number): Promise<boolean> 
 
 function buildCaption(media: any, ep: number): string {
   const title  = media.title?.english || media.title?.romaji || media.title?.native || "أنمي";
-  const romaji = media.title?.romaji || "";
-  const genres = (media.genres || []).slice(0, 3).join(" · ");
-
-  const lines: string[] = [
-    `🌸 <b>حلقة جديدة متاحة الآن!</b>`,
-    ``,
-    `✨ <b>${title}</b>`,
-  ];
-  if (romaji && romaji !== title) lines.push(`<i>${romaji}</i>`);
-  lines.push(`🎬 الحلقة <b>${ep}</b>`);
-  if (genres) lines.push(`🎭 ${genres}`);
-  lines.push(``);
-  lines.push(`✅ <b>متاحة الآن على Anime NOVA</b> 🎮`);
-  lines.push(``);
-  lines.push(`🎉 <b>مشاهدة ممتعة!</b> 🌟`);
-  return lines.join("\n");
+  return buildEpisodeCaption(title, ep);
 }
 
 /* ── حالة الـ scheduler ──────────────────────────────────────────────── */
@@ -280,77 +404,98 @@ let schedulerSentToday = 0;
 let schedulerTimer: ReturnType<typeof setTimeout> | null = null;
 
 const INTERVAL_MS = 10 * 60 * 1000; // كل 10 دقائق (كان 30)
+const STARTUP_EPISODE_WINDOW_MS = 30 * 60 * 1000;
 
-/* ── polling مباشر لـ AnimeSlayer API (بدون المرور على الـ cached endpoint) ── */
-// السبب: الـ endpoint /api/anime/anslayer-latest لديه TTL كاش 15 دقيقة يرجع
-// مبكراً بدون فحص الحلقات الجديدة، بينما الـ scheduler يعمل كل 10 دقائق.
-// الحل: استدعاء AnimeSlayer API مباشرة + تتبع الإشعارات المرسلة عبر DB.
+function wasRecentlyUpdated(item: any): boolean {
+  const value = item?.updatedAt ?? item?.updated_at ?? item?.latest_episode_at ?? item?.latest_episode_date;
+  let timestamp: number;
+  if (typeof value === "number" && Number.isFinite(value)) {
+    timestamp = value < 1_000_000_000_000 ? value * 1000 : value;
+  } else if (typeof value === "string" && value.trim()) {
+    timestamp = Date.parse(value);
+  } else {
+    return false;
+  }
+  if (!Number.isFinite(timestamp)) return false;
+  const age = Date.now() - timestamp;
+  return age >= -5 * 60_000 && age <= STARTUP_EPISODE_WINDOW_MS;
+}
 
-const ANSLAYER_SCHED_BASE  = "https://anslayer.com/anime/public";
-const ANSLAYER_SCHED_CID   = "android-app2";
-const ANSLAYER_SCHED_CSEC  = "7befba6263cc14c90d2f1d6da2c5cf9b251bfbbd";
+/* ── poll the same normalized feed shown in the homepage's latest episodes ── */
 
 async function pollAnimeSlayerDirect(): Promise<void> {
   try {
-    const json = JSON.stringify({ list_type: "latest_updated_episode_new", page: 1 });
-    const url  = `${ANSLAYER_SCHED_BASE}/animes/get-published-animes?json=${encodeURIComponent(json)}`;
-    const resp = await fetch(url, {
-      headers: {
-        "Client-Id":     ANSLAYER_SCHED_CID,
-        "Client-Secret": ANSLAYER_SCHED_CSEC,
-        "User-Agent":    "okhttp/4.12.0",
-      },
+    // Read the same normalized feed as the homepage, but through loopback:
+    // calling the public hostname from the VPS depends on external DNS/TLS and
+    // can fail even while the API itself is healthy.
+    const resp = await fetch(`${internalApiBaseUrl()}/api/anime/anslayer-latest`, {
+      headers: { "User-Agent": "NovaBot/1.0", Accept: "application/json" },
       signal: AbortSignal.timeout(25_000),
     });
     if (!resp.ok) {
-      console.warn(`[scheduler] AnimeSlayer API HTTP ${resp.status}`);
+      console.warn(`[scheduler] latest episodes feed HTTP ${resp.status}`);
       return;
     }
     const data = await resp.json() as any;
-    const list: any[] = data?.response?.data || [];
+    const list: any[] = Array.isArray(data?.items)
+      ? data.items
+      : Array.isArray(data)
+        ? data
+        : [];
 
     if (!list.length) {
-      console.log("[scheduler] 🔄 AnimeSlayer: لا بيانات في الرد");
+      console.log("[scheduler] 🔄 latest episodes feed: لا بيانات في الرد");
       return;
     }
 
-    // ── أول تشغيل بعد restart: نبذر الكاش فقط بدون إرسال ──────────────────
-    // لتفادي إغراق Telegram بكل الحلقات الحالية دفعة واحدة
+    // عند إعادة التشغيل نتجنب إرسال السجل القديم دفعة واحدة، مع عدم إسقاط
+    // الحلقة التي نُشرت للتو أثناء توقف الخادم.
     if (schedulerFirstRun) {
       schedulerFirstRun = false;
       let seeded = 0;
+      let recentSent = 0;
       for (const item of list) {
-        const animeId = parseInt(item.anime_id, 10);
-        const epMatch = String(item.latest_episode_name || "").match(/(\d+)/);
-        const ep      = epMatch ? parseInt(epMatch[1], 10) : null;
+        const animeId = Number(item.animeId || item.anilistId || item.anslayerId);
+        const ep = Number(item.episode);
         if (!animeId || !ep) continue;
         if (!(await wasNotified(animeId, ep))) {
-          await markNotified(animeId, ep);
-          seeded++;
+          if (wasRecentlyUpdated(item)) {
+            const title = item.english || item.romaji || item.name || "أنمي";
+            const sent = await notifyNewEpisode(animeId, title, ep, item.cover || undefined)
+              .catch((error) => {
+                console.warn(`[scheduler] startup episode notification failed title=${title} episode=${ep}:`, error instanceof Error ? error.message : String(error));
+                return false;
+              });
+            if (sent) recentSent++;
+            await new Promise((resolve) => setTimeout(resolve, 1_500));
+          } else {
+            await markNotified(animeId, ep);
+            seeded++;
+          }
         }
       }
-      console.log(`[scheduler] 🌱 AnimeSlayer seed: ${seeded} حلقة موجودة مُسجَّلة (لن تُرسل) — الدورات القادمة ستُرسل الجديد فقط`);
+      console.log(`[scheduler] 🌱 AnimeSlayer startup: seeded=${seeded} recent_sent=${recentSent}`);
       return;
     }
 
     let sent = 0;
     for (const item of list) {
-      const animeId = parseInt(item.anime_id, 10);
-      const epMatch = String(item.latest_episode_name || "").match(/(\d+)/);
-      const ep      = epMatch ? parseInt(epMatch[1], 10) : null;
+      // Prefer the canonical AniList ID used by app push notifications and
+      // the homepage; fall back to AnimeSlayer's ID only for unresolved titles.
+      const animeId = Number(item.animeId || item.anilistId || item.anslayerId);
+      const ep = Number(item.episode);
       if (!animeId || !ep) continue;
 
       // تحقق من DB + ذاكرة العملية — لا ترسل مرتين
       if (await wasNotified(animeId, ep)) continue;
 
-      const name  = item.anime_name  || "أنمي";
-      const cover = item.anime_cover_image_url || "";
+      const name = item.english || item.romaji || item.name || "أنمي";
+      const cover = item.cover || "";
 
       console.log(`[scheduler] 🎯 AnimeSlayer جديد: ${name} ح${ep}`);
 
       try {
-        await notifyNewEpisode(animeId, name, ep, cover || undefined);
-        sent++;
+        if (await notifyNewEpisode(animeId, name, ep, cover || undefined)) sent++;
       } catch (e: any) {
         console.warn(`[scheduler] notify error (${name}): ${e.message}`);
       }
@@ -371,9 +516,21 @@ async function pollAnimeSlayerDirect(): Promise<void> {
 
 /* ── الدورة الواحدة ────────────────────────────────────────────────────── */
 
-async function runSchedulerCycle(): Promise<void> {
+let schedulerCyclePromise: Promise<void> | null = null;
+
+function runSchedulerCycle(): Promise<void> {
+  if (schedulerCyclePromise) return schedulerCyclePromise;
+  schedulerCyclePromise = runSchedulerCycleInner().finally(() => {
+    schedulerCyclePromise = null;
+  });
+  return schedulerCyclePromise;
+}
+
+async function runSchedulerCycleInner(): Promise<void> {
   const tok = await getToken();
-  if (!tok || !process.env.TELEGRAM_CHANNEL_ID) return;
+  const telegramReady = Boolean(tok && process.env.TELEGRAM_CHANNEL_ID);
+  const pushDevices = await sbSelect("mobile_push_tokens", { disabled_at: "is.null" }, { limit: 1 });
+  if (!telegramReady && !pushDevices.length) return;
 
   // ── 1. فحص AnimeSlayer مباشرة (بدون الـ cached endpoint) ──
   await pollAnimeSlayerDirect();
@@ -410,7 +567,7 @@ async function runSchedulerCycle(): Promise<void> {
     // إذا فشل الفحص أو انتهت المهلة → أرسل الإشعار مباشرة (لا تتأخر)
     let awAvailable = false;
     try {
-      const awPromise = checkAnimeWitcherEp(titleToCheck, ep);
+      const awPromise = checkAnimeWitcherEp(titleToCheck, ep, anilistId);
       awAvailable = await Promise.race([
         awPromise,
         new Promise<boolean>(resolve => setTimeout(() => resolve(true), 5_000)), // fallback: أرسل بعد 5s
@@ -443,12 +600,29 @@ async function runSchedulerCycle(): Promise<void> {
       episode_num: ep,
     }).catch(() => {});
 
-    if (poster) {
-      await sendChannelPhoto(poster, caption);
-    } else {
-      await sendMessage(process.env.TELEGRAM_CHANNEL_ID!, caption);
+    const pushResult = await sendNewEpisodePushDetailed({
+      animeId: anilistId,
+      title,
+      episode: ep,
+      posterUrl: poster ?? undefined,
+    }).catch((pushError: any) => {
+      console.warn(`[scheduler] mobile push failed: ${pushError?.message || String(pushError)}`);
+      return null;
+    });
+
+    const channelId = process.env.TELEGRAM_CHANNEL_ID;
+    const tokForChannel = await getToken();
+    const telegramSent = channelId && tokForChannel
+      ? await sendTelegramEpisodeOnce(anilistId, ep, caption, poster ?? undefined)
+      : true;
+
+    if (!pushResult?.queueReady || !telegramSent) {
+      console.warn(`[scheduler] episode remains pending queue=${pushResult?.queueReady ?? false} push=${pushResult?.pending ?? "error"} failed=${pushResult?.failed ?? "error"} telegram=${telegramSent} title=${title} episode=${ep}`);
+      if (sent < schedules.length) await new Promise(r => setTimeout(r, 1_500));
+      continue;
     }
 
+    notifiedEpisodes.add(`${anilistId}:${ep}`);
     await markNotified(anilistId, ep);
     sent++;
     schedulerSentToday++;
@@ -491,24 +665,19 @@ export function startEpisodeScheduler(): void {
     const channelId = process.env.TELEGRAM_CHANNEL_ID
       || await getEnvOrDb("TELEGRAM_CHANNEL_ID", "telegram_channel_id");
 
-    if (!channelId) {
-      console.warn("[scheduler] ⚠️ TELEGRAM_CHANNEL_ID غير موجود في البيئة أو DB — الـ scheduler لن يعمل");
-      schedulerRunning = false;
-      return;
-    }
-
     // اضبط في البيئة للاستخدام اللاحق
-    if (!process.env.TELEGRAM_CHANNEL_ID) {
+    if (channelId && !process.env.TELEGRAM_CHANNEL_ID) {
       process.env.TELEGRAM_CHANNEL_ID = channelId;
     }
 
     const tok = await getToken();
-    if (!tok) {
-      console.warn("[scheduler] ⚠️ TELEGRAM_BOT_TOKEN غير موجود في البيئة أو DB — الـ scheduler لن يعمل");
+    const pushDevices = await sbSelect("mobile_push_tokens", { disabled_at: "is.null" }, { limit: 1 });
+    if (!tok && !pushDevices.length) {
+      console.warn("[scheduler] لا يوجد Telegram أو أجهزة Push مسجلة — الـ scheduler لن يعمل");
       schedulerRunning = false;
       return;
     }
-    console.log(`[scheduler] 🚀 بدأ — يفحص كل ${INTERVAL_MS / 60_000} دقيقة`);
+    console.log(`[scheduler] 🚀 بدأ — يفحص كل ${INTERVAL_MS / 60_000} دقيقة (Telegram=${Boolean(tok && channelId)}, Push=${pushDevices.length > 0})`);
     runSchedulerCycle().catch(e => console.warn("[scheduler] cycle error:", e.message));
     schedulerTimer = setInterval(() => {
       runSchedulerCycle().catch(e => console.warn("[scheduler] cycle error:", e.message));
@@ -756,25 +925,28 @@ router.post("/api/telegram/notify-test", async (_req: Request, res: Response) =>
     return;
   }
 
-  // One Piece ح1 كمثال تجريبي
-  const testAnilistId = 21;
-  const testTitle     = "ون بيس";
-  const testEp        = 1;
+  // Goodbye, Lara — عينة الاختبار تطابق المثال الذي طلبه المستخدم.
+  const testAnilistId = 177637;
+  const testTitle     = "Sayonara Lara";
+  const testEp        = 4;
 
   const poster  = await fetchAnimePoster(testAnilistId);
-  const caption =
-    `🎬 <b>اسم الأنمي:</b> ${testTitle}\n` +
-    `📺 <b>الحلقة:</b> ${testEp} (تجريبي)\n` +
-    `✨ تم إضافة الحلقة الجديدة\n\n` +
-    `مشاهدة ممتعة 💙`;
+  const caption = buildEpisodeCaption(testTitle, testEp);
 
-  if (poster) {
-    await sendChannelPhoto(poster, caption);
-  } else {
-    await sendMessage(channelId, caption);
+  const photoSent = poster ? await sendChannelPhoto(poster, caption) : false;
+  const sent = photoSent || await sendMessage(channelId, caption);
+  if (!sent) {
+    res.status(502).json({
+      ok: false,
+      error: "تعذر إرسال الاختبار إلى القناة. تحقق من صلاحية البوت ورابط البوستر.",
+      channelId,
+      photoSent: false,
+      posterAvailable: !!poster,
+    });
+    return;
   }
 
-  res.json({ ok: true, channelId, hasPoster: !!poster, caption });
+  res.json({ ok: true, channelId, hasPoster: photoSent, posterAvailable: !!poster, caption });
 });
 
 /* ── Scheduler status & manual trigger ───────────────────────────────── */

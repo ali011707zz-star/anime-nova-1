@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { ActivityIndicator, View } from "react-native";
 import { useRouter } from "expo-router";
+import { useColors } from "@/hooks/useColors";
 
 /**
  * Native Google OAuth callback.
@@ -12,6 +13,7 @@ import { useRouter } from "expo-router";
  * remounts the AuthSheet, where useAuthRequest handles the response.
  */
 export default function GoogleOAuthCallback() {
+  const colors = useColors();
   const router = useRouter();
 
   useEffect(() => {
@@ -24,8 +26,8 @@ export default function GoogleOAuthCallback() {
   }, [router]);
 
   return (
-    <View style={{ flex: 1, backgroundColor: "#08080b", alignItems: "center", justifyContent: "center" }}>
-      <ActivityIndicator color="#a78bfa" />
+    <View style={{ flex: 1, backgroundColor: colors.background, alignItems: "center", justifyContent: "center" }}>
+      <ActivityIndicator color={colors.accent} />
     </View>
   );
 }

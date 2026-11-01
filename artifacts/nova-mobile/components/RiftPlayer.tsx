@@ -26,7 +26,7 @@ import {
   isSkipInRange,
   resolveSkipTimes,
   validateSkipInterval,
-} from "@/lib/skipTimes";
+} from "@/lib/skipTimes.mjs";
 
 const { width: W, height: H } = Dimensions.get("window");
 const PLAYER_CONTROL_ICON = "rgba(255,255,255,0.90)";
@@ -3213,7 +3213,7 @@ function ExpoRiftPlayer({
             return (
               <LinearGradient
                 colors={colors.playerTopGradient}
-                style={[s.topBar, tvMode && s.tvTopBar, { paddingTop: Platform.OS === "web" ? 14 : Math.max(insets.top + 16, 24) }]}
+                style={[s.topBar, tvMode && s.tvTopBar, { paddingTop: Platform.OS === "web" ? 12 : insets.top + 6 }]}
               >
                 {/* RTL: مجموعة الأزرار أولاً (تظهر يميناً)، معلومات ثانياً (تظهر يساراً) */}
                 {nativeRTL ? <>{btnsBlock}{infoBlock}</> : <>{infoBlock}{btnsBlock}</>}
@@ -4065,12 +4065,8 @@ const s = StyleSheet.create({
   },
   /* معلومات الأنمي — أقصى اليسار العلوي، حجم صغير لعدم التداخل */
   topInfoWrap: {
-    flexShrink: 1, maxWidth: "62%", flexDirection: "column", gap: 3, marginRight: 4,
+    flexShrink: 1, maxWidth: "58%", flexDirection: "column", gap: 2, marginRight: 4,
     alignItems: "flex-start",
-    backgroundColor: "rgba(10, 15, 26, 0.65)",
-    paddingHorizontal: 10, paddingVertical: 6,
-    borderRadius: 14,
-    borderWidth: 1, borderColor: "rgba(255, 255, 255, 0.12)",
   },
   tvTopInfoWrap: {
     position: "absolute",

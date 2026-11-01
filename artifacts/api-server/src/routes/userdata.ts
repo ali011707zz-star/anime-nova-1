@@ -5,10 +5,13 @@ import { getMobileUserId } from "../lib/security.js";
 const router = Router();
 
 function getUserId(req: Request): string | null {
+  // A mobile user token is the account identity. Prefer it over a stale
+  // session cookie so a reused WebView cannot write to the previous account.
+  const mobileUserId = getMobileUserId(req);
+  if (mobileUserId) return mobileUserId;
   return (
     (req.session as any)?.userId ||
     (req.session as any)?.emailUserId ||
-    getMobileUserId(req) ||
     null
   );
 }
@@ -27,7 +30,7 @@ router.get("/user/history", async (req: Request, res: Response) => {
 
     const rows = await sbSelect("watch_history",
       { user_id: `eq.${userId}`, order: "watched_at.desc" },
-      { limit: limit + offset },
+      { limit: limit + offset, strict: true },
     );
     return res.json({ history: rows.slice(offset, offset + limit) });
   } catch (err) {
@@ -86,6 +89,25 @@ router.delete("/user/history/:id", async (req: Request, res: Response) => {
   }
 });
 
+// Mobile history is displayed and removed by anime, not by the database row id.
+// Keep this separate from /user/history/:id so the UUID row-delete endpoint
+// remains backwards compatible with existing clients.
+router.delete("/user/history/anime/:animeId", async (req: Request, res: Response) => {
+  const userId = getUserId(req);
+  if (!userId) return res.status(401).json({ error: "غير مصرّح" });
+
+  try {
+    await sbDelete("watch_history", {
+      user_id: userId,
+      anime_id: `eq.${Number(req.params.animeId)}`,
+    });
+    return res.json({ ok: true });
+  } catch (err) {
+    console.error("[userdata] history DELETE anime:", err);
+    return res.status(500).json({ error: "خطأ في الخادم" });
+  }
+});
+
 router.delete("/user/history", async (req: Request, res: Response) => {
   const userId = getUserId(req);
   if (!userId) return res.status(401).json({ error: "غير مصرّح" });
@@ -110,6 +132,7 @@ router.get("/user/favorites", async (req: Request, res: Response) => {
   try {
     const rows = await sbSelect("favorites",
       { user_id: `eq.${userId}`, order: "added_at.desc" },
+      { strict: true },
     );
     return res.json({ favorites: rows });
   } catch (err) {
@@ -123,7 +146,7 @@ router.get("/user/favorites/ids", async (req: Request, res: Response) => {
   if (!userId) return res.json({ ids: [] });
 
   try {
-    const rows = await sbSelect("favorites", { user_id: `eq.${userId}` });
+    const rows = await sbSelect("favorites", { user_id: `eq.${userId}` }, { strict: true });
     return res.json({ ids: rows.map((r: any) => r.anime_id) });
   } catch (err) {
     console.error("[userdata] favorites/ids GET:", err);

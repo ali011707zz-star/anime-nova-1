@@ -15,6 +15,40 @@ import {
   ChevronDown, SkipForward,
 } from "lucide-react";
 
+const KAWAII_CDN_HOSTS = new Set([
+  "cdn.momentoai.dev",
+  "video.kawaii-anime.com",
+  "cdn.mewstream.buzz",
+  "hls.krussdomi.com",
+  "bl.krussdomi.com",
+  "cdn.imgnex.top",
+  "cdn.watching.onl",
+  "cdn.kryntal.top",
+  "fetch.nexabloom.top",
+]);
+
+function isKawaiiCdnUrl(value: string): boolean {
+  try {
+    const host = new URL(value, "https://player.invalid").hostname.toLowerCase();
+    return KAWAII_CDN_HOSTS.has(host) ||
+      host.endsWith(".kawaii-anime.com") ||
+      host.endsWith(".momentoai.dev") ||
+      host.endsWith(".mewstream.buzz") ||
+      host.endsWith(".imgnex.top") ||
+      host.endsWith(".watching.onl") ||
+      host.endsWith(".kryntal.top") ||
+      (new URL(value, "https://player.invalid").searchParams.has("md5") &&
+        /^(cdn|video)([.-][a-z0-9-]+)*\./i.test(host));
+  } catch {
+    return false;
+  }
+}
+
+function isKawaiiHlsUrl(value: string): boolean {
+  return /\.m3u8(?:[?#]|$)/i.test(value) ||
+    /\/(?:hls|playlist)(?:\/|[?#]|$)/i.test(value);
+}
+
 /* ─────────────────────────────────────── helpers ─── */
 function fmtTime(s: number) {
   if (!isFinite(s) || s < 0) return "0:00";
@@ -74,7 +108,7 @@ function getHlsBufferConfig() {
     const medium = !slow && (dl < 3.5 || eff === "3g");
     return {
       /* Keep enough future media to cover a slow 10–26s segment response. */
-      maxBufferLength:       slow ? 15  : medium ? 25  : 35,
+      maxBufferLength:       slow ? 25  : medium ? 25  : 35,
       maxMaxBufferLength:    slow ? 60  : medium ? 120 : 240,
       backBufferLength:      isMobile ? (slow ? 10 : 15) : 45,
       maxBufferSize:         (isMobile ? 60 : 160) * 1024 * 1024,
@@ -222,6 +256,7 @@ export default function RiftPlayer({
   const containerRef = useRef<HTMLDivElement>(null);
   const progressRef  = useRef<HTMLDivElement>(null);
   const hideRef         = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const userHiddenControlsRef = useRef(false);
   const feedbackHideRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const seekDrag     = useRef(false);
   const touchScrubbing = useRef(false);
@@ -250,6 +285,9 @@ export default function RiftPlayer({
   const lastTouchTs  = useRef(0);
   const moved        = useRef(false);
   const seekThrottle = useRef<number>(0);
+  const seekRafRef   = useRef<number | null>(null);
+  const pendingSeekTimeRef = useRef<number | null>(null);
+  const touchSeekFracRef = useRef(0);
   const tapTimer     = useRef<ReturnType<typeof setTimeout> | null>(null);
   const autoFsTriggered = useRef(false);
   const G_THRESH     = 18;
@@ -439,7 +477,12 @@ export default function RiftPlayer({
     if (hideRef.current) clearTimeout(hideRef.current);
     hideRef.current = setTimeout(() => setShowCtrl(false), 6500);
   }, []);
-  const showControls = useCallback(() => { setShowCtrl(true); schedHide(); }, [schedHide]);
+  const showControls = useCallback(() => {
+    // بعد إخفاء الأزرار بلمسة صريحة، لا تعيدها أحداث metadata أو mousemove تلقائياً.
+    if (userHiddenControlsRef.current) return;
+    setShowCtrl(true);
+    schedHide();
+  }, [schedHide]);
 
   /* ── fail ──
      force=true → يتجاوز حارس hasPlayedSuccessRef (للأخطاء الحرجة الحقيقية)
@@ -541,15 +584,14 @@ export default function RiftPlayer({
       return;
     }
 
-    // CDNs with CORS * + Accept-Ranges → play DIRECTLY in browser (no proxy round-trip)
-    // cdn.momentoai.dev (kawaii جديد): CORS * + Range support (MP4 native)
-    // pixeldrain.com/api/file/: confirmed CORS * + Accept-Ranges (MP4 only)
-    const CORS_DIRECT_CDN = ["cdn.momentoai.dev", "video.kawaii-anime.com", "pixeldrain.com/api/file/"];
-    const isCorsDirectCdn = CORS_DIRECT_CDN.some(h => src.includes(h));
-    if (isCorsDirectCdn && !src.match(/\.m3u8([?#]|$)/i)) {
+    // Kawaii rotates direct media hostnames; Pixeldrain is a separate confirmed
+    // CORS + Range source. Playlist-shaped Kawaii links must go through HLS.js.
+    const isKawaiiCdn = isKawaiiCdnUrl(src);
+    const isCorsDirectCdn = isKawaiiCdn || src.includes("pixeldrain.com/api/file/");
+    if (isCorsDirectCdn && !(isKawaiiCdn && isKawaiiHlsUrl(src))) {
       // MP4/non-HLS: native <video> element works fine (CORS *)
       // kawaii CDN: no-Referer=200, wrong-Referer=403 — browser sends page URL as Referer by default
-      if (src.includes("cdn.momentoai.dev") || src.includes("video.kawaii-anime.com")) v.referrerPolicy = "no-referrer";
+      if (isKawaiiCdn) v.referrerPolicy = "no-referrer";
       v.src = src; v.load();
       let done = false;
       const cleanup = () => { done = true; clearTimeout(t); v.removeEventListener("loadedmetadata", onMd); v.removeEventListener("error", onEd); };
@@ -603,7 +645,7 @@ export default function RiftPlayer({
 
       // ── kawaii CDN: XHR لا يستطيع إخفاء Referer (forbidden header) → CDN يُرجع 403.
       // الحل: custom Fetch loader بـ referrerPolicy:"no-referrer" لجميع طلبات kawaii HLS.
-      const isKawaiiHls = m3u8.includes("cdn.momentoai.dev") || m3u8.includes("video.kawaii-anime.com");
+      const isKawaiiHls = isKawaiiCdnUrl(m3u8);
       class KawaiiNoRefLoader {
         private ctrl: AbortController | null = null;
         destroy() { this.ctrl?.abort(); }
@@ -650,7 +692,10 @@ export default function RiftPlayer({
         ...bufCfg,
         maxBufferHole: 1.5,
         maxFragLookUpTolerance: 0.6,
-        startFragPrefetch: true,
+        // Do not prefetch before the media element is attached. Some HLS
+        // CDNs return a valid manifest but the prefetched first fragment is
+        // discarded, leaving a black player until a manual seek.
+        startFragPrefetch: false,
         progressive: true,
         /* ── startLevel:-1 → HLS.js picks best level for current bandwidth
            (faster cold-start than forcing level 0 then ABR upswitch) ── */
@@ -696,6 +741,20 @@ export default function RiftPlayer({
       });
       hlsRef.current = hls;
       hls.loadSource(m3u8); hls.attachMedia(v);
+      const kickPlayback = () => {
+        if (hlsRef.current !== hls) return;
+        setLoading(false);
+        showControls();
+        const retryPlay = () => {
+          if (hlsRef.current !== hls) return;
+          v.play().catch(() => {
+            window.setTimeout(() => {
+              if (hlsRef.current === hls) v.play().catch(() => {});
+            }, 250);
+          });
+        };
+        retryPlay();
+      };
       hls.on(Hls.Events.MANIFEST_PARSED, () => {
         if (hlsRef.current !== hls) return;
         // تعطيل مسارات الترجمة المدمجة في HLS (مثل kawaii) — نعتمد على overlay خاص بنا
@@ -710,9 +769,14 @@ export default function RiftPlayer({
           setCurrentTime(startPos);
         }
         hls.startLoad(startPos);
-        setError(null); setLoading(false); showControls();
-        v.play().catch(() => {});
+        setError(null);
+        kickPlayback();
       });
+      // Manifest parsing alone is not a rendered frame. Retry playback when
+      // the first fragment is buffered, which removes the intermittent black
+      // frame on AK/GO and slow AN fallback manifests.
+      hls.on(Hls.Events.FRAG_BUFFERED, () => kickPlayback());
+      v.addEventListener("canplay", kickPlayback, { once: true });
       hls.on(Hls.Events.ERROR, (_, d) => {
         if (hlsRef.current !== hls) return;
         if (!d.fatal) {
@@ -1015,10 +1079,23 @@ export default function RiftPlayer({
   function seekFrac(f: number, force = false) {
     const v = videoRef.current; if (!v || !duration) return;
     const t = Math.max(0, Math.min(1, f)) * duration;
-    setCurrentTime(t);
-    const now = Date.now();
-    if (force || now - seekThrottle.current > 280) {
-      seekThrottle.current = now;
+    // During a drag, update only the preview thumb. Repeatedly assigning
+    // currentTime makes HLS players request/flush segments and causes lag.
+    pendingSeekTimeRef.current = t;
+    if (seekRafRef.current === null) {
+      seekRafRef.current = requestAnimationFrame(() => {
+        seekRafRef.current = null;
+        const preview = pendingSeekTimeRef.current;
+        if (preview !== null) setCurrentTime(preview);
+      });
+    }
+    if (force) {
+      if (seekRafRef.current !== null) {
+        cancelAnimationFrame(seekRafRef.current);
+        seekRafRef.current = null;
+      }
+      pendingSeekTimeRef.current = null;
+      setCurrentTime(t);
       v.currentTime = t;
     }
   }
@@ -1052,7 +1129,7 @@ export default function RiftPlayer({
   function handlePrgClick(e: React.MouseEvent) {
     e.stopPropagation();
     const bar = progressRef.current; if (!bar) return;
-    seekFrac(calcSeekFrac(e.clientX, e.clientY, bar.getBoundingClientRect()));
+    seekFrac(calcSeekFrac(e.clientX, e.clientY, bar.getBoundingClientRect()), true);
   }
   function handlePrgDown(e: React.MouseEvent) {
     e.stopPropagation(); seekDrag.current = true;
@@ -1216,6 +1293,7 @@ export default function RiftPlayer({
       setDblTap({ side, id: now, secs: Math.abs(delta) });
       setTimeout(() => setDblTap(null), 700);
       lastTap.current = null;
+      userHiddenControlsRef.current = false;
       showControls();
     } else {
       // ── SINGLE TAP: record and delay controls toggle so double-tap can cancel it ──
@@ -1224,7 +1302,13 @@ export default function RiftPlayer({
       tapTimer.current = setTimeout(() => {
         tapTimer.current = null;
         lastTap.current = null;
-        setShowCtrl(p => { const n = !p; if (n) schedHide(); return n; });
+        setShowCtrl(p => {
+          const n = !p;
+          userHiddenControlsRef.current = !n;
+          if (n) schedHide();
+          else if (hideRef.current) { clearTimeout(hideRef.current); hideRef.current = null; }
+          return n;
+        });
       }, 260);
     }
   }
@@ -1276,7 +1360,7 @@ export default function RiftPlayer({
   function subPositionStyle(pos: "top" | "center" | "bottom", ctrlVisible: boolean): React.CSSProperties {
     if (pos === "center") return { top: "50%", transform: "translateY(-50%)", bottom: "auto" };
     if (pos === "top")    return { top: ctrlVisible ? 90 : 20, bottom: "auto", transform: "none" };
-                          return { bottom: ctrlVisible ? 130 : 60, top: "auto", transform: "none" };
+                          return { bottom: ctrlVisible ? 98 : 30, top: "auto", transform: "none" };
   }
 
   return (
@@ -1587,6 +1671,13 @@ export default function RiftPlayer({
               initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
               transition={{ duration: 0.22, ease: "easeInOut" }}
               className="absolute inset-0 flex flex-col pointer-events-none"
+              /* Do not let button touches bubble into the player tap gesture.
+                 Otherwise a button action can be followed by the delayed
+                 single-tap toggle and controls flash back on. */
+              onTouchStart={e => e.stopPropagation()}
+              onTouchMove={e => e.stopPropagation()}
+              onTouchEnd={e => e.stopPropagation()}
+              onClick={e => e.stopPropagation()}
             >
 
               {/* ════ TOP BAR ════ */}
@@ -1812,15 +1903,30 @@ export default function RiftPlayer({
                       e.stopPropagation(); e.preventDefault();
                       touchScrubbing.current = true; setPrgHover(true);
                       const r = e.currentTarget.getBoundingClientRect();
-                      seekFrac(calcSeekFrac(e.touches[0].clientX, e.touches[0].clientY, r));
+                      const f = calcSeekFrac(e.touches[0].clientX, e.touches[0].clientY, r);
+                      touchSeekFracRef.current = f;
+                      seekFrac(f, false);
                     }}
                     onTouchMove={e => {
                       e.stopPropagation(); e.preventDefault();
                       if (!touchScrubbing.current) return;
                       const r = e.currentTarget.getBoundingClientRect();
-                      seekFrac(calcSeekFrac(e.touches[0].clientX, e.touches[0].clientY, r));
+                      const f = calcSeekFrac(e.touches[0].clientX, e.touches[0].clientY, r);
+                      touchSeekFracRef.current = f;
+                      seekFrac(f, false);
                     }}
-                    onTouchEnd={e => { e.stopPropagation(); touchScrubbing.current = false; setPrgHover(false); }}
+                    onTouchEnd={e => {
+                      e.stopPropagation();
+                      seekFrac(touchSeekFracRef.current, true);
+                      touchScrubbing.current = false;
+                      setPrgHover(false);
+                    }}
+                    onTouchCancel={e => {
+                      e.stopPropagation();
+                      seekFrac(touchSeekFracRef.current, true);
+                      touchScrubbing.current = false;
+                      setPrgHover(false);
+                    }}
                   >
                     {/* Visual track */}
                     <div className="absolute left-0 right-0 rounded-full overflow-hidden pointer-events-none"
@@ -2474,7 +2580,7 @@ export default function RiftPlayer({
                             <button
                               onPointerDown={e => {
                                 e.stopPropagation();
-                                onSubSettingsChange({ fontSize: 16, color: "#ffffff", bgOpacity: 0, bold: true, position: "bottom" });
+                                onSubSettingsChange({ fontSize: 20, color: "#ffffff", bgOpacity: 0, bold: true, position: "bottom" });
                               }}
                               className="w-full py-2.5 rounded-2xl flex items-center justify-center gap-2 transition-all active:scale-95"
                               style={{

@@ -27,7 +27,21 @@ interface AnimHistoryItem {
   date: string;
 }
 
-type HistoryItem = AnimeHistoryItem | AnimHistoryItem;
+interface StardimaHistoryItem {
+  kind: "stardima";
+  serverId?: string;
+  providerTitleId: string;
+  episodeId: string;
+  mediaType: "movie" | "series";
+  episodeTitle?: string;
+  title: string;
+  cover: string;
+  ep: number;
+  season: number;
+  date: string;
+}
+
+type HistoryItem = AnimeHistoryItem | AnimHistoryItem | StardimaHistoryItem;
 
 function timeAgo(iso: string): string {
   try {
@@ -57,6 +71,52 @@ function getAnimProgress(tmdbId: string, type: string, season: number, ep: numbe
   try { return parseFloat(localStorage.getItem(`anim-wp-${tmdbId}-${type}-${season}-${ep}`) || "0") || 0; } catch { return 0; }
 }
 
+function getStardimaProgress(providerTitleId: string, episodeId: string): number {
+  try {
+    const raw = localStorage.getItem(`stardima-progress:${providerTitleId}:${episodeId}`) || "0";
+    try {
+      const value = JSON.parse(raw);
+      if (value && typeof value === "object") return Number(value.position) || 0;
+      return Number(raw) || 0;
+    } catch { return Number(raw) || 0; }
+  } catch { return 0; }
+}
+
+function loadStardimaHistory(): StardimaHistoryItem[] {
+  const items: StardimaHistoryItem[] = [];
+  try {
+    const raw = JSON.parse(localStorage.getItem("stardima-watch-history") || "[]");
+    for (const entry of raw) {
+      if (!entry?.providerTitleId || !entry?.episodeId || !entry?.title) continue;
+      items.push({
+        kind: "stardima",
+        providerTitleId: String(entry.providerTitleId),
+        episodeId: String(entry.episodeId),
+        mediaType: entry.mediaType === "movie" ? "movie" : "series",
+        episodeTitle: String(entry.episodeTitle || ""),
+        title: String(entry.title),
+        cover: String(entry.cover || ""),
+        ep: Number(entry.ep) || 1,
+        season: Number(entry.season) || 1,
+        date: String(entry.date || new Date().toISOString()),
+      });
+    }
+  } catch { /* ignore malformed local history */ }
+  return items;
+}
+
+function sortAndDedupeHistory(items: HistoryItem[]): HistoryItem[] {
+  items.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+  const seenStardima = new Set<string>();
+  return items.filter((item) => {
+    if (item.kind !== "stardima") return true;
+    const key = `${item.providerTitleId}:${item.episodeId}`;
+    if (seenStardima.has(key)) return false;
+    seenStardima.add(key);
+    return true;
+  });
+}
+
 function loadLocalHistory(): HistoryItem[] {
   const anime: AnimeHistoryItem[] = [];
   try {
@@ -78,26 +138,53 @@ function loadLocalHistory(): HistoryItem[] {
     }
   } catch { /* ignore */ }
 
-  const all: HistoryItem[] = [...anime, ...anim];
-  all.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-  return all;
+  const all: HistoryItem[] = [...anime, ...anim, ...loadStardimaHistory()];
+  return sortAndDedupeHistory(all);
 }
 
-async function loadServerHistory(): Promise<AnimeHistoryItem[]> {
+async function loadServerHistory(): Promise<HistoryItem[]> {
   try {
     const res = await fetch(API_BASE + "/api/user/history?limit=60", { credentials: "include" });
     if (!res.ok) return [];
     const data = await res.json();
-    return (data.history || []).map((r: any) => ({
-      kind: "anime" as const,
-      serverId: r.id,
-      id: r.animeId,
-      title: r.animeTitle || "",
-      cover: r.animeCover || "",
-      ep: r.episodeNumber,
-      date: r.watchedAt,
-      totalEps: 0,
-    }));
+    return (data.history || []).map((r: any): HistoryItem => {
+      const animeType = String(r.animeType ?? r.anime_type ?? "anime");
+      const title = String(r.animeTitle ?? r.anime_title ?? "");
+      const cover = String(r.animeCover ?? r.anime_cover ?? "");
+      const ep = Number(r.episodeNumber ?? r.episode_number) || 1;
+      const season = Number(r.seasonNumber ?? r.season_number) || 1;
+      const date = String(r.watchedAt ?? r.watched_at ?? new Date().toISOString());
+      if (animeType.startsWith("stardima:")) {
+        const decode = (part?: string) => {
+          try { return decodeURIComponent(part || ""); } catch { return part || ""; }
+        };
+        const parts = animeType.slice("stardima:".length).split(":");
+        return {
+          kind: "stardima",
+          serverId: String(r.id || ""),
+          providerTitleId: decode(parts[0]),
+          episodeId: decode(parts[1]),
+          mediaType: decode(parts[2]) === "movie" ? "movie" : "series",
+          episodeTitle: decode(parts[4]),
+          title,
+          cover,
+          ep,
+          season,
+          date,
+        };
+      }
+      return {
+        kind: "anime",
+        serverId: String(r.id || ""),
+        id: Number(r.animeId ?? r.anime_id) || 0,
+        title,
+        cover,
+        ep,
+        date,
+        totalEps: 0,
+      };
+    }).filter((item: HistoryItem) => item.kind !== "stardima" ||
+      Boolean(item.providerTitleId && item.episodeId && item.title));
   } catch { return []; }
 }
 
@@ -124,9 +211,8 @@ export default function WatchHistory() {
             anim.push({ kind: "anim", tmdbId: String(tmdbId), type: x.type || "movie", title: x.title, cover: fullCover, ep: x.ep || 1, season: x.season || 1, date: x.date || new Date().toISOString() });
           }
         } catch {}
-        const all: HistoryItem[] = [...server, ...anim];
-        all.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-        setHistory(all);
+        const all: HistoryItem[] = [...server, ...anim, ...loadStardimaHistory()];
+        setHistory(sortAndDedupeHistory(all));
       } else {
         setHistory(loadLocalHistory());
       }
@@ -154,12 +240,32 @@ export default function WatchHistory() {
     setHistory(h => h.filter(x => !(x.kind === "anim" && x.tmdbId === tmdbId && x.type === type && x.ep === ep && x.season === season)));
   }
 
+  function removeStardima(providerTitleId: string, episodeId: string, serverId?: string) {
+    if (userId && serverId) {
+      fetch(`${API_BASE}/api/user/history/${encodeURIComponent(serverId)}`, {
+        method: "DELETE",
+        credentials: "include",
+      }).catch(() => {});
+    }
+    try {
+      const raw: any[] = JSON.parse(localStorage.getItem("stardima-watch-history") || "[]");
+      localStorage.setItem("stardima-watch-history", JSON.stringify(raw.filter((entry) =>
+        !(String(entry.providerTitleId) === providerTitleId && String(entry.episodeId) === episodeId)
+      )));
+      localStorage.removeItem(`stardima-progress:${providerTitleId}:${episodeId}`);
+    } catch {}
+    setHistory(items => items.filter(item =>
+      !(item.kind === "stardima" && item.providerTitleId === providerTitleId && item.episodeId === episodeId)
+    ));
+  }
+
   function clearAll() {
     if (userId) {
       fetch(API_BASE + "/api/user/history", { method: "DELETE", credentials: "include" }).catch(() => {});
     }
     localStorage.removeItem("watch-history");
     localStorage.removeItem("anim-watch-history");
+    localStorage.removeItem("stardima-watch-history");
     setHistory([]);
   }
 
@@ -285,6 +391,75 @@ export default function WatchHistory() {
                           onClick={() => removeAnime(item.serverId, item.id, item.ep)}
                           className="w-10 h-10 rounded-xl bg-white/4 border border-white/7 flex items-center justify-center active:scale-90 transition-transform">
                           <Trash2 className="w-3.5 h-3.5 text-white/25" />
+                        </button>
+                      </div>
+                    </motion.div>
+                  );
+                }
+
+                if (item.kind === "stardima") {
+                  const progress = getStardimaProgress(item.providerTitleId, item.episodeId);
+                  const playParams = new URLSearchParams({
+                    providerTitleId: item.providerTitleId,
+                    episodeId: item.episodeId,
+                    episodeNumber: String(item.ep),
+                    seasonNumber: String(item.season),
+                    episodeTitle: item.episodeTitle || (item.mediaType === "movie" ? "الفيلم" : `الحلقة ${item.ep}`),
+                    title: item.title,
+                    mediaType: item.mediaType,
+                    poster: item.cover,
+                  });
+                  const playUrl = `/stardima/servers?${playParams.toString()}`;
+                  const detailUrl = `/stardima/title/${encodeURIComponent(item.providerTitleId)}`;
+                  const isMovie = item.mediaType === "movie";
+                  return (
+                    <motion.div
+                      key={`stardima-${item.providerTitleId}-${item.episodeId}`}
+                      initial={{ opacity: 0, y: 8 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, x: 40 }}
+                      transition={{ delay: i * 0.03, duration: 0.2 }}
+                      className="flex items-center gap-3 rounded-2xl border border-emerald-500/10 bg-[#0e1513] p-3">
+                      <Link href={detailUrl} className="shrink-0">
+                        <div className="relative h-[78px] w-14 overflow-hidden rounded-xl bg-white/5">
+                          {item.cover && <img src={item.cover} alt="" className="h-full w-full object-cover" loading="lazy" />}
+                          {progress > 0 && (
+                            <div className="absolute bottom-0 left-0 right-0 h-1 bg-white/15">
+                              <div className="h-full bg-emerald-400" style={{ width: `${Math.min(99, Math.round((progress / 7200) * 100))}%` }} />
+                            </div>
+                          )}
+                        </div>
+                      </Link>
+                      <div className="min-w-0 flex-1">
+                        <span className="mb-1 inline-flex items-center gap-1 rounded-md border border-emerald-400/20 bg-emerald-500/10 px-1.5 py-[2px] font-['Cairo'] text-[9px] font-black text-emerald-200">
+                          {isMovie ? <Film className="h-2.5 w-2.5" /> : <Tv className="h-2.5 w-2.5" />}
+                          StarDima · {isMovie ? "فيلم" : "مسلسل"}
+                        </span>
+                        <Link href={detailUrl}>
+                          <p className="line-clamp-1 font-['Cairo'] text-sm font-black leading-tight text-white/90">{item.title}</p>
+                        </Link>
+                        <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                          <span className="font-['Cairo'] text-[11px] font-bold text-emerald-300">
+                            {isMovie ? "الفيلم" : `${item.episodeTitle || `الحلقة ${item.ep}`} · الموسم ${item.season}`}
+                          </span>
+                          {progress > 5 ? <span className="font-mono text-[10px] text-white/35">{fmtSec(progress)}</span> : null}
+                        </div>
+                        <div className="mt-1 flex items-center gap-1">
+                          <Clock className="h-2.5 w-2.5 text-white/22" />
+                          <span className="font-['Cairo'] text-[9px] text-white/28">منذ {timeAgo(item.date)}</span>
+                        </div>
+                      </div>
+                      <div className="flex shrink-0 flex-col items-center gap-2">
+                        <Link href={playUrl}>
+                          <button className="flex h-10 w-10 items-center justify-center rounded-xl border border-emerald-400/25 bg-emerald-500/15 active:scale-90"
+                            aria-label="متابعة مشاهدة StarDima">
+                            <Play className="h-4 w-4 fill-emerald-300 text-emerald-300" />
+                          </button>
+                        </Link>
+                        <button onClick={() => removeStardima(item.providerTitleId, item.episodeId, item.serverId)}
+                          aria-label="حذف من سجل المشاهدة"
+                          className="flex h-10 w-10 items-center justify-center rounded-xl border border-white/7 bg-white/4 active:scale-90">
+                          <Trash2 className="h-3.5 w-3.5 text-white/25" />
                         </button>
                       </div>
                     </motion.div>

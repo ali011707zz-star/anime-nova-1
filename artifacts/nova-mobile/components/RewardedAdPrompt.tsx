@@ -4,7 +4,6 @@ import {
   StyleSheet,
   Text,
   View,
-  Linking,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
@@ -65,9 +64,9 @@ export function RewardedAdPrompt() {
     }
   };
 
-  const openTelegramChannel = () => {
+  const openSubscriptions = () => {
     close(false);
-    Linking.openURL("https://t.me/Anime_NOVA_0").catch(() => {});
+    router.push({ pathname: "/settings", params: { openPremium: "1" } } as any);
   };
 
   const isDownload = pending?.kind === "download";

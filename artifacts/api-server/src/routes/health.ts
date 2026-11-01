@@ -3,26 +3,13 @@ import { HealthCheckResponse } from "@workspace/api-zod";
 import { readFileSync } from "fs";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
-
+import { scraperQueueStats } from "../lib/scraperQueue.js";
+import { getCacheStats } from "../lib/sourceCache.js";
 const __dir = dirname(fileURLToPath(import.meta.url));
-
 const router: IRouter = Router();
-
-router.get("/healthz", (_req, res) => {
-  const data = HealthCheckResponse.parse({ status: "ok" });
-  res.json(data);
-});
-
-router.get("/updates", (_req, res) => {
-  try {
-    const filePath = join(__dir, "../data/updates.json");
-    const raw = readFileSync(filePath, "utf-8");
-    const updates = JSON.parse(raw);
-    res.setHeader("Cache-Control", "public, max-age=300");
-    res.json({ updates });
-  } catch {
-    res.json({ updates: [] });
-  }
-});
-
+router.get("/healthz", (_req, res) => { res.setHeader("Cache-Control", "no-store"); res.json(HealthCheckResponse.parse({ status: "ok" })); });
+router.get("/health", (_req, res) => { res.setHeader("Cache-Control", "no-store"); res.json({ status: "ok", queue: scraperQueueStats(), cache: getCacheStats() }); });
+router.get("/queue/status", (_req, res) => { res.setHeader("Cache-Control", "no-store"); res.json({ status: "ok", queue: scraperQueueStats() }); });
+router.get("/cache/status", (_req, res) => { res.setHeader("Cache-Control", "no-store"); res.json({ status: "ok", cache: getCacheStats() }); });
+router.get("/updates", (_req, res) => { try { const raw = readFileSync(join(__dir, "../data/updates.json"), "utf-8"); res.setHeader("Cache-Control", "public, max-age=300"); res.json({ updates: JSON.parse(raw) }); } catch { res.json({ updates: [] }); } });
 export default router;

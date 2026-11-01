@@ -11,7 +11,6 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import { StyleSheet, View } from "react-native";
 import { WebView } from "react-native-webview";
 import { StatusBar } from "expo-status-bar";
-import * as ScreenOrientation from "expo-screen-orientation";
 
 /* ── Types ── */
 export interface AnimHlsSource {
@@ -957,14 +956,6 @@ export default function AnimHlsPlayer({
 }: Props) {
   const webRef = useRef<WebView>(null);
   const loadedRef = useRef(false);
-
-  /* ── Lock to landscape on mount ── */
-  useEffect(() => {
-    ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE_LEFT).catch(() => {});
-    return () => {
-      ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP).catch(() => {});
-    };
-  }, []);
 
   /* ── Set episode nav after WebView ready ── */
   const setEpNav = useCallback(() => {

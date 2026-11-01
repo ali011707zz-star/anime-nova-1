@@ -5,13 +5,18 @@
 import session from "express-session";
 import connectPg from "connect-pg-simple";
 import type { Express } from "express";
+import { randomBytes } from "node:crypto";
 
 const SESSION_TTL = 30 * 24 * 60 * 60 * 1000; // 30 days
 
 export function setupSession(app: Express) {
   app.set("trust proxy", 1);
 
-  const secret = process.env.SESSION_SECRET || "nova-anime-2024-secure";
+  const configuredSecret = process.env.SESSION_SECRET?.trim();
+  if (process.env.NODE_ENV === "production" && !configuredSecret) {
+    throw new Error("[session] SESSION_SECRET must be configured in production");
+  }
+  const secret = configuredSecret || `nova-anime-dev-${randomBytes(32).toString("hex")}`;
 
   let store: session.Store | undefined;
 

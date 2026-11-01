@@ -3,6 +3,7 @@ import * as Notifications from "expo-notifications";
 import * as FileSystem from "expo-file-system";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { getBaseUrl } from "./api";
+import { PUSH_REGISTERED_KEY } from "./pushNotifications";
 
 const KNOWN_EPISODES_KEY = "nova-known-latest-episodes-v2";
 const LAST_SYNC_KEY = "nova-latest-episodes-last-sync-v1";
@@ -38,11 +39,14 @@ function configure(): Promise<boolean> {
             shouldSetBadge: true,
           }),
         });
-        const current = await Notifications.getPermissionsAsync();
-        const permission = current.granted
-          ? current
-          : await Notifications.requestPermissionsAsync();
-        if (!permission.granted) return false;
+        // Push registration already owns the one-time permission prompt.
+        // Avoid immediately prompting a second time when remote registration
+        // fails and the app falls back to local notifications.
+        const permission = await Notifications.getPermissionsAsync();
+        if (!permission.granted) {
+          console.warn(`[push] local fallback permission denied status=${permission.status || "unknown"}`);
+          return false;
+        }
         if (Platform.OS === "android") {
           await Notifications.setNotificationChannelAsync(CHANNEL_ID, {
             name: "حلقات جديدة",
@@ -52,11 +56,16 @@ function configure(): Promise<boolean> {
             showBadge: true,
           });
         }
+        console.info("[push] local notification fallback ready");
         return true;
-      } catch {
+      } catch (error) {
+        console.warn("[push] local fallback configuration failed:", error instanceof Error ? error.message : String(error));
         return false;
       }
-    })();
+    })().then((configured) => {
+      if (!configured) ready = null;
+      return configured;
+    });
   }
   return ready;
 }
@@ -102,7 +111,18 @@ async function localPosterUri(item: LatestEpisode): Promise<string | undefined> 
 async function notifyOneEpisode(item: LatestEpisode): Promise<void> {
   const title = String(item.titleAr || item.title || item.name || "أنمي").trim();
   const episode = Number(item.episode ?? 0);
-  const poster = await localPosterUri(item);
+  let posterTimer: ReturnType<typeof setTimeout> | undefined;
+  const poster = await Promise.race([
+    localPosterUri(item),
+    new Promise<undefined>((resolve) => {
+      posterTimer = setTimeout(() => resolve(undefined), 4_000);
+    }),
+  ]).finally(() => {
+    if (posterTimer) clearTimeout(posterTimer);
+  }).catch((error) => {
+    console.warn("[push] episode poster unavailable; keeping text notification:", error instanceof Error ? error.message : String(error));
+    return undefined;
+  });
   const content: Notifications.NotificationContentInput = {
     title: `حلقة جديدة · ${title}`,
     body: `الحلقة ${episode} متاحة الآن للمشاهدة في Anime NOVA`,
@@ -124,10 +144,15 @@ async function notifyOneEpisode(item: LatestEpisode): Promise<void> {
     // Android uses the large icon when it cannot render an attachment.
     (content as any).largeIcon = poster;
   }
-  await Notifications.scheduleNotificationAsync({
-    content,
-    trigger: null,
-  });
+  try {
+    await Notifications.scheduleNotificationAsync({ content, trigger: null });
+  } catch (error) {
+    if (!poster) throw error;
+    console.warn("[push] poster attachment failed; retrying text-only notification");
+    delete content.attachments;
+    delete (content as any).largeIcon;
+    await Notifications.scheduleNotificationAsync({ content, trigger: null });
+  }
 }
 
 export async function syncLatestEpisodeNotifications(): Promise<void> {
@@ -160,7 +185,8 @@ export async function syncLatestEpisodeNotifications(): Promise<void> {
       previous = new Set();
     }
     const isFirstSync = previous.size === 0;
-    const newItems = isFirstSync
+    const hasRemotePush = (await AsyncStorage.getItem(PUSH_REGISTERED_KEY)) === "1";
+    const newItems = isFirstSync || hasRemotePush
       ? []
       : normalized.filter(({ key }) => !previous.has(key));
     // Keep a rolling union rather than replacing the snapshot. The upstream
@@ -178,7 +204,9 @@ export async function syncLatestEpisodeNotifications(): Promise<void> {
       // devices that receive several new episodes in the same sync.
       await new Promise((resolve) => setTimeout(resolve, 250));
     }
-  })().catch(() => {}).finally(() => {
+  })().catch((error) => {
+    console.warn("[push] local episode notification sync failed:", error instanceof Error ? error.message : String(error));
+  }).finally(() => {
     syncInFlight = null;
   });
   return syncInFlight;

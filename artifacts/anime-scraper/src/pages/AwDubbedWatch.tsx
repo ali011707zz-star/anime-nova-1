@@ -133,14 +133,6 @@ export default function AwDubbedWatch() {
     return { bg: "rgba(255,255,255,0.06)", border: "rgba(255,255,255,0.15)", text: "rgba(255,255,255,0.55)" };
   };
 
-  const serverLabel = (name: string) => {
-    if (name.includes("PD"))  return "Pixeldrain";
-    if (name.includes("MF"))  return "Mediafire";
-    if (name.includes("KF"))  return "KrakenFiles";
-    if (name.includes("VT"))  return "Vidtape";
-    return name.replace(/AW·Dubbed\s*·\s*/gi, "").replace(/\s*·.*$/, "").trim();
-  };
-
   // ─── Shared Loading / Poster backdrop ─────────────────────────────────────
   const Backdrop = () => (
     posterUrl ? (
@@ -257,7 +249,6 @@ export default function AwDubbedWatch() {
             <AnimatePresence>
               {allSources.map((src, i) => {
                 const q = qualityColor(src.quality);
-                const srvLabel = serverLabel(src.name);
                 const isHls = !src.rawUrl && !!src.hlsUrl;
                 return (
                   <motion.button key={i}
@@ -288,7 +279,7 @@ export default function AwDubbedWatch() {
                           </span>
                         )}
                       </div>
-                      <p className="text-[12px] text-white/55 font-['Cairo'] mt-0.5 truncate">{srvLabel}</p>
+                      <p className="text-[12px] text-white/55 font-['Cairo'] mt-0.5 truncate">السيرفر {i + 1}</p>
                     </div>
 
                     {/* Arrow */}

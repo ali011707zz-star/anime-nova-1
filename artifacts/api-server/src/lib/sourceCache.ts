@@ -51,7 +51,8 @@ export const SITE_TTL: Record<string, number> = {
   moviebox:       10 * 60_000,    // CDN URLs مُوقَّعة بـ &t= تنتهي بسرعة → 10 دقائق فقط
   moviebox_anim:  10 * 60_000,    // نفس السبب — Animation version
   // ── روابط دائمة — MP4/HLS مباشر بدون tokens ─────────────────────
-  sanime:         30 * 24 * 3_600_000,  // server.sanime.net/Video/{id}/{ep}.mp4
+  sanime:         30 * 24 * 3_600_000,  // server.sanime.net permanent MP4 links
+  "sanime-v2":    30 * 24 * 3_600_000,  // same permanent links under the versioned cache key
   dahmermovies:   30 * 24 * 3_600_000,  // a.111477.xyz → p.111477.xyz direct MP4/MKV
   dahmermovies_anim: 30 * 24 * 3_600_000,
 };
@@ -60,7 +61,7 @@ const DEFAULT_TTL = 2 * 3_600_000;
 // URLs من هذه الأنماط تُعامَل كدائمة (TTL=30 يوم بدل حساب expiry من URL)
 const PERMANENT_URL_PATTERNS: Array<[RegExp, number]> = [
   // ── مدة 30 يوم ─────────────────────────────────────────────────────
-  [/server\.sanime\.net\/Video\//i,     30 * 24 * 3_600_000], // SAnime MP4 مباشر
+  [/server\.sanime\.net\/Video3\//i,    30 * 24 * 3_600_000], // SAnime MP4: canonical CDN path
   [/[ap]\.111477\.xyz\//i,              30 * 24 * 3_600_000], // DahmerMovies MP4
   [/mega\.nz\/(embed|file)\//i,         30 * 24 * 3_600_000], // Mega — ملفات دائمة
   [/drive\.google\.com\/file\//i,       30 * 24 * 3_600_000], // Google Drive
@@ -96,7 +97,7 @@ export function computeExpiry(site: string, sources: any[]): number {
   let minExpiry = siteDefault;
 
   for (const src of sources) {
-    for (const rawField of [src.directUrl, src.url, src.proxyUrl] as (string | undefined)[]) {
+    for (const rawField of [src.directUrl, src.url, src.proxyUrl, src.rawUrl] as (string | undefined)[]) {
       if (!rawField) continue;
       let url = rawField;
       if (url.startsWith("/api/")) {
@@ -119,6 +120,45 @@ export function computeExpiry(site: string, sources: any[]): number {
 
 // ── L1: ذاكرة العملية (سريعة، تُفقد عند restart) ──
 const l1 = new Map<string, { sources: any[]; expiresAt: number }>();
+
+// Single-flight deduplication: concurrent viewers of the same episode/provider
+// share one live extraction instead of opening one upstream request per viewer.
+// The promise is process-local; Supabase L2 remains the shared result across restarts.
+type SourceFlight = {
+  promise: Promise<any[]>;
+  listeners: Set<(source: any) => void>;
+};
+const sourceFlights = new Map<string, SourceFlight>();
+
+export function getOrCreateSourceFlight(
+  key: string,
+  loader: (publish?: (source: any) => void) => Promise<any[]>,
+  onProgress?: (source: any) => void,
+): Promise<any[]> {
+  const existing = sourceFlights.get(key);
+  if (existing) {
+    if (onProgress) existing.listeners.add(onProgress);
+    return existing.promise.finally(() => {
+      if (onProgress) existing.listeners.delete(onProgress);
+    });
+  }
+
+  const listeners = new Set<(source: any) => void>();
+  if (onProgress) listeners.add(onProgress);
+  const publish = (source: any) => {
+    for (const listener of listeners) {
+      try { listener(source); } catch { /* progress listeners must not fail the shared extraction */ }
+    }
+  };
+  const promise = Promise.resolve()
+    .then(() => loader(publish))
+    .finally(() => {
+      if (sourceFlights.get(key)?.promise === promise) sourceFlights.delete(key);
+      listeners.clear();
+    });
+  sourceFlights.set(key, { promise, listeners });
+  return promise;
+}
 
 setInterval(() => {
   const now = Date.now();
@@ -151,7 +191,8 @@ async function sbUpsertCache(cacheKey: string, site: string, sources: any[], exp
     expires_at: new Date(expiresAt).toISOString() as any,
   };
   try {
-    await cacheUpsert("source_cache", row, "cache_key");
+    const saved = await cacheUpsert("source_cache", row, "cache_key");
+    if (!saved) console.warn(`[sourceCache] L2 write returned no row for ${site}:${cacheKey}`);
   } catch (err: any) {
     // Retry with ms-epoch number in case remote DB still has expires_at as BIGINT (legacy schema)
     const isBigintError = err?.message?.includes("bigint") || err?.code === "22P02";
@@ -184,7 +225,12 @@ setTimeout(() => {
 }, 600);
 
 // ── صنع مفتاح cache ──
-export function makeSourceCacheKey(site: string, title: string, ep: number): string {
+export function makeSourceCacheKey(
+  site: string,
+  title: string,
+  ep: number,
+  identity?: string | number | null,
+): string {
   const norm = title
     .toLowerCase()
     .replace(/[^a-z0-9 ]/g, " ")
@@ -192,7 +238,11 @@ export function makeSourceCacheKey(site: string, title: string, ep: number): str
     .split(/\s+/)
     .slice(0, 5)
     .join("-");
-  return `${site}:${norm}:ep${ep}`;
+  // A title/episode pair is not a unique anime identity.  The previous key
+  // allowed same-titled series (or catalog links carrying a different ID) to
+  // share provider rows, which made one refresh show a different provider.
+  const id = String(identity ?? "").trim().replace(/[^a-zA-Z0-9:_-]/g, "");
+  return `${site}:${norm}:ep${ep}${id ? `:id${id}` : ""}`;
 }
 
 export function makeAnimCacheKey(site: string, tmdbId: string, type: string, season: number, ep: number): string {
@@ -376,19 +426,3 @@ setInterval(() => {
     if (now - v.ts > SUB_L1_TTL) SUB_L1.delete(k);
   }
 }, 3_600_000);
-
-/**
- * Dedupes concurrent source-fetching requests (request collapsing).
- * If a request for the same key is already in flight, returns its promise.
- */
-const _sourceFlights = new Map<string, Promise<any>>();
-export async function getOrCreateSourceFlight(key: string, fetcher: () => Promise<any>): Promise<any> {
-  const existing = _sourceFlights.get(key);
-  if (existing) return existing;
-
-  const p = fetcher().finally(() => {
-    _sourceFlights.delete(key);
-  });
-  _sourceFlights.set(key, p);
-  return p;
-}

@@ -1,11 +1,15 @@
 import { Router } from "express";
 import { logger } from "../lib/logger";
+import {
+  SANIME_API_PREFIX,
+  SANIME_USER_AGENT,
+  sanimeEpisodeVariants,
+} from "../lib/sanimeSource.mjs";
 
 const router = Router();
 
-const SA_API = "https://app.sanime.net/function/h10.php?page=";
-const SA_CDN = "https://server.sanime.net/Video";
-const SA_UA  = "IBRAHIMSEVEN";
+const SA_API = SANIME_API_PREFIX;
+const SA_UA = SANIME_USER_AGENT;
 const saImg  = (id: string | number) => `https://app.sanime.net/api/anime/${id}/image.jpg`;
 
 const PAGE_SIZE = 24;
@@ -146,12 +150,23 @@ router.get("/sanime/src", async (req, res) => {
     const epNum = parseInt(epStr, 10);
     if (isNaN(epNum)) return void res.status(400).json({ error: "invalid ep" });
 
-    const hdUrl = `${SA_CDN}/${id}/${epNum}.mp4`;
-    const sdUrl = `${SA_CDN}/${id}/${epNum}SD.mp4`;
+    // SAnime requires its mobile client UA.  A direct CDN URL works in a
+    // browser but returns 404 when ExoPlayer requests it without that UA.
+    // Keep the CDN URL encoded inside our proxy so the VPS can add the UA
+    // and forward Range requests correctly.
+    const proxyBase = `/api/anime/video-proxy?ref=${encodeURIComponent("https://app.sanime.net/")}&ua=${encodeURIComponent(SA_UA)}`;
+    const [current] = sanimeEpisodeVariants(id, epNum);
+    if (!current) {
+      res.status(400).json({ error: "invalid episode identity" });
+      return;
+    }
+    const proxyUrl = (url: string) => `${proxyBase}&url=${encodeURIComponent(url)}`;
+    const hdUrl = proxyUrl(current.hdUrl);
+    const sdUrl = proxyUrl(current.sdUrl);
 
     // Return direct URLs immediately — SA CDN URLs are permanent & predictable.
     // Skip slow HEAD/openAnd checks that added 5–13s latency; the player handles failures.
-    res.json({ hdUrl, sdUrl, permanent: true });
+    res.json({ hdUrl, sdUrl, permanent: true, proxy: true });
   } catch (e) {
     logger.error({ err: e }, "sanime /src error");
     res.status(500).json({ error: "src error" });

@@ -1,47 +1,130 @@
 import React, { useState, useEffect, useRef } from "react";
 import {
-  View, Text, Pressable, Image, FlatList,
-  ActivityIndicator, StyleSheet, Platform, ScrollView,
+  View, Text, Image, FlatList,
+  ActivityIndicator, StyleSheet, Platform, ScrollView, I18nManager,
 } from "react-native";
+
+const ROW_RTL = I18nManager.isRTL ? "row" : "row-reverse";
 import { Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { getBaseUrl } from "@/utils/api";
+import {
+  isTvDevice,
+  tvFocusStyle,
+  TvFocusGuideView,
+  TvPressable,
+  useTvListFocusScroll,
+} from "@/utils/tv";
+import { useColors } from "@/hooks/useColors";
+import { EpisodeDivider } from "@/components/EpisodeDivider";
+const Pressable = TvPressable;
 
 interface Season { label: string; arabicToonsId: string; }
 interface Episode { number: number; epId: string; url: string; thumbnail?: string; }
+type CarateenProvider = "sp" | "carateen";
 
-const BASE = getBaseUrl();
-const AT_IMG = `${BASE}/api/dubbed/img?f=`;
+function apiBase(): string {
+  return getBaseUrl().replace(/\/$/, "");
+}
 
 function thumbSrc(t?: string): string | null {
   if (!t) return null;
-  if (t.startsWith("http")) return t;
-  if (t.startsWith("/api/dubbed/img")) return `${BASE}${t}`;
-  const f = t.split("?f=")[1] || t.split("/").pop();
-  return f ? `${AT_IMG}${f}` : null;
+  const base = apiBase();
+  if (t.startsWith("/api/dubbed/img")) return `${base}${t}`;
+  if (/^https?:\/\//i.test(t)) {
+    try {
+      const url = new URL(t);
+      const host = url.hostname.toLowerCase();
+      const filename = url.pathname.split("/").pop() || "";
+      if (
+        (host === "arabic-toons.com" || host === "www.arabic-toons.com") &&
+        url.pathname.startsWith("/images/anime/") &&
+        filename
+      ) {
+        return `${base}/api/dubbed/img?f=${encodeURIComponent(filename)}`;
+      }
+    } catch { /* keep valid external image URLs as-is */ }
+    return t;
+  }
+  const f = t.split("?f=")[1] || t.split(/[?#]/)[0].split("/").pop();
+  return f ? `${base}/api/dubbed/img?f=${encodeURIComponent(f)}` : null;
+}
+
+function EpisodeArtwork({
+  thumbnailUri,
+  fallbackUri,
+}: {
+  thumbnailUri: string | null;
+  fallbackUri: string | null;
+}) {
+  const [failedUris, setFailedUris] = useState<string[]>([]);
+  const imageCandidates = [...new Set([thumbnailUri, fallbackUri].filter((uri): uri is string => Boolean(uri)))];
+  const uri = imageCandidates.find(candidate => !failedUris.includes(candidate));
+
+  if (!uri) {
+    return (
+      <View style={styles.epThumbPlaceholder}>
+        <Ionicons name="play-circle-outline" size={22} color="rgba(255,255,255,0.3)" />
+      </View>
+    );
+  }
+
+  return (
+    <Image
+      source={{ uri }}
+      style={StyleSheet.absoluteFill}
+      resizeMode="cover"
+      resizeMethod="resize"
+      fadeDuration={0}
+      onError={() => setFailedUris(current => current.includes(uri) ? current : [...current, uri])}
+    />
+  );
 }
 
 export default function DubbedDetailScreen() {
+  const colors = useColors();
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const topPad = Platform.OS === "web" ? 0 : insets.top;
+  const tvMode = isTvDevice();
 
-  const { id, title: titleParam, seasons: seasonsParam, img } = useLocalSearchParams<{
+  const {
+    id,
+    title: titleParam,
+    seasons: seasonsParam,
+    img,
+    provider: providerParam,
+    showId: showIdParam,
+    isMovie: isMovieParam,
+  } = useLocalSearchParams<{
     id: string; title: string; seasons: string; img: string;
+    provider?: string; showId?: string; isMovie?: string;
   }>();
 
   const title = titleParam || decodeURIComponent(id || "");
-  const seasons: Season[] = (() => {
+  const providerValue = Array.isArray(providerParam) ? providerParam[0] : providerParam;
+  const carateenProvider: CarateenProvider | null =
+    providerValue === "sp" || providerValue === "carateen" ? providerValue : null;
+  const showIdValue = Array.isArray(showIdParam) ? showIdParam[0] : showIdParam;
+  const showId = Number(showIdValue);
+  const isCarateenEntry = !!carateenProvider && Number.isSafeInteger(showId) && showId > 0;
+  const isMovie = (Array.isArray(isMovieParam) ? isMovieParam[0] : isMovieParam) === "1";
+  const legacySeasons: Season[] = (() => {
     try { return JSON.parse(decodeURIComponent(seasonsParam || "[]")); } catch { return []; }
   })();
+  const seasons: Season[] = isCarateenEntry
+    ? [{ label: "قائمة الحلقات", arabicToonsId: `${carateenProvider}:${showId}` }]
+    : legacySeasons;
   const imgSrc = img ? decodeURIComponent(img) : null;
-  const posterSrc = imgSrc?.startsWith("http") ? imgSrc : (imgSrc ? `${BASE}${imgSrc}` : null);
+  const posterSrc = imgSrc?.startsWith("http") ? imgSrc : (imgSrc ? `${apiBase()}${imgSrc}` : null);
 
   const [selSeason, setSelSeason] = useState(0);
   const [episodes, setEpisodes] = useState<Episode[]>([]);
   const [epLoading, setEpLoading] = useState(false);
   const [showSeasonDrop, setShowSeasonDrop] = useState(false);
+  const episodeListRef = useRef<FlatList<Episode>>(null);
+  const episodeFocusScroll = useTvListFocusScroll(episodeListRef, 0.35);
 
   const curSeason = seasons[selSeason];
 
@@ -50,12 +133,15 @@ export default function DubbedDetailScreen() {
     const ctrl = new AbortController();
     setEpLoading(true);
     setEpisodes([]);
-    fetch(`${BASE}/api/dubbed/episodes?series=${encodeURIComponent(curSeason.arabicToonsId)}`, { signal: ctrl.signal })
-      .then(r => r.json())
-      .then(d => { if (!ctrl.signal.aborted) { setEpisodes(d.episodes || []); setEpLoading(false); } })
+    const endpoint = isCarateenEntry
+      ? `${apiBase()}/api/dubbed/carateen/episodes?provider=${carateenProvider}&showId=${showId}`
+      : `${apiBase()}/api/dubbed/episodes?series=${encodeURIComponent(curSeason.arabicToonsId)}`;
+    fetch(endpoint, { signal: ctrl.signal })
+      .then(r => { if (!r.ok) throw new Error(`episodes_${r.status}`); return r.json(); })
+      .then(d => { if (!ctrl.signal.aborted) { setEpisodes(Array.isArray(d.episodes) ? d.episodes : []); setEpLoading(false); } })
       .catch((e) => { if (e?.name !== "AbortError") setEpLoading(false); });
     return () => ctrl.abort();
-  }, [curSeason?.arabicToonsId]);
+  }, [curSeason?.arabicToonsId, isCarateenEntry, carateenProvider, showId]);
 
   const openWatch = (ep: Episode) => {
     const at = seasons.map(s => s.arabicToonsId).join(",");
@@ -63,64 +149,102 @@ export default function DubbedDetailScreen() {
       pathname: "/dubbed/watch",
       params: {
         epUrl: ep.url,
+        series: isCarateenEntry
+          ? `${carateenProvider}:${showId}`
+          : curSeason?.arabicToonsId || "",
         title,
         ep: String(ep.number),
         season: curSeason?.label || "الموسم 1",
         poster: imgSrc || "",
-        at,
+        at: isCarateenEntry ? `${carateenProvider}:${showId}` : at,
+        provider: isCarateenEntry ? carateenProvider || "" : "",
+        showId: isCarateenEntry ? String(showId) : "",
+        episodeId: isCarateenEntry ? ep.epId : "",
+        isMovie: isMovie ? "1" : "0",
       },
     });
   };
 
-  const renderEp = ({ item: ep }: { item: Episode }) => {
+  const renderEp = ({ item: ep, index }: { item: Episode; index: number }) => {
     const thumb = thumbSrc(ep.thumbnail);
     return (
       <Pressable
         onPress={() => openWatch(ep)}
-        style={({ pressed }) => [styles.epRow, { opacity: pressed ? 0.7 : 1 }]}
+        focusable={tvMode}
+        hasTVPreferredFocus={tvMode && index === 0}
+        onFocus={() => episodeFocusScroll.scrollToFocusedIndex(index)}
+        style={({ pressed, focused }) => [
+          styles.epRow,
+          { backgroundColor: colors.card, borderColor: colors.border, opacity: pressed ? 0.78 : 1 },
+          tvMode && tvFocusStyle(focused),
+        ]}
       >
-        <View style={styles.epThumb}>
-          {thumb ? (
-            <Image source={{ uri: thumb }} style={StyleSheet.absoluteFill} resizeMode="cover" />
-          ) : (
-            <View style={styles.epThumbPlaceholder}>
-              <Ionicons name="play-circle-outline" size={22} color="rgba(255,255,255,0.3)" />
-            </View>
-          )}
+        <View style={[styles.epThumb, { backgroundColor: colors.surfaceElevated }]}>
+          <EpisodeArtwork
+            key={`${curSeason?.arabicToonsId || ""}:${ep.epId || ep.number}:${thumb || ""}:${posterSrc || ""}`}
+            thumbnailUri={thumb}
+            fallbackUri={posterSrc}
+          />
           <View style={styles.epPlayOverlay}>
             <View style={styles.epPlayBtn}>
-              <Ionicons name="play" size={10} color="#fff" />
+              <Ionicons name="play" size={12} color="#fff" style={{ marginLeft: 1 }} />
             </View>
+          </View>
+          <View style={styles.epNumBadge}>
+            <Text style={styles.epNumText}>{ep.number}</Text>
           </View>
         </View>
         <View style={styles.epInfo}>
-          <Text style={styles.epTitle}>الحلقة {ep.number}</Text>
+          <Text style={[styles.epTitle, { color: colors.textPrimary }]}>الحلقة {ep.number}</Text>
+          <Text style={[styles.epSub, { color: colors.textSecondary }]}>
+            {curSeason?.label || `الموسم ${selSeason + 1}`}
+          </Text>
         </View>
-        <Ionicons name="chevron-back" size={16} color="rgba(255,255,255,0.3)" />
+        <Ionicons name="chevron-back" size={16} color={colors.textMuted} />
       </Pressable>
     );
   };
 
   return (
-    <View style={[styles.container, { paddingTop: topPad }]}>
+    <View style={[styles.container, { backgroundColor: colors.background, paddingTop: topPad }]}>
       {/* Header */}
-      <View style={styles.header}>
-        <Pressable onPress={() => router.back()} style={styles.backBtn}>
-          <Ionicons name="chevron-back" size={20} color="rgba(255,255,255,0.7)" />
+      <View style={[styles.header, { borderBottomColor: colors.border }]}>
+        <Pressable onPress={() => router.canGoBack() ? router.back() : router.replace("/(tabs)" as any)} focusable={tvMode}
+          style={({ focused }) => [styles.backBtn, { backgroundColor: colors.input, borderColor: colors.border }, tvMode && tvFocusStyle(focused)]}>
+          <Ionicons name="chevron-forward" size={20} color={colors.textSecondary} />
         </Pressable>
-        </View>
+        <Text numberOfLines={1} style={[styles.headerTitle, { color: colors.textPrimary }]}>{title}</Text>
+      </View>
 
-      <FlatList
-        data={episodes}
-        keyExtractor={ep => ep.epId || String(ep.number)}
-        renderItem={renderEp}
-        ListHeaderComponent={() => (
+      <TvFocusGuideView autoFocus={tvMode} style={styles.tvFocusGuide}>
+        <FlatList
+          ref={episodeListRef}
+          data={episodes}
+          keyExtractor={ep => ep.epId || String(ep.number)}
+          renderItem={renderEp}
+          onViewableItemsChanged={episodeFocusScroll.onViewableItemsChanged}
+          viewabilityConfig={episodeFocusScroll.viewabilityConfig}
+          removeClippedSubviews={Platform.OS === "android" && !tvMode}
+          initialNumToRender={tvMode ? 12 : 8}
+          maxToRenderPerBatch={tvMode ? 10 : 6}
+          windowSize={tvMode ? 7 : Platform.OS === "android" ? 4 : 5}
+          onScrollToIndexFailed={({ index }) => episodeListRef.current?.scrollToOffset({
+            offset: Math.max(0, index * (tvMode ? 130 : 80)),
+            animated: false,
+          })}
+          ListHeaderComponent={() => (
           <View>
-            {/* Poster */}
+            {/* Poster & Hero */}
             <View style={styles.heroRow}>
-              <View style={styles.poster}>
+              <View style={[styles.poster, { backgroundColor: colors.surface, borderColor: colors.border }]}>
                 {posterSrc ? (
-                  <Image source={{ uri: posterSrc }} style={StyleSheet.absoluteFill} resizeMode="cover" />
+                  <Image
+                    source={{ uri: posterSrc }}
+                    style={StyleSheet.absoluteFill}
+                    resizeMode="cover"
+                    resizeMethod="resize"
+                    fadeDuration={0}
+                  />
                 ) : (
                   <View style={styles.posterPlaceholder}>
                     <Text style={{ fontSize: 36 }}>📺</Text>
@@ -128,69 +252,77 @@ export default function DubbedDetailScreen() {
                 )}
               </View>
               <View style={styles.heroInfo}>
-                <Text style={styles.heroTitle}>{title}</Text>
+                <Text style={[styles.heroTitle, { color: colors.textPrimary }]}>{title}</Text>
                 <View style={styles.badge}>
-                  <Text style={styles.badgeText}>مدبلج عربي</Text>
+                  <Ionicons name="volume-high-outline" size={11} color="#10B981" />
+                  <Text style={styles.badgeText}>
+                    {isCarateenEntry && carateenProvider === "sp" ? "سبيستون مدبلج" : "مدبلج عربي"}
+                  </Text>
                 </View>
                 {episodes.length > 0 && (
-                  <Text style={styles.epCount}>{episodes.length} حلقة</Text>
-                )}
-                {seasons.length > 1 && (
-                  <Pressable
-                    onPress={() => setShowSeasonDrop(o => !o)}
-                    style={styles.seasonBtn}
-                  >
-                    <Text style={styles.seasonBtnText}>{curSeason?.label || "اختر الموسم"}</Text>
-                    <Ionicons name={showSeasonDrop ? "chevron-up" : "chevron-down"} size={14} color="rgba(255,255,255,0.6)" />
-                  </Pressable>
-                )}
-                {seasons.length === 1 && (
-                  <Text style={styles.seasonLabel}>{seasons[0].label}</Text>
+                  <Text style={[styles.epCount, { color: colors.textSecondary }]}>{episodes.length} حلقة</Text>
                 )}
               </View>
             </View>
 
-            {/* Season dropdown */}
-            {showSeasonDrop && (
-              <View style={styles.seasonDrop}>
-                {seasons.map((s, i) => (
-                  <Pressable
-                    key={s.arabicToonsId}
-                    onPress={() => { setSelSeason(i); setShowSeasonDrop(false); }}
-                    style={[styles.seasonItem, i === selSeason && styles.seasonItemActive]}
-                  >
-                    <Text style={[styles.seasonItemText, i === selSeason && styles.seasonItemTextActive]}>
-                      {s.label}
-                    </Text>
-                  </Pressable>
-                ))}
-              </View>
+            {/* Season pills */}
+            {seasons.length > 1 && (
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.seasonTabsRow}
+              >
+                {seasons.map((s, i) => {
+                  const active = i === selSeason;
+                  return (
+                    <Pressable
+                      key={s.arabicToonsId}
+                      onPress={() => setSelSeason(i)}
+                      focusable={tvMode}
+                      style={({ focused }) => [
+                        styles.seasonPill,
+                        { backgroundColor: colors.surface, borderColor: colors.border },
+                        active && styles.seasonPillActive,
+                        tvMode && tvFocusStyle(focused),
+                      ]}
+                    >
+                      <Text style={[styles.seasonPillText, { color: active ? "#fff" : colors.textSecondary }]}>
+                        {s.label}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </ScrollView>
             )}
 
             <View style={styles.epSectionHeader}>
-              <View style={styles.accentBar} />
-              <Text style={styles.epSectionTitle}>الحلقات</Text>
+              <Text style={[styles.epSectionTitle, { color: colors.textPrimary }]}>
+                الحلقات {episodes.length > 0 ? `(${episodes.length})` : ""}
+              </Text>
             </View>
             {epLoading && (
               <View style={styles.epLoadingCenter}>
-                <ActivityIndicator color="#7C3AED" />
+                <ActivityIndicator color="#10B981" />
               </View>
             )}
           </View>
         )}
-        contentContainerStyle={{ paddingBottom: 100 }}
-        ListEmptyComponent={!epLoading ? (
-          <Text style={styles.emptyText}>لا توجد حلقات</Text>
-        ) : null}
-      />
+          contentContainerStyle={[{ paddingBottom: 100 }, tvMode && styles.tvListContent]}
+          ListEmptyComponent={!epLoading ? (
+            <Text style={[styles.emptyText, { color: colors.textMuted }]}>لا توجد حلقات</Text>
+          ) : null}
+        />
+      </TvFocusGuideView>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#09090B" },
+  tvFocusGuide: { flex: 1 },
+  tvListContent: { paddingHorizontal: 56, paddingBottom: 140 },
   header: {
-    flexDirection: "row", alignItems: "center", gap: 12,
+    flexDirection: ROW_RTL, alignItems: "center", gap: 10,
     paddingHorizontal: 16, paddingTop: 12, paddingBottom: 12,
     borderBottomWidth: 1, borderBottomColor: "rgba(255,255,255,0.05)",
   },
@@ -205,66 +337,76 @@ const styles = StyleSheet.create({
     fontWeight: "800", fontFamily: "Cairo_700Bold",
     textAlign: "right", writingDirection: "rtl",
   },
-  heroRow: { flexDirection: "row", gap: 14, padding: 16 },
+  heroRow: { flexDirection: ROW_RTL, gap: 14, padding: 16, alignItems: "center" },
   poster: {
-    width: 90, aspectRatio: 2 / 3, borderRadius: 12,
+    width: 92, aspectRatio: 2 / 3, borderRadius: 14,
     backgroundColor: "rgba(255,255,255,0.05)",
     overflow: "hidden", borderWidth: 1, borderColor: "rgba(255,255,255,0.08)",
   },
   posterPlaceholder: { flex: 1, alignItems: "center", justifyContent: "center" },
-  heroInfo: { flex: 1, paddingTop: 4, gap: 8 },
-  heroTitle: { color: "#fff", fontSize: 16, fontWeight: "900", fontFamily: "Cairo_700Bold", textAlign: "right", writingDirection: "rtl" },
+  heroInfo: { flex: 1, alignItems: "flex-end", gap: 8 },
+  heroTitle: { color: "#fff", fontSize: 17, fontWeight: "900", fontFamily: "Cairo_700Bold", textAlign: "right", writingDirection: "rtl" },
   badge: {
-    alignSelf: "flex-start",
-    paddingHorizontal: 10, paddingVertical: 3,
-    backgroundColor: "rgba(124,58,237,0.2)",
-    borderRadius: 8, borderWidth: 1, borderColor: "rgba(124,58,237,0.3)",
+    flexDirection: ROW_RTL,
+    alignItems: "center",
+    gap: 5,
+    paddingHorizontal: 10, paddingVertical: 4,
+    backgroundColor: "rgba(16,185,129,0.16)",
+    borderRadius: 12, borderWidth: 1, borderColor: "rgba(16,185,129,0.35)",
   },
-  badgeText: { color: "#A78BFA", fontSize: 11, fontFamily: "Cairo_700Bold" },
-  epCount: { color: "rgba(255,255,255,0.5)", fontSize: 12, fontFamily: "Cairo_400Regular" },
-  seasonBtn: {
-    flexDirection: "row", alignItems: "center", gap: 6,
-    paddingHorizontal: 12, paddingVertical: 7,
-    backgroundColor: "rgba(255,255,255,0.06)",
-    borderRadius: 10, borderWidth: 1, borderColor: "rgba(255,255,255,0.10)",
-    alignSelf: "flex-start",
+  badgeText: { color: "#10B981", fontSize: 11, fontFamily: "Cairo_700Bold" },
+  epCount: { color: "rgba(255,255,255,0.5)", fontSize: 12, fontFamily: "Cairo_600SemiBold" },
+  seasonTabsRow: {
+    paddingHorizontal: 14,
+    paddingBottom: 10,
+    gap: 8,
+    flexDirection: ROW_RTL,
   },
-  seasonBtnText: { color: "rgba(255,255,255,0.8)", fontSize: 12, fontFamily: "Cairo_400Regular" },
-  seasonLabel: { color: "rgba(255,255,255,0.5)", fontSize: 12, fontFamily: "Cairo_400Regular" },
-  seasonDrop: {
-    marginHorizontal: 16, marginBottom: 8,
-    backgroundColor: "#18181B", borderRadius: 14,
-    borderWidth: 1, borderColor: "rgba(255,255,255,0.10)",
-    overflow: "hidden",
+  seasonPill: {
+    paddingHorizontal: 18,
+    paddingVertical: 8,
+    borderRadius: 22,
+    borderWidth: 1,
   },
-  seasonItem: { paddingHorizontal: 16, paddingVertical: 12 },
-  seasonItemActive: { backgroundColor: "rgba(124,58,237,0.15)" },
-  seasonItemText: { color: "rgba(255,255,255,0.7)", fontSize: 13, fontFamily: "Cairo_400Regular" },
-  seasonItemTextActive: { color: "#A78BFA", fontFamily: "Cairo_700Bold" },
+  seasonPillActive: {
+    backgroundColor: "#10B981",
+    borderColor: "#10B981",
+  },
+  seasonPillText: {
+    fontSize: 13,
+    fontFamily: "Cairo_700Bold",
+  },
   epSectionHeader: {
-    flexDirection: "row", alignItems: "center", gap: 8,
-    paddingHorizontal: 16, paddingVertical: 10,
+    flexDirection: ROW_RTL, alignItems: "center", gap: 8,
+    paddingHorizontal: 16, paddingVertical: 8,
   },
-  accentBar: { width: 4, height: 20, borderRadius: 2, backgroundColor: "#7C3AED" },
-  epSectionTitle: { color: "#fff", fontSize: 15, fontWeight: "900", fontFamily: "Cairo_700Bold" },
+  epSectionTitle: { color: "#fff", fontSize: 14, fontWeight: "900", fontFamily: "Cairo_700Bold", textAlign: "right" },
   epLoadingCenter: { paddingVertical: 24, alignItems: "center" },
   epRow: {
-    flexDirection: "row", alignItems: "center", gap: 12,
-    paddingHorizontal: 16, paddingVertical: 10,
-    borderBottomWidth: 1, borderBottomColor: "rgba(255,255,255,0.04)",
+    flexDirection: ROW_RTL, alignItems: "center", gap: 12,
+    marginHorizontal: 14, marginVertical: 5,
+    paddingHorizontal: 12, paddingVertical: 10,
+    borderRadius: 16, borderWidth: 1,
   },
   epThumb: {
-    width: 90, aspectRatio: 16 / 9, borderRadius: 8,
-    backgroundColor: "rgba(255,255,255,0.05)", overflow: "hidden",
+    width: 96, height: 58, borderRadius: 10,
+    backgroundColor: "rgba(255,255,255,0.05)", overflow: "hidden", position: "relative",
   },
   epThumbPlaceholder: { flex: 1, alignItems: "center", justifyContent: "center" },
-  epPlayOverlay: { ...StyleSheet.absoluteFillObject, alignItems: "center", justifyContent: "center" },
+  epPlayOverlay: { ...StyleSheet.absoluteFillObject, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(0,0,0,0.25)" },
   epPlayBtn: {
-    width: 26, height: 26, borderRadius: 13,
-    backgroundColor: "rgba(0,0,0,0.6)", alignItems: "center", justifyContent: "center",
+    width: 28, height: 28, borderRadius: 14,
+    backgroundColor: "rgba(16,185,129,0.92)", alignItems: "center", justifyContent: "center",
   },
-  epInfo: { flex: 1 },
-  epTitle: { color: "#fff", fontSize: 13, fontWeight: "700", fontFamily: "Cairo_700Bold" },
+  epNumBadge: {
+    position: "absolute", bottom: 4, right: 5,
+    backgroundColor: "rgba(0,0,0,0.75)", borderRadius: 6,
+    paddingHorizontal: 5, paddingVertical: 1,
+  },
+  epNumText: { color: "#fff", fontSize: 9, fontFamily: "Cairo_700Bold" },
+  epInfo: { flex: 1, alignItems: "flex-end" },
+  epTitle: { color: "#fff", fontSize: 14, fontWeight: "700", fontFamily: "Cairo_700Bold", textAlign: "right" },
+  epSub: { fontSize: 11, fontFamily: "Cairo_400Regular", marginTop: 2, textAlign: "right" },
   emptyText: {
     color: "rgba(255,255,255,0.3)", textAlign: "center",
     fontFamily: "Cairo_400Regular", paddingVertical: 32,

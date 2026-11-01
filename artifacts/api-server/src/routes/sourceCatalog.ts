@@ -1,13 +1,19 @@
 import { Router, type Request, type Response } from "express";
-import { sbCount, sbSelect } from "../lib/supabaseClient.js";
+import { isSupabaseReady, sbCount, sbSelect } from "../lib/supabaseClient.js";
+import { filterSourceCatalogServerRows } from "../lib/sourceCatalogServerHealth.mjs";
+import { sourceCatalogTitleBelongsInSection } from "../lib/sourceCatalogEligibility.mjs";
 
 const router = Router();
 const PROVIDERS = new Set(["animeify", "anslayer", "sanime", "anifox", "stardima_catalog"]);
 const MEDIA_TYPES = new Set(["series", "movie"]);
 const CATALOG_STATUSES = new Set(["catalogued", "details_checked", "partial", "failed"]);
+const CATALOG_SECTIONS = new Set(["animation", "cartoon"]);
+const SECTION_CACHE_TTL_MS = 60_000;
+const sectionCache = new Map<string, { expiresAt: number; titles: any[]; providerTotal: number }>();
+const sectionCachePending = new Map<string, Promise<{ titles: any[]; providerTotal: number }>>();
 const PUBLIC_BASE = new URL(process.env.NOVA_PUBLIC_URL || "https://animenovaa.duckdns.org").origin;
 const TMDB_IMAGE_SIZES = new Set(["w92", "w154", "w185", "w342", "w500", "w780", "w1280", "original"]);
-const TMDB_IMAGE_FILE = /^[A-Za-z0-9_-]+[.](?:jpe?g|png|webp)$/i;
+const TMDB_IMAGE_FILE = /^[A-Za-z0-9_-]+\.(?:jpe?g|png|webp)$/i;
 
 function intParam(value: unknown, fallback: number, min: number, max: number): number {
   const n = Number.parseInt(String(value ?? ""), 10);
@@ -65,10 +71,21 @@ function publicServerRow(row: any): any {
   const metadataPageUrl = metadata && typeof metadata === "object"
     ? metadata.page_url
     : undefined;
+  const health = metadata && typeof metadata === "object" &&
+      metadata.health && typeof metadata.health === "object" && !Array.isArray(metadata.health)
+    ? metadata.health
+    : null;
   return {
     ...publicRow,
     page_url: row.page_url || metadataPageUrl || null,
+    health_state: health?.state || null,
+    health_reason: health?.reason || null,
+    health_checked_at: health?.checked_at || row.last_checked_at || null,
   };
+}
+
+function dedupeCatalogServerRows(rows: any[], provider: string) {
+  return filterSourceCatalogServerRows(rows.map(publicServerRow), provider);
 }
 
 function publicCatalogImageUrl(value: unknown): string | null {
@@ -76,11 +93,11 @@ function publicCatalogImageUrl(value: unknown): string | null {
   if (!raw) return null;
   try {
     const imageUrl = new URL(raw);
-    const path = imageUrl.pathname.split("/");
-    if (imageUrl.protocol !== "https:" || imageUrl.hostname !== "image.tmdb.org" ||
-        path.length !== 5 || path[1] !== "t" || path[2] !== "p" ||
-        !TMDB_IMAGE_SIZES.has(path[3]) || !TMDB_IMAGE_FILE.test(path[4])) return raw;
-    return PUBLIC_BASE + "/api/source-catalog/tmdb-poster/" + path[3] + "/" + path[4];
+    const match = imageUrl.pathname.match(
+      /^\/t\/p\/(w92|w154|w185|w342|w500|w780|w1280|original)\/([A-Za-z0-9_-]+\.(?:jpe?g|png|webp))$/i,
+    );
+    if (imageUrl.protocol !== "https:" || imageUrl.hostname !== "image.tmdb.org" || !match) return raw;
+    return `${PUBLIC_BASE}/api/source-catalog/tmdb-poster/${match[1]}/${match[2]}`;
   } catch {
     return raw;
   }
@@ -102,6 +119,7 @@ function publicCatalogTitle(row: any): any {
           version: Number(classification.version) || 1,
           status: String(classification.status || "source_labeled"),
           contentFamilies: safeList(classification.content_families),
+          familyEvidence: String(classification.family_evidence || ""),
           sourceCategories: safeList(classification.source_categories),
           sourceTags: safeList(classification.source_tags),
           localizationLabels: safeList(classification.localization_labels),
@@ -110,6 +128,68 @@ function publicCatalogTitle(row: any): any {
         }
       : null,
   };
+}
+
+async function loadQualifiedStardimaSection(
+  section: "animation" | "cartoon",
+): Promise<{ titles: any[]; providerTotal: number }> {
+  const cached = sectionCache.get(section);
+  if (cached && cached.expiresAt > Date.now()) {
+    return { titles: cached.titles, providerTotal: cached.providerTotal };
+  }
+  const pending = sectionCachePending.get(section);
+  if (pending) return pending;
+
+  const request = (async () => {
+    const family = section === "animation" ? "anime" : "animation";
+    const candidates: any[] = [];
+    const pageSize = 1000;
+    const maxRows = 10_000;
+    for (let offset = 0; offset < maxRows; offset += pageSize) {
+      const filters: Record<string, string | number | undefined> = {
+        provider: "eq.stardima_catalog",
+        order: "title.asc",
+      };
+      if (isSupabaseReady()) {
+        filters["provider_metadata->classification->>status"] =
+          "in.(classified,manually_reviewed)";
+        filters["provider_metadata->classification->content_families"] =
+          `cs.${JSON.stringify([family])}`;
+      }
+      const rows = await sbSelect<any>("source_catalog_titles", filters, {
+        limit: pageSize,
+        offset,
+        select: "id,provider,provider_title_id,title,title_en,title_ar,title_native,synonyms,genres,tags,media_type,release_year,episode_count,poster_url,backdrop_url,provider_metadata,catalog_status,last_seen_at",
+        strict: true,
+      });
+      candidates.push(...rows);
+      if (rows.length < pageSize) break;
+    }
+    if (candidates.length >= maxRows) {
+      throw new Error("StarDima section scan exceeded the safe row limit");
+    }
+
+    const titles = candidates
+      .map(publicCatalogTitle)
+      .filter((item) => sourceCatalogTitleBelongsInSection(item, section))
+      .sort((a, b) => String(a.title || "").localeCompare(String(b.title || "")));
+    const providerTotal = await sbCount(
+      "source_catalog_titles",
+      { provider: "eq.stardima_catalog" },
+    );
+    sectionCache.set(section, {
+      expiresAt: Date.now() + SECTION_CACHE_TTL_MS,
+      titles,
+      providerTotal,
+    });
+    return { titles, providerTotal };
+  })();
+  sectionCachePending.set(section, request);
+  try {
+    return await request;
+  } finally {
+    sectionCachePending.delete(section);
+  }
 }
 
 // Public catalog endpoints. These return provider/server page URLs, never
@@ -122,7 +202,7 @@ router.get("/source-catalog/tmdb-poster/:size/:file", async (req: Request, res: 
   }
 
   try {
-    const upstream = await fetch("https://image.tmdb.org/t/p/" + size + "/" + file, {
+    const upstream = await fetch(`https://image.tmdb.org/t/p/${size}/${file}`, {
       headers: {
         Accept: "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
         "User-Agent": "NovaAnime/1.0",
@@ -173,7 +253,14 @@ router.get("/source-catalog/categories", async (req: Request, res: Response) => 
   if (!provider) return void res.status(400).json({ error: "valid provider required" });
   if (provider === "stardima_catalog" && STARDIMA_ARCHIVE_FEED_HIDDEN) {
     res.setHeader("Cache-Control", "no-store");
-    return void res.json({ provider, totalTitles: 0, classifiedTitles: 0, unclassifiedTitles: 0, categories: [], localizationLabels: [] });
+    return void res.json({
+      provider,
+      totalTitles: 0,
+      classifiedTitles: 0,
+      unclassifiedTitles: 0,
+      categories: [],
+      localizationLabels: [],
+    });
   }
 
   const result = await catalogQuery(res, "source catalog categories unavailable", async () => {
@@ -239,7 +326,11 @@ router.get("/source-catalog/titles", async (req: Request, res: Response) => {
   const rawCatalogStatus = String(req.query.catalogStatus ?? "").trim().toLowerCase();
   const category = String(req.query.category ?? "").trim();
   const tag = String(req.query.tag ?? "").trim();
-  const requestedSection = String(req.query.section ?? "").trim().toLowerCase();
+  const rawSection = String(req.query.section ?? "").trim().toLowerCase();
+  const section = rawSection as "animation" | "cartoon";
+  if (rawSection && (!CATALOG_SECTIONS.has(rawSection) || provider !== "stardima_catalog")) {
+    return void res.status(400).json({ error: "section must be animation or cartoon for stardima_catalog" });
+  }
   if (rawMediaType && !MEDIA_TYPES.has(rawMediaType)) {
     return void res.status(400).json({ error: "mediaType must be series or movie" });
   }
@@ -249,9 +340,55 @@ router.get("/source-catalog/titles", async (req: Request, res: Response) => {
   if (category.length > 120 || tag.length > 120) {
     return void res.status(400).json({ error: "category and tag must be 120 characters or fewer" });
   }
-  if (provider === "stardima_catalog" && STARDIMA_ARCHIVE_FEED_HIDDEN && !["animation", "cartoon"].includes(requestedSection)) {
+  if (provider === "stardima_catalog" && STARDIMA_ARCHIVE_FEED_HIDDEN && !section) {
     res.setHeader("Cache-Control", "no-store");
-    return void res.json({ results: [], page, limit, provider, query: q, mediaType: rawMediaType || null, category: category || null, tag: tag || null, catalogStatus: rawCatalogStatus || null, total: 0, providerTotal: 0 });
+    return void res.json({
+      results: [],
+      page,
+      limit,
+      provider,
+      query: q,
+      mediaType: rawMediaType || null,
+      category: category || null,
+      tag: tag || null,
+      catalogStatus: rawCatalogStatus || null,
+      total: 0,
+      providerTotal: 0,
+    });
+  }
+  if (section) {
+    const result = await catalogQuery(res, "source catalog titles unavailable", async () => {
+      const qualified = await loadQualifiedStardimaSection(section);
+      const needle = q.toLocaleLowerCase();
+      const matching = needle
+        ? qualified.titles.filter((item) => [
+            item.title,
+            item.title_en,
+            item.title_ar,
+            item.title_native,
+            ...(Array.isArray(item.synonyms) ? item.synonyms : []),
+          ].some((value) => String(value || "").toLocaleLowerCase().includes(needle)))
+        : qualified.titles;
+      return {
+        results: matching.slice((page - 1) * limit, page * limit).map(publicCatalogTitle),
+        total: matching.length,
+        providerTotal: qualified.providerTotal,
+      };
+    });
+    if (!result) return;
+    res.setHeader("Cache-Control", "no-store");
+    return void res.json({
+      ...result,
+      page,
+      limit,
+      provider,
+      section,
+      query: q,
+      mediaType: rawMediaType || null,
+      category: category || null,
+      tag: tag || null,
+      catalogStatus: rawCatalogStatus || null,
+    });
   }
   const filters: Record<string, string | number | undefined> = {
     provider: provider ? `eq.${provider}` : undefined,
@@ -273,7 +410,7 @@ router.get("/source-catalog/titles", async (req: Request, res: Response) => {
     strict: true,
   }));
   if (!rows) return;
-  res.setHeader("Cache-Control", "public, max-age=300");
+  res.setHeader("Cache-Control", provider === "stardima_catalog" ? "no-store" : "public, max-age=300");
   res.json({
     results: rows.map(publicCatalogTitle),
     page,
@@ -354,31 +491,54 @@ router.get("/source-catalog/lookup", async (req: Request, res: Response) => {
     limit: 100,
     // Production Supabase still has the legacy schema without page_url.
     // The importer keeps the same public contract in provider_metadata.page_url.
-    select: "id,episode_id,provider,server_key,server_name,quality,language,source_kind,source_host,availability_status,last_checked_at,provider_metadata",
+    select: "id,episode_id,provider,server_key,server_name,quality,language,source_kind,source_host,availability_status,last_checked_at,last_seen_at,provider_metadata",
     strict: true,
-  })).map(publicServerRow).filter((server: any) => Boolean(server.page_url)));
+  })));
   if (!servers) return;
+  const visible = dedupeCatalogServerRows(servers, String(title.provider || ""));
 
-  res.setHeader("Cache-Control", "public, max-age=60");
-  res.json({ title: publicCatalogTitle(title), episode: episodeRow, servers, pagesOnly: true });
+  res.setHeader("Cache-Control", provider === "stardima_catalog" ? "no-store" : "private, max-age=10");
+  res.json({
+    title: publicCatalogTitle(title),
+    episode: episodeRow,
+    servers: visible.servers,
+    omittedServerCount: visible.omittedCount,
+    pagesOnly: true,
+  });
 });
 
 router.get("/source-catalog/episodes/:episodeId/servers", async (req: Request, res: Response) => {
   const episodeId = Number(String(req.params.episodeId ?? ""));
   if (!Number.isSafeInteger(episodeId) || episodeId <= 0) return void res.status(400).json({ error: "invalid episode id" });
   const quality = String(req.query.quality ?? "").trim();
+  const episodes = await catalogQuery(res, "source catalog episode unavailable", () => sbSelect<any>("source_catalog_episodes", {
+    id: `eq.${episodeId}`,
+  }, {
+    limit: 1,
+    select: "id,provider",
+    strict: true,
+  }));
+  if (!episodes) return;
+  if (!episodes[0]) return void res.status(404).json({ error: "episode not found" });
+  const provider = String(episodes[0].provider || "");
   const rows = await catalogQuery(res, "source catalog servers unavailable", async () => (await sbSelect<any>("source_catalog_servers", {
     episode_id: `eq.${episodeId}`,
     quality: quality && quality.length <= 30 ? `eq.${quality}` : undefined,
     order: "quality.desc",
   }, {
     limit: 100,
-    select: "id,episode_id,provider,server_key,server_name,quality,language,source_kind,source_host,availability_status,last_checked_at,provider_metadata",
+    select: "id,episode_id,provider,server_key,server_name,quality,language,source_kind,source_host,availability_status,last_checked_at,last_seen_at,provider_metadata",
     strict: true,
-  })).map(publicServerRow).filter((server: any) => Boolean(server.page_url)));
+  })));
   if (!rows) return;
-  res.setHeader("Cache-Control", "public, max-age=60");
-  res.json({ servers: rows, pagesOnly: true, playback: "resolve-on-demand" });
+  const visible = dedupeCatalogServerRows(rows, provider);
+  res.setHeader("Cache-Control", provider === "stardima_catalog" ? "no-store" : "private, max-age=10");
+  res.json({
+    servers: visible.servers,
+    omittedServerCount: visible.omittedCount,
+    pagesOnly: true,
+    playback: provider === "stardima_catalog" ? "internal-resolve-and-verify" : "resolve-on-demand",
+  });
 });
 
 export default router;

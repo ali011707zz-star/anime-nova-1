@@ -191,7 +191,7 @@ router.post("/device-link/claim", async (req: Request, res: Response) => {
     if (!claimed) return res.status(409).json({ error: "تم استخدام الرمز. أنشئ رمزاً جديداً من الهاتف." });
 
     const now = new Date().toISOString();
-    const linked = linkedForDevice
+    const insertedLinked = linkedForDevice
       ? await sbPatch("linked_devices", { id: `eq.${linkedForDevice.id}`, user_id: `eq.${pending.user_id}` }, {
           device_name: deviceName,
           platform,
@@ -207,6 +207,14 @@ router.post("/device-link/claim", async (req: Request, res: Response) => {
           linked_at: now,
           last_seen_at: now,
         });
+
+    // Some PostgREST configurations return an empty representation even
+    // though the write succeeded. Confirm the row before reporting failure.
+    const linked = insertedLinked || (await sbSelect("linked_devices", {
+      user_id: `eq.${pending.user_id}`,
+      device_id: `eq.${deviceId}`,
+      revoked_at: "is.null",
+    }, { limit: 1 }))[0];
 
     if (!linked) return res.status(503).json({ error: "تعذّر حفظ الجهاز. حاول برمز جديد." });
 

@@ -25,7 +25,6 @@ const ARABIC_ALIASES: Record<string, string> = {
   "جوجوتسو كايسن": "Jujutsu Kaisen",
   "جوجوتسو": "Jujutsu Kaisen",
   "ماي هيرو أكاديميا": "Boku no Hero Academia",
-  "أكاديمية بطلي": "Boku no Hero Academia",
   "سولو ليفلينج": "Solo Leveling",
   "سولو لفلينج": "Solo Leveling",
   "بلاك كلوفر": "Black Clover",

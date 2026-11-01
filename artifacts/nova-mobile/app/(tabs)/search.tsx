@@ -1,14 +1,30 @@
-import React, { useState, useEffect, useRef, useCallback } from "react";
+import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import {
-  View, Text, Pressable, TextInput, FlatList, Image,
+  View, Text, TextInput, FlatList, Image,
   ScrollView, ActivityIndicator, StyleSheet, Platform,
-  KeyboardAvoidingView, Modal, Alert, useWindowDimensions,
+  KeyboardAvoidingView, Modal, Alert, useWindowDimensions, I18nManager,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { useRouter } from "expo-router";
+import { useLocalSearchParams, useRouter } from "expo-router";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as ImagePicker from "expo-image-picker";
+import { isTvDevice, tvFocusStyle, TvPressable as Pressable } from "@/utils/tv";
+import { getGridColumnCount } from "@/components/AnimeCard";
+import { AnimeFilterSheet, type AnimeFilterOption } from "@/components/AnimeFilterSheet";
+import { useColors } from "@/hooks/useColors";
+import type { ThemePalette } from "@/constants/colors";
+
+const ROW_RTL = I18nManager.isRTL ? "row" : "row-reverse";
+
+function useSearchTheme() {
+  const colors = useColors();
+  const styles = useMemo(() => ({
+    s: createSearchStyles(colors),
+    sm: createTraceStyles(colors),
+  }), [colors]);
+  return { colors, ...styles };
+}
 
 /* ── trace.moe result type ── */
 interface TraceResult {
@@ -32,13 +48,19 @@ function fmtTime(sec: number) {
 }
 
 import { getBaseUrl } from "@/utils/baseUrl";
-const API_BASE = `${getBaseUrl()}/api`;
+const rawApiBase = getBaseUrl().replace(/\/$/, "");
+const SEARCH_API_BASE = /a\.duckdns\.org/i.test(rawApiBase)
+  ? "https://animenovaa.duckdns.org"
+  : rawApiBase;
+const API_BASE = `${SEARCH_API_BASE}/api`;
 
 /* ── Types ── */
 interface AnimeResult {
   id: number;
-  title: { romaji: string; english?: string; native?: string };
-  coverImage: { large: string };
+  idSource?: "mal" | "kitsu" | string;
+  title: { romaji?: string; english?: string; native?: string };
+  title_ar?: string;
+  coverImage: { large?: string; extraLarge?: string };
   averageScore?: number;
   episodes?: number;
   format?: string;
@@ -63,11 +85,15 @@ const SEASON_OPTIONS = [
   { label: "خريف", value: "FALL", emoji: "🍂" },
 ];
 const SORT_OPTIONS = [
-  { label: "الأشهر", value: "POPULARITY_DESC" },
+  { label: "الأكثر شعبية", value: "POPULARITY_DESC" },
   { label: "الأعلى تقييماً", value: "SCORE_DESC" },
+  { label: "بواسطة الاسم", value: "TITLE_ROMAJI" },
   { label: "الأحدث", value: "START_DATE_DESC" },
-  { label: "الأقدم", value: "START_DATE" },
 ];
+const YEAR_OPTIONS = ["الكل", ...Array.from(
+  { length: new Date().getFullYear() - 1990 + 1 },
+  (_, index) => String(new Date().getFullYear() - index),
+)];
 const GENRES = [
   "Action","Adventure","Comedy","Drama","Fantasy","Horror","Mystery","Romance",
   "Sci-Fi","Slice of Life","Sports","Supernatural","Thriller","Mecha","Music",
@@ -80,6 +106,10 @@ const GENRES_AR: Record<string,string> = {
   "Supernatural":"خوارق","Thriller":"إثارة","Mecha":"ميكا","Music":"موسيقى",
   "Psychological":"نفسي","School":"مدرسي","Isekai":"إيسيكاي",
 };
+const GENRE_FILTER_OPTIONS: AnimeFilterOption[] = [
+  { label: "الكل", value: "" },
+  ...GENRES.map((value) => ({ label: GENRES_AR[value] || value, value })),
+];
 const FORMAT_AR: Record<string,string> = {
   TV:"مسلسل",MOVIE:"فيلم",OVA:"OVA",ONA:"ONA",SPECIAL:"خاص",MUSIC:"موسيقى",
 };
@@ -87,57 +117,145 @@ const BLOCKED_GENRES = new Set<string>(["Hentai", "Ecchi"]);
 
 /* ── Arabic transliteration ── */
 const AR_TO_EN: Record<string,string> = {
-  "ناروتو":"Naruto","هانتر":"Hunter x Hunter","ون بيس":"One Piece",
-  "دراغون بول":"Dragon Ball","ديمون سلاير":"Demon Slayer",
-  "هجوم العمالقة":"Shingeki no Kyojin","بوكو نو هيرو":"Boku no Hero Academia",
-  "بليتش":"Bleach","فيري تيل":"Fairy Tail","توكيو غول":"Tokyo Ghoul",
-  "ريزيرو":"Re:Zero","سوورد ارت":"Sword Art Online","فولميتال":"Fullmetal Alchemist",
+  "ناروتو":"Naruto","هانتر":"Hunter x Hunter","هنتر":"Hunter x Hunter",
+  "ون بيس":"One Piece","ون بيسي":"One Piece",
+  "دراغون بول":"Dragon Ball","دراجون بول":"Dragon Ball",
+  "ديمون سلاير":"Demon Slayer","كيميتسو":"Kimetsu",
+  "هجوم العمالقة":"Shingeki no Kyojin","بوكو نو هيرو":"Boku no Hero",
+  "بلاتش":"Bleach","بليتش":"Bleach","هانتر إكس هانتر":"Hunter x Hunter",
+  "فيري تيل":"Fairy Tail","الكيميائي":"Fullmetal Alchemist",
+  "سوورد ارت":"Sword Art Online","توكيو غول":"Tokyo Ghoul",
+  "ريزيرو":"Re:Zero","تيتان":"Titan","ابطال":"Hero Academia",
 };
-function translateQuery(q: string): string {
-  const t = q.trim();
-  if (AR_TO_EN[t]) return AR_TO_EN[t];
-  if (/[\u0600-\u06FF]/.test(t)) {
-    for (const [ar, en] of Object.entries(AR_TO_EN)) {
-      if (t.includes(ar)) return t.replace(ar, en);
-    }
-  }
-  return t;
+function normalizeArabicSearch(value: string): string {
+  return value.normalize("NFKC")
+    .replace(/[ًٌٍَُِّْـ]/g, "")
+    .replace(/[أإآ]/g, "ا")
+    .replace(/ة/g, "ه")
+    .replace(/يٰ/g, "ي")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
-function buildSearchQuery(sort: string, format: string, status: string, genre: string, season: string) {
+async function translateQuery(q: string): Promise<string> {
+  const trimmed = q.trim();
+  if (!/[\u0600-\u06FF]/.test(trimmed)) return trimmed;
+
+  const normalized = normalizeArabicSearch(trimmed);
+  const exact = Object.entries(AR_TO_EN)
+    .find(([ar]) => normalizeArabicSearch(ar) === normalized);
+  if (exact) return exact[1];
+
+  const phrase = Object.entries(AR_TO_EN)
+    .filter(([ar]) => normalized.includes(normalizeArabicSearch(ar)))
+    .sort((a, b) => b[0].length - a[0].length)[0];
+  if (phrase) return trimmed.replace(phrase[0], phrase[1]);
+
+  try {
+    const response = await fetch(
+      `${SEARCH_API_BASE}/api/anime/translate?text=${encodeURIComponent(trimmed)}&from=ar&to=en&kind=search`,
+    );
+    if (response.ok) {
+      const data = await response.json();
+      const translated = String(data?.translated || "").trim();
+      if (translated && translated !== trimmed && !/[\u0600-\u06FF]/.test(translated)) {
+        return translated;
+      }
+    }
+  } catch {
+    // AniList still receives the original Arabic query as the final fallback.
+  }
+  return trimmed;
+}
+
+function buildSearchQuery(sort: string, format: string, status: string, genre: string, season: string, year: string) {
   const sortArr = sort ? `[SEARCH_MATCH, ${sort}]` : "[SEARCH_MATCH, POPULARITY_DESC]";
   return `query ($search: String, $page: Int, $perPage: Int) {
   Page(page: $page, perPage: $perPage) {
-    media(search: $search, type: ANIME, isAdult: false, genre_not_in: ["Hentai","Ecchi"], sort: ${sortArr}${format ? `, format: ${format}` : ""}${status ? `, status: ${status}` : ""}${genre ? `, genre: "${genre}"` : ""}${season ? `, season: ${season}` : ""}) {
-      id title { romaji english } coverImage { large } averageScore episodes format status startDate { year } genres
+    media(search: $search, type: ANIME, isAdult: false, genre_not_in: ["Hentai"], sort: ${sortArr}${format ? `, format: ${format}` : ""}${status ? `, status: ${status}` : ""}${genre ? `, genre: "${genre}"` : ""}${season ? `, season: ${season}` : ""}${year ? `, startDate_greater: "${Number(year) - 1}-12-31", startDate_lesser: "${Number(year) + 1}-01-01"` : ""}) {
+      id title { romaji english native } coverImage { large extraLarge } averageScore episodes format status startDate { year } genres
     }
   }
 }`;
 }
 
-function buildBrowseQuery(sort: string, format: string, status: string, genre: string, season: string) {
+function buildArabicIdQuery(ids: number[], sort: string, format: string, status: string, genre: string, season: string, year: string) {
+  return buildSearchQuery(sort, format, status, genre, season, year)
+    .replace("query ($search: String, $page: Int, $perPage: Int) {", "query ($page: Int, $perPage: Int) {")
+    .replace(
+      "media(search: $search, type: ANIME,",
+      `media(id_in: [${ids.join(",")}], type: ANIME,`,
+    );
+}
+
+async function findArabicTitleIds(query: string, signal: AbortSignal): Promise<number[]> {
+  if (!/[\u0600-\u06FF]/.test(query)) return [];
+  try {
+    const response = await fetch(
+      `${API_BASE}/anime/title-ar/search?q=${encodeURIComponent(query)}`,
+      { signal },
+    );
+    if (!response.ok) return [];
+    const payload = await response.json();
+    return Array.isArray(payload?.items)
+      ? payload.items.map((item: any) => Number(item.id)).filter((id: number) => Number.isSafeInteger(id) && id > 0)
+      : [];
+  } catch (error: any) {
+    if (error?.name === "AbortError") throw error;
+    return [];
+  }
+}
+
+function buildBrowseQuery(sort: string, format: string, status: string, genre: string, season: string, year: string) {
   return `query ($page: Int, $perPage: Int) {
   Page(page: $page, perPage: $perPage) {
-    media(type: ANIME, isAdult: false, genre_not_in: ["Hentai","Ecchi"], sort: [${sort || "POPULARITY_DESC"}]${format ? `, format: ${format}` : ""}${status ? `, status: ${status}` : ""}${genre ? `, genre: "${genre}"` : ""}${season ? `, season: ${season}` : ""}) {
-      id title { romaji english } coverImage { large } averageScore episodes format status startDate { year } genres
+    media(type: ANIME, isAdult: false, genre_not_in: ["Hentai","Ecchi"], sort: [${sort || "POPULARITY_DESC"}]${format ? `, format: ${format}` : ""}${status ? `, status: ${status}` : ""}${genre ? `, genre: "${genre}"` : ""}${season ? `, season: ${season}` : ""}${year ? `, startDate_greater: "${Number(year) - 1}-12-31", startDate_lesser: "${Number(year) + 1}-01-01"` : ""}) {
+      id title { romaji english } coverImage { large extraLarge } averageScore episodes format status startDate { year } genres
     }
   }
 }`;
 }
 
 function filterSafe(list: AnimeResult[]): AnimeResult[] {
-  return list.filter(a => !(a.genres || []).some(g => BLOCKED_GENRES.has(g)));
+  const seen = new Set<number>();
+  return list.filter((anime) => {
+    if (!anime?.id || seen.has(anime.id)) return false;
+    seen.add(anime.id);
+    if ((anime.genres || []).some(g => BLOCKED_GENRES.has(g))) return false;
+
+    /* Web search accepts AniList fallback records that have only an
+       English/native title or extraLarge artwork. Normalize those records
+       before rendering instead of dropping them on mobile. */
+    const title = anime.title?.romaji || anime.title?.english || anime.title?.native;
+    const cover = anime.coverImage?.large || anime.coverImage?.extraLarge;
+    if (!title || !cover) return false;
+    if (!anime.title?.romaji) anime.title = { ...anime.title, romaji: title };
+    if (!anime.coverImage?.large) anime.coverImage = { ...anime.coverImage, large: cover };
+    return true;
+  });
 }
 
 /* ── Anime Card ── */
 function AnimeCard({ anime, onPress, columns }: { anime: AnimeResult; onPress: () => void; columns: number }) {
+  const { s } = useSearchTheme();
+  const { width, height } = useWindowDimensions();
+  const tvMode = isTvDevice(width, height);
   const fmt = anime.format ? FORMAT_AR[anime.format] || anime.format : null;
   const isFilm = anime.format === "MOVIE";
   return (
-    <Pressable onPress={onPress} style={[s.card, { flex: 1 / columns }]}>
+    <Pressable
+      onPress={onPress}
+      focusable={tvMode}
+      style={({ focused }) => [s.card, { flex: 1 / columns }, tvMode && tvFocusStyle(focused)]}
+    >
       <View style={s.cardImgWrap}>
         {anime.coverImage?.large ? (
-          <Image source={{ uri: anime.coverImage.large }} style={s.cardImg} />
+          <Image
+            source={{ uri: tvMode ? anime.coverImage.extraLarge || anime.coverImage.large : anime.coverImage.large }}
+            style={s.cardImg}
+            resizeMethod="resize"
+            fadeDuration={tvMode ? 0 : 100}
+          />
         ) : (
           <View style={[s.cardImg, s.noImg]} />
         )}
@@ -153,7 +271,17 @@ function AnimeCard({ anime, onPress, columns }: { anime: AnimeResult; onPress: (
           </View>
         ) : null}
         <View style={s.cardBottom}>
-          <Text style={s.cardTitle} numberOfLines={2}>{anime.title?.romaji}</Text>
+          <Text style={[s.cardTitle, { writingDirection: "ltr" }]} numberOfLines={2}>
+            {anime.title?.english || anime.title?.romaji}
+          </Text>
+          {anime.title_ar ? (
+            <Text
+              numberOfLines={1}
+              style={{ color: "rgba(255,255,255,0.72)", fontSize: tvMode ? 12 : 8, lineHeight: tvMode ? 18 : 11, fontFamily: "Cairo_700Bold", textAlign: "right", writingDirection: "rtl", marginTop: 2 }}
+            >
+              {anime.title_ar}
+            </Text>
+          ) : null}
         </View>
       </View>
     </Pressable>
@@ -161,13 +289,20 @@ function AnimeCard({ anime, onPress, columns }: { anime: AnimeResult; onPress: (
 }
 
 export default function SearchScreen() {
+  const { colors, s, sm } = useSearchTheme();
   const insets = useSafeAreaInsets();
-  const { width } = useWindowDimensions();
+  const { width, height } = useWindowDimensions();
   const router = useRouter();
+  const { q: routeQuery } = useLocalSearchParams<{ q?: string | string[] }>();
+  const initialQuery = typeof routeQuery === "string" ? routeQuery : "";
   const topPad = Platform.OS === "web" ? 0 : insets.top;
-  const gridColumns = width >= 1000 ? 6 : width >= 700 ? 5 : 3;
+  // Four TV columns remain readable while avoiding an oversized decode batch
+  // on lower-powered Android TV hardware.
+  const tvMode = isTvDevice(width, height);
+  const gridColumns = getGridColumnCount(width, height);
+  const gridWidth = Math.min(Math.max(width - 24, 0), tvMode ? 1100 : 900);
 
-  const [query, setQuery]         = useState("");
+  const [query, setQuery]         = useState(initialQuery);
   const [results, setResults]     = useState<AnimeResult[]>([]);
   const [loading, setLoading]     = useState(false);
   const [sort, setSort]           = useState("POPULARITY_DESC");
@@ -175,6 +310,7 @@ export default function SearchScreen() {
   const [status, setStatus]       = useState("");
   const [genre, setGenre]         = useState("");
   const [season, setSeason]       = useState("");
+  const [year, setYear]           = useState("");
   const [showFilters, setShowFilters] = useState(false);
   const [showGenres, setShowGenres]   = useState(false);
   const [history, setHistory]     = useState<string[]>([]);
@@ -189,34 +325,43 @@ export default function SearchScreen() {
   const inputRef = useRef<TextInput>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const activeFilterCount = [format, status, genre, season].filter(Boolean).length;
+  const activeFilterCount = [format, status, genre, season, year].filter(Boolean).length;
 
   useEffect(() => {
     AsyncStorage.getItem("searchHistory")
       .then(v => { if (v) setHistory(JSON.parse(v)); });
   }, []);
 
+  useEffect(() => {
+    setQuery(initialQuery);
+  }, [initialQuery]);
+
   const searchAbortRef = useRef<AbortController | null>(null);
 
   const doSearch = useCallback(async (
-    q: string, so: string, fo: string, st: string, ge: string, se: string,
+    q: string, so: string, fo: string, st: string, ge: string, se: string, ye: string,
     signal: AbortSignal
   ) => {
     setLoading(true);
     try {
       let body: object;
       if (q.trim()) {
-        const term = translateQuery(q);
-        body = { query: buildSearchQuery(so, fo, st, ge, se), variables: { search: term, page: 1, perPage: 30 } };
+        const arabicIds = await findArabicTitleIds(q, signal);
+        if (arabicIds.length) {
+          body = { query: buildArabicIdQuery(arabicIds, so, fo, st, ge, se, ye), variables: { page: 1, perPage: 30 } };
+        } else {
+          const term = await translateQuery(q);
+          body = { query: buildSearchQuery(so, fo, st, ge, se, ye), variables: { search: term, page: 1, perPage: 30 } };
+        }
         setHistory(prev => {
           const updated = [q, ...prev.filter(h => h !== q)].slice(0, 8);
           AsyncStorage.setItem("searchHistory", JSON.stringify(updated));
           return updated;
         });
       } else {
-        body = { query: buildBrowseQuery(so, fo, st, ge, se), variables: { page: 1, perPage: 30 } };
+        body = { query: buildBrowseQuery(so, fo, st, ge, se, ye), variables: { page: 1, perPage: 30 } };
       }
-      const res = await fetch(`${getBaseUrl()}/api/anilist`, {
+      const res = await fetch(`${SEARCH_API_BASE}/api/anilist`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
@@ -224,6 +369,9 @@ export default function SearchScreen() {
       });
       if (signal.aborted) return;
       const json = await res.json();
+      if (!res.ok || (Array.isArray(json?.errors) && json.errors.length > 0)) {
+        throw new Error(json?.error || json?.errors?.[0]?.message || `Search failed (${res.status})`);
+      }
       if (!signal.aborted) setResults(filterSafe(json.data?.Page?.media || []));
     } catch (e: any) {
       if (e?.name === "AbortError") return;
@@ -235,22 +383,29 @@ export default function SearchScreen() {
   useEffect(() => {
     if (timer.current) clearTimeout(timer.current);
     searchAbortRef.current?.abort();
-    const hasFilters = format || status || genre || season;
+    const hasFilters = format || status || genre || season || year;
     if (!query.trim() && !hasFilters) { setResults([]); setLoading(false); return; }
     const ctrl = new AbortController();
     searchAbortRef.current = ctrl;
     timer.current = setTimeout(() => {
-      doSearch(query, sort, format, status, genre, season, ctrl.signal);
+      doSearch(query, sort, format, status, genre, season, year, ctrl.signal);
     }, query.trim() ? 400 : 100);
     return () => {
       if (timer.current) clearTimeout(timer.current);
       ctrl.abort();
     };
-  }, [query, sort, format, status, genre, season]);
+  }, [query, sort, format, status, genre, season, year]);
 
-  function clearFilters() { setFormat(""); setStatus(""); setGenre(""); setSeason(""); }
+  function clearFilters() {
+    setSort("POPULARITY_DESC");
+    setFormat("");
+    setStatus("");
+    setGenre("");
+    setSeason("");
+    setYear("");
+  }
   const activeSeason = SEASON_OPTIONS.find(opt => opt.value === season);
-  const showEmpty = !query && !format && !status && !genre && !season;
+  const showEmpty = !query && !format && !status && !genre && !season && !year;
 
   /* ── trace.moe handlers ── */
   async function runTraceSearch(imageUri: string, mimeType?: string, base64Data?: string | null) {
@@ -325,22 +480,86 @@ export default function SearchScreen() {
       <View style={[s.container, { paddingTop: topPad }]}>
 
         {/* ── Sticky header ── */}
-        <View style={s.header}>
+        <View style={[s.header, tvMode && s.tvHeader]}>
+          {!tvMode ? (
+            <>
+              <View style={s.mobileHeaderTop}>
+                <View style={s.mobileTitleGroup}>
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel="رجوع"
+                    onPress={() => router.canGoBack() ? router.back() : router.replace("/(tabs)/browse" as any)}
+                    style={s.mobileBackButton}
+                  >
+                    <Ionicons name="chevron-forward" size={21} color={colors.textPrimary} />
+                  </Pressable>
+                  <Text style={s.mobileTitle}>البحث</Text>
+                </View>
+                <View style={s.mobileModeSwitch}>
+                  <Pressable onPress={() => router.push("/(tabs)/browse" as any)} style={s.mobileModeButton}>
+                    <Ionicons name="compass-outline" size={14} color={colors.textMuted} />
+                    <Text style={s.mobileModeText}>تصفح</Text>
+                  </Pressable>
+                  <Pressable style={[s.mobileModeButton, s.mobileModeButtonActive]}>
+                    <Ionicons name="search" size={14} color="#ffffff" />
+                    <Text style={[s.mobileModeText, s.mobileModeTextActive]}>بحث</Text>
+                  </Pressable>
+                </View>
+              </View>
+
+              <View style={s.mobileSearchBar}>
+                <Pressable
+                  accessibilityLabel="فتح فلاتر البحث"
+                  onPress={() => setShowFilters(true)}
+                  style={[s.mobileFilterButton, activeFilterCount > 0 && s.mobileFilterButtonActive]}
+                >
+                  <Ionicons
+                    name="options-outline"
+                    size={17}
+                    color={activeFilterCount > 0 ? colors.buttonText : colors.textSecondary}
+                  />
+                  {activeFilterCount > 0 && (
+                    <View style={s.mobileFilterCount}>
+                      <Text style={s.mobileFilterCountText}>{activeFilterCount}</Text>
+                    </View>
+                  )}
+                </Pressable>
+                <TextInput
+                  ref={inputRef}
+                  value={query}
+                  onChangeText={setQuery}
+                  placeholder="ابحث عن أنمي بالعربية أو الإنجليزية..."
+                  placeholderTextColor={colors.textMuted}
+                  style={s.mobileSearchInput}
+                  focusable
+                />
+                {query ? (
+                  <Pressable onPress={() => { setQuery(""); inputRef.current?.focus(); }}>
+                    <Ionicons name="close-circle" size={17} color={colors.textMuted} />
+                  </Pressable>
+                ) : null}
+                <Ionicons name="search" size={19} color="#0ea5e9" />
+              </View>
+            </>
+          ) : (
+            <>
           {/* Search bar */}
-          <View style={s.searchBar}>
-            <Ionicons name="search" size={15} color="rgba(255,255,255,0.3)" />
+          <View style={[s.searchBar, tvMode && s.tvSearchBar]}>
+            <Ionicons name="search" size={15} color={colors.textMuted} />
             <TextInput
               ref={inputRef}
               value={query}
               onChangeText={setQuery}
               placeholder="ابحث عن أنمي..."
-              placeholderTextColor="rgba(255,255,255,0.25)"
-              style={s.searchInput}
-              autoFocus
+              placeholderTextColor={colors.textMuted}
+              style={[s.searchInput, tvMode && s.tvSearchInput]}
+              autoFocus={tvMode}
+              focusable
             />
             {query ? (
-              <Pressable onPress={() => { setQuery(""); inputRef.current?.focus(); }}>
-                <Ionicons name="close-circle" size={16} color="rgba(255,255,255,0.35)" />
+              <Pressable onPress={() => { setQuery(""); inputRef.current?.focus(); }} focusable={tvMode}
+                style={({ focused }) => [tvMode && tvFocusStyle(focused)]}>
+                <Ionicons name="close-circle" size={16} color={colors.textMuted} />
               </Pressable>
             ) : null}
           </View>
@@ -349,8 +568,9 @@ export default function SearchScreen() {
           <View style={s.filterRow}>
             <Pressable
               onPress={() => setShowFilters(f => !f)}
-              style={[s.filterToggle, (showFilters || activeFilterCount > 0) && s.filterToggleActive]}>
-              <Ionicons name="options" size={12} color={showFilters || activeFilterCount > 0 ? "#c4b5fd" : "rgba(255,255,255,0.45)"} />
+              focusable={tvMode}
+              style={({ focused }) => [s.filterToggle, (showFilters || activeFilterCount > 0) && s.filterToggleActive, tvMode && tvFocusStyle(focused)]}>
+              <Ionicons name="options" size={12} color={showFilters || activeFilterCount > 0 ? colors.accent : colors.textSecondary} />
               <Text style={[s.filterToggleText, (showFilters || activeFilterCount > 0) && s.filterToggleTextActive]}>
                 فلاتر
               </Text>
@@ -359,18 +579,20 @@ export default function SearchScreen() {
               )}
             </Pressable>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flex: 1 }}>
-              <View style={{ flexDirection: "row", gap: 6, paddingRight: 8 }}>
+              <View style={{ flexDirection: "row", gap: tvMode ? 10 : 6, paddingRight: 8 }}>
                 {SORT_OPTIONS.map(opt => (
                   <Pressable key={opt.value} onPress={() => setSort(opt.value)}
-                    style={[s.sortPill, sort === opt.value && s.sortPillActive]}>
+                    focusable={tvMode}
+                    style={({ focused }) => [s.sortPill, tvMode && s.tvPill, sort === opt.value && s.sortPillActive, tvMode && tvFocusStyle(focused)]}>
                     <Text style={[s.sortPillText, sort === opt.value && s.sortPillTextActive]}>{opt.label}</Text>
                   </Pressable>
                 ))}
               </View>
             </ScrollView>
             {activeFilterCount > 0 && (
-              <Pressable onPress={clearFilters} style={{ paddingHorizontal: 4 }}>
-                <Text style={{ fontSize: 11, color: "rgba(252,100,100,0.7)", fontFamily: "Cairo_700Bold" }}>مسح</Text>
+              <Pressable onPress={clearFilters} focusable={tvMode}
+                style={({ focused }) => [{ paddingHorizontal: 4 }, tvMode && tvFocusStyle(focused)]}>
+                <Text style={{ fontSize: 11, color: colors.destructive, fontFamily: "Cairo_700Bold" }}>مسح</Text>
               </Pressable>
             )}
           </View>
@@ -380,7 +602,8 @@ export default function SearchScreen() {
             <View style={{ flexDirection: "row", gap: 6 }}>
               {SEASON_OPTIONS.map(opt => (
                 <Pressable key={opt.value} onPress={() => setSeason(opt.value)}
-                  style={[s.seasonChip, season === opt.value && s.seasonChipActive]}>
+                  focusable={tvMode}
+                  style={({ focused }) => [s.seasonChip, tvMode && s.tvSeasonChip, season === opt.value && s.seasonChipActive, tvMode && tvFocusStyle(focused)]}>
                   <Text style={{ fontSize: 10 }}>{opt.emoji}</Text>
                   <Text style={[s.seasonChipText, season === opt.value && s.seasonChipTextActive]}>{opt.label}</Text>
                 </Pressable>
@@ -395,7 +618,8 @@ export default function SearchScreen() {
               <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6, marginBottom: 10 }}>
                 {FORMAT_OPTIONS.map(opt => (
                   <Pressable key={opt.value} onPress={() => setFormat(opt.value)}
-                    style={[s.filterChip, format === opt.value && s.filterChipActive]}>
+                    focusable={tvMode}
+                    style={({ focused }) => [s.filterChip, format === opt.value && s.filterChipActive, tvMode && tvFocusStyle(focused)]}>
                     <Text style={[s.filterChipText, format === opt.value && s.filterChipTextActive]}>{opt.label}</Text>
                   </Pressable>
                 ))}
@@ -404,38 +628,53 @@ export default function SearchScreen() {
               <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6, marginBottom: 10 }}>
                 {STATUS_OPTIONS.map(opt => (
                   <Pressable key={opt.value} onPress={() => setStatus(opt.value)}
-                    style={[s.filterChip, status === opt.value && s.filterChipActive]}>
+                    focusable={tvMode}
+                    style={({ focused }) => [s.filterChip, status === opt.value && s.filterChipActive, tvMode && tvFocusStyle(focused)]}>
                     <Text style={[s.filterChipText, status === opt.value && s.filterChipTextActive]}>{opt.label}</Text>
                   </Pressable>
                 ))}
               </View>
-              <Pressable onPress={() => setShowGenres(g => !g)}
-                style={{ flexDirection: "row", alignItems: "center", gap: 6, marginBottom: genre ? 4 : 0 }}>
+               <Pressable onPress={() => setShowGenres(g => !g)} focusable={tvMode}
+                 style={({ focused }) => [{ flexDirection: "row", alignItems: "center", gap: 6, marginBottom: genre ? 4 : 0 }, tvMode && tvFocusStyle(focused)]}>
                 <Text style={s.filterLabel}>التصنيف</Text>
-                {genre ? <Text style={{ fontSize: 10, color: "#c4b5fd", fontFamily: "Cairo_700Bold" }}>· {GENRES_AR[genre] || genre}</Text> : null}
-                <Ionicons name={showGenres ? "chevron-up" : "chevron-down"} size={12} color="rgba(255,255,255,0.3)" />
+                {genre ? <Text style={{ fontSize: 10, color: colors.accent, fontFamily: "Cairo_700Bold" }}>· {GENRES_AR[genre] || genre}</Text> : null}
+                <Ionicons name={showGenres ? "chevron-up" : "chevron-down"} size={12} color={colors.textMuted} />
               </Pressable>
               {showGenres && (
                 <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
-                  <Pressable onPress={() => setGenre("")} style={[s.filterChip, !genre && s.filterChipActive]}>
+                   <Pressable onPress={() => setGenre("")} focusable={tvMode}
+                     style={({ focused }) => [s.filterChip, !genre && s.filterChipActive, tvMode && tvFocusStyle(focused)]}>
                     <Text style={[s.filterChipText, !genre && s.filterChipTextActive]}>الكل</Text>
                   </Pressable>
                   {GENRES.map(g => (
                     <Pressable key={g} onPress={() => setGenre(genre === g ? "" : g)}
-                      style={[s.filterChip, genre === g && s.filterChipActive]}>
+                      focusable={tvMode}
+                      style={({ focused }) => [s.filterChip, genre === g && s.filterChipActive, tvMode && tvFocusStyle(focused)]}>
                       <Text style={[s.filterChipText, genre === g && s.filterChipTextActive]}>{GENRES_AR[g] || g}</Text>
                     </Pressable>
                   ))}
                 </View>
               )}
+              <Text style={s.filterLabel}>السنة</Text>
+              <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
+                {YEAR_OPTIONS.map(y => (
+                  <Pressable key={y || "all-years"} onPress={() => setYear(y === "الكل" ? "" : y)}
+                    focusable={tvMode}
+                    style={({ focused }) => [s.filterChip, (year === y || (!year && y === "الكل")) && s.filterChipActive, tvMode && tvFocusStyle(focused)]}>
+                    <Text style={[s.filterChipText, (year === y || (!year && y === "الكل")) && s.filterChipTextActive]}>{y}</Text>
+                  </Pressable>
+                ))}
+              </View>
             </View>
+          )}
+            </>
           )}
         </View>
 
         {/* ── Loading ── */}
         {loading && (
           <View style={s.loadingWrap}>
-            <ActivityIndicator color="#8B5CF6" size="large" />
+            <ActivityIndicator color={colors.accent} size="large" />
           </View>
         )}
 
@@ -452,8 +691,9 @@ export default function SearchScreen() {
                 </View>
                 <View style={s.historyChips}>
                   {history.map((h, i) => (
-                    <Pressable key={i} onPress={() => setQuery(h)} style={s.historyChip}>
-                      <Ionicons name="time" size={12} color="rgba(255,255,255,0.4)" />
+                    <Pressable key={i} onPress={() => setQuery(h)} focusable={tvMode}
+                      style={({ focused }) => [s.historyChip, tvMode && tvFocusStyle(focused)]}>
+                      <Ionicons name="time" size={12} color={colors.textMuted} />
                       <Text style={s.historyChipText}>{h}</Text>
                     </Pressable>
                   ))}
@@ -462,7 +702,7 @@ export default function SearchScreen() {
             )}
             <View style={s.idleWrap}>
               <View style={s.idleIcon}>
-                <Ionicons name="search" size={28} color="rgba(139,92,246,0.4)" />
+                <Ionicons name="search" size={28} color={colors.accent} />
               </View>
               <Text style={s.idleText}>ابحث عن أنميك المفضل</Text>
               <Text style={s.idleSub}>أو استخدم الفلاتر لاستكشاف الأنميات</Text>
@@ -474,25 +714,38 @@ export default function SearchScreen() {
         {!loading && results.length > 0 && (
           <FlatList
             data={results}
+            style={{ width: gridWidth, alignSelf: "center" }}
             key={`search-grid-${gridColumns}`}
             keyExtractor={item => item.id.toString()}
             numColumns={gridColumns}
             columnWrapperStyle={{ gap: 10, marginBottom: 10 }}
             contentContainerStyle={{ paddingHorizontal: 14, paddingTop: 12, paddingBottom: 100 }}
             showsVerticalScrollIndicator={false}
+            initialNumToRender={6}
+            maxToRenderPerBatch={3}
+            updateCellsBatchingPeriod={50}
+            windowSize={5}
+             removeClippedSubviews={Platform.OS !== "web" && !tvMode}
             ListHeaderComponent={
-              activeSeason?.value ? (
-                <View style={s.activeSeasonRow}>
-                  <Text style={s.activeSeasonLabel}>موسم:</Text>
-                  <Text style={s.activeSeasonValue}>{activeSeason.emoji} {activeSeason.label}</Text>
-                </View>
-              ) : null
+              <View style={s.resultsHeader}>
+                <Text style={s.resultsCount}>
+                  {query.trim() ? "نتائج البحث" : "قائمة الأنمي"} ({results.length} أنمي)
+                </Text>
+                {activeSeason?.value ? (
+                  <View style={s.activeSeasonRow}>
+                    <Text style={s.activeSeasonLabel}>موسم:</Text>
+                    <Text style={s.activeSeasonValue}>{activeSeason.emoji} {activeSeason.label}</Text>
+                  </View>
+                ) : null}
+              </View>
             }
             renderItem={({ item }) => (
               <AnimeCard
                 anime={item}
                 columns={gridColumns}
-                onPress={() => router.push(`/anime/${item.id}?title=${encodeURIComponent(item.title?.romaji || "")}&english=${encodeURIComponent(item.title?.english || "")}`)}
+                onPress={() => router.push(
+                  `/anime/${item.id}?title=${encodeURIComponent(item.title?.romaji || "")}&english=${encodeURIComponent(item.title?.english || "")}${item.idSource ? `&src=${encodeURIComponent(item.idSource)}` : ""}`
+                )}
               />
             )}
           />
@@ -502,7 +755,7 @@ export default function SearchScreen() {
         {!loading && results.length === 0 && !showEmpty && (
           <View style={s.emptyWrap}>
             <View style={s.emptyIcon}>
-              <Ionicons name="search" size={28} color="rgba(255,255,255,0.15)" />
+            <Ionicons name="search" size={28} color={colors.textMuted} />
             </View>
             <Text style={s.emptyText}>
               {query ? `لا توجد نتائج لـ "${query}"` : "لا توجد نتائج بهذه الفلاتر"}
@@ -516,6 +769,33 @@ export default function SearchScreen() {
         )}
       </View>
 
+      {!tvMode && (
+        <AnimeFilterSheet
+          visible={showFilters}
+          resultCount={results.length}
+          sortOptions={SORT_OPTIONS}
+          formatOptions={FORMAT_OPTIONS}
+          statusOptions={STATUS_OPTIONS}
+          seasonOptions={SEASON_OPTIONS}
+          genreOptions={GENRE_FILTER_OPTIONS}
+          years={YEAR_OPTIONS}
+          sort={sort}
+          format={format}
+          status={status}
+          season={season}
+          genre={genre}
+          year={year}
+          onSortChange={setSort}
+          onFormatChange={setFormat}
+          onStatusChange={setStatus}
+          onSeasonChange={setSeason}
+          onGenreChange={setGenre}
+          onYearChange={setYear}
+          onReset={clearFilters}
+          onClose={() => setShowFilters(false)}
+        />
+      )}
+
       {/* ══ trace.moe modal ══ */}
       <Modal visible={showTrace} animationType="slide" transparent presentationStyle="overFullScreen"
         onRequestClose={() => setShowTrace(false)}>
@@ -525,32 +805,32 @@ export default function SearchScreen() {
             {/* header */}
             <View style={sm.header}>
               <View style={sm.iconBox}>
-                <Ionicons name="camera-outline" size={18} color="#c4b5fd" />
+                <Ionicons name="camera-outline" size={18} color={colors.accent} />
               </View>
               <View style={{ flex: 1 }}>
                 <Text style={sm.title}>البحث بالصورة</Text>
                 <Text style={sm.sub}>اعثر على الأنمي من لقطة شاشة</Text>
               </View>
               <Pressable onPress={() => setShowTrace(false)} hitSlop={10}>
-                <Ionicons name="close" size={20} color="rgba(255,255,255,0.35)" />
+                <Ionicons name="close" size={20} color={colors.textMuted} />
               </Pressable>
             </View>
 
             {/* Pick image — primary action */}
             <Pressable onPress={pickImageForTrace} disabled={traceLoading}
               style={[sm.uploadBtn, traceLoading && { opacity: 0.4 }]}>
-              <Ionicons name="image-outline" size={20} color="#c4b5fd" />
+              <Ionicons name="image-outline" size={20} color={colors.accent} />
               <Text style={sm.uploadBtnText}>اختر صورة من الجهاز</Text>
             </Pressable>
-            <Text style={{ textAlign: "center", fontSize: 10, color: "rgba(255,255,255,0.2)", fontFamily: "Cairo_400Regular" }}>
+            <Text style={{ textAlign: "center", fontSize: 10, color: colors.textMuted, fontFamily: "Cairo_400Regular" }}>
               التقط لقطة شاشة من مشهد الأنمي وارفعها للبحث
             </Text>
 
             {/* Loading */}
             {traceLoading && (
               <View style={{ alignItems: "center", paddingVertical: 20 }}>
-                <ActivityIndicator color="#8B5CF6" size="large" />
-                <Text style={{ fontSize: 11, color: "rgba(255,255,255,0.35)", fontFamily: "Cairo_400Regular", marginTop: 8 }}>
+                <ActivityIndicator color={colors.accent} size="large" />
+                <Text style={{ fontSize: 11, color: colors.textSecondary, fontFamily: "Cairo_400Regular", marginTop: 8 }}>
                   جارٍ البحث...
                 </Text>
               </View>
@@ -577,7 +857,7 @@ export default function SearchScreen() {
                       {r.previewImage || r.coverImage ? (
                         <Image source={{ uri: (r.previewImage || r.coverImage)! }} style={sm.resImg} />
                       ) : (
-                        <Ionicons name="film-outline" size={20} color="rgba(255,255,255,0.15)" />
+                          <Ionicons name="film-outline" size={20} color={colors.textMuted} />
                       )}
                     </View>
                     <View style={{ flex: 1 }}>
@@ -587,12 +867,12 @@ export default function SearchScreen() {
                           <View style={sm.badge}><Text style={sm.badgeText}>حلقة {r.episode}</Text></View>
                         )}
                         <Text style={sm.timeTxt}>{fmtTime(r.from)} – {fmtTime(r.to)}</Text>
-                        <View style={[sm.badge, { backgroundColor: "rgba(16,185,129,0.15)" }]}>
-                          <Text style={[sm.badgeText, { color: "#6EE7B7" }]}>{r.similarity}%</Text>
+                        <View style={[sm.badge, { backgroundColor: colors.success + "20" }]}>
+                          <Text style={[sm.badgeText, { color: colors.success }]}>{r.similarity}%</Text>
                         </View>
                       </View>
                     </View>
-                    <Ionicons name="chevron-back" size={14} color="rgba(255,255,255,0.2)" />
+                    <Ionicons name="chevron-back" size={14} color={colors.textMuted} />
                   </Pressable>
                 ))}
               </ScrollView>
@@ -605,75 +885,97 @@ export default function SearchScreen() {
   );
 }
 
-const sm = StyleSheet.create({
-  overlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.65)", justifyContent: "flex-end" },
-  sheet: { backgroundColor: "#111116", borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 20, paddingBottom: 40, borderTopWidth: 1, borderColor: "rgba(255,255,255,0.08)" },
+const createTraceStyles = (colors: ThemePalette) => StyleSheet.create({
+  overlay: { flex: 1, backgroundColor: colors.overlay, justifyContent: "flex-end" },
+  sheet: { backgroundColor: colors.surface, borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 20, paddingBottom: 40, borderTopWidth: 1, borderColor: colors.border },
   header: { flexDirection: "row", alignItems: "center", gap: 12, marginBottom: 16 },
-  iconBox: { width: 34, height: 34, borderRadius: 10, backgroundColor: "rgba(139,92,246,0.18)", alignItems: "center", justifyContent: "center" },
-  title: { fontSize: 14, fontFamily: "Cairo_700Bold", color: "#fff" },
-  sub: { fontSize: 10, fontFamily: "Cairo_400Regular", color: "rgba(255,255,255,0.35)" },
+  iconBox: { width: 34, height: 34, borderRadius: 10, backgroundColor: colors.accentSurface, alignItems: "center", justifyContent: "center" },
+  title: { fontSize: 14, fontFamily: "Cairo_700Bold", color: colors.textPrimary },
+  sub: { fontSize: 10, fontFamily: "Cairo_400Regular", color: colors.textSecondary },
   urlRow: { flexDirection: "row", gap: 8, marginBottom: 12 },
-  urlInput: { flex: 1, backgroundColor: "#18181B", borderWidth: 1, borderColor: "rgba(255,255,255,0.07)", borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10, fontSize: 12, color: "#fff", fontFamily: "Cairo_400Regular", textAlign: "left" },
-  searchBtn: { backgroundColor: "#7C3AED", borderRadius: 12, paddingHorizontal: 14, justifyContent: "center" },
-  searchBtnText: { fontSize: 12, fontFamily: "Cairo_700Bold", color: "#fff" },
+  urlInput: { flex: 1, backgroundColor: colors.input, borderWidth: 1, borderColor: colors.border, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10, fontSize: 12, color: colors.textPrimary, fontFamily: "Cairo_400Regular", textAlign: "left" },
+  searchBtn: { backgroundColor: colors.button, borderRadius: 12, paddingHorizontal: 14, justifyContent: "center" },
+  searchBtnText: { fontSize: 12, fontFamily: "Cairo_700Bold", color: colors.buttonText },
   divider: { flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 12 },
-  divLine: { flex: 1, height: 1, backgroundColor: "rgba(255,255,255,0.06)" },
-  divText: { fontSize: 10, color: "rgba(255,255,255,0.25)", fontFamily: "Cairo_400Regular" },
-  uploadBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, backgroundColor: "#18181B", borderRadius: 12, paddingVertical: 14, borderWidth: 1, borderStyle: "dashed", borderColor: "rgba(139,92,246,0.25)", marginBottom: 12 },
-  uploadBtnText: { fontSize: 13, fontFamily: "Cairo_700Bold", color: "rgba(196,181,253,0.7)" },
-  errorBox: { backgroundColor: "rgba(239,68,68,0.1)", borderRadius: 12, padding: 12, marginBottom: 8 },
-  errorText: { fontSize: 12, fontFamily: "Cairo_400Regular", color: "#FCA5A5", textAlign: "center" },
-  resTitle: { fontSize: 10, fontFamily: "Cairo_700Bold", color: "rgba(255,255,255,0.3)", marginBottom: 8 },
-  resCard: { flexDirection: "row", alignItems: "center", gap: 10, backgroundColor: "#18181B", borderRadius: 12, padding: 10, marginBottom: 8, borderWidth: 1, borderColor: "rgba(255,255,255,0.05)" },
-  resThumb: { width: 48, height: 68, borderRadius: 8, overflow: "hidden", backgroundColor: "#222226", alignItems: "center", justifyContent: "center" },
+  divLine: { flex: 1, height: 1, backgroundColor: colors.border },
+  divText: { fontSize: 10, color: colors.textMuted, fontFamily: "Cairo_400Regular" },
+  uploadBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, backgroundColor: colors.input, borderRadius: 12, paddingVertical: 14, borderWidth: 1, borderStyle: "dashed", borderColor: colors.accentBorder, marginBottom: 12 },
+  uploadBtnText: { fontSize: 13, fontFamily: "Cairo_700Bold", color: colors.accent },
+  errorBox: { backgroundColor: colors.destructiveSurface, borderRadius: 12, padding: 12, marginBottom: 8 },
+  errorText: { fontSize: 12, fontFamily: "Cairo_400Regular", color: colors.destructive, textAlign: "center" },
+  resTitle: { fontSize: 10, fontFamily: "Cairo_700Bold", color: colors.textMuted, marginBottom: 8 },
+  resCard: { flexDirection: "row", alignItems: "center", gap: 10, backgroundColor: colors.card, borderRadius: 12, padding: 10, marginBottom: 8, borderWidth: 1, borderColor: colors.border },
+  resThumb: { width: 48, height: 68, borderRadius: 8, overflow: "hidden", backgroundColor: colors.surfaceElevated, alignItems: "center", justifyContent: "center" },
   resImg: { width: "100%", height: "100%" },
-  resName: { fontSize: 12, fontFamily: "Cairo_700Bold", color: "#fff", lineHeight: 16 },
-  badge: { backgroundColor: "rgba(139,92,246,0.15)", borderRadius: 8, paddingHorizontal: 6, paddingVertical: 2 },
-  badgeText: { fontSize: 9, fontFamily: "Cairo_700Bold", color: "#c4b5fd" },
-  timeTxt: { fontSize: 9, fontFamily: "Cairo_400Regular", color: "rgba(255,255,255,0.35)", alignSelf: "center" },
+  resName: { fontSize: 12, fontFamily: "Cairo_700Bold", color: colors.textPrimary, lineHeight: 16 },
+  badge: { backgroundColor: colors.accentSurface, borderRadius: 8, paddingHorizontal: 6, paddingVertical: 2 },
+  badgeText: { fontSize: 9, fontFamily: "Cairo_700Bold", color: colors.accent },
+  timeTxt: { fontSize: 9, fontFamily: "Cairo_400Regular", color: colors.textSecondary, alignSelf: "center" },
 });
 
-const s = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#0A0A0F" },
-  header: { backgroundColor: "#0A0A0F", borderBottomWidth: 1, borderBottomColor: "rgba(255,255,255,0.05)", paddingHorizontal: 14, paddingTop: 10, paddingBottom: 6 },
-  searchBar: { flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: "#18181B", borderRadius: 12, paddingHorizontal: 12, paddingVertical: 6, borderWidth: 1, borderColor: "rgba(255,255,255,0.07)", marginBottom: 6 },
-  searchInput: { flex: 1, color: "#fff", fontSize: 12, fontFamily: "Cairo_700Bold", textAlign: "right" },
+const createSearchStyles = (colors: ThemePalette) => StyleSheet.create({
+  container: { flex: 1, backgroundColor: colors.background },
+  header: { backgroundColor: colors.surface, borderBottomWidth: 1, borderBottomColor: colors.border, paddingHorizontal: 14, paddingTop: 10, paddingBottom: 6 },
+  tvHeader: { paddingHorizontal: 32, paddingTop: 16, paddingBottom: 14 },
+  mobileHeaderTop: { minHeight: 42, flexDirection: ROW_RTL, alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 10 },
+  mobileModeSwitch: { flexDirection: ROW_RTL, alignItems: "center", padding: 3, borderRadius: 13, backgroundColor: colors.input, borderWidth: 1, borderColor: colors.border },
+  mobileModeButton: { minHeight: 32, flexDirection: ROW_RTL, alignItems: "center", justifyContent: "center", gap: 5, paddingHorizontal: 9, borderRadius: 10 },
+  mobileModeButtonActive: { backgroundColor: "#0ea5e9" },
+  mobileModeText: { color: colors.textSecondary, fontSize: 10, fontFamily: "Cairo_700Bold" },
+  mobileModeTextActive: { color: "#ffffff" },
+  mobileTitleGroup: { flexDirection: ROW_RTL, alignItems: "center", gap: 9 },
+  mobileTitle: { color: colors.textPrimary, fontSize: 18, fontFamily: "Cairo_800ExtraBold" },
+  mobileBackButton: { width: 40, height: 40, alignItems: "center", justifyContent: "center", borderRadius: 12, backgroundColor: colors.input, borderWidth: 1, borderColor: colors.border },
+  mobileSearchBar: { minHeight: 52, flexDirection: ROW_RTL, alignItems: "center", gap: 8, paddingHorizontal: 9, borderRadius: 14, backgroundColor: colors.input, borderWidth: 1, borderColor: colors.border },
+  mobileFilterButton: { width: 34, height: 34, alignItems: "center", justifyContent: "center", borderRadius: 10, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, position: "relative" },
+  mobileFilterButtonActive: { backgroundColor: colors.destructive, borderColor: colors.destructive },
+  mobileFilterCount: { position: "absolute", top: -5, right: -5, minWidth: 15, height: 15, alignItems: "center", justifyContent: "center", borderRadius: 8, backgroundColor: colors.destructive, borderWidth: 1, borderColor: colors.surface },
+  mobileFilterCountText: { color: colors.destructiveForeground, fontSize: 8, fontFamily: "Cairo_700Bold" },
+  mobileSearchInput: { flex: 1, minWidth: 0, color: colors.textPrimary, fontSize: 13, fontFamily: "Cairo_400Regular", textAlign: "right", writingDirection: "rtl" },
+  searchBar: { flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: colors.input, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 6, borderWidth: 1, borderColor: colors.border, marginBottom: 6 },
+  searchInput: { flex: 1, color: colors.textPrimary, fontSize: 12, fontFamily: "Cairo_700Bold", textAlign: "right" },
+  tvSearchBar: { minHeight: 72, paddingHorizontal: 22, paddingVertical: 14, borderRadius: 18, gap: 14 },
+  tvSearchInput: { fontSize: 23, lineHeight: 34 },
   filterRow: { flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 6 },
-  filterToggle: { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 8, paddingVertical: 5, borderRadius: 10, backgroundColor: "#18181B", borderWidth: 1, borderColor: "rgba(255,255,255,0.05)" },
-  filterToggleActive: { backgroundColor: "rgba(139,92,246,0.15)", borderColor: "rgba(139,92,246,0.3)" },
-  filterToggleText: { fontSize: 10, fontFamily: "Cairo_700Bold", color: "rgba(255,255,255,0.45)" },
-  filterToggleTextActive: { color: "#c4b5fd" },
-  filterCount: { width: 14, height: 14, borderRadius: 7, backgroundColor: "#8B5CF6", alignItems: "center", justifyContent: "center" },
+  filterToggle: { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 8, paddingVertical: 5, borderRadius: 10, backgroundColor: colors.input, borderWidth: 1, borderColor: colors.border },
+  filterToggleActive: { backgroundColor: colors.accentSurface, borderColor: colors.accentBorder },
+  filterToggleText: { fontSize: 10, fontFamily: "Cairo_700Bold", color: colors.textSecondary },
+  filterToggleTextActive: { color: colors.accent },
+  filterCount: { width: 14, height: 14, borderRadius: 7, backgroundColor: colors.accent, alignItems: "center", justifyContent: "center" },
   filterCountText: { fontSize: 8, color: "#fff", fontFamily: "Cairo_700Bold" },
-  sortPill: { paddingHorizontal: 9, paddingVertical: 5, borderRadius: 10, backgroundColor: "#18181B", borderWidth: 1, borderColor: "rgba(255,255,255,0.05)" },
-  sortPillActive: { backgroundColor: "#8B5CF6", borderColor: "#8B5CF6" },
-  sortPillText: { fontSize: 10, fontFamily: "Cairo_700Bold", color: "rgba(255,255,255,0.45)" },
-  sortPillTextActive: { color: "#fff" },
+  sortPill: { paddingHorizontal: 9, paddingVertical: 5, borderRadius: 10, backgroundColor: colors.input, borderWidth: 1, borderColor: colors.border },
+  tvPill: { paddingHorizontal: 24, paddingVertical: 14, minHeight: 64, borderRadius: 16, justifyContent: "center" },
+  sortPillActive: { backgroundColor: colors.accent, borderColor: colors.accent },
+  sortPillText: { fontSize: 10, fontFamily: "Cairo_700Bold", color: colors.textSecondary },
+  sortPillTextActive: { color: colors.buttonText },
   seasonRow: { marginBottom: 5 },
-  seasonChip: { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 9, paddingVertical: 5, borderRadius: 10, backgroundColor: "#18181B", borderWidth: 1, borderColor: "rgba(255,255,255,0.05)" },
-  seasonChipActive: { backgroundColor: "rgba(139,92,246,0.2)", borderColor: "rgba(139,92,246,0.4)" },
-  seasonChipText: { fontSize: 10, fontFamily: "Cairo_700Bold", color: "rgba(255,255,255,0.40)" },
-  seasonChipTextActive: { color: "#8B5CF6" },
-  filterPanel: { backgroundColor: "#0A0A0F", borderTopWidth: 1, borderTopColor: "rgba(255,255,255,0.05)", paddingTop: 10, paddingBottom: 6 },
-  filterLabel: { fontSize: 9, color: "rgba(255,255,255,0.25)", fontFamily: "Cairo_700Bold", marginBottom: 6 },
-  filterChip: { paddingHorizontal: 9, paddingVertical: 5, borderRadius: 10, backgroundColor: "#18181B", borderWidth: 1, borderColor: "rgba(255,255,255,0.05)" },
-  filterChipActive: { backgroundColor: "rgba(139,92,246,0.2)", borderColor: "rgba(139,92,246,0.4)" },
-  filterChipText: { fontSize: 10, fontFamily: "Cairo_700Bold", color: "rgba(255,255,255,0.45)" },
-  filterChipTextActive: { color: "#c4b5fd" },
+  seasonChip: { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 9, paddingVertical: 5, borderRadius: 10, backgroundColor: colors.input, borderWidth: 1, borderColor: colors.border },
+  tvSeasonChip: { paddingHorizontal: 22, paddingVertical: 14, minHeight: 64, borderRadius: 16, gap: 8 },
+  seasonChipActive: { backgroundColor: colors.accentSurface, borderColor: colors.accentBorder },
+  seasonChipText: { fontSize: 10, fontFamily: "Cairo_700Bold", color: colors.textSecondary },
+  seasonChipTextActive: { color: colors.accent },
+  filterPanel: { backgroundColor: colors.surface, borderTopWidth: 1, borderTopColor: colors.border, paddingTop: 10, paddingBottom: 6 },
+  filterLabel: { fontSize: 9, color: colors.textMuted, fontFamily: "Cairo_700Bold", marginBottom: 6 },
+  filterChip: { paddingHorizontal: 9, paddingVertical: 5, borderRadius: 10, backgroundColor: colors.input, borderWidth: 1, borderColor: colors.border },
+  filterChipActive: { backgroundColor: colors.accent, borderColor: colors.accent },
+  filterChipText: { fontSize: 10, fontFamily: "Cairo_700Bold", color: colors.textSecondary },
+  filterChipTextActive: { color: colors.buttonText },
   historyHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 10 },
-  historyTitle: { fontSize: 11, fontFamily: "Cairo_700Bold", color: "rgba(255,255,255,0.30)" },
-  historyClear: { fontSize: 10, color: "rgba(139,92,246,0.7)", fontFamily: "Cairo_700Bold" },
+  historyTitle: { fontSize: 11, fontFamily: "Cairo_700Bold", color: colors.textMuted },
+  historyClear: { fontSize: 10, color: colors.accent, fontFamily: "Cairo_700Bold" },
   historyChips: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
-  historyChip: { flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 12, paddingVertical: 7, borderRadius: 12, backgroundColor: "#18181B", borderWidth: 1, borderColor: "rgba(255,255,255,0.05)" },
-  historyChipText: { fontSize: 11, fontFamily: "Cairo_700Bold", color: "rgba(255,255,255,0.55)" },
+  historyChip: { flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 12, paddingVertical: 7, borderRadius: 12, backgroundColor: colors.input, borderWidth: 1, borderColor: colors.border },
+  historyChipText: { fontSize: 11, fontFamily: "Cairo_700Bold", color: colors.textSecondary },
   activeSeasonRow: { flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 10 },
-  activeSeasonLabel: { fontSize: 10, color: "rgba(255,255,255,0.25)", fontFamily: "Cairo_400Regular" },
-  activeSeasonValue: { fontSize: 11, fontFamily: "Cairo_700Bold", color: "#8B5CF6" },
+  activeSeasonLabel: { fontSize: 10, color: colors.textMuted, fontFamily: "Cairo_400Regular" },
+  activeSeasonValue: { fontSize: 11, fontFamily: "Cairo_700Bold", color: colors.accent },
+  resultsHeader: { alignItems: "flex-end", paddingBottom: 10 },
+  resultsCount: { color: colors.textSecondary, fontSize: 11, fontFamily: "Cairo_700Bold", textAlign: "right", writingDirection: "rtl" },
   loadingWrap: { flex: 1, alignItems: "center", justifyContent: "center" },
   card: { flex: 1 },
-  cardImgWrap: { borderRadius: 14, overflow: "hidden", aspectRatio: 2 / 3, backgroundColor: "#18181B", borderWidth: 1, borderColor: "rgba(255,255,255,0.07)", position: "relative" },
+  cardImgWrap: { borderRadius: 14, overflow: "hidden", aspectRatio: 2 / 3, backgroundColor: colors.surfaceElevated, borderWidth: 1, borderColor: colors.border, position: "relative" },
   cardImg: { width: "100%", height: "100%" },
-  noImg: { backgroundColor: "rgba(139,92,246,0.1)", alignItems: "center", justifyContent: "center" },
+  noImg: { backgroundColor: colors.accentSurface, alignItems: "center", justifyContent: "center" },
   scoreBadge: { position: "absolute", top: 6, right: 6, flexDirection: "row", alignItems: "center", gap: 2, backgroundColor: "rgba(0,0,0,0.7)", borderRadius: 8, paddingHorizontal: 5, paddingVertical: 2, borderWidth: 1, borderColor: "rgba(251,191,36,0.2)" },
   scoreText: { fontSize: 7, fontFamily: "Cairo_700Bold", color: "#fff" },
   fmtBadge: { position: "absolute", top: 6, left: 6, paddingHorizontal: 5, paddingVertical: 2, borderRadius: 6 },
@@ -681,12 +983,12 @@ const s = StyleSheet.create({
   cardBottom: { position: "absolute", bottom: 0, left: 0, right: 0, padding: 6, backgroundColor: "rgba(0,0,0,0.55)" },
   cardTitle: { fontSize: 9.5, color: "#fff", fontFamily: "Cairo_700Bold", lineHeight: 14 },
   idleWrap: { alignItems: "center", paddingTop: 20 },
-  idleIcon: { width: 72, height: 72, borderRadius: 24, backgroundColor: "rgba(139,92,246,0.08)", borderWidth: 1, borderColor: "rgba(139,92,246,0.15)", alignItems: "center", justifyContent: "center", marginBottom: 16 },
-  idleText: { fontSize: 16, fontFamily: "Cairo_700Bold", color: "rgba(255,255,255,0.45)", marginBottom: 6 },
-  idleSub: { fontSize: 12, fontFamily: "Cairo_400Regular", color: "rgba(255,255,255,0.25)", textAlign: "center" },
+  idleIcon: { width: 72, height: 72, borderRadius: 24, backgroundColor: colors.accentSurface, borderWidth: 1, borderColor: colors.accentBorder, alignItems: "center", justifyContent: "center", marginBottom: 16 },
+  idleText: { fontSize: 16, fontFamily: "Cairo_700Bold", color: colors.textSecondary, marginBottom: 6 },
+  idleSub: { fontSize: 12, fontFamily: "Cairo_400Regular", color: colors.textMuted, textAlign: "center" },
   emptyWrap: { flex: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: 24 },
-  emptyIcon: { width: 64, height: 64, borderRadius: 24, backgroundColor: "rgba(255,255,255,0.04)", borderWidth: 1, borderColor: "rgba(255,255,255,0.08)", alignItems: "center", justifyContent: "center", marginBottom: 16 },
-  emptyText: { fontSize: 14, fontFamily: "Cairo_700Bold", color: "rgba(255,255,255,0.40)", textAlign: "center", marginBottom: 16 },
-  emptyBtn: { paddingHorizontal: 16, paddingVertical: 10, borderRadius: 14, backgroundColor: "rgba(139,92,246,0.1)", borderWidth: 1, borderColor: "rgba(139,92,246,0.2)" },
-  emptyBtnText: { fontSize: 12, fontFamily: "Cairo_700Bold", color: "#8B5CF6" },
+  emptyIcon: { width: 64, height: 64, borderRadius: 24, backgroundColor: colors.input, borderWidth: 1, borderColor: colors.border, alignItems: "center", justifyContent: "center", marginBottom: 16 },
+  emptyText: { fontSize: 14, fontFamily: "Cairo_700Bold", color: colors.textSecondary, textAlign: "center", marginBottom: 16 },
+  emptyBtn: { paddingHorizontal: 16, paddingVertical: 10, borderRadius: 14, backgroundColor: colors.accentSurface, borderWidth: 1, borderColor: colors.accentBorder },
+  emptyBtnText: { fontSize: 12, fontFamily: "Cairo_700Bold", color: colors.accent },
 });

@@ -2,16 +2,20 @@ package expo.modules.novamedia3
 
 import android.app.PictureInPictureParams
 import android.content.Context
+import android.graphics.Color
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.util.Rational
+import android.view.LayoutInflater
+import android.view.TextureView
 import android.view.ViewGroup
 import androidx.media3.common.C
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.DefaultLoadControl
+import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
@@ -25,7 +29,17 @@ class NovaMedia3View(
   appContext: AppContext
 ) : ExpoView(context, appContext) {
   private val mainHandler = Handler(Looper.getMainLooper())
-  private val playerView = PlayerView(context)
+  /*
+   * PlayerView defaults to SurfaceView. SurfaceView is a separate window
+   * surface, not a normal child of the React Native hierarchy. After the
+   * phone rotates into the TV landscape layout, some TV GPUs can retain the
+   * old surface crop and composite a differently coloured rectangle over one
+   * side of the video. The TV player is always rendered below React Native
+   * controls, so keep it as a TextureView in the same clipped hierarchy.
+   */
+  private var playerView =
+    LayoutInflater.from(context)
+      .inflate(R.layout.nova_media3_player_view, this, false) as PlayerView
   private var exoPlayer: ExoPlayer? = null
   private var currentUrl: String? = null
   private var headersJson = "{}"
@@ -33,6 +47,20 @@ class NovaMedia3View(
   private var lastCommandSequence = 0L
   private var attached = false
   private var shouldAutoPlay = true
+  private var playerGeneration = 0L
+  private var surfaceResetPending = false
+  private var surfacePrimed = false
+  private var lastMeasuredWidth = 0
+  private var lastMeasuredHeight = 0
+  /*
+   * Expo can deliver sourceUrl and sourceHeaders as two prop updates during
+   * one React render. Rebuilding ExoPlayer synchronously in both setters
+   * creates a short-lived player with stale headers and can race a second
+   * release/prepare on Android. Coalesce the pair into one main-thread turn.
+   */
+  private val prepareRunnable = Runnable {
+    if (attached) prepareCurrentSource()
+  }
 
   private val onPlaybackState by EventDispatcher()
   private val onProgress by EventDispatcher()
@@ -49,29 +77,116 @@ class NovaMedia3View(
   }
 
   init {
-    playerView.layoutParams = LayoutParams(
+    setBackgroundColor(Color.BLACK)
+    configurePlayerView(playerView)
+    addView(playerView)
+    /*
+     * Do not let a video child escape the measured TV viewport. This was
+     * previously false to accommodate animated controls, but controls are
+     * React Native siblings, not children of this native view.
+     */
+    clipChildren = true
+    clipToPadding = true
+  }
+
+  override fun onSizeChanged(width: Int, height: Int, oldWidth: Int, oldHeight: Int) {
+    super.onSizeChanged(width, height, oldWidth, oldHeight)
+    val changed = width > 0 && height > 0 &&
+      (width != lastMeasuredWidth || height != lastMeasuredHeight)
+    val wasAlreadyMeasured = lastMeasuredWidth > 0 && lastMeasuredHeight > 0
+    lastMeasuredWidth = width
+    lastMeasuredHeight = height
+    if (changed && wasAlreadyMeasured && (width != oldWidth || height != oldHeight)) {
+      /*
+       * requestLayout()/invalidate() alone does not recreate a SurfaceTexture.
+       * On some Android TV GPU drivers the old texture transform survives the
+       * landscape relayout and is composited over one side of the new frame.
+       * Recreate the TextureView after the parent has settled, while keeping the
+       * same ExoPlayer instance and playback position.
+       */
+      scheduleSurfaceReset()
+    }
+    if (!surfacePrimed && width > 0 && height > 0 && attached && exoPlayer != null) {
+      /*
+       * The first real TV layout can happen after the player is attached.
+       * Normalize that first SurfaceTexture as well; otherwise the first
+       * decoded frame can inherit a pre-layout crop from the view hierarchy.
+       */
+      scheduleSurfaceReset()
+    }
+  }
+
+  private fun configurePlayerView(view: PlayerView) {
+    view.layoutParams = LayoutParams(
       ViewGroup.LayoutParams.MATCH_PARENT,
       ViewGroup.LayoutParams.MATCH_PARENT
     )
-    playerView.useController = false
-    playerView.setShowBuffering(PlayerView.SHOW_BUFFERING_NEVER)
-    playerView.resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
-    addView(playerView)
-    clipChildren = false
+    view.useController = false
+    view.setShowBuffering(PlayerView.SHOW_BUFFERING_NEVER)
+    /*
+     * Never leave the previous decoded frame visible while a new surface or
+     * source is being attached. On affected TV GPUs that stale buffer can
+     * remain composited over only one half of the view.
+     */
+    view.setKeepContentOnPlayerReset(false)
+    view.setShutterBackgroundColor(Color.BLACK)
+    view.resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
+    /*
+     * A transparent TextureView lets the window compositor blend stale
+     * content below the video. The video surface is always opaque and its
+     * parent already supplies the black shutter background.
+     */
+    (view.videoSurfaceView as? TextureView)?.apply {
+      setOpaque(true)
+      alpha = 1f
+    }
+  }
+
+  private fun scheduleSurfaceReset() {
+    if (surfaceResetPending || !attached || exoPlayer == null) return
+    surfacePrimed = true
+    surfaceResetPending = true
+    mainHandler.post {
+      surfaceResetPending = false
+      if (!attached || exoPlayer == null || width <= 0 || height <= 0) return@post
+      resetVideoSurface()
+    }
+  }
+
+  private fun resetVideoSurface() {
+    val player = exoPlayer ?: return
+    val oldView = playerView
+    /*
+     * Detach first so the old SurfaceTexture is released instead of remaining
+     * as a second compositor layer. The player itself stays alive, so HLS
+     * buffering and the current position are preserved.
+     */
+    oldView.player = null
+    removeView(oldView)
+
+    val replacement = LayoutInflater.from(context)
+      .inflate(R.layout.nova_media3_player_view, this, false) as PlayerView
+    configurePlayerView(replacement)
+    playerView = replacement
+    addView(replacement, 0)
+    replacement.player = player
+    player.videoScalingMode = C.VIDEO_SCALING_MODE_SCALE_TO_FIT
+    replacement.requestLayout()
+    replacement.invalidate()
   }
 
   fun setSourceUrl(value: String?) {
     val next = value?.trim().takeUnless { it.isNullOrEmpty() }
     if (next == currentUrl) return
     currentUrl = next
-    if (attached) prepareCurrentSource()
+    schedulePrepare()
   }
 
   fun setSourceHeaders(value: String?) {
     val next = value?.takeUnless { it.isBlank() } ?: "{}"
     if (next == headersJson) return
     headersJson = next
-    if (attached && currentUrl != null) prepareCurrentSource()
+    schedulePrepare()
   }
 
   fun setInitialPosition(value: Double) {
@@ -116,16 +231,25 @@ class NovaMedia3View(
   override fun onAttachedToWindow() {
     super.onAttachedToWindow()
     attached = true
-    prepareCurrentSource()
+    schedulePrepare()
     mainHandler.removeCallbacks(progressRunnable)
     mainHandler.post(progressRunnable)
   }
 
   override fun onDetachedFromWindow() {
     attached = false
+    surfaceResetPending = false
+    surfacePrimed = false
+    mainHandler.removeCallbacks(prepareRunnable)
     mainHandler.removeCallbacks(progressRunnable)
     releasePlayer()
     super.onDetachedFromWindow()
+  }
+
+  private fun schedulePrepare() {
+    if (!attached) return
+    mainHandler.removeCallbacks(prepareRunnable)
+    mainHandler.post(prepareRunnable)
   }
 
   private fun prepareCurrentSource() {
@@ -151,13 +275,26 @@ class NovaMedia3View(
       )
       .setBackBuffer(15_000, false)
       .build()
-    val player = ExoPlayer.Builder(context)
+    /*
+     * Use Media3 directly for TV instead of expo-video's renderer wrapper.
+     * Decoder fallback lets Media3 retry with a compatible codec when the
+     * hardware decoder reports a bad surface/color configuration.
+     */
+    val renderersFactory = DefaultRenderersFactory(context)
+      .setEnableDecoderFallback(true)
+    val player = ExoPlayer.Builder(context, renderersFactory)
       .setLoadControl(loadControl)
       .build()
     exoPlayer = player
+    val generation = playerGeneration
     playerView.player = player
+    player.videoScalingMode = C.VIDEO_SCALING_MODE_SCALE_TO_FIT
+    if (!surfacePrimed && width > 0 && height > 0) {
+      scheduleSurfaceReset()
+    }
     player.addListener(object : Player.Listener {
       override fun onPlaybackStateChanged(state: Int) {
+        if (exoPlayer !== player || generation != playerGeneration) return
         when (state) {
           Player.STATE_BUFFERING -> emitState("loading", player.isPlaying)
           Player.STATE_READY -> {
@@ -174,11 +311,13 @@ class NovaMedia3View(
       }
 
       override fun onIsPlayingChanged(isPlaying: Boolean) {
+        if (exoPlayer !== player || generation != playerGeneration) return
         emitState(if (player.playbackState == Player.STATE_BUFFERING) "loading" else "readyToPlay", isPlaying)
       }
 
       override fun onPlayerError(error: PlaybackException) {
-        emitError(error)
+        if (exoPlayer !== player || generation != playerGeneration) return
+        emitError(error, player)
       }
     })
 
@@ -213,14 +352,14 @@ class NovaMedia3View(
     )
   }
 
-  private fun emitError(error: Throwable) {
+  private fun emitError(error: Throwable, player: ExoPlayer? = exoPlayer) {
     onPlayerError(
       mapOf(
         "state" to "error",
         "message" to (error.message ?: error.javaClass.simpleName),
         "isPlaying" to false,
-        "currentTime" to (exoPlayer?.currentPosition ?: 0L) / 1000.0,
-        "duration" to durationSeconds(exoPlayer)
+        "currentTime" to (player?.currentPosition ?: 0L) / 1000.0,
+        "duration" to durationSeconds(player)
       )
     )
   }
@@ -231,6 +370,7 @@ class NovaMedia3View(
   }
 
   private fun releasePlayer() {
+    playerGeneration += 1
     playerView.player = null
     exoPlayer?.release()
     exoPlayer = null

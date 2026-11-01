@@ -1,2 +1,1 @@
-/** Player components are imported directly from their files. */
-export {};
+/** Shared component exports can be added here as the component library grows. */

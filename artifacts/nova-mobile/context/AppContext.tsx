@@ -1,13 +1,26 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import React, { createContext, useCallback, useContext, useEffect, useState } from "react";
-import { DEFAULT_CONFIG, fetchRemoteConfig, RemoteConfig } from "@/utils/api";
-import { getAuthToken } from "@/utils/secureApi";
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { StyleSheet, Text, View } from "react-native";
+import { DEFAULT_CONFIG, fetchRemoteConfig, getBaseUrl, RemoteConfig } from "@/utils/api";
+import { getAuthToken, secureFetch, setUserAuthToken } from "@/utils/secureApi";
 
-type Theme = "dark" | "amoled" | "violet" | "blue" | "pink";
+export type Theme = "white" | "black";
+
+export type WatchContentKind = "anime" | "dubbed" | "aw-dubbed" | "stardima";
 
 export type WatchProgress = {
   animeId: number;
   ep: number;
+  totalEps?: number;
+  season?: number;
+  contentKind?: WatchContentKind;
+  contentKey?: string;
+  episodeUrl?: string;
+  catalogEpisodeId?: string;
+  catalogMediaType?: "movie" | "series";
+  episodeTitle?: string;
+  seasonLabel?: string;
+  titleAr?: string;
   title: string;
   english: string;
   thumbnail: string;
@@ -24,37 +37,523 @@ export type FavoriteAnime = {
   episodes: number | null;
   score: number | null;
   addedAt: number;
+  startYear?: number | null;
+  genres?: string[];
+};
+
+export type MobileUser = {
+  email: string;
+  displayName: string;
+  id: string;
+  username?: string;
+  avatarColor?: number;
+  profileImageUrl?: string | null;
 };
 
 type AppContextType = {
   theme: Theme;
+  themeHydrated: boolean;
   setTheme: (t: Theme) => void;
   remoteConfig: RemoteConfig;
   refreshConfig: () => Promise<void>;
   watchHistory: WatchProgress[];
   addToHistory: (item: WatchProgress) => Promise<void>;
   removeFromHistory: (animeId: number) => Promise<void>;
+  clearHistory: () => Promise<void>;
   favorites: FavoriteAnime[];
   toggleFavorite: (anime: FavoriteAnime) => Promise<void>;
+  clearFavorites: () => Promise<void>;
   isFavorite: (id: number) => boolean;
+  currentUser: MobileUser | null;
+  authReady: boolean;
+  setCurrentUser: (user: MobileUser | null) => void;
+  restoreAuth: () => Promise<void>;
 };
 
 const AppContext = createContext<AppContextType | null>(null);
 
+const HISTORY_DELETED_KEY = (userId: string) => `nova-history-deleted:${userId}`;
+const FAVORITES_DELETED_KEY = (userId: string) => `nova-favorites-deleted:${userId}`;
+const HISTORY_CLEAR_PENDING_KEY = (userId: string) => `nova-history-clear-pending:${userId}`;
+const FAVORITES_CLEAR_PENDING_KEY = (userId: string) => `nova-favorites-clear-pending:${userId}`;
+const ACCOUNT_HISTORY_KEY = (userId: string) => `nova-history:account:${userId}`;
+const ACCOUNT_FAVORITES_KEY = (userId: string) => `nova-favorites:account:${userId}`;
+const ANONYMOUS_HISTORY_KEY = "nova-history";
+const ANONYMOUS_FAVORITES_KEY = "nova-favorites";
+
+function asNumber(value: unknown, fallback = 0): number {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+export function getWatchContentId(kind: WatchContentKind, key: string): number {
+  if (kind === "anime") {
+    const numeric = Number(key);
+    return Number.isSafeInteger(numeric) && numeric > 0 ? numeric : 0;
+  }
+  // The production watch tables use a numeric anime_id. Keep a stable
+  // positive surrogate for string-based dubbed/animation series IDs while
+  // storing the real key in anime_type.
+  let hash = 2166136261;
+  for (const char of `${kind}:${key}`) {
+    hash ^= char.charCodeAt(0);
+    hash = Math.imul(hash, 16777619);
+  }
+  return 100_000_000 + ((hash >>> 0) % 1_900_000_000);
+}
+
+function historyKey(item: Pick<WatchProgress, "animeId" | "ep" | "season" | "contentKind" | "contentKey">): string {
+  const kind = item.contentKind || "anime";
+  const key = item.contentKey || String(item.animeId);
+  return `${kind}:${key}:${item.ep}:${item.season || 1}`;
+}
+
+function serverAnimeType(item: WatchProgress): string {
+  const kind = item.contentKind || "anime";
+  if (kind === "anime") return "anime";
+  const key = encodeURIComponent(item.contentKey || String(item.animeId));
+  const season = encodeURIComponent(item.seasonLabel || "");
+  if (kind === "stardima") {
+    return `stardima:${key}:${encodeURIComponent(item.catalogEpisodeId || "")}:` +
+      `${encodeURIComponent(item.catalogMediaType || "series")}:${season}:` +
+      encodeURIComponent(item.episodeTitle || "");
+  }
+  const extra = kind === "dubbed" ? `:${encodeURIComponent(item.episodeUrl || "")}` : "";
+  return `${kind}:${key}${extra}:${season}`;
+}
+
+function decodeServerAnimeType(value: unknown): {
+  kind: WatchContentKind;
+  key: string;
+  episodeUrl: string;
+  catalogEpisodeId: string;
+  catalogMediaType: "movie" | "series";
+  episodeTitle: string;
+  seasonLabel: string;
+} {
+  const raw = String(value ?? "anime");
+  const match = /^(dubbed|aw-dubbed|stardima):(.*)$/.exec(raw);
+  if (!match) {
+    return { kind: "anime", key: "", episodeUrl: "", catalogEpisodeId: "", catalogMediaType: "series", episodeTitle: "", seasonLabel: "" };
+  }
+  const parts = match[2].split(":");
+  const decode = (part?: string) => {
+    try { return decodeURIComponent(part || ""); } catch { return part || ""; }
+  };
+  const kind = match[1] as WatchContentKind;
+  const catalogMediaType = decode(parts[kind === "stardima" ? 2 : -1]) === "movie" ? "movie" : "series";
+  return {
+    kind,
+    key: decode(parts[0]),
+    episodeUrl: kind === "dubbed" ? decode(parts[1]) : "",
+    catalogEpisodeId: kind === "stardima" ? decode(parts[1]) : "",
+    catalogMediaType: kind === "stardima" ? catalogMediaType : "series",
+    episodeTitle: kind === "stardima" ? decode(parts[4]) : "",
+    seasonLabel: decode(kind === "dubbed" ? parts[2] : kind === "stardima" ? parts[3] : parts[1]),
+  };
+}
+
+export function historyRoute(item: WatchProgress): string {
+  const kind = item.contentKind || "anime";
+  if (kind === "dubbed") {
+    return `/dubbed/watch?epUrl=${encodeURIComponent(item.episodeUrl || "")}` +
+      `&series=${encodeURIComponent(item.contentKey || "")}` +
+      `&title=${encodeURIComponent(item.title)}` +
+      `&ep=${item.ep}` +
+      `&season=${encodeURIComponent(item.seasonLabel || "الموسم 1")}` +
+      `&poster=${encodeURIComponent(item.thumbnail || "")}`;
+  }
+  if (kind === "aw-dubbed") {
+    return `/aw-dubbed/watch?series=${encodeURIComponent(item.contentKey || "")}` +
+      `&ep=${item.ep}` +
+      `&title=${encodeURIComponent(item.title)}` +
+      `&titleAr=${encodeURIComponent(item.titleAr || "")}` +
+      `&season=${encodeURIComponent(item.seasonLabel || "الحلقات")}` +
+      `&poster=${encodeURIComponent(item.thumbnail || "")}`;
+  }
+  if (kind === "stardima") {
+    return `/stardima-servers?providerTitleId=${encodeURIComponent(item.contentKey || "")}` +
+      `&episodeId=${encodeURIComponent(item.catalogEpisodeId || "")}` +
+      `&episodeNumber=${item.ep}` +
+      `&seasonNumber=${item.season || 1}` +
+      `&episodeTitle=${encodeURIComponent(item.episodeTitle || (item.catalogMediaType === "movie" ? "الفيلم" : `الحلقة ${item.ep}`))}` +
+      `&title=${encodeURIComponent(item.title || "StarDima")}` +
+      `&mediaType=${item.catalogMediaType || "series"}` +
+      `&poster=${encodeURIComponent(item.thumbnail || "")}`;
+  }
+  return `/watch?anime=${item.animeId}&ep=${item.ep}` +
+    `&title=${encodeURIComponent(item.title)}` +
+    `&english=${encodeURIComponent(item.english)}` +
+    `${item.totalEps ? `&totalEps=${item.totalEps}` : ""}` +
+    `${item.thumbnail ? `&cover=${encodeURIComponent(item.thumbnail)}` : ""}`;
+}
+
+function mapServerHistory(row: any): WatchProgress | null {
+  const animeId = asNumber(row?.anime_id ?? row?.animeId);
+  const ep = asNumber(row?.episode_number ?? row?.episode ?? row?.ep);
+  if (!animeId || !ep) return null;
+  const encoded = decodeServerAnimeType(row?.anime_type ?? row?.animeType);
+  return {
+    animeId,
+    ep,
+    season: asNumber(row?.season_number ?? row?.season, 1),
+    contentKind: encoded.kind,
+    contentKey: encoded.key || String(animeId),
+    episodeUrl: encoded.episodeUrl || String(row?.episode_url ?? row?.episodeUrl ?? ""),
+    catalogEpisodeId: encoded.catalogEpisodeId,
+    catalogMediaType: encoded.catalogMediaType,
+    episodeTitle: encoded.episodeTitle,
+    seasonLabel: encoded.seasonLabel || String(row?.season_label ?? row?.seasonLabel ?? ""),
+    titleAr: String(row?.title_ar ?? row?.titleAr ?? ""),
+    title: String(row?.anime_title ?? row?.title ?? ""),
+    english: String(row?.english_title ?? row?.english ?? row?.anime_title ?? row?.title ?? ""),
+    thumbnail: String(row?.anime_cover ?? row?.image ?? row?.poster ?? ""),
+    updatedAt: Date.parse(row?.watched_at || row?.updated_at || "") || Date.now(),
+  };
+}
+
+function mapServerFavorite(row: any): FavoriteAnime | null {
+  const id = asNumber(row?.anime_id ?? row?.animeId ?? row?.content_id);
+  if (!id) return null;
+  return {
+    id,
+    title: String(row?.anime_title ?? row?.title ?? ""),
+    english: String(row?.english_title ?? row?.english ?? row?.anime_title ?? row?.title ?? ""),
+    thumbnail: String(row?.anime_cover ?? row?.image ?? row?.poster ?? ""),
+    episodes: row?.episodes == null ? null : asNumber(row.episodes),
+    score: row?.score == null ? null : asNumber(row.score),
+    addedAt: Date.parse(row?.added_at || row?.created_at || "") || Date.now(),
+  };
+}
+
 export function AppProvider({ children }: { children: React.ReactNode }) {
-  const [theme, setThemeState] = useState<Theme>("amoled");
+  const [theme, setThemeState] = useState<Theme>("white");
+  const [themeHydrated, setThemeHydrated] = useState(false);
   const [remoteConfig, setRemoteConfig] = useState<RemoteConfig>(DEFAULT_CONFIG);
   const [watchHistory, setWatchHistory] = useState<WatchProgress[]>([]);
   const [favorites, setFavorites] = useState<FavoriteAnime[]>([]);
   const [historyHydrated, setHistoryHydrated] = useState(false);
   const [favoritesHydrated, setFavoritesHydrated] = useState(false);
+  const [officialAppRequired, setOfficialAppRequired] = useState(false);
+  const [currentUser, setCurrentUser] = useState<MobileUser | null>(null);
+  const [authReady, setAuthReady] = useState(false);
+  const currentUserRef = useRef<MobileUser | null>(null);
+  // "loading" prevents a user switch from persisting the previous account's
+  // in-memory data into the anonymous cache before the new owner is loaded.
+  const dataOwnerRef = useRef<string | null | "loading">("loading");
+
+  useEffect(() => {
+    currentUserRef.current = currentUser;
+  }, [currentUser]);
+
+  const restoreAuth = useCallback(async () => {
+    try {
+      const stored = await AsyncStorage.getItem("nova-mobile-user");
+      if (stored) {
+        try { setCurrentUser(JSON.parse(stored) as MobileUser); } catch { await AsyncStorage.removeItem("nova-mobile-user"); }
+      }
+      const response = await secureFetch(`${getBaseUrl()}/api/auth/me`);
+      if (!response.ok) {
+        if (response.status === 401 || response.status === 403) {
+          await setUserAuthToken(null);
+          await AsyncStorage.removeItem("nova-mobile-user");
+          setCurrentUser(null);
+        }
+        return;
+      }
+      const data = await response.json() as any;
+      if (!data?.id) return;
+      if (data.authToken) await setUserAuthToken(String(data.authToken));
+      const next: MobileUser = {
+        id: String(data.id),
+        email: data.email || "",
+        displayName: data.displayName || data.display_name || data.username || data.email?.split("@")[0] || "مستخدم",
+        username: data.username,
+        avatarColor: data.avatarColor ?? data.avatar_color ?? 0,
+        profileImageUrl: data.profileImageUrl || data.profile_image_custom || data.profile_image_url || null,
+      };
+      await AsyncStorage.setItem("nova-mobile-user", JSON.stringify(next));
+      setCurrentUser(next);
+    } catch {
+      // A stored user remains usable while the VPS is temporarily unavailable.
+    } finally {
+      setAuthReady(true);
+    }
+  }, []);
 
   useEffect(() => {
     loadAll();
     refreshConfig();
     // Pre-warm the auth token so first API call is instant
     getAuthToken().catch(() => {});
+    void restoreAuth();
+  }, [restoreAuth]);
+
+  const accountUrl = useCallback((path: string) => `${getBaseUrl()}/api${path}`, []);
+
+  const readDeletedIds = useCallback(async (key: string): Promise<number[]> => {
+    try {
+      const raw = await AsyncStorage.getItem(key);
+      const parsed = raw ? JSON.parse(raw) : [];
+      return Array.isArray(parsed) ? parsed.map(Number).filter(Number.isFinite) : [];
+    } catch {
+      return [];
+    }
   }, []);
+
+  const writeDeletedIds = useCallback(async (key: string, ids: number[]) => {
+    await AsyncStorage.setItem(key, JSON.stringify([...new Set(ids)]));
+  }, []);
+
+  const postHistory = useCallback(async (item: WatchProgress): Promise<boolean> => {
+    try {
+      const response = await secureFetch(accountUrl("/user/history"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          animeId: item.animeId,
+          animeTitle: item.english || item.title,
+          animeCover: item.thumbnail || null,
+          animeType: serverAnimeType(item),
+          episodeNumber: item.ep,
+          seasonNumber: item.season || 1,
+        }),
+      });
+      return response.ok;
+    } catch {
+      return false;
+    }
+  }, [accountUrl]);
+
+  const postFavorite = useCallback(async (item: FavoriteAnime): Promise<boolean> => {
+    try {
+      const response = await secureFetch(accountUrl("/user/favorites"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          animeId: item.id,
+          animeTitle: item.english || item.title,
+          animeCover: item.thumbnail || null,
+          animeType: "anime",
+        }),
+      });
+      return response.ok;
+    } catch {
+      return false;
+    }
+  }, [accountUrl]);
+
+  const syncAccountData = useCallback(async (
+    userId: string,
+    localHistory: WatchProgress[],
+    localFavorites: FavoriteAnime[],
+  ): Promise<boolean> => {
+    try {
+      const [historyResponse, favoritesResponse] = await Promise.all([
+        secureFetch(accountUrl("/user/history")),
+        secureFetch(accountUrl("/user/favorites")),
+      ]);
+      if (!historyResponse.ok || !favoritesResponse.ok) return false;
+
+      const [historyPayload, favoritesPayload] = await Promise.all([
+        historyResponse.json() as Promise<any>,
+        favoritesResponse.json() as Promise<any>,
+      ]);
+      const [deletedHistory, deletedFavorites] = await Promise.all([
+        readDeletedIds(HISTORY_DELETED_KEY(userId)),
+        readDeletedIds(FAVORITES_DELETED_KEY(userId)),
+      ]);
+      const deletedHistorySet = new Set(deletedHistory);
+      const deletedFavoritesSet = new Set(deletedFavorites);
+      const [historyClearPending, favoritesClearPending] = await Promise.all([
+        AsyncStorage.getItem(HISTORY_CLEAR_PENDING_KEY(userId)),
+        AsyncStorage.getItem(FAVORITES_CLEAR_PENDING_KEY(userId)),
+      ]);
+
+      const remoteHistoryRows: any[] = Array.isArray(historyPayload?.history)
+        ? historyPayload.history
+        : [];
+      const remoteFavoritesRows: any[] = Array.isArray(favoritesPayload?.favorites)
+        ? favoritesPayload.favorites
+        : [];
+      const remoteHistory: WatchProgress[] = remoteHistoryRows
+        .map(mapServerHistory)
+        .filter((item): item is WatchProgress => Boolean(item));
+      const remoteFavorites: FavoriteAnime[] = remoteFavoritesRows
+        .map(mapServerFavorite)
+        .filter((item): item is FavoriteAnime => Boolean(item));
+
+      // A local delete wins over a stale remote row. Retry that delete before
+      // clearing its tombstone, so a temporary outage cannot resurrect content.
+      let historyDeletesSucceeded = true;
+      for (const animeId of deletedHistorySet) {
+        try {
+          const response = await secureFetch(accountUrl(`/user/history/anime/${animeId}`), { method: "DELETE" });
+          if (!response.ok) historyDeletesSucceeded = false;
+        } catch {
+          historyDeletesSucceeded = false;
+        }
+      }
+      let favoriteDeletesSucceeded = true;
+      for (const animeId of deletedFavoritesSet) {
+        try {
+          const response = await secureFetch(accountUrl(`/user/favorites/${animeId}`), { method: "DELETE" });
+          if (!response.ok) favoriteDeletesSucceeded = false;
+        } catch {
+          favoriteDeletesSucceeded = false;
+        }
+      }
+
+      if (historyClearPending === "1") {
+        try {
+          const response = await secureFetch(accountUrl("/user/history"), { method: "DELETE" });
+          if (response.ok) await AsyncStorage.removeItem(HISTORY_CLEAR_PENDING_KEY(userId));
+          else historyDeletesSucceeded = false;
+        } catch {
+          historyDeletesSucceeded = false;
+        }
+      }
+      if (favoritesClearPending === "1") {
+        try {
+          const response = await secureFetch(accountUrl("/user/favorites"), { method: "DELETE" });
+          if (response.ok) await AsyncStorage.removeItem(FAVORITES_CLEAR_PENDING_KEY(userId));
+          else favoriteDeletesSucceeded = false;
+        } catch {
+          favoriteDeletesSucceeded = false;
+        }
+      }
+
+      const remoteHistoryByKey = new Map<string, WatchProgress>(
+        remoteHistory
+          .filter(item => !deletedHistorySet.has(item.animeId))
+          .map(item => [historyKey(item), item]),
+      );
+      const mergedHistory = new Map<string, WatchProgress>();
+      if (historyClearPending !== "1") {
+        remoteHistoryByKey.forEach((item, key) => mergedHistory.set(key, item));
+      }
+      const historyToUpload: WatchProgress[] = [];
+      for (const item of localHistory) {
+        if (deletedHistorySet.has(item.animeId)) continue;
+        const remote = historyClearPending === "1" ? undefined : remoteHistoryByKey.get(historyKey(item));
+        if (!remote || item.updatedAt >= remote.updatedAt) {
+          mergedHistory.set(historyKey(item), item);
+          if (!remote || item.updatedAt > remote.updatedAt || historyClearPending === "1") {
+            historyToUpload.push(item);
+          }
+        }
+      }
+
+      const remoteFavoritesById = new Map<number, FavoriteAnime>(
+        remoteFavorites
+          .filter(item => !deletedFavoritesSet.has(item.id))
+          .map(item => [item.id, item]),
+      );
+      const mergedFavorites = new Map<number, FavoriteAnime>();
+      if (favoritesClearPending !== "1") {
+        remoteFavoritesById.forEach((item, key) => mergedFavorites.set(key, item));
+      }
+      const favoritesToUpload: FavoriteAnime[] = [];
+      for (const item of localFavorites) {
+        if (deletedFavoritesSet.has(item.id)) continue;
+        const remote = favoritesClearPending === "1" ? undefined : remoteFavoritesById.get(item.id);
+        if (!remote || item.addedAt >= remote.addedAt) {
+          mergedFavorites.set(item.id, item);
+          if (!remote || item.addedAt > remote.addedAt || favoritesClearPending === "1") {
+            favoritesToUpload.push(item);
+          }
+        }
+      }
+
+      // Upload local-only/newer rows. Failures intentionally leave local state
+      // and tombstones intact; the next auth restore can retry safely.
+      const historyUploadResults = await Promise.all(historyToUpload.map(postHistory));
+      const favoriteUploadResults = await Promise.all(favoritesToUpload.map(postFavorite));
+      const historyUploadsSucceeded = historyUploadResults.every(Boolean);
+      const favoriteUploadsSucceeded = favoriteUploadResults.every(Boolean);
+
+      if (historyDeletesSucceeded && historyUploadsSucceeded) {
+        await AsyncStorage.removeItem(HISTORY_DELETED_KEY(userId));
+      }
+      if (favoriteDeletesSucceeded && favoriteUploadsSucceeded) {
+        await AsyncStorage.removeItem(FAVORITES_DELETED_KEY(userId));
+      }
+
+      // A logout or account switch may happen while the requests above are in
+      // flight. Never let a previous account repopulate the new account's UI.
+      if (currentUserRef.current?.id !== userId) return false;
+      setWatchHistory([...mergedHistory.values()].sort((a, b) => b.updatedAt - a.updatedAt).slice(0, 100));
+      setFavorites([...mergedFavorites.values()].sort((a, b) => b.addedAt - a.addedAt).slice(0, 500));
+      return historyDeletesSucceeded && favoriteDeletesSucceeded &&
+        historyUploadsSucceeded && favoriteUploadsSucceeded;
+    } catch {
+      // Local state remains the offline source of truth.
+      return false;
+    }
+  }, [accountUrl, postFavorite, postHistory, readDeletedIds]);
+
+  useEffect(() => {
+    if (!authReady || !historyHydrated || !favoritesHydrated) return;
+
+    let cancelled = false;
+    const userId = currentUser?.id || null;
+    dataOwnerRef.current = "loading";
+
+    const parseArray = <T,>(raw: string | null): T[] => {
+      if (!raw) return [];
+      try {
+        const parsed = JSON.parse(raw);
+        return Array.isArray(parsed) ? parsed : [];
+      } catch {
+        return [];
+      }
+    };
+
+    if (!userId) {
+      // Logout only removes the local identity. Restore the anonymous local
+      // collection without touching any account rows on the backend.
+      void Promise.all([
+        AsyncStorage.getItem(ANONYMOUS_HISTORY_KEY),
+        AsyncStorage.getItem(ANONYMOUS_FAVORITES_KEY),
+      ]).then(([historyRaw, favoritesRaw]) => {
+        if (cancelled || currentUserRef.current) return;
+        dataOwnerRef.current = null;
+        setWatchHistory(parseArray<WatchProgress>(historyRaw));
+        setFavorites(parseArray<FavoriteAnime>(favoritesRaw));
+      });
+      return () => { cancelled = true; };
+    }
+
+    void (async () => {
+      const [historyRaw, favoritesRaw] = await Promise.all([
+        AsyncStorage.getItem(ACCOUNT_HISTORY_KEY(userId)).catch(() => null),
+        AsyncStorage.getItem(ACCOUNT_FAVORITES_KEY(userId)).catch(() => null),
+      ]);
+      if (cancelled || currentUserRef.current?.id !== userId) return;
+
+      const localHistory = parseArray<WatchProgress>(historyRaw);
+      const localFavorites = parseArray<FavoriteAnime>(favoritesRaw);
+      dataOwnerRef.current = userId;
+      setWatchHistory(localHistory);
+      setFavorites(localFavorites);
+
+      // Supabase is authoritative for account-owned data. The account-scoped
+      // cache is only an offline queue/cache and is never mixed with anonymous
+      // data or another user's collection.
+      await syncAccountData(userId, localHistory, localFavorites);
+      if (!cancelled && currentUserRef.current?.id === userId) {
+        dataOwnerRef.current = userId;
+      }
+    })();
+
+    return () => { cancelled = true; };
+  }, [
+    authReady,
+    currentUser?.id,
+    favoritesHydrated,
+    historyHydrated,
+    syncAccountData,
+  ]);
 
   /** حذف مفاتيح الكاش القديمة عند الإطلاق — يمنع امتلاء AsyncStorage (6MB Android limit) */
   const cleanOldCacheKeys = async () => {
@@ -89,12 +588,18 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
     const [themeVal, historyVal, favVal] = await Promise.all([
       AsyncStorage.getItem("nova-theme").catch(() => null),
-      AsyncStorage.getItem("nova-history").catch(() => null),
-      AsyncStorage.getItem("nova-favorites").catch(() => null),
+      AsyncStorage.getItem(ANONYMOUS_HISTORY_KEY).catch(() => null),
+      AsyncStorage.getItem(ANONYMOUS_FAVORITES_KEY).catch(() => null),
     ]);
     if (themeVal) {
-      try { setThemeState(themeVal as Theme); } catch {}
+      const nextTheme: Theme =
+        themeVal === "white" || themeVal === "light" ? "white" : "black";
+      setThemeState(nextTheme);
+      if (themeVal !== nextTheme) {
+        await AsyncStorage.setItem("nova-theme", nextTheme).catch(() => {});
+      }
     }
+    setThemeHydrated(true);
     if (historyVal) {
       try {
         const parsed = JSON.parse(historyVal);
@@ -124,14 +629,24 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   };
 
   const refreshConfig = useCallback(async () => {
-    const cfg = await fetchRemoteConfig();
-    if (cfg) setRemoteConfig({ ...DEFAULT_CONFIG, ...cfg });
+    try {
+      const cfg = await fetchRemoteConfig();
+      if (cfg) setRemoteConfig({ ...DEFAULT_CONFIG, ...cfg });
+    } catch (error) {
+      if (error instanceof Error && error.message === "OFFICIAL_APP_REQUIRED") {
+        setOfficialAppRequired(true);
+      }
+    }
   }, []);
 
-  const setTheme = async (t: Theme) => {
-    setThemeState(t);
-    await AsyncStorage.setItem("nova-theme", t);
-  };
+  const setTheme = useCallback(async (t: Theme) => {
+    // Normalize stale callers and older persisted values to the two supported themes.
+    const nextTheme: Theme = (t as string) === "white" || (t as string) === "light"
+      ? "white"
+      : "black";
+    setThemeState(nextTheme);
+    await AsyncStorage.setItem("nova-theme", nextTheme);
+  }, []);
 
   /*
    * Keep the state updater pure. React may invoke functional updaters more than
@@ -139,15 +654,29 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
    * this callback.
    */
   const addToHistory = useCallback(async (item: WatchProgress) => {
+    const userId = currentUser?.id;
+    if (userId) {
+      const key = HISTORY_DELETED_KEY(userId);
+      const deleted = await readDeletedIds(key);
+      if (deleted.includes(item.animeId)) {
+        await writeDeletedIds(key, deleted.filter(id => id !== item.animeId));
+      }
+    }
     setWatchHistory((prev) => {
-      const exists = prev.find(
+      const withoutCurrent = prev.filter(
         (historyItem) =>
-          historyItem.animeId === item.animeId && historyItem.ep === item.ep,
+          !(historyKey(historyItem) === historyKey(item) &&
+            historyItem.ep === item.ep &&
+            (historyItem.season || 1) === (item.season || 1)),
       );
-      if (exists) return prev;
-      return [...prev.slice(-99), item];
+      // Keep the most recently exited episode at index 0. Home renders this
+      // list from the right, so the latest item must be the first item.
+      return [item, ...withoutCurrent].slice(0, 100);
     });
-  }, []);
+    // The caller invokes this when leaving the episode. Keep the network
+    // write at that boundary; onProgress only updates an in-memory ref.
+    if (userId) void postHistory(item);
+  }, [currentUser?.id, postHistory, readDeletedIds, writeDeletedIds]);
 
   /*
    * Persist after React commits the new state. This keeps storage I/O out of
@@ -155,30 +684,142 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
    */
   useEffect(() => {
     if (!historyHydrated) return;
-    AsyncStorage.setItem("nova-history", JSON.stringify(watchHistory)).catch(() => {});
-  }, [historyHydrated, watchHistory]);
+    const owner = dataOwnerRef.current;
+    if (owner === "loading") return;
+    const key = owner ? ACCOUNT_HISTORY_KEY(owner) : ANONYMOUS_HISTORY_KEY;
+    AsyncStorage.setItem(key, JSON.stringify(watchHistory)).catch(() => {});
+  }, [historyHydrated, watchHistory, currentUser?.id]);
 
   useEffect(() => {
     if (!favoritesHydrated) return;
-    AsyncStorage.setItem("nova-favorites", JSON.stringify(favorites)).catch(() => {});
-  }, [favorites, favoritesHydrated]);
+    const owner = dataOwnerRef.current;
+    if (owner === "loading") return;
+    const key = owner ? ACCOUNT_FAVORITES_KEY(owner) : ANONYMOUS_FAVORITES_KEY;
+    AsyncStorage.setItem(key, JSON.stringify(favorites)).catch(() => {});
+  }, [favorites, favoritesHydrated, currentUser?.id]);
 
-  const removeFromHistory = async (animeId: number) => {
+  const removeFromHistory = useCallback(async (animeId: number) => {
     setWatchHistory((prev) => prev.filter((h) => h.animeId !== animeId));
-  };
+    const userId = currentUser?.id;
+    if (!userId) return;
 
-  const toggleFavorite = async (anime: FavoriteAnime) => {
+    const key = HISTORY_DELETED_KEY(userId);
+    const deleted = await readDeletedIds(key);
+    await writeDeletedIds(key, [...deleted, animeId]);
+    try {
+      const response = await secureFetch(accountUrl(`/user/history/anime/${animeId}`), { method: "DELETE" });
+      if (response.ok) {
+        await writeDeletedIds(key, deleted.filter(id => id !== animeId));
+      }
+    } catch {}
+  }, [accountUrl, currentUser?.id, readDeletedIds, writeDeletedIds]);
+
+  const clearHistory = useCallback(async () => {
+    setWatchHistory([]);
+    const userId = currentUser?.id;
+    if (!userId) return;
+    const pendingKey = HISTORY_CLEAR_PENDING_KEY(userId);
+    await AsyncStorage.setItem(pendingKey, "1");
+    try {
+      const response = await secureFetch(accountUrl("/user/history"), { method: "DELETE" });
+      if (response.ok) await AsyncStorage.removeItem(pendingKey);
+    } catch {}
+  }, [accountUrl, currentUser?.id]);
+
+  const toggleFavorite = useCallback(async (anime: FavoriteAnime) => {
+    const exists = favorites.some((f) => f.id === anime.id);
     setFavorites((prev) => {
-      const exists = prev.find((f) => f.id === anime.id);
       return exists ? prev.filter((f) => f.id !== anime.id) : [anime, ...prev].slice(0, 500);
     });
-  };
+    const userId = currentUser?.id;
+    if (!userId) return;
 
-  const isFavorite = (id: number) => favorites.some((f) => f.id === id);
+    const key = FAVORITES_DELETED_KEY(userId);
+    const deleted = await readDeletedIds(key);
+    if (exists) {
+      await writeDeletedIds(key, [...deleted, anime.id]);
+      try {
+        const response = await secureFetch(accountUrl(`/user/favorites/${anime.id}`), { method: "DELETE" });
+        if (response.ok) {
+          await writeDeletedIds(key, deleted.filter(id => id !== anime.id));
+        }
+      } catch {}
+    } else {
+      if (deleted.includes(anime.id)) {
+        await writeDeletedIds(key, deleted.filter(id => id !== anime.id));
+      }
+      void postFavorite(anime);
+    }
+  }, [accountUrl, currentUser?.id, favorites, postFavorite, readDeletedIds, writeDeletedIds]);
+
+  const clearFavorites = useCallback(async () => {
+    setFavorites([]);
+    const userId = currentUser?.id;
+    if (!userId) return;
+    const pendingKey = FAVORITES_CLEAR_PENDING_KEY(userId);
+    await AsyncStorage.setItem(pendingKey, "1");
+    try {
+      const response = await secureFetch(accountUrl("/user/favorites"), { method: "DELETE" });
+      if (response.ok) await AsyncStorage.removeItem(pendingKey);
+    } catch {}
+  }, [accountUrl, currentUser?.id]);
+
+  const isFavorite = useCallback((id: number) => favorites.some((f) => f.id === id), [favorites]);
+
+  const contextValue = useMemo<AppContextType>(() => ({
+    theme,
+    themeHydrated,
+    setTheme,
+    remoteConfig,
+    refreshConfig,
+    watchHistory,
+    addToHistory,
+    removeFromHistory,
+    clearHistory,
+    favorites,
+    toggleFavorite,
+    clearFavorites,
+    isFavorite,
+    currentUser,
+    authReady,
+    setCurrentUser,
+    restoreAuth,
+  }), [
+    addToHistory,
+    authReady,
+    clearFavorites,
+    clearHistory,
+    currentUser,
+    favorites,
+    isFavorite,
+    refreshConfig,
+    remoteConfig,
+    removeFromHistory,
+    restoreAuth,
+    setTheme,
+    theme,
+    toggleFavorite,
+    themeHydrated,
+    watchHistory,
+  ]);
 
   return (
-    <AppContext.Provider value={{ theme, setTheme, remoteConfig, refreshConfig, watchHistory, addToHistory, removeFromHistory, favorites, toggleFavorite, isFavorite }}>
-      {children}
+    <AppContext.Provider value={contextValue}>
+      {officialAppRequired ? (
+        <View style={blockedStyles.container}>
+          <Text style={blockedStyles.title}>النسخة الرسمية مطلوبة</Text>
+          <Text style={blockedStyles.message}>
+            هذه النسخة غير رسمية أو معدلة. حمّل التطبيق الرسمي من موقع Anime NOVA.
+          </Text>
+        </View>
+      ) : remoteConfig.maintenanceMode ? (
+        <View style={blockedStyles.container}>
+          <Text style={blockedStyles.title}>التطبيق تحت الصيانة</Text>
+          <Text style={blockedStyles.message}>
+            {remoteConfig.maintenanceMessage || "سنعود قريبًا. يرجى المحاولة لاحقًا."}
+          </Text>
+        </View>
+      ) : children}
     </AppContext.Provider>
   );
 }
@@ -188,3 +829,26 @@ export function useApp() {
   if (!ctx) throw new Error("useApp must be inside AppProvider");
   return ctx;
 }
+
+const blockedStyles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: "#09090B",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 28,
+  },
+  title: {
+    color: "#F4F4F5",
+    fontSize: 22,
+    fontWeight: "800",
+    marginBottom: 12,
+    textAlign: "center",
+  },
+  message: {
+    color: "#A1A1AA",
+    fontSize: 15,
+    lineHeight: 24,
+    textAlign: "center",
+  },
+});

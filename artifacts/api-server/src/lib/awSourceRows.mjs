@@ -9,7 +9,10 @@ function qualityWeight(value) {
   return match ? Number(match[0]) : 0;
 }
 
-/** Combine cache and live rows without collapsing different quality variants. */
+/**
+ * Combine the fast Supabase rows with AnimeWitcher's live rows.
+ * Preserve rows when the same server/link is listed at different qualities.
+ */
 export function mergeAwSourceRows(...groups) {
   const seen = new Set();
   const rows = [];

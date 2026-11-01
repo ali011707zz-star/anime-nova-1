@@ -9,7 +9,7 @@
  */
 
 import { NativeModules, NativeEventEmitter, Platform } from "react-native";
-import { EventEmitter, requireNativeModule } from "expo-modules-core";
+import { requireNativeModule } from "expo-modules-core";
 
 type VolumeResult = { volume: number } | number;
 type VolumeListener = (result: VolumeResult) => void;
@@ -30,14 +30,16 @@ const emitter =
 type NovaVolumeModule = {
   getVolume: () => Promise<number>;
   setVolume: (volume: number, showUi: boolean) => Promise<void>;
+  addListener: (eventName: "onVolumeChange", listener: VolumeListener) => Subscription;
 };
 
 let novaVolume: NovaVolumeModule | null = null;
-let novaVolumeEvents: EventEmitter<NovaVolumeModule> | null = null;
+let novaVolumeEvents: Pick<NovaVolumeModule, "addListener"> | null = null;
 if (Platform.OS !== "web") {
   try {
     novaVolume = requireNativeModule<NovaVolumeModule>("NovaVolume");
-    novaVolumeEvents = new EventEmitter(novaVolume);
+    // Expo SDK 52+ native modules already implement EventEmitter.
+    novaVolumeEvents = novaVolume;
   } catch {
     // Expo Go does not contain project-local native modules. A development
     // build gets the real implementation; the legacy bridge remains a safe

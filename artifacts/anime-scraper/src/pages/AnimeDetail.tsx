@@ -8,7 +8,6 @@ import {
 } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 import { motion, AnimatePresence } from "framer-motion";
-import CommentsSheet from "@/components/CommentsSheet";
 import SEO from "@/components/SEO";
 import { saveAnime, unsaveAnime } from "@/lib/db";
 
@@ -64,6 +63,14 @@ query ($id: Int) {
     }
   }
 }`;
+
+
+// Same detail fields, resolved by title for source catalogs whose ids are
+// not AniList ids (for example the AnimeSlayer latest-episode feed).
+const DETAIL_BY_SEARCH_Q = DETAIL_Q.replace(
+  "query ($id: Int) {\n  Media(id: $id, type: ANIME)",
+  "query ($search: String) {\n  Media(search: $search, type: ANIME)"
+);
 
 // ── Lookups ──────────────────────────────────────────────────────
 const STATUS_MAP: Record<string, { label: string; color: string }> = {
@@ -169,6 +176,9 @@ export default function AnimeDetail() {
   const params = useParams<{ id: string }>();
   const [, navigate] = useLocation();
   const { user } = useAuth();
+  const searchParams = new URLSearchParams(window.location.search);
+  const idSource = searchParams.get("src");
+  const sourceTitle = searchParams.get("title") || searchParams.get("english") || "";
 
   const getMyName = useCallback(() =>
     user?.displayName || user?.username || localStorage.getItem("nova-username") || "مستخدم"
@@ -177,6 +187,7 @@ export default function AnimeDetail() {
   const [anime, setAnime]           = useState<any>(null);
   const [loading, setLoading]       = useState(true);
   const [descAr, setDescAr]         = useState<string | null>(null);
+  const [titleAr, setTitleAr]       = useState<string | null>(null);
   const [showFull, setShowFull]     = useState(false);
   const [saved, setSaved]           = useState(false);
   const [myRating, setMyRating]     = useState(0);
@@ -204,7 +215,7 @@ export default function AnimeDetail() {
     }
     let cancelled = false;
     const ctrl = new AbortController();
-    setLoading(true); setAnime(null); setDescAr(null); setShowFull(false);
+    setLoading(true); setAnime(null); setDescAr(null); setTitleAr(null); setShowFull(false);
 
     const savedList: number[] = JSON.parse(localStorage.getItem("savedAnime") || "[]");
     setSaved(savedList.includes(parseInt(params.id)));
@@ -217,11 +228,20 @@ export default function AnimeDetail() {
     // إذا كان الرابط يحمل مصدر id غير AniList (mal/kitsu — قادم من قائمة
     // بُنيت أثناء انقطاع AniList) نجلب التفاصيل مباشرة من نفس المصدر بدل
     // معاملتها كـ AniList id (ما كان يفتح صفحة أنمي مختلف تماماً)
-    const idSource = new URLSearchParams(window.location.search).get("src");
+    const searchParams = new URLSearchParams(window.location.search);
+    const idSource = searchParams.get("src");
+    const sourceTitle = searchParams.get("title") || searchParams.get("english") || "";
 
     const doFetch = (useProxy: boolean) => {
       const p: Promise<any> = (idSource === "mal" || idSource === "kitsu")
         ? fetch(`${API_BASE}/api/anime/meta-by-id?id=${encodeURIComponent(params.id!)}&source=${idSource}`, {
+            signal: ctrl.signal,
+          }).then(r => r.json())
+        : idSource === "anslayer" && sourceTitle
+        ? fetch(API_BASE + "/api/anilist", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ query: DETAIL_BY_SEARCH_Q, variables: { search: sourceTitle } }),
             signal: ctrl.signal,
           }).then(r => r.json())
         : useProxy
@@ -240,7 +260,31 @@ export default function AnimeDetail() {
 
       p.then(d => {
         if (cancelled) return;
-        const a = d.data?.Media;
+        let a = d.data?.Media;
+        if (!a && sourceTitle) {
+          /* Catalog cards may carry a provider id, and AniList can also be
+             temporarily unavailable. Never replace the selected card with a
+             different fallback anime; keep its title/cover so episodes remain
+             reachable. */
+          const fallbackCover = searchParams.get("cover") || "";
+          const fallbackEp = parseInt(searchParams.get("ep") || "0", 10) || 0;
+          a = {
+            id: parseInt(params.id!, 10),
+            idMal: null,
+            title: { romaji: sourceTitle, english: sourceTitle, native: sourceTitle },
+            description: "",
+            bannerImage: fallbackCover || null,
+            coverImage: { large: fallbackCover, extraLarge: fallbackCover },
+            averageScore: 0, popularity: 0, favourites: 0,
+            status: "RELEASING", episodes: fallbackEp, duration: 0,
+            seasonYear: null, season: null, format: "TV", source: null,
+            startDate: { year: null, month: null, day: null },
+            endDate: { year: null, month: null, day: null },
+            genres: [], studios: { nodes: [] }, characters: { edges: [] },
+            relations: { edges: [] }, recommendations: { nodes: [] },
+            nextAiringEpisode: null, rankings: [], trailer: null, isAdult: false,
+          };
+        }
         if (!a) {
           // بروكسي فشل → جرّب مباشرة
           if (useProxy) { doFetch(false); return; }
@@ -255,25 +299,57 @@ export default function AnimeDetail() {
         }
         setAnime(a);
         setLoading(false);
+
+        // Arabic display names are curated and keyed by AniList ID on the API.
+        // Never reuse or generate a machine-translated title from local storage.
+        const verifiedTitleAr = typeof a.title_ar === "string" &&
+          /[\u0600-\u06FF]/.test(a.title_ar) ? a.title_ar : null;
+        setTitleAr(verifiedTitleAr);
+
         if (!a.description) return;
         const cached = localStorage.getItem(`desc-ar-${params.id}`);
-        if (cached) { setDescAr(cached); return; }
+        if (cached && /[\u0600-\u06FF]/.test(cached)) { setDescAr(cached); return; }
+        if (cached) localStorage.removeItem(`desc-ar-${params.id}`);
         const stripped = a.description
           .replace(/<br\s*\/?>/gi, " ").replace(/<[^>]*>/gm, "")
           .replace(/&amp;/g,"&").replace(/&lt;/g,"<").replace(/&gt;/g,">")
           .replace(/&quot;/g,'"').replace(/&#039;/g,"'").replace(/&nbsp;/g," ")
           .replace(/\s+/g," ").trim().substring(0, 500);
-        fetch(`${API_BASE}/api/anime/translate?text=${encodeURIComponent(stripped)}`, { signal: ctrl.signal })
+        fetch(`${API_BASE}/api/anime/translate?text=${encodeURIComponent(stripped)}&from=en&to=ar&kind=synopsis`, { signal: ctrl.signal })
           .then(r2 => r2.json()).then(d2 => {
             if (cancelled) return;
-            const t = d2.translated;
-            if (t && t !== stripped && t.length > 10) {
+            const t = String(d2?.translated || "").trim();
+            if (t && t.length > 10 && /[\u0600-\u06FF]/.test(t)) {
               setDescAr(t); localStorage.setItem(`desc-ar-${params.id}`, t);
-            } else setDescAr(stripped);
+            } else {
+              // Keep the synopsis readable when a free translation provider is
+              // temporarily unavailable; do not replace it with a misleading
+              // error string that looks like the content itself.
+              setDescAr(stripped);
+            }
           }).catch(() => { if (!cancelled) setDescAr(stripped); });
       }).catch(() => {
         if (!cancelled) {
           if (useProxy) { doFetch(false); return; }
+          if (sourceTitle) {
+            const fallbackCover = searchParams.get("cover") || "";
+            setAnime({
+              id: parseInt(params.id!, 10),
+              idMal: null,
+              title: { romaji: sourceTitle, english: sourceTitle, native: sourceTitle },
+              description: "",
+              bannerImage: fallbackCover || null,
+              coverImage: { large: fallbackCover, extraLarge: fallbackCover },
+              averageScore: 0, popularity: 0, favourites: 0,
+              status: "RELEASING", episodes: parseInt(searchParams.get("ep") || "0", 10) || 0,
+              duration: 0, seasonYear: null, season: null, format: "TV", source: null,
+              startDate: { year: null, month: null, day: null },
+              endDate: { year: null, month: null, day: null },
+              genres: [], studios: { nodes: [] }, characters: { edges: [] },
+              relations: { edges: [] }, recommendations: { nodes: [] },
+              nextAiringEpisode: null, rankings: [], trailer: null, isAdult: false,
+            });
+          }
           setLoading(false);
         }
       });
@@ -415,9 +491,17 @@ export default function AnimeDetail() {
             onClick={() => {
               if (!params.id) { navigate("/"); return; }
               setLoading(true); setAnime(null);
-              const idSource = new URLSearchParams(window.location.search).get("src");
+              const retryParams = new URLSearchParams(window.location.search);
+              const idSource = retryParams.get("src");
+              const sourceTitle = retryParams.get("title") || retryParams.get("english") || "";
               const retryFetch = (idSource === "mal" || idSource === "kitsu")
                 ? fetch(`${API_BASE}/api/anime/meta-by-id?id=${encodeURIComponent(params.id)}&source=${idSource}`)
+                : idSource === "anslayer" && sourceTitle
+                ? fetch(API_BASE + "/api/anilist", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json", "Accept": "application/json" },
+                    body: JSON.stringify({ query: DETAIL_BY_SEARCH_Q, variables: { search: sourceTitle } }),
+                  })
                 : fetch(API_BASE + "/api/anilist", {
                     method: "POST",
                     headers: { "Content-Type": "application/json", "Accept": "application/json" },
@@ -444,7 +528,8 @@ export default function AnimeDetail() {
   );
 
   const score      = anime.averageScore ? (anime.averageScore / 10).toFixed(2) : null;
-  const descText   = descAr || anime.description?.replace(/<[^>]*>/gm,"") || "";
+  const displayTitle = anime.title?.english || anime.title?.romaji || anime.title?.native || "أنمي";
+  const descText   = descAr || (anime.description ? "جاري ترجمة الوصف…" : "");
   const statusInfo = STATUS_MAP[anime.status] || { label: anime.status, color: "text-white/50 bg-white/8 border-white/10" };
   const allTimeRank = anime.rankings?.find((r: any) => r.allTime && r.type === "RATED")?.rank;
   const mainChars  = anime.characters?.edges?.filter((e: any) => e.role === "MAIN") || [];
@@ -458,8 +543,8 @@ export default function AnimeDetail() {
   return (
     <main className="bg-[#09090B] min-h-screen pb-32 text-white" dir="rtl">
       <SEO
-        title={anime.title?.arabic || anime.title?.english || anime.title?.romaji || "أنمي"}
-        description={descAr || anime.description?.replace(/<[^>]+>/g, "").slice(0, 160)}
+        title={displayTitle}
+        description={descAr || "جاري ترجمة الوصف…"}
         image={anime.coverImage?.extraLarge || anime.coverImage?.large || anime.bannerImage}
         path={`/anime/${params.id}`}
       />
@@ -492,10 +577,17 @@ export default function AnimeDetail() {
           )}
         </div>
         <div className="flex-1 pb-3 min-w-0 space-y-1.5">
-          <h1 className="text-[17px] font-black text-white leading-snug font-['Cairo'] line-clamp-2">
-            {anime.title.arabic || anime.title.english || anime.title.romaji}
+          <h1 dir="ltr" lang="en" className="text-[17px] font-black text-white leading-snug font-['Cairo'] line-clamp-2 text-right">
+            {displayTitle}
           </h1>
-          <p className="text-[10px] text-white/35 line-clamp-1">{anime.title.romaji}</p>
+          {titleAr && (
+            <p dir="rtl" lang="ar" className="text-[12px] text-white/65 leading-snug font-['Cairo'] line-clamp-2">
+              {titleAr}
+            </p>
+          )}
+          {anime.title?.romaji && anime.title.romaji !== displayTitle && (
+            <p dir="ltr" lang="ja-Latn" className="text-[10px] text-white/35 line-clamp-1">{anime.title.romaji}</p>
+          )}
           <div className="flex flex-wrap gap-1.5">
             <span className={`text-[9px] font-black px-2 py-1 rounded-lg border font-['Cairo'] ${statusInfo.color}`}>
               {statusInfo.label}
@@ -541,6 +633,9 @@ export default function AnimeDetail() {
             if (isMovie) {
               navigate(`/watch?anime=${params.id}&ep=1&title=${encodeURIComponent(anime?.title?.romaji ?? "")}&english=${encodeURIComponent(anime?.title?.english ?? "")}`);
             } else {
+              // المسلسلات تفتح صفحة الحلقات دائماً. حتى لو جاءت صفحة التفاصيل
+              // من بطاقة "أحدث الحلقات" التابعة لمصدر خارجي، لا ننقل المستخدم
+              // مباشرةً إلى الحلقة الحالية من زر "مشاهدة الأنمي".
               navigate(`/episodes/${params.id}`);
             }
           }}
@@ -589,7 +684,7 @@ export default function AnimeDetail() {
         {/* 3-button action row */}
         <div className="grid grid-cols-3 gap-2 mb-3">
           {[
-            { icon: MessageSquare, label: "التعليقات", active: comments.length > 0, activeColor: "#8B5CF6", action: () => setShowComments(true), sub: comments.length > 0 ? `${comments.length}` : null },
+            { icon: MessageSquare, label: "التعليقات", active: comments.length > 0, activeColor: "#8B5CF6", action: () => navigate(`/comments?animeId=${params.id}`), sub: comments.length > 0 ? `${comments.length}` : null },
             { icon: Plus,          label: "قائمتي",    active: saved,        activeColor: "#8B5CF6", action: toggleSave,                         sub: saved ? "مضاف" : null },
             { icon: Star,          label: "تقييمي",    active: myRating > 0, activeColor: "#EAB308", action: () => setShowRatingPicker(true),    sub: myRating > 0 ? `${myRating}/10` : null },
           ].map(({ icon: Icon, label, active, activeColor, action, sub }) => (
@@ -828,7 +923,7 @@ export default function AnimeDetail() {
                       <Link key={rec.id} href={`/anime/${rec.id}`}>
                         <motion.div whileTap={{ scale: 0.96 }} className="cursor-pointer">
                           <div className="relative aspect-[2/3] rounded-2xl overflow-hidden border border-white/6 bg-[#1C1C22]">
-                            <img src={rec.coverImage.large} alt="" className="w-full h-full object-cover" loading="lazy" />
+                            <img src={rec.coverImage?.large || rec.coverImage?.medium || anime.coverImage?.large || ""} alt="" className="w-full h-full object-cover" loading="lazy" />
                             {rec.averageScore && (
                               <div className="absolute top-1.5 right-1.5 bg-black/70 text-amber-400 text-[8px] px-1.5 py-0.5 rounded-lg font-black flex items-center gap-0.5">
                                 <Star className="w-2 h-2 fill-current" /> {(rec.averageScore / 10).toFixed(1)}

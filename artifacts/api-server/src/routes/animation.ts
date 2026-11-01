@@ -1,4 +1,5 @@
 import { Router, type Request, type Response } from "express";
+import { scraperQueueMiddleware } from "../lib/scraperQueue.js";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { randomBytes, createHash, createDecipheriv, createCipheriv } from "node:crypto";
 import { encryptParam, encryptProxyUrl, isEncrypted, decryptParam } from "../lib/security.js";
@@ -267,7 +268,7 @@ async function getMbxAuthAnim(): Promise<{ token: string; cookies: string } | nu
 }
 
 const DULO_TV_BASE    = "https://dulo.tv";
-const DULO_TV_API_KEY = "WDNUNBUB3HR983Y9ISBADK4O82";
+const DULO_TV_API_KEY = process.env.DULO_TV_API_KEY || "";
 let _duloAnimCookie   = "";
 let _duloAnimCookieAt = 0;
 const DULO_SESS_TTL_ANIM = 7 * 3_600_000;
@@ -2163,7 +2164,7 @@ router.get("/animation/videasy-fresh", async (req: Request, res: Response) => {
 
 // ── SSE animation sources stream ──────────────────────────────────────────────
 
-router.get("/animation/sources-stream", async (req: Request, res: Response) => {
+router.get("/animation/sources-stream", scraperQueueMiddleware, async (req: Request, res: Response) => {
   const title   = String(req.query.title  || "");
   const type    = String(req.query.type   || "movie");
   const epNum   = parseInt(String(req.query.ep     || "1"), 10) || 1;
@@ -2191,6 +2192,9 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
 
   // ── كاش capture: AsyncLocalStorage لتجنب race condition في الاستدعاءات المتزامنة ──
   const captureStorage = new AsyncLocalStorage<any[]>();
+  // Keeps the originating lazy scraper attached to every streamed source.
+  // This lets the selected-source resolver rerun one provider only.
+  const sourceSiteStorage = new AsyncLocalStorage<string>();
 
   // Send a source; directUrl = already-extracted stream URL, proxyUrl = proxied version
   const sendSource = (url: string, label: string, directUrl?: string, proxyUrl?: string, extra2?: Record<string, any>) => {
@@ -2225,7 +2229,13 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
       } catch { /* ignore */ }
     }
 
-    const extra = { ...(adSub ? { subtitleUrl: adSub } : {}), ...(extra2 || {}), ...(headers ? { headers } : {}) };
+    const sourceSite = sourceSiteStorage.getStore() || siteParam || undefined;
+    const extra = {
+      ...(adSub ? { subtitleUrl: adSub } : {}),
+      ...(sourceSite ? { site: sourceSite } : {}),
+      ...(extra2 || {}),
+      ...(headers ? { headers } : {}),
+    };
     // تشفير params في روابط الـ proxy قبل إرسالها للعميل — يمنع كشف CDN URLs في devtools
     const mobileHeaders = extra?.headers as Record<string,string> | undefined;
     const isMob = (req.headers?.["x-nova-client"] || "").toString().includes("mobile");
@@ -2277,20 +2287,26 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
   ) {
     if (siteParam && site !== siteParam) return;
     if (ANIM_SOURCE_ALLOWLIST && !ANIM_SOURCE_ALLOWLIST.has(site)) return;
-    const cKey = makeAnimCacheKey(site, tmdbId || title.slice(0, 20), type, season, epNum);
+    const animCacheIdentity = tmdbId ||
+      `title-${createHash("sha256").update(title.trim().toLowerCase()).digest("hex").slice(0, 16)}`;
+    const cKey = makeAnimCacheKey(site, animCacheIdentity, type, season, epNum);
     const hit  = await getFromSourceCache(cKey);
 
     if (hit) {
       // ✅ تقديم من الكاش فوراً (< 5ms)
       for (const s of hit.sources) {
-        sendSource(s.url, s.label, s.directUrl, s.proxyUrl, s.subtitleUrl ? { subtitleUrl: s.subtitleUrl } : undefined);
+        sendSource(s.url, s.label, s.directUrl, s.proxyUrl, {
+          ...(s.site || site ? { site: s.site || site } : {}),
+          ...(s.subtitleUrl ? { subtitleUrl: s.subtitleUrl } : {}),
+          ...(s.headers ? { headers: s.headers } : {}),
+        });
       }
       // تجديد خلفي إذا انتهى الكاش (stale) أو اقترب انتهاؤه
       if (hit.stale || shouldRefreshCache(hit.expiresAt)) {
         setImmediate(async () => {
           try {
             const bgArr: any[] = [];
-            await captureStorage.run(bgArr, () => scrape());
+            await sourceSiteStorage.run(site, () => captureStorage.run(bgArr, () => scrape()));
             if (bgArr.length) await setSourceCache(cKey, site, bgArr);
           } catch { /* silent */ }
         });
@@ -2300,7 +2316,7 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
 
     // ❌ لا يوجد كاش → اكشط مع التسجيل في context معزول
     const captured: any[] = [];
-    await captureStorage.run(captured, () => scrape());
+    await sourceSiteStorage.run(site, () => captureStorage.run(captured, () => scrape()));
     if (captured.length) await setSourceCache(cKey, site, captured);
   }
 
@@ -5123,7 +5139,7 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
         if (!tmdbId) return;
         try {
           send("status", { msg: "NflixMovies: جاري الاستخراج…" });
-          const NFLIX_TOKEN = "tvk_1olLFNOIoDx6xfMYo_RKovws8zFe_hhyUfgf3E0NNR8";
+          const NFLIX_TOKEN = process.env.NFLIX_TOKEN || "";
           const params = new URLSearchParams({ id: String(tmdbId), type: type === "movie" ? "movie" : "tv" });
           if (type !== "movie") { params.set("season", String(season)); params.set("episode", String(epNum)); }
           const r = await fetch(`https://stream.nflixmovies.app/api/v1/play?${params}`, {
@@ -5189,6 +5205,104 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
       send("error", { msg: String(e) });
       send("done",  {}); clearInterval(keepAlive); res.end();
     }
+  }
+});
+
+
+// ── Resolve one selected animation source only ───────────────────────────────
+// The discovery stream remains responsible for listing sources. This endpoint
+// reruns only the provider selected by the client and returns the first valid
+// resolved source, preserving the existing proxy/encryption behavior.
+router.post("/animation/source-resolve", async (req: Request, res: Response) => {
+  const body = (req.body || {}) as Record<string, any>;
+  const sourceId = String(body.sourceId || body.site || "").trim();
+  const title = String(body.title || "").trim();
+  const type = String(body.type || "movie").trim();
+  const ep = String(body.ep || body.episodeNumber || "1");
+  const season = String(body.season || "1");
+  const tmdbId = String(body.tmdbId || body.id || "").trim();
+  const quality = String(body.quality || "").trim().toLowerCase();
+
+  if (!sourceId || !tmdbId) {
+    res.status(400).json({ error: "sourceId and tmdbId are required" });
+    return;
+  }
+
+  const port = Number(process.env.PORT || 5000);
+  const params = new URLSearchParams({
+    title, type, ep, season, tmdbId, site: sourceId,
+  });
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 26_000);
+
+  try {
+    const upstreamHeaders: Record<string, string> = {};
+    for (const header of [
+      "x-app-token",
+      "x-nova-client",
+      "x-nova-version",
+      "x-nova-package",
+      "user-agent",
+    ] as const) {
+      const value = req.headers[header];
+      if (typeof value === "string" && value) upstreamHeaders[header] = value;
+    }
+    const upstream = await fetch(`http://127.0.0.1:${port}/api/animation/sources-stream?${params}`, {
+      headers: upstreamHeaders,
+      signal: controller.signal,
+    });
+    if (!upstream.ok || !upstream.body) {
+      res.status(502).json({ error: `source stream failed (${upstream.status})` });
+      return;
+    }
+
+    const reader = upstream.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    let selected: any = null;
+
+    const consider = (value: any) => {
+      if (!value || typeof value !== "object" || !value.url && !value.directUrl && !value.proxyUrl) return;
+      if (!selected) selected = value;
+      if (quality) {
+        const text = `${value.label || ""} ${value.quality || ""}`.toLowerCase();
+        if (text.includes(quality)) selected = value;
+      }
+    };
+
+    while (!selected) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const blocks = buffer.split("\n\n");
+      buffer = blocks.pop() || "";
+      for (const block of blocks) {
+        let event = "";
+        let data = "";
+        for (const line of block.split("\n")) {
+          if (line.startsWith("event: ")) event = line.slice(7).trim();
+          else if (line.startsWith("data: ")) data += line.slice(6);
+        }
+        if (event === "source" && data) {
+          try { consider(JSON.parse(data)); } catch { /* ignore malformed event */ }
+        }
+      }
+    }
+    try { await reader.cancel(); } catch {}
+
+    if (!selected) {
+      res.status(404).json({ error: "selected source returned no playable stream", sourceId });
+      return;
+    }
+    res.json({ ...selected, sourceId });
+  } catch (e: any) {
+    if (e?.name === "AbortError") {
+      res.status(504).json({ error: "selected source timed out", sourceId });
+    } else {
+      res.status(500).json({ error: String(e?.message || e), sourceId });
+    }
+  } finally {
+    clearTimeout(timeout);
   }
 });
 

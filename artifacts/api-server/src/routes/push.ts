@@ -163,7 +163,7 @@ function cleanErrorCode(value: unknown): string {
 }
 
 function isRetryableExpoError(code: string): boolean {
-  return TRANSIENT_EXPO_ERRORS.has(code);
+  return TRANSIENT_EXPO_ERRORS.has(code) || code === "InvalidCredentials" || code === "MismatchSenderId";
 }
 
 async function patchDelivery(row: PushDeliveryRow, values: Record<string, unknown>): Promise<boolean> {
@@ -222,7 +222,7 @@ async function deferDelivery(
   options: { status?: DeliveryStatus; delayMs?: number; clearTicket?: boolean } = {},
 ): Promise<void> {
   const attempts = (row.attempts || 0) + 1;
-  const status = options.status || (isRetryableExpoError(code) && attempts < 5 ? "retry" : "failed");
+  const status = options.status || (isRetryableExpoError(code) ? "retry" : "failed");
   const updated = await patchDelivery(row, {
     status,
     attempts,

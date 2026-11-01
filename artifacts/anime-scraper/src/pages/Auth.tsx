@@ -96,7 +96,7 @@ export function AuthModal({ onClose }: { onClose: () => void }) {
 /* ═══════════════════════════════════════════════
    SHARED AUTH CONTENT
 ═══════════════════════════════════════════════ */
-type Flow = "login" | "signup" | "verify" | "forgot" | "reset";
+type Flow = "login" | "signup" | "forgot" | "reset";
 
 function AuthContent({ onClose, isModal }: { onClose: () => void; isModal?: boolean }) {
   const { signIn, signUp } = useAuth();
@@ -132,7 +132,7 @@ function AuthContent({ onClose, isModal }: { onClose: () => void; isModal?: bool
   const iClass = "w-full bg-white/5 border border-white/8 rounded-2xl px-4 py-3.5 text-white text-[13.5px] font-['Cairo'] placeholder-white/20 outline-none focus:border-violet-500/50 transition-all";
 
   /* ── إرسال الكود ── */
-  const sendCode = async (type: "signup" | "reset" = "signup") => {
+  const sendCode = async (type: "reset" = "reset") => {
     if (!email.trim()) { setError("أدخل بريدك الإلكتروني أولاً"); return false; }
     setLoading(true); setError("");
     try {
@@ -163,24 +163,14 @@ function AuthContent({ onClose, isModal }: { onClose: () => void; isModal?: bool
     else onClose();
   };
 
-  /* ── إرسال كود التسجيل ── */
+  /* ── إنشاء الحساب مباشرةً بدون كود تحقق ── */
   const submitSignupRequest = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
     if (!email.trim()) { setError("أدخل بريدك الإلكتروني"); return; }
     if (password.length < 6) { setError("كلمة المرور يجب أن تكون 6 أحرف على الأقل"); return; }
-    const ok = await sendCode("signup");
-    if (ok) { setCode(["", "", "", "", "", ""]); setFlow("verify"); setTimeout(() => codeRefs[0].current?.focus(), 300); }
-  };
-
-  /* ── إتمام التسجيل بعد التحقق ── */
-  const submitSignupVerify = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setError("");
-    const fullCode = code.join("");
-    if (fullCode.length < 6) { setError("أدخل الكود المكوّن من 6 أرقام"); return; }
     setLoading(true);
-    const result = await signUp(email.trim(), password, name.trim() || undefined, fullCode);
+    const result = await signUp(email.trim(), password, name.trim() || undefined);
     setLoading(false);
     if (result.error) setError(result.error);
     else onClose();
@@ -230,7 +220,6 @@ function AuthContent({ onClose, isModal }: { onClose: () => void; isModal?: bool
     if (e.key === "Enter") {
       const full = code.join("");
       if (full.length === 6) {
-        if (flow === "verify") submitSignupVerify(e as any);
         if (flow === "reset") submitReset(e as any);
       }
     }
@@ -248,7 +237,6 @@ function AuthContent({ onClose, isModal }: { onClose: () => void; isModal?: bool
   const titles: Record<Flow, { title: string; sub: string }> = {
     login:  { title: "Anime NOVA", sub: "مرحباً بعودتك" },
     signup: { title: "Anime NOVA", sub: "أنشئ حسابك مجاناً" },
-    verify: { title: "تأكيد البريد", sub: `أُرسل كود إلى ${email}` },
     forgot: { title: "نسيت كلمة المرور", sub: "سنرسل لك كود إعادة تعيين" },
     reset:  { title: "إعادة تعيين", sub: `أُرسل كود إلى ${email}` },
   };
@@ -261,7 +249,7 @@ function AuthContent({ onClose, isModal }: { onClose: () => void; isModal?: bool
         <div className="flex items-center gap-2.5">
           <div className="w-9 h-9 rounded-2xl flex items-center justify-center"
             style={{ background: "linear-gradient(135deg,#7C3AED,#4F46E5)", boxShadow: "0 0 20px rgba(124,58,237,0.35)" }}>
-            {flow === "verify" || flow === "reset"
+            {flow === "reset"
               ? <ShieldCheck className="w-4 h-4 text-white" />
               : <Sparkles className="w-4 h-4 text-white" />}
           </div>
@@ -288,32 +276,23 @@ function AuthContent({ onClose, isModal }: { onClose: () => void; isModal?: bool
         )}
       </AnimatePresence>
 
-      {/* ══════════════════════════════════════════
-          TABS (login / signup only)
-      ══════════════════════════════════════════ */}
-      {(flow === "login" || flow === "signup") && (
-        <div className="flex gap-1 p-1 rounded-2xl mb-6"
-          style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.06)" }}>
-          {(["login", "signup"] as const).map(t => (
-            <button key={t} onClick={() => { setFlow(t); setError(""); }}
-              className="flex-1 py-2.5 rounded-xl font-black font-['Cairo'] text-[12.5px] transition-all"
-              style={flow === t ? {
-                background: "linear-gradient(135deg,rgba(124,58,237,0.5),rgba(79,70,229,0.5))",
-                color: "white", border: "1px solid rgba(139,92,246,0.3)",
-                boxShadow: "0 2px 12px rgba(124,58,237,0.2)",
-              } : { color: "rgba(255,255,255,0.35)" }}>
-              {t === "login" ? "تسجيل الدخول" : "حساب جديد"}
-            </button>
-          ))}
-        </div>
-      )}
-
-      {/* OAuth buttons hidden temporarily — will be added later */}
+      <div className="mb-5 rounded-2xl px-4 py-3 text-center"
+        style={{ background: "rgba(124,58,237,0.08)", border: "1px solid rgba(139,92,246,0.18)" }}>
+        <p className="text-[12px] text-white/60 font-['Cairo'] leading-6">
+          سجّل الدخول أو أنشئ حسابك باستخدام حساب Google فقط
+        </p>
+        <p className="text-[10px] text-white/30 font-['Cairo'] mt-1">
+          سيتم حفظ سجلك ومفضلاتك على حسابك
+        </p>
+      </div>
+      <GoogleBtn />
 
       {/* ══════════════════════════════════════════
-          LOGIN
+          Legacy email flow intentionally disabled.
+          Keep the handlers temporarily so existing sessions/API clients
+          remain compatible while all new UI uses Google only.
       ══════════════════════════════════════════ */}
-      {flow === "login" && (
+      {false && flow === "login" && (
         <form onSubmit={submitLogin} className="flex flex-col gap-3">
           <div className="relative">
             <Mail className="absolute right-4 top-1/2 -translate-y-1/2 w-4 h-4 text-white/25 pointer-events-none" />
@@ -343,7 +322,7 @@ function AuthContent({ onClose, isModal }: { onClose: () => void; isModal?: bool
       {/* ══════════════════════════════════════════
           SIGNUP — المرحلة الأولى
       ══════════════════════════════════════════ */}
-      {flow === "signup" && (
+      {false && flow === "signup" && (
         <form onSubmit={submitSignupRequest} className="flex flex-col gap-3">
           <div className="relative">
             <User className="absolute right-4 top-1/2 -translate-y-1/2 w-4 h-4 text-white/25 pointer-events-none" />
@@ -367,7 +346,7 @@ function AuthContent({ onClose, isModal }: { onClose: () => void; isModal?: bool
             </button>
           </div>
           <ErrorBox error={error} />
-          <SubmitBtn loading={loading} label="أرسل كود التحقق" />
+          <SubmitBtn loading={loading} label="إنشاء الحساب" />
           <p className="text-center text-[10.5px] text-white/25 font-['Cairo'] mt-1 leading-5">
             بإنشاء حساب أنت توافق على شروط الاستخدام
           </p>
@@ -375,23 +354,9 @@ function AuthContent({ onClose, isModal }: { onClose: () => void; isModal?: bool
       )}
 
       {/* ══════════════════════════════════════════
-          VERIFY — إدخال الكود (للتسجيل)
-      ══════════════════════════════════════════ */}
-      {flow === "verify" && (
-        <form onSubmit={submitSignupVerify} className="flex flex-col gap-4">
-          <CodeInfo email={email} />
-          <CodeInput code={code} refs={codeRefs} onChange={handleCodeInput} onKeyDown={handleCodeKey} onPaste={handleCodePaste} />
-          <ErrorBox error={error} />
-          <SubmitBtn loading={loading} label="تحقّق وأنشئ الحساب" />
-          <ResendBtn cooldown={cooldown} loading={loading} onResend={() => sendCode("signup")} />
-          <BackBtn onClick={() => { setFlow("signup"); setError(""); }} />
-        </form>
-      )}
-
-      {/* ══════════════════════════════════════════
           FORGOT — إدخال البريد لإعادة التعيين
       ══════════════════════════════════════════ */}
-      {flow === "forgot" && (
+      {false && flow === "forgot" && (
         <form onSubmit={submitForgot} className="flex flex-col gap-3">
           <div className="relative">
             <Mail className="absolute right-4 top-1/2 -translate-y-1/2 w-4 h-4 text-white/25 pointer-events-none" />
@@ -408,7 +373,7 @@ function AuthContent({ onClose, isModal }: { onClose: () => void; isModal?: bool
       {/* ══════════════════════════════════════════
           RESET — إدخال الكود + كلمة مرور جديدة
       ══════════════════════════════════════════ */}
-      {flow === "reset" && (
+      {false && flow === "reset" && (
         <form onSubmit={submitReset} className="flex flex-col gap-4">
           <CodeInfo email={email} />
           <CodeInput code={code} refs={codeRefs} onChange={handleCodeInput} onKeyDown={handleCodeKey} onPaste={handleCodePaste} />
@@ -531,7 +496,7 @@ function GoogleBtn() {
       type="button"
       disabled={loading}
       onClick={async () => { setLoading(true); await signInWithGoogle(); setLoading(false); }}
-      className="w-full flex items-center justify-center gap-2 py-3 rounded-2xl font-bold font-['Cairo'] text-[12px] transition-all active:scale-[0.98] disabled:opacity-60"
+      className="w-full max-w-sm mx-auto flex items-center justify-center gap-2 py-3 rounded-2xl font-bold font-['Cairo'] text-[12px] transition-all active:scale-[0.98] disabled:opacity-60"
       style={{
         background: "rgba(255,255,255,0.05)",
         border: "1.5px solid rgba(255,255,255,0.10)",

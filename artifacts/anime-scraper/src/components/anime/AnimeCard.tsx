@@ -5,6 +5,7 @@ import { Star } from 'lucide-react';
 type AniListAnime = {
   id: number;
   title: { romaji: string; english?: string };
+  title_ar?: string;
   coverImage: { large: string };
   averageScore?: number;
   episodes?: number;
@@ -35,8 +36,13 @@ export default function AnimeCard({ anime }: { anime: AniListAnime }) {
           )}
         </div>
         <h3 className="mt-1.5 text-[11px] text-white/65 truncate font-bold group-hover:text-primary transition-colors">
-          {anime.title.romaji}
+          {anime.title.english || anime.title.romaji}
         </h3>
+        {anime.title_ar && (
+          <p dir="rtl" lang="ar" className="text-[9px] text-white/45 truncate font-['Cairo'] mt-0.5">
+            {anime.title_ar}
+          </p>
+        )}
       </motion.div>
     </Link>
   );

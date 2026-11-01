@@ -1763,28 +1763,55 @@ export default function SettingsScreen() {
           ))}
         </View>}
 
-        {/* ── التبرع ودعم التطبيق عبر قناة تلجرام الرسمية ── */}
+        {/* ── Nova Premium banner ── */}
         {!tvMode && <View style={{ paddingHorizontal: 16, marginTop: 16 }}>
+          <Pressable style={ts.premiumCard} onPress={() => setShowPremium(true)}>
+            {/* Glow */}
+            <View style={ts.premiumGlow} />
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
+              <View style={ts.premiumIcon}>
+                <Ionicons name="ribbon" size={20} color="#fbbf24" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={[ts.premiumTitle, theme === "white" && { color: "#70500B" }]}>Nova Premium ⭐</Text>
+                <Text style={[ts.premiumSub, theme === "white" && { color: "#65552F" }]}>اشترك الآن · إزالة الإعلانات · مميزات حصرية</Text>
+              </View>
+              <View style={ts.premiumBtn}>
+                <Text style={[ts.premiumBtnText, theme === "white" && { color: "#70500B" }]}>اشترك</Text>
+                <Ionicons name="chevron-back" size={14} color="#fbbf24" />
+              </View>
+            </View>
+              <View style={ts.premiumFeatures}>
+                {["بدون إعلانات", "جودة أعلى", "تخطي المقدمة"].map(f => (
+                  <View key={f} style={ts.premiumFeatureItem}>
+                    <Ionicons name="checkmark" size={10} color="#fbbf24" />
+                    <Text style={[ts.premiumFeatureText, theme === "white" && { color: "#70500B" }]}>{f}</Text>
+                  </View>
+                ))}
+              </View>
+            </Pressable>
+
+            {/* ── التبرع ودعم التطبيق (تحت زر الاشتراكات مباشرة) ── */}
             <Pressable
               testID="open-donation-modal"
               style={ts.donationCard}
-              onPress={() => Linking.openURL("https://t.me/Anime_NOVA_0").catch(() => {})}
+              onPress={() => setShowDonation(true)}
             >
               <View style={{ flexDirection: ROW_RTL, alignItems: "center", gap: 12 }}>
                 <View style={ts.donationIconBox}>
-                  <Ionicons name="paper-plane" size={20} color="#10b981" />
+                  <Ionicons name="heart" size={20} color="#10b981" />
                 </View>
                 <View style={{ flex: 1, alignItems: "flex-end" }}>
                   <Text style={[ts.donationTitle, theme === "white" && { color: "#065f46" }]}>
-                    انضم لقناتنا وادعم التطبيق على تلجرام ❤️
+                    ادعمني ليستمر التطبيق بالعمل مجاناً ❤️
                   </Text>
                   <Text style={[ts.donationSub, theme === "white" && { color: "#047857" }]}>
-                    تابع أحدث التحديثات ودعم السيرفرات عبر قناتنا الرسمية https://t.me/Anime_NOVA_0
+                    دعمك بالنجوم أو الهدايا يحافظ على خوادم الحلقات السريعة بدون رسوم إجبارية
                   </Text>
                 </View>
                 <View style={ts.donationPillBtn}>
-                  <Text style={ts.donationPillBtnText}>زيارة القناة</Text>
-                  <Ionicons name="chevron-back" size={13} color="#10b981" style={{ transform: [{ scaleX: -1 }] }} />
+                  <Text style={ts.donationPillBtnText}>تبرع الآن</Text>
+                  <Ionicons name="chevron-back" size={13} color="#10b981" />
                 </View>
               </View>
             </Pressable>

@@ -7,10 +7,19 @@ export async function fetchRemoteConfig() {
     const res = await secureFetch(`${getBaseUrl()}/api/config`, {
       headers: { Accept: "application/json" },
     });
-    if (!res.ok) throw new Error("config fetch failed");
+    if (!res.ok) {
+      const body = await res.clone().json().catch(() => ({}));
+      if (body?.officialDownloadRequired) {
+        throw new Error("OFFICIAL_APP_REQUIRED");
+      }
+      throw new Error("config fetch failed");
+    }
     return await res.json();
-  } catch {
-    return null;
+  } catch (error) {
+    if (error instanceof Error && error.message === "OFFICIAL_APP_REQUIRED") {
+      throw error;
+    }
+    throw new Error("config fetch failed");
   }
 }
 
@@ -33,6 +42,7 @@ export type RemoteConfig = {
   maintenanceMode?: boolean;
   maintenanceMessage?: string;
   version?: string;
+  limits?: { downloadLimit: number; watchAccessMinutes: number };
 };
 
 export const DEFAULT_CONFIG: RemoteConfig = {
@@ -55,5 +65,7 @@ export const DEFAULT_CONFIG: RemoteConfig = {
     watchHistory: true,
     subscriptions: true,
     downloads: false,
+    animationSection: true,
   },
+  limits: { downloadLimit: 4, watchAccessMinutes: 60 },
 };

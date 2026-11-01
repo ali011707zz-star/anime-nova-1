@@ -7,8 +7,9 @@ import {
 } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 
-/* ── Telegram username ── */
-const TG_USERNAME = "L_X_00";
+/* ── Telegram direct chat ── */
+const TG_USER_ID = "5477879129";
+const TELEGRAM_CHAT_URL = `tg://user?id=${TG_USER_ID}`;
 
 /* ── Feature list ── */
 const FEATURES = [
@@ -72,7 +73,9 @@ export default function Subscription() {
     }
 
     setTimeout(() => {
-      window.open(`https://t.me/${TG_USERNAME}`, "_blank");
+      // The numeric deep link opens the conversation directly instead of
+      // opening the account's public profile.
+      window.location.href = TELEGRAM_CHAT_URL;
       setOpening(false);
     }, 400);
   }

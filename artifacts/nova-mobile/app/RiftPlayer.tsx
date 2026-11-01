@@ -13,13 +13,19 @@ import Video, { VideoRef } from "react-native-video";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator, Animated, Dimensions, Easing, I18nManager, Platform,
-  PanResponder, Pressable, ScrollView, StyleSheet, Text, View,
+  PanResponder, ScrollView, StyleSheet, Text, View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import * as FileSystem from "expo-file-system";
+import { useColors } from "@/hooks/useColors";
 import { getBaseUrl } from "@/utils/api";
+import { TvPressable } from "@/utils/tv";
+
+const Pressable = TvPressable;
 
 const { width: W, height: H } = Dimensions.get("window");
+const IS_TV = Platform.isTV;
 
 /* ─── Types ─── */
 export type PlayerSource = {
@@ -95,7 +101,7 @@ const SUB_POSITIONS = [
 ];
 
 const DEFAULT_SUB_SETTINGS: SubSettings = {
-  fontSize: 16,
+  fontSize: IS_TV ? 34 : 16,
   color: "#ffffff",
   bgOpacity: 0,
   bold: false,
@@ -345,6 +351,7 @@ function wrapSubLine(text: string, maxLen = 30): string[] {
 
 /* ─── Screenshot flash overlay ─── */
 function ScreenshotFlash({ visible }: { visible: boolean }) {
+  const colors = useColors();
   const opacity = useRef(new Animated.Value(0)).current;
   useEffect(() => {
     if (visible) {
@@ -355,7 +362,7 @@ function ScreenshotFlash({ visible }: { visible: boolean }) {
   return (
     <Animated.View
       pointerEvents="none"
-      style={[StyleSheet.absoluteFill, { backgroundColor: "#fff", opacity, zIndex: 99 }]}
+      style={[StyleSheet.absoluteFill, { backgroundColor: colors.background, opacity, zIndex: 99 }]}
     />
   );
 }
@@ -644,13 +651,19 @@ export function RiftPlayer({
     }
   }, [sources, srcIdx]); // eslint-disable-line
 
+  const lastUiUpdateAtRef = useRef(0);
   const handleVideoProgress = useCallback((data: any) => {
     const pos: number = data?.currentTime ?? 0;
     const playable: number = data?.playableDuration ?? 0;
     const dur = durationRef.current;
-    setPosition(pos);
     positionRef.current = pos;
-    if (dur > 0) setBufferedPct(Math.min(playable / dur, 1));
+    const now = Date.now();
+    /* Throttle UI state updates to ~450ms so playback & subtitle rAF stay 60fps without re-render stutter */
+    if (now - lastUiUpdateAtRef.current >= 450 || pos < 1 || (dur > 0 && pos >= dur - 1)) {
+      lastUiUpdateAtRef.current = now;
+      setPosition(pos);
+      if (dur > 0) setBufferedPct(Math.min(playable / dur, 1));
+    }
     if (dur > 0 && onProgress) onProgress(pos, dur);
     /* نهاية الفيديو */
     if (dur > 0 && pos >= dur - 0.5 && !isEndedRef.current) {
@@ -660,11 +673,11 @@ export function RiftPlayer({
       setIsPlaying(false);
     }
     /* stall detection: شاشة سوداء صامتة بدون error event */
-    const STALL_TIMEOUT_MS = 15000;
+    const STALL_TIMEOUT_MS = 22000;
     if (!pausedRef.current && !isErrorRef.current && !isEndedRef.current && dur > 0) {
       if (pos > stallRef.current.lastPos + 0.1) {
-        stallRef.current = { lastPos: pos, lastAt: Date.now() };
-      } else if (stallRef.current.lastAt > 0 && Date.now() - stallRef.current.lastAt > STALL_TIMEOUT_MS) {
+        stallRef.current = { lastPos: pos, lastAt: now };
+      } else if (stallRef.current.lastAt > 0 && now - stallRef.current.lastAt > STALL_TIMEOUT_MS) {
         console.warn(`[RiftPlayer] 🔴 stall detected (${STALL_TIMEOUT_MS / 1000}s no progress)`);
         stallRef.current = { lastPos: -1, lastAt: 0 };
         setError(true);
@@ -672,7 +685,7 @@ export function RiftPlayer({
         isErrorRef.current = true;
       }
     } else {
-      stallRef.current = { lastPos: pos, lastAt: !pausedRef.current ? Date.now() : 0 };
+      stallRef.current = { lastPos: pos, lastAt: !pausedRef.current ? now : 0 };
     }
   }, [onProgress]); // eslint-disable-line
 
@@ -753,6 +766,7 @@ export function RiftPlayer({
 
     /* ── حساب الـ URL الإنجليزي الخام (قبل أي ترجمة) ── */
     const base = getBaseUrl();
+    const isLocalSubtitle = /^(?:file|content):\/\//i.test(rawUrl);
     const alreadyTranslated = rawUrl.includes("translate-vtt") || rawUrl.includes("proxy-text");
 
     // استخراج الـ URL الداخلي إذا كان translate-vtt
@@ -768,7 +782,12 @@ export function RiftPlayer({
 
     /* ── اختيار الـ URL بناءً على اللغة المختارة ── */
     let url: string;
-    if (subLang === "en") {
+    if (isLocalSubtitle) {
+      /* Downloaded subtitles are already translated before they are stored.
+         Never send a local VTT back through translate-vtt: that would require
+         the network and made offline downloads appear to have no subtitles. */
+      url = innerUrl;
+    } else if (subLang === "en") {
       url = innerUrl; // إنجليزي خام مباشر
     } else if (currentSrc?.isArabic || alreadyTranslated) {
       url = rawUrl; // عربي مباشر أو translate-vtt جاهز
@@ -793,7 +812,7 @@ export function RiftPlayer({
 
     /* مفتاح الكاش خاص بكل لغة لتجنب إرجاع cues الإنجليزية حين يطلب المستخدم العربية */
     const cacheKey = (anilistId && episode && subLang === "ar") ? `sub-ar-${anilistId}-${episode}` : null;
-    const isTranslated = url.includes("translate-vtt") || url.includes("proxy-text");
+    const isTranslated = isLocalSubtitle || url.includes("translate-vtt") || url.includes("proxy-text");
 
     (async () => {
       /* ── 1. Check AsyncStorage cache first (translated subs only) ── */
@@ -844,13 +863,16 @@ export function RiftPlayer({
         // VTT/SRT نص مباشر
         setSubLoading(true);
         setLoadedCues([]);
-        fetch(url, {
-          headers: { "Accept": "text/vtt,text/plain,*/*" },
-          signal: AbortSignal.timeout(30_000),
-        }).then(async r => {
-          if (!r.ok) throw new Error(`HTTP ${r.status}`);
-          if (cancelled) return;
-          const text = await r.text();
+        const textPromise = isLocalSubtitle
+          ? FileSystem.readAsStringAsync(url)
+          : fetch(url, {
+              headers: { "Accept": "text/vtt,text/plain,*/*" },
+              signal: AbortSignal.timeout(30_000),
+            }).then(async r => {
+              if (!r.ok) throw new Error(`HTTP ${r.status}`);
+              return r.text();
+            });
+        textPromise.then(text => {
           if (cancelled) return;
           const cues = parseVTT(text);
           if (cues.length > 0) urlCueCacheRef.current.set(url, cues);
@@ -1514,7 +1536,6 @@ export function RiftPlayer({
         rate={rate}
         repeat={false}
         useTextureView={true}
-        secureView={false}
         resizeMode={contentFit === "cover" ? "cover" : contentFit === "fill" ? "stretch" : "contain"}
         controls={false}
         progressUpdateInterval={500}
@@ -1531,12 +1552,12 @@ export function RiftPlayer({
           }
         }}
         bufferConfig={{
-          minBufferMs: 1000,
-          maxBufferMs: 15000,
-          bufferForPlaybackMs: 150,
-          bufferForPlaybackAfterRebufferMs: 1200,
+          minBufferMs: 2500,
+          maxBufferMs: 30000,
+          bufferForPlaybackMs: 500,
+          bufferForPlaybackAfterRebufferMs: 2000,
           backBufferDurationMs: 5000,
-          cacheSizeMB: 20,
+          cacheSizeMB: 40,
         }}
         ignoreSilentSwitch="ignore"
         playInBackground={false}
@@ -1568,7 +1589,10 @@ export function RiftPlayer({
               s.subtitleText,
               i > 0 && { marginTop: 2 },
               {
-                fontSize: subSettings.fontSize,
+                // TV viewing distance needs a much larger subtitle baseline.
+                fontSize: IS_TV
+                  ? Math.max(34, Math.round(subSettings.fontSize * 1.75))
+                  : subSettings.fontSize,
                 color: subSettings.color,
                 fontWeight: subSettings.bold ? "700" : "400",
                 backgroundColor: subSettings.bgOpacity > 0
@@ -1618,7 +1642,7 @@ export function RiftPlayer({
             </Pressable>
           )}
           <Pressable onPress={onBack} style={s.errorBtnBack}>
-            <Ionicons name="arrow-back" size={14} color="rgba(255,255,255,0.6)" />
+            <Ionicons name="arrow-back" size={14} color="rgba(255,255,255,0.6)" style={{ transform: [{ scaleX: -1 }] }} />
             <Text style={s.errorBtnBackText}>العودة</Text>
           </Pressable>
         </View>
@@ -1764,7 +1788,7 @@ export function RiftPlayer({
 
           <View style={s.endBtnRow}>
             <Pressable onPress={() => { setIsEnded(false); onBack(); }} style={s.endBackBtn}>
-              <Ionicons name="arrow-back" size={16} color="rgba(255,255,255,0.65)" />
+              <Ionicons name="arrow-back" size={16} color="rgba(255,255,255,0.65)" style={{ transform: [{ scaleX: -1 }] }} />
               <Text style={[s.endBtnLabel, { color: "rgba(255,255,255,0.65)" }]}>رجوع</Text>
             </Pressable>
             <Pressable
@@ -1798,7 +1822,8 @@ export function RiftPlayer({
       ════════════════════════════════════════ */}
       <View
         style={[StyleSheet.absoluteFill, { zIndex: isLocked ? 15 : 5 }]}
-        {...(isLocked ? {} : panResponder.panHandlers)}
+        pointerEvents={showSubPanel || showFitMenu || showSpeedMenu ? "none" : "auto"}
+        {...(isLocked || showSubPanel || showFitMenu || showSpeedMenu ? {} : panResponder.panHandlers)}
       >
         <Pressable
           style={s.halfLeft}
@@ -2170,7 +2195,15 @@ export function RiftPlayer({
               </View>
               <View style={s.subPanelDivider} />
 
-              <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={[s.subPanelBody, { paddingBottom: 32 }]}>
+              <ScrollView
+                style={{ flex: 1 }}
+                showsVerticalScrollIndicator={true}
+                nestedScrollEnabled={true}
+                keyboardShouldPersistTaps="handled"
+                bounces={false}
+                overScrollMode="never"
+                contentContainerStyle={[s.subPanelBody, { paddingBottom: 40 }]}
+              >
 
                 {/* ── تشغيل / إيقاف ── */}
                 <View style={s.subRow}>
@@ -2178,7 +2211,7 @@ export function RiftPlayer({
                     <Ionicons name="logo-closed-captioning" size={16} color="rgba(255,255,255,0.70)" />
                     <Text style={s.subRowLabel}>الترجمة</Text>
                   </View>
-                  <Pressable style={[s.subToggle, subOn && s.subToggleOn]} onPress={() => setSubOn(v => !v)}>
+                  <Pressable style={[s.subToggle, subOn && s.subToggleOn]} onPress={() => setSubOn(v => !v)} hitSlop={8}>
                     <View style={[s.subToggleThumb, subOn && s.subToggleThumbOn]} />
                   </Pressable>
                 </View>
@@ -2473,24 +2506,24 @@ const s = StyleSheet.create({
   },
   subPanel: {
     position: "absolute", top: 0, bottom: 0, right: 0,
-    backgroundColor: "rgba(5,3,18,0.97)",
-    borderLeftWidth: 1, borderLeftColor: "rgba(139,92,246,0.22)",
-    shadowColor: "#000", shadowOpacity: 0.8, shadowRadius: 24, elevation: 30,
+    backgroundColor: "rgba(8,6,22,0.98)",
+    borderLeftWidth: 1, borderLeftColor: "rgba(139,92,246,0.28)",
+    shadowColor: "#000", shadowOpacity: 0.85, shadowRadius: 24, elevation: 30,
   },
-  subPanelPortrait:  { width: "82%" },
-  subPanelLandscape: { width: "40%" },
+  subPanelPortrait:  { width: "84%", maxWidth: 360 },
+  subPanelLandscape: { width: "52%", maxWidth: 400 },
 
   subPanelHeader: {
-    flexDirection: "row", alignItems: "center", justifyContent: "space-between",
-    paddingHorizontal: 20, paddingTop: 22, paddingBottom: 14,
+    flexDirection: "row", direction: "ltr", alignItems: "center", justifyContent: "space-between",
+    paddingHorizontal: 18, paddingTop: 18, paddingBottom: 12,
   },
-  subPanelTitle: { color: "#fff", fontSize: 18, fontFamily: "Cairo_700Bold" },
+  subPanelTitle: { color: "#fff", fontSize: 17, fontFamily: "Cairo_700Bold" },
   subPanelClose: {
     width: 34, height: 34, borderRadius: 17,
-    backgroundColor: "rgba(255,255,255,0.08)", borderWidth: 1, borderColor: "rgba(255,255,255,0.12)",
+    backgroundColor: "rgba(255,255,255,0.08)", borderWidth: 1, borderColor: "rgba(255,255,255,0.14)",
     alignItems: "center", justifyContent: "center",
   },
-  subPanelDivider: { height: 1, backgroundColor: "rgba(255,255,255,0.08)", marginHorizontal: 16, marginBottom: 10 },
+  subPanelDivider: { height: 1, backgroundColor: "rgba(255,255,255,0.08)", marginHorizontal: 16, marginBottom: 6 },
 
   subEmptyWrap: { flex: 1, alignItems: "center", justifyContent: "center", gap: 14 },
   subEmptyIcon: {
@@ -2510,51 +2543,51 @@ const s = StyleSheet.create({
   whisperBtnLoading: { borderColor: "rgba(139,92,246,0.20)", backgroundColor: "rgba(139,92,246,0.10)" },
   whisperBtnText: { color: "#c4b5fd", fontSize: 13, fontFamily: "Cairo_700Bold" },
 
-  subPanelBody: { paddingHorizontal: 16, paddingTop: 6, gap: 4 },
+  subPanelBody: { paddingHorizontal: 16, paddingTop: 6, gap: 6 },
 
-  subSectionLabel: { color: "rgba(255,255,255,0.40)", fontSize: 11, fontFamily: "Cairo_700Bold", letterSpacing: 0.8, marginTop: 12, marginBottom: 4, textTransform: "uppercase" },
+  subSectionLabel: { color: "rgba(255,255,255,0.50)", fontSize: 11.5, fontFamily: "Cairo_700Bold", letterSpacing: 0.4, marginTop: 10, marginBottom: 4, textAlign: "right" },
 
   /* Toggle row */
-  subRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingVertical: 6 },
-  subRowLeft: { flexDirection: "row", alignItems: "center", gap: 10 },
-  subRowLabel: { color: "rgba(255,255,255,0.75)", fontSize: 14, fontFamily: "Cairo_600SemiBold" },
+  subRow: { flexDirection: "row", direction: "ltr", alignItems: "center", justifyContent: "space-between", paddingVertical: 6 },
+  subRowLeft: { flexDirection: "row", direction: "ltr", alignItems: "center", gap: 10 },
+  subRowLabel: { color: "rgba(255,255,255,0.85)", fontSize: 14, fontFamily: "Cairo_600SemiBold" },
   subToggle: {
-    width: 46, height: 26, borderRadius: 13,
-    backgroundColor: "rgba(255,255,255,0.12)", borderWidth: 1, borderColor: "rgba(255,255,255,0.15)",
-    justifyContent: "center", paddingHorizontal: 2,
+    width: 48, height: 26, borderRadius: 13,
+    backgroundColor: "rgba(255,255,255,0.12)", borderWidth: 1, borderColor: "rgba(255,255,255,0.18)",
+    justifyContent: "center", paddingHorizontal: 3,
   },
-  subToggleOn: { backgroundColor: "rgba(139,92,246,0.80)", borderColor: "rgba(167,139,250,0.60)" },
-  subToggleThumb: { width: 20, height: 20, borderRadius: 10, backgroundColor: "rgba(255,255,255,0.50)" },
+  subToggleOn: { backgroundColor: "rgba(139,92,246,0.85)", borderColor: "rgba(167,139,250,0.65)" },
+  subToggleThumb: { width: 20, height: 20, borderRadius: 10, backgroundColor: "rgba(255,255,255,0.55)" },
   subToggleThumbOn: { backgroundColor: "#fff", alignSelf: "flex-end" },
 
   /* Chip rows */
-  subChipRow: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+  subChipRow: { flexDirection: "row", direction: "ltr", flexWrap: "wrap", gap: 8 },
   subChip: {
-    flexDirection: "row", alignItems: "center", gap: 6,
-    paddingHorizontal: 12, paddingVertical: 8, borderRadius: 20,
-    backgroundColor: "rgba(255,255,255,0.06)", borderWidth: 1, borderColor: "rgba(255,255,255,0.12)",
+    flexDirection: "row", direction: "ltr", alignItems: "center", justifyContent: "center", gap: 6,
+    paddingHorizontal: 14, paddingVertical: 9, borderRadius: 18,
+    backgroundColor: "rgba(255,255,255,0.07)", borderWidth: 1, borderColor: "rgba(255,255,255,0.14)",
   },
-  subChipActive: { backgroundColor: "rgba(139,92,246,0.22)", borderColor: "rgba(167,139,250,0.50)" },
-  subChipText: { color: "rgba(255,255,255,0.65)", fontSize: 12, fontFamily: "Cairo_600SemiBold" },
+  subChipActive: { backgroundColor: "rgba(139,92,246,0.26)", borderColor: "rgba(167,139,250,0.60)" },
+  subChipText: { color: "rgba(255,255,255,0.75)", fontSize: 12.5, fontFamily: "Cairo_600SemiBold" },
   subChipTextActive: { color: "#c4b5fd" },
   subChipEmoji: { fontSize: 14 },
   subPosIcon: { fontSize: 12, color: "rgba(255,255,255,0.70)" },
 
   /* Font size chips */
   subSizeChip: {
-    alignItems: "center", gap: 3,
+    alignItems: "center", justifyContent: "center", gap: 2,
     paddingHorizontal: 14, paddingVertical: 8, borderRadius: 16,
-    backgroundColor: "rgba(255,255,255,0.06)", borderWidth: 1, borderColor: "rgba(255,255,255,0.12)",
-    minWidth: 52,
+    backgroundColor: "rgba(255,255,255,0.07)", borderWidth: 1, borderColor: "rgba(255,255,255,0.14)",
+    minWidth: 56, flex: 1,
   },
-  subSizeLabel: { fontFamily: "Cairo_700Bold", color: "rgba(255,255,255,0.80)" },
-  subSizeNameText: { color: "rgba(255,255,255,0.45)", fontSize: 9, fontFamily: "Cairo_400Regular" },
+  subSizeLabel: { fontFamily: "Cairo_700Bold", color: "rgba(255,255,255,0.85)" },
+  subSizeNameText: { color: "rgba(255,255,255,0.50)", fontSize: 9.5, fontFamily: "Cairo_400Regular" },
 
   /* Color dots */
-  subColorRow: { flexDirection: "row", gap: 10, flexWrap: "wrap" },
+  subColorRow: { flexDirection: "row", direction: "ltr", gap: 12, flexWrap: "wrap", paddingVertical: 2 },
   subColorDot: {
-    width: 32, height: 32, borderRadius: 16,
-    borderWidth: 2, borderColor: "rgba(255,255,255,0.20)",
+    width: 34, height: 34, borderRadius: 17,
+    borderWidth: 2, borderColor: "rgba(255,255,255,0.22)",
     alignItems: "center", justifyContent: "center",
     shadowColor: "#000", shadowOpacity: 0.3, shadowRadius: 4, elevation: 3,
   },
@@ -2604,29 +2637,29 @@ const s = StyleSheet.create({
   autoSubBadgeText: {
     color: "rgba(196,181,253,0.85)", fontSize: 9, fontFamily: "Cairo_600SemiBold",
   },
-  topRightRow: { flexDirection: "row", alignItems: "center", gap: 5 },
+  topRightRow: { flexDirection: "row", alignItems: "center", gap: 7 },
   topIconBtn: {
-    width: 30, height: 30, borderRadius: 15,
-    backgroundColor: "rgba(255,255,255,0.10)", borderWidth: 1, borderColor: "rgba(255,255,255,0.16)",
+    width: 36, height: 36, borderRadius: 18,
+    backgroundColor: "rgba(255,255,255,0.11)", borderWidth: 1, borderColor: "rgba(255,255,255,0.18)",
     alignItems: "center", justifyContent: "center",
   },
-  topIconBtnActive: { backgroundColor: "rgba(139,92,246,0.30)", borderColor: "rgba(167,139,250,0.55)" },
-  /* زر تدوير الشاشة — pill يجمع أيقونة */
+  topIconBtnActive: { backgroundColor: "rgba(139,92,246,0.32)", borderColor: "rgba(167,139,250,0.60)" },
+  /* زر تدوير الشاشة — دائري موحّد مع بقية أزرار الشريط العلوي */
   topRotateBtn: {
-    flexDirection: "row", alignItems: "center", gap: 4,
-    paddingHorizontal: 8, paddingVertical: 5, borderRadius: 15,
-    backgroundColor: "rgba(255,255,255,0.10)", borderWidth: 1, borderColor: "rgba(255,255,255,0.18)",
+    width: 36, height: 36, borderRadius: 18,
+    alignItems: "center", justifyContent: "center",
+    backgroundColor: "rgba(139,92,246,0.20)", borderWidth: 1, borderColor: "rgba(167,139,250,0.45)",
   },
   topRotateBtnActive: {
-    backgroundColor: "rgba(139,92,246,0.28)", borderColor: "rgba(167,139,250,0.55)",
+    backgroundColor: "rgba(139,92,246,0.32)", borderColor: "rgba(167,139,250,0.65)",
   },
   topRotateLabel: {
     color: "rgba(255,255,255,0.80)", fontSize: 9, fontFamily: "Cairo_700Bold",
   },
   topRotateLabelActive: { color: "#c4b5fd" },
   topCloseBtn: {
-    width: 32, height: 32, borderRadius: 16,
-    backgroundColor: "rgba(239,68,68,0.14)", borderWidth: 1.5, borderColor: "rgba(239,68,68,0.40)",
+    width: 36, height: 36, borderRadius: 18,
+    backgroundColor: "rgba(239,68,68,0.16)", borderWidth: 1.5, borderColor: "rgba(239,68,68,0.45)",
     alignItems: "center", justifyContent: "center",
   },
 
@@ -2692,26 +2725,26 @@ const s = StyleSheet.create({
 
   /* ── Bottom play button ── */
   bottomPlayBtn: {
-    width: 58, height: 58, borderRadius: 29,
-    backgroundColor: "rgba(139,92,246,0.88)",
-    borderWidth: 2, borderColor: "rgba(196,181,253,0.75)",
+    width: 56, height: 56, borderRadius: 28,
+    backgroundColor: "rgba(139,92,246,0.92)",
+    borderWidth: 2, borderColor: "rgba(196,181,253,0.80)",
     alignItems: "center", justifyContent: "center", flexShrink: 0,
     shadowColor: "#8B5CF6", shadowOpacity: 0.65, shadowRadius: 18, elevation: 12,
   },
-  bottomPlayBtnPortrait: { width: 48, height: 48, borderRadius: 24 },
+  bottomPlayBtnPortrait: { width: 52, height: 52, borderRadius: 26 },
 
   /* ── Icon control buttons ── */
   ctrlIconBtn: {
-    width: 36, height: 36, borderRadius: 18,
-    backgroundColor: "rgba(255,255,255,0.09)", borderWidth: 1, borderColor: "rgba(255,255,255,0.15)",
+    width: 40, height: 40, borderRadius: 20,
+    backgroundColor: "rgba(255,255,255,0.09)", borderWidth: 1, borderColor: "rgba(255,255,255,0.16)",
     alignItems: "center", justifyContent: "center",
   },
-  ctrlIconBtnPortrait: { width: 30, height: 30, borderRadius: 15 },
+  ctrlIconBtnPortrait: { width: 38, height: 38, borderRadius: 19 },
   ctrlIconBtnActive: { backgroundColor: "rgba(139,92,246,0.28)", borderColor: "rgba(167,139,250,0.50)" },
   ctrlIconBtnMuted:  { backgroundColor: "rgba(239,68,68,0.14)", borderColor: "rgba(239,68,68,0.30)" },
-  ctrlSpeedBtn: { paddingHorizontal: 4, minWidth: 42 },
-  ctrlSpeedBtnPortrait: { paddingHorizontal: 2, minWidth: 36 },
-  speedLabel: { color: "rgba(255,255,255,0.75)", fontSize: 12, fontFamily: "Cairo_700Bold" },
+  ctrlSpeedBtn: { paddingHorizontal: 6, minWidth: 42 },
+  ctrlSpeedBtnPortrait: { paddingHorizontal: 5, minWidth: 40 },
+  speedLabel: { color: "rgba(255,255,255,0.85)", fontSize: 12.5, fontFamily: "Cairo_700Bold" },
   speedLabelActive: { color: "#c4b5fd" },
 
   /* ── Dropdown menus ── */

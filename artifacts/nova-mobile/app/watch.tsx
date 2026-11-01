@@ -38,7 +38,7 @@ import {
   getAdjacentAwEpisode,
   hasAwEpisode,
   normalizeAwWatchSources,
-} from "@/utils/awWatchExperience";
+} from "@/utils/awWatchExperience.mjs";
 
 /* ── Types ── */
 type Quality    = "1080p FHD" | "720p HD" | "480p SD" | "360p SD";
@@ -541,7 +541,6 @@ const STATIC_PICKER: Record<QualityKey, { site: string; name: string; tag: strin
     { site: "megaplay",     name: "MegaPlay",    tag: "MP" },
     { site: "anineko",      name: "AniNeko",      tag: "AN" },
     { site: "animewitcher", name: "AnimeWitcher", tag: "AW" },
-    { site: "animedar",     name: "أنمي فور أب",  tag: "AD" },
     { site: "anslayer",     name: "AnimeSlayer",  tag: "AS" },
     { site: "sanime",       name: "سـAnime",      tag: "SA" },
     { site: "animeify",     name: "أنمي فاي",    tag: "AF" },
@@ -553,7 +552,6 @@ const STATIC_PICKER: Record<QualityKey, { site: string; name: string; tag: strin
     { site: "megaplay",     name: "MegaPlay",    tag: "MP" },
     { site: "anineko",      name: "AniNeko",      tag: "AN" },
     { site: "animewitcher", name: "AnimeWitcher", tag: "AW" },
-    { site: "animedar",     name: "أنمي فور أب",  tag: "AD" },
     { site: "anslayer",     name: "AnimeSlayer",  tag: "AS" },
     { site: "sanime",       name: "سـAnime",      tag: "SA" },
     { site: "animeify",     name: "أنمي فاي",    tag: "AF" },
@@ -565,7 +563,6 @@ const STATIC_PICKER: Record<QualityKey, { site: string; name: string; tag: strin
     { site: "megaplay",     name: "MegaPlay",    tag: "MP" },
     { site: "anineko",      name: "AniNeko",      tag: "AN" },
     { site: "animewitcher", name: "AnimeWitcher", tag: "AW" },
-    { site: "animedar",     name: "أنمي فور أب",  tag: "AD" },
     { site: "animeify",     name: "أنمي فاي",    tag: "AF" },
     { site: "anifox",        name: "ANIFOX",      tag: "FX" },
     { site: "animekai",      name: "AnimeKai",   tag: "AK" },
@@ -575,7 +572,6 @@ const STATIC_PICKER: Record<QualityKey, { site: string; name: string; tag: strin
     { site: "megaplay",     name: "MegaPlay",    tag: "MP" },
     { site: "anineko",      name: "AniNeko",      tag: "AN" },
     { site: "animewitcher", name: "AnimeWitcher", tag: "AW" },
-    { site: "animedar",     name: "أنمي فور أب",  tag: "AD" },
     { site: "animeify",     name: "أنمي فاي",    tag: "AF" },
     { site: "anifox",        name: "ANIFOX",      tag: "FX" },
     { site: "animekai",      name: "AnimeKai",   tag: "AK" },
@@ -844,8 +840,8 @@ function SrcRow({ src, idx, onPlay }: { src: Src; idx: number; onPlay: (s: Src) 
 export default function WatchScreen() {
   const {
     anime, ep, title, english, format, etitle,
-    totalEps: totalEpsParam, year, episodes, native, titleAr,
-    titles: titlesParam, anslayerId, anilistId,
+    totalEps: totalEpsParam, year, episodes, native, titleAr, season: seasonParam,
+    titles: titlesParam, anslayerId, anilistId, anifoxId,
     awAnimeId,
     fromLatest, latestSource: latestSourceParam,
     mode, awSeries: awSeriesParam, awSeasonLabel: awSeasonLabelParam,
@@ -853,9 +849,10 @@ export default function WatchScreen() {
   } = useLocalSearchParams<{
     anime: string; ep: string; title: string; english: string;
     format?: string; etitle?: string; totalEps?: string;
-    year?: string; episodes?: string; native?: string; titleAr?: string;
+    year?: string; episodes?: string; native?: string; titleAr?: string; season?: string;
     titles?: string;
     anslayerId?: string; anilistId?: string;
+    anifoxId?: string;
     awAnimeId?: string;
     fromLatest?: string; latestSource?: string;
     mode?: string; awSeries?: string; awSeasonLabel?: string;
@@ -1035,8 +1032,10 @@ export default function WatchScreen() {
     englishStr,
     format || "",
     year,
-  )}|latest:${isFromLatest ? latestSource || "unknown" : "no"}${
+  )}|season:${seasonParam || "1"}|latest:${isFromLatest ? latestSource || "unknown" : "no"}${
     isFromLatest && latestSource === "animewitcher" ? `|aw:${awAnimeId || "unknown"}` : ""
+  }${
+    isFromLatest && latestSource === "anifox" ? `|fx:${anifoxId || "unknown"}` : ""
   }`;
   const [watchUnlocked, setWatchUnlocked] = useState(false);
   /* Only the pressed server row is waiting for the ad decision. A single
@@ -1298,7 +1297,7 @@ export default function WatchScreen() {
     const forceFresh = forceAvailabilityRefreshRef.current;
     forceAvailabilityRefreshRef.current = false;
     const cachedHints = forceFresh || (
-      isFromLatest && (latestSource === "anslayer" || latestSource === "animewitcher")
+      isFromLatest && (latestSource === "anslayer" || latestSource === "animewitcher" || latestSource === "anifox")
     )
       ? null
       : readAvailabilityHintRows(availabilityHintKey);
@@ -1342,10 +1341,12 @@ export default function WatchScreen() {
     if (format) params.set("format", format);
     if (year) params.set("year", year);
     if (episodes) params.set("episodes", episodes);
+    if (seasonParam) params.set("season", seasonParam);
     if (native) params.set("native", native);
     if (titleArStr) params.set("titleAr", titleArStr);
     if (anslayerId) params.set("anslayerId", anslayerId);
     if (awAnimeId) params.set("awAnimeId", awAnimeId);
+    if (anifoxId) params.set("anifoxId", anifoxId);
     if (isFromLatest && latestSource) {
       params.set("fromLatest", "1");
       params.set("latestSource", latestSource);
@@ -1543,7 +1544,7 @@ export default function WatchScreen() {
       controller.abort();
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isAwDubbed, anime, anilistId, sourceAnimeId, epNum, titleStr, englishStr, titleArStr, format, year, episodes, native, anslayerId, awAnimeId, isFromLatest, latestSource, availabilityAttempt, availabilityHintKey, playbackTraceId]);
+  }, [isAwDubbed, anime, anilistId, sourceAnimeId, epNum, titleStr, englishStr, titleArStr, format, year, episodes, native, seasonParam, anslayerId, awAnimeId, anifoxId, isFromLatest, latestSource, availabilityAttempt, availabilityHintKey, playbackTraceId]);
 
   /* ── Progress save ── */
   const saveProgress = useCallback(async () => {
@@ -1663,6 +1664,7 @@ export default function WatchScreen() {
     const arParam    = titleArStr ? `&titleAr=${encodeURIComponent(titleArStr)}` : "";
     const anslayerParam = anslayerId ? `&anslayerId=${encodeURIComponent(anslayerId)}` : "";
     const awAnimeParam = awAnimeId ? `&awAnimeId=${encodeURIComponent(awAnimeId)}` : "";
+    const anifoxParam = anifoxId ? `&anifoxId=${encodeURIComponent(anifoxId)}` : "";
     const latestParams = isFromLatest && latestSource
       ? `&fromLatest=1&latestSource=${encodeURIComponent(latestSource)}`
       : "";
@@ -1676,13 +1678,14 @@ export default function WatchScreen() {
     const anilistParam = sourceAnimeId
       ? `&anilistId=${encodeURIComponent(sourceAnimeId)}`
       : "";
-    router.replace(`/watch?anime=${sourceAnimeId || anime}&ep=${n}&title=${encodeURIComponent(titleStr)}&english=${encodeURIComponent(englishStr)}&format=${encodeURIComponent(format || "")}${totalParam}${coverParam}${arParam}${anslayerParam}${awAnimeParam}${latestParams}${nativeParam}${yearParam}${episodesParam}${titlesParam}${anilistParam}`);
+    const seasonRouteParam = seasonParam ? `&season=${encodeURIComponent(seasonParam)}` : "";
+    router.replace(`/watch?anime=${sourceAnimeId || anime}&ep=${n}&title=${encodeURIComponent(titleStr)}&english=${encodeURIComponent(englishStr)}&format=${encodeURIComponent(format || "")}${totalParam}${coverParam}${arParam}${anslayerParam}${awAnimeParam}${anifoxParam}${seasonRouteParam}${latestParams}${nativeParam}${yearParam}${episodesParam}${titlesParam}${anilistParam}`);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     isAwDubbed, goToAwEpisode, awSeasonIndex, saveProgress, coverUrl, titleArStr,
-    router, anime, sourceAnimeId, titleStr, englishStr, format, anslayerId, awAnimeId,
+    router, anime, sourceAnimeId, titleStr, englishStr, format, anslayerId, awAnimeId, anifoxId,
     isFromLatest, latestSource,
-    epNum, totalEpsCount, native, year, episodes, titleVariants,
+    epNum, totalEpsCount, native, year, episodes, seasonParam, titleVariants,
   ]);
 
   /* ── إعادة تعيين حالة المصادر (زر تحديث) — مسح الأخطاء للسماح بالمحاولة مجدداً ── */
@@ -1860,6 +1863,7 @@ export default function WatchScreen() {
       anime: sourceAnimeId || "0", ep: String(epNum), title: titleStr,
       english: englishStr, format: format || "",
       year: year || "", episodes: episodes || "", native: native || "",
+      season: seasonParam || "",
     });
     const lookupSiteTag = site.replace(/[^a-z0-9_-]/gi, "").slice(0, 12) || "source";
     const lookupTraceId = `${playbackTraceId}-s-${lookupSiteTag}`;
@@ -1873,6 +1877,7 @@ export default function WatchScreen() {
     if (titleArStr) qs.set("titleAr", titleArStr);
     if (site === "anslayer" && anslayerId) qs.set("anslayerId", anslayerId);
     if (site === "animewitcher" && awAnimeId) qs.set("awAnimeId", awAnimeId);
+    if (site === "anifox" && anifoxId) qs.set("anifoxId", anifoxId);
 
     let tid: ReturnType<typeof setTimeout> | null = null;
     let siteCtrl: AbortController | null = null;
@@ -2060,7 +2065,7 @@ export default function WatchScreen() {
       }
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [anime, sourceAnimeId, epNum, titleStr, englishStr, titleArStr, format, year, episodes, native, playSrc, anslayerId, sources, playbackTraceId]);
+  }, [anime, sourceAnimeId, epNum, titleStr, englishStr, titleArStr, format, year, episodes, native, playSrc, anslayerId, anifoxId, sources, playbackTraceId]);
   handlePickSiteRef.current = handlePickSite;
 
   /* ── مزامنة حالة التنزيل من Global Singleton ── */
@@ -2182,12 +2187,14 @@ export default function WatchScreen() {
       anime: sourceAnimeId || "0", ep: String(epNum), title: titleStr,
       english: englishStr, format: format || "",
       year: year || "", episodes: episodes || "", native: native || "",
+      season: seasonParam || "",
     });
     qs.set("anilistId", sourceAnimeId || "0");
     qs.set("titles", JSON.stringify(titleVariants));
     if (titleArStr) qs.set("titleAr", titleArStr);
     if (site === "anslayer" && anslayerId) qs.set("anslayerId", anslayerId);
     if (site === "animewitcher" && awAnimeId) qs.set("awAnimeId", awAnimeId);
+    if (site === "anifox" && anifoxId) qs.set("anifoxId", anifoxId);
 
     let tid: ReturnType<typeof setTimeout> | null = null;
     try {
@@ -2455,7 +2462,7 @@ export default function WatchScreen() {
       site,
       subtitleUrl: subtitlesDisabledForSite(site)
         ? undefined
-        : (playingSrc.subtitleUrl ? resolveUrl(playingSrc.subtitleUrl, base) : (isArabic ? undefined : globalSubUrl)),
+        : (playingSrc.subtitleUrl ? resolveUrl(playingSrc.subtitleUrl, base) : globalSubUrl),
       isArabic,
       wantsSmartSub: !isArabic,
       skipIntro: playingSrc.skipIntro,
@@ -2608,19 +2615,14 @@ export default function WatchScreen() {
 
       {/* ── Header ── */}
       <View style={[d.header, tvMode && d.tvHeader, { paddingTop: topPad + 4 }]}>
-        {/* Right Section: Back Button + Title */}
-        <View style={d.headerRightSection}>
-          <Pressable onPress={handleBack} focusable={tvMode}
-            style={({ focused }) => [d.headerBack, tvMode && d.tvHeaderActionBtn, tvMode && tvFocusStyle(focused)]}>
-            <Ionicons name="chevron-back" size={tvMode ? 25 : 19} color={colors.textPrimary} style={{ transform: [{ scaleX: -1 }] }} />
-          </Pressable>
-          <View style={d.headerCenter}>
-            <Text style={[d.headerTitle, tvMode && d.tvHeaderTitle]} numberOfLines={1}>{displayTitle}</Text>
-            <Text style={[d.headerSub, tvMode && d.tvHeaderSub]}>الحلقة {epNum}</Text>
-          </View>
+        <Pressable onPress={handleBack} focusable={tvMode}
+          style={({ focused }) => [d.headerBack, tvMode && d.tvHeaderActionBtn, tvMode && tvFocusStyle(focused)]}>
+          <Ionicons name="chevron-forward" size={tvMode ? 25 : 19} color={colors.textPrimary} />
+        </Pressable>
+        <View style={d.headerCenter}>
+          <Text style={[d.headerTitle, tvMode && d.tvHeaderTitle]} numberOfLines={1}>{displayTitle}</Text>
+          <Text style={[d.headerSub, tvMode && d.tvHeaderSub]}>الحلقة {epNum}</Text>
         </View>
-
-        {/* Left Section: Prev / Next / Refresh */}
         <View style={d.headerLeft}>
           <Pressable disabled={!canGoPrevEpisode} onPress={onRiftPrevEpisode} focusable={tvMode}
             style={({ focused }) => [d.epNavBtn, tvMode && d.tvEpNavBtn, !canGoPrevEpisode && { opacity: 0.22 }, tvMode && tvFocusStyle(focused)]}>
@@ -2969,14 +2971,13 @@ function createWatchStyles(colors: ThemePalette) {
   embedTopRow:   { position: "absolute", top: 0, left: 0, right: 0, flexDirection: "row", alignItems: "center", paddingHorizontal: 14, paddingBottom: 10, backgroundColor: "rgba(0,0,0,0.7)", gap: 10, zIndex: 10 },
 
   /* Picker header */
-  header:        { flexDirection: "row-reverse", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 12, paddingBottom: 10, borderBottomWidth: 1, borderBottomColor: colors.border, gap: 8 },
+  header:        { flexDirection: ROW_RTL, alignItems: "center", paddingHorizontal: 12, paddingBottom: 10, borderBottomWidth: 1, borderBottomColor: colors.border, gap: 8 },
   tvHeader:     { paddingHorizontal: 28, paddingBottom: 10, gap: 8 },
-  headerRightSection: { flexDirection: "row-reverse", alignItems: "center", gap: 10, flex: 1, minWidth: 0 },
-  headerLeft:    { flexDirection: "row-reverse", alignItems: "center", gap: 5 },
+  headerLeft:    { flexDirection: ROW_RTL, alignItems: "center", gap: 5 },
   headerCenter:  { flex: 1, alignItems: "flex-end" },
   headerBack:    { width: 36, height: 36, borderRadius: 12, backgroundColor: colors.surfaceElevated, borderWidth: 1, borderColor: colors.border, alignItems: "center", justifyContent: "center", flexShrink: 0 },
-  headerTitle:   { fontSize: 13, fontFamily: "Cairo_800ExtraBold", color: colors.textPrimary, textAlign: "right" },
-  headerSub:     { fontSize: 10, color: colors.textMuted, fontFamily: "Cairo_400Regular", textAlign: "right" },
+  headerTitle:   { fontSize: 13, fontFamily: "Cairo_800ExtraBold", color: colors.textPrimary, textAlign: "center" },
+  headerSub:     { fontSize: 10, color: colors.textMuted, fontFamily: "Cairo_400Regular", textAlign: "center" },
   tvHeaderTitle: { fontSize: 19, lineHeight: 27 },
   tvHeaderSub: { fontSize: 13, lineHeight: 20 },
   headerRefreshBtn: { width: 32, height: 32, borderRadius: 10, backgroundColor: colors.accentSurface, borderWidth: 1, borderColor: colors.accentBorder, alignItems: "center", justifyContent: "center" },

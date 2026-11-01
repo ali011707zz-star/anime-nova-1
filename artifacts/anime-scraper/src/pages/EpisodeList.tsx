@@ -20,7 +20,7 @@ const ANIME_QUERY = `
 query ($id: Int) {
   Media(id: $id, type: ANIME) {
     id idMal title { romaji english } coverImage { large extraLarge }
-    bannerImage episodes duration status nextAiringEpisode { episode }
+    bannerImage episodes duration status nextAiringEpisode { episode airingAt }
     averageScore genres
   }
 }`;
@@ -75,8 +75,13 @@ function EpisodeRow({
 
       {/* Info */}
       <button onClick={() => onWatch(n)} className="flex-1 min-w-0 text-right">
-        <p className={`text-[13px] font-black font-['Cairo'] ${watched ? "text-primary/80" : "text-white/90"}`}>
-          الحلقة {n}
+        <p className={`flex items-center justify-end gap-2 text-[13px] font-black font-['Cairo'] ${watched ? "text-primary/80" : "text-white/90"}`}>
+          {ep?.filler === true && (
+            <span className="inline-flex shrink-0 items-center rounded-sm bg-[#df2f39] px-2 py-0.5 text-[10px] font-bold leading-none text-white">
+              فلر
+            </span>
+          )}
+          <span>الحلقة {n}</span>
         </p>
         {displayTitle && (
           <p className="text-[9px] font-['Cairo'] mt-0.5 line-clamp-2 leading-relaxed text-white/50" dir="rtl">
@@ -282,6 +287,7 @@ export default function EpisodeListPage() {
   const [anime, setAnime]     = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [epData, setEpData]   = useState<any[]>([]);
+  const [jikanEpisodeTotal, setJikanEpisodeTotal] = useState(0);
   const [search, setSearch]   = useState("");
   const [page, setPage]       = useState(1);
   const [watched, setWatched] = useState<Set<number>>(new Set());
@@ -294,6 +300,7 @@ export default function EpisodeListPage() {
     if (!params.id) return;
     setLoading(true);
     setEpData([]);
+    setJikanEpisodeTotal(0);
     setPage(1);
     setSearch("");
     setWatched(getWatched(params.id));
@@ -305,17 +312,48 @@ export default function EpisodeListPage() {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ query: ANIME_QUERY, variables: { id: parseInt(params.id) } }),
+      cache: "no-store",
     }).then(r => r.json()).then(d => {
       const a = d.data?.Media;
       setAnime(a);
-      if (a?.idMal) {
-        fetch(`https://api.jikan.moe/v4/anime/${a.idMal}/episodes?page=1`)
-          .then(r => r.json())
-          .then(d => { if (d.data) setEpData(d.data); })
-          .catch(() => {});
-      }
     }).finally(() => setLoading(false));
   }, [params.id]);
+
+  // Load only the visible Jikan page. This keeps episode titles responsive
+  // even for long-running shows while still exposing the latest total count.
+  useEffect(() => {
+    const malId = Number(anime?.idMal || 0);
+    if (!malId || search.trim()) return;
+    const ctrl = new AbortController();
+    fetch(`${API_BASE}/api/anime/episode-titles?malId=${malId}&anilistId=${Number(anime?.id || 0)}&page=${Math.max(1, page)}`, {
+      signal: ctrl.signal,
+      cache: "no-store",
+    })
+      .then(r => r.ok ? r.json() : null)
+      .then(d => {
+        if (ctrl.signal.aborted) return;
+        const catalogTotal = anime?.status === "RELEASING"
+          ? Number(d?.releasedTotal || 0)
+          : Number(d?.total || 0);
+        if (catalogTotal > 0) setJikanEpisodeTotal(catalogTotal);
+        if (Array.isArray(d?.episodes)) {
+          setEpData(prev => {
+            const merged = new Map<number, any>();
+            for (const item of prev) {
+              const n = Number(item?.mal_id || item?.episode_id || 0);
+              if (n > 0) merged.set(n, item);
+            }
+            for (const item of d.episodes) {
+              const n = Number(item?.mal_id || item?.episode_id || 0);
+              if (n > 0) merged.set(n, item);
+            }
+            return Array.from(merged.values());
+          });
+        }
+      })
+      .catch(() => {});
+    return () => ctrl.abort();
+  }, [anime?.idMal, page, search]);
 
   const toggleWatched = useCallback((n: number) => {
     setWatched(prev => {
@@ -326,7 +364,10 @@ export default function EpisodeListPage() {
     });
   }, [params.id]);
 
-  function openComment(n: number) { setActiveCommentEp(n); }
+  function openComment(n: number) {
+    const title = anime?.title?.romaji || anime?.title?.english || "";
+    navigate(`/comments?animeId=${params.id}&ep=${n}&animeTitle=${encodeURIComponent(title)}`);
+  }
 
   function closeComment() {
     if (activeCommentEp !== null && params.id) {
@@ -346,6 +387,7 @@ export default function EpisodeListPage() {
   }
 
   function watchEp(n: number) {
+    if (n < 1 || n > total) return;
     setWatched(prev => {
       const next = new Set(prev);
       next.add(n);
@@ -359,9 +401,18 @@ export default function EpisodeListPage() {
   }
 
   const total = anime
-    ? (anime.status === "RELEASING" && anime.nextAiringEpisode?.episode
-        ? anime.nextAiringEpisode.episode - 1
-        : (anime.episodes || anime.nextAiringEpisode?.episode || 12))
+    ? anime.status === "NOT_YET_RELEASED"
+      ? 0
+      : anime.status === "RELEASING"
+        ? Math.max(
+            0,
+            jikanEpisodeTotal,
+            Number(anime.nextAiringEpisode?.episode || 0) - 1,
+          )
+        : Math.max(
+            Number(anime.episodes || 0),
+            jikanEpisodeTotal,
+          )
     : 0;
   const allEps = useMemo(() => Array.from({ length: total }, (_, i) => i + 1), [total]);
   const watchedCount = useMemo(() => [...watched].filter(n => n >= 1 && n <= total).length, [watched, total]);
@@ -399,7 +450,8 @@ export default function EpisodeListPage() {
     const cached: Record<number, string> = {};
     for (const n of displayedEps) {
       const v = localStorage.getItem(`ep-title-ar-${params.id}-${n}`);
-      if (v) cached[n] = v;
+      if (v && /[\u0600-\u06FF]/.test(v)) cached[n] = v;
+      else if (v) localStorage.removeItem(`ep-title-ar-${params.id}-${n}`);
     }
     if (Object.keys(cached).length > 0) {
       setArEpTitles(prev => ({ ...prev, ...cached }));
@@ -411,7 +463,7 @@ export default function EpisodeListPage() {
       if (cached[n]) continue; // already have Arabic
       // Get English title from Jikan epData
       const ep = epData?.find((e: any) => e.mal_id === n || e.episode_id === n);
-      const engTitle = ep?.title || ep?.title_romanji || null;
+      const engTitle = ep?.title || ep?.title_romanji || `Episode ${n}`;
       if (engTitle) toTranslate.push({ n, title: engTitle });
     }
     if (!toTranslate.length) return;
@@ -423,19 +475,40 @@ export default function EpisodeListPage() {
 
     const SEP = "\n§§§\n";
     const combined = toTranslate.map(t => t.title).join(SEP);
-    fetch(`${API_BASE}/api/anime/translate?text=${encodeURIComponent(combined)}&from=en&to=ar`, { signal: ctrl.signal })
+    fetch(`${API_BASE}/api/anime/translate?text=${encodeURIComponent(combined)}&from=en&to=ar&kind=title`, { signal: ctrl.signal })
       .then(r => r.ok ? r.json() : null)
-      .then((d: any) => {
+      .then(async (d: any) => {
         if (!d?.translated) return;
-        const parts: string[] = d.translated.split(/\n§§§\n|\n§§§|\n ---§§§--- \n/);
+        const parts: string[] = String(d.translated).split(/\s*(?:§§§|\|\|\|)\s*/);
         const updates: Record<number, string> = {};
-        toTranslate.forEach((t, i) => {
-          const ar = parts[i]?.trim();
-          if (ar && ar.length > 1 && ar !== t.title) {
-            localStorage.setItem(`ep-title-ar-${params.id}-${t.n}`, ar);
-            updates[t.n] = ar;
-          }
-        });
+        const aligned = parts.length === toTranslate.length;
+        if (aligned) {
+          toTranslate.forEach((t, i) => {
+            const ar = parts[i]?.trim();
+            if (ar && ar.length > 1 && ar !== t.title && /[\u0600-\u06FF]/.test(ar)) {
+              localStorage.setItem(`ep-title-ar-${params.id}-${t.n}`, ar);
+              updates[t.n] = ar;
+            }
+          });
+        }
+        // Google occasionally collapses the separator, which used to attach
+        // all translated text to episode 1. Retry the affected page one title
+        // at a time so every episode gets its own Arabic value.
+        if (!aligned || Object.keys(updates).length === 0) {
+          const fallback: Record<number, string> = {};
+          await Promise.all(toTranslate.map(async t => {
+            try {
+              const one = await fetch(`${API_BASE}/api/anime/translate?text=${encodeURIComponent(t.title)}&from=en&to=ar&kind=title`, { signal: ctrl.signal });
+              const body = one.ok ? await one.json() : null;
+              const ar = String(body?.translated || "").trim();
+              if (ar && ar !== t.title && /[\u0600-\u06FF]/.test(ar)) {
+                localStorage.setItem(`ep-title-ar-${params.id}-${t.n}`, ar);
+                fallback[t.n] = ar;
+              }
+            } catch {}
+          }));
+          Object.assign(updates, fallback);
+        }
         if (Object.keys(updates).length > 0) {
           setArEpTitles(prev => ({ ...prev, ...updates }));
         }
@@ -607,19 +680,6 @@ export default function EpisodeListPage() {
           </button>
         </div>
       )}
-
-      {/* ── Per-episode comment sheet ── */}
-      <AnimatePresence>
-        {activeCommentEp !== null && params.id && (
-          <EpCommentSheet
-            key={activeCommentEp}
-            epNum={activeCommentEp}
-            animeId={params.id}
-            animeTitle={anime?.title?.romaji || anime?.title?.english || ""}
-            onClose={closeComment}
-          />
-        )}
-      </AnimatePresence>
     </main>
   );
 }

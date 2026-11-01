@@ -43,8 +43,11 @@ const port = Number(rawPort);
 if (Number.isNaN(port) || port <= 0) throw new Error(`Invalid PORT value: "${rawPort}"`);
 
 if (!process.env.SESSION_SECRET) {
-  process.env.SESSION_SECRET = "nova-anime-replit-secret-" + Math.random().toString(36).slice(2);
-  console.warn("[bootstrap] ⚠️ SESSION_SECRET not set — using ephemeral secret.");
+  if (process.env.NODE_ENV === "production") {
+    throw new Error("[bootstrap] SESSION_SECRET must be configured in production");
+  }
+  process.env.SESSION_SECRET = "nova-anime-dev-" + Math.random().toString(36).slice(2);
+  console.warn("[bootstrap] ⚠️ SESSION_SECRET not set — using an ephemeral development secret.");
 }
 
 if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_KEY) {
@@ -59,6 +62,7 @@ const { logger }             = await import("./lib/logger.js");
 const { initEmailService }   = await import("./auth/emailService.js");
 const { registerTelegramWebhook, startEpisodeScheduler } = await import("./routes/telegram.js");
 const { startAnimationNotificationScheduler } = await import("./routes/notifications.js");
+const { startPushDeliveryWorker } = await import("./routes/push.js");
 
 const app  = await createApp();
 const host = "0.0.0.0";
@@ -72,7 +76,7 @@ app.listen(port, host, (err) => {
   logger.info({ port }, "Server listening");
 
   // ── تشغيل migration بعد بدء الاستماع (لا يُعيق فتح المنفذ) ──
-  (async () => {
+  const migrationReady = (async () => {
     try {
       const { runSupabaseMigration } = await import("./lib/supabaseMigrate.js");
       await runSupabaseMigration();
@@ -80,6 +84,7 @@ app.listen(port, host, (err) => {
       console.warn("[bootstrap] ⚠️ فشل migration:", e.message);
     }
   })();
+  void migrationReady.then(() => startPushDeliveryWorker());
 
   // ── مزامنة ENV ↔ DB ثم تشغيل الـ schedulers بعد اكتمال التحميل ──────────
   // ملاحظة: الـ schedulers تبدأ داخل هذا الـ block لتضمن توفر التوكن من DB
@@ -133,10 +138,10 @@ app.listen(port, host, (err) => {
 
     // ── تصحيح SMTP على Orkestr تلقائياً عند الـ startup ──
     const orkestrUrl = process.env.ORKESTR_RELAY_URL;
-    const appSecret  = process.env.APP_SECRET || "anime-nova-default-change-me-aabbccdd";
+    const appSecret  = process.env.APP_SECRET;
     const smtpUser   = process.env.SMTP_USER;
     const smtpPass   = process.env.SMTP_PASS;
-    if (orkestrUrl && smtpUser && smtpPass) {
+    if (orkestrUrl && appSecret && smtpUser && smtpPass) {
       fetch(`${orkestrUrl}/api/admin/smtp-env-patch`, {
         method: "POST",
         headers: { "Content-Type": "application/json", "x-relay-secret": appSecret },
