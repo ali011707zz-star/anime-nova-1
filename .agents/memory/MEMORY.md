@@ -4,7 +4,7 @@
 - [Dubbed poster proxy](dubbed-poster-proxy.md) — Fetch Arabic-Toons images as raw bytes and validate signatures; StarCima and text-based proxy fallbacks can corrupt images.
 - [PM2 stale env vars](pm2-stale-env-vars.md) — editing ecosystem.config.cjs/.env on VPS does nothing until pm2 delete+start; caused universal web black-screen bug (broken CF_WORKER_URL never reloaded).
 - [Nova Mobile GitHub builds](nova-mobile-github-builds.md) — user builds APKs through GitHub; sync source to VPS if needed, but never build or install Nova Mobile in Replit.
-- [GitHub push auth](github-push-auth.md) — Replit may rewrite GitHub pushes to a disconnected proxy; use secret-backed askpass for direct github.com access and never expose tokens.
+- [GitHub push auth](github-push-auth.md) — Git pushes can be rewritten even for github.com; use the authorized GitHub API with SHA checks if the proxy blocks them.
 - [PG JSON serialization](pg-json-serialization.md) — pg (node-postgres) treats JS arrays as PostgreSQL ARRAY syntax, not jsonb. Must JSON.stringify() objects/arrays before parameterized inserts into jsonb columns. Also: timestamps stored as "timestamptz" need ISO string (not ms epoch); read back with new Date(val).getTime().
 - [Anime NOVA startup fix](anime-nova-startup.md) — DB migration must run AFTER server starts listening, not before, or the workflow port-open timeout fails.
 - [Supabase source_cache schema fix](supabase-source-cache-schema-fix.md) — real prod DB is Supabase (not VPS's local legacy Postgres); sandbox has no IPv6 + pooler rejects this project, but VPS reaches db.<ref>.supabase.co directly.
