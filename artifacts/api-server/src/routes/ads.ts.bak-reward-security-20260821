@@ -1,0 +1,94 @@
+import { Router, type Request, type Response } from "express";
+import { randomBytes, createHmac, timingSafeEqual } from "crypto";
+import { sbSelect, sbUpsert } from "../lib/supabaseClient.js";
+import { getEmailUser } from "../auth/emailAuth.js";
+import { getMobileUserId } from "../lib/security.js";
+
+const router = Router();
+const PREFIX = "rewarded_ads:";
+const DOWNLOAD_LIMIT = 4;
+const WATCH_MINUTES = 60;
+type State = { downloads: number; episodes: string[]; watchUntil: string | null; events: Array<{ type: string; ok: boolean; at: string }> };
+
+function userId(req: Request): string | null {
+  return (req.session as any)?.userId || (req.session as any)?.emailUserId || getMobileUserId(req) || null;
+}
+function deviceId(req: Request): string | null {
+  const raw = String(req.headers["x-nova-device"] || "").trim();
+  return raw && /^[a-zA-Z0-9._:-]{8,120}$/.test(raw) ? raw : null;
+}
+function key(req: Request): string | null { return userId(req) || deviceId(req); }
+function empty(): State { return { downloads: 0, episodes: [], watchUntil: null, events: [] }; }
+async function state(req: Request): Promise<State> {
+  const id = key(req); if (!id) return empty();
+  const rows = await sbSelect<any>("app_config", { key: `eq.${PREFIX}${id}` }, { limit: 1 });
+  try { return { ...empty(), ...(JSON.parse(rows[0]?.value || "{}")) }; } catch { return empty(); }
+}
+async function save(id: string, value: State): Promise<void> {
+  await sbUpsert("app_config", { key: `${PREFIX}${id}`, value: JSON.stringify(value), updated_at: new Date().toISOString() }, "key");
+}
+async function plan(req: Request): Promise<string> {
+  const id = userId(req);
+  if (id) {
+    const entitlement = await sbSelect<any>("app_config", { key: `eq.admin_entitlement:${id}` }, { limit: 1 });
+    try {
+      const value = JSON.parse(entitlement[0]?.value || "{}");
+      if (value.plan === "premium" || value.plan === "admin") return value.plan;
+    } catch {}
+  }
+  // Legacy installations may still expose plan through the users table.
+  try {
+    const u = await getEmailUser(req);
+    return u?.plan === "premium" || u?.plan === "admin" ? u.plan : "free";
+  } catch { return "free"; }
+}
+function challenge(type: string, id: string): string {
+  const secret = process.env.APP_SECRET || "anime-nova-default-change-me-aabbccdd";
+  const nonce = randomBytes(18).toString("base64url");
+  const sig = createHmac("sha256", secret).update(`${type}:${id}:${nonce}`).digest("base64url").slice(0, 32);
+  return `${type}.${id}.${nonce}.${sig}`;
+}
+function validChallenge(raw: string, type: string, id: string): boolean {
+  const [kind, who, nonce, sig] = String(raw || "").split(".");
+  if (kind !== type || who !== id || !nonce || !sig) return false;
+  const secret = process.env.APP_SECRET || "anime-nova-default-change-me-aabbccdd";
+  const expected = createHmac("sha256", secret).update(`${type}:${id}:${nonce}`).digest("base64url").slice(0, 32);
+  try { return timingSafeEqual(Buffer.from(sig), Buffer.from(expected)); } catch { return false; }
+}
+
+router.get("/ads/status", async (req: Request, res: Response) => {
+  const id = key(req); const p = await plan(req); const s = await state(req);
+  const active = s.watchUntil ? new Date(s.watchUntil).getTime() > Date.now() : false;
+  return res.json({ plan: p, adsEnabled: p === "free", downloads: p === "free" ? s.downloads : 0, downloadLimit: DOWNLOAD_LIMIT, downloadAdRequired: p === "free" && s.downloads >= DOWNLOAD_LIMIT, watchAccess: p !== "free" || active, watchUntil: p !== "free" ? null : (active ? s.watchUntil : null), challenge: id && p === "free" ? challenge("watch", id) : null });
+});
+
+router.post("/ads/download/completed", async (req: Request, res: Response) => {
+  const id = key(req); if (!id) return res.status(401).json({ error: "تسجيل الدخول أو معرّف الجهاز مطلوب" });
+  const episodeKey = String(req.body?.episodeKey || `${req.body?.animeId}:e${req.body?.ep}`).slice(0, 160);
+  if (!episodeKey || episodeKey === ":eundefined") return res.status(400).json({ error: "episodeKey مطلوب" });
+  const p = await plan(req); const s = await state(req);
+  if (p !== "free") return res.json({ ok: true, plan: p, downloadAdRequired: false });
+  if (s.episodes.includes(episodeKey)) return res.json({ ok: true, duplicate: true, downloads: s.downloads, downloadAdRequired: s.downloads >= DOWNLOAD_LIMIT });
+  s.episodes = [...s.episodes.slice(-99), episodeKey]; s.downloads += 1;
+  s.events = [...s.events.slice(-49), { type: "download", ok: true, at: new Date().toISOString() }];
+  await save(id, s);
+  return res.json({ ok: true, downloads: s.downloads, downloadAdRequired: s.downloads >= DOWNLOAD_LIMIT });
+});
+
+router.post("/ads/download/reward", async (req: Request, res: Response) => {
+  const id = key(req); if (!id) return res.status(401).json({ error: "غير مصرّح" });
+  const p = await plan(req); if (p !== "free") return res.json({ ok: true, plan: p, downloads: 0 });
+  const s = await state(req); if (s.downloads < DOWNLOAD_LIMIT) return res.status(409).json({ error: "لم يكتمل عدد التنزيلات المطلوب" });
+  s.downloads = 0; s.episodes = []; s.events = [...s.events.slice(-49), { type: "download_reward", ok: true, at: new Date().toISOString() }];
+  await save(id, s); return res.json({ ok: true, downloads: 0 });
+});
+
+router.post("/ads/watch/reward", async (req: Request, res: Response) => {
+  const id = key(req); if (!id) return res.status(401).json({ error: "غير مصرّح" });
+  const p = await plan(req); if (p !== "free") return res.json({ ok: true, plan: p, watchAccess: true, watchUntil: null });
+  if (!validChallenge(String(req.body?.challenge || ""), "watch", id)) return res.status(403).json({ error: "تصريح الإعلان غير صالح" });
+  const s = await state(req); const until = new Date(Date.now() + WATCH_MINUTES * 60_000).toISOString();
+  s.watchUntil = until; s.events = [...s.events.slice(-49), { type: "watch_reward", ok: true, at: new Date().toISOString() }];
+  await save(id, s); return res.json({ ok: true, watchAccess: true, watchUntil: until });
+});
+export default router;

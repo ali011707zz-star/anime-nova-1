@@ -1,0 +1,339 @@
+# ══════════════════════════════════════════════════════════════════
+#  Anime NOVA — Nginx config مُحسَّن للـ HLS streaming
+# ══════════════════════════════════════════════════════════════════
+
+upstream nova_backend {
+    server 127.0.0.1:5000;
+    keepalive 64;
+    keepalive_timeout 60s;
+    keepalive_requests 1000;
+}
+
+limit_req_zone $binary_remote_addr zone=nova_api:10m rate=8r/s;
+limit_conn_zone $binary_remote_addr zone=nova_conn:10m;
+
+proxy_cache_path /var/cache/nginx/hls
+    levels=1:2
+    keys_zone=hls_cache:10m
+    max_size=1g
+    inactive=1h
+    use_temp_path=off;
+
+# HTTP → HTTPS
+server {
+    listen 80 default_server;
+    listen [::]:80 default_server;
+    server_name animenovaa.duckdns.org;
+    return 301 https://$host$request_uri;
+}
+
+# HTTPS
+server {
+    listen 443 ssl default_server;
+    listen [::]:443 ssl default_server;
+    server_name animenovaa.duckdns.org;
+
+    ssl_certificate     /etc/letsencrypt/live/animenovaa.duckdns.org/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/animenovaa.duckdns.org/privkey.pem;
+    ssl_protocols       TLSv1.2 TLSv1.3;
+    ssl_ciphers         ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:!aNULL:!MD5;
+    ssl_prefer_server_ciphers on;
+    ssl_session_cache   shared:SSL:10m;
+    ssl_session_timeout 1d;
+    ssl_session_tickets off;
+
+    client_max_body_size 50M;
+    # Per-client guard; HLS players normally use only a few sockets.
+    limit_conn nova_conn 32;
+    server_tokens off;
+    sendfile on;
+    tcp_nopush on;
+    tcp_nodelay on;
+
+    gzip on;
+    gzip_comp_level 5;
+    gzip_min_length 256;
+    gzip_proxied any;
+    gzip_vary on;
+    gzip_types text/plain text/css application/javascript application/json application/vnd.apple.mpegurl text/vtt text/xml image/svg+xml;
+
+    # ── Scraper entrypoint: bounded request rate per client ───────
+    location ^~ /api/anime/fetch-source {
+        limit_req zone=nova_api burst=16 nodelay;
+        proxy_pass http://nova_backend;
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_read_timeout 60s;
+        proxy_connect_timeout 10s;
+    }
+
+    # ── HLS manifests (.m3u8) — cache 30s ───────────────────────
+    # NOVA_MOBILE_DOWNLOAD
+    location ^~ /nova-mobile/ {
+        proxy_pass http://127.0.0.1:5100;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_read_timeout 120s;
+        proxy_buffering off;
+    }
+
+    location /api/anime/hls-proxy {
+        proxy_pass http://nova_backend;
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_buffering on;
+        proxy_buffers 16 32k;
+        proxy_buffer_size 64k;
+        proxy_cache hls_cache;
+        proxy_hide_header Cache-Control;
+        # HLS manifests are immutable VOD snapshots behind signed URLs. The
+        # Node handler emits no-cache for client correctness, but that would
+        # disable this bounded shared micro-cache and create one upstream fetch
+        # per viewer. Keep the TTL short to avoid stale signed manifests.
+        proxy_ignore_headers Cache-Control Expires;
+        proxy_cache_valid 200 10s;
+        proxy_cache_use_stale error timeout updating http_500 http_502 http_503 http_504;
+        proxy_cache_lock on;
+        proxy_cache_lock_timeout 5s;
+        proxy_cache_background_update on;
+        add_header X-Cache-Status $upstream_cache_status always;
+        proxy_read_timeout 60s;
+        proxy_connect_timeout 10s;
+        proxy_send_timeout 60s;
+    }
+
+    # ── HLS segments (.ts/.m4s) — cache 1h ──────────────────────
+    location /api/anime/seg-proxy {
+        proxy_pass http://nova_backend;
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_buffering on;
+        proxy_buffers 8 16k;
+        proxy_buffer_size 16k;
+        proxy_busy_buffers_size 64k;
+        # Cache large segments on disk, not in the Node process or Nginx RAM.
+        proxy_temp_file_write_size 128k;
+        proxy_max_temp_file_size 16m;
+        proxy_cache hls_cache;
+        proxy_cache_valid 200 1h;
+        proxy_cache_use_stale error timeout updating;
+        proxy_cache_lock on;
+        proxy_cache_lock_timeout 3s;
+        proxy_cache_lock_age 10s;
+        proxy_cache_background_update on;
+        add_header X-Cache-Status $upstream_cache_status;
+        proxy_read_timeout 120s;
+        proxy_send_timeout 120s;
+        proxy_connect_timeout 10s;
+    }
+
+    # ── MP4 video streaming — no cache ──────────────────────────
+    # Background MP4/HLS downloads: do not inherit the buffered site-wide proxy.
+    # Android DownloadManager needs a long-lived, resumable stream while the app
+    # process is suspended or killed.
+    location = /api/anime/download-mp4 {
+        proxy_pass http://nova_backend;
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header X-App-Token $http_x_app_token;
+        proxy_set_header X-Download-Token $http_x_download_token;
+        proxy_set_header Range $http_range;
+        proxy_set_header If-Range $http_if_range;
+        proxy_buffering off;
+        proxy_request_buffering off;
+        proxy_cache off;
+        proxy_read_timeout 1800s;
+        proxy_send_timeout 1800s;
+        proxy_connect_timeout 15s;
+    }
+
+    location /api/anime/video-proxy {
+        proxy_pass http://nova_backend;
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header Range $http_range;
+        proxy_set_header If-Range $http_if_range;
+        proxy_set_header X-Nova-Kawaii-Direct $http_x_nova_kawaii_direct;
+        proxy_buffering on;
+        proxy_buffer_size 64k;
+        proxy_buffers 8 64k;
+        proxy_busy_buffers_size 128k;
+        proxy_temp_file_write_size 1m;
+        proxy_max_temp_file_size 16m;
+        proxy_cache off;
+        proxy_read_timeout 1800s;
+        proxy_send_timeout 1800s;
+        proxy_connect_timeout 15s;
+    }
+
+
+    # ── SSE: sources-stream + animation sources-stream — no buffer ────────
+    location ~ ^/api/(anime|animation)/sources-stream {
+        limit_req zone=nova_api burst=8 nodelay;
+        proxy_pass http://nova_backend;
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_buffering off;
+        proxy_cache off;
+        proxy_read_timeout 60s;
+        proxy_connect_timeout 15s;
+        add_header Cache-Control "no-cache";
+        add_header X-Accel-Buffering "no";
+        add_header Access-Control-Allow-Origin "*";
+    }
+
+    # ── SSE (translate-vtt-stream) — no buffer ──────────────────
+    location ~ ^/api/anime/translate-vtt-stream {
+        proxy_pass http://nova_backend;
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_buffering off;
+        proxy_cache off;
+        proxy_read_timeout 120s;
+        proxy_connect_timeout 15s;
+        add_header Cache-Control "no-cache";
+        add_header X-Accel-Buffering "no";
+    }
+
+    # ── Dubbed MP4 proxy — must precede the generic .mp4 static regex ──
+    # Native players send Range requests; never cache or strip them here.
+    location ^~ /api/dubbed/stream {
+        proxy_pass http://nova_backend;
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header Range $http_range;
+        proxy_set_header If-Range $http_if_range;
+        proxy_buffering off;
+        proxy_cache off;
+        proxy_read_timeout 1800s;
+        proxy_send_timeout 1800s;
+        proxy_connect_timeout 15s;
+        add_header Access-Control-Allow-Origin "*" always;
+        add_header Access-Control-Allow-Headers "Range" always;
+        add_header Access-Control-Expose-Headers "Accept-Ranges, Content-Length, Content-Range, Content-Type" always;
+    }
+
+    # ── Static assets — cache 7d ─────────────────────────────────
+    location ~* \.(js|css|woff2?|ttf|otf|eot|ico|svg|png|jpg|jpeg|webp|gif|mp4)$ {
+        proxy_pass http://nova_backend;
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_cache hls_cache;
+        proxy_hide_header Cache-Control;
+        proxy_cache_valid 200 7d;
+        proxy_cache_use_stale error timeout;
+        add_header X-Cache-Status $upstream_cache_status;
+        add_header Cache-Control "public, max-age=604800, immutable";
+        proxy_read_timeout 30s;
+    }
+
+    # ── CDN proxy (Referer injection للمتصفح) ──────────────────────
+    location /cdn-proxy {
+        proxy_pass http://127.0.0.1:8000/stream;
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header Range $http_range;
+        proxy_buffering off;
+        proxy_cache off;
+        proxy_read_timeout 60s;
+        proxy_connect_timeout 10s;
+        add_header Access-Control-Allow-Origin "*";
+        add_header Access-Control-Allow-Headers "Range";
+        add_header Access-Control-Expose-Headers "Content-Length, Content-Range, Content-Type";
+    }
+
+    # ── Nova Player APK static download
+    location = /anitaku-logger.apk {
+        alias /opt/anime-nova/public/anitaku-logger.apk;
+        add_header Content-Disposition "attachment; filename=AniTaku-Logger.apk";
+        add_header Content-Type "application/vnd.android.package-archive";
+        add_header Cache-Control "no-cache";
+    }
+
+    location = "/Anime Nova.apk" {
+        alias "/opt/anime-nova/public/Anime Nova.apk";
+        default_type application/vnd.android.package-archive;
+        add_header Content-Disposition "attachment; filename=Anime Nova.apk" always;
+        add_header Cache-Control "no-cache" always;
+    }
+
+    location = /Anime-Nova.apk {
+        alias "/opt/anime-nova/public/Anime Nova.apk";
+        add_header Content-Disposition "attachment; filename=Anime Nova.apk";
+        add_header Content-Type application/vnd.android.package-archive;
+        add_header Cache-Control no-cache;
+    }
+
+    location = /nova-player.apk {
+        alias /opt/anime-nova/public/nova-player.apk;
+        add_header Content-Disposition "attachment; filename=NOVA-Player.apk";
+        add_header Content-Type "application/vnd.android.package-archive";
+        add_header Cache-Control "no-cache";
+    }
+
+    # ── Everything else ──────────────────────────────────────────
+    location = /temporary-downloads/nova-source-081029aca71fa369a0872b29ea5bfe58.tar.gz {
+        alias /opt/anime-nova/.temporary-downloads/nova-source-081029aca71fa369a0872b29ea5bfe58.tar.gz;
+        default_type application/gzip;
+        add_header Content-Disposition 'attachment; filename=anime-nova-source.tar.gz' always;
+        add_header Cache-Control 'no-store' always;
+    }
+
+    location / {
+        proxy_pass http://nova_backend;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_cache_bypass $http_upgrade;
+        proxy_buffering on;
+        proxy_buffers 16 32k;
+        proxy_buffer_size 64k;
+        proxy_read_timeout 300s;
+        proxy_connect_timeout 75s;
+    }
+}

@@ -1,0 +1,1752 @@
+import { Router } from "express";
+import { load } from "cheerio";
+import { logger } from "../lib/logger";
+
+const router = Router();
+
+// AnimeWitcher Firestore is the source of truth for dubbed animation.
+// Supabase is intentionally kept as the fast/cache path, but it can lag when
+// an import fails or when the table has no matching conflict constraint.
+const AW_FS_BASE =
+  "https://firestore.googleapis.com/v1/projects/animewitcher-1c66d/databases/(default)/documents";
+const AW_FS_HEADERS = {
+  "User-Agent":
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+  Accept: "application/json",
+};
+
+function awFsValue(value: any): any {
+  if (!value) return "";
+  if ("stringValue" in value) return value.stringValue;
+  if ("integerValue" in value) return Number(value.integerValue);
+  if ("doubleValue" in value) return Number(value.doubleValue);
+  if ("booleanValue" in value) return value.booleanValue;
+  if ("arrayValue" in value) return (value.arrayValue.values || []).map(awFsValue);
+  if ("mapValue" in value) {
+    const result: Record<string, any> = {};
+    for (const [key, child] of Object.entries(value.mapValue.fields || {})) {
+      result[key] = awFsValue(child);
+    }
+    return result;
+  }
+  return "";
+}
+
+function awFsDoc(document: any): Record<string, any> {
+  const result: Record<string, any> = {};
+  for (const [key, value] of Object.entries(document?.fields || {})) {
+    result[key] = awFsValue(value);
+  }
+  return result;
+}
+
+async function fetchAwFirestoreEpisodes(series: string): Promise<number[]> {
+  const numbers: number[] = [];
+  let pageToken = "";
+  do {
+    const url =
+      `${AW_FS_BASE}/anime_list/${encodeURIComponent(series)}/episodes?pageSize=300` +
+      (pageToken ? `&pageToken=${encodeURIComponent(pageToken)}` : "");
+    try {
+      const response = await fetch(url, {
+        headers: AW_FS_HEADERS,
+        signal: AbortSignal.timeout(12000),
+      });
+      if (!response.ok) break;
+      const payload = await response.json() as any;
+      for (const document of payload.documents || []) {
+        const id = String(document.name || "").split("/").pop() || "";
+        const fields = awFsDoc(document);
+        const label = String(fields.name || fields.nameFull || id);
+        const match = label.match(/(\d+(?:\.\d+)?)/);
+        const number = match ? Number(match[1]) : Number(id.replace(/\D/g, ""));
+        if (Number.isFinite(number) && number > 0) numbers.push(number);
+      }
+      pageToken = String(payload.nextPageToken || "");
+    } catch {
+      break;
+    }
+  } while (pageToken);
+  return [...new Set(numbers)].sort((a, b) => a - b);
+}
+
+async function fetchAwFirestoreServers(
+  series: string,
+  episode: number,
+): Promise<{ server: string; quality: string; link: string }[]> {
+  const base = `${AW_FS_BASE}/anime_list/${encodeURIComponent(series)}/episodes`;
+  const ids = [...new Set([
+    String(Math.round(episode)).padStart(3, "0"),
+    String(Math.round(episode)).padStart(4, "0"),
+    String(Math.round(episode)),
+  ])];
+
+  for (const id of ids) {
+    try {
+      const response = await fetch(`${base}/${encodeURIComponent(id)}/servers?pageSize=30`, {
+        headers: AW_FS_HEADERS,
+        signal: AbortSignal.timeout(12000),
+      });
+      if (!response.ok) continue;
+      const payload = await response.json() as any;
+      const documents = Array.isArray(payload.documents) ? payload.documents : [];
+      if (!documents.length) continue;
+      return documents.map((document: any) => {
+        const fields = awFsDoc(document);
+        return {
+          server: String(fields.serverName || fields.name || ""),
+          quality: String(fields.quality || "720p"),
+          link: String(fields.link || fields.url || fields.imageUrl || fields.server || ""),
+        };
+      }).filter((row: any) => row.server && row.link && row.server !== "KF");
+    } catch {
+      // Try the next padding convention.
+    }
+  }
+
+  // Some AW titles store servers as one document instead of a collection.
+  for (const id of ids) {
+    try {
+      const response = await fetch(`${base}/${encodeURIComponent(id)}/servers2/all_servers`, {
+        headers: AW_FS_HEADERS,
+        signal: AbortSignal.timeout(12000),
+      });
+      if (!response.ok) continue;
+      const fields = awFsDoc(await response.json());
+      const servers = Array.isArray(fields.servers) ? fields.servers : [];
+      const rows = servers.map((server: any) => ({
+        server: String(server.serverName || server.name || ""),
+        quality: String(server.quality || "720p"),
+        link: String(server.link || server.url || server.imageUrl || ""),
+      })).filter((row: any) => row.server && row.link && row.server !== "KF");
+      if (rows.length) return rows;
+    } catch {
+      // Continue to the next padding convention.
+    }
+  }
+  return [];
+}
+
+// ── Disk cache for dubbed catalog (يبقى بعد pm2 restart) ──────────────────────
+import { existsSync as _dcExists, readFileSync as _dcRead, writeFileSync as _dcWrite, mkdirSync as _dcMkdir } from "node:fs";
+import { join as _dcJoin } from "node:path";
+
+const _DC_DIR = "/opt/nova-cache/dubbed";
+try { if (!_dcExists(_DC_DIR)) _dcMkdir(_DC_DIR, { recursive: true }); } catch {}
+
+function _dcGet(key: string): any | null {
+  try {
+    const fp = _dcJoin(_DC_DIR, key.replace(/[^a-z0-9_-]/gi,"_") + ".json");
+    if (!_dcExists(fp)) return null;
+    const r = JSON.parse(_dcRead(fp, "utf8"));
+    if (r._ts && Date.now() - r._ts > CATALOG_TTL * 2) return null; // 2× TTL grace
+    return r.data;
+  } catch { return null; }
+}
+
+function _dcSet(key: string, data: any): void {
+  try {
+    const fp = _dcJoin(_DC_DIR, key.replace(/[^a-z0-9_-]/gi,"_") + ".json");
+    _dcWrite(fp, JSON.stringify({ data, _ts: Date.now() }), "utf8");
+  } catch {}
+}
+
+const SC_BASE = "https://starcima.com";
+
+// ── Mediafire CDN resolver (module-level with TTL cache) ──────────────────────
+const _mfCdnCache = new Map<string, { url: string; exp: number }>();
+
+async function resolveMfUrl(link: string): Promise<string | null> {
+  const cached = _mfCdnCache.get(link);
+  if (cached && cached.exp > Date.now()) return cached.url;
+  try {
+    const r = await fetch(link, {
+      headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" },
+      signal: AbortSignal.timeout(8000),
+    });
+    if (!r.ok) return null;
+    const html = await r.text();
+    const m = html.match(/href="(https:\/\/download\d*\.mediafire\.com\/[^"]+)"/);
+    const cdnUrl = m?.[1] ?? html.match(/id="downloadButton"[^>]+href="([^"]+)"/)?.[1] ?? null;
+    if (cdnUrl) _mfCdnCache.set(link, { url: cdnUrl, exp: Date.now() + 3 * 60_000 }); // 3min
+    return cdnUrl;
+  } catch { return null; }
+}
+const AT_BASE = "https://www.arabic-toons.com";
+const CF_PROXY_BASE = "http://localhost:8000";
+const BROWSER_UA =
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
+
+let _cfProxyAlive: boolean | null = null;
+let _cfProxyCheckedAt = 0;
+
+function isCfBlock(html: string): boolean {
+    return !html || html.length < 300
+    || html.includes("Just a moment")
+    || html.includes("cf-browser-verification")
+    || html.includes("Attention Required!");
+} // <-- هذا هو القوس الذي حُذف بالخطأ، قم بإعادته هنا
+
+const MOBILE_UA =
+  "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.6367.82 Mobile Safari/537.36";
+
+async function cfGet(url: string, referer?: string, timeoutMs = 18000): Promise<string | null> {
+  const now = Date.now();
+  if (_cfProxyAlive === null || now - _cfProxyCheckedAt > 60_000) {
+    try {
+      const h = await fetch(`${CF_PROXY_BASE}/health`, { signal: AbortSignal.timeout(2000) });
+      _cfProxyAlive = h.ok;
+    } catch { _cfProxyAlive = false; }
+    _cfProxyCheckedAt = now;
+  }
+
+  // 1. Try CF proxy (localhost:8000) if alive
+  if (_cfProxyAlive) {
+    try {
+      const proxyUrl = new URL(`${CF_PROXY_BASE}/fetch`);
+      proxyUrl.searchParams.set("url", url);
+      if (referer) proxyUrl.searchParams.set("ref", referer);
+      proxyUrl.searchParams.set("timeout", String(Math.floor(timeoutMs / 1000)));
+      const r = await fetch(proxyUrl.toString(), { signal: AbortSignal.timeout(timeoutMs + 3000) });
+      if (r.ok) {
+        const html = await r.text();
+        if (!isCfBlock(html)) return html;
+      }
+    } catch { /* fall through */ }
+  }
+
+  // 2. Try direct fetch with desktop UA
+  try {
+    const r = await fetch(url, {
+      headers: {
+        "User-Agent": BROWSER_UA,
+        Referer: referer || url,
+        Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "ar,en-US;q=0.9,en;q=0.8",
+        "Accept-Encoding": "gzip, deflate, br",
+        "Cache-Control": "no-cache",
+      },
+      signal: AbortSignal.timeout(Math.min(timeoutMs, 12000)),
+    });
+    if (r.ok) {
+      const html = await r.text();
+      if (!isCfBlock(html)) return html;
+    }
+  } catch { /* fall through */ }
+
+  // 3. Try with mobile UA (CF sometimes lets mobile through)
+  try {
+    const r = await fetch(url, {
+      headers: {
+        "User-Agent": MOBILE_UA,
+        Referer: referer || url,
+        Accept: "text/html,*/*;q=0.9",
+        "Accept-Language": "ar-SA,ar;q=0.9",
+      },
+      signal: AbortSignal.timeout(Math.min(timeoutMs, 10000)),
+    });
+    if (r.ok) {
+      const html = await r.text();
+      if (!isCfBlock(html)) return html;
+    }
+  } catch { /* fall through */ }
+
+  return null;
+}
+
+// ── L1 cache for catalog pages ──
+const _catalogCache = new Map<string, { data: any; ts: number }>();
+const CATALOG_TTL = 30 * 60_000; // 30 دقيقة — يبقى سريعاً لكن لا يحبس الإضافات اليومية
+const ARABIC_TOONS_HOSTS = new Set(["arabic-toons.com", "www.arabic-toons.com"]);
+
+function normalizeArabicToonsSeriesUrl(value: string): string | null {
+  try {
+    const url = new URL(value);
+    if (
+      url.protocol !== "https:" ||
+      !ARABIC_TOONS_HOSTS.has(url.hostname.toLowerCase()) ||
+      url.username ||
+      url.password ||
+      url.port ||
+      !/-anime-streaming\.html$/i.test(url.pathname)
+    ) return null;
+    return `${AT_BASE}${url.pathname}`;
+  } catch {
+    return null;
+  }
+}
+
+async function fetchArabicToonsHtml(url: string, referer: string): Promise<string | null> {
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== "https:" || !ARABIC_TOONS_HOSTS.has(parsed.hostname.toLowerCase())) return null;
+    // VPS direct egress can be blocked by Cloudflare. Use the existing
+    // curl_cffi proxy first, then cfGet's direct-fetch fallbacks.
+    const html = await cfGet(url, referer, 18000);
+    if (!html) return null;
+    return html.length > 500 && !isCfBlock(html) ? html : null;
+  } catch {
+    return null;
+  }
+}
+
+async function fetchArabicToonsCatalogPage(page: number): Promise<any | null> {
+  const safePage = Math.max(1, Math.min(1000, Math.floor(page) || 1));
+  const url = new URL(`${AT_BASE}/cartoon.php`);
+  url.searchParams.set("next", String(safePage));
+  const html = await fetchArabicToonsHtml(url.toString(), `${AT_BASE}/cartoon.php`);
+  if (!html) return null;
+
+  const $ = load(html);
+  const results: any[] = [];
+  const seen = new Set<string>();
+  $("a[href]").each((_, element) => {
+    const anchor = $(element);
+    const rawHref = anchor.attr("href") || "";
+    let seriesUrl: URL;
+    try {
+      seriesUrl = new URL(rawHref, AT_BASE);
+    } catch {
+      return;
+    }
+    if (
+      !ARABIC_TOONS_HOSTS.has(seriesUrl.hostname.toLowerCase()) ||
+      !/-anime-streaming\.html$/i.test(seriesUrl.pathname)
+    ) return;
+
+    const canonicalUrl = `${AT_BASE}${seriesUrl.pathname}`;
+    if (seen.has(canonicalUrl)) return;
+    const image = anchor.find("img").first();
+    const rawImage = image.attr("src") || image.attr("data-src") || "";
+    let imageUrl: string | undefined;
+    if (rawImage) {
+      try {
+        const parsedImage = new URL(rawImage, AT_BASE);
+        if (ARABIC_TOONS_HOSTS.has(parsedImage.hostname.toLowerCase())) imageUrl = parsedImage.toString();
+      } catch { /* skip malformed poster URLs */ }
+    }
+    const title = String(
+      image.attr("alt") || anchor.attr("title") || anchor.text() || "",
+    ).replace(/\s+/g, " ").trim();
+    const slug = seriesUrl.pathname.split("/").pop()?.replace(/-anime-streaming\.html$/i, "") || "";
+    if (!slug || !title) return;
+    let posterImage = imageUrl;
+    if (imageUrl) {
+      const filename = new URL(imageUrl).pathname.match(/^\/images\/anime\/([^/]+)$/)?.[1];
+      if (filename && /^[\w.-]+$/.test(filename)) {
+        posterImage = `/api/dubbed/img?f=${encodeURIComponent(filename)}`;
+      }
+    }
+
+    seen.add(canonicalUrl);
+    results.push({
+      key: slug,
+      slug,
+      title,
+      image: posterImage,
+      poster: posterImage,
+      seasons: [{ label: "الحلقات", arabicToonsId: canonicalUrl }],
+    });
+  });
+
+  if (!results.length) return null;
+  let totalPages = safePage;
+  const pageLinkPattern = /cartoon\.php\?next=(\d+)/gi;
+  let pageLink: RegExpExecArray | null;
+  while ((pageLink = pageLinkPattern.exec(html))) {
+    totalPages = Math.max(totalPages, Number(pageLink[1]) || safePage);
+  }
+  return { results, page: safePage, totalPages };
+}
+
+function normalizeArabicDigits(value: string): string {
+  return value
+    .replace(/[٠-٩]/g, digit => String("٠١٢٣٤٥٦٧٨٩".indexOf(digit)))
+    .replace(/[۰-۹]/g, digit => String("۰۱۲۳۴۵۶۷۸۹".indexOf(digit)));
+}
+
+function parseArabicToonsEpisodes(html: string, seriesUrl: string): any[] {
+  const $ = load(html);
+  const seriesPath = new URL(seriesUrl).pathname;
+  const seriesStem = seriesPath.replace(/-anime-streaming\.html$/i, "");
+  const episodes = new Map<string, any>();
+
+  $("a[href]").each((_, element) => {
+    const anchor = $(element);
+    let episodeUrl: URL;
+    try {
+      episodeUrl = new URL(anchor.attr("href") || "", seriesUrl);
+    } catch {
+      return;
+    }
+    if (!ARABIC_TOONS_HOSTS.has(episodeUrl.hostname.toLowerCase())) return;
+    const episodeId = episodeUrl.pathname.match(/-(\d+)\.html$/i)?.[1];
+    if (!episodeId || episodeUrl.pathname.replace(/-\d+\.html$/i, "") !== seriesStem) return;
+    if (episodes.has(episodeId)) return;
+
+    const image = anchor.find("img").first();
+    const label = normalizeArabicDigits([
+      anchor.attr("title") || "",
+      anchor.text(),
+      image.attr("alt") || "",
+    ].join(" "));
+    const labelledNumber = label.match(/(?:الحلقة|episode)\s*[:#-]?\s*(\d+(?:\.\d+)?)/i)?.[1];
+    const anyNumber = label.match(/(?:^|[^\d])(\d+(?:\.\d+)?)(?:$|[^\d])/)?.[1];
+    const parsedNumber = Number(labelledNumber || anyNumber);
+    const number = Number.isFinite(parsedNumber) && parsedNumber > 0
+      ? parsedNumber
+      : episodes.size + 1;
+
+    let thumbnail: string | undefined;
+    const srcsetThumbnail = (image.attr("data-srcset") || image.attr("srcset"))
+      ?.split(",")[0]
+      ?.trim()
+      .split(/\s+/)[0];
+    const thumbnailCandidates = [
+      image.attr("data-src"),
+      image.attr("data-original"),
+      image.attr("data-lazy-src"),
+      srcsetThumbnail,
+      image.attr("src"),
+    ].filter((value): value is string => Boolean(value?.trim()));
+    for (const rawThumbnail of thumbnailCandidates) {
+      try {
+        const parsedThumbnail = new URL(rawThumbnail, AT_BASE);
+        if (ARABIC_TOONS_HOSTS.has(parsedThumbnail.hostname.toLowerCase())) {
+          thumbnail = parsedThumbnail.toString();
+          break;
+        }
+      } catch { /* skip malformed thumbnails */ }
+    }
+
+    if (!episodeUrl.hash) episodeUrl.hash = "sets";
+    episodes.set(episodeId, {
+      number,
+      epId: episodeId,
+      url: episodeUrl.toString(),
+      ...(thumbnail ? { thumbnail } : {}),
+    });
+  });
+
+  return [...episodes.values()].sort((a, b) => a.number - b.number);
+}
+
+
+async function fetchStarCimaDubbed(path: string, forceRefresh = false): Promise<any> {
+  const hit = _catalogCache.get(path);
+  if (!forceRefresh && hit && Date.now() - hit.ts < CATALOG_TTL) return hit.data;
+
+  // احتفظ بآخر كتالوج صالح كخطة رجوع حتى لو انتهت مدة حداثته القصيرة.
+  // تعطل المصدر الخارجي لا يجب أن يحول كتالوج الهاتف إلى شاشة فارغة.
+  const diskHit = _dcGet(path);
+  const staleData = diskHit ?? (Array.isArray(hit?.data?.results) ? hit.data : null);
+  if (!forceRefresh && diskHit) {
+    _catalogCache.set(path, { data: diskHit, ts: Date.now() - CATALOG_TTL + 10 * 60_000 }); // يُجدَّد خلال 10 دقائق
+  }
+
+  try {
+    const r = await fetch(`${SC_BASE}${path}`, {
+      headers: {
+        "User-Agent": BROWSER_UA,
+        Referer: `${SC_BASE}/dubbed`,
+        Accept: "application/json",
+      },
+      signal: AbortSignal.timeout(12000),
+    });
+    if (r.ok) {
+      const data = await r.json();
+      if (!Array.isArray(data?.results)) throw new Error("invalid StarCima dubbed catalog response");
+      _catalogCache.set(path, { data, ts: Date.now() });
+      _dcSet(path, data); // حفظ على القرص للـ restart القادم
+      return data;
+    }
+    logger.warn({ status: r.status, path }, "dubbed: StarCima catalog unavailable; trying Arabic-Toons");
+  } catch (e) {
+    logger.warn({ err: e, path }, "dubbed: fetchStarCimaDubbed error; trying Arabic-Toons");
+  }
+
+  const page = path.match(/^\/api\/dubbed\/catalog\?page=(\d+)$/);
+  if (page) {
+    const fallback = await fetchArabicToonsCatalogPage(Number(page[1]));
+    if (fallback) {
+      _catalogCache.set(path, { data: fallback, ts: Date.now() });
+      _dcSet(path, fallback);
+      return fallback;
+    }
+  }
+  return staleData;
+}
+// ── GET /api/dubbed/catalog?page=N ──
+router.get("/dubbed/catalog", async (req, res) => {
+  const page = parseInt(req.query.page as string || "1", 10) || 1;
+  const forceRefresh = req.query.refresh === "1";
+  const data = await fetchStarCimaDubbed(`/api/dubbed/catalog?page=${page}`, forceRefresh);
+  if (!data) { res.status(502).json({ error: "upstream failed" }); return; }
+  // Older mobile builds accept only absolute poster URLs. StarCima returns
+  // /api/dubbed/img paths, so expose the same proxy as an absolute URL.
+  const publicBase = (process.env.NOVA_PUBLIC_URL || "https://animenovaa.duckdns.org").replace(/\/$/, "");
+  const absoluteImageUrl = (value: any) =>
+    typeof value === "string" && value.startsWith("/") ? `${publicBase}${value}` : value;
+  const results = Array.isArray(data.results) ? data.results.map((item: any) => ({
+    ...item,
+    image: absoluteImageUrl(item.image),
+    poster: absoluteImageUrl(item.poster),
+  })) : data.results;
+  const responseData = results ? { ...data, results } : data;
+  res.setHeader("Cache-Control", forceRefresh ? "no-store" : "public, max-age=300");
+  res.json(responseData);
+});
+
+function normalizeDubbedSearchText(value: unknown): string {
+  return String(value ?? "")
+    .normalize("NFKD")
+    .replace(/[\u064B-\u065F\u0670\u06D6-\u06ED]/g, "")
+    .replace(/\u0640/g, "")
+    .replace(/[أإآٱ]/g, "ا")
+    .replace(/[ىئ]/g, "ي")
+    .replace(/ؤ/g, "و")
+    .replace(/ة/g, "ه")
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .trim()
+    .replace(/\s+/g, " ");
+}
+
+function dubbedSearchTokenMatches(queryToken: string, titleToken: string): boolean {
+  if (queryToken === titleToken || titleToken.includes(queryToken)) return true;
+  const queryChars = Array.from(queryToken);
+  const titleChars = Array.from(titleToken);
+  if (queryChars.length < 3 || Math.abs(queryChars.length - titleChars.length) > 1) return false;
+
+  let queryIndex = 0;
+  let titleIndex = 0;
+  let edits = 0;
+  while (queryIndex < queryChars.length && titleIndex < titleChars.length) {
+    if (queryChars[queryIndex] === titleChars[titleIndex]) {
+      queryIndex++;
+      titleIndex++;
+      continue;
+    }
+    if (++edits > 1) return false;
+    if (queryChars.length > titleChars.length) queryIndex++;
+    else if (titleChars.length > queryChars.length) titleIndex++;
+    else {
+      queryIndex++;
+      titleIndex++;
+    }
+  }
+  edits += queryChars.length - queryIndex + titleChars.length - titleIndex;
+  return edits <= 1;
+}
+
+function matchesDubbedSearch(item: any, query: string): boolean {
+  const normalizedQuery = normalizeDubbedSearchText(query);
+  if (!normalizedQuery) return false;
+  const normalizedTitle = normalizeDubbedSearchText([
+    item?.title,
+    item?.titleAr,
+    item?.titleEn,
+    item?.englishTitle,
+    item?.slug,
+    item?.key,
+  ].filter(Boolean).join(" "));
+  if (!normalizedTitle) return false;
+  if (normalizedTitle.includes(normalizedQuery)) return true;
+
+  const queryTokens = normalizedQuery.split(" ");
+  const titleTokens = normalizedTitle.split(" ");
+  return queryTokens.every(queryToken =>
+    titleTokens.some(titleToken => dubbedSearchTokenMatches(queryToken, titleToken)),
+  );
+}
+
+async function searchCachedDubbedCatalog(query: string): Promise<any[]> {
+  const firstPagePath = "/api/dubbed/catalog?page=1";
+  const firstPage = await fetchStarCimaDubbed(firstPagePath);
+  const totalPages = Math.min(100, Math.max(1, Math.trunc(Number(firstPage?.totalPages) || 1)));
+  const pages = new Map<number, any[]>();
+
+  if (Array.isArray(firstPage?.results)) pages.set(1, firstPage.results);
+  for (const [path, cached] of _catalogCache) {
+    const match = path.match(/^\/api\/dubbed\/catalog\?page=(\d+)$/);
+    const page = match ? Number(match[1]) : 0;
+    if (page > 0 && Array.isArray(cached.data?.results)) pages.set(page, cached.data.results);
+  }
+  for (let page = 1; page <= totalPages; page++) {
+    if (pages.has(page)) continue;
+    const cached = _dcGet(`/api/dubbed/catalog?page=${page}`);
+    if (Array.isArray(cached?.results)) pages.set(page, cached.results);
+  }
+
+  const seen = new Set<string>();
+  return [...pages.values()].flat().filter((item: any) => {
+    if (!matchesDubbedSearch(item, query)) return false;
+    const identity = String(item?.key || item?.slug || item?.title || "");
+    if (!identity || seen.has(identity)) return false;
+    seen.add(identity);
+    return true;
+  });
+}
+
+// ── GET /api/dubbed/search?q= ──
+router.get("/dubbed/search", async (req, res) => {
+  const q = (req.query.q as string || "").trim();
+  if (!q) { res.json({ results: [] }); return; }
+
+  try {
+    const catalogMatches = await searchCachedDubbedCatalog(q);
+    if (catalogMatches.length) {
+      res.setHeader("Cache-Control", "no-store");
+      res.json({ results: catalogMatches });
+      return;
+    }
+  } catch (error) {
+    logger.warn({ err: error }, "dubbed: local catalog search fallback failed");
+  }
+
+  try {
+    const r = await fetch(`${SC_BASE}/api/dubbed/search?q=${encodeURIComponent(q)}`, {
+      headers: { "User-Agent": BROWSER_UA, Referer: `${SC_BASE}/dubbed`, Accept: "application/json" },
+      signal: AbortSignal.timeout(8000),
+    });
+    if (r.ok) {
+      const data = await r.json() as any;
+      if (Array.isArray(data?.results) && data.results.length) {
+        res.setHeader("Cache-Control", "public, max-age=300");
+        res.json(data);
+        return;
+      }
+    }
+  } catch {
+    // The local cached catalog is the primary fallback when upstream search is unavailable.
+  }
+  res.setHeader("Cache-Control", "no-store");
+  res.json({ results: [] });
+});
+
+// ── GET /api/dubbed/episodes?series= ──
+router.get("/dubbed/episodes", async (req, res) => {
+  const series = (req.query.series as string || "").trim();
+  if (!series) { res.json({ episodes: [] }); return; }
+
+  const cacheKey = `/api/dubbed/episodes?series=${series}`;
+  const hit = _catalogCache.get(cacheKey);
+  const arabicToonsSeriesUrl = normalizeArabicToonsSeriesUrl(series);
+  if (
+    arabicToonsSeriesUrl &&
+    hit &&
+    Array.isArray(hit.data) &&
+    hit.data.length > 0 &&
+    Date.now() - hit.ts < CATALOG_TTL
+  ) {
+    res.setHeader("Cache-Control", "public, max-age=1800");
+    res.json({ episodes: hit.data });
+    return;
+  }
+
+  if (arabicToonsSeriesUrl) {
+    const html = await fetchArabicToonsHtml(arabicToonsSeriesUrl, `${AT_BASE}/cartoon.php`);
+    const arabicToonsEpisodes = html
+      ? parseArabicToonsEpisodes(html, arabicToonsSeriesUrl)
+      : [];
+    if (arabicToonsEpisodes.length) {
+      _catalogCache.set(cacheKey, { data: arabicToonsEpisodes, ts: Date.now() });
+      res.setHeader("Cache-Control", "public, max-age=1800");
+      res.json({ episodes: arabicToonsEpisodes });
+      return;
+    }
+  }
+
+  if (hit && Date.now() - hit.ts < CATALOG_TTL && !arabicToonsSeriesUrl) {
+    res.setHeader("Cache-Control", "public, max-age=1800");
+    res.json({ episodes: hit.data });
+    return;
+  }
+
+  try {
+    const r = await fetch(`${SC_BASE}/api/dubbed/episodes?series=${encodeURIComponent(series)}`, {
+      headers: { "User-Agent": BROWSER_UA, Referer: `${SC_BASE}/dubbed`, Accept: "application/json" },
+      signal: AbortSignal.timeout(10000),
+    });
+    if (!r.ok) { res.json({ episodes: [] }); return; }
+    const data = await r.json();
+    const rawEps = Array.isArray(data) ? data : (data.episodes || []);
+
+    // ── تطبيع روابط الحلقات: بعض استجابات starcima تُعيد روابط نسبية أو من نطاقها
+    // الـ watch-src يقبل فقط arabic-toons.com — نُطبّع هنا تفادياً لـ 400
+    const AT_BASE_NORM = "https://www.arabic-toons.com";
+    const SC_HOST = new URL(SC_BASE).hostname; // "starcima.com"
+    const episodes = rawEps.map((ep: any) => {
+      if (!ep || typeof ep.url !== "string") return ep;
+      let url = ep.url.trim();
+      // رابط نسبي → مطلق على arabic-toons (النمط الأصلي)
+      if (url.startsWith("/")) url = `${AT_BASE_NORM}${url}`;
+      // رابط starcima.com → حوّله إلى arabic-toons.com (نفس المسار)
+      try {
+        const u = new URL(url);
+        if (u.hostname === SC_HOST || u.hostname === `www.${SC_HOST}`) {
+          u.hostname = "www.arabic-toons.com";
+          url = u.toString();
+        }
+      } catch { /* url غير قابل للتحليل — ابقه كما هو */ }
+      return { ...ep, url };
+    });
+
+    _catalogCache.set(cacheKey, { data: episodes, ts: Date.now() });
+    res.setHeader("Cache-Control", "public, max-age=1800");
+    res.json({ episodes });
+  } catch { res.json({ episodes: [] }); }
+});
+
+// ── GET /api/dubbed/watch-src?epUrl= ──
+// Fetches the arabic-toons.com episode page and extracts the video URL (MP4 or HLS).
+// arabic-toons uses a clappr player with a JS variable: const videoSrc = "https://...mp4?tkn=..."
+const ALLOWED_DUBBED_HOSTNAMES = new Set([
+  "www.arabic-toons.com",
+  "arabic-toons.com",
+  "starcima.com",
+  "www.starcima.com",
+]);
+
+router.get("/dubbed/watch-src", async (req, res) => {
+  const epUrl = (req.query.epUrl as string || "").trim();
+  // صلاحية الـ URL: يجب أن يكون https ومن نطاق arabic-toons.com فقط
+  let parsedEpUrl: URL;
+  try {
+    parsedEpUrl = new URL(epUrl);
+    if (parsedEpUrl.protocol !== "https:" || !ALLOWED_DUBBED_HOSTNAMES.has(parsedEpUrl.hostname)) {
+      throw new Error("hostname not allowed");
+    }
+  } catch {
+    res.status(400).json({ error: "invalid epUrl" }); return;
+  }
+
+  try {
+    // ── جلب صفحة الحلقة — نجرب direct و cfGet بالتوازي.
+    // الانتظار التسلسلي كان يجعل الطلب يستهلك 12s + 18s عند تعثر VPS
+    // في الوصول المباشر، وهو ما كان يظهر للمستخدم كتعليق طويل قبل المشغل.
+    let html: string | null = null;
+    const fetchDirectPage = async (): Promise<string> => {
+      const directR = await fetch(epUrl, {
+        headers: {
+          "User-Agent": BROWSER_UA,
+          Referer: AT_BASE + "/",
+          Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+          "Accept-Language": "ar,en-US;q=0.9,en;q=0.8",
+          "Accept-Encoding": "gzip, deflate, br",
+          "Cache-Control": "no-cache",
+        },
+        signal: AbortSignal.timeout(12000),
+      });
+      if (!directR.ok) throw new Error(`direct_${directR.status}`);
+      const t = await directR.text();
+      if (t.length <= 500 || isCfBlock(t)) throw new Error("direct_invalid");
+      return t;
+    };
+    const fetchCfPage = async (): Promise<string> => {
+      const t = await cfGet(epUrl, AT_BASE + "/", 18000);
+      if (!t || t.length <= 500 || isCfBlock(t)) throw new Error("cf_invalid");
+      return t;
+    };
+    try {
+      // Promise.any keeps the fast successful path and only waits for the
+      // slower path when the first one is blocked or unavailable.
+      html = await Promise.any([fetchDirectPage(), fetchCfPage()]);
+    } catch { /* both retrieval paths failed */ }
+    if (!html) { res.status(502).json({ error: "failed to fetch episode page" }); return; }
+
+    // Helper: build proxied URL + return rawUrl for mobile clients.
+    // foupix CDN (stream.foupix.com:8443) blocks datacenter IPs (VPS/Replit).
+    // Mobile devices on residential IPs CAN stream rawUrl directly.
+    // The `ips` query param is a constant tied to the content file — NOT to any IP.
+    // nova-mobile/dubbed/watch.tsx picks rawUrl first, proxyUrl as fallback.
+    function resolveVideoUrl(rawUrl: string, type: "hls" | "mp4"): { hlsUrl: string; rawUrl: string; type: string } {
+      if (type === "hls") {
+        const proxied = `/api/anime/hls-proxy?url=${encodeURIComponent(rawUrl)}&ref=${encodeURIComponent(AT_BASE + "/")}`;
+        return { hlsUrl: proxied, rawUrl, type: "hls" };
+      }
+      // foupix CDN validates ua-hash in token against the User-Agent used at token-generation time.
+      // Use /api/dubbed/stream which proxies from server with the same BROWSER_UA — NOT a 307 redirect.
+      // Include the episode page so the stream proxy can mint a fresh Foupix
+      // token if this short-lived signed URL expires while the app is open.
+      const proxied = `/api/dubbed/stream.mp4?url=${encodeURIComponent(rawUrl)}&ep=${encodeURIComponent(epUrl)}`;
+      return { hlsUrl: proxied, rawUrl, type: "mp4" };
+    }
+
+    // Pattern 1: videoSrc = "https://stream.foupix.com:8443/...mp4?tkn=..."  (main pattern)
+    // arabic-toons uses: videoSrc = "URL"+ "&_=" + Date.now()  — بدون كلمة const
+    const videoSrcMatch = html.match(/(?:const\s+)?videoSrc\s*=\s*["']([^"']+(?:\.mp4|\.m3u8)[^"']*)["']/);
+    if (videoSrcMatch) {
+      const rawUrl = videoSrcMatch[1].split('"')[0].split("'")[0]; // strip any trailing quote
+      const isHls = rawUrl.includes(".m3u8");
+      const resolved = await resolveVideoUrl(rawUrl, isHls ? "hls" : "mp4");
+      res.json(resolved);
+      return;
+    }
+
+    // Pattern 2: file: "https://....mp4" (JW Player or Video.js setup)
+    const fileMatch = html.match(/['"](https?:\/\/[^"']+\.mp4[^"']*)['"]/);
+    if (fileMatch) {
+      const rawUrl = fileMatch[1];
+      const resolved = await resolveVideoUrl(rawUrl, "mp4");
+      res.json(resolved);
+      return;
+    }
+
+    // Pattern 3: HLS m3u8 in <source src="...">
+    const srcMatch = html.match(/src=["']([^"']+\.m3u8[^"']*)["']/);
+    if (srcMatch) {
+      const hlsRaw = srcMatch[1];
+      const proxied = `/api/anime/hls-proxy?url=${encodeURIComponent(hlsRaw)}&ref=${encodeURIComponent(AT_BASE + "/")}`;
+      res.json({ hlsUrl: proxied, rawUrl: hlsRaw, type: "hls" });
+      return;
+    }
+
+    logger.warn({ epUrl }, "dubbed: no video source found in episode page");
+    res.status(404).json({ error: "no video source found" });
+  } catch (e: any) {
+    logger.warn({ err: e }, "dubbed: watch-src error");
+    res.status(502).json({ error: String(e?.message || e) });
+  }
+});
+
+// ── GET /api/dubbed/stream → فوبيكس CDN streaming proxy ──────────────────────
+// foupix CDN يتحقق من UA hash في الـ token — يجب الـ stream من السيرفر بنفس UA الذي أنتج الـ token.
+// يدعم Range requests للتقديم والتأخير (seeking).
+const CARTOON_DUBBED_ENABLED = process.env.NOVA_CARTOON_DUBBED_ENABLED !== "false";
+
+// Temporary feature switch: keep animation-dubbed (/aw-dubbed) available while
+// making every direct cartoon-dubbed API call fail closed on the server.
+router.use((req, res, next) => {
+  if (!CARTOON_DUBBED_ENABLED && req.path.startsWith("/dubbed")) {
+    res.setHeader("Cache-Control", "no-store");
+    return res.status(503).json({ disabled: true, error: "cartoon dubbed section temporarily disabled" });
+  }
+  next();
+});
+
+const FOUPIX_HOSTS = new Set(["stream.foupix.com", "streamxx.foupix.com"]);
+
+function extractFoupixVideoUrl(html: string): string | null {
+  const videoSrc = html.match(/(?:const\s+)?videoSrc\s*=\s*["']([^"']+(?:\.mp4|\.m3u8)[^"']*)["']/)?.[1];
+  const fileSrc = html.match(/["'](https?:\/\/[^"']+\.mp4[^"']*)["']/)?.[1];
+  const sourceSrc = html.match(/src=["']([^"']+\.m3u8[^"']*)["']/)?.[1];
+  const candidate = videoSrc || fileSrc || sourceSrc;
+  if (!candidate) return null;
+  try {
+    const parsed = new URL(candidate.split("\"")[0].split("'")[0]);
+    if (parsed.protocol === "https:" && FOUPIX_HOSTS.has(parsed.hostname)) return parsed.toString();
+  } catch {}
+  return null;
+}
+
+async function fetchFreshFoupixUrl(epUrl: string): Promise<string | null> {
+  let parsed: URL;
+  try {
+    parsed = new URL(epUrl);
+    if (parsed.protocol !== "https:" || !ALLOWED_DUBBED_HOSTNAMES.has(parsed.hostname)) return null;
+  } catch {
+    return null;
+  }
+
+  const direct = async (): Promise<string> => {
+    const response = await fetch(parsed.toString(), {
+      headers: {
+        "User-Agent": BROWSER_UA,
+        Referer: AT_BASE + "/",
+        Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "ar,en-US;q=0.9,en;q=0.8",
+        "Cache-Control": "no-cache",
+      },
+      signal: AbortSignal.timeout(12000),
+    });
+    if (!response.ok) throw new Error(`episode_${response.status}`);
+    const html = await response.text();
+    if (html.length <= 500 || isCfBlock(html)) throw new Error("episode_invalid");
+    return html;
+  };
+  const viaCf = async (): Promise<string> => {
+    const html = await cfGet(parsed.toString(), AT_BASE + "/", 18000);
+    if (!html || html.length <= 500 || isCfBlock(html)) throw new Error("episode_cf_invalid");
+    return html;
+  };
+
+  try {
+    const html = await Promise.any([direct(), viaCf()]);
+    return extractFoupixVideoUrl(html);
+  } catch {
+    return null;
+  }
+}
+
+// Foupix may return a transient 403 while rotating its signed CDN token.
+// Keep this endpoint as a transparent, single-upstream media proxy. The previous
+// MP4-header priming implementation opened many extra Range requests before the
+// player request; Foupix rate-limited that burst and the player saw a 502.
+function foupixRequestHeaders(range?: string): Record<string, string> {
+  const headers: Record<string, string> = {
+    "User-Agent": BROWSER_UA,
+    "Referer": AT_BASE + "/",
+    "Origin": AT_BASE,
+    "Accept": "*/*",
+    "Accept-Encoding": "identity",
+  };
+  if (range) headers.Range = range;
+  return headers;
+}
+
+
+/**
+ * Timeout only the connection/headers phase. A timeout attached directly to
+ * fetch() also aborts the response body later, truncating open-ended Range
+ * requests while a large MP4 is still streaming.
+ */
+async function fetchFoupixHeaders(
+  url: string,
+  headers: Record<string, string>,
+): Promise<Response> {
+  const controller = new AbortController();
+  // Foupix can take around 20s to open a cold Range request. Give one
+  // connection enough time, but do not allow the old multi-retry loop to
+  // turn a single bad token into a multi-minute player wait.
+  const timeout = setTimeout(() => controller.abort(), 25_000);
+  try {
+    return await fetch(url, { headers, signal: controller.signal });
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+router.get(["/dubbed/stream", "/dubbed/stream.mp4"], async (req, res) => {
+  let rawUrl = (req.query.url as string || "").trim();
+  const refreshEpUrl = (req.query.ep as string || "").trim();
+  if (!rawUrl) { res.status(400).json({ error: "missing url" }); return; }
+  let parsed: URL;
+  try {
+    parsed = new URL(rawUrl);
+    if (parsed.protocol !== "https:" || !FOUPIX_HOSTS.has(parsed.hostname)) {
+      throw new Error("hostname not allowed");
+    }
+  } catch {
+    res.status(400).json({ error: "invalid or disallowed url" }); return;
+  }
+
+  try {
+    const rangeHeader = typeof req.headers["range"] === "string"
+      ? req.headers["range"]
+      : undefined;
+    let fetchHeaders = foupixRequestHeaders(rangeHeader);
+    let upstream: Response | null = null;
+    let refreshedToken = false;
+    const retryableNetworkCodes = new Set<string>([
+      "ECONNRESET", "ECONNREFUSED", "EAI_AGAIN", "ETIMEDOUT",
+      "UND_ERR_CONNECT_TIMEOUT", "UND_ERR_SOCKET",
+    ]);
+
+    // Retry only statuses that are commonly transient at this CDN. Do not issue
+    // parallel requests: Foupix treats a burst of ranges as an abusive client.
+    // One retry is enough after a fresh token; more retries make startup
+    // look frozen without improving a blocked Foupix edge.
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      try {
+        upstream = await fetchFoupixHeaders(rawUrl, fetchHeaders);
+      } catch (error) {
+        const errorName = error instanceof Error ? error.name : "UnknownError";
+        const errorCode = (error as any)?.cause?.code;
+        const retryableNetworkFailure =
+          errorName !== "AbortError" &&
+          (errorName === "TypeError" || retryableNetworkCodes.has(String(errorCode)));
+        upstream = null;
+        if (retryableNetworkFailure && attempt === 0) {
+          await new Promise(resolve => setTimeout(resolve, 400));
+          continue;
+        }
+        logger.warn({ errorName, errorCode, attempt: attempt + 1 }, "dubbed: stream upstream request failed");
+        break;
+      }
+
+      const retryable = upstream && (
+        upstream.status === 401 ||
+        upstream.status === 403 ||
+        upstream.status === 429 ||
+        upstream.status >= 500
+      );
+      if (!retryable || attempt === 1) break;
+      try { await upstream?.body?.cancel(); } catch {}
+
+      // The mobile app can keep a player open long enough for the signed URL
+      // to expire. Re-fetch the original episode page once, then continue with
+      // a newly signed URL while preserving the client's Range header.
+      // A signed Foupix URL can fail with a transient 5xx/429 as well as
+      // an explicit 401/403. Refresh once for every retryable denial so a
+      // CDN rotation does not burn all retries against the same stale token.
+      const refreshableStatus = upstream && (
+        upstream.status === 401 ||
+        upstream.status === 403 ||
+        upstream.status === 429 ||
+        upstream.status >= 500
+      );
+      if (refreshEpUrl && !refreshedToken && refreshableStatus) {
+        refreshedToken = true;
+        const freshUrl = await fetchFreshFoupixUrl(refreshEpUrl);
+        if (freshUrl) {
+          rawUrl = freshUrl;
+          fetchHeaders = foupixRequestHeaders(rangeHeader);
+          continue;
+        }
+      }
+      await new Promise(resolve => setTimeout(resolve, 400 * (attempt + 1)));
+    }
+
+    if (!upstream) {
+      res.status(502).json({ error: "upstream unavailable" }); return;
+    }
+    if (upstream.status === 401 || upstream.status === 403) {
+      logger.warn({ upstreamStatus: upstream.status, refreshedToken }, "dubbed: stream denied after token refresh");
+      res.status(502).json({ error: "foupix temporarily denied the stream" }); return;
+    }
+    if (!upstream.ok && upstream.status !== 206) {
+      logger.warn({ upstreamStatus: upstream.status, refreshedToken }, "dubbed: upstream returned non-success stream status");
+      res.status(502).json({ error: `foupix upstream ${upstream.status}` }); return;
+    }
+
+    const contentType = upstream.headers.get("content-type") || "video/mp4";
+    const contentLength = upstream.headers.get("content-length");
+    const contentRange = upstream.headers.get("content-range");
+    const acceptRanges = upstream.headers.get("accept-ranges") || "bytes";
+    res.status(upstream.status);
+    res.setHeader("Content-Type", contentType);
+    res.setHeader("Cache-Control", "no-store");
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Access-Control-Expose-Headers", "Accept-Ranges, Content-Length, Content-Range, Content-Type");
+    if (contentLength) res.setHeader("Content-Length", contentLength);
+    if (contentRange) res.setHeader("Content-Range", contentRange);
+    res.setHeader("Accept-Ranges", acceptRanges);
+
+    if (!upstream.body) { res.end(); return; }
+    const { Readable } = await import("stream");
+    const readable = Readable.fromWeb(upstream.body as any);
+    readable.on("error", () => { if (!res.destroyed) res.end(); });
+    readable.pipe(res);
+  } catch (e: any) {
+    if (!res.headersSent) res.status(502).json({ error: String(e?.message || e) });
+  }
+});
+
+function detectDubbedImageMime(buffer: Buffer): string | null {
+  if (
+    buffer.length >= 8 &&
+    buffer.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))
+  ) return "image/png";
+  if (buffer.length >= 3 && buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) {
+    return "image/jpeg";
+  }
+  const signature = buffer.subarray(0, 6).toString("ascii");
+  if (signature === "GIF87a" || signature === "GIF89a") return "image/gif";
+  if (
+    buffer.length >= 12 &&
+    buffer.subarray(0, 4).toString("ascii") === "RIFF" &&
+    buffer.subarray(8, 12).toString("ascii") === "WEBP"
+  ) return "image/webp";
+  return null;
+}
+
+// ── GET /api/dubbed/img?f= → binary-safe Arabic-Toons poster proxy ──
+router.get("/dubbed/img", async (req, res) => {
+  const f = (req.query.f as string || "").trim();
+  if (!f || !/^[\w\-\.]+$/.test(f)) { res.status(400).send("bad"); return; }
+
+  const atImgUrl = `${AT_BASE}/images/anime/${f}`;
+  const sendImage = (buffer: Buffer): boolean => {
+    const mime = detectDubbedImageMime(buffer);
+    if (!mime) return false;
+    res.setHeader("Content-Type", mime);
+    res.setHeader("Cache-Control", "public, max-age=86400");
+    res.send(buffer);
+    return true;
+  };
+
+  // Fetch raw bytes directly; cfGet returns text and corrupts binary PNG/JPEG data.
+  try {
+    const direct = await fetch(atImgUrl, {
+      headers: {
+        "User-Agent": BROWSER_UA,
+        Referer: `${AT_BASE}/`,
+        Accept: "image/*,*/*",
+      },
+      signal: AbortSignal.timeout(8000),
+    });
+    if (direct.ok && sendImage(Buffer.from(await direct.arrayBuffer()))) return;
+  } catch { /* try the StarCima image proxy */ }
+
+  try {
+    const scImgUrl = `${SC_BASE}/api/dubbed/img?f=${encodeURIComponent(f)}`;
+    const r = await fetch(scImgUrl, {
+      headers: {
+        "User-Agent": BROWSER_UA,
+        Referer: `${SC_BASE}/dubbed`,
+        Accept: "image/*,*/*",
+      },
+      signal: AbortSignal.timeout(8000),
+    });
+    if (r.ok && sendImage(Buffer.from(await r.arrayBuffer()))) return;
+  } catch { /* use the existing CF fallback below */ }
+
+  try {
+    const cfImage = await cfGet(atImgUrl, `${AT_BASE}/`, 8000);
+    if (cfImage && sendImage(Buffer.from(cfImage, "binary"))) return;
+    res.status(404).send("not found");
+  } catch {
+    res.status(502).send("proxy error");
+  }
+});
+// ════════════════════════════════════════════════════════════════════════════
+// aw-dubbed routes — أنيميشن مدبلج (aw_links table in Supabase)
+// ════════════════════════════════════════════════════════════════════════════
+
+interface AwCatalogItem {
+  key: string;
+  title: string;
+  titleAr: string | null;
+  poster: string | null;
+  seasons: { label: string; animeId: string }[];
+}
+
+interface AwSourceTitle {
+  animeId: string;
+  title: string;
+  titleAr: string | null;
+  anilistId: number | null;
+}
+
+let _awCatalog: AwCatalogItem[] | null = null;
+let _awCatalogTs = 0;
+const AW_TTL = 2 * 60 * 60_000; // 2 ساعات
+let _awLoadPromise: Promise<AwCatalogItem[]> | null = null;
+const AW_DISK_CACHE_FILE = _dcJoin(_DC_DIR, "aw-catalog.json");
+const AW_DISK_TTL = 7 * 24 * 60 * 60_000;
+let _awPosterHydrationPromise: Promise<void> | null = null;
+
+function readAwDiskCatalog(): AwCatalogItem[] | null {
+  try {
+    if (!_dcExists(AW_DISK_CACHE_FILE)) return null;
+    const cached = JSON.parse(_dcRead(AW_DISK_CACHE_FILE, "utf8"));
+    if (!cached?._ts || Date.now() - Number(cached._ts) > AW_DISK_TTL) return null;
+    if (!Array.isArray(cached.data)) return null;
+    return cached.data.filter((item: any) =>
+      item && typeof item.key === "string" && typeof item.title === "string" && Array.isArray(item.seasons)
+    ) as AwCatalogItem[];
+  } catch {
+    return null;
+  }
+}
+
+function writeAwDiskCatalog(catalog: AwCatalogItem[]): void {
+  try { _dcWrite(AW_DISK_CACHE_FILE, JSON.stringify({ data: catalog, _ts: Date.now() }), "utf8"); } catch {}
+}
+
+function hydrateAwPostersInBackground(catalog: AwCatalogItem[], titles: string[]): void {
+  if (!titles.length || _awPosterHydrationPromise) return;
+  _awPosterHydrationPromise = fetchFallbackPosters(titles).then(posterMap => {
+    for (const item of catalog) {
+      const poster = posterMap.get(awBaseTitle(item.title));
+      if (poster) item.poster = poster;
+    }
+    writeAwDiskCatalog(catalog);
+  }).catch(() => {}).finally(() => { _awPosterHydrationPromise = null; });
+}
+
+function awPoster(anilistId: number | null | undefined): string | null {
+  if (!Number.isFinite(anilistId) || Number(anilistId) <= 0) return null;
+  return `https://img.anili.st/media/${anilistId}`;
+}
+
+// ── Poster caches (عمر الكاش = 24 ساعة مع السيرفر) ──
+const _tmdbPosterCache = new Map<string, string | null>();
+const _tvMazePosterCache = new Map<string, string | null>();
+const TMDB_KEY = "8265bd1679663a7ea12ac168da84d2e8";
+const TMDB_IMG = "https://image.tmdb.org/t/p/w300";
+
+/** احذف لاحقة الموسم/الجزء والوسوم التي لا تدخل في مطابقة العمل الأساسي. */
+function awBaseTitle(title: string): string {
+  return title
+    .replace(/[_-]+/g, " ")
+    .replace(/\s*[\[(]\s*(?:season|saison|الموسم|موسم|part|الجزء|جزء)\s*[-_.#]?\s*\d+\s*[\])]\s*/gi, " ")
+    .replace(/\s+(?:season|saison|الموسم|موسم)\s*[-_.#]?\s*\d+\s*(?:dub(?:bed)?|مدبلج)?$/i, "")
+    .replace(/\s+(?:part|الجزء|جزء)\s*[-_.#]?\s*\d+\s*$/i, "")
+    .replace(/\s+s\s*[-_.#]?\s*\d+\s*$/i, "")
+    .replace(/\s+(?:dub(?:bed)?|مدبلج)$/i, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+
+// Some older western-animation rows were imported into aw_links with the
+// generic content_type=anime, while newer seasons use content_type=dubbed.
+// Keep this compatibility scope explicit so ordinary Japanese anime does not
+// leak into the Arabic dubbed catalogue.
+const LEGACY_ANIMATION_KEYS = new Set(["invincible", "castlevania"]);
+function isLegacyAnimationSeries(series: string): boolean {
+  return LEGACY_ANIMATION_KEYS.has(
+    awBaseTitle(series).toLocaleLowerCase("en-US").replace(/[^a-z0-9]+/gi, " ").trim(),
+  );
+}
+
+function awSeasonLabel(title: string, animeId: string): string {
+  const value = `${title} ${animeId}`;
+  const season = value.match(/(?:season|saison|الموسم|موسم)\s*[-_.#]?\s*(\d+)/i)
+    || value.match(/\bs\s*[-_.#]?\s*(\d+)\b/i);
+  if (season) return `Season ${season[1]}`;
+  const part = value.match(/(?:part|الجزء|جزء)\s*[-_.#]?\s*(\d+)/i);
+  if (part) return `Part ${part[1]}`;
+  return "الحلقات";
+}
+
+function awGroupKey(title: string): string {
+  return awBaseTitle(title)
+    .toLocaleLowerCase("en-US")
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .trim();
+}
+
+function awTitleScore(title: string): number {
+  return awSeasonLabel(title, "") !== "الحلقات" ? 2 : title.trim() ? 1 : 0;
+}
+
+/** ابحث عن بوستر في TMDB بالعنوان */
+async function tmdbPosterByTitle(title: string): Promise<string | null> {
+  const base = awBaseTitle(title);
+  if (_tmdbPosterCache.has(base)) return _tmdbPosterCache.get(base) ?? null;
+  try {
+    const url = `https://api.themoviedb.org/3/search/multi?api_key=${TMDB_KEY}&query=${encodeURIComponent(base)}&language=en-US&page=1`;
+    const r = await fetch(url, { signal: AbortSignal.timeout(6000) });
+    if (!r.ok) { _tmdbPosterCache.set(base, null); return null; }
+    const data = await r.json();
+    const hit = (data.results as any[] || []).find((h: any) =>
+      h.poster_path && (h.media_type === "tv" || h.media_type === "movie")
+    );
+    const poster = hit ? `${TMDB_IMG}${hit.poster_path}` : null;
+    _tmdbPosterCache.set(base, poster);
+    return poster;
+  } catch { _tmdbPosterCache.set(base, null); return null; }
+}
+
+/** TVMaze fallback لا يحتاج مفتاحاً، ويفيد خصوصاً في الأعمال الغربية المدبلجة. */
+async function tvMazePosterByTitle(title: string): Promise<string | null> {
+  const base = awBaseTitle(title);
+  if (_tvMazePosterCache.has(base)) return _tvMazePosterCache.get(base) ?? null;
+  try {
+    const r = await fetch(`https://api.tvmaze.com/search/shows?q=${encodeURIComponent(base)}`, {
+      signal: AbortSignal.timeout(6000),
+    });
+    if (!r.ok) { _tvMazePosterCache.set(base, null); return null; }
+    const data = await r.json();
+    const normalized = base.toLocaleLowerCase("en-US");
+    const ranked = (Array.isArray(data) ? data : [])
+      .filter((row: any) => row?.show?.image?.original || row?.show?.image?.medium)
+      .sort((a: any, b: any) => {
+        const an = String(a?.show?.name || "").toLocaleLowerCase("en-US");
+        const bn = String(b?.show?.name || "").toLocaleLowerCase("en-US");
+        return Number(bn === normalized) - Number(an === normalized);
+      });
+    const poster = ranked[0]?.show?.image?.original || ranked[0]?.show?.image?.medium || null;
+    _tvMazePosterCache.set(base, poster);
+    return poster;
+  } catch { _tvMazePosterCache.set(base, null); return null; }
+}
+
+async function posterByTitle(title: string): Promise<string | null> {
+  const tmdb = await tmdbPosterByTitle(title);
+  return tmdb || await tvMazePosterByTitle(title);
+}
+
+function awFallbackPoster(title: string): string {
+  const label = awBaseTitle(title).slice(0, 42) || "Anime NOVA";
+  return `https://placehold.co/300x450/111827/FFFFFF/png?text=${encodeURIComponent(label)}`;
+}
+
+/** جلب البوسترات للعناوين التي لا تحمل anilist_id (تشغيل متوازٍ بحد أقصى 8). */
+async function fetchFallbackPosters(titles: string[]): Promise<Map<string, string | null>> {
+  const unique = [...new Set(titles.map(awBaseTitle))];
+  const results = new Map<string, string | null>();
+  // معالجة دُفعات بمعدل 8 طلبات متوازية
+  for (let i = 0; i < unique.length; i += 8) {
+    const batch = unique.slice(i, i + 8);
+    const posters = await Promise.all(batch.map(t => posterByTitle(t)));
+    batch.forEach((t, idx) => results.set(t, posters[idx]));
+    if (i + 8 < unique.length) await new Promise(r => setTimeout(r, 250)); // تأخير بسيط
+  }
+  return results;
+}
+
+/** جلب كل السلاسل من جدول dubbed_anim_links (الجديد) */
+async function fetchDalCatalog(
+  sbUrl: string, sbKey: string
+): Promise<Map<string, { series_name: string; series_name_ar: string | null }>> {
+  const result = new Map<string, { series_name: string; series_name_ar: string | null }>();
+  let offset = 0;
+  const batch = 1000;
+  while (true) {
+    try {
+      const url = `${sbUrl}/rest/v1/dubbed_anim_links?select=series_id,series_name,series_name_ar&ep_number=not.is.null&link=not.is.null&link=neq.&order=series_id.asc&limit=${batch}&offset=${offset}`;
+      const r = await fetch(url, {
+        headers: { apikey: sbKey, Authorization: `Bearer ${sbKey}` },
+        signal: AbortSignal.timeout(15000),
+      });
+      if (!r.ok) break;
+      const rows: { series_id: string; series_name: string; series_name_ar: string | null }[] = await r.json();
+      if (!Array.isArray(rows) || !rows.length) break;
+      for (const row of rows) {
+        if (row.series_id && !result.has(row.series_id)) {
+          result.set(row.series_id, { series_name: row.series_name || row.series_id, series_name_ar: row.series_name_ar || null });
+        }
+      }
+      if (rows.length < batch) break;
+      offset += batch;
+    } catch { break; }
+  }
+  return result;
+}
+
+async function buildAwCatalog(): Promise<AwCatalogItem[]> {
+  const SB_URL = (process.env.SUPABASE_URL || "").replace(/\/$/, "");
+  const SB_KEY = process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || "";
+  if (!SB_URL || !SB_KEY) return [];
+
+  const sources = new Map<string, AwSourceTitle>();
+  const batchSize = 1000;
+
+  // ── جلب aw_links + dubbed_anim_links بالتوازي ──
+  const [, dalMap] = await Promise.all([
+    // aw_links: احتفظ بعنوان واحد موثوق لكل anime_id، مع تفضيل الاسم الذي
+    // يحتوي على رقم موسم إذا كان المصدر يعيد أكثر من نسخة للمعرف نفسه.
+    (async () => {
+      let offset = 0;
+      while (true) {
+        try {
+          const url = `${SB_URL}/rest/v1/aw_links?select=anime_id,anime_name,anilist_id,content_type&or=(content_type.eq.dubbed,anime_id.ilike.*Invincible*,anime_name.ilike.*Invincible*,anime_id.ilike.*Castlevania*,anime_name.ilike.*Castlevania*)&ep_number=not.is.null&link=not.is.null&link=neq.&order=anime_id.asc&limit=${batchSize}&offset=${offset}`;
+          const r = await fetch(url, {
+            headers: { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}` },
+            signal: AbortSignal.timeout(15000),
+          });
+          if (!r.ok) break;
+          const rows: {
+            anime_id: string;
+            anime_name: string;
+            anilist_id: number | null;
+            content_type?: string | null;
+          }[] = await r.json();
+          if (!Array.isArray(rows) || !rows.length) break;
+          for (const row of rows) {
+            const animeId = String(row.anime_id ?? "");
+            if (!animeId.trim()) continue;
+            // The legacy OR clause is intentionally broad for PostgREST, but
+            // only exact legacy series may use the old anime content type.
+            if (row.content_type !== "dubbed" && !isLegacyAnimationSeries(animeId)) continue;
+            const title = String(row.anime_name || animeId);
+            const previous = sources.get(animeId);
+            if (!previous || awTitleScore(title) > awTitleScore(previous.title)) {
+              sources.set(animeId, {
+                animeId,
+                title,
+                titleAr: previous?.titleAr ?? null,
+                anilistId: row.anilist_id == null ? (previous?.anilistId ?? null) : Number(row.anilist_id),
+              });
+            } else if (previous.anilistId == null && row.anilist_id != null) {
+              previous.anilistId = Number(row.anilist_id);
+            }
+          }
+          if (rows.length < batchSize) break;
+          offset += batchSize;
+        } catch { break; }
+      }
+    })(),
+    // dubbed_anim_links: يُعاد كـ Map
+    fetchDalCatalog(SB_URL, SB_KEY),
+  ]);
+
+  // دمج: أضف سلاسل dubbed_anim_links غير الموجودة في aw_links، أو استكمل
+  // العنوان العربي للمعرف الموجود في الجدول الأول.
+  for (const [sid, info] of dalMap) {
+    const existing = sources.get(sid);
+    if (!existing) {
+      sources.set(sid, {
+        animeId: sid,
+        title: info.series_name || sid,
+        titleAr: info.series_name_ar || null,
+        anilistId: null,
+      });
+    } else if (!existing.titleAr && info.series_name_ar) {
+      existing.titleAr = info.series_name_ar;
+    }
+  }
+
+  // اجمع نسخ العمل الواحد (مثل Invincible Season 1/2/3) في بطاقة واحدة.
+  // لا نعتمد على عنوان ثابت أو استثناء لعمل بعينه؛ كل ما يهم هو إزالة لاحقة
+  // الموسم/الجزء من الاسم وبناء season لكل anime_id فعلي.
+  const groups = new Map<string, {
+    key: string;
+    title: string;
+    titleAr: string | null;
+    seasons: { label: string; animeId: string }[];
+    anilistIds: number[];
+  }>();
+
+  for (const source of sources.values()) {
+    const baseTitle = awBaseTitle(source.title) || source.title || source.animeId;
+    const groupKey = awGroupKey(baseTitle) || `id:${source.animeId}`;
+    let group = groups.get(groupKey);
+    if (!group) {
+      group = {
+        key: source.animeId,
+        title: baseTitle,
+        titleAr: source.titleAr,
+        seasons: [],
+        anilistIds: [],
+      };
+      groups.set(groupKey, group);
+    } else if (!group.titleAr && source.titleAr) {
+      group.titleAr = source.titleAr;
+    }
+
+    const label = awSeasonLabel(source.title, source.animeId);
+    if (!group.seasons.some(season => season.animeId === source.animeId)) {
+      group.seasons.push({ label, animeId: source.animeId });
+    }
+    if (source.anilistId && Number.isFinite(source.anilistId) && !group.anilistIds.includes(source.anilistId)) {
+      group.anilistIds.push(source.anilistId);
+    }
+  }
+
+  // A base AnimeWitcher ID such as "Invincible" represents season 1 when
+  // the same work also has numbered seasons. Do not relabel standalone
+  // titles that simply have multiple alternate IDs.
+  for (const group of groups.values()) {
+    if (
+      group.seasons.length > 1 &&
+      group.seasons.some(season => season.label !== "الحلقات")
+    ) {
+      for (const season of group.seasons) {
+        if (season.label === "الحلقات") season.label = "Season 1";
+      }
+    }
+  }
+
+  const items: AwCatalogItem[] = [...groups.values()].map(group => {
+    group.seasons.sort((a, b) => {
+      const an = Number(a.label.match(/\d+/)?.[0] || 0);
+      const bn = Number(b.label.match(/\d+/)?.[0] || 0);
+      return an - bn || a.label.localeCompare(b.label, "en-US");
+    });
+    return {
+      key: group.key,
+      title: group.title,
+      titleAr: group.titleAr,
+      poster: awPoster(group.anilistIds[0]),
+      seasons: group.seasons,
+    };
+  });
+
+  // لا تنتظر TMDB/TVMaze لكل الكتالوج؛ أعد النتائج مع fallback فوراً، ثم
+  // حدّث البوسترات الحقيقية في الخلفية حتى لا يتأخر أول فتح للقسم.
+  const needPosters = items.filter(item => !item.poster).map(item => item.title);
+  for (const item of items) {
+    if (!item.poster) item.poster = awFallbackPoster(item.title);
+  }
+  items.sort((a, b) => a.title.localeCompare(b.title, "en-US"));
+  writeAwDiskCatalog(items);
+  hydrateAwPostersInBackground(items, needPosters);
+
+  logger.info({ count: items.length }, "[aw-dubbed] catalog built");
+  return items;
+}
+
+function refreshAwCatalog(): Promise<AwCatalogItem[]> {
+  if (_awLoadPromise) return _awLoadPromise;
+  _awLoadPromise = buildAwCatalog().then(c => {
+    _awCatalog = c;
+    _awCatalogTs = Date.now();
+    return c;
+  }).catch(() => _awCatalog || []).finally(() => { _awLoadPromise = null; });
+  return _awLoadPromise;
+}
+
+async function getAwCatalog(): Promise<AwCatalogItem[]> {
+  if (_awCatalog && Date.now() - _awCatalogTs < AW_TTL) return _awCatalog;
+  const diskCatalog = readAwDiskCatalog();
+  if (diskCatalog?.length) {
+    _awCatalog = diskCatalog;
+    _awCatalogTs = Date.now();
+    void refreshAwCatalog();
+    return diskCatalog;
+  }
+  return refreshAwCatalog();
+}
+
+// دفء الكاش عند بدء السيرفر
+setTimeout(() => { getAwCatalog().catch(() => {}); }, 6000);
+
+const AW_PAGE_SIZE = 36;
+
+function awSearchResults(catalog: AwCatalogItem[], query: string): AwCatalogItem[] {
+  const q = query.toLocaleLowerCase("en-US");
+  const results: AwCatalogItem[] = [];
+
+  for (const item of catalog) {
+    const matchingSeasons = item.seasons.filter(season => {
+      const haystack = [
+        item.title,
+        item.titleAr || "",
+        season.label,
+      ].join(" ").toLocaleLowerCase("en-US");
+      return haystack.includes(q);
+    });
+    if (!matchingSeasons.length) continue;
+
+    // عند البحث، أعد كل موسم كسجل مستقل حتى لا تظهر بطاقة واحدة باسم عام
+    // بينما يضطر المستخدم لاكتشاف الأجزاء من صفحة التفاصيل.
+    if (item.seasons.length > 1 || matchingSeasons.some(season => season.label !== "الحلقات")) {
+      for (const season of matchingSeasons) {
+        results.push({
+          ...item,
+          key: `${item.key}::${season.animeId}`,
+          title: `${item.title} — ${season.label}`,
+          titleAr: item.titleAr ? `${item.titleAr} — ${season.label}` : null,
+          seasons: [season],
+        });
+      }
+    } else {
+      results.push(item);
+    }
+  }
+  return results;
+}
+
+// ── GET /api/aw-dubbed/catalog?page=N&q=search ──
+router.get("/aw-dubbed/catalog", async (req, res) => {
+  const page = Math.max(1, parseInt(req.query.page as string || "1", 10) || 1);
+  const q = (req.query.q as string || "").trim();
+  try {
+    let catalog = await getAwCatalog();
+    if (q.length >= 2) {
+      catalog = awSearchResults(catalog, q);
+      // Resolve only the small searched subset on a cold process; the full
+      // catalog is hydrated in the background and remains disk-cached.
+      const posterBackfill = catalog.filter(item => item.poster?.includes("placehold.co")).slice(0, 8);
+      if (posterBackfill.length) {
+        await Promise.all(posterBackfill.map(async item => {
+          const poster = await posterByTitle(item.title);
+          if (poster) item.poster = poster;
+        }));
+      }
+    }
+    const totalPages = Math.max(1, Math.ceil(catalog.length / AW_PAGE_SIZE));
+    const results = catalog.slice((page - 1) * AW_PAGE_SIZE, page * AW_PAGE_SIZE);
+    res.setHeader("Cache-Control", "public, max-age=300");
+    res.json({ results, page, totalPages, total: catalog.length });
+  } catch {
+    res.status(502).json({ error: "failed to load catalog" });
+  }
+});
+
+// ── GET /api/aw-dubbed/episodes?series=anime_id ──
+router.get("/aw-dubbed/episodes", async (req, res) => {
+  // Do not trim the key: legacy AnimeWitcher IDs can intentionally begin or
+  // end with whitespace, and Supabase stores that value verbatim.
+  const series = String(req.query.series || "");
+  if (!series.trim()) { res.json({ episodes: [] }); return; }
+
+  const SB_URL = (process.env.SUPABASE_URL || "").replace(/\/$/, "");
+  const SB_KEY = process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || "";
+  if (!SB_URL || !SB_KEY) { res.json({ episodes: [] }); return; }
+
+  try {
+    // جلب من الجدولين بالتوازي — dubbed_anim_links أولاً (أحدث) ثم aw_links كـ fallback
+    const [dalR, awR] = await Promise.all([
+      fetch(`${SB_URL}/rest/v1/dubbed_anim_links?select=ep_number&series_id=eq.${encodeURIComponent(series)}&order=ep_number.asc&limit=2000`, {
+        headers: { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}` },
+        signal: AbortSignal.timeout(10000),
+      }).then(r => r.ok ? r.json() as Promise<{ ep_number: number }[]> : [] as { ep_number: number }[]).catch(() => [] as { ep_number: number }[]),
+      fetch(`${SB_URL}/rest/v1/aw_links?select=ep_number&anime_id=eq.${encodeURIComponent(series)}${isLegacyAnimationSeries(series) ? "" : "&content_type=eq.dubbed"}&order=ep_number.asc&limit=2000`, {
+        headers: { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}` },
+        signal: AbortSignal.timeout(10000),
+      }).then(r => r.ok ? r.json() as Promise<{ ep_number: number }[]> : [] as { ep_number: number }[]).catch(() => [] as { ep_number: number }[]),
+    ]);
+
+    // دمج: dubbed_anim_links أولاً، ثم aw_links للتكملة
+    const rawRows: { ep_number: number }[] = [
+      ...(Array.isArray(dalR) ? dalR : []),
+      ...(Array.isArray(awR)  ? awR  : []),
+    ];
+
+    const seen = new Set<number>();
+    const episodes: { number: number }[] = [];
+    for (const row of rawRows) {
+      if (typeof row.ep_number === "number" && !seen.has(row.ep_number)) {
+        seen.add(row.ep_number);
+        episodes.push({ number: row.ep_number });
+      }
+    }
+    // Supabase may lag behind AnimeWitcher's Firestore import. Merge the live
+    // list so a failed sync cannot make the mobile detail page look empty.
+    if (episodes.length === 0 || episodes.length < 3) {
+      for (const number of await fetchAwFirestoreEpisodes(series)) {
+        if (!seen.has(number)) {
+          seen.add(number);
+          episodes.push({ number });
+        }
+      }
+    }
+    episodes.sort((a, b) => a.number - b.number);
+    res.setHeader("Cache-Control", "public, max-age=1800");
+    res.json({ episodes });
+  } catch { res.json({ episodes: [] }); }
+});
+
+// ── GET /api/aw-dubbed/watch-src?series=anime_id&ep=N ──
+router.get("/aw-dubbed/watch-src", async (req, res) => {
+  // Keep the exact AnimeWitcher/Supabase ID; trimming breaks titles imported
+  // with a leading space and makes valid episodes look unavailable.
+  const series = String(req.query.series || "");
+  const ep     = Math.max(1, parseInt(req.query.ep as string || "1", 10) || 1);
+  if (!series.trim()) { res.status(400).json({ error: "missing series" }); return; }
+
+  const SB_URL = (process.env.SUPABASE_URL || "").replace(/\/$/, "");
+  const SB_KEY = process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || "";
+  if (!SB_URL || !SB_KEY) { res.status(502).json({ error: "not configured" }); return; }
+
+  try {
+    // جلب من الجدولين بالتوازي — dubbed_anim_links أولاً ثم aw_links
+    // ملاحظة: order=quality.desc يفرز نصياً (720p > 480p > 1080p) — نفرز بعدها رقمياً في الكود
+    const [dalRows, awRows] = await Promise.all([
+      fetch(`${SB_URL}/rest/v1/dubbed_anim_links?select=server,quality,link&series_id=eq.${encodeURIComponent(series)}&ep_number=eq.${ep}&limit=30`, {
+        headers: { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}` },
+        signal: AbortSignal.timeout(10000),
+      }).then(r => r.ok ? r.json() as Promise<{ server: string; quality: string; link: string }[]> : [] as { server: string; quality: string; link: string }[]).catch(() => [] as { server: string; quality: string; link: string }[]),
+      fetch(`${SB_URL}/rest/v1/aw_links?select=server,quality,link&anime_id=eq.${encodeURIComponent(series)}&ep_number=eq.${ep}${isLegacyAnimationSeries(series) ? "" : "&content_type=eq.dubbed"}&limit=30`, {
+        headers: { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}` },
+        signal: AbortSignal.timeout(10000),
+      }).then(r => r.ok ? r.json() as Promise<{ server: string; quality: string; link: string }[]> : [] as { server: string; quality: string; link: string }[]).catch(() => [] as { server: string; quality: string; link: string }[]),
+    ]);
+
+    // وزن الجودة الرقمي للفرز الصحيح
+    function qualityWeight(q: string): number {
+      const n = parseInt(q.replace(/\D/g, "") || "0", 10);
+      return n; // 1080 > 720 > 480 > 360
+    }
+
+    // دمج: dubbed_anim_links أولاً، ثم aw_links — مع تخطي KF (روابطه محذوفة)
+    const seenSrv = new Set<string>();
+    const rows: { server: string; quality: string; link: string }[] = [];
+    for (const r of [...(Array.isArray(dalRows) ? dalRows : []), ...(Array.isArray(awRows) ? awRows : [])]) {
+      if (r.server === "KF") continue; // KrakenFiles: كل روابطه 404 — تخطي مباشر
+      const k = `${r.server}|${r.link}`;
+      if (!seenSrv.has(k)) { seenSrv.add(k); rows.push(r); }
+    }
+    // A missing DB row must not make a real AW episode unplayable. Fetch the
+    // current server documents directly when the cached tables have no link.
+    if (!rows.length) {
+      rows.push(...await fetchAwFirestoreServers(series, ep));
+    }
+    // فرز: 1080p أولاً ثم 720p ثم 480p
+    rows.sort((a, b) => qualityWeight(b.quality) - qualityWeight(a.quality));
+    if (!rows.length) { res.status(404).json({ error: "no sources found" }); return; }
+
+    function serverLabel(srv: string): string {
+      if (srv === "PD")  return "Pixeldrain";
+      if (srv === "MF")  return "Mediafire";
+      if (srv === "MF2") return "Mediafire";
+      if (srv === "VT")  return "Vidtape";
+      return srv;
+    }
+
+    /** لفّ رابط مباشر عبر video-proxy حتى يلتقطه RiftPlayer isDirect branch */
+    function wrapProxy(directUrl: string): string {
+      return `/api/anime/video-proxy?url=${encodeURIComponent(directUrl)}&ref=${encodeURIComponent("https://animenovaa.duckdns.org")}`;
+    }
+
+    /** تحويل رابط أي خادم إلى رابط تشغيل؛ null = تخطي */
+    async function toPlayUrl(link: string, srv: string): Promise<string | null> {
+      // KrakenFiles — كل الروابط 404 (محذوفة) → تخطي
+      if (srv === "KF") return null;
+      // Pixeldrain: رابط مباشر — RiftPlayer يتعامل معه عبر CORS_DIRECT_CDN (لا حاجة لـ proxy)
+      if (srv === "PD" || link.includes("pixeldrain.com/u/")) {
+        const id = link.split("/u/").pop()?.split("?")[0];
+        if (id) return `https://pixeldrain.com/api/file/${id}`;
+      }
+      // Mediafire: لا نحلّ رابط CDN الآن (ينتهي صلاحيته) — نُمرّر صفحة MF عبر mf-stream
+      // الـ endpoint يحلّ الرابط وقت التشغيل الفعلي مع TTL cache
+      if (srv === "MF" || srv === "MF2" || link.includes("mediafire.com")) {
+        if (!link.includes("mediafire.com")) return null;
+        return `/api/aw-dubbed/mf-stream?link=${encodeURIComponent(link)}`;
+      }
+      return wrapProxy(link);
+    }
+
+    // استخراج الروابط بشكل متوازٍ
+    const resolved = await Promise.all(
+      rows.map(async row => {
+        const rawUrl = await toPlayUrl(row.link, row.server);
+        if (!rawUrl) return null;
+        return {
+          quality: row.quality || "720p",
+          name:    serverLabel(row.server),
+          rawUrl,
+          hlsUrl: null,
+        };
+      })
+    );
+    const allSources = resolved.filter(Boolean) as { quality: string; name: string; rawUrl: string; hlsUrl: null }[];
+
+    if (!allSources.length) {
+      res.status(404).json({ error: "لا توجد مصادر متاحة لهذه الحلقة حالياً" });
+      return;
+    }
+
+    res.setHeader("Cache-Control", "no-cache");
+    res.json({ allSources, rawUrl: allSources[0]?.rawUrl ?? null, hlsUrl: null });
+  } catch (e: any) {
+    res.status(502).json({ error: String(e?.message || e) });
+  }
+});
+
+// ── mf-stream: يحلّ رابط Mediafire CDN وقت التشغيل ويبثّ الفيديو ────────────
+// لا نحلّ رابط CDN عند scrape (ينتهي صلاحيته) — نؤجّل الحلّ لطلب التشغيل الفعلي
+router.get("/aw-dubbed/mf-stream", async (req, res) => {
+  const link = (req.query.link as string || "").trim();
+  if (!link || !link.includes("mediafire.com")) {
+    res.status(400).json({ error: "invalid mediafire link" }); return;
+  }
+
+  const cdnUrl = await resolveMfUrl(link);
+  if (!cdnUrl) { res.status(502).json({ error: "تعذّر استخراج رابط Mediafire" }); return; }
+
+  const hdrs: Record<string, string> = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+    "Accept": "video/mp4,video/*,*/*;q=0.8",
+  };
+  const range = req.headers.range;
+  if (range) hdrs["Range"] = range;
+
+  try {
+    const r = await fetch(cdnUrl, { headers: hdrs, signal: AbortSignal.timeout(30000) });
+
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Access-Control-Allow-Headers", "Range");
+    res.setHeader("Content-Type", r.headers.get("content-type") || "video/mp4");
+    const cl = r.headers.get("content-length"); if (cl) res.setHeader("Content-Length", cl);
+    const cr = r.headers.get("content-range");  if (cr) res.setHeader("Content-Range", cr);
+    const ar = r.headers.get("accept-ranges");  if (ar) res.setHeader("Accept-Ranges", ar);
+    res.status(r.status);
+
+    if (!r.body) { res.end(); return; }
+    const { Readable } = await import("node:stream");
+    const nodeStream = Readable.fromWeb(r.body as any);
+    nodeStream.pipe(res);
+    req.on("close", () => nodeStream.destroy());
+  } catch (e: any) {
+    if (!res.headersSent) res.status(502).json({ error: String(e?.message) });
+  }
+});
+
+export default router;

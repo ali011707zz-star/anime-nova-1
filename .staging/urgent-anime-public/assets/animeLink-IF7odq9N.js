@@ -1,0 +1,1 @@
+function s(t){const e=new URLSearchParams;(t.idSource==="mal"||t.idSource==="kitsu")&&e.set("src",t.idSource);const r=t.title?.english||t.title?.romaji;r?.trim()&&e.set("title",r.trim().slice(0,160));const i=e.toString();return i?`?${i}`:""}function o(t){return`/anime/${t.id}${s(t)}`}function n(t){return`/episodes/${t.id}${s(t)}`}export{n as a,o as b};

@@ -1,0 +1,17 @@
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item>
+        <shape>
+            <gradient
+                android:angle="0"
+                android:endColor="#09090B"
+                android:startColor="#2A1244" />
+        </shape>
+    </item>
+    <item
+        android:bottom="50dp"
+        android:drawable="@drawable/ic_nova_tv"
+        android:gravity="center"
+        android:left="135dp"
+        android:right="135dp"
+        android:top="50dp" />
+</layer-list>

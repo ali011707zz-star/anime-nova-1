@@ -1,0 +1,20 @@
+ M artifacts/anime-scraper/src/lib/appToken.ts
+ M artifacts/anime-scraper/src/pages/Watch.tsx
+ M artifacts/api-server/src/routes/anime.ts
+ M artifacts/nova-mobile/app/(tabs)/aw-dubbed.tsx
+ M artifacts/nova-mobile/app/_layout.tsx
+ M artifacts/nova-mobile/app/watch.tsx
+ M artifacts/nova-mobile/components/index.ts
+ M artifacts/nova-mobile/utils/downloadManager.ts
+?? artifacts/nova-mobile/components/RiftPlayer.tsx.bak-controls-20260808-192026
+?? backups/deploy-download-fix-20260810-104145/
+?? backups/deploy-download-fix-20260810-104340/
+?? backups/deploy-shirayuki-20260809-222457/
+?? backups/deploy-shirayuki-20260810-083132/
+?? backups/disable-ak-ax-ki-20260810-100238/
+?? backups/enable-anime-sources-20260810-093143/
+?? backups/pre-replit-sync-20260810-140732/
+?? backups/search-fix-20260808-181428/
+?? backups/shirayuki-integration-20260809/
+?? backups/shirayuki-provider-split-20260809-225434/
+?? backups/source-fix-20260809-170827/

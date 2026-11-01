@@ -1,0 +1,1 @@
+import{O as t,u as r,r as i,j as s,N as c}from"./vendor-AOaYfDDG.js";function m(){const e=t(),[,a]=r();return i.useEffect(()=>{e.id?a(`/watch?anime=${e.id}&ep=1`,{replace:!0}):a("/",{replace:!0})},[e.id]),s.jsx("div",{className:"bg-black min-h-screen flex items-center justify-center",children:s.jsx(c,{className:"w-10 h-10 text-primary animate-spin"})})}export{m as default};

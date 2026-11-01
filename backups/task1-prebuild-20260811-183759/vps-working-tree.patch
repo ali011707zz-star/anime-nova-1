@@ -1,0 +1,1356 @@
+diff --git a/artifacts/anime-scraper/src/lib/appToken.ts b/artifacts/anime-scraper/src/lib/appToken.ts
+index 527d2f65..77cb0ec2 100644
+--- a/artifacts/anime-scraper/src/lib/appToken.ts
++++ b/artifacts/anime-scraper/src/lib/appToken.ts
+@@ -28,10 +28,10 @@ async function fetchToken(): Promise<string> {
+  * أعد التوكن الحالي (أو اجلب واحداً جديداً إذا انتهى أو قارب على الانتهاء).
+  * آمن للاستخدام المتزامن — يدمج الطلبات الجارية.
+  */
+-export async function getAppToken(): Promise<string> {
++export async function getAppToken(forceRefresh = false): Promise<string> {
+   const now = Math.floor(Date.now() / 1000);
+   // إذا كان التوكن صالحاً لأكثر من 60 ثانية → أعده فوراً
+-  if (_cache && _cache.exp - now > 60) return _cache.token;
++  if (!forceRefresh && _cache && _cache.exp - now > 60) return _cache.token;
+ 
+   // دمج الطلبات المتزامنة
+   if (_inflight) return _inflight;
+diff --git a/artifacts/anime-scraper/src/pages/Watch.tsx b/artifacts/anime-scraper/src/pages/Watch.tsx
+index e2ecddeb..3be9104c 100644
+--- a/artifacts/anime-scraper/src/pages/Watch.tsx
++++ b/artifacts/anime-scraper/src/pages/Watch.tsx
+@@ -167,7 +167,6 @@ interface FetchedSrc {
+ //    الكاملة محفوظة أعلاه في تاريخ Git — لإعادة أي مصدر أضِفه هنا وفي الباك-إند معاً.
+ const SCRAPER_DEFS: { site: string; name: string; desc: string; tag: string; audioLang?: "en"; isArabic?: true }[] = [
+   { site: "kawaii",       name: "كواي أنمي",    desc: "1080p · مباشر",            tag: "KW" },
+-  { site: "anikoto",      name: "AniKoto",       desc: "ياباني مترجم · 1080p",    tag: "AK" },
+   // hianime: معطّل بطلب المستخدم 2026-07-30 — تفوّت حلقات
+   { site: "animewitcher", name: "AnimeWitcher",   desc: "PD/ST · مباشر",           tag: "AW", isArabic: true },
+   { site: "anineko",      name: "AniNeko",        desc: "ياباني مترجم · HLS",      tag: "AN" },
+@@ -200,17 +199,20 @@ const STATIC_PICKER_WEB: Record<WebQualityKey, { site: string; tag: string }[]>
+     { site: "sanime",       tag: "SA" },
+     { site: "animeify",     tag: "AF" },
+     { site: "anifox",       tag: "FX" },
++    { site: "anineko",      tag: "AN" },
+   ],
+   "720p": [
+     { site: "animewitcher", tag: "AW" },
+     { site: "sanime",       tag: "SA" },
+     { site: "animeify",     tag: "AF" },
+     { site: "anifox",       tag: "FX" },
++    { site: "anineko",      tag: "AN" },
+   ],
+   "480p": [
+     { site: "animewitcher", tag: "AW" },
+     { site: "animeify",     tag: "AF" },
+     { site: "anifox",       tag: "FX" },
++    { site: "anineko",      tag: "AN" },
+   ],
+ };
+ const WEB_Q_KEYS: WebQualityKey[] = ["1080p", "720p", "480p"];
+@@ -228,8 +230,8 @@ const PICKER_QMAP: Record<WebQualityKey, Quality> = {
+  * دون التأثير على سرعة تجربة المستخدم (auto-play يبقى فورياً).
+  */
+ const PRIORITY_FETCH_SITES = new Set([
+-  "kawaii", "animewitcher", "dulo_anim", "anineko", "anikoto",
+-  "animeify", "sanime", "anifox",  // ANIFOX: Archive/MediaFire/MP4Upload/Uqload
++  "kawaii", "animewitcher", "dulo_anim", "anineko",
++  "animeify", "sanime", "anifox",  // Japanese providers
+   // shahiid/animelek: أُزيلت — معطّلة بطلب المستخدم 2026-07-14
+ ]);
+ 
+@@ -3269,13 +3271,16 @@ export default function WatchPage() {
+     /* timeout مُصمَّم لكل موقع — يجب أن يكون >= timeout الباكند لنفس الموقع
+        حتى لا يُقتل الطلب قبل أن يرد الباكند (مشكلة جذرية لفقدان المصادر في cache البارد) */
+     const SITE_REQUEST_TIMEOUTS: Record<string, number> = {
+-      animekai:     46000,  // backend = 40s + هامش 6s
+       animewitcher: 32000,  // backend = 28s + هامش 4s
+       cinesrc_anim: 38000,  // backend = 35s + هامش 3s
+       anime4up2:    28000,  // backend = 25s + هامش 3s
+       mycima:       34000,  // backend = 30s + هامش 4s
+       anikototv:    28000,  // backend = 25s + هامش 3s
+       anslayer:     50000,  // backend = 45s + هامش 5s (parallel embed extraction)
++      animeify:     28000,  // backend = 18s + هامش للاستخراج/الشبكة
++      sanime:       28000,  // backend = 20s + هامش للبحث وinfo
++      anifox:       38000,  // backend = 30s + هامش لتحميل الكتالوج أول مرة
++      anikoto:        26000,  anineko: 26000,
+       // mitanime: محذوف 2026-07-27
+       // reanime: محذوف 2026-07-24
+       // hianime: معطّل 2026-07-30
+@@ -3294,7 +3299,20 @@ export default function WatchPage() {
+          titleAr: العنوان العربي يُحسَّن البحث على AnimeSlayer (يبحث بالعربي أولاً). */
+       if (site === "anslayer" && sp.get("anslayerId")) params.set("anslayerId", sp.get("anslayerId")!);
+       if (site === "anslayer" && titleArParam) params.set("titleAr", titleArParam);
+-      const r    = await fetch(`${API_BASE}/api/anime/fetch-source?${params}`, { signal: ctrl.signal, headers: { "X-App-Token": await getAppToken() } });
++      let token = await getAppToken();
++      let r = await fetch(`${API_BASE}/api/anime/fetch-source?${params}`, {
++        signal: ctrl.signal,
++        headers: token ? { "X-App-Token": token } : {},
++      });
++      // A token can expire between the cache check and the request. Refresh once
++      // instead of marking a healthy source as failed after a transient 403.
++      if (r.status === 403 && !ctrl.signal.aborted) {
++        token = await getAppToken(true);
++        r = await fetch(`${API_BASE}/api/anime/fetch-source?${params}`, {
++          signal: ctrl.signal,
++          headers: token ? { "X-App-Token": token } : {},
++        });
++      }
+       const data = await r.json() as { sources?: FetchedSrc[] };
+       const srcs: FetchedSrc[] = data.sources || [];
+ 
+diff --git a/artifacts/api-server/src/auth/emailAuth.ts b/artifacts/api-server/src/auth/emailAuth.ts
+index 3318c5e7..5d92742b 100644
+--- a/artifacts/api-server/src/auth/emailAuth.ts
++++ b/artifacts/api-server/src/auth/emailAuth.ts
+@@ -139,8 +139,12 @@ export function registerEmailAuthRoutes(app: Express): void {
+         ? await sendPasswordResetEmail(emailKey, code)
+         : await sendVerifyEmail(emailKey, code);
+ 
+-      if (!result.ok)
+-        return res.status(502).json({ error: result.error || "فشل إرسال البريد، تحقق من إعدادات البريد على الخادم" });
++      if (!result.ok) {
++        console.error("[send-verify-code] email delivery failed:", result.error || "EMAIL_DELIVERY_FAILED");
++        return res.status(502).json({
++          error: "تعذر إرسال رسالة التحقق حالياً. حاول مرة أخرى لاحقاً.",
++        });
++      }
+ 
+       // لا نحجز البريد لمدة دقيقة إذا فشل SMTP؛ احفظ الكود فقط بعد نجاح الإرسال.
+       await setPendingCode(emailKey, code, type as "signup" | "reset");
+diff --git a/artifacts/api-server/src/auth/emailService.ts b/artifacts/api-server/src/auth/emailService.ts
+index 77aea606..82817cad 100644
+--- a/artifacts/api-server/src/auth/emailService.ts
++++ b/artifacts/api-server/src/auth/emailService.ts
+@@ -173,10 +173,12 @@ async function getTransporter(): Promise<Transporter> {
+     getConfig("smtp_port"),
+   ]);
+ 
+-  const user = dbUser || process.env.SMTP_USER || process.env.EMAIL_USER;
+-  const pass = dbPass || process.env.SMTP_PASS;
+-  const host = dbHost || process.env.SMTP_HOST;
+-  const port = dbPort ? Number(dbPort) : (process.env.SMTP_PORT ? Number(process.env.SMTP_PORT) : undefined);
++  // Prefer the verified VPS environment values. The DB may contain stale SMTP
++  // credentials from an older provider configuration.
++  const user = process.env.SMTP_USER || dbUser || process.env.EMAIL_USER;
++  const pass = process.env.SMTP_PASS || dbPass;
++  const host = process.env.SMTP_HOST || dbHost;
++  const port = process.env.SMTP_PORT ? Number(process.env.SMTP_PORT) : (dbPort ? Number(dbPort) : undefined);
+ 
+   if (user && pass) {
+     const smtpHostname = host || "smtp.gmail.com";
+@@ -255,51 +257,60 @@ async function sendViaResend(
+   console.log(`[email] ✅ Resend → ${to}`);
+ }
+ 
+-/** إرسال بريد: Resend أولاً ← Gmail REST API ← SMTP */
++/** إرسال بريد: Resend أولاً ← Gmail REST API ← SMTP.
++ * إذا رفض Resend الإرسال (مثلاً لأن النطاق غير موثّق في وضع الاختبار)
++ * نتابع إلى مزوّد آخر بدلاً من إيقاف الطلب فوراً.
++ */
+ async function sendEmail(
+   to: string,
+   subject: string,
+   html: string,
+   text: string,
+ ): Promise<SendResult> {
+-  // 1. Resend (HTTPS/443 — مجاني بدون بطاقة — الأسهل إعداداً)
++  const providerErrors: string[] = [];
++
++  // 1. SMTP on the VPS (verified working and supports any recipient address).
++  try {
++    const t = await getTransporter();
++    const smtpUser = process.env.SMTP_USER || await getConfig("smtp_user") || "";
++    const fromAddr = `"Anime NOVA" <${smtpUser}>`;
++    const info = await t.sendMail({ from: fromAddr, to, subject, html, text });
++    console.log(`[email] ✅ SMTP → ${to}`);
++    return { ok: true, messageId: info.messageId };
++  } catch (err: any) {
++    const msg = err.message === "SMTP_NOT_CONFIGURED" ? "SMTP_NOT_CONFIGURED" : err.message;
++    providerErrors.push(`SMTP: ${msg}`);
++    console.error("[email] SMTP فشل — تجربة البدائل:", msg);
++  }
++
++  // 2. Resend fallback (the current testing sender only accepts its owner address).
+   try {
+     await sendViaResend(to, subject, html, text);
+     return { ok: true };
+   } catch (err: any) {
+-    if (err.message !== "RESEND_NOT_CONFIGURED") {
+-      console.error("[email] Resend فشل:", err.message);
+-      return { ok: false, error: `Resend: ${err.message}` };
++    if (err.message === "RESEND_NOT_CONFIGURED") {
++      console.warn("[email] Resend غير مُهيّأ — الانتقال إلى Gmail API");
++    } else {
++      providerErrors.push(`Resend: ${err.message}`);
++      console.error("[email] Resend فشل — تجربة البديل:", err.message);
+     }
+-    // لا يوجد RESEND_API_KEY → جرّب Gmail API
+   }
+ 
+-  // 2. Gmail REST API (HTTPS/443 — لا يُحجب)
++  // 3. Gmail REST API (HTTPS/443 — لا يُحجب).
+   try {
+     await sendViaGmailApi(to, subject, html, text);
+     return { ok: true };
+   } catch (err: any) {
+-    if (err.message !== "GMAIL_API_NOT_CONFIGURED") {
++    if (err.message === "GMAIL_API_NOT_CONFIGURED") {
++      console.warn("[email] Gmail API غير مُهيّأ");
++    } else {
++      providerErrors.push(`Gmail API: ${err.message}`);
+       console.error("[email] Gmail API فشل:", err.message);
+-      return { ok: false, error: `Gmail API: ${err.message}` };
+     }
+-    // لا يوجد Gmail API credentials → جرّب SMTP
+-  }
+-
+-  // 3. SMTP fallback (يعمل إذا لم تكن المنافذ محجوبة)
+-  try {
+-    const t = await getTransporter();
+-    const smtpUser = process.env.SMTP_USER || await getConfig("smtp_user") || "";
+-    const fromAddr = `"Anime NOVA" <${smtpUser}>`;
+-    const info     = await t.sendMail({ from: fromAddr, to, subject, html, text });
+-    console.log(`[email] ✅ SMTP → ${to}`);
+-    return { ok: true, messageId: info.messageId };
+-  } catch (err: any) {
+-    const msg = err.message === "SMTP_NOT_CONFIGURED"
+-      ? "البريد معطّل — أضف RESEND_API_KEY (مجاني من resend.com) أو Gmail API credentials"
+-      : err.message;
+-    console.error("[email] SMTP فشل:", msg);
+-    return { ok: false, error: msg };
++    return {
++      ok: false,
++      error: providerErrors.join(" | ") || "EMAIL_DELIVERY_FAILED",
++    };
+   }
+ }
+ 
+@@ -321,86 +332,37 @@ export async function sendPasswordResetEmail(to: string, code: string): Promise<
+   );
+ }
+ 
++function legacyCodeHtml(
++  code: string,
++  subtitle: string,
++  instruction: string,
++  expiryText: string,
++): string {
++  return `
++  <div dir="rtl" style="font-family:'Segoe UI',Arial,sans-serif;max-width:480px;margin:0 auto;background:#0d0d18;color:#e2e8f0;border-radius:16px;overflow:hidden;">
++    <div style="background:linear-gradient(135deg,#7c3aed,#4f46e5);padding:32px;text-align:center;">
++      <h1 style="margin:0;font-size:26px;font-weight:900;color:#fff;letter-spacing:-0.5px;">ANIME NOVA</h1>
++      <p style="margin:8px 0 0;color:rgba(255,255,255,0.7);font-size:13px;">${subtitle}</p>
++    </div>
++    <div style="padding:32px;text-align:center;">
++      <p style="color:#94a3b8;margin:0 0 24px;font-size:15px;">${instruction}</p>
++      <div style="display:inline-block;background:#1e1b4b;border:2px solid #7c3aed;border-radius:12px;padding:16px 36px;margin-bottom:24px;">
++        <span style="font-size:36px;font-weight:900;letter-spacing:10px;color:#a78bfa;font-family:monospace;">${code}</span>
++      </div>
++      <p style="color:#64748b;font-size:12px;margin:0;">${expiryText}</p>
++    </div>
++    <div style="border-top:1px solid rgba(255,255,255,0.06);padding:16px 32px;text-align:center;">
++      <p style="color:#475569;font-size:11px;margin:0;">إذا لم تطلب هذا، تجاهل هذا البريد.</p>
++    </div>
++  </div>
++`;
++}
++
+ function verifyHtml(code: string): string {
+-  const digits = code.split("").map(d =>
+-    `<td style="padding:0 3px;"><div style="width:44px;height:54px;background:#1a1040;border:2px solid #7c3aed;border-radius:12px;display:inline-flex;align-items:center;justify-content:center;"><span style="font-size:28px;font-weight:900;color:#c4b5fd;font-family:'Courier New',monospace;line-height:1;">${d}</span></div></td>`
+-  ).join("");
+-  return `<!DOCTYPE html>
+-<html dir="rtl" lang="ar">
+-<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+-<body style="margin:0;padding:0;background:#07070f;">
+-<table width="100%" cellpadding="0" cellspacing="0" style="background:#07070f;padding:32px 0;">
+-  <tr><td align="center">
+-    <table width="480" cellpadding="0" cellspacing="0" style="max-width:480px;width:100%;background:#0d0d1f;border-radius:20px;overflow:hidden;border:1px solid rgba(124,58,237,0.25);">
+-      <tr>
+-        <td style="background:linear-gradient(135deg,#6d28d9 0%,#4f46e5 100%);padding:28px 32px;text-align:center;">
+-          <p style="margin:0 0 4px;font-size:11px;font-weight:700;color:rgba(255,255,255,0.55);letter-spacing:3px;font-family:Arial,sans-serif;">ANIME</p>
+-          <p style="margin:0;font-size:28px;font-weight:900;color:#fff;letter-spacing:-0.5px;font-family:Arial,sans-serif;">NOVA ✦</p>
+-          <p style="margin:10px 0 0;color:rgba(196,181,253,0.80);font-size:13px;font-family:Arial,sans-serif;">تحقق من بريدك الإلكتروني</p>
+-        </td>
+-      </tr>
+-      <tr>
+-        <td style="padding:36px 32px;text-align:center;">
+-          <p style="color:#94a3b8;margin:0 0 28px;font-size:15px;line-height:1.7;font-family:Arial,sans-serif;">
+-            مرحباً! استخدم الكود أدناه لتفعيل حسابك.<br>
+-            الكود صالح لمدة <strong style="color:#a78bfa;">10 دقائق</strong> فقط.
+-          </p>
+-          <table cellpadding="0" cellspacing="0" style="margin:0 auto 28px;">
+-            <tr>${digits}</tr>
+-          </table>
+-          <p style="color:#64748b;font-size:12px;margin:0;font-family:Arial,sans-serif;">إذا لم تطلب هذا الكود، تجاهل هذا البريد.</p>
+-        </td>
+-      </tr>
+-      <tr>
+-        <td style="padding:18px 32px;text-align:center;border-top:1px solid rgba(124,58,237,0.15);">
+-          <p style="color:#334155;font-size:11px;margin:0;font-family:Arial,sans-serif;">Anime NOVA · جميع الحقوق محفوظة 2026</p>
+-        </td>
+-      </tr>
+-    </table>
+-  </td></tr>
+-</table>
+-</body>
+-</html>`;
++  return legacyCodeHtml(code, "تحقق من بريدك الإلكتروني", "أدخل هذا الرمز لتأكيد حسابك:", "الرمز صالح لمدة 10 دقائق. لا تشاركه مع أحد.");
+ }
+ 
+ function resetHtml(code: string): string {
+-  const digits = code.split("").map(d =>
+-    `<td style="padding:0 3px;"><div style="width:44px;height:54px;background:#1a1040;border:2px solid #7c3aed;border-radius:12px;display:inline-flex;align-items:center;justify-content:center;"><span style="font-size:28px;font-weight:900;color:#c4b5fd;font-family:'Courier New',monospace;line-height:1;">${d}</span></div></td>`
+-  ).join("");
+-  return `<!DOCTYPE html>
+-<html dir="rtl" lang="ar">
+-<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+-<body style="margin:0;padding:0;background:#07070f;">
+-<table width="100%" cellpadding="0" cellspacing="0" style="background:#07070f;padding:32px 0;">
+-  <tr><td align="center">
+-    <table width="480" cellpadding="0" cellspacing="0" style="max-width:480px;width:100%;background:#0d0d1f;border-radius:20px;overflow:hidden;border:1px solid rgba(124,58,237,0.25);">
+-      <tr>
+-        <td style="background:linear-gradient(135deg,#6d28d9 0%,#4f46e5 100%);padding:28px 32px;text-align:center;">
+-          <p style="margin:0 0 4px;font-size:11px;font-weight:700;color:rgba(255,255,255,0.55);letter-spacing:3px;font-family:Arial,sans-serif;">ANIME</p>
+-          <p style="margin:0;font-size:28px;font-weight:900;color:#fff;letter-spacing:-0.5px;font-family:Arial,sans-serif;">NOVA ✦</p>
+-          <p style="margin:10px 0 0;color:rgba(196,181,253,0.80);font-size:13px;font-family:Arial,sans-serif;">إعادة تعيين كلمة المرور</p>
+-        </td>
+-      </tr>
+-      <tr>
+-        <td style="padding:36px 32px;text-align:center;">
+-          <p style="color:#94a3b8;margin:0 0 28px;font-size:15px;line-height:1.7;font-family:Arial,sans-serif;">
+-            استخدم الكود أدناه لإعادة تعيين كلمة مرورك.<br>
+-            الكود صالح لمدة <strong style="color:#a78bfa;">10 دقائق</strong> فقط.
+-          </p>
+-          <table cellpadding="0" cellspacing="0" style="margin:0 auto 28px;">
+-            <tr>${digits}</tr>
+-          </table>
+-          <p style="color:#64748b;font-size:12px;margin:0;font-family:Arial,sans-serif;">إذا لم تطلب إعادة التعيين، تجاهل هذا البريد.</p>
+-        </td>
+-      </tr>
+-      <tr>
+-        <td style="padding:18px 32px;text-align:center;border-top:1px solid rgba(124,58,237,0.15);">
+-          <p style="color:#334155;font-size:11px;margin:0;font-family:Arial,sans-serif;">Anime NOVA · جميع الحقوق محفوظة 2026</p>
+-        </td>
+-      </tr>
+-    </table>
+-  </td></tr>
+-</table>
+-</body>
+-</html>`;
++  return legacyCodeHtml(code, "إعادة تعيين كلمة المرور", "أدخل هذا الرمز لإعادة تعيين كلمة مرورك:", "الرمز صالح لمدة 10 دقائق. لا تشاركه مع أحد.");
+ }
++
+diff --git a/artifacts/api-server/src/routes/anime.ts b/artifacts/api-server/src/routes/anime.ts
+index 9dbc0787..09d1a6c8 100644
+--- a/artifacts/api-server/src/routes/anime.ts
++++ b/artifacts/api-server/src/routes/anime.ts
+@@ -1,7 +1,7 @@
+-import { Router } from "express";
++import { Router, type Request } from "express";
+ import { createHash, createDecipheriv, createCipheriv, randomBytes } from "crypto";
+-import { execSync, execFile } from "child_process";
+-import { existsSync, writeFileSync, readFileSync, readdirSync, mkdirSync } from "fs";
++import { execSync, execFile, spawn } from "child_process";
++import { createReadStream, existsSync, writeFileSync, readFileSync, readdirSync, mkdirSync, rmSync, statSync } from "fs";
+ import { join as pathJoin } from "path";
+ import {
+   makeSourceCacheKey,
+@@ -2445,6 +2445,141 @@ interface UnifiedSource {
+   headers?: Record<string, string>;
+ }
+ 
++// ── Shirayuki / AniKuro bridge ─────────────────────────────────────────────
++// Shirayuki runs as a separate local service on the VPS (pm2: shirayuki-api).
++// Keep its network address server-side; the browser/mobile clients only receive
++// our own HLS proxy URL.
++const SHIRAYUKI_API_BASE = process.env.SHIRAYUKI_API_URL || "http://127.0.0.1:3100";
++
++const SHIRAYUKI_PROVIDER_SITE: Record<string, string> = {
++  anikoto: "shirayuki_anikoto",
++  animix: "shirayuki_animix",
++};
++
++async function getShirayukiSources(
++  anilistId: number | undefined,
++  ep: number,
++  onlyProvider?: string,
++): Promise<UnifiedSource[]> {
++  if (!anilistId) return [];
++
++  try {
++    const ref = `${anilistId}:${ep}`;
++    const serversResponse = await fetch(
++      `${SHIRAYUKI_API_BASE}/api/v2/anikuro/episode/servers?animeEpisodeId=${encodeURIComponent(ref)}`,
++      { signal: AbortSignal.timeout(8_000) },
++    );
++    if (!serversResponse.ok) return [];
++    const serversPayload = await serversResponse.json() as {
++      data?: {
++        servers?: {
++          sub?: Array<{ name?: string; nameId?: string; provider?: string }>;
++          dub?: Array<{ name?: string; nameId?: string; provider?: string }>;
++        };
++      };
++    };
++    const providers = (serversPayload.data?.servers?.sub || []).filter(
++      (provider): provider is { name?: string; nameId?: string; provider?: string } =>
++        Boolean(provider.provider || provider.nameId) &&
++        (!onlyProvider || (provider.provider || provider.nameId) === onlyProvider),
++    );
++    if (!providers.length) return [];
++
++    const results = await Promise.allSettled(providers.map(async (provider) => {
++      const server = provider.nameId || provider.provider || "";
++      const sourceResponse = await fetch(
++        `${SHIRAYUKI_API_BASE}/api/v2/anikuro/episode/sources?animeEpisodeId=${encodeURIComponent(ref)}&server=${encodeURIComponent(server)}&category=sub`,
++        { signal: AbortSignal.timeout(18_000) },
++      );
++      if (!sourceResponse.ok) return [];
++      type ShirayukiSourceRow = {
++        m3u8?: string; type?: string; quality?: string; referer?: string;
++      };
++      const payload = await sourceResponse.json() as {
++        data?: {
++          sources?: ShirayukiSourceRow[];
++          variants?: Array<{ quality?: string; sources?: ShirayukiSourceRow[] }>;
++          tracks?: Array<{ file?: string; label?: string }>;
++        };
++      };
++      const tracks = payload.data?.tracks || [];
++      // Recent Shirayuki responses group sources under quality variants while
++      // older responses expose a flat sources array. Accept both response
++      // shapes and let the HLS manifest provide the actual quality when it is
++      // available.
++      const sourceRows = [
++        ...(payload.data?.sources || []),
++        ...(payload.data?.variants || []).flatMap(variant =>
++          (variant.sources || []).map(source => ({
++            ...source,
++            quality: source.quality || variant.quality,
++          })),
++        ),
++      ];
++      const expanded: UnifiedSource[] = [];
++
++      for (const source of sourceRows) {
++        if (!source.m3u8) continue;
++        const referer = source.referer || "https://anikuro.ru/";
++        const subtitleUrl = tracks.find(track => track.file)?.file;
++        const isShirayukiProxy = source.m3u8.includes("proxy.anikuro.ru/");
++
++        // Discard stale CDN rows instead of presenting a dead source. This
++        // is especially important for AX, whose CDN hostname can rotate while
++        // the Shirayuki API still has an old cached row.
++        const manifestProbe = await fetch(source.m3u8, {
++          headers: { ...BASE_HDRS, Accept: "*/*", Referer: referer },
++          signal: AbortSignal.timeout(8_000),
++        }).catch(() => null);
++        if (!manifestProbe?.ok) continue;
++        const manifestText = await manifestProbe.text().catch(() => "");
++        if (!manifestText.includes("#EXTM3U")) continue;
++
++        const parsedQualities = await parseM3u8Qualities(source.m3u8, referer);
++        const qualities = parsedQualities.length
++          ? parsedQualities.map(item => ({
++              url: item.url,
++              quality: item.quality,
++              rank: item.rank >= 11 ? 14 : item.rank >= 10 ? 13 : 11,
++            }))
++          : [{
++              url: source.m3u8,
++              quality: source.quality || "HD",
++              rank: qualityRank(source.quality || "") || 9,
++            }];
++
++        for (const variant of qualities) {
++          // Shirayuki's proxy already rewrites child playlists and segments.
++          // Wrapping it again through Nova creates a proxy-to-proxy request.
++          const directUrl = isShirayukiProxy
++            ? variant.url
++            : `/api/anime/hls-proxy?url=${encodeURIComponent(variant.url)}&ref=${encodeURIComponent(referer)}`;
++          expanded.push({
++            name: `${server === "anikoto" ? "AK" : "AX"} · ${variant.quality}`,
++            url: variant.url,
++            quality: variant.quality,
++            qualityRank: variant.rank,
++            // Keep each AniKuro provider as its own Nova source. The picker
++            // uses this value for independent status and caching.
++            site: SHIRAYUKI_PROVIDER_SITE[server] || `shirayuki_${server}`,
++            directUrl,
++            directType: "hls" as const,
++            corsOk: isShirayukiProxy,
++            ...(subtitleUrl ? { subtitleUrl } : {}),
++            headers: { Referer: referer },
++          });
++        }
++      }
++
++      return expanded;
++    }));
++
++    return results.flatMap(result => result.status === "fulfilled" ? result.value : []);
++  } catch {
++    return [];
++  }
++}
++
+ const SKIP_EXTRACT_HOSTS = [
+   "drive.google","mega.nz","mediafire.com",
+   "ok.ru","odnoklassniki.ru","youtube.com","youtu.be",
+@@ -5688,6 +5823,7 @@ async function getKawaiiAnimeSources(
+     const data = await r.json() as {
+       sources?: Array<{ url: string; quality?: string; isM3U8?: boolean; type?: string }>;
+       subtitles?: Array<{ url: string; lang?: string; label?: string }>;
++      headers?: Record<string, string>;
+       intro?: { start: number; end: number };
+       outro?: { start: number; end: number };
+     };
+@@ -5719,7 +5855,12 @@ async function getKawaiiAnimeSources(
+     // ── kawaii CDN: cdn.momentoai.dev يشترط Referer: kawaiianime.cc ──
+     // المتصفح لا يستطيع تعيين Referer كـ forbidden header → التشغيل المباشر يفشل.
+     // الحل: توجيه كل المصادر عبر VPS proxy مع الـ Referer الصحيح.
+-    // فلترة: نقبل روابط cdn.momentoai.dev + video.kawaii-anime.com (legacy) + مسارات نسبية.
++    // Kawaii rotated its signed CDN; accept only the known Kawaii hosts.
++    const KAWAII_CDN_HOSTS = new Set([
++      "cdn.momentoai.dev",
++      "video.kawaii-anime.com",
++      "cdn.mewstream.buzz",
++    ]);
+     const trustedSources = data.sources
+       .map(s => {
+         if (!s?.url) return null;
+@@ -5728,19 +5869,32 @@ async function getKawaiiAnimeSources(
+           return { ...s, url };
+         } catch { return null; }
+       })
+-      .filter((s): s is NonNullable<typeof s> =>
+-        !!s && (
+-          s.url.includes("cdn.momentoai.dev") ||
+-          s.url.includes("video.kawaii-anime.com")
+-        )
+-      );
++      .filter((s): s is NonNullable<typeof s> => {
++        if (!s) return false;
++        try { return KAWAII_CDN_HOSTS.has(new URL(s.url).hostname.toLowerCase()); }
++        catch { return false; }
++      });
+     if (!trustedSources.length) return [];
+ 
+-    const kawaiiRef = encodeURIComponent(KAWAII_BASE + "/");
++    // Kawaii can route newer episodes through another provider. For example,
++    // Grand Blue S3 ep6 currently returns megaplay/mewstream and rejects the
++    // Kawaii page as Referer (403); the API tells us the provider's Referer.
++    // Keep the old Kawaii page as a fallback for legacy video.kawaii-anime.com
++    // URLs where the API does not include headers.
++    const apiReferer = data.headers?.Referer || data.headers?.referer;
+ 
+     return trustedSources.map((src) => {
+       const isHls = src.isM3U8 === true || src.type === "hls";
+-      // كل المصادر عبر VPS proxy مع Referer: www.kawaii-anime.com — المسار الوحيد الذي يعمل
++      let sourceHost = "";
++      try { sourceHost = new URL(src.url).hostname.toLowerCase(); } catch {}
++      // The CDN host is authoritative when Kawaii rotates providers.
++      const kawaiiRefValue =
++        sourceHost === "cdn.mewstream.buzz" || sourceHost.endsWith(".mewstream.buzz")
++          ? "https://megaplay.buzz/"
++          : apiReferer?.trim() || KAWAII_BASE + "/";
++      const kawaiiRef = encodeURIComponent(kawaiiRefValue);
++      // Every Kawaii source goes through the VPS proxy so the provider-specific
++      // Referer reaches both the manifest and its rewritten segments.
+       const directUrl = isHls
+         ? `/api/anime/hls-proxy?url=${encodeURIComponent(src.url)}&ref=${kawaiiRef}`
+         : `/api/anime/video-proxy?url=${encodeURIComponent(src.url)}&ref=${kawaiiRef}`;
+@@ -5754,6 +5908,7 @@ async function getKawaiiAnimeSources(
+         directType: isHls ? "hls" : "mp4",
+         rawUrl: src.url,
+         corsOk: false,
++        headers: { Referer: kawaiiRefValue },
+         subtitleUrl,
+         skipIntro,
+         skipOutro,
+@@ -5894,6 +6049,9 @@ function wrapForMobile(s: { directUrl?: string; url?: string; directType?: strin
+   if (!rawUrl) return s;
+   // بالفعل proxy عبر VPS
+   if (rawUrl.startsWith("/api/")) return s;
++  // Shirayuki already rewrites child playlists and segments. Wrapping its
++  // URL through Nova again creates a proxy-to-proxy request.
++  if (rawUrl.includes("proxy.anikuro.ru/")) return { ...s, corsOk: true };
+   // روابط embed/mega
+   if (rawUrl.includes("mega.nz") || rawUrl.includes("mega.co.nz")) return s;
+   const ref = s.headers?.Referer || "";
+@@ -11492,6 +11650,8 @@ async function getSAnimeSourcesUncached(
+         english ? similarity(label, english) : 0,
+         slugSimilarity(label, title),
+         english ? slugSimilarity(label, english) : 0,
++        ...variants.map(variant => similarity(label, variant)),
++        ...variants.map(variant => asciiSimilarity(label, variant)),
+         ...variants.map(variant => slugSimilarity(label, variant)),
+       );
+       // ترجيح رقم الموسم — لكن نُطبِّق العقوبة فقط إذا كانت الدرجة الأساسية ضعيفة
+@@ -12165,11 +12325,9 @@ router.get("/anime/sources-stream", async (req, res) => {
+       scrapeCached("topcinemaa",   () => getTopCimaaSources(title, english, ep, isMovie)),
+       // ── ياباني مترجم (AniList ID) ─────────────────────────────────
+       scrapeCached("kawaii",       () => getKawaiiAnimeSources(title, english, ep, anilistId), false, 14000),
+-      scrapeCached("anikoto",      () => getAniKotoSources(title, english, ep, anilistId),      false),
+       scrapeCached("anikototv",    () => getAnikototvSources(title, english, ep),               false, 22000),
+       // anikuro: محذوف
+       // anivault: محذوف — ترجمة إنجليزية مدمجة في الـ stream
+-      scrapeCached("animekai",      () => getAnimeKaiSources(title, english, ep, anilistId),     false, 45000),
+       // hianime: معطّل بطلب المستخدم 2026-07-30 — تفوّت حلقات
+       // animex: محذوف
+       // animepahe: mirurotvapi + owocdn AES-128 HLS — 18ث timeout — ثقيل
+@@ -12287,17 +12445,21 @@ router.get("/anime/fetch-source", async (req, res) => {
+     "sanime",        // 🎌 MP4 مباشر عربي مدبلج ✅
+     "anslayer",      // ⚡ بحث متوازٍ + dedupe للطلبات + cache
+     "animeify",      // 🎬 أنمي فاي — MEGA/Streamtape/MediaFire ✅ (مُعاد تفعيله)
+-    // ── معطّلة 2026-08-02 بطلب المستخدم (تحسين التزامن) ──────────────────────
+-    // "anineko":    متوسط (3s) — معطّل
+-    // "anikoto":    معطّل
+-    // "animekai":   معطّل
++    "anineko",        // 🐱 AniNeko — HLS مترجم
+     // "anipub":     معطّل
+     // ── مُعطَّلة سابقاً ─────────────────────────────────────────────────────
+     // "akoam": حُذف 2026-07-28 — كان يستخدم hopxBrowserExtract على كل طلب
+     // "allmanga": معطّل 2026-07-17 — AA_CRYPTO_MISSING
+   ]);
+   // الطلبات الداخلية (x-internal:1) تتجاوز القائمة لتسمح لـ animation.ts باستدعاء moviz_time وغيره
++  const DISABLED_ANIME_SOURCES = new Set([
++    "anikoto", "animekai", "shirayuki_anikoto", "shirayuki_animix",
++  ]);
+   const isInternalCall = req.headers["x-internal"] === "1";
++  if (DISABLED_ANIME_SOURCES.has(site)) {
++    res.json({ sources: [] });
++    return;
++  }
+   if (ANIME_SOURCE_ALLOWLIST && !ANIME_SOURCE_ALLOWLIST.has(site) && !isInternalCall) {
+     res.json({ sources: [] });
+     return;
+@@ -12314,6 +12476,8 @@ router.get("/anime/fetch-source", async (req, res) => {
+     "xpass_anim",                                  // XPass token ~8min
+   ]);
+   const SHORT_TTL_MAX_AGE_MS = 90 * 60_000; // 90 دقيقة — قبل انتهاء tokens
++  // Shirayuki returns short-lived CDN URLs; never serve its cached rows.
++  const FORCE_LIVE_FETCH_SITES = new Set(["shirayuki_anikoto", "shirayuki_animix"]);
+   const cKey = makeSourceCacheKey(site, title, ep);
+   let cached = await getFromSourceCache(cKey);
+   if (cached && site === "anifox") {
+@@ -12328,15 +12492,36 @@ router.get("/anime/fetch-source", async (req, res) => {
+   // للمواقع قصيرة الـ TTL: إذا بقي للكاش أقل من 90 دقيقة أو انتهى → اكشط مباشرةً
+   const skipCacheForShortTtl = cached !== null && SHORT_TTL_FETCH_SITES.has(site) &&
+     (cached.stale === true || (cached.expiresAt - Date.now()) < SHORT_TTL_MAX_AGE_MS);
+-  if (cached && !shouldRefreshCache(cached.expiresAt) && !skipCacheForShortTtl) {
++  if (cached && !FORCE_LIVE_FETCH_SITES.has(site) &&
++      !shouldRefreshCache(cached.expiresAt) && !skipCacheForShortTtl) {
+     const enc = cached.sources.map((s: UnifiedSource) => {
++      // Cached Kawaii records can outlive a provider rotation. Mewstream uses
++      // Megaplay as its Referer even when an older cached record says Kawaii.
++      const cacheSource = (() => {
++        if (site !== "kawaii") return s;
++        const raw = String(s.rawUrl || "");
++        let host = "";
++        try { host = new URL(raw).hostname.toLowerCase(); } catch {}
++        if (!host.endsWith("mewstream.buzz")) return s;
++        const ref = "https://megaplay.buzz/";
++        const isHls = s.directType === "hls" || /\.m3u8/i.test(raw) || String(s.directUrl || "").includes("/hls-proxy");
++        const proxyPath = isHls
++          ? `/api/anime/hls-proxy?url=${encodeURIComponent(raw)}&ref=${encodeURIComponent(ref)}`
++          : `/api/anime/video-proxy?url=${encodeURIComponent(raw)}&ref=${encodeURIComponent(ref)}`;
++        return {
++          ...s,
++          url: proxyPath,
++          directUrl: proxyPath,
++          headers: { ...(s.headers || {}), Referer: ref, Origin: "https://megaplay.buzz" },
++        };
++      })();
+       /* استخراج headers (Referer/Origin) من رابط الـ proxy قبل التشفير.
+          يحتاجها ExoPlayer/AVPlayer لإرسال Referer مع طلبات الـ segments مباشرةً للـ CDN.
+          إذا كان ref مشفَّراً (hex AES) فهو رابط proxy داخلي — لا نُرسله كـ Referer. */
+-      let derivedHeaders = s.headers;
+-      if (!derivedHeaders && s.directUrl) {
++      let derivedHeaders = cacheSource.headers;
++      if (!derivedHeaders && cacheSource.directUrl) {
+         try {
+-          const pu = new URL(s.directUrl.startsWith("/") ? `http://x.com${s.directUrl}` : s.directUrl);
++          const pu = new URL(cacheSource.directUrl.startsWith("/") ? `http://x.com${cacheSource.directUrl}` : cacheSource.directUrl);
+           const ref = pu.searchParams.get("ref");
+           if (ref && !isEncrypted(ref)) {
+             let origin = "";
+@@ -12346,7 +12531,7 @@ router.get("/anime/fetch-source", async (req, res) => {
+         } catch { /* ignore */ }
+       }
+       const mobileClient = (req.headers["x-nova-client"] || "").toString().includes("mobile");
+-      const finalS = mobileClient ? wrapForMobile(s) : s;
++      const finalS = mobileClient ? wrapForMobile(cacheSource) : cacheSource;
+       // corsOk=true: لا تشفير على directUrl — RiftPlayer يحتاج URL الخام لكشف CDN وإخفاء الـ Referer
+       const encDirectUrl = finalS.directUrl
+         ? (finalS.corsOk ? finalS.directUrl : encryptProxyUrl(finalS.directUrl))
+@@ -12361,8 +12546,8 @@ router.get("/anime/fetch-source", async (req, res) => {
+     return;
+   }
+ 
+-  const SCRAPER_MS = 7000;   // موحّد مع مسار التدفق المتوازي — كان 20000
+-  const EXTRACT_MS = 7000;   // موحّد مع مسار التدفق المتوازي — كان 15000
++  const SCRAPER_MS = 12000;  // لا تقطع المصادر العربية البطيئة أثناء البحث
++  const EXTRACT_MS = 9000;   // هامش كافٍ لاستخراج روابط AF/المصادر المماثلة
+   const race = <T>(p: Promise<T>, ms: number, fallback: T) =>
+     Promise.race([p, new Promise<T>(r => setTimeout(() => r(fallback), ms))]);
+ 
+@@ -12415,9 +12600,7 @@ router.get("/anime/fetch-source", async (req, res) => {
+       // case "moviz_time":  (await race(getMovizTimeSources(title, english, ep, isMovie), 20000, [])).forEach(collectSrc); break;
+       case "topcinemaa":   await runExtract(await race(getTopCimaaSources(title, english, ep, isMovie), SCRAPER_MS, [])); break;
+       case "kawaii":      (await race(getKawaiiAnimeSources(title, english, ep, anilistId), 14_000, [])).forEach(collectSrc); break;
+-      case "anikoto":     (await race(getAniKotoSources(title, english, ep, anilistId),     20_000, [])).forEach(collectSrc); break;
+       case "anikototv":   (await race(getAnikototvSources(title, english, ep),              25000, [])).forEach(collectSrc); break;
+-      case "animekai":    (await race(getAnimeKaiSources(title, english, ep, anilistId),    40_000, [])).forEach(collectSrc); break;
+       // anikuro: محذوف
+       // anivault: محذوف
+       // case "hianime": معطّل بطلب المستخدم 2026-07-30
+@@ -14605,6 +14788,243 @@ router.get("/anime/video-proxy", async (req, res) => {
+   await serveMediaVPS(url, ref, req, res);
+ });
+ 
++// ── download-mp4: تحويل HLS إلى MP4 مع حرق الترجمة للموبايل ────────────────
++// هذا المسار مخصص للمصادر التي تحتاج ملفاً حقيقياً قابلاً للتشغيل دون اتصال.
++// لا يقبل روابط CDN عشوائية: المصدر يجب أن يكون أحد مسارات الـ proxy الداخلية.
++function localApiUrl(raw: string, allowedPaths: string[], req: Request): string | null {
++  if (!raw) return null;
++  try {
++    const parsed = new URL(raw, `http://${req.headers.host || "localhost"}`);
++    if (!allowedPaths.some(path => parsed.pathname === path)) return null;
++    const appDomain = process.env.APP_DOMAIN || "";
++    const publicHost = (() => {
++      try { return new URL(NOVA_PUBLIC_URL).hostname; } catch { return ""; }
++    })();
++    const requestHost = (req.hostname || "").split(":")[0];
++    const allowedHosts = new Set(["localhost", "127.0.0.1", "::1", appDomain, publicHost, requestHost].filter(Boolean));
++    if (!allowedHosts.has(parsed.hostname)) return null;
++    const port = process.env.PORT || "5000";
++    return `http://127.0.0.1:${port}${parsed.pathname}${parsed.search}`;
++  } catch {
++    return null;
++  }
++}
++
++function trustedKawaiiMediaUrl(raw: string): string | null {
++  if (!raw) return null;
++  try {
++    const parsed = new URL(raw);
++    return isTrustedKawaiiCdnUrl(parsed.toString()) ? parsed.toString() : null;
++  } catch {
++    return null;
++  }
++}
++
++function proxyTargetFromLocalUrl(sourceUrl: string): { url: string; ref: string; isHls: boolean } | null {
++  try {
++    const parsed = new URL(sourceUrl);
++    const rawTarget = parsed.searchParams.get("url") || "";
++    const rawRef = parsed.searchParams.get("ref") || "";
++    const url = isEncrypted(rawTarget) ? decryptParam(rawTarget) : rawTarget;
++    const ref = isEncrypted(rawRef) ? decryptParam(rawRef) : rawRef;
++    if (!isTrustedKawaiiMediaUrl(url)) return null;
++    return {
++      url,
++      ref,
++      isHls: parsed.pathname === "/api/anime/hls-proxy",
++    };
++  } catch {
++    return null;
++  }
++}
++
++async function streamKawaiiMp4(
++  sourceUrl: string,
++  req: Request,
++  res: Response,
++): Promise<boolean> {
++  const target = proxyTargetFromLocalUrl(sourceUrl);
++  if (!target || target.isHls) return false;
++  res.setHeader("Content-Disposition", `attachment; filename="nova-episode.mp4"`);
++  await serveMediaVPS(target.url, target.ref, req, res);
++  return res.headersSent;
++}
++
++function cuesToVtt(body: string): string {
++  try {
++    const payload = JSON.parse(body) as { cues?: Array<{ timing?: string; text?: string }> };
++    if (Array.isArray(payload.cues)) {
++      return [
++        "WEBVTT",
++        "",
++        ...payload.cues.flatMap((cue, index) => [
++          String(index + 1),
++          cue.timing || "00:00:00.000 --> 00:00:01.000",
++          cue.text || "",
++          "",
++        ]),
++      ].join("\n");
++    }
++  } catch {
++    // Direct VTT/SRT responses are handled unchanged below.
++  }
++  return body;
++}
++
++router.get("/anime/download-mp4", async (req, res) => {
++  const site = String(req.query.site || "").trim().toLowerCase();
++  if (site !== "kawaii") {
++    res.status(400).send("download conversion is only available for KW");
++    return;
++  }
++
++  const requestedUrl = String(req.query.url || "");
++  const sourceUrl = localApiUrl(
++    requestedUrl,
++    ["/api/anime/hls-proxy", "/api/anime/video-proxy"],
++    req,
++  );
++  const rawKawaiiUrl = site === "kawaii" && !sourceUrl
++    ? trustedKawaiiMediaUrl(requestedUrl)
++    : null;
++  if (!sourceUrl && !rawKawaiiUrl) {
++    res.status(400).send("invalid proxied media url");
++    return;
++  }
++
++  const subtitleRaw = String(req.query.subtitleUrl || "");
++  const subtitleUrl = subtitleRaw
++    ? localApiUrl(subtitleRaw, ["/api/anime/translate-vtt", "/api/anime/proxy-text"], req)
++    : null;
++  if (subtitleRaw && !subtitleUrl) {
++    res.status(400).send("invalid proxied subtitle url");
++    return;
++  }
++
++  const tempRoot = `/tmp/nova-download-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
++  const outputPath = `${tempRoot}/episode.mp4`;
++  const subtitlePath = `${tempRoot}/episode.vtt`;
++  mkdirSync(tempRoot, { recursive: true, mode: 0o700 });
++
++  const cleanup = () => {
++    try { rmSync(tempRoot, { recursive: true, force: true }); } catch {}
++  };
++  res.on("close", cleanup);
++
++  try {
++    // MP4 Kawaii URLs are already signed media files. Stream them through the
++    // same VPS proxy used by the player instead of invoking ffmpeg. This is
++    // critical for DownloadResumable: a retry Range request must not trigger a
++    // second full conversion before the first byte is sent.
++    if (site === "kawaii" && !subtitleUrl) {
++      if (rawKawaiiUrl) {
++        res.setHeader("Content-Disposition", `attachment; filename="nova-episode.mp4"`);
++        await serveMediaVPS(rawKawaiiUrl, KAWAII_BASE + "/", req, res);
++        return;
++      }
++      if (sourceUrl && await streamKawaiiMp4(sourceUrl, req, res)) return;
++    }
++
++    if (!sourceUrl) {
++      res.status(400).send("invalid media url");
++      return;
++    }
++    if (subtitleUrl) {
++      const subtitleResponse = await fetch(subtitleUrl, {
++        headers: { Accept: "application/json,text/vtt,text/plain,*/*" },
++        signal: AbortSignal.timeout(30_000),
++      });
++      if (!subtitleResponse.ok) throw new Error(`subtitle ${subtitleResponse.status}`);
++      const vtt = cuesToVtt(await subtitleResponse.text());
++      if (!vtt.includes("-->")) throw new Error("subtitle has no cues");
++      writeFileSync(subtitlePath, vtt, { mode: 0o600 });
++    }
++
++    const args = [
++      "-hide_banner", "-loglevel", "error", "-y",
++      "-i", sourceUrl,
++      "-map", "0:v:0",
++      "-map", "0:a:0?",
++    ];
++    if (subtitleUrl && site !== "kawaii") {
++      args.push(
++        "-vf",
++        `subtitles=${subtitlePath.replace(/([\\':])/g, "\\$1")}:force_style='FontName=DejaVu Sans,FontSize=20,Alignment=2,Outline=1,Shadow=1'`,
++      );
++      args.push(
++        "-c:v", "libx264",
++        "-preset", "ultrafast",
++        "-crf", "23",
++        "-pix_fmt", "yuv420p",
++        "-c:a", "aac",
++        "-b:a", "128k"
++      );
++    } else {
++      args.push("-c", "copy");
++    }
++    args.push("-movflags", "+faststart", outputPath);
++
++    await new Promise<void>((resolve, reject) => {
++      const child = spawn("/usr/bin/ffmpeg", args, { stdio: ["ignore", "ignore", "pipe"] });
++      let stderr = "";
++      child.stderr.on("data", (chunk: Buffer) => {
++        stderr = (stderr + chunk.toString()).slice(-4000);
++      });
++      child.once("error", reject);
++      child.once("close", code => {
++        if (code === 0) resolve();
++        else reject(new Error(`ffmpeg exited ${code}: ${stderr}`));
++      });
++      req.once("close", () => {
++        if (!res.headersSent) child.kill("SIGTERM");
++      });
++    });
++
++    const size = statSync(outputPath).size;
++    if (size <= 0) throw new Error("empty converted video");
++    /* DownloadResumable sends a byte Range when it retries an interrupted
++       transfer. The conversion is repeated server-side, then only the
++       requested slice is returned so the native downloader can append it
++       safely instead of starting with a second full MP4. */
++    const range = String(req.headers.range || "").trim();
++    let streamStart = 0;
++    let streamEnd = size - 1;
++    let statusCode = 200;
++    if (range) {
++      const match = /^bytes=(\d*)-(\d*)$/i.exec(range);
++      if (!match || (!match[1] && !match[2])) {
++        res.status(416).setHeader("Content-Range", `bytes */${size}`).end();
++        return;
++      }
++      if (match[1]) {
++        streamStart = Number(match[1]);
++        streamEnd = match[2] ? Math.min(Number(match[2]), size - 1) : size - 1;
++      } else {
++        const suffixLength = Number(match[2]);
++        streamStart = Math.max(0, size - suffixLength);
++        streamEnd = size - 1;
++      }
++      if (!Number.isSafeInteger(streamStart) || !Number.isSafeInteger(streamEnd)
++          || streamStart < 0 || streamStart >= size || streamStart > streamEnd) {
++        res.status(416).setHeader("Content-Range", `bytes */${size}`).end();
++        return;
++      }
++      statusCode = 206;
++    }
++    res.status(statusCode);
++    res.setHeader("Content-Type", "video/mp4");
++    res.setHeader("Accept-Ranges", "bytes");
++    res.setHeader("Content-Length", String(streamEnd - streamStart + 1));
++    if (statusCode === 206) {
++      res.setHeader("Content-Range", `bytes ${streamStart}-${streamEnd}/${size}`);
++    }
++    res.setHeader("Content-Disposition", `attachment; filename="nova-episode.mp4"`);
++    createReadStream(outputPath, { start: streamStart, end: streamEnd }).pipe(res);
++  } catch (error: any) {
++    if (!res.headersSent) res.status(502).send(`video conversion failed: ${error?.message || "unknown error"}`);
++  }
++});
++
+ // ── seg-proxy: VPS يجلب الـ segment مع Referer الصحيح ───────────────────────
+ // بعض CDNs (anineko, cdn.1shows.app وغيرها) تحزم الـ TS segments داخل PNG
+ // نكشف PNG-wrapping تلقائياً من أول 4 بايت ونجد أول MPEG-TS sync byte (0x47)
+@@ -15839,3 +16259,22 @@ setTimeout(() => awAutoSync().catch(() => {}), 3 * 60_000);
+ setInterval(() => awAutoSync().catch(() => {}), 2 * 60 * 60_000);
+ 
+ export default router;
++
++// ── FFmpeg Temp Cleanup Scheduler ──
++// يحذف مجلدات التحميل المؤقتة التي تجاوز عمرها ساعة واحدة لمنع امتلاء القرص
++setInterval(() => {
++  try {
++    const tmpDir = "/tmp";
++    const dirs = readdirSync(tmpDir).filter(d => d.startsWith("nova-download-"));
++    const now = Date.now();
++    for (const d of dirs) {
++      const p = pathJoin(tmpDir, d);
++      try {
++        const s = statSync(p);
++        if (now - s.mtimeMs > 3600_000) {
++          rmSync(p, { recursive: true, force: true });
++        }
++      } catch {}
++    }
++  } catch {}
++}, 30 * 60_000);
+diff --git a/artifacts/nova-mobile/app/(tabs)/aw-dubbed.tsx b/artifacts/nova-mobile/app/(tabs)/aw-dubbed.tsx
+index ec0f52b1..62667af9 100644
+--- a/artifacts/nova-mobile/app/(tabs)/aw-dubbed.tsx
++++ b/artifacts/nova-mobile/app/(tabs)/aw-dubbed.tsx
+@@ -210,19 +210,25 @@ function CartoonList({ searchQ }: { searchQ: string }) {
+   const [totalPages,  setTotalPages]  = useState(1);
+   const [loading,     setLoading]     = useState(false);
+   const [loadingMore, setLoadingMore] = useState(false);
++  const [loadError,   setLoadError]   = useState(false);
+   const [searchRes,   setSearchRes]   = useState<DubbedSeries[]>([]);
+   const [searchLoad,  setSearchLoad]  = useState(false);
+   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+ 
+   const loadPage = useCallback(async (p: number, reset = false) => {
+     if (reset) setLoading(true); else setLoadingMore(true);
++    if (reset) setLoadError(false);
+     try {
+       const r = await fetch(`${BASE}/api/dubbed/catalog?page=${p}`);
++      if (!r.ok) throw new Error(`catalog ${r.status}`);
+       const d = await r.json();
++      if (!Array.isArray(d.results)) throw new Error("invalid catalog response");
+       setSeries(prev => reset ? (d.results || []) : [...prev, ...(d.results || [])]);
+       setTotalPages(d.totalPages || 1);
+       setPage(p);
+-    } catch {}
++    } catch {
++      if (reset) setLoadError(true);
++    }
+     setLoading(false);
+     setLoadingMore(false);
+   }, [BASE]);
+@@ -265,6 +271,17 @@ function CartoonList({ searchQ }: { searchQ: string }) {
+     </View>
+   );
+ 
++  if (loadError && series.length === 0) return (
++    <View style={shared.center}>
++      <Ionicons name="cloud-offline-outline" size={42} color="rgba(167,139,250,0.55)" />
++      <Text style={shared.emptyText}>تعذّر تحميل الكرتون المدبلج</Text>
++      <Pressable onPress={() => loadPage(1, true)} style={shared.retryBtn}>
++        <Ionicons name="refresh" size={15} color="#A78BFA" />
++        <Text style={shared.retryText}>إعادة المحاولة</Text>
++      </Pressable>
++    </View>
++  );
++
+   return (
+     <FlatList
+       data={displayList}
+@@ -450,6 +467,8 @@ const shared = StyleSheet.create({
+   grid:       { padding: 12, paddingBottom: 110, gap: 10 },
+   center:     { flex: 1, alignItems: "center", justifyContent: "center", paddingVertical: 60 },
+   emptyText:  { color: "rgba(255,255,255,0.3)", fontFamily: "Cairo_400Regular" },
++  retryBtn:   { flexDirection: "row", alignItems: "center", gap: 7, marginTop: 10, paddingHorizontal: 16, paddingVertical: 9, borderRadius: 12, backgroundColor: "rgba(124,58,237,0.15)", borderWidth: 1, borderColor: "rgba(124,58,237,0.3)" },
++  retryText:  { color: "#A78BFA", fontFamily: "Cairo_700Bold", fontSize: 12 },
+ });
+ 
+ const card = StyleSheet.create({
+diff --git a/artifacts/nova-mobile/app/_layout.tsx b/artifacts/nova-mobile/app/_layout.tsx
+index 0f39db81..04da8588 100644
+--- a/artifacts/nova-mobile/app/_layout.tsx
++++ b/artifacts/nova-mobile/app/_layout.tsx
+@@ -79,6 +79,13 @@ function RootLayoutNav() {
+       <Stack.Screen name="profile" options={{ headerShown: false, animation: "slide_from_right" }} />
+       <Stack.Screen name="aw-dubbed/[key]" options={{ headerShown: false, animation: "slide_from_bottom" }} />
+       <Stack.Screen name="aw-dubbed/watch"  options={{ headerShown: false, orientation: "all" }} />
++      {/* The cartoon tab intentionally opens the legacy Arabic-Toons
++          screens, not the anime-dubbed Supabase screens. Register them in
++          the root stack so native builds resolve the detail and watch routes
++          reliably. */}
++      <Stack.Screen name="dubbed" options={{ headerShown: false }} />
++      <Stack.Screen name="dubbed/[id]" options={{ headerShown: false, animation: "slide_from_bottom" }} />
++      <Stack.Screen name="dubbed/watch" options={{ headerShown: false, orientation: "all" }} />
+       <Stack.Screen name="+not-found" />
+     </Stack>
+   );
+diff --git a/artifacts/nova-mobile/app/watch.tsx b/artifacts/nova-mobile/app/watch.tsx
+index abdce426..a3788c49 100644
+--- a/artifacts/nova-mobile/app/watch.tsx
++++ b/artifacts/nova-mobile/app/watch.tsx
+@@ -68,8 +68,7 @@ const SITE_TAG: Record<string, string> = {
+   shahiid: "SH", animelek: "EK", animedar: "AD", okanime: "OK",
+   ristoanime: "RS", animeify: "AF", animeday: "DY", arabseed: "AR",
+   anime4up2: "4U", mycima: "MC", topcinemaa: "TC",
+-  animewitcher: "AW", kawaii: "KW",
+-  anikototv: "ATV", animekai: "KI", mitanime: "MT",
++  animewitcher: "AW", kawaii: "KW", anineko: "AN",
+   vidlink_anim: "VL", vidfast: "VF",
+   animetime: "AT", animepahe: "AP", dulo_anim: "DL",
+   faselhd_db: "FH",
+@@ -79,10 +78,9 @@ const SITE_TAG: Record<string, string> = {
+ 
+ /* ── اسم عرض لكل موقع في منتقي المصادر ── */
+ const SITE_LABEL: Record<string, string> = {
+-  kawaii: "Kawaii", animewitcher: "AnimeWitcher",
++  kawaii: "Kawaii", animewitcher: "AnimeWitcher", anineko: "AniNeko",
+   dulo_anim: "Dulo",
+   anikototv: "AniKotoTV", mitanime: "MITanime", vidfast: "VidFast",
+-  vidlink_anim: "VidLink", animekai: "AnimeKai",
+   animepahe: "AnimePahe", shahiid: "Shahiid", animelek: "Animelek",
+   animedar: "Animedar", okanime: "OkAnime", ristoanime: "RistoAnime",
+   animeify: "AnimeIfy", animeday: "AnimeDay", arabseed: "ArabSeed",
+@@ -98,10 +96,10 @@ function getSiteTag(site: string): string {
+ /* ── وصف قصير لكل مصدر في شبكة الاختيار (يطابق نظام الويب) ── */
+ const SITE_DESC: Record<string, string> = {
+   kawaii: "1080p · مباشر", animewitcher: "PD/ST · مباشر",
++  anineko: "ياباني مترجم · HLS · حتى 4 خوادم",
+   dulo_anim: "ياباني/إنجليزي · HLS مباشر",
+   vidlink_anim: "ياباني مترجم · مباشر",
+   mitanime: "ياباني مترجم · مباشر", vidfast: "TMDB · HLS · متعدد الخوادم",
+-  anikototv: "ياباني مترجم · skip مدمج", animekai: "ياباني مترجم · DB مباشر",
+   animepahe: "ياباني مترجم · HLS نظيف", anipm: "ياباني مترجم · 37 سيرفر/حلقة",
+   shahiid: "عربي مدبلج / مترجم", animelek: "عربي مدبلج / مترجم",
+   animedar: "عربي مترجم", okanime: "عربي مترجم",
+@@ -119,7 +117,8 @@ function getSiteDesc(site: string): string {
+ }
+ 
+ /* مصادر محظورة في Nova Mobile — لا تُجلب ولا تُعرض حتى لو جاءت من كاش قديم. */
+-const BLOCKED_SOURCE_SITES = new Set(["anikoto", "anineko", "hianime", "ak", "an", "hi"]);
++/* AN/AniNeko is web-only for now; keep backend/web access unchanged. */
++const BLOCKED_SOURCE_SITES = new Set(["hianime", "ak", "an", "anineko", "hi"]);
+ function isBlockedSource(src: Pick<Src, "site">): boolean {
+   return BLOCKED_SOURCE_SITES.has(String(src.site || "").trim().toLowerCase());
+ }
+@@ -203,6 +202,9 @@ function ensureVpsProxy(url: string, headers: Record<string, string> | undefined
+   if (!url) return url;
+   // بالفعل proxy عبر VPS
+   if (url.includes("/api/anime/") || url.includes("/api/animation/")) return url;
++  // Shirayuki already rewrites child playlists and segments. Do not wrap
++  // its proxy URL in Nova's HLS proxy a second time.
++  if (url.includes("proxy.anikuro.ru/")) return url;
+   // روابط embed (mega / vidmoly) — لا نلفّها
+   if (url.includes("mega.nz") || url.includes("mega.co.nz")) return url;
+   if (url.includes("mp4upload")) return url;
+@@ -221,16 +223,29 @@ function ensureVpsProxy(url: string, headers: Record<string, string> | undefined
+   return url; // لا Referer متاح — استخدم كما هو
+ }
+ 
++function buildEmbeddedDownloadUrl(
++  site: string,
++  mediaUrl: string,
++  subtitleUrl: string | undefined,
++  base: string,
++): string {
++  const query = new URLSearchParams({
++    site,
++    url: mediaUrl,
++  });
++  if (subtitleUrl) query.set("subtitleUrl", subtitleUrl);
++  return `${base}/api/anime/download-mp4?${query.toString()}`;
++}
++
+ /* ── مصادر تُشغَّل native مباشرةً عبر RiftPlayer (seg-proxy يُعيد روابط مطلقة الآن) ── */
+ 
+ /* ── أولويات المصادر: KW → AW → AF → SA → rest ── */
+ const SITE_PRIORITY: Record<string, number> = {
+   kawaii: 100, animewitcher: 90,
++  anineko: 72,
+   animeify: 85, sanime: 80,
+   dulo_anim: 70, vidlink_anim: 55,
+   vidfast: 35,
+-  anikototv: 30, animekai: 25, animepahe: 20, anipm: 18,
+-  sanime: 15,
+ };
+ 
+ /* ── قائمة المصادر (KW أولاً — الأولوية القصوى للتشغيل الفوري) ── */
+@@ -660,6 +675,9 @@ export default function WatchScreen() {
+ 
+     const token = await getAuthToken();
+     /* Fire-and-forget — يعمل في الخلفية بمستقل عن lifecycle هذه الشاشة */
++    const downloadUrl = (site === "anineko" || site === "kawaii")
++      ? buildEmbeddedDownloadUrl(site, proxyUrl, subtitleUrl, base)
++      : proxyUrl;
+     void startGlobalDownload({
+       animeId:  parseInt(anime || "0"),
+       ep:       epNum,
+@@ -667,7 +685,7 @@ export default function WatchScreen() {
+       cover:    coverUrl,
+       site,
+       quality:  getSrcQuality(best),
+-      url:      proxyUrl,
++      url:      downloadUrl,
+       authToken: token,
+       subtitleUrl,
+     });
+@@ -739,6 +757,9 @@ export default function WatchScreen() {
+       const subRaw    = best.subtitleUrl || globalSubUrl;
+       const subtitleUrl = subRaw ? resolveUrl(subRaw, base) : undefined;
+       const token     = await getAuthToken();
++      const downloadUrl = (site === "anineko" || site === "kawaii")
++        ? buildEmbeddedDownloadUrl(site, proxyUrl, subtitleUrl, base)
++        : proxyUrl;
+ 
+       void startGlobalDownload({
+         animeId:    parseInt(anime || "0"),
+@@ -747,7 +768,7 @@ export default function WatchScreen() {
+         cover:      coverUrl,
+         site,
+         quality:    getSrcQuality(best),
+-        url:        proxyUrl,
++        url:        downloadUrl,
+         authToken:  token,
+         subtitleUrl,
+       });
+diff --git a/artifacts/nova-mobile/components/index.ts b/artifacts/nova-mobile/components/index.ts
+index d38b9e9c..969be6f3 100644
+--- a/artifacts/nova-mobile/components/index.ts
++++ b/artifacts/nova-mobile/components/index.ts
+@@ -1 +1 @@
+-/** ✅ Mobile App Player Utilities for Enhanced Controls */\n\nexport * from './RiftPlayer.config';\n"
+\ No newline at end of file
++/** Shared component exports can be added here as the component library grows. */
+\ No newline at end of file
+diff --git a/artifacts/nova-mobile/utils/downloadManager.ts b/artifacts/nova-mobile/utils/downloadManager.ts
+index 0e005ee8..b3475151 100644
+--- a/artifacts/nova-mobile/utils/downloadManager.ts
++++ b/artifacts/nova-mobile/utils/downloadManager.ts
+@@ -9,6 +9,7 @@ import { AppState, Platform } from "react-native";
+ import * as FileSystem from "expo-file-system";
+ import * as Notifications from "expo-notifications";
+ import AsyncStorage from "@react-native-async-storage/async-storage";
++import { getAuthToken } from "./secureApi";
+ 
+ const DOWNLOADS_KEY = "nova-downloads-v3";
+ const ACTIVE_PENDING_KEY = "nova-downloads-active-v2";
+@@ -91,6 +92,10 @@ const listeners = new Set<() => void>();
+ let notificationsReady: Promise<boolean> | null = null;
+ let persistQueue = Promise.resolve();
+ 
++function isPaused(entry: RuntimeDownload): boolean {
++  return entry.status === "paused";
++}
++
+ export function makeDownloadId(animeId: number, ep: number): string {
+   return `${animeId}_ep${ep}`;
+ }
+@@ -220,9 +225,10 @@ async function configureNotifications(): Promise<boolean> {
+       try {
+         Notifications.setNotificationHandler({
+           handleNotification: async (notification) => ({
+-            /* Keep download updates in the notification shade instead of
+-               repeatedly flashing transient banners while progress changes. */
+-            shouldShowBanner: Boolean(notification.request.content.data?.completed),
++            /* Download progress is an ongoing notification. Showing the
++               banner here also makes the first notification visible
++               immediately; the same notification id is updated below. */
++            shouldShowBanner: true,
+             shouldShowList: true,
+             shouldPlaySound: false,
+             shouldSetBadge: false,
+@@ -276,7 +282,6 @@ function updateDownloadNotification(entry: RuntimeDownload, force = false): void
+       ? `${formatFileSize(entry.bytesWritten)} من ${formatFileSize(entry.totalBytes)}`
+       : "";
+     try {
+-      await dismissDownloadNotification(entry.id);
+       await Notifications.scheduleNotificationAsync({
+         identifier,
+         content: ({
+@@ -317,8 +322,10 @@ function completeNotification(entry: RuntimeDownload, error = false): void {
+             body: error
+               ? `فشل تنزيل ${entry.title} — الحلقة ${entry.ep}`
+               : `اكتمل تنزيل ${entry.title} — الحلقة ${entry.ep}`,
+-            sticky: false,
+-            autoDismiss: true,
++            /* Leave the result in the notification shade. It should not
++               disappear before the user has a chance to read it. */
++            sticky: true,
++            autoDismiss: false,
+             sound: !error,
+             color: error ? "#EF4444" : "#34D399",
+             data: { downloadId: entry.id, completed: !error },
+@@ -408,6 +415,9 @@ async function saveCompleted(entry: RuntimeDownload): Promise<void> {
+   if (fileSize <= 0) throw new Error("ملف التنزيل فارغ");
+ 
+   let subtitleLocalPath: string | undefined;
++  /* AN and KW are converted by the VPS download endpoint with the Arabic
++     subtitles burned into the MP4. Do not create a misleading sidecar VTT
++     for those downloads; other sources keep the existing sidecar behavior. */
+   if (entry.params.subtitleUrl) {
+     const subtitlePath = `${entry.localPath.slice(0, -4)}.vtt`;
+     try {
+@@ -467,13 +477,18 @@ function makeResumable(
+   resumeState?: ResumeState,
+ ): FileSystem.DownloadResumable {
+   const state = resumeState;
++  const options: DownloadOptions = {
++    ...(state?.options ?? {
++      sessionType: FileSystem.FileSystemSessionType.BACKGROUND,
++    }),
++    /* A saved download may outlive the anon token that created it. Keep the
++       native session settings, but always use the current request headers. */
++    headers: requestHeaders(entry.params),
++  };
+   return FileSystem.createDownloadResumable(
+     state?.url ?? entry.params.url,
+     state?.fileUri ?? entry.localPath,
+-    state?.options ?? {
+-      headers: requestHeaders(entry.params),
+-      sessionType: FileSystem.FileSystemSessionType.BACKGROUND,
+-    },
++    options,
+     (progress) => {
+       entry.bytesWritten = Math.max(0, progress.totalBytesWritten);
+       entry.totalBytes = progress.totalBytesExpectedToWrite;
+@@ -528,7 +543,7 @@ async function runDownload(entry: RuntimeDownload): Promise<void> {
+       if (!active.has(entry.id)) return;
+       /* A user pause also interrupts downloadAsync on some Android versions.
+          Do not treat that intentional interruption as a failed retry. */
+-      if (entry.status === "paused") return;
++      if (isPaused(entry)) return;
+       /* Keep the resumable state and partial file. A subsequent attempt starts
+          from the saved native resume state instead of deleting the download. */
+       try {
+@@ -631,10 +646,14 @@ export async function restoreInterruptedDownloads(): Promise<void> {
+     if (!Array.isArray(records)) return;
+ 
+     const completed = await getDownloads();
++    /* download-mp4 is protected by the same anon-token middleware as source
++       fetching. Refresh once before rebuilding tasks so an app restart does
++       not turn a resumable download into a permanent 403. */
++    const restoredToken = await getAuthToken();
+     for (const record of records) {
+       if (!record?.id || completed.some((item) => item.id === record.id)) continue;
+       if (!record.url || !record.localPath) continue;
+-      enqueueDownload({
++      const params: StartDownloadParams = {
+         animeId: record.animeId,
+         ep: record.ep,
+         title: record.title,
+@@ -642,22 +661,26 @@ export async function restoreInterruptedDownloads(): Promise<void> {
+         site: record.site,
+         quality: record.quality,
+         url: record.url,
++        authToken: restoredToken,
+         subtitleUrl: record.subtitleUrl,
+-      }, record.resumeState ?? (Platform.OS === "android" && record.bytesWritten > 0
++      };
++      const savedResumeState = record.resumeState
++        ? {
++            ...record.resumeState,
++            options: {
++              ...record.resumeState.options,
++              headers: requestHeaders(params),
++            },
++          }
++        : undefined;
++      enqueueDownload({
++        ...params,
++      }, savedResumeState ?? (Platform.OS === "android" && record.bytesWritten > 0
+         ? {
+             url: record.url,
+             fileUri: record.localPath,
+             options: {
+-              headers: requestHeaders({
+-                animeId: record.animeId,
+-                ep: record.ep,
+-                title: record.title,
+-                cover: record.cover,
+-                site: record.site,
+-                quality: record.quality,
+-                url: record.url,
+-                subtitleUrl: record.subtitleUrl,
+-              }),
++              headers: requestHeaders(params),
+               sessionType: FileSystem.FileSystemSessionType.BACKGROUND,
+             },
+             resumeData: String(record.bytesWritten),
+diff --git a/ecosystem.config.cjs b/ecosystem.config.cjs
+index 7e3c92f7..09a1617b 100644
+--- a/ecosystem.config.cjs
++++ b/ecosystem.config.cjs
+@@ -33,6 +33,8 @@ module.exports = {
+         SMTP_PORT: "587",
+         SMTP_USER: _e("SMTP_USER"),
+         SMTP_PASS: _e("SMTP_PASS"),
++        RESEND_API_KEY: _e("RESEND_API_KEY"),
++        RESEND_FROM: _e("RESEND_FROM") || "Anime NOVA <onboarding@resend.dev>",
+         APP_DOMAIN: _e("APP_DOMAIN") || "animenovaa.duckdns.org",
+         SESSION_SECRET: _e("SESSION_SECRET"),
+         APP_SECRET: _e("APP_SECRET"),
