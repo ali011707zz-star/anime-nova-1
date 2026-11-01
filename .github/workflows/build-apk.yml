@@ -270,6 +270,25 @@ jobs:
           echo "=== gradle.properties (last 10 lines) ==="
           tail -10 gradle.properties
 
+      - name: 🔐 Prepare Android release keystore
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          set -euo pipefail
+          if [ -z "${ANDROID_KEYSTORE_BASE64:-}" ]; then
+            echo "❌ Missing GitHub Actions secret: ANDROID_KEYSTORE_BASE64"
+            exit 1
+          fi
+
+          KEYSTORE_PATH="$RUNNER_TEMP/nova-release.keystore"
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$KEYSTORE_PATH"
+          if [ ! -s "$KEYSTORE_PATH" ]; then
+            echo "❌ Android release keystore is empty"
+            exit 1
+          fi
+          chmod 600 "$KEYSTORE_PATH"
+          printf 'ANDROID_KEYSTORE_FILE=%s\n' "$KEYSTORE_PATH" >> "$GITHUB_ENV"
+
       - name: 💾 Cache Gradle
         uses: actions/cache@v4
         with:
@@ -283,7 +302,51 @@ jobs:
         working-directory: artifacts/nova-mobile/android
         env:
           GRADLE_OPTS: "-Dorg.gradle.daemon=false -Dorg.gradle.jvmargs=-Xmx4096m -Dorg.gradle.warning.mode=none"
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import os
+          import pathlib
+
+          required = (
+              "ANDROID_KEYSTORE_FILE",
+              "ANDROID_KEYSTORE_PASSWORD",
+              "ANDROID_KEY_ALIAS",
+              "ANDROID_KEY_PASSWORD",
+          )
+          missing = [name for name in required if not os.environ.get(name)]
+          if missing:
+              raise SystemExit("Missing Android release signing configuration: " + ", ".join(missing))
+
+          path = pathlib.Path("app/build.gradle")
+          content = path.read_text()
+          marker = "// NOVA release signing injected by CI"
+          if marker not in content:
+              signing = """
+          // NOVA release signing injected by CI
+          android {
+              signingConfigs {
+                  release {
+                      storeFile file(System.getenv("ANDROID_KEYSTORE_FILE"))
+                      storePassword System.getenv("ANDROID_KEYSTORE_PASSWORD")
+                      keyAlias System.getenv("ANDROID_KEY_ALIAS")
+                      keyPassword System.getenv("ANDROID_KEY_PASSWORD")
+                  }
+              }
+              buildTypes {
+                  release {
+                      signingConfig signingConfigs.release
+                  }
+              }
+          }
+          """
+              path.write_text(content.rstrip() + "\n\n" + signing.lstrip())
+          print("✅ Release signing configured without exposing credentials")
+          PY
+
           set -o pipefail
           chmod +x gradlew
           ./gradlew assembleRelease \
@@ -299,11 +362,49 @@ jobs:
               exit 1
             }
 
+      - name: 🔎 Verify signed installable APK
+        working-directory: artifacts/nova-mobile/android
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK="app/build/outputs/apk/release/app-release.apk"
+          if [ ! -s "$APK" ]; then
+            echo "❌ Release APK is missing or empty: $APK"
+            exit 1
+          fi
+
+          SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
+          if [ -z "$SDK_ROOT" ] || [ ! -d "$SDK_ROOT/build-tools" ]; then
+            echo "❌ Android SDK build-tools directory is unavailable"
+            exit 1
+          fi
+          APKSIGNER="$(find "$SDK_ROOT/build-tools" -type f -name apksigner -print | sort -V | tail -1)"
+          AAPT="$(find "$SDK_ROOT/build-tools" -type f -name aapt -print | sort -V | tail -1)"
+          if [ -z "$APKSIGNER" ] || [ -z "$AAPT" ]; then
+            echo "❌ apksigner or aapt is unavailable; cannot validate APK"
+            exit 1
+          fi
+
+          "$APKSIGNER" verify --verbose "$APK"
+          PACKAGE="$("$AAPT" dump badging "$APK" | sed -n "s/^package: name='\([^']*\)'.*/\1/p" | head -1)"
+          if [ "$PACKAGE" != "com.nova.anime" ]; then
+            echo "❌ Unexpected APK package: ${PACKAGE:-missing}"
+            exit 1
+          fi
+
+          OUTPUT_NAME="AnimeNova-v${GITHUB_RUN_NUMBER}.apk"
+          cp "$APK" "$GITHUB_WORKSPACE/$OUTPUT_NAME"
+          {
+            echo "✅ **Signed APK verified:** \`$OUTPUT_NAME\`"
+            echo ""
+            echo "The downloaded Actions artifact is a ZIP. Extract it, then install the APK inside."
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - name: 📱 Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: AnimeNova-v${{ github.run_number }}
-          path: artifacts/nova-mobile/android/app/build/outputs/apk/release/*.apk
+          path: AnimeNova-v${{ github.run_number }}.apk
           retention-days: 30
 
       - name: 📤 Upload build log (on failure)
