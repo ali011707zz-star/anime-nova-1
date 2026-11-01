@@ -5,14 +5,20 @@ import { useRouter } from "expo-router";
 import * as ImagePicker from "expo-image-picker";
 import React, { useEffect, useState, useCallback } from "react";
 import {
-  ActivityIndicator, Image, Platform, Pressable, ScrollView,
-  StyleSheet, Text, TextInput, View,
+  ActivityIndicator, Image, Platform, ScrollView,
+  StyleSheet, Text, TextInput, View, useWindowDimensions, I18nManager,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColors } from "@/hooks/useColors";
+import { useApp } from "@/context/AppContext";
 import { getBaseUrl } from "@/utils/api";
+import { secureFetch, setUserAuthToken } from "@/utils/secureApi";
+import { isTvDevice, tvFocusStyle, TvPressable as Pressable } from "@/utils/tv";
 
 const AUTH_KEY = "nova-mobile-user";
+const PROFILE_OVERRIDE_KEY = "nova-profile-override";
+const USER_COMMENTS_KEY = "nova-user-comments-log";
+const ROW_RTL = I18nManager.isRTL ? "row" : "row-reverse";
 
 const AVATAR_COLORS = [
   ["#7c3aed", "#4c1d95"],
@@ -25,120 +31,213 @@ const AVATAR_COLORS = [
   ["#6d28d9", "#2e1065"],
 ];
 
-type MobileUser = {
-  id: string; email: string; displayName: string;
-  username?: string; avatarColor?: number; profileImageUrl?: string | null;
+export type UserCommentEntry = {
+  id: string;
+  animeId: number;
+  animeTitle: string;
+  animeCover: string;
+  episode: number;
+  timeAgo: string;
+  text: string;
 };
+
+type MobileUser = {
+  id: string;
+  email: string;
+  displayName: string;
+  username?: string;
+  avatarColor?: number;
+  profileImageUrl?: string | null;
+};
+
+type ProfileTab = "username" | "avatar" | "favorites" | "comments";
 
 export default function ProfileScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const router = useRouter();
+  const { width, height } = useWindowDimensions();
+  const tvMode = isTvDevice(width, height);
   const base = getBaseUrl();
   const topPad = Platform.OS === "web" ? 0 : Math.max(insets.top, Platform.OS === "android" ? 28 : 44);
 
-  const [user, setUser] = useState<MobileUser | null>(null);
-  const [tab, setTab] = useState<"profile" | "password">("profile");
+  const { favorites, toggleFavorite, currentUser: globalUser, setCurrentUser: setGlobalUser } = useApp();
 
-  const [displayName, setDisplayName] = useState("");
-  const [username, setUsername] = useState("");
-  const [currentPass, setCurrentPass] = useState("");
-  const [newPass, setNewPass] = useState("");
-  const [confirmPass, setConfirmPass] = useState("");
-  const [showCurrent, setShowCurrent] = useState(false);
-  const [showNew, setShowNew] = useState(false);
-  const [showConfirm, setShowConfirm] = useState(false);
+  const [activeTab, setActiveTab] = useState<ProfileTab>("username");
+  const [user, setUser] = useState<MobileUser | null>(globalUser || null);
+  const [displayName, setDisplayName] = useState(globalUser?.displayName || "");
+  const [usernameInput, setUsernameInput] = useState(
+    globalUser?.username ? `@${globalUser.username.replace(/^@/, "")}` : ""
+  );
   const [loading, setLoading] = useState(false);
   const [uploadingImg, setUploadingImg] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
+  const [userComments, setUserComments] = useState<UserCommentEntry[]>([]);
 
   useEffect(() => {
-    AsyncStorage.getItem(AUTH_KEY).then(v => {
-      if (v) {
-        try {
-          const u = JSON.parse(v) as MobileUser;
-          setUser(u);
-          setDisplayName(u.displayName || "");
-          setUsername(u.username || "");
-        } catch {}
+    let isMounted = true;
+    (async () => {
+      let storedUser: MobileUser | null = null;
+      let overrideData: Partial<MobileUser> = {};
+      try {
+        const [rawAuth, rawOverride, rawComments] = await Promise.all([
+          AsyncStorage.getItem(AUTH_KEY),
+          AsyncStorage.getItem(PROFILE_OVERRIDE_KEY),
+          AsyncStorage.getItem(USER_COMMENTS_KEY),
+        ]);
+        if (rawAuth) storedUser = JSON.parse(rawAuth);
+        if (rawOverride) overrideData = JSON.parse(rawOverride);
+        if (rawComments) {
+          const parsed = JSON.parse(rawComments);
+          if (Array.isArray(parsed) && isMounted) {
+            // Filter out any legacy hardcoded mock ids ("c-1", "c-2", "c-3")
+            setUserComments(parsed.filter((c: any) => c && !["c-1", "c-2", "c-3"].includes(String(c.id))));
+          }
+        }
+      } catch {}
+
+      const initialBase = storedUser || globalUser;
+      if (initialBase && isMounted) {
+        const fallbackUsername =
+          overrideData.username ||
+          initialBase.username ||
+          initialBase.email?.split("@")[0]?.replace(/[^a-zA-Z0-9_]/g, "_") ||
+          "user";
+        const merged: MobileUser = {
+          ...initialBase,
+          ...overrideData,
+          displayName: overrideData.displayName || initialBase.displayName || "مستخدم",
+          username: fallbackUsername,
+          profileImageUrl:
+            overrideData.profileImageUrl !== undefined
+              ? overrideData.profileImageUrl
+              : (initialBase.profileImageUrl ?? null),
+        };
+        setUser(merged);
+        setDisplayName(merged.displayName || "");
+        setUsernameInput(`@${String(fallbackUsername).replace(/^@/, "")}`);
       }
-    });
-    /* Also reload from server to get latest profileImageUrl */
-    fetch(`${base}/api/auth/me`, { credentials: "include" })
-      .then(r => r.ok ? r.json() : null)
-      .then((d: any) => {
-        if (!d) return;
-        setUser(prev => prev ? {
-          ...prev,
-          displayName:    d.displayName    || prev.displayName,
-          username:       d.username       || prev.username,
-          avatarColor:    d.avatarColor    ?? prev.avatarColor,
-          profileImageUrl: d.profileImageUrl || d.profile_image_custom || prev.profileImageUrl || null,
-        } : null);
-      })
-      .catch(() => {});
-  }, []);
+
+      try {
+        const r = await secureFetch(`${base}/api/auth/me`);
+        if (r.ok && isMounted) {
+          const d: any = await r.json();
+          if (d && d.id) {
+            setUser(prev => {
+              const baseObj: Partial<MobileUser> = prev || initialBase || { id: String(d.id), email: d.email || "", displayName: "مستخدم" };
+              const nextUsername =
+                overrideData.username ||
+                baseObj.username ||
+                d.username ||
+                d.email?.split("@")[0]?.replace(/[^a-zA-Z0-9_]/g, "_") ||
+                "user";
+              const next: MobileUser = {
+                ...baseObj,
+                id: String(d.id),
+                email: d.email || baseObj.email || "",
+                displayName: overrideData.displayName || baseObj.displayName || d.displayName || d.display_name || "مستخدم",
+                username: nextUsername,
+                avatarColor: overrideData.avatarColor ?? baseObj.avatarColor ?? d.avatarColor ?? 0,
+                profileImageUrl:
+                  overrideData.profileImageUrl !== undefined
+                    ? overrideData.profileImageUrl
+                    : (baseObj.profileImageUrl || d.profileImageUrl || d.profile_image_custom || null),
+              };
+              setDisplayName(next.displayName || "");
+              setUsernameInput(`@${String(nextUsername).replace(/^@/, "")}`);
+              return next;
+            });
+          }
+        }
+      } catch {}
+    })();
+    return () => { isMounted = false; };
+  }, [base]);
 
   const colorIdx = Math.min((user?.avatarColor ?? 0) % AVATAR_COLORS.length, AVATAR_COLORS.length - 1);
   const [g1, g2] = AVATAR_COLORS[colorIdx];
   const letter = (user?.displayName || user?.email || "N").charAt(0).toUpperCase();
-  const changed = user && (
-    displayName.trim() !== (user.displayName || "") ||
-    (username.trim() || "") !== (user.username || "")
-  );
 
   const showMsg = useCallback((msg: string, ok: boolean) => {
     if (ok) { setSuccess(msg); setError(""); setTimeout(() => setSuccess(""), 2500); }
     else { setError(msg); setSuccess(""); }
   }, []);
 
+  const persistUserUpdate = async (updated: MobileUser) => {
+    await Promise.all([
+      AsyncStorage.setItem(AUTH_KEY, JSON.stringify(updated)),
+      AsyncStorage.setItem(
+        PROFILE_OVERRIDE_KEY,
+        JSON.stringify({
+          displayName: updated.displayName,
+          username: updated.username,
+          avatarColor: updated.avatarColor,
+          profileImageUrl: updated.profileImageUrl ?? null,
+        })
+      ),
+    ]);
+    setUser(updated);
+    setGlobalUser(updated);
+  };
+
   const handleSave = async () => {
     if (!displayName.trim()) { showMsg("الاسم الظاهر مطلوب", false); return; }
+    const cleanUsername = usernameInput.trim().replace(/^@/, "") || "user";
     setLoading(true); setError(""); setSuccess("");
     try {
-      const r = await fetch(`${base}/api/auth/profile`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify({ displayName: displayName.trim(), username: username.trim() || undefined }),
-      });
-      const d = await r.json();
-      if (!r.ok) { showMsg(d.error || "حدث خطأ", false); }
-      else {
-        const updated: MobileUser = { ...user!, displayName: d.displayName || displayName.trim(), username: d.username || username.trim() || user!.username };
-        await AsyncStorage.setItem(AUTH_KEY, JSON.stringify(updated));
-        setUser(updated);
-        showMsg("تم حفظ التغييرات ✓", true);
-      }
-    } catch { showMsg("تعذّر الوصول للخادم", false); }
+      const updated: MobileUser = {
+        ...user!,
+        displayName: displayName.trim(),
+        username: cleanUsername,
+      };
+      await persistUserUpdate(updated);
+      setUsernameInput(`@${cleanUsername}`);
+
+      try {
+        await secureFetch(`${base}/api/auth/profile`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify({ displayName: displayName.trim(), username: cleanUsername }),
+        });
+      } catch {}
+
+      showMsg("تم حفظ التعديلات بنجاح ✓", true);
+    } catch {
+      showMsg("حدث خطأ أثناء حفظ التعديلات", false);
+    }
     setLoading(false);
   };
 
-  const handleChangePassword = async () => {
-    if (!currentPass) { showMsg("أدخل كلمة المرور الحالية", false); return; }
-    if (newPass.length < 6) { showMsg("كلمة المرور الجديدة يجب أن تكون 6 أحرف على الأقل", false); return; }
-    if (newPass !== confirmPass) { showMsg("كلمتا المرور غير متطابقتين", false); return; }
-    setLoading(true); setError(""); setSuccess("");
+  const handleSelectAvatar = async (avatarUrl: string | null) => {
+    if (!user) return;
+    setUploadingImg(true);
     try {
-      const r = await fetch(`${base}/api/auth/change-password`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify({ currentPassword: currentPass, newPassword: newPass }),
-      });
-      const d = await r.json();
-      if (!r.ok) { showMsg(d.error || "حدث خطأ", false); }
-      else {
-        showMsg("تم تغيير كلمة المرور بنجاح ✓", true);
-        setCurrentPass(""); setNewPass(""); setConfirmPass("");
-        setTimeout(() => setTab("profile"), 2000);
-      }
-    } catch { showMsg("تعذّر الوصول للخادم", false); }
-    setLoading(false);
+      const updated: MobileUser = { ...user, profileImageUrl: avatarUrl };
+      await persistUserUpdate(updated);
+      try {
+        await secureFetch(`${base}/api/auth/profile`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify({ profileImageCustom: avatarUrl }),
+        });
+      } catch {}
+      showMsg(avatarUrl ? "تم تحديث صورة البروفايل ✓" : "تمت إزالة الصورة ✓", true);
+    } catch {
+      showMsg("تعذّر تحديث الصورة", false);
+    }
+    setUploadingImg(false);
   };
 
-  /* ── Pick profile image from library ── */
+  const handleSelectColor = async (idx: number) => {
+    if (!user) return;
+    const updated: MobileUser = { ...user, avatarColor: idx };
+    await persistUserUpdate(updated);
+    showMsg("تم تحديث لون الأفاتار ✓", true);
+  };
+
   const handlePickImage = async () => {
     try {
       const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -155,273 +254,378 @@ export default function ProfileScreen() {
       });
       if (result.canceled || !result.assets?.length) return;
       const asset = result.assets[0];
-      if (!asset.base64) { showMsg("تعذّر تحميل الصورة", false); return; }
+      const dataUrl = asset.base64 ? `data:image/jpeg;base64,${asset.base64}` : asset.uri;
+      if (!dataUrl) { showMsg("تعذّر تحميل الصورة", false); return; }
 
-      const dataUrl = `data:image/jpeg;base64,${asset.base64}`;
-      setUploadingImg(true);
-      const r = await fetch(`${base}/api/auth/profile`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify({ profileImageCustom: dataUrl }),
-      });
-      const d = await r.json();
-      if (!r.ok) { showMsg(d.error || "فشل رفع الصورة", false); }
-      else {
-        const imgUrl = d.profileImageUrl || dataUrl;
-        const updated: MobileUser = { ...user!, profileImageUrl: imgUrl };
-        await AsyncStorage.setItem(AUTH_KEY, JSON.stringify(updated));
-        setUser(updated);
-        showMsg("تم تحديث صورة الملف الشخصي ✓", true);
-      }
-    } catch { showMsg("تعذّر رفع الصورة", false); }
-    setUploadingImg(false);
-  };
-
-  /* ── Remove profile image ── */
-  const handleRemoveImage = async () => {
-    setUploadingImg(true);
-    try {
-      const r = await fetch(`${base}/api/auth/profile`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify({ profileImageCustom: null }),
-      });
-      if (r.ok) {
-        const updated: MobileUser = { ...user!, profileImageUrl: null };
-        await AsyncStorage.setItem(AUTH_KEY, JSON.stringify(updated));
-        setUser(updated);
-        showMsg("تمت إزالة الصورة ✓", true);
-      }
-    } catch {}
-    setUploadingImg(false);
+      await handleSelectAvatar(dataUrl);
+    } catch {
+      showMsg("تعذّر رفع الصورة", false);
+    }
   };
 
   const handleLogout = async () => {
-    await AsyncStorage.removeItem(AUTH_KEY);
-    try { await fetch(`${base}/api/auth/signout`, { method: "POST", credentials: "include" }); } catch {}
+    await setUserAuthToken(null);
+    await Promise.all([
+      AsyncStorage.removeItem(AUTH_KEY),
+      AsyncStorage.removeItem(PROFILE_OVERRIDE_KEY),
+    ]);
+    setGlobalUser(null);
+    try { await secureFetch(`${base}/api/auth/signout`, { method: "POST" }); } catch {}
     router.replace("/settings" as any);
+  };
+
+  const handleDeleteComment = async (commentId: string) => {
+    const next = userComments.filter(c => c.id !== commentId);
+    setUserComments(next);
+    await AsyncStorage.setItem(USER_COMMENTS_KEY, JSON.stringify(next));
+  };
+
+  const realFavorites = favorites.map(f => ({
+    id: f.id,
+    title: f.title,
+    titleEn: f.english || f.title,
+    coverImage: f.thumbnail,
+    score: f.score ? Number((f.score > 10 ? f.score / 10 : f.score).toFixed(1)) : null,
+    episodes: f.episodes || null,
+  }));
+
+  const handleRemoveFavoriteItem = async (id: number) => {
+    const existing = favorites.find(f => f.id === id);
+    if (existing) {
+      await toggleFavorite(existing);
+    }
   };
 
   if (!user) {
     return (
       <View style={[s.container, { backgroundColor: colors.background, justifyContent: "center", alignItems: "center" }]}>
-        <ActivityIndicator color={colors.primary} size="large" />
+        <ActivityIndicator color="#0ea5e9" size="large" />
       </View>
     );
   }
 
+  const cleanUserHandle = `@${(user.username || "user").replace(/^@/, "")}`;
+
   return (
-    <View style={[s.container, { backgroundColor: colors.background }]}>
-      {/* Header */}
-      <View style={[s.header, { paddingTop: topPad + 8 }]}>
-        <Pressable onPress={() => router.back()} style={s.backBtn}>
-          <Ionicons name="arrow-back" size={22} color={colors.text} />
+    <View style={[s.container, { backgroundColor: "#090a0f" }]}>
+      {/* ── Top Header: Back Button + Title on Physical Right, Back to Settings Pill on Physical Left ── */}
+      <View style={[s.header, { paddingTop: topPad + 10 }]}>
+        <View style={s.headerRightGroup}>
+          <Pressable
+            onPress={() => router.canGoBack() ? router.back() : router.replace("/settings" as any)}
+            accessibilityRole="button"
+            accessibilityLabel="رجوع"
+            focusable={tvMode}
+            style={({ focused }) => [s.backBtn, tvMode && tvFocusStyle(focused)]}
+          >
+            <Ionicons name="chevron-back" size={20} color="#f8fafc" style={{ transform: [{ scaleX: -1 }] }} />
+          </Pressable>
+          <View style={s.headerTitleBox}>
+            <Text style={s.headerTitle}>إدارة الحساب</Text>
+            <Text style={s.headerSubtitle}>تعديل اليوزر · صورة البروفايل · المفضلة · سجل تعليقاتك</Text>
+          </View>
+        </View>
+
+        <Pressable
+          onPress={() => router.canGoBack() ? router.back() : router.replace("/settings" as any)}
+          style={s.backToSettingsPill}
+        >
+          <Text style={s.backToSettingsText}>رجوع للإعدادات</Text>
         </Pressable>
-        <Text style={[s.headerTitle, { color: colors.text }]}>الملف الشخصي</Text>
-        <View style={{ width: 38 }} />
       </View>
 
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 60 }} keyboardShouldPersistTaps="handled">
-        {/* Hero Avatar */}
-        <View style={s.heroSection}>
-          <Pressable onPress={handlePickImage} style={[s.avatarGlow, { shadowColor: g1 }]} disabled={uploadingImg}>
+      <ScrollView
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={{ paddingHorizontal: 14, paddingTop: 16, paddingBottom: 60 }}
+        keyboardShouldPersistTaps="handled"
+      >
+        {/* ── User Summary Card ── */}
+        <View style={s.userSummaryCard}>
+          {/* Avatar on Physical Right */}
+          <View style={s.summaryAvatarWrap}>
             {user.profileImageUrl ? (
-              <Image source={{ uri: user.profileImageUrl }} style={s.avatarImage} />
+              <Image source={{ uri: user.profileImageUrl }} style={s.summaryAvatarImg} />
             ) : (
-              <LinearGradient colors={[g1, g2]} style={s.avatarCircle}>
+              <LinearGradient colors={[g1, g2]} style={s.summaryAvatarImg}>
                 <Text style={s.avatarLetter}>{letter}</Text>
               </LinearGradient>
             )}
-            {/* Camera badge overlay */}
-            <View style={[s.cameraBadge, { backgroundColor: g1 }]}>
-              {uploadingImg
-                ? <ActivityIndicator size="small" color="#fff" />
-                : <Ionicons name="camera" size={12} color="#fff" />
-              }
+          </View>
+
+          {/* Info in Middle (Right-aligned) */}
+          <View style={s.summaryInfoCol}>
+            <View style={s.summaryNameRow}>
+              <Text numberOfLines={1} style={s.summaryDisplayName}>{user.displayName}</Text>
+              <View style={s.usernameBadge}>
+                <Text style={s.usernameBadgeText}>{cleanUserHandle}</Text>
+              </View>
             </View>
+            <Text numberOfLines={1} style={s.summaryEmail}>{user.email}</Text>
+          </View>
+
+          {/* Logout Button on Physical Left */}
+          <Pressable onPress={handleLogout} style={s.logoutPillBtn}>
+            <Text style={s.logoutPillText}>تسجيل الخروج</Text>
           </Pressable>
+        </View>
 
-          <Text style={[s.heroName, { color: colors.text }]}>{user.displayName}</Text>
-          {user.username ? (
-            <Text style={[s.heroSub, { color: colors.mutedForeground }]}>@{user.username}</Text>
-          ) : null}
-          <Text style={[s.heroEmail, { color: colors.mutedForeground }]}>{user.email}</Text>
-
-          {/* Image action buttons */}
-          <View style={s.imgActions}>
-            <Pressable onPress={handlePickImage} disabled={uploadingImg}
-              style={[s.imgBtn, { backgroundColor: colors.primary + "20", borderColor: colors.primary + "40" }]}>
-              <Ionicons name="image" size={14} color={colors.primary} />
-              <Text style={[s.imgBtnText, { color: colors.primary }]}>تغيير الصورة</Text>
-            </Pressable>
-            {user.profileImageUrl && (
-              <Pressable onPress={handleRemoveImage} disabled={uploadingImg}
-                style={[s.imgBtn, { backgroundColor: "rgba(239,68,68,0.10)", borderColor: "rgba(239,68,68,0.25)" }]}>
-                <Ionicons name="trash" size={14} color="#f87171" />
-                <Text style={[s.imgBtnText, { color: "#f87171" }]}>إزالة</Text>
+        {/* ── 4 Navigation Tabs (Right to Left) ── */}
+        <View style={s.tabsRow}>
+          {[
+            { id: "username" as const, label: "اليوزر والاسم" },
+            { id: "avatar" as const, label: "صورة البروفايل" },
+            { id: "favorites" as const, label: `المفضلة (${realFavorites.length})` },
+            { id: "comments" as const, label: `تعليقاتك (${userComments.length})` },
+          ].map(tab => {
+            const active = activeTab === tab.id;
+            return (
+              <Pressable
+                key={tab.id}
+                onPress={() => setActiveTab(tab.id)}
+                style={[s.tabBtn, active && s.tabBtnActive]}
+              >
+                <Text style={[s.tabBtnText, active && s.tabBtnTextActive]}>
+                  {tab.label}
+                </Text>
               </Pressable>
+            );
+          })}
+        </View>
+
+        {/* Status Messages */}
+        {!!error && (
+          <View style={[s.msgBox, { backgroundColor: "rgba(239,68,68,0.12)", borderColor: "rgba(239,68,68,0.3)" }]}>
+            <Ionicons name="alert-circle" size={15} color="#f87171" />
+            <Text style={[s.msgText, { color: "#fca5a5" }]}>{error}</Text>
+          </View>
+        )}
+        {!!success && (
+          <View style={[s.msgBox, { backgroundColor: "rgba(16,185,129,0.12)", borderColor: "rgba(16,185,129,0.3)" }]}>
+            <Ionicons name="checkmark-circle" size={15} color="#34d399" />
+            <Text style={[s.msgText, { color: "#6ee7b7" }]}>{success}</Text>
+          </View>
+        )}
+
+        {/* ── TAB 1: اليوزر والاسم ── */}
+        {activeTab === "username" && (
+          <View style={s.panelCard}>
+            <Text style={s.fieldLabel}>اسم المستخدم (الاسم الظاهر)</Text>
+            <View style={s.fieldInputWrap}>
+              <TextInput
+                value={displayName}
+                onChangeText={v => { setDisplayName(v); setError(""); }}
+                placeholder="اسمك الظاهر للآخرين"
+                placeholderTextColor="#64748b"
+                style={s.fieldInput}
+                textAlign="right"
+              />
+            </View>
+
+            <Text style={[s.fieldLabel, { marginTop: 18 }]}>اليوزر (معرّف الحساب @username)</Text>
+            <View style={s.fieldInputWrap}>
+              <TextInput
+                value={usernameInput}
+                onChangeText={v => {
+                  const clean = v.replace(/\s+/g, "");
+                  setUsernameInput(clean.startsWith("@") ? clean : `@${clean}`);
+                  setError("");
+                }}
+                placeholder="@username"
+                placeholderTextColor="#38bdf8"
+                style={[s.fieldInput, { color: "#38bdf8", textAlign: "left" }]}
+              />
+            </View>
+
+            <View style={s.saveActionRow}>
+              <Text style={s.helperNote}>يظهر اسمك واليوزر في التعليقات والملف الشخصي</Text>
+              <Pressable onPress={handleSave} disabled={loading} style={s.saveBlueBtn}>
+                {loading ? (
+                  <ActivityIndicator size="small" color="#fff" />
+                ) : (
+                  <>
+                    <Ionicons name="checkmark" size={16} color="#fff" />
+                    <Text style={s.saveBlueBtnText}>حفظ التعديلات</Text>
+                  </>
+                )}
+              </Pressable>
+            </View>
+          </View>
+        )}
+
+        {/* ── TAB 2: صورة البروفايل ── */}
+        {activeTab === "avatar" && (
+          <View style={s.panelCard}>
+            <View style={s.avatarCenterBox}>
+              <View style={s.largeAvatarPreview}>
+                {user.profileImageUrl ? (
+                  <Image source={{ uri: user.profileImageUrl }} style={s.summaryAvatarImg} />
+                ) : (
+                  <LinearGradient colors={[g1, g2]} style={s.summaryAvatarImg}>
+                    <Text style={[s.avatarLetter, { fontSize: 36 }]}>{letter}</Text>
+                  </LinearGradient>
+                )}
+              </View>
+              <Text style={s.avatarPanelTitle}>اختر صورة من جهازك أو خصّص لون الأفاتار الافتراضي</Text>
+
+              <View style={s.avatarActionBtnsRow}>
+                <Pressable onPress={handlePickImage} disabled={uploadingImg} style={s.uploadDeviceBtn}>
+                  {uploadingImg ? (
+                    <ActivityIndicator size="small" color="#38bdf8" />
+                  ) : (
+                    <>
+                      <Ionicons name="image-outline" size={16} color="#38bdf8" />
+                      <Text style={s.uploadDeviceBtnText}>رفع صورة من الجهاز</Text>
+                    </>
+                  )}
+                </Pressable>
+
+                {user.profileImageUrl ? (
+                  <Pressable onPress={() => handleSelectAvatar(null)} disabled={uploadingImg} style={s.removeAvatarBtn}>
+                    <Ionicons name="trash-outline" size={15} color="#f87171" />
+                    <Text style={s.removeAvatarBtnText}>إزالة الصورة</Text>
+                  </Pressable>
+                ) : null}
+              </View>
+            </View>
+
+            <Text style={[s.fieldLabel, { marginTop: 18 }]}>لون الأفاتار عند عدم وجود صورة:</Text>
+            <View style={s.colorSwatchesRow}>
+              {AVATAR_COLORS.map(([c1, c2], idx) => {
+                const activeColor = colorIdx === idx && !user.profileImageUrl;
+                return (
+                  <Pressable
+                    key={idx}
+                    onPress={() => handleSelectColor(idx)}
+                    style={[s.colorSwatchWrap, activeColor && s.colorSwatchWrapActive]}
+                  >
+                    <LinearGradient colors={[c1, c2]} style={s.colorSwatchCircle}>
+                      {activeColor && <Ionicons name="checkmark" size={16} color="#fff" />}
+                    </LinearGradient>
+                  </Pressable>
+                );
+              })}
+            </View>
+          </View>
+        )}
+
+        {/* ── TAB 3: المفضلة ── */}
+        {activeTab === "favorites" && (
+          <View style={s.panelCard}>
+            <View style={s.sectionTopRow}>
+              <Text style={s.sectionMainTitle}>
+                قائمة أنمياتك المفضلة المرتبطة بالحساب ({realFavorites.length})
+              </Text>
+              <Text style={s.cloudSyncBadge}>✓ مُزامنة سحابياً</Text>
+            </View>
+
+            {realFavorites.length === 0 ? (
+              <View style={s.emptyBox}>
+                <Ionicons name="heart-outline" size={36} color="#475569" />
+                <Text style={s.emptyTitle}>لا توجد أعمال مضافة للمفضلة حالياً</Text>
+                <Text style={s.emptySub}>أضف أي أنمي إلى المفضلة ليظهر هنا تلقائياً</Text>
+              </View>
+            ) : (
+              <View style={{ gap: 10 }}>
+                {realFavorites.map(item => (
+                  <View key={item.id} style={s.favRowCard}>
+                    <View style={s.favRightGroup}>
+                      <Image source={{ uri: item.coverImage }} style={s.favPoster} />
+                      <View style={s.favMetaCol}>
+                        <Text numberOfLines={1} style={s.favTitle}>{item.title}</Text>
+                        <Text style={s.favSubMeta}>
+                          {item.score ? `★ ${item.score}` : "أنمي"}
+                          {item.episodes ? `  •  ${item.episodes} حلقة` : ""}
+                        </Text>
+                      </View>
+                    </View>
+
+                    <View style={s.favActionsLeft}>
+                      <Pressable
+                        onPress={() =>
+                          router.push(
+                            `/anime/${item.id}?title=${encodeURIComponent(item.title)}&english=${encodeURIComponent(item.titleEn || item.title)}` as any
+                          )
+                        }
+                        style={s.openItemBtn}
+                      >
+                        <Text style={s.openItemBtnText}>عرض</Text>
+                      </Pressable>
+                      <Pressable
+                        onPress={() => handleRemoveFavoriteItem(item.id)}
+                        style={s.deleteTrashBtn}
+                      >
+                        <Ionicons name="trash-outline" size={16} color="#f87171" />
+                      </Pressable>
+                    </View>
+                  </View>
+                ))}
+              </View>
             )}
           </View>
+        )}
 
-          {/* Active badge */}
-          <View style={[s.activeBadge, { backgroundColor: "#16a34a18", borderColor: "#16a34a40" }]}>
-            <View style={s.activeDot} />
-            <Text style={s.activeBadgeText}>حساب نشط</Text>
-          </View>
-        </View>
-
-        {/* Tabs */}
-        <View style={[s.tabRow, { backgroundColor: colors.card, borderColor: colors.border }]}>
-          {(["profile", "password"] as const).map(t => (
-            <Pressable key={t} onPress={() => { setTab(t); setError(""); setSuccess(""); }}
-              style={[s.tabBtn, tab === t && { backgroundColor: colors.primary + "30", borderColor: colors.primary + "60", borderWidth: 1 }]}>
-              <Ionicons name={t === "profile" ? "person-outline" : "lock-closed-outline"} size={14} color={tab === t ? colors.primary : colors.mutedForeground} />
-              <Text style={[s.tabText, { color: tab === t ? colors.primary : colors.mutedForeground }]}>
-                {t === "profile" ? "بيانات الحساب" : "كلمة المرور"}
+        {/* ── TAB 4: تعليقاتك ── */}
+        {activeTab === "comments" && (
+          <View style={s.panelCard}>
+            <View style={s.sectionTopRow}>
+              <Text style={s.sectionMainTitle}>
+                سجل تعليقاتك في الحلقات ({userComments.length})
               </Text>
-            </Pressable>
-          ))}
-        </View>
-
-        <View style={{ paddingHorizontal: 18, marginTop: 14 }}>
-          {/* Error / Success */}
-          {!!error && (
-            <View style={[s.msgBox, { backgroundColor: "#ef444414", borderColor: "#ef444430" }]}>
-              <Ionicons name="alert-circle" size={14} color="#f87171" />
-              <Text style={[s.msgText, { color: "#fca5a5" }]}>{error}</Text>
+              <Text style={s.commentHandleText}>{cleanUserHandle}</Text>
             </View>
-          )}
-          {!!success && (
-            <View style={[s.msgBox, { backgroundColor: "#10b98114", borderColor: "#10b98130" }]}>
-              <Ionicons name="checkmark-circle" size={14} color="#34d399" />
-              <Text style={[s.msgText, { color: "#6ee7b7" }]}>{success}</Text>
-            </View>
-          )}
 
-          {tab === "profile" ? (
-            <>
-              <Text style={[s.fieldLabel, { color: colors.mutedForeground }]}>الاسم الظاهر</Text>
-              <View style={[s.fieldWrap, { backgroundColor: colors.card, borderColor: colors.border }]}>
-                <TextInput value={displayName} onChangeText={v => { setDisplayName(v); setError(""); }}
-                  placeholder="اسمك الظاهر للآخرين"
-                  placeholderTextColor={colors.mutedForeground + "80"}
-                  style={[s.fieldInput, { color: colors.text }]}
-                  textAlign="right"
-                />
-                <Ionicons name="person-outline" size={16} color={colors.mutedForeground} />
+            {userComments.length === 0 ? (
+              <View style={s.emptyBox}>
+                <Ionicons name="chatbubble-ellipses-outline" size={36} color="#475569" />
+                <Text style={s.emptyTitle}>لم تقم بإضافة أي تعليقات بعد</Text>
+                <Text style={s.emptySub}>ستظهر تعليقاتك على الحلقات هنا عند مشاركتك في النقاشات</Text>
               </View>
+            ) : (
+              <View style={{ gap: 12 }}>
+                {userComments.map(c => (
+                  <View key={c.id} style={s.commentItemCard}>
+                    <View style={s.commentTopBar}>
+                      <View style={s.commentRightMeta}>
+                        {c.animeCover ? (
+                          <Image source={{ uri: c.animeCover }} style={s.commentPoster} />
+                        ) : null}
+                        <View style={s.favMetaCol}>
+                          <Text numberOfLines={1} style={s.favTitle}>{c.animeTitle}</Text>
+                          <Text style={s.commentEpLine}>
+                            <Text style={{ color: "#38bdf8", fontFamily: "Cairo_700Bold" }}>الحلقة {c.episode}</Text>
+                            {"  •  "}
+                            {c.timeAgo}
+                          </Text>
+                        </View>
+                      </View>
 
-              <Text style={[s.fieldLabel, { color: colors.mutedForeground }]}>اسم المستخدم (إنجليزي)</Text>
-              <View style={[s.fieldWrap, { backgroundColor: colors.card, borderColor: colors.border }]}>
-                <TextInput value={username} onChangeText={v => { setUsername(v.replace(/[^a-zA-Z0-9_.]/g, "").toLowerCase()); setError(""); }}
-                  placeholder="@username"
-                  placeholderTextColor={colors.mutedForeground + "80"}
-                  autoCapitalize="none"
-                  style={[s.fieldInput, { color: colors.text }]}
-                  textAlign="right"
-                />
-                <Ionicons name="at" size={16} color={colors.mutedForeground} />
+                      <View style={s.favActionsLeft}>
+                        <Pressable
+                          onPress={() =>
+                            router.push(
+                              `/comments?animeId=${c.animeId}&ep=${c.episode}&title=${encodeURIComponent(c.animeTitle)}&commentId=${c.id}&highlightId=${c.id}` as any
+                            )
+                          }
+                          style={s.openItemBtn}
+                        >
+                          <Text style={s.openItemBtnText}>فتح المناقشة</Text>
+                        </Pressable>
+                        <Pressable
+                          onPress={() => handleDeleteComment(c.id)}
+                          style={s.deleteTrashBtn}
+                        >
+                          <Ionicons name="trash-outline" size={16} color="#f87171" />
+                        </Pressable>
+                      </View>
+                    </View>
+
+                    <Text style={s.commentBodyText}>{c.text}</Text>
+                  </View>
+                ))}
               </View>
-
-              <Text style={[s.fieldLabel, { color: colors.mutedForeground }]}>البريد الإلكتروني</Text>
-              <View style={[s.fieldWrap, { backgroundColor: colors.card, borderColor: colors.border, opacity: 0.5 }]}>
-                <Text style={[s.fieldInput, { color: colors.mutedForeground, paddingVertical: 12 }]}>{user.email}</Text>
-                <Ionicons name="mail-outline" size={16} color={colors.mutedForeground} />
-              </View>
-
-              <Pressable onPress={handleSave} disabled={loading || !changed}
-                style={[s.primaryBtn, { backgroundColor: colors.primary, opacity: !changed ? 0.45 : 1, marginTop: 10 }]}>
-                {loading
-                  ? <ActivityIndicator color="#fff" size="small" />
-                  : (<>
-                    <Ionicons name="checkmark-circle" size={16} color="#fff" />
-                    <Text style={s.primaryBtnText}>حفظ التغييرات</Text>
-                  </>)
-                }
-              </Pressable>
-
-              <View style={[s.divider, { backgroundColor: colors.border }]} />
-
-              {/* Logout */}
-              <Pressable onPress={handleLogout}
-                style={[s.dangerBtn, { backgroundColor: "#ef444410", borderColor: "#ef444430" }]}>
-                <Ionicons name="log-out" size={16} color="#f87171" />
-                <Text style={[s.dangerBtnText, { color: "#f87171" }]}>تسجيل الخروج</Text>
-              </Pressable>
-
-              <Pressable onPress={handleLogout}
-                style={[s.secondaryBtn, { backgroundColor: colors.card, borderColor: colors.border, marginTop: 10 }]}>
-                <Ionicons name="swap-horizontal" size={14} color={colors.mutedForeground} />
-                <Text style={[s.secondaryBtnText, { color: colors.mutedForeground }]}>تبديل الحساب</Text>
-              </Pressable>
-            </>
-          ) : (
-            <>
-              <Text style={[s.fieldLabel, { color: colors.mutedForeground }]}>كلمة المرور الحالية</Text>
-              <View style={[s.fieldWrap, { backgroundColor: colors.card, borderColor: colors.border }]}>
-                <Pressable onPress={() => setShowCurrent(p => !p)}>
-                  <Ionicons name={showCurrent ? "eye-off" : "eye"} size={16} color={colors.mutedForeground} />
-                </Pressable>
-                <TextInput value={currentPass} onChangeText={v => { setCurrentPass(v); setError(""); }}
-                  placeholder="••••••••"
-                  placeholderTextColor={colors.mutedForeground + "80"}
-                  secureTextEntry={!showCurrent}
-                  style={[s.fieldInput, { color: colors.text }]}
-                  textAlign="right"
-                />
-                <Ionicons name="lock-closed-outline" size={16} color={colors.mutedForeground} />
-              </View>
-
-              <Text style={[s.fieldLabel, { color: colors.mutedForeground }]}>كلمة المرور الجديدة</Text>
-              <View style={[s.fieldWrap, { backgroundColor: colors.card, borderColor: colors.border }]}>
-                <Pressable onPress={() => setShowNew(p => !p)}>
-                  <Ionicons name={showNew ? "eye-off" : "eye"} size={16} color={colors.mutedForeground} />
-                </Pressable>
-                <TextInput value={newPass} onChangeText={v => { setNewPass(v); setError(""); }}
-                  placeholder="6 أحرف على الأقل"
-                  placeholderTextColor={colors.mutedForeground + "80"}
-                  secureTextEntry={!showNew}
-                  style={[s.fieldInput, { color: colors.text }]}
-                  textAlign="right"
-                />
-                <Ionicons name="lock-closed-outline" size={16} color={colors.mutedForeground} />
-              </View>
-
-              <Text style={[s.fieldLabel, { color: colors.mutedForeground }]}>تأكيد كلمة المرور الجديدة</Text>
-              <View style={[s.fieldWrap, { backgroundColor: colors.card,
-                borderColor: confirmPass ? (newPass === confirmPass ? "#34d39940" : "#ef444440") : colors.border }]}>
-                <Pressable onPress={() => setShowConfirm(p => !p)}>
-                  <Ionicons name={showConfirm ? "eye-off" : "eye"} size={16} color={colors.mutedForeground} />
-                </Pressable>
-                <TextInput value={confirmPass} onChangeText={v => { setConfirmPass(v); setError(""); }}
-                  placeholder="••••••••"
-                  placeholderTextColor={colors.mutedForeground + "80"}
-                  secureTextEntry={!showConfirm}
-                  style={[s.fieldInput, { color: colors.text }]}
-                  textAlign="right"
-                />
-                <Ionicons
-                  name={newPass === confirmPass && confirmPass ? "checkmark-circle" : "ellipse-outline"}
-                  size={16}
-                  color={newPass === confirmPass && confirmPass ? "#34d399" : colors.mutedForeground}
-                />
-              </View>
-
-              <Pressable onPress={handleChangePassword} disabled={loading}
-                style={[s.primaryBtn, { backgroundColor: colors.primary, marginTop: 10 }]}>
-                {loading
-                  ? <ActivityIndicator color="#fff" size="small" />
-                  : (<>
-                    <Ionicons name="shield-checkmark" size={16} color="#fff" />
-                    <Text style={s.primaryBtnText}>تغيير كلمة المرور</Text>
-                  </>)
-                }
-              </Pressable>
-            </>
-          )}
-        </View>
+            )}
+          </View>
+        )}
       </ScrollView>
     </View>
   );
@@ -429,37 +633,468 @@ export default function ProfileScreen() {
 
 const s = StyleSheet.create({
   container: { flex: 1 },
-  header: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 16, paddingBottom: 12 },
-  backBtn: { width: 38, height: 38, borderRadius: 12, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(255,255,255,0.06)" },
-  headerTitle: { fontSize: 17, fontFamily: "Cairo_800ExtraBold" },
-  heroSection: { alignItems: "center", paddingVertical: 24, paddingHorizontal: 20 },
-  avatarGlow: { shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.5, shadowRadius: 20, elevation: 12, marginBottom: 16 },
-  avatarCircle: { width: 96, height: 96, borderRadius: 28, alignItems: "center", justifyContent: "center" },
-  avatarImage: { width: 96, height: 96, borderRadius: 28 },
-  avatarLetter: { fontSize: 40, fontFamily: "Cairo_800ExtraBold", color: "#fff" },
-  cameraBadge: { position: "absolute", bottom: -6, right: -6, width: 28, height: 28, borderRadius: 14, alignItems: "center", justifyContent: "center", borderWidth: 2, borderColor: "#fff" },
-  heroName: { fontSize: 20, fontFamily: "Cairo_800ExtraBold", marginBottom: 2 },
-  heroSub: { fontSize: 12.5, fontFamily: "Cairo_400Regular", marginBottom: 2 },
-  heroEmail: { fontSize: 11, fontFamily: "Cairo_400Regular", marginBottom: 10 },
-  imgActions: { flexDirection: "row", gap: 8, marginBottom: 12 },
-  imgBtn: { flexDirection: "row", alignItems: "center", gap: 5, paddingHorizontal: 12, paddingVertical: 7, borderRadius: 12, borderWidth: 1 },
-  imgBtnText: { fontSize: 11, fontFamily: "Cairo_700Bold" },
-  activeBadge: { flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 12, paddingVertical: 5, borderRadius: 20, borderWidth: 1 },
-  activeDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: "#22c55e" },
-  activeBadgeText: { fontSize: 10.5, fontFamily: "Cairo_700Bold", color: "#4ade80" },
-  tabRow: { flexDirection: "row", marginHorizontal: 18, padding: 4, borderRadius: 16, borderWidth: 1, gap: 4 },
-  tabBtn: { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, paddingVertical: 10, borderRadius: 12 },
-  tabText: { fontSize: 12, fontFamily: "Cairo_800ExtraBold" },
-  msgBox: { flexDirection: "row", alignItems: "center", gap: 8, borderWidth: 1, borderRadius: 14, paddingHorizontal: 14, paddingVertical: 10, marginBottom: 14 },
-  msgText: { fontSize: 12, fontFamily: "Cairo_400Regular", flex: 1, textAlign: "right" },
-  fieldLabel: { fontSize: 11, fontFamily: "Cairo_700Bold", marginBottom: 6, marginTop: 14, textAlign: "right" },
-  fieldWrap: { flexDirection: "row", alignItems: "center", gap: 10, borderWidth: 1, borderRadius: 14, paddingHorizontal: 14, marginBottom: 2 },
-  fieldInput: { flex: 1, fontSize: 13, fontFamily: "Cairo_400Regular", paddingVertical: 13 },
-  primaryBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, paddingVertical: 15, borderRadius: 18 },
-  primaryBtnText: { fontSize: 13, fontFamily: "Cairo_800ExtraBold", color: "#fff" },
-  divider: { height: 1, marginVertical: 22 },
-  dangerBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 10, paddingVertical: 14, borderRadius: 18, borderWidth: 1 },
-  dangerBtnText: { fontSize: 13, fontFamily: "Cairo_800ExtraBold" },
-  secondaryBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 10, paddingVertical: 12, borderRadius: 18, borderWidth: 1 },
-  secondaryBtnText: { fontSize: 12, fontFamily: "Cairo_700Bold" },
+  header: {
+    flexDirection: ROW_RTL,
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 14,
+    paddingBottom: 14,
+    backgroundColor: "#0e1017",
+    borderBottomWidth: 1,
+    borderBottomColor: "rgba(255,255,255,0.06)",
+  },
+  headerRightGroup: {
+    flexDirection: ROW_RTL,
+    alignItems: "center",
+    gap: 10,
+    flex: 1,
+  },
+  headerTitleBox: {
+    alignItems: "flex-end",
+    flex: 1,
+  },
+  backBtn: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#171a24",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.09)",
+  },
+  headerTitle: {
+    fontSize: 17,
+    fontFamily: "Cairo_800ExtraBold",
+    color: "#ffffff",
+    textAlign: "right",
+  },
+  headerSubtitle: {
+    fontSize: 10,
+    fontFamily: "Cairo_600SemiBold",
+    color: "#64748b",
+    textAlign: "right",
+    marginTop: 1,
+  },
+  backToSettingsPill: {
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+    borderRadius: 999,
+    backgroundColor: "#141720",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.09)",
+  },
+  backToSettingsText: {
+    fontSize: 11,
+    fontFamily: "Cairo_700Bold",
+    color: "#cbd5e1",
+  },
+  userSummaryCard: {
+    flexDirection: ROW_RTL,
+    alignItems: "center",
+    gap: 12,
+    padding: 16,
+    borderRadius: 20,
+    backgroundColor: "#141622",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.07)",
+    marginBottom: 14,
+  },
+  summaryAvatarWrap: {
+    width: 68,
+    height: 68,
+    borderRadius: 18,
+    overflow: "hidden",
+    borderWidth: 2,
+    borderColor: "#0ea5e9",
+    backgroundColor: "#1e293b",
+  },
+  summaryAvatarImg: {
+    width: "100%",
+    height: "100%",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  avatarLetter: {
+    fontSize: 28,
+    fontFamily: "Cairo_800ExtraBold",
+    color: "#ffffff",
+  },
+  summaryInfoCol: {
+    flex: 1,
+    alignItems: "flex-end",
+    justifyContent: "center",
+    gap: 4,
+  },
+  summaryNameRow: {
+    flexDirection: ROW_RTL,
+    alignItems: "center",
+    gap: 8,
+    flexWrap: "wrap",
+  },
+  summaryDisplayName: {
+    fontSize: 16,
+    fontFamily: "Cairo_800ExtraBold",
+    color: "#ffffff",
+  },
+  usernameBadge: {
+    paddingHorizontal: 10,
+    paddingVertical: 2,
+    borderRadius: 999,
+    backgroundColor: "rgba(14,165,233,0.16)",
+    borderWidth: 1,
+    borderColor: "rgba(14,165,233,0.4)",
+  },
+  usernameBadgeText: {
+    fontSize: 11,
+    fontFamily: "Cairo_700Bold",
+    color: "#38bdf8",
+  },
+  summaryEmail: {
+    fontSize: 12,
+    fontFamily: "Cairo_600SemiBold",
+    color: "#94a3b8",
+  },
+  logoutPillBtn: {
+    paddingHorizontal: 14,
+    paddingVertical: 9,
+    borderRadius: 14,
+    backgroundColor: "rgba(127,29,29,0.32)",
+    borderWidth: 1,
+    borderColor: "rgba(239,68,68,0.32)",
+  },
+  logoutPillText: {
+    fontSize: 11,
+    fontFamily: "Cairo_700Bold",
+    color: "#fca5a5",
+  },
+  tabsRow: {
+    flexDirection: ROW_RTL,
+    alignItems: "center",
+    gap: 8,
+    marginBottom: 14,
+  },
+  tabBtn: {
+    flex: 1,
+    paddingVertical: 10,
+    paddingHorizontal: 6,
+    borderRadius: 14,
+    backgroundColor: "#12151f",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.07)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  tabBtnActive: {
+    backgroundColor: "rgba(14,165,233,0.16)",
+    borderColor: "#0ea5e9",
+  },
+  tabBtnText: {
+    fontSize: 11,
+    fontFamily: "Cairo_700Bold",
+    color: "#cbd5e1",
+    textAlign: "center",
+  },
+  tabBtnTextActive: {
+    color: "#38bdf8",
+  },
+  msgBox: {
+    flexDirection: ROW_RTL,
+    alignItems: "center",
+    gap: 8,
+    borderWidth: 1,
+    borderRadius: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    marginBottom: 12,
+  },
+  msgText: {
+    fontSize: 12,
+    fontFamily: "Cairo_700Bold",
+    flex: 1,
+    textAlign: "right",
+  },
+  panelCard: {
+    borderRadius: 20,
+    padding: 16,
+    backgroundColor: "#11131c",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.07)",
+  },
+  fieldLabel: {
+    fontSize: 12,
+    fontFamily: "Cairo_700Bold",
+    color: "#cbd5e1",
+    textAlign: "right",
+    marginBottom: 8,
+  },
+  fieldInputWrap: {
+    borderRadius: 14,
+    backgroundColor: "#161924",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.08)",
+    paddingHorizontal: 14,
+  },
+  fieldInput: {
+    fontSize: 14,
+    fontFamily: "Cairo_700Bold",
+    color: "#ffffff",
+    paddingVertical: 12,
+  },
+  saveActionRow: {
+    flexDirection: ROW_RTL,
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginTop: 18,
+    gap: 10,
+  },
+  helperNote: {
+    flex: 1,
+    fontSize: 11,
+    fontFamily: "Cairo_600SemiBold",
+    color: "#64748b",
+    textAlign: "right",
+  },
+  saveBlueBtn: {
+    flexDirection: ROW_RTL,
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: 18,
+    paddingVertical: 10,
+    borderRadius: 14,
+    backgroundColor: "#0ea5e9",
+  },
+  saveBlueBtnText: {
+    fontSize: 12,
+    fontFamily: "Cairo_800ExtraBold",
+    color: "#ffffff",
+  },
+  avatarCenterBox: {
+    alignItems: "center",
+    gap: 12,
+    paddingVertical: 6,
+  },
+  largeAvatarPreview: {
+    width: 88,
+    height: 88,
+    borderRadius: 24,
+    overflow: "hidden",
+    borderWidth: 2.5,
+    borderColor: "#0ea5e9",
+    backgroundColor: "#1e293b",
+  },
+  avatarPanelTitle: {
+    fontSize: 12,
+    fontFamily: "Cairo_700Bold",
+    color: "#cbd5e1",
+    textAlign: "center",
+  },
+  avatarActionBtnsRow: {
+    flexDirection: ROW_RTL,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 10,
+  },
+  uploadDeviceBtn: {
+    flexDirection: ROW_RTL,
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 14,
+    backgroundColor: "rgba(14,165,233,0.16)",
+    borderWidth: 1,
+    borderColor: "rgba(14,165,233,0.45)",
+  },
+  uploadDeviceBtnText: {
+    fontSize: 12,
+    fontFamily: "Cairo_700Bold",
+    color: "#38bdf8",
+  },
+  removeAvatarBtn: {
+    flexDirection: ROW_RTL,
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 14,
+    backgroundColor: "rgba(127,29,29,0.28)",
+    borderWidth: 1,
+    borderColor: "rgba(239,68,68,0.35)",
+  },
+  removeAvatarBtnText: {
+    fontSize: 12,
+    fontFamily: "Cairo_700Bold",
+    color: "#fca5a5",
+  },
+  colorSwatchesRow: {
+    flexDirection: ROW_RTL,
+    flexWrap: "wrap",
+    gap: 10,
+    justifyContent: "flex-start",
+  },
+  colorSwatchWrap: {
+    width: 44,
+    height: 44,
+    borderRadius: 14,
+    padding: 2,
+    borderWidth: 2,
+    borderColor: "transparent",
+  },
+  colorSwatchWrapActive: {
+    borderColor: "#38bdf8",
+  },
+  colorSwatchCircle: {
+    flex: 1,
+    borderRadius: 10,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  emptyBox: {
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 32,
+    gap: 8,
+  },
+  emptyTitle: {
+    fontSize: 13,
+    fontFamily: "Cairo_700Bold",
+    color: "#cbd5e1",
+    textAlign: "center",
+  },
+  emptySub: {
+    fontSize: 11,
+    fontFamily: "Cairo_600SemiBold",
+    color: "#64748b",
+    textAlign: "center",
+  },
+  sectionTopRow: {
+    flexDirection: ROW_RTL,
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 14,
+  },
+  sectionMainTitle: {
+    fontSize: 13,
+    fontFamily: "Cairo_800ExtraBold",
+    color: "#f8fafc",
+    textAlign: "right",
+  },
+  cloudSyncBadge: {
+    fontSize: 11,
+    fontFamily: "Cairo_700Bold",
+    color: "#10b981",
+  },
+  commentHandleText: {
+    fontSize: 12,
+    fontFamily: "Cairo_700Bold",
+    color: "#0ea5e9",
+  },
+  favRowCard: {
+    flexDirection: ROW_RTL,
+    alignItems: "center",
+    justifyContent: "space-between",
+    padding: 12,
+    borderRadius: 16,
+    backgroundColor: "#161925",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.06)",
+    gap: 10,
+  },
+  favRightGroup: {
+    flexDirection: ROW_RTL,
+    alignItems: "center",
+    gap: 12,
+    flex: 1,
+  },
+  favPoster: {
+    width: 48,
+    height: 64,
+    borderRadius: 10,
+    backgroundColor: "#1e293b",
+  },
+  favMetaCol: {
+    flex: 1,
+    alignItems: "flex-end",
+    gap: 3,
+  },
+  favTitle: {
+    fontSize: 14,
+    fontFamily: "Cairo_800ExtraBold",
+    color: "#ffffff",
+    textAlign: "right",
+  },
+  favSubMeta: {
+    fontSize: 11,
+    fontFamily: "Cairo_600SemiBold",
+    color: "#94a3b8",
+    textAlign: "right",
+  },
+  favActionsLeft: {
+    flexDirection: ROW_RTL,
+    alignItems: "center",
+    gap: 8,
+  },
+  openItemBtn: {
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+    borderRadius: 11,
+    backgroundColor: "rgba(14,165,233,0.14)",
+    borderWidth: 1,
+    borderColor: "rgba(14,165,233,0.38)",
+  },
+  openItemBtnText: {
+    fontSize: 11,
+    fontFamily: "Cairo_700Bold",
+    color: "#38bdf8",
+  },
+  deleteTrashBtn: {
+    width: 34,
+    height: 34,
+    borderRadius: 10,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(127,29,29,0.28)",
+    borderWidth: 1,
+    borderColor: "rgba(239,68,68,0.32)",
+  },
+  commentItemCard: {
+    padding: 14,
+    borderRadius: 16,
+    backgroundColor: "#161925",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.06)",
+    gap: 10,
+  },
+  commentTopBar: {
+    flexDirection: ROW_RTL,
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 10,
+  },
+  commentRightMeta: {
+    flexDirection: ROW_RTL,
+    alignItems: "center",
+    gap: 10,
+    flex: 1,
+  },
+  commentPoster: {
+    width: 42,
+    height: 56,
+    borderRadius: 9,
+    backgroundColor: "#1e293b",
+  },
+  commentEpLine: {
+    fontSize: 11,
+    fontFamily: "Cairo_600SemiBold",
+    color: "#94a3b8",
+    textAlign: "right",
+  },
+  commentBodyText: {
+    fontSize: 13,
+    fontFamily: "Cairo_600SemiBold",
+    color: "#e2e8f0",
+    textAlign: "right",
+    lineHeight: 22,
+  },
 });

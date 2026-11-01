@@ -10,6 +10,11 @@ import pg from "pg";
 const { Pool } = pg;
 
 let _pool: pg.Pool | null = null;
+// Device linking can be deployed before its Supabase migration is applied.
+// Keep a narrowly scoped PostgreSQL fallback so the feature remains usable
+// without changing the storage behavior of other tables.
+const DEVICE_STORAGE_TABLES = new Set(["device_link_codes", "linked_devices", "mobile_push_tokens", "mobile_push_deliveries"]);
+const _pgOnlyDeviceTables = new Set<string>(DEVICE_STORAGE_TABLES);
 
 function getPool(): pg.Pool {
   if (!_pool) {
@@ -18,6 +23,97 @@ function getPool(): pg.Pool {
     _pool = new Pool({ connectionString: url });
   }
   return _pool;
+}
+
+let _deviceStorageSchemaPromise: Promise<void> | null = null;
+
+/**
+ * Device-link tables may temporarily live in the VPS PostgreSQL fallback
+ * while the Supabase schema is being rolled out. Create them lazily as a
+ * last-mile safeguard for an older process that missed startup migration.
+ */
+async function ensureDeviceStorageSchema(): Promise<void> {
+  if (!isPgReady()) return;
+  if (!_deviceStorageSchemaPromise) {
+    _deviceStorageSchemaPromise = (async () => {
+      await getPool().query(`
+        CREATE TABLE IF NOT EXISTS device_link_codes (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          user_id UUID NOT NULL,
+          code_hash TEXT NOT NULL,
+          expires_at TIMESTAMPTZ NOT NULL,
+          attempts INTEGER NOT NULL DEFAULT 0,
+          claimed_at TIMESTAMPTZ,
+          claimed_device_id TEXT,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+        CREATE INDEX IF NOT EXISTS idx_device_link_codes_hash_active
+          ON device_link_codes(code_hash, claimed_at, expires_at);
+        CREATE INDEX IF NOT EXISTS idx_device_link_codes_user_active
+          ON device_link_codes(user_id, claimed_at, expires_at);
+        -- Device-link identity belongs to Supabase when Supabase is enabled.
+        -- Do not enforce a foreign key against a different local users table
+        -- when these operational tables are using the PostgreSQL fallback.
+        ALTER TABLE device_link_codes
+          DROP CONSTRAINT IF EXISTS device_link_codes_user_id_fkey;
+        CREATE TABLE IF NOT EXISTS linked_devices (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          user_id UUID NOT NULL,
+          device_id TEXT NOT NULL,
+          device_name TEXT NOT NULL DEFAULT 'Android TV',
+          platform TEXT NOT NULL DEFAULT 'android-tv',
+          linked_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          last_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          revoked_at TIMESTAMPTZ,
+          UNIQUE(user_id, device_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_linked_devices_user_active
+          ON linked_devices(user_id, revoked_at, linked_at DESC);
+        ALTER TABLE linked_devices
+          DROP CONSTRAINT IF EXISTS linked_devices_user_id_fkey;
+        CREATE TABLE IF NOT EXISTS mobile_push_tokens (
+          token TEXT PRIMARY KEY,
+          user_id UUID,
+          platform TEXT NOT NULL DEFAULT 'android',
+          app_version TEXT,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          last_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          disabled_at TIMESTAMPTZ
+        );
+        ALTER TABLE mobile_push_tokens ADD COLUMN IF NOT EXISTS user_id UUID;
+        CREATE INDEX IF NOT EXISTS idx_mobile_push_tokens_active
+          ON mobile_push_tokens(disabled_at, last_seen_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_mobile_push_tokens_user_active
+          ON mobile_push_tokens(user_id, disabled_at);
+        CREATE TABLE IF NOT EXISTS mobile_push_deliveries (
+          id BIGSERIAL PRIMARY KEY,
+          event_key TEXT NOT NULL,
+          token TEXT NOT NULL,
+          payload_json TEXT NOT NULL,
+          status TEXT NOT NULL DEFAULT 'queued'
+            CHECK (status IN ('queued', 'retry', 'ticket_pending', 'sent', 'invalid_token', 'failed')),
+          attempts INTEGER NOT NULL DEFAULT 0,
+          next_attempt_at TIMESTAMPTZ,
+          ticket_id TEXT,
+          last_error TEXT,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          UNIQUE(event_key, token)
+        );
+        CREATE INDEX IF NOT EXISTS idx_mobile_push_deliveries_due
+          ON mobile_push_deliveries(status, next_attempt_at);
+      `);
+    })().catch(error => {
+      _deviceStorageSchemaPromise = null;
+      throw error;
+    });
+  }
+  await _deviceStorageSchemaPromise;
+}
+
+function isSupabaseReadyForTable(table: string): boolean {
+  if ((_pgOnlyDeviceTables.has(table) || table.startsWith("source_catalog_")) && isPgReady()) return false;
+  return isSupabaseReady();
 }
 
 export function isSupabaseReady(): boolean {
@@ -93,8 +189,12 @@ function parseFilter(col: string, val: string): { sql: string; value: any } {
     return { sql: `"${col}" IN (${placeholders})`, value: values };
   }
 
+  let processedRaw = raw;
+  if (op === "like" || op === "ilike") {
+    processedRaw = raw.replace(/^\*/, "%").replace(/\*$/, "%");
+  }
   const sqlOp = opMap[op] || "=";
-  return { sql: `"${col}" ${sqlOp} $?`, value: raw };
+  return { sql: `"${col}" ${sqlOp} $?`, value: processedRaw };
 }
 
 /**
@@ -113,6 +213,27 @@ function buildWhere(
   for (const [k, v] of Object.entries(filters)) {
     if (SKIP.has(k) || v === undefined || v === null) continue;
     const strVal = String(v);
+    if (k === "or") {
+      const inner = strVal.replace(/^\(|\)$/g, "");
+      const clauses = inner.split(",").map(c => c.trim()).filter(Boolean);
+      const orParts: string[] = [];
+      for (const clause of clauses) {
+        const dot1 = clause.indexOf(".");
+        if (dot1 === -1) continue;
+        const col = clause.slice(0, dot1);
+        const rest = clause.slice(dot1 + 1);
+        const { sql, value } = parseFilter(col, rest);
+        if (value !== undefined) {
+          orParts.push(sql.replace("$?", `${idx}`));
+          values.push(value);
+          idx++;
+        }
+      }
+      if (orParts.length) {
+        conds.push(`(${orParts.join(" OR ")})`);
+      }
+      continue;
+    }
     const { sql, value } = parseFilter(k, strVal);
     if (value !== undefined) {
       if (Array.isArray(value)) {
@@ -146,37 +267,60 @@ function buildWhere(
 export async function sbSelect<T = any>(
   table: string,
   filters: Record<string, string | number | undefined> = {},
-  opts: { limit?: number; select?: string } = {},
+  opts: { limit?: number; offset?: number; select?: string; strict?: boolean } = {},
 ): Promise<T[]> {
+  const allowDeviceStorageFallback = (DEVICE_STORAGE_TABLES.has(table) || table.startsWith("source_catalog_")) && isPgReady();
+  let lastError: Error | null = null;
+
   // Supabase path
-  if (isSupabaseReady()) {
+  if (isSupabaseReadyForTable(table)) {
     try {
       const params: Record<string, string | number | undefined> = {
         ...filters,
         select: opts.select || "*",
         limit: opts.limit || filters.limit || 200,
+        offset: opts.offset,
       };
       const url = `${getSbUrl()}/rest/v1/${table}${buildQuery(params)}`;
       const res = await fetch(url, { headers: sbHeaders(), signal: AbortSignal.timeout(10000) });
       if (!res.ok) {
         const err = await res.text();
+        lastError = new Error(`Supabase ${res.status}: ${err.slice(0, 200)}`);
         console.error(`[sb] sbSelect "${table}" ${res.status}:`, err.slice(0, 200));
+        // Device-link/push tables may intentionally live in the VPS
+        // PostgreSQL fallback until their Supabase migration is applied.
+        // Keep reads consistent with sbInsert/sbPatch: any client/schema
+        // error must use the same fallback instead of returning an empty
+        // result and making a valid code look invalid.
+        if (!(res.status >= 400 && res.status < 500 && allowDeviceStorageFallback)) {
+          if (opts.strict) throw lastError;
+          return [];
+        }
+      } else {
+        return (await res.json()) as T[];
+      }
+    } catch (e: any) {
+      lastError = e instanceof Error ? e : new Error(String(e));
+      console.error(`[sb] sbSelect "${table}":`, e.message);
+      if (!allowDeviceStorageFallback) {
+        if (opts.strict) throw lastError;
         return [];
       }
-      return (await res.json()) as T[];
-    } catch (e: any) {
-      console.error(`[sb] sbSelect "${table}":`, e.message);
-      return [];
     }
   }
 
   // PostgreSQL fallback
-  if (!isPgReady()) return [];
+  if (!isPgReady()) {
+    if (opts.strict) throw lastError || new Error("No database configured");
+    return [];
+  }
   try {
+    if (allowDeviceStorageFallback) await ensureDeviceStorageSchema();
     const cols = opts.select && opts.select !== "*"
       ? opts.select.split(",").map(c => `"${c.trim()}"`).join(", ")
       : "*";
     const limit = opts.limit || (filters.limit as number | undefined) || 200;
+    const offset = Math.max(0, opts.offset || 0);
     const order = filters.order ? String(filters.order) : null;
 
     const { where, values, nextIdx } = buildWhere(filters);
@@ -187,14 +331,74 @@ export async function sbSelect<T = any>(
       orderClause = `ORDER BY "${col}" ${dir?.toUpperCase() === "DESC" ? "DESC" : "ASC"}`;
     }
 
-    const sql = `SELECT ${cols} FROM "${table}" ${where} ${orderClause} LIMIT $${nextIdx}`;
-    values.push(limit);
+    const sql = `SELECT ${cols} FROM "${table}" ${where} ${orderClause} LIMIT $${nextIdx} OFFSET $${nextIdx + 1}`;
+    values.push(limit, offset);
 
     const result = await getPool().query(sql, values);
     return result.rows as T[];
   } catch (e: any) {
     console.error(`[pg] sbSelect "${table}":`, e.message);
+    if (opts.strict) throw (e instanceof Error ? e : new Error(String(e)));
     return [];
+  }
+}
+
+/**
+ * Count rows without downloading them. Supabase/PostgREST caps normal
+ * responses at 1,000 rows, so counting a fetched array silently undercounts
+ * large catalog tables.
+ */
+export async function sbCount(
+  table: string,
+  filters: Record<string, string | number | undefined> = {},
+  options: { strict?: boolean } = {},
+): Promise<number> {
+  if (isSupabaseReady()) {
+    try {
+      const params: Record<string, string | number | undefined> = {
+        ...filters,
+        select: "*",
+        limit: 1,
+      };
+      const url = `${getSbUrl()}/rest/v1/${table}${buildQuery(params)}`;
+      const res = await fetch(url, {
+        headers: { ...sbHeaders(), Prefer: "count=exact" },
+        signal: AbortSignal.timeout(10000),
+      });
+      if (!res.ok) {
+        const message = `HTTP ${res.status}`;
+        if (options.strict) throw new Error(`sbCount ${table}: ${message}`);
+        return 0;
+      }
+      const range = res.headers.get("content-range") || "";
+      const totalText = range.split("/").pop() || "";
+      const total = Number(totalText);
+      if (Number.isSafeInteger(total) && total >= 0) return total;
+      if (options.strict) throw new Error(`sbCount ${table}: exact count unavailable`);
+      const rows = await res.json();
+      return Array.isArray(rows) ? rows.length : 0;
+    } catch (e: any) {
+      console.error(`[sb] sbCount "${table}":`, e.message);
+      if (options.strict) throw e;
+      return 0;
+    }
+  }
+
+  if (!isPgReady()) {
+    if (options.strict) throw new Error(`sbCount ${table}: database unavailable`);
+    return 0;
+  }
+  try {
+    const { where, values } = buildWhere(filters);
+    const result = await getPool().query(
+      `SELECT count(*)::int AS count FROM "${table}" ${where}`,
+      values,
+    );
+    return Number(result.rows[0]?.count || 0);
+  } catch (e: any) {
+    console.error(`[pg] sbCount "${table}":`, e.message);
+    if (options.strict) throw e;
+    return 0;
   }
 }
 
@@ -203,11 +407,14 @@ export async function sbSelect<T = any>(
 export async function sbInsert<T = any>(
   table: string,
   row: Record<string, any>,
+  options: { allowPostgresFallback?: boolean } = {},
 ): Promise<T | null> {
+  const allowPostgresFallback = options.allowPostgresFallback !== false;
   // ── PostgreSQL direct helper ───────────────────────────────────────────
   const pgInsert = async (): Promise<T | null> => {
     if (!isPgReady()) return null;
     try {
+      if (DEVICE_STORAGE_TABLES.has(table)) await ensureDeviceStorageSchema();
       const entries = Object.entries(row).filter(([, v]) => v !== undefined);
       const cols = entries.map(([k]) => `"${k}"`).join(", ");
       const placeholders = entries.map((_, i) => `$${i + 1}`).join(", ");
@@ -222,7 +429,7 @@ export async function sbInsert<T = any>(
   };
 
   // Supabase path
-  if (isSupabaseReady()) {
+  if (isSupabaseReadyForTable(table)) {
     try {
       const url = `${getSbUrl()}/rest/v1/${table}`;
       const res = await fetch(url, {
@@ -235,7 +442,7 @@ export async function sbInsert<T = any>(
         const errText = await res.text();
         console.error(`[sb] sbInsert "${table}" ${res.status}:`, errText.slice(0, 200));
         // عند خطأ 4xx (عمود ناقص، مخطط قديم) — جرّب PostgreSQL كـ fallback
-        if (res.status >= 400 && res.status < 500 && isPgReady()) {
+        if (allowPostgresFallback && res.status >= 400 && res.status < 500 && isPgReady()) {
           console.warn(`[sb] sbInsert "${table}" Supabase 4xx — falling back to PostgreSQL`);
           return pgInsert();
         }
@@ -246,8 +453,85 @@ export async function sbInsert<T = any>(
     } catch (e: any) {
       console.error(`[sb] sbInsert "${table}":`, e.message);
       // شبكة أو timeout — جرّب PostgreSQL
-      if (isPgReady()) return pgInsert();
+      if (allowPostgresFallback && isPgReady()) return pgInsert();
       return null;
+    }
+  }
+
+  return allowPostgresFallback ? pgInsert() : null;
+}
+
+/**
+ * Insert a row once, ignoring a known unique-key collision. Used for durable
+ * push delivery intents so a scheduler retry cannot overwrite ticket state.
+ */
+export async function sbInsertIgnore(
+  table: string,
+  row: Record<string, any> | Record<string, any>[],
+  onConflict: string,
+): Promise<boolean> {
+  const columns = onConflict.split(",").map((column) => column.trim()).filter(Boolean);
+  if (!columns.length || columns.some((column) => !/^[a-z_][a-z0-9_]*$/i.test(column))) {
+    throw new Error("Invalid insert-ignore conflict columns");
+  }
+  const rows = Array.isArray(row) ? row : [row];
+  if (!rows.length) return true;
+
+  const pgInsert = async (): Promise<boolean> => {
+    if (!isPgReady()) return false;
+    try {
+      if (DEVICE_STORAGE_TABLES.has(table)) await ensureDeviceStorageSchema();
+      const entries = Object.entries(rows[0]).filter(([, value]) => value !== undefined);
+      const keys = entries.map(([column]) => column);
+      const quotedColumns = keys.map((column) => `"${column}"`).join(", ");
+      const conflictColumns = columns.map((column) => `"${column}"`).join(", ");
+      const values: unknown[] = [];
+      const valueGroups = rows.map((current) => {
+        const currentKeys = Object.keys(current).filter((key) => current[key] !== undefined);
+        if (currentKeys.length !== keys.length || keys.some((key) => !currentKeys.includes(key))) {
+          throw new Error("Insert-ignore batch rows must have matching columns");
+        }
+        const placeholders = keys.map((key) => {
+          values.push(current[key]);
+          return `$${values.length}`;
+        });
+        return `(${placeholders.join(", ")})`;
+      });
+      const result = await getPool().query(
+        `INSERT INTO "${table}" (${quotedColumns}) VALUES ${valueGroups.join(", ")} ON CONFLICT (${conflictColumns}) DO NOTHING RETURNING *`,
+        values,
+      );
+      return result.rows.length > 0;
+    } catch (error: any) {
+      console.error(`[pg] sbInsertIgnore "${table}":`, error.message);
+      return false;
+    }
+  };
+
+  if (isSupabaseReady()) {
+    try {
+      const url = `${getSbUrl()}/rest/v1/${table}?on_conflict=${encodeURIComponent(columns.join(","))}`;
+      const response = await fetch(url, {
+        method: "POST",
+        headers: { ...sbHeaders(), Prefer: "resolution=ignore-duplicates,return=representation" },
+        body: JSON.stringify(rows.length === 1 ? rows[0] : rows),
+        signal: AbortSignal.timeout(10_000),
+      });
+      if (response.ok) {
+        const data = await response.json();
+        return Array.isArray(data) ? data.length > 0 : Boolean(data);
+      }
+      const errorText = await response.text();
+      console.error(`[sb] sbInsertIgnore "${table}" ${response.status}:`, errorText.slice(0, 200));
+      if (response.status === 409) return false;
+      if (response.status >= 400 && response.status < 500 && DEVICE_STORAGE_TABLES.has(table) && isPgReady()) {
+        return pgInsert();
+      }
+      return false;
+    } catch (error: any) {
+      console.error(`[sb] sbInsertIgnore "${table}":`, error.message);
+      if (DEVICE_STORAGE_TABLES.has(table)) return pgInsert();
+      return false;
     }
   }
 
@@ -261,8 +545,10 @@ export async function sbUpsert<T = any>(
   row: Record<string, any>,
   onConflict?: string,
 ): Promise<T | null> {
+  const allowDeviceStorageFallback = DEVICE_STORAGE_TABLES.has(table) && isPgReady();
+
   // Supabase path
-  if (isSupabaseReady()) {
+  if (isSupabaseReadyForTable(table)) {
     try {
       const h = { ...sbHeaders(), "Prefer": `resolution=merge-duplicates,return=representation` };
       const qs = onConflict ? `?on_conflict=${encodeURIComponent(onConflict)}` : "";
@@ -275,20 +561,37 @@ export async function sbUpsert<T = any>(
       });
       if (!res.ok) {
         const err = await res.text();
+        if (res.status === 400 && /Could not find the '([^']+)' column/.test(err)) {
+          const missing = err.match(/Could not find the '([^']+)' column/)?.[1];
+          if (missing && Object.prototype.hasOwnProperty.call(row, missing)) {
+            const compatibleRow = { ...row }; delete compatibleRow[missing];
+            const retry = await fetch(url, { method: "POST", headers: h, body: JSON.stringify(compatibleRow), signal: AbortSignal.timeout(10000) });
+            if (retry.ok) { const data = await retry.json(); return (Array.isArray(data) ? data[0] : data) as T | null; }
+            const retryErr = await retry.text();
+            console.error(`[sb] sbUpsert "${table}" compatible retry ${retry.status}:`, retryErr.slice(0, 200)); return null;
+          }
+        }
         console.error(`[sb] sbUpsert "${table}" ${res.status}:`, err.slice(0, 200));
-        return null;
+        if (res.status === 404 && allowDeviceStorageFallback) {
+          console.warn(`[sb] sbUpsert "${table}" Supabase 404 — falling back to PostgreSQL`);
+        } else {
+          return null;
+        }
       }
-      const data = await res.json();
-      return (Array.isArray(data) ? data[0] : data) as T | null;
+      if (res.ok) {
+        const data = await res.json();
+        return (Array.isArray(data) ? data[0] : data) as T | null;
+      }
     } catch (e: any) {
       console.error(`[sb] sbUpsert "${table}":`, e.message);
-      return null;
+      if (!allowDeviceStorageFallback) return null;
     }
   }
 
   // PostgreSQL fallback
   if (!isPgReady()) return null;
   try {
+    if (allowDeviceStorageFallback) await ensureDeviceStorageSchema();
     const entries = Object.entries(row).filter(([, v]) => v !== undefined);
     const cols = entries.map(([k]) => `"${k}"`).join(", ");
     const placeholders = entries.map((_, i) => `$${i + 1}`).join(", ");
@@ -326,8 +629,10 @@ export async function sbPatch<T = any>(
   filter: Record<string, string | number>,
   data: Record<string, any>,
 ): Promise<T | null> {
+  const allowDeviceStorageFallback = DEVICE_STORAGE_TABLES.has(table) && isPgReady();
+
   // Supabase path
-  if (isSupabaseReady()) {
+  if (isSupabaseReadyForTable(table)) {
     try {
       const params: Record<string, string | number | undefined> = {};
       for (const [k, v] of Object.entries(filter)) params[k] = String(v);
@@ -341,19 +646,21 @@ export async function sbPatch<T = any>(
       if (!res.ok) {
         const err = await res.text();
         console.error(`[sb] sbPatch "${table}" ${res.status}:`, err.slice(0, 200));
-        return null;
+        if (!(res.status >= 400 && res.status < 500 && allowDeviceStorageFallback)) return null;
+      } else {
+        const result = await res.json();
+        return (Array.isArray(result) ? result[0] : result) as T | null;
       }
-      const result = await res.json();
-      return (Array.isArray(result) ? result[0] : result) as T | null;
     } catch (e: any) {
       console.error(`[sb] sbPatch "${table}":`, e.message);
-      return null;
+      if (!allowDeviceStorageFallback) return null;
     }
   }
 
   // PostgreSQL fallback
   if (!isPgReady()) return null;
   try {
+    if (allowDeviceStorageFallback) await ensureDeviceStorageSchema();
     const setEntries = Object.entries(data).filter(([, v]) => v !== undefined);
     const setClause = setEntries.map(([k], i) => `"${k}" = $${i + 1}`).join(", ");
     const setValues = setEntries.map(([, v]) => v);
@@ -374,8 +681,10 @@ export async function sbDelete(
   table: string,
   filter: Record<string, string | number>,
 ): Promise<boolean> {
+  const allowDeviceStorageFallback = DEVICE_STORAGE_TABLES.has(table) && isPgReady();
+
   // Supabase path
-  if (isSupabaseReady()) {
+  if (isSupabaseReadyForTable(table)) {
     try {
       const params: Record<string, string | number | undefined> = {};
       for (const [k, v] of Object.entries(filter)) params[k] = String(v);
@@ -385,16 +694,18 @@ export async function sbDelete(
         headers: sbHeaders(),
         signal: AbortSignal.timeout(10000),
       });
-      return res.ok;
+      if (res.ok) return true;
+      if (!(res.status >= 400 && res.status < 500 && allowDeviceStorageFallback)) return false;
     } catch (e: any) {
       console.error(`[sb] sbDelete "${table}":`, e.message);
-      return false;
+      if (!allowDeviceStorageFallback) return false;
     }
   }
 
   // PostgreSQL fallback
   if (!isPgReady()) return false;
   try {
+    if (allowDeviceStorageFallback) await ensureDeviceStorageSchema();
     const { where, values } = buildWhere(filter);
     if (!where) return false; // safety: never delete all rows
     const sql = `DELETE FROM "${table}" ${where}`;

@@ -1,19 +1,27 @@
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Ionicons } from "@expo/vector-icons";
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator, FlatList, KeyboardAvoidingView, Platform,
-  Pressable, StyleSheet, Text, TextInput, View,
+  Image, StyleSheet, Text, TextInput, View, I18nManager,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { getBaseUrl } from "@/utils/api";
 import { secureFetch } from "@/utils/secureApi";
+import { isTvDevice, tvFocusStyle, TvPressable as Pressable } from "@/utils/tv";
+import { useColors } from "@/hooks/useColors";
+import type { ThemePalette } from "@/constants/colors";
+
+const ROW_RTL = I18nManager.isRTL ? "row" : "row-reverse";
+const USER_COMMENTS_KEY = "nova-user-comments-log";
 
 /* ── Types ── */
 interface Comment {
   id: string;
   userId: string;
   username: string;
+  displayName?: string | null;
   avatarUrl: string | null;
   text: string;
   likes: number;
@@ -23,22 +31,30 @@ interface Comment {
   replyToUsername: string | null;
 }
 
-function timeAgo(iso: string) {
-  const diff = Date.now() - new Date(iso).getTime();
+function timeAgo(value: string | number) {
+  const raw = typeof value === "number" || /^\d+$/.test(String(value)) ? Number(value) : new Date(value).getTime();
+  const timestamp = raw > 0 && raw < 10_000_000_000 ? raw * 1000 : raw;
+  const diff = Math.max(0, Date.now() - timestamp);
   const s = Math.floor(diff / 1000);
   if (s < 60) return "الآن";
   const m = Math.floor(s / 60);
-  if (m < 60) return `منذ ${m} دقيقة`;
+  if (m < 60) return `منذ ${m} ${m === 1 ? "دقيقة" : "دقائق"}`;
   const h = Math.floor(m / 60);
-  if (h < 24) return `منذ ${h} ساعة`;
+  if (h < 24) return `منذ ${h} ${h === 1 ? "ساعة" : "ساعات"}`;
   const d = Math.floor(h / 24);
-  if (d < 30) return `منذ ${d} يوم`;
-  return new Date(iso).toLocaleDateString("ar-EG");
+  if (d < 30) return `منذ ${d} ${d === 1 ? "يوم" : "أيام"}`;
+  return new Date(timestamp).toLocaleDateString("ar-EG");
 }
 
-function Avatar({ username }: { username: string }) {
+function Avatar({ username, avatarUrl }: { username: string; avatarUrl?: string | null }) {
+  const colors = useColors();
+  const s = useMemo(() => createCommentStyles(colors), [colors]);
+  const [imageFailed, setImageFailed] = useState(false);
   const char = (username || "م")[0].toUpperCase();
   const hue = (username.charCodeAt(0) * 37) % 360;
+  if (avatarUrl && !imageFailed) {
+    return <Image source={{ uri: avatarUrl }} onError={() => setImageFailed(true)} style={s.avatar} />;
+  }
   return (
     <View style={[s.avatar, { backgroundColor: `hsl(${hue},55%,35%)` }]}>
       <Text style={s.avatarText}>{char}</Text>
@@ -49,6 +65,9 @@ function Avatar({ username }: { username: string }) {
 export default function CommentsPage() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const colors = useColors();
+  const s = useMemo(() => createCommentStyles(colors), [colors]);
+  const tvMode = isTvDevice();
   const params = useLocalSearchParams<{ animeId?: string; tmdbId?: string; ep?: string; title?: string; type?: string }>();
 
   const animeId = params.animeId ? parseInt(params.animeId) : undefined;
@@ -59,6 +78,7 @@ export default function CommentsPage() {
     : "التعليقات";
 
   const [comments, setComments]   = useState<Comment[]>([]);
+  const [highlightId, setHighlightId] = useState<string | null>(params.highlightId || params.commentId || null);
   const [loading, setLoading]     = useState(false);
   const [posting, setPosting]     = useState(false);
   const [text, setText]           = useState("");
@@ -68,6 +88,7 @@ export default function CommentsPage() {
   const [myUsername, setMyUsername]   = useState<string | null>(null);
   const [myDisplayName, setMyDisplayName] = useState<string | null>(null);
   const [liking, setLiking]       = useState<Set<string>>(new Set());
+  const [, refreshRelativeTimes] = useState(0);
   const inputRef  = useRef<TextInput>(null);
   const listRef   = useRef<FlatList>(null);
 
@@ -82,6 +103,11 @@ export default function CommentsPage() {
     }).catch(() => {});
   }, []);
 
+  useEffect(() => {
+    const timer = setInterval(() => refreshRelativeTimes(value => value + 1), 30_000);
+    return () => clearInterval(timer);
+  }, []);
+
   async function loadComments() {
     setLoading(true);
     try {
@@ -93,7 +119,19 @@ export default function CommentsPage() {
       const r = await secureFetch(`${base}/api/comments?${ps}`);
       if (r.ok) {
         const d = await r.json();
-        setComments(d.comments || []);
+        const loaded: Comment[] = d.comments || [];
+        setComments(loaded);
+        const targetId = params.highlightId || params.commentId;
+        if (targetId) {
+          setHighlightId(targetId);
+          setTimeout(() => {
+            const idx = loaded.findIndex(c => String(c.id) === String(targetId));
+            if (idx >= 0) {
+              try { listRef.current?.scrollToIndex({ index: Math.max(0, idx), animated: true }); } catch {}
+            }
+          }, 400);
+          setTimeout(() => setHighlightId(null), 5000);
+        }
       }
     } catch {}
     setLoading(false);
@@ -106,7 +144,9 @@ export default function CommentsPage() {
     try {
       const body: any = {
         text: text.trim(),
-        username: myUsername || myDisplayName || "مستخدم",
+        username: myDisplayName || myUsername || "مستخدم",
+        userHandle: myUsername || null,
+        avatarUrl: null,
         animeType: params.type || (tmdbId ? "animation" : "anime"),
       };
       if (animeId) body.animeId = animeId;
@@ -124,10 +164,27 @@ export default function CommentsPage() {
         if (d.comment) {
           setComments(prev => [...prev, d.comment]);
           setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 100);
+          try {
+            const rawLog = await AsyncStorage.getItem(USER_COMMENTS_KEY);
+            const parsedLog = rawLog ? JSON.parse(rawLog) : [];
+            const cleanLog = Array.isArray(parsedLog)
+              ? parsedLog.filter((item: any) => item && !["c-1", "c-2", "c-3"].includes(String(item.id)))
+              : [];
+            const newEntry = {
+              id: String(d.comment.id || Date.now()),
+              animeId: animeId || 0,
+              animeTitle: params.title || "أنمي",
+              animeCover: "",
+              episode: epNum || 1,
+              timeAgo: "الآن",
+              text: text.trim(),
+            };
+            await AsyncStorage.setItem(USER_COMMENTS_KEY, JSON.stringify([newEntry, ...cleanLog]));
+          } catch {}
         }
         setText(""); setReplyTo(null);
       } else if (r.status === 401) {
-        setPostError("يجب تسجيل الدخول من تطبيق الويب لإضافة تعليق");
+        setPostError("يلزم تسجيل حساب في التطبيق لإضافة تعليق");
       } else {
         const d = await r.json().catch(() => ({}));
         setPostError(d.error || "حدث خطأ أثناء الإرسال");
@@ -160,47 +217,61 @@ export default function CommentsPage() {
   const topLevel = comments.filter(c => !c.parentId);
   const replies  = (parentId: string) => comments.filter(c => c.parentId === parentId);
 
-  const renderComment = (c: Comment, isReply = false) => (
-    <View key={c.id} style={[s.commentWrap, isReply && s.replyWrap]}>
-      {isReply && <View style={s.replyLine} />}
-      <Avatar username={c.username} />
-      <View style={{ flex: 1, gap: 4 }}>
-        <View style={s.commentMeta}>
-          <Text style={s.commentUser}>{c.username}</Text>
-          {c.replyToUsername && <Text style={s.replyTag}>↩ {c.replyToUsername}</Text>}
-          <Text style={s.commentTime}>{timeAgo(c.createdAt)}</Text>
-        </View>
-        <Text style={s.commentText}>{c.text}</Text>
-        <View style={s.commentActions}>
-          <Pressable onPress={() => toggleLike(c)} style={s.actionBtn} disabled={liking.has(c.id)}>
-            <Ionicons name="heart" size={14} color={c.liked ? "#f87171" : "rgba(255,255,255,0.3)"} />
-            {c.likes > 0 && <Text style={[s.actionBtnText, c.liked && { color: "#f87171" }]}>{c.likes}</Text>}
-          </Pressable>
-          <Pressable onPress={() => { setReplyTo(c); setTimeout(() => inputRef.current?.focus(), 100); }} style={s.actionBtn}>
-            <Ionicons name="return-up-back" size={14} color="rgba(139,92,246,0.7)" />
-            <Text style={[s.actionBtnText, { color: "rgba(139,92,246,0.7)" }]}>رد</Text>
-          </Pressable>
-          {c.userId === myUserId && (
-            <Pressable onPress={() => deleteComment(c)} style={s.actionBtn}>
-              <Ionicons name="trash" size={13} color="rgba(239,68,68,0.45)" />
+  const renderComment = (c: Comment, isReply = false) => {
+    const isHighlighted = String(c.id) === String(highlightId);
+    return (
+      <View key={c.id} style={[
+        s.commentWrap,
+        isReply && s.replyWrap,
+        isHighlighted && { borderColor: "#06b6d4", borderWidth: 2, backgroundColor: "rgba(6, 182, 212, 0.16)", borderRadius: 14 }
+      ]}>
+        {isReply && <View style={s.replyLine} />}
+        <Avatar username={c.displayName || c.username} avatarUrl={c.avatarUrl} />
+        <View style={{ flex: 1, gap: 4 }}>
+          <View style={s.commentMeta}>
+            <Text style={s.commentUser}>{c.displayName || c.username}</Text>
+            {c.username && c.displayName && c.username !== c.displayName && (
+              <Text style={s.commentHandle}>@{c.username}</Text>
+            )}
+            {c.replyToUsername && <Text style={s.replyTag}>↩ {c.replyToUsername}</Text>}
+            <Text style={s.commentTime}>{timeAgo(c.createdAt)}</Text>
+          </View>
+          <Text style={s.commentText}>{c.text}</Text>
+          <View style={s.commentActions}>
+            <Pressable onPress={() => toggleLike(c)} focusable={tvMode}
+              style={({ focused }) => [s.actionBtn, tvMode && tvFocusStyle(focused)]} disabled={liking.has(c.id)}>
+              <Ionicons name="heart" size={14} color={c.liked ? colors.destructive : colors.textMuted} />
+              {c.likes > 0 && <Text style={[s.actionBtnText, c.liked && { color: colors.destructive }]}>{c.likes}</Text>}
             </Pressable>
-          )}
+            <Pressable onPress={() => { setReplyTo(c); setTimeout(() => inputRef.current?.focus(), 100); }} focusable={tvMode}
+              style={({ focused }) => [s.actionBtn, tvMode && tvFocusStyle(focused)]}>
+              <Ionicons name="return-up-back" size={14} color={colors.accent} />
+              <Text style={[s.actionBtnText, { color: colors.accent }]}>رد</Text>
+            </Pressable>
+            {c.userId === myUserId && (
+              <Pressable onPress={() => deleteComment(c)} focusable={tvMode}
+                style={({ focused }) => [s.actionBtn, tvMode && tvFocusStyle(focused)]}>
+                <Ionicons name="trash" size={13} color={colors.destructive} />
+              </Pressable>
+            )}
+          </View>
+          {replies(c.id).map(r => renderComment(r, true))}
         </View>
-        {replies(c.id).map(r => renderComment(r, true))}
       </View>
-    </View>
-  );
+    );
+  };
 
   return (
     <View style={[s.container, { paddingTop: Platform.OS === "web" ? 0 : insets.top }]}>
       {/* Header */}
       <View style={s.header}>
-        <Pressable onPress={() => router.canGoBack() ? router.back() : router.replace("/(tabs)" as any)} style={s.backBtn}>
-          <Ionicons name="chevron-back" size={20} color="#fff" />
+        <Pressable onPress={() => router.canGoBack() ? router.back() : router.replace("/(tabs)" as any)} focusable={tvMode}
+          style={({ focused }) => [s.backBtn, tvMode && tvFocusStyle(focused)]}>
+          <Ionicons name="chevron-back" size={20} color={colors.textPrimary} style={{ transform: [{ scaleX: -1 }] }} />
         </Pressable>
-        <View style={{ flex: 1 }}>
+        <View style={{ flex: 1, alignItems: "flex-end" }}>
           <View style={s.headerTitleRow}>
-            <Ionicons name="chatbubbles" size={16} color="#8B5CF6" />
+            <Ionicons name="chatbubbles" size={16} color={colors.accent} />
             <Text style={s.headerTitle} numberOfLines={1}>التعليقات</Text>
             {comments.length > 0 && (
               <View style={s.countBadge}>
@@ -213,19 +284,19 @@ export default function CommentsPage() {
           )}
         </View>
         <Pressable onPress={loadComments} style={s.refreshBtn}>
-          <Ionicons name="refresh" size={18} color="rgba(255,255,255,0.4)" />
+          <Ionicons name="refresh" size={18} color={colors.textMuted} />
         </Pressable>
       </View>
 
       {/* Comments list */}
       {loading ? (
         <View style={s.center}>
-          <ActivityIndicator color="#8B5CF6" size="large" />
+          <ActivityIndicator color={colors.accent} size="large" />
           <Text style={s.loadingText}>جارٍ التحميل...</Text>
         </View>
       ) : comments.length === 0 ? (
         <View style={s.center}>
-          <Ionicons name="chatbubble-ellipses" size={52} color="rgba(139,92,246,0.2)" />
+          <Ionicons name="chatbubble-ellipses" size={52} color={colors.accentBorder} />
           <Text style={s.emptyText}>لا توجد تعليقات بعد</Text>
           <Text style={s.emptySubtext}>كن أول من يعلّق على هذه الحلقة!</Text>
         </View>
@@ -247,19 +318,19 @@ export default function CommentsPage() {
       >
         {replyTo && (
           <View style={s.replyBanner}>
-            <Ionicons name="return-up-back" size={13} color="rgba(139,92,246,0.7)" />
+            <Ionicons name="return-up-back" size={13} color={colors.accent} />
             <Text style={s.replyBannerText} numberOfLines={1}>رد على {replyTo.username}: {replyTo.text}</Text>
             <Pressable onPress={() => setReplyTo(null)}>
-              <Ionicons name="close-circle" size={15} color="rgba(255,255,255,0.3)" />
+              <Ionicons name="close-circle" size={15} color={colors.textMuted} />
             </Pressable>
           </View>
         )}
         {postError && (
           <View style={s.errorBanner}>
-            <Ionicons name="alert-circle" size={13} color="#f87171" />
+            <Ionicons name="alert-circle" size={13} color={colors.destructive} />
             <Text style={s.errorBannerText}>{postError}</Text>
             <Pressable onPress={() => setPostError(null)}>
-              <Ionicons name="close" size={13} color="rgba(255,255,255,0.3)" />
+              <Ionicons name="close" size={13} color={colors.textMuted} />
             </Pressable>
           </View>
         )}
@@ -269,7 +340,7 @@ export default function CommentsPage() {
             ref={inputRef}
             style={s.input}
             placeholder={replyTo ? `الرد على ${replyTo.username}…` : "أضف تعليقاً…"}
-            placeholderTextColor="rgba(255,255,255,0.25)"
+            placeholderTextColor={colors.textMuted}
             value={text}
             onChangeText={t => { setText(t); setPostError(null); }}
             multiline
@@ -282,8 +353,8 @@ export default function CommentsPage() {
             style={[s.sendBtn, (!text.trim() || posting) && s.sendBtnDisabled]}
           >
             {posting
-              ? <ActivityIndicator size="small" color="#fff" />
-              : <Ionicons name="send" size={16} color="#fff" />
+              ? <ActivityIndicator size="small" color={colors.primaryForeground} />
+              : <Ionicons name="send" size={16} color={colors.primaryForeground} />
             }
           </Pressable>
         </View>
@@ -292,39 +363,40 @@ export default function CommentsPage() {
   );
 }
 
-const s = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#09090B" },
+function createCommentStyles(colors: ThemePalette) {
+  return StyleSheet.create({
+  container: { flex: 1, backgroundColor: colors.background },
   header: {
-    flexDirection: "row", alignItems: "center", gap: 10,
+    flexDirection: ROW_RTL, alignItems: "center", gap: 10,
     paddingHorizontal: 14, paddingVertical: 12,
-    borderBottomWidth: 1, borderBottomColor: "rgba(255,255,255,0.06)",
-    backgroundColor: "#09090B",
+    borderBottomWidth: 1, borderBottomColor: colors.border,
+    backgroundColor: colors.background,
   },
   backBtn: {
     width: 36, height: 36, borderRadius: 14,
-    backgroundColor: "rgba(255,255,255,0.06)",
+    backgroundColor: colors.surfaceElevated,
     alignItems: "center", justifyContent: "center",
   },
-  headerTitleRow: { flexDirection: "row", alignItems: "center", gap: 6 },
-  headerTitle: { fontSize: 16, fontFamily: "Cairo_800ExtraBold", color: "#fff" },
-  headerSub: { fontSize: 10, fontFamily: "Cairo_400Regular", color: "rgba(255,255,255,0.35)", marginTop: 1 },
+  headerTitleRow: { flexDirection: ROW_RTL, alignItems: "center", gap: 6 },
+  headerTitle: { fontSize: 16, fontFamily: "Cairo_800ExtraBold", color: colors.textPrimary },
+  headerSub: { fontSize: 10, fontFamily: "Cairo_400Regular", color: colors.textMuted, marginTop: 1 },
   countBadge: {
-    backgroundColor: "rgba(139,92,246,0.2)", borderRadius: 10,
+    backgroundColor: colors.accentSurface, borderRadius: 10,
     paddingHorizontal: 7, paddingVertical: 2,
-    borderWidth: 1, borderColor: "rgba(139,92,246,0.3)",
+    borderWidth: 1, borderColor: colors.accentBorder,
   },
-  countBadgeText: { fontSize: 10, fontFamily: "Cairo_700Bold", color: "#c4b5fd" },
+  countBadgeText: { fontSize: 10, fontFamily: "Cairo_700Bold", color: colors.accent },
   refreshBtn: { width: 36, height: 36, alignItems: "center", justifyContent: "center" },
   center: { flex: 1, alignItems: "center", justifyContent: "center", gap: 12 },
-  loadingText: { fontSize: 12, fontFamily: "Cairo_400Regular", color: "rgba(255,255,255,0.3)" },
-  emptyText: { fontSize: 16, fontFamily: "Cairo_700Bold", color: "rgba(255,255,255,0.4)" },
-  emptySubtext: { fontSize: 12, fontFamily: "Cairo_400Regular", color: "rgba(255,255,255,0.2)" },
+  loadingText: { fontSize: 12, fontFamily: "Cairo_400Regular", color: colors.textMuted },
+  emptyText: { fontSize: 16, fontFamily: "Cairo_700Bold", color: colors.textSecondary },
+  emptySubtext: { fontSize: 12, fontFamily: "Cairo_400Regular", color: colors.textMuted },
   listContent: { padding: 16, gap: 14, paddingBottom: 12 },
-  commentWrap: { flexDirection: "row", gap: 10 },
+  commentWrap: { flexDirection: "row", gap: 10, padding: 12, borderRadius: 16, backgroundColor: colors.card, borderWidth: 1, borderColor: colors.border },
   replyWrap: { marginTop: 10, marginRight: 12 },
   replyLine: {
     position: "absolute", left: -8, top: 0, bottom: 0,
-    width: 2, backgroundColor: "rgba(139,92,246,0.2)", borderRadius: 1,
+    width: 2, backgroundColor: colors.accentBorder, borderRadius: 1,
   },
   avatar: {
     width: 34, height: 34, borderRadius: 17,
@@ -332,43 +404,45 @@ const s = StyleSheet.create({
   },
   avatarText: { fontSize: 13, fontFamily: "Cairo_800ExtraBold", color: "#fff" },
   commentMeta: { flexDirection: "row", alignItems: "center", gap: 6, flexWrap: "wrap" },
-  commentUser: { fontSize: 12, fontFamily: "Cairo_800ExtraBold", color: "#e2e2e2" },
-  replyTag: { fontSize: 10, color: "rgba(139,92,246,0.7)", fontFamily: "Cairo_700Bold" },
-  commentTime: { fontSize: 10, color: "rgba(255,255,255,0.2)", fontFamily: "Cairo_400Regular" },
+  commentUser: { fontSize: 12, fontFamily: "Cairo_800ExtraBold", color: colors.textPrimary },
+  commentHandle: { fontSize: 10, color: colors.textSecondary, fontFamily: "Cairo_400Regular" },
+  replyTag: { fontSize: 10, color: colors.accent, fontFamily: "Cairo_700Bold" },
+  commentTime: { fontSize: 10, color: colors.textMuted, fontFamily: "Cairo_400Regular" },
   commentText: {
-    fontSize: 13, color: "rgba(255,255,255,0.82)", lineHeight: 21,
+    fontSize: 13, color: colors.textPrimary, lineHeight: 21,
     fontFamily: "Cairo_400Regular", textAlign: "right",
   },
   commentActions: { flexDirection: "row", gap: 14, marginTop: 2 },
   actionBtn: { flexDirection: "row", alignItems: "center", gap: 4 },
-  actionBtnText: { fontSize: 11, fontFamily: "Cairo_700Bold", color: "rgba(255,255,255,0.3)" },
+  actionBtnText: { fontSize: 11, fontFamily: "Cairo_700Bold", color: colors.textMuted },
   inputArea: {
-    borderTopWidth: 1, borderTopColor: "rgba(255,255,255,0.07)",
-    padding: 12, gap: 8, backgroundColor: "#09090B",
+    borderTopWidth: 1, borderTopColor: colors.border,
+    padding: 12, gap: 8, backgroundColor: colors.background,
   },
   replyBanner: {
     flexDirection: "row", alignItems: "center", gap: 6,
-    backgroundColor: "rgba(139,92,246,0.08)", borderRadius: 10,
-    borderWidth: 1, borderColor: "rgba(139,92,246,0.2)", padding: 8,
+    backgroundColor: colors.accentSurface, borderRadius: 10,
+    borderWidth: 1, borderColor: colors.accentBorder, padding: 8,
   },
-  replyBannerText: { flex: 1, fontSize: 11, color: "rgba(139,92,246,0.8)", fontFamily: "Cairo_400Regular" },
+  replyBannerText: { flex: 1, fontSize: 11, color: colors.accent, fontFamily: "Cairo_400Regular" },
   errorBanner: {
     flexDirection: "row", alignItems: "center", gap: 6,
-    backgroundColor: "rgba(239,68,68,0.08)", borderRadius: 10,
-    borderWidth: 1, borderColor: "rgba(239,68,68,0.2)", padding: 8,
+    backgroundColor: colors.destructiveSurface, borderRadius: 10,
+    borderWidth: 1, borderColor: colors.destructiveBorder, padding: 8,
   },
-  errorBannerText: { flex: 1, fontSize: 11, color: "#f87171", fontFamily: "Cairo_400Regular" },
+  errorBannerText: { flex: 1, fontSize: 11, color: colors.destructive, fontFamily: "Cairo_400Regular" },
   inputRow: { flexDirection: "row", alignItems: "flex-end", gap: 8 },
   input: {
     flex: 1, minHeight: 42, maxHeight: 120,
-    backgroundColor: "rgba(255,255,255,0.05)",
-    borderRadius: 14, borderWidth: 1, borderColor: "rgba(255,255,255,0.1)",
+    backgroundColor: colors.input,
+    borderRadius: 14, borderWidth: 1, borderColor: colors.border,
     paddingHorizontal: 12, paddingVertical: 8,
-    fontSize: 13, color: "#fff", fontFamily: "Cairo_400Regular",
+    fontSize: 13, color: colors.textPrimary, fontFamily: "Cairo_400Regular",
   },
   sendBtn: {
-    width: 42, height: 42, backgroundColor: "#7C3AED",
+    width: 42, height: 42, backgroundColor: colors.primary,
     borderRadius: 14, alignItems: "center", justifyContent: "center",
   },
-  sendBtnDisabled: { backgroundColor: "rgba(124,58,237,0.3)" },
-});
+  sendBtnDisabled: { opacity: 0.45 },
+  });
+}

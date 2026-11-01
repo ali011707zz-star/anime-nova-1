@@ -8,25 +8,41 @@ import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import * as ScreenOrientation from "expo-screen-orientation";
 import { StatusBar } from "expo-status-bar";
-import { useVideoPlayer, VideoView } from "expo-video";
+import { useVideoPlayer, VideoView, type BufferOptions } from "expo-video";
 import * as Brightness from "expo-brightness";
 import { VolumeManager } from "../lib/volume-manager";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator, Alert, Animated, Dimensions, Easing, I18nManager, Linking, Platform,
-  PanResponder, Pressable, ScrollView, StyleSheet, Text, View,
+  BackHandler, PanResponder, ScrollView, StyleSheet, Text, View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { getBaseUrl } from "@/utils/api";
+import { TvPressable, useTvMetrics } from "@/utils/tv";
+import { useColors } from "@/hooks/useColors";
+import {
+  buildSkipScopeKey,
+  isSkipInRange,
+  resolveSkipTimes,
+  validateSkipInterval,
+} from "@/lib/skipTimes.mjs";
 
 const { width: W, height: H } = Dimensions.get("window");
+const PLAYER_CONTROL_ICON = "rgba(255,255,255,0.90)";
+const PLAYER_ACTIVE_ICON = "#c4b5fd";
+const PLAYER_MUTED_ICON = "#fca5a5";
+const PLAYER_CONTROL_LABEL = "rgba(255,255,255,0.80)";
+// Keep the existing player controls in one place while making every control
+// visible to Android TV's D-pad focus engine.
+const Pressable = TvPressable;
 
 /* ─── Types ─── */
 export type PlayerSource = {
   url: string;
   label: string;
-  quality: "1080p FHD" | "720p HD" | "360p SD";
+  quality?: string;
+  contentType?: "hls" | "progressive";
   site?: string;
   subtitleUrl?: string;
   isArabic?: boolean;
@@ -37,7 +53,93 @@ export type PlayerSource = {
    * ضرورية لـ CDN تتحقق من Referer حين تذهب الـ segments مباشرةً (mobile=1).
    */
   headers?: Record<string, string>;
+  /** أوقات تخطي المقدمة/النهاية التي أعادها مزود المصدر نفسه. */
+  skipIntro?: { start: number; end: number };
+  skipOutro?: { start: number; end: number };
 };
+
+type SeekRecoveryState = {
+  target: number;
+  retries: number;
+  restorePending: boolean;
+};
+
+type NovaVideoSource = string | {
+  uri: string;
+  /**
+   * expo-video otherwise infers a proxy URL as progressive media because the
+   * encrypted query no longer exposes the upstream `.m3u8` suffix.
+   */
+  contentType?: "hls" | "progressive";
+  /** Provider headers are needed by signed CDNs on direct mobile playback. */
+  headers?: Record<string, string>;
+};
+
+function isHlsSourceUrl(url: string, contentType?: PlayerSource["contentType"]): boolean {
+  if (contentType === "hls") return true;
+  if (contentType === "progressive") return false;
+  const lower = url.toLowerCase();
+  return (
+    /\.m3u8(?:[?#]|$)/i.test(lower) ||
+    lower.includes("/api/anime/hls-proxy") ||
+    lower.includes("/proxy/hls") ||
+    /\/(?:hls|playlist)(?:\/|[?#]|$)/i.test(lower)
+  );
+}
+
+function isProgressiveSourceUrl(url: string, contentType?: PlayerSource["contentType"]): boolean {
+  if (contentType === "progressive") return true;
+  if (contentType === "hls") return false;
+  const lower = url.toLowerCase();
+  return (
+    /\.(?:mp4|m4v|webm|mov)(?:[?#]|$)/i.test(lower) ||
+    lower.includes("/api/dubbed/stream") ||
+    lower.includes("/api/aw-dubbed/mf-stream") ||
+    lower.includes("/api/anime/video-proxy")
+  );
+}
+
+function toExpoVideoSource(source: PlayerSource | undefined): NovaVideoSource | null {
+  if (!source?.url) return null;
+  const hls = isHlsSourceUrl(source.url, source.contentType);
+  const progressive = !hls && isProgressiveSourceUrl(source.url, source.contentType);
+  return hls || progressive || source.headers
+    ? {
+        uri: source.url,
+        ...(hls ? { contentType: "hls" as const } : {}),
+        ...(progressive ? { contentType: "progressive" as const } : {}),
+        ...(source.headers ? { headers: source.headers } : {}),
+      }
+    : source.url;
+}
+
+function playbackTraceIdFromUrl(url: string | undefined): string {
+  if (!url) return "";
+  try {
+    const trace = new URL(url).searchParams.get("trace") || "";
+    return /^[a-z0-9_-]{8,36}$/i.test(trace) ? trace : "";
+  } catch {
+    return "";
+  }
+}
+
+function logPlaybackStage(url: string | undefined, stage: string, detail = ""): void {
+  const trace = playbackTraceIdFromUrl(url);
+  if (!trace) return;
+  const safeDetail = detail ? ` ${detail.replace(/[^a-zA-Z0-9_=.:-]/g, "").slice(0, 80)}` : "";
+  console.info(`[playback-trace] id=${trace} component=player stage=${stage}${safeDetail}`);
+}
+
+function getPlaybackBufferOptions(animePlayback: boolean): BufferOptions {
+  /* expo-video 3.x accepts buffer durations in seconds. Android maps
+     preferredForwardBufferDuration to its target buffer duration; the old
+     Media3 millisecond keys and backBufferDurationMs are not part of this API. */
+  return {
+    preferredForwardBufferDuration: animePlayback ? 24 : 8,
+    waitsToMinimizeStalling: animePlayback,
+    minBufferForPlayback: animePlayback ? 3 : 2,
+  };
+}
 
 /** Never pass malformed URLs into the native player.
  *  Some Media3/AVPlayer versions crash before emitting statusChange(error)
@@ -63,7 +165,10 @@ export interface SubSettings {
   color: string;
   bgOpacity: number;
   bold: boolean;
+  extraBold: boolean;
   position: "top" | "center" | "bottom";
+  /** Pixel adjustment inside the selected position; negative = higher. */
+  verticalOffset: number;
 }
 
 type Props = {
@@ -73,6 +178,8 @@ type Props = {
   episode?: number;
   anilistId?: number;
   onBack: () => void;
+  /** Watch routes own phone orientation; standalone player surfaces use the local fallback. */
+  onToggleOrientation?: () => void;
   onNextEpisode?: () => void;
   onPrevEpisode?: () => void;
   onEpisodeSelect?: (ep: number) => void;
@@ -87,14 +194,23 @@ type Props = {
   episodeTitle?: string;
   /** يُستدعى عند فشل جميع المصادر المتاحة */
   onError?: () => void;
+  /** Use anime-specific buffering and seek handling; other catalogs stay unchanged. */
+  animePlayback?: boolean;
 };
 
+/**
+ * A TV-only native view can fail during React rendering when an APK has a
+ * stale/missing native module. Keep that failure local to the watch screen so
+ * the app shell and the rest of the TV navigation remain usable.
+ */
 /* هذه المصادر لا يجب أن تظهر معها ترجمة تلقائية أو ترجمة محفوظة من مصدر آخر. */
 const SUBTITLE_DISABLED_SITES = new Set([
   "animeify", "af",
   "animewitcher", "aw",
   "sanime", "sa",
   "anifox", "fx",
+  "anslayer", "as",
+  "stardima_catalog",
 ]);
 
 function subtitlesDisabledForSite(site?: string): boolean {
@@ -103,12 +219,16 @@ function subtitlesDisabledForSite(site?: string): boolean {
 
 /* ─── Constants ─── */
 const SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 2];
+// Watch routes remount RiftPlayer between episodes; retain the user's choice
+// for the next native player created in this app session.
+let preferredPlaybackSpeed = 1;
 
 const FONT_SIZES = [
   { sz: 13, label: "ص", name: "صغير" },
   { sz: 16, label: "م", name: "متوسط" },
   { sz: 20, label: "ك", name: "كبير" },
   { sz: 24, label: "ع", name: "عملاق" },
+  { sz: 30, label: "ع+", name: "عملاق جدًا" },
 ];
 
 const SUB_COLORS = [
@@ -130,7 +250,9 @@ const DEFAULT_SUB_SETTINGS: SubSettings = {
   color: "#ffffff",
   bgOpacity: 0,
   bold: false,
+  extraBold: false,
   position: "bottom",
+  verticalOffset: 0,
 };
 
 const QUALITY_COLOR: Record<string, string> = {
@@ -295,47 +417,6 @@ function parseVTT(text: string): SubCue[] {
   return cues;
 }
 
-/* ─── PulseRing (نبض أرجواني حول زر التشغيل عند الإيقاف المؤقت) ─── */
-function PulseRing() {
-  const scale1 = useRef(new Animated.Value(1)).current;
-  const opacity1 = useRef(new Animated.Value(0.65)).current;
-  const scale2 = useRef(new Animated.Value(1)).current;
-  const opacity2 = useRef(new Animated.Value(0.35)).current;
-  useEffect(() => {
-    const pulse = (sc: Animated.Value, op: Animated.Value, delay: number) =>
-      Animated.loop(Animated.sequence([
-        Animated.delay(delay),
-        Animated.parallel([
-          Animated.timing(sc, { toValue: 1.85, duration: 1200, easing: Easing.out(Easing.quad), useNativeDriver: true }),
-          Animated.timing(op, { toValue: 0, duration: 1200, easing: Easing.out(Easing.quad), useNativeDriver: true }),
-        ]),
-        Animated.parallel([
-          Animated.timing(sc, { toValue: 1, duration: 0, useNativeDriver: true }),
-          Animated.timing(op, { toValue: delay === 0 ? 0.65 : 0.35, duration: 0, useNativeDriver: true }),
-        ]),
-      ]));
-    const a1 = pulse(scale1, opacity1, 0);
-    const a2 = pulse(scale2, opacity2, 550);
-    a1.start();
-    a2.start();
-    return () => { a1.stop(); a2.stop(); };
-  }, []);
-  return (
-    <>
-      <Animated.View pointerEvents="none" style={{
-        position: "absolute", width: 90, height: 90, borderRadius: 45,
-        borderWidth: 2, borderColor: "#8B5CF6",
-        transform: [{ scale: scale1 }], opacity: opacity1,
-      }} />
-      <Animated.View pointerEvents="none" style={{
-        position: "absolute", width: 90, height: 90, borderRadius: 45,
-        borderWidth: 1.5, borderColor: "#a78bfa",
-        transform: [{ scale: scale2 }], opacity: opacity2,
-      }} />
-    </>
-  );
-}
-
 /* ─── SpinRing ─── */
 function SpinRing({ size = 52 }: { size?: number }) {
   const rot = useRef(new Animated.Value(0)).current;
@@ -361,13 +442,20 @@ function SpinRing({ size = 52 }: { size?: number }) {
 }
 
 /* ─── Main Component ─── */
-export function RiftPlayer({
+export function RiftPlayer(props: Props) {
+  // TV reuses the same stable player surface as phones. TV-specific branches
+  // below only adjust sizing and remote-friendly controls.
+  return <ExpoRiftPlayer {...props} />;
+}
+
+function ExpoRiftPlayer({
   sources,
   initialSourceIndex = 0,
   title,
   episode,
   anilistId,
   onBack,
+  onToggleOrientation,
   onNextEpisode,
   onPrevEpisode,
   onEpisodeSelect,
@@ -378,11 +466,33 @@ export function RiftPlayer({
   subCues,
   subEnabled = false,
   autoPlayNext = true,
-  totalEps = 999,
+  animePlayback = false,
+  /* Unknown totals must be fail-closed. A synthetic 999 allowed automatic
+     and manual navigation into episodes that do not exist. */
+  totalEps = 0,
   episodeTitle,
   onError,
 }: Props) {
+  // Theme updates affect controls only; the video surface remains black.
+  const colors = useColors();
+  // Keep the playback timeline physically left-to-right even when the app is RTL.
+  // React Native swaps left/right style properties on native RTL layouts.
+  const timelineNativeRTL = Platform.OS !== "web" && I18nManager.isRTL;
+  const timelineStartEdge: "left" | "right" = timelineNativeRTL ? "right" : "left";
+  const timelineEndEdge: "left" | "right" = timelineNativeRTL ? "left" : "right";
   const insets = useSafeAreaInsets();
+  const { tv: tvMode } = useTvMetrics();
+
+  /* أثناء فحص المصادر، زر الرجوع في الهاتف يجب أن يعيد المستخدم إلى
+     منتقي السيرفرات داخل نفس شاشة الحلقة، لا إلى صفحة الحلقات. */
+  useEffect(() => {
+    if (Platform.OS !== "android") return;
+    const subscription = BackHandler.addEventListener("hardwareBackPress", () => {
+      onBack();
+      return true;
+    });
+    return () => subscription.remove();
+  }, [onBack]);
 
   /* ─── Source ─── */
   const playableSources = useMemo(() => {
@@ -400,7 +510,36 @@ export function RiftPlayer({
   );
   const [srcIdx, setSrcIdx]         = useState(safeInitialIndex);
   const currentSrc                  = playableSources[srcIdx];
+  const playbackTraceStateRef = useRef({
+    url: "",
+    assignedAt: 0,
+    loadingAt: 0,
+    readyLogged: false,
+    playingLogged: false,
+    progressLogged: false,
+    rebufferStartedAt: 0,
+    rebufferCount: 0,
+  });
+  useEffect(() => {
+    const url = currentSrc?.url || "";
+    playbackTraceStateRef.current = {
+      url,
+      assignedAt: Date.now(),
+      loadingAt: 0,
+      readyLogged: false,
+      playingLogged: false,
+      progressLogged: false,
+      rebufferStartedAt: 0,
+      rebufferCount: 0,
+    };
+    logPlaybackStage(url, "source_assigned");
+  }, [currentSrc?.url]);
+  const isLocalPlayback = playableSources.length > 0
+    && playableSources.every(source => /^(?:file|content):\/\//i.test(source.url));
   const subtitlesDisabled = subtitlesDisabledForSite(currentSrc?.site);
+  const subtitleShadowOnly = new Set(["kawaii", "kw", "megaplay", "mp"]).has(
+    String(currentSrc?.site || "").trim().toLowerCase(),
+  );
   const aliveRef                    = useRef(true);
   const terminalErrorRef            = useRef(false);
   /* switchGenerationRef: يُزاد عند كل استدعاء switchSource. أحداث player.replace()
@@ -432,7 +571,12 @@ export function RiftPlayer({
   const [isEnded, setIsEnded]         = useState(false);
 
   /* ─── UI state ─── */
+  // Keep the normal overlay available on TV; its controls are enlarged below
+  // and remain D-pad focusable through TvPressable.
   const [showControls, setShowControls] = useState(true);
+  const [showTvRevealHint, setShowTvRevealHint] = useState(false);
+  const progressFocusedRef = useRef(false);
+  const lastTvSeekAtRef = useRef(0);
   const [showSpeedSheet, setShowSpeedSheet] = useState(false);
   const [showViewSheet, setShowViewSheet] = useState(false);
   const [showSubSheet, setShowSubSheet]   = useState(false);
@@ -441,13 +585,16 @@ export function RiftPlayer({
   const [contentFit, setContentFit]     = useState<"contain" | "cover" | "fill">("contain");
   const [screenshotSaved, setScreenshotSaved] = useState(false);
   const [isFlipped, setIsFlipped]       = useState(false);
-
   /* ─── Subtitle state ─── */
   const [subOn, setSubOn]               = useState(subEnabled);
   const [loadedCues, setLoadedCues]     = useState<SubCue[]>([]);
   const [subLoading, setSubLoading]     = useState(false);
   const [autoSubSource, setAutoSubSource] = useState<string | null>(null);
-  const [subSettings, setSubSettings]   = useState<SubSettings>(DEFAULT_SUB_SETTINGS);
+  const [subSettings, setSubSettings]   = useState<SubSettings>(() => ({
+    ...DEFAULT_SUB_SETTINGS,
+    fontSize: tvMode ? 30 : DEFAULT_SUB_SETTINGS.fontSize,
+    bold: tvMode ? true : DEFAULT_SUB_SETTINGS.bold,
+  }));
   const [subOpenSection, setSubOpenSection] = useState<string | null>(null);
   const [showOffsetControls, setShowOffsetControls] = useState(false);
   /* subOffset: seconds to shift subtitle timing; positive = show earlier (fix late subs) */
@@ -456,13 +603,15 @@ export function RiftPlayer({
 
   /* ─── Seekbar drag ─── */
   const [isDragging, setIsDragging]     = useState(false);
+  const isDraggingRef                   = useRef(false);
   const [dragPct, setDragPct]           = useState(0);
-  /* postSeekPct: يُبقي الشريط على الموضع الصحيح لـ 800ms بعد الإفلات ريثما يتحدث polling */
+  /* Keep the requested position visible until native playback confirms the seek. */
   const [postSeekPct, setPostSeekPct]   = useState<number | null>(null);
   const postSeekTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingSeekRef = useRef<{ target: number; expiresAt: number } | null>(null);
 
   /* ─── Speed ─── */
-  const [speed, setSpeed]             = useState(1);
+  const [speed, setSpeed]             = useState(preferredPlaybackSpeed);
   const [longPressSpeed, setLongPressSpeed] = useState(false);
   const prevSpeedRef                  = useRef(1);
 
@@ -489,11 +638,6 @@ export function RiftPlayer({
   /* ─── Subtitle ─── */
   const [activeCue, setActiveCue]     = useState<SubCue | null>(null);
 
-  /* ─── Skip notification ─── */
-  const skipNotifFired                = useRef(false);
-  const [skipIntroDismissed, setSkipIntroDismissed] = useState(false);
-  const [skipOutroDismissed, setSkipOutroDismissed] = useState(false);
-
   /* ─── Anime Rift features ─── */
   const [seekDuration, setSeekDuration] = useState(10);
   const seekDurationRef               = useRef(10);
@@ -514,6 +658,7 @@ export function RiftPlayer({
   const [showFitMenu, setShowFitMenu]     = useState(false);
   const [showSubPanel, setShowSubPanel]   = useState(false);
   const [subLang, setSubLang]             = useState<"ar" | "en">("ar");
+  const userSelectedSubLangRef            = useRef(false);
   const rawSubUrlRef      = useRef<string | null>(null); // original English VTT URL before translation
   const autoRawSubUrlRef  = useRef<string | null>(null); // English URL discovered by auto-fetch
   const [autoPlayEnabled, setAutoPlayEnabled] = useState(true);
@@ -525,11 +670,52 @@ export function RiftPlayer({
   /* ─── Position to restore when switching sources (keeps resumedRef approach) ─── */
   const switchPosRef = useRef(0);
 
-  /* ─── AniSkip: fetch skip times if not provided by source ─── */
-  const [fetchedSkipIntro, setFetchedSkipIntro] = useState<{ start: number; end: number } | undefined>(undefined);
-  const [fetchedSkipOutro, setFetchedSkipOutro] = useState<{ start: number; end: number } | undefined>(undefined);
-  const skipIntro = skipIntroProp ?? fetchedSkipIntro;
-  const skipOutro = skipOutroProp ?? fetchedSkipOutro;
+  /* ─── Independent source/AniSkip/fallback timings ─── */
+  const sourceIntroTiming = validateSkipInterval(skipIntroProp)
+    ?? validateSkipInterval(currentSrc?.skipIntro);
+  const sourceOutroTiming = validateSkipInterval(skipOutroProp)
+    ?? validateSkipInterval(currentSrc?.skipOutro);
+  const skipScopeKey = buildSkipScopeKey({
+    anilistId,
+    episode,
+    title,
+    sourceSite: currentSrc?.site,
+    sourceUrl: currentSrc?.url,
+    intro: sourceIntroTiming,
+    outro: sourceOutroTiming,
+  });
+  const [fetchedSkipTimes, setFetchedSkipTimes] = useState<{
+    key: string;
+    intro: { start: number; end: number } | null;
+    outro: { start: number; end: number } | null;
+    checkedIntro: boolean;
+    checkedOutro: boolean;
+    retryAt: number;
+  } | null>(null);
+  const [skipFetchRetryTick, setSkipFetchRetryTick] = useState(0);
+  const fetchedSkipForScope = fetchedSkipTimes?.key === skipScopeKey
+    ? fetchedSkipTimes
+    : null;
+  const resolvedSkipTimes = resolveSkipTimes({
+    sourceIntroProp: skipIntroProp,
+    sourceIntro: currentSrc?.skipIntro,
+    sourceOutroProp: skipOutroProp,
+    sourceOutro: currentSrc?.skipOutro,
+    fetchedIntro: fetchedSkipForScope?.intro,
+    fetchedOutro: fetchedSkipForScope?.outro,
+    duration,
+  });
+  const skipIntro = resolvedSkipTimes.intro ?? undefined;
+  const skipOutro = resolvedSkipTimes.outro ?? undefined;
+  const [dismissedSkipRanges, setDismissedSkipRanges] = useState<{
+    key: string;
+    intro: boolean;
+    outro: boolean;
+  }>({ key: "", intro: false, outro: false });
+  const skipIntroDismissed = dismissedSkipRanges.key === skipScopeKey
+    && dismissedSkipRanges.intro;
+  const skipOutroDismissed = dismissedSkipRanges.key === skipScopeKey
+    && dismissedSkipRanges.outro;
 
   /* ─── Animated values ─── */
   const controlsOpacity   = useRef(new Animated.Value(1)).current;
@@ -538,6 +724,7 @@ export function RiftPlayer({
 
   /* ─── Refs ─── */
   const hideTimer         = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const revealHintTimer   = useRef<ReturnType<typeof setTimeout> | null>(null);
   const progressTimer     = useRef<ReturnType<typeof setInterval> | null>(null);
   /** كاشف الـ stall: موضع آخر حركة + وقتها (لكشف "يشتغل بدون تقدّم") */
   const stallRef          = useRef<{ lastPos: number; lastAt: number }>({ lastPos: -1, lastAt: 0 });
@@ -546,8 +733,18 @@ export function RiftPlayer({
      ويُصلح كثيراً من حالات "شغّال لكن بدون تقدّم" الناتجة عن اختناق مؤقت في
      الـ HLS proxy، بدون الحاجة لإزعاجه بشاشة "البحث عن مصادر بديلة". */
   const stallNudgeTriedRef = useRef(false);
+  /* أثناء seek قد يرسل ExoPlayer حالة loading/error مؤقتة لأن HLS يحتاج
+     جلب segment جديد. لا نعتبرها فشلاً للمصدر ولا نبدأ auto-cycle فوراً. */
+  const seekRecoveryRef = useRef<SeekRecoveryState | null>(null);
+  const fadeInRef = useRef<(() => void) | null>(null);
+  const seekRecoveryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [sourceReloadNonce, setSourceReloadNonce] = useState(0);
+  const nativeLoadNonceRef = useRef(0);
   /** refs للحالات التي يحتاجها الـ polling interval بدون stale closure */
   const isPlayingRef      = useRef(false);
+  /* Keep explicit Anime play/pause intent across source replacement. Native
+     readyToPlay can arrive after a user pauses while a new source is loading. */
+  const animePlaybackIntentRef = useRef(true);
   const isErrorRef        = useRef(false);
   const isEndedRef        = useRef(false);
   const lastTap           = useRef<{ time: number; side: "L" | "R" } | null>(null);
@@ -558,10 +755,9 @@ export function RiftPlayer({
   const gestureStartY     = useRef(0);
   const gestureStartVal   = useRef(0);
   const barRef            = useRef<View>(null);
-  const barWidth          = useRef(W);   // يبدأ بعرض الشاشة كـ fallback آمن قبل onLayout
-  const barPageX          = useRef(0);   // absolute X of bar's left edge on screen (for reliable seek)
-  const lastMoveX         = useRef(0);   // last known absolute X during drag (fallback for release on Android)
-  const grantLocationXRef = useRef(0);   // locationX النسبي لحدث Grant (أدق من pageX للنقر السريع)
+  const seekBarBoundsRef  = useRef<{ left: number; width: number } | null>(null);
+  const seekBarMeasureGenerationRef = useRef(0);
+  const lastMoveX         = useRef<number | null>(null);
   const resumedRef        = useRef(false);
   const subRafRef         = useRef<any>(null);
   const durationRef       = useRef(0);
@@ -582,6 +778,8 @@ export function RiftPlayer({
   const gestureStartPosRef= useRef(0);
   const gestureStartXRef  = useRef(0);
   const orientLockRef     = useRef<"left" | "right">("left");
+  const orientationPendingRef = useRef<ScreenOrientation.OrientationLock | null>(null);
+  const orientationRunningRef = useRef(false);
   /* timeout لاكتشاف الشاشة السوداء: إذا بقي المشغّل في "loading" أكثر من 25ث
      نعامله كخطأ ونتجاوز للمصدر التالي تلقائياً */
   const loadTimeoutRef    = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -589,6 +787,7 @@ export function RiftPlayer({
   const waitForSrcTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
       /* timers صغيرة غير مُتتبَّعة سابقاً — يجب مسحها في master cleanup لمنع كراش الـ native player */
   const replayTimeoutRef         = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const manualSeekErrorTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const screenshotSavedTimerRef  = useRef<ReturnType<typeof setTimeout> | null>(null);
   /* طلبات الشبكة المرتبطة بالمصدر الحالي — تُلغى قبل تبديل الحلقة أو إغلاقها. */
   const subtitleAbortRef         = useRef<AbortController | null>(null);
@@ -598,6 +797,56 @@ export function RiftPlayer({
   /* يؤجل replace إلى effect بعد إعادة تسجيل listeners الخاصة بالمصدر الجديد. */
   const nativeSrcIdxRef          = useRef(safeInitialIndex);
   const replaceCallTimerRef      = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const measureSeekBar = useCallback(() => {
+    const generation = seekBarMeasureGenerationRef.current;
+    barRef.current?.measureInWindow((left, _top, width) => {
+      if (generation !== seekBarMeasureGenerationRef.current) return;
+      if (Number.isFinite(left) && Number.isFinite(width) && width > 1) {
+        seekBarBoundsRef.current = { left, width };
+      } else {
+        seekBarBoundsRef.current = null;
+      }
+    });
+  }, []);
+
+  useEffect(() => {
+    const subscription = Dimensions.addEventListener("change", () => {
+      seekBarMeasureGenerationRef.current += 1;
+      seekBarBoundsRef.current = null;
+      requestAnimationFrame(measureSeekBar);
+    });
+    return () => subscription.remove();
+  }, [measureSeekBar]);
+
+  useEffect(() => {
+    durationRef.current = 0;
+    positionRef.current = 0;
+    pendingSeekRef.current = null;
+    isDraggingRef.current = false;
+    setPosition(0);
+    setDuration(0);
+    setBufferedPct(0);
+    setIsDragging(false);
+    setPostSeekPct(null);
+    if (postSeekTimer.current) {
+      clearTimeout(postSeekTimer.current);
+      postSeekTimer.current = null;
+    }
+    if (manualSeekErrorTimeoutRef.current) {
+      clearTimeout(manualSeekErrorTimeoutRef.current);
+      manualSeekErrorTimeoutRef.current = null;
+    }
+    if (seekRecoveryTimerRef.current) {
+      clearTimeout(seekRecoveryTimerRef.current);
+      seekRecoveryTimerRef.current = null;
+    }
+    if (replayTimeoutRef.current) {
+      clearTimeout(replayTimeoutRef.current);
+      replayTimeoutRef.current = null;
+    }
+    seekRecoveryRef.current = null;
+  }, [srcIdx, currentSrc?.url]);
 
   useEffect(() => {
     aliveRef.current = true;
@@ -660,12 +909,14 @@ export function RiftPlayer({
   /* ─── expo-video player ─── */
   /* نستخدم ref ثابت للـ VideoSource الأولي حتى لا يُعيد useVideoPlayer
      تهيئة المشغّل عند تغيير srcIdx (التبديل يتم عبر player.replace فقط).
-     نمرّر URL string مباشرةً (بدون headers) — جميع المصادر تمرّ عبر VPS proxy
-     الذي يُضيف Referer/Origin داخلياً، لذا لا حاجة لإرسالها من ExoPlayer.
-     تمرير { uri, headers } يُسبِّب فشلاً صامتاً في بعض إصدارات expo-video native. */
+     روابط HLS تمرّر contentType صراحةً، وروابط التشغيل المباشر تحتفظ بـ headers
+     التي يحتاجها الـ CDN. */
   const _initSrc = playableSources[safeInitialIndex];
-  const _initVideoSrcRef = useRef<string>(_initSrc?.url || "");
+  const _initVideoSrcRef = useRef<NovaVideoSource | null>(toExpoVideoSource(_initSrc));
   const player = useVideoPlayer(_initVideoSrcRef.current || null, (p) => {
+    // expo-video 3.0.16's Android native player defaults this to false.
+    p.preservesPitch = true;
+    p.playbackRate = preferredPlaybackSpeed;
     p.loop = false;
     p.volume = 1;
     /* ⚠️ لا نستدعي p.play() هنا مباشرةً — بعض إصدارات ExoPlayer/AVPlayer تُطلق
@@ -674,22 +925,10 @@ export function RiftPlayer({
     if (initialPosition && initialPosition > 5) {
       try { p.currentTime = initialPosition; } catch {}
     }
-    /* Buffer tuning — هامش أمامي أكبر لتقليل التقطيع، مع تجنّب buffer ضخم
-       ⚠️ bufferForPlaybackMs=150 كان يُسبّب crash فوري في ExoPlayer على بعض
-          الأجهزة لأنه يحاول decode الفيديو قبل أن يجمع Media3 بيانات كافية.
-       ⚠️ maxBufferMs=30000 كان يُسبّب OOM على الأجهزة منخفضة الذاكرة.
-       ⚠️ backBufferDurationMs غير محدّد → يبقي ExoPlayer 30ث من المحتوى
-          المُشغَّل في الذاكرة → يُضاعف استهلاك الذاكرة. */
+     /* Use expo-video's public buffer contract; do not pass Media3-only millisecond
+        options that this Expo version silently ignores. */
     try {
-      (p as any).bufferOptions = {
-        preferredForwardBufferDuration: 20, // iOS: مسبق 20ث لتقليل التقطيع
-        waitsToMinimizeStalling: true,      // iOS: لا تبدأ قبل buffer آمن
-        minBufferMs: 3000,                  // Android: الحد الأدنى قبل التشغيل
-        maxBufferMs: 20000,                 // Android: هامش 20ث بدون OOM مبالغ
-        bufferForPlaybackMs: 2000,          // Android: بداية آمنة للـ codec
-        bufferForPlaybackAfterRebufferMs: 4500, // Android: استئناف بعد 4.5ث
-        backBufferDurationMs: 3000,         // Android: ذاكرة خلفية صغيرة
-      };
+       p.bufferOptions = getPlaybackBufferOptions(animePlayback);
     } catch {}
   });
 
@@ -720,6 +959,7 @@ export function RiftPlayer({
 
       /* 5. ألغِ hide timer */
       if (hideTimer.current) { clearTimeout(hideTimer.current); hideTimer.current = null; }
+      if (revealHintTimer.current) { clearTimeout(revealHintTimer.current); revealHintTimer.current = null; }
 
       /* 5b. ألغِ كل الـ timers الصغيرة التي لم تكن في cleanup — مسببات الكراش الرئيسية:
              replayTimeout: يستدعي player.play() بعد 120ms من unmount → native crash
@@ -736,6 +976,8 @@ export function RiftPlayer({
       if (waitForSrcTimerRef.current) { clearTimeout(waitForSrcTimerRef.current); waitForSrcTimerRef.current = null; }
       if (replaceSafetyTimerRef.current) { clearTimeout(replaceSafetyTimerRef.current); replaceSafetyTimerRef.current = null; }
       if (replaceCallTimerRef.current) { clearTimeout(replaceCallTimerRef.current); replaceCallTimerRef.current = null; }
+      if (seekRecoveryTimerRef.current) { clearTimeout(seekRecoveryTimerRef.current); seekRecoveryTimerRef.current = null; }
+      seekRecoveryRef.current = null;
       if (subtitleTimeoutRef.current) { clearTimeout(subtitleTimeoutRef.current); subtitleTimeoutRef.current = null; }
       subtitleAbortRef.current?.abort();
       subtitleAbortRef.current = null;
@@ -798,6 +1040,65 @@ export function RiftPlayer({
     });
   }, []);
 
+  /* Android may deliver several orientation requests while the activity is
+     still relaying the previous configuration change. Serialize them and keep
+     only the newest pending lock so rotation never races the video surface. */
+  const requestOrientation = useCallback((lock: ScreenOrientation.OrientationLock) => {
+    orientationPendingRef.current = lock;
+    if (orientationRunningRef.current) return;
+    orientationRunningRef.current = true;
+    void (async () => {
+      while (orientationPendingRef.current !== null) {
+        const next = orientationPendingRef.current;
+        orientationPendingRef.current = null;
+        try {
+          await ScreenOrientation.lockAsync(next);
+        } catch {}
+      }
+      orientationRunningRef.current = false;
+    })();
+  }, []);
+
+  const cancelSeekRecovery = useCallback(() => {
+    if (seekRecoveryTimerRef.current) {
+      clearTimeout(seekRecoveryTimerRef.current);
+      seekRecoveryTimerRef.current = null;
+    }
+    if (replayTimeoutRef.current) {
+      clearTimeout(replayTimeoutRef.current);
+      replayTimeoutRef.current = null;
+    }
+    seekRecoveryRef.current = null;
+  }, []);
+
+  const beginSeekRecovery = useCallback((target: number) => {
+    if (seekRecoveryTimerRef.current) clearTimeout(seekRecoveryTimerRef.current);
+    if (replayTimeoutRef.current) {
+      clearTimeout(replayTimeoutRef.current);
+      replayTimeoutRef.current = null;
+    }
+    seekRecoveryRef.current = {
+      target,
+      retries: 0,
+      restorePending: false,
+    };
+    /* لا نترك timeout التحميل الخاص ببدء المصدر يفسّر seek بطيئاً كفشل. */
+    if (loadTimeoutRef.current) {
+      clearTimeout(loadTimeoutRef.current);
+      loadTimeoutRef.current = null;
+    }
+    setError(false);
+    setIsAutoCycling(false);
+    setIsWaitingForSources(false);
+    terminalErrorRef.current = false;
+    /* إذا لم تصل readyToPlay، يظل stall detector هو الحارس النهائي بدلاً من
+       تبديل المصدر بعد 18 ثانية بشكل كاذب. */
+    seekRecoveryTimerRef.current = setTimeout(() => {
+      seekRecoveryTimerRef.current = null;
+      seekRecoveryRef.current = null;
+    }, 30_000);
+  }, []);
+
   /* ─── Player events ───
      myGen: يُلتقط جيل التبديل الحالي لحظة تسجيل هذا الـ effect (بعد أي switchSource
      سابق زاد switchGenerationRef). أي حدث يصل من native player بعد أن بدأ تبديل
@@ -812,59 +1113,214 @@ export function RiftPlayer({
       if (!aliveRef.current || isStale()) return;
       setIsPlaying(e.isPlaying ?? false);
       setBuffering(false);
+      if (e.isPlaying && !playbackTraceStateRef.current.playingLogged) {
+        playbackTraceStateRef.current.playingLogged = true;
+        logPlaybackStage(
+          playbackTraceStateRef.current.url,
+          "playing",
+          `elapsed_ms=${Date.now() - playbackTraceStateRef.current.assignedAt}`,
+        );
+      }
+      if (e.isPlaying && manualSeekErrorTimeoutRef.current) {
+        clearTimeout(manualSeekErrorTimeoutRef.current);
+        manualSeekErrorTimeoutRef.current = null;
+      }
     });
     const sub2 = player.addListener("statusChange", (e: any) => {
       if (!aliveRef.current || isStale()) return;
       if (e.status === "loading") {
         setBuffering(true);
-        /* إذا بقي التحميل أكثر من 12ث (شاشة سوداء) نعامله كخطأ ونتجاوز للمصدر التالي.
-           25ث كان طويلاً جداً: 10 مصادر × 25ث = 250ث انتظار + OOM من الـ buffers المتراكمة.
-           12ث كافٍ لأغلب HLS streams مع هامش للشبكات البطيئة. */
-        if (loadTimeoutRef.current) clearTimeout(loadTimeoutRef.current);
-        loadTimeoutRef.current = setTimeout(() => {
-          loadTimeoutRef.current = null;
-          if (!aliveRef.current || isStale()) return;
-          console.warn(`[RiftPlayer] ⏱ timeout (12s) — ${playableSources[srcIdx]?.label || "?"}: ${playableSources[srcIdx]?.url?.slice(0, 80)}`);
-          setError(true);
-          setBuffering(false);
-        }, 12000);
+        const traceState = playbackTraceStateRef.current;
+        const isSeekLoading = !!seekRecoveryRef.current || !!pendingSeekRef.current;
+        if (traceState.playingLogged && !isSeekLoading && !traceState.rebufferStartedAt) {
+          traceState.rebufferStartedAt = Date.now();
+          traceState.rebufferCount += 1;
+          logPlaybackStage(
+            traceState.url,
+            "rebuffer_start",
+            `count=${traceState.rebufferCount}`,
+          );
+        }
+        /* loading الناتج عن تغيير الموضع ليس بداية تحميل مصدر جديد. */
+        if (seekRecoveryRef.current) return;
+        if (!playbackTraceStateRef.current.loadingAt) {
+          playbackTraceStateRef.current.loadingAt = Date.now();
+          logPlaybackStage(
+            playbackTraceStateRef.current.url,
+            "loading",
+            `elapsed_ms=${Date.now() - playbackTraceStateRef.current.assignedAt}`,
+          );
+        }
+        /* Anime CDNs can deliver a first segment slowly. Allow 25s for startup,
+           and 40s for a rebuffer; the 25s + 12s stall recovery remains the
+           earlier guard for a player that claims to be playing but makes no progress. */
+        const loadTimeoutMs = animePlayback
+          ? (traceState.playingLogged ? 40_000 : 25_000)
+          : 18_000;
+        /* Repeated native loading notifications must not keep extending the
+           Anime deadline indefinitely. Other player modes keep their prior behavior. */
+        if (!animePlayback || !loadTimeoutRef.current) {
+          if (loadTimeoutRef.current) clearTimeout(loadTimeoutRef.current);
+          loadTimeoutRef.current = setTimeout(() => {
+            loadTimeoutRef.current = null;
+            if (!aliveRef.current || isStale()) return;
+            logPlaybackStage(
+              playbackTraceStateRef.current.url,
+              "load_timeout",
+              `timeout_ms=${loadTimeoutMs}`,
+            );
+            console.warn(
+              `[RiftPlayer] ⏱ timeout (${Math.round(loadTimeoutMs / 1000)}s) — ${playableSources[srcIdx]?.label || "?"}`,
+            );
+            setError(true);
+            setBuffering(false);
+          }, loadTimeoutMs);
+        }
       } else {
         /* أي حالة غير loading → ألغِ الـ timeout */
         if (loadTimeoutRef.current) { clearTimeout(loadTimeoutRef.current); loadTimeoutRef.current = null; }
         /* انتهت عملية replace() الجارية (نجاحاً أو فشلاً) — حرِّر القفل ونفِّذ أي
            تبديل مصدر تراكم أثناء الانتظار (انظر replaceInFlightRef أعلاه). */
         if (e.status === "readyToPlay" || e.status === "error") {
+          const traceState = playbackTraceStateRef.current;
+          if (traceState.rebufferStartedAt) {
+            const rebufferDuration = Date.now() - traceState.rebufferStartedAt;
+            traceState.rebufferStartedAt = 0;
+            logPlaybackStage(
+              traceState.url,
+              e.status === "readyToPlay" ? "rebuffer_end" : "rebuffer_error",
+              `duration_ms=${rebufferDuration} count=${traceState.rebufferCount}`,
+            );
+          }
           if (replaceSafetyTimerRef.current) { clearTimeout(replaceSafetyTimerRef.current); replaceSafetyTimerRef.current = null; }
           replaceInFlightRef.current = false;
           const pending = pendingSwitchIdxRef.current;
           pendingSwitchIdxRef.current = null;
           if (pending !== null && !isStale() && aliveRef.current) {
             switchSourceRef.current?.(pending);
+            /* This status belongs to the source that just finished replacing.
+               Do not let its ready/error branch alter the newly selected source. */
+            return;
           }
         }
         if (e.status === "readyToPlay") {
           setBuffering(false);
           setError(false);
+          if (manualSeekErrorTimeoutRef.current) {
+            clearTimeout(manualSeekErrorTimeoutRef.current);
+            manualSeekErrorTimeoutRef.current = null;
+          }
           terminalErrorRef.current = false;
-          console.log(`[RiftPlayer] ✅ readyToPlay: ${playableSources[srcIdx]?.label || "?"} → ${playableSources[srcIdx]?.url?.slice(0, 100)}`);
+          if (!playbackTraceStateRef.current.readyLogged) {
+            playbackTraceStateRef.current.readyLogged = true;
+            logPlaybackStage(
+              playbackTraceStateRef.current.url,
+              "ready_to_play",
+              `elapsed_ms=${Date.now() - playbackTraceStateRef.current.assignedAt}`,
+            );
+          }
+          console.log(`[RiftPlayer] ✅ readyToPlay: ${playableSources[srcIdx]?.label || "?"}`);
+          const pendingSeek = seekRecoveryRef.current;
+          if (pendingSeek) {
+            if (pendingSeek.restorePending) {
+              /* إعادة تحميل نفس المصدر تعيد الموضع إلى الصفر؛ أعد target بعد
+                 جاهزية الـ pipeline، لا أثناء loading. */
+              pendingSeek.restorePending = false;
+              try { player.currentTime = pendingSeek.target; } catch {}
+              if (seekRecoveryTimerRef.current) clearTimeout(seekRecoveryTimerRef.current);
+              seekRecoveryTimerRef.current = setTimeout(() => {
+                seekRecoveryTimerRef.current = null;
+                seekRecoveryRef.current = null;
+              }, 8_000);
+            } else {
+              if (seekRecoveryTimerRef.current) {
+                clearTimeout(seekRecoveryTimerRef.current);
+                seekRecoveryTimerRef.current = null;
+              }
+              seekRecoveryRef.current = null;
+            }
+          }
           /* ── Restore position on readyToPlay (server-switch or initial resume) ──
              Doing this here (not in the polling timer) ensures we only seek AFTER
              the new stream is actually buffered, preventing conflicts with loading. */
           const swPos = switchPosRef.current;
           const initPos = initialPosition && initialPosition > 5 ? initialPosition : 0;
-          const restorePos = swPos > 5 ? swPos : initPos;
-          if (!resumedRef.current && restorePos > 5) {
+          const restorePos = swPos > 0.5 ? swPos : initPos;
+          if (!resumedRef.current && restorePos > 0.5) {
             resumedRef.current = true;
             switchPosRef.current = 0;
             try { player.currentTime = restorePos; } catch {}
           }
-          try { player.play(); } catch {}
+          try {
+            if (!animePlayback || animePlaybackIntentRef.current) player.play();
+            else player.pause();
+          } catch {}
         }
         else if (e.status === "error") {
+          const manualSeek = pendingSeekRef.current;
+          if (
+            manualSeek &&
+            Date.now() < manualSeek.expiresAt &&
+            !(animePlayback && seekRecoveryRef.current)
+          ) {
+            setBuffering(true);
+            if (!manualSeekErrorTimeoutRef.current) {
+              manualSeekErrorTimeoutRef.current = setTimeout(() => {
+                manualSeekErrorTimeoutRef.current = null;
+                if (!aliveRef.current || isStale() || pendingSeekRef.current !== manualSeek) return;
+                if ((player as any).status === "error") {
+                  if (animePlayback && !seekRecoveryRef.current) {
+                    beginSeekRecovery(manualSeek.target);
+                    const recovery = seekRecoveryRef.current as SeekRecoveryState | null;
+                    if (recovery) {
+                      recovery.retries = 1;
+                      recovery.restorePending = true;
+                    }
+                    setSourceReloadNonce(value => value + 1);
+                    return;
+                  }
+                  pendingSeekRef.current = null;
+                  setPostSeekPct(null);
+                  setError(true);
+                  setBuffering(false);
+                }
+              }, 6_000);
+            }
+            return;
+          }
+          const pendingSeek = seekRecoveryRef.current;
+          if (pendingSeek && pendingSeek.retries < 1) {
+            /* بعض إصدارات Media3 تبلغ error عند seek قبل أن تعيد بناء
+               HLS pipeline. أعد نفس المصدر مرة واحدة، من دون إظهار شاشة
+               "مصادر بديلة" أو تدوير القائمة. */
+            pendingSeek.retries += 1;
+            pendingSeek.restorePending = true;
+            setError(false);
+            setBuffering(true);
+            if (replayTimeoutRef.current) clearTimeout(replayTimeoutRef.current);
+            replayTimeoutRef.current = setTimeout(() => {
+              replayTimeoutRef.current = null;
+              if (!aliveRef.current || !seekRecoveryRef.current) return;
+              setSourceReloadNonce(value => value + 1);
+            }, 250);
+            return;
+          }
+          if (pendingSeek) {
+            if (seekRecoveryTimerRef.current) {
+              clearTimeout(seekRecoveryTimerRef.current);
+              seekRecoveryTimerRef.current = null;
+            }
+            if (replayTimeoutRef.current) {
+              clearTimeout(replayTimeoutRef.current);
+              replayTimeoutRef.current = null;
+            }
+            seekRecoveryRef.current = null;
+          }
           setError(true);
           setBuffering(false);
           /* تفاصيل الخطأ — ضرورية لتشخيص مشاكل ExoPlayer/AVPlayer مع المصادر */
-          console.error(`[RiftPlayer] ❌ خطأ في التشغيل:`, JSON.stringify(e));
+          logPlaybackStage(playbackTraceStateRef.current.url, "player_error");
+          console.error("[RiftPlayer] ❌ خطأ في التشغيل");
         }
       }
     });
@@ -880,7 +1336,7 @@ export function RiftPlayer({
          كان يُزيل الحماية من الـ black-screen بينما المشغّل لا يزال في loading.
          الـ timeout يُلغى فقط في: Master cleanup (unmount) أو statusChange نفسه. */
     };
-  }, [player, initialPosition, srcIdx]); // eslint-disable-line
+  }, [player, initialPosition, srcIdx, beginSeekRecovery, animePlayback]); // eslint-disable-line
   /* ✅ أُزيل playableSources من deps — كان يُعيد تسجيل الـ listeners عند كل وصول
      مصدر جديد مما يُلغي loadTimeoutRef الجاري ويُعطّل حماية الـ black-screen. */
 
@@ -910,6 +1366,11 @@ export function RiftPlayer({
     if (!aliveRef.current) return;
     /* نقرأ الطول من ref — يعكس القيمة الأحدث دون إعادة تشغيل هذا الـ effect */
     const curLen = playableCountRef.current;
+    if (isLocalPlayback) {
+      setIsAutoCycling(false);
+      setIsWaitingForSources(false);
+      return;
+    }
     if (curLen <= 1) {
       /* ── انتظر حتى 8 ثوانٍ لوصول مصادر من الخلفية قبل الاستسلام ──
          هذا يمنع الخروج الفوري عندما يفشل المصدر الأول بينما المصادر الأخرى
@@ -949,7 +1410,7 @@ export function RiftPlayer({
     setIsAutoCycling(true); // suppress full error UI — show silent loading instead
     const t = setTimeout(() => switchSource(nextIdx), 600);
     return () => clearTimeout(t);
-  }, [error, srcIdx]); // eslint-disable-line
+  }, [error, isLocalPlayback, srcIdx]); // eslint-disable-line
 
   /* ── عندما تصل مصادر جديدة أثناء انتظار البديل → جرّب الأول الجديد فوراً ── */
   useEffect(() => {
@@ -957,6 +1418,9 @@ export function RiftPlayer({
     if (playableSources.length <= 1) return;
     /* وصل مصدر إضافي → الغِ timer الانتظار وانتقل إليه */
     if (waitForSrcTimerRef.current) { clearTimeout(waitForSrcTimerRef.current); waitForSrcTimerRef.current = null; }
+    if (seekRecoveryTimerRef.current) { clearTimeout(seekRecoveryTimerRef.current); seekRecoveryTimerRef.current = null; }
+    if (replayTimeoutRef.current) { clearTimeout(replayTimeoutRef.current); replayTimeoutRef.current = null; }
+    seekRecoveryRef.current = null;
     setIsWaitingForSources(false);
     setIsAutoCycling(false);
     consecutiveErrorsRef.current = 0;
@@ -986,37 +1450,105 @@ export function RiftPlayer({
 
   /* ─── Progress polling ─── */
   useEffect(() => {
-    const STALL_TIMEOUT_MS = 15000; // 15ث بدون تقدّم = stall
+    // Some signed CDN segments take 17+ seconds to arrive. Do not switch away
+    // from a healthy source while that request is still within its normal range.
+    const STALL_TIMEOUT_MS = 25_000;
+    const STALL_RECOVERY_TIMEOUT_MS = 12_000;
     const id = setInterval(() => {
       try {
         const rawPos = player.currentTime;
         const rawDur = player.duration;
         const pos = (typeof rawPos === "number" && isFinite(rawPos) && rawPos >= 0) ? rawPos : 0;
-        const dur = (typeof rawDur === "number" && isFinite(rawDur) && rawDur > 0) ? rawDur : 0;
-        setPosition(pos);
-        setDuration(dur);
-        positionRef.current = pos;
-        durationRef.current = dur;
-        if (dur > 0 && onProgress) onProgress(pos, dur);
+        const reportedDuration = (typeof rawDur === "number" && isFinite(rawDur) && rawDur > 0)
+          ? rawDur
+          : 0;
+        if (reportedDuration > 0) {
+          durationRef.current = reportedDuration;
+          setDuration(reportedDuration);
+        }
+        const dur = reportedDuration || durationRef.current;
+        const pendingSeek = pendingSeekRef.current;
+        let awaitingNativeSeek = false;
+        if (pendingSeek) {
+          const tolerance = Math.max(1.5, dur * 0.004);
+          const reachedTarget = Math.abs(pos - pendingSeek.target) <= tolerance;
+          const resumedPastTarget = !!player.playing &&
+            pos > pendingSeek.target &&
+            pos - pendingSeek.target <= Math.max(4, dur * 0.01);
+          if (reachedTarget || resumedPastTarget) {
+            logPlaybackStage(
+              playbackTraceStateRef.current.url,
+              "seek_settled",
+              `target_s=${pendingSeek.target.toFixed(1)} actual_s=${pos.toFixed(1)}`,
+            );
+            pendingSeekRef.current = null;
+            setPostSeekPct(null);
+            if (seekRecoveryRef.current?.target === pendingSeek.target) {
+              if (seekRecoveryTimerRef.current) clearTimeout(seekRecoveryTimerRef.current);
+              seekRecoveryTimerRef.current = null;
+              seekRecoveryRef.current = null;
+            }
+            if (postSeekTimer.current) {
+              clearTimeout(postSeekTimer.current);
+              postSeekTimer.current = null;
+            }
+            if (manualSeekErrorTimeoutRef.current) {
+              clearTimeout(manualSeekErrorTimeoutRef.current);
+              manualSeekErrorTimeoutRef.current = null;
+            }
+          } else if (Date.now() < pendingSeek.expiresAt) {
+            awaitingNativeSeek = true;
+            setPosition(pendingSeek.target);
+            positionRef.current = pendingSeek.target;
+          } else {
+            logPlaybackStage(
+              playbackTraceStateRef.current.url,
+              "seek_timeout",
+              `target_s=${pendingSeek.target.toFixed(1)}`,
+            );
+            pendingSeekRef.current = null;
+            setPostSeekPct(null);
+          }
+        }
+        if (!awaitingNativeSeek) {
+          positionRef.current = pos;
+          if (!isDraggingRef.current) setPosition(pos);
+          if (dur > 0 && onProgress && !isDraggingRef.current) onProgress(pos, dur);
+          if (pos > 0 && !playbackTraceStateRef.current.progressLogged) {
+            playbackTraceStateRef.current.progressLogged = true;
+            logPlaybackStage(
+              playbackTraceStateRef.current.url,
+              "first_progress",
+              `elapsed_ms=${Date.now() - playbackTraceStateRef.current.assignedAt}`,
+            );
+          }
+        }
         if (dur > 0 && pos >= dur - 0.5) {
           setIsEnded(true);
           setIsPlaying(false);
         }
         /* ── Buffer bar tracking ── */
         try {
-          const buf = (player as any).bufferedPosition || 0;
-          setBufferedPct(dur > 0 ? Math.min(buf / dur, 1) : 0);
+          const rawBuffered = Number((player as any).bufferedPosition);
+          const buf = Number.isFinite(rawBuffered) && rawBuffered > 0 ? rawBuffered : 0;
+          setBufferedPct(dur > 0 ? Math.min(Math.max(buf / dur, 0), 1) : 0);
         } catch {}
         /* ── Stall detection: شاشة سوداء صامتة بدون error event ──
-           إذا بقي المشغّل في "يشتغل" (isPlaying=true) بدون تقدّم في الـ position
-           لمدة 15ث نعامله كخطأ → auto-advance للمصدر التالي.
+           ننتظر استجابة CDN بطيئة قبل اعتبار المصدر معطلاً، ثم نعطي محاولة
+           إنعاش واحدة بمهلة أقصر قبل الانتقال للمصدر التالي.
            نتجاهل حالة الإيقاف المؤقت أو نهاية الحلقة أو حالة الخطأ الموجودة. */
-        if (isPlayingRef.current && !isErrorRef.current && !isEndedRef.current && dur > 0) {
+        if (isDraggingRef.current || pendingSeekRef.current) {
+          stallRef.current = { lastPos: pos, lastAt: Date.now() };
+        } else if (isPlayingRef.current && !isErrorRef.current && !isEndedRef.current && !isLocalPlayback && dur > 0) {
           if (pos > stallRef.current.lastPos + 0.1) {
             // تقدّم طبيعي — أعد ضبط العداد وألغِ محاولة الـ nudge السابقة
             stallRef.current = { lastPos: pos, lastAt: Date.now() };
             stallNudgeTriedRef.current = false;
-          } else if (stallRef.current.lastAt > 0 && Date.now() - stallRef.current.lastAt > STALL_TIMEOUT_MS) {
+          } else if (
+            stallRef.current.lastAt > 0
+            && Date.now() - stallRef.current.lastAt
+              > (stallNudgeTriedRef.current ? STALL_RECOVERY_TIMEOUT_MS : STALL_TIMEOUT_MS)
+          ) {
             if (!stallNudgeTriedRef.current) {
               /* محاولة إنعاش أولى بدون إزعاج المستخدم: نفس ما يفعله يدوياً بالتقديم
                  قليلاً — كثيراً ما يكفي لتحرير اختناق مؤقت في HLS proxy. */
@@ -1025,8 +1557,9 @@ export function RiftPlayer({
               stallRef.current = { lastPos: pos, lastAt: Date.now() }; // مهلة جديدة أقصر للمحاولة التالية
               try {
                 const nudgeTarget = pos + 0.4;
+                beginSeekRecovery(nudgeTarget);
                 player.currentTime = nudgeTarget;
-                player.play();
+                if (!animePlayback || animePlaybackIntentRef.current) player.play();
               } catch {}
             } else {
               console.warn(`[RiftPlayer] 🔴 stall persists after nudge — switching source`);
@@ -1041,13 +1574,13 @@ export function RiftPlayer({
           stallRef.current = { lastPos: pos, lastAt: isPlayingRef.current ? Date.now() : 0 };
         }
       } catch {}
-    }, 500);
+    }, 1000);
     progressTimer.current = id;
     return () => {
       clearInterval(id);
       if (progressTimer.current === id) progressTimer.current = null;
     };
-  }, [player, onProgress]); // eslint-disable-line
+  }, [animePlayback, beginSeekRecovery, isLocalPlayback, player, onProgress]); // eslint-disable-line
 
   /* ─── Subtitle cue lookup via rAF ─── */
   /* Vidstack technique: pre-sort once → binary search O(log n) at 60fps */
@@ -1104,7 +1637,9 @@ export function RiftPlayer({
 
     /* ── حساب الـ URL الإنجليزي الخام (قبل أي ترجمة) ── */
     const base = getBaseUrl();
-    const alreadyTranslated = rawUrl.includes("translate-vtt") || rawUrl.includes("proxy-text");
+    // proxy-text only fixes CORS/referer; it does not translate. Treating it
+    // as translated caused KW/MP English tracks to bypass Arabic translation.
+    const alreadyTranslated = rawUrl.includes("translate-vtt");
 
     // استخراج الـ URL الداخلي إذا كان translate-vtt
     const innerUrl = alreadyTranslated ? (() => {
@@ -1273,31 +1808,25 @@ export function RiftPlayer({
     }
   }, [currentSrc?.subtitleUrl, subtitlesDisabled]);
 
-  /* ─── Screen orientation lock to landscape ─── */
-  useEffect(() => {
-    ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE_RIGHT)
-      .then(() => { orientLockRef.current = "right"; })
-      .catch(() => {});
-    return () => {
-      ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP).catch(() => {});
-    };
-  }, []);
-
   /* ─── Flip screen — rotate 180° using CSS transform (no surface recreation = no black flash) ─── */
   const flipScreen = useCallback(() => {
     setIsFlipped(f => !f);
   }, []);
 
   /* ─── Portrait / Landscape toggle ─── */
-  const togglePortrait = useCallback(async () => {
-    try {
-      if (isPortrait) {
-        await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE_RIGHT);
-      } else {
-        await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP);
-      }
-    } catch {}
-  }, [isPortrait]);
+  const togglePortrait = useCallback(() => {
+    const nextPortrait = !isPortrait;
+    setIsPortrait(nextPortrait);
+    if (onToggleOrientation) {
+      onToggleOrientation();
+      return;
+    }
+    requestOrientation(
+      nextPortrait
+        ? ScreenOrientation.OrientationLock.PORTRAIT_UP
+        : ScreenOrientation.OrientationLock.LANDSCAPE_RIGHT,
+    );
+  }, [isPortrait, onToggleOrientation, requestOrientation]);
 
   /* ─── Screenshot ─── */
   const rootViewRef = useRef<View>(null);
@@ -1350,10 +1879,10 @@ export function RiftPlayer({
     } finally {
       if (wasShowingControls && aliveRef.current) {
         setShowControls(true);
-        fadeIn();
+        fadeInRef.current?.();
       }
     }
-  }, [fadeIn, showControls]);
+  }, [showControls]);
 
   /* ─── Orientation change listener ─── */
   useEffect(() => {
@@ -1366,16 +1895,19 @@ export function RiftPlayer({
         );
       } catch {}
     };
-    detect();
+    // Watch routes enter with a centrally requested landscape lock. Avoid a
+    // stale pre-lock orientation read changing the player layout on mount.
+    if (!onToggleOrientation) detect();
     const sub = ScreenOrientation.addOrientationChangeListener((e) => {
       const o = e.orientationInfo.orientation;
       setIsPortrait(
         o === ScreenOrientation.Orientation.PORTRAIT_UP ||
         o === ScreenOrientation.Orientation.PORTRAIT_DOWN
       );
+      /* A rotation invalidates absolute coordinates used by the seekbar. */
     });
     return () => sub.remove();
-  }, []);
+  }, [onToggleOrientation]);
 
   /* ─── Mute sync + initial maximum real volume ─── */
   useEffect(() => {
@@ -1388,38 +1920,88 @@ export function RiftPlayer({
     } catch {}
   }, [isMuted, player]);
 
-  /* ─── AniSkip: جلب أوقات المقدمة/النهاية إذا لم تُوفَّر بالمصدر ─── */
+  /* ─── Server-resolved skip timings: only request independently missing parts ─── */
   useEffect(() => {
-    if (skipIntroProp || skipOutroProp || !anilistId || !episode) return;
+    const previous = fetchedSkipTimes?.key === skipScopeKey
+      ? fetchedSkipTimes
+      : null;
+    const needsIntro = !resolvedSkipTimes.intro;
+    const needsOutro = !resolvedSkipTimes.outro;
+    const pendingIntro = needsIntro && !previous?.checkedIntro;
+    const pendingOutro = needsOutro && !previous?.checkedOutro;
+    const retryDelay = Math.max(0, (previous?.retryAt ?? 0) - Date.now());
+    if (!pendingIntro && !pendingOutro) return;
+    if (retryDelay > 0) {
+      const timer = setTimeout(() => setSkipFetchRetryTick(value => value + 1), retryDelay);
+      return () => clearTimeout(timer);
+    }
+    const requestIntro = pendingIntro;
+    const requestOutro = pendingOutro;
+    if (!currentSrc?.url || !anilistId || !episode) return;
+    const base = getBaseUrl();
+    if (!base) return;
+
     const ctrl = new AbortController();
     (async () => {
       try {
-        // 1. Get MAL ID from AniList
-        const alRes = await fetch(`${getBaseUrl()}/api/anilist`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ query: "query($id:Int){Media(id:$id){idMal}}", variables: { id: anilistId } }),
-          signal: ctrl.signal,
+        const params = new URLSearchParams({
+          anilistId: String(anilistId),
+          ep: String(episode),
+          intro: requestIntro ? "1" : "0",
+          outro: requestOutro ? "1" : "0",
         });
-        const alData = await alRes.json();
-        const malId: number | null = alData?.data?.Media?.idMal;
-        if (!malId || ctrl.signal.aborted) return;
-        // 2. Fetch skip times from AniSkip
-        const skipRes = await fetch(
-          `https://api.aniskip.com/v1/skip-times/${malId}/${episode}?types[]=op&types[]=ed`,
+        const response = await fetch(
+          `${base}/api/anime/skip-times?${params.toString()}`,
           { signal: ctrl.signal },
         );
-        const skipData = await skipRes.json();
-        if (ctrl.signal.aborted || !skipData?.found) return;
-        for (const r of (skipData.results ?? [])) {
-          const s = { start: r.interval.start_time, end: r.interval.end_time };
-          if (r.skip_type === "op")  setFetchedSkipIntro(s);
-          if (r.skip_type === "ed")  setFetchedSkipOutro(s);
-        }
+        const payload = await response.json().catch(() => null);
+        if (!payload || ctrl.signal.aborted) return;
+        const nextIntro = validateSkipInterval(payload?.intro);
+        const nextOutro = validateSkipInterval(payload?.outro);
+        const current = fetchedSkipTimes?.key === skipScopeKey
+          ? fetchedSkipTimes
+          : {
+              key: skipScopeKey,
+              intro: null,
+              outro: null,
+              checkedIntro: false,
+              checkedOutro: false,
+              retryAt: 0,
+            };
+        const retryAfterMs = Number(payload?.retryAfterMs);
+        const retryAt = Number.isFinite(retryAfterMs) && retryAfterMs > 0
+          ? Date.now() + retryAfterMs
+          : response.ok ? 0 : Date.now() + 60_000;
+        setFetchedSkipTimes({
+          key: skipScopeKey,
+          intro: nextIntro ?? current.intro,
+          outro: nextOutro ?? current.outro,
+          checkedIntro: current.checkedIntro
+            || (typeof payload?.checkedIntro === "boolean"
+              ? payload.checkedIntro
+              : response.ok && requestIntro),
+          checkedOutro: current.checkedOutro
+            || (typeof payload?.checkedOutro === "boolean"
+              ? payload.checkedOutro
+              : response.ok && requestOutro),
+          retryAt,
+        });
       } catch {}
     })();
     return () => ctrl.abort();
-  }, [anilistId, episode]);
+  }, [
+    anilistId,
+    episode,
+    currentSrc?.url,
+    skipScopeKey,
+    duration,
+    fetchedSkipTimes,
+    skipFetchRetryTick,
+    resolvedSkipTimes.intro?.start,
+    resolvedSkipTimes.intro?.end,
+    resolvedSkipTimes.outro?.start,
+    resolvedSkipTimes.outro?.end,
+  ]);
 
   /* ─── Auto-fetch subtitles via subtitle-tracks API (wyzie.ru + SubDL + HiAnime) ─── */
   useEffect(() => {
@@ -1459,7 +2041,10 @@ export function RiftPlayer({
         }
 
         /* Pick track based on current language preference */
-        const track = subLang === "en"
+        // Keep Arabic as the default on every source/episode. Only honor
+        // English after the user explicitly selected it; a previous source's
+        // fallback must never silently switch the next source to English.
+        const track = userSelectedSubLangRef.current && subLang === "en"
           ? (enTrack || arTrack || tracks[0])
           : (arTrack || enTrack || tracks[0]);
         if (!track?.url) return;
@@ -1524,13 +2109,6 @@ export function RiftPlayer({
     });
   }, []);
 
-  /* ─── Skip notification (mark fired when skip data arrives) ─── */
-  useEffect(() => {
-    if ((skipIntro || skipOutro) && !skipNotifFired.current) {
-      skipNotifFired.current = true;
-    }
-  }, [skipIntro, skipOutro]);
-
   /* ─── Sleep timer countdown ─── */
   useEffect(() => {
     if (sleepTimer === 0) { setSleepRemaining(0); return; }
@@ -1539,7 +2117,10 @@ export function RiftPlayer({
       setSleepRemaining(r => {
         if (r <= 1) {
           clearInterval(tick);
-          if (aliveRef.current) { try { player.pause(); } catch {} }
+          if (aliveRef.current) {
+            if (animePlayback) animePlaybackIntentRef.current = false;
+            try { player.pause(); } catch {}
+          }
           setSleepTimer(0);
           return 0;
         }
@@ -1547,7 +2128,7 @@ export function RiftPlayer({
       });
     }, 1000);
     return () => clearInterval(tick);
-  }, [sleepTimer]); // eslint-disable-line
+  }, [sleepTimer, animePlayback]); // eslint-disable-line
 
   /* ─── Auto-play countdown — DISABLED: user must press next manually ─── */
   useEffect(() => {
@@ -1555,59 +2136,176 @@ export function RiftPlayer({
   }, [isEnded]);
 
   /* ─── Controls show/hide ─── */
+  const showTvRevealHintBriefly = useCallback(() => {
+    setShowTvRevealHint(true);
+    if (revealHintTimer.current) clearTimeout(revealHintTimer.current);
+    revealHintTimer.current = setTimeout(() => {
+      revealHintTimer.current = null;
+      setShowTvRevealHint(false);
+    }, 2200);
+  }, []);
+
   const schedHide = useCallback(() => {
     if (hideTimer.current) clearTimeout(hideTimer.current);
     hideTimer.current = setTimeout(() => {
-      Animated.timing(controlsOpacity, { toValue: 0, duration: 350, useNativeDriver: true }).start(() => setShowControls(false));
-    }, 5000);
-  }, []);
+      Animated.timing(controlsOpacity, {
+        toValue: 0,
+        duration: 350,
+        useNativeDriver: true,
+      }).start(() => {
+        setShowControls(false);
+        if (tvMode) showTvRevealHintBriefly();
+      });
+    // أدوات المشغل تبقى ظاهرة بالمدة المعتادة؛ التلميح الوسطي وحده
+    // يختفي تلقائياً بعد ثانيتين عبر showTvRevealHintBriefly.
+    }, tvMode ? 6500 : 5000);
+  }, [showTvRevealHintBriefly, tvMode]);
 
   const fadeIn = useCallback(() => {
     if (hideTimer.current) clearTimeout(hideTimer.current);
+    if (revealHintTimer.current) {
+      clearTimeout(revealHintTimer.current);
+      revealHintTimer.current = null;
+    }
+    setShowTvRevealHint(false);
     Animated.timing(controlsOpacity, { toValue: 1, duration: 200, useNativeDriver: true }).start();
     setShowControls(true);
     schedHide();
   }, [schedHide]);
+  fadeInRef.current = fadeIn;
+
+  /* أي حركة D-pad تعني أن المستخدم ما زال يتنقل بين أدوات المشغل.
+     أعد تشغيل مؤقت الإخفاء عند كل حركة، حتى يبدأ العد بعد توقفه فعلياً
+     بدلاً من اختفاء الأزرار أثناء الوصول إلى الخيار المطلوب. */
+  const keepTvControlsVisible = useCallback(() => {
+    if (!tvMode) return;
+    if (!showControls) {
+      fadeIn();
+      return;
+    }
+    schedHide();
+  }, [fadeIn, schedHide, showControls, tvMode]);
+
+  /* لا نركّب مستمع D-pad عام هنا: بعض إصدارات Android TV/Expo تبني
+     الشاشة بنجاح لكن تفشل أثناء تركيب هذا المستمع native. أحداث التركيز
+     التي تمر عبر TvPressable تكفي لإعادة ضبط المؤقت بدون كسر شاشة المشغل. */
+  const Pressable = useCallback((props: React.ComponentProps<typeof TvPressable>) => {
+    const { onFocus, ...pressableProps } = props;
+    return (
+      <TvPressable
+        {...pressableProps}
+        onFocus={(event: any) => {
+          keepTvControlsVisible();
+          onFocus?.(event);
+        }}
+      />
+    );
+  }, [keepTvControlsVisible]);
 
   useEffect(() => {
     fadeIn();
     return () => { if (hideTimer.current) clearTimeout(hideTimer.current); };
   }, []);
 
-  /* ─── Back: lock to portrait then go back ─── */
+  /* ─── Back: the watch route switches back to portrait when the player closes ─── */
   const handleBack = useCallback(() => {
-    ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP).catch(() => {});
     onBack();
   }, [onBack]);
 
   /* ─── Actions ─── */
   const togglePlay = useCallback(() => {
     fadeIn();
-    try { if (player.playing) player.pause(); else player.play(); } catch {}
-  }, [player, fadeIn]);
+    const shouldPlay = animePlayback ? animePlaybackIntentRef.current : !!player.playing;
+    const nextShouldPlay = !shouldPlay;
+    if (animePlayback) animePlaybackIntentRef.current = nextShouldPlay;
+    try {
+      if (nextShouldPlay) player.play();
+      else player.pause();
+    } catch {}
+  }, [player, fadeIn, animePlayback]);
 
-  const seek = useCallback((secs: number) => {
-    fadeIn();
-    const target = Math.max(0, Math.min(secs, durationRef.current || duration));
-    try { player.currentTime = target; setPosition(target); } catch {}
+  const applySeek = useCallback((secs: number) => {
+    const maxDuration = durationRef.current;
+    if (!Number.isFinite(secs) || !Number.isFinite(maxDuration) || maxDuration <= 0) return;
+    const target = Math.min(Math.max(secs, 0), maxDuration);
+    if (!Number.isFinite(target)) return;
+    cancelSeekRecovery();
+    if (manualSeekErrorTimeoutRef.current) {
+      clearTimeout(manualSeekErrorTimeoutRef.current);
+      manualSeekErrorTimeoutRef.current = null;
+    }
+    if (postSeekTimer.current) {
+      clearTimeout(postSeekTimer.current);
+      postSeekTimer.current = null;
+    }
+    pendingSeekRef.current = { target, expiresAt: Date.now() + (animePlayback ? 15_000 : 8_000) };
+    logPlaybackStage(playbackTraceStateRef.current.url, "seek_requested", `target_s=${target.toFixed(1)}`);
+    setPostSeekPct(target / maxDuration);
+    setPosition(target);
+    positionRef.current = target;
+    setIsEnded(false);
+    isEndedRef.current = false;
+    if (animePlayback) beginSeekRecovery(target);
+    try {
+      const seekPlayer = player as typeof player & {
+        seekTo?: (seconds: number, toleranceBefore?: number, toleranceAfter?: number) => void;
+      };
+      if (animePlayback && typeof seekPlayer.seekTo === "function") {
+        try {
+          seekPlayer.seekTo(target, 1, 1);
+        } catch {
+          player.currentTime = target;
+        }
+      } else {
+        player.currentTime = target;
+      }
+    } catch {
+      pendingSeekRef.current = null;
+      setPostSeekPct(null);
+      return;
+    }
     /* أعِد ضبط كاشف الـ stall — بدون هذا، القفز للخلف يجعل pos أصغر من
        lastPos المُخزَّن فيبقى عدّاد "بدون تقدّم" السابق للتنقّل يعمل، فيُطلق
        "stall" زائف بعد ثوانٍ قليلة من القفز رغم أن التشغيل طبيعي تماماً —
        هذا هو سبب التجمّد الظاهري بعد التقديم/الإرجاع الذي أبلغ عنه المستخدم. */
     stallRef.current = { lastPos: target, lastAt: Date.now() };
-  }, [player, duration, fadeIn]);
+  }, [animePlayback, beginSeekRecovery, cancelSeekRecovery, player]);
+  const seek = useCallback((secs: number) => {
+    fadeIn();
+    applySeek(secs);
+  }, [applySeek, fadeIn]);
   seekRef.current = seek;
+
+  /* على التلفاز يبقى التركيز على شريط التقدم هدفاً حقيقياً للريموت؛
+     السهمان يسحبان الموضع بخطوة التقديم المختارة بدلاً من نقل التركيز
+     إلى زر آخر. ندعم أرقام Android keyCode وأسماء أحداث RN معاً. */
+  const handleTvProgressKeyDown = useCallback((event: any) => {
+    if (!tvMode || !showControls || !progressFocusedRef.current) return;
+    const nativeEvent = event?.nativeEvent || {};
+    const keyCode = Number(nativeEvent.keyCode ?? nativeEvent.keycode);
+    const eventName = String(
+      nativeEvent.eventType ?? nativeEvent.key ?? nativeEvent.action ?? "",
+    ).toLowerCase();
+    const direction =
+      keyCode === 21 || eventName.includes("left") ? -1 :
+      keyCode === 22 || eventName.includes("right") ? 1 : 0;
+    if (!direction) return;
+    const now = Date.now();
+    if (now - lastTvSeekAtRef.current < 100) return;
+    lastTvSeekAtRef.current = now;
+    seek(positionRef.current + direction * (seekDurationRef.current || 10));
+    event?.preventDefault?.();
+  }, [seek, showControls, tvMode]);
 
   /* seekSilent: نفس seek لكن بدون إظهار controls (للـ double-tap والـ gestures) */
   const seekSilentRef = useRef<(s: number) => void>(() => {});
   const seekSilent = useCallback((secs: number) => {
-    const target = Math.max(0, Math.min(secs, durationRef.current || duration));
-    try { player.currentTime = target; setPosition(target); } catch {}
-    stallRef.current = { lastPos: target, lastAt: Date.now() };
-  }, [player, duration]);
+    applySeek(secs);
+  }, [applySeek]);
   seekSilentRef.current = seekSilent;
 
   const changeSpeed = useCallback((s: number) => {
+    preferredPlaybackSpeed = s;
     setSpeed(s);
     try { player.playbackRate = s; } catch {}
     setShowSpeedSheet(false);
@@ -1644,9 +2342,15 @@ export function RiftPlayer({
     consecutiveErrorsRef.current = 0;
     setIsWaitingForSources(false);
     /* ── Save current position before replacing source ── */
-    const savedPos = player.currentTime || 0;
-    if (savedPos > 5) switchPosRef.current = savedPos;
-    console.log(`[Nova Mobile] تبديل المصدر → ${newSrc.label || "مجهول"} (${safeIdx + 1}/${playableSources.length}): ${newSrc.url?.slice(0, 120)}`);
+    const nativePos = Number(player.currentTime);
+    const savedPos = Number.isFinite(nativePos) && nativePos > 0
+      ? nativePos
+      : positionRef.current;
+    /* لا نهمل المواضع القصيرة، واستخدم polling كاحتياط إذا أعاد native
+       صفرًا لحظة ضغط زر تبديل السيرفر. */
+    switchPosRef.current = Number.isFinite(savedPos) ? Math.max(0, savedPos) : 0;
+    logPlaybackStage(newSrc.url, "source_switch", `index=${safeIdx + 1} total=${playableSources.length}`);
+    console.log(`[Nova Mobile] تبديل المصدر → ${newSrc.label || "مجهول"} (${safeIdx + 1}/${playableSources.length})`);
     setSrcIdx(safeIdx);
     terminalErrorRef.current = false;
     setIsAutoCycling(false);
@@ -1673,7 +2377,7 @@ export function RiftPlayer({
        URL فارغ أو بدون بروتوكول يُسبِّب native crash بدل statusChange→error */
     const srcUrl = newSrc?.url;
     if (!isValidPlayerSourceUrl(srcUrl)) {
-      console.warn(`[RiftPlayer] ⛔ URL غير صالح للمصدر ${safeIdx + 1}: "${srcUrl?.slice(0, 60) ?? "فارغ"}"`);
+      console.warn(`[RiftPlayer] ⛔ URL غير صالح للمصدر ${safeIdx + 1}: "${String(srcUrl ?? "").slice(0, 60) || "فارغ"}"`);
       setError(true);
       setBuffering(false);
       return;
@@ -1691,8 +2395,12 @@ export function RiftPlayer({
   /* ─── Serialized native source replacement ───
      يُنفّذ بعد effect الـlisteners أعلاه، وبعملية replace واحدة فقط. */
   useEffect(() => {
-    if (nativeSrcIdxRef.current === srcIdx) return;
+    if (
+      nativeSrcIdxRef.current === srcIdx
+      && nativeLoadNonceRef.current === sourceReloadNonce
+    ) return;
     nativeSrcIdxRef.current = srcIdx;
+    nativeLoadNonceRef.current = sourceReloadNonce;
     const nextSrc = playableSources[srcIdx];
     if (!nextSrc || !isValidPlayerSourceUrl(nextSrc.url)) return;
 
@@ -1703,18 +2411,27 @@ export function RiftPlayer({
 
       replaceInFlightRef.current = true;
       if (replaceSafetyTimerRef.current) clearTimeout(replaceSafetyTimerRef.current);
+      /* Keep the Anime replacement lock beyond its maximum loading deadline;
+         releasing it sooner can start a second native replace while the first
+         source is still loading. */
+      const replaceSafetyTimeoutMs = animePlayback
+        ? (playbackTraceStateRef.current.playingLogged ? 45_000 : 30_000)
+        : 10_000;
       replaceSafetyTimerRef.current = setTimeout(() => {
         replaceSafetyTimerRef.current = null;
         replaceInFlightRef.current = false;
         const pending = pendingSwitchIdxRef.current;
         pendingSwitchIdxRef.current = null;
         if (pending !== null && aliveRef.current) switchSourceRef.current?.(pending);
-      }, 10_000);
+      }, replaceSafetyTimeoutMs);
 
       try {
         /* replace() يدير إيقاف الـpipeline السابق داخلياً؛ لا نضيف pause()
            قبله لأن استدعاءين native متتاليين كانا سبباً لسباق الكراش. */
-        player.replace(nextSrc.url as any);
+        try {
+          player.bufferOptions = getPlaybackBufferOptions(animePlayback);
+        } catch {}
+        player.replace(toExpoVideoSource(nextSrc) as any);
       } catch (e) {
         console.warn("[RiftPlayer] player.replace() رمى استثناء:", e);
         setError(true);
@@ -1736,7 +2453,7 @@ export function RiftPlayer({
         replaceCallTimerRef.current = null;
       }
     };
-  }, [player, playableSources, srcIdx]);
+  }, [player, playableSources, sourceReloadNonce, srcIdx, animePlayback]);
 
   /* ─── Whisper audio transcription ─── */
   const triggerWhisper = useCallback(async () => {
@@ -1863,118 +2580,117 @@ export function RiftPlayer({
   ).current;
 
   /* ─── Seekbar drag PanResponder ─── */
-  /* شريط التقدم يسير من اليسار إلى اليمين (LTR) — المعيار العالمي لمشغلات الفيديو.
-     نستخدم gestureState.moveX (إحداثي مطلق على الشاشة) بدلاً من locationX
-     لأن locationX على Android غير موثوق أثناء onPanResponderMove خارج حدود الـ View. */
-  const _nRTL = Platform.OS !== "web" && I18nManager.isRTL;
-  /* شريط التقدم يسير دائماً من اليسار (0%) إلى اليمين (100%) بغض النظر عن RTL —
-     هذا هو المعيار العالمي لمشغلات الفيديو حتى في التطبيقات العربية */
-  const _calcPctFromAbsolute = (absoluteX: number): number => {
-    const localX = absoluteX - barPageX.current;
-    const raw = Math.min(1, Math.max(0, localX) / Math.max(1, barWidth.current));
-    return _nRTL ? 1 - raw : raw;
-  };
-  const seekBarPan = useRef(
-    PanResponder.create({
-      onStartShouldSetPanResponder: () => true,
-      onMoveShouldSetPanResponder: () => true,
-      onPanResponderGrant: (e) => {
-        const grantPageX  = e.nativeEvent.pageX;
-        const grantLocX   = e.nativeEvent.locationX; // نسبي للـ View — أدق من pageX للنقرات السريعة
-        lastMoveX.current        = grantPageX;
-        grantLocationXRef.current = grantLocX;
-        // إلغاء أي timer معلّق من الإفلات السابق
-        if (postSeekTimer.current) { clearTimeout(postSeekTimer.current); postSeekTimer.current = null; }
-        setPostSeekPct(null);
-        setIsDragging(true);
-
-        /* حساب فوري: نفضّل locationX (لا يعتمد على barPageX) إن كان ضمن حدود الشريط */
-        const bw = barWidth.current;
-        if (grantLocX >= 0 && grantLocX <= bw + 4) {
-          const raw = Math.min(1, Math.max(0, grantLocX / Math.max(1, bw)));
-          setDragPct(_nRTL ? 1 - raw : raw);
-        } else {
-          setDragPct(Math.max(0, Math.min(1, _calcPctFromAbsolute(grantPageX))));
+  const progressPctFromAbsolute = useCallback((absoluteX: number): number | null => {
+    const bounds = seekBarBoundsRef.current;
+    if (!Number.isFinite(absoluteX) || !bounds || bounds.width <= 1) return null;
+    return Math.min(1, Math.max(0, (absoluteX - bounds.left) / bounds.width));
+  }, []);
+  const seekBarPan = useRef<ReturnType<typeof PanResponder.create> | null>(null);
+  if (!seekBarPan.current) {
+    seekBarPan.current = PanResponder.create({
+      onStartShouldSetPanResponder: () => durationRef.current > 0 && seekBarBoundsRef.current !== null,
+      onMoveShouldSetPanResponder: () => durationRef.current > 0 && seekBarBoundsRef.current !== null,
+      onPanResponderGrant: (event) => {
+        const x = Number(event.nativeEvent.pageX);
+        const pct = progressPctFromAbsolute(x);
+        if (pct === null) {
+          measureSeekBar();
+          return;
         }
-
-        /* تحديث القياسات بشكل غير متزامن (يُصلح إن تغيّر تخطيط الشريط) */
-        barRef.current?.measureInWindow((px, _py, pw) => {
-          if (px >= 0) barPageX.current = px;
-          if (pw > 1)  barWidth.current  = pw;
-        });
-      },
-      onPanResponderMove: (_, gs) => {
-        /* gs.moveX = الإحداثي المطلق للإصبع على الشاشة — موثوق على iOS وAndroid */
-        const x = gs.moveX;
-        if (x > 0) lastMoveX.current = x;
-        const pct = _calcPctFromAbsolute(x > 0 ? x : lastMoveX.current);
-        setDragPct(Math.max(0, Math.min(1, pct)));
-      },
-      onPanResponderRelease: (_, gs) => {
-        /* نقرة سريعة (dx < 8px): نفضّل locationX المحفوظ — لا يعتمد على barPageX/barWidth.
-           لكن locationX قد يكون 0 على Android لأسباب داخلية (موثّق)؛ نتحقق أن الصفر
-           منطقي فعلاً (الطرف الأيسر من الشريط) وإلا نرجع لحساب pageX. */
-        let safePct: number;
-        const isPureTap = Math.abs(gs.dx) < 8 && Math.abs(gs.dy) < 8;
-        if (isPureTap) {
-          const loc = grantLocationXRef.current;
-          const bw  = barWidth.current;
-          /* اعتبر locationX صالحاً إن كان موجباً، أو صفراً مع نقرة في الطرف الأيسر فعلاً */
-          const isEdgeTap = lastMoveX.current <= barPageX.current + 4;
-          const locValid  = loc > 0 || (loc === 0 && isEdgeTap);
-          if (locValid && bw > 1) {
-            const raw = Math.min(1, Math.max(0, loc / bw));
-            safePct = _nRTL ? 1 - raw : raw;
-          } else {
-            /* fallback: pageX-based (Android RTL أو locationX=0 غير طرفي) */
-            const x = lastMoveX.current > 0 ? lastMoveX.current : gs.x0;
-            safePct = Math.max(0, Math.min(1, _calcPctFromAbsolute(x)));
-          }
-        } else {
-          const x = gs.moveX > 0 ? gs.moveX : lastMoveX.current;
-          safePct = Math.max(0, Math.min(1, _calcPctFromAbsolute(x)));
-        }
-        seekRef.current(safePct * durationRef.current);
-        // نُبقي على الموضع المطلوب مرئياً 800ms ريثما يتحدث الـ polling (كل 500ms)
-        // هذا يمنع "الخط الوهمي" الذي يملأ ثم يرجع عند الإفلات
-        setPostSeekPct(safePct);
-        setIsDragging(false);
-        if (postSeekTimer.current) clearTimeout(postSeekTimer.current);
-        postSeekTimer.current = setTimeout(() => {
-          setPostSeekPct(null);
+        lastMoveX.current = x;
+        if (postSeekTimer.current) {
+          clearTimeout(postSeekTimer.current);
           postSeekTimer.current = null;
-        }, 800);
+        }
+        setPostSeekPct(null);
+        isDraggingRef.current = true;
+        setIsDragging(true);
+        setDragPct(pct);
+        stallRef.current = { lastPos: positionRef.current, lastAt: Date.now() };
       },
-    })
-  ).current;
+      onPanResponderMove: (_event, gesture) => {
+        const x = Number(gesture.moveX);
+        if (Number.isFinite(x)) lastMoveX.current = x;
+        const pct = progressPctFromAbsolute(x);
+        if (pct !== null) setDragPct(pct);
+      },
+      onPanResponderRelease: (event, gesture) => {
+        const releaseX = Number(event.nativeEvent.pageX);
+        const gestureX = Number(gesture.moveX);
+        const absoluteX = Number.isFinite(releaseX)
+          ? releaseX
+          : Number.isFinite(gestureX)
+            ? gestureX
+            : lastMoveX.current;
+        const pct = absoluteX === null ? null : progressPctFromAbsolute(absoluteX);
+        isDraggingRef.current = false;
+        setIsDragging(false);
+        if (pct !== null && durationRef.current > 0) {
+          seekRef.current(pct * durationRef.current);
+        }
+        lastMoveX.current = null;
+      },
+      onPanResponderTerminate: () => {
+        isDraggingRef.current = false;
+        setIsDragging(false);
+        lastMoveX.current = null;
+      },
+      onPanResponderTerminationRequest: () => false,
+    });
+  }
+
+  const commitProgressPercent = useCallback((value: number) => {
+    const dur = durationRef.current;
+    if (!Number.isFinite(value) || !Number.isFinite(dur) || dur <= 0) return;
+    const safePct = Math.max(0, Math.min(1, value));
+    isDraggingRef.current = false;
+    setIsDragging(false);
+    seek(safePct * dur);
+  }, [seek]);
+
+  const handleTvProgressPress = useCallback((event: any) => {
+    const native = event?.nativeEvent || {};
+    const bounds = seekBarBoundsRef.current;
+    const pageX = Number(native.pageX);
+    const localX = Number(native.locationX);
+    const absoluteX = Number.isFinite(pageX)
+      ? pageX
+      : bounds && Number.isFinite(localX)
+        ? bounds.left + localX
+        : NaN;
+    const pct = progressPctFromAbsolute(absoluteX);
+    if (pct !== null) commitProgressPercent(pct);
+  }, [commitProgressPercent, progressPctFromAbsolute]);
 
   /* ─── Skip intro/outro logic ─── */
   const SKIP_BTN_LEAD = 3; // ثوانٍ قبل بداية النطاق لإظهار الزر
   /* يظهر الزر عند اقتراب المشغّل من بداية المقدمة (LEAD ثوانٍ قبلها) وحتى نهايتها */
-  const inIntroRange = !!skipIntro && !skipIntroDismissed
-    && position >= Math.max(0, (skipIntro.start ?? 0) - SKIP_BTN_LEAD)
-    && position < skipIntro.end;
-  // النهاية لا تظهر أثناء المقدمة، ولا تظهر قبل بدء نطاق النهاية — زر واحد في كل مرة
-  const inOutroRange = !!skipOutro && !skipOutroDismissed && !inIntroRange
-    && position >= Math.max(0, skipOutro.start - SKIP_BTN_LEAD)
-    && position < skipOutro.end;
-
-  /* إعادة تعيين الإخفاء عند تغيير المصدر — كل حلقة/مصدر جديد يُعيد الزر للظهور */
-  useEffect(() => {
-    setSkipIntroDismissed(false);
-    setSkipOutroDismissed(false);
-  }, [srcIdx]);
+  const inIntroRange = isSkipInRange(
+    skipIntro, position, duration, skipIntroDismissed, SKIP_BTN_LEAD,
+  );
+  // المقدمة والنهاية مستقلتان؛ حتى البيانات المتداخلة لا تُخفي أحد الزرين.
+  const inOutroRange = isSkipInRange(
+    skipOutro, position, duration, skipOutroDismissed, SKIP_BTN_LEAD,
+  );
 
   const doSkipIntro = useCallback(() => {
     if (skipIntro) seekSilent(skipIntro.end);
-    setSkipIntroDismissed(true); // يختفي بعد ضغط المستخدم
-  }, [skipIntro, seekSilent]);
+    setDismissedSkipRanges(current => ({
+      key: skipScopeKey,
+      intro: true,
+      outro: current.key === skipScopeKey ? current.outro : false,
+    }));
+  }, [skipIntro, seekSilent, skipScopeKey]);
 
   const doSkipOutro = useCallback(() => {
     // تخطي النهاية = القفز لنهاية نطاق الـ outro فقط (لا الانتقال للحلقة التالية)
     if (skipOutro) seekSilent(skipOutro.end);
-    setSkipOutroDismissed(true);
-  }, [skipOutro, seekSilent]);
+    setDismissedSkipRanges(current => ({
+      key: skipScopeKey,
+      intro: current.key === skipScopeKey ? current.intro : false,
+      outro: true,
+    }));
+  }, [skipOutro, seekSilent, skipScopeKey]);
 
   /* ─── Tap handler with double-tap detection ─── */
   const handleTap = useCallback((pageX: number) => {
@@ -2023,6 +2739,14 @@ export function RiftPlayer({
   const progress = (duration > 0 && isFinite(position) && isFinite(duration))
     ? Math.min(Math.max(position / duration, 0), 1)
     : 0;
+  const displayProgress = isDragging
+    ? dragPct
+    : postSeekPct !== null
+      ? postSeekPct
+      : progress;
+  const displayPosition = duration > 0 && isFinite(duration)
+    ? displayProgress * duration
+    : position;
 
   /* ─── Volume sync: player يعمل دائماً بـ 100% — النظام يتحكم بالصوت الفعلي ─── */
   useEffect(() => {
@@ -2042,17 +2766,18 @@ export function RiftPlayer({
   /* ─── Subtitle overlay position ─── */
   function subPositionStyle() {
     const pos = subSettings.position;
-    if (pos === "top")    return { top: showControls ? 70 : 20, bottom: undefined };
-    if (pos === "center") return { top: "45%" as any, bottom: undefined };
-    return { bottom: showControls ? 100 : 24, top: undefined };
+    const translateY = subSettings.verticalOffset || 0;
+    if (pos === "top")    return { top: showControls ? 70 : 20, bottom: undefined, transform: [{ translateY }] };
+    if (pos === "center") return { top: "45%" as any, bottom: undefined, transform: [{ translateY }] };
+    return { bottom: showControls ? 100 : 24, top: undefined, transform: [{ translateY }] };
   }
 
   /* لا نرجع null عند غياب currentSrc — يظهر شاشة رمادية بيضاء.
      نعرض loading spinner بدلاً حتى تصل المصادر من الخلفية. */
   if (!currentSrc) return (
     <View style={{ flex: 1, backgroundColor: "#000", alignItems: "center", justifyContent: "center" }}>
-      <ActivityIndicator size="large" color="rgba(167,139,250,0.9)" />
-      <Text style={{ color: "rgba(255,255,255,0.45)", marginTop: 12, fontSize: 13, fontFamily: "System" }}>
+      <ActivityIndicator size="large" color={colors.accent} />
+      <Text style={{ color: colors.playerSecondaryText, marginTop: 12, fontSize: 13, fontFamily: "System" }}>
         جاري تحميل المشغّل…
       </Text>
     </View>
@@ -2064,14 +2789,21 @@ export function RiftPlayer({
       {/* ── Video ── */}
       <VideoView
         player={player}
-        style={s.video}
+        style={tvMode ? s.tvVideo : s.video}
         nativeControls={false}
         contentFit={contentFit}
-        /* Android SurfaceView is not included by react-native-view-shot and
-           produced a black saved image. TextureView is capturable while
-           retaining the same native decoder/player. */
+        /* TextureView keeps the shared surface capture-friendly and avoids
+           maintaining a second TV-only native player implementation. */
         surfaceType={Platform.OS === "android" ? "textureView" : undefined}
       />
+
+      {/* Smooth first-frame handoff instead of a sudden black jump. */}
+      {buffering && position <= 0.25 && !error && !isAutoCycling && showControls && (
+        <View style={s.entryLoadingOverlay} pointerEvents="none">
+          <SpinRing size={tvMode ? 54 : 42} />
+          <Text style={s.entryLoadingText}>جارٍ فتح الحلقة…</Text>
+        </View>
+      )}
 
       {/* ── Brightness: يُضبط عبر expo-brightness (سطوع الشاشة الحقيقي) — لا حاجة لـ overlay ── */}
 
@@ -2096,12 +2828,14 @@ export function RiftPlayer({
               {
                 fontSize: subSettings.fontSize,
                 color: subSettings.color,
-                fontWeight: subSettings.bold ? "700" : "400",
-                backgroundColor: subSettings.bgOpacity > 0
+                fontWeight: subSettings.extraBold ? "900" : subSettings.bold ? "700" : "400",
+                backgroundColor: !subtitleShadowOnly && subSettings.bgOpacity > 0
                   ? `rgba(0,0,0,${subSettings.bgOpacity})`
                   : "transparent",
-                textShadowColor: subSettings.bgOpacity === 0 ? "rgba(0,0,0,0.95)" : "transparent",
-                textShadowRadius: subSettings.bgOpacity === 0 ? 8 : 0,
+                textShadowColor: subtitleShadowOnly || subSettings.bgOpacity === 0
+                  ? "rgba(0,0,0,0.90)"
+                  : "transparent",
+                textShadowRadius: subtitleShadowOnly ? 3 : subSettings.bgOpacity === 0 ? 8 : 0,
                 textShadowOffset: { width: 0, height: 1 },
               },
             ]}>
@@ -2122,8 +2856,17 @@ export function RiftPlayer({
 
       {/* ── Auto-cycling: silent "trying next source" indicator ── */}
       {isAutoCycling && (
-        <View style={s.errorWrap} pointerEvents="none">
-          <SpinRing size={44} />
+        <View style={s.errorWrap} pointerEvents="box-none">
+          <Pressable
+            onPress={onBack}
+            style={[s.autoCycleClose, { top: insets.top + 14 }]}
+            hitSlop={10}
+            accessibilityRole="button"
+            accessibilityLabel="العودة إلى السيرفرات"
+          >
+            <Ionicons name="close" size={20} color="rgba(255,255,255,0.82)" />
+          </Pressable>
+          {!tvMode && <SpinRing size={44} />}
           <Text style={[s.errorTitle, { color: "rgba(167,139,250,0.9)", marginTop: 12 }]}>
             {isWaitingForSources
               ? "جاري البحث عن مصادر بديلة…"
@@ -2147,7 +2890,7 @@ export function RiftPlayer({
             </Pressable>
           )}
           <Pressable onPress={onBack} style={s.errorBtnBack}>
-            <Ionicons name="arrow-back" size={14} color="rgba(255,255,255,0.6)" />
+            <Ionicons name="arrow-back" size={14} color="rgba(255,255,255,0.6)" style={{ transform: [{ scaleX: -1 }] }} />
             <Text style={s.errorBtnBackText}>العودة</Text>
           </Pressable>
         </View>
@@ -2254,6 +2997,19 @@ export function RiftPlayer({
         </View>
       )}
 
+      {isLocked && tvMode && (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="إلغاء قفل المشغل"
+          hasTVPreferredFocus
+          onPress={() => { setIsLocked(false); setShowUnlock(false); }}
+          style={s.tvUnlockTarget}
+        >
+          <Ionicons name="lock-open-outline" size={28} color="#fbbf24" />
+          <Text style={s.tvUnlockText}>اضغط OK لإلغاء القفل</Text>
+        </Pressable>
+      )}
+
       {/* ── Lock screen: elegant swipe-down bar (appears on tap) ── */}
       {isLocked && showUnlock && (
         <Pressable
@@ -2292,12 +3048,13 @@ export function RiftPlayer({
 
           <View style={s.endBtnRow}>
             <Pressable onPress={() => { setIsEnded(false); onBack(); }} style={s.endBackBtn}>
-              <Ionicons name="arrow-back" size={16} color="rgba(255,255,255,0.65)" />
+              <Ionicons name="arrow-back" size={16} color="rgba(255,255,255,0.65)" style={{ transform: [{ scaleX: -1 }] }} />
               <Text style={[s.endBtnLabel, { color: "rgba(255,255,255,0.65)" }]}>رجوع</Text>
             </Pressable>
             <Pressable
               onPress={() => {
                 setIsEnded(false);
+                if (animePlayback) animePlaybackIntentRef.current = true;
                 const genAtPress = switchGenerationRef.current;
                 try { player.currentTime = 0; } catch {}
                 if (replayTimeoutRef.current) clearTimeout(replayTimeoutRef.current);
@@ -2336,25 +3093,27 @@ export function RiftPlayer({
       {/* ════════════════════════════════════════
           GESTURE LAYER
       ════════════════════════════════════════ */}
-      <View
-        style={[StyleSheet.absoluteFill, { zIndex: isLocked ? 15 : 5 }]}
-        {...(isLocked ? {} : panResponder.panHandlers)}
-      >
-        <Pressable
-          style={s.halfLeft}
-          onPress={(e) => handleTap(e.nativeEvent.pageX)}
-          onLongPress={handleLongPress}
-          onPressOut={handleLongPressRelease}
-          delayLongPress={500}
-        />
-        <Pressable
-          style={s.halfRight}
-          onPress={(e) => handleTap(e.nativeEvent.pageX)}
-          onLongPress={handleLongPress}
-          onPressOut={handleLongPressRelease}
-          delayLongPress={500}
-        />
-      </View>
+      {!tvMode && (
+        <View
+          style={[StyleSheet.absoluteFill, { zIndex: isLocked ? 15 : 5 }]}
+          {...(isLocked ? {} : panResponder.panHandlers)}
+        >
+          <Pressable
+            style={s.halfLeft}
+            onPress={(e) => handleTap(e.nativeEvent.pageX)}
+            onLongPress={handleLongPress}
+            onPressOut={handleLongPressRelease}
+            delayLongPress={500}
+          />
+          <Pressable
+            style={s.halfRight}
+            onPress={(e) => handleTap(e.nativeEvent.pageX)}
+            onLongPress={handleLongPress}
+            onPressOut={handleLongPressRelease}
+            delayLongPress={500}
+          />
+        </View>
+      )}
 
       {/* ════════════════════════════════════════
           CONTROLS OVERLAY
@@ -2373,24 +3132,24 @@ export function RiftPlayer({
             // نحل الترتيب فقط (لا نغير flexDirection)
             const nativeRTL = Platform.OS !== "web" && I18nManager.isRTL;
             const infoBlock = (
-              <View style={[s.topInfoWrap, nativeRTL && { alignItems: "flex-end" }]}>
+              <View style={[s.topInfoWrap, tvMode && s.tvTopInfoWrap, nativeRTL && !tvMode && { alignItems: "flex-end" }]}>
                 {title ? (
-                  <Text style={s.topInfoTitle} numberOfLines={1}>{title}</Text>
+                  <Text style={[s.topInfoTitle, tvMode && s.tvTopInfoTitle, { color: colors.playerText }]} numberOfLines={1}>{title}</Text>
                 ) : null}
                 <View style={[s.topInfoRow, nativeRTL && { flexDirection: "row-reverse" }]}>
                   {episode != null && (
-                    <View style={s.topEpBadge}>
-                      <Text style={s.topEpText}>الحلقة {episode}</Text>
+                      <View style={[s.topEpBadge, tvMode && s.tvTopEpBadge]}>
+                        <Text style={[s.topEpText, tvMode && s.tvTopEpText]}>الحلقة {episode}</Text>
                     </View>
                   )}
                   {currentSrc?.quality ? (
-                    <View style={s.topQualityBadge}>
-                      <Text style={s.topQualityText}>{currentSrc.quality}</Text>
+                      <View style={[s.topQualityBadge, tvMode && s.tvTopQualityBadge]}>
+                        <Text style={[s.topQualityText, tvMode && s.tvTopQualityText]}>{currentSrc.quality}</Text>
                     </View>
                   ) : null}
                 </View>
                 {episodeTitle ? (
-                  <Text style={s.topEpTitle} numberOfLines={1}>{episodeTitle}</Text>
+                    <Text style={[s.topEpTitle, tvMode && s.tvTopEpTitle, { color: colors.playerSecondaryText }]} numberOfLines={1}>{episodeTitle}</Text>
                 ) : null}
                 {autoSubSource ? (
                   <View style={[s.autoSubBadge, nativeRTL && { alignSelf: "flex-end" }]}>
@@ -2404,55 +3163,57 @@ export function RiftPlayer({
             const ccBtn = subtitlesDisabled ? null : (
               <Pressable
                 onPress={() => setShowSubPanel(true)}
-                style={[s.topIconBtn, s.topCCBtn, subOn && s.topCCBtnActive]}
+                style={[s.topIconBtn, s.topCCBtn, tvMode && s.tvCCBtn, subOn && s.topCCBtnActive]}
                 hitSlop={10}
+                accessibilityRole="button"
+                accessibilityLabel="إعدادات الترجمة"
               >
                 <Ionicons
                   name="logo-closed-captioning"
-                  size={18}
-                  color={subOn ? "#c4b5fd" : "rgba(255,255,255,0.75)"}
+                  size={tvMode ? 26 : 18}
+                  color={subOn ? PLAYER_ACTIVE_ICON : "rgba(255,255,255,0.75)"}
                 />
               </Pressable>
             );
             const btnsBlock = nativeRTL ? (
-              <View style={s.topRightRow}>
-                <Pressable onPress={handleBack} style={s.topCloseBtn} hitSlop={10}>
+              <View style={[s.topRightRow, tvMode && s.tvTopRightRow]}>
+                <Pressable onPress={handleBack} style={[s.topCloseBtn, tvMode && s.tvTopCloseBtn]} hitSlop={10}>
                   <Ionicons name="close" size={21} color="rgba(239,68,68,0.90)" />
                 </Pressable>
-                <Pressable onPress={togglePortrait} style={[s.topRotateBtn, isPortrait && s.topRotateBtnActive]} hitSlop={10}>
+                <Pressable onPress={togglePortrait} style={[s.topRotateBtn, tvMode && s.tvTopActionBtn, isPortrait && s.topRotateBtnActive]} hitSlop={10}>
                   <Ionicons
                     name={isPortrait ? "phone-landscape-outline" : "phone-portrait-outline"}
-                    size={17}
-                    color={isPortrait ? "#c4b5fd" : "rgba(255,255,255,0.85)"}
+                    size={tvMode ? 28 : 17}
+                    color={isPortrait ? PLAYER_ACTIVE_ICON : "rgba(255,255,255,0.85)"}
                   />
-                </Pressable>
+                 </Pressable>
                 {ccBtn}
-                <Pressable onPress={takeScreenshot} style={s.topIconBtn} hitSlop={10}>
-                  <Ionicons name="camera-outline" size={18} color="rgba(255,255,255,0.85)" />
-                </Pressable>
+                 <Pressable onPress={takeScreenshot} style={[s.topIconBtn, tvMode && s.tvTopActionBtn]} hitSlop={10}>
+                  <Ionicons name="camera-outline" size={tvMode ? 28 : 18} color="rgba(255,255,255,0.85)" />
+                 </Pressable>
               </View>
             ) : (
-              <View style={s.topRightRow}>
-                <Pressable onPress={takeScreenshot} style={s.topIconBtn} hitSlop={10}>
-                  <Ionicons name="camera-outline" size={18} color="rgba(255,255,255,0.85)" />
-                </Pressable>
+              <View style={[s.topRightRow, tvMode && s.tvTopRightRow]}>
+                <Pressable onPress={takeScreenshot} style={[s.topIconBtn, tvMode && s.tvTopActionBtn]} hitSlop={10}>
+                  <Ionicons name="camera-outline" size={tvMode ? 28 : 18} color="rgba(255,255,255,0.85)" />
+               </Pressable>
                 {ccBtn}
-                <Pressable onPress={togglePortrait} style={[s.topRotateBtn, isPortrait && s.topRotateBtnActive]} hitSlop={10}>
+                <Pressable onPress={togglePortrait} style={[s.topRotateBtn, tvMode && s.tvTopActionBtn, isPortrait && s.topRotateBtnActive]} hitSlop={10}>
                   <Ionicons
                     name={isPortrait ? "phone-landscape-outline" : "phone-portrait-outline"}
-                    size={17}
-                    color={isPortrait ? "#c4b5fd" : "rgba(255,255,255,0.85)"}
+                    size={tvMode ? 28 : 17}
+                    color={isPortrait ? PLAYER_ACTIVE_ICON : "rgba(255,255,255,0.85)"}
                   />
-                </Pressable>
-                <Pressable onPress={handleBack} style={s.topCloseBtn} hitSlop={10}>
+                 </Pressable>
+                <Pressable onPress={handleBack} style={[s.topCloseBtn, tvMode && s.tvTopCloseBtn]} hitSlop={10}>
                   <Ionicons name="close" size={21} color="rgba(239,68,68,0.90)" />
                 </Pressable>
               </View>
             );
             return (
               <LinearGradient
-                colors={["rgba(0,0,0,0.82)", "transparent"]}
-                style={[s.topBar, { paddingTop: Platform.OS === "web" ? 12 : insets.top + 6 }]}
+                colors={colors.playerTopGradient}
+                style={[s.topBar, tvMode && s.tvTopBar, { paddingTop: Platform.OS === "web" ? 14 : Math.max(insets.top + 16, 24) }]}
               >
                 {/* RTL: مجموعة الأزرار أولاً (تظهر يميناً)، معلومات ثانياً (تظهر يساراً) */}
                 {nativeRTL ? <>{btnsBlock}{infoBlock}</> : <>{infoBlock}{btnsBlock}</>}
@@ -2461,21 +3222,20 @@ export function RiftPlayer({
           })()}
 
           {/* ════ CENTER ════ */}
-          <View style={s.centerOverlay} pointerEvents="box-none">
+          <View style={[s.centerOverlay, tvMode && s.tvCenterOverlay]} pointerEvents="box-none">
             {isPortrait ? (
               /* وضع عمودي: أزرار التخطي + التشغيل */
               <View style={s.centerPortraitRow}>
                 {/* زر التخطي للأمام — الأول في JSX → يظهر على اليمين في RTL */}
                 <View style={s.controlButtonSlot}>
-                  <Pressable onPress={() => seek(positionRef.current + 10)} style={s.centerSeekBtn} hitSlop={14}>
-                    <Ionicons name="play-forward" size={24} color="#fff" />
+                  <Pressable onPress={() => seek(positionRef.current + 10)} style={[s.centerSeekBtn, tvMode && s.tvCenterSeekBtn]} hitSlop={14}>
+                    <Ionicons name="play-forward" size={tvMode ? 30 : 24} color="#fff" />
                   </Pressable>
-                  <Text style={s.controlButtonLabel}>10</Text>
+                  <Text style={[s.controlButtonLabel, { color: PLAYER_CONTROL_LABEL }]}>10</Text>
                 </View>
                 {/* زر المنتصف: play/pause/spinner */}
                 <View style={s.controlButtonSlot}>
-                  {!isPlaying && !buffering && <PulseRing />}
-                  <Pressable onPress={togglePlay} style={s.centerPlayBtn} hitSlop={16}>
+                  <Pressable hasTVPreferredFocus={tvMode} onPress={togglePlay} style={[s.centerPlayBtn, tvMode && s.tvCenterPlayBtn]} hitSlop={16}>
                     {buffering && !error
                       ? <ActivityIndicator size={32} color="#fff" />
                       : <Ionicons
@@ -2487,18 +3247,17 @@ export function RiftPlayer({
                 </View>
                 {/* زر الرجوع — الأخير في JSX → يظهر على اليسار في RTL */}
                 <View style={s.controlButtonSlot}>
-                  <Pressable onPress={() => seek(positionRef.current - 10)} style={s.centerSeekBtn} hitSlop={14}>
-                    <Ionicons name="play-back" size={24} color="#fff" />
+                  <Pressable onPress={() => seek(positionRef.current - 10)} style={[s.centerSeekBtn, tvMode && s.tvCenterSeekBtn]} hitSlop={14}>
+                    <Ionicons name="play-back" size={tvMode ? 30 : 24} color="#fff" />
                   </Pressable>
-                  <Text style={s.controlButtonLabel}>10</Text>
+                  <Text style={[s.controlButtonLabel, { color: PLAYER_CONTROL_LABEL }]}>10</Text>
                 </View>
               </View>
             ) : (
               /* وضع أفقي: play/pause في المنتصف دائماً */
               <View style={s.centerLandscapeWrap}>
                 <View style={s.controlButtonSlot}>
-                  {!isPlaying && !buffering && <PulseRing />}
-                  <Pressable onPress={togglePlay} style={s.centerPlayBtn} hitSlop={16}>
+                  <Pressable hasTVPreferredFocus={tvMode} onPress={togglePlay} style={[s.centerPlayBtn, tvMode && s.tvCenterPlayBtn]} hitSlop={16}>
                     {buffering && !error
                       ? <ActivityIndicator size={32} color="#fff" />
                       : <Ionicons
@@ -2514,73 +3273,87 @@ export function RiftPlayer({
 
           {/* ════ BOTTOM SECTION ════ */}
           <LinearGradient
-            colors={["transparent", "rgba(0,0,0,0.60)", "rgba(0,0,0,0.96)"]}
-            style={[s.bottomSection, { paddingBottom: Platform.OS === "web" ? 16 : insets.bottom + 12 }]}
+            colors={colors.playerBottomGradient}
+            style={[s.bottomSection, tvMode && s.tvBottomSection, { paddingBottom: Platform.OS === "web" ? 16 : insets.bottom + 12 }]}
           >
             {/* أزرار التخطي انتقلت إلى overlay مستقل خارج showControls */}
 
-            {/* الوقت — الوقت الحالي أقصى اليسار الفيزيائي، المدة الكلية أقصى اليمين الفيزيائي */}
+            {/* The progress timeline is left-to-right on every locale. */}
             <View style={{ position: "relative", height: 18, marginBottom: 2 }}>
-              <Text style={[s.timeText, { position: "absolute", [_nRTL ? "right" : "left"]: 0 }]}>{fmtTime(position)}</Text>
-              <Text style={[s.timeText, { position: "absolute", [_nRTL ? "left" : "right"]: 0, opacity: 0.45 }]}>{fmtTime(duration)}</Text>
+              <Text style={[s.timeText, tvMode && s.tvTimeText, { position: "absolute", [timelineStartEdge]: 0, color: colors.playerText }]}>{fmtTime(displayPosition)}</Text>
+              <Text style={[s.timeText, tvMode && s.tvTimeText, { position: "absolute", [timelineEndEdge]: 0, opacity: 0.75, color: colors.playerSecondaryText }]}>{fmtTime(duration)}</Text>
             </View>
 
-            {/* شريط التقدم — يسار=بداية، يمين=نهاية (LTR دائماً، المعيار العالمي لمشغلات الفيديو)
-                direction:'ltr' يُجبر Yoga على تخطيط LTR حتى في التطبيقات العربية RTL،
-                مما يجعل left:0%→100% من اليسار الفيزيائي وليس من يمين RTL.
-                هذا يُصلح: (1) ملء الشريط (2) موضع الـ thumb (3) حساب الـ seek */}
+            {/* One physical left-to-right timeline, shared by fill, thumb and touch math. */}
             {(() => {
-              const rawFill = (isDragging ? dragPct : postSeekPct !== null ? postSeekPct : progress) * 100;
+              const rawFill = displayProgress * 100;
               const fillPct = Math.min(Math.max(isFinite(rawFill) ? rawFill : 0, 0), 100);
               const thumbPct = fillPct;
               const tooltipPct = Math.max(4, Math.min(88, fillPct - 6));
               return (
                 <View
                   ref={barRef}
-                  style={[s.progressWrap, isDragging && s.progressWrapDragging,
-                    _nRTL && { transform: [{ scaleX: -1 }] },
-                  ]}
-                  onLayout={(e) => {
-                    barWidth.current = e.nativeEvent.layout.width || 1;
-                    // مسح أي seek مؤقت عند تغيير الاتجاه (portrait↔landscape) لتجنب الإحداثيات القديمة
-                    setPostSeekPct(null);
-                    setIsDragging(false);
-                    barRef.current?.measureInWindow((px) => { if (px >= 0) barPageX.current = px; });
-                  }}
-                  {...seekBarPan.panHandlers}
+                  style={[s.progressWrap, tvMode && s.tvProgressWrap, isDragging && s.progressWrapDragging]}
+                  onLayout={measureSeekBar}
+                  {...(seekBarPan.current?.panHandlers ?? {})}
                 >
-                  <View style={s.progressBg} />
+                  {tvMode && (
+                    <Pressable
+                      accessibilityRole="adjustable"
+                      accessibilityLabel="شريط تقدم الحلقة"
+                      onPress={handleTvProgressPress}
+                      onFocus={() => {
+                        progressFocusedRef.current = true;
+                        fadeIn();
+                      }}
+                      onBlur={() => { progressFocusedRef.current = false; }}
+                      onKeyDown={handleTvProgressKeyDown}
+                      style={({ focused }) => [
+                        StyleSheet.absoluteFillObject,
+                        focused && [
+                          s.tvProgressFocus,
+                          {
+                            borderColor: colors.accent,
+                            backgroundColor: colors.overlay,
+                            shadowColor: "transparent",
+                            shadowOpacity: 0,
+                            shadowRadius: 0,
+                            elevation: 0,
+                          },
+                        ],
+                      ]}
+                    />
+                  )}
+                  <View style={[s.progressBg, tvMode && s.tvProgressBg, { backgroundColor: colors.playerTrack }]} />
                   {bufferedPct > 0 && (
-                    <View style={[s.bufferBar, { left: 0, width: `${bufferedPct * 100}%` as any }]} />
+                    <View style={[s.bufferBar, { [timelineStartEdge]: 0, width: `${bufferedPct * 100}%` as any, backgroundColor: colors.playerBuffer }]} />
                   )}
                   {markerPctIntro && (
                     <View style={[s.skipMarker, {
-                      left: `${markerPctIntro.start}%` as any,
+                      [timelineStartEdge]: `${markerPctIntro.start}%` as any,
                       width: `${Math.max(1.2, markerPctIntro.end - markerPctIntro.start)}%` as any,
                     }]} />
                   )}
                   {markerPctOutro && (
                     <View style={[s.skipMarker, {
-                      left: `${markerPctOutro.start}%` as any,
+                      [timelineStartEdge]: `${markerPctOutro.start}%` as any,
                       width: `${Math.max(1.2, markerPctOutro.end - markerPctOutro.start)}%` as any,
                     }]} />
                   )}
                   <LinearGradient
-                    colors={["#6D28D9", "#8B5CF6", "#a78bfa"]}
-                    start={_nRTL ? { x: 1, y: 0 } : { x: 0, y: 0 }}
-                    end={_nRTL ? { x: 0, y: 0 } : { x: 1, y: 0 }}
-                    style={[s.progressFill, { left: 0, width: `${fillPct}%` as any }]}
+                    colors={[colors.violetDark, colors.violet, colors.accent]}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 0 }}
+                    style={[s.progressFill, tvMode && s.tvProgressFill, { [timelineStartEdge]: 0, width: `${fillPct}%` as any }]}
                   />
                   <View style={[
-                    s.thumb,
-                    { left: `${thumbPct}%` as any },
+                    s.thumb, tvMode && s.tvThumb,
                     isDragging && s.thumbDragging,
+                    { [timelineStartEdge]: `${thumbPct}%` as any, backgroundColor: colors.accent },
                   ]} />
                   {isDragging && (
-                    <View style={[s.dragTooltip, { left: `${tooltipPct}%` as any },
-                      _nRTL && { transform: [{ scaleX: -1 }] },
-                    ]}>
-                      <Text style={s.dragTooltipText}>{fmtTime(dragPct * (durationRef.current || duration))}</Text>
+                    <View style={[s.dragTooltip, { [timelineStartEdge]: `${tooltipPct}%` as any, backgroundColor: colors.surfaceElevated, borderColor: colors.border }]}>
+                      <Text style={[s.dragTooltipText, { color: colors.textPrimary }]}>{fmtTime(displayPosition)}</Text>
                     </View>
                   )}
                 </View>
@@ -2588,12 +3361,15 @@ export function RiftPlayer({
             })()}
 
             {/* ── صف أزرار التحكم السفلي ── */}
-            <View style={s.bottomCtrlRow}>
+            <View style={[
+              s.bottomCtrlRow,
+              tvMode && s.tvBottomCtrlRow,
+            ]}>
 
-              {/* يسار: قفل + ملء شاشة */}
-              <View style={s.bottomSide}>
+              {/* يسار: قفل + ملء شاشة — نفس أزرار الهاتف، بحجم TV الحالي */}
+             <View style={s.bottomSide}>
                 <View style={s.controlButtonSlot}>
-                  <Pressable onPress={() => setIsLocked(true)} style={s.ctrlIconBtn} hitSlop={10}>
+                  <Pressable onPress={() => setIsLocked(true)} style={[s.ctrlIconBtn, tvMode && s.tvCtrlIconBtn]} hitSlop={10}>
                     <Ionicons name="lock-closed-outline" size={16} color="rgba(255,255,255,0.80)" />
                   </Pressable>
                 </View>
@@ -2617,44 +3393,47 @@ export function RiftPlayer({
                       ))}
                     </View>
                   )}
-                  <Pressable onPress={() => { setShowFitMenu(v => !v); setShowSpeedMenu(false); fadeIn(); }} style={[s.ctrlIconBtn, showFitMenu && s.ctrlIconBtnActive]} hitSlop={10}>
-                    <Ionicons name="scan-outline" size={16} color={showFitMenu ? "#c4b5fd" : "rgba(255,255,255,0.80)"} />
+                <Pressable onPress={() => { setShowFitMenu(v => !v); setShowSpeedMenu(false); fadeIn(); }} style={[s.ctrlIconBtn, tvMode && s.tvCtrlIconBtn, showFitMenu && s.ctrlIconBtnActive]} hitSlop={10}>
+                    <Ionicons name="scan-outline" size={tvMode ? 24 : 16} color={showFitMenu ? PLAYER_ACTIVE_ICON : "rgba(255,255,255,0.80)"} />
                   </Pressable>
-                </View>
-              </View>
+                 </View>
+               </View>
 
               {/* وسط: تخطي + تشغيل (وضع أفقي فقط) — "10" خارج الدائرة للمحاذاة الصحيحة */}
-              <View style={s.bottomCenter}>
+              <View style={[
+                s.bottomCenter,
+                tvMode && s.tvBottomCenter,
+              ]}>
                 {!isPortrait && (
                   <View style={s.controlButtonSlot}>
-                    <Pressable onPress={() => seek(positionRef.current + 10)} style={s.seekCtrlBtn} hitSlop={10}>
-                      <Ionicons name="play-forward" size={17} color="rgba(255,255,255,0.90)" />
+                    <Pressable onPress={() => seek(positionRef.current + 10)} style={[s.seekCtrlBtn, tvMode && s.tvSeekCtrlBtn]} hitSlop={10}>
+                      <Ionicons name="play-forward" size={tvMode ? 24 : 17} color={PLAYER_CONTROL_ICON} />
                     </Pressable>
-                    <Text style={s.controlButtonLabel}>10</Text>
+                    <Text style={[s.controlButtonLabel, { color: PLAYER_CONTROL_LABEL }]}>10</Text>
                   </View>
                 )}
                 <View style={s.controlButtonSlot}>
-                  <Pressable onPress={togglePlay} style={s.bottomPlayBtn} hitSlop={10}>
-                    <Ionicons name={isPlaying ? "pause" : "play"} size={23} color="#fff" style={isPlaying ? undefined : { transform: [{ translateX: 2 }] }} />
+                  <Pressable onPress={togglePlay} style={[s.bottomPlayBtn, tvMode && s.tvBottomPlayBtn]} hitSlop={10}>
+                    <Ionicons name={isPlaying ? "pause" : "play"} size={tvMode ? 30 : 23} color="#fff" style={isPlaying ? undefined : { transform: [{ translateX: 2 }] }} />
                   </Pressable>
                 </View>
                 {!isPortrait && (
                   <View style={s.controlButtonSlot}>
-                    <Pressable onPress={() => seek(positionRef.current - 10)} style={s.seekCtrlBtn} hitSlop={10}>
-                      <Ionicons name="play-back" size={17} color="rgba(255,255,255,0.90)" />
+                    <Pressable onPress={() => seek(positionRef.current - 10)} style={[s.seekCtrlBtn, tvMode && s.tvSeekCtrlBtn]} hitSlop={10}>
+                      <Ionicons name="play-back" size={tvMode ? 24 : 17} color={PLAYER_CONTROL_ICON} />
                     </Pressable>
-                    <Text style={s.controlButtonLabel}>10</Text>
+                    <Text style={[s.controlButtonLabel, { color: PLAYER_CONTROL_LABEL }]}>10</Text>
                   </View>
                 )}
               </View>
 
-              {/* يمين: كتم + تشغيل تلقائي + سرعة */}
-              <View style={[s.bottomSide, { justifyContent: "flex-end" }]}>
+              {/* يمين: كتم + تشغيل تلقائي + سرعة — نفس أزرار الهاتف */}
+               <View style={[s.bottomSide, { justifyContent: "flex-end" }]}>
                 <View style={s.controlButtonSlot}>
-                  <Pressable onPress={() => { setIsMuted(v => !v); fadeIn(); }} style={[s.ctrlIconBtn, isMuted && s.ctrlIconBtnMuted]} hitSlop={10}>
-                    <Ionicons name={isMuted ? "volume-mute-outline" : "volume-high-outline"} size={16} color={isMuted ? "#fca5a5" : "rgba(255,255,255,0.80)"} />
+                  <Pressable onPress={() => { setIsMuted(v => !v); fadeIn(); }} style={[s.ctrlIconBtn, tvMode && s.tvCtrlIconBtn, isMuted && s.ctrlIconBtnMuted]} hitSlop={10}>
+                    <Ionicons name={isMuted ? "volume-mute-outline" : "volume-high-outline"} size={tvMode ? 24 : 16} color={isMuted ? PLAYER_MUTED_ICON : "rgba(255,255,255,0.80)"} />
                   </Pressable>
-                </View>
+               </View>
                 <View style={s.controlButtonSlot}>
                   {showSpeedMenu && (
                     <View style={s.speedDropdown}>
@@ -2670,8 +3449,8 @@ export function RiftPlayer({
                       ))}
                     </View>
                   )}
-                  <Pressable onPress={() => { setShowSpeedMenu(v => !v); setShowFitMenu(false); fadeIn(); }} style={[s.ctrlIconBtn, s.ctrlSpeedBtn, showSpeedMenu && s.ctrlIconBtnActive]} hitSlop={10}>
-                    <Text style={[s.speedLabel, speed !== 1 && s.speedLabelActive]}>{speed}x</Text>
+                  <Pressable onPress={() => { setShowSpeedMenu(v => !v); setShowFitMenu(false); fadeIn(); }} style={[s.ctrlIconBtn, s.ctrlSpeedBtn, tvMode && s.tvCtrlIconBtn, showSpeedMenu && s.ctrlIconBtnActive]} hitSlop={10}>
+                    <Text style={[s.speedLabel, tvMode && s.tvSpeedLabel, speed !== 1 && s.speedLabelActive]}>{speed}x</Text>
                   </Pressable>
                 </View>
               </View>
@@ -2679,6 +3458,23 @@ export function RiftPlayer({
             </View>
           </LinearGradient>
         </Animated.View>
+      )}
+
+      {tvMode && !showControls && !error && !isEnded && !isLocked && (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="إظهار أدوات المشغل"
+          hasTVPreferredFocus
+          onPress={fadeIn}
+          style={s.tvRevealTarget}
+        >
+          {showTvRevealHint && (
+            <View style={s.tvRevealHint}>
+              <Ionicons name="game-controller-outline" size={26} color="#c4b5fd" />
+              <Text style={s.tvRevealText}>اضغط OK لإظهار أدوات المشغل</Text>
+            </View>
+          )}
+        </Pressable>
       )}
 
 
@@ -2717,15 +3513,15 @@ export function RiftPlayer({
                 </View>
 
                 {/* ── اللغة ── */}
-                <Text style={s.subSectionLabel}>اللغة</Text>
+              <Text style={[s.subSectionLabel, tvMode && s.tvSubSectionLabel]}>اللغة</Text>
                 <View style={s.subChipRow}>
                   {(["ar", "en"] as const).map(lng => (
                     <Pressable
                       key={lng}
-                      style={[s.subChip, subLang === lng && subOn && s.subChipActive]}
-                      onPress={() => { setSubLang(lng); setSubOn(true); fadeIn(); }}
+                      style={[s.subChip, tvMode && s.tvSubChip, subLang === lng && subOn && s.subChipActive]}
+                      onPress={() => { userSelectedSubLangRef.current = true; setSubLang(lng); setSubOn(true); fadeIn(); }}
                     >
-                      <Text style={[s.subChipText, subLang === lng && subOn && s.subChipTextActive]}>
+                      <Text style={[s.subChipText, tvMode && s.tvSubChipText, subLang === lng && subOn && s.subChipTextActive]}>
                         {lng === "ar" ? "عربي" : "إنجليزي"}
                       </Text>
                     </Pressable>
@@ -2777,6 +3573,48 @@ export function RiftPlayer({
                   ))}
                 </View>
 
+                {/* ── الضبط الدقيق للارتفاع ── */}
+                <Text style={s.subSectionLabel}>التحريك لأعلى وأسفل</Text>
+                <View style={[s.subRow, { marginBottom: 6 }]}>
+                  <Text style={{ color: "rgba(255,255,255,0.50)", fontSize: 13, fontFamily: "Cairo_600SemiBold" }}>
+                    {subSettings.verticalOffset > 0 ? `+${subSettings.verticalOffset}` : subSettings.verticalOffset}px
+                  </Text>
+                </View>
+                <View style={s.subMoveRow}>
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel="رفع الترجمة"
+                    style={s.subMoveButton}
+                    onPress={() => updateSubSettings({
+                      // Mobile subtitle coordinates use translateY:
+                      // negative values move the subtitle upward.
+                      verticalOffset: Math.max(-120, subSettings.verticalOffset - 24),
+                    })}
+                  >
+                    <Ionicons name="arrow-up" size={20} color="#c4b5fd" />
+                    <Text style={s.subMoveLabel}>رفع</Text>
+                  </Pressable>
+                  <View style={s.subMoveValue}>
+                    <Text style={s.subMoveValueText}>
+                      {subSettings.verticalOffset === 0
+                        ? "الافتراضي"
+                        : `${Math.abs(subSettings.verticalOffset)}px`}
+                    </Text>
+                    <Text style={s.subMoveHint}>كل ضغطة تحركها قليلًا</Text>
+                  </View>
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel="خفض الترجمة"
+                    style={s.subMoveButton}
+                    onPress={() => updateSubSettings({
+                      verticalOffset: Math.min(120, subSettings.verticalOffset + 24),
+                    })}
+                  >
+                    <Ionicons name="arrow-down" size={20} color="#c4b5fd" />
+                    <Text style={s.subMoveLabel}>خفض</Text>
+                  </Pressable>
+                </View>
+
                 {/* ── خلفية النص ── */}
                 <Text style={s.subSectionLabel}>خلفية النص</Text>
                 <View style={s.subChipRow}>
@@ -2797,8 +3635,19 @@ export function RiftPlayer({
                     <Text style={{ color: "#fff", fontWeight: "700", fontSize: 15 }}>ع</Text>
                     <Text style={s.subRowLabel}>نص عريض</Text>
                   </View>
-                  <Pressable style={[s.subToggle, subSettings.bold && s.subToggleOn]} onPress={() => updateSubSettings({ bold: !subSettings.bold })}>
+                  <Pressable style={[s.subToggle, subSettings.bold && !subSettings.extraBold && s.subToggleOn]} onPress={() => updateSubSettings({ bold: !subSettings.bold, extraBold: false })}>
                     <View style={[s.subToggleThumb, subSettings.bold && s.subToggleThumbOn]} />
+                  </Pressable>
+                </View>
+
+                {/* ── عريض جدًا ── */}
+                <View style={[s.subRow, { marginTop: 2 }]}>
+                  <View style={s.subRowLeft}>
+                    <Text style={{ color: "#fff", fontWeight: "900", fontSize: 15 }}>ع</Text>
+                    <Text style={s.subRowLabel}>نص عريض جدًا</Text>
+                  </View>
+                  <Pressable style={[s.subToggle, subSettings.extraBold && s.subToggleOn]} onPress={() => updateSubSettings({ extraBold: !subSettings.extraBold, bold: false })}>
+                    <View style={[s.subToggleThumb, subSettings.extraBold && s.subToggleThumbOn]} />
                   </Pressable>
                 </View>
 
@@ -2835,15 +3684,29 @@ export function RiftPlayer({
       {!error && !isEnded && !isLocked && (inIntroRange || inOutroRange) && (
         <View style={s.skipBtnRowFloat} pointerEvents="box-none">
           {inIntroRange && (
-            <Pressable onPress={doSkipIntro} style={s.skipPillIntro} hitSlop={8} pointerEvents="auto">
+            <Pressable
+              onPress={doSkipIntro}
+              style={[s.skipPillIntro, tvMode && s.tvSkipPill]}
+              hitSlop={8}
+              pointerEvents="auto"
+              accessibilityRole="button"
+              accessibilityLabel="تخطي المقدمة"
+            >
               <Ionicons name="play-forward" size={13} color="#92400e" />
-              <Text style={s.skipPillIntroText}>تخطي المقدمة</Text>
+              <Text style={[s.skipPillIntroText, tvMode && s.tvSkipPillText]}>تخطي المقدمة</Text>
             </Pressable>
           )}
           {inOutroRange && (
-            <Pressable onPress={doSkipOutro} style={s.skipPillOutro} hitSlop={8} pointerEvents="auto">
+            <Pressable
+              onPress={doSkipOutro}
+              style={[s.skipPillOutro, tvMode && s.tvSkipPill]}
+              hitSlop={8}
+              pointerEvents="auto"
+              accessibilityRole="button"
+              accessibilityLabel="تخطي الخاتمة"
+            >
               <Ionicons name="play-forward" size={13} color="#4c1d95" />
-              <Text style={s.skipPillOutroText}>تخطي النهاية</Text>
+              <Text style={[s.skipPillOutroText, tvMode && s.tvSkipPillText]}>تخطي النهاية</Text>
             </Pressable>
           )}
         </View>
@@ -2909,7 +3772,13 @@ function AccordionSection({
 /* ─── Styles ─── */
 const s = StyleSheet.create({
   root:  { flex: 1, backgroundColor: "#000", position: "relative" },
+  entryLoadingOverlay: { ...StyleSheet.absoluteFillObject, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(3,3,8,0.44)" },
+  entryLoadingText: { marginTop: 12, color: "rgba(255,255,255,0.78)", fontSize: 13, fontFamily: "System" },
   video: { width: "100%", height: "100%" },
+  /* TextureView must be explicitly pinned to the TV viewport after the
+     landscape orientation lock; otherwise the native view can retain a
+     pre-rotation width and expose a differently composited side region. */
+  tvVideo: { ...StyleSheet.absoluteFillObject },
   screenshotSavedBadge: {
     position: "absolute",
     top: 24,
@@ -2936,6 +3805,7 @@ const s = StyleSheet.create({
 
   /* Spinner — top area of screen */
   errorWrap:   { ...StyleSheet.absoluteFillObject, alignItems: "center", justifyContent: "center", gap: 14, zIndex: 20, backgroundColor: "rgba(0,0,0,0.92)" },
+  autoCycleClose: { position: "absolute", right: 16, width: 40, height: 40, borderRadius: 20, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(255,255,255,0.08)", borderWidth: 1, borderColor: "rgba(255,255,255,0.16)", zIndex: 30 },
   errorIconBox: { width: 68, height: 68, borderRadius: 18, backgroundColor: "rgba(239,68,68,0.10)", borderWidth: 1, borderColor: "rgba(239,68,68,0.25)", alignItems: "center", justifyContent: "center" },
   errorTitle:  { color: "rgba(255,255,255,0.85)", fontSize: 15, fontFamily: "Cairo_700Bold" },
   errorBtn:    { flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: "rgba(239,68,68,0.15)", borderRadius: 20, paddingHorizontal: 22, paddingVertical: 11, borderWidth: 1, borderColor: "rgba(239,68,68,0.35)" },
@@ -2945,7 +3815,24 @@ const s = StyleSheet.create({
 
   /* Subtitle */
   subtitleWrap: { position: "absolute", left: 16, right: 16, alignItems: "stretch", zIndex: 8 },
-  subtitleText: { paddingHorizontal: 14, paddingVertical: 6, borderRadius: 10, textAlign: "center", lineHeight: 26, alignSelf: "center", maxWidth: "100%" },
+  subMoveRow: { flexDirection: "row", alignItems: "center", gap: 8, marginTop: 8 },
+  subMoveButton: { minWidth: 58, paddingHorizontal: 10, paddingVertical: 8, borderRadius: 10, backgroundColor: "rgba(139,92,246,0.14)", borderWidth: 1, borderColor: "rgba(139,92,246,0.28)", alignItems: "center", justifyContent: "center" },
+  subMoveLabel: { fontSize: 11, color: "#c4b5fd", fontFamily: "Cairo_700Bold" },
+  subMoveValue: { flex: 1, alignItems: "center" },
+  subMoveValueText: { fontSize: 12, color: "#fff", fontFamily: "Cairo_700Bold" },
+  subMoveHint: { fontSize: 9, color: "rgba(255,255,255,0.42)", fontFamily: "Cairo_400Regular", marginTop: 2, textAlign: "center" },
+  subtitleText: {
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+    borderRadius: 10,
+    textAlign: "center",
+    lineHeight: 26,
+    alignSelf: "center",
+    maxWidth: "100%",
+    textShadowColor: "rgba(0,0,0,0.92)",
+    textShadowRadius: 4,
+    textShadowOffset: { width: 1, height: 1 },
+  },
 
   /* Ripples */
   rippleLeft:   { position: "absolute", left: 0, top: "10%", width: "45%", height: "80%", alignItems: "center", justifyContent: "center", zIndex: 25 },
@@ -2981,6 +3868,13 @@ const s = StyleSheet.create({
 
   /* Lock — new swipe-down bar design */
   lockDot: { position: "absolute", right: 12, top: "48%", backgroundColor: "rgba(0,0,0,0.55)", borderRadius: 20, padding: 8, borderWidth: 1, borderColor: "rgba(251,191,36,0.25)", zIndex: 25 },
+  tvUnlockTarget: {
+    position: "absolute", left: "35%", right: "35%", top: "44%",
+    minHeight: 88, alignItems: "center", justifyContent: "center", gap: 8,
+    backgroundColor: "rgba(5,5,15,0.84)", borderRadius: 18,
+    borderWidth: 1.5, borderColor: "rgba(251,191,36,0.45)", zIndex: 40,
+  },
+  tvUnlockText: { color: "rgba(253,224,71,0.90)", fontSize: 18, fontFamily: "Cairo_700Bold" },
   swipeUnlockBar: {
     position: "absolute", right: 10, top: "18%", bottom: "18%",
     width: 46,
@@ -3038,9 +3932,24 @@ const s = StyleSheet.create({
     shadowColor: "#8B5CF6", shadowOpacity: 0.40, shadowRadius: 8, elevation: 6,
   },
   skipPillOutroText: { color: "#f3f0ff", fontSize: 12, fontFamily: "Cairo_700Bold" },
+  tvSkipPill: {
+    minHeight: 58,
+    paddingHorizontal: 22,
+    paddingVertical: 14,
+    borderRadius: 16,
+    borderWidth: 2,
+    borderColor: "rgba(255,255,255,0.75)",
+  },
+  tvSkipPillText: { fontSize: 18, lineHeight: 27 },
 
   /* ── CC button in top bar ── */
   topCCBtn: { minWidth: 38 },
+  /* Keep CC in the same square action rail as screenshot, rotate and close.
+     The old TV-only label made this one button much wider than its neighbours. */
+  tvCCBtn: {
+    width: 60, height: 60, minWidth: 60, minHeight: 60,
+    paddingHorizontal: 0, paddingVertical: 0, borderRadius: 18, gap: 0,
+  },
   topCCBtnActive: { backgroundColor: "rgba(139,92,246,0.28)", borderColor: "rgba(167,139,250,0.55)" },
   topCCText: { color: "rgba(255,255,255,0.80)", fontSize: 11, fontFamily: "Cairo_700Bold", letterSpacing: 0.5 },
   topCCTextActive: { color: "#c4b5fd" },
@@ -3094,6 +4003,7 @@ const s = StyleSheet.create({
   subPanelBody: { paddingHorizontal: 16, paddingTop: 6, gap: 4 },
 
   subSectionLabel: { color: "rgba(255,255,255,0.40)", fontSize: 11, fontFamily: "Cairo_700Bold", letterSpacing: 0.8, marginTop: 12, marginBottom: 4, textTransform: "uppercase" },
+  tvSubSectionLabel: { fontSize: 19, marginTop: 20, marginBottom: 10 },
 
   /* Toggle row */
   subRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingVertical: 6 },
@@ -3117,6 +4027,8 @@ const s = StyleSheet.create({
   },
   subChipActive: { backgroundColor: "rgba(139,92,246,0.22)", borderColor: "rgba(167,139,250,0.50)" },
   subChipText: { color: "rgba(255,255,255,0.65)", fontSize: 12, fontFamily: "Cairo_600SemiBold" },
+  tvSubChip: { minWidth: 150, minHeight: 64, paddingHorizontal: 24, paddingVertical: 16, borderRadius: 14 },
+  tvSubChipText: { fontSize: 22, fontFamily: "Cairo_800ExtraBold" },
   subChipTextActive: { color: "#c4b5fd" },
   subChipEmoji: { fontSize: 14 },
   subPosIcon: { fontSize: 12, color: "rgba(255,255,255,0.70)" },
@@ -3146,15 +4058,35 @@ const s = StyleSheet.create({
     paddingHorizontal: 10, paddingBottom: 12,
     flexDirection: "row", alignItems: "center", justifyContent: "space-between",
   },
+  tvTopBar: {
+    minHeight: 104,
+    paddingHorizontal: 40,
+    paddingBottom: 16,
+  },
   /* معلومات الأنمي — أقصى اليسار العلوي، حجم صغير لعدم التداخل */
   topInfoWrap: {
-    flexShrink: 1, maxWidth: "58%", flexDirection: "column", gap: 2, marginRight: 4,
+    flexShrink: 1, maxWidth: "62%", flexDirection: "column", gap: 3, marginRight: 4,
     alignItems: "flex-start",
+    backgroundColor: "rgba(10, 15, 26, 0.65)",
+    paddingHorizontal: 10, paddingVertical: 6,
+    borderRadius: 14,
+    borderWidth: 1, borderColor: "rgba(255, 255, 255, 0.12)",
+  },
+  tvTopInfoWrap: {
+    position: "absolute",
+    /* RN mirrors left/right in RTL: right becomes the physical left side. */
+    right: 20,
+    top: 22,
+    width: "34%",
+    marginRight: 0,
+    gap: 5,
+    zIndex: 2,
   },
   topInfoTitle: {
-    color: "rgba(255,255,255,0.90)", fontSize: 10, fontFamily: "Cairo_700Bold",
+    color: "#fff", fontSize: 12, fontFamily: "Cairo_700Bold",
     textShadowColor: "rgba(0,0,0,0.85)", textShadowRadius: 5, textShadowOffset: { width: 0, height: 1 },
   },
+  tvTopInfoTitle: { fontSize: 20 },
   topInfoRow: {
     flexDirection: "row", alignItems: "center", gap: 4, flexWrap: "nowrap",
   },
@@ -3177,6 +4109,11 @@ const s = StyleSheet.create({
     maxWidth: 180,
     textShadowColor: "rgba(0,0,0,0.80)", textShadowRadius: 4, textShadowOffset: { width: 0, height: 1 },
   },
+  tvTopEpBadge: { paddingHorizontal: 9, paddingVertical: 4, borderRadius: 8 },
+  tvTopEpText: { fontSize: 15 },
+  tvTopQualityBadge: { paddingHorizontal: 9, paddingVertical: 4, borderRadius: 8 },
+  tvTopQualityText: { fontSize: 14 },
+  tvTopEpTitle: { maxWidth: 420, fontSize: 15 },
   autoSubBadge: {
     marginTop: 3, alignSelf: "flex-start",
     paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6,
@@ -3186,6 +4123,15 @@ const s = StyleSheet.create({
     color: "rgba(196,181,253,0.85)", fontSize: 9, fontFamily: "Cairo_600SemiBold",
   },
   topRightRow: { flexDirection: "row", alignItems: "center", gap: 5 },
+  tvTopRightRow: {
+    position: "absolute",
+    /* Use left in RTL so RN places the controls at the physical right,
+       matching the phone player instead of mirroring them to the left. */
+    left: 40,
+    top: 22,
+    gap: 10,
+    zIndex: 4,
+  },
   topIconBtn: {
     width: 38, height: 38, borderRadius: 19,
     backgroundColor: "rgba(255,255,255,0.10)", borderWidth: 1, borderColor: "rgba(255,255,255,0.16)",
@@ -3210,9 +4156,42 @@ const s = StyleSheet.create({
     backgroundColor: "rgba(239,68,68,0.14)", borderWidth: 1.5, borderColor: "rgba(239,68,68,0.40)",
     alignItems: "center", justifyContent: "center",
   },
+  tvTopActionBtn: {
+    width: 60, height: 60, borderRadius: 18,
+    paddingHorizontal: 0, paddingVertical: 0,
+  },
+  tvTopCloseBtn: {
+    width: 60, height: 60, borderRadius: 18,
+  },
+
+  /* A focusable remote target remains after the chrome hides so OK can bring
+     the same controls back without requiring a touch gesture. */
+  tvRevealTarget: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: "center",
+    justifyContent: "center",
+    zIndex: 12,
+  },
+  tvRevealHint: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    paddingHorizontal: 22,
+    paddingVertical: 14,
+    borderRadius: 18,
+    backgroundColor: "rgba(8,7,18,0.72)",
+    borderWidth: 1,
+    borderColor: "rgba(167,139,250,0.34)",
+  },
+  tvRevealText: {
+    color: "rgba(255,255,255,0.78)",
+    fontSize: 17,
+    fontFamily: "Cairo_700Bold",
+  },
 
   /* ── Center overlay ── */
   centerOverlay: { flex: 1, alignItems: "center", justifyContent: "center", paddingTop: 60 },
+  tvCenterOverlay: { paddingTop: 30 },
   centerLandscapeWrap: { alignItems: "center" },
   centerPortraitRow: { flexDirection: "row", alignItems: "center", gap: 28 },
   controlButtonSlot: { height: 72, justifyContent: "center", alignItems: "center" },
@@ -3222,6 +4201,7 @@ const s = StyleSheet.create({
     backgroundColor: "rgba(0,0,0,0.38)", borderWidth: 1, borderColor: "rgba(255,255,255,0.20)",
     alignItems: "center", justifyContent: "center", gap: 3,
   },
+  tvCenterSeekBtn: { width: 78, height: 78, borderRadius: 39 },
   centerSeekLabel: { color: "rgba(255,255,255,0.80)", fontSize: 11, fontFamily: "Cairo_700Bold", lineHeight: 13 },
   centerPlayBtn: {
     width: 74, height: 74, borderRadius: 37,
@@ -3230,17 +4210,21 @@ const s = StyleSheet.create({
     alignItems: "center", justifyContent: "center",
     shadowColor: "#8B5CF6", shadowOpacity: 0.75, shadowRadius: 24, elevation: 16,
   },
+  tvCenterPlayBtn: { width: 104, height: 104, borderRadius: 52 },
 
   /* ── Bottom section ── */
   bottomSection: { paddingHorizontal: 16, paddingTop: 20, gap: 5 },
+  tvBottomSection: { paddingHorizontal: 48, paddingTop: 24, gap: 8 },
 
   /* ── Bottom controls row ── */
   bottomCtrlRow: {
     flexDirection: "row", alignItems: "center", justifyContent: "space-between",
     marginTop: 4, marginBottom: 2,
   },
+  tvBottomCtrlRow: { marginTop: 8, marginBottom: 4 },
   bottomSide: { flex: 1, flexDirection: "row", alignItems: "center", gap: 8 },
   bottomCenter: { flexDirection: "row", alignItems: "center", gap: 14 },
+  tvBottomCenter: { gap: 24 },
 
   /* ── Seek buttons (in bottom row, landscape) ── */
   seekCtrlBtn: {
@@ -3248,6 +4232,7 @@ const s = StyleSheet.create({
     backgroundColor: "rgba(255,255,255,0.09)", borderWidth: 1, borderColor: "rgba(255,255,255,0.18)",
     alignItems: "center", justifyContent: "center", gap: 2,
   },
+  tvSeekCtrlBtn: { width: 64, height: 64, borderRadius: 32 },
   seekCtrlLabel: { color: "rgba(255,255,255,0.70)", fontSize: 9, fontFamily: "Cairo_700Bold", lineHeight: 11 },
 
   /* ── Bottom play button ── */
@@ -3258,6 +4243,7 @@ const s = StyleSheet.create({
     alignItems: "center", justifyContent: "center",
     shadowColor: "#8B5CF6", shadowOpacity: 0.65, shadowRadius: 18, elevation: 12,
   },
+  tvBottomPlayBtn: { width: 64, height: 64, borderRadius: 32 },
 
   /* ── Icon control buttons ── */
   ctrlIconBtn: {
@@ -3265,10 +4251,12 @@ const s = StyleSheet.create({
     backgroundColor: "rgba(255,255,255,0.09)", borderWidth: 1, borderColor: "rgba(255,255,255,0.15)",
     alignItems: "center", justifyContent: "center",
   },
+  tvCtrlIconBtn: { width: 52, height: 52, borderRadius: 16 },
   ctrlIconBtnActive: { backgroundColor: "rgba(139,92,246,0.28)", borderColor: "rgba(167,139,250,0.50)" },
   ctrlIconBtnMuted:  { backgroundColor: "rgba(239,68,68,0.14)", borderColor: "rgba(239,68,68,0.30)" },
   ctrlSpeedBtn: { paddingHorizontal: 4, minWidth: 42 },
   speedLabel: { color: "rgba(255,255,255,0.75)", fontSize: 12, fontFamily: "Cairo_700Bold" },
+  tvSpeedLabel: { fontSize: 17 },
   speedLabelActive: { color: "#c4b5fd" },
 
   /* ── Dropdown menus ── */
@@ -3317,14 +4305,30 @@ const s = StyleSheet.create({
   bottomBar: { paddingHorizontal: 16, paddingTop: 28, gap: 8 },
   timeRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 2 },
   timeText: { color: "rgba(255,255,255,0.75)", fontSize: 11, fontFamily: "Cairo_400Regular", minWidth: 40, textAlign: "center" },
+  tvTimeText: { fontSize: 14, minWidth: 54 },
 
   /* Progress bar */
   progressWrap: { height: 34, justifyContent: "center", position: "relative", marginHorizontal: 2 },
+  tvProgressWrap: { height: 42, marginHorizontal: 0 },
+  tvProgressFocus: {
+    borderWidth: 3,
+    borderColor: "#FFFFFF",
+    borderRadius: 10,
+    backgroundColor: "rgba(139,92,246,0.10)",
+    shadowColor: "#A78BFA",
+    shadowOpacity: 1,
+    shadowRadius: 12,
+    elevation: 12,
+    zIndex: 20,
+  },
   progressWrapDragging: { height: 48 },
   progressBg: { position: "absolute", left: 0, right: 0, height: 6, backgroundColor: "rgba(255,255,255,0.15)", borderRadius: 3 },
+  tvProgressBg: { height: 8, borderRadius: 4 },
   skipMarker: { position: "absolute", height: 4, backgroundColor: "rgba(250,204,21,0.80)", borderRadius: 2, top: "50%", marginTop: -2, zIndex: 2 },
-  progressFill: { position: "absolute", left: 0, height: 6, backgroundColor: "#8B5CF6", borderRadius: 3, top: "50%", marginTop: -3, zIndex: 3 },
+  progressFill: { position: "absolute", height: 6, backgroundColor: "#8B5CF6", borderRadius: 3, top: "50%", marginTop: -3, zIndex: 3 },
+  tvProgressFill: { height: 8, marginTop: -4, borderRadius: 4 },
   thumb: { position: "absolute", top: "50%", width: 18, height: 18, borderRadius: 9, backgroundColor: "#fff", marginLeft: -9, marginTop: -9, shadowColor: "#8B5CF6", shadowOpacity: 0.5, shadowRadius: 6, elevation: 4, zIndex: 4 },
+  tvThumb: { width: 24, height: 24, borderRadius: 12, marginLeft: -12, marginTop: -12 },
   thumbDragging: { width: 26, height: 26, borderRadius: 13, marginLeft: -13, marginTop: -13, backgroundColor: "#c4b5fd", shadowColor: "#8B5CF6", shadowOpacity: 1, shadowRadius: 14, elevation: 8 },
   dragTooltip: { position: "absolute", bottom: "100%", marginBottom: 6, backgroundColor: "rgba(10,6,30,0.95)", borderRadius: 10, paddingHorizontal: 10, paddingVertical: 5, borderWidth: 1, borderColor: "rgba(139,92,246,0.40)", zIndex: 10 },
   dragTooltipText: { color: "#fff", fontSize: 13, fontFamily: "Cairo_700Bold" },
@@ -3444,7 +4448,7 @@ const s = StyleSheet.create({
 
   /* ══════ Buffer bar (web player port) ══════ */
   bufferBar: {
-    position: "absolute", left: 0, height: 6,
+    position: "absolute", height: 6,
     backgroundColor: "rgba(255,255,255,0.22)",
     borderRadius: 3, zIndex: 2,
   },
