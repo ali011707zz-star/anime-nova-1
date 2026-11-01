@@ -86,7 +86,10 @@ export default function DubbedScreen() {
   const loadPage = useCallback(async (p: number, reset = false) => {
     if (reset) setLoading(true); else setLoadingMore(true);
     try {
-      const r = await fetch(`${BASE}/api/dubbed/catalog?page=${p}`);
+      const r = await fetch(`${BASE}/api/dubbed/catalog?page=${p}&_=${Date.now()}`, {
+        cache: "no-store",
+        headers: { Accept: "application/json", "Cache-Control": "no-cache" },
+      });
       const d = await r.json();
       const results: Series[] = d.results || [];
       setTotalPages(d.totalPages || 1);

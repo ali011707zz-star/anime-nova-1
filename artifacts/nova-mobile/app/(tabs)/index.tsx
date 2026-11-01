@@ -5,10 +5,11 @@ import { FlatList, Image } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import React, { useState, useEffect } from "react";
 import {
-  Platform, Pressable, RefreshControl, ScrollView,
+  ActivityIndicator, Platform, Pressable, RefreshControl, ScrollView,
   StyleSheet, Text, View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { AnnouncementBanner } from "@/components/AnnouncementBanner";
 import { DrawerMenu } from "@/components/DrawerMenu";
 import { HeroSection } from "@/components/HeroSection";
@@ -73,16 +74,80 @@ export default function HomeScreen() {
 
   /* أحدث الحلقات — مباشرةً من كتالوج anslayer نفسه (نفس مصدر تطبيق الويب تماماً،
      بدلاً من جدول بث AniList) لضمان تطابق الحلقات المعروضة بين الويب والموبايل. */
-  type TodayEp = { animeId: number; name: string; episode: number; cover: string; year?: string };
+  type TodayEp = { animeId: number; anslayerId: number; name: string; episode: number; cover: string; year?: string };
   const [todayEps, setTodayEps] = useState<TodayEp[]>([]);
+  const [todayChecking, setTodayChecking] = useState(true);
+  const [todayError, setTodayError] = useState(false);
+  const [todayRefreshKey, setTodayRefreshKey] = useState(0);
   useEffect(() => {
     const ctrl = new AbortController();
-    fetch(`${getBaseUrl()}/api/anime/anslayer-latest`, { signal: ctrl.signal })
-      .then(r => r.json())
-      .then((d: { items?: TodayEp[] }) => { if (!ctrl.signal.aborted) setTodayEps(d.items || []); })
-      .catch((e) => { if (e?.name !== "AbortError") console.warn("[Home] anslayer-latest fetch error"); });
-    return () => ctrl.abort();
-  }, []);
+    let timedOut = false;
+    const timeout = setTimeout(() => {
+      timedOut = true;
+      ctrl.abort();
+    }, 15_000);
+    setTodayChecking(true);
+    setTodayError(false);
+    const loadLatest = async () => {
+      try {
+        const cached = await AsyncStorage.getItem("nova-latest-episodes");
+        if (!ctrl.signal.aborted && cached) {
+          const parsed = JSON.parse(cached);
+          if (Array.isArray(parsed) && parsed.length) {
+            const cachedItems: TodayEp[] = parsed
+              .map((item: any) => ({
+                ...item,
+                animeId: Number(item.anilistId ?? item.animeId ?? item.anilist_id ?? 0),
+                anslayerId: Number(item.anslayerId ?? item.anslayer_id ?? item.animeId ?? 0),
+                name: String(item.name ?? item.title ?? "").trim(),
+                episode: Number(item.episode),
+                cover: String(item.cover ?? item.poster ?? "").trim(),
+              }))
+              .filter((item: TodayEp) => item.anslayerId > 0 && item.name && item.episode > 0);
+            if (cachedItems.length) setTodayEps(cachedItems);
+          }
+        }
+      } catch {}
+
+      try {
+        const response = await fetch(
+          `${getBaseUrl()}/api/anime/anslayer-latest?_=${Date.now()}`,
+          { signal: ctrl.signal, headers: { Accept: "application/json", "Cache-Control": "no-cache" } },
+        );
+        if (!response.ok) throw new Error(`latest episodes returned ${response.status}`);
+        const payload = await response.json();
+        const raw = Array.isArray(payload) ? payload : Array.isArray(payload?.items) ? payload.items : [];
+        const normalized: TodayEp[] = raw
+          .map((item: any) => ({
+            ...item,
+            animeId: Number(item.anilistId ?? item.animeId ?? item.anilist_id ?? 0),
+            anslayerId: Number(item.anslayerId ?? item.anslayer_id ?? item.animeId ?? 0),
+            name: String(item.name ?? item.title ?? "").trim(),
+            episode: Number(item.episode),
+            cover: String(item.cover ?? item.poster ?? "").trim(),
+          }))
+          .filter((item: TodayEp) => item.anslayerId > 0 && item.name && item.episode > 0);
+        if (ctrl.signal.aborted) return;
+        if (normalized.length) {
+          setTodayEps(normalized);
+          await AsyncStorage.setItem("nova-latest-episodes", JSON.stringify(normalized)).catch(() => {});
+        }
+        setTodayError(false);
+      } catch (e: any) {
+        if (timedOut || (!ctrl.signal.aborted && e?.name !== "AbortError")) {
+          console.warn("[Home] anslayer-latest fetch error");
+          setTodayError(true);
+        }
+      } finally {
+        if (!ctrl.signal.aborted || timedOut) setTodayChecking(false);
+      }
+    };
+    void loadLatest();
+    return () => {
+      clearTimeout(timeout);
+      ctrl.abort();
+    };
+  }, [todayRefreshKey]);
 
   const isLoading = loadingT || loadingP || loadingA;
 
@@ -91,7 +156,10 @@ export default function HomeScreen() {
   const [dubbedSeries, setDubbedSeries] = useState<any[]>([]);
   useEffect(() => {
     const ctrl = new AbortController();
-    fetch(`${BASE_URL}/api/dubbed/catalog?page=1`, { signal: ctrl.signal })
+    fetch(`${BASE_URL}/api/dubbed/catalog?page=1&_=${Date.now()}`, {
+      signal: ctrl.signal,
+      headers: { Accept: "application/json", "Cache-Control": "no-cache" },
+    })
       .then(r => r.json())
       .then(d => { if (!ctrl.signal.aborted) setDubbedSeries((d.results || d.items || d.series || []).slice(0, 14)); })
       .catch((e) => { if (e?.name !== "AbortError") console.warn("[Home] dubbed/catalog fetch error"); });
@@ -121,6 +189,8 @@ export default function HomeScreen() {
   const recentHistory = watchHistory.slice(0, 10);
 
   const refresh = async () => {
+    setTodayChecking(true);
+    setTodayRefreshKey((value) => value + 1);
     await Promise.all([refetchT(), refetchP(), refetchA(), refetchS(), refetchR(), refetchM()]);
   };
 
@@ -205,49 +275,66 @@ export default function HomeScreen() {
         )}
 
         {/* أحدث الحلقات — نفس مصدر anslayer المستخدم على الويب */}
-        {todayEps.length > 0 && (
-          <View style={{ marginTop: 24 }}>
+        <View style={{ marginTop: 24 }}>
             <View style={styles.sectionHeader}>
               <View style={styles.sectionLeft}>
                 <View style={[styles.sectionDot, { backgroundColor: "#f43f5e" }]} />
                 <Text style={[styles.sectionTitle, { color: colors.text }]}>📺 أحدث الحلقات</Text>
               </View>
-              <Pressable onPress={() => router.push("/schedule" as any)} style={styles.seeAllBtn}>
-                <Text style={[styles.seeAllText, { color: colors.primary }]}>عرض المزيد</Text>
-                <Ionicons name="chevron-back" size={13} color={colors.primary} />
-              </Pressable>
-            </View>
-            <FlatList
-              data={todayEps}
-              horizontal
-              keyExtractor={(ep) => `${ep.animeId}-${ep.episode}`}
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={{ paddingHorizontal: 16, gap: 10 }}
-              renderItem={({ item: ep }) => (
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
                 <Pressable
-                  onPress={() => router.push(`/watch?anime=0&ep=${ep.episode}&title=${encodeURIComponent(ep.name || "")}&english=${encodeURIComponent(ep.name || "")}&cover=${encodeURIComponent(ep.cover || "")}&site=anslayer&anslayerId=${ep.animeId}&single=1` as any)}
-                  style={[todayEpStyles.card, { backgroundColor: colors.card, borderColor: colors.border }]}
+                  onPress={() => { setTodayChecking(true); setTodayRefreshKey((value) => value + 1); }}
+                  style={styles.seeAllBtn}
+                  accessibilityRole="button"
+                  accessibilityLabel="تحديث أحدث الحلقات"
                 >
-                  {ep.cover ? (
-                    <Image source={{ uri: ep.cover }} style={todayEpStyles.img} resizeMode="cover" />
-                  ) : (
-                    <View style={[todayEpStyles.img, { backgroundColor: colors.card, alignItems: "center", justifyContent: "center" }]}>
-                      <Ionicons name="tv" size={28} color="rgba(255,255,255,0.2)" />
-                    </View>
-                  )}
-                  <LinearGradient colors={["transparent", "rgba(0,0,0,0.95)"]} style={todayEpStyles.grad}>
-                    <Text style={todayEpStyles.ep}>حلقة {ep.episode}</Text>
-                    <Text style={todayEpStyles.title} numberOfLines={2}>{ep.name}</Text>
-                  </LinearGradient>
+                  <Ionicons name="refresh" size={15} color={colors.primary} />
                 </Pressable>
-              )}
-              initialNumToRender={5}
-              maxToRenderPerBatch={5}
-              windowSize={3}
-              removeClippedSubviews={Platform.OS !== "web"}
-            />
+                <Pressable onPress={() => router.push("/schedule" as any)} style={styles.seeAllBtn}>
+                  <Text style={[styles.seeAllText, { color: colors.primary }]}>عرض المزيد</Text>
+                  <Ionicons name="chevron-back" size={13} color={colors.primary} />
+                </Pressable>
+              </View>
+            </View>
+            {todayEps.length > 0 ? (
+              <FlatList
+                data={todayEps}
+                horizontal
+                keyExtractor={(ep) => `${ep.anslayerId || ep.animeId}-${ep.episode}`}
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={{ paddingHorizontal: 16, gap: 10 }}
+                renderItem={({ item: ep }) => (
+                  <Pressable
+                    onPress={() => router.push(`/watch?anime=0&ep=${ep.episode}&title=${encodeURIComponent(ep.name || "")}&english=${encodeURIComponent(ep.name || "")}&cover=${encodeURIComponent(ep.cover || "")}&site=anslayer&anslayerId=${ep.anslayerId}&single=1` as any)}
+                    style={[todayEpStyles.card, { backgroundColor: colors.card, borderColor: colors.border }]}
+                  >
+                    {ep.cover ? (
+                      <Image source={{ uri: ep.cover }} style={todayEpStyles.img} resizeMode="cover" />
+                    ) : (
+                      <View style={[todayEpStyles.img, { backgroundColor: colors.card, alignItems: "center", justifyContent: "center" }]}>
+                        <Ionicons name="tv" size={28} color="rgba(255,255,255,0.2)" />
+                      </View>
+                    )}
+                    <LinearGradient colors={["transparent", "rgba(0,0,0,0.95)"]} style={todayEpStyles.grad}>
+                      <Text style={todayEpStyles.ep}>حلقة {ep.episode}</Text>
+                      <Text style={todayEpStyles.title} numberOfLines={2}>{ep.name}</Text>
+                    </LinearGradient>
+                  </Pressable>
+                )}
+                initialNumToRender={5}
+                maxToRenderPerBatch={5}
+                windowSize={3}
+                removeClippedSubviews={Platform.OS !== "web"}
+              />
+            ) : (
+              <View style={{ minHeight: 92, paddingHorizontal: 16, alignItems: "center", justifyContent: "center", flexDirection: "row", gap: 10 }}>
+                {todayChecking ? <ActivityIndicator color={colors.primary} /> : null}
+                <Text style={{ color: colors.mutedForeground, fontSize: 13 }}>
+                  {todayChecking ? "جارٍ تحميل أحدث الحلقات..." : todayError ? "تعذر تحميل الحلقات — اضغط تحديث للمحاولة مجدداً" : "لا توجد حلقات حديثة حالياً"}
+                </Text>
+              </View>
+            )}
           </View>
-        )}
 
         <View style={{ marginTop: 24 }}>
           {isLoading ? (

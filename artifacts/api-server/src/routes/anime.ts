@@ -6,7 +6,7 @@ import { findExactAniListTitleMatch, normalizeAniListTitle } from "../lib/aniLis
 import { checkReanimeEpisode, getReanimeSources } from "../lib/reanimeSource.js";
 import { createHash, createDecipheriv, createCipheriv, createHmac, randomBytes } from "crypto";
 import { execSync, execFile, spawn } from "child_process";
-import { createReadStream, existsSync, writeFileSync, readFileSync, readdirSync, mkdirSync, rmSync, statSync } from "fs";
+import { createReadStream, existsSync, writeFileSync, readFileSync, readdirSync, mkdirSync, rmSync, statSync, renameSync } from "fs";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { cancelInspectedBody, collectInspectedBody, fetchWithHeaderTimeout, inspectReadableBody, startDelayedAbortableRequest, streamInspectedBody } from "../lib/mediaStreamTools.mjs";
@@ -16293,6 +16293,30 @@ router.get("/anime/check-arabic", async (req, res) => {
 let _anslayerLatestCache: any[] | null = null;
 let _anslayerLatestTs = 0;
 const ANSLAYER_LATEST_TTL = 2 * 60_000; // 2 دقيقة — المصدر يتغير بعد نشر الحلقة بسرعة
+const ANSLAYER_LATEST_CACHE_PATH = "/opt/nova-cache/anslayer-latest.json";
+const ANSLAYER_LATEST_DISK_MAX_AGE = 24 * 60 * 60_000;
+
+function readAnslayerLatestDiskCache(): any[] | null {
+  try {
+    const cached = JSON.parse(readFileSync(ANSLAYER_LATEST_CACHE_PATH, "utf8"));
+    const age = Date.now() - Number(cached?.ts);
+    if (!Array.isArray(cached?.items) || cached.items.length === 0 || age < 0 || age > ANSLAYER_LATEST_DISK_MAX_AGE) return null;
+    return cached.items;
+  } catch {
+    return null;
+  }
+}
+
+function writeAnslayerLatestDiskCache(items: any[]): void {
+  try {
+    mkdirSync("/opt/nova-cache", { recursive: true });
+    const tempPath = `${ANSLAYER_LATEST_CACHE_PATH}.${process.pid}.tmp`;
+    writeFileSync(tempPath, JSON.stringify({ ts: Date.now(), items }), "utf8");
+    renameSync(tempPath, ANSLAYER_LATEST_CACHE_PATH);
+  } catch {
+    // Disk cache is best-effort; the live feed must remain available without it.
+  }
+}
 
 async function fetchLiveFallbackLatestEpisodes(): Promise<any[]> {
   type RawLatestCandidate = {
@@ -16550,6 +16574,10 @@ async function fetchLiveFallbackLatestEpisodes(): Promise<any[]> {
 
 router.get("/anime/anslayer-latest", async (req, res) => {
   try {
+    if (!_anslayerLatestCache) {
+      _anslayerLatestCache = readAnslayerLatestDiskCache();
+      if (_anslayerLatestCache) _anslayerLatestTs = 0; // stale on boot: refresh upstream before serving
+    }
     if (_anslayerLatestCache && Date.now() - _anslayerLatestTs < ANSLAYER_LATEST_TTL) {
       res.setHeader("Cache-Control", "no-store");
       res.json({ items: _anslayerLatestCache });
@@ -16572,6 +16600,7 @@ router.get("/anime/anslayer-latest", async (req, res) => {
       if (fallbackItems.length > 0) {
         _anslayerLatestCache = fallbackItems;
         _anslayerLatestTs = Date.now();
+        writeAnslayerLatestDiskCache(fallbackItems);
         res.setHeader("Cache-Control", "no-store");
         res.json({ items: fallbackItems });
         return;
@@ -16660,10 +16689,22 @@ router.get("/anime/anslayer-latest", async (req, res) => {
     // duplicate notification attempts. The scheduler polls this same feed.
     _anslayerLatestCache = items;
     _anslayerLatestTs = Date.now();
+    writeAnslayerLatestDiskCache(items);
     res.setHeader("Cache-Control", "no-store");
     res.json({ items });
   } catch (e: any) {
     console.warn("[AnimeSlayer] latest feed request failed:", e?.message || String(e));
+    try {
+      const fallbackItems = await fetchLiveFallbackLatestEpisodes();
+      if (fallbackItems.length > 0) {
+        _anslayerLatestCache = fallbackItems;
+        _anslayerLatestTs = Date.now();
+        writeAnslayerLatestDiskCache(fallbackItems);
+        res.setHeader("Cache-Control", "no-store");
+        res.json({ items: fallbackItems });
+        return;
+      }
+    } catch { /* return the last known-good feed below */ }
     res.setHeader("Cache-Control", "no-store");
     if (_anslayerLatestCache?.length) {
       res.json({ items: _anslayerLatestCache, stale: true });

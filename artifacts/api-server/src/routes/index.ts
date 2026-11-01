@@ -4,6 +4,7 @@ import animeRouter     from './anime';
 import reportRouter    from './report';
 import configRouter    from './config';
 import dubbedRouter    from './dubbed';
+import carateenRouter  from './carateen';
 import mangaRouter     from './manga';
 import statsRouter     from './stats';
 
@@ -12,6 +13,7 @@ router.use(configRouter);
 router.use(healthRouter);
 router.use(animeRouter);
 router.use(dubbedRouter);
+router.use(carateenRouter);
 router.use(mangaRouter);
 router.use(statsRouter);
 router.use(reportRouter);

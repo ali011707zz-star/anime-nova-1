@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { load } from "cheerio";
 import { logger } from "../lib/logger";
 
 const router = Router();
@@ -134,9 +135,137 @@ async function cfGet(url: string, referer?: string, timeoutMs = 18000): Promise<
 const _catalogCache = new Map<string, { data: any; ts: number }>();
 const CATALOG_TTL = 4 * 60 * 60_000; // 4 ساعات — أطول من قبل (كان 30 دقيقة)
 
-async function fetchStarCimaDubbed(path: string): Promise<any> {
+const ARABIC_TOONS_HOSTS = new Set(["arabic-toons.com", "www.arabic-toons.com"]);
+
+function normalizeArabicToonsSeriesUrl(value: string): string | null {
+  try {
+    const url = new URL(value);
+    if (
+      url.protocol !== "https:" ||
+      !ARABIC_TOONS_HOSTS.has(url.hostname.toLowerCase()) ||
+      url.username ||
+      url.password ||
+      url.port ||
+      !/-anime-streaming\.html$/i.test(url.pathname)
+    ) return null;
+    return `${AT_BASE}${url.pathname}`;
+  } catch {
+    return null;
+  }
+}
+
+async function fetchArabicToonsHtml(url: string, referer: string): Promise<string | null> {
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== "https:" || !ARABIC_TOONS_HOSTS.has(parsed.hostname.toLowerCase())) return null;
+    // VPS direct egress can be blocked by Cloudflare. Use the existing
+    // curl_cffi proxy first, then cfGet's direct-fetch fallbacks.
+    const html = await cfGet(url, referer, 18000);
+    if (!html) return null;
+    return html.length > 500 && !isCfBlock(html) ? html : null;
+  } catch {
+    return null;
+  }
+}
+
+function normalizeArabicDigits(value: string): string {
+  return value
+    .replace(/[٠-٩]/g, digit => String("٠١٢٣٤٥٦٧٨٩".indexOf(digit)))
+    .replace(/[۰-۹]/g, digit => String("۰۱۲۳۴۵۶۷۸۹".indexOf(digit)));
+}
+
+function parseArabicToonsEpisodes(html: string, seriesUrl: string): any[] {
+  const $ = load(html);
+  const seriesPath = new URL(seriesUrl).pathname;
+  const seriesStem = seriesPath.replace(/-anime-streaming\.html$/i, "");
+  const episodes = new Map<string, any>();
+
+  $("a[href]").each((_, element) => {
+    const anchor = $(element);
+    let episodeUrl: URL;
+    try {
+      episodeUrl = new URL(anchor.attr("href") || "", seriesUrl);
+    } catch {
+      return;
+    }
+    if (!ARABIC_TOONS_HOSTS.has(episodeUrl.hostname.toLowerCase())) return;
+    const episodeId = episodeUrl.pathname.match(/-(\d+)\.html$/i)?.[1];
+    if (!episodeId || episodeUrl.pathname.replace(/-\d+\.html$/i, "") !== seriesStem) return;
+    if (episodes.has(episodeId)) return;
+
+    const image = anchor.find("img").first();
+    const label = normalizeArabicDigits([
+      anchor.attr("title") || "",
+      anchor.text(),
+      image.attr("alt") || "",
+    ].join(" "));
+    const labelledNumber = label.match(/(?:الحلقة|episode)\s*[:#-]?\s*(\d+(?:\.\d+)?)/i)?.[1];
+    const anyNumber = label.match(/(?:^|[^\d])(\d+(?:\.\d+)?)(?:$|[^\d])/)?.[1];
+    const parsedNumber = Number(labelledNumber || anyNumber);
+    const number = Number.isFinite(parsedNumber) && parsedNumber > 0
+      ? parsedNumber
+      : episodes.size + 1;
+
+    let thumbnail: string | undefined;
+    const srcsetThumbnail = (image.attr("data-srcset") || image.attr("srcset"))
+      ?.split(",")[0]
+      ?.trim()
+      .split(/\s+/)[0];
+    const thumbnailCandidates = [
+      image.attr("data-src"),
+      image.attr("data-original"),
+      image.attr("data-lazy-src"),
+      srcsetThumbnail,
+      image.attr("src"),
+    ].filter((value): value is string => Boolean(value?.trim()));
+    for (const rawThumbnail of thumbnailCandidates) {
+      try {
+        const parsedThumbnail = new URL(rawThumbnail, AT_BASE);
+        if (ARABIC_TOONS_HOSTS.has(parsedThumbnail.hostname.toLowerCase())) {
+          thumbnail = parsedThumbnail.toString();
+          break;
+        }
+      } catch { /* skip malformed thumbnails */ }
+    }
+
+    if (!episodeUrl.hash) episodeUrl.hash = "sets";
+    episodes.set(episodeId, {
+      number,
+      epId: episodeId,
+      url: episodeUrl.toString(),
+      ...(thumbnail ? { thumbnail } : {}),
+    });
+  });
+
+  return [...episodes.values()].sort((a, b) => a.number - b.number);
+}
+
+const NOVA_PUBLIC_URL = (process.env.NOVA_PUBLIC_URL || "https://animenovaa.duckdns.org").replace(/\/$/, "");
+
+function absoluteDubbedImage(value: unknown): unknown {
+  if (typeof value !== "string" || !value) return value;
+  const absolute = value.startsWith("/") ? `${NOVA_PUBLIC_URL}${value}` : value;
+  if (!absolute.includes("/api/dubbed/img?")) return absolute;
+  return `${absolute}&v=2`;
+}
+
+function normalizeDubbedImages(data: any): any {
+  if (!data || typeof data !== "object") return data;
+  const key = Array.isArray(data.results) ? "results" : Array.isArray(data.items) ? "items" : null;
+  if (!key) return data;
+  return {
+    ...data,
+    [key]: data[key].map((item: any) => ({
+      ...item,
+      image: absoluteDubbedImage(item?.image),
+      poster: absoluteDubbedImage(item?.poster),
+    })),
+  };
+}
+
+async function fetchStarCimaDubbed(path: string, forceRefresh = false): Promise<any> {
   const hit = _catalogCache.get(path);
-  if (hit && Date.now() - hit.ts < CATALOG_TTL) return hit.data;
+  if (!forceRefresh && hit && Date.now() - hit.ts < CATALOG_TTL) return hit.data;
 
   // جرّب الـ disk cache أولاً (يبقى بعد restart)
   const diskHit = _dcGet(path);
@@ -173,10 +302,10 @@ async function fetchStarCimaDubbed(path: string): Promise<any> {
 // ── GET /api/dubbed/catalog?page=N ──
 router.get("/dubbed/catalog", async (req, res) => {
   const page = parseInt(req.query.page as string || "1", 10) || 1;
-  const data = await fetchStarCimaDubbed(`/api/dubbed/catalog?page=${page}`);
+  const data = await fetchStarCimaDubbed(`/api/dubbed/catalog?page=${page}`, req.query.refresh === "1");
   if (!data) { res.status(502).json({ error: "upstream failed" }); return; }
-  res.setHeader("Cache-Control", "public, max-age=1800");
-  res.json(data);
+  res.setHeader("Cache-Control", "no-store");
+  res.json(normalizeDubbedImages(data));
 });
 
 // ── GET /api/dubbed/search?q= ──
@@ -190,8 +319,8 @@ router.get("/dubbed/search", async (req, res) => {
     });
     if (!r.ok) { res.json({ results: [] }); return; }
     const data = await r.json();
-    res.setHeader("Cache-Control", "public, max-age=300");
-    res.json(data);
+    res.setHeader("Cache-Control", "no-store");
+    res.json(normalizeDubbedImages(data));
   } catch { res.json({ results: [] }); }
 });
 
@@ -202,7 +331,33 @@ router.get("/dubbed/episodes", async (req, res) => {
 
   const cacheKey = `/api/dubbed/episodes?series=${series}`;
   const hit = _catalogCache.get(cacheKey);
-  if (hit && Date.now() - hit.ts < CATALOG_TTL) {
+  const arabicToonsSeriesUrl = normalizeArabicToonsSeriesUrl(series);
+  if (
+    arabicToonsSeriesUrl &&
+    hit &&
+    Array.isArray(hit.data) &&
+    hit.data.length > 0 &&
+    Date.now() - hit.ts < CATALOG_TTL
+  ) {
+    res.setHeader("Cache-Control", "public, max-age=1800");
+    res.json({ episodes: hit.data });
+    return;
+  }
+
+  if (arabicToonsSeriesUrl) {
+    const html = await fetchArabicToonsHtml(arabicToonsSeriesUrl, `${AT_BASE}/cartoon.php`);
+    const arabicToonsEpisodes = html
+      ? parseArabicToonsEpisodes(html, arabicToonsSeriesUrl)
+      : [];
+    if (arabicToonsEpisodes.length) {
+      _catalogCache.set(cacheKey, { data: arabicToonsEpisodes, ts: Date.now() });
+      res.setHeader("Cache-Control", "public, max-age=1800");
+      res.json({ episodes: arabicToonsEpisodes });
+      return;
+    }
+  }
+
+  if (hit && Date.now() - hit.ts < CATALOG_TTL && !arabicToonsSeriesUrl) {
     res.setHeader("Cache-Control", "public, max-age=1800");
     res.json({ episodes: hit.data });
     return;
@@ -413,19 +568,55 @@ router.get("/dubbed/stream", async (req, res) => {
   }
 });
 
-// ── GET /api/dubbed/img?f= → proxy image through StarCima's own img endpoint ──
-// StarCima hosts/proxies all arabic-toons images via /api/dubbed/img?f=
-// This approach is reliable and avoids CF challenges on arabic-toons.com directly.
-// Supports both series posters (cat_XXXXXXXXXX.jpg) and episode thumbnails (mqdefault_XXXXX.jpg)
+function detectDubbedImageMime(buffer: Buffer): string | null {
+  if (
+    buffer.length >= 8 &&
+    buffer.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))
+  ) return "image/png";
+  if (buffer.length >= 3 && buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) {
+    return "image/jpeg";
+  }
+  const signature = buffer.subarray(0, 6).toString("ascii");
+  if (signature === "GIF87a" || signature === "GIF89a") return "image/gif";
+  if (
+    buffer.length >= 12 &&
+    buffer.subarray(0, 4).toString("ascii") === "RIFF" &&
+    buffer.subarray(8, 12).toString("ascii") === "WEBP"
+  ) return "image/webp";
+  return null;
+}
+
+// ── GET /api/dubbed/img?f= → binary-safe Arabic-Toons poster proxy ──
 router.get("/dubbed/img", async (req, res) => {
   const f = (req.query.f as string || "").trim();
   if (!f || !/^[\w\-\.]+$/.test(f)) { res.status(400).send("bad"); return; }
 
-  // Use StarCima's own image proxy endpoint (confirmed HTTP 200)
-  const scImgUrl = `${SC_BASE}/api/dubbed/img?f=${encodeURIComponent(f)}`;
+  const sendImage = (buffer: Buffer): boolean => {
+    const mime = detectDubbedImageMime(buffer);
+    if (!mime) return false;
+    res.setHeader("Content-Type", mime);
+    res.setHeader("Cache-Control", "public, max-age=86400");
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.send(buffer);
+    return true;
+  };
 
   try {
-    const r = await fetch(scImgUrl, {
+    const direct = await fetch(`${AT_BASE}/images/anime/${encodeURIComponent(f)}`, {
+      headers: {
+        "User-Agent": BROWSER_UA,
+        Referer: `${AT_BASE}/`,
+        Accept: "image/*,*/*",
+      },
+      signal: AbortSignal.timeout(10000),
+    });
+    if (direct.ok && sendImage(Buffer.from(await direct.arrayBuffer()))) return;
+  } catch {
+    // Try StarCima only as a binary-safe fallback below.
+  }
+
+  try {
+    const fallback = await fetch(`${SC_BASE}/api/dubbed/img?f=${encodeURIComponent(f)}`, {
       headers: {
         "User-Agent": BROWSER_UA,
         Referer: `${SC_BASE}/dubbed`,
@@ -433,29 +624,12 @@ router.get("/dubbed/img", async (req, res) => {
       },
       signal: AbortSignal.timeout(10000),
     });
-    if (r.ok) {
-      const ct = r.headers.get("content-type") || "image/jpeg";
-      if (ct.includes("image") || ct.includes("octet")) {
-        const buf = Buffer.from(await r.arrayBuffer());
-        res.setHeader("Content-Type", ct);
-        res.setHeader("Cache-Control", "public, max-age=86400");
-        res.send(buf);
-        return;
-      }
-    }
-    // Fallback: try arabic-toons.com/images/anime/{f} directly via CF proxy
-    const atImgUrl = `${AT_BASE}/images/anime/${f}`;
-    const html2 = await cfGet(atImgUrl, AT_BASE + "/", 8000);
-    if (html2) {
-      res.setHeader("Content-Type", "image/jpeg");
-      res.setHeader("Cache-Control", "public, max-age=86400");
-      res.send(Buffer.from(html2, "binary"));
-      return;
-    }
-    res.status(404).send("not found");
+    if (fallback.ok && sendImage(Buffer.from(await fallback.arrayBuffer()))) return;
   } catch {
-    res.status(502).send("proxy error");
+    // The proxy may be unavailable; never return decoded text as an image.
   }
+
+  res.status(404).send("image not found");
 });
 
 // ════════════════════════════════════════════════════════════════════════════
