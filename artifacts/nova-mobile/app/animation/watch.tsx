@@ -1032,6 +1032,17 @@ export default function AnimationWatchScreen() {
 
       {/* ── Header: 3-zone fixed layout ── */}
       <View style={w.header}>
+        {/* Right: back */}
+        <Pressable onPress={handleBack} style={w.headerBack}>
+          <Ionicons name="arrow-back" size={17} color="rgba(255,255,255,0.75)" style={{ transform: [{ scaleX: -1 }] }} />
+        </Pressable>
+        {/* Center: title */}
+        <View style={w.headerCenter}>
+          <Text style={w.headerTitle} numberOfLines={1}>{titleStr || "مشاهدة"}</Text>
+          {type !== "movie" && (
+            <Text style={w.headerSub}>الموسم {season} • الحلقة {ep}</Text>
+          )}
+        </View>
         {/* Left: refresh */}
         <View style={w.headerLeft}>
           {loading
@@ -1041,17 +1052,6 @@ export default function AnimationWatchScreen() {
               </Pressable>
           }
         </View>
-        {/* Center: title */}
-        <View style={w.headerCenter}>
-          <Text style={w.headerTitle} numberOfLines={1}>{titleStr || "مشاهدة"}</Text>
-          {type !== "movie" && (
-            <Text style={w.headerSub}>الموسم {season} • الحلقة {ep}</Text>
-          )}
-        </View>
-        {/* Right: back button (always same position) */}
-        <Pressable onPress={handleBack} style={w.headerBack}>
-          <Ionicons name="arrow-back" size={17} color="rgba(255,255,255,0.75)" style={{ transform: [{ scaleX: -1 }] }} />
-        </Pressable>
       </View>
 
       <ScrollView
@@ -1203,7 +1203,7 @@ const w = StyleSheet.create({
   srcSwitchText: { fontSize: 10, fontFamily: "Cairo_700Bold", color: "rgba(255,255,255,0.8)" },
 
   /* ── Picker header: 3-zone fixed layout ── */
-  header: { flexDirection: "row", direction: "ltr", alignItems: "center", paddingHorizontal: 12, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: "rgba(255,255,255,0.07)", gap: 8 },
+  header: { flexDirection: "row", direction: "rtl", alignItems: "center", paddingHorizontal: 12, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: "rgba(255,255,255,0.07)", gap: 8 },
   headerLeft: { width: 36, alignItems: "flex-start", justifyContent: "center" },
   headerCenter: { flex: 1, alignItems: "center" },
   headerBack: { width: 36, height: 36, borderRadius: 12, backgroundColor: "rgba(255,255,255,0.07)", borderWidth: 1, borderColor: "rgba(255,255,255,0.11)", alignItems: "center", justifyContent: "center", flexShrink: 0 },

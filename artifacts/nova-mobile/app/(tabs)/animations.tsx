@@ -222,14 +222,14 @@ export default function AnimationsScreen() {
       {/* ── Header ── */}
       <View style={[s.header, tvMode && s.tvHeader]}>
         <View style={[s.headerRow, tvMode && s.tvHeaderRow]}>
-          <View style={{ flex: 1 }}>
-            <View>
-              <Text style={[s.headerTitle, tvMode && s.tvHeaderTitle]}>رسوم متحركة</Text>
-              <Text style={[s.headerSub, tvMode && s.tvHeaderSub]}>
-                {type === "movie" ? "أفلام أنيميشن عالمية" : "مسلسلات كرتون عالمية"}
-              </Text>
-            </View>
-          </View>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="رجوع"
+              onPress={() => (router.canGoBack() ? router.back() : router.push("/"))}
+              style={[s.iconBtn, tvMode && s.tvIconBtn]}
+            >
+              <Ionicons name="arrow-back" size={20} color={colors.textSecondary} style={{ transform: [{ scaleX: -1 }] }} />
+            </Pressable>
           <View style={{ flexDirection: "row", gap: 8 }}>
             <Pressable
               onPress={() => setShowFilters(o => !o)}
@@ -247,14 +247,12 @@ export default function AnimationsScreen() {
               <Ionicons name="search" size={tvMode ? 20 : 18} color={searchOpen ? colors.accent : colors.textSecondary} />
             </Pressable>
           </View>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="رجوع"
-            onPress={() => (router.canGoBack() ? router.back() : router.push("/"))}
-            style={[s.iconBtn, tvMode && s.tvIconBtn]}
-          >
-            <Ionicons name="arrow-back" size={20} color={colors.textSecondary} style={{ transform: [{ scaleX: -1 }] }} />
-          </Pressable>
+            <View style={{ flex: 1 }}>
+              <Text style={[s.headerTitle, tvMode && s.tvHeaderTitle]}>رسوم متحركة</Text>
+              <Text style={[s.headerSub, tvMode && s.tvHeaderSub]}>
+                {type === "movie" ? "أفلام أنيميشن عالمية" : "مسلسلات كرتون عالمية"}
+              </Text>
+            </View>
         </View>
 
         {/* Movie / TV tabs */}
@@ -435,7 +433,7 @@ export default function AnimationsScreen() {
 const createAnimationStyles = (colors: ThemePalette) => StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
   header: { backgroundColor: colors.surface, borderBottomWidth: 1, borderBottomColor: colors.border, paddingHorizontal: 16, paddingTop: 12, paddingBottom: 10 },
-  headerRow: { flexDirection: "row", direction: "ltr", alignItems: "center", justifyContent: "space-between", marginBottom: 12 },
+  headerRow: { flexDirection: "row", direction: "rtl", alignItems: "center", justifyContent: "space-between", marginBottom: 12 },
   headerTitle: { fontSize: 22, fontFamily: "Cairo_800ExtraBold", color: colors.textPrimary },
   tvHeader: { paddingHorizontal: 32, paddingTop: 16, paddingBottom: 12 },
   tvHeaderRow: { marginBottom: 8 },

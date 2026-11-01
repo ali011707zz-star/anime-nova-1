@@ -281,14 +281,14 @@ export default function DubbedWatchScreen() {
       <View style={[styles.container, { backgroundColor: colors.background, paddingTop: topPad }]}>
         <RewardedAdPrompt />
         <View style={styles.header}>
-          <View style={{ flex: 1 }}>
-            <Text style={[styles.headerTitle, { color: colors.textPrimary }]} numberOfLines={1}>{title}</Text>
-            <Text style={[styles.headerSub, { color: colors.textSecondary }]}>{season} · الحلقة {ep}</Text>
-          </View>
           <Pressable onPress={handleBack} focusable={tvMode}
              style={({ focused }) => [styles.backBtn, tvMode && tvFocusStyle(focused)]}>
             <Ionicons name="arrow-back" size={20} color={colors.textSecondary} style={{ transform: [{ scaleX: -1 }] }} />
           </Pressable>
+          <View style={{ flex: 1 }}>
+            <Text style={[styles.headerTitle, { color: colors.textPrimary }]} numberOfLines={1}>{title}</Text>
+            <Text style={[styles.headerSub, { color: colors.textSecondary }]}>{season} · الحلقة {ep}</Text>
+          </View>
         </View>
         <View style={styles.center}>
           <ActivityIndicator color={colors.accent} size="large" />
@@ -304,14 +304,14 @@ export default function DubbedWatchScreen() {
       <View style={[styles.container, { backgroundColor: colors.background, paddingTop: topPad }]}>
         <RewardedAdPrompt />
         <View style={styles.header}>
-          <View style={{ flex: 1 }}>
-            <Text style={[styles.headerTitle, { color: colors.textPrimary }]} numberOfLines={1}>{title}</Text>
-            <Text style={[styles.headerSub, { color: colors.textSecondary }]}>{season} · الحلقة {ep}</Text>
-          </View>
           <Pressable onPress={handleBack} focusable={tvMode}
              style={({ focused }) => [styles.backBtn, tvMode && tvFocusStyle(focused)]}>
             <Ionicons name="arrow-back" size={20} color={colors.textSecondary} style={{ transform: [{ scaleX: -1 }] }} />
           </Pressable>
+          <View style={{ flex: 1 }}>
+            <Text style={[styles.headerTitle, { color: colors.textPrimary }]} numberOfLines={1}>{title}</Text>
+            <Text style={[styles.headerSub, { color: colors.textSecondary }]}>{season} · الحلقة {ep}</Text>
+          </View>
         </View>
         <View style={styles.center}>
           <View style={styles.errorIcon}>
@@ -351,7 +351,7 @@ export default function DubbedWatchScreen() {
 const styles = StyleSheet.create({
   container:   { flex: 1, backgroundColor: "#000" },
   header: {
-    flexDirection: "row", direction: "ltr", alignItems: "center", gap: 12,
+    flexDirection: "row", direction: "rtl", alignItems: "center", gap: 12,
     paddingHorizontal: 16, paddingTop: 12, paddingBottom: 12,
     borderBottomWidth: 1, borderBottomColor: "rgba(255,255,255,0.05)",
   },

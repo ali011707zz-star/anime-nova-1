@@ -221,7 +221,7 @@ const styles = StyleSheet.create({
   center: { flex: 1, alignItems: "center", justifyContent: "center" },
   backButton: {
     position: "absolute",
-    ...(I18nManager.isRTL ? { left: 16 } : { right: 16 }),
+    ...(I18nManager.isRTL ? { right: 16 } : { left: 16 }),
     zIndex: 2,
     width: 42,
     height: 42,

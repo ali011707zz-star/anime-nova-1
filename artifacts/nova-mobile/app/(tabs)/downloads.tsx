@@ -668,19 +668,6 @@ export default function DownloadsScreen() {
           </Pressable>
         )}
         <View style={[s.headerRight, tvMode && s.tvHeaderRight]}>
-          <View style={s.headerInfo}>
-            <Text style={[s.headerTitle, tvMode && s.tvHeaderTitle]} numberOfLines={1}>
-              {selectedGroup?.title ?? "تنزيلاتي"}
-            </Text>
-            <Text style={[s.headerSub, tvMode && s.tvHeaderSub]} numberOfLines={1}>
-              {selectedGroup
-                ? `${selectedGroup.items.length} حلقات محملة · ${formatFileSize(selectedGroup.totalSize)}`
-                : `${downloadGroups.length} أعمال · ${downloads.length} حلقات محملة · ${formatFileSize(totalDownloadedBytes)}`}
-            </Text>
-          </View>
-          <View style={[s.headerIcon, tvMode && s.tvHeaderIcon]}>
-            <Ionicons name="download" size={19} color={colors.buttonText} />
-          </View>
           <Pressable
             onPress={handleHeaderBack}
             focusable={tvMode}
@@ -691,6 +678,19 @@ export default function DownloadsScreen() {
           >
             <Ionicons name="chevron-forward" size={21} color={colors.textPrimary} />
           </Pressable>
+          <View style={[s.headerIcon, tvMode && s.tvHeaderIcon]}>
+            <Ionicons name="download" size={19} color={colors.buttonText} />
+          </View>
+          <View style={s.headerInfo}>
+            <Text style={[s.headerTitle, tvMode && s.tvHeaderTitle]} numberOfLines={1}>
+              {selectedGroup?.title ?? "تنزيلاتي"}
+            </Text>
+            <Text style={[s.headerSub, tvMode && s.tvHeaderSub]} numberOfLines={1}>
+              {selectedGroup
+                ? `${selectedGroup.items.length} حلقات محملة · ${formatFileSize(selectedGroup.totalSize)}`
+                : `${downloadGroups.length} أعمال · ${downloads.length} حلقات محملة · ${formatFileSize(totalDownloadedBytes)}`}
+            </Text>
+          </View>
         </View>
       </View>
 
@@ -876,7 +876,7 @@ const createDownloadStyles = (colors: ThemePalette) => StyleSheet.create({
   },
   headerRight: {
     position: "absolute", top: 6, bottom: 6, left: 112, right: 14,
-    flexDirection: "row", alignItems: "center", gap: 8, direction: "ltr",
+    flexDirection: "row", alignItems: "center", gap: 8, direction: "rtl",
   },
   headerInfo: { flex: 1, minWidth: 0, alignItems: "flex-end", gap: 1 },
   headerIcon: {

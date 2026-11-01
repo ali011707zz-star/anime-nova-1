@@ -92,7 +92,7 @@ export default function StardimaPlayerScreen() {
       minHeight: 56 + (Platform.OS === "web" ? 0 : insets.top),
       paddingTop: Platform.OS === "web" ? 0 : insets.top,
       flexDirection: "row",
-      direction: "ltr",
+      direction: "rtl",
       alignItems: "center",
       gap: 10,
       paddingHorizontal: 12,
@@ -433,6 +433,15 @@ export default function StardimaPlayerScreen() {
   return (
     <View style={styles.screen}>
       <View style={styles.header}>
+        <Pressable
+          onPress={() => router.canGoBack() ? router.back() : router.replace("/(tabs)/browse" as any)}
+          accessibilityRole="button"
+          accessibilityLabel="رجوع"
+          focusable={tvMode}
+          style={({ focused }) => [styles.back, tvMode && focused && tvFocusStyle(true)]}
+        >
+          <Ionicons name="arrow-back" size={21} color={colors.textPrimary} style={{ transform: [{ scaleX: -1 }] }} />
+        </Pressable>
         <View style={{ flex: 1 }}>
           <Text numberOfLines={1} style={[styles.heading, tvMode && { fontSize: 20 }]}>{title}</Text>
           <Text numberOfLines={1} style={[styles.subheading, tvMode && { fontSize: 13 }]}>
@@ -443,15 +452,6 @@ export default function StardimaPlayerScreen() {
             ].filter(Boolean).join(" · ")}
           </Text>
         </View>
-        <Pressable
-          onPress={() => router.canGoBack() ? router.back() : router.replace("/(tabs)/browse" as any)}
-          accessibilityRole="button"
-          accessibilityLabel="رجوع"
-          focusable={tvMode}
-          style={({ focused }) => [styles.back, tvMode && focused && tvFocusStyle(true)]}
-        >
-          <Ionicons name="arrow-back" size={21} color={colors.textPrimary} style={{ transform: [{ scaleX: -1 }] }} />
-        </Pressable>
       </View>
 
       {loading || (directSource?.length && !resumeReady) ? (

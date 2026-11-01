@@ -170,17 +170,6 @@ export default function DubbedScreen() {
       {/* Header */}
       <View style={[styles.header, { borderBottomColor: colors.border }]}>
         <Pressable
-          onPress={() => setSearchOpen(o => !o)}
-          focusable={tvMode}
-          style={({ focused }) => [styles.iconBtn, { backgroundColor: colors.input, borderColor: colors.border }, tvMode && tvFocusStyle(focused)]}
-        >
-          <Ionicons name={searchOpen ? "close" : "search"} size={18} color={colors.textSecondary} />
-        </Pressable>
-        <View style={{ flex: 1 }}>
-          <Text style={[styles.headerTitle, { color: colors.textPrimary }]}>كرتون مدبلج</Text>
-          <Text style={[styles.headerSub, { color: colors.textSecondary }]}>كرتون مدبلج للعربية</Text>
-        </View>
-        <Pressable
           accessibilityRole="button"
           accessibilityLabel="رجوع"
           onPress={() => (router.canGoBack() ? router.back() : router.push("/"))}
@@ -188,6 +177,17 @@ export default function DubbedScreen() {
           style={({ focused }) => [styles.iconBtn, { backgroundColor: colors.input, borderColor: colors.border }, tvMode && tvFocusStyle(focused)]}
         >
           <Ionicons name="arrow-back" size={20} color={colors.textSecondary} style={{ transform: [{ scaleX: -1 }] }} />
+        </Pressable>
+        <View style={{ flex: 1 }}>
+          <Text style={[styles.headerTitle, { color: colors.textPrimary }]}>كرتون مدبلج</Text>
+          <Text style={[styles.headerSub, { color: colors.textSecondary }]}>كرتون مدبلج للعربية</Text>
+        </View>
+        <Pressable
+          onPress={() => setSearchOpen(o => !o)}
+          focusable={tvMode}
+          style={({ focused }) => [styles.iconBtn, { backgroundColor: colors.input, borderColor: colors.border }, tvMode && tvFocusStyle(focused)]}
+        >
+          <Ionicons name={searchOpen ? "close" : "search"} size={18} color={colors.textSecondary} />
         </Pressable>
       </View>
 
@@ -255,7 +255,7 @@ export default function DubbedScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#09090B" },
   header: {
-    flexDirection: "row", direction: "ltr", alignItems: "center", paddingHorizontal: 16,
+    flexDirection: "row", direction: "rtl", alignItems: "center", paddingHorizontal: 16,
     paddingTop: 12, paddingBottom: 12, borderBottomWidth: 1,
     borderBottomColor: "rgba(255,255,255,0.05)",
   },
