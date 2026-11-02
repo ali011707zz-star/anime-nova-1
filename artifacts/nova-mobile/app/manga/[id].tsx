@@ -18,6 +18,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { CatalogMedia } from "@/components/MediaCatalogGrid";
 import { useColors } from "@/hooks/useColors";
 import { anilistQuery } from "@/utils/anilist";
+import { translateMangaGenre } from "@/utils/mangaLocalization";
 import { getBaseUrl } from "@/utils/api";
 import { TvPressable } from "@/utils/tv";
 
@@ -137,27 +138,6 @@ const ANILIST_TO_MANGADEX_ID: Record<number, string> = {
   97852: "a96676e5-8ae2-425e-b549-7f15dd34a6d8",  // Komi Can't Communicate
   74347: "d8a959f7-648e-4c8d-8f23-f1f3f8e129f3",  // One Punch Man
   53390: "304ceac3-8cdb-4fe7-acf7-2b6ff7a60613",  // Attack on Titan
-};
-
-const GENRE_AR_MAP: Record<string, string> = {
-  Action: "أكشن",
-  Adventure: "مغامرة",
-  Comedy: "كوميديا",
-  Drama: "دراما",
-  Fantasy: "فانتازيا",
-  Horror: "رعب",
-  Mystery: "غموض",
-  Psychological: "نفسي",
-  Romance: "رومانسي",
-  "Sci-Fi": "خيال علمي",
-  "Slice of Life": "حياة يومية",
-  Sports: "رياضة",
-  Supernatural: "خوارق",
-  Thriller: "إثارة",
-  Mecha: "ميكا",
-  Music: "موسيقى",
-  Ecchi: "إيتشي",
-  Mahou Shoujo: "فتيات سحريات",
 };
 
 const CURATED_ARABIC_SYNOPSES: Record<number, string> = {
@@ -737,7 +717,7 @@ export default function MangaDetailScreen() {
                         {manga.genres.slice(0, 3).map((g) => (
                           <View key={g} style={[styles.genreChip, { backgroundColor: colors.surface, borderColor: colors.border }]}>
                             <Text style={[styles.genreChipText, { color: colors.textSecondary }]}>
-                              {GENRE_AR_MAP[g] || g}
+                              {translateMangaGenre(g)}
                             </Text>
                           </View>
                         ))}

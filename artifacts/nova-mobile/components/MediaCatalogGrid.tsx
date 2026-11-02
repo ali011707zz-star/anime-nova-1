@@ -12,6 +12,7 @@ import {
 } from "react-native";
 import { useRouter } from "expo-router";
 import { anilistQuery } from "@/utils/anilist";
+import { translateMangaGenre } from "@/utils/mangaLocalization";
 import { useColors } from "@/hooks/useColors";
 import { isTvDevice, tvFocusStyle, TvPressable as Pressable } from "@/utils/tv";
 
@@ -411,6 +412,9 @@ export function MediaCatalogGrid({
     const cardSubtitle = variant === "manga"
       ? (arTitle ? enTitle : mangaOriginLabel(item.countryOfOrigin))
       : formatLabel(item.format);
+    const mangaGenres = mediaType === "MANGA"
+      ? (item.genres || []).slice(0, 2).map(translateMangaGenre)
+      : [];
 
     return (
       <Pressable
@@ -476,6 +480,11 @@ export function MediaCatalogGrid({
         <Text style={[styles.cardSubtitle, { color: colors.textMuted }]} numberOfLines={1}>
           {cardSubtitle}
         </Text>
+        {mangaGenres.length > 0 && (
+          <Text style={[styles.cardGenres, { color: colors.textMuted }]} numberOfLines={1}>
+            {mangaGenres.join(" · ")}
+          </Text>
+        )}
       </Pressable>
     );
   };
@@ -543,6 +552,7 @@ const styles = StyleSheet.create({
   statusBadgeText: { color: "#fff", fontSize: 9, fontFamily: "Cairo_700Bold" },
   cardTitle: { fontSize: 13, lineHeight: 19, marginTop: 6, fontFamily: "Cairo_700Bold", textAlign: "left" },
   cardSubtitle: { fontSize: 11, lineHeight: 16, marginTop: 2, fontFamily: "Cairo_400Regular", textAlign: "right" },
+  cardGenres: { fontSize: 10, lineHeight: 15, marginTop: 1, fontFamily: "Cairo_400Regular", textAlign: "right" },
   message: { minHeight: 220, alignItems: "center", justifyContent: "center", gap: 10, padding: 20 },
   messageText: { fontSize: 13, fontFamily: "Cairo_600SemiBold", textAlign: "center" },
   retryButton: { borderWidth: 1, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 8, marginTop: 4 },
