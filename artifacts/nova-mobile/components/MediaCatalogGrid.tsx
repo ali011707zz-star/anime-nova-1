@@ -48,32 +48,55 @@ type Props = {
   countryOfOrigin?: string;
   sort?: string;
   emptyText?: string;
+  search?: string;
 };
 
-const MEDIA_CATALOG_QUERY = `
-query NovaMediaCatalog(
-  $page: Int!
-  $type: MediaType!
-  $status: MediaStatus
-  $format: MediaFormat
-  $season: MediaSeason
-  $seasonYear: Int
-  $countryOfOrigin: CountryCode
-  $sort: [MediaSort!]
-) {
+function buildMediaCatalogQuery(params: {
+  status?: string;
+  format?: string;
+  season?: string;
+  seasonYear?: number;
+  countryOfOrigin?: string;
+  search?: string;
+}) {
+  const varDefs: string[] = ["$page: Int!", "$type: MediaType!", "$sort: [MediaSort!]"];
+  const filterArgs: string[] = [
+    "type: $type",
+    "isAdult: false",
+    'genre_not_in: ["Hentai"]',
+    "sort: $sort",
+  ];
+
+  if (params.search) {
+    varDefs.push("$search: String");
+    filterArgs.push("search: $search");
+  }
+  if (params.status) {
+    varDefs.push("$status: MediaStatus");
+    filterArgs.push("status: $status");
+  }
+  if (params.format) {
+    varDefs.push("$format: MediaFormat");
+    filterArgs.push("format: $format");
+  }
+  if (params.season) {
+    varDefs.push("$season: MediaSeason");
+    filterArgs.push("season: $season");
+  }
+  if (typeof params.seasonYear === "number") {
+    varDefs.push("$seasonYear: Int");
+    filterArgs.push("seasonYear: $seasonYear");
+  }
+  if (params.countryOfOrigin) {
+    varDefs.push("$countryOfOrigin: CountryCode");
+    filterArgs.push("countryOfOrigin: $countryOfOrigin");
+  }
+
+  return `
+query NovaMediaCatalog(${varDefs.join(", ")}) {
   Page(page: $page, perPage: 30) {
     pageInfo { hasNextPage }
-    media(
-      type: $type
-      isAdult: false
-      genre_not_in: ["Hentai"]
-      status: $status
-      format: $format
-      season: $season
-      seasonYear: $seasonYear
-      countryOfOrigin: $countryOfOrigin
-      sort: $sort
-    ) {
+    media(${filterArgs.join(", ")}) {
       id
       title { romaji english native }
       coverImage { large extraLarge }
@@ -82,6 +105,7 @@ query NovaMediaCatalog(
     }
   }
 }`;
+}
 
 const FORMAT_LABELS: Record<string, string> = {
   TV: "مسلسل",
@@ -124,6 +148,7 @@ export function MediaCatalogGrid({
   countryOfOrigin,
   sort = "POPULARITY_DESC",
   emptyText = "لا توجد عناوين في هذا القسم حالياً",
+  search,
 }: Props) {
   const colors = useColors();
   const router = useRouter();
@@ -157,22 +182,30 @@ export function MediaCatalogGrid({
     }
 
     try {
+      const query = buildMediaCatalogQuery({
+        status,
+        format,
+        season,
+        seasonYear,
+        countryOfOrigin,
+        search,
+      });
+
+      const variables: Record<string, unknown> = {
+        page: requestedPage,
+        type: mediaType,
+        sort: [sort],
+      };
+      if (search) variables.search = search;
+      if (status) variables.status = status;
+      if (format) variables.format = format;
+      if (season) variables.season = season;
+      if (typeof seasonYear === "number") variables.seasonYear = seasonYear;
+      if (countryOfOrigin) variables.countryOfOrigin = countryOfOrigin;
+
       const data = await anilistQuery<{
         Page?: { pageInfo?: { hasNextPage?: boolean }; media?: CatalogMedia[] };
-      }>(
-        MEDIA_CATALOG_QUERY,
-        {
-          page: requestedPage,
-          type: mediaType,
-          status: status || null,
-          format: format || null,
-          season: season || null,
-          seasonYear: seasonYear ?? null,
-          countryOfOrigin: countryOfOrigin || null,
-          sort: [sort],
-        },
-        { signal: controller.signal, timeoutMs: 25_000 },
-      );
+      }>(query, variables, { signal: controller.signal, timeoutMs: 25_000 });
       if (sequence !== requestSequence.current || controller.signal.aborted) return;
 
       const nextItems = data?.Page?.media || [];
@@ -194,7 +227,7 @@ export function MediaCatalogGrid({
         setLoadingMore(false);
       }
     }
-  }, [countryOfOrigin, format, mediaType, season, seasonYear, sort, status]);
+  }, [countryOfOrigin, format, mediaType, search, season, seasonYear, sort, status]);
 
   useEffect(() => {
     setItems([]);

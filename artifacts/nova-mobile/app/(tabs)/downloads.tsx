@@ -655,19 +655,8 @@ export default function DownloadsScreen() {
 
     <View style={[s.screen, { paddingTop: topPad }]}>
       <View style={[s.header, tvMode && s.tvHeader]}>
-        {hasCompleted && !selectedGroup && (
-          <Pressable
-            onPress={handleClearAll}
-            focusable={tvMode}
-            style={({ focused }) => [s.clearBtn, tvMode && s.tvClearBtn, tvMode && tvFocusStyle(focused)]}
-            accessibilityRole="button"
-            accessibilityLabel="حذف جميع التنزيلات المكتملة"
-          >
-            <Ionicons name="trash-outline" size={14} color={colors.destructive} />
-            <Text style={s.clearBtnText}>حذف الكل</Text>
-          </Pressable>
-        )}
-        <View style={[s.headerRight, tvMode && s.tvHeaderRight]}>
+        {/* Right Section: Back Button (Far Right) + Download Icon + Title */}
+        <View style={[s.headerRightSection, tvMode && s.tvHeaderRight]}>
           <Pressable
             onPress={handleHeaderBack}
             focusable={tvMode}
@@ -676,7 +665,7 @@ export default function DownloadsScreen() {
             accessibilityLabel={selectedGroup ? "العودة إلى التنزيلات" : "رجوع"}
             testID="downloads-back"
           >
-            <Ionicons name="chevron-forward" size={21} color={colors.textPrimary} />
+            <Ionicons name="chevron-forward" size={22} color={colors.textPrimary} />
           </Pressable>
           <View style={[s.headerIcon, tvMode && s.tvHeaderIcon]}>
             <Ionicons name="download" size={19} color={colors.buttonText} />
@@ -692,6 +681,20 @@ export default function DownloadsScreen() {
             </Text>
           </View>
         </View>
+
+        {/* Left Section: Clear All Button */}
+        {hasCompleted && !selectedGroup && (
+          <Pressable
+            onPress={handleClearAll}
+            focusable={tvMode}
+            style={({ focused }) => [s.clearBtn, tvMode && s.tvClearBtn, tvMode && tvFocusStyle(focused)]}
+            accessibilityRole="button"
+            accessibilityLabel="حذف جميع التنزيلات المكتملة"
+          >
+            <Ionicons name="trash-outline" size={14} color={colors.destructive} />
+            <Text style={s.clearBtnText}>حذف الكل</Text>
+          </Pressable>
+        )}
       </View>
 
       <ScrollView
@@ -871,30 +874,38 @@ const createDownloadStyles = (colors: ThemePalette) => StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.background },
 
   header: {
-    height: 64, justifyContent: "center", position: "relative",
-    backgroundColor: colors.surface, borderBottomWidth: 1, borderBottomColor: colors.border,
+    height: 68,
+    flexDirection: I18nManager.isRTL ? "row" : "row-reverse",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 16,
+    backgroundColor: colors.surface,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
   },
-  headerRight: {
-    position: "absolute", top: 6, bottom: 6, left: 112, right: 14,
-    flexDirection: "row", alignItems: "center", gap: 8, direction: "rtl",
+  headerRightSection: {
+    flexDirection: I18nManager.isRTL ? "row" : "row-reverse",
+    alignItems: "center",
+    gap: 12,
+    flex: 1,
   },
-  headerInfo: { flex: 1, minWidth: 0, alignItems: "flex-end", gap: 1 },
+  headerInfo: { flex: 1, minWidth: 0, alignItems: "flex-end", gap: 2 },
   headerIcon: {
-    width: 42, height: 42, borderRadius: 14,
+    width: 40, height: 40, borderRadius: 13,
     backgroundColor: colors.accent, borderWidth: 1,
     borderColor: colors.accentBorder, alignItems: "center", justifyContent: "center",
   },
   headerBack: {
-    width: 42, height: 42, borderRadius: 14, backgroundColor: colors.surfaceElevated,
+    width: 40, height: 40, borderRadius: 13, backgroundColor: colors.surfaceElevated,
     borderWidth: 1, borderColor: colors.border, alignItems: "center", justifyContent: "center",
   },
-  headerTitle: { maxWidth: "100%", fontSize: 15, lineHeight: 21, fontFamily: "Cairo_800ExtraBold", color: colors.textPrimary, textAlign: "right" },
-  headerSub:   { maxWidth: "100%", fontSize: 9, lineHeight: 14, fontFamily: "Cairo_400Regular", color: colors.textMuted, textAlign: "right" },
+  headerTitle: { maxWidth: "100%", fontSize: 16, lineHeight: 22, fontFamily: "Cairo_800ExtraBold", color: colors.textPrimary, textAlign: "right" },
+  headerSub:   { maxWidth: "100%", fontSize: 10, lineHeight: 15, fontFamily: "Cairo_400Regular", color: colors.textMuted, textAlign: "right" },
 
   clearBtn: {
-    position: "absolute", left: 14, top: 15,
-    flexDirection: "row", alignItems: "center", gap: 5,
-    paddingHorizontal: 11, paddingVertical: 8, borderRadius: 12,
+    flexDirection: I18nManager.isRTL ? "row" : "row-reverse",
+    alignItems: "center", gap: 5,
+    paddingHorizontal: 12, paddingVertical: 8, borderRadius: 12,
     backgroundColor: colors.destructiveSurface, borderWidth: 1,
     borderColor: colors.destructiveBorder,
   },

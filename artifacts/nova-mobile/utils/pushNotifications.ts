@@ -60,9 +60,11 @@ async function registerPushNotificationsOnce(forceTokenRefresh = false): Promise
     if (Platform.OS === "android") {
       await Notifications.setNotificationChannelAsync(CHANNEL_ID, {
         name: "حلقات جديدة",
-        importance: Notifications.AndroidImportance.HIGH,
+        importance: Notifications.AndroidImportance.MAX,
+        lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
+        enableVibrate: true,
         sound: "default",
-        vibrationPattern: [0, 200, 100, 200],
+        vibrationPattern: [0, 250, 120, 250],
         showBadge: true,
       });
     }

@@ -204,6 +204,25 @@ query UpcomingAnime {
   }
 }`;
 
+export const SEASONAL_QUERY = `
+query SeasonalAnime($season: MediaSeason, $year: Int) {
+  Page(page: 1, perPage: 20) {
+    media(season: $season, seasonYear: $year, type: ANIME, sort: POPULARITY_DESC) {
+      id title { romaji english } coverImage { large extraLarge } averageScore episodes status format
+    }
+  }
+}`;
+
+export function getCurrentSeason() {
+  const month = new Date().getMonth();
+  const year = new Date().getFullYear();
+  let season: "WINTER" | "SPRING" | "SUMMER" | "FALL" = "WINTER";
+  if (month >= 2 && month <= 4) season = "SPRING";
+  else if (month >= 5 && month <= 7) season = "SUMMER";
+  else if (month >= 8 && month <= 10) season = "FALL";
+  return { season, year };
+}
+
 export const TODAY_EPISODES_QUERY = `
 query TodayEpisodes($gt: Int!, $lt: Int!) {
   Page(page: 1, perPage: 20) {

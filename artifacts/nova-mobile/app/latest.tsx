@@ -23,7 +23,7 @@ import { fetchLatestEpisodes, type LatestEpisodeItem } from "@/utils/latestEpiso
 import { getPosterUri, getTvPosterUri } from "@/utils/media";
 import { isTvDevice, tvFocusStyle, TvPressable as Pressable } from "@/utils/tv";
 
-const CACHE_KEY = "nova-latest-episodes-v3";
+const CACHE_KEY = "nova-latest-episodes";
 const ROW_RTL = I18nManager.isRTL ? "row" : "row-reverse";
 const RATING_QUERY = `
   query LatestEpisodeRatings($ids: [Int]) {
@@ -80,8 +80,6 @@ function watchRoute(item: LatestEpisodeItem): string {
     `&anilistId=${encodeURIComponent(String(item.anilistId || item.animeId || 0))}` +
     `&anslayerId=${encodeURIComponent(String(item.anslayerId || ""))}` +
     `&awAnimeId=${encodeURIComponent(String(item.awAnimeId || ""))}` +
-    `&anifoxId=${encodeURIComponent(String(item.anifoxId || ""))}` +
-    `&season=${encodeURIComponent(String(item.season || 1))}` +
     `&ep=${encodeURIComponent(String(item.episode))}` +
     `&totalEps=${encodeURIComponent(String(item.episode))}` +
     `&title=${encodeURIComponent(item.romaji || item.name || "")}` +
@@ -173,8 +171,8 @@ export default function LatestEpisodesScreen() {
   ];
 
   return (
-    <View style={[styles.container, { backgroundColor: colors.background }]}>
-      <View style={[styles.header, { paddingTop: topPad + 10 }]}>
+    <View style={[styles.container, { backgroundColor: "#07090e" }]}>
+      <View style={[styles.header, { paddingTop: topPad + 8 }]}>
         <View style={styles.headerRow}>
           <View style={styles.heading}>
             <Pressable
@@ -182,14 +180,19 @@ export default function LatestEpisodesScreen() {
               accessibilityLabel="رجوع"
               onPress={() => router.canGoBack() ? router.back() : router.replace("/(tabs)" as any)}
               focusable={tvMode}
-              style={({ focused }) => [styles.iconButton, { backgroundColor: colors.card, borderColor: colors.border }, tvMode && tvFocusStyle(focused)]}
+              style={({ focused }) => [styles.iconButton, tvMode && tvFocusStyle(focused)]}
             >
-              <Ionicons name="chevron-forward" size={20} color={colors.text} />
+              <Ionicons name="chevron-forward" size={20} color="#f8fafc" />
             </Pressable>
             <View style={styles.headingText}>
-              <Text style={[styles.title, { color: colors.text }]}>أحدث الحلقات</Text>
-              <Text style={[styles.subtitle, { color: colors.mutedForeground }]}>
-                جميع الحلقات الجديدة المترجمة بجودة فائقة
+              <View style={styles.titleRow}>
+                <Text style={styles.title}>أحدث الحلقات</Text>
+                <View style={styles.liveBadge}>
+                  <Text style={styles.liveBadgeText}>تحديث مباشر</Text>
+                </View>
+              </View>
+              <Text style={styles.subtitle} numberOfLines={1}>
+                جميع الحلقات الجديدة المضافة مترجمة بجودة فائقة
               </Text>
             </View>
           </View>
@@ -199,24 +202,24 @@ export default function LatestEpisodesScreen() {
               accessibilityLabel="البحث"
               onPress={() => router.push("/(tabs)/search" as any)}
               focusable={tvMode}
-              style={({ focused }) => [styles.iconButton, { backgroundColor: colors.card, borderColor: colors.border }, tvMode && tvFocusStyle(focused)]}
+              style={({ focused }) => [styles.iconButton, tvMode && tvFocusStyle(focused)]}
             >
-              <Ionicons name="search" size={19} color={colors.text} />
+              <Ionicons name="search" size={19} color="#f8fafc" />
             </Pressable>
             <Pressable
               accessibilityRole="button"
               accessibilityLabel="فتح القائمة"
               onPress={() => setShowDrawer(true)}
               focusable={tvMode}
-              style={({ focused }) => [styles.iconButton, { backgroundColor: colors.card, borderColor: colors.border }, tvMode && tvFocusStyle(focused)]}
+              style={({ focused }) => [styles.iconButton, tvMode && tvFocusStyle(focused)]}
             >
-              <Ionicons name="menu" size={21} color={colors.text} />
+              <Ionicons name="menu" size={21} color="#f8fafc" />
             </Pressable>
           </View>
         </View>
       </View>
 
-      <View style={[styles.filters, { borderBottomColor: colors.border }]}>
+      <View style={styles.filters}>
         {filters.map((option) => {
           const active = filter === option.id;
           return (
@@ -229,13 +232,13 @@ export default function LatestEpisodesScreen() {
               style={({ focused }) => [
                 styles.filterButton,
                 {
-                  backgroundColor: active ? colors.primary : colors.card,
-                  borderColor: active ? colors.primary : colors.border,
+                  backgroundColor: active ? "#0284c7" : "#0f172a",
+                  borderColor: active ? "#0284c7" : "rgba(255,255,255,0.12)",
                 },
                 tvMode && tvFocusStyle(focused),
               ]}
             >
-              <Text style={[styles.filterText, { color: active ? "#fff" : colors.text }]}>
+              <Text style={[styles.filterText, { color: active ? "#ffffff" : "#cbd5e1" }]}>
                 {option.label}
               </Text>
             </Pressable>
@@ -245,14 +248,14 @@ export default function LatestEpisodesScreen() {
 
       {loading && items.length === 0 ? (
         <View style={styles.center}>
-          <ActivityIndicator color={colors.primary} size="large" />
+          <ActivityIndicator color="#0284c7" size="large" />
           <Text style={[styles.statusText, { color: colors.mutedForeground }]}>جارٍ تحميل الحلقات…</Text>
         </View>
       ) : error && items.length === 0 ? (
         <View style={styles.center}>
           <Ionicons name="cloud-offline-outline" size={36} color={colors.mutedForeground} />
           <Text style={[styles.statusText, { color: colors.mutedForeground }]}>{error}</Text>
-          <Pressable onPress={() => void load(true)} style={[styles.retryButton, { backgroundColor: colors.primary }]}>
+          <Pressable onPress={() => void load(true)} style={[styles.retryButton, { backgroundColor: "#0284c7" }]}>
             <Text style={styles.retryText}>إعادة المحاولة</Text>
           </Pressable>
         </View>
@@ -269,8 +272,8 @@ export default function LatestEpisodesScreen() {
             <RefreshControl
               refreshing={refreshing}
               onRefresh={() => void load(true)}
-              tintColor={colors.primary}
-              colors={[colors.primary]}
+              tintColor="#0284c7"
+              colors={["#0284c7"]}
             />
           }
           renderItem={({ item }) => (
@@ -279,52 +282,52 @@ export default function LatestEpisodesScreen() {
               accessibilityLabel={`مشاهدة ${item.name} الحلقة ${item.episode}`}
               onPress={() => router.push(watchRoute(item) as any)}
               focusable={tvMode}
-              style={({ focused }) => [
+              style={({ focused, pressed }) => [
                 styles.episodeCard,
-                {
-                  width: cardWidth,
-                  backgroundColor: colors.card,
-                  borderColor: colors.border,
-                },
+                { width: cardWidth, opacity: pressed ? 0.8 : 1 },
                 tvMode && tvFocusStyle(focused),
               ]}
             >
-              {item.cover ? (
-                <Image
-                  source={{
-                    uri: tvMode
-                      ? getTvPosterUri(item, item.animeId ? `https://img.anili.st/media/${item.animeId}` : "")
-                      : getPosterUri(item, item.animeId ? `https://img.anili.st/media/${item.animeId}` : ""),
-                  }}
-                  style={[styles.poster, { height: cardWidth * 1.43 }]}
-                  resizeMode="cover"
+              <View style={[styles.posterBox, { height: Math.round(cardWidth * 1.48) }]}>
+                {item.cover ? (
+                  <Image
+                    source={{
+                      uri: tvMode
+                        ? getTvPosterUri(item, item.animeId ? `https://img.anili.st/media/${item.animeId}` : "")
+                        : getPosterUri(item, item.animeId ? `https://img.anili.st/media/${item.animeId}` : ""),
+                    }}
+                    style={styles.poster}
+                    resizeMode="cover"
+                  />
+                ) : (
+                  <View style={[styles.poster, { backgroundColor: "#0f172a", alignItems: "center", justifyContent: "center" }]}>
+                    <Ionicons name="tv-outline" size={28} color={colors.mutedForeground} />
+                  </View>
+                )}
+                <LinearGradient
+                  colors={["transparent", "rgba(0,0,0,0.85)"]}
+                  style={styles.posterGradient}
                 />
-              ) : (
-                <View style={[styles.poster, { height: cardWidth * 1.43, backgroundColor: colors.surfaceElevated, alignItems: "center", justifyContent: "center" }]}>
-                  <Ionicons name="tv-outline" size={28} color={colors.mutedForeground} />
+                <View style={styles.episodeBadge}>
+                  <Text style={styles.episodeBadgeText}>حلقة {item.episode}</Text>
                 </View>
-              )}
-              <LinearGradient
-                colors={["transparent", "rgba(0,0,0,0.9)"]}
-                style={[styles.posterGradient, { height: cardWidth * 1.43 }]}
-              />
-              <View style={styles.episodeBadge}>
-                <Text style={styles.episodeBadgeText}>حلقة {item.episode}</Text>
+                {item.averageScore != null && filter === "top" && (
+                  <View style={styles.scoreBadge}>
+                    <Ionicons name="star" size={10} color="#fde047" />
+                    <Text style={styles.scoreText}>{(item.averageScore / 10).toFixed(1)}</Text>
+                  </View>
+                )}
+                <Text style={styles.updatedLabel} numberOfLines={1}>
+                  {timeAgo(item.updatedAt)}
+                </Text>
               </View>
-              {item.averageScore != null && (
-                <View style={styles.scoreBadge}>
-                  <Ionicons name="star" size={10} color="#fde047" />
-                  <Text style={styles.scoreText}>{(item.averageScore / 10).toFixed(1)}</Text>
-                </View>
-              )}
-              <Text style={styles.updatedLabel}>{timeAgo(item.updatedAt)}</Text>
               <View style={styles.cardTitles}>
                 <Text style={styles.cardArabicTitle} numberOfLines={1}>
                   {item.titleAr || item.name}
                 </Text>
-                {!!item.english && (
-                  <Text style={styles.cardEnglishTitle} numberOfLines={1}>{item.english}</Text>
-                )}
+                <Text style={styles.cardEnglishTitle} numberOfLines={1}>
+                  {item.english || item.romaji || item.name}
+                </Text>
               </View>
             </Pressable>
           )}
@@ -340,13 +343,6 @@ export default function LatestEpisodesScreen() {
               </Text>
             </View>
           }
-          ListHeaderComponent={
-            <View style={styles.listHeading}>
-              <Text style={[styles.listCount, { color: colors.mutedForeground }]}>
-                نتائج الحلقات ({visibleItems.length})
-              </Text>
-            </View>
-          }
         />
       )}
 
@@ -357,32 +353,104 @@ export default function LatestEpisodesScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  header: { paddingHorizontal: 16, paddingBottom: 14 },
-  headerRow: { flexDirection: ROW_RTL, alignItems: "center", gap: 10 },
-  headerActions: { flexDirection: ROW_RTL, gap: 8 },
-  heading: { flex: 1, flexDirection: ROW_RTL, alignItems: "center", gap: 10 },
-  headingText: { flex: 1, alignItems: "flex-end" },
-  title: { fontSize: 20, fontFamily: "Cairo_800ExtraBold", textAlign: "right" },
-  subtitle: { fontSize: 11, fontFamily: "Cairo_400Regular", marginTop: 2, textAlign: "right" },
-  iconButton: { width: 42, height: 42, borderRadius: 13, borderWidth: 1, alignItems: "center", justifyContent: "center" },
-  filters: { flexDirection: "row", direction: "rtl", alignItems: "center", gap: 8, paddingHorizontal: 16, paddingBottom: 12, borderBottomWidth: 1 },
-  filterButton: { paddingHorizontal: 14, paddingVertical: 8, borderWidth: 1, borderRadius: 22, minHeight: 38, alignItems: "center", justifyContent: "center" },
+  header: { paddingHorizontal: 14, paddingBottom: 10 },
+  headerRow: { flexDirection: ROW_RTL, alignItems: "flex-start", justifyContent: "space-between", gap: 8 },
+  headerActions: { flexDirection: "row", direction: "ltr", gap: 8, paddingTop: 2 },
+  heading: { flex: 1, flexDirection: ROW_RTL, alignItems: "flex-start", gap: 10 },
+  headingText: { flex: 1, alignItems: I18nManager.isRTL ? "flex-start" : "flex-end" },
+  titleRow: { flexDirection: ROW_RTL, alignItems: "center", gap: 8, flexWrap: "wrap" },
+  title: { color: "#f8fafc", fontSize: 21, fontFamily: "Cairo_800ExtraBold", textAlign: "right", lineHeight: 28 },
+  liveBadge: {
+    paddingHorizontal: 10,
+    paddingVertical: 2,
+    borderRadius: 999,
+    backgroundColor: "rgba(2, 132, 199, 0.25)",
+    borderWidth: 1,
+    borderColor: "#0284c7",
+  },
+  liveBadgeText: { color: "#38bdf8", fontSize: 10, fontFamily: "Cairo_700Bold" },
+  subtitle: { color: "#64748b", fontSize: 11, fontFamily: "Cairo_600SemiBold", marginTop: 2, textAlign: "right" },
+  iconButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.1)",
+    backgroundColor: "#0f172a",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  filters: {
+    flexDirection: ROW_RTL,
+    alignItems: "center",
+    gap: 8,
+    paddingHorizontal: 14,
+    paddingBottom: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: "rgba(255,255,255,0.07)",
+  },
+  filterButton: {
+    paddingHorizontal: 16,
+    paddingVertical: 6,
+    borderWidth: 1,
+    borderRadius: 999,
+    minHeight: 36,
+    alignItems: "center",
+    justifyContent: "center",
+  },
   filterText: { fontSize: 12, fontFamily: "Cairo_700Bold" },
-  grid: { paddingHorizontal: 16, paddingBottom: 40 },
-  gridRow: { justifyContent: "space-between", gap: 10, marginBottom: 14 },
-  episodeCard: { borderRadius: 16, overflow: "hidden", borderWidth: 1, position: "relative" },
-  poster: { width: "100%" },
-  posterGradient: { position: "absolute", top: 0, left: 0, right: 0 },
-  episodeBadge: { position: "absolute", top: 9, right: 8, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 12, backgroundColor: "#0997d6" },
-  episodeBadgeText: { color: "#fff", fontSize: 9, fontFamily: "Cairo_700Bold" },
-  scoreBadge: { position: "absolute", top: 9, left: 8, flexDirection: "row", alignItems: "center", gap: 3, paddingHorizontal: 6, paddingVertical: 3, borderRadius: 10, backgroundColor: "rgba(0,0,0,0.68)" },
+  grid: { paddingHorizontal: 14, paddingTop: 14, paddingBottom: 40 },
+  gridRow: { justifyContent: "space-between", gap: 10, marginBottom: 16 },
+  episodeCard: { flexDirection: "column" },
+  posterBox: {
+    width: "100%",
+    borderRadius: 16,
+    overflow: "hidden",
+    backgroundColor: "#0f172a",
+    position: "relative",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.08)",
+  },
+  poster: { width: "100%", height: "100%" },
+  posterGradient: { position: "absolute", left: 0, right: 0, bottom: 0, height: 64 },
+  episodeBadge: {
+    position: "absolute",
+    top: 8,
+    right: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 3,
+    borderRadius: 999,
+    backgroundColor: "#0284c7",
+  },
+  episodeBadgeText: { color: "#ffffff", fontSize: 10, fontFamily: "Cairo_700Bold" },
+  scoreBadge: {
+    position: "absolute",
+    top: 8,
+    left: 8,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 3,
+    paddingHorizontal: 6,
+    paddingVertical: 3,
+    borderRadius: 10,
+    backgroundColor: "rgba(0,0,0,0.68)",
+  },
   scoreText: { color: "#fff", fontSize: 9, fontFamily: "Cairo_700Bold" },
-  updatedLabel: { position: "absolute", right: 8, bottom: 40, color: "#fff", fontSize: 8, fontFamily: "Cairo_700Bold", textShadowColor: "#000", textShadowRadius: 4 },
-  cardTitles: { paddingHorizontal: 5, paddingVertical: 6, minHeight: 40, alignItems: "flex-end" },
-  cardArabicTitle: { color: "#f8fafc", fontSize: 10, fontFamily: "Cairo_700Bold", textAlign: "right", width: "100%" },
-  cardEnglishTitle: { color: "#94a3b8", fontSize: 8, fontFamily: "Cairo_400Regular", textAlign: "right", width: "100%" },
-  listHeading: { paddingVertical: 12, alignItems: "flex-end" },
-  listCount: { fontSize: 12, fontFamily: "Cairo_700Bold" },
+  updatedLabel: {
+    position: "absolute",
+    right: 8,
+    bottom: 7,
+    color: "#e2e8f0",
+    fontSize: 9.5,
+    fontFamily: "Cairo_700Bold",
+    textAlign: "right",
+    textShadowColor: "rgba(0,0,0,0.9)",
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 3,
+  },
+  cardTitles: { paddingTop: 7, paddingHorizontal: 2, alignItems: "flex-end" },
+  cardArabicTitle: { color: "#f8fafc", fontSize: 12, fontFamily: "Cairo_700Bold", textAlign: "right", width: "100%" },
+  cardEnglishTitle: { color: "#64748b", fontSize: 10, fontFamily: "Cairo_600SemiBold", textAlign: "right", width: "100%", marginTop: 1 },
   center: { flex: 1, alignItems: "center", justifyContent: "center", padding: 24, gap: 12 },
   statusText: { fontSize: 13, fontFamily: "Cairo_600SemiBold", textAlign: "center", lineHeight: 22 },
   retryButton: { paddingHorizontal: 18, paddingVertical: 10, borderRadius: 14 },

@@ -318,7 +318,7 @@ export default function ProfileScreen() {
             focusable={tvMode}
             style={({ focused }) => [s.backBtn, tvMode && tvFocusStyle(focused)]}
           >
-            <Ionicons name="chevron-forward" size={20} color="#f8fafc" />
+            <Ionicons name="chevron-back" size={20} color="#f8fafc" style={{ transform: [{ scaleX: -1 }] }} />
           </Pressable>
           <View style={s.headerTitleBox}>
             <Text style={s.headerTitle}>إدارة الحساب</Text>
@@ -603,7 +603,7 @@ export default function ProfileScreen() {
                         <Pressable
                           onPress={() =>
                             router.push(
-                              `/comments?animeId=${c.animeId}&ep=${c.episode}&title=${encodeURIComponent(c.animeTitle)}` as any
+                              `/comments?animeId=${c.animeId}&ep=${c.episode}&title=${encodeURIComponent(c.animeTitle)}&commentId=${c.id}&highlightId=${c.id}` as any
                             )
                           }
                           style={s.openItemBtn}

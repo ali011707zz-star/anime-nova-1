@@ -239,19 +239,6 @@ export default function LibraryScreen() {
 
       {/* ── Header ── */}
       <View style={[s.header, { paddingTop: topPad + 14 }]}>
-        <Pressable
-          onPress={() => router.canGoBack() ? router.back() : router.replace("/(tabs)" as any)}
-          accessibilityRole="button"
-          accessibilityLabel="رجوع"
-          focusable={tvMode}
-          style={({ focused }) => [
-            s.headerBack,
-            { backgroundColor: colors.card, borderColor: colors.border },
-            tvMode && tvFocusStyle(focused),
-          ]}
-        >
-          <Ionicons name="chevron-forward" size={20} color={colors.text} />
-        </Pressable>
         <Text style={[s.title, { color: colors.text }]}>قائمتي</Text>
         {counts[activeTab] > 0 && (
           <View style={[s.countBadge, { backgroundColor: colors.primary + "20" }]}>
@@ -488,12 +475,8 @@ function EmptyState({ icon, title, desc, onBrowse, colors }: {
 
 const s = StyleSheet.create({
   container: { flex: 1 },
-  header: { paddingHorizontal: 16, paddingBottom: 0, flexDirection: "row", direction: "rtl", alignItems: "center", gap: 8 },
-  headerBack: {
-    width: 38, height: 38, borderRadius: 12, borderWidth: 1,
-    alignItems: "center", justifyContent: "center",
-  },
-  title: { flex: 1, fontSize: 24, fontFamily: "Cairo_800ExtraBold", textAlign: "right" },
+  header: { paddingHorizontal: 16, paddingBottom: 0, flexDirection: "row", alignItems: "center", gap: 8 },
+  title: { fontSize: 24, fontFamily: "Cairo_800ExtraBold" },
   countBadge: { borderRadius: 12, paddingHorizontal: 8, paddingVertical: 2 },
   countText: { fontSize: 11, fontFamily: "Cairo_700Bold" },
 

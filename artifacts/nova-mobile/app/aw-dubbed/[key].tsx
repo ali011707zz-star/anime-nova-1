@@ -146,6 +146,8 @@ export default function AwDubbedDetailScreen() {
     <View style={[styles.container, { backgroundColor: colors.background, paddingTop: topPad }]}>
       {/* Header */}
       <View style={[styles.header, { borderBottomColor: colors.border }]}>
+        <View style={{ width: 36 }} />
+        <Text style={[styles.headerTitle, { color: colors.textPrimary }]} numberOfLines={1}>{displayTitle}</Text>
         <Pressable onPress={() => router.canGoBack() ? router.back() : router.replace("/(tabs)" as any)} focusable={tvMode}
            style={({ focused }) => [
              styles.backBtn,
@@ -154,8 +156,6 @@ export default function AwDubbedDetailScreen() {
            ]}>
            <Ionicons name="chevron-forward" size={20} color={colors.textSecondary} />
         </Pressable>
-        <Text style={[styles.headerTitle, { color: colors.textPrimary }]} numberOfLines={1}>{displayTitle}</Text>
-        <View style={{ width: 36 }} />
       </View>
 
       <TvFocusGuideView autoFocus={tvMode} style={styles.tvFocusGuide}>
@@ -257,7 +257,7 @@ export default function AwDubbedDetailScreen() {
 const styles = StyleSheet.create({
   container:       { flex: 1, backgroundColor: "#09090B" },
   tvFocusGuide:    { flex: 1 },
-  header:          { flexDirection: "row", direction: "rtl", alignItems: "center", paddingHorizontal: 12, paddingVertical: 10,
+  header:          { flexDirection: "row", direction: "ltr", alignItems: "center", paddingHorizontal: 12, paddingVertical: 10,
                      borderBottomWidth: 1, borderBottomColor: "rgba(255,255,255,0.05)" },
   backBtn:         { width: 36, height: 36, borderRadius: 10, backgroundColor: "rgba(255,255,255,0.05)",
                      alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: "rgba(255,255,255,0.08)" },

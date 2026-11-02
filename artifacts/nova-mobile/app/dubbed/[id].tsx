@@ -154,6 +154,7 @@ export default function DubbedDetailScreen() {
           : curSeason?.arabicToonsId || "",
         title,
         ep: String(ep.number),
+        totalEps: String(episodes.length || ep.number),
         season: curSeason?.label || "الموسم 1",
         poster: imgSrc || "",
         at: isCarateenEntry ? `${carateenProvider}:${showId}` : at,

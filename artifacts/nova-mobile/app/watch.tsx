@@ -105,6 +105,7 @@ const ARABIC_PLAYBACK_SITES = new Set([
 
 /* Playback and download providers are separate product surfaces. */
 const DOWNLOAD_SOURCE_SITES = new Set([
+  "animedar",     // AD — أنمي فور أب
   "animewitcher", // AW
   "sanime",       // SA
   "anslayer",     // AS
@@ -541,6 +542,7 @@ const STATIC_PICKER: Record<QualityKey, { site: string; name: string; tag: strin
     { site: "megaplay",     name: "MegaPlay",    tag: "MP" },
     { site: "anineko",      name: "AniNeko",      tag: "AN" },
     { site: "animewitcher", name: "AnimeWitcher", tag: "AW" },
+    { site: "animedar",     name: "أنمي فور أب",  tag: "AD" },
     { site: "anslayer",     name: "AnimeSlayer",  tag: "AS" },
     { site: "sanime",       name: "سـAnime",      tag: "SA" },
     { site: "animeify",     name: "أنمي فاي",    tag: "AF" },
@@ -552,6 +554,7 @@ const STATIC_PICKER: Record<QualityKey, { site: string; name: string; tag: strin
     { site: "megaplay",     name: "MegaPlay",    tag: "MP" },
     { site: "anineko",      name: "AniNeko",      tag: "AN" },
     { site: "animewitcher", name: "AnimeWitcher", tag: "AW" },
+    { site: "animedar",     name: "أنمي فور أب",  tag: "AD" },
     { site: "anslayer",     name: "AnimeSlayer",  tag: "AS" },
     { site: "sanime",       name: "سـAnime",      tag: "SA" },
     { site: "animeify",     name: "أنمي فاي",    tag: "AF" },
@@ -563,6 +566,7 @@ const STATIC_PICKER: Record<QualityKey, { site: string; name: string; tag: strin
     { site: "megaplay",     name: "MegaPlay",    tag: "MP" },
     { site: "anineko",      name: "AniNeko",      tag: "AN" },
     { site: "animewitcher", name: "AnimeWitcher", tag: "AW" },
+    { site: "animedar",     name: "أنمي فور أب",  tag: "AD" },
     { site: "animeify",     name: "أنمي فاي",    tag: "AF" },
     { site: "anifox",        name: "ANIFOX",      tag: "FX" },
     { site: "animekai",      name: "AnimeKai",   tag: "AK" },
@@ -572,6 +576,7 @@ const STATIC_PICKER: Record<QualityKey, { site: string; name: string; tag: strin
     { site: "megaplay",     name: "MegaPlay",    tag: "MP" },
     { site: "anineko",      name: "AniNeko",      tag: "AN" },
     { site: "animewitcher", name: "AnimeWitcher", tag: "AW" },
+    { site: "animedar",     name: "أنمي فور أب",  tag: "AD" },
     { site: "animeify",     name: "أنمي فاي",    tag: "AF" },
     { site: "anifox",        name: "ANIFOX",      tag: "FX" },
     { site: "animekai",      name: "AnimeKai",   tag: "AK" },
@@ -840,8 +845,8 @@ function SrcRow({ src, idx, onPlay }: { src: Src; idx: number; onPlay: (s: Src) 
 export default function WatchScreen() {
   const {
     anime, ep, title, english, format, etitle,
-    totalEps: totalEpsParam, year, episodes, native, titleAr, season: seasonParam,
-    titles: titlesParam, anslayerId, anilistId, anifoxId,
+    totalEps: totalEpsParam, year, episodes, native, titleAr,
+    titles: titlesParam, anslayerId, anilistId,
     awAnimeId,
     fromLatest, latestSource: latestSourceParam,
     mode, awSeries: awSeriesParam, awSeasonLabel: awSeasonLabelParam,
@@ -849,10 +854,9 @@ export default function WatchScreen() {
   } = useLocalSearchParams<{
     anime: string; ep: string; title: string; english: string;
     format?: string; etitle?: string; totalEps?: string;
-    year?: string; episodes?: string; native?: string; titleAr?: string; season?: string;
+    year?: string; episodes?: string; native?: string; titleAr?: string;
     titles?: string;
     anslayerId?: string; anilistId?: string;
-    anifoxId?: string;
     awAnimeId?: string;
     fromLatest?: string; latestSource?: string;
     mode?: string; awSeries?: string; awSeasonLabel?: string;
@@ -1032,12 +1036,10 @@ export default function WatchScreen() {
     englishStr,
     format || "",
     year,
-  )}|season:${seasonParam || "1"}|latest:${isFromLatest ? latestSource || "unknown" : "no"}${
+  )}|latest:${isFromLatest ? latestSource || "unknown" : "no"}${
     isFromLatest && latestSource === "animewitcher" ? `|aw:${awAnimeId || "unknown"}` : ""
-  }${
-    isFromLatest && latestSource === "anifox" ? `|fx:${anifoxId || "unknown"}` : ""
   }`;
-  const [watchUnlocked, setWatchUnlocked] = useState(false);
+  const [watchUnlocked, setWatchUnlocked] = useState(true);
   /* Only the pressed server row is waiting for the ad decision. A single
      boolean here made every server button show a spinner at once. */
   const [watchAdSite, setWatchAdSite] = useState<string | null>(null);
@@ -1297,7 +1299,7 @@ export default function WatchScreen() {
     const forceFresh = forceAvailabilityRefreshRef.current;
     forceAvailabilityRefreshRef.current = false;
     const cachedHints = forceFresh || (
-      isFromLatest && (latestSource === "anslayer" || latestSource === "animewitcher" || latestSource === "anifox")
+      isFromLatest && (latestSource === "anslayer" || latestSource === "animewitcher")
     )
       ? null
       : readAvailabilityHintRows(availabilityHintKey);
@@ -1341,12 +1343,10 @@ export default function WatchScreen() {
     if (format) params.set("format", format);
     if (year) params.set("year", year);
     if (episodes) params.set("episodes", episodes);
-    if (seasonParam) params.set("season", seasonParam);
     if (native) params.set("native", native);
     if (titleArStr) params.set("titleAr", titleArStr);
     if (anslayerId) params.set("anslayerId", anslayerId);
     if (awAnimeId) params.set("awAnimeId", awAnimeId);
-    if (anifoxId) params.set("anifoxId", anifoxId);
     if (isFromLatest && latestSource) {
       params.set("fromLatest", "1");
       params.set("latestSource", latestSource);
@@ -1544,7 +1544,7 @@ export default function WatchScreen() {
       controller.abort();
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isAwDubbed, anime, anilistId, sourceAnimeId, epNum, titleStr, englishStr, titleArStr, format, year, episodes, native, seasonParam, anslayerId, awAnimeId, anifoxId, isFromLatest, latestSource, availabilityAttempt, availabilityHintKey, playbackTraceId]);
+  }, [isAwDubbed, anime, anilistId, sourceAnimeId, epNum, titleStr, englishStr, titleArStr, format, year, episodes, native, anslayerId, awAnimeId, isFromLatest, latestSource, availabilityAttempt, availabilityHintKey, playbackTraceId]);
 
   /* ── Progress save ── */
   const saveProgress = useCallback(async () => {
@@ -1664,7 +1664,6 @@ export default function WatchScreen() {
     const arParam    = titleArStr ? `&titleAr=${encodeURIComponent(titleArStr)}` : "";
     const anslayerParam = anslayerId ? `&anslayerId=${encodeURIComponent(anslayerId)}` : "";
     const awAnimeParam = awAnimeId ? `&awAnimeId=${encodeURIComponent(awAnimeId)}` : "";
-    const anifoxParam = anifoxId ? `&anifoxId=${encodeURIComponent(anifoxId)}` : "";
     const latestParams = isFromLatest && latestSource
       ? `&fromLatest=1&latestSource=${encodeURIComponent(latestSource)}`
       : "";
@@ -1678,14 +1677,13 @@ export default function WatchScreen() {
     const anilistParam = sourceAnimeId
       ? `&anilistId=${encodeURIComponent(sourceAnimeId)}`
       : "";
-    const seasonRouteParam = seasonParam ? `&season=${encodeURIComponent(seasonParam)}` : "";
-    router.replace(`/watch?anime=${sourceAnimeId || anime}&ep=${n}&title=${encodeURIComponent(titleStr)}&english=${encodeURIComponent(englishStr)}&format=${encodeURIComponent(format || "")}${totalParam}${coverParam}${arParam}${anslayerParam}${awAnimeParam}${anifoxParam}${seasonRouteParam}${latestParams}${nativeParam}${yearParam}${episodesParam}${titlesParam}${anilistParam}`);
+    router.replace(`/watch?anime=${sourceAnimeId || anime}&ep=${n}&title=${encodeURIComponent(titleStr)}&english=${encodeURIComponent(englishStr)}&format=${encodeURIComponent(format || "")}${totalParam}${coverParam}${arParam}${anslayerParam}${awAnimeParam}${latestParams}${nativeParam}${yearParam}${episodesParam}${titlesParam}${anilistParam}`);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     isAwDubbed, goToAwEpisode, awSeasonIndex, saveProgress, coverUrl, titleArStr,
-    router, anime, sourceAnimeId, titleStr, englishStr, format, anslayerId, awAnimeId, anifoxId,
+    router, anime, sourceAnimeId, titleStr, englishStr, format, anslayerId, awAnimeId,
     isFromLatest, latestSource,
-    epNum, totalEpsCount, native, year, episodes, seasonParam, titleVariants,
+    epNum, totalEpsCount, native, year, episodes, titleVariants,
   ]);
 
   /* ── إعادة تعيين حالة المصادر (زر تحديث) — مسح الأخطاء للسماح بالمحاولة مجدداً ── */
@@ -1752,40 +1750,60 @@ export default function WatchScreen() {
   const handlePickSite = useCallback(async (site: string, preferredQuality?: QualityKey, excludeKeys: string[] = []) => {
     if (isAwDubbed) {
       if (!preferredQuality) return;
-      const selected = sources.find(source =>
-        source.awPickerKey === site && source.awQualityKey === preferredQuality,
-      );
-      if (!selected) {
-        setSlotStatus(prev => ({ ...prev, [pickerSlotKey(site, preferredQuality)]: "failed" }));
-        return;
+      const slotKey = pickerSlotKey(site, preferredQuality);
+      setSlotStatus(prev => ({ ...prev, [slotKey]: "fetching" }));
+      try {
+        let selected = sources.find(source =>
+          source.awPickerKey === site && source.awQualityKey === preferredQuality,
+        );
+        if (!selected && awSeries) {
+          const response = await fetch(
+            `${getBaseUrl()}/api/aw-dubbed/watch-src?series=${encodeURIComponent(awSeries)}&ep=${epNum}`,
+          );
+          if (response.ok) {
+            const data = await response.json();
+            const entries = normalizeAwWatchSources(data?.allSources, getBaseUrl());
+            const nextSources: Src[] = entries.map((entry) => ({
+              site: "animewitcher",
+              name: `السيرفر ${entry.serverNumber}`,
+              label: `السيرفر ${entry.serverNumber}`,
+              quality: entry.quality,
+              url: entry.url,
+              rawUrl: entry.url,
+              directUrl: entry.url,
+              isEmbed: false,
+              awPickerKey: entry.pickerKey,
+              awQualityKey: entry.qualityKey,
+            }));
+            setSources(nextSources);
+            selected = nextSources.find(source =>
+              source.awPickerKey === site && source.awQualityKey === preferredQuality,
+            ) || nextSources[0];
+          }
+        }
+        if (!selected) {
+          setSlotStatus(prev => ({ ...prev, [slotKey]: "failed" }));
+          return;
+        }
+        setSlotStatus(prev => ({ ...prev, [slotKey]: "ready" }));
+        playSrc(selected);
+      } catch {
+        setSlotStatus(prev => ({ ...prev, [slotKey]: "failed" }));
       }
-      setSlotStatus(prev => ({ ...prev, [pickerSlotKey(site, preferredQuality)]: "ready" }));
-      playSrc(selected);
       return;
     }
     if (BLOCKED_SOURCE_SITES.has(site.toLowerCase())) return;
+    /* أوقف فحص التوفر بالخلفية فور ضغط المستخدم على سيرفر لمنع التزاحم في طابور السكرابر على الخادم */
+    if (availabilityAbortRef.current) {
+      availabilityAbortRef.current.abort();
+      availabilityAbortRef.current = null;
+      setAvailabilityDone(true);
+    }
     /* أظهر استجابة اللمس فوراً. فحص صلاحية المشاهدة/الإعلان قد يستغرق
        ثواني، ولا ينبغي أن يبدو الزر ميتاً أثناء انتظاره. */
     const fetchKey = preferredQuality ? `${site}::${preferredQuality}` : site;
     if (preferredQuality) {
       setSlotStatus(prev => ({ ...prev, [pickerSlotKey(site, preferredQuality)]: "fetching" }));
-    }
-    if (!watchUnlocked) {
-      if (watchAdSite && watchAdSite !== site) return;
-      if (watchAdSite === site) return;
-      setWatchAdSite(site);
-      try {
-        const allowed = await ensureWatchAccess();
-        if (isMountedRef.current && allowed) setWatchUnlocked(true);
-        if (!allowed) {
-          if (preferredQuality) {
-            setSlotStatus(prev => ({ ...prev, [pickerSlotKey(site, preferredQuality)]: "idle" }));
-          }
-          return;
-        }
-      } finally {
-        if (isMountedRef.current) setWatchAdSite(null);
-      }
     }
     const priorPlayback = progressivePlaybackRef.current;
     if (priorPlayback && priorPlayback.fetchKey !== fetchKey) {
@@ -1863,7 +1881,6 @@ export default function WatchScreen() {
       anime: sourceAnimeId || "0", ep: String(epNum), title: titleStr,
       english: englishStr, format: format || "",
       year: year || "", episodes: episodes || "", native: native || "",
-      season: seasonParam || "",
     });
     const lookupSiteTag = site.replace(/[^a-z0-9_-]/gi, "").slice(0, 12) || "source";
     const lookupTraceId = `${playbackTraceId}-s-${lookupSiteTag}`;
@@ -1877,7 +1894,6 @@ export default function WatchScreen() {
     if (titleArStr) qs.set("titleAr", titleArStr);
     if (site === "anslayer" && anslayerId) qs.set("anslayerId", anslayerId);
     if (site === "animewitcher" && awAnimeId) qs.set("awAnimeId", awAnimeId);
-    if (site === "anifox" && anifoxId) qs.set("anifoxId", anifoxId);
 
     let tid: ReturnType<typeof setTimeout> | null = null;
     let siteCtrl: AbortController | null = null;
@@ -1886,12 +1902,12 @@ export default function WatchScreen() {
     let rejectedCandidateCount = 0;
     let streamDoneSeen = false;
     let lookupStartedAt = Date.now();
+    let bestAlternateCandidate: Src | null = null;
     const markQualityFailed = () => {
       if (!preferredQuality) return;
       setSlotStatus(prev => ({ ...prev, [pickerSlotKey(site, preferredQuality)]: "failed" }));
     };
     try {
-      await warmAuthToken();
       lookupStartedAt = Date.now();
       if (!isMountedRef.current || progressivePlaybackRef.current !== playback) return;
       const currentSiteCtrl = new AbortController();
@@ -1911,6 +1927,36 @@ export default function WatchScreen() {
       const decoder = new TextDecoder();
       let eventBuffer = "";
       const requestedTier = preferredQuality ? PICKER_QUALITY[preferredQuality] : undefined;
+
+      const acceptPlayableCandidate = (mapped: Src, candidateKey: string, kind?: string) => {
+        receivedCandidate = true;
+        receivedCandidateCount++;
+        if (kind === "primary") {
+          console.info(
+            `[playback-trace] id=${lookupTraceId} component=source stage=first_candidate site=${lookupSiteTag} elapsed_ms=${Date.now() - lookupStartedAt} quality=${getSrcQuality(mapped)}`,
+          );
+        } else {
+          console.info(
+            `[playback-trace] id=${lookupTraceId} component=source stage=backup_candidate site=${lookupSiteTag} elapsed_ms=${Date.now() - lookupStartedAt} quality=${getSrcQuality(mapped)}`,
+          );
+        }
+        fetchedSitesRef.current.add(fetchKey);
+        if (preferredQuality) {
+          setSlotStatus(prev => ({ ...prev, [pickerSlotKey(site, preferredQuality)]: "ready" }));
+        }
+        setSources(prev => prev.some(item => item.candidateKey === candidateKey && candidateKey !== "")
+          ? prev
+          : [...prev, mapped]);
+
+        if (!playback.hasStartedPlayback || playback.retryPending) {
+          playback.retryPending = false;
+          playback.hasStartedPlayback = true;
+          if (candidateKey && !playback.attemptedKeys.includes(candidateKey)) playback.attemptedKeys.push(candidateKey);
+          playSrc(mapped);
+        } else if (!playback.fallbackSources.some(item => item.candidateKey === candidateKey && candidateKey !== "")) {
+          playback.fallbackSources.push(mapped);
+        }
+      };
 
       const handleSseBlock = (block: string) => {
         let eventName = "message";
@@ -1946,54 +1992,33 @@ export default function WatchScreen() {
           ...raw,
           candidateKey,
           site: sourceSite,
+          quality: raw.quality || preferredQuality || undefined,
           directUrl: resolveUrl(raw.directUrl, base),
           url: resolveUrl(raw.url, base),
           subtitleUrl: normalizeProviderSubtitleUrl(sourceSite, raw.subtitleUrl, base),
         }, base);
-        const rejectReason = isBlockedSource(mapped) ? "blocked"
+        const hardRejectReason = isBlockedSource(mapped) ? "blocked"
           : (mapped.isEmbed && mapped.url && (mapped.url.includes("mega.nz") || mapped.url.includes("mega.co.nz"))) ? "unsupported_embed"
           : !isValidSourceUrl(getPlayUrl(mapped)) ? "invalid_url"
           : !isMobilePlayable(mapped) ? "not_playable"
-          : (requestedTier && getSrcQuality(mapped) !== requestedTier) ? "quality_mismatch"
           : "";
-        if (rejectReason) {
+        if (hardRejectReason) {
           rejectedCandidateCount++;
           if (candidateKey && !playback.attemptedKeys.includes(candidateKey)) playback.attemptedKeys.push(candidateKey);
           console.info(
-            `[playback-trace] id=${lookupTraceId} component=source stage=candidate_rejected site=${lookupSiteTag} reason=${rejectReason} quality=${getSrcQuality(mapped)} event=${sourceEventCount} elapsed_ms=${Date.now() - lookupStartedAt}`,
+            `[playback-trace] id=${lookupTraceId} component=source stage=candidate_rejected site=${lookupSiteTag} reason=${hardRejectReason} quality=${getSrcQuality(mapped)} event=${sourceEventCount} elapsed_ms=${Date.now() - lookupStartedAt}`,
           );
           return;
         }
-        receivedCandidate = true;
-        receivedCandidateCount++;
-        if (payload.kind === "primary") {
-          console.info(
-            `[playback-trace] id=${lookupTraceId} component=source stage=first_candidate site=${lookupSiteTag} elapsed_ms=${Date.now() - lookupStartedAt} quality=${getSrcQuality(mapped)}`,
-          );
-        } else {
-          console.info(
-            `[playback-trace] id=${lookupTraceId} component=source stage=backup_candidate site=${lookupSiteTag} elapsed_ms=${Date.now() - lookupStartedAt} quality=${getSrcQuality(mapped)}`,
-          );
+        if (requestedTier && getSrcQuality(mapped) !== requestedTier) {
+          /* احتفظ بأول مرشح صالح كبديل فوري إذا أعاد المزود (مثل AD أو AF أو SA)
+             تسمية جودة مختلفة عن المطلوبة، حتى لا يفشل السيرفر أو يتأخر. */
+          if (!bestAlternateCandidate) {
+            bestAlternateCandidate = { ...mapped, quality: preferredQuality || mapped.quality };
+          }
+          return;
         }
-        fetchedSitesRef.current.add(fetchKey);
-        if (preferredQuality) {
-          setSlotStatus(prev => ({ ...prev, [pickerSlotKey(site, preferredQuality)]: "ready" }));
-        }
-        setSources(prev => prev.some(item => item.candidateKey === candidateKey)
-          ? prev
-          : [...prev, mapped]);
-
-        // The server's primary can still be rejected by the mobile URL/quality
-        // checks. Start the first candidate the client actually accepts, even
-        // if the server labels it as the backup.
-        if (!playback.hasStartedPlayback || playback.retryPending) {
-          playback.retryPending = false;
-          playback.hasStartedPlayback = true;
-          if (candidateKey && !playback.attemptedKeys.includes(candidateKey)) playback.attemptedKeys.push(candidateKey);
-          playSrc(mapped);
-        } else if (!playback.fallbackSources.some(item => item.candidateKey === candidateKey)) {
-          playback.fallbackSources.push(mapped);
-        }
+        acceptPlayableCandidate(mapped, candidateKey, payload.kind);
       };
 
       while (true) {
@@ -2006,6 +2031,13 @@ export default function WatchScreen() {
       }
       eventBuffer += decoder.decode();
       if (eventBuffer.trim()) handleSseBlock(eventBuffer);
+      if (!receivedCandidate && bestAlternateCandidate) {
+        acceptPlayableCandidate(
+          bestAlternateCandidate,
+          (bestAlternateCandidate as Src).candidateKey || "",
+          "primary",
+        );
+      }
       playback.streamOpen = false;
       console.info(
         `[playback-trace] id=${lookupTraceId} component=source stage=stream_end site=${lookupSiteTag} elapsed_ms=${Date.now() - lookupStartedAt} candidates=${receivedCandidateCount} rejected=${rejectedCandidateCount} done=${streamDoneSeen}`,
@@ -2065,12 +2097,14 @@ export default function WatchScreen() {
       }
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [anime, sourceAnimeId, epNum, titleStr, englishStr, titleArStr, format, year, episodes, native, playSrc, anslayerId, anifoxId, sources, playbackTraceId]);
+  }, [anime, sourceAnimeId, epNum, titleStr, englishStr, titleArStr, format, year, episodes, native, playSrc, anslayerId, sources, playbackTraceId]);
   handlePickSiteRef.current = handlePickSite;
 
   /* ── مزامنة حالة التنزيل من Global Singleton ── */
   useEffect(() => {
-    const animeIdNum = parseInt(anime || "0");
+    const animeIdNum = isAwDubbed
+      ? Math.abs(Array.from(awSeries || titleStr).reduce((acc, ch) => ((acc << 5) - acc) + ch.charCodeAt(0), 0)) || 900001
+      : (parseInt(anime || "0", 10) || 0);
     const sync = () => {
       const snapshot = getActiveDownloadsSnapshot();
       /* خريطة: site:quality → ActiveDownload للحلقة الحالية فقط */
@@ -2108,13 +2142,15 @@ export default function WatchScreen() {
 
   /* ── تنزيل حلقة من موقع معين (Global — يستمر عند التنقل) ── */
   const handleDownloadSite = useCallback(async (site: string, preferredQuality?: QualityKey) => {
-    if (!DOWNLOAD_SOURCE_SITES.has(site)) return;
+    if (!isAwDubbed && !DOWNLOAD_SOURCE_SITES.has(site)) return;
     const stateKey = preferredQuality ? `${site}:${preferredQuality}` : site;
     const wantedQuality = preferredQuality ? PICKER_QUALITY[preferredQuality] : undefined;
     const dlState = downloadStates[stateKey] || "idle";
     if (dlState === "downloading" || dlState === "done") return;
 
-    const siteSrcs = sources.filter(s => s.site === site);
+    const siteSrcs = isAwDubbed
+      ? sources.filter(s => s.awPickerKey === site || s.site === site)
+      : sources.filter(s => s.site === site);
     const best = (wantedQuality
       ? siteSrcs.find(s => getSrcQuality(s) === wantedQuality && isDirectPlayable(s))
       : undefined) ?? siteSrcs.find(isDirectPlayable) ?? siteSrcs[0];
@@ -2123,27 +2159,27 @@ export default function WatchScreen() {
     const rawUrl   = getPlayUrl(best);
     const headers  = best.headers || extractProxyHeaders(rawUrl);
     const base     = getBaseUrl();
-    const proxyUrl = ensureVpsProxy(rawUrl, headers, base, best.directType === "hls");
+    const proxyUrl = isAwDubbed
+      ? resolveUrl(rawUrl, base)
+      : ensureVpsProxy(rawUrl, headers, base, best.directType === "hls");
 
     /* الترجمة الجانبية اختيارية: لا نمنع تنزيل الفيديو إذا لم تتوفر. */
-    const subRaw     = subtitlesDisabledForSite(site)
+    const subRaw     = (isAwDubbed || subtitlesDisabledForSite(site))
       ? undefined
       : (best.subtitleUrl || globalSubUrl);
-    /* Subtitle download is optional. Do not block the video task on a slow
-       fallback translation lookup; source-provided tracks still remain
-       available and the video starts immediately. */
     const subtitleCandidate = subRaw;
     const subtitleUrl = normalizeProviderSubtitleUrl(site, subtitleCandidate, base);
 
-    const token = await getAuthToken();
-    const downloadToken = await getDownloadToken();
-    /* Fire-and-forget — يعمل في الخلفية بمستقل عن lifecycle هذه الشاشة */
-     const isHlsDownload = best.directType === "hls" || isHlsMediaUrl(proxyUrl);
+    const [token, downloadToken] = await Promise.all([getAuthToken(), getDownloadToken()]);
+    const isHlsDownload = best.directType === "hls" || isHlsMediaUrl(proxyUrl);
     const downloadUrl = (DOWNLOAD_SUBTITLE_SITES.has(site) || isHlsDownload)
       ? buildEmbeddedDownloadUrl(site, proxyUrl, subtitleUrl, base)
       : proxyUrl;
+    const numericId = isAwDubbed
+      ? Math.abs(Array.from(awSeries || titleStr).reduce((acc, ch) => ((acc << 5) - acc) + ch.charCodeAt(0), 0)) || 900001
+      : (parseInt(anime || "0", 10) || 0);
     void startGlobalDownload({
-      animeId:  parseInt(anime || "0"),
+      animeId:  numericId,
       ep:       epNum,
       title:    displayTitle,
       cover:    coverUrl,
@@ -2154,10 +2190,10 @@ export default function WatchScreen() {
       downloadToken,
       headers,
       subtitleUrl,
-       hlsManifestUrl: isHlsDownload ? proxyUrl : undefined,
+      hlsManifestUrl: isHlsDownload ? proxyUrl : undefined,
     });
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [downloadStates, sources, anime, epNum, displayTitle, coverUrl, globalSubUrl, watchUnlocked]);
+  }, [isAwDubbed, awSeries, downloadStates, sources, anime, epNum, displayTitle, coverUrl, globalSubUrl, watchUnlocked]);
 
   /**
    * handleFetchAndDownload — يُنزَّل مباشرةً بدون الحاجة لفتح المشغّل أولاً.
@@ -2165,7 +2201,7 @@ export default function WatchScreen() {
    * - إذا لم يُجلب بعد → يجلبه أولاً ثم يبدأ التنزيل.
    */
   const handleFetchAndDownload = useCallback(async (site: string, preferredQuality: QualityKey) => {
-    if (!DOWNLOAD_SOURCE_SITES.has(site)) return;
+    if (!isAwDubbed && !DOWNLOAD_SOURCE_SITES.has(site)) return;
     const stateKey = `${site}:${preferredQuality}`;
     const wantedQuality = PICKER_QUALITY[preferredQuality];
     const dlState = downloadStates[stateKey] || "idle";
@@ -2173,8 +2209,13 @@ export default function WatchScreen() {
     if (dlFetchingSites.has(stateKey)) return; // جلب جارٍ بالفعل
     if (!(await ensureDownloadAllowed())) return;
 
+    if (isAwDubbed) {
+      await handleDownloadSite(site, preferredQuality);
+      return;
+    }
+
     // إذا كان المصدر مجلوباً → نزّل مباشرةً من sources الحالية
-    if (fetchedSitesRef.current.has(site)) {
+    if (fetchedSitesRef.current.has(site) || fetchedSitesRef.current.has(`${site}::${preferredQuality}`)) {
       await handleDownloadSite(site, preferredQuality);
       return;
     }
@@ -2187,18 +2228,16 @@ export default function WatchScreen() {
       anime: sourceAnimeId || "0", ep: String(epNum), title: titleStr,
       english: englishStr, format: format || "",
       year: year || "", episodes: episodes || "", native: native || "",
-      season: seasonParam || "",
     });
     qs.set("anilistId", sourceAnimeId || "0");
     qs.set("titles", JSON.stringify(titleVariants));
+    if (preferredQuality) qs.set("quality", preferredQuality);
     if (titleArStr) qs.set("titleAr", titleArStr);
     if (site === "anslayer" && anslayerId) qs.set("anslayerId", anslayerId);
     if (site === "animewitcher" && awAnimeId) qs.set("awAnimeId", awAnimeId);
-    if (site === "anifox" && anifoxId) qs.set("anifoxId", anifoxId);
 
     let tid: ReturnType<typeof setTimeout> | null = null;
     try {
-      await warmAuthToken();
       const siteCtrl = new AbortController();
       /* تسجيل الـ controller — يُلغى عند navigation/refresh/goEp تماماً كـ handlePickSite */
       siteCtrls.current.set(site, siteCtrl);
@@ -2217,6 +2256,7 @@ export default function WatchScreen() {
            const mapped: Src = {
             ...s,
             site: sourceSite,
+            quality: s.quality || preferredQuality || undefined,
             directUrl: resolveUrl(s.directUrl, base),
             url: resolveUrl(s.url, base),
             subtitleUrl: normalizeProviderSubtitleUrl(sourceSite, s.subtitleUrl, base),
@@ -2230,25 +2270,25 @@ export default function WatchScreen() {
       if (!newSrcs.length) throw new Error("no direct sources");
 
       fetchedSitesRef.current.add(site);
-      setSlotStatus(prev => ({ ...prev, [site]: "ready" }));
+      setSlotStatus(prev => ({ ...prev, [pickerSlotKey(site, preferredQuality)]: "ready" }));
       setSources(prev => [...prev.filter(s => s.site !== site), ...newSrcs]);
 
-      // لا تستخدم أعلى جودة تلقائياً: صف التنزيل يحدد الجودة المطلوبة.
-      const best = newSrcs.find(s => getSrcQuality(s) === wantedQuality && isDirectPlayable(s));
+      const best = newSrcs.find(s => getSrcQuality(s) === wantedQuality && isDirectPlayable(s))
+        ?? newSrcs.find(isDirectPlayable)
+        ?? newSrcs[0];
       if (!best || !isDirectPlayable(best)) throw new Error("no playable source");
 
       const rawUrl    = getPlayUrl(best);
       const hdrs      = best.headers || extractProxyHeaders(rawUrl);
       const proxyUrl  = ensureVpsProxy(rawUrl, hdrs, base, best.directType === "hls");
-      const subRaw    = best.subtitleUrl || globalSubUrl;
-        const subtitleCandidate = subRaw;
-       const subtitleUrl = normalizeProviderSubtitleUrl(site, subtitleCandidate, base);
-       const token     = await getAuthToken();
-       const downloadToken = await getDownloadToken();
-       const isHlsDownload = best.directType === "hls" || isHlsMediaUrl(proxyUrl);
-        const downloadUrl = (DOWNLOAD_SUBTITLE_SITES.has(site) || isHlsDownload)
-          ? buildEmbeddedDownloadUrl(site, proxyUrl, subtitleUrl, base)
-         : proxyUrl;
+      const subRaw    = subtitlesDisabledForSite(site) ? undefined : (best.subtitleUrl || globalSubUrl);
+      const subtitleCandidate = subRaw;
+      const subtitleUrl = normalizeProviderSubtitleUrl(site, subtitleCandidate, base);
+      const [token, downloadToken] = await Promise.all([getAuthToken(), getDownloadToken()]);
+      const isHlsDownload = best.directType === "hls" || isHlsMediaUrl(proxyUrl);
+      const downloadUrl = (DOWNLOAD_SUBTITLE_SITES.has(site) || isHlsDownload)
+        ? buildEmbeddedDownloadUrl(site, proxyUrl, subtitleUrl, base)
+        : proxyUrl;
 
       void startGlobalDownload({
         animeId:    parseInt(anime || "0"),
@@ -2262,7 +2302,7 @@ export default function WatchScreen() {
         downloadToken,
         headers:    hdrs,
         subtitleUrl,
-         hlsManifestUrl: isHlsDownload ? proxyUrl : undefined,
+        hlsManifestUrl: isHlsDownload ? proxyUrl : undefined,
       });
 
     } catch {
@@ -2427,14 +2467,19 @@ export default function WatchScreen() {
   const downloadSlots = useMemo(() => {
     return Q_KEYS.flatMap((quality) =>
       Object.entries(availableSlots)
-        .filter(([site, tiers]) => DOWNLOAD_SOURCE_SITES.has(site) && Boolean(tiers[quality]))
-        .map(([site]) => ({ site, tag: SITE_TAG[site] || getSiteTag(site), quality }))
+        .filter(([site, tiers]) => (isAwDubbed || DOWNLOAD_SOURCE_SITES.has(site)) && Boolean(tiers[quality]))
+        .map(([site, tiers]) => ({
+          site,
+          tag: tiers[quality]?.tag || SITE_TAG[site] || getSiteTag(site),
+          name: tiers[quality]?.name || SITE_LABEL[site] || site,
+          quality,
+        }))
         .sort((a, b) => {
           const order = (STATIC_PICKER[quality] || []).map(item => item.site);
           return order.indexOf(a.site) - order.indexOf(b.site);
         }),
     );
-  }, [availableSlots]);
+  }, [availableSlots, isAwDubbed]);
 
   /* ── مرّر المصدر الذي اختاره المستخدم فقط إلى المشغّل.
      لا نضمّ بقية المصادر هنا، حتى لا يحوّل auto-advance فشل المصدر إلى KW/MP. ── */
@@ -2462,7 +2507,7 @@ export default function WatchScreen() {
       site,
       subtitleUrl: subtitlesDisabledForSite(site)
         ? undefined
-        : (playingSrc.subtitleUrl ? resolveUrl(playingSrc.subtitleUrl, base) : globalSubUrl),
+        : (playingSrc.subtitleUrl ? resolveUrl(playingSrc.subtitleUrl, base) : (isArabic ? undefined : globalSubUrl)),
       isArabic,
       wantsSmartSub: !isArabic,
       skipIntro: playingSrc.skipIntro,
@@ -2615,14 +2660,19 @@ export default function WatchScreen() {
 
       {/* ── Header ── */}
       <View style={[d.header, tvMode && d.tvHeader, { paddingTop: topPad + 4 }]}>
-        <Pressable onPress={handleBack} focusable={tvMode}
-          style={({ focused }) => [d.headerBack, tvMode && d.tvHeaderActionBtn, tvMode && tvFocusStyle(focused)]}>
-          <Ionicons name="chevron-forward" size={tvMode ? 25 : 19} color={colors.textPrimary} />
-        </Pressable>
-        <View style={d.headerCenter}>
-          <Text style={[d.headerTitle, tvMode && d.tvHeaderTitle]} numberOfLines={1}>{displayTitle}</Text>
-          <Text style={[d.headerSub, tvMode && d.tvHeaderSub]}>الحلقة {epNum}</Text>
+        {/* Right Section: Back Button + Title */}
+        <View style={d.headerRightSection}>
+          <Pressable onPress={handleBack} focusable={tvMode}
+            style={({ focused }) => [d.headerBack, tvMode && d.tvHeaderActionBtn, tvMode && tvFocusStyle(focused)]}>
+            <Ionicons name="chevron-back" size={tvMode ? 25 : 19} color={colors.textPrimary} style={{ transform: [{ scaleX: -1 }] }} />
+          </Pressable>
+          <View style={d.headerCenter}>
+            <Text style={[d.headerTitle, tvMode && d.tvHeaderTitle]} numberOfLines={1}>{displayTitle}</Text>
+            <Text style={[d.headerSub, tvMode && d.tvHeaderSub]}>الحلقة {epNum}</Text>
+          </View>
         </View>
+
+        {/* Left Section: Prev / Next / Refresh */}
         <View style={d.headerLeft}>
           <Pressable disabled={!canGoPrevEpisode} onPress={onRiftPrevEpisode} focusable={tvMode}
             style={({ focused }) => [d.epNavBtn, tvMode && d.tvEpNavBtn, !canGoPrevEpisode && { opacity: 0.22 }, tvMode && tvFocusStyle(focused)]}>
@@ -2794,22 +2844,21 @@ export default function WatchScreen() {
            if (!slots.length) return null;
           const dotColor = qk === "1080p" ? "#fbbf24" : qk === "720p" ? "#34d399" : "#94a3b8";
           return (
-            <View key={qk} style={{ gap: 6 }}>
-              {/* رأس الجودة */}
-                 <View style={[d.qPill, tvMode && d.tvQPill]}>
-                 <Text style={[d.qPillText, tvMode && d.tvQPillText, { color: dotColor }]}>
+            <View key={qk} style={{ gap: 8, marginBottom: 12 }}>
+              {/* رأس الجودة — محاذاة لليمين كما في الصورة */}
+              <View style={[d.qPill, tvMode && d.tvQPill, { justifyContent: "flex-end", flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 4 }]}>
+                <Text style={[d.qPillText, tvMode && d.tvQPillText, { color: dotColor, fontSize: 13, fontFamily: "Cairo_700Bold" }]}>
                   {qk.replace("p", "P")}
                 </Text>
-                <View style={[d.qPillDot, { backgroundColor: dotColor }]} />
+                <View style={[d.qPillDot, { width: 7, height: 7, borderRadius: 4, backgroundColor: dotColor }]} />
               </View>
 
               {/* قائمة السيرفرات */}
-              <View style={d.srcSection}>
+              <View style={[d.srcSection, { backgroundColor: "#0c121e", borderColor: "rgba(255,255,255,0.08)", borderWidth: 1, borderRadius: 14, overflow: "hidden" }]}>
                 {slots.map((slot, idx) => {
                   const status   = slotStatus[pickerSlotKey(slot.site, qk)] || "idle";
                   const isFetching = status === "fetching";
                   const isFailed   = status === "failed";
-                  const isReady    = status === "ready";
                   return (
                     <Pressable
                       key={slot.site}
@@ -2823,120 +2872,166 @@ export default function WatchScreen() {
                         if (tvMode) rememberFocus(pickerSlotKey(slot.site, qk));
                       }}
                       accessibilityRole="button"
-                      accessibilityLabel={`اختيار سيرفر ${slot.tag} بجودة ${qk}`}
+                      accessibilityLabel={`تشغيل سيرفر ${slot.tag} بجودة ${qk}`}
                       style={({ focused, pressed }) => [
-                         d.webRow,
+                        d.webRow,
                         tvMode && d.tvWebRow,
                         tvMode && tvFocusStyle(focused),
                         idx < slots.length - 1 && d.webRowBorder,
-                        !watchUnlocked && { opacity: 0.72 },
-                        isReady && watchUnlocked && { backgroundColor: colors.success + "10" },
-                        pressed  && { opacity: 0.72 },
+                        { minHeight: 52, paddingHorizontal: 12, paddingVertical: 10, justifyContent: "space-between" },
+                        pressed && { opacity: 0.75 },
                       ]}
                     >
+                      {/* Left: زر التشغيل الأخضر المباشر تشغيل ▶ */}
                       <View style={d.webRowActions}>
-                        {!watchUnlocked ? (
-                          <View style={[d.lockBtn, tvMode && d.tvLockBtn]}>
-                            {watchAdSite === slot.site ? <SpinRing size={tvMode ? 28 : 14} /> : <Ionicons name="lock-closed" size={tvMode ? 24 : 11} color={colors.accent} />}
-                            <Text style={[d.lockBtnText, tvMode && d.tvActionText]}>فتح</Text>
-                          </View>
-                        ) : isFetching ? (
-                          <SpinRing size={tvMode ? 26 : 16} />
-                        ) : isReady ? (
-                          <View style={[d.playBtnGreen, tvMode && d.tvPlayBtn]}>
-                            <Ionicons name="play" size={tvMode ? 24 : 10} color={colors.primaryForeground} />
-                            <Text style={[d.playBtnGreenText, tvMode && d.tvActionText]}>تشغيل</Text>
-                          </View>
+                        {isFetching ? (
+                          <SpinRing size={tvMode ? 26 : 18} />
                         ) : (
-                          <View style={[d.pickBtn, tvMode && d.tvPickBtn]}>
-                            <Text style={[d.pickBtnText, tvMode && d.tvActionText]}>{isFailed ? "إعادة المحاولة" : "اختيار"}</Text>
+                          <View style={[d.playBtnGreen, tvMode && d.tvPlayBtn, { backgroundColor: "#10b981", borderRadius: 10, paddingHorizontal: 14, paddingVertical: 6, flexDirection: "row", alignItems: "center", gap: 4 }]}>
+                            <Ionicons name="play" size={tvMode ? 20 : 11} color="#ffffff" />
+                            <Text style={[d.playBtnGreenText, tvMode && d.tvActionText, { color: "#ffffff", fontSize: 12, fontFamily: "Cairo_700Bold" }]}>تشغيل</Text>
                           </View>
                         )}
                       </View>
 
-                      {/* Center: السيرفر XX */}
-                      <Text
-                        style={[
-                           d.webRowTag,
-                           tvMode && d.tvWebRowTag,
-                          { flex: 1, textAlign: "right" },
-                          isReady  && { color: colors.textPrimary },
-                          isFailed && { color: colors.destructive },
-                        ]}
-                        numberOfLines={1}
-                      >
-                        السيرفر {slot.tag}
-                      </Text>
-
-                      {/* Status only; the download action sits beside اختيار. */}
-                      <View style={d.webRowRight}>
-                        {!isFetching && (
-                          <View style={[d.webRowDot, tvMode && d.tvWebRowDot, {
-                            backgroundColor:
-                              isReady  ? "#34d399" :
-                              isFailed ? colors.destructive :
-                              colors.border,
-                          }]} />
-                        )}
+                      {/* Right: السيرفر XX مع النقطة الخضراء */}
+                      <View style={{ flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "flex-end", gap: 8 }}>
+                        <Text
+                          style={[
+                            d.webRowTag,
+                            tvMode && d.tvWebRowTag,
+                            { textAlign: "right", color: "#f8fafc", fontSize: 13, fontFamily: "Cairo_700Bold" },
+                            isFailed && { color: colors.destructive },
+                          ]}
+                          numberOfLines={1}
+                        >
+                          السيرفر {slot.tag}
+                        </Text>
+                        <View style={[d.webRowDot, tvMode && d.tvWebRowDot, {
+                          width: 8,
+                          height: 8,
+                          borderRadius: 4,
+                          backgroundColor: isFailed ? colors.destructive : "#34d399",
+                        }]} />
                       </View>
                     </Pressable>
                   );
-         })}
+                })}
               </View>
             </View>
           );
         })}
 
-        {availabilityDone && downloadSlots.length > 0 && (
-          <View style={d.downloadSection}>
-            <View style={d.downloadHeader}>
-              <View style={d.downloadHeaderIcon}>
-                <Ionicons name="download-outline" size={17} color={colors.accent} />
+        { downloadSlots.length > 0 && (
+          <View style={[d.downloadSection, { backgroundColor: "#0b111d", borderColor: "rgba(6, 182, 212, 0.22)", borderWidth: 1, borderRadius: 18, padding: 14, marginTop: 18 }]}>
+            <View style={[d.downloadHeader, { flexDirection: "row-reverse", alignItems: "center", justifyContent: "space-between", gap: 10 }]}>
+              <View style={{ flexDirection: "row-reverse", alignItems: "center", gap: 10, flex: 1 }}>
+                <View style={[d.downloadHeaderIcon, { width: 38, height: 38, borderRadius: 12, backgroundColor: "rgba(6, 182, 212, 0.14)", borderColor: "rgba(6, 182, 212, 0.35)" }]}>
+                  <Ionicons name="cloud-download-outline" size={20} color="#22d3ee" />
+                </View>
+                <View style={{ flex: 1, alignItems: "flex-end" }}>
+                  <Text style={[d.downloadTitle, { color: "#f8fafc", fontSize: 14, fontFamily: "Cairo_800ExtraBold" }]}>سيرفرات التحميل المباشر</Text>
+                  <Text style={[d.downloadSubtitle, { color: "#94a3b8", fontSize: 10, fontFamily: "Cairo_600SemiBold" }]}>
+                    {isAwDubbed
+                      ? "تحميل مباشر سريع للحلقة المدبلجة يعمل في الخلفية"
+                      : "مصادر مخصصة للتحميل السريع بالخلفية: AD · AW · SA · AF · AS"}
+                  </Text>
+                </View>
               </View>
-              <View style={{ flex: 1 }}>
-                <Text style={d.downloadTitle}>سيرفرات التحميل</Text>
-                <Text style={d.downloadSubtitle}>مصادر مخصصة للتحميل السلس: AW · SA · AS · FX</Text>
+              <View style={{ paddingHorizontal: 10, paddingVertical: 4, borderRadius: 999, backgroundColor: "rgba(6, 182, 212, 0.14)", borderWidth: 1, borderColor: "rgba(6, 182, 212, 0.3)" }}>
+                <Text style={{ color: "#22d3ee", fontSize: 10, fontFamily: "Cairo_700Bold" }}>{downloadSlots.length} سيرفر</Text>
               </View>
             </View>
-            <Text style={d.downloadHint}>
-              اختر سيرفرًا لتحميل الحلقة. سيرفرات المشاهدة أعلاه مخصصة للمشاهدة فقط.
-            </Text>
-            <View style={d.downloadRows}>
-              {downloadSlots.map((slot) => {
+            <View style={[d.downloadRows, { backgroundColor: "#070b12", borderRadius: 14, borderWidth: 1, borderColor: "rgba(255,255,255,0.07)", marginTop: 6 }]}>
+              {downloadSlots.map((slot, idx) => {
                 const stateKey = `${slot.site}:${slot.quality}`;
                 const dlState = downloadStates[stateKey] || "idle";
                 const dlPct = Math.round((downloadProgress[stateKey] || 0) * 100);
+                const qColor = slot.quality === "1080p" ? "#fbbf24" : slot.quality === "720p" ? "#34d399" : "#60a5fa";
                 return (
-                  <View key={stateKey} style={d.downloadRow}>
-                    <View style={d.downloadRowInfo}>
-                      <View style={d.downloadTag}>
-                        <Text style={d.downloadTagText}>{slot.tag}</Text>
-                      </View>
-                      <Text style={d.downloadRowLabel}>سيرفر {slot.tag}</Text>
-                      <Text style={d.downloadQuality}>{slot.quality.replace("p", "P")}</Text>
+                  <View
+                    key={stateKey}
+                    style={[
+                      d.downloadRow,
+                      {
+                        minHeight: 58,
+                        paddingHorizontal: 12,
+                        paddingVertical: 10,
+                        flexDirection: "row",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        borderBottomWidth: idx < downloadSlots.length - 1 ? StyleSheet.hairlineWidth : 0,
+                        borderBottomColor: "rgba(255,255,255,0.08)",
+                      },
+                    ]}
+                  >
+                    {/* Left: Action / Progress */}
+                    <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                      {(dlState === "idle" || dlState === "error") && (
+                        <Pressable
+                          onPress={() => void handleFetchAndDownload(slot.site, slot.quality)}
+                          hitSlop={8}
+                          style={({ pressed }) => [
+                            d.downloadAction,
+                            {
+                              minWidth: 96,
+                              height: 36,
+                              paddingHorizontal: 14,
+                              borderRadius: 10,
+                              backgroundColor: dlState === "error" ? "rgba(239, 68, 68, 0.18)" : "#0284c7",
+                              borderColor: dlState === "error" ? "rgba(239, 68, 68, 0.45)" : "#38bdf8",
+                              opacity: pressed ? 0.78 : 1,
+                            },
+                          ]}
+                          accessibilityLabel={`تحميل ${slot.quality} من سيرفر ${slot.tag}`}
+                        >
+                          {dlFetchingSites.has(stateKey) ? <SpinRing size={16} /> : (
+                            <>
+                              <Ionicons
+                                name={dlState === "error" ? "refresh" : "download-outline"}
+                                size={15}
+                                color="#ffffff"
+                              />
+                              <Text style={[d.downloadActionText, { color: "#ffffff", fontSize: 11 }]}>
+                                {dlState === "error" ? "إعادة" : "تنزيل"}
+                              </Text>
+                            </>
+                          )}
+                        </Pressable>
+                      )}
+                      {dlState === "downloading" && (
+                        <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                          <View style={{ minWidth: 94, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 10, backgroundColor: "rgba(2, 132, 199, 0.18)", borderWidth: 1, borderColor: "rgba(56, 189, 248, 0.35)", alignItems: "center" }}>
+                            <Text style={{ color: "#38bdf8", fontSize: 11, fontFamily: "Cairo_800ExtraBold" }}>
+                              {dlPct}% · جاري التنزيل
+                            </Text>
+                          </View>
+                        </View>
+                      )}
+                      {dlState === "done" && (
+                        <View style={{ flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 10, backgroundColor: "rgba(16, 185, 129, 0.16)", borderWidth: 1, borderColor: "rgba(52, 211, 153, 0.35)" }}>
+                          <Ionicons name="checkmark-circle" size={15} color="#34d399" />
+                          <Text style={{ color: "#34d399", fontSize: 11, fontFamily: "Cairo_700Bold" }}>تم التنزيل</Text>
+                        </View>
+                      )}
                     </View>
-                    {dlState === "idle" && (
-                      <Pressable
-                        onPress={() => void handleFetchAndDownload(slot.site, slot.quality)}
-                        hitSlop={8}
-                        style={d.downloadAction}
-                        accessibilityLabel={`تحميل ${slot.quality} من سيرفر ${slot.tag}`}
-                      >
-                        {dlFetchingSites.has(stateKey) ? <SpinRing size={15} /> : (
-                          <>
-                            <Ionicons name="download-outline" size={15} color={colors.primaryForeground} />
-                            <Text style={d.downloadActionText}>تحميل</Text>
-                          </>
-                        )}
-                      </Pressable>
-                    )}
-                    {dlState === "downloading" && (
-                      <View style={d.dlPctBadge}>
-                        <Text style={d.dlPctText}>{dlPct}%</Text>
+
+                    {/* Right: Server info + Quality badge */}
+                    <View style={{ flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "flex-end", gap: 9 }}>
+                      <View style={{ paddingHorizontal: 8, paddingVertical: 2, borderRadius: 7, backgroundColor: "rgba(255,255,255,0.05)", borderWidth: 1, borderColor: "rgba(255,255,255,0.12)" }}>
+                        <Text style={{ color: qColor, fontSize: 10, fontFamily: "Cairo_800ExtraBold" }}>
+                          {slot.quality.replace("p", "P")}
+                        </Text>
                       </View>
-                    )}
-                    {dlState === "done" && <Ionicons name="checkmark-circle" size={19} color={colors.accent} />}
-                    {dlState === "error" && <Ionicons name="close-circle" size={19} color={colors.destructive} />}
+                      <View style={{ alignItems: "flex-end" }}>
+                        <Text style={{ color: "#f8fafc", fontSize: 12.5, fontFamily: "Cairo_700Bold", textAlign: "right" }}>
+                          السيرفر {slot.tag}
+                        </Text>
+                      </View>
+                      <View style={{ width: 32, height: 32, borderRadius: 9, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(6, 182, 212, 0.14)", borderWidth: 1, borderColor: "rgba(6, 182, 212, 0.32)" }}>
+                        <Text style={{ color: "#22d3ee", fontSize: 10, fontFamily: "Cairo_800ExtraBold" }}>{slot.tag}</Text>
+                      </View>
+                    </View>
                   </View>
                 );
               })}
@@ -2971,13 +3066,14 @@ function createWatchStyles(colors: ThemePalette) {
   embedTopRow:   { position: "absolute", top: 0, left: 0, right: 0, flexDirection: "row", alignItems: "center", paddingHorizontal: 14, paddingBottom: 10, backgroundColor: "rgba(0,0,0,0.7)", gap: 10, zIndex: 10 },
 
   /* Picker header */
-  header:        { flexDirection: ROW_RTL, alignItems: "center", paddingHorizontal: 12, paddingBottom: 10, borderBottomWidth: 1, borderBottomColor: colors.border, gap: 8 },
+  header:        { flexDirection: "row-reverse", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 12, paddingBottom: 10, borderBottomWidth: 1, borderBottomColor: colors.border, gap: 8 },
   tvHeader:     { paddingHorizontal: 28, paddingBottom: 10, gap: 8 },
-  headerLeft:    { flexDirection: ROW_RTL, alignItems: "center", gap: 5 },
+  headerRightSection: { flexDirection: "row-reverse", alignItems: "center", gap: 10, flex: 1, minWidth: 0 },
+  headerLeft:    { flexDirection: "row-reverse", alignItems: "center", gap: 5 },
   headerCenter:  { flex: 1, alignItems: "flex-end" },
   headerBack:    { width: 36, height: 36, borderRadius: 12, backgroundColor: colors.surfaceElevated, borderWidth: 1, borderColor: colors.border, alignItems: "center", justifyContent: "center", flexShrink: 0 },
-  headerTitle:   { fontSize: 13, fontFamily: "Cairo_800ExtraBold", color: colors.textPrimary, textAlign: "center" },
-  headerSub:     { fontSize: 10, color: colors.textMuted, fontFamily: "Cairo_400Regular", textAlign: "center" },
+  headerTitle:   { fontSize: 13, fontFamily: "Cairo_800ExtraBold", color: colors.textPrimary, textAlign: "right" },
+  headerSub:     { fontSize: 10, color: colors.textMuted, fontFamily: "Cairo_400Regular", textAlign: "right" },
   tvHeaderTitle: { fontSize: 19, lineHeight: 27 },
   tvHeaderSub: { fontSize: 13, lineHeight: 20 },
   headerRefreshBtn: { width: 32, height: 32, borderRadius: 10, backgroundColor: colors.accentSurface, borderWidth: 1, borderColor: colors.accentBorder, alignItems: "center", justifyContent: "center" },

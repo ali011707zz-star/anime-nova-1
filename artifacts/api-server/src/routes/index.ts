@@ -9,6 +9,7 @@ import sanimeRouter   from "./sanime";
 import adsRouter      from "./ads";
 import sourceCatalogRouter from "./sourceCatalog.js";
 import pushRouter from "./push.js";
+import mangaRouter from "./manga.js";
 
 const router: IRouter = Router();
 
@@ -22,5 +23,6 @@ router.use(reportRouter);
 router.use(adsRouter);
 router.use(sourceCatalogRouter);
 router.use(pushRouter);
+router.use(mangaRouter);
 
 export default router;

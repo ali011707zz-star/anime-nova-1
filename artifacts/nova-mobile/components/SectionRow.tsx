@@ -81,9 +81,12 @@ export const SectionRow = React.memo(function SectionRow({ title, items, onSeeAl
   return (
     <View style={styles.container}>
       <SectionHeader onSeeAll={onSeeAll} focusable={tvMode}>
-        <Text style={[styles.title, { fontSize: scaleSize(17, 25), lineHeight: scaleSize(22, 34), color: colors.text }]}>
-          {title}
-        </Text>
+        <View style={styles.titleRow}>
+          <Text style={[styles.title, { fontSize: scaleSize(17, 25), lineHeight: scaleSize(22, 34), color: colors.text }]}>
+            {title}
+          </Text>
+          <View style={[styles.accentBar, { backgroundColor: colors.homeAccent || "#06b6d4" }]} />
+        </View>
       </SectionHeader>
       {tvMode ? (
         <TvFocusGuideView autoFocus={false} style={styles.focusGuide}>
@@ -113,7 +116,9 @@ export function SkeletonRow() {
 
 const styles = StyleSheet.create({
   container: { marginBottom: 24 },
-  title: { fontSize: 17, fontWeight: "800" },
+  titleRow: { flexDirection: "row", direction: "ltr", alignItems: "center", justifyContent: "flex-end", gap: 9 },
+  accentBar: { width: 3.5, height: 22, borderRadius: 2 },
+  title: { fontSize: 17, fontFamily: "Cairo_700Bold", textAlign: "right" },
   focusGuide: { minHeight: 1 },
   scroll: { paddingHorizontal: 16, gap: 14 },
   skeletonTitle: { width: 140, height: 18, borderRadius: 6, marginHorizontal: 16, marginBottom: 12 },

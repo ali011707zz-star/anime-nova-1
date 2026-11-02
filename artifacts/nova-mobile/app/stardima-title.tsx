@@ -87,7 +87,7 @@ export default function StardimaTitleScreen() {
     header: {
       minHeight: 54,
       flexDirection: "row",
-      direction: "rtl",
+      direction: "ltr",
       alignItems: "center",
       gap: 12,
       paddingHorizontal: 14,
@@ -455,6 +455,9 @@ export default function StardimaTitleScreen() {
     <View style={[styles.screen, { paddingTop: topPad }]}>
       <RewardedAdPrompt />
       <View style={[styles.header, { minHeight: tvMode ? 68 : 54 }]}>
+        <Text numberOfLines={1} style={[styles.heading, tvMode && { fontSize: 22 }]}>
+          {titleText(title)}
+        </Text>
         <Pressable
           onPress={() => router.canGoBack() ? router.back() : router.replace("/(tabs)/browse" as any)}
           focusable={tvMode}
@@ -464,9 +467,6 @@ export default function StardimaTitleScreen() {
         >
           <Ionicons name="chevron-forward" size={20} color={colors.textPrimary} />
         </Pressable>
-        <Text numberOfLines={1} style={[styles.heading, tvMode && { fontSize: 22 }]}>
-          {titleText(title)}
-        </Text>
       </View>
 
       {loading ? (

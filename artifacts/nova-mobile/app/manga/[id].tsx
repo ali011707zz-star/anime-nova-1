@@ -204,14 +204,13 @@ export default function MangaDetailScreen() {
     <View style={[styles.screen, { backgroundColor: colors.background }]}>
       {/* Top Header matching reference screenshot */}
       <View style={[styles.topBar, { paddingTop: topPad + 8, borderBottomColor: colors.border }]}>
+        {/* Left: Origin Pill */}
+        <View style={styles.originPill}>
+          <Text style={styles.originPillText}>{originLabel(manga?.countryOfOrigin)}</Text>
+        </View>
+
         {/* Right: Title + Back Button on physical right */}
         <View style={styles.topRightGroup}>
-          <Pressable
-            onPress={() => (router.canGoBack() ? router.back() : router.replace("/(tabs)" as any))}
-            style={[styles.backBtn, { backgroundColor: colors.surface, borderColor: colors.border }]}
-          >
-            <Ionicons name="chevron-forward" size={18} color={colors.textPrimary} />
-          </Pressable>
           <View style={styles.topTitleWrap}>
             <Text style={[styles.topTitleAr, { color: colors.textPrimary }]} numberOfLines={1}>
               {arabicTitle}
@@ -220,11 +219,12 @@ export default function MangaDetailScreen() {
               {englishTitle}
             </Text>
           </View>
-        </View>
-
-        {/* Left: Origin Pill */}
-        <View style={styles.originPill}>
-          <Text style={styles.originPillText}>{originLabel(manga?.countryOfOrigin)}</Text>
+          <Pressable
+            onPress={() => (router.canGoBack() ? router.back() : router.replace("/(tabs)" as any))}
+            style={[styles.backBtn, { backgroundColor: colors.surface, borderColor: colors.border }]}
+          >
+            <Ionicons name="chevron-forward" size={18} color={colors.textPrimary} />
+          </Pressable>
         </View>
       </View>
 
@@ -512,7 +512,7 @@ const styles = StyleSheet.create({
   errorText: { fontSize: 14, fontFamily: "Cairo_600SemiBold" },
   topBar: {
     flexDirection: "row",
-    direction: "rtl",
+    direction: "ltr",
     alignItems: "center",
     justifyContent: "space-between",
     paddingHorizontal: 14,
@@ -534,11 +534,11 @@ const styles = StyleSheet.create({
   },
   topRightGroup: {
     flexDirection: "row",
-    direction: "rtl",
+    direction: "ltr",
     alignItems: "center",
     gap: 10,
     flex: 1,
-    justifyContent: "flex-start",
+    justifyContent: "flex-end",
     marginLeft: 10,
   },
   topTitleWrap: {

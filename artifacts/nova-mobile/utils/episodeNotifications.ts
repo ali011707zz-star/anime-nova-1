@@ -3,11 +3,12 @@ import * as Notifications from "expo-notifications";
 import * as FileSystem from "expo-file-system";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { getBaseUrl } from "./api";
-import { PUSH_REGISTERED_KEY } from "./pushNotifications";
+import { arePushNotificationsEnabled } from "./pushNotifications";
 
 const KNOWN_EPISODES_KEY = "nova-known-latest-episodes-v2";
+const NOTIFIED_EPISODES_KEY = "nova-notified-latest-episodes-v1";
 const LAST_SYNC_KEY = "nova-latest-episodes-last-sync-v1";
-const SYNC_MIN_INTERVAL_MS = 10 * 60_000;
+const SYNC_MIN_INTERVAL_MS = 3 * 60_000;
 const CHANNEL_ID = "nova-new-episodes";
 let ready: Promise<boolean> | null = null;
 let syncInFlight: Promise<void> | null = null;
@@ -39,27 +40,28 @@ function configure(): Promise<boolean> {
             shouldSetBadge: true,
           }),
         });
-        // Push registration already owns the one-time permission prompt.
-        // Avoid immediately prompting a second time when remote registration
-        // fails and the app falls back to local notifications.
-        const permission = await Notifications.getPermissionsAsync();
+        const current = await Notifications.getPermissionsAsync();
+        const permission = current.granted
+          ? current
+          : await Notifications.requestPermissionsAsync();
         if (!permission.granted) {
-          console.warn(`[push] local fallback permission denied status=${permission.status || "unknown"}`);
+          console.warn(`[push] local notification permission denied status=${permission.status || "unknown"}`);
           return false;
         }
         if (Platform.OS === "android") {
           await Notifications.setNotificationChannelAsync(CHANNEL_ID, {
             name: "حلقات جديدة",
-            importance: Notifications.AndroidImportance.HIGH,
+            importance: Notifications.AndroidImportance.MAX,
+            lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
+            enableVibrate: true,
             sound: "default",
-            vibrationPattern: [0, 200, 100, 200],
+            vibrationPattern: [0, 250, 120, 250],
             showBadge: true,
           });
         }
-        console.info("[push] local notification fallback ready");
         return true;
       } catch (error) {
-        console.warn("[push] local fallback configuration failed:", error instanceof Error ? error.message : String(error));
+        console.warn("[push] local notification configuration failed:", error instanceof Error ? error.message : String(error));
         return false;
       }
     })().then((configured) => {
@@ -71,8 +73,6 @@ function configure(): Promise<boolean> {
 }
 
 function episodeKey(item: LatestEpisode): string {
-  // Prefer the stable AniList identity, but keep AnimeSlayer as a fallback
-  // for older/cold catalog responses that have not resolved AniList yet.
   const animeId = Number(item.animeId ?? item.anilistId ?? item.anslayerId ?? 0);
   const episode = Number(item.episode ?? 0);
   return animeId > 0 && episode > 0 ? `${animeId}:${episode}` : "";
@@ -102,15 +102,33 @@ async function localPosterUri(item: LatestEpisode): Promise<string | undefined> 
     const result = await FileSystem.downloadAsync(remote, target);
     return result.uri || remote;
   } catch {
-    // A remote URL is still useful on platforms that support remote
-    // notification attachments; never block the notification itself.
     return remote;
   }
 }
 
+export async function markEpisodeNotified(key: string): Promise<boolean> {
+  if (!key) return false;
+  try {
+    const raw = await AsyncStorage.getItem(NOTIFIED_EPISODES_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    const set = new Set<string>(Array.isArray(parsed) ? parsed : []);
+    if (set.has(key)) return false;
+    set.add(key);
+    await AsyncStorage.setItem(NOTIFIED_EPISODES_KEY, JSON.stringify([...set].slice(-500)));
+    return true;
+  } catch {
+    return true;
+  }
+}
+
 async function notifyOneEpisode(item: LatestEpisode): Promise<void> {
+  const key = episodeKey(item);
+  if (key && !(await markEpisodeNotified(key))) {
+    return;
+  }
   const title = String(item.titleAr || item.title || item.name || "أنمي").trim();
   const episode = Number(item.episode ?? 0);
+  const animeId = Number(item.animeId ?? item.anilistId ?? 0);
   let posterTimer: ReturnType<typeof setTimeout> | undefined;
   const poster = await Promise.race([
     localPosterUri(item),
@@ -119,48 +137,56 @@ async function notifyOneEpisode(item: LatestEpisode): Promise<void> {
     }),
   ]).finally(() => {
     if (posterTimer) clearTimeout(posterTimer);
-  }).catch((error) => {
-    console.warn("[push] episode poster unavailable; keeping text notification:", error instanceof Error ? error.message : String(error));
-    return undefined;
-  });
+  }).catch(() => undefined);
+
   const content: Notifications.NotificationContentInput = {
     title: `حلقة جديدة · ${title}`,
     body: `الحلقة ${episode} متاحة الآن للمشاهدة في Anime NOVA`,
     sound: "default",
+    priority: Notifications.AndroidNotificationPriority.MAX,
     data: {
       type: "new-episode",
-      animeId: Number(item.animeId ?? item.anilistId ?? 0),
+      animeId,
       episode,
       title,
       poster: posterOf(item),
     },
-  };
+    ...(Platform.OS === "android" ? { channelId: CHANNEL_ID } : {}),
+  } as Notifications.NotificationContentInput;
+
   if (poster) {
     content.attachments = [{
-      identifier: `episode-${Number(item.animeId ?? item.anilistId ?? 0)}-${episode}`,
+      identifier: `episode-${animeId}-${episode}`,
       url: poster,
       type: "image",
     }];
-    // Android uses the large icon when it cannot render an attachment.
     (content as any).largeIcon = poster;
   }
   try {
-    await Notifications.scheduleNotificationAsync({ content, trigger: null });
+    await Notifications.scheduleNotificationAsync({
+      identifier: `nova-ep-${animeId}-${episode}`,
+      content,
+      trigger: null,
+    });
   } catch (error) {
     if (!poster) throw error;
-    console.warn("[push] poster attachment failed; retrying text-only notification");
     delete content.attachments;
     delete (content as any).largeIcon;
-    await Notifications.scheduleNotificationAsync({ content, trigger: null });
+    await Notifications.scheduleNotificationAsync({
+      identifier: `nova-ep-${animeId}-${episode}`,
+      content,
+      trigger: null,
+    });
   }
 }
 
-export async function syncLatestEpisodeNotifications(): Promise<void> {
+export async function syncLatestEpisodeNotifications(force = false): Promise<void> {
   if (Platform.OS === "web" || syncInFlight) return syncInFlight ?? Promise.resolve();
   syncInFlight = (async () => {
+    if (!(await arePushNotificationsEnabled())) return;
     if (!(await configure())) return;
     const lastSync = Number(await AsyncStorage.getItem(LAST_SYNC_KEY) || 0);
-    if (Number.isFinite(lastSync) && lastSync > 0 && Date.now() - lastSync < SYNC_MIN_INTERVAL_MS) {
+    if (!force && Number.isFinite(lastSync) && lastSync > 0 && Date.now() - lastSync < SYNC_MIN_INTERVAL_MS) {
       return;
     }
     const response = await fetch(`${getBaseUrl()}/api/anime/anslayer-latest`, {
@@ -181,27 +207,23 @@ export async function syncLatestEpisodeNotifications(): Promise<void> {
         previous = new Set(stored.filter((value): value is string => typeof value === "string" && value.length > 0));
       }
     } catch {
-      // Corrupt local state should not make every sync look like a first run.
       previous = new Set();
     }
     const isFirstSync = previous.size === 0;
-    const hasRemotePush = (await AsyncStorage.getItem(PUSH_REGISTERED_KEY)) === "1";
-    const newItems = isFirstSync || hasRemotePush
+    /* Always allow local notification delivery for newly discovered episodes
+       (deduplicated by NOTIFIED_EPISODES_KEY and identifier `nova-ep-${animeId}-${episode}`)
+       so that even if remote FCM push is delayed or blocked in the background,
+       the device still posts the system notification banner. */
+    const newItems = isFirstSync
       ? []
       : normalized.filter(({ key }) => !previous.has(key));
-    // Keep a rolling union rather than replacing the snapshot. The upstream
-    // list is paginated/rolling; replacement causes a reappearing episode to
-    // be notified again after it temporarily falls out of the response.
+
     const next = new Set([...previous, ...normalized.map(({ key }) => key)]);
     await AsyncStorage.setItem(KNOWN_EPISODES_KEY, JSON.stringify([...next].slice(-500)));
     await AsyncStorage.setItem(LAST_SYNC_KEY, String(Date.now()));
 
-    // Keep one rich notification per episode. This lets the user open and
-    // identify a specific episode instead of receiving an opaque batch alert.
-    for (const { item } of newItems) {
+    for (const { item } of newItems.slice(0, 5)) {
       await notifyOneEpisode(item);
-      // A small spacing avoids Android notification shade coalescing on
-      // devices that receive several new episodes in the same sync.
       await new Promise((resolve) => setTimeout(resolve, 250));
     }
   })().catch((error) => {
@@ -213,9 +235,17 @@ export async function syncLatestEpisodeNotifications(): Promise<void> {
 }
 
 export function startEpisodeNotificationSync(): () => void {
-  void syncLatestEpisodeNotifications();
+  void syncLatestEpisodeNotifications(true);
+  const intervalId = setInterval(() => {
+    void syncLatestEpisodeNotifications(false);
+  }, SYNC_MIN_INTERVAL_MS);
   const subscription = AppState.addEventListener("change", (state) => {
-    if (state === "active") void syncLatestEpisodeNotifications();
+    if (state === "active" || state === "background") {
+      void syncLatestEpisodeNotifications(state === "active");
+    }
   });
-  return () => subscription.remove();
+  return () => {
+    clearInterval(intervalId);
+    subscription.remove();
+  };
 }

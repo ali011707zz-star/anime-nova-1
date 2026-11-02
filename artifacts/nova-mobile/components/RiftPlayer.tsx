@@ -132,12 +132,12 @@ function logPlaybackStage(url: string | undefined, stage: string, detail = ""): 
 
 function getPlaybackBufferOptions(animePlayback: boolean): BufferOptions {
   /* expo-video 3.x accepts buffer durations in seconds. Android maps
-     preferredForwardBufferDuration to its target buffer duration; the old
-     Media3 millisecond keys and backBufferDurationMs are not part of this API. */
+     preferredForwardBufferDuration to its target buffer duration.
+     minBufferForPlayback = 1s and waitsToMinimizeStalling = false provide instant playback start without initial stall. */
   return {
-    preferredForwardBufferDuration: animePlayback ? 24 : 8,
-    waitsToMinimizeStalling: animePlayback,
-    minBufferForPlayback: animePlayback ? 3 : 2,
+    preferredForwardBufferDuration: animePlayback ? 16 : 8,
+    waitsToMinimizeStalling: false,
+    minBufferForPlayback: 1,
   };
 }
 
@@ -2252,7 +2252,7 @@ function ExpoRiftPlayer({
       };
       if (animePlayback && typeof seekPlayer.seekTo === "function") {
         try {
-          seekPlayer.seekTo(target, 1, 1);
+          seekPlayer.seekTo(target, 0.5, 0.5);
         } catch {
           player.currentTime = target;
         }
@@ -2264,11 +2264,8 @@ function ExpoRiftPlayer({
       setPostSeekPct(null);
       return;
     }
-    /* أعِد ضبط كاشف الـ stall — بدون هذا، القفز للخلف يجعل pos أصغر من
-       lastPos المُخزَّن فيبقى عدّاد "بدون تقدّم" السابق للتنقّل يعمل، فيُطلق
-       "stall" زائف بعد ثوانٍ قليلة من القفز رغم أن التشغيل طبيعي تماماً —
-       هذا هو سبب التجمّد الظاهري بعد التقديم/الإرجاع الذي أبلغ عنه المستخدم. */
-    stallRef.current = { lastPos: target, lastAt: Date.now() };
+    /* أعِد ضبط كاشف الـ stall مع فترة سماح 2.5 ثانية لمنع تجمد البث أو التدوير الخاطئ بعد التقديم */
+    stallRef.current = { lastPos: target, lastAt: Date.now() + 2500 };
   }, [animePlayback, beginSeekRecovery, cancelSeekRecovery, player]);
   const seek = useCallback((secs: number) => {
     fadeIn();
@@ -3131,6 +3128,12 @@ function ExpoRiftPlayer({
             // الأول في DOM → يظهر على اليمين، الأخير → على اليسار
             // نحل الترتيب فقط (لا نغير flexDirection)
             const nativeRTL = Platform.OS !== "web" && I18nManager.isRTL;
+            const localizedEpTitle = (() => {
+              if (!episodeTitle) return null;
+              const epMatch = episodeTitle.match(/^(?:Episode|Ep\.?)\s*(\d+)$/i);
+              if (epMatch) return `الحلقة ${epMatch[1]}`;
+              return episodeTitle;
+            })();
             const infoBlock = (
               <View style={[s.topInfoWrap, tvMode && s.tvTopInfoWrap, nativeRTL && !tvMode && { alignItems: "flex-end" }]}>
                 {title ? (
@@ -3148,8 +3151,8 @@ function ExpoRiftPlayer({
                     </View>
                   ) : null}
                 </View>
-                {episodeTitle ? (
-                    <Text style={[s.topEpTitle, tvMode && s.tvTopEpTitle, { color: colors.playerSecondaryText }]} numberOfLines={1}>{episodeTitle}</Text>
+                {localizedEpTitle ? (
+                    <Text style={[s.topEpTitle, tvMode && s.tvTopEpTitle, { color: colors.playerSecondaryText }]} numberOfLines={1}>{localizedEpTitle}</Text>
                 ) : null}
                 {autoSubSource ? (
                   <View style={[s.autoSubBadge, nativeRTL && { alignSelf: "flex-end" }]}>
@@ -3213,7 +3216,7 @@ function ExpoRiftPlayer({
             return (
               <LinearGradient
                 colors={colors.playerTopGradient}
-                style={[s.topBar, tvMode && s.tvTopBar, { paddingTop: Platform.OS === "web" ? 12 : insets.top + 6 }]}
+                style={[s.topBar, tvMode && s.tvTopBar, { paddingTop: Platform.OS === "web" ? 14 : Math.max(insets.top + 16, 24) }]}
               >
                 {/* RTL: مجموعة الأزرار أولاً (تظهر يميناً)، معلومات ثانياً (تظهر يساراً) */}
                 {nativeRTL ? <>{btnsBlock}{infoBlock}</> : <>{infoBlock}{btnsBlock}</>}
@@ -4063,53 +4066,59 @@ const s = StyleSheet.create({
     paddingHorizontal: 40,
     paddingBottom: 16,
   },
-  /* معلومات الأنمي — أقصى اليسار العلوي، حجم صغير لعدم التداخل */
+  /* معلومات الأنمي — واضحة ومقروءة بالعربية ومنسدلة لأسفل قليلاً */
   topInfoWrap: {
-    flexShrink: 1, maxWidth: "58%", flexDirection: "column", gap: 2, marginRight: 4,
+    flexShrink: 1, maxWidth: "68%", flexDirection: "column", gap: 5, marginRight: 4,
     alignItems: "flex-start",
+    backgroundColor: "rgba(10, 15, 26, 0.75)",
+    marginTop: 8,
+    paddingTop: 6,
+    paddingHorizontal: 12, paddingVertical: 8,
+    borderRadius: 14,
+    borderWidth: 1, borderColor: "rgba(255, 255, 255, 0.14)",
   },
   tvTopInfoWrap: {
     position: "absolute",
     /* RN mirrors left/right in RTL: right becomes the physical left side. */
     right: 20,
     top: 22,
-    width: "34%",
+    width: "36%",
     marginRight: 0,
-    gap: 5,
+    gap: 6,
     zIndex: 2,
   },
   topInfoTitle: {
-    color: "#fff", fontSize: 12, fontFamily: "Cairo_700Bold",
+    color: "#fff", fontSize: 16, fontFamily: "Cairo_700Bold", lineHeight: 22,
     textShadowColor: "rgba(0,0,0,0.85)", textShadowRadius: 5, textShadowOffset: { width: 0, height: 1 },
   },
-  tvTopInfoTitle: { fontSize: 20 },
+  tvTopInfoTitle: { fontSize: 22 },
   topInfoRow: {
-    flexDirection: "row", alignItems: "center", gap: 4, flexWrap: "nowrap",
+    flexDirection: "row", alignItems: "center", gap: 6, flexWrap: "nowrap", marginTop: 2,
   },
   topEpBadge: {
-    paddingHorizontal: 4, paddingVertical: 1, borderRadius: 4,
-    backgroundColor: "rgba(139,92,246,0.30)", borderWidth: 1, borderColor: "rgba(167,139,250,0.45)",
+    paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6,
+    backgroundColor: "rgba(139,92,246,0.35)", borderWidth: 1, borderColor: "rgba(167,139,250,0.55)",
   },
   topEpText: {
-    color: "rgba(221,214,254,0.95)", fontSize: 7, fontFamily: "Cairo_700Bold", letterSpacing: 0.1,
+    color: "rgba(221,214,254,0.95)", fontSize: 12, fontFamily: "Cairo_700Bold", letterSpacing: 0.1,
   },
   topQualityBadge: {
-    paddingHorizontal: 4, paddingVertical: 1, borderRadius: 4,
-    backgroundColor: "rgba(251,191,36,0.18)", borderWidth: 1, borderColor: "rgba(251,191,36,0.40)",
+    paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6,
+    backgroundColor: "rgba(251,191,36,0.22)", borderWidth: 1, borderColor: "rgba(251,191,36,0.45)",
   },
   topQualityText: {
-    color: "rgba(253,224,71,0.90)", fontSize: 7, fontFamily: "Cairo_700Bold", letterSpacing: 0.1,
+    color: "rgba(253,224,71,0.95)", fontSize: 12, fontFamily: "Cairo_700Bold", letterSpacing: 0.1,
   },
   topEpTitle: {
-    color: "rgba(255,255,255,0.60)", fontSize: 8, fontFamily: "Cairo_400Regular",
-    maxWidth: 180,
+    color: "rgba(255,255,255,0.85)", fontSize: 13, fontFamily: "Cairo_600SemiBold",
+    maxWidth: 260, lineHeight: 18, marginTop: 2,
     textShadowColor: "rgba(0,0,0,0.80)", textShadowRadius: 4, textShadowOffset: { width: 0, height: 1 },
   },
-  tvTopEpBadge: { paddingHorizontal: 9, paddingVertical: 4, borderRadius: 8 },
-  tvTopEpText: { fontSize: 15 },
-  tvTopQualityBadge: { paddingHorizontal: 9, paddingVertical: 4, borderRadius: 8 },
-  tvTopQualityText: { fontSize: 14 },
-  tvTopEpTitle: { maxWidth: 420, fontSize: 15 },
+  tvTopEpBadge: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 10 },
+  tvTopEpText: { fontSize: 16 },
+  tvTopQualityBadge: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 10 },
+  tvTopQualityText: { fontSize: 15 },
+  tvTopEpTitle: { maxWidth: 460, fontSize: 16 },
   autoSubBadge: {
     marginTop: 3, alignSelf: "flex-start",
     paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6,

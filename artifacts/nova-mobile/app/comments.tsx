@@ -78,6 +78,7 @@ export default function CommentsPage() {
     : "التعليقات";
 
   const [comments, setComments]   = useState<Comment[]>([]);
+  const [highlightId, setHighlightId] = useState<string | null>(params.highlightId || params.commentId || null);
   const [loading, setLoading]     = useState(false);
   const [posting, setPosting]     = useState(false);
   const [text, setText]           = useState("");
@@ -118,7 +119,19 @@ export default function CommentsPage() {
       const r = await secureFetch(`${base}/api/comments?${ps}`);
       if (r.ok) {
         const d = await r.json();
-        setComments(d.comments || []);
+        const loaded: Comment[] = d.comments || [];
+        setComments(loaded);
+        const targetId = params.highlightId || params.commentId;
+        if (targetId) {
+          setHighlightId(targetId);
+          setTimeout(() => {
+            const idx = loaded.findIndex(c => String(c.id) === String(targetId));
+            if (idx >= 0) {
+              try { listRef.current?.scrollToIndex({ index: Math.max(0, idx), animated: true }); } catch {}
+            }
+          }, 400);
+          setTimeout(() => setHighlightId(null), 5000);
+        }
       }
     } catch {}
     setLoading(false);
@@ -204,42 +217,49 @@ export default function CommentsPage() {
   const topLevel = comments.filter(c => !c.parentId);
   const replies  = (parentId: string) => comments.filter(c => c.parentId === parentId);
 
-  const renderComment = (c: Comment, isReply = false) => (
-    <View key={c.id} style={[s.commentWrap, isReply && s.replyWrap]}>
-      {isReply && <View style={s.replyLine} />}
-      <Avatar username={c.displayName || c.username} avatarUrl={c.avatarUrl} />
-      <View style={{ flex: 1, gap: 4 }}>
-        <View style={s.commentMeta}>
-          <Text style={s.commentUser}>{c.displayName || c.username}</Text>
-          {c.username && c.displayName && c.username !== c.displayName && (
-            <Text style={s.commentHandle}>@{c.username}</Text>
-          )}
-          {c.replyToUsername && <Text style={s.replyTag}>↩ {c.replyToUsername}</Text>}
-          <Text style={s.commentTime}>{timeAgo(c.createdAt)}</Text>
-        </View>
-        <Text style={s.commentText}>{c.text}</Text>
+  const renderComment = (c: Comment, isReply = false) => {
+    const isHighlighted = String(c.id) === String(highlightId);
+    return (
+      <View key={c.id} style={[
+        s.commentWrap,
+        isReply && s.replyWrap,
+        isHighlighted && { borderColor: "#06b6d4", borderWidth: 2, backgroundColor: "rgba(6, 182, 212, 0.16)", borderRadius: 14 }
+      ]}>
+        {isReply && <View style={s.replyLine} />}
+        <Avatar username={c.displayName || c.username} avatarUrl={c.avatarUrl} />
+        <View style={{ flex: 1, gap: 4 }}>
+          <View style={s.commentMeta}>
+            <Text style={s.commentUser}>{c.displayName || c.username}</Text>
+            {c.username && c.displayName && c.username !== c.displayName && (
+              <Text style={s.commentHandle}>@{c.username}</Text>
+            )}
+            {c.replyToUsername && <Text style={s.replyTag}>↩ {c.replyToUsername}</Text>}
+            <Text style={s.commentTime}>{timeAgo(c.createdAt)}</Text>
+          </View>
+          <Text style={s.commentText}>{c.text}</Text>
           <View style={s.commentActions}>
-          <Pressable onPress={() => toggleLike(c)} focusable={tvMode}
-            style={({ focused }) => [s.actionBtn, tvMode && tvFocusStyle(focused)]} disabled={liking.has(c.id)}>
-            <Ionicons name="heart" size={14} color={c.liked ? colors.destructive : colors.textMuted} />
-            {c.likes > 0 && <Text style={[s.actionBtnText, c.liked && { color: colors.destructive }]}>{c.likes}</Text>}
-          </Pressable>
-          <Pressable onPress={() => { setReplyTo(c); setTimeout(() => inputRef.current?.focus(), 100); }} focusable={tvMode}
-            style={({ focused }) => [s.actionBtn, tvMode && tvFocusStyle(focused)]}>
-            <Ionicons name="return-up-back" size={14} color={colors.accent} />
-            <Text style={[s.actionBtnText, { color: colors.accent }]}>رد</Text>
-          </Pressable>
-          {c.userId === myUserId && (
-            <Pressable onPress={() => deleteComment(c)} focusable={tvMode}
-              style={({ focused }) => [s.actionBtn, tvMode && tvFocusStyle(focused)]}>
-              <Ionicons name="trash" size={13} color={colors.destructive} />
+            <Pressable onPress={() => toggleLike(c)} focusable={tvMode}
+              style={({ focused }) => [s.actionBtn, tvMode && tvFocusStyle(focused)]} disabled={liking.has(c.id)}>
+              <Ionicons name="heart" size={14} color={c.liked ? colors.destructive : colors.textMuted} />
+              {c.likes > 0 && <Text style={[s.actionBtnText, c.liked && { color: colors.destructive }]}>{c.likes}</Text>}
             </Pressable>
-          )}
+            <Pressable onPress={() => { setReplyTo(c); setTimeout(() => inputRef.current?.focus(), 100); }} focusable={tvMode}
+              style={({ focused }) => [s.actionBtn, tvMode && tvFocusStyle(focused)]}>
+              <Ionicons name="return-up-back" size={14} color={colors.accent} />
+              <Text style={[s.actionBtnText, { color: colors.accent }]}>رد</Text>
+            </Pressable>
+            {c.userId === myUserId && (
+              <Pressable onPress={() => deleteComment(c)} focusable={tvMode}
+                style={({ focused }) => [s.actionBtn, tvMode && tvFocusStyle(focused)]}>
+                <Ionicons name="trash" size={13} color={colors.destructive} />
+              </Pressable>
+            )}
+          </View>
+          {replies(c.id).map(r => renderComment(r, true))}
         </View>
-        {replies(c.id).map(r => renderComment(r, true))}
       </View>
-    </View>
-  );
+    );
+  };
 
   return (
     <View style={[s.container, { paddingTop: Platform.OS === "web" ? 0 : insets.top }]}>
@@ -247,7 +267,7 @@ export default function CommentsPage() {
       <View style={s.header}>
         <Pressable onPress={() => router.canGoBack() ? router.back() : router.replace("/(tabs)" as any)} focusable={tvMode}
           style={({ focused }) => [s.backBtn, tvMode && tvFocusStyle(focused)]}>
-          <Ionicons name="chevron-forward" size={20} color={colors.textPrimary} />
+          <Ionicons name="chevron-back" size={20} color={colors.textPrimary} style={{ transform: [{ scaleX: -1 }] }} />
         </Pressable>
         <View style={{ flex: 1, alignItems: "flex-end" }}>
           <View style={s.headerTitleRow}>

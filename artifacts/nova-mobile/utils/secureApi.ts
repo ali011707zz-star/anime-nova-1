@@ -24,9 +24,26 @@ let _cachedToken: string | null = null;
 let _cachedExp: number = 0;
 let _cachedDownloadToken: string | null = null;
 let _cachedDownloadExp: number = 0;
+let _cachedUserToken: string | null | undefined = undefined;
+let _cachedExpoFetch: typeof fetch | null = null;
 
 // Singleton: يمنع 20+ طلب token متوازٍ عند فتح شاشة المشاهدة
 let _inflightFetch: Promise<string | null> | null = null;
+
+async function getExpoFetch(): Promise<typeof fetch> {
+  if (_cachedExpoFetch) return _cachedExpoFetch;
+  try {
+    const mod = await import("expo/fetch");
+    if (typeof mod?.fetch === "function") {
+      _cachedExpoFetch = mod.fetch as unknown as typeof fetch;
+      return _cachedExpoFetch;
+    }
+  } catch {}
+  return fetch;
+}
+
+// Pre-warm expo/fetch module at startup
+void getExpoFetch();
 
 async function secureGet(key: string): Promise<string | null> {
   try {
@@ -52,12 +69,22 @@ async function secureDelete(key: string): Promise<void> {
 }
 
 async function getStoredToken(): Promise<string | null> {
-  const token = await secureGet(TOKEN_KEY);
-  const expStr = await secureGet(TOKEN_EXP_KEY);
+  const [token, expStr] = await Promise.all([
+    secureGet(TOKEN_KEY),
+    secureGet(TOKEN_EXP_KEY),
+  ]);
   if (!token || !expStr) return null;
   const exp = parseInt(expStr, 10);
   if (isNaN(exp) || Date.now() / 1000 > exp - 60) return null;
+  _cachedToken = token;
+  _cachedExp = exp;
   return token;
+}
+
+async function getUserTokenCached(): Promise<string | null> {
+  if (_cachedUserToken !== undefined) return _cachedUserToken;
+  _cachedUserToken = await secureGet(USER_TOKEN_KEY);
+  return _cachedUserToken;
 }
 
 async function doFetchFreshToken(): Promise<string | null> {
@@ -83,14 +110,18 @@ async function doFetchFreshToken(): Promise<string | null> {
       const data = await res.json();
       if (!data.token || !data.exp) continue;
       _cachedToken = data.token;
-      _cachedExp = data.exp;
-      await secureSet(TOKEN_KEY, data.token);
-      await secureSet(TOKEN_EXP_KEY, data.exp.toString());
+      _cachedExp = Number(data.exp);
+      void Promise.all([
+        secureSet(TOKEN_KEY, data.token),
+        secureSet(TOKEN_EXP_KEY, data.exp.toString()),
+      ]);
       if (data.downloadToken && data.downloadExp) {
         _cachedDownloadToken = String(data.downloadToken);
         _cachedDownloadExp = Number(data.downloadExp);
-        await secureSet(DOWNLOAD_TOKEN_KEY, _cachedDownloadToken);
-        await secureSet(DOWNLOAD_TOKEN_EXP_KEY, _cachedDownloadExp.toString());
+        void Promise.all([
+          secureSet(DOWNLOAD_TOKEN_KEY, _cachedDownloadToken),
+          secureSet(DOWNLOAD_TOKEN_EXP_KEY, _cachedDownloadExp.toString()),
+        ]);
       }
       return data.token;
     } catch {
@@ -118,7 +149,7 @@ export async function getAuthToken(): Promise<string | null> {
   }
   if (_cachedToken && Date.now() / 1000 < _cachedExp - 60) return _cachedToken;
   const stored = await getStoredToken();
-  if (stored) { _cachedToken = stored; return stored; }
+  if (stored) return stored;
   return fetchFreshToken();
 }
 
@@ -129,8 +160,10 @@ export async function getDownloadToken(): Promise<string | null> {
   if (_cachedDownloadToken && Date.now() / 1000 < _cachedDownloadExp - 60) {
     return _cachedDownloadToken;
   }
-  const stored = await secureGet(DOWNLOAD_TOKEN_KEY);
-  const expStr = await secureGet(DOWNLOAD_TOKEN_EXP_KEY);
+  const [stored, expStr] = await Promise.all([
+    secureGet(DOWNLOAD_TOKEN_KEY),
+    secureGet(DOWNLOAD_TOKEN_EXP_KEY),
+  ]);
   const exp = Number(expStr);
   if (stored && Number.isFinite(exp) && Date.now() / 1000 < exp - 60) {
     _cachedDownloadToken = stored;
@@ -143,6 +176,7 @@ export async function getDownloadToken(): Promise<string | null> {
 
 /** Pre-warm: يُستدعى قبل الطلبات المتوازية لضمان وجود توكن صالح */
 export async function warmAuthToken(): Promise<void> {
+  if (_cachedToken && Date.now() / 1000 < _cachedExp - 60) return;
   await getAuthToken();
 }
 
@@ -151,18 +185,22 @@ export async function invalidateToken(): Promise<void> {
   _cachedExp = 0;
   _cachedDownloadToken = null;
   _cachedDownloadExp = 0;
-  await secureDelete(TOKEN_KEY);
-  await secureDelete(TOKEN_EXP_KEY);
-  await secureDelete(DOWNLOAD_TOKEN_KEY);
-  await secureDelete(DOWNLOAD_TOKEN_EXP_KEY);
+  await Promise.all([
+    secureDelete(TOKEN_KEY),
+    secureDelete(TOKEN_EXP_KEY),
+    secureDelete(DOWNLOAD_TOKEN_KEY),
+    secureDelete(DOWNLOAD_TOKEN_EXP_KEY),
+  ]);
 }
 
 export async function setUserAuthToken(token: string | null): Promise<void> {
+  _cachedUserToken = token;
   if (token) await secureSet(USER_TOKEN_KEY, token);
   else await secureDelete(USER_TOKEN_KEY);
 }
 
 export async function clearUserAuthToken(): Promise<void> {
+  _cachedUserToken = null;
   await secureDelete(USER_TOKEN_KEY);
 }
 
@@ -173,7 +211,7 @@ export async function secureFetch(
   if (!getRuntimeIntegrity().trusted) {
     throw new Error("Untrusted runtime");
   }
-  const [token, userToken] = await Promise.all([getAuthToken(), secureGet(USER_TOKEN_KEY)]);
+  const [token, userToken] = await Promise.all([getAuthToken(), getUserTokenCached()]);
   const buildHeaders = (tok: string | null): Record<string, string> => {
     const h: Record<string, string> = {
       ...(options.headers as Record<string, string> || {}),
@@ -212,8 +250,7 @@ export async function secureStreamFetch(
   if (!getRuntimeIntegrity().trusted) {
     throw new Error("Untrusted runtime");
   }
-  const token = await getAuthToken();
-  const { fetch: expoFetch } = await import("expo/fetch");
+  const [token, expoFetch] = await Promise.all([getAuthToken(), getExpoFetch()]);
   const headers: Record<string, string> = {
     ...(options.headers as Record<string, string> || {}),
     Accept: "text/event-stream",

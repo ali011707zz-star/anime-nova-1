@@ -351,12 +351,12 @@ function notifyListeners(): void {
 function notifyProgressListeners(): void {
   const now = Date.now();
   const elapsed = now - lastProgressNotifyAt;
-  if (elapsed >= 750) {
+  if (elapsed >= 350) {
     lastProgressNotifyAt = now;
     for (const listener of listeners) {
       try { listener(); } catch {}
     }
-    if (now - lastProgressPersistAt >= 3_000) {
+    if (now - lastProgressPersistAt >= 2_500) {
       lastProgressPersistAt = now;
       persistActive();
     }
@@ -370,11 +370,11 @@ function notifyProgressListeners(): void {
       try { listener(); } catch {}
     }
     const persistAt = Date.now();
-    if (persistAt - lastProgressPersistAt >= 3_000) {
+    if (persistAt - lastProgressPersistAt >= 2_500) {
       lastProgressPersistAt = persistAt;
       persistActive();
     }
-  }, Math.max(50, 750 - elapsed));
+  }, Math.max(50, 350 - elapsed));
 }
 
 async function configureNotifications(): Promise<boolean> {
@@ -582,6 +582,7 @@ function requestHeaders(params: StartDownloadParams): Record<string, string> {
     "X-Nova-Package": MOBILE_PACKAGE_NAME,
     "X-Nova-Version": MOBILE_VERSION,
     "User-Agent": `NovaAnime/${MOBILE_VERSION} (Expo; Mobile)`,
+    "Connection": "keep-alive",
     /* DownloadResumable may issue Range requests after a background retry.
        Explicitly advertise byte-range support to the VPS conversion route. */
     "Accept": "video/mp4,video/*;q=0.9,*/*;q=0.1",
@@ -1266,7 +1267,14 @@ if (Platform.OS !== "web") {
        session continues independently of the watch screen. */
     persistActive();
     if (state === "active") {
-      for (const entry of active.values()) updateDownloadNotification(entry, true);
+      void restoreNativeDownloads();
+      for (const entry of active.values()) {
+        updateDownloadNotification(entry, true);
+        if (entry.nativeJobId != null && entry.status === "downloading") {
+          if (entry.nativePollTimer) clearTimeout(entry.nativePollTimer);
+          void pollNativeDownload(entry);
+        }
+      }
     }
   });
 }

@@ -5,8 +5,6 @@ export type LatestEpisodeItem = {
   anilistId?: number;
   anslayerId: number;
   awAnimeId?: string;
-  anifoxId?: string;
-  providerTitleId?: string;
   source: string;
   name: string;
   romaji?: string;
@@ -15,7 +13,6 @@ export type LatestEpisodeItem = {
   titleVariants?: string[];
   titleAr?: string;
   episode: number;
-  season?: number;
   cover: string;
   year?: string;
   averageScore?: number | null;
@@ -35,8 +32,6 @@ export function normalizeLatestEpisodeItem(item: any, sourceOverride?: string): 
   );
   const rawAwAnimeId = item?.awAnimeId ?? item?.aw_anime_id ??
     (source === "animewitcher" ? item?.anime_id : "");
-  const rawAnifoxId = item?.anifoxId ?? item?.providerTitleId ??
-    (source === "anifox" ? item?.content_id : "");
   const animeId = Number.isInteger(rawAniListId) && rawAniListId > 0 ? rawAniListId : 0;
   const anslayerId = Number.isInteger(rawAnimeSlayerId) && rawAnimeSlayerId > 0
     ? rawAnimeSlayerId
@@ -73,8 +68,6 @@ export function normalizeLatestEpisodeItem(item: any, sourceOverride?: string): 
     anilistId: animeId || undefined,
     anslayerId,
     awAnimeId: String(rawAwAnimeId || "").trim(),
-    anifoxId: String(rawAnifoxId || "").trim(),
-    providerTitleId: String(rawAnifoxId || "").trim(),
     source,
     name,
     titleAr,
@@ -102,7 +95,7 @@ async function fetchSource(endpoint: string, source: string, signal?: AbortSigna
   return rows
     .map((item: unknown) => normalizeLatestEpisodeItem(item, source))
     .filter((item: LatestEpisodeItem) =>
-      (item.animeId > 0 || item.anslayerId > 0 || Boolean(item.awAnimeId) || Boolean(item.anifoxId)) &&
+      (item.animeId > 0 || item.anslayerId > 0 || Boolean(item.awAnimeId)) &&
       item.name &&
       Number(item.episode) > 0,
     );
@@ -110,7 +103,8 @@ async function fetchSource(endpoint: string, source: string, signal?: AbortSigna
 
 export async function fetchLatestEpisodes(signal?: AbortSignal): Promise<LatestEpisodeItem[]> {
   const results = await Promise.allSettled([
-    fetchSource("anifox-latest", "anifox", signal),
+    fetchSource("anslayer-latest", "anslayer", signal),
+    fetchSource("aw-latest", "animewitcher", signal),
   ]);
   const fulfilled = results.filter(
     (result): result is PromiseFulfilledResult<LatestEpisodeItem[]> => result.status === "fulfilled",
@@ -119,7 +113,7 @@ export async function fetchLatestEpisodes(signal?: AbortSignal): Promise<LatestE
 
   const items = fulfilled
     .flatMap((result) => result.value)
-    .filter((item) => item.source === "anifox");
+    .sort((a, b) => Number(b.episode) - Number(a.episode));
   if (items.length === 0) {
     throw new Error("لم تصل بيانات أحدث الحلقات من المصادر");
   }
