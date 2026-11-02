@@ -76,7 +76,7 @@ async function fetchMangaDarHtml(url: string): Promise<string> {
       referer: `${MANGADAR_BASE}/manga/`,
       solve_cf: true,
     }),
-    signal: AbortSignal.timeout(35_000),
+    signal: AbortSignal.timeout(60_000),
   });
   if (!res.ok) {
     throw new Error(`Hound service HTTP ${res.status} for ${url}`);

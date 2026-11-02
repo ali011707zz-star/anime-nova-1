@@ -37,7 +37,7 @@ _session = None
 _session_lock = asyncio.Lock()
 _session_idle_since: float = 0.0
 _domain_pages: dict[str, object] = {}
-SESSION_IDLE_TIMEOUT = int(os.getenv("HOUND_IDLE_TIMEOUT", "1800"))  # 30 دقيقة
+SESSION_IDLE_TIMEOUT = int(os.getenv("HOUND_IDLE_TIMEOUT", "0"))  # إبقاء الجلسة دافئة دائماً
 
 
 async def get_session():
@@ -165,15 +165,17 @@ async def fetch_via_domain_page(session, url: str) -> tuple[str, int]:
 
 
 async def warm_mangadar():
-    """تسخين جلسة mangadar.com عند بدء الخدمة ليكون أول طلب سريعاً."""
-    try:
-        await asyncio.sleep(1.0)
-        async with _session_lock:
-            session = await get_session()
-            await fetch_via_domain_page(session, "https://mangadar.com/manga/")
-            log.info("🔥 mangadar.com warm session initialized")
-    except Exception as e:
-        log.warning(f"mangadar warmup skipped: {e}")
+    """تسخين جلسة mangadar.com عند بدء الخدمة وإبقاؤها نشطة كل 12 دقيقة."""
+    await asyncio.sleep(1.0)
+    while True:
+        try:
+            async with _session_lock:
+                session = await get_session()
+                await fetch_via_domain_page(session, "https://mangadar.com/manga/")
+                log.info("🔥 mangadar.com warm session active")
+        except Exception as e:
+            log.warning(f"mangadar warmup/keepalive error: {e}")
+        await asyncio.sleep(720)
 
 
 async def idle_watchdog():
