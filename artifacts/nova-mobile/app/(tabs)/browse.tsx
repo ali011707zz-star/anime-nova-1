@@ -80,22 +80,22 @@ const STATUS_OPTIONS = [
 const ROW_RTL = I18nManager.isRTL ? "row" : "row-reverse";
 
 const GENRES_WITH_COVERS = [
-  { genre: "Adventure",     ar: "مغامرة",      color: "#D97706", poster: "https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx21-YCDoj1EkAxFn.jpg" },
-  { genre: "Action",        ar: "أكشن",        color: "#CA8A04", poster: "https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx101922-PEn1CTc93blC.jpg" },
-  { genre: "Comedy",        ar: "كوميديا",     color: "#EAB308", poster: "https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx21087-UV2tu6exRFXz.jpg" },
-  { genre: "Fantasy",       ar: "فانتازيا",    color: "#7C3AED", poster: "https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx113415-bbBWj4pEFseh.jpg" },
-  { genre: "Drama",         ar: "دراما",       color: "#DB2777", poster: "https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx16498-C6FPmWm59CyP.jpg" },
-  { genre: "Romance",       ar: "رومانسي",     color: "#EC4899", poster: "https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx154587-n1fmjRv4JQUd.jpg" },
-  { genre: "Sci-Fi",        ar: "خيال علمي",   color: "#0891B2", poster: "https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx151807-m1gX3iwfIsLu.png" },
-  { genre: "Supernatural",  ar: "خوارق",       color: "#6D28D9", poster: "https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx113415-bbBWj4pEFseh.jpg" },
-  { genre: "Mystery",       ar: "غموض",        color: "#4F46E5", poster: "https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx1535-lawCwhzhi96X.jpg" },
-  { genre: "Sports",        ar: "رياضة",       color: "#16A34A", poster: "https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx21087-UV2tu6exRFXz.jpg" },
-  { genre: "Slice of Life", ar: "حياة يومية",  color: "#EA580C", poster: "https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx154587-n1fmjRv4JQUd.jpg" },
-  { genre: "Horror",        ar: "رعب",         color: "#DC2626", poster: "https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx16498-C6FPmWm59CyP.jpg" },
-  { genre: "Psychological", ar: "نفسي",        color: "#9333EA", poster: "https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx1535-lawCwhzhi96X.jpg" },
-  { genre: "Music",         ar: "موسيقى",      color: "#C026D3", poster: "https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx101922-PEn1CTc93blC.jpg" },
-  { genre: "Mecha",         ar: "ميكا",        color: "#2563EB", poster: "https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx151807-m1gX3iwfIsLu.png" },
-  { genre: "Isekai",        ar: "إيسيكاي",     color: "#0284C7", poster: "https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx21-YCDoj1EkAxFn.jpg" },
+  { genre: "Adventure",     ar: "مغامرة",      color: "#D97706", poster: "https://img.anili.st/media/21" },
+  { genre: "Action",        ar: "أكشن",        color: "#CA8A04", poster: "https://img.anili.st/media/101922" },
+  { genre: "Comedy",        ar: "كوميديا",     color: "#EAB308", poster: "https://img.anili.st/media/21087" },
+  { genre: "Fantasy",       ar: "فانتازيا",    color: "#7C3AED", poster: "https://img.anili.st/media/113415" },
+  { genre: "Drama",         ar: "دراما",       color: "#DB2777", poster: "https://img.anili.st/media/16498" },
+  { genre: "Romance",       ar: "رومانسي",     color: "#EC4899", poster: "https://img.anili.st/media/124080" },
+  { genre: "Sci-Fi",        ar: "خيال علمي",   color: "#0891B2", poster: "https://img.anili.st/media/9253" },
+  { genre: "Supernatural",  ar: "خوارق",       color: "#6D28D9", poster: "https://img.anili.st/media/269" },
+  { genre: "Mystery",       ar: "غموض",        color: "#4F46E5", poster: "https://img.anili.st/media/1535" },
+  { genre: "Sports",        ar: "رياضة",       color: "#16A34A", poster: "https://img.anili.st/media/20583" },
+  { genre: "Slice of Life", ar: "حياة يومية",  color: "#EA580C", poster: "https://img.anili.st/media/20665" },
+  { genre: "Horror",        ar: "رعب",         color: "#DC2626", poster: "https://img.anili.st/media/11111" },
+  { genre: "Psychological", ar: "نفسي",        color: "#9333EA", poster: "https://img.anili.st/media/21355" },
+  { genre: "Music",         ar: "موسيقى",      color: "#C026D3", poster: "https://img.anili.st/media/20958" },
+  { genre: "Mecha",         ar: "ميكا",        color: "#2563EB", poster: "https://img.anili.st/media/30" },
+  { genre: "Isekai",        ar: "إيسيكاي",     color: "#0284C7", poster: "https://img.anili.st/media/108465" },
 ];
 
 const FILTER_GENRES: AnimeFilterOption[] = [
@@ -339,25 +339,7 @@ export default function BrowseScreen() {
     setView("list");
   }, [routeParams.genre, routeParams.genreAr, routeParams.format, routeParams.sort, routeParams.season, routeParams.year, routeParams.status]);
 
-  /* load genre cover images */
-  useEffect(() => {
-    const ctrl = new AbortController();
-    const covers: Record<string, string> = {};
-    Promise.all(GENRES_WITH_COVERS.map(async item => {
-      try {
-        const r = await fetch(`${getBaseUrl()}/api/anilist`, {
-          method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ query: GENRE_COVER_QUERY(item.genre) }),
-          signal: ctrl.signal,
-        });
-        const d = await r.json();
-        const media = d.data?.Page?.media?.[0];
-        const url = media?.coverImage?.large;
-        if (url) covers[item.genre] = url;
-      } catch (e: any) { if (e?.name === "AbortError") return; }
-    })).then(() => { if (!ctrl.signal.aborted) setGenreCovers({ ...covers }); });
-    return () => ctrl.abort();
-  }, []);
+  /* Every genre already has a dedicated, verified unique cover in GENRES_WITH_COVERS */
 
   const abortRef = useRef<AbortController | null>(null);
 

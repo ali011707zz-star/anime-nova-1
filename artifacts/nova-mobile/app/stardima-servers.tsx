@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  I18nManager,
   Image,
   Platform,
   ScrollView,
@@ -561,7 +562,7 @@ export default function StardimaServersScreen() {
                         <View style={[styles.dlQualityTag, { borderColor: `${qColor}44`, backgroundColor: `${qColor}18` }]}>
                           <Text style={[styles.dlQualityTagText, { color: qColor }]}>{qualityLabel.toUpperCase()}</Text>
                         </View>
-                        <View style={{ alignItems: "flex-end" }}>
+                        <View style={{ alignItems: ALIGN_RIGHT }}>
                           <Text style={styles.dlServerName}>سيرفر التحميل {serverName}</Text>
                           <Text style={styles.dlServerSub}>
                             {dlState === "downloading"
@@ -591,11 +592,14 @@ export default function StardimaServersScreen() {
   );
 }
 
+const ROW_RTL = I18nManager.isRTL ? "row" : "row-reverse";
+const ROW_LTR = I18nManager.isRTL ? "row-reverse" : "row";
+const ALIGN_RIGHT = I18nManager.isRTL ? "flex-start" : "flex-end";
+
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: "#08080f" },
   header: {
-    flexDirection: "row",
-    direction: "ltr",
+    flexDirection: ROW_LTR,
     alignItems: "center",
     gap: 10,
     paddingHorizontal: 14,
@@ -604,8 +608,7 @@ const styles = StyleSheet.create({
     borderBottomColor: "rgba(255,255,255,0.06)",
   },
   epNavRow: {
-    flexDirection: "row",
-    direction: "ltr",
+    flexDirection: ROW_LTR,
     alignItems: "center",
     gap: 6,
   },
@@ -620,8 +623,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   epNavBtn: {
-    flexDirection: "row",
-    direction: "ltr",
+    flexDirection: ROW_LTR,
     alignItems: "center",
     gap: 4,
     paddingHorizontal: 10,
@@ -667,9 +669,8 @@ const styles = StyleSheet.create({
   },
   content: { padding: 16, gap: 16 },
   infoCard: {
-    flexDirection: "row-reverse",
-    direction: "ltr",
-    alignItems: "center",
+    flexDirection: ROW_RTL,
+    alignItems: "flex-start",
     gap: 14,
     padding: 14,
     borderRadius: 18,
@@ -686,7 +687,6 @@ const styles = StyleSheet.create({
   },
   infoTextWrap: {
     flex: 1,
-    alignItems: "flex-end",
     gap: 8,
   },
   infoTitle: {
@@ -696,8 +696,8 @@ const styles = StyleSheet.create({
     textAlign: "right",
   },
   epPill: {
-    flexDirection: "row",
-    direction: "ltr",
+    flexDirection: ROW_RTL,
+    alignSelf: "flex-start",
     alignItems: "center",
     gap: 6,
     paddingHorizontal: 12,
@@ -721,8 +721,7 @@ const styles = StyleSheet.create({
   },
   qualitySection: { gap: 8 },
   qualityHeader: {
-    flexDirection: "row",
-    direction: "ltr",
+    flexDirection: ROW_LTR,
     alignItems: "center",
     justifyContent: "flex-end",
     gap: 6,
@@ -745,8 +744,7 @@ const styles = StyleSheet.create({
     overflow: "hidden",
   },
   serverRow: {
-    flexDirection: "row",
-    direction: "ltr",
+    flexDirection: ROW_LTR,
     alignItems: "center",
     justifyContent: "space-between",
     paddingHorizontal: 14,
@@ -757,8 +755,7 @@ const styles = StyleSheet.create({
     borderTopColor: "rgba(255,255,255,0.06)",
   },
   playActionPill: {
-    flexDirection: "row",
-    direction: "ltr",
+    flexDirection: ROW_LTR,
     alignItems: "center",
     gap: 6,
     paddingHorizontal: 14,
@@ -772,8 +769,7 @@ const styles = StyleSheet.create({
     fontFamily: "Cairo_700Bold",
   },
   serverRightInfo: {
-    flexDirection: "row",
-    direction: "ltr",
+    flexDirection: ROW_LTR,
     alignItems: "center",
     gap: 8,
   },
@@ -793,14 +789,12 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   dlSectionHeader: {
-    flexDirection: "row",
-    direction: "ltr",
+    flexDirection: ROW_LTR,
     alignItems: "center",
     justifyContent: "space-between",
   },
   dlHeaderTitleRow: {
-    flexDirection: "row",
-    direction: "ltr",
+    flexDirection: ROW_LTR,
     alignItems: "center",
     gap: 8,
   },
@@ -816,8 +810,7 @@ const styles = StyleSheet.create({
     fontFamily: "Cairo_700Bold",
   },
   dlHeaderBadge: {
-    flexDirection: "row",
-    direction: "ltr",
+    flexDirection: ROW_LTR,
     alignItems: "center",
     gap: 5,
     paddingHorizontal: 10,
@@ -840,8 +833,7 @@ const styles = StyleSheet.create({
     overflow: "hidden",
   },
   dlRow: {
-    flexDirection: "row",
-    direction: "ltr",
+    flexDirection: ROW_LTR,
     alignItems: "center",
     justifyContent: "space-between",
     paddingHorizontal: 14,
@@ -851,8 +843,7 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(16, 185, 129, 0.06)",
   },
   dlActionBtn: {
-    flexDirection: "row",
-    direction: "ltr",
+    flexDirection: ROW_LTR,
     alignItems: "center",
     gap: 6,
     paddingHorizontal: 12,
@@ -876,8 +867,7 @@ const styles = StyleSheet.create({
     fontFamily: "Cairo_700Bold",
   },
   dlRightInfo: {
-    flexDirection: "row",
-    direction: "ltr",
+    flexDirection: ROW_LTR,
     alignItems: "center",
     gap: 10,
   },

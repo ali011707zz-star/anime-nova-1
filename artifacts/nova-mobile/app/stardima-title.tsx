@@ -23,6 +23,8 @@ import { getStardimaProgressKey } from "@/utils/stardimaProgress";
 
 const Pressable = TvPressable;
 const ROW_RTL = I18nManager.isRTL ? "row" : "row-reverse";
+const ROW_LTR = I18nManager.isRTL ? "row-reverse" : "row";
+const ALIGN_RIGHT = I18nManager.isRTL ? "flex-start" : "flex-end";
 
 type CatalogTitle = {
   id: string | number;
@@ -86,8 +88,7 @@ export default function StardimaTitleScreen() {
     screen: { flex: 1, backgroundColor: colors.background },
     header: {
       minHeight: 54,
-      flexDirection: "row",
-      direction: "ltr",
+      flexDirection: ROW_LTR,
       alignItems: "center",
       gap: 12,
       paddingHorizontal: 14,
@@ -126,7 +127,7 @@ export default function StardimaTitleScreen() {
       borderRadius: 14,
       backgroundColor: colors.surfaceElevated,
     },
-    heroInfo: { flex: 1, gap: 7, alignItems: "flex-end" },
+    heroInfo: { flex: 1, gap: 7, alignItems: ALIGN_RIGHT },
     title: {
       color: colors.textPrimary,
       fontFamily: "Cairo_800ExtraBold",
@@ -226,7 +227,7 @@ export default function StardimaTitleScreen() {
       fontSize: 9,
       fontFamily: "Cairo_700Bold",
     },
-    episodeInfo: { flex: 1, alignItems: "flex-end" },
+    episodeInfo: { flex: 1, alignItems: ALIGN_RIGHT },
     episodeTitle: {
       color: colors.textPrimary,
       fontFamily: "Cairo_700Bold",

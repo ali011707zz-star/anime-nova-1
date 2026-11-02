@@ -21,6 +21,8 @@ import {
 import { useColors } from "@/hooks/useColors";
 const Pressable = TvPressable;
 const ROW_RTL = I18nManager.isRTL ? "row" : "row-reverse";
+const ROW_LTR = I18nManager.isRTL ? "row-reverse" : "row";
+const ALIGN_RIGHT = I18nManager.isRTL ? "flex-start" : "flex-end";
 
 const BASE = getBaseUrl();
 
@@ -257,7 +259,7 @@ export default function AwDubbedDetailScreen() {
 const styles = StyleSheet.create({
   container:       { flex: 1, backgroundColor: "#09090B" },
   tvFocusGuide:    { flex: 1 },
-  header:          { flexDirection: "row", direction: "ltr", alignItems: "center", paddingHorizontal: 12, paddingVertical: 10,
+  header:          { flexDirection: ROW_LTR, alignItems: "center", paddingHorizontal: 12, paddingVertical: 10,
                      borderBottomWidth: 1, borderBottomColor: "rgba(255,255,255,0.05)" },
   backBtn:         { width: 36, height: 36, borderRadius: 10, backgroundColor: "rgba(255,255,255,0.05)",
                      alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: "rgba(255,255,255,0.08)" },
@@ -269,7 +271,7 @@ const styles = StyleSheet.create({
   posterWrap:      { ...StyleSheet.absoluteFillObject, overflow: "hidden" },
   posterPlaceholder: { flex: 1, alignItems: "center", justifyContent: "center",
                        backgroundColor: "rgba(16,185,129,0.08)" },
-  heroInfo:        { position: "absolute", bottom: 14, right: 14, left: 14, alignItems: "flex-end" },
+  heroInfo:        { position: "absolute", bottom: 14, right: 14, left: 14, alignItems: ALIGN_RIGHT },
   heroTitle:       { color: "#fff", fontSize: 20, fontWeight: "900", fontFamily: "Cairo_700Bold", lineHeight: 28, textAlign: "right" },
   heroSub:         { color: "rgba(255,255,255,0.6)", fontSize: 12, fontFamily: "Cairo_600SemiBold", marginTop: 4, textAlign: "right" },
   heroBadge:       { flexDirection: ROW_RTL, alignItems: "center", gap: 5, marginTop: 6,
@@ -300,7 +302,7 @@ const styles = StyleSheet.create({
   epNumBadge:      { position: "absolute", bottom: 4, right: 5, backgroundColor: "rgba(0,0,0,0.75)",
                      borderRadius: 6, paddingHorizontal: 5, paddingVertical: 1 },
   epNumText:       { color: "#fff", fontSize: 9, fontFamily: "Cairo_700Bold" },
-  epInfo:          { flex: 1, alignItems: "flex-end" },
+  epInfo:          { flex: 1, alignItems: ALIGN_RIGHT },
   epTitle:         { color: "#fff", fontSize: 14, fontFamily: "Cairo_700Bold", textAlign: "right" },
   epSub:           { color: "rgba(255,255,255,0.45)", fontSize: 11, fontFamily: "Cairo_400Regular", marginTop: 2, textAlign: "right" },
   center:          { paddingVertical: 40, alignItems: "center", justifyContent: "center" },

@@ -3485,14 +3485,15 @@ function ExpoRiftPlayer({
           SUBTITLE SETTINGS PANEL (slides from right)
       ════════════════════════════════════════ */}
       {showSubPanel && !subtitlesDisabled && (
-        <Pressable
-          style={[StyleSheet.absoluteFill, s.subPanelBackdrop, { zIndex: 60 }]}
-          onPress={() => setShowSubPanel(false)}
-        >
+        <View style={[StyleSheet.absoluteFill, { zIndex: 60 }]} pointerEvents="box-none">
+          <Pressable
+            style={[StyleSheet.absoluteFill, s.subPanelBackdrop]}
+            onPress={() => setShowSubPanel(false)}
+          />
           <Animated.View
             style={[s.subPanel, isPortrait ? s.subPanelPortrait : s.subPanelLandscape, { transform: [{ translateX: subPanelX }] }]}
           >
-            <Pressable onPress={() => {}} style={{ flex: 1 }}>
+            <View style={{ flex: 1 }}>
               {/* Header */}
               <View style={s.subPanelHeader}>
                 <Text style={s.subPanelTitle}>إعدادات الترجمة</Text>
@@ -3502,7 +3503,14 @@ function ExpoRiftPlayer({
               </View>
               <View style={s.subPanelDivider} />
 
-              <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={[s.subPanelBody, { paddingBottom: 32 }]}>
+              <ScrollView
+                style={{ flex: 1 }}
+                nestedScrollEnabled={true}
+                showsVerticalScrollIndicator={true}
+                bounces={true}
+                keyboardShouldPersistTaps="handled"
+                contentContainerStyle={[s.subPanelBody, { paddingBottom: 44 }]}
+              >
 
                 {/* ── تشغيل / إيقاف ── */}
                 <View style={s.subRow}>
@@ -3678,9 +3686,9 @@ function ExpoRiftPlayer({
                 </View>
 
               </ScrollView>
-            </Pressable>
+            </View>
           </Animated.View>
-        </Pressable>
+        </View>
       )}
 
       {/* ── أزرار تخطي المقدمة/النهاية — مستقلة تماماً عن رؤية الـ controls ── */}
@@ -4068,14 +4076,12 @@ const s = StyleSheet.create({
   },
   /* معلومات الأنمي — واضحة ومقروءة بالعربية ومنسدلة لأسفل قليلاً */
   topInfoWrap: {
-    flexShrink: 1, maxWidth: "68%", flexDirection: "column", gap: 5, marginRight: 4,
+    flexShrink: 1, maxWidth: "68%", flexDirection: "column", gap: 4, marginRight: 4,
     alignItems: "flex-start",
-    backgroundColor: "rgba(10, 15, 26, 0.75)",
-    marginTop: 8,
-    paddingTop: 6,
-    paddingHorizontal: 12, paddingVertical: 8,
-    borderRadius: 14,
-    borderWidth: 1, borderColor: "rgba(255, 255, 255, 0.14)",
+    backgroundColor: "transparent",
+    marginTop: 4,
+    paddingHorizontal: 2, paddingVertical: 0,
+    borderWidth: 0, borderColor: "transparent",
   },
   tvTopInfoWrap: {
     position: "absolute",

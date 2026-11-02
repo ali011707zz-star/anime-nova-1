@@ -2660,19 +2660,14 @@ export default function WatchScreen() {
 
       {/* ── Header ── */}
       <View style={[d.header, tvMode && d.tvHeader, { paddingTop: topPad + 4 }]}>
-        {/* Right Section: Back Button + Title */}
-        <View style={d.headerRightSection}>
-          <Pressable onPress={handleBack} focusable={tvMode}
-            style={({ focused }) => [d.headerBack, tvMode && d.tvHeaderActionBtn, tvMode && tvFocusStyle(focused)]}>
-            <Ionicons name="chevron-back" size={tvMode ? 25 : 19} color={colors.textPrimary} style={{ transform: [{ scaleX: -1 }] }} />
-          </Pressable>
-          <View style={d.headerCenter}>
-            <Text style={[d.headerTitle, tvMode && d.tvHeaderTitle]} numberOfLines={1}>{displayTitle}</Text>
-            <Text style={[d.headerSub, tvMode && d.tvHeaderSub]}>الحلقة {epNum}</Text>
-          </View>
+        <Pressable onPress={handleBack} focusable={tvMode}
+          style={({ focused }) => [d.headerBack, tvMode && d.tvHeaderActionBtn, tvMode && tvFocusStyle(focused)]}>
+          <Ionicons name="chevron-forward" size={tvMode ? 25 : 19} color={colors.textPrimary} />
+        </Pressable>
+        <View style={d.headerCenter}>
+          <Text style={[d.headerTitle, tvMode && d.tvHeaderTitle]} numberOfLines={1}>{displayTitle}</Text>
+          <Text style={[d.headerSub, tvMode && d.tvHeaderSub]}>الحلقة {epNum}</Text>
         </View>
-
-        {/* Left Section: Prev / Next / Refresh */}
         <View style={d.headerLeft}>
           <Pressable disabled={!canGoPrevEpisode} onPress={onRiftPrevEpisode} focusable={tvMode}
             style={({ focused }) => [d.epNavBtn, tvMode && d.tvEpNavBtn, !canGoPrevEpisode && { opacity: 0.22 }, tvMode && tvFocusStyle(focused)]}>
@@ -3066,25 +3061,24 @@ function createWatchStyles(colors: ThemePalette) {
   embedTopRow:   { position: "absolute", top: 0, left: 0, right: 0, flexDirection: "row", alignItems: "center", paddingHorizontal: 14, paddingBottom: 10, backgroundColor: "rgba(0,0,0,0.7)", gap: 10, zIndex: 10 },
 
   /* Picker header */
-  header:        { flexDirection: "row-reverse", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 12, paddingBottom: 10, borderBottomWidth: 1, borderBottomColor: colors.border, gap: 8 },
+  header:        { flexDirection: ROW_RTL, alignItems: "center", paddingHorizontal: 12, paddingBottom: 10, borderBottomWidth: 1, borderBottomColor: colors.border, gap: 8 },
   tvHeader:     { paddingHorizontal: 28, paddingBottom: 10, gap: 8 },
-  headerRightSection: { flexDirection: "row-reverse", alignItems: "center", gap: 10, flex: 1, minWidth: 0 },
-  headerLeft:    { flexDirection: "row-reverse", alignItems: "center", gap: 5 },
+  headerLeft:    { flexDirection: ROW_RTL, alignItems: "center", gap: 5 },
   headerCenter:  { flex: 1, alignItems: "flex-end" },
   headerBack:    { width: 36, height: 36, borderRadius: 12, backgroundColor: colors.surfaceElevated, borderWidth: 1, borderColor: colors.border, alignItems: "center", justifyContent: "center", flexShrink: 0 },
-  headerTitle:   { fontSize: 13, fontFamily: "Cairo_800ExtraBold", color: colors.textPrimary, textAlign: "right" },
-  headerSub:     { fontSize: 10, color: colors.textMuted, fontFamily: "Cairo_400Regular", textAlign: "right" },
+  headerTitle:   { fontSize: 13, fontFamily: "Cairo_800ExtraBold", color: colors.textPrimary, textAlign: "center" },
+  headerSub:     { fontSize: 10, color: colors.textMuted, fontFamily: "Cairo_400Regular", textAlign: "center" },
   tvHeaderTitle: { fontSize: 19, lineHeight: 27 },
   tvHeaderSub: { fontSize: 13, lineHeight: 20 },
   headerRefreshBtn: { width: 32, height: 32, borderRadius: 10, backgroundColor: colors.accentSurface, borderWidth: 1, borderColor: colors.accentBorder, alignItems: "center", justifyContent: "center" },
   tvHeaderActionBtn: { width: 42, height: 42, borderRadius: 12 },
-  epNavBtn:      { flexDirection: "row", alignItems: "center", gap: 2, height: 32, borderRadius: 10, backgroundColor: colors.surfaceElevated, borderWidth: 1, borderColor: colors.border, paddingHorizontal: 8, justifyContent: "center" },
+  epNavBtn:      { flexDirection: ROW_RTL, alignItems: "center", gap: 2, height: 32, borderRadius: 10, backgroundColor: colors.surfaceElevated, borderWidth: 1, borderColor: colors.border, paddingHorizontal: 8, justifyContent: "center" },
   tvEpNavBtn:    { minWidth: 96, height: 44, borderRadius: 12, paddingHorizontal: 12, gap: 5 },
   epNavText:     { fontSize: 10, fontFamily: "Cairo_700Bold", color: colors.textSecondary },
   tvEpNavText:   { fontSize: 13, lineHeight: 20 },
 
   /* Info card */
-  infoCard:      { flexDirection: "row", alignItems: "flex-start", gap: 14, backgroundColor: colors.card, borderRadius: 18, borderWidth: 1, borderColor: colors.border, padding: 14 },
+  infoCard:      { flexDirection: ROW_RTL, alignItems: "flex-start", gap: 14, backgroundColor: colors.card, borderRadius: 18, borderWidth: 1, borderColor: colors.border, padding: 14 },
   tvInfoCard:    { padding: 18, gap: 16, borderRadius: 18 },
   infoPosterWrap:{ width: 72, height: 102, position: "relative", alignItems: "center", justifyContent: "center" },
   tvInfoPosterWrap: { width: 96, height: 136 },
@@ -3095,8 +3089,8 @@ function createWatchStyles(colors: ThemePalette) {
   infoMeta:      { flex: 1, gap: 8, paddingTop: 2 },
   infoTitle:     { fontSize: 15, fontFamily: "Cairo_800ExtraBold", color: colors.textPrimary, textAlign: "right", lineHeight: 22 },
   tvInfoTitle: { fontSize: 19, lineHeight: 28 },
-  infoEpRow:     { flexDirection: "row", gap: 8, flexWrap: "wrap" },
-  infoEpBadge:   { flexDirection: "row", alignItems: "center", gap: 5, backgroundColor: colors.accentSurface, borderRadius: 8, borderWidth: 1, borderColor: colors.accentBorder, paddingHorizontal: 10, paddingVertical: 5 },
+  infoEpRow:     { flexDirection: ROW_RTL, gap: 8, flexWrap: "wrap" },
+  infoEpBadge:   { flexDirection: ROW_RTL, alignItems: "center", gap: 5, backgroundColor: colors.accentSurface, borderRadius: 8, borderWidth: 1, borderColor: colors.accentBorder, paddingHorizontal: 10, paddingVertical: 5 },
   tvInfoEpBadge: { gap: 6, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 7 },
   infoEpText:    { fontSize: 11, fontFamily: "Cairo_700Bold", color: colors.accent },
   tvInfoEpText: { fontSize: 14, lineHeight: 21 },

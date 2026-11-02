@@ -66,7 +66,27 @@ query NovaMangaDetail($id: Int!) {
 }`;
 
 const CURATED_ARABIC_TITLES: Record<number, string> = {
-  105398: "سولو ليفلينغ (الارتقاء المنفرد)",
+  105398: "الارتقاء المنفرد (سولو ليفلينغ)",
+  119257: "قارئ وجهة نظر كل شيء",
+  86964: "برج الإله",
+  100448: "البداية بعد النهاية",
+  127763: "سيد المرتزقة",
+  114745: "أسطورة النصل الشمالي",
+  126297: "النانو ماشين",
+  107967: "إليزيد",
+  113594: "عودة طائفة جبل هوا",
+  101557: "ملك لصوص القبور",
+  85143: "اللاعب",
+  85314: "النبلاء",
+  85135: "إله الثانوية",
+  98462: "ازدواجية المظهر (لوكيسم)",
+  107237: "الأوغاد (باستارد)",
+  100664: "منزل جميل",
+  104065: "مقتل البطل الشرير",
+  117612: "سجلات الشيطان السماوي",
+  128971: "حاصد القمر المنجرف",
+  132144: "أعظم مهندس في العالم",
+  135264: "سولو ليفلينغ: راغناروك",
   30002: "بيرسيرك",
   30013: "ون بيس",
   85486: "أكاديميتي للأبطال",
@@ -77,16 +97,74 @@ const CURATED_ARABIC_TITLES: Record<number, string> = {
   74347: "ون بنش مان",
   53390: "هجوم العمالقة",
   30011: "ناروتو",
-  100448: "بداية بعد النهاية",
-  119257: "قارئ كل شيء",
-  86964: "برج الإله",
+  30012: "بليتش",
+  85611: "طوكيو غول",
+  92451: "طوكيو غول: ري",
+  30001: "مونستر",
+  30642: "فينلاند ساغا",
+  30656: "فاغابوند",
+  31706: "جوجو: ستيل بول رن",
+  108556: "سباي إكس فاميلي",
+  117195: "أوشي نو كو",
+  118586: "فريرين: ما وراء نهاية الرحلة",
+  126287: "دان دا دان",
+  119161: "بلو لوك (القفل الأزرق)",
+  113138: "كايجو رقم 8",
+  122663: "أيام ساكاموتو",
+  86337: "البرسيم الأسود (بلاك كلوفر)",
+  86769: "نيفرلاند الموعودة",
+  70029: "هنتر إكس هنتر",
+  30021: "مذكرة الموت (ديث نوت)",
+  30025: "الخيميائي المعدني الكامل",
+  85161: "خطايا السبع المميتة",
+  87471: "طوكيو ريفنجرز",
+  100128: "دكتور ستون",
+  103248: "هايكيو!!",
+  44489: "المملكة (كينغدوم)",
+};
+
+const ANILIST_TO_MANGADEX_ID: Record<number, string> = {
+  105398: "32d76d19-8a05-4db0-9fc2-e0b0648fe9d0", // Solo Leveling
+  119257: "328c74fd-f386-456d-92a9-73d7c3f88f59", // Omniscient Reader
+  86964: "c0ae42a8-1934-4c60-b243-5956c0d68c74",  // Tower of God
+  100448: "4ada20eb-085a-491a-8c49-477ab42014d7", // The Beginning After the End
+  30002: "801513ba-a712-498c-8f57-cae55b38cc92",  // Berserk
+  30013: "a1c7c817-4e59-43b7-9365-09675a149a6f",  // One Piece
+  85486: "4f3bcae4-2d96-4c9d-932c-90181d9c873e",  // My Hero Academia
+  87216: "628de6a2-c110-4b66-9213-61a8bf08a088",  // Demon Slayer
+  101517: "c52b2ce3-7f95-469c-96b0-479524fb7a1a", // Jujutsu Kaisen
+  105778: "a77742b1-befd-49a4-bff5-1ad4e6b0ef7b", // Chainsaw Man
+  97852: "a96676e5-8ae2-425e-b549-7f15dd34a6d8",  // Komi Can't Communicate
+  74347: "d8a959f7-648e-4c8d-8f23-f1f3f8e129f3",  // One Punch Man
+  53390: "304ceac3-8cdb-4fe7-acf7-2b6ff7a60613",  // Attack on Titan
+};
+
+const GENRE_AR_MAP: Record<string, string> = {
+  Action: "أكشن",
+  Adventure: "مغامرة",
+  Comedy: "كوميديا",
+  Drama: "دراما",
+  Fantasy: "فانتازيا",
+  Horror: "رعب",
+  Mystery: "غموض",
+  Psychological: "نفسي",
+  Romance: "رومانسي",
+  "Sci-Fi": "خيال علمي",
+  "Slice of Life": "حياة يومية",
+  Sports: "رياضة",
+  Supernatural: "خوارق",
+  Thriller: "إثارة",
+  Mecha: "ميكا",
+  Music: "موسيقى",
+  Ecchi: "إيتشي",
+  Mahou Shoujo: "فتيات سحريات",
 };
 
 const CURATED_ARABIC_SYNOPSES: Record<number, string> = {
   105398:
     "في عالم ظهر فيه «الصيادون» الذين يمتلكون قدرات خارقة لمقاتلة الوحشية الكامنة داخل البوابات وحماية البشرية، يُعرف سونغ جين-وو بلقب «أضعف صياد في العالم». خلال غارة داخل زنزانة مزدوجة غامضة ومميتة، ينجو بأعجوبة ليجد نفسه المختار الوحيد لبرنامج سحري غامض يُدعى «النظام»، يمنحه قدرة فريدة لا يمتلكها أي صياد آخر: رفع مستواه بلا حدود وتحويل ظلال أعدائه المهزومين إلى جيش مخلص له.",
   97852:
-    "في أول يوم لها في ثانوية إيتان المرموقة، تحظى شوكو كومي بإعجاب الجميع بفضل جمالها وأناقتها الهادئة، لكن الحقيقة التي لايدركها أحد هي أنها تعاني من اضطراب تواصل شديد يمنعها من نطق كلمة واحدة أمام الآخرين. يكتشف زميلها هيتوهيتو تادانو سرّها بالصدفة، ويعدها بمساعدتها في تحقيق حلمها الكبير: تكوين 100 صديق والتغلب على خوفها من التواصل.",
+    "في أول يوم لها في ثانوية إيتان المرموقة، تحظى شوكو كومي بإعجاب الجميع بفضل جمالها وأناقتها الهادئة، لكن الحقيقة التي لا يدركها أحد هي أنها تعاني من اضطراب تواصل شديد يمنعها من نطق كلمة واحدة أمام الآخرين. يكتشف زميلها هيتوهيتو تادانو سرّها بالصدفة، ويعدها بمساعدتها في تحقيق حلمها الكبير: تكوين 100 صديق والتغلب على خوفها من التواصل.",
   30013:
     "قبل إعدامه، كشف ملك القراصنة غول دي روجر عن كنزه الأسطوري «ون بيس» المخبأ في الخط العظيم، مما أشعل عصر القراصنة العظيم. ينطلق الفتى الطموح مونكي دي لوفي، الذي اكتسب جسداً مطاطياً بعد أكله لفاكهة الشيطان، في رحلة ملحمية عبر البحار لجمع طاقمه «قبعة القش» وتحقيق حلمه بأن يصبح ملك القراصنة القادم.",
   30002:
@@ -97,6 +175,12 @@ const CURATED_ARABIC_SYNOPSES: Record<number, string> = {
     "يعيش الشاب الفقير دينجي مع شيطانه الأليف «بوتشيتا» ويعمل صياد شياطين لسداد ديون والده المتوفى. بعد تعرضه لخيانة غادرة وموته، يندمج بوتشيتا مع قلبه ليعود إلى الحياة بقدرة التحول إلى «رجل المنشار»، فينضم إلى قسم السلامة العامة لمواجهة أخطر الشياطين.",
   87216:
     "في عصر تايشو باليابان، يعود الفتى الطيب تانجيرو كامادو إلى منزله ليجد عائلته قد قُتلت على يد شيطان، بينما تحولت أخته الصغرى نيزوكو إلى شيطانة لكنها لا تزال تحتفظ بمشاعرها البشرية. ينطلق تانجيرو في رحلة شاقة ليصبح قاتل شياطين ويعيد أخته إلى بشرية.",
+  119257:
+    "كيم دوكجا موظف عادي كان القارئ الوحيد لرواية ويب طويلة تدعى «ثلاث طرق للبقاء في عالم مدمر». في اللحظة التي يقرأ فيها الفصل الأخير، يتحول عالم الرواية فجأة إلى واقع حقيقي ودموي، ليصبح دوكجا الشخص الوحيد في العالم الذي يعرف كيف سينتهي هذا العالم المروع وما هي الخطوات اللازمة للنجاة.",
+  86964:
+    "أمضى الفتى «بام الخامس والعشرون» حياته كلها وحيداً في كهف مظلم أسفل برج عملاق غامض، باستثناء صديقته الوحيدة «ريتشل». عندما تدخل ريتشل البرج بحثاً عن النجوم، يقتحم بام أبواب البرج خلفها ليواجه اختبارات قاتلة في كل طابق ويكتشف أسرار البرج الدفينة.",
+  100448:
+    "الملك «غراي» يمتلك قوة وثروة ومكانة لا مثيل لها في عالم تحكمه القدرة القتالية، لكنه يموت وحيداً ليولد من جديد باسم «آرثر لوين» في قارة ديكاتين المليئة بالسحر والوحوش. مسلحاً بحكمة وخبرة حياته السابقة، يسعى آرثر لتصحيح أخطاء ماضيه وحماية عائلته الجديدة.",
 };
 
 function statusLabel(status?: string) {
@@ -183,11 +267,13 @@ function MangaPageImage({ uri, index, total, width }: { uri: string; index: numb
           source={{ uri }}
           style={{ width, height: Math.round(width * ratio) }}
           resizeMode="contain"
+          fadeDuration={0}
           onLoad={(e) => {
             const w = e.nativeEvent?.source?.width;
             const h = e.nativeEvent?.source?.height;
             if (w && h && w > 0 && h > 0) {
-              setRatio(Math.max(0.5, Math.min(3.8, h / w)));
+              // Allow tall vertical Manhwa webtoon strips up to 14x aspect ratio to render at full screen width!
+              setRatio(Math.max(0.5, Math.min(14.0, h / w)));
             }
             setImgLoading(false);
           }}
@@ -225,7 +311,8 @@ export default function MangaDetailScreen() {
   const [readerPages, setReaderPages] = useState<string[]>([]);
   const [readerLoading, setReaderLoading] = useState(false);
   const [readerError, setReaderError] = useState<string | null>(null);
-  const [dataSaver, setDataSaver] = useState(false);
+  // Default dataSaver to true so pages load fast (compressed WebP/JPG), with HD toggle available
+  const [dataSaver, setDataSaver] = useState(true);
 
   const loadManga = useCallback(async (signal: AbortSignal) => {
     const numericId = Number(id);
@@ -282,66 +369,105 @@ export default function MangaDetailScreen() {
           }
         }
 
-        // Resolve MangaDex manga & chapters in background
+        // Resolve MangaDex manga & chapters in background (prioritizing exact ID map & Arabic chapters)
         const candidates = [media.title?.english, media.title?.romaji, ...(media.synonyms || []).slice(0, 2)]
           .map((t) => String(t || "").trim())
           .filter(Boolean);
 
         (async () => {
-          for (const candidate of candidates) {
-            if (signal.aborted) return;
-            try {
-              const searchRes = await fetch(
-                `https://api.mangadex.org/manga?title=${encodeURIComponent(candidate)}&limit=5&order[followedCount]=desc`,
-                { signal },
-              );
-              if (!searchRes.ok) continue;
-              const searchData = await searchRes.json();
-              const firstMatch = searchData?.data?.[0];
-              if (!firstMatch?.id) continue;
+          let resolvedMdId: string | null = ANILIST_TO_MANGADEX_ID[media.id] || null;
 
-              const foundMdId: string = firstMatch.id;
+          if (!resolvedMdId) {
+            for (const candidate of candidates) {
               if (signal.aborted) return;
-              setMdMangaId(foundMdId);
+              try {
+                const searchRes = await fetch(
+                  `https://api.mangadex.org/manga?title=${encodeURIComponent(candidate)}&limit=10&order[followedCount]=desc`,
+                  { signal },
+                );
+                if (!searchRes.ok) continue;
+                const searchData = await searchRes.json();
+                const list: any[] = Array.isArray(searchData?.data) ? searchData.data : [];
+                if (!list.length) continue;
 
-              const feedRes = await fetch(
-                `https://api.mangadex.org/manga/${foundMdId}/feed?limit=500&order[chapter]=asc&contentRating[]=safe&contentRating[]=suggestive&contentRating[]=erotica`,
+                const normTarget = candidate.toLowerCase().replace(/[^a-z0-9]/g, "");
+                const exactMatch = list.find((item) => {
+                  const titles = [
+                    ...Object.values(item?.attributes?.title || {}),
+                    ...(item?.attributes?.altTitles || []).flatMap((o: any) => Object.values(o || {})),
+                  ].map((s) => String(s || "").toLowerCase().replace(/[^a-z0-9]/g, ""));
+                  return titles.some((t) => t === normTarget || (normTarget.length > 5 && t.includes(normTarget)));
+                });
+                const chosen = exactMatch || list[0];
+                if (chosen?.id) {
+                  resolvedMdId = String(chosen.id);
+                  break;
+                }
+              } catch {}
+            }
+          }
+
+          if (!resolvedMdId || signal.aborted) return;
+          setMdMangaId(resolvedMdId);
+
+          try {
+            // Fetch Arabic chapters first + English fallback chapters in parallel
+            const [arRes, enRes] = await Promise.all([
+              fetch(
+                `https://api.mangadex.org/manga/${resolvedMdId}/feed?limit=500&translatedLanguage[]=ar&order[chapter]=asc&contentRating[]=safe&contentRating[]=suggestive&contentRating[]=erotica`,
+                { signal },
+              ).catch(() => null),
+              fetch(
+                `https://api.mangadex.org/manga/${resolvedMdId}/feed?limit=500&translatedLanguage[]=en&order[chapter]=asc&contentRating[]=safe&contentRating[]=suggestive&contentRating[]=erotica`,
+                { signal },
+              ).catch(() => null),
+            ]);
+
+            const arData = arRes && arRes.ok ? await arRes.json() : null;
+            const enData = enRes && enRes.ok ? await enRes.json() : null;
+            let rawChapters: any[] = [
+              ...(Array.isArray(arData?.data) ? arData.data : []),
+              ...(Array.isArray(enData?.data) ? enData.data : []),
+            ];
+
+            if (rawChapters.length === 0) {
+              const anyRes = await fetch(
+                `https://api.mangadex.org/manga/${resolvedMdId}/feed?limit=500&order[chapter]=asc&contentRating[]=safe&contentRating[]=suggestive&contentRating[]=erotica`,
                 { signal },
               );
-              if (!feedRes.ok) break;
-              const feedData = await feedRes.json();
-              const rawChapters: any[] = Array.isArray(feedData?.data) ? feedData.data : [];
-
-              // Group by chapter number, preferring Arabic ('ar') > English ('en') > any language with pages > 0
-              const byNum = new Map<number, MdChapterEntry>();
-              const langRank = (lang: string) => (lang === "ar" ? 3 : lang === "en" ? 2 : 1);
-
-              for (const row of rawChapters) {
-                const pages = Number(row?.attributes?.pages || 0);
-                if (!row?.id || pages <= 0) continue;
-                const chStr = row?.attributes?.chapter;
-                const parsedNum = chStr != null ? parseFloat(String(chStr)) : NaN;
-                const chapterNum = Number.isFinite(parsedNum) && parsedNum > 0 ? Math.floor(parsedNum) : byNum.size + 1;
-                const lang = String(row?.attributes?.translatedLanguage || "en");
-                const existing = byNum.get(chapterNum);
-                if (!existing || langRank(lang) > langRank(existing.lang)) {
-                  byNum.set(chapterNum, {
-                    id: String(row.id),
-                    chapterNum,
-                    title: String(row?.attributes?.title || "").trim(),
-                    lang,
-                    pages,
-                  });
-                }
+              if (anyRes.ok) {
+                const anyData = await anyRes.json();
+                rawChapters = Array.isArray(anyData?.data) ? anyData.data : [];
               }
+            }
 
-              const sortedEntries = [...byNum.values()].sort((a, b) => a.chapterNum - b.chapterNum);
-              if (!signal.aborted && sortedEntries.length > 0) {
-                setMdChapters(sortedEntries);
-                break;
+            const byNum = new Map<number, MdChapterEntry>();
+            const langRank = (lang: string) => (lang === "ar" ? 3 : lang === "en" ? 2 : 1);
+
+            for (const row of rawChapters) {
+              const pages = Number(row?.attributes?.pages || 0);
+              if (!row?.id || pages <= 0) continue;
+              const chStr = row?.attributes?.chapter;
+              const parsedNum = chStr != null ? parseFloat(String(chStr)) : NaN;
+              const chapterNum = Number.isFinite(parsedNum) && parsedNum > 0 ? Math.floor(parsedNum) : byNum.size + 1;
+              const lang = String(row?.attributes?.translatedLanguage || "en");
+              const existing = byNum.get(chapterNum);
+              if (!existing || langRank(lang) > langRank(existing.lang)) {
+                byNum.set(chapterNum, {
+                  id: String(row.id),
+                  chapterNum,
+                  title: String(row?.attributes?.title || "").trim(),
+                  lang,
+                  pages,
+                });
               }
-            } catch {}
-          }
+            }
+
+            const sortedEntries = [...byNum.values()].sort((a, b) => a.chapterNum - b.chapterNum);
+            if (!signal.aborted && sortedEntries.length > 0) {
+              setMdChapters(sortedEntries);
+            }
+          } catch {}
         })();
       }
     } catch (requestError: any) {
@@ -415,7 +541,7 @@ export default function MangaDetailScreen() {
 
         // If MangaDex chapters weren't resolved yet, resolve on-demand now
         if (!targetChapterId) {
-          let currentMdId = mdMangaId;
+          let currentMdId = mdMangaId || (manga ? ANILIST_TO_MANGADEX_ID[manga.id] || null : null);
           if (!currentMdId && manga) {
             const qTitle = manga.title?.english || manga.title?.romaji || "";
             if (qTitle) {
@@ -431,18 +557,31 @@ export default function MangaDetailScreen() {
           }
 
           if (currentMdId) {
-            const fRes = await fetch(
-              `https://api.mangadex.org/manga/${currentMdId}/feed?limit=200&order[chapter]=asc&contentRating[]=safe&contentRating[]=suggestive&contentRating[]=erotica`,
+            const [arFRes, enFRes] = await Promise.all([
+              fetch(
+                `https://api.mangadex.org/manga/${currentMdId}/feed?limit=300&translatedLanguage[]=ar&order[chapter]=asc&contentRating[]=safe&contentRating[]=suggestive&contentRating[]=erotica`,
+              ).catch(() => null),
+              fetch(
+                `https://api.mangadex.org/manga/${currentMdId}/feed?limit=300&translatedLanguage[]=en&order[chapter]=asc&contentRating[]=safe&contentRating[]=suggestive&contentRating[]=erotica`,
+              ).catch(() => null),
+            ]);
+            const arFData = arFRes && arFRes.ok ? await arFRes.json() : null;
+            const enFData = enFRes && enFRes.ok ? await enFRes.json() : null;
+            const arRows = (Array.isArray(arFData?.data) ? arFData.data : []).filter(
+              (r: any) => Number(r?.attributes?.pages || 0) > 0,
             );
-            if (fRes.ok) {
-              const fData = await fRes.json();
-              const validRows = (Array.isArray(fData?.data) ? fData.data : []).filter(
-                (r: any) => Number(r?.attributes?.pages || 0) > 0,
-              );
-              const exact = validRows.find(
+            const enRows = (Array.isArray(enFData?.data) ? enFData.data : []).filter(
+              (r: any) => Number(r?.attributes?.pages || 0) > 0,
+            );
+            const validRows = [...arRows, ...enRows];
+            if (validRows.length > 0) {
+              const exactAr = arRows.find(
                 (r: any) => Math.floor(Number(r?.attributes?.chapter)) === activeChapter.number,
               );
-              const chosen = exact || validRows[(activeChapter.number - 1) % Math.max(1, validRows.length)];
+              const exactEn = enRows.find(
+                (r: any) => Math.floor(Number(r?.attributes?.chapter)) === activeChapter.number,
+              );
+              const chosen = exactAr || exactEn || validRows[Math.min(activeChapter.number - 1, validRows.length - 1)];
               targetChapterId = chosen?.id;
             }
           }
@@ -470,6 +609,10 @@ export default function MangaDetailScreen() {
         if (!cancelled) {
           setReaderPages(pageUrls);
           setReaderLoading(false);
+          // Prefetch first 4 pages immediately so scrolling is fast
+          pageUrls.slice(0, 4).forEach((u) => {
+            Image.prefetch(u).catch(() => {});
+          });
         }
       } catch {
         if (!cancelled) {
@@ -593,7 +736,9 @@ export default function MangaDetailScreen() {
                       <View style={styles.genresRow}>
                         {manga.genres.slice(0, 3).map((g) => (
                           <View key={g} style={[styles.genreChip, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-                            <Text style={[styles.genreChipText, { color: colors.textSecondary }]}>{g}</Text>
+                            <Text style={[styles.genreChipText, { color: colors.textSecondary }]}>
+                              {GENRE_AR_MAP[g] || g}
+                            </Text>
                           </View>
                         ))}
                       </View>

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import {
   View, Text, Image, ScrollView, StyleSheet,
-  Platform, Dimensions, Animated, Easing, ActivityIndicator, Alert,
+  Platform, Dimensions, Animated, Easing, ActivityIndicator, Alert, I18nManager,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
@@ -1030,10 +1030,49 @@ export default function AnimationWatchScreen() {
       ) : null}
       <LinearGradient colors={["rgba(7,7,13,0.97)", "rgba(7,7,13,0.88)"]} style={StyleSheet.absoluteFill} />
 
-      {/* ── Header: 3-zone fixed layout ── */}
+      {/* ── Header: Unified 3-zone layout ── */}
       <View style={w.header}>
-        {/* Left: refresh */}
+        {/* Right: back button */}
+        <Pressable onPress={handleBack} style={w.headerBack}>
+          <Ionicons name="chevron-forward" size={19} color="#fff" />
+        </Pressable>
+        {/* Center: title */}
+        <View style={w.headerCenter}>
+          <Text style={w.headerTitle} numberOfLines={1}>{titleStr || "مشاهدة"}</Text>
+          <Text style={w.headerSub}>{type === "movie" ? "الفيلم" : `الحلقة ${ep}`}</Text>
+        </View>
+        {/* Left: Prev / Next / Refresh */}
         <View style={w.headerLeft}>
+          {type !== "movie" && (
+            <>
+              <Pressable
+                disabled={ep <= 1}
+                onPress={() => {
+                  if (ep <= 1) return;
+                  const t = encodeURIComponent(titleStr);
+                  const p = encodeURIComponent(posterUrl);
+                  router.replace(`/animation/watch?id=${tmdbId}&type=${type}&ep=${ep - 1}&season=${season}&totalEps=${totalEps}&title=${t}&poster=${p}`);
+                }}
+                style={[w.epNavBtn, ep <= 1 && { opacity: 0.22 }]}
+              >
+                <Ionicons name="chevron-forward" size={12} color="rgba(255,255,255,0.65)" />
+                <Text style={w.epNavText}>السابقة</Text>
+              </Pressable>
+              <Pressable
+                disabled={!canGoNextEpisode}
+                onPress={() => {
+                  if (!canGoNextEpisode) return;
+                  const t = encodeURIComponent(titleStr);
+                  const p = encodeURIComponent(posterUrl);
+                  router.replace(`/animation/watch?id=${tmdbId}&type=${type}&ep=${ep + 1}&season=${season}&totalEps=${totalEps}&title=${t}&poster=${p}`);
+                }}
+                style={[w.epNavBtn, w.epNavBtnNext, !canGoNextEpisode && { opacity: 0.22 }]}
+              >
+                <Text style={[w.epNavText, { color: "#c4b5fd" }]}>التالية</Text>
+                <Ionicons name="chevron-back" size={12} color="#c4b5fd" />
+              </Pressable>
+            </>
+          )}
           {loading
             ? <ActivityIndicator color="#8B5CF6" size="small" />
             : <Pressable onPress={fetchSources} style={w.retryBtn}>
@@ -1041,17 +1080,6 @@ export default function AnimationWatchScreen() {
               </Pressable>
           }
         </View>
-        {/* Center: title */}
-        <View style={w.headerCenter}>
-          <Text style={w.headerTitle} numberOfLines={1}>{titleStr || "مشاهدة"}</Text>
-          {type !== "movie" && (
-            <Text style={w.headerSub}>الموسم {season} • الحلقة {ep}</Text>
-          )}
-        </View>
-        {/* Right: back button (always same position) */}
-        <Pressable onPress={handleBack} style={w.headerBack}>
-          <Ionicons name="arrow-back" size={17} color="rgba(255,255,255,0.75)" style={{ transform: [{ scaleX: -1 }] }} />
-        </Pressable>
       </View>
 
       <ScrollView
@@ -1202,32 +1230,35 @@ const w = StyleSheet.create({
   srcSwitchBtn: { flexDirection: "row", alignItems: "center", gap: 4, backgroundColor: "rgba(0,0,0,0.5)", borderRadius: 10, paddingHorizontal: 10, paddingVertical: 6 },
   srcSwitchText: { fontSize: 10, fontFamily: "Cairo_700Bold", color: "rgba(255,255,255,0.8)" },
 
-  /* ── Picker header: 3-zone fixed layout ── */
-  header: { flexDirection: "row", direction: "ltr", alignItems: "center", paddingHorizontal: 12, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: "rgba(255,255,255,0.07)", gap: 8 },
-  headerLeft: { width: 36, alignItems: "flex-start", justifyContent: "center" },
-  headerCenter: { flex: 1, alignItems: "center" },
+  /* ── Picker header: Unified 3-zone layout ── */
+  header: { flexDirection: I18nManager.isRTL ? "row" : "row-reverse", alignItems: "center", paddingHorizontal: 12, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: "rgba(255,255,255,0.07)", gap: 8 },
+  headerLeft: { flexDirection: I18nManager.isRTL ? "row" : "row-reverse", alignItems: "center", gap: 5 },
+  headerCenter: { flex: 1, alignItems: "flex-end" },
   headerBack: { width: 36, height: 36, borderRadius: 12, backgroundColor: "rgba(255,255,255,0.07)", borderWidth: 1, borderColor: "rgba(255,255,255,0.11)", alignItems: "center", justifyContent: "center", flexShrink: 0 },
   headerTitle: { fontSize: 13, fontFamily: "Cairo_800ExtraBold", color: "#fff", textAlign: "center" },
   headerSub: { fontSize: 10, color: "rgba(255,255,255,0.35)", fontFamily: "Cairo_400Regular", textAlign: "center" },
+  epNavBtn: { flexDirection: I18nManager.isRTL ? "row" : "row-reverse", alignItems: "center", gap: 2, height: 32, borderRadius: 10, backgroundColor: "rgba(255,255,255,0.06)", borderWidth: 1, borderColor: "rgba(255,255,255,0.10)", paddingHorizontal: 8, justifyContent: "center" },
+  epNavBtnNext: { backgroundColor: "rgba(139,92,246,0.14)", borderColor: "rgba(139,92,246,0.32)" },
+  epNavText: { fontSize: 10, fontFamily: "Cairo_700Bold", color: "rgba(255,255,255,0.75)" },
   retryBtn: { width: 32, height: 32, borderRadius: 10, backgroundColor: "rgba(139,92,246,0.12)", borderWidth: 1, borderColor: "rgba(139,92,246,0.25)", alignItems: "center", justifyContent: "center" },
-  commentsBtn: { alignSelf: "flex-end", flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 10, backgroundColor: "rgba(139,92,246,0.10)", borderWidth: 1, borderColor: "rgba(139,92,246,0.22)" },
+  commentsBtn: { alignSelf: "flex-end", flexDirection: I18nManager.isRTL ? "row" : "row-reverse", alignItems: "center", gap: 6, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 10, backgroundColor: "rgba(139,92,246,0.10)", borderWidth: 1, borderColor: "rgba(139,92,246,0.22)" },
   commentsBtnText: { fontSize: 11, fontFamily: "Cairo_700Bold", color: "rgba(196,181,253,0.92)" },
 
   pickerContent: { padding: 14, paddingBottom: 100, gap: 12 },
   tvPickerContent: { paddingHorizontal: 56, paddingTop: 24, gap: 20 },
 
   /* ── Info card ── */
-  infoCard: { flexDirection: "row", alignItems: "flex-start", gap: 14, backgroundColor: "rgba(15,12,28,0.80)", borderRadius: 18, borderWidth: 1, borderColor: "rgba(139,92,246,0.14)", padding: 14 },
+  infoCard: { flexDirection: I18nManager.isRTL ? "row" : "row-reverse", alignItems: "flex-start", gap: 14, backgroundColor: "rgba(15,12,28,0.80)", borderRadius: 18, borderWidth: 1, borderColor: "rgba(139,92,246,0.14)", padding: 14 },
   infoPosterWrap: { width: 72, height: 102, position: "relative", alignItems: "center", justifyContent: "center" },
   infoPosterGlow: { position: "absolute", width: 80, height: 110, borderRadius: 20, backgroundColor: "rgba(109,40,217,0.28)" },
   infoPoster: { width: 72, height: 102, borderRadius: 12, borderWidth: 1, borderColor: "rgba(139,92,246,0.30)" },
   infoPosterPlaceholder: { backgroundColor: "rgba(139,92,246,0.08)", alignItems: "center", justifyContent: "center" },
   infoMeta: { flex: 1, gap: 8, paddingTop: 2 },
   infoTitle: { fontSize: 15, fontFamily: "Cairo_800ExtraBold", color: "#fff", textAlign: "right", lineHeight: 22 },
-  infoEpRow: { flexDirection: "row", gap: 8, flexWrap: "wrap" },
-  infoEpBadge: { flexDirection: "row", alignItems: "center", gap: 5, backgroundColor: "rgba(124,58,237,0.18)", borderRadius: 8, borderWidth: 1, borderColor: "rgba(139,92,246,0.28)", paddingHorizontal: 10, paddingVertical: 5 },
+  infoEpRow: { flexDirection: I18nManager.isRTL ? "row" : "row-reverse", gap: 8, flexWrap: "wrap" },
+  infoEpBadge: { flexDirection: I18nManager.isRTL ? "row" : "row-reverse", alignItems: "center", gap: 5, backgroundColor: "rgba(124,58,237,0.18)", borderRadius: 8, borderWidth: 1, borderColor: "rgba(139,92,246,0.28)", paddingHorizontal: 10, paddingVertical: 5 },
   infoEpText: { fontSize: 11, fontFamily: "Cairo_700Bold", color: "#c4b5fd" },
-  infoSrcBadge: { flexDirection: "row", alignItems: "center", gap: 5, backgroundColor: "rgba(34,197,94,0.10)", borderRadius: 8, borderWidth: 1, borderColor: "rgba(34,197,94,0.22)", paddingHorizontal: 10, paddingVertical: 5 },
+  infoSrcBadge: { flexDirection: I18nManager.isRTL ? "row" : "row-reverse", alignItems: "center", gap: 5, backgroundColor: "rgba(34,197,94,0.10)", borderRadius: 8, borderWidth: 1, borderColor: "rgba(34,197,94,0.22)", paddingHorizontal: 10, paddingVertical: 5 },
   infoSrcText: { fontSize: 11, fontFamily: "Cairo_700Bold", color: "rgba(134,239,172,0.85)" },
 
   dot: { width: 5, height: 5, borderRadius: 2.5 },

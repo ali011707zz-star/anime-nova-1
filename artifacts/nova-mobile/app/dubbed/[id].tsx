@@ -5,6 +5,7 @@ import {
 } from "react-native";
 
 const ROW_RTL = I18nManager.isRTL ? "row" : "row-reverse";
+const ALIGN_RIGHT = I18nManager.isRTL ? "flex-start" : "flex-end";
 import { Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -21,7 +22,7 @@ import { EpisodeDivider } from "@/components/EpisodeDivider";
 const Pressable = TvPressable;
 
 interface Season { label: string; arabicToonsId: string; }
-interface Episode { number: number; epId: string; url: string; thumbnail?: string; }
+interface Episode { number: number; epId: string; url: string; thumbnail?: string; videoId?: string; pref?: string; }
 type CarateenProvider = "sp" | "carateen";
 
 function apiBase(): string {
@@ -138,7 +139,22 @@ export default function DubbedDetailScreen() {
       : `${apiBase()}/api/dubbed/episodes?series=${encodeURIComponent(curSeason.arabicToonsId)}`;
     fetch(endpoint, { signal: ctrl.signal })
       .then(r => { if (!r.ok) throw new Error(`episodes_${r.status}`); return r.json(); })
-      .then(d => { if (!ctrl.signal.aborted) { setEpisodes(Array.isArray(d.episodes) ? d.episodes : []); setEpLoading(false); } })
+      .then(d => {
+        if (!ctrl.signal.aborted) {
+          const rawList = Array.isArray(d.episodes) ? d.episodes : [];
+          const normalized: Episode[] = rawList.map((raw: any, idx: number) => {
+            const epId = String(raw.epId || raw.id || "");
+            const number = Number(raw.number || raw.order_id || idx + 1) || (idx + 1);
+            const url = raw.url || (isCarateenEntry && epId ? `carateen://${carateenProvider}/${showId}/${epId}` : "");
+            const thumbnail = raw.thumbnail || raw.cover_full_path || raw.cover || "";
+            const videoId = raw.video_id ? String(raw.video_id) : undefined;
+            const pref = String(raw.pref || raw.title || "").trim();
+            return { number, epId, url, thumbnail, videoId, pref };
+          });
+          setEpisodes(normalized);
+          setEpLoading(false);
+        }
+      })
       .catch((e) => { if (e?.name !== "AbortError") setEpLoading(false); });
     return () => ctrl.abort();
   }, [curSeason?.arabicToonsId, isCarateenEntry, carateenProvider, showId]);
@@ -161,6 +177,7 @@ export default function DubbedDetailScreen() {
         provider: isCarateenEntry ? carateenProvider || "" : "",
         showId: isCarateenEntry ? String(showId) : "",
         episodeId: isCarateenEntry ? ep.epId : "",
+        videoId: isCarateenEntry ? (ep.videoId || "") : "",
         isMovie: isMovie ? "1" : "0",
       },
     });
@@ -198,7 +215,7 @@ export default function DubbedDetailScreen() {
         <View style={styles.epInfo}>
           <Text style={[styles.epTitle, { color: colors.textPrimary }]}>الحلقة {ep.number}</Text>
           <Text style={[styles.epSub, { color: colors.textSecondary }]}>
-            {curSeason?.label || `الموسم ${selSeason + 1}`}
+            {ep.pref || curSeason?.label || `الموسم ${selSeason + 1}`}
           </Text>
         </View>
         <Ionicons name="chevron-back" size={16} color={colors.textMuted} />
@@ -345,7 +362,7 @@ const styles = StyleSheet.create({
     overflow: "hidden", borderWidth: 1, borderColor: "rgba(255,255,255,0.08)",
   },
   posterPlaceholder: { flex: 1, alignItems: "center", justifyContent: "center" },
-  heroInfo: { flex: 1, alignItems: "flex-end", gap: 8 },
+  heroInfo: { flex: 1, alignItems: ALIGN_RIGHT, gap: 8 },
   heroTitle: { color: "#fff", fontSize: 17, fontWeight: "900", fontFamily: "Cairo_700Bold", textAlign: "right", writingDirection: "rtl" },
   badge: {
     flexDirection: ROW_RTL,
@@ -405,7 +422,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 5, paddingVertical: 1,
   },
   epNumText: { color: "#fff", fontSize: 9, fontFamily: "Cairo_700Bold" },
-  epInfo: { flex: 1, alignItems: "flex-end" },
+  epInfo: { flex: 1, alignItems: ALIGN_RIGHT },
   epTitle: { color: "#fff", fontSize: 14, fontWeight: "700", fontFamily: "Cairo_700Bold", textAlign: "right" },
   epSub: { fontSize: 11, fontFamily: "Cairo_400Regular", marginTop: 2, textAlign: "right" },
   emptyText: {

@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   ActivityIndicator,
   FlatList,
+  I18nManager,
   Image,
   Modal,
   Platform,
@@ -69,8 +70,7 @@ function createStyles(colors: ThemePalette) {
     listContent: { alignItems: "center", paddingBottom: 34 },
     listHeader: { width: "100%" },
     header: {
-      flexDirection: "row",
-      direction: "ltr",
+      flexDirection: I18nManager.isRTL ? "row-reverse" : "row",
       alignItems: "center",
       gap: 12,
       paddingHorizontal: 16,

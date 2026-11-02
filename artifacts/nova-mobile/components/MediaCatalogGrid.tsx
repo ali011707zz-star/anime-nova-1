@@ -22,6 +22,7 @@ export type CatalogMedia = {
     english?: string | null;
     native?: string | null;
   };
+  synonyms?: string[];
   title_ar?: string;
   coverImage?: { large?: string; extraLarge?: string };
   averageScore?: number | null;
@@ -35,6 +36,163 @@ export type CatalogMedia = {
   countryOfOrigin?: string;
   genres?: string[];
 };
+
+const MANGA_AR_TITLES: Record<number, string> = {
+  105398: "الارتقاء المنفرد (سولو ليفلينغ)",
+  119257: "قارئ وجهة نظر كل شيء",
+  86964: "برج الإله",
+  100448: "البداية بعد النهاية",
+  127763: "سيد المرتزقة",
+  114745: "أسطورة النصل الشمالي",
+  126297: "النانو ماشين",
+  107967: "إليزيد",
+  113594: "عودة طائفة جبل هوا",
+  101557: "ملك لصوص القبور",
+  85143: "اللاعب",
+  85314: "النبلاء",
+  85135: "إله الثانوية",
+  98462: "ازدواجية المظهر (لوكيسم)",
+  107237: "الأوغاد (باستارد)",
+  100664: "منزل جميل",
+  104065: "مقتل البطل الشرير",
+  117612: "سجلات الشيطان السماوي",
+  128971: "حاصد القمر المنجرف",
+  132144: "أعظم مهندس في العالم",
+  135264: "سولو ليفلينغ: راغناروك",
+  125828: "ساحر اللانهاية",
+  126612: "العودة بعد التناسخ",
+  112926: "طبيب يعيش مرة ثانية",
+  118523: "اللاعب الذي لا يستطيع رفع مستواه",
+  109957: "الرتبة الثانية",
+  111647: "رفع المستوى مع الآلهة",
+  30002: "بيرسيرك",
+  30013: "ون بيس",
+  85486: "أكاديميتي للأبطال",
+  87216: "قاتل الشياطين",
+  101517: "جوجوتسو كايسن",
+  105778: "رجل المنشار (تشينسو مان)",
+  97852: "كومي لا تستطيع التواصل",
+  74347: "ون بنش مان",
+  53390: "هجوم العمالقة",
+  30011: "ناروتو",
+  30012: "بليتش",
+  85611: "طوكيو غول",
+  92451: "طوكيو غول: ري",
+  30001: "مونستر",
+  30642: "فينلاند ساغا",
+  30656: "فاغابوند",
+  31706: "جوجو: ستيل بول رن",
+  108556: "سباي إكس فاميلي",
+  117195: "أوشي نو كو",
+  118586: "فريرين: ما وراء نهاية الرحلة",
+  126287: "دان دا دان",
+  119161: "بلو لوك (القفل الأزرق)",
+  113138: "كايجو رقم 8",
+  122663: "أيام ساكاموتو",
+  86337: "البرسيم الأسود (بلاك كلوفر)",
+  86769: "نيفرلاند الموعودة",
+  70029: "هنتر إكس هنتر",
+  30021: "مذكرة الموت (ديث نوت)",
+  30025: "الخيميائي المعدني الكامل",
+  85161: "خطايا السبع المميتة",
+  87471: "طوكيو ريفنجرز",
+  100128: "دكتور ستون",
+  103248: "هايكيو!!",
+  44489: "المملكة (كينغدوم)",
+};
+
+const MANGA_FRAGMENT_AR: Record<string, string> = {
+  "Solo Leveling": "الارتقاء المنفرد",
+  "Omniscient Reader": "قارئ وجهة نظر كل شيء",
+  "Tower of God": "برج الإله",
+  "The Beginning After the End": "البداية بعد النهاية",
+  "Chainsaw Man": "رجل المنشار",
+  "Jujutsu Kaisen": "جوجوتسو كايسن",
+  "Demon Slayer": "قاتل الشياطين",
+  "Kimetsu no Yaiba": "قاتل الشياطين",
+  "One Piece": "ون بيس",
+  "Berserk": "بيرسيرك",
+  "Attack on Titan": "هجوم العمالقة",
+  "Shingeki no Kyojin": "هجوم العمالقة",
+  "One-Punch Man": "ون بنش مان",
+  "One Punch Man": "ون بنش مان",
+  "My Hero Academia": "أكاديميتي للأبطال",
+  "Boku no Hero Academia": "أكاديميتي للأبطال",
+  "Tokyo Ghoul": "طوكيو غول",
+  "Spy x Family": "سباي إكس فاميلي",
+  "SPY×FAMILY": "سباي إكس فاميلي",
+  "Blue Lock": "بلو لوك",
+  "Frieren": "فريرين",
+  "Vagabond": "فاغابوند",
+  "Vinland Saga": "فينلاند ساغا",
+  "Monster": "مونستر",
+  "Oshi no Ko": "أوشي نو كو",
+  "Dandadan": "دان دا دان",
+  "Sakamoto Days": "أيام ساكاموتو",
+  "Kaiju No. 8": "كايجو رقم 8",
+  "Black Clover": "البرسيم الأسود",
+  "Tokyo Revengers": "طوكيو ريفنجرز",
+  "Haikyu": "هايكيو!!",
+  "Death Note": "مذكرة الموت",
+  "Hunter x Hunter": "هنتر إكس هنتر",
+  "Bleach": "بليتش",
+  "Naruto": "ناروتو",
+  "The God of High School": "إله الثانوية",
+  "Noblesse": "النبلاء",
+  "Sweet Home": "منزل جميل",
+  "Bastard": "الأوغاد",
+  "Lookism": "ازدواجية المظهر",
+  "Eleceed": "إليزيد",
+  "Nano Machine": "النانو ماشين",
+  "Mercenary Enrollment": "سيد المرتزقة",
+  "Teenage Mercenary": "سيد المرتزقة",
+  "Legend of the Northern Blade": "أسطورة النصل الشمالي",
+  "Return of the Mount Hua Sect": "عودة طائفة جبل هوا",
+  "The Greatest Estate Developer": "أعظم مهندس في العالم",
+  "Wind Breaker": "ويند بريكر",
+  "The Boxer": "الملاكم",
+  "Unordinary": "غير عادي",
+  "unOrdinary": "غير عادي",
+  "Villains Are Destined to Die": "مقتل البطل الشرير",
+  "Who Made Me a Princess": "من جعلني أميرة",
+  "SSS-Class Revival Hunter": "صياد الإحياء من الفئة SSS",
+  "SSS-Class Suicide Hunter": "صياد الإحياء من الفئة SSS",
+  "Leveling With the Gods": "رفع المستوى مع الآلهة",
+  "Second Life Ranker": "الرتبة الثانية",
+  "Tomb Raider King": "ملك لصوص القبور",
+  "The Horizon": "الأفق",
+  "Goodnight Punpun": "طابت ليلتك بونبون",
+  "Oyasumi Punpun": "طابت ليلتك بونبون",
+  "Kaguya-sama": "كاغويا ساما: الحب حرب",
+  "Horimiya": "هوريميا",
+  "Classroom of the Elite": "فصل النخبة",
+  "JoJo": "مغامرات جوجو العجيبة",
+  "Kingdom": "المملكة (كينغدوم)",
+  "Slam Dunk": "سلام دانك",
+  "20th Century Boys": "فتيان القرن العشرين",
+  "Gantz": "غانتز",
+  "Claymore": "كلايمور",
+  "Fire Punch": "فاير بنش",
+  "Hell's Paradise": "جنة الجحيم",
+  "Jigokuraku": "جنة الجحيم",
+  "Mashle": "ماشل: السحر والعضلات",
+  "Undead Unluck": "أنديد أنلاك",
+  "Blue Box": "الصندوق الأزرق",
+  "Ao no Hako": "الصندوق الأزرق",
+  "Komi Can't Communicate": "كومي لا تستطيع التواصل",
+};
+
+function getArabicTitleForItem(item: CatalogMedia): string | null {
+  if (item.title_ar && /[\u0600-\u06FF]/.test(item.title_ar)) return item.title_ar;
+  if (MANGA_AR_TITLES[item.id]) return MANGA_AR_TITLES[item.id];
+  const arSyn = (item.synonyms || []).find((s) => /[\u0600-\u06FF]/.test(s));
+  if (arSyn) return arSyn;
+  const en = String(item.title?.english || item.title?.romaji || "");
+  for (const [frag, ar] of Object.entries(MANGA_FRAGMENT_AR)) {
+    if (en.toLowerCase().includes(frag.toLowerCase())) return ar;
+  }
+  return null;
+}
 
 type CatalogVariant = "standard" | "upcoming" | "stats" | "manga";
 
@@ -99,6 +257,7 @@ query NovaMediaCatalog(${varDefs.join(", ")}) {
     media(${filterArgs.join(", ")}) {
       id
       title { romaji english native }
+      synonyms
       coverImage { large extraLarge }
       averageScore popularity episodes chapters volumes
       status format startDate { year month day } countryOfOrigin genres
@@ -243,12 +402,14 @@ export function MediaCatalogGrid({
   };
 
   const renderItem = ({ item }: { item: CatalogMedia }) => {
-    const title = item.title_ar || item.title?.english || item.title?.romaji || item.title?.native || "";
+    const arTitle = getArabicTitleForItem(item);
+    const enTitle = item.title?.english || item.title?.romaji || item.title?.native || "";
+    const title = arTitle || (mediaType === "MANGA" ? `${mangaOriginLabel(item.countryOfOrigin)}: ${enTitle}` : enTitle);
     const hasArabicTitle = /[\u0600-\u06FF]/.test(title);
     const year = item.startDate?.year || null;
     const cover = item.coverImage?.extraLarge || item.coverImage?.large;
     const cardSubtitle = variant === "manga"
-      ? mangaOriginLabel(item.countryOfOrigin)
+      ? (arTitle ? enTitle : mangaOriginLabel(item.countryOfOrigin))
       : formatLabel(item.format);
 
     return (

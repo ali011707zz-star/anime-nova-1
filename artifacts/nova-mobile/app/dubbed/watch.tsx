@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import {
   View, Text, ActivityIndicator, ScrollView,
-  StyleSheet, Platform, Image,
+  StyleSheet, Platform, Image, I18nManager,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
@@ -25,11 +25,17 @@ import {
   subscribeActiveDownloads,
 } from "@/utils/downloadManager";
 
+const ROW_RTL = I18nManager.isRTL ? "row" : "row-reverse";
+const ROW_LTR = I18nManager.isRTL ? "row-reverse" : "row";
+const ALIGN_RIGHT = I18nManager.isRTL ? "flex-start" : "flex-end";
+
 interface DubbedEpRef {
   number: number;
   title: string;
   url: string;
   seasonLabel: string;
+  epId?: string;
+  videoId?: string;
 }
 
 type DubbedSlotState = "checking" | "available" | "fetching" | "failed";
@@ -53,15 +59,16 @@ export default function DubbedWatchScreen() {
 
   const {
     epUrl, series, title, ep, season, poster, totalEps: totalEpsParam,
-    provider: providerParam, showId: showIdParam, episodeId: episodeIdParam,
+    provider: providerParam, showId: showIdParam, episodeId: episodeIdParam, videoId: videoIdParam,
   } = useLocalSearchParams<{
     epUrl: string; series: string; title: string; ep: string; season: string;
-    poster: string; at: string; totalEps?: string; provider?: string; showId?: string; episodeId?: string;
+    poster: string; at: string; totalEps?: string; provider?: string; showId?: string; episodeId?: string; videoId?: string;
   }>();
   const parsedEpisodeRef = parseCarateenEpisodeUrl(epUrl);
   const requestedProvider = Array.isArray(providerParam) ? providerParam[0] : providerParam;
   const requestedShowId = Array.isArray(showIdParam) ? showIdParam[0] : showIdParam;
   const requestedEpisodeId = Array.isArray(episodeIdParam) ? episodeIdParam[0] : episodeIdParam;
+  const requestedVideoId = Array.isArray(videoIdParam) ? videoIdParam[0] : videoIdParam;
   const provider =
     requestedProvider === "sp" || requestedProvider === "carateen"
       ? requestedProvider
@@ -103,7 +110,7 @@ export default function DubbedWatchScreen() {
     try { return decodeURIComponent(poster); } catch { return poster; }
   })();
 
-  /* ── Load Series Episode List for Prev/Next Navigation ── */
+  /* ── Load Series Episode List for Prev/Next Navigation & ID Resolution ── */
   useEffect(() => {
     let cancelled = false;
     const BASE = getBaseUrl();
@@ -111,20 +118,40 @@ export default function DubbedWatchScreen() {
       try {
         if (isCarateenSource && provider && showId) {
           const r = await fetch(
-            `${BASE}/api/dubbed/carateen/episodes?provider=${encodeURIComponent(provider)}&id=${encodeURIComponent(showId)}`,
+            `${BASE}/api/dubbed/carateen/episodes?provider=${encodeURIComponent(provider)}&showId=${encodeURIComponent(showId)}&id=${encodeURIComponent(showId)}`,
           );
           if (!r.ok || cancelled) return;
           const d = await r.json();
-          const seasons = Array.isArray(d?.seasons) ? d.seasons : [];
           const flat: DubbedEpRef[] = [];
-          for (const s of seasons) {
-            const sLabel = s.label || "الموسم 1";
-            for (const item of s.episodes || []) {
+          const seasons = Array.isArray(d?.seasons) ? d.seasons : [];
+          if (seasons.length > 0) {
+            for (const s of seasons) {
+              const sLabel = s.label || "الموسم 1";
+              for (const item of s.episodes || []) {
+                const epIdVal = String(item.epId ?? item.id ?? "").trim();
+                const numVal = Number(item.number) || flat.length + 1;
+                flat.push({
+                  number: numVal,
+                  title: item.title || item.pref || `الحلقة ${numVal}`,
+                  url: item.url || (epIdVal ? `carateen://${provider}/${showId}/${epIdVal}` : ""),
+                  seasonLabel: sLabel,
+                  epId: epIdVal || undefined,
+                  videoId: item.video_id ? String(item.video_id) : undefined,
+                });
+              }
+            }
+          } else if (Array.isArray(d?.episodes)) {
+            for (let i = 0; i < d.episodes.length; i++) {
+              const item = d.episodes[i];
+              const epIdVal = String(item.epId ?? item.id ?? "").trim();
+              const numVal = Number(item.number ?? item.episode_number ?? i + 1) || i + 1;
               flat.push({
-                number: Number(item.number) || flat.length + 1,
-                title: item.title || `الحلقة ${item.number || flat.length + 1}`,
-                url: item.url || "",
-                seasonLabel: sLabel,
+                number: numVal,
+                title: item.title || item.pref || `الحلقة ${numVal}`,
+                url: item.url || (epIdVal ? `carateen://${provider}/${showId}/${epIdVal}` : ""),
+                seasonLabel: "الموسم 1",
+                epId: epIdVal || undefined,
+                videoId: item.video_id ? String(item.video_id) : undefined,
               });
             }
           }
@@ -155,10 +182,22 @@ export default function DubbedWatchScreen() {
 
   const currentEpIndex = useMemo(() => {
     if (!episodeList.length) return -1;
+    if (episodeId) {
+      const byEpId = episodeList.findIndex((item) => item.epId === episodeId);
+      if (byEpId >= 0) return byEpId;
+    }
     const byUrl = epUrl ? episodeList.findIndex((item) => item.url === epUrl) : -1;
     if (byUrl >= 0) return byUrl;
     return episodeList.findIndex((item) => item.number === episodeNumber);
-  }, [episodeList, epUrl, episodeNumber]);
+  }, [episodeList, episodeId, epUrl, episodeNumber]);
+
+  const matchedEpRef = useMemo(() => {
+    if (currentEpIndex >= 0) return episodeList[currentEpIndex];
+    return episodeList.find((item) => item.number === episodeNumber) || episodeList[0] || null;
+  }, [currentEpIndex, episodeList, episodeNumber]);
+
+  const effectiveEpisodeId = episodeId || matchedEpRef?.epId || "";
+  const effectiveVideoId = requestedVideoId || matchedEpRef?.videoId || "";
 
   const prevEpRef = currentEpIndex > 0 ? episodeList[currentEpIndex - 1] : null;
   const nextEpRef = currentEpIndex >= 0 && currentEpIndex < episodeList.length - 1 ? episodeList[currentEpIndex + 1] : null;
@@ -176,16 +215,17 @@ export default function DubbedWatchScreen() {
         season: target.seasonLabel || season || "الموسم 1",
         poster: posterUrl,
         totalEps: String(totalEpsCount || episodeList.length || ""),
-        ...(parsedTarget
+        ...(isCarateenSource || parsedTarget
           ? {
-              provider: parsedTarget.provider,
-              showId: parsedTarget.showId,
-              episodeId: parsedTarget.episodeId,
+              provider: parsedTarget?.provider || provider || "sp",
+              showId: parsedTarget?.showId || showId || "",
+              episodeId: target.epId || parsedTarget?.episodeId || "",
+              ...(target.videoId ? { videoId: target.videoId } : {}),
             }
           : {}),
       },
     });
-  }, [router, series, title, season, posterUrl, totalEpsCount, episodeList.length]);
+  }, [router, series, title, season, posterUrl, totalEpsCount, episodeList.length, isCarateenSource, provider, showId]);
 
   /** استخراج رابط الفيديو من HTML — نفس patterns الباكند */
   function extractVideoFromHtml(html: string): string | null {
@@ -197,6 +237,107 @@ export default function DubbedWatchScreen() {
     if (m3) return m3[1];
     return null;
   }
+
+  /** استخراج رابط تشغيل حلقة سبيستون / كراتين (يدعم /stream و /watch-src و video_id المباشر) */
+  const resolveCarateenMedia = useCallback(async (
+    signal: AbortSignal,
+    mode: "api" | "direct" = "api",
+  ): Promise<{ url: string; contentType: "hls" | "progressive"; rawUrl: string } | null> => {
+    const BASE = getBaseUrl();
+    const prov = provider || "sp";
+    let targetEpId = effectiveEpisodeId;
+    let targetVideoId = effectiveVideoId;
+
+    // If episodeId is still empty (e.g. episodes list hasn't finished loading), fetch it on-demand
+    if (!targetEpId && showId) {
+      try {
+        const epRes = await fetch(
+          `${BASE}/api/dubbed/carateen/episodes?provider=${encodeURIComponent(prov)}&showId=${encodeURIComponent(showId)}&id=${encodeURIComponent(showId)}`,
+          { signal },
+        );
+        if (epRes.ok) {
+          const epData = await epRes.json();
+          const rawList: any[] = Array.isArray(epData?.episodes)
+            ? epData.episodes
+            : Array.isArray(epData?.seasons?.[0]?.episodes)
+              ? epData.seasons[0].episodes
+              : [];
+          const found = rawList.find((item: any, idx: number) => Number(item?.number ?? idx + 1) === episodeNumber) || rawList[0];
+          if (found) {
+            targetEpId = String(found.epId ?? found.id ?? "").trim();
+            if (found.video_id) targetVideoId = String(found.video_id).trim();
+          }
+        }
+      } catch {}
+    }
+
+    // 1. Try /api/dubbed/carateen/stream (Available on live server https://animenovaa.duckdns.org)
+    if (targetEpId && showId) {
+      try {
+        const streamRes = await fetch(
+          `${BASE}/api/dubbed/carateen/stream?provider=${encodeURIComponent(prov)}&showId=${encodeURIComponent(showId)}&episodeId=${encodeURIComponent(targetEpId)}`,
+          { signal, cache: "no-store" },
+        );
+        if (streamRes.ok && (streamRes.headers.get("content-type") || "").includes("json")) {
+          const d = await streamRes.json();
+          const rawStreamUrl = typeof d?.streamUrl === "string" ? d.streamUrl.trim() : "";
+          if (rawStreamUrl) {
+            const isHls = /\.m3u8(?:[?#]|$)/i.test(rawStreamUrl) || rawStreamUrl.includes("/hls/");
+            const proxied = isHls
+              ? `${BASE}/api/anime/hls-proxy?url=${encodeURIComponent(rawStreamUrl)}&ref=${encodeURIComponent("https://carateen.tv/")}`
+              : `${BASE}/api/anime/video-proxy?url=${encodeURIComponent(rawStreamUrl)}&ref=${encodeURIComponent("https://carateen.tv/")}`;
+            const chosenUrl = mode === "direct" ? rawStreamUrl : proxied;
+            return {
+              url: withPlaybackTrace(chosenUrl, playbackTraceId, BASE),
+              contentType: isHls ? "hls" : "progressive",
+              rawUrl: proxied,
+            };
+          }
+        }
+      } catch (e: any) {
+        if (e?.name === "AbortError" || signal.aborted) return null;
+      }
+    }
+
+    // 2. Try /api/dubbed/carateen/watch-src (if supported by backend)
+    if (targetEpId && showId) {
+      try {
+        const watchRes = await fetch(
+          `${BASE}/api/dubbed/carateen/watch-src?provider=${encodeURIComponent(prov)}&showId=${encodeURIComponent(showId)}&episodeId=${encodeURIComponent(targetEpId)}`,
+          { signal, cache: "no-store" },
+        );
+        if (watchRes.ok && (watchRes.headers.get("content-type") || "").includes("json")) {
+          const d = await watchRes.json();
+          const proxyUrl = typeof d?.hlsUrl === "string" && d.hlsUrl
+            ? (d.hlsUrl.startsWith("/") ? `${BASE}${d.hlsUrl}` : d.hlsUrl)
+            : null;
+          if (proxyUrl) {
+            return {
+              url: withPlaybackTrace(proxyUrl, playbackTraceId, BASE),
+              contentType: d.type === "hls" ? "hls" : "progressive",
+              rawUrl: proxyUrl,
+            };
+          }
+        }
+      } catch (e: any) {
+        if (e?.name === "AbortError" || signal.aborted) return null;
+      }
+    }
+
+    // 3. Direct fallback using video_id from episode metadata
+    if (targetVideoId) {
+      const directHls = `https://pegasus.5387692.xyz/api/${prov === "sp" ? "sp" : "ct"}/hls/${encodeURIComponent(targetVideoId)}/playlist.m3u8`;
+      const proxiedHls = `${BASE}/api/anime/hls-proxy?url=${encodeURIComponent(directHls)}&ref=${encodeURIComponent("https://carateen.tv/")}`;
+      const chosenUrl = mode === "direct" ? directHls : proxiedHls;
+      return {
+        url: withPlaybackTrace(chosenUrl, playbackTraceId, BASE),
+        contentType: "hls",
+        rawUrl: proxiedHls,
+      };
+    }
+
+    return null;
+  }, [effectiveEpisodeId, effectiveVideoId, episodeNumber, playbackTraceId, provider, showId]);
 
   /* ── Stage 1: Availability Query (مرحلة الاستعلام) ── */
   const runAvailabilityQuery = useCallback(async () => {
@@ -227,39 +368,41 @@ export default function DubbedWatchScreen() {
         mode: "api",
         state: "checking",
       },
-      ...(!isCarateenSource && epUrl
-        ? [{
-            key: "DIRECT_720p",
-            site: "dubbed_direct_720",
-            shortName: " احتياطي",
-            label: "السيرفر الاحتياطي المباشر",
-            quality: "720p" as const,
-            mode: "direct" as const,
-            state: "checking" as DubbedSlotState,
-          }]
-        : []),
+      {
+        key: "DIRECT_720p",
+        site: "dubbed_direct_720",
+        shortName: "احتياطي",
+        label: "السيرفر الاحتياطي المباشر",
+        quality: "720p",
+        mode: "direct",
+        state: "checking",
+      },
     ];
     setSlots(initialSlots);
 
     const BASE = getBaseUrl();
     try {
-      const sourceUrl = isCarateenSource
-        ? `${BASE}/api/dubbed/carateen/watch-src?provider=${encodeURIComponent(provider || "")}&showId=${encodeURIComponent(showId || "")}&episodeId=${encodeURIComponent(episodeId || "")}`
-        : `${BASE}/api/dubbed/watch-src?epUrl=${encodeURIComponent(epUrl)}&trace=${encodeURIComponent(playbackTraceId)}`;
-
-      const r = await fetch(sourceUrl, { signal: ctrl.signal, cache: "no-store" });
-      if (ctrl.signal.aborted || !mountedRef.current) return;
-      if (r.ok) {
-        const d = await r.json();
-        const proxyUrl = typeof d.hlsUrl === "string" && d.hlsUrl
-          ? (d.hlsUrl.startsWith("/") ? `${BASE}${d.hlsUrl}` : d.hlsUrl)
-          : null;
-        if (proxyUrl) {
-          preloadedMediaRef.current = {
-            url: withPlaybackTrace(proxyUrl, playbackTraceId, BASE),
-            contentType: d.type === "hls" ? "hls" : "progressive",
-            rawUrl: proxyUrl,
-          };
+      if (isCarateenSource) {
+        const resolved = await resolveCarateenMedia(ctrl.signal, "api");
+        if (resolved && !ctrl.signal.aborted && mountedRef.current) {
+          preloadedMediaRef.current = resolved;
+        }
+      } else {
+        const sourceUrl = `${BASE}/api/dubbed/watch-src?epUrl=${encodeURIComponent(epUrl)}&trace=${encodeURIComponent(playbackTraceId)}`;
+        const r = await fetch(sourceUrl, { signal: ctrl.signal, cache: "no-store" });
+        if (ctrl.signal.aborted || !mountedRef.current) return;
+        if (r.ok && (r.headers.get("content-type") || "").includes("json")) {
+          const d = await r.json();
+          const proxyUrl = typeof d.hlsUrl === "string" && d.hlsUrl
+            ? (d.hlsUrl.startsWith("/") ? `${BASE}${d.hlsUrl}` : d.hlsUrl)
+            : null;
+          if (proxyUrl) {
+            preloadedMediaRef.current = {
+              url: withPlaybackTrace(proxyUrl, playbackTraceId, BASE),
+              contentType: d.type === "hls" ? "hls" : "progressive",
+              rawUrl: proxyUrl,
+            };
+          }
         }
       }
     } catch (e: any) {
@@ -274,7 +417,7 @@ export default function DubbedWatchScreen() {
       })),
     );
     setCheckingAvailability(false);
-  }, [epUrl, episodeId, isCarateenSource, playbackTraceId, provider, showId]);
+  }, [epUrl, isCarateenSource, playbackTraceId, provider, resolveCarateenMedia]);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -307,16 +450,28 @@ export default function DubbedWatchScreen() {
       };
     }
 
+    if (isCarateenSource) {
+      const resolved = await resolveCarateenMedia(signal, mode);
+      if (resolved) {
+        if (mode === "api") preloadedMediaRef.current = resolved;
+        return resolved;
+      }
+      // If direct failed, try api mode as fallback
+      if (mode === "direct") {
+        const fallback = await resolveCarateenMedia(signal, "api");
+        if (fallback) return fallback;
+      }
+      return null;
+    }
+
     const BASE = getBaseUrl();
-    if (mode === "api" || isCarateenSource) {
+    if (mode === "api") {
       for (let attempt = 0; attempt < 2; attempt += 1) {
         try {
-          const sourceUrl = isCarateenSource
-            ? `${BASE}/api/dubbed/carateen/watch-src?provider=${encodeURIComponent(provider || "")}&showId=${encodeURIComponent(showId || "")}&episodeId=${encodeURIComponent(episodeId || "")}`
-            : `${BASE}/api/dubbed/watch-src?epUrl=${encodeURIComponent(epUrl)}&trace=${encodeURIComponent(playbackTraceId)}`;
+          const sourceUrl = `${BASE}/api/dubbed/watch-src?epUrl=${encodeURIComponent(epUrl)}&trace=${encodeURIComponent(playbackTraceId)}`;
           const r = await fetch(sourceUrl, { signal, cache: "no-store" });
           if (signal.aborted) return null;
-          if (r.ok) {
+          if (r.ok && (r.headers.get("content-type") || "").includes("json")) {
             const d = await r.json();
             const proxyUrl = typeof d.hlsUrl === "string" && d.hlsUrl
               ? (d.hlsUrl.startsWith("/") ? `${BASE}${d.hlsUrl}` : d.hlsUrl)
@@ -377,7 +532,7 @@ export default function DubbedWatchScreen() {
     }
 
     return null;
-  }, [epUrl, episodeId, isCarateenSource, playbackTraceId, provider, showId]);
+  }, [epUrl, isCarateenSource, playbackTraceId, resolveCarateenMedia]);
 
   const handlePickSlot = useCallback(async (slot: DubbedServerSlot) => {
     if (slot.state === "fetching") return;
@@ -472,12 +627,14 @@ export default function DubbedWatchScreen() {
       ]);
 
       const rawMediaUrl = extracted.rawUrl || extracted.url;
-      const isAlreadyProxy = rawMediaUrl.includes("/api/dubbed/stream") || rawMediaUrl.includes("/api/anime/");
-      const downloadUrl = extracted.contentType === "hls" && !rawMediaUrl.includes("/api/anime/download-mp4")
-        ? `${base}/api/anime/download-mp4?url=${encodeURIComponent(rawMediaUrl)}${downloadToken ? `&dlToken=${encodeURIComponent(downloadToken)}` : ""}`
-        : isAlreadyProxy
-          ? rawMediaUrl
-          : `${base}/api/anime/download-mp4?url=${encodeURIComponent(rawMediaUrl)}${downloadToken ? `&dlToken=${encodeURIComponent(downloadToken)}` : ""}`;
+      const isDirectProgressiveProxy =
+        rawMediaUrl.includes("/api/dubbed/stream") || rawMediaUrl.includes("/api/anime/video-proxy");
+      const downloadUrl =
+        extracted.contentType === "hls" && !rawMediaUrl.includes("/api/anime/download-mp4")
+          ? `${base}/api/anime/download-mp4?site=animewitcher&url=${encodeURIComponent(rawMediaUrl)}${downloadToken ? `&dlToken=${encodeURIComponent(downloadToken)}` : ""}`
+          : isDirectProgressiveProxy
+            ? rawMediaUrl
+            : `${base}/api/anime/download-mp4?site=animewitcher&url=${encodeURIComponent(rawMediaUrl)}${downloadToken ? `&dlToken=${encodeURIComponent(downloadToken)}` : ""}`;
 
       setDlStates((p) => ({ ...p, [slot.key]: "downloading" }));
       setDlProgress((p) => ({ ...p, [slot.key]: 0 }));
@@ -880,8 +1037,7 @@ export default function DubbedWatchScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#08080f" },
   header: {
-    flexDirection: "row",
-    direction: "ltr",
+    flexDirection: ROW_LTR,
     alignItems: "center",
     gap: 10,
     paddingHorizontal: 14,
@@ -891,8 +1047,7 @@ const styles = StyleSheet.create({
     borderBottomColor: "rgba(255,255,255,0.06)",
   },
   epNavRow: {
-    flexDirection: "row",
-    direction: "ltr",
+    flexDirection: ROW_LTR,
     alignItems: "center",
     gap: 6,
   },
@@ -907,8 +1062,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   epNavBtn: {
-    flexDirection: "row",
-    direction: "ltr",
+    flexDirection: ROW_LTR,
     alignItems: "center",
     gap: 4,
     paddingHorizontal: 10,
@@ -949,8 +1103,7 @@ const styles = StyleSheet.create({
     gap: 16,
   },
   infoCard: {
-    flexDirection: "row-reverse",
-    direction: "ltr",
+    flexDirection: ROW_RTL,
     alignItems: "center",
     gap: 14,
     padding: 14,
@@ -968,7 +1121,7 @@ const styles = StyleSheet.create({
   },
   infoTextWrap: {
     flex: 1,
-    alignItems: "flex-end",
+    alignItems: ALIGN_RIGHT,
     gap: 8,
   },
   infoTitle: {
@@ -978,8 +1131,7 @@ const styles = StyleSheet.create({
     textAlign: "right",
   },
   epPill: {
-    flexDirection: "row",
-    direction: "ltr",
+    flexDirection: ROW_RTL,
     alignItems: "center",
     gap: 6,
     paddingHorizontal: 12,
@@ -1002,7 +1154,7 @@ const styles = StyleSheet.create({
     textAlign: "right",
   },
   errorBanner: {
-    flexDirection: "row-reverse",
+    flexDirection: ROW_RTL,
     alignItems: "center",
     gap: 8,
     padding: 12,
@@ -1022,10 +1174,9 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   qualityHeader: {
-    flexDirection: "row",
-    direction: "ltr",
+    flexDirection: ROW_LTR,
     alignItems: "center",
-    justifyContent: "flex-end",
+    justifyContent: ALIGN_RIGHT,
     gap: 6,
   },
   qualityDot: {
@@ -1045,8 +1196,7 @@ const styles = StyleSheet.create({
     overflow: "hidden",
   },
   serverRow: {
-    flexDirection: "row",
-    direction: "ltr",
+    flexDirection: ROW_LTR,
     alignItems: "center",
     justifyContent: "space-between",
     paddingHorizontal: 14,
@@ -1057,8 +1207,7 @@ const styles = StyleSheet.create({
     borderTopColor: "rgba(255,255,255,0.06)",
   },
   playActionPill: {
-    flexDirection: "row",
-    direction: "ltr",
+    flexDirection: ROW_LTR,
     alignItems: "center",
     gap: 6,
     paddingHorizontal: 14,
@@ -1072,8 +1221,7 @@ const styles = StyleSheet.create({
     fontFamily: "Cairo_700Bold",
   },
   serverRightInfo: {
-    flexDirection: "row",
-    direction: "ltr",
+    flexDirection: ROW_LTR,
     alignItems: "center",
     gap: 8,
   },
@@ -1092,14 +1240,12 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   dlSectionHeader: {
-    flexDirection: "row",
-    direction: "ltr",
+    flexDirection: ROW_LTR,
     alignItems: "center",
     justifyContent: "space-between",
   },
   dlHeaderTitleRow: {
-    flexDirection: "row",
-    direction: "ltr",
+    flexDirection: ROW_LTR,
     alignItems: "center",
     gap: 8,
   },
@@ -1115,8 +1261,7 @@ const styles = StyleSheet.create({
     fontFamily: "Cairo_700Bold",
   },
   dlHeaderBadge: {
-    flexDirection: "row",
-    direction: "ltr",
+    flexDirection: ROW_LTR,
     alignItems: "center",
     gap: 5,
     paddingHorizontal: 10,
@@ -1139,8 +1284,7 @@ const styles = StyleSheet.create({
     overflow: "hidden",
   },
   dlRow: {
-    flexDirection: "row",
-    direction: "ltr",
+    flexDirection: ROW_LTR,
     alignItems: "center",
     justifyContent: "space-between",
     paddingHorizontal: 14,
@@ -1150,8 +1294,7 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(16, 185, 129, 0.06)",
   },
   dlActionBtn: {
-    flexDirection: "row",
-    direction: "ltr",
+    flexDirection: ROW_LTR,
     alignItems: "center",
     gap: 6,
     paddingHorizontal: 12,
@@ -1175,8 +1318,7 @@ const styles = StyleSheet.create({
     fontFamily: "Cairo_700Bold",
   },
   dlRightInfo: {
-    flexDirection: "row",
-    direction: "ltr",
+    flexDirection: ROW_LTR,
     alignItems: "center",
     gap: 10,
   },
