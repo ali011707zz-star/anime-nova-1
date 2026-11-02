@@ -14587,25 +14587,26 @@ router.get("/anime/sources-stream", scraperQueueMiddleware, async (req, res) => 
     await fallback(hint);
   }
 
-  // Resolve AniList in parallel with provider checks. Only ID-dependent
-  // providers await this bounded lookup; title/catalog providers can emit
-  // availability rows immediately instead of holding the whole picker.
+  // Reuse a supplied AniList ID immediately. Resolve by title only when it is
+  // missing; only ID-dependent providers await this bounded lookup.
   const aniListIdResolution = (!closed && title)
-    ? Promise.race([
-        resolveAniListIdForSource(title, english, titleVariants, titleAr),
-        new Promise<number | undefined>(resolve => setTimeout(() => resolve(undefined), 3500)),
-      ]).then(resolvedByTitle => {
-        if (resolvedByTitle) anilistId = resolvedByTitle;
-        tracePlayback(
-          sourceCheckTrace,
-          "sources-stream",
-          "anilist_resolution",
-          "anilist",
-          Date.now() - sourceCheckStartedAt,
-          `found=${Boolean(resolvedByTitle)}`,
-        );
-        return anilistId;
-      }).catch(() => anilistId)
+    ? anilistId
+      ? Promise.resolve(anilistId)
+      : Promise.race([
+          resolveAniListIdForSource(title, english, titleVariants, titleAr),
+          new Promise<number | undefined>(resolve => setTimeout(() => resolve(undefined), 3500)),
+        ]).then(resolvedByTitle => {
+          if (resolvedByTitle) anilistId = resolvedByTitle;
+          tracePlayback(
+            sourceCheckTrace,
+            "sources-stream",
+            "anilist_resolution",
+            "anilist",
+            Date.now() - sourceCheckStartedAt,
+            `found=${Boolean(resolvedByTitle)}`,
+          );
+          return anilistId;
+        }).catch(() => anilistId)
     : Promise.resolve(anilistId);
   if (!checkOnly) {
     // Some home/latest links carry a catalog id rather than an AniList id.
@@ -15303,6 +15304,18 @@ router.get("/anime/sources-stream", scraperQueueMiddleware, async (req, res) => 
           timeoutMs: sourceAvailabilityJobTimeoutMs("anslayer", 15_000),
           run: () => useCatalogAvailability("anslayer", async hint => {
             const directId = Number(hint?.providerTitleId || anslayerId || 0) || undefined;
+            if (fromLatest && latestSource === "anslayer") {
+              const availabilityWrites: Promise<UnifiedSource[]>[] = [];
+              const onSource: AnslayerSourceListener = source => {
+                availabilityWrites.push(emitAvailability([source]));
+              };
+              const resolved = await getAnimeSlayerSources(
+                title, english, ep, directId, titleAr, hint, onSource, false,
+              );
+              availabilityWrites.push(emitAvailability(resolved));
+              await Promise.all(availabilityWrites);
+              return resolved;
+            }
             return scrapeCached("anslayer", async () => getAnimeSlayerSources(
               title, english, ep, directId, titleAr, hint, undefined, true,
             ), false, 15_000);

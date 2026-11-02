@@ -1,12 +1,17 @@
 export const SOURCE_AVAILABILITY_PRIORITY = Object.freeze([
   "kawaii",
   "megaplay",
-  "animewitcher",
-  "anifox",
+  "anslayer",
+  "animeify",
   "animedar",
   "sanime",
+  "animekai",
+  "anifox",
+  "animewitcher",
 ]);
-export const SOURCE_AVAILABILITY_CONCURRENCY = 6;
+// Match the previously responsive scan: start the fast providers together so
+// slow catalog scrapers cannot hold back the first availability row.
+export const SOURCE_AVAILABILITY_CONCURRENCY = 10;
 
 const MIN_TIMEOUT_MS = Object.freeze({
   // Search + episode-list requests are sequential; the full metadata check can
