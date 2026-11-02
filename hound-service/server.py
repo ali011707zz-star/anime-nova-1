@@ -17,6 +17,7 @@ import os
 import time
 from contextlib import asynccontextmanager
 from typing import Optional
+from urllib.parse import urlparse
 
 import uvicorn
 from fastapi import FastAPI, HTTPException
@@ -35,16 +36,18 @@ PORT = int(os.getenv("HOUND_SERVICE_PORT", "8766"))
 _session = None
 _session_lock = asyncio.Lock()
 _session_idle_since: float = 0.0
-SESSION_IDLE_TIMEOUT = int(os.getenv("HOUND_IDLE_TIMEOUT", "300"))  # 5 دقائق
+_domain_pages: dict[str, object] = {}
+SESSION_IDLE_TIMEOUT = int(os.getenv("HOUND_IDLE_TIMEOUT", "1800"))  # 30 دقيقة
 
 
 async def get_session():
     """يُرجع session دافئة أو يُنشئ جديدة."""
-    global _session, _session_idle_since
+    global _session, _session_idle_since, _domain_pages
     from master_fetch.browser import StealthyBrowser  # lazy import (patchright ~5s)
 
     if _session is None or not _session._is_alive:
         log.info("🚀 launching StealthyBrowser (patchright)…")
+        _domain_pages.clear()
         _session = StealthyBrowser(
             headless=True,
             solve_cloudflare=True,   # ← يحل Turnstile تلقائياً
@@ -55,14 +58,127 @@ async def get_session():
         )
         await _session.start()
         log.info("✅ StealthyBrowser ready")
-
     _session_idle_since = time.monotonic()
     return _session
 
 
+def _is_cf_challenge(html: str) -> bool:
+    head = (html or "")[:1500].lower()
+    return (
+        "just a moment" in head
+        or "challenge-platform" in head
+        or "cf-turnstile" in head
+        or "attention required! | cloudflare" in head
+    )
+
+
+async def _navigate_and_solve(session, page, url: str) -> str:
+    from master_fetch.browser import _solve_cloudflare
+
+    await page.goto(url, wait_until="commit", timeout=25_000)
+    if getattr(session, "_init_script", None):
+        try:
+            await page.evaluate(session._init_script)
+        except Exception:
+            pass
+    try:
+        await page.wait_for_load_state("domcontentloaded", timeout=15_000)
+    except Exception:
+        pass
+    html0 = await page.content()
+    if _is_cf_challenge(html0):
+        log.info(f"🛡️ solving Cloudflare challenge on {url}…")
+        await _solve_cloudflare(page)
+        try:
+            await page.wait_for_load_state("domcontentloaded", timeout=10_000)
+        except Exception:
+            pass
+        html0 = await page.content()
+    return html0
+
+
+async def fetch_via_domain_page(session, url: str) -> tuple[str, int]:
+    """
+    يحتفظ بصفحة دافئة لكل نطاق (مثل mangadar.com) بعد حل Cloudflare مرة واحدة،
+    ويُنفّذ fetch داخل نفس سياق المتصفح بسرعة ~250ms بدلاً من فتح تبويب جديد في كل طلب.
+    """
+    global _domain_pages
+    parsed = urlparse(url)
+    origin = f"{parsed.scheme}://{parsed.netloc}"
+    warm_url = f"{origin}/manga/" if "mangadar.com" in parsed.netloc else f"{origin}/"
+
+    page = _domain_pages.get(origin)
+    if page is not None:
+        try:
+            if page.is_closed():
+                page = None
+        except Exception:
+            page = None
+
+    if page is None:
+        log.info(f"🌐 opening persistent domain page for {origin}…")
+        page = await session._context.new_page()
+        page.set_default_navigation_timeout(25_000)
+        page.set_default_timeout(25_000)
+        await _navigate_and_solve(session, page, warm_url)
+        _domain_pages[origin] = page
+        log.info(f"✅ persistent domain page ready for {origin}")
+
+    # جرّب in-page fetch السريع بنفس الكوكيز وبصمة المتصفح
+    try:
+        res = await asyncio.wait_for(
+            page.evaluate(
+                """async (targetUrl) => {
+                    const r = await fetch(targetUrl, {
+                        credentials: 'include',
+                        headers: {
+                            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                            'Accept-Language': 'ar,en;q=0.9'
+                        }
+                    });
+                    const text = await r.text();
+                    return { status: r.status, text };
+                }""",
+                url,
+            ),
+            timeout=15.0,
+        )
+        status = int(res.get("status", 200))
+        html = res.get("text") or ""
+        if status == 200 and len(html) > 30 and not _is_cf_challenge(html):
+            return html, status
+        log.info(f"⚠️ in-page fetch on {origin} returned status={status} or CF challenge; re-navigating…")
+    except Exception as e:
+        log.warning(f"in-page fetch error on {origin}: {e}; re-navigating…")
+
+    # في حال انتهاء صلاحية cf_clearance أعد فتح الرابط مباشرة وحل التحدي
+    try:
+        html = await _navigate_and_solve(session, page, url)
+        return html, 200
+    except Exception:
+        try:
+            await page.close()
+        except Exception:
+            pass
+        _domain_pages.pop(origin, None)
+        raise
+
+
+async def warm_mangadar():
+    """تسخين جلسة mangadar.com عند بدء الخدمة ليكون أول طلب سريعاً."""
+    try:
+        await asyncio.sleep(1.0)
+        async with _session_lock:
+            session = await get_session()
+            await fetch_via_domain_page(session, "https://mangadar.com/manga/")
+            log.info("🔥 mangadar.com warm session initialized")
+    except Exception as e:
+        log.warning(f"mangadar warmup skipped: {e}")
+
+
 async def idle_watchdog():
     """يُغلق البراوزر بعد SESSION_IDLE_TIMEOUT ثانية بدون استخدام."""
-    global _session
+    global _session, _domain_pages
     while True:
         await asyncio.sleep(60)
         if (
@@ -73,6 +189,7 @@ async def idle_watchdog():
             and (time.monotonic() - _session_idle_since) > SESSION_IDLE_TIMEOUT
         ):
             log.info("💤 browser idle — closing to free RAM")
+            _domain_pages.clear()
             try:
                 await _session.close()
             except Exception:
@@ -83,9 +200,11 @@ async def idle_watchdog():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     asyncio.create_task(idle_watchdog())
+    asyncio.create_task(warm_mangadar())
     yield
     # shutdown
-    global _session
+    global _session, _domain_pages
+    _domain_pages.clear()
     if _session is not None:
         try:
             await _session.close()
@@ -97,7 +216,6 @@ app = FastAPI(title="Hound CF-Bypass", lifespan=lifespan)
 
 
 # ── Models ───────────────────────────────────────────────────────────────────
-
 class FetchRequest(BaseModel):
     url: str
     wait: int = 8000          # ms to wait after page load
@@ -116,16 +234,33 @@ class FetchResponse(BaseModel):
 
 
 # ── Endpoints ────────────────────────────────────────────────────────────────
-
 @app.get("/health")
 async def health():
     browser_alive = _session is not None and getattr(_session, "_is_alive", False)
-    return {"ok": True, "browser_alive": browser_alive}
+    return {"ok": True, "browser_alive": browser_alive, "warm_domains": list(_domain_pages.keys())}
 
 
 @app.post("/fetch", response_model=FetchResponse)
 async def fetch_url(req: FetchRequest):
     t0 = time.monotonic()
+
+    # ── 0. مسار سريع خاص بـ mangadar.com عبر الصفحة الدافئة ──────────────
+    if "mangadar.com" in req.url:
+        async with _session_lock:
+            try:
+                session = await get_session()
+                html, status = await fetch_via_domain_page(session, req.url)
+                elapsed = int((time.monotonic() - t0) * 1000)
+                log.info(f"⚡ mangadar-fast ({status}) {req.url[-60:]} [{elapsed}ms]")
+                return FetchResponse(
+                    ok=True,
+                    html=html,
+                    status=status,
+                    method="mangadar-fast",
+                    elapsed_ms=elapsed,
+                )
+            except Exception as e:
+                log.error(f"mangadar-fast error: {e}")
 
     # ── 1. محاولة HTTP سريعة أولاً عبر primp (TLS fingerprinting) ─────────
     try:
@@ -141,7 +276,6 @@ async def fetch_url(req: FetchRequest):
         }
         if req.referer:
             headers["Referer"] = req.referer
-
         r = await client.get(req.url, headers=headers)
         html = r.text or ""
         # تحقق: ليس CF challenge page
@@ -191,11 +325,11 @@ async def fetch_url(req: FetchRequest):
             log.info(f"✅ patchright ({status}) {req.url[-60:]} [{elapsed}ms]")
             return FetchResponse(ok=True, html=html, status=status, method="patchright",
                                  elapsed_ms=elapsed, cookie_str=cookie_str)
-
         except Exception as e:
             log.error(f"StealthyBrowser error: {e}")
             # أعد تهيئة الـ session في الـ request القادم
-            global _session
+            global _session, _domain_pages
+            _domain_pages.clear()
             if _session is not None:
                 try:
                     await _session.close()

@@ -28,176 +28,6 @@ const SEASON_AR: Record<string, string> = {
   WINTER: "شتاء", SPRING: "ربيع", SUMMER: "صيف", FALL: "خريف",
 };
 
-const HOME_MANGA_QUERY = `
-query HomeManga($country: CountryCode) {
-  Page(page: 1, perPage: 16) {
-    media(type: MANGA, countryOfOrigin: $country, sort: [POPULARITY_DESC]) {
-      id
-      title { romaji english native }
-      synonyms
-      coverImage { large extraLarge }
-      averageScore chapters status countryOfOrigin
-    }
-  }
-}`;
-
-const HOME_MANGA_AR_TITLES: Record<number, string> = {
-  // Manhwa (KR)
-  105398: "الارتقاء المنفرد (سولو ليفلينغ)",
-  119257: "قارئ وجهة نظر كل شيء",
-  86964: "برج الإله",
-  100448: "البداية بعد النهاية",
-  127763: "سيد المرتزقة (التحاق المراهق)",
-  114745: "أسطورة النصل الشمالي",
-  126297: "النانو ماشين",
-  107967: "إليزيد",
-  113594: "عودة طائفة جبل هوا",
-  101557: "تومب رايدر كينغ",
-  85143: "اللاعب",
-  85314: "النبيذ والورد (النبلاء)",
-  85135: "إله الثانوية",
-  98462: "لوكيسم (ازدواجية المظهر)",
-  107237: "الأوغاد (باستارد)",
-  100664: "منزل جميل",
-  104065: "مقتل البطل الشرير",
-  117612: "سجلات الشيطان السماوي",
-  128971: "حاصد القمر المنجرف",
-  132144: "أعظم مهندس في العالم",
-  135264: "سولو ليفلينغ: راغناروك",
-  125828: "ساحر اللانهاية",
-  126612: "العودة بعد التناسخ",
-  112926: "طبيب يعيش مرة ثانية",
-  118523: "اللاعب الذي لا يستطيع رفع مستواه",
-  109957: "الرتبة الثانية",
-  111647: "رفع المستوى مع الآلهة",
-  // Manga (JP)
-  30002: "بيرسيرك",
-  30013: "ون بيس",
-  85486: "أكاديميتي للأبطال",
-  87216: "قاتل الشياطين",
-  101517: "جوجوتسو كايسن",
-  105778: "رجل المنشار (تشينسو مان)",
-  97852: "كومي لا تستطيع التواصل",
-  74347: "ون بنش مان",
-  53390: "هجوم العمالقة",
-  30011: "ناروتو",
-  30012: "بليتش",
-  85611: "طوكيو غول",
-  92451: "طوكيو غول: ري",
-  30001: "مونستر",
-  30642: "فينلاند ساغا",
-  30656: "فاغابوند",
-  31706: "جوجو: ستيل بول رن",
-  108556: "سباي إكس فاميلي",
-  117195: "أوشي نو كو",
-  118586: "فريرين: ما وراء نهاية الرحلة",
-  126287: "دان دا دان",
-  119161: "بلو لوك (القفل الأزرق)",
-  113138: "كايجو رقم 8",
-  122663: "أيام ساكاموتو",
-  86337: "البرسيم الأسود (بلاك كلوفر)",
-  86769: "نيفرلاند الموعودة",
-  70029: "هنتر إكس هنتر",
-  30021: "مذكرة الموت (ديث نوت)",
-  30025: "الخيميائي المعدني الكامل",
-  85161: "خطايا السبع المميتة",
-  87471: "طوكيو ريفنجرز",
-  100128: "دكتور ستون",
-  103248: "هايكيو!!",
-  44489: "المملكة (كينغدوم)",
-};
-
-const MANGA_NAME_FRAGMENT_AR: Record<string, string> = {
-  "Solo Leveling": "الارتقاء المنفرد",
-  "Omniscient Reader": "قارئ وجهة نظر كل شيء",
-  "Tower of God": "برج الإله",
-  "The Beginning After the End": "البداية بعد النهاية",
-  "Chainsaw Man": "رجل المنشار",
-  "Jujutsu Kaisen": "جوجوتسو كايسن",
-  "Demon Slayer": "قاتل الشياطين",
-  "Kimetsu no Yaiba": "قاتل الشياطين",
-  "One Piece": "ون بيس",
-  "Berserk": "بيرسيرك",
-  "Attack on Titan": "هجوم العمالقة",
-  "Shingeki no Kyojin": "هجوم العمالقة",
-  "One-Punch Man": "ون بنش مان",
-  "One Punch Man": "ون بنش مان",
-  "My Hero Academia": "أكاديميتي للأبطال",
-  "Boku no Hero Academia": "أكاديميتي للأبطال",
-  "Tokyo Ghoul": "طوكيو غول",
-  "Spy x Family": "سباي إكس فاميلي",
-  "SPY×FAMILY": "سباي إكس فاميلي",
-  "Blue Lock": "بلو لوك",
-  "Frieren": "فريرين",
-  "Vagabond": "فاغابوند",
-  "Vinland Saga": "فينلاند ساغا",
-  "Monster": "مونستر",
-  "Oshi no Ko": "أوشي نو كو",
-  "Dandadan": "دان دا دان",
-  "Sakamoto Days": "أيام ساكاموتو",
-  "Kaiju No. 8": "كايجو رقم 8",
-  "Black Clover": "البرسيم الأسود",
-  "Tokyo Revengers": "طوكيو ريفنجرز",
-  "Haikyu": "هايكيو!!",
-  "Death Note": "مذكرة الموت",
-  "Hunter x Hunter": "هنتر إكس هنتر",
-  "Bleach": "بليتش",
-  "Naruto": "ناروتو",
-  "The God of High School": "إله الثانوية",
-  "Noblesse": "النبلاء",
-  "Sweet Home": "منزل جميل",
-  "Bastard": "الأوغاد",
-  "Lookism": "ازدواجية المظهر",
-  "Eleceed": "إليزيد",
-  "Nano Machine": "النانو ماشين",
-  "Mercenary Enrollment": "سيد المرتزقة",
-  "Teenage Mercenary": "سيد المرتزقة",
-  "Legend of the Northern Blade": "أسطورة النصل الشمالي",
-  "Return of the Mount Hua Sect": "عودة طائفة جبل هوا",
-  "The Greatest Estate Developer": "أعظم مهندس في العالم",
-  "Wind Breaker": "ويند بريكر",
-  "The Boxer": "الملاكم",
-  "Unordinary": "غير عادي",
-  "unOrdinary": "غير عادي",
-  "Villains Are Destined to Die": "مقتل البطل الشرير",
-  "Who Made Me a Princess": "من جعلني أميرة",
-  "SSS-Class Revival Hunter": "صياد الإحياء من الفئة SSS",
-  "SSS-Class Suicide Hunter": "صياد الإحياء من الفئة SSS",
-  "Leveling With the Gods": "رفع المستوى مع الآلهة",
-  "Second Life Ranker": "الرتبة الثانية",
-  "Tomb Raider King": "ملك لصوص القبور",
-  "The Horizon": "الأفق",
-  "Goodnight Punpun": "طابت ليلتك بونبون",
-  "Oyasumi Punpun": "طابت ليلتك بونبون",
-  "Kaguya-sama": "كاغويا ساما: الحب حرب",
-  "Horimiya": "هوريميا",
-  "Classroom of the Elite": "فصل النخبة",
-  "JoJo": "مغامرات جوجو العجيبة",
-  "Kingdom": "المملكة (كينغدوم)",
-  "Slam Dunk": "سلام دانك",
-  "20th Century Boys": "فتيان القرن العشرين",
-  "Gantz": "غانتز",
-  "Claymore": "كلايمور",
-  "Fire Punch": "فاير بنش",
-  "Hell's Paradise": "جنة الجحيم",
-  "Jigokuraku": "جنة الجحيم",
-  "Mashle": "ماشل: السحر والعضلات",
-  "Undead Unluck": "أنديد أنلاك",
-  "Blue Box": "الصندوق الأزرق",
-  "Ao no Hako": "الصندوق الأزرق",
-  "Komi Can't Communicate": "كومي لا تستطيع التواصل",
-};
-
-function resolveArabicMangaTitle(m: any, fallbackLabel: string): string {
-  if (m?.id && HOME_MANGA_AR_TITLES[m.id]) return HOME_MANGA_AR_TITLES[m.id];
-  const arSyn = (m?.synonyms || []).find((s: string) => /[\u0600-\u06FF]/.test(s));
-  if (arSyn) return arSyn;
-  const en = String(m?.title?.english || m?.title?.romaji || "");
-  for (const [key, arVal] of Object.entries(MANGA_NAME_FRAGMENT_AR)) {
-    if (en.toLowerCase().includes(key.toLowerCase())) return arVal;
-  }
-  return en ? `${fallbackLabel}: ${en}` : fallbackLabel;
-}
 import { historyRoute, useApp } from "@/context/AppContext";
 import { getBaseUrl } from "@/utils/api";
 import { isTvDevice, tvFocusStyle, TvPressable as Pressable } from "@/utils/tv";
@@ -378,41 +208,48 @@ export default function HomeScreen() {
     return () => ctrl.abort();
   }, []);
 
-  /* ── Manhwa (KR) & Manga (JP) from AniList ── */
+  /* ── Manhwa (Azorafly) & Manga (MangaDar) from Backend ── */
   const { data: manhwaData, refetch: refetchManhwa } = useQuery({
     queryKey: ["homeManhwa"],
-    queryFn: () => anilistQuery<{ Page: { media: any[] } }>(HOME_MANGA_QUERY, { country: "KR" }),
+    queryFn: async () => {
+      const res = await fetch(`${getBaseUrl()}/api/manga/catalog?source=manhwa&page=1`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return res.json();
+    },
     staleTime: 10 * 60 * 1000,
   });
 
   const { data: jpMangaData, refetch: refetchJpManga } = useQuery({
     queryKey: ["homeJpManga"],
-    queryFn: () => anilistQuery<{ Page: { media: any[] } }>(HOME_MANGA_QUERY, { country: "JP" }),
+    queryFn: async () => {
+      const res = await fetch(`${getBaseUrl()}/api/manga/catalog?source=manga&page=1`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return res.json();
+    },
     staleTime: 10 * 60 * 1000,
   });
 
   const manhwaItems = useMemo(() => {
-    const list = manhwaData?.Page?.media || [];
-    return list.map((m: any) => ({
-      id: m.id,
-      title: resolveArabicMangaTitle(m, "مانهوا"),
-      subtitle: m.title?.english || m.title?.romaji || "",
-      poster: m.coverImage?.extraLarge || m.coverImage?.large || "",
-      type: "مانهوا كورية",
+    const list = manhwaData?.items || [];
+    return list.slice(0, 16).map((m: any) => ({
+      id: String(m.id),
+      title: m.arTitle || m.title?.native || m.title?.english || m.title?.romaji || "مانهوا",
+      subtitle: m.enTitle || m.title?.english || "",
+      poster: m.coverImage?.extraLarge || m.coverImage?.large || m.cover || "",
+      type: "مانهوا ملونة",
     }));
   }, [manhwaData]);
 
   const mangaItems = useMemo(() => {
-    const list = jpMangaData?.Page?.media || [];
-    return list.map((m: any) => ({
-      id: m.id,
-      title: resolveArabicMangaTitle(m, "مانجا"),
-      subtitle: m.title?.english || m.title?.romaji || "",
-      poster: m.coverImage?.extraLarge || m.coverImage?.large || "",
+    const list = jpMangaData?.items || [];
+    return list.slice(0, 16).map((m: any) => ({
+      id: String(m.id),
+      title: m.arTitle || m.title?.native || m.title?.english || m.title?.romaji || "مانجا",
+      subtitle: m.enTitle || m.title?.english || "",
+      poster: m.coverImage?.extraLarge || m.coverImage?.large || m.cover || "",
       type: "مانجا مترجمة",
     }));
   }, [jpMangaData]);
-
 
   const trendingList = trending?.Page?.media || [];
   const popularList = popular?.Page?.media || [];
@@ -1051,7 +888,7 @@ export default function HomeScreen() {
               contentContainerStyle={{ paddingHorizontal: railSidePadding, gap: railGap }}
               renderItem={({ item }) => (
                 <Pressable
-                  onPress={() => router.push(`/manga/${item.id}` as any)}
+                  onPress={() => router.push(`/manga/${encodeURIComponent(String(item.id))}` as any)}
                   focusable={isTvLayout}
                   style={({ focused }) => [
                     todayStyles.card,
@@ -1118,7 +955,7 @@ export default function HomeScreen() {
               contentContainerStyle={{ paddingHorizontal: railSidePadding, gap: railGap }}
               renderItem={({ item }) => (
                 <Pressable
-                  onPress={() => router.push(`/manga/${item.id}` as any)}
+                  onPress={() => router.push(`/manga/${encodeURIComponent(String(item.id))}` as any)}
                   focusable={isTvLayout}
                   style={({ focused }) => [
                     todayStyles.card,
