@@ -222,9 +222,33 @@ export async function syncLatestEpisodeNotifications(force = false): Promise<voi
     await AsyncStorage.setItem(KNOWN_EPISODES_KEY, JSON.stringify([...next].slice(-500)));
     await AsyncStorage.setItem(LAST_SYNC_KEY, String(Date.now()));
 
-    for (const { item } of newItems.slice(0, 5)) {
-      await notifyOneEpisode(item);
-      await new Promise((resolve) => setTimeout(resolve, 250));
+    if (newItems.length === 1) {
+      await notifyOneEpisode(newItems[0].item);
+    } else if (newItems.length > 1) {
+      // If multiple episodes arrived while inactive, send only the most prominent one
+      // with a summary so the user is not spammed with 5 simultaneous notification bells
+      const first = newItems[0].item;
+      const count = newItems.length;
+      const title = String(first.titleAr || first.title || first.name || "أنمي").trim();
+      const content = {
+        title: `وصلت حلقات جديدة (${count})`,
+        body: `الحلقة ${first.episode} من ${title} والمزيد متاحة الآن في Anime NOVA`,
+        sound: "default",
+        priority: Notifications.AndroidNotificationPriority.HIGH,
+        data: {
+          type: "new-episodes-batch",
+          count,
+        },
+        ...(Platform.OS === "android" ? { channelId: CHANNEL_ID } : {}),
+      };
+      await Notifications.scheduleNotificationAsync({
+        identifier: `nova-ep-batch-${Date.now()}`,
+        content: content as any,
+        trigger: null,
+      }).catch(() => {});
+      for (const { key } of newItems) {
+        if (key) await markEpisodeNotified(key);
+      }
     }
   })().catch((error) => {
     console.warn("[push] local episode notification sync failed:", error instanceof Error ? error.message : String(error));

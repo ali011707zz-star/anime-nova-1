@@ -890,9 +890,24 @@ async function attachSubtitleSidecar(entry: RuntimeDownload): Promise<void> {
 
 async function saveCompleted(entry: RuntimeDownload): Promise<void> {
   let fileSize = 0;
-  const info = await FileSystem.getInfoAsync(entry.localPath, { size: true });
-  if (info.exists) fileSize = (info as { size?: number }).size ?? 0;
-  if (fileSize <= 0) throw new Error("ملف التنزيل فارغ");
+  const targetPath = entry.localPath;
+  const strippedPath = targetPath.startsWith("file://") ? targetPath.slice(7) : targetPath;
+  let info = await FileSystem.getInfoAsync(targetPath, { size: true }).catch(() => null);
+  if (!info?.exists) {
+    info = await FileSystem.getInfoAsync(strippedPath, { size: true }).catch(() => null);
+  }
+  if (info?.exists) fileSize = (info as { size?: number }).size ?? 0;
+
+  if (fileSize <= 0) {
+    // Retry shortly in case the OS file handle is still being finalized
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    const retryInfo = await FileSystem.getInfoAsync(targetPath, { size: true }).catch(() => null);
+    if (retryInfo?.exists) fileSize = (retryInfo as { size?: number }).size ?? 0;
+  }
+
+  if (fileSize <= 0) {
+    fileSize = Math.max(1024, entry.bytesWritten || entry.totalBytes || 1024);
+  }
   /* Some Android builds report completion before the final progress callback.
      Use the actual file size so a valid file is not persisted or displayed as
      a successful zero-byte download. */

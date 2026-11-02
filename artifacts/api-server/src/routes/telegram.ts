@@ -204,14 +204,16 @@ async function deliverNewEpisodeNotification(
     telegramSent = await sendTelegramEpisodeOnce(anilistId, ep, caption, poster || undefined);
   }
 
-  if (!pushResult?.queueReady || !telegramSent) {
-    console.warn(`[scheduler] episode remains pending queue=${pushResult?.queueReady ?? false} push=${pushResult?.pending ?? "error"} failed=${pushResult?.failed ?? "error"} telegram=${telegramSent} title=${title} episode=${ep}`);
+  // Decoupled delivery: Telegram should succeed even if no mobile push tokens are registered yet,
+  // and mobile push should succeed even if Telegram channel is unconfigured.
+  if (!telegramSent && !pushResult?.queueReady) {
+    console.warn(`[scheduler] episode delivery failed telegram=${telegramSent} queueReady=${pushResult?.queueReady ?? false} title=${title} episode=${ep}`);
     return false;
   }
 
   notifiedEpisodes.add(key);
   await markNotified(anilistId, ep);
-  console.log(`[scheduler] ✅ episode delivery complete title=${title} episode=${ep} devices=${pushResult.targets}`);
+  console.log(`[scheduler] ✅ episode delivery complete title=${title} episode=${ep} devices=${pushResult?.targets ?? 0}`);
   return true;
 }
 

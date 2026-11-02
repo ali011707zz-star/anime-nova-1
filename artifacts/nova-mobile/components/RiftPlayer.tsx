@@ -169,6 +169,8 @@ export interface SubSettings {
   position: "top" | "center" | "bottom";
   /** Pixel adjustment inside the selected position; negative = higher. */
   verticalOffset: number;
+  fontFamily?: "Cairo" | "System";
+  shadowLevel?: "none" | "light" | "heavy";
 }
 
 type Props = {
@@ -224,11 +226,12 @@ const SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 2];
 let preferredPlaybackSpeed = 1;
 
 const FONT_SIZES = [
-  { sz: 13, label: "ص", name: "صغير" },
-  { sz: 16, label: "م", name: "متوسط" },
+  { sz: 14, label: "ص", name: "صغير" },
+  { sz: 17, label: "م", name: "متوسط" },
   { sz: 20, label: "ك", name: "كبير" },
-  { sz: 24, label: "ع", name: "عملاق" },
-  { sz: 30, label: "ع+", name: "عملاق جدًا" },
+  { sz: 24, label: "ك+", name: "كبير جدًا" },
+  { sz: 28, label: "ض", name: "ضخم" },
+  { sz: 32, label: "ع", name: "عملاق" },
 ];
 
 const SUB_COLORS = [
@@ -246,13 +249,15 @@ const SUB_POSITIONS = [
 ];
 
 const DEFAULT_SUB_SETTINGS: SubSettings = {
-  fontSize: 16,
+  fontSize: 18,
   color: "#ffffff",
-  bgOpacity: 0,
-  bold: false,
+  bgOpacity: 0.35,
+  bold: true,
   extraBold: false,
   position: "bottom",
   verticalOffset: 0,
+  fontFamily: "Cairo",
+  shadowLevel: "heavy",
 };
 
 const QUALITY_COLOR: Record<string, string> = {
@@ -1002,7 +1007,12 @@ function ExpoRiftPlayer({
   useEffect(() => {
     AsyncStorage.getItem("sub-settings-v1").then(raw => {
       if (!aliveRef.current) return; // لا setState بعد unmount
-      if (raw) { try { setSubSettings(JSON.parse(raw)); } catch {} }
+      if (raw) {
+        try {
+          const parsed = JSON.parse(raw);
+          setSubSettings(prev => ({ ...DEFAULT_SUB_SETTINGS, ...prev, ...parsed }));
+        } catch {}
+      }
     }).catch(() => {});
     AsyncStorage.getItem("pref-autoplay").then(v => {
       if (!aliveRef.current) return;
@@ -1033,11 +1043,31 @@ function ExpoRiftPlayer({
 
   const updateSubOffset = useCallback((delta: number) => {
     setSubOffset(prev => {
-      const next = Math.max(-10, Math.min(10, parseFloat((prev + delta).toFixed(1))));
+      const next = delta === 0 ? 0 : Math.max(-10, Math.min(10, parseFloat((prev + delta).toFixed(1))));
       subOffsetRef.current = next;
       AsyncStorage.setItem("sub-offset-v1", String(next)).catch(() => {});
       return next;
     });
+  }, []);
+
+  const stepFontSize = useCallback((delta: number) => {
+    updateSubSettings({
+      fontSize: Math.max(12, Math.min(38, subSettings.fontSize + delta)),
+    });
+  }, [subSettings.fontSize, updateSubSettings]);
+
+  const stepVerticalOffset = useCallback((delta: number) => {
+    updateSubSettings({
+      verticalOffset: delta === 0 ? 0 : Math.max(-140, Math.min(140, (subSettings.verticalOffset || 0) + delta)),
+    });
+  }, [subSettings.verticalOffset, updateSubSettings]);
+
+  const resetSubSettings = useCallback(() => {
+    setSubSettings({ ...DEFAULT_SUB_SETTINGS });
+    setSubOffset(0);
+    subOffsetRef.current = 0;
+    AsyncStorage.setItem("sub-settings-v1", JSON.stringify(DEFAULT_SUB_SETTINGS)).catch(() => {});
+    AsyncStorage.setItem("sub-offset-v1", "0").catch(() => {});
   }, []);
 
   /* Android may deliver several orientation requests while the activity is
@@ -2818,27 +2848,33 @@ function ExpoRiftPlayer({
           pointerEvents="none"
         >
           {/* Vidstack technique: split multi-line VTT cues → each line as separate Text */}
-          {activeCue.text.split(/\r?\n/).map((line, i) => (
-            <Text key={i} style={[
-              s.subtitleText,
-              i > 0 && { marginTop: 2 },
-              {
-                fontSize: subSettings.fontSize,
-                color: subSettings.color,
-                fontWeight: subSettings.extraBold ? "900" : subSettings.bold ? "700" : "400",
-                backgroundColor: !subtitleShadowOnly && subSettings.bgOpacity > 0
-                  ? `rgba(0,0,0,${subSettings.bgOpacity})`
-                  : "transparent",
-                textShadowColor: subtitleShadowOnly || subSettings.bgOpacity === 0
-                  ? "rgba(0,0,0,0.90)"
-                  : "transparent",
-                textShadowRadius: subtitleShadowOnly ? 3 : subSettings.bgOpacity === 0 ? 8 : 0,
-                textShadowOffset: { width: 0, height: 1 },
-              },
-            ]}>
-              {line || " "}
-            </Text>
-          ))}
+          {activeCue.text.split(/\r?\n/).map((line, i) => {
+            const isSys = subSettings.fontFamily === "System";
+            const fontName = isSys ? "System" : subSettings.extraBold ? "Cairo_900Black" : subSettings.bold ? "Cairo_700Bold" : "Cairo_400Regular";
+            const shadowRadius = subSettings.shadowLevel === "none" ? 0 : subSettings.shadowLevel === "light" ? 3 : 7;
+            const shadowColor = subSettings.shadowLevel === "none" ? "transparent" : "rgba(0,0,0,0.95)";
+            return (
+              <Text key={i} style={[
+                s.subtitleText,
+                i > 0 && { marginTop: 3 },
+                {
+                  fontSize: subSettings.fontSize,
+                  lineHeight: Math.round(subSettings.fontSize * 1.38),
+                  color: subSettings.color,
+                  fontFamily: fontName,
+                  fontWeight: isSys ? (subSettings.extraBold ? "900" : subSettings.bold ? "700" : "400") : undefined,
+                  backgroundColor: !subtitleShadowOnly && subSettings.bgOpacity > 0
+                    ? `rgba(0,0,0,${subSettings.bgOpacity})`
+                    : "transparent",
+                  textShadowColor: shadowColor,
+                  textShadowRadius: shadowRadius,
+                  textShadowOffset: { width: 0, height: 1.5 },
+                },
+              ]}>
+                {line || " "}
+              </Text>
+            );
+          })}
         </View>
       )}
 
@@ -3482,23 +3518,38 @@ function ExpoRiftPlayer({
 
 
       {/* ════════════════════════════════════════
-          SUBTITLE SETTINGS PANEL (slides from right)
+          SUBTITLE SETTINGS PANEL (Smooth controls & working buttons)
       ════════════════════════════════════════ */}
       {showSubPanel && !subtitlesDisabled && (
-        <View style={[StyleSheet.absoluteFill, { zIndex: 60 }]} pointerEvents="box-none">
+        <View style={[StyleSheet.absoluteFill, { zIndex: 70 }]} pointerEvents="box-none">
           <Pressable
             style={[StyleSheet.absoluteFill, s.subPanelBackdrop]}
             onPress={() => setShowSubPanel(false)}
+            accessibilityLabel="إغلاق إعدادات الترجمة"
           />
           <Animated.View
-            style={[s.subPanel, isPortrait ? s.subPanelPortrait : s.subPanelLandscape, { transform: [{ translateX: subPanelX }] }]}
+            style={[
+              s.subPanel,
+              isPortrait ? s.subPanelPortrait : s.subPanelLandscape,
+              { transform: [{ translateX: subPanelX }], zIndex: 75 },
+            ]}
           >
             <View style={{ flex: 1 }}>
               {/* Header */}
               <View style={s.subPanelHeader}>
-                <Text style={s.subPanelTitle}>إعدادات الترجمة</Text>
-                <Pressable style={s.subPanelClose} onPress={() => setShowSubPanel(false)} hitSlop={10}>
-                  <Ionicons name="close" size={16} color="rgba(255,255,255,0.70)" />
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+                  <View style={s.subHeaderIconBadge}>
+                    <Ionicons name="color-wand-outline" size={17} color="#c4b5fd" />
+                  </View>
+                  <Text style={s.subPanelTitle}>إعدادات الترجمة</Text>
+                </View>
+                <Pressable
+                  style={s.subPanelClose}
+                  onPress={() => setShowSubPanel(false)}
+                  hitSlop={12}
+                  accessibilityLabel="إغلاق"
+                >
+                  <Ionicons name="close" size={18} color="rgba(255,255,255,0.85)" />
                 </Pressable>
               </View>
               <View style={s.subPanelDivider} />
@@ -3509,74 +3560,242 @@ function ExpoRiftPlayer({
                 showsVerticalScrollIndicator={true}
                 bounces={true}
                 keyboardShouldPersistTaps="handled"
-                contentContainerStyle={[s.subPanelBody, { paddingBottom: 44 }]}
+                contentContainerStyle={[s.subPanelBody, { paddingBottom: 50 }]}
               >
+                {/* ── المعاينة الحية الفورية ── */}
+                <View style={s.subPreviewCard}>
+                  <View style={s.subPreviewHeader}>
+                    <Ionicons name="eye-outline" size={14} color="#a78bfa" />
+                    <Text style={s.subPreviewHeaderTitle}>معاينة حية فورية للترجمة</Text>
+                  </View>
+                  <View style={s.subPreviewDisplay}>
+                    <Text
+                      style={[
+                        s.subtitleText,
+                        {
+                          fontSize: Math.min(22, Math.max(13, subSettings.fontSize)),
+                          lineHeight: Math.round(Math.min(22, Math.max(13, subSettings.fontSize)) * 1.38),
+                          color: subSettings.color,
+                          fontFamily: subSettings.fontFamily === "System"
+                            ? "System"
+                            : subSettings.extraBold ? "Cairo_900Black" : subSettings.bold ? "Cairo_700Bold" : "Cairo_400Regular",
+                          fontWeight: subSettings.fontFamily === "System" ? (subSettings.extraBold ? "900" : subSettings.bold ? "700" : "400") : undefined,
+                          backgroundColor: subSettings.bgOpacity > 0
+                            ? `rgba(0,0,0,${subSettings.bgOpacity})`
+                            : "transparent",
+                          textShadowColor: subSettings.shadowLevel === "none" ? "transparent" : "rgba(0,0,0,0.95)",
+                          textShadowRadius: subSettings.shadowLevel === "none" ? 0 : subSettings.shadowLevel === "light" ? 3 : 7,
+                          textShadowOffset: { width: 0, height: 1.5 },
+                        },
+                      ]}
+                    >
+                      هذا نص تجريبي لمعاينة الترجمة
+                    </Text>
+                  </View>
+                </View>
 
-                {/* ── تشغيل / إيقاف ── */}
+                {/* ── تشغيل / إيقاف الترجمة ── */}
                 <View style={s.subRow}>
                   <View style={s.subRowLeft}>
-                    <Ionicons name="logo-closed-captioning" size={16} color="rgba(255,255,255,0.70)" />
-                    <Text style={s.subRowLabel}>الترجمة</Text>
+                    <Ionicons name="logo-closed-captioning" size={18} color="#c4b5fd" />
+                    <Text style={s.subRowLabel}>تفعيل الترجمة</Text>
                   </View>
-                  <Pressable style={[s.subToggle, subOn && s.subToggleOn]} onPress={() => setSubOn(v => !v)}>
+                  <Pressable
+                    style={[s.subToggle, subOn && s.subToggleOn]}
+                    onPress={() => setSubOn(v => !v)}
+                    hitSlop={8}
+                    accessibilityRole="switch"
+                    accessibilityState={{ checked: subOn }}
+                  >
                     <View style={[s.subToggleThumb, subOn && s.subToggleThumbOn]} />
                   </Pressable>
                 </View>
 
-                {/* ── اللغة ── */}
-              <Text style={[s.subSectionLabel, tvMode && s.tvSubSectionLabel]}>اللغة</Text>
+                {/* ── لغة الترجمة ── */}
+                <Text style={s.subSectionLabel}>لغة الترجمة</Text>
                 <View style={s.subChipRow}>
                   {(["ar", "en"] as const).map(lng => (
                     <Pressable
                       key={lng}
-                      style={[s.subChip, tvMode && s.tvSubChip, subLang === lng && subOn && s.subChipActive]}
-                      onPress={() => { userSelectedSubLangRef.current = true; setSubLang(lng); setSubOn(true); fadeIn(); }}
+                      style={[s.subChip, subLang === lng && subOn && s.subChipActive]}
+                      onPress={() => {
+                        userSelectedSubLangRef.current = true;
+                        setSubLang(lng);
+                        setSubOn(true);
+                      }}
+                      hitSlop={6}
                     >
-                      <Text style={[s.subChipText, tvMode && s.tvSubChipText, subLang === lng && subOn && s.subChipTextActive]}>
-                        {lng === "ar" ? "عربي" : "إنجليزي"}
+                      <Ionicons
+                        name={lng === "ar" ? "language" : "globe-outline"}
+                        size={14}
+                        color={subLang === lng && subOn ? "#c4b5fd" : "rgba(255,255,255,0.5)"}
+                      />
+                      <Text style={[s.subChipText, subLang === lng && subOn && s.subChipTextActive]}>
+                        {lng === "ar" ? "عربي (مترجم)" : "الإنجليزية (Original)"}
                       </Text>
                     </Pressable>
                   ))}
                 </View>
 
-                {/* ── حجم الخط ── */}
-                <Text style={s.subSectionLabel}>حجم الخط</Text>
+                {/* ── حجم الخط (مع أزرار دقيقة + / -) ── */}
+                <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginTop: 14 }}>
+                  <Text style={[s.subSectionLabel, { marginTop: 0 }]}>حجم الخط</Text>
+                  <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                    <Pressable
+                      style={s.subStepBtn}
+                      onPress={() => stepFontSize(-1)}
+                      hitSlop={6}
+                      accessibilityLabel="تصغير الخط"
+                    >
+                      <Ionicons name="remove" size={16} color="#c4b5fd" />
+                    </Pressable>
+                    <View style={s.subSizeNumBadge}>
+                      <Text style={s.subSizeNumText}>{subSettings.fontSize}px</Text>
+                    </View>
+                    <Pressable
+                      style={s.subStepBtn}
+                      onPress={() => stepFontSize(1)}
+                      hitSlop={6}
+                      accessibilityLabel="تكبير الخط"
+                    >
+                      <Ionicons name="add" size={16} color="#c4b5fd" />
+                    </Pressable>
+                  </View>
+                </View>
+
                 <View style={s.subChipRow}>
                   {FONT_SIZES.map(({ sz, label, name }) => (
                     <Pressable
                       key={sz}
                       style={[s.subSizeChip, subSettings.fontSize === sz && s.subChipActive]}
                       onPress={() => updateSubSettings({ fontSize: sz })}
+                      hitSlop={6}
                     >
-                      <Text style={[s.subSizeLabel, { fontSize: sz * 0.85 }, subSettings.fontSize === sz && s.subChipTextActive]}>{label}</Text>
+                      <Text style={[s.subSizeLabel, { fontSize: Math.max(11, sz * 0.7) }, subSettings.fontSize === sz && s.subChipTextActive]}>
+                        {label}
+                      </Text>
                       <Text style={s.subSizeNameText}>{name}</Text>
                     </Pressable>
                   ))}
                 </View>
 
-                {/* ── اللون ── */}
-                <Text style={s.subSectionLabel}>اللون</Text>
+                {/* ── نوع الخط ── */}
+                <Text style={s.subSectionLabel}>نوع الخط</Text>
+                <View style={s.subChipRow}>
+                  {([
+                    { id: "Cairo" as const, label: "خط كايرو الأصيل" },
+                    { id: "System" as const, label: "خط النظام" },
+                  ]).map(({ id, label }) => (
+                    <Pressable
+                      key={id}
+                      style={[s.subChip, (subSettings.fontFamily || "Cairo") === id && s.subChipActive]}
+                      onPress={() => updateSubSettings({ fontFamily: id })}
+                      hitSlop={6}
+                    >
+                      <Text style={[s.subChipText, (subSettings.fontFamily || "Cairo") === id && s.subChipTextActive]}>
+                        {label}
+                      </Text>
+                    </Pressable>
+                  ))}
+                </View>
+
+                {/* ── لون الترجمة ── */}
+                <Text style={s.subSectionLabel}>لون النص</Text>
                 <View style={s.subColorRow}>
                   {SUB_COLORS.map(({ v, label }) => (
                     <Pressable
                       key={v}
                       style={[s.subColorDot, { backgroundColor: v }, subSettings.color === v && s.subColorDotActive]}
                       onPress={() => updateSubSettings({ color: v })}
-                      hitSlop={6}
+                      hitSlop={8}
+                      accessibilityLabel={label}
                     >
-                      {subSettings.color === v && <Ionicons name="checkmark" size={14} color={v === "#ffffff" ? "#000" : "#fff"} />}
+                      {subSettings.color === v && (
+                        <Ionicons name="checkmark" size={15} color={v === "#ffffff" ? "#000" : "#000"} />
+                      )}
                     </Pressable>
                   ))}
                 </View>
 
-                {/* ── الموضع ── */}
-                <Text style={s.subSectionLabel}>الموضع</Text>
+                {/* ── خلفية النص ── */}
+                <Text style={s.subSectionLabel}>خلفية النص (التباين)</Text>
+                <View style={s.subChipRow}>
+                  {([
+                    { v: 0, l: "بدون (0%)" },
+                    { v: 0.35, l: "خفيفة (35%)" },
+                    { v: 0.65, l: "متوازنة (65%)" },
+                    { v: 0.85, l: "داكنة (85%)" },
+                    { v: 1.0, l: "سوداء (100%)" },
+                  ]).map(({ v, l }) => (
+                    <Pressable
+                      key={v}
+                      style={[s.subChip, Math.abs(subSettings.bgOpacity - v) < 0.05 && s.subChipActive]}
+                      onPress={() => updateSubSettings({ bgOpacity: v })}
+                      hitSlop={6}
+                    >
+                      <Text style={[s.subChipText, Math.abs(subSettings.bgOpacity - v) < 0.05 && s.subChipTextActive]}>
+                        {l}
+                      </Text>
+                    </Pressable>
+                  ))}
+                </View>
+
+                {/* ── سماكة الخط ── */}
+                <Text style={s.subSectionLabel}>سماكة الخط</Text>
+                <View style={s.subChipRow}>
+                  {([
+                    { bold: false, extraBold: false, label: "عادي" },
+                    { bold: true, extraBold: false, label: "عريض (موصى به)" },
+                    { bold: false, extraBold: true, label: "عريض جدًا (Bold+)" },
+                  ]).map((item, idx) => {
+                    const active = (item.extraBold && subSettings.extraBold) ||
+                      (!item.extraBold && item.bold && subSettings.bold && !subSettings.extraBold) ||
+                      (!item.bold && !item.extraBold && !subSettings.bold && !subSettings.extraBold);
+                    return (
+                      <Pressable
+                        key={idx}
+                        style={[s.subChip, active && s.subChipActive]}
+                        onPress={() => updateSubSettings({ bold: item.bold, extraBold: item.extraBold })}
+                        hitSlop={6}
+                      >
+                        <Text style={[s.subChipText, active && s.subChipTextActive]}>
+                          {item.label}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+
+                {/* ── ظل النص والتحديد ── */}
+                <Text style={s.subSectionLabel}>تحديد وظل النص</Text>
+                <View style={s.subChipRow}>
+                  {([
+                    { id: "none" as const, l: "بدون ظل" },
+                    { id: "light" as const, l: "ظل خفيف" },
+                    { id: "heavy" as const, l: "بارز ومحدد" },
+                  ]).map(({ id, l }) => (
+                    <Pressable
+                      key={id}
+                      style={[s.subChip, (subSettings.shadowLevel || "heavy") === id && s.subChipActive]}
+                      onPress={() => updateSubSettings({ shadowLevel: id })}
+                      hitSlop={6}
+                    >
+                      <Text style={[s.subChipText, (subSettings.shadowLevel || "heavy") === id && s.subChipTextActive]}>
+                        {l}
+                      </Text>
+                    </Pressable>
+                  ))}
+                </View>
+
+                {/* ── الموضع والتحريك الرأسي ── */}
+                <Text style={s.subSectionLabel}>موضع الترجمة</Text>
                 <View style={s.subChipRow}>
                   {SUB_POSITIONS.map(({ v, label, icon }) => (
                     <Pressable
                       key={v}
                       style={[s.subChip, subSettings.position === v && s.subChipActive]}
                       onPress={() => updateSubSettings({ position: v })}
+                      hitSlop={6}
                     >
                       <Text style={s.subPosIcon}>{icon}</Text>
                       <Text style={[s.subChipText, subSettings.position === v && s.subChipTextActive]}>{label}</Text>
@@ -3584,113 +3803,83 @@ function ExpoRiftPlayer({
                   ))}
                 </View>
 
-                {/* ── الضبط الدقيق للارتفاع ── */}
-                <Text style={s.subSectionLabel}>التحريك لأعلى وأسفل</Text>
-                <View style={[s.subRow, { marginBottom: 6 }]}>
-                  <Text style={{ color: "rgba(255,255,255,0.50)", fontSize: 13, fontFamily: "Cairo_600SemiBold" }}>
-                    {subSettings.verticalOffset > 0 ? `+${subSettings.verticalOffset}` : subSettings.verticalOffset}px
-                  </Text>
-                </View>
-                <View style={s.subMoveRow}>
-                  <Pressable
-                    accessibilityRole="button"
-                    accessibilityLabel="رفع الترجمة"
-                    style={s.subMoveButton}
-                    onPress={() => updateSubSettings({
-                      // Mobile subtitle coordinates use translateY:
-                      // negative values move the subtitle upward.
-                      verticalOffset: Math.max(-120, subSettings.verticalOffset - 24),
-                    })}
-                  >
-                    <Ionicons name="arrow-up" size={20} color="#c4b5fd" />
-                    <Text style={s.subMoveLabel}>رفع</Text>
-                  </Pressable>
-                  <View style={s.subMoveValue}>
-                    <Text style={s.subMoveValueText}>
+                {/* ── الضبط الدقيق لارتفاع الترجمة ── */}
+                <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginTop: 12 }}>
+                  <Text style={[s.subSectionLabel, { marginTop: 0 }]}>التحريك لأعلى وأسفل</Text>
+                  <View style={s.subOffsetValuePill}>
+                    <Text style={s.subOffsetValueText}>
                       {subSettings.verticalOffset === 0
-                        ? "الافتراضي"
-                        : `${Math.abs(subSettings.verticalOffset)}px`}
+                        ? "الافتراضي (0px)"
+                        : `${subSettings.verticalOffset > 0 ? `+${subSettings.verticalOffset}` : subSettings.verticalOffset}px`}
                     </Text>
-                    <Text style={s.subMoveHint}>كل ضغطة تحركها قليلًا</Text>
                   </View>
-                  <Pressable
-                    accessibilityRole="button"
-                    accessibilityLabel="خفض الترجمة"
-                    style={s.subMoveButton}
-                    onPress={() => updateSubSettings({
-                      verticalOffset: Math.min(120, subSettings.verticalOffset + 24),
-                    })}
-                  >
-                    <Ionicons name="arrow-down" size={20} color="#c4b5fd" />
-                    <Text style={s.subMoveLabel}>خفض</Text>
-                  </Pressable>
                 </View>
-
-                {/* ── خلفية النص ── */}
-                <Text style={s.subSectionLabel}>خلفية النص</Text>
-                <View style={s.subChipRow}>
-                  {([{ v: 0, l: "بلا" }, { v: 0.45, l: "خفيفة" }, { v: 0.82, l: "داكنة" }]).map(({ v, l }) => (
-                    <Pressable
-                      key={v}
-                      style={[s.subChip, subSettings.bgOpacity === v && s.subChipActive]}
-                      onPress={() => updateSubSettings({ bgOpacity: v })}
-                    >
-                      <Text style={[s.subChipText, subSettings.bgOpacity === v && s.subChipTextActive]}>{l}</Text>
-                    </Pressable>
-                  ))}
-                </View>
-
-                {/* ── نص عريض ── */}
-                <View style={[s.subRow, { marginTop: 8 }]}>
-                  <View style={s.subRowLeft}>
-                    <Text style={{ color: "#fff", fontWeight: "700", fontSize: 15 }}>ع</Text>
-                    <Text style={s.subRowLabel}>نص عريض</Text>
-                  </View>
-                  <Pressable style={[s.subToggle, subSettings.bold && !subSettings.extraBold && s.subToggleOn]} onPress={() => updateSubSettings({ bold: !subSettings.bold, extraBold: false })}>
-                    <View style={[s.subToggleThumb, subSettings.bold && s.subToggleThumbOn]} />
-                  </Pressable>
-                </View>
-
-                {/* ── عريض جدًا ── */}
-                <View style={[s.subRow, { marginTop: 2 }]}>
-                  <View style={s.subRowLeft}>
-                    <Text style={{ color: "#fff", fontWeight: "900", fontSize: 15 }}>ع</Text>
-                    <Text style={s.subRowLabel}>نص عريض جدًا</Text>
-                  </View>
-                  <Pressable style={[s.subToggle, subSettings.extraBold && s.subToggleOn]} onPress={() => updateSubSettings({ extraBold: !subSettings.extraBold, bold: false })}>
-                    <View style={[s.subToggleThumb, subSettings.extraBold && s.subToggleThumbOn]} />
-                  </Pressable>
-                </View>
-
-                {/* ── إزاحة التوقيت ── */}
-                <Text style={s.subSectionLabel}>إزاحة التوقيت</Text>
-                <View style={[s.subRow, { marginBottom: 6 }]}>
-                  <Text style={{ color: "rgba(255,255,255,0.50)", fontSize: 13, fontFamily: "Cairo_600SemiBold" }}>
-                    {subOffset > 0 ? `+${subOffset.toFixed(1)}` : subOffset.toFixed(1)}s
-                  </Text>
-                </View>
-                <View style={{ flexDirection: "row", gap: 8 }}>
-                  {([{ d: -0.5, l: "−0.5s" }, { d: 0, l: "تصفير" }, { d: 0.5, l: "+0.5s" }]).map(({ d, l }) => (
+                <View style={{ flexDirection: "row", gap: 6, flexWrap: "wrap", marginTop: 6 }}>
+                  {([
+                    { d: -20, l: "▲ رفع +20" },
+                    { d: -5,  l: "▲ +5" },
+                    { d: 0,   l: "إعادة ضبط" },
+                    { d: 5,   l: "▼ خفض +5" },
+                    { d: 20,  l: "▼ +20" },
+                  ]).map(({ d, l }) => (
                     <Pressable
                       key={l}
-                      style={[s.subChip, { flex: 1, justifyContent: "center" }]}
-                      onPress={() => {
-                        const nv = d === 0 ? 0 : Math.max(-10, Math.min(10, subOffset + d));
-                        setSubOffset(nv);
-                        subOffsetRef.current = nv;
-                      }}
+                      style={[s.subStepPillBtn, d === 0 && s.subStepPillBtnReset]}
+                      onPress={() => stepVerticalOffset(d)}
+                      hitSlop={6}
                     >
-                      <Text style={[s.subChipText, { textAlign: "center" }]}>{l}</Text>
+                      <Text style={[s.subStepPillText, d === 0 && { color: "#fca5a5" }]}>{l}</Text>
                     </Pressable>
                   ))}
                 </View>
 
+                {/* ── مزامنة التوقيت ── */}
+                <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginTop: 14 }}>
+                  <Text style={[s.subSectionLabel, { marginTop: 0 }]}>مزامنة توقيت الترجمة</Text>
+                  <View style={[s.subOffsetValuePill, subOffset !== 0 && { backgroundColor: "rgba(251,191,36,0.18)", borderColor: "rgba(251,191,36,0.40)" }]}>
+                    <Text style={[s.subOffsetValueText, subOffset !== 0 && { color: "#fde047" }]}>
+                      {subOffset > 0 ? `+${subOffset.toFixed(1)}s` : `${subOffset.toFixed(1)}s`}
+                    </Text>
+                  </View>
+                </View>
+                <View style={{ flexDirection: "row", gap: 6, flexWrap: "wrap", marginTop: 6 }}>
+                  {([
+                    { d: -1.0, l: "−1.0s" },
+                    { d: -0.5, l: "−0.5s" },
+                    { d: -0.1, l: "−0.1s" },
+                    { d: 0,    l: "تصفير (0.0s)" },
+                    { d: 0.1,  l: "+0.1s" },
+                    { d: 0.5,  l: "+0.5s" },
+                    { d: 1.0,  l: "+1.0s" },
+                  ]).map(({ d, l }) => (
+                    <Pressable
+                      key={l}
+                      style={[
+                        s.subStepPillBtn,
+                        d === 0 && s.subStepPillBtnReset,
+                      ]}
+                      onPress={() => updateSubOffset(d)}
+                      hitSlop={6}
+                    >
+                      <Text style={[s.subStepPillText, d === 0 && { color: "#fca5a5" }]}>{l}</Text>
+                    </Pressable>
+                  ))}
+                </View>
+
+                {/* ── إعادة ضبط كل شيء ── */}
+                <Pressable
+                  style={s.subResetAllBtn}
+                  onPress={resetSubSettings}
+                  hitSlop={8}
+                >
+                  <Ionicons name="refresh" size={16} color="#fca5a5" />
+                  <Text style={s.subResetAllText}>إعادة ضبط كافة إعدادات الترجمة للافتراضي</Text>
+                </Pressable>
               </ScrollView>
             </View>
           </Animated.View>
         </View>
       )}
-
       {/* ── أزرار تخطي المقدمة/النهاية — مستقلة تماماً عن رؤية الـ controls ── */}
       {!error && !isEnded && !isLocked && (inIntroRange || inOutroRange) && (
         <View style={s.skipBtnRowFloat} pointerEvents="box-none">
@@ -3974,9 +4163,96 @@ const s = StyleSheet.create({
   },
   subPanel: {
     position: "absolute", top: 0, bottom: 0, right: 0,
-    backgroundColor: "rgba(5,3,18,0.97)",
-    borderLeftWidth: 1, borderLeftColor: "rgba(139,92,246,0.22)",
-    shadowColor: "#000", shadowOpacity: 0.8, shadowRadius: 24, elevation: 30,
+    backgroundColor: "rgba(8,6,22,0.98)",
+    borderLeftWidth: 1, borderLeftColor: "rgba(139,92,246,0.30)",
+    shadowColor: "#000", shadowOpacity: 0.85, shadowRadius: 28, elevation: 35,
+    zIndex: 75,
+  },
+  subHeaderIconBadge: {
+    width: 32, height: 32, borderRadius: 10,
+    backgroundColor: "rgba(139,92,246,0.20)",
+    borderWidth: 1, borderColor: "rgba(139,92,246,0.40)",
+    alignItems: "center", justifyContent: "center",
+  },
+  subPreviewCard: {
+    backgroundColor: "rgba(255,255,255,0.035)",
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: "rgba(139,92,246,0.28)",
+    padding: 10,
+    marginBottom: 10,
+  },
+  subPreviewHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    marginBottom: 6,
+  },
+  subPreviewHeaderTitle: {
+    color: "#c4b5fd",
+    fontSize: 11,
+    fontFamily: "Cairo_700Bold",
+  },
+  subPreviewDisplay: {
+    width: "100%",
+    minHeight: 48,
+    borderRadius: 8,
+    backgroundColor: "rgba(0,0,0,0.55)",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+  },
+  subStepBtn: {
+    width: 32, height: 32, borderRadius: 10,
+    backgroundColor: "rgba(255,255,255,0.08)",
+    borderWidth: 1, borderColor: "rgba(255,255,255,0.15)",
+    alignItems: "center", justifyContent: "center",
+  },
+  subSizeNumBadge: {
+    paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8,
+    backgroundColor: "rgba(139,92,246,0.18)",
+    borderWidth: 1, borderColor: "rgba(139,92,246,0.35)",
+    minWidth: 46, alignItems: "center",
+  },
+  subSizeNumText: {
+    color: "#fff", fontSize: 12, fontFamily: "Cairo_700Bold",
+  },
+  subOffsetValuePill: {
+    paddingHorizontal: 10, paddingVertical: 3, borderRadius: 8,
+    backgroundColor: "rgba(139,92,246,0.16)",
+    borderWidth: 1, borderColor: "rgba(139,92,246,0.30)",
+  },
+  subOffsetValueText: {
+    color: "#c4b5fd", fontSize: 11, fontFamily: "Cairo_700Bold",
+  },
+  subStepPillBtn: {
+    paddingHorizontal: 10, paddingVertical: 7, borderRadius: 9,
+    backgroundColor: "rgba(255,255,255,0.06)",
+    borderWidth: 1, borderColor: "rgba(255,255,255,0.12)",
+    alignItems: "center", justifyContent: "center",
+  },
+  subStepPillBtnReset: {
+    backgroundColor: "rgba(239,68,68,0.12)",
+    borderColor: "rgba(239,68,68,0.28)",
+  },
+  subStepPillText: {
+    color: "rgba(255,255,255,0.78)", fontSize: 11, fontFamily: "Cairo_700Bold",
+  },
+  subResetAllBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    paddingVertical: 12,
+    borderRadius: 12,
+    backgroundColor: "rgba(239,68,68,0.10)",
+    borderWidth: 1,
+    borderColor: "rgba(239,68,68,0.25)",
+    marginTop: 18,
+  },
+  subResetAllText: {
+    color: "#fca5a5", fontSize: 12, fontFamily: "Cairo_700Bold",
   },
   subPanelPortrait:  { width: "82%" },
   subPanelLandscape: { width: "40%" },

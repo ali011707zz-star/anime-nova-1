@@ -295,6 +295,7 @@ export async function createApp(): Promise<Express> {
   });
 
   app.use("/api", router);
+  app.use("/api/push", pushRouter);
   app.use("/api", pushRouter);
   app.use("/api", newsRouter);
   app.use("/api", notificationsRouter);

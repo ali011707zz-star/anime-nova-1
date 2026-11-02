@@ -67,7 +67,7 @@ function validToken(value: unknown): value is string {
     (EXPO_TOKEN_RE.test(value) || value.length >= 32);
 }
 
-router.post("/push/register", async (req: Request, res: Response) => {
+router.post(["/push/register", "/register"], async (req: Request, res: Response) => {
   const token = req.body?.token;
   const platform = req.body?.platform === "ios" ? "ios" : "android";
   if (!validToken(token) || (!isExpoToken(token) && platform !== "android")) {
@@ -126,7 +126,7 @@ router.post("/push/register", async (req: Request, res: Response) => {
   return res.json({ ok: true });
 });
 
-router.post("/push/unregister", async (req: Request, res: Response) => {
+router.post(["/push/unregister", "/unregister"], async (req: Request, res: Response) => {
   const token = req.body?.token;
   if (!validToken(token)) return res.status(400).json({ error: "Invalid push token" });
   const updated = await sbPatch("mobile_push_tokens", { token: `eq.${token}` }, {
