@@ -1,9 +1,8 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import {
   View, Text, ActivityIndicator, ScrollView,
-  StyleSheet, Platform,
+  StyleSheet, Platform, Image,
 } from "react-native";
-import { Image } from "expo-image";
 import { Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -669,7 +668,7 @@ export default function DubbedWatchScreen() {
         {/* Info Banner Card */}
         <View style={styles.infoCard}>
           {posterUrl ? (
-            <Image source={{ uri: posterUrl }} style={styles.posterThumb} contentFit="cover" />
+            <Image source={{ uri: posterUrl }} style={styles.posterThumb} resizeMode="cover" />
           ) : (
             <View style={[styles.posterThumb, { backgroundColor: "rgba(124,58,237,0.15)", alignItems: "center", justifyContent: "center" }]}>
               <Ionicons name="film-outline" size={24} color="#A78BFA" />

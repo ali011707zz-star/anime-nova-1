@@ -1,13 +1,13 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  Image,
   Platform,
   ScrollView,
   StyleSheet,
   Text,
   View,
 } from "react-native";
-import { Image } from "expo-image";
 import { Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -416,7 +416,7 @@ export default function StardimaServersScreen() {
         <ScrollView contentContainerStyle={[styles.content, { paddingBottom: Math.max(insets.bottom, 20) + 28 }]}>
           <View style={styles.infoCard}>
             {poster ? (
-              <Image source={{ uri: poster }} style={styles.posterThumb} contentFit="cover" />
+              <Image source={{ uri: poster }} style={styles.posterThumb} resizeMode="cover" />
             ) : (
               <View style={[styles.posterThumb, { backgroundColor: "rgba(124,58,237,0.15)", alignItems: "center", justifyContent: "center" }]}>
                 <Ionicons name="film-outline" size={24} color="#A78BFA" />
