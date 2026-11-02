@@ -18,10 +18,10 @@ type SeasonId = (typeof SEASONS)[number]["id"];
 type SeasonChoice = { season: SeasonId; year: number };
 
 const TABS = [
-  { id: "all", label: "جميع المواسم" },
-  { id: "upcoming", label: "الموسم القادم" },
   { id: "current", label: "الموسم الحالي" },
+  { id: "upcoming", label: "الموسم القادم" },
   { id: "previous", label: "الموسم السابق" },
+  { id: "all", label: "جميع المواسم" },
 ];
 
 function getCurrentSeason(): SeasonChoice {
@@ -45,7 +45,7 @@ function seasonName(season: SeasonId) {
 
 export default function SeasonsScreen() {
   const colors = useColors();
-  const [activeTab, setActiveTab] = useState("all");
+  const [activeTab, setActiveTab] = useState("current");
   const [selectedSeason, setSelectedSeason] = useState<SeasonChoice | null>(null);
   const [focusedSeasonKey, setFocusedSeasonKey] = useState<string | null>(null);
   const current = useMemo(getCurrentSeason, []);

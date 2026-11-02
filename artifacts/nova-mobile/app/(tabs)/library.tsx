@@ -385,7 +385,22 @@ export default function LibraryScreen() {
             showsVerticalScrollIndicator={false}
             renderItem={({ item }) => (
               <Pressable
-                onPress={() => router.push(`/anime/${item.id}?title=${encodeURIComponent(item.title)}&english=${encodeURIComponent(item.english)}`)}
+                onPress={() => {
+                  if (item.mangaId) {
+                    router.push({
+                      pathname: "/manga/[id]",
+                      params: {
+                        id: item.mangaId,
+                        title: item.title,
+                        english: item.english,
+                        cover: item.thumbnail || "",
+                        source: item.source || (item.mangaId.startsWith("az--") ? "manhwa" : "manga"),
+                      },
+                    });
+                  } else {
+                    router.push(`/anime/${item.id}?title=${encodeURIComponent(item.title)}&english=${encodeURIComponent(item.english)}`);
+                  }
+                }}
                 focusable={tvMode}
                 style={({ focused }) => [s.favCard, tvMode && s.tvFavCard, tvMode && tvFocusStyle(focused)]}
               >

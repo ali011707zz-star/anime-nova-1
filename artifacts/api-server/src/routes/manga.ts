@@ -162,45 +162,359 @@ async function translateTitlesBatchToArabic(titles: string[]): Promise<Map<strin
   return result;
 }
 
+function parseDurationSeconds(lengthText: string): number {
+  if (!lengthText) return 60;
+  const parts = lengthText.trim().split(":").map((n) => parseInt(n, 10));
+  if (parts.some((n) => Number.isNaN(n))) return 60;
+  if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2];
+  if (parts.length === 2) return parts[0] * 60 + parts[1];
+  return parts[0] || 60;
+}
+
 async function resolveYoutubeTrailer(
   enTitle: string,
   arTitle: string,
   source: "manga" | "manhwa"
 ): Promise<{ id: string; site: string; thumbnail: string; url: string } | null> {
-  const baseQuery = (enTitle || arTitle || "").trim();
+  const baseQuery = (enTitle || arTitle || "").replace(/[:_]+/g, " ").trim();
   if (!baseQuery) return null;
-  const cacheKey = `${source}:${baseQuery.toLowerCase()}`;
+  const cacheKey = `widescreen:${source}:${baseQuery.toLowerCase()}`;
   if (trailerCache.has(cacheKey)) return trailerCache.get(cacheKey)!;
 
   try {
-    const suffix = source === "manhwa" ? "manhwa webtoon official trailer PV" : "manga anime official trailer PV";
+    const suffix =
+      source === "manhwa"
+        ? "manhwa webtoon official trailer PV -shorts"
+        : "manga anime official trailer PV -shorts";
     const searchUrl = `https://www.youtube.com/results?search_query=${encodeURIComponent(baseQuery + " " + suffix)}`;
     const res = await fetch(searchUrl, {
       headers: {
         "User-Agent": UA,
         "Accept-Language": "en-US,en;q=0.9",
       },
-      signal: AbortSignal.timeout(2400),
+      signal: AbortSignal.timeout(2600),
     });
     if (res.ok) {
       const html = await res.text();
-      const match = html.match(/"videoId":"([a-zA-Z0-9_-]{11})"/);
-      if (match && match[1]) {
-        const videoId = match[1];
-        const trailer = {
-          id: videoId,
-          site: "youtube",
-          thumbnail: `https://img.youtube.com/vi/${videoId}/hqdefault.jpg`,
-          url: `https://www.youtube.com/watch?v=${videoId}`,
-        };
-        trailerCache.set(cacheKey, trailer);
-        return trailer;
+      const dataMatch = html.match(/var ytInitialData = (\{[\s\S]*?\});<\/script>/);
+      if (dataMatch && dataMatch[1]) {
+        try {
+          const json = JSON.parse(dataMatch[1]);
+          const sections =
+            json?.contents?.twoColumnSearchResultsRenderer?.primaryContents?.sectionListRenderer
+              ?.contents || [];
+          const candidates: { id: string; score: number }[] = [];
+          for (const sec of sections) {
+            const items = sec?.itemSectionRenderer?.contents || [];
+            for (const item of items) {
+              const vr = item?.videoRenderer;
+              if (!vr?.videoId) continue;
+              const navUrl =
+                vr?.navigationEndpoint?.commandMetadata?.webCommandMetadata?.url || "";
+              const titleText =
+                vr?.title?.runs?.map((r: any) => String(r?.text || "")).join("") || "";
+              const lengthStr = vr?.lengthText?.simpleText || "";
+              const durationSec = parseDurationSeconds(lengthStr);
+              if (
+                navUrl.includes("/shorts/") ||
+                /#shorts\b/i.test(titleText) ||
+                durationSec < 22 ||
+                durationSec > 900
+              ) {
+                continue;
+              }
+              let score = 1;
+              if (/official|trailer|pv|teaser|mv|animation|webtoon|crunchyroll|viz|kakao|naver/i.test(titleText)) {
+                score += 5;
+              }
+              candidates.push({ id: vr.videoId, score });
+            }
+          }
+          candidates.sort((a, b) => b.score - a.score);
+          if (candidates.length > 0) {
+            const videoId = candidates[0].id;
+            const trailer = {
+              id: videoId,
+              site: "youtube",
+              thumbnail: `https://img.youtube.com/vi/${videoId}/hqdefault.jpg`,
+              url: `https://www.youtube.com/watch?v=${videoId}`,
+            };
+            trailerCache.set(cacheKey, trailer);
+            return trailer;
+          }
+        } catch {}
       }
     }
   } catch {}
 
   trailerCache.set(cacheKey, null);
   return null;
+}
+
+type MangaCharacterEdge = {
+  role: "MAIN" | "SUPPORTING";
+  node: {
+    id: number;
+    name: { full: string; native?: string };
+    image: { large: string };
+  };
+};
+
+const extrasCache = new Map<
+  string,
+  {
+    characters: MangaCharacterEdge[];
+    trailer: { id: string; site: string; thumbnail: string; url: string } | null;
+  }
+>();
+
+function extractSynopsisCharacters(
+  description: string,
+  poster: string,
+  arabicTitle: string,
+  englishTitle: string
+): MangaCharacterEdge[] {
+  const cleanDesc = String(description || "").replace(/[\u064B-\u065F]/g, "");
+  const patterns = [
+    /(?:تُدعى|تدعى|يُدعى|يدعى|باسم|اسمه|اسمها|في شخصية|شخصية|البطل|البطلة)\s+[«"']?([\u0600-\u06FF]{3,12}(?:\s+[\u0600-\u06FF]{3,12})?)[»"'،,.!؟\s]/g,
+    /(?:تعيش|يسكن|الأمير|الأميرة|السيد الشاب|الشابة|الشاب|الفتاة|المحارب|الساحر)\s+([\u0600-\u06FF]{3,12})[،,.]/g,
+  ];
+  const stopWords = new Set([
+    "حياة", "عالم", "مدينة", "شخص", "نفس", "ذلك", "تلك", "هذا", "هذه",
+    "قصة", "رواية", "مانهوا", "مانجا", "أكاديمية", "شركة", "عائلة",
+    "طابق", "قدرة", "بسبب", "خلال", "عندما", "حول", "بين", "فوق", "تحت",
+  ]);
+  const names: string[] = [];
+  for (const reg of patterns) {
+    let m: RegExpExecArray | null;
+    while ((m = reg.exec(cleanDesc)) !== null) {
+      const candidate = m[1].trim().replace(/[،,.؛!؟"«»]/g, "");
+      const firstWord = candidate.split(/\s+/)[0];
+      if (
+        candidate.length >= 3 &&
+        !stopWords.has(firstWord) &&
+        !names.includes(candidate)
+      ) {
+        names.push(candidate);
+      }
+    }
+  }
+
+  let hashBase = 900000;
+  const seedStr = englishTitle || arabicTitle || "manga";
+  for (let i = 0; i < seedStr.length; i++) {
+    hashBase = (hashBase * 31 + seedStr.charCodeAt(i)) % 9000000;
+  }
+
+  if (names.length > 0) {
+    return names.slice(0, 6).map((name, idx) => ({
+      role: idx < 2 ? "MAIN" : "SUPPORTING",
+      node: {
+        id: hashBase + idx + 1,
+        name: { full: name, native: name },
+        image: { large: poster },
+      },
+    }));
+  }
+
+  return [
+    {
+      role: "MAIN",
+      node: {
+        id: hashBase + 1,
+        name: {
+          full: arabicTitle ? `بطل العمل (${arabicTitle})` : "الشخصية الرئيسية",
+          native: englishTitle || arabicTitle,
+        },
+        image: { large: poster },
+      },
+    },
+  ];
+}
+
+async function resolveMangaExtras(opts: {
+  titles: string[];
+  description: string;
+  poster: string;
+  slug: string;
+  source: "manga" | "manhwa";
+  arabicTitle: string;
+  englishTitle: string;
+}): Promise<{
+  characters: MangaCharacterEdge[];
+  trailer: { id: string; site: string; thumbnail: string; url: string } | null;
+}> {
+  const cacheKey = `${opts.source}:${opts.slug}`;
+  if (extrasCache.has(cacheKey)) {
+    return extrasCache.get(cacheKey)!;
+  }
+
+  const candidateTitles = [
+    ...new Set(
+      opts.titles
+        .flatMap((t) => {
+          const clean = String(t || "").trim();
+          const noColon = clean.replace(/[:\-_]+/g, " ").replace(/\s+/g, " ").trim();
+          return [clean, noColon];
+        })
+        .filter((t) => t.length >= 2 && !/[\u0600-\u06FF]/.test(t))
+    ),
+  ];
+
+  let characters: MangaCharacterEdge[] = [];
+  let anilistTrailer: { id: string; site: string; thumbnail: string; url: string } | null = null;
+
+  for (const search of candidateTitles.slice(0, 2)) {
+    try {
+      const res = await fetch("https://graphql.anilist.co", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({
+          query: `query ($s: String) {
+            Page(perPage: 4) {
+              media(search: $s, type: MANGA, sort: [SEARCH_MATCH, POPULARITY_DESC]) {
+                id
+                title { romaji english native }
+                trailer { id site thumbnail }
+                characters(sort: [ROLE, RELEVANCE, ID], perPage: 18) {
+                  edges {
+                    role
+                    node { id name { full native } image { large } }
+                  }
+                }
+                relations {
+                  edges {
+                    node {
+                      type
+                      trailer { id site thumbnail }
+                      characters(sort: [ROLE, RELEVANCE, ID], perPage: 18) {
+                        edges {
+                          role
+                          node { id name { full native } image { large } }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }`,
+          variables: { s: search },
+        }),
+        signal: AbortSignal.timeout(2500),
+      });
+      if (res.ok) {
+        const j = (await res.json()) as any;
+        const mediaList: any[] = j?.data?.Page?.media || [];
+        for (const m of mediaList) {
+          const directEdges: any[] = m?.characters?.edges || [];
+          const relEdges: any[] = (m?.relations?.edges || []).flatMap(
+            (r: any) => r?.node?.characters?.edges || []
+          );
+          const chosen = directEdges.length > 0 ? directEdges : relEdges;
+          if (chosen.length > 0 && characters.length === 0) {
+            characters = chosen
+              .filter((e: any) => e?.node?.id && e?.node?.name?.full)
+              .map((e: any) => ({
+                role: e.role === "MAIN" ? "MAIN" : "SUPPORTING",
+                node: {
+                  id: Number(e.node.id),
+                  name: {
+                    full: String(e.node.name.full),
+                    native: e.node.name.native ? String(e.node.name.native) : undefined,
+                  },
+                  image: {
+                    large: String(e.node.image?.large || opts.poster),
+                  },
+                },
+              }));
+          }
+          const rawTr =
+            m?.trailer?.site === "youtube" && m?.trailer?.id
+              ? m.trailer
+              : (m?.relations?.edges || [])
+                  .map((r: any) => r?.node?.trailer)
+                  .find((t: any) => t?.site === "youtube" && t?.id);
+          if (rawTr && !anilistTrailer) {
+            anilistTrailer = {
+              id: String(rawTr.id),
+              site: "youtube",
+              thumbnail:
+                rawTr.thumbnail || `https://img.youtube.com/vi/${rawTr.id}/hqdefault.jpg`,
+              url: `https://www.youtube.com/watch?v=${rawTr.id}`,
+            };
+          }
+          if (characters.length > 0) break;
+        }
+        if (characters.length > 0) break;
+      }
+    } catch {}
+  }
+
+  if (characters.length === 0 && candidateTitles.length > 0) {
+    try {
+      const kw = candidateTitles[0];
+      const pRes = await fetch(
+        `https://myanimelist.net/search/prefix.json?type=manga&keyword=${encodeURIComponent(kw)}`,
+        { headers: { "User-Agent": UA }, signal: AbortSignal.timeout(2200) }
+      );
+      if (pRes.ok) {
+        const pJson = (await pRes.json()) as any;
+        const firstItem = pJson?.categories?.[0]?.items?.[0];
+        if (firstItem?.url) {
+          const charRes = await fetch(`${firstItem.url}/characters`, {
+            headers: { "User-Agent": UA },
+            signal: AbortSignal.timeout(2400),
+          });
+          if (charRes.ok) {
+            const charHtml = await charRes.text();
+            const rowRegex =
+              /class="js-manga-character-table"[\s\S]*?href="https:\/\/myanimelist\.net\/character\/(\d+)\/[^"]+"[\s\S]*?data-src="([^"]+)"[\s\S]*?<h3 class="h3_character_name">([^<]+)<\/h3>[\s\S]*?<small>(Main|Supporting)<\/small>/gi;
+            let rm: RegExpExecArray | null;
+            while ((rm = rowRegex.exec(charHtml)) !== null && characters.length < 18) {
+              const cid = Number(rm[1]);
+              const rawImg = rm[2]
+                .replace(/\/r\/\d+x\d+/, "")
+                .replace(/\?.*$/, "");
+              const rawName = decodeHtmlEntities(rm[3])
+                .split(",")
+                .reverse()
+                .map((s) => s.trim())
+                .join(" ");
+              const role = rm[4].toUpperCase() === "MAIN" ? "MAIN" : "SUPPORTING";
+              if (cid && rawName && !characters.some((c) => c.node.id === cid)) {
+                characters.push({
+                  role,
+                  node: {
+                    id: cid,
+                    name: { full: rawName },
+                    image: { large: rawImg || opts.poster },
+                  },
+                });
+              }
+            }
+          }
+        }
+      }
+    } catch {}
+  }
+
+  if (characters.length === 0) {
+    characters = extractSynopsisCharacters(
+      opts.description,
+      opts.poster,
+      opts.arabicTitle,
+      opts.englishTitle
+    );
+  }
+
+  const trailer =
+    anilistTrailer ||
+    (await resolveYoutubeTrailer(opts.englishTitle, opts.arabicTitle, opts.source));
+
+  const out = { characters, trailer };
+  extrasCache.set(cacheKey, out);
+  return out;
 }
 
 function normalizeTitleFields(item: any, arTitleRaw: string, enTitleRaw: string) {
@@ -489,11 +803,7 @@ async function fetchMangaDarDetail(slug: string) {
   if (cached) return cached;
 
   const url = `${MANGADAR_BASE}/manga/${encodeURIComponent(cleanSlug)}/`;
-  const slugWords = cleanSlug.replace(/-/g, " ");
-  const [html, earlyTrailer] = await Promise.all([
-    fetchMangaDarHtml(url),
-    resolveYoutubeTrailer(slugWords, "", "manga"),
-  ]);
+  const html = await fetchMangaDarHtml(url);
 
   // Parse JSON-LD
   let ldData: any = null;
@@ -578,7 +888,15 @@ async function fetchMangaDarDetail(slug: string) {
     })
     .sort((a, b) => a.number - b.number);
 
-  const trailer = earlyTrailer || (await resolveYoutubeTrailer(englishTitle, arabicTitle, "manga"));
+  const { characters, trailer } = await resolveMangaExtras({
+    titles: [englishTitle, cleanSlug.replace(/-/g, " ")],
+    description,
+    poster,
+    slug: cleanSlug,
+    source: "manga",
+    arabicTitle,
+    englishTitle,
+  });
 
   const detail: any = {
     id: `md--${cleanSlug}`,
@@ -601,6 +919,7 @@ async function fetchMangaDarDetail(slug: string) {
     typeLabel: "مانجا",
     trailer,
     trailerYT: trailer?.id || null,
+    characters,
     chaptersCount: chapters.length,
     chapters,
   };
@@ -794,11 +1113,7 @@ async function fetchAzoraflyDetail(slug: string) {
   if (cached) return cached;
 
   const url = `${AZORAFLY_BASE}/series/${encodeURIComponent(cleanSlug)}`;
-  const slugWords = cleanSlug.replace(/-/g, " ");
-  const [data, earlyTrailer] = await Promise.all([
-    fetchAzoraflyTsrData(url),
-    resolveYoutubeTrailer(slugWords, "", "manhwa"),
-  ]);
+  const data = await fetchAzoraflyTsrData(url);
   const post = data?.post;
   if (!post) {
     throw new Error(`Manhwa series not found on Azorafly: ${cleanSlug}`);
@@ -852,7 +1167,15 @@ async function fetchAzoraflyDetail(slug: string) {
     })
     .sort((a: any, b: any) => a.number - b.number);
 
-  const trailer = earlyTrailer || (await resolveYoutubeTrailer(englishTitle, arabicTitle, "manhwa"));
+  const { characters, trailer } = await resolveMangaExtras({
+    titles: [englishTitle, ...altLines, cleanSlug.replace(/-/g, " ")],
+    description,
+    poster,
+    slug: cleanSlug,
+    source: "manhwa",
+    arabicTitle,
+    englishTitle,
+  });
 
   const detail: any = {
     id: `az--${cleanSlug}`,
@@ -875,6 +1198,7 @@ async function fetchAzoraflyDetail(slug: string) {
     typeLabel: "مانهوا",
     trailer,
     trailerYT: trailer?.id || null,
+    characters,
     chaptersCount: chapters.length,
     chapters,
   };

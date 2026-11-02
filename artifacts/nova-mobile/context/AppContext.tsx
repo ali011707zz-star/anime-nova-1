@@ -31,6 +31,8 @@ export type WatchProgress = {
 
 export type FavoriteAnime = {
   id: number;
+  mangaId?: string;
+  source?: "manga" | "manhwa";
   title: string;
   english: string;
   thumbnail: string;

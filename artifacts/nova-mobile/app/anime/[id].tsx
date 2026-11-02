@@ -225,6 +225,20 @@ export default function AnimeDetailScreen() {
   const [showFull, setShowFull] = useState(false);
   const [tab, setTab] = useState<"chars" | "related" | "similar">("chars");
   const [showTrailer, setShowTrailer] = useState(false);
+
+  useEffect(() => {
+    if (tvMode || Platform.OS === "web") return;
+    if (showTrailer) {
+      ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE_RIGHT).catch(() => {});
+    } else {
+      ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP).catch(() => {});
+    }
+    return () => {
+      if (showTrailer) {
+        ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP).catch(() => {});
+      }
+    };
+  }, [showTrailer, tvMode]);
   const [showRating, setShowRating] = useState(false);
   const [myRating, setMyRating] = useState(0);
   const [saved, setSaved] = useState(false);
@@ -914,7 +928,12 @@ export default function AnimeDetailScreen() {
       </ScrollView>
 
       {/* ── Trailer Modal — in-app YouTube player ── */}
-      <Modal visible={showTrailer} animationType={tvMode ? "none" : "slide"} onRequestClose={() => setShowTrailer(false)}>
+      <Modal
+        visible={showTrailer}
+        animationType={tvMode ? "none" : "fade"}
+        supportedOrientations={["landscape", "landscape-left", "landscape-right", "portrait"]}
+        onRequestClose={() => setShowTrailer(false)}
+      >
         <View style={{ flex: 1, backgroundColor: "#000" }}>
           <View style={[d.trailerSheetHeader, { paddingTop: topPad + 4 }]}>
             <Ionicons name="logo-youtube" size={20} color="#FF0000" />
