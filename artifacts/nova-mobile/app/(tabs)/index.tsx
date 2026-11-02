@@ -233,10 +233,10 @@ export default function HomeScreen() {
     const list = manhwaData?.items || [];
     return list.slice(0, 16).map((m: any) => ({
       id: String(m.id),
-      title: m.arTitle || m.title?.native || m.title?.english || m.title?.romaji || "مانهوا",
-      subtitle: m.enTitle || m.title?.english || "",
-      poster: m.coverImage?.extraLarge || m.coverImage?.large || m.cover || "",
-      type: "مانهوا ملونة",
+      title: m.arabicTitle || m.arTitle || (typeof m.title === "string" ? m.title : m.title?.native || m.title?.english || m.title?.romaji) || "مانهوا",
+      subtitle: m.englishTitle || m.enTitle || (typeof m.title === "object" ? m.title?.english : "") || "",
+      poster: m.poster || m.coverImage?.extraLarge || m.coverImage?.large || m.cover || "",
+      type: m.typeLabel || "مانهوا ملونة",
     }));
   }, [manhwaData]);
 
@@ -244,10 +244,10 @@ export default function HomeScreen() {
     const list = jpMangaData?.items || [];
     return list.slice(0, 16).map((m: any) => ({
       id: String(m.id),
-      title: m.arTitle || m.title?.native || m.title?.english || m.title?.romaji || "مانجا",
-      subtitle: m.enTitle || m.title?.english || "",
-      poster: m.coverImage?.extraLarge || m.coverImage?.large || m.cover || "",
-      type: "مانجا مترجمة",
+      title: m.arabicTitle || m.arTitle || (typeof m.title === "string" ? m.title : m.title?.native || m.title?.english || m.title?.romaji) || "مانجا",
+      subtitle: m.englishTitle || m.enTitle || (typeof m.title === "object" ? m.title?.english : "") || "",
+      poster: m.poster || m.coverImage?.extraLarge || m.coverImage?.large || m.cover || "",
+      type: m.typeLabel || "مانجا مترجمة",
     }));
   }, [jpMangaData]);
 

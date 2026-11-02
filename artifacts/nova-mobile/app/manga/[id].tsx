@@ -38,16 +38,19 @@ type MangaDetailData = {
   id: string;
   slug: string;
   source: "manga" | "manhwa";
-  arTitle: string;
-  enTitle: string;
-  title: {
-    romaji: string;
-    english: string;
-    native: string;
+  arabicTitle?: string;
+  englishTitle?: string;
+  arTitle?: string;
+  enTitle?: string;
+  title?: string | {
+    romaji?: string;
+    english?: string;
+    native?: string;
   };
   description: string;
-  cover: string;
-  banner: string;
+  poster?: string;
+  cover?: string;
+  banner?: string;
   coverImage?: { large?: string; extraLarge?: string };
   bannerImage?: string;
   status: string;
@@ -219,7 +222,11 @@ export default function MangaDetailScreen() {
         const res = await fetch(`${getBaseUrl()}/api/manga/chapter?${qs.toString()}`);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
-        const pages: string[] = Array.isArray(data?.pages) ? data.pages.filter(Boolean) : [];
+        const pages: string[] = Array.isArray(data?.pages)
+          ? data.pages
+              .map((p: any) => (typeof p === "string" ? p : p?.url || ""))
+              .filter(Boolean)
+          : [];
         if (!pages.length) {
           setPagesError("لا تتوفر صفحات لهذا الفصل حالياً.");
         } else {
@@ -305,15 +312,21 @@ export default function MangaDetailScreen() {
     );
   }
 
-  const primaryTitle = manga.arTitle || manga.enTitle || manga.title?.native || manga.title?.english || "بدون عنوان";
-  const secondaryTitle =
-    manga.enTitle && manga.enTitle !== primaryTitle
-      ? manga.enTitle
-      : manga.title?.romaji && manga.title.romaji !== primaryTitle
-      ? manga.title.romaji
-      : "";
-  const cover = manga.cover || manga.coverImage?.extraLarge || manga.coverImage?.large || "";
-  const banner = manga.banner || manga.bannerImage || cover;
+  const rawTitleStr = typeof manga.title === "string" ? manga.title : "";
+  const rawTitleObj = typeof manga.title === "object" && manga.title ? manga.title : undefined;
+  const primaryTitle =
+    manga.arabicTitle ||
+    manga.arTitle ||
+    rawTitleStr ||
+    rawTitleObj?.native ||
+    manga.englishTitle ||
+    manga.enTitle ||
+    rawTitleObj?.english ||
+    "بدون عنوان";
+  const enCandidate = manga.englishTitle || manga.enTitle || rawTitleObj?.english || rawTitleObj?.romaji || "";
+  const secondaryTitle = enCandidate && enCandidate !== primaryTitle ? enCandidate : "";
+  const cover = manga.poster || manga.cover || manga.coverImage?.extraLarge || manga.coverImage?.large || "";
+  const banner = manga.bannerImage || manga.banner || cover;
   const score = typeof manga.averageScore === "number" && manga.averageScore > 0
     ? (manga.averageScore / 10).toFixed(1)
     : null;

@@ -214,27 +214,33 @@ export function MediaCatalogGrid({
         const data = await res.json();
         if (sequence !== requestSequence.current || controller.signal.aborted) return;
 
-        const nextItems: CatalogMedia[] = (data?.items || []).map((item: any) => ({
-          id: String(item.id),
-          slug: item.slug,
-          source: item.source || source,
-          arTitle: item.arTitle || "",
-          title: item.title || {
-            romaji: item.enTitle || item.arTitle || "",
-            english: item.enTitle || item.title?.english || "",
-            native: item.arTitle || item.title?.native || "",
-          },
-          coverImage: item.coverImage || {
-            large: item.cover || "",
-            extraLarge: item.cover || "",
-          },
-          averageScore: item.averageScore ?? null,
-          chapters: item.chapters ?? null,
-          status: item.status || "RELEASING",
-          format: "MANGA",
-          countryOfOrigin: item.countryOfOrigin || (source === "manhwa" ? "KR" : "JP"),
-          genres: Array.isArray(item.genres) ? item.genres : [],
-        }));
+        const nextItems: CatalogMedia[] = (data?.items || []).map((item: any) => {
+          const strTitle = typeof item.title === "string" ? item.title : "";
+          const arT = item.arabicTitle || item.arTitle || (typeof item.title === "object" ? item.title?.native : "") || "";
+          const enT = item.englishTitle || item.enTitle || strTitle || (typeof item.title === "object" ? item.title?.english || item.title?.romaji : "") || "";
+          const posterUri = item.poster || item.cover || item.coverImage?.extraLarge || item.coverImage?.large || "";
+          return {
+            id: String(item.id),
+            slug: item.slug,
+            source: item.source || source,
+            arTitle: arT,
+            title: {
+              romaji: enT || arT,
+              english: enT || arT,
+              native: arT || enT,
+            },
+            coverImage: {
+              large: posterUri,
+              extraLarge: posterUri,
+            },
+            averageScore: item.averageScore ?? null,
+            chapters: item.chapters ?? null,
+            status: item.status || "RELEASING",
+            format: "MANGA",
+            countryOfOrigin: item.countryOfOrigin || (source === "manhwa" ? "KR" : "JP"),
+            genres: Array.isArray(item.genres) ? item.genres : [],
+          };
+        });
 
         setItems((previous) => {
           if (!append) return nextItems;
