@@ -102,20 +102,5 @@ async function fetchSource(endpoint: string, source: string, signal?: AbortSigna
 }
 
 export async function fetchLatestEpisodes(signal?: AbortSignal): Promise<LatestEpisodeItem[]> {
-  const results = await Promise.allSettled([
-    fetchSource("anslayer-latest", "anslayer", signal),
-    fetchSource("aw-latest", "animewitcher", signal),
-  ]);
-  const fulfilled = results.filter(
-    (result): result is PromiseFulfilledResult<LatestEpisodeItem[]> => result.status === "fulfilled",
-  );
-  if (fulfilled.length === 0) throw new Error("تعذّر تحميل أحدث الحلقات من المصادر");
-
-  const items = fulfilled
-    .flatMap((result) => result.value)
-    .sort((a, b) => Number(b.episode) - Number(a.episode));
-  if (items.length === 0) {
-    throw new Error("لم تصل بيانات أحدث الحلقات من المصادر");
-  }
-  return items;
+  return fetchSource("anslayer-latest", "anslayer", signal);
 }

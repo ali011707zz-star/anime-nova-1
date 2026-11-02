@@ -37,7 +37,7 @@ import {
 import { rewriteHlsManifest } from "../lib/hlsManifestRewrite.mjs";
 import { createHash, createDecipheriv, createCipheriv, randomBytes } from "crypto";
 import { execSync, execFile, spawn } from "child_process";
-import { createReadStream, existsSync, writeFileSync, readFileSync, readdirSync, mkdirSync, rmSync, statSync } from "fs";
+import { createReadStream, existsSync, writeFileSync, readFileSync, readdirSync, mkdirSync, rmSync, statSync, renameSync } from "fs";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { join as pathJoin } from "path";
@@ -15300,23 +15300,9 @@ router.get("/anime/sources-stream", scraperQueueMiddleware, async (req, res) => 
         },
         {
           site: "anslayer",
-          timeoutMs: fromLatest && latestSource === "anslayer"
-            ? 90_000
-            : sourceAvailabilityJobTimeoutMs("anslayer", 15_000),
+          timeoutMs: sourceAvailabilityJobTimeoutMs("anslayer", 15_000),
           run: () => useCatalogAvailability("anslayer", async hint => {
             const directId = Number(hint?.providerTitleId || anslayerId || 0) || undefined;
-            if (fromLatest && latestSource === "anslayer") {
-              const availabilityWrites: Promise<UnifiedSource[]>[] = [];
-              const onSource: AnslayerSourceListener = source => {
-                availabilityWrites.push(emitAvailability([source]));
-              };
-              const resolved = await getAnimeSlayerSources(
-                title, english, ep, directId, titleAr, hint, onSource, false,
-              );
-              availabilityWrites.push(emitAvailability(resolved));
-              await Promise.all(availabilityWrites);
-              return resolved;
-            }
             return scrapeCached("anslayer", async () => getAnimeSlayerSources(
               title, english, ep, directId, titleAr, hint, undefined, true,
             ), false, 15_000);
@@ -15336,6 +15322,12 @@ router.get("/anime/sources-stream", scraperQueueMiddleware, async (req, res) => 
             const lookupId = hint?.providerTitleId ? anilistId : await aniListIdResolution;
             return getAnifoxSources(title, english, ep, titleVariants, lookupId, true, hint);
           }, false, 18_000)),
+        },
+        {
+          site: "animedar",
+          timeoutMs: sourceAvailabilityJobTimeoutMs("animedar", 11_000),
+          run: () => scrapeCached("animedar", () =>
+            getAnimadarSources(title, english, ep, isMovie, matchCtx), false, 11_000),
         },
         {
           site: "anineko",
@@ -16381,9 +16373,184 @@ router.get("/anime/check-arabic", async (req, res) => {
 let _anslayerLatestCache: any[] | null = null;
 let _anslayerLatestTs = 0;
 const ANSLAYER_LATEST_TTL = 2 * 60_000; // 2 دقيقة — المصدر يتغير بعد نشر الحلقة بسرعة
+const ANSLAYER_LATEST_CACHE_PATH = "/opt/nova-cache/anslayer-latest.json";
+const ANSLAYER_LATEST_DISK_MAX_AGE = 24 * 60 * 60_000;
+
+function readAnslayerLatestDiskCache(): any[] | null {
+  try {
+    const cached = JSON.parse(readFileSync(ANSLAYER_LATEST_CACHE_PATH, "utf8"));
+    const age = Date.now() - Number(cached?.ts);
+    if (!Array.isArray(cached?.items) || cached.items.length === 0 || age < 0 || age > ANSLAYER_LATEST_DISK_MAX_AGE) return null;
+    return cached.items;
+  } catch {
+    return null;
+  }
+}
+
+function writeAnslayerLatestDiskCache(items: any[]): void {
+  try {
+    mkdirSync("/opt/nova-cache", { recursive: true });
+    const tempPath = `${ANSLAYER_LATEST_CACHE_PATH}.${process.pid}.tmp`;
+    writeFileSync(tempPath, JSON.stringify({ ts: Date.now(), items }), "utf8");
+    renameSync(tempPath, ANSLAYER_LATEST_CACHE_PATH);
+  } catch {
+    // Disk cache is best-effort; the live feed must remain available without it.
+  }
+}
+
+async function fetchLiveFallbackLatestEpisodes(): Promise<any[]> {
+  type LatestCandidate = {
+    sourceId: number;
+    malId?: number;
+    name: string;
+    english?: string;
+    titleAr?: string;
+    synonyms?: string[];
+    episode: number;
+    cover: string;
+    year: string;
+    updatedAt: string | null;
+  };
+
+  const collected: LatestCandidate[] = [];
+  const tasks = [
+    (async () => {
+      try {
+        const creds = await getAnimeifyCreds();
+        if (!creds) return;
+        const response = await animeifyPost(
+          creds.base,
+          creds.token,
+          "episodes/load_latest_episodes.php",
+          new URLSearchParams({ UserId: "0", Language: "AR", From: "0" }),
+        );
+        if (!response?.ok) return;
+        const rows = await response.json() as any[];
+        if (!Array.isArray(rows)) return;
+        for (const row of rows) {
+          const anime = row?.Anime || {};
+          const episodeData = row?.Episode || {};
+          const episode = parseInt(String(episodeData.Episode || episodeData.EpisodeNumber || ""), 10);
+          const name = String(anime.EN_Title || "").trim();
+          if (!name || !Number.isFinite(episode) || episode <= 0) continue;
+          const malId = parseInt(String(anime.MalId || "0"), 10);
+          const thumbnail = String(anime.Thumbnail || "").trim();
+          const titleAr = [anime.AR_Title, anime.Tags]
+            .map((value) => String(value || "").trim())
+            .find((value) => /[\u0600-\u06FF]/.test(value))
+            ?.split(",")[0]?.trim() || "";
+          const year = String(anime.Aired || anime.Premiered || "").match(/\b(19\d{2}|20\d{2})\b/)?.[1] || "";
+          collected.push({
+            sourceId: malId > 0 ? malId : Math.abs(createHash("md5").update(name).digest().readInt32BE(0)) || 1,
+            malId: malId > 0 ? malId : undefined,
+            name,
+            english: name,
+            titleAr,
+            synonyms: String(anime.Synonyms || "").split(",").map((value) => value.trim()).filter(Boolean),
+            episode,
+            cover: thumbnail
+              ? (thumbnail.startsWith("http") ? thumbnail : `https://animeify.net/animeify/files/thumbnails/${thumbnail}`)
+              : "",
+            year,
+            updatedAt: episodeData.Released || episodeData.AddedAt || null,
+          });
+        }
+      } catch {}
+    })(),
+    (async () => {
+      try {
+        const response = await fetch(`${SANIME_API}latest`, {
+          headers: { "User-Agent": SANIME_UA, Accept: "application/json" },
+          signal: AbortSignal.timeout(6500),
+        });
+        if (!response.ok) return;
+        const payload = await response.json() as any;
+        const rows: any[] = Array.isArray(payload?.latest) ? payload.latest : (Array.isArray(payload) ? payload : []);
+        for (const row of rows) {
+          const name = String(row?.name || row?.title || "").trim();
+          const match = String(row?.epName || row?.episode || "").match(/(\d+)/);
+          const episode = match ? parseInt(match[1], 10) : NaN;
+          if (!name || !Number.isFinite(episode) || episode <= 0) continue;
+          collected.push({
+            sourceId: parseInt(String(row?.id || "0"), 10) || Math.abs(createHash("md5").update(name).digest().readInt32BE(0)) || 1,
+            name,
+            english: name,
+            episode,
+            cover: String(row?.image || row?.poster || "").trim(),
+            year: String(row?.year || "").trim(),
+            updatedAt: row?.date || null,
+          });
+        }
+      } catch {}
+    })(),
+    (async () => {
+      try {
+        const html = await a4up2Fetch(`${A4UP2_BASE}/episode/`, 6500);
+        const cardRe = /<img[^>]+src="([^"]+)"[^>]+alt="([^"]*?)\s+الحلقة\s+(\d+)[^"]*"/gi;
+        for (const match of html.matchAll(cardRe)) {
+          const name = match[2].trim();
+          const episode = parseInt(match[3], 10);
+          if (!name || !Number.isFinite(episode) || episode <= 0) continue;
+          collected.push({
+            sourceId: Math.abs(createHash("md5").update(name).digest().readInt32BE(0)) || 1,
+            name,
+            english: name,
+            episode,
+            cover: match[1].trim(),
+            year: "",
+            updatedAt: null,
+          });
+        }
+      } catch {}
+    })(),
+  ];
+  await Promise.allSettled(tasks);
+  if (!collected.length) return [];
+
+  const deduped = new Map<string, LatestCandidate>();
+  for (const item of collected) {
+    const key = normalizeAniTitle(item.name);
+    const existing = deduped.get(key);
+    if (!existing || item.episode > existing.episode) deduped.set(key, item);
+  }
+
+  const selected = Array.from(deduped.values()).slice(0, 35);
+  return Promise.all(selected.map(async (item, index) => {
+    let animeId: number | undefined;
+    if (index < 15) {
+      animeId = await Promise.race([
+        resolveAniListIdForSource(item.name, item.english || null, item.synonyms || [], item.titleAr || null),
+        new Promise<undefined>((resolve) => setTimeout(() => resolve(undefined), 1800)),
+      ]);
+    }
+    const meta = animeId ? getCachedAniListSourceMeta(animeId) : undefined;
+    const titleAr = item.titleAr || (/[\u0600-\u06FF]/.test(item.name) ? item.name : "");
+    return {
+      anslayerId: animeId || item.sourceId,
+      animeId: animeId || null,
+      anilistId: animeId || null,
+      malId: item.malId || null,
+      name: meta?.english || meta?.romaji || item.name,
+      romaji: meta?.romaji || item.name,
+      english: meta?.english || item.english || item.name,
+      native: meta?.native || "",
+      title_ar: titleAr,
+      titleAr,
+      titleVariants: Array.from(new Set([meta?.romaji, meta?.english, item.name, ...(item.synonyms || []), titleAr].filter(Boolean))),
+      episode: item.episode,
+      cover: item.cover,
+      year: item.year,
+      updatedAt: item.updatedAt,
+    };
+  }));
+}
 
 router.get("/anime/anslayer-latest", async (req, res) => {
   try {
+    if (!_anslayerLatestCache) {
+      _anslayerLatestCache = readAnslayerLatestDiskCache();
+      if (_anslayerLatestCache) _anslayerLatestTs = 0;
+    }
     if (_anslayerLatestCache && Date.now() - _anslayerLatestTs < ANSLAYER_LATEST_TTL) {
       res.setHeader("Cache-Control", "no-store");
       res.json({ items: _anslayerLatestCache });
@@ -16402,6 +16569,15 @@ router.get("/anime/anslayer-latest", async (req, res) => {
       candidates.find(Array.isArray) ||
       [];
     if (list.length === 0) {
+      const fallbackItems = await fetchLiveFallbackLatestEpisodes();
+      if (fallbackItems.length > 0) {
+        _anslayerLatestCache = fallbackItems;
+        _anslayerLatestTs = Date.now();
+        writeAnslayerLatestDiskCache(fallbackItems);
+        res.setHeader("Cache-Control", "no-store");
+        res.json({ items: fallbackItems });
+        return;
+      }
       if (_anslayerLatestCache?.length) {
         res.setHeader("Cache-Control", "no-store");
         res.json({ items: _anslayerLatestCache, stale: true });
@@ -16432,24 +16608,20 @@ router.get("/anime/anslayer-latest", async (req, res) => {
       };
     }).filter((it: any) => it.anslayerId && it.episode);
 
-    // Resolve in parallel so the latest list can use the same AniList-based
-    // detail, subtitle, and Japanese-source paths as the normal catalog.
-    const items = (await Promise.all(rawItems.map(async (item: any) => {
-      const animeId = item.anilistId || await resolveAniListIdForSource(item.name, null, [], null);
-      const meta = animeId ? getCachedAniListSourceMeta(animeId) : undefined;
-      const titleAr = animeId ? await getArabicAnimeTitleById(animeId) : null;
+    const items = rawItems.map((item: any) => {
+      const titleAr = /[\u0600-\u06FF]/.test(item.name) ? item.name : "";
       return {
         ...item,
-        animeId,
-        anilistId: animeId,
+        animeId: item.anilistId || null,
+        anilistId: item.anilistId || null,
         title_ar: titleAr,
         titleAr,
-        titleVariants: meta?.titles || [item.name].filter(Boolean),
-        romaji: meta?.romaji || item.name,
-        english: meta?.english || "",
-        native: meta?.native || "",
+        titleVariants: [item.name].filter(Boolean),
+        romaji: item.name,
+        english: "",
+        native: "",
       };
-    }))).filter((it: any) => (it.animeId || it.anslayerId) && it.episode);
+    }).filter((item: any) => (item.animeId || item.anslayerId) && item.episode);
 
     if (items.length === 0) {
       if (_anslayerLatestCache?.length) {
@@ -16467,10 +16639,22 @@ router.get("/anime/anslayer-latest", async (req, res) => {
     // duplicate notification attempts. The scheduler polls this same feed.
     _anslayerLatestCache = items;
     _anslayerLatestTs = Date.now();
+    writeAnslayerLatestDiskCache(items);
     res.setHeader("Cache-Control", "no-store");
     res.json({ items });
   } catch (e: any) {
     console.warn("[AnimeSlayer] latest feed request failed:", e?.message || String(e));
+    try {
+      const fallbackItems = await fetchLiveFallbackLatestEpisodes();
+      if (fallbackItems.length > 0) {
+        _anslayerLatestCache = fallbackItems;
+        _anslayerLatestTs = Date.now();
+        writeAnslayerLatestDiskCache(fallbackItems);
+        res.setHeader("Cache-Control", "no-store");
+        res.json({ items: fallbackItems });
+        return;
+      }
+    } catch {}
     res.setHeader("Cache-Control", "no-store");
     if (_anslayerLatestCache?.length) {
       res.json({ items: _anslayerLatestCache, stale: true });

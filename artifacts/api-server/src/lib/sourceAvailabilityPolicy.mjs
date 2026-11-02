@@ -3,6 +3,7 @@ export const SOURCE_AVAILABILITY_PRIORITY = Object.freeze([
   "megaplay",
   "animewitcher",
   "anifox",
+  "animedar",
   "sanime",
 ]);
 export const SOURCE_AVAILABILITY_CONCURRENCY = 6;

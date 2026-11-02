@@ -19,7 +19,11 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { DrawerMenu } from "@/components/DrawerMenu";
 import { useColors } from "@/hooks/useColors";
 import { anilistQuery } from "@/utils/anilist";
-import { fetchLatestEpisodes, type LatestEpisodeItem } from "@/utils/latestEpisodes";
+import {
+  fetchLatestEpisodes,
+  normalizeLatestEpisodeItem,
+  type LatestEpisodeItem,
+} from "@/utils/latestEpisodes";
 import { getPosterUri, getTvPosterUri } from "@/utils/media";
 import { isTvDevice, tvFocusStyle, TvPressable as Pressable } from "@/utils/tv";
 
@@ -116,7 +120,13 @@ export default function LatestEpisodesScreen() {
         const cached = await AsyncStorage.getItem(CACHE_KEY);
         if (cached) {
           const parsed = JSON.parse(cached);
-          if (Array.isArray(parsed)) setItems(parsed);
+          if (Array.isArray(parsed)) {
+            setItems(
+              parsed
+                .map((item) => normalizeLatestEpisodeItem(item))
+                .filter((item) => item.source === "anslayer"),
+            );
+          }
         }
       }
       const fresh = await fetchLatestEpisodes();

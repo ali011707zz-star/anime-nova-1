@@ -128,7 +128,10 @@ export default function HomeScreen() {
       try {
         const parsed = JSON.parse(stored || "[]");
         if (Array.isArray(parsed) && parsed.length) {
-          setTodayEps(parsed.map((item) => normalizeLatestEpisodeItem(item)));
+          const cachedItems = parsed
+            .map((item) => normalizeLatestEpisodeItem(item))
+            .filter((item) => item.source === "anslayer");
+          if (cachedItems.length) setTodayEps(cachedItems);
         }
       } catch {}
     }).catch(() => {});
