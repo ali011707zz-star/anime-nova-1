@@ -20,6 +20,25 @@ type PendingPrompt = {
   resolve: (value: boolean) => void;
 };
 
+function AdPreviewVideo() {
+  const player = useVideoPlayer(require("../assets/deku-ad.mp4"), (instance) => {
+    instance.loop = true;
+    instance.muted = true;
+    instance.play();
+  });
+  return (
+    <VideoView
+      player={player}
+      style={styles.media}
+      nativeControls={false}
+      contentFit="cover"
+      surfaceType={undefined}
+      pointerEvents="none"
+      accessible={false}
+    />
+  );
+}
+
 export function RewardedAdPrompt() {
   const colors = useColors();
   const [pending, setPending] = useState<PendingPrompt | null>(null);
@@ -27,11 +46,6 @@ export function RewardedAdPrompt() {
   const [adError, setAdError] = useState("");
   const router = useRouter();
   const tvMode = isTvDevice();
-  const player = useVideoPlayer(require("../assets/deku-ad.mp4"), (instance) => {
-    instance.loop = true;
-    instance.muted = true;
-    instance.play();
-  });
 
   useEffect(() => {
     return subscribeRewardPrompt((kind, confirm, resolve) => {
@@ -70,6 +84,11 @@ export function RewardedAdPrompt() {
     Linking.openURL("https://t.me/Anime_NOVA_0").catch(() => {});
   };
 
+  const openSubscriptions = () => {
+    close(false);
+    router.push("/settings?openPremium=1" as any);
+  };
+
   const isDownload = pending?.kind === "download";
   const title = isDownload ? "تابع التنزيل" : "افتح المشاهدة";
   const message = isDownload
@@ -102,15 +121,7 @@ export function RewardedAdPrompt() {
           </View>
 
           <View style={styles.mediaFrame}>
-            <VideoView
-              player={player}
-              style={styles.media}
-              nativeControls={false}
-              contentFit="cover"
-              surfaceType={undefined}
-              pointerEvents="none"
-              accessible={false}
-            />
+            {pending ? <AdPreviewVideo /> : null}
           </View>
 
           <Text style={[styles.title, { color: colors.textPrimary }]}>{title}</Text>

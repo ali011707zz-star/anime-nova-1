@@ -68,8 +68,7 @@ const styles = StyleSheet.create({
   },
   seeAll: {
     minHeight: 34,
-    flexDirection: "row",
-    direction: "ltr",
+    flexDirection: I18nManager.isRTL ? "row-reverse" : "row",
     alignItems: "center",
     justifyContent: "center",
     gap: 5,

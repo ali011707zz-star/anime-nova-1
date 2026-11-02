@@ -1,7 +1,7 @@
 import React, { useState, useCallback, useEffect, useRef, useMemo } from "react";
 import {
   View, Text, StyleSheet, ScrollView, TextInput, BackHandler, useWindowDimensions,
-  Image, Alert, Linking, Platform, Modal,
+  Image, Alert, Linking, Platform, Modal, I18nManager,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";

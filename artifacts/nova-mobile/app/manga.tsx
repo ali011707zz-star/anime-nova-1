@@ -1,23 +1,33 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { StyleSheet, View } from "react-native";
+import { useLocalSearchParams } from "expo-router";
 import { CatalogPageHeader, CatalogTabs } from "@/components/CatalogPageHeader";
 import { MediaCatalogGrid } from "@/components/MediaCatalogGrid";
 import { useColors } from "@/hooks/useColors";
 
 const TABS = [
   { id: "all", label: "جميع المانجا" },
+  { id: "manhwa", label: "مانهوا كورية" },
   { id: "ongoing", label: "مستمرة" },
   { id: "finished", label: "مكتملة" },
-  { id: "manhwa", label: "مانهوا ملونة" },
 ];
 
 export default function MangaScreen() {
   const colors = useColors();
-  const [activeTab, setActiveTab] = useState("all");
+  const params = useLocalSearchParams<{ tab?: string }>();
+  const [activeTab, setActiveTab] = useState<string>(
+    params.tab && TABS.some((t) => t.id === params.tab) ? params.tab : "all"
+  );
+
+  useEffect(() => {
+    if (params.tab && TABS.some((t) => t.id === params.tab)) {
+      setActiveTab(params.tab);
+    }
+  }, [params.tab]);
 
   return (
     <View style={[styles.screen, { backgroundColor: colors.background }]}>
-      <CatalogPageHeader title="المانجا" />
+      <CatalogPageHeader title={activeTab === "manhwa" ? "المانهوا الكورية" : "المانجا والمانهوا"} />
       <CatalogTabs tabs={TABS} activeId={activeTab} onSelect={setActiveTab} />
       <MediaCatalogGrid
         key={activeTab}
@@ -26,7 +36,7 @@ export default function MangaScreen() {
         status={activeTab === "ongoing" ? "RELEASING" : activeTab === "finished" ? "FINISHED" : undefined}
         countryOfOrigin={activeTab === "manhwa" ? "KR" : undefined}
         sort="POPULARITY_DESC"
-        emptyText="لا توجد مانجا مطابقة لهذا التصنيف"
+        emptyText="لا توجد أعمال مطابقة لهذا التصنيف"
       />
     </View>
   );

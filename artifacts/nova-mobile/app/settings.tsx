@@ -339,7 +339,14 @@ function fetchWithTimeout(
 }
 
 /* ── Auth Sheet ── */
-function AuthSheet({ open, onClose, onLogin, onLinkDevice }: {
+function AuthSheet(props: {
+  open: boolean; onClose: () => void; onLogin: (u: MobileUser) => void; onLinkDevice: () => void;
+}) {
+  if (!props.open) return null;
+  return <AuthSheetInner {...props} />;
+}
+
+function AuthSheetInner({ open, onClose, onLogin, onLinkDevice }: {
   open: boolean; onClose: () => void; onLogin: (u: MobileUser) => void; onLinkDevice: () => void;
 }) {
   const GOOGLE_ONLY = true;
@@ -364,9 +371,9 @@ function AuthSheet({ open, onClose, onLogin, onLinkDevice }: {
   }, [resendCooldown]);
 
   const base = getBaseUrl();
-  const googleWebClientId = process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID;
-  const googleAndroidClientId = process.env.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID || googleWebClientId;
-  const googleIosClientId = process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID;
+  const googleWebClientId = process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID || GOOGLE_NATIVE_CLIENT_ID;
+  const googleAndroidClientId = process.env.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID || googleWebClientId || GOOGLE_NATIVE_CLIENT_ID;
+  const googleIosClientId = process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID || GOOGLE_NATIVE_CLIENT_ID;
   const [googleRequest, googleResponse, promptGoogleAsync] = Google.useAuthRequest({
     androidClientId: googleAndroidClientId,
     iosClientId: googleIosClientId,
@@ -421,9 +428,6 @@ function AuthSheet({ open, onClose, onLogin, onLinkDevice }: {
         credentials: "include",
       });
       const d = await r.json();
-      // Google auth currently establishes the server session cookie. Older
-      // API builds do not return an app token, so do not reject a valid user
-      // response merely because that optional field is absent.
       if (!r.ok || !d.id) {
         setError(d.error || "فشل تسجيل الدخول بحساب Google");
         return;
@@ -448,10 +452,6 @@ function AuthSheet({ open, onClose, onLogin, onLinkDevice }: {
   }, [base, onClose, onLogin]);
 
   useEffect(() => {
-    // The OAuth callback route can remount this component while the sheet is
-    // closed. Never process a stale response from a hidden AuthSheet: doing
-    // so can create another settings route and leave duplicate pages in the
-    // native navigation stack.
     if (!googleResponse) return;
     const responseKey = JSON.stringify(googleResponse);
     if (handledGoogleResponse.current === responseKey) return;
@@ -470,9 +470,6 @@ function AuthSheet({ open, onClose, onLogin, onLinkDevice }: {
       }
       return;
     }
-    // The native Google flow normally returns an access token directly.
-    // Reading it here avoids a second PKCE exchange whose verifier can be
-    // lost when Android hands the deep link to Expo Router.
     const accessToken = googleResponse.authentication?.accessToken;
     if (accessToken) {
       void saveGoogleUser(accessToken).catch((error) => {
@@ -591,7 +588,6 @@ function AuthSheet({ open, onClose, onLogin, onLinkDevice }: {
     setLoading(false);
   };
 
-  if (!open) return null;
   const isLogin = flow === "login";
   const isVerify = flow === "verify";
 

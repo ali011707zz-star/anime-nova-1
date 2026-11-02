@@ -122,42 +122,46 @@ export default function ScheduleScreen() {
       </View>
 
       {/* ── Horizontal Days Selector ── */}
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        contentContainerStyle={styles.daysRow}
-      >
-        {DAYS_AR.map((day, i) => {
-          const isSelected = i === selectedDay;
-          return (
-            <Pressable
-              key={day}
-              onPress={() => setSelectedDay(i)}
-              focusable={tvMode}
-              style={({ focused }) => [
-                styles.dayBtn,
-                tvMode && tvFocusStyle(focused),
-                {
-                  backgroundColor: isSelected ? "#06b6d4" : "rgba(39, 39, 42, 0.75)",
-                  borderColor: isSelected ? "#06b6d4" : "rgba(255, 255, 255, 0.08)",
-                },
-              ]}
-            >
-              <Text
-                style={[
-                  styles.dayText,
+      <View style={styles.daysWrapper}>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          style={styles.daysScroll}
+          contentContainerStyle={styles.daysRow}
+        >
+          {DAYS_AR.map((day, i) => {
+            const isSelected = i === selectedDay;
+            return (
+              <Pressable
+                key={day}
+                onPress={() => setSelectedDay(i)}
+                focusable={tvMode}
+                style={({ focused }) => [
+                  styles.dayBtn,
+                  tvMode && tvFocusStyle(focused),
                   {
-                    color: isSelected ? "#ffffff" : colors.text,
-                    fontWeight: isSelected ? "700" : "500",
+                    backgroundColor: isSelected ? "#06b6d4" : "rgba(39, 39, 42, 0.85)",
+                    borderColor: isSelected ? "#06b6d4" : "rgba(255, 255, 255, 0.12)",
                   },
                 ]}
               >
-                {day}
-              </Text>
-            </Pressable>
-          );
-        })}
-      </ScrollView>
+                <Text
+                  numberOfLines={1}
+                  style={[
+                    styles.dayText,
+                    {
+                      color: isSelected ? "#ffffff" : "#f4f4f5",
+                      fontWeight: isSelected ? "700" : "600",
+                    },
+                  ]}
+                >
+                  {day}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </ScrollView>
+      </View>
 
       {/* ── Content Area ── */}
       {isLoading ? (
@@ -313,25 +317,38 @@ const styles = StyleSheet.create({
   },
 
   /* Days Strip */
+  daysWrapper: {
+    height: 52,
+    flexShrink: 0,
+    marginBottom: 10,
+  },
+  daysScroll: {
+    flexGrow: 0,
+    flexShrink: 0,
+  },
   daysRow: {
     paddingHorizontal: 16,
     paddingVertical: 4,
-    marginBottom: 12,
     alignItems: "center",
     flexDirection: I18nManager.isRTL ? "row" : "row-reverse",
     gap: 8,
   },
   dayBtn: {
+    minHeight: 40,
+    minWidth: 74,
     paddingHorizontal: 16,
-    paddingVertical: 7,
+    paddingVertical: 8,
     borderRadius: 12,
     borderWidth: 1,
     alignItems: "center",
     justifyContent: "center",
   },
   dayText: {
-    fontSize: 12,
+    fontSize: 13,
+    lineHeight: 20,
     fontFamily: "Cairo_700Bold",
+    textAlign: "center",
+    includeFontPadding: false,
   },
 
   center: { flex: 1, alignItems: "center", justifyContent: "center", gap: 12 },

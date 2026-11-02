@@ -14,6 +14,7 @@ import { useColors } from "@/hooks/useColors";
 import type { ThemePalette } from "@/constants/colors";
 
 const ROW_RTL = I18nManager.isRTL ? "row" : "row-reverse";
+const ALIGN_RIGHT = I18nManager.isRTL ? "flex-start" : "flex-end";
 const USER_COMMENTS_KEY = "nova-user-comments-log";
 
 /* ── Types ── */
@@ -46,18 +47,19 @@ function timeAgo(value: string | number) {
   return new Date(timestamp).toLocaleDateString("ar-EG");
 }
 
-function Avatar({ username, avatarUrl }: { username: string; avatarUrl?: string | null }) {
+function Avatar({ username, avatarUrl, size = 36 }: { username: string; avatarUrl?: string | null; size?: number }) {
   const colors = useColors();
   const s = useMemo(() => createCommentStyles(colors), [colors]);
   const [imageFailed, setImageFailed] = useState(false);
   const char = (username || "م")[0].toUpperCase();
   const hue = (username.charCodeAt(0) * 37) % 360;
+  const br = size / 2;
   if (avatarUrl && !imageFailed) {
-    return <Image source={{ uri: avatarUrl }} onError={() => setImageFailed(true)} style={s.avatar} />;
+    return <Image source={{ uri: avatarUrl }} onError={() => setImageFailed(true)} style={[s.avatar, { width: size, height: size, borderRadius: br }]} />;
   }
   return (
-    <View style={[s.avatar, { backgroundColor: `hsl(${hue},55%,35%)` }]}>
-      <Text style={s.avatarText}>{char}</Text>
+    <View style={[s.avatar, { width: size, height: size, borderRadius: br, backgroundColor: `hsl(${hue},60%,36%)` }]}>
+      <Text style={[s.avatarText, { fontSize: Math.round(size * 0.38) }]}>{char}</Text>
     </View>
   );
 }
@@ -68,7 +70,7 @@ export default function CommentsPage() {
   const colors = useColors();
   const s = useMemo(() => createCommentStyles(colors), [colors]);
   const tvMode = isTvDevice();
-  const params = useLocalSearchParams<{ animeId?: string; tmdbId?: string; ep?: string; title?: string; type?: string }>();
+  const params = useLocalSearchParams<{ animeId?: string; tmdbId?: string; ep?: string; title?: string; type?: string; highlightId?: string; commentId?: string }>();
 
   const animeId = params.animeId ? parseInt(params.animeId) : undefined;
   const tmdbId  = params.tmdbId || undefined;
@@ -152,7 +154,10 @@ export default function CommentsPage() {
       if (animeId) body.animeId = animeId;
       if (tmdbId)  body.tmdbId = tmdbId;
       if (epNum != null) body.episodeNumber = epNum;
-      if (replyTo) { body.parentId = replyTo.id; body.replyToUsername = replyTo.username; }
+      if (replyTo) {
+        body.parentId = replyTo.parentId || replyTo.id;
+        body.replyToUsername = replyTo.displayName || replyTo.username;
+      }
 
       const r = await secureFetch(`${getBaseUrl()}/api/comments`, {
         method: "POST",
@@ -219,44 +224,104 @@ export default function CommentsPage() {
 
   const renderComment = (c: Comment, isReply = false) => {
     const isHighlighted = String(c.id) === String(highlightId);
+    const childReplies = isReply ? [] : replies(c.id);
+    const authorName = c.displayName || c.username || "مستخدم";
+
     return (
-      <View key={c.id} style={[
-        s.commentWrap,
-        isReply && s.replyWrap,
-        isHighlighted && { borderColor: "#06b6d4", borderWidth: 2, backgroundColor: "rgba(6, 182, 212, 0.16)", borderRadius: 14 }
-      ]}>
-        {isReply && <View style={s.replyLine} />}
-        <Avatar username={c.displayName || c.username} avatarUrl={c.avatarUrl} />
-        <View style={{ flex: 1, gap: 4 }}>
-          <View style={s.commentMeta}>
-            <Text style={s.commentUser}>{c.displayName || c.username}</Text>
-            {c.username && c.displayName && c.username !== c.displayName && (
-              <Text style={s.commentHandle}>@{c.username}</Text>
-            )}
-            {c.replyToUsername && <Text style={s.replyTag}>↩ {c.replyToUsername}</Text>}
-            <Text style={s.commentTime}>{timeAgo(c.createdAt)}</Text>
-          </View>
-          <Text style={s.commentText}>{c.text}</Text>
-          <View style={s.commentActions}>
-            <Pressable onPress={() => toggleLike(c)} focusable={tvMode}
-              style={({ focused }) => [s.actionBtn, tvMode && tvFocusStyle(focused)]} disabled={liking.has(c.id)}>
-              <Ionicons name="heart" size={14} color={c.liked ? colors.destructive : colors.textMuted} />
-              {c.likes > 0 && <Text style={[s.actionBtnText, c.liked && { color: colors.destructive }]}>{c.likes}</Text>}
-            </Pressable>
-            <Pressable onPress={() => { setReplyTo(c); setTimeout(() => inputRef.current?.focus(), 100); }} focusable={tvMode}
-              style={({ focused }) => [s.actionBtn, tvMode && tvFocusStyle(focused)]}>
-              <Ionicons name="return-up-back" size={14} color={colors.accent} />
-              <Text style={[s.actionBtnText, { color: colors.accent }]}>رد</Text>
-            </Pressable>
-            {c.userId === myUserId && (
-              <Pressable onPress={() => deleteComment(c)} focusable={tvMode}
-                style={({ focused }) => [s.actionBtn, tvMode && tvFocusStyle(focused)]}>
-                <Ionicons name="trash" size={13} color={colors.destructive} />
+      <View
+        key={c.id}
+        style={[
+          s.commentCard,
+          isReply && s.replyCard,
+          isHighlighted && {
+            borderColor: "#06b6d4",
+            borderWidth: 1.5,
+            backgroundColor: "rgba(6, 182, 212, 0.14)",
+          },
+        ]}
+      >
+        <View style={s.commentRow}>
+          <Avatar username={authorName} avatarUrl={c.avatarUrl} size={isReply ? 30 : 38} />
+
+          <View style={s.commentBodyCol}>
+            {/* Header Row: User Info on Right, Time on Left */}
+            <View style={s.commentHeaderRow}>
+              <View style={s.commentUserGroup}>
+                <Text style={s.commentUser} numberOfLines={1}>{authorName}</Text>
+                {c.username && c.displayName && c.username !== c.displayName && (
+                  <Text style={s.commentHandle}>@{c.username}</Text>
+                )}
+                {c.replyToUsername && (
+                  <View style={s.replyToBadge}>
+                    <Ionicons name="return-down-back" size={11} color={colors.accent} />
+                    <Text style={s.replyTag}>{c.replyToUsername}</Text>
+                  </View>
+                )}
+              </View>
+              <Text style={s.commentTime}>{timeAgo(c.createdAt)}</Text>
+            </View>
+
+            {/* Comment Text */}
+            <View style={s.commentTextWrap}>
+              <Text style={s.commentText}>{c.text}</Text>
+            </View>
+
+            {/* Actions Row */}
+            <View style={s.commentActions}>
+              <Pressable
+                onPress={() => toggleLike(c)}
+                focusable={tvMode}
+                disabled={liking.has(c.id)}
+                style={({ focused }) => [
+                  s.actionPill,
+                  c.liked && s.actionPillLiked,
+                  tvMode && tvFocusStyle(focused),
+                ]}
+              >
+                <Ionicons
+                  name={c.liked ? "heart" : "heart-outline"}
+                  size={13}
+                  color={c.liked ? "#f43f5e" : colors.textMuted}
+                />
+                <Text style={[s.actionBtnText, c.liked && { color: "#f43f5e" }]}>
+                  {c.likes > 0 ? String(c.likes) : "إعجاب"}
+                </Text>
               </Pressable>
-            )}
+
+              <Pressable
+                onPress={() => {
+                  setReplyTo(c);
+                  setTimeout(() => inputRef.current?.focus(), 100);
+                }}
+                focusable={tvMode}
+                style={({ focused }) => [s.actionPill, s.actionPillReply, tvMode && tvFocusStyle(focused)]}
+              >
+                <Ionicons name="chatbubble-outline" size={12} color={colors.accent} />
+                <Text style={[s.actionBtnText, { color: colors.accent }]}>رد</Text>
+              </Pressable>
+
+              {c.userId === myUserId && (
+                <Pressable
+                  onPress={() => deleteComment(c)}
+                  focusable={tvMode}
+                  style={({ focused }) => [s.actionPill, s.actionPillDelete, tvMode && tvFocusStyle(focused)]}
+                >
+                  <Ionicons name="trash-outline" size={13} color={colors.destructive} />
+                </Pressable>
+              )}
+            </View>
           </View>
-          {replies(c.id).map(r => renderComment(r, true))}
         </View>
+
+        {/* Nested Replies Thread */}
+        {childReplies.length > 0 && (
+          <View style={s.repliesThreadWrap}>
+            <View style={s.replyThreadBar} />
+            <View style={s.repliesList}>
+              {childReplies.map(r => renderComment(r, true))}
+            </View>
+          </View>
+        )}
       </View>
     );
   };
@@ -265,13 +330,17 @@ export default function CommentsPage() {
     <View style={[s.container, { paddingTop: Platform.OS === "web" ? 0 : insets.top }]}>
       {/* Header */}
       <View style={s.header}>
-        <Pressable onPress={() => router.canGoBack() ? router.back() : router.replace("/(tabs)" as any)} focusable={tvMode}
-          style={({ focused }) => [s.backBtn, tvMode && tvFocusStyle(focused)]}>
-          <Ionicons name="chevron-back" size={20} color={colors.textPrimary} style={{ transform: [{ scaleX: -1 }] }} />
+        <Pressable
+          onPress={() => router.canGoBack() ? router.back() : router.replace("/(tabs)" as any)}
+          focusable={tvMode}
+          style={({ focused }) => [s.backBtn, tvMode && tvFocusStyle(focused)]}
+        >
+          <Ionicons name="chevron-forward" size={20} color={colors.textPrimary} />
         </Pressable>
-        <View style={{ flex: 1, alignItems: "flex-end" }}>
+
+        <View style={s.headerCenterCol}>
           <View style={s.headerTitleRow}>
-            <Ionicons name="chatbubbles" size={16} color={colors.accent} />
+            <Ionicons name="chatbubbles" size={17} color={colors.accent} />
             <Text style={s.headerTitle} numberOfLines={1}>التعليقات</Text>
             {comments.length > 0 && (
               <View style={s.countBadge}>
@@ -283,6 +352,7 @@ export default function CommentsPage() {
             <Text style={s.headerSub} numberOfLines={1}>{pageTitle}</Text>
           )}
         </View>
+
         <Pressable onPress={loadComments} style={s.refreshBtn}>
           <Ionicons name="refresh" size={18} color={colors.textMuted} />
         </Pressable>
@@ -292,13 +362,13 @@ export default function CommentsPage() {
       {loading ? (
         <View style={s.center}>
           <ActivityIndicator color={colors.accent} size="large" />
-          <Text style={s.loadingText}>جارٍ التحميل...</Text>
+          <Text style={s.loadingText}>جارٍ تحميل التعليقات...</Text>
         </View>
       ) : comments.length === 0 ? (
         <View style={s.center}>
-          <Ionicons name="chatbubble-ellipses" size={52} color={colors.accentBorder} />
+          <Ionicons name="chatbubble-ellipses-outline" size={54} color={colors.accentBorder} />
           <Text style={s.emptyText}>لا توجد تعليقات بعد</Text>
-          <Text style={s.emptySubtext}>كن أول من يعلّق على هذه الحلقة!</Text>
+          <Text style={s.emptySubtext}>كن أول من يشارك رأيه حول هذا العمل!</Text>
         </View>
       ) : (
         <FlatList
@@ -314,32 +384,41 @@ export default function CommentsPage() {
       {/* Input */}
       <KeyboardAvoidingView
         behavior={Platform.OS === "ios" ? "padding" : "height"}
-        style={[s.inputArea, { paddingBottom: insets.bottom + 8 }]}
+        style={[s.inputArea, { paddingBottom: insets.bottom + 10 }]}
       >
         {replyTo && (
           <View style={s.replyBanner}>
-            <Ionicons name="return-up-back" size={13} color={colors.accent} />
-            <Text style={s.replyBannerText} numberOfLines={1}>رد على {replyTo.username}: {replyTo.text}</Text>
-            <Pressable onPress={() => setReplyTo(null)}>
-              <Ionicons name="close-circle" size={15} color={colors.textMuted} />
+            <View style={s.replyBannerRight}>
+              <Ionicons name="return-down-back" size={15} color={colors.accent} />
+              <View style={{ flex: 1, alignItems: ALIGN_RIGHT }}>
+                <Text style={s.replyBannerTitle}>
+                  الرد على {replyTo.displayName || replyTo.username}
+                </Text>
+                <Text style={s.replyBannerText} numberOfLines={1}>
+                  {replyTo.text}
+                </Text>
+              </View>
+            </View>
+            <Pressable onPress={() => setReplyTo(null)} style={s.replyBannerClose}>
+              <Ionicons name="close" size={16} color={colors.textSecondary} />
             </Pressable>
           </View>
         )}
         {postError && (
           <View style={s.errorBanner}>
-            <Ionicons name="alert-circle" size={13} color={colors.destructive} />
+            <Ionicons name="alert-circle" size={14} color={colors.destructive} />
             <Text style={s.errorBannerText}>{postError}</Text>
             <Pressable onPress={() => setPostError(null)}>
-              <Ionicons name="close" size={13} color={colors.textMuted} />
+              <Ionicons name="close" size={14} color={colors.textMuted} />
             </Pressable>
           </View>
         )}
         <View style={s.inputRow}>
-          <Avatar username={myUsername || myDisplayName || "م"} />
+          <Avatar username={myDisplayName || myUsername || "م"} size={38} />
           <TextInput
             ref={inputRef}
-            style={s.input}
-            placeholder={replyTo ? `الرد على ${replyTo.username}…` : "أضف تعليقاً…"}
+            style={[s.input, replyTo && { borderColor: colors.accentBorder }]}
+            placeholder={replyTo ? `اكتب ردك على ${replyTo.displayName || replyTo.username}...` : "أضف تعليقاً..."}
             placeholderTextColor={colors.textMuted}
             value={text}
             onChangeText={t => { setText(t); setPostError(null); }}
@@ -350,12 +429,25 @@ export default function CommentsPage() {
           <Pressable
             onPress={postComment}
             disabled={!text.trim() || posting}
-            style={[s.sendBtn, (!text.trim() || posting) && s.sendBtnDisabled]}
+            style={({ pressed }) => [
+              s.sendBtn,
+              (!text.trim() || posting) && s.sendBtnDisabled,
+              pressed && { opacity: 0.85 },
+            ]}
           >
-            {posting
-              ? <ActivityIndicator size="small" color={colors.primaryForeground} />
-              : <Ionicons name="send" size={16} color={colors.primaryForeground} />
-            }
+            {posting ? (
+              <ActivityIndicator size="small" color="#ffffff" />
+            ) : (
+              <>
+                <Text style={s.sendBtnLabel}>إرسال</Text>
+                <Ionicons
+                  name="paper-plane"
+                  size={14}
+                  color="#ffffff"
+                  style={{ transform: [{ scaleX: -1 }] }}
+                />
+              </>
+            )}
           </Pressable>
         </View>
       </KeyboardAvoidingView>
@@ -365,84 +457,319 @@ export default function CommentsPage() {
 
 function createCommentStyles(colors: ThemePalette) {
   return StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.background },
-  header: {
-    flexDirection: ROW_RTL, alignItems: "center", gap: 10,
-    paddingHorizontal: 14, paddingVertical: 12,
-    borderBottomWidth: 1, borderBottomColor: colors.border,
-    backgroundColor: colors.background,
-  },
-  backBtn: {
-    width: 36, height: 36, borderRadius: 14,
-    backgroundColor: colors.surfaceElevated,
-    alignItems: "center", justifyContent: "center",
-  },
-  headerTitleRow: { flexDirection: ROW_RTL, alignItems: "center", gap: 6 },
-  headerTitle: { fontSize: 16, fontFamily: "Cairo_800ExtraBold", color: colors.textPrimary },
-  headerSub: { fontSize: 10, fontFamily: "Cairo_400Regular", color: colors.textMuted, marginTop: 1 },
-  countBadge: {
-    backgroundColor: colors.accentSurface, borderRadius: 10,
-    paddingHorizontal: 7, paddingVertical: 2,
-    borderWidth: 1, borderColor: colors.accentBorder,
-  },
-  countBadgeText: { fontSize: 10, fontFamily: "Cairo_700Bold", color: colors.accent },
-  refreshBtn: { width: 36, height: 36, alignItems: "center", justifyContent: "center" },
-  center: { flex: 1, alignItems: "center", justifyContent: "center", gap: 12 },
-  loadingText: { fontSize: 12, fontFamily: "Cairo_400Regular", color: colors.textMuted },
-  emptyText: { fontSize: 16, fontFamily: "Cairo_700Bold", color: colors.textSecondary },
-  emptySubtext: { fontSize: 12, fontFamily: "Cairo_400Regular", color: colors.textMuted },
-  listContent: { padding: 16, gap: 14, paddingBottom: 12 },
-  commentWrap: { flexDirection: "row", gap: 10, padding: 12, borderRadius: 16, backgroundColor: colors.card, borderWidth: 1, borderColor: colors.border },
-  replyWrap: { marginTop: 10, marginRight: 12 },
-  replyLine: {
-    position: "absolute", left: -8, top: 0, bottom: 0,
-    width: 2, backgroundColor: colors.accentBorder, borderRadius: 1,
-  },
-  avatar: {
-    width: 34, height: 34, borderRadius: 17,
-    alignItems: "center", justifyContent: "center", flexShrink: 0,
-  },
-  avatarText: { fontSize: 13, fontFamily: "Cairo_800ExtraBold", color: "#fff" },
-  commentMeta: { flexDirection: "row", alignItems: "center", gap: 6, flexWrap: "wrap" },
-  commentUser: { fontSize: 12, fontFamily: "Cairo_800ExtraBold", color: colors.textPrimary },
-  commentHandle: { fontSize: 10, color: colors.textSecondary, fontFamily: "Cairo_400Regular" },
-  replyTag: { fontSize: 10, color: colors.accent, fontFamily: "Cairo_700Bold" },
-  commentTime: { fontSize: 10, color: colors.textMuted, fontFamily: "Cairo_400Regular" },
-  commentText: {
-    fontSize: 13, color: colors.textPrimary, lineHeight: 21,
-    fontFamily: "Cairo_400Regular", textAlign: "right",
-  },
-  commentActions: { flexDirection: "row", gap: 14, marginTop: 2 },
-  actionBtn: { flexDirection: "row", alignItems: "center", gap: 4 },
-  actionBtnText: { fontSize: 11, fontFamily: "Cairo_700Bold", color: colors.textMuted },
-  inputArea: {
-    borderTopWidth: 1, borderTopColor: colors.border,
-    padding: 12, gap: 8, backgroundColor: colors.background,
-  },
-  replyBanner: {
-    flexDirection: "row", alignItems: "center", gap: 6,
-    backgroundColor: colors.accentSurface, borderRadius: 10,
-    borderWidth: 1, borderColor: colors.accentBorder, padding: 8,
-  },
-  replyBannerText: { flex: 1, fontSize: 11, color: colors.accent, fontFamily: "Cairo_400Regular" },
-  errorBanner: {
-    flexDirection: "row", alignItems: "center", gap: 6,
-    backgroundColor: colors.destructiveSurface, borderRadius: 10,
-    borderWidth: 1, borderColor: colors.destructiveBorder, padding: 8,
-  },
-  errorBannerText: { flex: 1, fontSize: 11, color: colors.destructive, fontFamily: "Cairo_400Regular" },
-  inputRow: { flexDirection: "row", alignItems: "flex-end", gap: 8 },
-  input: {
-    flex: 1, minHeight: 42, maxHeight: 120,
-    backgroundColor: colors.input,
-    borderRadius: 14, borderWidth: 1, borderColor: colors.border,
-    paddingHorizontal: 12, paddingVertical: 8,
-    fontSize: 13, color: colors.textPrimary, fontFamily: "Cairo_400Regular",
-  },
-  sendBtn: {
-    width: 42, height: 42, backgroundColor: colors.primary,
-    borderRadius: 14, alignItems: "center", justifyContent: "center",
-  },
-  sendBtnDisabled: { opacity: 0.45 },
+    container: { flex: 1, backgroundColor: colors.background },
+    header: {
+      flexDirection: ROW_RTL,
+      alignItems: "center",
+      justifyContent: "space-between",
+      gap: 10,
+      paddingHorizontal: 14,
+      paddingVertical: 12,
+      borderBottomWidth: 1,
+      borderBottomColor: colors.border,
+      backgroundColor: colors.background,
+    },
+    backBtn: {
+      width: 38,
+      height: 38,
+      borderRadius: 12,
+      backgroundColor: colors.surfaceElevated,
+      borderWidth: 1,
+      borderColor: colors.border,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    headerCenterCol: {
+      flex: 1,
+      alignItems: ALIGN_RIGHT,
+      justifyContent: "center",
+    },
+    headerTitleRow: {
+      flexDirection: ROW_RTL,
+      alignItems: "center",
+      gap: 7,
+    },
+    headerTitle: {
+      fontSize: 17,
+      fontFamily: "Cairo_800ExtraBold",
+      color: colors.textPrimary,
+      textAlign: "right",
+    },
+    headerSub: {
+      fontSize: 11,
+      fontFamily: "Cairo_600SemiBold",
+      color: colors.textMuted,
+      marginTop: 1,
+      textAlign: "right",
+    },
+    countBadge: {
+      backgroundColor: colors.accentSurface,
+      borderRadius: 10,
+      paddingHorizontal: 8,
+      paddingVertical: 2,
+      borderWidth: 1,
+      borderColor: colors.accentBorder,
+    },
+    countBadgeText: {
+      fontSize: 11,
+      fontFamily: "Cairo_700Bold",
+      color: colors.accent,
+    },
+    refreshBtn: {
+      width: 38,
+      height: 38,
+      borderRadius: 12,
+      backgroundColor: colors.surface,
+      borderWidth: 1,
+      borderColor: colors.border,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    center: { flex: 1, alignItems: "center", justifyContent: "center", gap: 12, paddingHorizontal: 24 },
+    loadingText: { fontSize: 13, fontFamily: "Cairo_600SemiBold", color: colors.textMuted },
+    emptyText: { fontSize: 16, fontFamily: "Cairo_700Bold", color: colors.textSecondary },
+    emptySubtext: { fontSize: 12, fontFamily: "Cairo_400Regular", color: colors.textMuted, textAlign: "center" },
+    listContent: { padding: 14, gap: 12, paddingBottom: 20 },
+    commentCard: {
+      padding: 13,
+      borderRadius: 18,
+      backgroundColor: colors.card,
+      borderWidth: 1,
+      borderColor: colors.border,
+    },
+    replyCard: {
+      padding: 11,
+      borderRadius: 14,
+      backgroundColor: "rgba(255, 255, 255, 0.03)",
+      borderColor: "rgba(255, 255, 255, 0.07)",
+    },
+    commentRow: {
+      flexDirection: ROW_RTL,
+      alignItems: "flex-start",
+      gap: 10,
+    },
+    commentBodyCol: {
+      flex: 1,
+      alignItems: ALIGN_RIGHT,
+      gap: 5,
+    },
+    commentHeaderRow: {
+      flexDirection: ROW_RTL,
+      alignItems: "center",
+      justifyContent: "space-between",
+      width: "100%",
+      gap: 8,
+    },
+    commentUserGroup: {
+      flexDirection: ROW_RTL,
+      alignItems: "center",
+      flexWrap: "wrap",
+      gap: 6,
+      flex: 1,
+    },
+    avatar: {
+      alignItems: "center",
+      justifyContent: "center",
+      flexShrink: 0,
+    },
+    avatarText: { fontFamily: "Cairo_800ExtraBold", color: "#fff" },
+    commentUser: {
+      fontSize: 13,
+      fontFamily: "Cairo_800ExtraBold",
+      color: colors.textPrimary,
+      textAlign: "right",
+    },
+    commentHandle: {
+      fontSize: 10.5,
+      color: colors.textSecondary,
+      fontFamily: "Cairo_400Regular",
+    },
+    replyToBadge: {
+      flexDirection: ROW_RTL,
+      alignItems: "center",
+      gap: 3,
+      paddingHorizontal: 7,
+      paddingVertical: 1,
+      borderRadius: 8,
+      backgroundColor: colors.accentSurface,
+    },
+    replyTag: {
+      fontSize: 10,
+      color: colors.accent,
+      fontFamily: "Cairo_700Bold",
+    },
+    commentTime: {
+      fontSize: 10.5,
+      color: colors.textMuted,
+      fontFamily: "Cairo_400Regular",
+    },
+    commentTextWrap: {
+      width: "100%",
+      alignItems: ALIGN_RIGHT,
+    },
+    commentText: {
+      width: "100%",
+      fontSize: 13.5,
+      color: colors.textPrimary,
+      lineHeight: 22,
+      fontFamily: "Cairo_400Regular",
+      textAlign: "right",
+      writingDirection: "rtl",
+    },
+    commentActions: {
+      flexDirection: ROW_RTL,
+      alignItems: "center",
+      gap: 8,
+      marginTop: 4,
+    },
+    actionPill: {
+      flexDirection: ROW_RTL,
+      alignItems: "center",
+      gap: 5,
+      paddingHorizontal: 10,
+      paddingVertical: 4,
+      borderRadius: 10,
+      backgroundColor: colors.surface,
+      borderWidth: 1,
+      borderColor: colors.border,
+    },
+    actionPillLiked: {
+      backgroundColor: "rgba(244, 63, 94, 0.12)",
+      borderColor: "rgba(244, 63, 94, 0.32)",
+    },
+    actionPillReply: {
+      backgroundColor: colors.accentSurface,
+      borderColor: colors.accentBorder,
+    },
+    actionPillDelete: {
+      backgroundColor: "rgba(239, 68, 68, 0.1)",
+      borderColor: "rgba(239, 68, 68, 0.25)",
+      paddingHorizontal: 8,
+    },
+    actionBtnText: {
+      fontSize: 11,
+      fontFamily: "Cairo_700Bold",
+      color: colors.textSecondary,
+    },
+    repliesThreadWrap: {
+      flexDirection: ROW_RTL,
+      marginTop: 10,
+      gap: 10,
+      width: "100%",
+    },
+    replyThreadBar: {
+      width: 2.5,
+      borderRadius: 2,
+      backgroundColor: colors.accentBorder,
+      marginVertical: 4,
+    },
+    repliesList: {
+      flex: 1,
+      gap: 8,
+    },
+    inputArea: {
+      borderTopWidth: 1,
+      borderTopColor: colors.border,
+      paddingHorizontal: 12,
+      paddingTop: 10,
+      gap: 8,
+      backgroundColor: colors.surface,
+    },
+    replyBanner: {
+      flexDirection: ROW_RTL,
+      alignItems: "center",
+      justifyContent: "space-between",
+      gap: 8,
+      backgroundColor: colors.accentSurface,
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: colors.accentBorder,
+      paddingHorizontal: 12,
+      paddingVertical: 8,
+    },
+    replyBannerRight: {
+      flex: 1,
+      flexDirection: ROW_RTL,
+      alignItems: "center",
+      gap: 8,
+    },
+    replyBannerTitle: {
+      fontSize: 11,
+      fontFamily: "Cairo_700Bold",
+      color: colors.accent,
+      textAlign: "right",
+    },
+    replyBannerText: {
+      fontSize: 11,
+      color: colors.textSecondary,
+      fontFamily: "Cairo_400Regular",
+      textAlign: "right",
+    },
+    replyBannerClose: {
+      width: 26,
+      height: 26,
+      borderRadius: 13,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: "rgba(255,255,255,0.06)",
+    },
+    errorBanner: {
+      flexDirection: ROW_RTL,
+      alignItems: "center",
+      gap: 6,
+      backgroundColor: colors.destructiveSurface,
+      borderRadius: 10,
+      borderWidth: 1,
+      borderColor: colors.destructiveBorder,
+      padding: 8,
+    },
+    errorBannerText: {
+      flex: 1,
+      fontSize: 11,
+      color: colors.destructive,
+      fontFamily: "Cairo_600SemiBold",
+      textAlign: "right",
+    },
+    inputRow: {
+      flexDirection: ROW_RTL,
+      alignItems: "flex-end",
+      gap: 8,
+    },
+    input: {
+      flex: 1,
+      minHeight: 42,
+      maxHeight: 110,
+      backgroundColor: colors.input,
+      borderRadius: 14,
+      borderWidth: 1,
+      borderColor: colors.border,
+      paddingHorizontal: 13,
+      paddingVertical: 9,
+      fontSize: 13,
+      color: colors.textPrimary,
+      fontFamily: "Cairo_400Regular",
+      textAlign: "right",
+      writingDirection: "rtl",
+    },
+    sendBtn: {
+      minHeight: 42,
+      paddingHorizontal: 14,
+      flexDirection: ROW_RTL,
+      gap: 6,
+      backgroundColor: "#7c3aed",
+      borderRadius: 14,
+      alignItems: "center",
+      justifyContent: "center",
+      borderWidth: 1,
+      borderColor: "rgba(196, 181, 253, 0.35)",
+    },
+    sendBtnLabel: {
+      color: "#ffffff",
+      fontSize: 12,
+      fontFamily: "Cairo_700Bold",
+    },
+    sendBtnDisabled: {
+      opacity: 0.42,
+    },
   });
 }

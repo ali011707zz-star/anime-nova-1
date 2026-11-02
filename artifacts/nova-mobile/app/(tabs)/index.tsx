@@ -27,6 +27,36 @@ import {
 const SEASON_AR: Record<string, string> = {
   WINTER: "شتاء", SPRING: "ربيع", SUMMER: "صيف", FALL: "خريف",
 };
+
+const HOME_MANGA_QUERY = `
+query HomeManga($country: CountryCode) {
+  Page(page: 1, perPage: 16) {
+    media(type: MANGA, countryOfOrigin: $country, sort: [POPULARITY_DESC]) {
+      id
+      title { romaji english native }
+      synonyms
+      coverImage { large extraLarge }
+      averageScore chapters status countryOfOrigin
+    }
+  }
+}`;
+
+const HOME_MANGA_AR_TITLES: Record<number, string> = {
+  105398: "سولو ليفلينغ (الارتقاء المنفرد)",
+  30002: "بيرسيرك",
+  30013: "ون بيس",
+  85486: "أكاديميتي للأبطال",
+  87216: "قاتل الشياطين",
+  101517: "جوجوتسو كايسن",
+  105778: "رجل المنشار (تشينسو مان)",
+  97852: "كومي لا تستطيع التواصل",
+  74347: "ون بنش مان",
+  53390: "هجوم العمالقة",
+  30011: "ناروتو",
+  100448: "بداية بعد النهاية",
+  119257: "قارئ كل شيء",
+  86964: "برج الإله",
+};
 import { historyRoute, useApp } from "@/context/AppContext";
 import { getBaseUrl } from "@/utils/api";
 import { isTvDevice, tvFocusStyle, TvPressable as Pressable } from "@/utils/tv";
@@ -190,16 +220,63 @@ export default function HomeScreen() {
     return () => ctrl.abort();
   }, []);
 
-  /* ── Manga catalog from Supabase ── */
-  const [mangaItems, setMangaItems] = useState<any[]>([]);
+  /* ── سبيستون مدبلج (spacetoon) catalog ── */
+  const [spacetoonHomeItems, setSpacetoonHomeItems] = useState<any[]>([]);
   useEffect(() => {
     const ctrl = new AbortController();
-    fetch(`${getBaseUrl()}/api/manga/catalog?page=1`, { signal: ctrl.signal })
-      .then(r => r.json())
-      .then(d => { if (!ctrl.signal.aborted) setMangaItems(d.items || []); })
-      .catch((e) => { if (e?.name !== "AbortError") console.warn("[Home] manga/catalog fetch error"); });
+    fetch(`${getBaseUrl()}/api/dubbed/carateen/catalog?page=1&limit=18&provider=sp`, { signal: ctrl.signal })
+      .then((r) => r.json())
+      .then((d) => {
+        if (!ctrl.signal.aborted && Array.isArray(d.results)) {
+          setSpacetoonHomeItems(d.results.slice(0, 14));
+        }
+      })
+      .catch((e) => {
+        if (e?.name !== "AbortError") console.warn("[Home] spacetoon catalog fetch error");
+      });
     return () => ctrl.abort();
   }, []);
+
+  /* ── Manhwa (KR) & Manga (JP) from AniList ── */
+  const { data: manhwaData, refetch: refetchManhwa } = useQuery({
+    queryKey: ["homeManhwa"],
+    queryFn: () => anilistQuery<{ Page: { media: any[] } }>(HOME_MANGA_QUERY, { country: "KR" }),
+    staleTime: 10 * 60 * 1000,
+  });
+
+  const { data: jpMangaData, refetch: refetchJpManga } = useQuery({
+    queryKey: ["homeJpManga"],
+    queryFn: () => anilistQuery<{ Page: { media: any[] } }>(HOME_MANGA_QUERY, { country: "JP" }),
+    staleTime: 10 * 60 * 1000,
+  });
+
+  const manhwaItems = useMemo(() => {
+    const list = manhwaData?.Page?.media || [];
+    return list.map((m: any) => {
+      const arSyn = (m.synonyms || []).find((s: string) => /[\u0600-\u06FF]/.test(s));
+      return {
+        id: m.id,
+        title: HOME_MANGA_AR_TITLES[m.id] || arSyn || m.title?.english || m.title?.romaji || "مانهوا",
+        subtitle: m.title?.english || m.title?.romaji || "",
+        poster: m.coverImage?.extraLarge || m.coverImage?.large || "",
+        type: "مانهوا كورية",
+      };
+    });
+  }, [manhwaData]);
+
+  const mangaItems = useMemo(() => {
+    const list = jpMangaData?.Page?.media || [];
+    return list.map((m: any) => {
+      const arSyn = (m.synonyms || []).find((s: string) => /[\u0600-\u06FF]/.test(s));
+      return {
+        id: m.id,
+        title: HOME_MANGA_AR_TITLES[m.id] || arSyn || m.title?.english || m.title?.romaji || "مانجا",
+        subtitle: m.title?.english || m.title?.romaji || "",
+        poster: m.coverImage?.extraLarge || m.coverImage?.large || "",
+        type: "مانجا مترجمة",
+      };
+    });
+  }, [jpMangaData]);
 
   /* ── Global Statistics from Supabase ── */
   const [globalStats, setGlobalStats] = useState<any>(null);
@@ -248,6 +325,7 @@ export default function HomeScreen() {
   const refresh = async () => {
     await Promise.all([
       refetchT(), refetchP(), refetchA(), refetchS(), refetchU(), refetchR(), refetchM(), refetchIsekai(),
+      refetchManhwa(), refetchJpManga(),
       refreshDubbed(true),
     ]);
   };
@@ -261,40 +339,22 @@ export default function HomeScreen() {
   const homeRows = useMemo<HomeRow[]>(
     () => [
       {
-        key: "trending",
-        title: "رائج الآن",
-        items: trendingList,
-        onSeeAll: () => router.push({ pathname: "/browse", params: { sort: "TRENDING_DESC" } } as any),
-      },
-      {
-        key: "seasonal",
-        title: `🌸 أنمي ${SEASON_AR[season] ?? "الموسم"} ${year}`,
-        items: seasonalList,
-        onSeeAll: () => router.push({ pathname: "/browse", params: { sort: "POPULARITY_DESC", season, year: String(year) } } as any),
-      },
-      {
         key: "airing",
         title: "يُعرض حالياً",
         items: airingList,
         onSeeAll: () => router.push({ pathname: "/browse", params: { status: "RELEASING", sort: "POPULARITY_DESC" } } as any),
       },
       {
-        key: "upcoming",
-        title: "⌛ قادماً قريباً",
-        items: upcomingList,
-        onSeeAll: () => router.push({ pathname: "/browse", params: { status: "NOT_YET_RELEASED", sort: "POPULARITY_DESC" } } as any),
-      },
-      {
-        key: "top-rated",
-        title: "🏆 الأعلى تقييماً على الإطلاق",
-        items: topRatedList,
-        onSeeAll: () => router.push({ pathname: "/browse", params: { sort: "SCORE_DESC" } } as any),
-      },
-      {
         key: "popular",
         title: "⭐ الأكثر شعبية",
         items: popularList,
         onSeeAll: () => router.push({ pathname: "/browse", params: { sort: "POPULARITY_DESC" } } as any),
+      },
+      {
+        key: "upcoming",
+        title: "⌛ قادماً قريباً",
+        items: upcomingList,
+        onSeeAll: () => router.push({ pathname: "/browse", params: { status: "NOT_YET_RELEASED", sort: "POPULARITY_DESC" } } as any),
       },
       {
         key: "movies",
@@ -309,7 +369,7 @@ export default function HomeScreen() {
         onSeeAll: () => router.push({ pathname: "/browse", params: { genre: "Isekai", genreAr: "إيسيكاي", sort: "POPULARITY_DESC" } } as any),
       },
     ],
-    [airingList, isekaiList, moviesList, popularList, router, seasonalList, topRatedList, trendingList, upcomingList, season, year],
+    [airingList, isekaiList, moviesList, popularList, router, upcomingList],
   );
 
   return (
@@ -595,7 +655,7 @@ export default function HomeScreen() {
               focusable={isTvLayout}
             >
               <View style={styles.sectionRightRow}>
-                <Text style={[styles.sectionTitle, isTvLayout && styles.tvSectionTitle, { color: colors.text }]}>أنيميشن مدبلج ومترجم ✨</Text>
+                <Text style={[styles.sectionTitle, isTvLayout && styles.tvSectionTitle, { color: colors.text }]}>انميشن مدبلج ✨</Text>
                 <View style={[styles.continueAccent, { backgroundColor: colors.homeAccent || "#06b6d4" }]} />
               </View>
             </SectionHeader>
@@ -787,7 +847,156 @@ export default function HomeScreen() {
           </View>
         )}
 
-        {/* ── Manga Section ── */}
+        {/* ── سبيستون مدبلج ── */}
+        {spacetoonHomeItems.length > 0 && (
+          <View style={{ marginBottom: 24 }}>
+            <SectionHeader
+              onSeeAll={() => router.push({ pathname: "/aw-dubbed" as any, params: { tab: "spacetoon" } })}
+              focusable={isTvLayout}
+            >
+              <View style={styles.sectionRightRow}>
+                <Text style={[styles.sectionTitle, isTvLayout && styles.tvSectionTitle, { color: colors.text }]}>سبيستون مدبلج 🚀</Text>
+                <View style={[styles.continueAccent, { backgroundColor: colors.homeAccent || "#06b6d4" }]} />
+              </View>
+            </SectionHeader>
+            <FlatList
+              data={spacetoonHomeItems}
+              horizontal
+              keyExtractor={(item, idx) => `sp-home:${item.id || idx}`}
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={{ paddingHorizontal: railSidePadding, gap: railGap }}
+              renderItem={({ item }) => {
+                const rawImg = String(item.image || "").trim();
+                const imgUri = rawImg
+                  ? rawImg.startsWith("http") ? rawImg : `${getBaseUrl()}${rawImg}`
+                  : null;
+                return (
+                  <Pressable
+                    onPress={() =>
+                      router.push({
+                        pathname: "/dubbed/[id]" as any,
+                        params: {
+                          id: `sp-${item.id}`,
+                          provider: "sp",
+                          showId: String(item.id),
+                          isMovie: item.isMovie ? "1" : "0",
+                          title: item.title,
+                          img: item.image || "",
+                        },
+                      })
+                    }
+                    focusable={isTvLayout}
+                    style={({ focused }) => [
+                      todayStyles.card,
+                      { width: railCardWidth, height: Math.round(railCardWidth * 1.46), backgroundColor: colors.card, borderColor: colors.border },
+                      isTvLayout && tvFocusStyle(focused),
+                    ]}
+                  >
+                    {imgUri ? (
+                      <Image source={{ uri: imgUri }} style={todayStyles.img} resizeMode="cover" resizeMethod="resize" fadeDuration={isTvLayout ? 0 : 100} />
+                    ) : (
+                      <View style={[todayStyles.img, { backgroundColor: colors.card, alignItems: "center", justifyContent: "center" }]}>
+                        <Ionicons name="planet-outline" size={28} color="rgba(255,255,255,0.2)" />
+                      </View>
+                    )}
+                    <View
+                      style={{
+                        position: "absolute",
+                        top: 8,
+                        right: 8,
+                        zIndex: 2,
+                        paddingHorizontal: 8,
+                        paddingVertical: 3,
+                        borderRadius: 7,
+                        backgroundColor: "#06b6d4",
+                      }}
+                    >
+                      <Text style={{ color: "#fff", fontFamily: "Cairo_700Bold", fontSize: isTvLayout ? 12 : 9 }}>
+                        سبيستون
+                      </Text>
+                    </View>
+                    <LinearGradient colors={["transparent", "rgba(0,0,0,0.92)"]} style={todayStyles.grad}>
+                      <Text style={todayStyles.title} numberOfLines={2}>{item.title}</Text>
+                    </LinearGradient>
+                  </Pressable>
+                );
+              }}
+              initialNumToRender={5}
+              maxToRenderPerBatch={5}
+              windowSize={3}
+              removeClippedSubviews={Platform.OS === "android" && !isTvLayout}
+            />
+          </View>
+        )}
+
+        {/* ── Manhwa Section (مانهوا) ── */}
+        {manhwaItems.length > 0 && (
+          <View style={{ marginBottom: 24 }}>
+            <SectionHeader
+              onSeeAll={() => router.push({ pathname: "/manga" as any, params: { tab: "manhwa" } })}
+              focusable={isTvLayout}
+            >
+              <View style={styles.sectionRightRow}>
+                <Text style={[styles.sectionTitle, isTvLayout && styles.tvSectionTitle, { color: colors.text }]}>مانهوا 🔥</Text>
+                <View style={[styles.continueAccent, { backgroundColor: "#f59e0b" }]} />
+              </View>
+            </SectionHeader>
+            <FlatList
+              data={manhwaItems}
+              horizontal
+              keyExtractor={(item) => `manhwa-${item.id}`}
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={{ paddingHorizontal: railSidePadding, gap: railGap }}
+              renderItem={({ item }) => (
+                <Pressable
+                  onPress={() => router.push(`/manga/${item.id}` as any)}
+                  focusable={isTvLayout}
+                  style={({ focused }) => [
+                    todayStyles.card,
+                    { width: railCardWidth, height: Math.round(railCardWidth * 1.46), backgroundColor: colors.card, borderColor: colors.border },
+                    isTvLayout && tvFocusStyle(focused),
+                  ]}
+                >
+                  {item.poster ? (
+                    <Image source={{ uri: item.poster }} style={todayStyles.img} resizeMode="cover" />
+                  ) : (
+                    <View style={[todayStyles.img, { backgroundColor: colors.card, alignItems: "center", justifyContent: "center" }]}>
+                      <Ionicons name="book-outline" size={28} color="rgba(255,255,255,0.2)" />
+                    </View>
+                  )}
+                  <View
+                    style={{
+                      position: "absolute",
+                      top: 8,
+                      right: 8,
+                      zIndex: 2,
+                      paddingHorizontal: 8,
+                      paddingVertical: 3,
+                      borderRadius: 7,
+                      backgroundColor: "rgba(245, 158, 11, 0.9)",
+                    }}
+                  >
+                    <Text style={{ color: "#09090b", fontFamily: "Cairo_700Bold", fontSize: isTvLayout ? 12 : 9 }}>
+                      مانهوا
+                    </Text>
+                  </View>
+                  <LinearGradient colors={["transparent", "rgba(0,0,0,0.92)"]} style={todayStyles.grad}>
+                    <Text style={todayStyles.title} numberOfLines={2}>{item.title}</Text>
+                    <Text style={{ color: "#fbbf24", fontSize: 9, fontFamily: "Cairo_700Bold", textAlign: "right" }}>
+                      {item.type}
+                    </Text>
+                  </LinearGradient>
+                </Pressable>
+              )}
+              initialNumToRender={5}
+              maxToRenderPerBatch={5}
+              windowSize={3}
+              removeClippedSubviews={Platform.OS === "android" && !isTvLayout}
+            />
+          </View>
+        )}
+
+        {/* ── Manga Section (مانجا مترجمة) ── */}
         {mangaItems.length > 0 && (
           <View style={{ marginBottom: 24 }}>
             <SectionHeader
@@ -802,14 +1011,18 @@ export default function HomeScreen() {
             <FlatList
               data={mangaItems}
               horizontal
-              keyExtractor={(item) => String(item.id)}
+              keyExtractor={(item) => `manga-${item.id}`}
               showsHorizontalScrollIndicator={false}
               contentContainerStyle={{ paddingHorizontal: railSidePadding, gap: railGap }}
               renderItem={({ item }) => (
                 <Pressable
-                  onPress={() => {}} // TODO: Manga detail page
+                  onPress={() => router.push(`/manga/${item.id}` as any)}
                   focusable={isTvLayout}
-                  style={({ focused }) => [todayStyles.card, { width: railCardWidth, height: Math.round(railCardWidth * 1.46), backgroundColor: colors.card, borderColor: colors.border }, isTvLayout && tvFocusStyle(focused)]}
+                  style={({ focused }) => [
+                    todayStyles.card,
+                    { width: railCardWidth, height: Math.round(railCardWidth * 1.46), backgroundColor: colors.card, borderColor: colors.border },
+                    isTvLayout && tvFocusStyle(focused),
+                  ]}
                 >
                   {item.poster ? (
                     <Image source={{ uri: item.poster }} style={todayStyles.img} resizeMode="cover" />
@@ -820,10 +1033,16 @@ export default function HomeScreen() {
                   )}
                   <LinearGradient colors={["transparent", "rgba(0,0,0,0.92)"]} style={todayStyles.grad}>
                     <Text style={todayStyles.title} numberOfLines={2}>{item.title}</Text>
-                    <Text style={{ color: colors.primary, fontSize: 9, fontFamily: "Cairo_700Bold" }}>{item.type || "مانجا"}</Text>
+                    <Text style={{ color: colors.primary, fontSize: 9, fontFamily: "Cairo_700Bold", textAlign: "right" }}>
+                      {item.type || "مانجا"}
+                    </Text>
                   </LinearGradient>
                 </Pressable>
               )}
+              initialNumToRender={5}
+              maxToRenderPerBatch={5}
+              windowSize={3}
+              removeClippedSubviews={Platform.OS === "android" && !isTvLayout}
             />
           </View>
         )}
