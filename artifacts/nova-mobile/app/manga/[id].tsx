@@ -97,9 +97,250 @@ function originLabel(source?: string, country?: string) {
   return "مانجا مترجمة";
 }
 
+type MangaPageData = {
+  url: string;
+  width?: number;
+  height?: number;
+};
+
 function formatChapterNumber(ch: MangaChapter): string {
   if (ch.numberStr) return String(ch.numberStr);
   return String(ch.number ?? "");
+}
+
+function buildWebtoonReaderHtml(
+  pages: MangaPageData[],
+  chapterLabel: string,
+  nextChapterLabel: string | null,
+  zoomPercent: number
+): string {
+  const safeZoom = Math.max(100, Math.min(250, zoomPercent || 100));
+  const pagesJson = JSON.stringify(pages.map((p) => p.url));
+  const safeChapterLabel = String(chapterLabel || "الفصل").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const safeNextLabel = nextChapterLabel
+    ? String(nextChapterLabel).replace(/</g, "&lt;").replace(/>/g, "&gt;")
+    : "";
+
+  return `<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, minimum-scale=1.0, maximum-scale=5.0, user-scalable=yes" />
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      -webkit-tap-highlight-color: transparent;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+    html, body {
+      width: 100%;
+      min-height: 100%;
+      background-color: #050507;
+      color: #f4f4f5;
+      font-family: system-ui, -apple-system, sans-serif;
+      overflow-x: auto;
+      overflow-y: auto;
+      -webkit-overflow-scrolling: touch;
+    }
+    #reader-container {
+      width: ${safeZoom}%;
+      margin: 0 auto;
+      display: flex;
+      flex-direction: column;
+      align-items: stretch;
+      background-color: #050507;
+    }
+    .page-slot {
+      width: 100%;
+      position: relative;
+      background-color: #09090d;
+      line-height: 0;
+      font-size: 0;
+      margin: 0;
+      padding: 0;
+    }
+    .page-slot.loading {
+      min-height: 320px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      border-bottom: 1px solid rgba(255,255,255,0.04);
+    }
+    .spinner {
+      width: 28px;
+      height: 28px;
+      border: 3px solid rgba(245, 158, 11, 0.22);
+      border-top-color: #F59E0B;
+      border-radius: 50%;
+      animation: spin 0.75s linear infinite;
+    }
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+    .page-status {
+      font-size: 12px;
+      line-height: 1.4;
+      color: #a1a1aa;
+      font-weight: 600;
+    }
+    .page-img {
+      width: 100% !important;
+      max-width: 100% !important;
+      height: auto !important;
+      display: block !important;
+      margin: 0 !important;
+      padding: 0 !important;
+      border: 0 !important;
+      image-rendering: -webkit-optimize-contrast;
+    }
+    .retry-btn {
+      margin-top: 6px;
+      padding: 8px 16px;
+      border-radius: 10px;
+      border: 0;
+      background: #F59E0B;
+      color: #09090B;
+      font-weight: 700;
+      font-size: 12px;
+      line-height: 1.4;
+    }
+    .end-footer {
+      width: 100%;
+      padding: 36px 18px 46px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 12px;
+      background: #09090d;
+      border-top: 1px solid rgba(255,255,255,0.08);
+      text-align: center;
+    }
+    .end-badge {
+      color: #FBBF24;
+      font-size: 15px;
+      font-weight: 700;
+    }
+    .next-btn {
+      padding: 12px 22px;
+      border-radius: 14px;
+      border: 0;
+      background: #F59E0B;
+      color: #09090B;
+      font-weight: 800;
+      font-size: 14px;
+      box-shadow: 0 6px 18px rgba(245, 158, 11, 0.28);
+    }
+  </style>
+</head>
+<body>
+  <div id="reader-container"></div>
+  <div class="end-footer">
+    <div class="end-badge">✓ نهاية ${safeChapterLabel}</div>
+    ${
+      safeNextLabel
+        ? `<button class="next-btn" onclick="goNextChapter()">الانتقال إلى الفصل التالي (${safeNextLabel}) ←</button>`
+        : ""
+    }
+  </div>
+  <script>
+    const pages = ${pagesJson};
+    const container = document.getElementById("reader-container");
+    let currentZoom = ${safeZoom};
+    let lastTapTime = 0;
+
+    function goNextChapter() {
+      if (window.ReactNativeWebView && window.ReactNativeWebView.postMessage) {
+        window.ReactNativeWebView.postMessage("NEXT_CHAPTER");
+      }
+    }
+
+    // Double-tap anywhere on the reader to toggle 100% <-> 175% width zoom
+    document.addEventListener("touchend", function (e) {
+      if (e.touches && e.touches.length > 0) return;
+      const now = Date.now();
+      if (now - lastTapTime < 280) {
+        currentZoom = currentZoom > 100 ? 100 : 175;
+        container.style.width = currentZoom + "%";
+        if (window.ReactNativeWebView && window.ReactNativeWebView.postMessage) {
+          window.ReactNativeWebView.postMessage("ZOOM:" + currentZoom);
+        }
+        lastTapTime = 0;
+      } else {
+        lastTapTime = now;
+      }
+    }, { passive: true });
+
+    pages.forEach((url, index) => {
+      const slot = document.createElement("div");
+      slot.className = "page-slot loading";
+
+      const spinner = document.createElement("div");
+      spinner.className = "spinner";
+      const status = document.createElement("div");
+      status.className = "page-status";
+      status.textContent = "صفحة " + (index + 1) + " من " + pages.length;
+
+      slot.appendChild(spinner);
+      slot.appendChild(status);
+
+      const img = document.createElement("img");
+      img.className = "page-img";
+      img.decoding = "async";
+      img.loading = index < 4 ? "eager" : "lazy";
+      img.style.display = "none";
+
+      let retries = 0;
+      function loadImg(cacheBust) {
+        img.src = cacheBust
+          ? url + (url.indexOf("?") !== -1 ? "&" : "?") + "retry=" + cacheBust
+          : url;
+      }
+
+      img.onload = function () {
+        slot.className = "page-slot";
+        spinner.remove();
+        status.remove();
+        img.style.display = "block";
+      };
+
+      img.onerror = function () {
+        if (retries < 2) {
+          retries++;
+          setTimeout(() => loadImg(retries + "_" + Date.now()), 500 * retries);
+          return;
+        }
+        spinner.style.display = "none";
+        status.textContent = "تعذر تحميل الصفحة " + (index + 1);
+        let btn = slot.querySelector(".retry-btn");
+        if (!btn) {
+          btn = document.createElement("button");
+          btn.className = "retry-btn";
+          btn.textContent = "إعادة المحاولة";
+          btn.onclick = function (ev) {
+            ev.stopPropagation();
+            retries = 0;
+            spinner.style.display = "block";
+            status.textContent = "جاري إعادة تحميل الصفحة " + (index + 1) + "...";
+            btn.remove();
+            loadImg("manual_" + Date.now());
+          };
+          slot.appendChild(btn);
+        }
+      };
+
+      slot.appendChild(img);
+      container.appendChild(slot);
+      loadImg("");
+    });
+  </script>
+</body>
+</html>`;
 }
 
 function MangaPageItem({
@@ -107,13 +348,21 @@ function MangaPageItem({
   pageIndex,
   totalPages,
   screenWidth,
+  initialWidth,
+  initialHeight,
 }: {
   uri: string;
   pageIndex: number;
   totalPages: number;
   screenWidth: number;
+  initialWidth?: number;
+  initialHeight?: number;
 }) {
-  const [aspectRatio, setAspectRatio] = useState<number>(0.7);
+  const initialRatio =
+    initialWidth && initialHeight && initialWidth > 0 && initialHeight > 0
+      ? initialWidth / initialHeight
+      : 0.7;
+  const [aspectRatio, setAspectRatio] = useState<number>(initialRatio);
   const [loaded, setLoaded] = useState(false);
   const [failed, setFailed] = useState(false);
   const [retrySeed, setRetrySeed] = useState(0);
@@ -126,7 +375,7 @@ function MangaPageItem({
     setFailed(false);
   }, [effectiveUri]);
 
-  const computedHeight = Math.max(240, Math.round(screenWidth / Math.max(0.18, aspectRatio)));
+  const computedHeight = Math.max(240, Math.round(screenWidth / Math.max(0.01, aspectRatio)));
 
   return (
     <View style={[styles.pageFrame, { width: screenWidth, minHeight: failed ? 240 : computedHeight }]}>
@@ -217,11 +466,12 @@ export default function MangaDetailScreen() {
   // Full-screen Reader state
   const [readerOpen, setReaderOpen] = useState(false);
   const [activeChapter, setActiveChapter] = useState<MangaChapter | null>(null);
-  const [chapterPages, setChapterPages] = useState<string[]>([]);
+  const [chapterPages, setChapterPages] = useState<MangaPageData[]>([]);
   const [pagesLoading, setPagesLoading] = useState(false);
   const [pagesError, setPagesError] = useState<string | null>(null);
+  const [readerZoom, setReaderZoom] = useState<number>(100);
 
-  const readerListRef = useRef<FlatList<string>>(null);
+  const readerWebViewRef = useRef<WebView>(null);
 
   // Hardware back button handling for standalone Chapters screen
   useEffect(() => {
@@ -274,10 +524,17 @@ export default function MangaDetailScreen() {
         const res = await fetch(`${getBaseUrl()}/api/manga/chapter?${qs.toString()}`);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
-        const pages: string[] = Array.isArray(data?.pages)
+        const pages: MangaPageData[] = Array.isArray(data?.pages)
           ? data.pages
-              .map((p: any) => (typeof p === "string" ? p : p?.url || ""))
-              .filter(Boolean)
+              .map((p: any) => {
+                if (typeof p === "string") return { url: p };
+                return {
+                  url: p?.url || "",
+                  width: typeof p?.width === "number" ? p.width : undefined,
+                  height: typeof p?.height === "number" ? p.height : undefined,
+                };
+              })
+              .filter((p: MangaPageData) => Boolean(p.url))
           : [];
         if (!pages.length) {
           setPagesError("لا تتوفر صفحات لهذا الفصل حالياً.");
@@ -1016,10 +1273,26 @@ export default function MangaDetailScreen() {
               </View>
             </View>
 
-            <Pressable onPress={() => setChapterPickerVisible(true)} style={styles.qualityPill}>
-              <Ionicons name="list" size={13} color="#FBBF24" />
-              <Text style={styles.qualityPillText}>الفصول</Text>
-            </Pressable>
+            <View style={{ flexDirection: ROW_RTL, alignItems: "center", gap: 6 }}>
+              <Pressable
+                onPress={() => {
+                  const nextZ = readerZoom === 100 ? 140 : readerZoom === 140 ? 180 : 100;
+                  setReaderZoom(nextZ);
+                  readerWebViewRef.current?.injectJavaScript(
+                    `(function(){ var c = document.getElementById("reader-container"); if(c){ c.style.width = "${nextZ}%"; currentZoom = ${nextZ}; } })(); true;`
+                  );
+                }}
+                style={styles.qualityPill}
+              >
+                <Ionicons name="search-outline" size={13} color="#FBBF24" />
+                <Text style={styles.qualityPillText}>{readerZoom}%</Text>
+              </Pressable>
+
+              <Pressable onPress={() => setChapterPickerVisible(true)} style={styles.qualityPill}>
+                <Ionicons name="list" size={13} color="#FBBF24" />
+                <Text style={styles.qualityPillText}>الفصول</Text>
+              </Pressable>
+            </View>
           </View>
 
           {pagesLoading ? (
@@ -1044,45 +1317,41 @@ export default function MangaDetailScreen() {
               </View>
             </View>
           ) : (
-            <FlatList
-              ref={readerListRef}
-              data={chapterPages}
-              keyExtractor={(uri, index) => `${activeChapter?.slug || "ch"}-${index}-${uri}`}
-              showsVerticalScrollIndicator={false}
-              initialNumToRender={4}
-              maxToRenderPerBatch={4}
-              windowSize={7}
-              renderItem={({ item: uri, index }) => (
-                <MangaPageItem
-                  uri={uri}
-                  pageIndex={index}
-                  totalPages={chapterPages.length}
-                  screenWidth={width}
-                />
-              )}
-              ListFooterComponent={
-                <View style={styles.readerEndFooter}>
-                  <Ionicons name="checkmark-done-circle" size={32} color="#FBBF24" />
-                  <Text style={styles.readerEndText}>
-                    نهاية{" "}
-                    {activeChapter ? `الفصل ${formatChapterNumber(activeChapter)}` : "الفصل"}
-                  </Text>
-                  {nextChapter && (
-                    <Pressable
-                      onPress={() => openChapterInApp(nextChapter)}
-                      style={[
-                        styles.pageRetryBtn,
-                        { marginTop: 8, paddingHorizontal: 18, paddingVertical: 10 },
-                      ]}
-                    >
-                      <Text style={styles.pageRetryBtnText}>
-                        الانتقال إلى الفصل التالي ({formatChapterNumber(nextChapter)})
-                      </Text>
-                      <Ionicons name="arrow-back" size={15} color="#09090B" />
-                    </Pressable>
-                  )}
-                </View>
-              }
+            <WebView
+              ref={readerWebViewRef}
+              key={`${activeChapter?.slug || "ch"}-${chapterPages.length}`}
+              style={{ flex: 1, backgroundColor: "#050507" }}
+              originWhitelist={["*"]}
+              source={{
+                html: buildWebtoonReaderHtml(
+                  chapterPages,
+                  activeChapter ? `الفصل ${formatChapterNumber(activeChapter)}` : "الفصل",
+                  nextChapter ? formatChapterNumber(nextChapter) : null,
+                  readerZoom
+                ),
+                baseUrl:
+                  currentSource === "manhwa"
+                    ? "https://azorafly.com/"
+                    : "https://mangadar.com/",
+              }}
+              scalesPageToFit={true}
+              setBuiltInZoomControls={true}
+              setDisplayZoomControls={false}
+              showsVerticalScrollIndicator={true}
+              showsHorizontalScrollIndicator={false}
+              bounces={false}
+              javaScriptEnabled={true}
+              domStorageEnabled={true}
+              mixedContentMode="always"
+              onMessage={(event) => {
+                const msg = String(event?.nativeEvent?.data || "");
+                if (msg === "NEXT_CHAPTER" && nextChapter) {
+                  openChapterInApp(nextChapter);
+                } else if (msg.startsWith("ZOOM:")) {
+                  const z = parseInt(msg.slice(5), 10);
+                  if (!Number.isNaN(z)) setReaderZoom(z);
+                }
+              }}
             />
           )}
 
