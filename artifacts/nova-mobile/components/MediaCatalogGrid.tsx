@@ -311,7 +311,22 @@ export function MediaCatalogGrid({
 
   const openMedia = (item: CatalogMedia) => {
     if (mediaType === "MANGA") {
-      router.push(`/manga/${encodeURIComponent(String(item.id))}` as any);
+      const arTitle = getArabicTitleForItem(item) || "";
+      const enTitle = item.title?.english || item.title?.romaji || "";
+      const cover = item.coverImage?.extraLarge || item.coverImage?.large || "";
+      router.push({
+        pathname: "/manga/[id]" as any,
+        params: {
+          id: String(item.id),
+          ...(arTitle ? { title: arTitle } : {}),
+          ...(enTitle ? { english: enTitle } : {}),
+          ...(cover ? { cover } : {}),
+          ...(item.status ? { status: item.status } : {}),
+          ...(item.chapters ? { chapters: String(item.chapters) } : {}),
+          ...(item.averageScore ? { score: String(item.averageScore) } : {}),
+          ...(item.source ? { source: item.source } : {}),
+        },
+      });
     } else {
       router.push(`/anime/${item.id}` as any);
     }

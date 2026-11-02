@@ -4,10 +4,13 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  BackHandler,
   FlatList,
   I18nManager,
   Image,
+  Linking,
   Modal,
+  Platform,
   ScrollView,
   StyleSheet,
   Text,
@@ -15,10 +18,12 @@ import {
   View,
   useWindowDimensions,
 } from "react-native";
+import WebView from "react-native-webview";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColors } from "@/hooks/useColors";
 import { getBaseUrl } from "@/utils/api";
 import { translateMangaGenre } from "@/utils/mangaLocalization";
+import { getYoutubeEmbedUrl, getYoutubeReferer } from "@/utils/youtube";
 import { TvPressable as Pressable } from "@/utils/tv";
 
 const IS_RTL = I18nManager.isRTL;
@@ -29,9 +34,18 @@ const ALIGN_RIGHT = (IS_RTL ? "flex-start" : "flex-end") as "flex-start" | "flex
 type MangaChapter = {
   id: string;
   slug: string;
-  number: string;
+  number: string | number;
+  numberStr?: string;
   title?: string;
   date?: string;
+  createdAt?: string;
+};
+
+type MangaTrailer = {
+  id: string;
+  site?: string;
+  thumbnail?: string;
+  url?: string;
 };
 
 type MangaDetailData = {
@@ -42,11 +56,14 @@ type MangaDetailData = {
   englishTitle?: string;
   arTitle?: string;
   enTitle?: string;
-  title?: string | {
-    romaji?: string;
-    english?: string;
-    native?: string;
-  };
+  displayTitle?: string;
+  title?:
+    | string
+    | {
+        romaji?: string;
+        english?: string;
+        native?: string;
+      };
   description: string;
   poster?: string;
   cover?: string;
@@ -60,6 +77,8 @@ type MangaDetailData = {
   author?: string;
   artist?: string;
   year?: number | null;
+  trailer?: MangaTrailer | null;
+  trailerYT?: string | null;
   chaptersCount: number;
   chapters: MangaChapter[];
 };
@@ -78,6 +97,11 @@ function originLabel(source?: string, country?: string) {
   return "مانجا مترجمة";
 }
 
+function formatChapterNumber(ch: MangaChapter): string {
+  if (ch.numberStr) return String(ch.numberStr);
+  return String(ch.number ?? "");
+}
+
 function MangaPageItem({
   uri,
   pageIndex,
@@ -94,9 +118,8 @@ function MangaPageItem({
   const [failed, setFailed] = useState(false);
   const [retrySeed, setRetrySeed] = useState(0);
 
-  const effectiveUri = retrySeed > 0
-    ? `${uri}${uri.includes("?") ? "&" : "?"}r=${retrySeed}`
-    : uri;
+  const effectiveUri =
+    retrySeed > 0 ? `${uri}${uri.includes("?") ? "&" : "?"}r=${retrySeed}` : uri;
 
   useEffect(() => {
     setLoaded(false);
@@ -153,7 +176,16 @@ function MangaPageItem({
 }
 
 export default function MangaDetailScreen() {
-  const { id } = useLocalSearchParams<{ id: string }>();
+  const params = useLocalSearchParams<{
+    id: string;
+    title?: string;
+    english?: string;
+    cover?: string;
+    status?: string;
+    chapters?: string;
+    score?: string;
+    source?: string;
+  }>();
   const router = useRouter();
   const colors = useColors();
   const insets = useSafeAreaInsets();
@@ -161,20 +193,28 @@ export default function MangaDetailScreen() {
 
   const decodedId = useMemo(() => {
     try {
-      return decodeURIComponent(String(id || ""));
+      return decodeURIComponent(String(params.id || ""));
     } catch {
-      return String(id || "");
+      return String(params.id || "");
     }
-  }, [id]);
+  }, [params.id]);
+
+  const inferredSource: "manga" | "manhwa" =
+    params.source === "manhwa" || decodedId.startsWith("az--") ? "manhwa" : "manga";
 
   const [manga, setManga] = useState<MangaDetailData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
+  const [showFullSynopsis, setShowFullSynopsis] = useState(false);
+  const [showTrailer, setShowTrailer] = useState(false);
 
+  // Dedicated standalone Chapters Screen state
+  const [chaptersPageOpen, setChaptersPageOpen] = useState(false);
   const [chaptersDesc, setChaptersDesc] = useState(true);
   const [chapterSearch, setChapterSearch] = useState("");
   const [chapterPickerVisible, setChapterPickerVisible] = useState(false);
 
+  // Full-screen Reader state
   const [readerOpen, setReaderOpen] = useState(false);
   const [activeChapter, setActiveChapter] = useState<MangaChapter | null>(null);
   const [chapterPages, setChapterPages] = useState<string[]>([]);
@@ -182,6 +222,16 @@ export default function MangaDetailScreen() {
   const [pagesError, setPagesError] = useState<string | null>(null);
 
   const readerListRef = useRef<FlatList<string>>(null);
+
+  // Hardware back button handling for standalone Chapters screen
+  useEffect(() => {
+    if (Platform.OS !== "android" || !chaptersPageOpen || readerOpen) return;
+    const sub = BackHandler.addEventListener("hardwareBackPress", () => {
+      setChaptersPageOpen(false);
+      return true;
+    });
+    return () => sub.remove();
+  }, [chaptersPageOpen, readerOpen]);
 
   const fetchDetail = useCallback(async () => {
     if (!decodedId) {
@@ -209,15 +259,17 @@ export default function MangaDetailScreen() {
 
   const loadChapterPages = useCallback(
     async (chapter: MangaChapter) => {
-      if (!manga) return;
+      const targetId = manga?.id || decodedId;
+      const targetSource = manga?.source || inferredSource;
+      if (!targetId) return;
       setPagesLoading(true);
       setPagesError(null);
       setChapterPages([]);
       try {
         const qs = new URLSearchParams({
-          id: manga.id,
+          id: targetId,
           chapter: chapter.slug,
-          source: manga.source,
+          source: targetSource,
         });
         const res = await fetch(`${getBaseUrl()}/api/manga/chapter?${qs.toString()}`);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -238,7 +290,7 @@ export default function MangaDetailScreen() {
         setPagesLoading(false);
       }
     },
-    [manga]
+    [decodedId, inferredSource, manga]
   );
 
   const openChapterInApp = useCallback(
@@ -250,14 +302,16 @@ export default function MangaDetailScreen() {
     [loadChapterPages]
   );
 
-  // Chapters sorted ascending by numeric order for prev/next navigation
+  // Chapters sorted ascending by numeric order
   const chaptersAsc = useMemo(() => {
     const raw = manga?.chapters || [];
     return [...raw].sort((a, b) => {
-      const na = parseFloat(a.number);
-      const nb = parseFloat(b.number);
+      const na = parseFloat(formatChapterNumber(a));
+      const nb = parseFloat(formatChapterNumber(b));
       if (!Number.isNaN(na) && !Number.isNaN(nb) && na !== nb) return na - nb;
-      return String(a.number).localeCompare(String(b.number), undefined, { numeric: true });
+      return formatChapterNumber(a).localeCompare(formatChapterNumber(b), undefined, {
+        numeric: true,
+      });
     });
   }, [manga?.chapters]);
 
@@ -267,7 +321,7 @@ export default function MangaDetailScreen() {
     if (!q) return ordered;
     return ordered.filter(
       (ch) =>
-        String(ch.number).toLowerCase().includes(q) ||
+        formatChapterNumber(ch).toLowerCase().includes(q) ||
         String(ch.title || "").toLowerCase().includes(q)
     );
   }, [chaptersAsc, chaptersDesc, chapterSearch]);
@@ -283,20 +337,63 @@ export default function MangaDetailScreen() {
       ? chaptersAsc[activeChapterAscIdx + 1]
       : null;
 
-  if (loading) {
-    return (
-      <View style={[styles.center, { backgroundColor: colors.background }]}>
-        <ActivityIndicator size="large" color={colors.homeAccent} />
-        <Text style={[styles.loadingLabel, { color: colors.textSecondary }]}>جاري تحميل تفاصيل العمل...</Text>
-      </View>
-    );
-  }
+  // Resolve titles & visuals immediately (using route params while detail loads so there is 0ms delay!)
+  const rawTitleStr = typeof manga?.title === "string" ? manga.title : "";
+  const rawTitleObj = typeof manga?.title === "object" && manga?.title ? manga.title : undefined;
 
-  if (error || !manga) {
+  const arabicTitle =
+    manga?.arTitle ||
+    manga?.arabicTitle ||
+    rawTitleObj?.native ||
+    (rawTitleStr && /[\u0600-\u06FF]/.test(rawTitleStr) ? rawTitleStr : "") ||
+    params.title ||
+    "";
+
+  const englishTitle =
+    manga?.enTitle ||
+    manga?.englishTitle ||
+    rawTitleObj?.english ||
+    rawTitleObj?.romaji ||
+    (rawTitleStr && !/[\u0600-\u06FF]/.test(rawTitleStr) ? rawTitleStr : "") ||
+    params.english ||
+    "";
+
+  const primaryTitle = arabicTitle || englishTitle || "جاري التحميل...";
+  const secondaryTitle =
+    englishTitle && englishTitle !== primaryTitle ? englishTitle : "";
+
+  const cover =
+    manga?.poster ||
+    manga?.cover ||
+    manga?.coverImage?.extraLarge ||
+    manga?.coverImage?.large ||
+    params.cover ||
+    "";
+  const banner = manga?.bannerImage || manga?.banner || cover;
+  const currentSource = manga?.source || inferredSource;
+  const currentStatus = manga?.status || params.status || "RELEASING";
+  const rawScore = manga?.averageScore ?? (params.score ? Number(params.score) : null);
+  const score =
+    typeof rawScore === "number" && rawScore > 0 ? (rawScore / 10).toFixed(1) : null;
+  const totalChaptersCount =
+    chaptersAsc.length > 0
+      ? chaptersAsc.length
+      : manga?.chaptersCount || (params.chapters ? Number(params.chapters) : 0);
+
+  const arabicSynopsis = manga?.description?.trim() || "";
+  const trailerYT = manga?.trailer?.id || manga?.trailerYT || null;
+  const trailerThumb =
+    manga?.trailer?.thumbnail ||
+    (trailerYT ? `https://img.youtube.com/vi/${trailerYT}/hqdefault.jpg` : "");
+
+  const firstChapter = chaptersAsc[0] || null;
+  const latestChapter = chaptersAsc[chaptersAsc.length - 1] || null;
+
+  if (error && !manga && !params.title) {
     return (
       <View style={[styles.center, { backgroundColor: colors.background }]}>
         <Ionicons name="alert-circle-outline" size={44} color={colors.textMuted} />
-        <Text style={[styles.errorText, { color: colors.textSecondary }]}>تعذر تحميل تفاصيل المانجا</Text>
+        <Text style={[styles.errorText, { color: colors.textSecondary }]}>تعذر تحميل تفاصيل العمل</Text>
         <View style={styles.errorActionsRow}>
           <Pressable
             onPress={() => void fetchDetail()}
@@ -312,38 +409,24 @@ export default function MangaDetailScreen() {
     );
   }
 
-  const rawTitleStr = typeof manga.title === "string" ? manga.title : "";
-  const rawTitleObj = typeof manga.title === "object" && manga.title ? manga.title : undefined;
-  const primaryTitle =
-    manga.arabicTitle ||
-    manga.arTitle ||
-    rawTitleStr ||
-    rawTitleObj?.native ||
-    manga.englishTitle ||
-    manga.enTitle ||
-    rawTitleObj?.english ||
-    "بدون عنوان";
-  const enCandidate = manga.englishTitle || manga.enTitle || rawTitleObj?.english || rawTitleObj?.romaji || "";
-  const secondaryTitle = enCandidate && enCandidate !== primaryTitle ? enCandidate : "";
-  const cover = manga.poster || manga.cover || manga.coverImage?.extraLarge || manga.coverImage?.large || "";
-  const banner = manga.bannerImage || manga.banner || cover;
-  const score = typeof manga.averageScore === "number" && manga.averageScore > 0
-    ? (manga.averageScore / 10).toFixed(1)
-    : null;
-  const arabicSynopsis = manga.description?.trim() || "لا يتوفر ملخص عربي لهذا العمل حالياً.";
-  const firstChapter = chaptersAsc[0] || null;
-  const latestChapter = chaptersAsc[chaptersAsc.length - 1] || null;
-
   return (
     <View style={[styles.screen, { backgroundColor: colors.background }]}>
-      <ScrollView contentContainerStyle={{ paddingBottom: insets.bottom + 44 }} showsVerticalScrollIndicator={false}>
-        {/* Hero Header */}
+      <ScrollView
+        contentContainerStyle={{ paddingBottom: insets.bottom + 44 }}
+        showsVerticalScrollIndicator={false}
+      >
+        {/* ── Hero Header ── */}
         <View style={styles.heroWrap}>
           {banner ? (
-            <Image source={{ uri: banner }} style={StyleSheet.absoluteFill} resizeMode="cover" blurRadius={6} />
+            <Image
+              source={{ uri: banner }}
+              style={StyleSheet.absoluteFill}
+              resizeMode="cover"
+              blurRadius={8}
+            />
           ) : null}
           <LinearGradient
-            colors={["rgba(9,9,11,0.3)", "rgba(9,9,11,0.84)", colors.background]}
+            colors={["rgba(9,9,11,0.25)", "rgba(9,9,11,0.85)", colors.background]}
             style={StyleSheet.absoluteFill}
           />
 
@@ -351,12 +434,6 @@ export default function MangaDetailScreen() {
             <Pressable onPress={() => router.back()} style={styles.iconBtn}>
               <Ionicons name="arrow-forward" size={21} color="#fff" />
             </Pressable>
-            <View style={styles.sourceBadge}>
-              <Ionicons name="book" size={12} color="#FBBF24" />
-              <Text style={styles.sourceBadgeText}>
-                {manga.source === "manhwa" ? "أزورا مانجا • مانهوا" : "مانجا دار • مانجا"}
-              </Text>
-            </View>
           </View>
 
           <View style={styles.heroContent}>
@@ -372,7 +449,9 @@ export default function MangaDetailScreen() {
 
             <View style={styles.heroMeta}>
               <View style={[styles.typeBadge, { backgroundColor: colors.homeAccent }]}>
-                <Text style={styles.typeBadgeText}>{originLabel(manga.source, manga.countryOfOrigin)}</Text>
+                <Text style={styles.typeBadgeText}>
+                  {originLabel(currentSource, manga?.countryOfOrigin)}
+                </Text>
               </View>
 
               <Text style={[styles.title, { color: colors.textPrimary }]} numberOfLines={3}>
@@ -394,209 +473,448 @@ export default function MangaDetailScreen() {
                 )}
                 <View style={styles.statPill}>
                   <Ionicons name="checkmark-circle-outline" size={13} color="#34D399" />
-                  <Text style={styles.statText}>{STATUS_AR[manga.status || ""] || "مستمرة"}</Text>
+                  <Text style={styles.statText}>{STATUS_AR[currentStatus] || "مستمرة"}</Text>
                 </View>
-                <View style={styles.statPill}>
-                  <Ionicons name="layers-outline" size={13} color="#60A5FA" />
-                  <Text style={styles.statText}>{chaptersAsc.length} فصل</Text>
-                </View>
+                {totalChaptersCount > 0 && (
+                  <View style={styles.statPill}>
+                    <Ionicons name="layers-outline" size={13} color="#60A5FA" />
+                    <Text style={styles.statText}>{totalChaptersCount} فصل</Text>
+                  </View>
+                )}
               </View>
             </View>
           </View>
         </View>
 
-        {/* Action Buttons: Start Reading First / Latest Chapter */}
-        <View style={styles.actionsWrap}>
+        {/* ── Primary CTA Bar: قراءة الفصول (opens standalone Chapters Screen) ── */}
+        <View style={styles.ctaWrap}>
           <Pressable
-            onPress={() => {
-              if (firstChapter) openChapterInApp(firstChapter);
-            }}
-            disabled={!firstChapter}
+            onPress={() => setChaptersPageOpen(true)}
             style={[
-              styles.readPrimaryBtn,
-              {
-                backgroundColor: colors.homeAccent || "#F59E0B",
-                opacity: firstChapter ? 1 : 0.5,
-              },
+              styles.chaptersCtaBtn,
+              { backgroundColor: colors.homeAccent || "#0EA5E9" },
             ]}
           >
-            <Ionicons name="book" size={18} color="#09090B" />
-            <Text style={styles.readPrimaryBtnText}>
-              {firstChapter ? `ابدأ القراءة (فصل ${firstChapter.number})` : "لا تتوفر فصول"}
-            </Text>
-          </Pressable>
+            <View style={styles.chaptersCtaRight}>
+              <View style={styles.chaptersCtaIcon}>
+                <Ionicons name="book" size={19} color="#09090B" />
+              </View>
+              <View style={styles.chaptersCtaTextWrap}>
+                <Text style={styles.chaptersCtaTitle}>قراءة الفصول</Text>
+                <Text style={styles.chaptersCtaSub}>
+                  تصفح جميع الفصول وابدأ القراءة فوراً
+                </Text>
+              </View>
+            </View>
 
-          {latestChapter && latestChapter.slug !== firstChapter?.slug && (
-            <Pressable
-              onPress={() => openChapterInApp(latestChapter)}
-              style={[
-                styles.SelectSourceBtn,
-                { backgroundColor: colors.surface, borderColor: colors.border },
-              ]}
-            >
-              <Ionicons name="flash-outline" size={16} color={colors.homeAccent} />
-              <Text style={[styles.SelectSourceBtnText, { color: colors.textPrimary }]}>
-                آخر فصل ({latestChapter.number})
-              </Text>
-            </Pressable>
-          )}
+            <View style={styles.chaptersCtaPill}>
+              {loading && chaptersAsc.length === 0 ? (
+                <ActivityIndicator size="small" color="#09090B" />
+              ) : (
+                <>
+                  <Text style={styles.chaptersCtaPillText}>
+                    {totalChaptersCount > 0 ? `${totalChaptersCount} فصل` : "الفصول"}
+                  </Text>
+                  <Ionicons name="chevron-back" size={14} color="#09090B" />
+                </>
+              )}
+            </View>
+          </Pressable>
         </View>
 
-        {/* Genres */}
-        {Boolean(manga.genres?.length) && (
+        {/* ── Genres ── */}
+        {Boolean(manga?.genres?.length) && (
           <View style={styles.genresWrap}>
-            {manga.genres.map((g, idx) => (
-              <View key={`${g}-${idx}`} style={[styles.genreChip, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-                <Text style={[styles.genreText, { color: colors.textSecondary }]}>{translateMangaGenre(g)}</Text>
+            {manga!.genres.map((g, idx) => (
+              <View
+                key={`${g}-${idx}`}
+                style={[styles.genreChip, { backgroundColor: colors.surface, borderColor: colors.border }]}
+              >
+                <Text style={[styles.genreText, { color: colors.textSecondary }]}>
+                  {translateMangaGenre(g)}
+                </Text>
               </View>
             ))}
           </View>
         )}
 
-        {/* Info Grid */}
-        <View style={[styles.sectionCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-          <Text style={[styles.sectionTitle, { color: colors.textPrimary }]}>معلومات العمل</Text>
-          <View style={styles.infoGrid}>
-            <View style={styles.infoItem}>
-              <Text style={[styles.infoLabel, { color: colors.textMuted }]}>التصنيف</Text>
-              <Text style={[styles.infoValue, { color: colors.textPrimary }]}>
-                {originLabel(manga.source, manga.countryOfOrigin)}
-              </Text>
-            </View>
-            <View style={styles.infoItem}>
-              <Text style={[styles.infoLabel, { color: colors.textMuted }]}>الحالة</Text>
-              <Text style={[styles.infoValue, { color: colors.textPrimary }]}>
-                {STATUS_AR[manga.status || ""] || "مستمرة"}
-              </Text>
-            </View>
-            <View style={styles.infoItem}>
-              <Text style={[styles.infoLabel, { color: colors.textMuted }]}>عدد الفصول</Text>
-              <Text style={[styles.infoValue, { color: colors.textPrimary }]}>
-                {chaptersAsc.length > 0 ? `${chaptersAsc.length} فصل` : "غير محدد"}
-              </Text>
-            </View>
-            <View style={styles.infoItem}>
-              <Text style={[styles.infoLabel, { color: colors.textMuted }]}>المؤلف / الرسام</Text>
-              <Text style={[styles.infoValue, { color: colors.textPrimary }]} numberOfLines={1}>
-                {manga.author || manga.artist || "غير محدد"}
-              </Text>
-            </View>
-          </View>
-        </View>
-
-        {/* Arabic Synopsis */}
+        {/* ── 1. القصة (Placed First & Higher Up!) ── */}
         <View style={[styles.sectionCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
           <View style={styles.synopsisHeaderRow}>
-            <Text style={[styles.sectionTitle, { color: colors.textPrimary, marginBottom: 0 }]}>القصة</Text>
+            <View style={styles.sectionHeaderRight}>
+              <View style={[styles.sectionBar, { backgroundColor: colors.homeAccent || "#0EA5E9" }]} />
+              <Text style={[styles.sectionTitle, { color: colors.textPrimary, marginBottom: 0 }]}>
+                القصة
+              </Text>
+            </View>
             <View style={styles.arTag}>
               <Ionicons name="language-outline" size={12} color="#FBBF24" />
               <Text style={styles.arTagText}>مترجمة بالعربية</Text>
             </View>
           </View>
-          <Text style={[styles.synopsisText, { color: colors.textSecondary }]}>{arabicSynopsis}</Text>
+
+          {loading && !arabicSynopsis ? (
+            <View style={{ paddingVertical: 18, alignItems: "center" }}>
+              <ActivityIndicator size="small" color={colors.homeAccent} />
+            </View>
+          ) : (
+            <>
+              <Text
+                style={[styles.synopsisText, { color: colors.textSecondary }]}
+                numberOfLines={showFullSynopsis ? undefined : 5}
+              >
+                {arabicSynopsis || "لا يتوفر ملخص عربي لهذا العمل حالياً."}
+              </Text>
+              {arabicSynopsis.length > 160 && (
+                <Pressable
+                  onPress={() => setShowFullSynopsis((v) => !v)}
+                  style={[styles.readMoreBtn, { borderTopColor: colors.border }]}
+                >
+                  <Text style={[styles.readMoreText, { color: colors.textPrimary }]}>
+                    {showFullSynopsis ? "عرض أقل" : "قراءة القصة كاملة"}
+                  </Text>
+                  <Ionicons
+                    name={showFullSynopsis ? "chevron-up" : "chevron-down"}
+                    size={14}
+                    color={colors.textSecondary}
+                  />
+                </Pressable>
+              )}
+            </>
+          )}
         </View>
 
-        {/* Chapters List Section */}
-        <View style={styles.chaptersSection}>
-          <View style={styles.chaptersHeaderRow}>
-            <View style={styles.chaptersTitleRow}>
+        {/* ── 2. الإعلان الدعائي (YouTube Trailer) ── */}
+        {trailerYT ? (
+          <View style={styles.trailerSection}>
+            <View style={[styles.sectionHeaderRight, { marginBottom: 10 }]}>
+              <View style={[styles.sectionBar, { backgroundColor: "#EF4444" }]} />
               <Text style={[styles.sectionTitle, { color: colors.textPrimary, marginBottom: 0 }]}>
-                الفصول المتوفرة
+                الإعلان الدعائي
               </Text>
-              <View style={styles.chaptersCountBadge}>
-                <Text style={styles.chaptersCountText}>{chaptersAsc.length}</Text>
+            </View>
+
+            <Pressable onPress={() => setShowTrailer(true)} style={styles.trailerBtn}>
+              <Image source={{ uri: trailerThumb }} style={styles.trailerImg} />
+              <LinearGradient
+                colors={["transparent", "rgba(0,0,0,0.82)"]}
+                style={StyleSheet.absoluteFill}
+              />
+              <View style={styles.trailerPlayBtn}>
+                <View style={styles.trailerPlay}>
+                  <Ionicons name="play" size={24} color="#fff" style={{ marginLeft: 2 }} />
+                </View>
+              </View>
+              <View style={styles.trailerBottom}>
+                <Text style={styles.trailerLabel}>العرض الدعائي الرسمي</Text>
+                <Text style={styles.trailerSub}>انقر للمشاهدة</Text>
+              </View>
+            </Pressable>
+          </View>
+        ) : null}
+
+        {/* ── 3. معلومات العمل (Placed Below Synopsis) ── */}
+        <View style={[styles.sectionCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+          <View style={[styles.sectionHeaderRight, { marginBottom: 12 }]}>
+            <View style={[styles.sectionBar, { backgroundColor: colors.homeAccent || "#0EA5E9" }]} />
+            <Text style={[styles.sectionTitle, { color: colors.textPrimary, marginBottom: 0 }]}>
+              معلومات العمل
+            </Text>
+          </View>
+
+          <View style={styles.infoGrid}>
+            {arabicTitle ? (
+              <View style={[styles.infoItem, styles.infoItemWide]}>
+                <Text style={[styles.infoLabel, { color: colors.textMuted }]}>الاسم العربي</Text>
+                <Text style={[styles.infoValue, { color: colors.textPrimary }]} numberOfLines={2}>
+                  {arabicTitle}
+                </Text>
+              </View>
+            ) : null}
+            {englishTitle ? (
+              <View style={[styles.infoItem, styles.infoItemWide]}>
+                <Text style={[styles.infoLabel, { color: colors.textMuted }]}>الاسم الإنجليزي</Text>
+                <Text style={[styles.infoValue, { color: colors.textPrimary }]} numberOfLines={2}>
+                  {englishTitle}
+                </Text>
+              </View>
+            ) : null}
+            <View style={styles.infoItem}>
+              <Text style={[styles.infoLabel, { color: colors.textMuted }]}>التصنيف</Text>
+              <Text style={[styles.infoValue, { color: colors.textPrimary }]}>
+                {originLabel(currentSource, manga?.countryOfOrigin)}
+              </Text>
+            </View>
+            <View style={styles.infoItem}>
+              <Text style={[styles.infoLabel, { color: colors.textMuted }]}>الحالة</Text>
+              <Text style={[styles.infoValue, { color: colors.textPrimary }]}>
+                {STATUS_AR[currentStatus] || "مستمرة"}
+              </Text>
+            </View>
+            <View style={styles.infoItem}>
+              <Text style={[styles.infoLabel, { color: colors.textMuted }]}>عدد الفصول</Text>
+              <Text style={[styles.infoValue, { color: colors.textPrimary }]}>
+                {totalChaptersCount > 0 ? `${totalChaptersCount} فصل` : "غير محدد"}
+              </Text>
+            </View>
+            <View style={styles.infoItem}>
+              <Text style={[styles.infoLabel, { color: colors.textMuted }]}>المؤلف / الرسام</Text>
+              <Text style={[styles.infoValue, { color: colors.textPrimary }]} numberOfLines={1}>
+                {manga?.author || manga?.artist || "غير محدد"}
+              </Text>
+            </View>
+          </View>
+        </View>
+      </ScrollView>
+
+      {/* ── Standalone Chapters Page Modal (تفتح لوحدها عند الضغط على "قراءة الفصول") ── */}
+      <Modal
+        visible={chaptersPageOpen}
+        animationType="slide"
+        presentationStyle="fullScreen"
+        onRequestClose={() => setChaptersPageOpen(false)}
+      >
+        <View style={[styles.chaptersScreen, { backgroundColor: colors.background }]}>
+          {/* Chapters Screen Top Header */}
+          <View
+            style={[
+              styles.chaptersScreenHeader,
+              {
+                paddingTop: insets.top + 10,
+                backgroundColor: colors.surface,
+                borderBottomColor: colors.border,
+              },
+            ]}
+          >
+            <View style={styles.chaptersScreenHeaderRight}>
+              <Pressable
+                onPress={() => setChaptersPageOpen(false)}
+                style={[styles.chaptersBackBtn, { borderColor: colors.border }]}
+              >
+                <Ionicons name="arrow-forward" size={20} color={colors.textPrimary} />
+              </Pressable>
+
+              <View style={styles.chaptersHeaderTitles}>
+                <Text style={[styles.chaptersScreenTitle, { color: colors.textPrimary }]} numberOfLines={1}>
+                  قائمة الفصول
+                </Text>
+                <Text style={[styles.chaptersScreenSubtitle, { color: colors.textMuted }]} numberOfLines={1}>
+                  {primaryTitle}
+                </Text>
               </View>
             </View>
 
-            <View style={styles.chaptersFilterRow}>
+            <View style={styles.chaptersCountBadge}>
+              <Text style={styles.chaptersCountText}>{chaptersAsc.length} فصل</Text>
+            </View>
+          </View>
+
+          {/* Quick Start Buttons + Search + Sort Controls */}
+          <View style={styles.chaptersControlsWrap}>
+            {firstChapter && (
+              <View style={styles.quickReadRow}>
+                <Pressable
+                  onPress={() => openChapterInApp(firstChapter)}
+                  style={[
+                    styles.quickReadPrimary,
+                    { backgroundColor: colors.homeAccent || "#0EA5E9" },
+                  ]}
+                >
+                  <Ionicons name="play" size={16} color="#09090B" />
+                  <Text style={styles.quickReadPrimaryText}>
+                    ابدأ من الفصل الأول ({formatChapterNumber(firstChapter)})
+                  </Text>
+                </Pressable>
+
+                {latestChapter && latestChapter.slug !== firstChapter.slug && (
+                  <Pressable
+                    onPress={() => openChapterInApp(latestChapter)}
+                    style={[
+                      styles.quickReadSecondary,
+                      { backgroundColor: colors.surface, borderColor: colors.border },
+                    ]}
+                  >
+                    <Ionicons name="flash-outline" size={15} color={colors.homeAccent} />
+                    <Text style={[styles.quickReadSecondaryText, { color: colors.textPrimary }]}>
+                      آخر فصل ({formatChapterNumber(latestChapter)})
+                    </Text>
+                  </Pressable>
+                )}
+              </View>
+            )}
+
+            <View style={styles.searchAndSortRow}>
+              <View
+                style={[
+                  styles.chapterSearchBox,
+                  { backgroundColor: colors.surface, borderColor: colors.border },
+                ]}
+              >
+                <Ionicons name="search-outline" size={16} color={colors.textMuted} />
+                <TextInput
+                  value={chapterSearch}
+                  onChangeText={setChapterSearch}
+                  placeholder="ابحث عن رقم الفصل..."
+                  placeholderTextColor={colors.textMuted}
+                  style={[styles.chapterSearchInput, { color: colors.textPrimary }]}
+                />
+                {chapterSearch.length > 0 && (
+                  <Pressable onPress={() => setChapterSearch("")}>
+                    <Ionicons name="close-circle" size={16} color={colors.textMuted} />
+                  </Pressable>
+                )}
+              </View>
+
               <Pressable
                 onPress={() => setChaptersDesc((d) => !d)}
-                style={[styles.sortBtn, { borderColor: colors.border, backgroundColor: colors.surface }]}
+                style={[
+                  styles.sortBtn,
+                  { borderColor: colors.border, backgroundColor: colors.surface },
+                ]}
               >
-                <Ionicons name="swap-vertical" size={13} color={colors.textSecondary} />
+                <Ionicons name="swap-vertical" size={14} color={colors.textSecondary} />
                 <Text style={[styles.sortBtnText, { color: colors.textSecondary }]}>
-                  {chaptersDesc ? "الأحدث أولاً" : "الأقدم أولاً"}
+                  {chaptersDesc ? "الأحدث" : "الأقدم"}
                 </Text>
               </Pressable>
             </View>
           </View>
 
-          {chaptersAsc.length > 8 && (
-            <View style={[styles.chapterSearchBox, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-              <Ionicons name="search-outline" size={16} color={colors.textMuted} />
-              <TextInput
-                value={chapterSearch}
-                onChangeText={setChapterSearch}
-                placeholder="ابحث عن رقم الفصل..."
-                placeholderTextColor={colors.textMuted}
-                style={[styles.chapterSearchInput, { color: colors.textPrimary }]}
-              />
-              {chapterSearch.length > 0 && (
-                <Pressable onPress={() => setChapterSearch("")}>
-                  <Ionicons name="close-circle" size={16} color={colors.textMuted} />
-                </Pressable>
-              )}
+          {/* Virtualized Chapters FlatList (Smooth 60fps for 1200+ chapters) */}
+          {loading && chaptersAsc.length === 0 ? (
+            <View style={styles.center}>
+              <ActivityIndicator size="large" color={colors.homeAccent} />
+              <Text style={[styles.loadingLabel, { color: colors.textSecondary }]}>
+                جاري جلب قائمة الفصول...
+              </Text>
             </View>
-          )}
-
-          {displayedChapters.length === 0 ? (
-            <View style={[styles.emptyBox, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-              <Ionicons name="book-outline" size={28} color={colors.textMuted} />
+          ) : displayedChapters.length === 0 ? (
+            <View style={styles.center}>
+              <Ionicons name="book-outline" size={34} color={colors.textMuted} />
               <Text style={[styles.emptyBoxText, { color: colors.textSecondary }]}>
                 لا توجد فصول مطابقة حالياً.
               </Text>
             </View>
           ) : (
-            displayedChapters.map((ch) => (
-              <Pressable
-                key={ch.id}
-                onPress={() => openChapterInApp(ch)}
-                style={[
-                  styles.chapterCard,
-                  {
-                    backgroundColor: colors.surface,
-                    borderColor: "rgba(245,158,11,0.32)",
-                  },
-                ]}
-              >
-                <View style={styles.chapterRight}>
-                  <View
+            <FlatList
+              data={displayedChapters}
+              keyExtractor={(ch) => `${ch.id}-${ch.slug}`}
+              contentContainerStyle={{
+                paddingHorizontal: 16,
+                paddingTop: 6,
+                paddingBottom: insets.bottom + 32,
+              }}
+              showsVerticalScrollIndicator={false}
+              initialNumToRender={14}
+              maxToRenderPerBatch={14}
+              windowSize={7}
+              removeClippedSubviews={Platform.OS === "android"}
+              renderItem={({ item: ch }) => {
+                const numLabel = formatChapterNumber(ch);
+                return (
+                  <Pressable
+                    onPress={() => openChapterInApp(ch)}
                     style={[
-                      styles.chapterIconWrap,
+                      styles.chapterCard,
                       {
-                        backgroundColor: "rgba(245,158,11,0.16)",
-                        borderColor: "rgba(245,158,11,0.45)",
+                        backgroundColor: colors.surface,
+                        borderColor: colors.border,
                       },
                     ]}
                   >
-                    <Ionicons name="book" size={15} color="#FBBF24" />
-                  </View>
-                  <View style={styles.chapterTexts}>
-                    <Text style={[styles.chapterTitle, { color: colors.textPrimary }]} numberOfLines={1}>
-                      {ch.title || `الفصل ${ch.number}`}
-                    </Text>
-                    <Text style={[styles.chapterSub, { color: colors.textMuted }]} numberOfLines={1}>
-                      {[
-                        manga.source === "manhwa" ? "أزورا مانجا" : "مانجا دار",
-                        ch.date ? ch.date : null,
-                      ]
-                        .filter(Boolean)
-                        .join(" • ")}
-                    </Text>
-                  </View>
-                </View>
+                    <View style={styles.chapterRight}>
+                      <View
+                        style={[
+                          styles.chapterIconWrap,
+                          {
+                            backgroundColor: "rgba(14,165,233,0.14)",
+                            borderColor: "rgba(14,165,233,0.38)",
+                          },
+                        ]}
+                      >
+                        <Text style={styles.chapterNumBadgeText}>{numLabel}</Text>
+                      </View>
+                      <View style={styles.chapterTexts}>
+                        <Text
+                          style={[styles.chapterTitle, { color: colors.textPrimary }]}
+                          numberOfLines={1}
+                        >
+                          {ch.title || `الفصل ${numLabel}`}
+                        </Text>
+                        <Text
+                          style={[styles.chapterSub, { color: colors.textMuted }]}
+                          numberOfLines={1}
+                        >
+                          مترجم بالعربية
+                        </Text>
+                      </View>
+                    </View>
 
-                <View style={styles.chapterLeft}>
-                  <Text style={styles.chapterTranslatedLabel}>قراءة</Text>
-                  <Ionicons name="chevron-back" size={17} color="#FBBF24" />
-                </View>
-              </Pressable>
-            ))
+                    <View style={styles.chapterLeft}>
+                      <Text style={[styles.chapterTranslatedLabel, { color: colors.homeAccent }]}>
+                        قراءة
+                      </Text>
+                      <Ionicons name="chevron-back" size={16} color={colors.homeAccent} />
+                    </View>
+                  </Pressable>
+                );
+              }}
+            />
           )}
         </View>
-      </ScrollView>
+      </Modal>
 
-      {/* Chapter Picker Modal */}
+      {/* ── Trailer Modal — in-app YouTube player ── */}
+      <Modal
+        visible={showTrailer}
+        animationType="slide"
+        onRequestClose={() => setShowTrailer(false)}
+      >
+        <View style={{ flex: 1, backgroundColor: "#000" }}>
+          <View
+            style={[
+              styles.trailerSheetHeader,
+              { paddingTop: insets.top + 8, backgroundColor: colors.surface },
+            ]}
+          >
+            <Ionicons name="logo-youtube" size={20} color="#FF0000" />
+            <Text style={[styles.trailerModalTitle, { color: colors.textPrimary, flex: 1 }]}>
+              الإعلان الدعائي
+            </Text>
+            {trailerYT && (
+              <Pressable
+                onPress={() => Linking.openURL(`https://www.youtube.com/watch?v=${trailerYT}`)}
+                style={styles.trailerCloseBtn}
+              >
+                <Ionicons name="open-outline" size={17} color="#fff" />
+              </Pressable>
+            )}
+            <Pressable onPress={() => setShowTrailer(false)} style={styles.trailerCloseBtn}>
+              <Ionicons name="close" size={19} color="#fff" />
+            </Pressable>
+          </View>
+          {trailerYT ? (
+            <WebView
+              source={{
+                uri: getYoutubeEmbedUrl(trailerYT),
+                headers: { Referer: getYoutubeReferer() },
+              }}
+              style={{ flex: 1 }}
+              allowsFullscreenVideo
+              allowsInlineMediaPlayback
+              mediaPlaybackRequiresUserAction={false}
+              javaScriptEnabled
+              domStorageEnabled
+              originWhitelist={["*"]}
+              mixedContentMode="always"
+              thirdPartyCookiesEnabled
+              userAgent="Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"
+            />
+          ) : null}
+        </View>
+      </Modal>
+
+      {/* ── Quick Chapter Picker inside Reader ── */}
       <Modal
         visible={chapterPickerVisible}
         transparent
@@ -604,7 +922,12 @@ export default function MangaDetailScreen() {
         onRequestClose={() => setChapterPickerVisible(false)}
       >
         <View style={styles.modalBackdrop}>
-          <View style={[styles.pickerModal, { backgroundColor: "#121217", borderColor: colors.border, maxHeight: height * 0.72 }]}>
+          <View
+            style={[
+              styles.pickerModal,
+              { backgroundColor: "#121217", borderColor: colors.border, maxHeight: height * 0.72 },
+            ]}
+          >
             <View style={[styles.pickerHeader, { borderBottomColor: colors.border }]}>
               <View style={styles.pickerHeaderRight}>
                 <Ionicons name="list" size={18} color="#FBBF24" />
@@ -617,10 +940,14 @@ export default function MangaDetailScreen() {
 
             <FlatList
               data={chaptersAsc}
-              keyExtractor={(item) => item.id}
+              keyExtractor={(item) => `${item.id}-${item.slug}`}
               contentContainerStyle={{ padding: 12, gap: 8 }}
+              initialNumToRender={16}
+              maxToRenderPerBatch={16}
+              windowSize={7}
               renderItem={({ item }) => {
                 const isSelected = activeChapter?.slug === item.slug;
+                const numLabel = formatChapterNumber(item);
                 return (
                   <Pressable
                     onPress={() => {
@@ -630,13 +957,17 @@ export default function MangaDetailScreen() {
                     style={[
                       styles.pickerItem,
                       {
-                        backgroundColor: isSelected ? "rgba(245,158,11,0.18)" : "rgba(255,255,255,0.04)",
+                        backgroundColor: isSelected
+                          ? "rgba(245,158,11,0.18)"
+                          : "rgba(255,255,255,0.04)",
                         borderColor: isSelected ? "#F59E0B" : "rgba(255,255,255,0.08)",
                       },
                     ]}
                   >
-                    <Text style={[styles.pickerItemText, { color: isSelected ? "#FBBF24" : "#f4f4f5" }]}>
-                      {item.title || `الفصل ${item.number}`}
+                    <Text
+                      style={[styles.pickerItemText, { color: isSelected ? "#FBBF24" : "#f4f4f5" }]}
+                    >
+                      {item.title || `الفصل ${numLabel}`}
                     </Text>
                     <Ionicons
                       name={isSelected ? "checkmark-circle" : "book-outline"}
@@ -651,7 +982,7 @@ export default function MangaDetailScreen() {
         </View>
       </Modal>
 
-      {/* Full-Screen Vertical Reader Modal */}
+      {/* ── Full-Screen Vertical Reader Modal ── */}
       <Modal
         visible={readerOpen}
         animationType="slide"
@@ -659,7 +990,6 @@ export default function MangaDetailScreen() {
         onRequestClose={() => setReaderOpen(false)}
       >
         <View style={[styles.readerScreen, { backgroundColor: "#050507" }]}>
-          {/* Reader Top Bar */}
           <View
             style={[
               styles.readerHeader,
@@ -676,7 +1006,9 @@ export default function MangaDetailScreen() {
 
               <View style={styles.readerTitleCol}>
                 <Text style={styles.readerHeaderTitle} numberOfLines={1}>
-                  {activeChapter ? activeChapter.title || `الفصل ${activeChapter.number}` : primaryTitle}
+                  {activeChapter
+                    ? activeChapter.title || `الفصل ${formatChapterNumber(activeChapter)}`
+                    : primaryTitle}
                 </Text>
                 <Text style={styles.readerHeaderSub} numberOfLines={1}>
                   {primaryTitle} {chapterPages.length > 0 ? `• ${chapterPages.length} صفحة` : ""}
@@ -684,16 +1016,12 @@ export default function MangaDetailScreen() {
               </View>
             </View>
 
-            <Pressable
-              onPress={() => setChapterPickerVisible(true)}
-              style={styles.qualityPill}
-            >
+            <Pressable onPress={() => setChapterPickerVisible(true)} style={styles.qualityPill}>
               <Ionicons name="list" size={13} color="#FBBF24" />
               <Text style={styles.qualityPillText}>الفصول</Text>
             </Pressable>
           </View>
 
-          {/* Reader Body */}
           {pagesLoading ? (
             <View style={styles.readerCenter}>
               <ActivityIndicator size="large" color="#F59E0B" />
@@ -736,15 +1064,19 @@ export default function MangaDetailScreen() {
                 <View style={styles.readerEndFooter}>
                   <Ionicons name="checkmark-done-circle" size={32} color="#FBBF24" />
                   <Text style={styles.readerEndText}>
-                    نهاية {activeChapter ? `الفصل ${activeChapter.number}` : "الفصل"}
+                    نهاية{" "}
+                    {activeChapter ? `الفصل ${formatChapterNumber(activeChapter)}` : "الفصل"}
                   </Text>
                   {nextChapter && (
                     <Pressable
                       onPress={() => openChapterInApp(nextChapter)}
-                      style={[styles.pageRetryBtn, { marginTop: 8, paddingHorizontal: 18, paddingVertical: 10 }]}
+                      style={[
+                        styles.pageRetryBtn,
+                        { marginTop: 8, paddingHorizontal: 18, paddingVertical: 10 },
+                      ]}
                     >
                       <Text style={styles.pageRetryBtnText}>
-                        الانتقال إلى الفصل التالي ({nextChapter.number})
+                        الانتقال إلى الفصل التالي ({formatChapterNumber(nextChapter)})
                       </Text>
                       <Ionicons name="arrow-back" size={15} color="#09090B" />
                     </Pressable>
@@ -754,7 +1086,6 @@ export default function MangaDetailScreen() {
             />
           )}
 
-          {/* Reader Bottom Bar: Chapter Navigation */}
           <View
             style={[
               styles.readerBottomBar,
@@ -776,7 +1107,7 @@ export default function MangaDetailScreen() {
             >
               <Ionicons name="chevron-forward" size={16} color="#fff" />
               <Text style={[styles.readerNavBtnText, { color: "#fff" }]}>
-                {prevChapter ? `السابق (${prevChapter.number})` : "الفصل الأول"}
+                {prevChapter ? `السابق (${formatChapterNumber(prevChapter)})` : "الفصل الأول"}
               </Text>
             </Pressable>
 
@@ -786,7 +1117,7 @@ export default function MangaDetailScreen() {
             >
               <Ionicons name="albums-outline" size={15} color="#FBBF24" />
               <Text style={styles.readerChapterSelectText}>
-                {activeChapter ? `فصل ${activeChapter.number}` : "الفصول"}
+                {activeChapter ? `فصل ${formatChapterNumber(activeChapter)}` : "الفصول"}
               </Text>
             </Pressable>
 
@@ -802,7 +1133,7 @@ export default function MangaDetailScreen() {
               ]}
             >
               <Text style={[styles.readerNavBtnText, { color: "#09090B" }]}>
-                {nextChapter ? `التالي (${nextChapter.number})` : "آخر فصل"}
+                {nextChapter ? `التالي (${formatChapterNumber(nextChapter)})` : "آخر فصل"}
               </Text>
               <Ionicons name="chevron-back" size={16} color="#09090B" />
             </Pressable>
@@ -821,7 +1152,7 @@ const styles = StyleSheet.create({
   errorActionsRow: { flexDirection: ROW_RTL, alignItems: "center", gap: 10, marginTop: 4 },
   backButton: { borderWidth: 1, borderRadius: 12, paddingHorizontal: 18, paddingVertical: 9 },
   backButtonText: { fontSize: 13, fontFamily: "Cairo_700Bold" },
-  heroWrap: { minHeight: 330, justifyContent: "space-between", paddingBottom: 18 },
+  heroWrap: { minHeight: 320, justifyContent: "space-between", paddingBottom: 18 },
   topBar: {
     paddingHorizontal: 16,
     flexDirection: ROW_RTL,
@@ -837,22 +1168,6 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.16)",
-  },
-  sourceBadge: {
-    flexDirection: ROW_RTL,
-    alignItems: "center",
-    gap: 6,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 999,
-    backgroundColor: "rgba(0,0,0,0.6)",
-    borderWidth: 1,
-    borderColor: "rgba(245,158,11,0.4)",
-  },
-  sourceBadgeText: {
-    color: "#FBBF24",
-    fontSize: 11,
-    fontFamily: "Cairo_700Bold",
   },
   heroContent: {
     flexDirection: ROW_RTL,
@@ -893,8 +1208,8 @@ const styles = StyleSheet.create({
     width: "100%",
   },
   subTitle: {
-    fontSize: 12,
-    lineHeight: 17,
+    fontSize: 12.5,
+    lineHeight: 18,
     fontFamily: "Cairo_600SemiBold",
     textAlign: "right",
     width: "100%",
@@ -919,40 +1234,68 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontFamily: "Cairo_700Bold",
   },
-  actionsWrap: {
-    flexDirection: ROW_RTL,
+  /* Primary CTA Button: قراءة الفصول */
+  ctaWrap: {
     paddingHorizontal: 16,
-    marginTop: 6,
-    marginBottom: 8,
-    gap: 10,
+    marginTop: 8,
+    marginBottom: 10,
   },
-  readPrimaryBtn: {
+  chaptersCtaBtn: {
+    width: "100%",
+    flexDirection: ROW_RTL,
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingVertical: 13,
+    paddingHorizontal: 15,
+    borderRadius: 18,
+    shadowColor: "#0EA5E9",
+    shadowOpacity: 0.28,
+    shadowRadius: 10,
+    elevation: 5,
+  },
+  chaptersCtaRight: {
+    flexDirection: ROW_RTL,
+    alignItems: "center",
+    gap: 11,
     flex: 1,
-    flexDirection: ROW_RTL,
+  },
+  chaptersCtaIcon: {
+    width: 38,
+    height: 38,
+    borderRadius: 12,
+    backgroundColor: "rgba(9,9,11,0.16)",
     alignItems: "center",
     justifyContent: "center",
-    gap: 8,
-    paddingVertical: 13,
-    paddingHorizontal: 16,
-    borderRadius: 16,
   },
-  readPrimaryBtnText: {
+  chaptersCtaTextWrap: {
+    flex: 1,
+    alignItems: ALIGN_RIGHT,
+  },
+  chaptersCtaTitle: {
     color: "#09090B",
-    fontSize: 14,
-    fontFamily: "Cairo_700Bold",
+    fontSize: 15,
+    fontFamily: "Cairo_800ExtraBold",
+    textAlign: "right",
   },
-  SelectSourceBtn: {
+  chaptersCtaSub: {
+    color: "rgba(9,9,11,0.72)",
+    fontSize: 10.5,
+    fontFamily: "Cairo_600SemiBold",
+    textAlign: "right",
+    marginTop: 1,
+  },
+  chaptersCtaPill: {
     flexDirection: ROW_RTL,
     alignItems: "center",
-    justifyContent: "center",
-    gap: 6,
-    paddingVertical: 13,
-    paddingHorizontal: 14,
-    borderRadius: 16,
-    borderWidth: 1,
+    gap: 4,
+    backgroundColor: "rgba(9,9,11,0.14)",
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 999,
   },
-  SelectSourceBtnText: {
-    fontSize: 12.5,
+  chaptersCtaPillText: {
+    color: "#09090B",
+    fontSize: 11.5,
     fontFamily: "Cairo_700Bold",
   },
   genresWrap: {
@@ -960,7 +1303,7 @@ const styles = StyleSheet.create({
     flexWrap: "wrap",
     paddingHorizontal: 16,
     gap: 8,
-    marginTop: 6,
+    marginTop: 4,
     marginBottom: 14,
   },
   genreChip: {
@@ -979,6 +1322,16 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     borderWidth: 1,
     padding: 15,
+  },
+  sectionHeaderRight: {
+    flexDirection: ROW_RTL,
+    alignItems: "center",
+    gap: 8,
+  },
+  sectionBar: {
+    width: 4,
+    height: 18,
+    borderRadius: 2,
   },
   sectionTitle: {
     fontSize: 15,
@@ -1009,6 +1362,107 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontFamily: "Cairo_700Bold",
   },
+  synopsisText: {
+    fontSize: 13.5,
+    lineHeight: 23,
+    fontFamily: "Cairo_400Regular",
+    textAlign: "right",
+    writingDirection: "rtl",
+  },
+  readMoreBtn: {
+    flexDirection: ROW_RTL,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    marginTop: 12,
+    paddingTop: 10,
+    borderTopWidth: 1,
+  },
+  readMoreText: {
+    fontSize: 12,
+    fontFamily: "Cairo_700Bold",
+  },
+  /* Trailer Section */
+  trailerSection: {
+    marginHorizontal: 16,
+    marginBottom: 14,
+  },
+  trailerBtn: {
+    height: 182,
+    borderRadius: 16,
+    overflow: "hidden",
+    position: "relative",
+    backgroundColor: "#111",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.12)",
+  },
+  trailerImg: {
+    width: "100%",
+    height: "100%",
+    resizeMode: "cover",
+  },
+  trailerPlayBtn: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  trailerPlay: {
+    width: 56,
+    height: 56,
+    backgroundColor: "rgba(255,0,0,0.88)",
+    borderRadius: 28,
+    alignItems: "center",
+    justifyContent: "center",
+    shadowColor: "#FF0000",
+    shadowOpacity: 0.5,
+    shadowRadius: 12,
+    elevation: 8,
+  },
+  trailerBottom: {
+    position: "absolute",
+    bottom: 0,
+    left: 0,
+    right: 0,
+    padding: 12,
+    alignItems: ALIGN_RIGHT,
+  },
+  trailerLabel: {
+    fontSize: 14,
+    fontFamily: "Cairo_800ExtraBold",
+    color: "#fff",
+    textAlign: "right",
+  },
+  trailerSub: {
+    fontSize: 10.5,
+    color: "rgba(255,255,255,0.68)",
+    fontFamily: "Cairo_400Regular",
+    marginTop: 2,
+    textAlign: "right",
+  },
+  trailerSheetHeader: {
+    flexDirection: ROW_RTL,
+    alignItems: "center",
+    gap: 10,
+    paddingHorizontal: 14,
+    paddingBottom: 10,
+  },
+  trailerModalTitle: {
+    fontSize: 14,
+    fontFamily: "Cairo_800ExtraBold",
+    textAlign: "right",
+  },
+  trailerCloseBtn: {
+    width: 36,
+    height: 36,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(255,255,255,0.1)",
+    borderRadius: 12,
+  },
   infoGrid: {
     flexDirection: ROW_RTL,
     flexWrap: "wrap",
@@ -1018,6 +1472,9 @@ const styles = StyleSheet.create({
     width: "50%",
     alignItems: ALIGN_RIGHT,
     paddingLeft: 8,
+  },
+  infoItemWide: {
+    width: "100%",
   },
   infoLabel: {
     fontSize: 11,
@@ -1032,62 +1489,107 @@ const styles = StyleSheet.create({
     textAlign: "right",
     width: "100%",
   },
-  synopsisText: {
-    fontSize: 13.5,
-    lineHeight: 23,
-    fontFamily: "Cairo_400Regular",
-    textAlign: "right",
-    writingDirection: "rtl",
+  /* Standalone Chapters Screen */
+  chaptersScreen: {
+    flex: 1,
   },
-  chaptersSection: {
-    marginHorizontal: 16,
-    marginTop: 4,
-  },
-  chaptersHeaderRow: {
+  chaptersScreenHeader: {
     flexDirection: ROW_RTL,
     alignItems: "center",
     justifyContent: "space-between",
-    marginBottom: 12,
-    flexWrap: "wrap",
-    gap: 8,
+    paddingHorizontal: 16,
+    paddingBottom: 12,
+    borderBottomWidth: 1,
+    gap: 10,
   },
-  chaptersTitleRow: {
+  chaptersScreenHeaderRight: {
+    flex: 1,
     flexDirection: ROW_RTL,
     alignItems: "center",
-    gap: 8,
+    gap: 10,
   },
-  chaptersCountBadge: {
-    backgroundColor: "rgba(245,158,11,0.16)",
+  chaptersBackBtn: {
+    width: 38,
+    height: 38,
+    borderRadius: 12,
     borderWidth: 1,
-    borderColor: "rgba(245,158,11,0.38)",
-    borderRadius: 999,
-    paddingHorizontal: 9,
-    paddingVertical: 2,
-  },
-  chaptersCountText: {
-    color: "#FBBF24",
-    fontSize: 11,
-    fontFamily: "Cairo_700Bold",
-  },
-  chaptersFilterRow: {
-    flexDirection: ROW_RTL,
     alignItems: "center",
-    gap: 8,
+    justifyContent: "center",
   },
-  sortBtn: {
-    flexDirection: ROW_RTL,
-    alignItems: "center",
-    gap: 4,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 999,
-    borderWidth: 1,
+  chaptersHeaderTitles: {
+    flex: 1,
+    alignItems: ALIGN_RIGHT,
   },
-  sortBtnText: {
+  chaptersScreenTitle: {
+    fontSize: 15.5,
+    fontFamily: "Cairo_800ExtraBold",
+    textAlign: "right",
+  },
+  chaptersScreenSubtitle: {
     fontSize: 11,
     fontFamily: "Cairo_600SemiBold",
+    textAlign: "right",
+    marginTop: 1,
+  },
+  chaptersCountBadge: {
+    backgroundColor: "rgba(14,165,233,0.14)",
+    borderWidth: 1,
+    borderColor: "rgba(14,165,233,0.35)",
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+  },
+  chaptersCountText: {
+    color: "#38BDF8",
+    fontSize: 11.5,
+    fontFamily: "Cairo_700Bold",
+  },
+  chaptersControlsWrap: {
+    paddingHorizontal: 16,
+    paddingTop: 12,
+    paddingBottom: 6,
+    gap: 10,
+  },
+  quickReadRow: {
+    flexDirection: ROW_RTL,
+    gap: 10,
+  },
+  quickReadPrimary: {
+    flex: 1,
+    flexDirection: ROW_RTL,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 7,
+    paddingVertical: 11,
+    paddingHorizontal: 14,
+    borderRadius: 14,
+  },
+  quickReadPrimaryText: {
+    color: "#09090B",
+    fontSize: 13,
+    fontFamily: "Cairo_700Bold",
+  },
+  quickReadSecondary: {
+    flexDirection: ROW_RTL,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    paddingVertical: 11,
+    paddingHorizontal: 13,
+    borderRadius: 14,
+    borderWidth: 1,
+  },
+  quickReadSecondaryText: {
+    fontSize: 12,
+    fontFamily: "Cairo_700Bold",
+  },
+  searchAndSortRow: {
+    flexDirection: ROW_RTL,
+    alignItems: "center",
+    gap: 8,
   },
   chapterSearchBox: {
+    flex: 1,
     flexDirection: ROW_RTL,
     alignItems: "center",
     borderRadius: 12,
@@ -1095,7 +1597,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     height: 40,
     gap: 8,
-    marginBottom: 12,
   },
   chapterSearchInput: {
     flex: 1,
@@ -1104,16 +1605,21 @@ const styles = StyleSheet.create({
     textAlign: "right",
     paddingVertical: 0,
   },
-  emptyBox: {
-    borderRadius: 16,
-    borderWidth: 1,
-    padding: 24,
+  sortBtn: {
+    flexDirection: ROW_RTL,
     alignItems: "center",
-    justifyContent: "center",
-    gap: 10,
+    gap: 5,
+    paddingHorizontal: 12,
+    height: 40,
+    borderRadius: 12,
+    borderWidth: 1,
+  },
+  sortBtnText: {
+    fontSize: 11.5,
+    fontFamily: "Cairo_700Bold",
   },
   emptyBoxText: {
-    fontSize: 12.5,
+    fontSize: 13,
     fontFamily: "Cairo_600SemiBold",
     textAlign: "center",
     lineHeight: 20,
@@ -1124,7 +1630,7 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     paddingHorizontal: 12,
     paddingVertical: 11,
-    borderRadius: 16,
+    borderRadius: 15,
     borderWidth: 1,
     marginBottom: 9,
     gap: 10,
@@ -1136,12 +1642,18 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   chapterIconWrap: {
-    width: 36,
+    minWidth: 38,
     height: 36,
+    paddingHorizontal: 6,
     borderRadius: 11,
     borderWidth: 1,
     alignItems: "center",
     justifyContent: "center",
+  },
+  chapterNumBadgeText: {
+    color: "#38BDF8",
+    fontSize: 12,
+    fontFamily: "Cairo_700Bold",
   },
   chapterTexts: {
     flex: 1,
@@ -1164,8 +1676,7 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   chapterTranslatedLabel: {
-    color: "#FBBF24",
-    fontSize: 11,
+    fontSize: 11.5,
     fontFamily: "Cairo_700Bold",
   },
   modalBackdrop: {

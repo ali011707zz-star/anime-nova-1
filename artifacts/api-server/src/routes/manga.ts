@@ -36,6 +36,190 @@ function setCached<T>(key: string, data: T, ttlMs: number): void {
   cache.set(key, { data, expiresAt: Date.now() + ttlMs });
 }
 
+
+
+const KNOWN_AR_TITLES: Record<string, string> = {
+  "one piece": "ون بيس",
+  "kingdom": "المملكة (كينغدوم)",
+  "berserk": "بيرسيرك",
+  "jujutsu kaisen": "جوجوتسو كايسن",
+  "chainsaw man": "رجل المنشار",
+  "attack on titan": "هجوم العمالقة",
+  "shingeki no kyojin": "هجوم العمالقة",
+  "hunter x hunter": "هنتر إكس هنتر",
+  "bleach": "بليتش",
+  "naruto": "ناروتو",
+  "black clover": "البرسيم الأسود",
+  "solo leveling": "الارتقاء المنفرد",
+  "tower of god": "برج الإله",
+  "omniscient reader": "قارئ وجهة نظر كل شيء",
+  "omniscient reader's viewpoint": "قارئ وجهة نظر كل شيء",
+  "the beginning after the end": "البداية بعد النهاية",
+  "blue lock": "القفل الأزرق (بلو لوك)",
+  "frieren": "فريرين: ما وراء نهاية الرحلة",
+  "dandadan": "دان دا دان",
+  "sakamoto days": "أيام ساكاموتو",
+  "kaiju no. 8": "كايجو رقم 8",
+  "monster": "مونستر",
+  "vagabond": "فاغابوند",
+  "vinland saga": "فينلاند ساغا",
+  "tokyo ghoul": "طوكيو غول",
+  "death note": "مذكرة الموت",
+  "demon slayer": "قاتل الشياطين",
+  "kimetsu no yaiba": "قاتل الشياطين",
+  "one punch man": "ون بنش مان",
+  "one-punch man": "ون بنش مان",
+  "my hero academia": "أكاديميتي للأبطال",
+  "spy x family": "سباي إكس فاميلي",
+  "haikyu!!": "هايكيو!!",
+  "tokyo revengers": "طوكيو ريفنجرز",
+  "dr. stone": "دكتور ستون",
+  "oshi no ko": "أوشي نو كو",
+  "goodnight punpun": "طابت ليلتك بونبون",
+  "gantz": "غانتز",
+  "claymore": "كلايمور",
+  "slam dunk": "سلام دانك",
+  "dragon ball": "دراغون بول",
+  "dragon ball super": "دراغون بول سوبر",
+  "boruto": "بوروتو",
+  "fairy tail": "فيري تيل",
+  "fullmetal alchemist": "الخيميائي المعدني الكامل",
+  "the promised neverland": "نيفرلاند الموعودة",
+  "seven deadly sins": "الخطايا السبع المميتة",
+  "eleceed": "إليزيد",
+  "nano machine": "النانو ماشين",
+  "wind breaker": "ويند بريكر",
+  "lookism": "ازدواجية المظهر (لوكيسم)",
+  "the greatest estate developer": "أعظم مهندس في العالم",
+  "return of the mount hua sect": "عودة طائفة جبل هوا",
+  "legend of the northern blade": "أسطورة النصل الشمالي",
+  "mercenary enrollment": "التحاق المرتزقة",
+  "who made me a princess": "من جعلني أميرة",
+  "villains are destined to die": "مصير الأشرار هو الموت",
+};
+
+const arTitleCache = new Map<string, string>();
+const trailerCache = new Map<string, { id: string; site: string; thumbnail: string; url: string } | null>();
+
+function lookupKnownArabicTitle(enTitle: string): string | null {
+  const clean = (enTitle || "").trim();
+  if (!clean) return null;
+  if (/[\u0600-\u06FF]/.test(clean)) return clean;
+  const lower = clean.toLowerCase();
+  if (KNOWN_AR_TITLES[lower]) return KNOWN_AR_TITLES[lower];
+  if (arTitleCache.has(lower)) return arTitleCache.get(lower)!;
+  for (const [k, v] of Object.entries(KNOWN_AR_TITLES)) {
+    if (lower === k || lower.startsWith(k + ":") || lower.startsWith(k + " ")) {
+      return v;
+    }
+  }
+  return null;
+}
+
+async function translateTitlesBatchToArabic(titles: string[]): Promise<Map<string, string>> {
+  const result = new Map<string, string>();
+  const toTranslate: string[] = [];
+
+  for (const raw of titles) {
+    const t = (raw || "").trim();
+    if (!t) continue;
+    const known = lookupKnownArabicTitle(t);
+    if (known) {
+      result.set(t, known);
+    } else if (!toTranslate.includes(t)) {
+      toTranslate.push(t);
+    }
+  }
+
+  if (toTranslate.length === 0) return result;
+
+  try {
+    const joined = toTranslate.join("\n");
+    const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=en&tl=ar&dt=t&q=${encodeURIComponent(joined)}`;
+    const res = await fetch(url, {
+      headers: { "User-Agent": UA },
+      signal: AbortSignal.timeout(2500),
+    });
+    if (res.ok) {
+      const data = (await res.json()) as any;
+      const fullTranslated = Array.isArray(data?.[0])
+        ? data[0].map((seg: any) => String(seg?.[0] || "")).join("")
+        : "";
+      const lines = fullTranslated.split(/\r?\n/).map((l: string) => l.trim());
+      toTranslate.forEach((orig, i) => {
+        const ar = lines[i] || orig;
+        arTitleCache.set(orig.toLowerCase(), ar);
+        result.set(orig, ar);
+      });
+    }
+  } catch {
+    // Fallback to original title if translation times out
+  }
+
+  for (const orig of toTranslate) {
+    if (!result.has(orig)) result.set(orig, orig);
+  }
+  return result;
+}
+
+async function resolveYoutubeTrailer(
+  enTitle: string,
+  arTitle: string,
+  source: "manga" | "manhwa"
+): Promise<{ id: string; site: string; thumbnail: string; url: string } | null> {
+  const baseQuery = (enTitle || arTitle || "").trim();
+  if (!baseQuery) return null;
+  const cacheKey = `${source}:${baseQuery.toLowerCase()}`;
+  if (trailerCache.has(cacheKey)) return trailerCache.get(cacheKey)!;
+
+  try {
+    const suffix = source === "manhwa" ? "manhwa webtoon official trailer PV" : "manga anime official trailer PV";
+    const searchUrl = `https://www.youtube.com/results?search_query=${encodeURIComponent(baseQuery + " " + suffix)}`;
+    const res = await fetch(searchUrl, {
+      headers: {
+        "User-Agent": UA,
+        "Accept-Language": "en-US,en;q=0.9",
+      },
+      signal: AbortSignal.timeout(2400),
+    });
+    if (res.ok) {
+      const html = await res.text();
+      const match = html.match(/"videoId":"([a-zA-Z0-9_-]{11})"/);
+      if (match && match[1]) {
+        const videoId = match[1];
+        const trailer = {
+          id: videoId,
+          site: "youtube",
+          thumbnail: `https://img.youtube.com/vi/${videoId}/hqdefault.jpg`,
+          url: `https://www.youtube.com/watch?v=${videoId}`,
+        };
+        trailerCache.set(cacheKey, trailer);
+        return trailer;
+      }
+    }
+  } catch {}
+
+  trailerCache.set(cacheKey, null);
+  return null;
+}
+
+function normalizeTitleFields(item: any, arTitleRaw: string, enTitleRaw: string) {
+  const enTitle = (enTitleRaw || arTitleRaw || "").trim();
+  const arTitle = (arTitleRaw || enTitle || "").trim();
+  item.arTitle = arTitle;
+  item.enTitle = enTitle;
+  item.arabicTitle = arTitle;
+  item.englishTitle = enTitle;
+  item.displayTitle = arTitle || enTitle;
+  item.title = {
+    romaji: enTitle || arTitle,
+    english: enTitle || arTitle,
+    native: arTitle || enTitle,
+  };
+  item.cover = item.poster;
+  item.banner = item.bannerImage || item.poster;
+  return item;
+}
 // ── HTML Helpers ─────────────────────────────────────────────────────────────
 function decodeHtmlEntities(str: string): string {
   if (!str) return "";
@@ -242,9 +426,14 @@ async function fetchMangaDarCatalog(opts: {
             })
             .filter(Boolean);
 
+          const trMap = await translateTitlesBatchToArabic(items.map((it: any) => String(it.englishTitle || it.title || "")));
+          for (const it of items) {
+            const enT = String(it.englishTitle || it.title || "");
+            const arT = trMap.get(enT) || enT;
+            normalizeTitleFields(it, arT, enT);
+          }
           const result = {
             source: "manga",
-            sourceSite: "https://mangadar.com/manga/",
             page: 1,
             hasNextPage: false,
             items,
@@ -277,14 +466,19 @@ async function fetchMangaDarCatalog(opts: {
   const items = withChapters.length > 0 ? withChapters : allItems;
   const hasNextPage = html.includes(`/manga/page/${page + 1}/`) || allItems.length >= 24;
 
+  const trMap = await translateTitlesBatchToArabic(items.map((it: any) => String(it.englishTitle || it.title || "")));
+  for (const it of items) {
+    const enT = String(it.englishTitle || it.title || "");
+    const arT = trMap.get(enT) || enT;
+    normalizeTitleFields(it, arT, enT);
+  }
   const result = {
     source: "manga",
-    sourceSite: "https://mangadar.com/manga/",
     page,
     hasNextPage,
     items,
   };
-  setCached(cacheKey, result, 10 * 60 * 1000);
+  setCached(cacheKey, result, 15 * 60 * 1000);
   return result;
 }
 
@@ -295,7 +489,11 @@ async function fetchMangaDarDetail(slug: string) {
   if (cached) return cached;
 
   const url = `${MANGADAR_BASE}/manga/${encodeURIComponent(cleanSlug)}/`;
-  const html = await fetchMangaDarHtml(url);
+  const slugWords = cleanSlug.replace(/-/g, " ");
+  const [html, earlyTrailer] = await Promise.all([
+    fetchMangaDarHtml(url),
+    resolveYoutubeTrailer(slugWords, "", "manga"),
+  ]);
 
   // Parse JSON-LD
   let ldData: any = null;
@@ -317,10 +515,18 @@ async function fetchMangaDarDetail(slug: string) {
 
   const h1Match = html.match(/<h1[^>]*>([\s\S]*?)<\/h1>/i);
   const h1Title = decodeHtmlEntities(stripHtml(h1Match ? h1Match[1] : ""));
-  const ldName = decodeHtmlEntities(String(ldData?.name || ""));
-  const title = h1Title || ldName || cleanSlug;
-  const arabicTitle = ldName || title;
-  const englishTitle = h1Title || title;
+  const rawLdName = decodeHtmlEntities(String(ldData?.name || ""))
+    .replace(/^مانجا\s+/i, "")
+    .replace(/^مانهوا\s+/i, "")
+    .replace(/\s+مترجم[ةه]?$/i, "")
+    .trim();
+  const englishTitle = h1Title || rawLdName || cleanSlug;
+  let arabicTitle = rawLdName && /[\u0600-\u06FF]/.test(rawLdName) ? rawLdName : "";
+  if (!arabicTitle) {
+    const trMap = await translateTitlesBatchToArabic([englishTitle]);
+    arabicTitle = trMap.get(englishTitle) || englishTitle;
+  }
+  const title = arabicTitle || englishTitle;
 
   // Synopsis
   const synMatch = html.match(/x-ref="synContent"[^>]*>([\s\S]*?)<\/div>/i);
@@ -372,11 +578,12 @@ async function fetchMangaDarDetail(slug: string) {
     })
     .sort((a, b) => a.number - b.number);
 
-  const detail = {
+  const trailer = earlyTrailer || (await resolveYoutubeTrailer(englishTitle, arabicTitle, "manga"));
+
+  const detail: any = {
     id: `md--${cleanSlug}`,
     slug: cleanSlug,
     source: "manga",
-    sourceUrl: url,
     title,
     arabicTitle,
     englishTitle,
@@ -392,11 +599,14 @@ async function fetchMangaDarDetail(slug: string) {
     author,
     countryOfOrigin: "JP",
     typeLabel: "مانجا",
+    trailer,
+    trailerYT: trailer?.id || null,
     chaptersCount: chapters.length,
     chapters,
   };
+  normalizeTitleFields(detail, arabicTitle, englishTitle);
 
-  setCached(cacheKey, detail, 15 * 60 * 1000);
+  setCached(cacheKey, detail, 60 * 60 * 1000);
   return detail;
 }
 
@@ -559,16 +769,21 @@ async function fetchAzoraflyCatalog(opts: {
     };
   });
 
+  const trMap = await translateTitlesBatchToArabic(items.map((it: any) => String(it.englishTitle || it.title || "")));
+  for (const it of items) {
+    const enT = String(it.englishTitle || it.title || "");
+    const arT = trMap.get(enT) || enT;
+    normalizeTitleFields(it, arT, enT);
+  }
   const hasNextPage = page * 40 < totalCount && items.length > 0;
   const result = {
     source: "manhwa",
-    sourceSite: "https://azorafly.com/",
     page,
     totalCount,
     hasNextPage,
     items,
   };
-  setCached(cacheKey, result, 10 * 60 * 1000);
+  setCached(cacheKey, result, 15 * 60 * 1000);
   return result;
 }
 
@@ -579,16 +794,30 @@ async function fetchAzoraflyDetail(slug: string) {
   if (cached) return cached;
 
   const url = `${AZORAFLY_BASE}/series/${encodeURIComponent(cleanSlug)}`;
-  const data = await fetchAzoraflyTsrData(url);
+  const slugWords = cleanSlug.replace(/-/g, " ");
+  const [data, earlyTrailer] = await Promise.all([
+    fetchAzoraflyTsrData(url),
+    resolveYoutubeTrailer(slugWords, "", "manhwa"),
+  ]);
   const post = data?.post;
   if (!post) {
     throw new Error(`Manhwa series not found on Azorafly: ${cleanSlug}`);
   }
 
-  const title = String(post.postTitle || cleanSlug).trim();
-  const altTitle = String(post.alternativeTitles || "")
-    .split(/\r?\n/)[0]
-    ?.trim();
+  const rawPostTitle = String(post.postTitle || cleanSlug).trim();
+  const altLines = String(post.alternativeTitles || "")
+    .split(/[\r\n،,/|]+/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const arAlt = altLines.find((s) => /[\u0600-\u06FF]/.test(s));
+  const enAlt = altLines.find((s) => /[a-zA-Z]/.test(s) && !/[\u0600-\u06FF]/.test(s));
+  const englishTitle = (/[\u0600-\u06FF]/.test(rawPostTitle) ? enAlt || rawPostTitle : rawPostTitle).trim();
+  let arabicTitle = (/[\u0600-\u06FF]/.test(rawPostTitle) ? rawPostTitle : arAlt || "").trim();
+  if (!arabicTitle) {
+    const trMap = await translateTitlesBatchToArabic([englishTitle]);
+    arabicTitle = trMap.get(englishTitle) || englishTitle;
+  }
+  const title = arabicTitle || englishTitle;
   const poster = String(post.featuredImage || "");
   const description = stripHtml(String(post.postContent || ""));
   const { status, statusAr } = mapAzoraflyStatus(post.seriesStatus);
@@ -623,14 +852,15 @@ async function fetchAzoraflyDetail(slug: string) {
     })
     .sort((a: any, b: any) => a.number - b.number);
 
-  const detail = {
+  const trailer = earlyTrailer || (await resolveYoutubeTrailer(englishTitle, arabicTitle, "manhwa"));
+
+  const detail: any = {
     id: `az--${cleanSlug}`,
     slug: cleanSlug,
     source: "manhwa",
-    sourceUrl: `${AZORAFLY_BASE}/series/${cleanSlug}`,
     title,
-    arabicTitle: title,
-    englishTitle: altTitle || title,
+    arabicTitle,
+    englishTitle,
     description,
     poster,
     coverImage: { extraLarge: poster, large: poster },
@@ -643,11 +873,14 @@ async function fetchAzoraflyDetail(slug: string) {
     author: String(post.author || ""),
     countryOfOrigin: "KR",
     typeLabel: "مانهوا",
+    trailer,
+    trailerYT: trailer?.id || null,
     chaptersCount: chapters.length,
     chapters,
   };
+  normalizeTitleFields(detail, arabicTitle, englishTitle);
 
-  setCached(cacheKey, detail, 15 * 60 * 1000);
+  setCached(cacheKey, detail, 60 * 60 * 1000);
   return detail;
 }
 

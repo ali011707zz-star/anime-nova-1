@@ -233,10 +233,14 @@ export default function HomeScreen() {
     const list = manhwaData?.items || [];
     return list.slice(0, 16).map((m: any) => ({
       id: String(m.id),
-      title: m.arabicTitle || m.arTitle || (typeof m.title === "string" ? m.title : m.title?.native || m.title?.english || m.title?.romaji) || "مانهوا",
-      subtitle: m.englishTitle || m.enTitle || (typeof m.title === "object" ? m.title?.english : "") || "",
+      title: m.arTitle || m.arabicTitle || (typeof m.title === "string" ? m.title : m.title?.native || m.title?.english || m.title?.romaji) || "مانهوا",
+      subtitle: m.enTitle || m.englishTitle || (typeof m.title === "object" ? m.title?.english : "") || "",
       poster: m.poster || m.coverImage?.extraLarge || m.coverImage?.large || m.cover || "",
-      type: m.typeLabel || "مانهوا ملونة",
+      status: m.status || "RELEASING",
+      chapters: m.chapters || 0,
+      score: m.averageScore || 86,
+      source: "manhwa",
+      type: "مانهوا ملونة",
     }));
   }, [manhwaData]);
 
@@ -244,10 +248,14 @@ export default function HomeScreen() {
     const list = jpMangaData?.items || [];
     return list.slice(0, 16).map((m: any) => ({
       id: String(m.id),
-      title: m.arabicTitle || m.arTitle || (typeof m.title === "string" ? m.title : m.title?.native || m.title?.english || m.title?.romaji) || "مانجا",
-      subtitle: m.englishTitle || m.enTitle || (typeof m.title === "object" ? m.title?.english : "") || "",
+      title: m.arTitle || m.arabicTitle || (typeof m.title === "string" ? m.title : m.title?.native || m.title?.english || m.title?.romaji) || "مانجا",
+      subtitle: m.enTitle || m.englishTitle || (typeof m.title === "object" ? m.title?.english : "") || "",
       poster: m.poster || m.coverImage?.extraLarge || m.coverImage?.large || m.cover || "",
-      type: m.typeLabel || "مانجا مترجمة",
+      status: m.status || "RELEASING",
+      chapters: m.chapters || 0,
+      score: m.averageScore || 85,
+      source: "manga",
+      type: "مانجا مترجمة",
     }));
   }, [jpMangaData]);
 
@@ -888,7 +896,7 @@ export default function HomeScreen() {
               contentContainerStyle={{ paddingHorizontal: railSidePadding, gap: railGap }}
               renderItem={({ item }) => (
                 <Pressable
-                  onPress={() => router.push(`/manga/${encodeURIComponent(String(item.id))}` as any)}
+                  onPress={() => router.push({ pathname: "/manga/[id]" as any, params: { id: String(item.id), title: item.title, english: item.subtitle, cover: item.poster, status: item.status, chapters: String(item.chapters || ""), score: String(item.score || ""), source: item.source } })}
                   focusable={isTvLayout}
                   style={({ focused }) => [
                     todayStyles.card,
@@ -955,7 +963,7 @@ export default function HomeScreen() {
               contentContainerStyle={{ paddingHorizontal: railSidePadding, gap: railGap }}
               renderItem={({ item }) => (
                 <Pressable
-                  onPress={() => router.push(`/manga/${encodeURIComponent(String(item.id))}` as any)}
+                  onPress={() => router.push({ pathname: "/manga/[id]" as any, params: { id: String(item.id), title: item.title, english: item.subtitle, cover: item.poster, status: item.status, chapters: String(item.chapters || ""), score: String(item.score || ""), source: item.source } })}
                   focusable={isTvLayout}
                   style={({ focused }) => [
                     todayStyles.card,
