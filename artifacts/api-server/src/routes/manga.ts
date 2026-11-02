@@ -192,7 +192,7 @@ async function resolveYoutubeTrailer(
         "User-Agent": UA,
         "Accept-Language": "en-US,en;q=0.9",
       },
-      signal: AbortSignal.timeout(2600),
+      signal: AbortSignal.timeout(5500),
     });
     if (res.ok) {
       const html = await res.text();
@@ -276,13 +276,14 @@ function extractSynopsisCharacters(
 ): MangaCharacterEdge[] {
   const cleanDesc = String(description || "").replace(/[\u064B-\u065F]/g, "");
   const patterns = [
-    /(?:تُدعى|تدعى|يُدعى|يدعى|باسم|اسمه|اسمها|في شخصية|شخصية|البطل|البطلة)\s+[«"']?([\u0600-\u06FF]{3,12}(?:\s+[\u0600-\u06FF]{3,12})?)[»"'،,.!؟\s]/g,
-    /(?:تعيش|يسكن|الأمير|الأميرة|السيد الشاب|الشابة|الشاب|الفتاة|المحارب|الساحر)\s+([\u0600-\u06FF]{3,12})[،,.]/g,
+    /(?:تُدعى|تدعى|يُدعى|يدعى|باسم|اسمه|اسمها|في شخصية)\s+[«"']?([\u0600-\u06FF]{3,11}(?:\s+[\u0600-\u06FF]{3,11})?)[»"'،,.!؟]/g,
+    /(?:حيث تعيش|بينما يعيش|تقطن|يسكن)\s+([\u0600-\u06FF]{3,11})(?:[،,.]|\s+في\b)/g,
   ];
   const stopWords = new Set([
     "حياة", "عالم", "مدينة", "شخص", "نفس", "ذلك", "تلك", "هذا", "هذه",
     "قصة", "رواية", "مانهوا", "مانجا", "أكاديمية", "شركة", "عائلة",
     "طابق", "قدرة", "بسبب", "خلال", "عندما", "حول", "بين", "فوق", "تحت",
+    "كانت", "كان", "على", "إلى", "التي", "الذي", "وهي", "وهو", "حيث", "هناك",
   ]);
   const names: string[] = [];
   for (const reg of patterns) {
@@ -363,6 +364,7 @@ async function resolveMangaExtras(opts: {
 
   let characters: MangaCharacterEdge[] = [];
   let anilistTrailer: { id: string; site: string; thumbnail: string; url: string } | null = null;
+  const ytTrailerPromise = resolveYoutubeTrailer(opts.englishTitle, opts.arabicTitle, opts.source);
 
   for (const search of candidateTitles.slice(0, 2)) {
     try {
@@ -508,9 +510,8 @@ async function resolveMangaExtras(opts: {
     );
   }
 
-  const trailer =
-    anilistTrailer ||
-    (await resolveYoutubeTrailer(opts.englishTitle, opts.arabicTitle, opts.source));
+  const ytTrailer = await ytTrailerPromise;
+  const trailer = anilistTrailer || ytTrailer;
 
   const out = { characters, trailer };
   extrasCache.set(cacheKey, out);
