@@ -50,8 +50,8 @@ export const DEFAULT_CONFIG: RemoteConfig = {
     // مصادر يابانية مترجمة (HI → DU → اولوية عالية)
     kawaii: true, animewitcher: true, hianime: true, dulo_anim: true,
     // مصادر سريعة (ياباني / إنجليزي)
-    vidlink_anim: true, anineko: true, anikoto: true,
-    vidfast: true, anikototv: true, animekai: true,
+    vidlink_anim: true, anineko: false, anikoto: true,
+    vidfast: true, anikototv: true, animekai: false,
     // مصادر عربية
     shahiid: true, animelek: true, animedar: true,
     okanime: true, ristoanime: true, animeify: true,

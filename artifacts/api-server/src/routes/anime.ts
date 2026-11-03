@@ -109,7 +109,9 @@ async function pgTranslateSave(key: string, translated: string, from: string, to
   } catch { /* silent */ }
 }
 const router = Router();
-const TEMPORARILY_DISABLED_SOURCE_SITES = new Set<string>();
+// Disabled by the user; keep these out of both availability probes and
+// playback extraction even if stale client/config data still requests them.
+const TEMPORARILY_DISABLED_SOURCE_SITES = new Set<string>(["animekai", "anineko"]);
 
 async function pipeWebMediaBody(
   body: ReadableStream<Uint8Array> | null,
@@ -14587,26 +14589,25 @@ router.get("/anime/sources-stream", scraperQueueMiddleware, async (req, res) => 
     await fallback(hint);
   }
 
-  // Reuse a supplied AniList ID immediately. Resolve by title only when it is
-  // missing; only ID-dependent providers await this bounded lookup.
+  // Resolve AniList in parallel with provider checks. Only ID-dependent
+  // providers await this bounded lookup; title/catalog providers can emit
+  // availability rows immediately instead of holding the whole picker.
   const aniListIdResolution = (!closed && title)
-    ? anilistId
-      ? Promise.resolve(anilistId)
-      : Promise.race([
-          resolveAniListIdForSource(title, english, titleVariants, titleAr),
-          new Promise<number | undefined>(resolve => setTimeout(() => resolve(undefined), 3500)),
-        ]).then(resolvedByTitle => {
-          if (resolvedByTitle) anilistId = resolvedByTitle;
-          tracePlayback(
-            sourceCheckTrace,
-            "sources-stream",
-            "anilist_resolution",
-            "anilist",
-            Date.now() - sourceCheckStartedAt,
-            `found=${Boolean(resolvedByTitle)}`,
-          );
-          return anilistId;
-        }).catch(() => anilistId)
+    ? Promise.race([
+        resolveAniListIdForSource(title, english, titleVariants, titleAr),
+        new Promise<number | undefined>(resolve => setTimeout(() => resolve(undefined), 3500)),
+      ]).then(resolvedByTitle => {
+        if (resolvedByTitle) anilistId = resolvedByTitle;
+        tracePlayback(
+          sourceCheckTrace,
+          "sources-stream",
+          "anilist_resolution",
+          "anilist",
+          Date.now() - sourceCheckStartedAt,
+          `found=${Boolean(resolvedByTitle)}`,
+        );
+        return anilistId;
+      }).catch(() => anilistId)
     : Promise.resolve(anilistId);
   if (!checkOnly) {
     // Some home/latest links carry a catalog id rather than an AniList id.
@@ -15419,10 +15420,7 @@ router.get("/anime/sources-stream", scraperQueueMiddleware, async (req, res) => 
       // ── ياباني مترجم (AniList ID) ─────────────────────────────────
       scrapeCached("kawaii",       () => getKawaiiAnimeSources(title, english, ep, anilistId), false, 14000),
       scrapeCached("megaplay",     () => getMegaPlayAnimeSources(title, english, ep, anilistId), false, 18000),
-      // AK and AN are visible in both clients; include them in the first availability pass too.
-      // Previously they existed only in fetch-source, so the picker reported them as missing.
-      scrapeCached("animekai",     () => getAnimeKaiSources(title, english, ep, anilistId),      false, 26000),
-      scrapeCached("anineko",      () => getAninekoSources(title, english, ep, titleVariants),    false, 30000),
+      // AnimeKai and AniNeko are disabled by policy and must not be probed.
       // FX and GO were fetchable only after a tap, so the availability pass
       // incorrectly marked them missing. Discover them in the same parallel pass.
       scrapeCached("anifox",       () => catalogHintFor("anifox").then((hint) =>
@@ -15530,6 +15528,8 @@ router.get("/anime/fetch-source", scraperQueueMiddleware, async (req, res) => {
     "re",
     "anivexa_re",
     "consumet_reanime",
+    "animekai",
+    "anineko",
   ]);
   if (DISABLED_SOURCE_SITES.has(requestedSite)) {
     res.json({ sources: [], disabled: true });
@@ -15782,6 +15782,7 @@ router.get("/anime/fetch-source", scraperQueueMiddleware, async (req, res) => {
   ]);
   // الطلبات الداخلية (x-internal:1) تتجاوز القائمة لتسمح لـ animation.ts باستدعاء moviz_time وغيره
   const DISABLED_ANIME_SOURCES = new Set([
+    "animekai", "anineko",
     "anikoto", "shirayuki_anikoto", "shirayuki_animix",
     "anivexa_anikoto", "anivexa_anidbapp",
     "reanime", "re", "anivexa_re",

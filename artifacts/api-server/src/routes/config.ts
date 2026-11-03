@@ -6,7 +6,13 @@ import { isWebAdmin } from "./webAdmin.js";
 
 const router = Router();
 const REMOTE_CONFIG_KEY = "remote_config";
-const PERMANENTLY_DISABLED_SOURCES = ["anivexa_re", "reanime", "consumet_reanime"] as const;
+const PERMANENTLY_DISABLED_SOURCES = [
+  "anivexa_re",
+  "reanime",
+  "consumet_reanime",
+  "animekai",
+  "anineko",
+] as const;
 
 const DEFAULT_CONFIG = {
   version: "1.0.0",
@@ -22,9 +28,9 @@ const DEFAULT_CONFIG = {
     anikoto:      true,
     animepahe:    true,
     animewitcher: true,
-    animekai:      true,
+    animekai:      false,
     megaplay:      true,
-    anineko:       true,
+    anineko:       false,
     anifox:        true,
     anslayer:      true,
     sanime:        true,

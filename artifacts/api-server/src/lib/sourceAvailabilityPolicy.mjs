@@ -5,7 +5,6 @@ export const SOURCE_AVAILABILITY_PRIORITY = Object.freeze([
   "animeify",
   "animedar",
   "sanime",
-  "animekai",
   "anifox",
   "animewitcher",
 ]);

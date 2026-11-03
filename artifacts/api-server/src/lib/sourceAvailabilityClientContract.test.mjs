@@ -5,6 +5,7 @@ import {
   SOURCE_AVAILABILITY_CONCURRENCY,
   sourceAvailabilityJobTimeoutMs,
   sourceAvailabilityScanTimeoutMs,
+  sourceAvailabilityTimeoutMs,
 } from "./sourceAvailabilityPolicy.mjs";
 
 const mobileWatchUrl = new URL("../../../nova-mobile/app/watch.tsx", import.meta.url);
@@ -27,11 +28,12 @@ test("mobile availability timeout covers the complete API scan and response-clos
     ["anslayer", 15_000],
     ["animeify", 4_000],
     ["anifox", 18_000],
-    ["anineko", 25_000],
-    ["animekai", 5_000],
+    ["animedar", 11_000],
   ].map(([site, timeoutMs]) => ({
     site,
-    timeoutMs: sourceAvailabilityJobTimeoutMs(site, timeoutMs),
+    timeoutMs: site === "consumet_gogo"
+      ? sourceAvailabilityTimeoutMs(site, timeoutMs)
+      : sourceAvailabilityJobTimeoutMs(site, timeoutMs),
   }));
   const scanDeadline = sourceAvailabilityScanTimeoutMs(
     jobs,
