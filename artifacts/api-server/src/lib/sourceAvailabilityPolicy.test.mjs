@@ -9,11 +9,11 @@ import {
 } from "./sourceAvailabilityPolicy.mjs";
 
 test("prioritizes the user's core anime providers without reordering peers", () => {
-  const jobs = ["anslayer", "sanime", "kawaii", "animewitcher", "megaplay", "anifox", "animeify", "animedar"]
+  const jobs = ["anslayer", "sanime", "kawaii", "animewitcher", "megaplay", "anifox", "animeify", "anime4up2", "animedar"]
     .map(site => ({ site, run: async () => site }));
   assert.deepEqual(
     orderAvailabilityJobs(jobs).map(job => job.site),
-    ["kawaii", "megaplay", "anslayer", "animeify", "animedar", "sanime", "anifox", "animewitcher"],
+    ["kawaii", "megaplay", "anslayer", "animeify", "anime4up2", "animedar", "sanime", "anifox", "animewitcher"],
   );
 });
 
@@ -36,11 +36,11 @@ test("scan deadline covers every FIFO worker wave plus a safety margin", () => {
     { site: "megaplay", timeoutMs: sourceAvailabilityJobTimeoutMs("megaplay", 5_000), run: async () => {} },
     { site: "animewitcher", timeoutMs: sourceAvailabilityJobTimeoutMs("animewitcher", 20_000), run: async () => {} },
     { site: "sanime", timeoutMs: sourceAvailabilityJobTimeoutMs("sanime", 4_000), run: async () => {} },
-    { site: "consumet_gogo", timeoutMs: sourceAvailabilityTimeoutMs("consumet_gogo", 40_000), run: async () => {} },
     { site: "anslayer", timeoutMs: sourceAvailabilityJobTimeoutMs("anslayer", 15_000), run: async () => {} },
     { site: "animeify", timeoutMs: sourceAvailabilityJobTimeoutMs("animeify", 4_000), run: async () => {} },
     { site: "anifox", timeoutMs: sourceAvailabilityJobTimeoutMs("anifox", 18_000), run: async () => {} },
     { site: "animedar", timeoutMs: sourceAvailabilityJobTimeoutMs("animedar", 11_000), run: async () => {} },
+    { site: "anime4up2", timeoutMs: sourceAvailabilityJobTimeoutMs("anime4up2", 7_000), run: async () => {} },
   ]);
 
   // The nine enabled providers fit in one 10-worker wave; the scan keeps 12s

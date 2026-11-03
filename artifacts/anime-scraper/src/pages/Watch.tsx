@@ -504,10 +504,11 @@ const SCRAPER_DEFS: {
     tag: "AK",
   },
   {
-    site: "consumet_gogo",
-    name: "GogoAnime",
-    desc: "HLS · صوت خام · كل الجودات",
-    tag: "GO",
+    site: "anime4up2",
+    name: "أنمي فور أب",
+    desc: "عربي مترجم · HLS/ميغا",
+    tag: "AD",
+    isArabic: true,
   },
   // akoam: حُذف 2026-07-28 — كان يستخدم hopxBrowserExtract (browser) على كل طلب
 ];
@@ -534,7 +535,6 @@ const STATIC_PICKER_WEB: Record<
     { site: "animeify", tag: "AF" },
     { site: "anifox", tag: "FX" },
     { site: "animekai", tag: "AK" },
-    { site: "consumet_gogo", tag: "GO" },
   ],
   "720p": [
     { site: "megaplay", tag: "MP" },
@@ -545,7 +545,7 @@ const STATIC_PICKER_WEB: Record<
     { site: "animeify", tag: "AF" },
     { site: "anifox", tag: "FX" },
     { site: "animekai", tag: "AK" },
-    { site: "consumet_gogo", tag: "GO" },
+    { site: "anime4up2", tag: "AD" },
   ],
   "360p": [
     { site: "megaplay", tag: "MP" },
@@ -554,7 +554,6 @@ const STATIC_PICKER_WEB: Record<
     { site: "animeify", tag: "AF" },
     { site: "anifox", tag: "FX" },
     { site: "animekai", tag: "AK" },
-    { site: "consumet_gogo", tag: "GO" },
   ],
 };
 const WEB_Q_KEYS: WebQualityKey[] = ["1080p", "720p", "360p"];
@@ -593,7 +592,6 @@ const PROVIDER_WANTS_SMART_SUB = new Set([
   "anikototv",
   "anineko",
   "animekai",
-  "consumet_gogo",
   "dulo_anim",
   "anivexa_solaris_1",
   "anivexa_solaris_2",
@@ -608,7 +606,6 @@ const KAWAII_SUBTITLE_SITES = new Set([
   "anineko", // AN
   "animekai", // AK
   "megaplay", // MP
-  "consumet_gogo",
 ]);
 
 /* These providers are intentionally left without the generic episode subtitle
@@ -5473,7 +5470,6 @@ export default function WatchPage() {
     const SITE_REQUEST_TIMEOUTS: Record<string, number> = {
       animewitcher: 42000, // backend = 38s + هامش 4s
       animekai: 36000, // backend = 30s + هامش 6s
-      consumet_gogo: 36000,
       cinesrc_anim: 38000, // backend = 35s + هامش 3s
       mycima: 34000, // backend = 30s + هامش 4s
       anikototv: 28000, // backend = 25s + هامش 3s

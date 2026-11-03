@@ -65,7 +65,6 @@ import {
   CONSUMET_SOURCES,
   decodeEncryptedHlsPlaylist,
   getConsumetSources,
-  checkConsumetEpisode,
   isConsumetSite,
   probeHlsManifest,
   probeHlsQuality,
@@ -111,7 +110,7 @@ async function pgTranslateSave(key: string, translated: string, from: string, to
 const router = Router();
 // Disabled by the user; keep these out of both availability probes and
 // playback extraction even if stale client/config data still requests them.
-const TEMPORARILY_DISABLED_SOURCE_SITES = new Set<string>(["animekai", "anineko"]);
+const TEMPORARILY_DISABLED_SOURCE_SITES = new Set<string>(["animekai", "anineko", "consumet_gogo"]);
 
 async function pipeWebMediaBody(
   body: ReadableStream<Uint8Array> | null,
@@ -15283,24 +15282,6 @@ router.get("/anime/sources-stream", scraperQueueMiddleware, async (req, res) => 
           false, 4000), false),
         },
         {
-          site: "consumet_gogo",
-          timeoutMs: sourceAvailabilityTimeoutMs("consumet_gogo", 40_000),
-          run: async () => {
-            const checked = await checkConsumetEpisode("consumet_gogo", title, english, ep, titleVariants, anilistId);
-            if (checked.available) {
-              sendCheckSrc({
-                name: "GogoAnime · الحلقة موجودة",
-                url: "",
-                quality: checked.quality || "720p",
-                qualityRank: checked.qualityRank || 13,
-                site: "consumet_gogo",
-                serverCount: checked.serverCount || 1,
-                verified: true,
-              } as UnifiedSource);
-            }
-          },
-        },
-        {
           site: "anslayer",
           timeoutMs: sourceAvailabilityJobTimeoutMs("anslayer", 15_000),
           run: () => useCatalogAvailability("anslayer", async hint => {
@@ -15342,6 +15323,12 @@ router.get("/anime/sources-stream", scraperQueueMiddleware, async (req, res) => 
           timeoutMs: sourceAvailabilityJobTimeoutMs("animedar", 11_000),
           run: () => scrapeCached("animedar", () =>
             getAnimadarSources(title, english, ep, isMovie, matchCtx), false, 11_000),
+        },
+        {
+          site: "anime4up2",
+          timeoutMs: sourceAvailabilityJobTimeoutMs("anime4up2", 7_000),
+          run: () => scrapeCached("anime4up2", () =>
+            getAnime4up2Sources(title, english, ep), false, 7_000),
         },
         {
           site: "anineko",
@@ -15420,12 +15407,11 @@ router.get("/anime/sources-stream", scraperQueueMiddleware, async (req, res) => 
       // ── ياباني مترجم (AniList ID) ─────────────────────────────────
       scrapeCached("kawaii",       () => getKawaiiAnimeSources(title, english, ep, anilistId), false, 14000),
       scrapeCached("megaplay",     () => getMegaPlayAnimeSources(title, english, ep, anilistId), false, 18000),
-      // AnimeKai and AniNeko are disabled by policy and must not be probed.
-      // FX and GO were fetchable only after a tap, so the availability pass
-      // incorrectly marked them missing. Discover them in the same parallel pass.
+      // AnimeKai, AniNeko, and GogoAnime are disabled by policy.
+      // FX and Anime4Up need availability rows before the picker can show them.
       scrapeCached("anifox",       () => catalogHintFor("anifox").then((hint) =>
         getAnifoxSources(title, english, ep, titleVariants, anilistId, false, hint)), false, 12000),
-      scrapeCached("consumet_gogo",() => getConsumetSources("consumet_gogo", title, english, ep, titleVariants, anilistId), false, 12000),
+      scrapeCached("anime4up2",    () => getAnime4up2Sources(title, english, ep), false, 12000),
       scrapeCached("anikototv",    () => getAnikototvSources(title, english, ep),               false, 22000),
       // anikuro: محذوف
       // anivault: محذوف — ترجمة إنجليزية مدمجة في الـ stream
@@ -15772,6 +15758,7 @@ router.get("/anime/fetch-source", scraperQueueMiddleware, async (req, res) => {
     "sanime",        // 🎌 MP4 مباشر عربي مدبلج ✅
     "anslayer",      // ⚡ بحث متوازٍ + dedupe للطلبات + cache
     "animeify",      // 🎬 أنمي فاي — MEGA/Streamtape/MediaFire ✅ (مُعاد تفعيله)
+    "anime4up2",     // 🎌 Anime4Up — السيرفرات المضمّنة في صفحة الحلقة
     "animekai",      // 🎌 AnimeKai direct scraper — HLS/MP4
     ...ANIVEXA_SOURCES.map(source => source.site),
     ...CONSUMET_SOURCES.map(source => source.site),
@@ -15787,7 +15774,7 @@ router.get("/anime/fetch-source", scraperQueueMiddleware, async (req, res) => {
     "anivexa_anikoto", "anivexa_anidbapp",
     "reanime", "re", "anivexa_re",
     "consumet_world", "consumet_miruro", "consumet_saturn",
-    "consumet_reanime", "consumet_anikoto", "anime4up2",
+    "consumet_reanime", "consumet_anikoto", "consumet_gogo",
     // Retired provider ids and legacy short tags. Keep these blocked so stale
     // clients/cache rows cannot resurrect the failed servers.
     "mkissa", "mk", "ra", "animegg", "gg", "anibd", "db",
@@ -16148,6 +16135,7 @@ router.get("/anime/fetch-source", scraperQueueMiddleware, async (req, res) => {
       // case "shahiid":      await runExtract(await race(getShahiidSources(title, english, ep, isMovie),    SCRAPER_MS, [])); break;
       // case "animelek":     await runExtract(await race(getAnimelekSources(title, english, ep, isMovie),   SCRAPER_MS, [])); break;
       case "animedar":     await runExtract(await race(getAnimadarSources(title, english, ep, isMovie),   SCRAPER_MS, [])); break;
+      case "anime4up2":    await runExtract(await race(getAnime4up2Sources(title, english, ep), 12_000, [])); break;
       // case "okanime": معطّل بطلب المستخدم
       // case "mitanime": محذوف بطلب المستخدم 2026-07-27
       case "animeify":    (await race(getAnimeifySources(title, english, ep, titleVariants, false, catalogHint, requestedQuality),  18000, [])).forEach(collectSrc); break;

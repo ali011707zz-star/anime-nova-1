@@ -3,6 +3,7 @@ export const SOURCE_AVAILABILITY_PRIORITY = Object.freeze([
   "megaplay",
   "anslayer",
   "animeify",
+  "anime4up2",
   "animedar",
   "sanime",
   "anifox",
@@ -15,7 +16,7 @@ export const SOURCE_AVAILABILITY_CONCURRENCY = 10;
 const MIN_TIMEOUT_MS = Object.freeze({
   // Search + episode-list requests are sequential; the full metadata check can
   // legitimately take several per-request timeouts.
-  consumet_gogo: 40_000,
+  anime4up2: 7_000,
   animeify: 12_000,
   anslayer: 15_000,
   // Both providers can need sequential catalog + episode lookups on a cold

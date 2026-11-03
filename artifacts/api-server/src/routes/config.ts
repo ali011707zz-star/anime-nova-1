@@ -12,6 +12,7 @@ const PERMANENTLY_DISABLED_SOURCES = [
   "consumet_reanime",
   "animekai",
   "anineko",
+  "consumet_gogo",
 ] as const;
 
 const DEFAULT_CONFIG = {
@@ -29,6 +30,7 @@ const DEFAULT_CONFIG = {
     animepahe:    true,
     animewitcher: true,
     animekai:      false,
+    anime4up2:      true,
     megaplay:      true,
     anineko:       false,
     anifox:        true,
@@ -50,7 +52,7 @@ const DEFAULT_CONFIG = {
     vyla:         true,
     aflaam:       true,
     stardima:     true,
-    consumet_gogo: true,
+    consumet_gogo: false,
     consumet_world: true,
     consumet_reanime: false,
     consumet_miruro: true,

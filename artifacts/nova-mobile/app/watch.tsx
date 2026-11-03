@@ -105,7 +105,8 @@ const ARABIC_PLAYBACK_SITES = new Set([
 
 /* Playback and download providers are separate product surfaces. */
 const DOWNLOAD_SOURCE_SITES = new Set([
-  "animedar",     // AD — أنمي فور أب
+  "animedar",     // AnimeDar
+  "anime4up2",    // AD — أنمي فور أب
   "animewitcher", // AW
   "sanime",       // SA
   "anslayer",     // AS
@@ -119,11 +120,11 @@ function subtitlesDisabledForSite(site?: string): boolean {
 
 /* ── Site → 2-letter tag (mirrors web SCRAPER_DEFS tags exactly) ── */
 const SITE_TAG: Record<string, string> = {
-  shahiid: "SH", animelek: "EK", animedar: "AD", okanime: "OK",
+  shahiid: "SH", animelek: "EK", animedar: "DR", okanime: "OK",
   ristoanime: "RS", animeify: "AF", animeday: "DY", arabseed: "AR",
-  anime4up2: "4U", mycima: "MC", topcinemaa: "TC",
+  anime4up2: "AD", mycima: "MC", topcinemaa: "TC",
   animewitcher: "AW", kawaii: "KW", megaplay: "MP", anineko: "AN",
-  animekai: "AK", consumet_gogo: "GO",
+  animekai: "AK",
   vidlink_anim: "VL", vidfast: "VF",
   animetime: "AT", animepahe: "AP", dulo_anim: "DL",
   faselhd_db: "FH",
@@ -136,12 +137,12 @@ const SITE_TAG: Record<string, string> = {
 /* ── اسم عرض لكل موقع في منتقي المصادر ── */
 const SITE_LABEL: Record<string, string> = {
   kawaii: "Kawaii", megaplay: "MegaPlay", animekai: "AnimeKai",
-  consumet_gogo: "GogoAnime", animewitcher: "AnimeWitcher",
+  animewitcher: "AnimeWitcher",
   anineko: "AniNeko",
   dulo_anim: "Dulo",
   anikototv: "AniKotoTV", mitanime: "MITanime", vidfast: "VidFast",
   animepahe: "AnimePahe", shahiid: "Shahiid", animelek: "Animelek",
-  animedar: "Animedar", okanime: "OkAnime", ristoanime: "RistoAnime",
+  animedar: "AnimeDar", okanime: "OkAnime", ristoanime: "RistoAnime",
   animeify: "AnimeIfy", animeday: "AnimeDay", arabseed: "ArabSeed",
   anime4up2: "Anime4Up", mycima: "MyCima", topcinemaa: "TopCinema",
   faselhd_db: "FaselHD", animetime: "AnimeTime",
@@ -160,7 +161,7 @@ function getSiteTag(site: string): string {
 const SITE_DESC: Record<string, string> = {
   kawaii: "1080p · مباشر", megaplay: "HLS · صوت خام · ترجمة Kawaii",
   anineko: "HLS · متعدد الجودات", animekai: "HLS · ياباني + ترجمة",
-  consumet_gogo: "HLS · صوت خام · كل الجودات", animewitcher: "PD/ST · مباشر",
+  animewitcher: "PD/ST · مباشر",
   dulo_anim: "ياباني/إنجليزي · HLS مباشر",
   vidlink_anim: "ياباني مترجم · مباشر",
   mitanime: "ياباني مترجم · مباشر", vidfast: "TMDB · HLS · متعدد الخوادم",
@@ -542,45 +543,42 @@ const STATIC_PICKER: Record<QualityKey, { site: string; name: string; tag: strin
     { site: "megaplay",     name: "MegaPlay",    tag: "MP" },
     { site: "anineko",      name: "AniNeko",      tag: "AN" },
     { site: "animewitcher", name: "AnimeWitcher", tag: "AW" },
-    { site: "animedar",     name: "أنمي فور أب",  tag: "AD" },
+    { site: "animedar",     name: "أنمي دار",     tag: "DR" },
     { site: "anslayer",     name: "AnimeSlayer",  tag: "AS" },
     { site: "sanime",       name: "سـAnime",      tag: "SA" },
     { site: "animeify",     name: "أنمي فاي",    tag: "AF" },
     { site: "anifox",        name: "ANIFOX",      tag: "FX" },
     { site: "animekai",      name: "AnimeKai",   tag: "AK" },
-    { site: "consumet_gogo", name: "GogoAnime",  tag: "GO" },
   ],
   "720p": [
     { site: "megaplay",     name: "MegaPlay",    tag: "MP" },
     { site: "anineko",      name: "AniNeko",      tag: "AN" },
     { site: "animewitcher", name: "AnimeWitcher", tag: "AW" },
-    { site: "animedar",     name: "أنمي فور أب",  tag: "AD" },
+    { site: "animedar",     name: "أنمي دار",     tag: "DR" },
+    { site: "anime4up2",    name: "أنمي فور أب",  tag: "AD" },
     { site: "anslayer",     name: "AnimeSlayer",  tag: "AS" },
     { site: "sanime",       name: "سـAnime",      tag: "SA" },
     { site: "animeify",     name: "أنمي فاي",    tag: "AF" },
     { site: "anifox",        name: "ANIFOX",      tag: "FX" },
     { site: "animekai",      name: "AnimeKai",   tag: "AK" },
-    { site: "consumet_gogo", name: "GogoAnime",  tag: "GO" },
   ],
   "360p": [
     { site: "megaplay",     name: "MegaPlay",    tag: "MP" },
     { site: "anineko",      name: "AniNeko",      tag: "AN" },
     { site: "animewitcher", name: "AnimeWitcher", tag: "AW" },
-    { site: "animedar",     name: "أنمي فور أب",  tag: "AD" },
+    { site: "animedar",     name: "أنمي دار",     tag: "DR" },
     { site: "animeify",     name: "أنمي فاي",    tag: "AF" },
     { site: "anifox",        name: "ANIFOX",      tag: "FX" },
     { site: "animekai",      name: "AnimeKai",   tag: "AK" },
-    { site: "consumet_gogo", name: "GogoAnime",  tag: "GO" },
   ],
   "480p": [
     { site: "megaplay",     name: "MegaPlay",    tag: "MP" },
     { site: "anineko",      name: "AniNeko",      tag: "AN" },
     { site: "animewitcher", name: "AnimeWitcher", tag: "AW" },
-    { site: "animedar",     name: "أنمي فور أب",  tag: "AD" },
+    { site: "animedar",     name: "أنمي دار",     tag: "DR" },
     { site: "animeify",     name: "أنمي فاي",    tag: "AF" },
     { site: "anifox",        name: "ANIFOX",      tag: "FX" },
     { site: "animekai",      name: "AnimeKai",   tag: "AK" },
-    { site: "consumet_gogo", name: "GogoAnime",  tag: "GO" },
   ],
 };
 
