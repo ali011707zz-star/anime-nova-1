@@ -482,7 +482,18 @@ export default function MangaDetailScreen() {
       setLoading(false);
       return;
     }
-    setLoading(true);
+    const cacheKey = `manga_cache_${decodedId}`;
+    try {
+      const cached = await AsyncStorage.getItem(cacheKey);
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (parsed && (parsed.title || parsed.arabicTitle)) {
+          setManga(parsed);
+          setLoading(false);
+        }
+      }
+    } catch {}
+
     setError(false);
     try {
       const res = await fetch(
@@ -491,12 +502,15 @@ export default function MangaDetailScreen() {
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data: MangaDetailData = await res.json();
       setManga(data);
+      try {
+        await AsyncStorage.setItem(cacheKey, JSON.stringify(data));
+      } catch {}
     } catch {
-      setError(true);
+      if (!manga) setError(true);
     } finally {
       setLoading(false);
     }
-  }, [decodedId]);
+  }, [decodedId, manga]);
 
   useEffect(() => {
     void fetchDetail();

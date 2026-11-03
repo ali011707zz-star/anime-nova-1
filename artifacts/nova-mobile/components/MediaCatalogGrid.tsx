@@ -14,6 +14,7 @@ import { useRouter } from "expo-router";
 import { anilistQuery } from "@/utils/anilist";
 import { getBaseUrl } from "@/utils/api";
 import { translateMangaGenre } from "@/utils/mangaLocalization";
+import { getKnownArabicAnimeTitle } from "@/utils/arabicAnimeTitles";
 import { useColors } from "@/hooks/useColors";
 import { isTvDevice, tvFocusStyle, TvPressable as Pressable } from "@/utils/tv";
 

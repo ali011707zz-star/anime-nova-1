@@ -94,11 +94,7 @@ export default function HomeScreen() {
     staleTime: 5 * 60 * 1000,
   });
 
-  const { data: upcoming, refetch: refetchU } = useQuery({
-    queryKey: ["upcoming"],
-    queryFn: () => anilistQuery<{ Page: { media: AnilistMedia[] } }>(UPCOMING_QUERY),
-    staleTime: 5 * 60 * 1000,
-  });
+
 
   const { data: topRated, refetch: refetchR } = useQuery({
     queryKey: ["topRated"],
@@ -274,7 +270,6 @@ export default function HomeScreen() {
   ), [awDubbedSeries, stardimaAnimation.items]);
   const airingList = airing?.Page?.media || [];
   const seasonalList = seasonal?.Page?.media || [];
-  const upcomingList = upcoming?.Page?.media || [];
   const topRatedList = topRated?.Page?.media || [];
   const moviesList = movies?.Page?.media || [];
   const isekaiList = isekai?.Page?.media || [];
@@ -296,7 +291,7 @@ export default function HomeScreen() {
 
   const refresh = async () => {
     await Promise.all([
-      refetchT(), refetchP(), refetchA(), refetchS(), refetchU(), refetchR(), refetchM(), refetchIsekai(),
+      refetchT(), refetchP(), refetchA(), refetchS(), refetchR(), refetchM(), refetchIsekai(),
       refetchManhwa(), refetchJpManga(),
       refreshDubbed(true),
     ]);
@@ -322,12 +317,7 @@ export default function HomeScreen() {
         items: popularList,
         onSeeAll: () => router.push({ pathname: "/browse", params: { sort: "POPULARITY_DESC" } } as any),
       },
-      {
-        key: "upcoming",
-        title: "⌛ قادماً قريباً",
-        items: upcomingList,
-        onSeeAll: () => router.push({ pathname: "/browse", params: { status: "NOT_YET_RELEASED", sort: "POPULARITY_DESC" } } as any),
-      },
+
       {
         key: "movies",
         title: "🎬 أفلام الأنمي",
@@ -341,7 +331,7 @@ export default function HomeScreen() {
         onSeeAll: () => router.push({ pathname: "/browse", params: { genre: "Isekai", genreAr: "إيسيكاي", sort: "POPULARITY_DESC" } } as any),
       },
     ],
-    [airingList, isekaiList, moviesList, popularList, router, upcomingList],
+    [airingList, isekaiList, moviesList, popularList, router],
   );
 
   return (
@@ -349,6 +339,10 @@ export default function HomeScreen() {
       <FlatList
         data={isLoading ? [] : homeRows}
         keyExtractor={(item) => item.key}
+        initialNumToRender={4}
+        maxToRenderPerBatch={3}
+        windowSize={4}
+        removeClippedSubviews={Platform.OS === "android"}
         renderItem={({ item }) => (
           <SectionRow title={item.title} items={item.items} size="md" onSeeAll={item.onSeeAll} />
         )}

@@ -1161,7 +1161,17 @@ export default function WatchScreen() {
     const base = getBaseUrl();
     fetchArabicSubtitleUrl(sourceAnimeId, epNum, base, titleStr, englishStr, ctrl.signal)
       .then(subtitleUrl => {
-        if (!ctrl.signal.aborted && subtitleUrl) setGlobalSubUrl(subtitleUrl);
+        if (!ctrl.signal.aborted && subtitleUrl) {
+          setGlobalSubUrl(subtitleUrl);
+          setPlayingSrc(current => {
+            if (!current) return current;
+            const curSite = String(current.site || "").toLowerCase();
+            if (KAWAII_SUBTITLE_SITES.has(curSite) && !current.subtitleUrl) {
+              return { ...current, subtitleUrl };
+            }
+            return current;
+          });
+        }
       });
     return () => ctrl.abort();
   }, [isAwDubbed, sourceAnimeId, epNum]);
@@ -2505,7 +2515,9 @@ export default function WatchScreen() {
       site,
       subtitleUrl: subtitlesDisabledForSite(site)
         ? undefined
-        : (playingSrc.subtitleUrl ? resolveUrl(playingSrc.subtitleUrl, base) : (isArabic ? undefined : globalSubUrl)),
+        : (playingSrc.subtitleUrl
+            ? resolveUrl(playingSrc.subtitleUrl, base)
+            : (KAWAII_SUBTITLE_SITES.has(site) || !isArabic ? globalSubUrl : undefined)),
       isArabic,
       wantsSmartSub: !isArabic,
       skipIntro: playingSrc.skipIntro,

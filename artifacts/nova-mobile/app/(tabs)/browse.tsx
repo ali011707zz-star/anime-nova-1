@@ -136,7 +136,7 @@ function GenreCard({ item, liveCoverUrl, onPress, columns, horizontal = false }:
         <Text numberOfLines={1} style={[g.genreLabel, tvMode && g.tvGenreLabel]}>
           {item.ar}
         </Text>
-        <View style={g.genreFloatingPosterWrap}>
+        <View style={[g.genreFloatingPosterWrap, horizontal && g.horizontalGenreFloatingPosterWrap]}>
           <Image
             source={{ uri: posterUri }}
             onError={() => setFailed(true)}
@@ -813,25 +813,25 @@ const createBrowseStyles = (colors: ThemePalette) => StyleSheet.create({
     borderRadius: 15,
   },
   genreFloatingPosterWrap: {
-    width: 54,
-    height: 72,
-    borderRadius: 11,
+    width: 44,
+    height: 44,
+    borderRadius: 10,
     overflow: "hidden",
-    marginTop: -22,
     borderWidth: 1.5,
-    borderColor: "rgba(255,255,255,0.68)",
+    borderColor: "rgba(255,255,255,0.5)",
     backgroundColor: "#18181b",
-    elevation: 6,
+    alignItems: "center",
+    justifyContent: "center",
+    elevation: 3,
     shadowColor: "#000",
-    shadowOpacity: 0.35,
-    shadowRadius: 6,
-    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.25,
+    shadowRadius: 4,
+    shadowOffset: { width: 0, height: 2 },
   },
   horizontalGenreFloatingPosterWrap: {
-    width: 50,
-    height: 68,
-    borderRadius: 11,
-    marginTop: -20,
+    width: 40,
+    height: 40,
+    borderRadius: 9,
   },
   genreFloatingPoster: { width: "100%", height: "100%" },
   genrePillLabel: {

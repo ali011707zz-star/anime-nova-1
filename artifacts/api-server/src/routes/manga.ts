@@ -1,4 +1,7 @@
 import { Router } from "express";
+import fs from "fs";
+import path from "path";
+import crypto from "crypto";
 import vm from "node:vm";
 import { logger } from "../lib/logger.js";
 
@@ -11,21 +14,59 @@ const AZORAFLY_BASE = "https://azorafly.com";
 const UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
 
-// ── Simple In-Memory Cache ───────────────────────────────────────────────────
+// ── Persistent Disk & In-Memory Cache (مشترك وسريع لكل المستخدمين) ────────────
 interface CacheEntry<T> {
   data: T;
   expiresAt: number;
 }
 const cache = new Map<string, CacheEntry<any>>();
 
-function getCached<T>(key: string): T | null {
-  const entry = cache.get(key);
-  if (!entry) return null;
-  if (Date.now() > entry.expiresAt) {
-    cache.delete(key);
+const DISK_CACHE_DIR = process.env.MANGA_DISK_CACHE_DIR || "/tmp/anime-nova-manga-cache";
+try {
+  if (!fs.existsSync(DISK_CACHE_DIR)) {
+    fs.mkdirSync(DISK_CACHE_DIR, { recursive: true });
+  }
+} catch {}
+
+function safeDiskKey(key: string): string {
+  return crypto.createHash("md5").update(key).digest("hex") + ".json";
+}
+
+function getDiskCached<T>(key: string, maxAgeMs: number = 14 * 24 * 3600 * 1000): T | null {
+  try {
+    const filePath = path.join(DISK_CACHE_DIR, safeDiskKey(key));
+    if (!fs.existsSync(filePath)) return null;
+    const stat = fs.statSync(filePath);
+    if (Date.now() - stat.mtimeMs > maxAgeMs) {
+      try { fs.unlinkSync(filePath); } catch {}
+      return null;
+    }
+    const raw = fs.readFileSync(filePath, "utf-8");
+    return JSON.parse(raw) as T;
+  } catch {
     return null;
   }
-  return entry.data as T;
+}
+
+function setDiskCached<T>(key: string, data: T): void {
+  try {
+    const filePath = path.join(DISK_CACHE_DIR, safeDiskKey(key));
+    fs.writeFileSync(filePath, JSON.stringify(data), "utf-8");
+  } catch {}
+}
+
+function getCached<T>(key: string): T | null {
+  const entry = cache.get(key);
+  if (entry) {
+    if (Date.now() <= entry.expiresAt) return entry.data as T;
+    cache.delete(key);
+  }
+  const fromDisk = getDiskCached<T>(key);
+  if (fromDisk) {
+    cache.set(key, { data: fromDisk, expiresAt: Date.now() + 60 * 60 * 1000 });
+    return fromDisk;
+  }
+  return null;
 }
 
 function setCached<T>(key: string, data: T, ttlMs: number): void {
@@ -34,6 +75,7 @@ function setCached<T>(key: string, data: T, ttlMs: number): void {
     if (oldestKey) cache.delete(oldestKey);
   }
   cache.set(key, { data, expiresAt: Date.now() + ttlMs });
+  setDiskCached(key, data);
 }
 
 
@@ -345,9 +387,14 @@ async function resolveMangaExtras(opts: {
   characters: MangaCharacterEdge[];
   trailer: { id: string; site: string; thumbnail: string; url: string } | null;
 }> {
-  const cacheKey = `${opts.source}:${opts.slug}`;
+  const cacheKey = `manga-extras:${opts.source}:${opts.slug}`;
   if (extrasCache.has(cacheKey)) {
     return extrasCache.get(cacheKey)!;
+  }
+  const diskExtras = getDiskCached<any>(cacheKey);
+  if (diskExtras) {
+    extrasCache.set(cacheKey, diskExtras);
+    return diskExtras;
   }
 
   const candidateTitles = [
@@ -515,6 +562,7 @@ async function resolveMangaExtras(opts: {
 
   const out = { characters, trailer };
   extrasCache.set(cacheKey, out);
+  setDiskCached(cacheKey, out);
   return out;
 }
 

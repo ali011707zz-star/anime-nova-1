@@ -36,7 +36,8 @@ export type UserCommentEntry = {
   animeId: number;
   animeTitle: string;
   animeCover: string;
-  episode: number;
+  episode?: number | null;
+  isAnimeDetail?: boolean;
   timeAgo: string;
   text: string;
 };
@@ -592,7 +593,11 @@ export default function ProfileScreen() {
                         <View style={s.favMetaCol}>
                           <Text numberOfLines={1} style={s.favTitle}>{c.animeTitle}</Text>
                           <Text style={s.commentEpLine}>
-                            <Text style={{ color: "#38bdf8", fontFamily: "Cairo_700Bold" }}>الحلقة {c.episode}</Text>
+                            {c.episode && c.episode > 0 && !c.isAnimeDetail ? (
+                              <Text style={{ color: "#38bdf8", fontFamily: "Cairo_700Bold" }}>الحلقة {c.episode}</Text>
+                            ) : (
+                              <Text style={{ color: "#a855f7", fontFamily: "Cairo_700Bold" }}>صفحة وتفاصيل العمل</Text>
+                            )}
                             {"  •  "}
                             {c.timeAgo}
                           </Text>
@@ -601,11 +606,17 @@ export default function ProfileScreen() {
 
                       <View style={s.favActionsLeft}>
                         <Pressable
-                          onPress={() =>
-                            router.push(
-                              `/comments?animeId=${c.animeId}&ep=${c.episode}&title=${encodeURIComponent(c.animeTitle)}&commentId=${c.id}&highlightId=${c.id}` as any
-                            )
-                          }
+                          onPress={() => {
+                            if (c.episode && c.episode > 0 && !c.isAnimeDetail) {
+                              router.push(
+                                `/comments?animeId=${c.animeId}&ep=${c.episode}&title=${encodeURIComponent(c.animeTitle)}&commentId=${c.id}&highlightId=${c.id}` as any
+                              );
+                            } else {
+                              router.push(
+                                `/comments?animeId=${c.animeId}&title=${encodeURIComponent(c.animeTitle)}&commentId=${c.id}&highlightId=${c.id}` as any
+                              );
+                            }
+                          }}
                           style={s.openItemBtn}
                         >
                           <Text style={s.openItemBtnText}>فتح المناقشة</Text>

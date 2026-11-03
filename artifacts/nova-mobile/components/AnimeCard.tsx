@@ -7,6 +7,7 @@ import { StyleSheet, Text, View } from "react-native";
 import { useColors } from "@/hooks/useColors";
 import { isTvDevice, tvFocusStyle, TvPressable as Pressable, useTvMetrics } from "@/utils/tv";
 import { getPosterUri, getTvPosterUri } from "@/utils/media";
+import { getKnownArabicAnimeTitle } from "@/utils/arabicAnimeTitles";
 
 type Props = {
   anime: AnilistMedia;
@@ -61,7 +62,10 @@ export const AnimeCard = React.memo(function AnimeCard({ anime, size = "sm", car
   const cardH = cardW * 1.4;
   const tvMode = isTvDevice(windowWidth, windowHeight);
 
-  const title = anime.title.english || anime.title.romaji;
+  const knownAr = getKnownArabicAnimeTitle(anime.id, anime.title?.english, anime.title?.romaji);
+  const arabicTitle = anime.title_ar || knownAr || (anime.synonyms || []).find((s) => /[؀-ۿ]/.test(s));
+  const mainTitle = arabicTitle || anime.title.english || anime.title.romaji;
+  const secondaryTitle = arabicTitle && (anime.title.english || anime.title.romaji) !== arabicTitle ? (anime.title.english || anime.title.romaji) : null;
   const posterUri = tvMode
     ? getTvPosterUri(anime, anime.id ? `https://img.anili.st/media/${anime.id}` : "")
     : getPosterUri(anime, anime.id ? `https://img.anili.st/media/${anime.id}` : "");
@@ -110,15 +114,22 @@ export const AnimeCard = React.memo(function AnimeCard({ anime, size = "sm", car
       <Text
         style={[
           styles.title,
-          { fontSize: scaleSize(12, 21), lineHeight: scaleSize(16, 29), color: colors.text },
+          {
+            fontSize: scaleSize(12, 21),
+            lineHeight: scaleSize(16, 29),
+            color: colors.text,
+            textAlign: arabicTitle ? "right" : "left",
+            writingDirection: arabicTitle ? "rtl" : "ltr",
+            fontFamily: arabicTitle ? "Cairo_700Bold" : undefined,
+          },
         ]}
         numberOfLines={2}
       >
-        {title}
+        {mainTitle}
       </Text>
-      {anime.title_ar ? (
+      {secondaryTitle ? (
         <Text style={styles.titleArabic} numberOfLines={1}>
-          {anime.title_ar}
+          {secondaryTitle}
         </Text>
       ) : null}
       {anime.episodes && (

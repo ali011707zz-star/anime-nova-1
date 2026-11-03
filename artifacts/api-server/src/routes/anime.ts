@@ -11771,20 +11771,27 @@ async function getKawaiiSubForSource(anilistId: number | undefined, ep: number):
   if (hit && Date.now() - hit.ts < KAWAII_SUB_TTL) return hit.val;
   try {
     let payload: any = null;
-    for (const endpoint of [
-      `${KAWAII_BASE}/api/miruro?anilistId=${anilistId}&ep=${ep}`,
-      `${KAWAII_BASE}/api/miruro?anilist_id=${anilistId}&episode=${ep}`,
-      `${KAWAII_BASE}/api/watch?anilistId=${anilistId}&ep=${ep}`,
-    ]) {
-      const r = await fetch(endpoint, {
-        headers: { ...BASE_HDRS, Accept: "application/json", Referer: KAWAII_BASE + "/" },
-        signal: AbortSignal.timeout(6000),
-      });
-      if (!r.ok) continue;
-      const candidate = await r.json().catch(() => null);
-      payload = candidate?.data && typeof candidate.data === "object"
-        ? { ...candidate, ...candidate.data }
-        : candidate;
+    let apiBase = KAWAII_BASE;
+    for (const base of KAWAII_API_BASES) {
+      for (const endpoint of [
+        `${base}/api/miruro?anilistId=${anilistId}&ep=${ep}`,
+        `${base}/api/miruro?anilist_id=${anilistId}&episode=${ep}`,
+        `${base}/api/watch?anilistId=${anilistId}&ep=${ep}`,
+      ]) {
+        const r = await fetch(endpoint, {
+          headers: { ...BASE_HDRS, Accept: "application/json", Referer: base + "/" },
+          signal: AbortSignal.timeout(6000),
+        });
+        if (!r.ok) continue;
+        const candidate = await r.json().catch(() => null);
+        payload = candidate?.data && typeof candidate.data === "object"
+          ? { ...candidate, ...candidate.data }
+          : candidate;
+        if (payload?.subtitles?.length) {
+          apiBase = base;
+          break;
+        }
+      }
       if (payload?.subtitles?.length) break;
     }
     const subs = payload?.subtitles ?? [];
@@ -11792,12 +11799,12 @@ async function getKawaiiSubForSource(anilistId: number | undefined, ep: number):
     const arSub = subs.find(s => (s.lang || "").toLowerCase().includes("arabic") || (s.lang || "").toLowerCase() === "ar");
     let result: string | undefined;
     if (arSub?.url) {
-      const proxied = `/api/anime/proxy-text?url=${encodeURIComponent(arSub.url)}&ref=${encodeURIComponent(KAWAII_BASE + "/")}`;
+      const proxied = `/api/anime/proxy-text?url=${encodeURIComponent(arSub.url)}&ref=${encodeURIComponent(apiBase + "/")}`;
       result = proxied;
     } else {
       const enSub = subs.find(s => (s.lang || "").toLowerCase().includes("english") || (s.lang || "").toLowerCase() === "en");
       if (enSub?.url) {
-        const proxied = `/api/anime/proxy-text?url=${encodeURIComponent(enSub.url)}&ref=${encodeURIComponent(KAWAII_BASE + "/")}`;
+        const proxied = `/api/anime/proxy-text?url=${encodeURIComponent(enSub.url)}&ref=${encodeURIComponent(apiBase + "/")}`;
         result = `/api/anime/translate-vtt?url=${encodeURIComponent(proxied)}&from=en&to=ar`;
       }
     }

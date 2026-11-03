@@ -175,12 +175,14 @@ export default function CommentsPage() {
             const cleanLog = Array.isArray(parsedLog)
               ? parsedLog.filter((item: any) => item && !["c-1", "c-2", "c-3"].includes(String(item.id)))
               : [];
+            const isAnimeLevel = epNum == null || epNum <= 0;
             const newEntry = {
               id: String(d.comment.id || Date.now()),
               animeId: animeId || 0,
               animeTitle: params.title || "أنمي",
               animeCover: "",
-              episode: epNum || 1,
+              episode: isAnimeLevel ? null : epNum,
+              isAnimeDetail: isAnimeLevel,
               timeAgo: "الآن",
               text: text.trim(),
             };
