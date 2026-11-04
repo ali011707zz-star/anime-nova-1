@@ -164,8 +164,9 @@ async function deliverNewEpisodeNotification(
   ep: number,
   posterUrl?: string,
 ): Promise<boolean> {
+  const key = `${anilistId}:${ep}`;
   if (await wasNotified(anilistId, ep)) {
-    notifiedEpisodes.add(`${anilistId}:${ep}`);
+    notifiedEpisodes.add(key);
     return true;
   }
 

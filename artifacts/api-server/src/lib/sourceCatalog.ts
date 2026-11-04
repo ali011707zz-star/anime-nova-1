@@ -40,7 +40,10 @@ type HintInput = {
 
 const PROVIDERS: CatalogProvider[] = ["animeify", "anslayer", "sanime", "anifox"];
 const HINT_TTL_MS = 10 * 60_000;
+const TITLE_TTL_MS = 30 * 60_000;
 const hintCache = new Map<string, { value: CatalogEpisodeHint | null; expiresAt: number }>();
+const hintInflight = new Map<string, Promise<CatalogEpisodeHint | null>>();
+const titleCache = new Map<string, { value: Record<string, any> | null; expiresAt: number }>();
 
 function normalized(value: unknown): string {
   return String(value ?? "")
@@ -88,10 +91,10 @@ function pageUrl(row: Record<string, any>): string {
 }
 
 function cacheKey(provider: CatalogProvider, input: HintInput): string {
+  const pid = input.providerTitleIds?.[provider] ?? input.providerTitleId ?? "";
   return [
     provider,
-    input.providerTitleId || "",
-    input.providerTitleIds?.[provider] || "",
+    pid,
     normalized(input.english || input.title),
     input.season ?? "",
     input.episode,
@@ -100,12 +103,19 @@ function cacheKey(provider: CatalogProvider, input: HintInput): string {
 
 async function findTitle(provider: CatalogProvider, input: HintInput): Promise<Record<string, any> | null> {
   const directId = String(input.providerTitleId ?? "").trim();
+  const tKey = `${provider}:${directId}:${normalized(input.english || input.title)}`;
+  const cachedTitle = titleCache.get(tKey);
+  if (cachedTitle && cachedTitle.expiresAt > Date.now()) return cachedTitle.value;
+
   if (directId) {
     const exact = await sbSelect<Record<string, any>>("source_catalog_titles", {
       provider: `eq.${provider}`,
       provider_title_id: `eq.${directId}`,
     }, { limit: 1 });
-    if (exact[0]) return exact[0];
+    if (exact[0]) {
+      titleCache.set(tKey, { value: exact[0], expiresAt: Date.now() + TITLE_TTL_MS });
+      return exact[0];
+    }
   }
 
   const queries = [...new Set([
@@ -113,18 +123,22 @@ async function findTitle(provider: CatalogProvider, input: HintInput): Promise<R
     input.english,
     input.titleAr,
     ...(input.variants || []),
-  ].map((value) => String(value || "").trim()).filter((value) => value.length > 2))].slice(0, 6);
+  ].map((value) => String(value || "").trim()).filter((value) => value.length > 2))].slice(0, 3);
+
   const batches = await Promise.allSettled(queries.map((query) =>
     sbSelect<Record<string, any>>("source_catalog_titles", {
       provider: `eq.${provider}`,
       title: `ilike.*${query.replace(/[*%,]/g, " ")}*`,
-    }, { limit: 30 }),
+    }, { limit: 15 }),
   ));
+
   const rows = batches.flatMap((batch) => batch.status === "fulfilled" ? batch.value : []);
   const unique = [...new Map(rows.map((row) => [String(row.id), row])).values()];
   unique.sort((a, b) => titleScore(input, b) - titleScore(input, a));
   const best = unique[0];
-  return best && titleScore(input, best) >= 0.45 ? best : null;
+  const matched = best && titleScore(input, best) >= 0.45 ? best : null;
+  titleCache.set(tKey, { value: matched, expiresAt: Date.now() + (matched ? TITLE_TTL_MS : 90_000) });
+  return matched;
 }
 
 export async function getSourceCatalogHint(
@@ -135,61 +149,70 @@ export async function getSourceCatalogHint(
   const cached = hintCache.get(key);
   if (cached && cached.expiresAt > Date.now()) return cached.value;
 
-  try {
-    const title = await findTitle(provider, {
-      ...input,
-      providerTitleId: input.providerTitleIds?.[provider] ?? input.providerTitleId,
-    });
-    if (!title?.id || !title.provider_title_id) {
-      hintCache.set(key, { value: null, expiresAt: Date.now() + 60_000 });
+  const existingFlight = hintInflight.get(key);
+  if (existingFlight) return existingFlight;
+
+  const flight = (async (): Promise<CatalogEpisodeHint | null> => {
+    try {
+      const title = await findTitle(provider, {
+        ...input,
+        providerTitleId: input.providerTitleIds?.[provider] ?? input.providerTitleId,
+      });
+      if (!title?.id || !title.provider_title_id) {
+        hintCache.set(key, { value: null, expiresAt: Date.now() + 90_000 });
+        return null;
+      }
+
+      const episodeFilters: Record<string, string | number | undefined> = {
+        title_id: `eq.${title.id}`,
+        episode_number: `eq.${input.episode}`,
+        season_number: input.season ? `eq.${input.season}` : undefined,
+        order: "season_number.asc",
+      };
+      const episodes = await sbSelect<Record<string, any>>("source_catalog_episodes", episodeFilters, {
+        limit: 1,
+      });
+      const episode = episodes[0];
+      if (!episode?.id) {
+        hintCache.set(key, { value: null, expiresAt: Date.now() + 90_000 });
+        return null;
+      }
+
+      const rows = await sbSelect<Record<string, any>>("source_catalog_servers", {
+        episode_id: `eq.${episode.id}`,
+        order: "quality.desc",
+      }, {
+        limit: 40,
+        select: "id,episode_id,provider,server_key,server_name,quality,language,source_kind,source_host,availability_status,last_checked_at,provider_metadata",
+      });
+      const servers = rows.map((row) => ({ ...row, page_url: pageUrl(row) }))
+        .filter((row) => row.page_url)
+        .filter((row) => !["dead", "unsupported"].includes(String(row.availability_status || "").toLowerCase()));
+
+      const value: CatalogEpisodeHint = {
+        provider,
+        providerTitleId: String(title.provider_title_id),
+        titleId: Number(title.id),
+        episodeId: Number(episode.id),
+        episodeNumber: Number(episode.episode_number),
+        episodeStatus: String(episode.episode_status || "episode_found"),
+        title,
+        episode,
+        servers,
+      };
+      hintCache.set(key, { value, expiresAt: Date.now() + HINT_TTL_MS });
+      return value;
+    } catch (error: any) {
+      console.warn(`[sourceCatalog] ${provider} hint failed:`, error?.message || error);
+      hintCache.set(key, { value: null, expiresAt: Date.now() + 30_000 });
       return null;
+    } finally {
+      hintInflight.delete(key);
     }
+  })();
 
-    const episodeFilters: Record<string, string | number | undefined> = {
-      title_id: `eq.${title.id}`,
-      episode_number: `eq.${input.episode}`,
-      season_number: input.season ? `eq.${input.season}` : undefined,
-      order: "season_number.asc",
-    };
-    const episodes = await sbSelect<Record<string, any>>("source_catalog_episodes", episodeFilters, {
-      limit: 1,
-    });
-    const episode = episodes[0];
-    if (!episode?.id) {
-      hintCache.set(key, { value: null, expiresAt: Date.now() + 60_000 });
-      return null;
-    }
-
-    const rows = await sbSelect<Record<string, any>>("source_catalog_servers", {
-      episode_id: `eq.${episode.id}`,
-      order: "quality.desc",
-    }, {
-      limit: 100,
-      // page_url is kept in provider_metadata on legacy production schemas.
-      select: "id,episode_id,provider,server_key,server_name,quality,language,source_kind,source_host,availability_status,last_checked_at,provider_metadata",
-    });
-    const servers = rows.map((row) => ({ ...row, page_url: pageUrl(row) }))
-      .filter((row) => row.page_url)
-      .filter((row) => !["dead", "unsupported"].includes(String(row.availability_status || "").toLowerCase()));
-
-    const value: CatalogEpisodeHint = {
-      provider,
-      providerTitleId: String(title.provider_title_id),
-      titleId: Number(title.id),
-      episodeId: Number(episode.id),
-      episodeNumber: Number(episode.episode_number),
-      episodeStatus: String(episode.episode_status || "episode_found"),
-      title,
-      episode,
-      servers,
-    };
-    hintCache.set(key, { value, expiresAt: Date.now() + HINT_TTL_MS });
-    return value;
-  } catch (error: any) {
-    console.warn(`[sourceCatalog] ${provider} hint failed:`, error?.message || error);
-    hintCache.set(key, { value: null, expiresAt: Date.now() + 30_000 });
-    return null;
-  }
+  hintInflight.set(key, flight);
+  return flight;
 }
 
 export async function getSourceCatalogHints(input: HintInput): Promise<Partial<Record<CatalogProvider, CatalogEpisodeHint>>> {

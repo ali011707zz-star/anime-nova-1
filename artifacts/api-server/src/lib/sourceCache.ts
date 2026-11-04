@@ -120,6 +120,8 @@ export function computeExpiry(site: string, sources: any[]): number {
 
 // ── L1: ذاكرة العملية (سريعة، تُفقد عند restart) ──
 const l1 = new Map<string, { sources: any[]; expiresAt: number }>();
+const L1_MISS_TTL = 45_000;
+const l1Miss = new Map<string, { staleRow: { sources: any[]; expiresAt: number; stale?: boolean } | null; ts: number }>();
 
 // Single-flight deduplication: concurrent viewers of the same episode/provider
 // share one live extraction instead of opening one upstream request per viewer.
@@ -274,21 +276,27 @@ export async function getFromSourceCache(
   // L1 أولاً (أسرع)
   const m = l1.get(key);
   if (m && Date.now() < m.expiresAt) {
-    // تحقق من انتهاء الـ URL الفعلي (signed URLs)
     if (isSourcesUrlExpired(m.sources)) { l1.delete(key); }
     else return m;
   } else { l1.delete(key); }
 
-  // L2: Supabase
-  const row = await sbGet(key);
-  if (!row) return null;
-
-  if (Date.now() > row.expiresAt || isSourcesUrlExpired(row.sources)) {
-    // بيانات منتهية الصلاحية (TTL أو URL) — أعدها مع علامة stale لإعادة الجلب
-    return { sources: row.sources, expiresAt: row.expiresAt, stale: true };
+  const miss = l1Miss.get(key);
+  if (miss && Date.now() - miss.ts < L1_MISS_TTL) {
+    return miss.staleRow;
   }
 
-  // خزِّن في L1 لتسريع الطلبات القادمة
+  // L2: Supabase
+  const row = await sbGet(key);
+  if (!row) {
+    l1Miss.set(key, { staleRow: null, ts: Date.now() });
+    return null;
+  }
+  if (Date.now() > row.expiresAt || isSourcesUrlExpired(row.sources)) {
+    const staleRow = { sources: row.sources, expiresAt: row.expiresAt, stale: true };
+    l1Miss.set(key, { staleRow, ts: Date.now() });
+    return staleRow;
+  }
+  l1Miss.delete(key);
   l1.set(key, { sources: row.sources, expiresAt: row.expiresAt });
   return { sources: row.sources, expiresAt: row.expiresAt };
 }
@@ -302,6 +310,7 @@ export async function setSourceCache(
   if (!sources.length) return;
   const expiresAt = computeExpiry(site, sources);
   // L1 فوري
+  l1Miss.delete(key);
   l1.set(key, { sources, expiresAt });
   // L2 Supabase: fire-and-forget (لا يؤخر الاستجابة)
   sbUpsertCache(key, site, sources, expiresAt);

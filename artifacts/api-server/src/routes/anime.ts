@@ -110,7 +110,7 @@ async function pgTranslateSave(key: string, translated: string, from: string, to
 const router = Router();
 // Disabled by the user; keep these out of both availability probes and
 // playback extraction even if stale client/config data still requests them.
-const TEMPORARILY_DISABLED_SOURCE_SITES = new Set<string>(["animekai", "anineko", "consumet_gogo"]);
+const TEMPORARILY_DISABLED_SOURCE_SITES = new Set<string>(["animekai", "anineko", "consumet_gogo", "anime4up2"]);
 
 async function pipeWebMediaBody(
   body: ReadableStream<Uint8Array> | null,
@@ -3046,6 +3046,8 @@ const SKIP_EXTRACT_HOSTS = [
 ];
 
 async function probeDirectUrl(url: string, referer?: string): Promise<boolean> {
+  if (!url) return false;
+  if (url.startsWith("/api/")) return true;
   // HLS m3u8 manifests: CDN servers frequently reject HEAD with HTML error pages
   // but serve fine on GET — trust extracted m3u8 URLs without probing
   if (url.match(/\.m3u8([?#]|$)/i)) return true;
@@ -3569,7 +3571,7 @@ async function getAnimelekSources(
 //  ANIMEDAR.NET scraper  (Arabic anime — WordPress/animestream theme)
 // ════════════════════════════════════════════════════════════════════
 
-const ADAR_BASE = "https://animedar.net";
+const ADAR_BASE = "https://web.animedar.net";
 const ADAR_HDRS: Record<string, string> = {
   ...BASE_HDRS,
   Referer: "https://animedar.net/",
@@ -3646,17 +3648,15 @@ async function searchAnimedar(title: string, english: string | null, isMovie = f
   const SKIP_SLUGS = ["feed/", "wp-", "/page/", "genre/", "cast/", "tag/", "category/",
     "dmca", "contact", "about", "privacy", "xmlrpc", "wp-json"];
 
-  // ── Step 1: Search first (accurate — avoids slug hitting wrong OVA/movie page) ──
   for (const q of [english, title].filter(Boolean) as string[]) {
     try {
-      const html = await cfProxyGet(`${ADAR_BASE}/?s=${encodeURIComponent(q)}`, "https://animedar.net/", 10000);
-      if (!html) continue;
-      if (isCloudflareBlock(html)) continue;
+      const html = await cfProxyGet(`${ADAR_BASE}/?s=${encodeURIComponent(q)}`, `${ADAR_BASE}/`, 4500);
+      if (!html || isCloudflareBlock(html)) continue;
 
       let best: string | null = null;
       let bestScore = 0;
 
-      const anchorRe = /<a\s+href="(https?:\/\/animedar\.net\/([^"#?]+))"(?:[^>]*title="([^"]*)")?[^>]*>/gi;
+      const anchorRe = /<a\s+href="(https?:\/\/(?:web\.)?animedar\.net\/(?:anime-page\/)?([^"#?]+))"(?:[^>]*title="([^"]*)")?[^>]*>/gi;
       for (const m of html.matchAll(anchorRe)) {
         const url      = m[1];
         const slug     = m[2];
@@ -3694,41 +3694,25 @@ async function searchAnimedar(title: string, english: string | null, isMovie = f
     } catch {}
   }
 
-  // ── Step 2: Direct slug fallback (for cases where search fails / site slow) ──
-  // Slug must be 3+ distinct words to avoid ambiguous matches (e.g. "one-piece" = OVA/series/movie)
-  const slugCandidates: string[] = [];
-  for (const q of [english, title].filter(Boolean) as string[]) {
-    const s = toSlug(q as string);
-    if (!s) continue;
-    // Only use slug when it uniquely identifies the series (colon-variant / stripped season suffix)
-    const colonJoined = toSlug((q as string).replace(/[：:]/g, ""));
-    if (colonJoined && colonJoined !== s) slugCandidates.push(colonJoined);
-    const stripped = s.replace(/[-–](?:season[-–]?\d+|\d+(?:nd|rd|th)[-–]season|s\d+)$/i, "");
-    if (stripped !== s && stripped.length > 2) slugCandidates.push(stripped);
-    const colonJoinedStripped = colonJoined.replace(/[-–](?:season[-–]?\d+|\d+(?:nd|rd|th)[-–]season|s\d+)$/i, "");
-    if (colonJoinedStripped !== colonJoined && colonJoinedStripped.length > 2) slugCandidates.push(colonJoinedStripped);
-    // Only add plain slug if it's long enough to be distinctive (3+ words)
-    if (s.split("-").length >= 3) slugCandidates.push(s);
-  }
-  for (const slug of [...new Set(slugCandidates)]) {
-    try {
-      const html = await cfProxyGet(`${ADAR_BASE}/${slug}/`, "https://animedar.net/", 7000);
-      if (html && !isCloudflareBlock(html) && html.includes("ul-server-position")) {
-        const finalUrl = `${ADAR_BASE}/${slug}/`;
-        adarSlugCache.set(ck, { url: finalUrl, ts: Date.now() });
-        return finalUrl;
-      }
-    } catch {}
-  }
-
   adarSlugCache.set(ck, { url: null, ts: Date.now() });
   return null;
 }
 
 async function getAnimadarSources(
   title: string, english: string | null, ep: number, isMovie = false,
-  ctx?: MatchCtx,
+  ctx?: MatchCtx, anilistId?: number,
 ): Promise<UnifiedSource[]> {
+  // AD (أنمي فور أب): Fetch live Anime4Up streams first and return them under site="animedar" (AD)
+  try {
+    const a4upSources = await getAnime4up2Sources(title, english, ep, anilistId);
+    if (a4upSources.length > 0) {
+      return a4upSources.map(s => ({
+        ...s,
+        site: "animedar",
+      }));
+    }
+  } catch {}
+
   const ck = `adar:${(title + "|" + (english || "")).toLowerCase()}:${ep}`;
   const hit = adarSrcCache.get(ck);
   if (hit && Date.now() - hit.ts < SRC_TTL) return hit.sources;
@@ -3737,7 +3721,7 @@ async function getAnimadarSources(
     const seriesUrl = await searchAnimedar(title, english, isMovie, ctx);
     if (!seriesUrl) return [];
 
-    const html = await cfProxyGet(seriesUrl, "https://animedar.net/", 14000);
+    const html = await cfProxyGet(seriesUrl, `${ADAR_BASE}/`, 5500);
     if (!html || isCloudflareBlock(html)) return [];
 
     const allEpisodes = parseAnimadarServers(html);
@@ -3766,7 +3750,7 @@ async function getAnimadarSources(
       const qRank = quality.toUpperCase().includes("FHD") ? 3
                   : quality.toUpperCase().includes("HD")  ? 2 : 1;
       sources.push({
-        name: `AnimeDar · ${type.toUpperCase()} · ${quality}`,
+        name: `أنمي فور أب · ${type.toUpperCase()} · ${quality}`,
         url: embedUrl,
         quality,
         qualityRank: isMegaEmbed ? 8 : qRank,
@@ -5117,38 +5101,147 @@ async function getAnime4upSources(
 //  Series page: shows latest 48 eps. Search: /?search_param=animes&s=
 // ════════════════════════════════════════════════════════════════════
 
-const A4UP2_BASE = "https://anime4up.pro";
+const A4UP2_BASE = "https://w1.anime4up.rest";
 const a4up2SeriesCache = new Map<string, { url: string | null; ts: number }>();
 const a4up2SrcCache    = new Map<string, { sources: UnifiedSource[]; ts: number }>();
 
-async function a4up2Fetch(url: string, timeoutMs = 7000): Promise<string> {
-  // المسار 1: Orkestr EU relay (يتجاوز CF ويتابع JWT redirect تلقائياً)
+async function a4up2Fetch(url: string, timeoutMs = 6000): Promise<string> {
   try {
-    const html = await orkestGet(url, `${A4UP2_BASE}/`, Math.min(timeoutMs, 14000)) ?? "";
-    if (html && !isCloudflareBlock(html)) {
-      // تابع JWT redirect عبر Orkestr إذا وجد
-      const redir = html.match(/window\.location\.replace\(['"]([^'"]+)['"]\)/)?.[1];
-      if (redir) {
-        const html2 = await orkestGet(redir, `${A4UP2_BASE}/`, Math.min(timeoutMs, 12000)) ?? "";
-        if (html2 && !isCloudflareBlock(html2) && !/window\.location\.replace\(/.test(html2))
-          return html2;
-      } else if (html.length > 200) {
+    const r = await fetch(url, {
+      headers: {
+        "User-Agent": BROWSER_UA,
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "ar,en-US;q=0.9,en;q=0.8",
+        "Referer": `${A4UP2_BASE}/`,
+      },
+      signal: AbortSignal.timeout(Math.min(timeoutMs, 4500)),
+    });
+    if (r.ok || r.status === 404) {
+      const html = await r.text();
+      if (html && html.length > 200 && !isCloudflareBlock(html)) {
         return html;
       }
     }
   } catch { /* fall through */ }
 
-  // المسار 2: CF proxy محلي (curl_cffi - يقبل 404 كنتيجة صحيحة)
   try {
     const proxyUrl = new URL(`${CF_PROXY_BASE}/fetch`);
     proxyUrl.searchParams.set("url", url);
     proxyUrl.searchParams.set("ref", `${A4UP2_BASE}/`);
-    proxyUrl.searchParams.set("timeout", String(Math.floor(timeoutMs / 1000)));
-    const r = await fetch(proxyUrl.toString(), { signal: AbortSignal.timeout(timeoutMs + 1500) });
+    proxyUrl.searchParams.set("timeout", String(Math.max(3, Math.floor(timeoutMs / 1000))));
+    const r = await fetch(proxyUrl.toString(), { signal: AbortSignal.timeout(timeoutMs + 1000) });
     const cfBlocked = r.headers.get("x-cf-blocked") === "1";
     if (cfBlocked) return "";
-    return await r.text();          // accept 404 — content is still valid
+    return await r.text();
   } catch { return ""; }
+}
+
+async function fetchAnime4upVnxServers(malId: number, ep: number): Promise<UnifiedSource[]> {
+  if (!malId || malId <= 0 || ep <= 0) return [];
+  const endpoints = [
+    { url: `${A4UP2_BASE}/Anime4up-S1/mal/${malId}/${ep}/sub/`, label: "S1" },
+    { url: `${A4UP2_BASE}/Anime4up-S2/mal/${malId}/${ep}/sub/`, label: "S2" },
+  ];
+  const results = await Promise.allSettled(
+    endpoints.map(async ({ url, label }) => {
+      const r = await fetch(url, {
+        headers: {
+          "User-Agent": BROWSER_UA,
+          "Referer": `${A4UP2_BASE}/`,
+          "Accept": "text/html,application/xhtml+xml,*/*;q=0.8",
+        },
+        signal: AbortSignal.timeout(3800),
+      });
+      if (!r.ok) return [];
+      const html = await r.text();
+      const streamMatch = html.match(/let\s+streamUrl\s*=\s*["'](https?:\/\/[^"']+)["']/i)
+        || html.match(/streamUrl\s*=\s*["'](https?:\/\/[^"']+)["']/i);
+      if (!streamMatch?.[1]) return [];
+      const rawStreamUrl = streamMatch[1].trim();
+      const proxiedHls = `/api/anime/hls-proxy?url=${encodeURIComponent(rawStreamUrl)}&ref=${encodeURIComponent(url)}`;
+
+      const subtitles: Array<{ url: string; lang: string; label: string; isDefault?: boolean }> = [];
+      const tracksMatch = html.match(/const\s+tracks\s*=\s*(\[[\s\S]*?\]);/i);
+      if (tracksMatch?.[1]) {
+        try {
+          const parsedTracks = JSON.parse(tracksMatch[1]) as Array<{ file?: string; label?: string; kind?: string; default?: boolean }>;
+          for (const t of parsedTracks) {
+            if (!t?.file || t.kind === "thumbnails") continue;
+            const lbl = String(t.label || "العربية").trim();
+            const isAr = /arab|عرب/i.test(lbl) || /_ar\.vtt/i.test(t.file);
+            subtitles.push({
+              url: t.file,
+              lang: isAr ? "ar" : "en",
+              label: isAr ? "العربية" : lbl,
+              isDefault: Boolean(t.default || isAr),
+            });
+          }
+        } catch {}
+      }
+
+      let intro: { start: number; end: number } | undefined;
+      const skipMatch = html.match(/let\s+skipSegments\s*=\s*(\{[\s\S]*?\});/i);
+      if (skipMatch?.[1]) {
+        try {
+          const parsedSkip = JSON.parse(skipMatch[1]);
+          if (
+            parsedSkip?.intro &&
+            typeof parsedSkip.intro.start === "number" &&
+            typeof parsedSkip.intro.end === "number" &&
+            parsedSkip.intro.end > parsedSkip.intro.start
+          ) {
+            intro = { start: parsedSkip.intro.start, end: parsedSkip.intro.end };
+          }
+        } catch {}
+      }
+
+      const headers = { Referer: url, Origin: A4UP2_BASE };
+      return [
+        {
+          name: `أنمي فور أب · ${label} · 1080p`,
+          label: `أنمي فور أب (${label})`,
+          url: proxiedHls,
+          directUrl: proxiedHls,
+          directType: "hls" as const,
+          quality: "1080p",
+          qualityRank: 10,
+          site: "animedar",
+          headers,
+          subtitles: subtitles.length ? subtitles : undefined,
+          ...(intro ? { intro } : {}),
+          verified: true,
+        },
+        {
+          name: `أنمي فور أب · ${label} · 720p`,
+          label: `أنمي فور أب (${label})`,
+          url: proxiedHls,
+          directUrl: proxiedHls,
+          directType: "hls" as const,
+          quality: "720p",
+          qualityRank: 8,
+          site: "animedar",
+          headers,
+          subtitles: subtitles.length ? subtitles : undefined,
+          ...(intro ? { intro } : {}),
+          verified: true,
+        },
+      ] as UnifiedSource[];
+    })
+  );
+
+  const out: UnifiedSource[] = [];
+  const seenStreams = new Set<string>();
+  for (const r of results) {
+    if (r.status === "fulfilled" && r.value.length) {
+      for (const s of r.value) {
+        const dedupKey = `${s.directUrl}|${s.quality}`;
+        if (seenStreams.has(dedupKey)) continue;
+        seenStreams.add(dedupKey);
+        out.push(s);
+      }
+    }
+  }
+  return out;
 }
 
 async function searchAnime4up2(title: string, english: string | null): Promise<string | null> {
@@ -5157,15 +5250,16 @@ async function searchAnime4up2(title: string, english: string | null): Promise<s
   if (hit && Date.now() - hit.ts < SRC_TTL) return hit.url;
 
   for (const q of [english, title].filter(Boolean) as string[]) {
-    const html = await a4up2Fetch(`${A4UP2_BASE}/?search_param=animes&s=${encodeURIComponent(q as string)}`);
+    const html = await a4up2Fetch(`${A4UP2_BASE}/?search_param=animes&s=${encodeURIComponent(q as string)}`, 5000);
     if (!html || isCloudflareBlock(html)) continue;
 
     const candidates: Array<{ url: string; score: number }> = [];
-    // Confirmed structure: <a href="URL" class="overlay" aria-label="Title">
-    const cardRe = /<a\s+href="(https?:\/\/(?:anime4up\.cam|w1\.anime4up\.rest)\/anime\/[^"]+)"\s+class="overlay"[^>]+aria-label="([^"]+)"/gi;
+    const cardRe = /<a\s+href="(https?:\/\/(?:anime4up\.cam|w1\.anime4up\.rest|(?:ww\d+\.)?anime4up\.pro)\/anime\/[^"]+)"[^>]*>/gi;
     for (const m of html.matchAll(cardRe)) {
-      const url   = m[1];
-      const rawTitle = m[2].trim();
+      const url = m[1].replace(/^https?:\/\/[^/]+/i, A4UP2_BASE);
+      const rawSlug = decodeURIComponent(url.replace(/^.*\/anime\//, "").replace(/\/$/, "")).replace(/-/g, " ");
+      const ariaM = m[0].match(/(?:aria-label|title)=["']([^"']+)["']/i);
+      const rawTitle = (ariaM?.[1] || rawSlug).trim();
       if (!rawTitle) continue;
       const score = Math.max(
         similarity(rawTitle, title),
@@ -5189,61 +5283,78 @@ async function searchAnime4up2(title: string, english: string | null): Promise<s
 }
 
 async function getAnime4up2Sources(
-  title: string, english: string | null, ep: number,
+  title: string, english: string | null, ep: number, anilistId?: number,
 ): Promise<UnifiedSource[]> {
-  const ck = `a4up2:${(title + "|" + (english ?? "")).toLowerCase()}:${ep}`;
+  const ck = `a4up2:${(title + "|" + (english ?? "")).toLowerCase()}:${ep}:${anilistId || 0}`;
   const hit = a4up2SrcCache.get(ck);
   if (hit && Date.now() - hit.ts < SRC_TTL) return hit.sources;
 
+  // ── ULTRA-FAST PATH: Direct VnxPlayer via MAL ID (~250-350ms) ──
+  if (anilistId && anilistId > 0) {
+    try {
+      const malId = await Promise.race([
+        getMalIdForAniList(anilistId),
+        new Promise<number | null>(r => setTimeout(() => r(null), 2200)),
+      ]);
+      if (malId) {
+        const vnxSources = await fetchAnime4upVnxServers(malId, ep);
+        if (vnxSources.length > 0) {
+          a4up2SrcCache.set(ck, { sources: vnxSources, ts: Date.now() });
+          return vnxSources;
+        }
+      }
+    } catch {}
+  }
+
   const epStr = String(ep);
 
-  // Parse <li data-watch="URL"><a>Label</a></li> from episode page HTML
   function parseDataWatch(html: string): UnifiedSource[] {
     const sources: UnifiedSource[] = [];
     const seenUrls = new Set<string>();
-    for (const m of html.matchAll(/<li[^>]*\sdata-watch=["'](https?:\/\/[^"']{5,})["'][^>]*>\s*<a[^>]*>([\s\S]*?)<\/a>/gi)) {
-      const url = m[1].trim();
-      if (seenUrls.has(url)) continue;
-      seenUrls.add(url);
-      const label = m[2].replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim();
-      sources.push({
-        name: `أنمي فور أب · ${label || "سيرفر"}`,
-        url, quality: "HD", qualityRank: 10, site: "anime4up2",
-      });
+    const patterns = [
+      /<li[^>]*\sdata-watch=["'](https?:\/\/[^"']{5,})["'][^>]*>\s*<a[^>]*>([\s\S]*?)<\/a>/gi,
+      /<a[^>]*\sdata-(?:ep-url|embed|watch|url)=["'](https?:\/\/[^"']{5,})["'][^>]*>([\s\S]*?)<\/a>/gi,
+      /<button[^>]*\sdata-(?:ep-url|embed|watch|url)=["'](https?:\/\/[^"']{5,})["'][^>]*>([\s\S]*?)<\/button>/gi,
+    ];
+    for (const re of patterns) {
+      for (const m of html.matchAll(re)) {
+        const url = m[1].trim();
+        if (seenUrls.has(url)) continue;
+        seenUrls.add(url);
+        const label = m[2].replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim();
+        sources.push({
+          name: `أنمي فور أب · ${label || "سيرفر"}`,
+          url, quality: "1080p", qualityRank: 10, site: "animedar",
+        });
+      }
     }
     return sources;
   }
 
-  // Fetch episode page and return its servers
   async function fetchEpSources(epUrl: string): Promise<UnifiedSource[] | null> {
-    const html = await a4up2Fetch(epUrl);
+    const html = await a4up2Fetch(epUrl, 4500);
     if (!html || isCloudflareBlock(html)) return null;
-    if (!html.includes("data-watch")) return null;
+    const malMatch = html.match(/Anime4up-S[12]\/mal\/(\d+)\/(\d+)/i);
+    if (malMatch?.[1]) {
+      const vnx = await fetchAnime4upVnxServers(parseInt(malMatch[1], 10), ep);
+      if (vnx.length) return vnx;
+    }
     const srcs = parseDataWatch(html);
     return srcs.length ? srcs : null;
   }
 
-  // ── START SEARCH IMMEDIATELY (runs in parallel with fast path) ──
-  // This avoids the 7s fast-path wait before search can begin.
   const searchPromise = searchAnime4up2(title, english);
 
-  // ── FAST PATH: try direct URL construction (old format slug-الحلقة-N) ──
-  // Old format still works for most anime on anime4up.cam.
-  // Each request has a 7s timeout (previously 20s), so parallel runs cost at most 7s.
   const fastCandidates: string[] = [];
   const seenSlugs = new Set<string>();
-  const A4UP2_ALT = "https://ww5.anime4up.pro";           // نطاق بديل
   for (const q of [english, title].filter(Boolean) as string[]) {
     const slug = toSlug(q as string);
     if (!slug || seenSlugs.has(slug)) continue;
     seenSlugs.add(slug);
-    for (const base of [A4UP2_BASE, A4UP2_ALT]) {
-      fastCandidates.push(`${base}/episode/${encodeURIComponent(slug + "-الحلقة-" + epStr)}/`);
-      fastCandidates.push(`${base}/episode/${encodeURIComponent(slug + "-الحلقة-" + epStr + "-مترجمة")}/`);
-    }
+    fastCandidates.push(`${A4UP2_BASE}/episode/${encodeURIComponent(slug + "-الحلقة-" + epStr)}/`);
+    fastCandidates.push(`${A4UP2_BASE}/episode/${encodeURIComponent(slug + "-الحلقة-" + epStr + "-مترجمة")}/`);
   }
 
-  // Try fast candidates in parallel (7s timeout each)
   if (fastCandidates.length > 0) {
     const fastResults = await Promise.allSettled(
       fastCandidates.map(url => fetchEpSources(url))
@@ -5256,25 +5367,24 @@ async function getAnime4up2Sources(
     }
   }
 
-  // ── SLOW PATH: use already-running search → series page → find episode ──
   const seriesUrl = await searchPromise;
   if (!seriesUrl) {
     a4up2SrcCache.set(ck, { sources: [], ts: Date.now() });
     return [];
   }
 
-  const srHtml = await a4up2Fetch(seriesUrl);
+  const srHtml = await a4up2Fetch(seriesUrl, 4500);
   if (!srHtml || isCloudflareBlock(srHtml)) {
     a4up2SrcCache.set(ck, { sources: [], ts: Date.now() });
     return [];
   }
 
   const epLinks: string[] = [];
-  for (const m of srHtml.matchAll(/href=["'](https?:\/\/(?:anime4up\.cam|w1\.anime4up\.rest)\/episode\/[^"']+)["']/g)) {
-    if (!m[1].includes("/page/") && !epLinks.includes(m[1])) epLinks.push(m[1]);
+  for (const m of srHtml.matchAll(/href=["'](https?:\/\/(?:anime4up\.cam|w1\.anime4up\.rest|(?:ww\d+\.)?anime4up\.pro)\/episode\/[^"']+)["']/g)) {
+    const normalizedLink = m[1].replace(/^https?:\/\/[^/]+/i, A4UP2_BASE);
+    if (!normalizedLink.includes("/page/") && !epLinks.includes(normalizedLink)) epLinks.push(normalizedLink);
   }
 
-  // Find episode by number in decoded URL
   for (const link of epLinks) {
     try {
       const decoded = decodeURIComponent(link);
@@ -5290,31 +5400,9 @@ async function getAnime4up2Sources(
     } catch {}
   }
 
-  // Construct URL from prefix pattern found in series page
-  if (epLinks.length > 0) {
-    for (const link of epLinks.slice(0, 2)) {
-      try {
-        const decoded = decodeURIComponent(link.replace(A4UP2_BASE + "/episode/", "").replace(/\/$/, ""));
-        const prefixM = decoded.match(/^([\s\S]+?)الحلقة-\d+/);
-        if (!prefixM) continue;
-        const prefix = prefixM[1];
-        for (const suffix of ["-مترجمة", "-مترجم", ""]) {
-          const candidate = `${A4UP2_BASE}/episode/${encodeURIComponent(prefix + "الحلقة-" + epStr + suffix)}/`;
-          const sources = await fetchEpSources(candidate);
-          if (sources && sources.length) {
-            a4up2SrcCache.set(ck, { sources, ts: Date.now() });
-            return sources;
-          }
-        }
-        break;
-      } catch {}
-    }
-  }
-
   a4up2SrcCache.set(ck, { sources: [], ts: Date.now() });
   return [];
 }
-
 
 // ════════════════════════════════════════════════════════════════════
 //  MyCima / WeCima scraper (mycima.gives — WP-JSON + data-watch)
@@ -14550,7 +14638,7 @@ router.get("/anime/sources-stream", scraperQueueMiddleware, async (req, res) => 
   // Catalog lookups run once per request and are shared by both phases:
   // availability can advertise a known page immediately, while extraction
   // receives the provider's stable id and skips its title-wide search.
-  const catalogHintsPromise = getSourceCatalogHints({
+  const catalogLookupInput = {
     title,
     english,
     titleAr,
@@ -14559,22 +14647,33 @@ router.get("/anime/sources-stream", scraperQueueMiddleware, async (req, res) => 
     season: seasonNum,
     providerTitleId: anslayerId,
     providerTitleIds: { anifox: anifoxId },
-  }).catch(() => ({}));
-  const catalogHintFor = async (provider: "animeify" | "anslayer" | "sanime" | "anifox") =>
-    (await catalogHintsPromise)[provider] || null;
+  };
+  const catalogHintFor = (provider: "animeify" | "anslayer" | "sanime" | "anifox") =>
+    getSourceCatalogHint(provider, {
+      ...catalogLookupInput,
+      providerTitleId:
+        provider === "anslayer"
+          ? anslayerId
+          : provider === "anifox"
+            ? anifoxId
+            : undefined,
+    }).catch(() => null);
 
   async function useCatalogAvailability(
     provider: "animeify" | "anslayer" | "sanime" | "anifox",
     fallback: (hint: CatalogEpisodeHint | null) => Promise<unknown>,
     allowCatalogServers = true,
   ): Promise<void> {
-    // Do not hold the picker open for a slow database request. The normal
-    // scraper remains the explicit fallback when the catalog is unavailable.
-    const hints = await Promise.race([
-      catalogHintsPromise,
-      new Promise<Partial<Record<string, CatalogEpisodeHint>>>(resolve => setTimeout(() => resolve({}), 1200)),
+    const availabilityHit = getSourceAvailabilityCache(cKey).get(provider);
+    if (availabilityHit?.length) {
+      await emitAvailability(availabilityHit);
+      return;
+    }
+
+    const hint = await Promise.race([
+      catalogHintFor(provider),
+      new Promise<CatalogEpisodeHint | null>(resolve => setTimeout(() => resolve(null), 450)),
     ]);
-    const hint = hints[provider] || null;
     if (allowCatalogServers && hint?.servers.length) {
       for (const server of hint.servers) {
         sendCheckSrc({
@@ -14588,20 +14687,18 @@ router.get("/anime/sources-stream", scraperQueueMiddleware, async (req, res) => 
       }
       return;
     }
-    // Pass the bounded lookup result through instead of awaiting the original
-    // catalog promise again inside the fallback. Otherwise a slow catalog
-    // request defeats this 1.2s bound and can consume the provider's entire
-    // availability deadline before its scraper even starts.
     await fallback(hint);
   }
 
-  // Resolve AniList in parallel with provider checks. Only ID-dependent
-  // providers await this bounded lookup; title/catalog providers can emit
-  // availability rows immediately instead of holding the whole picker.
-  const aniListIdResolution = (!closed && title)
+  const needsAniListResolution = Boolean(
+    !closed &&
+    title &&
+    (!anilistId || anilistId <= 0 || (fromLatest && latestSource === "anslayer"))
+  );
+  const aniListIdResolution = needsAniListResolution
     ? Promise.race([
         resolveAniListIdForSource(title, english, titleVariants, titleAr),
-        new Promise<number | undefined>(resolve => setTimeout(() => resolve(undefined), 3500)),
+        new Promise<number | undefined>(resolve => setTimeout(() => resolve(anilistId), 2500)),
       ]).then(resolvedByTitle => {
         if (resolvedByTitle) anilistId = resolvedByTitle;
         tracePlayback(
@@ -14615,10 +14712,7 @@ router.get("/anime/sources-stream", scraperQueueMiddleware, async (req, res) => 
         return anilistId;
       }).catch(() => anilistId)
     : Promise.resolve(anilistId);
-  if (!checkOnly) {
-    // Some home/latest links carry a catalog id rather than an AniList id.
-    // Resolve by title even when a numeric id was supplied so MP/KW do not
-    // silently disappear because they received the wrong catalog namespace.
+  if (!checkOnly && needsAniListResolution) {
     anilistId = await aniListIdResolution;
   }
 
@@ -14656,6 +14750,7 @@ router.get("/anime/sources-stream", scraperQueueMiddleware, async (req, res) => 
     };
     checkRows.set(key, { ...row, count: row.serverCount });
     res.write(`data: ${JSON.stringify(row)}\n\n`);
+    (res as any).flush?.();
     if (!checkFirstRowLogged) {
       checkFirstRowLogged = true;
       tracePlayback(
@@ -14717,9 +14812,8 @@ router.get("/anime/sources-stream", scraperQueueMiddleware, async (req, res) => 
       while (cursor < srcs.length) {
         const source = srcs[cursor++];
         const site = String((source as any).site || "");
-        // Preserve Kawaii's existing quality and availability behavior. Its
-        // playback path uses fresh links and is handled separately.
-        if (site !== "kawaii") {
+        // Only inspect remote HLS manifests during check mode for anineko (multi-quality master).
+        if (site === "anineko") {
           const target = getAvailabilityManifestTarget(source);
           if (target) {
             const inspection = await readAvailabilityManifest(target);
@@ -15327,9 +15421,9 @@ router.get("/anime/sources-stream", scraperQueueMiddleware, async (req, res) => 
         },
         {
           site: "animedar",
-          timeoutMs: sourceAvailabilityJobTimeoutMs("animedar", 11_000),
-          run: () => scrapeCached("animedar", () =>
-            getAnimadarSources(title, english, ep, isMovie, matchCtx), false, 11_000),
+          timeoutMs: sourceAvailabilityJobTimeoutMs("animedar", 7_000),
+          run: () => scrapeCached("animedar", async () =>
+            getAnimadarSources(title, english, ep, isMovie, matchCtx, await aniListIdResolution), false, 7_000),
         },
         {
           site: "anime4up2",
@@ -15394,7 +15488,7 @@ router.get("/anime/sources-stream", scraperQueueMiddleware, async (req, res) => 
       // shahiid/animelek: معطّلة بطلب المستخدم 2026-07-14 (قسم الأنمي فقط)
       // scrapeCached("shahiid",      () => getShahiidSources(title, english, ep, isMovie, matchCtx)),
       // scrapeCached("animelek",     () => getAnimelekSources(title, english, ep, isMovie, matchCtx)),
-      scrapeCached("animedar",     () => getAnimadarSources(title, english, ep, isMovie, matchCtx)),
+      scrapeCached("animedar",     () => getAnimadarSources(title, english, ep, isMovie, matchCtx, anilistId)),
       // okanime: معطّل بطلب المستخدم
       // scrapeCached("okanime",      () => getOkAnimeSources(title, english, ep, isMovie, matchCtx), true, 22_000),
       // mitanime: محذوف بطلب المستخدم 2026-07-27
@@ -15700,6 +15794,10 @@ router.get("/anime/fetch-source", scraperQueueMiddleware, async (req, res) => {
   };
   const sendProgressiveBatch = async (rows: UnifiedSource[]) => {
     if (!progressive) return;
+    if (progressiveSent > 0) {
+      finishProgressiveResponse();
+      return;
+    }
     const ordered = filterRequestedQuality(rows)
       .filter(matchesRequestedQuality)
       .filter(source => !excludedCandidateKeys.has(progressiveCandidateKey(source)))
@@ -15722,30 +15820,24 @@ router.get("/anime/fetch-source", scraperQueueMiddleware, async (req, res) => {
   }
   if (progressive) startProgressiveResponse();
 
-  // Availability resolves Kawaii from the title even when the client supplied
-  // a numeric id. Match that behavior here: latest/catalog links can carry a
-  // provider id in `anime`, which is not necessarily an AniList id.
   const idResolutionStartedAt = Date.now();
+  const needsFetchIdResolution = Boolean(
+    title &&
+    site !== "anslayer" &&
+    (!anilistId || anilistId <= 0 || (String(req.query.fromLatest || "") === "1" && String(req.query.latestSource || "").trim().toLowerCase() === "anslayer"))
+  );
   try {
-    if (site === "kawaii" && title) {
+    if (needsFetchIdResolution) {
       const resolvedByTitle = await Promise.race([
         resolveAniListIdForSource(title, english, titleVariants, titleAr),
-        new Promise<number | undefined>(resolve => setTimeout(() => resolve(undefined), 3500)),
-      ]);
-      if (resolvedByTitle) anilistId = resolvedByTitle;
-    } else if (site !== "anslayer" && !anilistId) {
-      // Other AniList-dependent sources still need title resolution when no id
-      // was supplied by the caller.
-      const resolvedByTitle = await Promise.race([
-        resolveAniListIdForSource(title, english, titleVariants, titleAr),
-        new Promise<number | undefined>(resolve => setTimeout(() => resolve(undefined), 3500)),
+        new Promise<number | undefined>(resolve => setTimeout(() => resolve(undefined), 2500)),
       ]);
       if (resolvedByTitle) anilistId = resolvedByTitle;
     }
   } catch (error: any) {
     console.warn(`[fetch-source] AniList resolution failed for ${site}:`, error?.message ?? error);
   }
-  if (site === "kawaii" || !parseInt((req.query.anilistId as string) || (req.query.anime as string) || "0")) {
+  if (needsFetchIdResolution) {
     console.info(
       `[playback-trace] id=${sourceTrace || "none"} route=fetch-source stage=id_resolution site=${sourceTraceSite} elapsed_ms=${Date.now() - idResolutionStartedAt} has_id=${Boolean(anilistId)}`,
     );
@@ -15765,7 +15857,7 @@ router.get("/anime/fetch-source", scraperQueueMiddleware, async (req, res) => {
     "sanime",        // 🎌 MP4 مباشر عربي مدبلج ✅
     "anslayer",      // ⚡ بحث متوازٍ + dedupe للطلبات + cache
     "animeify",      // 🎬 أنمي فاي — MEGA/Streamtape/MediaFire ✅ (مُعاد تفعيله)
-    "anime4up2",     // 🎌 Anime4Up — السيرفرات المضمّنة في صفحة الحلقة
+    "animedar",      // 🎌 أنمي فور أب (AD)
     "animekai",      // 🎌 AnimeKai direct scraper — HLS/MP4
     ...ANIVEXA_SOURCES.map(source => source.site),
     ...CONSUMET_SOURCES.map(source => source.site),
@@ -15781,7 +15873,7 @@ router.get("/anime/fetch-source", scraperQueueMiddleware, async (req, res) => {
     "anivexa_anikoto", "anivexa_anidbapp",
     "reanime", "re", "anivexa_re",
     "consumet_world", "consumet_miruro", "consumet_saturn",
-    "consumet_reanime", "consumet_anikoto", "consumet_gogo",
+    "consumet_reanime", "consumet_anikoto", "consumet_gogo", "anime4up2",
     // Retired provider ids and legacy short tags. Keep these blocked so stale
     // clients/cache rows cannot resurrect the failed servers.
     "mkissa", "mk", "ra", "animegg", "gg", "anibd", "db",
@@ -15852,6 +15944,7 @@ router.get("/anime/fetch-source", scraperQueueMiddleware, async (req, res) => {
     "animekai",             // embed/CDN links are signed and short-lived
     "animewitcher", "animeify",                    // Streamtape/MediaFire ~45min
     "kawaii", "anifox",                             // signed CDN/download URLs
+    "animedar",                                     // VnxPlayer token URLs
     "moviebox", "moviebox_anim",                   // &t= signed URLs ~10min
     "vidlink_encdec", "vidlink_anim",              // stormvv URLs ~45min
     "xpass_anim",                                  // XPass token ~8min
@@ -15987,7 +16080,7 @@ router.get("/anime/fetch-source", scraperQueueMiddleware, async (req, res) => {
           : catalogProvider === "anifox"
             ? anifoxId
             : undefined,
-      }), 1800, null).catch(() => null)
+      }), 500, null).catch(() => null)
     : null;
   if (catalogProvider) {
     console.info(
@@ -16141,7 +16234,14 @@ router.get("/anime/fetch-source", scraperQueueMiddleware, async (req, res) => {
       // shahiid/animelek: معطّلة بطلب المستخدم 2026-07-14 (قسم الأنمي فقط)
       // case "shahiid":      await runExtract(await race(getShahiidSources(title, english, ep, isMovie),    SCRAPER_MS, [])); break;
       // case "animelek":     await runExtract(await race(getAnimelekSources(title, english, ep, isMovie),   SCRAPER_MS, [])); break;
-      case "animedar":     await runExtract(await race(getAnimadarSources(title, english, ep, isMovie),   SCRAPER_MS, [])); break;
+      case "animedar": {
+        const adarRaw = await race(getAnimadarSources(title, english, ep, isMovie, undefined, anilistId), 8_000, []);
+        const adarDirect = adarRaw.filter(s => Boolean(s.directUrl && !s.isEmbed));
+        const adarEmbeds = adarRaw.filter(s => !s.directUrl || s.isEmbed);
+        adarDirect.forEach(collectSrc);
+        if (adarEmbeds.length) await runExtract(adarEmbeds);
+        break;
+      }
       case "anime4up2":    await runExtract(await race(getAnime4up2Sources(title, english, ep), 12_000, [])); break;
       // case "okanime": معطّل بطلب المستخدم
       // case "mitanime": محذوف بطلب المستخدم 2026-07-27
@@ -16231,7 +16331,7 @@ router.get("/anime/fetch-source", scraperQueueMiddleware, async (req, res) => {
         .sort((a, b) => (b.qualityRank || sourceCheckQuality(b).qualityRank) - (a.qualityRank || sourceCheckQuality(a).qualityRank))
         .slice(0, 2);
       await Promise.all(directCandidates.map(async source => {
-        if (await verifyProgressiveLinkTraced(source)) publishProgressSource?.(source);
+        if ((source as any).verified || await verifyProgressiveLinkTraced(source)) publishProgressSource?.(source);
         else sendProgressiveRejected(source);
       }));
     }

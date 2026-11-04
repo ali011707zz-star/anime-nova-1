@@ -120,9 +120,9 @@ function subtitlesDisabledForSite(site?: string): boolean {
 
 /* ── Site → 2-letter tag (mirrors web SCRAPER_DEFS tags exactly) ── */
 const SITE_TAG: Record<string, string> = {
-  shahiid: "SH", animelek: "EK", animedar: "DR", okanime: "OK",
+  shahiid: "SH", animelek: "EK", animedar: "AD", okanime: "OK",
   ristoanime: "RS", animeify: "AF", animeday: "DY", arabseed: "AR",
-  anime4up2: "AD", mycima: "MC", topcinemaa: "TC",
+  mycima: "MC", topcinemaa: "TC",
   animewitcher: "AW", kawaii: "KW", megaplay: "MP", anineko: "AN",
   animekai: "AK",
   vidlink_anim: "VL", vidfast: "VF",
@@ -142,7 +142,7 @@ const SITE_LABEL: Record<string, string> = {
   dulo_anim: "Dulo",
   anikototv: "AniKotoTV", mitanime: "MITanime", vidfast: "VidFast",
   animepahe: "AnimePahe", shahiid: "Shahiid", animelek: "Animelek",
-  animedar: "AnimeDar", okanime: "OkAnime", ristoanime: "RistoAnime",
+  animedar: "أنمي فور أب", okanime: "OkAnime", ristoanime: "RistoAnime",
   animeify: "AnimeIfy", animeday: "AnimeDay", arabseed: "ArabSeed",
   anime4up2: "Anime4Up", mycima: "MyCima", topcinemaa: "TopCinema",
   faselhd_db: "FaselHD", animetime: "AnimeTime",
@@ -543,7 +543,7 @@ const STATIC_PICKER: Record<QualityKey, { site: string; name: string; tag: strin
     { site: "megaplay",     name: "MegaPlay",    tag: "MP" },
     { site: "anineko",      name: "AniNeko",      tag: "AN" },
     { site: "animewitcher", name: "AnimeWitcher", tag: "AW" },
-    { site: "animedar",     name: "أنمي دار",     tag: "DR" },
+    { site: "animedar",     name: "أنمي فور أب",  tag: "AD" },
     { site: "anslayer",     name: "AnimeSlayer",  tag: "AS" },
     { site: "sanime",       name: "سـAnime",      tag: "SA" },
     { site: "animeify",     name: "أنمي فاي",    tag: "AF" },
@@ -554,8 +554,7 @@ const STATIC_PICKER: Record<QualityKey, { site: string; name: string; tag: strin
     { site: "megaplay",     name: "MegaPlay",    tag: "MP" },
     { site: "anineko",      name: "AniNeko",      tag: "AN" },
     { site: "animewitcher", name: "AnimeWitcher", tag: "AW" },
-    { site: "animedar",     name: "أنمي دار",     tag: "DR" },
-    { site: "anime4up2",    name: "أنمي فور أب",  tag: "AD" },
+    { site: "animedar",     name: "أنمي فور أب",  tag: "AD" },
     { site: "anslayer",     name: "AnimeSlayer",  tag: "AS" },
     { site: "sanime",       name: "سـAnime",      tag: "SA" },
     { site: "animeify",     name: "أنمي فاي",    tag: "AF" },
@@ -566,7 +565,7 @@ const STATIC_PICKER: Record<QualityKey, { site: string; name: string; tag: strin
     { site: "megaplay",     name: "MegaPlay",    tag: "MP" },
     { site: "anineko",      name: "AniNeko",      tag: "AN" },
     { site: "animewitcher", name: "AnimeWitcher", tag: "AW" },
-    { site: "animedar",     name: "أنمي دار",     tag: "DR" },
+    { site: "animedar",     name: "أنمي فور أب",  tag: "AD" },
     { site: "animeify",     name: "أنمي فاي",    tag: "AF" },
     { site: "anifox",        name: "ANIFOX",      tag: "FX" },
     { site: "animekai",      name: "AnimeKai",   tag: "AK" },
@@ -575,13 +574,12 @@ const STATIC_PICKER: Record<QualityKey, { site: string; name: string; tag: strin
     { site: "megaplay",     name: "MegaPlay",    tag: "MP" },
     { site: "anineko",      name: "AniNeko",      tag: "AN" },
     { site: "animewitcher", name: "AnimeWitcher", tag: "AW" },
-    { site: "animedar",     name: "أنمي دار",     tag: "DR" },
+    { site: "animedar",     name: "أنمي فور أب",  tag: "AD" },
     { site: "animeify",     name: "أنمي فاي",    tag: "AF" },
     { site: "anifox",        name: "ANIFOX",      tag: "FX" },
     { site: "animekai",      name: "AnimeKai",   tag: "AK" },
   ],
 };
-
 const Q_KEYS: QualityKey[] = ["1080p", "720p", "480p", "360p"];
 
 type AvailabilityHintSlot = {

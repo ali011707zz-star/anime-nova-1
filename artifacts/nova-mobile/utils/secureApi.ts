@@ -263,5 +263,14 @@ export async function secureStreamFetch(
   const { body: _body, signal: _signal, ...restOpts } = options;
   const body = _body === null ? undefined : _body;
   const signal = _signal === null ? undefined : _signal;
-  return expoFetch(url, { ...restOpts, body, signal, headers }) as unknown as Response;
+  const res = await (expoFetch(url, { ...restOpts, body, signal, headers }) as unknown as Promise<Response>);
+  if (res.status === 403) {
+    await invalidateToken();
+    const fresh = await fetchFreshToken();
+    if (fresh) {
+      headers["X-App-Token"] = fresh;
+      return expoFetch(url, { ...restOpts, body, signal, headers }) as unknown as Response;
+    }
+  }
+  return res;
 }

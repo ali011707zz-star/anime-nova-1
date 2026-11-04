@@ -504,7 +504,7 @@ const SCRAPER_DEFS: {
     tag: "AK",
   },
   {
-    site: "anime4up2",
+    site: "animedar",
     name: "أنمي فور أب",
     desc: "عربي مترجم · HLS/ميغا",
     tag: "AD",
@@ -545,7 +545,7 @@ const STATIC_PICKER_WEB: Record<
     { site: "animeify", tag: "AF" },
     { site: "anifox", tag: "FX" },
     { site: "animekai", tag: "AK" },
-    { site: "anime4up2", tag: "AD" },
+    { site: "animedar", tag: "AD" },
   ],
   "360p": [
     { site: "megaplay", tag: "MP" },
