@@ -400,6 +400,8 @@ async function readFetchedSources(
 const BLOCKED_SOURCE_SITES = new Set([
   "hianime",
   "hi",
+  // AnimeDar is retired; Anime4Up now has its own provider id (anime4up2).
+  "animedar",
   // Removed provider ids: hide stale cached responses and old clients too.
   "anivexa_anidbapp",
   "consumet_world",
@@ -431,7 +433,7 @@ const BLOCKED_SOURCE_SITES = new Set([
   "anivexa_kickassanime",
 ]);
 
-/* ── All known scrapers — shown immediately in picker ── */
+/* ── Sources with a confirmed availability row are shown in the picker ── */
 // ── قائمة المصادر المعتمدة فقط — المصادر الفاشلة لا تُعاد إلى المنتقي
 //    من الباك-إند أيضاً (ANIME_SOURCE_ALLOWLIST في anime.ts). القائمة الأصلية
 //    الكاملة محفوظة أعلاه في تاريخ Git — لإعادة أي مصدر أضِفه هنا وفي الباك-إند معاً.
@@ -475,6 +477,13 @@ const SCRAPER_DEFS: {
     tag: "AF",
     isArabic: true,
   },
+  {
+    site: "anime4up2",
+    name: "أنمي فور أب",
+    desc: "سيرفرات متعددة · جودات متعددة",
+    tag: "AD",
+    isArabic: true,
+  },
   // anipub: معطّل بطلب المستخدم 2026-07-27
   // allmanga: معطّل 2026-07-17 — AllAnime أضافت AA_CRYPTO_MISSING على endpoint الحلقات (anti-scraping)
   // xpass_anim: محذوف — CDN يحجب VPS/CF IPs، المقاطع تفشل للمستخدم 2026-07-15
@@ -503,13 +512,6 @@ const SCRAPER_DEFS: {
     desc: "HLS · ياباني + ترجمة",
     tag: "AK",
   },
-  {
-    site: "animedar",
-    name: "أنمي فور أب",
-    desc: "عربي مترجم · HLS/ميغا",
-    tag: "AD",
-    isArabic: true,
-  },
   // akoam: حُذف 2026-07-28 — كان يستخدم hopxBrowserExtract (browser) على كل طلب
 ];
 
@@ -533,6 +535,7 @@ const STATIC_PICKER_WEB: Record<
     { site: "anslayer", tag: "AS" },
     { site: "sanime", tag: "SA" },
     { site: "animeify", tag: "AF" },
+    { site: "anime4up2", tag: "AD" },
     { site: "anifox", tag: "FX" },
     { site: "animekai", tag: "AK" },
   ],
@@ -543,9 +546,9 @@ const STATIC_PICKER_WEB: Record<
     { site: "anslayer", tag: "AS" },
     { site: "sanime", tag: "SA" },
     { site: "animeify", tag: "AF" },
+    { site: "anime4up2", tag: "AD" },
     { site: "anifox", tag: "FX" },
     { site: "animekai", tag: "AK" },
-    { site: "animedar", tag: "AD" },
   ],
   "360p": [
     { site: "megaplay", tag: "MP" },
@@ -1580,6 +1583,7 @@ const SITE_SHORT: Record<string, string> = {
   shahiid: "شاهيد",
   animelek: "أنمي ليك",
   animedar: "أنمي دار",
+  anime4up2: "أنمي فور أب",
   okanime: "أوك أنمي",
   toonstream: "تون ستريم",
   animeify: "أنمي فاي",
@@ -1923,15 +1927,8 @@ function ScraperPicker({
   const allScrapersComplete = !anyFetching && !hasIdleScrapers;
   const allDone = !anyFetching;
 
-  /* Next-episode guard: never guess an upper bound. Long-running series
-     still use their real count, while an unknown total fails closed. */
-  const nextAiringEp = anime?.nextAiringEpisode?.episode;
   const isMovie = anime?.format === "MOVIE" || anime?.format === "MOVIE_SHORT";
-  const isNextDisabled =
-    isMovie ||
-    totalEps <= 0 ||
-    ep >= totalEps ||
-    (Number(nextAiringEp) > 0 && ep >= Number(nextAiringEp) - 1);
+  const isNextDisabled = nextDisabled;
 
   /* تجميع المصادر حسب (موقع + جودة) — صف واحد لكل مجموعة، السيرفرات تتنافس داخلياً */
   const { sourceGroups, embedFallbacks } = useMemo(() => {
@@ -2314,40 +2311,23 @@ function ScraperPicker({
 
         {!availabilityDone && (
           <div
-            className="mx-4 mt-5 mb-6 min-h-[330px] flex flex-col items-center justify-center px-5 py-8 rounded-3xl text-center"
+            role="status"
+            aria-live="polite"
+            className="mx-4 mt-4 mb-2 flex items-center gap-3 rounded-2xl px-4 py-3"
             style={{
               background: "rgba(255,255,255,0.025)",
               border: "1px solid rgba(255,255,255,0.07)",
-              boxShadow: "0 18px 60px rgba(0,0,0,0.28)",
             }}
           >
-            <div
-              className="relative w-full max-w-[330px] aspect-video rounded-3xl overflow-hidden mb-5"
-              style={{ background: "rgba(255,255,255,0.025)" }}
-            >
-              <video
-                src="/nova-loading.mp4"
-                autoPlay
-                loop
-                muted
-                playsInline
-                preload="auto"
-                aria-hidden="true"
-                className="absolute inset-0 w-full h-full object-cover"
-              />
-              <div className="absolute inset-0 bg-gradient-to-t from-[#07070d]/80 via-transparent to-transparent pointer-events-none" />
+            <div className="w-5 h-5 shrink-0 rounded-full border-2 border-white/10 border-t-violet-400 animate-spin" />
+            <div>
+              <p className="text-white/80 text-[13px] font-bold font-['Cairo']">
+                جارٍ فحص المصادر
+              </p>
+              <p className="text-white/40 text-[11px] font-['Cairo'] mt-0.5">
+                ستظهر المصادر المؤكدة فور التحقق منها
+              </p>
             </div>
-            <motion.div
-              className="w-7 h-7 rounded-full border-2 border-white/10 border-t-violet-400/80 mb-4"
-              animate={{ rotate: 360 }}
-              transition={{ duration: 0.9, repeat: Infinity, ease: "linear" }}
-            />
-            <p className="text-white/85 text-[15px] font-black font-['Cairo'] leading-relaxed">
-              سوكونا يقاتل غوجو بجهد من اجل السيرفرات
-            </p>
-            <p className="text-white/30 text-[11px] font-['Cairo'] mt-2">
-              يتم فحص جميع السيرفرات… ستظهر دفعة واحدة عند الجاهزية
-            </p>
           </div>
         )}
 
@@ -2375,7 +2355,7 @@ function ScraperPicker({
         )}
 
         {/* ── Static picker: جودات مكدّسة + صفوف (تصميم Aniyomi) ── */}
-        <div className={`${availabilityDone ? "" : "hidden"} px-4 mt-4 mb-3`}>
+        <div className="px-4 mt-4 mb-3">
           {WEB_Q_KEYS.map((qk) => {
             const tierQ = PICKER_QMAP[qk];
             /* بعد انتهاء الاستعلام لا نعرض إلا الصفوف التي أعاد لها الباكند
@@ -2386,8 +2366,8 @@ function ScraperPicker({
                   shouldShowSrc(src) && getSrcQualityTier(src) === tierQ,
               ),
             );
-            if (availabilityDone && availableSlots.length === 0) return null;
-            const visibleSlots = availabilityDone ? availableSlots : VISIBLE_DEFS;
+            if (availableSlots.length === 0) return null;
+            const visibleSlots = availableSlots;
             /* ألوان لكل جودة */
             const qColor =
               qk === "1080p"
@@ -2857,6 +2837,7 @@ function EpisodePlayer({
   onBack,
   onNextEp,
   onPrevEp,
+  nextDisabled = false,
   onEpisodeSelect,
   onChangeQuality,
   onTierExhausted,
@@ -2883,6 +2864,7 @@ function EpisodePlayer({
   onBack: () => void;
   onNextEp: () => void;
   onPrevEp: () => void;
+  nextDisabled?: boolean;
   onEpisodeSelect?: (ep: number) => void;
   onChangeQuality: (q: Quality) => void;
   onTierExhausted?: () => void;
@@ -4942,6 +4924,15 @@ export default function WatchPage() {
           totalEpsParam > 0 ? totalEpsParam : 0,
           anime ? 1 : 0,
         );
+  /* Never guess an upper bound; use the known episode count and airing data. */
+  const nextAiringEp = anime?.nextAiringEpisode?.episode;
+  const isMovie =
+    anime?.format === "MOVIE" || anime?.format === "MOVIE_SHORT";
+  const isNextDisabled =
+    isMovie ||
+    totalEps <= 0 ||
+    ep >= totalEps ||
+    (Number(nextAiringEp) > 0 && ep >= Number(nextAiringEp) - 1);
   const episodeNotReleased = Boolean(anime) && (ep < 1 || ep > totalEps);
   /* Cover: prefer AniList data, fallback to URL param, then watch history */
   const coverFromHistory = useMemo(() => {
@@ -5057,7 +5048,7 @@ export default function WatchPage() {
     setKawaiiSubUrl(undefined);
     const ctrl = new AbortController();
     const metaParams = new URLSearchParams({
-      anilistId: animeId,
+      anilistId: String(animeId),
       ep: String(ep),
       title: titleParam || anime?.title?.userPreferred || "",
       english: anime?.title?.english || "",
@@ -5559,7 +5550,7 @@ export default function WatchPage() {
          live quality differs from the card, rather than dropping a healthy source. */
       const QUALITY_FALLBACK_SITES = new Set([
         "kawaii", "anineko", "animekai", "animewitcher", "sanime", "megaplay",
-        "animeify", "anifox", "anslayer",
+        "animeify", "anime4up2", "anifox", "anslayer",
       ]);
       if (!data.sources?.length && QUALITY_FALLBACK_SITES.has(site) && !ctrl.signal.aborted) {
         const fallbackParams = new URLSearchParams(params);
@@ -6254,6 +6245,7 @@ export default function WatchPage() {
         cover={cover}
         ep={ep}
         totalEps={totalEps}
+         nextDisabled={isNextDisabled}
         isMovie={anime?.format === "MOVIE" || anime?.format === "MOVIE_SHORT"}
         downloadUrl={playerDlUrl}
         subtitleUrl={playerSubUrl || activeKawaiiSubUrl}
