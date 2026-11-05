@@ -81,22 +81,22 @@ const STATUS_OPTIONS = [
 const ROW_RTL = I18nManager.isRTL ? "row" : "row-reverse";
 
 const GENRES_WITH_COVERS = [
-  { genre: "Adventure",     ar: "مغامرة",      color: "#D97706", icon: "compass-outline" },
-  { genre: "Action",        ar: "أكشن",        color: "#CA8A04", icon: "flame-outline" },
-  { genre: "Comedy",        ar: "كوميديا",     color: "#EAB308", icon: "happy-outline" },
-  { genre: "Fantasy",       ar: "فانتازيا",    color: "#7C3AED", icon: "sparkles-outline" },
-  { genre: "Drama",         ar: "دراما",       color: "#DB2777", icon: "film-outline" },
-  { genre: "Romance",       ar: "رومانسي",     color: "#EC4899", icon: "heart-outline" },
-  { genre: "Sci-Fi",        ar: "خيال علمي",   color: "#0891B2", icon: "planet-outline" },
-  { genre: "Supernatural",  ar: "خوارق",       color: "#6D28D9", icon: "skull-outline" },
-  { genre: "Mystery",       ar: "غموض",        color: "#4F46E5", icon: "search-outline" },
-  { genre: "Sports",        ar: "رياضة",       color: "#16A34A", icon: "football-outline" },
-  { genre: "Slice of Life", ar: "حياة يومية",  color: "#EA580C", icon: "cafe-outline" },
-  { genre: "Horror",        ar: "رعب",         color: "#DC2626", icon: "flash-outline" },
-  { genre: "Psychological", ar: "نفسي",        color: "#9333EA", icon: "eye-outline" },
-  { genre: "Music",         ar: "موسيقى",      color: "#C026D3", icon: "musical-notes-outline" },
-  { genre: "Mecha",         ar: "ميكا",        color: "#2563EB", icon: "hardware-chip-outline" },
-  { genre: "Isekai",        ar: "إيسيكاي",     color: "#0284C7", icon: "globe-outline" },
+  { genre: "Adventure",     ar: "مغامرة",      color: "#D97706", cover: "https://s4.anilist.co/file/anilistcdn/media/anime/cover/medium/bx21-ELSYx3yMPcKM.jpg", icon: "compass-outline" },
+  { genre: "Action",        ar: "أكشن",        color: "#CA8A04", cover: "https://s4.anilist.co/file/anilistcdn/media/anime/cover/medium/bx101922-WBsBl0ClmgYL.jpg", icon: "flame-outline" },
+  { genre: "Comedy",        ar: "كوميديا",     color: "#EAB308", cover: "https://s4.anilist.co/file/anilistcdn/media/anime/cover/medium/bx140960-Kb6R5nYQfjmP.jpg", icon: "happy-outline" },
+  { genre: "Fantasy",       ar: "فانتازيا",    color: "#7C3AED", cover: "https://s4.anilist.co/file/anilistcdn/media/anime/cover/medium/bx154587-qQTzQnEJJ3oB.jpg", icon: "sparkles-outline" },
+  { genre: "Drama",         ar: "دراما",       color: "#DB2777", cover: "https://s4.anilist.co/file/anilistcdn/media/anime/cover/medium/bx21827-ubzq619ZA2E9.png", icon: "film-outline" },
+  { genre: "Romance",       ar: "رومانسي",     color: "#EC4899", cover: "https://s4.anilist.co/file/anilistcdn/media/anime/cover/medium/bx124080-3i22mRVPBS0T.jpg", icon: "heart-outline" },
+  { genre: "Sci-Fi",        ar: "خيال علمي",   color: "#0891B2", cover: "https://s4.anilist.co/file/anilistcdn/media/anime/cover/medium/bx9253-tIUXF2gfU8Sg.jpg", icon: "planet-outline" },
+  { genre: "Supernatural",  ar: "خوارق",       color: "#6D28D9", cover: "https://s4.anilist.co/file/anilistcdn/media/anime/cover/medium/bx113415-LHBAeoZDIsnF.jpg", icon: "skull-outline" },
+  { genre: "Mystery",       ar: "غموض",        color: "#4F46E5", cover: "https://s4.anilist.co/file/anilistcdn/media/anime/cover/medium/bx1535-kUgkcrfOrkUM.jpg", icon: "search-outline" },
+  { genre: "Sports",        ar: "رياضة",       color: "#16A34A", cover: "https://s4.anilist.co/file/anilistcdn/media/anime/cover/medium/bx20464-ooZUyBe4ptp9.png", icon: "football-outline" },
+  { genre: "Slice of Life", ar: "حياة يومية",  color: "#EA580C", cover: "https://s4.anilist.co/file/anilistcdn/media/anime/cover/medium/bx20665-TLgkL8T8IRFd.png", icon: "cafe-outline" },
+  { genre: "Horror",        ar: "رعب",         color: "#DC2626", cover: "https://s4.anilist.co/file/anilistcdn/media/anime/cover/medium/b20605-k665mVkSug8D.jpg", icon: "flash-outline" },
+  { genre: "Psychological", ar: "نفسي",        color: "#9333EA", cover: "https://s4.anilist.co/file/anilistcdn/media/anime/cover/medium/bx19-gtMC64182sm4.jpg", icon: "eye-outline" },
+  { genre: "Music",         ar: "موسيقى",      color: "#C026D3", cover: "https://s4.anilist.co/file/anilistcdn/media/anime/cover/medium/bx130003-HTDmeL4RGeJ4.png", icon: "musical-notes-outline" },
+  { genre: "Mecha",         ar: "ميكا",        color: "#2563EB", cover: "https://s4.anilist.co/file/anilistcdn/media/anime/cover/medium/bx1575-hsmWM2ydNm1m.jpg", icon: "hardware-chip-outline" },
+  { genre: "Isekai",        ar: "إيسيكاي",     color: "#0284C7", cover: "https://s4.anilist.co/file/anilistcdn/media/anime/cover/medium/bx108465-1ANspF1EWyFx.jpg", icon: "globe-outline" },
 ];
 
 const FILTER_GENRES: AnimeFilterOption[] = [
@@ -109,7 +109,7 @@ const BLOCKED = new Set(["Hentai"]);
 
 function coverUrl(id: number) { return `https://img.anili.st/media/${id}`; }
 
-/* ── Genre badge card with reliable crisp vector iconography ── */
+/* ── Genre badge card with authentic anime artwork + vector fallback ── */
 function GenreCard({
   item,
   onPress,
@@ -125,6 +125,7 @@ function GenreCard({
   const { g } = useBrowseTheme();
   const { width, height } = useWindowDimensions();
   const tvMode = isTvDevice(width, height);
+  const [imgErr, setImgErr] = useState(false);
 
   return (
     <Pressable
@@ -148,11 +149,20 @@ function GenreCard({
           {item.ar}
         </Text>
         <View style={[g.genreFloatingPosterWrap, horizontal && g.horizontalGenreFloatingPosterWrap]}>
-          <Ionicons
-            name={item.icon as any}
-            size={horizontal ? 19 : 22}
-            color="#FFFFFF"
-          />
+          {item.cover && !imgErr ? (
+            <Image
+              source={{ uri: item.cover }}
+              style={g.genreFloatingPoster}
+              resizeMode="cover"
+              onError={() => setImgErr(true)}
+            />
+          ) : (
+            <Ionicons
+              name={item.icon as any}
+              size={horizontal ? 19 : 22}
+              color="#FFFFFF"
+            />
+          )}
         </View>
       </View>
     </Pressable>

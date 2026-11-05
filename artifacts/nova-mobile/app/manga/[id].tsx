@@ -1044,7 +1044,7 @@ export default function MangaDetailScreen() {
                     ? "جاري تجهيز قائمة الفصول..."
                     : totalChaptersCount > 0
                     ? `تصفح جميع الفصول المتوفرة (${totalChaptersCount} فصل)`
-                    : "فتح صفحة الفصول"}
+                    : "لم تصدر فصول بعد (قيد الترجمة والرفع)"}
                 </Text>
               </View>
             </View>
@@ -1565,11 +1565,22 @@ export default function MangaDetailScreen() {
               maxToRenderPerBatch={16}
               windowSize={7}
               ListEmptyComponent={
-                <View style={{ paddingVertical: 48, alignItems: "center", gap: 10 }}>
-                  <Ionicons name="book-outline" size={38} color={colors.textMuted} />
-                  <Text style={[styles.emptyBoxText, { color: colors.textMuted }]}>
-                    لا توجد فصول مطابقة للبحث.
+                <View style={{ paddingVertical: 48, alignItems: "center", gap: 10, paddingHorizontal: 24 }}>
+                  <Ionicons
+                    name={chapterSearch.trim() ? "search-outline" : "hourglass-outline"}
+                    size={42}
+                    color={colors.textMuted}
+                  />
+                  <Text style={[styles.emptyBoxText, { color: colors.textPrimary, textAlign: "center", fontSize: 14, fontFamily: "Cairo_700Bold" }]}>
+                    {chapterSearch.trim()
+                      ? "لا توجد فصول مطابقة للبحث."
+                      : "لم تصدر فصول لهذا العمل بعد، أو قيد الترجمة والرفع من المصدر."}
                   </Text>
+                  {!chapterSearch.trim() && (
+                    <Text style={{ color: colors.textMuted, textAlign: "center", fontSize: 12, fontFamily: "Cairo_400Regular", marginTop: 4 }}>
+                      العمل مسجل في المصدر، وسيتم إدراج فصوله هنا تلقائياً فور نشرها من فرق الترجمة.
+                    </Text>
+                  )}
                 </View>
               }
               ListFooterComponent={
