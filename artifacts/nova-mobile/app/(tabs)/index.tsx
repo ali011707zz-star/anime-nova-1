@@ -30,7 +30,7 @@ const SEASON_AR: Record<string, string> = {
 
 import { historyRoute, useApp } from "@/context/AppContext";
 import { getBaseUrl } from "@/utils/api";
-import { isTvDevice, tvFocusStyle, TvPressable as Pressable } from "@/utils/tv";
+import { isTvDevice, tvFocusStyle, TvPressable as Pressable, useTvMetrics } from "@/utils/tv";
 import { useTvFocusMemory } from "@/utils/tvFocus";
 import { getPosterUri, getTvPosterUri } from "@/utils/media";
 import {
@@ -63,6 +63,7 @@ export default function HomeScreen() {
   const [showDrawer, setShowDrawer] = useState(false);
   const [headerSearch, setHeaderSearch] = useState("");
   const isTvLayout = isTvDevice(width, height);
+  const { size: scaleSize } = useTvMetrics();
   const { ready } = useTvFocusMemory("home");
   const stardimaAnimation = useDubbedCatalogFeed("animation", "");
   const stardimaCartoon = useDubbedCatalogFeed("cartoon", "");
@@ -349,7 +350,7 @@ export default function HomeScreen() {
         ListHeaderComponent={
           <View>
         {/* Header */}
-        <View style={[styles.header, { paddingTop: topPad + 6, flexDirection: I18nManager.isRTL ? "row-reverse" : "row" }]}>
+        <View style={[styles.header, { paddingTop: topPad + 6, paddingHorizontal: scaleSize(14, 40), flexDirection: I18nManager.isRTL ? "row-reverse" : "row" }]}>
           <Pressable
             accessibilityLabel="فتح القائمة"
             onPress={() => setShowDrawer(true)}
@@ -357,11 +358,17 @@ export default function HomeScreen() {
             hitSlop={isTvLayout ? 10 : 6}
             style={({ focused }) => [
               styles.iconBtn,
-              { backgroundColor: colors.surface, borderColor: colors.border },
+              {
+                width: scaleSize(42, 54),
+                height: scaleSize(42, 54),
+                borderRadius: scaleSize(13, 16),
+                backgroundColor: colors.surface,
+                borderColor: colors.border,
+              },
               isTvLayout && tvFocusStyle(focused),
             ]}
           >
-            <Ionicons name="menu" size={24} color={colors.text} />
+            <Ionicons name="menu" size={scaleSize(21, 28)} color={colors.text} />
           </Pressable>
           <View style={styles.headerSpacer} />
           <View style={styles.headerBrandGroup}>
@@ -372,18 +379,24 @@ export default function HomeScreen() {
               focusable={isTvLayout}
               style={({ focused }) => [
                 styles.headerSearch,
-                { backgroundColor: colors.input, borderColor: colors.border },
+                {
+                  height: scaleSize(38, 48),
+                  width: scaleSize(116, 180),
+                  borderRadius: scaleSize(13, 16),
+                  backgroundColor: colors.input,
+                  borderColor: colors.border,
+                },
                 isTvLayout && tvFocusStyle(focused),
               ]}
             >
-              <Ionicons name="search" size={15} color={colors.textMuted} />
-              <Text style={[styles.headerSearchInput, { color: colors.textMuted }]} numberOfLines={1}>
+              <Ionicons name="search" size={scaleSize(14, 18)} color={colors.textMuted} />
+              <Text style={[styles.headerSearchInput, { fontSize: scaleSize(12, 16), color: colors.textMuted }]} numberOfLines={1}>
                 ...بحث
               </Text>
             </Pressable>
             <View style={styles.logoRow}>
-              <View style={[styles.logoAccent, { backgroundColor: "#06b6d4" }]} />
-              <Text style={[styles.logoText, { color: colors.text }]}>
+              <View style={[styles.logoAccent, { height: scaleSize(22, 30), backgroundColor: "#06b6d4" }]} />
+              <Text style={[styles.logoText, { fontSize: scaleSize(15, 22), color: colors.text }]}>
                 ANIME <Text style={{ color: "#06b6d4" }}>NOVA</Text>
               </Text>
             </View>
@@ -400,17 +413,17 @@ export default function HomeScreen() {
 
         {/* Continue Watching */}
         {recentHistory.length > 0 && (
-          <View style={{ marginTop: 24 }}>
+          <View style={{ marginTop: scaleSize(18, 28) }}>
             <SectionHeader
               onSeeAll={() => router.push("/(tabs)/library")}
               focusable={isTvLayout}
               seeAllLabel="السجل الكامل"
             >
               <View style={styles.continueHeading}>
-                <View style={[styles.continueAccent, { backgroundColor: "#06b6d4" }]} />
+                <View style={[styles.continueAccent, { height: scaleSize(20, 28), backgroundColor: "#06b6d4" }]} />
                 <View style={styles.continueTitleWrap}>
-                  <Text style={[styles.sectionTitle, isTvLayout && styles.tvSectionTitle, { color: colors.text }]}>متابعة المشاهدة</Text>
-                  <Text style={[styles.continueSubtitle, { color: colors.mutedForeground }]}>
+                  <Text style={[styles.sectionTitle, { fontSize: scaleSize(16, 25), color: colors.text }]}>متابعة المشاهدة</Text>
+                  <Text style={[styles.continueSubtitle, { fontSize: scaleSize(10.5, 14), color: colors.mutedForeground }]} numberOfLines={1}>
                     أكمل حلقاتك من حيث توقفت
                   </Text>
                 </View>
@@ -422,8 +435,8 @@ export default function HomeScreen() {
                keyExtractor={(h) => `${h.contentKind || "anime"}-${h.contentKey || h.animeId}-${h.season || 1}-${h.ep}`}
               showsHorizontalScrollIndicator={false}
                contentContainerStyle={{
-                 paddingHorizontal: isTvLayout ? railSidePadding : 10,
-                 gap: isTvLayout ? railGap : 6,
+                 paddingHorizontal: isTvLayout ? railSidePadding : scaleSize(12, 24),
+                 gap: isTvLayout ? railGap : scaleSize(7, 12),
                }}
               renderItem={({ item: h }) => {
                 const hasPlaybackPosition =
@@ -440,6 +453,15 @@ export default function HomeScreen() {
                   typeof h.totalEps === "number" && h.totalEps > h.ep
                     ? h.totalEps - h.ep
                     : null;
+                const hScale = Math.max(0.72, Math.min(1.12, historyCardWidth / 155));
+                const compactCard = historyCardWidth < 138;
+                const leftBadgeText = remainingMinutes !== null
+                  ? (compactCard ? `${remainingMinutes} د` : `متبقي ${remainingMinutes} د`)
+                  : remainingEpisodes !== null
+                    ? (compactCard ? `متبقي ${remainingEpisodes}` : `متبقي ${remainingEpisodes} حلقة`)
+                    : "متابعة";
+                const rightBadgeText = compactCard ? `ح ${h.ep}` : `الحلقة ${h.ep}`;
+                const resumeLabel = compactCard ? "استئناف المشاهدة" : "استئناف المشاهدة الآن";
                 return (
                   <Pressable
                     onPress={() => router.push(historyRoute(h) as any)}
@@ -448,10 +470,10 @@ export default function HomeScreen() {
                       styles.historyCard,
                       {
                         width: historyCardWidth,
-                        height: isTvLayout ? Math.round(historyCardWidth * 0.7) : Math.round(historyCardWidth * 0.82),
+                        height: isTvLayout ? Math.round(historyCardWidth * 0.7) : Math.round(historyCardWidth * 0.84),
                         backgroundColor: colors.card,
                         borderColor: colors.border,
-                        borderRadius: isTvLayout ? 12 : 15,
+                        borderRadius: isTvLayout ? 12 : Math.round(14 * hScale),
                       },
                       isTvLayout && tvFocusStyle(focused),
                     ]}
@@ -465,27 +487,61 @@ export default function HomeScreen() {
                     />
                     {!isTvLayout && (
                       <>
-                        <View style={[styles.historyBadge, styles.historyRemainingBadge]}>
-                          <Text style={styles.historyBadgeText}>
-                            {remainingMinutes !== null
-                              ? `متبقي ${remainingMinutes} د`
-                              : remainingEpisodes !== null
-                                ? `متبقي ${remainingEpisodes} حلقة`
-                                : "متابعة"}
+                        <View
+                          style={[
+                            styles.historyBadge,
+                            styles.historyRemainingBadge,
+                            {
+                              top: Math.round(5.5 * hScale),
+                              left: Math.round(5.5 * hScale),
+                              paddingHorizontal: Math.round(5.5 * hScale),
+                              paddingVertical: Math.max(1.5, Math.round(2 * hScale)),
+                              borderRadius: Math.round(9 * hScale),
+                            },
+                          ]}
+                        >
+                          <Text style={[styles.historyBadgeText, { fontSize: Math.max(7, Math.round(7.8 * hScale)) }]} numberOfLines={1}>
+                            {leftBadgeText}
                           </Text>
                         </View>
-                        <View style={[styles.historyBadge, styles.historyEpisodeBadge]}>
-                          <Text style={styles.historyBadgeText}>الحلقة {h.ep}</Text>
+                        <View
+                          style={[
+                            styles.historyBadge,
+                            styles.historyEpisodeBadge,
+                            {
+                              top: Math.round(5.5 * hScale),
+                              right: Math.round(5.5 * hScale),
+                              paddingHorizontal: Math.round(5.5 * hScale),
+                              paddingVertical: Math.max(1.5, Math.round(2 * hScale)),
+                              borderRadius: Math.round(9 * hScale),
+                            },
+                          ]}
+                        >
+                          <Text style={[styles.historyBadgeText, { fontSize: Math.max(7, Math.round(7.8 * hScale)) }]} numberOfLines={1}>
+                            {rightBadgeText}
+                          </Text>
                         </View>
                       </>
                     )}
                     <LinearGradient
                       colors={["transparent", "rgba(0,0,0,0.94)"]}
-                      style={[styles.historyGrad, isTvLayout && styles.historyGradTv]}
+                      style={[
+                        styles.historyGrad,
+                        !isTvLayout && {
+                          paddingHorizontal: Math.round(6.5 * hScale),
+                          paddingBottom: Math.round(5.5 * hScale),
+                          paddingTop: Math.round(22 * hScale),
+                        },
+                        isTvLayout && styles.historyGradTv,
+                      ]}
                     >
                       {isTvLayout && <Text style={styles.historyEp}>حلقة {h.ep}</Text>}
                       <Text
-                        style={[styles.historyTitle, isTvLayout && styles.historyTitleTv]}
+                        style={[
+                          styles.historyTitle,
+                          !isTvLayout && { fontSize: Math.max(8.5, Math.round(9.8 * hScale)) },
+                          isTvLayout && styles.historyTitleTv,
+                        ]}
                         numberOfLines={1}
                       >
                         {h.titleAr || h.english || h.title}
@@ -493,11 +549,11 @@ export default function HomeScreen() {
                       {!isTvLayout && (
                         <>
                           <View style={styles.historyResumeRow}>
-                            <Text style={styles.historyPercent}>
-                              {completionPercent !== null ? `${completionPercent}%` : `الحلقة ${h.ep}`}
+                            <Text style={[styles.historyPercent, { fontSize: Math.max(7.5, Math.round(8.5 * hScale)) }]}>
+                              {completionPercent !== null ? `${completionPercent}%` : `ح ${h.ep}`}
                             </Text>
-                            <Text style={styles.historyResumeText} numberOfLines={1}>
-                              استئناف المشاهدة الآن
+                            <Text style={[styles.historyResumeText, { fontSize: Math.max(7, Math.round(7.8 * hScale)) }]} numberOfLines={1}>
+                              {resumeLabel}
                             </Text>
                           </View>
                           <View style={styles.historyProgress}>

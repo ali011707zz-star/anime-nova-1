@@ -23,7 +23,7 @@ export function SectionHeader({
   const { size: scaleSize } = useTvMetrics();
 
   return (
-    <View style={styles.header}>
+    <View style={[styles.header, { paddingHorizontal: scaleSize(14, 40), marginBottom: scaleSize(10, 16) }]}>
       <View style={styles.heading}>{children}</View>
       {onSeeAll && (
         <Pressable
@@ -35,6 +35,9 @@ export function SectionHeader({
           style={({ focused, pressed }) => [
             styles.seeAll,
             {
+              minHeight: scaleSize(30, 44),
+              paddingHorizontal: scaleSize(12, 18),
+              paddingVertical: scaleSize(4, 8),
               backgroundColor: "rgba(15, 23, 42, 0.92)",
               borderColor: "rgba(255, 255, 255, 0.15)",
               opacity: pressed ? 0.78 : 1,
@@ -42,8 +45,8 @@ export function SectionHeader({
             focused && tvFocusStyle(focused),
           ]}
         >
-          <Ionicons name="chevron-back" size={scaleSize(13, 18)} color="#cbd5e1" />
-          <Text style={[styles.seeAllText, { fontSize: scaleSize(12, 17), color: "#f8fafc" }]}>
+          <Ionicons name="chevron-back" size={scaleSize(12, 18)} color="#cbd5e1" />
+          <Text style={[styles.seeAllText, { fontSize: scaleSize(11, 17), color: "#f8fafc" }]}>
             {seeAllLabel}
           </Text>
         </Pressable>
@@ -57,9 +60,9 @@ const styles = StyleSheet.create({
     flexDirection: ROW_RTL,
     alignItems: "center",
     justifyContent: "space-between",
-    paddingHorizontal: 16,
-    marginBottom: 12,
-    gap: 12,
+    paddingHorizontal: 14,
+    marginBottom: 10,
+    gap: 10,
   },
   heading: {
     flex: 1,
@@ -67,16 +70,17 @@ const styles = StyleSheet.create({
     alignItems: I18nManager.isRTL ? "flex-start" : "flex-end",
   },
   seeAll: {
-    minHeight: 34,
+    minHeight: 30,
     flexDirection: I18nManager.isRTL ? "row-reverse" : "row",
     alignItems: "center",
     justifyContent: "center",
-    gap: 5,
-    paddingHorizontal: 14,
-    paddingVertical: 5,
+    gap: 4,
+    paddingHorizontal: 12,
+    paddingVertical: 4,
     borderRadius: 999,
     borderWidth: 1,
     flexShrink: 0,
   },
   seeAllText: { fontFamily: "Cairo_700Bold" },
 });
+

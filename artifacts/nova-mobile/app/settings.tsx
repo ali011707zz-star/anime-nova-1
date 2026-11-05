@@ -1694,22 +1694,38 @@ export default function SettingsScreen() {
                 {currentUser.profileImageUrl ? (
                   <Image source={{ uri: currentUser.profileImageUrl }} style={ts.profileAvatarImage} />
                 ) : (
-                  <Text style={{ fontSize: 22, fontFamily: "Cairo_800ExtraBold", color: AVATAR_COLORS[(currentUser.avatarColor ?? 0) % AVATAR_COLORS.length] }}>
+                  <Text style={{ fontSize: 20, fontFamily: "Cairo_800ExtraBold", color: AVATAR_COLORS[(currentUser.avatarColor ?? 0) % AVATAR_COLORS.length] }}>
                     {currentUser.displayName.charAt(0).toUpperCase()}
                   </Text>
                 )}
               </View>
               {/* Info */}
-              <View style={{ flex: 1, alignItems: "flex-end" }}>
-                <Text style={[ts.profileLoginTitle, { color: colors.textPrimary }]}>{currentUser.displayName}</Text>
+              <View style={{ flex: 1, minWidth: 0, alignItems: "flex-end" }}>
+                <Text style={[ts.profileLoginTitle, { color: colors.textPrimary }]} numberOfLines={1}>
+                  {currentUser.displayName}
+                </Text>
                 {currentUser.username ? (
-                  <Text style={[ts.profileLoginSub, { color: colors.accent }]}>@{currentUser.username}</Text>
+                  <Text
+                    style={[ts.profileLoginSub, { color: colors.accent }]}
+                    numberOfLines={1}
+                    adjustsFontSizeToFit
+                    minimumFontScale={0.78}
+                  >
+                    @{currentUser.username}
+                  </Text>
                 ) : null}
-                <Text style={[ts.profileLoginSub, { color: colors.textSecondary }]}>{currentUser.email}</Text>
+                <Text
+                  style={[ts.profileLoginSub, { color: colors.textSecondary, width: "100%" }]}
+                  numberOfLines={1}
+                  adjustsFontSizeToFit
+                  minimumFontScale={0.72}
+                >
+                  {currentUser.email}
+                </Text>
               </View>
               {/* Edit chevron */}
               <View style={[ts.profileLoginBtn, { backgroundColor: colors.surfaceElevated, borderColor: colors.border }]}>
-                <Ionicons name="create-outline" size={14} color={colors.accent} />
+                <Ionicons name="create-outline" size={13} color={colors.accent} />
                 <Text style={[ts.profileLoginBtnText, { color: colors.accent }]}>تعديل</Text>
               </View>
             </Pressable>
@@ -1760,28 +1776,41 @@ export default function SettingsScreen() {
         </View>}
 
         {/* ── التبرع ودعم التطبيق عبر قناة تلجرام الرسمية ── */}
-        {!tvMode && <View style={{ paddingHorizontal: 16, marginTop: 16 }}>
+        {!tvMode && <View style={{ paddingHorizontal: 16, marginTop: 14 }}>
             <Pressable
               testID="open-donation-modal"
               style={ts.donationCard}
               onPress={() => Linking.openURL("https://t.me/Anime_NOVA_0").catch(() => {})}
             >
-              <View style={{ flexDirection: ROW_RTL, alignItems: "center", gap: 12 }}>
+              <View style={{ flexDirection: ROW_RTL, alignItems: "center", gap: 11 }}>
                 <View style={ts.donationIconBox}>
-                  <Ionicons name="paper-plane" size={20} color="#10b981" />
+                  <Ionicons name="paper-plane" size={18} color="#10b981" />
                 </View>
-                <View style={{ flex: 1, alignItems: "flex-end" }}>
-                  <Text style={[ts.donationTitle, theme === "white" && { color: "#065f46" }]}>
+                <View style={{ flex: 1, minWidth: 0, alignItems: "flex-end" }}>
+                  <Text
+                    style={[ts.donationTitle, theme === "white" && { color: "#065f46" }]}
+                    numberOfLines={1}
+                    adjustsFontSizeToFit
+                    minimumFontScale={0.8}
+                  >
                     انضم لقناتنا وادعم التطبيق على تلجرام ❤️
                   </Text>
-                  <Text style={[ts.donationSub, theme === "white" && { color: "#047857" }]}>
-                    تابع أحدث التحديثات ودعم السيرفرات عبر قناتنا الرسمية https://t.me/Anime_NOVA_0
+                  <Text
+                    style={[ts.donationSub, theme === "white" && { color: "#047857" }]}
+                    numberOfLines={2}
+                  >
+                    تابع أحدث التحديثات ودعم السيرفرات عبر قناتنا الرسمية
                   </Text>
                 </View>
+              </View>
+              <View style={ts.donationBottomRow}>
                 <View style={ts.donationPillBtn}>
                   <Text style={ts.donationPillBtnText}>زيارة القناة</Text>
-                  <Ionicons name="chevron-back" size={13} color="#10b981" style={{ transform: [{ scaleX: -1 }] }} />
+                  <Ionicons name="chevron-back" size={12} color="#10b981" style={{ transform: [{ scaleX: -1 }] }} />
                 </View>
+                <Text style={ts.donationLinkHint} numberOfLines={1}>
+                  t.me/Anime_NOVA_0
+                </Text>
               </View>
             </Pressable>
           </View>}
@@ -2235,13 +2264,13 @@ const ts = StyleSheet.create({
   headerBadgeText: { fontSize: 9, fontFamily: "Cairo_700Bold", color: "rgba(255,255,255,0.3)" },
 
   /* Profile */
-  profileCard: { flexDirection: "row", alignItems: "center", gap: 14, borderRadius: 20, padding: 16, backgroundColor: "rgba(17,17,22,0.95)", borderWidth: 1, borderColor: "rgba(255,255,255,0.07)" },
-  profileAvatar: { width: 56, height: 56, borderRadius: 16, backgroundColor: "rgba(255,255,255,0.05)", borderWidth: 1, borderColor: "rgba(255,255,255,0.10)", alignItems: "center", justifyContent: "center" },
-  profileAvatarImage: { width: "100%", height: "100%", borderRadius: 15 },
-  profileLoginTitle: { fontSize: 14, fontFamily: "Cairo_800ExtraBold", color: "rgba(255,255,255,0.8)", textAlign: "right" },
-  profileLoginSub: { fontSize: 11, fontFamily: "Cairo_400Regular", color: "rgba(255,255,255,0.35)", marginTop: 2, textAlign: "right" },
-  profileLoginBtn: { flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 12, backgroundColor: "rgba(139,92,246,0.18)", borderWidth: 1, borderColor: "rgba(139,92,246,0.30)" },
-  profileLoginBtnText: { fontSize: 11, fontFamily: "Cairo_800ExtraBold", color: "#c4b5fd" },
+  profileCard: { flexDirection: "row", alignItems: "center", gap: 11, borderRadius: 18, paddingHorizontal: 13, paddingVertical: 13, backgroundColor: "rgba(17,17,22,0.95)", borderWidth: 1, borderColor: "rgba(255,255,255,0.07)" },
+  profileAvatar: { width: 48, height: 48, borderRadius: 14, backgroundColor: "rgba(255,255,255,0.05)", borderWidth: 1, borderColor: "rgba(255,255,255,0.10)", alignItems: "center", justifyContent: "center", flexShrink: 0 },
+  profileAvatarImage: { width: "100%", height: "100%", borderRadius: 13 },
+  profileLoginTitle: { fontSize: 13.5, fontFamily: "Cairo_800ExtraBold", color: "rgba(255,255,255,0.85)", textAlign: "right" },
+  profileLoginSub: { fontSize: 10.5, fontFamily: "Cairo_400Regular", color: "rgba(255,255,255,0.42)", marginTop: 1, textAlign: "right" },
+  profileLoginBtn: { flexDirection: "row", alignItems: "center", gap: 5, paddingHorizontal: 10, paddingVertical: 7, borderRadius: 11, backgroundColor: "rgba(139,92,246,0.18)", borderWidth: 1, borderColor: "rgba(139,92,246,0.30)", flexShrink: 0 },
+  profileLoginBtnText: { fontSize: 10.5, fontFamily: "Cairo_800ExtraBold", color: "#c4b5fd" },
   deviceLinkGuestBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, paddingVertical: 12, borderRadius: 16, backgroundColor: "rgba(139,92,246,0.08)", borderWidth: 1, borderColor: "rgba(167,139,250,0.28)" },
   deviceLinkGuestText: { fontSize: 12, fontFamily: "Cairo_700Bold", color: "#c4b5fd" },
   linkCodeDisplay: {
@@ -2442,49 +2471,68 @@ const ts = StyleSheet.create({
 
   /* Donation Card & Modal */
   donationCard: {
-    marginTop: 12,
-    borderRadius: 20,
-    padding: 15,
+    marginTop: 8,
+    borderRadius: 18,
+    paddingHorizontal: 14,
+    paddingVertical: 13,
     backgroundColor: "rgba(16,185,129,0.08)",
     borderWidth: 1.5,
     borderColor: "rgba(16,185,129,0.32)",
+    gap: 10,
   },
   donationIconBox: {
-    width: 44,
-    height: 44,
-    borderRadius: 14,
+    width: 38,
+    height: 38,
+    borderRadius: 12,
     backgroundColor: "rgba(16,185,129,0.18)",
     borderWidth: 1,
     borderColor: "rgba(16,185,129,0.38)",
     alignItems: "center",
     justifyContent: "center",
+    flexShrink: 0,
   },
   donationTitle: {
-    fontSize: 13.5,
+    fontSize: 13,
     fontFamily: "Cairo_800ExtraBold",
     color: "#34d399",
     textAlign: "right",
+    width: "100%",
   },
   donationSub: {
-    fontSize: 10,
+    fontSize: 10.5,
+    lineHeight: 16,
     fontFamily: "Cairo_600SemiBold",
-    color: "rgba(167,243,208,0.75)",
+    color: "rgba(167,243,208,0.82)",
     marginTop: 2,
     textAlign: "right",
+    width: "100%",
+  },
+  donationBottomRow: {
+    flexDirection: ROW_RTL,
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingTop: 8,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: "rgba(16,185,129,0.22)",
+  },
+  donationLinkHint: {
+    fontSize: 10.5,
+    fontFamily: "Cairo_700Bold",
+    color: "rgba(167,243,208,0.65)",
   },
   donationPillBtn: {
     flexDirection: ROW_RTL,
     alignItems: "center",
     gap: 4,
     paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 12,
-    backgroundColor: "rgba(16,185,129,0.16)",
+    paddingVertical: 5,
+    borderRadius: 10,
+    backgroundColor: "rgba(16,185,129,0.18)",
     borderWidth: 1,
-    borderColor: "rgba(16,185,129,0.35)",
+    borderColor: "rgba(16,185,129,0.38)",
   },
   donationPillBtnText: {
-    fontSize: 11,
+    fontSize: 10.5,
     fontFamily: "Cairo_800ExtraBold",
     color: "#34d399",
   },

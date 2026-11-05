@@ -15,6 +15,7 @@ import { useApp } from "@/context/AppContext";
 import { getBaseUrl } from "@/utils/api";
 import { secureFetch } from "@/utils/secureApi";
 import { getYoutubeEmbedUrl, getYoutubeReferer } from "@/utils/youtube";
+import { YoutubeTrailerModal } from "@/components/YoutubeTrailerModal";
 import { isTvDevice, tvFocusStyle, TvPressable as Pressable } from "@/utils/tv";
 import { useTvFocusMemory } from "@/utils/tvFocus";
 import { useColors } from "@/hooks/useColors";
@@ -928,64 +929,13 @@ export default function AnimeDetailScreen() {
       </ScrollView>
 
       {/* ── Trailer Modal — in-app YouTube player ── */}
-      <Modal
+      <YoutubeTrailerModal
         visible={showTrailer}
-        animationType={tvMode ? "none" : "fade"}
-        supportedOrientations={["landscape", "landscape-left", "landscape-right", "portrait"]}
-        onRequestClose={() => setShowTrailer(false)}
-      >
-        <View style={{ flex: 1, backgroundColor: "#000" }}>
-          <View style={[d.trailerSheetHeader, { paddingTop: topPad + 4 }]}>
-            <Ionicons name="logo-youtube" size={20} color="#FF0000" />
-            <Text style={[d.trailerModalTitle, { flex: 1 }]}>الإعلان الدعائي</Text>
-            <Pressable
-              onPress={() => Linking.openURL(`https://www.youtube.com/watch?v=${trailerYT}`)}
-              style={d.trailerCloseBtn}
-            >
-              <Ionicons name="open-outline" size={16} color="rgba(255,255,255,0.5)" />
-            </Pressable>
-            <Pressable onPress={() => setShowTrailer(false)} style={d.trailerCloseBtn}>
-              <Ionicons name="close" size={18} color="rgba(255,255,255,0.6)" />
-            </Pressable>
-          </View>
-          {/* تحميل رابط إيمبيد يوتيوب مباشرةً (لا HTML wrapper) —
-              source={{ html }} يجعل الـ referer فارغاً فيحجب يوتيوب التشغيل.
-              مع URI مباشر يرى يوتيوب الطلب كأنه من youtube-nocookie.com نفسه. */}
-          <WebView
-            source={{
-              uri: getYoutubeEmbedUrl(trailerYT),
-              headers: { Referer: getYoutubeReferer() },
-            }}
-            style={{ flex: 1 }}
-            allowsFullscreenVideo
-            allowsInlineMediaPlayback
-            mediaPlaybackRequiresUserAction={false}
-            javaScriptEnabled
-            domStorageEnabled
-            originWhitelist={["*"]}
-            mixedContentMode="always"
-            thirdPartyCookiesEnabled
-            userAgent="Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"
-            onShouldStartLoadWithRequest={(req) => {
-              const url = req.url;
-              if (
-                url.startsWith("about:") ||
-                url.startsWith("data:") ||
-                url.startsWith("blob:") ||
-                url.includes("googlevideo.com") ||
-                url.includes("ytimg.com") ||
-                url.includes("googleapis.com") ||
-                url.includes("youtube.com") ||
-                url.includes("youtube-nocookie.com")
-              ) {
-                return true;
-              }
-              Linking.openURL(url).catch(() => {});
-              return false;
-            }}
-          />
-        </View>
-      </Modal>
+        videoId={trailerYT}
+        title={arabicTitle || anime?.title?.english || anime?.title?.romaji}
+        onClose={() => setShowTrailer(false)}
+        tvMode={tvMode}
+      />
 
       {/* ── Rating bottom sheet ── */}
       <Modal visible={showRating} animationType={tvMode ? "none" : "slide"} transparent onRequestClose={() => setShowRating(false)}>

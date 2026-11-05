@@ -11,7 +11,7 @@ import { Stack, usePathname, useRouter } from "expo-router";
 import { LinearGradient } from "expo-linear-gradient";
 import * as SplashScreen from "expo-splash-screen";
 import React, { useEffect, useRef, useState } from "react";
-import { Animated, BackHandler, Dimensions, I18nManager, Image, Platform, StatusBar, StyleSheet, Text, View } from "react-native";
+import { Animated, BackHandler, Dimensions, I18nManager, Image, Platform, StatusBar, StyleSheet, Text, TextInput, View } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import * as ScreenOrientation from "expo-screen-orientation";
@@ -25,6 +25,19 @@ import { installGlobalCrashHandlers } from "@/utils/crashLogger";
 import { getRuntimeIntegrity, runtimeIntegrityMessage } from "@/utils/runtimeIntegrity";
 import { isTvDevice } from "@/utils/tv";
 import { registerPushNotifications, subscribeToPushTokenChanges } from "@/utils/pushNotifications";
+
+// توحيد مقياس الخطوط والأيقونات بين الهواتف والأجهزة اللوحية (iPad) ومنع تضخم النصوص بسبب إعدادات تكبير خط النظام
+try {
+  const TextAny = Text as any;
+  TextAny.defaultProps = TextAny.defaultProps || {};
+  TextAny.defaultProps.allowFontScaling = false;
+  TextAny.defaultProps.maxFontSizeMultiplier = 1;
+
+  const TextInputAny = TextInput as any;
+  TextInputAny.defaultProps = TextInputAny.defaultProps || {};
+  TextInputAny.defaultProps.allowFontScaling = false;
+  TextInputAny.defaultProps.maxFontSizeMultiplier = 1;
+} catch (_) {}
 
 /* Sentry: يلتقط أعطال JS *و* الأعطال الأصلية (native) — مثل كراش مشغّل الفيديو
    الذي كان يُغلق التطبيق فوراً دون أن يترك أي أثر في نظام تسجيل الأعطال القديم

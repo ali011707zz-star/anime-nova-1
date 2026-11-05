@@ -27,6 +27,7 @@ import { useColors } from "@/hooks/useColors";
 import { getBaseUrl } from "@/utils/api";
 import { translateMangaGenre } from "@/utils/mangaLocalization";
 import { getYoutubeEmbedUrl, getYoutubeReferer } from "@/utils/youtube";
+import { YoutubeTrailerModal } from "@/components/YoutubeTrailerModal";
 import { TvPressable as Pressable } from "@/utils/tv";
 
 const IS_RTL = I18nManager.isRTL;
@@ -1568,59 +1569,13 @@ export default function MangaDetailScreen() {
         </View>
       </Modal>
 
-      {/* ── YouTube Trailer Modal (أفقي دائماً وكامل الشاشة) ── */}
-      {trailerYT ? (
-        <Modal
-          visible={showTrailer}
-          animationType="fade"
-          supportedOrientations={["landscape", "landscape-left", "landscape-right", "portrait"]}
-          onRequestClose={() => setShowTrailer(false)}
-        >
-          <View style={{ flex: 1, backgroundColor: "#000" }}>
-            <View style={styles.trailerLandscapeTopBar}>
-              <View style={{ flexDirection: ROW_RTL, alignItems: "center", gap: 8 }}>
-                <Ionicons name="logo-youtube" size={20} color="#FF0000" />
-                <Text style={[styles.trailerModalTitle, { color: "#fff" }]} numberOfLines={1}>
-                  الإعلان الدعائي — {primaryTitle}
-                </Text>
-              </View>
-
-              <View style={{ flexDirection: ROW_RTL, alignItems: "center", gap: 8 }}>
-                <Pressable
-                  onPress={() =>
-                    Linking.openURL(`https://www.youtube.com/watch?v=${trailerYT}`).catch(
-                      () => {}
-                    )
-                  }
-                  style={styles.trailerCloseBtn}
-                >
-                  <Ionicons name="open-outline" size={16} color="rgba(255,255,255,0.8)" />
-                </Pressable>
-                <Pressable onPress={() => setShowTrailer(false)} style={styles.trailerCloseBtn}>
-                  <Ionicons name="close" size={19} color="#fff" />
-                </Pressable>
-              </View>
-            </View>
-
-            <WebView
-              source={{
-                uri: getYoutubeEmbedUrl(trailerYT),
-                headers: { Referer: getYoutubeReferer() },
-              }}
-              style={{ flex: 1, backgroundColor: "#000" }}
-              allowsFullscreenVideo
-              allowsInlineMediaPlayback
-              mediaPlaybackRequiresUserAction={false}
-              javaScriptEnabled
-              domStorageEnabled
-              originWhitelist={["*"]}
-              mixedContentMode="always"
-              thirdPartyCookiesEnabled
-              userAgent="Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"
-            />
-          </View>
-        </Modal>
-      ) : null}
+      {/* ── YouTube Trailer Modal (أفقي دائماً وكامل الشاشة بدون قص) ── */}
+      <YoutubeTrailerModal
+        visible={showTrailer}
+        videoId={trailerYT}
+        title={primaryTitle}
+        onClose={() => setShowTrailer(false)}
+      />
 
       {/* ── Chapter Picker Modal inside Reader (مع تقسيم 50 فصل لكل صفحة) ── */}
       <Modal

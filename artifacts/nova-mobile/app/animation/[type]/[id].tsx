@@ -11,6 +11,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { getBaseUrl } from "@/utils/api";
 import { getYoutubeEmbedUrl, getYoutubeReferer } from "@/utils/youtube";
+import { YoutubeTrailerModal } from "@/components/YoutubeTrailerModal";
 import { isTvDevice, tvFocusStyle, TvPressable as Pressable } from "@/utils/tv";
 import { useColors } from "@/hooks/useColors";
 
@@ -446,40 +447,13 @@ export default function AnimationDetailScreen() {
     </ScrollView>
 
     {/* ── Trailer Modal ── */}
-    <Modal visible={showTrailer} animationType="slide" onRequestClose={() => setShowTrailer(false)}>
-      <View style={{ flex: 1, backgroundColor: "#000" }}>
-        <View style={[s.trailerHeader, { paddingTop: insets.top + 1 }]}>
-          <Pressable onPress={() => setShowTrailer(false)} style={s.trailerClose}>
-            <Ionicons name="close" size={20} color="#fff" />
-          </Pressable>
-          <Text style={s.trailerHeaderText}>الإعلان الدعائي</Text>
-          <Pressable
-            onPress={() => Linking.openURL(`https://www.youtube.com/watch?v=${trailerKey}`)}
-            style={s.trailerClose}
-          >
-            <Ionicons name="open" size={18} color="rgba(255,255,255,0.7)" />
-          </Pressable>
-        </View>
-        {trailerKey ? (
-          <WebView
-            source={{
-              html: `<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width,initial-scale=1.0"><meta name="referrer" content="strict-origin-when-cross-origin"><style>*{margin:0;padding:0;background:#000;}html,body{width:100%;height:100%;overflow:hidden;display:flex;align-items:center;justify-content:center;}iframe{position:absolute;top:0;left:0;width:100%;height:100%;border:0;}</style></head><body><iframe src="${getYoutubeEmbedUrl(trailerKey)}" allow="autoplay;fullscreen;encrypted-media;picture-in-picture" allowfullscreen></iframe></body></html>`,
-              baseUrl: getYoutubeReferer(),
-              headers: { Referer: getYoutubeReferer() },
-            }}
-            style={{ flex: 1 }}
-            allowsFullscreenVideo
-            allowsInlineMediaPlayback
-            mediaPlaybackRequiresUserAction={false}
-            javaScriptEnabled
-            domStorageEnabled
-            originWhitelist={["*"]}
-            mixedContentMode="always"
-            userAgent="Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/116.0.0.0 Mobile Safari/537.36"
-          />
-        ) : null}
-      </View>
-    </Modal>
+    <YoutubeTrailerModal
+      visible={showTrailer}
+      videoId={trailerKey}
+      title={title}
+      onClose={() => setShowTrailer(false)}
+      tvMode={tvMode}
+    />
 
   </View>
   );

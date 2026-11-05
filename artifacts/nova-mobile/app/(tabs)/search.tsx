@@ -9,7 +9,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as ImagePicker from "expo-image-picker";
-import { isTvDevice, tvFocusStyle, TvPressable as Pressable } from "@/utils/tv";
+import { isTvDevice, tvFocusStyle, TvPressable as Pressable, useTvMetrics } from "@/utils/tv";
 import { getGridColumnCount } from "@/components/AnimeCard";
 import { AnimeFilterSheet, type AnimeFilterOption } from "@/components/AnimeFilterSheet";
 import { useColors } from "@/hooks/useColors";
@@ -19,10 +19,11 @@ const ROW_RTL = I18nManager.isRTL ? "row" : "row-reverse";
 
 function useSearchTheme() {
   const colors = useColors();
+  const { deviceScale } = useTvMetrics();
   const styles = useMemo(() => ({
-    s: createSearchStyles(colors),
+    s: createSearchStyles(colors, deviceScale),
     sm: createTraceStyles(colors),
-  }), [colors]);
+  }), [colors, deviceScale]);
   return { colors, ...styles };
 }
 
@@ -913,25 +914,25 @@ const createTraceStyles = (colors: ThemePalette) => StyleSheet.create({
   timeTxt: { fontSize: 9, fontFamily: "Cairo_400Regular", color: colors.textSecondary, alignSelf: "center" },
 });
 
-const createSearchStyles = (colors: ThemePalette) => StyleSheet.create({
+const createSearchStyles = (colors: ThemePalette, s = 1) => StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
-  header: { backgroundColor: colors.surface, borderBottomWidth: 1, borderBottomColor: colors.border, paddingHorizontal: 14, paddingTop: 10, paddingBottom: 6 },
+  header: { backgroundColor: colors.surface, borderBottomWidth: 1, borderBottomColor: colors.border, paddingHorizontal: Math.round(12 * s), paddingTop: 10, paddingBottom: 6 },
   tvHeader: { paddingHorizontal: 32, paddingTop: 16, paddingBottom: 14 },
-  mobileHeaderTop: { minHeight: 42, flexDirection: ROW_RTL, alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 10 },
-  mobileModeSwitch: { flexDirection: ROW_RTL, alignItems: "center", padding: 3, borderRadius: 13, backgroundColor: colors.input, borderWidth: 1, borderColor: colors.border },
-  mobileModeButton: { minHeight: 32, flexDirection: ROW_RTL, alignItems: "center", justifyContent: "center", gap: 5, paddingHorizontal: 9, borderRadius: 10 },
+  mobileHeaderTop: { minHeight: Math.round(40 * s), flexDirection: ROW_RTL, alignItems: "center", justifyContent: "space-between", gap: 6, marginBottom: 8 },
+  mobileModeSwitch: { flexDirection: ROW_RTL, alignItems: "center", padding: 2.5, borderRadius: Math.round(12 * s), backgroundColor: colors.input, borderWidth: 1, borderColor: colors.border, flexShrink: 0 },
+  mobileModeButton: { minHeight: Math.round(30 * s), flexDirection: ROW_RTL, alignItems: "center", justifyContent: "center", gap: 4, paddingHorizontal: Math.round(8 * s), borderRadius: Math.round(9 * s) },
   mobileModeButtonActive: { backgroundColor: "#0ea5e9" },
-  mobileModeText: { color: colors.textSecondary, fontSize: 10, fontFamily: "Cairo_700Bold" },
+  mobileModeText: { color: colors.textSecondary, fontSize: Math.round(9.8 * s), fontFamily: "Cairo_700Bold" },
   mobileModeTextActive: { color: "#ffffff" },
-  mobileTitleGroup: { flexDirection: ROW_RTL, alignItems: "center", gap: 9 },
-  mobileTitle: { color: colors.textPrimary, fontSize: 18, fontFamily: "Cairo_800ExtraBold" },
-  mobileBackButton: { width: 40, height: 40, alignItems: "center", justifyContent: "center", borderRadius: 12, backgroundColor: colors.input, borderWidth: 1, borderColor: colors.border },
-  mobileSearchBar: { minHeight: 52, flexDirection: ROW_RTL, alignItems: "center", gap: 8, paddingHorizontal: 9, borderRadius: 14, backgroundColor: colors.input, borderWidth: 1, borderColor: colors.border },
-  mobileFilterButton: { width: 34, height: 34, alignItems: "center", justifyContent: "center", borderRadius: 10, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, position: "relative" },
+  mobileTitleGroup: { flex: 1, flexDirection: ROW_RTL, alignItems: "center", gap: 7, minWidth: 0 },
+  mobileTitle: { flexShrink: 1, color: colors.textPrimary, fontSize: Math.round(15.5 * s), fontFamily: "Cairo_800ExtraBold" },
+  mobileBackButton: { width: Math.round(36 * s), height: Math.round(36 * s), alignItems: "center", justifyContent: "center", borderRadius: Math.round(11 * s), backgroundColor: colors.input, borderWidth: 1, borderColor: colors.border, flexShrink: 0 },
+  mobileSearchBar: { minHeight: Math.round(46 * s), flexDirection: ROW_RTL, alignItems: "center", gap: 7, paddingHorizontal: 9, borderRadius: Math.round(13 * s), backgroundColor: colors.input, borderWidth: 1, borderColor: colors.border },
+  mobileFilterButton: { width: Math.round(32 * s), height: Math.round(32 * s), alignItems: "center", justifyContent: "center", borderRadius: 10, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, position: "relative" },
   mobileFilterButtonActive: { backgroundColor: colors.destructive, borderColor: colors.destructive },
   mobileFilterCount: { position: "absolute", top: -5, right: -5, minWidth: 15, height: 15, alignItems: "center", justifyContent: "center", borderRadius: 8, backgroundColor: colors.destructive, borderWidth: 1, borderColor: colors.surface },
   mobileFilterCountText: { color: colors.destructiveForeground, fontSize: 8, fontFamily: "Cairo_700Bold" },
-  mobileSearchInput: { flex: 1, minWidth: 0, color: colors.textPrimary, fontSize: 13, fontFamily: "Cairo_400Regular", textAlign: "right", writingDirection: "rtl" },
+  mobileSearchInput: { flex: 1, minWidth: 0, color: colors.textPrimary, fontSize: Math.round(12.5 * s), fontFamily: "Cairo_400Regular", textAlign: "right", writingDirection: "rtl" },
   searchBar: { flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: colors.input, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 6, borderWidth: 1, borderColor: colors.border, marginBottom: 6 },
   searchInput: { flex: 1, color: colors.textPrimary, fontSize: 12, fontFamily: "Cairo_700Bold", textAlign: "right" },
   tvSearchBar: { minHeight: 72, paddingHorizontal: 22, paddingVertical: 14, borderRadius: 18, gap: 14 },

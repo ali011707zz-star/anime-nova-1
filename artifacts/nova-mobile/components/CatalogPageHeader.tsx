@@ -5,7 +5,7 @@ import { useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { DrawerMenu } from "@/components/DrawerMenu";
 import { useColors } from "@/hooks/useColors";
-import { isTvDevice, tvFocusStyle, TvPressable as Pressable } from "@/utils/tv";
+import { tvFocusStyle, TvPressable as Pressable, useTvMetrics } from "@/utils/tv";
 
 const ROW_RTL = I18nManager.isRTL ? "row" : "row-reverse";
 
@@ -21,7 +21,7 @@ export function CatalogPageHeader({ title, onBack }: HeaderProps) {
   const [drawerVisible, setDrawerVisible] = useState(false);
   const [focusedAction, setFocusedAction] = useState<string | null>(null);
   const topInset = Platform.OS === "web" ? 67 : insets.top;
-  const tvMode = isTvDevice();
+  const { tv: tvMode, size: scaleSize } = useTvMetrics();
 
   const goBack = () => {
     if (onBack) {
@@ -33,9 +33,21 @@ export function CatalogPageHeader({ title, onBack }: HeaderProps) {
     }
   };
 
+  const btnSize = scaleSize(36, 48);
+
   return (
     <>
-      <View style={[styles.header, { height: topInset + 54, paddingTop: topInset, borderBottomColor: colors.border }]}>
+      <View
+        style={[
+          styles.header,
+          {
+            height: topInset + scaleSize(50, 66),
+            paddingTop: topInset,
+            paddingHorizontal: scaleSize(13, 32),
+            borderBottomColor: colors.border,
+          },
+        ]}
+      >
         <View style={styles.rightTitleGroup}>
           <Pressable
             accessibilityLabel="رجوع"
@@ -43,14 +55,26 @@ export function CatalogPageHeader({ title, onBack }: HeaderProps) {
             onFocus={() => setFocusedAction("back")}
             onBlur={() => setFocusedAction((current) => current === "back" ? null : current)}
             focusable={tvMode}
-            style={[styles.backButton, { backgroundColor: colors.surface, borderColor: colors.border }, tvMode && tvFocusStyle(focusedAction === "back")]}
+            style={[
+              styles.backButton,
+              {
+                width: btnSize,
+                height: btnSize,
+                borderRadius: scaleSize(11, 14),
+                backgroundColor: colors.surface,
+                borderColor: colors.border,
+              },
+              tvMode && tvFocusStyle(focusedAction === "back"),
+            ]}
           >
-            <Ionicons name="chevron-forward" size={21} color={colors.textPrimary} />
+            <Ionicons name="chevron-forward" size={scaleSize(19, 25)} color={colors.textPrimary} />
           </Pressable>
 
           <Text
             numberOfLines={1}
-            style={[styles.title, { color: colors.textPrimary }]}
+            adjustsFontSizeToFit
+            minimumFontScale={0.82}
+            style={[styles.title, { fontSize: scaleSize(16.5, 24), color: colors.textPrimary }]}
           >
             {title}
           </Text>
@@ -63,9 +87,19 @@ export function CatalogPageHeader({ title, onBack }: HeaderProps) {
             onFocus={() => setFocusedAction("search")}
             onBlur={() => setFocusedAction((current) => current === "search" ? null : current)}
             focusable={tvMode}
-            style={[styles.iconButton, { backgroundColor: colors.surface, borderColor: colors.border }, tvMode && tvFocusStyle(focusedAction === "search")]}
+            style={[
+              styles.iconButton,
+              {
+                width: btnSize,
+                height: btnSize,
+                borderRadius: scaleSize(11, 14),
+                backgroundColor: colors.surface,
+                borderColor: colors.border,
+              },
+              tvMode && tvFocusStyle(focusedAction === "search"),
+            ]}
           >
-            <Ionicons name="search" size={19} color={colors.textPrimary} />
+            <Ionicons name="search" size={scaleSize(17, 23)} color={colors.textPrimary} />
           </Pressable>
           <Pressable
             accessibilityLabel="فتح القائمة"
@@ -73,9 +107,19 @@ export function CatalogPageHeader({ title, onBack }: HeaderProps) {
             onFocus={() => setFocusedAction("menu")}
             onBlur={() => setFocusedAction((current) => current === "menu" ? null : current)}
             focusable={tvMode}
-            style={[styles.iconButton, { backgroundColor: colors.surface, borderColor: colors.border }, tvMode && tvFocusStyle(focusedAction === "menu")]}
+            style={[
+              styles.iconButton,
+              {
+                width: btnSize,
+                height: btnSize,
+                borderRadius: scaleSize(11, 14),
+                backgroundColor: colors.surface,
+                borderColor: colors.border,
+              },
+              tvMode && tvFocusStyle(focusedAction === "menu"),
+            ]}
           >
-            <Ionicons name="menu" size={21} color={colors.textPrimary} />
+            <Ionicons name="menu" size={scaleSize(19, 25)} color={colors.textPrimary} />
           </Pressable>
         </View>
       </View>
@@ -94,7 +138,7 @@ type TabsProps = {
 
 export function CatalogTabs({ tabs, activeId, onSelect }: TabsProps) {
   const colors = useColors();
-  const tvMode = isTvDevice();
+  const { tv: tvMode, size: scaleSize } = useTvMetrics();
   const [focusedId, setFocusedId] = useState<string | null>(null);
 
   return (
@@ -102,7 +146,7 @@ export function CatalogTabs({ tabs, activeId, onSelect }: TabsProps) {
       <ScrollView
         horizontal
         showsHorizontalScrollIndicator={false}
-        contentContainerStyle={styles.tabsContent}
+        contentContainerStyle={[styles.tabsContent, { gap: scaleSize(16, 26), paddingHorizontal: scaleSize(13, 32) }]}
       >
         {tabs.map((tab) => {
           const active = tab.id === activeId;
@@ -116,9 +160,15 @@ export function CatalogTabs({ tabs, activeId, onSelect }: TabsProps) {
               onFocus={() => setFocusedId(tab.id)}
               onBlur={() => setFocusedId((current) => current === tab.id ? null : current)}
               focusable={tvMode}
-              style={[styles.tab, tvMode && tvFocusStyle(focusedId === tab.id)]}
+              style={[styles.tab, { minHeight: scaleSize(44, 56) }, tvMode && tvFocusStyle(focusedId === tab.id)]}
             >
-              <Text style={[styles.tabText, { color: active ? colors.textPrimary : colors.textMuted }, active && { color: colors.homeAccent }]}>
+              <Text
+                style={[
+                  styles.tabText,
+                  { fontSize: scaleSize(12.5, 17), color: active ? colors.textPrimary : colors.textMuted },
+                  active && { color: colors.homeAccent },
+                ]}
+              >
                 {tab.label}
               </Text>
               {active && <View style={[styles.tabIndicator, { backgroundColor: colors.homeAccent }]} />}
@@ -141,14 +191,14 @@ const styles = StyleSheet.create({
   rightTitleGroup: {
     flexDirection: ROW_RTL,
     alignItems: "center",
-    gap: 10,
+    gap: 9,
     flex: 1,
     minWidth: 0,
   },
   actions: {
     flexDirection: ROW_RTL,
     alignItems: "center",
-    gap: 8,
+    gap: 7,
   },
   iconButton: {
     width: 38,
@@ -161,7 +211,7 @@ const styles = StyleSheet.create({
   title: {
     flex: 1,
     textAlign: "right",
-    fontSize: 18,
+    fontSize: 17,
     fontFamily: "Cairo_800ExtraBold",
   },
   backButton: {
@@ -173,8 +223,9 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   tabsFrame: { borderBottomWidth: StyleSheet.hairlineWidth },
-  tabsContent: { alignItems: "stretch", gap: 20, paddingHorizontal: 14 },
-  tab: { minHeight: 49, justifyContent: "center", alignItems: "center", paddingHorizontal: 3, position: "relative" },
-  tabText: { fontSize: 13, fontFamily: "Cairo_700Bold", paddingBottom: 7 },
+  tabsContent: { alignItems: "stretch", gap: 18, paddingHorizontal: 14 },
+  tab: { minHeight: 46, justifyContent: "center", alignItems: "center", paddingHorizontal: 3, position: "relative" },
+  tabText: { fontSize: 12.5, fontFamily: "Cairo_700Bold", paddingBottom: 7 },
   tabIndicator: { position: "absolute", bottom: 0, height: 3, left: 0, right: 0, borderTopLeftRadius: 3, borderTopRightRadius: 3 },
 });
+

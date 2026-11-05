@@ -17,8 +17,16 @@ export function HeroSection({ items, initialTVFocus = false }: Props) {
   const router = useRouter();
   const { width, height } = useWindowDimensions();
   const tvMode = isTvDevice(width, height);
-  const heroWidth = tvMode ? width : width - 32;
-  const heroHeight = tvMode ? 340 : Math.max(178, Math.min(380, heroWidth * 0.53));
+  const isTablet = !tvMode && Math.min(width, height) >= 600;
+  const heroWidth = tvMode ? width : width - (isTablet ? 36 : 28);
+  // Keep enough height on phones so genres, titles, metadata, and CTA buttons
+  // ("مشاهدة الآن" + "تفاصيل") fit with clear artwork breathing room just like iPad.
+  const heroHeight = tvMode
+    ? 340
+    : isTablet
+      ? Math.max(268, Math.min(350, Math.round(heroWidth * 0.52)))
+      : Math.max(216, Math.min(258, Math.round(heroWidth * 0.64)));
+  const s = tvMode ? 1.2 : Math.max(0.82, Math.min(1.12, heroWidth / 430));
   const scrollRef = useRef<ScrollView>(null);
   const [activeIdx, setActiveIdx] = useState(0);
 
@@ -37,13 +45,16 @@ export function HeroSection({ items, initialTVFocus = false }: Props) {
 
   if (!items.length) return null;
 
+  const pad = tvMode ? 28 : Math.round(13 * s);
+  const radius = tvMode ? 8 : Math.round(20 * s);
+
   return (
-    <View style={[styles.carousel, { height: heroHeight + (tvMode ? 0 : 24), width }]}>
+    <View style={[styles.carousel, { height: heroHeight + (tvMode ? 0 : Math.round(22 * s)), width }]}>
       <ScrollView
         ref={scrollRef}
         horizontal
         pagingEnabled
-        style={[styles.heroViewport, { width: heroWidth, height: heroHeight }]}
+        style={[styles.heroViewport, { width: heroWidth, height: heroHeight, borderRadius: radius }]}
         contentContainerStyle={styles.heroTrack}
         showsHorizontalScrollIndicator={false}
         scrollEventThrottle={16}
@@ -64,7 +75,7 @@ export function HeroSection({ items, initialTVFocus = false }: Props) {
                 {
                   width: heroWidth,
                   height: heroHeight,
-                  borderRadius: tvMode ? 8 : 22,
+                  borderRadius: radius,
                   borderColor: colors.border,
                   borderWidth: tvMode ? 0 : 1,
                 },
@@ -82,66 +93,136 @@ export function HeroSection({ items, initialTVFocus = false }: Props) {
                 fadeDuration={tvMode ? 0 : 400}
               />
               <LinearGradient
-                colors={["transparent", "rgba(9,9,11,0.55)", "rgba(9,9,11,0.95)"]}
-                style={[StyleSheet.absoluteFill, { justifyContent: "space-between", padding: tvMode ? 28 : 14 }]}
+                colors={["rgba(9,9,11,0.12)", "rgba(9,9,11,0.52)", "rgba(9,9,11,0.94)"]}
+                locations={[0, 0.42, 1]}
+                style={[StyleSheet.absoluteFill, { justifyContent: "space-between", padding: pad }]}
               >
                 {/* Top Badges Row */}
                 <View style={styles.topBadgesRow}>
                   {anime.averageScore ? (
-                    <View style={styles.ratingBadge}>
-                      <Text style={styles.ratingText}>{(anime.averageScore / 10).toFixed(1)}</Text>
-                      <Ionicons name="star" size={11} color="#FFD700" />
+                    <View
+                      style={[
+                        styles.ratingBadge,
+                        {
+                          paddingHorizontal: Math.round(8 * s),
+                          paddingVertical: Math.round(3 * s),
+                          borderRadius: Math.round(10 * s),
+                        },
+                      ]}
+                    >
+                      <Text style={[styles.ratingText, { fontSize: Math.round(10.5 * s) }]}>
+                        {(anime.averageScore / 10).toFixed(1)}
+                      </Text>
+                      <Ionicons name="star" size={Math.round(10.5 * s)} color="#FFD700" />
                     </View>
                   ) : <View />}
-                  <View style={styles.featuredBadge}>
-                    <View style={styles.featuredDot} />
-                    <Text style={styles.featuredText}>مختارات الموسم #{index + 1}</Text>
+                  <View
+                    style={[
+                      styles.featuredBadge,
+                      {
+                        paddingHorizontal: Math.round(9 * s),
+                        paddingVertical: Math.round(3 * s),
+                        borderRadius: Math.round(10 * s),
+                      },
+                    ]}
+                  >
+                    <View style={[styles.featuredDot, { width: Math.round(5.5 * s), height: Math.round(5.5 * s) }]} />
+                    <Text style={[styles.featuredText, { fontSize: Math.round(9.5 * s) }]}>
+                      مختارات الموسم #{index + 1}
+                    </Text>
                   </View>
                 </View>
 
                 {/* Bottom Details Section */}
-                <View>
+                <View style={{ gap: Math.round(2 * s) }}>
                   {/* Genre Tags */}
-                  <View style={styles.genreRow}>
+                  <View style={[styles.genreRow, { gap: Math.round(5 * s), marginBottom: Math.round(3 * s) }]}>
                     {anime.genres?.slice(0, 3).map((g) => (
-                      <View key={g} style={styles.genreBadge}>
-                        <Text style={styles.genreText}>{g}</Text>
+                      <View
+                        key={g}
+                        style={[
+                          styles.genreBadge,
+                          {
+                            paddingHorizontal: Math.round(8 * s),
+                            paddingVertical: Math.max(2, Math.round(2.5 * s)),
+                            borderRadius: Math.round(7 * s),
+                          },
+                        ]}
+                      >
+                        <Text style={[styles.genreText, { fontSize: Math.round(9.5 * s) }]}>{g}</Text>
                       </View>
                     ))}
                   </View>
 
                   {/* Title & Arabic Title */}
-                  <Text style={styles.heroTitleArabic} numberOfLines={1}>
+                  <Text
+                    style={[
+                      styles.heroTitleArabic,
+                      {
+                        fontSize: Math.round(16.5 * s),
+                        lineHeight: Math.round(22 * s),
+                      },
+                    ]}
+                    numberOfLines={1}
+                  >
                     {anime.title_ar || anime.title.romaji || title}
                   </Text>
-                  <Text style={styles.heroTitleEnglish} numberOfLines={1}>
+                  <Text
+                    style={[
+                      styles.heroTitleEnglish,
+                      {
+                        fontSize: Math.round(11 * s),
+                        lineHeight: Math.round(15 * s),
+                        marginBottom: Math.round(3 * s),
+                      },
+                    ]}
+                    numberOfLines={1}
+                  >
                     {title}
                   </Text>
 
                   {/* Metadata Row */}
-                  <View style={styles.infoRow}>
-                    <Text style={styles.infoText}>
+                  <View style={[styles.infoRow, { marginBottom: Math.round(6 * s) }]}>
+                    <Text style={[styles.infoText, { fontSize: Math.round(10 * s) }]} numberOfLines={1}>
                       {anime.episodes ? `${anime.episodes} حلقة` : "مستمر"} • {(anime as any).seasonYear || "2024"} • {anime.format || "TV"}
                     </Text>
                   </View>
 
                   {/* CTAs */}
-                  <View style={styles.btnRow}>
+                  <View style={[styles.btnRow, { gap: Math.round(8 * s) }]}>
                     <Pressable
                       onPress={() => router.push({ pathname: "/episodes/[id]", params: { id: anime.id } } as any)}
                       focusable={tvMode}
-                      style={({ focused }) => [styles.watchBtn, tvMode && tvFocusStyle(focused)]}
+                      style={({ focused }) => [
+                        styles.watchBtn,
+                        {
+                          paddingHorizontal: Math.round(15 * s),
+                          paddingVertical: Math.round(7 * s),
+                          borderRadius: Math.round(11 * s),
+                          gap: Math.round(5 * s),
+                        },
+                        tvMode && tvFocusStyle(focused),
+                      ]}
                     >
-                      <Ionicons name="play" size={15} color="#fff" />
-                      <Text style={styles.watchBtnText}>مشاهدة الآن</Text>
+                      <Ionicons name="play" size={Math.round(13.5 * s)} color="#fff" />
+                      <Text style={[styles.watchBtnText, { fontSize: Math.round(11.5 * s) }]}>مشاهدة الآن</Text>
                     </Pressable>
                     <Pressable
                       onPress={() => router.push(`/anime/${anime.id}?title=${encodeURIComponent(anime.title.romaji)}&english=${encodeURIComponent(anime.title.english || "")}`)}
                       focusable={tvMode}
-                      style={({ focused }) => [styles.detailBtn, tvMode && tvFocusStyle(focused)]}
+                      style={({ focused }) => [
+                        styles.detailBtn,
+                        {
+                          paddingHorizontal: Math.round(13 * s),
+                          paddingVertical: Math.round(7 * s),
+                          borderRadius: Math.round(11 * s),
+                          gap: Math.round(5 * s),
+                        },
+                        tvMode && tvFocusStyle(focused),
+                      ]}
                     >
-                      <Ionicons name="information-circle-outline" size={16} color="#fff" />
-                      <Text style={styles.detailBtnText}>تفاصيل</Text>
+                      <Ionicons name="information-circle-outline" size={Math.round(14.5 * s)} color="#fff" />
+                      <Text style={[styles.detailBtnText, { fontSize: Math.round(11.5 * s) }]}>تفاصيل</Text>
                     </Pressable>
                   </View>
                 </View>
@@ -151,7 +232,7 @@ export function HeroSection({ items, initialTVFocus = false }: Props) {
         })}
       </ScrollView>
       {items.length > 1 && (
-        <View style={styles.dots}>
+        <View style={[styles.dots, { marginTop: Math.round(8 * s) }]}>
           {items.slice(0, 5).map((_, i) => (
             <View
               key={i}
@@ -159,7 +240,7 @@ export function HeroSection({ items, initialTVFocus = false }: Props) {
                 styles.dot,
                 {
                   backgroundColor: i === (activeIdx % 5) ? "#06b6d4" : "rgba(255,255,255,0.22)",
-                  width: i === (activeIdx % 5) ? 22 : 12,
+                  width: i === (activeIdx % 5) ? Math.round(20 * s) : Math.round(10 * s),
                 },
               ]}
             />
@@ -172,27 +253,28 @@ export function HeroSection({ items, initialTVFocus = false }: Props) {
 
 const styles = StyleSheet.create({
   carousel: { alignSelf: "center", alignItems: "center", overflow: "visible" },
-  heroViewport: { alignSelf: "center", borderRadius: 22 },
+  heroViewport: { alignSelf: "center", borderRadius: 20 },
   heroTrack: { alignItems: "flex-start" },
   heroSlide: { overflow: "hidden", position: "relative" },
-  topBadgesRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginTop: 2 },
-  ratingBadge: { flexDirection: "row", alignItems: "center", gap: 3, backgroundColor: "rgba(15, 23, 42, 0.85)", paddingHorizontal: 9, paddingVertical: 4, borderRadius: 12, borderWidth: 1, borderColor: "rgba(255, 255, 255, 0.12)" },
-  ratingText: { color: "#fff", fontSize: 11, fontFamily: "Cairo_700Bold" },
-  featuredBadge: { flexDirection: "row", alignItems: "center", gap: 5, backgroundColor: "rgba(15, 23, 42, 0.85)", paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12, borderWidth: 1, borderColor: "rgba(168, 85, 247, 0.35)" },
-  featuredDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: "#a855f7" },
-  featuredText: { color: "#e9d5ff", fontSize: 10, fontFamily: "Cairo_700Bold" },
-  genreRow: { flexDirection: "row", gap: 5, marginBottom: 6, flexWrap: "wrap", justifyContent: "flex-end" },
-  genreBadge: { backgroundColor: "rgba(30, 41, 59, 0.75)", paddingHorizontal: 9, paddingVertical: 3, borderRadius: 8, borderWidth: 1, borderColor: "rgba(255, 255, 255, 0.10)" },
-  genreText: { fontSize: 10, color: "rgba(255, 255, 255, 0.85)", fontFamily: "Cairo_600SemiBold" },
-  heroTitleArabic: { color: "#fff", fontSize: 19, fontFamily: "Cairo_800ExtraBold", textAlign: "right", writingDirection: "rtl", marginBottom: 2 },
-  heroTitleEnglish: { color: "rgba(255, 255, 255, 0.75)", fontSize: 12, fontFamily: "Cairo_600SemiBold", textAlign: "right", marginBottom: 6 },
-  infoRow: { flexDirection: "row", justifyContent: "flex-end", marginBottom: 10 },
-  infoText: { color: "rgba(255, 255, 255, 0.65)", fontSize: 11, fontFamily: "Cairo_400Regular" },
-  btnRow: { flexDirection: "row-reverse", gap: 8, marginTop: 2 },
-  watchBtn: { flexDirection: "row-reverse", alignItems: "center", gap: 6, backgroundColor: "#06b6d4", paddingHorizontal: 18, paddingVertical: 9, borderRadius: 12 },
-  detailBtn: { flexDirection: "row-reverse", alignItems: "center", gap: 6, backgroundColor: "rgba(15, 23, 42, 0.80)", paddingHorizontal: 16, paddingVertical: 9, borderRadius: 12, borderWidth: 1, borderColor: "rgba(255, 255, 255, 0.20)" },
-  watchBtnText: { color: "#fff", fontSize: 12, fontFamily: "Cairo_700Bold" },
-  detailBtnText: { color: "#fff", fontSize: 12, fontFamily: "Cairo_600SemiBold" },
-  dots: { marginTop: 10, flexDirection: "row", justifyContent: "center", gap: 5 },
+  topBadgesRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
+  ratingBadge: { flexDirection: "row", alignItems: "center", gap: 3, backgroundColor: "rgba(15, 23, 42, 0.85)", paddingHorizontal: 8, paddingVertical: 3, borderRadius: 10, borderWidth: 1, borderColor: "rgba(255, 255, 255, 0.12)" },
+  ratingText: { color: "#fff", fontSize: 10.5, fontFamily: "Cairo_700Bold" },
+  featuredBadge: { flexDirection: "row", alignItems: "center", gap: 5, backgroundColor: "rgba(15, 23, 42, 0.85)", paddingHorizontal: 9, paddingVertical: 3, borderRadius: 10, borderWidth: 1, borderColor: "rgba(168, 85, 247, 0.35)" },
+  featuredDot: { width: 5.5, height: 5.5, borderRadius: 3, backgroundColor: "#a855f7" },
+  featuredText: { color: "#e9d5ff", fontSize: 9.5, fontFamily: "Cairo_700Bold" },
+  genreRow: { flexDirection: "row", gap: 5, marginBottom: 4, flexWrap: "wrap", justifyContent: "flex-end" },
+  genreBadge: { backgroundColor: "rgba(30, 41, 59, 0.78)", paddingHorizontal: 8, paddingVertical: 2.5, borderRadius: 7, borderWidth: 1, borderColor: "rgba(255, 255, 255, 0.10)" },
+  genreText: { fontSize: 9.5, color: "rgba(255, 255, 255, 0.88)", fontFamily: "Cairo_600SemiBold" },
+  heroTitleArabic: { color: "#fff", fontSize: 17, fontFamily: "Cairo_800ExtraBold", textAlign: "right", writingDirection: "rtl" },
+  heroTitleEnglish: { color: "rgba(255, 255, 255, 0.75)", fontSize: 11, fontFamily: "Cairo_600SemiBold", textAlign: "right" },
+  infoRow: { flexDirection: "row", justifyContent: "flex-end" },
+  infoText: { color: "rgba(255, 255, 255, 0.72)", fontSize: 10, fontFamily: "Cairo_600SemiBold" },
+  btnRow: { flexDirection: "row-reverse", gap: 8 },
+  watchBtn: { flexDirection: "row-reverse", alignItems: "center", gap: 5, backgroundColor: "#06b6d4", paddingHorizontal: 15, paddingVertical: 7, borderRadius: 11 },
+  detailBtn: { flexDirection: "row-reverse", alignItems: "center", gap: 5, backgroundColor: "rgba(15, 23, 42, 0.82)", paddingHorizontal: 13, paddingVertical: 7, borderRadius: 11, borderWidth: 1, borderColor: "rgba(255, 255, 255, 0.20)" },
+  watchBtnText: { color: "#fff", fontSize: 11.5, fontFamily: "Cairo_700Bold" },
+  detailBtnText: { color: "#fff", fontSize: 11.5, fontFamily: "Cairo_600SemiBold" },
+  dots: { marginTop: 8, flexDirection: "row", justifyContent: "center", gap: 5 },
   dot: { height: 4, borderRadius: 2 },
 });
+

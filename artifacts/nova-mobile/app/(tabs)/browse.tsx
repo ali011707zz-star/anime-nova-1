@@ -7,7 +7,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { getBaseUrl } from "@/utils/api";
-import { isTvDevice, tvFocusStyle, TvPressable as Pressable } from "@/utils/tv";
+import { isTvDevice, tvFocusStyle, TvPressable as Pressable, useTvMetrics } from "@/utils/tv";
 import { useTvFocusMemory } from "@/utils/tvFocus";
 import { getGridColumnCount } from "@/components/AnimeCard";
 import { AnimeFilterSheet, type AnimeFilterOption } from "@/components/AnimeFilterSheet";
@@ -16,8 +16,9 @@ import type { ThemePalette } from "@/constants/colors";
 
 function useBrowseTheme() {
   const colors = useColors();
-  const g = useMemo(() => createBrowseStyles(colors), [colors]);
-  return { colors, g };
+  const { deviceScale } = useTvMetrics();
+  const g = useMemo(() => createBrowseStyles(colors, deviceScale), [colors, deviceScale]);
+  return { colors, g, deviceScale };
 }
 
 /* ── Data ── */
@@ -462,20 +463,25 @@ export default function BrowseScreen() {
                   onPress={() => router.canGoBack() ? router.back() : router.replace("/(tabs)" as any)}
                   style={g.mobileBackButton}
                 >
-                  <Ionicons name="chevron-forward" size={21} color={colors.textPrimary} />
+                  <Ionicons name="chevron-forward" size={19} color={colors.textPrimary} />
                 </Pressable>
-                <Text numberOfLines={1} style={[g.mobileTitle, { flexShrink: 1 }]}>
+                <Text
+                  numberOfLines={1}
+                  adjustsFontSizeToFit
+                  minimumFontScale={0.8}
+                  style={[g.mobileTitle, { flexShrink: 1 }]}
+                >
                   {activeGenreAr || "المكتبة والتصفح"}
                 </Text>
               </View>
               <View style={g.mobileActions}>
                 <View style={g.modeSwitch}>
                   <Pressable onPress={() => router.push("/(tabs)/search" as any)} style={g.modeButton}>
-                    <Ionicons name="search" size={14} color={colors.textMuted} />
+                    <Ionicons name="search" size={13} color={colors.textMuted} />
                     <Text style={g.modeButtonText}>بحث</Text>
                   </Pressable>
                   <Pressable onPress={() => setView("list")} style={[g.modeButton, g.modeButtonActive]}>
-                    <Ionicons name="compass-outline" size={14} color={colors.buttonText} />
+                    <Ionicons name="compass-outline" size={13} color={colors.buttonText} />
                     <Text style={[g.modeButtonText, g.modeButtonTextActive]}>تصفح</Text>
                   </Pressable>
                 </View>
@@ -484,17 +490,17 @@ export default function BrowseScreen() {
                   onPress={() => setFilterVisible(true)}
                   style={({ pressed }) => [g.mobileFilterButton, hasFilters && g.mobileFilterButtonActive, pressed && { opacity: 0.82 }]}
                 >
-                  <Ionicons name="options-outline" size={18} color={hasFilters ? colors.buttonText : colors.textPrimary} />
+                  <Ionicons name="options-outline" size={17} color={hasFilters ? colors.buttonText : colors.textPrimary} />
                 </Pressable>
               </View>
             </View>
 
             <Pressable onPress={() => setFilterVisible(true)} style={g.mobileSortButton}>
-              <Ionicons name="options-outline" size={17} color={colors.textSecondary} />
+              <Ionicons name="options-outline" size={16} color={colors.textSecondary} />
               <Text numberOfLines={1} style={g.mobileSortText}>
                 {SORT_OPTIONS.find((option) => option.value === sort)?.label || "الأكثر شعبية"}
               </Text>
-              <Ionicons name="chevron-down" size={17} color={colors.textSecondary} />
+              <Ionicons name="chevron-down" size={16} color={colors.textSecondary} />
             </Pressable>
 
             <ScrollView
@@ -745,28 +751,28 @@ export default function BrowseScreen() {
   );
 }
 
-const createBrowseStyles = (colors: ThemePalette) => StyleSheet.create({
+const createBrowseStyles = (colors: ThemePalette, s = 1) => StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
-  header: { backgroundColor: colors.surface, borderBottomWidth: 1, borderBottomColor: colors.border, paddingHorizontal: 12, paddingTop: 8, paddingBottom: 5 },
+  header: { backgroundColor: colors.surface, borderBottomWidth: 1, borderBottomColor: colors.border, paddingHorizontal: Math.round(11 * s), paddingTop: 8, paddingBottom: 5 },
   tvHeader: { paddingHorizontal: 32, paddingTop: 16, paddingBottom: 14 },
-  mobileHeaderRow: { flexDirection: ROW_RTL, alignItems: "center", justifyContent: "space-between", minHeight: 44, gap: 8 },
-  mobileActions: { flexDirection: ROW_RTL, alignItems: "center", gap: 6 },
-  mobileFilterButton: { width: 40, height: 40, borderRadius: 12, alignItems: "center", justifyContent: "center", backgroundColor: colors.input, borderWidth: 1, borderColor: colors.border },
+  mobileHeaderRow: { flexDirection: ROW_RTL, alignItems: "center", justifyContent: "space-between", minHeight: Math.round(40 * s), gap: 6 },
+  mobileActions: { flexDirection: ROW_RTL, alignItems: "center", gap: 5, flexShrink: 0 },
+  mobileFilterButton: { width: Math.round(36 * s), height: Math.round(36 * s), borderRadius: Math.round(11 * s), alignItems: "center", justifyContent: "center", backgroundColor: colors.input, borderWidth: 1, borderColor: colors.border },
   mobileFilterButtonActive: { backgroundColor: colors.destructive, borderColor: colors.destructive },
-  modeSwitch: { flexDirection: ROW_RTL, alignItems: "center", padding: 3, borderRadius: 13, backgroundColor: colors.input, borderWidth: 1, borderColor: colors.border },
-  modeButton: { minHeight: 32, flexDirection: ROW_RTL, alignItems: "center", justifyContent: "center", gap: 5, paddingHorizontal: 9, borderRadius: 10 },
+  modeSwitch: { flexDirection: ROW_RTL, alignItems: "center", padding: 2.5, borderRadius: Math.round(12 * s), backgroundColor: colors.input, borderWidth: 1, borderColor: colors.border },
+  modeButton: { minHeight: Math.round(30 * s), flexDirection: ROW_RTL, alignItems: "center", justifyContent: "center", gap: 4, paddingHorizontal: Math.round(8 * s), borderRadius: Math.round(9 * s) },
   modeButtonActive: { backgroundColor: "#0ea5e9" },
-  modeButtonText: { color: colors.textSecondary, fontFamily: "Cairo_700Bold", fontSize: 10 },
+  modeButtonText: { color: colors.textSecondary, fontFamily: "Cairo_700Bold", fontSize: Math.round(9.8 * s) },
   modeButtonTextActive: { color: "#ffffff" },
-  mobileTitleGroup: { flexDirection: ROW_RTL, alignItems: "center", gap: 9, minWidth: 0 },
-  mobileTitle: { color: colors.textPrimary, fontSize: 17, fontFamily: "Cairo_800ExtraBold", textAlign: "right", writingDirection: "rtl" },
-  mobileBackButton: { width: 40, height: 40, borderRadius: 12, alignItems: "center", justifyContent: "center", backgroundColor: colors.input, borderWidth: 1, borderColor: colors.border },
-  mobileSortButton: { minHeight: 44, flexDirection: ROW_RTL, alignItems: "center", gap: 8, marginTop: 10, paddingHorizontal: 12, borderRadius: 14, backgroundColor: colors.input, borderWidth: 1, borderColor: colors.border },
-  mobileSortText: { flex: 1, color: colors.textPrimary, fontSize: 13, fontFamily: "Cairo_700Bold", textAlign: "right", writingDirection: "rtl" },
-  mobileGenreRail: { marginTop: 12, marginHorizontal: -12 },
-  mobileGenreRailContent: { flexDirection: ROW_RTL, gap: 10, paddingHorizontal: 12, paddingTop: 18, paddingBottom: 8 },
+  mobileTitleGroup: { flex: 1, flexDirection: ROW_RTL, alignItems: "center", gap: 7, minWidth: 0 },
+  mobileTitle: { color: colors.textPrimary, fontSize: Math.round(15 * s), fontFamily: "Cairo_800ExtraBold", textAlign: "right", writingDirection: "rtl" },
+  mobileBackButton: { width: Math.round(36 * s), height: Math.round(36 * s), borderRadius: Math.round(11 * s), alignItems: "center", justifyContent: "center", backgroundColor: colors.input, borderWidth: 1, borderColor: colors.border, flexShrink: 0 },
+  mobileSortButton: { minHeight: Math.round(40 * s), flexDirection: ROW_RTL, alignItems: "center", gap: 8, marginTop: 8, paddingHorizontal: 12, borderRadius: Math.round(13 * s), backgroundColor: colors.input, borderWidth: 1, borderColor: colors.border },
+  mobileSortText: { flex: 1, color: colors.textPrimary, fontSize: Math.round(12.2 * s), fontFamily: "Cairo_700Bold", textAlign: "right", writingDirection: "rtl" },
+  mobileGenreRail: { marginTop: 10, marginHorizontal: -Math.round(11 * s) },
+  mobileGenreRailContent: { flexDirection: ROW_RTL, gap: 9, paddingHorizontal: Math.round(11 * s), paddingTop: 10, paddingBottom: 6 },
   resultsHeading: { paddingTop: 2, paddingBottom: 10, alignItems: "flex-end" },
-  resultsHeadingText: { color: colors.textSecondary, fontSize: 11, fontFamily: "Cairo_700Bold", textAlign: "right", writingDirection: "rtl" },
+  resultsHeadingText: { color: colors.textSecondary, fontSize: Math.round(11 * s), fontFamily: "Cairo_700Bold", textAlign: "right", writingDirection: "rtl" },
   headerRow: { flexDirection: "row", alignItems: "center", marginBottom: 6 },
   headerTitle: { fontSize: 17, fontFamily: "Cairo_800ExtraBold", color: colors.textPrimary },
   tvHeaderTitle: { fontSize: 26, lineHeight: 36 },
@@ -795,27 +801,27 @@ const createBrowseStyles = (colors: ThemePalette) => StyleSheet.create({
   searchInput: { flex: 1, color: colors.textPrimary, fontSize: 10, fontFamily: "Cairo_400Regular", textAlign: "right" },
   tvSearchInput: { fontSize: 14, lineHeight: 21 },
   genreCard: { flex: 1 },
-  horizontalGenreCard: { width: 154, flexGrow: 0 },
+  horizontalGenreCard: { width: Math.round(142 * s), flexGrow: 0 },
   genreCardWrap: { paddingTop: 16, position: "relative" },
   horizontalGenreCardWrap: { paddingTop: 14, position: "relative" },
   genrePillWrap: {
-    height: 62,
-    borderRadius: 16,
+    height: Math.round(58 * s),
+    borderRadius: Math.round(15 * s),
     flexDirection: ROW_RTL,
     alignItems: "center",
     justifyContent: "space-between",
-    paddingHorizontal: 12,
+    paddingHorizontal: Math.round(10 * s),
     position: "relative",
     overflow: "visible",
   },
   horizontalGenrePillWrap: {
-    height: 54,
-    borderRadius: 15,
+    height: Math.round(48 * s),
+    borderRadius: Math.round(14 * s),
   },
   genreFloatingPosterWrap: {
-    width: 44,
-    height: 44,
-    borderRadius: 10,
+    width: Math.round(42 * s),
+    height: Math.round(42 * s),
+    borderRadius: Math.round(10 * s),
     overflow: "hidden",
     borderWidth: 1.5,
     borderColor: "rgba(255,255,255,0.5)",
@@ -829,14 +835,14 @@ const createBrowseStyles = (colors: ThemePalette) => StyleSheet.create({
     shadowOffset: { width: 0, height: 2 },
   },
   horizontalGenreFloatingPosterWrap: {
-    width: 40,
-    height: 40,
-    borderRadius: 9,
+    width: Math.round(36 * s),
+    height: Math.round(36 * s),
+    borderRadius: Math.round(9 * s),
   },
   genreFloatingPoster: { width: "100%", height: "100%" },
   genrePillLabel: {
     flex: 1,
-    fontSize: 14,
+    fontSize: Math.round(13 * s),
     fontFamily: "Cairo_800ExtraBold",
     color: "#ffffff",
     textAlign: "right",
@@ -850,23 +856,23 @@ const createBrowseStyles = (colors: ThemePalette) => StyleSheet.create({
   tvGenreImgWrap: { height: 150, borderRadius: 18, borderWidth: 1 },
   genreImg: { ...StyleSheet.absoluteFillObject, width: "100%", height: "100%" },
   genreColorBar: { position: "absolute", bottom: 0, left: 0, right: 0, height: 3 },
-  genreLabel: { fontSize: 14, fontFamily: "Cairo_800ExtraBold", color: "#fff", padding: 10, textShadowColor: "rgba(0,0,0,0.8)", textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 4 },
+  genreLabel: { fontSize: Math.round(13 * s), fontFamily: "Cairo_800ExtraBold", color: "#fff", paddingHorizontal: Math.round(8 * s), paddingVertical: Math.round(6 * s), textShadowColor: "rgba(0,0,0,0.8)", textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 4 },
   tvGenreLabel: { fontSize: 19, lineHeight: 28, padding: 14 },
   card: { flex: 1 },
-  cardWrap: { borderRadius: 14, overflow: "hidden", aspectRatio: 2 / 3, backgroundColor: colors.surfaceElevated, borderWidth: 1, borderColor: colors.border, position: "relative" },
+  cardWrap: { borderRadius: Math.round(13 * s), overflow: "hidden", aspectRatio: 2 / 3, backgroundColor: colors.surfaceElevated, borderWidth: 1, borderColor: colors.border, position: "relative" },
   tvCardWrap: { borderRadius: 16, borderWidth: 1 },
   cardImg: { width: "100%", height: "100%" },
   cardNoImg: { backgroundColor: colors.accentSurface, alignItems: "center", justifyContent: "center" },
-  scoreBadge: { position: "absolute", top: 5, right: 5, flexDirection: "row", alignItems: "center", gap: 2, backgroundColor: "rgba(0,0,0,0.7)", borderRadius: 7, paddingHorizontal: 4, paddingVertical: 2 },
+  scoreBadge: { position: "absolute", top: 5, right: 5, flexDirection: "row", alignItems: "center", gap: 2, backgroundColor: "rgba(0,0,0,0.72)", borderRadius: 6, paddingHorizontal: Math.round(4.5 * s), paddingVertical: 1.5 },
   tvScoreBadge: { top: 8, right: 8, borderRadius: 9, paddingHorizontal: 7, paddingVertical: 4, gap: 3 },
-  scoreText: { fontSize: 7, color: "#fff", fontFamily: "Cairo_700Bold" },
+  scoreText: { fontSize: Math.max(7, Math.round(7.5 * s)), color: "#fff", fontFamily: "Cairo_700Bold" },
   tvScoreText: { fontSize: 12 },
-  fmtBadge: { position: "absolute", top: 5, left: 5, paddingHorizontal: 5, paddingVertical: 2, borderRadius: 5 },
+  fmtBadge: { position: "absolute", top: 5, left: 5, paddingHorizontal: Math.round(5 * s), paddingVertical: 1.5, borderRadius: 5 },
   tvFmtBadge: { top: 8, left: 8, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8 },
-  fmtText: { fontSize: 7, color: "#fff", fontFamily: "Cairo_700Bold" },
+  fmtText: { fontSize: Math.max(7, Math.round(7.5 * s)), color: "#fff", fontFamily: "Cairo_700Bold" },
   tvFmtText: { fontSize: 12 },
-  cardBottom: { position: "absolute", bottom: 0, left: 0, right: 0, padding: 5, backgroundColor: "rgba(0,0,0,0.6)" },
-  cardTitle: { fontSize: 9, color: "#fff", fontFamily: "Cairo_700Bold", lineHeight: 13 },
+  cardBottom: { position: "absolute", bottom: 0, left: 0, right: 0, padding: Math.round(5 * s), backgroundColor: "rgba(0,0,0,0.62)" },
+  cardTitle: { fontSize: Math.max(8.5, Math.round(9.2 * s)), color: "#fff", fontFamily: "Cairo_700Bold", lineHeight: Math.round(13 * s) },
   tvCardTitle: { fontSize: 16, lineHeight: 23, padding: 8 },
   center: { flex: 1, alignItems: "center", justifyContent: "center", gap: 12, minHeight: 200 },
   emptyText: { fontSize: 14, fontFamily: "Cairo_700Bold", color: colors.textMuted, textAlign: "center" },

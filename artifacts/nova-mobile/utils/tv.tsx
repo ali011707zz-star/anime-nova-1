@@ -166,12 +166,36 @@ export function tvScale(tv: boolean, phone: number, television: number) {
 }
 
 /**
- * Central ten-foot UI metrics.
+ * Proportional scale factor across Phone (320dp–430dp) and Tablet/iPad (600dp+).
+ * Reference baseline is 412dp (standard large phone / small tablet rhythm).
+ * - Compact phones (350dp): ~0.88x so icons, badges, and pills never crowd or clip
+ * - Standard phones (390–412dp): ~0.95x–1.0x
+ * - iPads / Tablets (600dp–840dp): ~1.08x–1.15x
+ */
+export function getDeviceScale(width?: number, height?: number) {
+  const window = Dimensions.get("window");
+  const w = width ?? window.width ?? 390;
+  const h = height ?? window.height ?? 800;
+  const shortEdge = Math.min(w, h);
+  if (shortEdge >= 600) {
+    return Math.min(1.15, Math.max(1.05, shortEdge / 560));
+  }
+  return Math.max(0.84, Math.min(1.02, shortEdge / 412));
+}
+
+export function scaleByDevice(baseValue: number, width?: number, height?: number) {
+  const factor = getDeviceScale(width, height);
+  return Math.round(baseValue * factor * 10) / 10;
+}
+
+/**
+ * Central responsive + ten-foot UI metrics.
  *
- * Android TV can report a 720p, 1080p, or 4K logical window, so using the
- * physical pixel width directly would make a 4K TV four times too large.
- * The TV branch intentionally stays within a 1.45x–1.8x range over the phone
- * reference while still responding to split-screen/rotation changes.
+ * - On phones and tablets (`!tv`), scales `phoneValue` proportionally to the
+ *   device's short edge so a 350dp phone and a 600dp iPad share the exact same
+ *   visual proportions without oversized icons or clipped badges.
+ * - On Android TV (`tv`), stays within a 1.45x–1.8x range over the phone
+ *   reference while still responding to split-screen/rotation changes.
  */
 export function responsiveScale(
   phoneValue: number,
@@ -179,14 +203,19 @@ export function responsiveScale(
   tv: boolean,
   tvValue?: number,
 ) {
-  if (!tv) return phoneValue;
-  const tvScale = Math.max(1.45, Math.min(1.8, width / 960));
-  return Math.round(tvValue ?? phoneValue * tvScale);
+  if (!tv) {
+    const factor = getDeviceScale(width);
+    return Math.round(phoneValue * factor);
+  }
+  const tvScaleFactor = Math.max(1.45, Math.min(1.8, width / 960));
+  return Math.round(tvValue ?? phoneValue * tvScaleFactor);
 }
 
 export function useTvMetrics() {
   const { width, height } = useWindowDimensions();
   const tv = isTvDevice(width, height);
+  const isTablet = !tv && Math.min(width, height) >= 600;
+  const deviceScale = getDeviceScale(width, height);
   const size = (phoneValue: number, tvValue?: number) =>
     responsiveScale(phoneValue, width, tv, tvValue);
 
@@ -194,9 +223,11 @@ export function useTvMetrics() {
     width,
     height,
     tv,
+    isTablet,
+    deviceScale,
     size,
     horizontalPadding: size(16, 40),
-    controlTarget: size(44, 58),
+    controlTarget: size(42, 58),
   };
 }
 
