@@ -28,16 +28,7 @@ export function isTvDevice(width?: number, height?: number) {
   };
   const uiMode = String(nativePlatform.constants?.uiMode ?? "").toLowerCase();
   if (nativePlatform.isTV === true || uiMode === "tv" || uiMode === "television") return true;
-  const window = Dimensions.get("window");
-  const measuredWidth = width ?? window.width;
-  const measuredHeight = height ?? window.height;
-  if (measuredWidth == null || measuredHeight == null) return false;
-  const longEdge = Math.max(measuredWidth, measuredHeight);
-  const shortEdge = Math.min(measuredWidth, measuredHeight);
-  // Android TV commonly reports a logical 960x540 or 1280x720 window even
-  // when its physical output is 1080p/4K. Keep the short edge high enough to
-  // avoid classifying a normal phone in landscape as a TV.
-  return longEdge >= 900 && shortEdge >= 500;
+  return false;
 }
 
 export function tvFocusStyle(focused: boolean) {

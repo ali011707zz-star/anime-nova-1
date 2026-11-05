@@ -200,6 +200,8 @@ function CharCard({ e, animeId, animeTitle, favIds, onToggle, tvMode = false, co
   );
 }
 
+const _animeMemoryCache = new Map<string, { anime: any; descAr?: string }>();
+
 export default function AnimeDetailScreen() {
   const { colors, d } = useDetailStyles();
   const { id, src, title, english, cover, ep } = useLocalSearchParams<{
@@ -285,10 +287,17 @@ export default function AnimeDetailScreen() {
 
   useEffect(() => {
     if (!id) return;
-    setLoading(true);
+    const cachedMem = _animeMemoryCache.get(String(id));
+    if (cachedMem?.anime) {
+      setAnime(cachedMem.anime);
+      if (cachedMem.descAr) setDescAr(cachedMem.descAr);
+      setLoading(false);
+    } else {
+      setLoading(true);
+      setAnime(null);
+      setDescAr(null);
+    }
     setLoadError(false);
-    setAnime(null);
-    setDescAr(null);
 
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 15000);
@@ -373,6 +382,7 @@ export default function AnimeDetailScreen() {
       }
       if (!a) { setLoadError(true); return; }
       setAnime(a);
+      _animeMemoryCache.set(String(id), { anime: a });
       if (a?.nextAiringEpisode?.timeUntilAiring) {
         setCountdown(a.nextAiringEpisode.timeUntilAiring);
       }

@@ -352,6 +352,106 @@ function buildWebtoonReaderHtml(
 </html>`;
 }
 
+function buildTextReaderHtml(
+  contentHtml: string,
+  chapterLabel: string,
+  nextChapterLabel: string | null
+): string {
+  const safeChapterLabel = String(chapterLabel || "الفصل")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+  const safeNextLabel = nextChapterLabel
+    ? String(nextChapterLabel).replace(/</g, "&lt;").replace(/>/g, "&gt;")
+    : "";
+
+  return `<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, minimum-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      -webkit-tap-highlight-color: transparent;
+    }
+    html, body {
+      width: 100%;
+      min-height: 100%;
+      background-color: #050507;
+      color: #e4e4e7;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Cairo", sans-serif;
+      overflow-x: hidden;
+      overflow-y: auto;
+      -webkit-overflow-scrolling: touch;
+      padding: 24px 18px 80px 18px;
+    }
+    .novel-header {
+      text-align: center;
+      padding: 16px 0 20px 0;
+      border-bottom: 1px solid rgba(255,255,255,0.1);
+      margin-bottom: 24px;
+    }
+    .novel-title {
+      font-size: 20px;
+      font-weight: 700;
+      color: #FBBF24;
+      line-height: 1.4;
+    }
+    .novel-body {
+      font-size: 18px;
+      line-height: 2.2;
+      color: #e4e4e7;
+      letter-spacing: 0.2px;
+      word-break: break-word;
+    }
+    .novel-body p {
+      margin-bottom: 20px;
+      text-indent: 14px;
+    }
+    .novel-body img {
+      max-width: 100%;
+      height: auto;
+      border-radius: 8px;
+      margin: 16px 0;
+      display: block;
+    }
+    .next-btn-wrap {
+      margin-top: 40px;
+      padding-top: 24px;
+      border-top: 1px solid rgba(255,255,255,0.1);
+      text-align: center;
+    }
+    .next-btn {
+      display: inline-block;
+      background: #F59E0B;
+      color: #09090B;
+      font-weight: 700;
+      font-size: 15px;
+      padding: 12px 28px;
+      border-radius: 12px;
+      cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+  <div class="novel-header">
+    <div class="novel-title">${safeChapterLabel}</div>
+  </div>
+  <div class="novel-body">
+    ${contentHtml}
+  </div>
+  ${safeNextLabel ? `
+  <div class="next-btn-wrap">
+    <div class="next-btn" onclick="window.ReactNativeWebView && window.ReactNativeWebView.postMessage('NEXT_CHAPTER')">
+      الانتقال إلى فصل ${safeNextLabel} ←
+    </div>
+  </div>` : ''}
+</body>
+</html>`;
+}
+
 export default function MangaDetailScreen() {
   const params = useLocalSearchParams<{
     id: string;
@@ -401,6 +501,8 @@ export default function MangaDetailScreen() {
   const [readerOpen, setReaderOpen] = useState(false);
   const [activeChapter, setActiveChapter] = useState<MangaChapter | null>(null);
   const [chapterPages, setChapterPages] = useState<MangaPageData[]>([]);
+  const [chapterContentType, setChapterContentType] = useState<"images" | "text">("images");
+  const [chapterTextHtml, setChapterTextHtml] = useState<string>("");
   const [pagesLoading, setPagesLoading] = useState(false);
   const [pagesError, setPagesError] = useState<string | null>(null);
 
@@ -467,15 +569,29 @@ export default function MangaDetailScreen() {
     []
   );
 
-  // Hardware back button handling for standalone Chapters screen
+  const mangaRef = useRef<MangaDetailData | null>(null);
+  mangaRef.current = manga;
+
+  // Hardware back button handling for reader and chapters screens
   useEffect(() => {
-    if (Platform.OS !== "android" || !chaptersPageOpen || readerOpen) return;
+    if (Platform.OS !== "android") return;
     const sub = BackHandler.addEventListener("hardwareBackPress", () => {
-      setChaptersPageOpen(false);
-      return true;
+      if (chapterPickerVisible) {
+        setChapterPickerVisible(false);
+        return true;
+      }
+      if (readerOpen) {
+        setReaderOpen(false);
+        return true;
+      }
+      if (chaptersPageOpen) {
+        setChaptersPageOpen(false);
+        return true;
+      }
+      return false;
     });
     return () => sub.remove();
-  }, [chaptersPageOpen, readerOpen]);
+  }, [chapterPickerVisible, readerOpen, chaptersPageOpen]);
 
   const fetchDetail = useCallback(async () => {
     if (!decodedId) {
@@ -507,11 +623,11 @@ export default function MangaDetailScreen() {
         await AsyncStorage.setItem(cacheKey, JSON.stringify(data));
       } catch {}
     } catch {
-      if (!manga) setError(true);
+      if (!mangaRef.current) setError(true);
     } finally {
       setLoading(false);
     }
-  }, [decodedId, manga]);
+  }, [decodedId]);
 
   useEffect(() => {
     void fetchDetail();
@@ -525,6 +641,8 @@ export default function MangaDetailScreen() {
       setPagesLoading(true);
       setPagesError(null);
       setChapterPages([]);
+      setChapterTextHtml("");
+      setChapterContentType("images");
       try {
         const qs = new URLSearchParams({
           id: targetId,
@@ -534,6 +652,18 @@ export default function MangaDetailScreen() {
         const res = await fetch(`${getBaseUrl()}/api/manga/chapter?${qs.toString()}`);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
+
+        if (data?.isLocked) {
+          setPagesError(data.message || "هذا الفصل مدفوع أو مقفل بالعملات على المصدر الأصلي حالياً.");
+          return;
+        }
+
+        if (data?.contentType === "text" || (data?.contentHtml && !data?.pages?.length)) {
+          setChapterContentType("text");
+          setChapterTextHtml(String(data.contentHtml || data.previewText || ""));
+          return;
+        }
+
         const pages: MangaPageData[] = Array.isArray(data?.pages)
           ? data.pages
               .map((p: any) => {
@@ -546,8 +676,14 @@ export default function MangaDetailScreen() {
               })
               .filter((p: MangaPageData) => Boolean(p.url))
           : [];
+
         if (!pages.length) {
-          setPagesError("لا تتوفر صفحات لهذا الفصل حالياً.");
+          if (data?.contentHtml || data?.previewText) {
+            setChapterContentType("text");
+            setChapterTextHtml(String(data.contentHtml || data.previewText || ""));
+          } else {
+            setPagesError("لا تتوفر صفحات لهذا الفصل حالياً.");
+          }
         } else {
           setChapterPages(pages);
         }
@@ -557,7 +693,7 @@ export default function MangaDetailScreen() {
         setPagesLoading(false);
       }
     },
-    [decodedId, inferredSource, manga]
+    [decodedId, inferredSource, manga?.id, manga?.source]
   );
 
   const openChapterInApp = useCallback(
@@ -1732,7 +1868,7 @@ export default function MangaDetailScreen() {
                     : primaryTitle}
                 </Text>
                 <Text style={styles.readerHeaderSub} numberOfLines={1}>
-                  {primaryTitle} {chapterPages.length > 0 ? `• ${chapterPages.length} صفحة` : ""}
+                  {primaryTitle} {chapterContentType === "text" ? "• قراءة نصية" : chapterPages.length > 0 ? `• ${chapterPages.length} صفحة` : ""}
                 </Text>
               </View>
             </View>
@@ -1746,7 +1882,7 @@ export default function MangaDetailScreen() {
           {pagesLoading ? (
             <View style={styles.readerCenter}>
               <ActivityIndicator size="large" color="#F59E0B" />
-              <Text style={styles.readerLoadingText}>جاري تحميل صفحات الفصل...</Text>
+              <Text style={styles.readerLoadingText}>جاري تحميل محتوى الفصل...</Text>
             </View>
           ) : pagesError ? (
             <View style={styles.readerCenter}>
@@ -1767,15 +1903,24 @@ export default function MangaDetailScreen() {
           ) : (
             <WebView
               ref={readerWebViewRef}
-              key={`${activeChapter?.slug || "ch"}-${chapterPages.length}`}
+              key={`${activeChapter?.slug || "ch"}-${chapterContentType}-${chapterPages.length}-${chapterTextHtml.length}`}
               style={{ flex: 1, backgroundColor: "#050507" }}
               originWhitelist={["*"]}
               source={{
-                html: buildWebtoonReaderHtml(
-                  chapterPages,
-                  activeChapter ? `الفصل ${formatChapterNumber(activeChapter)}` : "الفصل",
-                  nextChapter ? formatChapterNumber(nextChapter) : null
-                ),
+                html:
+                  chapterContentType === "text"
+                    ? buildTextReaderHtml(
+                        chapterTextHtml,
+                        activeChapter
+                          ? activeChapter.title || `الفصل ${formatChapterNumber(activeChapter)}`
+                          : "الفصل",
+                        nextChapter ? formatChapterNumber(nextChapter) : null
+                      )
+                    : buildWebtoonReaderHtml(
+                        chapterPages,
+                        activeChapter ? `الفصل ${formatChapterNumber(activeChapter)}` : "الفصل",
+                        nextChapter ? formatChapterNumber(nextChapter) : null
+                      ),
                 baseUrl:
                   currentSource === "manhwa"
                     ? "https://azorafly.com/"
@@ -2551,8 +2696,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingBottom: 10,
     borderBottomWidth: 1,
-    backgroundColor: "rgba(9, 9, 13, 0.96)",
+    backgroundColor: "rgba(9, 9, 13, 0.98)",
     gap: 10,
+    zIndex: 9999,
+    elevation: 20,
   },
   readerHeaderRight: {
     flex: 1,
@@ -2561,12 +2708,12 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   readerBackBtn: {
-    width: 38,
-    height: 38,
+    width: 42,
+    height: 42,
     borderRadius: 12,
-    backgroundColor: "rgba(255,255,255,0.1)",
+    backgroundColor: "rgba(255,255,255,0.12)",
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.16)",
+    borderColor: "rgba(255,255,255,0.2)",
     alignItems: "center",
     justifyContent: "center",
   },
@@ -2590,16 +2737,16 @@ const styles = StyleSheet.create({
     flexDirection: ROW_RTL,
     alignItems: "center",
     gap: 5,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
     borderRadius: 12,
-    backgroundColor: "rgba(245,158,11,0.14)",
+    backgroundColor: "rgba(245,158,11,0.16)",
     borderWidth: 1,
-    borderColor: "rgba(245,158,11,0.38)",
+    borderColor: "rgba(245,158,11,0.45)",
   },
   qualityPillText: {
     color: "#FBBF24",
-    fontSize: 10.5,
+    fontSize: 11,
     fontFamily: "Cairo_700Bold",
   },
   readerCenter: {
@@ -2608,6 +2755,8 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     gap: 14,
     padding: 24,
+    zIndex: 50,
+    elevation: 5,
   },
   readerLoadingText: {
     color: "#e4e4e7",
@@ -2618,27 +2767,32 @@ const styles = StyleSheet.create({
   readerFallbackBody: {
     padding: 20,
     alignItems: "center",
-    gap: 12,
+    gap: 14,
+    maxWidth: 360,
   },
   readerErrorTitle: {
     color: "#f4f4f5",
-    fontSize: 13,
+    fontSize: 13.5,
     fontFamily: "Cairo_600SemiBold",
     textAlign: "center",
-    lineHeight: 21,
+    lineHeight: 22,
   },
   pageRetryBtn: {
     flexDirection: ROW_RTL,
     alignItems: "center",
-    gap: 6,
-    paddingHorizontal: 14,
-    paddingVertical: 7,
-    borderRadius: 10,
+    gap: 7,
+    paddingHorizontal: 18,
+    paddingVertical: 9,
+    borderRadius: 12,
     backgroundColor: "#F59E0B",
+    elevation: 10,
+    shadowColor: "#F59E0B",
+    shadowOpacity: 0.35,
+    shadowRadius: 8,
   },
   pageRetryBtnText: {
     color: "#09090B",
-    fontSize: 11.5,
+    fontSize: 12.5,
     fontFamily: "Cairo_700Bold",
   },
   readerBottomBar: {
@@ -2649,8 +2803,10 @@ const styles = StyleSheet.create({
     paddingTop: 10,
     borderTopWidth: 1,
     borderTopColor: "rgba(255,255,255,0.1)",
-    backgroundColor: "rgba(9, 9, 13, 0.96)",
+    backgroundColor: "rgba(9, 9, 13, 0.98)",
     gap: 10,
+    zIndex: 9999,
+    elevation: 20,
   },
   readerNavBtn: {
     flex: 1,

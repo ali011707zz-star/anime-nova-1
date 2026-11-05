@@ -155,6 +155,8 @@ function mangaOriginLabel(country?: string, source?: string) {
   return "مانجا مترجمة";
 }
 
+const _catalogMemoryCache = new Map<string, { items: CatalogMedia[]; hasMore: boolean }>();
+
 export function MediaCatalogGrid({
   mediaType,
   variant = "standard",
@@ -171,7 +173,8 @@ export function MediaCatalogGrid({
   const router = useRouter();
   const { width, height } = useWindowDimensions();
   const tvMode = isTvDevice(width, height);
-  const columns = tvMode ? 5 : 3;
+  const isTablet = !tvMode && Math.min(width, height) >= 600;
+  const columns = tvMode ? 5 : isTablet ? 4 : 3;
   const gridWidth = Math.max(0, width - 32);
   const cardGap = 12;
   const cardWidth = Math.floor((gridWidth - cardGap * (columns - 1)) / columns);
@@ -187,15 +190,27 @@ export function MediaCatalogGrid({
   const requestSequence = useRef(0);
   const controllerRef = useRef<AbortController | null>(null);
 
+  const cacheKey = `${mediaType}_${variant}_${countryOfOrigin || ""}_${status || ""}_${format || ""}_${search || ""}_${sort}`;
+
   const loadPage = useCallback(async (requestedPage: number, append: boolean) => {
     controllerRef.current?.abort();
     const controller = new AbortController();
     controllerRef.current = controller;
     const sequence = ++requestSequence.current;
-    if (append) setLoadingMore(true);
-    else {
-      setLoading(true);
-      setError(false);
+
+    if (append) {
+      setLoadingMore(true);
+    } else {
+      const memCached = _catalogMemoryCache.get(cacheKey);
+      if (memCached && memCached.items.length > 0) {
+        setItems(memCached.items);
+        setHasMore(memCached.hasMore);
+        setLoading(false);
+        setError(false);
+      } else {
+        setLoading(true);
+        setError(false);
+      }
     }
 
     try {
@@ -243,6 +258,9 @@ export function MediaCatalogGrid({
           };
         });
 
+        if (requestedPage === 1 && !append) {
+          _catalogMemoryCache.set(cacheKey, { items: nextItems, hasMore: Boolean(data?.hasNextPage) });
+        }
         setItems((previous) => {
           if (!append) return nextItems;
           const existingIds = new Set(previous.map((item) => String(item.id)));
@@ -281,6 +299,9 @@ export function MediaCatalogGrid({
       if (sequence !== requestSequence.current || controller.signal.aborted) return;
 
       const nextItems = data?.Page?.media || [];
+      if (requestedPage === 1 && !append) {
+        _catalogMemoryCache.set(cacheKey, { items: nextItems, hasMore: Boolean(data?.Page?.pageInfo?.hasNextPage) });
+      }
       setItems((previous) => {
         if (!append) return nextItems;
         const existingIds = new Set(previous.map((item) => item.id));
@@ -299,12 +320,19 @@ export function MediaCatalogGrid({
         setLoadingMore(false);
       }
     }
-  }, [countryOfOrigin, format, mediaType, search, season, seasonYear, sort, status]);
+  }, [cacheKey, countryOfOrigin, format, mediaType, search, season, seasonYear, sort, status]);
 
   useEffect(() => {
-    setItems([]);
+    const memCached = _catalogMemoryCache.get(cacheKey);
+    if (memCached && memCached.items.length > 0) {
+      setItems(memCached.items);
+      setHasMore(memCached.hasMore);
+      setLoading(false);
+    } else {
+      setItems([]);
+      setLoading(true);
+    }
     setPage(1);
-    setHasMore(true);
     setError(false);
     void loadPage(1, false);
     return () => controllerRef.current?.abort();

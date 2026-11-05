@@ -413,6 +413,11 @@ async function resolveMangaExtras(opts: {
   let anilistTrailer: { id: string; site: string; thumbnail: string; url: string } | null = null;
   const ytTrailerPromise = resolveYoutubeTrailer(opts.englishTitle, opts.arabicTitle, opts.source);
 
+  const timeoutPromise = new Promise<{ characters: MangaCharacterEdge[]; trailer: null }>((resolve) =>
+    setTimeout(() => resolve({ characters: [], trailer: null }), 2000)
+  );
+
+  const fetchPromise = (async () => {
   for (const search of candidateTitles.slice(0, 2)) {
     try {
       const res = await fetch("https://graphql.anilist.co", {
@@ -557,13 +562,16 @@ async function resolveMangaExtras(opts: {
     );
   }
 
-  const ytTrailer = await ytTrailerPromise;
-  const trailer = anilistTrailer || ytTrailer;
+    const ytTrailer = await ytTrailerPromise.catch(() => null);
+    const trailer = anilistTrailer || ytTrailer;
 
-  const out = { characters, trailer };
-  extrasCache.set(cacheKey, out);
-  setDiskCached(cacheKey, out);
-  return out;
+    const out = { characters, trailer };
+    extrasCache.set(cacheKey, out);
+    setDiskCached(cacheKey, out);
+    return out;
+  })();
+
+  return Promise.race([fetchPromise, timeoutPromise]);
 }
 
 function normalizeTitleFields(item: any, arTitleRaw: string, enTitleRaw: string) {
@@ -614,25 +622,60 @@ function stripHtml(html: string): string {
 
 // ── MangaDar (https://mangadar.com/manga/) Helpers ───────────────────────────
 async function fetchMangaDarHtml(url: string): Promise<string> {
-  const res = await fetch(HOUND_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      url,
-      wait: 1000,
-      referer: `${MANGADAR_BASE}/manga/`,
-      solve_cf: true,
-    }),
-    signal: AbortSignal.timeout(60_000),
-  });
-  if (!res.ok) {
-    throw new Error(`Hound service HTTP ${res.status} for ${url}`);
+  const diskKey = `md_html:${url}`;
+  const diskCached = getDiskCached<string>(diskKey, 30 * 60 * 1000);
+  if (diskCached) return diskCached;
+
+  // 1. Try Hound CF bypass service if reachable (short 7s timeout)
+  try {
+    const res = await fetch(HOUND_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        url,
+        wait: 1000,
+        referer: `${MANGADAR_BASE}/manga/`,
+        solve_cf: true,
+      }),
+      signal: AbortSignal.timeout(7_000),
+    });
+    if (res.ok) {
+      const data = (await res.json()) as { ok?: boolean; html?: string; error?: string };
+      if (data?.html && data.html.length > 500) {
+        setDiskCached(diskKey, data.html);
+        return data.html;
+      }
+    }
+  } catch {
+    // Hound unavailable or timed out, continue to direct fetch
   }
-  const data = (await res.json()) as { ok?: boolean; html?: string; error?: string };
-  if (!data?.html) {
-    throw new Error(data?.error || `Empty HTML from mangadar for ${url}`);
-  }
-  return data.html;
+
+  // 2. Direct fetch with real desktop headers
+  try {
+    const directRes = await fetch(url, {
+      headers: {
+        "User-Agent": UA,
+        Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+        "Accept-Language": "ar,en-US;q=0.9,en;q=0.8",
+        Referer: `${MANGADAR_BASE}/manga/`,
+        "Cache-Control": "no-cache",
+      },
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (directRes.ok) {
+      const html = await directRes.text();
+      if (html && html.length > 500 && !html.includes("Just a moment") && !html.includes("cf-browser-verification")) {
+        setDiskCached(diskKey, html);
+        return html;
+      }
+    }
+  } catch {}
+
+  // 3. Stale cache fallback up to 7 days
+  const stale = getDiskCached<string>(diskKey, 7 * 24 * 3600 * 1000);
+  if (stale) return stale;
+
+  throw new Error(`تعذر جلب بيانات المانجا من MangaDar: ${url}`);
 }
 
 function mapMangaDarStatus(statusAr: string): { status: "RELEASING" | "FINISHED" | "HIATUS"; statusAr: string } {
@@ -988,16 +1031,70 @@ async function fetchMangaDarChapterPages(slug: string, chapter: string) {
   const url = `${MANGADAR_BASE}/manga/${encodeURIComponent(cleanSlug)}/${encodeURIComponent(cleanChapter)}/`;
   const html = await fetchMangaDarHtml(url);
 
-  const pagesMatch = html.match(/<script[^>]*id="mv-pages-\d+"[^>]*>\s*([\s\S]*?)\s*<\/script>/i);
-  if (!pagesMatch) {
-    throw new Error(`No reader pages found on MangaDar for ${cleanSlug}/${cleanChapter}`);
+  let rawUrls: string[] = [];
+  const pagesMatch =
+    html.match(/<script[^>]*id="mv-pages-\d+"[^>]*>\s*([\s\S]*?)\s*<\/script>/i) ||
+    html.match(/<script[^>]*id="mdg-manga-chapters-json"[^>]*>\s*([\s\S]*?)\s*<\/script>/i) ||
+    html.match(/var\s+(?:chapter_preloaded_images|manga_pages)\s*=\s*(\[[\s\S]*?\]);/i);
+
+  if (pagesMatch) {
+    try {
+      const parsed = JSON.parse(pagesMatch[1]);
+      if (Array.isArray(parsed)) rawUrls = parsed;
+      else if (Array.isArray(parsed?.images)) rawUrls = parsed.images;
+      else if (Array.isArray(parsed?.pages)) rawUrls = parsed.pages;
+    } catch {}
   }
 
-  const rawUrls = JSON.parse(pagesMatch[1]) as string[];
-  const pages = (Array.isArray(rawUrls) ? rawUrls : []).map((pageUrl, idx) => ({
-    index: idx + 1,
-    url: String(pageUrl),
-  }));
+  // Fallback: search for img tags in reading content containers
+  if (rawUrls.length === 0) {
+    const imgRegex = /<img[^>]+(?:data-src|data-lazy-src|src)=["']([^"']+)["'][^>]*class=["'][^"']*(?:wp-manga-chapter-img|page-image)[^"']*["']/gi;
+    let m: RegExpExecArray | null;
+    while ((m = imgRegex.exec(html)) !== null) {
+      if (m[1] && !m[1].includes("logo") && !m[1].includes("banner")) {
+        rawUrls.push(m[1]);
+      }
+    }
+  }
+
+  // Second fallback: any reading-content images
+  if (rawUrls.length === 0) {
+    const readerBlock = html.match(/<div[^>]*class=["'][^"']*(?:reading-content|entry-content)[^"']*["']>([\s\S]*?)<\/div>/i);
+    if (readerBlock) {
+      const anyImg = /<img[^>]+(?:data-src|data-lazy-src|src)=["']([^"']+)["']/gi;
+      let m: RegExpExecArray | null;
+      while ((m = anyImg.exec(readerBlock[1])) !== null) {
+        if (m[1] && m[1].startsWith("http")) rawUrls.push(m[1]);
+      }
+    }
+  }
+
+  const pages = rawUrls
+    .map((pageUrl, idx) => ({
+      index: idx + 1,
+      url: String(pageUrl).trim(),
+    }))
+    .filter((p) => p.url.length > 5);
+
+  if (pages.length === 0) {
+    // Check if it's a novel/text chapter
+    const textMatch = html.match(/<div[^>]*class=["'][^"']*(?:reading-content|text-left|entry-content)[^"']*["']>([\s\S]*?)<\/div>/i);
+    if (textMatch && textMatch[1].replace(/<[^>]+>/g, "").trim().length > 50) {
+      const textResult = {
+        id: `md--${cleanSlug}`,
+        slug: cleanSlug,
+        chapter: cleanChapter,
+        source: "manga",
+        contentType: "text",
+        contentHtml: textMatch[1],
+        pagesCount: 1,
+        pages: [],
+      };
+      setCached(cacheKey, textResult, 60 * 60 * 1000);
+      return textResult;
+    }
+    throw new Error(`تعذر العثور على صفحات الفصل في MangaDar: ${cleanSlug}/${cleanChapter}`);
+  }
 
   const result = {
     id: `md--${cleanSlug}`,
@@ -1019,7 +1116,7 @@ async function fetchAzoraflyTsrData(url: string): Promise<any> {
       Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
       "Accept-Language": "ar,en;q=0.9",
     },
-    signal: AbortSignal.timeout(20_000),
+    signal: AbortSignal.timeout(15_000),
   });
   if (!res.ok) {
     throw new Error(`Azorafly HTTP ${res.status} for ${url}`);
@@ -1054,6 +1151,16 @@ async function fetchAzoraflyTsrData(url: string): Promise<any> {
   if (!Array.isArray(matches) || matches.length === 0) {
     throw new Error(`Empty $_TSR matches on ${url}`);
   }
+
+  // Scan backwards to find the route match carrying the real data payload
+  for (let i = matches.length - 1; i >= 0; i--) {
+    const match = matches[i];
+    const data = match?.l?.data || match?.b || match?.data;
+    if (data && (data.chapter || data.readerImages || data.post || data.initialPosts || data.initialChapters)) {
+      return data;
+    }
+  }
+
   const lastMatch = matches[matches.length - 1];
   return lastMatch?.l?.data || lastMatch?.b || {};
 }
@@ -1264,8 +1371,50 @@ async function fetchAzoraflyChapterPages(slug: string, chapterSlug: string) {
   const cached = getCached<any>(cacheKey);
   if (cached) return cached;
 
-  const url = `${AZORAFLY_BASE}/series/${encodeURIComponent(cleanSlug)}/${encodeURIComponent(cleanChapter)}`;
-  const data = await fetchAzoraflyTsrData(url);
+  // Try chapter slug variants if needed
+  const candidateChapterSlugs = [
+    cleanChapter,
+    cleanChapter.replace(/^chapter-?/i, ""),
+    cleanChapter.startsWith("chapter-") ? cleanChapter : `chapter-${cleanChapter}`,
+    cleanChapter.startsWith("الفصل-") ? cleanChapter : `الفصل-${cleanChapter}`,
+  ];
+
+  let data: any = null;
+  let usedChapterSlug = cleanChapter;
+
+  for (const candidate of candidateChapterSlugs) {
+    try {
+      const url = `${AZORAFLY_BASE}/series/${encodeURIComponent(cleanSlug)}/${encodeURIComponent(candidate)}`;
+      const resData = await fetchAzoraflyTsrData(url);
+      if (resData && (resData.chapter || resData.readerImages || resData.lockedChapter)) {
+        data = resData;
+        usedChapterSlug = candidate;
+        break;
+      }
+    } catch {
+      // try next candidate
+    }
+  }
+
+  if (!data) {
+    const fallbackUrl = `${AZORAFLY_BASE}/series/${encodeURIComponent(cleanSlug)}/${encodeURIComponent(cleanChapter)}`;
+    data = await fetchAzoraflyTsrData(fallbackUrl);
+  }
+
+  // Check if locked
+  if (data?.lockedChapter || data?.chapter?.isLocked || data?.chapter?.isPermanentlyLocked) {
+    const lockedResult = {
+      id: `az--${cleanSlug}`,
+      slug: cleanSlug,
+      chapter: cleanChapter,
+      source: "manhwa",
+      isLocked: true,
+      message: "هذا الفصل مدفوع أو مقفل بالعملات على المصدر الأصلي حالياً.",
+      pagesCount: 0,
+      pages: [],
+    };
+    return lockedResult;
+  }
 
   const publicImages = Array.isArray(data?.chapter?.publicImages) ? data.chapter.publicImages : [];
   const readerImages = Array.isArray(data?.readerImages) ? data.readerImages : [];
@@ -1292,8 +1441,44 @@ async function fetchAzoraflyChapterPages(slug: string, chapterSlug: string) {
       .filter((p: any) => Boolean(p.url));
   }
 
+  // Check if images are embedded in HTML content
+  const contentHtml = String(
+    data?.chapter?.publicContentHtml || data?.chapter?.content || ""
+  ).trim();
+
+  if (pages.length === 0 && contentHtml) {
+    const imgRegex = /<img[^>]+src=["']([^"']+)["']/gi;
+    let m: RegExpExecArray | null;
+    const embedded: { index: number; url: string }[] = [];
+    while ((m = imgRegex.exec(contentHtml)) !== null) {
+      if (m[1] && m[1].startsWith("http")) {
+        embedded.push({ index: embedded.length + 1, url: m[1] });
+      }
+    }
+    if (embedded.length > 0) {
+      pages = embedded;
+    }
+  }
+
+  // If still 0 pages, check if this is a web novel / text chapter
   if (pages.length === 0) {
-    throw new Error(`No public chapter images found on Azorafly for ${cleanSlug}/${cleanChapter}`);
+    if (data?.chapter?.isNovel || contentHtml.length > 20 || data?.chapter?.previewText) {
+      const textResult = {
+        id: `az--${cleanSlug}`,
+        slug: cleanSlug,
+        chapter: cleanChapter,
+        source: "manhwa",
+        contentType: "text",
+        contentHtml,
+        previewText: String(data?.chapter?.previewText || ""),
+        title: data?.chapter?.title || `الفصل ${data?.chapter?.number || cleanChapter}`,
+        pagesCount: 1,
+        pages: [],
+      };
+      setCached(cacheKey, textResult, 60 * 60 * 1000);
+      return textResult;
+    }
+    throw new Error(`تعذر العثور على صفحات أو محتوى الفصل على Azorafly: ${cleanSlug}/${cleanChapter}`);
   }
 
   const result = {
@@ -1301,6 +1486,7 @@ async function fetchAzoraflyChapterPages(slug: string, chapterSlug: string) {
     slug: cleanSlug,
     chapter: cleanChapter,
     source: "manhwa",
+    contentType: "images",
     pagesCount: pages.length,
     pages,
   };
