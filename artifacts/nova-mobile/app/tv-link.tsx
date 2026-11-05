@@ -6,6 +6,7 @@ import {
   ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -17,7 +18,7 @@ import { useApp } from "@/context/AppContext";
 import { useColors } from "@/hooks/useColors";
 import { getBaseUrl } from "@/utils/baseUrl";
 import { secureFetch, setUserAuthToken } from "@/utils/secureApi";
-import { isTvDevice, TvPressable } from "@/utils/tv";
+import { isTvDevice, tvFocusStyle, TvPressable, useTvModeOverride } from "@/utils/tv";
 const Pressable = TvPressable;
 
 const AUTH_KEY = "nova-mobile-user";
@@ -53,11 +54,14 @@ async function getDeviceId(): Promise<string> {
   return next;
 }
 
+const TV_DIGITS = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "0"];
+
 export default function TvLinkScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { setCurrentUser } = useApp();
+  useTvModeOverride();
   const tvMode = isTvDevice();
   const goBack = () => router.canGoBack() ? router.back() : router.replace("/(tabs)" as any);
   const [code, setCode] = useState("");
@@ -80,8 +84,8 @@ export default function TvLinkScreen() {
     return () => { active = false; };
   }, [router]);
 
-  const handleClaim = async () => {
-    const normalized = normalizeLinkCode(code);
+  const handleClaim = async (overrideCode?: string) => {
+    const normalized = normalizeLinkCode(overrideCode ?? code);
     if (normalized.length !== 6) {
       setError("أدخل الرمز المكوّن من 6 أرقام");
       return;
@@ -138,6 +142,19 @@ export default function TvLinkScreen() {
     }
   };
 
+  const appendDigit = (d: string) => {
+    setError("");
+    setCode(prev => {
+      if (prev.length >= 6) return prev;
+      return prev + d;
+    });
+  };
+
+  const backspaceDigit = () => {
+    setError("");
+    setCode(prev => prev.slice(0, -1));
+  };
+
   if (checking) {
     return (
       <View style={[styles.center, { backgroundColor: colors.background, paddingTop: insets.top }]}>
@@ -157,7 +174,7 @@ export default function TvLinkScreen() {
 
   return (
     <KeyboardAvoidingView
-      style={[styles.page, { backgroundColor: colors.background, paddingTop: insets.top, paddingBottom: Math.max(insets.bottom, 24) }]}
+      style={[styles.page, { backgroundColor: colors.background, paddingTop: insets.top }]}
       behavior={Platform.OS === "ios" ? "padding" : undefined}
     >
       <Pressable
@@ -169,62 +186,107 @@ export default function TvLinkScreen() {
       >
         <Ionicons name="arrow-back" size={22} color={colors.text} style={{ transform: [{ scaleX: -1 }] }} />
       </Pressable>
-      <View style={styles.brand}>
-        <View style={[styles.logo, { backgroundColor: colors.primary + "20", borderColor: colors.primary + "55" }]}>
-          <Ionicons name={tvMode ? "tv-outline" : "phone-portrait-outline"} size={30} color={colors.primary} />
+
+      <ScrollView
+        contentContainerStyle={[
+          styles.scrollContent,
+          { paddingBottom: Math.max(insets.bottom, 24) },
+        ]}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
+      >
+        <View style={styles.brand}>
+          <View style={[styles.logo, { backgroundColor: colors.primary + "20", borderColor: colors.primary + "55" }]}>
+            <Ionicons name={tvMode ? "tv-outline" : "phone-portrait-outline"} size={28} color={colors.primary} />
+          </View>
+          <Text style={[styles.title, { color: colors.text }]}>ربط هذا الجهاز بالحساب</Text>
+          <Text style={[styles.subtitle, { color: colors.mutedForeground }]}>أدخل رمز الربط الذي أنشأته من الهاتف المسجّل</Text>
         </View>
-        <Text style={[styles.title, { color: colors.text }]}>ربط هذا الجهاز بالحساب</Text>
-        <Text style={[styles.subtitle, { color: colors.mutedForeground }]}>أدخل رمز الربط الذي أنشأته من الهاتف المسجّل</Text>
-      </View>
 
-      <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
-        <Text style={[styles.step, { color: colors.primary }]}>أدخل رمز الهاتف المسجّل هنا</Text>
-        <Text style={[styles.instructions, { color: colors.text }]}>
-          من الهاتف المسجّل: الملف الشخصي ← «ربط جهاز جديد» ← «إنشاء رمز ربط». اكتب الأرقام الستة الظاهرة هنا على {tvMode ? "التلفاز" : "هذا الهاتف"}.
-        </Text>
-        <TextInput
-          testID="tv-link-code"
-          value={code}
-          onChangeText={value => { setCode(normalizeLinkCode(value)); setError(""); }}
-          placeholder="000000"
-          placeholderTextColor={colors.mutedForeground + "80"}
-          keyboardType="number-pad"
-          maxLength={6}
-          autoFocus
-          textAlign="center"
-          style={[styles.codeInput, { color: colors.text, borderColor: code.length === 6 ? colors.primary : colors.border, backgroundColor: colors.input }]}
-        />
-        {!!error && <Text style={[styles.error, { color: colors.destructive }]}>{error}</Text>}
-        <Pressable
-          testID="tv-link-submit"
-          onPress={handleClaim}
-          disabled={loading}
-          focusable={tvMode}
-          hasTVPreferredFocus={tvMode}
-          style={[styles.submit, { backgroundColor: colors.primary, opacity: loading ? 0.6 : 1 }]}
-        >
-          {loading ? <ActivityIndicator color={colors.primaryForeground} /> : <Ionicons name="link" size={20} color={colors.primaryForeground} />}
-          <Text style={[styles.submitText, { color: colors.primaryForeground }]}>ربط الجهاز بالرمز</Text>
-        </Pressable>
-      </View>
+        <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
+          <Text style={[styles.step, { color: colors.primary }]}>أدخل رمز الهاتف المسجّل هنا</Text>
+          <Text style={[styles.instructions, { color: colors.text }]}>
+            من الهاتف المسجّل بحساب Google: الإعدادات ← الملف الشخصي ← «ربط جهاز جديد» ← «إنشاء رمز مؤقت».
+          </Text>
+          <TextInput
+            testID="tv-link-code"
+            value={code}
+            onChangeText={value => { setCode(normalizeLinkCode(value)); setError(""); }}
+            placeholder="000000"
+            placeholderTextColor={colors.mutedForeground + "80"}
+            keyboardType="number-pad"
+            maxLength={6}
+            autoFocus={!tvMode}
+            textAlign="center"
+            style={[styles.codeInput, { color: colors.text, borderColor: code.length === 6 ? colors.primary : colors.border, backgroundColor: colors.input }]}
+          />
 
-      <View style={styles.safeNote}>
-        <Ionicons name="shield-checkmark-outline" size={16} color={colors.mutedForeground} />
-        <Text style={[styles.safeText, { color: colors.mutedForeground }]}>الرمز صالح لدقائق قليلة ويُستخدم مرة واحدة. يتم إصدار جلسة آمنة خاصة بهذا الجهاز.</Text>
-      </View>
+          {tvMode && (
+            <View style={styles.tvKeypad}>
+              {TV_DIGITS.map((d, idx) => (
+                <Pressable
+                  key={d}
+                  onPress={() => appendDigit(d)}
+                  focusable={tvMode}
+                  hasTVPreferredFocus={tvMode && idx === 0}
+                  style={({ focused }) => [
+                    styles.tvKeyBtn,
+                    { backgroundColor: colors.surface, borderColor: colors.border },
+                    tvMode && tvFocusStyle(focused),
+                  ]}
+                >
+                  <Text style={[styles.tvKeyText, { color: colors.text }]}>{d}</Text>
+                </Pressable>
+              ))}
+              <Pressable
+                onPress={backspaceDigit}
+                focusable={tvMode}
+                style={({ focused }) => [
+                  styles.tvKeyBtn,
+                  styles.tvKeyBackBtn,
+                  { backgroundColor: colors.surface, borderColor: colors.border },
+                  tvMode && tvFocusStyle(focused),
+                ]}
+              >
+                <Ionicons name="backspace-outline" size={20} color={colors.text} />
+                <Text style={[styles.tvKeySubText, { color: colors.text }]}>حذف</Text>
+              </Pressable>
+            </View>
+          )}
+
+          {!!error && <Text style={[styles.error, { color: colors.destructive }]}>{error}</Text>}
+          <Pressable
+            testID="tv-link-submit"
+            onPress={() => void handleClaim()}
+            disabled={loading}
+            focusable={tvMode}
+            hasTVPreferredFocus={!tvMode}
+            style={[styles.submit, { backgroundColor: colors.primary, opacity: loading ? 0.6 : 1 }]}
+          >
+            {loading ? <ActivityIndicator color={colors.primaryForeground} /> : <Ionicons name="link" size={20} color={colors.primaryForeground} />}
+            <Text style={[styles.submitText, { color: colors.primaryForeground }]}>ربط الجهاز بالرمز</Text>
+          </Pressable>
+        </View>
+
+        <View style={styles.safeNote}>
+          <Ionicons name="shield-checkmark-outline" size={16} color={colors.mutedForeground} />
+          <Text style={[styles.safeText, { color: colors.mutedForeground }]}>الرمز صالح لدقائق قليلة ويُستخدم مرة واحدة. يتم إصدار جلسة آمنة خاصة بهذا الجهاز.</Text>
+        </View>
+      </ScrollView>
     </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
-  page: { flex: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: 36 },
+  page: { flex: 1 },
+  scrollContent: { flexGrow: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: 28, paddingTop: 24 },
   center: { flex: 1, alignItems: "center", justifyContent: "center" },
   backButton: {
     position: "absolute",
     ...(I18nManager.isRTL ? { left: 16 } : { right: 16 }),
-    zIndex: 2,
-    width: 42,
-    height: 42,
+    zIndex: 10,
+    width: 44,
+    height: 44,
     borderRadius: 14,
     alignItems: "center",
     justifyContent: "center",
@@ -232,17 +294,45 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.12)",
   },
-  brand: { alignItems: "center", marginBottom: 28 },
-  logo: { width: 72, height: 72, borderRadius: 24, borderWidth: 1, alignItems: "center", justifyContent: "center", marginBottom: 16 },
-  title: { fontSize: 25, fontFamily: "Cairo_800ExtraBold", textAlign: "center" },
-  subtitle: { fontSize: 14, fontFamily: "Cairo_400Regular", textAlign: "center", marginTop: 6 },
-  card: { width: "100%", maxWidth: 520, borderRadius: 24, borderWidth: 1, padding: 24 },
+  brand: { alignItems: "center", marginBottom: 18 },
+  logo: { width: 60, height: 60, borderRadius: 20, borderWidth: 1, alignItems: "center", justifyContent: "center", marginBottom: 10 },
+  title: { fontSize: 22, fontFamily: "Cairo_800ExtraBold", textAlign: "center" },
+  subtitle: { fontSize: 13, fontFamily: "Cairo_400Regular", textAlign: "center", marginTop: 4 },
+  card: { width: "100%", maxWidth: 520, borderRadius: 22, borderWidth: 1, padding: 20 },
   step: { fontSize: 13, fontFamily: "Cairo_800ExtraBold", textAlign: "right" },
-  instructions: { fontSize: 15, fontFamily: "Cairo_600SemiBold", lineHeight: 27, textAlign: "right", marginTop: 8 },
-  codeInput: { height: 72, borderWidth: 1.5, borderRadius: 18, fontSize: 34, letterSpacing: 12, fontFamily: "Cairo_800ExtraBold", marginTop: 22, paddingHorizontal: 14 },
+  instructions: { fontSize: 13.5, fontFamily: "Cairo_600SemiBold", lineHeight: 22, textAlign: "right", marginTop: 6 },
+  codeInput: { height: 64, borderWidth: 1.5, borderRadius: 16, fontSize: 30, letterSpacing: 10, fontFamily: "Cairo_800ExtraBold", marginTop: 14, paddingHorizontal: 14 },
+  tvKeypad: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    justifyContent: "center",
+    gap: 8,
+    marginTop: 14,
+  },
+  tvKeyBtn: {
+    width: 68,
+    height: 46,
+    borderRadius: 12,
+    borderWidth: 1,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  tvKeyBackBtn: {
+    width: 106,
+    flexDirection: "row",
+    gap: 6,
+  },
+  tvKeyText: {
+    fontSize: 19,
+    fontFamily: "Cairo_800ExtraBold",
+  },
+  tvKeySubText: {
+    fontSize: 13,
+    fontFamily: "Cairo_700Bold",
+  },
   error: { fontSize: 12, fontFamily: "Cairo_600SemiBold", textAlign: "center", marginTop: 10 },
-  submit: { height: 58, borderRadius: 17, alignItems: "center", justifyContent: "center", flexDirection: "row", gap: 10, marginTop: 18 },
+  submit: { height: 52, borderRadius: 15, alignItems: "center", justifyContent: "center", flexDirection: "row", gap: 10, marginTop: 16 },
   submitText: { fontSize: 15, fontFamily: "Cairo_800ExtraBold" },
-  safeNote: { maxWidth: 460, flexDirection: "row", alignItems: "center", gap: 8, marginTop: 22 },
+  safeNote: { maxWidth: 460, flexDirection: "row", alignItems: "center", gap: 8, marginTop: 16 },
   safeText: { flex: 1, fontSize: 11, fontFamily: "Cairo_400Regular", textAlign: "center", lineHeight: 19 },
 });

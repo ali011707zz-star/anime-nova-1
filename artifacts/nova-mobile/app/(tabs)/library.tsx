@@ -11,7 +11,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useColors } from "@/hooks/useColors";
 import { historyRoute, useApp } from "@/context/AppContext";
-import { isTvDevice, tvFocusStyle, TvPressable as Pressable } from "@/utils/tv";
+import { isTvDevice, tvFocusStyle, TvPressable as Pressable, useTvModeOverride } from "@/utils/tv";
 import { getRailCardWidth } from "@/components/AnimeCard";
 
 interface FavChar {
@@ -62,10 +62,11 @@ const LIBRARY_YEARS = ["", "2026", "2025", "2024", "2023", "2022", "2021", "2020
 export default function LibraryScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
+  useTvModeOverride();
   const { width, height } = useWindowDimensions();
   const topPad = Platform.OS === "web" ? 0 : Math.max(insets.top, 0);
   const tvMode = isTvDevice(width, height);
-  const visibleTabs = tvMode ? TABS.slice(0, 3) : TABS;
+  const visibleTabs = TABS;
   const gridColumns = tvMode ? 5 : 3;
   const tvPosterWidth = getRailCardWidth(width, 5, 8);
   const gridWidth = tvMode
@@ -136,16 +137,17 @@ export default function LibraryScreen() {
     return sq ? all.filter(i => i.title.toLowerCase().includes(sq)) : all;
   }, [watchHistory, search, router, removeFromHistory]);
 
-  /* ── Filtered favorites (المحفوظة) ── */
+  /* ── Filtered favorites (المحفوظة — بدون المانجا في وضع التلفاز) ── */
   const filteredFavs = useMemo(() => {
     const sq = search.toLowerCase();
     return favorites.filter(f => {
+      if (tvMode && f.mangaId) return false;
       const matchesSearch = !sq || (f.english || f.title).toLowerCase().includes(sq);
       const matchesYear = !year || String(f.startYear || new Date(f.addedAt).getFullYear()) === year;
       const matchesGenre = !genre || (f.genres || []).includes(genre);
       return matchesSearch && matchesYear && matchesGenre;
     });
-  }, [favorites, search, year, genre]);
+  }, [favorites, search, year, genre, tvMode]);
 
   /* ── Filtered characters (الشخصيات) ── */
   const filteredChars = useMemo(() => {

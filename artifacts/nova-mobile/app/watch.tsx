@@ -2821,109 +2821,126 @@ export default function WatchScreen() {
 
           {/* تظهر بطاقات المصادر تدريجيًا أثناء الفحص، ثم تكتمل
               القائمة عند وصول [DONE] من مرحلة availability. */}
-            {hasAvailableSlot && Q_KEYS.map(qk => {
-            const pickerDefs = STATIC_PICKER[qk] || [];
-           const dynamicSlots = Object.entries(availableSlots)
-             .filter(([, tiers]) => !!tiers[qk])
-             .map(([site, tiers]) => {
-               const pickerDef = pickerDefs.find(def => def.site === site);
-               return {
-                 site,
-                 name: pickerDef?.name || tiers[qk]?.name || SITE_LABEL[site] || site,
-                 tag: pickerDef?.tag || tiers[qk]?.tag || getSiteTag(site),
-               };
-            })
-            .sort((a, b) => {
-              const ai = pickerDefs.findIndex(def => def.site === a.site);
-              const bi = pickerDefs.findIndex(def => def.site === b.site);
-              return (ai < 0 ? Number.MAX_SAFE_INTEGER : ai)
-                - (bi < 0 ? Number.MAX_SAFE_INTEGER : bi);
-            });
-           /* Do not fall back to the static catalog after the scan. The web
-              picker renders only provider/quality rows confirmed by
-              mode=check; using STATIC_PICKER here was the source of phantom
-              mobile rows and web/mobile list drift. */
-           const slots = dynamicSlots;
-           if (!slots.length) return null;
-          const dotColor = qk === "1080p" ? "#fbbf24" : qk === "720p" ? "#34d399" : "#94a3b8";
-          return (
-            <View key={qk} style={{ gap: 8, marginBottom: 12 }}>
-              {/* رأس الجودة — محاذاة لليمين كما في الصورة */}
-              <View style={[d.qPill, tvMode && d.tvQPill, { justifyContent: "flex-end", flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 4 }]}>
-                <Text style={[d.qPillText, tvMode && d.tvQPillText, { color: dotColor, fontSize: 13, fontFamily: "Cairo_700Bold" }]}>
-                  {qk.replace("p", "P")}
-                </Text>
-                <View style={[d.qPillDot, { width: 7, height: 7, borderRadius: 4, backgroundColor: dotColor }]} />
-              </View>
+            {(() => {
+              let firstAvailableKey: string | null = null;
+              for (const qk of Q_KEYS) {
+                const pickerDefs = STATIC_PICKER[qk] || [];
+                const matchingSites = Object.entries(availableSlots)
+                  .filter(([, tiers]) => !!tiers[qk])
+                  .map(([site]) => site)
+                  .sort((a, b) => {
+                    const ai = pickerDefs.findIndex(def => def.site === a);
+                    const bi = pickerDefs.findIndex(def => def.site === b);
+                    return (ai < 0 ? Number.MAX_SAFE_INTEGER : ai) - (bi < 0 ? Number.MAX_SAFE_INTEGER : bi);
+                  });
+                if (matchingSites.length > 0) {
+                  firstAvailableKey = pickerSlotKey(matchingSites[0], qk);
+                  break;
+                }
+              }
 
-              {/* قائمة السيرفرات */}
-              <View style={[d.srcSection, { backgroundColor: "#0c121e", borderColor: "rgba(255,255,255,0.08)", borderWidth: 1, borderRadius: 14, overflow: "hidden" }]}>
-                {slots.map((slot, idx) => {
-                  const status   = slotStatus[pickerSlotKey(slot.site, qk)] || "idle";
-                  const isFetching = status === "fetching";
-                  const isFailed   = status === "failed";
-                  return (
-                    <Pressable
-                      key={slot.site}
-                      onPress={() => handlePickSite(slot.site, qk)}
-                      hasTVPreferredFocus={
-                        tvMode &&
-                        focusMemoryReady &&
-                        pickerFocusKey === pickerSlotKey(slot.site, qk)
-                      }
-                      onFocus={() => {
-                        if (tvMode) rememberFocus(pickerSlotKey(slot.site, qk));
-                      }}
-                      accessibilityRole="button"
-                      accessibilityLabel={`تشغيل سيرفر ${slot.tag} بجودة ${qk}`}
-                      style={({ focused, pressed }) => [
-                        d.webRow,
-                        tvMode && d.tvWebRow,
-                        tvMode && tvFocusStyle(focused),
-                        idx < slots.length - 1 && d.webRowBorder,
-                        { minHeight: 52, paddingHorizontal: 12, paddingVertical: 10, justifyContent: "space-between" },
-                        pressed && { opacity: 0.75 },
-                      ]}
-                    >
-                      {/* Left: زر التشغيل الأخضر المباشر تشغيل ▶ */}
-                      <View style={d.webRowActions}>
-                        {isFetching ? (
-                          <SpinRing size={tvMode ? 26 : 18} />
-                        ) : (
-                          <View style={[d.playBtnGreen, tvMode && d.tvPlayBtn, { backgroundColor: "#10b981", borderRadius: 10, paddingHorizontal: 14, paddingVertical: 6, flexDirection: "row", alignItems: "center", gap: 4 }]}>
-                            <Ionicons name="play" size={tvMode ? 20 : 11} color="#ffffff" />
-                            <Text style={[d.playBtnGreenText, tvMode && d.tvActionText, { color: "#ffffff", fontSize: 12, fontFamily: "Cairo_700Bold" }]}>تشغيل</Text>
-                          </View>
-                        )}
-                      </View>
+              return hasAvailableSlot && Q_KEYS.map(qk => {
+                const pickerDefs = STATIC_PICKER[qk] || [];
+                const dynamicSlots = Object.entries(availableSlots)
+                  .filter(([, tiers]) => !!tiers[qk])
+                  .map(([site, tiers]) => {
+                    const pickerDef = pickerDefs.find(def => def.site === site);
+                    return {
+                      site,
+                      name: pickerDef?.name || tiers[qk]?.name || SITE_LABEL[site] || site,
+                      tag: pickerDef?.tag || tiers[qk]?.tag || getSiteTag(site),
+                    };
+                  })
+                  .sort((a, b) => {
+                    const ai = pickerDefs.findIndex(def => def.site === a.site);
+                    const bi = pickerDefs.findIndex(def => def.site === b.site);
+                    return (ai < 0 ? Number.MAX_SAFE_INTEGER : ai)
+                      - (bi < 0 ? Number.MAX_SAFE_INTEGER : bi);
+                  });
+                const slots = dynamicSlots;
+                if (!slots.length) return null;
+                const dotColor = qk === "1080p" ? "#fbbf24" : qk === "720p" ? "#34d399" : "#94a3b8";
+                return (
+                  <View key={qk} style={{ gap: 8, marginBottom: 12 }}>
+                    {/* رأس الجودة — محاذاة لليمين كما في الصورة */}
+                    <View style={[d.qPill, tvMode && d.tvQPill, { justifyContent: "flex-end", flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 4 }]}>
+                      <Text style={[d.qPillText, tvMode && d.tvQPillText, { color: dotColor, fontSize: 13, fontFamily: "Cairo_700Bold" }]}>
+                        {qk.replace("p", "P")}
+                      </Text>
+                      <View style={[d.qPillDot, { width: 7, height: 7, borderRadius: 4, backgroundColor: dotColor }]} />
+                    </View>
 
-                      {/* Right: السيرفر XX مع النقطة الخضراء */}
-                      <View style={{ flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "flex-end", gap: 8 }}>
-                        <Text
-                          style={[
-                            d.webRowTag,
-                            tvMode && d.tvWebRowTag,
-                            { textAlign: "right", color: "#f8fafc", fontSize: 13, fontFamily: "Cairo_700Bold" },
-                            isFailed && { color: colors.destructive },
-                          ]}
-                          numberOfLines={1}
-                        >
-                          السيرفر {slot.tag}
-                        </Text>
-                        <View style={[d.webRowDot, tvMode && d.tvWebRowDot, {
-                          width: 8,
-                          height: 8,
-                          borderRadius: 4,
-                          backgroundColor: isFailed ? colors.destructive : "#34d399",
-                        }]} />
-                      </View>
-                    </Pressable>
-                  );
-                })}
-              </View>
-            </View>
-          );
-        })}
+                    {/* قائمة السيرفرات */}
+                    <View style={[d.srcSection, { backgroundColor: "#0c121e", borderColor: "rgba(255,255,255,0.08)", borderWidth: 1, borderRadius: 14, overflow: "hidden" }]}>
+                      {slots.map((slot, idx) => {
+                        const slotKey = pickerSlotKey(slot.site, qk);
+                        const status   = slotStatus[slotKey] || "idle";
+                        const isFetching = status === "fetching";
+                        const isFailed   = status === "failed";
+                        const shouldPreferTvFocus =
+                          tvMode &&
+                          focusMemoryReady &&
+                          (pickerFocusKey ? pickerFocusKey === slotKey : slotKey === firstAvailableKey);
+                        return (
+                          <Pressable
+                            key={slot.site}
+                            onPress={() => handlePickSite(slot.site, qk)}
+                            focusable={tvMode}
+                            hasTVPreferredFocus={shouldPreferTvFocus}
+                            onFocus={() => {
+                              if (tvMode) rememberFocus(slotKey);
+                            }}
+                            accessibilityRole="button"
+                            accessibilityLabel={`تشغيل سيرفر ${slot.tag} بجودة ${qk}`}
+                            style={({ focused, pressed }) => [
+                              d.webRow,
+                              tvMode && d.tvWebRow,
+                              tvMode && tvFocusStyle(focused),
+                              idx < slots.length - 1 && d.webRowBorder,
+                              { minHeight: 52, paddingHorizontal: 12, paddingVertical: 10, justifyContent: "space-between" },
+                              pressed && { opacity: 0.75 },
+                            ]}
+                          >
+                            {/* Left: زر التشغيل الأخضر المباشر تشغيل ▶ */}
+                            <View style={d.webRowActions}>
+                              {isFetching ? (
+                                <SpinRing size={tvMode ? 26 : 18} />
+                              ) : (
+                                <View style={[d.playBtnGreen, tvMode && d.tvPlayBtn, { backgroundColor: "#10b981", borderRadius: 10, paddingHorizontal: 14, paddingVertical: 6, flexDirection: "row", alignItems: "center", gap: 4 }]}>
+                                  <Ionicons name="play" size={tvMode ? 18 : 11} color="#ffffff" />
+                                  <Text style={[d.playBtnGreenText, tvMode && d.tvActionText, { color: "#ffffff", fontSize: 12, fontFamily: "Cairo_700Bold" }]}>تشغيل</Text>
+                                </View>
+                              )}
+                            </View>
+
+                            {/* Right: السيرفر XX مع النقطة الخضراء */}
+                            <View style={{ flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "flex-end", gap: 8 }}>
+                              <Text
+                                style={[
+                                  d.webRowTag,
+                                  tvMode && d.tvWebRowTag,
+                                  { textAlign: "right", color: "#f8fafc", fontSize: 13, fontFamily: "Cairo_700Bold" },
+                                  isFailed && { color: colors.destructive },
+                                ]}
+                                numberOfLines={1}
+                              >
+                                السيرفر {slot.tag}
+                              </Text>
+                              <View style={[d.webRowDot, tvMode && d.tvWebRowDot, {
+                                width: 8,
+                                height: 8,
+                                borderRadius: 4,
+                                backgroundColor: isFailed ? colors.destructive : "#34d399",
+                              }]} />
+                            </View>
+                          </Pressable>
+                        );
+                      })}
+                    </View>
+                  </View>
+                );
+              });
+            })()}
 
         { downloadSlots.length > 0 && (
           <View style={[d.downloadSection, { backgroundColor: "#0b111d", borderColor: "rgba(6, 182, 212, 0.22)", borderWidth: 1, borderRadius: 18, padding: 14, marginTop: 18 }]}>
@@ -2973,8 +2990,9 @@ export default function WatchScreen() {
                       {(dlState === "idle" || dlState === "error") && (
                         <Pressable
                           onPress={() => void handleFetchAndDownload(slot.site, slot.quality)}
+                          focusable={tvMode}
                           hitSlop={8}
-                          style={({ pressed }) => [
+                          style={({ pressed, focused }) => [
                             d.downloadAction,
                             {
                               minWidth: 96,
@@ -2985,6 +3003,7 @@ export default function WatchScreen() {
                               borderColor: dlState === "error" ? "rgba(239, 68, 68, 0.45)" : "#38bdf8",
                               opacity: pressed ? 0.78 : 1,
                             },
+                            tvMode && tvFocusStyle(focused),
                           ]}
                           accessibilityLabel={`تحميل ${slot.quality} من سيرفر ${slot.tag}`}
                         >

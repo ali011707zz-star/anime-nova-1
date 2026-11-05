@@ -3,7 +3,7 @@ import { Ionicons } from "@expo/vector-icons";
 import React from "react";
 import { Platform, StyleSheet, Text, View } from "react-native";
 import { useColors } from "@/hooks/useColors";
-import { useTvMetrics } from "@/utils/tv";
+import { TvPressable, useTvMetrics } from "@/utils/tv";
 
 type TabIconProps = {
   name: keyof typeof Ionicons.glyphMap;
@@ -40,8 +40,8 @@ export default function TabLayout() {
   const { tv: tvMode, isTablet, size: scaleSize } = useTvMetrics();
   const isIOS = Platform.OS === "ios";
   const isWeb = Platform.OS === "web";
-  const iconSize = tvMode ? 24 : scaleSize(19, 24);
-  const labelSize = tvMode ? 15 : isTablet ? 10.5 : 9;
+  const iconSize = tvMode ? 21 : scaleSize(19, 21);
+  const labelSize = tvMode ? 12.5 : isTablet ? 10.5 : 9;
 
   return (
     <Tabs
@@ -50,19 +50,22 @@ export default function TabLayout() {
         tabBarInactiveTintColor: colors.mutedForeground,
         headerShown: false,
         tabBarShowLabel: false,
+        tabBarButton: tvMode
+          ? (props) => <TvPressable {...(props as any)} focusable={true} />
+          : undefined,
         tabBarStyle: {
           position: "absolute",
           backgroundColor: isIOS ? "transparent" : colors.background,
           borderTopWidth: 1,
           borderTopColor: colors.border,
           elevation: 0,
-          height: tvMode ? 92 : isWeb ? 84 : isTablet ? 66 : 58,
-          paddingBottom: tvMode ? 12 : isWeb ? 34 : isTablet ? 8 : 5,
-          paddingTop: tvMode ? 10 : isTablet ? 7 : 5,
+          height: tvMode ? 72 : isWeb ? 84 : isTablet ? 66 : 58,
+          paddingBottom: tvMode ? 8 : isWeb ? 34 : isTablet ? 8 : 5,
+          paddingTop: tvMode ? 6 : isTablet ? 7 : 5,
         },
         tabBarIconStyle: {
           width: "100%",
-          height: tvMode ? 68 : isTablet ? 52 : 46,
+          height: tvMode ? 54 : isTablet ? 52 : 46,
           overflow: "visible",
         },
         tabBarBackground: () => null,
@@ -93,7 +96,7 @@ export default function TabLayout() {
       <Tabs.Screen
         name="animations"
         options={{
-          href: null, // مخفي بطلب المستخدم — لا يظهر في شريط التنقل ولا يُحمَّل في الخلفية
+          href: null,
         }}
       />
       <Tabs.Screen
@@ -143,14 +146,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: 2,
   },
   tabFocused: {
-    borderRadius: 14,
-    borderWidth: 2,
-    borderColor: "#C4B5FD",
-    paddingVertical: 5,
-    shadowColor: "#A78BFA",
-    shadowOpacity: 0.65,
-    shadowRadius: 8,
-    elevation: 6,
+    borderRadius: 12,
+    borderWidth: 1.5,
+    borderColor: "#06b6d4",
+    backgroundColor: "rgba(6, 182, 212, 0.12)",
+    paddingVertical: 4,
   },
   tabLabel: {
     fontSize: 9,
@@ -161,8 +161,7 @@ const styles = StyleSheet.create({
     width: "100%",
   },
   tvTabLabel: {
-    fontSize: 15,
-    lineHeight: 19,
+    fontSize: 12.5,
+    lineHeight: 16,
   },
 });
-

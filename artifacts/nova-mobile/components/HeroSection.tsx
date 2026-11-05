@@ -18,15 +18,15 @@ export function HeroSection({ items, initialTVFocus = false }: Props) {
   const { width, height } = useWindowDimensions();
   const tvMode = isTvDevice(width, height);
   const isTablet = !tvMode && Math.min(width, height) >= 600;
-  const heroWidth = tvMode ? width : width - (isTablet ? 36 : 28);
-  // Keep enough height on phones so genres, titles, metadata, and CTA buttons
-  // ("مشاهدة الآن" + "تفاصيل") fit with clear artwork breathing room just like iPad.
+  const heroWidth = tvMode ? Math.min(width - 64, 1400) : width - (isTablet ? 36 : 28);
+  // Keep enough height on phones, tablets, and TVs so genres, titles, metadata, and CTA buttons
+  // ("مشاهدة الآن" + "تفاصيل") fit with clear artwork breathing room.
   const heroHeight = tvMode
-    ? 340
+    ? Math.max(260, Math.min(330, Math.round(heroWidth * 0.36)))
     : isTablet
       ? Math.max(268, Math.min(350, Math.round(heroWidth * 0.52)))
       : Math.max(216, Math.min(258, Math.round(heroWidth * 0.64)));
-  const s = tvMode ? 1.2 : Math.max(0.82, Math.min(1.12, heroWidth / 430));
+  const s = tvMode ? 1.15 : Math.max(0.82, Math.min(1.12, heroWidth / 430));
   const scrollRef = useRef<ScrollView>(null);
   const [activeIdx, setActiveIdx] = useState(0);
 
@@ -45,11 +45,11 @@ export function HeroSection({ items, initialTVFocus = false }: Props) {
 
   if (!items.length) return null;
 
-  const pad = tvMode ? 28 : Math.round(13 * s);
-  const radius = tvMode ? 8 : Math.round(20 * s);
+  const pad = tvMode ? 22 : Math.round(13 * s);
+  const radius = tvMode ? 20 : Math.round(20 * s);
 
   return (
-    <View style={[styles.carousel, { height: heroHeight + (tvMode ? 0 : Math.round(22 * s)), width }]}>
+    <View style={[styles.carousel, { height: heroHeight + Math.round(22 * s), width }]}>
       <ScrollView
         ref={scrollRef}
         horizontal
@@ -70,6 +70,12 @@ export function HeroSection({ items, initialTVFocus = false }: Props) {
               key={anime.id}
               focusable={tvMode}
               hasTVPreferredFocus={tvMode && initialTVFocus && index === 0}
+              onFocus={() => {
+                if (tvMode && activeIdx !== index) {
+                  setActiveIdx(index);
+                  scrollRef.current?.scrollTo({ x: index * heroWidth, animated: true });
+                }
+              }}
               style={({ focused }) => [
                 styles.heroSlide,
                 {
@@ -77,7 +83,7 @@ export function HeroSection({ items, initialTVFocus = false }: Props) {
                   height: heroHeight,
                   borderRadius: radius,
                   borderColor: colors.border,
-                  borderWidth: tvMode ? 0 : 1,
+                  borderWidth: 1,
                 },
                 tvMode && tvFocusStyle(focused),
               ]}

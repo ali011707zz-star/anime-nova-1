@@ -11,7 +11,7 @@ import {
   Image, Share, StyleSheet, Switch, Text, TextInput, View, ActivityIndicator, I18nManager,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { isTvDevice } from "@/utils/tv";
+import { isTvDevice, TvPressable, tvFocusStyle, useTvModeOverride, type TvModeOverride } from "@/utils/tv";
 
 const ROW_RTL = I18nManager.isRTL ? "row" : "row-reverse";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -22,7 +22,6 @@ import type { MobileUser } from "@/context/AppContext";
 import { getBaseUrl } from "@/utils/baseUrl";
 import { secureFetch, setUserAuthToken } from "@/utils/secureApi";
 import { CrashEntry, getCrashLog } from "@/utils/crashLogger";
-import { TvPressable } from "@/utils/tv";
 import {
   getPushNotificationsStatus,
   setPushNotificationsEnabled,
@@ -33,13 +32,13 @@ const THEMES: { label: string; value: string; dot: string; desc: string }[] = [
   { label: "أسود", value: "black", dot: paletteColors.black.background, desc: "خلفيات داكنة وأزرار بنفسجية هادئة" },
 ];
 
-type SettingsPressableProps = React.ComponentProps<typeof NativePressable>;
+type SettingsPressableProps = React.ComponentProps<typeof TvPressable>;
 
 function Pressable(props: SettingsPressableProps) {
   if (isTvDevice()) {
-    return <TvPressable {...(props as React.ComponentProps<typeof TvPressable>)} />;
+    return <TvPressable {...props} />;
   }
-  return <NativePressable {...props} />;
+  return <NativePressable {...(props as React.ComponentProps<typeof NativePressable>)} />;
 }
 
 const REPORT_TYPES = [
@@ -501,14 +500,30 @@ function AuthSheetInner({ open, onClose, onLogin, onLinkDevice }: {
       });
   }, [exchangeGoogleCode, googleResponse, saveGoogleUser]);
 
+  const tvMode = isTvDevice();
+
   const handleGoogleLogin = async () => {
     if (!googleRequest) {
+      if (tvMode) {
+        onLinkDevice();
+        return;
+      }
       setError("تسجيل الدخول بـ Google غير مهيأ لهذه النسخة");
       return;
     }
     setError("");
-    try { await promptGoogleAsync(); }
-    catch { setError("تعذّر فتح تسجيل الدخول عبر Google. حاول مرة أخرى."); }
+    try {
+      const res = await promptGoogleAsync();
+      if (tvMode && res?.type === "error") {
+        setError("تعذّر فتح متصفح Google على هذا التلفاز. يمكنك استخدام «لدي رمز ربط» للدخول الفوري من هاتفك.");
+      }
+    } catch {
+      if (tvMode) {
+        setError("لا يتوفر متصفح متوافق مع Google على هذا التلفاز. اضغط «لدي رمز ربط» بالأسفل للدخول الفوري.");
+      } else {
+        setError("تعذّر فتح تسجيل الدخول عبر Google. حاول مرة أخرى.");
+      }
+    }
   };
 
   const handleLogin = async () => {
@@ -592,9 +607,9 @@ function AuthSheetInner({ open, onClose, onLogin, onLinkDevice }: {
   const isVerify = flow === "verify";
 
   return (
-    <Modal transparent animationType="slide" onRequestClose={onClose}>
+    <Modal transparent animationType={tvMode ? "none" : "slide"} onRequestClose={onClose}>
       <Pressable style={ts.overlay} onPress={onClose} focusable={false} />
-      <View style={[ts.bottomSheet, { paddingBottom: 0 }]}>
+      <View style={[ts.bottomSheet, { paddingBottom: 0 }, tvMode && { maxWidth: 620, alignSelf: "center", width: "90%", marginBottom: 24, borderRadius: 24 }]}>
         <View style={[ts.sheetAccentBar, { backgroundColor: "#7C3AED" }]} />
         <View style={ts.sheetHandle} />
         <ScrollView
@@ -605,7 +620,7 @@ function AuthSheetInner({ open, onClose, onLogin, onLinkDevice }: {
         >
           {/* Header */}
           <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 22 }}>
-            <Pressable onPress={onClose} style={ts.reportCloseBtn}>
+            <Pressable onPress={onClose} focusable={tvMode} style={ts.reportCloseBtn}>
               <Ionicons name="close" size={16} color="rgba(255,255,255,0.5)" />
             </Pressable>
             <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
@@ -626,12 +641,14 @@ function AuthSheetInner({ open, onClose, onLogin, onLinkDevice }: {
              <View style={{ gap: 12 }}>
                <View style={{ borderRadius: 16, paddingHorizontal: 14, paddingVertical: 12, backgroundColor: "rgba(124,58,237,0.10)", borderWidth: 1, borderColor: "rgba(139,92,246,0.20)" }}>
                  <Text style={{ fontSize: 12, color: "rgba(255,255,255,0.65)", fontFamily: "Cairo_400Regular", textAlign: "right", lineHeight: 22 }}>
-                   سجّل الدخول أو أنشئ حسابك باستخدام Google فقط. ستبقى سجلات المشاهدة والمفضلات والتعليقات محفوظة.
+                   سجّل الدخول أو أنشئ حسابك باستخدام Google، أو اربط التلفاز فوراً عبر رمز الربط السريع من هاتفك. ستبقى سجلات المشاهدة والمفضلات محفوظة.
                  </Text>
                </View>
                <Pressable
                  onPress={handleGoogleLogin}
                  disabled={loading}
+                 focusable={tvMode}
+                 hasTVPreferredFocus={tvMode && open}
                  accessibilityRole="button"
                  accessibilityLabel="المتابعة باستخدام Google"
                  style={[ts.authSubmitBtn, { backgroundColor: "#fff", borderColor: "rgba(255,255,255,0.25)", minHeight: 56, shadowColor: "#000", shadowOpacity: 0.18, shadowRadius: 12, shadowOffset: { width: 0, height: 5 }, elevation: 3 }]}
@@ -655,10 +672,11 @@ function AuthSheetInner({ open, onClose, onLogin, onLinkDevice }: {
                  testID="open-device-link-from-auth"
                  onPress={onLinkDevice}
                  disabled={loading}
-                 style={{ flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, paddingVertical: 12, marginTop: 2, borderRadius: 16, borderWidth: 1, borderColor: "rgba(167,139,250,0.28)", backgroundColor: "rgba(139,92,246,0.08)", opacity: loading ? 0.5 : 1 }}
+                 focusable={tvMode}
+                 style={{ flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, paddingVertical: 14, marginTop: 2, borderRadius: 16, borderWidth: 1.5, borderColor: "rgba(6,182,212,0.45)", backgroundColor: "rgba(6,182,212,0.12)", opacity: loading ? 0.5 : 1 }}
                >
-                 <Ionicons name="link-outline" size={16} color="#c4b5fd" />
-                 <Text style={{ fontSize: 12, fontFamily: "Cairo_700Bold", color: "#c4b5fd" }}>لدي رمز ربط · ربط جهاز موجود</Text>
+                 <Ionicons name="tv-outline" size={18} color="#22d3ee" />
+                 <Text style={{ fontSize: 13, fontFamily: "Cairo_700Bold", color: "#22d3ee" }}>لدي رمز ربط · ربط التلفاز أو الجهاز فوراً</Text>
                </Pressable>
              </View>
            )}
@@ -1420,6 +1438,7 @@ export default function SettingsScreen() {
   } = useApp();
   const colors = useColors();
   const topPad = Platform.OS === "web" ? 0 : insets.top;
+  const [tvOverride, updateTvOverride] = useTvModeOverride();
   const tvMode = isTvDevice();
 
   const { toast, show: showToast } = useToast();
@@ -1756,9 +1775,7 @@ export default function SettingsScreen() {
           )}
         </View>
 
-        {/* The stats/premium marketing blocks are useful on phones but add
-            noise and startup work to the TV settings screen. */}
-        {!tvMode && <View style={ts.statsGrid}>
+        <View style={ts.statsGrid}>
           {[
             { label: "مشاهَدة", val: histCount,      color: theme === "white" ? "#5B469A" : "#a78bfa", bg: "rgba(139,92,246,0.10)" },
             { label: "محفوظة",  val: savedCount,     color: theme === "white" ? "#A12D5B" : "#f472b6", bg: "rgba(236,72,153,0.10)" },
@@ -1773,10 +1790,10 @@ export default function SettingsScreen() {
               <Text style={[ts.statLabel, { color: colors.textSecondary }]}>{s.label}</Text>
             </Pressable>
           ))}
-        </View>}
+        </View>
 
         {/* ── التبرع ودعم التطبيق عبر قناة تلجرام الرسمية ── */}
-        {!tvMode && <View style={{ paddingHorizontal: 16, marginTop: 14 }}>
+        <View style={{ paddingHorizontal: 16, marginTop: 14 }}>
             <Pressable
               testID="open-donation-modal"
               style={ts.donationCard}
@@ -1813,11 +1830,11 @@ export default function SettingsScreen() {
                 </Text>
               </View>
             </Pressable>
-          </View>}
+          </View>
 
         {/* ══════ المظهر ══════ */}
         <SectionHeader title="المظهر" icon="المظهر" />
-        <View style={{ paddingHorizontal: 16 }}>
+        <View style={{ paddingHorizontal: 16, gap: 12 }}>
             <Card>
             <View style={{ padding: 16 }}>
               <View style={{ flexDirection: "row", alignItems: "center", gap: 12, marginBottom: 16 }}>
@@ -1859,6 +1876,63 @@ export default function SettingsScreen() {
                         )}
                       </View>
                       <Text style={[ts.themeLabel, { color: active ? colors.textPrimary : colors.textMuted }]}>{t.label}</Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            </View>
+          </Card>
+
+          <Card>
+            <View style={{ padding: 16 }}>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 12, marginBottom: 14 }}>
+                <View style={[ts.navIcon, { backgroundColor: tvMode ? "rgba(6,182,212,0.14)" : colors.surfaceElevated, borderColor: tvMode ? "rgba(6,182,212,0.4)" : colors.border }]}>
+                  <Ionicons name="tv-outline" size={18} color={tvMode ? "#06b6d4" : colors.textMuted} />
+                </View>
+                <View style={{ flex: 1, alignItems: "flex-end" }}>
+                  <Text style={[ts.navLabel, { color: colors.textPrimary }]}>وضع التلفاز (TV Mode)</Text>
+                  <Text style={[ts.navSub, { color: colors.textSecondary }]}>
+                    {tvMode
+                      ? "مفعّل حالياً · تحكم كامل بالريموت مع إخفاء المانجا والمانهوا"
+                      : "متوقف حالياً · واجهة اللمس العادية للهاتف والأجهزة اللوحية"}
+                  </Text>
+                </View>
+              </View>
+              <View style={ts.themesRow}>
+                {([
+                  { label: "تلقائي", value: "auto" as TvModeOverride },
+                  { label: "مفعّل (TV)", value: "on" as TvModeOverride },
+                  { label: "متوقف", value: "off" as TvModeOverride },
+                ]).map((opt) => {
+                  const active = tvOverride === opt.value;
+                  return (
+                    <Pressable
+                      key={opt.value}
+                      onPress={async () => {
+                        await updateTvOverride(opt.value);
+                        showToast(
+                          opt.value === "on"
+                            ? "تم تفعيل وضع التلفاز 📺"
+                            : opt.value === "off"
+                              ? "تم إيقاف وضع التلفاز 📱"
+                              : "تم ضبط وضع التلفاز على التلقائي",
+                        );
+                      }}
+                      style={[
+                        ts.themeBtn,
+                        {
+                          paddingVertical: 10,
+                          backgroundColor: active ? "rgba(6,182,212,0.15)" : colors.surface,
+                          borderColor: active ? "#06b6d4" : colors.border,
+                        },
+                      ]}
+                    >
+                      <Ionicons
+                        name={opt.value === "on" ? "tv" : opt.value === "off" ? "phone-portrait-outline" : "sparkles-outline"}
+                        size={16}
+                        color={active ? "#06b6d4" : colors.textMuted}
+                      />
+                      <Text style={[ts.themeLabel, { color: active ? "#06b6d4" : colors.textMuted }]}>{opt.label}</Text>
                     </Pressable>
                   );
                 })}

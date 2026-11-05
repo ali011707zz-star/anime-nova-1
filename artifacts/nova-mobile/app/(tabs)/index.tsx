@@ -208,7 +208,7 @@ export default function HomeScreen() {
     return () => ctrl.abort();
   }, []);
 
-  /* ── Manhwa (Azorafly) & Manga (MangaDar) from Backend ── */
+  /* ── Manhwa (Azorafly) & Manga (MangaDar) from Backend (Hidden in TV mode) ── */
   const { data: manhwaData, refetch: refetchManhwa } = useQuery({
     queryKey: ["homeManhwa"],
     queryFn: async () => {
@@ -216,6 +216,7 @@ export default function HomeScreen() {
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       return res.json();
     },
+    enabled: !isTvLayout,
     staleTime: 10 * 60 * 1000,
   });
 
@@ -226,6 +227,7 @@ export default function HomeScreen() {
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       return res.json();
     },
+    enabled: !isTvLayout,
     staleTime: 10 * 60 * 1000,
   });
 
@@ -453,7 +455,7 @@ export default function HomeScreen() {
                   typeof h.totalEps === "number" && h.totalEps > h.ep
                     ? h.totalEps - h.ep
                     : null;
-                const hScale = Math.max(0.72, Math.min(1.12, historyCardWidth / 155));
+                const hScale = Math.max(0.72, Math.min(1.18, historyCardWidth / 155));
                 const compactCard = historyCardWidth < 138;
                 const leftBadgeText = remainingMinutes !== null
                   ? (compactCard ? `${remainingMinutes} د` : `متبقي ${remainingMinutes} د`)
@@ -470,10 +472,10 @@ export default function HomeScreen() {
                       styles.historyCard,
                       {
                         width: historyCardWidth,
-                        height: isTvLayout ? Math.round(historyCardWidth * 0.7) : Math.round(historyCardWidth * 0.84),
+                        height: Math.round(historyCardWidth * 0.84),
                         backgroundColor: colors.card,
                         borderColor: colors.border,
-                        borderRadius: isTvLayout ? 12 : Math.round(14 * hScale),
+                        borderRadius: Math.round(14 * hScale),
                       },
                       isTvLayout && tvFocusStyle(focused),
                     ]}
@@ -483,98 +485,82 @@ export default function HomeScreen() {
                       style={styles.historyImg}
                       resizeMode="cover"
                       resizeMethod="resize"
-                      fadeDuration={100}
+                      fadeDuration={isTvLayout ? 0 : 100}
                     />
-                    {!isTvLayout && (
-                      <>
-                        <View
-                          style={[
-                            styles.historyBadge,
-                            styles.historyRemainingBadge,
-                            {
-                              top: Math.round(5.5 * hScale),
-                              left: Math.round(5.5 * hScale),
-                              paddingHorizontal: Math.round(5.5 * hScale),
-                              paddingVertical: Math.max(1.5, Math.round(2 * hScale)),
-                              borderRadius: Math.round(9 * hScale),
-                            },
-                          ]}
-                        >
-                          <Text style={[styles.historyBadgeText, { fontSize: Math.max(7, Math.round(7.8 * hScale)) }]} numberOfLines={1}>
-                            {leftBadgeText}
-                          </Text>
-                        </View>
-                        <View
-                          style={[
-                            styles.historyBadge,
-                            styles.historyEpisodeBadge,
-                            {
-                              top: Math.round(5.5 * hScale),
-                              right: Math.round(5.5 * hScale),
-                              paddingHorizontal: Math.round(5.5 * hScale),
-                              paddingVertical: Math.max(1.5, Math.round(2 * hScale)),
-                              borderRadius: Math.round(9 * hScale),
-                            },
-                          ]}
-                        >
-                          <Text style={[styles.historyBadgeText, { fontSize: Math.max(7, Math.round(7.8 * hScale)) }]} numberOfLines={1}>
-                            {rightBadgeText}
-                          </Text>
-                        </View>
-                      </>
-                    )}
+                    <View
+                      style={[
+                        styles.historyBadge,
+                        styles.historyRemainingBadge,
+                        {
+                          top: Math.round(5.5 * hScale),
+                          left: Math.round(5.5 * hScale),
+                          paddingHorizontal: Math.round(5.5 * hScale),
+                          paddingVertical: Math.max(1.5, Math.round(2 * hScale)),
+                          borderRadius: Math.round(9 * hScale),
+                        },
+                      ]}
+                    >
+                      <Text style={[styles.historyBadgeText, { fontSize: Math.max(7, Math.round(7.8 * hScale)) }]} numberOfLines={1}>
+                        {leftBadgeText}
+                      </Text>
+                    </View>
+                    <View
+                      style={[
+                        styles.historyBadge,
+                        styles.historyEpisodeBadge,
+                        {
+                          top: Math.round(5.5 * hScale),
+                          right: Math.round(5.5 * hScale),
+                          paddingHorizontal: Math.round(5.5 * hScale),
+                          paddingVertical: Math.max(1.5, Math.round(2 * hScale)),
+                          borderRadius: Math.round(9 * hScale),
+                        },
+                      ]}
+                    >
+                      <Text style={[styles.historyBadgeText, { fontSize: Math.max(7, Math.round(7.8 * hScale)) }]} numberOfLines={1}>
+                        {rightBadgeText}
+                      </Text>
+                    </View>
                     <LinearGradient
                       colors={["transparent", "rgba(0,0,0,0.94)"]}
                       style={[
                         styles.historyGrad,
-                        !isTvLayout && {
+                        {
                           paddingHorizontal: Math.round(6.5 * hScale),
                           paddingBottom: Math.round(5.5 * hScale),
                           paddingTop: Math.round(22 * hScale),
                         },
-                        isTvLayout && styles.historyGradTv,
                       ]}
                     >
-                      {isTvLayout && <Text style={styles.historyEp}>حلقة {h.ep}</Text>}
                       <Text
                         style={[
                           styles.historyTitle,
-                          !isTvLayout && { fontSize: Math.max(8.5, Math.round(9.8 * hScale)) },
-                          isTvLayout && styles.historyTitleTv,
+                          { fontSize: Math.max(8.5, Math.round(9.8 * hScale)) },
                         ]}
                         numberOfLines={1}
                       >
                         {h.titleAr || h.english || h.title}
                       </Text>
-                      {!isTvLayout && (
-                        <>
-                          <View style={styles.historyResumeRow}>
-                            <Text style={[styles.historyPercent, { fontSize: Math.max(7.5, Math.round(8.5 * hScale)) }]}>
-                              {completionPercent !== null ? `${completionPercent}%` : `ح ${h.ep}`}
-                            </Text>
-                            <Text style={[styles.historyResumeText, { fontSize: Math.max(7, Math.round(7.8 * hScale)) }]} numberOfLines={1}>
-                              {resumeLabel}
-                            </Text>
-                          </View>
-                          <View style={styles.historyProgress}>
-                            <View
-                              style={[
-                                styles.historyProgressFill,
-                                {
-                                  width: `${completionPercent ?? 0}%`,
-                                  backgroundColor: colors.homeAccent,
-                                },
-                              ]}
-                            />
-                          </View>
-                        </>
-                      )}
-                    </LinearGradient>
-                    {isTvLayout && (
-                      <View style={styles.playOverlay}>
-                        <Ionicons name="play-circle" size={28} color="rgba(255,255,255,0.85)" />
+                      <View style={styles.historyResumeRow}>
+                        <Text style={[styles.historyPercent, { fontSize: Math.max(7.5, Math.round(8.5 * hScale)) }]}>
+                          {completionPercent !== null ? `${completionPercent}%` : `ح ${h.ep}`}
+                        </Text>
+                        <Text style={[styles.historyResumeText, { fontSize: Math.max(7, Math.round(7.8 * hScale)) }]} numberOfLines={1}>
+                          {resumeLabel}
+                        </Text>
                       </View>
-                    )}
+                      <View style={styles.historyProgress}>
+                        <View
+                          style={[
+                            styles.historyProgressFill,
+                            {
+                              width: `${completionPercent ?? 0}%`,
+                              backgroundColor: colors.homeAccent,
+                            },
+                          ]}
+                        />
+                      </View>
+                    </LinearGradient>
                   </Pressable>
                 );
               }}
@@ -929,8 +915,8 @@ export default function HomeScreen() {
           </View>
         )}
 
-        {/* ── Manhwa Section (مانهوا) ── */}
-        {manhwaItems.length > 0 && (
+        {/* ── Manhwa Section (مانهوا — مخفية في وضع التلفاز) ── */}
+        {!isTvLayout && manhwaItems.length > 0 && (
           <View style={{ marginBottom: 24 }}>
             <SectionHeader
               onSeeAll={() => router.push({ pathname: "/manga" as any, params: { tab: "manhwa" } })}
@@ -996,8 +982,8 @@ export default function HomeScreen() {
           </View>
         )}
 
-        {/* ── Manga Section (مانجا مترجمة) ── */}
-        {mangaItems.length > 0 && (
+        {/* ── Manga Section (مانجا مترجمة — مخفية في وضع التلفاز) ── */}
+        {!isTvLayout && mangaItems.length > 0 && (
           <View style={{ marginBottom: 24 }}>
             <SectionHeader
               onSeeAll={() => router.push("/manga" as any)}

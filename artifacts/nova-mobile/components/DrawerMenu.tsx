@@ -12,7 +12,8 @@ import { useApp } from "@/context/AppContext";
 import { useColors } from "@/hooks/useColors";
 import { getBaseUrl } from "@/utils/api";
 import { secureFetch } from "@/utils/secureApi";
-import { isTvDevice, tvFocusStyle, TvPressable as Pressable } from "@/utils/tv";
+import { isTvDevice, toggleTvMode, tvFocusStyle, TvPressable as Pressable, useTvModeOverride } from "@/utils/tv";
+import { useWindowDimensions } from "react-native";
 
 const { width: W } = Dimensions.get("window");
 const DRAWER_W = Math.min(W * 0.80, 320);
@@ -77,12 +78,22 @@ type Props = { visible: boolean; onClose: () => void };
 export function DrawerMenu({ visible, onClose }: Props) {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const tvMode = isTvDevice(Dimensions.get("window").width, Dimensions.get("window").height);
-  const drawerWidth = tvMode ? Math.min(W * 0.42, 520) : DRAWER_W;
+  useTvModeOverride();
+  const { width: winW, height: winH } = useWindowDimensions();
+  const tvMode = isTvDevice(winW, winH);
+  const drawerWidth = tvMode ? Math.min(winW * 0.42, 460) : DRAWER_W;
   const topPad = Platform.OS === "web" ? 0 : insets.top;
   const { watchHistory, favorites, theme, currentUser } = useApp();
   const colors = useColors();
   const [userData, setUserData] = React.useState<UserData | null>(null);
+  const visibleNavMain = React.useMemo(
+    () => (tvMode ? NAV_MAIN.filter((item) => item.route !== "/manga") : NAV_MAIN),
+    [tvMode],
+  );
+  const visibleFavoritesCount = React.useMemo(
+    () => (tvMode ? favorites.filter((f: any) => !f?.mangaId).length : favorites.length),
+    [favorites, tvMode],
+  );
 
   React.useEffect(() => {
     if (currentUser) {
@@ -265,7 +276,7 @@ export function DrawerMenu({ visible, onClose }: Props) {
                 </View>
                 <Text style={[s.userSub, { color: colors.textSecondary }]} numberOfLines={1}>
                   {isLogged
-                    ? `${watchHistory.length} مشاهدة  •  ${favorites.length} مفضلة`
+                    ? `${watchHistory.length} مشاهدة  •  ${visibleFavoritesCount} مفضلة`
                     : "سجّل الدخول لمزامنة حسابك ومفضلتك"}
                 </Text>
               </View>
@@ -279,7 +290,7 @@ export function DrawerMenu({ visible, onClose }: Props) {
 
           {/* ── Main navigation ── */}
           <SectionHeading label="القائمة الرئيسية" colors={colors} />
-          {NAV_MAIN.map((item) => (
+          {visibleNavMain.map((item) => (
             <DrawerItem key={item.label} item={item} tvMode={tvMode} colors={colors} onPress={() => nav(item.route)} />
           ))}
 
@@ -289,7 +300,7 @@ export function DrawerMenu({ visible, onClose }: Props) {
             <DrawerItem
               key={item.label}
               item={item}
-              badge={item.label === "المفضلة" ? favorites.length : watchHistory.length}
+              badge={item.label === "المفضلة" ? visibleFavoritesCount : watchHistory.length}
               tvMode={tvMode}
               colors={colors}
               onPress={() => nav(item.route)}
@@ -298,6 +309,21 @@ export function DrawerMenu({ visible, onClose }: Props) {
 
           {/* ── Other ── */}
           <SectionHeading label="أخرى" colors={colors} />
+          <DrawerItem
+            item={{
+              icon: "tv-outline",
+              label: tvMode ? "وضع التلفاز: مفعّل" : "وضع التلفاز: متوقف",
+              route: "",
+              badge: tvMode ? "TV" : undefined,
+              showChevron: false,
+              color: tvMode ? "#06b6d4" : "#8B5CF6",
+            }}
+            tvMode={tvMode}
+            colors={colors}
+            onPress={() => {
+              toggleTvMode();
+            }}
+          />
           {NAV_OTHER.map((item) => (
             <DrawerItem key={item.label} item={item} tvMode={tvMode} colors={colors} onPress={() => nav(item.route)} />
           ))}

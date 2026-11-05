@@ -115,8 +115,8 @@ export const AnimeCard = React.memo(function AnimeCard({ anime, size = "sm", car
         style={[
           styles.title,
           {
-            fontSize: scaleSize(12, 21),
-            lineHeight: scaleSize(16, 29),
+            fontSize: scaleSize(12, 14),
+            lineHeight: scaleSize(16, 20),
             color: colors.text,
             textAlign: arabicTitle ? "right" : "left",
             writingDirection: arabicTitle ? "rtl" : "ltr",
@@ -133,7 +133,7 @@ export const AnimeCard = React.memo(function AnimeCard({ anime, size = "sm", car
         </Text>
       ) : null}
       {anime.episodes && (
-        <Text style={[styles.epCount, { fontSize: scaleSize(10, 16), color: colors.mutedForeground }]}>
+        <Text style={[styles.epCount, { fontSize: scaleSize(10, 12), color: colors.mutedForeground }]}>
           {anime.episodes} حلقة
         </Text>
       )}
