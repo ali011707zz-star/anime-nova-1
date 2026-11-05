@@ -272,13 +272,13 @@ function AnimeCard({ anime, onPress, columns }: { anime: AnimeResult; onPress: (
           </View>
         ) : null}
         <View style={s.cardBottom}>
-          <Text style={[s.cardTitle, { writingDirection: "ltr" }]} numberOfLines={2}>
+          <Text style={[s.cardTitle, { writingDirection: "ltr" }]} numberOfLines={1}>
             {anime.title?.english || anime.title?.romaji}
           </Text>
           {anime.title_ar ? (
             <Text
               numberOfLines={1}
-              style={{ color: "rgba(255,255,255,0.72)", fontSize: tvMode ? 12 : 8, lineHeight: tvMode ? 18 : 11, fontFamily: "Cairo_700Bold", textAlign: "right", writingDirection: "rtl", marginTop: 2 }}
+              style={s.cardTitleAr}
             >
               {anime.title_ar}
             </Text>
@@ -480,196 +480,74 @@ export default function SearchScreen() {
     <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
       <View style={[s.container, { paddingTop: topPad }]}>
 
-        {/* ── Sticky header ── */}
-        <View style={[s.header, tvMode && s.tvHeader]}>
-          {!tvMode ? (
-            <>
-              <View style={s.mobileHeaderTop}>
-                <View style={s.mobileTitleGroup}>
-                  <Pressable
-                    accessibilityRole="button"
-                    accessibilityLabel="رجوع"
-                    onPress={() => router.canGoBack() ? router.back() : router.replace("/(tabs)/browse" as any)}
-                    style={s.mobileBackButton}
-                  >
-                    <Ionicons name="chevron-forward" size={21} color={colors.textPrimary} />
-                  </Pressable>
-                  <Text style={s.mobileTitle}>البحث</Text>
-                </View>
-                <View style={s.mobileModeSwitch}>
-                  <Pressable onPress={() => router.push("/(tabs)/browse" as any)} style={s.mobileModeButton}>
-                    <Ionicons name="compass-outline" size={14} color={colors.textMuted} />
-                    <Text style={s.mobileModeText}>تصفح</Text>
-                  </Pressable>
-                  <Pressable style={[s.mobileModeButton, s.mobileModeButtonActive]}>
-                    <Ionicons name="search" size={14} color="#ffffff" />
-                    <Text style={[s.mobileModeText, s.mobileModeTextActive]}>بحث</Text>
-                  </Pressable>
-                </View>
-              </View>
+        {/* ── Sticky header (Unified across Phone, iPad & TV) ── */}
+        <View style={[s.header, tvMode && width >= 700 && s.tvHeader]}>
+          <View style={s.mobileHeaderTop}>
+            <View style={s.mobileTitleGroup}>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="رجوع"
+                focusable={tvMode}
+                onPress={() => router.canGoBack() ? router.back() : router.replace("/(tabs)/browse" as any)}
+                style={s.mobileBackButton}
+              >
+                <Ionicons name="chevron-forward" size={21} color={colors.textPrimary} />
+              </Pressable>
+              <Text style={s.mobileTitle}>البحث</Text>
+            </View>
+            <View style={s.mobileModeSwitch}>
+              <Pressable
+                focusable={tvMode}
+                onPress={() => router.push("/(tabs)/browse" as any)}
+                style={s.mobileModeButton}
+              >
+                <Ionicons name="compass-outline" size={14} color={colors.textMuted} />
+                <Text style={s.mobileModeText}>تصفح</Text>
+              </Pressable>
+              <Pressable focusable={tvMode} style={[s.mobileModeButton, s.mobileModeButtonActive]}>
+                <Ionicons name="search" size={14} color="#ffffff" />
+                <Text style={[s.mobileModeText, s.mobileModeTextActive]}>بحث</Text>
+              </Pressable>
+            </View>
+          </View>
 
-              <View style={s.mobileSearchBar}>
-                <Pressable
-                  accessibilityLabel="فتح فلاتر البحث"
-                  onPress={() => setShowFilters(true)}
-                  style={[s.mobileFilterButton, activeFilterCount > 0 && s.mobileFilterButtonActive]}
-                >
-                  <Ionicons
-                    name="options-outline"
-                    size={17}
-                    color={activeFilterCount > 0 ? colors.buttonText : colors.textSecondary}
-                  />
-                  {activeFilterCount > 0 && (
-                    <View style={s.mobileFilterCount}>
-                      <Text style={s.mobileFilterCountText}>{activeFilterCount}</Text>
-                    </View>
-                  )}
-                </Pressable>
-                <TextInput
-                  ref={inputRef}
-                  value={query}
-                  onChangeText={setQuery}
-                  placeholder="ابحث عن أنمي بالعربية أو الإنجليزية..."
-                  placeholderTextColor={colors.textMuted}
-                  style={s.mobileSearchInput}
-                  focusable
-                />
-                {query ? (
-                  <Pressable onPress={() => { setQuery(""); inputRef.current?.focus(); }}>
-                    <Ionicons name="close-circle" size={17} color={colors.textMuted} />
-                  </Pressable>
-                ) : null}
-                <Ionicons name="search" size={19} color="#0ea5e9" />
-              </View>
-            </>
-          ) : (
-            <>
-          {/* Search bar */}
-          <View style={[s.searchBar, tvMode && s.tvSearchBar]}>
-            <Ionicons name="search" size={15} color={colors.textMuted} />
+          <View style={s.mobileSearchBar}>
+            <Pressable
+              accessibilityLabel="فتح فلاتر البحث"
+              focusable={tvMode}
+              onPress={() => setShowFilters(true)}
+              style={[s.mobileFilterButton, activeFilterCount > 0 && s.mobileFilterButtonActive]}
+            >
+              <Ionicons
+                name="options-outline"
+                size={17}
+                color={activeFilterCount > 0 ? colors.buttonText : colors.textSecondary}
+              />
+              {activeFilterCount > 0 && (
+                <View style={s.mobileFilterCount}>
+                  <Text style={s.mobileFilterCountText}>{activeFilterCount}</Text>
+                </View>
+              )}
+            </Pressable>
             <TextInput
               ref={inputRef}
               value={query}
               onChangeText={setQuery}
-              placeholder="ابحث عن أنمي..."
+              placeholder="ابحث عن أنمي بالعربية أو الإنجليزية..."
               placeholderTextColor={colors.textMuted}
-              style={[s.searchInput, tvMode && s.tvSearchInput]}
-              autoFocus={tvMode}
+              style={s.mobileSearchInput}
               focusable
             />
             {query ? (
-              <Pressable onPress={() => { setQuery(""); inputRef.current?.focus(); }} focusable={tvMode}
-                style={({ focused }) => [tvMode && tvFocusStyle(focused)]}>
-                <Ionicons name="close-circle" size={16} color={colors.textMuted} />
+              <Pressable
+                focusable={tvMode}
+                onPress={() => { setQuery(""); inputRef.current?.focus(); }}
+              >
+                <Ionicons name="close-circle" size={17} color={colors.textMuted} />
               </Pressable>
             ) : null}
+            <Ionicons name="search" size={19} color="#0ea5e9" />
           </View>
-
-          {/* Filter toggle + sort pills */}
-          <View style={s.filterRow}>
-            <Pressable
-              onPress={() => setShowFilters(f => !f)}
-              focusable={tvMode}
-              style={({ focused }) => [s.filterToggle, (showFilters || activeFilterCount > 0) && s.filterToggleActive, tvMode && tvFocusStyle(focused)]}>
-              <Ionicons name="options" size={12} color={showFilters || activeFilterCount > 0 ? colors.accent : colors.textSecondary} />
-              <Text style={[s.filterToggleText, (showFilters || activeFilterCount > 0) && s.filterToggleTextActive]}>
-                فلاتر
-              </Text>
-              {activeFilterCount > 0 && (
-                <View style={s.filterCount}><Text style={s.filterCountText}>{activeFilterCount}</Text></View>
-              )}
-            </Pressable>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flex: 1 }}>
-              <View style={{ flexDirection: "row", gap: tvMode ? 10 : 6, paddingRight: 8 }}>
-                {SORT_OPTIONS.map(opt => (
-                  <Pressable key={opt.value} onPress={() => setSort(opt.value)}
-                    focusable={tvMode}
-                    style={({ focused }) => [s.sortPill, tvMode && s.tvPill, sort === opt.value && s.sortPillActive, tvMode && tvFocusStyle(focused)]}>
-                    <Text style={[s.sortPillText, sort === opt.value && s.sortPillTextActive]}>{opt.label}</Text>
-                  </Pressable>
-                ))}
-              </View>
-            </ScrollView>
-            {activeFilterCount > 0 && (
-              <Pressable onPress={clearFilters} focusable={tvMode}
-                style={({ focused }) => [{ paddingHorizontal: 4 }, tvMode && tvFocusStyle(focused)]}>
-                <Text style={{ fontSize: 11, color: colors.destructive, fontFamily: "Cairo_700Bold" }}>مسح</Text>
-              </Pressable>
-            )}
-          </View>
-
-          {/* Season quick filter */}
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={s.seasonRow}>
-            <View style={{ flexDirection: "row", gap: 6 }}>
-              {SEASON_OPTIONS.map(opt => (
-                <Pressable key={opt.value} onPress={() => setSeason(opt.value)}
-                  focusable={tvMode}
-                  style={({ focused }) => [s.seasonChip, tvMode && s.tvSeasonChip, season === opt.value && s.seasonChipActive, tvMode && tvFocusStyle(focused)]}>
-                  <Text style={{ fontSize: 10 }}>{opt.emoji}</Text>
-                  <Text style={[s.seasonChipText, season === opt.value && s.seasonChipTextActive]}>{opt.label}</Text>
-                </Pressable>
-              ))}
-            </View>
-          </ScrollView>
-
-          {/* Expandable filter panel */}
-          {showFilters && (
-            <View style={s.filterPanel}>
-              <Text style={s.filterLabel}>النوع</Text>
-              <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6, marginBottom: 10 }}>
-                {FORMAT_OPTIONS.map(opt => (
-                  <Pressable key={opt.value} onPress={() => setFormat(opt.value)}
-                    focusable={tvMode}
-                    style={({ focused }) => [s.filterChip, format === opt.value && s.filterChipActive, tvMode && tvFocusStyle(focused)]}>
-                    <Text style={[s.filterChipText, format === opt.value && s.filterChipTextActive]}>{opt.label}</Text>
-                  </Pressable>
-                ))}
-              </View>
-              <Text style={s.filterLabel}>الحالة</Text>
-              <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6, marginBottom: 10 }}>
-                {STATUS_OPTIONS.map(opt => (
-                  <Pressable key={opt.value} onPress={() => setStatus(opt.value)}
-                    focusable={tvMode}
-                    style={({ focused }) => [s.filterChip, status === opt.value && s.filterChipActive, tvMode && tvFocusStyle(focused)]}>
-                    <Text style={[s.filterChipText, status === opt.value && s.filterChipTextActive]}>{opt.label}</Text>
-                  </Pressable>
-                ))}
-              </View>
-               <Pressable onPress={() => setShowGenres(g => !g)} focusable={tvMode}
-                 style={({ focused }) => [{ flexDirection: "row", alignItems: "center", gap: 6, marginBottom: genre ? 4 : 0 }, tvMode && tvFocusStyle(focused)]}>
-                <Text style={s.filterLabel}>التصنيف</Text>
-                {genre ? <Text style={{ fontSize: 10, color: colors.accent, fontFamily: "Cairo_700Bold" }}>· {GENRES_AR[genre] || genre}</Text> : null}
-                <Ionicons name={showGenres ? "chevron-up" : "chevron-down"} size={12} color={colors.textMuted} />
-              </Pressable>
-              {showGenres && (
-                <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
-                   <Pressable onPress={() => setGenre("")} focusable={tvMode}
-                     style={({ focused }) => [s.filterChip, !genre && s.filterChipActive, tvMode && tvFocusStyle(focused)]}>
-                    <Text style={[s.filterChipText, !genre && s.filterChipTextActive]}>الكل</Text>
-                  </Pressable>
-                  {GENRES.map(g => (
-                    <Pressable key={g} onPress={() => setGenre(genre === g ? "" : g)}
-                      focusable={tvMode}
-                      style={({ focused }) => [s.filterChip, genre === g && s.filterChipActive, tvMode && tvFocusStyle(focused)]}>
-                      <Text style={[s.filterChipText, genre === g && s.filterChipTextActive]}>{GENRES_AR[g] || g}</Text>
-                    </Pressable>
-                  ))}
-                </View>
-              )}
-              <Text style={s.filterLabel}>السنة</Text>
-              <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
-                {YEAR_OPTIONS.map(y => (
-                  <Pressable key={y || "all-years"} onPress={() => setYear(y === "الكل" ? "" : y)}
-                    focusable={tvMode}
-                    style={({ focused }) => [s.filterChip, (year === y || (!year && y === "الكل")) && s.filterChipActive, tvMode && tvFocusStyle(focused)]}>
-                    <Text style={[s.filterChipText, (year === y || (!year && y === "الكل")) && s.filterChipTextActive]}>{y}</Text>
-                  </Pressable>
-                ))}
-              </View>
-            </View>
-          )}
-            </>
-          )}
         </View>
 
         {/* ── Loading ── */}
@@ -770,32 +648,30 @@ export default function SearchScreen() {
         )}
       </View>
 
-      {!tvMode && (
-        <AnimeFilterSheet
-          visible={showFilters}
-          resultCount={results.length}
-          sortOptions={SORT_OPTIONS}
-          formatOptions={FORMAT_OPTIONS}
-          statusOptions={STATUS_OPTIONS}
-          seasonOptions={SEASON_OPTIONS}
-          genreOptions={GENRE_FILTER_OPTIONS}
-          years={YEAR_OPTIONS}
-          sort={sort}
-          format={format}
-          status={status}
-          season={season}
-          genre={genre}
-          year={year}
-          onSortChange={setSort}
-          onFormatChange={setFormat}
-          onStatusChange={setStatus}
-          onSeasonChange={setSeason}
-          onGenreChange={setGenre}
-          onYearChange={setYear}
-          onReset={clearFilters}
-          onClose={() => setShowFilters(false)}
-        />
-      )}
+      <AnimeFilterSheet
+        visible={showFilters}
+        resultCount={results.length}
+        sortOptions={SORT_OPTIONS}
+        formatOptions={FORMAT_OPTIONS}
+        statusOptions={STATUS_OPTIONS}
+        seasonOptions={SEASON_OPTIONS}
+        genreOptions={GENRE_FILTER_OPTIONS}
+        years={YEAR_OPTIONS}
+        sort={sort}
+        format={format}
+        status={status}
+        season={season}
+        genre={genre}
+        year={year}
+        onSortChange={setSort}
+        onFormatChange={setFormat}
+        onStatusChange={setStatus}
+        onSeasonChange={setSeason}
+        onGenreChange={setGenre}
+        onYearChange={setYear}
+        onReset={clearFilters}
+        onClose={() => setShowFilters(false)}
+      />
 
       {/* ══ trace.moe modal ══ */}
       <Modal visible={showTrace} animationType="slide" transparent presentationStyle="overFullScreen"
@@ -981,8 +857,9 @@ const createSearchStyles = (colors: ThemePalette, s = 1) => StyleSheet.create({
   scoreText: { fontSize: 7, fontFamily: "Cairo_700Bold", color: "#fff" },
   fmtBadge: { position: "absolute", top: 6, left: 6, paddingHorizontal: 5, paddingVertical: 2, borderRadius: 6 },
   fmtText: { fontSize: 7, fontFamily: "Cairo_700Bold", color: "#fff" },
-  cardBottom: { position: "absolute", bottom: 0, left: 0, right: 0, padding: 6, backgroundColor: "rgba(0,0,0,0.55)" },
-  cardTitle: { fontSize: 9.5, color: "#fff", fontFamily: "Cairo_700Bold", lineHeight: 14 },
+  cardBottom: { position: "absolute", bottom: 0, left: 0, right: 0, paddingHorizontal: 7, paddingVertical: 6, backgroundColor: "rgba(0,0,0,0.72)", gap: 2 },
+  cardTitle: { fontSize: Math.max(9.5, Math.round(10.5 * s)), color: "#fff", fontFamily: "Cairo_700Bold", lineHeight: Math.round(14 * s), textAlign: "left" },
+  cardTitleAr: { fontSize: Math.max(8.5, Math.round(9.5 * s)), color: "rgba(255,255,255,0.82)", fontFamily: "Cairo_700Bold", lineHeight: Math.round(13.5 * s), textAlign: "right", writingDirection: "rtl" },
   idleWrap: { alignItems: "center", paddingTop: 20 },
   idleIcon: { width: 72, height: 72, borderRadius: 24, backgroundColor: colors.accentSurface, borderWidth: 1, borderColor: colors.accentBorder, alignItems: "center", justifyContent: "center", marginBottom: 16 },
   idleText: { fontSize: 16, fontFamily: "Cairo_700Bold", color: colors.textSecondary, marginBottom: 6 },

@@ -215,6 +215,7 @@ export function TvPressable({
   return (
     <Pressable
       {...props}
+      unstable_pressDelay={0}
       focusable={tv ? focusable !== false : focusable}
       hasTVPreferredFocus={tv && hasTVPreferredFocus}
       hitSlop={props.hitSlop ?? 8}
@@ -251,13 +252,15 @@ export function TvFocusGuideView({
 
 export function tvLayout(width: number, height: number) {
   const tv = isTvDevice(width, height);
+  const wide = width >= 700;
+  const hPad = tv && wide ? 32 : wide ? 24 : 16;
   return {
     tv,
-    contentWidth: tv ? Math.min(Math.max(width - 64, 0), 1440) : width,
-    horizontalPadding: tv ? 32 : 16,
-    controlHeight: tv ? 50 : 44,
-    textScale: tv ? 1.12 : 1,
-    sectionGap: tv ? 24 : 22,
+    contentWidth: tv && wide ? Math.min(Math.max(width - 64, 0), 1440) : width,
+    horizontalPadding: hPad,
+    controlHeight: tv && wide ? 48 : 42,
+    textScale: tv && wide ? 1.1 : 1,
+    sectionGap: tv && wide ? 24 : 20,
   };
 }
 
@@ -288,8 +291,8 @@ export function scaleByDevice(baseValue: number, width?: number, height?: number
 
 /**
  * Central responsive + ten-foot UI metrics.
- * On TV (`tv`), scales cleanly within a balanced 1.15x–1.35x range so icons,
- * cards, and text fit harmoniously without overflowing or crowding.
+ * Scales proportionally to the actual screen width so phones, iPads/tablets,
+ * and TV screens all have balanced icon, text, and button sizes.
  */
 export function responsiveScale(
   phoneValue: number,
@@ -297,15 +300,14 @@ export function responsiveScale(
   tv: boolean,
   tvValue?: number,
 ) {
-  if (!tv) {
+  if (!tv || width < 600) {
     const factor = getDeviceScale(width);
     return Math.round(phoneValue * factor);
   }
-  const tvScaleFactor = Math.max(1.15, Math.min(1.35, width / 960));
+  const tvScaleFactor = Math.max(1.06, Math.min(1.24, width / 960));
   if (tvValue !== undefined) {
-    // Prevent legacy hardcoded oversized tvValues from blowing up the layout
-    const cappedTvValue = Math.min(tvValue, Math.round(phoneValue * 1.42));
-    return cappedTvValue;
+    const cappedTvValue = Math.min(tvValue, Math.round(phoneValue * 1.28));
+    return Math.round(Math.min(cappedTvValue, phoneValue * tvScaleFactor));
   }
   return Math.round(phoneValue * tvScaleFactor);
 }
@@ -326,8 +328,8 @@ export function useTvMetrics() {
     isTablet,
     deviceScale,
     size,
-    horizontalPadding: size(16, 32),
-    controlTarget: size(42, 50),
+    horizontalPadding: size(16, 28),
+    controlTarget: size(40, 48),
   };
 }
 

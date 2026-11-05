@@ -1792,45 +1792,41 @@ export default function SettingsScreen() {
           ))}
         </View>
 
-        {/* ── التبرع ودعم التطبيق عبر قناة تلجرام الرسمية ── */}
+        {/* ── زر التبرع ودعم التطبيق ── */}
         <View style={{ paddingHorizontal: 16, marginTop: 14 }}>
-            <Pressable
-              testID="open-donation-modal"
-              style={ts.donationCard}
-              onPress={() => Linking.openURL("https://t.me/Anime_NOVA_0").catch(() => {})}
-            >
-              <View style={{ flexDirection: ROW_RTL, alignItems: "center", gap: 11 }}>
-                <View style={ts.donationIconBox}>
-                  <Ionicons name="paper-plane" size={18} color="#10b981" />
-                </View>
-                <View style={{ flex: 1, minWidth: 0, alignItems: "flex-end" }}>
-                  <Text
-                    style={[ts.donationTitle, theme === "white" && { color: "#065f46" }]}
-                    numberOfLines={1}
-                    adjustsFontSizeToFit
-                    minimumFontScale={0.8}
-                  >
-                    انضم لقناتنا وادعم التطبيق على تلجرام ❤️
-                  </Text>
-                  <Text
-                    style={[ts.donationSub, theme === "white" && { color: "#047857" }]}
-                    numberOfLines={2}
-                  >
-                    تابع أحدث التحديثات ودعم السيرفرات عبر قناتنا الرسمية
-                  </Text>
-                </View>
+          <Pressable
+            testID="open-donation-modal"
+            focusable={tvMode}
+            style={({ focused }) => [ts.donationCard, tvMode && tvFocusStyle(focused)]}
+            onPress={() => setShowDonation(true)}
+          >
+            <View style={{ flexDirection: ROW_RTL, alignItems: "center", gap: 11 }}>
+              <View style={ts.donationIconBox}>
+                <Ionicons name="heart" size={18} color="#10b981" />
               </View>
-              <View style={ts.donationBottomRow}>
-                <View style={ts.donationPillBtn}>
-                  <Text style={ts.donationPillBtnText}>زيارة القناة</Text>
-                  <Ionicons name="chevron-back" size={12} color="#10b981" style={{ transform: [{ scaleX: -1 }] }} />
-                </View>
-                <Text style={ts.donationLinkHint} numberOfLines={1}>
-                  t.me/Anime_NOVA_0
+              <View style={{ flex: 1, minWidth: 0, alignItems: "flex-end" }}>
+                <Text
+                  style={[ts.donationTitle, theme === "white" && { color: "#065f46" }]}
+                  numberOfLines={1}
+                  adjustsFontSizeToFit
+                  minimumFontScale={0.8}
+                >
+                  ادعمني ليستمر التطبيق بالعمل مجاناً ❤️
+                </Text>
+                <Text
+                  style={[ts.donationSub, theme === "white" && { color: "#047857" }]}
+                  numberOfLines={2}
+                >
+                  ادعم خوادم المشاهدة والتحميل بنجوم أو هدايا تلجرام
                 </Text>
               </View>
-            </Pressable>
-          </View>
+              <View style={ts.donationPillBtn}>
+                <Text style={ts.donationPillBtnText}>ادعم الآن</Text>
+                <Ionicons name="chevron-back" size={12} color="#10b981" style={{ transform: [{ scaleX: -1 }] }} />
+              </View>
+            </View>
+          </Pressable>
+        </View>
 
         {/* ══════ المظهر ══════ */}
         <SectionHeader title="المظهر" icon="المظهر" />
@@ -2231,7 +2227,11 @@ export default function SettingsScreen() {
                     </Text>
                   </View>
                 </View>
-                <Pressable onPress={() => setShowDonation(false)} style={ts.donationCloseBtn}>
+                <Pressable
+                  onPress={() => setShowDonation(false)}
+                  focusable={tvMode}
+                  style={({ focused }) => [ts.donationCloseBtn, tvMode && tvFocusStyle(focused)]}
+                >
                   <Ionicons name="close" size={18} color="#cbd5e1" />
                 </Pressable>
               </View>
@@ -2262,8 +2262,14 @@ export default function SettingsScreen() {
                   return (
                     <Pressable
                       key={tier.id}
+                      focusable={tvMode}
+                      hasTVPreferredFocus={tvMode && tier.id === "1"}
                       onPress={() => setSelectedDonationTier(tier.id)}
-                      style={[ts.donationTierCard, active && ts.donationTierCardActive]}
+                      style={({ focused }) => [
+                        ts.donationTierCard,
+                        active && ts.donationTierCardActive,
+                        tvMode && tvFocusStyle(focused),
+                      ]}
                     >
                       <Text style={[ts.donationTierPrice, active && { color: "#0ea5e9" }]}>{tier.price}</Text>
                       <Text style={ts.donationTierStars}>{tier.stars}</Text>
@@ -2287,8 +2293,9 @@ export default function SettingsScreen() {
                 </View>
 
                 <Pressable
+                  focusable={tvMode}
                   onPress={() => void Linking.openURL("https://t.me/ANIME_N0VA").catch(() => {})}
-                  style={ts.donationGoTelegramBtn}
+                  style={({ focused }) => [ts.donationGoTelegramBtn, tvMode && tvFocusStyle(focused)]}
                 >
                   <Ionicons name="open-outline" size={16} color="#ffffff" />
                   <Text style={ts.donationGoTelegramText}>اذهب إلى تلجرام</Text>
@@ -2297,6 +2304,7 @@ export default function SettingsScreen() {
 
               {/* Share App Button */}
               <Pressable
+                focusable={tvMode}
                 onPress={() => {
                   void Share.share({
                     message: `Anime NOVA — شاهد الأنمي واكتشف أحدث الحلقات مجاناً\n${OFFICIAL_SITE}`,
@@ -2304,7 +2312,7 @@ export default function SettingsScreen() {
                   }).catch(() => {});
                   showToast("تم نسخ رابط التطبيق للمشاركة ✓");
                 }}
-                style={ts.donationShareBtn}
+                style={({ focused }) => [ts.donationShareBtn, tvMode && tvFocusStyle(focused)]}
               >
                 <Text style={ts.donationShareBtnText}>نسخ رابط التطبيق ومشاركته مع أصدقائك</Text>
               </Pressable>

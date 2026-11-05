@@ -287,7 +287,13 @@ export default function StardimaServersScreen() {
     return [...groups.entries()];
   }, [servers]);
 
+  const pickerOpenedAtRef = useRef(Date.now());
+  useEffect(() => {
+    pickerOpenedAtRef.current = Date.now();
+  }, [episodeId, providerTitleId]);
+
   const chooseServer = useCallback(async (server: CatalogServer) => {
+    if (tvMode && Date.now() - pickerOpenedAtRef.current < 750) return;
     const serverId = String(server.id || "");
     if (!serverId || !safePageUrl(server.page_url) || openingServerId) return;
     setOpeningServerId(serverId);

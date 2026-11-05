@@ -20,15 +20,14 @@ type Props = {
 };
 
 export function getRailCardWidth(windowWidth: number, visibleCards = 3, gap = 10) {
-  // Keep the same card density on phones, tablets, and ten-foot screens.
-  // A 4K TV can report a very wide logical window, so cap the decoded card
-  // size instead of stretching posters until they become blurry and heavy.
   const wideLayout = windowWidth >= 700;
   const maxRailWidth = wideLayout ? 1400 : 960;
-  const railWidth = Math.min(Math.max(windowWidth - (wideLayout ? 80 : 32), 0), maxRailWidth);
-  const targetVisibleCards = wideLayout ? (windowWidth >= 1200 ? 6 : 5) : visibleCards;
-  const minCardWidth = wideLayout ? 128 : 96;
-  const maxCardWidth = wideLayout ? 185 : 180;
+  const sidePad = windowWidth >= 900 ? 64 : windowWidth >= 600 ? 44 : 32;
+  const railWidth = Math.min(Math.max(windowWidth - sidePad, 0), maxRailWidth);
+  const targetVisibleCards =
+    windowWidth >= 1200 ? 6 : windowWidth >= 900 ? 5 : windowWidth >= 600 ? 4 : visibleCards;
+  const minCardWidth = wideLayout ? 124 : 96;
+  const maxCardWidth = wideLayout ? 185 : 165;
   const calculated = Math.floor((railWidth - gap * (targetVisibleCards - 1)) / targetVisibleCards);
   return Math.max(minCardWidth, Math.min(maxCardWidth, calculated));
 }
@@ -36,17 +35,15 @@ export function getRailCardWidth(windowWidth: number, visibleCards = 3, gap = 10
 export function getRailSidePadding(windowWidth: number) {
   const wideLayout = windowWidth >= 700;
   const maxRailWidth = wideLayout ? 1400 : 960;
-  const railWidth = Math.min(Math.max(windowWidth - (wideLayout ? 80 : 32), 0), maxRailWidth);
-  return Math.max(wideLayout ? 40 : 16, Math.floor((windowWidth - railWidth) / 2));
+  const sidePad = windowWidth >= 900 ? 64 : windowWidth >= 600 ? 44 : 32;
+  const railWidth = Math.min(Math.max(windowWidth - sidePad, 0), maxRailWidth);
+  return Math.max(windowWidth >= 900 ? 32 : windowWidth >= 600 ? 22 : 16, Math.floor((windowWidth - railWidth) / 2));
 }
 
-export function getGridColumnCount(windowWidth: number, windowHeight: number) {
-  if (isTvDevice(windowWidth, windowHeight)) {
-    const contentWidth = Math.min(Math.max(windowWidth - 80, 0), 1440);
-    return Math.max(5, Math.min(7, Math.floor((contentWidth + 10) / 205)));
-  }
-  if (windowWidth >= 1024) return 5;
-  if (windowWidth >= 600) return 4;
+export function getGridColumnCount(windowWidth: number, _windowHeight?: number) {
+  if (windowWidth >= 1200) return 6;
+  if (windowWidth >= 900) return 5;
+  if (windowWidth >= 560) return 4;
   return 3;
 }
 

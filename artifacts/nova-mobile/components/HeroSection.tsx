@@ -68,15 +68,8 @@ export function HeroSection({ items, initialTVFocus = false }: Props) {
           return (
             <Pressable
               key={anime.id}
-              focusable={tvMode}
-              hasTVPreferredFocus={tvMode && initialTVFocus && index === 0}
-              onFocus={() => {
-                if (tvMode && activeIdx !== index) {
-                  setActiveIdx(index);
-                  scrollRef.current?.scrollTo({ x: index * heroWidth, animated: true });
-                }
-              }}
-              style={({ focused }) => [
+              focusable={false}
+              style={[
                 styles.heroSlide,
                 {
                   width: heroWidth,
@@ -85,7 +78,6 @@ export function HeroSection({ items, initialTVFocus = false }: Props) {
                   borderColor: colors.border,
                   borderWidth: 1,
                 },
-                tvMode && tvFocusStyle(focused),
               ]}
               onPress={() => router.push(`/anime/${anime.id}?title=${encodeURIComponent(anime.title.romaji)}&english=${encodeURIComponent(anime.title.english || "")}`)}
             >
@@ -96,7 +88,7 @@ export function HeroSection({ items, initialTVFocus = false }: Props) {
                 style={StyleSheet.absoluteFill}
                 resizeMode="cover"
                 resizeMethod="resize"
-                fadeDuration={tvMode ? 0 : 400}
+                fadeDuration={tvMode ? 0 : 250}
               />
               <LinearGradient
                 colors={["rgba(9,9,11,0.12)", "rgba(9,9,11,0.52)", "rgba(9,9,11,0.94)"]}
@@ -199,7 +191,14 @@ export function HeroSection({ items, initialTVFocus = false }: Props) {
                     <Pressable
                       onPress={() => router.push({ pathname: "/episodes/[id]", params: { id: anime.id } } as any)}
                       focusable={tvMode}
-                      style={({ focused }) => [
+                      hasTVPreferredFocus={tvMode && initialTVFocus && index === 0}
+                      onFocus={() => {
+                        if (tvMode && activeIdx !== index) {
+                          setActiveIdx(index);
+                          scrollRef.current?.scrollTo({ x: index * heroWidth, animated: false });
+                        }
+                      }}
+                      style={[
                         styles.watchBtn,
                         {
                           paddingHorizontal: Math.round(15 * s),
@@ -207,7 +206,6 @@ export function HeroSection({ items, initialTVFocus = false }: Props) {
                           borderRadius: Math.round(11 * s),
                           gap: Math.round(5 * s),
                         },
-                        tvMode && tvFocusStyle(focused),
                       ]}
                     >
                       <Ionicons name="play" size={Math.round(13.5 * s)} color="#fff" />
@@ -216,7 +214,13 @@ export function HeroSection({ items, initialTVFocus = false }: Props) {
                     <Pressable
                       onPress={() => router.push(`/anime/${anime.id}?title=${encodeURIComponent(anime.title.romaji)}&english=${encodeURIComponent(anime.title.english || "")}`)}
                       focusable={tvMode}
-                      style={({ focused }) => [
+                      onFocus={() => {
+                        if (tvMode && activeIdx !== index) {
+                          setActiveIdx(index);
+                          scrollRef.current?.scrollTo({ x: index * heroWidth, animated: false });
+                        }
+                      }}
+                      style={[
                         styles.detailBtn,
                         {
                           paddingHorizontal: Math.round(13 * s),
@@ -224,7 +228,6 @@ export function HeroSection({ items, initialTVFocus = false }: Props) {
                           borderRadius: Math.round(11 * s),
                           gap: Math.round(5 * s),
                         },
-                        tvMode && tvFocusStyle(focused),
                       ]}
                     >
                       <Ionicons name="information-circle-outline" size={Math.round(14.5 * s)} color="#fff" />

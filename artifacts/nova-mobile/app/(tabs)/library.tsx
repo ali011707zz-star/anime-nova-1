@@ -12,7 +12,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useColors } from "@/hooks/useColors";
 import { historyRoute, useApp } from "@/context/AppContext";
 import { isTvDevice, tvFocusStyle, TvPressable as Pressable, useTvModeOverride } from "@/utils/tv";
-import { getRailCardWidth } from "@/components/AnimeCard";
+import { getGridColumnCount, getRailCardWidth } from "@/components/AnimeCard";
 
 interface FavChar {
   id: number;
@@ -67,9 +67,9 @@ export default function LibraryScreen() {
   const topPad = Platform.OS === "web" ? 0 : Math.max(insets.top, 0);
   const tvMode = isTvDevice(width, height);
   const visibleTabs = TABS;
-  const gridColumns = tvMode ? 5 : 3;
-  const tvPosterWidth = getRailCardWidth(width, 5, 8);
-  const gridWidth = tvMode
+  const gridColumns = getGridColumnCount(width, height);
+  const tvPosterWidth = getRailCardWidth(width, gridColumns, 8);
+  const gridWidth = tvMode && width >= 700
     ? tvPosterWidth * gridColumns + 8 * (gridColumns - 1) + 32
     : Math.min(Math.max(width - 24, 0), 900);
   const router = useRouter();

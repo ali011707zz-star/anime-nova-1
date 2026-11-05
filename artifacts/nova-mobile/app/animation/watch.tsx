@@ -591,8 +591,16 @@ export default function AnimationWatchScreen() {
     return () => clearTimeout(timeout);
   }, [tmdbId, ep, season]);
 
+  const pickerOpenedAtRef = useRef(Date.now());
+  useEffect(() => {
+    if (screen === "picker") {
+      pickerOpenedAtRef.current = Date.now();
+    }
+  }, [screen, tmdbId, ep, season]);
+
   /* ── Resolve and play only the selected source ── */
   const playSrc = useCallback(async (src: AnimSrc) => {
+    if (tvMode && Date.now() - pickerOpenedAtRef.current < 750) return;
     if (!(await ensureWatchAccess())) return;
     let next = src;
     if (src.site && !src.isEmbed) {
@@ -860,7 +868,7 @@ export default function AnimationWatchScreen() {
         onNextEpisode={canGoNextEpisode ? () => {
           const t = encodeURIComponent(titleStr);
           const p = encodeURIComponent(posterUrl);
-          router.replace(`/animation/watch?id=${tmdbId}&type=${type}&ep=${ep + 1}&season=${season}&totalEps=${totalEps}&title=${t}&poster=${p}&autoplay=1` as any);
+          router.replace(`/animation/watch?id=${tmdbId}&type=${type}&ep=${ep + 1}&season=${season}&totalEps=${totalEps}&title=${t}&poster=${p}${tvMode ? "" : "&autoplay=1"}` as any);
         } : undefined}
         onPrevEpisode={type === "tv" && ep > 1 ? () => {
           const t = encodeURIComponent(titleStr);

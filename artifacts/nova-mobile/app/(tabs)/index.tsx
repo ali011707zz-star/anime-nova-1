@@ -89,20 +89,6 @@ export default function HomeScreen() {
     staleTime: 5 * 60 * 1000,
   });
 
-  const { data: seasonal, refetch: refetchS } = useQuery({
-    queryKey: ["seasonal", season, year],
-    queryFn: () => anilistQuery<{ Page: { media: AnilistMedia[] } }>(SEASONAL_QUERY, { season, year }),
-    staleTime: 5 * 60 * 1000,
-  });
-
-
-
-  const { data: topRated, refetch: refetchR } = useQuery({
-    queryKey: ["topRated"],
-    queryFn: () => anilistQuery<{ Page: { media: AnilistMedia[] } }>(TOP_RATED_QUERY),
-    staleTime: 5 * 60 * 1000,
-  });
-
   const { data: movies, refetch: refetchM } = useQuery({
     queryKey: ["animeMovies"],
     queryFn: () => anilistQuery<{ Page: { media: AnilistMedia[] } }>(MOVIES_QUERY),
@@ -272,8 +258,6 @@ export default function HomeScreen() {
     stardimaAnimation.items.slice(0, 7).map((item) => ({ kind: "stardima" as const, item })),
   ), [awDubbedSeries, stardimaAnimation.items]);
   const airingList = airing?.Page?.media || [];
-  const seasonalList = seasonal?.Page?.media || [];
-  const topRatedList = topRated?.Page?.media || [];
   const moviesList = movies?.Page?.media || [];
   const isekaiList = isekai?.Page?.media || [];
 
@@ -294,127 +278,90 @@ export default function HomeScreen() {
 
   const refresh = async () => {
     await Promise.all([
-      refetchT(), refetchP(), refetchA(), refetchS(), refetchR(), refetchM(), refetchIsekai(),
+      refetchT(), refetchP(), refetchA(), refetchM(), refetchIsekai(),
       refetchManhwa(), refetchJpManga(),
       refreshDubbed(true),
     ]);
   };
 
-  type HomeRow = {
-    key: string;
-    title: string;
-    items: AnilistMedia[];
-    onSeeAll: () => void;
-  };
-  const homeRows = useMemo<HomeRow[]>(
-    () => [
-      {
-        key: "airing",
-        title: "يُعرض حالياً",
-        items: airingList,
-        onSeeAll: () => router.push({ pathname: "/browse", params: { status: "RELEASING", sort: "POPULARITY_DESC" } } as any),
-      },
-      {
-        key: "popular",
-        title: "⭐ الأكثر شعبية",
-        items: popularList,
-        onSeeAll: () => router.push({ pathname: "/browse", params: { sort: "POPULARITY_DESC" } } as any),
-      },
+  type HomeSectionItem =
+    | { kind: "continue"; key: string }
+    | { kind: "todayEps"; key: string }
+    | { kind: "animationHome"; key: string }
+    | { kind: "dubbedHome"; key: string }
+    | { kind: "spacetoonHome"; key: string }
+    | { kind: "manhwa"; key: string }
+    | { kind: "manga"; key: string }
+    | { kind: "anilist"; key: string; title: string; items: AnilistMedia[]; onSeeAll: () => void };
 
-      {
-        key: "movies",
-        title: "🎬 أفلام الأنمي",
-        items: moviesList,
-        onSeeAll: () => router.push({ pathname: "/browse", params: { format: "MOVIE", sort: "POPULARITY_DESC" } } as any),
-      },
-      {
-        key: "isekai",
-        title: "إيسيكاي",
-        items: isekaiList,
-        onSeeAll: () => router.push({ pathname: "/browse", params: { genre: "Isekai", genreAr: "إيسيكاي", sort: "POPULARITY_DESC" } } as any),
-      },
-    ],
-    [airingList, isekaiList, moviesList, popularList, router],
-  );
+  const homeSections = useMemo<HomeSectionItem[]>(() => {
+    const sections: HomeSectionItem[] = [];
+    if (recentHistory.length > 0) sections.push({ kind: "continue", key: "continue" });
+    if (todayEps.length > 0 || todayChecking) sections.push({ kind: "todayEps", key: "todayEps" });
+    if (animationHomeRows.length > 0) sections.push({ kind: "animationHome", key: "animationHome" });
+    if (dubbedHomeRows.length > 0) sections.push({ kind: "dubbedHome", key: "dubbedHome" });
+    if (spacetoonHomeItems.length > 0) sections.push({ kind: "spacetoonHome", key: "spacetoonHome" });
+    if (!isTvLayout && manhwaItems.length > 0) sections.push({ kind: "manhwa", key: "manhwa" });
+    if (!isTvLayout && mangaItems.length > 0) sections.push({ kind: "manga", key: "manga" });
+    if (!isLoading) {
+      sections.push(
+        {
+          kind: "anilist",
+          key: "airing",
+          title: "يُعرض حالياً",
+          items: airingList,
+          onSeeAll: () => router.push({ pathname: "/browse", params: { status: "RELEASING", sort: "POPULARITY_DESC" } } as any),
+        },
+        {
+          kind: "anilist",
+          key: "popular",
+          title: "⭐ الأكثر شعبية",
+          items: popularList,
+          onSeeAll: () => router.push({ pathname: "/browse", params: { sort: "POPULARITY_DESC" } } as any),
+        },
+        {
+          kind: "anilist",
+          key: "movies",
+          title: "🎬 أفلام الأنمي",
+          items: moviesList,
+          onSeeAll: () => router.push({ pathname: "/browse", params: { format: "MOVIE", sort: "POPULARITY_DESC" } } as any),
+        },
+        {
+          kind: "anilist",
+          key: "isekai",
+          title: "إيسيكاي",
+          items: isekaiList,
+          onSeeAll: () => router.push({ pathname: "/browse", params: { genre: "Isekai", genreAr: "إيسيكاي", sort: "POPULARITY_DESC" } } as any),
+        },
+      );
+    }
+    return sections;
+  }, [
+    recentHistory.length,
+    todayEps.length,
+    todayChecking,
+    animationHomeRows.length,
+    dubbedHomeRows.length,
+    spacetoonHomeItems.length,
+    isTvLayout,
+    manhwaItems.length,
+    mangaItems.length,
+    isLoading,
+    airingList,
+    popularList,
+    moviesList,
+    isekaiList,
+    router,
+  ]);
 
-  return (
-    <View style={[styles.container, { backgroundColor: colors.background }]}>
-      <FlatList
-        data={isLoading ? [] : homeRows}
-        keyExtractor={(item) => item.key}
-        initialNumToRender={4}
-        maxToRenderPerBatch={3}
-        windowSize={4}
-        removeClippedSubviews={Platform.OS === "android"}
-        renderItem={({ item }) => (
-          <SectionRow title={item.title} items={item.items} size="md" onSeeAll={item.onSeeAll} />
-        )}
-        ListHeaderComponent={
-          <View>
-        {/* Header */}
-        <View style={[styles.header, { paddingTop: topPad + 6, paddingHorizontal: scaleSize(14, 40), flexDirection: I18nManager.isRTL ? "row-reverse" : "row" }]}>
-          <Pressable
-            accessibilityLabel="فتح القائمة"
-            onPress={() => setShowDrawer(true)}
-            focusable={isTvLayout}
-            hitSlop={isTvLayout ? 10 : 6}
-            style={({ focused }) => [
-              styles.iconBtn,
-              {
-                width: scaleSize(42, 54),
-                height: scaleSize(42, 54),
-                borderRadius: scaleSize(13, 16),
-                backgroundColor: colors.surface,
-                borderColor: colors.border,
-              },
-              isTvLayout && tvFocusStyle(focused),
-            ]}
-          >
-            <Ionicons name="menu" size={scaleSize(21, 28)} color={colors.text} />
-          </Pressable>
-          <View style={styles.headerSpacer} />
-          <View style={styles.headerBrandGroup}>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="البحث عن أنمي"
-              onPress={() => router.push("/(tabs)/search" as any)}
-              focusable={isTvLayout}
-              style={({ focused }) => [
-                styles.headerSearch,
-                {
-                  height: scaleSize(38, 48),
-                  width: scaleSize(116, 180),
-                  borderRadius: scaleSize(13, 16),
-                  backgroundColor: colors.input,
-                  borderColor: colors.border,
-                },
-                isTvLayout && tvFocusStyle(focused),
-              ]}
-            >
-              <Ionicons name="search" size={scaleSize(14, 18)} color={colors.textMuted} />
-              <Text style={[styles.headerSearchInput, { fontSize: scaleSize(12, 16), color: colors.textMuted }]} numberOfLines={1}>
-                ...بحث
-              </Text>
-            </Pressable>
-            <View style={styles.logoRow}>
-              <View style={[styles.logoAccent, { height: scaleSize(22, 30), backgroundColor: "#06b6d4" }]} />
-              <Text style={[styles.logoText, { fontSize: scaleSize(15, 22), color: colors.text }]}>
-                ANIME <Text style={{ color: "#06b6d4" }}>NOVA</Text>
-              </Text>
-            </View>
-          </View>
-        </View>
-
-        {!isTvLayout && <AnnouncementBanner />}
-
-        {isLoading ? (
-          <View style={{ height: 420, backgroundColor: colors.card }} />
-        ) : (
-          <HeroSection items={heroItems} initialTVFocus={isTvLayout && ready} />
-        )}
-
+  const renderHomeSection = ({ item: section }: { item: HomeSectionItem }) => {
+    if (section.kind === "anilist") {
+      return <SectionRow title={section.title} items={section.items} size="md" onSeeAll={section.onSeeAll} />;
+    }
+    return (
+      <View>
         {/* Continue Watching */}
-        {recentHistory.length > 0 && (
+        {section.kind === "continue" && recentHistory.length > 0 && (
           <View style={{ marginTop: scaleSize(18, 28) }}>
             <SectionHeader
               onSeeAll={() => router.push("/(tabs)/library")}
@@ -573,7 +520,7 @@ export default function HomeScreen() {
         )}
 
         {/* أحدث الحلقات — AnimeSlayer (مطابق للويب) */}
-        {(todayEps.length > 0 || todayChecking) && (
+        {section.kind === "todayEps" && (todayEps.length > 0 || todayChecking) && (
           <View style={{ marginTop: 24 }}>
             <SectionHeader
               onSeeAll={() => router.push("/latest" as any)}
@@ -634,7 +581,7 @@ export default function HomeScreen() {
         )}
 
         {/* ── الأقسام المدبلجة — مباشرة بعد أحدث الحلقات ── */}
-        {animationHomeRows.length > 0 && (
+        {section.kind === "animationHome" && animationHomeRows.length > 0 && (
           <View style={{ marginTop: 24, marginBottom: 24 }}>
             <SectionHeader
               onSeeAll={() => router.push("/aw-dubbed" as any)}
@@ -740,7 +687,7 @@ export default function HomeScreen() {
           </View>
         )}
 
-        {dubbedHomeRows.length > 0 && (
+        {section.kind === "dubbedHome" && dubbedHomeRows.length > 0 && (
           <View style={{ marginBottom: 24 }}>
             <SectionHeader
               onSeeAll={() => router.push({ pathname: "/aw-dubbed" as any, params: { tab: "cartoon" } })}
@@ -834,7 +781,7 @@ export default function HomeScreen() {
         )}
 
         {/* ── سبيستون مدبلج ── */}
-        {spacetoonHomeItems.length > 0 && (
+        {section.kind === "spacetoonHome" && spacetoonHomeItems.length > 0 && (
           <View style={{ marginBottom: 24 }}>
             <SectionHeader
               onSeeAll={() => router.push({ pathname: "/aw-dubbed" as any, params: { tab: "spacetoon" } })}
@@ -916,7 +863,7 @@ export default function HomeScreen() {
         )}
 
         {/* ── Manhwa Section (مانهوا — مخفية في وضع التلفاز) ── */}
-        {!isTvLayout && manhwaItems.length > 0 && (
+        {section.kind === "manhwa" && !isTvLayout && manhwaItems.length > 0 && (
           <View style={{ marginBottom: 24 }}>
             <SectionHeader
               onSeeAll={() => router.push({ pathname: "/manga" as any, params: { tab: "manhwa" } })}
@@ -983,7 +930,7 @@ export default function HomeScreen() {
         )}
 
         {/* ── Manga Section (مانجا مترجمة — مخفية في وضع التلفاز) ── */}
-        {!isTvLayout && mangaItems.length > 0 && (
+        {section.kind === "manga" && !isTvLayout && mangaItems.length > 0 && (
           <View style={{ marginBottom: 24 }}>
             <SectionHeader
               onSeeAll={() => router.push("/manga" as any)}
@@ -1032,16 +979,85 @@ export default function HomeScreen() {
             />
           </View>
         )}
+      </View>
+    );
+  };
 
-        <View style={{ marginTop: 24 }}>
-          {isLoading && (
-            <>
-              <SkeletonRow />
-              <SkeletonRow />
-              <SkeletonRow />
-            </>
-          )}
-        </View>
+  return (
+    <View style={[styles.container, { backgroundColor: colors.background }]}>
+      <FlatList
+        data={homeSections}
+        keyExtractor={(item) => item.key}
+        renderItem={renderHomeSection}
+        ListHeaderComponent={
+          <View>
+            {/* Header */}
+            <View style={[styles.header, { paddingTop: topPad + 6, paddingHorizontal: scaleSize(14, 40), flexDirection: I18nManager.isRTL ? "row-reverse" : "row" }]}>
+              <Pressable
+                accessibilityLabel="فتح القائمة"
+                onPress={() => setShowDrawer(true)}
+                focusable={isTvLayout}
+                hitSlop={isTvLayout ? 10 : 6}
+                style={[
+                  styles.iconBtn,
+                  {
+                    width: scaleSize(42, 54),
+                    height: scaleSize(42, 54),
+                    borderRadius: scaleSize(13, 16),
+                    backgroundColor: colors.surface,
+                    borderColor: colors.border,
+                  },
+                ]}
+              >
+                <Ionicons name="menu" size={scaleSize(21, 28)} color={colors.text} />
+              </Pressable>
+              <View style={styles.headerSpacer} />
+              <View style={styles.headerBrandGroup}>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="البحث عن أنمي"
+                  onPress={() => router.push("/(tabs)/search" as any)}
+                  focusable={isTvLayout}
+                  style={[
+                    styles.headerSearch,
+                    {
+                      height: scaleSize(38, 48),
+                      width: scaleSize(116, 180),
+                      borderRadius: scaleSize(13, 16),
+                      backgroundColor: colors.input,
+                      borderColor: colors.border,
+                    },
+                  ]}
+                >
+                  <Ionicons name="search" size={scaleSize(14, 18)} color={colors.textMuted} />
+                  <Text style={[styles.headerSearchInput, { fontSize: scaleSize(12, 16), color: colors.textMuted }]} numberOfLines={1}>
+                    ...بحث
+                  </Text>
+                </Pressable>
+                <View style={styles.logoRow}>
+                  <View style={[styles.logoAccent, { height: scaleSize(22, 30), backgroundColor: "#06b6d4" }]} />
+                  <Text style={[styles.logoText, { fontSize: scaleSize(15, 22), color: colors.text }]}>
+                    ANIME <Text style={{ color: "#06b6d4" }}>NOVA</Text>
+                  </Text>
+                </View>
+              </View>
+            </View>
+
+            {!isTvLayout && <AnnouncementBanner />}
+
+            {isLoading ? (
+              <View style={{ height: 420, backgroundColor: colors.card }} />
+            ) : (
+              <HeroSection items={heroItems} initialTVFocus={isTvLayout && ready} />
+            )}
+
+            {isLoading && (
+              <View style={{ marginTop: 24 }}>
+                <SkeletonRow />
+                <SkeletonRow />
+                <SkeletonRow />
+              </View>
+            )}
           </View>
         }
         ListFooterComponent={<View style={{ height: 90 }} />}
@@ -1050,7 +1066,7 @@ export default function HomeScreen() {
         removeClippedSubviews={Platform.OS === "android" && !isTvLayout}
         initialNumToRender={3}
         maxToRenderPerBatch={2}
-        updateCellsBatchingPeriod={50}
+        updateCellsBatchingPeriod={40}
         windowSize={5}
       />
       <DrawerMenu visible={showDrawer} onClose={() => setShowDrawer(false)} />

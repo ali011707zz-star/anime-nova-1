@@ -534,7 +534,15 @@ export default function DubbedWatchScreen() {
     return null;
   }, [epUrl, isCarateenSource, playbackTraceId, resolveCarateenMedia]);
 
+  const pickerOpenedAtRef = useRef(Date.now());
+  useEffect(() => {
+    if (screen === "picker") {
+      pickerOpenedAtRef.current = Date.now();
+    }
+  }, [screen, epUrl, episodeId]);
+
   const handlePickSlot = useCallback(async (slot: DubbedServerSlot) => {
+    if (tvMode && Date.now() - pickerOpenedAtRef.current < 750) return;
     if (slot.state === "fetching") return;
     checkCtrlRef.current?.abort();
     ctrlRef.current?.abort();

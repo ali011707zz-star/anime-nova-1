@@ -47,8 +47,6 @@ Thumbs.db
 # Replit
 .cache/
 .local/
-<<<<<<< HEAD
-=======
 .replit
 replit.nix
 
@@ -61,6 +59,7 @@ anime-nova-1/artifacts/api-server/bin/
 # Attached assets (screenshots/videos from chat - not needed in repo)
 attached_assets/
 anime-nova-1/attached_assets/
+public/assets/aistudio/
 
 # Agent memory files — may contain API keys/tokens from research (never commit)
 .agents/
@@ -80,7 +79,11 @@ nova-player-build-final/
 *.apk
 *.keystore
 *.jks
->>>>>>> 22277ebee9275f51cb7b54c9b3300c5144e2c175
+artifacts/nova-mobile/google-services.json
+
+# JADX input/output for the archived Nova Mobile 2 reference project (contains
+# embedded third-party keys and the original APK binary)
+archive/prototypes/nova-mobile-2/extracted/
 
 # ── أسرار — لا تُرفع أبداً ──
 .env.prev

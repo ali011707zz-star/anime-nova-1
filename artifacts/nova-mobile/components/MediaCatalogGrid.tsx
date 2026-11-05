@@ -173,8 +173,7 @@ export function MediaCatalogGrid({
   const router = useRouter();
   const { width, height } = useWindowDimensions();
   const tvMode = isTvDevice(width, height);
-  const isTablet = !tvMode && Math.min(width, height) >= 600;
-  const columns = tvMode ? 5 : isTablet ? 4 : 3;
+  const columns = width >= 1200 ? 6 : width >= 900 ? 5 : width >= 560 ? 4 : 3;
   const gridWidth = Math.max(0, width - 32);
   const cardGap = 12;
   const cardWidth = Math.floor((gridWidth - cardGap * (columns - 1)) / columns);
@@ -186,7 +185,6 @@ export function MediaCatalogGrid({
   const [error, setError] = useState(false);
   const [page, setPage] = useState(1);
   const [hasMore, setHasMore] = useState(true);
-  const [focusedItemId, setFocusedItemId] = useState<number | string | null>(null);
   const requestSequence = useRef(0);
   const controllerRef = useRef<AbortController | null>(null);
 
@@ -379,13 +377,10 @@ export function MediaCatalogGrid({
       <Pressable
         testID={`catalog-item-${item.id}`}
         onPress={() => openMedia(item)}
-        onFocus={() => setFocusedItemId(item.id)}
-        onBlur={() => setFocusedItemId((current) => current === item.id ? null : current)}
         focusable={tvMode}
         style={[
           styles.card,
           { width: cardWidth },
-          tvMode && tvFocusStyle(focusedItemId === item.id),
         ]}
       >
         <View style={[styles.poster, { height: posterHeight, backgroundColor: colors.surface, borderColor: colors.border }]}>

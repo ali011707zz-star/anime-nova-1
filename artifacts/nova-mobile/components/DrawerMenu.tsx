@@ -81,7 +81,11 @@ export function DrawerMenu({ visible, onClose }: Props) {
   useTvModeOverride();
   const { width: winW, height: winH } = useWindowDimensions();
   const tvMode = isTvDevice(winW, winH);
-  const drawerWidth = tvMode ? Math.min(winW * 0.42, 460) : DRAWER_W;
+  const drawerWidth = tvMode && winW >= 700
+    ? Math.min(winW * 0.40, 420)
+    : winW >= 600
+      ? Math.min(winW * 0.46, 360)
+      : Math.min(winW * 0.80, 315);
   const topPad = Platform.OS === "web" ? 0 : insets.top;
   const { watchHistory, favorites, theme, currentUser } = useApp();
   const colors = useColors();
@@ -110,7 +114,7 @@ export function DrawerMenu({ visible, onClose }: Props) {
   React.useEffect(() => {
     if (!visible) return;
     let isMounted = true;
-    (async () => {
+    const timer = setTimeout(async () => {
       let localUser: any = null;
       let overrideData: any = null;
       try {
@@ -150,8 +154,11 @@ export function DrawerMenu({ visible, onClose }: Props) {
           }));
         }
       } catch {}
-    })();
-    return () => { isMounted = false; };
+    }, 220);
+    return () => {
+      isMounted = false;
+      clearTimeout(timer);
+    };
   }, [visible, currentUser]);
 
   const colorIdx = Math.min((userData?.avatarColor ?? 0) % AVATAR_COLORS.length, AVATAR_COLORS.length - 1);
@@ -169,31 +176,24 @@ export function DrawerMenu({ visible, onClose }: Props) {
 
   useEffect(() => {
     if (visible) {
+      slideX.setValue(drawerWidth);
       Animated.parallel([
         Animated.timing(slideX, {
           toValue: 0,
-          duration: 180,
-          easing: Easing.bezier(0.22, 1, 0.36, 1),
+          duration: 165,
+          easing: Easing.out(Easing.cubic),
           useNativeDriver: true,
         }),
-        Animated.timing(opacity, { toValue: 1, duration: 140, useNativeDriver: true }),
+        Animated.timing(opacity, { toValue: 1, duration: 130, useNativeDriver: true }),
       ]).start();
     } else {
-      Animated.parallel([
-        Animated.timing(slideX, {
-          toValue: drawerWidth,
-          duration: 150,
-          easing: Easing.bezier(0.4, 0, 1, 1),
-          useNativeDriver: true,
-        }),
-        Animated.timing(opacity, { toValue: 0, duration: 130, useNativeDriver: true }),
-      ]).start();
+      opacity.setValue(0);
     }
-  }, [drawerWidth, visible]);
+  }, [drawerWidth, opacity, slideX, visible]);
 
   function nav(route: string) {
     onClose();
-    setTimeout(() => router.push(route as any), 150);
+    requestAnimationFrame(() => router.push(route as any));
   }
 
   if (!visible) return null;

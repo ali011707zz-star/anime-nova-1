@@ -878,302 +878,301 @@ export default function EpisodeListScreen() {
           </View>
         </View>
         <View style={ep_s.topBarLeftTools}>
-          <Pressable
-            onPress={scrollToTop}
-            style={({ pressed }) => [ep_s.topBarJumpBtn, pressed && { opacity: 0.8 }]}
-            accessibilityRole="button"
-            accessibilityLabel="التمرير للأعلى"
-          >
-            <Ionicons name="chevron-up" size={15} color={colors.textPrimary} />
-          </Pressable>
-          <Pressable
-            onPress={scrollToBottom}
-            style={({ pressed }) => [ep_s.topBarJumpBtn, pressed && { opacity: 0.8 }]}
-            accessibilityRole="button"
-            accessibilityLabel="التمرير للأسفل"
-          >
-            <Ionicons name="chevron-down" size={15} color={colors.textPrimary} />
-          </Pressable>
-          <Pressable
-            onPress={() => {
-              setSortOrder(current => current === "asc" ? "desc" : "asc");
-              episodeListRef.current?.scrollToOffset({ offset: 0, animated: false });
-            }}
-            focusable={tvMode}
-            testID="anime-episode-sort"
-            accessibilityRole="button"
-            accessibilityLabel={`ترتيب الحلقات: ${sortOrder === "asc" ? "الأقدم أولاً" : "الأحدث أولاً"}`}
-            style={({ focused, pressed }) => [
-              ep_s.topBarSort,
-              tvMode && ep_s.tvTopBarSort,
-              tvMode && tvFocusStyle(focused),
-              pressed && { opacity: 0.84 },
-            ]}
-          >
-            <Text style={[ep_s.topBarSortText, tvMode && ep_s.tvText, { color: colors.textPrimary }]}>
-              {sortOrder === "asc" ? "الأقدم" : "الأحدث"}
-            </Text>
-            <Ionicons name="swap-vertical" size={tvMode ? 20 : 13} color={colors.textPrimary} />
-          </Pressable>
-        </View>
-      </View>
+              <Pressable
+                onPress={scrollToTop}
+                focusable={tvMode}
+                style={({ focused, pressed }) => [ep_s.topBarJumpBtn, tvMode && tvFocusStyle(focused), pressed && { opacity: 0.8 }]}
+                accessibilityRole="button"
+                accessibilityLabel="التمرير للأعلى"
+              >
+                <Ionicons name="chevron-up" size={15} color={colors.textPrimary} />
+              </Pressable>
+              <Pressable
+                onPress={scrollToBottom}
+                focusable={tvMode}
+                style={({ focused, pressed }) => [ep_s.topBarJumpBtn, tvMode && tvFocusStyle(focused), pressed && { opacity: 0.8 }]}
+                accessibilityRole="button"
+                accessibilityLabel="التمرير للأسفل"
+              >
+                <Ionicons name="chevron-down" size={15} color={colors.textPrimary} />
+              </Pressable>
+              <Pressable
+                onPress={() => {
+                  setSortOrder(current => current === "asc" ? "desc" : "asc");
+                  episodeListRef.current?.scrollToOffset({ offset: 0, animated: false });
+                }}
+                focusable={tvMode}
+                testID="anime-episode-sort"
+                accessibilityRole="button"
+                accessibilityLabel={`ترتيب الحلقات: ${sortOrder === "asc" ? "الأقدم أولاً" : "الأحدث أولاً"}`}
+                style={({ focused, pressed }) => [
+                  ep_s.topBarSort,
+                  tvMode && ep_s.tvTopBarSort,
+                  tvMode && tvFocusStyle(focused),
+                  pressed && { opacity: 0.84 },
+                ]}
+              >
+                <Text style={[ep_s.topBarSortText, tvMode && ep_s.tvText, { color: colors.textPrimary }]}>
+                  {sortOrder === "asc" ? "الأقدم" : "الأحدث"}
+                </Text>
+                <Ionicons name="swap-vertical" size={tvMode ? 20 : 13} color={colors.textPrimary} />
+              </Pressable>
+            </View>
+          </View>
 
-      {/* ── Hero Banner ── */}
-      <View style={[ep_s.hero, tvMode && ep_s.tvHero]}>
-        {(selectedAnime?.bannerImage || selectedAnime?.coverImage?.extraLarge || selectedAnime?.coverImage?.large) ? (
-          <Image
-            source={{ uri: selectedAnime.bannerImage || selectedAnime.coverImage?.extraLarge || selectedAnime.coverImage?.large }}
-            style={StyleSheet.absoluteFill}
-            resizeMode="cover"
-          />
-        ) : null}
-        <LinearGradient
-          colors={["rgba(9,9,11,0.18)", "rgba(9,9,11,0.68)", colors.background]}
-          style={StyleSheet.absoluteFill}
-        />
-
-        {/* Cover (Right) + info + progress */}
-        <View style={[ep_s.heroBottom, tvMode && ep_s.tvHeroBottom]}>
-          <View style={[ep_s.heroContent, tvMode && ep_s.tvHeroContent]}>
-            {selectedAnime?.coverImage?.large ? (
-              <Image source={{ uri: selectedAnime.coverImage.large }} style={[ep_s.heroCover, tvMode && ep_s.tvHeroCover]} />
+          {/* ── Hero Banner ── */}
+          <View style={[ep_s.hero, tvMode && width >= 700 && ep_s.tvHero]}>
+            {(selectedAnime?.bannerImage || selectedAnime?.coverImage?.extraLarge || selectedAnime?.coverImage?.large) ? (
+              <Image
+                source={{ uri: selectedAnime.bannerImage || selectedAnime.coverImage?.extraLarge || selectedAnime.coverImage?.large }}
+                style={StyleSheet.absoluteFill}
+                resizeMode="cover"
+              />
             ) : null}
-            <View style={[ep_s.heroInfo, tvMode && ep_s.tvHeroInfo]}>
-              <Text style={[ep_s.heroTitle, tvMode && ep_s.tvHeroTitle]} numberOfLines={1}>
-                {selectedAnime?.title?.english || selectedAnime?.title?.romaji}
-              </Text>
-              <View style={ep_s.heroBadgesRow}>
-                <View style={ep_s.heroPill}>
-                  <Text style={ep_s.heroPillText}>{total} حلقة</Text>
-                </View>
-                {watchedCount > 0 ? (
-                  <View style={[ep_s.heroPill, ep_s.heroPillWatched]}>
-                    <Text style={[ep_s.heroPillText, { color: "#10B981" }]}>تمت مشاهدة {watchedCount}</Text>
-                  </View>
+            <LinearGradient
+              colors={["rgba(9,9,11,0.18)", "rgba(9,9,11,0.68)", colors.background]}
+              style={StyleSheet.absoluteFill}
+            />
+
+            {/* Cover (Right) + info + progress */}
+            <View style={[ep_s.heroBottom, tvMode && width >= 700 && ep_s.tvHeroBottom]}>
+              <View style={[ep_s.heroContent, tvMode && width >= 700 && ep_s.tvHeroContent]}>
+                {selectedAnime?.coverImage?.large ? (
+                  <Image source={{ uri: selectedAnime.coverImage.large }} style={[ep_s.heroCover, tvMode && width >= 700 && ep_s.tvHeroCover]} />
                 ) : null}
-                {selectedAnime?.averageScore ? (
-                  <View style={ep_s.heroPill}>
-                    <Ionicons name="star" size={11} color="#fff" />
-                    <Text style={ep_s.heroPillText}>{(selectedAnime.averageScore / 10).toFixed(1)}</Text>
-                  </View>
-                ) : null}
-              </View>
-              <View style={ep_s.heroProgress}>
-                <View style={ep_s.heroProgressLabels}>
-                  <Text style={[ep_s.heroProgressCount, tvMode && ep_s.tvText]}>تقدم المشاهدة</Text>
-                  <Text style={[ep_s.heroProgressPercent, tvMode && ep_s.tvText]}>
-                    {watchedCount} / {total} ({pct}%)
+                <View style={[ep_s.heroInfo, tvMode && width >= 700 && ep_s.tvHeroInfo]}>
+                  <Text style={[ep_s.heroTitle, tvMode && width >= 700 && ep_s.tvHeroTitle]} numberOfLines={1}>
+                    {selectedAnime?.title?.english || selectedAnime?.title?.romaji}
                   </Text>
-                </View>
-                <View style={[ep_s.progressTrack, ep_s.heroProgressTrack]}>
-                  <View style={[ep_s.progressFill, { width: `${pct}%` }]} />
+                  <View style={ep_s.heroBadgesRow}>
+                    <View style={ep_s.heroPill}>
+                      <Text style={ep_s.heroPillText}>{total} حلقة</Text>
+                    </View>
+                    {watchedCount > 0 ? (
+                      <View style={[ep_s.heroPill, ep_s.heroPillWatched]}>
+                        <Text style={[ep_s.heroPillText, { color: "#10B981" }]}>تمت مشاهدة {watchedCount}</Text>
+                      </View>
+                    ) : null}
+                    {selectedAnime?.averageScore ? (
+                      <View style={ep_s.heroPill}>
+                        <Ionicons name="star" size={11} color="#fff" />
+                        <Text style={ep_s.heroPillText}>{(selectedAnime.averageScore / 10).toFixed(1)}</Text>
+                      </View>
+                    ) : null}
+                  </View>
+                  <View style={ep_s.heroProgress}>
+                    <View style={ep_s.heroProgressLabels}>
+                      <Text style={[ep_s.heroProgressCount, tvMode && ep_s.tvText]}>تقدم المشاهدة</Text>
+                      <Text style={[ep_s.heroProgressPercent, tvMode && ep_s.tvText]}>
+                        {watchedCount} / {total} ({pct}%)
+                      </Text>
+                    </View>
+                    <View style={[ep_s.progressTrack, ep_s.heroProgressTrack]}>
+                      <View style={[ep_s.progressFill, { width: `${pct}%` }]} />
+                    </View>
+                  </View>
                 </View>
               </View>
             </View>
           </View>
-        </View>
-      </View>
 
-      {/* ── Sticky controls ── */}
-      <View style={[ep_s.controls, tvMode && ep_s.tvControls, { backgroundColor: colors.background, borderBottomColor: colors.border }]}>
-        {seasons.length > 0 && (
-          <View style={ep_s.seasonSection}>
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={ep_s.seasonTabs}
-            >
-              {seasons.map((season, index) => {
-                const isActive = String(season?.id) === selectedSeasonAnimeKey;
-                const episodeCount = isActive ? total : knownEpisodeCount(season);
-                return (
-                  <Pressable
-                    key={String(season?.id)}
-                    onPress={() => {
-                      setSelectedSeasonId(String(season?.id));
-                      setSearch("");
+          {/* ── Sticky controls ── */}
+          <View style={[ep_s.controls, tvMode && width >= 700 && ep_s.tvControls, { backgroundColor: colors.background, borderBottomColor: colors.border }]}>
+            {seasons.length > 0 && (
+              <View style={ep_s.seasonSection}>
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={ep_s.seasonTabs}
+                >
+                  {seasons.map((season, index) => {
+                    const isActive = String(season?.id) === selectedSeasonAnimeKey;
+                    const episodeCount = isActive ? total : knownEpisodeCount(season);
+                    return (
+                      <Pressable
+                        key={String(season?.id)}
+                        onPress={() => {
+                          setSelectedSeasonId(String(season?.id));
+                          setSearch("");
+                          setRangeStart(null);
+                          episodeListRef.current?.scrollToOffset({ offset: 0, animated: false });
+                        }}
+                        focusable={tvMode}
+                        testID={`anime-season-${season?.id}`}
+                        accessibilityRole="button"
+                        accessibilityLabel={`الموسم ${index + 1}${episodeCount === null ? "" : `، ${episodeCount} حلقة`}`}
+                        accessibilityState={{ selected: isActive }}
+                        style={({ focused, pressed }) => [
+                          ep_s.seasonTab,
+                          isActive && ep_s.seasonTabActive,
+                          tvMode && ep_s.tvSeasonTab,
+                          tvMode && tvFocusStyle(focused),
+                          pressed && { opacity: 0.84 },
+                        ]}
+                      >
+                        <Text style={[
+                          ep_s.seasonTabTitle,
+                          tvMode && ep_s.tvSeasonTabTitle,
+                          isActive && ep_s.seasonTabTitleActive,
+                        ]}>
+                          الموسم {index + 1}
+                        </Text>
+                        {episodeCount !== null ? (
+                          <Text style={[ep_s.seasonTabCount, tvMode && ep_s.tvSeasonTabCount, isActive && ep_s.seasonTabCountActive]}>
+                            {episodeCount} حلقة
+                          </Text>
+                        ) : null}
+                      </Pressable>
+                    );
+                  })}
+                </ScrollView>
+              </View>
+            )}
+
+            {/* Search and continue watching */}
+            <View style={[ep_s.episodeQuickRow, tvMode && ep_s.tvEpisodeQuickRow]}>
+              <View style={[ep_s.searchBar, ep_s.quickSearchBar, tvMode && ep_s.tvSearchBar, { backgroundColor: colors.card, borderColor: colors.border }]}>
+                <Ionicons name="search" size={tvMode ? 24 : 16} color={colors.textMuted} />
+                <TextInput
+                  value={search}
+                  onChangeText={value => {
+                    setSearch(value);
+                    if (value.trim()) {
                       setRangeStart(null);
                       episodeListRef.current?.scrollToOffset({ offset: 0, animated: false });
-                    }}
-                    focusable={tvMode}
-                    testID={`anime-season-${season?.id}`}
-                    accessibilityRole="button"
-                    accessibilityLabel={`الموسم ${index + 1}${episodeCount === null ? "" : `، ${episodeCount} حلقة`}`}
-                    accessibilityState={{ selected: isActive }}
-                    style={({ focused, pressed }) => [
-                      ep_s.seasonTab,
-                      isActive && ep_s.seasonTabActive,
-                      tvMode && ep_s.tvSeasonTab,
-                      tvMode && tvFocusStyle(focused),
-                      pressed && { opacity: 0.84 },
-                    ]}
-                  >
-                    <Text style={[
-                      ep_s.seasonTabTitle,
-                      tvMode && ep_s.tvSeasonTabTitle,
-                      isActive && ep_s.seasonTabTitleActive,
-                    ]}>
-                      الموسم {index + 1}
-                    </Text>
-                    {episodeCount !== null ? (
-                      <Text style={[ep_s.seasonTabCount, tvMode && ep_s.tvSeasonTabCount, isActive && ep_s.seasonTabCountActive]}>
-                        {episodeCount} حلقة
-                      </Text>
-                    ) : null}
-                  </Pressable>
-                );
-              })}
-            </ScrollView>
-          </View>
-        )}
-
-        {/* Search and continue watching */}
-        <View style={[ep_s.episodeQuickRow, tvMode && ep_s.tvEpisodeQuickRow]}>
-          <View style={[ep_s.searchBar, ep_s.quickSearchBar, tvMode && ep_s.tvSearchBar, { backgroundColor: colors.card, borderColor: colors.border }]}>
-            <Ionicons name="search" size={tvMode ? 24 : 16} color={colors.textMuted} />
-            <TextInput
-              value={search}
-              onChangeText={value => {
-                setSearch(value);
-                if (value.trim()) {
-                  setRangeStart(null);
-                  episodeListRef.current?.scrollToOffset({ offset: 0, animated: false });
-                }
-              }}
-              placeholder="ابحث عن رقم أو عنوان الحلقة..."
-              placeholderTextColor={colors.textMuted}
-              style={[ep_s.searchInput, tvMode && ep_s.tvText, { color: colors.textPrimary }]}
-            />
-            {search ? (
-              <Pressable onPress={() => setSearch("")} focusable={tvMode}
-                style={({ focused }) => [tvMode && tvFocusStyle(focused)]}>
-                <Ionicons name="close" size={16} color={colors.textMuted} />
-              </Pressable>
-            ) : null}
-          </View>
-          {total > 0 ? (
-            <Pressable
-              onPress={() => watchEp(continueEpisode)}
-              focusable={tvMode}
-              hasTVPreferredFocus={tvMode && ready && shouldFocusContinue}
-              onFocus={() => { if (tvMode) rememberFocus("continue"); }}
-              testID="anime-continue-watching"
-              accessibilityRole="button"
-              accessibilityLabel={watchedCount > 0 ? `متابعة من الحلقة ${continueEpisode}` : "مشاهدة من البداية"}
-              style={({ focused, pressed }) => [
-                ep_s.quickWatchBtn,
-                tvMode && ep_s.tvQuickWatchBtn,
-                tvMode && tvFocusStyle(focused),
-                pressed && { opacity: 0.84 },
-              ]}>
-              <Ionicons name="play" size={tvMode ? 22 : 13} color="#fff" />
-              <Text style={[ep_s.quickWatchBtnText, tvMode && ep_s.tvQuickWatchBtnText]} numberOfLines={1}>
-                متابعة ح {continueEpisode}
-              </Text>
-            </Pressable>
-          ) : null}
-        </View>
-        {total > 12 ? (
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={ep_s.rangeChips}
-            style={ep_s.rangeControls}
-            accessibilityLabel="تصفية نطاق الحلقات"
-          >
-            {rangeOptions.map(option => {
-              const isActive = rangeStart === option.start;
-              return (
-                <Pressable
-                  key={option.start === null ? "all" : option.start}
-                  onPress={() => {
-                    setSearch("");
-                    setRangeStart(option.start);
-                    episodeListRef.current?.scrollToOffset({ offset: 0, animated: false });
+                    }
                   }}
+                  placeholder="ابحث عن رقم أو عنوان الحلقة..."
+                  placeholderTextColor={colors.textMuted}
+                  style={[ep_s.searchInput, tvMode && ep_s.tvText, { color: colors.textPrimary }]}
+                />
+                {search ? (
+                  <Pressable onPress={() => setSearch("")} focusable={tvMode}
+                    style={({ focused }) => [tvMode && tvFocusStyle(focused)]}>
+                    <Ionicons name="close" size={16} color={colors.textMuted} />
+                  </Pressable>
+                ) : null}
+              </View>
+              {total > 0 ? (
+                <Pressable
+                  onPress={() => watchEp(continueEpisode)}
                   focusable={tvMode}
+                  hasTVPreferredFocus={tvMode && ready && shouldFocusContinue}
+                  onFocus={() => { if (tvMode) rememberFocus("continue"); }}
+                  testID="anime-continue-watching"
                   accessibilityRole="button"
-                  accessibilityLabel={option.start === null
-                    ? `كل الحلقات، ${total}`
-                    : `الحلقات من ${option.start} إلى ${option.end}`}
-                  accessibilityState={{ selected: isActive }}
+                  accessibilityLabel={watchedCount > 0 ? `متابعة من الحلقة ${continueEpisode}` : "مشاهدة من البداية"}
                   style={({ focused, pressed }) => [
-                    ep_s.rangeChip,
-                    isActive && ep_s.rangeChipActive,
-                    tvMode && ep_s.tvRangeChip,
+                    ep_s.quickWatchBtn,
+                    tvMode && ep_s.tvQuickWatchBtn,
                     tvMode && tvFocusStyle(focused),
                     pressed && { opacity: 0.84 },
-                  ]}
-                >
-                  <Text style={[
-                    ep_s.rangeChipText,
-                    isActive && ep_s.rangeChipTextActive,
-                    tvMode && ep_s.tvRangeChipText,
-                  ]}>{option.label}</Text>
+                  ]}>
+                  <Ionicons name="play" size={tvMode ? 22 : 13} color="#fff" />
+                  <Text style={[ep_s.quickWatchBtnText, tvMode && ep_s.tvQuickWatchBtnText]} numberOfLines={1}>
+                    متابعة ح {continueEpisode}
+                  </Text>
                 </Pressable>
-              );
-            })}
-          </ScrollView>
-        ) : null}
-      </View>
+              ) : null}
+            </View>
+            {total > 12 ? (
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={ep_s.rangeChips}
+                style={ep_s.rangeControls}
+                accessibilityLabel="تصفية نطاق الحلقات"
+              >
+                {rangeOptions.map(option => {
+                  const isActive = rangeStart === option.start;
+                  return (
+                    <Pressable
+                      key={option.start === null ? "all" : option.start}
+                      onPress={() => {
+                        setSearch("");
+                        setRangeStart(option.start);
+                        episodeListRef.current?.scrollToOffset({ offset: 0, animated: false });
+                      }}
+                      focusable={tvMode}
+                      accessibilityRole="button"
+                      accessibilityLabel={option.start === null
+                        ? `كل الحلقات، ${total}`
+                        : `الحلقات من ${option.start} إلى ${option.end}`}
+                      accessibilityState={{ selected: isActive }}
+                      style={({ focused, pressed }) => [
+                        ep_s.rangeChip,
+                        isActive && ep_s.rangeChipActive,
+                        tvMode && ep_s.tvRangeChip,
+                        tvMode && tvFocusStyle(focused),
+                        pressed && { opacity: 0.84 },
+                      ]}
+                    >
+                      <Text style={[
+                        ep_s.rangeChipText,
+                        isActive && ep_s.rangeChipTextActive,
+                        tvMode && ep_s.tvRangeChipText,
+                      ]}>{option.label}</Text>
+                    </Pressable>
+                  );
+                })}
+              </ScrollView>
+            ) : null}
+          </View>
 
-      {/* ── Episode list ── */}
-      <TvFocusGuideView autoFocus={tvMode} style={ep_s.tvFocusGuide}>
-        <FlatList
-          ref={episodeListRef}
-          key={`${tvMode ? "tv" : "phone"}-${selectedAnimeId}`}
-          data={displayedEps}
-          numColumns={1}
-          keyExtractor={n => n.toString()}
-          showsVerticalScrollIndicator={false}
-          removeClippedSubviews={Platform.OS === "android" && !tvMode}
-          initialNumToRender={tvMode ? 16 : 12}
-          maxToRenderPerBatch={tvMode ? 12 : 12}
-          updateCellsBatchingPeriod={50}
-          windowSize={tvMode ? 7 : 9}
-          onViewableItemsChanged={onViewableItemsChanged}
-          viewabilityConfig={viewabilityConfig}
-          onEndReached={() => {
-            const lastEpisode = displayedEps[displayedEps.length - 1] || 1;
-            fetchEpisodePageRef.current(Math.floor((lastEpisode - 1) / 100) + 1);
-          }}
-          onEndReachedThreshold={0.35}
-          onScrollToIndexFailed={({ index }) => {
-            episodeListRef.current?.scrollToOffset({
-              offset: Math.max(0, index * (tvMode ? 116 : 76)),
-              animated: false,
-            });
-          }}
-          columnWrapperStyle={undefined}
-          contentContainerStyle={[{ paddingTop: 6, paddingBottom: 100 }, tvMode && ep_s.tvListContent]}
-          renderItem={({ item: n, index }) => (
-            <EpisodeRow
-              n={n}
-              anime={selectedAnime}
-              epByNumber={epByNumber}
-              episodeTitlesAr={episodeTitlesAr}
-              watched={watched.has(n)}
-              commentCount={commentCounts[n] || 0}
-              onToggleWatched={toggleWatched}
-              onWatch={watchEp}
-              onComment={openComments}
-              onFocus={() => {
-                if (!tvMode) return;
-                rememberFocus(String(n));
-                if (!visibleEpisodeIndicesRef.current.has(index)) {
-                  episodeListRef.current?.scrollToIndex({ index, animated: false, viewPosition: 0.35 });
-                }
+          {/* ── Episode list ── */}
+          <TvFocusGuideView autoFocus={tvMode} style={ep_s.tvFocusGuide}>
+            <FlatList
+              ref={episodeListRef}
+              key={`${tvMode ? "tv" : "phone"}-${selectedAnimeId}`}
+              data={displayedEps}
+              numColumns={1}
+              keyExtractor={n => n.toString()}
+              showsVerticalScrollIndicator={false}
+              removeClippedSubviews={Platform.OS === "android" && !tvMode}
+              initialNumToRender={tvMode ? 12 : 12}
+              maxToRenderPerBatch={tvMode ? 10 : 12}
+              updateCellsBatchingPeriod={40}
+              windowSize={tvMode ? 7 : 9}
+              onViewableItemsChanged={onViewableItemsChanged}
+              viewabilityConfig={viewabilityConfig}
+              onEndReached={() => {
+                const lastEpisode = displayedEps[displayedEps.length - 1] || 1;
+                fetchEpisodePageRef.current(Math.floor((lastEpisode - 1) / 100) + 1);
               }}
-              hasTVPreferredFocus={tvMode && ready && preferredKey === String(n)}
+              onEndReachedThreshold={0.35}
+              onScrollToIndexFailed={({ index }) => {
+                episodeListRef.current?.scrollToOffset({
+                  offset: Math.max(0, index * (tvMode ? 116 : 76)),
+                  animated: false,
+                });
+              }}
+              columnWrapperStyle={undefined}
+              contentContainerStyle={[{ paddingTop: 6, paddingBottom: 100 }, tvMode && ep_s.tvListContent]}
+              renderItem={({ item: n }) => (
+                <EpisodeRow
+                  n={n}
+                  anime={selectedAnime}
+                  epByNumber={epByNumber}
+                  episodeTitlesAr={episodeTitlesAr}
+                  watched={watched.has(n)}
+                  commentCount={commentCounts[n] || 0}
+                  onToggleWatched={toggleWatched}
+                  onWatch={watchEp}
+                  onComment={openComments}
+                  onFocus={() => {
+                    if (!tvMode) return;
+                    rememberFocus(String(n));
+                  }}
+                  hasTVPreferredFocus={tvMode && ready && preferredKey === String(n)}
+                />
+              )}
+              ItemSeparatorComponent={() => <View style={ep_s.rowSeparator} />}
             />
-          )}
-          ItemSeparatorComponent={() => <View style={ep_s.rowSeparator} />}
-        />
-      </TvFocusGuideView>
+          </TvFocusGuideView>
 
-    </View>
-  );
-}
+        </View>
+      );
+    }
 
 function createEpStyles(colors: ReturnType<typeof useColors>) {
 return StyleSheet.create({

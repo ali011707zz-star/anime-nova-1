@@ -666,7 +666,10 @@ function ExpoRiftPlayer({
   const userSelectedSubLangRef            = useRef(false);
   const rawSubUrlRef      = useRef<string | null>(null); // original English VTT URL before translation
   const autoRawSubUrlRef  = useRef<string | null>(null); // English URL discovered by auto-fetch
-  const [autoPlayEnabled, setAutoPlayEnabled] = useState(true);
+  const [autoPlayEnabled, setAutoPlayEnabled] = useState(!tvMode);
+  useEffect(() => {
+    if (tvMode) setAutoPlayEnabled(false);
+  }, [tvMode]);
   const prevVolRef                        = useRef(1);
   const subPanelX                         = useRef(new Animated.Value(400)).current;
   /* ─── Whisper audio transcription ─── */

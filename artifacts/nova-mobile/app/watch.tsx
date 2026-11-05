@@ -1050,9 +1050,15 @@ export default function WatchScreen() {
     ),
     [availableSlots],
   );
-  const pickerFocusKey = visiblePickerKeys.includes(preferredKey || "")
+  const pickerFocusKey = preferredKey && visiblePickerKeys.includes(preferredKey)
     ? preferredKey
-    : (visiblePickerKeys[0] || null);
+    : null;
+  const pickerOpenedAtRef = useRef(Date.now());
+  useEffect(() => {
+    if (screen === "picker") {
+      pickerOpenedAtRef.current = Date.now();
+    }
+  }, [screen, anime, awSeries, epNum]);
 
   const abortRef          = useRef<AbortController | null>(null);
   const availabilityAbortRef = useRef<AbortController | null>(null);
@@ -1754,6 +1760,9 @@ export default function WatchScreen() {
 
   /* ── جلب مصدر واحد عند ضغط المستخدم على زر المصدر ── */
   const handlePickSite = useCallback(async (site: string, preferredQuality?: QualityKey, excludeKeys: string[] = []) => {
+    if (tvMode && excludeKeys.length === 0 && Date.now() - pickerOpenedAtRef.current < 750) {
+      return;
+    }
     if (isAwDubbed) {
       if (!preferredQuality) return;
       const slotKey = pickerSlotKey(site, preferredQuality);
@@ -2668,7 +2677,7 @@ export default function WatchScreen() {
 
       {/* ── Header ── */}
       <View style={[d.header, tvMode && d.tvHeader, { paddingTop: topPad + 4 }]}>
-        <Pressable onPress={handleBack} focusable={tvMode}
+        <Pressable onPress={handleBack} focusable={tvMode} hasTVPreferredFocus={tvMode && !pickerFocusKey}
           style={({ focused }) => [d.headerBack, tvMode && d.tvHeaderActionBtn, tvMode && tvFocusStyle(focused)]}>
           <Ionicons name="chevron-forward" size={tvMode ? 25 : 19} color={colors.textPrimary} />
         </Pressable>
@@ -2698,7 +2707,7 @@ export default function WatchScreen() {
         </View>
       </View>
 
-      <TvFocusGuideView autoFocus={tvMode} style={d.tvFocusGuide}>
+      <TvFocusGuideView autoFocus={false} style={d.tvFocusGuide}>
         <ScrollView
           showsVerticalScrollIndicator={false}
           removeClippedSubviews={false}
@@ -2877,10 +2886,12 @@ export default function WatchScreen() {
                         const status   = slotStatus[slotKey] || "idle";
                         const isFetching = status === "fetching";
                         const isFailed   = status === "failed";
-                        const shouldPreferTvFocus =
+                        const shouldPreferTvFocus = Boolean(
                           tvMode &&
                           focusMemoryReady &&
-                          (pickerFocusKey ? pickerFocusKey === slotKey : slotKey === firstAvailableKey);
+                          pickerFocusKey &&
+                          pickerFocusKey === slotKey
+                        );
                         return (
                           <Pressable
                             key={slot.site}
