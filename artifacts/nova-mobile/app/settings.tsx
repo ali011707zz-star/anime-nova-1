@@ -2458,12 +2458,12 @@ export default function SettingsScreen() {
                         ? "تم اختيار باقة الدعم ($3 · 150 نجمة)"
                         : "تم اختيار باقة الدعم ($5 · هدية تلجرام)"}
                   </Text>
-                  <Text style={ts.donationTelegramHandle}>ANIME_N0VA@</Text>
+                  <Text style={ts.donationTelegramHandle}>@Anime_NOVA_0</Text>
                 </View>
 
                 <Pressable
                   focusable={tvMode}
-                  onPress={() => void Linking.openURL("https://t.me/ANIME_N0VA").catch(() => {})}
+                  onPress={() => void Linking.openURL("https://t.me/Anime_NOVA_0").catch(() => {})}
                   style={({ focused }) => [ts.donationGoTelegramBtn, tvMode && tvFocusStyle(focused)]}
                 >
                   <Ionicons name="open-outline" size={16} color="#ffffff" />
