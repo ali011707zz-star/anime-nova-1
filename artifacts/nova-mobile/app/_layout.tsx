@@ -105,35 +105,22 @@ function RootLayoutNav() {
 
     const isAppRoot = pathname === "/" || pathname === "/(tabs)" || pathname === "/(tabs)/index";
     const subscription = BackHandler.addEventListener("hardwareBackPress", () => {
-      const now = Date.now();
-
       if (!isAppRoot) {
         lastTvBackAt.current = 0;
         setTvExitHintVisible(false);
         if (router.canGoBack()) {
           router.back();
         } else {
-          // Some entry points use replace(), leaving no native stack entry.
-          // Return to the tab root instead of allowing Android to close NOVA.
           router.replace("/(tabs)" as any);
         }
         return true;
       }
 
-      if (now - lastTvBackAt.current < 2200) {
-        if (tvExitHintTimer.current) clearTimeout(tvExitHintTimer.current);
-        tvExitHintTimer.current = null;
-        BackHandler.exitApp();
-        return true;
-      }
-
-      lastTvBackAt.current = now;
-      setTvExitHintVisible(true);
+      // At root screen on TV: exit immediately without requiring double press
       if (tvExitHintTimer.current) clearTimeout(tvExitHintTimer.current);
-      tvExitHintTimer.current = setTimeout(() => {
-        tvExitHintTimer.current = null;
-        setTvExitHintVisible(false);
-      }, 2200);
+      tvExitHintTimer.current = null;
+      setTvExitHintVisible(false);
+      BackHandler.exitApp();
       return true;
     });
 

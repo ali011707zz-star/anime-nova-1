@@ -137,17 +137,51 @@ export function isTvDevice(width?: number, height?: number) {
   return false;
 }
 
-export function tvFocusStyle(focused: boolean) {
-  return focused
-    ? {
-        // High-visibility cyan focus ring matching the new Anime Nova design.
-        // Avoids heavy shadows/transforms so D-pad navigation stays instant at 60fps.
-        backgroundColor: "rgba(6, 182, 212, 0.15)",
-        borderColor: "#06b6d4",
-        borderWidth: 2.5,
-        zIndex: 20,
+let activeThemeIsWhite = false;
+
+export function setActiveThemeIsWhite(isWhite: boolean) {
+  activeThemeIsWhite = isWhite;
+}
+
+try {
+  AsyncStorage.getItem("nova-theme")
+    .then((val) => {
+      if (val === "white" || val === "light") {
+        activeThemeIsWhite = true;
       }
-    : {};
+    })
+    .catch(() => {});
+} catch {}
+
+export function tvFocusStyle(focused: boolean, isWhite?: boolean) {
+  if (!focused) return {};
+  const white = typeof isWhite === "boolean" ? isWhite : activeThemeIsWhite;
+  if (white) {
+    // Ultra-visible high-contrast focus indicator for White Theme:
+    // Deep indigo/purple ring + rich dark drop shadow so the cursor location is unmistakable.
+    return {
+      backgroundColor: "rgba(67, 56, 202, 0.16)",
+      borderColor: "#3730A3",
+      borderWidth: 3.5,
+      shadowColor: "#0f172a",
+      shadowOpacity: 0.55,
+      shadowRadius: 10,
+      shadowOffset: { width: 0, height: 3 },
+      elevation: 12,
+      zIndex: 50,
+    };
+  }
+  return {
+    // High-visibility cyan focus ring for Dark Theme
+    backgroundColor: "rgba(6, 182, 212, 0.18)",
+    borderColor: "#06b6d4",
+    borderWidth: 2.8,
+    shadowColor: "#06b6d4",
+    shadowOpacity: 0.35,
+    shadowRadius: 8,
+    elevation: 8,
+    zIndex: 50,
+  };
 }
 
 export const TV_FOCUS_VIEWABILITY_CONFIG = {
@@ -215,6 +249,8 @@ export function TvPressable({
   return (
     <Pressable
       {...props}
+      delayPressIn={0}
+      delayPressOut={0}
       unstable_pressDelay={0}
       focusable={tv ? focusable !== false : focusable}
       hasTVPreferredFocus={tv && hasTVPreferredFocus}

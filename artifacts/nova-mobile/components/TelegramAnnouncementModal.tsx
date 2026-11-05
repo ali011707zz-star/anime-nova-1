@@ -13,6 +13,7 @@ import {
 } from "react-native";
 import { isTvDevice, tvFocusStyle, TvPressable as Pressable } from "../utils/tv";
 import { useColors } from "../hooks/useColors";
+import { useApp } from "../context/AppContext";
 
 const TELEGRAM_URL = "https://t.me/Anime_NOVA_0";
 
@@ -58,6 +59,8 @@ export function TelegramAnnouncementModal({
 }: TelegramAnnouncementModalProps) {
   const { width, height } = useWindowDimensions();
   const colors = useColors();
+  const { theme } = useApp();
+  const isWhiteTheme = theme === "white";
   const tvMode = isTvDevice(width, height);
   const openingTelegramRef = useRef(false);
 
@@ -112,14 +115,18 @@ export function TelegramAnnouncementModal({
             hitSlop={tvMode ? 14 : 8}
             style={({ pressed, focused }) => [
               styles.closeButton,
-              { backgroundColor: colors.input },
-              tvMode && styles.tvCloseButton,
+              isWhiteTheme ? styles.whiteCloseButton : styles.darkCloseButton,
+              tvMode && (isWhiteTheme ? styles.tvWhiteCloseButton : styles.tvCloseButton),
               tvMode && tvFocusStyle(focused),
               pressed && styles.pressed,
             ]}
           >
-            <Ionicons name="close" size={tvMode ? 24 : 21} color={colors.textPrimary} />
-            {tvMode && <Text style={[styles.tvCloseLabel, { color: colors.textPrimary }]}>إغلاق</Text>}
+            <Ionicons name="close" size={tvMode ? 22 : 20} color={isWhiteTheme ? "#0F172A" : "#FFFFFF"} />
+            {tvMode && (
+              <Text style={[styles.tvCloseLabel, { color: isWhiteTheme ? "#0F172A" : "#FFFFFF" }]}>
+                إغلاق
+              </Text>
+            )}
           </Pressable>
 
           {tvMode ? (
@@ -250,7 +257,33 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     borderRadius: 17,
+  },
+  whiteCloseButton: {
+    backgroundColor: "#F1F5F9",
+    borderWidth: 1,
+    borderColor: "#CBD5E1",
+  },
+  darkCloseButton: {
     backgroundColor: "rgba(0, 0, 0, 0.48)",
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.16)",
+  },
+  tvWhiteCloseButton: {
+    width: 92,
+    height: 44,
+    borderRadius: 14,
+    top: 14,
+    right: 14,
+    flexDirection: "row",
+    gap: 6,
+    paddingHorizontal: 14,
+    borderWidth: 1.5,
+    borderColor: "#CBD5E1",
+    backgroundColor: "#FFFFFF",
+    shadowColor: "#000",
+    shadowOpacity: 0.10,
+    shadowRadius: 6,
+    elevation: 3,
   },
   tvCloseButton: {
     width: 92,

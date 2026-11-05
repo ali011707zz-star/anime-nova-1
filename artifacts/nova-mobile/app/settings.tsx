@@ -606,80 +606,249 @@ function AuthSheetInner({ open, onClose, onLogin, onLinkDevice }: {
   const isLogin = flow === "login";
   const isVerify = flow === "verify";
 
+  const colors = useColors();
+  const { theme } = useApp();
+  const isWhite = theme === "white";
+
   return (
     <Modal transparent animationType={tvMode ? "none" : "slide"} onRequestClose={onClose}>
       <Pressable style={ts.overlay} onPress={onClose} focusable={false} />
-      <View style={[ts.bottomSheet, { paddingBottom: 0 }, tvMode && { maxWidth: 620, alignSelf: "center", width: "90%", marginBottom: 24, borderRadius: 24 }]}>
-        <View style={[ts.sheetAccentBar, { backgroundColor: "#7C3AED" }]} />
-        <View style={ts.sheetHandle} />
+      <View
+        style={[
+          ts.bottomSheet,
+          {
+            paddingBottom: 0,
+            backgroundColor: isWhite ? "#FFFFFF" : "#0E0C1A",
+            borderColor: isWhite ? "#E2E8F0" : "rgba(255,255,255,0.08)",
+          },
+          tvMode && {
+            maxWidth: 580,
+            alignSelf: "center",
+            width: "92%",
+            marginBottom: 24,
+            borderRadius: 26,
+            borderWidth: 2,
+            shadowColor: "#000",
+            shadowOpacity: 0.35,
+            shadowRadius: 20,
+            elevation: 12,
+          },
+        ]}
+      >
+        <LinearGradient
+          colors={["#7C3AED", "#06B6D4"]}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 0 }}
+          style={[ts.sheetAccentBar, { height: 3 }]}
+        />
+        <View style={[ts.sheetHandle, isWhite && { backgroundColor: "rgba(0,0,0,0.14)" }]} />
+
         <ScrollView
           style={{ flex: 1 }}
-          contentContainerStyle={{ padding: 20, paddingBottom: 48 }}
+          contentContainerStyle={{ paddingHorizontal: 22, paddingTop: 6, paddingBottom: 40 }}
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
         >
           {/* Header */}
-          <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 22 }}>
-            <Pressable onPress={onClose} focusable={tvMode} style={ts.reportCloseBtn}>
-              <Ionicons name="close" size={16} color="rgba(255,255,255,0.5)" />
+          <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 18 }}>
+            <Pressable
+              onPress={onClose}
+              focusable={tvMode}
+              style={[
+                ts.reportCloseBtn,
+                isWhite && { backgroundColor: "#F1F5F9", borderColor: "#CBD5E1" },
+              ]}
+              accessibilityRole="button"
+              accessibilityLabel="إغلاق"
+            >
+              <Ionicons name="close" size={17} color={isWhite ? "#0F172A" : "rgba(255,255,255,0.75)"} />
             </Pressable>
-            <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
-              <View style={{ width: 36, height: 36, borderRadius: 12, backgroundColor: "rgba(124,58,237,0.25)", borderWidth: 1, borderColor: "rgba(139,92,246,0.40)", alignItems: "center", justifyContent: "center" }}>
-                <Ionicons name={isVerify ? "shield-checkmark" : "sparkles"} size={16} color="#c4b5fd" />
+
+            <View style={{ flexDirection: ROW_RTL, alignItems: "center", gap: 10 }}>
+              <View
+                style={{
+                  width: 42,
+                  height: 42,
+                  borderRadius: 14,
+                  backgroundColor: isWhite ? "rgba(124,58,237,0.12)" : "rgba(124,58,237,0.25)",
+                  borderWidth: 1.5,
+                  borderColor: isWhite ? "rgba(124,58,237,0.30)" : "rgba(139,92,246,0.45)",
+                  alignItems: "center",
+                  justifyContent: "center",
+                }}
+              >
+                <Ionicons name="sparkles" size={20} color={isWhite ? "#7C3AED" : "#c4b5fd"} />
               </View>
               <View style={{ alignItems: "flex-end" }}>
-                <Text style={{ fontSize: 15, fontFamily: "Cairo_800ExtraBold", color: "#fff" }}>Anime NOVA</Text>
-                <Text style={{ fontSize: 10, color: "rgba(255,255,255,0.35)", fontFamily: "Cairo_400Regular" }}>
-                  {isVerify ? "تأكيد البريد الإلكتروني" : isLogin ? "مرحباً بعودتك" : "أنشئ حسابك مجاناً"}
+                <Text style={{ fontSize: 17, fontFamily: "Cairo_800ExtraBold", color: isWhite ? "#0F172A" : "#FFFFFF" }}>
+                  Anime NOVA
+                </Text>
+                <Text style={{ fontSize: 11, color: isWhite ? "#64748B" : "rgba(255,255,255,0.45)", fontFamily: "Cairo_600SemiBold" }}>
+                  تسجيل الدخول ومزامنة الأجهزة
                 </Text>
               </View>
             </View>
             <View style={{ width: 36 }} />
           </View>
 
-           {GOOGLE_ONLY && (
-             <View style={{ gap: 12 }}>
-               <View style={{ borderRadius: 16, paddingHorizontal: 14, paddingVertical: 12, backgroundColor: "rgba(124,58,237,0.10)", borderWidth: 1, borderColor: "rgba(139,92,246,0.20)" }}>
-                 <Text style={{ fontSize: 12, color: "rgba(255,255,255,0.65)", fontFamily: "Cairo_400Regular", textAlign: "right", lineHeight: 22 }}>
-                   سجّل الدخول أو أنشئ حسابك باستخدام Google، أو اربط التلفاز فوراً عبر رمز الربط السريع من هاتفك. ستبقى سجلات المشاهدة والمفضلات محفوظة.
-                 </Text>
-               </View>
-               <Pressable
-                 onPress={handleGoogleLogin}
-                 disabled={loading}
-                 focusable={tvMode}
-                 hasTVPreferredFocus={tvMode && open}
-                 accessibilityRole="button"
-                 accessibilityLabel="المتابعة باستخدام Google"
-                 style={[ts.authSubmitBtn, { backgroundColor: "#fff", borderColor: "rgba(255,255,255,0.25)", minHeight: 56, shadowColor: "#000", shadowOpacity: 0.18, shadowRadius: 12, shadowOffset: { width: 0, height: 5 }, elevation: 3 }]}
-               >
-                 {loading ? <ActivityIndicator color="#111827" size="small" /> : (
-                   <>
-                     <View style={{ width: 20, height: 20, borderRadius: 10, backgroundColor: "#fff", alignItems: "center", justifyContent: "center" }}>
-                       <Text style={{ color: "#4285F4", fontSize: 15, fontWeight: "800" }}>G</Text>
-                     </View>
-                     <Text style={[ts.authSubmitText, { color: "#111827" }]}>المتابعة باستخدام Google</Text>
-                   </>
-                 )}
-               </Pressable>
-               {!!error && (
-                 <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, backgroundColor: "rgba(239,68,68,0.10)", borderWidth: 1, borderColor: "rgba(239,68,68,0.25)", borderRadius: 14, paddingHorizontal: 14, paddingVertical: 10 }}>
-                   <Ionicons name="alert-circle" size={16} color="#f87171" />
-                   <Text style={{ flex: 1, fontSize: 11, color: "#fca5a5", fontFamily: "Cairo_400Regular", textAlign: "right", lineHeight: 20 }}>{error}</Text>
-                 </View>
-               )}
-               <Pressable
-                 testID="open-device-link-from-auth"
-                 onPress={onLinkDevice}
-                 disabled={loading}
-                 focusable={tvMode}
-                 style={{ flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, paddingVertical: 14, marginTop: 2, borderRadius: 16, borderWidth: 1.5, borderColor: "rgba(6,182,212,0.45)", backgroundColor: "rgba(6,182,212,0.12)", opacity: loading ? 0.5 : 1 }}
-               >
-                 <Ionicons name="tv-outline" size={18} color="#22d3ee" />
-                 <Text style={{ fontSize: 13, fontFamily: "Cairo_700Bold", color: "#22d3ee" }}>لدي رمز ربط · ربط التلفاز أو الجهاز فوراً</Text>
-               </Pressable>
-             </View>
-           )}
+          {/* Benefits pills */}
+          <View
+            style={{
+              flexDirection: ROW_RTL,
+              flexWrap: "wrap",
+              gap: 8,
+              marginBottom: 18,
+              justifyContent: "center",
+            }}
+          >
+            {[
+              { icon: "tv-outline", text: "مزامنة بين الهاتف والتلفاز" },
+              { icon: "heart-outline", text: "حفظ المفضلة والسجل" },
+              { icon: "flash-outline", text: "دخول سريع وآمن" },
+            ].map((b, idx) => (
+              <View
+                key={idx}
+                style={{
+                  flexDirection: ROW_RTL,
+                  alignItems: "center",
+                  gap: 5,
+                  paddingHorizontal: 10,
+                  paddingVertical: 5,
+                  borderRadius: 20,
+                  backgroundColor: isWhite ? "#F8FAFC" : "rgba(255,255,255,0.05)",
+                  borderWidth: 1,
+                  borderColor: isWhite ? "#E2E8F0" : "rgba(255,255,255,0.08)",
+                }}
+              >
+                <Ionicons name={b.icon as any} size={13} color={isWhite ? "#7C3AED" : "#38BDF8"} />
+                <Text style={{ fontSize: 11, fontFamily: "Cairo_700Bold", color: isWhite ? "#334155" : "rgba(255,255,255,0.8)" }}>
+                  {b.text}
+                </Text>
+              </View>
+            ))}
+          </View>
+
+          {GOOGLE_ONLY && (
+            <View style={{ gap: 14 }}>
+              {/* Google Button */}
+              <Pressable
+                onPress={handleGoogleLogin}
+                disabled={loading}
+                focusable={tvMode}
+                hasTVPreferredFocus={tvMode && open}
+                accessibilityRole="button"
+                accessibilityLabel="المتابعة باستخدام Google"
+                style={({ focused, pressed }) => [
+                  ts.authSubmitBtn,
+                  {
+                    backgroundColor: "#FFFFFF",
+                    borderColor: isWhite ? "#CBD5E1" : "rgba(255,255,255,0.3)",
+                    borderWidth: 1.5,
+                    minHeight: 56,
+                    borderRadius: 18,
+                    shadowColor: "#000",
+                    shadowOpacity: 0.12,
+                    shadowRadius: 10,
+                    shadowOffset: { width: 0, height: 4 },
+                    elevation: 4,
+                  },
+                  tvMode && tvFocusStyle(focused),
+                  pressed && { opacity: 0.88 },
+                ]}
+              >
+                {loading ? (
+                  <ActivityIndicator color="#111827" size="small" />
+                ) : (
+                  <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 10 }}>
+                    <Ionicons name="logo-google" size={20} color="#EA4335" />
+                    <Text style={[ts.authSubmitText, { color: "#111827", fontSize: 15, fontFamily: "Cairo_800ExtraBold" }]}>
+                      المتابعة باستخدام Google
+                    </Text>
+                  </View>
+                )}
+              </Pressable>
+
+              {/* Error box */}
+              {!!error && (
+                <View
+                  style={{
+                    flexDirection: "row",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    gap: 8,
+                    backgroundColor: "rgba(239,68,68,0.12)",
+                    borderWidth: 1,
+                    borderColor: "rgba(239,68,68,0.30)",
+                    borderRadius: 14,
+                    paddingHorizontal: 14,
+                    paddingVertical: 10,
+                  }}
+                >
+                  <Ionicons name="alert-circle" size={17} color="#ef4444" />
+                  <Text style={{ flex: 1, fontSize: 11.5, color: "#ef4444", fontFamily: "Cairo_600SemiBold", textAlign: "right", lineHeight: 20 }}>
+                    {error}
+                  </Text>
+                </View>
+              )}
+
+              {/* Divider */}
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 10, marginVertical: 4 }}>
+                <View style={{ flex: 1, height: 1, backgroundColor: isWhite ? "#E2E8F0" : "rgba(255,255,255,0.10)" }} />
+                <Text style={{ fontSize: 11, fontFamily: "Cairo_700Bold", color: isWhite ? "#94A3B8" : "rgba(255,255,255,0.40)" }}>
+                  أو للشاشات وأجهزة التلفاز
+                </Text>
+                <View style={{ flex: 1, height: 1, backgroundColor: isWhite ? "#E2E8F0" : "rgba(255,255,255,0.10)" }} />
+              </View>
+
+              {/* TV Quick Link Card */}
+              <Pressable
+                testID="open-device-link-from-auth"
+                onPress={onLinkDevice}
+                disabled={loading}
+                focusable={tvMode}
+                style={({ focused, pressed }) => [
+                  {
+                    flexDirection: ROW_RTL,
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    paddingHorizontal: 16,
+                    paddingVertical: 14,
+                    borderRadius: 18,
+                    borderWidth: 1.5,
+                    borderColor: isWhite ? "#0284C7" : "rgba(6,182,212,0.50)",
+                    backgroundColor: isWhite ? "rgba(2,132,199,0.08)" : "rgba(6,182,212,0.12)",
+                    opacity: loading ? 0.5 : 1,
+                  },
+                  tvMode && tvFocusStyle(focused),
+                  pressed && { opacity: 0.84 },
+                ]}
+              >
+                <View style={{ flexDirection: ROW_RTL, alignItems: "center", gap: 12, flex: 1 }}>
+                  <View
+                    style={{
+                      width: 40,
+                      height: 40,
+                      borderRadius: 12,
+                      backgroundColor: isWhite ? "rgba(2,132,199,0.15)" : "rgba(6,182,212,0.22)",
+                      alignItems: "center",
+                      justifyContent: "center",
+                    }}
+                  >
+                    <Ionicons name="tv-outline" size={20} color={isWhite ? "#0284C7" : "#22d3ee"} />
+                  </View>
+                  <View style={{ flex: 1, alignItems: "flex-end" }}>
+                    <Text style={{ fontSize: 13.5, fontFamily: "Cairo_800ExtraBold", color: isWhite ? "#0369A1" : "#22d3ee" }}>
+                      لدي رمز ربط · ربط التلفاز أو الجهاز فوراً
+                    </Text>
+                    <Text style={{ fontSize: 10.5, fontFamily: "Cairo_600SemiBold", color: isWhite ? "#64748B" : "rgba(255,255,255,0.50)" }}>
+                      أدخل الرمز المكوّن من 6 أرقام لمزامنة شاشتك بنقرة واحدة
+                    </Text>
+                  </View>
+                </View>
+                <Ionicons name="chevron-back" size={17} color={isWhite ? "#0284C7" : "#22d3ee"} />
+              </Pressable>
+            </View>
+          )}
 
            {/* Legacy email UI is intentionally hidden. The API remains compatible
                with existing sessions and records while new access uses Google. */}

@@ -81,22 +81,22 @@ const STATUS_OPTIONS = [
 const ROW_RTL = I18nManager.isRTL ? "row" : "row-reverse";
 
 const GENRES_WITH_COVERS = [
-  { genre: "Adventure",     ar: "مغامرة",      color: "#D97706", poster: "https://img.anili.st/media/21" },
-  { genre: "Action",        ar: "أكشن",        color: "#CA8A04", poster: "https://img.anili.st/media/101922" },
-  { genre: "Comedy",        ar: "كوميديا",     color: "#EAB308", poster: "https://img.anili.st/media/21087" },
-  { genre: "Fantasy",       ar: "فانتازيا",    color: "#7C3AED", poster: "https://img.anili.st/media/113415" },
-  { genre: "Drama",         ar: "دراما",       color: "#DB2777", poster: "https://img.anili.st/media/16498" },
-  { genre: "Romance",       ar: "رومانسي",     color: "#EC4899", poster: "https://img.anili.st/media/124080" },
-  { genre: "Sci-Fi",        ar: "خيال علمي",   color: "#0891B2", poster: "https://img.anili.st/media/9253" },
-  { genre: "Supernatural",  ar: "خوارق",       color: "#6D28D9", poster: "https://img.anili.st/media/269" },
-  { genre: "Mystery",       ar: "غموض",        color: "#4F46E5", poster: "https://img.anili.st/media/1535" },
-  { genre: "Sports",        ar: "رياضة",       color: "#16A34A", poster: "https://img.anili.st/media/20583" },
-  { genre: "Slice of Life", ar: "حياة يومية",  color: "#EA580C", poster: "https://img.anili.st/media/20665" },
-  { genre: "Horror",        ar: "رعب",         color: "#DC2626", poster: "https://img.anili.st/media/11111" },
-  { genre: "Psychological", ar: "نفسي",        color: "#9333EA", poster: "https://img.anili.st/media/21355" },
-  { genre: "Music",         ar: "موسيقى",      color: "#C026D3", poster: "https://img.anili.st/media/20958" },
-  { genre: "Mecha",         ar: "ميكا",        color: "#2563EB", poster: "https://img.anili.st/media/30" },
-  { genre: "Isekai",        ar: "إيسيكاي",     color: "#0284C7", poster: "https://img.anili.st/media/108465" },
+  { genre: "Adventure",     ar: "مغامرة",      color: "#D97706", icon: "compass-outline" },
+  { genre: "Action",        ar: "أكشن",        color: "#CA8A04", icon: "flame-outline" },
+  { genre: "Comedy",        ar: "كوميديا",     color: "#EAB308", icon: "happy-outline" },
+  { genre: "Fantasy",       ar: "فانتازيا",    color: "#7C3AED", icon: "sparkles-outline" },
+  { genre: "Drama",         ar: "دراما",       color: "#DB2777", icon: "film-outline" },
+  { genre: "Romance",       ar: "رومانسي",     color: "#EC4899", icon: "heart-outline" },
+  { genre: "Sci-Fi",        ar: "خيال علمي",   color: "#0891B2", icon: "planet-outline" },
+  { genre: "Supernatural",  ar: "خوارق",       color: "#6D28D9", icon: "skull-outline" },
+  { genre: "Mystery",       ar: "غموض",        color: "#4F46E5", icon: "search-outline" },
+  { genre: "Sports",        ar: "رياضة",       color: "#16A34A", icon: "football-outline" },
+  { genre: "Slice of Life", ar: "حياة يومية",  color: "#EA580C", icon: "cafe-outline" },
+  { genre: "Horror",        ar: "رعب",         color: "#DC2626", icon: "flash-outline" },
+  { genre: "Psychological", ar: "نفسي",        color: "#9333EA", icon: "eye-outline" },
+  { genre: "Music",         ar: "موسيقى",      color: "#C026D3", icon: "musical-notes-outline" },
+  { genre: "Mecha",         ar: "ميكا",        color: "#2563EB", icon: "hardware-chip-outline" },
+  { genre: "Isekai",        ar: "إيسيكاي",     color: "#0284C7", icon: "globe-outline" },
 ];
 
 const FILTER_GENRES: AnimeFilterOption[] = [
@@ -109,13 +109,23 @@ const BLOCKED = new Set(["Hentai"]);
 
 function coverUrl(id: number) { return `https://img.anili.st/media/${id}`; }
 
-/* ── Genre cover card (matches Screenshot_20261031-192003_2_7bc0e764.jpg) ── */
-function GenreCard({ item, liveCoverUrl, onPress, columns, horizontal = false }: { item: typeof GENRES_WITH_COVERS[0]; liveCoverUrl?: string; onPress: () => void; columns: number; horizontal?: boolean }) {
+/* ── Genre badge card with reliable crisp vector iconography ── */
+function GenreCard({
+  item,
+  onPress,
+  columns,
+  horizontal = false,
+}: {
+  item: typeof GENRES_WITH_COVERS[0];
+  liveCoverUrl?: string;
+  onPress: () => void;
+  columns: number;
+  horizontal?: boolean;
+}) {
   const { g } = useBrowseTheme();
   const { width, height } = useWindowDimensions();
   const tvMode = isTvDevice(width, height);
-  const [failed, setFailed] = useState(false);
-  const posterUri = !failed && liveCoverUrl ? liveCoverUrl : item.poster;
+
   return (
     <Pressable
       onPress={onPress}
@@ -138,11 +148,10 @@ function GenreCard({ item, liveCoverUrl, onPress, columns, horizontal = false }:
           {item.ar}
         </Text>
         <View style={[g.genreFloatingPosterWrap, horizontal && g.horizontalGenreFloatingPosterWrap]}>
-          <Image
-            source={{ uri: posterUri }}
-            onError={() => setFailed(true)}
-            style={g.genreFloatingPoster}
-            resizeMode="cover"
+          <Ionicons
+            name={item.icon as any}
+            size={horizontal ? 19 : 22}
+            color="#FFFFFF"
           />
         </View>
       </View>
@@ -751,13 +760,13 @@ const createBrowseStyles = (colors: ThemePalette, s = 1) => StyleSheet.create({
     borderRadius: Math.round(14 * s),
   },
   genreFloatingPosterWrap: {
-    width: Math.round(42 * s),
-    height: Math.round(42 * s),
-    borderRadius: Math.round(10 * s),
+    width: Math.round(38 * s),
+    height: Math.round(38 * s),
+    borderRadius: Math.round(11 * s),
     overflow: "hidden",
     borderWidth: 1.5,
-    borderColor: "rgba(255,255,255,0.5)",
-    backgroundColor: "#18181b",
+    borderColor: "rgba(255,255,255,0.45)",
+    backgroundColor: "rgba(0, 0, 0, 0.25)",
     alignItems: "center",
     justifyContent: "center",
     elevation: 3,
@@ -767,9 +776,9 @@ const createBrowseStyles = (colors: ThemePalette, s = 1) => StyleSheet.create({
     shadowOffset: { width: 0, height: 2 },
   },
   horizontalGenreFloatingPosterWrap: {
-    width: Math.round(36 * s),
-    height: Math.round(36 * s),
-    borderRadius: Math.round(9 * s),
+    width: Math.round(32 * s),
+    height: Math.round(32 * s),
+    borderRadius: Math.round(10 * s),
   },
   genreFloatingPoster: { width: "100%", height: "100%" },
   genrePillLabel: {

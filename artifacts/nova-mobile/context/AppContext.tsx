@@ -3,6 +3,7 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo, useR
 import { StyleSheet, Text, View } from "react-native";
 import { DEFAULT_CONFIG, fetchRemoteConfig, getBaseUrl, RemoteConfig } from "@/utils/api";
 import { getAuthToken, secureFetch, setUserAuthToken } from "@/utils/secureApi";
+import { setActiveThemeIsWhite } from "@/utils/tv";
 
 export type Theme = "white" | "black";
 
@@ -597,9 +598,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       const nextTheme: Theme =
         themeVal === "white" || themeVal === "light" ? "white" : "black";
       setThemeState(nextTheme);
+      setActiveThemeIsWhite(nextTheme === "white");
       if (themeVal !== nextTheme) {
         await AsyncStorage.setItem("nova-theme", nextTheme).catch(() => {});
       }
+    } else {
+      setActiveThemeIsWhite(true);
     }
     setThemeHydrated(true);
     if (historyVal) {
@@ -647,6 +651,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       ? "white"
       : "black";
     setThemeState(nextTheme);
+    setActiveThemeIsWhite(nextTheme === "white");
     await AsyncStorage.setItem("nova-theme", nextTheme);
   }, []);
 
