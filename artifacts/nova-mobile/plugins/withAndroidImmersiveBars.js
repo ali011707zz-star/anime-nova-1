@@ -44,6 +44,20 @@ const KOTLIN_METHODS = `
     return true
   }
 
+  private class NovaRnFocusEvent(
+    surfaceId: Int,
+    viewId: Int,
+    private val evtName: String
+  ) : com.facebook.react.uimanager.events.Event<NovaRnFocusEvent>(surfaceId, viewId) {
+    override fun getEventName(): String = evtName
+    override fun canCoalesce(): Boolean = false
+    override fun getEventData(): com.facebook.react.bridge.WritableMap {
+      return com.facebook.react.bridge.Arguments.createMap().apply {
+        putInt("target", viewTag)
+      }
+    }
+  }
+
   private fun novaDispatchRnFocusEvent(view: android.view.View?, isFocus: Boolean) {
     if (view == null || view.id == android.view.View.NO_ID) return
     try {
@@ -56,16 +70,7 @@ const KOTLIN_METHODS = `
       if (surfaceId != android.view.View.NO_ID) return
       val dispatcher = com.facebook.react.uimanager.UIManagerHelper.getEventDispatcherForReactTag(themedCtx, view.id) ?: return
       val evtName = if (isFocus) "topFocus" else "topBlur"
-      val evt = object : com.facebook.react.uimanager.events.Event<com.facebook.react.uimanager.events.Event<*>>(-1, view.id) {
-        override fun getEventName(): String = evtName
-        override fun canCoalesce(): Boolean = false
-        override fun getEventData(): com.facebook.react.bridge.WritableMap {
-          val map = com.facebook.react.bridge.Arguments.createMap()
-          map.putInt("target", viewTag)
-          return map
-        }
-      }
-      dispatcher.dispatchEvent(evt)
+      dispatcher.dispatchEvent(NovaRnFocusEvent(-1, view.id, evtName))
     } catch (_: Throwable) {}
   }
 
