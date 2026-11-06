@@ -118,19 +118,19 @@ const KOTLIN_METHODS = `
     val overlay = object : android.view.View(this) {
       private val fillPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
         style = android.graphics.Paint.Style.FILL
-        color = 0x2400E5FF
+        color = 0x00000000
       }
       private val outerHaloPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
         style = android.graphics.Paint.Style.STROKE
-        color = 0xB809090B.toInt()
+        color = 0x60000000.toInt()
       }
       private val cyanStrokePaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
         style = android.graphics.Paint.Style.STROKE
-        color = 0xFF00E5FF.toInt()
+        color = 0xFF38BDF8.toInt()
       }
       private val whiteInnerPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
         style = android.graphics.Paint.Style.STROKE
-        color = 0xEEFFFFFF.toInt()
+        color = 0xC0FFFFFF.toInt()
       }
 
       override fun onDraw(canvas: android.graphics.Canvas) {
@@ -144,7 +144,7 @@ const KOTLIN_METHODS = `
         val targetLoc = IntArray(2)
         v.getLocationOnScreen(targetLoc)
         val d = resources.displayMetrics.density.coerceAtLeast(1f)
-        val pad = 3.5f * d
+        val pad = 1.5f * d
         val wScaled = v.width * v.scaleX
         val hScaled = v.height * v.scaleY
         val dx = (wScaled - v.width) * 0.5f
@@ -157,12 +157,12 @@ const KOTLIN_METHODS = `
         val corner = (12f * d).coerceAtMost(minOf(rectF.width(), rectF.height()) * 0.45f)
 
         canvas.drawRoundRect(rectF, corner, corner, fillPaint)
-        outerHaloPaint.strokeWidth = 6.5f * d
+        outerHaloPaint.strokeWidth = 3.2f * d
         canvas.drawRoundRect(rectF, corner, corner, outerHaloPaint)
-        cyanStrokePaint.strokeWidth = 3.8f * d
+        cyanStrokePaint.strokeWidth = 2.4f * d
         canvas.drawRoundRect(rectF, corner, corner, cyanStrokePaint)
 
-        val innerInset = 2.0f * d
+        val innerInset = 1.2f * d
         val innerRect = android.graphics.RectF(
           rectF.left + innerInset,
           rectF.top + innerInset,
@@ -170,7 +170,7 @@ const KOTLIN_METHODS = `
           rectF.bottom - innerInset
         )
         val innerCorner = (corner - innerInset).coerceAtLeast(2f * d)
-        whiteInnerPaint.strokeWidth = 1.4f * d
+        whiteInnerPaint.strokeWidth = 1.0f * d
         canvas.drawRoundRect(innerRect, innerCorner, innerCorner, whiteInnerPaint)
       }
     }.apply {
@@ -205,20 +205,7 @@ const KOTLIN_METHODS = `
         if (novaDpadMode || novaIsTvDevice()) {
           novaScrollFocusedIntoView(newFocus)
           if (novaShouldDrawFocusRing(newFocus, decor.width, decor.height)) {
-            try {
-              val d = resources.displayMetrics.density.coerceAtLeast(1f)
-              if (newFocus.width > 8 && newFocus.height > 8) {
-                val ring = android.graphics.drawable.GradientDrawable().apply {
-                  shape = android.graphics.drawable.GradientDrawable.RECTANGLE
-                  cornerRadius = minOf(12f * d, minOf(newFocus.width, newFocus.height) * 0.45f)
-                  setColor(0x2600E5FF)
-                  setStroke((3.5f * d).toInt().coerceAtLeast(3), 0xFF00E5FF.toInt())
-                  setBounds(0, 0, newFocus.width, newFocus.height)
-                }
-                newFocus.overlay.clear()
-                newFocus.overlay.add(ring)
-              }
-            } catch (_: Throwable) {}
+            /* overlay ring removed */
             try {
               newFocus.animate()
                 .scaleX(1.035f)
@@ -246,7 +233,7 @@ const KOTLIN_METHODS = `
         if (cur == null || !cur.isShown || !cur.isAttachedToWindow) {
           val candidate = novaFindFirstFocusable(decor)
           if (candidate != null) {
-            candidate.requestFocus()
+            /* do not hijack focus */
           }
         } else {
           novaOverlayView?.bringToFront()
@@ -319,8 +306,7 @@ const KOTLIN_METHODS = `
         if (focused == null || !focused.isShown || (decor != null && !novaShouldDrawFocusRing(focused, decor.width, decor.height) && desc != "مشغل الفيديو النشط" && desc != "إظهار أدوات المشغل")) {
           val first = novaFindFirstFocusable(decor)
           if (first != null) {
-            first.requestFocus()
-            return true
+            /* do not hijack focus */
           }
         }
       }

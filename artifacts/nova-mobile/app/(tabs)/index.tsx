@@ -996,7 +996,7 @@ export default function HomeScreen() {
               <Pressable
                 accessibilityLabel="فتح القائمة"
                 onPress={() => setShowDrawer(true)}
-                focusable={isTvLayout}
+                focusable={false}
                 hitSlop={isTvLayout ? 10 : 6}
                 style={[
                   styles.iconBtn,

@@ -22,7 +22,7 @@ export function HeroSection({ items, initialTVFocus = false }: Props) {
   // Keep enough height on phones, tablets, and TVs so genres, titles, metadata, and CTA buttons
   // ("مشاهدة الآن" + "تفاصيل") fit with clear artwork breathing room.
   const heroHeight = tvMode
-    ? Math.max(260, Math.min(330, Math.round(heroWidth * 0.36)))
+    ? Math.max(340, Math.min(430, Math.round(heroWidth * 0.42)))
     : isTablet
       ? Math.max(268, Math.min(350, Math.round(heroWidth * 0.52)))
       : Math.max(216, Math.min(258, Math.round(heroWidth * 0.64)));

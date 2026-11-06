@@ -95,20 +95,7 @@ export const AnimeCard = React.memo(function AnimeCard({ anime, size = "sm", car
           fadeDuration={tvMode ? 0 : 120}
           resizeMethod="resize"
         />
-        {focused && (
-          <View
-            pointerEvents="none"
-            style={[
-              StyleSheet.absoluteFillObject,
-              {
-                borderRadius: colors.radius - 4,
-                borderWidth: 3.5,
-                borderColor: "#00E5FF",
-                backgroundColor: "rgba(0, 229, 255, 0.15)",
-              },
-            ]}
-          />
-        )}
+        
         {anime.averageScore && (
           <View style={styles.scoreBadge}>
             <Ionicons name="star" size={9} color="#FFD700" />

@@ -171,27 +171,25 @@ export function tvFocusStyle(focused: boolean, isWhite?: boolean) {
   const white = typeof isWhite === "boolean" ? isWhite : activeThemeIsWhite;
   if (white) {
     return {
-      backgroundColor: "rgba(6, 182, 212, 0.22)",
       borderColor: "#0284C7",
-      borderWidth: 3.5,
+      borderWidth: 2.2,
       borderRadius: 12,
       shadowColor: "#0f172a",
-      shadowOpacity: 0.65,
-      shadowRadius: 10,
-      shadowOffset: { width: 0, height: 3 },
-      elevation: 12,
+      shadowOpacity: 0.30,
+      shadowRadius: 6,
+      shadowOffset: { width: 0, height: 2 },
+      elevation: 6,
       zIndex: 50,
     };
   }
   return {
-    backgroundColor: "rgba(0, 229, 255, 0.20)",
-    borderColor: "#00E5FF",
-    borderWidth: 3.5,
+    borderColor: "#38BDF8",
+    borderWidth: 2.4,
     borderRadius: 12,
-    shadowColor: "#00E5FF",
-    shadowOpacity: 0.75,
-    shadowRadius: 10,
-    elevation: 10,
+    shadowColor: "#38BDF8",
+    shadowOpacity: 0.45,
+    shadowRadius: 6,
+    elevation: 6,
     zIndex: 50,
   };
 }
