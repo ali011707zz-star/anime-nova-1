@@ -9,7 +9,7 @@ cd "$APP_DIR"
 
 echo "🔄 جاري تحديث Anime NOVA..."
 
-git pull origin main 2>/dev/null || git pull origin master
+git fetch origin main && git reset --hard origin/main
 
 pnpm install --prefer-offline --ignore-scripts 2>/dev/null || pnpm install --ignore-scripts
 

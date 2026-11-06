@@ -1162,7 +1162,7 @@ async function fetchMangaDarChapterPages(slug: string, chapter: string) {
   const publicBase = appDomain.startsWith("http") ? appDomain : `https://${appDomain}`;
 
   const pages = rawPages.map((p, idx) => {
-    const proxiedUrl = `${publicBase}/api/manga/img-proxy?url=${encodeURIComponent(p.url)}`;
+    const proxiedUrl = `${publicBase}/api/manga/image-proxy?url=${encodeURIComponent(p.url)}`;
     return {
       index: idx + 1,
       url: proxiedUrl,
@@ -1576,10 +1576,10 @@ async function fetchAzoraflyChapterPages(slug: string, chapterSlug: string) {
 // ── Express Routes ───────────────────────────────────────────────────────────
 
 /**
- * GET /api/manga/img-proxy
- * Proxies manga/manhwa chapter images with Referer: https://mangalik.net/ or https://azorafly.com/
+ * GET /api/manga/image-proxy & /api/manga/img-proxy
+ * Proxies manga/manhwa chapter images with Referer: https://mangalik.net/, https://mangatek.com/, or https://azorafly.com/
  */
-router.get("/manga/img-proxy", async (req, res) => {
+async function handleMangaImageProxy(req: any, res: any) {
   try {
     const rawUrl = String(req.query.url || "").trim();
     if (!rawUrl || !/^https?:\/\//i.test(rawUrl)) {
@@ -1589,6 +1589,7 @@ router.get("/manga/img-proxy", async (req, res) => {
     const host = new URL(normalizedUrl).hostname.toLowerCase();
     let referer = "https://mangalik.net/";
     if (host.includes("azorafly")) referer = "https://azorafly.com/";
+    else if (host.includes("api.mangatek.com")) referer = "https://mangatek.com/";
     else if (host.includes("mangatek")) referer = "";
 
     const headers: Record<string, string> = {
@@ -1597,10 +1598,24 @@ router.get("/manga/img-proxy", async (req, res) => {
     };
     if (referer) headers.Referer = referer;
 
-    const upstream = await fetch(normalizedUrl, {
+    let upstream = await fetch(normalizedUrl, {
       headers,
       signal: AbortSignal.timeout(15000),
     });
+
+    if (!upstream.ok && host.includes("mangatek")) {
+      const altReferer = referer ? "" : "https://mangatek.com/";
+      const altHeaders: Record<string, string> = {
+        "User-Agent": UA,
+        Accept: "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
+      };
+      if (altReferer) altHeaders.Referer = altReferer;
+      upstream = await fetch(normalizedUrl, {
+        headers: altHeaders,
+        signal: AbortSignal.timeout(15000),
+      });
+    }
+
     if (!upstream.ok) {
       return res.status(upstream.status || 502).send("Upstream image error");
     }
@@ -1610,7 +1625,10 @@ router.get("/manga/img-proxy", async (req, res) => {
   } catch (error: any) {
     return res.status(502).send(error?.message || "Image proxy error");
   }
-});
+}
+
+router.get("/manga/image-proxy", handleMangaImageProxy);
+router.get("/manga/img-proxy", handleMangaImageProxy);
 
 /**
  * GET /api/manga/catalog
