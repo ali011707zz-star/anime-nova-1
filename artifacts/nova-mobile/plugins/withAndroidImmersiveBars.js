@@ -144,7 +144,7 @@ const KOTLIN_METHODS = `
         val targetLoc = IntArray(2)
         v.getLocationOnScreen(targetLoc)
         val d = resources.displayMetrics.density.coerceAtLeast(1f)
-        val pad = 1.5f * d
+        val pad = 1.0f * d
         val wScaled = v.width * v.scaleX
         val hScaled = v.height * v.scaleY
         val dx = (wScaled - v.width) * 0.5f
@@ -157,9 +157,9 @@ const KOTLIN_METHODS = `
         val corner = (12f * d).coerceAtMost(minOf(rectF.width(), rectF.height()) * 0.45f)
 
         canvas.drawRoundRect(rectF, corner, corner, fillPaint)
-        outerHaloPaint.strokeWidth = 3.2f * d
+        outerHaloPaint.strokeWidth = 2.0f * d
         canvas.drawRoundRect(rectF, corner, corner, outerHaloPaint)
-        cyanStrokePaint.strokeWidth = 2.4f * d
+        cyanStrokePaint.strokeWidth = 2.0f * d
         canvas.drawRoundRect(rectF, corner, corner, cyanStrokePaint)
 
         val innerInset = 1.2f * d
@@ -170,7 +170,7 @@ const KOTLIN_METHODS = `
           rectF.bottom - innerInset
         )
         val innerCorner = (corner - innerInset).coerceAtLeast(2f * d)
-        whiteInnerPaint.strokeWidth = 1.0f * d
+        whiteInnerPaint.strokeWidth = 0.8f * d
         canvas.drawRoundRect(innerRect, innerCorner, innerCorner, whiteInnerPaint)
       }
     }.apply {

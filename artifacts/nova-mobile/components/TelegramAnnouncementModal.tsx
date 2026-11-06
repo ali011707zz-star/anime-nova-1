@@ -115,6 +115,7 @@ export function TelegramAnnouncementModal({
             hitSlop={tvMode ? 14 : 8}
             style={({ pressed, focused }) => [
               styles.closeButton,
+              tvMode && { minWidth: 70, minHeight: 38, borderRadius: 10, margin: 4 },
               isWhiteTheme ? styles.whiteCloseButton : styles.darkCloseButton,
               tvMode && (isWhiteTheme ? styles.tvWhiteCloseButton : styles.tvCloseButton),
               tvMode && tvFocusStyle(focused),

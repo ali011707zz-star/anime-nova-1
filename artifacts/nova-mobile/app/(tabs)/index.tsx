@@ -514,7 +514,7 @@ export default function HomeScreen() {
               initialNumToRender={5}
               maxToRenderPerBatch={5}
               windowSize={3}
-              removeClippedSubviews={Platform.OS === "android" && !isTvLayout}
+              removeClippedSubviews={false}
             />
           </View>
         )}
@@ -574,7 +574,7 @@ export default function HomeScreen() {
                 initialNumToRender={5}
                 maxToRenderPerBatch={5}
                 windowSize={3}
-                removeClippedSubviews={Platform.OS === "android" && !isTvLayout}
+                removeClippedSubviews={false}
               />
             )}
           </View>
@@ -682,7 +682,7 @@ export default function HomeScreen() {
               initialNumToRender={5}
               maxToRenderPerBatch={5}
               windowSize={3}
-              removeClippedSubviews={Platform.OS === "android" && !isTvLayout}
+              removeClippedSubviews={false}
             />
           </View>
         )}
@@ -775,7 +775,7 @@ export default function HomeScreen() {
               initialNumToRender={5}
               maxToRenderPerBatch={5}
               windowSize={3}
-              removeClippedSubviews={Platform.OS === "android" && !isTvLayout}
+              removeClippedSubviews={false}
             />
           </View>
         )}
@@ -857,7 +857,7 @@ export default function HomeScreen() {
               initialNumToRender={5}
               maxToRenderPerBatch={5}
               windowSize={3}
-              removeClippedSubviews={Platform.OS === "android" && !isTvLayout}
+              removeClippedSubviews={false}
             />
           </View>
         )}
@@ -924,7 +924,7 @@ export default function HomeScreen() {
               initialNumToRender={5}
               maxToRenderPerBatch={5}
               windowSize={3}
-              removeClippedSubviews={Platform.OS === "android" && !isTvLayout}
+              removeClippedSubviews={false}
             />
           </View>
         )}
@@ -975,7 +975,7 @@ export default function HomeScreen() {
               initialNumToRender={5}
               maxToRenderPerBatch={5}
               windowSize={3}
-              removeClippedSubviews={Platform.OS === "android" && !isTvLayout}
+              removeClippedSubviews={false}
             />
           </View>
         )}
@@ -996,7 +996,8 @@ export default function HomeScreen() {
               <Pressable
                 accessibilityLabel="فتح القائمة"
                 onPress={() => setShowDrawer(true)}
-                focusable={false}
+                focusable={isTvLayout}
+                hasTVPreferredFocus={false}
                 hitSlop={isTvLayout ? 10 : 6}
                 style={[
                   styles.iconBtn,
@@ -1063,7 +1064,7 @@ export default function HomeScreen() {
         ListFooterComponent={<View style={{ height: 90 }} />}
         showsVerticalScrollIndicator={false}
         refreshControl={<RefreshControl refreshing={false} onRefresh={refresh} tintColor={colors.primary} />}
-        removeClippedSubviews={Platform.OS === "android" && !isTvLayout}
+        removeClippedSubviews={false}
         initialNumToRender={3}
         maxToRenderPerBatch={2}
         updateCellsBatchingPeriod={40}

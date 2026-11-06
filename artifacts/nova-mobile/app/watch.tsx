@@ -2941,7 +2941,7 @@ export default function WatchScreen() {
                     </View>
 
                     {/* قائمة السيرفرات */}
-                    <View style={[d.srcSection, { backgroundColor: "#0c121e", borderColor: "rgba(255,255,255,0.08)", borderWidth: 1, borderRadius: 14, overflow: "hidden" }]}>
+                    <View style={[d.srcSection, { backgroundColor: colors.isWhite ? "#ffffff" : "#0c121e", borderColor: colors.border, borderWidth: 1, borderRadius: 14, overflow: "hidden" }]}>
                       {slots.map((slot, idx) => {
                         const slotKey = pickerSlotKey(slot.site, qk);
                         const status   = slotStatus[slotKey] || "idle";
@@ -2991,7 +2991,7 @@ export default function WatchScreen() {
                                 style={[
                                   d.webRowTag,
                                   tvMode && d.tvWebRowTag,
-                                  { textAlign: "right", color: "#f8fafc", fontSize: 13, fontFamily: "Cairo_700Bold" },
+                                  { textAlign: "right", color: colors.textPrimary, fontSize: 13, fontFamily: "Cairo_700Bold" },
                                   isFailed && { color: colors.destructive },
                                 ]}
                                 numberOfLines={1}
@@ -3015,14 +3015,14 @@ export default function WatchScreen() {
             })()}
 
         { downloadSlots.length > 0 && (
-          <View style={[d.downloadSection, { backgroundColor: "#0b111d", borderColor: "rgba(6, 182, 212, 0.22)", borderWidth: 1, borderRadius: 18, padding: 14, marginTop: 18 }]}>
+          <View style={[d.downloadSection, { backgroundColor: colors.isWhite ? "#f8fafc" : "#0b111d", borderColor: colors.isWhite ? "rgba(2, 132, 199, 0.35)" : "rgba(6, 182, 212, 0.22)", borderWidth: 1, borderRadius: 18, padding: 14, marginTop: 18 }]}>
             <View style={[d.downloadHeader, { flexDirection: "row-reverse", alignItems: "center", justifyContent: "space-between", gap: 10 }]}>
               <View style={{ flexDirection: "row-reverse", alignItems: "center", gap: 10, flex: 1 }}>
                 <View style={[d.downloadHeaderIcon, { width: 38, height: 38, borderRadius: 12, backgroundColor: "rgba(6, 182, 212, 0.14)", borderColor: "rgba(6, 182, 212, 0.35)" }]}>
                   <Ionicons name="cloud-download-outline" size={20} color="#22d3ee" />
                 </View>
                 <View style={{ flex: 1, alignItems: "flex-end" }}>
-                  <Text style={[d.downloadTitle, { color: "#f8fafc", fontSize: 14, fontFamily: "Cairo_800ExtraBold" }]}>سيرفرات التحميل المباشر</Text>
+                  <Text style={[d.downloadTitle, { color: colors.textPrimary, fontSize: 14, fontFamily: "Cairo_800ExtraBold" }]}>سيرفرات التحميل المباشر</Text>
                   <Text style={[d.downloadSubtitle, { color: "#94a3b8", fontSize: 10, fontFamily: "Cairo_600SemiBold" }]}>
                     {isAwDubbed
                       ? "تحميل مباشر سريع للحلقة المدبلجة يعمل في الخلفية"
@@ -3118,7 +3118,7 @@ export default function WatchScreen() {
                         </Text>
                       </View>
                       <View style={{ alignItems: "flex-end" }}>
-                        <Text style={{ color: "#f8fafc", fontSize: 12.5, fontFamily: "Cairo_700Bold", textAlign: "right" }}>
+                        <Text style={{ color: colors.textPrimary, fontSize: 12.5, fontFamily: "Cairo_700Bold", textAlign: "right" }}>
                           السيرفر {slot.tag}
                         </Text>
                       </View>

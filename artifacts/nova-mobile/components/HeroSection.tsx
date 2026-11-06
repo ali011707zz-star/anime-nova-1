@@ -54,9 +54,12 @@ export function HeroSection({ items, initialTVFocus = false }: Props) {
         ref={scrollRef}
         horizontal
         pagingEnabled
-        style={[styles.heroViewport, { width: heroWidth, height: heroHeight, borderRadius: radius }]}
+        style={[styles.heroViewport, { width: heroWidth, height: heroHeight, borderRadius: radius, overflow: "hidden" }]}
         contentContainerStyle={styles.heroTrack}
         showsHorizontalScrollIndicator={false}
+        snapToInterval={heroWidth}
+        snapToAlignment="center"
+        decelerationRate="fast"
         scrollEventThrottle={16}
         onMomentumScrollEnd={(e) => {
           const idx = Math.round(e.nativeEvent.contentOffset.x / heroWidth);

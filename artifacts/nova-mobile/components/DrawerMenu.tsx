@@ -202,7 +202,7 @@ export function DrawerMenu({ visible, onClose }: Props) {
     <Modal visible={visible} transparent animationType="none" onRequestClose={onClose}>
       {/* Backdrop */}
       <Animated.View style={[s.backdrop, { opacity }]}>
-        <Pressable style={StyleSheet.absoluteFill} onPress={onClose} />
+        <Pressable style={StyleSheet.absoluteFill} onPress={onClose} focusable={false} />
       </Animated.View>
 
       {/* Drawer panel — slides from RIGHT (RTL) */}
