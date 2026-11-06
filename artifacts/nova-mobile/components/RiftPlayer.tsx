@@ -930,7 +930,7 @@ function ExpoRiftPlayer({
     /* ⚠️ لا نستدعي p.play() هنا مباشرةً — بعض إصدارات ExoPlayer/AVPlayer تُطلق
        native crash عند استدعاء play() قبل أن يكون المصدر جاهزاً للتشغيل.
        التشغيل الآن يتم فقط عبر حدث statusChange → readyToPlay أدناه. */
-    if (initialPosition && initialPosition > 5) {
+    if (initialPosition && initialPosition > 1) {
       try { p.currentTime = initialPosition; } catch {}
     }
      /* Use expo-video's public buffer contract; do not pass Media3-only millisecond
@@ -1277,7 +1277,7 @@ function ExpoRiftPlayer({
              Doing this here (not in the polling timer) ensures we only seek AFTER
              the new stream is actually buffered, preventing conflicts with loading. */
           const swPos = switchPosRef.current;
-          const initPos = initialPosition && initialPosition > 5 ? initialPosition : 0;
+          const initPos = initialPosition && initialPosition > 1 ? initialPosition : 0;
           const restorePos = swPos > 0.5 ? swPos : initPos;
           if (!resumedRef.current && restorePos > 0.5) {
             resumedRef.current = true;
@@ -1970,7 +1970,7 @@ function ExpoRiftPlayer({
     }
     const requestIntro = pendingIntro;
     const requestOutro = pendingOutro;
-    if (!currentSrc?.url || !anilistId || !episode) return;
+    if (!currentSrc?.url || (!anilistId && !title) || !episode) return;
     const base = getBaseUrl();
     if (!base) return;
 
@@ -1978,8 +1978,9 @@ function ExpoRiftPlayer({
     (async () => {
       try {
         const params = new URLSearchParams({
-          anilistId: String(anilistId),
+          anilistId: String(anilistId || 0),
           ep: String(episode),
+          ...(title ? { title: String(title) } : {}),
           intro: requestIntro ? "1" : "0",
           outro: requestOutro ? "1" : "0",
         });
@@ -2814,7 +2815,39 @@ function ExpoRiftPlayer({
   );
 
   return (
-    <View ref={rootViewRef} style={[s.root, isFlipped && { transform: [{ rotate: "180deg" }] }]}>
+    <View
+      ref={rootViewRef}
+      style={[s.root, isFlipped && { transform: [{ rotate: "180deg" }] }]}
+      focusable={tvMode}
+      hasTVPreferredFocus={tvMode}
+      onKeyDown={(e: any) => {
+        if (!tvMode) return;
+        const native = e?.nativeEvent || {};
+        const code = Number(native.keyCode ?? native.keycode);
+        const name = String(native.eventType ?? native.key ?? "").toLowerCase();
+        // D-Pad Right / Media Fast Forward (seek +10s)
+        if (code === 22 || code === 90 || name.includes("right") || name.includes("forward")) {
+          fadeIn();
+          seek(positionRef.current + 10);
+          e?.preventDefault?.();
+        }
+        // D-Pad Left / Media Rewind (seek -10s)
+        else if (code === 21 || code === 89 || name.includes("left") || name.includes("rewind")) {
+          fadeIn();
+          seek(positionRef.current - 10);
+          e?.preventDefault?.();
+        }
+        // D-Pad Center / Enter / Play-Pause
+        else if (code === 23 || code === 66 || code === 85 || code === 126 || code === 127 || name.includes("select") || name.includes("center") || name.includes("play")) {
+          togglePlay();
+          e?.preventDefault?.();
+        }
+        // D-Pad Up / Down / Menu -> Show controls
+        else if (code === 19 || code === 20 || code === 82 || name.includes("up") || name.includes("down") || name.includes("menu")) {
+          fadeIn();
+        }
+      }}
+    >
       <StatusBar hidden />
       {/* ── Video ── */}
       <VideoView

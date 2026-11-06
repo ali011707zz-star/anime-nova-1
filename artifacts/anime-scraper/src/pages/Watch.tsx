@@ -2841,6 +2841,7 @@ function EpisodePlayer({
   onEpisodeSelect,
   onChangeQuality,
   onTierExhausted,
+  onPlaybackProgress,
 }: {
   servers: string[];
   quality: Quality;
@@ -2868,6 +2869,7 @@ function EpisodePlayer({
   onEpisodeSelect?: (ep: number) => void;
   onChangeQuality: (q: Quality) => void;
   onTierExhausted?: () => void;
+  onPlaybackProgress?: (seconds: number) => void;
 }) {
   const [currentServer, setCurrentServer] = useState(initialServer ?? 0);
   const [showQuality, setShowQuality] = useState(false);
@@ -2890,7 +2892,7 @@ function EpisodePlayer({
   /* Save helper — persists when time > 10s */
   const saveProgress = useCallback(() => {
     const t = lastTimeRef.current;
-    if (t > 10) {
+    if (t > 2) {
       try {
         localStorage.setItem(progressKey, String(Math.floor(t)));
       } catch {}
@@ -3010,6 +3012,7 @@ function EpisodePlayer({
   const handleRealQuality = useCallback((q: string) => setRealQuality(q), []);
   const handleHlsTime = useCallback(
     (t: number) => {
+      onPlaybackProgress?.(t);
       setHlsTime(t);
       lastTimeRef.current = t;
       /* Fallback: also save every 30s in case beforeunload doesn't fire (mobile) */
@@ -3023,7 +3026,7 @@ function EpisodePlayer({
       }
       // eslint-disable-next-line react-hooks/exhaustive-deps
     },
-    [progressKey, userId, animeId, ep],
+    [progressKey, userId, animeId, ep, onPlaybackProgress],
   );
 
   /* ── Reset on quality tier change only ── */
@@ -3970,7 +3973,7 @@ function EpisodePlayer({
               serverCount={servers.length}
               serverIndex={currentServer}
               downloadUrl={downloadUrl}
-              resumeTime={resumeTime > 10 ? resumeTime : undefined}
+              resumeTime={(lastTimeRef.current > 1 ? lastTimeRef.current : resumeTime) > 1 ? (lastTimeRef.current > 1 ? lastTimeRef.current : resumeTime) : undefined}
               subCues={
                 subState === "ready" && !hideSubtitle && subCues.length > 0
                   ? subCues
@@ -5033,13 +5036,23 @@ export default function WatchPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userId]);
 
+  const analyticsTrackerRef = useRef<ReturnType<typeof startWebWatchAnalytics> | null>(null);
+  const reportPlaybackProgress = useCallback((seconds: number) => {
+    analyticsTrackerRef.current?.markProgress(seconds);
+  }, []);
+
   useEffect(() => {
     if (!animeId) return;
-    return startWebWatchAnalytics({
+    const tracker = startWebWatchAnalytics({
       animeId,
       episode: ep,
       title: titleParam || anime?.title?.userPreferred || "",
     });
+    analyticsTrackerRef.current = tracker;
+    return () => {
+      tracker.stop();
+      if (analyticsTrackerRef.current === tracker) analyticsTrackerRef.current = null;
+    };
   }, [animeId, ep, titleParam, anime?.title?.userPreferred]);
 
   /* ── Fetch kawaii-meta: Arabic subtitle + intro/outro skip times ── */
@@ -6265,6 +6278,7 @@ export default function WatchPage() {
           setInitialSrv(0);
         }}
         userId={userId}
+        onPlaybackProgress={reportPlaybackProgress}
         onTierExhausted={handleTierExhausted}
       />
     </div>

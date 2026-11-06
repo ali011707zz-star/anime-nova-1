@@ -304,13 +304,20 @@ export default function AnimationWatch() {
      Keep next-episode navigation disabled until TMDB confirms the season. */
   const canGoNextEpisode = type === "tv" && episodes.length > 0 && ep < episodes.length;
 
+  const analyticsTrackerRef = useRef<ReturnType<typeof startWebWatchAnalytics> | null>(null);
+
   useEffect(() => {
     if (!tmdbId) return;
-    return startWebWatchAnalytics({
+    const tracker = startWebWatchAnalytics({
       animeId: tmdbId,
       episode: ep,
       title: displayTitle,
     });
+    analyticsTrackerRef.current = tracker;
+    return () => {
+      tracker.stop();
+      if (analyticsTrackerRef.current === tracker) analyticsTrackerRef.current = null;
+    };
   }, [tmdbId, ep, displayTitle]);
 
   /* ── User prefs (read once on mount) ── */
@@ -574,6 +581,7 @@ export default function AnimationWatch() {
 
   /* ── Time update (progress + subtitle sync) ── */
   const handleTimeUpdate = useCallback((t: number) => {
+    analyticsTrackerRef.current?.markProgress(t);
     setHlsTime(t);
     const now = Date.now();
     if (now - lastProgressSave.current < 5000) return;

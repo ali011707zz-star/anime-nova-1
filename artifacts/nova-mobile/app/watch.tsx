@@ -989,13 +989,20 @@ export default function WatchScreen() {
     : totalEpsCount;
   const displayTitle = titleArStr || englishStr || titleStr;
 
+  const analyticsTrackerRef = useRef<ReturnType<typeof startMobileWatchAnalytics> | null>(null);
+
   useEffect(() => {
     if (isAwDubbed || !anime) return;
-    return startMobileWatchAnalytics({
+    const tracker = startMobileWatchAnalytics({
       animeId: anime,
       episode: epNum,
       title: displayTitle,
     });
+    analyticsTrackerRef.current = tracker;
+    return () => {
+      tracker.stop();
+      if (analyticsTrackerRef.current === tracker) analyticsTrackerRef.current = null;
+    };
   }, [isAwDubbed, anime, epNum, displayTitle]);
 
   /* ── State ── */
@@ -1006,6 +1013,10 @@ export default function WatchScreen() {
   const [resumeTime,  setResumeTime]  = useState(0);
   const [resolveFailed, setResolveFailed] = useState(false);
   const [globalSubUrl, setGlobalSubUrl] = useState<string | undefined>();
+  const [episodeSkipTimes, setEpisodeSkipTimes] = useState<{
+    intro?: { start: number; end: number };
+    outro?: { start: number; end: number };
+  }>({});
   const [arEpTitle,   setArEpTitle]   = useState<string | undefined>();
   /* slotStatus: حالة كل مصدر في المنتقي (idle → fetching → ready/failed) */
   const [slotStatus,  setSlotStatus]  = useState<Record<string, "idle" | "fetching" | "ready" | "failed">>({});
@@ -1156,29 +1167,52 @@ export default function WatchScreen() {
      Kawaii may return Arabic directly or English only; translate the latter
      through Nova after proxying the signed subtitle file server-side. */
   useEffect(() => {
-    if (isAwDubbed || !sourceAnimeId) {
+    setEpisodeSkipTimes({});
+    if (isAwDubbed || (!sourceAnimeId && !titleStr)) {
       setGlobalSubUrl(undefined);
       return;
     }
     setGlobalSubUrl(undefined);
     const ctrl = new AbortController();
     const base = getBaseUrl();
-    fetchArabicSubtitleUrl(sourceAnimeId, epNum, base, titleStr, englishStr, ctrl.signal)
-      .then(subtitleUrl => {
-        if (!ctrl.signal.aborted && subtitleUrl) {
-          setGlobalSubUrl(subtitleUrl);
-          setPlayingSrc(current => {
-            if (!current) return current;
-            const curSite = String(current.site || "").toLowerCase();
-            if (KAWAII_SUBTITLE_SITES.has(curSite) && !current.subtitleUrl) {
-              return { ...current, subtitleUrl };
-            }
-            return current;
-          });
-        }
-      });
+    if (sourceAnimeId) {
+      fetchArabicSubtitleUrl(sourceAnimeId, epNum, base, titleStr, englishStr, ctrl.signal)
+        .then(subtitleUrl => {
+          if (!ctrl.signal.aborted && subtitleUrl) {
+            setGlobalSubUrl(subtitleUrl);
+            setPlayingSrc(current => {
+              if (!current) return current;
+              const curSite = String(current.site || "").toLowerCase();
+              if (KAWAII_SUBTITLE_SITES.has(curSite) && !current.subtitleUrl) {
+                return { ...current, subtitleUrl };
+              }
+              return current;
+            });
+          }
+        });
+    }
+    // Fetch episode-level skip times so all servers share the same intro/outro
+    const skipParams = new URLSearchParams({
+      anilistId: String(sourceAnimeId || "0"),
+      ep: String(epNum),
+      title: titleStr,
+      english: englishStr,
+      titleAr: titleArStr,
+      intro: "1",
+      outro: "1",
+    });
+    secureFetch(`${base}/api/anime/skip-times?${skipParams.toString()}`, { signal: ctrl.signal })
+      .then(r => (r.ok || r.status === 503) ? r.json() : null)
+      .then((d: any) => {
+        if (ctrl.signal.aborted || !d) return;
+        setEpisodeSkipTimes(prev => ({
+          intro: (d.intro && d.intro.end > d.intro.start) ? d.intro : prev.intro,
+          outro: (d.outro && d.outro.end > d.outro.start) ? d.outro : prev.outro,
+        }));
+      })
+      .catch(() => {});
     return () => ctrl.abort();
-  }, [isAwDubbed, sourceAnimeId, epNum]);
+  }, [isAwDubbed, sourceAnimeId, epNum, titleStr, englishStr, titleArStr]);
 
   const progressKey    = isAwDubbed
     ? `progress-aw-dubbed-${awSeries}-${epNum}`
@@ -1196,7 +1230,11 @@ export default function WatchScreen() {
         && item.contentKey === awSeries
         && item.ep === epNum,
       )?.position || 0
-      : 0;
+      : watchHistory.find((item) =>
+        (!item.contentKind || item.contentKind === "anime")
+        && item.animeId === Number(anime)
+        && item.ep === epNum,
+      )?.position || 0;
     AsyncStorage.getItem(progressKey).then(v => {
       if (!active || !isMountedRef.current) return;
       const storedPosition = Number.parseFloat(v || "") || 0;
@@ -1559,9 +1597,12 @@ export default function WatchScreen() {
   }, [isAwDubbed, anime, anilistId, sourceAnimeId, epNum, titleStr, englishStr, titleArStr, format, year, episodes, native, anslayerId, awAnimeId, isFromLatest, latestSource, availabilityAttempt, availabilityHintKey, playbackTraceId]);
 
   /* ── Progress save ── */
-  const saveProgress = useCallback(async () => {
+  const saveProgress = useCallback(async (syncResumeState = true) => {
     const t = lastTimeRef.current;
-    if (t <= 10) return;
+    if (syncResumeState && t > 1) {
+      setResumeTime(Math.floor(t));
+    }
+    if (t <= 2) return;
     await AsyncStorage.setItem(progressKey, String(Math.floor(t)));
     if (isAwDubbed && awSeries) {
       await addToHistory({
@@ -1660,7 +1701,10 @@ export default function WatchScreen() {
        invent a future episode. Previous/explicit episode selection remains
        available when it is inside a known catalog bound. */
     if (n < 1 || (n > epNum && (totalEpsCount === undefined || n > totalEpsCount))) return;
-    saveProgress();
+    void saveProgress(false);
+    lastTimeRef.current = 0;
+    lastDurationRef.current = 0;
+    setResumeTime(0);
     abortRef.current?.abort();
     /* إلغاء جميع طلبات المواقع الجارية قبل الانتقال للحلقة التالية */
     siteCtrls.current.forEach(c => c.abort());
@@ -1721,10 +1765,24 @@ export default function WatchScreen() {
 
   /* ── Play a source ── */
   const playSrc = useCallback((src: Src) => {
+    if (lastTimeRef.current > 1) {
+      setResumeTime(Math.floor(lastTimeRef.current));
+    }
+    if (src.skipIntro || src.skipOutro) {
+      setEpisodeSkipTimes(prev => ({
+        intro: src.skipIntro || prev.intro,
+        outro: src.skipOutro || prev.outro,
+      }));
+    }
     const subtitleUrl = subtitlesDisabledForSite(src.site)
       ? undefined
       : normalizeProviderSubtitleUrl(src.site || "", src.subtitleUrl || globalSubUrl, getBaseUrl());
-    setPlayingSrc({ ...src, subtitleUrl });
+    setPlayingSrc({
+      ...src,
+      subtitleUrl,
+      skipIntro: src.skipIntro || episodeSkipTimes.intro,
+      skipOutro: src.skipOutro || episodeSkipTimes.outro,
+    });
     setResolveFailed(false);
     /* على web: HLS → embed WebView مع hls-proxy URL مباشرة */
     if (Platform.OS === "web") {
@@ -2459,6 +2517,7 @@ export default function WatchScreen() {
   }, [isAwDubbed, playingSrc, saveProgress, srcCacheKey, playSrc, playbackTraceId]);
 
   const onRiftProgress = useCallback((pos: number, dur: number) => {
+    analyticsTrackerRef.current?.markProgress(pos);
     lastTimeRef.current = pos;
     if (dur > 0) lastDurationRef.current = dur;
   }, []);
@@ -2527,10 +2586,10 @@ export default function WatchScreen() {
             : (KAWAII_SUBTITLE_SITES.has(site) || !isArabic ? globalSubUrl : undefined)),
       isArabic,
       wantsSmartSub: !isArabic,
-      skipIntro: playingSrc.skipIntro,
-      skipOutro: playingSrc.skipOutro,
+      skipIntro: playingSrc.skipIntro || episodeSkipTimes.intro,
+      skipOutro: playingSrc.skipOutro || episodeSkipTimes.outro,
     }];
-  }, [screen, playingSrc, globalSubUrl, playbackTraceId, isAwDubbed]);
+  }, [screen, playingSrc, globalSubUrl, playbackTraceId, isAwDubbed, episodeSkipTimes.intro, episodeSkipTimes.outro]);
 
 
   /* ── loading: صحيح عندما يكون أي موقع قيد الجلب (مرجع للمستقبل) ── */
@@ -2591,6 +2650,8 @@ export default function WatchScreen() {
           ? `${awCurrentSeason.label} · الحلقة ${epNum}`
           : (arEpTitle ?? (etitle ? safeDecodeURIComponent(etitle) : undefined))}
         initialPosition={resumeTime}
+        skipIntro={playingSrc.skipIntro || episodeSkipTimes.intro}
+        skipOutro={playingSrc.skipOutro || episodeSkipTimes.outro}
         totalEps={playerTotalEps}
         onBack={onRiftBack}
         onToggleOrientation={onToggleOrientation}

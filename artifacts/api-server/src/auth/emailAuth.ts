@@ -293,7 +293,7 @@ export function registerEmailAuthRoutes(app: Express): void {
         (req.session as any).userId = rows[0].id;
         req.session.cookie.maxAge = 30 * 24 * 60 * 60 * 1000;
       }
-      return res.json(userPayload(rows[0]));
+      return res.json(authenticatedPayload(rows[0]));
     } catch {
       return res.status(500).json({ error: "خطأ في الخادم" });
     }

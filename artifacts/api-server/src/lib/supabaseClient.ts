@@ -328,6 +328,7 @@ export async function sbSelect<T = any>(
 export async function sbCount(
   table: string,
   filters: Record<string, string | number | undefined> = {},
+  options: { strict?: boolean } = {},
 ): Promise<number> {
   if (isSupabaseReady()) {
     try {
@@ -342,18 +343,29 @@ export async function sbCount(
         signal: AbortSignal.timeout(10000),
       });
       const range = res.headers.get("content-range") || "";
-      const total = Number(range.split("/").pop());
+      const totalText = range.split("/").pop();
+      const total = totalText && totalText !== "*" ? Number(totalText) : Number.NaN;
       if (Number.isFinite(total)) return total;
-      if (!res.ok) return 0;
+      if (!res.ok) {
+        if (options.strict) throw new Error(`Supabase ${res.status}: ${await res.text()}`);
+        return 0;
+      }
       const rows = await res.json();
+      if (options.strict) {
+        throw new Error(`Supabase ${table} response did not include an exact Content-Range`);
+      }
       return Array.isArray(rows) ? rows.length : 0;
     } catch (e: any) {
       console.error(`[sb] sbCount "${table}":`, e.message);
+      if (options.strict) throw (e instanceof Error ? e : new Error(String(e)));
       return 0;
     }
   }
 
-  if (!isPgReady()) return 0;
+  if (!isPgReady()) {
+    if (options.strict) throw new Error("No database configured");
+    return 0;
+  }
   try {
     const { where, values } = buildWhere(filters);
     const result = await getPool().query(
@@ -363,6 +375,7 @@ export async function sbCount(
     return Number(result.rows[0]?.count || 0);
   } catch (e: any) {
     console.error(`[pg] sbCount "${table}":`, e.message);
+    if (options.strict) throw (e instanceof Error ? e : new Error(String(e)));
     return 0;
   }
 }

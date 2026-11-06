@@ -140,7 +140,7 @@ export const AnimeCard = React.memo(function AnimeCard({ anime, size = "sm", car
 
 const styles = StyleSheet.create({
   card: { flexDirection: "column", gap: 6 },
-  tvCard: { borderRadius: 10, padding: 5, margin: -5, gap: 8 },
+  tvCard: { borderRadius: 12, padding: 4, margin: 2, gap: 8 },
   imageContainer: { overflow: "hidden", backgroundColor: "#1a1a2e", position: "relative" },
   image: { width: "100%", height: "100%" },
   scoreBadge: {

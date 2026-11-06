@@ -85,6 +85,7 @@ export default function DubbedWatchScreen() {
   const [slots, setSlots] = useState<DubbedServerSlot[]>([]);
   const [checkingAvailability, setCheckingAvailability] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [resumeTime, setResumeTime] = useState(0);
   const [episodeList, setEpisodeList] = useState<DubbedEpRef[]>([]);
   const [dlStates, setDlStates] = useState<Record<string, "idle" | "fetching" | "downloading" | "done" | "error">>({});
   const [dlProgress, setDlProgress] = useState<Record<string, number>>({});
@@ -637,12 +638,13 @@ export default function DubbedWatchScreen() {
       const rawMediaUrl = extracted.rawUrl || extracted.url;
       const isDirectProgressiveProxy =
         rawMediaUrl.includes("/api/dubbed/stream") || rawMediaUrl.includes("/api/anime/video-proxy");
+      const downloadSite = isCarateenSource ? (slot.site || "sp") : "animewitcher";
       const downloadUrl =
         extracted.contentType === "hls" && !rawMediaUrl.includes("/api/anime/download-mp4")
-          ? `${base}/api/anime/download-mp4?site=animewitcher&url=${encodeURIComponent(rawMediaUrl)}${downloadToken ? `&dlToken=${encodeURIComponent(downloadToken)}` : ""}`
+          ? `${base}/api/anime/download-mp4?site=${encodeURIComponent(downloadSite)}&url=${encodeURIComponent(rawMediaUrl)}${downloadToken ? `&dlToken=${encodeURIComponent(downloadToken)}` : ""}`
           : isDirectProgressiveProxy
             ? rawMediaUrl
-            : `${base}/api/anime/download-mp4?site=animewitcher&url=${encodeURIComponent(rawMediaUrl)}${downloadToken ? `&dlToken=${encodeURIComponent(downloadToken)}` : ""}`;
+            : `${base}/api/anime/download-mp4?site=${encodeURIComponent(downloadSite)}&url=${encodeURIComponent(rawMediaUrl)}${downloadToken ? `&dlToken=${encodeURIComponent(downloadToken)}` : ""}`;
 
       setDlStates((p) => ({ ...p, [slot.key]: "downloading" }));
       setDlProgress((p) => ({ ...p, [slot.key]: 0 }));
@@ -657,6 +659,7 @@ export default function DubbedWatchScreen() {
         url: downloadUrl,
         authToken: authToken ?? undefined,
         downloadToken: downloadToken ?? undefined,
+        hlsManifestUrl: extracted.contentType === "hls" ? rawMediaUrl : undefined,
       });
     } catch {
       setDlStates((p) => ({ ...p, [slot.key]: "error" }));
@@ -700,7 +703,8 @@ export default function DubbedWatchScreen() {
 
   const saveProgress = useCallback(async () => {
     const position = lastTimeRef.current;
-    if (!contentKey || position <= 10) return;
+    if (position > 1) setResumeTime(Math.floor(position));
+    if (!contentKey || position <= 2) return;
     const duration = lastDurationRef.current || undefined;
     await addToHistory({
       animeId: numericAnimeId,
@@ -720,6 +724,8 @@ export default function DubbedWatchScreen() {
 
   const handleBack = useCallback(() => {
     if (screen === "player") {
+      if (lastTimeRef.current > 1) setResumeTime(Math.floor(lastTimeRef.current));
+      void saveProgress();
       setScreen("picker");
       return;
     }
@@ -753,6 +759,7 @@ export default function DubbedWatchScreen() {
           sources={sources}
           title={`${title || ""} · ${season || ""}`}
           episode={episodeNumber}
+          initialPosition={resumeTime}
           totalEpisodes={totalEpsCount}
           onToggleOrientation={onToggleOrientation}
           onProgress={onProgress}

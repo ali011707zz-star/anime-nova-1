@@ -637,6 +637,31 @@ router.get("/dubbed/carateen/episodes", async (req, res) => {
   }
 });
 
+router.get("/dubbed/carateen/stream", async (req, res) => {
+  const provider = parseCarateenProvider(req.query.provider);
+  const showId = parsePositiveId(req.query.showId);
+  const episodeId = parsePositiveId(req.query.episodeId);
+  if (!provider || !showId || !episodeId) {
+    res.status(400).json({ error: "provider, showId and episodeId are required" });
+    return;
+  }
+  try {
+    const rawUrl = await getCarateenEpisodeStream(provider, showId, episodeId);
+    if (!isAllowedCarateenStreamUrl(rawUrl)) {
+      res.status(502).json({ error: "مصدر الحلقة غير مدعوم" });
+      return;
+    }
+    res.setHeader("Cache-Control", "no-store");
+    res.json({ streamUrl: rawUrl, success: true });
+  } catch (error) {
+    logger.warn(
+      { err: error, provider, showId, episodeId },
+      "dubbed: Carateen stream unavailable",
+    );
+    res.status(502).json({ error: "تعذر استخراج رابط الحلقة" });
+  }
+});
+
 router.get("/dubbed/carateen/watch-src", async (req, res) => {
   const provider = parseCarateenProvider(req.query.provider);
   const showId = parsePositiveId(req.query.showId);

@@ -1,4 +1,3 @@
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import React from "react";
 import {
   Dimensions,
@@ -16,179 +15,60 @@ import type {
   ViewStyle,
 } from "react-native";
 
-export type TvModeOverride = "auto" | "on" | "off";
-
-const TV_MODE_OVERRIDE_KEY = "nova-tv-mode-override";
-let currentTvOverride: TvModeOverride = "auto";
-let hydratedTvOverride = false;
-const tvListeners = new Set<() => void>();
-
-function notifyTvListeners() {
-  for (const listener of tvListeners) {
-    try {
-      listener();
-    } catch {}
-  }
-}
-
-function ensureTvOverrideHydrated() {
-  if (hydratedTvOverride) return;
-  hydratedTvOverride = true;
-  AsyncStorage.getItem(TV_MODE_OVERRIDE_KEY)
-    .then((raw) => {
-      if (raw === "on" || raw === "off" || raw === "auto") {
-        if (currentTvOverride !== raw) {
-          currentTvOverride = raw;
-          notifyTvListeners();
-        }
-      }
-    })
-    .catch(() => {});
-}
-
-ensureTvOverrideHydrated();
-
-export function getTvModeOverride(): TvModeOverride {
-  ensureTvOverrideHydrated();
-  return currentTvOverride;
-}
-
-export async function setTvModeOverride(mode: TvModeOverride): Promise<void> {
-  currentTvOverride = mode;
-  notifyTvListeners();
-  try {
-    await AsyncStorage.setItem(TV_MODE_OVERRIDE_KEY, mode);
-  } catch {}
-}
-
-export async function toggleTvMode(): Promise<boolean> {
-  const currentlyActive = isTvDevice();
-  const nextMode: TvModeOverride = currentlyActive ? "off" : "on";
-  await setTvModeOverride(nextMode);
-  return !currentlyActive;
-}
-
-export function useTvModeOverride(): [TvModeOverride, (mode: TvModeOverride) => Promise<void>] {
-  ensureTvOverrideHydrated();
-  const [mode, setMode] = React.useState<TvModeOverride>(currentTvOverride);
-
-  React.useEffect(() => {
-    const listener = () => setMode(currentTvOverride);
-    tvListeners.add(listener);
-    return () => {
-      tvListeners.delete(listener);
-    };
-  }, []);
-
-  return [mode, setTvModeOverride];
-}
-
 /**
- * Detects Android TV, Google TV, Fire TV, and common Android TV boxes, while
- * also respecting the user's explicit TV Mode toggle ("on" | "off" | "auto").
+ * Android TV, Google TV, Fire TV, and modern Android Smart TVs.
+ * We detect TV mode reliably through platform indicators, UI mode,
+ * and TV screen aspect ratio / orientation.
  */
-export function isTvDevice(width?: number, height?: number) {
-  ensureTvOverrideHydrated();
-  if (currentTvOverride === "on") return true;
-  if (currentTvOverride === "off") return false;
-
+export function isTvDevice(width?: number, height?: number): boolean {
   if (Platform.OS !== "android") return false;
   const nativePlatform = Platform as typeof Platform & {
     isTV?: boolean;
-    constants?: {
-      uiMode?: string;
-      Model?: string;
-      Brand?: string;
-      Manufacturer?: string;
-       fingerprint?: string;
-    };
+    constants?: { uiMode?: string; Brand?: string; Model?: string };
   };
   const uiMode = String(nativePlatform.constants?.uiMode ?? "").toLowerCase();
-  if (nativePlatform.isTV === true || uiMode === "tv" || uiMode === "television") {
-    return true;
-  }
-
-  const deviceInfo = [
-    nativePlatform.constants?.Model,
-    nativePlatform.constants?.Brand,
-    nativePlatform.constants?.Manufacturer,
-    nativePlatform.constants?.fingerprint,
-  ]
-    .filter(Boolean)
-    .join(" ")
-    .toLowerCase();
-
-  if (
-    /\b(aft[a-z0-9]*|shield|mibox|mi\s*box|chromecast|bravia|android\s*tv|google\s*tv|smart\s*tv|tv\s*box|mecool|h96|x96|tx3|t95|tanix|beelink|ugoos|onn\.?\s*tv)\b/i.test(
-      deviceInfo,
-    )
-  ) {
-    return true;
-  }
+  if (nativePlatform.isTV === true || uiMode === "tv" || uiMode === "television") return true;
 
   const window = Dimensions.get("window");
-  const w = width ?? window.width ?? 0;
-  const h = height ?? window.height ?? 0;
-  if (w >= 960 && h >= 500 && w > h * 1.65 && Math.abs(w / h - 16 / 9) < 0.08) {
-    // Exact 16:9 landscape output at 960x540 / 1280x720 / 1920x1080 is standard HDMI TV output
-    return true;
-  }
+  const measuredWidth = width ?? window.width;
+  const measuredHeight = height ?? window.height;
+  if (measuredWidth == null || measuredHeight == null) return false;
 
-  return false;
+  const longEdge = Math.max(measuredWidth, measuredHeight);
+  const shortEdge = Math.min(measuredWidth, measuredHeight);
+  const isLandscape = measuredWidth >= measuredHeight;
+
+  // On native Android TV, logical density creates resolutions like 960x540, 1280x720, or 1920x1080.
+  // When running on a TV without uiMode=tv set by OEM, landscape >= 720 width is guaranteed TV or ten-foot layout.
+  return isLandscape && (longEdge >= 800 && shortEdge >= 400);
 }
 
-let activeThemeIsWhite = false;
-
-export function setActiveThemeIsWhite(isWhite: boolean) {
-  activeThemeIsWhite = isWhite;
-}
-
-try {
-  AsyncStorage.getItem("nova-theme")
-    .then((val) => {
-      if (val === "white" || val === "light") {
-        activeThemeIsWhite = true;
+/**
+ * High-contrast Netflix-style focus ring:
+ * Visible and glowing with distinct outline and highlight background.
+ */
+export function tvFocusStyle(focused: boolean) {
+  return focused
+    ? {
+        backgroundColor: "rgba(139, 92, 246, 0.25)",
+        borderColor: "#38BDF8", // Vibrant Sky Cyan / Neon highlight
+        borderWidth: 3.5,
+        borderRadius: 12,
+        shadowColor: "#38BDF8",
+        shadowOffset: { width: 0, height: 0 },
+        shadowOpacity: 0.85,
+        shadowRadius: 10,
+        elevation: 10,
+        zIndex: 50,
       }
-    })
-    .catch(() => {});
-} catch {}
-
-export function tvFocusStyle(focused: boolean, isWhite?: boolean) {
-  if (!focused) return {};
-  const white = typeof isWhite === "boolean" ? isWhite : activeThemeIsWhite;
-  if (white) {
-    // Ultra-visible high-contrast focus indicator for White Theme:
-    // Deep indigo/purple ring + rich dark drop shadow so the cursor location is unmistakable.
-    return {
-      backgroundColor: "rgba(67, 56, 202, 0.16)",
-      borderColor: "#3730A3",
-      borderWidth: 3.5,
-      shadowColor: "#0f172a",
-      shadowOpacity: 0.55,
-      shadowRadius: 10,
-      shadowOffset: { width: 0, height: 3 },
-      elevation: 12,
-      zIndex: 50,
-    };
-  }
-  return {
-    // High-visibility cyan focus ring for Dark Theme
-    backgroundColor: "rgba(6, 182, 212, 0.18)",
-    borderColor: "#06b6d4",
-    borderWidth: 2.8,
-    shadowColor: "#06b6d4",
-    shadowOpacity: 0.35,
-    shadowRadius: 8,
-    elevation: 8,
-    zIndex: 50,
-  };
+    : {};
 }
 
 export const TV_FOCUS_VIEWABILITY_CONFIG = {
-  itemVisiblePercentThreshold: 65,
+  itemVisiblePercentThreshold: 75,
 };
 
-/** Scroll a virtualized list smoothly when D-pad focus reaches an off-screen row. */
+/** Scroll a virtualized list only when D-pad focus reaches an off-screen row. */
 export function useTvListFocusScroll<T>(
   listRef: React.RefObject<FlatList<T> | null>,
   viewPosition = 0.35,
@@ -203,16 +83,11 @@ export function useTvListFocusScroll<T>(
     }
     visibleIndicesRef.current = next;
   }).current;
-  const scrollToFocusedIndex = React.useCallback(
-    (index: number) => {
-      if (!isTvDevice() || visibleIndicesRef.current?.has(index) || !visibleIndicesRef.current)
-        return;
-      try {
-        listRef.current?.scrollToIndex({ index, animated: false, viewPosition });
-      } catch {}
-    },
-    [listRef, viewPosition],
-  );
+
+  const scrollToFocusedIndex = React.useCallback((index: number) => {
+    if (!isTvDevice() || visibleIndicesRef.current?.has(index) || !visibleIndicesRef.current) return;
+    listRef.current?.scrollToIndex({ index, animated: false, viewPosition });
+  }, [listRef, viewPosition]);
 
   return {
     onViewableItemsChanged,
@@ -221,11 +96,6 @@ export function useTvListFocusScroll<T>(
   };
 }
 
-/**
- * Use this for every interactive control. Android TV's native focus engine
- * sees controls when explicitly focusable, and D-pad center/enter presses
- * trigger immediately without delay.
- */
 type TvPressableState = PressableStateCallbackType & { focused: boolean };
 
 type TvPressableProps = Omit<PressableProps, "style"> & {
@@ -242,21 +112,16 @@ export function TvPressable({
   onBlur,
   ...props
 }: TvPressableProps) {
-  useTvModeOverride();
-  const tv = isTvDevice();
   const [focused, setFocused] = React.useState(false);
+  const isTv = isTvDevice();
 
   return (
     <Pressable
       {...props}
-      delayPressIn={0}
-      delayPressOut={0}
-      unstable_pressDelay={0}
-      focusable={tv ? focusable !== false : focusable}
-      hasTVPreferredFocus={tv && hasTVPreferredFocus}
+      focusable={focusable !== undefined ? focusable : isTv}
+      hasTVPreferredFocus={hasTVPreferredFocus}
       hitSlop={props.hitSlop ?? 8}
       pressRetentionOffset={props.pressRetentionOffset ?? 12}
-      android_disableSound={false}
       onFocus={(event) => {
         setFocused(true);
         onFocus?.(event);
@@ -267,8 +132,8 @@ export function TvPressable({
       }}
       style={({ pressed }) => [
         typeof style === "function" ? style({ focused, pressed }) : style,
-        tvFocusStyle(tv && focused),
-        pressed && { opacity: 0.84 },
+        focused && tvFocusStyle(true),
+        pressed && { opacity: 0.82 },
       ]}
     >
       {children}
@@ -276,9 +141,6 @@ export function TvPressable({
   );
 }
 
-/**
- * Safe wrapper for TV focus guide sections across Android TV and phones.
- */
 export function TvFocusGuideView({
   autoFocus: _autoFocus,
   ...props
@@ -288,72 +150,34 @@ export function TvFocusGuideView({
 
 export function tvLayout(width: number, height: number) {
   const tv = isTvDevice(width, height);
-  const wide = width >= 700;
-  const hPad = tv && wide ? 32 : wide ? 24 : 16;
   return {
     tv,
-    contentWidth: tv && wide ? Math.min(Math.max(width - 64, 0), 1440) : width,
-    horizontalPadding: hPad,
-    controlHeight: tv && wide ? 48 : 42,
-    textScale: tv && wide ? 1.1 : 1,
-    sectionGap: tv && wide ? 24 : 20,
+    contentWidth: tv ? Math.min(Math.max(width - 80, 0), 1440) : width,
+    horizontalPadding: tv ? 40 : 16,
+    controlHeight: tv ? 58 : 44,
+    textScale: tv ? 1.16 : 1,
+    sectionGap: tv ? 28 : 24,
   };
 }
 
-/** Shared TV sizing scale. Keep phone values untouched and make remote
- * targets/text comfortably readable on a ten-foot screen without oversized elements. */
 export function tvScale(tv: boolean, phone: number, television: number) {
   return tv ? television : phone;
 }
 
-/**
- * Proportional scale factor across Phone (320dp–430dp) and Tablet/iPad (600dp+).
- */
-export function getDeviceScale(width?: number, height?: number) {
-  const window = Dimensions.get("window");
-  const w = width ?? window.width ?? 390;
-  const h = height ?? window.height ?? 800;
-  const shortEdge = Math.min(w, h);
-  if (shortEdge >= 600) {
-    return Math.min(1.15, Math.max(1.05, shortEdge / 560));
-  }
-  return Math.max(0.84, Math.min(1.02, shortEdge / 412));
-}
-
-export function scaleByDevice(baseValue: number, width?: number, height?: number) {
-  const factor = getDeviceScale(width, height);
-  return Math.round(baseValue * factor * 10) / 10;
-}
-
-/**
- * Central responsive + ten-foot UI metrics.
- * Scales proportionally to the actual screen width so phones, iPads/tablets,
- * and TV screens all have balanced icon, text, and button sizes.
- */
 export function responsiveScale(
   phoneValue: number,
   width: number,
   tv: boolean,
   tvValue?: number,
 ) {
-  if (!tv || width < 600) {
-    const factor = getDeviceScale(width);
-    return Math.round(phoneValue * factor);
-  }
-  const tvScaleFactor = Math.max(1.06, Math.min(1.24, width / 960));
-  if (tvValue !== undefined) {
-    const cappedTvValue = Math.min(tvValue, Math.round(phoneValue * 1.28));
-    return Math.round(Math.min(cappedTvValue, phoneValue * tvScaleFactor));
-  }
-  return Math.round(phoneValue * tvScaleFactor);
+  if (!tv) return phoneValue;
+  const scale = Math.max(1.45, Math.min(1.8, width / 960));
+  return Math.round(tvValue ?? phoneValue * scale);
 }
 
 export function useTvMetrics() {
-  useTvModeOverride();
   const { width, height } = useWindowDimensions();
   const tv = isTvDevice(width, height);
-  const isTablet = !tv && Math.min(width, height) >= 600;
-  const deviceScale = getDeviceScale(width, height);
   const size = (phoneValue: number, tvValue?: number) =>
     responsiveScale(phoneValue, width, tv, tvValue);
 
@@ -361,17 +185,15 @@ export function useTvMetrics() {
     width,
     height,
     tv,
-    isTablet,
-    deviceScale,
     size,
-    horizontalPadding: size(16, 28),
-    controlTarget: size(40, 48),
+    horizontalPadding: size(16, 40),
+    controlTarget: size(44, 58),
   };
 }
 
 export const tvReadable = {
-  title: { fontSize: 24, lineHeight: 32 },
-  body: { fontSize: 16, lineHeight: 24 },
-  small: { fontSize: 14, lineHeight: 20 },
-  button: { minHeight: 50, paddingHorizontal: 20, paddingVertical: 12 },
+  title: { fontSize: 30, lineHeight: 40 },
+  body: { fontSize: 18, lineHeight: 28 },
+  small: { fontSize: 15, lineHeight: 23 },
+  button: { minHeight: 58, paddingHorizontal: 22, paddingVertical: 14 },
 };

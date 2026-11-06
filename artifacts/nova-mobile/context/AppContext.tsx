@@ -211,6 +211,9 @@ function mapServerHistory(row: any): WatchProgress | null {
     title: String(row?.anime_title ?? row?.title ?? ""),
     english: String(row?.english_title ?? row?.english ?? row?.anime_title ?? row?.title ?? ""),
     thumbnail: String(row?.anime_cover ?? row?.image ?? row?.poster ?? ""),
+    totalEps: asNumber(row?.total_eps ?? row?.totalEps) || undefined,
+    position: asNumber(row?.position) || undefined,
+    duration: asNumber(row?.duration) || undefined,
     updatedAt: Date.parse(row?.watched_at || row?.updated_at || "") || Date.now(),
   };
 }
@@ -257,7 +260,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       }
       const response = await secureFetch(`${getBaseUrl()}/api/auth/me`);
       if (!response.ok) {
-        if (response.status === 401 || response.status === 403) {
+        if (response.status === 401) {
           await setUserAuthToken(null);
           await AsyncStorage.removeItem("nova-mobile-user");
           setCurrentUser(null);
@@ -315,11 +318,16 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           animeId: item.animeId,
-          animeTitle: item.english || item.title,
+          animeTitle: item.title || item.english,
+          english: item.english || item.title,
+          titleAr: item.titleAr || undefined,
           animeCover: item.thumbnail || null,
           animeType: serverAnimeType(item),
           episodeNumber: item.ep,
           seasonNumber: item.season || 1,
+          position: item.position || undefined,
+          duration: item.duration || undefined,
+          totalEps: item.totalEps || undefined,
         }),
       });
       return response.ok;
@@ -444,6 +452,17 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           if (!remote || item.updatedAt > remote.updatedAt || historyClearPending === "1") {
             historyToUpload.push(item);
           }
+        } else {
+          mergedHistory.set(historyKey(item), {
+            ...item,
+            ...remote,
+            position: remote.position || item.position,
+            duration: remote.duration || item.duration,
+            totalEps: remote.totalEps || item.totalEps,
+            titleAr: remote.titleAr || item.titleAr,
+            english: remote.english || item.english,
+            title: item.title || remote.title,
+          });
         }
       }
 
@@ -589,10 +608,21 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     // نظّف الكاش القديم أولاً في الخلفية
     cleanOldCacheKeys().catch(() => {});
 
+    const storedUserRaw = await AsyncStorage.getItem("nova-mobile-user").catch(() => null);
+    let initialUserId: string | null = null;
+    if (storedUserRaw) {
+      try {
+        const parsedUser = JSON.parse(storedUserRaw);
+        if (parsedUser?.id) initialUserId = String(parsedUser.id);
+      } catch {}
+    }
+    const initialHistoryKey = initialUserId ? ACCOUNT_HISTORY_KEY(initialUserId) : ANONYMOUS_HISTORY_KEY;
+    const initialFavKey = initialUserId ? ACCOUNT_FAVORITES_KEY(initialUserId) : ANONYMOUS_FAVORITES_KEY;
+    if (initialUserId) dataOwnerRef.current = initialUserId;
     const [themeVal, historyVal, favVal] = await Promise.all([
       AsyncStorage.getItem("nova-theme").catch(() => null),
-      AsyncStorage.getItem(ANONYMOUS_HISTORY_KEY).catch(() => null),
-      AsyncStorage.getItem(ANONYMOUS_FAVORITES_KEY).catch(() => null),
+      AsyncStorage.getItem(initialHistoryKey).catch(() => null),
+      AsyncStorage.getItem(initialFavKey).catch(() => null),
     ]);
     if (themeVal) {
       const nextTheme: Theme =

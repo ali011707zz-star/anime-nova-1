@@ -37,7 +37,7 @@ import {
 import { rewriteHlsManifest } from "../lib/hlsManifestRewrite.mjs";
 import { createHash, createHmac, createDecipheriv, createCipheriv, randomBytes } from "crypto";
 import { execSync, execFile, spawn } from "child_process";
-import { createReadStream, existsSync, writeFileSync, readFileSync, readdirSync, mkdirSync, rmSync, statSync, renameSync } from "fs";
+import { createReadStream, existsSync, writeFileSync, readFileSync, readdirSync, mkdirSync, rmSync, statSync, renameSync, openSync, writeSync, closeSync } from "fs";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { join as pathJoin } from "path";
@@ -557,6 +557,7 @@ const CF_PROXY_BASE = _NOVA_PROXY_BASE
 // The VPS cf-proxy may require its internal key for binary media streams.
 // Keep it server-side; it is never included in client-facing URLs.
 const CF_PROXY_KEY = process.env.CF_PROXY_KEY || "";
+const CF_WORKER_URL = process.env.CF_WORKER_URL || "";
 let _cfProxyAlive: boolean | null = null;
 let _cfProxyCheckedAt = 0;
 
@@ -649,6 +650,49 @@ async function cfProxyStreamFetch(
   }
 }
 
+function buildCfWorkerUrl(url: string, ref: string): string | null {
+  if (!CF_WORKER_URL || !CF_PROXY_KEY) return null;
+  try {
+    const key = Buffer.from(CF_PROXY_KEY.padEnd(32, "0").slice(0, 32));
+    const iv = randomBytes(12);
+    const payload = JSON.stringify({
+      url,
+      ref,
+      exp: Math.floor(Date.now() / 1000) + 6 * 60 * 60,
+    });
+    const cipher = createCipheriv("aes-256-gcm", key, iv);
+    const encrypted = Buffer.concat([cipher.update(payload, "utf8"), cipher.final()]);
+    const token = iv.toString("hex") + Buffer.concat([encrypted, cipher.getAuthTag()]).toString("hex");
+    const workerUrl = new URL(CF_WORKER_URL);
+    workerUrl.searchParams.set("t", token);
+    return workerUrl.toString();
+  } catch {
+    return null;
+  }
+}
+
+async function fetchViaCfWorker(
+  url: string,
+  ref: string,
+  range?: string,
+  externalSignal?: AbortSignal,
+): Promise<Response | null> {
+  const workerUrl = buildCfWorkerUrl(url, ref);
+  if (!workerUrl) return null;
+  const headers: Record<string, string> = {};
+  if (range) headers.Range = range;
+  try {
+    return await fetchWithHeaderTimeout(
+      fetch,
+      workerUrl,
+      { headers, ...(externalSignal ? { signal: externalSignal } : {}) },
+      12_000,
+    );
+  } catch {
+    return null;
+  }
+}
+
 async function fetchMediaUpstream(
   url: string,
   ref: string,
@@ -673,6 +717,18 @@ async function fetchMediaUpstream(
     try { await response?.body?.cancel(); } catch {}
     return { kind: "cf-error" };
   });
+  const tryWorkerFallback = async (): Promise<Response | null> => {
+    const response = await fetchViaCfWorker(url, ref, range, signal);
+    if (response?.ok) {
+      console.info(`[media-hedge] route=cf-worker host=${safeHost(url)}`);
+      return response;
+    }
+    if (response) {
+      console.warn(`[media-hedge] route=cf-worker rejected host=${safeHost(url)} status=${response.status}`);
+      try { await response.body?.cancel(); } catch {}
+    }
+    return null;
+  };
 
   const first: any = await Promise.race([directPromise, hedgePromise]);
   if (first.kind === "direct" && first.response.ok) {
@@ -696,13 +752,35 @@ async function fetchMediaUpstream(
       return alternate.response;
     }
     cancelHedge();
-    if (first.kind === "direct") return first.response;
+    const workerResponse = await tryWorkerFallback();
+    if (workerResponse) {
+      directRaceAbort.abort();
+      if (first.kind === "direct") {
+        try { await first.response.body?.cancel(); } catch {}
+      }
+      return workerResponse;
+    }
+    if (first.kind === "direct") {
+      try { await first.response.body?.cancel(); } catch {}
+      return first.response;
+    }
     throw first.error;
   }
 
   const direct: any = await directPromise;
   cancelHedge();
-  if (direct.kind === "direct") return direct.response;
+  if (direct.kind === "direct" && direct.response.ok) return direct.response;
+  const workerResponse = await tryWorkerFallback();
+  if (workerResponse) {
+    if (direct.kind === "direct") {
+      try { await direct.response.body?.cancel(); } catch {}
+    }
+    return workerResponse;
+  }
+  if (direct.kind === "direct") {
+    try { await direct.response.body?.cancel(); } catch {}
+    return direct.response;
+  }
   throw direct.error;
 }
 
@@ -2902,6 +2980,56 @@ interface UnifiedSource {
   skipOutro?: { start: number; end: number };
   /** Referer/Origin headers مطلوبة للـ CDN — تُرسَل مع كل طلب (segments + redirects) */
   headers?: Record<string, string>;
+}
+
+/**
+ * Mobile players cannot reliably send provider Referer headers to every HLS
+ * segment. Keep HLS playback on our proxy, and proxy direct MP4 links when the
+ * provider requires a Referer. Existing internal proxy URLs remain untouched.
+ */
+function wrapForMobile(source: UnifiedSource): UnifiedSource {
+  const raw = String(source.directUrl || "").trim();
+  if (!raw || source.isEmbed) return source;
+
+  const existingProxy = [source.url, source.directUrl].find((value) =>
+    typeof value === "string" && /^\/api\/anime\/(?:hls|video)-proxy(?:[/?#]|$)/i.test(value),
+  );
+  if (existingProxy) {
+    return { ...source, url: existingProxy, directUrl: existingProxy };
+  }
+
+  // Kawaii signed MP4s are intentionally passed through so the mobile client
+  // can normalize them to video-proxy with the provider-specific bypass header.
+  if (source.site === "kawaii" && source.directType === "mp4") return source;
+
+  if (!isSafeExternalUrl(raw)) return source;
+
+  const ref = String(source.headers?.Referer || source.headers?.referer || "").trim();
+  const isHls =
+    source.directType === "hls" ||
+    /\.m3u8(?:[?#]|$)/i.test(raw) ||
+    /\/(?:hls|playlist)\//i.test(raw);
+
+  let proxyUrl: string;
+  if (isHls) {
+    const params = new URLSearchParams({
+      url: encryptParam(raw),
+      ref: encryptParam(ref || raw),
+    });
+    proxyUrl = `/api/anime/hls-proxy?${params.toString()}`;
+  } else if (ref) {
+    const params = new URLSearchParams({
+      url: encryptParam(raw),
+      ref: encryptParam(ref),
+    });
+    proxyUrl = `/api/anime/video-proxy?${params.toString()}`;
+  } else {
+    return source;
+  }
+
+  // Set both fields: mobile clients prefer `url` when it is already a proxy,
+  // while `directUrl` remains the canonical playable source for older builds.
+  return { ...source, url: proxyUrl, directUrl: proxyUrl };
 }
 
 // ── Shirayuki / AniKuro bridge ─────────────────────────────────────────────
@@ -5180,6 +5308,7 @@ async function fetchAnime4upVnxServers(malId: number, ep: number): Promise<Unifi
       }
 
       let intro: { start: number; end: number } | undefined;
+      let outro: { start: number; end: number } | undefined;
       const skipMatch = html.match(/let\s+skipSegments\s*=\s*(\{[\s\S]*?\});/i);
       if (skipMatch?.[1]) {
         try {
@@ -5191,6 +5320,15 @@ async function fetchAnime4upVnxServers(malId: number, ep: number): Promise<Unifi
             parsedSkip.intro.end > parsedSkip.intro.start
           ) {
             intro = { start: parsedSkip.intro.start, end: parsedSkip.intro.end };
+          }
+          const rawOutro = parsedSkip?.outro || parsedSkip?.ed || parsedSkip?.ending;
+          if (
+            rawOutro &&
+            typeof rawOutro.start === "number" &&
+            typeof rawOutro.end === "number" &&
+            rawOutro.end > rawOutro.start
+          ) {
+            outro = { start: rawOutro.start, end: rawOutro.end };
           }
         } catch {}
       }
@@ -5214,6 +5352,7 @@ async function fetchAnime4upVnxServers(malId: number, ep: number): Promise<Unifi
           ...(subtitleUrl ? { subtitleUrl } : {}),
           subtitles: subtitles.length ? subtitles : undefined,
           ...(intro ? { intro, skipIntro: intro } : {}),
+          ...(outro ? { outro, skipOutro: outro } : {}),
           verified: true,
         },
         {
@@ -5229,6 +5368,7 @@ async function fetchAnime4upVnxServers(malId: number, ep: number): Promise<Unifi
           ...(subtitleUrl ? { subtitleUrl } : {}),
           subtitles: subtitles.length ? subtitles : undefined,
           ...(intro ? { intro, skipIntro: intro } : {}),
+          ...(outro ? { outro, skipOutro: outro } : {}),
           verified: true,
         },
       ] as UnifiedSource[];
@@ -7016,12 +7156,83 @@ async function fetchKawaiiSkipTimes(
   return { ok: hadSuccessfulResponse, value: merged };
 }
 
+async function fetchMegaPlaySkipTimes(
+  anilistId: number,
+  episode: number,
+  needs: SkipNeeds,
+): Promise<{ ok: boolean; value: SkipTimes }> {
+  try {
+    const embedUrl = `https://megaplay.buzz/stream/ani/${anilistId}/${episode}/sub`;
+    const page = await fetch(embedUrl, {
+      headers: { ...BASE_HDRS, Referer: "https://hianimez.to/", Accept: "text/html" },
+      signal: AbortSignal.timeout(7_000),
+    });
+    if (!page.ok) return { ok: false, value: { intro: null, outro: null } };
+    const html = await page.text();
+    const fileId = html.match(/data-id\s*=\s*["']([^"']+)["']/i)?.[1]
+      || html.match(/["']data-id["']\s*:\s*["']([^"']+)["']/i)?.[1];
+    if (!fileId) return { ok: true, value: { intro: null, outro: null } };
+    const srcRes = await fetch(
+      `https://megaplay.buzz/stream/getSources?id=${encodeURIComponent(fileId)}`,
+      {
+        headers: {
+          ...BASE_HDRS,
+          Referer: embedUrl,
+          "X-Requested-With": "XMLHttpRequest",
+          Accept: "application/json",
+        },
+        signal: AbortSignal.timeout(7_000),
+      },
+    );
+    if (!srcRes.ok) return { ok: false, value: { intro: null, outro: null } };
+    const data = await srcRes.json().catch(() => null) as any;
+    if (!data || typeof data !== "object") return { ok: false, value: { intro: null, outro: null } };
+    return {
+      ok: true,
+      value: {
+        intro: needs.intro ? normalizeSkipInterval(data.intro) : null,
+        outro: needs.outro ? normalizeSkipInterval(data.outro) : null,
+      },
+    };
+  } catch {
+    return { ok: false, value: { intro: null, outro: null } };
+  }
+}
+
+async function fetchAniZipSkipTimes(
+  anilistId: number,
+  episode: number,
+  needs: SkipNeeds,
+): Promise<{ ok: boolean; value: SkipTimes }> {
+  try {
+    const response = await fetch(
+      `https://api.anizip.moe/mappings?anilist_id=${anilistId}`,
+      { headers: { ...BASE_HDRS, Accept: "application/json" }, signal: AbortSignal.timeout(6_000) },
+    );
+    if (!response.ok) return { ok: false, value: { intro: null, outro: null } };
+    const mapping = await response.json().catch(() => null) as any;
+    const epData = mapping?.episodes?.[String(episode)];
+    if (!epData || typeof epData !== "object") return { ok: true, value: { intro: null, outro: null } };
+    return {
+      ok: true,
+      value: {
+        intro: needs.intro ? normalizeSkipInterval(epData.intro) : null,
+        outro: needs.outro ? normalizeSkipInterval(epData.outro) : null,
+      },
+    };
+  } catch {
+    return { ok: false, value: { intro: null, outro: null } };
+  }
+}
+
 const SKIP_TIMES_FALLBACK_PROVIDERS: Array<{
   name: string;
   fetch: (anilistId: number, episode: number, needs: SkipNeeds) =>
     Promise<{ ok: boolean; value: SkipTimes }>;
 }> = [
   { name: "kawaii", fetch: fetchKawaiiSkipTimes },
+  { name: "megaplay", fetch: fetchMegaPlaySkipTimes },
+  { name: "anizip", fetch: fetchAniZipSkipTimes },
 ];
 
 function getSkipTimesCacheEntry(key: string): SkipTimesCacheEntry | null {
@@ -7097,30 +7308,26 @@ async function resolveCachedSkipTimes(
     }
   }
 
+  let hadFallbackSuccess = false;
   for (const provider of SKIP_TIMES_FALLBACK_PROVIDERS) {
     if (!unresolved.intro && !unresolved.outro) break;
     const result = await provider.fetch(anilistId, episode, unresolved);
     if (!result.ok) continue;
-    if (unresolved.intro) {
-      if (result.value.intro) {
-        next.value.intro = result.value.intro;
-        next.checkedIntro = true;
-      } else if (aniSkipChecked) {
-        next.checkedIntro = true;
-      }
+    hadFallbackSuccess = true;
+    if (unresolved.intro && result.value.intro) {
+      next.value.intro = result.value.intro;
+      next.checkedIntro = true;
+      unresolved.intro = false;
     }
-    if (unresolved.outro) {
-      if (result.value.outro) {
-        next.value.outro = result.value.outro;
-        next.checkedOutro = true;
-      } else if (aniSkipChecked) {
-        next.checkedOutro = true;
-      }
+    if (unresolved.outro && result.value.outro) {
+      next.value.outro = result.value.outro;
+      next.checkedOutro = true;
+      unresolved.outro = false;
     }
-    unresolved = {
-      intro: unresolved.intro && !result.value.intro && !aniSkipChecked,
-      outro: unresolved.outro && !result.value.outro && !aniSkipChecked,
-    };
+  }
+  if (aniSkipChecked && hadFallbackSuccess) {
+    if (needs.intro) next.checkedIntro = true;
+    if (needs.outro) next.checkedOutro = true;
   }
 
   const resolvedAt = Date.now();
@@ -7682,7 +7889,7 @@ async function getMegaPlayAnimeSources(
     const kawaiiSubtitle = await getKawaiiSubForSource(anilistId, ep);
     const skipIntro = data.intro && Number(data.intro.start) >= 0 && Number(data.intro.end) > Number(data.intro.start)
       ? { start: Number(data.intro.start), end: Number(data.intro.end) } : undefined;
-    const skipOutro = data.outro && Number(data.outro.start) >= 0 && Number(data.outro.end) > Number(data.outro.end)
+    const skipOutro = data.outro && Number(data.outro.start) >= 0 && Number(data.outro.end) > Number(data.outro.start)
       ? { start: Number(data.outro.start), end: Number(data.outro.end) } : undefined;
 
     return variants.map((variant) => {
@@ -7707,6 +7914,213 @@ async function getMegaPlayAnimeSources(
     return [];
   }
 }
+
+router.get("/anime/kawaii-meta", async (req: Request, res: Response) => {
+  let anilistId = parseInt(String(req.query.anilistId || "0"), 10);
+  const ep = parseInt(String(req.query.ep || "1"), 10);
+  const title = String(req.query.title || "").trim();
+  const english = String(req.query.english || "").trim() || null;
+  const titleAr = String(req.query.titleAr || "").trim() || null;
+  const empty = { arabicSubUrl: null, englishSubUrl: null, subtitleRef: null, intro: null, outro: null };
+  if (title) {
+    anilistId = await Promise.race([
+      resolveAniListIdForSource(title, english, [], titleAr),
+      new Promise<number | undefined>(resolve => setTimeout(() => resolve(undefined), 3500)),
+    ]) || anilistId;
+  }
+  if (!anilistId) return res.json(empty);
+  try {
+    type KawaiiMeta = {
+      subtitles?: Array<{ url: string; lang?: string; label?: string }>;
+      headers?: Record<string, string>;
+      intro?: { start: number; end: number };
+      outro?: { start: number; end: number };
+    };
+    let data: KawaiiMeta | null = null;
+    let apiBase = KAWAII_BASE;
+    for (const base of KAWAII_API_BASES) {
+      for (const apiUrl of [
+        `${base}/api/miruro?anilistId=${anilistId}&ep=${ep}`,
+        `${base}/api/miruro?anilist_id=${anilistId}&episode=${ep}`,
+        `${base}/api/watch?anilistId=${anilistId}&ep=${ep}`,
+      ]) {
+        const r = await fetchSourceWithRetry(apiUrl, {
+          headers: { ...BASE_HDRS, Accept: "application/json", Referer: `${base}/` },
+        }, 6_000, 1);
+        if (!r?.ok) continue;
+        const candidate = await r.json().catch(() => null) as any;
+        const payload = candidate?.data && typeof candidate.data === "object"
+          ? { ...candidate, ...candidate.data }
+          : candidate;
+        if (payload && typeof payload === "object" && (payload.subtitles?.length || payload.intro || payload.outro)) {
+          data = payload;
+          apiBase = base;
+          break;
+        }
+      }
+      if (data) break;
+    }
+    const language = (s: { lang?: string; label?: string }) => `${s.lang || ""} ${s.label || ""}`.toLowerCase().trim();
+    const isArabic = (s: { lang?: string; label?: string }) => {
+      const value = language(s);
+      return value === "ar" || value === "ara" || value.includes("arabic") || value.includes("arab") || value.includes("عربي") || value.includes("العربية");
+    };
+    const isEnglish = (s: { lang?: string; label?: string }) => {
+      const value = language(s);
+      return value === "en" || value === "eng" || value.includes("english") || value.includes("انجليزي");
+    };
+    const arEntry = data?.subtitles?.find(isArabic);
+    const enEntry = data?.subtitles?.find(isEnglish);
+    const subtitleRef = data?.headers?.Referer || data?.headers?.referer || `${apiBase}/`;
+    const kawaiiSkip = data ? parseKawaiiSkipPayload(data) : { intro: null, outro: null };
+    let intro = kawaiiSkip.intro;
+    let outro = kawaiiSkip.outro;
+    if (!intro || !outro) {
+      try {
+        const malId = await getMalIdForAniList(anilistId).catch(() => null);
+        const cacheKey = malId ? `mal:${malId}:${ep}` : `al:${anilistId}:${ep}`;
+        const resolved = await getCachedSkipTimes(cacheKey, anilistId, malId, ep, {
+          intro: !intro,
+          outro: !outro,
+        });
+        if (!intro && resolved.value.intro) intro = resolved.value.intro;
+        if (!outro && resolved.value.outro) outro = resolved.value.outro;
+      } catch {}
+    }
+    return res.json({
+      arabicSubUrl: arEntry?.url || null,
+      englishSubUrl: enEntry?.url || null,
+      subtitleRef,
+      intro,
+      outro,
+    });
+  } catch {
+    return res.json(empty);
+  }
+});
+
+router.get("/anime/skip-times", async (req: Request, res: Response) => {
+  let anilistId = Number(req.query.anilistId || 0);
+  const episode = Number(req.query.ep);
+  const title = String(req.query.title || "").trim();
+  const english = String(req.query.english || "").trim() || null;
+  const titleAr = String(req.query.titleAr || "").trim() || null;
+  const isRequested = (value: unknown) => {
+    if (value === undefined) return true;
+    const text = String(value).trim().toLowerCase();
+    return !["0", "false", "no", "off"].includes(text);
+  };
+  const requested: SkipNeeds = {
+    intro: isRequested(req.query.intro),
+    outro: isRequested(req.query.outro),
+  };
+
+  if (title && (!Number.isSafeInteger(anilistId) || anilistId <= 0)) {
+    anilistId = (await Promise.race([
+      resolveAniListIdForSource(title, english, [], titleAr),
+      new Promise<number | undefined>(resolve => setTimeout(() => resolve(undefined), 3500)),
+    ])) || anilistId;
+  }
+
+  if (
+    !Number.isSafeInteger(anilistId) || anilistId <= 0
+    || !Number.isSafeInteger(episode) || episode <= 0
+    || (!requested.intro && !requested.outro)
+  ) {
+    return res.status(400).json({ error: "anilistId و ep يجب أن يكونا عددين موجبين، ويجب طلب نوع واحد على الأقل" });
+  }
+
+  try {
+    let malId: number | null = null;
+    try {
+      malId = await getMalIdForAniList(anilistId);
+    } catch {
+      logger.warn({ provider: "anilist" }, "skip-times MAL ID lookup failed");
+    }
+    if (!malId && title) {
+      const resolvedId = await Promise.race([
+        resolveAniListIdForSource(title, english, [], titleAr),
+        new Promise<number | undefined>(resolve => setTimeout(() => resolve(undefined), 3500)),
+      ]);
+      if (resolvedId && resolvedId !== anilistId) {
+        anilistId = resolvedId;
+        malId = await getMalIdForAniList(anilistId).catch(() => null);
+      }
+    }
+    const cacheKey = malId
+      ? `mal:${malId}:${episode}`
+      : `al:${anilistId}:${episode}`;
+    const result = await getCachedSkipTimes(
+      cacheKey,
+      anilistId,
+      malId,
+      episode,
+      requested,
+    );
+    const retryAt = Math.max(
+      requested.intro && !result.checkedIntro ? result.retryIntroAt ?? 0 : 0,
+      requested.outro && !result.checkedOutro ? result.retryOutroAt ?? 0 : 0,
+    );
+    const retryAfterMs = Math.max(0, retryAt - Date.now());
+    const response = {
+      ...result.value,
+      checkedIntro: result.checkedIntro,
+      checkedOutro: result.checkedOutro,
+      retryAfterMs,
+    };
+    const requestComplete =
+      (!requested.intro || result.checkedIntro)
+      && (!requested.outro || result.checkedOutro);
+    if (!requestComplete) {
+      res.setHeader("Cache-Control", "no-store");
+      res.setHeader("Retry-After", String(Math.max(1, Math.ceil(retryAfterMs / 1_000))));
+      return res.status(503).json(response);
+    }
+    res.setHeader("Cache-Control", "public, max-age=300");
+    return res.json(response);
+  } catch {
+    logger.warn({ anilistId, episode }, "skip-times resolution failed");
+    res.setHeader("Cache-Control", "no-store");
+    res.setHeader("Retry-After", "60");
+    return res.status(503).json({
+      intro: null,
+      outro: null,
+      checkedIntro: false,
+      checkedOutro: false,
+      retryAfterMs: SKIP_TIMES_FAILURE_TTL_MS,
+    });
+  }
+});
+
+router.get("/anime/aniskip", async (req: Request, res: Response) => {
+  const malId = Number(req.query.malId || 0);
+  const ep = Number(req.query.ep || 0);
+  if (!malId || !ep) return res.status(400).json({ found: false });
+  try {
+    const r = await fetch(
+      `https://api.aniskip.com/v2/skip-times/${malId}/${ep}?types[]=op&types[]=ed&episodeLength=0`,
+      { headers: { ...BASE_HDRS, Accept: "application/json" }, signal: AbortSignal.timeout(8_000) },
+    );
+    if (!r.ok) return res.json({ found: false });
+    const data = await r.json();
+    return res.json(data);
+  } catch {
+    return res.json({ found: false });
+  }
+});
+
+router.get("/anime/anizip", async (req: Request, res: Response) => {
+  const anilistId = Number(req.query.anilistId || 0);
+  const ep = Number(req.query.ep || 1);
+  if (!anilistId || !ep) return res.json({ found: false });
+  try {
+    const resSkip = await fetchAniZipSkipTimes(anilistId, ep, { intro: true, outro: true });
+    if (!resSkip.value.intro && !resSkip.value.outro) return res.json({ found: false });
+    return res.json({ found: true, ep, intro: resSkip.value.intro, outro: resSkip.value.outro });
+  } catch {
+    return res.json({ found: false });
+  }
+});
 
 /** Resolve Pixeldrain ID مباشرة — بدون proxy (200 OK مؤكد من VPS) */
 function awResolvePd(pageUrl: string): string | null {
@@ -12262,16 +12676,12 @@ async function getSAnimeSourcesUncached(
   catalogHint?: CatalogEpisodeHint | null,
   signal?: AbortSignal,
 ): Promise<UnifiedSource[]> {
-  const ck = `sanime:${catalogHint?.providerTitleId || normalize(english || title).replace(/\s+/g, "-")}:${ep}`;
+  const ck = `sanime-v3:${catalogHint?.providerTitleId || normalize(english || title).replace(/\s+/g, "-")}:${ep}:${availabilityOnly ? "avail" : "play"}`;
   const hit = _sanimeCacheMap.get(ck);
   if (hit && Date.now() - hit.ts < SANIME_TTL) return hit.sources;
 
   const out: UnifiedSource[] = [];
   try {
-    // The catalog can retain old SAnime CDN families. Use the live info API
-    // to confirm the episode, then build the current Video3 URLs below.
-    /* 1. البحث — SAnime يخزّن أسماء عربية ومترجمة، نجرب الإنجليزي أولاً ثم الروماجي.
-       ندمج النتائج لتحسين فرص المطابقة (بعض العناوين موجودة بكلا الاسمين). */
     const queries = titleQueries(title, english, variants);
     const allResults: any[] = [];
     const seenIds = new Set<string>();
@@ -12297,7 +12707,6 @@ async function getSAnimeSourcesUncached(
     }
     if (allResults.length === 0) return out;
 
-    // 2. similarity match — مع ترجيح رقم الموسم (SAnime يفصل كل موسم كمُدخل مستقل)
     const targetSeason = sanimeSeasonNum(english) !== 1 ? sanimeSeasonNum(english) : sanimeSeasonNum(title);
     let bestId: string | null = null;
     let bestScore = 0;
@@ -12312,35 +12721,78 @@ async function getSAnimeSourcesUncached(
         ...variants.map(variant => asciiSimilarity(label, variant)),
         ...variants.map(variant => slugSimilarity(label, variant)),
       );
-      // ترجيح رقم الموسم — لكن نُطبِّق العقوبة فقط إذا كانت الدرجة الأساسية ضعيفة
-      // (إذا كان التطابق قوياً بالفعل لا نعاقبه بسبب خطأ في كشف الموسم)
       const labelSeason = sanimeSeasonNum(label);
       if (score > 0.50) {
-        score += labelSeason === targetSeason ? 0.10 : -0.05; // عقوبة خفيفة عند تطابق قوي
+        score += labelSeason === targetSeason ? 0.10 : -0.05;
       } else {
-        score += labelSeason === targetSeason ? 0.15 : -0.20; // عقوبة معتدلة عند تطابق ضعيف
+        score += labelSeason === targetSeason ? 0.15 : -0.20;
       }
       if (score > bestScore) { bestScore = score; bestId = String(r.id); }
     }
-    // threshold مخفَّض من 0.42 → 0.30 لأن عناوين SAnime العربية لا تطابق تماماً الروماجي
     if (!bestId || bestScore < 0.30) {
       console.log(`[SAnime] no match for "${english || title}" (best=${bestScore.toFixed(2)}, targetSeason=${targetSeason})`);
       return out;
     }
 
-    // 3. info + episodes
     const infoRes = await fetchSourceWithRetry(`${SANIME_API}info&id=${bestId}`, {
       headers: { "User-Agent": SANIME_UA, "Accept": "application/json" },
     }, availabilityOnly ? 8_000 : 9_000, 2, signal);
     if (!infoRes) { console.warn("[SAnime] info request failed"); return out; }
-    const info: any = await infoRes.json().catch(() => null);
+    let info: any = await infoRes.json().catch(() => null);
     if (!info?.ep) return out;
 
-    // 4. إيجاد الحلقة (ep هو 2D array)
-    const allEps: any[] = (Array.isArray(info.ep) ? info.ep : []).flat();
-    const epObj = allEps.find((e: any) =>
+    let allEps: any[] = (Array.isArray(info.ep) ? info.ep : []).flat();
+    let epObj = allEps.find((e: any) =>
       Number(e.epName) === ep || String(e.epName) === String(ep),
     );
+    if (!epObj && catalogHint?.providerTitleId) {
+      const fallbackSearch = await Promise.allSettled(
+        queries.slice(0, 6).map(q =>
+          fetchSourceWithRetry(`${SANIME_API}search&name=${encodeURIComponent(q)}`, {
+            headers: { "User-Agent": SANIME_UA, "Accept": "application/json" },
+          }, 6_000, 1, signal),
+        ),
+      );
+      let retryBestId: string | null = null;
+      let retryBestScore = 0;
+      for (const resItem of fallbackSearch) {
+        if (resItem.status !== "fulfilled" || !resItem.value) continue;
+        const batch: any[] = await resItem.value.json().catch(() => []);
+        if (!Array.isArray(batch)) continue;
+        for (const r of batch) {
+          const rid = String(r.id ?? "");
+          if (!rid || rid === bestId) continue;
+          const label = String(r.name ?? r.title ?? "");
+          let sc = Math.max(
+            similarity(label, title),
+            english ? similarity(label, english) : 0,
+            slugSimilarity(label, title),
+            english ? slugSimilarity(label, english) : 0,
+            ...variants.map(v => similarity(label, v)),
+            ...variants.map(v => asciiSimilarity(label, v)),
+            ...variants.map(v => slugSimilarity(label, v)),
+          );
+          const lSeason = sanimeSeasonNum(label);
+          sc += sc > 0.50 ? (lSeason === targetSeason ? 0.10 : -0.05) : (lSeason === targetSeason ? 0.15 : -0.20);
+          if (sc > retryBestScore) { retryBestScore = sc; retryBestId = rid; }
+        }
+      }
+      if (retryBestId && retryBestScore >= 0.30) {
+        const retryInfoRes = await fetchSourceWithRetry(`${SANIME_API}info&id=${retryBestId}`, {
+          headers: { "User-Agent": SANIME_UA, "Accept": "application/json" },
+        }, 8_000, 1, signal);
+        const retryInfo: any = retryInfoRes ? await retryInfoRes.json().catch(() => null) : null;
+        const retryEps: any[] = (Array.isArray(retryInfo?.ep) ? retryInfo.ep : []).flat();
+        const retryEp = retryEps.find((e: any) => Number(e.epName) === ep || String(e.epName) === String(ep));
+        if (retryEp) {
+          bestId = retryBestId;
+          bestScore = retryBestScore;
+          info = retryInfo;
+          allEps = retryEps;
+          epObj = retryEp;
+        }
+      }
+    }
     if (!epObj) {
       console.log(`[SAnime] ep${ep} not found in ${allEps.length} eps for id=${bestId}`);
       return out;
@@ -12353,33 +12805,52 @@ async function getSAnimeSourcesUncached(
       ];
     }
 
-    // 5. Direct CDN URLs.
-    //
-    // The info endpoint already confirmed that this episode exists. Waiting for
-    // two ranged CDN probes here used to add up to 4.5s before the source could
-    // reach the picker, and HEAD/Range is intermittently filtered by SAnime's
-    // CDN even when normal playback works. Return both quality candidates
-    // immediately; the VPS video proxy still preserves Range and the player can
-    // fall back to SD if the old HD file is unavailable.
     const SANIME_REF = "https://app.sanime.net/";
-    /* Keep this aligned with /api/sanime/src: Video3 is the current CDN path. */
-    for (const variant of sanimeEpisodeVariants(bestId, ep)) {
-      const sanimeProxyParams = `&ua=${encodeURIComponent(SANIME_UA)}`;
-      const proxiedHD = `/api/anime/video-proxy?url=${encodeURIComponent(variant.hdUrl)}&ref=${encodeURIComponent(SANIME_REF)}${sanimeProxyParams}`;
-      const proxiedSD = `/api/anime/video-proxy?url=${encodeURIComponent(variant.sdUrl)}&ref=${encodeURIComponent(SANIME_REF)}${sanimeProxyParams}`;
-      out.push({
-        name: "SAnime · FHD", url: variant.hdUrl, quality: "FHD", qualityRank: 14,
-        site: "sanime", directUrl: proxiedHD, directType: "mp4",
-        headers: { Referer: SANIME_REF }, corsOk: false,
-      });
-      out.push({
-        name: "SAnime · HD", url: variant.sdUrl, quality: "HD", qualityRank: 9,
-        site: "sanime", directUrl: proxiedSD, directType: "mp4",
-        headers: { Referer: SANIME_REF }, corsOk: false,
-      });
-    }
+    const isSAnimeMediaUrl = (value: unknown): value is string => {
+      if (typeof value !== "string" || !/^https:\/\//i.test(value)) return false;
+      try {
+        const parsed = new URL(value);
+        return parsed.hostname === "server.sanime.net"
+          && /\/Video\d*\//i.test(parsed.pathname)
+          && /\.mp4$/i.test(parsed.pathname);
+      } catch { return false; }
+    };
 
-    console.log(`[SAnime] id=${bestId} ep${ep} → ${out.length} sources (match=${bestScore.toFixed(2)})`);
+    let directHD = "";
+    let directSD = "";
+    try {
+      const episodePayload = Buffer.from(JSON.stringify(epObj), "utf8").toString("base64");
+      const openRes = await fetchSourceWithRetry(
+        `${SANIME_API}openAnd&id=${encodeURIComponent(episodePayload)}`,
+        { headers: { "User-Agent": SANIME_UA, "Accept": "application/json" } },
+        8_000,
+        2,
+        signal,
+      );
+      const opened = openRes?.ok ? await openRes.json().catch(() => null) as any : null;
+      if (isSAnimeMediaUrl(opened?.hd)) directHD = opened.hd;
+      if (isSAnimeMediaUrl(opened?.sd)) directSD = opened.sd;
+    } catch {}
+
+    if (!directHD) directHD = `https://server.sanime.net/Video/${bestId}/${ep}.mp4`;
+    if (!directSD) directSD = `https://server.sanime.net/Video/${bestId}/${ep}SD.mp4`;
+
+    const sanimeProxyParams = `&ua=${encodeURIComponent(SANIME_UA)}`;
+    const proxiedHD = `/api/anime/video-proxy?url=${encodeURIComponent(directHD)}&ref=${encodeURIComponent(SANIME_REF)}${sanimeProxyParams}`;
+    const proxiedSD = `/api/anime/video-proxy?url=${encodeURIComponent(directSD)}&ref=${encodeURIComponent(SANIME_REF)}${sanimeProxyParams}`;
+
+    out.push({
+      name: "SAnime · FHD", url: directHD, quality: "FHD", qualityRank: 14,
+      site: "sanime", directUrl: proxiedHD, directType: "mp4",
+      headers: { Referer: SANIME_REF, "User-Agent": SANIME_UA }, corsOk: false,
+    });
+    out.push({
+      name: "SAnime · HD", url: directSD, quality: "HD", qualityRank: 9,
+      site: "sanime", directUrl: proxiedSD, directType: "mp4",
+      headers: { Referer: SANIME_REF, "User-Agent": SANIME_UA }, corsOk: false,
+    });
+
+    console.log(`[SAnime] id=${bestId} ep${ep} → ${out.length} sources (match=${bestScore.toFixed(2)}, hd=${directHD})`);
     if (out.length) _sanimeCacheMap.set(ck, { sources: out, ts: Date.now() });
   } catch (e: any) {
     console.warn("[SAnime]", e?.message);
@@ -13915,7 +14386,19 @@ router.get("/anime/fetch-source", scraperQueueMiddleware, async (req, res) => {
     const label = String(source.name || "").trim().toLowerCase().replace(/\s+/g, " ");
     return createHash("sha256").update(`${sourceSite}|${quality}|${label}|${urlIdentity}`).digest("hex").slice(0, 20);
   };
+  let resolvedEpisodeSkip: SkipTimes = { intro: null, outro: null };
+  const applyEpisodeSkip = (source: UnifiedSource): UnifiedSource => {
+    const skipIntro = source.skipIntro || (source as any).intro || resolvedEpisodeSkip.intro || undefined;
+    const skipOutro = source.skipOutro || (source as any).outro || resolvedEpisodeSkip.outro || undefined;
+    return {
+      ...source,
+      ...(skipIntro ? { skipIntro, intro: skipIntro } : {}),
+      ...(skipOutro ? { skipOutro, outro: skipOutro } : {}),
+    };
+  };
+
   const encodeProgressiveSource = (source: UnifiedSource): UnifiedSource => {
+    source = applyEpisodeSkip(source);
     const classified = sourceCheckQuality(source);
     let derivedHeaders = source.headers;
     if (!derivedHeaders && source.directUrl) {
@@ -13990,6 +14473,7 @@ router.get("/anime/fetch-source", scraperQueueMiddleware, async (req, res) => {
   };
   const sendProgressiveBatch = async (rows: UnifiedSource[]) => {
     if (!progressive) return;
+    await skipWarmupPromise;
     if (progressiveSent > 0) {
       finishProgressiveResponse();
       return;
@@ -14038,6 +14522,28 @@ router.get("/anime/fetch-source", scraperQueueMiddleware, async (req, res) => {
       `[playback-trace] id=${sourceTrace || "none"} route=fetch-source stage=id_resolution site=${sourceTraceSite} elapsed_ms=${Date.now() - idResolutionStartedAt} has_id=${Boolean(anilistId)}`,
     );
   }
+  const skipWarmupPromise = (!isMovie && ep > 0)
+    ? (async () => {
+        try {
+          let resolvedId = anilistId && anilistId > 0 ? anilistId : undefined;
+          if ((!resolvedId || site === "anslayer") && title) {
+            const byTitle = await Promise.race([
+              resolveAniListIdForSource(title, english, titleVariants, titleAr),
+              new Promise<number | undefined>(r => setTimeout(() => r(undefined), 1800)),
+            ]);
+            if (byTitle) resolvedId = byTitle;
+          }
+          if (!resolvedId) return;
+          const malId = await getMalIdForAniList(resolvedId).catch(() => null);
+          const cacheKey = malId ? `mal:${malId}:${ep}` : `al:${resolvedId}:${ep}`;
+          const entry = await Promise.race([
+            getCachedSkipTimes(cacheKey, resolvedId, malId, ep, { intro: true, outro: true }),
+            new Promise<null>(r => setTimeout(() => r(null), 1800)),
+          ]);
+          if (entry?.value) resolvedEpisodeSkip = entry.value;
+        } catch {}
+      })()
+    : Promise.resolve();
 
   // ── تقييد مؤقت (بطلب المستخدم 2026-07-13): تعطيل كل مصادر قسم الأنمي ما عدا
   //    كواي(kawaii) / أنمي سلاير(anslayer) / AniKoto(anikoto) /
@@ -14097,7 +14603,8 @@ router.get("/anime/fetch-source", scraperQueueMiddleware, async (req, res) => {
           : wrapped.directUrl,
       };
     });
-    res.json({ sources: encSources });
+    await skipWarmupPromise;
+    res.json({ sources: encSources.map(applyEpisodeSkip) });
     return;
   }
   if (isConsumetSite(site)) {
@@ -14145,7 +14652,7 @@ router.get("/anime/fetch-source", scraperQueueMiddleware, async (req, res) => {
   const cacheAnimeIdentity = site === "animewitcher" && awAnimeId
     ? `aw:${awAnimeId}`
     : anilistId || anslayerId;
-  const cacheSite = site === "sanime" ? "sanime-v2"
+  const cacheSite = site === "sanime" ? "sanime-v3"
     : site === "anslayer" ? "anslayer-v2"
     : site;
   const cKey = makeSourceCacheKey(cacheSite, title, ep, cacheAnimeIdentity);
@@ -14231,7 +14738,8 @@ router.get("/anime/fetch-source", scraperQueueMiddleware, async (req, res) => {
         directUrl: encDirectUrl,
       };
     });
-    res.json({ sources: enc, fromCache: true });
+    await skipWarmupPromise;
+    res.json({ sources: enc.map(applyEpisodeSkip), fromCache: true });
     return;
     }
   }
@@ -14511,6 +15019,7 @@ router.get("/anime/fetch-source", scraperQueueMiddleware, async (req, res) => {
       `candidates=${sources.length}`,
     );
     if (progressive) {
+      await skipWarmupPromise;
       const directCandidates = [...sources]
         .filter(matchesRequestedQuality)
         .filter(source => !excludedCandidateKeys.has(progressiveCandidateKey(source)))
@@ -16748,14 +17257,11 @@ function traceProxyResponse(
   });
 }
 
-// ── Hopx proxy port (يحل CF Worker — كل الفيديو عبر VPS) ───────────────────────
-// ── Hopx / MediaFlow / CF Worker — معطّلة جميعها، كل شيء عبر VPS مباشرة ─────────
+// ── Hopx / MediaFlow remain disabled; CF Worker is a last-resort media fallback ──
 const _mfOk    = false; // معطّل
 const _hopxOk  = false; // معطّل
 
-// ── CF Worker / Hopx — معطّلان، stub دائماً null ────────────────────────────────
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-async function fetchSegViaCfWorker(_url: string, _ref: string, _t?: number): Promise<Response | null> { return null; }
+// ── Hopx remains disabled ─────────────────────────────────────────────────────
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 async function fetchViaHopx(_url: string, _ref: string, _t?: number): Promise<Response | null> { return null; }
 
@@ -16998,8 +17504,15 @@ async function serveHlsVPS(
     const body = await fetchPromise;
     if (body) sendManifest(body);
     else if (!res.headersSent) {
-      mediaMetrics.upstreamErrors++;
-      res.status(502).send("upstream error");
+      const workerUrl = buildCfWorkerUrl(url, ref);
+      if (workerUrl) {
+        tracePlayback(trace, traceRoute, "cf_worker_redirect", safeHost(url), Date.now() - requestStartedAt);
+        res.setHeader("Cache-Control", "no-store");
+        res.status(307).setHeader("Location", workerUrl).end();
+      } else {
+        mediaMetrics.upstreamErrors++;
+        res.status(502).send("upstream error");
+      }
     }
   } finally {
     mediaMetrics.activeManifests--;
@@ -17294,9 +17807,27 @@ async function serveMediaVPS(
     const cfStreamResponse = isClientRoutedFlixMedia(url)
       ? await cfProxyStreamFetch(url, ref, req.headers.range ? String(req.headers.range) : undefined)
       : null;
-    const r = cfStreamResponse ?? await fetch(url, { headers: hdrs, signal: upstreamAbort.signal });
+    let r = cfStreamResponse ?? await fetch(url, { headers: hdrs, signal: upstreamAbort.signal });
+    if (r.status === 404) {
+      const saMatch = url.match(/^https:\/\/server\.sanime\.net\/(Video\d*(?:\/latest)?)\/([^/]+)\/(\d+(?:SD)?\.mp4)$/i);
+      if (saMatch) {
+        const [, currentPrefix, saId, saFile] = saMatch;
+        for (const prefix of ["Video", "Video2", "Video4", "Video2/latest", "Video3"]) {
+          if (prefix.toLowerCase() === currentPrefix.toLowerCase()) continue;
+          const altUrl = `https://server.sanime.net/${prefix}/${saId}/${saFile}`;
+          try {
+            const altResp = await fetch(altUrl, { headers: hdrs, signal: upstreamAbort.signal });
+            if (altResp.ok || altResp.status === 206) {
+              url = altUrl;
+              r = altResp;
+              break;
+            }
+          } catch {}
+        }
+      }
+    }
     clearTimeout(connectTimeout);
-    tracePlayback(trace, "video", "upstream_headers", safeHost(url), Date.now() - startedAt, `status=${r.status}`);
+    tracePlayback(trace, "video", "upstream_headers", safeHost(url), Date.now() - upstreamStartedAt, `status=${r.status}`);
     res.setHeader("Access-Control-Allow-Origin", "*");
     res.setHeader("Access-Control-Expose-Headers", "Content-Length,Content-Range,Content-Type");
     let ct = r.headers.get("content-type") || "video/MP2T";
@@ -17581,8 +18112,289 @@ function cuesToVtt(body: string): string {
   return body;
 }
 
+
+const PEGASUS_CACHE_DIR = "/tmp/nova-pegasus-cache";
+const PEGASUS_MP4_INFLIGHT = new Map<string, Promise<string>>();
+
+function extractPegasusHlsUrl(raw: string): string | null {
+  if (!raw) return null;
+  let candidate = raw.trim();
+  for (let depth = 0; depth < 3; depth++) {
+    try {
+      const parsed = new URL(candidate, "http://localhost");
+      const nested = parsed.searchParams.get("url");
+      if (nested) {
+        try {
+          candidate = decodeURIComponent(nested);
+        } catch {
+          candidate = nested;
+        }
+        continue;
+      }
+    } catch {}
+    break;
+  }
+  try {
+    const u = new URL(candidate);
+    if (
+      (u.protocol === "https:" || u.protocol === "http:") &&
+      (u.hostname === "pegasus.5387692.xyz" || u.hostname.endsWith(".5387692.xyz"))
+    ) {
+      return u.href;
+    }
+  } catch {}
+  return null;
+}
+
+function prunePegasusCache(): void {
+  try {
+    mkdirSync(PEGASUS_CACHE_DIR, { recursive: true, mode: 0o700 });
+    const now = Date.now();
+    const entries = readdirSync(PEGASUS_CACHE_DIR)
+      .filter(f => f.endsWith(".mp4"))
+      .map(f => {
+        const full = pathJoin(PEGASUS_CACHE_DIR, f);
+        try {
+          const st = statSync(full);
+          return { full, mtimeMs: st.mtimeMs };
+        } catch {
+          return null;
+        }
+      })
+      .filter((x): x is { full: string; mtimeMs: number } => Boolean(x))
+      .sort((a, b) => b.mtimeMs - a.mtimeMs);
+
+    for (let i = 0; i < entries.length; i++) {
+      if (i >= 6 || now - entries[i].mtimeMs > 30 * 60 * 1000) {
+        try { rmSync(entries[i].full, { force: true }); } catch {}
+      }
+    }
+  } catch {}
+}
+
+async function preparePegasusMp4(pegasusUrl: string): Promise<string> {
+  prunePegasusCache();
+  const cacheKey = createHash("sha1").update(pegasusUrl).digest("hex");
+  const finalMp4Path = pathJoin(PEGASUS_CACHE_DIR, `${cacheKey}.mp4`);
+  try {
+    if (existsSync(finalMp4Path) && statSync(finalMp4Path).size > 65536) {
+      return finalMp4Path;
+    }
+  } catch {}
+
+  const existingJob = PEGASUS_MP4_INFLIGHT.get(cacheKey);
+  if (existingJob) return existingJob;
+
+  const job = (async () => {
+    const hdrs: Record<string, string> = {
+      "Referer": "https://carateen.tv/",
+      "Origin": "https://carateen.tv",
+      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+      "Accept": "*/*",
+    };
+
+    const masterResp = await fetch(pegasusUrl, { headers: hdrs, signal: AbortSignal.timeout(15000) });
+    if (!masterResp.ok) {
+      throw new Error(`Pegasus manifest HTTP ${masterResp.status}`);
+    }
+    const masterText = await masterResp.text();
+    let variantUrl = pegasusUrl;
+    let segs: string[] = [];
+
+    if (masterText.includes("#EXT-X-STREAM-INF")) {
+      const variants: Array<{ bw: number; height: number; name: string; url: string }> = [];
+      const lines = masterText.split("\n").map(l => l.trim());
+      for (let i = 0; i < lines.length; i++) {
+        if (lines[i].startsWith("#EXT-X-STREAM-INF")) {
+          const bw = Number((lines[i].match(/BANDWIDTH=(\d+)/i) || [])[1] || 0);
+          const name = (lines[i].match(/NAME="([^"]+)"/i) || [])[1] || "";
+          const resHeight = Number((lines[i].match(/RESOLUTION=\d+x(\d+)/i) || [])[1] || 0);
+          const height = parseInt(name, 10) || resHeight || 0;
+          const next = lines[i + 1];
+          if (next && !next.startsWith("#")) {
+            variants.push({ bw, height, name, url: new URL(next, pegasusUrl).href });
+          }
+        }
+      }
+      variants.sort((a, b) => (b.height - a.height) || (b.bw - a.bw));
+      const preferred =
+        variants.find(v => v.height >= 360 && v.height <= 540) ||
+        variants.find(v => v.height >= 480 && v.height <= 768) ||
+        variants.find(v => v.height > 0 && v.height <= 768) ||
+        variants[0];
+      if (preferred) variantUrl = preferred.url;
+
+      const varResp = await fetch(variantUrl, { headers: hdrs, signal: AbortSignal.timeout(15000) });
+      if (!varResp.ok) throw new Error(`Pegasus variant HTTP ${varResp.status}`);
+      const varText = await varResp.text();
+      segs = varText.split("\n").map(l => l.trim()).filter(l => l && !l.startsWith("#")).map(l => new URL(l, variantUrl).href);
+
+      // For long movies (> 380 segments), step down to 480p/270p so download+remux finishes in < 15s
+      if (segs.length > 380 && variants.length > 1) {
+        const lighter =
+          (segs.length > 800 ? variants.find(v => v.height > 0 && v.height <= 360) : null) ||
+          variants.find(v => v.height > 0 && v.height <= 480) ||
+          variants[variants.length - 1];
+        if (lighter && lighter.url !== variantUrl) {
+          const lightResp = await fetch(lighter.url, { headers: hdrs, signal: AbortSignal.timeout(15000) });
+          if (lightResp.ok) {
+            const lightText = await lightResp.text();
+            const lightSegs = lightText.split("\n").map(l => l.trim()).filter(l => l && !l.startsWith("#")).map(l => new URL(l, lighter.url).href);
+            if (lightSegs.length > 0) {
+              variantUrl = lighter.url;
+              segs = lightSegs;
+            }
+          }
+        }
+      }
+    } else {
+      segs = masterText.split("\n").map(l => l.trim()).filter(l => l && !l.startsWith("#")).map(l => new URL(l, pegasusUrl).href);
+    }
+
+    if (segs.length === 0) {
+      throw new Error("Pegasus playlist contained no segments");
+    }
+
+    const buffers = new Array<Buffer>(segs.length);
+    let nextIdx = 0;
+    const concurrency = Math.min(48, segs.length);
+    await Promise.all(
+      Array.from({ length: concurrency }, async () => {
+        while (true) {
+          const i = nextIdx++;
+          if (i >= segs.length) break;
+          let lastErr: unknown;
+          for (let attempt = 0; attempt < 3; attempt++) {
+            try {
+              const r = await fetch(segs[i], { headers: hdrs, signal: AbortSignal.timeout(15000) });
+              if (!r.ok) throw new Error(`segment ${i} HTTP ${r.status}`);
+              buffers[i] = Buffer.from(await r.arrayBuffer());
+              lastErr = null;
+              break;
+            } catch (e) {
+              lastErr = e;
+            }
+          }
+          if (lastErr) throw lastErr;
+        }
+      }),
+    );
+
+    const shmDir = existsSync("/dev/shm") ? "/dev/shm" : PEGASUS_CACHE_DIR;
+    const uniqueSuffix = `${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+    const tempTsPath = pathJoin(shmDir, `pegasus-${cacheKey}-${uniqueSuffix}.ts`);
+    const tempMp4Path = pathJoin(PEGASUS_CACHE_DIR, `${cacheKey}-${uniqueSuffix}.mp4`);
+
+    try {
+      const fd = openSync(tempTsPath, "w");
+      try {
+        for (const buf of buffers) {
+          if (buf && buf.length > 0) writeSync(fd, buf);
+        }
+      } finally {
+        closeSync(fd);
+      }
+
+      const runRemux = (extraArgs: string[]) => new Promise<void>((resolve, reject) => {
+        const child = spawn("/usr/bin/ffmpeg", [
+          "-hide_banner", "-loglevel", "error", "-y",
+          "-i", tempTsPath,
+          "-map", "0:v:0",
+          "-map", "0:a:0?",
+          ...extraArgs,
+          tempMp4Path,
+        ], { stdio: ["ignore", "ignore", "pipe"] });
+        let stderr = "";
+        child.stderr.on("data", (chunk: Buffer) => {
+          stderr = (stderr + chunk.toString()).slice(-3000);
+        });
+        child.once("error", reject);
+        child.once("close", code => {
+          if (code === 0) resolve();
+          else reject(new Error(`ffmpeg exited ${code}: ${stderr}`));
+        });
+      });
+
+      try {
+        await runRemux(["-c", "copy", "-bsf:a", "aac_adtstoasc"]);
+      } catch {
+        rmSync(tempMp4Path, { force: true });
+        await runRemux(["-c:v", "copy", "-c:a", "aac", "-b:a", "128k"]);
+      }
+
+      const finalSize = statSync(tempMp4Path).size;
+      if (finalSize <= 0) throw new Error("empty pegasus mp4");
+      renameSync(tempMp4Path, finalMp4Path);
+      return finalMp4Path;
+    } finally {
+      try { rmSync(tempTsPath, { force: true }); } catch {}
+      try { rmSync(tempMp4Path, { force: true }); } catch {}
+    }
+  })();
+
+  PEGASUS_MP4_INFLIGHT.set(cacheKey, job);
+  try {
+    return await job;
+  } finally {
+    PEGASUS_MP4_INFLIGHT.delete(cacheKey);
+  }
+}
+
 router.get("/anime/download-mp4", async (req, res) => {
   const site = String(req.query.site || "").trim().toLowerCase();
+  const rawRequestedUrl = String(req.query.url || "");
+  const pegasusDirectUrl = extractPegasusHlsUrl(rawRequestedUrl);
+  if (pegasusDirectUrl) {
+    try {
+      const mp4FilePath = await preparePegasusMp4(pegasusDirectUrl);
+      const size = statSync(mp4FilePath).size;
+      if (size <= 0) throw new Error("empty converted video");
+      const range = String(req.headers.range || "").trim();
+      let streamStart = 0;
+      let streamEnd = size - 1;
+      let statusCode = 200;
+      if (range) {
+        const match = /^bytes=(\d*)-(\d*)$/i.exec(range);
+        if (!match || (!match[1] && !match[2])) {
+          res.status(416).setHeader("Content-Range", `bytes */${size}`).end();
+          return;
+        }
+        if (match[1]) {
+          streamStart = Number(match[1]);
+          streamEnd = match[2] ? Math.min(Number(match[2]), size - 1) : size - 1;
+        } else {
+          const suffixLength = Number(match[2]);
+          streamStart = Math.max(0, size - suffixLength);
+          streamEnd = size - 1;
+        }
+        if (
+          !Number.isSafeInteger(streamStart) ||
+          !Number.isSafeInteger(streamEnd) ||
+          streamStart < 0 ||
+          streamStart >= size ||
+          streamStart > streamEnd
+        ) {
+          res.status(416).setHeader("Content-Range", `bytes */${size}`).end();
+          return;
+        }
+        statusCode = 206;
+      }
+      res.status(statusCode);
+      res.setHeader("Content-Type", "video/mp4");
+      res.setHeader("Accept-Ranges", "bytes");
+      res.setHeader("Content-Length", String(streamEnd - streamStart + 1));
+      if (statusCode === 206) {
+        res.setHeader("Content-Range", `bytes ${streamStart}-${streamEnd}/${size}`);
+      }
+      res.setHeader("Content-Disposition", `attachment; filename="nova-episode.mp4"`);
+      await pipeline(createReadStream(mp4FilePath, { start: streamStart, end: streamEnd }), res);
+    } catch (error: any) {
+      if (!res.headersSent && !res.destroyed) {
+        res.status(502).send(`video conversion failed: ${error?.message || "unknown error"}`);
+      }
+    }
+    return;
+  }
   /* Download and playback providers are intentionally separate. Keep this
      allowlist server-side as the final guard: clients and old cached picker
      rows must not be able to turn a playback-only source into a download. */
@@ -17592,9 +18404,23 @@ router.get("/anime/download-mp4", async (req, res) => {
     "anslayer",     // AS
     "animeify",     // AF — direct MediaFire/FileMoon sources are downloadable
     "anifox",       // FX
+    // Dubbed Spacetoon & Carateen sources
+    "sp",
+    "spacetoon",
+    "carateen",
+    "ct",
+    "dubbed",
+    "dubbed_sp_1080",
+    "dubbed_sp_720",
+    "dubbed_direct_720",
+    "dubbed_ct_1080",
+    "dubbed_ct_720",
+    "dubbed_at_1080",
+    "dubbed_at_720",
   ]);
-  if (!site || !DOWNLOAD_SOURCE_SITES.has(site)) {
-    res.status(403).send("downloads are available only from AW, SA, AS, AF and FX");
+  const isDubbedSite = site.startsWith("dubbed") || site === "sp" || site === "spacetoon" || site === "carateen" || site === "ct";
+  if (!site || (!DOWNLOAD_SOURCE_SITES.has(site) && !isDubbedSite)) {
+    res.status(403).send("downloads are available only from approved sources");
     return;
   }
 
@@ -17607,9 +18433,18 @@ router.get("/anime/download-mp4", async (req, res) => {
   const rawKawaiiUrl = site === "kawaii" && !sourceUrl
     ? trustedKawaiiMediaUrl(requestedUrl)
     : null;
-  if (!sourceUrl && !rawKawaiiUrl) {
+  const isPegasusMediaUrl = !sourceUrl && (
+    requestedUrl.includes("pegasus.5387692.xyz") ||
+    requestedUrl.includes(".5387692.xyz") ||
+    requestedUrl.includes("carateen.tv")
+  );
+  if (!sourceUrl && !rawKawaiiUrl && !isPegasusMediaUrl) {
     res.status(400).send("invalid proxied media url");
     return;
+  }
+  if (!sourceUrl && isPegasusMediaUrl) {
+    const port = process.env.PORT || "5000";
+    sourceUrl = `http://127.0.0.1:${port}/api/anime/hls-proxy?url=${encodeURIComponent(requestedUrl)}&ref=${encodeURIComponent("https://carateen.tv/")}`;
   }
 
   /* A raw signed KW URL is valid input for this endpoint. HLS must go through
@@ -17712,26 +18547,37 @@ router.get("/anime/download-mp4", async (req, res) => {
       await runFfmpeg([
         ...inputArgs,
         "-c", "copy",
+        "-bsf:a", "aac_adtstoasc",
         "-movflags", "+faststart",
         outputPath,
       ]);
     } catch (remuxError) {
-      const message = remuxError instanceof Error ? remuxError.message : String(remuxError);
-      if (!/could not write header|could not find tag for codec|codec .* not currently supported in container|unsupported codec/i.test(message)) {
-        throw remuxError;
+      try {
+        rmSync(outputPath, { force: true });
+        await runFfmpeg([
+          ...inputArgs,
+          "-c", "copy",
+          "-movflags", "+faststart",
+          outputPath,
+        ]);
+      } catch (copyErr) {
+        const message = copyErr instanceof Error ? copyErr.message : String(copyErr);
+        if (!/could not write header|could not find tag for codec|codec .* not currently supported in container|unsupported codec|malformed aac|aac_adtstoasc|operation not permitted/i.test(message)) {
+          throw copyErr;
+        }
+        rmSync(outputPath, { force: true });
+        await runFfmpeg([
+          ...inputArgs,
+          "-c:v", "libx264",
+          "-preset", "veryfast",
+          "-crf", "23",
+          "-pix_fmt", "yuv420p",
+          "-c:a", "aac",
+          "-b:a", "128k",
+          "-movflags", "+faststart",
+          outputPath,
+        ]);
       }
-      rmSync(outputPath, { force: true });
-      await runFfmpeg([
-        ...inputArgs,
-        "-c:v", "libx264",
-        "-preset", "veryfast",
-        "-crf", "23",
-        "-pix_fmt", "yuv420p",
-        "-c:a", "aac",
-        "-b:a", "128k",
-        "-movflags", "+faststart",
-        outputPath,
-      ]);
     }
 
     const size = statSync(outputPath).size;

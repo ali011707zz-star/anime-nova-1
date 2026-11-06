@@ -391,7 +391,37 @@ function TvPlayerSurface({
   };
 
   return (
-    <View style={styles.tvRoot}>
+    <View
+      style={styles.tvRoot}
+      focusable={true}
+      hasTVPreferredFocus={true}
+      onKeyDown={(e: any) => {
+        const native = e?.nativeEvent || {};
+        const code = Number(native.keyCode ?? native.keycode);
+        const name = String(native.eventType ?? native.key ?? "").toLowerCase();
+        // D-Pad Right / Media Fast Forward (seek +10s)
+        if (code === 22 || code === 90 || name.includes("right") || name.includes("forward")) {
+          show();
+          seek(Math.min(duration, position + 10));
+          e?.preventDefault?.();
+        }
+        // D-Pad Left / Media Rewind (seek -10s)
+        else if (code === 21 || code === 89 || name.includes("left") || name.includes("rewind")) {
+          show();
+          seek(Math.max(0, position - 10));
+          e?.preventDefault?.();
+        }
+        // D-Pad Center / Enter / Play-Pause
+        else if (code === 23 || code === 66 || code === 85 || code === 126 || code === 127 || name.includes("select") || name.includes("center") || name.includes("play")) {
+          togglePlay();
+          e?.preventDefault?.();
+        }
+        // D-Pad Up / Down / Menu -> Show controls
+        else if (code === 19 || code === 20 || code === 82 || name.includes("up") || name.includes("down") || name.includes("menu")) {
+          show();
+        }
+      }}
+    >
       <StatusBar hidden />
       <NovaMedia3View
         {...viewProps}
@@ -909,7 +939,7 @@ export function RiftPlayer({
       if (event.state === "readyToPlay") {
         setBuffering(false);
         setFailed(false);
-        if (!restoredInitialPosition.current && initialPosition > 5) {
+        if (!restoredInitialPosition.current && initialPosition > 1) {
           restoredInitialPosition.current = true;
           player.currentTime = initialPosition;
         }

@@ -217,7 +217,7 @@ export async function createApp(): Promise<Express> {
     const tokenHeader = req.headers["x-app-token"];
     const token = Array.isArray(tokenHeader) ? tokenHeader[0] : tokenHeader;
     const downloadTokenHeader = req.headers["x-download-token"];
-    const downloadToken = Array.isArray(downloadTokenHeader) ? downloadTokenHeader[0] : downloadTokenHeader;
+    const downloadToken = (Array.isArray(downloadTokenHeader) ? downloadTokenHeader[0] : downloadTokenHeader) || (req.query.dlToken as string) || (req.query.downloadToken as string);
     const hasValidMediaToken =
       validateAnonToken(token || "") ||
       (isMediaProxyRequest && validateDownloadToken(downloadToken || ""));
@@ -281,7 +281,7 @@ export async function createApp(): Promise<Express> {
     const token =
       (req.headers["x-app-token"] as string) ||
       (req.query._tok as string) || "";
-    const downloadToken = req.headers["x-download-token"] as string;
+    const downloadToken = (req.headers["x-download-token"] as string) || (req.query.dlToken as string) || (req.query.downloadToken as string);
 
     if (!validateAnonToken(token) && !(p === "/api/anime/download-mp4" && validateDownloadToken(downloadToken || ""))) {
       res.status(403).json({

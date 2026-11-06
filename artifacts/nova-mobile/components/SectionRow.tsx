@@ -24,15 +24,23 @@ type Props = {
   items: AnilistMedia[];
   onSeeAll?: () => void;
   size?: "sm" | "md" | "lg";
+  isFirstSection?: boolean;
 };
 
-export const SectionRow = React.memo(function SectionRow({ title, items, onSeeAll, size = "md" }: Props) {
+export const SectionRow = React.memo(function SectionRow({
+  title,
+  items,
+  onSeeAll,
+  size = "md",
+  isFirstSection = false,
+}: Props) {
   const colors = useColors();
   const { width, height } = useWindowDimensions();
   const tvMode = isTvDevice(width, height);
   const { size: scaleSize } = useTvMetrics();
   const cardWidth = getRailCardWidth(width, tvMode ? 5 : 3);
   const sidePadding = getRailSidePadding(width);
+
   const railRef = React.useRef<FlatList<AnilistMedia>>(null);
   const focusScroll = useTvListFocusScroll(railRef, 0.5);
 
@@ -49,9 +57,7 @@ export const SectionRow = React.memo(function SectionRow({ title, items, onSeeAl
           anime={item}
           size={size}
           cardWidth={cardWidth}
-          hasTVPreferredFocus={
-            false
-          }
+          hasTVPreferredFocus={isFirstSection && index === 0}
           onFocus={() => focusScroll.scrollToFocusedIndex(index)}
         />
       )}
@@ -59,9 +65,6 @@ export const SectionRow = React.memo(function SectionRow({ title, items, onSeeAl
       viewabilityConfig={focusScroll.viewabilityConfig}
       showsHorizontalScrollIndicator={false}
       contentContainerStyle={[styles.scroll, { paddingHorizontal: sidePadding }]}
-      // These rails are rendered inside Home's vertical FlatList. Keeping
-      // off-screen posters out of the native view tree matters on tablets
-      // where several rails are visible in one session.
       initialNumToRender={tvMode ? 5 : 4}
       maxToRenderPerBatch={tvMode ? 3 : 2}
       updateCellsBatchingPeriod={50}
@@ -71,9 +74,6 @@ export const SectionRow = React.memo(function SectionRow({ title, items, onSeeAl
         offset: (cardWidth + 14) * index,
         index,
       })}
-      // Clip off-screen native views on Android phones to reduce the amount of
-      // UI work and memory retained by the nested home rails. Keep clipping
-      // disabled on TV so remote-focused cards are never detached.
       removeClippedSubviews={Platform.OS === "android" && !tvMode}
     />
   );
@@ -88,41 +88,30 @@ export const SectionRow = React.memo(function SectionRow({ title, items, onSeeAl
           <View style={[styles.accentBar, { backgroundColor: colors.homeAccent || "#06b6d4" }]} />
         </View>
       </SectionHeader>
-      {tvMode ? (
-        <TvFocusGuideView autoFocus={false} style={styles.focusGuide}>
-          {rail}
-        </TvFocusGuideView>
-      ) : rail}
+      {rail}
     </View>
   );
 });
 
-export function SkeletonRow() {
-  const colors = useColors();
-  return (
-    <View style={styles.container}>
-      <View style={[styles.skeletonTitle, { backgroundColor: colors.card }]} />
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.scroll}>
-        {Array.from({ length: 5 }).map((_, i) => (
-          <View key={i} style={styles.skeletonCard}>
-            <View style={[styles.skeletonImg, { backgroundColor: colors.card }]} />
-            <View style={[styles.skeletonText, { backgroundColor: colors.card }]} />
-          </View>
-        ))}
-      </ScrollView>
-    </View>
-  );
-}
-
 const styles = StyleSheet.create({
-  container: { marginBottom: 24 },
-  titleRow: { flexDirection: "row", direction: "ltr", alignItems: "center", justifyContent: "flex-end", gap: 9 },
-  accentBar: { width: 3.5, height: 22, borderRadius: 2 },
-  title: { fontSize: 17, fontFamily: "Cairo_700Bold", textAlign: "right" },
-  focusGuide: { minHeight: 1 },
-  scroll: { paddingHorizontal: 16, gap: 14 },
-  skeletonTitle: { width: 140, height: 18, borderRadius: 6, marginHorizontal: 16, marginBottom: 12 },
-  skeletonCard: { width: 120, gap: 6 },
-  skeletonImg: { width: 120, height: 168, borderRadius: 10 },
-  skeletonText: { width: 100, height: 12, borderRadius: 4 },
+  container: {
+    marginVertical: 12,
+  },
+  scroll: {
+    gap: 14,
+    paddingVertical: 6,
+  },
+  titleRow: {
+    flexDirection: "row-reverse",
+    alignItems: "center",
+    gap: 8,
+  },
+  title: {
+    fontFamily: "Cairo_700Bold",
+  },
+  accentBar: {
+    width: 4,
+    height: 18,
+    borderRadius: 2,
+  },
 });
