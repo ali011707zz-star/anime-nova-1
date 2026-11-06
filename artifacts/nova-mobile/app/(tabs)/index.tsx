@@ -356,7 +356,7 @@ export default function HomeScreen() {
 
   const renderHomeSection = ({ item: section }: { item: HomeSectionItem }) => {
     if (section.kind === "anilist") {
-      return <SectionRow title={section.title} items={section.items} size="md" onSeeAll={section.onSeeAll} />;
+      return <SectionRow title={section.title} items={section.items} size="md" onSeeAll={section.onSeeAll} isFirstSection={true} />;
     }
     return (
       <View>
