@@ -1158,10 +1158,17 @@ async function fetchMangaDarChapterPages(slug: string, chapter: string) {
     a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: "base" })
   );
 
-  const pages = rawPages.map((p, idx) => ({
-    index: idx + 1,
-    url: p.url,
-  }));
+  const appDomain = process.env.APP_DOMAIN || "animenovaa.duckdns.org";
+  const publicBase = appDomain.startsWith("http") ? appDomain : `https://${appDomain}`;
+
+  const pages = rawPages.map((p, idx) => {
+    const proxiedUrl = `${publicBase}/api/manga/img-proxy?url=${encodeURIComponent(p.url)}`;
+    return {
+      index: idx + 1,
+      url: proxiedUrl,
+      rawUrl: p.url,
+    };
+  });
 
   const result = {
     id: `aw--${mangaId}`,
