@@ -2016,8 +2016,10 @@ export default function WatchScreen() {
           url: resolveUrl(raw.url, base),
           subtitleUrl: normalizeProviderSubtitleUrl(sourceSite, raw.subtitleUrl, base),
         }, base);
+        const checkEmbedUrl = (mapped.directUrl || mapped.url || "").toLowerCase();
         const hardRejectReason = isBlockedSource(mapped) ? "blocked"
-          : (mapped.isEmbed && mapped.url && (mapped.url.includes("mega.nz") || mapped.url.includes("mega.co.nz"))) ? "unsupported_embed"
+          : (mapped.isEmbed && (checkEmbedUrl.includes("mega.nz") || checkEmbedUrl.includes("mega.co.nz"))) ? "unsupported_embed"
+          : (Platform.OS !== "web" && mapped.isEmbed && !needsHiddenResolve(mapped)) ? "unsupported_embed"
           : !isValidSourceUrl(getPlayUrl(mapped)) ? "invalid_url"
           : !isMobilePlayable(mapped) ? "not_playable"
           : "";

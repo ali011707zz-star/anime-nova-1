@@ -5463,6 +5463,8 @@ async function getAnime4up2Sources(
         const url = m[1].trim();
         if (seenUrls.has(url)) continue;
         seenUrls.add(url);
+        // Exclude unplayable embeds (mega.nz) on mobile to prevent "هذا المصدر يحتاج التطبيق الأصلي"
+        if (/mega\.nz|mega\.co\.nz/i.test(url)) continue;
         const label = m[2].replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim();
         sources.push({
           name: `أنمي فور أب · ${label || "سيرفر"}`,
@@ -15316,7 +15318,14 @@ router.get("/anime/fetch-source", scraperQueueMiddleware, async (req, res) => {
         const adarDirect = adarRaw.filter(s => Boolean(s.directUrl && !s.isEmbed));
         const adarEmbeds = adarRaw.filter(s => !s.directUrl || s.isEmbed);
         adarDirect.forEach(collectSrc);
-        if (adarEmbeds.length) await runExtract(adarEmbeds);
+        if (adarEmbeds.length) {
+          await runExtract(adarEmbeds);
+          for (let i = sources.length - 1; i >= 0; i--) {
+            if (sources[i].site === "animedar" && (sources[i].isEmbed || /mega\.nz|mega\.co\.nz/i.test(sources[i].directUrl || sources[i].url))) {
+              sources.splice(i, 1);
+            }
+          }
+        }
         break;
       }
       case "anime4up2": {
@@ -15324,7 +15333,14 @@ router.get("/anime/fetch-source", scraperQueueMiddleware, async (req, res) => {
         const a4uDirect = a4uRaw.filter(s => Boolean(s.directUrl && !s.isEmbed));
         const a4uEmbeds = a4uRaw.filter(s => !s.directUrl || s.isEmbed);
         a4uDirect.forEach(collectSrc);
-        if (a4uEmbeds.length) await runExtract(a4uEmbeds);
+        if (a4uEmbeds.length) {
+          await runExtract(a4uEmbeds);
+          for (let i = sources.length - 1; i >= 0; i--) {
+            if (sources[i].site === "anime4up2" && (sources[i].isEmbed || /mega\.nz|mega\.co\.nz/i.test(sources[i].directUrl || sources[i].url))) {
+              sources.splice(i, 1);
+            }
+          }
+        }
         break;
       }
       // case "okanime": معطّل بطلب المستخدم
@@ -17680,12 +17696,20 @@ function toVpsHlsProxy(absUrl: string, ref: string, manifestKey = "", trace = ""
 
 // FlixCloud manifests and media are requested server-side; the VPS may use its
 // configured server-side fetch path, but the client must never receive a CDN redirect.
-function isClientRoutedFlixMedia(absUrl: string): boolean {
+function isClientRoutedFlixMedia(absUrl: string, ref = ""): boolean {
   try {
+    if (ref && /(?:^|\/|\.)flixcloud\.cc(?:\/|$)/i.test(ref)) return true;
     const host = new URL(absUrl).hostname.toLowerCase();
-    return host === "flixcloud.cc" || host.endsWith(".flixcloud.cc")
-      || host === "stronghole.site" || host.endsWith(".stronghole.site")
-      || host === "rundowncdn.top" || host.endsWith(".rundowncdn.top");
+    return (
+      host === "flixcloud.cc" ||
+      host.endsWith(".flixcloud.cc") ||
+      host.endsWith(".stronghole.site") ||
+      host.includes("stronghole") ||
+      host.endsWith(".rundowncdn.top") ||
+      host.includes("rundowncdn") ||
+      host.endsWith(".aerocdn.top") ||
+      host.includes("aerocdn")
+    );
   } catch {
     return false;
   }
@@ -17705,7 +17729,11 @@ function hlsRefererForTarget(absUrl: string, fallbackRef: string): string {
     if (host === "enc-dec.app" || host.endsWith(".enc-dec.app")) return "https://enc-dec.app/";
     if (
       /(?:^|\/)enc-dec\.app(?:\/|$)/i.test(fallbackRef) ||
-      /flixcloud\.cc/i.test(fallbackRef)
+      /flixcloud\.cc/i.test(fallbackRef) ||
+      host.endsWith(".aerocdn.top") ||
+      host.includes("aerocdn") ||
+      host.endsWith(".stronghole.site") ||
+      host.endsWith(".rundowncdn.top")
     ) return "https://flixcloud.cc/";
   } catch {}
   return fallbackRef;
@@ -19093,7 +19121,8 @@ router.get("/anime/seg-proxy", async (req, res) => {
   /** مساعد داخلي: يخدم segment من response جاهز (مع دعم PNG wrapper + تصحيح Content-Type) */
   async function serveSegResponse(r: Response): Promise<boolean> {
     const ct = (r.headers.get("content-type") || "").toLowerCase();
-    const reanimeFlixReferer = /^https?:\/\/(?:www\.)?flixcloud\.cc(?:\/|$)/i.test(ref);
+    const isFlix = isClientRoutedFlixMedia(url, ref);
+    const reanimeFlixReferer = isFlix || /^https?:\/\/(?:www\.)?flixcloud\.cc(?:\/|$)/i.test(ref);
     const isGenericBinary = ct === "application/octet-stream" || ct === "binary/octet-stream";
     const shouldInspect =
       reanimeFlixReferer ||
@@ -19235,8 +19264,9 @@ router.get("/anime/seg-proxy", async (req, res) => {
     // Reanime/FlixCloud fragments need the same curl_cffi fingerprint and
     // cookies as the manifest. A plain VPS fetch returns a misleading 200
     // image placeholder, so use the dedicated binary proxy first.
-    const flixResponse = isClientRoutedFlixMedia(url)
-      ? await cfProxyStreamFetch(url, ref, req.headers.range ? String(req.headers.range) : undefined)
+    const isFlix = isClientRoutedFlixMedia(url, ref);
+    const flixResponse = isFlix
+      ? await cfProxyStreamFetch(url, ref || "https://flixcloud.cc/", req.headers.range ? String(req.headers.range) : undefined)
       : null;
     if (flixResponse?.ok) {
       tracePlayback(trace, "hls-segment", "upstream_headers", safeHost(url), Date.now() - startedAt, `status=${flixResponse.status}`);
@@ -19244,7 +19274,7 @@ router.get("/anime/seg-proxy", async (req, res) => {
       if (servedViaCf) return;
     }
 
-    const r = isClientRoutedFlixMedia(url)
+    const r = isFlix
       ? await fetch(url, { headers: hdrs, signal: upstreamAbort.signal })
       : await fetchMediaUpstream(
           url,
