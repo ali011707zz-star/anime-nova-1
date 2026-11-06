@@ -13,7 +13,7 @@ import * as Brightness from "expo-brightness";
 import { VolumeManager } from "../lib/volume-manager";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  ActivityIndicator, Alert, Animated, DeviceEventEmitter, Dimensions, Easing, I18nManager, Linking, Platform,
+  ActivityIndicator, Alert, Animated, Dimensions, Easing, I18nManager, Linking, Platform,
   BackHandler, PanResponder, ScrollView, StyleSheet, Text, View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -542,7 +542,7 @@ function ExpoRiftPlayer({
   const isLocalPlayback = playableSources.length > 0
     && playableSources.every(source => /^(?:file|content):\/\//i.test(source.url));
   const subtitlesDisabled = subtitlesDisabledForSite(currentSrc?.site);
-  const subtitleShadowOnly = new Set(["kawaii", "kw", "megaplay", "mp"]).has(
+  const subtitleShadowOnly = new Set(["kawaii", "kw", "megaplay", "mp", "reanime", "re", "anime4up2", "ad"]).has(
     String(currentSrc?.site || "").trim().toLowerCase(),
   );
   const aliveRef                    = useRef(true);
@@ -930,7 +930,7 @@ function ExpoRiftPlayer({
     /* ⚠️ لا نستدعي p.play() هنا مباشرةً — بعض إصدارات ExoPlayer/AVPlayer تُطلق
        native crash عند استدعاء play() قبل أن يكون المصدر جاهزاً للتشغيل.
        التشغيل الآن يتم فقط عبر حدث statusChange → readyToPlay أدناه. */
-    if (initialPosition && initialPosition > 1) {
+    if (initialPosition && initialPosition > 5) {
       try { p.currentTime = initialPosition; } catch {}
     }
      /* Use expo-video's public buffer contract; do not pass Media3-only millisecond
@@ -1277,7 +1277,7 @@ function ExpoRiftPlayer({
              Doing this here (not in the polling timer) ensures we only seek AFTER
              the new stream is actually buffered, preventing conflicts with loading. */
           const swPos = switchPosRef.current;
-          const initPos = initialPosition && initialPosition > 1 ? initialPosition : 0;
+          const initPos = initialPosition && initialPosition > 5 ? initialPosition : 0;
           const restorePos = swPos > 0.5 ? swPos : initPos;
           if (!resumedRef.current && restorePos > 0.5) {
             resumedRef.current = true;
@@ -1970,7 +1970,7 @@ function ExpoRiftPlayer({
     }
     const requestIntro = pendingIntro;
     const requestOutro = pendingOutro;
-    if (!currentSrc?.url || (!anilistId && !title) || !episode) return;
+    if (!currentSrc?.url || !anilistId || !episode) return;
     const base = getBaseUrl();
     if (!base) return;
 
@@ -1978,9 +1978,8 @@ function ExpoRiftPlayer({
     (async () => {
       try {
         const params = new URLSearchParams({
-          anilistId: String(anilistId || 0),
+          anilistId: String(anilistId),
           ep: String(episode),
-          ...(title ? { title: String(title) } : {}),
           intro: requestIntro ? "1" : "0",
           outro: requestOutro ? "1" : "0",
         });
@@ -2327,43 +2326,6 @@ function ExpoRiftPlayer({
     seek(positionRef.current + direction * (seekDurationRef.current || 10));
     event?.preventDefault?.();
   }, [seek, showControls, tvMode]);
-
-  useEffect(() => {
-    if (Platform.OS !== "android" || isLocked) return;
-    const handleRemoteKey = (evt: any) => {
-      const keyCode = Number(evt?.keyCode ?? evt?.keycode ?? 0);
-      const eventType = String(evt?.eventType ?? evt?.key ?? "").toLowerCase();
-      const isRight = keyCode === 22 || keyCode === 90 || eventType === "right" || eventType === "fastforward";
-      const isLeft = keyCode === 21 || keyCode === 89 || eventType === "left" || eventType === "rewind";
-      if (isRight || isLeft) {
-        if (!showControls || progressFocusedRef.current || keyCode === 90 || keyCode === 89) {
-          const now = Date.now();
-          if (now - lastTvSeekAtRef.current < 95) return;
-          lastTvSeekAtRef.current = now;
-          const step = seekDurationRef.current || 10;
-          const dir = isRight ? 1 : -1;
-          seek(positionRef.current + dir * step);
-        } else {
-          keepTvControlsVisible();
-        }
-        return;
-      }
-      if (keyCode === 85 || keyCode === 126 || keyCode === 127 || eventType === "playpause") {
-        togglePlay();
-        return;
-      }
-      if (!showControls && (keyCode === 19 || keyCode === 20 || keyCode === 23 || keyCode === 66 || eventType === "up" || eventType === "down" || eventType === "select")) {
-        fadeIn();
-      }
-    };
-    const sub1 = DeviceEventEmitter.addListener("novaTvKeyEvent", handleRemoteKey);
-    const sub2 = DeviceEventEmitter.addListener("onHWKeyEvent", handleRemoteKey);
-    return () => {
-      sub1.remove();
-      sub2.remove();
-    };
-  }, [fadeIn, isLocked, keepTvControlsVisible, seek, showControls, togglePlay]);
-
 
   /* seekSilent: نفس seek لكن بدون إظهار controls (للـ double-tap والـ gestures) */
   const seekSilentRef = useRef<(s: number) => void>(() => {});
@@ -2726,13 +2688,9 @@ function ExpoRiftPlayer({
       : bounds && Number.isFinite(localX)
         ? bounds.left + localX
         : NaN;
-    if (!Number.isFinite(absoluteX) || absoluteX <= 0) {
-      togglePlay();
-      return;
-    }
     const pct = progressPctFromAbsolute(absoluteX);
     if (pct !== null) commitProgressPercent(pct);
-  }, [commitProgressPercent, progressPctFromAbsolute, togglePlay]);
+  }, [commitProgressPercent, progressPctFromAbsolute]);
 
   /* ─── Skip intro/outro logic ─── */
   const SKIP_BTN_LEAD = 3; // ثوانٍ قبل بداية النطاق لإظهار الزر
@@ -2856,10 +2814,7 @@ function ExpoRiftPlayer({
   );
 
   return (
-    <View
-      ref={rootViewRef}
-      style={[s.root, isFlipped && { transform: [{ rotate: "180deg" }] }]}
-    >
+    <View ref={rootViewRef} style={[s.root, isFlipped && { transform: [{ rotate: "180deg" }] }]}>
       <StatusBar hidden />
       {/* ── Video ── */}
       <VideoView
@@ -3322,7 +3277,7 @@ function ExpoRiftPlayer({
                 </View>
                 {/* زر المنتصف: play/pause/spinner */}
                 <View style={s.controlButtonSlot}>
-                  <Pressable onPress={togglePlay} style={[s.centerPlayBtn, tvMode && s.tvCenterPlayBtn]} hitSlop={16}>
+                  <Pressable hasTVPreferredFocus={tvMode} onPress={togglePlay} style={[s.centerPlayBtn, tvMode && s.tvCenterPlayBtn]} hitSlop={16}>
                     {buffering && !error
                       ? <ActivityIndicator size={32} color="#fff" />
                       : <Ionicons
@@ -3344,7 +3299,7 @@ function ExpoRiftPlayer({
               /* وضع أفقي: play/pause في المنتصف دائماً */
               <View style={s.centerLandscapeWrap}>
                 <View style={s.controlButtonSlot}>
-                  <Pressable onPress={togglePlay} style={[s.centerPlayBtn, tvMode && s.tvCenterPlayBtn]} hitSlop={16}>
+                  <Pressable hasTVPreferredFocus={tvMode} onPress={togglePlay} style={[s.centerPlayBtn, tvMode && s.tvCenterPlayBtn]} hitSlop={16}>
                     {buffering && !error
                       ? <ActivityIndicator size={32} color="#fff" />
                       : <Ionicons
@@ -3388,8 +3343,6 @@ function ExpoRiftPlayer({
                     <Pressable
                       accessibilityRole="adjustable"
                       accessibilityLabel="شريط تقدم الحلقة"
-                      hasTVPreferredFocus={tvMode}
-                      focusable={true}
                       onPress={handleTvProgressPress}
                       onFocus={() => {
                         progressFocusedRef.current = true;
@@ -3550,11 +3503,10 @@ function ExpoRiftPlayer({
       )}
 
       {tvMode && !showControls && !error && !isEnded && !isLocked && (
-        <TvPressable
+        <Pressable
           accessibilityRole="button"
-          accessibilityLabel="مشغل الفيديو النشط"
+          accessibilityLabel="إظهار أدوات المشغل"
           hasTVPreferredFocus
-          focusable={true}
           onPress={fadeIn}
           style={s.tvRevealTarget}
         >
@@ -3564,7 +3516,7 @@ function ExpoRiftPlayer({
               <Text style={s.tvRevealText}>اضغط OK لإظهار أدوات المشغل</Text>
             </View>
           )}
-        </TvPressable>
+        </Pressable>
       )}
 
 
