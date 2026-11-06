@@ -17703,12 +17703,17 @@ function isClientRoutedFlixMedia(absUrl: string, ref = ""): boolean {
     return (
       host === "flixcloud.cc" ||
       host.endsWith(".flixcloud.cc") ||
+      host.includes("flixcloud") ||
       host.endsWith(".stronghole.site") ||
       host.includes("stronghole") ||
       host.endsWith(".rundowncdn.top") ||
       host.includes("rundowncdn") ||
       host.endsWith(".aerocdn.top") ||
-      host.includes("aerocdn")
+      host.includes("aerocdn") ||
+      host.endsWith(".plasmacdn.top") ||
+      host.includes("plasmacdn") ||
+      host.endsWith(".chronoscdn.top") ||
+      host.includes("chronoscdn")
     );
   } catch {
     return false;
@@ -17732,6 +17737,10 @@ function hlsRefererForTarget(absUrl: string, fallbackRef: string): string {
       /flixcloud\.cc/i.test(fallbackRef) ||
       host.endsWith(".aerocdn.top") ||
       host.includes("aerocdn") ||
+      host.endsWith(".plasmacdn.top") ||
+      host.includes("plasmacdn") ||
+      host.endsWith(".chronoscdn.top") ||
+      host.includes("chronoscdn") ||
       host.endsWith(".stronghole.site") ||
       host.endsWith(".rundowncdn.top")
     ) return "https://flixcloud.cc/";
@@ -19176,6 +19185,14 @@ router.get("/anime/seg-proxy", async (req, res) => {
         res.status(200).end(decoded);
         return true;
       }
+      if (raw.length > 4096) {
+        res.setHeader("Content-Type", "video/MP2T");
+        res.setHeader("Content-Length", String(raw.length));
+        res.setHeader("Accept-Ranges", "bytes");
+        res.setHeader("Cache-Control", "public, max-age=60");
+        res.status(200).end(raw);
+        return true;
+      }
       if (ct.startsWith("image/")) return false;
       res.setHeader("Content-Type", r.headers.get("content-type") || "video/MP2T");
       res.setHeader("Content-Length", String(raw.length));
@@ -19199,6 +19216,15 @@ router.get("/anime/seg-proxy", async (req, res) => {
         res.setHeader("Accept-Ranges", "bytes");
         res.setHeader("Cache-Control", "public, max-age=60");
         res.status(200).end(stripped);
+        return true;
+      }
+      // FlixCloud segments masquerading as .webp with AES-128 encryption
+      if ((reanimeFlixReferer || isFlix) && raw.length > 4096) {
+        res.setHeader("Content-Type", "video/MP2T");
+        res.setHeader("Content-Length", String(raw.length));
+        res.setHeader("Accept-Ranges", "bytes");
+        res.setHeader("Cache-Control", "public, max-age=60");
+        res.status(200).end(raw);
         return true;
       }
       // Reanime CDNs can return an image placeholder with HTTP 200 when
