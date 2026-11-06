@@ -123,7 +123,7 @@ const SITE_TAG: Record<string, string> = {
   shahiid: "SH", animelek: "EK", animedar: "AD", okanime: "OK",
   ristoanime: "RS", animeify: "AF", animeday: "DY", arabseed: "AR",
   mycima: "MC", topcinemaa: "TC",
-  animewitcher: "AW", kawaii: "KW", megaplay: "MP", reanime: "RE", anineko: "AN",
+  animewitcher: "AW", kawaii: "KW", megaplay: "MP", reflix: "RE", reanime: "RE", anineko: "AN",
   animekai: "AK",
   vidlink_anim: "VL", vidfast: "VF",
   animetime: "AT", animepahe: "AP", dulo_anim: "DL",
@@ -136,7 +136,7 @@ const SITE_TAG: Record<string, string> = {
 
 /* ── اسم عرض لكل موقع في منتقي المصادر ── */
 const SITE_LABEL: Record<string, string> = {
-  kawaii: "Kawaii", megaplay: "MegaPlay", reanime: "ReAnime", animekai: "AnimeKai",
+  kawaii: "Kawaii", megaplay: "MegaPlay", reflix: "ReAnime", reanime: "ReAnime", animekai: "AnimeKai",
   animewitcher: "AnimeWitcher",
   anineko: "AniNeko",
   dulo_anim: "Dulo",
@@ -159,7 +159,7 @@ function getSiteTag(site: string): string {
 
 /* ── وصف قصير لكل مصدر في شبكة الاختيار (يطابق نظام الويب) ── */
 const SITE_DESC: Record<string, string> = {
-  kawaii: "1080p · مباشر", megaplay: "HLS · صوت خام · ترجمة Kawaii", reanime: "HLS · صوت خام · ترجمة Kawaii",
+  kawaii: "1080p · مباشر", megaplay: "HLS · صوت خام · ترجمة Kawaii", reflix: "HLS · صوت خام · ترجمة Kawaii", reanime: "HLS · صوت خام · ترجمة Kawaii",
   anineko: "HLS · متعدد الجودات", animekai: "HLS · ياباني + ترجمة",
   animewitcher: "PD/ST · مباشر",
   dulo_anim: "ياباني/إنجليزي · HLS مباشر",
@@ -468,7 +468,7 @@ function buildEmbeddedDownloadUrl(
 
 /* Web's canonical Arabic subtitle policy: KW supplies the track for the
    Japanese raw-audio providers AN/AK/MP as well as for KW itself. */
-const KAWAII_SUBTITLE_SITES = new Set(["kawaii", "anineko", "animekai", "megaplay", "reanime", "anime4up2"]);
+const KAWAII_SUBTITLE_SITES = new Set(["kawaii", "anineko", "animekai", "megaplay", "reflix", "reanime"]);
 const DOWNLOAD_SUBTITLE_SITES = KAWAII_SUBTITLE_SITES;
 
 function normalizeProviderSubtitleUrl(
@@ -541,7 +541,7 @@ const STATIC_PICKER: Record<QualityKey, { site: string; name: string; tag: strin
   "1080p": [
     { site: "kawaii",       name: "كواي أنمي",   tag: "KW" },
     { site: "megaplay",     name: "MegaPlay",    tag: "MP" },
-    { site: "reanime",      name: "ReAnime",     tag: "RE" },
+    { site: "reflix",       name: "ReAnime",     tag: "RE" },
     { site: "anineko",      name: "AniNeko",      tag: "AN" },
     { site: "animewitcher", name: "AnimeWitcher", tag: "AW" },
     { site: "anime4up2", name: "أنمي فور أب", tag: "AD" },
@@ -553,7 +553,7 @@ const STATIC_PICKER: Record<QualityKey, { site: string; name: string; tag: strin
   ],
   "720p": [
     { site: "megaplay",     name: "MegaPlay",    tag: "MP" },
-    { site: "reanime",      name: "ReAnime",     tag: "RE" },
+    { site: "reflix",       name: "ReAnime",     tag: "RE" },
     { site: "anineko",      name: "AniNeko",      tag: "AN" },
     { site: "animewitcher", name: "AnimeWitcher", tag: "AW" },
     { site: "anime4up2", name: "أنمي فور أب", tag: "AD" },
@@ -565,7 +565,7 @@ const STATIC_PICKER: Record<QualityKey, { site: string; name: string; tag: strin
   ],
   "360p": [
     { site: "megaplay",     name: "MegaPlay",    tag: "MP" },
-    { site: "reanime",      name: "ReAnime",     tag: "RE" },
+    { site: "reflix",       name: "ReAnime",     tag: "RE" },
     { site: "anineko",      name: "AniNeko",      tag: "AN" },
     { site: "animewitcher", name: "AnimeWitcher", tag: "AW" },
     { site: "anime4up2", name: "أنمي فور أب", tag: "AD" },
@@ -575,7 +575,7 @@ const STATIC_PICKER: Record<QualityKey, { site: string; name: string; tag: strin
   ],
   "480p": [
     { site: "megaplay",     name: "MegaPlay",    tag: "MP" },
-    { site: "reanime",      name: "ReAnime",     tag: "RE" },
+    { site: "reflix",       name: "ReAnime",     tag: "RE" },
     { site: "anineko",      name: "AniNeko",      tag: "AN" },
     { site: "animewitcher", name: "AnimeWitcher", tag: "AW" },
     { site: "anime4up2", name: "أنمي فور أب", tag: "AD" },

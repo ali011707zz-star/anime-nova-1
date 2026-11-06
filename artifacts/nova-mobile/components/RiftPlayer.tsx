@@ -542,7 +542,7 @@ function ExpoRiftPlayer({
   const isLocalPlayback = playableSources.length > 0
     && playableSources.every(source => /^(?:file|content):\/\//i.test(source.url));
   const subtitlesDisabled = subtitlesDisabledForSite(currentSrc?.site);
-  const subtitleShadowOnly = new Set(["kawaii", "kw", "megaplay", "mp", "reanime", "re", "anime4up2", "ad"]).has(
+  const subtitleShadowOnly = new Set(["kawaii", "kw", "megaplay", "mp", "reflix", "reanime", "re"]).has(
     String(currentSrc?.site || "").trim().toLowerCase(),
   );
   const aliveRef                    = useRef(true);
