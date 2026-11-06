@@ -285,7 +285,8 @@ function buildWebtoonReaderHtml(
       }
     }
 
-    pages.forEach((url, index) => {
+    pages.forEach((rawUrl, index) => {
+      const url = String(rawUrl || "").replace("://tempsolo.mangalik.net/", "://leksolo.mangalik.net/");
       const slot = document.createElement("div");
       slot.className = "page-slot loading";
 
@@ -302,13 +303,19 @@ function buildWebtoonReaderHtml(
       img.className = "page-img";
       img.decoding = "async";
       img.loading = index < 4 ? "eager" : "lazy";
+      if (url.indexOf("mangatek.com") !== -1) {
+        img.referrerPolicy = "no-referrer";
+      }
       img.style.display = "none";
 
       let retries = 0;
-      function loadImg(cacheBust) {
-        img.src = cacheBust
-          ? url + (url.indexOf("?") !== -1 ? "&" : "?") + "retry=" + cacheBust
+      function loadImg(cacheBust, useProxy) {
+        const base = useProxy && url.indexOf("/api/manga/img-proxy") === -1
+          ? "${API_BASE}/manga/img-proxy?url=" + encodeURIComponent(url)
           : url;
+        img.src = cacheBust
+          ? base + (base.indexOf("?") !== -1 ? "&" : "?") + "retry=" + cacheBust
+          : base;
       }
 
       img.onload = function () {
@@ -321,7 +328,7 @@ function buildWebtoonReaderHtml(
       img.onerror = function () {
         if (retries < 2) {
           retries++;
-          setTimeout(() => loadImg(retries + "_" + Date.now()), 500 * retries);
+          setTimeout(() => loadImg(retries + "_" + Date.now(), retries >= 1), 350 * retries);
           return;
         }
         spinner.style.display = "none";
@@ -1935,7 +1942,7 @@ export default function MangaDetailScreen() {
                 baseUrl:
                   currentSource === "manhwa"
                     ? "https://azorafly.com/"
-                    : "https://mangadar.com/",
+                    : "https://mangalik.net/",
               }}
               scalesPageToFit={false}
               setBuiltInZoomControls={false}

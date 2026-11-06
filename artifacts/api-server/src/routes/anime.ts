@@ -885,10 +885,6 @@ async function scrapingAntGet(
 }
 
 // ════════════════════════════════════════════════════════════════════
-
-// Hound CF-Bypass Service — patchright stealth browser يحل Turnstile محلياً على VPS
-const HOUND_SERVICE_URL    = process.env.HOUND_SERVICE_URL   || "http://localhost:8766";
-
 // hopxProxyGet — معطَّل نهائياً (hopx-manager حُذف 2026-08-03)
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 async function hopxProxyGet(_url: string, _ref?: string, _t?: number): Promise<string | null> { return null; }
@@ -8122,6 +8118,244 @@ router.get("/anime/anizip", async (req: Request, res: Response) => {
   }
 });
 
+// ════════════════════════════════════════════════════════════════════
+//  AnimeWitcher Firestore + Algolia helpers (TVNESH8OZY + episodes_summery)
+// ════════════════════════════════════════════════════════════════════
+
+const AW_FS_BASE = "https://firestore.googleapis.com/v1/projects/animewitcher-1c66d/databases/(default)/documents";
+let AW_ALGOLIA_APP = "TVNESH8OZY";
+let AW_ALGOLIA_KEY = "54098ae17637c217f486e6165c8a913c";
+let _awCredsRefreshedAt = 0;
+
+async function awRefreshAlgoliaCredentials(): Promise<void> {
+  if (Date.now() - _awCredsRefreshedAt < 30 * 60_000) return;
+  _awCredsRefreshedAt = Date.now();
+  try {
+    const r = await fetch(`${AW_FS_BASE}/Settings/search_service`, {
+      headers: BASE_HDRS,
+      signal: AbortSignal.timeout(5_000),
+    });
+    if (!r.ok) return;
+    const doc = await r.json() as any;
+    const f = doc?.fields || {};
+    const appId = f.algolia_app_id?.stringValue || f.app_id?.stringValue;
+    const apiKey = f.algolia_api_key?.stringValue || f.api_key?.stringValue || f.search_key?.stringValue;
+    if (appId && apiKey) {
+      AW_ALGOLIA_APP = String(appId).trim();
+      AW_ALGOLIA_KEY = String(apiKey).trim();
+    }
+  } catch {}
+}
+
+function awRequestSignal(parentSignal: AbortSignal | undefined, timeoutMs: number): AbortSignal {
+  const timeoutSignal = AbortSignal.timeout(timeoutMs);
+  if (!parentSignal) return timeoutSignal;
+  if (typeof (AbortSignal as any).any === "function") {
+    return (AbortSignal as any).any([parentSignal, timeoutSignal]);
+  }
+  return timeoutSignal;
+}
+
+function _awFv(v: any): any {
+  if (!v || typeof v !== "object") return null;
+  if ("stringValue"    in v) return v.stringValue;
+  if ("integerValue"   in v) return Number(v.integerValue);
+  if ("doubleValue"    in v) return Number(v.doubleValue);
+  if ("booleanValue"   in v) return Boolean(v.booleanValue);
+  if ("nullValue"      in v) return null;
+  if ("timestampValue" in v) return v.timestampValue;
+  if ("arrayValue"     in v) return (v.arrayValue?.values || []).map(_awFv);
+  if ("mapValue"       in v) {
+    const out: Record<string, any> = {};
+    for (const [k, val] of Object.entries(v.mapValue?.fields || {})) out[k] = _awFv(val);
+    return out;
+  }
+  return null;
+}
+
+function _awDoc(doc: any): Record<string, any> {
+  const out: Record<string, any> = {
+    _id: String(doc?.name || "").split("/").pop() || "",
+  };
+  for (const [k, val] of Object.entries(doc?.fields || {})) {
+    out[k] = _awFv(val);
+  }
+  return out;
+}
+
+async function awAlgoliaSearch(query: string, parentSignal?: AbortSignal): Promise<any[]> {
+  if (parentSignal?.aborted) return [];
+  await awRefreshAlgoliaCredentials();
+  const url = `https://${AW_ALGOLIA_APP.toLowerCase()}-dsn.algolia.net/1/indexes/all_anime/query`;
+  const params = `query=${encodeURIComponent(query)}&hitsPerPage=15`;
+  try {
+    const r = await fetch(url, {
+      method: "POST",
+      headers: {
+        "X-Algolia-Application-Id": AW_ALGOLIA_APP,
+        "X-Algolia-API-Key": AW_ALGOLIA_KEY,
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+      },
+      body: JSON.stringify({ params }),
+      signal: awRequestSignal(parentSignal, 6_000),
+    });
+    if (!r.ok) {
+      _awCredsRefreshedAt = 0;
+      return [];
+    }
+    const data = await r.json() as any;
+    return Array.isArray(data?.hits) ? data.hits : [];
+  } catch {
+    return [];
+  }
+}
+
+async function awFetchEpisodes(animeId: string, parentSignal?: AbortSignal): Promise<Array<{ id: string; num: number; name: string }>> {
+  if (parentSignal?.aborted) return [];
+  const encId = encodeURIComponent(animeId);
+
+  // Fast Path (<200ms): جلب كل الحلقات في طلب واحد عبر episodes_summery/summery
+  try {
+    const sumRes = await fetch(`${AW_FS_BASE}/anime_list/${encId}/episodes_summery/summery`, {
+      headers: BASE_HDRS,
+      signal: awRequestSignal(parentSignal, 6_000),
+    });
+    if (sumRes.ok) {
+      const sumDoc = _awDoc(await sumRes.json());
+      const rawEps = Array.isArray(sumDoc.episodes) ? sumDoc.episodes : [];
+      if (rawEps.length > 0) {
+        const list: Array<{ id: string; num: number; name: string }> = [];
+        for (const item of rawEps) {
+          if (!item || typeof item !== "object") continue;
+          const docId = String(item.doc_id || item.id || "").trim();
+          const nameStr = String(item.name ?? "").trim();
+          const numMatch = nameStr.match(/(\d+(?:\.\d+)?)/) || docId.match(/-(\d+(?:\.\d+)?)$/);
+          const num = numMatch ? parseFloat(numMatch[1]) : NaN;
+          if (docId && !isNaN(num)) {
+            list.push({ id: docId, num, name: nameStr });
+          }
+        }
+        if (list.length > 0) return list.sort((a, b) => a.num - b.num);
+      }
+    }
+  } catch {}
+
+  // Fallback: pagination على /episodes?pageSize=300
+  const all: Array<{ id: string; num: number; name: string }> = [];
+  let pageToken = "";
+  for (let page = 0; page < 5; page++) {
+    if (parentSignal?.aborted) break;
+    const url = `${AW_FS_BASE}/anime_list/${encId}/episodes?pageSize=300${pageToken ? `&pageToken=${encodeURIComponent(pageToken)}` : ""}`;
+    try {
+      const r = await fetch(url, {
+        headers: BASE_HDRS,
+        signal: awRequestSignal(parentSignal, 8_000),
+      });
+      if (!r.ok) break;
+      const data = await r.json() as any;
+      for (const raw of (data.documents || [])) {
+        const d = _awDoc(raw);
+        const num = parseFloat(String(d.number ?? d.name ?? ""));
+        if (!isNaN(num)) all.push({ id: d._id, num, name: String(d.name ?? num) });
+      }
+      pageToken = data.nextPageToken || "";
+      if (!pageToken) break;
+    } catch { break; }
+  }
+  return all.sort((a, b) => a.num - b.num);
+}
+
+async function awDirectEpId(
+  animeId: string,
+  ep: number,
+  parentSignal?: AbortSignal,
+): Promise<string | null> {
+  if (parentSignal?.aborted) return null;
+  const encAnime = encodeURIComponent(animeId);
+  const paddings = [
+    String(ep).padStart(2, "0"),
+    String(ep),
+    String(ep).padStart(3, "0"),
+    String(ep).padStart(4, "0"),
+  ];
+  const uniquePads = [...new Set(paddings)];
+  const checks = await Promise.allSettled(
+    uniquePads.map(async pad => {
+      const candidate = `${animeId}-${pad}`;
+      const r = await fetch(
+        `${AW_FS_BASE}/anime_list/${encAnime}/episodes/${encodeURIComponent(candidate)}/servers2/all_servers`,
+        { headers: BASE_HDRS, signal: awRequestSignal(parentSignal, 3_500) },
+      );
+      if (r.ok) return candidate;
+      const rEp = await fetch(
+        `${AW_FS_BASE}/anime_list/${encAnime}/episodes/${encodeURIComponent(candidate)}`,
+        { headers: BASE_HDRS, signal: awRequestSignal(parentSignal, 3_500) },
+      );
+      if (rEp.ok) return candidate;
+      throw new Error("not found");
+    }),
+  );
+  for (const c of checks) {
+    if (c.status === "fulfilled" && c.value) return c.value;
+  }
+  return null;
+}
+
+async function awFetchServers(
+  animeId: string,
+  epId: string,
+  parentSignal?: AbortSignal,
+): Promise<Array<{ name: string; url: string; quality: string }>> {
+  if (parentSignal?.aborted) return [];
+  const base = `${AW_FS_BASE}/anime_list/${encodeURIComponent(animeId)}/episodes/${encodeURIComponent(epId)}`;
+
+  const [r2Res, r1Res] = await Promise.allSettled([
+    fetch(`${base}/servers2/all_servers`, {
+      headers: BASE_HDRS, signal: awRequestSignal(parentSignal, 5_000),
+    }),
+    fetch(`${base}/servers?pageSize=30`, {
+      headers: BASE_HDRS, signal: awRequestSignal(parentSignal, 5_000),
+    }),
+  ]);
+
+  const servers: Array<{ name: string; url: string; quality: string }> = [];
+  const seen = new Set<string>();
+  const addSrv = (name: string, url: string, quality: string) => {
+    const cleanName = String(name || "").trim();
+    const cleanUrl = String(url || "").trim();
+    if (!cleanName || !cleanUrl) return;
+    const key = `${cleanName.toUpperCase()}|${cleanUrl}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    servers.push({ name: cleanName, url: cleanUrl, quality: String(quality || "720p") });
+  };
+
+  if (r2Res.status === "fulfilled" && r2Res.value.ok) {
+    try {
+      const doc = await r2Res.value.json() as any;
+      const d = _awDoc(doc);
+      if (Array.isArray(d.servers)) {
+        for (const s of d.servers) {
+          if (s && typeof s === "object") addSrv(s.name, s.link || s.url, s.quality || s.q || "720p");
+        }
+      }
+    } catch {}
+  }
+
+  if (r1Res.status === "fulfilled" && r1Res.value.ok) {
+    try {
+      const data = await r1Res.value.json() as any;
+      for (const raw of (data.documents || [])) {
+        const d = _awDoc(raw);
+        addSrv(d.name, d.link || d.url, d.quality || d.q || "720p");
+      }
+    } catch {}
+  }
+
+  return servers;
+}
+
 /** Resolve Pixeldrain ID مباشرة — بدون proxy (200 OK مؤكد من VPS) */
 function awResolvePd(pageUrl: string): string | null {
   const m = pageUrl.match(/pixeldrain\.com\/(?:u|l)\/([A-Za-z0-9_-]+)/);
@@ -8485,9 +8719,28 @@ async function getAnimeWitcherSources(
       if (dbRows.length) {
         console.log(`[AW] DB-hit: ${dbRows.length} rows for anilistId=${_anilistId} ep${ep}`);
         if (availabilityOnly) {
-          /* Build the real rows even during availability. For VT master HLS,
-             awBuildSourcesFromDb expands the actual 1080/720 variants; the old
-             DB label-only path collapsed every new episode to one 720 row. */
+          // Fast availability path: استخرج الجودات مباشرة من صفوف DB بدون scraping لـ KF/MF/ST
+          const seenFastQ = new Set<string>();
+          const fastRows: UnifiedSource[] = [];
+          for (const row of dbRows) {
+            const srvName = String(row.server || "").toUpperCase();
+            if (srvName === "VT") continue;
+            const q = normalizeAwQuality(`${row.quality || ""} ${row.server || ""} ${row.ep_id || ""} ${row.link || ""}`);
+            if (seenFastQ.has(q)) continue;
+            seenFastQ.add(q);
+            const qRank = q === "1080p" ? 22 : q === "720p" ? 21 : q === "480p" ? 10 : 5;
+            fastRows.push({
+              name: `AnimeWitcher · ${q} · ${srvName}`,
+              url: row.link,
+              quality: q,
+              qualityRank: qRank,
+              site: "animewitcher",
+              verified: true,
+            });
+          }
+          if (fastRows.length && seenFastQ.size >= 2) {
+            return fastRows;
+          }
           const dbSources = await awBuildSourcesFromDb(dbRows, signal);
           if (signal?.aborted) return [];
           const dbQualities = new Set(dbSources.map(source => normalizeAwQuality(
@@ -8648,114 +8901,144 @@ async function getAnimeWitcherSources(
       PD: 100, KF: 80, MF2: 60, MF: 50, ST: 30, VT: 20,
     };
 
-    for (const srv of [...rawServers].sort(
+    const sortedRawServers = [...rawServers].sort(
       (a, b) => (awServerPriority[String(b.name || "").toUpperCase()] || 0)
         - (awServerPriority[String(a.name || "").toUpperCase()] || 0),
-    )) {
-      const srvName = srv.name.toUpperCase();
-      const q       = String(srv.quality || "720p").replace(/p$/i, "p");
+    ).filter(srv => {
+      const srvName = String(srv.name || "").toUpperCase();
+      const q = String(srv.quality || "720p").replace(/p$/i, "p");
       if (
         requestedQuality &&
         srvName !== "VT" &&
         normalizeAwQuality(`${q} ${srv.name || ""} ${srv.url || ""}`) !== requestedQuality
-      ) continue;
+      ) return false;
+      return true;
+    });
+
+    const resolveSingleAwServer = async (srv: { name: string; url: string; quality: string }): Promise<Array<{ key: string; source: UnifiedSource }>> => {
+      const out: Array<{ key: string; source: UnifiedSource }> = [];
+      if (signal?.aborted) return out;
+      const srvName = String(srv.name || "").toUpperCase();
+      const q       = normalizeAwQuality(`${srv.quality || ""} ${srv.name || ""} ${srv.url || ""}`);
       const qRank   = q === "1080p" ? 22 : q === "720p" ? 21 : q === "480p" ? 10 : 5;
       const qLabel  = q === "1080p" ? "FHD 1080p" : q === "720p" ? "HD 720p" : q;
 
       if (srvName === "PD") {
-        // Pixeldrain — مباشر من VPS (لا يحجب datacenter IPs) ✅
         const direct = awResolvePd(srv.url);
-        if (!direct || seenUrls.has(direct)) continue;
-        seenUrls.add(direct);
-        sources.push({
-          name: `AnimeWitcher · ${qLabel} · PD`,
-          url: srv.url, quality: q, qualityRank: qRank + 2,
-          site: "animewitcher",
-          directUrl: `/api/anime/video-proxy?url=${encodeURIComponent(direct)}&ref=${encodeURIComponent("https://pixeldrain.com/")}`,
-          directType: "mp4",
-        });
-
-      } else if (srvName === "KF") {
-        // KrakenFiles — resolve عبر token API
-        try {
-          const kfDirect = await awResolveKf(srv.url);
-          if (kfDirect && !seenUrls.has(kfDirect)) {
-            seenUrls.add(kfDirect);
-            sources.push({
-              name: `AnimeWitcher · ${qLabel} · KF`,
-              url: srv.url, quality: q, qualityRank: qRank + 1,
+        if (direct) {
+          out.push({
+            key: direct,
+            source: {
+              name: `AnimeWitcher · ${qLabel} · PD`,
+              url: srv.url, quality: q, qualityRank: qRank + 2,
               site: "animewitcher",
-              directUrl: `/api/anime/video-proxy?url=${encodeURIComponent(kfDirect)}&ref=${encodeURIComponent("https://krakenfiles.com/")}`,
+              directUrl: `/api/anime/video-proxy?url=${encodeURIComponent(direct)}&ref=${encodeURIComponent("https://pixeldrain.com/")}`,
               directType: "mp4",
-              headers: { Referer: "https://krakenfiles.com/", Origin: "https://krakenfiles.com/" },
+            },
+          });
+        }
+      } else if (srvName === "KF") {
+        try {
+          const kfDirect = await awResolveKf(srv.url, signal);
+          if (kfDirect) {
+            out.push({
+              key: kfDirect,
+              source: {
+                name: `AnimeWitcher · ${qLabel} · KF`,
+                url: srv.url, quality: q, qualityRank: qRank + 1,
+                site: "animewitcher",
+                directUrl: `/api/anime/video-proxy?url=${encodeURIComponent(kfDirect)}&ref=${encodeURIComponent("https://krakenfiles.com/")}`,
+                directType: "mp4",
+                headers: { Referer: "https://krakenfiles.com/", Origin: "https://krakenfiles.com/" },
+              },
             });
           }
         } catch {}
-
       } else if (srvName === "MF" || srvName === "MF2") {
-        // MediaFire — HTML scraping (MF = /file/, MF2 = /file_premium/)
         try {
           const mfDirect = await extractMediafireDirect(srv.url);
-          if (mfDirect && !seenUrls.has(mfDirect)) {
-            seenUrls.add(mfDirect);
-            sources.push({
-              name: `AnimeWitcher · ${qLabel} · ${srvName}`,
-              url: srv.url, quality: q, qualityRank: qRank + (srvName === "MF2" ? 1 : 0),
-              site: "animewitcher",
-              directUrl: `/api/anime/video-proxy?url=${encodeURIComponent(mfDirect)}&ref=${encodeURIComponent("https://www.mediafire.com/")}`,
-              directType: "mp4",
+          if (mfDirect) {
+            out.push({
+              key: mfDirect,
+              source: {
+                name: `AnimeWitcher · ${qLabel} · ${srvName}`,
+                url: srv.url, quality: q, qualityRank: qRank + (srvName === "MF2" ? 1 : 0),
+                site: "animewitcher",
+                directUrl: `/api/anime/video-proxy?url=${encodeURIComponent(mfDirect)}&ref=${encodeURIComponent("https://www.mediafire.com/")}`,
+                directType: "mp4",
+              },
             });
           }
         } catch {}
-
       } else if (srvName === "ST") {
-        // Streamtape
         try {
           const stHtml = await fetch(srv.url, {
             headers: { ...BASE_HDRS, Referer: "https://streamtape.com/" },
-            signal: AbortSignal.timeout(8_000),
+            signal: awRequestSignal(signal, 8_000),
           }).then(r => r.ok ? r.text() : "").catch(() => "");
           const stResult = parseStreamtape(stHtml);
-          if (stResult && !seenUrls.has(stResult.url)) {
-            seenUrls.add(stResult.url);
-            sources.push({
-              name: `AnimeWitcher · ${qLabel} · ST`,
-              url: srv.url, quality: q, qualityRank: qRank,
-              site: "animewitcher",
-              directUrl: `/api/anime/video-proxy?url=${encodeURIComponent(stResult.url)}&ref=${encodeURIComponent("https://streamtape.com/")}`,
-              directType: "mp4",
+          if (stResult) {
+            out.push({
+              key: stResult.url,
+              source: {
+                name: `AnimeWitcher · ${qLabel} · ST`,
+                url: srv.url, quality: q, qualityRank: qRank,
+                site: "animewitcher",
+                directUrl: `/api/anime/video-proxy?url=${encodeURIComponent(stResult.url)}&ref=${encodeURIComponent("https://streamtape.com/")}`,
+                directType: "mp4",
+              },
             });
           }
         } catch {}
-
       } else if (srvName === "VT") {
         try {
           const vtResult = await extractVideoDeep(srv.url, srv.url);
-          if (vtResult && !seenUrls.has(vtResult.url)) {
-            seenUrls.add(vtResult.url);
+          if (vtResult) {
             if (vtResult.type === "hls") {
               const hlsVariants = await awResolveHlsVariants(vtResult.url, srv.url);
               for (const variant of hlsVariants) {
                 if (requestedQuality && normalizeAwQuality(variant.label) !== requestedQuality) continue;
                 const directUrl = `/api/anime/hls-proxy?url=${encodeURIComponent(variant.url)}&ref=${encodeURIComponent(srv.url)}`;
-                sources.push({
-                  name: `AnimeWitcher · ${variant.label} · VT`,
-                  url: srv.url, quality: variant.label, qualityRank: variant.rank,
-                  site: "animewitcher", directUrl, directType: "hls",
+                out.push({
+                  key: variant.url,
+                  source: {
+                    name: `AnimeWitcher · ${variant.label} · VT`,
+                    url: srv.url, quality: variant.label, qualityRank: variant.rank,
+                    site: "animewitcher", directUrl, directType: "hls",
+                  },
                 });
               }
             } else {
               const directUrl = `/api/anime/video-proxy?url=${encodeURIComponent(vtResult.url)}&ref=${encodeURIComponent(srv.url)}`;
-              sources.push({
-                name: `AnimeWitcher · ${qLabel} · VT`,
-                url: srv.url, quality: q, qualityRank: qRank,
-                site: "animewitcher", directUrl, directType: "mp4",
+              out.push({
+                key: vtResult.url,
+                source: {
+                  name: `AnimeWitcher · ${qLabel} · VT`,
+                  url: srv.url, quality: q, qualityRank: qRank,
+                  site: "animewitcher", directUrl, directType: "mp4",
+                },
               });
             }
           }
         } catch {}
       }
-      if (requestedQuality && sources.length) return sources.slice(0, 1);
+      return out;
+    };
+
+    const resolvedLists = await Promise.allSettled(sortedRawServers.map(resolveSingleAwServer));
+    for (const resItem of resolvedLists) {
+      if (resItem.status !== "fulfilled") continue;
+      for (const { key, source } of resItem.value) {
+        if (seenUrls.has(key)) continue;
+        seenUrls.add(key);
+        sources.push(source);
+      }
+    }
+    if (requestedQuality && sources.length) {
+      if (rawServers.length) {
+        awDbSaveLinks(animeId, animeId, _anilistId, ep, epId!, rawServers).catch(() => {});
+      }
+      return sources.slice(0, 1);
     }
 
     // BUNNY: محذوف 2026-07-28 — vz-*.b-cdn.net "Domain suspended or not configured"
@@ -18257,25 +18540,38 @@ async function preparePegasusMp4(pegasusUrl: string): Promise<string> {
 
     const buffers = new Array<Buffer>(segs.length);
     let nextIdx = 0;
-    const concurrency = Math.min(48, segs.length);
+    let failedSegs = 0;
+    // Lower concurrency from 48 to 12 so pegasus.5387692.xyz does not rate-limit with HTTP 502
+    const concurrency = Math.min(12, segs.length);
     await Promise.all(
       Array.from({ length: concurrency }, async () => {
         while (true) {
           const i = nextIdx++;
           if (i >= segs.length) break;
           let lastErr: unknown;
-          for (let attempt = 0; attempt < 3; attempt++) {
+          for (let attempt = 0; attempt < 6; attempt++) {
             try {
-              const r = await fetch(segs[i], { headers: hdrs, signal: AbortSignal.timeout(15000) });
+              if (attempt > 0) {
+                await new Promise(res => setTimeout(res, 350 * attempt));
+              }
+              const r = await fetch(segs[i], { headers: hdrs, signal: AbortSignal.timeout(20000) });
               if (!r.ok) throw new Error(`segment ${i} HTTP ${r.status}`);
-              buffers[i] = Buffer.from(await r.arrayBuffer());
+              const ab = await r.arrayBuffer();
+              if (ab.byteLength === 0) throw new Error(`segment ${i} empty`);
+              buffers[i] = Buffer.from(ab);
               lastErr = null;
               break;
             } catch (e) {
               lastErr = e;
             }
           }
-          if (lastErr) throw lastErr;
+          if (lastErr) {
+            failedSegs++;
+            console.warn(`[pegasus-mp4] segment ${i}/${segs.length} failed after 6 attempts:`, (lastErr as any)?.message || lastErr);
+            if (failedSegs > Math.max(3, Math.ceil(segs.length * 0.03))) {
+              throw lastErr;
+            }
+          }
         }
       }),
     );

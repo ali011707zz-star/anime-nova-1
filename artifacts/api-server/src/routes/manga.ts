@@ -3,13 +3,19 @@ import fs from "fs";
 import path from "path";
 import crypto from "crypto";
 import vm from "node:vm";
+import { exec } from "node:child_process";
 import { logger } from "../lib/logger.js";
 
 const router = Router();
 
-const HOUND_BASE = (process.env.HOUND_SERVICE_URL || "http://127.0.0.1:8766").replace(/\/fetch\/?$/, "").replace(/\/+$/, "");
-const HOUND_URL = `${HOUND_BASE}/fetch`;
-const MANGADAR_BASE = "https://mangadar.com";
+// إيقاف خدمة hound-service الثقيلة ومتصفح patchright/Chrome تلقائياً عند إقلاع السيرفر لتوفير 1.4GB RAM و 100% CPU
+try {
+  exec(
+    "pm2 delete hound-service 2>/dev/null || true; pkill -f 'hound-service' 2>/dev/null || true; pkill -f 'patchright' 2>/dev/null || true",
+    () => {},
+  );
+} catch {}
+
 const AZORAFLY_BASE = "https://azorafly.com";
 const UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
@@ -21,7 +27,7 @@ interface CacheEntry<T> {
 }
 const cache = new Map<string, CacheEntry<any>>();
 
-const DISK_CACHE_DIR = process.env.MANGA_DISK_CACHE_DIR || "/tmp/anime-nova-manga-cache";
+const DISK_CACHE_DIR = process.env.MANGA_DISK_CACHE_DIR || "/tmp/anime-nova-manga-cache-v2";
 try {
   if (!fs.existsSync(DISK_CACHE_DIR)) {
     fs.mkdirSync(DISK_CACHE_DIR, { recursive: true });
@@ -620,400 +626,441 @@ function stripHtml(html: string): string {
   );
 }
 
-// ── MangaDar (https://mangadar.com/manga/) Helpers ───────────────────────────
-async function fetchMangaDarHtml(url: string): Promise<string> {
-  const diskKey = `md_html:${url}`;
-  const diskCached = getDiskCached<string>(diskKey, 30 * 60 * 1000);
-  if (diskCached) return diskCached;
 
-  // 1. Try Hound CF bypass service if reachable (short 7s timeout)
+// ── Anime Witcher Manga (Algolia TVNESH8OZY + Firestore Summary Docs) ────────
+// Fast direct JSON (<150ms) — zero Headless Chrome / zero hound-service!
+const AW_FS_BASE =
+  "https://firestore.googleapis.com/v1/projects/animewitcher-1c66d/databases/(default)/documents";
+
+let AW_ALGOLIA_APP = "TVNESH8OZY";
+let AW_ALGOLIA_KEY = "54098ae17637c217f486e6165c8a913c";
+let awCredsCheckedAt = 0;
+
+async function ensureAwMangaAlgoliaCreds(force = false): Promise<{ appId: string; apiKey: string }> {
+  const now = Date.now();
+  if (!force && now - awCredsCheckedAt < 30 * 60 * 1000) {
+    return { appId: AW_ALGOLIA_APP, apiKey: AW_ALGOLIA_KEY };
+  }
+  awCredsCheckedAt = now;
   try {
-    const res = await fetch(HOUND_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        url,
-        wait: 1000,
-        referer: `${MANGADAR_BASE}/manga/`,
-        solve_cf: true,
-      }),
-      signal: AbortSignal.timeout(7_000),
+    const res = await fetch(`${AW_FS_BASE}/Settings/search_service`, {
+      headers: { Accept: "application/json", "User-Agent": UA },
+      signal: AbortSignal.timeout(5000),
     });
     if (res.ok) {
-      const data = (await res.json()) as { ok?: boolean; html?: string; error?: string };
-      if (data?.html && data.html.length > 500) {
-        setDiskCached(diskKey, data.html);
-        return data.html;
+      const doc = (await res.json()) as any;
+      const f = doc?.fields || {};
+      const appId = f?.app_id?.stringValue?.trim();
+      const apiKey = (f?.api_key?.stringValue || f?.browseApiKey?.stringValue || "").trim();
+      if (appId && apiKey) {
+        AW_ALGOLIA_APP = appId;
+        AW_ALGOLIA_KEY = apiKey;
       }
     }
   } catch {
-    // Hound unavailable or timed out, continue to direct fetch
+    // Keep default TVNESH8OZY credentials
   }
-
-  // 2. Direct fetch with real desktop headers
-  try {
-    const directRes = await fetch(url, {
-      headers: {
-        "User-Agent": UA,
-        Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-        "Accept-Language": "ar,en-US;q=0.9,en;q=0.8",
-        Referer: `${MANGADAR_BASE}/manga/`,
-        "Cache-Control": "no-cache",
-      },
-      signal: AbortSignal.timeout(10_000),
-    });
-    if (directRes.ok) {
-      const html = await directRes.text();
-      if (html && html.length > 500 && !html.includes("Just a moment") && !html.includes("cf-browser-verification")) {
-        setDiskCached(diskKey, html);
-        return html;
-      }
-    }
-  } catch {}
-
-  // 3. Stale cache fallback up to 7 days
-  const stale = getDiskCached<string>(diskKey, 7 * 24 * 3600 * 1000);
-  if (stale) return stale;
-
-  throw new Error(`تعذر جلب بيانات المانجا من MangaDar: ${url}`);
+  return { appId: AW_ALGOLIA_APP, apiKey: AW_ALGOLIA_KEY };
 }
 
-function mapMangaDarStatus(statusAr: string): { status: "RELEASING" | "FINISHED" | "HIATUS"; statusAr: string } {
+function parseAwFsVal(v: any): any {
+  if (!v || typeof v !== "object") return null;
+  if ("stringValue" in v) return v.stringValue;
+  if ("integerValue" in v) return parseInt(v.integerValue, 10);
+  if ("doubleValue" in v) return parseFloat(v.doubleValue);
+  if ("booleanValue" in v) return v.booleanValue;
+  if ("nullValue" in v) return null;
+  if ("timestampValue" in v) return v.timestampValue;
+  if ("arrayValue" in v) {
+    const vals = v.arrayValue?.values;
+    return Array.isArray(vals) ? vals.map(parseAwFsVal) : [];
+  }
+  if ("mapValue" in v) {
+    const out: Record<string, any> = {};
+    for (const [k, val] of Object.entries(v.mapValue?.fields || {})) {
+      out[k] = parseAwFsVal(val);
+    }
+    return out;
+  }
+  return null;
+}
+
+function parseAwFsDoc(doc: any): Record<string, any> {
+  const out: Record<string, any> = {};
+  for (const [k, v] of Object.entries(doc?.fields || {})) {
+    out[k] = parseAwFsVal(v);
+  }
+  return out;
+}
+
+/**
+ * Fix legacy subdomain tempsolo.mangalik.net -> leksolo.mangalik.net (403 -> 200 OK)
+ */
+function normalizeAwMangaImageUrl(rawUrl: string): string {
+  const clean = String(rawUrl || "").trim();
+  if (!clean) return "";
+  return clean
+    .replace(/^http:\/\//i, "https://")
+    .replace(/:\/\/tempsolo\.mangalik\.net\//i, "://leksolo.mangalik.net/");
+}
+
+function mapAwMangaStatus(statusAr: string): { status: "RELEASING" | "FINISHED" | "HIATUS"; statusAr: string } {
   const s = (statusAr || "").trim();
-  if (s.includes("مكتمل")) return { status: "FINISHED", statusAr: "مكتمل" };
-  if (s.includes("متوقف")) return { status: "HIATUS", statusAr: "متوقف" };
+  if (s.includes("مكتمل") || s.includes("منتهي") || s.toLowerCase().includes("completed")) {
+    return { status: "FINISHED", statusAr: "مكتمل" };
+  }
+  if (s.includes("متوقف") || s.toLowerCase().includes("hiatus")) {
+    return { status: "HIATUS", statusAr: "متوقف" };
+  }
   return { status: "RELEASING", statusAr: "مستمر" };
 }
 
-function extractMangaDarSlug(url: string): string {
-  const m = url.match(/mangadar\.com\/manga\/([^/?#]+)\/?/i);
-  return m ? decodeURIComponent(m[1]) : "";
-}
-
-function upgradeMangaDarPoster(posterUrl: string): string {
-  if (!posterUrl) return "";
-  // Strip small thumbnail suffix -150x210 while keeping original extension
-  return posterUrl.replace(/-\d+x\d+(\.[a-zA-Z0-9]+)$/, "$1");
-}
-
-function parseMangaDarArchiveHtml(html: string) {
-  // First collect high-res grid posters keyed by manga URL
-  const gridPosters = new Map<string, string>();
-  const gridRegex = /<template\s+x-if="view\s*===\s*'grid'">([\s\S]*?)<\/template>/g;
-  let gm: RegExpExecArray | null;
-  while ((gm = gridRegex.exec(html)) !== null) {
-    const block = gm[1];
-    const hrefMatch = block.match(/href="(https:\/\/mangadar\.com\/manga\/[^"]+)"/);
-    const imgMatch = block.match(/<img[^>]+src="([^"]+)"/);
-    if (hrefMatch && imgMatch) {
-      gridPosters.set(hrefMatch[1], imgMatch[1]);
+async function queryAwMangaAlgolia(
+  indexName: string,
+  params: Record<string, any>,
+  retried = false
+): Promise<any> {
+  const { appId, apiKey } = await ensureAwMangaAlgoliaCreds(retried);
+  const url = `https://${appId.toLowerCase()}-dsn.algolia.net/1/indexes/${encodeURIComponent(indexName)}/query`;
+  const res = await fetch(url, {
+    method: "POST",
+    headers: {
+      "X-Algolia-Application-Id": appId,
+      "X-Algolia-API-Key": apiKey,
+      "Content-Type": "application/json",
+      Accept: "application/json",
+      "User-Agent": UA,
+    },
+    body: JSON.stringify(params),
+    signal: AbortSignal.timeout(10000),
+  });
+  if (!res.ok) {
+    if (!retried && (res.status === 403 || res.status === 401)) {
+      return queryAwMangaAlgolia(indexName, params, true);
     }
+    throw new Error(`Algolia ${indexName} HTTP ${res.status}`);
+  }
+  return await res.json();
+}
+
+async function resolveAwMangaDocId(rawId: string): Promise<string> {
+  const stripped = String(rawId || "")
+    .trim()
+    .replace(/^(?:aw|md|az)--/i, "")
+    .replace(/^md-/i, "")
+    .replace(/^\/+|\/+$/g, "");
+  if (!stripped) throw new Error("Empty manga ID");
+
+  // Firestore document IDs in Anime Witcher are 20-char alphanumeric (e.g. QKAjU52tUNUxcK2GDSdk)
+  if (/^[A-Za-z0-9]{15,28}$/.test(stripped) && !stripped.includes("-")) {
+    return stripped;
   }
 
-  const items: any[] = [];
-  const seenSlugs = new Set<string>();
-  const listRegex = /<template\s+x-if="view\s*===\s*'list'">([\s\S]*?)<\/template>/g;
-  let lm: RegExpExecArray | null;
-
-  while ((lm = listRegex.exec(html)) !== null) {
-    const block = lm[1];
-    const hrefMatch = block.match(/href="(https:\/\/mangadar\.com\/manga\/[^"]+)"/);
-    if (!hrefMatch) continue;
-    const sourceUrl = hrefMatch[1];
-    const slug = extractMangaDarSlug(sourceUrl);
-    if (!slug || seenSlugs.has(slug)) continue;
-
-    const titleMatch = block.match(/<h3[^>]*>([\s\S]*?)<\/h3>/);
-    const title = decodeHtmlEntities(titleMatch ? titleMatch[1] : slug);
-
-    const listImgMatch = block.match(/<img[^>]+src="([^"]+)"/);
-    const rawPoster = gridPosters.get(sourceUrl) || (listImgMatch ? listImgMatch[1] : "");
-    const poster = upgradeMangaDarPoster(rawPoster) || rawPoster;
-
-    const statusMatch = block.match(/(مستمر|مكتمل|متوقف)/);
-    const { status, statusAr } = mapMangaDarStatus(statusMatch ? statusMatch[1] : "مستمر");
-
-    const starMatch = block.match(/#mdg-star[\s\S]*?<span[^>]*>\s*([0-9.]+)\s*<\/span>/);
-    const scoreFloat = starMatch ? parseFloat(starMatch[1]) : 0;
-    const scoreText = scoreFloat > 0 ? scoreFloat.toFixed(1) : "8.2";
-    const averageScore = scoreFloat > 0 ? Math.round(scoreFloat * 10) : 82;
-
-    const chapMatch = block.match(/#mdg-book-open[\s\S]*?<span[^>]*>\s*(\d+)\s*<\/span>/);
-    const chapters = chapMatch ? parseInt(chapMatch[1], 10) : 0;
-
-    const genresMatch = block.match(/<span\s+class="hidden sm:inline text-neutral-600">\s*([\s\S]*?)\s*<\/span>/);
-    const genres = genresMatch
-      ? decodeHtmlEntities(genresMatch[1])
-          .split(/[،,]/)
-          .map((g) => g.trim())
-          .filter(Boolean)
-      : [];
-
-    seenSlugs.add(slug);
-    items.push({
-      id: `md--${slug}`,
-      slug,
-      source: "manga",
-      sourceUrl,
-      title,
-      arabicTitle: title,
-      englishTitle: title,
-      poster,
-      coverImage: {
-        extraLarge: poster,
-        large: poster,
-      },
-      status,
-      statusAr,
-      averageScore,
-      scoreText,
-      chapters,
-      genres,
-      countryOfOrigin: "JP",
-      typeLabel: "مانجا",
-    });
+  // Fallback for legacy slug bookmarks (e.g., "one-piece", "jujutsu-kaisen")
+  const query = stripped.replace(/[-_]+/g, " ").trim();
+  const data = await queryAwMangaAlgolia("manga", { query, hitsPerPage: 5 });
+  const hits: any[] = Array.isArray(data?.hits) ? data.hits : [];
+  if (hits.length > 0) {
+    const exact = hits.find(
+      (h) => String(h?.name || "").toLowerCase().trim() === query.toLowerCase()
+    );
+    const chosen = exact || hits[0];
+    if (chosen?.objectID) return String(chosen.objectID);
   }
-
-  return items;
+  return stripped;
 }
 
 async function fetchMangaDarCatalog(opts: {
   page: number;
   status?: string;
   search?: string;
+  sort?: string;
+  genre?: string;
 }) {
-  const { page, status, search } = opts;
-  const cacheKey = `md:catalog:${page}:${status || "ALL"}:${search || ""}`;
+  const { page = 1, status, search, sort, genre } = opts;
+  const cacheKey = `aw:catalog:p${page}:s${status || "all"}:q${search || ""}:g${genre || ""}:o${sort || ""}`;
   const cached = getCached<any>(cacheKey);
   if (cached) return cached;
 
-  // If user is searching on page 1, use MangaDar's native AJAX search endpoint first
-  if (search && search.trim().length >= 2 && page === 1) {
-    const q = search.trim();
-    const ajaxUrl = `${MANGADAR_BASE}/wp-admin/admin-ajax.php?action=mangaverse_search&q=${encodeURIComponent(q)}`;
-    try {
-      const rawJsonText = await fetchMangaDarHtml(ajaxUrl);
-      const jsonStart = rawJsonText.indexOf("{");
-      const jsonEnd = rawJsonText.lastIndexOf("}");
-      if (jsonStart !== -1 && jsonEnd !== -1) {
-        const parsed = JSON.parse(rawJsonText.slice(jsonStart, jsonEnd + 1));
-        if (parsed?.success && Array.isArray(parsed.data)) {
-          const items = parsed.data
-            .map((entry: any) => {
-              const sourceUrl = String(entry.url || "");
-              const slug = extractMangaDarSlug(sourceUrl);
-              if (!slug) return null;
-              const { status: st, statusAr } = mapMangaDarStatus(String(entry.status || "مستمر"));
-              const poster = String(entry.cover || "");
-              const ratingNum = parseFloat(String(entry.rating || "0"));
-              const scoreText = ratingNum > 0 ? ratingNum.toFixed(1) : "8.2";
-              const averageScore = ratingNum > 0 ? Math.round(ratingNum * 10) : 82;
-              const chapters = Number(entry.chapters || entry.last_ch || 0);
-              const title = decodeHtmlEntities(String(entry.title || slug));
-              return {
-                id: `md--${slug}`,
-                slug,
-                source: "manga",
-                sourceUrl,
-                title,
-                arabicTitle: title,
-                englishTitle: title,
-                poster,
-                coverImage: { extraLarge: poster, large: poster },
-                status: st,
-                statusAr,
-                averageScore,
-                scoreText,
-                chapters,
-                genres: Array.isArray(entry.genres) ? entry.genres : [],
-                countryOfOrigin: "JP",
-                typeLabel: "مانجا",
-              };
-            })
-            .filter(Boolean);
-
-          const trMap = await translateTitlesBatchToArabic(items.map((it: any) => String(it.englishTitle || it.title || "")));
-          for (const it of items) {
-            const enT = String(it.englishTitle || it.title || "");
-            const arT = trMap.get(enT) || enT;
-            normalizeTitleFields(it, arT, enT);
-          }
-          const result = {
-            source: "manga",
-            page: 1,
-            hasNextPage: false,
-            items,
-          };
-          setCached(cacheKey, result, 5 * 60 * 1000);
-          return result;
-        }
-      }
-    } catch (err: any) {
-      logger.warn({ err: err.message }, "[manga] MangaDar AJAX search fallback to archive");
-    }
+  let indexName = "manga_views_desc";
+  const sLower = (sort || "").toLowerCase();
+  if (sLower.includes("update") || sLower.includes("latest") || sLower.includes("year")) {
+    indexName = "manga_year_desc";
+  } else if (sLower.includes("title") || sLower.includes("name")) {
+    indexName = "manga_name_asc";
+  } else if (search) {
+    indexName = "manga";
   }
 
-  // Standard archive page on https://mangadar.com/manga/
-  const basePath = page > 1 ? `${MANGADAR_BASE}/manga/page/${page}/` : `${MANGADAR_BASE}/manga/`;
-  const params = new URLSearchParams();
-  params.set("sort", "popular");
-  if (status === "RELEASING") params.set("status", "17");
-  else if (status === "FINISHED") params.set("status", "7");
-  else if (status === "HIATUS") params.set("status", "31");
-  if (search && search.trim()) {
-    params.set("s", search.trim());
+  const queryText = [search || "", genre && genre !== "الكل" ? genre : ""]
+    .filter(Boolean)
+    .join(" ")
+    .trim();
+
+  const data = await queryAwMangaAlgolia(indexName, {
+    query: queryText,
+    page: Math.max(0, page - 1),
+    hitsPerPage: 24,
+  });
+
+  const hits: any[] = Array.isArray(data?.hits) ? data.hits : [];
+  let items = hits
+    .map((hit: any) => {
+      const docId = String(hit?.objectID || hit?.id || "").trim();
+      const rawName = decodeHtmlEntities(String(hit?.name || "").trim());
+      if (!docId || !rawName) return null;
+
+      const poster = String(
+        hit?.poster?.large || hit?.poster?.medium || hit?.poster_uri || hit?.poster?.small || ""
+      ).trim();
+
+      const { status: mappedStatus, statusAr } = mapAwMangaStatus(
+        String(hit?.details?.status || hit?.details?.state || "مستمر")
+      );
+
+      const rateVal = parseFloat(String(hit?.rating?.rate ?? hit?.rate ?? "0"));
+      const scoreNum = rateVal > 0 ? Math.min(100, Math.round((rateVal > 10 ? rateVal / 10 : rateVal) * 10)) : 85;
+      const scoreText = rateVal > 0 ? (rateVal > 10 ? rateVal / 10 : rateVal).toFixed(1) : "8.5";
+
+      const chMatch = String(hit?.details?.chapters || "").match(/(\d+)/);
+      const chaptersNum = chMatch ? parseInt(chMatch[1], 10) : 0;
+
+      const tags: string[] = Array.isArray(hit?.tags)
+        ? hit.tags.map((t: any) => String(t || "").trim()).filter(Boolean)
+        : [];
+
+      const yearMatch = String(hit?.details?.year || hit?.details?.start_date || "").match(/(\d{4})/);
+      const year = yearMatch ? parseInt(yearMatch[1], 10) : null;
+
+      const storyAr = stripHtml(String(hit?.story?.ar || hit?.story_ar || ""));
+      const storyEn = stripHtml(String(hit?.story_en || hit?.story?.en || ""));
+
+      return {
+        id: `aw--${docId}`,
+        slug: docId,
+        source: "manga" as const,
+        title: rawName,
+        arabicTitle: /[؀-ۿ]/.test(rawName) ? rawName : "",
+        englishTitle: rawName,
+        description: storyAr || storyEn || "",
+        poster,
+        coverImage: { extraLarge: poster, large: poster, medium: poster },
+        bannerImage: poster,
+        status: mappedStatus,
+        statusAr,
+        averageScore: scoreNum,
+        scoreText,
+        chapters: chaptersNum > 0 ? chaptersNum : null,
+        genres: tags,
+        year,
+        countryOfOrigin: "JP",
+        typeLabel: String(hit?.type || "مانجا"),
+        malId: hit?.mal_id ? Number(hit.mal_id) : null,
+      };
+    })
+    .filter(Boolean) as any[];
+
+  if (status === "RELEASING" || status === "ONGOING") {
+    items = items.filter((item) => item.status === "RELEASING");
+  } else if (status === "FINISHED" || status === "COMPLETED") {
+    items = items.filter((item) => item.status === "FINISHED");
   }
 
-  const targetUrl = `${basePath}?${params.toString()}`;
-  const html = await fetchMangaDarHtml(targetUrl);
-  const allItems = parseMangaDarArchiveHtml(html);
-  // Keep items with chapters > 0 (or all if none have chapters)
-  const withChapters = allItems.filter((item) => (item.chapters || 0) > 0);
-  const items = withChapters.length > 0 ? withChapters : allItems;
-  const hasNextPage = html.includes(`/manga/page/${page + 1}/`) || allItems.length >= 24;
-
-  const trMap = await translateTitlesBatchToArabic(items.map((it: any) => String(it.englishTitle || it.title || "")));
+  const trMap = await translateTitlesBatchToArabic(
+    items.map((it: any) => String(it.englishTitle || it.title || ""))
+  );
   for (const it of items) {
     const enT = String(it.englishTitle || it.title || "");
-    const arT = trMap.get(enT) || enT;
+    const arT = it.arabicTitle || trMap.get(enT) || enT;
     normalizeTitleFields(it, arT, enT);
   }
+
+  const nbPages = Number(data?.nbPages || 1);
+  const hasNextPage = page < nbPages && hits.length > 0;
+
   const result = {
     source: "manga",
     page,
     hasNextPage,
     items,
+    media: items,
+    results: items,
   };
   setCached(cacheKey, result, 15 * 60 * 1000);
   return result;
 }
 
 async function fetchMangaDarDetail(slug: string) {
-  const cleanSlug = slug.replace(/^md--/, "").replace(/^\/+|\/+$/g, "");
-  const cacheKey = `md:detail:${cleanSlug}`;
+  const rawClean = String(slug || "").trim();
+  const cacheKey = `aw:detail:${rawClean}`;
   const cached = getCached<any>(cacheKey);
   if (cached) return cached;
 
-  const url = `${MANGADAR_BASE}/manga/${encodeURIComponent(cleanSlug)}/`;
-  const html = await fetchMangaDarHtml(url);
+  const mangaId = await resolveAwMangaDocId(rawClean);
+  const detailUrl = `${AW_FS_BASE}/manga_list/${encodeURIComponent(mangaId)}`;
+  const summaryChaptersUrl = `${AW_FS_BASE}/manga_list/${encodeURIComponent(mangaId)}/chapters_summery/summery`;
 
-  // Parse JSON-LD
-  let ldData: any = null;
-  const ldMatch = html.match(/<script\s+type="application\/ld\+json">\s*([\s\S]*?)\s*<\/script>/i);
-  if (ldMatch) {
-    try {
-      ldData = JSON.parse(ldMatch[1]);
-    } catch {}
+  const [detailRes, summaryRes] = await Promise.all([
+    fetch(detailUrl, {
+      headers: { Accept: "application/json", "User-Agent": UA },
+      signal: AbortSignal.timeout(10000),
+    }),
+    fetch(summaryChaptersUrl, {
+      headers: { Accept: "application/json", "User-Agent": UA },
+      signal: AbortSignal.timeout(10000),
+    }),
+  ]);
+
+  if (!detailRes.ok) {
+    throw new Error(`Firestore manga_list/${mangaId} HTTP ${detailRes.status}`);
   }
 
-  // Parse chapters JSON
-  let chaptersJson: { cover?: string; rows?: any[] } = {};
-  const chMatch = html.match(/<script[^>]*id="mdg-manga-chapters-json"[^>]*>\s*([\s\S]*?)\s*<\/script>/i);
-  if (chMatch) {
-    try {
-      chaptersJson = JSON.parse(chMatch[1]);
-    } catch {}
-  }
-
-  const h1Match = html.match(/<h1[^>]*>([\s\S]*?)<\/h1>/i);
-  const h1Title = decodeHtmlEntities(stripHtml(h1Match ? h1Match[1] : ""));
-  const rawLdName = decodeHtmlEntities(String(ldData?.name || ""))
-    .replace(/^مانجا\s+/i, "")
-    .replace(/^مانهوا\s+/i, "")
-    .replace(/\s+مترجم[ةه]?$/i, "")
-    .trim();
-  const englishTitle = h1Title || rawLdName || cleanSlug;
-  let arabicTitle = rawLdName && /[\u0600-\u06FF]/.test(rawLdName) ? rawLdName : "";
+  const f = parseAwFsDoc(await detailRes.json());
+  const rawName = decodeHtmlEntities(String(f.name || mangaId).trim());
+  const englishTitle = rawName;
+  let arabicTitle = /[؀-ۿ]/.test(rawName) ? rawName : "";
   if (!arabicTitle) {
     const trMap = await translateTitlesBatchToArabic([englishTitle]);
     arabicTitle = trMap.get(englishTitle) || englishTitle;
   }
   const title = arabicTitle || englishTitle;
 
-  // Synopsis
-  const synMatch = html.match(/x-ref="synContent"[^>]*>([\s\S]*?)<\/div>/i);
-  const synopsisFromHtml = synMatch ? stripHtml(synMatch[1]) : "";
-  const description = synopsisFromHtml || stripHtml(String(ldData?.description || "")) || "";
+  const description =
+    stripHtml(String(f.story?.ar || f.story_ar || f.story_en || f.story?.en || "")) ||
+    "لا يوجد وصف متوفر حالياً.";
 
-  // Cover
-  const ogImgMatch = html.match(/<meta\s+property="og:image"\s+content="([^"]+)"/i);
-  const poster =
-    chaptersJson.cover ||
-    String(ldData?.image || "") ||
-    (ogImgMatch ? ogImgMatch[1] : "");
+  const poster = String(
+    f.poster?.large || f.poster?.medium || f.poster_uri || f.poster?.small || ""
+  ).trim();
 
-  // Status
-  const statusMatch = html.match(/(مستمر|مكتمل|متوقف)/);
-  const { status, statusAr } = mapMangaDarStatus(statusMatch ? statusMatch[1] : "مستمر");
+  const { status, statusAr } = mapAwMangaStatus(
+    String(f.details?.status || f.details?.state || "مستمر")
+  );
 
-  // Rating
-  const ratingVal = parseFloat(String(ldData?.aggregateRating?.ratingValue || "0"));
-  const scoreText = ratingVal > 0 ? ratingVal.toFixed(1) : "8.5";
-  const averageScore = ratingVal > 0 ? Math.round(ratingVal * 10) : 85;
+  const ratingVal = parseFloat(String(f.rating?.rate ?? f.rate ?? "0"));
+  const scoreText = ratingVal > 0 ? (ratingVal > 10 ? ratingVal / 10 : ratingVal).toFixed(1) : "8.5";
+  const averageScore = ratingVal > 0 ? Math.min(100, Math.round((ratingVal > 10 ? ratingVal / 10 : ratingVal) * 10)) : 85;
 
-  // Genres
-  const genres: string[] = Array.isArray(ldData?.genre)
-    ? ldData.genre.map((g: any) => decodeHtmlEntities(String(g))).filter(Boolean)
+  const genres: string[] = Array.isArray(f.tags)
+    ? f.tags.map((g: any) => decodeHtmlEntities(String(g || "")).trim()).filter(Boolean)
     : [];
 
-  // Author
-  const author = decodeHtmlEntities(String(ldData?.author?.name || ""));
+  const yearMatch = String(f.details?.year || f.details?.start_date || "").match(/(\d{4})/);
+  const year = yearMatch ? parseInt(yearMatch[1], 10) : null;
 
-  // Chapters
-  const rawRows = Array.isArray(chaptersJson.rows) ? chaptersJson.rows : [];
-  const chapters = rawRows
-    .map((row: any, idx: number) => {
-      const chapId = String(row[0] ?? idx + 1);
-      const numStr = String(row[1] ?? idx + 1);
-      const chapUrl = String(row[2] ?? `${MANGADAR_BASE}/manga/${cleanSlug}/${numStr}/`);
-      const ts = Number(row[3] || 0);
-      const numVal = Number(row[4] ?? parseFloat(numStr));
+  // Extract chapters from chapters_summery/summery (1 request, <150ms)
+  const rawChapters: Array<{
+    doc_id: string;
+    name: string;
+    thumb_uri?: string;
+    title_translated?: string;
+  }> = [];
+
+  if (summaryRes.ok) {
+    const sumDoc = parseAwFsDoc(await summaryRes.json());
+    if (Array.isArray(sumDoc.chapters)) {
+      for (const ch of sumDoc.chapters) {
+        const docId = String(ch?.doc_id || ch?.id || "").trim();
+        if (!docId) continue;
+        rawChapters.push({
+          doc_id: docId,
+          name: String(ch?.name || docId).trim(),
+          thumb_uri: ch?.thumb_uri ? String(ch.thumb_uri) : undefined,
+          title_translated: ch?.title_translated ? String(ch.title_translated).trim() : undefined,
+        });
+      }
+    }
+  }
+
+  // Fallback to /chapters collection if summary doc was empty
+  if (rawChapters.length === 0) {
+    try {
+      const colRes = await fetch(
+        `${AW_FS_BASE}/manga_list/${encodeURIComponent(mangaId)}/chapters?pageSize=300`,
+        {
+          headers: { Accept: "application/json", "User-Agent": UA },
+          signal: AbortSignal.timeout(10000),
+        }
+      );
+      if (colRes.ok) {
+        const colData = (await colRes.json()) as any;
+        for (const doc of colData?.documents || []) {
+          const cf = parseAwFsDoc(doc);
+          const docId = String(cf.doc_id || doc.name?.split("/").pop() || "").trim();
+          if (!docId) continue;
+          rawChapters.push({
+            doc_id: docId,
+            name: String(cf.name || docId).trim(),
+            thumb_uri: cf.thumb_uri ? String(cf.thumb_uri) : undefined,
+            title_translated: cf.title_translated ? String(cf.title_translated).trim() : undefined,
+          });
+        }
+      }
+    } catch {
+      // ignore fallback error
+    }
+  }
+
+  const chapters = rawChapters
+    .map((ch, idx) => {
+      const chapId = ch.doc_id;
+      const numMatch = ch.name.match(/(\d+(?:\.\d+)?)/) || chapId.match(/(\d+(?:\.\d+)?)/);
+      const numVal = numMatch ? parseFloat(numMatch[1]) : idx + 1;
+      const numStr = numMatch ? String(parseFloat(numMatch[1])) : chapId;
+      const baseTitle = ch.name.includes("الفصل") ? ch.name : `الفصل ${numStr}`;
+      const fullTitle = ch.title_translated ? `${baseTitle} — ${ch.title_translated}` : baseTitle;
       return {
         id: chapId,
         number: Number.isFinite(numVal) ? numVal : idx + 1,
         numberStr: numStr,
-        slug: numStr,
-        title: `الفصل ${numStr}`,
-        url: chapUrl,
-        createdAt: ts > 0 ? new Date(ts * 1000).toISOString() : undefined,
+        slug: chapId,
+        title: fullTitle,
+        url: `${AW_FS_BASE}/manga_list/${encodeURIComponent(mangaId)}/chapters/${encodeURIComponent(chapId)}/summary_pages/summery`,
+        thumb: ch.thumb_uri,
       };
     })
     .sort((a, b) => a.number - b.number);
 
+  const synonyms: string[] = Array.isArray(f.Synonyms)
+    ? f.Synonyms.map((s: any) => String(s || "").trim()).filter(Boolean)
+    : [];
+
   const { characters, trailer } = await resolveMangaExtras({
-    titles: [englishTitle, cleanSlug.replace(/-/g, " ")],
+    titles: [englishTitle, ...synonyms],
     description,
     poster,
-    slug: cleanSlug,
+    slug: mangaId,
     source: "manga",
     arabicTitle,
     englishTitle,
   });
 
   const detail: any = {
-    id: `md--${cleanSlug}`,
-    slug: cleanSlug,
+    id: `aw--${mangaId}`,
+    slug: mangaId,
     source: "manga",
     title,
     arabicTitle,
     englishTitle,
     description,
     poster,
-    coverImage: { extraLarge: poster, large: poster },
+    coverImage: { extraLarge: poster, large: poster, medium: poster },
     bannerImage: poster,
     status,
     statusAr,
     averageScore,
     scoreText,
     genres,
-    author,
+    author: "",
+    year,
     countryOfOrigin: "JP",
-    typeLabel: "مانجا",
+    typeLabel: String(f.type || "مانجا"),
     trailer,
     trailerYT: trailer?.id || null,
     characters,
     chaptersCount: chapters.length,
     chapters,
+    chaptersList: chapters,
   };
   normalizeTitleFields(detail, arabicTitle, englishTitle);
 
@@ -1022,85 +1069,108 @@ async function fetchMangaDarDetail(slug: string) {
 }
 
 async function fetchMangaDarChapterPages(slug: string, chapter: string) {
-  const cleanSlug = slug.replace(/^md--/, "").replace(/^\/+|\/+$/g, "");
-  const cleanChapter = String(chapter).replace(/^\/+|\/+$/g, "");
-  const cacheKey = `md:chapter:${cleanSlug}:${cleanChapter}`;
+  const rawClean = String(slug || "").trim();
+  const cleanChapter = String(chapter || "").replace(/^\/+|\/+$/g, "").trim();
+  const cacheKey = `aw:chapter:${rawClean}:${cleanChapter}`;
   const cached = getCached<any>(cacheKey);
   if (cached) return cached;
 
-  const url = `${MANGADAR_BASE}/manga/${encodeURIComponent(cleanSlug)}/${encodeURIComponent(cleanChapter)}/`;
-  const html = await fetchMangaDarHtml(url);
+  const mangaId = await resolveAwMangaDocId(rawClean);
 
-  let rawUrls: string[] = [];
-  const pagesMatch =
-    html.match(/<script[^>]*id="mv-pages-\d+"[^>]*>\s*([\s\S]*?)\s*<\/script>/i) ||
-    html.match(/<script[^>]*id="mdg-manga-chapters-json"[^>]*>\s*([\s\S]*?)\s*<\/script>/i) ||
-    html.match(/var\s+(?:chapter_preloaded_images|manga_pages)\s*=\s*(\[[\s\S]*?\]);/i);
+  const candidates = Array.from(
+    new Set([
+      cleanChapter,
+      cleanChapter.replace(/^chapter-?/i, ""),
+      /^\d+$/.test(cleanChapter) ? cleanChapter.padStart(3, "0") : cleanChapter,
+      /^\d+$/.test(cleanChapter) ? cleanChapter.padStart(4, "0") : cleanChapter,
+      /^0+\d+$/.test(cleanChapter) ? String(parseInt(cleanChapter, 10)) : cleanChapter,
+    ])
+  ).filter(Boolean);
 
-  if (pagesMatch) {
+  let rawPages: Array<{ name: string; url: string }> = [];
+  let resolvedChapterId = cleanChapter;
+
+  // 1. Primary fast path: summary_pages/summery (1 request, <150ms)
+  for (const cand of candidates) {
     try {
-      const parsed = JSON.parse(pagesMatch[1]);
-      if (Array.isArray(parsed)) rawUrls = parsed;
-      else if (Array.isArray(parsed?.images)) rawUrls = parsed.images;
-      else if (Array.isArray(parsed?.pages)) rawUrls = parsed.pages;
-    } catch {}
+      const sumUrl = `${AW_FS_BASE}/manga_list/${encodeURIComponent(mangaId)}/chapters/${encodeURIComponent(cand)}/summary_pages/summery`;
+      const sumRes = await fetch(sumUrl, {
+        headers: { Accept: "application/json", "User-Agent": UA },
+        signal: AbortSignal.timeout(10000),
+      });
+      if (sumRes.ok) {
+        const sumDoc = parseAwFsDoc(await sumRes.json());
+        if (Array.isArray(sumDoc.pages) && sumDoc.pages.length > 0) {
+          for (const p of sumDoc.pages) {
+            const imgUrl = normalizeAwMangaImageUrl(p?.image_url || p?.url || "");
+            if (imgUrl) {
+              rawPages.push({ name: String(p?.name || ""), url: imgUrl });
+            }
+          }
+          if (rawPages.length > 0) {
+            resolvedChapterId = cand;
+            break;
+          }
+        }
+      }
+    } catch {
+      // try next candidate
+    }
   }
 
-  // Fallback: search for img tags in reading content containers
-  if (rawUrls.length === 0) {
-    const imgRegex = /<img[^>]+(?:data-src|data-lazy-src|src)=["']([^"']+)["'][^>]*class=["'][^"']*(?:wp-manga-chapter-img|page-image)[^"']*["']/gi;
-    let m: RegExpExecArray | null;
-    while ((m = imgRegex.exec(html)) !== null) {
-      if (m[1] && !m[1].includes("logo") && !m[1].includes("banner")) {
-        rawUrls.push(m[1]);
+  // 2. Fallback open collection: .../chapters/{chapter_doc_id}/pages?pageSize=300
+  if (rawPages.length === 0) {
+    for (const cand of candidates) {
+      try {
+        const colUrl = `${AW_FS_BASE}/manga_list/${encodeURIComponent(mangaId)}/chapters/${encodeURIComponent(cand)}/pages?pageSize=300`;
+        const colRes = await fetch(colUrl, {
+          headers: { Accept: "application/json", "User-Agent": UA },
+          signal: AbortSignal.timeout(10000),
+        });
+        if (colRes.ok) {
+          const colJson = (await colRes.json()) as any;
+          for (const doc of colJson?.documents || []) {
+            const pf = parseAwFsDoc(doc);
+            const imgUrl = normalizeAwMangaImageUrl(pf.image_url || pf.url || "");
+            if (imgUrl) {
+              rawPages.push({
+                name: String(pf.name || doc.name?.split("/").pop() || ""),
+                url: imgUrl,
+              });
+            }
+          }
+          if (rawPages.length > 0) {
+            resolvedChapterId = cand;
+            break;
+          }
+        }
+      } catch {
+        // try next candidate
       }
     }
   }
 
-  // Second fallback: any reading-content images
-  if (rawUrls.length === 0) {
-    const readerBlock = html.match(/<div[^>]*class=["'][^"']*(?:reading-content|entry-content)[^"']*["']>([\s\S]*?)<\/div>/i);
-    if (readerBlock) {
-      const anyImg = /<img[^>]+(?:data-src|data-lazy-src|src)=["']([^"']+)["']/gi;
-      let m: RegExpExecArray | null;
-      while ((m = anyImg.exec(readerBlock[1])) !== null) {
-        if (m[1] && m[1].startsWith("http")) rawUrls.push(m[1]);
-      }
-    }
+  if (rawPages.length === 0) {
+    throw new Error(`تعذر العثور على صفحات الفصل في Anime Witcher: ${mangaId}/${cleanChapter}`);
   }
 
-  const pages = rawUrls
-    .map((pageUrl, idx) => ({
-      index: idx + 1,
-      url: String(pageUrl).trim(),
-    }))
-    .filter((p) => p.url.length > 5);
+  rawPages.sort((a, b) =>
+    a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: "base" })
+  );
 
-  if (pages.length === 0) {
-    // Check if it's a novel/text chapter
-    const textMatch = html.match(/<div[^>]*class=["'][^"']*(?:reading-content|text-left|entry-content)[^"']*["']>([\s\S]*?)<\/div>/i);
-    if (textMatch && textMatch[1].replace(/<[^>]+>/g, "").trim().length > 50) {
-      const textResult = {
-        id: `md--${cleanSlug}`,
-        slug: cleanSlug,
-        chapter: cleanChapter,
-        source: "manga",
-        contentType: "text",
-        contentHtml: textMatch[1],
-        pagesCount: 1,
-        pages: [],
-      };
-      setCached(cacheKey, textResult, 60 * 60 * 1000);
-      return textResult;
-    }
-    throw new Error(`تعذر العثور على صفحات الفصل في MangaDar: ${cleanSlug}/${cleanChapter}`);
-  }
+  const pages = rawPages.map((p, idx) => ({
+    index: idx + 1,
+    url: p.url,
+  }));
 
   const result = {
-    id: `md--${cleanSlug}`,
-    slug: cleanSlug,
-    chapter: cleanChapter,
+    id: `aw--${mangaId}`,
+    mangaId: `aw--${mangaId}`,
+    slug: mangaId,
+    chapter: resolvedChapterId,
+    chapterId: resolvedChapterId,
     source: "manga",
+    contentType: "images",
     pagesCount: pages.length,
     pages,
   };
@@ -1108,7 +1178,6 @@ async function fetchMangaDarChapterPages(slug: string, chapter: string) {
   return result;
 }
 
-// ── Azorafly (https://azorafly.com/) Helpers ─────────────────────────────────
 async function fetchAzoraflyTsrData(url: string): Promise<any> {
   const res = await fetch(url, {
     headers: {
@@ -1496,25 +1565,66 @@ async function fetchAzoraflyChapterPages(slug: string, chapterSlug: string) {
 
 // ── Express Routes ───────────────────────────────────────────────────────────
 
+
+// ── Express Routes ───────────────────────────────────────────────────────────
+
+/**
+ * GET /api/manga/img-proxy
+ * Proxies manga/manhwa chapter images with Referer: https://mangalik.net/ or https://azorafly.com/
+ */
+router.get("/manga/img-proxy", async (req, res) => {
+  try {
+    const rawUrl = String(req.query.url || "").trim();
+    if (!rawUrl || !/^https?:\/\//i.test(rawUrl)) {
+      return res.status(400).send("Invalid image URL");
+    }
+    const normalizedUrl = normalizeAwMangaImageUrl(rawUrl);
+    const host = new URL(normalizedUrl).hostname.toLowerCase();
+    let referer = "https://mangalik.net/";
+    if (host.includes("azorafly")) referer = "https://azorafly.com/";
+    else if (host.includes("mangatek")) referer = "";
+
+    const headers: Record<string, string> = {
+      "User-Agent": UA,
+      Accept: "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
+    };
+    if (referer) headers.Referer = referer;
+
+    const upstream = await fetch(normalizedUrl, {
+      headers,
+      signal: AbortSignal.timeout(15000),
+    });
+    if (!upstream.ok) {
+      return res.status(upstream.status || 502).send("Upstream image error");
+    }
+    res.setHeader("Content-Type", upstream.headers.get("content-type") || "image/jpeg");
+    res.setHeader("Cache-Control", "public, max-age=86400");
+    return res.status(200).send(Buffer.from(await upstream.arrayBuffer()));
+  } catch (error: any) {
+    return res.status(502).send(error?.message || "Image proxy error");
+  }
+});
+
 /**
  * GET /api/manga/catalog
- * Manga comes exclusively from https://mangadar.com/manga/
- * Manhwa comes exclusively from https://azorafly.com/
+ * Manga comes from Anime Witcher (Algolia + Firestore)
+ * Manhwa comes from Azorafly (https://azorafly.com/)
  */
 router.get("/manga/catalog", async (req, res) => {
   try {
-    const rawSource = String(req.query.source || "manga").toLowerCase();
-    const source: "manga" | "manhwa" = rawSource === "manhwa" ? "manhwa" : "manga";
+    const rawSource = String(req.query.source || req.query.type || "manga").toLowerCase();
+    const source: "manga" | "manhwa" = rawSource === "manhwa" || rawSource === "azorafly" ? "manhwa" : "manga";
     const page = Math.max(1, parseInt(String(req.query.page || "1"), 10) || 1);
     const status = req.query.status ? String(req.query.status).toUpperCase() : undefined;
-    const search = req.query.search ? String(req.query.search).trim() : undefined;
+    const search = req.query.search || req.query.q ? String(req.query.search || req.query.q).trim() : undefined;
+    const sort = req.query.sort ? String(req.query.sort).trim() : undefined;
+    const genre = req.query.genre ? String(req.query.genre).trim() : undefined;
 
     if (source === "manhwa") {
       const data = await fetchAzoraflyCatalog({ page, status, search });
-      return res.json(data);
+      return res.json({ ...data, media: data.items, results: data.items });
     }
-
-    const data = await fetchMangaDarCatalog({ page, status, search });
+    const data = await fetchMangaDarCatalog({ page, status, search, sort, genre });
     return res.json(data);
   } catch (error: any) {
     logger.error({ err: error.message }, "[manga] Failed to fetch catalog");
@@ -1523,46 +1633,75 @@ router.get("/manga/catalog", async (req, res) => {
 });
 
 /**
- * GET /api/manga/detail?id=md--one-piece | az--solo-leveling
+ * GET /api/manga/detail?id=aw--QKAjU52tUNUxcK2GDSdk | md--one-piece | az--solo-leveling
+ * Also aliased as /api/manga/info
  */
-router.get("/manga/detail", async (req, res) => {
+async function handleMangaDetail(req: any, res: any) {
   try {
-    const rawId = String(req.query.id || "").trim();
+    const rawId = String(req.query.id || req.query.slug || "").trim();
     const rawSource = String(req.query.source || "").toLowerCase();
     if (!rawId) {
       return res.status(400).json({ error: "Missing id query parameter" });
     }
-
-    if (rawId.startsWith("az--") || rawSource === "manhwa") {
+    if (rawId.startsWith("az--") || rawSource === "manhwa" || rawSource === "azorafly") {
       const detail = await fetchAzoraflyDetail(rawId);
-      return res.json(detail);
+      return res.json({ ...detail, chaptersList: detail.chapters });
     }
-
     const detail = await fetchMangaDarDetail(rawId);
     return res.json(detail);
   } catch (error: any) {
     logger.error({ err: error.message, id: req.query.id }, "[manga] Failed to fetch detail");
     return res.status(500).json({ error: "Failed to fetch manga/manhwa detail", detail: error.message });
   }
+}
+
+router.get("/manga/detail", handleMangaDetail);
+router.get("/manga/info", handleMangaDetail);
+
+/**
+ * GET /api/manga/chapters?id=aw--QKAjU52tUNUxcK2GDSdk
+ */
+router.get("/manga/chapters", async (req, res) => {
+  try {
+    const rawId = String(req.query.id || req.query.slug || "").trim();
+    const rawSource = String(req.query.source || "").toLowerCase();
+    if (!rawId) {
+      return res.status(400).json({ error: "Missing id query parameter" });
+    }
+    const detail =
+      rawId.startsWith("az--") || rawSource === "manhwa"
+        ? await fetchAzoraflyDetail(rawId)
+        : await fetchMangaDarDetail(rawId);
+    return res.json({
+      id: detail.id,
+      slug: detail.slug,
+      source: detail.source,
+      title: detail.title,
+      poster: detail.poster,
+      total: (detail.chapters || []).length,
+      chapters: detail.chapters || [],
+    });
+  } catch (error: any) {
+    return res.status(500).json({ error: "Failed to fetch chapters", detail: error.message, chapters: [] });
+  }
 });
 
 /**
- * GET /api/manga/chapter?id=md--one-piece&chapter=1197
+ * GET /api/manga/chapter?id=aw--QKAjU52tUNUxcK2GDSdk&chapter=1198
+ * Also aliased as /api/manga/pages
  */
-router.get("/manga/chapter", async (req, res) => {
+async function handleMangaChapterPages(req: any, res: any) {
   try {
-    const rawId = String(req.query.id || "").trim();
-    const chapter = String(req.query.chapter || "").trim();
+    const rawId = String(req.query.id || req.query.mangaId || req.query.slug || "").trim();
+    const chapter = String(req.query.chapter || req.query.chapterId || "").trim();
     const rawSource = String(req.query.source || "").toLowerCase();
     if (!rawId || !chapter) {
       return res.status(400).json({ error: "Missing id or chapter query parameter" });
     }
-
-    if (rawId.startsWith("az--") || rawSource === "manhwa") {
+    if (rawId.startsWith("az--") || rawSource === "manhwa" || rawSource === "azorafly") {
       const data = await fetchAzoraflyChapterPages(rawId, chapter);
       return res.json(data);
     }
-
     const data = await fetchMangaDarChapterPages(rawId, chapter);
     return res.json(data);
   } catch (error: any) {
@@ -1572,6 +1711,9 @@ router.get("/manga/chapter", async (req, res) => {
     );
     return res.status(500).json({ error: "Failed to fetch chapter pages", detail: error.message });
   }
-});
+}
+
+router.get("/manga/chapter", handleMangaChapterPages);
+router.get("/manga/pages", handleMangaChapterPages);
 
 export default router;

@@ -19,6 +19,11 @@ VITE_API_URL= NODE_ENV=production pnpm --filter @workspace/anime-scraper run bui
 # ⚠️  يجب استخدام delete+start وليس restart
 # pm2 restart لا يُعيد تحميل env vars من ecosystem.config.cjs
 # بينما delete+start يُعيد قراءة الملف بالكامل مع كل متغيرات البيئة
+
+# إيقاف وحذف خدمة hound-service الثقيلة ومتصفح patchright نهائياً
+pm2 delete hound-service 2>/dev/null || true
+pkill -f "hound-service" 2>/dev/null || true
+pkill -f "patchright" 2>/dev/null || true
 pm2 delete anime-nova-api 2>/dev/null || true
 pm2 start "$APP_DIR/ecosystem.config.cjs" --only anime-nova-api
 pm2 save
