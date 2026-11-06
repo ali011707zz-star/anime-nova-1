@@ -8186,29 +8186,32 @@ function _awDoc(doc: any): Record<string, any> {
 async function awAlgoliaSearch(query: string, parentSignal?: AbortSignal): Promise<any[]> {
   if (parentSignal?.aborted) return [];
   await awRefreshAlgoliaCredentials();
-  const url = `https://${AW_ALGOLIA_APP.toLowerCase()}-dsn.algolia.net/1/indexes/all_anime/query`;
   const params = `query=${encodeURIComponent(query)}&hitsPerPage=15`;
-  try {
-    const r = await fetch(url, {
-      method: "POST",
-      headers: {
-        "X-Algolia-Application-Id": AW_ALGOLIA_APP,
-        "X-Algolia-API-Key": AW_ALGOLIA_KEY,
-        "Content-Type": "application/json",
-        "Accept": "application/json",
-      },
-      body: JSON.stringify({ params }),
-      signal: awRequestSignal(parentSignal, 6_000),
-    });
-    if (!r.ok) {
-      _awCredsRefreshedAt = 0;
-      return [];
+  for (const indexName of ["series", "all_anime"]) {
+    const url = `https://${AW_ALGOLIA_APP.toLowerCase()}-dsn.algolia.net/1/indexes/${indexName}/query`;
+    try {
+      const r = await fetch(url, {
+        method: "POST",
+        headers: {
+          "X-Algolia-Application-Id": AW_ALGOLIA_APP,
+          "X-Algolia-API-Key": AW_ALGOLIA_KEY,
+          "Content-Type": "application/json",
+          "Accept": "application/json",
+        },
+        body: JSON.stringify({ params }),
+        signal: awRequestSignal(parentSignal, 6_000),
+      });
+      if (!r.ok) {
+        _awCredsRefreshedAt = 0;
+        continue;
+      }
+      const data = await r.json() as any;
+      if (Array.isArray(data?.hits) && data.hits.length > 0) return data.hits;
+    } catch {
+      // try next index
     }
-    const data = await r.json() as any;
-    return Array.isArray(data?.hits) ? data.hits : [];
-  } catch {
-    return [];
   }
+  return [];
 }
 
 async function awFetchEpisodes(animeId: string, parentSignal?: AbortSignal): Promise<Array<{ id: string; num: number; name: string }>> {
@@ -8274,15 +8277,18 @@ async function awDirectEpId(
   if (parentSignal?.aborted) return null;
   const encAnime = encodeURIComponent(animeId);
   const paddings = [
+    String(ep).padStart(3, "0"),
     String(ep).padStart(2, "0"),
     String(ep),
-    String(ep).padStart(3, "0"),
     String(ep).padStart(4, "0"),
   ];
   const uniquePads = [...new Set(paddings)];
+  const candidates = [
+    ...uniquePads,
+    ...uniquePads.map(pad => `${animeId}-${pad}`),
+  ];
   const checks = await Promise.allSettled(
-    uniquePads.map(async pad => {
-      const candidate = `${animeId}-${pad}`;
+    candidates.map(async candidate => {
       const r = await fetch(
         `${AW_FS_BASE}/anime_list/${encAnime}/episodes/${encodeURIComponent(candidate)}/servers2/all_servers`,
         { headers: BASE_HDRS, signal: awRequestSignal(parentSignal, 3_500) },
@@ -8361,6 +8367,32 @@ function awResolvePd(pageUrl: string): string | null {
   const m = pageUrl.match(/pixeldrain\.com\/(?:u|l)\/([A-Za-z0-9_-]+)/);
   if (!m) return null;
   return `https://pixeldrain.com/api/file/${m[1]}`;
+}
+
+/** Resolve FireStream (SF) — يستخرج رابط MP4 المباشر من <script id="video-data"> بطلب HTTP خفيف */
+async function awResolveSf(pageUrl: string, parentSignal?: AbortSignal): Promise<string | null> {
+  if (!/firestream\.to\//i.test(pageUrl)) return null;
+  try {
+    const r = await fetch(pageUrl, {
+      headers: {
+        ...BASE_HDRS,
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Referer": "https://firestream.to/",
+      },
+      signal: awRequestSignal(parentSignal, 8_000),
+    });
+    if (!r.ok) return null;
+    const html = await r.text();
+    const scriptMatch = html.match(/<script[^>]*id=["']video-data["'][^>]*>([\s\S]*?)<\/script>/i);
+    if (scriptMatch?.[1]) {
+      const parsed = JSON.parse(scriptMatch[1].trim());
+      const dlUrl = parsed?.video?.downloadUrl || parsed?.downloadUrl;
+      if (typeof dlUrl === "string" && dlUrl.startsWith("http")) return dlUrl;
+    }
+    const rawMatch = html.match(/"downloadUrl"\s*:\s*"(https?:\/\/[^"]+)"/i);
+    if (rawMatch?.[1]) return rawMatch[1].replace(/\\\//g, "/");
+  } catch {}
+  return null;
 }
 
 /** Resolve KrakenFiles — HTML scraping (API blocked by CF from datacenter IPs) */
@@ -8512,7 +8544,7 @@ async function awDbSaveLinks(
     for (const srv of servers) {
       if (!srv.url) continue;
       const srvName = srv.name.toUpperCase();
-      if (!["PD","KF","MF","MF2","ST","VT"].includes(srvName)) continue;
+      if (!["PD","SF","KF","MF","MF2","ST","VT"].includes(srvName)) continue;
       const row = {
         anime_id:    animeId,
         anime_name:  animeName,
@@ -8587,6 +8619,20 @@ async function awBuildSourcesFromDb(rows: AwLinkRow[], parentSignal?: AbortSigna
         directUrl: `/api/anime/video-proxy?url=${encodeURIComponent(direct)}&ref=${encodeURIComponent("https://pixeldrain.com/")}`,
         directType: "mp4",
       });
+    } else if (srvName === "SF") {
+      try {
+        const sfDirect = await awResolveSf(row.link, parentSignal);
+        if (sfDirect) {
+          add(sfDirect, {
+            name: `AnimeWitcher · ${qLabel} · SF`,
+            url: row.link, quality: q, qualityRank: qRank + 2,
+            site: "animewitcher",
+            directUrl: `/api/anime/video-proxy?url=${encodeURIComponent(sfDirect)}&ref=${encodeURIComponent("https://firestream.to/")}`,
+            directType: "mp4",
+            headers: { Referer: "https://firestream.to/", Origin: "https://firestream.to" },
+          });
+        }
+      } catch {}
     } else if (srvName === "KF") {
       try {
         const kfDirect = await awResolveKf(row.link, parentSignal);
@@ -8682,7 +8728,7 @@ async function getAnimeWitcherSources(
     if (signal?.aborted) return [];
     const buildAwSources = async (rows: AwLinkRow[]): Promise<UnifiedSource[]> => {
       if (availabilityOnly || !requestedQuality) return awBuildSourcesFromDb(rows, signal);
-      const priority: Record<string, number> = { PD: 100, KF: 80, MF2: 60, MF: 50, ST: 30, VT: 20 };
+      const priority: Record<string, number> = { PD: 100, SF: 95, KF: 80, MF2: 60, MF: 50, ST: 30, VT: 20 };
       const candidates = rows
         .filter(row => {
           const server = String(row.server || "").toUpperCase();
@@ -8898,7 +8944,7 @@ async function getAnimeWitcherSources(
     const sources: UnifiedSource[] = [];
     const seenUrls = new Set<string>();
     const awServerPriority: Record<string, number> = {
-      PD: 100, KF: 80, MF2: 60, MF: 50, ST: 30, VT: 20,
+      PD: 100, SF: 95, KF: 80, MF2: 60, MF: 50, ST: 30, VT: 20,
     };
 
     const sortedRawServers = [...rawServers].sort(
@@ -8937,6 +8983,23 @@ async function getAnimeWitcherSources(
             },
           });
         }
+      } else if (srvName === "SF") {
+        try {
+          const sfDirect = await awResolveSf(srv.url, signal);
+          if (sfDirect) {
+            out.push({
+              key: sfDirect,
+              source: {
+                name: `AnimeWitcher · ${qLabel} · SF`,
+                url: srv.url, quality: q, qualityRank: qRank + 2,
+                site: "animewitcher",
+                directUrl: `/api/anime/video-proxy?url=${encodeURIComponent(sfDirect)}&ref=${encodeURIComponent("https://firestream.to/")}`,
+                directType: "mp4",
+                headers: { Referer: "https://firestream.to/", Origin: "https://firestream.to" },
+              },
+            });
+          }
+        } catch {}
       } else if (srvName === "KF") {
         try {
           const kfDirect = await awResolveKf(srv.url, signal);
