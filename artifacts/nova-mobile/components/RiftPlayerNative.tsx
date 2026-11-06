@@ -8,6 +8,7 @@ import {
   ActivityIndicator,
   Alert,
   BackHandler,
+  DeviceEventEmitter,
   Dimensions,
   PanResponder,
   Platform,
@@ -384,6 +385,48 @@ function TvPlayerSurface({
 }: TvPlayerSurfaceProps) {
   const progress = duration > 0 ? Math.min(1, Math.max(0, position / duration)) : 0;
   const canNext = Boolean(onNextEpisode && (episode ?? 0) < totalEps);
+  const progressFocusedRef = useRef(false);
+  const lastTvSeekAtRef = useRef(0);
+  const posRef = useRef(position);
+  posRef.current = position;
+  const durRef = useRef(duration);
+  durRef.current = duration;
+
+  useEffect(() => {
+    if (Platform.OS !== "android") return;
+    const handleKey = (evt: any) => {
+      const code = Number(evt?.keyCode ?? evt?.keycode ?? 0);
+      const name = String(evt?.eventType ?? evt?.key ?? "").toLowerCase();
+      const isRight = code === 22 || code === 90 || name === "right" || name === "fastforward";
+      const isLeft = code === 21 || code === 89 || name === "left" || name === "rewind";
+      if (isRight || isLeft) {
+        if (!controlsVisible || progressFocusedRef.current || code === 90 || code === 89) {
+          const now = Date.now();
+          if (now - lastTvSeekAtRef.current < 95) return;
+          lastTvSeekAtRef.current = now;
+          onTvFocus();
+          const dir = isRight ? 1 : -1;
+          seek(Math.max(0, Math.min(durRef.current || Infinity, posRef.current + dir * 10)));
+        } else {
+          onTvFocus();
+        }
+        return;
+      }
+      if (code === 85 || code === 126 || code === 127 || name === "playpause") {
+        togglePlayback();
+        return;
+      }
+      if (!controlsVisible && (code === 19 || code === 20 || code === 23 || code === 66 || name === "up" || name === "down" || name === "select")) {
+        onTvFocus();
+      }
+    };
+    const sub1 = DeviceEventEmitter.addListener("novaTvKeyEvent", handleKey);
+    const sub2 = DeviceEventEmitter.addListener("onHWKeyEvent", handleKey);
+    return () => {
+      sub1.remove();
+      sub2.remove();
+    };
+  }, [controlsVisible, onTvFocus, seek, togglePlayback]);
 
   const closeMenus = () => {
     setShowSources(false);
@@ -391,37 +434,7 @@ function TvPlayerSurface({
   };
 
   return (
-    <View
-      style={styles.tvRoot}
-      focusable={true}
-      hasTVPreferredFocus={true}
-      onKeyDown={(e: any) => {
-        const native = e?.nativeEvent || {};
-        const code = Number(native.keyCode ?? native.keycode);
-        const name = String(native.eventType ?? native.key ?? "").toLowerCase();
-        // D-Pad Right / Media Fast Forward (seek +10s)
-        if (code === 22 || code === 90 || name.includes("right") || name.includes("forward")) {
-          show();
-          seek(Math.min(duration, position + 10));
-          e?.preventDefault?.();
-        }
-        // D-Pad Left / Media Rewind (seek -10s)
-        else if (code === 21 || code === 89 || name.includes("left") || name.includes("rewind")) {
-          show();
-          seek(Math.max(0, position - 10));
-          e?.preventDefault?.();
-        }
-        // D-Pad Center / Enter / Play-Pause
-        else if (code === 23 || code === 66 || code === 85 || code === 126 || code === 127 || name.includes("select") || name.includes("center") || name.includes("play")) {
-          togglePlay();
-          e?.preventDefault?.();
-        }
-        // D-Pad Up / Down / Menu -> Show controls
-        else if (code === 19 || code === 20 || code === 82 || name.includes("up") || name.includes("down") || name.includes("menu")) {
-          show();
-        }
-      }}
-    >
+    <View style={styles.tvRoot}>
       <StatusBar hidden />
       <NovaMedia3View
         {...viewProps}
@@ -489,10 +502,10 @@ function TvPlayerSurface({
           <View style={styles.tvCinemaControls}>
             <View style={styles.tvProgressRow}>
               <Text style={styles.tvCinemaTime}>{formatTime(position)}</Text>
-              <View style={styles.tvProgressTrack}>
+              <Pressable accessibilityRole="adjustable" accessibilityLabel="شريط تقدم الحلقة" hasTVPreferredFocus focusable onPress={togglePlayback} onFocus={() => { progressFocusedRef.current = true; onTvFocus(); }} onBlur={() => { progressFocusedRef.current = false; }} style={({ focused }) => [styles.tvProgressTrack, tvFocusStyle(focused)]}>
                 <View style={[styles.tvProgressFill, { width: `${progress * 100}%` }]} />
                 <View style={[styles.tvProgressThumb, { left: `${progress * 100}%` }]} />
-              </View>
+              </Pressable>
               <Text style={styles.tvCinemaTime}>{formatTime(duration)}</Text>
             </View>
 
@@ -515,8 +528,8 @@ function TvPlayerSurface({
               </Pressable>
               <Pressable
                 accessibilityRole="button"
-                accessibilityLabel="إرجاع ثلاثين ثانية"
-                onPress={() => seek(position - 30)}
+                accessibilityLabel="إرجاع عشر ثوانٍ"
+                onPress={() => seek(position - 10)}
                 onFocus={onTvFocus}
                 focusable
                 style={({ focused }) => [
@@ -525,14 +538,13 @@ function TvPlayerSurface({
                 ]}
               >
                 <Ionicons name="play-back" size={32} color="#fff" />
-                <Text style={styles.tvTransportLabel}>30 ثانية</Text>
+                <Text style={styles.tvTransportLabel}>10 ثواني</Text>
               </Pressable>
               <Pressable
                 accessibilityRole="button"
                 accessibilityLabel={isPlaying ? "إيقاف مؤقت" : "تشغيل"}
                 onPress={togglePlayback}
                 onFocus={onTvFocus}
-                hasTVPreferredFocus
                 focusable
                 style={({ focused }) => [
                   styles.tvCinemaPlayButton,
@@ -544,8 +556,8 @@ function TvPlayerSurface({
               </Pressable>
               <Pressable
                 accessibilityRole="button"
-                accessibilityLabel="تقديم ثلاثين ثانية"
-                onPress={() => seek(position + 30)}
+                accessibilityLabel="تقديم عشر ثوانٍ"
+                onPress={() => seek(position + 10)}
                 onFocus={onTvFocus}
                 focusable
                 style={({ focused }) => [
@@ -554,7 +566,7 @@ function TvPlayerSurface({
                 ]}
               >
                 <Ionicons name="play-forward" size={32} color="#fff" />
-                <Text style={styles.tvTransportLabel}>30 ثانية</Text>
+                <Text style={styles.tvTransportLabel}>10 ثواني</Text>
               </Pressable>
               <Pressable
                 accessibilityRole="button"

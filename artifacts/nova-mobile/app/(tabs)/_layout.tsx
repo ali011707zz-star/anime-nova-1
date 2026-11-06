@@ -50,7 +50,7 @@ export default function TabLayout() {
         tabBarInactiveTintColor: colors.mutedForeground,
         headerShown: false,
         tabBarShowLabel: false,
-        tabBarButton: tvMode
+        tabBarButton: (tvMode || Platform.OS === "android")
           ? (props) => <TvPressable {...(props as any)} focusable={true} />
           : undefined,
         tabBarStyle: {

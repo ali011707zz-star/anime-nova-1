@@ -14473,7 +14473,7 @@ router.get("/anime/fetch-source", scraperQueueMiddleware, async (req, res) => {
   };
   const sendProgressiveBatch = async (rows: UnifiedSource[]) => {
     if (!progressive) return;
-    await skipWarmupPromise;
+    await Promise.race([skipWarmupPromise, new Promise(r => setTimeout(r, 200))]);
     if (progressiveSent > 0) {
       finishProgressiveResponse();
       return;
@@ -14603,7 +14603,7 @@ router.get("/anime/fetch-source", scraperQueueMiddleware, async (req, res) => {
           : wrapped.directUrl,
       };
     });
-    await skipWarmupPromise;
+    await Promise.race([skipWarmupPromise, new Promise(r => setTimeout(r, 200))]);
     res.json({ sources: encSources.map(applyEpisodeSkip) });
     return;
   }
@@ -14738,7 +14738,7 @@ router.get("/anime/fetch-source", scraperQueueMiddleware, async (req, res) => {
         directUrl: encDirectUrl,
       };
     });
-    await skipWarmupPromise;
+    await Promise.race([skipWarmupPromise, new Promise(r => setTimeout(r, 200))]);
     res.json({ sources: enc.map(applyEpisodeSkip), fromCache: true });
     return;
     }
@@ -15019,7 +15019,7 @@ router.get("/anime/fetch-source", scraperQueueMiddleware, async (req, res) => {
       `candidates=${sources.length}`,
     );
     if (progressive) {
-      await skipWarmupPromise;
+      await Promise.race([skipWarmupPromise, new Promise(r => setTimeout(r, 200))]);
       const directCandidates = [...sources]
         .filter(matchesRequestedQuality)
         .filter(source => !excludedCandidateKeys.has(progressiveCandidateKey(source)))

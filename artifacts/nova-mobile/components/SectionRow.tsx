@@ -115,3 +115,28 @@ const styles = StyleSheet.create({
     borderRadius: 2,
   },
 });
+
+export function SkeletonRow() {
+  const colors = useColors();
+  const { width, height } = useWindowDimensions();
+  const tvMode = isTvDevice(width, height);
+  const cardWidth = getRailCardWidth(width, tvMode ? 5 : 3);
+  const cardHeight = Math.round(cardWidth * 1.4);
+  const sidePadding = getRailSidePadding(width);
+  return (
+    <View style={{ flexDirection: "row", gap: 14, paddingHorizontal: sidePadding, paddingVertical: 8 }}>
+      {[0, 1, 2, 3, 4].map((i) => (
+        <View
+          key={i}
+          style={{
+            width: cardWidth,
+            height: cardHeight,
+            borderRadius: colors.radius - 4,
+            backgroundColor: colors.card,
+            opacity: 0.45,
+          }}
+        />
+      ))}
+    </View>
+  );
+}

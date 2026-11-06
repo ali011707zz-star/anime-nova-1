@@ -3,7 +3,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { Image, useWindowDimensions } from "react-native";
 import { useRouter } from "expo-router";
 import React from "react";
-import { StyleSheet, Text, View } from "react-native";
+import { Platform, StyleSheet, Text, View } from "react-native";
 import { useColors } from "@/hooks/useColors";
 import { isTvDevice, tvFocusStyle, TvPressable as Pressable, useTvMetrics } from "@/utils/tv";
 import { getPosterUri, getTvPosterUri } from "@/utils/media";
@@ -70,7 +70,9 @@ export const AnimeCard = React.memo(function AnimeCard({ anime, size = "sm", car
   return (
     <Pressable
       onPress={() => router.push(`/anime/${anime.id}?title=${encodeURIComponent(anime.title.romaji)}&english=${encodeURIComponent(anime.title.english || "")}`)}
-      focusable={tvMode}
+      focusable={Platform.OS === "android" ? true : tvMode}
+      delayPressIn={0}
+      unstable_pressDelay={0}
       hasTVPreferredFocus={hasTVPreferredFocus}
       hitSlop={tvMode ? 8 : 4}
       pressRetentionOffset={12}
@@ -80,9 +82,11 @@ export const AnimeCard = React.memo(function AnimeCard({ anime, size = "sm", car
         styles.card,
         { width: cardW, opacity: pressed ? 0.85 : 1 },
         tvMode && styles.tvCard,
-        tvMode && tvFocusStyle(focused),
+        (tvMode || focused) && tvFocusStyle(focused),
       ]}
     >
+      {({ focused }: { focused?: boolean }) => (
+        <>
       <View style={[styles.imageContainer, { width: cardW, height: cardH, borderRadius: colors.radius - 4 }]}>
         <Image
           source={{ uri: posterUri }}
@@ -91,6 +95,20 @@ export const AnimeCard = React.memo(function AnimeCard({ anime, size = "sm", car
           fadeDuration={tvMode ? 0 : 120}
           resizeMethod="resize"
         />
+        {focused && (
+          <View
+            pointerEvents="none"
+            style={[
+              StyleSheet.absoluteFillObject,
+              {
+                borderRadius: colors.radius - 4,
+                borderWidth: 3.5,
+                borderColor: "#00E5FF",
+                backgroundColor: "rgba(0, 229, 255, 0.15)",
+              },
+            ]}
+          />
+        )}
         {anime.averageScore && (
           <View style={styles.scoreBadge}>
             <Ionicons name="star" size={9} color="#FFD700" />
@@ -133,6 +151,8 @@ export const AnimeCard = React.memo(function AnimeCard({ anime, size = "sm", car
         <Text style={[styles.epCount, { fontSize: scaleSize(10, 12), color: colors.mutedForeground }]}>
           {anime.episodes} حلقة
         </Text>
+      )}
+        </>
       )}
     </Pressable>
   );
