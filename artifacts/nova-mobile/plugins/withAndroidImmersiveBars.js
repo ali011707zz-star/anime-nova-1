@@ -28,7 +28,12 @@ const KOTLIN_METHODS = `
       android.os.Build.MANUFACTURER,
       android.os.Build.DEVICE
     ).joinToString(" ").lowercase()
-    return Regex("\\b(aft[a-z0-9]*|shield|mibox|mi\\s*box|chromecast|bravia|android\\s*tv|google\\s*tv|smart\\s*tv|tv\\s*box|mecool|h96|x96|tx3|t95|tanix|beelink|ugoos|onn\\.?\\s*tv)\\b").containsMatchIn(info)
+    val tvKeywords = listOf(
+      "aft", "shield", "mibox", "mi box", "chromecast", "bravia",
+      "android tv", "google tv", "smart tv", "tv box", "mecool",
+      "h96", "x96", "tx3", "t95", "tanix", "beelink", "ugoos", "onn"
+    )
+    return tvKeywords.any { info.contains(it) }
   }
 
   private class NovaRnFocusEvent(
