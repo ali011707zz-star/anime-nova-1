@@ -4,7 +4,7 @@ import { secureFetch } from "./secureApi";
 
 const VISITOR_KEY = "nova-analytics-visitor-v1";
 
-export type MobileWatchAnalyticsController = {
+export type MobileWatchAnalyticsController = (() => void) & {
   markProgress: (seconds: number) => void;
   stop: () => void;
 };
@@ -66,34 +66,35 @@ export function startMobileWatchAnalytics(input: {
     heartbeat(active);
   }, 60_000);
 
-  return {
-    markProgress(seconds: number) {
-      if (stopped || !Number.isFinite(seconds) || seconds < 0) return;
-      const now = Date.now();
-      if (lastPosition !== null) {
-        const delta = seconds - lastPosition;
-        if (delta > 0 && delta <= 5) {
-          playedSeconds += delta;
-          lastProgressAt = now;
-        }
+  const markProgress = (seconds: number) => {
+    if (stopped || !Number.isFinite(seconds) || seconds < 0) return;
+    const now = Date.now();
+    if (lastPosition !== null) {
+      const delta = seconds - lastPosition;
+      if (delta > 0 && delta <= 5) {
+        playedSeconds += delta;
+        lastProgressAt = now;
       }
-      lastPosition = seconds;
+    }
+    lastPosition = seconds;
 
-      const active = lastProgressAt > 0 && now - lastProgressAt <= 90_000;
-      if (active && !watching) heartbeat(true);
-      else if (active && now - lastHeartbeatAt >= 45_000) heartbeat(true);
+    const active = lastProgressAt > 0 && now - lastProgressAt <= 90_000;
+    if (active && !watching) heartbeat(true);
+    else if (active && now - lastHeartbeatAt >= 45_000) heartbeat(true);
 
-      if (!viewSent && playedSeconds >= 10 && now - lastViewAttemptAt >= 60_000) {
-        lastViewAttemptAt = now;
-        void send("episode-view", { ...data, playedSeconds: Math.floor(playedSeconds) })
-          .then((saved) => { if (saved) viewSent = true; });
-      }
-    },
-    stop() {
-      if (stopped) return;
-      stopped = true;
-      clearInterval(timer);
-      void send("heartbeat", { ...data, watching: false });
-    },
+    if (!viewSent && playedSeconds >= 10 && now - lastViewAttemptAt >= 60_000) {
+      lastViewAttemptAt = now;
+      void send("episode-view", { ...data, playedSeconds: Math.floor(playedSeconds) })
+        .then((saved) => { if (saved) viewSent = true; });
+    }
   };
+
+  const stop = () => {
+    if (stopped) return;
+    stopped = true;
+    clearInterval(timer);
+    void send("heartbeat", { ...data, watching: false });
+  };
+
+  return Object.assign(stop, { markProgress, stop });
 }

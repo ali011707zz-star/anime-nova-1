@@ -311,7 +311,7 @@ function buildWebtoonReaderHtml(
       let retries = 0;
       function loadImg(cacheBust, useProxy) {
         const base = useProxy && url.indexOf("/api/manga/img-proxy") === -1
-          ? "${API_BASE}/manga/img-proxy?url=" + encodeURIComponent(url)
+          ? "${getBaseUrl()}/api/manga/img-proxy?url=" + encodeURIComponent(url)
           : url;
         img.src = cacheBust
           ? base + (base.indexOf("?") !== -1 ? "&" : "?") + "retry=" + cacheBust

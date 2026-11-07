@@ -567,13 +567,13 @@ export default function EpisodeListScreen() {
    */
   const fetchEpisodePage = useCallback((page: number) => {
     const malId = Number(selectedAnime?.idMal || 0);
-    if (!malId || !Number.isFinite(page) || page < 1) return;
+    const sourceUsesExternalId = selectedAnime?.idSource === "mal" || selectedAnime?.idSource === "kitsu" || routeSource === "mal" || routeSource === "kitsu";
+    const anilistId = sourceUsesExternalId ? 0 : Number(selectedAnime?.id || 0);
+    if ((!malId && !anilistId) || !Number.isFinite(page) || page < 1) return;
     if (episodePagesFetchedRef.current.has(page) || episodePageControllersRef.current.has(page)) return;
 
     const pageCtrl = new AbortController();
     episodePageControllersRef.current.set(page, pageCtrl);
-    const sourceUsesExternalId = selectedAnime?.idSource === "mal" || selectedAnime?.idSource === "kitsu" || routeSource === "mal" || routeSource === "kitsu";
-    const anilistId = sourceUsesExternalId ? 0 : Number(selectedAnime?.id || 0);
     fetch(`${getBaseUrl()}/api/anime/episode-titles?malId=${malId}&anilistId=${anilistId}&page=${page}`, {
       signal: pageCtrl.signal,
       cache: "no-store",
@@ -627,7 +627,7 @@ export default function EpisodeListScreen() {
     episodePagesFetchedRef.current.clear();
     for (const controller of episodePageControllersRef.current.values()) controller.abort();
     episodePageControllersRef.current.clear();
-    if (!selectedAnime?.idMal) return;
+    if (!selectedAnime?.idMal && !selectedAnime?.id) return;
     fetchEpisodePage(1);
     return () => {
       for (const controller of episodePageControllersRef.current.values()) controller.abort();

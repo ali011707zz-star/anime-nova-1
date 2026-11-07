@@ -993,13 +993,19 @@ export default function WatchScreen() {
     : totalEpsCount;
   const displayTitle = titleArStr || englishStr || titleStr;
 
+  const analyticsRef = useRef<ReturnType<typeof startMobileWatchAnalytics> | null>(null);
   useEffect(() => {
     if (isAwDubbed || !anime) return;
-    return startMobileWatchAnalytics({
+    const tracker = startMobileWatchAnalytics({
       animeId: anime,
       episode: epNum,
       title: displayTitle,
     });
+    analyticsRef.current = tracker;
+    return () => {
+      analyticsRef.current = null;
+      tracker.stop();
+    };
   }, [isAwDubbed, anime, epNum, displayTitle]);
 
   /* ── State ── */
@@ -2495,6 +2501,7 @@ export default function WatchScreen() {
   const onRiftProgress = useCallback((pos: number, dur: number) => {
     lastTimeRef.current = pos;
     if (dur > 0) lastDurationRef.current = dur;
+    analyticsRef.current?.markProgress?.(pos);
   }, []);
 
   const onRiftNextEpisode = useCallback(() => {

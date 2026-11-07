@@ -20634,16 +20634,123 @@ async function getAniListAiredEpisode(anilistId: number): Promise<number> {
   return episode;
 }
 
+const _aniZipMappingsCache = new Map<string, { ts: number; data: any }>();
+const ANIZIP_CACHE_TTL = 30 * 60_000;
+
+async function fetchAniZipMappings(malId: number, anilistId: number): Promise<any | null> {
+  const queries: string[] = [];
+  if (Number.isFinite(malId) && malId > 0) queries.push(`mal_id=${malId}`);
+  if (Number.isFinite(anilistId) && anilistId > 0) queries.push(`anilist_id=${anilistId}`);
+  if (!queries.length) return null;
+
+  for (const q of queries) {
+    const cached = _aniZipMappingsCache.get(q);
+    if (cached && Date.now() - cached.ts < ANIZIP_CACHE_TTL) {
+      if (cached.data?.episodes && Object.keys(cached.data.episodes).length > 0) {
+        return cached.data;
+      }
+    }
+    try {
+      const r = await fetch(`https://api.ani.zip/mappings?${q}`, {
+        headers: { Accept: "application/json", "User-Agent": "Mozilla/5.0" },
+        signal: AbortSignal.timeout(4500),
+      });
+      if (r.ok) {
+        const data = await r.json() as any;
+        if (data && typeof data === "object" && data.episodes && Object.keys(data.episodes).length > 0) {
+          _aniZipMappingsCache.set(q, { ts: Date.now(), data });
+          if (data.mappings?.mal_id) {
+            _aniZipMappingsCache.set(`mal_id=${data.mappings.mal_id}`, { ts: Date.now(), data });
+          }
+          if (data.mappings?.anilist_id) {
+            _aniZipMappingsCache.set(`anilist_id=${data.mappings.anilist_id}`, { ts: Date.now(), data });
+          }
+          return data;
+        }
+      }
+    } catch {}
+  }
+  return null;
+}
+
+function isGenericPlaceholderEpisodeTitle(raw: string): boolean {
+  const s = String(raw || "").trim();
+  if (!s) return true;
+  if (/^(?:Episode|Ep\.?|الحلقة)\s*\d+$/i.test(s)) return true;
+  if (/^(?:TBA|TBD|N\/A|Unknown)$/i.test(s)) return true;
+  return false;
+}
+
+async function populateArabicEpisodeTitles(episodes: any[]): Promise<void> {
+  const titlesToTranslate: Array<{ idx: number; title: string }> = [];
+  for (let i = 0; i < episodes.length; i++) {
+    const existingAr = String(episodes[i]?.title_ar || "").trim();
+    if (existingAr && /[\u0600-\u06FF]/.test(existingAr) && !isGenericPlaceholderEpisodeTitle(existingAr)) {
+      continue;
+    }
+    const rawTitle = String(episodes[i]?.title || episodes[i]?.title_en || episodes[i]?.title_romanji || "").trim();
+    if (!rawTitle || isGenericPlaceholderEpisodeTitle(rawTitle)) continue;
+    episodes[i].title_en = episodes[i].title_en || episodes[i].title || rawTitle;
+    episodes[i].title_romanji = episodes[i].title_romanji || rawTitle;
+    if (!/[\u0600-\u06FF]/.test(rawTitle)) {
+      const cacheKey = `ar_ep:${rawTitle}`;
+      const cachedAr = translateCache.get(cacheKey);
+      if (cachedAr) {
+        episodes[i].title_ar = cachedAr;
+      } else {
+        titlesToTranslate.push({ idx: i, title: rawTitle });
+      }
+    } else {
+      episodes[i].title_ar = rawTitle;
+    }
+  }
+
+  if (titlesToTranslate.length > 0) {
+    const CHUNK_SIZE = 25;
+    const chunks: Array<Array<{ idx: number; title: string }>> = [];
+    for (let c = 0; c < titlesToTranslate.length; c += CHUNK_SIZE) {
+      chunks.push(titlesToTranslate.slice(c, c + CHUNK_SIZE));
+    }
+    await Promise.allSettled(chunks.map(async (chunk) => {
+      try {
+        const joined = chunk.map(item => item.title.replace(/\r?\n/g, " ")).join("\n");
+        const translatedBlock = await translateGoogleSingle(joined, "auto", "ar");
+        const lines = String(translatedBlock || "").split(/\r?\n/).map(s => s.trim());
+        if (lines.length === chunk.length) {
+          for (let k = 0; k < chunk.length; k++) {
+            const tr = lines[k];
+            const { idx, title } = chunk[k];
+            if (tr && /[\u0600-\u06FF]/.test(tr)) {
+              episodes[idx].title_ar = tr;
+              translateCache.set(`ar_ep:${title}`, tr);
+            }
+          }
+          return;
+        }
+      } catch {}
+      await Promise.allSettled(chunk.map(async ({ idx, title }) => {
+        try {
+          const tr = await translateGoogleSingle(title, "auto", "ar");
+          if (tr && /[\u0600-\u06FF]/.test(tr)) {
+            episodes[idx].title_ar = tr;
+            translateCache.set(`ar_ep:${title}`, tr);
+          }
+        } catch {}
+      }));
+    }));
+  }
+}
+
 router.get("/anime/episode-titles", async (req, res) => {
   const malId = Number.parseInt(String(req.query.malId || "0"), 10);
   const anilistId = Number.parseInt(String(req.query.anilistId || "0"), 10);
   const page = Math.max(1, Number.parseInt(String(req.query.page || "1"), 10) || 1);
-  if (!Number.isFinite(malId) || malId <= 0) {
+  if ((!Number.isFinite(malId) || malId <= 0) && (!Number.isFinite(anilistId) || anilistId <= 0)) {
     res.status(400).json({ episodes: [], total: 0, page });
     return;
   }
 
-  const key = `${malId}:${page}`;
+  const key = `${malId || 0}:${anilistId || 0}:${page}`;
   const cached = _jikanEpisodeCache.get(key);
   if (cached && Date.now() - cached.ts < JIKAN_EPISODE_CACHE_TTL) {
     res.json(cached.payload);
@@ -20651,113 +20758,99 @@ router.get("/anime/episode-titles", async (req, res) => {
   }
 
   let payload: any = null;
-  for (let attempt = 0; attempt < 2 && !payload; attempt++) {
+
+  // 1) Primary fast catalog: api.ani.zip (works reliably in <200ms with built-in Arabic/English titles & episode thumbnails)
+  try {
+    const aniZip = await fetchAniZipMappings(malId, anilistId);
+    if (aniZip?.episodes && typeof aniZip.episodes === "object") {
+      const allNumericEps: Array<{ epNum: number; raw: any }> = [];
+      for (const [epKey, epVal] of Object.entries(aniZip.episodes)) {
+        if (!/^\d+$/.test(epKey)) continue;
+        const epNum = Number.parseInt(epKey, 10);
+        if (epNum > 0 && epVal && typeof epVal === "object") {
+          allNumericEps.push({ epNum, raw: epVal });
+        }
+      }
+      allNumericEps.sort((a, b) => a.epNum - b.epNum);
+
+      if (allNumericEps.length > 0) {
+        const startEp = (page - 1) * 100 + 1;
+        const endEp = page * 100;
+        const pageSlice = allNumericEps.filter(item => item.epNum >= startEp && item.epNum <= endEp);
+
+        const episodes = pageSlice.map(({ epNum, raw }) => {
+          const tObj = (raw?.title && typeof raw.title === "object") ? raw.title : {};
+          const rawAr = typeof tObj.ar === "string" && /[\u0600-\u06FF]/.test(tObj.ar) && !isGenericPlaceholderEpisodeTitle(tObj.ar)
+            ? tObj.ar.trim()
+            : "";
+          const rawEn = String(tObj.en || tObj["x-jat"] || tObj.ja || "").trim();
+          const cleanEn = isGenericPlaceholderEpisodeTitle(rawEn) ? "" : rawEn;
+          const rawRomaji = String(tObj["x-jat"] || tObj.en || tObj.ja || "").trim();
+          const cleanRomaji = isGenericPlaceholderEpisodeTitle(rawRomaji) ? "" : rawRomaji;
+          const img = typeof raw?.image === "string" && raw.image.startsWith("http") ? raw.image : undefined;
+          return {
+            mal_id: epNum,
+            episode_id: epNum,
+            episode: epNum,
+            title: cleanEn || cleanRomaji || rawAr || `Episode ${epNum}`,
+            title_ar: rawAr || "",
+            title_en: cleanEn || cleanRomaji || "",
+            title_romanji: cleanRomaji || cleanEn || "",
+            aired: raw?.airDateUtc || raw?.airDate || null,
+            filler: Boolean(raw?.filler),
+            recap: Boolean(raw?.recap),
+            images: img ? { jpg: { image_url: img } } : undefined,
+          };
+        });
+
+        await populateArabicEpisodeTitles(episodes);
+
+        const now = Date.now();
+        const airedEpisode = allNumericEps.reduce((max, { epNum, raw }) => {
+          const airedStr = raw?.airDateUtc || raw?.airDate;
+          const airedAt = airedStr ? Date.parse(String(airedStr)) : NaN;
+          return epNum > 0 && Number.isFinite(airedAt) && airedAt <= now ? Math.max(max, epNum) : max;
+        }, 0);
+        const episodeFloor = allNumericEps[allNumericEps.length - 1]?.epNum || 0;
+        const resolvedAniListId = anilistId > 0 ? anilistId : Number(aniZip?.mappings?.anilist_id || 0);
+        const [latestEpisode, anilistAiredEpisode] = await Promise.all([
+          resolvedAniListId > 0 ? getAnsLayerLatestEpisode(resolvedAniListId) : Promise.resolve(0),
+          resolvedAniListId > 0 ? getAniListAiredEpisode(resolvedAniListId) : Promise.resolve(0),
+        ]);
+        const releasedTotal = Math.max(airedEpisode, latestEpisode, anilistAiredEpisode);
+        const total = Math.max(
+          Number(aniZip?.episodeCount || 0),
+          episodeFloor,
+          latestEpisode,
+          anilistAiredEpisode,
+        );
+        payload = { episodes, total, releasedTotal, latestEpisode, anilistAiredEpisode, page };
+      }
+    }
+  } catch {}
+
+  // 2) Secondary fallback: Jikan (short timeout so it never stalls the request if Jikan is unreachable)
+  for (let attempt = 0; attempt < 2 && !payload && malId > 0; attempt++) {
     try {
       const upstream = await fetch(
         `https://api.jikan.moe/v4/anime/${malId}/episodes?page=${page}`,
-        { headers: { ...BASE_HDRS, Accept: "application/json" }, signal: AbortSignal.timeout(8000) },
+        { headers: { ...BASE_HDRS, Accept: "application/json" }, signal: AbortSignal.timeout(2500) },
       );
       if (upstream.ok) {
         const body = await upstream.json() as any;
         const episodes = (Array.isArray(body?.data) ? body.data : []).map((item: any) => ({
           ...item,
-          // Keep the client contract explicit even when Jikan omits the field
-          // for non-filler episodes or changes its nullability.
           filler: item?.filler === true,
         }));
-        // A long-running show can legitimately have a final short page, but
-        // an empty 200 response from Jikan is also seen during rate limiting.
-        // Retry once and never retain an empty page in the server cache.
         if (page > 1 && episodes.length === 0 && attempt === 0) {
-          await new Promise(resolve => setTimeout(resolve, 700));
+          await new Promise(resolve => setTimeout(resolve, 400));
           continue;
         }
-        // Enforce Arabic translations on episodes (title_ar + title for existing APKs)
-        const titlesToTranslate: Array<{ idx: number; title: string }> = [];
-        for (let i = 0; i < episodes.length; i++) {
-          const rawTitle = String(episodes[i]?.title || episodes[i]?.title_romanji || "").trim();
-          if (!rawTitle) continue;
-          episodes[i].title_en = episodes[i].title || rawTitle;
-          episodes[i].title_romanji = episodes[i].title_romanji || rawTitle;
-          if (!/[\u0600-\u06FF]/.test(rawTitle)) {
-            const cacheKey = `ar_ep:${rawTitle}`;
-            const cachedAr = translateCache.get(cacheKey);
-            if (cachedAr) {
-              episodes[i].title_ar = cachedAr;
-              episodes[i].title = cachedAr;
-            } else {
-              titlesToTranslate.push({ idx: i, title: rawTitle });
-            }
-          } else {
-            episodes[i].title_ar = rawTitle;
-            episodes[i].title = rawTitle;
-          }
-        }
-        if (titlesToTranslate.length > 0) {
-          // Translate in chunks of 25 joined by newline so all 100 episodes on a page translate in ~400ms
-          const CHUNK_SIZE = 25;
-          const chunks: Array<Array<{ idx: number; title: string }>> = [];
-          for (let c = 0; c < titlesToTranslate.length; c += CHUNK_SIZE) {
-            chunks.push(titlesToTranslate.slice(c, c + CHUNK_SIZE));
-          }
-          await Promise.allSettled(chunks.map(async (chunk) => {
-            try {
-              const joined = chunk.map(item => item.title.replace(/\r?\n/g, " ")).join("\n");
-              const translatedBlock = await translateGoogleSingle(joined, "auto", "ar");
-              const lines = String(translatedBlock || "").split(/\r?\n/).map(s => s.trim());
-              if (lines.length === chunk.length) {
-                for (let k = 0; k < chunk.length; k++) {
-                  const tr = lines[k];
-                  const { idx, title } = chunk[k];
-                  if (tr && /[\u0600-\u06FF]/.test(tr)) {
-                    episodes[idx].title_ar = tr;
-                    episodes[idx].title = tr;
-                    translateCache.set(`ar_ep:${title}`, tr);
-                  }
-                }
-                return;
-              }
-            } catch {}
-            // Fallback to individual translation if newline count mismatched
-            await Promise.allSettled(chunk.map(async ({ idx, title }) => {
-              try {
-                const tr = await translateGoogleSingle(title, "auto", "ar");
-                if (tr && /[\u0600-\u06FF]/.test(tr)) {
-                  episodes[idx].title_ar = tr;
-                  episodes[idx].title = tr;
-                  translateCache.set(`ar_ep:${title}`, tr);
-                }
-              } catch {}
-            }));
-          }));
-        }
+        await populateArabicEpisodeTitles(episodes);
 
         const paginationTotal = Number(body?.pagination?.items?.total || 0);
-        const lastVisiblePage = Number(body?.pagination?.last_visible_page || 0);
-        let catalogEpisodes = episodes;
-        if (page === 1 && lastVisiblePage > 1) {
-          try {
-            const lastPageResponse = await fetch(
-              `https://api.jikan.moe/v4/anime/${malId}/episodes?page=${lastVisiblePage}`,
-              { headers: { ...BASE_HDRS, Accept: "application/json" }, signal: AbortSignal.timeout(8000) },
-            );
-            if (lastPageResponse.ok) {
-              const lastPageBody = await lastPageResponse.json() as any;
-              const lastPageEpisodes = (Array.isArray(lastPageBody?.data) ? lastPageBody.data : []).map((item: any) => ({
-                ...item,
-                filler: item?.filler === true,
-              }));
-              catalogEpisodes = [...episodes, ...lastPageEpisodes];
-            }
-          } catch {
-            /* The first page remains useful if Jikan rate-limits the probe. */
-          }
-        }
-        // Older Jikan responses omit pagination.items.total. Infer a safe
-        // lower bound from the visible page so the client can still size the
-        // list while AniList supplies the live airing total when available.
         const pageFloor = (page - 1) * 100 + episodes.length;
-        const episodeFloor = catalogEpisodes.reduce((max: number, item: any) => {
+        const episodeFloor = episodes.reduce((max: number, item: any) => {
           const n = Number(item?.mal_id || item?.episode || 0);
           return Number.isFinite(n) && n > max ? n : max;
         }, 0);
@@ -20768,7 +20861,7 @@ router.get("/anime/episode-titles", async (req, res) => {
           ? await getAniListAiredEpisode(anilistId)
           : 0;
         const now = Date.now();
-        const airedEpisode = catalogEpisodes.reduce((max: number, item: any) => {
+        const airedEpisode = episodes.reduce((max: number, item: any) => {
           const n = Number(item?.mal_id || item?.episode || 0);
           const airedValue = typeof item?.aired === "string"
             ? item.aired
@@ -20787,12 +20880,7 @@ router.get("/anime/episode-titles", async (req, res) => {
         payload = { episodes, total, releasedTotal, latestEpisode, anilistAiredEpisode, page };
         break;
       }
-      if (upstream.status === 429 && attempt === 0) {
-        await new Promise(resolve => setTimeout(resolve, 900));
-      }
-    } catch {
-      if (attempt === 0) await new Promise(resolve => setTimeout(resolve, 250));
-    }
+    } catch {}
   }
 
   const result = payload || { episodes: [], total: 0, latestEpisode: 0, page };
@@ -20808,18 +20896,18 @@ router.get("/anime/episode-title", async (req, res) => {
   const ep = Math.max(1, Number.parseInt(String(req.query.ep || "1"), 10) || 1);
   const textParam = String(req.query.title || "").trim();
 
-  let originalTitle = textParam;
+  let originalTitle = isGenericPlaceholderEpisodeTitle(textParam) ? "" : textParam;
   let titleAr = "";
 
-  if (textParam && /[\u0600-\u06FF]/.test(textParam)) {
-    titleAr = textParam;
-  } else if (textParam) {
-    const cacheKey = `ar_ep:${textParam}`;
+  if (originalTitle && /[\u0600-\u06FF]/.test(originalTitle)) {
+    titleAr = originalTitle;
+  } else if (originalTitle) {
+    const cacheKey = `ar_ep:${originalTitle}`;
     if (translateCache.has(cacheKey)) {
       titleAr = translateCache.get(cacheKey) || "";
     } else {
       try {
-        const tr = await translateGoogleSingle(textParam, "auto", "ar");
+        const tr = await translateGoogleSingle(originalTitle, "auto", "ar");
         if (tr && /[\u0600-\u06FF]/.test(tr)) {
           titleAr = tr;
           translateCache.set(cacheKey, tr);
@@ -20830,48 +20918,81 @@ router.get("/anime/episode-title", async (req, res) => {
 
   if (!titleAr && (anilistId > 0 || malIdParam > 0)) {
     try {
-      let resolvedMalId = malIdParam;
-      if (!resolvedMalId && anilistId > 0) {
-        const query = `query ($id: Int) { Media(id: $id, type: ANIME) { idMal } }`;
-        const r = await fetch("https://graphql.anilist.co", {
-          method: "POST",
-          headers: { "Content-Type": "application/json", Accept: "application/json" },
-          body: JSON.stringify({ query, variables: { id: anilistId } }),
-          signal: AbortSignal.timeout(4000),
-        });
-        if (r.ok) {
-          const data = await r.json() as any;
-          resolvedMalId = Number(data?.data?.Media?.idMal || 0);
-        }
-      }
-      if (resolvedMalId > 0) {
-        const page = Math.floor((ep - 1) / 100) + 1;
-        const key = `${resolvedMalId}:${page}`;
-        let epList = _jikanEpisodeCache.get(key)?.payload?.episodes;
-        if (!epList) {
-          const up = await fetch(
-            `https://api.jikan.moe/v4/anime/${resolvedMalId}/episodes?page=${page}`,
-            { headers: { ...BASE_HDRS, Accept: "application/json" }, signal: AbortSignal.timeout(5000) },
-          );
-          if (up.ok) {
-            const body = await up.json() as any;
-            epList = Array.isArray(body?.data) ? body.data : [];
+      // 1) Try api.ani.zip directly by malId or anilistId (fast <200ms)
+      const aniZip = await fetchAniZipMappings(malIdParam, anilistId);
+      const epRaw = aniZip?.episodes?.[String(ep)];
+      if (epRaw && typeof epRaw === "object") {
+        const tObj = (epRaw.title && typeof epRaw.title === "object") ? epRaw.title : {};
+        const rawAr = typeof tObj.ar === "string" && /[\u0600-\u06FF]/.test(tObj.ar) && !isGenericPlaceholderEpisodeTitle(tObj.ar)
+          ? tObj.ar.trim()
+          : "";
+        const rawEn = String(tObj.en || tObj["x-jat"] || tObj.ja || "").trim();
+        const cleanEn = isGenericPlaceholderEpisodeTitle(rawEn) ? "" : rawEn;
+        if (!originalTitle && cleanEn) originalTitle = cleanEn;
+        if (rawAr) {
+          titleAr = rawAr;
+        } else if (cleanEn) {
+          const cacheKey = `ar_ep:${cleanEn}`;
+          if (translateCache.has(cacheKey)) {
+            titleAr = translateCache.get(cacheKey) || "";
+          } else {
+            const tr = await translateGoogleSingle(cleanEn, "auto", "ar");
+            if (tr && /[\u0600-\u06FF]/.test(tr)) {
+              titleAr = tr;
+              translateCache.set(cacheKey, tr);
+            }
           }
         }
-        const epObj = (epList || []).find((it: any) => Number(it?.mal_id || it?.episode) === ep);
-        if (epObj) {
-          originalTitle = epObj.title || epObj.title_romanji || originalTitle;
-          if (epObj.title_ar) {
-            titleAr = epObj.title_ar;
-          } else if (originalTitle) {
-            const cacheKey = `ar_ep:${originalTitle}`;
-            if (translateCache.has(cacheKey)) {
-              titleAr = translateCache.get(cacheKey) || "";
-            } else {
-              const tr = await translateGoogleSingle(originalTitle, "auto", "ar");
-              if (tr && /[\u0600-\u06FF]/.test(tr)) {
-                titleAr = tr;
-                translateCache.set(cacheKey, tr);
+      }
+
+      // 2) Fallback to Jikan cache / Jikan API if ani.zip didn't have the episode
+      if (!titleAr) {
+        let resolvedMalId = malIdParam || Number(aniZip?.mappings?.mal_id || 0);
+        if (!resolvedMalId && anilistId > 0) {
+          const query = `query ($id: Int) { Media(id: $id, type: ANIME) { idMal } }`;
+          const r = await fetch("https://graphql.anilist.co", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Accept: "application/json" },
+            body: JSON.stringify({ query, variables: { id: anilistId } }),
+            signal: AbortSignal.timeout(3000),
+          });
+          if (r.ok) {
+            const data = await r.json() as any;
+            resolvedMalId = Number(data?.data?.Media?.idMal || 0);
+          }
+        }
+        if (resolvedMalId > 0) {
+          const page = Math.floor((ep - 1) / 100) + 1;
+          const key = `${resolvedMalId}:${anilistId || 0}:${page}`;
+          let epList = _jikanEpisodeCache.get(key)?.payload?.episodes;
+          if (!epList) {
+            const up = await fetch(
+              `https://api.jikan.moe/v4/anime/${resolvedMalId}/episodes?page=${page}`,
+              { headers: { ...BASE_HDRS, Accept: "application/json" }, signal: AbortSignal.timeout(2500) },
+            );
+            if (up.ok) {
+              const body = await up.json() as any;
+              epList = Array.isArray(body?.data) ? body.data : [];
+            }
+          }
+          const epObj = (epList || []).find((it: any) => Number(it?.mal_id || it?.episode) === ep);
+          if (epObj) {
+            const cand = String(epObj.title || epObj.title_romanji || "").trim();
+            if (!isGenericPlaceholderEpisodeTitle(cand)) {
+              originalTitle = cand;
+            }
+            if (epObj.title_ar) {
+              titleAr = epObj.title_ar;
+            } else if (originalTitle) {
+              const cacheKey = `ar_ep:${originalTitle}`;
+              if (translateCache.has(cacheKey)) {
+                titleAr = translateCache.get(cacheKey) || "";
+              } else {
+                const tr = await translateGoogleSingle(originalTitle, "auto", "ar");
+                if (tr && /[\u0600-\u06FF]/.test(tr)) {
+                  titleAr = tr;
+                  translateCache.set(cacheKey, tr);
+                }
               }
             }
           }

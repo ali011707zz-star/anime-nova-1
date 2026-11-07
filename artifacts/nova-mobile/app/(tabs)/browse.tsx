@@ -17,7 +17,9 @@ import type { ThemePalette } from "@/constants/colors";
 function useBrowseTheme() {
   const colors = useColors();
   const { deviceScale } = useTvMetrics();
-  const g = useMemo(() => createBrowseStyles(colors, deviceScale), [colors, deviceScale]);
+  const { width, height } = useWindowDimensions();
+  const tvMode = isTvDevice(width, height);
+  const g = useMemo(() => createBrowseStyles(colors, deviceScale, tvMode), [colors, deviceScale, tvMode]);
   return { colors, g, deviceScale };
 }
 
@@ -702,7 +704,7 @@ export default function BrowseScreen() {
   );
 }
 
-const createBrowseStyles = (colors: ThemePalette, s = 1) => StyleSheet.create({
+const createBrowseStyles = (colors: ThemePalette, s = 1, tvMode = false) => StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
   header: { backgroundColor: colors.surface, borderBottomWidth: 1, borderBottomColor: colors.border, paddingHorizontal: Math.round(11 * s), paddingTop: 8, paddingBottom: 5 },
   tvHeader: { paddingHorizontal: 32, paddingTop: 16, paddingBottom: 14 },
@@ -772,7 +774,6 @@ const createBrowseStyles = (colors: ThemePalette, s = 1) => StyleSheet.create({
   genreFloatingPosterWrap: {
     width: tvMode ? Math.round(28 * s) : Math.round(38 * s),
     height: tvMode ? Math.round(28 * s) : Math.round(38 * s),
-    height: Math.round(38 * s),
     borderRadius: Math.round(11 * s),
     overflow: "hidden",
     borderWidth: 1.5,
