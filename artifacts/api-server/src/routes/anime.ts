@@ -20672,31 +20672,63 @@ router.get("/anime/episode-titles", async (req, res) => {
           await new Promise(resolve => setTimeout(resolve, 700));
           continue;
         }
-        // Enforce Arabic translations on episodes (e.g. title_ar)
+        // Enforce Arabic translations on episodes (title_ar + title for existing APKs)
         const titlesToTranslate: Array<{ idx: number; title: string }> = [];
         for (let i = 0; i < episodes.length; i++) {
-          const rawTitle = episodes[i]?.title || episodes[i]?.title_romanji || "";
-          if (rawTitle && !/[\u0600-\u06FF]/.test(rawTitle)) {
+          const rawTitle = String(episodes[i]?.title || episodes[i]?.title_romanji || "").trim();
+          if (!rawTitle) continue;
+          episodes[i].title_en = episodes[i].title || rawTitle;
+          episodes[i].title_romanji = episodes[i].title_romanji || rawTitle;
+          if (!/[\u0600-\u06FF]/.test(rawTitle)) {
             const cacheKey = `ar_ep:${rawTitle}`;
-            if (translateCache.has(cacheKey)) {
-              episodes[i].title_ar = translateCache.get(cacheKey);
+            const cachedAr = translateCache.get(cacheKey);
+            if (cachedAr) {
+              episodes[i].title_ar = cachedAr;
+              episodes[i].title = cachedAr;
             } else {
               titlesToTranslate.push({ idx: i, title: rawTitle });
             }
-          } else if (rawTitle && /[\u0600-\u06FF]/.test(rawTitle)) {
+          } else {
             episodes[i].title_ar = rawTitle;
+            episodes[i].title = rawTitle;
           }
         }
         if (titlesToTranslate.length > 0) {
-          const batch = titlesToTranslate.slice(0, 35);
-          await Promise.allSettled(batch.map(async ({ idx, title }) => {
+          // Translate in chunks of 25 joined by newline so all 100 episodes on a page translate in ~400ms
+          const CHUNK_SIZE = 25;
+          const chunks: Array<Array<{ idx: number; title: string }>> = [];
+          for (let c = 0; c < titlesToTranslate.length; c += CHUNK_SIZE) {
+            chunks.push(titlesToTranslate.slice(c, c + CHUNK_SIZE));
+          }
+          await Promise.allSettled(chunks.map(async (chunk) => {
             try {
-              const translated = await translateGoogleSingle(title, "auto", "ar");
-              if (translated && /[\u0600-\u06FF]/.test(translated)) {
-                episodes[idx].title_ar = translated;
-                translateCache.set(`ar_ep:${title}`, translated);
+              const joined = chunk.map(item => item.title.replace(/\r?\n/g, " ")).join("\n");
+              const translatedBlock = await translateGoogleSingle(joined, "auto", "ar");
+              const lines = String(translatedBlock || "").split(/\r?\n/).map(s => s.trim());
+              if (lines.length === chunk.length) {
+                for (let k = 0; k < chunk.length; k++) {
+                  const tr = lines[k];
+                  const { idx, title } = chunk[k];
+                  if (tr && /[\u0600-\u06FF]/.test(tr)) {
+                    episodes[idx].title_ar = tr;
+                    episodes[idx].title = tr;
+                    translateCache.set(`ar_ep:${title}`, tr);
+                  }
+                }
+                return;
               }
             } catch {}
+            // Fallback to individual translation if newline count mismatched
+            await Promise.allSettled(chunk.map(async ({ idx, title }) => {
+              try {
+                const tr = await translateGoogleSingle(title, "auto", "ar");
+                if (tr && /[\u0600-\u06FF]/.test(tr)) {
+                  episodes[idx].title_ar = tr;
+                  episodes[idx].title = tr;
+                  translateCache.set(`ar_ep:${title}`, tr);
+                }
+              } catch {}
+            }));
           }));
         }
 

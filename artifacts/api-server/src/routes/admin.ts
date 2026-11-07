@@ -1,7 +1,7 @@
 import { Router, type Request, type Response } from "express";
 import { setConfig, resetTransporter, initEmailService } from "../auth/emailService.js";
 import { getEmailUser } from "../auth/emailAuth.js";
-import { sbCount, sbSelect, sbPatch, sbDelete } from "../lib/supabaseClient.js";
+import { sbSelect, sbPatch, sbDelete } from "../lib/supabaseClient.js";
 import { SETUP_SQL, getTableStatus } from "../lib/supabaseMigrate.js";
 import { setDbConfig, clearDbConfigCache } from "../lib/dbConfig.js";
 import { checkAppSecret } from "../lib/security.js";
@@ -20,19 +20,7 @@ type Entitlement = { plan: "free" | "premium" | "admin"; expiresAt: string | nul
 
 async function loadEntitlements(): Promise<Map<string, Entitlement>> {
   const result = new Map<string, Entitlement>();
-  const rows: any[] = [];
-  const pageSize = 1000;
-  for (let offset = 0; ; offset += pageSize) {
-    const page = await sbSelect<any>("app_config", {}, {
-      select: "key,value",
-      limit: pageSize,
-      offset,
-      strict: true,
-      order: "key.asc",
-    });
-    rows.push(...page);
-    if (page.length < pageSize) break;
-  }
+  const rows = await sbSelect<any>("app_config", {}, { limit: 5000 });
   for (const row of rows) {
     const key = String(row.key || "");
     if (!key.startsWith(ENTITLEMENT_PREFIX)) continue;
@@ -393,153 +381,69 @@ router.delete("/admin/users/:id", async (req: Request, res: Response) => {
   }
 });
 
-async function loadPagedRows<T>(
-  table: string,
-  filters: Record<string, string | number | undefined>,
-  select: string,
-  maxRows: number,
-): Promise<{ rows: T[]; complete: boolean }> {
-  const rows: T[] = [];
-  const pageSize = 1000;
-  while (rows.length < maxRows) {
-    const limit = Math.min(pageSize, maxRows - rows.length);
-    const page = await sbSelect<T>(table, filters, {
-      select,
-      limit,
-      offset: rows.length,
-      strict: true,
-    });
-    rows.push(...page);
-    if (page.length < limit) return { rows, complete: true };
-  }
-  return { rows, complete: false };
-}
-
-function riyadhTodayStartIso(): string {
-  const parts = new Intl.DateTimeFormat("en-CA", {
-    timeZone: "Asia/Riyadh",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).formatToParts(new Date());
-  const part = (type: string) => parts.find((item) => item.type === type)?.value || "";
-  return new Date(`${part("year")}-${part("month")}-${part("day")}T00:00:00+03:00`).toISOString();
-}
-
 // حالة الخادم للمدير
 router.get("/admin/stats", async (req: Request, res: Response) => {
   if (!(await isAdmin(req)))
     return res.status(401).json({ error: "غير مصرّح" });
 
   try {
-    const viewFilter = { source: "eq.playback-v2" };
-    const activeSince = new Date(Date.now() - 5 * 60_000).toISOString();
-    const [
-      allUsersResult,
-      cacheCountResult,
-      entitlementsResult,
-      sessionsResult,
-      episodeViewsResult,
-      allViewsResult,
-      viewsTodayResult,
-      viewsWebResult,
-      viewsMobileResult,
-      recentViewsResult,
-      tableStatusResult,
-    ] = await Promise.allSettled([
-      sbCount("users", {}, { strict: true }),
-      sbCount("source_cache", {}, { strict: true }),
+    // Analytics must not disappear just because an unrelated legacy table
+    // (for example source_cache) is absent from the production REST schema.
+    // The old all-or-nothing Promise.all made the dashboard show dashes for
+    // every card when any one query failed.
+    const [allUsersResult, cacheRowsResult, entitlementsResult, sessionsResult, episodeViewsResult, tableStatusResult] = await Promise.allSettled([
+      sbSelect("users", { select: "id" }, { limit: 1000 }),
+      sbSelect("source_cache", { select: "cache_key" }, { limit: 1000 }),
       loadEntitlements(),
-      loadPagedRows<any>(
-        "analytics_sessions",
-        { last_seen_at: `gte.${activeSince}`, order: "session_key.asc" },
-        "platform,visitor_id,user_id,anime_id,last_seen_at",
-        50_000,
-      ),
-      sbCount("analytics_episode_views", viewFilter, { strict: true }),
-      sbCount("analytics_episode_views", {}, { strict: true }),
-      sbCount("analytics_episode_views", {
-        ...viewFilter,
-        viewed_at: `gte.${riyadhTodayStartIso()}`,
-      }, { strict: true }),
-      sbCount("analytics_episode_views", { ...viewFilter, platform: "eq.web" }, { strict: true }),
-      sbCount("analytics_episode_views", { ...viewFilter, platform: "eq.mobile" }, { strict: true }),
-      loadPagedRows<any>(
-        "analytics_episode_views",
-        { ...viewFilter, order: "viewed_at.desc" },
-        "anime_id,episode_number,anime_title,viewed_at",
-        10_000,
-      ),
+      sbSelect<any>("analytics_sessions", { last_seen_at: `gte.${new Date(Date.now() - 5 * 60_000).toISOString()}` }, { limit: 10000 }),
+      sbSelect<any>("analytics_episode_views", { order: "viewed_at.desc" }, { limit: 10000 }),
       getTableStatus(),
     ]);
-    const sessions = sessionsResult.status === "fulfilled" ? sessionsResult.value : null;
-    const recentViews = recentViewsResult.status === "fulfilled" ? recentViewsResult.value : null;
-    const activeRows = sessions?.rows || [];
-    const viewRows = recentViews?.rows || [];
-    const watchingSince = Date.now() - 90_000;
-    const currentlyWatching = activeRows.filter((s) => {
-      const lastSeen = Date.parse(String(s.last_seen_at || ""));
-      return Boolean(s.anime_id) && Number.isFinite(lastSeen) && lastSeen >= watchingSince;
-    });
-    const uniqueActiveUsers = (rows: any[]) => new Set(rows.map((s) =>
-      s.user_id ? `user:${s.user_id}` : `visitor:${s.platform}:${s.visitor_id}`,
-    )).size;
-    const byPlatform = (platform: string) => activeRows.filter((s) => s.platform === platform);
+    const valueOr = <T,>(result: PromiseSettledResult<T>, fallback: T): T =>
+      result.status === "fulfilled" ? result.value : fallback;
+    const allUsers = valueOr(allUsersResult, [] as any[]);
+    const cacheRows = valueOr(cacheRowsResult, [] as any[]);
+    const entitlements = valueOr(entitlementsResult, new Map<string, Entitlement>());
+    const sessions = valueOr(sessionsResult, [] as any[]);
+    const episodeViews = valueOr(episodeViewsResult, [] as any[]);
+    const tableStatus = valueOr(tableStatusResult, {});
+
+    const byPlatform = (platform: string) => sessions.filter((s) => s.platform === platform);
+    const viewsByPlatform = (platform: string) => episodeViews.filter((v) => v.platform === platform);
+    const uniqueActiveUsers = (rows: any[]) => new Set(
+      rows.map((s) => s.user_id ? `user:${s.user_id}` : `visitor:${s.platform}:${s.visitor_id}`),
+    ).size;
+    const dayAgo = Date.now() - 24 * 60 * 60_000;
+    const viewsToday = episodeViews.filter((v) => new Date(v.viewed_at).getTime() >= dayAgo);
     const topMap = new Map<string, { title: string; episode: number; views: number }>();
-    for (const row of viewRows) {
+    for (const row of episodeViews) {
       const key = `${row.anime_id}:${row.episode_number}`;
       const current = topMap.get(key) || { title: row.anime_title || row.anime_id, episode: Number(row.episode_number), views: 0 };
       current.views++;
       topMap.set(key, current);
     }
-    const tableStatus = tableStatusResult.status === "fulfilled" ? tableStatusResult.value : {};
-    const metricResults = [
-      episodeViewsResult,
-      allViewsResult,
-      viewsTodayResult,
-      viewsWebResult,
-      viewsMobileResult,
-    ];
-    const metricsReady = metricResults.every((result) => result.status === "fulfilled")
-      && sessionsResult.status === "fulfilled"
-      && recentViewsResult.status === "fulfilled";
-    const verifiedViews = episodeViewsResult.status === "fulfilled" ? episodeViewsResult.value : null;
-    const allViews = allViewsResult.status === "fulfilled" ? allViewsResult.value : null;
 
-    const totalUsers = allUsersResult.status === "fulfilled" ? allUsersResult.value : null;
-    const entitlementValues = entitlementsResult.status === "fulfilled"
-      ? [...entitlementsResult.value.values()]
-      : null;
-    const premiumUsers = entitlementValues?.filter((v) => v.plan === "premium").length ?? null;
-    const adminUsers = entitlementValues?.filter((v) => v.plan === "admin").length ?? null;
+    const premiumCount = [...entitlements.values()].filter((v) => v.plan === "premium").length;
     return res.json({
-      totalUsers,
-      premiumUsers,
-      freeUsers: totalUsers !== null && premiumUsers !== null && adminUsers !== null
-        ? Math.max(0, totalUsers - premiumUsers - adminUsers)
-        : null,
-      cacheEntries: cacheCountResult.status === "fulfilled" ? cacheCountResult.value : null,
+      totalUsers:   allUsers.length,
+      premiumUsers: premiumCount,
+      freeUsers:    Math.max(0, allUsers.length - premiumCount),
+      cacheEntries: cacheRows.length,
       analytics: {
-        activeUsers: sessions?.complete ? uniqueActiveUsers(activeRows) : null,
-        activeWeb: sessions?.complete ? uniqueActiveUsers(byPlatform("web")) : null,
-        activeMobile: sessions?.complete ? uniqueActiveUsers(byPlatform("mobile")) : null,
-        watchingNow: sessions?.complete ? uniqueActiveUsers(currentlyWatching) : null,
-        watchingWeb: sessions?.complete
-          ? uniqueActiveUsers(currentlyWatching.filter((s) => s.platform === "web"))
-          : null,
-        watchingMobile: sessions?.complete
-          ? uniqueActiveUsers(currentlyWatching.filter((s) => s.platform === "mobile"))
-          : null,
-        episodeViews: verifiedViews,
-        episodeViewsToday: viewsTodayResult.status === "fulfilled" ? viewsTodayResult.value : null,
-        episodeViewsWeb: viewsWebResult.status === "fulfilled" ? viewsWebResult.value : null,
-        episodeViewsMobile: viewsMobileResult.status === "fulfilled" ? viewsMobileResult.value : null,
-        legacyEpisodeViews: allViews !== null && verifiedViews !== null ? Math.max(0, allViews - verifiedViews) : null,
+        activeUsers: uniqueActiveUsers(sessions),
+        activeWeb: uniqueActiveUsers(byPlatform("web")),
+        activeMobile: uniqueActiveUsers(byPlatform("mobile")),
+        watchingNow: sessions.filter((s) => s.anime_id && s.episode_number !== null).length,
+        watchingWeb: byPlatform("web").filter((s) => s.anime_id).length,
+        watchingMobile: byPlatform("mobile").filter((s) => s.anime_id).length,
+        episodeViews: episodeViews.length,
+        episodeViewsToday: viewsToday.length,
+        episodeViewsWeb: viewsByPlatform("web").length,
+        episodeViewsMobile: viewsByPlatform("mobile").length,
         topEpisodes: [...topMap.values()].sort((a, b) => b.views - a.views).slice(0, 5),
-        topEpisodesSampled: Boolean(recentViews && (!recentViews.complete || (verifiedViews !== null && verifiedViews > viewRows.length))),
-        topEpisodesSampleSize: viewRows.length,
-        lastEventAt: viewRows[0]?.viewed_at || null,
-        ready: tableStatus.analytics_sessions === true && tableStatus.analytics_episode_views === true && metricsReady,
+        lastEventAt: episodeViews[0]?.viewed_at || null,
+        sampledLimit: 10000,
+        ready: tableStatus.analytics_sessions === true && tableStatus.analytics_episode_views === true,
       },
     });
   } catch (err) {
