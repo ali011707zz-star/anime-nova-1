@@ -22,7 +22,12 @@ const KOTLIN_METHODS = `
       return true
     }
 
-    val info = "${android.os.Build.MODEL ?: ""} ${android.os.Build.BRAND ?: ""} ${android.os.Build.MANUFACTURER ?: ""} ${android.os.Build.DEVICE ?: ""}".lowercase()
+    val info = listOfNotNull(
+      android.os.Build.MODEL,
+      android.os.Build.BRAND,
+      android.os.Build.MANUFACTURER,
+      android.os.Build.DEVICE
+    ).joinToString(" ").lowercase()
     return Regex("\\b(aft[a-z0-9]*|shield|mibox|mi\\s*box|chromecast|bravia|android\\s*tv|google\\s*tv|smart\\s*tv|tv\\s*box|mecool|h96|x96|tx3|t95|tanix|beelink|ugoos|onn\\.?\\s*tv)\\b").containsMatchIn(info)
   }
 
