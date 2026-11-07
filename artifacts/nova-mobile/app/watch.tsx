@@ -1142,17 +1142,45 @@ export default function WatchScreen() {
     };
   }, [isAwDubbed, awSeasons]);
 
-  /* ── ترجمة عنوان الحلقة من الإنجليزية للعربية ── */
+  /* ── جلب وترجمة عنوان الحلقة للعربية (من المعامل أو من الخادم مباشرةً) ── */
   useEffect(() => {
-    if (isAwDubbed || !etitle) return;
-    const raw = safeDecodeURIComponent(etitle);
-    if (!raw || /[\u0600-\u06FF]/.test(raw)) { setArEpTitle(raw); return; }
+    if (isAwDubbed) {
+      setArEpTitle(undefined);
+      return;
+    }
+    const raw = etitle ? safeDecodeURIComponent(etitle).trim() : "";
+    if (raw && /[\u0600-\u06FF]/.test(raw)) {
+      setArEpTitle(raw);
+      return;
+    }
+    setArEpTitle(undefined);
+    const ctrl = new AbortController();
     const base = getBaseUrl();
-    secureFetch(`${base}/api/anime/translate?text=${encodeURIComponent(raw)}&from=en&to=ar&kind=title`)
-      .then(r => r.ok ? r.json() : null)
-      .then((d: any) => { if (!isMountedRef.current) return; if (d?.translated) setArEpTitle(d.translated); })
+    const qs = new URLSearchParams({ ep: String(epNum) });
+    if (sourceAnimeId) qs.set("anilistId", String(sourceAnimeId));
+    if (raw && !/^(?:Episode|Ep\.?)\s*\d+$/i.test(raw)) qs.set("title", raw);
+
+    fetch(`${base}/api/anime/episode-title?${qs.toString()}`, { signal: ctrl.signal })
+      .then(r => (r.ok ? r.json() : null))
+      .then((d: any) => {
+        if (ctrl.signal.aborted || !isMountedRef.current) return;
+        const ar = String(d?.titleAr || "").trim();
+        const orig = String(d?.title || raw || "").trim();
+        if (ar) {
+          setArEpTitle(ar);
+        } else if (orig && !/^(?:Episode|Ep\.?)\s*\d+$/i.test(orig)) {
+          return secureFetch(`${base}/api/anime/translate?text=${encodeURIComponent(orig)}&from=auto&to=ar&kind=title`, { signal: ctrl.signal })
+            .then(r2 => (r2.ok ? r2.json() : null))
+            .then((d2: any) => {
+              if (!ctrl.signal.aborted && isMountedRef.current && d2?.translated) {
+                setArEpTitle(String(d2.translated).trim());
+              }
+            });
+        }
+      })
       .catch(() => {});
-  }, [etitle]); // eslint-disable-line
+    return () => ctrl.abort();
+  }, [isAwDubbed, sourceAnimeId, epNum, etitle]); // eslint-disable-line
 
   /* ── Kawaii Arabic subtitle for every raw-audio source ──
      Anivexa streams are deliberately returned without provider subtitles so
@@ -2565,7 +2593,7 @@ export default function WatchScreen() {
           {displayTitle ? (
             <Text style={{ fontSize: 16, fontFamily: "Cairo_700Bold", color: colors.textPrimary, textAlign: "center", paddingHorizontal: 12 }} numberOfLines={2}>{displayTitle}</Text>
           ) : null}
-          <View style={d.ldEpBadge}><Ionicons name="tv" size={10} color={colors.accent} /><Text style={d.ldEpText}>الحلقة {epNum}</Text></View>
+          <View style={d.ldEpBadge}><Ionicons name="tv" size={10} color={colors.accent} /><Text style={d.ldEpText}>الحلقة {epNum}{arEpTitle ? ` · ${arEpTitle}` : ""}</Text></View>
           <View style={{ alignItems: "center", gap: 10 }}>
             <SpinRing />
             <Text style={{ fontSize: 13, fontFamily: "Cairo_400Regular", color: colors.textSecondary, textAlign: "center" }}>⏳ جاري تجهيز الحلقة، قد يستغرق بضع ثوانٍ.</Text>
@@ -2689,7 +2717,9 @@ export default function WatchScreen() {
         </Pressable>
         <View style={d.headerCenter}>
           <Text style={[d.headerTitle, tvMode && d.tvHeaderTitle]} numberOfLines={1}>{displayTitle}</Text>
-          <Text style={[d.headerSub, tvMode && d.tvHeaderSub]}>الحلقة {epNum}</Text>
+          <Text style={[d.headerSub, tvMode && d.tvHeaderSub]} numberOfLines={1}>
+            الحلقة {epNum}{arEpTitle && arEpTitle !== `الحلقة ${epNum}` ? ` · ${arEpTitle}` : ""}
+          </Text>
         </View>
         <View style={d.headerLeft}>
           <Pressable disabled={!canGoPrevEpisode} onPress={onRiftPrevEpisode} focusable={tvMode}
@@ -2731,6 +2761,11 @@ export default function WatchScreen() {
           ) : null}
           <View style={d.infoMeta}>
             <Text style={[d.infoTitle, tvMode && d.tvInfoTitle]} numberOfLines={2}>{displayTitle}</Text>
+            {arEpTitle && arEpTitle !== `الحلقة ${epNum}` ? (
+              <Text style={{ fontSize: tvMode ? 15 : 12, fontFamily: "Cairo_600SemiBold", color: colors.textSecondary, textAlign: "right", writingDirection: "rtl", marginTop: 2 }} numberOfLines={1}>
+                {arEpTitle}
+              </Text>
+            ) : null}
             <View style={d.infoEpRow}>
               <View style={[d.infoEpBadge, tvMode && d.tvInfoEpBadge]}>
                 <Ionicons name="play-circle" size={tvMode ? 22 : 10} color={colors.accent} />

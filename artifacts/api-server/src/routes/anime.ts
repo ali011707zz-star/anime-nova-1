@@ -20672,6 +20672,34 @@ router.get("/anime/episode-titles", async (req, res) => {
           await new Promise(resolve => setTimeout(resolve, 700));
           continue;
         }
+        // Enforce Arabic translations on episodes (e.g. title_ar)
+        const titlesToTranslate: Array<{ idx: number; title: string }> = [];
+        for (let i = 0; i < episodes.length; i++) {
+          const rawTitle = episodes[i]?.title || episodes[i]?.title_romanji || "";
+          if (rawTitle && !/[\u0600-\u06FF]/.test(rawTitle)) {
+            const cacheKey = `ar_ep:${rawTitle}`;
+            if (translateCache.has(cacheKey)) {
+              episodes[i].title_ar = translateCache.get(cacheKey);
+            } else {
+              titlesToTranslate.push({ idx: i, title: rawTitle });
+            }
+          } else if (rawTitle && /[\u0600-\u06FF]/.test(rawTitle)) {
+            episodes[i].title_ar = rawTitle;
+          }
+        }
+        if (titlesToTranslate.length > 0) {
+          const batch = titlesToTranslate.slice(0, 35);
+          await Promise.allSettled(batch.map(async ({ idx, title }) => {
+            try {
+              const translated = await translateGoogleSingle(title, "auto", "ar");
+              if (translated && /[\u0600-\u06FF]/.test(translated)) {
+                episodes[idx].title_ar = translated;
+                translateCache.set(`ar_ep:${title}`, translated);
+              }
+            } catch {}
+          }));
+        }
+
         const paginationTotal = Number(body?.pagination?.items?.total || 0);
         const lastVisiblePage = Number(body?.pagination?.last_visible_page || 0);
         let catalogEpisodes = episodes;
@@ -20707,16 +20735,9 @@ router.get("/anime/episode-titles", async (req, res) => {
         const anilistAiredEpisode = anilistId > 0
           ? await getAniListAiredEpisode(anilistId)
           : 0;
-        // Jikan's pagination total is the planned series length and includes
-        // unaired episodes. For a currently airing show, expose only episodes
-        // whose air date has passed; otherwise the episode list can show 12
-        // items while only 7 have actually aired.
         const now = Date.now();
         const airedEpisode = catalogEpisodes.reduce((max: number, item: any) => {
           const n = Number(item?.mal_id || item?.episode || 0);
-          /* Jikan v4 commonly returns `aired` as an ISO string, while older
-             payloads used `{ from: ... }`. Support both shapes so released
-             totals do not incorrectly become zero. */
           const airedValue = typeof item?.aired === "string"
             ? item.aired
             : item?.aired?.from;
@@ -20747,6 +20768,87 @@ router.get("/anime/episode-titles", async (req, res) => {
     _jikanEpisodeCache.set(key, { ts: Date.now(), payload });
   }
   res.json(result);
+});
+
+router.get("/anime/episode-title", async (req, res) => {
+  const anilistId = Number.parseInt(String(req.query.anilistId || "0"), 10);
+  const malIdParam = Number.parseInt(String(req.query.malId || "0"), 10);
+  const ep = Math.max(1, Number.parseInt(String(req.query.ep || "1"), 10) || 1);
+  const textParam = String(req.query.title || "").trim();
+
+  let originalTitle = textParam;
+  let titleAr = "";
+
+  if (textParam && /[\u0600-\u06FF]/.test(textParam)) {
+    titleAr = textParam;
+  } else if (textParam) {
+    const cacheKey = `ar_ep:${textParam}`;
+    if (translateCache.has(cacheKey)) {
+      titleAr = translateCache.get(cacheKey) || "";
+    } else {
+      try {
+        const tr = await translateGoogleSingle(textParam, "auto", "ar");
+        if (tr && /[\u0600-\u06FF]/.test(tr)) {
+          titleAr = tr;
+          translateCache.set(cacheKey, tr);
+        }
+      } catch {}
+    }
+  }
+
+  if (!titleAr && (anilistId > 0 || malIdParam > 0)) {
+    try {
+      let resolvedMalId = malIdParam;
+      if (!resolvedMalId && anilistId > 0) {
+        const query = `query ($id: Int) { Media(id: $id, type: ANIME) { idMal } }`;
+        const r = await fetch("https://graphql.anilist.co", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Accept: "application/json" },
+          body: JSON.stringify({ query, variables: { id: anilistId } }),
+          signal: AbortSignal.timeout(4000),
+        });
+        if (r.ok) {
+          const data = await r.json() as any;
+          resolvedMalId = Number(data?.data?.Media?.idMal || 0);
+        }
+      }
+      if (resolvedMalId > 0) {
+        const page = Math.floor((ep - 1) / 100) + 1;
+        const key = `${resolvedMalId}:${page}`;
+        let epList = _jikanEpisodeCache.get(key)?.payload?.episodes;
+        if (!epList) {
+          const up = await fetch(
+            `https://api.jikan.moe/v4/anime/${resolvedMalId}/episodes?page=${page}`,
+            { headers: { ...BASE_HDRS, Accept: "application/json" }, signal: AbortSignal.timeout(5000) },
+          );
+          if (up.ok) {
+            const body = await up.json() as any;
+            epList = Array.isArray(body?.data) ? body.data : [];
+          }
+        }
+        const epObj = (epList || []).find((it: any) => Number(it?.mal_id || it?.episode) === ep);
+        if (epObj) {
+          originalTitle = epObj.title || epObj.title_romanji || originalTitle;
+          if (epObj.title_ar) {
+            titleAr = epObj.title_ar;
+          } else if (originalTitle) {
+            const cacheKey = `ar_ep:${originalTitle}`;
+            if (translateCache.has(cacheKey)) {
+              titleAr = translateCache.get(cacheKey) || "";
+            } else {
+              const tr = await translateGoogleSingle(originalTitle, "auto", "ar");
+              if (tr && /[\u0600-\u06FF]/.test(tr)) {
+                titleAr = tr;
+                translateCache.set(cacheKey, tr);
+              }
+            }
+          }
+        }
+      }
+    } catch {}
+  }
+
+  res.json({ episode: ep, title: originalTitle, titleAr: titleAr || "" });
 });
 
 export default router;

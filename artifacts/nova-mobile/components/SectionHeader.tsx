@@ -9,6 +9,7 @@ type Props = {
   onSeeAll?: () => void;
   focusable?: boolean;
   seeAllLabel?: string;
+  onFocus?: () => void;
 };
 
 const ROW_RTL = I18nManager.isRTL ? "row" : "row-reverse";
@@ -18,6 +19,7 @@ export function SectionHeader({
   onSeeAll,
   focusable = false,
   seeAllLabel = "عرض الكل",
+  onFocus,
 }: Props) {
   const colors = useColors();
   const { size: scaleSize } = useTvMetrics();
@@ -31,6 +33,7 @@ export function SectionHeader({
           accessibilityLabel={seeAllLabel}
           hitSlop={8}
           onPress={onSeeAll}
+          onFocus={onFocus}
           focusable={focusable}
           style={({ focused, pressed }) => [
             styles.seeAll,

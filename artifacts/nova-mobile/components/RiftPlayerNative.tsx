@@ -8,7 +8,6 @@ import {
   ActivityIndicator,
   Alert,
   BackHandler,
-  DeviceEventEmitter,
   Dimensions,
   PanResponder,
   Platform,
@@ -385,48 +384,6 @@ function TvPlayerSurface({
 }: TvPlayerSurfaceProps) {
   const progress = duration > 0 ? Math.min(1, Math.max(0, position / duration)) : 0;
   const canNext = Boolean(onNextEpisode && (episode ?? 0) < totalEps);
-  const progressFocusedRef = useRef(false);
-  const lastTvSeekAtRef = useRef(0);
-  const posRef = useRef(position);
-  posRef.current = position;
-  const durRef = useRef(duration);
-  durRef.current = duration;
-
-  useEffect(() => {
-    if (Platform.OS !== "android") return;
-    const handleKey = (evt: any) => {
-      const code = Number(evt?.keyCode ?? evt?.keycode ?? 0);
-      const name = String(evt?.eventType ?? evt?.key ?? "").toLowerCase();
-      const isRight = code === 22 || code === 90 || name === "right" || name === "fastforward";
-      const isLeft = code === 21 || code === 89 || name === "left" || name === "rewind";
-      if (isRight || isLeft) {
-        if (!controlsVisible || progressFocusedRef.current || code === 90 || code === 89) {
-          const now = Date.now();
-          if (now - lastTvSeekAtRef.current < 95) return;
-          lastTvSeekAtRef.current = now;
-          onTvFocus();
-          const dir = isRight ? 1 : -1;
-          seek(Math.max(0, Math.min(durRef.current || Infinity, posRef.current + dir * 10)));
-        } else {
-          onTvFocus();
-        }
-        return;
-      }
-      if (code === 85 || code === 126 || code === 127 || name === "playpause") {
-        togglePlayback();
-        return;
-      }
-      if (!controlsVisible && (code === 19 || code === 20 || code === 23 || code === 66 || name === "up" || name === "down" || name === "select")) {
-        onTvFocus();
-      }
-    };
-    const sub1 = DeviceEventEmitter.addListener("novaTvKeyEvent", handleKey);
-    const sub2 = DeviceEventEmitter.addListener("onHWKeyEvent", handleKey);
-    return () => {
-      sub1.remove();
-      sub2.remove();
-    };
-  }, [controlsVisible, onTvFocus, seek, togglePlayback]);
 
   const closeMenus = () => {
     setShowSources(false);
@@ -480,7 +437,9 @@ function TvPlayerSurface({
                 {title || "NOVA"}
               </Text>
               <Text numberOfLines={1} style={styles.tvCinemaMeta}>
-                {episode != null ? `الحلقة ${episode}` : episodeTitle || ""}
+                {episode != null
+                  ? (episodeTitle && episodeTitle !== `الحلقة ${episode}` ? `الحلقة ${episode} · ${episodeTitle}` : `الحلقة ${episode}`)
+                  : (episodeTitle || "")}
               </Text>
             </View>
             <Pressable
@@ -502,10 +461,10 @@ function TvPlayerSurface({
           <View style={styles.tvCinemaControls}>
             <View style={styles.tvProgressRow}>
               <Text style={styles.tvCinemaTime}>{formatTime(position)}</Text>
-              <Pressable accessibilityRole="adjustable" accessibilityLabel="شريط تقدم الحلقة" hasTVPreferredFocus focusable onPress={togglePlayback} onFocus={() => { progressFocusedRef.current = true; onTvFocus(); }} onBlur={() => { progressFocusedRef.current = false; }} style={({ focused }) => [styles.tvProgressTrack, tvFocusStyle(focused)]}>
+              <View style={styles.tvProgressTrack}>
                 <View style={[styles.tvProgressFill, { width: `${progress * 100}%` }]} />
                 <View style={[styles.tvProgressThumb, { left: `${progress * 100}%` }]} />
-              </Pressable>
+              </View>
               <Text style={styles.tvCinemaTime}>{formatTime(duration)}</Text>
             </View>
 
@@ -528,8 +487,8 @@ function TvPlayerSurface({
               </Pressable>
               <Pressable
                 accessibilityRole="button"
-                accessibilityLabel="إرجاع عشر ثوانٍ"
-                onPress={() => seek(position - 10)}
+                accessibilityLabel="إرجاع ثلاثين ثانية"
+                onPress={() => seek(position - 30)}
                 onFocus={onTvFocus}
                 focusable
                 style={({ focused }) => [
@@ -538,13 +497,14 @@ function TvPlayerSurface({
                 ]}
               >
                 <Ionicons name="play-back" size={32} color="#fff" />
-                <Text style={styles.tvTransportLabel}>10 ثواني</Text>
+                <Text style={styles.tvTransportLabel}>30 ثانية</Text>
               </Pressable>
               <Pressable
                 accessibilityRole="button"
                 accessibilityLabel={isPlaying ? "إيقاف مؤقت" : "تشغيل"}
                 onPress={togglePlayback}
                 onFocus={onTvFocus}
+                hasTVPreferredFocus
                 focusable
                 style={({ focused }) => [
                   styles.tvCinemaPlayButton,
@@ -556,8 +516,8 @@ function TvPlayerSurface({
               </Pressable>
               <Pressable
                 accessibilityRole="button"
-                accessibilityLabel="تقديم عشر ثوانٍ"
-                onPress={() => seek(position + 10)}
+                accessibilityLabel="تقديم ثلاثين ثانية"
+                onPress={() => seek(position + 30)}
                 onFocus={onTvFocus}
                 focusable
                 style={({ focused }) => [
@@ -566,7 +526,7 @@ function TvPlayerSurface({
                 ]}
               >
                 <Ionicons name="play-forward" size={32} color="#fff" />
-                <Text style={styles.tvTransportLabel}>10 ثواني</Text>
+                <Text style={styles.tvTransportLabel}>30 ثانية</Text>
               </Pressable>
               <Pressable
                 accessibilityRole="button"
@@ -951,7 +911,7 @@ export function RiftPlayer({
       if (event.state === "readyToPlay") {
         setBuffering(false);
         setFailed(false);
-        if (!restoredInitialPosition.current && initialPosition > 1) {
+        if (!restoredInitialPosition.current && initialPosition > 5) {
           restoredInitialPosition.current = true;
           player.currentTime = initialPosition;
         }
@@ -1092,7 +1052,9 @@ export function RiftPlayer({
         sourceHeaders: source.headers,
         subtitleUrl: source.subtitleUrl,
         title,
-        episodeLabel: episode != null ? `الحلقة ${episode}` : episodeTitle,
+        episodeLabel: episode != null
+          ? (episodeTitle && episodeTitle !== `الحلقة ${episode}` ? `الحلقة ${episode} · ${episodeTitle}` : `الحلقة ${episode}`)
+          : episodeTitle,
         initialPositionSeconds: position,
         introStartSeconds: skipIntro?.start,
         introEndSeconds: skipIntro?.end,
@@ -1244,7 +1206,9 @@ export function RiftPlayer({
             <View style={styles.titleBlock}>
               <Text numberOfLines={1} style={[styles.title, tvMode && styles.tvTitle]}>{title || "NOVA"}</Text>
               <Text numberOfLines={1} style={[styles.meta, tvMode && styles.tvMeta]}>
-                {episode != null ? `الحلقة ${episode}` : episodeTitle || ""}
+                {episode != null
+                  ? (episodeTitle && episodeTitle !== `الحلقة ${episode}` ? `الحلقة ${episode} · ${episodeTitle}` : `الحلقة ${episode}`)
+                  : (episodeTitle || "")}
               </Text>
             </View>
             {!tvMode && <Pressable onPress={togglePortrait} hitSlop={10} style={styles.iconButton}>

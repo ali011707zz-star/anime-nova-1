@@ -3,7 +3,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { Image, useWindowDimensions } from "react-native";
 import { useRouter } from "expo-router";
 import React from "react";
-import { Platform, StyleSheet, Text, View } from "react-native";
+import { StyleSheet, Text, View } from "react-native";
 import { useColors } from "@/hooks/useColors";
 import { isTvDevice, tvFocusStyle, TvPressable as Pressable, useTvMetrics } from "@/utils/tv";
 import { getPosterUri, getTvPosterUri } from "@/utils/media";
@@ -17,6 +17,7 @@ type Props = {
   showProgress?: boolean;
   onFocus?: () => void;
   hasTVPreferredFocus?: boolean;
+  tvFocusable?: boolean;
 };
 
 export function getRailCardWidth(windowWidth: number, visibleCards = 3, gap = 10) {
@@ -47,7 +48,7 @@ export function getGridColumnCount(windowWidth: number, _windowHeight?: number) 
   return 3;
 }
 
-export const AnimeCard = React.memo(function AnimeCard({ anime, size = "sm", cardWidth, progress, showProgress, onFocus, hasTVPreferredFocus = false }: Props) {
+export const AnimeCard = React.memo(function AnimeCard({ anime, size = "sm", cardWidth, progress, showProgress, onFocus, hasTVPreferredFocus = false, tvFocusable = true }: Props) {
   const router = useRouter();
   const colors = useColors();
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();
@@ -70,9 +71,7 @@ export const AnimeCard = React.memo(function AnimeCard({ anime, size = "sm", car
   return (
     <Pressable
       onPress={() => router.push(`/anime/${anime.id}?title=${encodeURIComponent(anime.title.romaji)}&english=${encodeURIComponent(anime.title.english || "")}`)}
-      focusable={Platform.OS === "android" ? true : tvMode}
-      delayPressIn={0}
-      unstable_pressDelay={0}
+      focusable={tvMode && tvFocusable}
       hasTVPreferredFocus={hasTVPreferredFocus}
       hitSlop={tvMode ? 8 : 4}
       pressRetentionOffset={12}
@@ -82,11 +81,9 @@ export const AnimeCard = React.memo(function AnimeCard({ anime, size = "sm", car
         styles.card,
         { width: cardW, opacity: pressed ? 0.85 : 1 },
         tvMode && styles.tvCard,
-        (tvMode || focused) && tvFocusStyle(focused),
+        tvMode && tvFocusStyle(focused),
       ]}
     >
-      {({ focused }: { focused?: boolean }) => (
-        <>
       <View style={[styles.imageContainer, { width: cardW, height: cardH, borderRadius: colors.radius - 4 }]}>
         <Image
           source={{ uri: posterUri }}
@@ -95,7 +92,6 @@ export const AnimeCard = React.memo(function AnimeCard({ anime, size = "sm", car
           fadeDuration={tvMode ? 0 : 120}
           resizeMethod="resize"
         />
-        
         {anime.averageScore && (
           <View style={styles.scoreBadge}>
             <Ionicons name="star" size={9} color="#FFD700" />
@@ -139,15 +135,13 @@ export const AnimeCard = React.memo(function AnimeCard({ anime, size = "sm", car
           {anime.episodes} حلقة
         </Text>
       )}
-        </>
-      )}
     </Pressable>
   );
 });
 
 const styles = StyleSheet.create({
   card: { flexDirection: "column", gap: 6 },
-  tvCard: { borderRadius: 12, padding: 4, margin: 2, gap: 8 },
+  tvCard: { borderRadius: 10, padding: 5, margin: -5, gap: 8 },
   imageContainer: { overflow: "hidden", backgroundColor: "#1a1a2e", position: "relative" },
   image: { width: "100%", height: "100%" },
   scoreBadge: {

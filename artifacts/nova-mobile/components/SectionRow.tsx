@@ -24,7 +24,8 @@ type Props = {
   items: AnilistMedia[];
   onSeeAll?: () => void;
   size?: "sm" | "md" | "lg";
-  isFirstSection?: boolean;
+  tvFocusable?: boolean;
+  onSectionFocus?: () => void;
 };
 
 export const SectionRow = React.memo(function SectionRow({
@@ -32,7 +33,8 @@ export const SectionRow = React.memo(function SectionRow({
   items,
   onSeeAll,
   size = "md",
-  isFirstSection = false,
+  tvFocusable = true,
+  onSectionFocus,
 }: Props) {
   const colors = useColors();
   const { width, height } = useWindowDimensions();
@@ -40,7 +42,6 @@ export const SectionRow = React.memo(function SectionRow({
   const { size: scaleSize } = useTvMetrics();
   const cardWidth = getRailCardWidth(width, tvMode ? 5 : 3);
   const sidePadding = getRailSidePadding(width);
-
   const railRef = React.useRef<FlatList<AnilistMedia>>(null);
   const focusScroll = useTvListFocusScroll(railRef, 0.5);
 
@@ -49,7 +50,7 @@ export const SectionRow = React.memo(function SectionRow({
   const rail = (
     <FlatList
       ref={railRef}
-      data={items.slice(0, tvMode ? 10 : items.length)}
+      data={items.slice(0, tvMode ? 12 : items.length)}
       horizontal
       keyExtractor={(item) => String(item.id)}
       renderItem={({ item, index }) => (
@@ -57,18 +58,22 @@ export const SectionRow = React.memo(function SectionRow({
           anime={item}
           size={size}
           cardWidth={cardWidth}
-          hasTVPreferredFocus={isFirstSection && index === 0}
-          onFocus={() => focusScroll.scrollToFocusedIndex(index)}
+          tvFocusable={tvFocusable}
+          hasTVPreferredFocus={false}
+          onFocus={() => {
+            onSectionFocus?.();
+            focusScroll.scrollToFocusedIndex(index);
+          }}
         />
       )}
       onViewableItemsChanged={focusScroll.onViewableItemsChanged}
       viewabilityConfig={focusScroll.viewabilityConfig}
       showsHorizontalScrollIndicator={false}
       contentContainerStyle={[styles.scroll, { paddingHorizontal: sidePadding }]}
-      initialNumToRender={tvMode ? 5 : 4}
-      maxToRenderPerBatch={tvMode ? 3 : 2}
+      initialNumToRender={tvMode ? 8 : 4}
+      maxToRenderPerBatch={tvMode ? 6 : 2}
       updateCellsBatchingPeriod={50}
-      windowSize={tvMode ? 4 : 3}
+      windowSize={tvMode ? 11 : 3}
       getItemLayout={(_, index) => ({
         length: cardWidth + 14,
         offset: (cardWidth + 14) * index,
@@ -80,7 +85,11 @@ export const SectionRow = React.memo(function SectionRow({
 
   return (
     <View style={styles.container}>
-      <SectionHeader onSeeAll={onSeeAll} focusable={tvMode}>
+      <SectionHeader
+        onSeeAll={onSeeAll}
+        focusable={tvMode && tvFocusable}
+        onFocus={onSectionFocus}
+      >
         <View style={styles.titleRow}>
           <Text style={[styles.title, { fontSize: scaleSize(17, 25), lineHeight: scaleSize(22, 34), color: colors.text }]}>
             {title}
@@ -88,55 +97,41 @@ export const SectionRow = React.memo(function SectionRow({
           <View style={[styles.accentBar, { backgroundColor: colors.homeAccent || "#06b6d4" }]} />
         </View>
       </SectionHeader>
-      {rail}
+      {tvMode ? (
+        <TvFocusGuideView autoFocus={false} style={styles.focusGuide}>
+          {rail}
+        </TvFocusGuideView>
+      ) : rail}
     </View>
   );
-});
-
-const styles = StyleSheet.create({
-  container: {
-    marginVertical: 12,
-  },
-  scroll: {
-    gap: 14,
-    paddingVertical: 6,
-  },
-  titleRow: {
-    flexDirection: "row-reverse",
-    alignItems: "center",
-    gap: 8,
-  },
-  title: {
-    fontFamily: "Cairo_700Bold",
-  },
-  accentBar: {
-    width: 4,
-    height: 18,
-    borderRadius: 2,
-  },
 });
 
 export function SkeletonRow() {
   const colors = useColors();
-  const { width, height } = useWindowDimensions();
-  const tvMode = isTvDevice(width, height);
-  const cardWidth = getRailCardWidth(width, tvMode ? 5 : 3);
-  const cardHeight = Math.round(cardWidth * 1.4);
-  const sidePadding = getRailSidePadding(width);
   return (
-    <View style={{ flexDirection: "row", gap: 14, paddingHorizontal: sidePadding, paddingVertical: 8 }}>
-      {[0, 1, 2, 3, 4].map((i) => (
-        <View
-          key={i}
-          style={{
-            width: cardWidth,
-            height: cardHeight,
-            borderRadius: colors.radius - 4,
-            backgroundColor: colors.card,
-            opacity: 0.45,
-          }}
-        />
-      ))}
+    <View style={styles.container}>
+      <View style={[styles.skeletonTitle, { backgroundColor: colors.card }]} />
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.scroll}>
+        {Array.from({ length: 5 }).map((_, i) => (
+          <View key={i} style={styles.skeletonCard}>
+            <View style={[styles.skeletonImg, { backgroundColor: colors.card }]} />
+            <View style={[styles.skeletonText, { backgroundColor: colors.card }]} />
+          </View>
+        ))}
+      </ScrollView>
     </View>
   );
 }
+
+const styles = StyleSheet.create({
+  container: { marginBottom: 24 },
+  titleRow: { flexDirection: "row", direction: "ltr", alignItems: "center", justifyContent: "flex-end", gap: 9 },
+  accentBar: { width: 3.5, height: 22, borderRadius: 2 },
+  title: { fontSize: 17, fontFamily: "Cairo_700Bold", textAlign: "right" },
+  focusGuide: { minHeight: 1 },
+  scroll: { paddingHorizontal: 16, gap: 14 },
+  skeletonTitle: { width: 140, height: 18, borderRadius: 6, marginHorizontal: 16, marginBottom: 12 },
+  skeletonCard: { width: 120, gap: 6 },
+  skeletonImg: { width: 120, height: 168, borderRadius: 10 },
+  skeletonText: { width: 100, height: 12, borderRadius: 4 },
+});

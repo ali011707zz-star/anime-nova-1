@@ -62,6 +62,7 @@ export default function HomeScreen() {
   const { width, height } = useWindowDimensions();
   const [showDrawer, setShowDrawer] = useState(false);
   const [headerSearch, setHeaderSearch] = useState("");
+  const [activeTvSectionIdx, setActiveTvSectionIdx] = useState(-1);
   const isTvLayout = isTvDevice(width, height);
   const { size: scaleSize } = useTvMetrics();
   const { ready } = useTvFocusMemory("home");
@@ -264,10 +265,18 @@ export default function HomeScreen() {
   /* الويب يبني الـHero من الأكثر شعبية ذات الـbanner، وليس من TRENDING. */
   /* Randomize from the full popular catalog so the hero is not fixed to the
      same first four titles on every client. */
-  const heroItems = useMemo(
-    () => randomSample(popularList.filter((m) => m.bannerImage), isTvLayout ? 4 : 8),
-    [popularList, isTvLayout],
-  );
+  const heroSampleRef = useRef<AnilistMedia[]>([]);
+  const heroItems = useMemo(() => {
+    const candidates = popularList.filter((m) => m.bannerImage);
+    if (!candidates.length) return [];
+    const targetCount = isTvLayout ? 4 : 8;
+    if (heroSampleRef.current.length > 0 && heroSampleRef.current.length <= targetCount) {
+      return heroSampleRef.current;
+    }
+    const sampled = randomSample(candidates, targetCount);
+    heroSampleRef.current = sampled;
+    return sampled;
+  }, [popularList, isTvLayout]);
   const recentHistory = watchHistory.slice(0, 10);
   const railCardWidth = getRailCardWidth(width, isTvLayout ? 5 : 3);
   const railSidePadding = getRailSidePadding(width);
@@ -277,6 +286,7 @@ export default function HomeScreen() {
     : Math.floor((width - 34) / 3);
 
   const refresh = async () => {
+    heroSampleRef.current = [];
     await Promise.all([
       refetchT(), refetchP(), refetchA(), refetchM(), refetchIsekai(),
       refetchManhwa(), refetchJpManga(),
@@ -354,9 +364,24 @@ export default function HomeScreen() {
     router,
   ]);
 
-  const renderHomeSection = ({ item: section }: { item: HomeSectionItem }) => {
+  const renderHomeSection = ({ item: section, index: sectionIndex }: { item: HomeSectionItem; index: number }) => {
+    const sectionFocusable = !isTvLayout || sectionIndex >= activeTvSectionIdx - 1;
+    const handleSectionFocus = () => {
+      if (isTvLayout && activeTvSectionIdx !== sectionIndex) {
+        setActiveTvSectionIdx(sectionIndex);
+      }
+    };
     if (section.kind === "anilist") {
-      return <SectionRow title={section.title} items={section.items} size="md" onSeeAll={section.onSeeAll} isFirstSection={true} />;
+      return (
+        <SectionRow
+          title={section.title}
+          items={section.items}
+          size="md"
+          onSeeAll={section.onSeeAll}
+          tvFocusable={sectionFocusable}
+          onSectionFocus={handleSectionFocus}
+        />
+      );
     }
     return (
       <View>
@@ -365,7 +390,8 @@ export default function HomeScreen() {
           <View style={{ marginTop: scaleSize(18, 28) }}>
             <SectionHeader
               onSeeAll={() => router.push("/(tabs)/library")}
-              focusable={isTvLayout}
+              focusable={isTvLayout && sectionFocusable}
+              onFocus={handleSectionFocus}
               seeAllLabel="السجل الكامل"
             >
               <View style={styles.continueHeading}>
@@ -414,7 +440,8 @@ export default function HomeScreen() {
                 return (
                   <Pressable
                     onPress={() => router.push(historyRoute(h) as any)}
-                    focusable={isTvLayout}
+                    onFocus={handleSectionFocus}
+                    focusable={isTvLayout && sectionFocusable}
                     style={({ focused }) => [
                       styles.historyCard,
                       {
@@ -511,10 +538,10 @@ export default function HomeScreen() {
                   </Pressable>
                 );
               }}
-              initialNumToRender={5}
-              maxToRenderPerBatch={5}
-              windowSize={3}
-              removeClippedSubviews={false}
+              initialNumToRender={isTvLayout ? 8 : 5}
+              maxToRenderPerBatch={isTvLayout ? 8 : 5}
+              windowSize={isTvLayout ? 11 : 3}
+              removeClippedSubviews={Platform.OS === "android" && !isTvLayout}
             />
           </View>
         )}
@@ -524,7 +551,8 @@ export default function HomeScreen() {
           <View style={{ marginTop: 24 }}>
             <SectionHeader
               onSeeAll={() => router.push("/latest" as any)}
-              focusable={isTvLayout}
+              focusable={isTvLayout && sectionFocusable}
+              onFocus={handleSectionFocus}
             >
               <View style={styles.sectionRightRow}>
                 <Text style={[styles.sectionTitle, isTvLayout && styles.tvSectionTitle, { color: colors.text }]}>أحدث الحلقات 📺</Text>
@@ -537,7 +565,7 @@ export default function HomeScreen() {
               <FlatList
                 data={todayEps}
                 horizontal
-                keyExtractor={(ep) => `${ep.source}-${ep.animeId || ep.anslayerId || ep.awAnimeId}-${ep.episode}`}
+                keyExtractor={(ep, idx) => `${ep.source}-${ep.anslayerId || ep.awAnimeId || ep.animeId || ep.name || idx}-${ep.episode}`}
                 showsHorizontalScrollIndicator={false}
                  contentContainerStyle={{ paddingHorizontal: railSidePadding, gap: railGap }}
                 renderItem={({ item: ep }) => (
@@ -545,7 +573,8 @@ export default function HomeScreen() {
                      لكن صفحة المشاهدة تفحص كل المصادر المتاحة مثل الويب. */
                    <Pressable
                       onPress={() => router.push(`/watch?anime=${ep.animeId || 0}&anilistId=${ep.anilistId || ep.animeId || 0}&ep=${ep.episode}&totalEps=${ep.episode}&title=${encodeURIComponent(ep.romaji || ep.name || "")}&english=${encodeURIComponent(ep.english || "")}&native=${encodeURIComponent(ep.native || "")}&titles=${encodeURIComponent(JSON.stringify(ep.titleVariants || []))}&cover=${encodeURIComponent(ep.cover || "")}&titleAr=${encodeURIComponent(ep.titleAr || "")}&anslayerId=${ep.anslayerId}&awAnimeId=${encodeURIComponent(ep.awAnimeId || "")}&site=${encodeURIComponent(ep.source)}&fromLatest=1&latestSource=${encodeURIComponent(ep.source)}` as any)}
-                     focusable={isTvLayout}
+                      onFocus={handleSectionFocus}
+                     focusable={isTvLayout && sectionFocusable}
                      style={({ focused }) => [todayEpStyles.card, { width: railCardWidth, height: Math.round(railCardWidth * 1.46), backgroundColor: colors.card, borderColor: colors.border }, isTvLayout && tvFocusStyle(focused)]}
                   >
                     {ep.cover ? (
@@ -571,10 +600,10 @@ export default function HomeScreen() {
                     </LinearGradient>
                   </Pressable>
                 )}
-                initialNumToRender={5}
-                maxToRenderPerBatch={5}
-                windowSize={3}
-                removeClippedSubviews={false}
+                initialNumToRender={isTvLayout ? 8 : 5}
+                maxToRenderPerBatch={isTvLayout ? 8 : 5}
+                windowSize={isTvLayout ? 11 : 3}
+                removeClippedSubviews={Platform.OS === "android" && !isTvLayout}
               />
             )}
           </View>
@@ -585,7 +614,8 @@ export default function HomeScreen() {
           <View style={{ marginTop: 24, marginBottom: 24 }}>
             <SectionHeader
               onSeeAll={() => router.push("/aw-dubbed" as any)}
-              focusable={isTvLayout}
+              focusable={isTvLayout && sectionFocusable}
+              onFocus={handleSectionFocus}
             >
               <View style={styles.sectionRightRow}>
                 <Text style={[styles.sectionTitle, isTvLayout && styles.tvSectionTitle, { color: colors.text }]}>انميشن مدبلج ✨</Text>
@@ -631,20 +661,21 @@ export default function HomeScreen() {
                           ? item.seasons
                           : [{ label: "الحلقات", animeId: key }],
                       );
-                      router.push({
-                        pathname: "/aw-dubbed/[key]" as any,
-                        params: {
-                          key: encodeURIComponent(key),
-                          title: item.title || "",
-                          titleAr: item.titleAr || "",
-                          seasons: encodeURIComponent(seasons),
-                          poster: encodeURIComponent(imgUri || ""),
-                        },
-                      });
-                     }}
-                     focusable={isTvLayout}
-                     style={({ focused }) => [todayStyles.card, { width: railCardWidth, height: Math.round(railCardWidth * 1.46), backgroundColor: colors.card, borderColor: colors.border }, isTvLayout && tvFocusStyle(focused)]}
-                  >
+                       router.push({
+                         pathname: "/aw-dubbed/[key]" as any,
+                         params: {
+                           key: encodeURIComponent(key),
+                           title: item.title || "",
+                           titleAr: item.titleAr || "",
+                           seasons: encodeURIComponent(seasons),
+                           poster: encodeURIComponent(imgUri || ""),
+                         },
+                       });
+                      }}
+                      onFocus={handleSectionFocus}
+                      focusable={isTvLayout && sectionFocusable}
+                      style={({ focused }) => [todayStyles.card, { width: railCardWidth, height: Math.round(railCardWidth * 1.46), backgroundColor: colors.card, borderColor: colors.border }, isTvLayout && tvFocusStyle(focused)]}
+                   >
                     {imgUri ? (
                       <Image source={{ uri: imgUri }} style={todayStyles.img} resizeMode="cover" resizeMethod="resize" fadeDuration={isTvLayout ? 0 : 100} />
                     ) : (
@@ -679,10 +710,10 @@ export default function HomeScreen() {
                   </Pressable>
                 );
               }}
-              initialNumToRender={5}
-              maxToRenderPerBatch={5}
-              windowSize={3}
-              removeClippedSubviews={false}
+              initialNumToRender={isTvLayout ? 8 : 5}
+              maxToRenderPerBatch={isTvLayout ? 8 : 5}
+              windowSize={isTvLayout ? 11 : 3}
+              removeClippedSubviews={Platform.OS === "android" && !isTvLayout}
             />
           </View>
         )}
@@ -691,7 +722,8 @@ export default function HomeScreen() {
           <View style={{ marginBottom: 24 }}>
             <SectionHeader
               onSeeAll={() => router.push({ pathname: "/aw-dubbed" as any, params: { tab: "cartoon" } })}
-              focusable={isTvLayout}
+              focusable={isTvLayout && sectionFocusable}
+              onFocus={handleSectionFocus}
             >
               <View style={styles.sectionRightRow}>
                 <Text style={[styles.sectionTitle, isTvLayout && styles.tvSectionTitle, { color: colors.text }]}>كرتون مدبلج ومترجم 🎬</Text>
@@ -738,7 +770,8 @@ export default function HomeScreen() {
                       const seasons = JSON.stringify(item.seasons || [{ label: "الحلقات", arabicToonsId: item.arabicToonsId }]);
                       router.push({ pathname: "/dubbed/[id]" as any, params: { id: item.key || item.id || item.title, title: item.title, seasons, img: rawImg } });
                      }}
-                     focusable={isTvLayout}
+                     onFocus={handleSectionFocus}
+                     focusable={isTvLayout && sectionFocusable}
                      style={({ focused }) => [todayStyles.card, { width: railCardWidth, height: Math.round(railCardWidth * 1.46), backgroundColor: colors.card, borderColor: colors.border }, isTvLayout && tvFocusStyle(focused)]}
                   >
                     {imgUri ? (
@@ -772,10 +805,10 @@ export default function HomeScreen() {
                   </Pressable>
                 );
               }}
-              initialNumToRender={5}
-              maxToRenderPerBatch={5}
-              windowSize={3}
-              removeClippedSubviews={false}
+              initialNumToRender={isTvLayout ? 8 : 5}
+              maxToRenderPerBatch={isTvLayout ? 8 : 5}
+              windowSize={isTvLayout ? 11 : 3}
+              removeClippedSubviews={Platform.OS === "android" && !isTvLayout}
             />
           </View>
         )}
@@ -785,7 +818,8 @@ export default function HomeScreen() {
           <View style={{ marginBottom: 24 }}>
             <SectionHeader
               onSeeAll={() => router.push({ pathname: "/aw-dubbed" as any, params: { tab: "spacetoon" } })}
-              focusable={isTvLayout}
+              focusable={isTvLayout && sectionFocusable}
+              onFocus={handleSectionFocus}
             >
               <View style={styles.sectionRightRow}>
                 <Text style={[styles.sectionTitle, isTvLayout && styles.tvSectionTitle, { color: colors.text }]}>سبيستون مدبلج 🚀</Text>
@@ -818,7 +852,8 @@ export default function HomeScreen() {
                         },
                       })
                     }
-                    focusable={isTvLayout}
+                    onFocus={handleSectionFocus}
+                    focusable={isTvLayout && sectionFocusable}
                     style={({ focused }) => [
                       todayStyles.card,
                       { width: railCardWidth, height: Math.round(railCardWidth * 1.46), backgroundColor: colors.card, borderColor: colors.border },
@@ -854,10 +889,10 @@ export default function HomeScreen() {
                   </Pressable>
                 );
               }}
-              initialNumToRender={5}
-              maxToRenderPerBatch={5}
-              windowSize={3}
-              removeClippedSubviews={false}
+              initialNumToRender={isTvLayout ? 8 : 5}
+              maxToRenderPerBatch={isTvLayout ? 8 : 5}
+              windowSize={isTvLayout ? 11 : 3}
+              removeClippedSubviews={Platform.OS === "android" && !isTvLayout}
             />
           </View>
         )}
@@ -924,7 +959,7 @@ export default function HomeScreen() {
               initialNumToRender={5}
               maxToRenderPerBatch={5}
               windowSize={3}
-              removeClippedSubviews={false}
+              removeClippedSubviews={Platform.OS === "android" && !isTvLayout}
             />
           </View>
         )}
@@ -975,13 +1010,16 @@ export default function HomeScreen() {
               initialNumToRender={5}
               maxToRenderPerBatch={5}
               windowSize={3}
-              removeClippedSubviews={false}
+              removeClippedSubviews={Platform.OS === "android" && !isTvLayout}
             />
           </View>
         )}
       </View>
     );
   };
+
+  const headerTvFocusable = !isTvLayout || activeTvSectionIdx <= -1 || (heroItems.length === 0 && activeTvSectionIdx <= 0);
+  const heroTvFocusable = !isTvLayout || activeTvSectionIdx <= 0;
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
@@ -996,8 +1034,8 @@ export default function HomeScreen() {
               <Pressable
                 accessibilityLabel="فتح القائمة"
                 onPress={() => setShowDrawer(true)}
-                focusable={isTvLayout}
-                hasTVPreferredFocus={false}
+                onFocus={() => { if (isTvLayout) setActiveTvSectionIdx(-2); }}
+                focusable={isTvLayout && headerTvFocusable}
                 hitSlop={isTvLayout ? 10 : 6}
                 style={[
                   styles.iconBtn,
@@ -1018,7 +1056,8 @@ export default function HomeScreen() {
                   accessibilityRole="button"
                   accessibilityLabel="البحث عن أنمي"
                   onPress={() => router.push("/(tabs)/search" as any)}
-                  focusable={isTvLayout}
+                  onFocus={() => { if (isTvLayout) setActiveTvSectionIdx(-2); }}
+                  focusable={isTvLayout && headerTvFocusable}
                   style={[
                     styles.headerSearch,
                     {
@@ -1049,7 +1088,12 @@ export default function HomeScreen() {
             {isLoading ? (
               <View style={{ height: 420, backgroundColor: colors.card }} />
             ) : (
-              <HeroSection items={heroItems} initialTVFocus={isTvLayout && ready} />
+              <HeroSection
+                items={heroItems}
+                initialTVFocus={isTvLayout && ready}
+                tvFocusable={heroTvFocusable}
+                onSectionFocus={() => { if (isTvLayout) setActiveTvSectionIdx(-1); }}
+              />
             )}
 
             {isLoading && (
@@ -1063,12 +1107,12 @@ export default function HomeScreen() {
         }
         ListFooterComponent={<View style={{ height: 90 }} />}
         showsVerticalScrollIndicator={false}
-        refreshControl={<RefreshControl refreshing={false} onRefresh={refresh} tintColor={colors.primary} />}
-        removeClippedSubviews={false}
-        initialNumToRender={3}
-        maxToRenderPerBatch={2}
+        refreshControl={isTvLayout ? undefined : <RefreshControl refreshing={false} onRefresh={refresh} tintColor={colors.primary} />}
+        removeClippedSubviews={Platform.OS === "android" && !isTvLayout}
+        initialNumToRender={isTvLayout ? 12 : 3}
+        maxToRenderPerBatch={isTvLayout ? 12 : 2}
         updateCellsBatchingPeriod={40}
-        windowSize={5}
+        windowSize={isTvLayout ? 21 : 5}
       />
       <DrawerMenu visible={showDrawer} onClose={() => setShowDrawer(false)} />
     </View>

@@ -10,9 +10,19 @@ import {
 import { useColors } from "@/hooks/useColors";
 import { isTvDevice, tvFocusStyle, TvPressable as Pressable } from "@/utils/tv";
 
-type Props = { items: AnilistMedia[]; initialTVFocus?: boolean };
+type Props = {
+  items: AnilistMedia[];
+  initialTVFocus?: boolean;
+  tvFocusable?: boolean;
+  onSectionFocus?: () => void;
+};
 
-export function HeroSection({ items, initialTVFocus = false }: Props) {
+export function HeroSection({
+  items,
+  initialTVFocus = false,
+  tvFocusable = true,
+  onSectionFocus,
+}: Props) {
   const colors = useColors();
   const router = useRouter();
   const { width, height } = useWindowDimensions();
@@ -22,13 +32,14 @@ export function HeroSection({ items, initialTVFocus = false }: Props) {
   // Keep enough height on phones, tablets, and TVs so genres, titles, metadata, and CTA buttons
   // ("مشاهدة الآن" + "تفاصيل") fit with clear artwork breathing room.
   const heroHeight = tvMode
-    ? Math.max(340, Math.min(430, Math.round(heroWidth * 0.42)))
+    ? Math.max(260, Math.min(330, Math.round(heroWidth * 0.36)))
     : isTablet
       ? Math.max(268, Math.min(350, Math.round(heroWidth * 0.52)))
       : Math.max(216, Math.min(258, Math.round(heroWidth * 0.64)));
   const s = tvMode ? 1.15 : Math.max(0.82, Math.min(1.12, heroWidth / 430));
   const scrollRef = useRef<ScrollView>(null);
   const [activeIdx, setActiveIdx] = useState(0);
+  const initialFocusDoneRef = useRef(false);
 
   useEffect(() => {
     if (tvMode) return;
@@ -54,12 +65,10 @@ export function HeroSection({ items, initialTVFocus = false }: Props) {
         ref={scrollRef}
         horizontal
         pagingEnabled
-        style={[styles.heroViewport, { width: heroWidth, height: heroHeight, borderRadius: radius, overflow: "hidden" }]}
+        focusable={false}
+        style={[styles.heroViewport, { width: heroWidth, height: heroHeight, borderRadius: radius }]}
         contentContainerStyle={styles.heroTrack}
         showsHorizontalScrollIndicator={false}
-        snapToInterval={heroWidth}
-        snapToAlignment="center"
-        decelerationRate="fast"
         scrollEventThrottle={16}
         onMomentumScrollEnd={(e) => {
           const idx = Math.round(e.nativeEvent.contentOffset.x / heroWidth);
@@ -193,9 +202,11 @@ export function HeroSection({ items, initialTVFocus = false }: Props) {
                   <View style={[styles.btnRow, { gap: Math.round(8 * s) }]}>
                     <Pressable
                       onPress={() => router.push({ pathname: "/episodes/[id]", params: { id: anime.id } } as any)}
-                      focusable={tvMode}
-                      hasTVPreferredFocus={tvMode && initialTVFocus && index === 0}
+                      focusable={tvMode && tvFocusable}
+                      hasTVPreferredFocus={tvMode && initialTVFocus && !initialFocusDoneRef.current && index === 0}
                       onFocus={() => {
+                        initialFocusDoneRef.current = true;
+                        onSectionFocus?.();
                         if (tvMode && activeIdx !== index) {
                           setActiveIdx(index);
                           scrollRef.current?.scrollTo({ x: index * heroWidth, animated: false });
@@ -216,8 +227,10 @@ export function HeroSection({ items, initialTVFocus = false }: Props) {
                     </Pressable>
                     <Pressable
                       onPress={() => router.push(`/anime/${anime.id}?title=${encodeURIComponent(anime.title.romaji)}&english=${encodeURIComponent(anime.title.english || "")}`)}
-                      focusable={tvMode}
+                      focusable={tvMode && tvFocusable}
                       onFocus={() => {
+                        initialFocusDoneRef.current = true;
+                        onSectionFocus?.();
                         if (tvMode && activeIdx !== index) {
                           setActiveIdx(index);
                           scrollRef.current?.scrollTo({ x: index * heroWidth, animated: false });

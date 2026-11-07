@@ -288,7 +288,7 @@ function EpisodeRow({
   const isFiller = ep?.filler === true;
   const thumb = ep?.images?.jpg?.image_url || anime?.bannerImage || anime?.coverImage?.large;
   const originalTitle = ep?.title || ep?.title_romanji || `Episode ${n}`;
-  const arabicTitle = episodeTitlesAr[n] || `أحداث الحلقة ${n}`;
+  const arabicTitle = ep?.title_ar || episodeTitlesAr[n] || (originalTitle && !originalTitle.startsWith("Episode ") ? originalTitle : `الحلقة ${n}`);
 
   return (
     <View style={[
@@ -594,6 +594,14 @@ export default function EpisodeListScreen() {
             }
             return Array.from(merged.values());
           });
+          const arMap: Record<number, string> = {};
+          for (const item of d.episodes) {
+            const n = Number(item?.mal_id || item?.episode_id || item?.episode || 0);
+            if (n > 0 && item?.title_ar) arMap[n] = item.title_ar;
+          }
+          if (Object.keys(arMap).length > 0) {
+            setEpisodeTitlesAr(prev => ({ ...prev, ...arMap }));
+          }
         }
         /* Keep the same aired/total rule as the web episode list. */
         const catalogTotal = selectedAnime?.status === "RELEASING"
@@ -677,8 +685,9 @@ export default function EpisodeListScreen() {
     const t = encodeURIComponent(selectedAnime?.title?.romaji || "");
     const eng = encodeURIComponent(selectedAnime?.title?.english || "");
     const fmt = encodeURIComponent(selectedAnime?.format || "");
-    const epInfo = epData?.find((e: any) => e.mal_id === n || e.episode_id === n);
-    const epTitleRaw = epInfo?.title || epInfo?.title_romanji || "";
+    const epInfo = epData?.find((e: any) => e.mal_id === n || e.episode_id === n || e.episode === n);
+    const epTitleAr = epInfo?.title_ar || episodeTitlesAr[n] || "";
+    const epTitleRaw = epTitleAr || epInfo?.title || epInfo?.title_romanji || "";
     const et = epTitleRaw ? `&etitle=${encodeURIComponent(epTitleRaw)}` : "";
     const totalParam = total > 0 ? `&totalEps=${total}` : "";
     const coverParam = selectedAnime?.coverImage?.large ? `&cover=${encodeURIComponent(selectedAnime.coverImage.extraLarge || selectedAnime.coverImage.large)}` : "";
