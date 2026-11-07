@@ -19,6 +19,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { getBaseUrl } from "@/utils/api";
+import { secureFetch } from "@/utils/secureApi";
 import { TvPressable, useTvMetrics } from "@/utils/tv";
 import { useColors } from "@/hooks/useColors";
 import {
@@ -1983,7 +1984,7 @@ function ExpoRiftPlayer({
           intro: requestIntro ? "1" : "0",
           outro: requestOutro ? "1" : "0",
         });
-        const response = await fetch(
+        const response = await secureFetch(
           `${base}/api/anime/skip-times?${params.toString()}`,
           { signal: ctrl.signal },
         );

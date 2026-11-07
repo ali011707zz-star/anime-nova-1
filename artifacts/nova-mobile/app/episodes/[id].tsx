@@ -9,6 +9,7 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { getBaseUrl } from "@/utils/api";
+import { secureFetch } from "@/utils/secureApi";
 import { isTvDevice, tvFocusStyle, TvFocusGuideView, TvPressable } from "@/utils/tv";
 const Pressable = TvPressable;
 import { useTvFocusMemory } from "@/utils/tvFocus";
@@ -244,7 +245,11 @@ async function loadAnimeSeries(root: any, base: string, signal: AbortSignal): Pr
 
 function extractArabicTitle(synonyms?: string[]): string {
   if (!synonyms) return "";
-  return synonyms.find(s => /[\u0600-\u06FF]/.test(s)) || "";
+  return synonyms.find(s =>
+    /[\u0600-\u06FF]/.test(s) &&
+    !/[گچپژی]/.test(s) &&
+    !/(?:^|\s)(?:فصل|به|در|از)(?:\s|$)/.test(s)
+  ) || "";
 }
 
 /* ── Watch progress storage ── */
@@ -346,9 +351,6 @@ function EpisodeRow({
           </View>
           <Text style={[ep_s.epTitleAr, tvMode && ep_s.tvEpTitle, { color: colors.textPrimary }]} numberOfLines={1}>
             {arabicTitle}
-          </Text>
-          <Text style={[ep_s.epTitleOriginal, tvMode && ep_s.tvEpOriginal, { color: colors.textSecondary }]} numberOfLines={1}>
-            {originalTitle}
           </Text>
         </View>
       </Pressable>
@@ -794,7 +796,7 @@ export default function EpisodeListScreen() {
         const batch = pending.slice(i, i + 6);
         const results = await Promise.all(batch.map(async item => {
           try {
-            const r = await fetch(`${getBaseUrl()}/api/anime/translate?text=${encodeURIComponent(item.title)}&from=auto&to=ar&kind=title`);
+            const r = await secureFetch(`${getBaseUrl()}/api/anime/translate?text=${encodeURIComponent(item.title)}&from=auto&to=ar&kind=title`);
             const d = await r.json();
             const value = String(d?.translated || "").trim();
             return /[\u0600-\u06FF]/.test(value) ? { n: item.n, value } : null;
@@ -951,7 +953,10 @@ export default function EpisodeListScreen() {
                 ) : null}
                 <View style={[ep_s.heroInfo, tvMode && width >= 700 && ep_s.tvHeroInfo]}>
                   <Text style={[ep_s.heroTitle, tvMode && width >= 700 && ep_s.tvHeroTitle]} numberOfLines={1}>
-                    {selectedAnime?.title?.english || selectedAnime?.title?.romaji}
+                    {extractArabicTitle(selectedAnime?.synonyms)
+                      || (Array.isArray(title) ? title[0] : title)
+                      || selectedAnime?.title?.english
+                      || selectedAnime?.title?.romaji}
                   </Text>
                   <View style={ep_s.heroBadgesRow}>
                     <View style={ep_s.heroPill}>

@@ -5268,16 +5268,18 @@ async function fetchAnime4upVnxServers(malId: number, ep: number): Promise<Unifi
   ];
   const results = await Promise.allSettled(
     endpoints.map(async ({ url, label }) => {
-      const r = await fetch(url, {
+      let html = await fetch(url, {
         headers: {
           "User-Agent": BROWSER_UA,
           "Referer": `${A4UP2_BASE}/`,
           "Accept": "text/html,application/xhtml+xml,*/*;q=0.8",
         },
-        signal: AbortSignal.timeout(3800),
-      });
-      if (!r.ok) return [];
-      const html = await r.text();
+        signal: AbortSignal.timeout(3200),
+      }).then(r => (r.ok ? r.text() : "")).catch(() => "");
+      if (!html || !/streamUrl\s*=/i.test(html)) {
+        html = (await a4up2Fetch(url, 4000)) || "";
+      }
+      if (!html) return [];
       const streamMatch = html.match(/let\s+streamUrl\s*=\s*["'](https?:\/\/[^"']+)["']/i)
         || html.match(/streamUrl\s*=\s*["'](https?:\/\/[^"']+)["']/i);
       if (!streamMatch?.[1]) return [];
@@ -5435,7 +5437,8 @@ async function getAnime4up2Sources(
   if (anilistId && anilistId > 0) {
     try {
       const malId = await Promise.race([
-        getMalIdForAniList(anilistId),
+        fetchAniZipMappings(0, anilistId).then(z => Number(z?.mappings?.mal_id || 0) || null).catch(() => null),
+        getMalIdForAniList(anilistId).catch(() => null),
         new Promise<number | null>(r => setTimeout(() => r(null), 2200)),
       ]);
       if (malId) {
@@ -7704,6 +7707,7 @@ async function getKawaiiAnimeSources(
         subtitleUrl,
         skipIntro,
         skipOutro,
+        verified: true,
       } as UnifiedSource;
     });
   } catch { return []; }
@@ -7797,6 +7801,9 @@ async function getMegaPlayAnimeSources(
 ): Promise<UnifiedSource[]> {
   if (!anilistId || !Number.isFinite(ep) || ep < 1) return [];
   try {
+    const kawaiiSubPromise = (!availabilityOnly && anilistId)
+      ? getKawaiiSubForSource(anilistId, ep).catch(() => undefined)
+      : Promise.resolve(undefined);
     const embedUrl = `${MEGAPLAY_RAW_BASE}/stream/ani/${anilistId}/${ep}/sub`;
     const page = await fetchSourceWithRetry(embedUrl, {
       headers: { ...BASE_HDRS, Referer: "https://hianimez.to/", Accept: "text/html" },
@@ -7884,7 +7891,10 @@ async function getMegaPlayAnimeSources(
       variants.push({ url: variants[0].url, quality: "720p", qualityRank: 13 });
     }
 
-    const kawaiiSubtitle = await getKawaiiSubForSource(anilistId, ep);
+    const kawaiiSubtitle = await Promise.race([
+      kawaiiSubPromise,
+      new Promise<undefined>(r => setTimeout(() => r(undefined), 1200)),
+    ]);
     const skipIntro = data.intro && Number(data.intro.start) >= 0 && Number(data.intro.end) > Number(data.intro.start)
       ? { start: Number(data.intro.start), end: Number(data.intro.end) } : undefined;
     const skipOutro = data.outro && Number(data.outro.start) >= 0 && Number(data.outro.end) > Number(data.outro.start)
@@ -7902,6 +7912,7 @@ async function getMegaPlayAnimeSources(
         directType: "hls",
         rawUrl: variant.url,
         hasBuiltinSub: false,
+        verified: true,
         ...(kawaiiSubtitle ? { subtitleUrl: kawaiiSubtitle } : {}),
         ...(skipIntro ? { skipIntro } : {}),
         ...(skipOutro ? { skipOutro } : {}),
@@ -9958,38 +9969,55 @@ async function getReanímeSources(
       ];
     }
 
-    // تمرير نفس ترجمة Kawaii التي تُمرَّر لـ KW و MP
+    // تمرير نفس ترجمة Kawaii التي تُمرَّر لـ KW و MP + تجهيز تخطي البداية/النهاية بالتوازي
     const kawaiiSubPromise = getKawaiiSubForSource(anilistId, ep).catch(() => undefined);
+    const skipFallbackPromise = (anilistId && anilistId > 0 && ep > 0)
+      ? (async () => {
+          try {
+            const aniZip = await fetchAniZipMappings(0, anilistId).catch(() => null);
+            const malId = Number(aniZip?.mappings?.mal_id || 0) || (await getMalIdForAniList(anilistId).catch(() => null));
+            const cacheKey = malId ? `mal:${malId}:${ep}` : `al:${anilistId}:${ep}`;
+            const entry = await getCachedSkipTimes(cacheKey, anilistId, malId, ep, { intro: true, outro: true });
+            return entry?.value || null;
+          } catch {
+            return null;
+          }
+        })()
+      : Promise.resolve(null);
 
-    const triedEmbeds = new Set<string>();
-    const collectedSources: UnifiedSource[] = [];
-
+    const uniqueEmbedUrls: string[] = [];
     for (const server of candidates) {
       const embedUrl: string = server.dataLink || server.link || "";
-      if (!embedUrl.startsWith("http") || triedEmbeds.has(embedUrl)) continue;
-      triedEmbeds.add(embedUrl);
+      if (embedUrl.startsWith("http") && !uniqueEmbedUrls.includes(embedUrl)) {
+        uniqueEmbedUrls.push(embedUrl);
+      }
+    }
 
+    const candidateResults = await Promise.all(uniqueEmbedUrls.slice(0, 2).map(async (embedUrl) => {
       try {
         // طلب مباشر أولاً (أسرع ولا يحتاج متصفح)، مع cfProxyGet كاحتياطي فقط
         let embedHtml = await fetch(embedUrl, {
           headers: { "User-Agent": REANIME_UA, "Referer": `${REANIME_BASE}/` },
-          signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(9000)]) : AbortSignal.timeout(9000),
+          signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(7000)]) : AbortSignal.timeout(7000),
         }).then(r => (r.ok ? r.text() : "")).catch(() => "");
         if (!embedHtml || !embedHtml.includes("obfuscation_seed")) {
-          embedHtml = (await cfProxyGet(embedUrl, `${REANIME_BASE}/`, 10000)) || "";
+          embedHtml = (await cfProxyGet(embedUrl, `${REANIME_BASE}/`, 8000)) || "";
         }
-        if (!embedHtml) continue;
+        if (!embedHtml) return [];
 
         const decrypted = await re_decryptEmbed(embedHtml);
         const m3u8Url = String(decrypted?.url || "").trim();
         const manifestKey = String(decrypted?.manifestKey || "").trim();
-        if (!/^https?:\/\//i.test(m3u8Url)) continue;
+        if (!/^https?:\/\//i.test(m3u8Url)) return [];
         const subtitles = Array.isArray(decrypted?.subtitles) ? decrypted.subtitles : [];
         const introChapter = decrypted?.introChapter;
         const outroChapter = decrypted?.outroChapter;
 
-        // الأولوية لترجمة Kawaii (نفس ترجمة KW و MP)، ثم الترجمة العربية المرفقة في ReAnime، ثم ترجمة الإنجليزية للعربية
-        const kawaiiSub = await kawaiiSubPromise;
+        // الأولوية لترجمة Kawaii (مع سقف زمني 1.2 ثانية حتى لا تتأخر بداية البث)، ثم ترجمة ReAnime
+        const kawaiiSub = await Promise.race([
+          kawaiiSubPromise,
+          new Promise<undefined>(r => setTimeout(() => r(undefined), 1200)),
+        ]);
         let subtitleUrl: string | undefined = kawaiiSub;
         if (!subtitleUrl && subtitles.length > 0) {
           const arTrack = subtitles.find((s: any) =>
@@ -10008,13 +10036,15 @@ async function getReanímeSources(
           }
         }
 
-        let skipIntro: { start: number; end: number } | undefined;
-        let skipOutro: { start: number; end: number } | undefined;
-        if (introChapter?.start !== undefined && introChapter?.end !== undefined) {
-          skipIntro = { start: Number(introChapter.start), end: Number(introChapter.end) };
-        }
-        if (outroChapter?.start !== undefined && outroChapter?.end !== undefined) {
-          skipOutro = { start: Number(outroChapter.start), end: Number(outroChapter.end) };
+        let skipIntro = normalizeSkipInterval(introChapter) ?? undefined;
+        let skipOutro = normalizeSkipInterval(outroChapter) ?? undefined;
+        if (!skipIntro || !skipOutro) {
+          const fallbackSkip = await Promise.race([
+            skipFallbackPromise,
+            new Promise<null>(r => setTimeout(() => r(null), 900)),
+          ]);
+          if (!skipIntro && fallbackSkip?.intro) skipIntro = fallbackSkip.intro;
+          if (!skipOutro && fallbackSkip?.outro) skipOutro = fallbackSkip.outro;
         }
 
         const srvTag = embedUrl.includes("?v=2") ? "HD-2" : "HD-1";
@@ -10028,28 +10058,30 @@ async function getReanímeSources(
           { q: "480p",  rank: 8 },
           { q: "360p",  rank: 5 },
         ];
-        for (const t of tiers) {
-          collectedSources.push({
-            name: `Reanime · FlixCloud ${srvTag} · ${t.q}${subtitleUrl ? " · ترجمة Kawaii" : ""}`,
-            url: proxied,
-            quality: t.q,
-            qualityRank: t.rank,
-            site: "reflix",
-            directUrl: proxied,
-            directType: "hls",
-            rawUrl: m3u8Url,
-            hasBuiltinSub: false,
-            headers: { Referer: embedUrl },
-            subtitleUrl,
-            skipIntro,
-            skipOutro,
-            ...(manifestKey ? { manifestKey } : {}),
-          } as UnifiedSource);
-        }
+        return tiers.map(t => ({
+          name: `Reanime · FlixCloud ${srvTag} · ${t.q}${subtitleUrl ? " · ترجمة Kawaii" : ""}`,
+          url: proxied,
+          quality: t.q,
+          qualityRank: t.rank,
+          site: "reflix",
+          directUrl: proxied,
+          directType: "hls",
+          rawUrl: m3u8Url,
+          hasBuiltinSub: false,
+          verified: true,
+          headers: { Referer: embedUrl },
+          subtitleUrl,
+          ...(skipIntro ? { skipIntro, intro: skipIntro } : {}),
+          ...(skipOutro ? { skipOutro, outro: skipOutro } : {}),
+          ...(manifestKey ? { manifestKey } : {}),
+        } as UnifiedSource));
       } catch (candidateError: any) {
         console.warn(`[reanime] server candidate failed: ${candidateError?.message ?? candidateError}`);
+        return [];
       }
-    }
+    }));
+
+    const collectedSources = candidateResults.flat();
     if (collectedSources.length) reanimeSrcCache.set(ck, { sources: collectedSources, ts: Date.now() });
     return collectedSources;
   } catch (e: any) { console.error("[reanime] error:", e?.message ?? e); return []; }
@@ -14774,8 +14806,14 @@ router.get("/anime/fetch-source", scraperQueueMiddleware, async (req, res) => {
   };
   let resolvedEpisodeSkip: SkipTimes = { intro: null, outro: null };
   const applyEpisodeSkip = (source: UnifiedSource): UnifiedSource => {
-    const skipIntro = source.skipIntro || (source as any).intro || resolvedEpisodeSkip.intro || undefined;
-    const skipOutro = source.skipOutro || (source as any).outro || resolvedEpisodeSkip.outro || undefined;
+    const skipIntro = normalizeSkipInterval(source.skipIntro)
+      || normalizeSkipInterval((source as any).intro)
+      || resolvedEpisodeSkip.intro
+      || undefined;
+    const skipOutro = normalizeSkipInterval(source.skipOutro)
+      || normalizeSkipInterval((source as any).outro)
+      || resolvedEpisodeSkip.outro
+      || undefined;
     return {
       ...source,
       ...(skipIntro ? { skipIntro, intro: skipIntro } : {}),
@@ -14815,6 +14853,8 @@ router.get("/anime/fetch-source", scraperQueueMiddleware, async (req, res) => {
   };
   const sendProgressiveCandidate = (source: UnifiedSource) => {
     if (!progressive || progressiveFinished || progressiveSent >= 2 || res.destroyed) return;
+    if (source.isEmbed && (isMobileClient || site === "anime4up2" || site === "animedar" || source.site === "anime4up2" || source.site === "animedar")) return;
+    if (isMobileClient && /mega\.nz|mega\.co\.nz|mp4upload/i.test(String(source.directUrl || source.url || ""))) return;
     if (!matchesRequestedQuality(source)) return;
     const candidateKey = progressiveCandidateKey(source);
     if (excludedCandidateKeys.has(candidateKey) || progressiveSeen.has(candidateKey)) return;
@@ -14920,7 +14960,10 @@ router.get("/anime/fetch-source", scraperQueueMiddleware, async (req, res) => {
             if (byTitle) resolvedId = byTitle;
           }
           if (!resolvedId) return;
-          const malId = await getMalIdForAniList(resolvedId).catch(() => null);
+          const malId = await Promise.race([
+            fetchAniZipMappings(0, resolvedId).then(z => Number(z?.mappings?.mal_id || 0) || null).catch(() => null),
+            getMalIdForAniList(resolvedId).catch(() => null),
+          ]);
           const cacheKey = malId ? `mal:${malId}:${ep}` : `al:${resolvedId}:${ep}`;
           const entry = await Promise.race([
             getCachedSkipTimes(cacheKey, resolvedId, malId, ep, { intro: true, outro: true }),
@@ -15045,10 +15088,12 @@ router.get("/anime/fetch-source", scraperQueueMiddleware, async (req, res) => {
     : site;
   const cKey = makeSourceCacheKey(cacheSite, title, ep, cacheAnimeIdentity);
   let cached: Awaited<ReturnType<typeof getFromSourceCache>> = null;
-  try {
-    cached = await getFromSourceCache(cKey);
-  } catch (error: any) {
-    console.warn(`[fetch-source] cache read failed for ${site}:`, error?.message ?? error);
+  if (!FORCE_LIVE_FETCH_SITES.has(site)) {
+    try {
+      cached = await getFromSourceCache(cKey);
+    } catch (error: any) {
+      console.warn(`[fetch-source] cache read failed for ${site}:`, error?.message ?? error);
+    }
   }
   if (cached && site === "anifox") {
     const liveSources = await filterAnifoxCachedSources(cached.sources);
@@ -15267,6 +15312,9 @@ router.get("/anime/fetch-source", scraperQueueMiddleware, async (req, res) => {
       await extractAndCollect(candidates, sources, seen, EXTRACT_MS, {
         concurrency: 2,
         maxResults: 2,
+        accept: (isMobileClient || site === "anime4up2" || site === "animedar")
+          ? (source => !source.isEmbed && !/mega\.nz|mega\.co\.nz|mp4upload/i.test(String(source.directUrl || source.url || "")))
+          : undefined,
         onSource: source => publishProgressSource?.(source),
         validate: async source => {
           const startedAt = Date.now();
@@ -15457,6 +15505,9 @@ router.get("/anime/fetch-source", scraperQueueMiddleware, async (req, res) => {
       `[playback-trace] id=${sourceTrace || "none"} route=fetch-source stage=provider_extraction_complete site=${sourceTraceSite} elapsed_ms=${Date.now() - pipelineStartedAt} accepted=${sharedSources.length} progressive=${progressive}`,
     );
 
+    if (site === "kawaii" && !sharedSources.length && !cached) {
+      cached = await getFromSourceCache(cKey).catch(() => null);
+    }
     const fallbackKawaiiCache = site === "kawaii" && !sharedSources.length && isUsableKawaiiCache(cached)
       ? rebuildKawaiiCachedSources(cached.sources)
       : [];
@@ -20738,6 +20789,21 @@ async function populateArabicEpisodeTitles(episodes: any[]): Promise<void> {
         } catch {}
       }));
     }));
+  }
+
+  for (let i = 0; i < episodes.length; i++) {
+    const epNum = Number(episodes[i]?.episode || episodes[i]?.mal_id || i + 1);
+    const ar = String(episodes[i]?.title_ar || "").trim();
+    if (ar && /[\u0600-\u06FF]/.test(ar)) {
+      episodes[i].title = ar;
+      episodes[i].title_ar = ar;
+      episodes[i].title_romanji = "";
+    } else {
+      const fallbackAr = `الحلقة ${epNum}`;
+      episodes[i].title_ar = fallbackAr;
+      episodes[i].title = fallbackAr;
+      episodes[i].title_romanji = "";
+    }
   }
 }
 

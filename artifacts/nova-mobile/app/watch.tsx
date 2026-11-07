@@ -257,6 +257,9 @@ function isEmbedSrc(s: Src): boolean {
   return url.includes("mega.nz") || url.includes("mega.co.nz") || url.includes("vidmoly");
 }
 function isMobilePlayable(s: Src): boolean {
+  if (Platform.OS !== "web") {
+    return isDirectPlayable(s) || (needsHiddenResolve(s) && isValidSourceUrl(getPlayUrl(s)));
+  }
   return isDirectPlayable(s) || (Boolean(s.isEmbed) && isValidSourceUrl(getPlayUrl(s)));
 }
 function getPlayUrl(s: Src): string {
@@ -2630,7 +2633,7 @@ export default function WatchScreen() {
         anilistId={!isAwDubbed && sourceAnimeId ? parseInt(sourceAnimeId) : undefined}
         episodeTitle={isAwDubbed
           ? `${awCurrentSeason.label} · الحلقة ${epNum}`
-          : (arEpTitle ?? (etitle ? safeDecodeURIComponent(etitle) : undefined))}
+          : (arEpTitle ?? (etitle && /[\u0600-\u06FF]/.test(safeDecodeURIComponent(etitle)) ? safeDecodeURIComponent(etitle) : undefined))}
         initialPosition={resumeTime}
         totalEps={playerTotalEps}
         onBack={onRiftBack}
