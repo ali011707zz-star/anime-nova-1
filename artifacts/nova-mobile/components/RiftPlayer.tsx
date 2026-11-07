@@ -13,7 +13,7 @@ import * as Brightness from "expo-brightness";
 import { VolumeManager } from "../lib/volume-manager";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  ActivityIndicator, Alert, Animated, Dimensions, Easing, I18nManager, Linking, Platform,
+  ActivityIndicator, Alert, Animated, DeviceEventEmitter, Dimensions, Easing, I18nManager, Linking, Platform,
   BackHandler, PanResponder, ScrollView, StyleSheet, Text, View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -2307,6 +2307,40 @@ function ExpoRiftPlayer({
   }, [applySeek, fadeIn]);
   seekRef.current = seek;
 
+  const tvHoldCommitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const performTvStepSeek = useCallback((direction: 1 | -1, repeatCount = 0) => {
+    const maxDuration = durationRef.current;
+    if (!Number.isFinite(maxDuration) || maxDuration <= 0) return;
+    const step = seekDurationRef.current || 10;
+    const basePos = pendingSeekRef.current?.target ?? positionRef.current;
+    const target = Math.min(Math.max(basePos + direction * step, 0), maxDuration);
+    fadeIn();
+    if (repeatCount > 0) {
+      pendingSeekRef.current = { target, expiresAt: Date.now() + 8000 };
+      positionRef.current = target;
+      setPosition(target);
+      setPostSeekPct(target / maxDuration);
+      if (tvHoldCommitTimerRef.current) clearTimeout(tvHoldCommitTimerRef.current);
+      tvHoldCommitTimerRef.current = setTimeout(() => {
+        tvHoldCommitTimerRef.current = null;
+        applySeek(target);
+      }, 160);
+    } else {
+      if (tvHoldCommitTimerRef.current) {
+        clearTimeout(tvHoldCommitTimerRef.current);
+        tvHoldCommitTimerRef.current = null;
+      }
+      applySeek(target);
+    }
+  }, [applySeek, fadeIn]);
+
+  useEffect(() => {
+    return () => {
+      if (tvHoldCommitTimerRef.current) clearTimeout(tvHoldCommitTimerRef.current);
+    };
+  }, []);
+
   /* على التلفاز يبقى التركيز على شريط التقدم هدفاً حقيقياً للريموت؛
      السهمان يسحبان الموضع بخطوة التقديم المختارة بدلاً من نقل التركيز
      إلى زر آخر. ندعم أرقام Android keyCode وأسماء أحداث RN معاً. */
@@ -2314,19 +2348,55 @@ function ExpoRiftPlayer({
     if (!tvMode || !showControls || !progressFocusedRef.current) return;
     const nativeEvent = event?.nativeEvent || {};
     const keyCode = Number(nativeEvent.keyCode ?? nativeEvent.keycode);
+    const repeatCount = Number(nativeEvent.repeatCount ?? 0);
     const eventName = String(
       nativeEvent.eventType ?? nativeEvent.key ?? nativeEvent.action ?? "",
     ).toLowerCase();
-    const direction =
+    const direction: 1 | -1 | 0 =
       keyCode === 21 || eventName.includes("left") ? -1 :
       keyCode === 22 || eventName.includes("right") ? 1 : 0;
     if (!direction) return;
     const now = Date.now();
-    if (now - lastTvSeekAtRef.current < 100) return;
+    if (now - lastTvSeekAtRef.current < 60) return;
     lastTvSeekAtRef.current = now;
-    seek(positionRef.current + direction * (seekDurationRef.current || 10));
+    performTvStepSeek(direction, repeatCount);
     event?.preventDefault?.();
-  }, [seek, showControls, tvMode]);
+  }, [performTvStepSeek, showControls, tvMode]);
+
+  useEffect(() => {
+    if (Platform.OS !== "android" || isLocked) return;
+    const handleRemoteKey = (evt: any) => {
+      const keyCode = Number(evt?.keyCode ?? evt?.keycode ?? 0);
+      const repeatCount = Number(evt?.repeatCount ?? 0);
+      const eventType = String(evt?.eventType ?? evt?.key ?? "").toLowerCase();
+      const isRight = keyCode === 22 || keyCode === 90 || eventType === "right" || eventType === "fastforward";
+      const isLeft = keyCode === 21 || keyCode === 89 || eventType === "left" || eventType === "rewind";
+      if (isRight || isLeft) {
+        if (!showControls || progressFocusedRef.current || keyCode === 90 || keyCode === 89) {
+          const now = Date.now();
+          if (now - lastTvSeekAtRef.current < 60) return;
+          lastTvSeekAtRef.current = now;
+          performTvStepSeek(isRight ? 1 : -1, repeatCount);
+        } else {
+          fadeIn();
+        }
+        return;
+      }
+      if (keyCode === 85 || keyCode === 126 || keyCode === 127 || eventType === "playpause") {
+        togglePlay();
+        return;
+      }
+      if (!showControls && (keyCode === 19 || keyCode === 20 || keyCode === 23 || keyCode === 66 || eventType === "up" || eventType === "down" || eventType === "select")) {
+        fadeIn();
+      }
+    };
+    const sub1 = DeviceEventEmitter.addListener("novaTvKeyEvent", handleRemoteKey);
+    const sub2 = DeviceEventEmitter.addListener("onHWKeyEvent", handleRemoteKey);
+    return () => {
+      sub1.remove();
+      sub2.remove();
+    };
+  }, [fadeIn, isLocked, performTvStepSeek, showControls, togglePlay]);
 
   /* seekSilent: نفس seek لكن بدون إظهار controls (للـ double-tap والـ gestures) */
   const seekSilentRef = useRef<(s: number) => void>(() => {});
@@ -2689,9 +2759,13 @@ function ExpoRiftPlayer({
       : bounds && Number.isFinite(localX)
         ? bounds.left + localX
         : NaN;
+    if (!Number.isFinite(absoluteX) || absoluteX <= 0) {
+      togglePlay();
+      return;
+    }
     const pct = progressPctFromAbsolute(absoluteX);
     if (pct !== null) commitProgressPercent(pct);
-  }, [commitProgressPercent, progressPctFromAbsolute]);
+  }, [commitProgressPercent, progressPctFromAbsolute, togglePlay]);
 
   /* ─── Skip intro/outro logic ─── */
   const SKIP_BTN_LEAD = 3; // ثوانٍ قبل بداية النطاق لإظهار الزر
@@ -3278,7 +3352,7 @@ function ExpoRiftPlayer({
                 </View>
                 {/* زر المنتصف: play/pause/spinner */}
                 <View style={s.controlButtonSlot}>
-                  <Pressable hasTVPreferredFocus={tvMode} onPress={togglePlay} style={[s.centerPlayBtn, tvMode && s.tvCenterPlayBtn]} hitSlop={16}>
+                  <Pressable onPress={togglePlay} style={[s.centerPlayBtn, tvMode && s.tvCenterPlayBtn]} hitSlop={16}>
                     {buffering && !error
                       ? <ActivityIndicator size={32} color="#fff" />
                       : <Ionicons
@@ -3300,7 +3374,7 @@ function ExpoRiftPlayer({
               /* وضع أفقي: play/pause في المنتصف دائماً */
               <View style={s.centerLandscapeWrap}>
                 <View style={s.controlButtonSlot}>
-                  <Pressable hasTVPreferredFocus={tvMode} onPress={togglePlay} style={[s.centerPlayBtn, tvMode && s.tvCenterPlayBtn]} hitSlop={16}>
+                  <Pressable onPress={togglePlay} style={[s.centerPlayBtn, tvMode && s.tvCenterPlayBtn]} hitSlop={16}>
                     {buffering && !error
                       ? <ActivityIndicator size={32} color="#fff" />
                       : <Ionicons
@@ -3344,6 +3418,8 @@ function ExpoRiftPlayer({
                     <Pressable
                       accessibilityRole="adjustable"
                       accessibilityLabel="شريط تقدم الحلقة"
+                      hasTVPreferredFocus={tvMode}
+                      focusable={true}
                       onPress={handleTvProgressPress}
                       onFocus={() => {
                         progressFocusedRef.current = true;

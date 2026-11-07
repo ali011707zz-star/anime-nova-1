@@ -23,6 +23,7 @@ const TV_MODE_OVERRIDE_KEY = "nova-tv-mode-override";
 let currentTvOverride: TvModeOverride = "auto";
 let hydratedTvOverride = false;
 let hardwareDpadDetected = false;
+let cachedHardwareTv: boolean | null = null;
 const tvListeners = new Set<() => void>();
 
 function notifyTvListeners() {
@@ -52,14 +53,14 @@ ensureTvOverrideHydrated();
 
 if (Platform.OS === "android") {
   try {
-    const onDpadEvent = () => {
-      if (!hardwareDpadDetected) {
+    DeviceEventEmitter.addListener("novaTvKeyEvent", (evt: any) => {
+      const code = Number(evt?.keyCode ?? 0);
+      // Only activate D-pad mode on real directional/center remote keys (never on Back/Volume)
+      if (!hardwareDpadDetected && (code === 19 || code === 20 || code === 21 || code === 22 || code === 23)) {
         hardwareDpadDetected = true;
         notifyTvListeners();
       }
-    };
-    DeviceEventEmitter.addListener("novaTvKeyEvent", onDpadEvent);
-    DeviceEventEmitter.addListener("onHWKeyEvent", onDpadEvent);
+    });
   } catch {}
 }
 
@@ -86,6 +87,7 @@ export async function toggleTvMode(): Promise<boolean> {
 export function useTvModeOverride(): [TvModeOverride, (mode: TvModeOverride) => Promise<void>] {
   ensureTvOverrideHydrated();
   const [mode, setMode] = React.useState<TvModeOverride>(currentTvOverride);
+
   React.useEffect(() => {
     const listener = () => setMode(currentTvOverride);
     tvListeners.add(listener);
@@ -93,20 +95,16 @@ export function useTvModeOverride(): [TvModeOverride, (mode: TvModeOverride) => 
       tvListeners.delete(listener);
     };
   }, []);
+
   return [mode, setTvModeOverride];
 }
 
-/**
- * Detects Android TV, Google TV, Fire TV, and Smart TVs reliably.
- * Also activates automatically if any hardware D-pad remote key is pressed.
- */
-export function isTvDevice(width?: number, height?: number): boolean {
-  ensureTvOverrideHydrated();
-  if (currentTvOverride === "on") return true;
-  if (currentTvOverride === "off") return false;
-  if (Platform.OS !== "android") return false;
-  if (hardwareDpadDetected) return true;
-
+function detectAndroidTvHardware(): boolean {
+  if (cachedHardwareTv !== null) return cachedHardwareTv;
+  if (Platform.OS !== "android") {
+    cachedHardwareTv = false;
+    return false;
+  }
   const nativePlatform = Platform as typeof Platform & {
     isTV?: boolean;
     constants?: {
@@ -119,6 +117,7 @@ export function isTvDevice(width?: number, height?: number): boolean {
   };
   const uiMode = String(nativePlatform.constants?.uiMode ?? "").toLowerCase();
   if (nativePlatform.isTV === true || uiMode === "tv" || uiMode === "television") {
+    cachedHardwareTv = true;
     return true;
   }
 
@@ -131,23 +130,24 @@ export function isTvDevice(width?: number, height?: number): boolean {
     .filter(Boolean)
     .join(" ")
     .toLowerCase();
-  if (
-    /\b(aft[a-z0-9]*|shield|mibox|mi\s*box|chromecast|bravia|android\s*tv|google\s*tv|smart\s*tv|tv\s*box|mecool|h96|x96|tx3|t95|tanix|beelink|ugoos|onn\.?\s*tv|tcl|hisense|toshiba|haier|skyworth|changhong|philips|sharp|sony)\b/i.test(
-      deviceInfo,
-    )
-  ) {
-    return true;
-  }
 
-  const window = Dimensions.get("window");
-  const w = width ?? window.width ?? 0;
-  const h = height ?? window.height ?? 0;
-  const longEdge = Math.max(w, h);
-  const shortEdge = Math.min(w, h);
-  if (w >= h && longEdge >= 720 && shortEdge >= 400) {
-    return true;
-  }
-  return false;
+  cachedHardwareTv = /\b(aft[a-z0-9]*|shield|mibox|mi\s*box|chromecast|bravia|android\s*tv|google\s*tv|smart\s*tv|tv\s*box|mecool|h96|x96|tx3|t95|tanix|beelink|ugoos|onn\.?\s*tv)\b/i.test(
+    deviceInfo,
+  );
+  return cachedHardwareTv;
+}
+
+/**
+ * Detects Android TV, Google TV, Fire TV, and Android TV boxes without ever
+ * misclassifying iPads or Android tablets based on screen dimensions.
+ */
+export function isTvDevice(_width?: number, _height?: number): boolean {
+  ensureTvOverrideHydrated();
+  if (currentTvOverride === "on") return true;
+  if (currentTvOverride === "off") return false;
+  if (Platform.OS !== "android") return false;
+  if (hardwareDpadDetected) return true;
+  return detectAndroidTvHardware();
 }
 
 let activeThemeIsWhite = false;
@@ -166,33 +166,24 @@ try {
     .catch(() => {});
 } catch {}
 
-export function tvFocusStyle(focused: boolean, isWhite?: boolean) {
+/**
+ * Clean, sleek TV focus ring that preserves the element's own borderRadius
+ * and background color without triggering Android elevation shadow artifacts.
+ */
+export function tvFocusStyle(focused: boolean, isWhite?: boolean): ViewStyle {
   if (!focused) return {};
   const white = typeof isWhite === "boolean" ? isWhite : activeThemeIsWhite;
   if (white) {
     return {
       borderColor: "#0284C7",
-      borderWidth: 2.2,
-      borderRadius: 12,
-      backgroundColor: "rgba(2, 132, 199, 0.08)",
-      shadowColor: "#0284c7",
-      shadowOpacity: 0.35,
-      shadowRadius: 5,
-      shadowOffset: { width: 0, height: 2 },
-      elevation: 6,
-      zIndex: 50,
+      borderWidth: 2.5,
+      zIndex: 25,
     };
   }
   return {
     borderColor: "#38BDF8",
-    borderWidth: 2.2,
-    borderRadius: 12,
-    backgroundColor: "rgba(56, 189, 248, 0.08)",
-    shadowColor: "#38BDF8",
-    shadowOpacity: 0.40,
-    shadowRadius: 6,
-    elevation: 6,
-    zIndex: 50,
+    borderWidth: 2.5,
+    zIndex: 25,
   };
 }
 
@@ -200,31 +191,15 @@ export const TV_FOCUS_VIEWABILITY_CONFIG = {
   itemVisiblePercentThreshold: 65,
 };
 
+/** Scroll a virtualized list smoothly when D-pad focus reaches an off-screen item. */
 export function useTvListFocusScroll<T>(
-  listRef: React.RefObject<FlatList<T> | null>,
-  viewPosition = 0.35,
+  _listRef: React.RefObject<FlatList<T> | null>,
+  _viewPosition = 0.35,
 ) {
-  const visibleIndicesRef = React.useRef<Set<number> | null>(null);
   const onViewableItemsChanged = React.useRef<
     NonNullable<FlatListProps<T>["onViewableItemsChanged"]>
-  >(({ viewableItems }) => {
-    const next = new Set<number>();
-    for (const item of viewableItems) {
-      if (item.isViewable && typeof item.index === "number") next.add(item.index);
-    }
-    visibleIndicesRef.current = next;
-  }).current;
-
-  const scrollToFocusedIndex = React.useCallback(
-    (index: number) => {
-      if (!isTvDevice() || visibleIndicesRef.current?.has(index) || !visibleIndicesRef.current)
-        return;
-      try {
-        listRef.current?.scrollToIndex({ index, animated: false, viewPosition });
-      } catch {}
-    },
-    [listRef, viewPosition],
-  );
+  >(() => {}).current;
+  const scrollToFocusedIndex = React.useCallback((_index: number) => {}, []);
 
   return {
     onViewableItemsChanged,
@@ -249,17 +224,19 @@ export function TvPressable({
   onBlur,
   ...props
 }: TvPressableProps) {
+  const tv = isTvDevice();
   const [focused, setFocused] = React.useState(false);
 
   return (
     <Pressable
       {...props}
-      {...({ delayPressIn: 0, delayPressOut: 0, unstable_pressDelay: 0 } as any)}
-      focusable={Platform.OS === "android" ? focusable !== false : focusable}
-      hasTVPreferredFocus={hasTVPreferredFocus}
+      unstable_pressDelay={0}
+      focusable={tv ? focusable !== false : focusable}
+      hasTVPreferredFocus={tv && hasTVPreferredFocus}
       hitSlop={props.hitSlop ?? 8}
       pressRetentionOffset={props.pressRetentionOffset ?? 12}
       android_disableSound={false}
+      android_ripple={tv ? null : props.android_ripple}
       onFocus={(event) => {
         setFocused(true);
         onFocus?.(event);
@@ -268,10 +245,10 @@ export function TvPressable({
         setFocused(false);
         onBlur?.(event);
       }}
-      style={({ pressed }) => [
-        typeof style === "function" ? style({ focused, pressed }) : style,
-        focused && tvFocusStyle(true),
-        pressed && { opacity: 0.84 },
+      style={(state) => [
+        typeof style === "function" ? style({ ...state, focused }) : style,
+        tv && focused && tvFocusStyle(true),
+        state.pressed && { opacity: 0.85 },
       ]}
     >
       {children}

@@ -115,21 +115,35 @@ function normalizeAwSeries(item: any): AwSeries | null {
     seasons: seasons.length ? seasons : [{ label: "الحلقات", animeId: key }],
   };
 }
-function gridColumnsForWidth(width: number) {
-  // TV has more pixels, not necessarily more decoding headroom. Match the
-  // phone layout so posters stay readable and scrolling stays fluid.
+function gridColumnsForWidth(width: number, tvMode = isTvDevice()) {
+  if (tvMode) return width >= 750 ? 5 : 4;
+  if (width >= 900) return 5;
+  if (width >= 600) return 4;
   return 3;
+}
+
+function getGridMetrics(width: number) {
+  const tvMode = isTvDevice();
+  const columns = gridColumnsForWidth(width, tvMode);
+  const gridWidth = tvMode
+    ? Math.min(Math.max(width - 40, 320), 1380)
+    : Math.min(Math.max(width - 24, 280), 900);
+  const gap = tvMode ? 12 : 10;
+  const cardWidth = Math.max(88, Math.floor((gridWidth - 24 - gap * (columns - 1)) / columns));
+  const cardHeight = Math.round(cardWidth * 1.44);
+  return { tvMode, columns, gridWidth, gap, cardWidth, cardHeight };
 }
 
 // ─────────────────────────────────────────────────────────
 // Shared card helpers
 // ─────────────────────────────────────────────────────────
 
-function PosterCard({ uri, title, seasons, tint, badge, badgeTint, sourceBadge, meta, testID, onPress, retryToken, retryDelayMs }: {
+function PosterCard({ uri, title, seasons, tint, badge, badgeTint, sourceBadge, meta, testID, onPress, retryToken, retryDelayMs, cardWidth, cardHeight }: {
   uri: string | null; title: string; seasons: number;
   tint: string; badge?: string; badgeTint?: string; sourceBadge?: string;
   meta?: string; testID?: string; onPress: () => void;
   retryToken?: number; retryDelayMs?: number;
+  cardWidth?: number; cardHeight?: number;
 }) {
   const colors = useColors();
   const [failedUri, setFailedUri] = useState<string | null>(null);
@@ -171,9 +185,25 @@ function PosterCard({ uri, title, seasons, tint, badge, badgeTint, sourceBadge, 
   }, [failedUri, retryDelayMs, retryToken, uri]);
 
   return (
-    <Pressable onPress={onPress} testID={testID} focusable={tvMode}
-      style={({ pressed, focused }) => [card.wrap, { opacity: pressed ? 0.72 : 1 }, tvMode && tvFocusStyle(focused)]}>
-      <View style={[card.poster, { backgroundColor: colors.surface }]}>
+    <Pressable
+      onPress={onPress}
+      testID={testID}
+      focusable={tvMode}
+      style={({ pressed, focused }) => [
+        card.wrap,
+        cardWidth && cardHeight ? { width: cardWidth, height: cardHeight } : undefined,
+        tvMode && { borderWidth: 2.5, borderColor: "transparent", padding: 2 },
+        { opacity: pressed ? 0.78 : 1 },
+        tvMode && tvFocusStyle(focused),
+      ]}
+    >
+      <View
+        style={[
+          card.poster,
+          cardWidth && cardHeight ? { width: "100%", height: "100%" } : { aspectRatio: 2 / 3 },
+          { backgroundColor: colors.surface },
+        ]}
+      >
         {show ? (
           <Image
             key={`${uri}:${imageRetry}`}
@@ -231,8 +261,7 @@ function PosterCard({ uri, title, seasons, tint, badge, badgeTint, sourceBadge, 
 function AnimationList({ searchQ }: { searchQ: string }) {
   const colors = useColors();
   const { width } = useWindowDimensions();
-  const gridWidth = Math.min(Math.max(width - 24, 0), 900);
-  const columns = gridColumnsForWidth(width);
+  const { gridWidth, columns, gap, cardWidth, cardHeight } = getGridMetrics(width);
   const router = useRouter();
   const BASE = getBaseUrl();
   const catalog = useDubbedCatalogFeed("animation", searchQ);
@@ -356,37 +385,41 @@ function AnimationList({ searchQ }: { searchQ: string }) {
       keyExtractor={row => row.kind === "aw" ? `aw:${row.item.key}` : `catalog:${row.item.provider_title_id}`}
       numColumns={columns}
       contentContainerStyle={shared.grid}
-      columnWrapperStyle={{ gap: 10 }}
-      initialNumToRender={6}
-      maxToRenderPerBatch={3}
+      columnWrapperStyle={{ gap }}
+      initialNumToRender={10}
+      maxToRenderPerBatch={6}
       updateCellsBatchingPeriod={50}
-      windowSize={5}
-      removeClippedSubviews={Platform.OS !== "web"}
-       renderItem={({ item: row }) => (
-        <View style={{ flex: 1 / columns }}>
-           {row.kind === "aw" ? (
-             <PosterCard
-               uri={row.item.poster || null}
-               title={row.item.titleAr || row.item.title}
-               seasons={row.item.seasons.length}
-               tint="#10B981"
-                 badge={trustedLegacyBadge(row.item, "animewitcher")}
-                 badgeTint="#35B955"
-               onPress={() => openDetail(row.item)}
-             />
-           ) : (
-             <PosterCard
-               uri={row.item.poster_url || row.item.backdrop_url || null}
-               title={row.item.title_ar || row.item.title || row.item.title_en || "عنوان"}
-               seasons={0}
-               tint="#10B981"
-               badge={catalogBadge(row.item, "animation")}
-                badgeTint={catalogBadge(row.item, "animation")?.includes("مترجم") ? "#D94141" : "#35B955"}
-                sourceBadge="StarDima"
-               meta={`${row.item.media_type === "movie" ? "فيلم" : "مسلسل"}${row.item.episode_count ? ` · ${row.item.episode_count} حلقة` : ""}${row.item.release_year ? ` · ${row.item.release_year}` : ""}`}
-               onPress={() => openCatalogDetail(row.item)}
-             />
-           )}
+      windowSize={7}
+      removeClippedSubviews={false}
+      renderItem={({ item: row }) => (
+        <View style={{ width: cardWidth }}>
+          {row.kind === "aw" ? (
+            <PosterCard
+              uri={row.item.poster || null}
+              title={row.item.titleAr || row.item.title}
+              seasons={row.item.seasons.length}
+              tint="#10B981"
+              badge={trustedLegacyBadge(row.item, "animewitcher")}
+              badgeTint="#35B955"
+              cardWidth={cardWidth}
+              cardHeight={cardHeight}
+              onPress={() => openDetail(row.item)}
+            />
+          ) : (
+            <PosterCard
+              uri={row.item.poster_url || row.item.backdrop_url || null}
+              title={row.item.title_ar || row.item.title || row.item.title_en || "عنوان"}
+              seasons={0}
+              tint="#10B981"
+              badge={catalogBadge(row.item, "animation")}
+              badgeTint={catalogBadge(row.item, "animation")?.includes("مترجم") ? "#D94141" : "#35B955"}
+              sourceBadge="StarDima"
+              meta={`${row.item.media_type === "movie" ? "فيلم" : "مسلسل"}${row.item.episode_count ? ` · ${row.item.episode_count} حلقة` : ""}${row.item.release_year ? ` · ${row.item.release_year}` : ""}`}
+              cardWidth={cardWidth}
+              cardHeight={cardHeight}
+              onPress={() => openCatalogDetail(row.item)}
+            />
+          )}
         </View>
       )}
       onEndReached={() => {
@@ -432,8 +465,7 @@ function dubbedImgUri(s: DubbedSeries, base: string): string | null {
 function CartoonList({ searchQ }: { searchQ: string }) {
   const colors = useColors();
   const { width } = useWindowDimensions();
-  const gridWidth = Math.min(Math.max(width - 24, 0), 900);
-  const columns = gridColumnsForWidth(width);
+  const { gridWidth, columns, gap, cardWidth, cardHeight } = getGridMetrics(width);
   const router = useRouter();
   const BASE = getBaseUrl();
   const catalog = useDubbedCatalogFeed("cartoon", searchQ);
@@ -630,14 +662,14 @@ function CartoonList({ searchQ }: { searchQ: string }) {
       keyExtractor={row => row.kind === "dubbed" ? `dubbed:${row.item.key || row.item.title}` : `catalog:${row.item.provider_title_id}`}
       numColumns={columns}
       contentContainerStyle={shared.grid}
-      columnWrapperStyle={{ gap: 10 }}
-      initialNumToRender={6}
-      maxToRenderPerBatch={3}
+      columnWrapperStyle={{ gap }}
+      initialNumToRender={10}
+      maxToRenderPerBatch={6}
       updateCellsBatchingPeriod={50}
-      windowSize={5}
-      removeClippedSubviews={Platform.OS !== "web"}
+      windowSize={7}
+      removeClippedSubviews={false}
       renderItem={({ item: row }) => (
-        <View style={{ flex: 1 / columns }}>
+        <View style={{ width: cardWidth }}>
           {row.kind === "dubbed" ? (
             <PosterCard
               uri={dubbedImgUri(row.item, BASE)}
@@ -646,6 +678,8 @@ function CartoonList({ searchQ }: { searchQ: string }) {
               tint="#7C3AED"
               badge={trustedLegacyBadge(row.item, "arabic-toons")}
               badgeTint="#35B955"
+              cardWidth={cardWidth}
+              cardHeight={cardHeight}
               onPress={() => openDetail(row.item)}
             />
           ) : (
@@ -658,6 +692,8 @@ function CartoonList({ searchQ }: { searchQ: string }) {
               badgeTint={catalogBadge(row.item, "cartoon")?.includes("مترجم") ? "#D94141" : "#35B955"}
               sourceBadge="StarDima"
               meta={`${row.item.media_type === "movie" ? "فيلم" : "مسلسل"}${row.item.episode_count ? ` · ${row.item.episode_count} حلقة` : ""}${row.item.release_year ? ` · ${row.item.release_year}` : ""}`}
+              cardWidth={cardWidth}
+              cardHeight={cardHeight}
               onPress={() => openCatalogDetail(row.item)}
             />
           )}
@@ -703,10 +739,8 @@ function isSpacetoonSeries(item: unknown): item is SpacetoonSeries {
 function SpacetoonList({ searchQ }: { searchQ: string }) {
   const colors = useColors();
   const { width } = useWindowDimensions();
-  const gridWidth = Math.min(Math.max(width - 24, 0), 900);
-  const columns = gridColumnsForWidth(width);
+  const { gridWidth, columns, gap, cardWidth, cardHeight, tvMode } = getGridMetrics(width);
   const router = useRouter();
-  const tvMode = isTvDevice();
   const [posterRetryToken, setPosterRetryToken] = useState(0);
   useFocusEffect(useCallback(() => {
     setPosterRetryToken(token => token + 1);
@@ -857,14 +891,14 @@ function SpacetoonList({ searchQ }: { searchQ: string }) {
       keyExtractor={item => `sp:${item.id}`}
       numColumns={columns}
       contentContainerStyle={shared.grid}
-      columnWrapperStyle={{ gap: 10 }}
-      initialNumToRender={6}
-      maxToRenderPerBatch={3}
+      columnWrapperStyle={{ gap }}
+      initialNumToRender={10}
+      maxToRenderPerBatch={6}
       updateCellsBatchingPeriod={50}
-      windowSize={tvMode ? 7 : Platform.OS === "android" ? 3 : 5}
-      removeClippedSubviews={Platform.OS === "android" && !tvMode}
+      windowSize={tvMode ? 9 : 7}
+      removeClippedSubviews={false}
       renderItem={({ item }) => (
-        <View style={{ flex: 1 / columns }}>
+        <View style={{ width: cardWidth }}>
           <PosterCard
             uri={item.image || null}
             title={item.title}
@@ -874,6 +908,8 @@ function SpacetoonList({ searchQ }: { searchQ: string }) {
             retryDelayMs={(item.id % 5) * 90}
             meta={`${item.isMovie ? "فيلم" : "مسلسل"}${item.episodeCount ? ` · ${item.episodeCount} حلقة` : ""}${item.year ? ` · ${item.year}` : ""}`}
             testID={`spacetoon-title-${item.id}`}
+            cardWidth={cardWidth}
+            cardHeight={cardHeight}
             onPress={() => openDetail(item)}
           />
         </View>

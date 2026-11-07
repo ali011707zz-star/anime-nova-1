@@ -4,7 +4,7 @@ import { LinearGradient } from "expo-linear-gradient";
 import { useRouter } from "expo-router";
 import React, { useEffect, useRef } from "react";
 import {
-  Animated, Dimensions, Easing, I18nManager, Image, Modal, Platform,
+  Animated, BackHandler, Dimensions, Easing, I18nManager, Image, Modal, Platform,
   ScrollView, StyleSheet, Text, View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -191,6 +191,15 @@ export function DrawerMenu({ visible, onClose }: Props) {
     }
   }, [drawerWidth, opacity, slideX, visible]);
 
+  useEffect(() => {
+    if (!visible || Platform.OS !== "android") return;
+    const sub = BackHandler.addEventListener("hardwareBackPress", () => {
+      onClose();
+      return true;
+    });
+    return () => sub.remove();
+  }, [visible, onClose]);
+
   function nav(route: string) {
     onClose();
     requestAnimationFrame(() => router.push(route as any));
@@ -198,11 +207,11 @@ export function DrawerMenu({ visible, onClose }: Props) {
 
   if (!visible) return null;
 
-  return (
-    <Modal visible={visible} transparent animationType="none" onRequestClose={onClose}>
+  const content = (
+    <View style={[StyleSheet.absoluteFillObject, { zIndex: 9999, elevation: 9999 }]}>
       {/* Backdrop */}
       <Animated.View style={[s.backdrop, { opacity }]}>
-        <Pressable style={StyleSheet.absoluteFill} onPress={onClose} focusable={false} />
+        <Pressable style={StyleSheet.absoluteFill} focusable={false} accessible={false} onPress={onClose} />
       </Animated.View>
 
       {/* Drawer panel — slides from RIGHT (RTL) */}
@@ -220,8 +229,13 @@ export function DrawerMenu({ visible, onClose }: Props) {
                 <Text style={[s.logoSub, tvMode && s.tvLogoSub, { color: colors.textMuted }]}>منصة الأنمي العربية</Text>
               </View>
             </View>
-            <Pressable onPress={onClose} focusable={tvMode} hasTVPreferredFocus={tvMode}
-              style={({ focused }) => [s.closeBtn, tvMode && s.tvCloseBtn, { backgroundColor: colors.surfaceElevated }, tvMode && tvFocusStyle(focused)]}>
+            <Pressable onPress={onClose} focusable={tvMode}
+              style={({ focused }) => [
+                s.closeBtn,
+                tvMode && s.tvCloseBtn,
+                { backgroundColor: colors.surfaceElevated, borderWidth: 2, borderColor: focused ? "#38BDF8" : "transparent" },
+                tvMode && tvFocusStyle(focused),
+              ]}>
               <Ionicons name="close" size={tvMode ? 28 : 20} color={colors.textMuted} />
             </Pressable>
           </View>
@@ -233,6 +247,7 @@ export function DrawerMenu({ visible, onClose }: Props) {
             style={({ focused }) => [
               s.userCard,
               tvMode && s.tvUserCard,
+              focused && { borderColor: "#38BDF8", borderWidth: 2.5 },
               tvMode && tvFocusStyle(focused),
             ]}
           >
@@ -290,8 +305,8 @@ export function DrawerMenu({ visible, onClose }: Props) {
 
           {/* ── Main navigation ── */}
           <SectionHeading label="القائمة الرئيسية" colors={colors} />
-          {visibleNavMain.map((item) => (
-            <DrawerItem key={item.label} item={item} tvMode={tvMode} colors={colors} onPress={() => nav(item.route)} />
+          {visibleNavMain.map((item, idx) => (
+            <DrawerItem key={item.label} item={item} tvMode={tvMode} hasTVPreferredFocus={tvMode && idx === 0} colors={colors} onPress={() => nav(item.route)} />
           ))}
 
           {/* ── Library ── */}
@@ -338,6 +353,16 @@ export function DrawerMenu({ visible, onClose }: Props) {
           </View>
         </ScrollView>
       </Animated.View>
+    </View>
+  );
+
+  if (tvMode || Platform.OS === "android") {
+    return content;
+  }
+
+  return (
+    <Modal visible={visible} transparent animationType="none" onRequestClose={onClose}>
+      {content}
     </Modal>
   );
 }
@@ -354,10 +379,11 @@ function SectionHeading({ label, colors }: {
   );
 }
 
-function DrawerItem({ item, onPress, tvMode, colors, badge }: {
+function DrawerItem({ item, onPress, tvMode, hasTVPreferredFocus = false, colors, badge }: {
   item: NavItem;
   onPress: () => void;
   tvMode: boolean;
+  hasTVPreferredFocus?: boolean;
   colors: ReturnType<typeof useColors>;
   badge?: number;
 }) {
@@ -366,15 +392,20 @@ function DrawerItem({ item, onPress, tvMode, colors, badge }: {
     : item.badge;
 
   return (
-    <Pressable onPress={onPress} focusable={tvMode} style={({ pressed, focused }) => [
-      s.navItem,
-      tvMode && s.tvNavItem,
-      { backgroundColor: colors.card, borderColor: colors.border },
-      pressed && { backgroundColor: colors.surfaceElevated },
-      tvMode && tvFocusStyle(focused),
-    ]}>
+    <Pressable
+      onPress={onPress}
+      focusable={tvMode}
+      hasTVPreferredFocus={hasTVPreferredFocus}
+      style={({ pressed, focused }) => [
+        s.navItem,
+        tvMode && s.tvNavItem,
+        { backgroundColor: colors.card, borderColor: colors.border, borderWidth: tvMode ? 2.5 : 1 },
+        (pressed || (tvMode && focused)) && { backgroundColor: colors.surfaceElevated },
+        tvMode && tvFocusStyle(focused),
+      ]}
+    >
       <View style={[s.navIcon, tvMode && s.tvNavIcon, { backgroundColor: (item.color || "#8B5CF6") + "18" }]}>
-        <Ionicons name={item.icon} size={tvMode ? 26 : 18} color={item.color || "#8B5CF6"} />
+        <Ionicons name={item.icon} size={tvMode ? 24 : 18} color={item.color || "#8B5CF6"} />
       </View>
       <Text style={[s.navLabel, tvMode && s.tvNavLabel, { color: colors.textPrimary }]}>{item.label}</Text>
       {badgeLabel && (

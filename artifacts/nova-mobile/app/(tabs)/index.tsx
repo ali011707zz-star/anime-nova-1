@@ -364,13 +364,9 @@ export default function HomeScreen() {
     router,
   ]);
 
-  const renderHomeSection = ({ item: section, index: sectionIndex }: { item: HomeSectionItem; index: number }) => {
-    const sectionFocusable = !isTvLayout || sectionIndex >= activeTvSectionIdx - 1;
-    const handleSectionFocus = () => {
-      if (isTvLayout && activeTvSectionIdx !== sectionIndex) {
-        setActiveTvSectionIdx(sectionIndex);
-      }
-    };
+  const renderHomeSection = ({ item: section }: { item: HomeSectionItem; index: number }) => {
+    const sectionFocusable = true;
+    const handleSectionFocus = undefined;
     if (section.kind === "anilist") {
       return (
         <SectionRow
@@ -1018,8 +1014,8 @@ export default function HomeScreen() {
     );
   };
 
-  const headerTvFocusable = !isTvLayout || activeTvSectionIdx <= -1 || (heroItems.length === 0 && activeTvSectionIdx <= 0);
-  const heroTvFocusable = !isTvLayout || activeTvSectionIdx <= 0;
+  const headerTvFocusable = true;
+  const heroTvFocusable = true;
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
@@ -1034,7 +1030,6 @@ export default function HomeScreen() {
               <Pressable
                 accessibilityLabel="فتح القائمة"
                 onPress={() => setShowDrawer(true)}
-                onFocus={() => { if (isTvLayout) setActiveTvSectionIdx(-2); }}
                 focusable={isTvLayout && headerTvFocusable}
                 hitSlop={isTvLayout ? 10 : 6}
                 style={[
@@ -1056,7 +1051,6 @@ export default function HomeScreen() {
                   accessibilityRole="button"
                   accessibilityLabel="البحث عن أنمي"
                   onPress={() => router.push("/(tabs)/search" as any)}
-                  onFocus={() => { if (isTvLayout) setActiveTvSectionIdx(-2); }}
                   focusable={isTvLayout && headerTvFocusable}
                   style={[
                     styles.headerSearch,
@@ -1092,7 +1086,6 @@ export default function HomeScreen() {
                 items={heroItems}
                 initialTVFocus={isTvLayout && ready}
                 tvFocusable={heroTvFocusable}
-                onSectionFocus={() => { if (isTvLayout) setActiveTvSectionIdx(-1); }}
               />
             )}
 

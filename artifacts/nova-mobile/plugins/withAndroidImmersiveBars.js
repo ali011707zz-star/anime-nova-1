@@ -3,45 +3,27 @@ const { withMainActivity } = require("@expo/config-plugins");
 const MARKER = "NOVA_PHONE_IMMERSIVE_SYSTEM_BARS";
 
 const KOTLIN_METHODS = `
-  // ${MARKER}: Keep phone system bars hidden & provide native 0ms Android TV Focus + Remote Engine.
+  // ${MARKER}: Keep phone system bars hidden; fast TV focus & remote key engine.
   private var novaTvEngineInstalled = false
   private var novaDpadMode = false
   private var novaCurrentFocusedView: android.view.View? = null
-  private var novaOverlayView: android.view.View? = null
   private var novaLastKeyRepeatMs = 0L
+  private var novaCenterConsumed = false
 
   private fun novaIsTvDevice(): Boolean {
-    if (packageManager.hasSystemFeature(android.content.pm.PackageManager.FEATURE_LEANBACK)) {
+    if (packageManager.hasSystemFeature(android.content.pm.PackageManager.FEATURE_LEANBACK) ||
+        packageManager.hasSystemFeature("android.hardware.type.television")) {
       return true
     }
+
     val uiModeType = resources.configuration.uiMode and
       android.content.res.Configuration.UI_MODE_TYPE_MASK
     if (uiModeType == android.content.res.Configuration.UI_MODE_TYPE_TELEVISION) {
       return true
     }
-    val metrics = resources.displayMetrics
-    val density = metrics.density.coerceAtLeast(1f)
-    val widthDp = metrics.widthPixels / density
-    val heightDp = metrics.heightPixels / density
-    return widthDp >= heightDp && maxOf(widthDp, heightDp) >= 720f && minOf(widthDp, heightDp) >= 400f
-  }
 
-  private fun novaShouldDrawFocusRing(view: android.view.View?, rootW: Int, rootH: Int): Boolean {
-    if (view == null || !view.isShown || !view.isAttachedToWindow) return false
-    if (!novaDpadMode && !novaIsTvDevice()) return false
-    val desc = view.contentDescription?.toString() ?: ""
-    if (desc == "مشغل الفيديو النشط" || desc == "إظهار أدوات المشغل") return false
-    val vw = view.width
-    val vh = view.height
-    if (vw <= 6 || vh <= 6) return false
-    if (rootW > 0 && rootH > 0 && vw >= (rootW * 0.92f).toInt() && vh >= (rootH * 0.84f).toInt()) {
-      return false
-    }
-    val cls = view.javaClass.name
-    if (cls.contains("ReactRootView") || cls.contains("ContentFrameLayout") || cls.contains("DecorView") || cls.contains("ScrollView")) {
-      return false
-    }
-    return true
+    val info = "${android.os.Build.MODEL ?: ""} ${android.os.Build.BRAND ?: ""} ${android.os.Build.MANUFACTURER ?: ""} ${android.os.Build.DEVICE ?: ""}".lowercase()
+    return Regex("\\b(aft[a-z0-9]*|shield|mibox|mi\\s*box|chromecast|bravia|android\\s*tv|google\\s*tv|smart\\s*tv|tv\\s*box|mecool|h96|x96|tx3|t95|tanix|beelink|ugoos|onn\\.?\\s*tv)\\b").containsMatchIn(info)
   }
 
   private class NovaRnFocusEvent(
@@ -67,43 +49,19 @@ const KOTLIN_METHODS = `
       }
       val themedCtx = ctx as? com.facebook.react.uimanager.ThemedReactContext ?: return
       val surfaceId = com.facebook.react.uimanager.UIManagerHelper.getSurfaceId(themedCtx)
-      if (surfaceId != android.view.View.NO_ID) return
       val dispatcher = com.facebook.react.uimanager.UIManagerHelper.getEventDispatcherForReactTag(themedCtx, view.id) ?: return
       val evtName = if (isFocus) "topFocus" else "topBlur"
-      dispatcher.dispatchEvent(NovaRnFocusEvent(-1, view.id, evtName))
+      dispatcher.dispatchEvent(NovaRnFocusEvent(surfaceId, view.id, evtName))
     } catch (_: Throwable) {}
   }
 
   private fun novaScrollFocusedIntoView(view: android.view.View) {
     try {
       val rect = android.graphics.Rect(0, 0, view.width, view.height)
-      val padX = (view.width * 0.35f).toInt().coerceAtLeast(32)
-      val padY = (view.height * 0.35f).toInt().coerceAtLeast(32)
-      rect.inset(-padX, -padY)
-      view.requestRectangleOnScreen(rect, false)
+      val padY = (view.height * 0.25f).toInt().coerceIn(20, 72)
+      rect.inset(0, -padY)
+      view.requestRectangleOnScreen(rect, true)
     } catch (_: Throwable) {}
-  }
-
-  private fun novaFindFirstFocusable(root: android.view.View?): android.view.View? {
-    if (root == null || root.visibility != android.view.View.VISIBLE || root.alpha <= 0.05f) return null
-    if (root === novaOverlayView) return null
-    val decor = window?.decorView
-    val rw = decor?.width ?: 0
-    val rh = decor?.height ?: 0
-    if (root.isFocusable && root.isShown && root.width > 16 && root.height > 16) {
-      val cls = root.javaClass.name
-      val isFullScreen = rw > 0 && rh > 0 && root.width >= (rw * 0.92f).toInt() && root.height >= (rh * 0.84f).toInt()
-      if (!isFullScreen && !cls.contains("ReactRootView") && !cls.contains("DecorView") && !cls.contains("ContentFrameLayout") && !cls.contains("ScrollView")) {
-        return root
-      }
-    }
-    if (root is android.view.ViewGroup) {
-      for (i in 0 until root.childCount) {
-        val found = novaFindFirstFocusable(root.getChildAt(i))
-        if (found != null) return found
-      }
-    }
-    return null
   }
 
   private fun novaInstallTvFocusEngine() {
@@ -115,129 +73,18 @@ const KOTLIN_METHODS = `
       decor.isFocusableInTouchMode = false
     }
 
-    val overlay = object : android.view.View(this) {
-      private val fillPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
-        style = android.graphics.Paint.Style.FILL
-        color = 0x00000000
-      }
-      private val outerHaloPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
-        style = android.graphics.Paint.Style.STROKE
-        color = 0x60000000.toInt()
-      }
-      private val cyanStrokePaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
-        style = android.graphics.Paint.Style.STROKE
-        color = 0xFF38BDF8.toInt()
-      }
-      private val whiteInnerPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
-        style = android.graphics.Paint.Style.STROKE
-        color = 0xC0FFFFFF.toInt()
-      }
-
-      override fun onDraw(canvas: android.graphics.Canvas) {
-        super.onDraw(canvas)
-        val v = novaCurrentFocusedView ?: return
-        if (!novaShouldDrawFocusRing(v, width, height)) return
-        val visRect = android.graphics.Rect()
-        if (!v.getGlobalVisibleRect(visRect)) return
-        val decorLoc = IntArray(2)
-        getLocationOnScreen(decorLoc)
-        val targetLoc = IntArray(2)
-        v.getLocationOnScreen(targetLoc)
-        val d = resources.displayMetrics.density.coerceAtLeast(1f)
-        val pad = 1.0f * d
-        val wScaled = v.width * v.scaleX
-        val hScaled = v.height * v.scaleY
-        val dx = (wScaled - v.width) * 0.5f
-        val dy = (hScaled - v.height) * 0.5f
-        val left = (targetLoc[0] - decorLoc[0]).toFloat() - dx - pad
-        val top = (targetLoc[1] - decorLoc[1]).toFloat() - dy - pad
-        val right = left + wScaled + pad * 2f
-        val bottom = top + hScaled + pad * 2f
-        val rectF = android.graphics.RectF(left, top, right, bottom)
-        val corner = (12f * d).coerceAtMost(minOf(rectF.width(), rectF.height()) * 0.45f)
-
-        canvas.drawRoundRect(rectF, corner, corner, fillPaint)
-        outerHaloPaint.strokeWidth = 2.0f * d
-        canvas.drawRoundRect(rectF, corner, corner, outerHaloPaint)
-        cyanStrokePaint.strokeWidth = 2.0f * d
-        canvas.drawRoundRect(rectF, corner, corner, cyanStrokePaint)
-
-        val innerInset = 1.2f * d
-        val innerRect = android.graphics.RectF(
-          rectF.left + innerInset,
-          rectF.top + innerInset,
-          rectF.right - innerInset,
-          rectF.bottom - innerInset
-        )
-        val innerCorner = (corner - innerInset).coerceAtLeast(2f * d)
-        whiteInnerPaint.strokeWidth = 0.8f * d
-        canvas.drawRoundRect(innerRect, innerCorner, innerCorner, whiteInnerPaint)
-      }
-    }.apply {
-      isClickable = false
-      isFocusable = false
-      importantForAccessibility = android.view.View.IMPORTANT_FOR_ACCESSIBILITY_NO
-      translationZ = 999f
-    }
-
-    decor.addView(
-      overlay,
-      android.widget.FrameLayout.LayoutParams(
-        android.view.ViewGroup.LayoutParams.MATCH_PARENT,
-        android.view.ViewGroup.LayoutParams.MATCH_PARENT
-      )
-    )
-    novaOverlayView = overlay
-
     decor.viewTreeObserver.addOnGlobalFocusChangeListener { oldFocus, newFocus ->
       if (oldFocus != null) {
-        try {
-          oldFocus.animate().cancel()
-          oldFocus.scaleX = 1.0f
-          oldFocus.scaleY = 1.0f
-          oldFocus.overlay.clear()
-        } catch (_: Throwable) {}
         novaDispatchRnFocusEvent(oldFocus, false)
       }
       novaCurrentFocusedView = newFocus
       if (newFocus != null) {
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+          try { newFocus.defaultFocusHighlightEnabled = false } catch (_: Throwable) {}
+        }
         novaDispatchRnFocusEvent(newFocus, true)
         if (novaDpadMode || novaIsTvDevice()) {
           novaScrollFocusedIntoView(newFocus)
-          if (novaShouldDrawFocusRing(newFocus, decor.width, decor.height)) {
-            /* overlay ring removed */
-            try {
-              newFocus.animate()
-                .scaleX(1.035f)
-                .scaleY(1.035f)
-                .setDuration(75)
-                .setUpdateListener { novaOverlayView?.invalidate() }
-                .start()
-            } catch (_: Throwable) {}
-          }
-        }
-      }
-      novaOverlayView?.bringToFront()
-      novaOverlayView?.invalidate()
-    }
-
-    decor.viewTreeObserver.addOnScrollChangedListener {
-      if (novaCurrentFocusedView != null) {
-        novaOverlayView?.invalidate()
-      }
-    }
-
-    decor.viewTreeObserver.addOnGlobalLayoutListener {
-      if (novaDpadMode || novaIsTvDevice()) {
-        val cur = novaCurrentFocusedView
-        if (cur == null || !cur.isShown || !cur.isAttachedToWindow) {
-          val candidate = novaFindFirstFocusable(decor)
-          if (candidate != null) {
-            /* do not hijack focus */
-          }
-        } else {
-          novaOverlayView?.bringToFront()
-          novaOverlayView?.invalidate()
         }
       }
     }
@@ -269,6 +116,8 @@ const KOTLIN_METHODS = `
       keyCode == android.view.KeyEvent.KEYCODE_ENTER ||
       keyCode == android.view.KeyEvent.KEYCODE_NUMPAD_ENTER ||
       keyCode == android.view.KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE ||
+      keyCode == android.view.KeyEvent.KEYCODE_MEDIA_PLAY ||
+      keyCode == android.view.KeyEvent.KEYCODE_MEDIA_PAUSE ||
       keyCode == android.view.KeyEvent.KEYCODE_MEDIA_FAST_FORWARD ||
       keyCode == android.view.KeyEvent.KEYCODE_MEDIA_REWIND
 
@@ -276,16 +125,14 @@ const KOTLIN_METHODS = `
       if (!novaDpadMode) {
         novaDpadMode = true
         window?.decorView?.isFocusableInTouchMode = false
-        novaOverlayView?.invalidate()
       }
       if (event.action == android.view.KeyEvent.ACTION_DOWN) {
         val now = android.os.SystemClock.uptimeMillis()
-        if (event.repeatCount == 0 || now - novaLastKeyRepeatMs >= 100L) {
+        if (event.repeatCount == 0 || now - novaLastKeyRepeatMs >= 65L) {
           novaLastKeyRepeatMs = now
           novaEmitKeyEventToJs(keyCode, event.action, event.repeatCount)
         }
       }
-
       val focused = currentFocus
       val desc = focused?.contentDescription?.toString() ?: ""
       if (
@@ -294,19 +141,33 @@ const KOTLIN_METHODS = `
       ) {
         return true
       }
-
       if (
-        event.action == android.view.KeyEvent.ACTION_DOWN &&
-        (keyCode == android.view.KeyEvent.KEYCODE_DPAD_UP ||
-         keyCode == android.view.KeyEvent.KEYCODE_DPAD_DOWN ||
-         keyCode == android.view.KeyEvent.KEYCODE_DPAD_LEFT ||
-         keyCode == android.view.KeyEvent.KEYCODE_DPAD_RIGHT)
+        keyCode == android.view.KeyEvent.KEYCODE_DPAD_CENTER ||
+        keyCode == android.view.KeyEvent.KEYCODE_ENTER ||
+        keyCode == android.view.KeyEvent.KEYCODE_NUMPAD_ENTER
       ) {
-        val decor = window?.decorView
-        if (focused == null || !focused.isShown || (decor != null && !novaShouldDrawFocusRing(focused, decor.width, decor.height) && desc != "مشغل الفيديو النشط" && desc != "إظهار أدوات المشغل")) {
-          val first = novaFindFirstFocusable(decor)
-          if (first != null) {
-            /* do not hijack focus */
+        if (focused != null && focused !is android.widget.EditText) {
+          if (event.action == android.view.KeyEvent.ACTION_DOWN) {
+            if (event.repeatCount == 0) {
+              var target: android.view.View? = focused
+              var clicked = false
+              while (target != null && target !== window?.decorView) {
+                if (target.isClickable && target.performClick()) {
+                  clicked = true
+                  break
+                }
+                target = target.parent as? android.view.View
+              }
+              if (clicked) {
+                novaCenterConsumed = true
+                return true
+              }
+            } else if (novaCenterConsumed) {
+              return true
+            }
+          } else if (event.action == android.view.KeyEvent.ACTION_UP && novaCenterConsumed) {
+            novaCenterConsumed = false
+            return true
           }
         }
       }
@@ -318,7 +179,6 @@ const KOTLIN_METHODS = `
     if (ev?.action == android.view.MotionEvent.ACTION_DOWN && !novaIsTvDevice()) {
       if (novaDpadMode) {
         novaDpadMode = false
-        novaOverlayView?.invalidate()
       }
     }
     return super.dispatchTouchEvent(ev)

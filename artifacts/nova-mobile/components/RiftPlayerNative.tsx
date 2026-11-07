@@ -8,6 +8,7 @@ import {
   ActivityIndicator,
   Alert,
   BackHandler,
+  DeviceEventEmitter,
   Dimensions,
   PanResponder,
   Platform,
@@ -461,10 +462,21 @@ function TvPlayerSurface({
           <View style={styles.tvCinemaControls}>
             <View style={styles.tvProgressRow}>
               <Text style={styles.tvCinemaTime}>{formatTime(position)}</Text>
-              <View style={styles.tvProgressTrack}>
+              <Pressable
+                accessibilityRole="adjustable"
+                accessibilityLabel="شريط تقدم الحلقة"
+                onPress={togglePlayback}
+                onFocus={onTvFocus}
+                hasTVPreferredFocus
+                focusable
+                style={({ focused }) => [
+                  styles.tvProgressTrack,
+                  tvFocusStyle(focused),
+                ]}
+              >
                 <View style={[styles.tvProgressFill, { width: `${progress * 100}%` }]} />
                 <View style={[styles.tvProgressThumb, { left: `${progress * 100}%` }]} />
-              </View>
+              </Pressable>
               <Text style={styles.tvCinemaTime}>{formatTime(duration)}</Text>
             </View>
 
@@ -487,8 +499,8 @@ function TvPlayerSurface({
               </Pressable>
               <Pressable
                 accessibilityRole="button"
-                accessibilityLabel="إرجاع ثلاثين ثانية"
-                onPress={() => seek(position - 30)}
+                accessibilityLabel="إرجاع عشر ثوانٍ"
+                onPress={() => seek(position - 10)}
                 onFocus={onTvFocus}
                 focusable
                 style={({ focused }) => [
@@ -497,14 +509,13 @@ function TvPlayerSurface({
                 ]}
               >
                 <Ionicons name="play-back" size={32} color="#fff" />
-                <Text style={styles.tvTransportLabel}>30 ثانية</Text>
+                <Text style={styles.tvTransportLabel}>10 ثوانٍ</Text>
               </Pressable>
               <Pressable
                 accessibilityRole="button"
                 accessibilityLabel={isPlaying ? "إيقاف مؤقت" : "تشغيل"}
                 onPress={togglePlayback}
                 onFocus={onTvFocus}
-                hasTVPreferredFocus
                 focusable
                 style={({ focused }) => [
                   styles.tvCinemaPlayButton,
@@ -516,8 +527,8 @@ function TvPlayerSurface({
               </Pressable>
               <Pressable
                 accessibilityRole="button"
-                accessibilityLabel="تقديم ثلاثين ثانية"
-                onPress={() => seek(position + 30)}
+                accessibilityLabel="تقديم عشر ثوانٍ"
+                onPress={() => seek(position + 10)}
                 onFocus={onTvFocus}
                 focusable
                 style={({ focused }) => [
@@ -526,7 +537,7 @@ function TvPlayerSurface({
                 ]}
               >
                 <Ionicons name="play-forward" size={32} color="#fff" />
-                <Text style={styles.tvTransportLabel}>30 ثانية</Text>
+                <Text style={styles.tvTransportLabel}>10 ثوانٍ</Text>
               </Pressable>
               <Pressable
                 accessibilityRole="button"
@@ -980,9 +991,13 @@ export function RiftPlayer({
     [playableSources, player, scheduleHide],
   );
 
+  const tvHoldPositionRef = useRef<number | null>(null);
+  const tvHoldCommitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   const seek = useCallback(
     (next: number) => {
       const target = Math.max(0, Math.min(duration || next, next));
+      tvHoldPositionRef.current = target;
       player.currentTime = target;
       setPosition(target);
       onProgress?.(target, duration);
@@ -990,6 +1005,88 @@ export function RiftPlayer({
     },
     [duration, onProgress, player, scheduleHide],
   );
+
+  const performTvStepSeek = useCallback(
+    (direction: -1 | 1, repeatCount = 0) => {
+      const basePos = tvHoldPositionRef.current ?? position;
+      const step = 10;
+      const next = Math.max(0, Math.min(duration || basePos + direction * step, basePos + direction * step));
+      tvHoldPositionRef.current = next;
+      setPosition(next);
+      scheduleHide();
+      if (tvHoldCommitTimerRef.current) {
+        clearTimeout(tvHoldCommitTimerRef.current);
+        tvHoldCommitTimerRef.current = null;
+      }
+      if (repeatCount === 0) {
+        player.currentTime = next;
+        onProgress?.(next, duration);
+        tvHoldCommitTimerRef.current = setTimeout(() => {
+          tvHoldPositionRef.current = null;
+          tvHoldCommitTimerRef.current = null;
+        }, 300);
+      } else {
+        tvHoldCommitTimerRef.current = setTimeout(() => {
+          const target = tvHoldPositionRef.current;
+          tvHoldPositionRef.current = null;
+          tvHoldCommitTimerRef.current = null;
+          if (target != null) {
+            player.currentTime = target;
+            onProgress?.(target, duration);
+          }
+        }, 160);
+      }
+    },
+    [duration, onProgress, player, position, scheduleHide],
+  );
+
+  useEffect(() => {
+    if (!tvMode) return;
+    const handleEvent = (evt: any) => {
+      if (!evt) return;
+      const eventType = String(evt.eventType || "");
+      const keyCode = Number(evt.keyCode || 0);
+      const repeatCount = Number(evt.repeatCount || 0);
+      if (showSources || showSpeeds || showSubtitleSettings) return;
+      if (eventType === "left" || keyCode === 21 || keyCode === 89) {
+        performTvStepSeek(-1, repeatCount);
+      } else if (eventType === "right" || keyCode === 22 || keyCode === 90) {
+        performTvStepSeek(1, repeatCount);
+      } else if (
+        eventType === "playPause" ||
+        keyCode === 85 ||
+        keyCode === 126 ||
+        keyCode === 127
+      ) {
+        if (isPlaying) player.pause();
+        else player.play();
+        setIsPlaying((value) => !value);
+        scheduleHide();
+      } else if (eventType === "up" || eventType === "down" || eventType === "select") {
+        if (!controlsVisible) scheduleHide();
+      }
+    };
+    const sub1 = DeviceEventEmitter.addListener("novaTvKeyEvent", handleEvent);
+    const sub2 = DeviceEventEmitter.addListener("onHWKeyEvent", handleEvent);
+    return () => {
+      sub1.remove();
+      sub2.remove();
+      if (tvHoldCommitTimerRef.current) {
+        clearTimeout(tvHoldCommitTimerRef.current);
+        tvHoldCommitTimerRef.current = null;
+      }
+    };
+  }, [
+    controlsVisible,
+    isPlaying,
+    performTvStepSeek,
+    player,
+    scheduleHide,
+    showSources,
+    showSpeeds,
+    showSubtitleSettings,
+    tvMode,
+  ]);
 
   const seekPan = useRef(tvMode ? null : PanResponder.create({
       onStartShouldSetPanResponder: () => true,

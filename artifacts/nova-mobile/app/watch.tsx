@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import {
   View, Text, Image, ScrollView, ActivityIndicator,
-  StyleSheet, Platform, Animated, Easing, Alert, I18nManager,
+  StyleSheet, Platform, Animated, Easing, Alert, I18nManager, BackHandler,
 } from "react-native";
 
 const ROW_RTL = I18nManager.isRTL ? "row" : "row-reverse";
@@ -1020,6 +1020,10 @@ export default function WatchScreen() {
   const [resolveFailed, setResolveFailed] = useState(false);
   const [globalSubUrl, setGlobalSubUrl] = useState<string | undefined>();
   const [arEpTitle,   setArEpTitle]   = useState<string | undefined>();
+  const [episodeSkipTimes, setEpisodeSkipTimes] = useState<{
+    intro?: { start: number; end: number };
+    outro?: { start: number; end: number };
+  }>({});
   /* slotStatus: حالة كل مصدر في المنتقي (idle → fetching → ready/failed) */
   const [slotStatus,  setSlotStatus]  = useState<Record<string, "idle" | "fetching" | "ready" | "failed">>({});
   /* حالات التنزيل لكل موقع وجودة (site:quality) */
@@ -1190,6 +1194,42 @@ export default function WatchScreen() {
       .catch(() => {});
     return () => ctrl.abort();
   }, [isAwDubbed, sourceAnimeId, epNum, etitle]); // eslint-disable-line
+
+  /* ── جلب أوقات تخطي البداية والنهاية للحلقة من الخادم لتعميمها على كافة السيرفرات (بما فيها RE) ── */
+  useEffect(() => {
+    if (isAwDubbed || !sourceAnimeId) {
+      setEpisodeSkipTimes({});
+      return;
+    }
+    const ctrl = new AbortController();
+    const base = getBaseUrl();
+    const qs = new URLSearchParams({
+      anilistId: String(sourceAnimeId),
+      ep: String(epNum),
+      title: titleStr || "",
+      english: englishStr || "",
+    });
+    fetch(`${base}/api/anime/skip-times?${qs.toString()}`, { signal: ctrl.signal })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d: any) => {
+        if (ctrl.signal.aborted || !isMountedRef.current || !d) return;
+        const next: { intro?: { start: number; end: number }; outro?: { start: number; end: number } } = {};
+        if (d.skipIntro && typeof d.skipIntro.start === "number" && typeof d.skipIntro.end === "number") {
+          next.intro = d.skipIntro;
+        }
+        if (d.skipOutro && typeof d.skipOutro.start === "number" && typeof d.skipOutro.end === "number") {
+          next.outro = d.skipOutro;
+        }
+        if (next.intro || next.outro) {
+          setEpisodeSkipTimes((prev) => ({
+            intro: prev.intro || next.intro,
+            outro: prev.outro || next.outro,
+          }));
+        }
+      })
+      .catch(() => {});
+    return () => ctrl.abort();
+  }, [isAwDubbed, sourceAnimeId, epNum, titleStr, englishStr]);
 
   /* ── Kawaii Arabic subtitle for every raw-audio source ──
      Anivexa streams are deliberately returned without provider subtitles so
@@ -1765,6 +1805,12 @@ export default function WatchScreen() {
     const subtitleUrl = subtitlesDisabledForSite(src.site)
       ? undefined
       : normalizeProviderSubtitleUrl(src.site || "", src.subtitleUrl || globalSubUrl, getBaseUrl());
+    if (src.skipIntro || src.skipOutro) {
+      setEpisodeSkipTimes((prev) => ({
+        intro: src.skipIntro || prev.intro,
+        outro: src.skipOutro || prev.outro,
+      }));
+    }
     setPlayingSrc({ ...src, subtitleUrl });
     setResolveFailed(false);
     /* على web: HLS → embed WebView مع hls-proxy URL مباشرة */
@@ -1801,7 +1847,7 @@ export default function WatchScreen() {
 
   /* ── جلب مصدر واحد عند ضغط المستخدم على زر المصدر ── */
   const handlePickSite = useCallback(async (site: string, preferredQuality?: QualityKey, excludeKeys: string[] = []) => {
-    if (tvMode && excludeKeys.length === 0 && Date.now() - pickerOpenedAtRef.current < 750) {
+    if (tvMode && excludeKeys.length === 0 && Date.now() - pickerOpenedAtRef.current < 180) {
       return;
     }
     if (isAwDubbed) {
@@ -2409,13 +2455,22 @@ export default function WatchScreen() {
   const handleBack = useCallback(() => {
     /* الخروج من المشغل يرجع أولاً إلى منتقي المصادر حتى لو دخل المستخدم
        من بطاقة أحدث الحلقات. */
-    if (screen === "native" || screen === "embed") {
+    if (screen === "native" || screen === "embed" || screen === "resolving") {
       saveProgress();
       setScreen("picker");
       return;
     }
     leaveWatch();
   }, [screen, saveProgress, leaveWatch]);
+
+  useEffect(() => {
+    if (Platform.OS !== "android" || screen === "native") return;
+    const sub = BackHandler.addEventListener("hardwareBackPress", () => {
+      handleBack();
+      return true;
+    });
+    return () => sub.remove();
+  }, [screen, handleBack]);
 
   /* ── Memoized RiftPlayer callbacks — يمنع إعادة render المشغّل عند كل تغيير في الـ parent ── */
   const onRiftBack = useCallback(() => {
@@ -2571,10 +2626,10 @@ export default function WatchScreen() {
             : (KAWAII_SUBTITLE_SITES.has(site) || !isArabic ? globalSubUrl : undefined)),
       isArabic,
       wantsSmartSub: !isArabic,
-      skipIntro: playingSrc.skipIntro,
-      skipOutro: playingSrc.skipOutro,
+      skipIntro: playingSrc.skipIntro || episodeSkipTimes.intro,
+      skipOutro: playingSrc.skipOutro || episodeSkipTimes.outro,
     }];
-  }, [screen, playingSrc, globalSubUrl, playbackTraceId, isAwDubbed]);
+  }, [screen, playingSrc, globalSubUrl, playbackTraceId, isAwDubbed, episodeSkipTimes]);
 
 
   /* ── loading: صحيح عندما يكون أي موقع قيد الجلب (مرجع للمستقبل) ── */
@@ -2721,7 +2776,7 @@ export default function WatchScreen() {
 
       {/* ── Header ── */}
       <View style={[d.header, tvMode && d.tvHeader, { paddingTop: topPad + 4 }]}>
-        <Pressable onPress={handleBack} focusable={tvMode} hasTVPreferredFocus={tvMode && !pickerFocusKey}
+        <Pressable onPress={handleBack} focusable={tvMode}
           style={({ focused }) => [d.headerBack, tvMode && d.tvHeaderActionBtn, tvMode && tvFocusStyle(focused)]}>
           <Ionicons name="chevron-forward" size={tvMode ? 25 : 19} color={colors.textPrimary} />
         </Pressable>
@@ -2931,7 +2986,20 @@ export default function WatchScreen() {
                     </View>
 
                     {/* قائمة السيرفرات */}
-                    <View style={[d.srcSection, { backgroundColor: "#0c121e", borderColor: "rgba(255,255,255,0.08)", borderWidth: 1, borderRadius: 14, overflow: "hidden" }]}>
+                    <View
+                      style={[
+                        d.srcSection,
+                        {
+                          backgroundColor: colors.card,
+                          borderColor: colors.border,
+                          borderWidth: 1,
+                          borderRadius: 14,
+                          padding: tvMode ? 6 : 0,
+                          gap: tvMode ? 6 : 0,
+                          overflow: tvMode ? "visible" : "hidden",
+                        },
+                      ]}
+                    >
                       {slots.map((slot, idx) => {
                         const slotKey = pickerSlotKey(slot.site, qk);
                         const status   = slotStatus[slotKey] || "idle";
@@ -2940,8 +3008,9 @@ export default function WatchScreen() {
                         const shouldPreferTvFocus = Boolean(
                           tvMode &&
                           focusMemoryReady &&
-                          pickerFocusKey &&
-                          pickerFocusKey === slotKey
+                          (pickerFocusKey
+                            ? pickerFocusKey === slotKey
+                            : firstAvailableKey === slotKey)
                         );
                         return (
                           <Pressable
@@ -2957,9 +3026,22 @@ export default function WatchScreen() {
                             style={({ focused, pressed }) => [
                               d.webRow,
                               tvMode && d.tvWebRow,
+                              !tvMode && idx < slots.length - 1 && d.webRowBorder,
+                              {
+                                minHeight: tvMode ? 64 : 52,
+                                paddingHorizontal: tvMode ? 16 : 12,
+                                paddingVertical: tvMode ? 12 : 10,
+                                justifyContent: "space-between",
+                                borderRadius: tvMode ? 12 : 0,
+                                borderWidth: tvMode ? 2.5 : 0,
+                                borderColor: "transparent",
+                                backgroundColor: tvMode
+                                  ? focused
+                                    ? colors.accentSurface
+                                    : colors.surfaceElevated
+                                  : "transparent",
+                              },
                               tvMode && tvFocusStyle(focused),
-                              idx < slots.length - 1 && d.webRowBorder,
-                              { minHeight: 52, paddingHorizontal: 12, paddingVertical: 10, justifyContent: "space-between" },
                               pressed && { opacity: 0.75 },
                             ]}
                           >
@@ -2970,7 +3052,7 @@ export default function WatchScreen() {
                               ) : (
                                 <View style={[d.playBtnGreen, tvMode && d.tvPlayBtn, { backgroundColor: "#10b981", borderRadius: 10, paddingHorizontal: 14, paddingVertical: 6, flexDirection: "row", alignItems: "center", gap: 4 }]}>
                                   <Ionicons name="play" size={tvMode ? 18 : 11} color="#ffffff" />
-                                  <Text style={[d.playBtnGreenText, tvMode && d.tvActionText, { color: "#ffffff", fontSize: 12, fontFamily: "Cairo_700Bold" }]}>تشغيل</Text>
+                                  <Text style={[d.playBtnGreenText, tvMode && d.tvActionText, { color: "#ffffff", fontSize: tvMode ? 14 : 12, fontFamily: "Cairo_700Bold" }]}>تشغيل</Text>
                                 </View>
                               )}
                             </View>
@@ -2981,7 +3063,7 @@ export default function WatchScreen() {
                                 style={[
                                   d.webRowTag,
                                   tvMode && d.tvWebRowTag,
-                                  { textAlign: "right", color: "#f8fafc", fontSize: 13, fontFamily: "Cairo_700Bold" },
+                                  { textAlign: "right", color: colors.textPrimary, fontSize: tvMode ? 15 : 13, fontFamily: "Cairo_700Bold" },
                                   isFailed && { color: colors.destructive },
                                 ]}
                                 numberOfLines={1}

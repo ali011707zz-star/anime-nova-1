@@ -188,6 +188,9 @@ function AnimeCard({
   const { g } = useBrowseTheme();
   const { width, height } = useWindowDimensions();
   const tvMode = isTvDevice(width, height);
+  const gridW = Math.min(Math.max(width - 24, 280), tvMode ? 1100 : 900);
+  const cardW = Math.max(88, Math.floor((gridW - 24 - 10 * (columns - 1)) / columns));
+  const cardH = Math.round(cardW * 1.44);
   const fmt = anime.format ? FORMAT_AR[anime.format] : null;
   const isFilm = anime.format === "MOVIE";
   return (
@@ -196,9 +199,14 @@ function AnimeCard({
       focusable={tvMode}
       hasTVPreferredFocus={hasTVPreferredFocus}
       onFocus={onFocus}
-      style={({ focused }) => [g.card, { flex: 1 / columns }, tvMode && tvFocusStyle(focused)]}
+      style={({ focused }) => [
+        g.card,
+        { width: cardW, height: cardH, flex: 0, borderRadius: tvMode ? 16 : 13 },
+        tvMode && { borderWidth: 2.5, borderColor: "transparent", padding: 2 },
+        tvMode && tvFocusStyle(focused),
+      ]}
     >
-      <View style={[g.cardWrap, tvMode && g.tvCardWrap]}>
+      <View style={[g.cardWrap, tvMode && g.tvCardWrap, { width: "100%", height: "100%", aspectRatio: undefined }]}>
         {anime.coverImage?.large ? (
           <Image
             source={{ uri: tvMode ? anime.coverImage.extraLarge || anime.coverImage.large : anime.coverImage.large }}

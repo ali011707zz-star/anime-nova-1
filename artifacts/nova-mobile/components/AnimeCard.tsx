@@ -61,7 +61,8 @@ export const AnimeCard = React.memo(function AnimeCard({ anime, size = "sm", car
   const tvMode = isTvDevice(windowWidth, windowHeight);
 
   const knownAr = getKnownArabicAnimeTitle(anime.id, anime.title?.english, anime.title?.romaji);
-  const arabicTitle = anime.title_ar || knownAr || (anime.synonyms || []).find((s) => /[؀-ۿ]/.test(s));
+  const synonyms = ((anime as any).synonyms as string[] | undefined) || [];
+  const arabicTitle = anime.title_ar || knownAr || synonyms.find((s: string) => /[\u0600-\u06FF]/.test(s));
   const mainTitle = arabicTitle || anime.title.english || anime.title.romaji;
   const secondaryTitle = arabicTitle && (anime.title.english || anime.title.romaji) !== arabicTitle ? (anime.title.english || anime.title.romaji) : null;
   const posterUri = tvMode
@@ -84,7 +85,7 @@ export const AnimeCard = React.memo(function AnimeCard({ anime, size = "sm", car
         tvMode && tvFocusStyle(focused),
       ]}
     >
-      <View style={[styles.imageContainer, { width: cardW, height: cardH, borderRadius: colors.radius - 4 }]}>
+      <View style={[styles.imageContainer, { width: tvMode ? cardW - 13 : cardW, height: cardH, borderRadius: colors.radius - 4 }]}>
         <Image
           source={{ uri: posterUri }}
           style={[styles.image, { borderRadius: colors.radius - 4 }]}
@@ -141,7 +142,7 @@ export const AnimeCard = React.memo(function AnimeCard({ anime, size = "sm", car
 
 const styles = StyleSheet.create({
   card: { flexDirection: "column", gap: 6 },
-  tvCard: { borderRadius: 10, padding: 5, margin: -5, gap: 8 },
+  tvCard: { borderRadius: 12, padding: 4, borderWidth: 2.5, borderColor: "transparent", gap: 6 },
   imageContainer: { overflow: "hidden", backgroundColor: "#1a1a2e", position: "relative" },
   image: { width: "100%", height: "100%" },
   scoreBadge: {
