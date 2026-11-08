@@ -135,11 +135,7 @@ const KOTLIN_METHODS = `
       decor.isFocusableInTouchMode = false
     }
 
-    decor.viewTreeObserver.addOnGlobalLayoutListener {
-      if (novaDpadMode || novaIsTvDevice()) {
-        novaEnsureModalFocus()
-      }
-    }
+    // Modal focus is handled safely on D-pad navigation and user interaction without blocking render/layout
     decor.viewTreeObserver.addOnGlobalFocusChangeListener { oldFocus, newFocus ->
       if (oldFocus != null) {
         novaDispatchRnFocusEvent(oldFocus, false)
