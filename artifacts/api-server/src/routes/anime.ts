@@ -35,6 +35,8 @@ import {
   streamInspectedBody,
 } from "../lib/mediaStreamTools.mjs";
 import { rewriteHlsManifest } from "../lib/hlsManifestRewrite.mjs";
+import { getAnimeFillerData } from "../services/fillerService.js";
+import { getPersistentArabicTitles, savePersistentArabicTitles, getSavedTranslation } from "../services/episodeTitlesStore.js";
 import { createHash, createHmac, createDecipheriv, createCipheriv, randomBytes } from "crypto";
 import { execSync, execFile, spawn } from "child_process";
 import { createReadStream, existsSync, writeFileSync, readFileSync, readdirSync, mkdirSync, rmSync, statSync, renameSync, openSync, writeSync, closeSync } from "fs";
@@ -18275,7 +18277,7 @@ async function serveMediaVPS(
   /* The timeout is only for establishing the upstream response. Applying
      AbortSignal.timeout() directly to fetch also aborts a healthy MP4 body
      after 20s, which looks like a playback freeze until the next seek. */
-  const connectTimeout = setTimeout(() => upstreamAbort.abort(), 20000);
+  const connectTimeout = setTimeout(() => upstreamAbort.abort(), 35000);
   const abortUpstream = () => upstreamAbort.abort();
   res.once("close", abortUpstream);
   try {
@@ -20732,7 +20734,27 @@ function isGenericPlaceholderEpisodeTitle(raw: string): boolean {
   return false;
 }
 
-async function populateArabicEpisodeTitles(episodes: any[]): Promise<void> {
+async function populateArabicEpisodeTitles(
+  episodes: any[],
+  malId = 0,
+  anilistId = 0,
+  page = 1
+): Promise<void> {
+  // 1. Check persistent database & disk store for this show and page first
+  const storedTitles = await getPersistentArabicTitles(malId, anilistId, page).catch(() => null);
+  if (storedTitles && storedTitles.size > 0) {
+    for (const ep of episodes) {
+      const epNum = Number(ep?.episode || ep?.mal_id || 0);
+      const stored = storedTitles.get(epNum);
+      if (stored && /[\u0600-\u06FF]/.test(stored)) {
+        ep.title_ar = stored;
+        ep.title = stored;
+        ep.title_romanji = "";
+      }
+    }
+  }
+
+  // 2. For any remaining episodes, check individual translation dictionary
   const titlesToTranslate: Array<{ idx: number; title: string }> = [];
   for (let i = 0; i < episodes.length; i++) {
     const existingAr = String(episodes[i]?.title_ar || "").trim();
@@ -20745,7 +20767,7 @@ async function populateArabicEpisodeTitles(episodes: any[]): Promise<void> {
     episodes[i].title_romanji = episodes[i].title_romanji || rawTitle;
     if (!/[\u0600-\u06FF]/.test(rawTitle)) {
       const cacheKey = `ar_ep:${rawTitle}`;
-      const cachedAr = translateCache.get(cacheKey);
+      const cachedAr = translateCache.get(cacheKey) || getSavedTranslation(rawTitle);
       if (cachedAr) {
         episodes[i].title_ar = cachedAr;
       } else {
@@ -20756,6 +20778,7 @@ async function populateArabicEpisodeTitles(episodes: any[]): Promise<void> {
     }
   }
 
+  // 3. Translate only new / untranslated episode titles
   if (titlesToTranslate.length > 0) {
     const CHUNK_SIZE = 25;
     const chunks: Array<Array<{ idx: number; title: string }>> = [];
@@ -20791,6 +20814,7 @@ async function populateArabicEpisodeTitles(episodes: any[]): Promise<void> {
     }));
   }
 
+  // 4. Normalize Arabic title and fallback
   for (let i = 0; i < episodes.length; i++) {
     const epNum = Number(episodes[i]?.episode || episodes[i]?.mal_id || i + 1);
     const ar = String(episodes[i]?.title_ar || "").trim();
@@ -20805,18 +20829,24 @@ async function populateArabicEpisodeTitles(episodes: any[]): Promise<void> {
       episodes[i].title_romanji = "";
     }
   }
+
+  // 5. Persist the titles permanently in database & disk store for all users!
+  if (malId > 0 || anilistId > 0) {
+    savePersistentArabicTitles(malId, anilistId, page, episodes).catch(() => {});
+  }
 }
 
 router.get("/anime/episode-titles", async (req, res) => {
   const malId = Number.parseInt(String(req.query.malId || "0"), 10);
   const anilistId = Number.parseInt(String(req.query.anilistId || "0"), 10);
   const page = Math.max(1, Number.parseInt(String(req.query.page || "1"), 10) || 1);
+  const titleParam = String(req.query.title || "").trim();
   if ((!Number.isFinite(malId) || malId <= 0) && (!Number.isFinite(anilistId) || anilistId <= 0)) {
     res.status(400).json({ episodes: [], total: 0, page });
     return;
   }
 
-  const key = `${malId || 0}:${anilistId || 0}:${page}`;
+  const key = `v3:${malId || 0}:${anilistId || 0}:${page}`;
   const cached = _jikanEpisodeCache.get(key);
   if (cached && Date.now() - cached.ts < JIKAN_EPISODE_CACHE_TTL) {
     res.json(cached.payload);
@@ -20844,6 +20874,18 @@ router.get("/anime/episode-titles", async (req, res) => {
         const endEp = page * 100;
         const pageSlice = allNumericEps.filter(item => item.epNum >= startEp && item.epNum <= endEp);
 
+        const candidateTitles: string[] = [];
+        if (titleParam) candidateTitles.push(titleParam);
+        if (aniZip?.titles) {
+          if (aniZip.titles.en) candidateTitles.push(aniZip.titles.en);
+          if (aniZip.titles["x-jat"]) candidateTitles.push(aniZip.titles["x-jat"]);
+          if (aniZip.titles.ja) candidateTitles.push(aniZip.titles.ja);
+        }
+        if (aniZip?.mappings?.animeplanet_id) {
+          candidateTitles.push(String(aniZip.mappings.animeplanet_id).replace(/-/g, " "));
+        }
+        const fillerData = await getAnimeFillerData(candidateTitles, malId).catch(() => null);
+
         const episodes = pageSlice.map(({ epNum, raw }) => {
           const tObj = (raw?.title && typeof raw.title === "object") ? raw.title : {};
           const rawAr = typeof tObj.ar === "string" && /[\u0600-\u06FF]/.test(tObj.ar) && !isGenericPlaceholderEpisodeTitle(tObj.ar)
@@ -20854,6 +20896,7 @@ router.get("/anime/episode-titles", async (req, res) => {
           const rawRomaji = String(tObj["x-jat"] || tObj.en || tObj.ja || "").trim();
           const cleanRomaji = isGenericPlaceholderEpisodeTitle(rawRomaji) ? "" : rawRomaji;
           const img = typeof raw?.image === "string" && raw.image.startsWith("http") ? raw.image : undefined;
+          const isFiller = Boolean(fillerData?.fillerEpisodes?.has(epNum) || raw?.filler);
           return {
             mal_id: epNum,
             episode_id: epNum,
@@ -20863,13 +20906,13 @@ router.get("/anime/episode-titles", async (req, res) => {
             title_en: cleanEn || cleanRomaji || "",
             title_romanji: cleanRomaji || cleanEn || "",
             aired: raw?.airDateUtc || raw?.airDate || null,
-            filler: Boolean(raw?.filler),
+            filler: isFiller,
             recap: Boolean(raw?.recap),
             images: img ? { jpg: { image_url: img } } : undefined,
           };
         });
 
-        await populateArabicEpisodeTitles(episodes);
+        await populateArabicEpisodeTitles(episodes, malId, anilistId, page);
 
         const now = Date.now();
         const airedEpisode = allNumericEps.reduce((max, { epNum, raw }) => {
@@ -20904,15 +20947,23 @@ router.get("/anime/episode-titles", async (req, res) => {
       );
       if (upstream.ok) {
         const body = await upstream.json() as any;
-        const episodes = (Array.isArray(body?.data) ? body.data : []).map((item: any) => ({
-          ...item,
-          filler: item?.filler === true,
-        }));
+        const candidateTitles: string[] = [];
+        if (titleParam) candidateTitles.push(titleParam);
+        const fillerData = await getAnimeFillerData(candidateTitles, malId).catch(() => null);
+
+        const episodes = (Array.isArray(body?.data) ? body.data : []).map((item: any) => {
+          const epNum = Number(item?.mal_id || item?.episode || 0);
+          const isFiller = Boolean(fillerData?.fillerEpisodes?.has(epNum) || item?.filler === true);
+          return {
+            ...item,
+            filler: isFiller,
+          };
+        });
         if (page > 1 && episodes.length === 0 && attempt === 0) {
           await new Promise(resolve => setTimeout(resolve, 400));
           continue;
         }
-        await populateArabicEpisodeTitles(episodes);
+        await populateArabicEpisodeTitles(episodes, malId, anilistId, page);
 
         const paginationTotal = Number(body?.pagination?.items?.total || 0);
         const pageFloor = (page - 1) * 100 + episodes.length;

@@ -6,12 +6,12 @@ import {
   useFonts,
 } from "@expo-google-fonts/cairo";
 import { Ionicons } from "@expo/vector-icons";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { focusManager, QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Stack, usePathname, useRouter } from "expo-router";
 import { LinearGradient } from "expo-linear-gradient";
 import * as SplashScreen from "expo-splash-screen";
 import React, { useEffect, useRef, useState } from "react";
-import { Animated, BackHandler, Dimensions, I18nManager, Image, Platform, StatusBar, StyleSheet, Text, TextInput, View } from "react-native";
+import { Animated, AppState, BackHandler, Dimensions, I18nManager, Image, Platform, StatusBar, StyleSheet, Text, TextInput, View } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import * as ScreenOrientation from "expo-screen-orientation";
@@ -25,6 +25,12 @@ import { installGlobalCrashHandlers } from "@/utils/crashLogger";
 import { getRuntimeIntegrity, runtimeIntegrityMessage } from "@/utils/runtimeIntegrity";
 import { isTvDevice } from "@/utils/tv";
 import { registerPushNotifications, subscribeToPushTokenChanges } from "@/utils/pushNotifications";
+
+if (Platform.OS !== "web") {
+  AppState.addEventListener("change", (status) => {
+    focusManager.setFocused(status === "active");
+  });
+}
 
 // توحيد مقياس الخطوط والأيقونات بين الهواتف والأجهزة اللوحية (iPad) ومنع تضخم النصوص بسبب إعدادات تكبير خط النظام
 try {
@@ -52,6 +58,17 @@ if (SENTRY_DSN && RUNTIME_INTEGRITY.trusted) {
     attachStacktrace: true,
     tracesSampleRate: 0.1,
     debug: false,
+    beforeSend(event) {
+      const firstEx = event?.exception?.values?.[0];
+      if (
+        firstEx?.type === "ApplicationNotResponding" &&
+        typeof firstEx?.value === "string" &&
+        firstEx.value.includes("Background ANR")
+      ) {
+        return null;
+      }
+      return event;
+    },
   });
 }
 

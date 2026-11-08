@@ -307,9 +307,13 @@ const AUTH_KEY = "nova-mobile-user";
 // generic app scheme (for example nova-mobile://) is not a registered
 // redirect for the Android client and Google rejects it with invalid_request
 // before the app receives any token.
+// Hardcoded known valid client IDs so missing env vars can NEVER crash Android runtime
+const HARDCODED_GOOGLE_ANDROID_CLIENT_ID = "413058110781-cbielvl5jhrf2bje392f8l9fnulvegp7.apps.googleusercontent.com";
+const HARDCODED_GOOGLE_WEB_CLIENT_ID = "413058110781-r8otf4jg4v1e7akp4ujii01brj3hv8kg.apps.googleusercontent.com";
+
 const GOOGLE_NATIVE_CLIENT_ID =
-  process.env.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID ||
-  "413058110781-cbielvl5jhrf2bje392f8l9fnulvegp7.apps.googleusercontent.com";
+  (process.env.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID || "").trim() ||
+  HARDCODED_GOOGLE_ANDROID_CLIENT_ID;
 const GOOGLE_NATIVE_SCHEME = `com.googleusercontent.apps.${GOOGLE_NATIVE_CLIENT_ID.replace(
   /\.apps\.googleusercontent\.com$/,
   "",
@@ -337,12 +341,47 @@ function fetchWithTimeout(
   });
 }
 
+class AuthErrorBoundary extends React.Component<
+  { onClose: () => void; children: React.ReactNode },
+  { hasError: boolean; errorMsg: string }
+> {
+  state = { hasError: false, errorMsg: "" };
+  static getDerivedStateFromError(error: any) {
+    return { hasError: true, errorMsg: String(error?.message || error) };
+  }
+  componentDidCatch(error: any, info: any) {
+    console.warn("[AuthErrorBoundary] caught:", error, info);
+  }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <Modal visible transparent animationType="fade" onRequestClose={this.props.onClose}>
+          <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.7)", justifyContent: "center", alignItems: "center", padding: 20 }}>
+            <View style={{ backgroundColor: "#1e1e2d", padding: 24, borderRadius: 16, maxWidth: 360, width: "100%", alignItems: "center", gap: 12 }}>
+              <Text style={{ color: "#fff", fontSize: 16, fontFamily: "Cairo_700Bold", textAlign: "center" }}>تعذر فتح تسجيل الدخول</Text>
+              <Text style={{ color: "#a1a1aa", fontSize: 12, fontFamily: "Cairo_400Regular", textAlign: "center" }}>{this.state.errorMsg}</Text>
+              <Pressable onPress={this.props.onClose} style={{ marginTop: 8, paddingHorizontal: 20, paddingVertical: 10, backgroundColor: "#7c3aed", borderRadius: 10 }}>
+                <Text style={{ color: "#fff", fontFamily: "Cairo_700Bold" }}>إغلاق</Text>
+              </Pressable>
+            </View>
+          </View>
+        </Modal>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 /* ── Auth Sheet ── */
 function AuthSheet(props: {
   open: boolean; onClose: () => void; onLogin: (u: MobileUser) => void; onLinkDevice: () => void;
 }) {
   if (!props.open) return null;
-  return <AuthSheetInner {...props} />;
+  return (
+    <AuthErrorBoundary onClose={props.onClose}>
+      <AuthSheetInner {...props} />
+    </AuthErrorBoundary>
+  );
 }
 
 function AuthSheetInner({ open, onClose, onLogin, onLinkDevice }: {
@@ -370,9 +409,9 @@ function AuthSheetInner({ open, onClose, onLogin, onLinkDevice }: {
   }, [resendCooldown]);
 
   const base = getBaseUrl();
-  const googleWebClientId = process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID || GOOGLE_NATIVE_CLIENT_ID;
-  const googleAndroidClientId = process.env.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID || googleWebClientId || GOOGLE_NATIVE_CLIENT_ID;
-  const googleIosClientId = process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID || GOOGLE_NATIVE_CLIENT_ID;
+  const googleWebClientId = (process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID || "").trim() || HARDCODED_GOOGLE_WEB_CLIENT_ID;
+  const googleAndroidClientId = (process.env.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID || "").trim() || GOOGLE_NATIVE_CLIENT_ID || HARDCODED_GOOGLE_ANDROID_CLIENT_ID;
+  const googleIosClientId = (process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID || "").trim() || HARDCODED_GOOGLE_WEB_CLIENT_ID;
   const [googleRequest, googleResponse, promptGoogleAsync] = Google.useAuthRequest({
     androidClientId: googleAndroidClientId,
     iosClientId: googleIosClientId,

@@ -337,9 +337,15 @@ function persistActive(): void {
     .catch(() => {});
 }
 
+function isAppActive(): boolean {
+  return !AppState.currentState || AppState.currentState === "active";
+}
+
 function notifyListeners(): void {
-  for (const listener of listeners) {
-    try { listener(); } catch {}
+  if (isAppActive()) {
+    for (const listener of listeners) {
+      try { listener(); } catch {}
+    }
   }
   persistActive();
 }
@@ -347,11 +353,21 @@ function notifyListeners(): void {
 /* DownloadResumable can report progress much faster than the downloads screen
    needs. Rendering and persisting every callback floods the React Native
    bridge, makes the list lose touch/scroll responsiveness, and queues many
-   AsyncStorage writes. User actions still call notifyListeners() directly. */
+   AsyncStorage writes. User actions still call notifyListeners() directly.
+   When the app is in the background, never trigger React UI re-renders to
+   avoid queueing NativeViewHierarchyManager / ReactTextView layout batches
+   that cause Background ANRs. */
 function notifyProgressListeners(): void {
   const now = Date.now();
+  if (!isAppActive()) {
+    if (now - lastProgressPersistAt >= 5_000) {
+      lastProgressPersistAt = now;
+      persistActive();
+    }
+    return;
+  }
   const elapsed = now - lastProgressNotifyAt;
-  if (elapsed >= 350) {
+  if (elapsed >= 500) {
     lastProgressNotifyAt = now;
     for (const listener of listeners) {
       try { listener(); } catch {}
@@ -365,6 +381,7 @@ function notifyProgressListeners(): void {
   if (progressNotifyTimer) return;
   progressNotifyTimer = setTimeout(() => {
     progressNotifyTimer = null;
+    if (!isAppActive()) return;
     lastProgressNotifyAt = Date.now();
     for (const listener of listeners) {
       try { listener(); } catch {}
@@ -374,7 +391,7 @@ function notifyProgressListeners(): void {
       lastProgressPersistAt = persistAt;
       persistActive();
     }
-  }, Math.max(50, 350 - elapsed));
+  }, Math.max(80, 500 - elapsed));
 }
 
 async function configureNotifications(): Promise<boolean> {
@@ -748,15 +765,23 @@ async function pollNativeDownload(entry: RuntimeDownload): Promise<void> {
     entry.errorMessage = undefined;
     entry.status = record.status === "paused" ? "paused" : "downloading";
     notifyProgressListeners();
-    entry.nativePollTimer = setTimeout(() => {
-      void pollNativeDownload(entry);
-    }, 1000);
+    if (isAppActive()) {
+      entry.nativePollTimer = setTimeout(() => {
+        void pollNativeDownload(entry);
+      }, 1200);
+    } else {
+      entry.nativePollTimer = undefined;
+    }
   } catch {
     // A transient DownloadManager query failure must not turn a live OS job
     // into a visible error. Keep polling while the app is open.
-    entry.nativePollTimer = setTimeout(() => {
-      void pollNativeDownload(entry);
-    }, 1500);
+    if (isAppActive()) {
+      entry.nativePollTimer = setTimeout(() => {
+        void pollNativeDownload(entry);
+      }, 1800);
+    } else {
+      entry.nativePollTimer = undefined;
+    }
   }
 }
 
@@ -1281,15 +1306,27 @@ if (Platform.OS !== "web") {
     /* Save the latest offset before backgrounding. The native background
        session continues independently of the watch screen. */
     persistActive();
-    if (state === "active") {
-      void restoreNativeDownloads();
+    if (state !== "active") {
+      if (progressNotifyTimer) {
+        clearTimeout(progressNotifyTimer);
+        progressNotifyTimer = null;
+      }
       for (const entry of active.values()) {
-        updateDownloadNotification(entry, true);
-        if (entry.nativeJobId != null && entry.status === "downloading") {
-          if (entry.nativePollTimer) clearTimeout(entry.nativePollTimer);
-          void pollNativeDownload(entry);
+        if (entry.nativePollTimer) {
+          clearTimeout(entry.nativePollTimer);
+          entry.nativePollTimer = undefined;
         }
       }
+      return;
     }
+    void restoreNativeDownloads();
+    for (const entry of active.values()) {
+      updateDownloadNotification(entry, true);
+      if (entry.nativeJobId != null && entry.status === "downloading") {
+        if (entry.nativePollTimer) clearTimeout(entry.nativePollTimer);
+        void pollNativeDownload(entry);
+      }
+    }
+    notifyListeners();
   });
 }

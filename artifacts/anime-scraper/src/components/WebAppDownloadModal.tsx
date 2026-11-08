@@ -45,6 +45,27 @@ export function WebAppDownloadModal() {
           />
         </div>
         <div className="pointer-events-none absolute -right-14 -top-16 h-44 w-44 rounded-full bg-violet-600/20 blur-3xl" />
+        <div className="relative mt-3 rounded-2xl border border-cyan-400/20 bg-cyan-500/10 px-3.5 py-2.5 text-right font-['Cairo']">
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-[11px] font-black text-cyan-300">📺 نسخة التلفاز (Android TV)</span>
+            <a
+              href="/nova.apk"
+              download
+              className="rounded-lg bg-cyan-500/20 px-2 py-0.5 text-[10px] font-black text-cyan-200 hover:bg-cyan-500/30"
+            >
+              تحميل مباشر (nova.apk)
+            </a>
+          </div>
+          <p className="mt-1 text-[11px] font-bold text-white/75">
+            كود تطبيق Downloader:{" "}
+            <span className="rounded bg-black/40 px-1.5 py-0.5 font-mono text-[12px] font-black text-amber-300">
+              2576388
+            </span>{" "}
+            أو الرابط:{" "}
+            <span className="font-mono text-[10.5px] text-cyan-200">aftv.news/2576388</span>
+          </p>
+        </div>
+
         <button
           type="button"
           onClick={() => setOpen(false)}

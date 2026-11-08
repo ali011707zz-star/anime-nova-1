@@ -58,6 +58,7 @@ const Watch              = lazy(() => import("@/pages/Watch"));
 const WatchById          = lazy(() => import("@/pages/WatchById"));
 const Search             = lazy(() => import("@/pages/Search"));
 const Schedule           = lazy(() => import("@/pages/Schedule"));
+const Latest             = lazy(() => import("@/pages/Latest"));
 const Library            = lazy(() => import("@/pages/Library"));
 const WatchHistory       = lazy(() => import("@/pages/WatchHistory"));
 const Browse             = lazy(() => import("@/pages/Browse"));
@@ -213,6 +214,7 @@ function Router({ onMenuClick }: { onMenuClick: () => void }) {
                 <Route path="/watch"                   component={WatchWrapper} />
                 <Route path="/search"                  component={Search} />
                 <Route path="/schedule"               component={Schedule} />
+                <Route path="/latest"                 component={Latest} />
                 <Route path="/library"                 component={Library} />
                 <Route path="/history"                 component={WatchHistory} />
                 <Route path="/browse"                  component={Browse} />

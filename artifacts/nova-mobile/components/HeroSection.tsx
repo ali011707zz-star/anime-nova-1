@@ -5,7 +5,7 @@ import { LinearGradient } from "expo-linear-gradient";
 import { useRouter } from "expo-router";
 import React, { useEffect, useRef, useState } from "react";
 import {
-  ScrollView, StyleSheet, Text, View, useWindowDimensions,
+  AppState, ScrollView, StyleSheet, Text, View, useWindowDimensions,
 } from "react-native";
 import { useColors } from "@/hooks/useColors";
 import { isTvDevice, TvPressable as Pressable } from "@/utils/tv";
@@ -42,6 +42,7 @@ export function HeroSection({
   useEffect(() => {
     if (items.length <= 1) return;
     const timer = setInterval(() => {
+      if (AppState.currentState && AppState.currentState !== "active") return;
       setActiveIdx((i) => {
         const next = (i + 1) % items.length;
         if (!tvMode) {

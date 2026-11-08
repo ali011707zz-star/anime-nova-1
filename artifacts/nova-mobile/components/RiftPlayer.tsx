@@ -13,7 +13,7 @@ import * as Brightness from "expo-brightness";
 import { VolumeManager } from "../lib/volume-manager";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  ActivityIndicator, Alert, Animated, DeviceEventEmitter, Dimensions, Easing, I18nManager, Linking, Platform,
+  ActivityIndicator, Alert, Animated, AppState, DeviceEventEmitter, Dimensions, Easing, I18nManager, Linking, Platform,
   BackHandler, PanResponder, ScrollView, StyleSheet, Text, View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -132,13 +132,12 @@ function logPlaybackStage(url: string | undefined, stage: string, detail = ""): 
 }
 
 function getPlaybackBufferOptions(animePlayback: boolean): BufferOptions {
-  /* expo-video 3.x accepts buffer durations in seconds. Android maps
-     preferredForwardBufferDuration to its target buffer duration.
-     minBufferForPlayback = 1s and waitsToMinimizeStalling = false provide instant playback start without initial stall. */
+  /* Generous 40s forward buffer and waitsToMinimizeStalling: true prevents stream drops
+     and micro-stuttering across all catalogs (Anime, Spacetoon, Cartoon/Carateen). */
   return {
-    preferredForwardBufferDuration: animePlayback ? 16 : 8,
-    waitsToMinimizeStalling: false,
-    minBufferForPlayback: 1,
+    preferredForwardBufferDuration: 40,
+    waitsToMinimizeStalling: true,
+    minBufferForPlayback: 2.5,
   };
 }
 
@@ -1482,6 +1481,19 @@ function ExpoRiftPlayer({
   useEffect(() => { isErrorRef.current = error; }, [error]);
   useEffect(() => { isEndedRef.current = isEnded; }, [isEnded]);
 
+  /* ─── Pause background activity to prevent Background ANRs ─── */
+  useEffect(() => {
+    const sub = AppState.addEventListener("change", (nextState) => {
+      if (nextState !== "active") {
+        stallRef.current = { lastPos: positionRef.current, lastAt: 0 };
+        stallNudgeTriedRef.current = false;
+      } else if (isPlayingRef.current) {
+        stallRef.current = { lastPos: positionRef.current, lastAt: Date.now() };
+      }
+    });
+    return () => sub.remove();
+  }, []);
+
   /* ─── Progress polling ─── */
   useEffect(() => {
     // Some signed CDN segments take 17+ seconds to arrive. Do not switch away
@@ -1489,6 +1501,10 @@ function ExpoRiftPlayer({
     const STALL_TIMEOUT_MS = 25_000;
     const STALL_RECOVERY_TIMEOUT_MS = 12_000;
     const id = setInterval(() => {
+      if (AppState.currentState && AppState.currentState !== "active") {
+        stallRef.current = { lastPos: positionRef.current, lastAt: 0 };
+        return;
+      }
       try {
         const rawPos = player.currentTime;
         const rawDur = player.duration;
@@ -1628,11 +1644,13 @@ function ExpoRiftPlayer({
     let lastKey = "";
     const tick = () => {
       try {
-        const ct = player.currentTime || 0;
-        /* Apply user offset: positive offset → look earlier in subtitle timeline (fixes late subs) */
-        const cue = bisectCue(sorted, ct - subOffsetRef.current);
-        const key = cue ? `${cue.start}` : "";
-        if (key !== lastKey) { lastKey = key; setActiveCue(cue); }
+        if (!AppState.currentState || AppState.currentState === "active") {
+          const ct = player.currentTime || 0;
+          /* Apply user offset: positive offset → look earlier in subtitle timeline (fixes late subs) */
+          const cue = bisectCue(sorted, ct - subOffsetRef.current);
+          const key = cue ? `${cue.start}` : "";
+          if (key !== lastKey) { lastKey = key; setActiveCue(cue); }
+        }
       } catch {}
       subRafRef.current = requestAnimationFrame(tick);
     };

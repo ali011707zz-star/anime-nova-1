@@ -20,6 +20,8 @@ import { isTvDevice, tvFocusStyle, TvPressable as Pressable } from "@/utils/tv";
 import { useColors } from "@/hooks/useColors";
 import type { ThemePalette } from "@/constants/colors";
 
+const ROW_RTL = (I18nManager && I18nManager.isRTL) ? "row" : "row-reverse";
+
 function useDownloadsTheme() {
   const colors = useColors();
   const s = useMemo(() => createDownloadStyles(colors), [colors]);
@@ -875,7 +877,7 @@ const createDownloadStyles = (colors: ThemePalette) => StyleSheet.create({
 
   header: {
     height: 68,
-    flexDirection: I18nManager.isRTL ? "row" : "row-reverse",
+    flexDirection: ROW_RTL,
     alignItems: "center",
     justifyContent: "space-between",
     paddingHorizontal: 16,
@@ -884,7 +886,7 @@ const createDownloadStyles = (colors: ThemePalette) => StyleSheet.create({
     borderBottomColor: colors.border,
   },
   headerRightSection: {
-    flexDirection: I18nManager.isRTL ? "row" : "row-reverse",
+    flexDirection: ROW_RTL,
     alignItems: "center",
     gap: 12,
     flex: 1,
@@ -903,7 +905,7 @@ const createDownloadStyles = (colors: ThemePalette) => StyleSheet.create({
   headerSub:   { maxWidth: "100%", fontSize: 10, lineHeight: 15, fontFamily: "Cairo_400Regular", color: colors.textMuted, textAlign: "right" },
 
   clearBtn: {
-    flexDirection: I18nManager.isRTL ? "row" : "row-reverse",
+    flexDirection: ROW_RTL,
     alignItems: "center", gap: 5,
     paddingHorizontal: 12, paddingVertical: 8, borderRadius: 12,
     backgroundColor: colors.destructiveSurface, borderWidth: 1,

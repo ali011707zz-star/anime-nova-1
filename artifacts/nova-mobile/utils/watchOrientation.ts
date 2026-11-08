@@ -1,5 +1,5 @@
 import { useCallback, useLayoutEffect, useRef } from "react";
-import { Platform } from "react-native";
+import { AppState, Platform } from "react-native";
 import * as ScreenOrientation from "expo-screen-orientation";
 
 type OrientationLock = ScreenOrientation.OrientationLock;
@@ -10,28 +10,58 @@ const LANDSCAPE_LOCK = ScreenOrientation.OrientationLock.LANDSCAPE_RIGHT;
 let nextSessionId = 0;
 let activeSessionId: number | null = null;
 let pendingLock: OrientationLock | null = null;
+let lastAppliedLock: OrientationLock | null = null;
+let deferredBackgroundLock: OrientationLock | null = null;
 let lockQueueRunning = false;
 
-// Keep all watch-route lock requests on one queue. If the route changes or the
-// user toggles quickly, only the newest pending lock is applied after the
-// in-flight native request completes.
-function queueOrientationLock(lock: OrientationLock): void {
-  pendingLock = lock;
-  if (lockQueueRunning) return;
+// Keep all watch-route lock requests on one queue. Never invoke native
+// ScreenOrientation.lockAsync while the Activity is in the background, as
+// forcing a configuration change on a stopped Activity causes Background ANRs
+// on Android 11+ (obtainStyledAttributes lock contention).
+function flushOrientationLockQueue(): void {
+  if (lockQueueRunning || pendingLock === null) return;
+  if (Platform.OS !== "web" && AppState.currentState && AppState.currentState !== "active") {
+    deferredBackgroundLock = pendingLock;
+    pendingLock = null;
+    return;
+  }
 
   lockQueueRunning = true;
   void (async () => {
     while (pendingLock !== null) {
+      if (Platform.OS !== "web" && AppState.currentState && AppState.currentState !== "active") {
+        deferredBackgroundLock = pendingLock;
+        pendingLock = null;
+        break;
+      }
       const nextLock = pendingLock;
       pendingLock = null;
+      if (lastAppliedLock === nextLock) continue;
       try {
         await ScreenOrientation.lockAsync(nextLock);
+        lastAppliedLock = nextLock;
       } catch {
         // Orientation locks can be unavailable on web/unsupported devices.
       }
     }
     lockQueueRunning = false;
   })();
+}
+
+export function queueOrientationLock(lock: OrientationLock): void {
+  pendingLock = lock;
+  deferredBackgroundLock = null;
+  flushOrientationLockQueue();
+}
+
+if (Platform.OS !== "web") {
+  AppState.addEventListener("change", (state) => {
+    if (state === "active" && deferredBackgroundLock !== null) {
+      const resumeLock = deferredBackgroundLock;
+      deferredBackgroundLock = null;
+      queueOrientationLock(resumeLock);
+    }
+  });
 }
 
 /**

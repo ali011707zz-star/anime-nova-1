@@ -31,8 +31,8 @@ let _homeCache: HomeCache | null = null;
 // Separate cache for today's airing episodes (independent fetch, persists between navigations)
 let _cachedTodayEps: any[] | null = null;
 let _cachedTodayEpsAt = 0;
-const TODAY_EPS_STORAGE_KEY = "nova-latest-episodes-v3";
-const LEGACY_TODAY_EPS_STORAGE_KEY = "nova-latest-episodes";
+const TODAY_EPS_STORAGE_KEY = "nova-latest-episodes-v4";
+const LEGACY_TODAY_EPS_STORAGE_KEY = "nova-latest-episodes-v3";
 const TODAY_EPS_CLIENT_TTL = 2 * 60_000;
 
 function normalizeLatestEpisodeItem(item: any): any {
@@ -381,12 +381,12 @@ export default function Home() {
   const [dubbedCards, setDubbedCards] = useState<any[]>([]);
   const [awCards, setAwCards] = useState<any[]>([]);
   const [todayEps, setTodayEps] = useState<any[]>(() => {
-    if (_cachedTodayEps?.length && _cachedTodayEps.every((item) => item.source === "anifox"))
+    if (_cachedTodayEps?.length && _cachedTodayEps.every((item) => item.source === "anslayer"))
       return _cachedTodayEps;
     try {
       const stored = JSON.parse(localStorage.getItem(TODAY_EPS_STORAGE_KEY) || "[]");
       return Array.isArray(stored)
-        ? stored.map(normalizeLatestEpisodeItem).filter((item: any) => item.source === "anifox")
+        ? stored.map(normalizeLatestEpisodeItem).filter((item: any) => item.source === "anslayer")
         : [];
     } catch { return []; }
   });
@@ -449,10 +449,10 @@ export default function Home() {
 
   /* Use the ANIFOX episode catalog for the homepage's latest-episodes rail. */
   useEffect(() => {
-    try { localStorage.removeItem(LEGACY_TODAY_EPS_STORAGE_KEY); } catch {}
+    try { localStorage.removeItem(LEGACY_TODAY_EPS_STORAGE_KEY); localStorage.removeItem("nova-latest-episodes"); } catch {}
     if (
       _cachedTodayEps?.length &&
-      _cachedTodayEps.every((item) => item.source === "anifox") &&
+      _cachedTodayEps.every((item) => item.source === "anslayer") &&
       Date.now() - _cachedTodayEpsAt < TODAY_EPS_CLIENT_TTL
     ) {
       setTodayChecking(false);
@@ -475,7 +475,7 @@ export default function Home() {
           item.name && item.episode,
         );
     };
-    fetchLatest("anifox-latest", "anifox")
+    fetchLatest("anslayer-latest", "anslayer")
       .then((items) => {
         _cachedTodayEps = items;
         _cachedTodayEpsAt = Date.now();
@@ -1132,59 +1132,38 @@ export default function Home() {
         </div>
       )}
 
-      {/* ── حلقات اليوم ── */}
+      {/* ── أحدث الحلقات (مطابق لتطبيق الهاتف AnimeSlayer) ── */}
       {(todayEps.length > 0 || todayChecking) && (
-        <div className="mt-5">
+        <div className="mt-6">
           <div className="flex items-center justify-between px-4 mb-3">
             <div className="flex items-center gap-2">
               <div
-                className="w-7 h-7 rounded-xl flex items-center justify-center shrink-0"
-                style={{
-                  background: "linear-gradient(135deg,#f97316,#ef4444)",
-                }}
-              >
-                <span className="text-white text-[14px] leading-none">📺</span>
-              </div>
-              <div>
-                <h2 className="text-[13px] font-black text-white font-['Cairo'] leading-none">
-                  أحدث الحلقات
-                </h2>
-                <p className="text-[9px] text-white/35 font-['Cairo'] mt-0.5">
-                  يتجدد يومياً
-                </p>
-              </div>
+                className="w-1 h-4 rounded-full shrink-0"
+                style={{ backgroundColor: "#06b6d4" }}
+              />
+              <h2 className="text-[15px] font-black text-white font-['Cairo'] leading-none">
+                أحدث الحلقات 📺
+              </h2>
             </div>
-            {/* Live dot */}
-            <div className="flex items-center gap-2.5">
-              <Link
-                href="/schedule"
-                className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl font-['Cairo'] text-[9px] font-black text-orange-300 active:scale-90 transition-transform"
-                style={{
-                  background: "rgba(249,115,22,0.12)",
-                  border: "1px solid rgba(249,115,22,0.22)",
-                }}
-              >
-                عرض المزيد
-                <ChevronLeft className="w-3 h-3" />
-              </Link>
-              <div className="flex items-center gap-1.5">
-                <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
-                <span className="text-[9px] font-black text-red-400 font-['Cairo']">
-                  LIVE
-                </span>
-              </div>
-            </div>
+
+            <Link
+              href="/latest"
+              className="flex items-center gap-1 px-2.5 py-1 rounded-xl font-['Cairo'] text-[11px] font-bold text-cyan-400 active:scale-95 transition-transform"
+              style={{
+                background: "rgba(6,182,212,0.10)",
+                border: "1px solid rgba(6,182,212,0.22)",
+              }}
+            >
+              عرض الكل
+              <ChevronLeft className="w-3.5 h-3.5" />
+            </Link>
           </div>
 
           <div
-            className="flex gap-3 overflow-x-auto px-4 pb-2"
+            className="flex gap-2.5 overflow-x-auto px-4 pb-2"
             style={{ scrollbarWidth: "none" }}
           >
             {todayEps.map((it: any, i: number) => {
-              const accentColor = "#ef4444";
-              const accentBg = "rgba(239,68,68,0.88)";
-              /* مرّر معرّف المصدر المباشر عند توفره، مع الاحتفاظ بالعنوان
-                 كمسار احتياطي لعناصر AW التي لا تملك ربط AniList. */
               const titleVariants = Array.from(
                 new Set(
                   [
@@ -1201,93 +1180,73 @@ export default function Home() {
               );
               const canonicalTitle = it.romaji || it.name || "";
               const canonicalEnglish = it.english || "";
-              const href = `/watch?anime=${encodeURIComponent(String(it.animeId || 0))}&anilistId=${encodeURIComponent(String(it.anilistId || it.animeId || 0))}&anslayerId=${encodeURIComponent(String(it.anslayerId || ""))}&awAnimeId=${encodeURIComponent(String(it.awAnimeId || ""))}&anifoxId=${encodeURIComponent(String(it.anifoxId || ""))}&season=${encodeURIComponent(String(it.season || 1))}&ep=${it.episode}&title=${encodeURIComponent(canonicalTitle)}&english=${encodeURIComponent(canonicalEnglish)}&titles=${encodeURIComponent(JSON.stringify(titleVariants))}&cover=${encodeURIComponent(it.cover || "")}&titleAr=${encodeURIComponent(it.titleAr || "")}&site=${encodeURIComponent(it.source || "anifox")}&fromLatest=1&latestSource=${encodeURIComponent(it.source || "anifox")}`;
+              const href = `/watch?anime=${encodeURIComponent(String(it.animeId || 0))}&anilistId=${encodeURIComponent(String(it.anilistId || it.animeId || 0))}&anslayerId=${encodeURIComponent(String(it.anslayerId || ""))}&awAnimeId=${encodeURIComponent(String(it.awAnimeId || ""))}&anifoxId=${encodeURIComponent(String(it.anifoxId || ""))}&season=${encodeURIComponent(String(it.season || 1))}&ep=${it.episode}&totalEps=${it.episode}&title=${encodeURIComponent(canonicalTitle)}&english=${encodeURIComponent(canonicalEnglish)}&native=${encodeURIComponent(String(it.native || ""))}&titles=${encodeURIComponent(JSON.stringify(titleVariants))}&cover=${encodeURIComponent(it.cover || "")}&titleAr=${encodeURIComponent(it.titleAr || "")}&site=${encodeURIComponent(it.source || "anslayer")}&fromLatest=1&latestSource=${encodeURIComponent(it.source || "anslayer")}`;
               return (
-                <Link href={href} key={`${it.source}-${it.animeId || it.anslayerId || it.awAnimeId || it.anifoxId}-${it.episode}-${i}`}>
+                <Link
+                  href={href}
+                  key={`${it.source}-${it.anslayerId || it.awAnimeId || it.animeId || it.name || i}-${it.episode}`}
+                >
                   <motion.div
-                    whileTap={{ scale: 0.91 }}
+                    whileTap={{ scale: 0.94 }}
                     className="shrink-0 cursor-pointer"
-                    style={{ width: 110 }}
+                    style={{ width: 120 }}
                   >
-                    {/* البطاقة */}
                     <div
-                      className="relative rounded-[18px] overflow-hidden shadow-xl"
+                      className="relative rounded-[12px] overflow-hidden"
                       style={{
-                        width: 110,
-                        height: 156,
-                        border: `1px solid ${accentColor}22`,
-                        background: "#111",
+                        width: 120,
+                        height: 175,
+                        border: "1px solid rgba(255,255,255,0.08)",
+                        background: "#13131f",
                       }}
                     >
-                      {/* البوستر */}
                       {it.cover ? (
                         <img
                           src={it.cover}
                           alt={it.name || ""}
-                          className="w-full h-full object-contain bg-[#0b0b10]"
+                          className="w-full h-full object-cover bg-[#0b0b10]"
                           loading="lazy"
+                          onError={(e) => {
+                            const target = e.currentTarget;
+                            const fallback = it.animeId
+                              ? `https://img.anili.st/media/${it.animeId}`
+                              : "";
+                            if (fallback && target.src !== fallback) {
+                              target.src = fallback;
+                            } else {
+                              target.style.display = "none";
+                            }
+                          }}
                         />
                       ) : (
-                        <div
-                          className="w-full h-full flex items-center justify-center"
-                          style={{ background: `${accentColor}18` }}
-                        >
-                          <span className="text-3xl">📺</span>
+                        <div className="w-full h-full flex items-center justify-center bg-[#13131f]">
+                          <Tv2 className="w-7 h-7 text-white/20" />
                         </div>
                       )}
-                      {/* تدرج داكن من الأسفل */}
+
+                      {/* شارة الحلقة (مطابقة لتطبيق الهاتف) */}
                       <div
-                        className="absolute inset-0"
-                        style={{
-                          background:
-                            "linear-gradient(to top, rgba(0,0,0,0.95) 0%, rgba(0,0,0,0.0) 55%)",
-                        }}
-                      />
-                      {/* شارة الحلقة — أعلى اليسار */}
-                      <div className="absolute top-2 right-2">
-                        <span
-                          className="text-[7px] font-black text-white px-1.5 py-0.5 rounded-lg"
-                          style={{
-                            background: accentBg,
-                            backdropFilter: "blur(8px)",
-                          }}
-                        >
-                          ح {it.episode}
-                        </span>
-                      </div>
-                      {/* حالة البث */}
-                      <div className="absolute top-8 right-2">
-                        <span
-                          className="text-[6.5px] font-black px-1.5 py-[3px] rounded-md"
-                          style={{
-                            background: "rgba(239,68,68,0.18)",
-                            color: "#fca5a5",
-                            border: `1px solid ${accentColor}33`,
-                          }}
-                        >
-                          ✓ نزلت
-                        </span>
-                      </div>
-                      {/* العنوان أسفل البطاقة */}
-                      <div className="absolute bottom-0 inset-x-0 px-2 pb-2.5">
-                        <p className="text-[9px] text-white/90 font-black truncate leading-tight font-['Cairo']">
-                          {it.name}
-                        </p>
-                      </div>
-                      {/* Play overlay عند الضغط */}
-                      <div
-                        className="absolute inset-0 flex items-center justify-center opacity-0 hover:opacity-100 transition-opacity"
-                        style={{ background: "rgba(0,0,0,0.32)" }}
+                        className="absolute top-[7px] right-[7px] z-10 px-[7px] py-[3px] rounded-[12px]"
+                        style={{ backgroundColor: "rgba(7,9,13,0.78)" }}
                       >
-                        <div
-                          className="w-10 h-10 rounded-full flex items-center justify-center"
-                          style={{
-                            background: accentBg,
-                            backdropFilter: "blur(8px)",
-                          }}
+                        <span className="text-[8px] font-bold text-white font-['Cairo'] leading-none block">
+                          الحلقة {it.episode}
+                        </span>
+                      </div>
+
+                      {/* التدرج السفلي والعنوان بسطرين مثل الهاتف */}
+                      <div
+                        className="absolute bottom-0 left-0 right-0 px-2 pb-2 pt-[50px]"
+                        style={{
+                          background: "linear-gradient(to top, rgba(0,0,0,0.95) 0%, transparent 100%)",
+                        }}
+                      >
+                        <p
+                          dir="rtl"
+                          className="text-[10px] font-semibold text-white leading-[14px] line-clamp-2 text-right font-['Cairo']"
                         >
-                          <Play className="w-4 h-4 text-white fill-white mr-[-2px]" />
-                        </div>
+                          {it.titleAr || it.name}
+                        </p>
                       </div>
                     </div>
                   </motion.div>

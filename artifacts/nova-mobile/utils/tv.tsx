@@ -193,16 +193,29 @@ export const TV_FOCUS_VIEWABILITY_CONFIG = {
 
 /** Scroll a virtualized list smoothly when D-pad focus reaches an off-screen item. */
 export function useTvListFocusScroll<T>(
-  _listRef: React.RefObject<FlatList<T> | null>,
-  _viewPosition = 0.35,
+  listRef: React.RefObject<FlatList<T> | null>,
+  viewPosition = 0.35,
 ) {
-  const onViewableItemsChanged = React.useRef<
-    NonNullable<FlatListProps<T>["onViewableItemsChanged"]>
-  >(() => {}).current;
-  const scrollToFocusedIndex = React.useCallback((_index: number) => {}, []);
+  const scrollToFocusedIndex = React.useCallback((index: number) => {
+    if (!listRef?.current || typeof index !== "number" || index < 0) return;
+    try {
+      listRef.current.scrollToIndex({
+        index,
+        animated: true,
+        viewPosition,
+      });
+    } catch {
+      try {
+        listRef.current.scrollToOffset({
+          offset: Math.max(0, index * 165),
+          animated: true,
+        });
+      } catch {}
+    }
+  }, [listRef, viewPosition]);
 
   return {
-    onViewableItemsChanged,
+    onViewableItemsChanged: undefined,
     viewabilityConfig: TV_FOCUS_VIEWABILITY_CONFIG,
     scrollToFocusedIndex,
   };
@@ -245,11 +258,17 @@ export function TvPressable({
         setFocused(false);
         onBlur?.(event);
       }}
-      style={(state) => [
-        typeof style === "function" ? style({ ...state, focused }) : style,
-        tv && focused && tvFocusStyle(true),
-        state.pressed && { opacity: 0.85 },
-      ]}
+      style={(state) => {
+        // Both native state.focused AND React state focused are checked to ensure
+        // the focus ring never drops or flickers while navigating rapidly with remote
+        const isFocused = Boolean((state as any)?.focused || focused);
+        const baseStyle = typeof style === "function" ? style({ ...state, focused: isFocused }) : style;
+        return [
+          baseStyle,
+          tv && isFocused && tvFocusStyle(true),
+          state.pressed && { opacity: 0.85 },
+        ];
+      }}
     >
       {children}
     </Pressable>

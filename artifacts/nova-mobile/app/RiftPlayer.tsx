@@ -1552,12 +1552,12 @@ export function RiftPlayer({
           }
         }}
         bufferConfig={{
-          minBufferMs: 2500,
-          maxBufferMs: 30000,
-          bufferForPlaybackMs: 500,
-          bufferForPlaybackAfterRebufferMs: 2000,
-          backBufferDurationMs: 5000,
-          cacheSizeMB: 40,
+          minBufferMs: 15000,
+          maxBufferMs: 60000,
+          bufferForPlaybackMs: 2500,
+          bufferForPlaybackAfterRebufferMs: 4000,
+          backBufferDurationMs: 10000,
+          cacheSizeMB: 100,
         }}
         ignoreSilentSwitch="ignore"
         playInBackground={false}
