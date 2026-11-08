@@ -276,21 +276,49 @@ async function fetchAiringSchedules(fromTs: number, toTs: number): Promise<any[]
 
 /* ── تحقق من DB هل أُرسل هذا التنبيه من قبل ──────────────────────────── */
 
-async function wasNotified(anilistId: number, ep: number): Promise<boolean> {
-  const key = `tg_notify:${anilistId}:${ep}`;
-  if (notifiedEpisodes.has(key)) return true;
+async function wasNotified(id: number | string, ep: number, secondaryId?: number | string): Promise<boolean> {
+  const key1 = `tg_notify:${id}:${ep}`;
+  const chanKey1 = `tg_channel:${id}:${ep}`;
+  if (notifiedEpisodes.has(key1) || telegramNotifiedEpisodes.has(key1)) return true;
+  if (secondaryId) {
+    const key2 = `tg_notify:${secondaryId}:${ep}`;
+    const chanKey2 = `tg_channel:${secondaryId}:${ep}`;
+    if (notifiedEpisodes.has(key2) || telegramNotifiedEpisodes.has(key2)) return true;
+  }
   try {
-    const rows = await sbSelect("app_config", { key: `eq.${key}` });
-    return Array.isArray(rows) && rows.length > 0;
+    const rows = await sbSelect("app_config", { key: `eq.${key1}` });
+    if (Array.isArray(rows) && rows.length > 0) return true;
+    const chanRows = await sbSelect("app_config", { key: `eq.${chanKey1}` });
+    if (Array.isArray(chanRows) && chanRows.length > 0) return true;
+    if (secondaryId) {
+      const rows2 = await sbSelect("app_config", { key: `eq.${secondaryId}:${ep}` });
+      if (Array.isArray(rows2) && rows2.length > 0) return true;
+      const chanRows2 = await sbSelect("app_config", { key: `eq.tg_channel:${secondaryId}:${ep}` });
+      if (Array.isArray(chanRows2) && chanRows2.length > 0) return true;
+    }
+    return false;
   } catch { return false; }
 }
 
-async function markNotified(anilistId: number, ep: number): Promise<void> {
-  const key = `tg_notify:${anilistId}:${ep}`;
-  notifiedEpisodes.add(key);
+async function markNotified(id: number | string, ep: number, secondaryId?: number | string): Promise<void> {
+  const key1 = `tg_notify:${id}:${ep}`;
+  const chanKey1 = `tg_channel:${id}:${ep}`;
+  notifiedEpisodes.add(key1);
+  telegramNotifiedEpisodes.add(key1);
   try {
-    await sbInsert("app_config", { key, value: String(Date.now()) });
-  } catch { /* silent — in-memory Set is enough */ }
+    await sbInsert("app_config", { key: key1, value: String(Date.now()) });
+    await sbInsert("app_config", { key: chanKey1, value: String(Date.now()) });
+  } catch { /* silent */ }
+  if (secondaryId) {
+    const key2 = `tg_notify:${secondaryId}:${ep}`;
+    const chanKey2 = `tg_channel:${secondaryId}:${ep}`;
+    notifiedEpisodes.add(key2);
+    telegramNotifiedEpisodes.add(key2);
+    try {
+      await sbInsert("app_config", { key: key2, value: String(Date.now()) });
+      await sbInsert("app_config", { key: chanKey2, value: String(Date.now()) });
+    } catch { /* silent */ }
+  }
 }
 
 async function sendTelegramEpisodeOnce(
@@ -390,6 +418,26 @@ async function checkAnimeWitcherEp(title: string, ep: number, anilistId?: number
   }
 }
 
+async function verifyEpisodeHasValidPlayableSources(animeId: number, ep: number, title: string): Promise<boolean> {
+  try {
+    const params = new URLSearchParams({
+      anime: String(animeId),
+      ep: String(ep),
+      title: title || "",
+      mode: "check",
+    });
+    const resp = await fetch(`${internalApiBaseUrl()}/api/anime/sources-stream?${params.toString()}`, {
+      headers: { Accept: "text/event-stream" },
+      signal: AbortSignal.timeout(12_000),
+    });
+    if (!resp.ok) return false;
+    const text = await resp.text();
+    return text.includes('"available":true');
+  } catch {
+    return false;
+  }
+}
+
 /* ── بناء رسالة الإشعار ────────────────────────────────────────────────── */
 
 function buildCaption(media: any, ep: number): string {
@@ -483,22 +531,35 @@ async function pollAnimeSlayerDirect(): Promise<void> {
 
     let sent = 0;
     for (const item of list) {
-      // Prefer the canonical AniList ID used by app push notifications and
-      // the homepage; fall back to AnimeSlayer's ID only for unresolved titles.
-      const animeId = Number(item.animeId || item.anilistId || item.anslayerId);
+      const anilistId = Number(item.animeId || item.anilistId || 0);
+      const anslayerId = Number(item.anslayerId || 0);
+      const primaryId = anilistId || anslayerId;
       const ep = Number(item.episode);
-      if (!animeId || !ep) continue;
+      if (!primaryId || !ep) continue;
 
-      // تحقق من DB + ذاكرة العملية — لا ترسل مرتين
-      if (await wasNotified(animeId, ep)) continue;
+      // تحقق من كل من AniList ID و AnimeSlayer ID لمنع أي تكرار نهائياً
+      if (await wasNotified(primaryId, ep, anslayerId !== primaryId ? anslayerId : undefined)) continue;
 
       const name = item.english || item.romaji || item.name || "أنمي";
       const cover = item.cover || "";
 
-      console.log(`[scheduler] 🎯 AnimeSlayer جديد: ${name} ح${ep}`);
+      // فحص توفر الحلقة في سيرفرات المشاهدة أولاً قبل الإشعار لمنع أي إشعار لحلقة غير موجودة
+      const isAvail = await verifyEpisodeHasValidPlayableSources(primaryId, ep, name);
+      if (!isAvail) {
+        console.log(`[scheduler] ⏳ لم تتوفر بعد بسيرفرات التطبيق: ${name} ح${ep} — تخطّي الإشعار`);
+        continue;
+      }
+
+
+      console.log(`[scheduler] 🎯 حلقة مؤكدة متوفرة: ${name} ح${ep}`);
 
       try {
-        if (await notifyNewEpisode(animeId, name, ep, cover || undefined)) sent++;
+        if (await notifyNewEpisode(primaryId, name, ep, cover || undefined)) {
+          sent++;
+          if (anslayerId && anslayerId !== primaryId) {
+            await markNotified(anslayerId, ep);
+          }
+        }
       } catch (e: any) {
         console.warn(`[scheduler] notify error (${name}): ${e.message}`);
       }
@@ -566,21 +627,10 @@ async function runSchedulerCycleInner(): Promise<void> {
     const titleToCheck = media.title?.romaji || media.title?.english || "";
     if (!titleToCheck) continue;
 
-    // ── فحص توفر الحلقة في AnimeWitcher مع timeout قصير (5 ثوانٍ فقط) ──
-    // إذا فشل الفحص أو انتهت المهلة → أرسل الإشعار مباشرة (لا تتأخر)
-    let awAvailable = false;
-    try {
-      const awPromise = checkAnimeWitcherEp(titleToCheck, ep, anilistId);
-      awAvailable = await Promise.race([
-        awPromise,
-        new Promise<boolean>(resolve => setTimeout(() => resolve(true), 5_000)), // fallback: أرسل بعد 5s
-      ]);
-    } catch {
-      awAvailable = true; // خطأ → أرسل على أي حال
-    }
-
-    if (!awAvailable) {
-      console.log(`[scheduler] ⏳ AnimeWitcher لم يُضف بعد: ${titleToCheck} ح${ep} — تخطّي`);
+    // التحقق الصارم من توفر الحلقة في سيرفرات التطبيق — لا ترسل أبداً حلقات غير موجودة أو مجدولة فقط في المستقبل
+    const isActuallyAvailable = await verifyEpisodeHasValidPlayableSources(anilistId, ep, titleToCheck);
+    if (!isActuallyAvailable) {
+      console.log(`[scheduler] ⏳ لم تتوفر بعد بسيرفرات التطبيق: ${titleToCheck} ح${ep} — تخطّي الإشعار`);
       notifiedEpisodes.delete(`tg_notify:${anilistId}:${ep}`);
       continue;
     }
