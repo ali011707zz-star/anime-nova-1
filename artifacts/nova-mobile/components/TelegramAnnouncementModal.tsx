@@ -88,15 +88,17 @@ export function TelegramAnnouncementModal({
 
   if (!visible) return null;
 
-  return (
-    <Modal
-      visible={visible}
-      transparent
-      animationType={tvMode ? "none" : "fade"}
-      onRequestClose={onClose}
-      statusBarTranslucent
-    >
-      <View style={[styles.backdrop, { backgroundColor: colors.overlay }, tvMode && styles.tvBackdrop]}>
+  const modalBody = (
+      <View
+        testID={tvMode ? "nova-tv-modal-root" : undefined}
+        style={[
+          tvMode && StyleSheet.absoluteFill,
+          styles.backdrop,
+          { backgroundColor: colors.overlay },
+          tvMode && styles.tvBackdrop,
+          tvMode && { zIndex: 9999, elevation: 9999 },
+        ]}
+      >
         <View
           style={[
             styles.card,
@@ -166,7 +168,7 @@ export function TelegramAnnouncementModal({
             <View style={tvMode ? styles.tvActionsColumn : styles.phoneActionsColumn}>
               <Pressable
                 accessibilityLabel="متابعة إلى التطبيق"
-                testID="telegram-announcement-dismiss"
+                testID={tvMode ? "nova-tv-preferred-focus" : "telegram-announcement-dismiss"}
                 onPress={onClose}
                 focusable={tvMode}
                 hasTVPreferredFocus={tvMode && visible}
@@ -211,6 +213,21 @@ export function TelegramAnnouncementModal({
           </View>
         </View>
       </View>
+  );
+
+  if (tvMode) {
+    return modalBody;
+  }
+
+  return (
+    <Modal
+      visible={visible}
+      transparent
+      animationType="fade"
+      onRequestClose={onClose}
+      statusBarTranslucent
+    >
+      {modalBody}
     </Modal>
   );
 }

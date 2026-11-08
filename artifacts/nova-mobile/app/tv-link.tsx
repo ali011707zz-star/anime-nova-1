@@ -163,7 +163,7 @@ export default function TvLinkScreen() {
           accessibilityRole="button"
           accessibilityLabel="رجوع"
           focusable={tvMode}
-          style={[styles.backButton, { top: insets.top + 8 }]}
+          style={({ focused }) => [styles.backButton, { top: insets.top + 8 }, tvMode && tvFocusStyle(focused)]}
         >
           <Ionicons name="arrow-back" size={22} color={colors.text} style={{ transform: [{ scaleX: -1 }] }} />
         </Pressable>
@@ -182,7 +182,7 @@ export default function TvLinkScreen() {
         accessibilityRole="button"
         accessibilityLabel="رجوع"
         focusable={tvMode}
-        style={[styles.backButton, { top: insets.top + 8 }]}
+        style={({ focused }) => [styles.backButton, { top: insets.top + 8 }, tvMode && tvFocusStyle(focused)]}
       >
         <Ionicons name="arrow-back" size={22} color={colors.text} style={{ transform: [{ scaleX: -1 }] }} />
       </Pressable>
@@ -216,6 +216,8 @@ export default function TvLinkScreen() {
             placeholderTextColor={colors.mutedForeground + "80"}
             keyboardType="number-pad"
             maxLength={6}
+            editable={!tvMode}
+            focusable={!tvMode}
             autoFocus={!tvMode}
             textAlign="center"
             style={[styles.codeInput, { color: colors.text, borderColor: code.length === 6 ? colors.primary : colors.border, backgroundColor: colors.input }]}
@@ -227,6 +229,7 @@ export default function TvLinkScreen() {
                 <Pressable
                   key={d}
                   onPress={() => appendDigit(d)}
+                  testID={tvMode && idx === 0 ? "nova-tv-preferred-focus" : undefined}
                   focusable={tvMode}
                   hasTVPreferredFocus={tvMode && idx === 0}
                   style={({ focused }) => [
@@ -261,7 +264,7 @@ export default function TvLinkScreen() {
             disabled={loading}
             focusable={tvMode}
             hasTVPreferredFocus={!tvMode}
-            style={[styles.submit, { backgroundColor: colors.primary, opacity: loading ? 0.6 : 1 }]}
+            style={({ focused }) => [styles.submit, { backgroundColor: colors.primary, opacity: loading ? 0.6 : 1 }, tvMode && tvFocusStyle(focused)]}
           >
             {loading ? <ActivityIndicator color={colors.primaryForeground} /> : <Ionicons name="link" size={20} color={colors.primaryForeground} />}
             <Text style={[styles.submitText, { color: colors.primaryForeground }]}>ربط الجهاز بالرمز</Text>

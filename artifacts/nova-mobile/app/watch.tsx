@@ -2926,7 +2926,7 @@ export default function WatchScreen() {
             </View>
           )}
 
-          {hasAvailableSlot && !showingAvailabilityHints && (
+          {hasAvailableSlot && !showingAvailabilityHints && !tvMode && (
             <View style={[d.availabilityPartialState, { marginBottom: 8 }]}>
               <Text style={d.availabilityPartialText}>
                 التوفر مؤشر أولي وليس تأكيداً للتشغيل. عند الاختيار يُجلب رابط الحلقة المطلوب، وتُجرّب الروابط الاحتياطية عند فشل التشغيل.
@@ -3287,7 +3287,7 @@ function createWatchStyles(colors: ThemePalette) {
 
   /* Scroll */
   scrollContent: { padding: 14, paddingBottom: 100, gap: 12 },
-  tvScrollContent: { paddingHorizontal: 28, paddingTop: 18, gap: 16 },
+  tvScrollContent: { paddingHorizontal: 22, paddingTop: 8, paddingBottom: 80, gap: 8 },
 
   /* Tier sections */
   tierSection:   { gap: 6 },

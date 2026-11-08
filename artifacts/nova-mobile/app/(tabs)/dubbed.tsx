@@ -163,7 +163,32 @@ export default function DubbedScreen() {
     });
   };
 
-  const displayList = searchQ.trim().length >= 2 ? searchResults : series;
+  const displayList = (() => {
+    const q = searchQ.trim();
+    if (!q) return series;
+    const norm = (s: string) =>
+      String(s || "")
+        .toLowerCase()
+        .replace(/[ً-ٰٟـ]/g, "")
+        .replace(/[أإآ]/g, "ا")
+        .replace(/ة/g, "ه")
+        .replace(/ى/g, "ي")
+        .trim();
+    const nq = norm(q);
+    const localMatches = series.filter(item =>
+      norm(item.title).includes(nq) || norm(item.key || "").includes(nq)
+    );
+    const seen = new Set<string>();
+    const combined: Series[] = [];
+    for (const item of [...searchResults, ...localMatches]) {
+      const k = item.key || item.title;
+      if (k && !seen.has(k)) {
+        seen.add(k);
+        combined.push(item);
+      }
+    }
+    return combined;
+  })();
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background, paddingTop: topPad }]}>

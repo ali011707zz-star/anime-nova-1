@@ -300,7 +300,7 @@ function AnimationList({ searchQ }: { searchQ: string }) {
 
   useEffect(() => {
     const q = searchQ.trim();
-    if (q.length < 2) { setSearchRes([]); return; }
+    if (q.length < 1) { setSearchRes([]); return; }
     setSearchLoad(true);
     if (timer.current) clearTimeout(timer.current);
     const ctrl = new AbortController();
@@ -566,7 +566,7 @@ function CartoonList({ searchQ }: { searchQ: string }) {
 
   useEffect(() => {
     const q = searchQ.trim();
-    if (q.length < 2) { setSearchRes([]); return; }
+    if (q.length < 1) { setSearchRes([]); return; }
     setSearchLoad(true);
     if (timer.current) clearTimeout(timer.current);
     timer.current = setTimeout(async () => {
@@ -602,7 +602,32 @@ function CartoonList({ searchQ }: { searchQ: string }) {
     });
   };
 
-  const displayList = searchQ.trim().length >= 2 ? searchRes : series;
+  const displayList: DubbedSeries[] = (() => {
+    const q = searchQ.trim();
+    if (!q) return series;
+    const norm = (s: string) =>
+      String(s || "")
+        .toLowerCase()
+        .replace(/[ً-ٰٟـ]/g, "")
+        .replace(/[أإآ]/g, "ا")
+        .replace(/ة/g, "ه")
+        .replace(/ى/g, "ي")
+        .trim();
+    const nq = norm(q);
+    const localMatches = series.filter(item =>
+      norm(item.title).includes(nq) || norm(item.key || "").includes(nq)
+    );
+    const seen = new Set<string>();
+    const combined: DubbedSeries[] = [];
+    for (const item of [...searchRes, ...localMatches]) {
+      const k = item.key || item.title;
+      if (k && !seen.has(k)) {
+        seen.add(k);
+        combined.push(item);
+      }
+    }
+    return combined;
+  })();
   const rows = mergeCatalogRows(
     displayList.map((item) => ({ kind: "dubbed" as const, item })),
     catalog.items.map((item) => ({ kind: "catalog" as const, item })),

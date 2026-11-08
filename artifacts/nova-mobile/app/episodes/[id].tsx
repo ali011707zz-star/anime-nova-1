@@ -10,7 +10,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { getBaseUrl } from "@/utils/api";
 import { secureFetch } from "@/utils/secureApi";
-import { isTvDevice, tvFocusStyle, TvFocusGuideView, TvPressable } from "@/utils/tv";
+import { isTvDevice, tvFocusStyle, TvFocusGuideView, TvPressable, useTvListFocusScroll } from "@/utils/tv";
 const Pressable = TvPressable;
 import { useTvFocusMemory } from "@/utils/tvFocus";
 import { useColors } from "@/hooks/useColors";
@@ -360,6 +360,7 @@ function EpisodeRow({
         {/* Comment button */}
         <Pressable
           onPress={() => onComment(n)}
+          onFocus={onFocus}
           focusable={tvMode}
           style={({ focused }) => [ep_s.commentBtn, tvMode && ep_s.tvSmallButton, tvMode && tvFocusStyle(focused)]}
           accessibilityRole="button"
@@ -376,6 +377,7 @@ function EpisodeRow({
         {/* Eye toggle */}
         <Pressable
           onPress={() => onToggleWatched(n)}
+          onFocus={onFocus}
           focusable={tvMode}
           style={({ focused }) => [ep_s.eyeBtn, watched && ep_s.eyeBtnWatched, tvMode && ep_s.tvSmallButton, tvMode && tvFocusStyle(focused)]}
           accessibilityRole="button"
@@ -437,6 +439,7 @@ export default function EpisodeListScreen() {
     seasons.findIndex(item => String(item?.id) === selectedSeasonAnimeKey),
   );
   const { preferredKey, ready, rememberFocus } = useTvFocusMemory(`episodes:${selectedAnimeId || "unknown"}`);
+  const { scrollToFocusedIndex } = useTvListFocusScroll(episodeListRef, 0.35);
 
   useEffect(() => {
     if (!id) return;
@@ -931,7 +934,12 @@ export default function EpisodeListScreen() {
             </View>
           </View>
 
-          {/* ── Hero Banner ── */}
+          {/* ── Episode list (with scrollable Hero + Controls header) ── */}
+          <TvFocusGuideView autoFocus={tvMode} style={ep_s.tvFocusGuide}>
+            <FlatList
+              ListHeaderComponent={
+                <View>
+                  {/* ── Hero Banner ── */}
           <View style={[ep_s.hero, tvMode && width >= 700 && ep_s.tvHero]}>
             {(selectedAnime?.bannerImage || selectedAnime?.coverImage?.extraLarge || selectedAnime?.coverImage?.large) ? (
               <Image
@@ -1045,8 +1053,34 @@ export default function EpisodeListScreen() {
 
             {/* Search and continue watching */}
             <View style={[ep_s.episodeQuickRow, tvMode && ep_s.tvEpisodeQuickRow]}>
+              {total > 0 ? (
+                <Pressable
+                  onPress={() => watchEp(continueEpisode)}
+                  focusable={tvMode}
+                  hasTVPreferredFocus={tvMode && ready && shouldFocusContinue}
+                  onFocus={() => {
+                    if (tvMode) {
+                      rememberFocus("continue");
+                      episodeListRef.current?.scrollToOffset({ offset: 0, animated: true });
+                    }
+                  }}
+                  testID="anime-continue-watching"
+                  accessibilityRole="button"
+                  accessibilityLabel={watchedCount > 0 ? `متابعة من الحلقة ${continueEpisode}` : "مشاهدة من البداية"}
+                  style={({ focused, pressed }) => [
+                    ep_s.quickWatchBtn,
+                    tvMode && ep_s.tvQuickWatchBtn,
+                    tvMode && tvFocusStyle(focused),
+                    pressed && { opacity: 0.84 },
+                  ]}>
+                  <Ionicons name="play" size={tvMode ? 18 : 13} color="#fff" />
+                  <Text style={[ep_s.quickWatchBtnText, tvMode && ep_s.tvQuickWatchBtnText]} numberOfLines={1}>
+                    متابعة ح {continueEpisode}
+                  </Text>
+                </Pressable>
+              ) : null}
               <View style={[ep_s.searchBar, ep_s.quickSearchBar, tvMode && ep_s.tvSearchBar, { backgroundColor: colors.card, borderColor: colors.border }]}>
-                <Ionicons name="search" size={tvMode ? 24 : 16} color={colors.textMuted} />
+                <Ionicons name="search" size={tvMode ? 18 : 16} color={colors.textMuted} />
                 <TextInput
                   value={search}
                   onChangeText={value => {
@@ -1067,27 +1101,6 @@ export default function EpisodeListScreen() {
                   </Pressable>
                 ) : null}
               </View>
-              {total > 0 ? (
-                <Pressable
-                  onPress={() => watchEp(continueEpisode)}
-                  focusable={tvMode}
-                  hasTVPreferredFocus={tvMode && ready && shouldFocusContinue}
-                  onFocus={() => { if (tvMode) rememberFocus("continue"); }}
-                  testID="anime-continue-watching"
-                  accessibilityRole="button"
-                  accessibilityLabel={watchedCount > 0 ? `متابعة من الحلقة ${continueEpisode}` : "مشاهدة من البداية"}
-                  style={({ focused, pressed }) => [
-                    ep_s.quickWatchBtn,
-                    tvMode && ep_s.tvQuickWatchBtn,
-                    tvMode && tvFocusStyle(focused),
-                    pressed && { opacity: 0.84 },
-                  ]}>
-                  <Ionicons name="play" size={tvMode ? 22 : 13} color="#fff" />
-                  <Text style={[ep_s.quickWatchBtnText, tvMode && ep_s.tvQuickWatchBtnText]} numberOfLines={1}>
-                    متابعة ح {continueEpisode}
-                  </Text>
-                </Pressable>
-              ) : null}
             </View>
             {total > 12 ? (
               <ScrollView
@@ -1132,10 +1145,8 @@ export default function EpisodeListScreen() {
               </ScrollView>
             ) : null}
           </View>
-
-          {/* ── Episode list ── */}
-          <TvFocusGuideView autoFocus={tvMode} style={ep_s.tvFocusGuide}>
-            <FlatList
+                </View>
+              }
               ref={episodeListRef}
               key={`${tvMode ? "tv" : "phone"}-${selectedAnimeId}`}
               data={displayedEps}
@@ -1162,7 +1173,7 @@ export default function EpisodeListScreen() {
               }}
               columnWrapperStyle={undefined}
               contentContainerStyle={[{ paddingTop: 6, paddingBottom: 100 }, tvMode && ep_s.tvListContent]}
-              renderItem={({ item: n }) => (
+              renderItem={({ item: n, index }) => (
                 <EpisodeRow
                   n={n}
                   anime={selectedAnime}
@@ -1176,6 +1187,7 @@ export default function EpisodeListScreen() {
                   onFocus={() => {
                     if (!tvMode) return;
                     rememberFocus(String(n));
+                    scrollToFocusedIndex(index);
                   }}
                   hasTVPreferredFocus={tvMode && ready && preferredKey === String(n)}
                 />
@@ -1289,34 +1301,34 @@ return StyleSheet.create({
   eyeBtnWatched: { backgroundColor: "rgba(16,185,129,0.16)", borderColor: "rgba(16,185,129,0.45)" },
   tvContainer: { paddingHorizontal: 28 },
   tvFocusGuide: { flex: 1 },
-  tvControls: { paddingHorizontal: 28, paddingTop: 12, paddingBottom: 10 },
-  tvEpisodeQuickRow: { gap: 12, marginBottom: 10 },
-  tvQuickWatchBtn: { minHeight: 48, maxWidth: 220, paddingHorizontal: 16, borderRadius: 14 },
-  tvQuickWatchBtnText: { maxWidth: 180, fontSize: 13, lineHeight: 20 },
-  tvRangeChip: { minHeight: 42, paddingHorizontal: 16, borderRadius: 20 },
-  tvRangeChipText: { fontSize: 12, lineHeight: 18 },
-  tvSeasonSectionTitle: { fontSize: 16, lineHeight: 24 },
-  tvSeasonTab: { minWidth: 150, paddingHorizontal: 15, paddingVertical: 9, borderRadius: 14 },
-  tvSeasonTabTitle: { fontSize: 14, lineHeight: 21 },
-  tvSeasonTabCount: { fontSize: 11, lineHeight: 17 },
-  tvEpisodeSectionTitle: { fontSize: 18, lineHeight: 27 },
-  tvSortButton: { minHeight: 44, paddingHorizontal: 14, paddingVertical: 8, borderRadius: 12 },
-  tvSortButtonText: { fontSize: 13, lineHeight: 20 },
-  tvHero: { height: 290 },
-  tvBackBtn: { width: 46, height: 46, borderRadius: 14 },
-  tvHeroBottom: { paddingHorizontal: 28, paddingBottom: 12, gap: 10 },
-  tvHeroContent: { gap: 16 },
-  tvHeroCover: { width: 104, height: 146, borderRadius: 14 },
-  tvHeroInfo: { paddingBottom: 4 },
-  tvHeroBadge: { fontSize: 14, lineHeight: 22 },
-  tvHeroTitle: { fontSize: 25, lineHeight: 34 },
-  tvText: { fontSize: 15, lineHeight: 23 },
-  tvRow: { width: "100%", minHeight: 100, flexDirection: ROW_RTL, alignItems: "center", paddingHorizontal: 10, paddingVertical: 8, gap: 10, borderRadius: 12, borderWidth: 1, borderBottomWidth: 1, borderColor: colors.border, backgroundColor: colors.card },
+  tvControls: { paddingHorizontal: 20, paddingTop: 8, paddingBottom: 8, gap: 7 },
+  tvEpisodeQuickRow: { gap: 10, marginBottom: 4 },
+  tvQuickWatchBtn: { minHeight: 40, maxWidth: 200, paddingHorizontal: 14, borderRadius: 12 },
+  tvQuickWatchBtnText: { maxWidth: 170, fontSize: 12, lineHeight: 18 },
+  tvRangeChip: { minHeight: 34, paddingHorizontal: 12, borderRadius: 16 },
+  tvRangeChipText: { fontSize: 11, lineHeight: 16 },
+  tvSeasonSectionTitle: { fontSize: 14, lineHeight: 20 },
+  tvSeasonTab: { minWidth: 118, paddingHorizontal: 12, paddingVertical: 6, borderRadius: 12 },
+  tvSeasonTabTitle: { fontSize: 12, lineHeight: 18 },
+  tvSeasonTabCount: { fontSize: 10, lineHeight: 15 },
+  tvEpisodeSectionTitle: { fontSize: 15, lineHeight: 22 },
+  tvSortButton: { minHeight: 36, paddingHorizontal: 12, paddingVertical: 6, borderRadius: 10 },
+  tvSortButtonText: { fontSize: 12, lineHeight: 18 },
+  tvHero: { height: 126 },
+  tvBackBtn: { width: 38, height: 38, borderRadius: 11 },
+  tvHeroBottom: { paddingHorizontal: 20, paddingBottom: 8, gap: 8 },
+  tvHeroContent: { gap: 12 },
+  tvHeroCover: { width: 62, height: 88, borderRadius: 10 },
+  tvHeroInfo: { paddingBottom: 2 },
+  tvHeroBadge: { fontSize: 11, lineHeight: 16 },
+  tvHeroTitle: { fontSize: 17, lineHeight: 23 },
+  tvText: { fontSize: 12, lineHeight: 18 },
+  tvRow: { width: "100%", minHeight: 74, flexDirection: ROW_RTL, alignItems: "center", paddingHorizontal: 10, paddingVertical: 6, gap: 10, borderRadius: 12, borderWidth: 1, borderBottomWidth: 1, borderColor: colors.border, backgroundColor: colors.card },
   tvEpisodeMain: { flex: 1, flexDirection: ROW_RTL, alignItems: "center", gap: 10, borderRadius: 10 },
-  tvListContent: { paddingTop: 6, gap: 8 },
-  tvSmallButton: { width: 38, height: 38, borderRadius: 10 },
-  tvSearchBar: { minHeight: 48, paddingVertical: 8, paddingHorizontal: 14, borderRadius: 12 },
-  tvThumbWrap: { width: 132, height: 74, borderRadius: 9 },
+  tvListContent: { paddingTop: 4, paddingBottom: 90, gap: 7 },
+  tvSmallButton: { width: 34, height: 34, borderRadius: 9 },
+  tvSearchBar: { minHeight: 40, paddingVertical: 4, paddingHorizontal: 12, borderRadius: 11 },
+  tvThumbWrap: { width: 106, height: 60, borderRadius: 8 },
   tvDurText: { fontSize: 8, paddingHorizontal: 4, paddingVertical: 2, borderRadius: 4 },
   tvInfo: { flex: 1, minHeight: 0 },
   tvEpisodeActions: { justifyContent: "flex-end", gap: 5 },

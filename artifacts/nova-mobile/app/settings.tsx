@@ -7,7 +7,7 @@ import { LinearGradient } from "expo-linear-gradient";
 import * as ImagePicker from "expo-image-picker";
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import {
-  Alert, KeyboardAvoidingView, Linking, Modal, Platform, Pressable as NativePressable, ScrollView,
+  Alert, KeyboardAvoidingView, Linking, Modal as RNModal, BackHandler, Platform, Pressable as NativePressable, ScrollView,
   Image, Share, StyleSheet, Switch, Text, TextInput, View, ActivityIndicator, I18nManager,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -39,6 +39,43 @@ function Pressable(props: SettingsPressableProps) {
     return <TvPressable {...props} />;
   }
   return <NativePressable {...(props as React.ComponentProps<typeof NativePressable>)} />;
+}
+
+function Modal({
+  visible = true,
+  onRequestClose,
+  children,
+  ...rest
+}: React.ComponentProps<typeof RNModal>) {
+  const tvMode = isTvDevice();
+  useEffect(() => {
+    if (!tvMode || !visible || !onRequestClose) return;
+    const sub = BackHandler.addEventListener("hardwareBackPress", () => {
+      onRequestClose({} as any);
+      return true;
+    });
+    return () => sub.remove();
+  }, [tvMode, visible, onRequestClose]);
+
+  if (!visible) return null;
+  if (tvMode) {
+    return (
+      <View
+        testID="nova-tv-modal-root"
+        style={[
+          StyleSheet.absoluteFill,
+          { zIndex: 9999, elevation: 9999 },
+        ]}
+      >
+        {children}
+      </View>
+    );
+  }
+  return (
+    <RNModal visible={visible} onRequestClose={onRequestClose} {...rest}>
+      {children}
+    </RNModal>
+  );
 }
 
 const REPORT_TYPES = [
@@ -93,6 +130,8 @@ function ConfirmSheet({ open, title, desc, confirmLabel = "تأكيد", danger =
             <Text style={ts.sheetCancelText}>إلغاء</Text>
           </Pressable>
           <Pressable
+            testID="nova-tv-preferred-focus"
+            hasTVPreferredFocus={isTvDevice() && open}
             onPress={() => { onConfirm(); onCancel(); }}
             style={[ts.sheetConfirmBtn, danger && ts.sheetConfirmDanger]}
           >
@@ -841,7 +880,8 @@ function AuthSheetInner({ open, onClose, onLogin, onLinkDevice }: {
 
               {/* TV Quick Link Card */}
               <Pressable
-                testID="open-device-link-from-auth"
+                testID={tvMode ? "nova-tv-preferred-focus" : "open-device-link-from-auth"}
+                hasTVPreferredFocus={tvMode && open}
                 onPress={onLinkDevice}
                 disabled={loading}
                 focusable={tvMode}

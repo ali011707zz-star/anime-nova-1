@@ -359,15 +359,28 @@ router.get("/source-catalog/titles", async (req: Request, res: Response) => {
   if (section) {
     const result = await catalogQuery(res, "source catalog titles unavailable", async () => {
       const qualified = await loadQualifiedStardimaSection(section);
-      const needle = q.toLocaleLowerCase();
-      const matching = needle
-        ? qualified.titles.filter((item) => [
-            item.title,
-            item.title_en,
-            item.title_ar,
-            item.title_native,
-            ...(Array.isArray(item.synonyms) ? item.synonyms : []),
-          ].some((value) => String(value || "").toLocaleLowerCase().includes(needle)))
+      const normAr = (s: unknown) => String(s || "")
+        .normalize("NFKD")
+        .replace(/[\u064B-\u065F\u0670\u0640]/g, "")
+        .replace(/[أإآٱ]/g, "ا")
+        .replace(/ة/g, "ه")
+        .replace(/ى/g, "ي")
+        .toLowerCase()
+        .replace(/\s+/g, " ")
+        .trim();
+      const needle = normAr(q);
+      const needleTokens = needle.split(" ").filter(Boolean);
+      const matching = needleTokens.length > 0
+        ? qualified.titles.filter((item) => {
+            const hay = normAr([
+              item.title,
+              item.title_en,
+              item.title_ar,
+              item.title_native,
+              ...(Array.isArray(item.synonyms) ? item.synonyms : []),
+            ].join(" "));
+            return needleTokens.every((tok) => hay.includes(tok));
+          })
         : qualified.titles;
       return {
         results: matching.slice((page - 1) * limit, page * limit).map(publicCatalogTitle),

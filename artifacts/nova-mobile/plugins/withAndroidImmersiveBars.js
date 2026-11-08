@@ -74,6 +74,58 @@ const KOTLIN_METHODS = `
     } catch (_: Throwable) {}
   }
 
+
+  private fun novaIsDescendantOf(child: android.view.View?, parent: android.view.View?): Boolean {
+    if (child == null || parent == null) return false
+    var cur: android.view.View? = child
+    while (cur != null) {
+      if (cur === parent) return true
+      cur = cur.parent as? android.view.View
+    }
+    return false
+  }
+
+  private fun novaFindViewByTag(root: android.view.View?, tagVal: String): android.view.View? {
+    if (root == null || root.visibility != android.view.View.VISIBLE) return null
+    if (root.tag == tagVal) return root
+    if (root is android.view.ViewGroup) {
+      for (i in 0 until root.childCount) {
+        val found = novaFindViewByTag(root.getChildAt(i), tagVal)
+        if (found != null) return found
+      }
+    }
+    return null
+  }
+
+  private fun novaFindFirstFocusable(root: android.view.View?): android.view.View? {
+    if (root == null || root.visibility != android.view.View.VISIBLE) return null
+    if (root.isFocusable && root.isClickable) return root
+    if (root is android.view.ViewGroup) {
+      for (i in 0 until root.childCount) {
+        val found = novaFindFirstFocusable(root.getChildAt(i))
+        if (found != null) return found
+      }
+    }
+    return null
+  }
+
+  private fun novaEnsureModalFocus(): Boolean {
+    val decor = window?.decorView as? android.view.ViewGroup ?: return false
+    val modalRoot = novaFindViewByTag(decor, "nova-tv-modal-root") ?: return false
+    val cur = currentFocus
+    if (cur != null && novaIsDescendantOf(cur, modalRoot)) return true
+    val preferred = novaFindViewByTag(modalRoot, "nova-tv-preferred-focus") ?: novaFindFirstFocusable(modalRoot)
+    if (preferred != null) {
+      preferred.post {
+        try {
+          preferred.requestFocus()
+        } catch (_: Throwable) {}
+      }
+      return true
+    }
+    return false
+  }
+
   private fun novaInstallTvFocusEngine() {
     if (novaTvEngineInstalled) return
     val decor = window?.decorView as? android.view.ViewGroup ?: return
@@ -83,6 +135,11 @@ const KOTLIN_METHODS = `
       decor.isFocusableInTouchMode = false
     }
 
+    decor.viewTreeObserver.addOnGlobalLayoutListener {
+      if (novaDpadMode || novaIsTvDevice()) {
+        novaEnsureModalFocus()
+      }
+    }
     decor.viewTreeObserver.addOnGlobalFocusChangeListener { oldFocus, newFocus ->
       if (oldFocus != null) {
         novaDispatchRnFocusEvent(oldFocus, false)
@@ -143,6 +200,7 @@ const KOTLIN_METHODS = `
           novaEmitKeyEventToJs(keyCode, event.action, event.repeatCount)
         }
       }
+      novaEnsureModalFocus()
       val focused = currentFocus
       val desc = focused?.contentDescription?.toString() ?: ""
       if (

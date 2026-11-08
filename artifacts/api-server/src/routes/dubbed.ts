@@ -715,20 +715,71 @@ router.get("/dubbed/catalog", async (req, res) => {
   res.json(responseData);
 });
 
+function normalizeDubbedSearchText(val: string): string {
+  return String(val || "")
+    .normalize("NFKD")
+    .replace(/[\u064B-\u065F\u0670\u0640]/g, "")
+    .replace(/[أإآٱ]/g, "ا")
+    .replace(/ة/g, "ه")
+    .replace(/ى/g, "ي")
+    .replace(/ؤ/g, "و")
+    .replace(/ئ/g, "ي")
+    .toLowerCase()
+    .replace(/[-_.:،,!?()\[\]]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 // ── GET /api/dubbed/search?q= ──
 router.get("/dubbed/search", async (req, res) => {
   const q = (req.query.q as string || "").trim();
   if (!q) { res.json({ results: [] }); return; }
+  const needle = normalizeDubbedSearchText(q);
+  const needleTokens = needle.split(" ").filter(Boolean);
+  const publicBase = (process.env.NOVA_PUBLIC_URL || "https://animenovaa.duckdns.org").replace(/\/$/, "");
+  const absoluteImageUrl = (value: any) =>
+    typeof value === "string" && value.startsWith("/") ? `${publicBase}${value}` : value;
+
   try {
-    const r = await fetch(`${SC_BASE}/api/dubbed/search?q=${encodeURIComponent(q)}`, {
-      headers: { "User-Agent": BROWSER_UA, Referer: `${SC_BASE}/dubbed`, Accept: "application/json" },
-      signal: AbortSignal.timeout(8000),
-    });
-    if (!r.ok) { res.json({ results: [] }); return; }
-    const data = await r.json();
+    const seen = new Set<string>();
+    const results: any[] = [];
+
+    const addCandidate = (item: any) => {
+      if (!item || typeof item !== "object") return;
+      const idKey = String(item.key || item.slug || item.title || "").trim();
+      if (!idKey || seen.has(idKey)) return;
+      const hay = normalizeDubbedSearchText([item.title, item.key, item.slug].filter(Boolean).join(" "));
+      if (!hay) return;
+      const matches = needleTokens.length > 0 && needleTokens.every(tok => hay.includes(tok));
+      if (!matches) return;
+      seen.add(idKey);
+      results.push({
+        ...item,
+        image: absoluteImageUrl(item.image),
+        poster: absoluteImageUrl(item.poster),
+      });
+    };
+
+    // 1. Search all in-memory cached catalog pages
+    for (const [, entry] of _catalogCache.entries()) {
+      if (Array.isArray(entry?.data?.results)) {
+        for (const item of entry.data.results) addCandidate(item);
+      }
+    }
+
+    // 2. Search all 55+ disk-cached catalog pages in /opt/nova-cache/dubbed
+    for (let p = 1; p <= 60; p++) {
+      const pageData = _dcGet(`/api/dubbed/catalog?page=${p}`);
+      if (Array.isArray(pageData?.results)) {
+        for (const item of pageData.results) addCandidate(item);
+      }
+    }
+
     res.setHeader("Cache-Control", "public, max-age=300");
-    res.json(data);
-  } catch { res.json({ results: [] }); }
+    res.json({ results });
+  } catch {
+    res.json({ results: [] });
+  }
 });
 
 // ── GET /api/dubbed/episodes?series= ──

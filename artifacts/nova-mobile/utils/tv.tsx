@@ -175,14 +175,20 @@ export function tvFocusStyle(focused: boolean, isWhite?: boolean): ViewStyle {
   const white = typeof isWhite === "boolean" ? isWhite : activeThemeIsWhite;
   if (white) {
     return {
-      borderColor: "#0284C7",
-      borderWidth: 2.5,
+      borderColor: "#7C3AED",
+      borderWidth: 3.5,
+      shadowColor: "#7C3AED",
+      shadowOpacity: 0.55,
+      shadowRadius: 8,
+      shadowOffset: { width: 0, height: 2 },
+      transform: [{ scale: 1.03 }],
       zIndex: 25,
     };
   }
   return {
     borderColor: "#38BDF8",
-    borderWidth: 2.5,
+    borderWidth: 3,
+    transform: [{ scale: 1.02 }],
     zIndex: 25,
   };
 }
@@ -239,10 +245,27 @@ export function TvPressable({
 }: TvPressableProps) {
   const tv = isTvDevice();
   const [focused, setFocused] = React.useState(false);
+  const innerRef = React.useRef<any>(null);
+
+  React.useEffect(() => {
+    if (!tv || !hasTVPreferredFocus) return;
+    const t1 = setTimeout(() => {
+      try { innerRef.current?.focus?.(); } catch {}
+    }, 60);
+    const t2 = setTimeout(() => {
+      try { innerRef.current?.focus?.(); } catch {}
+    }, 220);
+    return () => {
+      clearTimeout(t1);
+      clearTimeout(t2);
+    };
+  }, [tv, hasTVPreferredFocus]);
 
   return (
     <Pressable
+      ref={innerRef}
       {...props}
+      testID={tv && hasTVPreferredFocus && !props.testID ? "nova-tv-preferred-focus" : props.testID}
       unstable_pressDelay={0}
       focusable={tv ? focusable !== false : focusable}
       hasTVPreferredFocus={tv && hasTVPreferredFocus}
