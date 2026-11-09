@@ -39,26 +39,7 @@ const KOTLIN_METHODS = `
   }
 
   private fun novaDispatchRnFocusEvent(view: android.view.View, focused: Boolean) {
-    try {
-      val app = application as? com.facebook.react.ReactApplication ?: return
-      val reactContext = app.reactNativeHost.reactInstanceManager.currentReactContext ?: return
-      val targetId = view.id
-      if (targetId <= 0) return
-      val event = if (focused) {
-        com.facebook.react.views.view.ReactViewFocusEvent(
-          com.facebook.react.uimanager.UIManagerHelper.getSurfaceId(reactContext),
-          targetId
-        )
-      } else {
-        com.facebook.react.views.view.ReactViewBlurEvent(
-          com.facebook.react.uimanager.UIManagerHelper.getSurfaceId(reactContext),
-          targetId
-        )
-      }
-      com.facebook.react.uimanager.UIManagerHelper
-        .getEventDispatcherForReactTag(reactContext, targetId)
-        ?.dispatchEvent(event)
-    } catch (_: Throwable) {}
+    // React Native views dispatch focus/blur natively via OnFocusChangeListener
   }
 
   private fun novaScrollFocusedIntoView(focused: android.view.View) {
