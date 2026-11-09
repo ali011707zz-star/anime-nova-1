@@ -15663,6 +15663,11 @@ function writeAnslayerLatestDiskCache(items: any[]): void {
   }
 }
 
+const _latestFallbackResolvedAniListCache = new Map<string, number>();
+let _lastAnimeifyFallbackItems: any[] = [];
+let _lastSanimeFallbackItems: any[] = [];
+let _lastA4upFallbackItems: any[] = [];
+
 async function fetchLiveFallbackLatestEpisodes(): Promise<any[]> {
   type LatestCandidate = {
     sourceId: number;
@@ -15675,9 +15680,13 @@ async function fetchLiveFallbackLatestEpisodes(): Promise<any[]> {
     cover: string;
     year: string;
     updatedAt: string | null;
+    origin?: "animeify" | "sanime" | "a4up";
   };
 
-  const collected: LatestCandidate[] = [];
+  const animeifyItems: LatestCandidate[] = [];
+  const sanimeItems: LatestCandidate[] = [];
+  const a4upItems: LatestCandidate[] = [];
+
   const tasks = [
     (async () => {
       try {
@@ -15705,7 +15714,7 @@ async function fetchLiveFallbackLatestEpisodes(): Promise<any[]> {
             .find((value) => /[\u0600-\u06FF]/.test(value))
             ?.split(",")[0]?.trim() || "";
           const year = String(anime.Aired || anime.Premiered || "").match(/\b(19\d{2}|20\d{2})\b/)?.[1] || "";
-          collected.push({
+          animeifyItems.push({
             sourceId: malId > 0 ? malId : Math.abs(createHash("md5").update(name).digest().readInt32BE(0)) || 1,
             malId: malId > 0 ? malId : undefined,
             name,
@@ -15718,8 +15727,10 @@ async function fetchLiveFallbackLatestEpisodes(): Promise<any[]> {
               : "",
             year,
             updatedAt: episodeData.Released || episodeData.AddedAt || null,
+            origin: "animeify",
           });
         }
+        if (animeifyItems.length > 0) _lastAnimeifyFallbackItems = animeifyItems;
       } catch {}
     })(),
     (async () => {
@@ -15731,12 +15742,12 @@ async function fetchLiveFallbackLatestEpisodes(): Promise<any[]> {
         if (!response.ok) return;
         const payload = await response.json() as any;
         const rows: any[] = Array.isArray(payload?.latest) ? payload.latest : (Array.isArray(payload) ? payload : []);
-        for (const row of rows) {
+        for (const row of rows.slice(0, 28)) {
           const name = String(row?.name || row?.title || "").trim();
           const match = String(row?.epName || row?.episode || "").match(/(\d+)/);
           const episode = match ? parseInt(match[1], 10) : NaN;
           if (!name || !Number.isFinite(episode) || episode <= 0) continue;
-          collected.push({
+          sanimeItems.push({
             sourceId: parseInt(String(row?.id || "0"), 10) || Math.abs(createHash("md5").update(name).digest().readInt32BE(0)) || 1,
             name,
             english: name,
@@ -15744,8 +15755,10 @@ async function fetchLiveFallbackLatestEpisodes(): Promise<any[]> {
             cover: String(row?.image || row?.poster || "").trim(),
             year: String(row?.year || "").trim(),
             updatedAt: row?.date || null,
+            origin: "sanime",
           });
         }
+        if (sanimeItems.length > 0) _lastSanimeFallbackItems = sanimeItems;
       } catch {}
     })(),
     (async () => {
@@ -15756,7 +15769,7 @@ async function fetchLiveFallbackLatestEpisodes(): Promise<any[]> {
           const name = match[2].trim();
           const episode = parseInt(match[3], 10);
           if (!name || !Number.isFinite(episode) || episode <= 0) continue;
-          collected.push({
+          a4upItems.push({
             sourceId: Math.abs(createHash("md5").update(name).digest().readInt32BE(0)) || 1,
             name,
             english: name,
@@ -15764,34 +15777,66 @@ async function fetchLiveFallbackLatestEpisodes(): Promise<any[]> {
             cover: match[1].trim(),
             year: "",
             updatedAt: null,
+            origin: "a4up",
           });
         }
+        if (a4upItems.length > 0) _lastA4upFallbackItems = a4upItems;
       } catch {}
     })(),
   ];
   await Promise.allSettled(tasks);
+
+  const effAnimeify: LatestCandidate[] = animeifyItems.length > 0 ? animeifyItems : _lastAnimeifyFallbackItems;
+  const effSanime: LatestCandidate[] = sanimeItems.length > 0 ? sanimeItems : _lastSanimeFallbackItems;
+  const effA4up: LatestCandidate[] = a4upItems.length > 0 ? a4upItems : _lastA4upFallbackItems;
+
+  // Deterministic merge: put today's SAnime releases first, then interleave Animeify, SAnime, and A4up
+  // so the order never flips based on which HTTP server responded faster.
+  const todayIso = new Date().toISOString().slice(0, 10);
+  const collected: LatestCandidate[] = [];
+  for (const s of effSanime) {
+    if (s.updatedAt === todayIso) collected.push(s);
+  }
+  const maxLen = Math.max(effAnimeify.length, effSanime.length, effA4up.length);
+  for (let i = 0; i < maxLen; i++) {
+    if (i < effAnimeify.length) collected.push(effAnimeify[i]);
+    if (i < effSanime.length && effSanime[i].updatedAt !== todayIso) collected.push(effSanime[i]);
+    if (i < effA4up.length) collected.push(effA4up[i]);
+  }
+
   if (!collected.length) return [];
 
   const deduped = new Map<string, LatestCandidate>();
   for (const item of collected) {
     const key = normalizeAniTitle(item.name);
     const existing = deduped.get(key);
-    if (!existing || item.episode > existing.episode) deduped.set(key, item);
+    if (!existing || item.episode > existing.episode) {
+      deduped.set(key, existing ? {
+        ...item,
+        titleAr: item.titleAr || existing.titleAr,
+        synonyms: Array.from(new Set([...(existing.synonyms || []), ...(item.synonyms || [])])),
+      } : item);
+    }
   }
 
   const selected = Array.from(deduped.values()).slice(0, 35);
-  return Promise.all(selected.map(async (item, index) => {
-    let animeId: number | undefined;
-    if (index < 15) {
+  const resolvedRows = await Promise.all(selected.map(async (item, index) => {
+    const normKey = normalizeAniTitle(item.name);
+    let animeId: number | undefined = _latestFallbackResolvedAniListCache.get(normKey);
+    if (!animeId && index < 25) {
       animeId = await Promise.race([
         resolveAniListIdForSource(item.name, item.english || null, item.synonyms || [], item.titleAr || null),
-        new Promise<undefined>((resolve) => setTimeout(() => resolve(undefined), 1800)),
+        new Promise<undefined>((resolve) => setTimeout(() => resolve(undefined), 2200)),
       ]);
+      if (animeId && animeId > 0) {
+        _latestFallbackResolvedAniListCache.set(normKey, animeId);
+      }
     }
     const meta = animeId ? getCachedAniListSourceMeta(animeId) : undefined;
     const titleAr = item.titleAr || (/[\u0600-\u06FF]/.test(item.name) ? item.name : "");
     return {
-      anslayerId: animeId || item.sourceId,
+      anslayerId: item.sourceId,
+      sourceId: item.sourceId,
       animeId: animeId || null,
       anilistId: animeId || null,
       malId: item.malId || null,
@@ -15808,6 +15853,25 @@ async function fetchLiveFallbackLatestEpisodes(): Promise<any[]> {
       updatedAt: item.updatedAt,
     };
   }));
+
+  // Final deduplication by resolved animeId (merges English Animeify row + Romaji SAnime row of the same anime)
+  const finalById = new Map<string, any>();
+  for (const row of resolvedRows) {
+    const k = row.animeId ? `ani:${row.animeId}` : `title:${normalizeAniTitle(row.name)}`;
+    const prev = finalById.get(k);
+    if (!prev) {
+      finalById.set(k, row);
+    } else {
+      const pick = row.episode > prev.episode ? row : prev;
+      finalById.set(k, {
+        ...pick,
+        titleAr: pick.titleAr || prev.titleAr || "",
+        title_ar: pick.title_ar || prev.title_ar || "",
+        titleVariants: Array.from(new Set([...(prev.titleVariants || []), ...(row.titleVariants || [])])),
+      });
+    }
+  }
+  return Array.from(finalById.values());
 }
 
 router.get("/anime/anslayer-latest", async (req, res) => {

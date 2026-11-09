@@ -112,8 +112,12 @@ export async function createApp(): Promise<Express> {
         }
         if (origin.includes("localhost") || origin.includes("127.0.0.1")) return cb(null, true);
       }
-      // Exact origin used by the mobile OAuth WebView.
-      if (origin === "https://nova-player.local" || origin === "http://nova-player.local") {
+      // Exact origin used by the mobile OAuth WebView and AI Studio preview.
+      if (
+        origin === "https://nova-player.local" ||
+        origin === "http://nova-player.local" ||
+        origin.endsWith(".run.app")
+      ) {
         return cb(null, true);
       }
       cb(new Error(`CORS: ${origin} غير مسموح`));
