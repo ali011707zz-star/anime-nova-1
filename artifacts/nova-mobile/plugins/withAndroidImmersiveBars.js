@@ -38,8 +38,35 @@ const KOTLIN_METHODS = `
       device.contains("onn")
   }
 
-  private fun novaDispatchRnFocusEvent(view: android.view.View, focused: Boolean) {
-    // React Native views dispatch focus/blur natively via OnFocusChangeListener
+  private class NovaRnFocusEvent(
+    surfaceId: Int,
+    viewId: Int,
+    private val evtName: String
+  ) : com.facebook.react.uimanager.events.Event<NovaRnFocusEvent>(surfaceId, viewId) {
+    override fun getEventName(): String = evtName
+    override fun canCoalesce(): Boolean = false
+    override fun getEventData(): com.facebook.react.bridge.WritableMap {
+      return com.facebook.react.bridge.Arguments.createMap().apply {
+        putInt("target", viewTag)
+      }
+    }
+  }
+
+  private fun novaDispatchRnFocusEvent(view: android.view.View?, isFocus: Boolean) {
+    if (view == null || view.id == android.view.View.NO_ID || view.id <= 0) return
+    try {
+      var ctx = view.context
+      while (ctx is android.content.ContextWrapper && ctx !is com.facebook.react.bridge.ReactContext) {
+        ctx = ctx.baseContext
+      }
+      val reactCtx = (ctx as? com.facebook.react.bridge.ReactContext)
+        ?: (application as? com.facebook.react.ReactApplication)?.reactNativeHost?.reactInstanceManager?.currentReactContext
+        ?: return
+      val surfaceId = com.facebook.react.uimanager.UIManagerHelper.getSurfaceId(reactCtx)
+      val dispatcher = com.facebook.react.uimanager.UIManagerHelper.getEventDispatcherForReactTag(reactCtx, view.id) ?: return
+      val evtName = if (isFocus) "topFocus" else "topBlur"
+      dispatcher.dispatchEvent(NovaRnFocusEvent(surfaceId, view.id, evtName))
+    } catch (_: Throwable) {}
   }
 
   private fun novaScrollFocusedIntoView(focused: android.view.View) {
