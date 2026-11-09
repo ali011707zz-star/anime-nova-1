@@ -316,12 +316,12 @@ function patchMainActivity(modResults) {
   if (contents.includes(MARKER)) return contents;
 
   const isKotlin =
-    modResults.language === "kt" || /\\bfun\\s+onCreate\\s*\\(/.test(contents);
+    modResults.language === "kt" || /\bfun\s+onCreate\s*\(/.test(contents);
   if (!isKotlin) {
     throw new Error("withAndroidImmersiveBars: expected Kotlin MainActivity");
   }
 
-  const onCreateCall = /super\\.onCreate\\((?:null|savedInstanceState)\\)(;?)/;
+  const onCreateCall = /super\.onCreate\((?:null|savedInstanceState)\)(;?)/;
   if (!onCreateCall.test(contents)) {
     throw new Error("withAndroidImmersiveBars: could not find MainActivity.onCreate()");
   }
