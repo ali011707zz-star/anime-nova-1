@@ -731,102 +731,111 @@ export default function Home() {
         )}
 
         {/* ── 2. أحدث الحلقات 📺 ── */}
-        {todayEps.length > 0 && (
-          <div>
-            <SectionHeader title="أحدث الحلقات 📺" href="/latest" />
-            <div
-              className="flex gap-2.5 overflow-x-auto px-3.5 pb-1"
-              style={{ scrollbarWidth: "none" }}
-            >
-              {todayEps.slice(0, 18).map((it: any, i: number) => {
-                const titleVariants = Array.from(
-                  new Set(
-                    [
-                      ...(Array.isArray(it.titleVariants) ? it.titleVariants : []),
-                      it.romaji,
-                      it.english,
-                      it.native,
-                      it.name,
-                    ].filter(
-                      (value: unknown): value is string =>
-                        typeof value === "string" && value.trim().length > 1,
+        <div>
+          <SectionHeader title="أحدث الحلقات 📺" href="/latest" />
+          <div
+            className="flex gap-2.5 overflow-x-auto px-3.5 pb-1"
+            style={{ scrollbarWidth: "none" }}
+          >
+            {todayEps.length === 0
+              ? Array.from({ length: 6 }).map((_, idx) => (
+                  <div
+                    key={idx}
+                    className="shrink-0 w-[120px] sm:w-[136px] h-[175px] sm:h-[196px] rounded-[12px] animate-pulse border"
+                    style={{
+                      backgroundColor: "var(--bg-card, #14171C)",
+                      borderColor: "var(--border-subtle, rgba(255,255,255,0.08))",
+                    }}
+                  />
+                ))
+              : todayEps.slice(0, 18).map((it: any, i: number) => {
+                  const titleVariants = Array.from(
+                    new Set(
+                      [
+                        ...(Array.isArray(it.titleVariants) ? it.titleVariants : []),
+                        it.romaji,
+                        it.english,
+                        it.native,
+                        it.name,
+                      ].filter(
+                        (value: unknown): value is string =>
+                          typeof value === "string" && value.trim().length > 1,
+                      ),
                     ),
-                  ),
-                );
-                const canonicalTitle = it.romaji || it.name || "";
-                const canonicalEnglish = it.english || "";
-                const href = `/watch?anime=${encodeURIComponent(String(it.animeId || 0))}&anilistId=${encodeURIComponent(String(it.anilistId || it.animeId || 0))}&anslayerId=${encodeURIComponent(String(it.anslayerId || ""))}&awAnimeId=${encodeURIComponent(String(it.awAnimeId || ""))}&anifoxId=${encodeURIComponent(String(it.anifoxId || ""))}&season=${encodeURIComponent(String(it.season || 1))}&ep=${it.episode}&totalEps=${it.episode}&title=${encodeURIComponent(canonicalTitle)}&english=${encodeURIComponent(canonicalEnglish)}&native=${encodeURIComponent(String(it.native || ""))}&titles=${encodeURIComponent(JSON.stringify(titleVariants))}&cover=${encodeURIComponent(it.cover || "")}&titleAr=${encodeURIComponent(it.titleAr || "")}&site=${encodeURIComponent(it.source || "anslayer")}&fromLatest=1&latestSource=${encodeURIComponent(it.source || "anslayer")}`;
-                return (
-                  <Link
-                    href={href}
-                    key={`${it.source}-${it.anslayerId || it.animeId || i}-${it.episode}`}
-                  >
-                    <motion.div
-                      whileTap={{ scale: 0.95 }}
-                      className="shrink-0 w-[120px] sm:w-[136px] cursor-pointer"
+                  );
+                  const canonicalTitle = it.romaji || it.name || "";
+                  const canonicalEnglish = it.english || "";
+                  const href = `/watch?anime=${encodeURIComponent(String(it.animeId || 0))}&anilistId=${encodeURIComponent(String(it.anilistId || it.animeId || 0))}&anslayerId=${encodeURIComponent(String(it.anslayerId || ""))}&awAnimeId=${encodeURIComponent(String(it.awAnimeId || ""))}&anifoxId=${encodeURIComponent(String(it.anifoxId || ""))}&season=${encodeURIComponent(String(it.season || 1))}&ep=${it.episode}&totalEps=${it.episode}&title=${encodeURIComponent(canonicalTitle)}&english=${encodeURIComponent(canonicalEnglish)}&native=${encodeURIComponent(String(it.native || ""))}&titles=${encodeURIComponent(JSON.stringify(titleVariants))}&cover=${encodeURIComponent(it.cover || "")}&titleAr=${encodeURIComponent(it.titleAr || "")}&site=${encodeURIComponent(it.source || "anslayer")}&fromLatest=1&latestSource=${encodeURIComponent(it.source || "anslayer")}`;
+                  return (
+                    <Link
+                      href={href}
+                      key={`${it.source}-${it.anslayerId || it.animeId || i}-${it.episode}`}
                     >
-                      <div
-                        className="relative w-full h-[175px] sm:h-[196px] rounded-[12px] overflow-hidden border"
-                        style={{
-                          backgroundColor: "var(--bg-card, #14171C)",
-                          borderColor: "var(--border-subtle, rgba(255,255,255,0.08))",
-                        }}
+                      <motion.div
+                        whileTap={{ scale: 0.95 }}
+                        className="shrink-0 w-[120px] sm:w-[136px] cursor-pointer"
                       >
-                        {it.cover ? (
-                          <img
-                            src={it.cover}
-                            alt={it.name || ""}
-                            className="w-full h-full object-cover"
-                            loading="lazy"
-                            onError={(e) => {
-                              const target = e.currentTarget;
-                              const fallback = it.animeId
-                                ? `https://img.anili.st/media/${it.animeId}`
-                                : "";
-                              if (fallback && target.src !== fallback) {
-                                target.src = fallback;
-                              } else {
-                                target.style.display = "none";
-                              }
-                            }}
-                          />
-                        ) : (
-                          <div className="w-full h-full flex items-center justify-center">
-                            <Tv2 className="w-7 h-7 opacity-20" />
-                          </div>
-                        )}
-
                         <div
-                          className="absolute top-[7px] right-[7px] z-10 px-2 py-0.5 rounded-[12px]"
-                          style={{ backgroundColor: "rgba(7,9,13,0.78)" }}
-                        >
-                          <span className="text-[9px] font-bold text-white font-['Cairo']">
-                            الحلقة {it.episode}
-                          </span>
-                        </div>
-
-                        <div
-                          className="absolute bottom-0 inset-x-0 px-2 pb-2 pt-12"
+                          className="relative w-full h-[175px] sm:h-[196px] rounded-[12px] overflow-hidden border"
                           style={{
-                            background:
-                              "linear-gradient(to top, rgba(0,0,0,0.95) 0%, transparent 100%)",
+                            backgroundColor: "var(--bg-card, #14171C)",
+                            borderColor: "var(--border-subtle, rgba(255,255,255,0.08))",
                           }}
                         >
-                          <p
-                            dir="rtl"
-                            className="text-[11px] font-semibold text-white leading-[15px] line-clamp-2 text-right font-['Cairo']"
+                          {it.cover ? (
+                            <img
+                              src={it.cover}
+                              alt={it.name || ""}
+                              className="w-full h-full object-cover"
+                              loading="lazy"
+                              onError={(e) => {
+                                const target = e.currentTarget;
+                                const fallback = it.animeId
+                                  ? `https://img.anili.st/media/${it.animeId}`
+                                  : "";
+                                if (fallback && target.src !== fallback) {
+                                  target.src = fallback;
+                                } else {
+                                  target.style.display = "none";
+                                }
+                              }}
+                            />
+                          ) : (
+                            <div className="w-full h-full flex items-center justify-center">
+                              <Tv2 className="w-7 h-7 opacity-20" />
+                            </div>
+                          )}
+
+                          <div
+                            className="absolute top-[7px] right-[7px] z-10 px-2 py-0.5 rounded-[12px]"
+                            style={{ backgroundColor: "rgba(7,9,13,0.78)" }}
                           >
-                            {it.titleAr || it.name}
-                          </p>
+                            <span className="text-[9px] font-bold text-white font-['Cairo']">
+                              الحلقة {it.episode}
+                            </span>
+                          </div>
+
+                          <div
+                            className="absolute bottom-0 inset-x-0 px-2 pb-2 pt-12"
+                            style={{
+                              background:
+                                "linear-gradient(to top, rgba(0,0,0,0.95) 0%, transparent 100%)",
+                            }}
+                          >
+                            <p
+                              dir="rtl"
+                              className="text-[11px] font-semibold text-white leading-[15px] line-clamp-2 text-right font-['Cairo']"
+                            >
+                              {it.titleAr || it.name}
+                            </p>
+                          </div>
                         </div>
-                      </div>
-                    </motion.div>
-                  </Link>
-                );
-              })}
-            </div>
+                      </motion.div>
+                    </Link>
+                  );
+                })}
           </div>
-        )}
+        </div>
 
         {/* ── 3. انميشن مدبلج ✨ ── */}
         {animationHomeItems.length > 0 && (
