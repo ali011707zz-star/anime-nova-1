@@ -89,7 +89,14 @@ function loadFavChars(): any[] {
 
 export default function Library() {
   const { user } = useAuth();
-  const [tab, setTab] = useState<"continue" | "history" | "saved" | "chars">("continue");
+  const initialTab = (() => {
+    const t = new URLSearchParams(window.location.search).get("tab");
+    if (t === "saved" || t === "favorites") return "saved";
+    if (t === "history") return "history";
+    if (t === "chars") return "chars";
+    return "continue";
+  })();
+  const [tab, setTab] = useState<"continue" | "history" | "saved" | "chars">(initialTab);
   const [savedAnime, setSavedAnime] = useState<any[]>([]);
   const [history, setHistory] = useState<any[]>([]);
   const [animHistory, setAnimHistory] = useState<AnimHistItem[]>([]);

@@ -595,9 +595,22 @@ export default function DubbedCombinedLibrary() {
   const [, navigate]   = useLocation();
   const pageSearch = useSearch();
   const requestedTab = new URLSearchParams(pageSearch).get("tab");
-  const [tab, setTab]  = useState<Tab>(requestedTab === "spacetoon" ? "spacetoon" : "animation");
+  const [tab, setTab]  = useState<Tab>(
+    requestedTab === "spacetoon"
+      ? "spacetoon"
+      : requestedTab === "cartoon"
+        ? "cartoon"
+        : "animation",
+  );
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQ,    setSearchQ]    = useState("");
+
+  useEffect(() => {
+    const nextTab = new URLSearchParams(pageSearch).get("tab");
+    if (nextTab === "spacetoon" || nextTab === "cartoon" || nextTab === "animation") {
+      setTab(nextTab);
+    }
+  }, [pageSearch]);
 
   // إعادة تعيين البحث عند تبديل التبويب
   const switchTab = (t: Tab) => { setTab(t); setSearchQ(""); setSearchOpen(false); };
@@ -648,7 +661,7 @@ export default function DubbedCombinedLibrary() {
   return (
     <main className="bg-[#09090B] min-h-screen text-white pb-28" dir="rtl">
 
-      {/* ── Header ── */}
+      {/* ── Header matching mobile app/(tabs)/aw-dubbed.tsx ── */}
       <div className="sticky top-0 z-20 bg-[#09090B]/97 backdrop-blur-xl border-b border-white/5">
         <div className="px-4 pt-4 pb-3 flex items-center gap-3">
           <button onClick={() => navigate("/")}
@@ -656,8 +669,8 @@ export default function DubbedCombinedLibrary() {
             <ChevronDown className="w-4 h-4 text-white/70 rotate-90" />
           </button>
           <div className="flex-1">
-            <h1 className="text-lg font-black font-['Cairo'] text-white">مدبلج بالعربية</h1>
-            <p className="text-xs text-white/40 font-['Cairo']">كرتون وأنيميشن مدبلج ومترجم للعربية</p>
+            <h1 className="text-lg font-black font-['Cairo'] text-white">رسوم متحركة مدبلجة ومترجمة</h1>
+            <p className="text-xs text-white/40 font-['Cairo']">انميشن مدبلج، مسلسلات سبيستون، وكرتون عربي في مكان واحد</p>
           </div>
           <button
             onClick={() => { setSearchOpen(o => !o); if (!searchOpen) setTimeout(() => document.getElementById(searchId)?.focus(), 50); }}

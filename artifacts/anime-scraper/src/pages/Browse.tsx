@@ -281,37 +281,129 @@ export default function Browse() {
   return (
     <main className="bg-[#09090B] min-h-screen text-white pb-28" dir="rtl">
 
-      {/* Sticky header */}
-      <div className="sticky top-0 z-20 bg-[#09090B]/95 backdrop-blur-xl border-b border-white/5 px-4 pt-4 pb-3">
-        <div className="flex items-center gap-2 mb-3">
-          <h1 className="text-xl font-black font-['Cairo'] flex-1">
-            {selectedGenre ? currentGenreLabel
-              : selectedSeason && selectedYear ? `موسم ${seasonLabel[selectedSeason] || selectedSeason} ${selectedYear}`
-              : selectedYear ? `أنمي ${selectedYear}`
-              : "مكتبة الأنمي"}
-          </h1>
-          <button onClick={() => setShowGenreGrid(p => !p)}
-            className={`text-[10px] px-2.5 py-1.5 rounded-lg font-['Cairo'] active:scale-95 border transition-colors ${showGenreGrid ? "bg-primary/20 text-primary border-primary/30" : "bg-white/6 text-white/40 border-white/8"}`}>
-            تصنيفات
-          </button>
-          {hasFilter && (
-            <button onClick={() => { setSelectedGenre(""); setSelectedFormat(""); setSelectedYear(""); setSelectedSeason(""); }}
-              className="text-[10px] text-white/40 bg-white/6 border border-white/8 px-2.5 py-1.5 rounded-lg font-['Cairo'] active:scale-95">
-              × مسح
-            </button>
-          )}
-        </div>
+      {/* Sticky header matching mobile app/(tabs)/browse.tsx */}
+      <div
+        className="sticky top-0 z-20 backdrop-blur-xl border-b px-4 pt-3.5 pb-3"
+        style={{
+          backgroundColor: "var(--bg-base, #090A0C)",
+          borderColor: "var(--border-subtle, rgba(255,255,255,0.08))",
+        }}
+      >
+        <div className="max-w-7xl mx-auto">
+          {/* Top Mode Switcher Row: [تصفح | بحث] + Genre Grid Toggle */}
+          <div className="flex items-center justify-between gap-2.5 mb-3">
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setShowGenreGrid((p) => !p)}
+                className="px-3 h-[38px] rounded-[11px] border text-[12px] font-bold font-['Cairo'] flex items-center gap-1.5 transition-colors"
+                style={{
+                  backgroundColor: showGenreGrid
+                    ? "rgba(118, 84, 200, 0.16)"
+                    : "var(--bg-surface, #111317)",
+                  borderColor: showGenreGrid
+                    ? "var(--accent-primary, #7654C8)"
+                    : "var(--border-subtle, rgba(255,255,255,0.08))",
+                  color: showGenreGrid
+                    ? "var(--accent-primary, #7654C8)"
+                    : "var(--text-secondary, #CBD5E1)",
+                }}
+              >
+                <span>التصنيفات</span>
+              </button>
+              {hasFilter && (
+                <button
+                  onClick={() => {
+                    setSelectedGenre("");
+                    setSelectedFormat("");
+                    setSelectedYear("");
+                    setSelectedSeason("");
+                  }}
+                  className="px-3 h-[38px] rounded-[11px] border text-[12px] font-bold font-['Cairo'] text-rose-400 border-rose-500/30 bg-rose-500/10"
+                >
+                  × مسح
+                </button>
+              )}
+            </div>
 
-        {/* Search bar */}
-        <div className="relative mb-3">
-          <Search className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-white/30" />
-          <input
-            value={searchQ} onChange={e => setSearchQ(e.target.value)}
-            placeholder="ابحث عن أنمي..."
-            className="w-full bg-[#18181B] border border-white/8 rounded-xl px-4 py-2.5 pr-9 text-sm text-white placeholder:text-white/25 font-['Cairo'] focus:outline-none focus:border-primary/40"
-          />
-          {searchLoading && <Loader2 className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-primary animate-spin" />}
-        </div>
+            {/* Mode Switcher matching mobile modeSwitcher */}
+            <div
+              className="flex items-center p-[3px] rounded-[13px] border flex-1 max-w-[240px]"
+              style={{
+                backgroundColor: "var(--bg-surface, #111317)",
+                borderColor: "var(--border-subtle, rgba(255,255,255,0.08))",
+              }}
+            >
+              <button
+                className="flex-1 py-1.5 rounded-[10px] text-[13px] font-extrabold font-['Cairo'] text-white text-center"
+                style={{ backgroundColor: "var(--accent-primary, #7654C8)" }}
+              >
+                تصفح
+              </button>
+              <Link href="/search" className="flex-1">
+                <button
+                  className="w-full py-1.5 rounded-[10px] text-[13px] font-bold font-['Cairo'] text-center"
+                  style={{ color: "var(--text-muted, #94A3B8)" }}
+                >
+                  بحث
+                </button>
+              </Link>
+            </div>
+          </div>
+
+          {/* Horizontal GenreCard Rail matching mobile GenreCard */}
+          {!searchQ.trim() && (
+            <div
+              className="flex items-center gap-2.5 overflow-x-auto pb-2.5 pt-1"
+              style={{ scrollbarWidth: "none" }}
+            >
+              {GENRES.map((g) => {
+                const active = selectedGenre === g.en;
+                return (
+                  <button
+                    key={g.en}
+                    onClick={() => setSelectedGenre(active ? "" : g.en)}
+                    className="relative shrink-0 w-[128px] h-[54px] rounded-2xl overflow-hidden flex items-center justify-end px-3 transition-transform active:scale-95"
+                    style={{
+                      backgroundColor: g.color,
+                      boxShadow: active ? "0 0 0 2px #fff" : "none",
+                    }}
+                  >
+                    <div
+                      className="w-[40px] h-[52px] rounded-[10px] overflow-hidden border border-white/25 absolute left-2 top-1 bg-black/25"
+                      style={{ transform: "rotate(-9deg)" }}
+                    >
+                      <img
+                        src={coverUrl(g.animeId)}
+                        alt=""
+                        className="w-full h-full object-cover"
+                        loading="lazy"
+                      />
+                    </div>
+                    <span
+                      className="relative z-10 text-white font-extrabold text-[13px] font-['Cairo']"
+                      style={{ textShadow: "0 1px 4px rgba(0,0,0,0.45)" }}
+                    >
+                      {g.ar}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+
+          {/* Search bar */}
+          <div className="relative mb-2.5">
+            <Search className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-white/30" />
+            <input
+              value={searchQ}
+              onChange={(e) => setSearchQ(e.target.value)}
+              placeholder="ابحث عن أنمي..."
+              className="w-full bg-[#18181B] border border-white/8 rounded-xl px-4 py-2 pr-9 text-sm text-white placeholder:text-white/25 font-['Cairo'] focus:outline-none focus:border-primary/40"
+            />
+            {searchLoading && (
+              <Loader2 className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-primary animate-spin" />
+            )}
+          </div>
 
         {/* Format tabs */}
         {!searchQ.trim() && (
@@ -358,6 +450,7 @@ export default function Browse() {
             ))}
           </div>
         )}
+        </div>
       </div>
 
       {/* Genre grid — shown when no genre/format selected */}

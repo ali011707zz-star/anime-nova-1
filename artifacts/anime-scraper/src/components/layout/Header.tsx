@@ -1,17 +1,5 @@
 import { useLocation } from "wouter";
-import { LogIn } from "lucide-react";
-import { useAuth } from "@/lib/auth-context";
-
-const AVATAR_COLORS: [string, string][] = [
-  ["#7C3AED", "#4C1D95"],
-  ["#2563EB", "#1E3A8A"],
-  ["#DB2777", "#831843"],
-  ["#059669", "#064E3B"],
-  ["#D97706", "#78350F"],
-  ["#DC2626", "#7F1D1D"],
-  ["#0891B2", "#164E63"],
-  ["#6D28D9", "#2E1065"],
-];
+import { Menu, Search } from "lucide-react";
 
 interface HeaderProps {
   onMenuClick: () => void;
@@ -19,79 +7,88 @@ interface HeaderProps {
 
 export function Header({ onMenuClick }: HeaderProps) {
   const [location, navigate] = useLocation();
-  const { user } = useAuth();
 
   if (location.startsWith("/watch")) return null;
 
-  const colorIdx = Math.min(user?.avatarColor ?? 0, 7);
-  const [g1, g2] = AVATAR_COLORS[colorIdx];
-  const avatarLetter = (user?.displayName?.[0] ?? user?.email?.[0] ?? "N").toUpperCase();
-  const avatarImg = user?.profileImageUrl;
-
   return (
-    <header className="sticky top-0 z-50 w-full bg-[#09090B]/90 backdrop-blur-xl border-b border-white/[0.06]" dir="rtl">
+    <header
+      className="sticky top-0 z-50 w-full backdrop-blur-xl border-b"
+      style={{
+        backgroundColor: "var(--bg-base, #090A0C)",
+        borderColor: "var(--border-subtle, rgba(255,255,255,0.08))",
+      }}
+    >
       <a
         href="https://t.me/Anime_NOVA_0"
         target="_blank"
         rel="noreferrer"
-        className="flex min-h-8 items-center justify-center gap-1.5 border-b border-violet-400/10 bg-violet-500/[0.08] px-3 py-1 text-center text-[11px] font-bold font-['Cairo'] text-violet-100 transition-colors hover:bg-violet-500/[0.15]"
+        dir="rtl"
+        className="flex min-h-7 items-center justify-center gap-1.5 border-b border-cyan-500/15 bg-cyan-500/[0.08] px-3 py-1 text-center text-[11px] font-bold font-['Cairo'] text-cyan-300 transition-colors hover:bg-cyan-500/[0.14]"
       >
         <span aria-hidden="true">✈</span>
-        <span>تابع أخبار وتحديثات NOVA Anime وانضم لقناتنا الرسمية، وبلّغنا عن أي مشكلة تواجهك</span>
+        <span>تابع أخبار وتحديثات Anime NOVA وانضم لقناتنا الرسمية على تيليجرام</span>
       </a>
-      <div className="px-3 py-2 flex items-center justify-between">
-        {/* RIGHT: Menu + Logo */}
-        <div className="flex items-center gap-2">
-          <button
-            onClick={onMenuClick}
-            className="w-8 h-8 flex items-center justify-center rounded-xl hover:bg-white/8 text-white/70 hover:text-white transition-all active:scale-90"
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <line x1="4" y1="6" x2="20" y2="6"/><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="18" x2="20" y2="18"/>
-            </svg>
-          </button>
-          <div className="flex items-center gap-[4px]" dir="ltr">
-            <span className="text-[16px] font-black tracking-tight text-white/90" style={{ fontFamily: "'Cairo',sans-serif", letterSpacing: "0.03em" }}>ANIME</span>
-            <span className="text-[16px] font-black tracking-tight" style={{ fontFamily: "'Cairo',sans-serif", letterSpacing: "0.03em", background: "linear-gradient(135deg,#C4B5FD,#A78BFA,#7C3AED)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>NOVA</span>
-          </div>
-        </div>
 
-        {/* LEFT: Profile */}
-        <div className="flex items-center gap-1">
-          {user ? (
-            <button
-              onClick={() => navigate("/profile")}
-              className="relative w-9 h-9 flex items-center justify-center rounded-2xl transition-all active:scale-90 hover:scale-105 group overflow-hidden"
-              style={{
-                background: avatarImg ? undefined : `linear-gradient(135deg,${g1},${g2})`,
-                border: `1.5px solid ${g1}80`,
-                boxShadow: `0 2px 12px ${g1}40`,
-              }}
-              title="الملف الشخصي"
+      {/* Unified Mobile Header Layout: Left Menu button | Right Search Pill + | ANIME NOVA */}
+      <div className="px-3.5 py-2.5 flex items-center justify-between gap-2.5 max-w-7xl mx-auto" dir="ltr">
+        {/* Menu Button (Matches mobile menuBtn: 42x42 rounded-[13px]) */}
+        <button
+          onClick={onMenuClick}
+          aria-label="القائمة الجانبية"
+          className="w-[42px] h-[42px] rounded-[13px] flex items-center justify-center shrink-0 transition-transform active:scale-95"
+          style={{
+            backgroundColor: "var(--bg-surface, #111317)",
+            border: "1px solid var(--border-subtle, rgba(255,255,255,0.08))",
+            color: "var(--text-main, #F3F4F6)",
+          }}
+        >
+          <Menu className="w-[21px] h-[21px]" />
+        </button>
+
+        {/* Right Group: Compact Search Trigger + Brand Logo */}
+        <div className="flex items-center gap-2.5 flex-1 justify-end">
+          <button
+            onClick={() => navigate("/search")}
+            aria-label="البحث"
+            className="flex-1 max-w-[165px] sm:max-w-[260px] h-[38px] rounded-[13px] px-3 flex items-center justify-between gap-1.5 transition-transform active:scale-95"
+            style={{
+              backgroundColor: "var(--bg-surface, #111317)",
+              border: "1px solid var(--border-subtle, rgba(255,255,255,0.08))",
+            }}
+          >
+            <span
+              className="text-[12px] font-semibold font-['Cairo'] truncate"
+              style={{ color: "var(--text-muted, #94A3B8)" }}
             >
-              {avatarImg ? (
-                <img src={avatarImg} alt="" className="w-full h-full object-cover" />
-              ) : (
-                <span className="text-[13px] font-black text-white" style={{ textShadow: "0 1px 4px rgba(0,0,0,0.5)" }}>
-                  {avatarLetter}
-                </span>
-              )}
-              <span className="absolute inset-0 rounded-2xl opacity-0 group-hover:opacity-100 transition-opacity"
-                style={{ boxShadow: `0 0 16px ${g1}80` }} />
-            </button>
-          ) : (
-            <button
-              onClick={() => navigate("/auth")}
-              className="flex items-center gap-1.5 px-3 h-8 rounded-2xl text-[11px] font-black font-['Cairo'] text-white/80 hover:text-white transition-all active:scale-95"
-              style={{
-                background: "linear-gradient(135deg, rgba(139,92,246,0.2), rgba(109,40,217,0.12))",
-                border: "1px solid rgba(139,92,246,0.3)"
-              }}
+              ...بحث
+            </span>
+            <Search
+              className="w-[15px] h-[15px] shrink-0"
+              style={{ color: "var(--text-muted, #94A3B8)" }}
+            />
+          </button>
+
+          <button
+            onClick={() => navigate("/")}
+            className="flex items-center gap-[5px] shrink-0 active:opacity-80 transition-opacity"
+          >
+            <span
+              className="text-[17px] font-extrabold tracking-[0.5px] font-['Cairo']"
+              style={{ color: "var(--text-main, #F3F4F6)" }}
             >
-              <LogIn className="w-3.5 h-3.5" />
-              دخول
-            </button>
-          )}
+              ANIME
+            </span>
+            <span
+              className="text-[17px] font-extrabold tracking-[1px] font-['Cairo']"
+              style={{ color: "var(--accent-home, #06b6d4)" }}
+            >
+              NOVA
+            </span>
+            <div
+              className="w-[3px] h-[22px] rounded-full ml-1"
+              style={{ backgroundColor: "var(--accent-home, #06b6d4)" }}
+            />
+          </button>
         </div>
       </div>
     </header>

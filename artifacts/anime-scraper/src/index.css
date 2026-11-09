@@ -238,22 +238,62 @@
   }
 }
 
-/* ── Theme system: CSS variable defaults ── */
-:root {
-  --bg-base: #0D0C1A;
-  --bg-card: #131224;
+/* ── Theme system: CSS variable defaults (Mobile Black & White themes) ── */
+:root,
+html[data-theme="black"],
+html[data-theme="dark"] {
+  --bg-base: #090A0C;
+  --bg-surface: #111317;
+  --bg-card: #14171C;
+  --bg-elevated: #1B1F26;
+  --text-main: #F3F4F6;
+  --text-secondary: #CBD5E1;
+  --text-muted: #94A3B8;
+  --border-subtle: rgba(255, 255, 255, 0.08);
+  --accent-home: #06b6d4;
+  --accent-primary: #7654C8;
 }
 
-/* Override hardcoded page backgrounds so themes actually apply */
+html[data-theme="white"] {
+  --bg-base: #EEECE6;
+  --bg-surface: #F5F3ED;
+  --bg-card: #F7F5F0;
+  --bg-elevated: #EAE6DD;
+  --text-main: #202127;
+  --text-secondary: #373A44;
+  --text-muted: #696E7B;
+  --border-subtle: rgba(32, 33, 39, 0.12);
+  --accent-home: #087DA8;
+  --accent-primary: #6047B4;
+}
+
+/* Override hardcoded page backgrounds so themes apply everywhere */
 .bg-\[\#09090B\],
+.bg-\[\#090A0C\],
 .bg-\[\#0A0A0F\],
-.bg-\[\#0a0a0f\] {
+.bg-\[\#0a0a0f\],
+.bg-\[\#020617\] {
   background-color: var(--bg-base) !important;
+}
+
+html[data-theme="white"] body,
+html[data-theme="white"] main {
+  background-color: var(--bg-base) !important;
+  color: var(--text-main) !important;
+}
+
+html[data-theme="white"] .bg-\[\#111116\],
+html[data-theme="white"] .bg-\[\#14171C\],
+html[data-theme="white"] .bg-\[\#18181B\],
+html[data-theme="white"] .bg-\[\#0f172a\] {
+  background-color: var(--bg-card) !important;
+  border-color: var(--border-subtle) !important;
 }
 
 /* Keep body in sync with the theme variable */
 body {
   background-color: var(--bg-base);
+  color: var(--text-main);
 }
 
 /**

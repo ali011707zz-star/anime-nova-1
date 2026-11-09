@@ -13,27 +13,31 @@ import { useAuth } from "@/lib/auth-context";
 import { AuthModal } from "@/pages/Auth";
 import ReactDOM from "react-dom";
 
-/* ──────────────── Theme definitions ──────────────── */
+/* ──────────────── Theme definitions (Unified with Mobile App) ──────────────── */
 const THEMES = [
-  { id: "dark",   label: "داكن",    desc: "رمادي داكن",   dot: "#3F3F46", bg: "#09090B" },
-  { id: "amoled", label: "AMOLED",  desc: "أسود حقيقي",   dot: "#ffffff", bg: "#000000" },
-  { id: "violet", label: "بنفسجي",  desc: "توهّج بنفسجي", dot: "#a78bfa", bg: "#0B0814" },
-  { id: "blue",   label: "أزرق",    desc: "توهّج أزرق",   dot: "#3b82f6", bg: "#0B1120" },
-  { id: "pink",   label: "وردي",    desc: "توهّج وردي",   dot: "#ec4899", bg: "#130811" },
+  { id: "black",  label: "أسود",    desc: "ثيم التطبيق الداكن", dot: "#7654C8", bg: "#090A0C" },
+  { id: "white",  label: "أبيض",    desc: "ثيم التطبيق الفاتح", dot: "#EEECE6", bg: "#EEECE6" },
+  { id: "amoled", label: "AMOLED",  desc: "أسود حقيقي",         dot: "#ffffff", bg: "#000000" },
+  { id: "violet", label: "بنفسجي",  desc: "توهّج بنفسجي",       dot: "#a78bfa", bg: "#0B0814" },
+  { id: "blue",   label: "أزرق",    desc: "توهّج أزرق",         dot: "#3b82f6", bg: "#0B1120" },
 ];
 
 function applyTheme(t: string) {
   const root = document.documentElement;
-  root.setAttribute("data-theme", t);
-  const map: Record<string, [string, string]> = {
-    amoled: ["#000000", "#0A0A0A"],
-    violet: ["#0B0814", "#130F1E"],
-    blue:   ["#0B1120", "#0F1829"],
-    pink:   ["#130811", "#1A0E15"],
+  const normalized = t === "white" ? "white" : t === "black" || t === "dark" ? "black" : t;
+  root.setAttribute("data-theme", normalized);
+  const map: Record<string, [string, string, string]> = {
+    black:  ["#090A0C", "#14171C", "#F3F4F6"],
+    dark:   ["#090A0C", "#14171C", "#F3F4F6"],
+    white:  ["#EEECE6", "#F7F5F0", "#202127"],
+    amoled: ["#000000", "#0A0A0A", "#F3F4F6"],
+    violet: ["#0B0814", "#130F1E", "#F3F4F6"],
+    blue:   ["#0B1120", "#0F1829", "#F3F4F6"],
   };
-  const [base, card] = map[t] ?? ["#09090B", "#111116"];
+  const [base, card, text] = map[t] ?? ["#090A0C", "#14171C", "#F3F4F6"];
   root.style.setProperty("--bg-base", base);
   root.style.setProperty("--bg-card", card);
+  root.style.setProperty("--text-main", text);
   document.body.style.backgroundColor = base;
 }
 

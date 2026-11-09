@@ -1,39 +1,40 @@
 import { API_BASE } from "@/lib/apiBase";
 import { animeHref } from "@/lib/animeLink";
-import { useEffect, useState, useCallback, useMemo, useRef } from "react";
+import { useEffect, useState, useMemo, useRef } from "react";
 import { Link } from "wouter";
 import {
   Play,
-  Loader2,
-  ChevronDown,
   Star,
   ChevronLeft,
-  ChevronRight,
   Info,
-  Flame,
-  Film,
-  RotateCw,
-  Clapperboard,
   Tv2,
+  BookOpen,
 } from "lucide-react";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion } from "framer-motion";
 import SEO from "@/components/SEO";
 
-/* ── Module-level cache — survives component unmount/remount so categories
-      don't disappear when navigating Home → AnimeDetail → Home ── */
-interface HomeCache {
-  popular: any[];
-  movies: any[];
-  hero: any;
-  hasMore: boolean;
-}
-let _homeCache: HomeCache | null = null;
-// Separate cache for today's airing episodes (independent fetch, persists between navigations)
+const TODAY_EPS_STORAGE_KEY = "nova-latest-episodes-v4";
+const TODAY_EPS_CLIENT_TTL = 2 * 60_000;
 let _cachedTodayEps: any[] | null = null;
 let _cachedTodayEpsAt = 0;
-const TODAY_EPS_STORAGE_KEY = "nova-latest-episodes-v4";
-const LEGACY_TODAY_EPS_STORAGE_KEY = "nova-latest-episodes-v3";
-const TODAY_EPS_CLIENT_TTL = 2 * 60_000;
+
+const GENRE_AR: Record<string, string> = {
+  Action: "أكشن",
+  Adventure: "مغامرة",
+  Comedy: "كوميدي",
+  Drama: "دراما",
+  Fantasy: "فانتازيا",
+  "Sci-Fi": "خيال علمي",
+  Sports: "رياضة",
+  Romance: "رومانسي",
+  Isekai: "إيسيكاي",
+  Psychological: "نفسي",
+  Horror: "رعب",
+  Mystery: "غموض",
+  Supernatural: "خارق للطبيعة",
+  "Slice of Life": "شريحة من الحياة",
+  Thriller: "إثارة",
+};
 
 function normalizeLatestEpisodeItem(item: any): any {
   const rawAniListId = Number(item?.anilistId ?? item?.anilist_id ?? 0);
@@ -43,11 +44,16 @@ function normalizeLatestEpisodeItem(item: any): any {
       (item?.source === "anslayer" ? item?.animeId : 0) ??
       0,
   );
-  const rawAwAnimeId = item?.awAnimeId ?? item?.aw_anime_id ??
+  const rawAwAnimeId =
+    item?.awAnimeId ??
+    item?.aw_anime_id ??
     (item?.source === "animewitcher" ? item?.anime_id : "");
-  const rawAnifoxId = item?.anifoxId ?? item?.providerTitleId ??
+  const rawAnifoxId =
+    item?.anifoxId ??
+    item?.providerTitleId ??
     (item?.source === "anifox" ? item?.content_id : "");
-  const anilistId = Number.isInteger(rawAniListId) && rawAniListId > 0 ? rawAniListId : null;
+  const anilistId =
+    Number.isInteger(rawAniListId) && rawAniListId > 0 ? rawAniListId : null;
   const anslayerId =
     Number.isInteger(rawAnimeSlayerId) && rawAnimeSlayerId > 0
       ? rawAnimeSlayerId
@@ -90,38 +96,20 @@ function normalizeLatestEpisodeItem(item: any): any {
   };
 }
 
-function randomSample<T>(items: T[], limit = items.length): T[] {
-  const shuffled = [...items];
-  for (let i = shuffled.length - 1; i > 0; i -= 1) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
-  }
-  return shuffled.slice(0, limit);
-}
-
-/* ── Continue Watching helpers ── */
 interface MergedContinueItem {
   key: string;
-  kind: "anime" | "animation";
   id: string | number;
   title: string;
-  cover: string; // poster/cover url
+  cover: string;
   ep: number;
-  season?: number;
-  animType?: "movie" | "tv";
   date: string;
   watchTimeSec: number;
-  durationSec: number; // estimated
+  durationSec: number;
   href: string;
 }
-function fmtMinute(sec: number) {
-  const m = Math.floor(sec / 60);
-  const s = Math.floor(sec % 60);
-  return `${m}:${String(s).padStart(2, "0")}`;
-}
+
 function loadMergedContinue(): MergedContinueItem[] {
   const out: MergedContinueItem[] = [];
-  // Anime history
   try {
     const h: any[] = JSON.parse(localStorage.getItem("watch-history") || "[]");
     for (const item of h) {
@@ -131,7 +119,6 @@ function loadMergedContinue(): MergedContinueItem[] {
       const href = `/watch?anime=${item.id}&ep=${item.ep}&title=${encodeURIComponent(item.title)}&cover=${encodeURIComponent(item.cover || "")}`;
       out.push({
         key: `anime-${item.id}-${item.ep}`,
-        kind: "anime",
         id: item.id,
         title: item.title,
         cover: item.cover || "",
@@ -142,173 +129,152 @@ function loadMergedContinue(): MergedContinueItem[] {
         href,
       });
     }
-  } catch {
-    /* skip */
-  }
-  // Animation history
-  try {
-    const h: any[] = JSON.parse(
-      localStorage.getItem("anim-watch-history") || "[]",
-    );
-    for (const item of h) {
-      const t =
-        parseFloat(
-          localStorage.getItem(
-            `anim-wp-${item.id}-${item.type}-${item.season}-${item.ep}`,
-          ) || "0",
-        ) || 0;
-      if (t < 30) continue;
-      const p = encodeURIComponent(item.poster || "");
-      const ti = encodeURIComponent(item.title);
-      const href =
-        item.type === "tv"
-          ? `/animation/watch?title=${ti}&type=tv&id=${item.id}&ep=${item.ep}&season=${item.season}&poster=${p}`
-          : `/animation/watch?title=${ti}&type=movie&id=${item.id}&ep=1&season=1&poster=${p}`;
-      out.push({
-        key: `anim-${item.id}-${item.type}-${item.ep}`,
-        kind: "animation",
-        id: item.id,
-        title: item.title,
-        cover: item.poster || "",
-        ep: item.ep,
-        season: item.season,
-        animType: item.type,
-        date: item.date || "",
-        watchTimeSec: t,
-        durationSec: item.type === "movie" ? 90 * 60 : 24 * 60,
-        href,
-      });
-    }
-  } catch {
-    /* skip */
-  }
-  // Sort by date (most recent first)
+  } catch {}
   out.sort((a, b) => (b.date > a.date ? 1 : -1));
-  return out.slice(0, 10);
+  return out.slice(0, 12);
 }
 
-const GENRES_AR: { ar: string; en: string; color: string; animeId: number }[] =
-  [
-    { ar: "الكل", en: "", color: "#8B5CF6", animeId: 0 },
-    { ar: "أكشن", en: "Action", color: "#EF4444", animeId: 21459 },
-    { ar: "مغامرة", en: "Adventure", color: "#F97316", animeId: 113415 },
-    { ar: "كوميدي", en: "Comedy", color: "#EAB308", animeId: 21202 },
-    { ar: "دراما", en: "Drama", color: "#8B5CF6", animeId: 9253 },
-    { ar: "فانتازيا", en: "Fantasy", color: "#06B6D4", animeId: 101922 },
-    { ar: "خيال علمي", en: "Sci-Fi", color: "#3B82F6", animeId: 5114 },
-    { ar: "رياضة", en: "Sports", color: "#10B981", animeId: 124194 },
-    { ar: "رومانسي", en: "Romance", color: "#EC4899", animeId: 101921 },
-    { ar: "إيسيكاي", en: "Isekai", color: "#059669", animeId: 108632 },
-    { ar: "نفسي", en: "Psychological", color: "#7C3AED", animeId: 31646 },
-    { ar: "رعب", en: "Horror", color: "#6B7280", animeId: 98478 },
-    { ar: "غموض", en: "Mystery", color: "#64748B", animeId: 100388 },
-  ];
-
-function genreImg(animeId: number) {
-  return animeId ? `https://img.anili.st/media/${animeId}` : "";
-}
-
-function buildPopularQuery(genre: string) {
-  const gf = genre ? `, genre: "${genre}"` : "";
-  return `query ($page: Int, $perPage: Int) {
+const POPULAR_QUERY = `query ($page: Int, $perPage: Int) {
   Page(page: $page, perPage: $perPage) {
-    pageInfo { hasNextPage }
-    media(type: ANIME, sort: POPULARITY_DESC, countryOfOrigin: "JP", format_in: [TV, ONA], isAdult: false, genre_not_in: ["Hentai", "Music"]${gf}) {
+    media(type: ANIME, sort: POPULARITY_DESC, countryOfOrigin: "JP", format_in: [TV, ONA], isAdult: false, genre_not_in: ["Hentai", "Music"]) {
       id title { romaji english } coverImage { large extraLarge }
-      bannerImage averageScore episodes genres status format
+      bannerImage averageScore episodes genres status format seasonYear
     }
   }
 }`;
-}
 
-const SPRING_2026_QUERY = `query {
-  Page(perPage: 20) {
-    media(type: ANIME, season: SPRING, seasonYear: 2026, sort: POPULARITY_DESC, format_in: [TV, ONA], isAdult: false, genre_not_in: ["Hentai"]) {
-      id title { romaji english } coverImage { large } averageScore episodes nextAiringEpisode { episode } status
+const RELEASING_QUERY = `query {
+  Page(perPage: 16) {
+    media(type: ANIME, status: RELEASING, sort: POPULARITY_DESC, countryOfOrigin: "JP", format_in: [TV, ONA], isAdult: false, genre_not_in: ["Hentai"]) {
+      id title { romaji english } coverImage { large } averageScore episodes status format
     }
   }
 }`;
 
 const MOVIES_QUERY = `query {
-  Page(perPage: 12) {
+  Page(perPage: 16) {
     media(type: ANIME, sort: POPULARITY_DESC, format: MOVIE, countryOfOrigin: "JP", isAdult: false, genre_not_in: ["Hentai"]) {
-      id title { romaji } coverImage { large } averageScore
-    }
-  }
-}`;
-
-const TOP_RATED_QUERY = `query {
-  Page(perPage: 14) {
-    media(type: ANIME, sort: SCORE_DESC, countryOfOrigin: "JP", format_in: [TV, MOVIE], isAdult: false, genre_not_in: ["Hentai"], averageScore_greater: 75) {
-      id title { romaji } coverImage { large } averageScore format status
-    }
-  }
-}`;
-
-const FALL_2025_QUERY = `query {
-  Page(perPage: 14) {
-    media(type: ANIME, season: FALL, seasonYear: 2025, sort: POPULARITY_DESC, format_in: [TV, ONA], isAdult: false, genre_not_in: ["Hentai"]) {
-      id title { romaji } coverImage { large } averageScore episodes nextAiringEpisode { episode } status
+      id title { romaji english } coverImage { large } averageScore format status
     }
   }
 }`;
 
 const ISEKAI_QUERY = `query {
-  Page(perPage: 14) {
+  Page(perPage: 16) {
     media(type: ANIME, sort: POPULARITY_DESC, genre_in: ["Isekai"], countryOfOrigin: "JP", format_in: [TV, ONA, MOVIE], isAdult: false) {
-      id title { romaji } coverImage { large } averageScore format status
+      id title { romaji english } coverImage { large } averageScore format status
     }
   }
 }`;
 
-const TODAY_EPISODES_QUERY = `query($gt:Int,$lt:Int){
-  Page(page:1,perPage:25){
-    airingSchedules(airingAt_greater:$gt,airingAt_lesser:$lt,sort:[TIME_DESC]){
-      episode airingAt
-      media{id title{romaji english}coverImage{large}averageScore popularity format isAdult countryOfOrigin}
-    }
-  }
-}`;
+/* ── Unified SectionHeader matching /artifacts/nova-mobile/components/SectionHeader.tsx ── */
+function SectionHeader({
+  title,
+  href,
+  seeAllLabel = "عرض الكل",
+}: {
+  title: string;
+  href?: string;
+  seeAllLabel?: string;
+}) {
+  return (
+    <div
+      className="flex items-center justify-between px-3.5 mt-4 mb-2.5"
+      dir="ltr"
+    >
+      {href ? (
+        <Link href={href}>
+          <button
+            className="flex items-center gap-1 px-2.5 py-1.5 rounded-full border transition-transform active:scale-95"
+            style={{
+              backgroundColor: "rgba(15, 23, 42, 0.92)",
+              borderColor: "rgba(148, 163, 184, 0.16)",
+            }}
+          >
+            <ChevronLeft className="w-[15px] h-[15px] text-white" />
+            <span className="text-[12px] font-bold text-white font-['Cairo']">
+              {seeAllLabel}
+            </span>
+          </button>
+        </Link>
+      ) : (
+        <div />
+      )}
 
-function AnimeCard({ anime }: { anime: any }) {
+      <div className="flex items-center gap-2">
+        <h2
+          className="text-[17px] font-bold font-['Cairo'] text-right"
+          style={{ color: "var(--text-main, #F3F4F6)" }}
+        >
+          {title}
+        </h2>
+        <div
+          className="w-1 h-[18px] rounded-sm shrink-0"
+          style={{ backgroundColor: "var(--accent-home, #06b6d4)" }}
+        />
+      </div>
+    </div>
+  );
+}
+
+/* ── Unified AnimeCard matching /artifacts/nova-mobile/components/AnimeCard.tsx ── */
+function MobileAnimeCard({ anime }: { anime: any }) {
+  const title = anime.title_ar || anime.title?.english || anime.title?.romaji || "أنمي";
   return (
     <Link href={animeHref(anime)}>
-      <motion.div whileTap={{ scale: 0.91 }} className="cursor-pointer">
-        <div className="relative aspect-[2/3] rounded-2xl overflow-hidden bg-[#18181B] border border-white/[0.09] shadow-xl shadow-black/60">
+      <motion.div
+        whileTap={{ scale: 0.95 }}
+        className="shrink-0 w-[120px] sm:w-[136px] cursor-pointer"
+      >
+        <div
+          className="relative w-full h-[175px] sm:h-[196px] rounded-[12px] overflow-hidden border"
+          style={{
+            backgroundColor: "var(--bg-card, #14171C)",
+            borderColor: "var(--border-subtle, rgba(255,255,255,0.08))",
+          }}
+        >
           {anime.coverImage?.large ? (
             <img
               src={anime.coverImage.large}
-              alt={anime.title?.english || anime.title?.romaji}
+              alt={title}
               className="w-full h-full object-cover"
               loading="lazy"
               onError={(e) => {
-                (e.target as HTMLImageElement).style.display = "none";
+                (e.currentTarget as HTMLImageElement).style.display = "none";
               }}
             />
           ) : (
-            <div className="w-full h-full bg-gradient-to-b from-[#1e1e2e] to-[#0f0f1a]" />
-          )}
-          <div className="absolute inset-0 bg-gradient-to-t from-black via-black/20 to-transparent" />
-          {anime.averageScore && (
-            <div className="absolute top-1.5 right-1.5 flex items-center gap-0.5 bg-black/70 backdrop-blur-md text-yellow-400 text-[7px] px-1.5 py-0.5 rounded-lg font-black border border-yellow-500/25">
-              <Star className="w-1.5 h-1.5 fill-current" />{" "}
-              {(anime.averageScore / 10).toFixed(1)}
+            <div className="w-full h-full flex items-center justify-center">
+              <Tv2 className="w-7 h-7 opacity-20" />
             </div>
           )}
+
+          {anime.averageScore && (
+            <div className="absolute top-[7px] right-[7px] flex items-center gap-0.5 bg-black/75 px-1.5 py-0.5 rounded-[10px] text-amber-300 text-[9px] font-bold">
+              <Star className="w-2.5 h-2.5 fill-current" />
+              <span>{(anime.averageScore / 10).toFixed(1)}</span>
+            </div>
+          )}
+
           {anime.format === "MOVIE" && (
-            <div className="absolute top-1.5 left-1.5 bg-primary text-white text-[7px] px-1.5 py-0.5 rounded-md font-black shadow-md shadow-primary/50">
+            <div className="absolute top-[7px] left-[7px] bg-[#06b6d4] text-white text-[9px] font-bold px-2 py-0.5 rounded-[10px]">
               فيلم
             </div>
           )}
-          <div className="absolute bottom-0 left-0 right-0 px-2 pb-2 pt-4">
-            <h3 className="text-[9.5px] text-white/90 font-bold truncate leading-tight drop-shadow">
-              {anime.title?.english || anime.title?.romaji}
-            </h3>
-            {anime.title_ar && (
-              <p dir="rtl" lang="ar" className="text-[8px] text-white/65 line-clamp-1 leading-tight font-['Cairo'] mt-0.5">
-                {anime.title_ar}
-              </p>
-            )}
+
+          <div
+            className="absolute bottom-0 inset-x-0 px-2 pb-2 pt-12"
+            style={{
+              background:
+                "linear-gradient(to top, rgba(0,0,0,0.95) 0%, transparent 100%)",
+            }}
+          >
+            <p
+              dir="rtl"
+              className="text-[11px] font-semibold text-white leading-[15px] line-clamp-2 text-right font-['Cairo']"
+            >
+              {title}
+            </p>
           </div>
         </div>
       </motion.div>
@@ -317,1738 +283,937 @@ function AnimeCard({ anime }: { anime: any }) {
 }
 
 export default function Home() {
-  const [popular, setPopular] = useState<any[]>(_homeCache?.popular || []);
-  const [movies, setMovies] = useState<any[]>(_homeCache?.movies || []);
-  const [loading, setLoading] = useState(!_homeCache);
-  const [genreLoading, setGenreLoading] = useState(false);
-  const [page, setPage] = useState(1);
-  const [hasMore, setHasMore] = useState(_homeCache?.hasMore ?? true);
-  const [loadingMore, setLoadingMore] = useState(false);
-  const [topRated, setTopRated] = useState<any[]>([]);
-  const [fall2025, setFall2025] = useState<any[]>([]);
+  const [popular, setPopular] = useState<any[]>([]);
+  const [releasing, setReleasing] = useState<any[]>([]);
+  const [movies, setMovies] = useState<any[]>([]);
   const [isekaiList, setIsekaiList] = useState<any[]>([]);
-  const [hero, setHero] = useState<any>(() => {
-    if (!_homeCache) return null;
-    const heroes = randomSample(_homeCache.popular.filter((a: any) => a.bannerImage));
-    if (!heroes.length) return _homeCache.hero;
-    return heroes[0];
-  });
+  const [loading, setLoading] = useState(true);
   const [heroIdx, setHeroIdx] = useState(0);
-  const [heroDir, setHeroDir] = useState(1);
-  const [selectedGenre, setSelectedGenre] = useState("");
   const touchStartX = useRef<number>(0);
-  /* Pick from the full catalog instead of always showing the first popular titles.
-     useMemo keeps the random order stable while the home screen re-renders. */
-  const heroList = useMemo(
-    () => randomSample(popular.filter((a) => a.bannerImage), 8),
-    [popular],
-  );
-  const heroContainerRef = useRef<HTMLDivElement>(null);
-  const [heroMouse, setHeroMouse] = useState({ x: 0, y: 0 });
-  const [posterTilt, setPosterTilt] = useState({ rx: 0, ry: 0 });
 
-  const handleHeroMouseMove = useCallback(
-    (e: React.MouseEvent<HTMLDivElement>) => {
-      if (!heroContainerRef.current) return;
-      const rect = heroContainerRef.current.getBoundingClientRect();
-      const nx = ((e.clientX - rect.left) / rect.width - 0.5) * 2;
-      const ny = ((e.clientY - rect.top) / rect.height - 0.5) * 2;
-      setHeroMouse({ x: nx, y: ny });
-      setPosterTilt({ rx: ny * -12, ry: nx * 15 });
-    },
-    [],
-  );
-
-  const handleHeroMouseLeave = useCallback(() => {
-    setHeroMouse({ x: 0, y: 0 });
-    setPosterTilt({ rx: 0, ry: 0 });
-  }, []);
-
-  const fetch$ = async (query: string, variables?: any) => {
-    const r = await fetch(API_BASE + "/api/anilist", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ query, variables }),
-    });
-    return (await r.json()).data?.Page;
-  };
-
-  const [mergedContinue, setMergedContinue] = useState<MergedContinueItem[]>(
-    [],
-  );
-  const [animationMovies, setAnimationMovies] = useState<any[]>([]);
-  const [spring2026, setSpring2026] = useState<any[]>([]);
-  const [dubbedCards, setDubbedCards] = useState<any[]>([]);
-  const [awCards, setAwCards] = useState<any[]>([]);
+  const [mergedContinue, setMergedContinue] = useState<MergedContinueItem[]>([]);
   const [todayEps, setTodayEps] = useState<any[]>(() => {
-    if (_cachedTodayEps?.length && _cachedTodayEps.every((item) => item.source === "anslayer"))
-      return _cachedTodayEps;
+    if (_cachedTodayEps?.length) return _cachedTodayEps;
     try {
       const stored = JSON.parse(localStorage.getItem(TODAY_EPS_STORAGE_KEY) || "[]");
-      return Array.isArray(stored)
-        ? stored.map(normalizeLatestEpisodeItem).filter((item: any) => item.source === "anslayer")
-        : [];
-    } catch { return []; }
+      return Array.isArray(stored) ? stored.map(normalizeLatestEpisodeItem) : [];
+    } catch {
+      return [];
+    }
   });
-  const [todayChecking, setTodayChecking] = useState(true);
+  const [awCards, setAwCards] = useState<any[]>([]);
+  const [stardimaAnim, setStardimaAnim] = useState<any[]>([]);
+  const [dubbedCards, setDubbedCards] = useState<any[]>([]);
+  const [stardimaCartoon, setStardimaCartoon] = useState<any[]>([]);
+  const [spacetoonCards, setSpacetoonCards] = useState<any[]>([]);
+  const [manhwaCards, setManhwaCards] = useState<any[]>([]);
+  const [mangaCards, setMangaCards] = useState<any[]>([]);
 
-  /* Load continue-watching from localStorage (fast, synchronous) */
   useEffect(() => {
     setMergedContinue(loadMergedContinue());
   }, []);
 
-  /* Animation movies fetch disabled — section hidden */
-  // useEffect(() => { ... }, []);
-
-  /* Load Spring 2026 seasonal anime */
+  /* Fetch AniList rails */
   useEffect(() => {
-    fetch(API_BASE + "/api/anilist", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ query: SPRING_2026_QUERY }),
-    })
-      .then((r) => r.json())
-      .then((d) => setSpring2026(d.data?.Page?.media || []))
-      .catch(() => {});
-  }, []);
-
-  /* Load dubbed cartoon cards for Home section */
-  useEffect(() => {
-    fetch(API_BASE + "/api/dubbed/catalog?page=1")
-      .then((r) => r.json())
-      .then((d) => setDubbedCards((d.results || d.items || []).slice(0, 8)))
-      .catch(() => {});
-  }, []);
-
-  /* Load أنيميشن مدبلج (aw-dubbed) cards for Home section */
-  useEffect(() => {
-    fetch(API_BASE + "/api/aw-dubbed/catalog?page=1")
-      .then((r) => r.json())
-      .then((d) => setAwCards((d.results || []).slice(0, 8)))
-      .catch(() => {});
-  }, []);
-
-  /* Load extra sections — Top Rated, Fall 2025, Isekai */
-  useEffect(() => {
-    const post = (q: string) =>
-      fetch(API_BASE + "/api/anilist", {
+    const post = (query: string, variables?: any) =>
+      fetch(`${API_BASE}/api/anilist`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ query: q }),
-      }).then((r) => r.json());
-    post(TOP_RATED_QUERY)
-      .then((d) => setTopRated(d.data?.Page?.media || []))
-      .catch(() => {});
-    post(FALL_2025_QUERY)
-      .then((d) => setFall2025(d.data?.Page?.media || []))
-      .catch(() => {});
-    post(ISEKAI_QUERY)
-      .then((d) => setIsekaiList(d.data?.Page?.media || []))
-      .catch(() => {});
+        body: JSON.stringify({ query, variables }),
+      })
+        .then((r) => r.json())
+        .then((d) => d?.data?.Page?.media || []);
+
+    post(POPULAR_QUERY, { page: 1, perPage: 16 })
+      .then((list) => {
+        setPopular(list);
+        setLoading(false);
+      })
+      .catch(() => setLoading(false));
+
+    post(RELEASING_QUERY).then(setReleasing).catch(() => {});
+    post(MOVIES_QUERY).then(setMovies).catch(() => {});
+    post(ISEKAI_QUERY).then(setIsekaiList).catch(() => {});
   }, []);
 
-  /* Use the ANIFOX episode catalog for the homepage's latest-episodes rail. */
+  /* Fetch Latest Episodes */
   useEffect(() => {
-    try { localStorage.removeItem(LEGACY_TODAY_EPS_STORAGE_KEY); localStorage.removeItem("nova-latest-episodes"); } catch {}
     if (
       _cachedTodayEps?.length &&
-      _cachedTodayEps.every((item) => item.source === "anslayer") &&
       Date.now() - _cachedTodayEpsAt < TODAY_EPS_CLIENT_TTL
     ) {
-      setTodayChecking(false);
       return;
     }
-    setTodayChecking(true);
-    const fetchLatest = async (endpoint: string, source: string) => {
-      const response = await fetch(`${API_BASE}/api/anime/${endpoint}`, {
-        signal: AbortSignal.timeout(20_000),
-        cache: "no-store",
-      });
-      if (!response.ok) throw new Error(`${endpoint}_${response.status}`);
-      const payload: any = await response.json();
-      const raw = Array.isArray(payload) ? payload : payload.items || [];
-      return raw
-        .map((item: any) => normalizeLatestEpisodeItem({ ...item, source }))
-        .map((item: any) => ({ ...item, cover: item.cover ?? item.poster ?? "" }))
-        .filter((item: any) =>
-          (item.animeId || item.anslayerId || item.awAnimeId || item.anifoxId) &&
-          item.name && item.episode,
-        );
-    };
-    fetchLatest("anslayer-latest", "anslayer")
-      .then((items) => {
+    fetch(`${API_BASE}/api/anime/anslayer-latest`, { cache: "no-store" })
+      .then((r) => r.json())
+      .then((payload) => {
+        const raw = Array.isArray(payload) ? payload : payload?.items || [];
+        const items = raw
+          .map((item: any) =>
+            normalizeLatestEpisodeItem({ ...item, source: "anslayer" }),
+          )
+          .map((item: any) => ({
+            ...item,
+            cover: item.cover ?? item.poster ?? "",
+          }))
+          .filter(
+            (item: any) =>
+              (item.animeId || item.anslayerId || item.awAnimeId) &&
+              item.name &&
+              item.episode,
+          );
         _cachedTodayEps = items;
         _cachedTodayEpsAt = Date.now();
         setTodayEps(items);
-        try { localStorage.setItem(TODAY_EPS_STORAGE_KEY, JSON.stringify(items)); } catch {}
+        try {
+          localStorage.setItem(TODAY_EPS_STORAGE_KEY, JSON.stringify(items));
+        } catch {}
       })
-      .catch(() => {})
-      .finally(() => {
-        setTodayChecking(false);
-      });
+      .catch(() => {});
   }, []);
+
+  /* Fetch Dubbed Animation, Cartoon, Spacetoon, Manhwa, Manga */
+  useEffect(() => {
+    fetch(`${API_BASE}/api/aw-dubbed/catalog?page=1`)
+      .then((r) => r.json())
+      .then((d) => setAwCards((d?.results || []).slice(0, 12)))
+      .catch(() => {});
+
+    fetch(`${API_BASE}/api/stardima/catalog?section=animation&page=1`)
+      .then((r) => r.json())
+      .then((d) => setStardimaAnim((d?.items || d?.results || []).slice(0, 8)))
+      .catch(() => {});
+
+    fetch(`${API_BASE}/api/dubbed/catalog?page=1`)
+      .then((r) => r.json())
+      .then((d) => setDubbedCards((d?.results || d?.items || []).slice(0, 12)))
+      .catch(() => {});
+
+    fetch(`${API_BASE}/api/stardima/catalog?section=cartoon&page=1`)
+      .then((r) => r.json())
+      .then((d) => setStardimaCartoon((d?.items || d?.results || []).slice(0, 8)))
+      .catch(() => {});
+
+    fetch(`${API_BASE}/api/dubbed/carateen/catalog?page=1&limit=18&provider=sp`)
+      .then((r) => r.json())
+      .then((d) => setSpacetoonCards((d?.results || []).slice(0, 18)))
+      .catch(() => {});
+
+    fetch(`${API_BASE}/api/manga/catalog?source=manhwa&page=1`)
+      .then((r) => r.json())
+      .then((d) => setManhwaCards((d?.items || d?.results || []).slice(0, 14)))
+      .catch(() => {});
+
+    fetch(`${API_BASE}/api/manga/catalog?source=manga&page=1`)
+      .then((r) => r.json())
+      .then((d) => setMangaCards((d?.items || d?.results || []).slice(0, 14)))
+      .catch(() => {});
+  }, []);
+
+  const heroList = useMemo(
+    () => popular.filter((a) => a.bannerImage || a.coverImage?.extraLarge).slice(0, 6),
+    [popular],
+  );
+  const currentHero = heroList[heroIdx] || popular[0] || null;
 
   useEffect(() => {
-    /* If cache exists → skip fetch entirely, data is already in state */
-    if (_homeCache) return;
+    if (heroList.length <= 1) return;
+    const timer = setInterval(() => {
+      setHeroIdx((prev) => (prev + 1) % heroList.length);
+    }, 5500);
+    return () => clearInterval(timer);
+  }, [heroList.length]);
 
-    async function load() {
-      setLoading(true);
-      try {
-        /* ── Step 1: load popular first — shows hero + grid immediately ── */
-        const pop = await fetch$(buildPopularQuery(""), {
-          page: 1,
-          perPage: 12,
-        });
-        const popMedia = pop?.media || [];
-        const hasMorePop = pop?.pageInfo?.hasNextPage ?? false;
-        const heroes = randomSample(popMedia.filter((a: any) => a.bannerImage));
-        const heroItem =
-          heroes[0] ||
-          popMedia[0];
-        setPopular(popMedia);
-        setHasMore(hasMorePop);
-        setHero(heroItem);
-        setLoading(false); /* ← hero + popular visible now, rest loads below */
+  const animationHomeItems = useMemo(() => {
+    const legacy = awCards.map((item: any) => ({
+      id: `aw-${item.key || item.title}`,
+      title: item.titleAr || item.title,
+      cover: item.poster || "",
+      badge: "مدبلج",
+      isSub: false,
+      href: `/aw-dubbed/${encodeURIComponent(item.key || item.title)}?title=${encodeURIComponent(item.title)}&seasons=${encodeURIComponent(JSON.stringify(item.seasons || []))}&img=${encodeURIComponent(item.poster || "")}`,
+    }));
+    const stardima = stardimaAnim.map((item: any) => ({
+      id: `sd-anim-${item.provider_title_id}`,
+      title: item.title_ar || item.title || item.title_en,
+      cover: item.poster_url || item.backdrop_url || "",
+      badge: String(item.language_badge || "").includes("مترجم") ? "مترجم" : "مدبلج",
+      isSub: String(item.language_badge || "").includes("مترجم"),
+      href: `/stardima/title/${encodeURIComponent(item.provider_title_id)}`,
+    }));
+    return [...legacy, ...stardima].slice(0, 16);
+  }, [awCards, stardimaAnim]);
 
-        /* ── Step 2: load movies in the background ──
-           Never delay the visible home page or its cache on a slow secondary
-           catalog request. */
-        void fetch$(MOVIES_QUERY)
-          .then((mov) => {
-            const movMedia = mov?.media || [];
-            setMovies(movMedia);
-            _homeCache = {
-              popular: popMedia,
-              movies: movMedia,
-              hero: heroItem,
-              hasMore: hasMorePop,
-            };
-          })
-          .catch(() => {
-            _homeCache = {
-              popular: popMedia,
-              movies: [],
-              hero: heroItem,
-              hasMore: hasMorePop,
-            };
-          });
-      } catch {
-        setLoading(false);
-      }
-    }
-    load();
-  }, []);
-
-  useEffect(() => {
-    if (!popular.length || selectedGenre) return;
-    const heroes = popular.filter((a) => a.bannerImage);
-    if (heroes.length <= 1) return;
-    const t = setInterval(() => {
-      setHeroDir(1);
-      setHeroIdx((i) => {
-        const next = (i + 1) % heroes.length;
-        setHero(heroes[next]);
-        return next;
-      });
-    }, 7000);
-    return () => clearInterval(t);
-  }, [popular, selectedGenre]);
-
-  const handleGenreSelect = useCallback(async (genre: string) => {
-    setSelectedGenre(genre);
-    setPage(1);
-    setGenreLoading(true);
-    try {
-      const data = await fetch$(buildPopularQuery(genre), {
-        page: 1,
-        perPage: 12,
-      });
-      setPopular(data?.media || []);
-      setHasMore(data?.pageInfo?.hasNextPage ?? false);
-      if (!genre) {
-        const heroes = (data?.media || []).filter((a: any) => a.bannerImage);
-        setHero(heroes[0] || data?.media?.[0]);
-        setHeroIdx(0);
-      }
-    } finally {
-      setGenreLoading(false);
-    }
-  }, []);
-
-  const loadMore = useCallback(async () => {
-    if (loadingMore || !hasMore) return;
-    setLoadingMore(true);
-    const next = page + 1;
-    const data = await fetch$(buildPopularQuery(selectedGenre), {
-      page: next,
-      perPage: 12,
+  const cartoonHomeItems = useMemo(() => {
+    const legacy = dubbedCards.map((c: any) => {
+      const rawImg = c.image || c.img || c.poster || "";
+      const imgSrc = rawImg.startsWith("http")
+        ? rawImg
+        : rawImg.startsWith("/api/dubbed/img")
+          ? rawImg
+          : rawImg
+            ? `/api/dubbed/img?f=${encodeURIComponent(rawImg.split("?f=")[1] || rawImg.split("/").pop() || rawImg)}`
+            : "";
+      return {
+        id: `at-${c.key || c.title}`,
+        title: c.title,
+        cover: imgSrc,
+        badge: "مدبلج",
+        isSub: false,
+        href: `/dubbed/${encodeURIComponent(c.key || c.title)}?seasons=${encodeURIComponent(JSON.stringify(c.seasons || [{ label: "الموسم 1", arabicToonsId: c.arabicToonsId }]))}&title=${encodeURIComponent(c.title)}&img=${encodeURIComponent(rawImg)}`,
+      };
     });
-    setPopular((prev) => [...prev, ...(data?.media || [])]);
-    setHasMore(data?.pageInfo?.hasNextPage ?? false);
-    setPage(next);
-    setLoadingMore(false);
-  }, [loadingMore, hasMore, page, selectedGenre]);
-
-  if (loading)
-    return (
-      <div className="bg-[#09090B] min-h-screen flex flex-col items-center justify-center gap-3">
-        <div className="relative">
-          <div className="w-12 h-12 border-2 border-primary/30 rounded-full" />
-          <div className="w-12 h-12 border-2 border-primary border-t-transparent rounded-full animate-spin absolute inset-0" />
-        </div>
-        <p className="text-white/40 text-xs font-bold font-['Cairo']">
-          جارٍ التحميل...
-        </p>
-      </div>
-    );
+    const stardima = stardimaCartoon.map((item: any) => ({
+      id: `sd-c-${item.provider_title_id}`,
+      title: item.title_ar || item.title || item.title_en,
+      cover: item.poster_url || item.backdrop_url || "",
+      badge: String(item.language_badge || "").includes("مترجم") ? "مترجم" : "مدبلج",
+      isSub: String(item.language_badge || "").includes("مترجم"),
+      href: `/stardima/title/${encodeURIComponent(item.provider_title_id)}`,
+    }));
+    return [...legacy, ...stardima].slice(0, 16);
+  }, [dubbedCards, stardimaCartoon]);
 
   return (
-    <main className="bg-[#09090B] min-h-screen pb-28 text-white" dir="rtl">
+    <main
+      className="min-h-screen pb-28 font-['Cairo']"
+      style={{
+        backgroundColor: "var(--bg-base, #090A0C)",
+        color: "var(--text-main, #F3F4F6)",
+      }}
+      dir="rtl"
+    >
       <SEO
         title="Anime NOVA | أنمي نوفا - مشاهدة وتحميل الأنمي مترجم ومدبلج"
-        description="أنمي نوفا — مشاهدة وتحميل الأنمي المترجم والمدبلج مجاناً بجودة عالية، مع دعم مصادر متعددة ومشغّل داخلي متكامل."
+        description="أنمي نوفا — مشاهدة وتحميل الأنمي المترجم والمدبلج والمانجا مجاناً بجودة عالية."
         path="/"
       />
 
-      {/* Hero Banner — Modern Cinematic */}
-      {hero && !selectedGenre && (
-        <div
-          ref={heroContainerRef}
-          className="relative w-full overflow-hidden select-none"
-          style={{ height: "clamp(260px, 56vw, 340px)" }}
-          onMouseMove={handleHeroMouseMove}
-          onMouseLeave={handleHeroMouseLeave}
-          onTouchStart={(e) => {
-            touchStartX.current = e.touches[0].clientX;
-          }}
-          onTouchEnd={(e) => {
-            const dx = e.changedTouches[0].clientX - touchStartX.current;
-            if (Math.abs(dx) < 40) return;
-            if (heroList.length <= 1) return;
-            const dir = dx < 0 ? 1 : -1;
-            const next = (heroIdx + dir + heroList.length) % heroList.length;
-            setHeroDir(dir);
-            setHeroIdx(next);
-            setHero(heroList[next]);
-          }}
-        >
-          {/* Parallax background — moves with mouse */}
-          <AnimatePresence mode="sync">
-            <motion.div
-              key={hero.id + "-bg"}
-              className="absolute inset-0"
-              style={{ inset: "-30px" }}
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              transition={{ duration: 0.35, ease: "easeInOut" }}
+      <div className="max-w-7xl mx-auto pt-2.5">
+        {/* ── 0. HeroSection matching /artifacts/nova-mobile/components/HeroSection.tsx ── */}
+        {currentHero && (
+          <div className="mb-3 px-3.5">
+            <div
+              className="relative w-full h-[300px] sm:h-[360px] rounded-[20px] overflow-hidden select-none bg-[#14141f]"
+              onTouchStart={(e) => {
+                touchStartX.current = e.touches[0].clientX;
+              }}
+              onTouchEnd={(e) => {
+                const dx = e.changedTouches[0].clientX - touchStartX.current;
+                if (Math.abs(dx) < 40 || heroList.length <= 1) return;
+                const dir = dx < 0 ? 1 : -1;
+                setHeroIdx((prev) => (prev + dir + heroList.length) % heroList.length);
+              }}
             >
               <img
                 src={
-                  hero.bannerImage ||
-                  hero.coverImage?.extraLarge ||
-                  hero.coverImage?.large
+                  currentHero.bannerImage ||
+                  currentHero.coverImage?.extraLarge ||
+                  currentHero.coverImage?.large
                 }
-                alt=""
+                alt={currentHero.title?.romaji || ""}
                 className="w-full h-full object-cover"
-                draggable={false}
-                style={{ transform: "scale(1.06)" }}
               />
-            </motion.div>
-          </AnimatePresence>
+              <div
+                className="absolute inset-0"
+                style={{
+                  background:
+                    "linear-gradient(to bottom, rgba(7,7,14,0.12) 0%, rgba(7,7,14,0.5) 45%, rgba(7,7,14,0.97) 100%)",
+                }}
+              />
 
-          {/* Cinematic overlays */}
-          <div
-            className="absolute inset-0"
-            style={{
-              background:
-                "linear-gradient(to top, #09090B 0%, #09090B 5%, rgba(9,9,11,0.88) 40%, rgba(9,9,11,0.3) 75%, rgba(9,9,11,0.1) 100%)",
-            }}
-          />
-          <div
-            className="absolute inset-0"
-            style={{
-              background:
-                "linear-gradient(to right, rgba(9,9,11,0.92) 0%, rgba(9,9,11,0.5) 45%, transparent 70%)",
-            }}
-          />
-          <div
-            className="absolute inset-0"
-            style={{
-              background:
-                "radial-gradient(ellipse at 65% 40%, rgba(139,92,246,0.07) 0%, transparent 55%)",
-            }}
-          />
+              {/* Top Row: Score Badge (Left) + Season Pick Badge (Right) */}
+              <div
+                className="absolute top-3.5 left-3.5 right-3.5 flex items-center justify-between"
+                dir="ltr"
+              >
+                {currentHero.averageScore ? (
+                  <div className="flex items-center gap-1 bg-black/65 px-2.5 py-1 rounded-[10px]">
+                    <Star className="w-3 h-3 text-amber-400 fill-amber-400" />
+                    <span className="text-amber-400 text-[12px] font-bold">
+                      {(currentHero.averageScore / 10).toFixed(1)}
+                    </span>
+                  </div>
+                ) : (
+                  <div />
+                )}
 
-          {/* Purple accent glow at bottom */}
-          <div
-            className="absolute bottom-0 left-0 right-0 h-32"
-            style={{
-              background:
-                "linear-gradient(to top, rgba(109,40,217,0.12), transparent)",
-            }}
-          />
-
-          {/* ── Content Row ── */}
-          <div className="absolute inset-0 flex items-end pb-7 px-4">
-            <div className="flex items-end justify-between w-full gap-4">
-              {/* Left: Text + Buttons */}
-              <AnimatePresence mode="wait">
-                <motion.div
-                  key={hero.id + "-text"}
-                  className="flex-1 min-w-0"
-                  initial={{ opacity: 0, x: 20 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  exit={{ opacity: 0, x: -10, transition: { duration: 0.18 } }}
-                  transition={{
-                    duration: 0.2,
-                    ease: [0.22, 1, 0.36, 1],
-                    delay: 0.02,
+                <div
+                  className="px-2.5 py-1 rounded-full border"
+                  style={{
+                    backgroundColor: "rgba(6, 182, 212, 0.25)",
+                    borderColor: "rgba(6, 182, 212, 0.5)",
                   }}
                 >
-                  {/* Badges row */}
-                  <motion.div
-                    className="flex items-center gap-1.5 mb-3 flex-wrap"
-                    initial={{ opacity: 0, y: 10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ duration: 0.18, delay: 0.035 }}
-                  >
-                    {hero.genres?.slice(0, 3).map((g: string) => (
-                      <span
-                        key={g}
-                        className="text-[9px] font-black bg-white/10 backdrop-blur-md text-white/75 px-2.5 py-0.5 rounded-full border border-white/10 tracking-wide"
-                      >
-                        {GENRES_AR.find((x) => x.en === g)?.ar || g}
-                      </span>
-                    ))}
-                    {hero.averageScore && (
-                      <span className="text-[9px] font-black bg-yellow-500/20 border border-yellow-500/30 text-yellow-300 px-2 py-0.5 rounded-full flex items-center gap-0.5">
-                        <Star className="w-2.5 h-2.5 fill-current" />{" "}
-                        {(hero.averageScore / 10).toFixed(1)}
-                      </span>
-                    )}
-                    {hero.status === "RELEASING" && (
-                      <span className="text-[9px] font-black bg-red-500/15 border border-red-500/25 text-red-400 px-2 py-0.5 rounded-full flex items-center gap-1">
-                        <span className="w-1.5 h-1.5 rounded-full bg-red-400 animate-pulse inline-block" />{" "}
-                        يُبث الآن
-                      </span>
-                    )}
-                  </motion.div>
+                  <span className="text-[11px] font-bold text-cyan-300 font-['Cairo']">
+                    مختارات الموسم #{heroIdx + 1}
+                  </span>
+                </div>
+              </div>
 
-                  {/* Title — big & bold */}
-                  <motion.h1
-                    className="font-black text-white mb-1.5 tracking-tight leading-none"
-                    style={{
-                      fontSize: "clamp(21px, 6.5vw, 42px)",
-                      textShadow: "0 4px 30px rgba(0,0,0,0.9)",
-                    }}
-                    initial={{ opacity: 0, y: 12 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ duration: 0.18, delay: 0.045 }}
-                  >
-                    {hero.title?.english || hero.title?.romaji}
-                  </motion.h1>
-                  {hero.title_ar && (
-                    <motion.p
-                      dir="rtl"
-                      lang="ar"
-                      className="text-white/70 text-sm font-bold mb-1.5 font-['Cairo']"
-                      initial={{ opacity: 0, y: 8 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      transition={{ duration: 0.18, delay: 0.05 }}
+              {/* Bottom Content */}
+              <div
+                className="absolute bottom-0 left-0 right-0 p-4 flex flex-col items-end"
+                dir="ltr"
+              >
+                {/* Genres */}
+                <div className="flex items-center gap-1.5 mb-2 flex-wrap justify-end">
+                  {currentHero.genres?.slice(0, 3).map((g: string) => (
+                    <span
+                      key={g}
+                      className="bg-white/15 px-2.5 py-0.5 rounded-full text-[10px] font-semibold text-slate-200 font-['Cairo']"
                     >
-                      {hero.title_ar}
-                    </motion.p>
+                      {GENRE_AR[g] || g}
+                    </span>
+                  ))}
+                </div>
+
+                {/* Title */}
+                <h1
+                  dir="rtl"
+                  className="text-[20px] sm:text-[26px] font-bold text-white text-right leading-7 line-clamp-2 mb-1 font-['Cairo']"
+                  style={{ textShadow: "0 2px 6px rgba(0,0,0,0.8)" }}
+                >
+                  {currentHero.title_ar ||
+                    currentHero.title?.english ||
+                    currentHero.title?.romaji}
+                </h1>
+
+                {currentHero.title?.english &&
+                  currentHero.title?.romaji &&
+                  currentHero.title.english !== currentHero.title.romaji && (
+                    <p className="text-[11px] text-white/60 text-right line-clamp-1 mb-1">
+                      {currentHero.title.romaji}
+                    </p>
                   )}
 
-                  {/* Subtitle */}
-                  <motion.p
-                    className="text-white/45 text-xs font-bold mb-3"
-                    initial={{ opacity: 0, y: 6 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ duration: 0.18, delay: 0.055 }}
-                  >
-                    {hero.episodes ? `${hero.episodes} حلقة` : ""}
-                    {hero.episodes && hero.format ? " · " : ""}
-                    {hero.format === "MOVIE"
-                      ? "فيلم"
-                      : hero.format === "ONA"
-                        ? "أونا"
-                        : hero.format === "OVA"
-                          ? "أوفا"
-                          : ""}
-                  </motion.p>
+                {/* Meta Row */}
+                <div className="flex items-center gap-1.5 mb-3 text-[11px] font-semibold text-slate-400 font-['Cairo']">
+                  {currentHero.episodes && <span>{currentHero.episodes} حلقة</span>}
+                  {currentHero.seasonYear && <span>• {currentHero.seasonYear}</span>}
+                  {currentHero.format && <span>• {currentHero.format}</span>}
+                </div>
 
-                  {/* CTA Buttons */}
-                  <motion.div
-                    className="flex gap-2.5 items-center"
-                    initial={{ opacity: 0, y: 8 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ duration: 0.18, delay: 0.065 }}
-                  >
-                    <Link href={`/episodes/${hero.id}`}>
-                      <motion.button
-                        whileTap={{ scale: 0.93 }}
-                        whileHover={{ scale: 1.03 }}
-                        className="relative overflow-hidden text-white text-sm font-black px-5 py-3 rounded-2xl flex items-center gap-2 shadow-2xl"
-                        style={{
-                          background:
-                            "linear-gradient(135deg, #8B5CF6 0%, #6D28D9 100%)",
-                          boxShadow: "0 8px 28px rgba(109,40,217,0.5)",
-                        }}
-                      >
-                        <Play className="w-4 h-4 fill-current relative z-10" />
-                        <span className="relative z-10">مشاهدة الآن</span>
-                      </motion.button>
-                    </Link>
-                    <Link href={`/anime/${hero.id}`}>
-                      <motion.button
-                        whileTap={{ scale: 0.93 }}
-                        whileHover={{
-                          scale: 1.03,
-                          backgroundColor: "rgba(255,255,255,0.15)",
-                        }}
-                        className="bg-white/8 backdrop-blur-xl text-white text-sm font-black px-3.5 py-3 rounded-2xl border border-white/15 flex items-center gap-1.5 transition-colors"
-                      >
-                        <Info className="w-4 h-4" /> التفاصيل
-                      </motion.button>
-                    </Link>
-                  </motion.div>
-                </motion.div>
-              </AnimatePresence>
-
-              {/* Right: 3D Poster Card — visible on all screens */}
-              <AnimatePresence mode="wait">
-                <motion.div
-                  key={hero.id + "-poster"}
-                  className="flex-shrink-0"
-                  initial={{ opacity: 0, scale: 0.85, y: 20 }}
-                  animate={{ opacity: 1, scale: 1, y: 0 }}
-                  exit={{
-                    opacity: 0,
-                    scale: 0.9,
-                    transition: { duration: 0.2 },
-                  }}
-                  transition={{
-                    duration: 0.22,
-                    ease: [0.22, 1, 0.36, 1],
-                    delay: 0.04,
-                  }}
-                  style={{ perspective: "600px" }}
-                >
-                  <div
-                    className="relative overflow-hidden shadow-2xl bg-[#111]"
-                    style={{
-                      width: "clamp(80px, 21vw, 112px)",
-                      height: "clamp(114px, 30vw, 160px)",
-                      borderRadius: 14,
-                      transform: `rotateX(${posterTilt.rx}deg) rotateY(${posterTilt.ry}deg)`,
-                      transition:
-                        "transform 0.3s cubic-bezier(0.22, 1, 0.36, 1)",
-                      boxShadow:
-                        "0 20px 60px rgba(0,0,0,0.8), 0 0 0 1px rgba(255,255,255,0.1)",
-                    }}
-                  >
-                    <img
-                      src={
-                        hero.coverImage?.extraLarge || hero.coverImage?.large
-                      }
-                      alt={hero.title?.romaji}
-                      className="w-full h-full object-cover"
-                      draggable={false}
-                    />
-                  </div>
-                </motion.div>
-              </AnimatePresence>
-            </div>
-          </div>
-
-          {/* Left / Right navigation arrows */}
-          {heroList.length > 1 && (
-            <>
-              {/* Left arrow = next (RTL) */}
-              <motion.button
-                whileTap={{ scale: 0.88 }}
-                onClick={() => {
-                  const next = (heroIdx + 1) % heroList.length;
-                  setHeroDir(1);
-                  setHeroIdx(next);
-                  setHero(heroList[next]);
-                }}
-                className="absolute left-3 top-1/2 -translate-y-1/2 z-20 w-9 h-9 rounded-full flex items-center justify-center"
-                style={{
-                  background: "rgba(0,0,0,0.55)",
-                  backdropFilter: "blur(8px)",
-                  border: "1px solid rgba(255,255,255,0.15)",
-                }}
-              >
-                <ChevronLeft className="w-5 h-5 text-white" />
-              </motion.button>
-
-              {/* Right arrow = previous (RTL) */}
-              <motion.button
-                whileTap={{ scale: 0.88 }}
-                onClick={() => {
-                  const prev =
-                    (heroIdx - 1 + heroList.length) % heroList.length;
-                  setHeroDir(-1);
-                  setHeroIdx(prev);
-                  setHero(heroList[prev]);
-                }}
-                className="absolute right-3 top-1/2 -translate-y-1/2 z-20 w-9 h-9 rounded-full flex items-center justify-center"
-                style={{
-                  background: "rgba(0,0,0,0.55)",
-                  backdropFilter: "blur(8px)",
-                  border: "1px solid rgba(255,255,255,0.15)",
-                }}
-              >
-                <ChevronRight className="w-5 h-5 text-white" />
-              </motion.button>
-            </>
-          )}
-
-          {/* Hero indicator dots — centered at bottom */}
-          {heroList.length > 1 && (
-            <div className="absolute bottom-4 left-0 right-0 flex justify-center gap-1.5 items-center">
-              {heroList.map((_, i) => (
-                <motion.button
-                  key={i}
-                  onClick={() => {
-                    const d = i > heroIdx ? 1 : -1;
-                    setHeroDir(d);
-                    setHeroIdx(i);
-                    setHero(heroList[i]);
-                  }}
-                  animate={{
-                    width: i === heroIdx ? 24 : 5,
-                    opacity: i === heroIdx ? 1 : 0.28,
-                    backgroundColor: i === heroIdx ? "#8B5CF6" : "#ffffff",
-                  }}
-                  transition={{ duration: 0.15, ease: [0.22, 1, 0.36, 1] }}
-                  className="h-1.5 rounded-full"
-                  style={{ width: 5 }}
-                />
-              ))}
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* ── تابع المشاهدة (Continue Watching — merged anime + animation) ── */}
-      {mergedContinue.length > 0 && !selectedGenre && (
-        <div className="mt-5">
-          <div className="flex items-center justify-between px-4 mb-3">
-            <div className="flex items-center gap-2">
-              <div
-                className="w-7 h-7 rounded-xl flex items-center justify-center"
-                style={{
-                  background: "linear-gradient(135deg,#8B5CF6,#6D28D9)",
-                  boxShadow: "0 4px 12px rgba(109,40,217,0.4)",
-                }}
-              >
-                <RotateCw className="w-3.5 h-3.5 text-white" />
-              </div>
-              <div>
-                <h2 className="text-[13px] font-black font-['Cairo'] text-white leading-none">
-                  تابع المشاهدة
-                </h2>
-                <p className="text-[9px] text-white/25 font-['Cairo'] mt-0.5">
-                  {mergedContinue.length} عنوان
-                </p>
-              </div>
-            </div>
-            <Link href="/history">
-              <motion.button
-                whileTap={{ scale: 0.92 }}
-                className="flex items-center gap-1 px-3 py-1.5 rounded-xl text-[11px] font-black font-['Cairo'] transition-colors active:bg-white/10"
-                style={{
-                  background: "rgba(139,92,246,0.12)",
-                  border: "1px solid rgba(139,92,246,0.22)",
-                  color: "rgba(196,181,253,0.85)",
-                }}
-              >
-                عرض الكل
-              </motion.button>
-            </Link>
-          </div>
-          <div
-            className="flex gap-3 overflow-x-auto px-4 pb-2"
-            style={{ scrollbarWidth: "none" }}
-          >
-            {mergedContinue.map((item) => {
-              const pct = Math.min(
-                100,
-                Math.round((item.watchTimeSec / item.durationSec) * 100),
-              );
-              const isAnime = item.kind === "anime";
-              const accentColor = isAnime ? "#8B5CF6" : "#06B6D4";
-              const accentBg = isAnime
-                ? "rgba(139,92,246,0.85)"
-                : "rgba(6,182,212,0.85)";
-              const badgeLabel = isAnime
-                ? `ح ${item.ep}`
-                : item.animType === "movie"
-                  ? "فيلم"
-                  : `ح ${item.ep}`;
-              return (
-                <Link key={item.key} href={item.href}>
-                  <motion.div
-                    whileTap={{ scale: 0.91 }}
-                    className="shrink-0 cursor-pointer"
-                    style={{ width: 110 }}
-                  >
-                    {/* Card */}
-                    <div
-                      className="relative rounded-[18px] overflow-hidden bg-[#111] shadow-xl"
+                {/* Action Buttons */}
+                <div className="flex items-center gap-2.5 w-full" dir="ltr">
+                  <Link href={`/anime/${currentHero.id}`}>
+                    <button
+                      className="flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-[12px] border text-white text-[13px] font-semibold font-['Cairo'] active:scale-95 transition-transform"
                       style={{
-                        width: 110,
-                        height: 156,
-                        border: `1px solid ${accentColor}22`,
+                        backgroundColor: "rgba(255,255,255,0.12)",
+                        borderColor: "rgba(255,255,255,0.2)",
                       }}
                     >
-                      {/* Poster */}
-                      {item.cover ? (
+                      <Info className="w-[17px] h-[17px]" />
+                      <span>تفاصيل</span>
+                    </button>
+                  </Link>
+
+                  <Link href={`/episodes/${currentHero.id}`} className="flex-1">
+                    <button
+                      className="w-full flex items-center justify-center gap-2 py-2.5 px-5 rounded-[12px] text-white text-[14px] font-bold font-['Cairo'] active:scale-[0.98] transition-transform"
+                      style={{ backgroundColor: "#06b6d4" }}
+                    >
+                      <Play className="w-4 h-4 fill-white" />
+                      <span>مشاهدة الآن</span>
+                    </button>
+                  </Link>
+                </div>
+              </div>
+            </div>
+
+            {/* Dots */}
+            {heroList.length > 1 && (
+              <div className="flex items-center justify-center gap-1.5 mt-2.5" dir="ltr">
+                {heroList.map((_, i) => (
+                  <button
+                    key={i}
+                    onClick={() => setHeroIdx(i)}
+                    aria-label={`شريحة ${i + 1}`}
+                    className="h-1.5 rounded-full transition-all"
+                    style={{
+                      width: i === heroIdx ? 20 : 6,
+                      backgroundColor:
+                        i === heroIdx ? "#06b6d4" : "rgba(255,255,255,0.25)",
+                    }}
+                  />
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ── 1. متابعة المشاهدة (Continue Watching matching mobile landscape cards) ── */}
+        {mergedContinue.length > 0 && (
+          <div>
+            <SectionHeader
+              title="متابعة المشاهدة"
+              href="/library?tab=continue"
+              seeAllLabel="السجل الكامل"
+            />
+            <div
+              className="flex gap-2.5 overflow-x-auto px-3.5 pb-1"
+              style={{ scrollbarWidth: "none" }}
+            >
+              {mergedContinue.map((item) => {
+                const progress = Math.min(
+                  1,
+                  Math.max(0.05, item.watchTimeSec / (item.durationSec || 1440)),
+                );
+                const remainingMin = Math.max(
+                  1,
+                  Math.ceil(((1 - progress) * (item.durationSec || 1440)) / 60),
+                );
+                return (
+                  <Link key={item.key} href={item.href}>
+                    <motion.div
+                      whileTap={{ scale: 0.95 }}
+                      className="shrink-0 w-[150px] h-[126px] rounded-[14px] overflow-hidden relative cursor-pointer border"
+                      style={{
+                        backgroundColor: "var(--bg-card, #14171C)",
+                        borderColor: "var(--border-subtle, rgba(255,255,255,0.08))",
+                      }}
+                    >
+                      {item.cover && (
                         <img
                           src={item.cover}
-                          alt=""
+                          alt={item.title}
                           className="w-full h-full object-cover"
                           loading="lazy"
                         />
-                      ) : (
-                        <div
-                          className="w-full h-full flex items-center justify-center"
-                          style={{ background: `${accentColor}18` }}
-                        >
-                          <Play
-                            className="w-8 h-8"
-                            style={{ color: `${accentColor}50` }}
-                          />
-                        </div>
                       )}
-
-                      {/* Dark gradient */}
                       <div
                         className="absolute inset-0"
                         style={{
                           background:
-                            "linear-gradient(to top, rgba(0,0,0,0.96) 0%, rgba(0,0,0,0.0) 55%)",
+                            "linear-gradient(to top, rgba(3,7,18,0.96) 0%, rgba(3,7,18,0.28) 55%, rgba(3,7,18,0.12) 100%)",
                         }}
                       />
 
-                      {/* Top row: episode badge + time */}
-                      <div className="absolute top-2 inset-x-2 flex items-center justify-between">
-                        <span
-                          className="text-[7px] font-black text-white px-1.5 py-0.5 rounded-lg"
-                          style={{
-                            background: accentBg,
-                            backdropFilter: "blur(8px)",
-                          }}
-                        >
-                          {badgeLabel}
+                      <div
+                        className="absolute top-2 left-2 right-2 flex items-center justify-between"
+                        dir="ltr"
+                      >
+                        <span className="px-2 py-0.5 rounded-full bg-slate-900/80 text-slate-200 text-[9px] font-bold font-['Cairo']">
+                          متبقي {remainingMin} د
                         </span>
-                        <span
-                          className="text-[7px] font-black text-white/75 px-1.5 py-0.5 rounded-lg font-mono"
-                          style={{
-                            background: "rgba(0,0,0,0.60)",
-                            backdropFilter: "blur(8px)",
-                            border: "1px solid rgba(255,255,255,0.10)",
-                          }}
-                        >
-                          {fmtMinute(item.watchTimeSec)}
+                        <span className="px-2 py-0.5 rounded-full bg-cyan-600/90 text-white text-[9px] font-extrabold font-['Cairo']">
+                          الحلقة {item.ep}
                         </span>
                       </div>
 
-                      {/* Kind indicator */}
-                      <div className="absolute top-8 right-2">
-                        <span
-                          className="text-[6.5px] font-black px-1.5 py-[3px] rounded-md"
-                          style={{
-                            background: isAnime
-                              ? "rgba(139,92,246,0.22)"
-                              : "rgba(6,182,212,0.22)",
-                            color: isAnime ? "#c4b5fd" : "#67e8f9",
-                            border: `1px solid ${accentColor}33`,
-                          }}
-                        >
-                          {isAnime ? "أنمي" : "أنيميشن"}
-                        </span>
-                      </div>
-
-                      {/* Progress bar + title */}
-                      <div className="absolute bottom-0 inset-x-0 px-2 pb-2.5">
-                        <div
-                          className="w-full h-[3px] rounded-full mb-2 overflow-hidden"
-                          style={{ background: "rgba(255,255,255,0.12)" }}
-                        >
-                          <motion.div
-                            className="h-full rounded-full"
-                            initial={{ width: 0 }}
-                            animate={{ width: `${pct}%` }}
-                            transition={{
-                              duration: 0.25,
-                              ease: [0.22, 1, 0.36, 1],
-                            }}
-                            style={{
-                              background: `linear-gradient(90deg, ${accentColor}, ${accentColor}CC)`,
-                            }}
-                          />
+                      <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                        <div className="w-[34px] h-[34px] rounded-full bg-cyan-500/90 border border-white/35 flex items-center justify-center">
+                          <Play className="w-3.5 h-3.5 text-white fill-white" />
                         </div>
-                        <p className="text-[9px] text-white/90 font-black truncate leading-tight font-['Cairo']">
+                      </div>
+
+                      <div className="absolute bottom-2 left-2.5 right-2.5 text-right">
+                        <p className="text-white text-[11px] font-bold truncate font-['Cairo']">
                           {item.title}
                         </p>
-                      </div>
-
-                      {/* Play overlay */}
-                      <div
-                        className="absolute inset-0 flex items-center justify-center opacity-0 hover:opacity-100 transition-opacity"
-                        style={{ background: "rgba(0,0,0,0.35)" }}
-                      >
-                        <div
-                          className="w-10 h-10 rounded-full flex items-center justify-center"
-                          style={{
-                            background: accentBg,
-                            backdropFilter: "blur(8px)",
-                          }}
-                        >
-                          <Play className="w-4 h-4 text-white fill-white mr-[-2px]" />
+                        <p className="text-cyan-300 text-[9px] font-semibold font-['Cairo'] mt-0.5 mb-1.5">
+                          استئناف المشاهدة الآن
+                        </p>
+                        <div className="h-1 rounded-full bg-white/20 overflow-hidden">
+                          <div
+                            className="h-full rounded-full bg-[#06b6d4]"
+                            style={{ width: `${Math.round(progress * 100)}%` }}
+                          />
                         </div>
                       </div>
-                    </div>
-                    {/* Progress % below card */}
-                    <div className="flex items-center justify-between mt-1.5 px-0.5">
-                      <span
-                        className="text-[8.5px] font-black font-['Cairo']"
-                        style={{ color: `${accentColor}AA` }}
-                      >
-                        {pct}%
-                      </span>
-                    </div>
-                  </motion.div>
-                </Link>
-              );
-            })}
-          </div>
-        </div>
-      )}
-
-      {/* ── أحدث الحلقات (مطابق لتطبيق الهاتف AnimeSlayer) ── */}
-      {(todayEps.length > 0 || todayChecking) && (
-        <div className="mt-6">
-          <div className="flex items-center justify-between px-4 mb-3">
-            <div className="flex items-center gap-2">
-              <div
-                className="w-1 h-4 rounded-full shrink-0"
-                style={{ backgroundColor: "#06b6d4" }}
-              />
-              <h2 className="text-[15px] font-black text-white font-['Cairo'] leading-none">
-                أحدث الحلقات 📺
-              </h2>
+                    </motion.div>
+                  </Link>
+                );
+              })}
             </div>
-
-            <Link
-              href="/latest"
-              className="flex items-center gap-1 px-2.5 py-1 rounded-xl font-['Cairo'] text-[11px] font-bold text-cyan-400 active:scale-95 transition-transform"
-              style={{
-                background: "rgba(6,182,212,0.10)",
-                border: "1px solid rgba(6,182,212,0.22)",
-              }}
-            >
-              عرض الكل
-              <ChevronLeft className="w-3.5 h-3.5" />
-            </Link>
           </div>
+        )}
 
-          <div
-            className="flex gap-2.5 overflow-x-auto px-4 pb-2"
-            style={{ scrollbarWidth: "none" }}
-          >
-            {todayEps.map((it: any, i: number) => {
-              const titleVariants = Array.from(
-                new Set(
-                  [
-                    ...(Array.isArray(it.titleVariants) ? it.titleVariants : []),
-                    it.romaji,
-                    it.english,
-                    it.native,
-                    it.name,
-                  ].filter(
-                    (value: unknown): value is string =>
-                      typeof value === "string" && value.trim().length > 1,
+        {/* ── 2. أحدث الحلقات 📺 ── */}
+        {todayEps.length > 0 && (
+          <div>
+            <SectionHeader title="أحدث الحلقات 📺" href="/latest" />
+            <div
+              className="flex gap-2.5 overflow-x-auto px-3.5 pb-1"
+              style={{ scrollbarWidth: "none" }}
+            >
+              {todayEps.slice(0, 18).map((it: any, i: number) => {
+                const titleVariants = Array.from(
+                  new Set(
+                    [
+                      ...(Array.isArray(it.titleVariants) ? it.titleVariants : []),
+                      it.romaji,
+                      it.english,
+                      it.native,
+                      it.name,
+                    ].filter(
+                      (value: unknown): value is string =>
+                        typeof value === "string" && value.trim().length > 1,
+                    ),
                   ),
-                ),
-              );
-              const canonicalTitle = it.romaji || it.name || "";
-              const canonicalEnglish = it.english || "";
-              const href = `/watch?anime=${encodeURIComponent(String(it.animeId || 0))}&anilistId=${encodeURIComponent(String(it.anilistId || it.animeId || 0))}&anslayerId=${encodeURIComponent(String(it.anslayerId || ""))}&awAnimeId=${encodeURIComponent(String(it.awAnimeId || ""))}&anifoxId=${encodeURIComponent(String(it.anifoxId || ""))}&season=${encodeURIComponent(String(it.season || 1))}&ep=${it.episode}&totalEps=${it.episode}&title=${encodeURIComponent(canonicalTitle)}&english=${encodeURIComponent(canonicalEnglish)}&native=${encodeURIComponent(String(it.native || ""))}&titles=${encodeURIComponent(JSON.stringify(titleVariants))}&cover=${encodeURIComponent(it.cover || "")}&titleAr=${encodeURIComponent(it.titleAr || "")}&site=${encodeURIComponent(it.source || "anslayer")}&fromLatest=1&latestSource=${encodeURIComponent(it.source || "anslayer")}`;
-              return (
-                <Link
-                  href={href}
-                  key={`${it.source}-${it.anslayerId || it.awAnimeId || it.animeId || it.name || i}-${it.episode}`}
-                >
-                  <motion.div
-                    whileTap={{ scale: 0.94 }}
-                    className="shrink-0 cursor-pointer"
-                    style={{ width: 120 }}
+                );
+                const canonicalTitle = it.romaji || it.name || "";
+                const canonicalEnglish = it.english || "";
+                const href = `/watch?anime=${encodeURIComponent(String(it.animeId || 0))}&anilistId=${encodeURIComponent(String(it.anilistId || it.animeId || 0))}&anslayerId=${encodeURIComponent(String(it.anslayerId || ""))}&awAnimeId=${encodeURIComponent(String(it.awAnimeId || ""))}&anifoxId=${encodeURIComponent(String(it.anifoxId || ""))}&season=${encodeURIComponent(String(it.season || 1))}&ep=${it.episode}&totalEps=${it.episode}&title=${encodeURIComponent(canonicalTitle)}&english=${encodeURIComponent(canonicalEnglish)}&native=${encodeURIComponent(String(it.native || ""))}&titles=${encodeURIComponent(JSON.stringify(titleVariants))}&cover=${encodeURIComponent(it.cover || "")}&titleAr=${encodeURIComponent(it.titleAr || "")}&site=${encodeURIComponent(it.source || "anslayer")}&fromLatest=1&latestSource=${encodeURIComponent(it.source || "anslayer")}`;
+                return (
+                  <Link
+                    href={href}
+                    key={`${it.source}-${it.anslayerId || it.animeId || i}-${it.episode}`}
                   >
-                    <div
-                      className="relative rounded-[12px] overflow-hidden"
-                      style={{
-                        width: 120,
-                        height: 175,
-                        border: "1px solid rgba(255,255,255,0.08)",
-                        background: "#13131f",
-                      }}
+                    <motion.div
+                      whileTap={{ scale: 0.95 }}
+                      className="shrink-0 w-[120px] sm:w-[136px] cursor-pointer"
                     >
-                      {it.cover ? (
-                        <img
-                          src={it.cover}
-                          alt={it.name || ""}
-                          className="w-full h-full object-cover bg-[#0b0b10]"
-                          loading="lazy"
-                          onError={(e) => {
-                            const target = e.currentTarget;
-                            const fallback = it.animeId
-                              ? `https://img.anili.st/media/${it.animeId}`
-                              : "";
-                            if (fallback && target.src !== fallback) {
-                              target.src = fallback;
-                            } else {
-                              target.style.display = "none";
-                            }
-                          }}
-                        />
-                      ) : (
-                        <div className="w-full h-full flex items-center justify-center bg-[#13131f]">
-                          <Tv2 className="w-7 h-7 text-white/20" />
-                        </div>
-                      )}
-
-                      {/* شارة الحلقة (مطابقة لتطبيق الهاتف) */}
                       <div
-                        className="absolute top-[7px] right-[7px] z-10 px-[7px] py-[3px] rounded-[12px]"
-                        style={{ backgroundColor: "rgba(7,9,13,0.78)" }}
-                      >
-                        <span className="text-[8px] font-bold text-white font-['Cairo'] leading-none block">
-                          الحلقة {it.episode}
-                        </span>
-                      </div>
-
-                      {/* التدرج السفلي والعنوان بسطرين مثل الهاتف */}
-                      <div
-                        className="absolute bottom-0 left-0 right-0 px-2 pb-2 pt-[50px]"
+                        className="relative w-full h-[175px] sm:h-[196px] rounded-[12px] overflow-hidden border"
                         style={{
-                          background: "linear-gradient(to top, rgba(0,0,0,0.95) 0%, transparent 100%)",
+                          backgroundColor: "var(--bg-card, #14171C)",
+                          borderColor: "var(--border-subtle, rgba(255,255,255,0.08))",
                         }}
                       >
-                        <p
-                          dir="rtl"
-                          className="text-[10px] font-semibold text-white leading-[14px] line-clamp-2 text-right font-['Cairo']"
-                        >
-                          {it.titleAr || it.name}
-                        </p>
-                      </div>
-                    </div>
-                  </motion.div>
-                </Link>
-              );
-            })}
-          </div>
-        </div>
-      )}
-
-      {/* ── قسم الأنيميشن ── مخفي */}
-      {false && !selectedGenre && (
-        <div className="mt-5 px-4">
-          {/* Banner */}
-          <Link href="/animations">
-            <motion.div
-              whileTap={{ scale: 0.97 }}
-              className="relative w-full h-[110px] rounded-3xl overflow-hidden cursor-pointer mb-3 shadow-2xl shadow-black/60"
-              style={{
-                background:
-                  "linear-gradient(135deg,#1a1040 0%,#2d1b69 40%,#0f3460 100%)",
-              }}
-            >
-              <div
-                className="absolute -top-8 -left-8 w-40 h-40 rounded-full opacity-20"
-                style={{
-                  background: "radial-gradient(circle,#7c3aed,transparent)",
-                }}
-              />
-              <div
-                className="absolute -bottom-6 -right-4 w-32 h-32 rounded-full opacity-15"
-                style={{
-                  background: "radial-gradient(circle,#06b6d4,transparent)",
-                }}
-              />
-              {[
-                { top: "18%", left: "12%", size: 2 },
-                { top: "60%", left: "25%", size: 1.5 },
-                { top: "30%", left: "75%", size: 2.5 },
-                { top: "70%", left: "85%", size: 1.5 },
-                { top: "15%", left: "55%", size: 1 },
-              ].map((s, i) => (
-                <div
-                  key={i}
-                  className="absolute rounded-full bg-white/60 animate-pulse"
-                  style={{
-                    top: s.top,
-                    left: s.left,
-                    width: s.size,
-                    height: s.size,
-                  }}
-                />
-              ))}
-              <div className="absolute inset-0 flex items-center justify-between px-5">
-                <div className="space-y-1.5">
-                  <div className="flex items-center gap-2">
-                    <div
-                      className="w-7 h-7 rounded-xl flex items-center justify-center shadow-lg"
-                      style={{
-                        background: "linear-gradient(135deg,#7c3aed,#06b6d4)",
-                      }}
-                    >
-                      <Clapperboard className="w-3.5 h-3.5 text-white" />
-                    </div>
-                    <span className="text-[10px] text-white/40 font-['Cairo'] tracking-wider uppercase">
-                      Animation
-                    </span>
-                  </div>
-                  <h3 className="text-[20px] font-black text-white font-['Cairo'] leading-tight">
-                    عالم الأنيميشن
-                  </h3>
-                  <p className="text-[10px] text-white/45 font-['Cairo']">
-                    أفلام ومسلسلات كرتون عالمية
-                  </p>
-                </div>
-                <div
-                  className="flex items-center gap-1.5 border border-white/20 px-3.5 py-2 rounded-2xl"
-                  style={{
-                    background: "rgba(255,255,255,0.07)",
-                    backdropFilter: "blur(12px)",
-                  }}
-                >
-                  <span className="text-[11px] font-black text-white font-['Cairo']">
-                    اكتشف
-                  </span>
-                  <ChevronLeft className="w-3.5 h-3.5 text-white" />
-                </div>
-              </div>
-            </motion.div>
-          </Link>
-
-          {/* أفلام الأنيميشن */}
-          {animationMovies.length > 0 && (
-            <>
-              <div className="flex items-center justify-between mb-2.5">
-                <div className="flex items-center gap-2">
-                  <div
-                    className="w-7 h-7 rounded-xl flex items-center justify-center"
-                    style={{
-                      background: "linear-gradient(135deg,#7c3aed,#4f46e5)",
-                    }}
-                  >
-                    <Film className="w-3.5 h-3.5 text-white" />
-                  </div>
-                  <h2 className="text-[13px] font-black font-['Cairo'] text-white">
-                    أفلام أنيميشن
-                  </h2>
-                </div>
-                <Link href="/animations">
-                  <button className="text-[10px] text-violet-400/80 font-black font-['Cairo'] flex items-center gap-0.5 bg-violet-500/8 px-2.5 py-1 rounded-xl border border-violet-500/15">
-                    عرض الكل <ChevronLeft className="w-3 h-3" />
-                  </button>
-                </Link>
-              </div>
-              <div
-                className="flex gap-3 overflow-x-auto pb-1"
-                style={{ scrollbarWidth: "none" }}
-              >
-                {animationMovies.map((m) => (
-                  <Link key={m.id} href={`/animation/movie/${m.id}`}>
-                    <motion.div
-                      whileTap={{ scale: 0.92 }}
-                      className="shrink-0 w-[110px] cursor-pointer"
-                    >
-                      <div className="relative w-[110px] h-[158px] rounded-2xl overflow-hidden bg-[#18181B] border border-white/[0.08] shadow-lg shadow-black/50">
-                        {m.poster_path ? (
+                        {it.cover ? (
                           <img
-                            src={`https://image.tmdb.org/t/p/w300${m.poster_path}`}
-                            alt=""
+                            src={it.cover}
+                            alt={it.name || ""}
                             className="w-full h-full object-cover"
                             loading="lazy"
+                            onError={(e) => {
+                              const target = e.currentTarget;
+                              const fallback = it.animeId
+                                ? `https://img.anili.st/media/${it.animeId}`
+                                : "";
+                              if (fallback && target.src !== fallback) {
+                                target.src = fallback;
+                              } else {
+                                target.style.display = "none";
+                              }
+                            }}
                           />
                         ) : (
-                          <div className="w-full h-full bg-violet-900/20 flex items-center justify-center">
-                            <Film className="w-8 h-8 text-violet-600/30" />
+                          <div className="w-full h-full flex items-center justify-center">
+                            <Tv2 className="w-7 h-7 opacity-20" />
                           </div>
                         )}
-                        <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/10 to-transparent" />
-                        {m.vote_average > 0 && (
-                          <div className="absolute top-2 right-2 flex items-center gap-0.5 bg-black/70 backdrop-blur-md text-yellow-400 text-[7px] px-1.5 py-0.5 rounded-lg font-black border border-yellow-500/20">
-                            <Star className="w-1.5 h-1.5 fill-current" />{" "}
-                            {m.vote_average.toFixed(1)}
-                          </div>
-                        )}
-                        <div className="absolute bottom-0 left-0 right-0 px-2 pb-2">
-                          <p className="text-[9px] text-white/90 font-bold line-clamp-2 leading-tight">
-                            {m.title}
+
+                        <div
+                          className="absolute top-[7px] right-[7px] z-10 px-2 py-0.5 rounded-[12px]"
+                          style={{ backgroundColor: "rgba(7,9,13,0.78)" }}
+                        >
+                          <span className="text-[9px] font-bold text-white font-['Cairo']">
+                            الحلقة {it.episode}
+                          </span>
+                        </div>
+
+                        <div
+                          className="absolute bottom-0 inset-x-0 px-2 pb-2 pt-12"
+                          style={{
+                            background:
+                              "linear-gradient(to top, rgba(0,0,0,0.95) 0%, transparent 100%)",
+                          }}
+                        >
+                          <p
+                            dir="rtl"
+                            className="text-[11px] font-semibold text-white leading-[15px] line-clamp-2 text-right font-['Cairo']"
+                          >
+                            {it.titleAr || it.name}
                           </p>
                         </div>
                       </div>
                     </motion.div>
                   </Link>
-                ))}
-              </div>
-            </>
-          )}
-        </div>
-      )}
-
-      {/* ── قسم أنيميشن مدبلج (aw-dubbed) ── */}
-      {!selectedGenre && (
-        <div className="mt-5">
-          <div className="flex items-center justify-between px-4 mb-2.5">
-            <div className="flex items-center gap-2">
-              <div
-                className="w-7 h-7 rounded-xl flex items-center justify-center shrink-0"
-                style={{
-                  background: "linear-gradient(135deg,#10b981,#06b6d4)",
-                }}
-              >
-                <Film className="w-3.5 h-3.5 text-white" />
-              </div>
-              <div>
-                <h2 className="text-[13px] font-black font-['Cairo'] text-white leading-none">
-                  أنيميشن مدبلج 🎬
-                </h2>
-                <p className="text-[9px] text-white/25 font-['Cairo'] mt-0.5">
-                  أنيميشن مدبلج بالعربية
-                </p>
-              </div>
+                );
+              })}
             </div>
-            <Link href="/aw-dubbed">
-              <button className="text-[10px] text-cyan-400/80 font-black font-['Cairo'] flex items-center gap-0.5 bg-cyan-500/8 px-2.5 py-1 rounded-xl border border-cyan-500/15">
-                عرض الكل <ChevronLeft className="w-3 h-3" />
-              </button>
-            </Link>
           </div>
-          <div
-            className="flex gap-3 overflow-x-auto pb-1 px-4"
-            style={{ scrollbarWidth: "none" }}
-          >
-            {awCards.length > 0
-              ? awCards.map((c: any, i: number) => {
-                  const imgSrc = c.poster || null;
-                  const toDetail = `/aw-dubbed/${encodeURIComponent(c.key)}?title=${encodeURIComponent(c.title)}&seasons=${encodeURIComponent(JSON.stringify(c.seasons || []))}&img=${encodeURIComponent(c.poster || "")}`;
-                  return (
-                    <Link key={i} href={toDetail}>
-                      <motion.div
-                        whileTap={{ scale: 0.92 }}
-                        className="shrink-0 w-[110px] cursor-pointer"
-                      >
-                        <div className="relative w-[110px] h-[158px] rounded-2xl overflow-hidden bg-[#18181B] border border-white/[0.08] shadow-lg shadow-black/50">
-                          {imgSrc ? (
-                            <img
-                              src={imgSrc}
-                              alt={c.title}
-                              className="w-full h-full object-cover"
-                              loading="lazy"
-                              onError={(e) => {
-                                (e.target as HTMLImageElement).style.display =
-                                  "none";
-                              }}
-                            />
-                          ) : (
-                            <div className="w-full h-full bg-cyan-900/20 flex items-center justify-center">
-                              <Film className="w-8 h-8 text-cyan-600/30" />
-                            </div>
-                          )}
-                          <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/15 to-transparent" />
-                          <div className="absolute bottom-0 left-0 right-0 px-2 pb-2">
-                            <p className="text-[9px] text-white/90 font-bold line-clamp-2 leading-tight">
-                              {c.titleAr || c.title}
-                            </p>
-                          </div>
-                        </div>
-                      </motion.div>
-                    </Link>
-                  );
-                })
-              : Array.from({ length: 5 }).map((_, i) => (
-                  <div
-                    key={i}
-                    className="shrink-0 w-[110px] h-[158px] rounded-2xl bg-white/4 border border-white/6 animate-pulse"
-                  />
-                ))}
-          </div>
-        </div>
-      )}
+        )}
 
-      {/* ── قسم الكرتون المدبلج ── */}
-      {!selectedGenre && (
-        <div className="mt-5">
-          {/* Header row */}
-          <div className="flex items-center justify-between px-4 mb-2.5">
-            <div className="flex items-center gap-2">
-              <div
-                className="w-7 h-7 rounded-xl flex items-center justify-center shrink-0"
-                style={{
-                  background: "linear-gradient(135deg,#10b981,#f59e0b)",
-                }}
-              >
-                <Tv2 className="w-3.5 h-3.5 text-white" />
-              </div>
-              <div>
-                <h2 className="text-[13px] font-black font-['Cairo'] text-white leading-none">
-                  كرتون مدبلج 📺
-                </h2>
-                <p className="text-[9px] text-white/25 font-['Cairo'] mt-0.5">
-                  كرتون وأنمي مدبلج للعربية
-                </p>
-              </div>
-            </div>
-            <Link href="/dubbed">
-              <button className="text-[10px] text-emerald-400/80 font-black font-['Cairo'] flex items-center gap-0.5 bg-emerald-500/8 px-2.5 py-1 rounded-xl border border-emerald-500/15">
-                عرض الكل <ChevronLeft className="w-3 h-3" />
-              </button>
-            </Link>
-          </div>
-          {/* Horizontal poster cards */}
-          <div
-            className="flex gap-3 overflow-x-auto pb-1 px-4"
-            style={{ scrollbarWidth: "none" }}
-          >
-            {dubbedCards.length > 0
-              ? dubbedCards.map((c: any, i: number) => {
-                  /* نفس منطق imgSrc في DubbedDetail */
-                  const rawImg = c.image || c.img || "";
-                  const imgSrc = rawImg.startsWith("http")
-                    ? rawImg
-                    : rawImg.startsWith("/api/dubbed/img")
-                      ? rawImg
-                      : rawImg
-                        ? `/api/dubbed/img?f=${encodeURIComponent(rawImg.split("?f=")[1] || rawImg.split("/").pop() || rawImg)}`
-                        : null;
-                  const toDetail = `/dubbed/${encodeURIComponent(c.title)}?seasons=${encodeURIComponent(JSON.stringify(c.seasons || [{ label: "الموسم 1", arabicToonsId: c.arabicToonsId }]))}&title=${encodeURIComponent(c.title)}&img=${encodeURIComponent(rawImg)}`;
-                  return (
-                    <Link key={i} href={toDetail}>
-                      <motion.div
-                        whileTap={{ scale: 0.92 }}
-                        className="shrink-0 w-[110px] cursor-pointer"
-                      >
-                        <div className="relative w-[110px] h-[158px] rounded-2xl overflow-hidden bg-[#18181B] border border-white/[0.08] shadow-lg shadow-black/50">
-                          {imgSrc ? (
-                            <img
-                              src={imgSrc}
-                              alt={c.title}
-                              className="w-full h-full object-cover"
-                              loading="lazy"
-                            />
-                          ) : (
-                            <div className="w-full h-full bg-emerald-900/20 flex items-center justify-center">
-                              <Tv2 className="w-8 h-8 text-emerald-600/30" />
-                            </div>
-                          )}
-                          <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/15 to-transparent" />
-                          <div className="absolute bottom-0 left-0 right-0 px-2 pb-2">
-                            <p className="text-[9px] text-white/90 font-bold line-clamp-2 leading-tight">
-                              {c.title}
-                            </p>
-                          </div>
-                        </div>
-                      </motion.div>
-                    </Link>
-                  );
-                })
-              : Array.from({ length: 5 }).map((_, i) => (
-                  <div
-                    key={i}
-                    className="shrink-0 w-[110px] h-[158px] rounded-2xl bg-white/4 border border-white/6 animate-pulse"
-                  />
-                ))}
-          </div>
-        </div>
-      )}
-
-      {/* ── موسم الربيع 2026 ── */}
-      {spring2026.length > 0 && !selectedGenre && (
-        <div className="mt-5">
-          <div className="flex items-center justify-between px-4 mb-3">
-            <div className="flex items-center gap-2">
-              <div
-                className="w-7 h-7 rounded-xl flex items-center justify-center shrink-0"
-                style={{
-                  background: "linear-gradient(135deg,#ec4899,#8b5cf6)",
-                }}
-              >
-                <Tv2 className="w-3.5 h-3.5 text-white" />
-              </div>
-              <div>
-                <h2 className="text-[13px] font-black font-['Cairo'] text-white leading-none">
-                  موسم الربيع 2026 🌸
-                </h2>
-                <p className="text-[9px] text-white/25 font-['Cairo'] mt-0.5">
-                  {spring2026.length} أنمي يُبث الآن
-                </p>
-              </div>
-            </div>
-            <Link href="/browse?year=2026&season=SPRING&format=TV">
-              <button className="text-[10px] text-pink-400/80 font-black font-['Cairo'] flex items-center gap-0.5 bg-pink-500/8 px-2.5 py-1 rounded-xl border border-pink-500/15">
-                عرض الكل <ChevronLeft className="w-3 h-3" />
-              </button>
-            </Link>
-          </div>
-          <div
-            className="flex gap-3 overflow-x-auto px-4 pb-2"
-            style={{ scrollbarWidth: "none" }}
-          >
-            {spring2026.map((anime) => {
-              const aired =
-                anime.status === "RELEASING" && anime.nextAiringEpisode?.episode
-                  ? anime.nextAiringEpisode.episode - 1
-                  : anime.episodes || 0;
-              const total = anime.episodes || 0;
-              return (
-                <Link key={anime.id} href={animeHref(anime)}>
-                  <motion.div
-                    whileTap={{ scale: 0.91 }}
-                    className="shrink-0 cursor-pointer"
-                    style={{ width: 92 }}
-                  >
-                    <div
-                      className="relative rounded-2xl overflow-hidden bg-[#18181B] border border-white/[0.08] shadow-lg shadow-black/50"
-                      style={{ width: 92, height: 132 }}
-                    >
-                      {anime.coverImage?.large ? (
-                        <img
-                          src={anime.coverImage.large}
-                          alt=""
-                          className="w-full h-full object-cover"
-                          loading="lazy"
-                          onError={(e) => {
-                            (e.target as HTMLImageElement).style.display =
-                              "none";
-                          }}
-                        />
-                      ) : (
-                        <div className="w-full h-full bg-gradient-to-b from-[#1e1e2e] to-[#0f0f1a]" />
-                      )}
-                      <div className="absolute inset-0 bg-gradient-to-t from-black/95 via-black/15 to-transparent" />
-                      {anime.averageScore > 0 && (
-                        <div className="absolute top-1.5 right-1.5 flex items-center gap-0.5 bg-black/70 backdrop-blur-md text-yellow-400 text-[6.5px] px-1 py-0.5 rounded-md font-black">
-                          <Star className="w-1.5 h-1.5 fill-current" />{" "}
-                          {(anime.averageScore / 10).toFixed(1)}
-                        </div>
-                      )}
-                      {aired > 0 && (
-                        <div
-                          className="absolute top-1.5 left-1.5 text-[6.5px] font-black px-1.5 py-0.5 rounded-md"
-                          style={{
-                            background: "rgba(236,72,153,0.85)",
-                            color: "#fff",
-                          }}
-                        >
-                          {aired}
-                          {total && total > aired ? `/${total}` : ""} ح
-                        </div>
-                      )}
-                      {anime.status === "RELEASING" && (
-                        <div className="absolute bottom-8 left-1.5 w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                      )}
-                      <div className="absolute bottom-0 left-0 right-0 px-1.5 pb-2">
-                        <p className="text-[8.5px] text-white/90 font-black line-clamp-2 leading-tight font-['Cairo']">
-                          {anime.title?.english || anime.title?.romaji}
-                        </p>
-                        {anime.title_ar && <p dir="rtl" lang="ar" className="text-[7px] text-white/65 font-['Cairo'] line-clamp-1 mt-0.5">{anime.title_ar}</p>}
-                      </div>
-                    </div>
-                  </motion.div>
-                </Link>
-              );
-            })}
-          </div>
-        </div>
-      )}
-
-      {/* ── خريف 2025 ── */}
-      {fall2025.length > 0 && !selectedGenre && (
-        <div className="mt-5">
-          <div className="flex items-center justify-between px-4 mb-3">
-            <div className="flex items-center gap-2">
-              <div
-                className="w-7 h-7 rounded-xl flex items-center justify-center shrink-0"
-                style={{
-                  background: "linear-gradient(135deg,#f59e0b,#d97706)",
-                }}
-              >
-                <span className="text-white text-[14px] leading-none">🍂</span>
-              </div>
-              <div>
-                <h2 className="text-[13px] font-black font-['Cairo'] text-white leading-none">
-                  أنمي خريف 2025
-                </h2>
-                <p className="text-[9px] text-white/25 font-['Cairo'] mt-0.5">
-                  {fall2025.length} أنمي
-                </p>
-              </div>
-            </div>
-            <Link href="/browse?year=2025&season=FALL&format=TV">
-              <button className="text-[10px] text-amber-400/80 font-black font-['Cairo'] flex items-center gap-0.5 bg-amber-500/8 px-2.5 py-1 rounded-xl border border-amber-500/15">
-                عرض الكل <ChevronLeft className="w-3 h-3" />
-              </button>
-            </Link>
-          </div>
-          <div
-            className="flex gap-3 overflow-x-auto px-4 pb-2"
-            style={{ scrollbarWidth: "none" }}
-          >
-            {fall2025.map((anime) => {
-              const ep = anime.nextAiringEpisode?.episode
-                ? anime.nextAiringEpisode.episode - 1
-                : anime.episodes || 0;
-              return (
-                <Link key={anime.id} href={animeHref(anime)}>
-                  <motion.div
-                    whileTap={{ scale: 0.91 }}
-                    className="shrink-0 cursor-pointer"
-                    style={{ width: 92 }}
-                  >
-                    <div
-                      className="relative rounded-2xl overflow-hidden bg-[#18181B] border border-white/[0.08] shadow-lg"
-                      style={{ width: 92, height: 132 }}
-                    >
-                      {anime.coverImage?.large ? (
-                        <img
-                          src={anime.coverImage.large}
-                          alt=""
-                          className="w-full h-full object-cover"
-                          loading="lazy"
-                          onError={(e) => {
-                            (e.target as HTMLImageElement).style.display =
-                              "none";
-                          }}
-                        />
-                      ) : (
-                        <div className="w-full h-full bg-gradient-to-b from-[#1e1e2e] to-[#0f0f1a]" />
-                      )}
-                      <div className="absolute inset-0 bg-gradient-to-t from-black/95 via-black/15 to-transparent" />
-                      {anime.averageScore > 0 && (
-                        <div className="absolute top-1.5 right-1.5 flex items-center gap-0.5 bg-black/70 backdrop-blur-md text-yellow-400 text-[6.5px] px-1 py-0.5 rounded-md font-black">
-                          <Star className="w-1.5 h-1.5 fill-current" />{" "}
-                          {(anime.averageScore / 10).toFixed(1)}
-                        </div>
-                      )}
-                      {ep > 0 && (
-                        <div
-                          className="absolute top-1.5 left-1.5 text-[6.5px] font-black px-1.5 py-0.5 rounded-md"
-                          style={{
-                            background: "rgba(245,158,11,0.88)",
-                            color: "#fff",
-                          }}
-                        >
-                          {ep} ح
-                        </div>
-                      )}
-                      <div className="absolute bottom-0 left-0 right-0 px-1.5 pb-2">
-                        <p className="text-[8.5px] text-white/90 font-black line-clamp-2 leading-tight font-['Cairo']">
-                          {anime.title?.english || anime.title?.romaji}
-                        </p>
-                        {anime.title_ar && <p dir="rtl" lang="ar" className="text-[7px] text-white/65 font-['Cairo'] line-clamp-1 mt-0.5">{anime.title_ar}</p>}
-                      </div>
-                    </div>
-                  </motion.div>
-                </Link>
-              );
-            })}
-          </div>
-        </div>
-      )}
-
-      {/* ── Movies ── */}
-      {movies.length > 0 && !selectedGenre && (
-        <div className="mt-6">
-          <div className="flex items-center justify-between px-4 mb-3">
-            <div className="flex items-center gap-2">
-              <div
-                className="w-7 h-7 rounded-xl flex items-center justify-center"
-                style={{
-                  background: "linear-gradient(135deg,#3B82F6,#1D4ED8)",
-                }}
-              >
-                <Film className="w-3.5 h-3.5 text-white" />
-              </div>
-              <h2 className="text-[13px] font-black font-['Cairo'] text-white">
-                أفلام أنمي
-              </h2>
-            </div>
-            <Link href="/browse?format=MOVIE">
-              <button className="text-[10px] text-blue-400/80 font-black font-['Cairo'] flex items-center gap-0.5 bg-blue-500/8 px-2.5 py-1 rounded-xl border border-blue-500/15">
-                عرض الكل <ChevronLeft className="w-3 h-3" />
-              </button>
-            </Link>
-          </div>
-          <div
-            className="flex gap-3 overflow-x-auto px-4 pb-1"
-            style={{ scrollbarWidth: "none" }}
-          >
-            {movies.map((anime) => (
-              <Link key={anime.id} href={animeHref(anime)}>
-                <motion.div
-                  whileTap={{ scale: 0.92 }}
-                  className="shrink-0 w-[136px] cursor-pointer"
-                >
-                  <div className="relative w-[136px] h-[192px] rounded-2xl overflow-hidden bg-[#18181B] border border-white/[0.08] shadow-lg shadow-black/50">
-                    {anime.coverImage?.large ? (
-                      <img
-                        src={anime.coverImage.large}
-                        alt=""
-                        className="w-full h-full object-cover"
-                        loading="lazy"
-                        onError={(e) => {
-                          (e.target as HTMLImageElement).style.display = "none";
-                        }}
-                      />
-                    ) : (
-                      <div className="w-full h-full bg-gradient-to-b from-[#1a1a2e] to-[#0f0f1a]" />
-                    )}
-                    <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/10 to-transparent" />
-                    <div className="absolute top-2 left-2 bg-blue-500 text-white text-[7px] px-1.5 py-0.5 rounded-md font-black shadow-md shadow-blue-500/50">
-                      فيلم
-                    </div>
-                    {anime.averageScore && (
-                      <div className="absolute top-2 right-2 flex items-center gap-0.5 bg-black/70 backdrop-blur-md text-yellow-400 text-[7.5px] px-1.5 py-0.5 rounded-lg font-black border border-yellow-500/20">
-                        <Star className="w-1.5 h-1.5 fill-current" />{" "}
-                        {(anime.averageScore / 10).toFixed(1)}
-                      </div>
-                    )}
-                    <div className="absolute bottom-0 left-0 right-0 px-2 pb-2.5">
-                      <p className="text-[9.5px] text-white/90 font-bold truncate leading-tight">
-                        {anime.title?.english || anime.title?.romaji}
-                      </p>
-                      {anime.title_ar && <p dir="rtl" lang="ar" className="text-[7px] text-white/65 font-['Cairo'] line-clamp-1 mt-0.5">{anime.title_ar}</p>}
-                    </div>
-                  </div>
-                </motion.div>
-              </Link>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* ── الأكثر تقييماً ── */}
-      {topRated.length > 0 && !selectedGenre && (
-        <div className="mt-5">
-          <div className="flex items-center justify-between px-4 mb-3">
-            <div className="flex items-center gap-2">
-              <div
-                className="w-7 h-7 rounded-xl flex items-center justify-center shrink-0"
-                style={{
-                  background: "linear-gradient(135deg,#fbbf24,#f59e0b)",
-                }}
-              >
-                <Star className="w-3.5 h-3.5 text-white fill-white" />
-              </div>
-              <div>
-                <h2 className="text-[13px] font-black font-['Cairo'] text-white leading-none">
-                  الأكثر تقييماً
-                </h2>
-                <p className="text-[9px] text-white/25 font-['Cairo'] mt-0.5">
-                  أعلى نقاط على AniList
-                </p>
-              </div>
-            </div>
-            <Link href="/browse?sort=SCORE">
-              <button className="text-[10px] text-yellow-400/80 font-black font-['Cairo'] flex items-center gap-0.5 bg-yellow-500/8 px-2.5 py-1 rounded-xl border border-yellow-500/15">
-                عرض الكل <ChevronLeft className="w-3 h-3" />
-              </button>
-            </Link>
-          </div>
-          <div
-            className="flex gap-3 overflow-x-auto px-4 pb-2"
-            style={{ scrollbarWidth: "none" }}
-          >
-            {topRated.map((anime) => (
-              <Link key={anime.id} href={animeHref(anime)}>
-                <motion.div
-                  whileTap={{ scale: 0.91 }}
-                  className="shrink-0 cursor-pointer"
-                  style={{ width: 92 }}
-                >
-                  <div
-                    className="relative rounded-2xl overflow-hidden bg-[#18181B] border border-yellow-500/10 shadow-lg shadow-yellow-900/20"
-                    style={{ width: 92, height: 132 }}
-                  >
-                    {anime.coverImage?.large ? (
-                      <img
-                        src={anime.coverImage.large}
-                        alt=""
-                        className="w-full h-full object-cover"
-                        loading="lazy"
-                        onError={(e) => {
-                          (e.target as HTMLImageElement).style.display = "none";
-                        }}
-                      />
-                    ) : (
-                      <div className="w-full h-full bg-gradient-to-b from-[#1e1e2e] to-[#0f0f1a]" />
-                    )}
-                    <div className="absolute inset-0 bg-gradient-to-t from-black/95 via-black/10 to-transparent" />
-                    {anime.averageScore > 0 && (
-                      <div className="absolute top-1.5 right-1.5 flex items-center gap-0.5 bg-yellow-500/90 text-black text-[6.5px] px-1 py-0.5 rounded-md font-black">
-                        ⭐ {(anime.averageScore / 10).toFixed(1)}
-                      </div>
-                    )}
-                    {anime.format === "MOVIE" && (
-                      <div
-                        className="absolute top-1.5 left-1.5 text-[6px] font-black px-1 py-0.5 rounded-md"
-                        style={{
-                          background: "rgba(59,130,246,0.88)",
-                          color: "#fff",
-                        }}
-                      >
-                        فيلم
-                      </div>
-                    )}
-                    <div className="absolute bottom-0 left-0 right-0 px-1.5 pb-2">
-                      <p className="text-[8.5px] text-white/90 font-black line-clamp-2 leading-tight font-['Cairo']">
-                        {anime.title?.english || anime.title?.romaji}
-                      </p>
-                      {anime.title_ar && <p dir="rtl" lang="ar" className="text-[7px] text-white/65 font-['Cairo'] line-clamp-1 mt-0.5">{anime.title_ar}</p>}
-                    </div>
-                  </div>
-                </motion.div>
-              </Link>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* ── عالم الإيسيكاي ── */}
-      {isekaiList.length > 0 && !selectedGenre && (
-        <div className="mt-5">
-          <div className="flex items-center justify-between px-4 mb-3">
-            <div className="flex items-center gap-2">
-              <div
-                className="w-7 h-7 rounded-xl flex items-center justify-center shrink-0"
-                style={{
-                  background: "linear-gradient(135deg,#059669,#10b981)",
-                }}
-              >
-                <span className="text-white text-[14px] leading-none">⚔️</span>
-              </div>
-              <div>
-                <h2 className="text-[13px] font-black font-['Cairo'] text-white leading-none">
-                  عالم الإيسيكاي
-                </h2>
-                <p className="text-[9px] text-white/25 font-['Cairo'] mt-0.5">
-                  انتقال إلى عوالم أخرى
-                </p>
-              </div>
-            </div>
-            <Link href="/browse?genre=Isekai">
-              <button className="text-[10px] text-emerald-400/80 font-black font-['Cairo'] flex items-center gap-0.5 bg-emerald-500/8 px-2.5 py-1 rounded-xl border border-emerald-500/15">
-                عرض الكل <ChevronLeft className="w-3 h-3" />
-              </button>
-            </Link>
-          </div>
-          <div
-            className="flex gap-3 overflow-x-auto px-4 pb-2"
-            style={{ scrollbarWidth: "none" }}
-          >
-            {isekaiList.map((anime) => (
-              <Link key={anime.id} href={animeHref(anime)}>
-                <motion.div
-                  whileTap={{ scale: 0.91 }}
-                  className="shrink-0 cursor-pointer"
-                  style={{ width: 92 }}
-                >
-                  <div
-                    className="relative rounded-2xl overflow-hidden bg-[#18181B] border border-white/[0.08] shadow-lg"
-                    style={{ width: 92, height: 132 }}
-                  >
-                    {anime.coverImage?.large ? (
-                      <img
-                        src={anime.coverImage.large}
-                        alt=""
-                        className="w-full h-full object-cover"
-                        loading="lazy"
-                        onError={(e) => {
-                          (e.target as HTMLImageElement).style.display = "none";
-                        }}
-                      />
-                    ) : (
-                      <div className="w-full h-full bg-gradient-to-b from-[#1e1e2e] to-[#0f0f1a]" />
-                    )}
-                    <div className="absolute inset-0 bg-gradient-to-t from-black/95 via-black/10 to-transparent" />
-                    {anime.averageScore > 0 && (
-                      <div className="absolute top-1.5 right-1.5 flex items-center gap-0.5 bg-black/70 backdrop-blur-md text-yellow-400 text-[6.5px] px-1 py-0.5 rounded-md font-black">
-                        <Star className="w-1.5 h-1.5 fill-current" />{" "}
-                        {(anime.averageScore / 10).toFixed(1)}
-                      </div>
-                    )}
-                    <div className="absolute bottom-0 left-0 right-0 px-1.5 pb-2">
-                      <p className="text-[8.5px] text-white/90 font-black line-clamp-2 leading-tight font-['Cairo']">
-                        {anime.title?.english || anime.title?.romaji}
-                      </p>
-                      {anime.title_ar && <p dir="rtl" lang="ar" className="text-[7px] text-white/65 font-['Cairo'] line-clamp-1 mt-0.5">{anime.title_ar}</p>}
-                    </div>
-                  </div>
-                </motion.div>
-              </Link>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* ── Popular grid ── */}
-      <div className="mt-6 px-4">
-        <div className="flex items-center justify-between mb-3">
-          <div className="flex items-center gap-2">
+        {/* ── 3. انميشن مدبلج ✨ ── */}
+        {animationHomeItems.length > 0 && (
+          <div>
+            <SectionHeader title="انميشن مدبلج ✨" href="/aw-dubbed?tab=animation" />
             <div
-              className="w-7 h-7 rounded-xl flex items-center justify-center shrink-0"
-              style={{ background: "linear-gradient(135deg,#EF4444,#DC2626)" }}
+              className="flex gap-2.5 overflow-x-auto px-3.5 pb-1"
+              style={{ scrollbarWidth: "none" }}
             >
-              <Flame className="w-3.5 h-3.5 text-white fill-red-200" />
+              {animationHomeItems.map((item) => (
+                <Link key={item.id} href={item.href}>
+                  <motion.div
+                    whileTap={{ scale: 0.95 }}
+                    className="shrink-0 w-[120px] sm:w-[136px] cursor-pointer"
+                  >
+                    <div
+                      className="relative w-full h-[175px] sm:h-[196px] rounded-[12px] overflow-hidden border"
+                      style={{
+                        backgroundColor: "var(--bg-card, #14171C)",
+                        borderColor: "var(--border-subtle, rgba(255,255,255,0.08))",
+                      }}
+                    >
+                      {item.cover && (
+                        <img
+                          src={item.cover}
+                          alt={item.title}
+                          className="w-full h-full object-cover"
+                          loading="lazy"
+                        />
+                      )}
+                      <div
+                        className="absolute top-[7px] right-[7px] px-2 py-0.5 rounded-[12px] text-[9px] font-bold text-white"
+                        style={{
+                          backgroundColor: item.isSub
+                            ? "rgba(220,38,38,0.88)"
+                            : "rgba(16,185,129,0.86)",
+                        }}
+                      >
+                        {item.badge}
+                      </div>
+                      <div
+                        className="absolute bottom-0 inset-x-0 px-2 pb-2 pt-12"
+                        style={{
+                          background:
+                            "linear-gradient(to top, rgba(0,0,0,0.95) 0%, transparent 100%)",
+                        }}
+                      >
+                        <p className="text-[11px] font-semibold text-white leading-[15px] line-clamp-2 text-right font-['Cairo']">
+                          {item.title}
+                        </p>
+                      </div>
+                    </div>
+                  </motion.div>
+                </Link>
+              ))}
             </div>
-            <h2 className="text-[13px] font-black font-['Cairo'] text-white">
-              {selectedGenre
-                ? GENRES_AR.find((g) => g.en === selectedGenre)?.ar ||
-                  selectedGenre
-                : "الأكثر شعبية"}
-            </h2>
-            {genreLoading && (
-              <Loader2 className="w-3.5 h-3.5 text-primary animate-spin" />
-            )}
           </div>
-          {!selectedGenre && (
-            <Link href="/browse">
-              <button className="text-[10px] text-red-400/80 font-black font-['Cairo'] flex items-center gap-0.5 bg-red-500/8 px-2.5 py-1 rounded-xl border border-red-500/15">
-                عرض الكل <ChevronLeft className="w-3 h-3" />
-              </button>
-            </Link>
-          )}
-        </div>
-        <AnimatePresence mode="wait">
-          <motion.div
-            key={selectedGenre}
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.25 }}
-            className="grid grid-cols-3 gap-3"
-          >
-            {popular.map((anime) => (
-              <AnimeCard key={anime.id} anime={anime} />
+        )}
+
+        {/* ── 4. كرتون مدبلج ومترجم 🎬 ── */}
+        {cartoonHomeItems.length > 0 && (
+          <div>
+            <SectionHeader title="كرتون مدبلج ومترجم 🎬" href="/aw-dubbed?tab=cartoon" />
+            <div
+              className="flex gap-2.5 overflow-x-auto px-3.5 pb-1"
+              style={{ scrollbarWidth: "none" }}
+            >
+              {cartoonHomeItems.map((item) => (
+                <Link key={item.id} href={item.href}>
+                  <motion.div
+                    whileTap={{ scale: 0.95 }}
+                    className="shrink-0 w-[120px] sm:w-[136px] cursor-pointer"
+                  >
+                    <div
+                      className="relative w-full h-[175px] sm:h-[196px] rounded-[12px] overflow-hidden border"
+                      style={{
+                        backgroundColor: "var(--bg-card, #14171C)",
+                        borderColor: "var(--border-subtle, rgba(255,255,255,0.08))",
+                      }}
+                    >
+                      {item.cover && (
+                        <img
+                          src={item.cover}
+                          alt={item.title}
+                          className="w-full h-full object-cover"
+                          loading="lazy"
+                        />
+                      )}
+                      <div
+                        className="absolute top-[7px] right-[7px] px-2 py-0.5 rounded-[12px] text-[9px] font-bold text-white"
+                        style={{
+                          backgroundColor: item.isSub
+                            ? "rgba(220,38,38,0.88)"
+                            : "rgba(16,185,129,0.86)",
+                        }}
+                      >
+                        {item.badge}
+                      </div>
+                      <div
+                        className="absolute bottom-0 inset-x-0 px-2 pb-2 pt-12"
+                        style={{
+                          background:
+                            "linear-gradient(to top, rgba(0,0,0,0.95) 0%, transparent 100%)",
+                        }}
+                      >
+                        <p className="text-[11px] font-semibold text-white leading-[15px] line-clamp-2 text-right font-['Cairo']">
+                          {item.title}
+                        </p>
+                      </div>
+                    </div>
+                  </motion.div>
+                </Link>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* ── 5. سبيستون مدبلج 🚀 ── */}
+        {spacetoonCards.length > 0 && (
+          <div>
+            <SectionHeader title="سبيستون مدبلج 🚀" href="/aw-dubbed?tab=spacetoon" />
+            <div
+              className="flex gap-2.5 overflow-x-auto px-3.5 pb-1"
+              style={{ scrollbarWidth: "none" }}
+            >
+              {spacetoonCards.map((s: any) => {
+                const key = encodeURIComponent(`${s.provider}-${s.id}`);
+                const seasons = encodeURIComponent(
+                  JSON.stringify([
+                    { label: "قائمة الحلقات", arabicToonsId: `${s.provider}:${s.id}` },
+                  ]),
+                );
+                const href = `/dubbed/${key}?provider=${s.provider}&showId=${s.id}&title=${encodeURIComponent(s.title)}&img=${encodeURIComponent(s.image || "")}&seasons=${seasons}&isMovie=${s.isMovie ? "1" : "0"}&tab=spacetoon`;
+                return (
+                  <Link key={`${s.provider}-${s.id}`} href={href}>
+                    <motion.div
+                      whileTap={{ scale: 0.95 }}
+                      className="shrink-0 w-[120px] sm:w-[136px] cursor-pointer"
+                    >
+                      <div
+                        className="relative w-full h-[175px] sm:h-[196px] rounded-[12px] overflow-hidden border"
+                        style={{
+                          backgroundColor: "var(--bg-card, #14171C)",
+                          borderColor: "var(--border-subtle, rgba(255,255,255,0.08))",
+                        }}
+                      >
+                        {s.image && (
+                          <img
+                            src={s.image}
+                            alt={s.title}
+                            className="w-full h-full object-cover"
+                            loading="lazy"
+                          />
+                        )}
+                        <div
+                          className="absolute top-[7px] right-[7px] px-2 py-0.5 rounded-[12px] text-[9px] font-bold text-white"
+                          style={{ backgroundColor: "rgba(8, 145, 178, 0.9)" }}
+                        >
+                          سبيستون
+                        </div>
+                        <div
+                          className="absolute bottom-0 inset-x-0 px-2 pb-2 pt-12"
+                          style={{
+                            background:
+                              "linear-gradient(to top, rgba(0,0,0,0.95) 0%, transparent 100%)",
+                          }}
+                        >
+                          <p className="text-[11px] font-semibold text-white leading-[15px] line-clamp-2 text-right font-['Cairo']">
+                            {s.title}
+                          </p>
+                        </div>
+                      </div>
+                    </motion.div>
+                  </Link>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* ── 6. مانهوا 🔥 ── */}
+        {manhwaCards.length > 0 && (
+          <div>
+            <SectionHeader title="مانهوا 🔥" href="/manga?source=manhwa" />
+            <div
+              className="flex gap-2.5 overflow-x-auto px-3.5 pb-1"
+              style={{ scrollbarWidth: "none" }}
+            >
+              {manhwaCards.map((item: any, idx: number) => {
+                const id = item.id || item.slug || idx;
+                const title =
+                  item.title_ar ||
+                  item.title?.english ||
+                  item.title?.romaji ||
+                  item.title ||
+                  "مانهوا";
+                const cover = item.coverImage?.large || item.cover || item.poster || "";
+                const href = `/manga/${encodeURIComponent(String(id))}?source=manhwa&title=${encodeURIComponent(title)}&cover=${encodeURIComponent(cover)}`;
+                return (
+                  <Link key={`manhwa-${id}-${idx}`} href={href}>
+                    <motion.div
+                      whileTap={{ scale: 0.95 }}
+                      className="shrink-0 w-[120px] sm:w-[136px] cursor-pointer"
+                    >
+                      <div
+                        className="relative w-full h-[175px] sm:h-[196px] rounded-[12px] overflow-hidden border"
+                        style={{
+                          backgroundColor: "var(--bg-card, #14171C)",
+                          borderColor: "var(--border-subtle, rgba(255,255,255,0.08))",
+                        }}
+                      >
+                        {cover ? (
+                          <img
+                            src={cover}
+                            alt={title}
+                            className="w-full h-full object-cover"
+                            loading="lazy"
+                          />
+                        ) : (
+                          <div className="w-full h-full flex items-center justify-center">
+                            <BookOpen className="w-7 h-7 opacity-20" />
+                          </div>
+                        )}
+                        <div
+                          className="absolute top-[7px] right-[7px] px-2 py-0.5 rounded-[12px] text-[9px] font-bold text-white"
+                          style={{ backgroundColor: "rgba(245,158,11,0.9)" }}
+                        >
+                          مانهوا
+                        </div>
+                        <div
+                          className="absolute bottom-0 inset-x-0 px-2 pb-2 pt-12"
+                          style={{
+                            background:
+                              "linear-gradient(to top, rgba(0,0,0,0.95) 0%, transparent 100%)",
+                          }}
+                        >
+                          <p className="text-[11px] font-semibold text-white leading-[15px] line-clamp-2 text-right font-['Cairo']">
+                            {title}
+                          </p>
+                        </div>
+                      </div>
+                    </motion.div>
+                  </Link>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* ── 7. مانجا مترجمة 📚 ── */}
+        {mangaCards.length > 0 && (
+          <div>
+            <SectionHeader title="مانجا مترجمة 📚" href="/manga?source=manga" />
+            <div
+              className="flex gap-2.5 overflow-x-auto px-3.5 pb-1"
+              style={{ scrollbarWidth: "none" }}
+            >
+              {mangaCards.map((item: any, idx: number) => {
+                const id = item.id || item.slug || idx;
+                const title =
+                  item.title_ar ||
+                  item.title?.english ||
+                  item.title?.romaji ||
+                  item.title ||
+                  "مانجا";
+                const cover = item.coverImage?.large || item.cover || item.poster || "";
+                const href = `/manga/${encodeURIComponent(String(id))}?source=manga&title=${encodeURIComponent(title)}&cover=${encodeURIComponent(cover)}`;
+                return (
+                  <Link key={`manga-${id}-${idx}`} href={href}>
+                    <motion.div
+                      whileTap={{ scale: 0.95 }}
+                      className="shrink-0 w-[120px] sm:w-[136px] cursor-pointer"
+                    >
+                      <div
+                        className="relative w-full h-[175px] sm:h-[196px] rounded-[12px] overflow-hidden border"
+                        style={{
+                          backgroundColor: "var(--bg-card, #14171C)",
+                          borderColor: "var(--border-subtle, rgba(255,255,255,0.08))",
+                        }}
+                      >
+                        {cover ? (
+                          <img
+                            src={cover}
+                            alt={title}
+                            className="w-full h-full object-cover"
+                            loading="lazy"
+                          />
+                        ) : (
+                          <div className="w-full h-full flex items-center justify-center">
+                            <BookOpen className="w-7 h-7 opacity-20" />
+                          </div>
+                        )}
+                        <div
+                          className="absolute top-[7px] right-[7px] px-2 py-0.5 rounded-[12px] text-[9px] font-bold text-white"
+                          style={{ backgroundColor: "rgba(16,185,129,0.88)" }}
+                        >
+                          مانجا
+                        </div>
+                        <div
+                          className="absolute bottom-0 inset-x-0 px-2 pb-2 pt-12"
+                          style={{
+                            background:
+                              "linear-gradient(to top, rgba(0,0,0,0.95) 0%, transparent 100%)",
+                          }}
+                        >
+                          <p className="text-[11px] font-semibold text-white leading-[15px] line-clamp-2 text-right font-['Cairo']">
+                            {title}
+                          </p>
+                        </div>
+                      </div>
+                    </motion.div>
+                  </Link>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* ── 8. يُعرض حالياً ── */}
+        {releasing.length > 0 && (
+          <div>
+            <SectionHeader title="يُعرض حالياً" href="/browse?status=RELEASING" />
+            <div
+              className="flex gap-2.5 overflow-x-auto px-3.5 pb-1"
+              style={{ scrollbarWidth: "none" }}
+            >
+              {releasing.map((anime) => (
+                <MobileAnimeCard key={anime.id} anime={anime} />
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* ── 9. ⭐ الأكثر شعبية ── */}
+        {popular.length > 0 && (
+          <div>
+            <SectionHeader title="⭐ الأكثر شعبية" href="/browse" />
+            <div
+              className="flex gap-2.5 overflow-x-auto px-3.5 pb-1"
+              style={{ scrollbarWidth: "none" }}
+            >
+              {popular.map((anime) => (
+                <MobileAnimeCard key={anime.id} anime={anime} />
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* ── 10. 🎬 أفلام الأنمي ── */}
+        {movies.length > 0 && (
+          <div>
+            <SectionHeader title="🎬 أفلام الأنمي" href="/browse?format=MOVIE" />
+            <div
+              className="flex gap-2.5 overflow-x-auto px-3.5 pb-1"
+              style={{ scrollbarWidth: "none" }}
+            >
+              {movies.map((anime) => (
+                <MobileAnimeCard key={anime.id} anime={anime} />
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* ── 11. إيسيكاي ── */}
+        {isekaiList.length > 0 && (
+          <div>
+            <SectionHeader title="إيسيكاي" href="/browse?genre=Isekai" />
+            <div
+              className="flex gap-2.5 overflow-x-auto px-3.5 pb-1"
+              style={{ scrollbarWidth: "none" }}
+            >
+              {isekaiList.map((anime) => (
+                <MobileAnimeCard key={anime.id} anime={anime} />
+              ))}
+            </div>
+          </div>
+        )}
+
+        {loading && popular.length === 0 && (
+          <div className="px-3.5 pt-4 grid grid-cols-3 sm:grid-cols-6 gap-2.5">
+            {Array.from({ length: 6 }).map((_, i) => (
+              <div
+                key={i}
+                className="h-[175px] rounded-[12px] bg-white/5 animate-pulse"
+              />
             ))}
-          </motion.div>
-        </AnimatePresence>
-        {hasMore && (
-          <Link href="/browse">
-            <button className="w-full mt-5 py-3.5 bg-[#18181B] border border-white/8 rounded-2xl text-sm font-black flex items-center justify-center gap-2 text-white/50 hover:text-white hover:border-primary/30 transition-all active:scale-[0.98] font-['Cairo']">
-              <ChevronDown className="w-4 h-4" /> عرض المزيد
-            </button>
-          </Link>
+          </div>
         )}
       </div>
     </main>

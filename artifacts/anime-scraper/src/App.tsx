@@ -86,6 +86,11 @@ const AuthCallback       = lazy(() => import("@/pages/AuthCallback"));
 const CommentsPage       = lazy(() => import("@/pages/Comments"));
 const Subscription       = lazy(() => import("@/pages/Subscription"));
 const EpisodeList        = lazy(() => import("@/pages/EpisodeList"));
+const Manga              = lazy(() => import("@/pages/Manga"));
+const MangaDetail        = lazy(() => import("@/pages/MangaDetail"));
+const Seasons            = lazy(() => import("@/pages/Seasons"));
+const Stats              = lazy(() => import("@/pages/Stats"));
+const Upcoming           = lazy(() => import("@/pages/Upcoming"));
 
 function PageLoader() {
   return (
@@ -98,26 +103,58 @@ function PageLoader() {
   );
 }
 
-const NO_GLOBAL_HEADER = ["/watch", "/episodes/", "/anime/", "/settings", "/comments", "/profile", "/browse", "/animation/", "/auth", "/subscription", "/dubbed/watch", "/aw-dubbed/watch", "/stardima/"];
+const NO_GLOBAL_HEADER = [
+  "/watch",
+  "/episodes/",
+  "/anime/",
+  "/settings",
+  "/comments",
+  "/profile",
+  "/browse",
+  "/search",
+  "/latest",
+  "/manga",
+  "/seasons",
+  "/stats",
+  "/upcoming",
+  "/dubbed",
+  "/aw-dubbed",
+  "/animation/",
+  "/auth",
+  "/subscription",
+  "/stardima/",
+];
 
 function applyTheme(t: string) {
   const root = document.documentElement;
-  root.setAttribute("data-theme", t);
-  if (t === "amoled") {
+  const normalized = t === "white" ? "white" : t === "black" || t === "dark" ? "black" : t;
+  root.setAttribute("data-theme", normalized);
+  if (normalized === "white") {
+    root.style.setProperty("--bg-base", "#EEECE6");
+    root.style.setProperty("--bg-surface", "#F5F3ED");
+    root.style.setProperty("--bg-card", "#F7F5F0");
+    root.style.setProperty("--text-main", "#202127");
+  } else if (t === "amoled") {
     root.style.setProperty("--bg-base", "#000000");
     root.style.setProperty("--bg-card", "#0A0A0A");
+    root.style.setProperty("--text-main", "#F3F4F6");
   } else if (t === "violet") {
     root.style.setProperty("--bg-base", "#0B0814");
     root.style.setProperty("--bg-card", "#130F1E");
+    root.style.setProperty("--text-main", "#F3F4F6");
   } else if (t === "blue") {
     root.style.setProperty("--bg-base", "#0B1120");
     root.style.setProperty("--bg-card", "#0F1829");
+    root.style.setProperty("--text-main", "#F3F4F6");
   } else if (t === "pink") {
     root.style.setProperty("--bg-base", "#130811");
     root.style.setProperty("--bg-card", "#1A0E15");
+    root.style.setProperty("--text-main", "#F3F4F6");
   } else {
-    root.style.setProperty("--bg-base", "#09090B");
-    root.style.setProperty("--bg-card", "#111116");
+    root.style.setProperty("--bg-base", "#090A0C");
+    root.style.setProperty("--bg-surface", "#111317");
+    root.style.setProperty("--bg-card", "#14171C");
+    root.style.setProperty("--text-main", "#F3F4F6");
   }
 }
 
@@ -215,6 +252,11 @@ function Router({ onMenuClick }: { onMenuClick: () => void }) {
                 <Route path="/search"                  component={Search} />
                 <Route path="/schedule"               component={Schedule} />
                 <Route path="/latest"                 component={Latest} />
+                <Route path="/seasons"                component={Seasons} />
+                <Route path="/stats"                  component={Stats} />
+                <Route path="/upcoming"               component={Upcoming} />
+                <Route path="/manga/:id"              component={MangaDetail} />
+                <Route path="/manga"                  component={Manga} />
                 <Route path="/library"                 component={Library} />
                 <Route path="/history"                 component={WatchHistory} />
                 <Route path="/browse"                  component={Browse} />
@@ -252,7 +294,7 @@ function App() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
   useEffect(() => {
-    const saved = localStorage.getItem("pref-theme") || "dark";
+    const saved = localStorage.getItem("pref-theme") || "black";
     applyTheme(saved);
   }, []);
 
