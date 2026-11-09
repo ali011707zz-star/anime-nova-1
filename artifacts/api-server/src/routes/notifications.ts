@@ -143,7 +143,7 @@ router.post("/notifications/delete-old", async (_req: Request, res: Response) =>
 const TMDB_KEY  = process.env.TMDB_API_KEY || "8265bd1679663a7ea12ac168da84d2e8";
 const TMDB_BASE = "https://api.themoviedb.org/3";
 const _notifiedAnimation = new Set<string>();
-let _animLastPage = 0;
+let _animSeededOnStartup = false;
 let _animCheckInFlight = false;
 
 async function checkNewAnimation(): Promise<void> {
@@ -156,13 +156,13 @@ async function checkNewAnimation(): Promise<void> {
   }
 
   try {
-    // احضر آخر تنبيهات أنيميشن لتحديث الـ dedup set
+    // احضر جميع تنبيهات الأنيميشن السابقة لتحديث الـ dedup set دون إعادة إرسالها بعد 7 أيام
     if (_notifiedAnimation.size === 0) {
       const rows = await pool.query(
-        `SELECT tmdb_id FROM notifications WHERE type='animation_new' AND created_at > NOW() - INTERVAL '7 days'`
+        `SELECT DISTINCT tmdb_id FROM notifications WHERE type='animation_new' AND tmdb_id IS NOT NULL`
       );
       for (const r of rows.rows) {
-        if (r.tmdb_id) _notifiedAnimation.add(r.tmdb_id);
+        if (r.tmdb_id) _notifiedAnimation.add(String(r.tmdb_id));
       }
     }
 
@@ -173,10 +173,26 @@ async function checkNewAnimation(): Promise<void> {
     const data = await r.json() as any;
     const results: any[] = data?.results ?? [];
 
+    // عند بدء التشغيل لأول مرة، سجّل القائمة الحالية في الذاكرة دون إرسال إشعارات مكررة
+    if (!_animSeededOnStartup) {
+      for (const item of results) {
+        if (item?.id) _notifiedAnimation.add(String(item.id));
+      }
+      _animSeededOnStartup = true;
+      return;
+    }
+
+    const minYear = new Date().getUTCFullYear() - 1;
     let added = 0;
     for (const item of results.slice(0, 10)) {
       const id = String(item.id);
       if (_notifiedAnimation.has(id)) continue;
+
+      const releaseYear = Number(String(item.release_date || "").slice(0, 4));
+      if (!releaseYear || releaseYear < minYear) {
+        _notifiedAnimation.add(id);
+        continue;
+      }
 
       const titleAr = item.title || item.name || "";
       const titleEn = item.original_title || item.original_name || titleAr;
@@ -191,6 +207,7 @@ async function checkNewAnimation(): Promise<void> {
         link_path: `/animation/${id}`,
         tmdb_id: id,
       });
+      _notifiedAnimation.add(id);
       const result = await sendMobilePushDetailed({
         title: `أنيميشن جديد · ${titleAr}`,
         body: item.release_date
@@ -209,7 +226,6 @@ async function checkNewAnimation(): Promise<void> {
         return null;
       });
       if (result?.complete) {
-        _notifiedAnimation.add(id);
         added++;
       } else {
         console.warn(`[anim-scheduler] delivery remains pending tmdb=${id} pending=${result?.pending ?? "error"} failed=${result?.failed ?? "error"}`);
